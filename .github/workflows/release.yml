@@ -1,0 +1,135 @@
+name: Release Corum Integration
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  metadata:
+    name: Read and verify Release version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Read version from mod.json
+        id: version
+        env:
+          TRIGGER_EVENT: ${{ github.event_name }}
+          TRIGGER_REF: ${{ github.ref }}
+          TRIGGER_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+        shell: bash
+        run: |
+          if [[ "$TRIGGER_EVENT" == "workflow_dispatch" && "$TRIGGER_REF" != "refs/heads/main" ]]; then
+            echo "Manual releases must run from the main branch, not $TRIGGER_REF" >&2
+            exit 1
+          fi
+          MOD_VERSION="$(node -p "require('./corum-integration-mod/mod.json').version")"
+          if [[ ! "$MOD_VERSION" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid mod.json version: $MOD_VERSION" >&2
+            exit 1
+          fi
+          if [[ -n "$TRIGGER_TAG" && "$TRIGGER_TAG" != "$MOD_VERSION" ]]; then
+            echo "Tag $TRIGGER_TAG does not match mod.json version $MOD_VERSION" >&2
+            exit 1
+          fi
+          echo "version=$MOD_VERSION" >> "$GITHUB_OUTPUT"
+
+  build-mod:
+    needs: metadata
+    uses: ./.github/workflows/build-mod.yml
+
+  build-installer:
+    needs: metadata
+    uses: ./.github/workflows/build-installer.yml
+
+  release:
+    name: Publish installer and manual package
+    runs-on: ubuntu-latest
+    needs:
+      - metadata
+      - build-mod
+      - build-installer
+    env:
+      RELEASE_VERSION: ${{ needs.metadata.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v7
+        with:
+          name: Corum-Integration-${{ env.RELEASE_VERSION }}
+          path: release-assets
+      - uses: actions/download-artifact@v7
+        with:
+          name: Corum-Integration-Installer-${{ env.RELEASE_VERSION }}
+          path: release-assets
+      - name: Generate Release notes
+        shell: bash
+        run: |
+          python3 release/generate-release-notes.py \
+            --version "$RELEASE_VERSION" \
+            --changelog corum-integration-mod/changelog.md \
+            --template release/RELEASE-NOTES-TEMPLATE.md \
+            --output release-notes.md
+      - name: Validate final Release assets
+        shell: bash
+        run: |
+          GEODE="release-assets/hwanhee1.corum_integration.geode"
+          INSTALLER="release-assets/Corum-Integration-Installer-$RELEASE_VERSION.exe"
+          test -s "$GEODE"
+          test -s "$INSTALLER"
+          python3 - "$GEODE" "$RELEASE_VERSION" <<'PY'
+          import json
+          import sys
+          import zipfile
+
+          package_path, expected_version = sys.argv[1:]
+          with zipfile.ZipFile(package_path) as package:
+              manifest = json.loads(package.read("mod.json"))
+              package_files = set(package.namelist())
+          if manifest.get("id") != "hwanhee1.corum_integration":
+              raise SystemExit(f"Unexpected Mod ID: {manifest.get('id')}")
+          if manifest.get("version") != expected_version:
+              raise SystemExit(
+                  f"Package version {manifest.get('version')} does not match {expected_version}"
+              )
+          expected_binaries = {
+              "hwanhee1.corum_integration.dll",
+              "hwanhee1.corum_integration.ios.dylib",
+              "hwanhee1.corum_integration.android32.so",
+              "hwanhee1.corum_integration.android64.so",
+          }
+          missing_binaries = sorted(expected_binaries - package_files)
+          if missing_binaries:
+              raise SystemExit(
+                  "Release package is missing platform binaries: "
+                  + ", ".join(missing_binaries)
+              )
+          PY
+          {
+            echo "## Release assets"
+            echo
+            echo "- Corum-Integration-Installer-$RELEASE_VERSION.exe — Windows automatic installer/updater"
+            echo "- hwanhee1.corum_integration.geode — manual Geode package (Win64, iOS, Android32, Android64)"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Create or update GitHub Release
+        shell: bash
+        run: |
+          GEODE="release-assets/hwanhee1.corum_integration.geode"
+          INSTALLER="release-assets/Corum-Integration-Installer-$RELEASE_VERSION.exe"
+          NOTES="release-notes.md"
+          if gh release view "$RELEASE_VERSION" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_VERSION" "$INSTALLER" "$GEODE" --clobber
+            gh release edit "$RELEASE_VERSION" \
+              --title "$RELEASE_VERSION" \
+              --notes-file "$NOTES"
+          else
+            gh release create "$RELEASE_VERSION" "$INSTALLER" "$GEODE" \
+              --title "$RELEASE_VERSION" \
+              --notes-file "$NOTES"
+          fi

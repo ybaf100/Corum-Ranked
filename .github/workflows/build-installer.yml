@@ -1,0 +1,79 @@
+name: Build Windows Installer
+
+on:
+  workflow_call:
+  workflow_dispatch:
+  push:
+    branches:
+      - "**"
+    paths:
+      - "installer/**"
+      - "corum-integration-mod/mod.json"
+      - ".github/workflows/build-installer.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build self-contained win-x64 installer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "8.0.x"
+      - name: Read version from mod.json
+        id: version
+        shell: pwsh
+        run: |
+          $manifest = Get-Content "corum-integration-mod/mod.json" -Raw | ConvertFrom-Json
+          $version = [string]$manifest.version
+          if ($version -notmatch '^v(?<numeric>(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)$') {
+            throw "Invalid mod.json version: $version"
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "numeric_version=$($version.Substring(1))" >> $env:GITHUB_OUTPUT
+      - name: Run installer core tests
+        shell: pwsh
+        run: dotnet run --project installer/CorumIntegrationInstaller.Tests/CorumIntegrationInstaller.Tests.csproj --configuration Release
+      - name: Publish self-contained single-file installer
+        shell: pwsh
+        run: |
+          $publishDirectory = Join-Path $env:RUNNER_TEMP "corum-installer-publish"
+          dotnet publish installer/CorumIntegrationInstaller/CorumIntegrationInstaller.csproj `
+            --configuration Release `
+            --runtime win-x64 `
+            --self-contained true `
+            --output $publishDirectory `
+            -p:Version=${{ steps.version.outputs.numeric_version }} `
+            -p:InformationalVersion=${{ steps.version.outputs.numeric_version }} `
+            -p:PublishSingleFile=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:PublishTrimmed=false `
+            -p:DebugType=None `
+            -p:DebugSymbols=false
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "dotnet publish failed with exit code $LASTEXITCODE."
+          }
+
+          $source = Join-Path $publishDirectory "CorumIntegrationInstaller.exe"
+          if (-not (Test-Path $source -PathType Leaf)) {
+            throw "Published installer executable was not found: $source"
+          }
+
+          New-Item -ItemType Directory -Force -Path "dist" | Out-Null
+          $destination = "dist/Corum-Integration-Installer-${{ steps.version.outputs.version }}.exe"
+          Copy-Item $source $destination
+          if ((Get-Item $destination).Length -le 0) {
+            throw "Published installer executable is empty."
+          }
+          $hash = (Get-FileHash $destination -Algorithm SHA256).Hash.ToLowerInvariant()
+          "Installer SHA-256: ``$hash``" >> $env:GITHUB_STEP_SUMMARY
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Corum-Integration-Installer-${{ steps.version.outputs.version }}
+          path: dist/Corum-Integration-Installer-${{ steps.version.outputs.version }}.exe
+          if-no-files-found: error
+          compression-level: 0

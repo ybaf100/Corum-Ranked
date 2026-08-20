@@ -1,0 +1,38 @@
+{
+  "geode": "5.8.2",
+  "gd": {
+    "win": "2.2081",
+    "android": "2.2081",
+    "mac": "2.2081",
+    "ios": "2.2081"
+  },
+  "id": "hwanhee1.corum_ranked",
+  "name": "Corum Ranked",
+  "version": "v0.4.0-alpha.3",
+  "developer": "hwanhee1",
+  "description": "A separate server-authoritative Corum Ranked client. It does not share runtime state or UI with Corum Integration.",
+  "dependencies": {
+    "syzzi.click_between_frames": ">=v1.5.0"
+  },
+  "tags": [
+    "online",
+    "gameplay",
+    "interface"
+  ],
+  "settings": {
+    "ranked-server-url": {
+      "name": "Ranked server URL",
+      "description": "Base URL of the Corum Ranked server. HTTPS is required except for localhost development. This is not a secret.",
+      "type": "string",
+      "default": ""
+    },
+    "poll-interval-ms": {
+      "name": "Polling interval (ms)",
+      "description": "REST short-poll interval. The server remains authoritative for clocks and deadlines.",
+      "type": "int",
+      "default": 1000,
+      "min": 250,
+      "max": 5000
+    }
+  }
+}

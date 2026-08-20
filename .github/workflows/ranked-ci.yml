@@ -1,0 +1,48 @@
+name: Validate Corum Ranked
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "**"
+    paths:
+      - "ranked/**"
+      - "apps-script/Code.gs"
+      - "apps-script/RankedConfig.gs"
+      - "apps-script/validate-ranked-config.mjs"
+      - ".github/workflows/ranked-ci.yml"
+  pull_request:
+    paths:
+      - "ranked/**"
+      - "apps-script/Code.gs"
+      - "apps-script/RankedConfig.gs"
+      - "apps-script/validate-ranked-config.mjs"
+      - ".github/workflows/ranked-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Rules, server, database, and Apps Script
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ranked/package-lock.json
+      - name: Install pinned Ranked dependencies
+        run: npm ci --prefix ranked
+      - name: Type-check every Ranked workspace
+        run: npm run typecheck --prefix ranked
+      - name: Run rules and PostgreSQL integration tests
+        run: npm test --prefix ranked
+      - name: Build server and shared rules
+        run: npm run build --prefix ranked
+      - name: Validate additive Apps Script Ranked API
+        run: node apps-script/validate-ranked-config.mjs
+      - name: Re-run existing Apps Script compatibility checks
+        run: node apps-script/validate-record-sheet-compat.mjs
+

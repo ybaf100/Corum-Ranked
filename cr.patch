@@ -1,0 +1,170 @@
+From a4519ef7c66dabfcee642bccf9b92fc32efc6bf1 Mon Sep 17 00:00:00 2001
+From: OpenAI Codex <codex@openai.com>
+Date: Sun, 16 Aug 2026 14:57:50 +0900
+Subject: [PATCH] Standardize GitHub release notes
+
+---
+ .github/workflows/release.yml     | 16 +++++-
+ release/README.md                 |  6 +++
+ release/RELEASE-NOTES-TEMPLATE.md |  7 +++
+ release/generate-release-notes.py | 84 +++++++++++++++++++++++++++++++
+ 4 files changed, 111 insertions(+), 2 deletions(-)
+ create mode 100644 release/RELEASE-NOTES-TEMPLATE.md
+ create mode 100644 release/generate-release-notes.py
+
+diff --git a/.github/workflows/release.yml b/.github/workflows/release.yml
+index d4c0274..aff4577 100644
+--- a/.github/workflows/release.yml
++++ b/.github/workflows/release.yml
+@@ -68,6 +68,14 @@ jobs:
+         with:
+           name: Corum-Integration-Installer-${{ env.RELEASE_VERSION }}
+           path: release-assets
++      - name: Generate Release notes
++        shell: bash
++        run: |
++          python3 release/generate-release-notes.py \
++            --version "$RELEASE_VERSION" \
++            --changelog corum-integration-mod/changelog.md \
++            --template release/RELEASE-NOTES-TEMPLATE.md \
++            --output release-notes.md
+       - name: Validate final Release assets
+         shell: bash
+         run: |
+@@ -114,10 +122,14 @@ jobs:
+         run: |
+           GEODE="release-assets/hwanhee1.corum_integration.geode"
+           INSTALLER="release-assets/Corum-Integration-Installer-$RELEASE_VERSION.exe"
++          NOTES="release-notes.md"
+           if gh release view "$RELEASE_VERSION" >/dev/null 2>&1; then
+             gh release upload "$RELEASE_VERSION" "$INSTALLER" "$GEODE" --clobber
++            gh release edit "$RELEASE_VERSION" \
++              --title "$RELEASE_VERSION" \
++              --notes-file "$NOTES"
+           else
+             gh release create "$RELEASE_VERSION" "$INSTALLER" "$GEODE" \
+-              --title "Corum Integration $RELEASE_VERSION" \
+-              --generate-notes
++              --title "$RELEASE_VERSION" \
++              --notes-file "$NOTES"
+           fi
+diff --git a/release/README.md b/release/README.md
+index fa6bc45..c6c2d75 100644
+--- a/release/README.md
++++ b/release/README.md
+@@ -23,3 +23,9 @@
+ - `hwanhee1.corum_integration.geode` — 모든 포함 플랫폼의 수동 설치 패키지
+ 
+ 수동 실행은 `main`에서만 허용되며 `mod.json`의 버전을 자동으로 사용합니다. 태그 실행 시 태그 이름은 반드시 그 버전과 일치해야 합니다. 게시 직전 `.geode`의 ZIP 구조, Mod ID와 버전도 다시 검증합니다.
++
++Release 제목은 `mod.json`의 버전으로 설정합니다. 본문은
++`release/RELEASE-NOTES-TEMPLATE.md`의 다운로드 안내 뒤에
++`corum-integration-mod/changelog.md`에서 같은 버전의 수정 내역만 붙여
++자동 생성합니다. 기존 Release를 다시 실행해도 asset과 함께 제목과
++본문을 현재 형식으로 갱신합니다.
+diff --git a/release/RELEASE-NOTES-TEMPLATE.md b/release/RELEASE-NOTES-TEMPLATE.md
+new file mode 100644
+index 0000000..ac87481
+--- /dev/null
++++ b/release/RELEASE-NOTES-TEMPLATE.md
+@@ -0,0 +1,7 @@
++## **밑 Assets 항목을 펼치면 모드를 다운로드 할 수 있습니다 .geode로 끝나는 파일을 다운하세요**
++## **잘 모르겠다면 [가이드](https://app.notion.com/p/Corum-Integration-3b9f6f1f3d05808a9237efd47f49e9ce?source=copy_link)를 참고하여 다운하세요.**
++## Windows는 .exe 파일로 딸깍설치가 가능합니다!
++
++# {{VERSION}}
++
++{{CHANGELOG}}
+diff --git a/release/generate-release-notes.py b/release/generate-release-notes.py
+new file mode 100644
+index 0000000..5922f20
+--- /dev/null
++++ b/release/generate-release-notes.py
+@@ -0,0 +1,84 @@
++#!/usr/bin/env python3
++
++import argparse
++import re
++from pathlib import Path
++
++
++VERSION_PATTERN = re.compile(
++    r"^v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
++    r"(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$"
++)
++
++
++def parse_args() -> argparse.Namespace:
++    parser = argparse.ArgumentParser(
++        description="Generate the GitHub Release body from the matching changelog section."
++    )
++    parser.add_argument("--version", required=True)
++    parser.add_argument("--changelog", type=Path, required=True)
++    parser.add_argument("--template", type=Path, required=True)
++    parser.add_argument("--output", type=Path, required=True)
++    return parser.parse_args()
++
++
++def normalize_heading(heading: str) -> str:
++    return heading.replace(r"\.", ".").strip()
++
++
++def extract_version_notes(changelog: str, version: str) -> str:
++    lines = changelog.splitlines()
++    section_start = None
++
++    for index, line in enumerate(lines):
++        match = re.fullmatch(r"#\s+(.+?)\s*", line)
++        if match and normalize_heading(match.group(1)) == version:
++            section_start = index + 1
++            break
++
++    if section_start is None:
++        raise ValueError(f"Changelog section not found for {version}")
++
++    section_end = len(lines)
++    for index in range(section_start, len(lines)):
++        if re.fullmatch(r"#\s+.+?\s*", lines[index]):
++            section_end = index
++            break
++
++    notes = "\n".join(lines[section_start:section_end]).strip()
++    if not notes:
++        raise ValueError(f"Changelog section for {version} is empty")
++    if not any(line.startswith("- ") for line in notes.splitlines()):
++        raise ValueError(f"Changelog section for {version} has no bullet points")
++    return notes
++
++
++def main() -> None:
++    args = parse_args()
++    if not VERSION_PATTERN.fullmatch(args.version):
++        raise ValueError(f"Invalid release version: {args.version}")
++
++    template = args.template.read_text(encoding="utf-8")
++    required_placeholders = ("{{VERSION}}", "{{CHANGELOG}}")
++    missing_placeholders = [
++        placeholder for placeholder in required_placeholders if placeholder not in template
++    ]
++    if missing_placeholders:
++        raise ValueError(
++            "Release notes template is missing placeholders: "
++            + ", ".join(missing_placeholders)
++        )
++
++    notes = extract_version_notes(
++        args.changelog.read_text(encoding="utf-8"), args.version
++    )
++    release_body = template.replace("{{VERSION}}", args.version).replace(
++        "{{CHANGELOG}}", notes
++    )
++
++    args.output.parent.mkdir(parents=True, exist_ok=True)
++    args.output.write_text(release_body.rstrip() + "\n", encoding="utf-8")
++
++
++if __name__ == "__main__":
++    main()
+-- 
+2.51.1
+

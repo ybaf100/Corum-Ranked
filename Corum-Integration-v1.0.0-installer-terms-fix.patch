@@ -1,0 +1,413 @@
+From b33644d4594c0522b413840deb9cdc985d762e1a Mon Sep 17 00:00:00 2001
+From: OpenAI Codex <codex@openai.com>
+Date: Tue, 11 Aug 2026 19:54:07 +0900
+Subject: [PATCH] Add installer terms agreement UI
+
+---
+ .github/workflows/build-installer.yml         |   2 -
+ .../CorumIntegrationInstaller.csproj          |   9 --
+ .../CorumIntegrationInstaller/MainForm.cs     | 123 ++++++++++++------
+ .../PrivacyContent.cs                         |  27 ----
+ .../CorumIntegrationInstaller/TermsContent.cs |  46 +++++++
+ .../{PrivacyDialog.cs => TermsDialog.cs}      |  18 +--
+ installer/README.md                           |   2 +-
+ 7 files changed, 139 insertions(+), 88 deletions(-)
+ delete mode 100644 installer/CorumIntegrationInstaller/PrivacyContent.cs
+ create mode 100644 installer/CorumIntegrationInstaller/TermsContent.cs
+ rename installer/CorumIntegrationInstaller/{PrivacyDialog.cs => TermsDialog.cs} (73%)
+
+diff --git a/.github/workflows/build-installer.yml b/.github/workflows/build-installer.yml
+index 0263c72..6b43998 100644
+--- a/.github/workflows/build-installer.yml
++++ b/.github/workflows/build-installer.yml
+@@ -9,8 +9,6 @@ on:
+     paths:
+       - "installer/**"
+       - "corum-integration-mod/mod.json"
+-      - "corum-integration-mod/PRIVACY.md"
+-      - "DISCORD-DOWNLOAD-NOTICE.md"
+       - ".github/workflows/build-installer.yml"
+ 
+ permissions:
+diff --git a/installer/CorumIntegrationInstaller/CorumIntegrationInstaller.csproj b/installer/CorumIntegrationInstaller/CorumIntegrationInstaller.csproj
+index 69b6eba..1c3dcc6 100644
+--- a/installer/CorumIntegrationInstaller/CorumIntegrationInstaller.csproj
++++ b/installer/CorumIntegrationInstaller/CorumIntegrationInstaller.csproj
+@@ -29,13 +29,4 @@
+   <ItemGroup>
+     <ProjectReference Include="..\CorumIntegrationInstaller.Core\CorumIntegrationInstaller.Core.csproj" />
+   </ItemGroup>
+-
+-  <ItemGroup>
+-    <EmbeddedResource Include="..\..\DISCORD-DOWNLOAD-NOTICE.md">
+-      <LogicalName>CorumIntegrationInstaller.Privacy.DownloadNotice.md</LogicalName>
+-    </EmbeddedResource>
+-    <EmbeddedResource Include="..\..\corum-integration-mod\PRIVACY.md">
+-      <LogicalName>CorumIntegrationInstaller.Privacy.PrivacyPolicy.md</LogicalName>
+-    </EmbeddedResource>
+-  </ItemGroup>
+ </Project>
+diff --git a/installer/CorumIntegrationInstaller/MainForm.cs b/installer/CorumIntegrationInstaller/MainForm.cs
+index 9068414..09e71d2 100644
+--- a/installer/CorumIntegrationInstaller/MainForm.cs
++++ b/installer/CorumIntegrationInstaller/MainForm.cs
+@@ -26,8 +26,9 @@ internal sealed class MainForm : Form
+     private readonly Button _installButton = new();
+     private readonly Button _launchButton = new();
+     private readonly Button _refreshButton = new();
+-    private readonly Button _privacyDetailsButton = new();
+-    private readonly CheckBox _privacyAcknowledgement = new();
++    private readonly Button _readTermsButton = new();
++    private readonly CheckBox _agreeToTerms = new();
++    private readonly CheckBox _disagreeWithTerms = new();
+     private readonly ProgressBar _progressBar = new();
+ 
+     private string? _geometryDashDirectory;
+@@ -119,7 +120,7 @@ internal sealed class MainForm : Form
+         root.Controls.Add(CreateStatusPanel(), 0, 1);
+         root.Controls.Add(CreateActionPanel(), 0, 2);
+         root.Controls.Add(CreateSeparator(), 0, 3);
+-        root.Controls.Add(CreatePrivacyPanel(), 0, 4);
++        root.Controls.Add(CreateTermsPanel(), 0, 4);
+ 
+         _progressBar.Dock = DockStyle.Fill;
+         _progressBar.Style = ProgressBarStyle.Marquee;
+@@ -229,25 +230,24 @@ internal sealed class MainForm : Form
+         BackColor = Color.FromArgb(218, 221, 226)
+     };
+ 
+-    private Control CreatePrivacyPanel()
++    private Control CreateTermsPanel()
+     {
+         var panel = new TableLayoutPanel
+         {
+             Dock = DockStyle.Fill,
+             ColumnCount = 2,
+-            RowCount = 4,
+-            Padding = new Padding(0, 2, 0, 0)
++            RowCount = 2,
++            Padding = new Padding(0, 2, 0, 0),
++            BackColor = BackColor
+         };
+-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 112));
+-        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 26));
+-        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 46));
+-        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
+-        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
++        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 56));
++        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 44));
++        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
++        panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+ 
+         var heading = new Label
+         {
+-            Text = "Privacy & record verification",
++            Text = "약관 동의",
+             Dock = DockStyle.Fill,
+             Font = new Font("Segoe UI Semibold", 10.5F, FontStyle.Bold),
+             ForeColor = Color.FromArgb(35, 39, 45),
+@@ -255,36 +255,49 @@ internal sealed class MainForm : Form
+         };
+         panel.SetColumnSpan(heading, 2);
+ 
+-        var summary = new Label
++        var termsPanel = new TableLayoutPanel
+         {
+-            Text = "Record submission can include Geometry Dash account, map/record and version data, loaded non-built-in Geode mod IDs/versions, and an eligible End Level PNG. Nothing is uploaded at clear time; available data is sent only when you press Submit or Submit All.",
+             Dock = DockStyle.Fill,
+-            ForeColor = MutedColor
++            ColumnCount = 1,
++            RowCount = 2,
++            Margin = new Padding(30, 10, 28, 8)
+         };
+-        panel.SetColumnSpan(summary, 2);
++        termsPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
++        termsPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
+ 
+-        var scope = new Label
++        var termsLabel = new Label
+         {
+-            Text = "Other apps, desktop, notifications and OS UI are not captured. Record submission can be disabled in Geode settings.",
++            Text = "Corum Integration 모드 약관",
+             Dock = DockStyle.Fill,
+-            ForeColor = MutedColor,
+-            TextAlign = ContentAlignment.MiddleLeft
++            TextAlign = ContentAlignment.BottomLeft,
++            ForeColor = Color.FromArgb(35, 39, 45)
+         };
+ 
+-        _privacyDetailsButton.Text = "View details";
+-        _privacyDetailsButton.Dock = DockStyle.Fill;
+-        _privacyDetailsButton.Margin = new Padding(8, 2, 0, 2);
++        _readTermsButton.Text = "약관 읽기";
++        _readTermsButton.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left;
++        _readTermsButton.Size = new Size(138, 34);
++        _readTermsButton.Margin = new Padding(0, 3, 0, 3);
++        termsPanel.Controls.Add(termsLabel, 0, 0);
++        termsPanel.Controls.Add(_readTermsButton, 0, 1);
+ 
+-        _privacyAcknowledgement.Text = "I have reviewed the privacy and record verification information above.";
+-        _privacyAcknowledgement.Dock = DockStyle.Fill;
+-        _privacyAcknowledgement.AutoSize = false;
+-        panel.SetColumnSpan(_privacyAcknowledgement, 2);
++        var choicePanel = new TableLayoutPanel
++        {
++            Dock = DockStyle.Fill,
++            ColumnCount = 1,
++            RowCount = 2,
++            Margin = new Padding(18, 12, 0, 8)
++        };
++        choicePanel.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
++        choicePanel.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
++
++        ConfigureTermsChoice(_agreeToTerms, "동의합니다.");
++        ConfigureTermsChoice(_disagreeWithTerms, "동의하지 않습니다.");
++        choicePanel.Controls.Add(_agreeToTerms, 0, 0);
++        choicePanel.Controls.Add(_disagreeWithTerms, 0, 1);
+ 
+         panel.Controls.Add(heading, 0, 0);
+-        panel.Controls.Add(summary, 0, 1);
+-        panel.Controls.Add(scope, 0, 2);
+-        panel.Controls.Add(_privacyDetailsButton, 1, 2);
+-        panel.Controls.Add(_privacyAcknowledgement, 0, 3);
++        panel.Controls.Add(termsPanel, 0, 1);
++        panel.Controls.Add(choicePanel, 1, 1);
+         return panel;
+     }
+ 
+@@ -295,12 +308,29 @@ internal sealed class MainForm : Form
+         _refreshButton.Click += async (_, _) => await RefreshStateAsync(refreshRelease: true);
+         _installButton.Click += InstallButtonOnClick;
+         _launchButton.Click += LaunchButtonOnClick;
+-        _privacyDetailsButton.Click += (_, _) =>
++        _readTermsButton.Click += (_, _) =>
+         {
+-            using var dialog = new PrivacyDialog();
++            using var dialog = new TermsDialog();
+             dialog.ShowDialog(this);
+         };
+-        _privacyAcknowledgement.CheckedChanged += (_, _) => UpdateControls();
++        _agreeToTerms.CheckedChanged += (_, _) =>
++        {
++            if (_agreeToTerms.Checked)
++            {
++                _disagreeWithTerms.Checked = false;
++            }
++
++            UpdateControls();
++        };
++        _disagreeWithTerms.CheckedChanged += (_, _) =>
++        {
++            if (_disagreeWithTerms.Checked)
++            {
++                _agreeToTerms.Checked = false;
++            }
++
++            UpdateControls();
++        };
+     }
+ 
+     private async Task RefreshStateAsync(bool refreshRelease)
+@@ -432,12 +462,12 @@ internal sealed class MainForm : Form
+ 
+     private async void InstallButtonOnClick(object? sender, EventArgs eventArgs)
+     {
+-        if (!_privacyAcknowledgement.Checked)
++        if (!_agreeToTerms.Checked)
+         {
+             MessageBox.Show(
+                 this,
+-                "Review and acknowledge the privacy and record verification information before installing.",
+-                "Privacy information",
++                "약관을 읽고 ‘동의합니다.’를 선택한 뒤 설치 또는 업데이트를 진행해 주세요.",
++                "약관 동의 필요",
+                 MessageBoxButtons.OK,
+                 MessageBoxIcon.Information);
+             return;
+@@ -619,7 +649,7 @@ internal sealed class MainForm : Form
+ 
+         _installButton.Enabled = !_busy &&
+                                  !newerThanRelease &&
+-                                 _privacyAcknowledgement.Checked &&
++                                 _agreeToTerms.Checked &&
+                                  _geometryDashDirectory is not null &&
+                                  _geodeInstalled &&
+                                  _latestRelease is not null;
+@@ -627,8 +657,9 @@ internal sealed class MainForm : Form
+         _browseButton.Enabled = !_busy;
+         _geodeButton.Enabled = !_busy;
+         _refreshButton.Enabled = !_busy;
+-        _privacyDetailsButton.Enabled = !_busy;
+-        _privacyAcknowledgement.Enabled = !_busy;
++        _readTermsButton.Enabled = !_busy;
++        _agreeToTerms.Enabled = !_busy;
++        _disagreeWithTerms.Enabled = !_busy;
+     }
+ 
+     private GeodePackageMetadata? SelectHighestInstalledPackage()
+@@ -789,6 +820,16 @@ internal sealed class MainForm : Form
+         button.Margin = new Padding(8, 6, 8, 6);
+     }
+ 
++    private static void ConfigureTermsChoice(CheckBox checkBox, string text)
++    {
++        checkBox.Text = text;
++        checkBox.Dock = DockStyle.Fill;
++        checkBox.AutoSize = false;
++        checkBox.CheckAlign = ContentAlignment.MiddleLeft;
++        checkBox.TextAlign = ContentAlignment.MiddleLeft;
++        checkBox.Padding = new Padding(2, 0, 0, 0);
++    }
++
+     private static void SetValue(Label label, string value, bool success)
+     {
+         label.Text = value;
+diff --git a/installer/CorumIntegrationInstaller/PrivacyContent.cs b/installer/CorumIntegrationInstaller/PrivacyContent.cs
+deleted file mode 100644
+index 366cf0f..0000000
+--- a/installer/CorumIntegrationInstaller/PrivacyContent.cs
++++ /dev/null
+@@ -1,27 +0,0 @@
+-using System.Reflection;
+-using System.Text;
+-
+-namespace CorumIntegrationInstaller;
+-
+-internal static class PrivacyContent
+-{
+-    private const string DownloadNoticeResource = "CorumIntegrationInstaller.Privacy.DownloadNotice.md";
+-    private const string PrivacyPolicyResource = "CorumIntegrationInstaller.Privacy.PrivacyPolicy.md";
+-
+-    public static string Load()
+-    {
+-        var assembly = Assembly.GetExecutingAssembly();
+-        return string.Join(
+-            Environment.NewLine + Environment.NewLine + new string('─', 72) + Environment.NewLine + Environment.NewLine,
+-            ReadResource(assembly, DownloadNoticeResource),
+-            ReadResource(assembly, PrivacyPolicyResource));
+-    }
+-
+-    private static string ReadResource(Assembly assembly, string resourceName)
+-    {
+-        using var stream = assembly.GetManifestResourceStream(resourceName)
+-                           ?? throw new InvalidOperationException($"Missing embedded privacy resource: {resourceName}");
+-        using var reader = new StreamReader(stream, new UTF8Encoding(false), true);
+-        return reader.ReadToEnd();
+-    }
+-}
+diff --git a/installer/CorumIntegrationInstaller/TermsContent.cs b/installer/CorumIntegrationInstaller/TermsContent.cs
+new file mode 100644
+index 0000000..49086d2
+--- /dev/null
++++ b/installer/CorumIntegrationInstaller/TermsContent.cs
+@@ -0,0 +1,46 @@
++namespace CorumIntegrationInstaller;
++
++internal static class TermsContent
++{
++    public const string Text = """
++        Corum Integration 이용 및 기록 검증 데이터 약관
++
++        Corum Integration은 Corum 맵 정보 표시와 기록 제출을 위한 Geometry Dash Geode 모드입니다.
++        설치하거나 사용하기 전에 아래 내용을 확인해 주세요.
++
++        1. 처리하는 정보
++
++        기록 제출 기능이 활성화된 경우 다음 정보를 처리할 수 있습니다.
++
++        • 현재 로그인된 Geometry Dash 계정 ID와 닉네임
++        • 맵 코드, 맵 제목, 최고 기록, 시도 횟수와 점프 횟수
++        • 플랫폼, Geometry Dash 버전, Geode 버전과 Corum Integration 버전
++        • 게임 시작 시 로드된 비내장 Geode 모드의 ID와 버전 목록
++        • 등록된 Corum 맵을 Normal Mode의 비 Test Mode에서 100% 완료했을 때의 Geometry Dash End Level 화면 PNG
++        • PNG에 함께 표시되는 Geometry Dash 닉네임과 맵 제목
++
++        2. 생성 및 전송 시점
++
++        • End Level PNG는 기록 제출 기능이 켜진 상태에서 조건에 맞는 Corum 맵을 완료했을 때 게임 내부 장면만으로 생성됩니다.
++        • PNG는 먼저 해당 Geode 모드의 전용 로컬 저장 공간에 보관됩니다.
++        • 클리어 순간에는 PNG를 서버로 전송하지 않습니다.
++        • 사용자가 종이비행기 창의 Submit 또는 메인 메뉴의 Submit All을 누른 경우에만 기록 데이터와 사용 가능한 증거가 서버로 전송됩니다.
++        • 로컬 PNG가 없거나 사용할 수 없는 경우에는 증거 없이 기록만 제출될 수 있습니다.
++
++        3. 범위와 보관
++
++        • 다른 앱, 바탕화면, 알림창 또는 운영체제 UI는 캡처하지 않습니다.
++        • 기록과 증거 연결이 성공하면 해당 pending PNG는 로컬 저장 공간에서 삭제됩니다.
++        • 서버에 전송된 PNG와 기록 메타데이터는 비공개 기록 검증 자료로 보관되며 운영자가 관리합니다.
++        • 모드 삭제나 로컬 데이터 삭제는 이미 서버에 제출된 기록 또는 증거를 자동으로 삭제하지 않습니다.
++
++        4. 선택 및 동의
++
++        • Geode 설정에서 Record submission을 끄면 기록 제출 UI와 새로운 End Level 검증 이미지 준비가 비활성화됩니다.
++        • 이 데이터 처리에 동의하지 않는 경우 기록 제출 기능을 끄거나 모드를 설치하지 마세요.
++        • 제출된 자료에 관한 문의는 모드를 배포한 Corum 디스코드 서버 관리자에게 해 주세요.
++
++        설치기에서 ‘동의합니다.’를 선택하면 위 내용을 확인하고 동의한 것으로 처리됩니다.
++        ‘동의하지 않습니다.’를 선택하면 설치 또는 업데이트를 진행할 수 없습니다.
++        """;
++}
+diff --git a/installer/CorumIntegrationInstaller/PrivacyDialog.cs b/installer/CorumIntegrationInstaller/TermsDialog.cs
+similarity index 73%
+rename from installer/CorumIntegrationInstaller/PrivacyDialog.cs
+rename to installer/CorumIntegrationInstaller/TermsDialog.cs
+index 28e11cf..35fae1c 100644
+--- a/installer/CorumIntegrationInstaller/PrivacyDialog.cs
++++ b/installer/CorumIntegrationInstaller/TermsDialog.cs
+@@ -1,32 +1,34 @@
+ namespace CorumIntegrationInstaller;
+ 
+-internal sealed class PrivacyDialog : Form
++internal sealed class TermsDialog : Form
+ {
+-    public PrivacyDialog()
++    public TermsDialog()
+     {
+-        Text = "Privacy / Record verification information";
++        Text = "Corum Integration 약관";
+         StartPosition = FormStartPosition.CenterParent;
+         MinimumSize = new Size(620, 460);
+         Size = new Size(760, 620);
+         ShowIcon = false;
+         MaximizeBox = true;
+         MinimizeBox = false;
++        AutoScaleMode = AutoScaleMode.Dpi;
+         Font = new Font("Segoe UI", 9F);
+ 
+-        var textBox = new TextBox
++        var textBox = new RichTextBox
+         {
+             Dock = DockStyle.Fill,
+-            Multiline = true,
+             ReadOnly = true,
+-            ScrollBars = ScrollBars.Both,
++            DetectUrls = false,
+             WordWrap = true,
++            ScrollBars = RichTextBoxScrollBars.Vertical,
+             BackColor = SystemColors.Window,
+-            Text = PrivacyContent.Load()
++            BorderStyle = BorderStyle.FixedSingle,
++            Text = TermsContent.Text
+         };
+ 
+         var closeButton = new Button
+         {
+-            Text = "Close",
++            Text = "닫기",
+             AutoSize = true,
+             DialogResult = DialogResult.OK,
+             Padding = new Padding(18, 4, 18, 4),
+diff --git a/installer/README.md b/installer/README.md
+index 86ee37f..7dad454 100644
+--- a/installer/README.md
++++ b/installer/README.md
+@@ -17,4 +17,4 @@ dotnet publish installer/CorumIntegrationInstaller/CorumIntegrationInstaller.csp
+ 
+ GitHub Actions reads the release version from `corum-integration-mod/mod.json`, passes it to the installer assembly and renames the single executable to `Corum-Integration-Installer-v{VERSION}.exe`.
+ 
+-The installer embeds `DISCORD-DOWNLOAD-NOTICE.md` and `corum-integration-mod/PRIVACY.md` so the same repository-controlled disclosure is available before installation.
++The one-screen UI includes mutually exclusive agreement choices and opens its built-in terms and record-verification notice in a separate read-only window. It does not depend on external Markdown files at build time or runtime.
+-- 
+2.51.1
+

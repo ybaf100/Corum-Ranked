@@ -1,0 +1,23 @@
+{
+  "name": "corum-ranked",
+  "private": true,
+  "version": "0.4.0-alpha.3",
+  "workspaces": [
+    "packages/*",
+    "apps/*",
+    "tools/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run build --workspace @corum-ranked/rules && npm run test --workspaces --if-present",
+    "test:harness": "npm run build --workspace @corum-ranked/rules && npm run test:harness --workspace @corum-ranked/server",
+    "typecheck": "npm run build --workspace @corum-ranked/rules && npm run typecheck --workspaces --if-present"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "vitest": "4.1.11"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

@@ -1,0 +1,729 @@
+/**
+ * Corum Ranked 운영 설정 전용 Apps Script 모듈.
+ * 실시간 경기/attempt 데이터는 절대 Spreadsheet에 저장하지 않는다.
+ * 기존 Corum Integration setup/doPost 흐름과 분리되어 있다.
+ */
+var CORUM_RANKED_SHEETS = Object.freeze({
+  pool: "Ranked Pool",
+  tiers: "Ranked Tiers",
+  seeds: "Ranked CSMP Seed",
+  allowedMods: "Ranked Allowed Mods",
+  config: "Ranked Config",
+});
+
+var CORUM_RANKED_POOL_HEADERS = Object.freeze([
+  "Level ID",
+  "Canonical Level ID",
+  "대체 맵 코드",
+  "제목",
+  "제작자",
+  "난이도",
+  "Ranked Pool (1~6)",
+  "Qualifying %",
+  "활성",
+]);
+
+var CORUM_RANKED_TIER_HEADERS = Object.freeze([
+  "Tier",
+  "최소 점수(포함)",
+  "최대 점수(미포함)",
+  "Main Pool",
+  "Deathmatch Pool",
+]);
+
+var CORUM_RANKED_SEED_HEADERS = Object.freeze([
+  "CSMP Tier",
+  "Initial Hidden MMR",
+]);
+
+var CORUM_RANKED_ALLOWED_MOD_HEADERS = Object.freeze([
+  "Mod ID",
+  "표시명",
+  "최소 버전",
+  "최대 버전",
+  "Required",
+  "Enabled",
+]);
+
+var CORUM_RANKED_CONFIG_HEADERS = Object.freeze([
+  "Key",
+  "Value",
+  "설명",
+]);
+
+var CORUM_RANKED_TIER_DEFAULTS = Object.freeze([
+  Object.freeze(["RED", "", "", 2, 2]),
+  Object.freeze(["AQUA", "", "", 3, 3]),
+  Object.freeze(["BRONZE", "", "", 4, 4]),
+  Object.freeze(["SILVER", "", "", 5, 5]),
+  Object.freeze(["GOLD", "", "", 6, 6]),
+]);
+
+var CORUM_RANKED_SEED_DEFAULTS = Object.freeze([
+  Object.freeze(["NONE", ""]),
+  Object.freeze(["RED", ""]),
+  Object.freeze(["AQUA", ""]),
+  Object.freeze(["BRONZE", ""]),
+  Object.freeze(["SILVER", ""]),
+  Object.freeze(["GOLD", ""]),
+]);
+
+var CORUM_RANKED_ALLOWED_MOD_DEFAULTS = Object.freeze([
+  Object.freeze([
+    "hwanhee1.corum_ranked",
+    "Corum Ranked",
+    "",
+    "",
+    true,
+    true,
+  ]),
+  Object.freeze([
+    "syzzi.click_between_frames",
+    "Click Between Frames",
+    "",
+    "",
+    true,
+    true,
+  ]),
+]);
+
+var CORUM_RANKED_CONFIG_DEFAULTS = Object.freeze([
+  Object.freeze(["enabled", false, "모든 필수 운영값 입력·검증 후 TRUE"]),
+  Object.freeze(["ruleVersion", "corum-ranked-v0.3", "명세/규칙 버전"]),
+  Object.freeze(["roundSeconds", 180, "일반 Round 시간"]),
+  Object.freeze(["finalAttemptWindowSeconds", 10, "3분 이후 attempt 시작 Window"]),
+  Object.freeze(["lastAttemptWindowSeconds", 10, "2-Clear LAST ATTEMPT 시작 Window"]),
+  Object.freeze(["banSeconds", 10, "동시 비공개 밴 시간"]),
+  Object.freeze(["bestOf", 3, "최대 Round 수"]),
+  Object.freeze(["mmrAlgorithm", "ELO_V1", "서버가 지원하는 MMR 계산 정책"]),
+  Object.freeze(["placementGames", "", "운영 확정 필요"]),
+  Object.freeze(["placementKFactor", "", "운영 확정 필요"]),
+  Object.freeze(["regularKFactor", "", "운영 확정 필요"]),
+  Object.freeze(["expectedScoreDivisor", "", "운영 확정 필요"]),
+  Object.freeze(["deltaRounding", "", "NEAREST / FLOOR / CEIL 중 운영 확정"]),
+  Object.freeze(["sessionSeconds", "", "서버 세션 유효시간, 운영 확정 필요"]),
+  Object.freeze(["readySeconds", "", "운영 확정 필요"]),
+  Object.freeze(["reconnectGraceSeconds", "", "운영 확정 필요"]),
+  Object.freeze(["queueHeartbeatSeconds", "", "운영 확정 필요"]),
+  Object.freeze(["matchHeartbeatSeconds", "", "운영 확정 필요"]),
+  Object.freeze(["orphanAttemptSeconds", "", "운영 확정 필요"]),
+  Object.freeze(["roundResultSeconds", "", "라운드 결과 표시 시간, 운영 확정 필요"]),
+  Object.freeze(["matchmakingInitialRatingRange", "", "초기 MMR 검색 범위"]),
+  Object.freeze(["matchmakingWidenPerSecond", "", "대기 1초당 MMR 범위 확장값"]),
+  Object.freeze(["matchmakingMaximumRatingRange", "", "최대 MMR 검색 범위"]),
+  Object.freeze(["readyTimeoutAction", "", "CANCEL_MATCH / FORFEIT_UNREADY"]),
+  Object.freeze(["reconnectTimeoutAction", "", "CANCEL_MATCH / FORFEIT_DISCONNECTED"]),
+  Object.freeze(["restartRecoveryAction", "", "CANCEL_MATCH / RESUME"]),
+  Object.freeze(["cbfModId", "syzzi.click_between_frames", "필수 CBF Mod ID"]),
+  Object.freeze(["cbf.soft-toggle", false, "CBF의 Disable CBF는 꺼짐"]),
+  Object.freeze(["cbf.click-on-steps", false, "Click on Steps 모드는 꺼짐"]),
+  Object.freeze(["cbf.physics-bypass", false, "물리 변경 방지"]),
+]);
+
+/**
+ * Ranked 설정 시트만 생성/보수한다. setupCorumIntegration()에서 자동 호출하지 않는다.
+ * 기존 운영자가 입력한 값은 덮어쓰지 않고 누락된 기본 행만 추가한다.
+ */
+function setupCorumRankedConfig() {
+  var spreadsheet = getSpreadsheet_();
+  var poolSheet = getOrCreateSheet_(
+    spreadsheet,
+    CORUM_RANKED_SHEETS.pool,
+    CORUM_RANKED_POOL_HEADERS,
+  );
+  var tiersSheet = getOrCreateSheet_(
+    spreadsheet,
+    CORUM_RANKED_SHEETS.tiers,
+    CORUM_RANKED_TIER_HEADERS,
+  );
+  var seedsSheet = getOrCreateSheet_(
+    spreadsheet,
+    CORUM_RANKED_SHEETS.seeds,
+    CORUM_RANKED_SEED_HEADERS,
+  );
+  var allowedModsSheet = getOrCreateSheet_(
+    spreadsheet,
+    CORUM_RANKED_SHEETS.allowedMods,
+    CORUM_RANKED_ALLOWED_MOD_HEADERS,
+  );
+  var configSheet = getOrCreateSheet_(
+    spreadsheet,
+    CORUM_RANKED_SHEETS.config,
+    CORUM_RANKED_CONFIG_HEADERS,
+  );
+
+  appendMissingRankedRows_(tiersSheet, CORUM_RANKED_TIER_DEFAULTS);
+  appendMissingRankedRows_(seedsSheet, CORUM_RANKED_SEED_DEFAULTS);
+  appendMissingRankedRows_(allowedModsSheet, CORUM_RANKED_ALLOWED_MOD_DEFAULTS);
+  appendMissingRankedRows_(configSheet, CORUM_RANKED_CONFIG_DEFAULTS);
+
+  [poolSheet, tiersSheet, seedsSheet, allowedModsSheet, configSheet].forEach(function (sheet) {
+    sheet.setFrozenRows(1);
+  });
+
+  console.log("Corum Ranked 설정 시트 준비 완료");
+  console.log("미확정 Seed/MMR/timeout 값을 입력하고 검증한 뒤 enabled를 TRUE로 바꾸세요.");
+}
+
+function appendMissingRankedRows_(sheet, rows) {
+  var existingKeys = {};
+  if (sheet.getLastRow() >= 2) {
+    sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getDisplayValues().forEach(function (row) {
+      var key = String(row[0] || "").trim().toUpperCase();
+      if (key) existingKeys[key] = true;
+    });
+  }
+  rows.forEach(function (row) {
+    var key = String(row[0] || "").trim().toUpperCase();
+    if (!key || existingKeys[key]) return;
+    sheet.appendRow(Array.prototype.slice.call(row));
+    existingKeys[key] = true;
+  });
+}
+
+function getCorumRankedConfigResponse_() {
+  var document = readCorumRankedConfig_();
+  return json_({
+    ok: true,
+    action: "ranked_config",
+    data: document,
+  });
+}
+
+function readCorumRankedConfig_() {
+  var spreadsheet = getSpreadsheet_();
+  var rawConfig = readRankedKeyValues_(spreadsheet.getSheetByName(CORUM_RANKED_SHEETS.config));
+  var rules = {
+    rulesVersion: rankedText_(rawConfig.ruleVersion),
+    roundSeconds: rankedNumber_(rawConfig.roundSeconds),
+    finalAttemptWindowSeconds: rankedNumber_(rawConfig.finalAttemptWindowSeconds),
+    lastAttemptWindowSeconds: rankedNumber_(rawConfig.lastAttemptWindowSeconds),
+    banSeconds: rankedNumber_(rawConfig.banSeconds),
+    bestOf: rankedNumber_(rawConfig.bestOf),
+  };
+  var tierBands = readRankedTierBands_(spreadsheet.getSheetByName(CORUM_RANKED_SHEETS.tiers));
+  var csmpSeeds = readRankedSeeds_(spreadsheet.getSheetByName(CORUM_RANKED_SHEETS.seeds));
+  var maps = readRankedPool_(
+    spreadsheet.getSheetByName(CORUM_RANKED_SHEETS.pool),
+    readMaps_(),
+  );
+  var allowedMods = readRankedAllowedMods_(
+    spreadsheet.getSheetByName(CORUM_RANKED_SHEETS.allowedMods),
+  );
+  var operational = {
+    enabled: rankedBoolean_(rawConfig.enabled),
+    generation: "",
+    rules: rules,
+    tierBands: tierBands,
+    csmpSeeds: csmpSeeds,
+    cbf: {
+      modId: rankedText_(rawConfig.cbfModId),
+      requiredSettings: {
+        "soft-toggle": rankedBoolean_(rawConfig["cbf.soft-toggle"]),
+        "click-on-steps": rankedBoolean_(rawConfig["cbf.click-on-steps"]),
+        "physics-bypass": rankedBoolean_(rawConfig["cbf.physics-bypass"]),
+      },
+    },
+  };
+
+  var mmrPolicy = readRankedMmrPolicy_(rawConfig);
+  if (mmrPolicy) operational.mmrPolicy = mmrPolicy;
+  var timeouts = readRankedTimeouts_(rawConfig);
+  if (timeouts) operational.timeouts = timeouts;
+  var matchmaking = readRankedMatchmaking_(rawConfig);
+  if (matchmaking) operational.matchmaking = matchmaking;
+  var failurePolicy = readRankedFailurePolicy_(rawConfig);
+  if (failurePolicy) operational.failurePolicy = failurePolicy;
+
+  var generationInput = {
+    rules: rules,
+    tierBands: tierBands,
+    csmpSeeds: csmpSeeds,
+    mmrPolicy: mmrPolicy,
+    timeouts: timeouts,
+    matchmaking: matchmaking,
+    failurePolicy: failurePolicy,
+    cbf: operational.cbf,
+    maps: maps,
+    allowedMods: allowedMods,
+  };
+  var generation = "ranked-v0.3-" + rankedStableHash_(JSON.stringify(generationInput));
+  operational.generation = generation;
+  var validation = validateCorumRankedConfig_(operational, maps, allowedMods);
+
+  return {
+    generation: generation,
+    generatedAt: new Date().toISOString(),
+    operational: operational,
+    maps: maps,
+    allowedMods: allowedMods,
+    validation: {
+      valid: validation.errors.length === 0,
+      queueReady: operational.enabled && validation.errors.length === 0,
+      errors: validation.errors,
+    },
+  };
+}
+
+function readRankedKeyValues_(sheet) {
+  var result = {};
+  if (!sheet || sheet.getLastRow() < 2) return result;
+  var values = sheet.getDataRange().getValues();
+  var keyColumn = findOptionalHeaderIndex_(values[0], ["Key"]);
+  var valueColumn = findOptionalHeaderIndex_(values[0], ["Value"]);
+  if (keyColumn === -1 || valueColumn === -1) return result;
+  for (var rowIndex = 1; rowIndex < values.length; rowIndex += 1) {
+    var key = String(values[rowIndex][keyColumn] || "").trim();
+    if (key) result[key] = values[rowIndex][valueColumn];
+  }
+  return result;
+}
+
+function readRankedTierBands_(sheet) {
+  if (!sheet || sheet.getLastRow() < 2) return [];
+  var values = sheet.getDataRange().getValues();
+  var header = values[0];
+  var tierColumn = findOptionalHeaderIndex_(header, ["Tier"]);
+  var minimumColumn = findOptionalHeaderIndex_(header, ["최소 점수(포함)"]);
+  var maximumColumn = findOptionalHeaderIndex_(header, ["최대 점수(미포함)"]);
+  var mainPoolColumn = findOptionalHeaderIndex_(header, ["Main Pool"]);
+  var deathmatchPoolColumn = findOptionalHeaderIndex_(header, ["Deathmatch Pool"]);
+  if ([tierColumn, minimumColumn, maximumColumn, mainPoolColumn, deathmatchPoolColumn].some(function (column) {
+    return column === -1;
+  })) return [];
+
+  var result = [];
+  for (var rowIndex = 1; rowIndex < values.length; rowIndex += 1) {
+    var row = values[rowIndex];
+    var tier = rankedText_(row[tierColumn]).toUpperCase();
+    if (!tier) continue;
+    var minimum = rankedNumber_(row[minimumColumn]);
+    var maximumText = rankedText_(row[maximumColumn]);
+    var maximum = maximumText === "" ? null : rankedNumber_(row[maximumColumn]);
+    var mainPool = rankedNumber_(row[mainPoolColumn]);
+    var deathmatchPool = rankedNumber_(row[deathmatchPoolColumn]);
+    result.push({
+      tier: tier,
+      minInclusive: minimum,
+      maxExclusive: maximum,
+      mainPool: mainPool,
+      deathmatchPool: deathmatchPool,
+    });
+  }
+  return result;
+}
+
+function readRankedSeeds_(sheet) {
+  var result = {};
+  if (!sheet || sheet.getLastRow() < 2) return result;
+  var values = sheet.getDataRange().getValues();
+  var tierColumn = findOptionalHeaderIndex_(values[0], ["CSMP Tier"]);
+  var seedColumn = findOptionalHeaderIndex_(values[0], ["Initial Hidden MMR"]);
+  if (tierColumn === -1 || seedColumn === -1) return result;
+  for (var rowIndex = 1; rowIndex < values.length; rowIndex += 1) {
+    var tier = rankedText_(values[rowIndex][tierColumn]).toUpperCase();
+    var seed = rankedNumber_(values[rowIndex][seedColumn]);
+    if (tier && seed !== null) result[tier] = seed;
+  }
+  return result;
+}
+
+function readRankedPool_(sheet, corumMaps) {
+  if (!sheet || sheet.getLastRow() < 2) return [];
+  var values = sheet.getDataRange().getValues();
+  var header = values[0];
+  var columns = {
+    levelId: findOptionalHeaderIndex_(header, ["Level ID"]),
+    canonicalLevelId: findOptionalHeaderIndex_(header, ["Canonical Level ID"]),
+    alternateLevelId: findOptionalHeaderIndex_(header, [
+      "대체 맵 코드",
+      "Alternate Level ID",
+      "alternateLevelId",
+    ]),
+    title: findOptionalHeaderIndex_(header, ["제목"]),
+    creator: findOptionalHeaderIndex_(header, ["제작자"]),
+    difficulty: findOptionalHeaderIndex_(header, ["난이도"]),
+    pool: findOptionalHeaderIndex_(header, ["Ranked Pool (1~6)"]),
+    qualifyingPercent: findOptionalHeaderIndex_(header, ["Qualifying %"]),
+    active: findOptionalHeaderIndex_(header, ["활성"]),
+  };
+  if (Object.keys(columns).some(function (key) {
+    return key !== "alternateLevelId" && columns[key] === -1;
+  })) return [];
+
+  var corumByCanonical = {};
+  (corumMaps || []).forEach(function (map) {
+    var canonicalLevelId = rankedText_(map.levelId);
+    if (canonicalLevelId) corumByCanonical[canonicalLevelId] = map;
+  });
+
+  var result = [];
+  for (var rowIndex = 1; rowIndex < values.length; rowIndex += 1) {
+    var row = values[rowIndex];
+    var legacyLevelId = rankedText_(row[columns.levelId]);
+    var canonicalLevelId = rankedText_(row[columns.canonicalLevelId]) || legacyLevelId;
+    if (!canonicalLevelId) continue;
+    var explicitAlternate = rankedValidAlternateLevelId_(
+      columns.alternateLevelId === -1 ? "" : row[columns.alternateLevelId],
+      canonicalLevelId,
+    );
+    var corumAlternate = rankedValidAlternateLevelId_(
+      corumByCanonical[canonicalLevelId] && corumByCanonical[canonicalLevelId].alternateLevelId,
+      canonicalLevelId,
+    );
+    var legacyAlternate = rankedValidAlternateLevelId_(legacyLevelId, canonicalLevelId);
+    var alternateLevelId = explicitAlternate || corumAlternate || legacyAlternate || null;
+    result.push({
+      canonicalLevelId: canonicalLevelId,
+      alternateLevelId: alternateLevelId,
+      title: rankedText_(row[columns.title]),
+      creator: rankedText_(row[columns.creator]),
+      difficulty: rankedText_(row[columns.difficulty]),
+      pool: rankedNumber_(row[columns.pool]),
+      qualifyingPercent: rankedNumber_(row[columns.qualifyingPercent]),
+      active: rankedBoolean_(row[columns.active]),
+    });
+  }
+  return result;
+}
+
+function readRankedAllowedMods_(sheet) {
+  if (!sheet || sheet.getLastRow() < 2) return [];
+  var values = sheet.getDataRange().getValues();
+  var header = values[0];
+  var columns = {
+    id: findOptionalHeaderIndex_(header, ["Mod ID"]),
+    displayName: findOptionalHeaderIndex_(header, ["표시명"]),
+    minVersion: findOptionalHeaderIndex_(header, ["최소 버전"]),
+    maxVersion: findOptionalHeaderIndex_(header, ["최대 버전"]),
+    required: findOptionalHeaderIndex_(header, ["Required"]),
+    enabled: findOptionalHeaderIndex_(header, ["Enabled"]),
+  };
+  if (Object.keys(columns).some(function (key) { return columns[key] === -1; })) return [];
+
+  var result = [];
+  for (var rowIndex = 1; rowIndex < values.length; rowIndex += 1) {
+    var row = values[rowIndex];
+    var id = rankedText_(row[columns.id]);
+    if (!id) continue;
+    var rule = {
+      id: id,
+      displayName: rankedText_(row[columns.displayName]) || id,
+      required: rankedBoolean_(row[columns.required]),
+      enabled: rankedBoolean_(row[columns.enabled]),
+    };
+    var minimum = rankedText_(row[columns.minVersion]);
+    var maximum = rankedText_(row[columns.maxVersion]);
+    if (minimum) rule.minVersion = minimum;
+    if (maximum) rule.maxVersion = maximum;
+    result.push(rule);
+  }
+  return result;
+}
+
+function readRankedMmrPolicy_(config) {
+  var placementGames = rankedNumber_(config.placementGames);
+  var placementKFactor = rankedNumber_(config.placementKFactor);
+  var regularKFactor = rankedNumber_(config.regularKFactor);
+  var expectedScoreDivisor = rankedNumber_(config.expectedScoreDivisor);
+  var deltaRounding = rankedText_(config.deltaRounding).toUpperCase();
+  if (
+    placementGames === null ||
+    placementKFactor === null ||
+    regularKFactor === null ||
+    expectedScoreDivisor === null ||
+    !deltaRounding
+  ) return null;
+  return {
+    algorithm: rankedText_(config.mmrAlgorithm).toUpperCase(),
+    placementGames: placementGames,
+    placementKFactor: placementKFactor,
+    regularKFactor: regularKFactor,
+    expectedScoreDivisor: expectedScoreDivisor,
+    deltaRounding: deltaRounding,
+  };
+}
+
+function readRankedTimeouts_(config) {
+  var result = {
+    sessionSeconds: rankedNumber_(config.sessionSeconds),
+    readySeconds: rankedNumber_(config.readySeconds),
+    reconnectGraceSeconds: rankedNumber_(config.reconnectGraceSeconds),
+    queueHeartbeatSeconds: rankedNumber_(config.queueHeartbeatSeconds),
+    matchHeartbeatSeconds: rankedNumber_(config.matchHeartbeatSeconds),
+    orphanAttemptSeconds: rankedNumber_(config.orphanAttemptSeconds),
+    roundResultSeconds: rankedNumber_(config.roundResultSeconds),
+  };
+  if (Object.keys(result).some(function (key) { return result[key] === null; })) return null;
+  return result;
+}
+
+function readRankedMatchmaking_(config) {
+  var result = {
+    initialRatingRange: rankedNumber_(config.matchmakingInitialRatingRange),
+    widenPerSecond: rankedNumber_(config.matchmakingWidenPerSecond),
+    maximumRatingRange: rankedNumber_(config.matchmakingMaximumRatingRange),
+  };
+  if (Object.keys(result).some(function (key) { return result[key] === null; })) return null;
+  return result;
+}
+
+function readRankedFailurePolicy_(config) {
+  var ready = rankedText_(config.readyTimeoutAction).toUpperCase();
+  var reconnect = rankedText_(config.reconnectTimeoutAction).toUpperCase();
+  var restart = rankedText_(config.restartRecoveryAction).toUpperCase();
+  if (!ready || !reconnect || !restart) return null;
+  return {
+    readyTimeoutAction: ready,
+    reconnectTimeoutAction: reconnect,
+    restartRecoveryAction: restart,
+  };
+}
+
+function rankedText_(value) {
+  return String(value == null ? "" : value).trim();
+}
+
+function rankedNumber_(value) {
+  if (value === null || value === undefined || rankedText_(value) === "") return null;
+  var numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function rankedBoolean_(value) {
+  if (value === true || value === 1) return true;
+  var text = rankedText_(value).toLowerCase();
+  return text === "true" || text === "yes" || text === "y" || text === "1" || text === "활성";
+}
+
+function rankedValidAlternateLevelId_(value, canonicalLevelId) {
+  var alternateLevelId = rankedText_(value);
+  return /^[1-9]\d*$/.test(alternateLevelId) && alternateLevelId !== canonicalLevelId
+    ? alternateLevelId
+    : "";
+}
+
+function validateCorumRankedConfig_(operational, maps, allowedMods) {
+  var errors = [];
+  var rules = operational.rules || {};
+  if (rules.rulesVersion !== "corum-ranked-v0.3") {
+    errors.push("ruleVersion은 corum-ranked-v0.3이어야 합니다.");
+  }
+  if (rules.roundSeconds !== 180) errors.push("roundSeconds는 180이어야 합니다.");
+  if (rules.finalAttemptWindowSeconds !== 10) {
+    errors.push("finalAttemptWindowSeconds는 10이어야 합니다.");
+  }
+  if (rules.lastAttemptWindowSeconds !== 10) {
+    errors.push("lastAttemptWindowSeconds는 10이어야 합니다.");
+  }
+  if (rules.banSeconds !== 10) errors.push("banSeconds는 10이어야 합니다.");
+  if (rules.bestOf !== 3) errors.push("bestOf는 3이어야 합니다.");
+
+  validateRankedTiers_(operational.tierBands || [], errors);
+  ["NONE", "RED", "AQUA", "BRONZE", "SILVER", "GOLD"].forEach(function (tier) {
+    if (!Number.isFinite(operational.csmpSeeds && operational.csmpSeeds[tier])) {
+      errors.push("Ranked CSMP Seed의 " + tier + " 값을 입력해야 합니다.");
+    }
+  });
+
+  if (!operational.mmrPolicy) {
+    errors.push("MMR/배치 운영값을 모두 입력해야 합니다.");
+  } else {
+    var mmr = operational.mmrPolicy;
+    if (mmr.algorithm !== "ELO_V1") errors.push("지원되는 mmrAlgorithm은 ELO_V1입니다.");
+    if (!Number.isInteger(mmr.placementGames) || mmr.placementGames <= 0) {
+      errors.push("placementGames는 양의 정수여야 합니다.");
+    }
+    ["placementKFactor", "regularKFactor", "expectedScoreDivisor"].forEach(function (key) {
+      if (!(mmr[key] > 0)) errors.push(key + "는 양수여야 합니다.");
+    });
+    if (["NEAREST", "FLOOR", "CEIL"].indexOf(mmr.deltaRounding) === -1) {
+      errors.push("deltaRounding은 NEAREST/FLOOR/CEIL 중 하나여야 합니다.");
+    }
+  }
+
+  if (!operational.timeouts) {
+    errors.push("미확정 timeout 운영값을 모두 입력해야 합니다.");
+  } else {
+    Object.keys(operational.timeouts).forEach(function (key) {
+      if (!(operational.timeouts[key] > 0)) errors.push(key + "는 양수여야 합니다.");
+    });
+  }
+
+  if (!operational.matchmaking) {
+    errors.push("Matchmaking MMR 범위 운영값을 모두 입력해야 합니다.");
+  } else {
+    var matchmaking = operational.matchmaking;
+    if (matchmaking.initialRatingRange < 0 || matchmaking.widenPerSecond < 0) {
+      errors.push("Matchmaking 범위와 초당 확장값은 음수일 수 없습니다.");
+    }
+    if (matchmaking.maximumRatingRange < matchmaking.initialRatingRange) {
+      errors.push("최대 Matchmaking 범위는 초기 범위 이상이어야 합니다.");
+    }
+  }
+
+  if (!operational.failurePolicy) {
+    errors.push("장애/timeout 처리 정책을 모두 입력해야 합니다.");
+  } else {
+    if (["CANCEL_MATCH", "FORFEIT_UNREADY"].indexOf(operational.failurePolicy.readyTimeoutAction) === -1) {
+      errors.push("readyTimeoutAction 값이 올바르지 않습니다.");
+    }
+    if (["CANCEL_MATCH", "FORFEIT_DISCONNECTED"].indexOf(operational.failurePolicy.reconnectTimeoutAction) === -1) {
+      errors.push("reconnectTimeoutAction 값이 올바르지 않습니다.");
+    }
+    if (["CANCEL_MATCH", "RESUME"].indexOf(operational.failurePolicy.restartRecoveryAction) === -1) {
+      errors.push("restartRecoveryAction 값이 올바르지 않습니다.");
+    }
+  }
+
+  validateRankedPool_(maps, errors);
+  validateRankedAllowedMods_(operational.cbf, allowedMods, errors);
+  return { errors: errors };
+}
+
+function validateRankedTiers_(tierBands, errors) {
+  var expected = ["RED", "AQUA", "BRONZE", "SILVER", "GOLD"];
+  var byTier = {};
+  tierBands.forEach(function (band) {
+    if (byTier[band.tier]) errors.push("Ranked Tiers에 " + band.tier + "가 중복되어 있습니다.");
+    byTier[band.tier] = band;
+  });
+  expected.forEach(function (tier) {
+    if (!byTier[tier]) errors.push("Ranked Tiers에 " + tier + "가 필요합니다.");
+  });
+  if (tierBands.length !== expected.length) {
+    errors.push("Ranked Tiers에는 5개 표시 티어를 각각 한 번만 입력해야 합니다.");
+  }
+
+  var sorted = tierBands.slice().sort(function (left, right) {
+    return Number(left.minInclusive) - Number(right.minInclusive);
+  });
+  sorted.forEach(function (band, index) {
+    if (!Number.isFinite(band.minInclusive)) {
+      errors.push(band.tier + " 최소 점수를 입력해야 합니다.");
+    }
+    if (band.maxExclusive !== null && !Number.isFinite(band.maxExclusive)) {
+      errors.push(band.tier + " 최대 점수가 올바르지 않습니다.");
+    }
+    if (band.maxExclusive !== null && band.maxExclusive <= band.minInclusive) {
+      errors.push(band.tier + " 최대 점수는 최소 점수보다 커야 합니다.");
+    }
+    if (index > 0) {
+      var previous = sorted[index - 1];
+      if (previous.maxExclusive !== band.minInclusive) {
+        errors.push(previous.tier + "와 " + band.tier + " 경계는 빈 구간/중복 없이 이어져야 합니다.");
+      }
+    }
+    if (!Number.isInteger(band.mainPool) || band.mainPool < 1 || band.mainPool > 6) {
+      errors.push(band.tier + " Main Pool은 1~6 정수여야 합니다.");
+    }
+    if (!Number.isInteger(band.deathmatchPool) || band.deathmatchPool < 1 || band.deathmatchPool > 6) {
+      errors.push(band.tier + " Deathmatch Pool은 1~6 정수여야 합니다.");
+    }
+  });
+  if (sorted.length > 0 && sorted[sorted.length - 1].maxExclusive !== null) {
+    errors.push("최상위 티어 최대 점수는 비워야 합니다.");
+  }
+}
+
+function validateRankedPool_(maps, errors) {
+  var canonical = {};
+  var identityByLevelId = {};
+  var counts = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 };
+  maps.forEach(function (map) {
+    if (!map.active) return;
+    if (!map.canonicalLevelId || !map.title || !map.creator || !map.difficulty) {
+      errors.push("Ranked Pool 활성 맵의 필수 텍스트 값이 비어 있습니다: " + (map.canonicalLevelId || "(대표 맵 코드 없음)"));
+      return;
+    }
+    if (!/^[1-9]\d*$/.test(map.canonicalLevelId)) {
+      errors.push("대표 맵 코드는 양의 정수 Level ID여야 합니다: " + map.canonicalLevelId);
+      return;
+    }
+    if (
+      map.alternateLevelId !== null &&
+      (!/^[1-9]\d*$/.test(map.alternateLevelId) || map.alternateLevelId === map.canonicalLevelId)
+    ) {
+      errors.push("대체 맵 코드는 대표 맵과 다른 양의 정수 Level ID여야 합니다: " + map.canonicalLevelId);
+      return;
+    }
+    if (!Number.isInteger(map.pool) || map.pool < 1 || map.pool > 6) {
+      errors.push("Ranked Pool 값은 1~6 정수여야 합니다: " + map.canonicalLevelId);
+      return;
+    }
+    if (!Number.isFinite(map.qualifyingPercent) || map.qualifyingPercent < 0 || map.qualifyingPercent > 100) {
+      errors.push("Qualifying %는 0~100이어야 합니다: " + map.canonicalLevelId);
+      return;
+    }
+    var existing = canonical[map.canonicalLevelId];
+    if (existing) {
+      if (
+        existing.pool !== map.pool ||
+        existing.alternateLevelId !== map.alternateLevelId ||
+        existing.qualifyingPercent !== map.qualifyingPercent ||
+        existing.title !== map.title ||
+        existing.creator !== map.creator ||
+        existing.difficulty !== map.difficulty
+      ) {
+        errors.push("같은 Canonical Level의 활성 등록 정보가 충돌합니다: " + map.canonicalLevelId);
+      }
+      return;
+    }
+    canonical[map.canonicalLevelId] = map;
+    counts[map.pool] += 1;
+  });
+
+  Object.keys(canonical).forEach(function (canonicalLevelId) {
+    var map = canonical[canonicalLevelId];
+    [canonicalLevelId, map.alternateLevelId].forEach(function (levelId) {
+      if (!levelId) return;
+      var existingOwner = identityByLevelId[levelId];
+      if (existingOwner && existingOwner !== canonicalLevelId) {
+        errors.push(
+          "대표/대체 맵 코드가 서로 다른 canonical 맵에서 충돌합니다: " + levelId,
+        );
+      } else {
+        identityByLevelId[levelId] = canonicalLevelId;
+      }
+    });
+  });
+
+  var requiredByTier = {
+    RED: { 1: 1, 2: 3, 3: 1 },
+    AQUA: { 2: 1, 3: 3, 4: 1 },
+    BRONZE: { 3: 1, 4: 3, 5: 1 },
+    SILVER: { 4: 1, 5: 3, 6: 1 },
+    GOLD: { 4: 1, 5: 2, 6: 2 },
+  };
+  Object.keys(requiredByTier).forEach(function (tier) {
+    Object.keys(requiredByTier[tier]).forEach(function (pool) {
+      var required = requiredByTier[tier][pool];
+      if (counts[pool] < required) {
+        errors.push(tier + " 후보 생성을 위한 Pool " + pool + " canonical 맵이 부족합니다.");
+      }
+    });
+  });
+}
+
+function validateRankedAllowedMods_(cbf, allowedMods, errors) {
+  var enabledById = {};
+  allowedMods.forEach(function (rule) {
+    if (!rule.enabled) return;
+    if (enabledById[rule.id]) errors.push("Ranked Allowed Mods에 Mod ID가 중복되어 있습니다: " + rule.id);
+    enabledById[rule.id] = rule;
+  });
+  ["hwanhee1.corum_ranked", cbf && cbf.modId].forEach(function (id) {
+    if (!id || !enabledById[id] || !enabledById[id].required) {
+      errors.push("필수 모드는 Enabled/Required 상태여야 합니다: " + (id || "CBF Mod ID 없음"));
+    }
+  });
+}
+
+function rankedStableHash_(text) {
+  var hash = 2166136261;
+  for (var index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}

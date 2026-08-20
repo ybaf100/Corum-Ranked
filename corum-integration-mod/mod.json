@@ -1,0 +1,42 @@
+{
+  "geode": "5.8.2",
+  "gd": {
+    "win": "2.2081",
+    "android": "2.2081",
+    "mac": "2.2081",
+    "ios": "2.2081"
+  },
+  "id": "hwanhee1.corum_integration",
+  "name": "Corum Integration",
+  "version": "v1.0.2",
+  "developer": "hwanhee1",
+  "description": "Displays Corum map data, previews record points, and submits records with locally staged clear verification data and a startup snapshot of loaded mods.",
+  "dependencies": {
+    "geode.node-ids": ">=v1.23.3"
+  },
+  "tags": [
+    "online",
+    "utility",
+    "interface"
+  ],
+  "settings": {
+    "show-rating": {
+      "name": "Show Corum difficulty",
+      "description": "Uses the map catalog loaded once at startup to show a color-coded Corum rating card, current rank, and maximum points.",
+      "type": "bool",
+      "default": true
+    },
+    "enable-record-submit": {
+      "name": "Record submission",
+      "description": "Shows Corum record controls. Completed Corum clears are staged locally and any pending verification data is sent only when you press Submit or Submit All.",
+      "type": "bool",
+      "default": true
+    },
+    "submit-notifications": {
+      "name": "Record notifications",
+      "description": "Also shows a notification after the submission popup reports success or failure.",
+      "type": "bool",
+      "default": true
+    }
+  }
+}
