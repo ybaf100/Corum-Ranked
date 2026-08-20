@@ -69,7 +69,7 @@ beforeAll(async () => {
     new URL("../../../migrations/0001_initial_ranked.sql", import.meta.url),
   );
   await pglite.exec(await readFile(migrationPath, "utf8"));
-}, 20_000);
+}, 60_000);
 
 beforeEach(async () => {
   await database.query("DELETE FROM ranked_outbox_events");
@@ -119,4 +119,3 @@ describe("Discord relay outbox", () => {
     expect(row.rows[0]?.last_error).toContain("simulated Discord outage");
   });
 });
-

@@ -18,31 +18,42 @@ describe("server environment", () => {
       rankedConfigRefreshMs: 60_000,
       rankedConfigFetchTimeoutMs: 5_000,
       discordRelay: null,
-      debugBotMatch: null,
+      debugBot: null,
     });
   });
 
-  it("requires an explicit debug password only when the development route is enabled", () => {
-    expect(loadServerEnvironment({
+  it("enables the development bot only with an explicit body-password configuration", () => {
+    const loaded = loadServerEnvironment({
       ...validEnvironment(),
       ENABLE_DEBUG_BOT_MATCH: "true",
       DEBUG_BOT_PASSWORD: "2008",
-    }).debugBotMatch).toEqual({ password: "2008" });
+    });
+    expect(loaded.debugBot).toMatchObject({
+      password: "2008",
+      tickMs: 125,
+      difficulties: {
+        EASY: { mmrOffset: -250 },
+        NORMAL: { mmrOffset: 0 },
+        HARD: { mmrOffset: 250 },
+      },
+    });
+  });
+
+  it("fails closed when the bot flag is enabled without a password", () => {
     expect(() => loadServerEnvironment({
       ...validEnvironment(),
       ENABLE_DEBUG_BOT_MATCH: "true",
     })).toThrow("DEBUG_BOT_PASSWORD must be explicitly configured");
   });
 
-  it("refuses to start production with Debug Bot Match enabled", () => {
+  it("rejects a Bot clear probability above its qualifying probability", () => {
     expect(() => loadServerEnvironment({
       ...validEnvironment(),
-      NODE_ENV: "production",
-      RANKED_CONFIG_URL: "https://example.com/config?action=ranked_config",
-      RANKED_SESSION_TOKEN_SECRET: "production-test-secret-with-32-characters",
       ENABLE_DEBUG_BOT_MATCH: "true",
       DEBUG_BOT_PASSWORD: "2008",
-    })).toThrow("cannot be enabled in production");
+      DEBUG_BOT_EASY_QUALIFYING_CHANCE: "0.1",
+      DEBUG_BOT_EASY_CLEAR_CHANCE: "0.2",
+    })).toThrow("CLEAR_CHANCE cannot exceed");
   });
 
   it("loads Discord relay controls only when a webhook is configured", () => {

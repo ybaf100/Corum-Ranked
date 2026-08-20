@@ -59,9 +59,10 @@ describe("Bo3 match progression", () => {
 describe("three-attempt deathmatch", () => {
   const base = makeMap(3, 1, { qualifyingPercent: 50 });
   const map = {
+    levelId: base.levelId,
     canonicalLevelId: base.canonicalLevelId,
     alternateLevelId: base.alternateLevelId,
-    playableLevelId: base.alternateLevelId ?? base.canonicalLevelId,
+    playableLevelId: base.playableLevelId,
     title: base.title,
     creator: base.creator,
     difficulty: base.difficulty,

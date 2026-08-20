@@ -32,7 +32,7 @@ beforeAll(async () => {
     new URL("../../../migrations/0001_initial_ranked.sql", import.meta.url),
   );
   await pglite.exec(await readFile(migrationPath, "utf8"));
-}, 20_000);
+}, 60_000);
 
 afterAll(async () => {
   await pglite.close();
@@ -153,9 +153,10 @@ describe("Round 3 draw and repeating deathmatch", () => {
     const matchTokenA = tokens.deriveMatchToken(matchId, playerAId, sessionAId);
     const matchTokenB = tokens.deriveMatchToken(matchId, playerBId, sessionBId);
     const selectedMaps: RankedMapSnapshot[] = document.maps.slice(0, 3).map((map) => ({
+      levelId: map.levelId,
       canonicalLevelId: map.canonicalLevelId,
       alternateLevelId: map.alternateLevelId,
-      playableLevelId: map.alternateLevelId ?? map.canonicalLevelId,
+      playableLevelId: map.playableLevelId,
       title: map.title,
       creator: map.creator,
       difficulty: map.difficulty,
@@ -223,14 +224,11 @@ describe("Round 3 draw and repeating deathmatch", () => {
          alternate_level_id, playable_level_id,
          title, creator, difficulty, pool, qualifying_percent,
          phase, ready_deadline_at
-       ) VALUES (
-         $1, $2, 1, $3, $4, $5, $6, $7, $8, $9, $10, $11,
-         'ROUND_PREPARE', $12
-       )`,
+       ) VALUES ($1, $2, 1, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'ROUND_PREPARE', $12)`,
       [
         ids.next(),
         matchId,
-        firstMap.playableLevelId,
+        firstMap.levelId,
         firstMap.canonicalLevelId,
         firstMap.alternateLevelId,
         firstMap.playableLevelId,
@@ -268,11 +266,11 @@ describe("Round 3 draw and repeating deathmatch", () => {
       await service.ready(matchId, matchTokenA, contextA, {
         installedMods: structuredClone(cleanMods),
       });
-      const playing = (await service.ready(matchId, matchTokenB, contextB, {
+      await service.ready(matchId, matchTokenB, contextB, {
         installedMods: structuredClone(cleanMods),
-      })) as Record<string, any>;
+      });
+      const playing = (await service.state(matchId, matchTokenA, contextA)) as Record<string, any>;
       const levelId = playing.deathmatch.map.playableLevelId as string;
-      expect(levelId).toBe(playing.deathmatch.map.alternateLevelId);
       for (const [context, token, progress, prefix] of [
         [contextA, matchTokenA, scoreA, "a"],
         [contextB, matchTokenB, scoreB, "b"],

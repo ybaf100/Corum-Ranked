@@ -81,16 +81,22 @@ const operational = (generation: string): RankedOperationalConfig => ({
 
 const maps = (): RankedMap[] =>
   ([1, 2, 3, 4, 5, 6] as const).flatMap((pool: PoolNumber) =>
-    Array.from({ length: 5 }, (_, index) => ({
-      canonicalLevelId: `${pool}${String(index + 1).padStart(3, "0")}`,
-      alternateLevelId: `9${pool}${String(index + 1).padStart(3, "0")}`,
-      title: `Map ${pool}-${index + 1}`,
-      creator: "Test Creator",
-      difficulty: "Test Difficulty",
-      pool,
-      qualifyingPercent: 50,
-      active: true,
-    })),
+    Array.from({ length: 5 }, (_, index) => {
+      const canonicalLevelId = `${pool}${String(index + 1).padStart(3, "0")}`;
+      const playableLevelId = `9${canonicalLevelId}`;
+      return {
+        levelId: playableLevelId,
+        canonicalLevelId,
+        alternateLevelId: playableLevelId,
+        playableLevelId,
+        title: `Map ${pool}-${index + 1}`,
+        creator: "Test Creator",
+        difficulty: "Test Difficulty",
+        pool,
+        qualifyingPercent: 50,
+        active: true,
+      };
+    }),
   );
 
 const allowedMods: readonly AllowedModRule[] = [
@@ -126,5 +132,5 @@ export const environmentFixture = (): ServerEnvironment => ({
   sessionTokenSecret: "test-only-not-a-production-secret",
   corsOrigins: [],
   discordRelay: null,
-  debugBotMatch: null,
+  debugBot: null,
 });

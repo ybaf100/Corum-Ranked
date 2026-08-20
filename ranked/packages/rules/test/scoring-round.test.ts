@@ -18,9 +18,10 @@ const map = {
   qualifyingPercent: 60,
 };
 const snapshot = {
+  levelId: map.levelId,
   canonicalLevelId: map.canonicalLevelId,
   alternateLevelId: map.alternateLevelId,
-  playableLevelId: map.alternateLevelId ?? map.canonicalLevelId,
+  playableLevelId: map.playableLevelId,
   title: map.title,
   creator: map.creator,
   difficulty: map.difficulty,

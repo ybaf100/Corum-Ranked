@@ -4,8 +4,6 @@
 
 Apps Script `ranked_config`가 운영 설정의 source입니다. 서버는 마지막으로 검증에 성공한 문서만 사용하며, 새 Match 생성 시 config generation과 전체 source payload, 후보 맵을 DB에 snapshot합니다. 진행 중인 Match는 이후 Spreadsheet 변경의 영향을 받지 않습니다.
 
-맵 identity는 `canonicalLevelId`이고, 기존 Corum 데이터나 Ranked Pool의 `대체 맵 코드`는 `alternateLevelId`로 별도 반환합니다. 서버는 유효한 alternate를 `playableLevelId`로 반드시 우선하고 없을 때만 canonical로 fallback합니다. Pool/Qualifying/중복 판정과 history 연결은 canonical 기준이며 실제 다운로드·Round 진입·attempt 검증만 playable 기준입니다.
-
 다음 값은 코드에 운영 기본값이 없습니다. 빈 값이면 config 검증이 실패하고 queue가 열리지 않습니다.
 
 - CSMP tier별 최초 MMR Seed
@@ -25,13 +23,6 @@ Apps Script `ranked_config`가 운영 설정의 source입니다. 서버는 마�
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f ranked/migrations/0001_initial_ranked.sql
 ```
 
-기존 `v0.4.0-alpha.1` DB에는 Debug Match 분리 column/view를 추가하는 migration을 이어서 적용합니다.
-
-```bash
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f ranked/migrations/0002_debug_bot_match.sql
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f ranked/migrations/0003_debug_rating_playable_maps.sql
-```
-
 Migration은 transaction 안에서 실행됩니다. 기존 운영 DB에 적용할 때는 일반적인 migration runner로 버전 관리하고, 같은 초기 migration을 재실행하지 마세요.
 
 ## 3. 서버 환경변수
@@ -45,20 +36,18 @@ Migration은 transaction 안에서 실행됩니다. 기존 운영 DB에 적용�
 - `CORS_ORIGINS`: 필요한 origin만 쉼표로 지정
 - `DISCORD_WEBHOOK_URL`: 비어 있으면 relay 비활성화
 - `DISCORD_*`: Webhook을 켰을 때만 모두 명시하는 poll/batch/request/lease/retry/max-attempt 정책
-- `ENABLE_DEBUG_BOT_MATCH`: 기본 false. non-production debug 서버에서만 true
-- `DEBUG_BOT_PASSWORD`: debug route가 켜졌을 때만 주입하며 Production에는 배포하지 않음
+- `ENABLE_DEBUG_BOT_MATCH`: 기본/production은 `false`; alpha 테스트 서버에서만 `true`
+- `DEBUG_BOT_PASSWORD`, `DEBUG_BOT_*`: Bot gate와 난이도별 debug simulation 설정
 
 서버는 production에서 HTTP Apps Script URL, 짧은 session secret, 공식 Discord 외 webhook 목적지를 거부합니다. Discord URL 자체는 로그나 message body에 넣지 않습니다.
 
 ## 4. Health와 관찰 항목
 
-- `GET /health/live`: 프로세스 생존
-- `GET /health/ready`: DB와 마지막 검증 config 상태
+- `GET /health`: 프로세스 생존
+- `GET /ready`: DB와 마지막 검증 config 상태
 - config refresh 실패: 마지막 정상 snapshot이 있으면 기존 설정으로 계속 서비스하고 오류를 기록
 - outbox: `delivered_at IS NULL AND abandoned_at IS NULL`은 재시도 예정, `abandoned_at IS NOT NULL`은 최대 시도 후 포기한 알림
 - Match `result_applied_at`: MMR 반영 idempotency 기준
-- `ranked_rounds.canonical_level_id` / `alternate_level_id` / `playable_level_id`: 경기 생성 시 고정된 맵 ID snapshot
-- `ranked_attempts.played_level_id`: 실제 attempt가 snapshot playable ID에서 발생했는지 감사 가능
 
 Discord 실패는 outbox worker에서만 처리되며 Match 판정 transaction을 되돌리지 않습니다.
 
@@ -83,6 +72,5 @@ Ready timeout, reconnect timeout, restart recovery의 행동은 `Ranked Config`�
 - deadline 전환이 없는 progress 요청이 PostgreSQL row/score/stateVersion을 만들지 않는지 확인
 - HTTPS/TLS, reverse proxy request size/rate limit, DB backup/restore 확인
 - Discord staging webhook으로 모든 7개 event type 확인
-- Debug Bot을 사용한다면 전용 staging 서버/채널에서만 활성화하고, Release/Production에서는 flag와 route가 꺼졌는지 확인
-- Debug Bot 결과도 실제 MMR/placement/통계/history에 반영되므로 개발 서버와 테스트 계정만 사용
 - 실제 production secret이나 webhook URL이 Git history/빌드 로그에 없는지 확인
+- Debug Bot 결과도 rating에 반영되므로 staging/test 계정만 사용하고 Release에서는 server/client flag를 모두 OFF

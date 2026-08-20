@@ -4,23 +4,15 @@
  * 기존 Corum Integration setup/doPost 흐름과 분리되어 있다.
  */
 var CORUM_RANKED_SHEETS = Object.freeze({
-  pool: "Ranked Pool",
   tiers: "Ranked Tiers",
   seeds: "Ranked CSMP Seed",
   allowedMods: "Ranked Allowed Mods",
   config: "Ranked Config",
 });
 
-var CORUM_RANKED_POOL_HEADERS = Object.freeze([
-  "Level ID",
-  "Canonical Level ID",
-  "대체 맵 코드",
-  "제목",
-  "제작자",
-  "난이도",
+var CORUM_RANKED_MAP_HEADERS = Object.freeze([
   "Ranked Pool (1~6)",
   "Qualifying %",
-  "활성",
 ]);
 
 var CORUM_RANKED_TIER_HEADERS = Object.freeze([
@@ -126,11 +118,7 @@ var CORUM_RANKED_CONFIG_DEFAULTS = Object.freeze([
  */
 function setupCorumRankedConfig() {
   var spreadsheet = getSpreadsheet_();
-  var poolSheet = getOrCreateSheet_(
-    spreadsheet,
-    CORUM_RANKED_SHEETS.pool,
-    CORUM_RANKED_POOL_HEADERS,
-  );
+  var mapsSheet = ensureRankedMapColumns_();
   var tiersSheet = getOrCreateSheet_(
     spreadsheet,
     CORUM_RANKED_SHEETS.tiers,
@@ -157,11 +145,11 @@ function setupCorumRankedConfig() {
   appendMissingRankedRows_(allowedModsSheet, CORUM_RANKED_ALLOWED_MOD_DEFAULTS);
   appendMissingRankedRows_(configSheet, CORUM_RANKED_CONFIG_DEFAULTS);
 
-  [poolSheet, tiersSheet, seedsSheet, allowedModsSheet, configSheet].forEach(function (sheet) {
+  [mapsSheet, tiersSheet, seedsSheet, allowedModsSheet, configSheet].forEach(function (sheet) {
     sheet.setFrozenRows(1);
   });
 
-  console.log("Corum Ranked 설정 시트 준비 완료");
+  console.log("Corum Ranked 설정 준비 완료 (맵 Pool/Qualifying은 기존 맵 시트 열 사용)");
   console.log("미확정 Seed/MMR/timeout 값을 입력하고 검증한 뒤 enabled를 TRUE로 바꾸세요.");
 }
 
@@ -203,10 +191,7 @@ function readCorumRankedConfig_() {
   };
   var tierBands = readRankedTierBands_(spreadsheet.getSheetByName(CORUM_RANKED_SHEETS.tiers));
   var csmpSeeds = readRankedSeeds_(spreadsheet.getSheetByName(CORUM_RANKED_SHEETS.seeds));
-  var maps = readRankedPool_(
-    spreadsheet.getSheetByName(CORUM_RANKED_SHEETS.pool),
-    readMaps_(),
-  );
+  var maps = readRankedMapsFromCorumSheet_();
   var allowedMods = readRankedAllowedMods_(
     spreadsheet.getSheetByName(CORUM_RANKED_SHEETS.allowedMods),
   );
@@ -328,63 +313,99 @@ function readRankedSeeds_(sheet) {
   return result;
 }
 
-function readRankedPool_(sheet, corumMaps) {
+function ensureRankedMapColumns_() {
+  var sheet = getMapsSheet_();
+  var width = Math.max(1, sheet.getLastColumn());
+  var headers = sheet.getRange(1, 1, 1, width).getDisplayValues()[0];
+  var missing = CORUM_RANKED_MAP_HEADERS.filter(function (header) {
+    return findOptionalHeaderIndex_(headers, [header]) === -1;
+  });
+  if (missing.length > 0) {
+    sheet.getRange(1, headers.length + 1, 1, missing.length).setValues([missing]);
+  }
+  applyRankedMapValidation_(sheet);
+  return sheet;
+}
+
+function applyRankedMapValidation_(sheet) {
+  if (!SpreadsheetApp.newDataValidation || sheet.getLastColumn() < 1) return;
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getDisplayValues()[0];
+  var maximumRows = typeof sheet.getMaxRows === "function" ? sheet.getMaxRows() : sheet.getLastRow();
+  if (maximumRows < 2) return;
+  [
+    { aliases: ["Ranked Pool (1~6)"], minimum: 1, maximum: 6 },
+    { aliases: ["Qualifying %"], minimum: 0, maximum: 100 },
+  ].forEach(function (rule) {
+    var column = findOptionalHeaderIndex_(headers, rule.aliases);
+    if (column === -1) return;
+    var range = sheet.getRange(2, column + 1, maximumRows - 1, 1);
+    if (typeof range.setDataValidation !== "function") return;
+    var builder = SpreadsheetApp.newDataValidation()
+      .requireNumberBetween(rule.minimum, rule.maximum);
+    if (typeof builder.setAllowInvalid === "function") builder.setAllowInvalid(false);
+    range.setDataValidation(builder.build());
+  });
+}
+
+function readRankedMapsFromCorumSheet_() {
+  var sheet = getMapsSheet_();
   if (!sheet || sheet.getLastRow() < 2) return [];
   var values = sheet.getDataRange().getValues();
+  var displayValues = sheet.getDataRange().getDisplayValues();
   var header = values[0];
   var columns = {
-    levelId: findOptionalHeaderIndex_(header, ["Level ID"]),
-    canonicalLevelId: findOptionalHeaderIndex_(header, ["Canonical Level ID"]),
+    canonicalLevelId: findOptionalHeaderIndex_(header, ["맵 코드", "맵코드", "Level ID", "levelId", "ID"]),
     alternateLevelId: findOptionalHeaderIndex_(header, [
       "대체 맵 코드",
+      "대체맵코드",
       "Alternate Level ID",
+      "Alternative Level ID",
+      "Alt Level ID",
       "alternateLevelId",
     ]),
-    title: findOptionalHeaderIndex_(header, ["제목"]),
-    creator: findOptionalHeaderIndex_(header, ["제작자"]),
-    difficulty: findOptionalHeaderIndex_(header, ["난이도"]),
+    title: findOptionalHeaderIndex_(header, ["맵 제목", "맵제목", "제목", "Title"]),
+    creator: findOptionalHeaderIndex_(header, ["제작자", "Creator"]),
+    difficulty: findOptionalHeaderIndex_(header, ["난이도", "Difficulty", "Rating", "레이팅"]),
     pool: findOptionalHeaderIndex_(header, ["Ranked Pool (1~6)"]),
     qualifyingPercent: findOptionalHeaderIndex_(header, ["Qualifying %"]),
-    active: findOptionalHeaderIndex_(header, ["활성"]),
   };
-  if (Object.keys(columns).some(function (key) {
-    return key !== "alternateLevelId" && columns[key] === -1;
-  })) return [];
-
-  var corumByCanonical = {};
-  (corumMaps || []).forEach(function (map) {
-    var canonicalLevelId = rankedText_(map.levelId);
-    if (canonicalLevelId) corumByCanonical[canonicalLevelId] = map;
-  });
+  if ([columns.canonicalLevelId, columns.title, columns.creator, columns.difficulty, columns.pool,
+    columns.qualifyingPercent].some(function (column) { return column === -1; })) return [];
 
   var result = [];
   for (var rowIndex = 1; rowIndex < values.length; rowIndex += 1) {
     var row = values[rowIndex];
-    var legacyLevelId = rankedText_(row[columns.levelId]);
-    var canonicalLevelId = rankedText_(row[columns.canonicalLevelId]) || legacyLevelId;
-    if (!canonicalLevelId) continue;
-    var explicitAlternate = rankedValidAlternateLevelId_(
-      columns.alternateLevelId === -1 ? "" : row[columns.alternateLevelId],
-      canonicalLevelId,
-    );
-    var corumAlternate = rankedValidAlternateLevelId_(
-      corumByCanonical[canonicalLevelId] && corumByCanonical[canonicalLevelId].alternateLevelId,
-      canonicalLevelId,
-    );
-    var legacyAlternate = rankedValidAlternateLevelId_(legacyLevelId, canonicalLevelId);
-    var alternateLevelId = explicitAlternate || corumAlternate || legacyAlternate || null;
+    var displayRow = displayValues[rowIndex];
+    var pool = rankedNumber_(row[columns.pool]);
+    if (pool === null) continue;
+    var canonicalLevelId = rankedText_(displayRow[columns.canonicalLevelId]);
+    if (!/^\d+$/.test(canonicalLevelId) || /^0+$/.test(canonicalLevelId)) continue;
+    var alternateLevelId = columns.alternateLevelId === -1
+      ? ""
+      : normalizeAlternateLevelId_(displayRow[columns.alternateLevelId], canonicalLevelId);
     result.push({
+      levelId: alternateLevelId || canonicalLevelId,
       canonicalLevelId: canonicalLevelId,
-      alternateLevelId: alternateLevelId,
+      alternateLevelId: alternateLevelId || null,
+      playableLevelId: alternateLevelId || canonicalLevelId,
       title: rankedText_(row[columns.title]),
       creator: rankedText_(row[columns.creator]),
       difficulty: rankedText_(row[columns.difficulty]),
-      pool: rankedNumber_(row[columns.pool]),
-      qualifyingPercent: rankedNumber_(row[columns.qualifyingPercent]),
-      active: rankedBoolean_(row[columns.active]),
+      pool: pool,
+      qualifyingPercent: rankedPercent_(row[columns.qualifyingPercent], displayRow[columns.qualifyingPercent]),
+      active: true,
     });
   }
   return result;
+}
+
+function rankedPercent_(rawValue, displayValue) {
+  var displayText = rankedText_(displayValue);
+  if (/%$/.test(displayText)) {
+    var displayed = Number(displayText.replace(/%$/, "").replace(/,/g, "").trim());
+    return Number.isFinite(displayed) ? displayed : null;
+  }
+  return rankedNumber_(rawValue);
 }
 
 function readRankedAllowedMods_(sheet) {
@@ -494,13 +515,6 @@ function rankedBoolean_(value) {
   if (value === true || value === 1) return true;
   var text = rankedText_(value).toLowerCase();
   return text === "true" || text === "yes" || text === "y" || text === "1" || text === "활성";
-}
-
-function rankedValidAlternateLevelId_(value, canonicalLevelId) {
-  var alternateLevelId = rankedText_(value);
-  return /^[1-9]\d*$/.test(alternateLevelId) && alternateLevelId !== canonicalLevelId
-    ? alternateLevelId
-    : "";
 }
 
 function validateCorumRankedConfig_(operational, maps, allowedMods) {
@@ -628,38 +642,25 @@ function validateRankedTiers_(tierBands, errors) {
 
 function validateRankedPool_(maps, errors) {
   var canonical = {};
-  var identityByLevelId = {};
   var counts = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 };
   maps.forEach(function (map) {
     if (!map.active) return;
-    if (!map.canonicalLevelId || !map.title || !map.creator || !map.difficulty) {
-      errors.push("Ranked Pool 활성 맵의 필수 텍스트 값이 비어 있습니다: " + (map.canonicalLevelId || "(대표 맵 코드 없음)"));
-      return;
-    }
-    if (!/^[1-9]\d*$/.test(map.canonicalLevelId)) {
-      errors.push("대표 맵 코드는 양의 정수 Level ID여야 합니다: " + map.canonicalLevelId);
-      return;
-    }
-    if (
-      map.alternateLevelId !== null &&
-      (!/^[1-9]\d*$/.test(map.alternateLevelId) || map.alternateLevelId === map.canonicalLevelId)
-    ) {
-      errors.push("대체 맵 코드는 대표 맵과 다른 양의 정수 Level ID여야 합니다: " + map.canonicalLevelId);
+    if (!map.levelId || !map.canonicalLevelId || !map.title || !map.creator || !map.difficulty) {
+      errors.push("Ranked Pool 활성 맵의 필수 텍스트 값이 비어 있습니다: " + (map.levelId || "(Level ID 없음)"));
       return;
     }
     if (!Number.isInteger(map.pool) || map.pool < 1 || map.pool > 6) {
-      errors.push("Ranked Pool 값은 1~6 정수여야 합니다: " + map.canonicalLevelId);
+      errors.push("Ranked Pool 값은 1~6 정수여야 합니다: " + map.levelId);
       return;
     }
     if (!Number.isFinite(map.qualifyingPercent) || map.qualifyingPercent < 0 || map.qualifyingPercent > 100) {
-      errors.push("Qualifying %는 0~100이어야 합니다: " + map.canonicalLevelId);
+      errors.push("Qualifying %는 0~100이어야 합니다: " + map.levelId);
       return;
     }
     var existing = canonical[map.canonicalLevelId];
     if (existing) {
       if (
         existing.pool !== map.pool ||
-        existing.alternateLevelId !== map.alternateLevelId ||
         existing.qualifyingPercent !== map.qualifyingPercent ||
         existing.title !== map.title ||
         existing.creator !== map.creator ||
@@ -671,21 +672,6 @@ function validateRankedPool_(maps, errors) {
     }
     canonical[map.canonicalLevelId] = map;
     counts[map.pool] += 1;
-  });
-
-  Object.keys(canonical).forEach(function (canonicalLevelId) {
-    var map = canonical[canonicalLevelId];
-    [canonicalLevelId, map.alternateLevelId].forEach(function (levelId) {
-      if (!levelId) return;
-      var existingOwner = identityByLevelId[levelId];
-      if (existingOwner && existingOwner !== canonicalLevelId) {
-        errors.push(
-          "대표/대체 맵 코드가 서로 다른 canonical 맵에서 충돌합니다: " + levelId,
-        );
-      } else {
-        identityByLevelId[levelId] = canonicalLevelId;
-      }
-    });
   });
 
   var requiredByTier = {

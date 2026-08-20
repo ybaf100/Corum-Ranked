@@ -36,8 +36,7 @@ export class MatchRecoveryService implements OnApplicationBootstrap {
         `SELECT match.id, snapshot.source_payload
          FROM ranked_matches match
          JOIN ranked_config_snapshots snapshot ON snapshot.id = match.config_snapshot_id
-         WHERE match.match_type = 'RANKED_PVP'
-           AND match.state NOT IN ('MATCH_RESULT', 'CANCELLED')
+         WHERE match.state NOT IN ('MATCH_RESULT', 'CANCELLED')
          ORDER BY match.created_at, match.id
          FOR UPDATE OF match`,
       );
@@ -70,3 +69,4 @@ export class MatchRecoveryService implements OnApplicationBootstrap {
     return result;
   }
 }
+

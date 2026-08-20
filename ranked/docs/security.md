@@ -20,7 +20,7 @@ Geometry Dash account ID/username은 현재 공식 cryptographic login proof가 
 ## Secret 정책
 
 - 실제 `RANKED_SESSION_TOKEN_SECRET`, DB password, Discord webhook은 source, `.env`, fixture, ZIP에 포함하지 않습니다.
-- `.env.example`에는 placeholder 또는 빈 값만 둡니다.
-- Debug Bot password는 query string이나 로그에 넣지 않고 request body에서만 검증합니다. Production에는 debug route와 password를 배포하지 않습니다.
+- `.env.example`에는 production secret 대신 placeholder/빈 값만 둡니다. 예외적으로 출시 전 제거할 개발 gate 값 `DEBUG_BOT_PASSWORD=2008`만 요구사항에 따라 예시로 공개합니다. 이 값은 인증 secret이 아닙니다.
 - Geode의 Ranked 서버 URL은 public endpoint이므로 secret이 아니며 session/match token은 메모리에만 둡니다.
 - 로그에는 bearer token, match token, webhook URL을 기록하지 않습니다.
+- Debug password는 HTTPS JSON body로만 받고 request/body/crash 로그에 출력하지 않습니다. 클라이언트와 서버가 모두 검사하지만 production 인증으로 취급하지 않습니다.

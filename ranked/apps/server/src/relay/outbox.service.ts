@@ -18,8 +18,7 @@ export interface MatchRelayIdentity {
   readonly id: string;
   readonly player_a_id: string;
   readonly player_b_id: string;
-  readonly match_type?: "RANKED_PVP" | "DEBUG_BOT";
-  readonly debug_discord_events?: boolean;
+  readonly discord_events_enabled?: boolean;
 }
 
 interface PlayerNameRow {
@@ -39,8 +38,7 @@ export class OutboxService {
     payload: Readonly<Record<string, unknown>>,
     occurredAt: Date,
   ): Promise<void> {
-    const debugBotMatch = match.match_type === "DEBUG_BOT";
-    if (debugBotMatch && !match.debug_discord_events) return;
+    if (match.discord_events_enabled === false) return;
     const players = await transaction.query<PlayerNameRow>(
       "SELECT id, gd_username FROM ranked_players WHERE id = $1 OR id = $2",
       [match.player_a_id, match.player_b_id],
@@ -60,7 +58,6 @@ export class OutboxService {
         deduplicationKey,
         JSON.stringify({
           matchId: match.id,
-          debugBotMatch,
           occurredAt: occurredAt.toISOString(),
           players: {
             A: playerA?.gd_username ?? "Player A",

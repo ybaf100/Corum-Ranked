@@ -18,30 +18,18 @@ export const CANDIDATE_POOL_DISTRIBUTIONS: Readonly<Record<RankedTier, PoolDistr
     GOLD: Object.freeze({ 4: 1, 5: 2, 6: 2 }),
   });
 
-const isValidLevelId = (value: string): boolean => /^[1-9]\d*$/.test(value);
-
-export const normalizeAlternateLevelId = (
-  map: Pick<RankedMap, "canonicalLevelId" | "alternateLevelId">,
-): string | null =>
-  map.alternateLevelId !== null &&
-  isValidLevelId(map.alternateLevelId) &&
-  map.alternateLevelId !== map.canonicalLevelId
-    ? map.alternateLevelId
-    : null;
-
-export const resolvePlayableLevelId = (
-  map: Pick<RankedMap, "canonicalLevelId" | "alternateLevelId">,
-): string => {
-  if (!isValidLevelId(map.canonicalLevelId)) {
-    throw new RankedDomainError("INVALID_MAP", "Canonical level ID must be a positive integer", {
-      map,
-    });
-  }
-  return normalizeAlternateLevelId(map) ?? map.canonicalLevelId;
-};
-
 const validateMap = (map: RankedMap): void => {
-  resolvePlayableLevelId(map);
+  if (!isValidLevelId(map.canonicalLevelId)) {
+    throw new RankedDomainError("INVALID_MAP", "A positive canonical Level ID is required", { map });
+  }
+  const expectedPlayable = resolvePlayableLevelId(map.canonicalLevelId, map.alternateLevelId);
+  if (map.playableLevelId !== expectedPlayable || map.levelId !== expectedPlayable) {
+    throw new RankedDomainError(
+      "INVALID_MAP",
+      "playableLevelId must resolve from alternateLevelId with canonical fallback",
+      { map, expectedPlayable },
+    );
+  }
   if (!Number.isInteger(map.pool) || map.pool < 1 || map.pool > 6) {
     throw new RankedDomainError("INVALID_MAP", "Pool must be an integer from 1 through 6", { map });
   }
@@ -52,8 +40,24 @@ const validateMap = (map: RankedMap): void => {
   }
 };
 
+const isValidLevelId = (value: string | null | undefined): value is string =>
+  typeof value === "string" && /^[1-9]\d*$/.test(value.trim());
+
+export const resolvePlayableLevelId = (
+  canonicalLevelId: string,
+  alternateLevelId: string | null | undefined,
+): string => {
+  const canonical = canonicalLevelId.trim();
+  if (!isValidLevelId(canonical)) {
+    throw new RankedDomainError("INVALID_MAP", "A positive canonical Level ID is required");
+  }
+  const alternate = alternateLevelId?.trim() ?? "";
+  return isValidLevelId(alternate) && alternate !== canonical ? alternate : canonical;
+};
+
 const equivalentCanonicalRegistration = (left: RankedMap, right: RankedMap): boolean =>
-  normalizeAlternateLevelId(left) === normalizeAlternateLevelId(right) &&
+  left.alternateLevelId === right.alternateLevelId &&
+  left.playableLevelId === right.playableLevelId &&
   left.pool === right.pool &&
   left.qualifyingPercent === right.qualifyingPercent &&
   left.title === right.title &&
@@ -62,6 +66,7 @@ const equivalentCanonicalRegistration = (left: RankedMap, right: RankedMap): boo
 
 export const canonicalActiveMaps = (maps: readonly RankedMap[]): RankedMap[] => {
   const canonical = new Map<string, RankedMap>();
+  const aliases = new Map<string, string>();
   for (const map of maps) {
     validateMap(map);
     if (!map.active) continue;
@@ -74,31 +79,28 @@ export const canonicalActiveMaps = (maps: readonly RankedMap[]): RankedMap[] => 
       );
     }
     if (!existing) canonical.set(map.canonicalLevelId, map);
-  }
-  const active = [...canonical.values()];
-  const identityByLevelId = new Map<string, string>();
-  for (const map of active) {
-    const playableLevelId = resolvePlayableLevelId(map);
-    for (const levelId of [map.canonicalLevelId, playableLevelId]) {
-      const owner = identityByLevelId.get(levelId);
+    const identifiers = [map.canonicalLevelId, map.alternateLevelId].filter(isValidLevelId);
+    for (const identifier of identifiers) {
+      const owner = aliases.get(identifier);
       if (owner && owner !== map.canonicalLevelId) {
         throw new RankedDomainError(
           "CONFLICTING_MAP_ALIAS",
-          `Level ID ${levelId} belongs to multiple canonical maps`,
-          { levelId, firstCanonicalLevelId: owner, secondCanonicalLevelId: map.canonicalLevelId },
+          `Level ID ${identifier} belongs to more than one canonical Ranked map`,
+          { identifier, owner, conflicting: map.canonicalLevelId },
         );
       }
-      identityByLevelId.set(levelId, map.canonicalLevelId);
+      aliases.set(identifier, map.canonicalLevelId);
     }
   }
-  return active;
+  return [...canonical.values()];
 };
 
 export const snapshotMap = (map: RankedMap): RankedMapSnapshot =>
   Object.freeze({
+    levelId: resolvePlayableLevelId(map.canonicalLevelId, map.alternateLevelId),
     canonicalLevelId: map.canonicalLevelId,
-    alternateLevelId: normalizeAlternateLevelId(map),
-    playableLevelId: resolvePlayableLevelId(map),
+    alternateLevelId: map.alternateLevelId,
+    playableLevelId: resolvePlayableLevelId(map.canonicalLevelId, map.alternateLevelId),
     title: map.title,
     creator: map.creator,
     difficulty: map.difficulty,

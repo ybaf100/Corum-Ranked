@@ -69,9 +69,6 @@ type MatchState =
 
 interface LockedMatchRow {
   id: string;
-  match_type: "RANKED_PVP" | "DEBUG_BOT";
-  debug_config: unknown | null;
-  debug_discord_events: boolean;
   player_a_id: string;
   player_b_id: string;
   mmr_a_before: number;
@@ -102,6 +99,9 @@ interface LockedMatchRow {
   result_applied_at: Date | string | null;
   current_deathmatch_id: string | null;
   source_payload: unknown;
+  match_type: "PVP" | "DEBUG_BOT";
+  debug_bot_config: unknown | null;
+  discord_events_enabled: boolean;
 }
 
 interface RoundRow {
@@ -130,10 +130,6 @@ interface ProfileResultRow {
   player_id: string;
   hidden_mmr: number;
   placement_games: number;
-}
-
-interface LegacyRankedMapSnapshot extends Partial<RankedMapSnapshot> {
-  readonly levelId?: string;
 }
 
 interface DeathmatchRow {
@@ -168,30 +164,6 @@ const dateIso = (value: Date | string | null): string | null =>
 
 const sideColumn = (side: PlayerSide, prefix: string): string =>
   `${prefix}_${side.toLowerCase()}`;
-
-const mapSnapshot = (value: unknown): RankedMapSnapshot => {
-  const parsed = parseJson<LegacyRankedMapSnapshot>(value);
-  const canonicalLevelId = String(parsed.canonicalLevelId ?? "");
-  const alternateLevelId = parsed.alternateLevelId === undefined
-    ? null
-    : parsed.alternateLevelId;
-  const playableLevelId = String(
-    parsed.playableLevelId ?? parsed.levelId ?? alternateLevelId ?? canonicalLevelId,
-  );
-  if (!canonicalLevelId || !playableLevelId) {
-    throw new Error("Ranked map snapshot is missing canonical/playable IDs");
-  }
-  return {
-    canonicalLevelId,
-    alternateLevelId,
-    playableLevelId,
-    title: String(parsed.title ?? ""),
-    creator: String(parsed.creator ?? ""),
-    difficulty: String(parsed.difficulty ?? ""),
-    pool: Number(parsed.pool) as RankedMapSnapshot["pool"],
-    qualifyingPercent: Number(parsed.qualifyingPercent),
-  };
-};
 
 @Injectable()
 export class MatchService {
@@ -256,7 +228,7 @@ export class MatchService {
           match = await this.lockMatch(transaction, matchId);
           if (match.ready_a_at && match.ready_b_at) {
             const deathmatch = await this.currentDeathmatch(transaction, match);
-            const deathmatchMap = mapSnapshot(deathmatch.map_snapshot);
+            const deathmatchMap = parseJson<RankedMapSnapshot>(deathmatch.map_snapshot);
             await transaction.query(
               "UPDATE ranked_deathmatches SET started_at = $2 WHERE id = $1 AND started_at IS NULL",
               [match.current_deathmatch_id, now.toISOString()],
@@ -418,7 +390,7 @@ export class MatchService {
         throw new ConflictException(`Attempt start is not accepted in ${match.state}`);
       }
       const round = await this.lockCurrentRound(transaction, match);
-      this.assertPlayableLevel(body.levelId, round.playable_level_id);
+      this.assertPlayableLevelId(body.levelId, round.playable_level_id);
       const roundState = this.roundState(round);
       const decision = startRoundAttempt(
         roundState,
@@ -433,19 +405,19 @@ export class MatchService {
         if (!attempt) throw new Error("Accepted attempt was not persisted in domain state");
         await transaction.query(
           `INSERT INTO ranked_attempts (
-             id, round_id, player_id, played_level_id, attempt_sequence, domain_attempt_id,
-             server_accepted_start_at, client_started_at, client_start_event_id
+             id, round_id, player_id, attempt_sequence, domain_attempt_id,
+             server_accepted_start_at, client_started_at, level_id, client_start_event_id
            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
            ON CONFLICT (round_id, player_id, client_start_event_id) DO NOTHING`,
           [
             this.ids.next(),
             round.id,
             session.playerId,
-            body.levelId,
             attempt.sequence,
             attempt.id,
             now.toISOString(),
             body.clientStartedAt ?? null,
+            body.levelId,
             body.clientEventId,
           ],
         );
@@ -501,7 +473,7 @@ export class MatchService {
         throw new ConflictException(`Attempt end is not accepted in ${match.state}`);
       }
       const round = await this.lockCurrentRound(transaction, match);
-      this.assertPlayableLevel(body.levelId, round.playable_level_id);
+      this.assertPlayableLevelId(body.levelId, round.playable_level_id);
       const decision = endRoundAttempt(
         this.roundState(round),
         authorization.side,
@@ -608,25 +580,10 @@ export class MatchService {
         match = await this.advanceLockedMatch(transaction, match, now);
       }
       if (!this.isRoundPlaying(match.state)) {
-        if (match.state === "DEATHMATCH_PLAYING") {
-          const deathmatch = await this.currentDeathmatch(transaction, match);
-          const map = mapSnapshot(deathmatch.map_snapshot);
-          this.assertPlayableLevel(body.levelId, map.playableLevelId);
-          const active = await transaction.query<{ id: string }>(
-            `SELECT id FROM ranked_deathmatch_attempts
-             WHERE id = $1 AND deathmatch_id = $2 AND player_id = $3
-               AND ended_at IS NULL AND valid = TRUE`,
-            [body.attemptId, deathmatch.id, session.playerId],
-          );
-          if (!active.rows[0]) {
-            throw new ConflictException("Attempt progress requires the active server attempt");
-          }
-          return { accepted: true, stored: false, serverNow: now.toISOString() };
-        }
         throw new ConflictException(`Attempt progress is not accepted in ${match.state}`);
       }
       const round = await this.lockCurrentRound(transaction, match);
-      this.assertPlayableLevel(body.levelId, round.playable_level_id);
+      this.assertPlayableLevelId(body.levelId, round.playable_level_id);
       const state = this.roundState(round);
       const activeAttempt = state.attempts[authorization.side].find(
         (attempt) =>
@@ -667,16 +624,6 @@ export class MatchService {
     return match;
   }
 
-  private assertPlayableLevel(submittedLevelId: string, expectedLevelId: string): void {
-    if (submittedLevelId !== expectedLevelId) {
-      throw new ConflictException({
-        code: "RANKED_PLAYABLE_LEVEL_MISMATCH",
-        message: "Attempt levelId does not match the Round snapshot",
-        expectedPlayableLevelId: expectedLevelId,
-      });
-    }
-  }
-
   private matchConfig(match: LockedMatchRow): RankedConfigSnapshot {
     return parseJson<RankedConfigSnapshot>(match.source_payload);
   }
@@ -714,6 +661,12 @@ export class MatchService {
   private domainDeadlineIso(state: RoundState): string | null {
     const deadline = roundDeadlineAtMs(state);
     return deadline === null ? null : new Date(deadline).toISOString();
+  }
+
+  private assertPlayableLevelId(actual: string, expected: string): void {
+    if (actual.trim() !== expected) {
+      throw new ConflictException("Attempt Level ID does not match the Round playableLevelId snapshot");
+    }
   }
 
   private async advanceLockedMatch(
@@ -1026,6 +979,7 @@ export class MatchService {
   ): Promise<void> {
     const config = this.matchConfig(match);
     const map: RankedMapSnapshot = {
+      levelId: round.level_id,
       canonicalLevelId: round.canonical_level_id,
       alternateLevelId: round.alternate_level_id,
       playableLevelId: round.playable_level_id,
@@ -1244,33 +1198,19 @@ export class MatchService {
     );
     const profileA = profiles.rows.find((profile) => profile.player_id === current.player_a_id);
     const profileB = profiles.rows.find((profile) => profile.player_id === current.player_b_id);
-    if (!profileA || (current.match_type === "RANKED_PVP" && !profileB)) {
-      throw new Error("Match profile is missing");
-    }
-    const persistentProfileB = current.match_type === "RANKED_PVP" ? profileB : undefined;
-    const debugConfig = current.match_type === "DEBUG_BOT" && current.debug_config
-      ? parseJson<Record<string, unknown>>(current.debug_config)
-      : null;
-    const configuredBotPlacement = Number(debugConfig?.botPlacementGames);
-    const placementGamesB = persistentProfileB
-      ? Number(persistentProfileB.placement_games)
-      : Number.isInteger(configuredBotPlacement) && configuredBotPlacement >= 0
-        ? configuredBotPlacement
-        : Number(profileA.placement_games);
+    if (!profileA || !profileB) throw new Error("Match profile is missing");
     const update = calculateMmrUpdate(
       {
         ratingA: Number(profileA.hidden_mmr),
-        ratingB: persistentProfileB
-          ? Number(persistentProfileB.hidden_mmr)
-          : Number(current.mmr_b_before),
+        ratingB: Number(profileB.hidden_mmr),
         placementGamesA: Number(profileA.placement_games),
-        placementGamesB,
+        placementGamesB: Number(profileB.placement_games),
         winner,
       },
       config.operational.mmrPolicy,
     );
     const placementA = Number(profileA.placement_games) + 1;
-    const placementB = placementGamesB + 1;
+    const placementB = Number(profileB.placement_games) + 1;
     const displayedA = displayedTierForProfile(
       update.ratingAfterA,
       placementA,
@@ -1299,24 +1239,22 @@ export class MatchService {
         now.toISOString(),
       ],
     );
-    if (persistentProfileB) {
-      await transaction.query(
-        `UPDATE ranked_profiles
-         SET hidden_mmr = $2, visible_ranked_score = $2,
-             displayed_tier = $3, placement_games = $4,
-             wins = wins + $5, losses = losses + $6, updated_at = $7
-         WHERE player_id = $1`,
-        [
-          current.player_b_id,
-          update.ratingAfterB,
-          displayedB,
-          placementB,
-          winner === "B" ? 1 : 0,
-          winner === "A" ? 1 : 0,
-          now.toISOString(),
-        ],
-      );
-    }
+    await transaction.query(
+      `UPDATE ranked_profiles
+       SET hidden_mmr = $2, visible_ranked_score = $2,
+           displayed_tier = $3, placement_games = $4,
+           wins = wins + $5, losses = losses + $6, updated_at = $7
+       WHERE player_id = $1`,
+      [
+        current.player_b_id,
+        update.ratingAfterB,
+        displayedB,
+        placementB,
+        winner === "B" ? 1 : 0,
+        winner === "A" ? 1 : 0,
+        now.toISOString(),
+      ],
+    );
     const winnerId = winner === "A" ? current.player_a_id : current.player_b_id;
     await transaction.query(
       `UPDATE ranked_matches
@@ -1345,8 +1283,6 @@ export class MatchService {
       {
         winnerSide: winner,
         roundResults: finalSeries.roundResults,
-        matchType: current.match_type,
-        mmrApplied: true,
         mmrDelta: { A: update.deltaA, B: update.deltaB },
         ratingAfter: { A: update.ratingAfterA, B: update.ratingAfterB },
       },
@@ -1377,8 +1313,8 @@ export class MatchService {
     now: Date,
   ) {
     const deathmatch = await this.currentDeathmatch(transaction, match);
-    const map = mapSnapshot(deathmatch.map_snapshot);
-    this.assertPlayableLevel(body.levelId, map.playableLevelId);
+    const map = parseJson<RankedMapSnapshot>(deathmatch.map_snapshot);
+    this.assertPlayableLevelId(body.levelId, map.playableLevelId);
     const duplicate = await transaction.query<DeathmatchAttemptRow>(
       `SELECT * FROM ranked_deathmatch_attempts
        WHERE deathmatch_id = $1 AND player_id = $2 AND client_start_event_id = $3`,
@@ -1420,16 +1356,16 @@ export class MatchService {
     const attemptId = this.ids.next();
     await transaction.query(
       `INSERT INTO ranked_deathmatch_attempts (
-         id, deathmatch_id, player_id, played_level_id, attempt_sequence,
-         server_accepted_start_at, client_start_event_id
+         id, deathmatch_id, player_id, attempt_sequence,
+         server_accepted_start_at, level_id, client_start_event_id
        ) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
       [
         attemptId,
         deathmatch.id,
         playerId,
-        body.levelId,
         attempts.rows.length + 1,
         now.toISOString(),
+        body.levelId,
         body.clientEventId,
       ],
     );
@@ -1457,8 +1393,8 @@ export class MatchService {
     now: Date,
   ) {
     const deathmatch = await this.currentDeathmatch(transaction, match);
-    const map = mapSnapshot(deathmatch.map_snapshot);
-    this.assertPlayableLevel(body.levelId, map.playableLevelId);
+    const deathmatchMap = parseJson<RankedMapSnapshot>(deathmatch.map_snapshot);
+    this.assertPlayableLevelId(body.levelId, deathmatchMap.playableLevelId);
     const duplicate = await transaction.query<DeathmatchAttemptRow>(
       `SELECT * FROM ranked_deathmatch_attempts
        WHERE deathmatch_id = $1 AND player_id = $2 AND client_end_event_id = $3`,
@@ -1495,6 +1431,7 @@ export class MatchService {
         serverNow: now.toISOString(),
       };
     }
+    const map = deathmatchMap;
     const awardedScore = scoreAttempt(
       body.progressPercent,
       body.cleared,
@@ -1587,7 +1524,7 @@ export class MatchService {
       attemptsA.some((attempt) => attempt.ended_at === null) ||
       attemptsB.some((attempt) => attempt.ended_at === null)
     ) return;
-    const map = mapSnapshot(deathmatch.map_snapshot);
+    const map = parseJson<RankedMapSnapshot>(deathmatch.map_snapshot);
     const evaluation = evaluateDeathmatch(
       map,
       attemptsA.map((attempt) => ({
@@ -1667,7 +1604,7 @@ export class MatchService {
       [match.id],
     );
     const priorCanonicalIds = prior.rows.map(
-      (row) => mapSnapshot(row.map_snapshot).canonicalLevelId,
+      (row) => parseJson<RankedMapSnapshot>(row.map_snapshot).canonicalLevelId,
     );
     const effectiveTier = match.effective_tier as RankedConfigSnapshot["operational"]["tierBands"][number]["tier"];
     const band = tierBandFor(effectiveTier, config.operational.tierBands);
@@ -1736,6 +1673,7 @@ export class MatchService {
           banner: bannerForRound(round.round_number),
           phase: round.phase,
           map: {
+            levelId: round.level_id,
             canonicalLevelId: round.canonical_level_id,
             alternateLevelId: round.alternate_level_id,
             playableLevelId: round.playable_level_id,
@@ -1787,7 +1725,7 @@ export class MatchService {
       if (current) {
         deathmatch = {
           sequence: Number(current.sequence),
-          map: mapSnapshot(current.map_snapshot),
+          map: parseJson<RankedMapSnapshot>(current.map_snapshot),
           scoreA: current.score_a === null ? null : Number(current.score_a),
           scoreB: current.score_b === null ? null : Number(current.score_b),
           winnerSide:
@@ -1801,23 +1739,8 @@ export class MatchService {
     }
     const series = parseJson<MatchSeriesState>(match.series_state);
     const bansVisible = !["MATCHED", "BAN_PHASE"].includes(match.state);
-    const debugConfig = match.match_type === "DEBUG_BOT" && match.debug_config
-      ? parseJson<Record<string, unknown>>(match.debug_config)
-      : null;
     return {
       matchId: match.id,
-      matchType: match.match_type,
-      debug: debugConfig
-        ? {
-            active: true,
-            difficulty: debugConfig.difficulty ?? null,
-            scenario: debugConfig.scenario ?? null,
-            botBan: debugConfig.botBan ?? null,
-            botRating: debugConfig.botRating ?? null,
-            ratingOffset: debugConfig.ratingOffset ?? null,
-            discordEvents: match.debug_discord_events,
-          }
-        : null,
       state: match.state,
       stateVersion: Number(match.state_version),
       deadlineAt: dateIso(match.deadline_at),
@@ -1825,6 +1748,8 @@ export class MatchService {
       rulesVersion: config.operational.rules.rulesVersion,
       configGeneration: config.generation,
       effectiveTier: match.effective_tier,
+      matchType: match.match_type,
+      debug: match.match_type === "DEBUG_BOT",
       side: viewerSide,
       players: {
         A: playerA

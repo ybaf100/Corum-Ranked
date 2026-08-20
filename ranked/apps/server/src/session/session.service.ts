@@ -193,11 +193,12 @@ export class SessionService {
     const seeded = seedProfileOnce(base, fetchedCsmpTier, seeds, now.toISOString()).profile;
     const result = await transaction.query<ExistingProfileRow>(
       `INSERT INTO ranked_profiles (
-         player_id, displayed_tier, hidden_mmr, initial_csmp_tier,
+         player_id, displayed_tier, hidden_mmr, visible_ranked_score, initial_csmp_tier,
          initial_seed_mmr, seed_applied_at
-       ) VALUES ($1, 'UNRANKED', $2, $3, $4, $5)
+       ) VALUES ($1, 'UNRANKED', $2, $2, $3, $4, $5)
        ON CONFLICT (player_id) DO UPDATE SET
          hidden_mmr = EXCLUDED.hidden_mmr,
+         visible_ranked_score = EXCLUDED.visible_ranked_score,
          initial_csmp_tier = EXCLUDED.initial_csmp_tier,
          initial_seed_mmr = EXCLUDED.initial_seed_mmr,
          seed_applied_at = EXCLUDED.seed_applied_at,

@@ -15,6 +15,30 @@
    - 액세스 권한: 모든 사용자
 8. `/exec`로 끝나는 배포 URL을 복사한다.
 
+## Corum Ranked 설정 추가 (v0.4.0-alpha.4)
+
+Ranked를 처음 붙일 때 기존 Apps Script 프로젝트의 `Code.gs`를 이 폴더의 최신본으로
+교체하고, 같은 프로젝트에 새 스크립트 파일 `RankedConfig.gs`를 만든 뒤 동명 파일의
+전체 내용을 붙여 넣는다. 두 파일 중 하나만 반영하면 `ranked_config` API가 동작하지 않는다.
+
+`setupCorumIntegration()`을 먼저 한 번 실행한 다음 `setupCorumRankedConfig()`를 한 번
+실행한다. 후자는 별도 `Ranked Pool` 탭을 만들지 않고 현재 맵 관리 시트(기본 `sheet1`,
+또는 `MAPS_SHEET_NAME`)의 오른쪽에 다음 두 열만 추가한다.
+
+| 열 | 입력 |
+| --- | --- |
+| `Ranked Pool (1~6)` | 1~6 정수. 비워 두면 해당 맵은 Ranked 후보에서 제외 |
+| `Qualifying %` | 0~100 숫자 또는 Sheets 퍼센트 표시 |
+
+맵 제목·대표 `맵 코드`·`대체 맵 코드`·제작자·Rating은 같은 행의 기존 값을 사용한다.
+유효한 대체 맵 코드가 있으면 서버가 이를 `playableLevelId`로 snapshot하고, 대표 맵
+코드는 `canonicalLevelId`로 유지한다. 진행 중 경기는 이후 시트 변경의 영향을 받지 않는다.
+
+함수 실행 후 생성되는 별도 운영 탭은 `Ranked Tiers`, `Ranked CSMP Seed`,
+`Ranked Allowed Mods`, `Ranked Config` 네 개다. Seed/MMR/티어 경계/timeout 등 미확정
+운영값을 모두 채우고 검증 오류가 없을 때만 `Ranked Config`의 `enabled`를 `TRUE`로 바꾼다.
+마지막으로 Apps Script를 새 버전으로 재배포해야 `/exec?action=ranked_config`에 반영된다.
+
 ## 플레이어 자동 등록
 
 개인 토큰은 사용하지 않는다. 처음 기록을 제출하면 모드가 전송한 현재

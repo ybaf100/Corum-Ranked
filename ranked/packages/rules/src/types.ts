@@ -11,8 +11,11 @@ export type PoolNumber = 1 | 2 | 3 | 4 | 5 | 6;
 export type RoundResult = PlayerSide | "DRAW";
 
 export interface RankedMap {
+  /** @deprecated Use playableLevelId. Kept in the config contract during alpha migration. */
+  readonly levelId: string;
   readonly canonicalLevelId: string;
   readonly alternateLevelId: string | null;
+  readonly playableLevelId: string;
   readonly title: string;
   readonly creator: string;
   readonly difficulty: string;
@@ -22,6 +25,8 @@ export interface RankedMap {
 }
 
 export interface RankedMapSnapshot {
+  /** @deprecated Use playableLevelId. */
+  readonly levelId: string;
   readonly canonicalLevelId: string;
   readonly alternateLevelId: string | null;
   readonly playableLevelId: string;

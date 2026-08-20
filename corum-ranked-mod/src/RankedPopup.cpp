@@ -1,10 +1,7 @@
 #include "RankedPopup.hpp"
 
 #include "RankedRuntime.hpp"
-
-#if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
-#include "debug/DebugBotPopup.hpp"
-#endif
+#include "DebugBotPopup.hpp"
 
 #include <Geode/Geode.hpp>
 #include <Geode/binding/GameLevelManager.hpp>
@@ -24,7 +21,6 @@ using corum::ranked::MatchView;
 using corum::ranked::RankedRuntime;
 using corum::ranked::RuntimeStage;
 using corum::ranked::RuntimeView;
-using corum::ranked::stageName;
 
 namespace {
 
@@ -98,17 +94,9 @@ protected:
         }
 
         if (view.stage == RuntimeStage::Ready) {
+            addButton("Join Queue", {230.0f, 78.0f}, menu_selector(CorumRankedPopup::onJoin));
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
-            addButton("Join Queue", {230.0f, 72.0f}, menu_selector(CorumRankedPopup::onJoin));
-            addButton(
-                "DEBUG BOT MATCH",
-                {230.0f, 34.0f},
-                menu_selector(CorumRankedPopup::onDebugBotMatch),
-                true,
-                0.52f
-            );
-#else
-            addButton("Join Queue", {230.0f, 62.0f}, menu_selector(CorumRankedPopup::onJoin));
+            addButton("DEBUG BOT MATCH", {230.0f, 42.0f}, menu_selector(CorumRankedPopup::onDebugBot), true, 0.58f);
 #endif
         } else if (view.stage == RuntimeStage::Queued) {
             addButton("Leave Queue", {230.0f, 62.0f}, menu_selector(CorumRankedPopup::onLeave), true);
@@ -153,11 +141,11 @@ protected:
 
     void renderMatch(MatchView const& match) {
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
-        if (match.debugBotMatch) {
-            auto* debug = CCLabelBMFont::create("BOT MATCH - DEBUG", "goldFont.fnt");
-            debug->setColor(ccc3(255, 165, 70));
-            debug->setPosition({230.0f, 220.0f});
-            debug->setScale(0.29f);
+        if (match.debug) {
+            auto* debug = CCLabelBMFont::create("BOT MATCH · DEBUG", "goldFont.fnt");
+            debug->setColor(ccc3(255, 145, 105));
+            debug->setPosition({72.0f, 283.0f});
+            debug->setScale(0.25f);
             m_content->addChild(debug, 3);
         }
 #endif
@@ -330,9 +318,9 @@ protected:
     }
 
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
-    void onDebugBotMatch(CCObject*) {
+    void onDebugBot(CCObject*) {
         m_localMessage.clear();
-        corum::ranked::debug::showDebugBotPasswordPopup();
+        corum::ranked::showDebugBotPasswordPopup();
     }
 #endif
 

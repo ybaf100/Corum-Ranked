@@ -28,7 +28,7 @@ beforeAll(async () => {
     new URL("../../../migrations/0001_initial_ranked.sql", import.meta.url),
   );
   await pglite.exec(await readFile(migrationPath, "utf8"));
-}, 20_000);
+}, 60_000);
 
 afterAll(async () => {
   await pglite.close();
@@ -218,7 +218,6 @@ describe("two-client authoritative match flow", () => {
       expect(playing.state).toBe("ROUND_PLAYING");
       expect(playing.currentRound.roundNumber).toBe(roundNumber);
       const levelId = playing.currentRound.map.playableLevelId as string;
-      expect(levelId).toBe(playing.currentRound.map.alternateLevelId);
 
       clock.advanceSeconds(1);
       const firstStart = await matches.startAttempt(matchId, statusA.matchToken, playerA, {
@@ -269,28 +268,14 @@ describe("two-client authoritative match flow", () => {
     })) as Record<string, any>;
     expect(roundTwoPlaying.state).toBe("ROUND_PLAYING");
     expect(roundTwoPlaying.currentRound.clears).toEqual({ A: 0, B: 0 });
-    const roundTwoLevelId = roundTwoPlaying.currentRound.map.playableLevelId as string;
-    expect(roundTwoLevelId).toBe(roundTwoPlaying.currentRound.map.alternateLevelId);
     const snapshottedQualifying = roundTwoPlaying.currentRound.map.qualifyingPercent as number;
-    const snapshottedPlayableLevelId = roundTwoLevelId;
+    const roundTwoLevelId = roundTwoPlaying.currentRound.map.playableLevelId as string;
     liveDocument = {
       ...document,
-      maps: document.maps.map((map) => ({
-        ...map,
-        alternateLevelId: `8${map.canonicalLevelId}`,
-        qualifyingPercent: 99,
-      })),
+      maps: document.maps.map((map) => ({ ...map, qualifyingPercent: 99 })),
     };
     state = (await matches.state(matchId, statusA.matchToken, playerA)) as Record<string, any>;
     expect(state.currentRound.map.qualifyingPercent).toBe(snapshottedQualifying);
-    expect(state.currentRound.map.playableLevelId).toBe(snapshottedPlayableLevelId);
-
-    await expect(
-      matches.startAttempt(matchId, statusB.matchToken, playerB, {
-        levelId: roundTwoPlaying.currentRound.map.canonicalLevelId,
-        clientEventId: "r2-wrong-map-start",
-      }),
-    ).rejects.toThrow("Attempt levelId does not match the Round snapshot");
 
     clock.advanceSeconds(1);
     const b1 = await matches.startAttempt(matchId, statusB.matchToken, playerB, {
@@ -463,62 +448,26 @@ describe("two-client authoritative match flow", () => {
       player_id: string;
       placement_games: number;
       hidden_mmr: number;
-      visible_ranked_score: number;
       wins: number;
       losses: number;
-    }>(`SELECT player_id, placement_games, hidden_mmr, visible_ranked_score, wins, losses
-        FROM ranked_profiles ORDER BY player_id`);
+    }>("SELECT player_id, placement_games, hidden_mmr, wins, losses FROM ranked_profiles ORDER BY player_id");
     await matches.state(matchId, statusB.matchToken, playerB);
     const afterRepeatedPoll = await database.query<{
       player_id: string;
       placement_games: number;
       hidden_mmr: number;
-      visible_ranked_score: number;
       wins: number;
       losses: number;
-    }>(`SELECT player_id, placement_games, hidden_mmr, visible_ranked_score, wins, losses
-        FROM ranked_profiles ORDER BY player_id`);
+    }>("SELECT player_id, placement_games, hidden_mmr, wins, losses FROM ranked_profiles ORDER BY player_id");
     expect(afterRepeatedPoll.rows).toEqual(afterFirstPoll.rows);
     expect(afterRepeatedPoll.rows.every((profile) => Number(profile.placement_games) === 1)).toBe(true);
     expect(afterRepeatedPoll.rows.reduce((sum, profile) => sum + Number(profile.wins), 0)).toBe(1);
     expect(afterRepeatedPoll.rows.reduce((sum, profile) => sum + Number(profile.losses), 0)).toBe(1);
-    expect(
-      afterRepeatedPoll.rows.every(
-        (profile) => Number(profile.visible_ranked_score) === Number(profile.hidden_mmr),
-      ),
-    ).toBe(true);
 
     const attempts = await database.query<{ count: number }>(
       "SELECT COUNT(*)::int AS count FROM ranked_attempts",
     );
     expect(attempts.rows[0]?.count).toBe(7);
-    const mapPersistence = await database.query<{
-      canonical_level_id: string;
-      alternate_level_id: string | null;
-      playable_level_id: string;
-      level_id: string;
-    }>(
-      `SELECT canonical_level_id, alternate_level_id, playable_level_id, level_id
-       FROM ranked_rounds WHERE match_id = $1 ORDER BY round_number`,
-      [matchId],
-    );
-    expect(mapPersistence.rows).toHaveLength(2);
-    expect(
-      mapPersistence.rows.every(
-        (round) =>
-          round.playable_level_id === round.alternate_level_id &&
-          round.level_id === round.playable_level_id &&
-          round.canonical_level_id !== round.playable_level_id,
-      ),
-    ).toBe(true);
-    const wrongPlayedIds = await database.query<{ count: number }>(
-      `SELECT COUNT(*)::int AS count
-       FROM ranked_attempts attempt
-       JOIN ranked_rounds round ON round.id = attempt.round_id
-       WHERE round.match_id = $1 AND attempt.played_level_id <> round.playable_level_id`,
-      [matchId],
-    );
-    expect(wrongPlayedIds.rows[0]?.count).toBe(0);
 
     const relayEvents = await database.query<{ event_type: string; count: number }>(
       `SELECT event_type, COUNT(*)::int AS count

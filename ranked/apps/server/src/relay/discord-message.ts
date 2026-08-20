@@ -76,18 +76,12 @@ export const formatDiscordRelayMessage = (event: RelayEventForFormatting): strin
     case "MATCH_RESULT": {
       const deltas = objectValue(payload.mmrDelta);
       const ratings = objectValue(payload.ratingAfter);
-      content = payload.debugBotMatch === true
-        ? [
-            `🏆 **Debug Match Winner: ${sideName(payload.winnerSide, names)}**`,
-            `MMR, placement, and public statistics were not applied.`,
-            `Rounds: ${roundResults(payload.roundResults)} · ${match}`,
-          ].join("\n")
-        : [
-            `🏆 **Match Winner: ${sideName(payload.winnerSide, names)}**`,
-            `${names.A} ${number(deltas.A) >= 0 ? "+" : ""}${number(deltas.A)} → ${number(ratings.A)} · ` +
-              `${names.B} ${number(deltas.B) >= 0 ? "+" : ""}${number(deltas.B)} → ${number(ratings.B)}`,
-            `Rounds: ${roundResults(payload.roundResults)} · ${match}`,
-          ].join("\n");
+      content = [
+        `🏆 **Match Winner: ${sideName(payload.winnerSide, names)}**`,
+        `${names.A} ${number(deltas.A) >= 0 ? "+" : ""}${number(deltas.A)} → ${number(ratings.A)} · ` +
+          `${names.B} ${number(deltas.B) >= 0 ? "+" : ""}${number(deltas.B)} → ${number(ratings.B)}`,
+        `Rounds: ${roundResults(payload.roundResults)} · ${match}`,
+      ].join("\n");
       break;
     }
     case "DEATHMATCH_START":
@@ -109,6 +103,6 @@ export const formatDiscordRelayMessage = (event: RelayEventForFormatting): strin
     }
   }
 
-  if (payload.debugBotMatch === true) content = `🧪 **DEBUG BOT MATCH**\n${content}`;
   return content.slice(0, 1_900);
 };
+

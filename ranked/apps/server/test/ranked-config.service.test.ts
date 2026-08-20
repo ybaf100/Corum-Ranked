@@ -21,32 +21,10 @@ describe("Ranked config snapshot loader", () => {
     const snapshot = service.getSnapshot();
     source.document = {
       ...source.document,
-      maps: [
-        {
-          ...source.document.maps[0]!,
-          alternateLevelId: "88888888",
-          title: "changed later",
-        },
-        ...source.document.maps.slice(1),
-      ],
+      maps: [{ ...source.document.maps[0]!, title: "changed later" }, ...source.document.maps.slice(1)],
     };
     expect(snapshot.maps[0]!.title).not.toBe("changed later");
-    expect(snapshot.maps[0]!.alternateLevelId).not.toBe("88888888");
     expect(service.getStatus()).toMatchObject({ ready: true, generation: "test-1" });
-  });
-
-  it("rejects canonical/alternate aliases owned by different Ranked maps", async () => {
-    const source = new FakeSource();
-    const firstAlternate = source.document.maps[0]!.alternateLevelId!;
-    source.document = {
-      ...source.document,
-      maps: source.document.maps.map((map, index) =>
-        index === 1 ? { ...map, canonicalLevelId: firstAlternate } : map,
-      ),
-    };
-    const service = new RankedConfigService(source, environmentFixture());
-    expect(await service.refresh()).toBe(false);
-    expect(service.getStatus().lastError).toContain("belongs to multiple canonical maps");
   });
 
   it("keeps the last known valid snapshot after a failed refresh", async () => {

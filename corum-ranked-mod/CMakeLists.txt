@@ -14,25 +14,17 @@ endif()
 
 project(CorumRanked VERSION 0.4.0)
 
-option(CORUM_RANKED_DEBUG_BOT_MATCH "Compile the development-only Bot Match harness" OFF)
-if (DEFINED ENV{CORUM_RANKED_DEBUG_BOT_MATCH})
-    if ("$ENV{CORUM_RANKED_DEBUG_BOT_MATCH}" STREQUAL "1" OR
-        "$ENV{CORUM_RANKED_DEBUG_BOT_MATCH}" STREQUAL "ON" OR
-        "$ENV{CORUM_RANKED_DEBUG_BOT_MATCH}" STREQUAL "true")
-        set(CORUM_RANKED_DEBUG_BOT_MATCH ON)
-    endif()
-endif()
+option(
+    CORUM_RANKED_DEBUG_BOT_MATCH
+    "Include the temporary development-only Debug Bot Match UI and client route"
+    ON
+)
 
 file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS src/*.cpp)
-if (NOT CORUM_RANKED_DEBUG_BOT_MATCH)
-    list(FILTER SOURCES EXCLUDE REGEX "/debug/.*\\.cpp$")
-endif()
 add_library(${PROJECT_NAME} SHARED ${SOURCES})
+
 if (CORUM_RANKED_DEBUG_BOT_MATCH)
     target_compile_definitions(${PROJECT_NAME} PRIVATE CORUM_RANKED_DEBUG_BOT_MATCH=1)
-    message(STATUS "Corum Ranked Debug Bot Match: ENABLED")
-else()
-    message(STATUS "Corum Ranked Debug Bot Match: DISABLED")
 endif()
 
 if (NOT DEFINED ENV{GEODE_SDK})

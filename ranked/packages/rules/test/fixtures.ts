@@ -13,8 +13,10 @@ export const makeMap = (
   index: number,
   overrides: Partial<RankedMap> = {},
 ): RankedMap => ({
+  levelId: `${pool}${String(index).padStart(3, "0")}`,
   canonicalLevelId: `${pool}${String(index).padStart(3, "0")}`,
   alternateLevelId: null,
+  playableLevelId: `${pool}${String(index).padStart(3, "0")}`,
   title: `Pool ${pool} Map ${index}`,
   creator: `Creator ${index}`,
   difficulty: `Difficulty ${pool}`,

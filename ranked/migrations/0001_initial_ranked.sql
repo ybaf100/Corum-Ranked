@@ -1,9 +1,17 @@
 BEGIN;
 
+CREATE SEQUENCE ranked_debug_bot_account_id_seq
+    AS BIGINT
+    INCREMENT BY -1
+    MINVALUE -9223372036854775807
+    MAXVALUE -1
+    START WITH -1;
+
 CREATE TABLE ranked_players (
     id UUID PRIMARY KEY,
     gd_account_id BIGINT NOT NULL UNIQUE,
     gd_username TEXT NOT NULL,
+    is_bot BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -45,10 +53,6 @@ CREATE TABLE ranked_config_snapshots (
 
 CREATE TABLE ranked_matches (
     id UUID PRIMARY KEY,
-    match_type TEXT NOT NULL DEFAULT 'RANKED_PVP'
-        CHECK (match_type IN ('RANKED_PVP', 'DEBUG_BOT')),
-    debug_config JSONB,
-    debug_discord_events BOOLEAN NOT NULL DEFAULT FALSE,
     player_a_id UUID NOT NULL REFERENCES ranked_players(id),
     player_b_id UUID NOT NULL REFERENCES ranked_players(id),
     config_snapshot_id UUID NOT NULL REFERENCES ranked_config_snapshots(id),
@@ -88,6 +92,9 @@ CREATE TABLE ranked_matches (
     mmr_b_after INTEGER,
     result_applied_at TIMESTAMPTZ,
     rules_version TEXT NOT NULL,
+    match_type TEXT NOT NULL DEFAULT 'PVP' CHECK (match_type IN ('PVP', 'DEBUG_BOT')),
+    debug_bot_config JSONB,
+    discord_events_enabled BOOLEAN NOT NULL DEFAULT TRUE,
     cancellation_reason TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     started_at TIMESTAMPTZ,
@@ -95,40 +102,12 @@ CREATE TABLE ranked_matches (
     CONSTRAINT ranked_match_distinct_players CHECK (player_a_id <> player_b_id),
     CONSTRAINT ranked_match_winner_participant CHECK (
         winner_id IS NULL OR winner_id = player_a_id OR winner_id = player_b_id
-    ),
-    CONSTRAINT ranked_match_debug_shape CHECK (
-        (match_type = 'RANKED_PVP' AND debug_config IS NULL AND debug_discord_events = FALSE)
-        OR
-        (match_type = 'DEBUG_BOT' AND debug_config IS NOT NULL)
     )
 );
 
 CREATE INDEX ranked_matches_player_a_created_idx ON ranked_matches(player_a_id, created_at DESC);
 CREATE INDEX ranked_matches_player_b_created_idx ON ranked_matches(player_b_id, created_at DESC);
 CREATE INDEX ranked_matches_state_idx ON ranked_matches(state) WHERE finished_at IS NULL;
-CREATE INDEX ranked_matches_type_state_idx ON ranked_matches(match_type, state)
-    WHERE finished_at IS NULL;
-
-CREATE VIEW ranked_public_match_history AS
-SELECT *
-FROM ranked_matches;
-
-CREATE VIEW ranked_leaderboard AS
-SELECT
-    p.gd_account_id,
-    p.gd_username,
-    rp.visible_ranked_score,
-    rp.displayed_tier,
-    rp.placement_games,
-    rp.wins,
-    rp.losses,
-    rp.match_draws,
-    rp.updated_at
-FROM ranked_profiles rp
-JOIN ranked_players p ON p.id = rp.player_id
-WHERE rp.visible_ranked_score IS NOT NULL
-  AND rp.displayed_tier <> 'UNRANKED'
-  AND p.gd_account_id > 0;
 
 CREATE TABLE ranked_match_tokens (
     match_id UUID NOT NULL REFERENCES ranked_matches(id) ON DELETE CASCADE,
@@ -184,10 +163,10 @@ CREATE TABLE ranked_attempts (
     id UUID PRIMARY KEY,
     round_id UUID NOT NULL REFERENCES ranked_rounds(id) ON DELETE CASCADE,
     player_id UUID NOT NULL REFERENCES ranked_players(id),
-    played_level_id TEXT NOT NULL,
     attempt_sequence INTEGER NOT NULL CHECK (attempt_sequence > 0),
     server_accepted_start_at TIMESTAMPTZ NOT NULL,
     client_started_at TIMESTAMPTZ,
+    level_id TEXT NOT NULL,
     ended_at TIMESTAMPTZ,
     client_ended_at TIMESTAMPTZ,
     progress_percent NUMERIC(6, 3) CHECK (progress_percent BETWEEN 0 AND 100),
@@ -226,9 +205,9 @@ CREATE TABLE ranked_deathmatch_attempts (
     id UUID PRIMARY KEY,
     deathmatch_id UUID NOT NULL REFERENCES ranked_deathmatches(id) ON DELETE CASCADE,
     player_id UUID NOT NULL REFERENCES ranked_players(id),
-    played_level_id TEXT NOT NULL,
     attempt_sequence SMALLINT NOT NULL CHECK (attempt_sequence BETWEEN 1 AND 3),
     server_accepted_start_at TIMESTAMPTZ NOT NULL,
+    level_id TEXT NOT NULL,
     ended_at TIMESTAMPTZ,
     progress_percent NUMERIC(6, 3) CHECK (progress_percent BETWEEN 0 AND 100),
     cleared BOOLEAN NOT NULL DEFAULT FALSE,

@@ -12,11 +12,21 @@ export interface ServerEnvironment {
   readonly sessionTokenSecret: string;
   readonly corsOrigins: readonly string[];
   readonly discordRelay: DiscordRelayEnvironment | null;
-  readonly debugBotMatch: DebugBotEnvironment | null;
+  readonly debugBot: DebugBotEnvironment | null;
+}
+
+export interface DebugBotDifficultyEnvironment {
+  readonly mmrOffset: number;
+  readonly qualifyingChance: number;
+  readonly clearChance: number;
+  readonly progressPerSecond: number;
 }
 
 export interface DebugBotEnvironment {
   readonly password: string;
+  readonly tickMs: number;
+  readonly attemptDelayMs: number;
+  readonly difficulties: Readonly<Record<"EASY" | "NORMAL" | "HARD", DebugBotDifficultyEnvironment>>;
 }
 
 export interface DiscordRelayEnvironment {
@@ -46,11 +56,20 @@ const positiveInteger = (value: string, key: string): number => {
   return parsed;
 };
 
-const enabledFlag = (environment: NodeJS.ProcessEnv, key: string): boolean => {
-  const value = environment[key]?.trim().toLowerCase() || "false";
-  if (value === "true" || value === "1") return true;
-  if (value === "false" || value === "0") return false;
-  throw new RankedDomainError("INVALID_CONFIG", `${key} must be true or false`);
+const finiteNumber = (value: string | undefined, fallback: number, key: string): number => {
+  const parsed = value?.trim() ? Number(value) : fallback;
+  if (!Number.isFinite(parsed)) {
+    throw new RankedDomainError("INVALID_CONFIG", `${key} must be a finite number`);
+  }
+  return parsed;
+};
+
+const probability = (value: string | undefined, fallback: number, key: string): number => {
+  const parsed = finiteNumber(value, fallback, key);
+  if (parsed < 0 || parsed > 1) {
+    throw new RankedDomainError("INVALID_CONFIG", `${key} must be from 0 through 1`);
+  }
+  return parsed;
 };
 
 export const loadServerEnvironment = (
@@ -97,16 +116,57 @@ export const loadServerEnvironment = (
     .map((origin) => origin.trim())
     .filter(Boolean);
 
-  const debugBotEnabled = enabledFlag(environment, "ENABLE_DEBUG_BOT_MATCH");
-  if (nodeEnv === "production" && debugBotEnabled) {
-    throw new RankedDomainError(
-      "INVALID_CONFIG",
-      "ENABLE_DEBUG_BOT_MATCH cannot be enabled in production",
-    );
+  let debugBot: DebugBotEnvironment | null = null;
+  if (environment.ENABLE_DEBUG_BOT_MATCH?.trim().toLowerCase() === "true") {
+    const password = requireValue(environment, "DEBUG_BOT_PASSWORD");
+    const difficulty = (
+      name: "EASY" | "NORMAL" | "HARD",
+      offset: number,
+      qualifyingChance: number,
+      clearChance: number,
+      progressPerSecond: number,
+    ): DebugBotDifficultyEnvironment => {
+      const resolvedQualifyingChance = probability(
+        environment[`DEBUG_BOT_${name}_QUALIFYING_CHANCE`],
+        qualifyingChance,
+        `DEBUG_BOT_${name}_QUALIFYING_CHANCE`,
+      );
+      const resolvedClearChance = probability(
+        environment[`DEBUG_BOT_${name}_CLEAR_CHANCE`],
+        clearChance,
+        `DEBUG_BOT_${name}_CLEAR_CHANCE`,
+      );
+      if (resolvedClearChance > resolvedQualifyingChance) {
+        throw new RankedDomainError(
+          "INVALID_CONFIG",
+          `DEBUG_BOT_${name}_CLEAR_CHANCE cannot exceed DEBUG_BOT_${name}_QUALIFYING_CHANCE`,
+        );
+      }
+      return {
+        mmrOffset: finiteNumber(environment[`DEBUG_BOT_${name}_MMR_OFFSET`], offset, `DEBUG_BOT_${name}_MMR_OFFSET`),
+        qualifyingChance: resolvedQualifyingChance,
+        clearChance: resolvedClearChance,
+        progressPerSecond: finiteNumber(
+          environment[`DEBUG_BOT_${name}_PROGRESS_PER_SECOND`],
+          progressPerSecond,
+          `DEBUG_BOT_${name}_PROGRESS_PER_SECOND`,
+        ),
+      };
+    };
+    debugBot = {
+      password,
+      tickMs: positiveInteger(environment.DEBUG_BOT_TICK_MS?.trim() || "125", "DEBUG_BOT_TICK_MS"),
+      attemptDelayMs: positiveInteger(
+        environment.DEBUG_BOT_ATTEMPT_DELAY_MS?.trim() || "500",
+        "DEBUG_BOT_ATTEMPT_DELAY_MS",
+      ),
+      difficulties: {
+        EASY: difficulty("EASY", -250, 0.35, 0.04, 18),
+        NORMAL: difficulty("NORMAL", 0, 0.60, 0.10, 25),
+        HARD: difficulty("HARD", 250, 0.82, 0.22, 34),
+      },
+    };
   }
-  const debugBotMatch: DebugBotEnvironment | null = debugBotEnabled
-    ? { password: requireValue(environment, "DEBUG_BOT_PASSWORD") }
-    : null;
 
   const webhookText = environment.DISCORD_WEBHOOK_URL?.trim() || "";
   let discordRelay: DiscordRelayEnvironment | null = null;
@@ -190,6 +250,6 @@ export const loadServerEnvironment = (
     sessionTokenSecret,
     corsOrigins,
     discordRelay,
-    debugBotMatch,
+    debugBot,
   };
 };

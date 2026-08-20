@@ -1,775 +1,488 @@
 import { timingSafeEqual } from "node:crypto";
 import {
-  ConflictException,
-  ForbiddenException,
   Inject,
   Injectable,
-  Logger,
   NotFoundException,
-  ServiceUnavailableException,
-  type OnApplicationBootstrap,
   type OnApplicationShutdown,
+  type OnModuleInit,
 } from "@nestjs/common";
+import type { DisplayTier, RandomSource } from "@corum-ranked/rules";
 import {
-  createMatchSeries,
-  displayedTierForProfile,
-  effectiveTierForMatch,
-  selectCandidateMaps,
-  type PlayerSide,
-  type RandomSource,
-  type RankedMapSnapshot,
-} from "@corum-ranked/rules";
-import {
-  ID_GENERATOR,
   RANDOM_SOURCE,
   SERVER_CLOCK,
-  type IdGenerator,
   type ServerClock,
 } from "../common/runtime.module.js";
 import { TokenService } from "../common/token.service.js";
-import type { RankedConfigSnapshot } from "../config/ranked-config.document.js";
-import { RankedConfigService } from "../config/ranked-config.service.js";
 import {
   SERVER_ENVIRONMENT,
+  type DebugBotEnvironment,
   type ServerEnvironment,
 } from "../config/server-environment.js";
-import { DATABASE, type DatabasePort, type SqlExecutor } from "../database/database.port.js";
+import { RankedConfigService } from "../config/ranked-config.service.js";
+import { DATABASE, type DatabasePort } from "../database/database.port.js";
 import { MatchService } from "../match/match.service.js";
+import {
+  QueueService,
+  type DebugBotMatchCreation,
+  type DebugBotMatchSettings,
+  type DebugBotScenario,
+} from "../queue/queue.service.js";
 import type { InstalledModDto } from "../session/session.dto.js";
-import { SessionService } from "../session/session.service.js";
 import type { RankedSessionContext } from "../session/session.types.js";
-import { DEBUG_BOT_DIFFICULTY_PROFILES } from "./debug-bot.config.js";
 import type { CreateDebugBotMatchDto } from "./debug-bot.dto.js";
-import type {
-  DebugBotDifficultyProfile,
-  DebugBotMatchConfig,
-} from "./debug-bot.types.js";
 
-interface SessionEnvironmentRow {
-  readonly environment_snapshot: unknown;
-}
-
-interface BotPlayerRow {
-  readonly id: string;
-}
-
-interface ActiveMatchRow {
-  readonly id: string;
-  readonly match_type: "RANKED_PVP" | "DEBUG_BOT";
-}
-
-interface DebugRoundState {
-  readonly roundNumber: number;
-  readonly map: RankedMapSnapshot;
-  readonly scores: Readonly<Record<PlayerSide, number>>;
-  readonly clears: Readonly<Record<PlayerSide, number>>;
-}
-
-interface DebugDeathmatchState {
-  readonly sequence: number;
-  readonly map: RankedMapSnapshot;
-}
-
-interface DebugMatchState {
-  readonly state: string;
-  readonly candidateMaps: readonly RankedMapSnapshot[] | null;
-  readonly currentRound: DebugRoundState | null;
-  readonly deathmatch: DebugDeathmatchState | null;
-}
-
-interface AttemptPlan {
-  readonly targetProgress: number;
-  readonly cleared: boolean;
-  readonly progressPerSecond: number;
-}
-
-interface ActiveBotAttempt extends AttemptPlan {
-  readonly attemptId: string;
-  readonly playableLevelId: string;
-  readonly deathmatch: boolean;
-  readonly startedAtMs: number;
-  lastTelemetryAtMs: number;
-  currentProgress: number;
-}
-
-interface DebugBotRuntime {
-  readonly matchId: string;
-  readonly config: DebugBotMatchConfig;
-  readonly human: RankedSessionContext;
-  readonly bot: RankedSessionContext;
-  readonly humanMatchToken: string;
-  readonly botMatchToken: string;
-  readonly installedMods: readonly InstalledModDto[];
-  activeAttempt: ActiveBotAttempt | null;
+interface BotDriver {
+  readonly creation: DebugBotMatchCreation;
+  attemptId: string | null;
+  attemptProgress: number;
+  attemptTarget: number;
+  attemptLastTickMs: number;
   nextAttemptAtMs: number;
   eventSequence: number;
-  lastAttemptStarts: number;
-  lastAttemptRound: number;
-  deathmatchSequence: number;
-  deathmatchAttemptsCompleted: number;
+  banSubmitted: boolean;
+  seededRounds: Set<number>;
+  busy: boolean;
 }
 
-const parseJson = <T>(value: unknown): T =>
-  typeof value === "string" ? (JSON.parse(value) as T) : structuredClone(value) as T;
+interface ActiveDebugMatchRow {
+  id: string;
+  debug_bot_config: unknown;
+  player_a_id: string;
+  player_b_id: string;
+  player_a_account_id: string;
+  player_b_account_id: string;
+  player_a_name: string;
+  player_b_name: string;
+  player_a_tier: DisplayTier;
+  player_b_tier: DisplayTier;
+  player_a_mmr: number;
+  player_b_mmr: number;
+  player_a_placements: number;
+  player_b_placements: number;
+}
 
-const copyInstalledMods = (mods: readonly InstalledModDto[]): InstalledModDto[] =>
-  mods.map((mod) => structuredClone(mod));
-
-const sameSecret = (submitted: string, expected: string): boolean => {
-  const submittedBytes = Buffer.from(submitted, "utf8");
-  const expectedBytes = Buffer.from(expected, "utf8");
-  return submittedBytes.length === expectedBytes.length &&
-    timingSafeEqual(submittedBytes, expectedBytes);
+const parseObject = (value: unknown): Record<string, unknown> => {
+  if (typeof value === "string") return JSON.parse(value) as Record<string, unknown>;
+  return value && typeof value === "object" ? value as Record<string, unknown> : {};
 };
 
 @Injectable()
-export class DebugBotMatchService implements OnApplicationBootstrap, OnApplicationShutdown {
-  private readonly logger = new Logger(DebugBotMatchService.name);
-  private readonly runtimes = new Map<string, DebugBotRuntime>();
-  private readonly ticking = new Set<string>();
-  private timer: ReturnType<typeof setInterval> | null = null;
+export class DebugBotService implements OnModuleInit, OnApplicationShutdown {
+  private readonly configuration: DebugBotEnvironment | null;
+  private readonly drivers = new Map<string, BotDriver>();
+  private interval: ReturnType<typeof setInterval> | null = null;
 
   public constructor(
+    @Inject(SERVER_ENVIRONMENT) environment: ServerEnvironment,
     @Inject(DATABASE) private readonly database: DatabasePort,
     @Inject(SERVER_CLOCK) private readonly clock: ServerClock,
-    @Inject(ID_GENERATOR) private readonly ids: IdGenerator,
     @Inject(RANDOM_SOURCE) private readonly random: RandomSource,
-    @Inject(SERVER_ENVIRONMENT) private readonly environment: ServerEnvironment,
-    private readonly config: RankedConfigService,
-    private readonly sessions: SessionService,
-    private readonly tokens: TokenService,
+    private readonly queue: QueueService,
     private readonly matches: MatchService,
-  ) {}
+    private readonly config: RankedConfigService,
+    private readonly tokens: TokenService,
+  ) {
+    this.configuration = environment.debugBot;
+  }
 
-  public async onApplicationBootstrap(): Promise<void> {
-    if (!this.environment.debugBotMatch) return;
-    const now = this.clock.now();
-    await this.database.query(
-      `UPDATE ranked_matches
-       SET state = 'CANCELLED', cancellation_reason = 'DEBUG_SERVER_RESTART',
-           finished_at = $1, deadline_at = NULL, state_version = state_version + 1
-       WHERE match_type = 'DEBUG_BOT'
-         AND state NOT IN ('MATCH_RESULT', 'CANCELLED')`,
-      [now.toISOString()],
-    );
-    this.timer = setInterval(() => void this.tickAll(), 100);
-    this.timer.unref();
+  public onModuleInit(): void {
+    if (!this.configuration) return;
+    this.interval = setInterval(() => void this.tickOnce(), this.configuration.tickMs);
+    this.interval.unref?.();
   }
 
   public onApplicationShutdown(): void {
-    if (this.timer) clearInterval(this.timer);
-    this.timer = null;
-    this.runtimes.clear();
-    this.ticking.clear();
+    if (this.interval) clearInterval(this.interval);
+    this.interval = null;
   }
 
-  public async create(
-    session: RankedSessionContext,
-    body: CreateDebugBotMatchDto,
-  ) {
-    const debugEnvironment = this.environment.debugBotMatch;
-    if (!debugEnvironment) throw new NotFoundException("Debug Bot Match is disabled");
-    if (!sameSecret(body.password, debugEnvironment.password)) {
-      throw new ForbiddenException("Incorrect debug password");
+  public async create(session: RankedSessionContext, body: CreateDebugBotMatchDto) {
+    const configuration = this.configuration;
+    if (!configuration) throw new NotFoundException("Debug Bot Match is disabled");
+    if (!this.passwordMatches(body.password, configuration.password)) {
+      throw new NotFoundException("Incorrect password.");
     }
-    if (body.sendDiscordEvents && !this.environment.discordRelay) {
-      throw new ServiceUnavailableException(
-        "Debug Discord events require a configured Discord relay",
-      );
-    }
-    const snapshot = this.config.getSnapshot();
-    if (
-      !snapshot.operational.enabled ||
-      !snapshot.operational.mmrPolicy ||
-      !snapshot.operational.timeouts ||
-      !snapshot.operational.matchmaking
-    ) {
-      throw new ServiceUnavailableException("Ranked is not operationally configured");
-    }
-    const timeouts = snapshot.operational.timeouts;
-    const mmrPolicy = snapshot.operational.mmrPolicy;
-
-    const now = this.clock.now();
-    const difficultyProfile = DEBUG_BOT_DIFFICULTY_PROFILES[body.difficulty];
-    const minimumRating = Math.min(
-      ...snapshot.operational.tierBands.map((band) => band.minInclusive),
-    );
-    const botRating = Math.max(
-      minimumRating,
-      session.hiddenMmr + difficultyProfile.ratingOffset,
-    );
-    const storedConfig: DebugBotMatchConfig = {
+    const settings: DebugBotMatchSettings = {
       difficulty: body.difficulty,
       scenario: body.scenario,
       botBan: body.botBan,
       sendDiscordEvents: body.sendDiscordEvents,
-      botRating,
-      ratingOffset: difficultyProfile.ratingOffset,
-      botPlacementGames: session.placementGames,
+      mmrOffset: configuration.difficulties[body.difficulty].mmrOffset,
     };
-    const created = await this.database.transaction(async (transaction) => {
-      const active = await transaction.query<ActiveMatchRow>(
-        `SELECT id, match_type
-         FROM ranked_matches
-         WHERE (player_a_id = $1 OR player_b_id = $1)
-           AND state NOT IN ('MATCH_RESULT', 'CANCELLED')
-         ORDER BY created_at DESC
-         FOR UPDATE`,
-        [session.playerId],
-      );
-      if (active.rows.some((match) => match.match_type === "RANKED_PVP")) {
-        throw new ConflictException("Finish the active Ranked match before starting debug");
-      }
-      if (active.rows.some((match) => match.match_type === "DEBUG_BOT")) {
-        throw new ConflictException("Player already has an active Debug Bot Match");
-      }
-
-      const sessionEnvironment = await transaction.query<SessionEnvironmentRow>(
-        "SELECT environment_snapshot FROM ranked_sessions WHERE id = $1",
-        [session.sessionId],
-      );
-      const installedMods = parseJson<InstalledModDto[]>(
-        sessionEnvironment.rows[0]?.environment_snapshot ?? [],
-      );
-      this.sessions.assertEnvironment(installedMods);
-
-      const botPlayer = await transaction.query<BotPlayerRow>(
-        `INSERT INTO ranked_players (id, gd_account_id, gd_username)
-         VALUES ($1, -2008, 'BOT')
-         ON CONFLICT (gd_account_id) DO UPDATE
-           SET gd_username = 'BOT', updated_at = $2
-         RETURNING id`,
-        [this.ids.next(), now.toISOString()],
-      );
-      const botPlayerId = botPlayer.rows[0]?.id;
-      if (!botPlayerId) throw new Error("Failed to create the debug bot participant");
-
-      const effective = effectiveTierForMatch(
-        session.hiddenMmr,
-        botRating,
-        snapshot.operational.tierBands,
-      );
-      const candidates = selectCandidateMaps(effective.tier, snapshot.maps, this.random);
-      const configSnapshotId = await this.persistConfigSnapshot(transaction, snapshot);
-      const matchId = this.ids.next();
-      const botSessionId = this.ids.next();
-      const readyDeadline = new Date(
-        now.getTime() + timeouts.readySeconds * 1_000,
-      );
-      await transaction.query(
-        `INSERT INTO ranked_matches (
-           id, match_type, debug_config, debug_discord_events,
-           player_a_id, player_b_id, config_snapshot_id,
-           mmr_a_before, mmr_b_before, effective_rating_average, effective_tier,
-           candidate_maps_snapshot, series_state, state, state_version,
-           deadline_at, ready_deadline_at, last_heartbeat_a_at, last_heartbeat_b_at,
-           rules_version, created_at
-         ) VALUES (
-           $1, 'DEBUG_BOT', $2::jsonb, $3,
-           $4, $5, $6,
-           $7, $8, $9, $10,
-           $11::jsonb, $12::jsonb, 'MATCHED', 1,
-           $13, $13, $14, $14,
-           $15, $14
-         )`,
-        [
-          matchId,
-          JSON.stringify({ schemaVersion: 2, ...storedConfig }),
-          storedConfig.sendDiscordEvents,
-          session.playerId,
-          botPlayerId,
-          configSnapshotId,
-          session.hiddenMmr,
-          botRating,
-          effective.averageRating,
-          effective.tier,
-          JSON.stringify(candidates),
-          JSON.stringify(createMatchSeries()),
-          readyDeadline.toISOString(),
-          now.toISOString(),
-          snapshot.operational.rules.rulesVersion,
-        ],
-      );
-
-      const expiresAt = new Date(
-        now.getTime() + timeouts.sessionSeconds * 1_000,
-      );
-      const humanMatchToken = this.tokens.deriveMatchToken(
-        matchId,
-        session.playerId,
-        session.sessionId,
-      );
-      const botMatchToken = this.tokens.deriveMatchToken(matchId, botPlayerId, botSessionId);
-      await transaction.query(
-        `INSERT INTO ranked_match_tokens (match_id, player_id, token_hash, expires_at)
-         VALUES ($1, $2, $3, $4), ($1, $5, $6, $4)`,
-        [
-          matchId,
-          session.playerId,
-          this.tokens.hash(humanMatchToken),
-          expiresAt.toISOString(),
-          botPlayerId,
-          this.tokens.hash(botMatchToken),
-        ],
-      );
-      const bot: RankedSessionContext = {
-        sessionId: botSessionId,
-        playerId: botPlayerId,
-        gdAccountId: "-2008",
-        gdUsername: "BOT",
-        displayedTier: displayedTierForProfile(
-          botRating,
-          session.placementGames,
-          mmrPolicy,
-          snapshot.operational.tierBands,
-        ),
-        hiddenMmr: botRating,
-        placementGames: session.placementGames,
-      };
-      return {
-        matchId,
-        humanMatchToken,
-        botMatchToken,
-        bot,
-        installedMods,
-      };
-    });
-
-    this.runtimes.set(created.matchId, {
-      matchId: created.matchId,
-      config: storedConfig,
-      human: session,
-      bot: created.bot,
-      humanMatchToken: created.humanMatchToken,
-      botMatchToken: created.botMatchToken,
-      installedMods: created.installedMods,
-      activeAttempt: null,
-      nextAttemptAtMs: now.getTime(),
-      eventSequence: 0,
-      lastAttemptStarts: 0,
-      lastAttemptRound: 0,
-      deathmatchSequence: 0,
-      deathmatchAttemptsCompleted: 0,
-    });
+    const creation = await this.queue.createDebugBotMatch(session, body, settings);
+    this.drivers.set(creation.matchId, this.newDriver(creation));
+    await this.drive(creation.matchId);
     return {
-      matchId: created.matchId,
-      matchToken: created.humanMatchToken,
-      side: "A" as const,
-      matchType: "DEBUG_BOT" as const,
-      debug: storedConfig,
-      serverNow: now.toISOString(),
+      debug: true,
+      matchType: "DEBUG_BOT",
+      matchId: creation.matchId,
+      matchToken: creation.playerMatchToken,
+      side: "A",
+      opponent: {
+        name: creation.botContext.gdUsername,
+        rating: creation.botContext.hiddenMmr,
+        difficulty: settings.difficulty,
+      },
+      scenario: settings.scenario,
+      serverNow: this.clock.now().toISOString(),
     };
   }
 
-  public async tickMatchNow(matchId: string): Promise<boolean> {
-    const runtime = this.runtimes.get(matchId);
-    if (!runtime || this.ticking.has(matchId)) return false;
-    this.ticking.add(matchId);
-    try {
-      await this.tickRuntime(runtime);
-      return true;
-    } finally {
-      this.ticking.delete(matchId);
-    }
-  }
-
-  private async tickAll(): Promise<void> {
-    for (const matchId of this.runtimes.keys()) {
+  public async tickOnce(): Promise<void> {
+    if (!this.configuration) return;
+    await this.hydrateDrivers();
+    await Promise.all([...this.drivers.keys()].map(async (matchId) => {
       try {
-        await this.tickMatchNow(matchId);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "unknown simulator failure";
-        this.logger.warn(`Debug Bot Match ${matchId} tick failed: ${message}`);
+        await this.drive(matchId);
+      } catch {
+        // Debug simulation failures are retried on the next tick. Request bodies/passwords are never logged.
       }
-    }
+    }));
   }
 
-  private async tickRuntime(runtime: DebugBotRuntime): Promise<void> {
-    const state = await this.matches.state(
-      runtime.matchId,
-      runtime.botMatchToken,
-      runtime.bot,
-    ) as DebugMatchState;
-    switch (state.state) {
-      case "MATCHED":
-        await this.matches.ready(runtime.matchId, runtime.botMatchToken, runtime.bot, {
-          installedMods: copyInstalledMods(runtime.installedMods),
-        });
-        return;
-      case "BAN_PHASE":
-        await this.submitBotBan(runtime, state);
-        return;
-      case "ROUND_PREPARE":
-      case "DEATHMATCH_PREPARE":
-        await this.matches.ready(runtime.matchId, runtime.botMatchToken, runtime.bot, {
-          installedMods: copyInstalledMods(runtime.installedMods),
-        });
-        return;
-      case "ROUND_PLAYING":
-      case "FINAL_ATTEMPT_WINDOW":
-      case "LAST_ATTEMPT_WINDOW":
-      case "ROUND_SETTLING":
-        await this.driveRound(runtime, state);
-        return;
-      case "DEATHMATCH_PLAYING":
-        await this.driveDeathmatch(runtime, state);
-        return;
-      case "MATCH_RESULT":
-      case "CANCELLED":
-        this.runtimes.delete(runtime.matchId);
-        return;
-      default:
-        return;
-    }
+  private passwordMatches(actualText: string, expectedText: string): boolean {
+    const actual = Buffer.from(actualText, "utf8");
+    const expected = Buffer.from(expectedText, "utf8");
+    return actual.length === expected.length && timingSafeEqual(actual, expected);
   }
 
-  private async submitBotBan(
-    runtime: DebugBotRuntime,
-    state: DebugMatchState,
-  ): Promise<void> {
-    let canonicalLevelId: string | null = null;
-    const candidates = state.candidateMaps ?? [];
-    if (
-      runtime.config.botBan === "RANDOM" &&
-      candidates.length > 0 &&
-      this.random.next() >= 0.5
-    ) {
-      const index = Math.min(
-        candidates.length - 1,
-        Math.floor(this.random.next() * candidates.length),
-      );
-      canonicalLevelId = candidates[index]?.canonicalLevelId ?? null;
-    }
-    await this.matches.submitBan(
-      runtime.matchId,
-      runtime.botMatchToken,
-      runtime.bot,
-      canonicalLevelId ? { canonicalLevelId } : {},
-    );
-  }
-
-  private async driveRound(
-    runtime: DebugBotRuntime,
-    state: DebugMatchState,
-  ): Promise<void> {
-    const round = state.currentRound;
-    if (!round) return;
-    if (runtime.lastAttemptRound !== round.roundNumber) {
-      runtime.lastAttemptRound = round.roundNumber;
-      runtime.lastAttemptStarts = 0;
-      runtime.activeAttempt = null;
-      runtime.nextAttemptAtMs = this.clock.now().getTime();
-    }
-    if (state.state === "ROUND_PLAYING" && await this.driveScenarioPrelude(runtime, round)) {
-      return;
-    }
-    await this.driveBotAttempt(runtime, state, false);
-  }
-
-  private async driveScenarioPrelude(
-    runtime: DebugBotRuntime,
-    round: DebugRoundState,
-  ): Promise<boolean> {
-    const clearsA = Number(round.clears.A);
-    const clearsB = Number(round.clears.B);
-    switch (runtime.config.scenario) {
-      case "NORMAL_MATCH":
-        return false;
-      case "FORCE_BOT_ONE_CLEAR":
-        if (clearsB < 1) {
-          await this.emitInstantAttempt(runtime, "B", round.map.playableLevelId, 100, true);
-          return true;
-        }
-        return false;
-      case "FORCE_BOT_TWO_CLEARS":
-        if (clearsB < 2) {
-          await this.emitInstantAttempt(runtime, "B", round.map.playableLevelId, 100, true);
-        }
-        return true;
-      case "TRIGGER_LAST_ATTEMPT":
-      case "TRIGGER_ROUND_DRAW":
-        if (round.roundNumber !== 1) return false;
-        return this.seedLastAttempt(runtime, round.map.playableLevelId, clearsA, clearsB);
-      case "TRIGGER_ROUND_THREE":
-        if (round.roundNumber === 1) {
-          if (clearsA < 2) {
-            await this.emitInstantAttempt(runtime, "A", round.map.playableLevelId, 100, true);
-          }
-          return true;
-        }
-        if (round.roundNumber === 2) {
-          if (clearsB < 2) {
-            await this.emitInstantAttempt(runtime, "B", round.map.playableLevelId, 100, true);
-          }
-          return true;
-        }
-        return false;
-      case "TRIGGER_DEATHMATCH":
-        if (round.roundNumber === 1) {
-          if (clearsA < 2) {
-            await this.emitInstantAttempt(runtime, "A", round.map.playableLevelId, 100, true);
-          }
-          return true;
-        }
-        if (round.roundNumber === 2) {
-          if (clearsB < 2) {
-            await this.emitInstantAttempt(runtime, "B", round.map.playableLevelId, 100, true);
-          }
-          return true;
-        }
-        return this.seedLastAttempt(runtime, round.map.playableLevelId, clearsA, clearsB);
-    }
-  }
-
-  private async seedLastAttempt(
-    runtime: DebugBotRuntime,
-    playableLevelId: string,
-    clearsA: number,
-    clearsB: number,
-  ): Promise<boolean> {
-    if (clearsB < 1) {
-      await this.emitInstantAttempt(runtime, "B", playableLevelId, 100, true);
-      return true;
-    }
-    if (clearsA < 2) {
-      await this.emitInstantAttempt(runtime, "A", playableLevelId, 100, true);
-      return true;
-    }
-    return false;
-  }
-
-  private async driveDeathmatch(
-    runtime: DebugBotRuntime,
-    state: DebugMatchState,
-  ): Promise<void> {
-    const deathmatch = state.deathmatch;
-    if (!deathmatch) return;
-    if (runtime.deathmatchSequence !== deathmatch.sequence) {
-      runtime.deathmatchSequence = deathmatch.sequence;
-      runtime.deathmatchAttemptsCompleted = 0;
-      runtime.activeAttempt = null;
-      runtime.nextAttemptAtMs = this.clock.now().getTime();
-    }
-    if (runtime.deathmatchAttemptsCompleted >= 3) return;
-    await this.driveBotAttempt(runtime, state, true);
-  }
-
-  private async driveBotAttempt(
-    runtime: DebugBotRuntime,
-    state: DebugMatchState,
-    deathmatch: boolean,
-  ): Promise<void> {
-    const nowMs = this.clock.now().getTime();
-    if (runtime.activeAttempt) {
-      await this.advanceActiveAttempt(runtime, state, nowMs);
-      return;
-    }
-    if (nowMs < runtime.nextAttemptAtMs) return;
-    if (deathmatch && runtime.deathmatchAttemptsCompleted >= 3) return;
-
-    const map = deathmatch ? state.deathmatch?.map : state.currentRound?.map;
-    if (!map) return;
-    const plan = this.createAttemptPlan(runtime, state, map, deathmatch);
-    const response = await this.matches.startAttempt(
-      runtime.matchId,
-      runtime.botMatchToken,
-      runtime.bot,
-      {
-        levelId: map.playableLevelId,
-        clientEventId: this.eventId(runtime, deathmatch ? "dm-start" : "start"),
-      },
-    );
-    if (!response.accepted || !response.attemptId) {
-      runtime.nextAttemptAtMs = nowMs + 250;
-      return;
-    }
-    if (!deathmatch && state.state === "LAST_ATTEMPT_WINDOW") {
-      runtime.lastAttemptStarts += 1;
-    }
-    runtime.activeAttempt = {
-      attemptId: response.attemptId,
-      playableLevelId: map.playableLevelId,
-      deathmatch,
-      startedAtMs: nowMs,
-      lastTelemetryAtMs: nowMs,
-      currentProgress: 0,
-      ...plan,
+  private newDriver(creation: DebugBotMatchCreation): BotDriver {
+    return {
+      creation,
+      attemptId: null,
+      attemptProgress: 0,
+      attemptTarget: 0,
+      attemptLastTickMs: 0,
+      nextAttemptAtMs: 0,
+      eventSequence: 0,
+      banSubmitted: false,
+      seededRounds: new Set<number>(),
+      busy: false,
     };
   }
 
-  private async advanceActiveAttempt(
-    runtime: DebugBotRuntime,
-    state: DebugMatchState,
-    nowMs: number,
-  ): Promise<void> {
-    const active = runtime.activeAttempt;
-    if (!active) return;
-    const elapsedSeconds = Math.max(0, nowMs - active.startedAtMs) / 1_000;
-    const progress = Math.min(
-      active.targetProgress,
-      Math.floor(elapsedSeconds * active.progressPerSecond),
+  private async hydrateDrivers(): Promise<void> {
+    const result = await this.database.query<ActiveDebugMatchRow>(
+      `SELECT m.id, m.debug_bot_config, m.player_a_id, m.player_b_id,
+              pa.gd_account_id::text AS player_a_account_id,
+              pb.gd_account_id::text AS player_b_account_id,
+              pa.gd_username AS player_a_name, pb.gd_username AS player_b_name,
+              ra.displayed_tier AS player_a_tier, rb.displayed_tier AS player_b_tier,
+              ra.hidden_mmr AS player_a_mmr, rb.hidden_mmr AS player_b_mmr,
+              ra.placement_games AS player_a_placements,
+              rb.placement_games AS player_b_placements
+       FROM ranked_matches m
+       JOIN ranked_players pa ON pa.id = m.player_a_id
+       JOIN ranked_players pb ON pb.id = m.player_b_id
+       JOIN ranked_profiles ra ON ra.player_id = m.player_a_id
+       JOIN ranked_profiles rb ON rb.player_id = m.player_b_id
+       WHERE m.match_type = 'DEBUG_BOT'
+         AND m.state NOT IN ('MATCH_RESULT', 'CANCELLED')`,
     );
-    if (
-      !active.deathmatch &&
-      progress !== active.currentProgress &&
-      nowMs - active.lastTelemetryAtMs >= 100
-    ) {
-      await this.matches.updateAttemptProgress(
-        runtime.matchId,
-        runtime.botMatchToken,
-        runtime.bot,
-        {
-          levelId: active.playableLevelId,
-          attemptId: active.attemptId,
-          progressPercent: progress,
-        },
-      );
-      active.currentProgress = progress;
-      active.lastTelemetryAtMs = nowMs;
-    } else if (active.deathmatch) {
-      active.currentProgress = progress;
-    }
-    if (progress < active.targetProgress) return;
-
-    const response = await this.matches.endAttempt(
-      runtime.matchId,
-      runtime.botMatchToken,
-      runtime.bot,
-      {
-        levelId: active.playableLevelId,
-        attemptId: active.attemptId,
-        clientEventId: this.eventId(runtime, active.deathmatch ? "dm-end" : "end"),
-        progressPercent: active.targetProgress,
-        cleared: active.cleared,
-      },
-    );
-    if (response.accepted && active.deathmatch) runtime.deathmatchAttemptsCompleted += 1;
-    runtime.activeAttempt = null;
-    const profile = DEBUG_BOT_DIFFICULTY_PROFILES[runtime.config.difficulty];
-    runtime.nextAttemptAtMs = nowMs + profile.restartDelayMs;
-    if (state.state === "LAST_ATTEMPT_WINDOW" && !active.cleared) {
-      runtime.nextAttemptAtMs = nowMs + Math.min(150, profile.restartDelayMs);
-    }
-  }
-
-  private createAttemptPlan(
-    runtime: DebugBotRuntime,
-    state: DebugMatchState,
-    map: RankedMapSnapshot,
-    deathmatch: boolean,
-  ): AttemptPlan {
-    const profile = DEBUG_BOT_DIFFICULTY_PROFILES[runtime.config.difficulty];
-    if (deathmatch && runtime.config.scenario === "TRIGGER_DEATHMATCH") {
-      const targets = [58, 74, 91] as const;
-      return {
-        targetProgress: targets[Math.min(runtime.deathmatchAttemptsCompleted, 2)]!,
-        cleared: false,
-        progressPerSecond: 120,
+    for (const row of result.rows) {
+      if (this.drivers.has(row.id)) continue;
+      const stored = parseObject(row.debug_bot_config);
+      const playerSessionId = String(stored.playerSessionId ?? "");
+      const botSessionId = String(stored.botSessionId ?? "");
+      if (!playerSessionId || !botSessionId) continue;
+      const settings: DebugBotMatchSettings = {
+        difficulty: stored.difficulty as DebugBotMatchSettings["difficulty"],
+        scenario: stored.scenario as DebugBotMatchSettings["scenario"],
+        botBan: stored.botBan as DebugBotMatchSettings["botBan"],
+        sendDiscordEvents: Boolean(stored.sendDiscordEvents),
+        mmrOffset: Number(stored.mmrOffset ?? 0),
       };
+      const playerContext: RankedSessionContext = {
+        sessionId: playerSessionId,
+        playerId: row.player_a_id,
+        gdAccountId: row.player_a_account_id,
+        gdUsername: row.player_a_name,
+        displayedTier: row.player_a_tier,
+        hiddenMmr: Number(row.player_a_mmr),
+        placementGames: Number(row.player_a_placements),
+      };
+      const botContext: RankedSessionContext = {
+        sessionId: botSessionId,
+        playerId: row.player_b_id,
+        gdAccountId: row.player_b_account_id,
+        gdUsername: row.player_b_name,
+        displayedTier: row.player_b_tier,
+        hiddenMmr: Number(row.player_b_mmr),
+        placementGames: Number(row.player_b_placements),
+      };
+      this.drivers.set(row.id, this.newDriver({
+        matchId: row.id,
+        playerMatchToken: this.tokens.deriveMatchToken(row.id, row.player_a_id, playerSessionId),
+        botMatchToken: this.tokens.deriveMatchToken(row.id, row.player_b_id, botSessionId),
+        playerContext,
+        botContext,
+        settings,
+      }));
     }
-    if (!deathmatch && state.state === "LAST_ATTEMPT_WINDOW") {
-      return this.lastAttemptPlan(runtime, profile);
-    }
-    const forceFailure = runtime.config.scenario === "FORCE_BOT_ONE_CLEAR" &&
-      Number(state.currentRound?.clears.B ?? 0) >= 1;
-    const cleared = !forceFailure && this.random.next() < profile.clearProbability;
-    if (cleared) {
-      return { targetProgress: 100, cleared: true, progressPerSecond: profile.progressPerSecond };
-    }
-    const qualifying = Math.max(0, Math.min(100, map.qualifyingPercent));
-    const reachesQualifying = this.random.next() < profile.qualifyingReachProbability;
-    const noise = (this.random.next() - 0.5) * 30;
-    const desired = Math.round(profile.averageProgress + noise);
-    const minimum = reachesQualifying ? Math.min(99, Math.ceil(qualifying)) : 1;
-    const maximum = reachesQualifying ? 99 : Math.max(1, Math.ceil(qualifying) - 1);
-    return {
-      targetProgress: Math.max(minimum, Math.min(maximum, desired)),
-      cleared: false,
-      progressPerSecond: profile.progressPerSecond,
-    };
   }
 
-  private lastAttemptPlan(
-    runtime: DebugBotRuntime,
-    profile: DebugBotDifficultyProfile,
-  ): AttemptPlan {
-    const forceClear = runtime.config.scenario === "TRIGGER_ROUND_DRAW" ||
-      runtime.config.scenario === "TRIGGER_DEATHMATCH" ||
-      (runtime.config.scenario === "TRIGGER_LAST_ATTEMPT" &&
-        runtime.config.difficulty === "HARD");
-    if (forceClear && runtime.lastAttemptStarts >= 1) {
-      return { targetProgress: 100, cleared: true, progressPerSecond: 120 };
+  private async drive(matchId: string): Promise<void> {
+    const driver = this.drivers.get(matchId);
+    if (!driver || driver.busy) return;
+    driver.busy = true;
+    try {
+      const state = await this.matches.state(
+        matchId,
+        driver.creation.botMatchToken,
+        driver.creation.botContext,
+      ) as Record<string, any>;
+      if (state.state === "MATCH_RESULT" || state.state === "CANCELLED") {
+        this.drivers.delete(matchId);
+        return;
+      }
+      if (state.state === "MATCHED") {
+        await this.ready(driver, false);
+        return;
+      }
+      if (state.state === "BAN_PHASE") {
+        await this.submitBotBan(driver, state);
+        return;
+      }
+      if (state.state === "ROUND_PREPARE" || state.state === "DEATHMATCH_PREPARE") {
+        await this.ready(driver, false);
+        if (this.autoDrivesPlayer(driver.creation.settings.scenario)) {
+          await this.ready(driver, true);
+        }
+        return;
+      }
+      if (state.state === "ROUND_RESULT") {
+        if (this.autoDrivesPlayer(driver.creation.settings.scenario)) {
+          await this.database.query(
+            "UPDATE ranked_matches SET deadline_at = $2 WHERE id = $1 AND state = 'ROUND_RESULT'",
+            [matchId, this.clock.now().toISOString()],
+          );
+        }
+        return;
+      }
+      if (["ROUND_PLAYING", "FINAL_ATTEMPT_WINDOW", "LAST_ATTEMPT_WINDOW"].includes(state.state)) {
+        const round = state.currentRound as Record<string, any> | null;
+        if (!round) return;
+        await this.seedScenarioRound(driver, state, round);
+        const refreshed = await this.matches.state(
+          matchId,
+          driver.creation.botMatchToken,
+          driver.creation.botContext,
+        ) as Record<string, any>;
+        if (["ROUND_PLAYING", "FINAL_ATTEMPT_WINDOW", "LAST_ATTEMPT_WINDOW"].includes(refreshed.state)) {
+          await this.simulateBotAttempt(driver, refreshed, false);
+        }
+        return;
+      }
+      if (state.state === "DEATHMATCH_PLAYING") {
+        await this.simulateBotAttempt(driver, state, true);
+      }
+    } finally {
+      driver.busy = false;
     }
-    if (
-      runtime.config.scenario === "TRIGGER_LAST_ATTEMPT" &&
-      runtime.config.difficulty === "NORMAL" &&
-      runtime.lastAttemptStarts >= 1 &&
-      this.random.next() < profile.clearProbability
-    ) {
-      return { targetProgress: 100, cleared: true, progressPerSecond: 110 };
-    }
-    const failures = [36, 63, 88] as const;
-    return {
-      targetProgress: failures[Math.min(runtime.lastAttemptStarts, failures.length - 1)]!,
-      cleared: false,
-      progressPerSecond: 105,
-    };
   }
 
-  private async emitInstantAttempt(
-    runtime: DebugBotRuntime,
-    side: PlayerSide,
-    playableLevelId: string,
+  private installedMods(): InstalledModDto[] {
+    const snapshot = this.config.getSnapshot();
+    return snapshot.allowedMods
+      .filter((rule) => rule.enabled && rule.required)
+      .map((rule) => {
+        const mod: InstalledModDto = {
+          id: rule.id,
+          version: rule.minVersion ?? rule.maxVersion ?? "v0.0.0",
+          enabled: true,
+          loaded: true,
+          internal: false,
+          system: false,
+        };
+        if (rule.id === snapshot.operational.cbf.modId) {
+          mod.settings = { ...snapshot.operational.cbf.requiredSettings };
+        }
+        return mod;
+      });
+  }
+
+  private async ready(driver: BotDriver, player: boolean): Promise<void> {
+    const creation = driver.creation;
+    await this.matches.ready(
+      creation.matchId,
+      player ? creation.playerMatchToken : creation.botMatchToken,
+      player ? creation.playerContext : creation.botContext,
+      { installedMods: this.installedMods() },
+    );
+  }
+
+  private async submitBotBan(driver: BotDriver, state: Record<string, any>): Promise<void> {
+    if (driver.banSubmitted) return;
+    const candidates = Array.isArray(state.candidateMaps) ? state.candidateMaps : [];
+    const index = candidates.length > 0 ? Math.floor(this.random.next() * candidates.length) : -1;
+    const canonicalLevelId = driver.creation.settings.botBan === "RANDOM" && index >= 0
+      ? String(candidates[index].canonicalLevelId)
+      : null;
+    await this.matches.submitBan(
+      driver.creation.matchId,
+      driver.creation.botMatchToken,
+      driver.creation.botContext,
+      { canonicalLevelId },
+    );
+    driver.banSubmitted = true;
+  }
+
+  private autoDrivesPlayer(scenario: DebugBotScenario): boolean {
+    return scenario === "TRIGGER_ROUND_3" || scenario === "TRIGGER_DEATHMATCH";
+  }
+
+  private async seedScenarioRound(
+    driver: BotDriver,
+    state: Record<string, any>,
+    round: Record<string, any>,
+  ): Promise<void> {
+    const roundNumber = Number(round.roundNumber);
+    if (driver.seededRounds.has(roundNumber)) return;
+    const scenario = driver.creation.settings.scenario;
+    const levelId = String(round.map.playableLevelId);
+    const bot = () => this.completeAttempt(driver, false, levelId, 100, true, "scenario-bot");
+    const player = () => this.completeAttempt(driver, true, levelId, 100, true, "scenario-player");
+
+    if (scenario === "FORCE_BOT_1_CLEAR" && roundNumber === 1) {
+      await bot();
+    } else if (scenario === "FORCE_BOT_2_CLEARS" && roundNumber === 1) {
+      await bot();
+      await bot();
+    } else if (scenario === "TRIGGER_LAST_ATTEMPT" && roundNumber === 1) {
+      await bot();
+      await player();
+      await player();
+    } else if (scenario === "TRIGGER_ROUND_DRAW") {
+      await bot();
+      await player();
+      await player();
+      await bot();
+    } else if (scenario === "TRIGGER_ROUND_3") {
+      if (roundNumber === 1) {
+        await player();
+        await player();
+      } else if (roundNumber === 2) {
+        await bot();
+        await bot();
+      }
+    } else if (scenario === "TRIGGER_DEATHMATCH") {
+      await bot();
+      await player();
+      await player();
+      await bot();
+    }
+    driver.seededRounds.add(roundNumber);
+    if (state.state !== "ROUND_PLAYING") driver.attemptId = null;
+  }
+
+  private async completeAttempt(
+    driver: BotDriver,
+    player: boolean,
+    levelId: string,
     progressPercent: number,
     cleared: boolean,
-  ): Promise<boolean> {
-    const session = side === "A" ? runtime.human : runtime.bot;
-    const matchToken = side === "A" ? runtime.humanMatchToken : runtime.botMatchToken;
-    const started = await this.matches.startAttempt(runtime.matchId, matchToken, session, {
-      levelId: playableLevelId,
-      clientEventId: this.eventId(runtime, `scenario-${side.toLowerCase()}-start`),
+    kind: string,
+  ): Promise<void> {
+    const creation = driver.creation;
+    const context = player ? creation.playerContext : creation.botContext;
+    const token = player ? creation.playerMatchToken : creation.botMatchToken;
+    const sequence = ++driver.eventSequence;
+    const started = await this.matches.startAttempt(creation.matchId, token, context, {
+      levelId,
+      clientEventId: `debug-bot-${kind}-${sequence}-start`,
     });
-    if (!started.accepted || !started.attemptId) return false;
-    const ended = await this.matches.endAttempt(runtime.matchId, matchToken, session, {
-      levelId: playableLevelId,
+    if (!started.accepted || !started.attemptId) return;
+    await this.matches.endAttempt(creation.matchId, token, context, {
+      levelId,
       attemptId: started.attemptId,
-      clientEventId: this.eventId(runtime, `scenario-${side.toLowerCase()}-end`),
+      clientEventId: `debug-bot-${kind}-${sequence}-end`,
       progressPercent,
       cleared,
     });
-    return ended.accepted;
   }
 
-  private eventId(runtime: DebugBotRuntime, kind: string): string {
-    runtime.eventSequence += 1;
-    return `debug-${kind}-${runtime.eventSequence}`;
+  private async simulateBotAttempt(
+    driver: BotDriver,
+    state: Record<string, any>,
+    deathmatch: boolean,
+  ): Promise<void> {
+    const configuration = this.configuration;
+    if (!configuration) return;
+    if (
+      state.state === "LAST_ATTEMPT_WINDOW" &&
+      state.currentRound?.lastAttemptWindow?.targetSide !== "B"
+    ) return;
+    const map = deathmatch ? state.deathmatch?.map : state.currentRound?.map;
+    const levelId = String(map?.playableLevelId ?? "");
+    if (!levelId) return;
+    const nowMs = this.clock.now().getTime();
+    if (!driver.attemptId) {
+      if (nowMs < driver.nextAttemptAtMs) return;
+      const started = await this.matches.startAttempt(
+        driver.creation.matchId,
+        driver.creation.botMatchToken,
+        driver.creation.botContext,
+        { levelId, clientEventId: `debug-bot-auto-${++driver.eventSequence}-start` },
+      );
+      if (!started.accepted || !started.attemptId) return;
+      driver.attemptId = started.attemptId;
+      driver.attemptProgress = 0;
+      driver.attemptTarget = this.chooseAttemptTarget(
+        Number(map.qualifyingPercent),
+        driver.creation.settings.difficulty,
+      );
+      driver.attemptLastTickMs = nowMs;
+      return;
+    }
+
+    const difficulty = configuration.difficulties[driver.creation.settings.difficulty];
+    const elapsedSeconds = Math.max(configuration.tickMs, nowMs - driver.attemptLastTickMs) / 1_000;
+    const nextProgress = Math.min(
+      driver.attemptTarget,
+      Math.max(driver.attemptProgress + 1, Math.floor(driver.attemptProgress + difficulty.progressPerSecond * elapsedSeconds)),
+    );
+    driver.attemptLastTickMs = nowMs;
+    if (!deathmatch && nextProgress !== driver.attemptProgress) {
+      await this.matches.updateAttemptProgress(
+        driver.creation.matchId,
+        driver.creation.botMatchToken,
+        driver.creation.botContext,
+        { levelId, attemptId: driver.attemptId, progressPercent: nextProgress },
+      );
+    }
+    driver.attemptProgress = nextProgress;
+    if (driver.attemptProgress < driver.attemptTarget) return;
+    await this.matches.endAttempt(
+      driver.creation.matchId,
+      driver.creation.botMatchToken,
+      driver.creation.botContext,
+      {
+        levelId,
+        attemptId: driver.attemptId,
+        clientEventId: `debug-bot-auto-${++driver.eventSequence}-end`,
+        progressPercent: driver.attemptTarget,
+        cleared: driver.attemptTarget === 100,
+      },
+    );
+    driver.attemptId = null;
+    driver.attemptProgress = 0;
+    driver.nextAttemptAtMs = nowMs + configuration.attemptDelayMs;
   }
 
-  private async persistConfigSnapshot(
-    transaction: SqlExecutor,
-    config: RankedConfigSnapshot,
-  ): Promise<string> {
-    const id = this.ids.next();
-    const inserted = await transaction.query<{ id: string }>(
-      `INSERT INTO ranked_config_snapshots (
-         id, generation, rules_version, source_payload, fetched_at
-       ) VALUES ($1, $2, $3, $4::jsonb, $5)
-       ON CONFLICT (generation, rules_version) DO NOTHING
-       RETURNING id`,
-      [
-        id,
-        config.generation,
-        config.operational.rules.rulesVersion,
-        JSON.stringify(config),
-        config.fetchedAt,
-      ],
-    );
-    if (inserted.rows[0]) return inserted.rows[0].id;
-    const existing = await transaction.query<{ id: string }>(
-      "SELECT id FROM ranked_config_snapshots WHERE generation = $1 AND rules_version = $2",
-      [config.generation, config.operational.rules.rulesVersion],
-    );
-    if (!existing.rows[0]) throw new Error("Failed to persist debug config snapshot");
-    return existing.rows[0].id;
+  private chooseAttemptTarget(
+    qualifyingPercent: number,
+    difficultyName: DebugBotMatchSettings["difficulty"],
+  ): number {
+    const configuration = this.configuration!;
+    const difficulty = configuration.difficulties[difficultyName];
+    const outcome = this.random.next();
+    if (outcome < difficulty.clearChance) return 100;
+    if (outcome < difficulty.qualifyingChance) {
+      return Math.max(
+        Math.ceil(qualifyingPercent),
+        Math.min(99, Math.floor(qualifyingPercent + this.random.next() * (100 - qualifyingPercent))),
+      );
+    }
+    return Math.max(1, Math.min(99, Math.floor(this.random.next() * qualifyingPercent)));
   }
 }

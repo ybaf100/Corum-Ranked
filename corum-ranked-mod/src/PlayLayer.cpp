@@ -65,13 +65,13 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         CCLabelBMFont* opponentScoreLabel = nullptr;
         std::array<CCSprite*, 2> opponentChecks {nullptr, nullptr};
         CCLabelBMFont* qualifyingLabel = nullptr;
-#if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
-        CCLabelBMFont* debugLabel = nullptr;
-#endif
         CCNode* spectatorPanel = nullptr;
         CCLabelBMFont* spectatorNameLabel = nullptr;
         CCLabelBMFont* spectatorProgressLabel = nullptr;
         CCLabelBMFont* spectatorTimerLabel = nullptr;
+#if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
+        CCLabelBMFont* debugLabel = nullptr;
+#endif
         corum::ranked::RenderFpsMeter fpsMeter;
         std::chrono::steady_clock::time_point nextHudRefreshAt {};
         std::uint64_t renderedRevision = 0;
@@ -202,18 +202,10 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         m_fields->hudRoot->addChild(m_fields->qualifyingLabel, 3);
 
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
-        if (corum::ranked::RankedRuntime::get().view().match.debugBotMatch) {
-            m_fields->debugLabel = label(
-                "BOT MATCH - DEBUG",
-                "goldFont.fnt",
-                0.22f,
-                {0.5f, 1.0f},
-                {size.width / 2.0f, top - 5.0f}
-            );
-            m_fields->debugLabel->setColor(ccc3(255, 165, 70));
-            m_fields->debugLabel->setID("ranked-debug-bot-label"_spr);
-            m_fields->hudRoot->addChild(m_fields->debugLabel, 3);
-        }
+        m_fields->debugLabel = label("BOT MATCH · DEBUG", "goldFont.fnt", 0.22f, {0.5f, 1.0f}, {size.width / 2.0f, top});
+        m_fields->debugLabel->setColor(ccc3(255, 145, 105));
+        m_fields->debugLabel->setVisible(corum::ranked::RankedRuntime::get().view().match.debug);
+        m_fields->hudRoot->addChild(m_fields->debugLabel, 3);
 #endif
 
         addSpectatorPanel(size);
@@ -282,6 +274,9 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
             applyCheck(m_fields->opponentChecks[index], presentation.opponentChecks[index]);
         }
         m_fields->qualifyingLabel->setString(presentation.qualifyingText.c_str());
+#if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
+        if (m_fields->debugLabel) m_fields->debugLabel->setVisible(match.debug);
+#endif
 
         auto const size = CCDirector::sharedDirector()->getWinSize();
         auto const top = corum::ranked::layoutHud(size.width, size.height).topY;

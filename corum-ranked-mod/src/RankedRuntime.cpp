@@ -75,18 +75,21 @@ void writeSetting(matjson::Value& target, std::string const& key, corum::ranked:
 
 std::optional<corum::ranked::RankedMapView> parseMap(matjson::Value const& value) {
     if (!value.isObject()) return std::nullopt;
-    auto const playableValue = value.contains("playableLevelId")
-        ? value["playableLevelId"]
-        : value["levelId"];
-    auto playableLevelId = static_cast<int>(playableValue.asInt().unwrapOr(0));
-    if (playableLevelId <= 0) {
-        playableLevelId = numFromString<int>(playableValue.asString().unwrapOr("")).unwrapOr(0);
+    auto const playableText = value["playableLevelId"].asString().unwrapOr(
+        value["levelId"].asString().unwrapOr("")
+    );
+    auto levelId = numFromString<int>(playableText).unwrapOr(0);
+    if (levelId <= 0) {
+        levelId = static_cast<int>(value["playableLevelId"].asInt().unwrapOr(
+            value["levelId"].asInt().unwrapOr(0)
+        ));
     }
-    if (playableLevelId <= 0) return std::nullopt;
+    if (levelId <= 0) return std::nullopt;
     return corum::ranked::RankedMapView {
+        .levelId = levelId,
         .canonicalLevelId = value["canonicalLevelId"].asString().unwrapOr(""),
         .alternateLevelId = value["alternateLevelId"].asString().unwrapOr(""),
-        .playableLevelId = playableLevelId,
+        .playableLevelId = playableText.empty() ? fmt::format("{}", levelId) : playableText,
         .title = value["title"].asString().unwrapOr("Unknown map"),
         .creator = value["creator"].asString().unwrapOr(""),
         .difficulty = value["difficulty"].asString().unwrapOr(""),
@@ -425,6 +428,53 @@ void RankedRuntime::joinQueue() {
     );
 }
 
+#if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
+void RankedRuntime::startDebugBotMatch(DebugBotMatchOptions options) {
+    if (m_controlBusy || m_sessionToken.empty() || m_view.stage != RuntimeStage::Ready) return;
+    m_installedMods = captureInstalledMods();
+    auto const decision = evaluateEnvironment(m_installedMods, m_environmentPolicy);
+    if (!decision.allowed) {
+        setStage(RuntimeStage::Blocked, "The installed mod environment changed. Re-open Ranked to recheck.");
+        return;
+    }
+    matjson::Value body;
+    body["password"] = options.password;
+    body["difficulty"] = options.difficulty;
+    body["scenario"] = options.scenario;
+    body["botBan"] = options.botBan;
+    body["sendDiscordEvents"] = options.sendDiscordEvents;
+    body["installedMods"] = installedModsJson();
+    auto request = baseRequest(m_sessionToken);
+    request.bodyJSON(body);
+    m_controlBusy = true;
+    setStage(RuntimeStage::JoiningQueue, "Creating DEBUG BOT MATCH...");
+    m_controlRequest.spawn(
+        request.post(endpoint("/api/ranked/debug/bot-match")),
+        [this](web::WebResponse response) {
+            m_controlBusy = false;
+            if (!successful(response)) {
+                setStage(RuntimeStage::Ready, "Ranked session ready.", responseError(response));
+                return;
+            }
+            auto const root = response.json().unwrapOr(matjson::Value());
+            observeServerNow(root);
+            m_view.match = {};
+            m_view.match.matchId = root["matchId"].asString().unwrapOr("");
+            m_view.match.side = root["side"].asString().unwrapOr("A");
+            m_view.match.debug = root["debug"].asBool().unwrapOr(true);
+            m_matchToken = root["matchToken"].asString().unwrapOr("");
+            if (m_view.match.matchId.empty() || m_matchToken.empty()) {
+                setStage(RuntimeStage::Error, "The debug server returned an incomplete match assignment.");
+                return;
+            }
+            setStage(RuntimeStage::Matched, "DEBUG BOT MATCH created. Confirm Ready.");
+            m_nextPollAt = std::chrono::steady_clock::now();
+            pollMatch();
+        }
+    );
+}
+#endif
+
 void RankedRuntime::leaveQueue() {
     if (m_controlBusy || m_sessionToken.empty() || m_view.stage != RuntimeStage::Queued) return;
     auto request = baseRequest(m_sessionToken);
@@ -441,48 +491,6 @@ void RankedRuntime::leaveQueue() {
         }
     );
 }
-
-#if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
-void RankedRuntime::startDebugBotMatch(
-    std::string const& password,
-    debug::DebugBotOptions const& options
-) {
-    if (m_controlBusy || m_sessionToken.empty() || m_view.stage != RuntimeStage::Ready) return;
-    matjson::Value body;
-    body["password"] = password;
-    body["difficulty"] = debug::serverValue(options.difficulty);
-    body["scenario"] = debug::serverValue(options.scenario);
-    body["botBan"] = debug::serverValue(options.botBan);
-    body["sendDiscordEvents"] = options.sendDiscordEvents;
-    auto request = baseRequest(m_sessionToken);
-    request.bodyJSON(body);
-    m_controlBusy = true;
-    setStage(RuntimeStage::JoiningQueue, "Creating isolated Debug Bot Match...");
-    m_controlRequest.spawn(
-        request.post(endpoint("/api/ranked/debug/bot-match")),
-        [this](web::WebResponse response) {
-            m_controlBusy = false;
-            if (!successful(response)) {
-                setStage(RuntimeStage::Ready, "Ranked session ready.", responseError(response));
-                return;
-            }
-            auto const root = response.json().unwrapOr(matjson::Value());
-            observeServerNow(root);
-            m_view.match = {};
-            m_view.match.matchId = root["matchId"].asString().unwrapOr("");
-            m_matchToken = root["matchToken"].asString().unwrapOr("");
-            if (m_view.match.matchId.empty() || m_matchToken.empty()) {
-                setStage(RuntimeStage::Error, "The debug server returned an incomplete match.");
-                return;
-            }
-            m_view.match.debugBotMatch = true;
-            setStage(RuntimeStage::Matched, "DEBUG BOT MATCH created. Confirm Ready.");
-            m_nextPollAt = std::chrono::steady_clock::now();
-            pollMatch();
-        }
-    );
-}
-#endif
 
 void RankedRuntime::pollQueue() {
     if (m_pollBusy || m_sessionToken.empty() || m_view.stage != RuntimeStage::Queued) return;
@@ -560,6 +568,9 @@ void RankedRuntime::parseMatchState(matjson::Value const& root) {
     m_view.match.deadlineAt = root["deadlineAt"].asString().unwrapOr("");
     m_view.match.side = root["side"].asString().unwrapOr("");
     m_view.match.effectiveTier = root["effectiveTier"].asString().unwrapOr("");
+#if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
+    m_view.match.debug = root["debug"].asBool().unwrapOr(false);
+#endif
     m_view.match.candidateMaps.clear();
     m_view.match.currentMap.reset();
     m_view.match.banner.clear();
@@ -572,9 +583,6 @@ void RankedRuntime::parseMatchState(matjson::Value const& root) {
     m_view.match.spectatorActive = false;
     m_view.match.spectatorCurrentProgress.reset();
     m_view.match.spectatorOpponentName.clear();
-#if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
-    m_view.match.debugBotMatch = root["matchType"].asString().unwrapOr("") == "DEBUG_BOT";
-#endif
 
     auto const opponentSide = m_view.match.side == "A" ? "B" : "A";
     m_view.match.opponentName = root["players"][opponentSide]["gdUsername"].asString().unwrapOr("Opponent");
@@ -733,7 +741,7 @@ std::optional<std::int64_t> RankedRuntime::deadlineMillis() const {
 }
 
 int RankedRuntime::currentLevelId() const {
-    return m_view.match.currentMap ? m_view.match.currentMap->playableLevelId : 0;
+    return m_view.match.currentMap ? m_view.match.currentMap->levelId : 0;
 }
 
 bool RankedRuntime::canTrackLevel(int levelId) const {
@@ -742,7 +750,7 @@ bool RankedRuntime::canTrackLevel(int levelId) const {
         stateAllowsAttempts(m_view.match.state) &&
         !m_view.match.spectatorActive &&
         m_view.match.currentMap &&
-        m_view.match.currentMap->playableLevelId == levelId;
+        m_view.match.currentMap->levelId == levelId;
 }
 
 bool RankedRuntime::isSpectating() const {

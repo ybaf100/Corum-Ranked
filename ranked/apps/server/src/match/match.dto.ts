@@ -7,7 +7,6 @@ import {
   IsOptional,
   IsString,
   Length,
-  Matches,
   Max,
   Min,
 } from "class-validator";
@@ -24,7 +23,7 @@ export class SubmitBanDto {
 
 export class AttemptStartDto {
   @IsString()
-  @Matches(/^[1-9]\d*$/)
+  @Length(1, 40)
   public levelId!: string;
 
   @IsString()
@@ -38,7 +37,7 @@ export class AttemptStartDto {
 
 export class AttemptEndDto {
   @IsString()
-  @Matches(/^[1-9]\d*$/)
+  @Length(1, 40)
   public levelId!: string;
 
   @IsString()
@@ -65,7 +64,7 @@ export class AttemptEndDto {
 
 export class AttemptProgressDto {
   @IsString()
-  @Matches(/^[1-9]\d*$/)
+  @Length(1, 40)
   public levelId!: string;
 
   @IsString()

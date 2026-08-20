@@ -1,24 +1,13 @@
 # Changelog
 
-## v0.4.0-alpha.3
+## v0.4.0-alpha.4
 
-- Changed Debug Bot Match results to use the normal Ranked MMR, score, tier, placement, statistics, leaderboard, and history path.
-- Added configurable difficulty rating offsets around the current player MMR while retaining the shared ELO calculator.
-- Split map identity into canonical, alternate, and playable IDs, with mandatory alternate-first resolution and snapshot validation.
-- Added playable level IDs to every client attempt event and server-side Round/Deathmatch rejection for mismatched levels.
-
-## v0.4.0-alpha.2
-
-- Added the compile-time gated development-only Debug Bot Match entry and setup UI.
-- Added server-generated Bot attempts, progress telemetry, private bans, and deterministic rule scenarios through the normal authoritative match engine.
-- Isolated Debug Bot results from MMR, placement, public statistics, public history, queue state, and Discord relay by default.
-- Added release-removal switches and automated debug flow regression coverage.
-
-## v0.4.0-alpha.1
-
-- Published the first explicitly versioned alpha source snapshot.
-- Included the server-authoritative HUD and progress-only LAST ATTEMPT spectator overlay.
-- Kept the legacy Corum Integration mod isolated and unchanged by Ranked runtime code.
+- Added the compile-time-gated Debug Bot Match password/config UI and server-driven opponent simulator.
+- Debug Bot matches use the ordinary Ranked attempt, round, Bo3, deathmatch, rating, placement, statistics, and history paths.
+- Added Easy/Normal/Hard bot ratings near the player's MMR plus deterministic debug scenarios, including LAST ATTEMPT spectator testing.
+- Added canonical/alternate/playable map snapshots and authoritative attempt Level ID validation.
+- Moved Ranked Pool and Qualifying input to two columns on the existing Corum map sheet; no separate Ranked Pool tab is used.
+- Added Koyeb + Neon free-alpha deployment documentation.
 
 ## v0.1.0
 

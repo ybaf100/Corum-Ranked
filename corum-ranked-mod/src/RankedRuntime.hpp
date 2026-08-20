@@ -3,10 +3,6 @@
 #include "domain/EnvironmentPolicy.hpp"
 #include "domain/ServerClock.hpp"
 
-#if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
-#include "debug/DebugBotConfig.hpp"
-#endif
-
 #include <Geode/Geode.hpp>
 #include <Geode/utils/web.hpp>
 
@@ -31,9 +27,10 @@ enum class RuntimeStage {
 };
 
 struct RankedMapView {
+    int levelId = 0;
     std::string canonicalLevelId;
     std::string alternateLevelId;
-    int playableLevelId = 0;
+    std::string playableLevelId;
     std::string title;
     std::string creator;
     std::string difficulty;
@@ -65,9 +62,19 @@ struct MatchView {
     std::vector<RankedMapView> candidateMaps;
     std::optional<RankedMapView> currentMap;
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
-    bool debugBotMatch = false;
+    bool debug = false;
 #endif
 };
+
+#if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
+struct DebugBotMatchOptions {
+    std::string password;
+    std::string difficulty;
+    std::string scenario;
+    std::string botBan;
+    bool sendDiscordEvents = false;
+};
+#endif
 
 struct RuntimeView {
     RuntimeStage stage = RuntimeStage::Idle;
@@ -91,10 +98,7 @@ public:
     void submitReady();
     void submitBan(std::optional<std::string> canonicalLevelId);
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
-    void startDebugBotMatch(
-        std::string const& password,
-        debug::DebugBotOptions const& options
-    );
+    void startDebugBotMatch(DebugBotMatchOptions options);
 #endif
 
     [[nodiscard]] RuntimeView const& view() const;

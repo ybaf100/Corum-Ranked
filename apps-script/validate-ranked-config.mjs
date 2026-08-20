@@ -80,12 +80,36 @@ class MockSheet {
 
 class MockSpreadsheet {
   constructor() {
-    this.sheets = [
-      new MockSheet("sheet1", [
-        ["순위", "맵 제목", "Rating", "맵 길이", "맵 코드", "대체 맵 코드", "제작자", "Verifier"],
-        [1, "Map 1-1", 10, "Long", "1001", "91001", "Creator", "Verifier"],
-      ]),
+    const headers = [
+      "순위",
+      "맵 제목",
+      "Rating",
+      "맵 길이",
+      "맵 코드",
+      "대체 맵 코드",
+      "제작자",
+      "Verifier",
+      "최소 등록 가능 기록",
+      "CSMP 티어 배정",
     ];
+    const maps = [];
+    for (let pool = 1; pool <= 6; pool += 1) {
+      for (let index = 1; index <= 5; index += 1) {
+        maps.push([
+          (pool - 1) * 5 + index,
+          `Map ${pool}-${index}`,
+          "Extreme Demon",
+          "Long",
+          `${pool}${index}001`,
+          pool === 5 && index === 1 ? "987654321" : "",
+          "Creator",
+          "Verifier",
+          50,
+          "Gold",
+        ]);
+      }
+    }
+    this.sheets = [new MockSheet("sheet1", [headers, ...maps])];
   }
 
   getSheetByName(name) {
@@ -136,6 +160,8 @@ const context = {
 vm.createContext(context);
 vm.runInContext(fs.readFileSync(new URL("./Code.gs", import.meta.url), "utf8"), context);
 vm.runInContext(fs.readFileSync(new URL("./RankedConfig.gs", import.meta.url), "utf8"), context);
+assert.equal(context.rankedPercent_(0.35, "35%"), 35);
+assert.equal(context.rankedPercent_(1, "1"), 1);
 
 const responseJson = () =>
   JSON.parse(context.doGet({ parameter: { action: "ranked_config" } }).text);
@@ -149,7 +175,6 @@ const setConfig = (key, value) => {
 
 context.setupCorumRankedConfig();
 for (const name of [
-  "Ranked Pool",
   "Ranked Tiers",
   "Ranked CSMP Seed",
   "Ranked Allowed Mods",
@@ -157,6 +182,20 @@ for (const name of [
 ]) {
   assert.ok(spreadsheet.getSheetByName(name), `Missing ${name}`);
 }
+assert.equal(spreadsheet.getSheetByName("Ranked Pool"), null);
+
+const mapSheet = spreadsheet.getSheetByName("sheet1");
+const poolColumn = mapSheet.rows[0].indexOf("Ranked Pool (1~6)");
+const qualifyingColumn = mapSheet.rows[0].indexOf("Qualifying %");
+assert.ok(poolColumn >= 0);
+assert.ok(qualifyingColumn >= 0);
+for (let index = 1; index < mapSheet.rows.length; index += 1) {
+  mapSheet.rows[index][poolColumn] = Math.floor((index - 1) / 5) + 1;
+  mapSheet.rows[index][qualifyingColumn] = index === 1 ? "35%" : 50;
+}
+context.setupCorumRankedConfig();
+assert.equal(mapSheet.rows[0].filter((value) => value === "Ranked Pool (1~6)").length, 1);
+assert.equal(mapSheet.rows[0].filter((value) => value === "Qualifying %").length, 1);
 
 const initial = responseJson();
 assert.equal(initial.ok, true);
@@ -183,24 +222,6 @@ for (const row of tierRows.slice(1)) {
 const seedRows = spreadsheet.getSheetByName("Ranked CSMP Seed").rows;
 const seeds = { NONE: 500, RED: 700, AQUA: 1500, BRONZE: 2500, SILVER: 3500, GOLD: 4500 };
 for (const row of seedRows.slice(1)) row[1] = seeds[row[0]];
-
-const poolSheet = spreadsheet.getSheetByName("Ranked Pool");
-for (let pool = 1; pool <= 6; pool += 1) {
-  for (let index = 1; index <= 5; index += 1) {
-    const canonicalLevelId = `${pool}${String(index).padStart(3, "0")}`;
-    poolSheet.appendRow([
-      canonicalLevelId,
-      canonicalLevelId,
-      pool === 1 && index === 2 ? "invalid" : "",
-      `Map ${pool}-${index}`,
-      "Creator",
-      "Difficulty",
-      pool,
-      50,
-      true,
-    ]);
-  }
-}
 
 for (const [key, value] of Object.entries({
   enabled: true,
@@ -230,27 +251,31 @@ const complete = responseJson();
 assert.equal(complete.data.validation.valid, true, complete.data.validation.errors.join("\n"));
 assert.equal(complete.data.validation.queueReady, true);
 assert.equal(complete.data.maps.length, 30);
+assert.equal(complete.data.maps[0].canonicalLevelId, "11001");
+assert.equal(complete.data.maps[0].playableLevelId, "11001");
+assert.equal(complete.data.maps[0].qualifyingPercent, 35);
+const alternate = complete.data.maps.find((map) => map.canonicalLevelId === "51001");
+assert.equal(alternate.alternateLevelId, "987654321");
+assert.equal(alternate.playableLevelId, "987654321");
+assert.equal(alternate.levelId, "987654321");
 assert.equal(complete.data.operational.rules.roundSeconds, 180);
 assert.equal(complete.data.operational.cbf.requiredSettings["soft-toggle"], false);
 assert.equal(complete.data.operational.cbf.requiredSettings["click-on-steps"], false);
 assert.equal(complete.data.operational.cbf.requiredSettings["physics-bypass"], false);
 assert.equal(complete.data.operational.generation, complete.data.generation);
-const alternateMap = complete.data.maps.find((map) => map.canonicalLevelId === "1001");
-assert.equal(alternateMap.alternateLevelId, "91001");
-assert.equal(Object.prototype.hasOwnProperty.call(alternateMap, "levelId"), false);
-assert.equal(
-  complete.data.maps.find((map) => map.canonicalLevelId === "1002").alternateLevelId,
-  null,
-);
 
 const repeated = responseJson();
 assert.equal(repeated.data.generation, complete.data.generation);
-poolSheet.rows[1][7] = 55;
+mapSheet.rows[1][qualifyingColumn] = 55;
 const changed = responseJson();
 assert.notEqual(changed.data.generation, complete.data.generation);
+
+mapSheet.rows[2][poolColumn] = "";
+const excluded = responseJson();
+assert.equal(excluded.data.maps.length, 29);
 
 const health = JSON.parse(context.doGet({ parameter: { action: "health" } }).text);
 assert.equal(health.service, "Corum Integration API");
 assert.equal(health.version, context.CORUM_API_VERSION);
 
-console.log("Ranked config setup, canonical/alternate map export, fail-closed validation, snapshot generation, and legacy health routing passed.");
+console.log("Ranked map columns on sheet1, alternate/playable IDs, fail-closed config, and legacy health routing passed.");

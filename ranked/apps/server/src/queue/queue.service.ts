@@ -7,6 +7,7 @@ import {
 } from "@nestjs/common";
 import {
   createMatchSeries,
+  displayedTierForProfile,
   effectiveTierForMatch,
   selectCandidateMaps,
   type MatchmakingPolicy,
@@ -26,6 +27,34 @@ import { DATABASE, type DatabasePort, type SqlExecutor } from "../database/datab
 import type { EnvironmentRecheckDto } from "../session/session.dto.js";
 import { SessionService } from "../session/session.service.js";
 import type { RankedSessionContext } from "../session/session.types.js";
+
+export type DebugBotDifficulty = "EASY" | "NORMAL" | "HARD";
+export type DebugBotScenario =
+  | "NORMAL_MATCH"
+  | "FORCE_BOT_1_CLEAR"
+  | "FORCE_BOT_2_CLEARS"
+  | "TRIGGER_LAST_ATTEMPT"
+  | "TRIGGER_ROUND_DRAW"
+  | "TRIGGER_ROUND_3"
+  | "TRIGGER_DEATHMATCH";
+export type DebugBotBan = "RANDOM" | "NO_BAN";
+
+export interface DebugBotMatchSettings {
+  readonly difficulty: DebugBotDifficulty;
+  readonly scenario: DebugBotScenario;
+  readonly botBan: DebugBotBan;
+  readonly sendDiscordEvents: boolean;
+  readonly mmrOffset: number;
+}
+
+export interface DebugBotMatchCreation {
+  readonly matchId: string;
+  readonly playerMatchToken: string;
+  readonly botMatchToken: string;
+  readonly playerContext: RankedSessionContext;
+  readonly botContext: RankedSessionContext;
+  readonly settings: DebugBotMatchSettings;
+}
 
 interface ProfileRow {
   player_id: string;
@@ -121,8 +150,8 @@ export class QueueService {
       if (!candidate) return { status: "QUEUED" as const, matchId: null };
       const matchId = await this.createMatch(
         transaction,
-        ownQueue,
         candidate,
+        ownQueue,
         config,
         now,
       );
@@ -132,6 +161,120 @@ export class QueueService {
       ...result,
       serverNow: now.toISOString(),
     };
+  }
+
+  public async createDebugBotMatch(
+    session: RankedSessionContext,
+    body: EnvironmentRecheckDto,
+    settings: DebugBotMatchSettings,
+  ): Promise<DebugBotMatchCreation> {
+    this.sessions.assertEnvironment(body.installedMods);
+    const config = this.config.getSnapshot();
+    if (!config.operational.enabled || !config.operational.timeouts || !config.operational.mmrPolicy) {
+      throw new ServiceUnavailableException("Ranked is not operationally configured");
+    }
+    const timeouts = config.operational.timeouts;
+    const mmrPolicy = config.operational.mmrPolicy;
+    const now = this.clock.now();
+    return this.database.transaction(async (transaction) => {
+      const profile = await this.lockProfile(transaction, session.playerId);
+      await this.assertNoActiveMatch(transaction, session.playerId);
+      const queued = await transaction.query<{ status: string }>(
+        "SELECT status FROM ranked_queue_entries WHERE player_id = $1 AND status = 'QUEUED' FOR UPDATE",
+        [session.playerId],
+      );
+      if (queued.rows[0]) {
+        throw new ConflictException("Leave the public Ranked queue before starting Debug Bot Match");
+      }
+
+      const botRating = Math.max(0, Math.round(Number(profile.hidden_mmr) + settings.mmrOffset));
+      const botPlayerId = this.ids.next();
+      const botSessionId = this.ids.next();
+      const botAccount = await transaction.query<{ id: string }>(
+        "SELECT nextval('ranked_debug_bot_account_id_seq')::text AS id",
+      );
+      const botAccountId = botAccount.rows[0]?.id;
+      if (!botAccountId) throw new Error("Failed to allocate Debug Bot account ID");
+      const placementGames = mmrPolicy.placementGames;
+      const displayedTier = displayedTierForProfile(
+        botRating,
+        placementGames,
+        mmrPolicy,
+        config.operational.tierBands,
+      );
+      const botName = `BOT ${settings.difficulty}`;
+      await transaction.query(
+        `INSERT INTO ranked_players (id, gd_account_id, gd_username, is_bot)
+         VALUES ($1, $2, $3, TRUE)`,
+        [botPlayerId, botAccountId, botName],
+      );
+      await transaction.query(
+        `INSERT INTO ranked_profiles (
+           player_id, displayed_tier, hidden_mmr, visible_ranked_score,
+           placement_games, initial_csmp_tier, initial_seed_mmr, seed_applied_at
+         ) VALUES ($1, $2, $3, $3, $4, 'NONE', $3, $5)`,
+        [botPlayerId, displayedTier, botRating, placementGames, now.toISOString()],
+      );
+      await transaction.query(
+        `INSERT INTO ranked_sessions (
+           id, player_id, token_hash, client_version, environment_snapshot,
+           expires_at, last_heartbeat_at
+         ) VALUES ($1, $2, $3, 'debug-bot-server', '[]'::jsonb, $4, $5)`,
+        [
+          botSessionId,
+          botPlayerId,
+          this.tokens.hash(`debug-bot-session:${botSessionId}`),
+          new Date(now.getTime() + timeouts.sessionSeconds * 1_000).toISOString(),
+          now.toISOString(),
+        ],
+      );
+
+      const playerA: QueueRow = {
+        player_id: session.playerId,
+        session_id: session.sessionId,
+        hidden_mmr_snapshot: Number(profile.hidden_mmr),
+        joined_at: now,
+        last_heartbeat_at: now,
+        status: "MATCHED",
+        matched_match_id: null,
+      };
+      const playerB: QueueRow = {
+        player_id: botPlayerId,
+        session_id: botSessionId,
+        hidden_mmr_snapshot: botRating,
+        joined_at: now,
+        last_heartbeat_at: now,
+        status: "MATCHED",
+        matched_match_id: null,
+      };
+      const matchId = await this.createMatch(transaction, playerA, playerB, config, now, {
+        matchType: "DEBUG_BOT",
+        discordEventsEnabled: settings.sendDiscordEvents,
+        debugBotConfig: {
+          ...settings,
+          playerSessionId: session.sessionId,
+          botSessionId,
+        },
+        updateQueue: false,
+      });
+      const botContext: RankedSessionContext = {
+        sessionId: botSessionId,
+        playerId: botPlayerId,
+        gdAccountId: botAccountId,
+        gdUsername: botName,
+        displayedTier,
+        hiddenMmr: botRating,
+        placementGames,
+      };
+      return {
+        matchId,
+        playerMatchToken: this.tokens.deriveMatchToken(matchId, session.playerId, session.sessionId),
+        botMatchToken: this.tokens.deriveMatchToken(matchId, botPlayerId, botSessionId),
+        playerContext: session,
+        botContext,
+        settings,
+      };
+    });
   }
 
   public async leave(session: RankedSessionContext) {
@@ -219,7 +362,6 @@ export class QueueService {
     const active = await transaction.query<{ id: string }>(
       `SELECT id FROM ranked_matches
        WHERE (player_a_id = $1 OR player_b_id = $1)
-         AND match_type = 'RANKED_PVP'
          AND state NOT IN ('MATCH_RESULT', 'CANCELLED')
        LIMIT 1 FOR UPDATE`,
       [playerId],
@@ -263,15 +405,21 @@ export class QueueService {
 
   private async createMatch(
     transaction: SqlExecutor,
-    own: QueueRow,
-    candidate: QueueRow,
+    playerA: QueueRow,
+    playerB: QueueRow,
     config: RankedConfigSnapshot,
     now: Date,
+    options: {
+      readonly matchType?: "PVP" | "DEBUG_BOT";
+      readonly debugBotConfig?: Readonly<Record<string, unknown>> | null;
+      readonly discordEventsEnabled?: boolean;
+      readonly updateQueue?: boolean;
+    } = {},
   ): Promise<string> {
     if (!config.operational.timeouts) throw new Error("Missing timeout policy");
     const effective = effectiveTierForMatch(
-      Number(candidate.hidden_mmr_snapshot),
-      Number(own.hidden_mmr_snapshot),
+      Number(playerA.hidden_mmr_snapshot),
+      Number(playerB.hidden_mmr_snapshot),
       config.operational.tierBands,
     );
     const candidates = selectCandidateMaps(effective.tier, config.maps, this.random);
@@ -280,19 +428,17 @@ export class QueueService {
     const readyDeadline = new Date(
       now.getTime() + config.operational.timeouts.readySeconds * 1_000,
     );
-    const playerA = candidate;
-    const playerB = own;
     await transaction.query(
       `INSERT INTO ranked_matches (
          id, player_a_id, player_b_id, config_snapshot_id,
          mmr_a_before, mmr_b_before, effective_rating_average, effective_tier,
          candidate_maps_snapshot, series_state, state, state_version,
          deadline_at, ready_deadline_at, last_heartbeat_a_at, last_heartbeat_b_at,
-         rules_version, created_at
+         rules_version, match_type, debug_bot_config, discord_events_enabled, created_at
        ) VALUES (
          $1, $2, $3, $4, $5, $6, $7, $8,
          $9::jsonb, $10::jsonb, 'MATCHED', 1,
-         $11, $11, $13, $13, $12, $13
+         $11, $11, $13, $13, $12, $14, $15::jsonb, $16, $13
        )`,
       [
         matchId,
@@ -308,6 +454,9 @@ export class QueueService {
         readyDeadline.toISOString(),
         config.operational.rules.rulesVersion,
         now.toISOString(),
+        options.matchType ?? "PVP",
+        JSON.stringify(options.debugBotConfig ?? null),
+        options.discordEventsEnabled ?? true,
       ],
     );
     for (const participant of [playerA, playerB]) {
@@ -321,12 +470,14 @@ export class QueueService {
         [matchId, participant.player_id, this.tokens.hash(token), expiresAt.toISOString()],
       );
     }
-    await transaction.query(
-      `UPDATE ranked_queue_entries
-       SET status = 'MATCHED', matched_match_id = $1
-       WHERE player_id = $2 OR player_id = $3`,
-      [matchId, playerA.player_id, playerB.player_id],
-    );
+    if (options.updateQueue !== false) {
+      await transaction.query(
+        `UPDATE ranked_queue_entries
+         SET status = 'MATCHED', matched_match_id = $1
+         WHERE player_id = $2 OR player_id = $3`,
+        [matchId, playerA.player_id, playerB.player_id],
+      );
+    }
     return matchId;
   }
 

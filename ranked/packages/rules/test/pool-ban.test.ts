@@ -4,7 +4,6 @@ import {
   RankedDomainError,
   SeededRandom,
   effectiveTierForMatch,
-  resolvePlayableLevelId,
   resolveBans,
   selectCandidateMaps,
   snapshotMap,
@@ -45,25 +44,30 @@ describe("effective tier and candidate pools", () => {
     expect(new Set(selected.map((map) => map.canonicalLevelId)).size).toBe(5);
   });
 
-  it("resolves a valid alternate ID first and falls back to canonical", () => {
-    expect(resolvePlayableLevelId(makeMap(2, 1))).toBe("2001");
-    expect(resolvePlayableLevelId(makeMap(2, 1, { alternateLevelId: "invalid" }))).toBe(
-      "2001",
-    );
-    expect(resolvePlayableLevelId(makeMap(2, 1, { alternateLevelId: "2001" }))).toBe(
-      "2001",
-    );
-    expect(resolvePlayableLevelId(makeMap(2, 1, { alternateLevelId: "92001" }))).toBe(
-      "92001",
-    );
-    const alternate = snapshotMap(makeMap(2, 1, { alternateLevelId: "92001" }));
-    expect(alternate.alternateLevelId).toBe("92001");
-    expect(alternate.playableLevelId).toBe("92001");
+  it("uses a valid alternate Level ID as playable ID and snapshots both IDs", () => {
+    const resolved = snapshotMap(makeMap(3, 7, {
+      alternateLevelId: "90000007",
+      playableLevelId: "90000007",
+      levelId: "90000007",
+    }));
+    expect(resolved).toMatchObject({
+      canonicalLevelId: "3007",
+      alternateLevelId: "90000007",
+      playableLevelId: "90000007",
+      levelId: "90000007",
+    });
   });
 
-  it("rejects aliases that collide with another canonical map", () => {
+  it("rejects a canonical/alternate alias collision between two maps", () => {
     const maps = allPoolMaps();
-    maps[0] = { ...maps[0]!, alternateLevelId: maps[1]!.canonicalLevelId };
+    const first = maps[0]!;
+    const second = maps[1]!;
+    maps[0] = {
+      ...first,
+      alternateLevelId: second.canonicalLevelId,
+      playableLevelId: second.canonicalLevelId,
+      levelId: second.canonicalLevelId,
+    };
     expect(() => selectCandidateMaps("RED", maps, new SeededRandom(1))).toThrowError(
       expect.objectContaining<Partial<RankedDomainError>>({ code: "CONFLICTING_MAP_ALIAS" }),
     );
@@ -71,9 +75,12 @@ describe("effective tier and candidate pools", () => {
 
   it("rejects conflicting active registrations of one canonical level", () => {
     const maps = allPoolMaps();
+    const canonicalLevelId = maps[0]!.canonicalLevelId;
     maps.push(
       makeMap(4, 99, {
-        canonicalLevelId: maps[0]!.canonicalLevelId,
+        levelId: canonicalLevelId,
+        canonicalLevelId,
+        playableLevelId: canonicalLevelId,
         qualifyingPercent: 99,
       }),
     );
@@ -82,10 +89,22 @@ describe("effective tier and candidate pools", () => {
     );
   });
 
-  it("fails loudly instead of distorting a pool with insufficient maps", () => {
-    const maps = allPoolMaps().filter(
-      (map) => map.pool !== 2 || map.canonicalLevelId.endsWith("001"),
+  it("rejects one canonical map registered with two different alternate IDs", () => {
+    const maps = allPoolMaps();
+    const original = maps[0]!;
+    maps.push({
+      ...original,
+      alternateLevelId: "99900001",
+      playableLevelId: "99900001",
+      levelId: "99900001",
+    });
+    expect(() => selectCandidateMaps("RED", maps, new SeededRandom(1))).toThrowError(
+      expect.objectContaining<Partial<RankedDomainError>>({ code: "CONFLICTING_CANONICAL_MAP" }),
     );
+  });
+
+  it("fails loudly instead of distorting a pool with insufficient maps", () => {
+    const maps = allPoolMaps().filter((map) => map.pool !== 2 || map.levelId.endsWith("001"));
     expect(() => selectCandidateMaps("RED", maps, new SeededRandom(1))).toThrowError(
       expect.objectContaining<Partial<RankedDomainError>>({ code: "INSUFFICIENT_POOL_MAPS" }),
     );
@@ -96,11 +115,8 @@ describe("effective tier and candidate pools", () => {
     const selected = selectCandidateMaps("GOLD", maps, new SeededRandom(91));
     const chosen = maps.find((map) => map.canonicalLevelId === selected[0]!.canonicalLevelId)!;
     const originalTitle = selected[0]!.title;
-    const originalPlayableLevelId = selected[0]!.playableLevelId;
     (chosen as { title: string }).title = "Spreadsheet changed later";
-    (chosen as { alternateLevelId: string | null }).alternateLevelId = "999999";
     expect(selected[0]!.title).toBe(originalTitle);
-    expect(selected[0]!.playableLevelId).toBe(originalPlayableLevelId);
   });
 });
 
