@@ -24,7 +24,7 @@
       "name": "Ranked server URL",
       "description": "Base URL of the Corum Ranked server. HTTPS is required except for localhost development. This is not a secret.",
       "type": "string",
-      "default": ""
+      "default": "https://corum-ranked.onrender.com"
     },
     "poll-interval-ms": {
       "name": "Polling interval (ms)",

@@ -15,6 +15,7 @@ using namespace geode::prelude;
 namespace {
 
 constexpr std::string_view kCbfId = "syzzi.click_between_frames";
+constexpr std::string_view kDefaultRankedServerURL = "https://corum-ranked.onrender.com";
 constexpr std::string_view kKnownCbfSettings[] = {
     "soft-toggle",
     "click-on-steps",
@@ -185,6 +186,9 @@ void RankedRuntime::begin() {
     ) return;
 
     m_serverURL = trim(Mod::get()->getSettingValue<std::string>("ranked-server-url"));
+    if (m_serverURL.empty()) {
+        m_serverURL = std::string(kDefaultRankedServerURL);
+    }
     if (!isAcceptableServerURL(m_serverURL)) {
         setStage(
             RuntimeStage::NotConfigured,

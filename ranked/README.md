@@ -14,7 +14,7 @@
 
 ## 로컬 검증
 
-Node.js 22 이상과 C++23 컴파일러가 필요합니다. s
+Node.js 22 이상과 C++23 컴파일러가 필요합니다.
 
 ```bash
 npm ci --prefix ranked
