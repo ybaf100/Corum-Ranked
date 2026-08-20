@@ -98,7 +98,11 @@ public:
     void submitReady();
     void submitBan(std::optional<std::string> canonicalLevelId);
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
+    // Primary API: password travels inside the options object.
     void startDebugBotMatch(DebugBotMatchOptions options);
+    // Compatibility overload for alpha.4 callers that still pass password separately.
+    // Keep this through alpha.5 so stale DebugBotPopup layouts compile on every target.
+    void startDebugBotMatch(std::string const& password, DebugBotMatchOptions options);
 #endif
 
     [[nodiscard]] RuntimeView const& view() const;

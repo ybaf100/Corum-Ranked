@@ -194,5 +194,3 @@ setClearStatus("레코드-ID", "verified", "https://증거-주소");
 `playerRecord`로 반환한다.
 
 Apps Script Content Service의 응답 상태는 JSON의 `ok` 필드로 판별한다.
-
-OK

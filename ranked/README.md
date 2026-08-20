@@ -53,7 +53,7 @@ g++ -std=c++23 -Wall -Wextra -Wpedantic -Werror \
 운영 절차와 장애 시 동작은 [`docs/operations.md`](docs/operations.md), API 계약은 [`docs/api.md`](docs/api.md), 보안 경계는 [`docs/security.md`](docs/security.md)를 참고하세요.
 
 무료 alpha 호스팅 순서는 [`docs/free-hosting-koyeb-neon.md`](docs/free-hosting-koyeb-neon.md),
-이번 전체 소스에서 사용자가 실제로 해야 할 일은 [`docs/alpha-4-handoff.md`](docs/alpha-4-handoff.md),
+이번 전체 소스에서 사용자가 실제로 해야 할 일은 [`docs/alpha-5-handoff.md`](docs/alpha-5-handoff.md),
 Debug Bot Match 제거 방법은 [`docs/debug-bot-match.md`](docs/debug-bot-match.md)를 참고하세요.
 실제 변경 파일·구현 방식·테스트/빌드 결과는
-[`docs/v0.4.0-alpha.4-report.md`](docs/v0.4.0-alpha.4-report.md)에 정리되어 있습니다.
+[`docs/v0.4.0-alpha.5-report.md`](docs/v0.4.0-alpha.5-report.md)에 정리되어 있습니다.

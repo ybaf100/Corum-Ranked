@@ -429,6 +429,11 @@ void RankedRuntime::joinQueue() {
 }
 
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
+void RankedRuntime::startDebugBotMatch(std::string const& password, DebugBotMatchOptions options) {
+    options.password = password;
+    startDebugBotMatch(options);
+}
+
 void RankedRuntime::startDebugBotMatch(DebugBotMatchOptions options) {
     if (m_controlBusy || m_sessionToken.empty() || m_view.stage != RuntimeStage::Ready) return;
     m_installedMods = captureInstalledMods();

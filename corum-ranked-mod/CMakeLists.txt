@@ -21,6 +21,10 @@ option(
 )
 
 file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS src/*.cpp)
+# alpha.5 canonical Debug Bot UI lives at src/DebugBotPopup.cpp. Some alpha.4
+# working trees may still contain the old src/debug/DebugBotPopup.cpp path;
+# ignore that stale duplicate so an overlay update cannot compile/link both copies.
+list(FILTER SOURCES EXCLUDE REGEX ".*/src/debug/DebugBotPopup\\.cpp$")
 add_library(${PROJECT_NAME} SHARED ${SOURCES})
 
 if (CORUM_RANKED_DEBUG_BOT_MATCH)

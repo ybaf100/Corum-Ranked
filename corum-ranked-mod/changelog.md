@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.4.0-alpha.5
+
+- Fixed Debug Bot Match client/runtime API compatibility so both the current single-options call and the alpha.4 two-argument call compile.
+- Excluded the stale alpha.4 `src/debug/DebugBotPopup.cpp` overlay path from CMake to prevent duplicate/legacy Debug Bot compilation.
+- The compatibility fix is platform-independent and applies to Windows, iOS, Android32, and Android64 builds.
+- Kept the server-side debug password validation and did not bypass the debug gate to fix compilation.
+- Bumped the standalone Corum Ranked client/server workspace version to v0.4.0-alpha.5.
+
 ## v0.4.0-alpha.4
 
 - Added the compile-time-gated Debug Bot Match password/config UI and server-driven opponent simulator.
