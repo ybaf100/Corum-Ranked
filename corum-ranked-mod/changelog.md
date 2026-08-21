@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.4.0-alpha.6
+
+- Embedded `https://corum-ranked.onrender.com` as the production Ranked server URL and added a runtime fallback when the saved Geode string setting is empty.
+- Updated stale Debug Bot test naming from `DebugBotMatchService` / `debugBotMatch` to the canonical `DebugBotService` / `debugBot` API used by the server.
+- Added a compatibility smoke test at the legacy `debug-bot-flow.integration.test.ts` path so old working trees are overwritten instead of leaving a type-check-breaking stale test behind.
+- Updated Render + Neon deployment guidance; production Render builds install dev type packages with `npm ci --include=dev && npm run build`.
+- Bumped the standalone Corum Ranked client/server/rules workspace to v0.4.0-alpha.6. Corum Integration runtime code is unchanged.
+
 ## v0.4.0-alpha.5
 
 - Fixed Debug Bot Match client/runtime API compatibility so both the current single-options call and the alpha.4 two-argument call compile.

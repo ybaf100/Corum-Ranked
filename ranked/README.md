@@ -47,13 +47,13 @@ g++ -std=c++23 -Wall -Wextra -Wpedantic -Werror \
 5. PostgreSQL에 `migrations/0001_initial_ranked.sql`을 적용합니다.
 6. `apps/server/.env.example`을 참고해 배포 환경변수를 secret manager에서 주입하고 서버를 배포합니다.
 7. `/health`, `/ready`, `/api/ranked/config`를 확인합니다.
-8. 별도 `build-ranked-mod.yml` 결과인 `hwanhee1.corum_ranked.geode`를 배포하고 모드 설정에 Ranked 서버 HTTPS base URL을 입력합니다.
+8. 별도 `build-ranked-mod.yml` 결과인 `hwanhee1.corum_ranked.geode`를 배포합니다. alpha.6부터 production base URL `https://corum-ranked.onrender.com`이 기본값/런타임 fallback으로 포함되어 수동 URL 입력이 필요하지 않습니다.
 9. 두 테스트 계정으로 전체 harness 시나리오를 staging에서 재검증한 뒤 운영 queue를 엽니다.
 
 운영 절차와 장애 시 동작은 [`docs/operations.md`](docs/operations.md), API 계약은 [`docs/api.md`](docs/api.md), 보안 경계는 [`docs/security.md`](docs/security.md)를 참고하세요.
 
-무료 alpha 호스팅 순서는 [`docs/free-hosting-koyeb-neon.md`](docs/free-hosting-koyeb-neon.md),
-이번 전체 소스에서 사용자가 실제로 해야 할 일은 [`docs/alpha-5-handoff.md`](docs/alpha-5-handoff.md),
+무료 alpha 호스팅 순서는 [`docs/free-hosting-render-neon.md`](docs/free-hosting-render-neon.md),
+기존 최초 배포 체크리스트는 [`docs/alpha-5-handoff.md`](docs/alpha-5-handoff.md),
 Debug Bot Match 제거 방법은 [`docs/debug-bot-match.md`](docs/debug-bot-match.md)를 참고하세요.
-실제 변경 파일·구현 방식·테스트/빌드 결과는
-[`docs/v0.4.0-alpha.5-report.md`](docs/v0.4.0-alpha.5-report.md)에 정리되어 있습니다.
+alpha.6 변경 파일·검증 결과는
+[`docs/v0.4.0-alpha.6-report.md`](docs/v0.4.0-alpha.6-report.md)에 정리되어 있습니다.
