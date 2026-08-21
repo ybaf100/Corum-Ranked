@@ -470,7 +470,8 @@ class CorumRankedLayer final : public CCLayerColor, public LevelDownloadDelegate
         auto* title = makeLabel("MATCH FOUND", 0.62f, {size.width / 2.0f, size.height - 34.0f}, kGold, "goldFont.fnt");
         m_root->addChild(title, 3);
         auto const left = std::max(0, 5 - static_cast<int>(std::floor(phaseSeconds())));
-        auto* countdown = makeLabel(fmt::format("MAP BAN IN...\n{}", left), 0.38f, {size.width / 2.0f, size.height / 2.0f - 1.0f}, kRed, "goldFont.fnt");
+        auto* countdown = makeLabel(fmt::format("MAP BAN IN...\n{}", left), 0.52f, {size.width / 2.0f, size.height / 2.0f - 1.0f}, kRed, "goldFont.fnt");
+        countdown->setAnchorPoint({0.5f, 0.5f});
         m_root->addChild(countdown, 3);
     }
 
@@ -525,6 +526,13 @@ class CorumRankedLayer final : public CCLayerColor, public LevelDownloadDelegate
         if (match.deathmatchSequence > 0) {
             auto* sub = makeLabel("3 ATTEMPTS", 0.27f, {size.width / 2.0f, size.height - 49.0f}, kGreen);
             m_root->addChild(sub, 4);
+            auto* attempts = makeLabel(
+                fmt::format("A {}/3   B {}/3", match.deathmatchAttemptsUsedA, match.deathmatchAttemptsUsedB),
+                0.20f,
+                {size.width / 2.0f, size.height - 66.0f},
+                ccc3(215, 220, 230)
+            );
+            m_root->addChild(attempts, 4);
         } else if (!match.banner.empty() && match.banner != "NONE") {
             auto* sub = makeLabel(displayBanner(match.banner), 0.30f, {size.width / 2.0f, size.height - 49.0f}, kRed, "goldFont.fnt");
             m_root->addChild(sub, 4);
@@ -572,15 +580,22 @@ class CorumRankedLayer final : public CCLayerColor, public LevelDownloadDelegate
 
         auto const seconds = std::max(0, 10 - static_cast<int>(std::floor(phaseSeconds())));
         std::string footer = fmt::format("STARTS IN... {}", seconds);
-        if (phaseSeconds() >= 10.0) {
+        if (match.state == "DEATHMATCH_PLAYING") {
+            auto const ownUsed = ownA ? match.deathmatchAttemptsUsedA : match.deathmatchAttemptsUsedB;
+            auto const opponentUsed = ownA ? match.deathmatchAttemptsUsedB : match.deathmatchAttemptsUsedA;
+            footer = ownUsed >= 3
+                ? fmt::format("WAITING FOR OPPONENT...  {} / 3", opponentUsed)
+                : fmt::format("ATTEMPT {} OF 3", std::min(3, ownUsed + 1));
+        } else if (phaseSeconds() >= 10.0) {
             auto const ownReady = ownA ? match.readyA : match.readyB;
             auto const opponentReady = ownA ? match.readyB : match.readyA;
             if (!ownReady) footer = "WAITING FOR YOUR DOWNLOAD...";
             else if (!opponentReady) footer = fmt::format("WAITING FOR {}'S DOWNLOAD...", upper(shorten(match.opponentName, 13)));
             else footer = "STARTING...";
         }
-        auto* footerLabel = makeLabel(footer, 0.28f, {size.width / 2.0f, 27.0f}, phaseSeconds() >= 10.0 ? kGold : ccc3(225, 225, 230));
-        footerLabel->limitLabelWidth(size.width - 220.0f, 0.28f, 0.18f);
+        auto* footerLabel = makeLabel(footer, 0.42f, {size.width / 2.0f, 29.0f}, phaseSeconds() >= 10.0 ? kGold : ccc3(225, 225, 230));
+        footerLabel->setAnchorPoint({0.5f, 0.5f});
+        footerLabel->limitLabelWidth(size.width - 170.0f, 0.42f, 0.24f);
         m_root->addChild(footerLabel, 4);
     }
 
@@ -1000,6 +1015,10 @@ class CorumRankedLayer final : public CCLayerColor, public LevelDownloadDelegate
         if (m_enteringLevel || view.stage != RuntimeStage::Matched) return;
         auto const& state = view.match.state;
         if (state != "ROUND_PLAYING" && state != "DEATHMATCH_PLAYING") return;
+        if (!RankedRuntime::get().canEnterCurrentLevel()) {
+            if (state == "DEATHMATCH_PLAYING") m_localMessage = "All 3 attempts used. Waiting for the opponent...";
+            return;
+        }
         auto* level = findPlayableMap();
         if (!level) {
             m_localMessage = "Waiting for complete level data before entering.";

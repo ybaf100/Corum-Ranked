@@ -70,8 +70,10 @@ describe("score race formula", () => {
     expect(scoreAttempt(79.99, false, 60)).toBe(79);
   });
 
-  it("awards 100 plus qualifying for a clear", () => {
+  it("awards 100 plus qualifying for a clear without truncating decimal qualifying", () => {
     expect(scoreAttempt(100, true, 60)).toBe(160);
+    expect(scoreAttempt(100, true, 20.1)).toBeCloseTo(120.1, 6);
+    expect(scoreAttempt(100, true, 20.125)).toBeCloseTo(120.125, 6);
   });
 
   it("does not invent a tiebreaker when scores are equal", () => {

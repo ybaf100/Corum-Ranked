@@ -1,3 +1,15 @@
+# v0.4.0-alpha.15
+
+- Rebuilt Ranked attempt transport as a FIFO backlog so a fast death/Clear/reset cannot overwrite the previous unacknowledged attempt end.
+- Fixed live score and Clear accounting, including decimal Qualifying/Clear scores such as `20.1% -> 120.1`.
+- Added exactly-once manual restart and manual quit attempt-end handling.
+- Added per-attempt optimistic score/Clear reconciliation so several fast attempts remain visible until their individual authoritative acknowledgements arrive without double counting.
+- Blocked the two-Clear re-entry race while the second Clear acknowledgement is pending; LAST ATTEMPT phase/spectator state is applied directly from the attempt response.
+- Reworked Death Match client budgeting and server regression coverage to guarantee exactly three visual/authoritative attempts and reject attempt four.
+- Added live Death Match scores and per-side attempt counters.
+- Centered and enlarged gameplay and preparation countdown/status text.
+- No Apps Script or database migration changes. Corum Integration remains unchanged.
+
 # v0.4.0-alpha.14
 - Moved the main-menu Ranked shortcut from the crowded bottom action row to the upper-right corner.
 - Rebuilt Ranked song preparation around Geometry Dash's own `CustomSongWidget` download action, with MusicDownloadManager retained only as a fallback.

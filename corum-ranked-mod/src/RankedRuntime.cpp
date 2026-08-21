@@ -9,6 +9,7 @@
 #include <cmath>
 #include <iterator>
 #include <string_view>
+#include <utility>
 
 using namespace geode::prelude;
 
@@ -104,8 +105,8 @@ corum::ranked::RoundSummaryView parseRoundSummary(matjson::Value const& value) {
         .roundNumber = static_cast<int>(value["roundNumber"].asInt().unwrapOr(0)),
         .mapTitle = value["mapTitle"].asString().unwrapOr(""),
         .difficulty = value["difficulty"].asString().unwrapOr(""),
-        .scoreA = static_cast<int>(value["scoreA"].asDouble().unwrapOr(0.0)),
-        .scoreB = static_cast<int>(value["scoreB"].asDouble().unwrapOr(0.0)),
+        .scoreA = value["scoreA"].asDouble().unwrapOr(0.0),
+        .scoreB = value["scoreB"].asDouble().unwrapOr(0.0),
         .clearsA = static_cast<int>(value["clearsA"].asInt().unwrapOr(0)),
         .clearsB = static_cast<int>(value["clearsB"].asInt().unwrapOr(0)),
         .result = value["result"].asString().unwrapOr(""),
@@ -117,8 +118,8 @@ corum::ranked::DeathmatchSummaryView parseDeathmatchSummary(matjson::Value const
         .sequence = static_cast<int>(value["sequence"].asInt().unwrapOr(0)),
         .mapTitle = value["mapTitle"].asString().unwrapOr(""),
         .difficulty = value["difficulty"].asString().unwrapOr(""),
-        .scoreA = static_cast<int>(value["scoreA"].asDouble().unwrapOr(0.0)),
-        .scoreB = static_cast<int>(value["scoreB"].asDouble().unwrapOr(0.0)),
+        .scoreA = value["scoreA"].asDouble().unwrapOr(0.0),
+        .scoreB = value["scoreB"].asDouble().unwrapOr(0.0),
         .winnerSide = value["winnerSide"].asString().unwrapOr(""),
     };
 }
@@ -236,8 +237,13 @@ void RankedRuntime::begin() {
     m_attemptId.clear();
     m_pendingStart.reset();
     m_pendingEnd.reset();
+    m_attemptBacklog.clear();
     m_pendingProgress.reset();
     m_lastSubmittedProgress = -1;
+    m_localDeathmatchSequence = 0;
+    m_localDeathmatchVisualAttempts = 0;
+    m_optimisticScoreDelta = 0.0;
+    m_optimisticClearDelta = 0;
     m_songBypassAllowed = false;
     m_view.match = {};
     fetchConfig();
@@ -637,8 +643,14 @@ void RankedRuntime::parseMatchState(matjson::Value const& root) {
     m_view.match.banner.clear();
     m_view.match.roundNumber = 0;
     m_view.match.deathmatchSequence = 0;
-    m_view.match.scoreA = 0;
-    m_view.match.scoreB = 0;
+    m_view.match.deathmatchAttemptsUsedA = 0;
+    m_view.match.deathmatchAttemptsUsedB = 0;
+    m_view.match.deathmatchAttemptsCompletedA = 0;
+    m_view.match.deathmatchAttemptsCompletedB = 0;
+    m_view.match.scoreA = 0.0;
+    m_view.match.scoreB = 0.0;
+    m_view.match.committedScoreA = 0.0;
+    m_view.match.committedScoreB = 0.0;
     m_view.match.clearsA = 0;
     m_view.match.clearsB = 0;
     m_view.match.roundWinsA = static_cast<int>(root["series"]["roundWins"]["A"].asInt().unwrapOr(0));
@@ -664,9 +676,12 @@ void RankedRuntime::parseMatchState(matjson::Value const& root) {
     if (round.isObject()) {
         m_view.match.roundNumber = static_cast<int>(round["roundNumber"].asInt().unwrapOr(0));
         m_view.match.banner = round["banner"].asString().unwrapOr("");
-        auto const displayScores = round["displayScores"].isObject() ? round["displayScores"] : round["scores"];
-        m_view.match.scoreA = static_cast<int>(displayScores["A"].asInt().unwrapOr(0));
-        m_view.match.scoreB = static_cast<int>(displayScores["B"].asInt().unwrapOr(0));
+        auto const committedScores = round["scores"];
+        auto const displayScores = round["displayScores"].isObject() ? round["displayScores"] : committedScores;
+        m_view.match.committedScoreA = committedScores["A"].asDouble().unwrapOr(0.0);
+        m_view.match.committedScoreB = committedScores["B"].asDouble().unwrapOr(0.0);
+        m_view.match.scoreA = displayScores["A"].asDouble().unwrapOr(m_view.match.committedScoreA);
+        m_view.match.scoreB = displayScores["B"].asDouble().unwrapOr(m_view.match.committedScoreB);
         m_view.match.clearsA = static_cast<int>(round["clears"]["A"].asInt().unwrapOr(0));
         m_view.match.clearsB = static_cast<int>(round["clears"]["B"].asInt().unwrapOr(0));
         m_view.match.currentMap = parseMap(round["map"]);
@@ -675,6 +690,31 @@ void RankedRuntime::parseMatchState(matjson::Value const& root) {
     if (deathmatch.isObject()) {
         m_view.match.deathmatchSequence = static_cast<int>(deathmatch["sequence"].asInt().unwrapOr(0));
         m_view.match.currentMap = parseMap(deathmatch["map"]);
+        auto const committedScores = deathmatch["scores"];
+        auto const displayScores = deathmatch["displayScores"].isObject() ? deathmatch["displayScores"] : committedScores;
+        m_view.match.committedScoreA = committedScores["A"].asDouble().unwrapOr(0.0);
+        m_view.match.committedScoreB = committedScores["B"].asDouble().unwrapOr(0.0);
+        m_view.match.scoreA = displayScores["A"].asDouble().unwrapOr(m_view.match.committedScoreA);
+        m_view.match.scoreB = displayScores["B"].asDouble().unwrapOr(m_view.match.committedScoreB);
+        m_view.match.clearsA = static_cast<int>(deathmatch["clears"]["A"].asInt().unwrapOr(0));
+        m_view.match.clearsB = static_cast<int>(deathmatch["clears"]["B"].asInt().unwrapOr(0));
+        m_view.match.deathmatchAttemptsUsedA = static_cast<int>(deathmatch["attemptsUsed"]["A"].asInt().unwrapOr(0));
+        m_view.match.deathmatchAttemptsUsedB = static_cast<int>(deathmatch["attemptsUsed"]["B"].asInt().unwrapOr(0));
+        m_view.match.deathmatchAttemptsCompletedA = static_cast<int>(deathmatch["attemptsCompleted"]["A"].asInt().unwrapOr(0));
+        m_view.match.deathmatchAttemptsCompletedB = static_cast<int>(deathmatch["attemptsCompleted"]["B"].asInt().unwrapOr(0));
+
+        auto const ownServerUsed = m_view.match.side == "A"
+            ? m_view.match.deathmatchAttemptsUsedA
+            : m_view.match.deathmatchAttemptsUsedB;
+        if (m_localDeathmatchSequence != m_view.match.deathmatchSequence) {
+            m_localDeathmatchSequence = m_view.match.deathmatchSequence;
+            m_localDeathmatchVisualAttempts = ownServerUsed;
+        } else {
+            m_localDeathmatchVisualAttempts = std::max(
+                m_localDeathmatchVisualAttempts,
+                ownServerUsed
+            );
+        }
     }
 
     auto const roundSummaries = root["rounds"].asArray();
@@ -751,10 +791,23 @@ void RankedRuntime::parseMatchState(matjson::Value const& root) {
         m_attemptId.clear();
         m_pendingStart.reset();
         m_pendingEnd.reset();
+        m_attemptBacklog.clear();
         m_pendingProgress.reset();
         m_lastSubmittedProgress = -1;
+        m_optimisticScoreDelta = 0.0;
+        m_optimisticClearDelta = 0;
     }
     if (m_view.match.spectatorActive) {
+        // A trigger-side player must not create a new visual attempt after the
+        // server enters LAST_ATTEMPT. Any speculative future starts are invalid.
+        // Preserve the currently transmitting end acknowledgement, but discard
+        // queued later visuals and their optimistic presentation contribution.
+        for (auto const& queued : m_attemptBacklog) {
+            if (!queued.end) continue;
+            m_optimisticScoreDelta = std::max(0.0, m_optimisticScoreDelta - queued.end->optimisticScore);
+            m_optimisticClearDelta = std::max(0, m_optimisticClearDelta - queued.end->optimisticClear);
+        }
+        m_attemptBacklog.clear();
         m_pendingStart.reset();
         m_pendingProgress.reset();
     }
@@ -786,6 +839,84 @@ void RankedRuntime::parseMatchState(matjson::Value const& root) {
     ++m_view.revision;
     if (previousState != m_view.match.state) {
         log::info("Corum Ranked state: {} -> {}", previousState, m_view.match.state);
+    }
+}
+
+void RankedRuntime::applyAttemptSnapshot(matjson::Value const& root) {
+    auto const deadline = root["deadlineAt"].asString();
+    if (deadline.isOk()) m_view.match.deadlineAt = deadline.unwrap();
+
+    auto const round = root["roundSnapshot"];
+    if (round.isObject()) {
+        auto const roundNumber = static_cast<int>(round["roundNumber"].asInt().unwrapOr(0));
+        if (roundNumber == 0 || m_view.match.roundNumber == 0 || roundNumber == m_view.match.roundNumber) {
+            auto const phase = round["phase"].asString().unwrapOr("");
+            if (!phase.empty()) m_view.match.state = phase;
+
+            auto const committed = round["scores"];
+            auto const display = round["displayScores"].isObject() ? round["displayScores"] : committed;
+            m_view.match.committedScoreA = committed["A"].asDouble().unwrapOr(m_view.match.committedScoreA);
+            m_view.match.committedScoreB = committed["B"].asDouble().unwrapOr(m_view.match.committedScoreB);
+            m_view.match.scoreA = display["A"].asDouble().unwrapOr(m_view.match.committedScoreA);
+            m_view.match.scoreB = display["B"].asDouble().unwrapOr(m_view.match.committedScoreB);
+            m_view.match.clearsA = static_cast<int>(round["clears"]["A"].asInt().unwrapOr(m_view.match.clearsA));
+            m_view.match.clearsB = static_cast<int>(round["clears"]["B"].asInt().unwrapOr(m_view.match.clearsB));
+
+            // Attempt-end acknowledgements can move a Round directly into
+            // LAST_ATTEMPT_WINDOW / ROUND_SETTLING before the next state poll.
+            // Apply that transition immediately so a player who just reached
+            // two Clears cannot be auto-entered into an illegal extra attempt.
+            auto const lastAttempt = round["lastAttemptWindow"];
+            auto const inLastAttemptFlow =
+                phase == "LAST_ATTEMPT_WINDOW" || phase == "ROUND_SETTLING";
+            if (inLastAttemptFlow && lastAttempt.isObject()) {
+                auto const trigger = lastAttempt["triggerSide"].asString().unwrapOr("");
+                auto const target = lastAttempt["targetSide"].asString().unwrapOr("");
+                m_view.match.spectatorActive =
+                    !trigger.empty() && trigger == m_view.match.side && target != m_view.match.side;
+                if (m_view.match.spectatorActive) {
+                    m_view.match.spectatorOpponentName = m_view.match.opponentName;
+                    m_view.match.spectatorCurrentProgress.reset();
+                }
+            } else if (!inLastAttemptFlow) {
+                m_view.match.spectatorActive = false;
+                m_view.match.spectatorCurrentProgress.reset();
+                m_view.match.spectatorOpponentName.clear();
+            }
+        }
+    }
+
+    auto const deathmatch = root["deathmatchSnapshot"];
+    if (deathmatch.isObject()) {
+        auto const sequence = static_cast<int>(deathmatch["sequence"].asInt().unwrapOr(0));
+        if (sequence == 0 || m_view.match.deathmatchSequence == 0 || sequence == m_view.match.deathmatchSequence) {
+            if (sequence > 0) m_view.match.deathmatchSequence = sequence;
+            auto const committed = deathmatch["scores"];
+            auto const display = deathmatch["displayScores"].isObject() ? deathmatch["displayScores"] : committed;
+            m_view.match.committedScoreA = committed["A"].asDouble().unwrapOr(m_view.match.committedScoreA);
+            m_view.match.committedScoreB = committed["B"].asDouble().unwrapOr(m_view.match.committedScoreB);
+            m_view.match.scoreA = display["A"].asDouble().unwrapOr(m_view.match.committedScoreA);
+            m_view.match.scoreB = display["B"].asDouble().unwrapOr(m_view.match.committedScoreB);
+            m_view.match.clearsA = static_cast<int>(deathmatch["clears"]["A"].asInt().unwrapOr(m_view.match.clearsA));
+            m_view.match.clearsB = static_cast<int>(deathmatch["clears"]["B"].asInt().unwrapOr(m_view.match.clearsB));
+            m_view.match.deathmatchAttemptsUsedA = static_cast<int>(deathmatch["attemptsUsed"]["A"].asInt().unwrapOr(m_view.match.deathmatchAttemptsUsedA));
+            m_view.match.deathmatchAttemptsUsedB = static_cast<int>(deathmatch["attemptsUsed"]["B"].asInt().unwrapOr(m_view.match.deathmatchAttemptsUsedB));
+            m_view.match.deathmatchAttemptsCompletedA = static_cast<int>(deathmatch["attemptsCompleted"]["A"].asInt().unwrapOr(m_view.match.deathmatchAttemptsCompletedA));
+            m_view.match.deathmatchAttemptsCompletedB = static_cast<int>(deathmatch["attemptsCompleted"]["B"].asInt().unwrapOr(m_view.match.deathmatchAttemptsCompletedB));
+
+            auto const ownServerUsed = m_view.match.side == "A"
+                ? m_view.match.deathmatchAttemptsUsedA
+                : m_view.match.deathmatchAttemptsUsedB;
+            if (m_localDeathmatchSequence != m_view.match.deathmatchSequence) {
+                m_localDeathmatchSequence = m_view.match.deathmatchSequence;
+                m_localDeathmatchVisualAttempts = ownServerUsed;
+            } else {
+                m_localDeathmatchVisualAttempts = std::max(
+                    m_localDeathmatchVisualAttempts,
+                    ownServerUsed
+                );
+            }
+        }
     }
 }
 
@@ -872,8 +1003,13 @@ void RankedRuntime::dismissMatch() {
     m_attemptId.clear();
     m_pendingStart.reset();
     m_pendingEnd.reset();
+    m_attemptBacklog.clear();
     m_pendingProgress.reset();
     m_lastSubmittedProgress = -1;
+    m_localDeathmatchSequence = 0;
+    m_localDeathmatchVisualAttempts = 0;
+    m_optimisticScoreDelta = 0.0;
+    m_optimisticClearDelta = 0;
     m_songBypassAllowed = false;
     m_view.match = {};
     setStage(RuntimeStage::Ready, "Ranked session ready.");
@@ -962,6 +1098,95 @@ int RankedRuntime::currentLevelId() const {
     return m_view.match.currentMap ? m_view.match.currentMap->levelId : 0;
 }
 
+bool RankedRuntime::hasLocalAttemptInFlight() const {
+    return
+        !m_attemptId.empty() ||
+        m_pendingStart.has_value() ||
+        m_pendingEnd.has_value() ||
+        !m_attemptBacklog.empty() ||
+        m_attemptBusy;
+}
+
+bool RankedRuntime::canEnterCurrentLevel() const {
+    if (m_view.stage != RuntimeStage::Matched || !m_view.match.currentMap || m_view.match.spectatorActive) return false;
+    if (!stateAllowsActiveAttempt(m_view.match.state)) return false;
+
+    if (m_view.match.state == "DEATHMATCH_PLAYING") {
+        auto const serverUsed = m_view.match.side == "A"
+            ? m_view.match.deathmatchAttemptsUsedA
+            : m_view.match.deathmatchAttemptsUsedB;
+        auto const localUsed = m_localDeathmatchSequence == m_view.match.deathmatchSequence
+            ? m_localDeathmatchVisualAttempts
+            : 0;
+        // This is evaluated from LevelInfoLayer before creating a new PlayLayer.
+        // The currently-running third attempt is already inside PlayLayer, so a
+        // local/server visual count of 3 means a fourth scene must never begin.
+        if (std::max(serverUsed, localUsed) >= 3) return false;
+        return true;
+    }
+
+    // A Clear is shown optimistically before its /attempt/end acknowledgement.
+    // If that pending Clear would make this side reach two Clears, do not let
+    // LevelInfoLayer auto-enter another PlayLayer while waiting for the server
+    // to transition into LAST_ATTEMPT_WINDOW / ROUND_SETTLING. This closes the
+    // clear->LevelInfo->re-enter race that could create an illegal third Clear.
+    auto const committedClears = m_view.match.side == "A" ? m_view.match.clearsA : m_view.match.clearsB;
+    if (
+        stateAllowsAttemptStart(m_view.match.state) &&
+        committedClears + m_optimisticClearDelta >= 2 &&
+        hasLocalAttemptInFlight()
+    ) return false;
+
+    return true;
+}
+
+bool RankedRuntime::reserveDeathmatchVisualAttempt() {
+    if (m_view.match.state != "DEATHMATCH_PLAYING") return true;
+    auto const sequence = m_view.match.deathmatchSequence;
+    if (sequence <= 0) return false;
+    auto const serverUsed = m_view.match.side == "A"
+        ? m_view.match.deathmatchAttemptsUsedA
+        : m_view.match.deathmatchAttemptsUsedB;
+    if (m_localDeathmatchSequence != sequence) {
+        m_localDeathmatchSequence = sequence;
+        m_localDeathmatchVisualAttempts = serverUsed;
+    } else {
+        m_localDeathmatchVisualAttempts = std::max(m_localDeathmatchVisualAttempts, serverUsed);
+    }
+    if (m_localDeathmatchVisualAttempts >= 3) return false;
+    ++m_localDeathmatchVisualAttempts;
+    ++m_view.revision;
+    return true;
+}
+
+int RankedRuntime::localDeathmatchVisualAttemptsUsed() const {
+    if (m_localDeathmatchSequence != m_view.match.deathmatchSequence) return 0;
+    return std::clamp(m_localDeathmatchVisualAttempts, 0, 3);
+}
+
+double RankedRuntime::localDisplayScore(double progressPercent) const {
+    auto const ownIsA = m_view.match.side == "A";
+    auto const committed = ownIsA ? m_view.match.committedScoreA : m_view.match.committedScoreB;
+    auto const serverDisplay = ownIsA ? m_view.match.scoreA : m_view.match.scoreB;
+    auto const optimisticBase = committed + m_optimisticScoreDelta;
+
+    // A negative progress means the current visual attempt already ended. Its
+    // value is therefore in m_optimisticScoreDelta and must not be counted again.
+    if (progressPercent < 0.0 || m_view.match.spectatorActive || !m_view.match.currentMap) {
+        return std::max(serverDisplay, optimisticBase);
+    }
+
+    auto const progress = std::clamp(progressPercent, 0.0, 100.0);
+    auto const qualifying = m_view.match.currentMap->qualifyingPercent;
+    auto const live = progress >= qualifying ? std::floor(progress) : 0.0;
+    return std::max(serverDisplay, optimisticBase + live);
+}
+
+int RankedRuntime::localDisplayClears() const {
+    auto const committed = m_view.match.side == "A" ? m_view.match.clearsA : m_view.match.clearsB;
+    return std::max(0, committed + m_optimisticClearDelta);
+}
+
 bool RankedRuntime::canTrackLevel(int levelId) const {
     return
         m_view.stage == RuntimeStage::Matched &&
@@ -990,17 +1215,40 @@ std::string RankedRuntime::newEventId(std::string_view kind) {
 
 void RankedRuntime::reportAttemptStart(int levelId) {
     if (!canTrackLevel(levelId) || !stateAllowsAttemptStart(m_view.match.state)) return;
-    if (!m_pendingStart) {
-        m_pendingStart = PendingStart {
-            .levelId = levelId,
-            .eventId = newEventId("start"),
-        };
+
+    if (m_view.match.state == "DEATHMATCH_PLAYING") {
+        auto const serverUsed = m_view.match.side == "A"
+            ? m_view.match.deathmatchAttemptsUsedA
+            : m_view.match.deathmatchAttemptsUsedB;
+        if (serverUsed >= 3) return;
+    }
+
+    PendingStart start {
+        .levelId = levelId,
+        .eventId = newEventId("start"),
+    };
+
+    // Geometry Dash may visually reset into the next attempt before the previous
+    // HTTP end acknowledgement arrives. Never overwrite that older transport.
+    // Store every later visual attempt in FIFO order instead.
+    if (
+        !m_attemptId.empty() || m_pendingStart || m_pendingEnd ||
+        m_attemptBusy || !m_attemptBacklog.empty()
+    ) {
+        m_attemptBacklog.push_back(QueuedAttempt {
+            .start = std::move(start),
+            .end = std::nullopt,
+        });
+    } else {
+        m_pendingStart = std::move(start);
     }
     flushAttemptEvents();
 }
 
 void RankedRuntime::reportAttemptProgress(int levelId, double progressPercent) {
-    if (!canTrackLevel(levelId) || m_attemptId.empty() || m_pendingEnd) return;
+    // Progress is best-effort telemetry. If the visual client is already ahead of
+    // the server transport queue, do not attach that progress to an older attempt.
+    if (!canTrackLevel(levelId) || m_attemptId.empty() || m_pendingEnd || !m_attemptBacklog.empty()) return;
     auto const progress = std::clamp(static_cast<int>(std::floor(progressPercent)), 0, 100);
     if (progress == m_lastSubmittedProgress && !m_pendingProgress) return;
     m_pendingProgress = progress;
@@ -1009,20 +1257,58 @@ void RankedRuntime::reportAttemptProgress(int levelId, double progressPercent) {
 
 void RankedRuntime::reportAttemptEnd(int levelId, double progressPercent, bool cleared) {
     if (!canTrackLevel(levelId)) return;
-    if (m_pendingEnd) return;
-    if (m_attemptId.empty() && !m_pendingStart && !m_attemptBusy) return;
-    m_pendingEnd = PendingEnd {
+
+    auto const finalProgress = std::clamp(progressPercent, 0.0, 100.0);
+    auto optimisticScore = 0.0;
+    if (m_view.match.currentMap) {
+        auto const qualifying = m_view.match.currentMap->qualifyingPercent;
+        optimisticScore = cleared
+            ? 100.0 + qualifying
+            : (finalProgress >= qualifying ? std::floor(finalProgress) : 0.0);
+    }
+    PendingEnd end {
         .levelId = levelId,
-        .progressPercent = std::clamp(progressPercent, 0.0, 100.0),
+        .progressPercent = finalProgress,
         .cleared = cleared,
         .eventId = newEventId("end"),
+        .optimisticScore = optimisticScore,
+        .optimisticClear = cleared ? 1 : 0,
     };
+
+    if (!m_attemptBacklog.empty()) {
+        // The newest queued start is the visual attempt that just ended. Starts
+        // and ends are observed in gameplay order (destroy/complete before reset),
+        // so attaching to the FIFO tail preserves exact attempt identity.
+        if (m_attemptBacklog.back().end) return;
+        m_attemptBacklog.back().end = end;
+    } else {
+        if (m_pendingEnd) return; // duplicate completion hook for the current attempt
+        if (m_attemptId.empty() && !m_pendingStart && !m_attemptBusy) return;
+        m_pendingEnd = end;
+    }
+
+    m_optimisticScoreDelta += end.optimisticScore;
+    m_optimisticClearDelta += end.optimisticClear;
+    ++m_view.revision;
     m_pendingProgress.reset();
     flushAttemptEvents();
 }
 
+void RankedRuntime::promoteQueuedAttempt() {
+    if (
+        m_attemptBusy || !m_attemptId.empty() || m_pendingStart || m_pendingEnd ||
+        m_attemptBacklog.empty()
+    ) return;
+
+    auto next = std::move(m_attemptBacklog.front());
+    m_attemptBacklog.pop_front();
+    m_pendingStart = std::move(next.start);
+    m_pendingEnd = std::move(next.end);
+}
+
 void RankedRuntime::flushAttemptEvents() {
     if (m_attemptBusy || std::chrono::steady_clock::now() < m_nextAttemptRetryAt) return;
+    promoteQueuedAttempt();
     if (!m_attemptId.empty() && m_pendingEnd) {
         sendAttemptEnd();
         return;
@@ -1053,16 +1339,37 @@ void RankedRuntime::sendAttemptStart() {
             observeServerNow(root);
             if (!root["accepted"].asBool().unwrapOr(false)) {
                 setTransientError(root["reason"].asString().unwrapOr("Attempt start rejected"));
+                applyAttemptSnapshot(root);
+                if (m_pendingEnd) {
+                    m_optimisticScoreDelta = std::max(0.0, m_optimisticScoreDelta - m_pendingEnd->optimisticScore);
+                    m_optimisticClearDelta = std::max(0, m_optimisticClearDelta - m_pendingEnd->optimisticClear);
+                }
                 m_pendingStart.reset();
                 m_pendingEnd.reset();
+                m_pendingProgress.reset();
+                m_lastSubmittedProgress = -1;
+                m_nextAttemptRetryAt = {};
+                promoteQueuedAttempt();
+                ++m_view.revision;
+                flushAttemptEvents();
                 return;
             }
             m_attemptId = root["attemptId"].asString().unwrapOr("");
+            applyAttemptSnapshot(root);
+            if (m_view.match.state == "DEATHMATCH_PLAYING") {
+                auto const attemptNumber = static_cast<int>(root["attemptNumber"].asInt().unwrapOr(0));
+                if (attemptNumber > 0) {
+                    if (m_view.match.side == "A") m_view.match.deathmatchAttemptsUsedA = std::max(m_view.match.deathmatchAttemptsUsedA, attemptNumber);
+                    else m_view.match.deathmatchAttemptsUsedB = std::max(m_view.match.deathmatchAttemptsUsedB, attemptNumber);
+                }
+            }
             m_pendingStart.reset();
             m_pendingProgress.reset();
             m_lastSubmittedProgress = -1;
             m_nextAttemptRetryAt = {};
             ++m_view.revision;
+            // m_pendingEnd may already contain a fast visual death/Clear that
+            // happened before this start acknowledgement; send it immediately.
             flushAttemptEvents();
         }
     );
@@ -1070,18 +1377,19 @@ void RankedRuntime::sendAttemptStart() {
 
 void RankedRuntime::sendAttemptEnd() {
     if (!m_pendingEnd || m_attemptId.empty()) return;
+    auto const ending = *m_pendingEnd;
     matjson::Value body;
-    body["levelId"] = fmt::format("{}", m_pendingEnd->levelId);
+    body["levelId"] = fmt::format("{}", ending.levelId);
     body["attemptId"] = m_attemptId;
-    body["clientEventId"] = m_pendingEnd->eventId;
-    body["progressPercent"] = m_pendingEnd->progressPercent;
-    body["cleared"] = m_pendingEnd->cleared;
+    body["clientEventId"] = ending.eventId;
+    body["progressPercent"] = ending.progressPercent;
+    body["cleared"] = ending.cleared;
     auto request = baseRequest(m_sessionToken, m_matchToken);
     request.bodyJSON(body);
     m_attemptBusy = true;
     m_attemptRequest.spawn(
         request.post(endpoint("/api/ranked/matches/" + m_view.match.matchId + "/attempt/end")),
-        [this](web::WebResponse response) {
+        [this, ending](web::WebResponse response) {
             m_attemptBusy = false;
             if (!successful(response)) {
                 setTransientError("Attempt end retrying: " + responseError(response));
@@ -1095,11 +1403,16 @@ void RankedRuntime::sendAttemptEnd() {
             if (!accepted && reason != "ATTEMPT_ALREADY_ENDED") {
                 setTransientError(reason.empty() ? "Attempt end rejected" : reason);
             }
+            applyAttemptSnapshot(root);
             m_attemptId.clear();
             m_pendingEnd.reset();
             m_pendingProgress.reset();
             m_lastSubmittedProgress = -1;
+            m_optimisticScoreDelta = std::max(0.0, m_optimisticScoreDelta - ending.optimisticScore);
+            m_optimisticClearDelta = std::max(0, m_optimisticClearDelta - ending.optimisticClear);
             m_nextAttemptRetryAt = {};
+            m_nextPollAt = std::chrono::steady_clock::now();
+            promoteQueuedAttempt();
             ++m_view.revision;
             flushAttemptEvents();
         }
@@ -1131,7 +1444,9 @@ void RankedRuntime::sendAttemptProgress() {
         [this, attemptId, progress](web::WebResponse response) {
             m_progressBusy = false;
             if (successful(response)) {
-                observeServerNow(response.json().unwrapOr(matjson::Value()));
+                auto const root = response.json().unwrapOr(matjson::Value());
+                observeServerNow(root);
+                applyAttemptSnapshot(root);
                 if (m_attemptId == attemptId) m_lastSubmittedProgress = progress;
             } else {
                 log::debug("Ranked spectator telemetry dropped: {}", response.code());

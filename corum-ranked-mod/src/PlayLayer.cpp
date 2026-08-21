@@ -8,6 +8,9 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cmath>
+#include <iomanip>
+#include <sstream>
 
 using namespace geode::prelude;
 
@@ -52,6 +55,18 @@ void applyCheck(CCSprite* icon, corum::ranked::ClearCheckColor color) {
         : kPendingCheck);
 }
 
+std::string formatScore(double value) {
+    if (std::abs(value - std::round(value)) < 0.0005) {
+        return std::to_string(static_cast<long long>(std::llround(value)));
+    }
+    std::ostringstream stream;
+    stream << std::fixed << std::setprecision(3) << value;
+    auto text = stream.str();
+    while (!text.empty() && text.back() == '0') text.pop_back();
+    if (!text.empty() && text.back() == '.') text.pop_back();
+    return text;
+}
+
 } // namespace
 
 class $modify(CorumRankedPlayLayer, PlayLayer) {
@@ -60,10 +75,12 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         CCLabelBMFont* fpsLabel = nullptr;
         CCLabelBMFont* ownScoreLabel = nullptr;
         std::array<CCSprite*, 2> ownChecks {nullptr, nullptr};
+        CCLabelBMFont* ownAttemptLabel = nullptr;
         CCLabelBMFont* timerLabel = nullptr;
         CCLabelBMFont* stateLabel = nullptr;
         CCLabelBMFont* opponentScoreLabel = nullptr;
         std::array<CCSprite*, 2> opponentChecks {nullptr, nullptr};
+        CCLabelBMFont* opponentAttemptLabel = nullptr;
         CCLabelBMFont* qualifyingLabel = nullptr;
         CCNode* spectatorPanel = nullptr;
         CCLabelBMFont* spectatorNameLabel = nullptr;
@@ -78,6 +95,8 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         int levelId = 0;
         bool rankedLevel = false;
         bool autoExitRequested = false;
+        bool attemptEndReported = false;
+        bool deniedDeathmatchVisualAttempt = false;
     };
 
     bool init(GJGameLevel* level, bool useReplay, bool dontCreateObjects) {
@@ -90,6 +109,16 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         if (!m_fields->rankedLevel || m_isPracticeMode || m_isTestMode) return true;
 
         addRankedHud();
+        m_fields->attemptEndReported = false;
+        if (runtime.view().match.state == "DEATHMATCH_PLAYING") {
+            // Reserve the visual try before gameplay begins. This local budget is
+            // independent of HTTP acknowledgement latency and therefore prevents
+            // a fourth visual Death Match attempt from appearing on fast resets.
+            if (!runtime.reserveDeathmatchVisualAttempt()) {
+                m_fields->deniedDeathmatchVisualAttempt = true;
+                return true;
+            }
+        }
         runtime.reportAttemptStart(m_fields->levelId);
         return true;
     }
@@ -99,6 +128,11 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         auto& runtime = corum::ranked::RankedRuntime::get();
         runtime.tick();
         if (!m_fields->rankedLevel || m_isPracticeMode || m_isTestMode) return;
+        if (m_fields->deniedDeathmatchVisualAttempt && !m_fields->autoExitRequested) {
+            m_fields->autoExitRequested = true;
+            PlayLayer::onQuit();
+            return;
+        }
 
         auto const& matchState = runtime.view().match.state;
         auto const stillPlaying =
@@ -142,13 +176,40 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         ) {
             return;
         }
+        if (m_fields->rankedLevel && !m_isPracticeMode && !m_isTestMode) {
+            // destroyPlayer() normally closes an attempt before the vanilla reset.
+            // A manual restart/reset can bypass destroyPlayer(), so close it here
+            // before creating the next visual attempt. This guarantees exactly one
+            // end event for every start even when the user restarts while alive.
+            if (!m_fields->attemptEndReported) {
+                m_fields->attemptEndReported = true;
+                auto const progress = std::clamp(static_cast<double>(getCurrentPercent()), 0.0, 100.0);
+                runtime.reportAttemptEnd(m_fields->levelId, progress, false);
+            }
+
+            auto const& match = runtime.view().match;
+            if (match.state == "DEATHMATCH_PLAYING") {
+                // A reset creates the next *visual* attempt immediately, before the
+                // prior /attempt/end request may be acknowledged. Reserve the next
+                // slot locally first; after attempt 3 this returns false and exits.
+                if (!runtime.reserveDeathmatchVisualAttempt()) {
+                    if (!m_fields->autoExitRequested) {
+                        m_fields->autoExitRequested = true;
+                        PlayLayer::onQuit();
+                    }
+                    return;
+                }
+            }
+        }
         PlayLayer::resetLevel();
         if (!m_fields->rankedLevel || m_isPracticeMode || m_isTestMode) return;
+        m_fields->attemptEndReported = false;
         runtime.reportAttemptStart(m_fields->levelId);
     }
 
     void destroyPlayer(PlayerObject* player, GameObject* object) {
-        if (m_fields->rankedLevel && !m_isPracticeMode && !m_isTestMode) {
+        if (m_fields->rankedLevel && !m_isPracticeMode && !m_isTestMode && !m_fields->attemptEndReported) {
+            m_fields->attemptEndReported = true;
             auto const progress = std::clamp(static_cast<double>(getCurrentPercent()), 0.0, 100.0);
             corum::ranked::RankedRuntime::get().reportAttemptEnd(
                 m_fields->levelId,
@@ -160,10 +221,41 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
     }
 
     void levelComplete() {
-        if (m_fields->rankedLevel && !m_isPracticeMode && !m_isTestMode) {
+        if (m_fields->rankedLevel && !m_isPracticeMode && !m_isTestMode && !m_fields->attemptEndReported) {
+            m_fields->attemptEndReported = true;
             corum::ranked::RankedRuntime::get().reportAttemptEnd(m_fields->levelId, 100.0, true);
         }
         PlayLayer::levelComplete();
+    }
+
+    void showCompleteText() {
+        // levelComplete() is the primary clear hook. Keep showCompleteText() as a
+        // second vanilla completion-path safety net; the per-attempt guard makes
+        // the pair idempotent and prevents double Clear/score accounting.
+        if (m_fields->rankedLevel && !m_isPracticeMode && !m_isTestMode && !m_fields->attemptEndReported) {
+            m_fields->attemptEndReported = true;
+            corum::ranked::RankedRuntime::get().reportAttemptEnd(m_fields->levelId, 100.0, true);
+        }
+        PlayLayer::showCompleteText();
+    }
+
+    void onQuit() {
+        // A manual quit is still an attempt end. Without this hook a player could
+        // leave/re-enter LevelInfoLayer while the server kept the old attempt open,
+        // producing stale scores, orphan attempts, and broken Death Match counts.
+        if (
+            m_fields->rankedLevel && !m_isPracticeMode && !m_isTestMode &&
+            !m_fields->attemptEndReported && !m_fields->autoExitRequested
+        ) {
+            m_fields->attemptEndReported = true;
+            auto const progress = std::clamp(static_cast<double>(getCurrentPercent()), 0.0, 100.0);
+            corum::ranked::RankedRuntime::get().reportAttemptEnd(
+                m_fields->levelId,
+                progress,
+                false
+            );
+        }
+        PlayLayer::onQuit();
     }
 
     void togglePracticeMode(bool practiceMode) {
@@ -200,11 +292,17 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         m_fields->ownChecks[0] = checkIcon({layout.topLeftX + 5.0f, top - 42.0f});
         m_fields->ownChecks[1] = checkIcon({layout.topLeftX + 21.0f, top - 42.0f});
         for (auto* icon : m_fields->ownChecks) m_fields->hudRoot->addChild(icon, 3);
+        m_fields->ownAttemptLabel = label("", "bigFont.fnt", 0.24f, {0.0f, 1.0f}, {layout.topLeftX, top - 38.0f});
+        m_fields->ownAttemptLabel->setVisible(false);
+        m_fields->hudRoot->addChild(m_fields->ownAttemptLabel, 3);
 
-        m_fields->timerLabel = label("", "bigFont.fnt", 0.34f, {0.0f, 1.0f}, {layout.topLeftX, top - 54.0f});
+        // The authoritative clock belongs in the visual center. alpha.15 makes
+        // it larger and center-aligned so FINAL/LAST ATTEMPT timing is readable
+        // without looking away from gameplay.
+        m_fields->timerLabel = label("", "bigFont.fnt", 0.66f, {0.5f, 1.0f}, {size.width / 2.0f, top - 4.0f});
         m_fields->timerLabel->setID("ranked-countdown"_spr);
         m_fields->hudRoot->addChild(m_fields->timerLabel, 3);
-        m_fields->stateLabel = label("", "goldFont.fnt", 0.34f, {0.0f, 1.0f}, {layout.topLeftX, top - 72.0f});
+        m_fields->stateLabel = label("", "goldFont.fnt", 0.40f, {0.5f, 1.0f}, {size.width / 2.0f, top - 32.0f});
         m_fields->stateLabel->setID("ranked-round-state"_spr);
         m_fields->hudRoot->addChild(m_fields->stateLabel, 3);
 
@@ -214,6 +312,9 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         m_fields->opponentChecks[0] = checkIcon({right - 21.0f, top - 42.0f});
         m_fields->opponentChecks[1] = checkIcon({right - 5.0f, top - 42.0f});
         for (auto* icon : m_fields->opponentChecks) m_fields->hudRoot->addChild(icon, 3);
+        m_fields->opponentAttemptLabel = label("", "bigFont.fnt", 0.24f, {1.0f, 1.0f}, {right, top - 38.0f});
+        m_fields->opponentAttemptLabel->setVisible(false);
+        m_fields->hudRoot->addChild(m_fields->opponentAttemptLabel, 3);
 
         m_fields->qualifyingLabel = label("Qualifying : -", "bigFont.fnt", 0.28f, {0.0f, 0.0f}, {layout.bottomLeftX, layout.bottomY});
         m_fields->qualifyingLabel->setID("ranked-qualifying"_spr);
@@ -268,6 +369,13 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         m_fields->renderedRevision = runtime.view().revision;
         if (!m_fields->hudRoot || !m_fields->fpsLabel || !m_fields->ownScoreLabel) return;
 
+        auto attemptsUsedA = match.deathmatchAttemptsUsedA;
+        auto attemptsUsedB = match.deathmatchAttemptsUsedB;
+        if (match.state == "DEATHMATCH_PLAYING") {
+            auto const localVisualUsed = runtime.localDeathmatchVisualAttemptsUsed();
+            if (match.side == "A") attemptsUsedA = std::max(attemptsUsedA, localVisualUsed);
+            if (match.side == "B") attemptsUsedB = std::max(attemptsUsedB, localVisualUsed);
+        }
         auto const presentation = corum::ranked::presentHud({
             .side = match.side,
             .state = match.state,
@@ -276,6 +384,9 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
             .scoreB = match.scoreB,
             .clearsA = match.clearsA,
             .clearsB = match.clearsB,
+            .deathmatch = match.state == "DEATHMATCH_PLAYING",
+            .deathmatchAttemptsUsedA = attemptsUsedA,
+            .deathmatchAttemptsUsedB = attemptsUsedB,
             .qualifyingPercent = match.currentMap ? match.currentMap->qualifyingPercent : 100.0,
             .remainingMillis = runtime.deadlineMillis(),
             .renderFps = m_fields->fpsMeter.fps(),
@@ -285,11 +396,25 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         });
 
         m_fields->fpsLabel->setString(presentation.fpsText.c_str());
-        m_fields->ownScoreLabel->setString(presentation.ownScoreText.c_str());
+        auto const liveProgress = m_fields->attemptEndReported
+            ? -1.0
+            : std::clamp(static_cast<double>(getCurrentPercent()), 0.0, 100.0);
+        auto const ownLiveScore = runtime.localDisplayScore(liveProgress);
+        m_fields->ownScoreLabel->setString(("Score : " + formatScore(ownLiveScore)).c_str());
         m_fields->opponentScoreLabel->setString(presentation.opponentScoreText.c_str());
+        auto ownChecks = presentation.ownChecks;
+        if (!presentation.deathmatch) ownChecks = corum::ranked::clearChecks(runtime.localDisplayClears());
         for (std::size_t index = 0; index < 2; ++index) {
-            applyCheck(m_fields->ownChecks[index], presentation.ownChecks[index]);
+            applyCheck(m_fields->ownChecks[index], ownChecks[index]);
             applyCheck(m_fields->opponentChecks[index], presentation.opponentChecks[index]);
+            m_fields->ownChecks[index]->setVisible(!presentation.deathmatch);
+            m_fields->opponentChecks[index]->setVisible(!presentation.deathmatch);
+        }
+        m_fields->ownAttemptLabel->setVisible(presentation.deathmatch);
+        m_fields->opponentAttemptLabel->setVisible(presentation.deathmatch);
+        if (presentation.deathmatch) {
+            m_fields->ownAttemptLabel->setString(presentation.ownAttemptText.c_str());
+            m_fields->opponentAttemptLabel->setString(presentation.opponentAttemptText.c_str());
         }
         m_fields->qualifyingLabel->setString(presentation.qualifyingText.c_str());
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
@@ -302,8 +427,8 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         m_fields->stateLabel->setString(presentation.stateText.c_str());
         m_fields->timerLabel->setVisible(!presentation.timerText.empty());
         m_fields->stateLabel->setVisible(!presentation.stateText.empty());
-        m_fields->stateLabel->setPositionY(top - (presentation.windowStateFirst ? 54.0f : 72.0f));
-        m_fields->timerLabel->setPositionY(top - (presentation.windowStateFirst ? 72.0f : 54.0f));
+        m_fields->timerLabel->setPosition({size.width / 2.0f, top - 4.0f});
+        m_fields->stateLabel->setPosition({size.width / 2.0f, top - 32.0f});
 
         m_fields->spectatorPanel->setVisible(presentation.spectatorVisible);
         if (presentation.spectatorVisible) {

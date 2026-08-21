@@ -79,7 +79,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
             m_fields->vanillaSongKickIssued = true;
         }
 
-        if (rankedPlayingState(runtime.view().match.state)) {
+        if (rankedPlayingState(runtime.view().match.state) && runtime.canEnterCurrentLevel()) {
             scheduleAutoPlay(0.22f);
         } else {
             scheduleOnce(schedule_selector(CorumRankedLevelInfoLayer::returnToRanked), 0.10f);
@@ -97,6 +97,10 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         auto& runtime = corum::ranked::RankedRuntime::get();
         if (!isCurrentRankedLevel(m_level)) return;
         if (!rankedPlayingState(runtime.view().match.state)) {
+            returnToRanked(0.0f);
+            return;
+        }
+        if (!runtime.canEnterCurrentLevel()) {
             returnToRanked(0.0f);
             return;
         }
@@ -140,7 +144,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
     void returnToRanked(float) {
         auto& runtime = corum::ranked::RankedRuntime::get();
         if (!isCurrentRankedLevel(m_level)) return;
-        if (rankedPlayingState(runtime.view().match.state)) return;
+        if (rankedPlayingState(runtime.view().match.state) && runtime.canEnterCurrentLevel()) return;
         if (m_fields->returningToRanked) return;
         m_fields->returningToRanked = true;
         CCDirector::sharedDirector()->popScene();
@@ -153,9 +157,11 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         }
         auto& runtime = corum::ranked::RankedRuntime::get();
         if (rankedPlayingState(runtime.view().match.state)) {
-            // Never let repeated Back taps escape the ranked scene stack while the
-            // authoritative match is still active. Re-enter gameplay instead.
-            scheduleAutoPlay(0.05f);
+            // During a live Round, repeated Back taps cannot escape the Ranked stack.
+            // Death Match is the exception after all 3 local attempts are consumed:
+            // return to the Ranked waiting screen instead of re-entering gameplay.
+            if (runtime.canEnterCurrentLevel()) scheduleAutoPlay(0.05f);
+            else returnToRanked(0.0f);
             return;
         }
         returnToRanked(0.0f);
@@ -168,7 +174,8 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         }
         auto& runtime = corum::ranked::RankedRuntime::get();
         if (rankedPlayingState(runtime.view().match.state)) {
-            scheduleAutoPlay(0.05f);
+            if (runtime.canEnterCurrentLevel()) scheduleAutoPlay(0.05f);
+            else returnToRanked(0.0f);
             return;
         }
         returnToRanked(0.0f);

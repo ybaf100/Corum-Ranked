@@ -8,12 +8,15 @@
 namespace {
 
 std::string formatNumber(double value) {
-    if (std::abs(value - std::round(value)) < 0.001) {
-        return std::to_string(static_cast<int>(std::lround(value)));
+    if (std::abs(value - std::round(value)) < 0.0005) {
+        return std::to_string(static_cast<long long>(std::llround(value)));
     }
     std::ostringstream stream;
-    stream << std::fixed << std::setprecision(1) << value;
-    return stream.str();
+    stream << std::fixed << std::setprecision(3) << value;
+    auto text = stream.str();
+    while (!text.empty() && text.back() == '0') text.pop_back();
+    if (!text.empty() && text.back() == '.') text.pop_back();
+    return text;
 }
 
 std::int64_t nonNegative(std::optional<std::int64_t> value) {
@@ -67,18 +70,28 @@ HudPresentation presentHud(HudInput const& input) {
     auto const opponentScore = ownIsA ? input.scoreB : input.scoreA;
     auto const ownClears = ownIsA ? input.clearsA : input.clearsB;
     auto const opponentClears = ownIsA ? input.clearsB : input.clearsA;
+    auto const ownAttempts = ownIsA ? input.deathmatchAttemptsUsedA : input.deathmatchAttemptsUsedB;
+    auto const opponentAttempts = ownIsA ? input.deathmatchAttemptsUsedB : input.deathmatchAttemptsUsedA;
 
     HudPresentation result;
     result.fpsText = input.renderFps && std::isfinite(*input.renderFps) && *input.renderFps > 0.0
         ? "FPS : " + std::to_string(static_cast<int>(std::lround(*input.renderFps)))
         : "FPS : -";
-    result.ownScoreText = "Score : " + std::to_string(ownScore);
-    result.opponentScoreText = "Score : " + std::to_string(opponentScore);
+    result.ownScoreText = "Score : " + formatNumber(ownScore);
+    result.opponentScoreText = "Score : " + formatNumber(opponentScore);
     result.ownChecks = clearChecks(ownClears);
     result.opponentChecks = clearChecks(opponentClears);
     result.qualifyingText = "Qualifying : " + formatNumber(input.qualifyingPercent) + "%";
+    result.deathmatch = input.deathmatch;
+    if (input.deathmatch) {
+        result.ownAttemptText = "Attempts : " + std::to_string(std::clamp(ownAttempts, 0, 3)) + "/3";
+        result.opponentAttemptText = "Attempts : " + std::to_string(std::clamp(opponentAttempts, 0, 3)) + "/3";
+    }
 
-    if (input.state == "LAST_ATTEMPT_WINDOW") {
+    if (input.state == "DEATHMATCH_PLAYING") {
+        result.stateText = "DEATH MATCH";
+        result.timerText = "3 ATTEMPTS";
+    } else if (input.state == "LAST_ATTEMPT_WINDOW") {
         result.stateText = "LAST ATTEMPT";
         result.timerText = windowCountdown(input.remainingMillis);
         result.windowStateFirst = true;

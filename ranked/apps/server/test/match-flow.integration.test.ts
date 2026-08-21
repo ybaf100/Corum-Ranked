@@ -126,6 +126,10 @@ describe("two-client authoritative match flow", () => {
     const baseDocument = configDocumentFixture("match-flow");
     const document = {
       ...baseDocument,
+      // Exercise the real Corum case where Qualifying can be decimal. Clear
+      // awards and JSON snapshots must retain 100 + 20.1 = 120.1 exactly enough
+      // for the client instead of silently truncating to an integer.
+      maps: baseDocument.maps.map((map) => ({ ...map, qualifyingPercent: 20.1 })),
       operational: {
         ...baseDocument.operational,
         timeouts: {
@@ -218,20 +222,30 @@ describe("two-client authoritative match flow", () => {
       expect(playing.state).toBe("ROUND_PLAYING");
       expect(playing.currentRound.roundNumber).toBe(roundNumber);
       const levelId = playing.currentRound.map.playableLevelId as string;
+      const qualifying = Number(playing.currentRound.map.qualifyingPercent);
 
       clock.advanceSeconds(1);
       const firstStart = await matches.startAttempt(matchId, statusA.matchToken, playerA, {
         levelId,
         clientEventId: `r${roundNumber}-a1-start`,
       });
+      const livePercent = Math.min(99, Math.max(Math.ceil(qualifying), 1));
+      const progressAck = await matches.updateAttemptProgress(matchId, statusA.matchToken, playerA, {
+        levelId,
+        attemptId: firstStart.attemptId!,
+        progressPercent: livePercent,
+      });
+      expect(progressAck.roundSnapshot.displayScores.A).toBe(livePercent >= qualifying ? livePercent : 0);
       clock.advanceSeconds(1);
-      await matches.endAttempt(matchId, statusA.matchToken, playerA, {
+      const firstEnd = await matches.endAttempt(matchId, statusA.matchToken, playerA, {
         levelId,
         attemptId: firstStart.attemptId!,
         clientEventId: `r${roundNumber}-a1-end`,
         progressPercent: 100,
         cleared: true,
       });
+      expect(firstEnd.roundSnapshot.clears.A).toBe(1);
+      expect(firstEnd.roundSnapshot.scores.A).toBeCloseTo(100 + qualifying, 6);
       clock.advanceSeconds(1);
       const secondStart = await matches.startAttempt(matchId, statusA.matchToken, playerA, {
         levelId,

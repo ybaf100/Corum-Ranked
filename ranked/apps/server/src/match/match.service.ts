@@ -208,6 +208,11 @@ const sideColumn = (side: PlayerSide, prefix: string): string =>
 const resourcePrepareSeconds = (configuredReadySeconds: number): number =>
   Math.max(configuredReadySeconds, 60);
 
+// Runtime progress state is shared by normal rounds and deathmatches. Keep the
+// key-space disjoint so a Death Match can expose live score/progress without
+// colliding with Round 1-3 telemetry.
+const deathmatchRuntimeSlot = (sequence: number): number => 1_000 + sequence;
+
 @Injectable()
 export class MatchService {
   public constructor(
@@ -569,6 +574,14 @@ export class MatchService {
         reason: decision.reason,
         stateVersion: decision.state.stateVersion,
         deadlineAt: this.domainDeadlineIso(decision.state),
+        roundSnapshot: {
+          roundNumber: Number(round.round_number),
+          phase: decision.state.phase,
+          scores: decision.state.scores,
+          displayScores: decision.state.scores,
+          clears: decision.state.clears,
+          lastAttemptWindow: decision.state.lastAttemptWindow,
+        },
         serverNow: now.toISOString(),
       };
     });
@@ -681,12 +694,24 @@ export class MatchService {
           body.attemptId,
         );
       }
+      const endedAttempt = decision.state.attempts[authorization.side].find(
+        (candidate) => candidate.id === body.attemptId,
+      );
       return {
         accepted: decision.accepted,
         duplicate: decision.duplicate,
         reason: decision.reason,
+        awardedScore: endedAttempt?.awardedScore ?? 0,
         stateVersion: decision.state.stateVersion,
         deadlineAt: this.domainDeadlineIso(decision.state),
+        roundSnapshot: {
+          roundNumber: Number(round.round_number),
+          phase: decision.state.phase,
+          scores: decision.state.scores,
+          displayScores: decision.state.scores,
+          clears: decision.state.clears,
+          lastAttemptWindow: decision.state.lastAttemptWindow,
+        },
         serverNow: now.toISOString(),
       };
     });
@@ -704,6 +729,16 @@ export class MatchService {
       let match = await this.lockMatch(transaction, matchId);
       if (match.deadline_at && now.getTime() >= new Date(match.deadline_at).getTime()) {
         match = await this.advanceLockedMatch(transaction, match, now);
+      }
+      if (match.state === "DEATHMATCH_PLAYING") {
+        return this.updateDeathmatchAttemptProgress(
+          transaction,
+          match,
+          authorization.side,
+          session.playerId,
+          body,
+          now,
+        );
       }
       if (!this.isRoundPlaying(match.state)) {
         throw new ConflictException(`Attempt progress is not accepted in ${match.state}`);
@@ -728,9 +763,27 @@ export class MatchService {
         body.progressPercent,
         now.getTime(),
       );
+      const progressA = this.runtimeState.progress(match.id, round.round_number, "A");
+      const progressB = this.runtimeState.progress(match.id, round.round_number, "B");
+      const qualifyingPercent = Number(round.qualifying_percent);
       return {
         accepted: true,
         stored,
+        roundSnapshot: {
+          roundNumber: Number(round.round_number),
+          phase: state.phase,
+          scores: state.scores,
+          displayScores: {
+            A: state.scores.A + (progressA
+              ? scoreAttempt(progressA.progressPercent, false, qualifyingPercent)
+              : 0),
+            B: state.scores.B + (progressB
+              ? scoreAttempt(progressB.progressPercent, false, qualifyingPercent)
+              : 0),
+          },
+          clears: state.clears,
+          lastAttemptWindow: state.lastAttemptWindow,
+        },
         serverNow: now.toISOString(),
       };
     });
@@ -1471,7 +1524,9 @@ export class MatchService {
         accepted: true,
         duplicate: true,
         attemptId: duplicate.rows[0].id,
+        attemptNumber: Number(duplicate.rows[0].attempt_sequence),
         reason: null,
+        deathmatchSnapshot: await this.deathmatchLiveSnapshot(transaction, match, deathmatch),
         serverNow: now.toISOString(),
       };
     }
@@ -1519,6 +1574,13 @@ export class MatchService {
       "UPDATE ranked_matches SET state_version = state_version + 1 WHERE id = $1",
       [match.id],
     );
+    this.runtimeState.beginAttempt(
+      match.id,
+      deathmatchRuntimeSlot(Number(deathmatch.sequence)),
+      side,
+      attemptId,
+      now.getTime(),
+    );
     return {
       accepted: true,
       duplicate: false,
@@ -1526,6 +1588,7 @@ export class MatchService {
       attemptNumber: attempts.rows.length + 1,
       side,
       reason: null,
+      deathmatchSnapshot: await this.deathmatchLiveSnapshot(transaction, match, deathmatch),
       serverNow: now.toISOString(),
     };
   }
@@ -1551,6 +1614,8 @@ export class MatchService {
         accepted: true,
         duplicate: true,
         reason: null,
+        awardedScore: Number(duplicate.rows[0].awarded_score ?? 0),
+        deathmatchSnapshot: await this.deathmatchLiveSnapshot(transaction, match, deathmatch),
         serverNow: now.toISOString(),
       };
     }
@@ -1597,6 +1662,12 @@ export class MatchService {
         body.clientEventId,
       ],
     );
+    this.runtimeState.endAttempt(
+      match.id,
+      deathmatchRuntimeSlot(Number(deathmatch.sequence)),
+      playerId === match.player_a_id ? "A" : "B",
+      attempt.id,
+    );
     if (attempt.valid && body.cleared) {
       const totals = await transaction.query<{
         score_a: number;
@@ -1605,8 +1676,8 @@ export class MatchService {
         clears_b: number;
       }>(
         `SELECT
-           COALESCE(SUM(awarded_score) FILTER (WHERE player_id = $2 AND valid), 0)::int AS score_a,
-           COALESCE(SUM(awarded_score) FILTER (WHERE player_id = $3 AND valid), 0)::int AS score_b,
+           COALESCE(SUM(awarded_score) FILTER (WHERE player_id = $2 AND valid), 0) AS score_a,
+           COALESCE(SUM(awarded_score) FILTER (WHERE player_id = $3 AND valid), 0) AS score_b,
            COUNT(*) FILTER (WHERE player_id = $2 AND valid AND cleared)::int AS clears_a,
            COUNT(*) FILTER (WHERE player_id = $3 AND valid AND cleared)::int AS clears_b
          FROM ranked_deathmatch_attempts
@@ -1639,12 +1710,106 @@ export class MatchService {
       [match.id],
     );
     await this.settleDeathmatchIfComplete(transaction, match, now);
+    const deathmatchSnapshot = await this.deathmatchLiveSnapshot(transaction, match, deathmatch);
     return {
       accepted: true,
       duplicate: false,
       reason: null,
       awardedScore,
+      deathmatchSnapshot,
       serverNow: now.toISOString(),
+    };
+  }
+
+  private async updateDeathmatchAttemptProgress(
+    transaction: SqlExecutor,
+    match: LockedMatchRow,
+    side: PlayerSide,
+    playerId: string,
+    body: AttemptProgressDto,
+    now: Date,
+  ) {
+    const deathmatch = await this.currentDeathmatch(transaction, match);
+    const map = parseJson<RankedMapSnapshot>(deathmatch.map_snapshot);
+    this.assertPlayableLevelId(body.levelId, map.playableLevelId);
+    const active = await transaction.query<DeathmatchAttemptRow>(
+      `SELECT * FROM ranked_deathmatch_attempts
+       WHERE id = $1 AND deathmatch_id = $2 AND player_id = $3
+         AND ended_at IS NULL AND valid
+       FOR UPDATE`,
+      [body.attemptId, deathmatch.id, playerId],
+    );
+    if (!active.rows[0]) {
+      throw new ConflictException("Deathmatch progress requires the active server attempt");
+    }
+    const stored = this.runtimeState.updateProgress(
+      match.id,
+      deathmatchRuntimeSlot(Number(deathmatch.sequence)),
+      side,
+      body.attemptId,
+      body.progressPercent,
+      now.getTime(),
+    );
+    return {
+      accepted: true,
+      stored,
+      deathmatchSnapshot: await this.deathmatchLiveSnapshot(transaction, match, deathmatch),
+      serverNow: now.toISOString(),
+    };
+  }
+
+  private async deathmatchLiveSnapshot(
+    executor: SqlExecutor,
+    match: LockedMatchRow,
+    deathmatch: DeathmatchRow,
+  ) {
+    const map = parseJson<RankedMapSnapshot>(deathmatch.map_snapshot);
+    const attempts = await executor.query<DeathmatchAttemptRow>(
+      `SELECT * FROM ranked_deathmatch_attempts
+       WHERE deathmatch_id = $1
+       ORDER BY player_id, attempt_sequence`,
+      [deathmatch.id],
+    );
+    const rowsA = attempts.rows.filter((attempt) => attempt.player_id === match.player_a_id);
+    const rowsB = attempts.rows.filter((attempt) => attempt.player_id === match.player_b_id);
+    const committedScore = (rows: DeathmatchAttemptRow[]) => rows.reduce(
+      (total, attempt) => total + (attempt.valid && attempt.ended_at !== null ? Number(attempt.awarded_score) : 0),
+      0,
+    );
+    const clears = (rows: DeathmatchAttemptRow[]) => rows.filter(
+      (attempt) => attempt.valid && attempt.ended_at !== null && Boolean(attempt.cleared),
+    ).length;
+    const completed = (rows: DeathmatchAttemptRow[]) => rows.filter(
+      (attempt) => attempt.ended_at !== null,
+    ).length;
+    const slot = deathmatchRuntimeSlot(Number(deathmatch.sequence));
+    const progressA = this.runtimeState.progress(match.id, slot, "A");
+    const progressB = this.runtimeState.progress(match.id, slot, "B");
+    const scoreA = committedScore(rowsA);
+    const scoreB = committedScore(rowsB);
+    const activeA = rowsA.find((attempt) => attempt.ended_at === null) ?? null;
+    const activeB = rowsB.find((attempt) => attempt.ended_at === null) ?? null;
+    return {
+      sequence: Number(deathmatch.sequence),
+      map,
+      scores: { A: scoreA, B: scoreB },
+      displayScores: {
+        A: scoreA + (progressA && activeA
+          ? scoreAttempt(progressA.progressPercent, false, map.qualifyingPercent)
+          : 0),
+        B: scoreB + (progressB && activeB
+          ? scoreAttempt(progressB.progressPercent, false, map.qualifyingPercent)
+          : 0),
+      },
+      clears: { A: clears(rowsA), B: clears(rowsB) },
+      attemptsUsed: { A: rowsA.length, B: rowsB.length },
+      attemptsCompleted: { A: completed(rowsA), B: completed(rowsB) },
+      attemptsRemaining: { A: Math.max(0, 3 - rowsA.length), B: Math.max(0, 3 - rowsB.length) },
+      activeAttemptNumber: {
+        A: activeA ? Number(activeA.attempt_sequence) : null,
+        B: activeB ? Number(activeB.attempt_sequence) : null,
+      },
+      winnerSide: null,
     };
   }
 
@@ -1931,32 +2096,23 @@ export class MatchService {
       }
     }
     let deathmatch: object | null = null;
-    if (match.state.startsWith("DEATHMATCH")) {
-      const result = await transaction.query<{
-        sequence: number;
-        map_snapshot: unknown;
-        score_a: number | null;
-        score_b: number | null;
-        winner_id: string | null;
-      }>(
-        "SELECT sequence, map_snapshot, score_a, score_b, winner_id FROM ranked_deathmatches WHERE id = $1",
+    if (match.state.startsWith("DEATHMATCH") && match.current_deathmatch_id) {
+      const current = await this.currentDeathmatch(transaction, match);
+      const live = await this.deathmatchLiveSnapshot(transaction, match, current);
+      const result = await transaction.query<{ winner_id: string | null }>(
+        "SELECT winner_id FROM ranked_deathmatches WHERE id = $1",
         [match.current_deathmatch_id],
       );
-      const current = result.rows[0];
-      if (current) {
-        deathmatch = {
-          sequence: Number(current.sequence),
-          map: parseJson<RankedMapSnapshot>(current.map_snapshot),
-          scoreA: current.score_a === null ? null : Number(current.score_a),
-          scoreB: current.score_b === null ? null : Number(current.score_b),
-          winnerSide:
-            current.winner_id === match.player_a_id
-              ? "A"
-              : current.winner_id === match.player_b_id
-                ? "B"
-                : null,
-        };
-      }
+      const winnerId = result.rows[0]?.winner_id ?? null;
+      deathmatch = {
+        ...live,
+        winnerSide:
+          winnerId === match.player_a_id
+            ? "A"
+            : winnerId === match.player_b_id
+              ? "B"
+              : null,
+      };
     }
     const series = parseJson<MatchSeriesState>(match.series_state);
     const bansVisible = !["MATCHED", "BAN_PHASE"].includes(match.state);

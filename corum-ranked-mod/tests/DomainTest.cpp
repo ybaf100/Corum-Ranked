@@ -185,6 +185,19 @@ void hudTests() {
     assert(hud.stateText == "MATCH POINT");
     assert(hud.qualifyingText == "Qualifying : 35%");
 
+    // Ranked score transport must preserve decimal clear bonuses. A 20.1%
+    // qualifying map awards 120.1 for a clear, and the HUD must not truncate it.
+    input.scoreA = 120.1;
+    input.scoreB = 73.0;
+    input.qualifyingPercent = 20.1;
+    hud = presentHud(input);
+    assert(hud.ownScoreText == "Score : 120.1");
+    assert(hud.opponentScoreText == "Score : 73");
+    assert(hud.qualifyingText == "Qualifying : 20.1%");
+    input.scoreA = 382;
+    input.scoreB = 417;
+    input.qualifyingPercent = 35;
+
     input.clearsA = 0;
     input.clearsB = 0;
     input.spectatorCurrentProgress = 88;
@@ -232,6 +245,17 @@ void hudTests() {
     assert(hud.ownChecks[1] == ClearCheckColor::Green);
     assert(hud.opponentChecks[0] == ClearCheckColor::Green);
     assert(hud.opponentChecks[1] == ClearCheckColor::Gray);
+
+    input.state = "DEATHMATCH_PLAYING";
+    input.deathmatch = true;
+    input.deathmatchAttemptsUsedA = 3;
+    input.deathmatchAttemptsUsedB = 2;
+    input.spectatorActive = false;
+    hud = presentHud(input);
+    assert(hud.stateText == "DEATH MATCH");
+    assert(hud.timerText == "3 ATTEMPTS");
+    assert(hud.ownAttemptText == "Attempts : 2/3"); // side is still B
+    assert(hud.opponentAttemptText == "Attempts : 3/3");
 }
 
 } // namespace

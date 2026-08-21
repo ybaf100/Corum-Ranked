@@ -271,6 +271,7 @@ describe("Round 3 draw and repeating deathmatch", () => {
       });
       const playing = (await service.state(matchId, matchTokenA, contextA)) as Record<string, any>;
       const levelId = playing.deathmatch.map.playableLevelId as string;
+      const qualifying = Number(playing.deathmatch.map.qualifyingPercent);
       for (const [context, token, progress, prefix] of [
         [contextA, matchTokenA, scoreA, "a"],
         [contextB, matchTokenB, scoreB, "b"],
@@ -281,13 +282,38 @@ describe("Round 3 draw and repeating deathmatch", () => {
             levelId,
             clientEventId: `${prefix}-${clock.now().getTime()}-${attempt}-start`,
           });
+          expect(started.deathmatchSnapshot.attemptsUsed[context === contextA ? "A" : "B"]).toBe(attempt);
+          if (attempt === 1) {
+            const live = await service.updateAttemptProgress(matchId, token, context, {
+              levelId,
+              attemptId: started.attemptId!,
+              progressPercent: progress,
+            });
+            expect(live.deathmatchSnapshot.displayScores[context === contextA ? "A" : "B"]).toBe(
+              progress >= qualifying ? Math.floor(progress) : 0,
+            );
+          }
           clock.advance(1);
-          await service.endAttempt(matchId, token, context, {
+          const ended = await service.endAttempt(matchId, token, context, {
             levelId,
             attemptId: started.attemptId!,
             clientEventId: `${prefix}-${clock.now().getTime()}-${attempt}-end`,
             progressPercent: progress,
             cleared: false,
+          });
+          expect(ended.deathmatchSnapshot.attemptsCompleted[context === contextA ? "A" : "B"]).toBe(attempt);
+        }
+        if (context === contextA) {
+          // Player A has spent exactly three attempts while B has not started yet,
+          // so the deathmatch is still live and the authoritative 4th-attempt
+          // rejection can be asserted directly.
+          clock.advance(1);
+          await expect(service.startAttempt(matchId, token, context, {
+            levelId,
+            clientEventId: `${prefix}-${clock.now().getTime()}-4-start`,
+          })).resolves.toMatchObject({
+            accepted: false,
+            reason: "DEATHMATCH_ATTEMPTS_EXHAUSTED",
           });
         }
       }

@@ -26,10 +26,13 @@ struct HudInput {
     std::string side;
     std::string state;
     std::string banner;
-    int scoreA = 0;
-    int scoreB = 0;
+    double scoreA = 0.0;
+    double scoreB = 0.0;
     int clearsA = 0;
     int clearsB = 0;
+    bool deathmatch = false;
+    int deathmatchAttemptsUsedA = 0;
+    int deathmatchAttemptsUsedB = 0;
     double qualifyingPercent = 100.0;
     std::optional<std::int64_t> remainingMillis;
     std::optional<double> renderFps;
@@ -47,6 +50,9 @@ struct HudPresentation {
     std::string timerText;
     std::string stateText;
     bool windowStateFirst = false;
+    bool deathmatch = false;
+    std::string ownAttemptText;
+    std::string opponentAttemptText;
     std::string qualifyingText;
     bool spectatorVisible = false;
     std::string spectatorOpponentText;

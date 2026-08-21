@@ -8,6 +8,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <deque>
 #include <optional>
 #include <string>
 #include <vector>
@@ -42,8 +43,8 @@ struct RoundSummaryView {
     int roundNumber = 0;
     std::string mapTitle;
     std::string difficulty;
-    int scoreA = 0;
-    int scoreB = 0;
+    double scoreA = 0.0;
+    double scoreB = 0.0;
     int clearsA = 0;
     int clearsB = 0;
     std::string result;
@@ -53,8 +54,8 @@ struct DeathmatchSummaryView {
     int sequence = 0;
     std::string mapTitle;
     std::string difficulty;
-    int scoreA = 0;
-    int scoreB = 0;
+    double scoreA = 0.0;
+    double scoreB = 0.0;
     std::string winnerSide;
 };
 
@@ -91,13 +92,19 @@ struct MatchView {
     std::string cancellationReason;
     std::int64_t stateVersion = 0;
     int roundNumber = 0;
-    int scoreA = 0;
-    int scoreB = 0;
+    double scoreA = 0.0;
+    double scoreB = 0.0;
+    double committedScoreA = 0.0;
+    double committedScoreB = 0.0;
     int clearsA = 0;
     int clearsB = 0;
     int roundWinsA = 0;
     int roundWinsB = 0;
     int deathmatchSequence = 0;
+    int deathmatchAttemptsUsedA = 0;
+    int deathmatchAttemptsUsedB = 0;
+    int deathmatchAttemptsCompletedA = 0;
+    int deathmatchAttemptsCompletedB = 0;
     bool readyA = false;
     bool readyB = false;
     std::optional<int> ownMmrDelta;
@@ -177,6 +184,17 @@ public:
     [[nodiscard]] bool canTrackLevel(int levelId) const;
     [[nodiscard]] bool isSpectating() const;
     [[nodiscard]] int currentLevelId() const;
+    [[nodiscard]] bool canEnterCurrentLevel() const;
+    [[nodiscard]] bool hasLocalAttemptInFlight() const;
+    // Reserve one *visual* Death Match attempt before Geometry Dash starts it.
+    // This client-side budget closes the network-ack race that could otherwise
+    // let a fourth visual attempt begin before the server had acknowledged the
+    // third attempt end. The server remains authoritative and independently
+    // rejects attempt 4+.
+    [[nodiscard]] bool reserveDeathmatchVisualAttempt();
+    [[nodiscard]] int localDeathmatchVisualAttemptsUsed() const;
+    [[nodiscard]] double localDisplayScore(double progressPercent) const;
+    [[nodiscard]] int localDisplayClears() const;
     void setSongBypassAllowed(bool allowed);
     [[nodiscard]] bool songBypassAllowed() const;
 
@@ -195,6 +213,16 @@ private:
         double progressPercent = 0.0;
         bool cleared = false;
         std::string eventId;
+        double optimisticScore = 0.0;
+        int optimisticClear = 0;
+    };
+
+    // Visual attempts can finish faster than HTTP start/end acknowledgements.
+    // Keep every observed attempt in order so a fast reset can never overwrite
+    // the previous attempt's score/Clear event.
+    struct QueuedAttempt {
+        PendingStart start;
+        std::optional<PendingEnd> end;
     };
 
     RankedRuntime() = default;
@@ -204,6 +232,8 @@ private:
     void pollQueue();
     void pollMatch();
     void parseMatchState(matjson::Value const& root);
+    void applyAttemptSnapshot(matjson::Value const& root);
+    void promoteQueuedAttempt();
     void flushAttemptEvents();
     void sendAttemptStart();
     void sendAttemptEnd();
@@ -227,11 +257,16 @@ private:
     std::string m_attemptId;
     std::optional<PendingStart> m_pendingStart;
     std::optional<PendingEnd> m_pendingEnd;
+    std::deque<QueuedAttempt> m_attemptBacklog;
     std::optional<int> m_pendingProgress;
     std::chrono::steady_clock::time_point m_nextPollAt {};
     std::chrono::steady_clock::time_point m_nextAttemptRetryAt {};
     std::chrono::steady_clock::time_point m_nextProgressAt {};
     int m_lastSubmittedProgress = -1;
+    int m_localDeathmatchSequence = 0;
+    int m_localDeathmatchVisualAttempts = 0;
+    double m_optimisticScoreDelta = 0.0;
+    int m_optimisticClearDelta = 0;
     std::uint64_t m_eventSequence = 0;
     bool m_controlBusy = false;
     bool m_pollBusy = false;
