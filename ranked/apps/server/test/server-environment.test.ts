@@ -39,10 +39,11 @@ describe("server environment", () => {
     expect(loaded.debugBot).toMatchObject({
       password: "2008",
       tickMs: 125,
+      attemptDelayMs: 1_200,
       difficulties: {
-        EASY: { mmrOffset: -250 },
-        NORMAL: { mmrOffset: 0 },
-        HARD: { mmrOffset: 250 },
+        EASY: { mmrOffset: -250, qualifyingChance: 0.22, clearChance: 0.01, progressPerSecond: 11 },
+        NORMAL: { mmrOffset: 0, qualifyingChance: 0.45, clearChance: 0.04, progressPerSecond: 16 },
+        HARD: { mmrOffset: 250, qualifyingChance: 0.68, clearChance: 0.10, progressPerSecond: 22 },
       },
     });
   });

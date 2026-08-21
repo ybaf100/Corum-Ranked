@@ -393,6 +393,7 @@ describe("two-client authoritative match flow", () => {
     state = (await matches.state(matchId, statusA.matchToken, playerA)) as Record<string, any>;
     expect(state.spectator.currentProgress).toBe(73);
     expect(state.currentRound.scores).toEqual(scoreBeforeTelemetry);
+    expect(state.currentRound.displayScores.B).toBe(scoreBeforeTelemetry.B + 73);
 
     clock.advanceSeconds(1);
     await matches.updateAttemptProgress(matchId, statusB.matchToken, playerB, {
@@ -432,6 +433,10 @@ describe("two-client authoritative match flow", () => {
       progressPercent: 91,
     });
     clock.advanceSeconds(10);
+    state = (await matches.state(matchId, statusA.matchToken, playerA)) as Record<string, any>;
+    expect(state.state).toBe("ROUND_SETTLING");
+    expect(state.spectator).toMatchObject({ active: true, currentProgress: 91 });
+    expect(state.currentRound.displayScores.B).toBe(state.currentRound.scores.B + 91);
     await matches.endAttempt(matchId, statusB.matchToken, playerB, {
       levelId: roundTwoLevelId,
       attemptId: b3.attemptId!,

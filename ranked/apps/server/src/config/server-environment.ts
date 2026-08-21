@@ -162,13 +162,13 @@ export const loadServerEnvironment = (
       password,
       tickMs: positiveInteger(environment.DEBUG_BOT_TICK_MS?.trim() || "125", "DEBUG_BOT_TICK_MS"),
       attemptDelayMs: positiveInteger(
-        environment.DEBUG_BOT_ATTEMPT_DELAY_MS?.trim() || "500",
+        environment.DEBUG_BOT_ATTEMPT_DELAY_MS?.trim() || "1200",
         "DEBUG_BOT_ATTEMPT_DELAY_MS",
       ),
       difficulties: {
-        EASY: difficulty("EASY", -250, 0.35, 0.04, 18),
-        NORMAL: difficulty("NORMAL", 0, 0.60, 0.10, 25),
-        HARD: difficulty("HARD", 250, 0.82, 0.22, 34),
+        EASY: difficulty("EASY", -250, 0.22, 0.01, 11),
+        NORMAL: difficulty("NORMAL", 0, 0.45, 0.04, 16),
+        HARD: difficulty("HARD", 250, 0.68, 0.10, 22),
       },
     };
   }

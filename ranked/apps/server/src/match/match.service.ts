@@ -1876,6 +1876,18 @@ export class MatchService {
       if (round) {
         ready = { A: Boolean(round.ready_a_at), B: Boolean(round.ready_b_at) };
         const domain = round.domain_state ? this.roundState(round) : null;
+        const progressA = this.runtimeState.progress(match.id, round.round_number, "A");
+        const progressB = this.runtimeState.progress(match.id, round.round_number, "B");
+        const qualifyingPercent = Number(round.qualifying_percent);
+        const committedScores = domain?.scores ?? { A: 0, B: 0 };
+        const displayScores = {
+          A: committedScores.A + (progressA
+            ? scoreAttempt(progressA.progressPercent, false, qualifyingPercent)
+            : 0),
+          B: committedScores.B + (progressB
+            ? scoreAttempt(progressB.progressPercent, false, qualifyingPercent)
+            : 0),
+        };
         currentRound = {
           roundNumber: Number(round.round_number),
           banner: bannerForRound(round.round_number),
@@ -1889,15 +1901,16 @@ export class MatchService {
             creator: round.creator,
             difficulty: round.difficulty,
             pool: Number(round.pool),
-            qualifyingPercent: Number(round.qualifying_percent),
+            qualifyingPercent,
           },
-          scores: domain?.scores ?? { A: 0, B: 0 },
+          scores: committedScores,
+          displayScores,
           clears: domain?.clears ?? { A: 0, B: 0 },
           lastAttemptWindow: domain?.lastAttemptWindow ?? null,
           outcome: domain?.outcome ?? null,
         };
         if (
-          domain?.phase === "LAST_ATTEMPT_WINDOW" &&
+          (domain?.phase === "LAST_ATTEMPT_WINDOW" || domain?.phase === "ROUND_SETTLING") &&
           domain.lastAttemptWindow?.triggerSide === viewerSide &&
           domain.lastAttemptWindow.targetSide === opponentSide &&
           domain.clears[viewerSide] === 2 &&

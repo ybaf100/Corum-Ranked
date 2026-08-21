@@ -123,7 +123,16 @@ corum::ranked::DeathmatchSummaryView parseDeathmatchSummary(matjson::Value const
     };
 }
 
-bool stateAllowsAttempts(std::string const& state) {
+bool stateAllowsActiveAttempt(std::string const& state) {
+    return
+        state == "ROUND_PLAYING" ||
+        state == "FINAL_ATTEMPT_WINDOW" ||
+        state == "LAST_ATTEMPT_WINDOW" ||
+        state == "ROUND_SETTLING" ||
+        state == "DEATHMATCH_PLAYING";
+}
+
+bool stateAllowsAttemptStart(std::string const& state) {
     return
         state == "ROUND_PLAYING" ||
         state == "FINAL_ATTEMPT_WINDOW" ||
@@ -654,8 +663,9 @@ void RankedRuntime::parseMatchState(matjson::Value const& root) {
     if (round.isObject()) {
         m_view.match.roundNumber = static_cast<int>(round["roundNumber"].asInt().unwrapOr(0));
         m_view.match.banner = round["banner"].asString().unwrapOr("");
-        m_view.match.scoreA = static_cast<int>(round["scores"]["A"].asInt().unwrapOr(0));
-        m_view.match.scoreB = static_cast<int>(round["scores"]["B"].asInt().unwrapOr(0));
+        auto const displayScores = round["displayScores"].isObject() ? round["displayScores"] : round["scores"];
+        m_view.match.scoreA = static_cast<int>(displayScores["A"].asInt().unwrapOr(0));
+        m_view.match.scoreB = static_cast<int>(displayScores["B"].asInt().unwrapOr(0));
         m_view.match.clearsA = static_cast<int>(round["clears"]["A"].asInt().unwrapOr(0));
         m_view.match.clearsB = static_cast<int>(round["clears"]["B"].asInt().unwrapOr(0));
         m_view.match.currentMap = parseMap(round["map"]);
@@ -736,7 +746,7 @@ void RankedRuntime::parseMatchState(matjson::Value const& root) {
         }
     }
 
-    if (!stateAllowsAttempts(m_view.match.state) && !m_attemptBusy) {
+    if (!stateAllowsActiveAttempt(m_view.match.state) && !m_attemptBusy) {
         m_attemptId.clear();
         m_pendingStart.reset();
         m_pendingEnd.reset();
@@ -754,6 +764,8 @@ void RankedRuntime::parseMatchState(matjson::Value const& root) {
         m_view.status = "Match cancelled by the server.";
     } else if (m_view.match.state == "LAST_ATTEMPT_WINDOW") {
         m_view.status = "LAST ATTEMPT - starts must be accepted before the deadline.";
+    } else if (m_view.match.state == "ROUND_SETTLING") {
+        m_view.status = "LAST ATTEMPT - an accepted attempt is still in progress.";
     } else if (m_view.match.state == "FINAL_ATTEMPT_WINDOW") {
         m_view.status = "Final start window - active attempts remain valid.";
     } else if (m_view.match.state.starts_with("DEATHMATCH")) {
@@ -951,7 +963,7 @@ int RankedRuntime::currentLevelId() const {
 bool RankedRuntime::canTrackLevel(int levelId) const {
     return
         m_view.stage == RuntimeStage::Matched &&
-        stateAllowsAttempts(m_view.match.state) &&
+        stateAllowsActiveAttempt(m_view.match.state) &&
         !m_view.match.spectatorActive &&
         m_view.match.currentMap &&
         m_view.match.currentMap->levelId == levelId;
@@ -967,7 +979,7 @@ std::string RankedRuntime::newEventId(std::string_view kind) {
 }
 
 void RankedRuntime::reportAttemptStart(int levelId) {
-    if (!canTrackLevel(levelId)) return;
+    if (!canTrackLevel(levelId) || !stateAllowsAttemptStart(m_view.match.state)) return;
     if (!m_pendingStart) {
         m_pendingStart = PendingStart {
             .levelId = levelId,

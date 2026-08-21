@@ -105,6 +105,7 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
             matchState == "ROUND_PLAYING" ||
             matchState == "FINAL_ATTEMPT_WINDOW" ||
             matchState == "LAST_ATTEMPT_WINDOW" ||
+            matchState == "ROUND_SETTLING" ||
             matchState == "DEATHMATCH_PLAYING";
         if ((!stillPlaying || runtime.currentLevelId() != m_fields->levelId) && !m_fields->autoExitRequested) {
             // alpha.10: Ranked never leaves a finished map waiting for the user.

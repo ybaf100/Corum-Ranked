@@ -64,9 +64,9 @@ Round/Deathmatch map에는 `canonicalLevelId`, `alternateLevelId`, `playableLeve
 canonical로 fallback합니다. 클라이언트는 playable을 실제로 열고 모든 attempt 요청의
 `levelId`에 같은 값을 보내야 합니다. snapshot과 다르면 서버가 거부합니다.
 
-`attempt/progress`는 정수 %가 변할 때만 보내고 client/server 양쪽에서 최대 10Hz로 제한되는 관전용 임시 telemetry입니다. 활성 attempt ID만 허용하며 PostgreSQL 기록, 점수, Clear 판정, 승패 판정에는 사용하지 않습니다. 서버가 재시작되면 이 임시 값은 사라질 수 있고 다음 client update로 다시 채워집니다. 관전 overlay가 활성화된 viewer만 match state poll을 250ms 간격으로 일시 가속하고, 나머지 상태는 운영자가 정한 일반 poll 간격을 유지합니다.
+`attempt/progress`는 정수 %가 변할 때만 보내고 client/server 양쪽에서 최대 10Hz로 제한되는 임시 telemetry입니다. 활성 attempt ID만 허용하며 PostgreSQL의 확정 점수, Clear 판정, 승패 판정에는 사용하지 않습니다. 다만 `currentRound.displayScores`는 Qualifying 이상인 활성 attempt의 현재 진행률을 임시 점수로 합산해 HUD에 즉시 표시하며, attempt 종료 시 확정 `scores`로 대체됩니다. 서버가 재시작되면 이 임시 값은 사라질 수 있고 다음 client update로 다시 채워집니다. 관전 overlay가 활성화된 viewer만 match state poll을 250ms 간격으로 일시 가속하고, 나머지 상태는 운영자가 정한 일반 poll 간격을 유지합니다.
 
-State 응답의 `spectator`는 viewer별로 필터링됩니다. 서버가 `내 Clears=2`, `상대 Clears=1`, `LAST_ATTEMPT_WINDOW`를 모두 확인한 trigger player에게만 `active=true`, `opponentName`, `currentProgress`를 반환합니다. 대상 player와 일반 경기 중에는 `{ "active": false }`만 반환하여 상대 현재 진행률을 공개하지 않습니다. `currentRound.map.qualifyingPercent`, 양쪽 `scores`와 `clears`, `deadlineAt`, `serverNow`가 플레이 HUD의 권위 데이터입니다.
+State 응답의 `spectator`는 viewer별로 필터링됩니다. 서버가 `내 Clears=2`, `상대 Clears<=1`, `LAST_ATTEMPT_WINDOW` 또는 deadline 이후의 `ROUND_SETTLING`을 확인한 trigger player에게만 `active=true`, `opponentName`, `currentProgress`를 반환합니다. 대상 player와 일반 경기 중에는 `{ "active": false }`만 반환하여 상대 현재 진행률을 공개하지 않습니다. `currentRound.map.qualifyingPercent`, 양쪽 `scores`와 `clears`, `deadlineAt`, `serverNow`가 플레이 HUD의 권위 데이터입니다.
 
 BAN_PHASE 동안 두 player의 선택은 공개 state에 포함되지 않습니다. 확정 후에는 ban 결과만 공개하며, 선택된 3개 맵 중 현재 Round 맵만 노출합니다.
 

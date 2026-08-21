@@ -1,6 +1,12 @@
+# v0.4.0-alpha.13
+- Fixed LAST ATTEMPT so attempts accepted within the 10-second start window continue to completion after the timer expires.
+- Kept spectator mode active through ROUND_SETTLING until the accepted LAST ATTEMPT ends.
+- Added provisional live HUD scoring after Qualifying while preserving end-of-attempt authoritative scoring.
+- Nerfed Debug Bot default attempt frequency, clear chance, qualifying chance, and progress speed.
+
 # Changelog
 
-## v0.4.0-alpha.12
+## v0.4.0-alpha.13
 
 - Moved Corum Ranked into its own Geometry Dash-style scene/tab instead of attaching the Ranked fullscreen layer directly to whatever scene is currently open.
 - Replaced the old small `R` main-menu entry with a bottom-center crossed-swords Ranked button. The swords are drawn from Cocos nodes, so no external texture asset is required.
