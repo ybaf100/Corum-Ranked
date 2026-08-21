@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.4.0-alpha.8
+
+- Fixed the Ranked server session test isolation bug that caused deterministic test UUIDs to collide across test cases in the shared PGlite database.
+- `session.service.test.ts` now truncates session/profile/player tables before each test, so the active-only allowlist regression test does not fail on a stale `ranked_players` primary key.
+- Production UUID generation remains unchanged and continues to use `node:crypto` `randomUUID()`; this release only fixes the CI test harness.
+- Corum Integration remains unchanged.
+
 ## v0.4.0-alpha.7
 
 - Changed the Ranked allowlist gate to inspect only mods that are currently enabled and loaded. Installed-but-disabled user mods no longer block Ranked.

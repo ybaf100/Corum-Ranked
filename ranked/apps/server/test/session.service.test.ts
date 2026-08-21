@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { PGlite } from "@electric-sql/pglite";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { CsmpTier } from "@corum-ranked/rules";
 import type { IdGenerator, ServerClock } from "../src/common/runtime.module.js";
 import { TokenService } from "../src/common/token.service.js";
@@ -26,6 +26,12 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await pglite.close();
+});
+
+beforeEach(async () => {
+  await pglite.exec(
+    "TRUNCATE TABLE ranked_sessions, ranked_profiles, ranked_players CASCADE",
+  );
 });
 
 class SequenceIds implements IdGenerator {
