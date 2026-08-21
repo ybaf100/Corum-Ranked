@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.4.0-alpha.12
+
+- Moved Corum Ranked into its own Geometry Dash-style scene/tab instead of attaching the Ranked fullscreen layer directly to whatever scene is currently open.
+- Replaced the old small `R` main-menu entry with a bottom-center crossed-swords Ranked button. The swords are drawn from Cocos nodes, so no external texture asset is required.
+- Fixed repeated Ranked `Load Failed` launches by distinguishing saved list metadata from a fully downloaded playable level. Ranked now requires a non-empty `m_levelString` before a map is considered downloaded.
+- Changed automatic round entry to Geometry Dash's normal `LevelInfoLayer -> onPlay` path instead of directly constructing `PlayLayer::scene`; quitting returns through the game's normal scene stack.
+- Reworked song preparation to use every custom song ID in `m_songID` + the 2.2 comma-separated `m_songIDs` field.
+- Song download now requests missing `SongInfoObject` metadata first, retries stalled metadata/download requests on a cooldown, and polls `MusicDownloadManager` until all required custom songs are available.
+- Kept the 20-second song ceiling: a round may start without unfinished audio while an in-flight Geometry Dash song download is left running for later attempts.
+- Kept the 30-second map ceiling, Round 1 cancellation policy, later-round forfeit policy, active-only mod allowlist, alpha.10 UI flow, and alpha.11 authoritative LAST ATTEMPT behavior.
+- Corum Integration remains unchanged.
+
 ## v0.4.0-alpha.11
 
 - Updated the server integration harness for the alpha.10 2-Clear rule: a player at 0 Clears now receives a real 10-second LAST ATTEMPT start window, so rated Debug Bot tests wait for that authoritative window to expire before readying the next round.
