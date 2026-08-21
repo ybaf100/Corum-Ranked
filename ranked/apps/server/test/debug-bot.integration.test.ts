@@ -55,7 +55,7 @@ class FixedCsmpSource implements CsmpTierSource {
 const cleanMods: CreateSessionDto["installedMods"] = [
   {
     id: "hwanhee1.corum_ranked",
-    version: "v0.4.0-alpha.7",
+    version: "v0.4.0-alpha.11",
     enabled: true,
     loaded: true,
     internal: false,
@@ -134,7 +134,7 @@ describe("development-only Bot Match using the production Ranked engine", () => 
     const created = await sessions.create({
       gdAccountId: accountId,
       gdUsername: `Debug${accountId}`,
-      clientVersion: "v0.4.0-alpha.7",
+      clientVersion: "v0.4.0-alpha.11",
       installedMods: structuredClone(cleanMods),
     });
     const result = await database.query<{
@@ -266,8 +266,16 @@ describe("development-only Bot Match using the production Ranked engine", () => 
         )).rejects.toThrow("playableLevelId");
       }
       await completeTwoClears(creation, playerWins);
+
+      // alpha.10+ gives the trailing side the same 10-second LAST ATTEMPT
+      // start window even when it has zero Clears. The rated-match helper must
+      // let that authoritative window expire before attempting to ready the
+      // following round. Otherwise the next ready call correctly returns 409.
+      clock.advance(document.operational.rules.lastAttemptWindowSeconds * 1_000);
+      await matches.state(creation.matchId, creation.playerMatchToken, creation.playerContext);
+
       if (round === 1) {
-        clock.advance(6_000);
+        clock.advance((document.operational.timeouts?.roundResultSeconds ?? 5) * 1_000 + 1_000);
         await matches.state(creation.matchId, creation.playerMatchToken, creation.playerContext);
       }
     }

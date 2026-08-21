@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.4.0-alpha.11
+
+- Updated the server integration harness for the alpha.10 2-Clear rule: a player at 0 Clears now receives a real 10-second LAST ATTEMPT start window, so rated Debug Bot tests wait for that authoritative window to expire before readying the next round.
+- Updated the two-client relay regression expectation from one to two `LAST_ATTEMPT` events because both tested rounds now legitimately enter the new LAST ATTEMPT path.
+- Production 2-Clear, rating, map/song download, active-mod allowlist, and match flow behavior are unchanged; this release fixes CI expectations that still encoded the pre-alpha.10 rule.
+- Corum Integration remains unchanged.
+
 ## v0.4.0-alpha.10
 
 - Replaced the Ranked popup-style flow with a full-screen in-game Ranked layer based on the supplied UI sketches. Orange annotations/arrows from the sketches are implementation notes only and are never rendered in-game.

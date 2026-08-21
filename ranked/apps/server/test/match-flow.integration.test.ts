@@ -482,7 +482,7 @@ describe("two-client authoritative match flow", () => {
     );
     expect(relayEvents.rows).toEqual([
       { event_type: "CLEAR_EVENT", count: 6 },
-      { event_type: "LAST_ATTEMPT", count: 1 },
+      { event_type: "LAST_ATTEMPT", count: 2 },
       { event_type: "MATCH_RESULT", count: 1 },
       { event_type: "ROUND_RESULT", count: 2 },
       { event_type: "ROUND_START", count: 2 },
