@@ -1,3 +1,11 @@
+# v0.4.0-alpha.17
+
+- Replaced the hidden/off-screen song downloader with the real Geometry Dash LevelInfoLayer song download control.
+- Masks and blocks the rest of LevelInfo during preparation so only the vanilla song download control can be used.
+- Keeps the preparation countdown visible in the song gate and applies the 20-second optional-song timeout there.
+- Starts gameplay from the same fully initialized LevelInfoLayer through the normal onPlay path after Ready.
+- Preserves alpha.16 confirmed-ban and difficulty-color fixes.
+
 # v0.4.0-alpha.16
 
 - Fixed `START WITHOUT SONG` by preserving Geometry Dash's full `LevelInfoLayer::onPlay` path and suppressing only the already-acknowledged vanilla no-song warning instead of jumping directly into `playStep2`.

@@ -2,16 +2,15 @@
 
 #include "RankedRuntime.hpp"
 #include "DebugBotPopup.hpp"
+#include "RankedSongGate.hpp"
 
 #include <Geode/Geode.hpp>
-#include <Geode/binding/CustomSongWidget.hpp>
 #include <Geode/binding/GameLevelManager.hpp>
 #include <Geode/binding/GameManager.hpp>
 #include <Geode/binding/GJGameLevel.hpp>
 #include <Geode/binding/LevelDownloadDelegate.hpp>
 #include <Geode/binding/LevelInfoLayer.hpp>
 #include <Geode/binding/MusicDownloadManager.hpp>
-#include <Geode/binding/SongInfoObject.hpp>
 #include <Geode/binding/SimplePlayer.hpp>
 #include <Geode/ui/LoadingSpinner.hpp>
 
@@ -23,7 +22,6 @@
 #include <sstream>
 #include <string>
 #include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
 using namespace geode::prelude;
@@ -169,7 +167,6 @@ class CorumRankedLayer final : public CCLayerColor, public LevelDownloadDelegate
     CCNode* m_root = nullptr;
     CCMenu* m_menu = nullptr;
     GJGameLevel* m_downloadedLevel = nullptr;
-    LevelInfoLayer* m_songDriver = nullptr;
     Page m_page = Page::Live;
     std::size_t m_historyIndex = 0;
     std::string m_phaseKey;
@@ -181,22 +178,16 @@ class CorumRankedLayer final : public CCLayerColor, public LevelDownloadDelegate
     SteadyClock::time_point m_phaseStartedAt {};
     std::optional<SteadyClock::time_point> m_mapDownloadStartedAt;
     std::optional<SteadyClock::time_point> m_lastMapDownloadAttemptAt;
-    std::optional<SteadyClock::time_point> m_songDownloadStartedAt;
     std::vector<int> m_songIds;
-    std::unordered_set<int> m_songInfoRequested;
-    std::unordered_set<int> m_songDownloadRequested;
-    std::unordered_map<int, SteadyClock::time_point> m_songLastRequestAt;
     int m_downloadingLevelId = 0;
     bool m_readySent = false;
     bool m_matchFoundReadySent = false;
     bool m_mapFailureReported = false;
-    bool m_songBypassed = false;
-    bool m_vanillaSongDownloadKicked = false;
+    bool m_enteringSongGate = false;
     bool m_enteringLevel = false;
 
     ~CorumRankedLayer() override {
         detachLevelDownloadDelegate();
-        CC_SAFE_RELEASE(m_songDriver);
         CC_SAFE_RELEASE(m_downloadedLevel);
     }
 
@@ -282,20 +273,13 @@ class CorumRankedLayer final : public CCLayerColor, public LevelDownloadDelegate
                 m_resourceKey = newResourceKey;
                 m_mapDownloadStartedAt.reset();
                 m_lastMapDownloadAttemptAt.reset();
-                m_songDownloadStartedAt.reset();
                 m_readySent = false;
                 m_mapFailureReported = false;
-                m_songBypassed = false;
-                m_vanillaSongDownloadKicked = false;
+                m_enteringSongGate = false;
                 RankedRuntime::get().setSongBypassAllowed(false);
                 m_enteringLevel = false;
                 m_songIds.clear();
-                m_songInfoRequested.clear();
-                m_songDownloadRequested.clear();
-                m_songLastRequestAt.clear();
                 m_downloadingLevelId = 0;
-                CC_SAFE_RELEASE(m_songDriver);
-                m_songDriver = nullptr;
                 CC_SAFE_RELEASE(m_downloadedLevel);
                 m_downloadedLevel = nullptr;
             }
@@ -616,12 +600,8 @@ class CorumRankedLayer final : public CCLayerColor, public LevelDownloadDelegate
             addStatusPill("WAITING FOR MAP", songPos, kPanelLight);
         } else if (songReady) {
             addStatusPill("DOWNLOADED", songPos, kGreen);
-        } else if (m_songBypassed) {
+        } else if (RankedRuntime::get().songBypassAllowed()) {
             addStatusPill("START WITHOUT SONG", songPos, kGold);
-        } else if (isFetchingSongInfo(local)) {
-            addStatusPill("FETCHING SONG INFO...", songPos, kAccent);
-        } else if (isSongDownloading(local)) {
-            addStatusPill("DOWNLOADING...", songPos, kAccent);
         } else {
             addButton("DOWNLOAD SONG", songPos, menu_selector(CorumRankedLayer::onDownloadSong), false, 0.50f);
         }
@@ -876,9 +856,6 @@ class CorumRankedLayer final : public CCLayerColor, public LevelDownloadDelegate
         auto ids = collectSongIds(level);
         if (ids == m_songIds) return;
         m_songIds = std::move(ids);
-        m_songInfoRequested.clear();
-        m_songDownloadRequested.clear();
-        m_songLastRequestAt.clear();
     }
 
     bool songIdReady(MusicDownloadManager* manager, int id) const {
@@ -899,125 +876,13 @@ class CorumRankedLayer final : public CCLayerColor, public LevelDownloadDelegate
         return true;
     }
 
-    bool isFetchingSongInfo(GJGameLevel* level) {
-        if (!level) return false;
-        refreshSongIds(level);
-        auto* manager = MusicDownloadManager::sharedState();
-        if (!manager) return false;
-        for (auto const id : m_songIds) {
-            if (songIdReady(manager, id) || manager->getSongInfoObject(id)) continue;
-            auto const* key = manager->getSongInfoKey(id);
-            if (key && manager->isDLActive(key)) return true;
-        }
-        return false;
-    }
-
-    bool isSongDownloading(GJGameLevel* level) {
-        if (!level || !m_songDownloadStartedAt) return false;
-        refreshSongIds(level);
-        if (auto* driver = ensureSongDriver(level)) {
-            if (driver->m_songWidget && !driver->m_songWidget->m_isNotDownloading) return true;
-        }
-        auto* manager = MusicDownloadManager::sharedState();
-        if (!manager) return false;
-        for (auto const id : m_songIds) {
-            if (songIdReady(manager, id)) continue;
-            auto const* key = manager->getSongDownloadKey(id);
-            if ((key && manager->isDLActive(key)) || manager->isRunningActionForSongID(id)) return true;
-        }
-        return false;
-    }
-
-    bool requestCooldownElapsed(int id, double seconds) const {
-        auto const it = m_songLastRequestAt.find(id);
-        if (it == m_songLastRequestAt.end()) return true;
-        return std::chrono::duration<double>(SteadyClock::now() - it->second).count() >= seconds;
-    }
-
-    void startMapDownload() {
-        auto const id = RankedRuntime::get().currentLevelId();
-        if (id <= 0 || findPlayableMap() || m_downloadingLevelId != 0) return;
-        if (m_lastMapDownloadAttemptAt && elapsed(m_lastMapDownloadAttemptAt) < 1.5) return;
-        auto* manager = GameLevelManager::sharedState();
-        if (!manager) return;
-        auto const now = SteadyClock::now();
-        if (!m_mapDownloadStartedAt) m_mapDownloadStartedAt = now;
-        m_lastMapDownloadAttemptAt = now;
-        m_downloadingLevelId = id;
-        manager->m_levelDownloadDelegate = this;
-        manager->downloadLevel(id, false, 0);
-    }
-
-    LevelInfoLayer* ensureSongDriver(GJGameLevel* level) {
-        if (!level) return nullptr;
-        auto const id = static_cast<int>(level->m_levelID);
-        if (m_songDriver && m_songDriver->m_level && static_cast<int>(m_songDriver->m_level->m_levelID) == id) {
-            return m_songDriver;
-        }
-        CC_SAFE_RELEASE(m_songDriver);
-        m_songDriver = LevelInfoLayer::create(level, false);
-        CC_SAFE_RETAIN(m_songDriver);
-        return m_songDriver;
-    }
-
-    bool kickVanillaSongDownload(GJGameLevel* level) {
-        auto* driver = ensureSongDriver(level);
-        if (!driver || !driver->m_songWidget) return false;
-        auto* widget = driver->m_songWidget;
-        if (!widget->m_isNotDownloading) return true;
-        widget->onDownload(nullptr);
-        m_vanillaSongDownloadKicked = true;
-        return true;
-    }
-
-    void startSongDownload() {
+    void openSongDownloadGate() {
+        if (m_enteringSongGate) return;
         auto* level = findPlayableMap();
-        if (!level) return;
-        refreshSongIds(level);
-        auto* manager = MusicDownloadManager::sharedState();
-        if (!manager || m_songIds.empty() || isSongReady(level)) return;
-
-        if (!m_songDownloadStartedAt) m_songDownloadStartedAt = SteadyClock::now();
-        // Primary path: press Geometry Dash's own hidden CustomSongWidget download
-        // handler. Direct MusicDownloadManager calls remain only as a fallback for
-        // additional 2.2 song IDs / stalled metadata.
-        kickVanillaSongDownload(level);
-        auto const now = SteadyClock::now();
-        for (auto const id : m_songIds) {
-            if (songIdReady(manager, id)) {
-                m_songInfoRequested.erase(id);
-                m_songDownloadRequested.erase(id);
-                continue;
-            }
-
-            auto* info = manager->getSongInfoObject(id);
-            if (!info || info->m_unloaded) {
-                // Song metadata is required before a reliable custom-song download.
-                // Re-request it if the previous request stalled instead of getting
-                // permanently stuck in the alpha.11 "Downloading" state.
-                if (!m_songInfoRequested.contains(id) || requestCooldownElapsed(id, 2.0)) {
-                    // The second argument is the vanilla "download after info" flag.
-                    // alpha.15 passed false, which could fetch metadata without ever
-                    // engaging the actual custom-song download.
-                    manager->getSongInfo(id, true);
-                    m_songInfoRequested.insert(id);
-                    m_songLastRequestAt[id] = now;
-                }
-                continue;
-            }
-
-            m_songInfoRequested.erase(id);
-            // MusicDownloadManager deduplicates its active download list. Reissuing
-            // after a short cooldown also recovers from silent network failures.
-            if (!m_songDownloadRequested.contains(id) || requestCooldownElapsed(id, 3.0)) {
-                // Ranked maps use custom songs. downloadCustomSong follows GD's
-                // custom-content URL/path pipeline; downloadSong is not the correct
-                // fallback for this flow on current GD builds.
-                manager->downloadCustomSong(id);
-                m_songDownloadRequested.insert(id);
-                m_songLastRequestAt[id] = now;
-            }
-        }
+        if (!level || isSongReady(level)) return;
+        detachLevelDownloadDelegate();
+        auto const countdownRemaining = std::max(0.0, 10.0 - phaseSeconds());
+        m_enteringSongGate = corum::ranked::showRankedSongDownloadGate(level, countdownRemaining);
     }
 
     void updateAutomation() {
@@ -1039,7 +904,7 @@ class CorumRankedLayer final : public CCLayerColor, public LevelDownloadDelegate
         if (phaseSeconds() >= 5.0) {
             if (!level) startMapDownload();
             level = findPlayableMap();
-            if (level && !isSongReady(level)) startSongDownload();
+            if (level && !isSongReady(level)) openSongDownloadGate();
         }
 
         if (!level && m_mapDownloadStartedAt && elapsed(m_mapDownloadStartedAt) >= 30.0 && !m_mapFailureReported) {
@@ -1047,20 +912,11 @@ class CorumRankedLayer final : public CCLayerColor, public LevelDownloadDelegate
             runtime.reportMapDownloadFailure();
             return;
         }
-        if (level && !isSongReady(level) && m_songDownloadStartedAt && elapsed(m_songDownloadStartedAt) >= 20.0) {
-            // Audio is optional after the 20-second ceiling. Do not cancel the
-            // MusicDownloadManager request: an in-flight song can still finish in
-            // the background and GD will pick it up on a later attempt.
-            m_songBypassed = true;
-            runtime.setSongBypassAllowed(true);
-        }
-
         if (level && isSongReady(level)) {
-            m_songBypassed = false;
             runtime.setSongBypassAllowed(false);
         }
         auto const ownReady = match.side == "A" ? match.readyA : match.readyB;
-        auto const resourcesReady = level && (isSongReady(level) || m_songBypassed);
+        auto const resourcesReady = level && (isSongReady(level) || runtime.songBypassAllowed());
         if (phaseSeconds() >= 10.0 && resourcesReady && !ownReady && !m_readySent) {
             m_readySent = true;
             runtime.submitReady();
@@ -1123,7 +979,7 @@ class CorumRankedLayer final : public CCLayerColor, public LevelDownloadDelegate
     }
 
     void onDownloadSong(CCObject*) {
-        startSongDownload();
+        openSongDownloadGate();
     }
 
     void onQueueAgain(CCObject*) {
@@ -1195,7 +1051,7 @@ class CorumRankedLayer final : public CCLayerColor, public LevelDownloadDelegate
         m_downloadedLevel = level;
         m_localMessage = "Map downloaded.";
         refreshSongIds(level);
-        if (phaseSeconds() >= 5.0 && !isSongReady(level)) startSongDownload();
+        if (phaseSeconds() >= 5.0 && !isSongReady(level)) openSongDownloadGate();
     }
 
     void levelDownloadFailed(int response) override {

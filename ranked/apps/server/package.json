@@ -1,6 +1,6 @@
 {
   "name": "@corum-ranked/server",
-  "version": "0.4.0-alpha.16",
+  "version": "0.4.0-alpha.17",
   "private": true,
   "type": "module",
   "scripts": {
@@ -11,7 +11,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit"
   },
   "dependencies": {
-    "@corum-ranked/rules": "0.4.0-alpha.16",
+    "@corum-ranked/rules": "0.4.0-alpha.17",
     "@nestjs/common": "11.2.1",
     "@nestjs/core": "11.2.1",
     "@nestjs/platform-express": "11.2.1",
