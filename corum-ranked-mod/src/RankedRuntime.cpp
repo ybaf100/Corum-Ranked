@@ -635,6 +635,8 @@ void RankedRuntime::parseMatchState(matjson::Value const& root) {
     m_view.match.playerBScore = static_cast<int>(root["players"]["B"]["visibleRankedScore"].asInt().unwrapOr(0));
     m_view.match.readyA = root["ready"]["A"].asBool().unwrapOr(false);
     m_view.match.readyB = root["ready"]["B"].asBool().unwrapOr(false);
+    m_view.match.ownBanConfirmed = root["banStatus"]["confirmed"].asBool().unwrapOr(false);
+    m_view.match.ownBanCanonicalLevelId = root["banStatus"]["canonicalLevelId"].asString().unwrapOr("");
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
     m_view.match.debug = root["debug"].asBool().unwrapOr(false);
 #endif
@@ -950,6 +952,11 @@ void RankedRuntime::submitReady() {
 
 void RankedRuntime::submitBan(std::optional<std::string> canonicalLevelId) {
     if (m_controlBusy || m_view.stage != RuntimeStage::Matched || m_view.match.state != "BAN_PHASE") return;
+    // Clear stale transport errors before this acknowledgement cycle. If this
+    // request fails, setTransientError() will repopulate the error and the UI can
+    // release its BANNING... state for a retry.
+    m_view.error.clear();
+    ++m_view.revision;
     matjson::Value body;
     if (canonicalLevelId && !canonicalLevelId->empty()) body["canonicalLevelId"] = *canonicalLevelId;
     auto request = baseRequest(m_sessionToken, m_matchToken);

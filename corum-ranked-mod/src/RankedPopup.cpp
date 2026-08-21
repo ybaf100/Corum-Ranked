@@ -90,6 +90,38 @@ ccColor3B tierColor(std::string const& tier) {
     return {155, 160, 175};
 }
 
+ccColor3B colorFromHex(int value) {
+    return ccc3(
+        static_cast<GLubyte>((value >> 16) & 0xff),
+        static_cast<GLubyte>((value >> 8) & 0xff),
+        static_cast<GLubyte>(value & 0xff)
+    );
+}
+
+// Corum difficulty/rating palette. Keep this local to Corum Ranked; Corum
+// Integration remains a separate mod and is not linked into this target.
+ccColor3B difficultyColor(std::string rating) {
+    while (!rating.empty() && std::isspace(static_cast<unsigned char>(rating.front()))) rating.erase(rating.begin());
+    while (!rating.empty() && std::isspace(static_cast<unsigned char>(rating.back()))) rating.pop_back();
+    if (rating == "20") rating = "20.0";
+
+    static std::unordered_map<std::string, int> const colors {
+        {"Tiny", 0xff6fff}, {"0", 0xe8eaed}, {"1", 0x0099ff}, {"2", 0x00bbff},
+        {"3", 0x00ddff}, {"4", 0x00ffff}, {"5", 0x00ffaa}, {"6", 0x00ff00},
+        {"7", 0x66ff00}, {"8", 0x99ff00}, {"9", 0xccff00}, {"10", 0xffff00},
+        {"11", 0xffdd00}, {"12", 0xffcc00}, {"13", 0xffaa00}, {"14", 0xff8800},
+        {"15", 0xff6600}, {"16", 0xff4400}, {"17", 0xff0000}, {"18", 0xcc0000},
+        {"18+", 0xa61c00}, {"19", 0x660000}, {"19+", 0x460c00}, {"20.0", 0x360900},
+        {"20.1", 0x240600}, {"20.2", 0x130400}, {"20.3", 0x000000}, {"20.4", 0x0a031f},
+        {"20.5", 0x11072d}, {"20.6", 0x180b3b}, {"20.7", 0x180b3b}, {"20.8", 0x261358},
+        {"20.9", 0x2d1766}, {"21", 0x351c75}, {"21+", 0x4511c9}, {"-1", 0x4c1130},
+        {"-2", 0x434343}, {"UnVF", 0x4f71a3},
+    };
+
+    auto const found = colors.find(rating);
+    return colorFromHex(found == colors.end() ? 0xffffff : found->second);
+}
+
 CCLabelBMFont* makeLabel(
     std::string const& text,
     float scale,
@@ -144,6 +176,7 @@ class CorumRankedLayer final : public CCLayerColor, public LevelDownloadDelegate
     std::string m_resourceKey;
     std::string m_lastMatchId;
     std::string m_selectedBan;
+    std::string m_pendingBan;
     std::string m_localMessage;
     SteadyClock::time_point m_phaseStartedAt {};
     std::optional<SteadyClock::time_point> m_mapDownloadStartedAt;
@@ -215,10 +248,22 @@ class CorumRankedLayer final : public CCLayerColor, public LevelDownloadDelegate
         if (view.stage == RuntimeStage::Matched && m_lastMatchId != view.match.matchId) {
             m_lastMatchId = view.match.matchId;
             m_selectedBan.clear();
+            m_pendingBan.clear();
             m_localMessage.clear();
             m_resourceKey.clear();
             m_matchFoundReadySent = false;
         }
+        // Ban acknowledgement/error can change independently of the visible phase.
+        // Reconcile it before the phase-key early return.
+        if (view.stage == RuntimeStage::Matched) {
+            if (view.match.ownBanConfirmed) {
+                m_selectedBan = view.match.ownBanCanonicalLevelId;
+                m_pendingBan.clear();
+            } else if (!view.error.empty() && !m_pendingBan.empty()) {
+                m_pendingBan.clear();
+            }
+        }
+
         auto const key = view.stage == RuntimeStage::Matched
             ? fmt::format("{}:{}:{}", view.match.matchId, view.match.state, view.match.stateVersion)
             : fmt::format("stage:{}", static_cast<int>(view.stage));
@@ -254,6 +299,7 @@ class CorumRankedLayer final : public CCLayerColor, public LevelDownloadDelegate
                 CC_SAFE_RELEASE(m_downloadedLevel);
                 m_downloadedLevel = nullptr;
             }
+
         }
     }
 
@@ -495,12 +541,14 @@ class CorumRankedLayer final : public CCLayerColor, public LevelDownloadDelegate
             auto* map = makeLabel(twoLineTitle(match.candidateMaps[i].title, 10), 0.235f, {x, size.height / 2.0f + 27.0f});
             map->limitLabelWidth(cardWidth - 12.0f, 0.235f, 0.17f);
             m_root->addChild(map, 3);
-            auto* diff = makeLabel(match.candidateMaps[i].difficulty, 0.23f, {x, size.height / 2.0f - 9.0f}, kGold);
+            auto* diff = makeLabel(match.candidateMaps[i].difficulty, 0.23f, {x, size.height / 2.0f - 9.0f}, difficultyColor(match.candidateMaps[i].difficulty));
             diff->limitLabelWidth(cardWidth - 14.0f, 0.23f, 0.17f);
             m_root->addChild(diff, 3);
             if (m_selectedBan == match.candidateMaps[i].canonicalLevelId) {
                 addStatusPill("BANNED", {x, size.height / 2.0f - 50.0f}, kGreen);
-            } else if (m_selectedBan.empty()) {
+            } else if (m_pendingBan == match.candidateMaps[i].canonicalLevelId) {
+                addStatusPill("BANNING...", {x, size.height / 2.0f - 50.0f}, kAccent);
+            } else if (m_selectedBan.empty() && m_pendingBan.empty()) {
                 auto* button = addButton("BAN", {x, size.height / 2.0f - 50.0f}, menu_selector(CorumRankedLayer::onBan), true, 0.36f);
                 button->setTag(static_cast<int>(i));
             }
@@ -542,7 +590,7 @@ class CorumRankedLayer final : public CCLayerColor, public LevelDownloadDelegate
             auto* mapName = makeLabel(twoLineTitle(match.currentMap->title, 18), 0.34f, {size.width / 2.0f, size.height / 2.0f + 53.0f});
             mapName->limitLabelWidth(210.0f, 0.34f, 0.22f);
             m_root->addChild(mapName, 4);
-            auto* difficulty = makeLabel(match.currentMap->difficulty, 0.42f, {size.width / 2.0f, size.height / 2.0f + 20.0f}, kGold);
+            auto* difficulty = makeLabel(match.currentMap->difficulty, 0.42f, {size.width / 2.0f, size.height / 2.0f + 20.0f}, difficultyColor(match.currentMap->difficulty));
             m_root->addChild(difficulty, 4);
         }
 
@@ -857,8 +905,9 @@ class CorumRankedLayer final : public CCLayerColor, public LevelDownloadDelegate
         auto* manager = MusicDownloadManager::sharedState();
         if (!manager) return false;
         for (auto const id : m_songIds) {
-            if (songIdReady(manager, id)) continue;
-            if (!manager->getSongInfoObject(id) && m_songInfoRequested.contains(id)) return true;
+            if (songIdReady(manager, id) || manager->getSongInfoObject(id)) continue;
+            auto const* key = manager->getSongInfoKey(id);
+            if (key && manager->isDLActive(key)) return true;
         }
         return false;
     }
@@ -872,7 +921,9 @@ class CorumRankedLayer final : public CCLayerColor, public LevelDownloadDelegate
         auto* manager = MusicDownloadManager::sharedState();
         if (!manager) return false;
         for (auto const id : m_songIds) {
-            if (!songIdReady(manager, id) && m_songDownloadRequested.contains(id)) return true;
+            if (songIdReady(manager, id)) continue;
+            auto const* key = manager->getSongDownloadKey(id);
+            if ((key && manager->isDLActive(key)) || manager->isRunningActionForSongID(id)) return true;
         }
         return false;
     }
@@ -945,7 +996,10 @@ class CorumRankedLayer final : public CCLayerColor, public LevelDownloadDelegate
                 // Re-request it if the previous request stalled instead of getting
                 // permanently stuck in the alpha.11 "Downloading" state.
                 if (!m_songInfoRequested.contains(id) || requestCooldownElapsed(id, 2.0)) {
-                    manager->getSongInfo(id, false);
+                    // The second argument is the vanilla "download after info" flag.
+                    // alpha.15 passed false, which could fetch metadata without ever
+                    // engaging the actual custom-song download.
+                    manager->getSongInfo(id, true);
                     m_songInfoRequested.insert(id);
                     m_songLastRequestAt[id] = now;
                 }
@@ -956,7 +1010,10 @@ class CorumRankedLayer final : public CCLayerColor, public LevelDownloadDelegate
             // MusicDownloadManager deduplicates its active download list. Reissuing
             // after a short cooldown also recovers from silent network failures.
             if (!m_songDownloadRequested.contains(id) || requestCooldownElapsed(id, 3.0)) {
-                manager->downloadSong(id);
+                // Ranked maps use custom songs. downloadCustomSong follows GD's
+                // custom-content URL/path pipeline; downloadSong is not the correct
+                // fallback for this flow on current GD builds.
+                manager->downloadCustomSong(id);
                 m_songDownloadRequested.insert(id);
                 m_songLastRequestAt[id] = now;
             }
@@ -1053,12 +1110,12 @@ class CorumRankedLayer final : public CCLayerColor, public LevelDownloadDelegate
 #endif
 
     void onBan(CCObject* sender) {
-        if (!m_selectedBan.empty()) return;
+        if (!m_selectedBan.empty() || !m_pendingBan.empty()) return;
         auto const index = sender ? sender->getTag() : -1;
         auto const& maps = RankedRuntime::get().view().match.candidateMaps;
         if (index < 0 || static_cast<std::size_t>(index) >= maps.size()) return;
-        m_selectedBan = maps[static_cast<std::size_t>(index)].canonicalLevelId;
-        RankedRuntime::get().submitBan(m_selectedBan);
+        m_pendingBan = maps[static_cast<std::size_t>(index)].canonicalLevelId;
+        RankedRuntime::get().submitBan(m_pendingBan);
     }
 
     void onDownloadMap(CCObject*) {

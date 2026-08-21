@@ -107,6 +107,8 @@ struct MatchView {
     int deathmatchAttemptsCompletedB = 0;
     bool readyA = false;
     bool readyB = false;
+    bool ownBanConfirmed = false;
+    std::string ownBanCanonicalLevelId;
     std::optional<int> ownMmrDelta;
     std::optional<int> ownRatingAfter;
     std::optional<int> mmrDeltaA;

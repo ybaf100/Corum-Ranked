@@ -103,7 +103,11 @@ describe("Round 3 draw and repeating deathmatch", () => {
       ...structuredClone(document),
       fetchedAt: "2026-08-20T03:00:00.000Z",
     };
-    const config = { getSnapshot: () => structuredClone(snapshot) } as RankedConfigService;
+    // RankedConfigService is a concrete Nest service; this test only needs the
+    // getSnapshot contract. Make that deliberate test-double boundary explicit.
+    const config = {
+      getSnapshot: () => structuredClone(snapshot),
+    } as unknown as RankedConfigService;
     const clock = new MutableClock();
     const ids = new SequenceIds();
     const tokens = new TokenService(environmentFixture());
@@ -282,16 +286,24 @@ describe("Round 3 draw and repeating deathmatch", () => {
             levelId,
             clientEventId: `${prefix}-${clock.now().getTime()}-${attempt}-start`,
           });
-          expect(started.deathmatchSnapshot.attemptsUsed[context === contextA ? "A" : "B"]).toBe(attempt);
+          if (!("deathmatchSnapshot" in started)) {
+            throw new Error("Expected deathmatch snapshot after accepted attempt start");
+          }
+          expect(
+            started.deathmatchSnapshot.attemptsUsed[context === contextA ? "A" : "B"],
+          ).toBe(attempt);
           if (attempt === 1) {
             const live = await service.updateAttemptProgress(matchId, token, context, {
               levelId,
               attemptId: started.attemptId!,
               progressPercent: progress,
             });
-            expect(live.deathmatchSnapshot.displayScores[context === contextA ? "A" : "B"]).toBe(
-              progress >= qualifying ? Math.floor(progress) : 0,
-            );
+            if (!("deathmatchSnapshot" in live)) {
+              throw new Error("Expected deathmatch snapshot after live progress update");
+            }
+            expect(
+              live.deathmatchSnapshot.displayScores[context === contextA ? "A" : "B"],
+            ).toBe(progress >= qualifying ? Math.floor(progress) : 0);
           }
           clock.advance(1);
           const ended = await service.endAttempt(matchId, token, context, {
@@ -301,7 +313,12 @@ describe("Round 3 draw and repeating deathmatch", () => {
             progressPercent: progress,
             cleared: false,
           });
-          expect(ended.deathmatchSnapshot.attemptsCompleted[context === contextA ? "A" : "B"]).toBe(attempt);
+          if (!("deathmatchSnapshot" in ended)) {
+            throw new Error("Expected deathmatch snapshot after accepted attempt end");
+          }
+          expect(
+            ended.deathmatchSnapshot.attemptsCompleted[context === contextA ? "A" : "B"],
+          ).toBe(attempt);
         }
         if (context === contextA) {
           // Player A has spent exactly three attempts while B has not started yet,

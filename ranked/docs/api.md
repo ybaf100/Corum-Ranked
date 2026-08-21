@@ -68,7 +68,7 @@ canonical로 fallback합니다. 클라이언트는 playable을 실제로 열고 
 
 State 응답의 `spectator`는 viewer별로 필터링됩니다. 서버가 `내 Clears=2`, `상대 Clears<=1`, `LAST_ATTEMPT_WINDOW` 또는 deadline 이후의 `ROUND_SETTLING`을 확인한 trigger player에게만 `active=true`, `opponentName`, `currentProgress`를 반환합니다. 대상 player와 일반 경기 중에는 `{ "active": false }`만 반환하여 상대 현재 진행률을 공개하지 않습니다. `currentRound.map.qualifyingPercent`, 양쪽 `scores`와 `clears`, `deadlineAt`, `serverNow`가 플레이 HUD의 권위 데이터입니다.
 
-BAN_PHASE 동안 두 player의 선택은 공개 state에 포함되지 않습니다. 확정 후에는 ban 결과만 공개하며, 선택된 3개 맵 중 현재 Round 맵만 노출합니다.
+BAN_PHASE 동안 상대의 선택은 공개 state에 포함되지 않습니다. 각 viewer는 `banStatus`로 자기 자신의 ban 확인 여부와 canonical ID만 볼 수 있으며, opponent ban은 phase 종료 전까지 숨깁니다. 확정 후에는 `bans`에 양쪽 ban 결과를 공개하며, 선택된 3개 맵 중 현재 Round 맵만 노출합니다.
 
 ## Debug Bot Match (alpha only)
 

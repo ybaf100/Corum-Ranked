@@ -2116,6 +2116,12 @@ export class MatchService {
     }
     const series = parseJson<MatchSeriesState>(match.series_state);
     const bansVisible = !["MATCHED", "BAN_PHASE"].includes(match.state);
+    const ownBanConfirmed = viewerSide === "A"
+      ? Boolean(match.ban_a_confirmed_at)
+      : Boolean(match.ban_b_confirmed_at);
+    const ownBanCanonicalLevelId = viewerSide === "A"
+      ? match.ban_a_canonical_id
+      : match.ban_b_canonical_id;
     const rounds = await this.roundSummaries(transaction, match.id);
     const deathmatches = await this.deathmatchSummaries(transaction, match.id);
     let profileAfter: Record<PlayerSide, object | null> | null = null;
@@ -2197,6 +2203,14 @@ export class MatchService {
         match.state === "BAN_PHASE"
           ? parseJson<RankedMapSnapshot[]>(match.candidate_maps_snapshot)
           : null,
+      // During BAN_PHASE each client may see only its own acknowledgement.
+      // The opponent's choice remains private until the phase ends. This also
+      // prevents the client from treating a rejected/late optimistic tap as a
+      // confirmed ban.
+      banStatus: {
+        confirmed: ownBanConfirmed,
+        canonicalLevelId: ownBanConfirmed ? ownBanCanonicalLevelId : null,
+      },
       bans: bansVisible
         ? { A: match.ban_a_canonical_id, B: match.ban_b_canonical_id }
         : null,

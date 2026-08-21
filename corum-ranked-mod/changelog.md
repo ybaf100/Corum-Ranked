@@ -1,3 +1,13 @@
+# v0.4.0-alpha.16
+
+- Fixed `START WITHOUT SONG` by preserving Geometry Dash's full `LevelInfoLayer::onPlay` path and suppressing only the already-acknowledged vanilla no-song warning instead of jumping directly into `playStep2`.
+- Fixed Ranked custom-song download fallback: missing metadata is now requested with GD's download intent and downloaded through `MusicDownloadManager::downloadCustomSong`.
+- Fixed false song UI states: `FETCHING SONG INFO...` / `DOWNLOADING...` now require an active Geometry Dash download action instead of merely remembering that Ranked attempted a request.
+- Added Corum difficulty/rating colors to the Ban cards and the revealed Round/Death Match map difficulty label.
+- Changed Ban UI from optimistic `BANNED` to `BANNING...` until the server confirms the local ban. The server now exposes only the viewer's own ban acknowledgement during the private phase; the opponent ban remains hidden.
+- Added integration coverage that a confirmed shared ban cannot become the Round 1 map and that private ban acknowledgement does not leak the opponent's selection.
+- No Apps Script or database migration changes. Corum Integration remains unchanged.
+
 # v0.4.0-alpha.15
 
 - Rebuilt Ranked attempt transport as a FIFO backlog so a fast death/Clear/reset cannot overwrite the previous unacknowledged attempt end.

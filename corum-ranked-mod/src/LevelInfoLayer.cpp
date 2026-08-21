@@ -118,10 +118,13 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         }
 
         if (!ready && runtime.songBypassAllowed()) {
-            // The 20-second Ranked audio ceiling explicitly permits play without
-            // music. Jump to the post-warning step so GD's "No Song" confirmation
-            // cannot interrupt the authoritative match flow.
-            LevelInfoLayer::playStep2();
+            // Preserve Geometry Dash's complete onPlay setup path. alpha.14/15
+            // jumped directly into playStep2, which skips state initialized by
+            // onPlay on current GD builds and can fail when START WITHOUT SONG is
+            // reached. Mark the vanilla warning as already acknowledged instead,
+            // then let onPlay perform the normal level transition.
+            m_level->m_showedSongWarning = true;
+            LevelInfoLayer::onPlay(nullptr);
             return;
         }
         LevelInfoLayer::onPlay(nullptr);
@@ -135,7 +138,8 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
             !songsReady(m_level) &&
             runtime.songBypassAllowed()
         ) {
-            LevelInfoLayer::playStep2();
+            m_level->m_showedSongWarning = true;
+            LevelInfoLayer::onPlay(sender);
             return;
         }
         LevelInfoLayer::onPlay(sender);

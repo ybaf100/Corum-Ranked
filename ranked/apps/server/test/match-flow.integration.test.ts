@@ -139,9 +139,13 @@ describe("two-client authoritative match flow", () => {
       },
     };
     let liveDocument = document;
+    // RankedConfigService is a concrete Nest service with private runtime state.
+    // This integration test intentionally supplies only the getSnapshot contract,
+    // so cross the structural-typing boundary explicitly instead of relying on an
+    // unsafe direct class assertion that TypeScript 5.9 rejects.
     const config = {
       getSnapshot: () => ({ ...structuredClone(liveDocument), fetchedAt: "2026-08-20T02:00:00Z" }),
-    } as RankedConfigService;
+    } as unknown as RankedConfigService;
     const ids = new SequenceIds();
     const clock = new MutableClock();
     const tokens = new TokenService(environmentFixture());
@@ -200,15 +204,35 @@ describe("two-client authoritative match flow", () => {
     expect(state.candidateMaps).toHaveLength(5);
     const sharedBan = state.candidateMaps[0].canonicalLevelId as string;
 
-    await matches.submitBan(matchId, statusA.matchToken, playerA, {
+    const stateAfterABan = (await matches.submitBan(matchId, statusA.matchToken, playerA, {
+      canonicalLevelId: sharedBan,
+    })) as Record<string, any>;
+    expect(stateAfterABan.state).toBe("BAN_PHASE");
+    expect(stateAfterABan.banStatus).toEqual({
+      confirmed: true,
       canonicalLevelId: sharedBan,
     });
+    expect(stateAfterABan.bans).toBeNull();
+
+    const stateSeenByB = (await matches.state(
+      matchId,
+      statusB.matchToken,
+      playerB,
+    )) as Record<string, any>;
+    expect(stateSeenByB.banStatus).toEqual({
+      confirmed: false,
+      canonicalLevelId: null,
+    });
+    expect(stateSeenByB.bans).toBeNull();
+
     state = (await matches.submitBan(matchId, statusB.matchToken, playerB, {
       canonicalLevelId: sharedBan,
     })) as Record<string, any>;
     expect(state.state).toBe("ROUND_PREPARE");
     expect(state.currentRound.roundNumber).toBe(1);
     expect(state.currentRound.map).toBeTruthy();
+    expect(state.currentRound.map.canonicalLevelId).not.toBe(sharedBan);
+    expect(state.bans).toEqual({ A: sharedBan, B: sharedBan });
     expect(state.selectedRoundMaps).toBeUndefined();
     expect(state.candidateMaps).toBeNull();
 
@@ -235,7 +259,12 @@ describe("two-client authoritative match flow", () => {
         attemptId: firstStart.attemptId!,
         progressPercent: livePercent,
       });
-      expect(progressAck.roundSnapshot.displayScores.A).toBe(livePercent >= qualifying ? livePercent : 0);
+      if (!("roundSnapshot" in progressAck)) {
+        throw new Error("Expected round progress acknowledgement during ROUND_PLAYING");
+      }
+      expect(progressAck.roundSnapshot.displayScores.A).toBe(
+        livePercent >= qualifying ? livePercent : 0,
+      );
       clock.advanceSeconds(1);
       const firstEnd = await matches.endAttempt(matchId, statusA.matchToken, playerA, {
         levelId,
@@ -244,6 +273,9 @@ describe("two-client authoritative match flow", () => {
         progressPercent: 100,
         cleared: true,
       });
+      if (!("roundSnapshot" in firstEnd)) {
+        throw new Error("Expected round attempt-end acknowledgement during ROUND_PLAYING");
+      }
       expect(firstEnd.roundSnapshot.clears.A).toBe(1);
       expect(firstEnd.roundSnapshot.scores.A).toBeCloseTo(100 + qualifying, 6);
       clock.advanceSeconds(1);
