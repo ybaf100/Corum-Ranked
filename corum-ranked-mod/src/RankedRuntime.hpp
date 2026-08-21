@@ -38,6 +38,41 @@ struct RankedMapView {
     double qualifyingPercent = 100.0;
 };
 
+struct RoundSummaryView {
+    int roundNumber = 0;
+    std::string mapTitle;
+    std::string difficulty;
+    int scoreA = 0;
+    int scoreB = 0;
+    int clearsA = 0;
+    int clearsB = 0;
+    std::string result;
+};
+
+struct DeathmatchSummaryView {
+    int sequence = 0;
+    std::string mapTitle;
+    std::string difficulty;
+    int scoreA = 0;
+    int scoreB = 0;
+    std::string winnerSide;
+};
+
+struct HistoryMatchView {
+    std::string matchId;
+    std::string finishedAt;
+    std::string side;
+    std::string opponentName;
+    std::string effectiveTier;
+    std::string winnerSide;
+    int roundWinsA = 0;
+    int roundWinsB = 0;
+    std::optional<int> ownMmrDelta;
+    std::optional<int> ownRatingAfter;
+    std::vector<RoundSummaryView> rounds;
+    std::vector<DeathmatchSummaryView> deathmatches;
+};
+
 struct MatchView {
     std::string matchId;
     std::string state;
@@ -45,21 +80,44 @@ struct MatchView {
     std::string effectiveTier;
     std::string banner;
     std::string deadlineAt;
+    std::string playerAName;
+    std::string playerBName;
+    std::string playerATier;
+    std::string playerBTier;
+    int playerAScore = 0;
+    int playerBScore = 0;
     std::string opponentName;
     std::string winnerSide;
+    std::string cancellationReason;
     std::int64_t stateVersion = 0;
     int roundNumber = 0;
     int scoreA = 0;
     int scoreB = 0;
     int clearsA = 0;
     int clearsB = 0;
+    int roundWinsA = 0;
+    int roundWinsB = 0;
     int deathmatchSequence = 0;
+    bool readyA = false;
+    bool readyB = false;
     std::optional<int> ownMmrDelta;
     std::optional<int> ownRatingAfter;
+    std::optional<int> mmrDeltaA;
+    std::optional<int> mmrDeltaB;
+    std::optional<int> ratingAfterA;
+    std::optional<int> ratingAfterB;
+    std::string profileBeforeTierA;
+    std::string profileBeforeTierB;
+    std::string profileAfterTierA;
+    std::string profileAfterTierB;
+    std::optional<int> profileAfterScoreA;
+    std::optional<int> profileAfterScoreB;
     bool spectatorActive = false;
     std::optional<int> spectatorCurrentProgress;
     std::string spectatorOpponentName;
     std::vector<RankedMapView> candidateMaps;
+    std::vector<RoundSummaryView> rounds;
+    std::vector<DeathmatchSummaryView> deathmatches;
     std::optional<RankedMapView> currentMap;
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
     bool debug = false;
@@ -81,10 +139,14 @@ struct RuntimeView {
     std::string status;
     std::string error;
     std::string profileTier;
+    int profileScore = 0;
     int placementGames = 0;
     int placementGamesRequired = 0;
     std::uint64_t revision = 0;
     MatchView match;
+    bool historyLoading = false;
+    std::string historyError;
+    std::vector<HistoryMatchView> history;
 };
 
 class RankedRuntime final {
@@ -97,6 +159,10 @@ public:
     void leaveQueue();
     void submitReady();
     void submitBan(std::optional<std::string> canonicalLevelId);
+    void reportMapDownloadFailure();
+    void dismissMatch();
+    void queueAgain();
+    void fetchHistory();
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
     // Primary API: password travels inside the options object.
     void startDebugBotMatch(DebugBotMatchOptions options);

@@ -149,7 +149,7 @@ describe("three minutes plus final attempt start window", () => {
 });
 
 describe("two-clear and LAST ATTEMPT rules", () => {
-  it("ends immediately when A reaches two clears while B has zero", () => {
+  it("opens LAST ATTEMPT when A reaches two clears while B has zero", () => {
     let state = createRound(1, snapshot, DOCUMENT_RULES_V0_3, START);
     const b = start(state, "B", 1, "b-current");
     state = b.state;
@@ -157,9 +157,28 @@ describe("two-clear and LAST ATTEMPT rules", () => {
     state = end(a1.state, "A", a1.attemptId, 3, 100, true, "a1-end");
     const a2 = start(state, "A", 4, "a2-start");
     state = end(a2.state, "A", a2.attemptId, 5, 100, true, "a2-end");
-    expect(state.phase).toBe("ROUND_RESULT");
-    expect(state.outcome).toMatchObject({ winner: "A", reason: "TWO_CLEAR_ZERO" });
+    expect(state.phase).toBe("LAST_ATTEMPT_WINDOW");
+    expect(state.lastAttemptWindow).toMatchObject({ targetSide: "B", endsAtMs: START + 15_000 });
     expect(state.attempts.B[0]!.endedAtMs).toBeNull();
+  });
+
+  it("lets a zero-clear target clear once and start another attempt inside the same 10-second window", () => {
+    let state = createRound(1, snapshot, DOCUMENT_RULES_V0_3, START);
+    const a1 = start(state, "A", 1, "a1s");
+    state = end(a1.state, "A", a1.attemptId, 2, 100, true, "a1e");
+    const a2 = start(state, "A", 3, "a2s");
+    state = end(a2.state, "A", a2.attemptId, 4, 100, true, "a2e");
+    expect(state.phase).toBe("LAST_ATTEMPT_WINDOW");
+
+    const b1 = start(state, "B", 5, "b1s");
+    state = end(b1.state, "B", b1.attemptId, 6, 100, true, "b1e");
+    expect(state.phase).toBe("LAST_ATTEMPT_WINDOW");
+    expect(state.clears.B).toBe(1);
+
+    const b2 = start(state, "B", 13, "b2s");
+    state = end(b2.state, "B", b2.attemptId, 20, 100, true, "b2e");
+    expect(state.phase).toBe("ROUND_RESULT");
+    expect(state.outcome).toMatchObject({ result: "DRAW", reason: "LAST_ATTEMPT_CLEAR" });
   });
 
   it("allows the target's current attempt and multiple starts during the 10-second window", () => {
@@ -183,6 +202,18 @@ describe("two-clear and LAST ATTEMPT rules", () => {
 
     expect(state.phase).toBe("ROUND_RESULT");
     expect(state.outcome).toMatchObject({ result: "DRAW", reason: "LAST_ATTEMPT_CLEAR" });
+  });
+
+  it("awards the round to the trigger when a zero-clear target only reaches one clear", () => {
+    let state = createRound(1, snapshot, DOCUMENT_RULES_V0_3, START);
+    const a1 = start(state, "A", 1, "a1s");
+    state = end(a1.state, "A", a1.attemptId, 2, 100, true, "a1e");
+    const a2 = start(state, "A", 3, "a2s");
+    state = end(a2.state, "A", a2.attemptId, 4, 100, true, "a2e");
+    const b1 = start(state, "B", 5, "b1s");
+    state = end(b1.state, "B", b1.attemptId, 6, 100, true, "b1e");
+    state = advanceRoundClock(state, START + 15_000);
+    expect(state.outcome).toMatchObject({ winner: "A", reason: "LAST_ATTEMPT_EXPIRED" });
   });
 
   it("awards the round to the trigger when all LAST ATTEMPT runs fail", () => {

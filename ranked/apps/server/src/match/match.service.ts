@@ -45,6 +45,7 @@ import type {
   AttemptProgressDto,
   AttemptStartDto,
   ReadyMatchDto,
+  ResourceFailureDto,
   SubmitBanDto,
 } from "./match.dto.js";
 import {
@@ -102,6 +103,8 @@ interface LockedMatchRow {
   match_type: "PVP" | "DEBUG_BOT";
   debug_bot_config: unknown | null;
   discord_events_enabled: boolean;
+  cancellation_reason: string | null;
+  finished_at: Date | string | null;
 }
 
 interface RoundRow {
@@ -131,6 +134,40 @@ interface ProfileResultRow {
   hidden_mmr: number;
   placement_games: number;
 }
+
+interface PublicProfileRow {
+  player_id: string;
+  displayed_tier: string;
+  visible_ranked_score: number | null;
+  placement_games: number;
+}
+
+interface RoundSummaryRow {
+  round_number: number;
+  title: string;
+  difficulty: string;
+  score_a: number;
+  score_b: number;
+  clears_a: number;
+  clears_b: number;
+  result: PlayerSide | "DRAW" | null;
+}
+
+interface HistoryMatchRow {
+  id: string;
+  player_a_id: string;
+  player_b_id: string;
+  effective_tier: string;
+  winner_id: string | null;
+  mmr_delta_a: number | null;
+  mmr_delta_b: number | null;
+  mmr_a_after: number | null;
+  mmr_b_after: number | null;
+  series_state: unknown;
+  finished_at: Date | string | null;
+  opponent_name: string;
+}
+
 
 interface DeathmatchRow {
   id: string;
@@ -165,6 +202,12 @@ const dateIso = (value: Date | string | null): string | null =>
 const sideColumn = (side: PlayerSide, prefix: string): string =>
   `${prefix}_${side.toLowerCase()}`;
 
+// alpha.10 client flow: 10s start countdown, map download may take 30s,
+// and a custom song may be allowed up to 20s. Keep server preparation
+// deadlines comfortably beyond the client-side resource window.
+const resourcePrepareSeconds = (configuredReadySeconds: number): number =>
+  Math.max(configuredReadySeconds, 60);
+
 @Injectable()
 export class MatchService {
   public constructor(
@@ -177,6 +220,46 @@ export class MatchService {
     private readonly outbox: OutboxService,
     @Inject(MATCH_RUNTIME_STATE) private readonly runtimeState: MatchRuntimeStatePort,
   ) {}
+
+  public async history(session: RankedSessionContext) {
+    const now = this.clock.now();
+    const matches = await this.database.query<HistoryMatchRow>(
+      `SELECT m.*,
+              CASE WHEN m.player_a_id = $1 THEN pb.gd_username ELSE pa.gd_username END AS opponent_name
+       FROM ranked_matches m
+       JOIN ranked_players pa ON pa.id = m.player_a_id
+       JOIN ranked_players pb ON pb.id = m.player_b_id
+       WHERE (m.player_a_id = $1 OR m.player_b_id = $1)
+         AND m.state = 'MATCH_RESULT'
+       ORDER BY m.finished_at DESC NULLS LAST, m.created_at DESC
+       LIMIT 20`,
+      [session.playerId],
+    );
+    const items = [];
+    for (const match of matches.rows) {
+      const side: PlayerSide = match.player_a_id === session.playerId ? "A" : "B";
+      const winnerSide: PlayerSide | null =
+        match.winner_id === match.player_a_id
+          ? "A"
+          : match.winner_id === match.player_b_id
+            ? "B"
+            : null;
+      items.push({
+        matchId: match.id,
+        finishedAt: dateIso(match.finished_at),
+        side,
+        opponentName: match.opponent_name,
+        effectiveTier: match.effective_tier,
+        winnerSide,
+        mmrDelta: { A: match.mmr_delta_a, B: match.mmr_delta_b },
+        ratingAfter: { A: match.mmr_a_after, B: match.mmr_b_after },
+        series: parseJson<MatchSeriesState>(match.series_state),
+        rounds: await this.roundSummaries(this.database, match.id),
+        deathmatches: await this.deathmatchSummaries(this.database, match.id),
+      });
+    }
+    return { matches: items, serverNow: now.toISOString() };
+  }
 
   public async ready(
     matchId: string,
@@ -269,6 +352,49 @@ export class MatchService {
       if (updatedRound.ready_a_at && updatedRound.ready_b_at) {
         await this.startPreparedRound(transaction, match, updatedRound, now);
       }
+    });
+    return this.state(matchId, matchToken, session);
+  }
+
+  public async reportResourceFailure(
+    matchId: string,
+    matchToken: string,
+    session: RankedSessionContext,
+    body: ResourceFailureDto,
+  ) {
+    if (body.resource !== "MAP") {
+      throw new ConflictException("Only map download failure is a Ranked-fatal resource failure");
+    }
+    const now = this.clock.now();
+    await this.database.transaction(async (transaction) => {
+      const authorization = await this.access.authorize(transaction, matchId, session, matchToken);
+      let match = await this.lockMatch(transaction, matchId);
+      match = await this.advanceLockedMatch(transaction, match, now);
+      if (match.state === "ROUND_PREPARE" && match.current_round_number) {
+        const round = await this.lockCurrentRound(transaction, match);
+        if (round.round_number === 1) {
+          await this.cancelMatch(transaction, match.id, "ROUND_1_MAP_DOWNLOAD_TIMEOUT", now);
+          return;
+        }
+        await this.finalizeMatch(
+          transaction,
+          match,
+          authorization.side === "A" ? "B" : "A",
+          now,
+        );
+        return;
+      }
+      if (match.state === "DEATHMATCH_PREPARE") {
+        await this.finalizeMatch(
+          transaction,
+          match,
+          authorization.side === "A" ? "B" : "A",
+          now,
+        );
+        return;
+      }
+      if (match.state === "MATCH_RESULT" || match.state === "CANCELLED") return;
+      throw new ConflictException(`Map download failure is not accepted in ${match.state}`);
     });
     return this.state(matchId, matchToken, session);
   }
@@ -731,7 +857,7 @@ export class MatchService {
       match.ready_deadline_at &&
       now.getTime() >= new Date(match.ready_deadline_at).getTime()
     ) {
-      await this.resolveReadyTimeout(transaction, match, now);
+      await this.resolveDeathmatchReadyTimeout(transaction, match, now);
       return this.lockMatch(transaction, match.id);
     }
     if (this.isRoundPlaying(match.state)) {
@@ -861,11 +987,14 @@ export class MatchService {
     round: RoundRow,
     now: Date,
   ): Promise<void> {
-    const policy = this.matchConfig(match).operational.failurePolicy;
-    if (
-      policy?.readyTimeoutAction === "FORFEIT_UNREADY" &&
-      Boolean(round.ready_a_at) !== Boolean(round.ready_b_at)
-    ) {
+    // Round 1 resource failure invalidates the match completely. From Round 2
+    // onward, a one-sided map preparation failure is a match forfeit. If both
+    // sides are unready, there is no fair winner, so the match is cancelled.
+    if (round.round_number === 1) {
+      await this.cancelMatch(transaction, match.id, "ROUND_1_MAP_DOWNLOAD_TIMEOUT", now);
+      return;
+    }
+    if (Boolean(round.ready_a_at) !== Boolean(round.ready_b_at)) {
       await this.finalizeMatch(
         transaction,
         match,
@@ -874,7 +1003,24 @@ export class MatchService {
       );
       return;
     }
-    await this.cancelMatch(transaction, match.id, "ROUND_READY_TIMEOUT", now);
+    await this.cancelMatch(transaction, match.id, "ROUND_RESOURCE_TIMEOUT_BOTH", now);
+  }
+
+  private async resolveDeathmatchReadyTimeout(
+    transaction: SqlExecutor,
+    match: LockedMatchRow,
+    now: Date,
+  ): Promise<void> {
+    if (Boolean(match.ready_a_at) !== Boolean(match.ready_b_at)) {
+      await this.finalizeMatch(
+        transaction,
+        match,
+        match.ready_a_at ? "A" : "B",
+        now,
+      );
+      return;
+    }
+    await this.cancelMatch(transaction, match.id, "DEATHMATCH_RESOURCE_TIMEOUT_BOTH", now);
   }
 
   private async cancelMatch(
@@ -908,7 +1054,7 @@ export class MatchService {
       this.random,
     );
     const readyDeadline = new Date(
-      now.getTime() + config.operational.timeouts.readySeconds * 1_000,
+      now.getTime() + resourcePrepareSeconds(config.operational.timeouts.readySeconds) * 1_000,
     );
     await transaction.query(
       `UPDATE ranked_matches
@@ -1055,7 +1201,7 @@ export class MatchService {
         state.clears.B,
         state.outcome?.result ?? null,
         state.outcome?.reason ?? null,
-        state.outcome?.reason === "TWO_CLEAR_ZERO" || Boolean(state.lastAttemptWindow),
+        Boolean(state.lastAttemptWindow),
         state.lastAttemptWindow?.targetSide ?? null,
         state.lastAttemptWindow
           ? new Date(state.lastAttemptWindow.startedAtMs).toISOString()
@@ -1166,7 +1312,7 @@ export class MatchService {
     const map = selected[roundNumber - 1];
     if (!map) throw new Error("Selected round map snapshot is missing");
     const readyDeadline = new Date(
-      now.getTime() + config.operational.timeouts.readySeconds * 1_000,
+      now.getTime() + resourcePrepareSeconds(config.operational.timeouts.readySeconds) * 1_000,
     );
     await this.insertPreparedRound(transaction, match.id, roundNumber, map, readyDeadline);
     await transaction.query(
@@ -1617,7 +1763,7 @@ export class MatchService {
     const deathmatchId = this.ids.next();
     const sequence = prior.rows.length + 1;
     const readyDeadline = new Date(
-      now.getTime() + config.operational.timeouts.readySeconds * 1_000,
+      now.getTime() + resourcePrepareSeconds(config.operational.timeouts.readySeconds) * 1_000,
     );
     await transaction.query(
       `INSERT INTO ranked_deathmatches (id, match_id, sequence, map_snapshot)
@@ -1634,6 +1780,61 @@ export class MatchService {
     );
   }
 
+  private async roundSummaries(executor: SqlExecutor, matchId: string) {
+    const rows = await executor.query<RoundSummaryRow>(
+      `SELECT round_number, title, difficulty, score_a, score_b, clears_a, clears_b, result
+       FROM ranked_rounds WHERE match_id = $1 ORDER BY round_number`,
+      [matchId],
+    );
+    return rows.rows.map((round) => ({
+      roundNumber: Number(round.round_number),
+      mapTitle: round.title,
+      difficulty: round.difficulty,
+      scoreA: Number(round.score_a ?? 0),
+      scoreB: Number(round.score_b ?? 0),
+      clearsA: Number(round.clears_a ?? 0),
+      clearsB: Number(round.clears_b ?? 0),
+      result: round.result,
+    }));
+  }
+
+  private async deathmatchSummaries(executor: SqlExecutor, matchId: string) {
+    const rows = await executor.query<{
+      sequence: number;
+      map_snapshot: unknown;
+      score_a: number | null;
+      score_b: number | null;
+      winner_id: string | null;
+      finished_at: Date | string | null;
+    }>(
+      `SELECT sequence, map_snapshot, score_a, score_b, winner_id, finished_at
+       FROM ranked_deathmatches WHERE match_id = $1 ORDER BY sequence`,
+      [matchId],
+    );
+    const match = await executor.query<{ player_a_id: string; player_b_id: string }>(
+      "SELECT player_a_id, player_b_id FROM ranked_matches WHERE id = $1",
+      [matchId],
+    );
+    const participants = match.rows[0];
+    return rows.rows.map((deathmatch) => {
+      const map = parseJson<RankedMapSnapshot>(deathmatch.map_snapshot);
+      return {
+        sequence: Number(deathmatch.sequence),
+        mapTitle: map.title,
+        difficulty: map.difficulty,
+        scoreA: deathmatch.score_a === null ? null : Number(deathmatch.score_a),
+        scoreB: deathmatch.score_b === null ? null : Number(deathmatch.score_b),
+        winnerSide:
+          deathmatch.winner_id && deathmatch.winner_id === participants?.player_a_id
+            ? "A"
+            : deathmatch.winner_id && deathmatch.winner_id === participants?.player_b_id
+              ? "B"
+              : null,
+        finishedAt: dateIso(deathmatch.finished_at),
+      };
+    });
+  }
+
   private async buildPublicState(
     transaction: SqlExecutor,
     match: LockedMatchRow,
@@ -1644,9 +1845,14 @@ export class MatchService {
       id: string;
       gd_account_id: string;
       gd_username: string;
+      displayed_tier: string;
+      visible_ranked_score: number | null;
     }>(
-      `SELECT id, gd_account_id::text AS gd_account_id, gd_username
-       FROM ranked_players WHERE id = $1 OR id = $2`,
+      `SELECT p.id, p.gd_account_id::text AS gd_account_id, p.gd_username,
+              rp.displayed_tier, rp.visible_ranked_score
+       FROM ranked_players p
+       JOIN ranked_profiles rp ON rp.player_id = p.id
+       WHERE p.id = $1 OR p.id = $2`,
       [match.player_a_id, match.player_b_id],
     );
     const playerA = players.rows.find((player) => player.id === match.player_a_id);
@@ -1660,6 +1866,7 @@ export class MatchService {
       opponentName?: string;
       currentProgress?: number | null;
     } = { active: false };
+    let ready = { A: Boolean(match.ready_a_at), B: Boolean(match.ready_b_at) };
     if (match.current_round_number) {
       const roundResult = await transaction.query<RoundRow>(
         "SELECT * FROM ranked_rounds WHERE match_id = $1 AND round_number = $2",
@@ -1667,6 +1874,7 @@ export class MatchService {
       );
       const round = roundResult.rows[0];
       if (round) {
+        ready = { A: Boolean(round.ready_a_at), B: Boolean(round.ready_b_at) };
         const domain = round.domain_state ? this.roundState(round) : null;
         currentRound = {
           roundNumber: Number(round.round_number),
@@ -1693,7 +1901,7 @@ export class MatchService {
           domain.lastAttemptWindow?.triggerSide === viewerSide &&
           domain.lastAttemptWindow.targetSide === opponentSide &&
           domain.clears[viewerSide] === 2 &&
-          domain.clears[opponentSide] === 1
+          domain.clears[opponentSide] <= 1
         ) {
           const progress = this.runtimeState.progress(
             match.id,
@@ -1739,6 +1947,52 @@ export class MatchService {
     }
     const series = parseJson<MatchSeriesState>(match.series_state);
     const bansVisible = !["MATCHED", "BAN_PHASE"].includes(match.state);
+    const rounds = await this.roundSummaries(transaction, match.id);
+    const deathmatches = await this.deathmatchSummaries(transaction, match.id);
+    let profileAfter: Record<PlayerSide, object | null> | null = null;
+    let profileBefore: Record<PlayerSide, object | null> | null = null;
+    if (match.state === "MATCH_RESULT") {
+      const profiles = await transaction.query<PublicProfileRow>(
+        `SELECT player_id, displayed_tier, visible_ranked_score, placement_games
+         FROM ranked_profiles WHERE player_id = $1 OR player_id = $2`,
+        [match.player_a_id, match.player_b_id],
+      );
+      const a = profiles.rows.find((profile) => profile.player_id === match.player_a_id);
+      const b = profiles.rows.find((profile) => profile.player_id === match.player_b_id);
+      profileAfter = {
+        A: a
+          ? { displayedTier: a.displayed_tier, visibleRankedScore: Number(a.visible_ranked_score ?? 0), placementGames: Number(a.placement_games) }
+          : null,
+        B: b
+          ? { displayedTier: b.displayed_tier, visibleRankedScore: Number(b.visible_ranked_score ?? 0), placementGames: Number(b.placement_games) }
+          : null,
+      };
+      if (!config.operational.mmrPolicy) throw new Error("Missing MMR policy");
+      profileBefore = {
+        A: a
+          ? {
+              displayedTier: displayedTierForProfile(
+                Number(match.mmr_a_before),
+                Math.max(0, Number(a.placement_games) - 1),
+                config.operational.mmrPolicy,
+                config.operational.tierBands,
+              ),
+              visibleRankedScore: Number(match.mmr_a_before),
+            }
+          : null,
+        B: b
+          ? {
+              displayedTier: displayedTierForProfile(
+                Number(match.mmr_b_before),
+                Math.max(0, Number(b.placement_games) - 1),
+                config.operational.mmrPolicy,
+                config.operational.tierBands,
+              ),
+              visibleRankedScore: Number(match.mmr_b_before),
+            }
+          : null,
+      };
+    }
     return {
       matchId: match.id,
       state: match.state,
@@ -1751,12 +2005,23 @@ export class MatchService {
       matchType: match.match_type,
       debug: match.match_type === "DEBUG_BOT",
       side: viewerSide,
+      ready,
       players: {
         A: playerA
-          ? { gdAccountId: playerA.gd_account_id, gdUsername: playerA.gd_username }
+          ? {
+              gdAccountId: playerA.gd_account_id,
+              gdUsername: playerA.gd_username,
+              displayedTier: playerA.displayed_tier,
+              visibleRankedScore: Number(playerA.visible_ranked_score ?? 0),
+            }
           : null,
         B: playerB
-          ? { gdAccountId: playerB.gd_account_id, gdUsername: playerB.gd_username }
+          ? {
+              gdAccountId: playerB.gd_account_id,
+              gdUsername: playerB.gd_username,
+              displayedTier: playerB.displayed_tier,
+              visibleRankedScore: Number(playerB.visible_ranked_score ?? 0),
+            }
           : null,
       },
       candidateMaps:
@@ -1767,20 +2032,24 @@ export class MatchService {
         ? { A: match.ban_a_canonical_id, B: match.ban_b_canonical_id }
         : null,
       series,
+      rounds,
       currentRound,
       spectator,
       deathmatch,
+      deathmatches,
       result:
         match.state === "MATCH_RESULT"
           ? {
               winnerSide: match.winner_id === match.player_a_id ? "A" : "B",
               mmrDelta: { A: match.mmr_delta_a, B: match.mmr_delta_b },
               ratingAfter: { A: match.mmr_a_after, B: match.mmr_b_after },
+              profileBefore,
+              profileAfter,
             }
           : null,
       cancellation:
         match.state === "CANCELLED"
-          ? { cancelled: true }
+          ? { cancelled: true, reason: match.cancellation_reason }
           : null,
     };
   }

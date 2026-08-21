@@ -32,7 +32,15 @@ class $modify(CorumRankedMenuLayer, MenuLayer) {
         menu->addChild(button);
         addChild(menu, 20);
         schedule(schedule_selector(CorumRankedMenuLayer::rankedTick), 0.25f);
+        if (corum::ranked::RankedRuntime::get().view().stage == corum::ranked::RuntimeStage::Matched) {
+            scheduleOnce(schedule_selector(CorumRankedMenuLayer::reopenRanked), 0.35f);
+        }
         return true;
+    }
+
+    void reopenRanked(float) {
+        auto const& view = corum::ranked::RankedRuntime::get().view();
+        if (view.stage == corum::ranked::RuntimeStage::Matched) corum::ranked::showRankedPopup();
     }
 
     void rankedTick(float) {

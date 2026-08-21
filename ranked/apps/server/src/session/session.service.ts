@@ -25,6 +25,7 @@ interface ExistingProfileRow {
   initial_seed_mmr: number | null;
   seed_applied_at: Date | string | null;
   displayed_tier: DisplayTier;
+  visible_ranked_score: number | null;
 }
 
 interface PlayerRow {
@@ -40,6 +41,7 @@ export interface SessionCreationResult {
     readonly displayedTier: DisplayTier;
     readonly placementGames: number;
     readonly placementGamesRequired: number;
+    readonly visibleRankedScore: number;
   };
   readonly authenticationLevel: "SELF_ASSERTED_GD_ACCOUNT_WITH_SERVER_SESSION";
   readonly serverNow: string;
@@ -126,6 +128,7 @@ export class SessionService {
         displayedTier: profile.displayed_tier,
         placementGames: Number(profile.placement_games),
         placementGamesRequired: config.operational.mmrPolicy.placementGames,
+        visibleRankedScore: Number(profile.visible_ranked_score ?? profile.hidden_mmr ?? 0),
       },
       authenticationLevel: "SELF_ASSERTED_GD_ACCOUNT_WITH_SERVER_SESSION",
       serverNow: now.toISOString(),

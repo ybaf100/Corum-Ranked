@@ -2,6 +2,7 @@ import { Type } from "class-transformer";
 import {
   IsBoolean,
   IsISO8601,
+  IsIn,
   IsInt,
   IsNumber,
   IsOptional,
@@ -19,6 +20,13 @@ export class SubmitBanDto {
   @IsString()
   @Length(1, 40)
   public canonicalLevelId?: string | null;
+}
+
+
+export class ResourceFailureDto {
+  @IsString()
+  @IsIn(["MAP"])
+  public resource!: "MAP";
 }
 
 export class AttemptStartDto {

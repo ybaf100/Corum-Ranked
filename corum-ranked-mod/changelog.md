@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.4.0-alpha.10
+
+- Replaced the Ranked popup-style flow with a full-screen in-game Ranked layer based on the supplied UI sketches. Orange annotations/arrows from the sketches are implementation notes only and are never rendered in-game.
+- Added Match Found, private 10-second map ban, round/deathmatch preparation, Match End, Queue Again, and Match History/detail screens with round-by-round scores and approved Clear checks.
+- Added explicit map/song resource states: `DOWNLOAD MAP` / `DOWNLOAD SONG`, `DOWNLOADING...`, and `DOWNLOADED`. Missing resources auto-start downloading when the 10-second start countdown reaches 5 seconds remaining.
+- Added map download handling with a 30-second maximum: Round 1 timeout cancels the match with no rating/stat/history result; Round 2+, Round 3, and Deathmatch map timeout forfeits the match for the failing player.
+- Added song download handling with a 20-second maximum. If the song is still unavailable after the window, play starts without waiting; the Geometry Dash download continues in the background and can become available on a later attempt.
+- Added `WAITING FOR YOUR DOWNLOAD...` / `WAITING FOR <PLAYER>'S DOWNLOAD...` readiness messaging while either side is not map-ready.
+- Changed the 2-Clear rule so a player at 0 Clears also receives the same 10-second LAST ATTEMPT start window. A first Clear does not end the window; any next attempt started before the deadline remains valid through completion, and reaching 2 Clears produces a Draw.
+- Added automatic exit through Geometry Dash's normal `PlayLayer::onQuit()` path when the authoritative server state says the active round/match is no longer playable.
+- Added server match-history summaries and resource-failure handling required by the new result/history UI.
+- Kept active-only mod allowlist enforcement, CSMP timeout/retry handling, the embedded Render server URL, and Debug Bot rating/stat behavior from prior alphas.
+- Corum Integration remains unchanged.
+
 ## v0.4.0-alpha.9
 
 - Split CSMP source timeout control from Ranked config fetch timeout with `RANKED_CSMP_FETCH_TIMEOUT_MS` (30 seconds by default).

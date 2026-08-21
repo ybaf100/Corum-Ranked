@@ -15,6 +15,7 @@ import {
   AttemptProgressDto,
   AttemptStartDto,
   ReadyMatchDto,
+  ResourceFailureDto,
   SubmitBanDto,
 } from "./match.dto.js";
 import { MatchService } from "./match.service.js";
@@ -23,6 +24,11 @@ import { MatchService } from "./match.service.js";
 @UseGuards(SessionGuard)
 export class MatchController {
   public constructor(private readonly matches: MatchService) {}
+
+  @Get()
+  public recent(@CurrentSession() session: RankedSessionContext) {
+    return this.matches.history(session);
+  }
 
   @Get(":id/state")
   public state(
@@ -60,6 +66,17 @@ export class MatchController {
     @Body() body: SubmitBanDto,
   ) {
     return this.matches.submitBan(matchId, matchToken, session, body);
+  }
+
+
+  @Post(":id/resource-failure")
+  public resourceFailure(
+    @Param("id") matchId: string,
+    @Headers("x-match-token") matchToken: string,
+    @CurrentSession() session: RankedSessionContext,
+    @Body() body: ResourceFailureDto,
+  ) {
+    return this.matches.reportResourceFailure(matchId, matchToken, session, body);
   }
 
   @Post(":id/attempt/start")

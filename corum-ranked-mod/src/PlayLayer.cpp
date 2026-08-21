@@ -77,6 +77,7 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         std::uint64_t renderedRevision = 0;
         int levelId = 0;
         bool rankedLevel = false;
+        bool autoExitRequested = false;
     };
 
     bool init(GJGameLevel* level, bool useReplay, bool dontCreateObjects) {
@@ -98,6 +99,22 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         auto& runtime = corum::ranked::RankedRuntime::get();
         runtime.tick();
         if (!m_fields->rankedLevel || m_isPracticeMode || m_isTestMode) return;
+
+        auto const& matchState = runtime.view().match.state;
+        auto const stillPlaying =
+            matchState == "ROUND_PLAYING" ||
+            matchState == "FINAL_ATTEMPT_WINDOW" ||
+            matchState == "LAST_ATTEMPT_WINDOW" ||
+            matchState == "DEATHMATCH_PLAYING";
+        if ((!stillPlaying || runtime.currentLevelId() != m_fields->levelId) && !m_fields->autoExitRequested) {
+            // alpha.10: Ranked never leaves a finished map waiting for the user.
+            // Use Geometry Dash's normal PlayLayer quit path so scene/audio cleanup
+            // remains owned by the game.
+            m_fields->autoExitRequested = true;
+            PlayLayer::onQuit();
+            return;
+        }
+
         m_fields->fpsMeter.observeFrame(steadyNowMicros());
 
         if (!runtime.isSpectating()) {

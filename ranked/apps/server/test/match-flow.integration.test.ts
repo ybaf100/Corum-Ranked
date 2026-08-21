@@ -249,9 +249,14 @@ describe("two-client authoritative match flow", () => {
 
     await winRoundWithTwoClears(1);
     state = (await matches.state(matchId, statusA.matchToken, playerA)) as Record<string, any>;
+    expect(state.state).toBe("LAST_ATTEMPT_WINDOW");
+    expect(state.currentRound.lastAttemptWindow).toMatchObject({ triggerSide: "A", targetSide: "B" });
+    expect(state.spectator).toMatchObject({ active: true });
+
+    clock.advanceSeconds(11);
+    state = (await matches.state(matchId, statusA.matchToken, playerA)) as Record<string, any>;
     expect(state.state).toBe("ROUND_RESULT");
-    expect(state.currentRound.outcome).toMatchObject({ winner: "A", reason: "TWO_CLEAR_ZERO" });
-    expect(state.spectator).toEqual({ active: false });
+    expect(state.currentRound.outcome).toMatchObject({ winner: "A", reason: "LAST_ATTEMPT_EXPIRED" });
 
     clock.advanceSeconds(6);
     state = (await matches.state(matchId, statusA.matchToken, playerA)) as Record<string, any>;
