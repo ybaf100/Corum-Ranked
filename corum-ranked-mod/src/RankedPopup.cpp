@@ -8,7 +8,6 @@
 #include <Geode/binding/GameLevelManager.hpp>
 #include <Geode/binding/GameManager.hpp>
 #include <Geode/binding/GJGameLevel.hpp>
-#include <Geode/binding/LevelDownloadDelegate.hpp>
 #include <Geode/binding/LevelInfoLayer.hpp>
 #include <Geode/binding/MusicDownloadManager.hpp>
 #include <Geode/binding/SimplePlayer.hpp>
@@ -157,7 +156,7 @@ std::string resourceKey(MatchView const& match) {
     );
 }
 
-class CorumRankedLayer final : public CCLayerColor, public LevelDownloadDelegate {
+class CorumRankedLayer final : public CCLayerColor {
     enum class Page {
         Live,
         HistoryList,
@@ -166,7 +165,6 @@ class CorumRankedLayer final : public CCLayerColor, public LevelDownloadDelegate
 
     CCNode* m_root = nullptr;
     CCMenu* m_menu = nullptr;
-    GJGameLevel* m_downloadedLevel = nullptr;
     Page m_page = Page::Live;
     std::size_t m_historyIndex = 0;
     std::string m_phaseKey;
@@ -176,20 +174,13 @@ class CorumRankedLayer final : public CCLayerColor, public LevelDownloadDelegate
     std::string m_pendingBan;
     std::string m_localMessage;
     SteadyClock::time_point m_phaseStartedAt {};
-    std::optional<SteadyClock::time_point> m_mapDownloadStartedAt;
-    std::optional<SteadyClock::time_point> m_lastMapDownloadAttemptAt;
     std::vector<int> m_songIds;
-    int m_downloadingLevelId = 0;
     bool m_readySent = false;
     bool m_matchFoundReadySent = false;
-    bool m_mapFailureReported = false;
     bool m_enteringSongGate = false;
     bool m_enteringLevel = false;
 
-    ~CorumRankedLayer() override {
-        detachLevelDownloadDelegate();
-        CC_SAFE_RELEASE(m_downloadedLevel);
-    }
+    ~CorumRankedLayer() override = default;
 
     bool init() override {
         if (!CCLayerColor::initWithColor({0, 0, 0, 0})) return false;
@@ -271,17 +262,11 @@ class CorumRankedLayer final : public CCLayerColor, public LevelDownloadDelegate
             auto const newResourceKey = resourceKey(view.match);
             if (newResourceKey != m_resourceKey) {
                 m_resourceKey = newResourceKey;
-                m_mapDownloadStartedAt.reset();
-                m_lastMapDownloadAttemptAt.reset();
                 m_readySent = false;
-                m_mapFailureReported = false;
                 m_enteringSongGate = false;
                 RankedRuntime::get().setSongBypassAllowed(false);
                 m_enteringLevel = false;
                 m_songIds.clear();
-                m_downloadingLevelId = 0;
-                CC_SAFE_RELEASE(m_downloadedLevel);
-                m_downloadedLevel = nullptr;
             }
 
         }
@@ -290,11 +275,6 @@ class CorumRankedLayer final : public CCLayerColor, public LevelDownloadDelegate
     double phaseSeconds() const {
         if (m_phaseStartedAt == SteadyClock::time_point{}) return 0.0;
         return std::chrono::duration<double>(SteadyClock::now() - m_phaseStartedAt).count();
-    }
-
-    double elapsed(std::optional<SteadyClock::time_point> const& start) const {
-        if (!start) return 0.0;
-        return std::chrono::duration<double>(SteadyClock::now() - *start).count();
     }
 
     void clearUi() {
@@ -592,10 +572,8 @@ class CorumRankedLayer final : public CCLayerColor, public LevelDownloadDelegate
         auto const songPos = CCPoint{size.width / 2.0f, size.height / 2.0f - 62.0f};
         if (mapReady) {
             addStatusPill("DOWNLOADED", mapPos, kGreen);
-        } else if (m_downloadingLevelId != 0) {
-            addStatusPill("DOWNLOADING...", mapPos, kAccent);
         } else {
-            addButton("DOWNLOAD MAP", mapPos, menu_selector(CorumRankedLayer::onDownloadMap), false, 0.50f);
+            addStatusPill("OPENING LEVEL...", mapPos, kAccent);
         }
 
         if (!mapReady) {
@@ -807,82 +785,9 @@ class CorumRankedLayer final : public CCLayerColor, public LevelDownloadDelegate
         }
     }
 
-    void capturePlayableLevel(GJGameLevel* level) {
-        if (!isPlayableLevel(level)) return;
-        if (m_downloadedLevel != level) {
-            CC_SAFE_RETAIN(level);
-            CC_SAFE_RELEASE(m_downloadedLevel);
-            m_downloadedLevel = level;
-        }
-        m_downloadingLevelId = 0;
-        detachLevelDownloadDelegate();
-        m_localMessage = "Map downloaded.";
-        refreshSongIds(level);
-    }
-
-    bool reconcileMapDownload() {
-        if (auto* level = findLocalMap(); isPlayableLevel(level)) {
-            capturePlayableLevel(level);
-            return true;
-        }
-
-        if (m_downloadingLevelId == 0) return false;
-        auto* manager = GameLevelManager::sharedState();
-        if (manager && manager->m_levelDownloadDelegate != this) {
-            // GameLevelManager owns one global download delegate. If another layer
-            // replaced it while the Ranked request is alive, restore ours so the
-            // vanilla completion callback cannot disappear.
-            manager->m_levelDownloadDelegate = this;
-        }
-
-        // Do not get permanently stuck on DOWNLOADING when GD drops a callback or
-        // a request silently stalls. Poll the saved level every UI tick and retry
-        // the vanilla request after a short watchdog interval. The original 30 s
-        // match-resource deadline still governs cancellation/loss semantics.
-        if (m_lastMapDownloadAttemptAt && elapsed(m_lastMapDownloadAttemptAt) >= 3.0) {
-            detachLevelDownloadDelegate();
-            m_downloadingLevelId = 0;
-            m_localMessage = "Map download stalled. Retrying with Geometry Dash...";
-        }
-        return false;
-    }
-
-    void startMapDownload() {
-        auto const levelId = RankedRuntime::get().currentLevelId();
-        if (levelId <= 0 || reconcileMapDownload()) return;
-
-        auto* manager = GameLevelManager::sharedState();
-        if (!manager) {
-            m_localMessage = "Geometry Dash map downloader is unavailable.";
-            return;
-        }
-
-        // A live request is left alone until the watchdog above decides it stalled.
-        if (m_downloadingLevelId == levelId) return;
-        auto const now = SteadyClock::now();
-        if (m_lastMapDownloadAttemptAt) {
-            auto const sinceLast = std::chrono::duration<double>(now - *m_lastMapDownloadAttemptAt).count();
-            if (sinceLast < 0.75) return;
-        }
-
-        detachLevelDownloadDelegate();
-        manager->m_levelDownloadDelegate = this;
-        m_downloadingLevelId = levelId;
-        if (!m_mapDownloadStartedAt) m_mapDownloadStartedAt = now;
-        m_lastMapDownloadAttemptAt = now;
-        m_localMessage = "Downloading map...";
-
-        // Same vanilla download path used by Geometry Dash/other Geode clients.
-        // Completion is accepted both through LevelDownloadDelegate and through
-        // reconcileMapDownload(), so a missing delegate callback cannot deadlock
-        // the Ranked prepare screen.
-        manager->downloadLevel(levelId, false, 0);
-    }
-
     GJGameLevel* findLocalMap() const {
         auto const id = RankedRuntime::get().currentLevelId();
         if (id <= 0) return nullptr;
-        if (m_downloadedLevel && static_cast<int>(m_downloadedLevel->m_levelID) == id) return m_downloadedLevel;
         auto* manager = GameLevelManager::sharedState();
         return manager ? manager->getSavedLevel(id) : nullptr;
     }
@@ -899,6 +804,24 @@ class CorumRankedLayer final : public CCLayerColor, public LevelDownloadDelegate
     GJGameLevel* findPlayableMap() const {
         auto* level = findLocalMap();
         return isPlayableLevel(level) ? level : nullptr;
+    }
+
+    GJGameLevel* findLevelInfoMap() const {
+        if (auto* level = findLocalMap()) return level;
+        auto const& current = RankedRuntime::get().view().match.currentMap;
+        if (!current || current->levelId <= 0) return nullptr;
+
+        // LevelInfoLayer can own the real vanilla map download as long as it has
+        // an online-level shell with the selected ID. The server snapshot already
+        // gives us enough metadata to render that page until GD replaces it with
+        // the downloaded payload.
+        auto* level = GJGameLevel::create();
+        if (!level) return nullptr;
+        level->setLevelID(current->levelId);
+        level->m_levelName = current->title;
+        level->m_creatorName = current->creator;
+        level->m_levelNotDownloaded = true;
+        return level;
     }
 
     std::vector<int> collectSongIds(GJGameLevel* level) const {
@@ -952,9 +875,12 @@ class CorumRankedLayer final : public CCLayerColor, public LevelDownloadDelegate
 
     void openSongDownloadGate() {
         if (m_enteringSongGate) return;
-        auto* level = findPlayableMap();
-        if (!level || isSongReady(level)) return;
-        detachLevelDownloadDelegate();
+        auto* level = findLevelInfoMap();
+        if (!level) return;
+
+        // alpha.21: always move preparation to the real Geometry Dash level page.
+        // That LevelInfoLayer owns map download itself; Ranked no longer performs
+        // a parallel GameLevelManager map-download workflow from this screen.
         auto const countdownRemaining = std::max(0.0, 10.0 - phaseSeconds());
         m_enteringSongGate = corum::ranked::showRankedSongDownloadGate(level, countdownRemaining);
     }
@@ -974,28 +900,11 @@ class CorumRankedLayer final : public CCLayerColor, public LevelDownloadDelegate
         }
         if (match.state != "ROUND_PREPARE" && match.state != "DEATHMATCH_PREPARE") return;
 
-        reconcileMapDownload();
-        auto* level = findPlayableMap();
-        if (phaseSeconds() >= 5.0) {
-            if (!level) startMapDownload();
-            level = findPlayableMap();
-            if (level && !isSongReady(level)) openSongDownloadGate();
-        }
-
-        if (!level && m_mapDownloadStartedAt && elapsed(m_mapDownloadStartedAt) >= 30.0 && !m_mapFailureReported) {
-            m_mapFailureReported = true;
-            runtime.reportMapDownloadFailure();
-            return;
-        }
-        if (level && isSongReady(level)) {
-            runtime.setSongBypassAllowed(false);
-        }
-        auto const ownReady = match.side == "A" ? match.readyA : match.readyB;
-        auto const resourcesReady = level && (isSongReady(level) || runtime.songBypassAllowed());
-        if (phaseSeconds() >= 10.0 && resourcesReady && !ownReady && !m_readySent) {
-            m_readySent = true;
-            runtime.submitReady();
-        }
+        // Preparation now happens entirely on the real LevelInfoLayer. Opening
+        // that page immediately lets Geometry Dash own the selected map download,
+        // exposes only its vanilla song-download control, shows the countdown, and
+        // auto-enters Play when the server starts the round.
+        openSongDownloadGate();
     }
 
     void maybeEnterLevel() {
@@ -1013,7 +922,6 @@ class CorumRankedLayer final : public CCLayerColor, public LevelDownloadDelegate
             return;
         }
         m_enteringLevel = true;
-        detachLevelDownloadDelegate();
         // Do not construct PlayLayer directly. Enter through Geometry Dash's normal
         // LevelInfoLayer -> onPlay path; this lets the game own level validation,
         // loading transitions, audio setup, and the return/quit stack.
@@ -1050,7 +958,7 @@ class CorumRankedLayer final : public CCLayerColor, public LevelDownloadDelegate
     }
 
     void onDownloadMap(CCObject*) {
-        startMapDownload();
+        openSongDownloadGate();
     }
 
     void onDownloadSong(CCObject*) {
@@ -1110,32 +1018,6 @@ class CorumRankedLayer final : public CCLayerColor, public LevelDownloadDelegate
         }
         onCloseLayer(nullptr);
     }
-
-    void levelDownloadFinished(GJGameLevel* level) override {
-        detachLevelDownloadDelegate();
-        m_downloadingLevelId = 0;
-        if (!isPlayableLevel(level)) {
-            // Some GD responses can surface only the search/list metadata object.
-            // Do not call it downloaded; the watchdog will request the full level
-            // payload again instead of leaving WAITING FOR MAP forever.
-            m_localMessage = "Map metadata received; requesting playable data...";
-            return;
-        }
-        capturePlayableLevel(level);
-        if (phaseSeconds() >= 5.0 && !isSongReady(level)) openSongDownloadGate();
-    }
-
-    void levelDownloadFailed(int response) override {
-        detachLevelDownloadDelegate();
-        m_downloadingLevelId = 0;
-        m_localMessage = fmt::format("Map download failed ({}). Retrying is allowed until the 30s limit.", response);
-    }
-
-    void detachLevelDownloadDelegate() {
-        auto* manager = GameLevelManager::sharedState();
-        if (manager && manager->m_levelDownloadDelegate == this) manager->m_levelDownloadDelegate = nullptr;
-    }
-
 
 public:
     static CorumRankedLayer* create() {

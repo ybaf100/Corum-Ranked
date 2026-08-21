@@ -8,7 +8,7 @@
   },
   "id": "hwanhee1.corum_ranked",
   "name": "Corum Ranked",
-  "version": "v0.4.0-alpha.20",
+  "version": "v0.4.0-alpha.21",
   "developer": "hwanhee1",
   "description": "A separate server-authoritative Corum Ranked client. It does not share runtime state or UI with Corum Integration.",
   "dependencies": {

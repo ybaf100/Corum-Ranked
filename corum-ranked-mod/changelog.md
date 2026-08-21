@@ -1,3 +1,12 @@
+# v0.4.0-alpha.21
+- Replaced the Ranked prepare-screen map downloader with the real Geometry Dash `LevelInfoLayer` flow. The selected level page opens immediately and `LevelInfoLayer::downloadLevel()` owns map download/delegate/UI state.
+- During Round/Death Match preparation, every LevelInfo control is locked except the vanilla song-download widget; Back/Play cannot bypass the countdown.
+- Added the Ranked countdown/status directly onto the visible LevelInfo page and automatically enters the selected map from that same LevelInfoLayer when the server enters the playing state.
+- Added a 5-second vanilla LevelInfo download watchdog and retained the existing 30-second map failure policy plus 20-second optional-song bypass.
+- Removed the parallel RankedPopup `GameLevelManager::downloadLevel` / global `LevelDownloadDelegate` path to avoid fighting Geometry Dash for the map download delegate.
+- Preserves alpha.20 scoring/attempt fixes, Round-score presentation, and the alpha.19 Deathmatch test correction.
+- Corum Integration and Apps Script remain unchanged.
+
 # v0.4.0-alpha.20
 - Hardened map downloads so a dropped/stolen `LevelDownloadDelegate` callback cannot leave Ranked stuck on `DOWNLOADING...`; the client now polls for playable level data and retries stalled vanilla GD downloads under the existing 30-second policy.
 - Fixed local Ranked scoring presentation by snapshotting Qualifying in `PlayLayer` and using it as an explicit fallback for live/provisional attempt scoring instead of depending on a mutable match-state map view.

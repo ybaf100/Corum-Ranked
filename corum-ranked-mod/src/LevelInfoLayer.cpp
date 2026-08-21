@@ -19,13 +19,13 @@ namespace {
 
 using SteadyClock = std::chrono::steady_clock;
 
-struct PendingSongGate {
+struct PendingPrepareGate {
     int levelId = 0;
     double countdownRemainingSeconds = 0.0;
     bool pending = false;
 };
 
-PendingSongGate g_pendingSongGate;
+PendingPrepareGate g_pendingPrepareGate;
 
 bool rankedPrepareState(std::string const& state) {
     return state == "ROUND_PREPARE" || state == "DEATHMATCH_PREPARE";
@@ -38,6 +38,10 @@ bool rankedPlayingState(std::string const& state) {
         state == "LAST_ATTEMPT_WINDOW" ||
         state == "ROUND_SETTLING" ||
         state == "DEATHMATCH_PLAYING";
+}
+
+bool mapReady(GJGameLevel* level) {
+    return level && !level->m_levelString.empty() && !level->m_levelNotDownloaded;
 }
 
 std::vector<int> collectSongIds(GJGameLevel* level) {
@@ -57,6 +61,7 @@ std::vector<int> collectSongIds(GJGameLevel* level) {
 }
 
 bool songsReady(GJGameLevel* level) {
+    if (!mapReady(level)) return false;
     auto ids = collectSongIds(level);
     if (ids.empty()) return true;
     auto* manager = MusicDownloadManager::sharedState();
@@ -75,23 +80,36 @@ bool isCurrentRankedLevel(GJGameLevel* level) {
         runtime.currentLevelId() == static_cast<int>(level->m_levelID);
 }
 
-bool consumeSongGateRequest(GJGameLevel* level, double& countdownRemainingSeconds) {
-    if (!level || !g_pendingSongGate.pending) return false;
-    if (g_pendingSongGate.levelId != static_cast<int>(level->m_levelID)) return false;
-    countdownRemainingSeconds = std::max(0.0, g_pendingSongGate.countdownRemainingSeconds);
-    g_pendingSongGate = {};
+bool consumePrepareGateRequest(GJGameLevel* level, double& countdownRemainingSeconds) {
+    if (!level || !g_pendingPrepareGate.pending) return false;
+    if (g_pendingPrepareGate.levelId != static_cast<int>(level->m_levelID)) return false;
+    countdownRemainingSeconds = std::max(0.0, g_pendingPrepareGate.countdownRemainingSeconds);
+    g_pendingPrepareGate = {};
     return true;
 }
 
-void disableMenusOutside(CCNode* root, CCNode* allowedRoot) {
-    if (!root || root == allowedRoot) return;
-    if (auto* menu = typeinfo_cast<CCMenu*>(root)) {
-        menu->setTouchEnabled(false);
-    }
+void setMenusEnabled(CCNode* root, bool enabled) {
+    if (!root) return;
+    if (auto* menu = typeinfo_cast<CCMenu*>(root)) menu->setTouchEnabled(enabled);
     for (CCNode* child : root->getChildrenExt()) {
-        if (!child || child == allowedRoot) continue;
-        disableMenusOutside(child, allowedRoot);
+        if (child) setMenusEnabled(child, enabled);
     }
+}
+
+// Disable every vanilla LevelInfo menu while preparing, then selectively restore
+// the actual Geometry Dash song widget. This leaves map download fully owned by
+// LevelInfoLayer while preventing Play/Back/Like/etc. from being tapped early.
+void lockInteractionToSong(CCNode* root, CCNode* songWidget) {
+    if (!root) return;
+    setMenusEnabled(root, false);
+    if (!songWidget) return;
+
+    // If a parent menu owns the widget, it must stay enabled for the child's
+    // vanilla song download controls to receive touches.
+    for (CCNode* node = songWidget; node && node != root; node = node->getParent()) {
+        if (auto* menu = typeinfo_cast<CCMenu*>(node)) menu->setTouchEnabled(true);
+    }
+    setMenusEnabled(songWidget, true);
 }
 
 CCLabelBMFont* gateLabel(std::string const& text, float scale, CCPoint position, ccColor3B color = {255, 255, 255}) {
@@ -108,13 +126,13 @@ namespace corum::ranked {
 
 bool showRankedSongDownloadGate(GJGameLevel* level, double countdownRemainingSeconds) {
     if (!level) return false;
-    g_pendingSongGate.levelId = static_cast<int>(level->m_levelID);
-    g_pendingSongGate.countdownRemainingSeconds = std::max(0.0, countdownRemainingSeconds);
-    g_pendingSongGate.pending = true;
+    g_pendingPrepareGate.levelId = static_cast<int>(level->m_levelID);
+    g_pendingPrepareGate.countdownRemainingSeconds = std::max(0.0, countdownRemainingSeconds);
+    g_pendingPrepareGate.pending = true;
 
     auto* scene = LevelInfoLayer::scene(level, false);
     if (!scene) {
-        g_pendingSongGate = {};
+        g_pendingPrepareGate = {};
         return false;
     }
     CCDirector::sharedDirector()->pushScene(CCTransitionFade::create(0.20f, scene));
@@ -131,14 +149,15 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         bool songGateReadySent = false;
         bool songGateStartingPlay = false;
         bool songGateBypassed = false;
-        SteadyClock::time_point songGateOpenedAt {};
-        SteadyClock::time_point songGateCountdownEndsAt {};
-        CCLayerColor* songGateMask = nullptr;
-        CCLabelBMFont* songGateStatus = nullptr;
-        CCLabelBMFont* songGateCountdown = nullptr;
-        CCNode* songWidgetOriginalParent = nullptr;
-        CCPoint songWidgetOriginalPosition {};
-        int songWidgetOriginalZ = 0;
+        bool mapDownloadRequested = false;
+        bool mapFailureReported = false;
+        SteadyClock::time_point gateOpenedAt {};
+        SteadyClock::time_point countdownEndsAt {};
+        SteadyClock::time_point mapDownloadStartedAt {};
+        SteadyClock::time_point lastMapDownloadRequestAt {};
+        SteadyClock::time_point songWaitStartedAt {};
+        CCLabelBMFont* gateStatus = nullptr;
+        CCLabelBMFont* gateCountdown = nullptr;
     };
 
     void onEnterTransitionDidFinish() override {
@@ -147,7 +166,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         if (!isCurrentRankedLevel(m_level)) return;
 
         double countdownRemaining = 0.0;
-        if (rankedPrepareState(runtime.view().match.state) && consumeSongGateRequest(m_level, countdownRemaining)) {
+        if (rankedPrepareState(runtime.view().match.state) && consumePrepareGateRequest(m_level, countdownRemaining)) {
             setupSongDownloadGate(countdownRemaining);
             return;
         }
@@ -162,60 +181,45 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
     void setupSongDownloadGate(double countdownRemaining) {
         if (m_fields->songGateActive) return;
         m_fields->songGateActive = true;
-        m_fields->songGateOpenedAt = SteadyClock::now();
-        m_fields->songGateCountdownEndsAt = m_fields->songGateOpenedAt + std::chrono::milliseconds(
+        m_fields->gateOpenedAt = SteadyClock::now();
+        m_fields->countdownEndsAt = m_fields->gateOpenedAt + std::chrono::milliseconds(
             static_cast<long long>(std::ceil(std::max(0.0, countdownRemaining) * 1000.0))
         );
 
         auto const size = CCDirector::sharedDirector()->getWinSize();
-        auto* mask = CCLayerColor::create({18, 24, 38, 255});
-        mask->setContentSize(size);
-        mask->setPosition(CCPointZero);
-        mask->setZOrder(1000);
-        addChild(mask, 1000);
-        m_fields->songGateMask = mask;
 
-        auto* title = gateLabel("DOWNLOAD SONG", 0.48f, {size.width / 2.0f, size.height - 34.0f}, {255, 216, 86});
-        mask->addChild(title, 2);
-        auto* hint = gateLabel("ONLY THE SONG DOWNLOAD CONTROL IS AVAILABLE", 0.20f, {size.width / 2.0f, size.height - 58.0f}, {185, 196, 216});
-        hint->limitLabelWidth(size.width - 56.0f, 0.20f, 0.14f);
-        mask->addChild(hint, 2);
+        // Keep the normal Geometry Dash level page visible. Only these small
+        // Ranked labels are added in otherwise unused space; no full-screen mask
+        // is used anymore.
+        m_fields->gateStatus = gateLabel("DOWNLOADING MAP...", 0.22f, {size.width / 2.0f, 47.0f}, {95, 180, 255});
+        m_fields->gateStatus->setZOrder(1002);
+        addChild(m_fields->gateStatus, 1002);
 
-        m_fields->songGateStatus = gateLabel("USE THE GEOMETRY DASH DOWNLOAD BUTTON", 0.24f, {size.width / 2.0f, 54.0f}, {95, 180, 255});
-        mask->addChild(m_fields->songGateStatus, 2);
-        m_fields->songGateCountdown = gateLabel("STARTS IN...", 0.34f, {size.width / 2.0f, 28.0f}, {225, 225, 230});
-        mask->addChild(m_fields->songGateCountdown, 2);
+        m_fields->gateCountdown = gateLabel("STARTS IN...", 0.34f, {size.width / 2.0f, 27.0f}, {255, 216, 86});
+        m_fields->gateCountdown->setZOrder(1002);
+        addChild(m_fields->gateCountdown, 1002);
 
-        // Keep the real, on-screen Geometry Dash CustomSongWidget. alpha.16
-        // created a hidden LevelInfoLayer and invoked its widget/manager directly;
-        // that path could crash because the vanilla control was not attached to
-        // its normal scene lifecycle. Here the exact LevelInfoLayer widget is the
-        // only interactive control during preparation.
-        if (m_songWidget) {
-            auto* parent = m_songWidget->getParent();
-            if (parent) {
-                m_fields->songWidgetOriginalParent = parent;
-                m_fields->songWidgetOriginalPosition = m_songWidget->getPosition();
-                m_fields->songWidgetOriginalZ = m_songWidget->getZOrder();
-                auto const worldPosition = parent->convertToWorldSpace(m_songWidget->getPosition());
-                auto const localPosition = convertToNodeSpace(worldPosition);
-                m_songWidget->retain();
-                m_songWidget->removeFromParentAndCleanup(false);
-                addChild(m_songWidget, 1002);
-                m_songWidget->setPosition(localPosition);
-                m_songWidget->release();
-            } else {
-                m_songWidget->setZOrder(1002);
-            }
-        }
-
-        // Underlying LevelInfo buttons remain visually covered by the mask and
-        // their menus are disabled, so taps cannot leak through to Play/Back/etc.
-        // The reparented CustomSongWidget is excluded and remains fully vanilla.
-        disableMenusOutside(this, m_songWidget);
+        lockInteractionToSong(this, m_songWidget);
+        requestVanillaMapDownload();
 
         schedule(schedule_selector(CorumRankedLevelInfoLayer::updateSongDownloadGate), 0.20f);
         updateSongDownloadGate(0.0f);
+    }
+
+    void requestVanillaMapDownload() {
+        if (!m_fields->songGateActive || mapReady(m_level) || m_fields->mapDownloadRequested) return;
+
+        auto const now = SteadyClock::now();
+        if (m_fields->mapDownloadStartedAt == SteadyClock::time_point{}) {
+            m_fields->mapDownloadStartedAt = now;
+        }
+        m_fields->lastMapDownloadRequestAt = now;
+        m_fields->mapDownloadRequested = true;
+
+        // Important: do not call GameLevelManager::downloadLevel directly here.
+        // Let the real on-screen LevelInfoLayer own its normal download delegate,
+        // loading UI, saved-level replacement and song metadata initialization.
+        LevelInfoLayer::downloadLevel();
     }
 
     void updateSongDownloadGate(float) {
@@ -229,49 +233,88 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         }
 
         auto const& match = runtime.view().match;
-        auto const ready = songsReady(m_level);
         auto const now = SteadyClock::now();
-        auto const songElapsed = std::chrono::duration<double>(now - m_fields->songGateOpenedAt).count();
-        auto const countdownRemaining = std::max(
-            0,
-            static_cast<int>(std::ceil(std::chrono::duration<double>(m_fields->songGateCountdownEndsAt - now).count()))
-        );
+        auto const levelReady = mapReady(m_level);
 
-        if (ready) {
-            runtime.setSongBypassAllowed(false);
-            m_fields->songGateBypassed = false;
-            if (m_fields->songGateStatus) {
-                m_fields->songGateStatus->setString("DOWNLOADED");
-                m_fields->songGateStatus->setColor({78, 232, 112});
+        // Base LevelInfoLayer may replace/rebuild its song widget when the level
+        // payload arrives. Re-apply the interaction lock every tick so the newly
+        // created vanilla song control is the only clickable UI.
+        lockInteractionToSong(this, m_songWidget);
+
+        if (!levelReady) {
+            if (m_fields->gateStatus) {
+                m_fields->gateStatus->setString("DOWNLOADING MAP...");
+                m_fields->gateStatus->setColor({95, 180, 255});
             }
-        } else if (songElapsed >= 20.0) {
-            // Song availability is non-fatal. Keep Geometry Dash's own download
-            // request alive; only stop blocking Ranked readiness after 20 seconds.
-            runtime.setSongBypassAllowed(true);
-            m_fields->songGateBypassed = true;
-            if (m_fields->songGateStatus) {
-                m_fields->songGateStatus->setString("SONG TIMEOUT - STARTING WITHOUT SONG");
-                m_fields->songGateStatus->setColor({255, 216, 86});
+
+            if (m_fields->mapDownloadStartedAt == SteadyClock::time_point{}) {
+                requestVanillaMapDownload();
+            } else {
+                auto const mapElapsed = std::chrono::duration<double>(now - m_fields->mapDownloadStartedAt).count();
+                auto const sinceRequest = std::chrono::duration<double>(now - m_fields->lastMapDownloadRequestAt).count();
+                if (m_fields->mapDownloadRequested && sinceRequest >= 5.0) {
+                    // If vanilla never produced a completion/failure callback, let
+                    // LevelInfoLayer retry its own download rather than deadlocking.
+                    m_fields->mapDownloadRequested = false;
+                }
+                if (!m_fields->mapDownloadRequested && sinceRequest >= 1.0) requestVanillaMapDownload();
+                if (mapElapsed >= 30.0 && !m_fields->mapFailureReported) {
+                    m_fields->mapFailureReported = true;
+                    runtime.reportMapDownloadFailure();
+                }
             }
-        } else if (m_fields->songGateStatus) {
-            m_fields->songGateStatus->setString("USE THE GEOMETRY DASH DOWNLOAD BUTTON");
-            m_fields->songGateStatus->setColor({95, 180, 255});
+        } else {
+            if (m_fields->songWaitStartedAt == SteadyClock::time_point{}) {
+                m_fields->songWaitStartedAt = now;
+            }
+
+            auto const ready = songsReady(m_level);
+            auto const songElapsed = std::chrono::duration<double>(now - m_fields->songWaitStartedAt).count();
+            if (ready) {
+                runtime.setSongBypassAllowed(false);
+                m_fields->songGateBypassed = false;
+                if (m_fields->gateStatus) {
+                    m_fields->gateStatus->setString("SONG DOWNLOADED");
+                    m_fields->gateStatus->setColor({78, 232, 112});
+                }
+            } else if (songElapsed >= 20.0) {
+                // Song is optional after the existing 20-second grace period.
+                // The vanilla song widget remains alive, so a background download
+                // can continue while Ranked starts without audio.
+                runtime.setSongBypassAllowed(true);
+                m_fields->songGateBypassed = true;
+                if (m_fields->gateStatus) {
+                    m_fields->gateStatus->setString("SONG TIMEOUT - STARTING WITHOUT SONG");
+                    m_fields->gateStatus->setColor({255, 216, 86});
+                }
+            } else if (m_fields->gateStatus) {
+                m_fields->gateStatus->setString("ONLY SONG DOWNLOAD IS AVAILABLE");
+                m_fields->gateStatus->setColor({95, 180, 255});
+            }
         }
 
-        if (m_fields->songGateCountdown) {
+        auto const countdownRemaining = std::max(
+            0,
+            static_cast<int>(std::ceil(std::chrono::duration<double>(m_fields->countdownEndsAt - now).count()))
+        );
+        auto const readyForStart = levelReady && (songsReady(m_level) || runtime.songBypassAllowed());
+
+        if (m_fields->gateCountdown) {
             if (countdownRemaining > 0) {
-                m_fields->songGateCountdown->setString(fmt::format("STARTS IN... {}", countdownRemaining).c_str());
-            } else if (!ready && !m_fields->songGateBypassed) {
-                m_fields->songGateCountdown->setString("WAITING FOR SONG...");
+                m_fields->gateCountdown->setString(fmt::format("STARTS IN... {}", countdownRemaining).c_str());
+            } else if (!levelReady) {
+                m_fields->gateCountdown->setString("WAITING FOR MAP...");
+            } else if (!readyForStart) {
+                m_fields->gateCountdown->setString("WAITING FOR SONG...");
             } else {
-                m_fields->songGateCountdown->setString("READY");
+                m_fields->gateCountdown->setString("READY");
             }
         }
 
         if (
             rankedPrepareState(match.state) &&
-            now >= m_fields->songGateCountdownEndsAt &&
-            (ready || m_fields->songGateBypassed) &&
+            now >= m_fields->countdownEndsAt &&
+            readyForStart &&
             !m_fields->songGateReadySent
         ) {
             m_fields->songGateReadySent = true;
@@ -280,12 +323,9 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         }
 
         if (rankedPlayingState(match.state)) {
-            if (!runtime.canEnterCurrentLevel() || m_fields->songGateStartingPlay) return;
+            if (!readyForStart || !runtime.canEnterCurrentLevel() || m_fields->songGateStartingPlay) return;
             m_fields->songGateStartingPlay = true;
-            if (!ready && runtime.songBypassAllowed()) {
-                // This LevelInfoLayer is the real on-screen vanilla layer and has
-                // completed its normal initialization, so acknowledge only the
-                // missing-song warning and then use the normal onPlay path.
+            if (!songsReady(m_level) && runtime.songBypassAllowed()) {
                 m_level->m_showedSongWarning = true;
             }
             teardownSongDownloadGate();
@@ -293,6 +333,8 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
                 returnToRanked(0.0f);
                 return;
             }
+            // Start directly from the same real LevelInfoLayer that downloaded the
+            // map. This keeps Geometry Dash's normal load/audio/return stack.
             LevelInfoLayer::onPlay(nullptr);
             return;
         }
@@ -312,17 +354,42 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         m_fields->songGateActive = false;
         unschedule(schedule_selector(CorumRankedLevelInfoLayer::updateSongDownloadGate));
 
-        if (m_songWidget && m_fields->songWidgetOriginalParent && m_songWidget->getParent() == this) {
-            m_songWidget->retain();
-            m_songWidget->removeFromParentAndCleanup(false);
-            m_fields->songWidgetOriginalParent->addChild(m_songWidget, m_fields->songWidgetOriginalZ);
-            m_songWidget->setPosition(m_fields->songWidgetOriginalPosition);
-            m_songWidget->release();
+        // Restore vanilla LevelInfo interaction before invoking its onPlay path.
+        setMenusEnabled(this, true);
+
+        if (m_fields->gateStatus) {
+            m_fields->gateStatus->removeFromParentAndCleanup(true);
+            m_fields->gateStatus = nullptr;
         }
-        if (m_fields->songGateMask) {
-            m_fields->songGateMask->removeFromParentAndCleanup(true);
-            m_fields->songGateMask = nullptr;
+        if (m_fields->gateCountdown) {
+            m_fields->gateCountdown->removeFromParentAndCleanup(true);
+            m_fields->gateCountdown = nullptr;
         }
+    }
+
+    void levelDownloadFinished(GJGameLevel* level) override {
+        // Let vanilla LevelInfoLayer replace/update its level object and rebuild
+        // all normal UI first. Ranked only re-locks controls afterwards.
+        LevelInfoLayer::levelDownloadFinished(level);
+        if (!m_fields->songGateActive) return;
+
+        m_fields->mapDownloadRequested = false;
+        if (mapReady(m_level)) {
+            m_fields->songWaitStartedAt = SteadyClock::now();
+        }
+        lockInteractionToSong(this, m_songWidget);
+        updateSongDownloadGate(0.0f);
+    }
+
+    void levelDownloadFailed(int response) override {
+        LevelInfoLayer::levelDownloadFailed(response);
+        if (!m_fields->songGateActive) return;
+        m_fields->mapDownloadRequested = false;
+        if (m_fields->gateStatus) {
+            m_fields->gateStatus->setString(fmt::format("MAP DOWNLOAD FAILED ({}) - RETRYING", response).c_str());
+            m_fields->gateStatus->setColor({255, 92, 92});
+        }
+        lockInteractionToSong(this, m_songWidget);
     }
 
     void scheduleAutoPlay(float delay) {
@@ -339,23 +406,18 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
             returnToRanked(0.0f);
             return;
         }
-        if (!runtime.canEnterCurrentLevel()) {
+        if (!runtime.canEnterCurrentLevel() || !mapReady(m_level)) {
             returnToRanked(0.0f);
             return;
         }
 
         auto const ready = songsReady(m_level);
         if (!ready && !runtime.songBypassAllowed()) {
-            // A live round should only be reachable after this client submitted
-            // Ready from the song gate. If state is ever inconsistent, return to
-            // Ranked rather than invoking any hidden downloader from LevelInfo.
             returnToRanked(0.0f);
             return;
         }
 
-        if (!ready && runtime.songBypassAllowed()) {
-            m_level->m_showedSongWarning = true;
-        }
+        if (!ready && runtime.songBypassAllowed()) m_level->m_showedSongWarning = true;
         if (!runtime.armCurrentLevelForGameplay()) {
             returnToRanked(0.0f);
             return;
@@ -366,17 +428,12 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
     void onPlay(CCObject* sender) {
         auto& runtime = corum::ranked::RankedRuntime::get();
         if (m_fields->songGateActive) {
-            // During preparation the real song widget is the only permitted
-            // control. Do not let a leaked Play tap bypass the Ranked countdown.
+            // During the countdown only the vanilla song download control is legal.
             return;
         }
-        if (
-            isCurrentRankedLevel(m_level) &&
-            rankedPlayingState(runtime.view().match.state)
-        ) {
-            if (!songsReady(m_level) && runtime.songBypassAllowed()) {
-                m_level->m_showedSongWarning = true;
-            }
+        if (isCurrentRankedLevel(m_level) && rankedPlayingState(runtime.view().match.state)) {
+            if (!mapReady(m_level)) return;
+            if (!songsReady(m_level) && runtime.songBypassAllowed()) m_level->m_showedSongWarning = true;
             if (!runtime.armCurrentLevelForGameplay()) return;
             LevelInfoLayer::onPlay(sender);
             return;
@@ -401,9 +458,6 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         }
         auto& runtime = corum::ranked::RankedRuntime::get();
         if (rankedPlayingState(runtime.view().match.state)) {
-            // During a live Round, repeated Back taps cannot escape the Ranked stack.
-            // Death Match is the exception after all 3 local attempts are consumed:
-            // return to the Ranked waiting screen instead of re-entering gameplay.
             if (runtime.canEnterCurrentLevel()) scheduleAutoPlay(0.05f);
             else returnToRanked(0.0f);
             return;
