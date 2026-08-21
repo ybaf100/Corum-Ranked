@@ -83,36 +83,38 @@ export const evaluateClientEnvironment = (
   const rules = policy.allowedMods.filter((rule) => rule.enabled);
   const allowedById = new Map(rules.map((rule) => [rule.id, rule]));
   const userMods = installedMods.filter((mod) => !mod.internal && !mod.system);
-  const installedById = new Map(userMods.map((mod) => [mod.id, mod]));
-  const unauthorizedModIds = userMods
+  const userById = new Map(userMods.map((mod) => [mod.id, mod]));
+  const activeMods = userMods.filter((mod) => mod.enabled && mod.loaded);
+  const activeById = new Map(activeMods.map((mod) => [mod.id, mod]));
+  const unauthorizedModIds = activeMods
     .filter((mod) => !allowedById.has(mod.id))
     .map((mod) => mod.id)
     .sort();
   const missingRequiredModIds = rules
-    .filter((rule) => rule.required && !installedById.has(rule.id))
+    .filter((rule) => rule.required && !activeById.has(rule.id))
     .map((rule) => rule.id)
     .sort();
   const versionViolations: string[] = [];
 
-  for (const mod of userMods) {
+  for (const mod of activeMods) {
     const rule = allowedById.get(mod.id);
     if (!rule) continue;
     if (rule.minVersion) {
       const comparison = compareVersions(mod.version, rule.minVersion);
       if (comparison === null || comparison < 0) {
-        versionViolations.push(`${mod.id}: installed ${mod.version}, minimum ${rule.minVersion}`);
+        versionViolations.push(`${mod.id}: active ${mod.version}, minimum ${rule.minVersion}`);
       }
     }
     if (rule.maxVersion) {
       const comparison = compareVersions(mod.version, rule.maxVersion);
       if (comparison === null || comparison > 0) {
-        versionViolations.push(`${mod.id}: installed ${mod.version}, maximum ${rule.maxVersion}`);
+        versionViolations.push(`${mod.id}: active ${mod.version}, maximum ${rule.maxVersion}`);
       }
     }
   }
 
   const cbfIssues: string[] = [];
-  const cbf = installedById.get(policy.cbf.modId);
+  const cbf = userById.get(policy.cbf.modId);
   if (!cbf) {
     cbfIssues.push("CBF_NOT_INSTALLED");
   } else {

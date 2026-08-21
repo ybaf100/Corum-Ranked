@@ -1,7 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { PGlite } from "@electric-sql/pglite";
-import { ForbiddenException } from "@nestjs/common";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { CsmpTier } from "@corum-ranked/rules";
 import type { IdGenerator, ServerClock } from "../src/common/runtime.module.js";
@@ -124,7 +123,7 @@ describe("Ranked session/profile creation", () => {
     expect(second.sessionToken).not.toBe(first.sessionToken);
   });
 
-  it("blocks an unallowed disabled package before creating a profile", async () => {
+  it("ignores an unallowed disabled package when creating a profile", async () => {
     const source = new FakeCsmpSource();
     const service = buildService(source);
     const dto = cleanDto("7002");
@@ -136,11 +135,11 @@ describe("Ranked session/profile creation", () => {
       internal: false,
       system: false,
     });
-    await expect(service.create(dto)).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(service.create(dto)).resolves.toBeDefined();
     const players = await database.query<{ count: number }>(
       "SELECT COUNT(*)::int AS count FROM ranked_players WHERE gd_account_id = $1",
       ["7002"],
     );
-    expect(players.rows[0]?.count).toBe(0);
+    expect(players.rows[0]?.count).toBe(1);
   });
 });

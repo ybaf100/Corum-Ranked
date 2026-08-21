@@ -130,7 +130,7 @@ describe("allowlist and CBF gate", () => {
     expect(decision.allowed).toBe(true);
   });
 
-  it("blocks an unallowed package even when it is disabled", () => {
+  it("ignores an unallowed package when it is disabled", () => {
     const decision = evaluateClientEnvironment(
       [
         ranked,
@@ -146,9 +146,29 @@ describe("allowlist and CBF gate", () => {
       ],
       clientPolicyFixture(),
     );
+    expect(decision.allowed).toBe(true);
+    expect(decision.unauthorizedModIds).toEqual([]);
+    expect(decision.allowedModIds).toContain("syzzi.click_between_frames");
+  });
+
+  it("blocks an unallowed package when it is active", () => {
+    const decision = evaluateClientEnvironment(
+      [
+        ranked,
+        cbf,
+        {
+          id: "not.allowed",
+          version: "1.0.0",
+          enabled: true,
+          loaded: true,
+          internal: false,
+          system: false,
+        },
+      ],
+      clientPolicyFixture(),
+    );
     expect(decision.allowed).toBe(false);
     expect(decision.unauthorizedModIds).toEqual(["not.allowed"]);
-    expect(decision.allowedModIds).toContain("syzzi.click_between_frames");
   });
 
   it("blocks missing or inactive CBF", () => {

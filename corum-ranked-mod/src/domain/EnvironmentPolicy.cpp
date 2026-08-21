@@ -132,7 +132,8 @@ EnvironmentDecision evaluateEnvironment(
 ) {
     EnvironmentDecision decision;
     std::map<std::string, AllowedModRule const*> allowedById;
-    std::map<std::string, InstalledModSnapshot const*> installedById;
+    std::map<std::string, InstalledModSnapshot const*> userById;
+    std::map<std::string, InstalledModSnapshot const*> activeById;
 
     for (auto const& rule : policy.allowedMods) {
         if (!rule.enabled || rule.id.empty()) continue;
@@ -141,16 +142,18 @@ EnvironmentDecision evaluateEnvironment(
     }
     for (auto const& mod : installedMods) {
         if (mod.internal || mod.system || mod.id.empty()) continue;
-        installedById[mod.id] = &mod;
+        userById[mod.id] = &mod;
+        if (!mod.enabled || !mod.loaded) continue;
+        activeById[mod.id] = &mod;
         if (!allowedById.contains(mod.id)) decision.unauthorizedModIds.push_back(mod.id);
     }
 
     for (auto const& [id, rule] : allowedById) {
-        if (rule->required && !installedById.contains(id)) {
+        if (rule->required && !activeById.contains(id)) {
             decision.missingRequiredModIds.push_back(id);
         }
     }
-    for (auto const& [id, mod] : installedById) {
+    for (auto const& [id, mod] : activeById) {
         auto const ruleIt = allowedById.find(id);
         if (ruleIt == allowedById.end()) continue;
         auto const& rule = *ruleIt->second;
@@ -158,7 +161,7 @@ EnvironmentDecision evaluateEnvironment(
             auto const comparison = compareVersions(mod->version, *rule.minVersion);
             if (!comparison || *comparison < 0) {
                 decision.versionViolations.push_back(
-                    id + ": installed " + mod->version + ", minimum " + *rule.minVersion
+                    id + ": active " + mod->version + ", minimum " + *rule.minVersion
                 );
             }
         }
@@ -166,22 +169,25 @@ EnvironmentDecision evaluateEnvironment(
             auto const comparison = compareVersions(mod->version, *rule.maxVersion);
             if (!comparison || *comparison > 0) {
                 decision.versionViolations.push_back(
-                    id + ": installed " + mod->version + ", maximum " + *rule.maxVersion
+                    id + ": active " + mod->version + ", maximum " + *rule.maxVersion
                 );
             }
         }
     }
 
-    auto const cbfIt = installedById.find(policy.cbfModId);
-    if (cbfIt == installedById.end()) {
+    auto const cbfIt = userById.find(policy.cbfModId);
+    if (cbfIt == userById.end()) {
         decision.cbfIssues.push_back("CBF_NOT_INSTALLED");
     } else {
         auto const& cbf = *cbfIt->second;
-        if (!cbf.enabled || !cbf.loaded) decision.cbfIssues.push_back("CBF_NOT_ACTIVE");
-        for (auto const& [key, requiredValue] : policy.cbfRequiredSettings) {
-            auto const actual = cbf.settings.find(key);
-            if (actual == cbf.settings.end() || !settingValuesEqual(actual->second, requiredValue)) {
-                decision.cbfIssues.push_back("CBF_SETTING_MISMATCH:" + key);
+        if (!cbf.enabled || !cbf.loaded) {
+            decision.cbfIssues.push_back("CBF_NOT_ACTIVE");
+        } else {
+            for (auto const& [key, requiredValue] : policy.cbfRequiredSettings) {
+                auto const actual = cbf.settings.find(key);
+                if (actual == cbf.settings.end() || !settingValuesEqual(actual->second, requiredValue)) {
+                    decision.cbfIssues.push_back("CBF_SETTING_MISMATCH:" + key);
+                }
             }
         }
     }

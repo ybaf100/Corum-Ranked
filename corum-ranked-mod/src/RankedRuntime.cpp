@@ -286,7 +286,7 @@ void RankedRuntime::fetchConfig() {
                 reasons.insert(reasons.end(), decision.cbfIssues.begin(), decision.cbfIssues.end());
                 setStage(
                     RuntimeStage::Blocked,
-                    "Installed mod environment does not match the server allowlist.",
+                    "Active mod environment does not match the server allowlist.",
                     joinReasons(reasons)
                 );
                 return;
@@ -309,7 +309,14 @@ std::vector<InstalledModSnapshot> RankedRuntime::captureInstalledMods() const {
             .system = mod->isInternal(),
             .settings = {},
         };
-        if (snapshot.id == m_environmentPolicy.cbfModId) {
+        auto const isActive = snapshot.enabled && snapshot.loaded;
+        auto const isCbf = snapshot.id == m_environmentPolicy.cbfModId;
+        // Ranked only reports active mods to the allowlist gate. CBF is the one
+        // exception: keep an inactive CBF snapshot so we can report that the
+        // mandatory dependency is installed but not active.
+        if (!isActive && !isCbf) continue;
+
+        if (isCbf) {
             for (auto const& [key, required] : m_environmentPolicy.cbfRequiredSettings) {
                 if (!mod->getSetting(key)) {
 #if !defined(GEODE_IS_WINDOWS)
@@ -406,7 +413,7 @@ void RankedRuntime::joinQueue() {
     m_installedMods = captureInstalledMods();
     auto const decision = evaluateEnvironment(m_installedMods, m_environmentPolicy);
     if (!decision.allowed) {
-        setStage(RuntimeStage::Blocked, "The installed mod environment changed. Re-open Ranked to recheck.");
+        setStage(RuntimeStage::Blocked, "The active mod environment changed. Re-open Ranked to recheck.");
         return;
     }
     matjson::Value body;
@@ -443,7 +450,7 @@ void RankedRuntime::startDebugBotMatch(DebugBotMatchOptions options) {
     m_installedMods = captureInstalledMods();
     auto const decision = evaluateEnvironment(m_installedMods, m_environmentPolicy);
     if (!decision.allowed) {
-        setStage(RuntimeStage::Blocked, "The installed mod environment changed. Re-open Ranked to recheck.");
+        setStage(RuntimeStage::Blocked, "The active mod environment changed. Re-open Ranked to recheck.");
         return;
     }
     matjson::Value body;

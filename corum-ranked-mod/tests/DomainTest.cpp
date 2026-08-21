@@ -84,9 +84,20 @@ void environmentTests() {
         .settings = {},
     });
     auto blocked = evaluateEnvironment(mods, policy());
+    assert(blocked.allowed);
+    assert(blocked.unauthorizedModIds.empty());
+
+    mods.push_back({
+        .id = "unapproved.active_mod",
+        .version = "v1.0.0",
+        .enabled = true,
+        .loaded = true,
+        .settings = {},
+    });
+    blocked = evaluateEnvironment(mods, policy());
     assert(!blocked.allowed);
     assert(blocked.unauthorizedModIds.size() == 1);
-    assert(blocked.unauthorizedModIds.front() == "unapproved.disabled_mod");
+    assert(blocked.unauthorizedModIds.front() == "unapproved.active_mod");
 
     mods = validMods();
     mods[1].settings["soft-toggle"] = true;

@@ -18,11 +18,11 @@
 {
   "gdAccountId": "12345",
   "gdUsername": "Player",
-  "clientVersion": "v0.4.0-alpha.6",
+  "clientVersion": "v0.4.0-alpha.7",
   "installedMods": [
     {
       "id": "hwanhee1.corum_ranked",
-      "version": "v0.4.0-alpha.6",
+      "version": "v0.4.0-alpha.7",
       "enabled": true,
       "loaded": true,
       "internal": false,

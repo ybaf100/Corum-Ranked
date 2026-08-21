@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.4.0-alpha.7
+
+- Changed the Ranked allowlist gate to inspect only mods that are currently enabled and loaded. Installed-but-disabled user mods no longer block Ranked.
+- The client now omits inactive user mods from the environment payload; inactive CBF is retained only to report the mandatory dependency as not active.
+- The shared server-side anti-cheat independently filters to active mods, so legacy clients that still send disabled mods cannot make those disabled mods trigger the allowlist.
+- Required allowlisted mods must still be active, and CBF remains mandatory with its required settings enforced.
+- Updated client/server/rules tests for active-only mod enforcement and bumped Corum Ranked to v0.4.0-alpha.7. Corum Integration remains unchanged.
+
 ## v0.4.0-alpha.6
 
 - Embedded `https://corum-ranked.onrender.com` as the production Ranked server URL and added a runtime fallback when the saved Geode string setting is empty.
