@@ -293,6 +293,10 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
                 m_level->m_showedSongWarning = true;
             }
             teardownSongDownloadGate();
+            if (!runtime.armCurrentLevelForGameplay()) {
+                returnToRanked(0.0f);
+                return;
+            }
             LevelInfoLayer::onPlay(nullptr);
             return;
         }
@@ -356,6 +360,10 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         if (!ready && runtime.songBypassAllowed()) {
             m_level->m_showedSongWarning = true;
         }
+        if (!runtime.armCurrentLevelForGameplay()) {
+            returnToRanked(0.0f);
+            return;
+        }
         LevelInfoLayer::onPlay(nullptr);
     }
 
@@ -368,11 +376,12 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         }
         if (
             isCurrentRankedLevel(m_level) &&
-            rankedPlayingState(runtime.view().match.state) &&
-            !songsReady(m_level) &&
-            runtime.songBypassAllowed()
+            rankedPlayingState(runtime.view().match.state)
         ) {
-            m_level->m_showedSongWarning = true;
+            if (!songsReady(m_level) && runtime.songBypassAllowed()) {
+                m_level->m_showedSongWarning = true;
+            }
+            if (!runtime.armCurrentLevelForGameplay()) return;
             LevelInfoLayer::onPlay(sender);
             return;
         }

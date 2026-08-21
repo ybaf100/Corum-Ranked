@@ -235,6 +235,9 @@ void RankedRuntime::begin() {
     m_sessionToken.clear();
     m_matchToken.clear();
     m_attemptId.clear();
+    m_attemptLevelId = 0;
+    m_gameplayMap.reset();
+    m_gameplayMatchId.clear();
     m_pendingStart.reset();
     m_pendingEnd.reset();
     m_attemptBacklog.clear();
@@ -791,6 +794,7 @@ void RankedRuntime::parseMatchState(matjson::Value const& root) {
 
     if (!stateAllowsActiveAttempt(m_view.match.state) && !m_attemptBusy) {
         m_attemptId.clear();
+        m_attemptLevelId = 0;
         m_pendingStart.reset();
         m_pendingEnd.reset();
         m_attemptBacklog.clear();
@@ -798,6 +802,13 @@ void RankedRuntime::parseMatchState(matjson::Value const& root) {
         m_lastSubmittedProgress = -1;
         m_optimisticScoreDelta = 0.0;
         m_optimisticClearDelta = 0;
+        if (
+            m_view.match.state == "MATCH_RESULT" || m_view.match.state == "CANCELLED" ||
+            m_view.match.state == "ROUND_RESULT" || m_view.match.state == "DEATHMATCH_RESULT"
+        ) {
+            m_gameplayMap.reset();
+            m_gameplayMatchId.clear();
+        }
     }
     if (m_view.match.spectatorActive) {
         // A trigger-side player must not create a new visual attempt after the
@@ -1008,6 +1019,9 @@ void RankedRuntime::dismissMatch() {
     }
     m_matchToken.clear();
     m_attemptId.clear();
+    m_attemptLevelId = 0;
+    m_gameplayMap.reset();
+    m_gameplayMatchId.clear();
     m_pendingStart.reset();
     m_pendingEnd.reset();
     m_attemptBacklog.clear();
@@ -1105,6 +1119,31 @@ int RankedRuntime::currentLevelId() const {
     return m_view.match.currentMap ? m_view.match.currentMap->levelId : 0;
 }
 
+bool RankedRuntime::armCurrentLevelForGameplay() {
+    if (
+        m_view.stage != RuntimeStage::Matched || !m_view.match.currentMap ||
+        m_view.match.spectatorActive || !stateAllowsActiveAttempt(m_view.match.state)
+    ) return false;
+    m_gameplayMap = *m_view.match.currentMap;
+    m_gameplayMatchId = m_view.match.matchId;
+    log::debug(
+        "Ranked gameplay armed: match={} level={} qualifying={}",
+        m_gameplayMatchId,
+        m_gameplayMap->levelId,
+        m_gameplayMap->qualifyingPercent
+    );
+    return true;
+}
+
+bool RankedRuntime::isGameplayLevel(int levelId) const {
+    if (m_view.stage != RuntimeStage::Matched || m_view.match.matchId.empty()) return false;
+    if (
+        m_gameplayMap && m_gameplayMatchId == m_view.match.matchId &&
+        m_gameplayMap->levelId == levelId
+    ) return true;
+    return m_view.match.currentMap && m_view.match.currentMap->levelId == levelId;
+}
+
 bool RankedRuntime::hasLocalAttemptInFlight() const {
     return
         !m_attemptId.empty() ||
@@ -1179,12 +1218,20 @@ double RankedRuntime::localDisplayScore(double progressPercent) const {
 
     // A negative progress means the current visual attempt already ended. Its
     // value is therefore in m_optimisticScoreDelta and must not be counted again.
-    if (progressPercent < 0.0 || m_view.match.spectatorActive || !m_view.match.currentMap) {
+    if (progressPercent < 0.0 || m_view.match.spectatorActive) {
         return std::max(serverDisplay, optimisticBase);
     }
 
+    RankedMapView const* scoringMap = nullptr;
+    if (m_gameplayMap && m_gameplayMatchId == m_view.match.matchId) {
+        scoringMap = &*m_gameplayMap;
+    } else if (m_view.match.currentMap) {
+        scoringMap = &*m_view.match.currentMap;
+    }
+    if (!scoringMap) return std::max(serverDisplay, optimisticBase);
+
     auto const progress = std::clamp(progressPercent, 0.0, 100.0);
-    auto const qualifying = m_view.match.currentMap->qualifyingPercent;
+    auto const qualifying = scoringMap->qualifyingPercent;
     auto const live = progress >= qualifying ? std::floor(progress) : 0.0;
     return std::max(serverDisplay, optimisticBase + live);
 }
@@ -1199,8 +1246,7 @@ bool RankedRuntime::canTrackLevel(int levelId) const {
         m_view.stage == RuntimeStage::Matched &&
         stateAllowsActiveAttempt(m_view.match.state) &&
         !m_view.match.spectatorActive &&
-        m_view.match.currentMap &&
-        m_view.match.currentMap->levelId == levelId;
+        isGameplayLevel(levelId);
 }
 
 bool RankedRuntime::isSpectating() const {
@@ -1220,15 +1266,26 @@ std::string RankedRuntime::newEventId(std::string_view kind) {
     return fmt::format("{}-{}-{}", kind, localNowMillis(), m_eventSequence);
 }
 
-void RankedRuntime::reportAttemptStart(int levelId) {
-    if (!canTrackLevel(levelId) || !stateAllowsAttemptStart(m_view.match.state)) return;
+bool RankedRuntime::reportAttemptStart(int levelId) {
+    if (!canTrackLevel(levelId) || !stateAllowsAttemptStart(m_view.match.state)) return false;
 
     if (m_view.match.state == "DEATHMATCH_PLAYING") {
         auto const serverUsed = m_view.match.side == "A"
             ? m_view.match.deathmatchAttemptsUsedA
             : m_view.match.deathmatchAttemptsUsedB;
-        if (serverUsed >= 3) return;
+        if (serverUsed >= 3) return false;
     }
+
+    // A PlayLayer can retry this call while waiting for the transport. Treat an
+    // already registered local start as success instead of creating duplicates.
+    if (
+        !m_attemptId.empty() && m_attemptLevelId == levelId &&
+        !m_pendingEnd && m_attemptBacklog.empty()
+    ) return true;
+    if (
+        m_pendingStart && m_pendingStart->levelId == levelId &&
+        !m_pendingEnd && m_attemptBacklog.empty()
+    ) return true;
 
     PendingStart start {
         .levelId = levelId,
@@ -1249,26 +1306,54 @@ void RankedRuntime::reportAttemptStart(int levelId) {
     } else {
         m_pendingStart = std::move(start);
     }
+    log::debug("Ranked attempt start queued: level={} backlog={}", levelId, m_attemptBacklog.size());
     flushAttemptEvents();
+    return true;
 }
 
 void RankedRuntime::reportAttemptProgress(int levelId, double progressPercent) {
-    // Progress is best-effort telemetry. If the visual client is already ahead of
-    // the server transport queue, do not attach that progress to an older attempt.
-    if (!canTrackLevel(levelId) || m_attemptId.empty() || m_pendingEnd || !m_attemptBacklog.empty()) return;
+    // Keep the latest progress even while /attempt/start is waiting for its ACK.
+    // alpha.17 discarded every progress update before m_attemptId existed and
+    // then erased the buffered value on start ACK, which could leave fast levels
+    // at Score 0 for their entire attempt.
+    if (!canTrackLevel(levelId) || m_pendingEnd || !m_attemptBacklog.empty()) return;
+    auto const ownsTransport =
+        (!m_attemptId.empty() && m_attemptLevelId == levelId) ||
+        (m_pendingStart && m_pendingStart->levelId == levelId);
+    if (!ownsTransport) return;
     auto const progress = std::clamp(static_cast<int>(std::floor(progressPercent)), 0, 100);
     if (progress == m_lastSubmittedProgress && !m_pendingProgress) return;
     m_pendingProgress = progress;
     flushProgressTelemetry();
 }
 
-void RankedRuntime::reportAttemptEnd(int levelId, double progressPercent, bool cleared) {
-    if (!canTrackLevel(levelId)) return;
+bool RankedRuntime::reportAttemptEnd(int levelId, double progressPercent, bool cleared) {
+    if (!canTrackLevel(levelId)) return false;
+
+    // Self-heal a missed init-time start. PlayLayer can be created on the same
+    // frame as a state refresh; if the first reportAttemptStart() was skipped,
+    // never silently discard the eventual death/Clear. Queue a start first while
+    // starts are still legal and attach this end to it.
+    if (
+        m_attemptId.empty() && !m_pendingStart && !m_attemptBusy &&
+        m_attemptBacklog.empty()
+    ) {
+        if (!stateAllowsAttemptStart(m_view.match.state) || !reportAttemptStart(levelId)) {
+            log::warn("Ranked attempt end could not recover a missing start: level={}", levelId);
+            return false;
+        }
+    }
 
     auto const finalProgress = std::clamp(progressPercent, 0.0, 100.0);
+    RankedMapView const* scoringMap = nullptr;
+    if (m_gameplayMap && m_gameplayMatchId == m_view.match.matchId && m_gameplayMap->levelId == levelId) {
+        scoringMap = &*m_gameplayMap;
+    } else if (m_view.match.currentMap && m_view.match.currentMap->levelId == levelId) {
+        scoringMap = &*m_view.match.currentMap;
+    }
     auto optimisticScore = 0.0;
-    if (m_view.match.currentMap) {
-        auto const qualifying = m_view.match.currentMap->qualifyingPercent;
+    if (scoringMap) {
+        auto const qualifying = scoringMap->qualifyingPercent;
         optimisticScore = cleared
             ? 100.0 + qualifying
             : (finalProgress >= qualifying ? std::floor(finalProgress) : 0.0);
@@ -1286,11 +1371,11 @@ void RankedRuntime::reportAttemptEnd(int levelId, double progressPercent, bool c
         // The newest queued start is the visual attempt that just ended. Starts
         // and ends are observed in gameplay order (destroy/complete before reset),
         // so attaching to the FIFO tail preserves exact attempt identity.
-        if (m_attemptBacklog.back().end) return;
+        if (m_attemptBacklog.back().end) return true;
         m_attemptBacklog.back().end = end;
     } else {
-        if (m_pendingEnd) return; // duplicate completion hook for the current attempt
-        if (m_attemptId.empty() && !m_pendingStart && !m_attemptBusy) return;
+        if (m_pendingEnd) return true; // duplicate completion hook for current attempt
+        if (m_attemptId.empty() && !m_pendingStart && !m_attemptBusy) return false;
         m_pendingEnd = end;
     }
 
@@ -1298,7 +1383,15 @@ void RankedRuntime::reportAttemptEnd(int levelId, double progressPercent, bool c
     m_optimisticClearDelta += end.optimisticClear;
     ++m_view.revision;
     m_pendingProgress.reset();
+    log::debug(
+        "Ranked attempt end queued: level={} progress={} cleared={} optimisticScore={}",
+        levelId,
+        finalProgress,
+        cleared,
+        optimisticScore
+    );
     flushAttemptEvents();
+    return true;
 }
 
 void RankedRuntime::promoteQueuedAttempt() {
@@ -1327,15 +1420,16 @@ void RankedRuntime::flushAttemptEvents() {
 
 void RankedRuntime::sendAttemptStart() {
     if (!m_pendingStart) return;
+    auto const starting = *m_pendingStart;
     matjson::Value body;
-    body["levelId"] = fmt::format("{}", m_pendingStart->levelId);
-    body["clientEventId"] = m_pendingStart->eventId;
+    body["levelId"] = fmt::format("{}", starting.levelId);
+    body["clientEventId"] = starting.eventId;
     auto request = baseRequest(m_sessionToken, m_matchToken);
     request.bodyJSON(body);
     m_attemptBusy = true;
     m_attemptRequest.spawn(
         request.post(endpoint("/api/ranked/matches/" + m_view.match.matchId + "/attempt/start")),
-        [this](web::WebResponse response) {
+        [this, starting](web::WebResponse response) {
             m_attemptBusy = false;
             if (!successful(response)) {
                 setTransientError("Attempt start retrying: " + responseError(response));
@@ -1353,6 +1447,7 @@ void RankedRuntime::sendAttemptStart() {
                 }
                 m_pendingStart.reset();
                 m_pendingEnd.reset();
+                m_attemptLevelId = 0;
                 m_pendingProgress.reset();
                 m_lastSubmittedProgress = -1;
                 m_nextAttemptRetryAt = {};
@@ -1362,6 +1457,7 @@ void RankedRuntime::sendAttemptStart() {
                 return;
             }
             m_attemptId = root["attemptId"].asString().unwrapOr("");
+            m_attemptLevelId = starting.levelId;
             applyAttemptSnapshot(root);
             if (m_view.match.state == "DEATHMATCH_PLAYING") {
                 auto const attemptNumber = static_cast<int>(root["attemptNumber"].asInt().unwrapOr(0));
@@ -1371,13 +1467,15 @@ void RankedRuntime::sendAttemptStart() {
                 }
             }
             m_pendingStart.reset();
-            m_pendingProgress.reset();
+            // Preserve m_pendingProgress collected while start ACK was in flight.
+            // It belongs to this exact visual attempt and can now be transmitted.
             m_lastSubmittedProgress = -1;
             m_nextAttemptRetryAt = {};
             ++m_view.revision;
             // m_pendingEnd may already contain a fast visual death/Clear that
             // happened before this start acknowledgement; send it immediately.
             flushAttemptEvents();
+            flushProgressTelemetry();
         }
     );
 }
@@ -1412,6 +1510,7 @@ void RankedRuntime::sendAttemptEnd() {
             }
             applyAttemptSnapshot(root);
             m_attemptId.clear();
+            m_attemptLevelId = 0;
             m_pendingEnd.reset();
             m_pendingProgress.reset();
             m_lastSubmittedProgress = -1;
@@ -1439,7 +1538,7 @@ void RankedRuntime::sendAttemptProgress() {
     auto const progress = *m_pendingProgress;
     auto const attemptId = m_attemptId;
     matjson::Value body;
-    body["levelId"] = fmt::format("{}", currentLevelId());
+    body["levelId"] = fmt::format("{}", m_attemptLevelId);
     body["attemptId"] = attemptId;
     body["progressPercent"] = progress;
     auto request = baseRequest(m_sessionToken, m_matchToken);

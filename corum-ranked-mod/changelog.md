@@ -1,3 +1,15 @@
+# v0.4.0-alpha.18
+
+- Fixed a client-side attempt event loss path that could leave completed attempts at Score 0 and fail to count Clears.
+- Attempt Start registration now retries from PlayLayer until the visual attempt is locally owned by the FIFO transport.
+- Attempt End now returns queue success; PlayLayer no longer permanently marks a death/Clear as reported before the runtime actually accepts it.
+- Buffered live progress is preserved while `/attempt/start` waits for its server ACK instead of being discarded/reset.
+- Snapshots the revealed map before entering PlayLayer so Qualifying and playable-level identity remain stable across LevelInfo/poll transitions.
+- Pins progress telemetry to the acknowledged attempt's level ID and keeps optimistic score/Clear reconciliation intact.
+- Extended the server integration regression to prove a Qualifying non-Clear score persists before subsequent Clear awards.
+- Preserves the alpha.17 vanilla song-download gate, confirmed-ban handling, and difficulty colors.
+- No Apps Script or database migration changes. Corum Integration remains unchanged.
+
 # v0.4.0-alpha.17
 
 - Replaced the hidden/off-screen song downloader with the real Geometry Dash LevelInfoLayer song download control.

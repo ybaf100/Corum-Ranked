@@ -67,6 +67,14 @@ std::string formatScore(double value) {
     return text;
 }
 
+
+double rankedProgressPercent(PlayLayer* layer) {
+    if (!layer) return 0.0;
+    auto const precise = std::clamp(static_cast<double>(layer->getCurrentPercent()), 0.0, 100.0);
+    auto const whole = std::clamp(static_cast<double>(layer->getCurrentPercentInt()), 0.0, 100.0);
+    return std::max(precise, whole);
+}
+
 } // namespace
 
 class $modify(CorumRankedPlayLayer, PlayLayer) {
@@ -95,6 +103,7 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         int levelId = 0;
         bool rankedLevel = false;
         bool autoExitRequested = false;
+        bool attemptStartReported = false;
         bool attemptEndReported = false;
         bool deniedDeathmatchVisualAttempt = false;
     };
@@ -105,10 +114,11 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         m_fields->levelId = level ? static_cast<int>(level->m_levelID) : 0;
         m_fields->rankedLevel =
             runtime.view().stage == corum::ranked::RuntimeStage::Matched &&
-            runtime.currentLevelId() == m_fields->levelId;
+            runtime.isGameplayLevel(m_fields->levelId);
         if (!m_fields->rankedLevel || m_isPracticeMode || m_isTestMode) return true;
 
         addRankedHud();
+        m_fields->attemptStartReported = false;
         m_fields->attemptEndReported = false;
         if (runtime.view().match.state == "DEATHMATCH_PLAYING") {
             // Reserve the visual try before gameplay begins. This local budget is
@@ -119,7 +129,7 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
                 return true;
             }
         }
-        runtime.reportAttemptStart(m_fields->levelId);
+        m_fields->attemptStartReported = runtime.reportAttemptStart(m_fields->levelId);
         return true;
     }
 
@@ -153,9 +163,12 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         m_fields->fpsMeter.observeFrame(steadyNowMicros());
 
         if (!runtime.isSpectating()) {
+            if (!m_fields->attemptStartReported && !m_fields->attemptEndReported) {
+                m_fields->attemptStartReported = runtime.reportAttemptStart(m_fields->levelId);
+            }
             runtime.reportAttemptProgress(
                 m_fields->levelId,
-                std::clamp(static_cast<double>(getCurrentPercent()), 0.0, 100.0)
+                rankedProgressPercent(this)
             );
         }
         auto const now = std::chrono::steady_clock::now();
@@ -182,9 +195,8 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
             // before creating the next visual attempt. This guarantees exactly one
             // end event for every start even when the user restarts while alive.
             if (!m_fields->attemptEndReported) {
-                m_fields->attemptEndReported = true;
-                auto const progress = std::clamp(static_cast<double>(getCurrentPercent()), 0.0, 100.0);
-                runtime.reportAttemptEnd(m_fields->levelId, progress, false);
+                auto const progress = rankedProgressPercent(this);
+                m_fields->attemptEndReported = runtime.reportAttemptEnd(m_fields->levelId, progress, false);
             }
 
             auto const& match = runtime.view().match;
@@ -203,15 +215,15 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         }
         PlayLayer::resetLevel();
         if (!m_fields->rankedLevel || m_isPracticeMode || m_isTestMode) return;
+        m_fields->attemptStartReported = false;
         m_fields->attemptEndReported = false;
-        runtime.reportAttemptStart(m_fields->levelId);
+        m_fields->attemptStartReported = runtime.reportAttemptStart(m_fields->levelId);
     }
 
     void destroyPlayer(PlayerObject* player, GameObject* object) {
         if (m_fields->rankedLevel && !m_isPracticeMode && !m_isTestMode && !m_fields->attemptEndReported) {
-            m_fields->attemptEndReported = true;
-            auto const progress = std::clamp(static_cast<double>(getCurrentPercent()), 0.0, 100.0);
-            corum::ranked::RankedRuntime::get().reportAttemptEnd(
+            auto const progress = rankedProgressPercent(this);
+            m_fields->attemptEndReported = corum::ranked::RankedRuntime::get().reportAttemptEnd(
                 m_fields->levelId,
                 progress,
                 false
@@ -222,8 +234,11 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
 
     void levelComplete() {
         if (m_fields->rankedLevel && !m_isPracticeMode && !m_isTestMode && !m_fields->attemptEndReported) {
-            m_fields->attemptEndReported = true;
-            corum::ranked::RankedRuntime::get().reportAttemptEnd(m_fields->levelId, 100.0, true);
+            m_fields->attemptEndReported = corum::ranked::RankedRuntime::get().reportAttemptEnd(
+                m_fields->levelId,
+                100.0,
+                true
+            );
         }
         PlayLayer::levelComplete();
     }
@@ -233,8 +248,11 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         // second vanilla completion-path safety net; the per-attempt guard makes
         // the pair idempotent and prevents double Clear/score accounting.
         if (m_fields->rankedLevel && !m_isPracticeMode && !m_isTestMode && !m_fields->attemptEndReported) {
-            m_fields->attemptEndReported = true;
-            corum::ranked::RankedRuntime::get().reportAttemptEnd(m_fields->levelId, 100.0, true);
+            m_fields->attemptEndReported = corum::ranked::RankedRuntime::get().reportAttemptEnd(
+                m_fields->levelId,
+                100.0,
+                true
+            );
         }
         PlayLayer::showCompleteText();
     }
@@ -247,9 +265,8 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
             m_fields->rankedLevel && !m_isPracticeMode && !m_isTestMode &&
             !m_fields->attemptEndReported && !m_fields->autoExitRequested
         ) {
-            m_fields->attemptEndReported = true;
-            auto const progress = std::clamp(static_cast<double>(getCurrentPercent()), 0.0, 100.0);
-            corum::ranked::RankedRuntime::get().reportAttemptEnd(
+            auto const progress = rankedProgressPercent(this);
+            m_fields->attemptEndReported = corum::ranked::RankedRuntime::get().reportAttemptEnd(
                 m_fields->levelId,
                 progress,
                 false
@@ -398,7 +415,7 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         m_fields->fpsLabel->setString(presentation.fpsText.c_str());
         auto const liveProgress = m_fields->attemptEndReported
             ? -1.0
-            : std::clamp(static_cast<double>(getCurrentPercent()), 0.0, 100.0);
+            : rankedProgressPercent(this);
         auto const ownLiveScore = runtime.localDisplayScore(liveProgress);
         m_fields->ownScoreLabel->setString(("Score : " + formatScore(ownLiveScore)).c_str());
         m_fields->opponentScoreLabel->setString(presentation.opponentScoreText.c_str());

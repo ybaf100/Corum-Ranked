@@ -55,12 +55,12 @@ g++ -std=c++23 -Wall -Wextra -Wpedantic -Werror \
 무료 alpha 호스팅 순서는 [`docs/free-hosting-render-neon.md`](docs/free-hosting-render-neon.md),
 기존 최초 배포 체크리스트는 [`docs/alpha-5-handoff.md`](docs/alpha-5-handoff.md),
 Debug Bot Match 제거 방법은 [`docs/debug-bot-match.md`](docs/debug-bot-match.md)를 참고하세요.
-최신 alpha.17 변경 파일·검증 결과는
-[`docs/v0.4.0-alpha.17-report.md`](docs/v0.4.0-alpha.17-report.md)에 정리되어 있습니다.
+최신 alpha.18 변경 파일·검증 결과는
+[`docs/v0.4.0-alpha.18-report.md`](docs/v0.4.0-alpha.18-report.md)에 정리되어 있습니다.
 
 
-> v0.4.0-alpha.17 policy: the Ranked allowlist checks currently enabled + loaded mods only. Installed-but-disabled mods do not block Ranked; required mods such as CBF must still be active.
+> v0.4.0-alpha.18 policy: the Ranked allowlist checks currently enabled + loaded mods only. Installed-but-disabled mods do not block Ranked; required mods such as CBF must still be active.
 
 
-## alpha.17 vanilla song gate
-The Ranked client now opens the real Geometry Dash LevelInfoLayer for song preparation, masks/blocks the rest of that screen, and leaves only the vanilla song-download control interactive. Hidden/off-screen song downloader calls are no longer used.
+## alpha.18 attempt scoring reliability
+The Ranked client now snapshots the revealed map before entering PlayLayer, retries local attempt registration, buffers progress while start acknowledgement is pending, and only marks an attempt end as reported after it is actually queued. The alpha.17 vanilla song gate remains unchanged.

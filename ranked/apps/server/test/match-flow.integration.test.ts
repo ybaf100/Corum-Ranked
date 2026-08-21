@@ -270,24 +270,49 @@ describe("two-client authoritative match flow", () => {
         levelId,
         attemptId: firstStart.attemptId!,
         clientEventId: `r${roundNumber}-a1-end`,
-        progressPercent: 100,
-        cleared: true,
+        progressPercent: livePercent,
+        cleared: false,
       });
       if (!("roundSnapshot" in firstEnd)) {
         throw new Error("Expected round attempt-end acknowledgement during ROUND_PLAYING");
       }
-      expect(firstEnd.roundSnapshot.clears.A).toBe(1);
-      expect(firstEnd.roundSnapshot.scores.A).toBeCloseTo(100 + qualifying, 6);
+      expect(firstEnd.roundSnapshot.clears.A).toBe(0);
+      expect(firstEnd.roundSnapshot.scores.A).toBe(
+        livePercent >= qualifying ? livePercent : 0,
+      );
+
       clock.advanceSeconds(1);
       const secondStart = await matches.startAttempt(matchId, statusA.matchToken, playerA, {
         levelId,
         clientEventId: `r${roundNumber}-a2-start`,
       });
       clock.advanceSeconds(1);
-      await matches.endAttempt(matchId, statusA.matchToken, playerA, {
+      const secondEnd = await matches.endAttempt(matchId, statusA.matchToken, playerA, {
         levelId,
         attemptId: secondStart.attemptId!,
         clientEventId: `r${roundNumber}-a2-end`,
+        progressPercent: 100,
+        cleared: true,
+      });
+      if (!("roundSnapshot" in secondEnd)) {
+        throw new Error("Expected first Clear acknowledgement during ROUND_PLAYING");
+      }
+      expect(secondEnd.roundSnapshot.clears.A).toBe(1);
+      expect(secondEnd.roundSnapshot.scores.A).toBeCloseTo(
+        (livePercent >= qualifying ? livePercent : 0) + 100 + qualifying,
+        6,
+      );
+
+      clock.advanceSeconds(1);
+      const thirdStart = await matches.startAttempt(matchId, statusA.matchToken, playerA, {
+        levelId,
+        clientEventId: `r${roundNumber}-a3-start`,
+      });
+      clock.advanceSeconds(1);
+      await matches.endAttempt(matchId, statusA.matchToken, playerA, {
+        levelId,
+        attemptId: thirdStart.attemptId!,
+        clientEventId: `r${roundNumber}-a3-end`,
         progressPercent: 100,
         cleared: true,
       });

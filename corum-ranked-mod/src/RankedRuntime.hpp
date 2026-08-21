@@ -184,6 +184,11 @@ public:
     [[nodiscard]] std::optional<std::int64_t> deadlineSeconds() const;
     [[nodiscard]] std::optional<std::int64_t> deadlineMillis() const;
     [[nodiscard]] bool canTrackLevel(int levelId) const;
+    // Snapshot the revealed server map immediately before LevelInfoLayer enters
+    // PlayLayer. This decouples gameplay attempt capture from later poll/UI
+    // refresh timing while the server remains authoritative for the match state.
+    [[nodiscard]] bool armCurrentLevelForGameplay();
+    [[nodiscard]] bool isGameplayLevel(int levelId) const;
     [[nodiscard]] bool isSpectating() const;
     [[nodiscard]] int currentLevelId() const;
     [[nodiscard]] bool canEnterCurrentLevel() const;
@@ -200,9 +205,9 @@ public:
     void setSongBypassAllowed(bool allowed);
     [[nodiscard]] bool songBypassAllowed() const;
 
-    void reportAttemptStart(int levelId);
+    [[nodiscard]] bool reportAttemptStart(int levelId);
     void reportAttemptProgress(int levelId, double progressPercent);
-    void reportAttemptEnd(int levelId, double progressPercent, bool cleared);
+    [[nodiscard]] bool reportAttemptEnd(int levelId, double progressPercent, bool cleared);
 
 private:
     struct PendingStart {
@@ -257,6 +262,9 @@ private:
     std::string m_sessionToken;
     std::string m_matchToken;
     std::string m_attemptId;
+    int m_attemptLevelId = 0;
+    std::optional<RankedMapView> m_gameplayMap;
+    std::string m_gameplayMatchId;
     std::optional<PendingStart> m_pendingStart;
     std::optional<PendingEnd> m_pendingEnd;
     std::deque<QueuedAttempt> m_attemptBacklog;
