@@ -40,6 +40,7 @@ DATABASE_URL=<Neon pooled connection string>
 RANKED_CONFIG_URL=<Apps Script /exec?action=ranked_config URL>
 RANKED_CONFIG_REFRESH_MS=60000
 RANKED_CONFIG_FETCH_TIMEOUT_MS=10000
+RANKED_CSMP_FETCH_TIMEOUT_MS=30000
 RANKED_SESSION_TOKEN_SECRET=<32자 이상 임의값>
 CORS_ORIGINS=
 DISCORD_WEBHOOK_URL=
@@ -72,3 +73,12 @@ alpha.6부터 production base URL은 모드에 기본값으로 포함된다. Geo
 Debug Bot Match를 포함하려면 CMake configure 시 `-DCORUM_RANKED_DEBUG_BOT_MATCH=ON`을
 사용하고 서버에도 `ENABLE_DEBUG_BOT_MATCH=true`를 설정한다. 현재 alpha 정책에서는 Bot Match
 결과도 일반 Ranked와 동일한 rating/placement/statistics 경로에 반영된다.
+
+## 5. Apps Script CSMP cold-start handling
+
+`RANKED_CONFIG_FETCH_TIMEOUT_MS`는 Ranked Config snapshot 조회 전용이고,
+`RANKED_CSMP_FETCH_TIMEOUT_MS`는 최초 프로필 seed를 위한 `csmp` / `player_records` 조회 전용이다.
+alpha.9부터 CSMP timeout은 기본 30초이며 timeout일 때 한 번만 자동 재시도한다. 두 시도 모두 실패하면
+세션 API는 generic 500 대신 HTTP 503과 `CSMP_SOURCE_TIMEOUT`을 반환한다.
+공용 `csmp` 정의는 `RANKED_CONFIG_REFRESH_MS` 동안 서버 메모리에 cache되지만, 유저별 `player_records`는
+최초 seed가 필요한 계정마다 새로 조회한다.

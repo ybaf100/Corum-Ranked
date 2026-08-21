@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.4.0-alpha.9
+
+- Split CSMP source timeout control from Ranked config fetch timeout with `RANKED_CSMP_FETCH_TIMEOUT_MS` (30 seconds by default).
+- Apps Script `csmp` / `player_records` requests retry once on timeout and return HTTP 503 with a stable `CSMP_SOURCE_TIMEOUT` code instead of surfacing a generic 500.
+- Cached the shared `csmp` definition for the Ranked config refresh interval and de-duplicated concurrent CSMP definition fetches; per-player records remain fresh per initial seed lookup.
+- Added action-specific timeout/error logging without logging player IDs or secrets.
+- Extended the initial Geode session request timeout to 70 seconds so the server can complete one CSMP retry during Apps Script cold starts.
+- Added regression tests for CSMP caching, timeout retry, 503 mapping, and the independent environment setting.
+- Corum Integration remains unchanged.
+
 ## v0.4.0-alpha.8
 
 - Fixed the Ranked server session test isolation bug that caused deterministic test UUIDs to collide across test cases in the shared PGlite database.

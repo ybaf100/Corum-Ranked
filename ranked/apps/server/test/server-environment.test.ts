@@ -17,9 +17,17 @@ describe("server environment", () => {
       port: 3000,
       rankedConfigRefreshMs: 60_000,
       rankedConfigFetchTimeoutMs: 5_000,
+      rankedCsmpFetchTimeoutMs: 30_000,
       discordRelay: null,
       debugBot: null,
     });
+  });
+
+  it("allows the CSMP source timeout to be tuned independently", () => {
+    expect(loadServerEnvironment({
+      ...validEnvironment(),
+      RANKED_CSMP_FETCH_TIMEOUT_MS: "45000",
+    }).rankedCsmpFetchTimeoutMs).toBe(45_000);
   });
 
   it("enables the development bot only with an explicit body-password configuration", () => {

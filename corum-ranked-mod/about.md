@@ -10,7 +10,7 @@ During a Ranked round, the HUD keeps both players' server scores and approved Cl
 
 The production Ranked server defaults to `https://corum-ranked.onrender.com`. Production credentials and webhook secrets do not belong in the mod or repository.
 
-The `v0.4.0-alpha.8` development build can include **DEBUG BOT MATCH** behind
+The `v0.4.0-alpha.9` development build can include **DEBUG BOT MATCH** behind
 `CORUM_RANKED_DEBUG_BOT_MATCH`. Its results intentionally use the same live Ranked rating and
 statistics path during alpha testing. Build with that CMake option OFF and disable the matching
 server environment flag before a production release.

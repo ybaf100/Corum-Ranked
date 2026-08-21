@@ -31,7 +31,8 @@ Migration은 transaction 안에서 실행됩니다. 기존 운영 DB에 적용�
 
 - `DATABASE_URL`: PostgreSQL 연결 문자열
 - `RANKED_CONFIG_URL`: 배포된 Apps Script `ranked_config` URL
-- `RANKED_CONFIG_REFRESH_MS`, `RANKED_CONFIG_FETCH_TIMEOUT_MS`: config refresh 제어값
+- `RANKED_CONFIG_REFRESH_MS`, `RANKED_CONFIG_FETCH_TIMEOUT_MS`: Ranked config refresh/timeout 제어값
+- `RANKED_CSMP_FETCH_TIMEOUT_MS`: 최초 CSMP seed source (`csmp`, `player_records`) 요청 timeout. 기본 30000ms, timeout 시 1회 재시도
 - `RANKED_SESSION_TOKEN_SECRET`: production에서 최소 32자, 임의 생성값은 secret manager에서 생성
 - `CORS_ORIGINS`: 필요한 origin만 쉼표로 지정
 - `DISCORD_WEBHOOK_URL`: 비어 있으면 relay 비활성화
@@ -46,6 +47,7 @@ Migration은 transaction 안에서 실행됩니다. 기존 운영 DB에 적용�
 - `GET /health`: 프로세스 생존
 - `GET /ready`: DB와 마지막 검증 config 상태
 - config refresh 실패: 마지막 정상 snapshot이 있으면 기존 설정으로 계속 서비스하고 오류를 기록
+- CSMP source timeout: action 이름과 timeout/attempt만 로그에 남기고 HTTP 503 `CSMP_SOURCE_TIMEOUT`으로 반환. player ID/secret은 로그에 남기지 않음
 - outbox: `delivered_at IS NULL AND abandoned_at IS NULL`은 재시도 예정, `abandoned_at IS NOT NULL`은 최대 시도 후 포기한 알림
 - Match `result_applied_at`: MMR 반영 idempotency 기준
 

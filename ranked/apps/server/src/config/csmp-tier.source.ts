@@ -1,4 +1,4 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable, Logger, ServiceUnavailableException } from "@nestjs/common";
 import { CSMP_TIERS, type CsmpTier } from "@corum-ranked/rules";
 import {
   SERVER_ENVIRONMENT,
@@ -70,27 +70,129 @@ export const resolveCsmpTier = (
 
 @Injectable()
 export class AppsScriptCsmpTierSource implements CsmpTierSource {
+  private readonly logger = new Logger(AppsScriptCsmpTierSource.name);
+  private csmpCache: { readonly expiresAtMs: number; readonly body: Record<string, unknown> } | null = null;
+  private csmpInFlight: Promise<Record<string, unknown>> | null = null;
+
   public constructor(
     @Inject(SERVER_ENVIRONMENT) private readonly environment: ServerEnvironment,
   ) {}
 
-  private async fetchAction(action: string, parameters: Readonly<Record<string, string>> = {}) {
+  private isTimeout(error: unknown): boolean {
+    return error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
+  }
+
+  private unavailable(code: string, message: string): ServiceUnavailableException {
+    return new ServiceUnavailableException({
+      statusCode: 503,
+      error: "Service Unavailable",
+      code,
+      message,
+    });
+  }
+
+  private async fetchActionOnce(
+    action: string,
+    parameters: Readonly<Record<string, string>>,
+  ): Promise<Record<string, unknown>> {
     const url = new URL(this.environment.rankedConfigUrl);
     url.searchParams.set("action", action);
     for (const [key, value] of Object.entries(parameters)) url.searchParams.set(key, value);
-    const response = await fetch(url, {
-      headers: { accept: "application/json" },
-      signal: AbortSignal.timeout(this.environment.rankedConfigFetchTimeoutMs),
-    });
-    if (!response.ok) throw new Error(`Apps Script ${action} returned HTTP ${response.status}`);
-    const body = (await response.json()) as { ok?: boolean };
-    if (!body.ok) throw new Error(`Apps Script ${action} returned an error`);
+
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        headers: { accept: "application/json" },
+        signal: AbortSignal.timeout(this.environment.rankedCsmpFetchTimeoutMs),
+      });
+    } catch (error) {
+      if (this.isTimeout(error)) throw error;
+      this.logger.error(
+        `Apps Script action '${action}' failed before a response was received: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw this.unavailable(
+        "CSMP_SOURCE_UNAVAILABLE",
+        "CSMP service is temporarily unavailable. Retry shortly.",
+      );
+    }
+
+    if (!response.ok) {
+      this.logger.warn(`Apps Script action '${action}' returned HTTP ${response.status}`);
+      throw this.unavailable(
+        "CSMP_SOURCE_HTTP_ERROR",
+        "CSMP service is temporarily unavailable. Retry shortly.",
+      );
+    }
+
+    let body: { ok?: boolean };
+    try {
+      body = (await response.json()) as { ok?: boolean };
+    } catch (error) {
+      this.logger.warn(
+        `Apps Script action '${action}' returned invalid JSON: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw this.unavailable(
+        "CSMP_SOURCE_INVALID_RESPONSE",
+        "CSMP service returned an invalid response. Retry shortly.",
+      );
+    }
+    if (!body.ok) {
+      this.logger.warn(`Apps Script action '${action}' returned ok=false`);
+      throw this.unavailable(
+        "CSMP_SOURCE_ERROR",
+        "CSMP service is temporarily unavailable. Retry shortly.",
+      );
+    }
     return body as Record<string, unknown>;
+  }
+
+  private async fetchAction(
+    action: string,
+    parameters: Readonly<Record<string, string>> = {},
+  ): Promise<Record<string, unknown>> {
+    const maximumAttempts = 2;
+    for (let attempt = 1; attempt <= maximumAttempts; attempt += 1) {
+      try {
+        return await this.fetchActionOnce(action, parameters);
+      } catch (error) {
+        if (!this.isTimeout(error)) throw error;
+        this.logger.warn(
+          `Apps Script action '${action}' timed out after ${this.environment.rankedCsmpFetchTimeoutMs}ms (attempt ${attempt}/${maximumAttempts})`,
+        );
+        if (attempt === maximumAttempts) {
+          throw this.unavailable(
+            "CSMP_SOURCE_TIMEOUT",
+            "CSMP service timed out. Retry shortly.",
+          );
+        }
+      }
+    }
+    throw this.unavailable("CSMP_SOURCE_UNAVAILABLE", "CSMP service is temporarily unavailable.");
+  }
+
+  private async fetchCsmpDefinition(): Promise<Record<string, unknown>> {
+    const now = Date.now();
+    if (this.csmpCache && this.csmpCache.expiresAtMs > now) return this.csmpCache.body;
+    if (this.csmpInFlight) return this.csmpInFlight;
+
+    const pending = this.fetchAction("csmp")
+      .then((body) => {
+        this.csmpCache = {
+          body,
+          expiresAtMs: Date.now() + this.environment.rankedConfigRefreshMs,
+        };
+        return body;
+      })
+      .finally(() => {
+        if (this.csmpInFlight === pending) this.csmpInFlight = null;
+      });
+    this.csmpInFlight = pending;
+    return pending;
   }
 
   public async fetchCurrentTier(gdAccountId: string): Promise<CsmpTier> {
     const [csmp, playerRecords] = await Promise.all([
-      this.fetchAction("csmp"),
+      this.fetchCsmpDefinition(),
       this.fetchAction("player_records", { gdAccountId }),
     ]);
     const stages = Array.isArray(csmp.tiers) ? (csmp.tiers as CsmpStagePayload[]) : [];

@@ -129,6 +129,7 @@ export const environmentFixture = (): ServerEnvironment => ({
   rankedConfigUrl: "http://127.0.0.1/config",
   rankedConfigRefreshMs: 60_000,
   rankedConfigFetchTimeoutMs: 2_000,
+  rankedCsmpFetchTimeoutMs: 30_000,
   sessionTokenSecret: "test-only-not-a-production-secret",
   corsOrigins: [],
   discordRelay: null,

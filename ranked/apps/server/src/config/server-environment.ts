@@ -9,6 +9,7 @@ export interface ServerEnvironment {
   readonly rankedConfigUrl: string;
   readonly rankedConfigRefreshMs: number;
   readonly rankedConfigFetchTimeoutMs: number;
+  readonly rankedCsmpFetchTimeoutMs: number;
   readonly sessionTokenSecret: string;
   readonly corsOrigins: readonly string[];
   readonly discordRelay: DiscordRelayEnvironment | null;
@@ -91,6 +92,10 @@ export const loadServerEnvironment = (
   const rankedConfigFetchTimeoutMs = positiveInteger(
     requireValue(environment, "RANKED_CONFIG_FETCH_TIMEOUT_MS"),
     "RANKED_CONFIG_FETCH_TIMEOUT_MS",
+  );
+  const rankedCsmpFetchTimeoutMs = positiveInteger(
+    environment.RANKED_CSMP_FETCH_TIMEOUT_MS?.trim() || "30000",
+    "RANKED_CSMP_FETCH_TIMEOUT_MS",
   );
 
   const databaseProtocol = new URL(databaseUrl).protocol;
@@ -247,6 +252,7 @@ export const loadServerEnvironment = (
     rankedConfigUrl,
     rankedConfigRefreshMs,
     rankedConfigFetchTimeoutMs,
+    rankedCsmpFetchTimeoutMs,
     sessionTokenSecret,
     corsOrigins,
     discordRelay,

@@ -48,7 +48,7 @@
 - NestJS/PostgreSQL 서버가 매칭, 시간, attempt 승인, 점수, 승패, MMR을 최종 판정합니다.
 - Apps Script는 운영 설정만 제공하며 실시간 경기 상태를 저장하지 않습니다.
 - Ranked Pool과 Qualifying은 별도 문서가 아니라 기존 맵 시트(`sheet1`)의 오른쪽 두 열에서 관리합니다.
-- `v0.4.0-alpha.8`의 Debug Bot Match는 개발용이지만, 테스트 기간에는 일반 PvP와 동일하게 MMR·Ranked Score·Placement·W/L에 반영됩니다.
+- `v0.4.0-alpha.9`의 Debug Bot Match는 개발용이지만, 테스트 기간에는 일반 PvP와 동일하게 MMR·Ranked Score·Placement·W/L에 반영됩니다.
 - 미확정 MMR Seed·티어 경계·K-factor·timeout·매칭 폭·실패 정책은 운영자가 입력하기 전까지 queue가 fail-closed 상태를 유지합니다.
 - Production secret은 저장소에 포함하지 않습니다.
 
@@ -58,4 +58,4 @@
 ---
 
 
-> v0.4.0-alpha.8 policy: the Ranked allowlist checks currently enabled + loaded mods only. Installed-but-disabled mods do not block Ranked; required mods such as CBF must still be active.
+> v0.4.0-alpha.9 policy: the Ranked allowlist checks currently enabled + loaded mods only. Installed-but-disabled mods do not block Ranked; required mods such as CBF must still be active.

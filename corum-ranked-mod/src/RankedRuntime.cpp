@@ -379,6 +379,8 @@ void RankedRuntime::createSession() {
     body["clientVersion"] = Mod::get()->getVersion().toVString();
     body["installedMods"] = installedModsJson();
     auto request = baseRequest({});
+    // Initial profile creation can require a cold Apps Script CSMP lookup plus one retry.
+    request.timeout(std::chrono::seconds(70));
     request.bodyJSON(body);
     m_controlBusy = true;
     setStage(RuntimeStage::Loading, "Creating a server session...");
