@@ -1136,6 +1136,19 @@ bool RankedRuntime::armCurrentLevelForGameplay() {
     return true;
 }
 
+std::optional<double> RankedRuntime::gameplayQualifyingPercent(int levelId) const {
+    if (
+        m_gameplayMap && m_gameplayMatchId == m_view.match.matchId &&
+        m_gameplayMap->levelId == levelId
+    ) {
+        return m_gameplayMap->qualifyingPercent;
+    }
+    if (m_view.match.currentMap && m_view.match.currentMap->levelId == levelId) {
+        return m_view.match.currentMap->qualifyingPercent;
+    }
+    return std::nullopt;
+}
+
 bool RankedRuntime::isGameplayLevel(int levelId) const {
     if (m_view.stage != RuntimeStage::Matched || m_view.match.matchId.empty()) return false;
     if (
@@ -1211,16 +1224,18 @@ int RankedRuntime::localDeathmatchVisualAttemptsUsed() const {
     return std::clamp(m_localDeathmatchVisualAttempts, 0, 3);
 }
 
-double RankedRuntime::localDisplayScore(double progressPercent) const {
+double RankedRuntime::localDisplayScore(double progressPercent, std::optional<double> qualifyingPercentOverride) const {
     auto const ownIsA = m_view.match.side == "A";
     auto const committed = ownIsA ? m_view.match.committedScoreA : m_view.match.committedScoreB;
     auto const serverDisplay = ownIsA ? m_view.match.scoreA : m_view.match.scoreB;
     auto const optimisticBase = committed + m_optimisticScoreDelta;
 
-    // A negative progress means the current visual attempt already ended. Its
-    // value is therefore in m_optimisticScoreDelta and must not be counted again.
+    // Every Clear is worth exactly 200 under the current rules. Keep that
+    // invariant visible even while attempt-end/state acknowledgements are queued.
+    auto const clearFloor = static_cast<double>(localDisplayClears()) * 200.0;
+
     if (progressPercent < 0.0 || m_view.match.spectatorActive) {
-        return std::max(serverDisplay, optimisticBase);
+        return std::max({serverDisplay, optimisticBase, clearFloor});
     }
 
     RankedMapView const* scoringMap = nullptr;
@@ -1229,10 +1244,17 @@ double RankedRuntime::localDisplayScore(double progressPercent) const {
     } else if (m_view.match.currentMap) {
         scoringMap = &*m_view.match.currentMap;
     }
-    if (!scoringMap) return std::max(serverDisplay, optimisticBase);
 
-    auto const live = calculateAttemptScore(progressPercent, false, scoringMap->qualifyingPercent);
-    return std::max(serverDisplay, optimisticBase + live);
+    auto const overrideValid =
+        qualifyingPercentOverride && std::isfinite(*qualifyingPercentOverride) &&
+        *qualifyingPercentOverride >= 0.0 && *qualifyingPercentOverride <= 100.0;
+    auto const qualifying = overrideValid
+        ? *qualifyingPercentOverride
+        : (scoringMap ? scoringMap->qualifyingPercent : -1.0);
+    if (qualifying < 0.0) return std::max({serverDisplay, optimisticBase, clearFloor});
+
+    auto const live = calculateAttemptScore(progressPercent, false, qualifying);
+    return std::max({serverDisplay, optimisticBase + live, clearFloor});
 }
 
 int RankedRuntime::localDisplayClears() const {
@@ -1326,7 +1348,7 @@ void RankedRuntime::reportAttemptProgress(int levelId, double progressPercent) {
     flushProgressTelemetry();
 }
 
-bool RankedRuntime::reportAttemptEnd(int levelId, double progressPercent, bool cleared) {
+bool RankedRuntime::reportAttemptEnd(int levelId, double progressPercent, bool cleared, std::optional<double> qualifyingPercentOverride) {
     if (!canTrackLevel(levelId)) return false;
 
     // Self-heal a missed init-time start. PlayLayer can be created on the same
@@ -1350,12 +1372,18 @@ bool RankedRuntime::reportAttemptEnd(int levelId, double progressPercent, bool c
     } else if (m_view.match.currentMap && m_view.match.currentMap->levelId == levelId) {
         scoringMap = &*m_view.match.currentMap;
     }
+    auto const overrideValid =
+        qualifyingPercentOverride && std::isfinite(*qualifyingPercentOverride) &&
+        *qualifyingPercentOverride >= 0.0 && *qualifyingPercentOverride <= 100.0;
+    auto const qualifying = overrideValid
+        ? *qualifyingPercentOverride
+        : (scoringMap ? scoringMap->qualifyingPercent : -1.0);
     auto optimisticScore = 0.0;
-    if (scoringMap) {
+    if (qualifying >= 0.0) {
         optimisticScore = calculateAttemptScore(
             finalProgress,
             cleared,
-            scoringMap->qualifyingPercent
+            qualifying
         );
     }
     PendingEnd end {
@@ -1458,6 +1486,11 @@ void RankedRuntime::sendAttemptStart() {
             }
             m_attemptId = root["attemptId"].asString().unwrapOr("");
             m_attemptLevelId = starting.levelId;
+            log::info(
+                "Ranked attempt start ACK: accepted=true attempt={} level={}",
+                m_attemptId,
+                starting.levelId
+            );
             applyAttemptSnapshot(root);
             if (m_view.match.state == "DEATHMATCH_PLAYING") {
                 auto const attemptNumber = static_cast<int>(root["attemptNumber"].asInt().unwrapOr(0));
@@ -1505,6 +1538,16 @@ void RankedRuntime::sendAttemptEnd() {
             observeServerNow(root);
             auto const accepted = root["accepted"].asBool().unwrapOr(false);
             auto const reason = root["reason"].asString().unwrapOr("");
+            auto const awardedScore = root["awardedScore"].asDouble().unwrapOr(0.0);
+            log::info(
+                "Ranked attempt end ACK: accepted={} level={} progress={} clear={} awarded={} reason={}",
+                accepted,
+                ending.levelId,
+                ending.progressPercent,
+                ending.cleared,
+                awardedScore,
+                reason
+            );
             if (!accepted && reason != "ATTEMPT_ALREADY_ENDED") {
                 setTransientError(reason.empty() ? "Attempt end rejected" : reason);
             }

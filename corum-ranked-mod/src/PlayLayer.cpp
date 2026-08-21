@@ -1,5 +1,6 @@
 #include "RankedRuntime.hpp"
 #include "domain/HudPresentation.hpp"
+#include "domain/AttemptScoring.hpp"
 #include "domain/RenderFpsMeter.hpp"
 
 #include <Geode/Geode.hpp>
@@ -101,6 +102,7 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         std::chrono::steady_clock::time_point nextHudRefreshAt {};
         std::uint64_t renderedRevision = 0;
         int levelId = 0;
+        double qualifyingPercent = -1.0;
         bool rankedLevel = false;
         bool autoExitRequested = false;
         bool attemptStartReported = false;
@@ -115,6 +117,16 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         m_fields->rankedLevel =
             runtime.view().stage == corum::ranked::RuntimeStage::Matched &&
             runtime.isGameplayLevel(m_fields->levelId);
+        if (m_fields->rankedLevel) {
+            if (auto const qualifying = runtime.gameplayQualifyingPercent(m_fields->levelId)) {
+                m_fields->qualifyingPercent = *qualifying;
+            } else {
+                log::warn(
+                    "Ranked PlayLayer started without a Qualifying snapshot: level={}",
+                    m_fields->levelId
+                );
+            }
+        }
         if (!m_fields->rankedLevel || m_isPracticeMode || m_isTestMode) return true;
 
         addRankedHud();
@@ -196,7 +208,7 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
             // end event for every start even when the user restarts while alive.
             if (!m_fields->attemptEndReported) {
                 auto const progress = rankedProgressPercent(this);
-                m_fields->attemptEndReported = runtime.reportAttemptEnd(m_fields->levelId, progress, false);
+                m_fields->attemptEndReported = runtime.reportAttemptEnd(m_fields->levelId, progress, false, m_fields->qualifyingPercent);
             }
 
             auto const& match = runtime.view().match;
@@ -226,7 +238,8 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
             m_fields->attemptEndReported = corum::ranked::RankedRuntime::get().reportAttemptEnd(
                 m_fields->levelId,
                 progress,
-                false
+                false,
+                m_fields->qualifyingPercent
             );
         }
         PlayLayer::destroyPlayer(player, object);
@@ -237,7 +250,8 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
             m_fields->attemptEndReported = corum::ranked::RankedRuntime::get().reportAttemptEnd(
                 m_fields->levelId,
                 100.0,
-                true
+                true,
+                m_fields->qualifyingPercent
             );
         }
         PlayLayer::levelComplete();
@@ -251,7 +265,8 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
             m_fields->attemptEndReported = corum::ranked::RankedRuntime::get().reportAttemptEnd(
                 m_fields->levelId,
                 100.0,
-                true
+                true,
+                m_fields->qualifyingPercent
             );
         }
         PlayLayer::showCompleteText();
@@ -269,7 +284,8 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
             m_fields->attemptEndReported = corum::ranked::RankedRuntime::get().reportAttemptEnd(
                 m_fields->levelId,
                 progress,
-                false
+                false,
+                m_fields->qualifyingPercent
             );
         }
         PlayLayer::onQuit();
@@ -416,7 +432,10 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         auto const liveProgress = m_fields->attemptEndReported
             ? -1.0
             : rankedProgressPercent(this);
-        auto const ownLiveScore = runtime.localDisplayScore(liveProgress);
+        auto const ownLiveScore = runtime.localDisplayScore(
+            liveProgress,
+            m_fields->qualifyingPercent
+        );
         m_fields->ownScoreLabel->setString(("Score : " + formatScore(ownLiveScore)).c_str());
         m_fields->opponentScoreLabel->setString(presentation.opponentScoreText.c_str());
         auto ownChecks = presentation.ownChecks;

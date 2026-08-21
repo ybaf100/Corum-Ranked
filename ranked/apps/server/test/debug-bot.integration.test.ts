@@ -266,6 +266,12 @@ describe("development-only Bot Match using the production Ranked engine", () => 
         )).rejects.toThrow("playableLevelId");
       }
       await completeTwoClears(creation, playerWins);
+      const scored = await matches.state(
+        creation.matchId,
+        creation.playerMatchToken,
+        creation.playerContext,
+      ) as Record<string, any>;
+      expect(scored.currentRound.scores[playerWins ? "A" : "B"]).toBe(400);
 
       // alpha.10+ gives the trailing side the same 10-second LAST ATTEMPT
       // start window even when it has zero Clears. The rated-match helper must

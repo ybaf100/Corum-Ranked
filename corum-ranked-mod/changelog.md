@@ -1,3 +1,11 @@
+# v0.4.0-alpha.20
+- Hardened map downloads so a dropped/stolen `LevelDownloadDelegate` callback cannot leave Ranked stuck on `DOWNLOADING...`; the client now polls for playable level data and retries stalled vanilla GD downloads under the existing 30-second policy.
+- Fixed local Ranked scoring presentation by snapshotting Qualifying in `PlayLayer` and using it as an explicit fallback for live/provisional attempt scoring instead of depending on a mutable match-state map view.
+- Kept server-authoritative scoring unchanged and added Debug Bot regression coverage proving the human side receives 400 points for two Clears (200 each). Debug Bot Match uses the same scoring path as normal Ranked.
+- Fixed Round/Death Match prepare screens so the large side numbers show Bo3 round wins, not the previous/current map point totals.
+- Includes the alpha.19 Deathmatch unit-test expectation correction for the 70%+ x1.5 / Clear=200 scoring rules.
+- Corum Integration remains unchanged.
+
 # v0.4.0-alpha.19
 - Fixed Geode v5 build errors in the Ranked song-gate child traversal and restored the vanilla map-download helper.
 - Fixed the authoritative integration-test attempt count (the scenario creates 8 accepted attempts, not 7).

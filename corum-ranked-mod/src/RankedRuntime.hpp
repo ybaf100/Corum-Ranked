@@ -188,6 +188,7 @@ public:
     // PlayLayer. This decouples gameplay attempt capture from later poll/UI
     // refresh timing while the server remains authoritative for the match state.
     [[nodiscard]] bool armCurrentLevelForGameplay();
+    [[nodiscard]] std::optional<double> gameplayQualifyingPercent(int levelId) const;
     [[nodiscard]] bool isGameplayLevel(int levelId) const;
     [[nodiscard]] bool isSpectating() const;
     [[nodiscard]] int currentLevelId() const;
@@ -200,14 +201,14 @@ public:
     // rejects attempt 4+.
     [[nodiscard]] bool reserveDeathmatchVisualAttempt();
     [[nodiscard]] int localDeathmatchVisualAttemptsUsed() const;
-    [[nodiscard]] double localDisplayScore(double progressPercent) const;
+    [[nodiscard]] double localDisplayScore(double progressPercent, std::optional<double> qualifyingPercentOverride = std::nullopt) const;
     [[nodiscard]] int localDisplayClears() const;
     void setSongBypassAllowed(bool allowed);
     [[nodiscard]] bool songBypassAllowed() const;
 
     [[nodiscard]] bool reportAttemptStart(int levelId);
     void reportAttemptProgress(int levelId, double progressPercent);
-    [[nodiscard]] bool reportAttemptEnd(int levelId, double progressPercent, bool cleared);
+    [[nodiscard]] bool reportAttemptEnd(int levelId, double progressPercent, bool cleared, std::optional<double> qualifyingPercentOverride = std::nullopt);
 
 private:
     struct PendingStart {

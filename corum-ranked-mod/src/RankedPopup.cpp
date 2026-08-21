@@ -578,8 +578,10 @@ class CorumRankedLayer final : public CCLayerColor, public LevelDownloadDelegate
             m_root->addChild(difficulty, 4);
         }
 
-        auto* leftScore = makeLabel(fmt::format("{}", match.scoreA), 0.82f, {size.width / 2.0f - 74.0f, size.height / 2.0f + 5.0f}, kRed);
-        auto* rightScore = makeLabel(fmt::format("{}", match.scoreB), 0.82f, {size.width / 2.0f + 74.0f, size.height / 2.0f + 5.0f}, kRed);
+        // The large numbers on Round/Death Match prepare are the Bo3 series
+        // score, not the point total accumulated inside the current/previous map.
+        auto* leftScore = makeLabel(fmt::format("{}", match.roundWinsA), 0.82f, {size.width / 2.0f - 74.0f, size.height / 2.0f + 5.0f}, kRed);
+        auto* rightScore = makeLabel(fmt::format("{}", match.roundWinsB), 0.82f, {size.width / 2.0f + 74.0f, size.height / 2.0f + 5.0f}, kRed);
         m_root->addChild(leftScore, 4);
         m_root->addChild(rightScore, 4);
 
@@ -805,24 +807,62 @@ class CorumRankedLayer final : public CCLayerColor, public LevelDownloadDelegate
         }
     }
 
+    void capturePlayableLevel(GJGameLevel* level) {
+        if (!isPlayableLevel(level)) return;
+        if (m_downloadedLevel != level) {
+            CC_SAFE_RETAIN(level);
+            CC_SAFE_RELEASE(m_downloadedLevel);
+            m_downloadedLevel = level;
+        }
+        m_downloadingLevelId = 0;
+        detachLevelDownloadDelegate();
+        m_localMessage = "Map downloaded.";
+        refreshSongIds(level);
+    }
+
+    bool reconcileMapDownload() {
+        if (auto* level = findLocalMap(); isPlayableLevel(level)) {
+            capturePlayableLevel(level);
+            return true;
+        }
+
+        if (m_downloadingLevelId == 0) return false;
+        auto* manager = GameLevelManager::sharedState();
+        if (manager && manager->m_levelDownloadDelegate != this) {
+            // GameLevelManager owns one global download delegate. If another layer
+            // replaced it while the Ranked request is alive, restore ours so the
+            // vanilla completion callback cannot disappear.
+            manager->m_levelDownloadDelegate = this;
+        }
+
+        // Do not get permanently stuck on DOWNLOADING when GD drops a callback or
+        // a request silently stalls. Poll the saved level every UI tick and retry
+        // the vanilla request after a short watchdog interval. The original 30 s
+        // match-resource deadline still governs cancellation/loss semantics.
+        if (m_lastMapDownloadAttemptAt && elapsed(m_lastMapDownloadAttemptAt) >= 3.0) {
+            detachLevelDownloadDelegate();
+            m_downloadingLevelId = 0;
+            m_localMessage = "Map download stalled. Retrying with Geometry Dash...";
+        }
+        return false;
+    }
+
     void startMapDownload() {
         auto const levelId = RankedRuntime::get().currentLevelId();
-        if (levelId <= 0 || findPlayableMap()) return;
-
-        // Avoid stacking duplicate vanilla download requests while a request for
-        // this level is already in flight. Failed requests may retry, but not in a
-        // tight 200 ms Ranked UI loop.
-        if (m_downloadingLevelId == levelId) return;
-        auto const now = SteadyClock::now();
-        if (m_lastMapDownloadAttemptAt) {
-            auto const sinceLast = std::chrono::duration<double>(now - *m_lastMapDownloadAttemptAt).count();
-            if (sinceLast < 1.0) return;
-        }
+        if (levelId <= 0 || reconcileMapDownload()) return;
 
         auto* manager = GameLevelManager::sharedState();
         if (!manager) {
             m_localMessage = "Geometry Dash map downloader is unavailable.";
             return;
+        }
+
+        // A live request is left alone until the watchdog above decides it stalled.
+        if (m_downloadingLevelId == levelId) return;
+        auto const now = SteadyClock::now();
+        if (m_lastMapDownloadAttemptAt) {
+            auto const sinceLast = std::chrono::duration<double>(now - *m_lastMapDownloadAttemptAt).count();
+            if (sinceLast < 0.75) return;
         }
 
         detachLevelDownloadDelegate();
@@ -832,9 +872,10 @@ class CorumRankedLayer final : public CCLayerColor, public LevelDownloadDelegate
         m_lastMapDownloadAttemptAt = now;
         m_localMessage = "Downloading map...";
 
-        // Use Geometry Dash's normal level downloader. This keeps the resulting
-        // GJGameLevel lifecycle identical to a vanilla level-info download and
-        // feeds levelDownloadFinished/levelDownloadFailed above.
+        // Same vanilla download path used by Geometry Dash/other Geode clients.
+        // Completion is accepted both through LevelDownloadDelegate and through
+        // reconcileMapDownload(), so a missing delegate callback cannot deadlock
+        // the Ranked prepare screen.
         manager->downloadLevel(levelId, false, 0);
     }
 
@@ -933,6 +974,7 @@ class CorumRankedLayer final : public CCLayerColor, public LevelDownloadDelegate
         }
         if (match.state != "ROUND_PREPARE" && match.state != "DEATHMATCH_PREPARE") return;
 
+        reconcileMapDownload();
         auto* level = findPlayableMap();
         if (phaseSeconds() >= 5.0) {
             if (!level) startMapDownload();
@@ -1072,18 +1114,14 @@ class CorumRankedLayer final : public CCLayerColor, public LevelDownloadDelegate
     void levelDownloadFinished(GJGameLevel* level) override {
         detachLevelDownloadDelegate();
         m_downloadingLevelId = 0;
-        if (!level || level->m_levelString.empty() || level->m_levelNotDownloaded) {
-            // A list/search metadata object is not enough to construct gameplay.
-            // Keep the download timer running and allow the normal retry loop to
-            // request the full downloadGJLevel payload again.
-            m_localMessage = "Map metadata loaded, but playable level data is still missing. Retrying...";
+        if (!isPlayableLevel(level)) {
+            // Some GD responses can surface only the search/list metadata object.
+            // Do not call it downloaded; the watchdog will request the full level
+            // payload again instead of leaving WAITING FOR MAP forever.
+            m_localMessage = "Map metadata received; requesting playable data...";
             return;
         }
-        CC_SAFE_RETAIN(level);
-        CC_SAFE_RELEASE(m_downloadedLevel);
-        m_downloadedLevel = level;
-        m_localMessage = "Map downloaded.";
-        refreshSongIds(level);
+        capturePlayableLevel(level);
         if (phaseSeconds() >= 5.0 && !isSongReady(level)) openSongDownloadGate();
     }
 
