@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   SeededRandom,
   createMatchSeries,
+  scoreAttempt,
   type CsmpTier,
   type RankedMapSnapshot,
 } from "@corum-ranked/rules";
@@ -303,7 +304,7 @@ describe("Round 3 draw and repeating deathmatch", () => {
             }
             expect(
               live.deathmatchSnapshot.displayScores[context === contextA ? "A" : "B"],
-            ).toBe(progress >= qualifying ? Math.floor(progress) : 0);
+            ).toBe(scoreAttempt(progress, false, qualifying));
           }
           clock.advance(1);
           const ended = await service.endAttempt(matchId, token, context, {

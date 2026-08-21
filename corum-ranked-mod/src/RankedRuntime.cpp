@@ -1,4 +1,5 @@
 #include "RankedRuntime.hpp"
+#include "domain/AttemptScoring.hpp"
 
 #include <Geode/binding/GJAccountManager.hpp>
 #include <Geode/loader/Loader.hpp>
@@ -1230,9 +1231,7 @@ double RankedRuntime::localDisplayScore(double progressPercent) const {
     }
     if (!scoringMap) return std::max(serverDisplay, optimisticBase);
 
-    auto const progress = std::clamp(progressPercent, 0.0, 100.0);
-    auto const qualifying = scoringMap->qualifyingPercent;
-    auto const live = progress >= qualifying ? std::floor(progress) : 0.0;
+    auto const live = calculateAttemptScore(progressPercent, false, scoringMap->qualifyingPercent);
     return std::max(serverDisplay, optimisticBase + live);
 }
 
@@ -1353,10 +1352,11 @@ bool RankedRuntime::reportAttemptEnd(int levelId, double progressPercent, bool c
     }
     auto optimisticScore = 0.0;
     if (scoringMap) {
-        auto const qualifying = scoringMap->qualifyingPercent;
-        optimisticScore = cleared
-            ? 100.0 + qualifying
-            : (finalProgress >= qualifying ? std::floor(finalProgress) : 0.0);
+        optimisticScore = calculateAttemptScore(
+            finalProgress,
+            cleared,
+            scoringMap->qualifyingPercent
+        );
     }
     PendingEnd end {
         .levelId = levelId,

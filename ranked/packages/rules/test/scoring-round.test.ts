@@ -64,16 +64,19 @@ const end = (
 };
 
 describe("score race formula", () => {
-  it("awards zero below qualifying and integer progress at or above it", () => {
+  it("awards zero below qualifying, integer progress below 70, and x1.5 from 70 through 99", () => {
     expect(scoreAttempt(59.99, false, 60)).toBe(0);
     expect(scoreAttempt(60, false, 60)).toBe(60);
-    expect(scoreAttempt(79.99, false, 60)).toBe(79);
+    expect(scoreAttempt(69.99, false, 60)).toBe(69);
+    expect(scoreAttempt(70, false, 60)).toBe(105);
+    expect(scoreAttempt(79.99, false, 60)).toBe(118.5);
+    expect(scoreAttempt(99.99, false, 60)).toBe(148.5);
   });
 
-  it("awards 100 plus qualifying for a clear without truncating decimal qualifying", () => {
-    expect(scoreAttempt(100, true, 60)).toBe(160);
-    expect(scoreAttempt(100, true, 20.1)).toBeCloseTo(120.1, 6);
-    expect(scoreAttempt(100, true, 20.125)).toBeCloseTo(120.125, 6);
+  it("awards a fixed 200 points for a clear regardless of qualifying", () => {
+    expect(scoreAttempt(100, true, 60)).toBe(200);
+    expect(scoreAttempt(100, true, 20.1)).toBe(200);
+    expect(scoreAttempt(100, true, 20.125)).toBe(200);
   });
 
   it("does not invent a tiebreaker when scores are equal", () => {
@@ -89,7 +92,7 @@ describe("three minutes plus final attempt start window", () => {
       state = end(current.state, "A", current.attemptId, offset + 1, 70 + index, false, `end-${offset}`);
     }
     expect(state.attempts.A).toHaveLength(3);
-    expect(state.scores.A).toBe(70 + 71 + 72);
+    expect(state.scores.A).toBe(105 + 106.5 + 108);
   });
 
   it("rejects a new attempt at 3:11", () => {
@@ -106,7 +109,7 @@ describe("three minutes plus final attempt start window", () => {
     expect(state.phase).toBe("ROUND_SETTLING");
     state = end(state, "A", current.attemptId, 220, 88, false, "long-end");
     expect(state.phase).toBe("ROUND_RESULT");
-    expect(state.scores.A).toBe(88);
+    expect(state.scores.A).toBe(132);
     expect(state.outcome?.winner).toBe("A");
   });
 
@@ -146,7 +149,7 @@ describe("three minutes plus final attempt start window", () => {
     );
     expect(repeated.accepted).toBe(true);
     expect(repeated.duplicate).toBe(true);
-    expect(repeated.state.scores.A).toBe(80);
+    expect(repeated.state.scores.A).toBe(120);
   });
 });
 

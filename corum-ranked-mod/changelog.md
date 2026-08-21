@@ -1,3 +1,9 @@
+# v0.4.0-alpha.19
+- Fixed Geode v5 build errors in the Ranked song-gate child traversal and restored the vanilla map-download helper.
+- Fixed the authoritative integration-test attempt count (the scenario creates 8 accepted attempts, not 7).
+- Updated Ranked scoring: 70-99% scores integer progress x1.5; 100% Clear scores 200.
+- Mirrored the new scoring formula in live/provisional HUD scoring and server regression tests.
+
 # v0.4.0-alpha.18
 
 - Fixed a client-side attempt event loss path that could leave completed attempts at Score 0 and fail to count Clears.

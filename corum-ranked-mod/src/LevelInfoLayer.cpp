@@ -88,11 +88,7 @@ void disableMenusOutside(CCNode* root, CCNode* allowedRoot) {
     if (auto* menu = typeinfo_cast<CCMenu*>(root)) {
         menu->setTouchEnabled(false);
     }
-    auto* children = root->getChildren();
-    if (!children) return;
-    CCObject* object = nullptr;
-    CCARRAY_FOREACH(children, object) {
-        auto* child = typeinfo_cast<CCNode*>(object);
+    for (CCNode* child : root->getChildrenExt()) {
         if (!child || child == allowedRoot) continue;
         disableMenusOutside(child, allowedRoot);
     }
@@ -145,7 +141,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         int songWidgetOriginalZ = 0;
     };
 
-    void onEnterTransitionDidFinish() {
+    void onEnterTransitionDidFinish() override {
         LevelInfoLayer::onEnterTransitionDidFinish();
         auto& runtime = corum::ranked::RankedRuntime::get();
         if (!isCurrentRankedLevel(m_level)) return;

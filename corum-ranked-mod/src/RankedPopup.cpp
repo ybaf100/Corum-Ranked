@@ -805,6 +805,39 @@ class CorumRankedLayer final : public CCLayerColor, public LevelDownloadDelegate
         }
     }
 
+    void startMapDownload() {
+        auto const levelId = RankedRuntime::get().currentLevelId();
+        if (levelId <= 0 || findPlayableMap()) return;
+
+        // Avoid stacking duplicate vanilla download requests while a request for
+        // this level is already in flight. Failed requests may retry, but not in a
+        // tight 200 ms Ranked UI loop.
+        if (m_downloadingLevelId == levelId) return;
+        auto const now = SteadyClock::now();
+        if (m_lastMapDownloadAttemptAt) {
+            auto const sinceLast = std::chrono::duration<double>(now - *m_lastMapDownloadAttemptAt).count();
+            if (sinceLast < 1.0) return;
+        }
+
+        auto* manager = GameLevelManager::sharedState();
+        if (!manager) {
+            m_localMessage = "Geometry Dash map downloader is unavailable.";
+            return;
+        }
+
+        detachLevelDownloadDelegate();
+        manager->m_levelDownloadDelegate = this;
+        m_downloadingLevelId = levelId;
+        if (!m_mapDownloadStartedAt) m_mapDownloadStartedAt = now;
+        m_lastMapDownloadAttemptAt = now;
+        m_localMessage = "Downloading map...";
+
+        // Use Geometry Dash's normal level downloader. This keeps the resulting
+        // GJGameLevel lifecycle identical to a vanilla level-info download and
+        // feeds levelDownloadFinished/levelDownloadFailed above.
+        manager->downloadLevel(levelId, false, 0);
+    }
+
     GJGameLevel* findLocalMap() const {
         auto const id = RankedRuntime::get().currentLevelId();
         if (id <= 0) return nullptr;

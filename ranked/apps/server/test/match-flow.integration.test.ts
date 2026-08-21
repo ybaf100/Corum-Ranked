@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { SeededRandom, type CsmpTier } from "@corum-ranked/rules";
+import { SeededRandom, scoreAttempt, type CsmpTier } from "@corum-ranked/rules";
 import type { IdGenerator, ServerClock } from "../src/common/runtime.module.js";
 import { TokenService } from "../src/common/token.service.js";
 import type { CsmpTierSource } from "../src/config/csmp-tier.source.js";
@@ -127,7 +127,8 @@ describe("two-client authoritative match flow", () => {
     const document = {
       ...baseDocument,
       // Exercise the real Corum case where Qualifying can be decimal. Clear
-      // awards and JSON snapshots must retain 100 + 20.1 = 120.1 exactly enough
+      // Keep decimal qualifying in the match snapshot even though Clear is now
+      // a fixed 200 points and 70-99% receives the x1.5 multiplier.
       // for the client instead of silently truncating to an integer.
       maps: baseDocument.maps.map((map) => ({ ...map, qualifyingPercent: 20.1 })),
       operational: {
@@ -263,7 +264,7 @@ describe("two-client authoritative match flow", () => {
         throw new Error("Expected round progress acknowledgement during ROUND_PLAYING");
       }
       expect(progressAck.roundSnapshot.displayScores.A).toBe(
-        livePercent >= qualifying ? livePercent : 0,
+        scoreAttempt(livePercent, false, qualifying),
       );
       clock.advanceSeconds(1);
       const firstEnd = await matches.endAttempt(matchId, statusA.matchToken, playerA, {
@@ -278,7 +279,7 @@ describe("two-client authoritative match flow", () => {
       }
       expect(firstEnd.roundSnapshot.clears.A).toBe(0);
       expect(firstEnd.roundSnapshot.scores.A).toBe(
-        livePercent >= qualifying ? livePercent : 0,
+        scoreAttempt(livePercent, false, qualifying),
       );
 
       clock.advanceSeconds(1);
@@ -299,7 +300,7 @@ describe("two-client authoritative match flow", () => {
       }
       expect(secondEnd.roundSnapshot.clears.A).toBe(1);
       expect(secondEnd.roundSnapshot.scores.A).toBeCloseTo(
-        (livePercent >= qualifying ? livePercent : 0) + 100 + qualifying,
+        scoreAttempt(livePercent, false, qualifying) + 200,
         6,
       );
 
@@ -464,7 +465,7 @@ describe("two-client authoritative match flow", () => {
     state = (await matches.state(matchId, statusA.matchToken, playerA)) as Record<string, any>;
     expect(state.spectator.currentProgress).toBe(73);
     expect(state.currentRound.scores).toEqual(scoreBeforeTelemetry);
-    expect(state.currentRound.displayScores.B).toBe(scoreBeforeTelemetry.B + 73);
+    expect(state.currentRound.displayScores.B).toBe(scoreBeforeTelemetry.B + scoreAttempt(73, false, snapshottedQualifying));
 
     clock.advanceSeconds(1);
     await matches.updateAttemptProgress(matchId, statusB.matchToken, playerB, {
@@ -507,7 +508,7 @@ describe("two-client authoritative match flow", () => {
     state = (await matches.state(matchId, statusA.matchToken, playerA)) as Record<string, any>;
     expect(state.state).toBe("ROUND_SETTLING");
     expect(state.spectator).toMatchObject({ active: true, currentProgress: 91 });
-    expect(state.currentRound.displayScores.B).toBe(state.currentRound.scores.B + 91);
+    expect(state.currentRound.displayScores.B).toBe(state.currentRound.scores.B + scoreAttempt(91, false, snapshottedQualifying));
     await matches.endAttempt(matchId, statusB.matchToken, playerB, {
       levelId: roundTwoLevelId,
       attemptId: b3.attemptId!,
@@ -548,7 +549,7 @@ describe("two-client authoritative match flow", () => {
     const attempts = await database.query<{ count: number }>(
       "SELECT COUNT(*)::int AS count FROM ranked_attempts",
     );
-    expect(attempts.rows[0]?.count).toBe(7);
+    expect(attempts.rows[0]?.count).toBe(8);
 
     const relayEvents = await database.query<{ event_type: string; count: number }>(
       `SELECT event_type, COUNT(*)::int AS count

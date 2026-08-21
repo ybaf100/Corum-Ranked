@@ -1,3 +1,4 @@
+#include "../src/domain/AttemptScoring.hpp"
 #include "../src/domain/EnvironmentPolicy.hpp"
 #include "../src/domain/HudPresentation.hpp"
 #include "../src/domain/RenderFpsMeter.hpp"
@@ -117,6 +118,16 @@ void environmentTests() {
     assert(!isAcceptableServerURL("https://ranked.example.com/"));
 }
 
+void scoringTests() {
+    assert(calculateAttemptScore(19.99, false, 20.0) == 0.0);
+    assert(calculateAttemptScore(20.0, false, 20.0) == 20.0);
+    assert(calculateAttemptScore(69.99, false, 20.0) == 69.0);
+    assert(calculateAttemptScore(70.0, false, 20.0) == 105.0);
+    assert(calculateAttemptScore(79.99, false, 20.0) == 118.5);
+    assert(calculateAttemptScore(99.99, false, 20.0) == 148.5);
+    assert(calculateAttemptScore(100.0, true, 20.1) == 200.0);
+}
+
 void clockTests() {
     auto const epoch = parseIso8601Millis("1970-01-01T00:00:00.000Z");
     assert(epoch && *epoch == 0);
@@ -185,13 +196,13 @@ void hudTests() {
     assert(hud.stateText == "MATCH POINT");
     assert(hud.qualifyingText == "Qualifying : 35%");
 
-    // Ranked score transport must preserve decimal clear bonuses. A 20.1%
-    // qualifying map awards 120.1 for a clear, and the HUD must not truncate it.
-    input.scoreA = 120.1;
+    // Ranked score transport must preserve fractional totals produced by the
+    // 70-99% x1.5 multiplier.
+    input.scoreA = 118.5;
     input.scoreB = 73.0;
     input.qualifyingPercent = 20.1;
     hud = presentHud(input);
-    assert(hud.ownScoreText == "Score : 120.1");
+    assert(hud.ownScoreText == "Score : 118.5");
     assert(hud.opponentScoreText == "Score : 73");
     assert(hud.qualifyingText == "Qualifying : 20.1%");
     input.scoreA = 382;
@@ -262,6 +273,7 @@ void hudTests() {
 
 int main() {
     environmentTests();
+    scoringTests();
     clockTests();
     fpsTests();
     hudTests();

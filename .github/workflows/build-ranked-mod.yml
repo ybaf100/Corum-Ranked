@@ -53,6 +53,7 @@ jobs:
         run: |
           g++ -std=c++23 -Wall -Wextra -Wpedantic -Werror \
             corum-ranked-mod/tests/DomainTest.cpp \
+            corum-ranked-mod/src/domain/AttemptScoring.cpp \
             corum-ranked-mod/src/domain/EnvironmentPolicy.cpp \
             corum-ranked-mod/src/domain/HudPresentation.cpp \
             corum-ranked-mod/src/domain/RenderFpsMeter.cpp \
