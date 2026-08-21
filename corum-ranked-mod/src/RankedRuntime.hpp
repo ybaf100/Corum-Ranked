@@ -177,6 +177,8 @@ public:
     [[nodiscard]] bool canTrackLevel(int levelId) const;
     [[nodiscard]] bool isSpectating() const;
     [[nodiscard]] int currentLevelId() const;
+    void setSongBypassAllowed(bool allowed);
+    [[nodiscard]] bool songBypassAllowed() const;
 
     void reportAttemptStart(int levelId);
     void reportAttemptProgress(int levelId, double progressPercent);
@@ -235,6 +237,7 @@ private:
     bool m_pollBusy = false;
     bool m_attemptBusy = false;
     bool m_progressBusy = false;
+    bool m_songBypassAllowed = false;
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_controlRequest;
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_pollRequest;
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_attemptRequest;

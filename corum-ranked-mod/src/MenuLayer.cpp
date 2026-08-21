@@ -76,13 +76,15 @@ class $modify(CorumRankedMenuLayer, MenuLayer) {
 
         auto* menu = CCMenu::create();
         menu->setID("corum-ranked-menu"_spr);
-        menu->setPosition({size.width / 2.0f, 34.0f});
+        // Keep Ranked away from Geometry Dash's crowded bottom action row.
+        // The user-facing entry now lives as a compact upper-right shortcut.
+        menu->setPosition({size.width - 34.0f, size.height - 36.0f});
         menu->addChild(button);
         addChild(menu, 20);
 
         auto* caption = CCLabelBMFont::create("RANKED", "bigFont.fnt");
-        caption->setScale(0.28f);
-        caption->setPosition({size.width / 2.0f, 10.0f});
+        caption->setScale(0.22f);
+        caption->setPosition({size.width - 34.0f, size.height - 62.0f});
         caption->setOpacity(225);
         caption->setID("corum-ranked-caption"_spr);
         addChild(caption, 20);

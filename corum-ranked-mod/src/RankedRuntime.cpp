@@ -238,6 +238,7 @@ void RankedRuntime::begin() {
     m_pendingEnd.reset();
     m_pendingProgress.reset();
     m_lastSubmittedProgress = -1;
+    m_songBypassAllowed = false;
     m_view.match = {};
     fetchConfig();
 }
@@ -873,6 +874,7 @@ void RankedRuntime::dismissMatch() {
     m_pendingEnd.reset();
     m_pendingProgress.reset();
     m_lastSubmittedProgress = -1;
+    m_songBypassAllowed = false;
     m_view.match = {};
     setStage(RuntimeStage::Ready, "Ranked session ready.");
 }
@@ -971,6 +973,14 @@ bool RankedRuntime::canTrackLevel(int levelId) const {
 
 bool RankedRuntime::isSpectating() const {
     return m_view.match.spectatorActive;
+}
+
+void RankedRuntime::setSongBypassAllowed(bool allowed) {
+    m_songBypassAllowed = allowed;
+}
+
+bool RankedRuntime::songBypassAllowed() const {
+    return m_songBypassAllowed;
 }
 
 std::string RankedRuntime::newEventId(std::string_view kind) {

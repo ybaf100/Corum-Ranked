@@ -4,6 +4,7 @@
 #include "DebugBotPopup.hpp"
 
 #include <Geode/Geode.hpp>
+#include <Geode/binding/CustomSongWidget.hpp>
 #include <Geode/binding/GameLevelManager.hpp>
 #include <Geode/binding/GameManager.hpp>
 #include <Geode/binding/GJGameLevel.hpp>
@@ -57,6 +58,27 @@ std::string upper(std::string value) {
         return static_cast<char>(std::toupper(ch));
     });
     return value;
+}
+
+std::string displayBanner(std::string value) {
+    std::replace(value.begin(), value.end(), '_', ' ');
+    return value;
+}
+
+std::string twoLineTitle(std::string value, std::size_t perLine = 11) {
+    if (value.size() <= perLine) return value;
+    auto splitAt = value.rfind(' ', perLine);
+    if (splitAt == std::string::npos || splitAt < perLine / 2) splitAt = perLine;
+    auto first = value.substr(0, splitAt);
+    auto secondStart = splitAt;
+    while (secondStart < value.size() && value[secondStart] == ' ') ++secondStart;
+    auto second = value.substr(secondStart);
+    auto const maxSecond = perLine + 2;
+    if (second.size() > maxSecond) {
+        second.resize(maxSecond > 3 ? maxSecond - 3 : maxSecond);
+        second += "...";
+    }
+    return first + "\n" + second;
 }
 
 ccColor3B tierColor(std::string const& tier) {
@@ -115,6 +137,7 @@ class CorumRankedLayer final : public CCLayerColor, public LevelDownloadDelegate
     CCNode* m_root = nullptr;
     CCMenu* m_menu = nullptr;
     GJGameLevel* m_downloadedLevel = nullptr;
+    LevelInfoLayer* m_songDriver = nullptr;
     Page m_page = Page::Live;
     std::size_t m_historyIndex = 0;
     std::string m_phaseKey;
@@ -135,10 +158,12 @@ class CorumRankedLayer final : public CCLayerColor, public LevelDownloadDelegate
     bool m_matchFoundReadySent = false;
     bool m_mapFailureReported = false;
     bool m_songBypassed = false;
+    bool m_vanillaSongDownloadKicked = false;
     bool m_enteringLevel = false;
 
     ~CorumRankedLayer() override {
         detachLevelDownloadDelegate();
+        CC_SAFE_RELEASE(m_songDriver);
         CC_SAFE_RELEASE(m_downloadedLevel);
     }
 
@@ -216,12 +241,16 @@ class CorumRankedLayer final : public CCLayerColor, public LevelDownloadDelegate
                 m_readySent = false;
                 m_mapFailureReported = false;
                 m_songBypassed = false;
+                m_vanillaSongDownloadKicked = false;
+                RankedRuntime::get().setSongBypassAllowed(false);
                 m_enteringLevel = false;
                 m_songIds.clear();
                 m_songInfoRequested.clear();
                 m_songDownloadRequested.clear();
                 m_songLastRequestAt.clear();
                 m_downloadingLevelId = 0;
+                CC_SAFE_RELEASE(m_songDriver);
+                m_songDriver = nullptr;
                 CC_SAFE_RELEASE(m_downloadedLevel);
                 m_downloadedLevel = nullptr;
             }
@@ -307,7 +336,7 @@ class CorumRankedLayer final : public CCLayerColor, public LevelDownloadDelegate
         int score,
         bool self
     ) {
-        auto* panel = makePanel({145.0f, 155.0f}, center);
+        auto* panel = makePanel({148.0f, 158.0f}, center);
         m_root->addChild(panel, 1);
 
         int frame = 1;
@@ -315,8 +344,8 @@ class CorumRankedLayer final : public CCLayerColor, public LevelDownloadDelegate
             if (auto* game = GameManager::sharedState()) frame = std::max(1, game->getPlayerFrame());
         }
         auto* icon = SimplePlayer::create(frame);
-        icon->setScale(0.82f);
-        icon->setPosition({center.x, center.y + 28.0f});
+        icon->setScale(1.08f);
+        icon->setPosition({center.x, center.y + 31.0f});
         if (self) {
             if (auto* game = GameManager::sharedState()) {
                 icon->setColors(game->colorForIdx(game->getPlayerColor()), game->colorForIdx(game->getPlayerColor2()));
@@ -436,12 +465,12 @@ class CorumRankedLayer final : public CCLayerColor, public LevelDownloadDelegate
     void renderMatchFound(MatchView const& match) {
         auto const size = CCDirector::sharedDirector()->getWinSize();
         auto const ownA = match.side == "A";
-        addPlayerCard({120.0f, size.height / 2.0f}, match.playerAName, match.playerATier, match.playerAScore, ownA);
-        addPlayerCard({size.width - 120.0f, size.height / 2.0f}, match.playerBName, match.playerBTier, match.playerBScore, !ownA);
-        auto* title = makeLabel("MATCH FOUND", 0.60f, {size.width / 2.0f, size.height / 2.0f + 60.0f}, kGold, "goldFont.fnt");
+        addPlayerCard({112.0f, size.height / 2.0f - 7.0f}, match.playerAName, match.playerATier, match.playerAScore, ownA);
+        addPlayerCard({size.width - 112.0f, size.height / 2.0f - 7.0f}, match.playerBName, match.playerBTier, match.playerBScore, !ownA);
+        auto* title = makeLabel("MATCH FOUND", 0.62f, {size.width / 2.0f, size.height - 34.0f}, kGold, "goldFont.fnt");
         m_root->addChild(title, 3);
         auto const left = std::max(0, 5 - static_cast<int>(std::floor(phaseSeconds())));
-        auto* countdown = makeLabel(fmt::format("MAP BAN IN...\n{}", left), 0.40f, {size.width / 2.0f, size.height / 2.0f - 4.0f}, kRed);
+        auto* countdown = makeLabel(fmt::format("MAP BAN IN...\n{}", left), 0.38f, {size.width / 2.0f, size.height / 2.0f - 1.0f}, kRed, "goldFont.fnt");
         m_root->addChild(countdown, 3);
     }
 
@@ -456,21 +485,22 @@ class CorumRankedLayer final : public CCLayerColor, public LevelDownloadDelegate
         m_root->addChild(timer, 3);
 
         auto const count = std::min<std::size_t>(5, match.candidateMaps.size());
-        auto const cardWidth = std::min(96.0f, (size.width - 50.0f) / 5.0f);
-        auto const startX = size.width / 2.0f - cardWidth * 2.0f;
+        auto const cardWidth = (size.width - 44.0f) / 5.0f;
+        auto const startX = 22.0f + cardWidth / 2.0f;
         for (std::size_t i = 0; i < count; ++i) {
             auto const x = startX + cardWidth * static_cast<float>(i);
-            auto* panel = makePanel({cardWidth - 8.0f, 122.0f}, {x, size.height / 2.0f - 5.0f}, kPanelLight);
+            auto* panel = makePanel({cardWidth - 7.0f, 128.0f}, {x, size.height / 2.0f - 7.0f}, kPanelLight);
             m_root->addChild(panel, 1);
-            auto* map = makeLabel(shorten(match.candidateMaps[i].title, 13), 0.24f, {x, size.height / 2.0f + 22.0f});
-            map->limitLabelWidth(cardWidth - 14.0f, 0.24f, 0.17f);
+            auto* map = makeLabel(twoLineTitle(match.candidateMaps[i].title, 10), 0.235f, {x, size.height / 2.0f + 27.0f});
+            map->limitLabelWidth(cardWidth - 12.0f, 0.235f, 0.17f);
             m_root->addChild(map, 3);
-            auto* diff = makeLabel(shorten(match.candidateMaps[i].difficulty, 8), 0.22f, {x, size.height / 2.0f - 2.0f}, kGold);
+            auto* diff = makeLabel(match.candidateMaps[i].difficulty, 0.23f, {x, size.height / 2.0f - 9.0f}, kGold);
+            diff->limitLabelWidth(cardWidth - 14.0f, 0.23f, 0.17f);
             m_root->addChild(diff, 3);
             if (m_selectedBan == match.candidateMaps[i].canonicalLevelId) {
-                addStatusPill("BANNED", {x, size.height / 2.0f - 45.0f}, kGreen);
+                addStatusPill("BANNED", {x, size.height / 2.0f - 50.0f}, kGreen);
             } else if (m_selectedBan.empty()) {
-                auto* button = addButton("BAN", {x, size.height / 2.0f - 45.0f}, menu_selector(CorumRankedLayer::onBan), true, 0.38f);
+                auto* button = addButton("BAN", {x, size.height / 2.0f - 50.0f}, menu_selector(CorumRankedLayer::onBan), true, 0.36f);
                 button->setTag(static_cast<int>(i));
             }
         }
@@ -481,8 +511,8 @@ class CorumRankedLayer final : public CCLayerColor, public LevelDownloadDelegate
     void renderPrepare(MatchView const& match) {
         auto const size = CCDirector::sharedDirector()->getWinSize();
         auto const ownA = match.side == "A";
-        addPlayerCard({105.0f, size.height / 2.0f - 2.0f}, match.playerAName, match.playerATier, match.playerAScore, ownA);
-        addPlayerCard({size.width - 105.0f, size.height / 2.0f - 2.0f}, match.playerBName, match.playerBTier, match.playerBScore, !ownA);
+        addPlayerCard({103.0f, size.height / 2.0f - 3.0f}, match.playerAName, match.playerATier, match.playerAScore, ownA);
+        addPlayerCard({size.width - 103.0f, size.height / 2.0f - 3.0f}, match.playerBName, match.playerBTier, match.playerBScore, !ownA);
 
         auto* title = makeLabel(
             match.deathmatchSequence > 0 ? "DEATH MATCH" : fmt::format("ROUND {}", match.roundNumber),
@@ -496,13 +526,13 @@ class CorumRankedLayer final : public CCLayerColor, public LevelDownloadDelegate
             auto* sub = makeLabel("3 ATTEMPTS", 0.27f, {size.width / 2.0f, size.height - 49.0f}, kGreen);
             m_root->addChild(sub, 4);
         } else if (!match.banner.empty() && match.banner != "NONE") {
-            auto* sub = makeLabel(match.banner, 0.30f, {size.width / 2.0f, size.height - 49.0f}, kRed, "goldFont.fnt");
+            auto* sub = makeLabel(displayBanner(match.banner), 0.30f, {size.width / 2.0f, size.height - 49.0f}, kRed, "goldFont.fnt");
             m_root->addChild(sub, 4);
         }
 
         if (match.currentMap) {
-            auto* mapName = makeLabel(shorten(match.currentMap->title, 22), 0.39f, {size.width / 2.0f, size.height / 2.0f + 51.0f});
-            mapName->limitLabelWidth(205.0f, 0.39f, 0.24f);
+            auto* mapName = makeLabel(twoLineTitle(match.currentMap->title, 18), 0.34f, {size.width / 2.0f, size.height / 2.0f + 53.0f});
+            mapName->limitLabelWidth(210.0f, 0.34f, 0.22f);
             m_root->addChild(mapName, 4);
             auto* difficulty = makeLabel(match.currentMap->difficulty, 0.42f, {size.width / 2.0f, size.height / 2.0f + 20.0f}, kGold);
             m_root->addChild(difficulty, 4);
@@ -821,6 +851,9 @@ class CorumRankedLayer final : public CCLayerColor, public LevelDownloadDelegate
     bool isSongDownloading(GJGameLevel* level) {
         if (!level || !m_songDownloadStartedAt) return false;
         refreshSongIds(level);
+        if (auto* driver = ensureSongDriver(level)) {
+            if (driver->m_songWidget && !driver->m_songWidget->m_isNotDownloading) return true;
+        }
         auto* manager = MusicDownloadManager::sharedState();
         if (!manager) return false;
         for (auto const id : m_songIds) {
@@ -849,6 +882,28 @@ class CorumRankedLayer final : public CCLayerColor, public LevelDownloadDelegate
         manager->downloadLevel(id, false, 0);
     }
 
+    LevelInfoLayer* ensureSongDriver(GJGameLevel* level) {
+        if (!level) return nullptr;
+        auto const id = static_cast<int>(level->m_levelID);
+        if (m_songDriver && m_songDriver->m_level && static_cast<int>(m_songDriver->m_level->m_levelID) == id) {
+            return m_songDriver;
+        }
+        CC_SAFE_RELEASE(m_songDriver);
+        m_songDriver = LevelInfoLayer::create(level, false);
+        CC_SAFE_RETAIN(m_songDriver);
+        return m_songDriver;
+    }
+
+    bool kickVanillaSongDownload(GJGameLevel* level) {
+        auto* driver = ensureSongDriver(level);
+        if (!driver || !driver->m_songWidget) return false;
+        auto* widget = driver->m_songWidget;
+        if (!widget->m_isNotDownloading) return true;
+        widget->onDownload(nullptr);
+        m_vanillaSongDownloadKicked = true;
+        return true;
+    }
+
     void startSongDownload() {
         auto* level = findPlayableMap();
         if (!level) return;
@@ -857,6 +912,10 @@ class CorumRankedLayer final : public CCLayerColor, public LevelDownloadDelegate
         if (!manager || m_songIds.empty() || isSongReady(level)) return;
 
         if (!m_songDownloadStartedAt) m_songDownloadStartedAt = SteadyClock::now();
+        // Primary path: press Geometry Dash's own hidden CustomSongWidget download
+        // handler. Direct MusicDownloadManager calls remain only as a fallback for
+        // additional 2.2 song IDs / stalled metadata.
+        kickVanillaSongDownload(level);
         auto const now = SteadyClock::now();
         for (auto const id : m_songIds) {
             if (songIdReady(manager, id)) {
@@ -921,8 +980,13 @@ class CorumRankedLayer final : public CCLayerColor, public LevelDownloadDelegate
             // MusicDownloadManager request: an in-flight song can still finish in
             // the background and GD will pick it up on a later attempt.
             m_songBypassed = true;
+            runtime.setSongBypassAllowed(true);
         }
 
+        if (level && isSongReady(level)) {
+            m_songBypassed = false;
+            runtime.setSongBypassAllowed(false);
+        }
         auto const ownReady = match.side == "A" ? match.readyA : match.readyB;
         auto const resourcesReady = level && (isSongReady(level) || m_songBypassed);
         if (phaseSeconds() >= 10.0 && resourcesReady && !ownReady && !m_readySent) {

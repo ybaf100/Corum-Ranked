@@ -1,3 +1,12 @@
+# v0.4.0-alpha.14
+- Moved the main-menu Ranked shortcut from the crowded bottom action row to the upper-right corner.
+- Rebuilt Ranked song preparation around Geometry Dash's own `CustomSongWidget` download action, with MusicDownloadManager retained only as a fallback.
+- Added defensive LevelInfoLayer song-download re-kicks and explicit 20-second no-song bypass through the post-warning play step.
+- Locked LevelInfoLayer Back/key-back during an active Ranked match and made Ranked return-to-scene idempotent to prevent scene-stack escape from repeated quit/back input.
+- Enlarged player icons, moved Match Found heading to the top, widened the five-map ban row, and allowed two-line map titles instead of aggressive truncation.
+- Kept LAST ATTEMPT settling, provisional live scoring, Debug Bot nerfs, active-only mod allowlisting, and server rules unchanged.
+- Corum Integration remains unchanged.
+
 # v0.4.0-alpha.13
 - Fixed LAST ATTEMPT so attempts accepted within the 10-second start window continue to completion after the timer expires.
 - Kept spectator mode active through ROUND_SETTLING until the accepted LAST ATTEMPT ends.
