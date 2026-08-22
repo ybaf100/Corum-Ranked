@@ -106,7 +106,13 @@ export class InMemoryMatchRuntimeState implements MatchRuntimeStatePort {
       this.attempts.set(key, { attemptId, progressPercent, updatedAtMs: atMs });
       return true;
     }
-    if (current.progressPercent === progressPercent) return false;
+    if (current.progressPercent === progressPercent) {
+      // A player can legitimately remain at the same percentage for a while.
+      // Treat repeated telemetry as an attempt lease heartbeat even when the
+      // visible progress value did not change.
+      current.updatedAtMs = atMs;
+      return false;
+    }
     if (current.progressPercent !== 0 && atMs - current.updatedAtMs < 100) return false;
     current.progressPercent = progressPercent;
     current.updatedAtMs = atMs;

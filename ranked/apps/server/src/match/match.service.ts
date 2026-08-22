@@ -14,7 +14,6 @@ import {
   displayedTierForProfile,
   evaluateDeathmatch,
   endRoundAttempt,
-  invalidateRoundAttempt,
   resolveBans,
   selectDeathmatchMap,
   scoreAttempt,
@@ -42,6 +41,7 @@ import type { RankedSessionContext } from "../session/session.types.js";
 import { SessionService } from "../session/session.service.js";
 import { MatchAccessService } from "./match-access.service.js";
 import {
+  ATTEMPT_TRANSPORT_GRACE_MS,
   resolveAttemptStartTime,
   shouldHoldRoundForAttemptTransport,
 } from "./attempt-timing.js";
@@ -59,8 +59,11 @@ import {
   type MatchRuntimeStatePort,
 } from "./match-runtime-state.js";
 
-const ATTEMPT_START_INTENT_RECEIPT_GRACE_MS = 5_000;
-const ATTEMPT_START_INTENT_HOLD_MS = 30_000;
+const ATTEMPT_START_INTENT_FUTURE_SKEW_MS = 2_000;
+// A valid start-intent must never expire while the player is still connected and
+// the authoritative Start packet is catching up. This hard TTL is only a final
+// deadlock guard; reconnect timeout resolves genuinely abandoned clients first.
+const ATTEMPT_START_INTENT_HARD_TTL_MS = 15 * 60_000;
 
 type MatchState =
   | "MATCHED"
@@ -521,17 +524,43 @@ export class MatchService {
       const round = await this.lockCurrentRound(transaction, match);
       this.assertPlayableLevelId(body.levelId, round.playable_level_id);
       const state = this.roundState(round);
+      const existingAttempt = state.attempts[authorization.side].find(
+        (attempt) => attempt.startEventId === body.clientEventId,
+      );
+      if (existingAttempt) {
+        // The ordinary Start request can beat the out-of-band intent. Never
+        // recreate a stale lease after the attempt is already authoritative.
+        this.runtimeState.clearStartIntent(
+          match.id,
+          round.round_number,
+          authorization.side,
+          body.clientEventId,
+        );
+        return {
+          accepted: true,
+          duplicate: true,
+          reason: null,
+          serverNow: now.toISOString(),
+        };
+      }
       const parsed = new Date(body.clientStartedAt);
       if (Number.isNaN(parsed.getTime())) {
         return { accepted: false, reason: "INVALID_CLIENT_STARTED_AT", serverNow: now.toISOString() };
       }
-      const transportDelta = now.getTime() - parsed.getTime();
-      if (transportDelta < 0 || transportDelta > ATTEMPT_START_INTENT_RECEIPT_GRACE_MS) {
-        return { accepted: false, reason: "ATTEMPT_INTENT_TIMESTAMP_OUT_OF_RANGE", serverNow: now.toISOString() };
-      }
+      const startedAtMs = parsed.getTime();
       const deadline = state.lastAttemptWindow?.endsAtMs ?? state.finalWindowEndAtMs;
-      if (parsed.getTime() >= deadline) {
+      const windowStart = state.lastAttemptWindow?.startedAtMs ?? state.normalEndAtMs;
+      if (startedAtMs > now.getTime() + ATTEMPT_START_INTENT_FUTURE_SKEW_MS) {
+        return { accepted: false, reason: "ATTEMPT_INTENT_TIMESTAMP_IN_FUTURE", serverNow: now.toISOString() };
+      }
+      if (startedAtMs < windowStart - ATTEMPT_START_INTENT_FUTURE_SKEW_MS) {
+        return { accepted: false, reason: "ATTEMPT_INTENT_TIMESTAMP_BEFORE_WINDOW", serverNow: now.toISOString() };
+      }
+      if (startedAtMs >= deadline) {
         return { accepted: false, reason: "ATTEMPT_START_WINDOW_CLOSED", serverNow: now.toISOString() };
+      }
+      if (now.getTime() > deadline + ATTEMPT_TRANSPORT_GRACE_MS) {
+        return { accepted: false, reason: "ATTEMPT_INTENT_ARRIVED_TOO_LATE", serverNow: now.toISOString() };
       }
       if (state.lastAttemptWindow && state.lastAttemptWindow.targetSide !== authorization.side) {
         return { accepted: false, reason: "LAST_ATTEMPT_TARGET_ONLY", serverNow: now.toISOString() };
@@ -541,10 +570,10 @@ export class MatchService {
         round.round_number,
         authorization.side,
         body.clientEventId,
-        parsed.getTime(),
+        startedAtMs,
         now.getTime(),
       );
-      return { accepted: true, reason: null, serverNow: now.toISOString() };
+      return { accepted: true, duplicate: false, reason: null, serverNow: now.toISOString() };
     });
   }
 
@@ -1012,9 +1041,13 @@ export class MatchService {
       const pendingStartIntent = (["A", "B"] as const).some((side) => {
         const intent = this.runtimeState.startIntent(match.id, round.round_number, side);
         if (!intent) return false;
-        const fresh = now.getTime() - intent.observedAtMs < ATTEMPT_START_INTENT_HOLD_MS;
+        const alreadyAuthoritative = withoutOrphans.attempts[side].some(
+          (attempt) => attempt.startEventId === intent.eventId,
+        );
+        const hardExpired =
+          now.getTime() - intent.observedAtMs >= ATTEMPT_START_INTENT_HARD_TTL_MS;
         const validStart = intent.startedAtMs < startDeadlineMs;
-        if (!fresh || !validStart) {
+        if (alreadyAuthoritative || hardExpired || !validStart) {
           this.runtimeState.clearStartIntent(match.id, round.round_number, side, intent.eventId);
           return false;
         }
@@ -1064,62 +1097,26 @@ export class MatchService {
   }
 
   private async expireOrphanRoundAttempts(
-    transaction: SqlExecutor,
-    match: LockedMatchRow,
-    round: RoundRow,
+    _transaction: SqlExecutor,
+    _match: LockedMatchRow,
+    _round: RoundRow,
     initial: RoundState,
-    now: Date,
+    _now: Date,
   ): Promise<RoundState> {
-    const timeoutSeconds = this.matchConfig(match).operational.timeouts?.orphanAttemptSeconds;
-    if (!timeoutSeconds) return initial;
-    let state = initial;
-    for (const side of ["A", "B"] as const) {
-      const active = state.attempts[side].filter(
-        (attempt) =>
-          attempt.valid &&
-          attempt.endedAtMs === null &&
-          now.getTime() - attempt.serverAcceptedStartAtMs >= timeoutSeconds * 1_000,
-      );
-      for (const attempt of active) {
-        state = invalidateRoundAttempt(
-          state,
-          side,
-          attempt.id,
-          now.getTime(),
-          "ORPHAN_ATTEMPT_TIMEOUT",
-        );
-        await transaction.query(
-          `UPDATE ranked_attempts
-           SET ended_at = $4, valid = FALSE, invalid_reason = 'ORPHAN_ATTEMPT_TIMEOUT'
-           WHERE round_id = $1 AND player_id = $2 AND domain_attempt_id = $3
-             AND ended_at IS NULL`,
-          [
-            round.id,
-            side === "A" ? match.player_a_id : match.player_b_id,
-            attempt.id,
-            now.toISOString(),
-          ],
-        );
-      }
-    }
-    return state;
+    // A Ranked attempt has no maximum gameplay duration. In particular, an
+    // attempt that started inside FINAL/LAST ATTEMPT must be allowed to finish
+    // naturally no matter how long the level takes. Abandoned clients are
+    // handled by the match reconnect timeout instead of an absolute attempt age.
+    return initial;
   }
 
   private async expireOrphanDeathmatchAttempts(
-    transaction: SqlExecutor,
-    match: LockedMatchRow,
-    now: Date,
+    _transaction: SqlExecutor,
+    _match: LockedMatchRow,
+    _now: Date,
   ): Promise<void> {
-    if (!match.current_deathmatch_id) return;
-    const timeoutSeconds = this.matchConfig(match).operational.timeouts?.orphanAttemptSeconds;
-    if (!timeoutSeconds) return;
-    const cutoff = new Date(now.getTime() - timeoutSeconds * 1_000);
-    await transaction.query(
-      `UPDATE ranked_deathmatch_attempts
-       SET ended_at = $2, valid = FALSE, invalid_reason = 'ORPHAN_ATTEMPT_TIMEOUT'
-       WHERE deathmatch_id = $1 AND ended_at IS NULL AND server_accepted_start_at <= $3`,
-      [match.current_deathmatch_id, now.toISOString(), cutoff.toISOString()],
-    );
+    // Death Match attempts follow the same natural-end rule. The three-attempt
+    // budget remains authoritative; disconnect/recovery policy handles orphans.
   }
 
   private async resolveReadyTimeout(

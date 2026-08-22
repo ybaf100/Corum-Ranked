@@ -21,7 +21,7 @@ const map: RankedMapSnapshot = {
 const rules = DOCUMENT_RULES_V0_3;
 
 describe("attempt transport timing", () => {
-  it("accepts only a tightly bounded client start timestamp", () => {
+  it("accepts only a bounded client start timestamp", () => {
     const now = new Date("2026-08-22T04:00:10.000Z");
     expect(resolveAttemptStartTime("2026-08-22T04:00:08.500Z", now).toISOString())
       .toBe("2026-08-22T04:00:08.500Z");

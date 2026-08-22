@@ -1,6 +1,7 @@
 import {
   Inject,
   Injectable,
+  Logger,
   type OnApplicationShutdown,
 } from "@nestjs/common";
 import { Pool, type PoolClient, type QueryResultRow } from "pg";
@@ -12,12 +13,25 @@ import type { DatabasePort, SqlExecutor, SqlResult } from "./database.port.js";
 
 @Injectable()
 export class DatabaseService implements DatabasePort, OnApplicationShutdown {
+  private readonly logger = new Logger(DatabaseService.name);
   private readonly pool: Pool;
 
   public constructor(
     @Inject(SERVER_ENVIRONMENT) environment: ServerEnvironment,
   ) {
-    this.pool = new Pool({ connectionString: environment.databaseUrl });
+    this.pool = new Pool({
+      connectionString: environment.databaseUrl,
+      max: 5,
+      idleTimeoutMillis: 30_000,
+      connectionTimeoutMillis: 10_000,
+      keepAlive: true,
+    });
+    // pg-pool emits idle-client failures on the Pool itself. Without an error
+    // listener Node treats that event as uncaught and kills the entire Render
+    // process when Neon rotates or drops a pooled TLS connection.
+    this.pool.on("error", (error) => {
+      this.logger.error(`Unexpected idle PostgreSQL connection error: ${error.message}`);
+    });
   }
 
   public query<Row>(
@@ -38,7 +52,12 @@ export class DatabaseService implements DatabasePort, OnApplicationShutdown {
       await client.query("COMMIT");
       return result;
     } catch (error) {
-      await client.query("ROLLBACK");
+      try {
+        await client.query("ROLLBACK");
+      } catch (rollbackError) {
+        const message = rollbackError instanceof Error ? rollbackError.message : String(rollbackError);
+        this.logger.warn(`PostgreSQL rollback failed after connection error: ${message}`);
+      }
       throw error;
     } finally {
       client.release();

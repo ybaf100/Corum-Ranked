@@ -1,3 +1,15 @@
+# v0.4.0-alpha.28
+
+- Removed the 30-second FINAL/LAST ATTEMPT start-intent expiry. A valid pre-deadline intent now holds the round while the player remains connected; a 15-minute hard TTL exists only as a deadlock guard.
+- Preserved the bounded 5-second late packet reconciliation window; the actual 10-second gameplay start deadline is unchanged.
+- Removed absolute `orphanAttemptSeconds` force-ending for active Round/Death Match attempts. Connected attempts now end only by natural death/Clear; disconnect policy handles abandoned clients.
+- Repeated same-percent progress telemetry now refreshes the active-attempt lease heartbeat.
+- Added a client safeguard that refuses to `onQuit()` a still-alive visual attempt merely because polling published an early result state.
+- Prevented vanilla reset from creating a new visual attempt whenever the authoritative state no longer permits a new start.
+- Replaced the full-screen `SYNCING RESULT` dead-end with immediate authoritative result rendering and terminal transport cleanup for already-finalized events.
+- Serialized FINAL/LAST start-intent delivery with retry so multiple quick final-window starts cannot silently overwrite an in-flight intent request.
+- Hardened the PostgreSQL pool against Neon idle connection drops so an emitted pool error no longer terminates the Render process; rollback failure can no longer mask the original DB error.
+
 # v0.4.0-alpha.27
 
 - Fixed FINAL/LAST ATTEMPT semantics so an attempt that visually starts before the 10-second start deadline is never force-ended when the window expires.

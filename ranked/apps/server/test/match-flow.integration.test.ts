@@ -499,10 +499,33 @@ describe("two-client authoritative match flow", () => {
     ).rejects.toThrow("Attempt progress requires the active server attempt");
 
     clock.advanceSeconds(1);
+    const b3StartedAt = clock.now().toISOString();
+    const b3Intent = await matches.startAttemptIntent(
+      matchId,
+      statusB.matchToken,
+      playerB,
+      {
+        levelId: roundTwoLevelId,
+        clientEventId: "r2-b3-start",
+        clientStartedAt: b3StartedAt,
+      },
+    );
+    expect(b3Intent).toMatchObject({ accepted: true, duplicate: false });
+
+    // The intent is only a lease for a visual attempt that already started
+    // inside the 10-second window. Even if the serialized authoritative Start
+    // is delayed for longer than alpha.27's old 30-second hold, the round must
+    // remain open while the connected player is still reconciling it.
+    clock.advanceSeconds(35);
+    state = (await matches.state(matchId, statusA.matchToken, playerA)) as Record<string, any>;
+    expect(state.state).not.toBe("ROUND_RESULT");
+
     const b3 = await matches.startAttempt(matchId, statusB.matchToken, playerB, {
       levelId: roundTwoLevelId,
       clientEventId: "r2-b3-start",
+      clientStartedAt: b3StartedAt,
     });
+    expect(b3).toMatchObject({ accepted: true });
     state = (await matches.state(matchId, statusA.matchToken, playerA)) as Record<string, any>;
     expect(state.spectator.currentProgress).toBe(0);
     clock.advanceSeconds(1);
@@ -511,7 +534,10 @@ describe("two-client authoritative match flow", () => {
       attemptId: b3.attemptId!,
       progressPercent: 91,
     });
-    clock.advanceSeconds(10);
+
+    // Active attempts do not have an absolute lifetime. This deliberately
+    // exceeds orphanAttemptSeconds (120s in the fixture); it must still be live.
+    clock.advanceSeconds(130);
     state = (await matches.state(matchId, statusA.matchToken, playerA)) as Record<string, any>;
     expect(state.state).toBe("ROUND_SETTLING");
     expect(state.spectator).toMatchObject({ active: true, currentProgress: 91 });

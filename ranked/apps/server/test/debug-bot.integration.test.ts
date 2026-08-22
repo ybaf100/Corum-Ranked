@@ -284,6 +284,11 @@ describe("development-only Bot Match using the production Ranked engine", () => 
           1,
       );
       await matches.state(creation.matchId, creation.playerMatchToken, creation.playerContext);
+      // The fake clock jumps across the LAST ATTEMPT transport grace in one step.
+      // In production the DebugBotService polls as the bot every tick, which refreshes
+      // its heartbeat. Mirror that here so this rating-flow test does not accidentally
+      // turn into a reconnect-timeout/forfeit test when transport grace grows.
+      await matches.state(creation.matchId, creation.botMatchToken, creation.botContext);
 
       if (round === 1) {
         clock.advance((document.operational.timeouts?.roundResultSeconds ?? 5) * 1_000 + 1_000);

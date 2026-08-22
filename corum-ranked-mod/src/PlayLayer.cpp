@@ -124,6 +124,7 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         bool attemptStartReported = false;
         bool attemptEndReported = false;
         bool deniedDeathmatchVisualAttempt = false;
+        bool prematureResultLogged = false;
     };
 
     bool init(GJGameLevel* level, bool useReplay, bool dontCreateObjects) {
@@ -194,22 +195,36 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
             matchState == "ROUND_SETTLING" ||
             matchState == "DEATHMATCH_PLAYING";
         if ((!stillPlaying || runtime.currentLevelId() != m_fields->levelId) && !m_fields->autoExitRequested) {
-            // Polling can reach ROUND_RESULT a frame before the final HTTP End ACK.
-            // Journal the visual attempt before leaving PlayLayer; calling the
-            // vanilla onQuit path directly without this step was another route to
-            // a local Clear/progress disappearing from the authoritative result.
-            if (!m_fields->attemptEndReported && runtime.hasLocalAttemptInFlight()) {
-                auto const progress = rankedProgressPercent(this);
-                m_fields->attemptEndReported = runtime.reportAttemptEnd(
-                    m_fields->levelId,
-                    progress,
-                    false,
-                    m_fields->qualifyingPercent
-                );
+            auto const localAttemptStillAlive =
+                m_fields->attemptStartReported && !m_fields->attemptEndReported;
+            if (localAttemptStillAlive && matchState != "CANCELLED") {
+                // FINAL/LAST ATTEMPT is a start deadline, never an end deadline.
+                // Even if a stale/early server result leaks through, do not call
+                // onQuit() on a visual attempt that has not naturally died or
+                // cleared yet. Server reconciliation should normally keep the
+                // state in ROUND_SETTLING until this attempt ends.
+                if (!m_fields->prematureResultLogged) {
+                    log::error(
+                        "Ignoring premature Ranked state transition while visual attempt is alive: state={} level={}",
+                        matchState,
+                        m_fields->levelId
+                    );
+                    m_fields->prematureResultLogged = true;
+                }
+            } else {
+                if (!m_fields->attemptEndReported && runtime.hasLocalAttemptInFlight()) {
+                    auto const progress = rankedProgressPercent(this);
+                    m_fields->attemptEndReported = runtime.reportAttemptEnd(
+                        m_fields->levelId,
+                        progress,
+                        false,
+                        m_fields->qualifyingPercent
+                    );
+                }
+                m_fields->autoExitRequested = true;
+                PlayLayer::onQuit();
+                return;
             }
-            m_fields->autoExitRequested = true;
-            PlayLayer::onQuit();
-            return;
         }
 
         m_fields->fpsMeter.observeFrame(steadyNowMicros());
@@ -256,11 +271,12 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
                 ((match.state == "FINAL_ATTEMPT_WINDOW" || match.state == "LAST_ATTEMPT_WINDOW") &&
                  runtime.deadlineMillis().value_or(1) <= 0) ||
                 match.state == "ROUND_SETTLING";
-            if (startWindowExpired) {
+            auto const newAttemptForbidden = startWindowExpired || !runtime.canEnterCurrentLevel();
+            if (newAttemptForbidden) {
                 // The current attempt may finish after the start deadline, but
-                // once the start window is closed (or the server has entered
-                // ROUND_SETTLING) a vanilla reset must never create a fake next
-                // visual attempt. Exit immediately so Ranked can show the result
+                // once a new start is forbidden (closed window, settling, result,
+                // spectator, or exhausted Death Match budget), vanilla reset must
+                // never create a fake visual attempt. Exit immediately so Ranked can show the result
                 // or the opponent spectator state instead.
                 if (!m_fields->autoExitRequested) {
                     m_fields->autoExitRequested = true;

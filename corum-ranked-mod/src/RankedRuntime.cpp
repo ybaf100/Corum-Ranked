@@ -265,6 +265,7 @@ void RankedRuntime::begin() {
     m_pendingStart.reset();
     m_pendingEnd.reset();
     m_attemptBacklog.clear();
+    if (!m_attemptIntentBusy) m_attemptIntentBacklog.clear();
     m_pendingProgress.reset();
     m_lastSubmittedProgress = -1;
     m_localDeathmatchSequence = 0;
@@ -815,22 +816,23 @@ void RankedRuntime::parseMatchState(matjson::Value const& root) {
     }
 
     if (!stateAllowsActiveAttempt(m_view.match.state)) {
-        // Never erase an observed visual attempt merely because polling advanced
-        // the public match state first. On a slow/free-host connection the final
-        // Start/End ACK can arrive after ROUND_RESULT/MATCH_RESULT. alpha.24
-        // discarded that FIFO here, which is exactly how a locally scored Clear
-        // could end up as 0 score / 0 clears in the authoritative result.
         m_pendingProgress.reset();
         if (hasLocalAttemptInFlight()) {
-            log::warn(
-                "Ranked result reconciliation pending: state={} pendingStart={} pendingEnd={} backlog={} optimisticScore={} optimisticClears={}",
-                m_view.match.state,
-                m_pendingStart.has_value(),
-                m_pendingEnd.has_value(),
-                m_attemptBacklog.size(),
-                optimisticScoreForContext(currentAttemptContextKey()),
-                optimisticClearsForContext(currentAttemptContextKey())
-            );
+            if (hasLocalOpenAttempt()) {
+                // Defensive client rule: if the server ever publishes a result
+                // while the visual attempt is still alive, do not destroy the
+                // local attempt. The server-side lease fix should make this path
+                // exceptional, but natural completion is still preferred.
+                log::error(
+                    "Authoritative result arrived while a local visual attempt is still open: state={}",
+                    m_view.match.state
+                );
+            } else {
+                // ROUND/MATCH_RESULT is immutable. Completed packets left only
+                // because an ACK was lost cannot change that result, so keeping
+                // them forever only traps the client on SYNCING RESULT.
+                abandonFinalizedAttemptTransport();
+            }
         } else {
             cleanupAttemptTransportIfIdle();
         }
@@ -1027,9 +1029,11 @@ void RankedRuntime::dismissMatch() {
     if (m_view.stage != RuntimeStage::Matched) return;
     if (m_view.match.state != "MATCH_RESULT" && m_view.match.state != "CANCELLED") return;
     if (hasLocalAttemptInFlight()) {
-        setTransientError("Synchronizing final attempt result with the server...");
-        flushAttemptEvents();
-        return;
+        if (hasLocalOpenAttempt()) {
+            setTransientError("A final attempt is still active; finish it before leaving the result.");
+            return;
+        }
+        abandonFinalizedAttemptTransport();
     }
     if (m_view.match.state == "MATCH_RESULT") {
         auto const ownSide = m_view.match.side;
@@ -1051,6 +1055,8 @@ void RankedRuntime::dismissMatch() {
     m_pendingStart.reset();
     m_pendingEnd.reset();
     m_attemptBacklog.clear();
+    m_attemptIntentBacklog.clear();
+    m_nextIntentRetryAt = {};
     m_pendingProgress.reset();
     m_lastSubmittedProgress = -1;
     m_localDeathmatchSequence = 0;
@@ -1064,9 +1070,11 @@ void RankedRuntime::queueAgain() {
     if (m_view.stage != RuntimeStage::Matched) return;
     if (m_view.match.state != "MATCH_RESULT" && m_view.match.state != "CANCELLED") return;
     if (hasLocalAttemptInFlight()) {
-        setTransientError("Synchronizing final attempt result with the server...");
-        flushAttemptEvents();
-        return;
+        if (hasLocalOpenAttempt()) {
+            setTransientError("A final attempt is still active; finish it before queueing again.");
+            return;
+        }
+        abandonFinalizedAttemptTransport();
     }
     dismissMatch();
     joinQueue();
@@ -1201,6 +1209,41 @@ bool RankedRuntime::hasLocalAttemptInFlight() const {
         m_pendingEnd.has_value() ||
         !m_attemptBacklog.empty() ||
         m_attemptBusy;
+}
+
+bool RankedRuntime::hasLocalOpenAttempt() const {
+    if (!m_attemptBacklog.empty() && !m_attemptBacklog.back().end.has_value()) return true;
+    if (m_pendingEnd.has_value()) return false;
+    return !m_attemptId.empty() || m_pendingStart.has_value();
+}
+
+void RankedRuntime::abandonFinalizedAttemptTransport() {
+    if (m_attemptBusy) {
+        m_abandonAttemptTransportWhenIdle = true;
+        return;
+    }
+    if (hasLocalAttemptInFlight()) {
+        log::error(
+            "Dropping late Ranked attempt transport after authoritative result: state={} pendingStart={} pendingEnd={} backlog={}",
+            m_view.match.state,
+            m_pendingStart.has_value(),
+            m_pendingEnd.has_value(),
+            m_attemptBacklog.size()
+        );
+    }
+    m_attemptId.clear();
+    m_attemptLevelId = 0;
+    m_attemptContextKey.clear();
+    m_pendingStart.reset();
+    m_pendingEnd.reset();
+    m_attemptBacklog.clear();
+    m_attemptIntentBacklog.clear();
+    m_pendingProgress.reset();
+    m_lastSubmittedProgress = -1;
+    m_nextAttemptRetryAt = {};
+    m_nextIntentRetryAt = {};
+    m_abandonAttemptTransportWhenIdle = false;
+    ++m_view.revision;
 }
 
 std::string RankedRuntime::currentAttemptContextKey() const {
@@ -1375,6 +1418,7 @@ void RankedRuntime::cleanupAttemptTransportIfIdle() {
     m_pendingStart.reset();
     m_pendingEnd.reset();
     m_attemptBacklog.clear();
+    if (!m_attemptIntentBusy) m_attemptIntentBacklog.clear();
     m_pendingProgress.reset();
     m_lastSubmittedProgress = -1;
     if (
@@ -1610,23 +1654,53 @@ void RankedRuntime::flushAttemptEvents() {
 
 void RankedRuntime::sendAttemptStartIntent(PendingStart const& start) {
     if (m_view.match.matchId.empty() || start.clientStartedAt.empty()) return;
+    auto const exists = std::any_of(
+        m_attemptIntentBacklog.begin(),
+        m_attemptIntentBacklog.end(),
+        [&start](PendingStart const& queued) { return queued.eventId == start.eventId; }
+    );
+    if (!exists) m_attemptIntentBacklog.push_back(start);
+    flushAttemptStartIntents();
+}
+
+void RankedRuntime::flushAttemptStartIntents() {
+    if (
+        m_attemptIntentBusy || m_attemptIntentBacklog.empty() ||
+        std::chrono::steady_clock::now() < m_nextIntentRetryAt
+    ) return;
+    auto const start = m_attemptIntentBacklog.front();
     matjson::Value body;
     body["levelId"] = fmt::format("{}", start.levelId);
     body["clientEventId"] = start.eventId;
     body["clientStartedAt"] = start.clientStartedAt;
     auto request = baseRequest(m_sessionToken, m_matchToken);
     request.bodyJSON(body);
+    m_attemptIntentBusy = true;
     m_attemptIntentRequest.spawn(
         request.post(endpoint("/api/ranked/matches/" + m_view.match.matchId + "/attempt/intent")),
         [this, start](web::WebResponse response) {
+            m_attemptIntentBusy = false;
+            auto const sameFront =
+                !m_attemptIntentBacklog.empty() &&
+                m_attemptIntentBacklog.front().eventId == start.eventId;
             if (!successful(response)) {
-                log::warn(
-                    "Ranked attempt start intent failed: level={} event={} status={} reason={}",
-                    start.levelId,
-                    start.eventId,
-                    response.code(),
-                    responseError(response)
-                );
+                auto const code = response.code();
+                auto const permanent = code >= 400 && code < 500 && code != 429;
+                if (permanent) {
+                    log::error(
+                        "Ranked attempt intent permanently rejected: level={} event={} status={} reason={}",
+                        start.levelId, start.eventId, code, responseError(response)
+                    );
+                    if (sameFront) m_attemptIntentBacklog.pop_front();
+                    m_nextIntentRetryAt = {};
+                } else {
+                    log::warn(
+                        "Ranked attempt intent retrying: level={} event={} status={} reason={}",
+                        start.levelId, start.eventId, code, responseError(response)
+                    );
+                    m_nextIntentRetryAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
+                }
+                flushAttemptStartIntents();
                 return;
             }
             auto const root = response.json().unwrapOr(matjson::Value());
@@ -1639,6 +1713,9 @@ void RankedRuntime::sendAttemptStartIntent(PendingStart const& start) {
                     root["reason"].asString().unwrapOr("unknown")
                 );
             }
+            if (sameFront) m_attemptIntentBacklog.pop_front();
+            m_nextIntentRetryAt = {};
+            flushAttemptStartIntents();
         }
     );
 }
@@ -1657,6 +1734,10 @@ void RankedRuntime::sendAttemptStart() {
         request.post(endpoint("/api/ranked/matches/" + m_view.match.matchId + "/attempt/start")),
         [this, starting](web::WebResponse response) {
             m_attemptBusy = false;
+            if (m_abandonAttemptTransportWhenIdle) {
+                abandonFinalizedAttemptTransport();
+                return;
+            }
             if (!successful(response)) {
                 auto const reason = responseError(response);
                 if (response.code() == 409) {
@@ -1749,6 +1830,10 @@ void RankedRuntime::sendAttemptEnd() {
         request.post(endpoint("/api/ranked/matches/" + m_view.match.matchId + "/attempt/end")),
         [this, ending](web::WebResponse response) {
             m_attemptBusy = false;
+            if (m_abandonAttemptTransportWhenIdle) {
+                abandonFinalizedAttemptTransport();
+                return;
+            }
             if (!successful(response)) {
                 auto const reason = responseError(response);
                 if (response.code() == 409) {
@@ -1871,6 +1956,7 @@ void RankedRuntime::tick() {
         if (m_view.stage == RuntimeStage::Matched) pollMatch();
     }
     flushAttemptEvents();
+    flushAttemptStartIntents();
     flushProgressTelemetry();
 }
 

@@ -248,11 +248,14 @@ private:
     void promoteQueuedAttempt();
     void flushAttemptEvents();
     void sendAttemptStartIntent(PendingStart const& start);
+    void flushAttemptStartIntents();
     void sendAttemptStart();
     void sendAttemptEnd();
     void flushProgressTelemetry();
     void sendAttemptProgress();
     void cleanupAttemptTransportIfIdle();
+    void abandonFinalizedAttemptTransport();
+    [[nodiscard]] bool hasLocalOpenAttempt() const;
     [[nodiscard]] bool canFinishTrackedLevel(int levelId) const;
     [[nodiscard]] std::string currentAttemptContextKey() const;
     [[nodiscard]] double optimisticScoreForContext(std::string const& contextKey) const;
@@ -284,9 +287,11 @@ private:
     std::optional<PendingStart> m_pendingStart;
     std::optional<PendingEnd> m_pendingEnd;
     std::deque<QueuedAttempt> m_attemptBacklog;
+    std::deque<PendingStart> m_attemptIntentBacklog;
     std::optional<int> m_pendingProgress;
     std::chrono::steady_clock::time_point m_nextPollAt {};
     std::chrono::steady_clock::time_point m_nextAttemptRetryAt {};
+    std::chrono::steady_clock::time_point m_nextIntentRetryAt {};
     std::chrono::steady_clock::time_point m_nextProgressAt {};
     int m_lastSubmittedProgress = -1;
     int m_localDeathmatchSequence = 0;
@@ -295,7 +300,9 @@ private:
     bool m_controlBusy = false;
     bool m_pollBusy = false;
     bool m_attemptBusy = false;
+    bool m_attemptIntentBusy = false;
     bool m_progressBusy = false;
+    bool m_abandonAttemptTransportWhenIdle = false;
     bool m_songBypassAllowed = false;
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_controlRequest;
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_pollRequest;

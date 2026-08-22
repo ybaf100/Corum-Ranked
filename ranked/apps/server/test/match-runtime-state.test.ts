@@ -59,4 +59,13 @@ describe("ephemeral spectator progress state", () => {
     expect(state.startIntent("match-1", 1, "A")).toBeNull();
   });
 
+
+  it("refreshes the lease timestamp even when progress percent is unchanged", () => {
+    const runtime = new InMemoryMatchRuntimeState();
+    runtime.beginAttempt("match", 1, "A", "attempt", 1_000);
+    expect(runtime.updateProgress("match", 1, "A", "attempt", 42, 1_100)).toBe(true);
+    expect(runtime.progress("match", 1, "A")?.updatedAtMs).toBe(1_100);
+    expect(runtime.updateProgress("match", 1, "A", "attempt", 42, 5_000)).toBe(false);
+    expect(runtime.progress("match", 1, "A")?.updatedAtMs).toBe(5_000);
+  });
 });

@@ -561,18 +561,10 @@ class CorumRankedLayer final : public CCLayerColor {
     void renderMatch(RuntimeView const& view) {
         auto const& match = view.match;
         if (match.state == "MATCH_RESULT" || match.state == "CANCELLED") {
-            if (RankedRuntime::get().hasLocalAttemptInFlight()) {
-                auto const size = CCDirector::sharedDirector()->getWinSize();
-                auto* title = makeLabel("SYNCING RESULT", 0.58f, {size.width / 2.0f, size.height / 2.0f + 48.0f}, kGold, "goldFont.fnt");
-                m_root->addChild(title, 5);
-                auto* spinner = LoadingSpinner::create(58.0f);
-                spinner->setPosition({size.width / 2.0f, size.height / 2.0f});
-                m_root->addChild(spinner, 5);
-                auto* status = makeLabel("CONFIRMING FINAL ATTEMPT EVENTS...", 0.20f, {size.width / 2.0f, size.height / 2.0f - 50.0f}, ccc3(220, 230, 245));
-                status->limitLabelWidth(size.width - 90.0f, 0.20f, 0.14f);
-                m_root->addChild(status, 5);
-                return;
-            }
+            // MATCH_RESULT is immutable server authority. alpha.27 could trap the
+            // UI forever on SYNCING RESULT when an ACK was lost even though the
+            // server had already finalized. Transport cleanup now happens in the
+            // runtime; always render the authoritative result here.
             renderResult(view);
             return;
         }
