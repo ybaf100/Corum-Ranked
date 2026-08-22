@@ -112,8 +112,10 @@ interface LockedMatchRow {
   result_applied_at: Date | string | null;
   current_deathmatch_id: string | null;
   source_payload: unknown;
-  match_type: "PVP" | "DEBUG_BOT";
-  debug_bot_config: unknown | null;
+  match_type: "RANKED_PVP" | "DEBUG_BOT";
+  debug_config: unknown | null;
+  debug_discord_events: boolean;
+  // Retained compatibility column used by the existing OutboxService.
   discord_events_enabled: boolean;
   cancellation_reason: string | null;
   finished_at: Date | string | null;
@@ -790,8 +792,9 @@ export class MatchService {
         await transaction.query(
           `INSERT INTO ranked_attempts (
              id, round_id, player_id, attempt_sequence, domain_attempt_id,
-             server_accepted_start_at, client_started_at, level_id, client_start_event_id
-           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+             server_accepted_start_at, client_started_at,
+             level_id, played_level_id, client_start_event_id
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8, $9)
            ON CONFLICT (round_id, player_id, client_start_event_id) DO NOTHING`,
           [
             this.ids.next(),
@@ -2070,8 +2073,8 @@ export class MatchService {
     await transaction.query(
       `INSERT INTO ranked_deathmatch_attempts (
          id, deathmatch_id, player_id, attempt_sequence,
-         server_accepted_start_at, level_id, client_start_event_id
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+         server_accepted_start_at, level_id, played_level_id, client_start_event_id
+       ) VALUES ($1, $2, $3, $4, $5, $6, $6, $7)`,
       [
         attemptId,
         deathmatch.id,

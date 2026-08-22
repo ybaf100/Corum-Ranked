@@ -20,7 +20,13 @@ let database: PgliteDatabase;
 beforeAll(async () => {
   pglite = new PGlite();
   database = new PgliteDatabase(pglite);
-  for (const migrationName of ["0001_initial_ranked.sql", "0002_attempt_start_leases.sql"]) {
+  for (const migrationName of [
+    "0001_initial_ranked.sql",
+    "0002_attempt_start_leases.sql",
+    "0002_debug_bot_match.sql",
+    "0003_debug_rating_playable_maps.sql",
+    "0004_alpha37_schema_hardening.sql",
+  ]) {
     const migrationPath = fileURLToPath(
       new URL(`../../../migrations/${migrationName}`, import.meta.url),
     );
@@ -171,6 +177,26 @@ describe("transactional matchmaking queue", () => {
     expect(match.rows).toHaveLength(1);
     expect(match.rows[0]).toMatchObject({ effective_tier: "BRONZE", state: "MATCHED" });
     expect(match.rows[0]!.candidate_maps_snapshot).toHaveLength(5);
+
+    const schemaShape = await database.query<{
+      match_type: string;
+      debug_bot_config: unknown | null;
+      discord_events_enabled: boolean;
+      debug_config: unknown | null;
+      debug_discord_events: boolean;
+    }>(
+      `SELECT match_type, debug_bot_config, discord_events_enabled,
+              debug_config, debug_discord_events
+       FROM ranked_matches`,
+    );
+    expect(schemaShape.rows[0]).toMatchObject({
+      match_type: "RANKED_PVP",
+      debug_bot_config: null,
+      discord_events_enabled: true,
+      debug_config: null,
+      debug_discord_events: false,
+    });
+
     const snapshots = await database.query<{ count: number }>(
       "SELECT COUNT(*)::int AS count FROM ranked_config_snapshots",
     );

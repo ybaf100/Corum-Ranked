@@ -428,6 +428,23 @@ export class QueueService {
     const readyDeadline = new Date(
       now.getTime() + config.operational.timeouts.readySeconds * 1_000,
     );
+
+    const matchType = options.matchType ?? "RANKED_PVP";
+    const debugConfig = matchType === "DEBUG_BOT" ? options.debugBotConfig ?? null : null;
+    if (matchType === "DEBUG_BOT" && debugConfig === null) {
+      throw new Error("Debug Bot match requires debugBotConfig");
+    }
+    // pg maps JavaScript null to SQL NULL. Do not JSON.stringify(null), because
+    // "null"::jsonb is a JSON value and fails `debug_config IS NULL`.
+    const serializedDebugConfig =
+      debugConfig === null ? null : JSON.stringify(debugConfig);
+    // discord_events_enabled is the original match-wide relay switch and remains
+    // TRUE for public Ranked. debug_discord_events only controls Debug Bot relay.
+    const debugDiscordEvents =
+      matchType === "DEBUG_BOT" ? options.discordEventsEnabled ?? false : false;
+    const discordEventsEnabled =
+      matchType === "DEBUG_BOT" ? debugDiscordEvents : true;
+
     await transaction.query(
       `INSERT INTO ranked_matches (
          id, player_a_id, player_b_id, config_snapshot_id,
@@ -440,7 +457,7 @@ export class QueueService {
          $1, $2, $3, $4, $5, $6, $7, $8,
          $9::jsonb, $10::jsonb, 'MATCHED', 1,
          $11, $11, $13, $13, $12, $14, $15::jsonb, $16,
-         $15::jsonb, $16, $13
+         $15::jsonb, $17, $13
        )`,
       [
         matchId,
@@ -456,9 +473,10 @@ export class QueueService {
         readyDeadline.toISOString(),
         config.operational.rules.rulesVersion,
         now.toISOString(),
-        options.matchType ?? "RANKED_PVP",
-        JSON.stringify(options.debugBotConfig ?? null),
-        options.discordEventsEnabled ?? false,
+        matchType,
+        serializedDebugConfig,
+        discordEventsEnabled,
+        debugDiscordEvents,
       ],
     );
     for (const participant of [playerA, playerB]) {

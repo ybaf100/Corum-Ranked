@@ -46,7 +46,7 @@ interface BotDriver {
 
 interface ActiveDebugMatchRow {
   id: string;
-  debug_bot_config: unknown;
+  debug_config: unknown;
   player_a_id: string;
   player_b_id: string;
   player_a_account_id: string;
@@ -163,7 +163,7 @@ export class DebugBotService implements OnModuleInit, OnApplicationShutdown {
 
   private async hydrateDrivers(): Promise<void> {
     const result = await this.database.query<ActiveDebugMatchRow>(
-      `SELECT m.id, m.debug_bot_config, m.player_a_id, m.player_b_id,
+      `SELECT m.id, m.debug_config, m.player_a_id, m.player_b_id,
               pa.gd_account_id::text AS player_a_account_id,
               pb.gd_account_id::text AS player_b_account_id,
               pa.gd_username AS player_a_name, pb.gd_username AS player_b_name,
@@ -181,7 +181,7 @@ export class DebugBotService implements OnModuleInit, OnApplicationShutdown {
     );
     for (const row of result.rows) {
       if (this.drivers.has(row.id)) continue;
-      const stored = parseObject(row.debug_bot_config);
+      const stored = parseObject(row.debug_config);
       const playerSessionId = String(stored.playerSessionId ?? "");
       const botSessionId = String(stored.botSessionId ?? "");
       if (!playerSessionId || !botSessionId) continue;

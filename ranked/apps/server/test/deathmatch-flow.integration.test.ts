@@ -29,7 +29,13 @@ let database: PgliteDatabase;
 beforeAll(async () => {
   pglite = new PGlite();
   database = new PgliteDatabase(pglite);
-  for (const migrationName of ["0001_initial_ranked.sql", "0002_attempt_start_leases.sql"]) {
+  for (const migrationName of [
+    "0001_initial_ranked.sql",
+    "0002_attempt_start_leases.sql",
+    "0002_debug_bot_match.sql",
+    "0003_debug_rating_playable_maps.sql",
+    "0004_alpha37_schema_hardening.sql",
+  ]) {
     const migrationPath = fileURLToPath(
       new URL(`../../../migrations/${migrationName}`, import.meta.url),
     );

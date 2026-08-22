@@ -286,6 +286,8 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
     void setupSongDownloadGate(double countdownRemaining) {
         if (m_fields->songGateActive) return;
         m_fields->songGateActive = true;
+        corum::ranked::RankedRuntime::get().setSongBypassAllowed(false);
+        m_fields->songGateBypassed = false;
         m_fields->gateOpenedAt = SteadyClock::now();
         m_fields->countdownEndsAt = m_fields->gateOpenedAt + std::chrono::milliseconds(
             static_cast<long long>(std::ceil(std::max(0.0, countdownRemaining) * 1000.0))
@@ -381,7 +383,6 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
             }
 
             auto const ready = songsReady(m_level, m_songWidget);
-            auto const songElapsed = std::chrono::duration<double>(now - m_fields->songWaitStartedAt).count();
             if (ready) {
                 runtime.setSongBypassAllowed(false);
                 m_fields->songGateBypassed = false;
@@ -389,14 +390,16 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
                     m_fields->gateStatus->setString("SONG DOWNLOADED");
                     m_fields->gateStatus->setColor({78, 232, 112});
                 }
-            } else if (songElapsed >= 20.0) {
-                // Song is optional after the existing 20-second grace period.
-                // The vanilla song widget remains alive, so a background download
-                // can continue while Ranked starts without audio.
+            } else if (now >= m_fields->countdownEndsAt) {
+                // The visible Ranked countdown is the resource wait budget for
+                // optional music. A broken/slow custom-song API must never keep a
+                // fully downloaded playable map stuck after STARTS IN 00.
+                // The vanilla widget remains alive, so audio may still finish
+                // downloading while gameplay proceeds without it.
                 runtime.setSongBypassAllowed(true);
                 m_fields->songGateBypassed = true;
                 if (m_fields->gateStatus) {
-                    m_fields->gateStatus->setString("SONG TIMEOUT - STARTING WITHOUT SONG");
+                    m_fields->gateStatus->setString("SONG NOT READY - STARTING WITHOUT SONG");
                     m_fields->gateStatus->setColor({255, 216, 86});
                 }
             } else if (m_fields->gateStatus) {
