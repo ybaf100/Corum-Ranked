@@ -56,7 +56,7 @@ class FixedCsmpSource implements CsmpTierSource {
 const cleanMods: CreateSessionDto["installedMods"] = [
   {
     id: "hwanhee1.corum_ranked",
-    version: "v0.4.0-alpha.15",
+    version: "v0.4.0-alpha.36",
     enabled: true,
     loaded: true,
     internal: false,
@@ -137,7 +137,7 @@ describe("development-only Bot Match using the production Ranked engine", () => 
     const created = await sessions.create({
       gdAccountId: accountId,
       gdUsername: `Debug${accountId}`,
-      clientVersion: "v0.4.0-alpha.15",
+      clientVersion: "v0.4.0-alpha.36",
       installedMods: structuredClone(cleanMods),
     });
     const result = await database.query<{
@@ -241,25 +241,27 @@ describe("development-only Bot Match using the production Ranked engine", () => 
     const queueRows = await database.query("SELECT * FROM ranked_queue_entries WHERE player_id = $1", [player.playerId]);
     expect(queueRows.rowCount).toBe(0);
 
-    await matches.ready(creation.matchId, creation.playerMatchToken, creation.playerContext, {
-      installedMods: structuredClone(cleanMods),
-    });
-    let state = await matches.ready(creation.matchId, creation.botMatchToken, creation.botContext, {
+    let state = await matches.ready(creation.matchId, creation.playerMatchToken, creation.playerContext, {
       installedMods: structuredClone(cleanMods),
     }) as Record<string, any>;
+    // DEBUG_BOT has no real B-side client. A single player Ready must advance
+    // immediately; this catches the production READY deadlock directly.
     expect(state.state).toBe("BAN_PHASE");
+    expect(state.ready).toEqual({ A: true, B: true });
     await matches.submitBan(creation.matchId, creation.playerMatchToken, creation.playerContext, { canonicalLevelId: null });
     state = await matches.submitBan(creation.matchId, creation.botMatchToken, creation.botContext, { canonicalLevelId: null }) as Record<string, any>;
     expect(state.currentRound.map.playableLevelId).toBe(state.currentRound.map.alternateLevelId);
     expect(state.currentRound.map.playableLevelId).not.toBe(state.currentRound.map.canonicalLevelId);
 
     for (let round = 1; round <= 2; round += 1) {
-      await matches.ready(creation.matchId, creation.playerMatchToken, creation.playerContext, {
-        installedMods: structuredClone(cleanMods),
-      });
-      await matches.ready(creation.matchId, creation.botMatchToken, creation.botContext, {
-        installedMods: structuredClone(cleanMods),
-      });
+      const readyState = await matches.ready(
+        creation.matchId,
+        creation.playerMatchToken,
+        creation.playerContext,
+        { installedMods: structuredClone(cleanMods) },
+      ) as Record<string, any>;
+      expect(readyState.state).toBe("ROUND_PLAYING");
+      expect(readyState.ready).toEqual({ A: true, B: true });
       if (round === 1) {
         const playing = await matches.state(creation.matchId, creation.playerMatchToken, creation.playerContext) as Record<string, any>;
         await expect(matches.startAttempt(

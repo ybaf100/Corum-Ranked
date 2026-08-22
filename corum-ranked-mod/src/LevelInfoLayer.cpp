@@ -376,6 +376,9 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         );
         auto const readyForStart = levelReady && (songsReady(m_level) || runtime.songBypassAllowed());
 
+        auto const ownReady = match.side == "A" ? match.readyA : match.readyB;
+        auto const opponentReady = match.side == "A" ? match.readyB : match.readyA;
+
         if (m_fields->gateCountdown) {
             if (countdownRemaining > 0) {
                 m_fields->gateCountdown->setString(fmt::format("STARTS IN  {:02d}", countdownRemaining).c_str());
@@ -383,15 +386,20 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
                 m_fields->gateCountdown->setString("WAITING FOR MAP");
             } else if (!readyForStart) {
                 m_fields->gateCountdown->setString("WAITING FOR SONG");
+            } else if (rankedPrepareState(match.state) && ownReady && !opponentReady) {
+                m_fields->gateCountdown->setString("WAITING FOR OPPONENT");
+            } else if (rankedPrepareState(match.state) && ownReady && opponentReady) {
+                m_fields->gateCountdown->setString("STARTING...");
             } else {
-                m_fields->gateCountdown->setString("READY");
+                m_fields->gateCountdown->setString("SENDING READY...");
             }
         }
 
         if (
             rankedPrepareState(match.state) &&
             now >= m_fields->countdownEndsAt &&
-            readyForStart
+            readyForStart &&
+            !ownReady
         ) {
             // Ready is server-idempotent. Do not make this a one-shot client event:
             // submitReady() can legitimately be skipped while another control

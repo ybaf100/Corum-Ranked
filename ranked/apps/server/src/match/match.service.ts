@@ -325,12 +325,27 @@ export class MatchService {
       match = await this.advanceLockedMatch(transaction, match, now);
       if (match.state === "MATCHED") {
         const column = sideColumn(authorization.side, "ready");
-        await transaction.query(
-          `UPDATE ranked_matches
-           SET ${column}_at = COALESCE(${column}_at, $2), state_version = state_version + 1
-           WHERE id = $1`,
-          [matchId, now.toISOString()],
-        );
+        if (match.match_type === "DEBUG_BOT" && authorization.side === "A") {
+          // The Debug Bot has no real client/resource gate. Player A Ready must
+          // therefore make the synthetic B side Ready in the same transaction;
+          // relying on the background Bot driver creates a PREPARE deadlock if
+          // its timer is delayed, restarted, or one tick fails.
+          await transaction.query(
+            `UPDATE ranked_matches
+             SET ready_a_at = COALESCE(ready_a_at, $2),
+                 ready_b_at = COALESCE(ready_b_at, $2),
+                 state_version = state_version + 1
+             WHERE id = $1`,
+            [matchId, now.toISOString()],
+          );
+        } else {
+          await transaction.query(
+            `UPDATE ranked_matches
+             SET ${column}_at = COALESCE(${column}_at, $2), state_version = state_version + 1
+             WHERE id = $1`,
+            [matchId, now.toISOString()],
+          );
+        }
         match = await this.lockMatch(transaction, matchId);
         if (match.ready_a_at && match.ready_b_at) {
           const config = this.matchConfig(match);
@@ -352,12 +367,23 @@ export class MatchService {
       if (match.state !== "ROUND_PREPARE" || !match.current_round_number) {
         if (match.state === "DEATHMATCH_PREPARE" && match.current_deathmatch_id) {
           const column = sideColumn(authorization.side, "ready");
-          await transaction.query(
-            `UPDATE ranked_matches
-             SET ${column}_at = COALESCE(${column}_at, $2), state_version = state_version + 1
-             WHERE id = $1`,
-            [matchId, now.toISOString()],
-          );
+          if (match.match_type === "DEBUG_BOT" && authorization.side === "A") {
+            await transaction.query(
+              `UPDATE ranked_matches
+               SET ready_a_at = COALESCE(ready_a_at, $2),
+                   ready_b_at = COALESCE(ready_b_at, $2),
+                   state_version = state_version + 1
+               WHERE id = $1`,
+              [matchId, now.toISOString()],
+            );
+          } else {
+            await transaction.query(
+              `UPDATE ranked_matches
+               SET ${column}_at = COALESCE(${column}_at, $2), state_version = state_version + 1
+               WHERE id = $1`,
+              [matchId, now.toISOString()],
+            );
+          }
           match = await this.lockMatch(transaction, matchId);
           if (match.ready_a_at && match.ready_b_at) {
             const deathmatch = await this.currentDeathmatch(transaction, match);
@@ -392,12 +418,23 @@ export class MatchService {
       }
       const round = await this.lockCurrentRound(transaction, match);
       const column = sideColumn(authorization.side, "ready");
-      await transaction.query(
-        `UPDATE ranked_rounds
-         SET ${column}_at = COALESCE(${column}_at, $2), state_version = state_version + 1
-         WHERE id = $1`,
-        [round.id, now.toISOString()],
-      );
+      if (match.match_type === "DEBUG_BOT" && authorization.side === "A") {
+        await transaction.query(
+          `UPDATE ranked_rounds
+           SET ready_a_at = COALESCE(ready_a_at, $2),
+               ready_b_at = COALESCE(ready_b_at, $2),
+               state_version = state_version + 1
+           WHERE id = $1`,
+          [round.id, now.toISOString()],
+        );
+      } else {
+        await transaction.query(
+          `UPDATE ranked_rounds
+           SET ${column}_at = COALESCE(${column}_at, $2), state_version = state_version + 1
+           WHERE id = $1`,
+          [round.id, now.toISOString()],
+        );
+      }
       const updatedRound = await this.lockCurrentRound(transaction, match);
       if (updatedRound.ready_a_at && updatedRound.ready_b_at) {
         await this.startPreparedRound(transaction, match, updatedRound, now);
