@@ -17,13 +17,14 @@ Apps Script `ranked_config`가 운영 설정의 source입니다. 서버는 마�
 
 ## 2. Database
 
-새 DB에 다음을 실행합니다.
+새 DB에는 migration을 번호 순서대로 실행합니다.
 
 ```bash
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f ranked/migrations/0001_initial_ranked.sql
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f ranked/migrations/0002_attempt_start_leases.sql
 ```
 
-Migration은 transaction 안에서 실행됩니다. 기존 운영 DB에 적용할 때는 일반적인 migration runner로 버전 관리하고, 같은 초기 migration을 재실행하지 마세요.
+이미 alpha.32 이하 schema가 적용된 운영 DB를 alpha.33으로 올릴 때는 **서버 재배포 전에 `0002_attempt_start_leases.sql`만 추가 적용**합니다. Migration은 transaction 안에서 실행됩니다. 일반적인 migration runner로 버전 관리하고 이미 적용한 migration을 임의로 재실행하지 마세요.
 
 ## 3. 서버 환경변수
 
@@ -53,9 +54,11 @@ Migration은 transaction 안에서 실행됩니다. 기존 운영 DB에 적용�
 
 Discord 실패는 outbox worker에서만 처리되며 Match 판정 transaction을 되돌리지 않습니다.
 
-### 관전용 runtime state
+### 관전용 runtime state와 Start Lease
 
 `currentAttemptProgress`는 `MatchRuntimeStatePort` 뒤의 메모리 구현에만 저장하며 DB row를 만들지 않습니다. 단일 서버 MVP에서는 이 값이 재시작 시 사라져도 점수와 판정에 영향이 없고, 살아 있는 client의 다음 telemetry로 복구됩니다. 수평 확장 시에는 같은 interface를 Redis 같은 TTL 기반 공유 저장소 구현으로 교체한 뒤 sticky routing 또는 공유 state 동작을 staging에서 검증하세요. Round가 끝나면 양쪽 임시 progress를 즉시 제거합니다.
+
+반면 alpha.33의 `ranked_attempt_start_leases`는 점수 telemetry가 아니라 **visual attempt가 실제 start deadline 전에 시작되었다는 전송 reconciliation marker**이므로 PostgreSQL에 영속 저장합니다. 이 row 자체는 점수를 주지 않으며 authoritative `/attempt/start`가 수락되어야 실제 attempt가 생성됩니다. Render가 재시작되어도 pending lease가 남아 있어 FIFO 뒤의 정상 Start/End를 기다릴 수 있습니다.
 
 ## 5. 장애 정책
 

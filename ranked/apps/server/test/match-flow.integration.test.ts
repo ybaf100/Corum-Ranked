@@ -25,10 +25,12 @@ let database: PgliteDatabase;
 beforeAll(async () => {
   pglite = new PGlite();
   database = new PgliteDatabase(pglite);
-  const migrationPath = fileURLToPath(
-    new URL("../../../migrations/0001_initial_ranked.sql", import.meta.url),
-  );
-  await pglite.exec(await readFile(migrationPath, "utf8"));
+  for (const migrationName of ["0001_initial_ranked.sql", "0002_attempt_start_leases.sql"]) {
+    const migrationPath = fileURLToPath(
+      new URL(`../../../migrations/${migrationName}`, import.meta.url),
+    );
+    await pglite.exec(await readFile(migrationPath, "utf8"));
+  }
 }, 60_000);
 
 afterAll(async () => {
@@ -168,11 +170,12 @@ describe("two-client authoritative match flow", () => {
       sessions,
       tokens,
     );
-    const matches = new MatchService(
+    const matchRandom = new SeededRandom(91);
+    let matches = new MatchService(
       database,
       clock,
       ids,
-      new SeededRandom(91),
+      matchRandom,
       new MatchAccessService(tokens, clock),
       sessions,
       new OutboxService(ids),
@@ -247,13 +250,22 @@ describe("two-client authoritative match flow", () => {
       })) as Record<string, any>;
       expect(playing.state).toBe("ROUND_PLAYING");
       expect(playing.currentRound.roundNumber).toBe(roundNumber);
+      const roundStartedAtMs = clock.now().getTime();
       const levelId = playing.currentRound.map.playableLevelId as string;
       const qualifying = Number(playing.currentRound.map.qualifyingPercent);
 
       clock.advanceSeconds(1);
+      const firstStartedAt = clock.now().toISOString();
+      const firstIntent = await matches.startAttemptIntent(matchId, statusA.matchToken, playerA, {
+        levelId,
+        clientEventId: `r${roundNumber}-a1-start`,
+        clientStartedAt: firstStartedAt,
+      });
+      expect(firstIntent).toMatchObject({ accepted: true });
       const firstStart = await matches.startAttempt(matchId, statusA.matchToken, playerA, {
         levelId,
         clientEventId: `r${roundNumber}-a1-start`,
+        clientStartedAt: firstStartedAt,
       });
       const livePercent = Math.min(99, Math.max(Math.ceil(qualifying), 1));
       const progressAck = await matches.updateAttemptProgress(matchId, statusA.matchToken, playerA, {
@@ -305,19 +317,54 @@ describe("two-client authoritative match flow", () => {
         6,
       );
 
-      clock.advanceSeconds(1);
+      // Regression for the real alpha.32 Round-2 Score 0 race: the visual
+      // second Clear can start before the final start deadline while its
+      // authoritative Start is still queued behind an earlier End/ACK. Publish
+      // the lease first, move the server clock beyond the deadline, poll once,
+      // then let the serialized Start/End catch up. The Round must not finalize
+      // to Score 0 in between.
+      const finalStartDeadlineMs = roundStartedAtMs +
+        (document.operational.rules.roundSeconds +
+          document.operational.rules.finalAttemptWindowSeconds) * 1_000;
+      const millisUntilOneSecondBeforeDeadline = finalStartDeadlineMs - 1_000 - clock.now().getTime();
+      if (millisUntilOneSecondBeforeDeadline > 0) {
+        clock.advanceSeconds(millisUntilOneSecondBeforeDeadline / 1_000);
+      }
+      const thirdStartedAt = clock.now().toISOString();
+      const thirdIntent = await matches.startAttemptIntent(matchId, statusA.matchToken, playerA, {
+        levelId,
+        clientEventId: `r${roundNumber}-a3-start`,
+        clientStartedAt: thirdStartedAt,
+      });
+      expect(thirdIntent).toMatchObject({ accepted: true });
+
+      clock.advanceSeconds(3);
+      const heldForLease = (await matches.state(
+        matchId,
+        statusA.matchToken,
+        playerA,
+      )) as Record<string, any>;
+      expect(heldForLease.state).not.toBe("ROUND_RESULT");
+
       const thirdStart = await matches.startAttempt(matchId, statusA.matchToken, playerA, {
         levelId,
         clientEventId: `r${roundNumber}-a3-start`,
+        clientStartedAt: thirdStartedAt,
       });
+      expect(thirdStart).toMatchObject({ accepted: true });
       clock.advanceSeconds(1);
-      await matches.endAttempt(matchId, statusA.matchToken, playerA, {
+      const thirdEnd = await matches.endAttempt(matchId, statusA.matchToken, playerA, {
         levelId,
         attemptId: thirdStart.attemptId!,
         clientEventId: `r${roundNumber}-a3-end`,
         progressPercent: 100,
         cleared: true,
       });
+      expect(thirdEnd).toMatchObject({ accepted: true, awardedScore: 200 });
+      if (!("roundSnapshot" in thirdEnd)) {
+        throw new Error("Expected second Clear acknowledgement after delayed Start Lease reconciliation");
+      }
+      expect(thirdEnd.roundSnapshot.clears.A).toBe(2);
     };
 
     await winRoundWithTwoClears(1);
@@ -512,6 +559,20 @@ describe("two-client authoritative match flow", () => {
     );
     expect(b3Intent).toMatchObject({ accepted: true, duplicate: false });
 
+    // Simulate a Render process restart after the visual Start lease reached
+    // PostgreSQL but before the serialized authoritative Start request arrived.
+    // alpha.33 must not depend on InMemoryMatchRuntimeState for this protection.
+    matches = new MatchService(
+      database,
+      clock,
+      ids,
+      matchRandom,
+      new MatchAccessService(tokens, clock),
+      sessions,
+      new OutboxService(ids),
+      new InMemoryMatchRuntimeState(),
+    );
+
     // The intent is only a lease for a visual attempt that already started
     // inside the 10-second window. Even if the serialized authoritative Start
     // is delayed for longer than alpha.27's old 30-second hold, the round must
@@ -558,6 +619,23 @@ describe("two-client authoritative match flow", () => {
       reason: "LAST_ATTEMPT_CLEAR",
     });
     expect(state.spectator).toEqual({ active: false });
+
+    // Simulate a lost HTTP acknowledgement for the final End. Retrying after
+    // MATCH_RESULT must acknowledge the already-committed attempt instead of
+    // rejecting it because the Round is immutable.
+    const duplicateFinalEnd = await matches.endAttempt(matchId, statusB.matchToken, playerB, {
+      levelId: roundTwoLevelId,
+      attemptId: b3.attemptId!,
+      clientEventId: "r2-b3-end",
+      progressPercent: 100,
+      cleared: true,
+    });
+    expect(duplicateFinalEnd).toMatchObject({
+      accepted: true,
+      duplicate: true,
+      reason: "ATTEMPT_ALREADY_ENDED",
+      awardedScore: 200,
+    });
 
     const afterFirstPoll = await database.query<{
       player_id: string;

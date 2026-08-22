@@ -80,8 +80,10 @@ const cleanMods: CreateSessionDto["installedMods"] = [
 beforeAll(async () => {
   pglite = new PGlite();
   database = new PgliteDatabase(pglite);
-  const path = fileURLToPath(new URL("../../../migrations/0001_initial_ranked.sql", import.meta.url));
-  await pglite.exec(await readFile(path, "utf8"));
+  for (const migrationName of ["0001_initial_ranked.sql", "0002_attempt_start_leases.sql"]) {
+    const path = fileURLToPath(new URL(`../../../migrations/${migrationName}`, import.meta.url));
+    await pglite.exec(await readFile(path, "utf8"));
+  }
 }, 60_000);
 
 afterAll(async () => {

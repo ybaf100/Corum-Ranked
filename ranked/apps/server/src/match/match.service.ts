@@ -203,6 +203,39 @@ interface DeathmatchAttemptRow {
   client_end_event_id: string | null;
 }
 
+interface AttemptStartLeaseRow {
+  id: string;
+  match_id: string;
+  round_id: string;
+  player_id: string;
+  side: PlayerSide;
+  level_id: string;
+  client_start_event_id: string;
+  client_started_at: Date | string;
+  observed_at: Date | string;
+  consumed_at: Date | string | null;
+  invalidated_at: Date | string | null;
+}
+
+interface RankedAttemptLookupRow {
+  round_id: string;
+  domain_attempt_id: string;
+  attempt_sequence: number;
+  ended_at: Date | string | null;
+  awarded_score: number;
+  client_end_event_id: string | null;
+}
+
+interface DeathmatchAttemptLookupRow {
+  id: string;
+  deathmatch_id: string;
+  attempt_sequence: number;
+  ended_at: Date | string | null;
+  awarded_score: number | null;
+  client_start_event_id: string;
+  client_end_event_id: string | null;
+}
+
 const parseJson = <T>(value: unknown): T => {
   if (typeof value === "string") return JSON.parse(value) as T;
   return structuredClone(value) as T;
@@ -518,43 +551,49 @@ export class MatchService {
     return this.database.transaction(async (transaction) => {
       const authorization = await this.access.authorize(transaction, matchId, session, matchToken);
       const match = await this.lockMatch(transaction, matchId);
+
+      // Intent delivery is independently retried by the client. If the ordinary
+      // authoritative Start beat this packet, acknowledge the lease as a duplicate
+      // instead of recreating a stale hold after the attempt already exists.
+      const existingAttempt = await this.findRoundAttemptByStartEvent(
+        transaction,
+        match.id,
+        session.playerId,
+        body.clientEventId,
+      );
+      if (existingAttempt) {
+        await this.consumeStartLeaseByIdentity(
+          transaction,
+          match.id,
+          session.playerId,
+          body.clientEventId,
+          now,
+        );
+        return { accepted: true, duplicate: true, reason: null, serverNow: now.toISOString() };
+      }
+
       if (!this.isRoundPlaying(match.state)) {
         return { accepted: false, reason: `ATTEMPT_INTENT_NOT_ACCEPTED_IN_${match.state}`, serverNow: now.toISOString() };
       }
       const round = await this.lockCurrentRound(transaction, match);
       this.assertPlayableLevelId(body.levelId, round.playable_level_id);
       const state = this.roundState(round);
-      const existingAttempt = state.attempts[authorization.side].find(
-        (attempt) => attempt.startEventId === body.clientEventId,
-      );
-      if (existingAttempt) {
-        // The ordinary Start request can beat the out-of-band intent. Never
-        // recreate a stale lease after the attempt is already authoritative.
-        this.runtimeState.clearStartIntent(
-          match.id,
-          round.round_number,
-          authorization.side,
-          body.clientEventId,
-        );
-        return {
-          accepted: true,
-          duplicate: true,
-          reason: null,
-          serverNow: now.toISOString(),
-        };
-      }
       const parsed = new Date(body.clientStartedAt);
       if (Number.isNaN(parsed.getTime())) {
         return { accepted: false, reason: "INVALID_CLIENT_STARTED_AT", serverNow: now.toISOString() };
       }
       const startedAtMs = parsed.getTime();
       const deadline = state.lastAttemptWindow?.endsAtMs ?? state.finalWindowEndAtMs;
-      const windowStart = state.lastAttemptWindow?.startedAtMs ?? state.normalEndAtMs;
       if (startedAtMs > now.getTime() + ATTEMPT_START_INTENT_FUTURE_SKEW_MS) {
         return { accepted: false, reason: "ATTEMPT_INTENT_TIMESTAMP_IN_FUTURE", serverNow: now.toISOString() };
       }
-      if (startedAtMs < windowStart - ATTEMPT_START_INTENT_FUTURE_SKEW_MS) {
-        return { accepted: false, reason: "ATTEMPT_INTENT_TIMESTAMP_BEFORE_WINDOW", serverNow: now.toISOString() };
+      // alpha.33: the lease covers EVERY visual Round attempt, not only the
+      // FINAL/LAST window. This closes the Round-2 fast-clear race where the
+      // serialized Start/End queue could still be behind when polling finalized
+      // the Round. The server-observed intent must still arrive near the real
+      // start deadline, so a client cannot back-date an attempt after time expires.
+      if (startedAtMs < state.startedAtMs - ATTEMPT_START_INTENT_FUTURE_SKEW_MS) {
+        return { accepted: false, reason: "ATTEMPT_INTENT_TIMESTAMP_BEFORE_ROUND", serverNow: now.toISOString() };
       }
       if (startedAtMs >= deadline) {
         return { accepted: false, reason: "ATTEMPT_START_WINDOW_CLOSED", serverNow: now.toISOString() };
@@ -565,15 +604,24 @@ export class MatchService {
       if (state.lastAttemptWindow && state.lastAttemptWindow.targetSide !== authorization.side) {
         return { accepted: false, reason: "LAST_ATTEMPT_TARGET_ONLY", serverNow: now.toISOString() };
       }
-      this.runtimeState.noteStartIntent(
-        match.id,
-        round.round_number,
+
+      const lease = await this.noteStartLease(
+        transaction,
+        match,
+        round,
+        session.playerId,
         authorization.side,
+        body.levelId,
         body.clientEventId,
-        startedAtMs,
-        now.getTime(),
+        parsed,
+        now,
       );
-      return { accepted: true, duplicate: false, reason: null, serverNow: now.toISOString() };
+      return {
+        accepted: true,
+        duplicate: lease.duplicate,
+        reason: null,
+        serverNow: now.toISOString(),
+      };
     });
   }
 
@@ -587,13 +635,69 @@ export class MatchService {
     return this.database.transaction(async (transaction) => {
       const authorization = await this.access.authorize(transaction, matchId, session, matchToken);
       let match = await this.lockMatch(transaction, matchId);
+
+      // ACK loss must be idempotent even after the Round has already advanced.
+      // Check the durable attempt row before advancing clocks/state.
+      const existing = await this.findRoundAttemptByStartEvent(
+        transaction,
+        match.id,
+        session.playerId,
+        body.clientEventId,
+      );
+      if (existing) {
+        await this.consumeStartLeaseByIdentity(
+          transaction,
+          match.id,
+          session.playerId,
+          body.clientEventId,
+          now,
+        );
+        return {
+          accepted: true,
+          duplicate: true,
+          attemptId: existing.domain_attempt_id,
+          reason: null,
+          serverNow: now.toISOString(),
+        };
+      }
+
+      // Death Match Start is idempotent as well. The original Start can commit
+      // and its HTTP acknowledgement can be lost just as the third attempt ends
+      // and the match advances to DEATHMATCH_RESULT/MATCH_RESULT. A retry must
+      // retire the client journal instead of being rejected by the newer state.
+      const existingDeathmatchStart = await this.findDeathmatchAttemptByStartEvent(
+        transaction,
+        match.id,
+        session.playerId,
+        body.clientEventId,
+      );
+      if (existingDeathmatchStart) {
+        return {
+          accepted: true,
+          duplicate: true,
+          attemptId: existingDeathmatchStart.id,
+          attemptNumber: Number(existingDeathmatchStart.attempt_sequence),
+          reason: null,
+          serverNow: now.toISOString(),
+        };
+      }
+
+      let matchingLease: AttemptStartLeaseRow | null = null;
       if (match.state !== "DEATHMATCH_PLAYING" && this.isRoundPlaying(match.state) && match.current_round_number) {
-        const intent = this.runtimeState.startIntent(match.id, match.current_round_number, authorization.side);
-        const matchingIntent = intent?.eventId === body.clientEventId ? intent : null;
-        if (!matchingIntent) match = await this.advanceLockedMatch(transaction, match, now);
+        const currentRound = await this.lockCurrentRound(transaction, match);
+        matchingLease = await this.findStartLease(
+          transaction,
+          currentRound.id,
+          session.playerId,
+          body.clientEventId,
+        );
+        // A durable lease was observed while the visual attempt was legal. Do not
+        // let a clock poll finalize the Round before this serialized Start catches up.
+        if (!matchingLease) match = await this.advanceLockedMatch(transaction, match, now);
       } else {
         match = await this.advanceLockedMatch(transaction, match, now);
       }
+
       if (match.state === "DEATHMATCH_PLAYING") {
         return this.startDeathmatchAttempt(
           transaction,
@@ -613,18 +717,25 @@ export class MatchService {
           serverNow: now.toISOString(),
         };
       }
+
       const round = await this.lockCurrentRound(transaction, match);
       this.assertPlayableLevelId(body.levelId, round.playable_level_id);
       const roundState = this.roundState(round);
       const clientStart = resolveAttemptStartTime(body.clientStartedAt, now);
-      const intent = this.runtimeState.startIntent(match.id, round.round_number, authorization.side);
-      const matchingIntent = intent?.eventId === body.clientEventId ? intent : null;
+      if (!matchingLease || matchingLease.round_id !== round.id) {
+        matchingLease = await this.findStartLease(
+          transaction,
+          round.id,
+          session.playerId,
+          body.clientEventId,
+        );
+      }
       const effectiveStartMs = Math.max(roundState.lastEvaluatedAtMs, clientStart.getTime());
-      const decision = matchingIntent
+      const decision = matchingLease
         ? startRoundAttemptFromIntent(
             roundState,
             authorization.side,
-            matchingIntent.startedAtMs,
+            new Date(matchingLease.client_started_at).getTime(),
             now.getTime(),
             body.clientEventId,
           )
@@ -634,6 +745,7 @@ export class MatchService {
             effectiveStartMs,
             body.clientEventId,
           );
+
       if (decision.accepted && !decision.duplicate && decision.attemptId) {
         const attempt = decision.state.attempts[authorization.side].find(
           (candidate) => candidate.id === decision.attemptId,
@@ -658,8 +770,13 @@ export class MatchService {
           ],
         );
       }
-      if (decision.accepted || decision.reason !== "ATTEMPT_ALREADY_ACTIVE") {
-        this.runtimeState.clearStartIntent(match.id, round.round_number, authorization.side, body.clientEventId);
+
+      if (matchingLease) {
+        if (decision.accepted || decision.duplicate) {
+          await this.consumeStartLease(transaction, matchingLease.id, now);
+        } else if (decision.reason !== "ATTEMPT_ALREADY_ACTIVE") {
+          await this.invalidateStartLease(transaction, matchingLease.id, now);
+        }
       }
       await this.persistRoundState(transaction, match, round, decision.state, now);
       if (
@@ -705,6 +822,43 @@ export class MatchService {
     return this.database.transaction(async (transaction) => {
       const authorization = await this.access.authorize(transaction, matchId, session, matchToken);
       let match = await this.lockMatch(transaction, matchId);
+
+      // End retries can arrive after the authoritative Round result when the
+      // original database commit succeeded but its HTTP ACK was lost. Accept the
+      // stored result before advancing clocks so the client can safely retire the
+      // journal entry without double scoring.
+      const existingEnded = await this.findRoundEndedAttemptByEndEvent(
+        transaction,
+        match.id,
+        session.playerId,
+        body.clientEventId,
+      );
+      if (existingEnded) {
+        return {
+          accepted: true,
+          duplicate: true,
+          reason: "ATTEMPT_ALREADY_ENDED",
+          awardedScore: Number(existingEnded.awarded_score),
+          serverNow: now.toISOString(),
+        };
+      }
+
+      const existingDeathmatchEnd = await this.findDeathmatchAttemptByEndEvent(
+        transaction,
+        match.id,
+        session.playerId,
+        body.clientEventId,
+      );
+      if (existingDeathmatchEnd) {
+        return {
+          accepted: true,
+          duplicate: true,
+          reason: "ATTEMPT_ALREADY_ENDED",
+          awardedScore: Number(existingDeathmatchEnd.awarded_score ?? 0),
+          serverNow: now.toISOString(),
+        };
+      }
+
       match = await this.advanceLockedMatch(transaction, match, now);
       if (match.state === "DEATHMATCH_PLAYING") {
         return this.endDeathmatchAttempt(
@@ -962,6 +1116,229 @@ export class MatchService {
     }
   }
 
+  private async findRoundAttemptByStartEvent(
+    transaction: SqlExecutor,
+    matchId: string,
+    playerId: string,
+    clientStartEventId: string,
+  ): Promise<RankedAttemptLookupRow | null> {
+    const result = await transaction.query<RankedAttemptLookupRow>(
+      `SELECT a.round_id, a.domain_attempt_id, a.attempt_sequence, a.ended_at,
+              a.awarded_score, a.client_end_event_id
+       FROM ranked_attempts a
+       JOIN ranked_rounds r ON r.id = a.round_id
+       WHERE r.match_id = $1 AND a.player_id = $2 AND a.client_start_event_id = $3
+       ORDER BY r.round_number DESC
+       LIMIT 1`,
+      [matchId, playerId, clientStartEventId],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  private async findRoundEndedAttemptByEndEvent(
+    transaction: SqlExecutor,
+    matchId: string,
+    playerId: string,
+    clientEndEventId: string,
+  ): Promise<RankedAttemptLookupRow | null> {
+    const result = await transaction.query<RankedAttemptLookupRow>(
+      `SELECT a.round_id, a.domain_attempt_id, a.attempt_sequence, a.ended_at,
+              a.awarded_score, a.client_end_event_id
+       FROM ranked_attempts a
+       JOIN ranked_rounds r ON r.id = a.round_id
+       WHERE r.match_id = $1 AND a.player_id = $2
+         AND a.client_end_event_id = $3 AND a.ended_at IS NOT NULL
+       ORDER BY r.round_number DESC
+       LIMIT 1`,
+      [matchId, playerId, clientEndEventId],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  private async findDeathmatchAttemptByStartEvent(
+    transaction: SqlExecutor,
+    matchId: string,
+    playerId: string,
+    clientStartEventId: string,
+  ): Promise<DeathmatchAttemptLookupRow | null> {
+    const result = await transaction.query<DeathmatchAttemptLookupRow>(
+      `SELECT a.id, a.deathmatch_id, a.attempt_sequence, a.ended_at,
+              a.awarded_score, a.client_start_event_id, a.client_end_event_id
+       FROM ranked_deathmatch_attempts a
+       JOIN ranked_deathmatches d ON d.id = a.deathmatch_id
+       WHERE d.match_id = $1 AND a.player_id = $2 AND a.client_start_event_id = $3
+       ORDER BY d.sequence DESC
+       LIMIT 1`,
+      [matchId, playerId, clientStartEventId],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  private async findDeathmatchAttemptByEndEvent(
+    transaction: SqlExecutor,
+    matchId: string,
+    playerId: string,
+    clientEndEventId: string,
+  ): Promise<DeathmatchAttemptLookupRow | null> {
+    const result = await transaction.query<DeathmatchAttemptLookupRow>(
+      `SELECT a.id, a.deathmatch_id, a.attempt_sequence, a.ended_at,
+              a.awarded_score, a.client_start_event_id, a.client_end_event_id
+       FROM ranked_deathmatch_attempts a
+       JOIN ranked_deathmatches d ON d.id = a.deathmatch_id
+       WHERE d.match_id = $1 AND a.player_id = $2
+         AND a.client_end_event_id = $3 AND a.ended_at IS NOT NULL
+       ORDER BY d.sequence DESC
+       LIMIT 1`,
+      [matchId, playerId, clientEndEventId],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  private async findStartLease(
+    transaction: SqlExecutor,
+    roundId: string,
+    playerId: string,
+    clientStartEventId: string,
+  ): Promise<AttemptStartLeaseRow | null> {
+    const result = await transaction.query<AttemptStartLeaseRow>(
+      `SELECT *
+       FROM ranked_attempt_start_leases
+       WHERE round_id = $1 AND player_id = $2 AND client_start_event_id = $3
+         AND consumed_at IS NULL AND invalidated_at IS NULL
+       LIMIT 1`,
+      [roundId, playerId, clientStartEventId],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  private async noteStartLease(
+    transaction: SqlExecutor,
+    match: LockedMatchRow,
+    round: RoundRow,
+    playerId: string,
+    side: PlayerSide,
+    levelId: string,
+    clientStartEventId: string,
+    clientStartedAt: Date,
+    observedAt: Date,
+  ): Promise<{ lease: AttemptStartLeaseRow; duplicate: boolean }> {
+    const inserted = await transaction.query<AttemptStartLeaseRow>(
+      `INSERT INTO ranked_attempt_start_leases (
+         id, match_id, round_id, player_id, side, level_id,
+         client_start_event_id, client_started_at, observed_at
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       ON CONFLICT (round_id, player_id, client_start_event_id) DO NOTHING
+       RETURNING *`,
+      [
+        this.ids.next(),
+        match.id,
+        round.id,
+        playerId,
+        side,
+        levelId,
+        clientStartEventId,
+        clientStartedAt.toISOString(),
+        observedAt.toISOString(),
+      ],
+    );
+    if (inserted.rows[0]) return { lease: inserted.rows[0], duplicate: false };
+
+    const existing = await transaction.query<AttemptStartLeaseRow>(
+      `SELECT * FROM ranked_attempt_start_leases
+       WHERE round_id = $1 AND player_id = $2 AND client_start_event_id = $3
+       LIMIT 1`,
+      [round.id, playerId, clientStartEventId],
+    );
+    const lease = existing.rows[0];
+    if (!lease) throw new Error("Attempt start lease conflict row is missing");
+    return { lease, duplicate: true };
+  }
+
+  private async consumeStartLease(
+    transaction: SqlExecutor,
+    leaseId: string,
+    now: Date,
+  ): Promise<void> {
+    await transaction.query(
+      `UPDATE ranked_attempt_start_leases
+       SET consumed_at = COALESCE(consumed_at, $2)
+       WHERE id = $1 AND invalidated_at IS NULL`,
+      [leaseId, now.toISOString()],
+    );
+  }
+
+  private async consumeStartLeaseByIdentity(
+    transaction: SqlExecutor,
+    matchId: string,
+    playerId: string,
+    clientStartEventId: string,
+    now: Date,
+  ): Promise<void> {
+    await transaction.query(
+      `UPDATE ranked_attempt_start_leases
+       SET consumed_at = COALESCE(consumed_at, $4)
+       WHERE match_id = $1 AND player_id = $2 AND client_start_event_id = $3
+         AND invalidated_at IS NULL`,
+      [matchId, playerId, clientStartEventId, now.toISOString()],
+    );
+  }
+
+  private async invalidateStartLease(
+    transaction: SqlExecutor,
+    leaseId: string,
+    now: Date,
+  ): Promise<void> {
+    await transaction.query(
+      `UPDATE ranked_attempt_start_leases
+       SET invalidated_at = COALESCE(invalidated_at, $2)
+       WHERE id = $1 AND consumed_at IS NULL`,
+      [leaseId, now.toISOString()],
+    );
+  }
+
+  private async hasPendingStartLease(
+    transaction: SqlExecutor,
+    match: LockedMatchRow,
+    round: RoundRow,
+    state: RoundState,
+    now: Date,
+  ): Promise<boolean> {
+    const result = await transaction.query<AttemptStartLeaseRow>(
+      `SELECT *
+       FROM ranked_attempt_start_leases
+       WHERE match_id = $1 AND round_id = $2
+         AND consumed_at IS NULL AND invalidated_at IS NULL
+       ORDER BY observed_at ASC`,
+      [match.id, round.id],
+    );
+    const deadline = state.lastAttemptWindow?.endsAtMs ?? state.finalWindowEndAtMs;
+    let pending = false;
+    for (const lease of result.rows) {
+      const authoritative = state.attempts[lease.side].some(
+        (attempt) => attempt.startEventId === lease.client_start_event_id,
+      );
+      if (authoritative) {
+        await this.consumeStartLease(transaction, lease.id, now);
+        continue;
+      }
+      const startedAtMs = new Date(lease.client_started_at).getTime();
+      const observedAtMs = new Date(lease.observed_at).getTime();
+      const hardExpired = now.getTime() - observedAtMs >= ATTEMPT_START_INTENT_HARD_TTL_MS;
+      const invalidTimestamp =
+        !Number.isFinite(startedAtMs) ||
+        startedAtMs < state.startedAtMs - ATTEMPT_START_INTENT_FUTURE_SKEW_MS ||
+        startedAtMs >= deadline;
+      const wrongLastAttemptSide =
+        Boolean(state.lastAttemptWindow) && state.lastAttemptWindow?.targetSide !== lease.side;
+      if (hardExpired || invalidTimestamp || wrongLastAttemptSide) {
+        await this.invalidateStartLease(transaction, lease.id, now);
+        continue;
+      }
+      pending = true;
+    }
+    return pending;
+  }
+
   private async advanceLockedMatch(
     transaction: SqlExecutor,
     match: LockedMatchRow,
@@ -1038,25 +1415,18 @@ export class MatchService {
         now,
       );
       const startDeadlineMs = withoutOrphans.lastAttemptWindow?.endsAtMs ?? withoutOrphans.finalWindowEndAtMs;
-      const pendingStartIntent = (["A", "B"] as const).some((side) => {
-        const intent = this.runtimeState.startIntent(match.id, round.round_number, side);
-        if (!intent) return false;
-        const alreadyAuthoritative = withoutOrphans.attempts[side].some(
-          (attempt) => attempt.startEventId === intent.eventId,
-        );
-        const hardExpired =
-          now.getTime() - intent.observedAtMs >= ATTEMPT_START_INTENT_HARD_TTL_MS;
-        const validStart = intent.startedAtMs < startDeadlineMs;
-        if (alreadyAuthoritative || hardExpired || !validStart) {
-          this.runtimeState.clearStartIntent(match.id, round.round_number, side, intent.eventId);
-          return false;
-        }
-        return true;
-      });
-      if (pendingStartIntent && now.getTime() >= startDeadlineMs) {
-        // A client-side visual attempt was observed before the real start
-        // deadline. Keep the round open while the serialized authoritative
-        // Start request catches up; no new gameplay start is granted here.
+      const pendingStartLease = await this.hasPendingStartLease(
+        transaction,
+        match,
+        round,
+        withoutOrphans,
+        now,
+      );
+      if (pendingStartLease && now.getTime() >= startDeadlineMs) {
+        // A visual Start lease was server-observed before the real start deadline.
+        // Keep the round open while the serialized authoritative Start/End journal
+        // catches up. Leases live in PostgreSQL, so a Render restart cannot erase
+        // the protection and turn a completed Round-2 clear into Score 0.
         return match;
       }
       if (shouldHoldRoundForAttemptTransport(withoutOrphans, now.getTime())) {

@@ -1,3 +1,17 @@
+# v0.4.0-alpha.33
+
+- Added durable PostgreSQL Start Leases for every standard-round visual attempt so a delayed FIFO Start/End cannot be lost when polling reaches a Round result first; leases survive Render process restarts.
+- The client no longer discards completed attempt transport when an authoritative result poll races ahead, and newest lease requests preempt older slow lease HTTP waits.
+- Added idempotent round Start/End reconciliation for lost HTTP acknowledgements.
+- Fixed Death Match visual budgeting so an attempt is consumed only when the new visual Start journal is actually created; the third visual attempt is no longer pre-spent while the server still shows 2/3.
+- Death Match popup usage now includes the viewer's locally-created visual attempt while its server ACK is pending.
+- Keeps the next Round / MATCH POINT / Death Match map card visible for the first 5 seconds before opening the normal LevelInfo/resource gate; the existing total 10-second prepare period and authoritative timer semantics remain unchanged.
+- Replaced Ranked BGM playback through `FMODAudioEngine::playMusic()` with a Ranked-owned direct FMOD streaming Sound/Channel.
+- Added explicit `pauseSound()` handling plus iPadOS/iOS `resumeSound()` recovery, FMOD master-output normalization, playback-position watchdog/retry, and automatic loop recovery.
+- Ranked BGM volume is Geometry Dash's current Music Volume multiplied by 0.80.
+- Ranked resource downloads prefer Geometry Dash's canonical song path and migrate valid old private-cache songs when possible.
+- Added PostgreSQL migration `0002_attempt_start_leases.sql`. Apps Script, scoring/MMR, map pool, ban rules, and FINAL/LAST 10-second start-window rules are unchanged.
+
 # v0.4.0-alpha.32
 
 - Fixed Ranked BGM remaining completely silent even after all configured songs downloaded successfully.

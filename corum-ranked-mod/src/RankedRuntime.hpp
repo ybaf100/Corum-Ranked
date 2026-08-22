@@ -220,12 +220,6 @@ public:
     [[nodiscard]] int currentLevelId() const;
     [[nodiscard]] bool canEnterCurrentLevel() const;
     [[nodiscard]] bool hasLocalAttemptInFlight() const;
-    // Reserve one *visual* Death Match attempt before Geometry Dash starts it.
-    // This client-side budget closes the network-ack race that could otherwise
-    // let a fourth visual attempt begin before the server had acknowledged the
-    // third attempt end. The server remains authoritative and independently
-    // rejects attempt 4+.
-    [[nodiscard]] bool reserveDeathmatchVisualAttempt();
     [[nodiscard]] int localDeathmatchVisualAttemptsUsed() const;
     [[nodiscard]] double localDisplayScore(double progressPercent, std::optional<double> qualifyingPercentOverride = std::nullopt) const;
     [[nodiscard]] int localDisplayClears() const;
@@ -280,7 +274,6 @@ private:
     void flushProgressTelemetry();
     void sendAttemptProgress();
     void cleanupAttemptTransportIfIdle();
-    void abandonFinalizedAttemptTransport();
     [[nodiscard]] bool hasLocalOpenAttempt() const;
     [[nodiscard]] bool canFinishTrackedLevel(int levelId) const;
     [[nodiscard]] std::string currentAttemptContextKey() const;
@@ -323,12 +316,12 @@ private:
     int m_localDeathmatchSequence = 0;
     int m_localDeathmatchVisualAttempts = 0;
     std::uint64_t m_eventSequence = 0;
+    std::uint64_t m_attemptIntentRequestGeneration = 0;
     bool m_controlBusy = false;
     bool m_pollBusy = false;
     bool m_attemptBusy = false;
     bool m_attemptIntentBusy = false;
     bool m_progressBusy = false;
-    bool m_abandonAttemptTransportWhenIdle = false;
     bool m_songBypassAllowed = false;
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_controlRequest;
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_pollRequest;

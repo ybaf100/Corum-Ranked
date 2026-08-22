@@ -6,12 +6,13 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 let database: PGlite | null = null;
 
 beforeAll(async () => {
-  const migrationPath = fileURLToPath(
-    new URL("../../../migrations/0001_initial_ranked.sql", import.meta.url),
-  );
-  const migration = await readFile(migrationPath, "utf8");
   database = new PGlite();
-  await database.exec(migration);
+  for (const migrationName of ["0001_initial_ranked.sql", "0002_attempt_start_leases.sql"]) {
+    const migrationPath = fileURLToPath(
+      new URL(`../../../migrations/${migrationName}`, import.meta.url),
+    );
+    await database.exec(await readFile(migrationPath, "utf8"));
+  }
 }, 60_000);
 
 afterAll(async () => {
@@ -25,6 +26,7 @@ describe("PostgreSQL migration", () => {
       "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename",
     );
     expect(result.rows.map((row) => row.tablename)).toEqual([
+      "ranked_attempt_start_leases",
       "ranked_attempts",
       "ranked_config_snapshots",
       "ranked_deathmatch_attempts",

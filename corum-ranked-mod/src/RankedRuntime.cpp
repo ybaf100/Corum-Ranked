@@ -265,7 +265,10 @@ void RankedRuntime::begin() {
     m_pendingStart.reset();
     m_pendingEnd.reset();
     m_attemptBacklog.clear();
-    if (!m_attemptIntentBusy) m_attemptIntentBacklog.clear();
+    ++m_attemptIntentRequestGeneration;
+    m_attemptIntentRequest.cancel();
+    m_attemptIntentBusy = false;
+    m_attemptIntentBacklog.clear();
     m_pendingProgress.reset();
     m_lastSubmittedProgress = -1;
     m_localDeathmatchSequence = 0;
@@ -870,10 +873,16 @@ void RankedRuntime::parseMatchState(matjson::Value const& root) {
                     m_view.match.state
                 );
             } else {
-                // ROUND/MATCH_RESULT is immutable. Completed packets left only
-                // because an ACK was lost cannot change that result, so keeping
-                // them forever only traps the client on SYNCING RESULT.
-                abandonFinalizedAttemptTransport();
+                // Never discard a completed Start/End merely because polling raced
+                // ahead to a result. The server-side attempt lease/idempotency path
+                // can still reconcile an event that was visually completed first.
+                // Keep delivering until the authoritative endpoint ACKs or returns
+                // a permanent rejection for that exact event.
+                log::warn(
+                    "Authoritative result arrived while completed Ranked attempt transport is still pending: state={}",
+                    m_view.match.state
+                );
+                flushAttemptEvents();
             }
         } else {
             cleanupAttemptTransportIfIdle();
@@ -1073,9 +1082,11 @@ void RankedRuntime::dismissMatch() {
     if (hasLocalAttemptInFlight()) {
         if (hasLocalOpenAttempt()) {
             setTransientError("A final attempt is still active; finish it before leaving the result.");
-            return;
+        } else {
+            setTransientError("Final attempt result is still syncing; wait for server acknowledgement.");
+            flushAttemptEvents();
         }
-        abandonFinalizedAttemptTransport();
+        return;
     }
     if (m_view.match.state == "MATCH_RESULT") {
         auto const ownSide = m_view.match.side;
@@ -1097,6 +1108,9 @@ void RankedRuntime::dismissMatch() {
     m_pendingStart.reset();
     m_pendingEnd.reset();
     m_attemptBacklog.clear();
+    ++m_attemptIntentRequestGeneration;
+    m_attemptIntentRequest.cancel();
+    m_attemptIntentBusy = false;
     m_attemptIntentBacklog.clear();
     m_nextIntentRetryAt = {};
     m_pendingProgress.reset();
@@ -1114,9 +1128,11 @@ void RankedRuntime::queueAgain() {
     if (hasLocalAttemptInFlight()) {
         if (hasLocalOpenAttempt()) {
             setTransientError("A final attempt is still active; finish it before queueing again.");
-            return;
+        } else {
+            setTransientError("Final attempt result is still syncing; wait for server acknowledgement.");
+            flushAttemptEvents();
         }
-        abandonFinalizedAttemptTransport();
+        return;
     }
     dismissMatch();
     joinQueue();
@@ -1259,35 +1275,6 @@ bool RankedRuntime::hasLocalOpenAttempt() const {
     return !m_attemptId.empty() || m_pendingStart.has_value();
 }
 
-void RankedRuntime::abandonFinalizedAttemptTransport() {
-    if (m_attemptBusy) {
-        m_abandonAttemptTransportWhenIdle = true;
-        return;
-    }
-    if (hasLocalAttemptInFlight()) {
-        log::error(
-            "Dropping late Ranked attempt transport after authoritative result: state={} pendingStart={} pendingEnd={} backlog={}",
-            m_view.match.state,
-            m_pendingStart.has_value(),
-            m_pendingEnd.has_value(),
-            m_attemptBacklog.size()
-        );
-    }
-    m_attemptId.clear();
-    m_attemptLevelId = 0;
-    m_attemptContextKey.clear();
-    m_pendingStart.reset();
-    m_pendingEnd.reset();
-    m_attemptBacklog.clear();
-    m_attemptIntentBacklog.clear();
-    m_pendingProgress.reset();
-    m_lastSubmittedProgress = -1;
-    m_nextAttemptRetryAt = {};
-    m_nextIntentRetryAt = {};
-    m_abandonAttemptTransportWhenIdle = false;
-    ++m_view.revision;
-}
-
 std::string RankedRuntime::currentAttemptContextKey() const {
     if (m_view.match.matchId.empty()) return {};
     if (m_view.match.deathmatchSequence > 0) {
@@ -1360,25 +1347,6 @@ bool RankedRuntime::canEnterCurrentLevel() const {
         hasLocalAttemptInFlight()
     ) return false;
 
-    return true;
-}
-
-bool RankedRuntime::reserveDeathmatchVisualAttempt() {
-    if (m_view.match.state != "DEATHMATCH_PLAYING") return true;
-    auto const sequence = m_view.match.deathmatchSequence;
-    if (sequence <= 0) return false;
-    auto const serverUsed = m_view.match.side == "A"
-        ? m_view.match.deathmatchAttemptsUsedA
-        : m_view.match.deathmatchAttemptsUsedB;
-    if (m_localDeathmatchSequence != sequence) {
-        m_localDeathmatchSequence = sequence;
-        m_localDeathmatchVisualAttempts = serverUsed;
-    } else {
-        m_localDeathmatchVisualAttempts = std::max(m_localDeathmatchVisualAttempts, serverUsed);
-    }
-    if (m_localDeathmatchVisualAttempts >= 3) return false;
-    ++m_localDeathmatchVisualAttempts;
-    ++m_view.revision;
     return true;
 }
 
@@ -1460,7 +1428,10 @@ void RankedRuntime::cleanupAttemptTransportIfIdle() {
     m_pendingStart.reset();
     m_pendingEnd.reset();
     m_attemptBacklog.clear();
-    if (!m_attemptIntentBusy) m_attemptIntentBacklog.clear();
+    ++m_attemptIntentRequestGeneration;
+    m_attemptIntentRequest.cancel();
+    m_attemptIntentBusy = false;
+    m_attemptIntentBacklog.clear();
     m_pendingProgress.reset();
     m_lastSubmittedProgress = -1;
     if (
@@ -1501,13 +1472,6 @@ bool RankedRuntime::reportAttemptStart(int levelId) {
         !m_gameplayStartContextKey.empty();
     if ((!canTrackLevel(levelId) || !stateAllowsAttemptStart(m_view.match.state)) && !armedSceneStart) return false;
 
-    if (m_view.match.state == "DEATHMATCH_PLAYING") {
-        auto const serverUsed = m_view.match.side == "A"
-            ? m_view.match.deathmatchAttemptsUsedA
-            : m_view.match.deathmatchAttemptsUsedB;
-        if (serverUsed >= 3) return false;
-    }
-
     // A PlayLayer can retry this call while waiting for the transport. Treat an
     // already registered local start as success instead of creating duplicates.
     if (
@@ -1525,6 +1489,27 @@ bool RankedRuntime::reportAttemptStart(int levelId) {
         return true;
     }
 
+    if (m_view.match.state == "DEATHMATCH_PLAYING") {
+        auto const sequence = m_view.match.deathmatchSequence;
+        if (sequence <= 0) return false;
+        auto const serverUsed = m_view.match.side == "A"
+            ? m_view.match.deathmatchAttemptsUsedA
+            : m_view.match.deathmatchAttemptsUsedB;
+        if (m_localDeathmatchSequence != sequence) {
+            m_localDeathmatchSequence = sequence;
+            m_localDeathmatchVisualAttempts = serverUsed;
+        } else {
+            m_localDeathmatchVisualAttempts = std::max(m_localDeathmatchVisualAttempts, serverUsed);
+        }
+        // Count an attempt exactly when a new visual Start journal entry is
+        // created. The old pre-reservation path counted the next reset before the
+        // visual attempt actually existed, which could make attempt 3 look spent
+        // while the server correctly still showed 2/3.
+        if (m_localDeathmatchVisualAttempts >= 3) return false;
+        ++m_localDeathmatchVisualAttempts;
+        ++m_view.revision;
+    }
+
     auto const observedStartMillis = m_serverClock.serverNowMillis(localNowMillis());
     auto const startContext = armedSceneStart ? m_gameplayStartContextKey : currentAttemptContextKey();
     auto const clientStartedAt = armedSceneStart && !m_gameplayStartedAt.empty()
@@ -1538,16 +1523,13 @@ bool RankedRuntime::reportAttemptStart(int levelId) {
     };
     if (armedSceneStart) m_gameplayStartEligible = false;
 
-    // The ordinary Start/End transport is serialized for exact attempt ordering.
-    // During FINAL/LAST ATTEMPT that serialization can delay a valid visual Start
-    // beyond the 10-second start deadline. Send a lightweight, non-authoritative
-    // start intent immediately so the server knows an already-started attempt is
-    // still in flight and must not finalize the round at the deadline.
-    if (
-        (armedSceneStart && m_gameplayStartNeedsIntent) ||
-        m_view.match.state == "FINAL_ATTEMPT_WINDOW" ||
-        m_view.match.state == "LAST_ATTEMPT_WINDOW"
-    ) {
+    // Start/End delivery remains FIFO, but every standard-round visual Start now
+    // publishes an out-of-band lease immediately. That lease is not a score event;
+    // it only proves that a visual attempt began before the authoritative deadline
+    // while an earlier End/ACK may still be ahead of it in the FIFO. This closes
+    // the Round-2 fast-clear race where polling could finalize the round and the
+    // client would otherwise lose the queued Clear entirely.
+    if (m_view.match.state != "DEATHMATCH_PLAYING") {
         sendAttemptStartIntent(start);
     }
 
@@ -1701,7 +1683,23 @@ void RankedRuntime::sendAttemptStartIntent(PendingStart const& start) {
         m_attemptIntentBacklog.end(),
         [&start](PendingStart const& queued) { return queued.eventId == start.eventId; }
     );
-    if (!exists) m_attemptIntentBacklog.push_back(start);
+    if (exists) return;
+
+    // The lease exists specifically to bypass the serialized Start/End FIFO. A
+    // slow older intent must therefore never head-of-line block the NEW visual
+    // attempt that is currently at risk of crossing the Round deadline. Preempt
+    // the old HTTP wait, put the newest lease first, then reconcile older leases
+    // after it. Server-side idempotency makes a request that raced cancellation
+    // harmless.
+    if (m_attemptIntentBusy) {
+        ++m_attemptIntentRequestGeneration;
+        m_attemptIntentRequest.cancel();
+        m_attemptIntentBusy = false;
+        m_nextIntentRetryAt = {};
+        m_attemptIntentBacklog.push_front(start);
+    } else {
+        m_attemptIntentBacklog.push_back(start);
+    }
     flushAttemptStartIntents();
 }
 
@@ -1711,6 +1709,7 @@ void RankedRuntime::flushAttemptStartIntents() {
         std::chrono::steady_clock::now() < m_nextIntentRetryAt
     ) return;
     auto const start = m_attemptIntentBacklog.front();
+    auto const requestGeneration = ++m_attemptIntentRequestGeneration;
     matjson::Value body;
     body["levelId"] = fmt::format("{}", start.levelId);
     body["clientEventId"] = start.eventId;
@@ -1720,7 +1719,8 @@ void RankedRuntime::flushAttemptStartIntents() {
     m_attemptIntentBusy = true;
     m_attemptIntentRequest.spawn(
         request.post(endpoint("/api/ranked/matches/" + m_view.match.matchId + "/attempt/intent")),
-        [this, start](web::WebResponse response) {
+        [this, start, requestGeneration](web::WebResponse response) {
+            if (requestGeneration != m_attemptIntentRequestGeneration) return;
             m_attemptIntentBusy = false;
             auto const sameFront =
                 !m_attemptIntentBacklog.empty() &&
@@ -1776,10 +1776,6 @@ void RankedRuntime::sendAttemptStart() {
         request.post(endpoint("/api/ranked/matches/" + m_view.match.matchId + "/attempt/start")),
         [this, starting](web::WebResponse response) {
             m_attemptBusy = false;
-            if (m_abandonAttemptTransportWhenIdle) {
-                abandonFinalizedAttemptTransport();
-                return;
-            }
             if (!successful(response)) {
                 auto const reason = responseError(response);
                 if (response.code() == 409) {
@@ -1872,10 +1868,6 @@ void RankedRuntime::sendAttemptEnd() {
         request.post(endpoint("/api/ranked/matches/" + m_view.match.matchId + "/attempt/end")),
         [this, ending](web::WebResponse response) {
             m_attemptBusy = false;
-            if (m_abandonAttemptTransportWhenIdle) {
-                abandonFinalizedAttemptTransport();
-                return;
-            }
             if (!successful(response)) {
                 auto const reason = responseError(response);
                 if (response.code() == 409) {

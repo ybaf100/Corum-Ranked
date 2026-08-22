@@ -149,15 +149,6 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         addRankedHud();
         m_fields->attemptStartReported = false;
         m_fields->attemptEndReported = false;
-        if (runtime.view().match.state == "DEATHMATCH_PLAYING") {
-            // Reserve the visual try before gameplay begins. This local budget is
-            // independent of HTTP acknowledgement latency and therefore prevents
-            // a fourth visual Death Match attempt from appearing on fast resets.
-            if (!runtime.reserveDeathmatchVisualAttempt()) {
-                m_fields->deniedDeathmatchVisualAttempt = true;
-                return true;
-            }
-        }
         m_fields->attemptStartReported = runtime.reportAttemptStart(m_fields->levelId);
         return true;
     }
@@ -283,18 +274,6 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
                     PlayLayer::onQuit();
                 }
                 return;
-            }
-            if (match.state == "DEATHMATCH_PLAYING") {
-                // A reset creates the next *visual* attempt immediately, before the
-                // prior /attempt/end request may be acknowledged. Reserve the next
-                // slot locally first; after attempt 3 this returns false and exits.
-                if (!runtime.reserveDeathmatchVisualAttempt()) {
-                    if (!m_fields->autoExitRequested) {
-                        m_fields->autoExitRequested = true;
-                        PlayLayer::onQuit();
-                    }
-                    return;
-                }
             }
         }
         PlayLayer::resetLevel();

@@ -9,6 +9,11 @@
 #include <string>
 #include <vector>
 
+namespace FMOD {
+class Sound;
+class Channel;
+}
+
 namespace corum::ranked {
 
 enum class RankedAudioMode {
@@ -52,6 +57,8 @@ public:
     void setMode(RankedAudioMode mode);
     void fadeOutForGameplay();
     void restoreMenuMusic();
+    void onApplicationPause();
+    void onApplicationResume();
 
 private:
     RankedAudioManager() = default;
@@ -60,6 +67,7 @@ private:
     [[nodiscard]] bool songReady(int songId) const;
     [[nodiscard]] bool gdSongReady(int songId) const;
     [[nodiscard]] std::filesystem::path cachedSongPath(int songId) const;
+    [[nodiscard]] std::filesystem::path preferredDownloadPath(int songId) const;
     [[nodiscard]] std::string readySongPath(int songId) const;
     [[nodiscard]] std::vector<int> uniqueSongIds() const;
     [[nodiscard]] RankedAudioResourceView const* findResource(std::string const& key) const;
@@ -74,6 +82,13 @@ private:
     void startDesiredAudio(bool retry = false);
     void verifyDesiredAudio();
     void clearPlaybackState();
+    void migratePrivateCacheToGdPath();
+    void stopOwnedAudio();
+    [[nodiscard]] bool ownedChannelPlaying() const;
+    [[nodiscard]] float targetRankedVolume() const;
+    void ensureFmodOutputActive() const;
+    void beginOwnedFadeOut(double seconds);
+    void updateOwnedFades(std::chrono::steady_clock::time_point now);
 
     RankedClientPresentationView m_config;
     std::string m_configSignature;
@@ -96,6 +111,16 @@ private:
     std::chrono::steady_clock::time_point m_playbackVerifyAt {};
     int m_playbackRetryCount = 0;
     unsigned int m_pendingStartMs = 0;
+    unsigned int m_playbackVerifyStartPositionMs = 0;
+
+    FMOD::Sound* m_rankedSound = nullptr;
+    FMOD::Channel* m_rankedChannel = nullptr;
+    bool m_ownedFadeInPending = false;
+    bool m_ownedFadeOutPending = false;
+    std::chrono::steady_clock::time_point m_ownedFadeStartedAt {};
+    double m_ownedFadeDurationSeconds = 0.0;
+    float m_ownedFadeStartVolume = 0.8f;
+    bool m_resumeRecoveryRequested = false;
 };
 
 } // namespace corum::ranked

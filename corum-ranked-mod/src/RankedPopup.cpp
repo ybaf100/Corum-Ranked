@@ -993,13 +993,19 @@ class CorumRankedLayer final : public CCLayerColor {
         title->limitLabelWidth(size.width - 180.0f, deathmatch ? 0.62f : 0.56f, 0.34f);
         m_root->addChild(title, 6);
 
+        auto displayDeathmatchUsedA = match.deathmatchAttemptsUsedA;
+        auto displayDeathmatchUsedB = match.deathmatchAttemptsUsedB;
         if (deathmatch) {
+            auto const localOwnUsed = RankedRuntime::get().localDeathmatchVisualAttemptsUsed();
+            if (ownA) displayDeathmatchUsedA = std::max(displayDeathmatchUsedA, localOwnUsed);
+            else displayDeathmatchUsedB = std::max(displayDeathmatchUsedB, localOwnUsed);
+
             auto* sub = makeLabel("3 ATTEMPTS", 0.27f, {size.width / 2.0f, size.height - 52.0f}, kCyan, "goldFont.fnt");
             m_root->addChild(sub, 6);
             auto* attemptsPlate = makeNeonPanel({132.0f, 24.0f}, {size.width / 2.0f, size.height - 72.0f}, kBlue, {8, 18, 38}, 245);
             m_root->addChild(attemptsPlate, 2);
             auto* attempts = makeLabel(
-                fmt::format("A  {}/3    |    B  {}/3", match.deathmatchAttemptsUsedA, match.deathmatchAttemptsUsedB),
+                fmt::format("A  {}/3    |    B  {}/3", displayDeathmatchUsedA, displayDeathmatchUsedB),
                 0.18f,
                 {size.width / 2.0f, size.height - 72.0f},
                 ccc3(226, 232, 245)
@@ -1090,8 +1096,8 @@ class CorumRankedLayer final : public CCLayerColor {
         std::string footer = fmt::format("STARTS IN  {:02d}", seconds);
         ccColor3B footerAccent = seconds <= 3 ? kSideRed : kBlue;
         if (match.state == "DEATHMATCH_PLAYING") {
-            auto const ownUsed = ownA ? match.deathmatchAttemptsUsedA : match.deathmatchAttemptsUsedB;
-            auto const opponentUsed = ownA ? match.deathmatchAttemptsUsedB : match.deathmatchAttemptsUsedA;
+            auto const ownUsed = ownA ? displayDeathmatchUsedA : displayDeathmatchUsedB;
+            auto const opponentUsed = ownA ? displayDeathmatchUsedB : displayDeathmatchUsedA;
             footer = ownUsed >= 3
                 ? fmt::format("WAITING FOR OPPONENT   {}/3", opponentUsed)
                 : fmt::format("ATTEMPT  {}  OF  3", std::min(3, ownUsed + 1));
@@ -1468,10 +1474,13 @@ class CorumRankedLayer final : public CCLayerColor {
         }
         if (match.state != "ROUND_PREPARE" && match.state != "DEATHMATCH_PREPARE") return;
 
-        // Preparation now happens entirely on the real LevelInfoLayer. Opening
-        // that page immediately lets Geometry Dash own the selected map download,
-        // exposes only its vanilla song-download control, shows the countdown, and
-        // auto-enters Play when the server starts the round.
+        // Keep the Ranked map card on screen for the first five seconds so the
+        // player can actually read the next map / MATCH POINT / Death Match info.
+        // The existing 10-second prepare countdown is preserved: after these five
+        // seconds, LevelInfoLayer receives the remaining ~5 seconds. Because Ready
+        // is not submitted until that gate finishes, the authoritative round timer
+        // still cannot start during this display period.
+        if (phaseSeconds() < 5.0) return;
         openSongDownloadGate();
     }
 

@@ -22,8 +22,9 @@ constexpr auto kSongInfoTimeout = std::chrono::seconds(20);
 constexpr auto kSongFileTimeout = std::chrono::seconds(90);
 constexpr auto kDownloadGuardTimeout = std::chrono::seconds(105);
 constexpr std::uintmax_t kMinimumCachedSongBytes = 1024;
-constexpr auto kPlaybackVerifyDelay = std::chrono::milliseconds(700);
+constexpr auto kPlaybackVerifyDelay = std::chrono::milliseconds(1000);
 constexpr int kMaxPlaybackRetries = 2;
+constexpr float kRankedRelativeVolume = 0.80f;
 constexpr char kSongInfoEndpoint[] = "https://www.boomlings.com/database/getGJSongInfo.php";
 constexpr char kGdSecret[] = "Wmfd2893gb7";
 
@@ -132,21 +133,15 @@ void RankedAudioManager::configure(RankedClientPresentationView const& config) {
     auto const signature = configSignature(config);
     if (signature == m_configSignature) return;
 
-    auto const wasOwningMusic = m_ownsMusicChannel;
     cancelActiveDownload();
+    stopOwnedAudio();
     m_config = config;
     m_configSignature = signature;
+    migratePrivateCacheToGdPath();
     m_downloadQueue.clear();
     m_failedSongIds.clear();
     m_downloadState = resourcesReady() ? RankedResourceDownloadState::Ready : RankedResourceDownloadState::Idle;
 
-    if (wasOwningMusic) {
-        if (auto* engine = FMODAudioEngine::sharedEngine()) {
-            engine->fadeOutMusic(static_cast<float>(std::max(0.0, m_config.audio.fadeOutSeconds)), 0);
-        }
-        m_ownsMusicChannel = false;
-        m_playingKey.clear();
-    }
     m_switchPending = false;
     m_playbackVerifyPending = false;
     m_playbackVerifyAt = {};
@@ -182,12 +177,27 @@ std::filesystem::path RankedAudioManager::cachedSongPath(int songId) const {
     return mod->getSaveDir() / "ranked-audio" / (std::to_string(songId) + ".mp3");
 }
 
+std::filesystem::path RankedAudioManager::preferredDownloadPath(int songId) const {
+    if (songId > 0) {
+        if (auto* manager = MusicDownloadManager::sharedState()) {
+            auto const gdPath = manager->pathForSong(songId);
+            if (!gdPath.empty()) return std::filesystem::path(gdPath.c_str());
+        }
+    }
+    return cachedSongPath(songId);
+}
+
 std::string RankedAudioManager::readySongPath(int songId) const {
     if (songId <= 0) return {};
-    if (gdSongReady(songId)) {
-        if (auto* manager = MusicDownloadManager::sharedState()) {
-            auto const path = manager->pathForSong(songId);
-            if (!path.empty()) return path;
+    if (auto* manager = MusicDownloadManager::sharedState()) {
+        auto const path = manager->pathForSong(songId);
+        if (!path.empty()) {
+            auto const fsPath = std::filesystem::path(path.c_str());
+            // Trust built-in resource songs, and also accept a valid on-disk song
+            // even if GD's in-memory "downloaded" state has not refreshed yet.
+            if (manager->isResourceSong(songId) || manager->isSongDownloaded(songId) || usableFile(fsPath)) {
+                return path;
+            }
         }
     }
     auto const cached = cachedSongPath(songId);
@@ -321,7 +331,7 @@ void RankedAudioManager::downloadSongFile(int songId, std::string url) {
         }
     });
 
-    log::info("Ranked audio: downloading GD song {} to private cache", songId);
+    log::info("Ranked audio: downloading GD song {}", songId);
     m_songFileRequest.spawn(
         request.get(std::move(url)),
         [this, generation, songId](web::WebResponse response) {
@@ -331,15 +341,15 @@ void RankedAudioManager::downloadSongFile(int songId, std::string url) {
                 return;
             }
 
-            auto const target = cachedSongPath(songId);
+            auto const target = preferredDownloadPath(songId);
             if (target.empty()) {
-                finishDownloadFailure(songId, "cache path unavailable");
+                finishDownloadFailure(songId, "song path unavailable");
                 return;
             }
             std::error_code ec;
             std::filesystem::create_directories(target.parent_path(), ec);
             if (ec) {
-                finishDownloadFailure(songId, "failed to create audio cache directory");
+                finishDownloadFailure(songId, "failed to create song directory");
                 return;
             }
             auto write = response.into(target);
@@ -355,7 +365,7 @@ void RankedAudioManager::downloadSongFile(int songId, std::string url) {
 
 void RankedAudioManager::finishDownloadSuccess(int songId) {
     if (songId != m_activeDownloadSongId) return;
-    log::info("Ranked audio: GD song {} cached successfully", songId);
+    log::info("Ranked audio: GD song {} saved successfully", songId);
     m_failedSongIds.erase(songId);
     m_activeDownloadProgress = 100;
     m_activeDownloadSongId = 0;
@@ -403,107 +413,255 @@ void RankedAudioManager::setMode(RankedAudioMode mode) {
     if (!enabled() || !resourcesReady()) mode = RankedAudioMode::Silent;
     auto const* desired = resourceForMode(mode);
     auto const desiredKey = desired ? desired->key : std::string();
-    if (mode == m_desiredMode && ((!desired && !m_ownsMusicChannel) || (desired && desiredKey == m_playingKey))) {
-        return;
+
+    if (mode == m_desiredMode) {
+        if (m_switchPending || m_ownedFadeOutPending || m_playbackVerifyPending) return;
+        if (!desired && !m_ownsMusicChannel) return;
+        if (desired && desiredKey == m_playingKey && ownedChannelPlaying()) return;
     }
+
     m_desiredMode = mode;
     requestAudioSwitch();
 }
 
-void RankedAudioManager::clearPlaybackState() {
+bool RankedAudioManager::ownedChannelPlaying() const {
+    if (!m_rankedChannel) return false;
+    bool playing = false;
+    bool paused = false;
+    bool muted = false;
+    if (m_rankedChannel->isPlaying(&playing) != FMOD_OK || !playing) return false;
+    if (m_rankedChannel->getPaused(&paused) != FMOD_OK || paused) return false;
+    if (m_rankedChannel->getMute(&muted) != FMOD_OK || muted) return false;
+    return true;
+}
+
+float RankedAudioManager::targetRankedVolume() const {
+    auto* engine = FMODAudioEngine::sharedEngine();
+    auto const gdMusicVolume = engine ? std::clamp(engine->m_musicVolume, 0.0f, 1.0f) : 1.0f;
+    return gdMusicVolume * kRankedRelativeVolume;
+}
+
+void RankedAudioManager::ensureFmodOutputActive() const {
+    auto* engine = FMODAudioEngine::sharedEngine();
+    if (!engine || !engine->m_system) return;
+
+    // iOS/iPadOS can leave the FMOD master group paused/muted across scene/audio
+    // lifecycle transitions even while an individual Channel reports itself as
+    // playing. Geometry Dash's background -> foreground resume path clears this,
+    // which is why alpha.32 could suddenly become audible only after minimizing
+    // the app once. Ranked explicitly normalizes the active-game output group.
+    FMOD::ChannelGroup* master = nullptr;
+    if (engine->m_system->getMasterChannelGroup(&master) == FMOD_OK && master) {
+        master->setPaused(false);
+        master->setMute(false);
+    }
+}
+
+void RankedAudioManager::stopOwnedAudio() {
+    if (m_rankedChannel) {
+        m_rankedChannel->stop();
+        m_rankedChannel = nullptr;
+    }
+    if (m_rankedSound) {
+        m_rankedSound->release();
+        m_rankedSound = nullptr;
+    }
     m_ownsMusicChannel = false;
     m_playingKey.clear();
     m_playbackVerifyPending = false;
     m_playbackVerifyAt = {};
     m_pendingStartMs = 0;
+    m_playbackVerifyStartPositionMs = 0;
+    m_ownedFadeInPending = false;
+    m_ownedFadeOutPending = false;
+    m_ownedFadeStartedAt = {};
+    m_ownedFadeDurationSeconds = 0.0;
+    // Avoid touching the Geometry Dash audio singleton during teardown.
+    m_ownedFadeStartVolume = kRankedRelativeVolume;
+}
+
+void RankedAudioManager::clearPlaybackState() {
+    stopOwnedAudio();
+}
+
+void RankedAudioManager::migratePrivateCacheToGdPath() {
+    auto* manager = MusicDownloadManager::sharedState();
+    if (!manager) return;
+
+    for (auto const songId : uniqueSongIds()) {
+        auto const privatePath = cachedSongPath(songId);
+        if (!usableFile(privatePath)) continue;
+
+        auto const gdRawPath = manager->pathForSong(songId);
+        if (gdRawPath.empty()) continue;
+        auto const gdPath = std::filesystem::path(gdRawPath.c_str());
+        if (usableFile(gdPath)) continue;
+
+        std::error_code ec;
+        if (!gdPath.parent_path().empty()) {
+            std::filesystem::create_directories(gdPath.parent_path(), ec);
+            if (ec) {
+                log::warn("Ranked audio: failed to create GD song directory for {}: {}", songId, ec.message());
+                continue;
+            }
+        }
+        std::filesystem::copy_file(privatePath, gdPath, std::filesystem::copy_options::overwrite_existing, ec);
+        if (ec || !usableFile(gdPath)) {
+            log::warn("Ranked audio: failed to migrate private song {} into GD song storage", songId);
+            continue;
+        }
+        std::filesystem::remove(privatePath, ec);
+        log::info("Ranked audio: migrated song {} into GD song storage", songId);
+    }
+}
+
+void RankedAudioManager::beginOwnedFadeOut(double seconds) {
+    if (!m_rankedChannel || !ownedChannelPlaying() || seconds <= 0.0) {
+        stopOwnedAudio();
+        return;
+    }
+    float currentVolume = targetRankedVolume();
+    if (m_rankedChannel->getVolume(&currentVolume) != FMOD_OK) currentVolume = targetRankedVolume();
+    m_ownedFadeStartVolume = std::clamp(currentVolume, 0.0f, 1.0f);
+    m_ownedFadeDurationSeconds = seconds;
+    m_ownedFadeStartedAt = std::chrono::steady_clock::now();
+    m_ownedFadeOutPending = true;
+    m_ownedFadeInPending = false;
 }
 
 void RankedAudioManager::requestAudioSwitch() {
     auto const* desired = resourceForMode(m_desiredMode);
     auto const desiredKey = desired ? desired->key : std::string();
-    if (desired && m_ownsMusicChannel && desiredKey == m_playingKey) {
+    if (desired && m_ownsMusicChannel && desiredKey == m_playingKey && ownedChannelPlaying()) {
         m_switchPending = false;
         return;
     }
 
-    auto* engine = FMODAudioEngine::sharedEngine();
-    auto const fadeOut = static_cast<float>(std::max(0.0, m_config.audio.fadeOutSeconds));
-
-    // fadeOutMusic only fades the currently registered music channel; it does not
-    // guarantee that the channel has been removed by the time playMusic is called.
-    // Keep the visual fade here, then startDesiredAudio() hard-stops the old music
-    // before installing the new Ranked stream. This mirrors the stable pattern used
-    // by GD/Geode custom-music screens and avoids a permanently silent channel.
-    if (engine && (desired || m_ownsMusicChannel)) engine->fadeOutMusic(fadeOut, 0);
-
-    clearPlaybackState();
+    auto const fadeOut = std::max(0.0, m_config.audio.fadeOutSeconds);
+    m_playbackVerifyPending = false;
     m_playbackRetryCount = 0;
-    if (!desired) {
-        m_switchPending = false;
+
+    if (m_rankedChannel) {
+        m_switchPending = true;
+        beginOwnedFadeOut(fadeOut);
+        if (!m_ownedFadeOutPending) {
+            m_switchPending = false;
+            if (desired) startDesiredAudio();
+        }
         return;
     }
 
-    m_switchPending = true;
-    m_switchAt = std::chrono::steady_clock::now() +
-        std::chrono::milliseconds(static_cast<int>(std::round(std::max(0.0, m_config.audio.fadeOutSeconds) * 1000.0)));
-    if (m_config.audio.fadeOutSeconds <= 0.0) startDesiredAudio();
+    // No Ranked-owned channel exists, so this is normally the vanilla GD menu
+    // track. Let GD fade it, then hard-stop it immediately before starting the
+    // independent Ranked FMOD stream.
+    if (auto* engine = FMODAudioEngine::sharedEngine(); engine && desired && fadeOut > 0.0) {
+        engine->fadeOutMusic(static_cast<float>(fadeOut), 0);
+        m_switchPending = true;
+        m_switchAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(
+            static_cast<int>(std::round(fadeOut * 1000.0))
+        );
+        return;
+    }
+
+    m_switchPending = false;
+    if (desired) startDesiredAudio();
 }
 
 void RankedAudioManager::startDesiredAudio(bool retry) {
     m_switchPending = false;
     auto const* resource = resourceForMode(m_desiredMode);
     if (!resource || !songReady(resource->songId)) {
-        clearPlaybackState();
+        stopOwnedAudio();
         return;
     }
+
     auto* engine = FMODAudioEngine::sharedEngine();
-    if (!engine) {
-        clearPlaybackState();
+    if (!engine || !engine->m_system) {
+        stopOwnedAudio();
         return;
     }
 
     auto const path = readySongPath(resource->songId);
     if (path.empty()) {
-        clearPlaybackState();
+        stopOwnedAudio();
         return;
     }
 
-    // IMPORTANT: playMusic can fail to take ownership while the previous GD menu
-    // track is still registered/fading. Fully remove it first. The downloaded
-    // Ranked file itself remains on disk and is not affected by stopAllMusic().
+    // Ranked owns its FMOD Sound/Channel directly. This deliberately bypasses
+    // FMODAudioEngine::playMusic(), whose internal music-slot/queue state can
+    // occasionally reject or immediately silence an otherwise valid file.
+    stopOwnedAudio();
     engine->stopAllMusic(true);
-    if (engine->m_backgroundMusicChannel) {
-        // Scene transitions and third-party audio hooks can leave the main music
-        // group paused. A successful playMusic call on a paused group is silent.
-        engine->m_backgroundMusicChannel->setPaused(false);
-        // Respect the user's Geometry Dash music-volume setting while also
-        // recovering from a transition that left the group itself at volume 0.
-        engine->m_backgroundMusicChannel->setVolume(engine->m_musicVolume);
+    ensureFmodOutputActive();
+
+    FMOD_MODE mode = FMOD_CREATESTREAM | FMOD_2D;
+    mode |= resource->loop ? FMOD_LOOP_NORMAL : FMOD_LOOP_OFF;
+
+    FMOD::Sound* sound = nullptr;
+    auto result = engine->m_system->createSound(path.c_str(), mode, nullptr, &sound);
+    if (result != FMOD_OK || !sound) {
+        log::error(
+            "Ranked audio: createSound failed key='{}' song={} result={} path='{}'",
+            resource->key,
+            resource->songId,
+            static_cast<int>(result),
+            path
+        );
+        stopOwnedAudio();
+        return;
+    }
+    if (resource->loop) sound->setLoopCount(-1);
+
+    FMOD::Channel* channel = nullptr;
+    result = engine->m_system->playSound(sound, nullptr, true, &channel);
+    if (result != FMOD_OK || !channel) {
+        log::error(
+            "Ranked audio: playSound failed key='{}' song={} result={} path='{}'",
+            resource->key,
+            resource->songId,
+            static_cast<int>(result),
+            path
+        );
+        sound->release();
+        return;
     }
 
-    auto const fadeIn = retry
-        ? 0.0f
-        : static_cast<float>(std::max(0.0, m_config.audio.fadeInSeconds));
-    log::info(
-        "Ranked audio: play key='{}' song={} path='{}' loop={} fadeIn={} retry={}",
-        resource->key,
-        resource->songId,
-        path,
-        resource->loop,
-        fadeIn,
-        retry
-    );
-    engine->playMusic(path, resource->loop, fadeIn, 0);
+    auto const startMs = static_cast<unsigned int>(std::max(0.0, resource->startSeconds) * 1000.0);
+    if (startMs > 0) {
+        auto const seekResult = channel->setPosition(startMs, FMOD_TIMEUNIT_MS);
+        if (seekResult != FMOD_OK) {
+            log::warn("Ranked audio: seek failed song={} result={}", resource->songId, static_cast<int>(seekResult));
+        }
+    }
 
-    // playMusic may create/load the stream asynchronously. Seek only after the
-    // main music channel is confirmed active; doing it immediately can target the
-    // previous/nonexistent channel on some platforms.
-    m_pendingStartMs = static_cast<unsigned int>(std::max(0.0, resource->startSeconds) * 1000.0);
+    auto const fadeIn = retry ? 0.0 : std::max(0.0, m_config.audio.fadeInSeconds);
+    channel->setVolume(fadeIn > 0.0 ? 0.0f : targetRankedVolume());
+    channel->setMute(false);
+    channel->setPaused(false);
+    m_playbackVerifyStartPositionMs = startMs;
+    engine->m_system->update();
 
+    m_rankedSound = sound;
+    m_rankedChannel = channel;
     m_playingKey = resource->key;
     m_ownsMusicChannel = true;
     m_playbackVerifyPending = true;
     m_playbackVerifyAt = std::chrono::steady_clock::now() + kPlaybackVerifyDelay;
+    m_ownedFadeInPending = fadeIn > 0.0;
+    if (m_ownedFadeInPending) {
+        m_ownedFadeStartedAt = std::chrono::steady_clock::now();
+        m_ownedFadeDurationSeconds = fadeIn;
+    }
+
+    log::info(
+        "Ranked audio: direct FMOD play key='{}' song={} path='{}' loop={} relativeVolume={} retry={}",
+        resource->key,
+        resource->songId,
+        path,
+        resource->loop,
+        targetRankedVolume(),
+        retry
+    );
 }
 
 void RankedAudioManager::verifyDesiredAudio() {
@@ -512,27 +670,22 @@ void RankedAudioManager::verifyDesiredAudio() {
 
     auto const* resource = resourceForMode(m_desiredMode);
     if (!resource || resource->key != m_playingKey) return;
-    auto* engine = FMODAudioEngine::sharedEngine();
-    if (!engine) {
-        clearPlaybackState();
-        return;
+    bool progressed = false;
+    unsigned int positionMs = 0;
+    if (ownedChannelPlaying() && m_rankedChannel &&
+        m_rankedChannel->getPosition(&positionMs, FMOD_TIMEUNIT_MS) == FMOD_OK) {
+        // A loop can wrap below the configured start offset. Either a meaningful
+        // forward delta or a wrap proves that the stream clock is actually moving.
+        progressed = positionMs < m_playbackVerifyStartPositionMs ||
+            positionMs >= m_playbackVerifyStartPositionMs + 20;
     }
-    auto const path = readySongPath(resource->songId);
-    if (path.empty()) {
-        clearPlaybackState();
-        return;
-    }
-
-    bool isPlaying = false;
-    if (auto* channel = engine->getActiveMusicChannel(0)) {
-        channel->isPlaying(&isPlaying);
-    }
-    if (isPlaying) {
-        if (m_pendingStartMs > 0) {
-            engine->setMusicTimeMS(m_pendingStartMs, true, 0);
-            m_pendingStartMs = 0;
-        }
-        log::info("Ranked audio: playback verified for key='{}' song={}", resource->key, resource->songId);
+    if (ownedChannelPlaying() && progressed) {
+        log::info(
+            "Ranked audio: direct playback verified for key='{}' song={} position={}ms",
+            resource->key,
+            resource->songId,
+            positionMs
+        );
         m_playbackRetryCount = 0;
         return;
     }
@@ -540,7 +693,7 @@ void RankedAudioManager::verifyDesiredAudio() {
     if (m_playbackRetryCount < kMaxPlaybackRetries) {
         ++m_playbackRetryCount;
         log::warn(
-            "Ranked audio: playback did not become active for key='{}' song={}; retry {}/{}",
+            "Ranked audio: direct playback inactive for key='{}' song={}; retry {}/{}",
             resource->key,
             resource->songId,
             m_playbackRetryCount,
@@ -551,38 +704,76 @@ void RankedAudioManager::verifyDesiredAudio() {
     }
 
     log::error(
-        "Ranked audio: playback failed after {} retries for key='{}' song={} path='{}'",
+        "Ranked audio: direct playback failed after {} retries for key='{}' song={}",
         kMaxPlaybackRetries,
         resource->key,
-        resource->songId,
-        path
+        resource->songId
     );
-    // Do not pretend that audio is playing. Clearing this state allows a later
-    // mode sync (or scene transition) to attempt playback again instead of being
-    // permanently stuck in the silent 'already playing' state.
-    clearPlaybackState();
+    stopOwnedAudio();
+}
+
+void RankedAudioManager::updateOwnedFades(std::chrono::steady_clock::time_point now) {
+    if (m_ownedFadeOutPending && m_rankedChannel) {
+        auto const elapsed = std::chrono::duration<double>(now - m_ownedFadeStartedAt).count();
+        auto const t = m_ownedFadeDurationSeconds <= 0.0
+            ? 1.0
+            : std::clamp(elapsed / m_ownedFadeDurationSeconds, 0.0, 1.0);
+        m_rankedChannel->setVolume(m_ownedFadeStartVolume * static_cast<float>(1.0 - t));
+        if (t >= 1.0) {
+            m_ownedFadeOutPending = false;
+            stopOwnedAudio();
+            m_switchPending = false;
+            if (resourceForMode(m_desiredMode)) startDesiredAudio();
+        }
+        return;
+    }
+
+    if (m_ownedFadeInPending && m_rankedChannel) {
+        auto const elapsed = std::chrono::duration<double>(now - m_ownedFadeStartedAt).count();
+        auto const t = m_ownedFadeDurationSeconds <= 0.0
+            ? 1.0
+            : std::clamp(elapsed / m_ownedFadeDurationSeconds, 0.0, 1.0);
+        m_rankedChannel->setVolume(targetRankedVolume() * static_cast<float>(t));
+        if (t >= 1.0) m_ownedFadeInPending = false;
+    }
 }
 
 void RankedAudioManager::fadeOutForGameplay() {
+    // The Ranked layer stops ticking as soon as GD pushes the LevelInfo/Play
+    // scene, so a tick-driven fade could otherwise strand the custom channel in
+    // the gameplay scene. Stop it deterministically before handing audio back to GD.
     m_desiredMode = RankedAudioMode::Silent;
-    requestAudioSwitch();
+    m_switchPending = false;
+    stopOwnedAudio();
+}
+
+void RankedAudioManager::onApplicationPause() {
+    // Ranked owns this FMOD channel outside Geometry Dash's normal music-slot
+    // registry, so pause it explicitly when the app audio session is suspended.
+    // This prevents the direct stream from escaping GD's normal background-audio
+    // lifecycle on platforms where pauseSound() only visits registered channels.
+    if (m_rankedChannel) m_rankedChannel->setPaused(true);
+}
+
+void RankedAudioManager::onApplicationResume() {
+    // iOS/iPadOS may leave an FMOD channel paused after returning from the
+    // background even though the Sound itself is still valid. Defer recovery to
+    // the next Ranked tick, after Geometry Dash has completed resumeSound().
+    m_resumeRecoveryRequested = true;
 }
 
 void RankedAudioManager::restoreMenuMusic() {
-    if (auto* engine = FMODAudioEngine::sharedEngine()) {
-        // Ranked can leave the main music slot in a faded/stopped transitional
-        // state. Tear it down before asking GameManager to recreate menu music.
-        engine->stopAllMusic(true);
-    }
     m_desiredMode = RankedAudioMode::Silent;
     m_switchPending = false;
     m_playbackRetryCount = 0;
-    clearPlaybackState();
+    stopOwnedAudio();
+    if (auto* engine = FMODAudioEngine::sharedEngine()) engine->stopAllMusic(true);
     if (auto* game = GameManager::sharedState()) game->playMenuMusic();
 }
 
 void RankedAudioManager::tick() {
     auto const now = std::chrono::steady_clock::now();
+    updateOwnedFades(now);
 
     if (m_activeDownloadSongId > 0 &&
         m_downloadStartedAt != std::chrono::steady_clock::time_point{} &&
@@ -600,8 +791,41 @@ void RankedAudioManager::tick() {
         m_failedSongIds.clear();
     }
 
-    if (m_switchPending && now >= m_switchAt) startDesiredAudio();
+    if (m_resumeRecoveryRequested) {
+        m_resumeRecoveryRequested = false;
+        if (m_desiredMode != RankedAudioMode::Silent && resourceForMode(m_desiredMode)) {
+            ensureFmodOutputActive();
+            if (m_rankedChannel) {
+                m_rankedChannel->setPaused(false);
+                m_rankedChannel->setMute(false);
+            }
+            if (!ownedChannelPlaying()) {
+                log::warn("Ranked audio: recovering channel after application resume");
+                startDesiredAudio(true);
+            }
+        }
+    }
+
+    // Respect the player's live Geometry Dash music-volume setting. Ranked's
+    // own mix is intentionally 80% of that value. Do not fight an active fade.
+    if (m_rankedChannel && !m_ownedFadeInPending && !m_ownedFadeOutPending) {
+        ensureFmodOutputActive();
+        m_rankedChannel->setPaused(false);
+        m_rankedChannel->setMute(false);
+        m_rankedChannel->setVolume(targetRankedVolume());
+    }
+
+    if (m_switchPending && !m_ownedFadeOutPending && now >= m_switchAt) startDesiredAudio();
     if (m_playbackVerifyPending && now >= m_playbackVerifyAt) verifyDesiredAudio();
+
+    // If another scene/mod unexpectedly kills the direct Ranked channel, recover
+    // looped menu/match/result BGM instead of remaining silently "owned" forever.
+    if (m_ownsMusicChannel && !m_ownedFadeOutPending && !m_playbackVerifyPending) {
+        if (auto const* resource = resourceForMode(m_desiredMode); resource && resource->loop && !ownedChannelPlaying()) {
+            log::warn("Ranked audio: owned channel stopped unexpectedly; restarting key='{}' song={}", resource->key, resource->songId);
+            startDesiredAudio(true);
+        }
+    }
 }
 
 } // namespace corum::ranked
