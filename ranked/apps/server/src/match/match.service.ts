@@ -2074,24 +2074,35 @@ export class MatchService {
           lastAttemptWindow: domain?.lastAttemptWindow ?? null,
           outcome: domain?.outcome ?? null,
         };
-        if (
-          (domain?.phase === "LAST_ATTEMPT_WINDOW" || domain?.phase === "ROUND_SETTLING") &&
-          domain.lastAttemptWindow?.triggerSide === viewerSide &&
-          domain.lastAttemptWindow.targetSide === opponentSide &&
-          domain.clears[viewerSide] === 2 &&
-          domain.clears[opponentSide] <= 1
-        ) {
-          const progress = this.runtimeState.progress(
-            match.id,
-            round.round_number,
-            opponentSide,
-          );
-          const opponent = opponentSide === "A" ? playerA : playerB;
-          spectator = {
-            active: true,
-            opponentName: opponent?.gd_username ?? "Opponent",
-            currentProgress: progress?.progressPercent ?? null,
-          };
+        if (domain) {
+          const viewerProgress = viewerSide === "A" ? progressA : progressB;
+          const opponentProgress = opponentSide === "A" ? progressA : progressB;
+
+          const lastAttemptSpectator =
+            (domain.phase === "LAST_ATTEMPT_WINDOW" || domain.phase === "ROUND_SETTLING") &&
+            domain.lastAttemptWindow?.triggerSide === viewerSide &&
+            domain.lastAttemptWindow.targetSide === opponentSide &&
+            domain.clears[viewerSide] === 2 &&
+            domain.clears[opponentSide] <= 1;
+
+          // Once the normal 3:00 + final-start window has expired, no new
+          // attempts may begin. If this viewer has no active attempt but the
+          // opponent still has an accepted attempt running, switch the viewer to
+          // a read-only live-progress spectator view until that attempt ends.
+          const finalWindowSpectator =
+            domain.phase === "ROUND_SETTLING" &&
+            domain.lastAttemptWindow === null &&
+            !viewerProgress &&
+            Boolean(opponentProgress);
+
+          if (lastAttemptSpectator || finalWindowSpectator) {
+            const opponent = opponentSide === "A" ? playerA : playerB;
+            spectator = {
+              active: true,
+              opponentName: opponent?.gd_username ?? "Opponent",
+              currentProgress: opponentProgress?.progressPercent ?? null,
+            };
+          }
         }
       }
     }

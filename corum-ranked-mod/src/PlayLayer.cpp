@@ -233,6 +233,20 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
     }
 
     void destroyPlayer(PlayerObject* player, GameObject* object) {
+        // Geometry Dash deliberately calls destroyPlayer() for its internal
+        // anti-cheat verification spike and then returns without killing the
+        // player. Treating that callback as a real death closes the Ranked
+        // attempt near 0%, after which every real progress/death/clear event is
+        // ignored. This was the root cause of the human side staying at Score 0
+        // while the server-driven Debug Bot continued scoring normally.
+        if (
+            object && m_anticheatSpike &&
+            object->m_uniqueID == m_anticheatSpike->m_uniqueID
+        ) {
+            PlayLayer::destroyPlayer(player, object);
+            return;
+        }
+
         if (m_fields->rankedLevel && !m_isPracticeMode && !m_isTestMode && !m_fields->attemptEndReported) {
             auto const progress = rankedProgressPercent(this);
             m_fields->attemptEndReported = corum::ranked::RankedRuntime::get().reportAttemptEnd(
@@ -382,13 +396,13 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         background->setOpacity(220);
         m_fields->spectatorPanel->addChild(background, 0);
 
-        auto* waiting = label("WAITING FOR OPPONENT", "goldFont.fnt", 0.28f, {0.5f, 0.5f}, {0.0f, 32.0f});
+        auto* waiting = label("SPECTATING OPPONENT", "goldFont.fnt", 0.28f, {0.5f, 0.5f}, {0.0f, 32.0f});
         m_fields->spectatorPanel->addChild(waiting, 2);
         m_fields->spectatorNameLabel = label("OPPONENT", "bigFont.fnt", 0.27f, {0.5f, 0.5f}, {0.0f, 15.0f});
         m_fields->spectatorPanel->addChild(m_fields->spectatorNameLabel, 2);
         m_fields->spectatorProgressLabel = label("CURRENT : -", "bigFont.fnt", 0.42f, {0.5f, 0.5f}, {0.0f, -5.0f});
         m_fields->spectatorPanel->addChild(m_fields->spectatorProgressLabel, 2);
-        auto* lastAttempt = label("LAST ATTEMPT", "goldFont.fnt", 0.25f, {0.5f, 0.5f}, {-22.0f, -29.0f});
+        auto* lastAttempt = label("LIVE PROGRESS", "goldFont.fnt", 0.25f, {0.5f, 0.5f}, {-22.0f, -29.0f});
         m_fields->spectatorPanel->addChild(lastAttempt, 2);
         m_fields->spectatorTimerLabel = label("-", "bigFont.fnt", 0.3f, {0.0f, 0.5f}, {34.0f, -29.0f});
         m_fields->spectatorPanel->addChild(m_fields->spectatorTimerLabel, 2);

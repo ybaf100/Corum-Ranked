@@ -148,7 +148,7 @@ int pollIntervalMillis(bool spectatorActive = false) {
         250,
         5000
     );
-    return spectatorActive ? std::min(configured, 250) : configured;
+    return spectatorActive ? std::min(configured, 150) : configured;
 }
 
 web::WebRequest baseRequest(std::string const& sessionToken, std::string const& matchToken = {}) {

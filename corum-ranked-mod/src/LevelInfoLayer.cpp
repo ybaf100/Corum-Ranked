@@ -88,28 +88,47 @@ bool consumePrepareGateRequest(GJGameLevel* level, double& countdownRemainingSec
     return true;
 }
 
-void setMenusEnabled(CCNode* root, bool enabled) {
+void setMenuItemsEnabled(CCNode* root, bool enabled) {
     if (!root) return;
-    if (auto* menu = typeinfo_cast<CCMenu*>(root)) menu->setTouchEnabled(enabled);
+    if (auto* item = typeinfo_cast<CCMenuItem*>(root)) item->setEnabled(enabled);
     for (CCNode* child : root->getChildrenExt()) {
-        if (child) setMenusEnabled(child, enabled);
+        if (child) setMenuItemsEnabled(child, enabled);
     }
 }
 
-// Disable every vanilla LevelInfo menu while preparing, then selectively restore
-// the actual Geometry Dash song widget. This leaves map download fully owned by
-// LevelInfoLayer while preventing Play/Back/Like/etc. from being tapped early.
-void lockInteractionToSong(CCNode* root, CCNode* songWidget) {
-    if (!root) return;
-    setMenusEnabled(root, false);
+void enableSongAcquisitionControls(CustomSongWidget* songWidget) {
     if (!songWidget) return;
 
-    // If a parent menu owns the widget, it must stay enabled for the child's
-    // vanilla song download controls to receive touches.
-    for (CCNode* node = songWidget; node && node != root; node = node->getParent()) {
-        if (auto* menu = typeinfo_cast<CCMenu*>(node)) menu->setTouchEnabled(true);
-    }
-    setMenusEnabled(songWidget, true);
+    // CustomSongWidget is a CCNode with its own button menu. Disabling parent
+    // CCMenu touch dispatch (the alpha.21 approach) can leave the visible song
+    // download button completely inert. Keep menu dispatch alive and gate at the
+    // individual menu-item level instead.
+    if (songWidget->m_buttonMenu) songWidget->m_buttonMenu->setTouchEnabled(true);
+
+    auto enable = [](CCMenuItemSpriteExtra* item) {
+        if (!item) return;
+        item->setEnabled(true);
+    };
+    enable(songWidget->m_downloadBtn);
+    enable(songWidget->m_cancelDownloadBtn);
+    enable(songWidget->m_getSongInfoBtn);
+}
+
+// During prepare, leave Cocos menu touch dispatch enabled and disable the actual
+// menu items instead. Then explicitly restore only the vanilla song acquisition
+// controls. This makes the on-screen GD download button clickable while blocking
+// Play / Back / Like / Info / leaderboard / refresh and every other menu action.
+void lockInteractionToSong(CCNode* root, CustomSongWidget* songWidget) {
+    if (!root) return;
+    setMenuItemsEnabled(root, false);
+    enableSongAcquisitionControls(songWidget);
+}
+
+void unlockRankedPrepareInteraction(CCNode* root) {
+    // The gate is torn down immediately before vanilla onPlay(), so restoring the
+    // menu items here is safe and avoids carrying disabled controls into the
+    // normal Geometry Dash scene stack.
+    setMenuItemsEnabled(root, true);
 }
 
 CCLabelBMFont* gateLabel(std::string const& text, float scale, CCPoint position, ccColor3B color = {255, 255, 255}) {
@@ -118,6 +137,32 @@ CCLabelBMFont* gateLabel(std::string const& text, float scale, CCPoint position,
     label->setColor(color);
     label->setPosition(position);
     return label;
+}
+
+CCNode* gatePanel(CCSize size, CCPoint position, ccColor3B accent = {52, 214, 255}) {
+    auto* node = CCNode::create();
+    node->setContentSize(size);
+    node->setAnchorPoint({0.5f, 0.5f});
+    node->setPosition(position);
+
+    auto makeSlice = [](CCSize sliceSize, ccColor3B color, GLubyte opacity) {
+        auto* sprite = CCScale9Sprite::create("square02_001.png", {0.0f, 0.0f, 80.0f, 80.0f});
+        sprite->setContentSize(sliceSize);
+        sprite->setColor(color);
+        sprite->setOpacity(opacity);
+        return sprite;
+    };
+
+    auto* glow = makeSlice(size, accent, 105);
+    glow->setPosition({size.width / 2.0f, size.height / 2.0f});
+    node->addChild(glow, 0);
+    auto* inner = makeSlice({size.width - 4.0f, size.height - 4.0f}, {7, 18, 40}, 242);
+    inner->setPosition({size.width / 2.0f, size.height / 2.0f});
+    node->addChild(inner, 1);
+    auto* line = makeSlice({size.width - 14.0f, 2.0f}, accent, 220);
+    line->setPosition({size.width / 2.0f, size.height - 4.0f});
+    node->addChild(line, 2);
+    return node;
 }
 
 } // namespace
@@ -156,6 +201,8 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         SteadyClock::time_point mapDownloadStartedAt {};
         SteadyClock::time_point lastMapDownloadRequestAt {};
         SteadyClock::time_point songWaitStartedAt {};
+        CCNode* gateOverlay = nullptr;
+        CCLabelBMFont* gateTitle = nullptr;
         CCLabelBMFont* gateStatus = nullptr;
         CCLabelBMFont* gateCountdown = nullptr;
     };
@@ -188,16 +235,21 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
 
         auto const size = CCDirector::sharedDirector()->getWinSize();
 
-        // Keep the normal Geometry Dash level page visible. Only these small
-        // Ranked labels are added in otherwise unused space; no full-screen mask
-        // is used anymore.
-        m_fields->gateStatus = gateLabel("DOWNLOADING MAP...", 0.22f, {size.width / 2.0f, 47.0f}, {95, 180, 255});
-        m_fields->gateStatus->setZOrder(1002);
-        addChild(m_fields->gateStatus, 1002);
+        // Keep the real Geometry Dash level page visible and add a compact
+        // competitive Ranked banner in the open space above the song widget.
+        // This is intentionally native Cocos/Geode UI, not a screenshot overlay,
+        // so the vanilla song button remains a real interactive control.
+        m_fields->gateOverlay = gatePanel({184.0f, 58.0f}, {size.width / 2.0f, size.height / 2.0f - 53.0f});
+        m_fields->gateOverlay->setZOrder(1001);
+        addChild(m_fields->gateOverlay, 1001);
 
-        m_fields->gateCountdown = gateLabel("STARTS IN...", 0.34f, {size.width / 2.0f, 27.0f}, {255, 216, 86});
-        m_fields->gateCountdown->setZOrder(1002);
-        addChild(m_fields->gateCountdown, 1002);
+        m_fields->gateTitle = gateLabel("RANKED MATCH", 0.19f, {92.0f, 45.0f}, {52, 214, 255});
+        m_fields->gateOverlay->addChild(m_fields->gateTitle, 3);
+        m_fields->gateCountdown = gateLabel("STARTS IN  10", 0.29f, {92.0f, 28.0f}, {255, 216, 86});
+        m_fields->gateOverlay->addChild(m_fields->gateCountdown, 3);
+        m_fields->gateStatus = gateLabel("DOWNLOADING MAP...", 0.15f, {92.0f, 11.0f}, {215, 228, 245});
+        m_fields->gateStatus->limitLabelWidth(168.0f, 0.15f, 0.11f);
+        m_fields->gateOverlay->addChild(m_fields->gateStatus, 3);
 
         lockInteractionToSong(this, m_songWidget);
         requestVanillaMapDownload();
@@ -301,11 +353,11 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
 
         if (m_fields->gateCountdown) {
             if (countdownRemaining > 0) {
-                m_fields->gateCountdown->setString(fmt::format("STARTS IN... {}", countdownRemaining).c_str());
+                m_fields->gateCountdown->setString(fmt::format("STARTS IN  {:02d}", countdownRemaining).c_str());
             } else if (!levelReady) {
-                m_fields->gateCountdown->setString("WAITING FOR MAP...");
+                m_fields->gateCountdown->setString("WAITING FOR MAP");
             } else if (!readyForStart) {
-                m_fields->gateCountdown->setString("WAITING FOR SONG...");
+                m_fields->gateCountdown->setString("WAITING FOR SONG");
             } else {
                 m_fields->gateCountdown->setString("READY");
             }
@@ -355,16 +407,15 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         unschedule(schedule_selector(CorumRankedLevelInfoLayer::updateSongDownloadGate));
 
         // Restore vanilla LevelInfo interaction before invoking its onPlay path.
-        setMenusEnabled(this, true);
+        unlockRankedPrepareInteraction(this);
 
-        if (m_fields->gateStatus) {
-            m_fields->gateStatus->removeFromParentAndCleanup(true);
-            m_fields->gateStatus = nullptr;
+        if (m_fields->gateOverlay) {
+            m_fields->gateOverlay->removeFromParentAndCleanup(true);
+            m_fields->gateOverlay = nullptr;
         }
-        if (m_fields->gateCountdown) {
-            m_fields->gateCountdown->removeFromParentAndCleanup(true);
-            m_fields->gateCountdown = nullptr;
-        }
+        m_fields->gateTitle = nullptr;
+        m_fields->gateStatus = nullptr;
+        m_fields->gateCountdown = nullptr;
     }
 
     void levelDownloadFinished(GJGameLevel* level) override {

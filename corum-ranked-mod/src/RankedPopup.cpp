@@ -42,6 +42,11 @@ constexpr ccColor3B kAccent = {95, 180, 255};
 constexpr ccColor3B kGreen = {78, 232, 112};
 constexpr ccColor3B kRed = {255, 92, 92};
 constexpr ccColor3B kGold = {255, 216, 86};
+constexpr ccColor3B kCyan = {52, 214, 255};
+constexpr ccColor3B kBlue = {53, 128, 255};
+constexpr ccColor3B kDeepPanel = {8, 17, 35};
+constexpr ccColor3B kDeepPanel2 = {13, 25, 47};
+constexpr ccColor3B kSideRed = {255, 76, 89};
 
 std::string shorten(std::string value, std::size_t maximum) {
     if (value.size() <= maximum) return value;
@@ -142,6 +147,57 @@ CCScale9Sprite* makePanel(CCSize size, CCPoint position, ccColor3B color = kPane
     return panel;
 }
 
+CCNode* makeNeonPanel(
+    CCSize size,
+    CCPoint position,
+    ccColor3B accent = kCyan,
+    ccColor3B fill = kDeepPanel,
+    GLubyte fillOpacity = 245
+) {
+    auto* node = CCNode::create();
+    node->setContentSize(size);
+    node->setAnchorPoint({0.5f, 0.5f});
+    node->setPosition(position);
+
+    auto makeSlice = [](CCSize sliceSize, ccColor3B color, GLubyte opacity) {
+        auto* sprite = CCScale9Sprite::create("square02_001.png", {0.0f, 0.0f, 80.0f, 80.0f});
+        sprite->setContentSize(sliceSize);
+        sprite->setColor(color);
+        sprite->setOpacity(opacity);
+        return sprite;
+    };
+
+    auto* glow = makeSlice(size, accent, 105);
+    glow->setPosition({size.width / 2.0f, size.height / 2.0f});
+    node->addChild(glow, 0);
+
+    auto const innerSize = CCSize{std::max(2.0f, size.width - 4.0f), std::max(2.0f, size.height - 4.0f)};
+    auto* inner = makeSlice(innerSize, fill, fillOpacity);
+    inner->setPosition({size.width / 2.0f, size.height / 2.0f});
+    node->addChild(inner, 1);
+
+    auto* topGlow = makeSlice({std::max(2.0f, size.width - 12.0f), 2.0f}, accent, 210);
+    topGlow->setPosition({size.width / 2.0f, size.height - 3.5f});
+    node->addChild(topGlow, 2);
+    return node;
+}
+
+CCNode* makeTextPlate(
+    std::string const& text,
+    CCSize size,
+    CCPoint position,
+    ccColor3B accent,
+    float scale = 0.24f,
+    ccColor3B textColor = {255, 255, 255},
+    char const* font = "bigFont.fnt"
+) {
+    auto* node = makeNeonPanel(size, position, accent, kDeepPanel2, 242);
+    auto* label = makeLabel(text, scale, {size.width / 2.0f, size.height / 2.0f}, textColor, font);
+    label->limitLabelWidth(size.width - 12.0f, scale, std::max(0.12f, scale * 0.65f));
+    node->addChild(label, 4);
+    return node;
+}
+
 char const* buttonBackground(bool danger = false) {
     return danger ? "GJ_button_06.png" : "GJ_button_01.png";
 }
@@ -194,8 +250,12 @@ class CorumRankedLayer final : public CCLayerColor {
             auto const content = background->getContentSize();
             if (content.width > 0.0f) background->setScaleX(winSize.width / content.width);
             if (content.height > 0.0f) background->setScaleY(winSize.height / content.height);
-            background->setColor(ccc3(0, 108, 235));
+            background->setColor(ccc3(0, 78, 205));
             addChild(background, 0);
+        }
+        if (auto* shade = CCLayerColor::create({3, 10, 35, 82})) {
+            shade->setContentSize(winSize);
+            addChild(shade, 0);
         }
 
         m_root = CCNode::create();
@@ -346,34 +406,53 @@ class CorumRankedLayer final : public CCLayerColor {
         int score,
         bool self
     ) {
-        auto* panel = makePanel({148.0f, 158.0f}, center);
+        auto const accent = tierColor(upper(tier));
+        auto* panel = makeNeonPanel({142.0f, 172.0f}, center, accent, kDeepPanel, 247);
         m_root->addChild(panel, 1);
+
+        // Small identity strip: the cards use the player's tier colour as a
+        // persistent accent instead of a plain charcoal rectangle.
+        auto* identityPlate = makeTextPlate(
+            self ? "YOU" : "OPPONENT",
+            {68.0f, 18.0f},
+            {center.x, center.y + 72.0f},
+            accent,
+            0.18f,
+            self ? kGold : ccc3(205, 214, 230)
+        );
+        m_root->addChild(identityPlate, 2);
 
         int frame = 1;
         if (self) {
             if (auto* game = GameManager::sharedState()) frame = std::max(1, game->getPlayerFrame());
         }
+        auto* iconHalo = makeNeonPanel({58.0f, 58.0f}, {center.x, center.y + 34.0f}, accent, {4, 10, 21}, 248);
+        m_root->addChild(iconHalo, 2);
+
         auto* icon = SimplePlayer::create(frame);
-        icon->setScale(1.08f);
-        icon->setPosition({center.x, center.y + 31.0f});
+        icon->setScale(1.10f);
+        icon->setPosition({center.x, center.y + 34.0f});
         if (self) {
             if (auto* game = GameManager::sharedState()) {
                 icon->setColors(game->colorForIdx(game->getPlayerColor()), game->colorForIdx(game->getPlayerColor2()));
             }
         }
-        m_root->addChild(icon, 3);
+        m_root->addChild(icon, 4);
 
-        auto* nameLabel = makeLabel(shorten(name, 15), 0.34f, {center.x, center.y - 35.0f});
-        nameLabel->limitLabelWidth(128.0f, 0.34f, 0.22f);
-        m_root->addChild(nameLabel, 3);
-        auto* tierLabel = makeLabel(
-            fmt::format("{}  {} LP", upper(tier), score),
-            0.29f,
-            {center.x, center.y - 57.0f},
-            tierColor(upper(tier))
-        );
-        tierLabel->limitLabelWidth(132.0f, 0.29f, 0.20f);
-        m_root->addChild(tierLabel, 3);
+        auto* namePlate = makeNeonPanel({122.0f, 28.0f}, {center.x, center.y - 13.0f}, accent, kDeepPanel2, 245);
+        m_root->addChild(namePlate, 2);
+        auto* nameLabel = makeLabel(shorten(upper(name), 15), 0.29f, {center.x, center.y - 13.0f});
+        nameLabel->limitLabelWidth(112.0f, 0.29f, 0.20f);
+        m_root->addChild(nameLabel, 4);
+
+        auto* tierPlate = makeNeonPanel({122.0f, 38.0f}, {center.x, center.y - 52.0f}, accent, {10, 19, 35}, 245);
+        m_root->addChild(tierPlate, 2);
+        auto* tierLabel = makeLabel(upper(tier), 0.25f, {center.x, center.y - 45.0f}, accent, "goldFont.fnt");
+        tierLabel->limitLabelWidth(108.0f, 0.25f, 0.18f);
+        m_root->addChild(tierLabel, 4);
+        auto* lpLabel = makeLabel(fmt::format("{} LP", score), 0.22f, {center.x, center.y - 61.0f}, ccc3(230, 235, 245));
+        lpLabel->limitLabelWidth(108.0f, 0.22f, 0.16f);
+        m_root->addChild(lpLabel, 4);
     }
 
     void renderMain(RuntimeView const& view) {
@@ -475,95 +554,183 @@ class CorumRankedLayer final : public CCLayerColor {
     void renderMatchFound(MatchView const& match) {
         auto const size = CCDirector::sharedDirector()->getWinSize();
         auto const ownA = match.side == "A";
-        addPlayerCard({112.0f, size.height / 2.0f - 7.0f}, match.playerAName, match.playerATier, match.playerAScore, ownA);
-        addPlayerCard({size.width - 112.0f, size.height / 2.0f - 7.0f}, match.playerBName, match.playerBTier, match.playerBScore, !ownA);
-        auto* title = makeLabel("MATCH FOUND", 0.62f, {size.width / 2.0f, size.height - 34.0f}, kGold, "goldFont.fnt");
-        m_root->addChild(title, 3);
+        addPlayerCard({98.0f, size.height / 2.0f - 9.0f}, match.playerAName, match.playerATier, match.playerAScore, ownA);
+        addPlayerCard({size.width - 98.0f, size.height / 2.0f - 9.0f}, match.playerBName, match.playerBTier, match.playerBScore, !ownA);
+
+        auto* title = makeLabel("MATCH FOUND", 0.66f, {size.width / 2.0f, size.height - 34.0f}, ccc3(246, 249, 255), "goldFont.fnt");
+        title->limitLabelWidth(size.width - 170.0f, 0.66f, 0.38f);
+        m_root->addChild(title, 5);
+        auto* subtitle = makeLabel("RANKED 1V1", 0.22f, {size.width / 2.0f, size.height - 60.0f}, kCyan);
+        m_root->addChild(subtitle, 5);
+
         auto const left = std::max(0, 5 - static_cast<int>(std::floor(phaseSeconds())));
-        auto* countdown = makeLabel(fmt::format("MAP BAN IN...\n{}", left), 0.52f, {size.width / 2.0f, size.height / 2.0f - 1.0f}, kRed, "goldFont.fnt");
-        countdown->setAnchorPoint({0.5f, 0.5f});
-        m_root->addChild(countdown, 3);
+        auto* countdownPlate = makeNeonPanel({138.0f, 70.0f}, {size.width / 2.0f, size.height / 2.0f - 4.0f}, left <= 2 ? kSideRed : kBlue, {7, 17, 36}, 248);
+        m_root->addChild(countdownPlate, 2);
+        auto* phase = makeLabel("MAP BAN IN", 0.22f, {size.width / 2.0f, size.height / 2.0f + 15.0f}, kCyan, "goldFont.fnt");
+        m_root->addChild(phase, 5);
+        auto* countdown = makeLabel(fmt::format("{}", left), 0.66f, {size.width / 2.0f, size.height / 2.0f - 13.0f}, left <= 2 ? kSideRed : kGold, "goldFont.fnt");
+        m_root->addChild(countdown, 5);
     }
 
     void renderBan(MatchView const& match) {
         auto const size = CCDirector::sharedDirector()->getWinSize();
-        auto* title = makeLabel("MATCH FOUND", 0.52f, {size.width / 2.0f, size.height - 30.0f}, kGold, "goldFont.fnt");
-        m_root->addChild(title, 3);
-        auto* phase = makeLabel("BAN MAP", 0.44f, {size.width / 2.0f, size.height - 58.0f}, kRed, "goldFont.fnt");
-        m_root->addChild(phase, 3);
-        auto const remaining = RankedRuntime::get().deadlineSeconds().value_or(0);
-        auto* timer = makeLabel(fmt::format("{}", std::max<std::int64_t>(0, remaining)), 0.55f, {size.width - 40.0f, size.height - 42.0f}, kRed);
-        m_root->addChild(timer, 3);
+        addTopBack(true);
+
+        auto* title = makeLabel("MATCH FOUND", 0.62f, {size.width / 2.0f, size.height - 31.0f}, ccc3(244, 248, 255), "goldFont.fnt");
+        title->limitLabelWidth(size.width - 150.0f, 0.62f, 0.38f);
+        m_root->addChild(title, 6);
+        auto* phase = makeLabel("BAN MAP", 0.34f, {size.width / 2.0f, size.height - 61.0f}, kCyan, "goldFont.fnt");
+        m_root->addChild(phase, 6);
+
+        auto const remaining = std::max<std::int64_t>(0, RankedRuntime::get().deadlineSeconds().value_or(0));
+        auto* timerPlate = makeNeonPanel({54.0f, 48.0f}, {size.width - 42.0f, size.height - 41.0f}, remaining <= 3 ? kSideRed : kBlue, {8, 18, 40}, 250);
+        m_root->addChild(timerPlate, 3);
+        auto* timer = makeLabel(fmt::format("{}", remaining), 0.48f, {size.width - 42.0f, size.height - 34.0f}, remaining <= 3 ? kSideRed : ccc3(245, 248, 255), "goldFont.fnt");
+        m_root->addChild(timer, 6);
+        auto* timerCaption = makeLabel("TIME LEFT", 0.13f, {size.width - 42.0f, size.height - 56.0f}, kCyan);
+        m_root->addChild(timerCaption, 6);
 
         auto const count = std::min<std::size_t>(5, match.candidateMaps.size());
-        auto const cardWidth = (size.width - 44.0f) / 5.0f;
-        auto const startX = 22.0f + cardWidth / 2.0f;
+        auto const cardWidth = (size.width - 34.0f) / 5.0f;
+        auto const cardHeight = std::min(164.0f, size.height - 126.0f);
+        auto const startX = 17.0f + cardWidth / 2.0f;
+        auto const centerY = size.height / 2.0f - 7.0f;
         for (std::size_t i = 0; i < count; ++i) {
             auto const x = startX + cardWidth * static_cast<float>(i);
-            auto* panel = makePanel({cardWidth - 7.0f, 128.0f}, {x, size.height / 2.0f - 7.0f}, kPanelLight);
+            auto const& candidate = match.candidateMaps[i];
+            auto const diffColor = difficultyColor(candidate.difficulty);
+            auto const selected = m_selectedBan == candidate.canonicalLevelId;
+            auto const pending = m_pendingBan == candidate.canonicalLevelId;
+            auto const accent = selected ? kGreen : (pending ? kGold : kBlue);
+
+            auto* panel = makeNeonPanel({cardWidth - 5.0f, cardHeight}, {x, centerY}, accent, kDeepPanel, 248);
             m_root->addChild(panel, 1);
-            auto* map = makeLabel(twoLineTitle(match.candidateMaps[i].title, 10), 0.235f, {x, size.height / 2.0f + 27.0f});
-            map->limitLabelWidth(cardWidth - 12.0f, 0.235f, 0.17f);
-            m_root->addChild(map, 3);
-            auto* diff = makeLabel(match.candidateMaps[i].difficulty, 0.23f, {x, size.height / 2.0f - 9.0f}, difficultyColor(match.candidateMaps[i].difficulty));
-            diff->limitLabelWidth(cardWidth - 14.0f, 0.23f, 0.17f);
-            m_root->addChild(diff, 3);
-            if (m_selectedBan == match.candidateMaps[i].canonicalLevelId) {
-                addStatusPill("BANNED", {x, size.height / 2.0f - 50.0f}, kGreen);
-            } else if (m_pendingBan == match.candidateMaps[i].canonicalLevelId) {
-                addStatusPill("BANNING...", {x, size.height / 2.0f - 50.0f}, kAccent);
+
+            // Decorative map emblem. This stays entirely inside base GD assets and
+            // gives each card a stronger visual anchor than title-only rectangles.
+            auto* emblemBack = makeNeonPanel({40.0f, 40.0f}, {x, centerY + 47.0f}, diffColor, {5, 12, 27}, 250);
+            m_root->addChild(emblemBack, 2);
+            auto* emblem = CCSprite::createWithSpriteFrameName("GJ_bigStar_001.png");
+            if (emblem) {
+                emblem->setScale(0.34f);
+                emblem->setColor(diffColor);
+                emblem->setPosition({x, centerY + 47.0f});
+                m_root->addChild(emblem, 4);
+            }
+
+            auto* map = makeLabel(twoLineTitle(upper(candidate.title), 10), 0.225f, {x, centerY + 15.0f});
+            map->limitLabelWidth(cardWidth - 12.0f, 0.225f, 0.16f);
+            m_root->addChild(map, 4);
+
+            auto* difficultyPlate = makeNeonPanel({cardWidth - 22.0f, 28.0f}, {x, centerY - 20.0f}, diffColor, {11, 20, 36}, 245);
+            m_root->addChild(difficultyPlate, 2);
+            auto* diffCaption = makeLabel("DIFFICULTY", 0.12f, {x, centerY - 14.0f}, kCyan);
+            m_root->addChild(diffCaption, 4);
+            auto* diff = makeLabel(candidate.difficulty, 0.24f, {x, centerY - 27.0f}, diffColor, "goldFont.fnt");
+            diff->limitLabelWidth(cardWidth - 28.0f, 0.24f, 0.16f);
+            m_root->addChild(diff, 4);
+
+            auto const actionY = centerY - cardHeight / 2.0f + 21.0f;
+            if (selected) {
+                auto* state = makeTextPlate("BANNED", {cardWidth - 18.0f, 24.0f}, {x, actionY}, kGreen, 0.18f, kGreen);
+                m_root->addChild(state, 3);
+            } else if (pending) {
+                auto* state = makeTextPlate("BANNING...", {cardWidth - 18.0f, 24.0f}, {x, actionY}, kGold, 0.16f, kGold);
+                m_root->addChild(state, 3);
             } else if (m_selectedBan.empty() && m_pendingBan.empty()) {
-                auto* button = addButton("BAN", {x, size.height / 2.0f - 50.0f}, menu_selector(CorumRankedLayer::onBan), true, 0.36f);
+                auto* button = addButton("BAN", {x, actionY}, menu_selector(CorumRankedLayer::onBan), true, 0.39f);
                 button->setTag(static_cast<int>(i));
             }
         }
-        auto* privacy = makeLabel("YOUR BAN IS PRIVATE UNTIL THE PHASE ENDS", 0.20f, {size.width / 2.0f, 24.0f}, ccc3(180, 190, 210));
-        m_root->addChild(privacy, 2);
+
+        auto* privacyPlate = makeNeonPanel({230.0f, 34.0f}, {size.width / 2.0f, 24.0f}, kBlue, {8, 18, 36}, 242);
+        m_root->addChild(privacyPlate, 1);
+        auto* privacy = makeLabel("YOUR BAN IS PRIVATE  |  UNTIL THE PHASE ENDS", 0.16f, {size.width / 2.0f, 24.0f}, ccc3(215, 225, 242));
+        privacy->limitLabelWidth(214.0f, 0.16f, 0.12f);
+        m_root->addChild(privacy, 4);
     }
 
     void renderPrepare(MatchView const& match) {
         auto const size = CCDirector::sharedDirector()->getWinSize();
         auto const ownA = match.side == "A";
-        addPlayerCard({103.0f, size.height / 2.0f - 3.0f}, match.playerAName, match.playerATier, match.playerAScore, ownA);
-        addPlayerCard({size.width - 103.0f, size.height / 2.0f - 3.0f}, match.playerBName, match.playerBTier, match.playerBScore, !ownA);
+        auto const deathmatch = match.deathmatchSequence > 0;
+
+        // A/B cards keep the screen symmetric while the centre column is reserved
+        // for match state, map information and resource readiness.
+        addPlayerCard({92.0f, size.height / 2.0f - 8.0f}, match.playerAName, match.playerATier, match.playerAScore, ownA);
+        addPlayerCard({size.width - 92.0f, size.height / 2.0f - 8.0f}, match.playerBName, match.playerBTier, match.playerBScore, !ownA);
 
         auto* title = makeLabel(
-            match.deathmatchSequence > 0 ? "DEATH MATCH" : fmt::format("ROUND {}", match.roundNumber),
-            0.56f,
-            {size.width / 2.0f, size.height - 26.0f},
-            match.deathmatchSequence > 0 ? kRed : kGold,
+            deathmatch ? "DEATH MATCH" : fmt::format("ROUND {}", match.roundNumber),
+            deathmatch ? 0.62f : 0.56f,
+            {size.width / 2.0f, size.height - 27.0f},
+            ccc3(245, 248, 255),
             "goldFont.fnt"
         );
-        m_root->addChild(title, 4);
-        if (match.deathmatchSequence > 0) {
-            auto* sub = makeLabel("3 ATTEMPTS", 0.27f, {size.width / 2.0f, size.height - 49.0f}, kGreen);
-            m_root->addChild(sub, 4);
+        title->limitLabelWidth(size.width - 180.0f, deathmatch ? 0.62f : 0.56f, 0.34f);
+        m_root->addChild(title, 6);
+
+        if (deathmatch) {
+            auto* sub = makeLabel("3 ATTEMPTS", 0.27f, {size.width / 2.0f, size.height - 52.0f}, kCyan, "goldFont.fnt");
+            m_root->addChild(sub, 6);
+            auto* attemptsPlate = makeNeonPanel({132.0f, 24.0f}, {size.width / 2.0f, size.height - 72.0f}, kBlue, {8, 18, 38}, 245);
+            m_root->addChild(attemptsPlate, 2);
             auto* attempts = makeLabel(
-                fmt::format("A {}/3   B {}/3", match.deathmatchAttemptsUsedA, match.deathmatchAttemptsUsedB),
-                0.20f,
-                {size.width / 2.0f, size.height - 66.0f},
-                ccc3(215, 220, 230)
+                fmt::format("A  {}/3    |    B  {}/3", match.deathmatchAttemptsUsedA, match.deathmatchAttemptsUsedB),
+                0.18f,
+                {size.width / 2.0f, size.height - 72.0f},
+                ccc3(226, 232, 245)
             );
-            m_root->addChild(attempts, 4);
+            m_root->addChild(attempts, 6);
         } else if (!match.banner.empty() && match.banner != "NONE") {
-            auto* sub = makeLabel(displayBanner(match.banner), 0.30f, {size.width / 2.0f, size.height - 49.0f}, kRed, "goldFont.fnt");
-            m_root->addChild(sub, 4);
+            auto* sub = makeTextPlate(
+                displayBanner(match.banner),
+                {132.0f, 24.0f},
+                {size.width / 2.0f, size.height - 57.0f},
+                match.banner == "TIEBREAKER" ? kGold : kSideRed,
+                0.20f,
+                match.banner == "TIEBREAKER" ? kGold : kSideRed,
+                "goldFont.fnt"
+            );
+            m_root->addChild(sub, 3);
         }
 
+        // Series score is deliberately compact. It represents round wins in the
+        // Bo3, never the score accumulated inside the current map.
+        auto const seriesY = deathmatch ? size.height - 94.0f : size.height - 84.0f;
+        auto* seriesPlate = makeNeonPanel({116.0f, 27.0f}, {size.width / 2.0f, seriesY}, kBlue, {7, 17, 35}, 245);
+        m_root->addChild(seriesPlate, 2);
+        auto* seriesCaption = makeLabel("SERIES", 0.12f, {size.width / 2.0f, seriesY + 7.0f}, kCyan);
+        m_root->addChild(seriesCaption, 6);
+        auto* seriesScore = makeLabel(
+            fmt::format("{}   :   {}", match.roundWinsA, match.roundWinsB),
+            0.25f,
+            {size.width / 2.0f, seriesY - 5.0f},
+            ccc3(245, 248, 255),
+            "goldFont.fnt"
+        );
+        m_root->addChild(seriesScore, 6);
+
+        auto const mapY = size.height / 2.0f + 35.0f;
         if (match.currentMap) {
-            auto* mapName = makeLabel(twoLineTitle(match.currentMap->title, 18), 0.34f, {size.width / 2.0f, size.height / 2.0f + 53.0f});
-            mapName->limitLabelWidth(210.0f, 0.34f, 0.22f);
-            m_root->addChild(mapName, 4);
-            auto* difficulty = makeLabel(match.currentMap->difficulty, 0.42f, {size.width / 2.0f, size.height / 2.0f + 20.0f}, difficultyColor(match.currentMap->difficulty));
-            m_root->addChild(difficulty, 4);
-        }
+            auto* crown = CCSprite::createWithSpriteFrameName("GJ_bigStar_001.png");
+            if (crown) {
+                crown->setScale(0.24f);
+                crown->setColor(kCyan);
+                crown->setPosition({size.width / 2.0f, mapY + 31.0f});
+                m_root->addChild(crown, 4);
+            }
+            auto* mapName = makeLabel(twoLineTitle(upper(match.currentMap->title), 15), 0.33f, {size.width / 2.0f, mapY + 7.0f});
+            mapName->limitLabelWidth(154.0f, 0.33f, 0.20f);
+            m_root->addChild(mapName, 6);
 
-        // The large numbers on Round/Death Match prepare are the Bo3 series
-        // score, not the point total accumulated inside the current/previous map.
-        auto* leftScore = makeLabel(fmt::format("{}", match.roundWinsA), 0.82f, {size.width / 2.0f - 74.0f, size.height / 2.0f + 5.0f}, kRed);
-        auto* rightScore = makeLabel(fmt::format("{}", match.roundWinsB), 0.82f, {size.width / 2.0f + 74.0f, size.height / 2.0f + 5.0f}, kRed);
-        m_root->addChild(leftScore, 4);
-        m_root->addChild(rightScore, 4);
+            auto const diffColor = difficultyColor(match.currentMap->difficulty);
+            auto* diffPlate = makeNeonPanel({74.0f, 32.0f}, {size.width / 2.0f, mapY - 27.0f}, diffColor, {12, 17, 27}, 246);
+            m_root->addChild(diffPlate, 2);
+            auto* difficulty = makeLabel(match.currentMap->difficulty, 0.33f, {size.width / 2.0f, mapY - 27.0f}, diffColor, "goldFont.fnt");
+            difficulty->limitLabelWidth(62.0f, 0.33f, 0.22f);
+            m_root->addChild(difficulty, 6);
+        }
 
         auto* local = findPlayableMap();
         auto const mapReady = local != nullptr;
@@ -571,40 +738,48 @@ class CorumRankedLayer final : public CCLayerColor {
         auto const mapPos = CCPoint{size.width / 2.0f, size.height / 2.0f - 28.0f};
         auto const songPos = CCPoint{size.width / 2.0f, size.height / 2.0f - 62.0f};
         if (mapReady) {
-            addStatusPill("DOWNLOADED", mapPos, kGreen);
+            auto* plate = makeTextPlate("MAP DOWNLOADED", {128.0f, 29.0f}, mapPos, kGreen, 0.20f, kGreen);
+            m_root->addChild(plate, 3);
         } else {
-            addStatusPill("OPENING LEVEL...", mapPos, kAccent);
+            auto* plate = makeTextPlate("OPENING LEVEL...", {128.0f, 29.0f}, mapPos, kCyan, 0.20f, ccc3(235, 242, 255));
+            m_root->addChild(plate, 3);
         }
 
         if (!mapReady) {
-            addStatusPill("WAITING FOR MAP", songPos, kPanelLight);
+            auto* plate = makeTextPlate("WAITING FOR MAP", {128.0f, 29.0f}, songPos, kBlue, 0.19f, ccc3(218, 228, 244));
+            m_root->addChild(plate, 3);
         } else if (songReady) {
-            addStatusPill("DOWNLOADED", songPos, kGreen);
+            auto* plate = makeTextPlate("SONG DOWNLOADED", {128.0f, 29.0f}, songPos, kGreen, 0.19f, kGreen);
+            m_root->addChild(plate, 3);
         } else if (RankedRuntime::get().songBypassAllowed()) {
-            addStatusPill("START WITHOUT SONG", songPos, kGold);
+            auto* plate = makeTextPlate("START WITHOUT SONG", {136.0f, 29.0f}, songPos, kGold, 0.18f, kGold);
+            m_root->addChild(plate, 3);
         } else {
-            addButton("DOWNLOAD SONG", songPos, menu_selector(CorumRankedLayer::onDownloadSong), false, 0.50f);
+            // The real click target remains the vanilla song button on the level
+            // info page. This button only opens that gated page.
+            addButton("DOWNLOAD SONG", songPos, menu_selector(CorumRankedLayer::onDownloadSong), false, 0.48f);
         }
 
         auto const seconds = std::max(0, 10 - static_cast<int>(std::floor(phaseSeconds())));
-        std::string footer = fmt::format("STARTS IN... {}", seconds);
+        std::string footer = fmt::format("STARTS IN  {:02d}", seconds);
+        ccColor3B footerAccent = seconds <= 3 ? kSideRed : kBlue;
         if (match.state == "DEATHMATCH_PLAYING") {
             auto const ownUsed = ownA ? match.deathmatchAttemptsUsedA : match.deathmatchAttemptsUsedB;
             auto const opponentUsed = ownA ? match.deathmatchAttemptsUsedB : match.deathmatchAttemptsUsedA;
             footer = ownUsed >= 3
-                ? fmt::format("WAITING FOR OPPONENT...  {} / 3", opponentUsed)
-                : fmt::format("ATTEMPT {} OF 3", std::min(3, ownUsed + 1));
+                ? fmt::format("WAITING FOR OPPONENT   {}/3", opponentUsed)
+                : fmt::format("ATTEMPT  {}  OF  3", std::min(3, ownUsed + 1));
+            footerAccent = ownUsed >= 3 ? kBlue : kGold;
         } else if (phaseSeconds() >= 10.0) {
             auto const ownReady = ownA ? match.readyA : match.readyB;
             auto const opponentReady = ownA ? match.readyB : match.readyA;
-            if (!ownReady) footer = "WAITING FOR YOUR DOWNLOAD...";
-            else if (!opponentReady) footer = fmt::format("WAITING FOR {}'S DOWNLOAD...", upper(shorten(match.opponentName, 13)));
+            if (!ownReady) footer = "WAITING FOR YOUR DOWNLOAD";
+            else if (!opponentReady) footer = fmt::format("WAITING FOR {}", upper(shorten(match.opponentName, 13)));
             else footer = "STARTING...";
+            footerAccent = kGold;
         }
-        auto* footerLabel = makeLabel(footer, 0.42f, {size.width / 2.0f, 29.0f}, phaseSeconds() >= 10.0 ? kGold : ccc3(225, 225, 230));
-        footerLabel->setAnchorPoint({0.5f, 0.5f});
-        footerLabel->limitLabelWidth(size.width - 170.0f, 0.42f, 0.24f);
-        m_root->addChild(footerLabel, 4);
+        auto* footerPlate = makeTextPlate(footer, {190.0f, 35.0f}, {size.width / 2.0f, 27.0f}, footerAccent, 0.25f, ccc3(245, 248, 255), "goldFont.fnt");
+        m_root->addChild(footerPlate, 3);
     }
 
     void renderInterRound(MatchView const& match) {
@@ -612,14 +787,21 @@ class CorumRankedLayer final : public CCLayerColor {
         auto* title = makeLabel(
             match.state == "DEATHMATCH_RESULT" ? "DEATH MATCH RESULT" : "ROUND RESULT",
             0.62f,
-            {size.width / 2.0f, size.height / 2.0f + 50.0f},
-            kGold,
+            {size.width / 2.0f, size.height / 2.0f + 58.0f},
+            ccc3(245, 248, 255),
             "goldFont.fnt"
         );
-        m_root->addChild(title, 3);
-        auto* score = makeLabel(fmt::format("{} : {}", match.roundWinsA, match.roundWinsB), 0.88f, {size.width / 2.0f, size.height / 2.0f});
-        m_root->addChild(score, 3);
-        auto* next = makeLabel("NEXT MAP PREPARING...", 0.28f, {size.width / 2.0f, size.height / 2.0f - 52.0f}, kAccent);
+        title->limitLabelWidth(size.width - 90.0f, 0.62f, 0.34f);
+        m_root->addChild(title, 5);
+
+        auto* series = makeNeonPanel({150.0f, 58.0f}, {size.width / 2.0f, size.height / 2.0f - 1.0f}, kBlue, {7, 17, 36}, 248);
+        m_root->addChild(series, 2);
+        auto* caption = makeLabel("SERIES SCORE", 0.16f, {size.width / 2.0f, size.height / 2.0f + 14.0f}, kCyan);
+        m_root->addChild(caption, 5);
+        auto* score = makeLabel(fmt::format("{}   :   {}", match.roundWinsA, match.roundWinsB), 0.45f, {size.width / 2.0f, size.height / 2.0f - 10.0f}, ccc3(245, 248, 255), "goldFont.fnt");
+        m_root->addChild(score, 5);
+
+        auto* next = makeTextPlate("NEXT MAP PREPARING...", {166.0f, 30.0f}, {size.width / 2.0f, size.height / 2.0f - 58.0f}, kCyan, 0.18f, ccc3(225, 235, 248));
         m_root->addChild(next, 3);
     }
 

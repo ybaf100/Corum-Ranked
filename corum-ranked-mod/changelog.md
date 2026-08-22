@@ -1,3 +1,21 @@
+# v0.4.0-alpha.23
+
+- Reworked Match Found, Ban, Round Prepare, and Death Match UI into a consistent neon competitive visual system built with native Cocos/Geode nodes.
+- Added tier-accented player cards, compact series-score plates, structured map/difficulty badges, a proper Ban timer badge, and cleaner readiness/attempt status plates.
+- Removed the oversized floating round-win numbers from prepare screens; the Bo3 score now appears as an explicit compact `SERIES A : B` indicator.
+- Restyled the real Geometry Dash LevelInfo prepare gate with a compact Ranked Match countdown/status panel while preserving the vanilla song download control as the actual interaction target.
+- No external font/runtime dependency was added; the redesign mixes existing Geometry Dash fonts and assets so every target can render the same UI offline.
+- Alpha.22 song-button, anti-cheat-spike scoring, and live spectator fixes remain intact. Corum Integration and Apps Script remain unchanged.
+
+# v0.4.0-alpha.22
+
+- Fixed the real Geometry Dash song download button being visible but untouchable during Ranked preparation.
+- Prepare input now disables individual non-song menu items instead of disabling CCMenu touch dispatch.
+- Fixed human-side Ranked attempts being falsely ended by Geometry Dash's internal anti-cheat verification spike.
+- Added live opponent progress spectating after the normal final-start window expires when only the opponent still has an active attempt.
+- Kept and generalized the existing LAST ATTEMPT spectator telemetry with a read-only SPECTATING OPPONENT overlay.
+- Spectator state polling is tightened to roughly 150 ms while active.
+
 # v0.4.0-alpha.21
 - Replaced the Ranked prepare-screen map downloader with the real Geometry Dash `LevelInfoLayer` flow. The selected level page opens immediately and `LevelInfoLayer::downloadLevel()` owns map download/delegate/UI state.
 - During Round/Death Match preparation, every LevelInfo control is locked except the vanilla song-download widget; Back/Play cannot bypass the countdown.

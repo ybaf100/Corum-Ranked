@@ -55,11 +55,11 @@ g++ -std=c++23 -Wall -Wextra -Wpedantic -Werror \
 무료 alpha 호스팅 순서는 [`docs/free-hosting-render-neon.md`](docs/free-hosting-render-neon.md),
 기존 최초 배포 체크리스트는 [`docs/alpha-5-handoff.md`](docs/alpha-5-handoff.md),
 Debug Bot Match 제거 방법은 [`docs/debug-bot-match.md`](docs/debug-bot-match.md)를 참고하세요.
-최신 alpha.21 변경 파일·검증 결과는
-[`docs/v0.4.0-alpha.21-report.md`](docs/v0.4.0-alpha.21-report.md)에 정리되어 있습니다.
+최신 alpha.22 변경 파일·검증 결과는
+[`docs/v0.4.0-alpha.23-report.md`](docs/v0.4.0-alpha.23-report.md)에 정리되어 있습니다.
 
 
-> v0.4.0-alpha.21 policy: the Ranked allowlist checks currently enabled + loaded mods only. Installed-but-disabled mods do not block Ranked; required mods such as CBF must still be active.
+> v0.4.0-alpha.23 policy: the Ranked allowlist checks currently enabled + loaded mods only. Installed-but-disabled mods do not block Ranked; required mods such as CBF must still be active.
 
 
 ## alpha.18 attempt scoring reliability
