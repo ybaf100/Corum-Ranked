@@ -410,7 +410,7 @@ export class QueueService {
     config: RankedConfigSnapshot,
     now: Date,
     options: {
-      readonly matchType?: "PVP" | "DEBUG_BOT";
+      readonly matchType?: "RANKED_PVP" | "DEBUG_BOT";
       readonly debugBotConfig?: Readonly<Record<string, unknown>> | null;
       readonly discordEventsEnabled?: boolean;
       readonly updateQueue?: boolean;
@@ -434,11 +434,13 @@ export class QueueService {
          mmr_a_before, mmr_b_before, effective_rating_average, effective_tier,
          candidate_maps_snapshot, series_state, state, state_version,
          deadline_at, ready_deadline_at, last_heartbeat_a_at, last_heartbeat_b_at,
-         rules_version, match_type, debug_bot_config, discord_events_enabled, created_at
+         rules_version, match_type, debug_bot_config, discord_events_enabled,
+         debug_config, debug_discord_events, created_at
        ) VALUES (
          $1, $2, $3, $4, $5, $6, $7, $8,
          $9::jsonb, $10::jsonb, 'MATCHED', 1,
-         $11, $11, $13, $13, $12, $14, $15::jsonb, $16, $13
+         $11, $11, $13, $13, $12, $14, $15::jsonb, $16,
+         $15::jsonb, $16, $13
        )`,
       [
         matchId,
@@ -454,9 +456,9 @@ export class QueueService {
         readyDeadline.toISOString(),
         config.operational.rules.rulesVersion,
         now.toISOString(),
-        options.matchType ?? "PVP",
+        options.matchType ?? "RANKED_PVP",
         JSON.stringify(options.debugBotConfig ?? null),
-        options.discordEventsEnabled ?? true,
+        options.discordEventsEnabled ?? false,
       ],
     );
     for (const participant of [playerA, playerB]) {
