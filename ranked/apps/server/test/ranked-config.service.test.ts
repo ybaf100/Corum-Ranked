@@ -27,6 +27,30 @@ describe("Ranked config snapshot loader", () => {
     expect(service.getStatus()).toMatchObject({ ready: true, generation: "test-1" });
   });
 
+  it("accepts client presentation resources without changing gameplay config", async () => {
+    const source = new FakeSource();
+    source.document = {
+      ...source.document,
+      client: {
+        audio: {
+          enabled: true,
+          fadeInSeconds: 0.8,
+          fadeOutSeconds: 0.6,
+          resources: [
+            { key: "menu", label: "Ranked Theme", songId: 123456, startSeconds: 42.5, loop: true },
+          ],
+        },
+        ui: { fadeInSeconds: 0.24, fadeOutSeconds: 0.18 },
+      },
+    };
+    const service = new RankedConfigService(source, environmentFixture());
+    expect(await service.refresh()).toBe(true);
+    expect(service.getSnapshot().client?.audio.resources[0]).toMatchObject({
+      songId: 123456,
+      startSeconds: 42.5,
+    });
+  });
+
   it("keeps the last known valid snapshot after a failed refresh", async () => {
     const source = new FakeSource();
     const service = new RankedConfigService(source, environmentFixture());

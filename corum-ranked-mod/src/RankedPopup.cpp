@@ -1,6 +1,7 @@
 #include "RankedPopup.hpp"
 
 #include "RankedRuntime.hpp"
+#include "RankedAudioManager.hpp"
 #include "DebugBotPopup.hpp"
 #include "RankedSongGate.hpp"
 
@@ -29,6 +30,9 @@ using corum::ranked::DeathmatchSummaryView;
 using corum::ranked::HistoryMatchView;
 using corum::ranked::MatchView;
 using corum::ranked::RankedRuntime;
+using corum::ranked::RankedAudioManager;
+using corum::ranked::RankedAudioMode;
+using corum::ranked::RankedResourceDownloadState;
 using corum::ranked::RoundSummaryView;
 using corum::ranked::RuntimeStage;
 using corum::ranked::RuntimeView;
@@ -241,6 +245,7 @@ class CorumRankedLayer final : public CCLayerColor {
         HistoryDetail,
     };
 
+    CCLayerColor* m_fadeRoot = nullptr;
     CCNode* m_root = nullptr;
     CCMenu* m_menu = nullptr;
     Page m_page = Page::Live;
@@ -257,6 +262,15 @@ class CorumRankedLayer final : public CCLayerColor {
     bool m_matchFoundReadySent = false;
     bool m_enteringSongGate = false;
     bool m_enteringLevel = false;
+    bool m_resourceGateInitialized = false;
+    bool m_resourceGateAcknowledged = false;
+    bool m_resourceGateWasMissing = false;
+    bool m_resourceGateMenuRestored = false;
+    std::string m_renderedUiKey;
+    std::string m_pendingUiKey;
+    bool m_uiFadingOut = false;
+    bool m_fadeInNextRender = true;
+    SteadyClock::time_point m_uiTransitionDeadline {};
 
     ~CorumRankedLayer() override = default;
 
@@ -280,20 +294,29 @@ class CorumRankedLayer final : public CCLayerColor {
             addChild(shade, 0);
         }
 
+        m_fadeRoot = CCLayerColor::create({0, 0, 0, 0});
+        m_fadeRoot->setContentSize(winSize);
+        m_fadeRoot->setPosition(CCPointZero);
+        m_fadeRoot->setCascadeOpacityEnabled(true);
+        addChild(m_fadeRoot, 1);
+
         m_root = CCNode::create();
         m_root->setAnchorPoint({0.0f, 0.0f});
         m_root->setPosition(CCPointZero);
-        m_root->setContentSize(CCDirector::sharedDirector()->getWinSize());
-        addChild(m_root, 1);
+        m_root->setContentSize(winSize);
+        m_fadeRoot->addChild(m_root, 1);
 
         m_menu = CCMenu::create();
         m_menu->setPosition(CCPointZero);
         m_menu->setID("corum-ranked-fullscreen-menu"_spr);
-        addChild(m_menu, 10);
+        m_fadeRoot->addChild(m_menu, 10);
 
         RankedRuntime::get().begin();
         syncPhase();
+        syncResources();
+        m_renderedUiKey = presentationKey();
         render();
+        applyFadeInIfNeeded();
         schedule(schedule_selector(CorumRankedLayer::refresh), 0.20f);
         return true;
     }
@@ -301,10 +324,164 @@ class CorumRankedLayer final : public CCLayerColor {
     void refresh(float) {
         auto& runtime = RankedRuntime::get();
         runtime.tick();
+        auto& audio = RankedAudioManager::get();
+        audio.configure(runtime.view().client);
+        audio.tick();
+        syncResources();
         syncPhase();
         updateAutomation();
-        render();
+
+        auto const uiKey = presentationKey();
+        if (prepareUiTransition(uiKey)) {
+            render();
+            applyFadeInIfNeeded();
+        }
+        syncAudioMode();
         maybeEnterLevel();
+    }
+
+    bool showResourceGate() const {
+        auto const& audioConfig = RankedRuntime::get().view().client.audio;
+        if (!audioConfig.enabled || audioConfig.resources.empty()) return false;
+        auto const& audio = RankedAudioManager::get();
+        return audio.requiresResourceDownload() || !m_resourceGateAcknowledged;
+    }
+
+    void syncResources() {
+        auto& audio = RankedAudioManager::get();
+        auto const& audioConfig = RankedRuntime::get().view().client.audio;
+        if (!audioConfig.enabled || audioConfig.resources.empty()) {
+            m_resourceGateInitialized = true;
+            m_resourceGateAcknowledged = true;
+            m_resourceGateWasMissing = false;
+            m_resourceGateMenuRestored = false;
+            return;
+        }
+
+        auto const missing = audio.requiresResourceDownload();
+        if (!m_resourceGateInitialized) {
+            m_resourceGateInitialized = true;
+            m_resourceGateAcknowledged = !missing;
+        }
+        if (missing && !m_resourceGateWasMissing) {
+            m_resourceGateAcknowledged = false;
+            m_resourceGateMenuRestored = false;
+        }
+        m_resourceGateWasMissing = missing;
+
+        if (showResourceGate() && !m_resourceGateMenuRestored) {
+            audio.restoreMenuMusic();
+            m_resourceGateMenuRestored = true;
+        }
+        if (!showResourceGate()) m_resourceGateMenuRestored = false;
+    }
+
+    std::string presentationKey() const {
+        if (showResourceGate()) {
+            auto const resources = RankedAudioManager::get().downloadView();
+            return fmt::format("resources:{}", static_cast<int>(resources.state));
+        }
+        if (m_page == Page::HistoryList) return "history:list";
+        if (m_page == Page::HistoryDetail) return "history:detail";
+        auto const& view = RankedRuntime::get().view();
+        if (view.stage != RuntimeStage::Matched) {
+            return fmt::format("stage:{}", static_cast<int>(view.stage));
+        }
+        return fmt::format(
+            "match:{}:{}:{}",
+            view.match.state,
+            view.match.roundNumber,
+            view.match.deathmatchSequence
+        );
+    }
+
+    double uiFadeInSeconds() const {
+        return std::clamp(RankedRuntime::get().view().client.ui.fadeInSeconds, 0.0, 3.0);
+    }
+
+    double uiFadeOutSeconds() const {
+        return std::clamp(RankedRuntime::get().view().client.ui.fadeOutSeconds, 0.0, 3.0);
+    }
+
+    bool prepareUiTransition(std::string const& key) {
+        auto const now = SteadyClock::now();
+        if (m_renderedUiKey.empty()) {
+            m_renderedUiKey = key;
+            m_fadeInNextRender = true;
+            return true;
+        }
+
+        if (m_uiFadingOut) {
+            m_pendingUiKey = key;
+            if (now < m_uiTransitionDeadline) return false;
+            m_uiFadingOut = false;
+            m_renderedUiKey = m_pendingUiKey;
+            m_fadeInNextRender = true;
+            return true;
+        }
+
+        if (key == m_renderedUiKey) return true;
+        m_pendingUiKey = key;
+        auto const fadeOut = uiFadeOutSeconds();
+        if (fadeOut <= 0.0 || !m_fadeRoot) {
+            m_renderedUiKey = key;
+            m_fadeInNextRender = true;
+            return true;
+        }
+
+        m_uiFadingOut = true;
+        m_uiTransitionDeadline = now + std::chrono::milliseconds(
+            static_cast<int>(std::round(fadeOut * 1000.0))
+        );
+        m_fadeRoot->stopAllActions();
+        m_fadeRoot->runAction(CCFadeTo::create(static_cast<float>(fadeOut), 0));
+        return false;
+    }
+
+    void applyFadeInIfNeeded() {
+        if (!m_fadeInNextRender || !m_fadeRoot) return;
+        m_fadeInNextRender = false;
+        auto const fadeIn = uiFadeInSeconds();
+        m_fadeRoot->stopAllActions();
+        if (fadeIn <= 0.0) {
+            m_fadeRoot->setOpacity(255);
+            return;
+        }
+        m_fadeRoot->setOpacity(0);
+        m_fadeRoot->runAction(CCFadeTo::create(static_cast<float>(fadeIn), 255));
+    }
+
+    void syncAudioMode() {
+        auto& audio = RankedAudioManager::get();
+        if (showResourceGate()) return;
+
+        auto const& view = RankedRuntime::get().view();
+        if (view.stage == RuntimeStage::Matched) {
+            auto const& state = view.match.state;
+            auto const gameplayTransition =
+                state == "ROUND_PREPARE" ||
+                state == "DEATHMATCH_PREPARE" ||
+                state == "ROUND_PLAYING" ||
+                state == "FINAL_ATTEMPT_WINDOW" ||
+                state == "LAST_ATTEMPT_WINDOW" ||
+                state == "DEATHMATCH_PLAYING";
+            if ((m_enteringSongGate || m_enteringLevel) && gameplayTransition) return;
+        }
+        if (m_page != Page::Live || view.stage != RuntimeStage::Matched) {
+            audio.setMode(RankedAudioMode::Menu);
+            return;
+        }
+        if (view.match.state == "MATCH_RESULT") {
+            audio.setMode(view.match.winnerSide == view.match.side
+                ? RankedAudioMode::ResultWin
+                : RankedAudioMode::ResultLose);
+            return;
+        }
+        if (view.match.state == "CANCELLED") {
+            audio.setMode(RankedAudioMode::Match);
+            return;
+        }
+        audio.setMode(RankedAudioMode::Match);
     }
 
     void syncPhase() {
@@ -367,6 +544,10 @@ class CorumRankedLayer final : public CCLayerColor {
     void render() {
         clearUi();
         auto const& view = RankedRuntime::get().view();
+        if (showResourceGate()) {
+            renderResources();
+            return;
+        }
         if (m_page == Page::HistoryList) {
             renderHistoryList(view);
             return;
@@ -471,6 +652,88 @@ class CorumRankedLayer final : public CCLayerColor {
 
         auto* tierPlate = makeTextPlate(upper(tier), {96.0f, 24.0f}, {center.x, center.y - 69.0f}, accent, 0.21f, accent, "goldFont.fnt");
         m_root->addChild(tierPlate, 3);
+    }
+
+    void renderResources() {
+        auto const size = CCDirector::sharedDirector()->getWinSize();
+        addTopBack(true);
+        auto const resourceView = RankedAudioManager::get().downloadView();
+
+        auto* panel = makeNeonPanel(
+            {std::min(390.0f, size.width - 90.0f), 220.0f},
+            {size.width / 2.0f, size.height / 2.0f - 2.0f},
+            kCyan,
+            kDeepPanel,
+            248
+        );
+        m_root->addChild(panel, 1);
+
+        std::string title = "RANKED RESOURCES";
+        std::string subtitle = "Additional resources are required.";
+        ccColor3B accent = kCyan;
+        if (resourceView.state == RankedResourceDownloadState::Downloading) {
+            title = "DOWNLOADING RESOURCES";
+            subtitle = "Keep this screen open until the download is complete.";
+            accent = kGold;
+        } else if (resourceView.state == RankedResourceDownloadState::Ready) {
+            title = "ALL RESOURCES READY";
+            subtitle = "Everything required for Ranked is ready.";
+            accent = kGreen;
+        } else if (resourceView.state == RankedResourceDownloadState::Failed) {
+            title = "SOME RESOURCES FAILED";
+            subtitle = "Retry the failed download before continuing.";
+            accent = kRed;
+        }
+
+        auto* titleLabel = makeLabel(title, 0.52f, {size.width / 2.0f, size.height / 2.0f + 76.0f}, accent, "goldFont.fnt");
+        titleLabel->limitLabelWidth(size.width - 150.0f, 0.52f, 0.30f);
+        m_root->addChild(titleLabel, 4);
+        auto* subLabel = makeLabel(subtitle, 0.20f, {size.width / 2.0f, size.height / 2.0f + 47.0f}, ccc3(210, 220, 238));
+        subLabel->limitLabelWidth(size.width - 150.0f, 0.20f, 0.14f);
+        m_root->addChild(subLabel, 4);
+
+        auto* count = makeLabel(
+            fmt::format("{} / {} READY", resourceView.ready, resourceView.total),
+            0.30f,
+            {size.width / 2.0f, size.height / 2.0f + 10.0f},
+            resourceView.ready == resourceView.total ? kGreen : ccc3(240, 244, 250),
+            "goldFont.fnt"
+        );
+        m_root->addChild(count, 4);
+
+        auto const barWidth = std::min(270.0f, size.width - 180.0f);
+        auto* barBack = CCLayerColor::create({9, 17, 32, 235});
+        barBack->setContentSize({barWidth, 10.0f});
+        barBack->setPosition({size.width / 2.0f - barWidth / 2.0f, size.height / 2.0f - 16.0f});
+        m_root->addChild(barBack, 3);
+        double progress = resourceView.total > 0
+            ? static_cast<double>(resourceView.ready) / static_cast<double>(resourceView.total)
+            : 1.0;
+        if (resourceView.state == RankedResourceDownloadState::Downloading && resourceView.total > 0) {
+            progress = std::min(1.0, (
+                static_cast<double>(resourceView.ready) + static_cast<double>(resourceView.activeProgress) / 100.0
+            ) / static_cast<double>(resourceView.total));
+        }
+        auto* barFill = CCLayerColor::create({accent.r, accent.g, accent.b, 245});
+        barFill->setContentSize({static_cast<float>(barWidth * std::clamp(progress, 0.0, 1.0)), 10.0f});
+        barFill->setPosition(barBack->getPosition());
+        m_root->addChild(barFill, 4);
+
+        if (resourceView.state == RankedResourceDownloadState::Downloading) {
+            auto* progressLabel = makeLabel(
+                fmt::format("{}%", static_cast<int>(std::round(progress * 100.0))),
+                0.22f,
+                {size.width / 2.0f, size.height / 2.0f - 40.0f},
+                kGold
+            );
+            m_root->addChild(progressLabel, 4);
+        } else if (resourceView.state == RankedResourceDownloadState::Ready) {
+            addButton("CONTINUE", {size.width / 2.0f, size.height / 2.0f - 62.0f}, menu_selector(CorumRankedLayer::onContinueResources), false, 0.72f);
+        } else if (resourceView.state == RankedResourceDownloadState::Failed) {
+            addButton("RETRY FAILED", {size.width / 2.0f, size.height / 2.0f - 62.0f}, menu_selector(CorumRankedLayer::onDownloadAllResources), true, 0.68f);
+        } else {
+            addButton("DOWNLOAD ALL", {size.width / 2.0f, size.height / 2.0f - 62.0f}, menu_selector(CorumRankedLayer::onDownloadAllResources), false, 0.72f);
+        }
     }
 
     void renderMain(RuntimeView const& view) {
@@ -1151,6 +1414,7 @@ class CorumRankedLayer final : public CCLayerColor {
         if (m_enteringSongGate) return;
         auto* level = findLevelInfoMap();
         if (!level) return;
+        RankedAudioManager::get().fadeOutForGameplay();
 
         // The real Geometry Dash LevelInfo page owns map/song acquisition. The
         // explicit override is used as a recovery path when polling skipped a
@@ -1204,11 +1468,25 @@ class CorumRankedLayer final : public CCLayerColor {
             return;
         }
         m_enteringLevel = true;
+        RankedAudioManager::get().fadeOutForGameplay();
         // Do not construct PlayLayer directly. Enter through Geometry Dash's normal
         // LevelInfoLayer -> onPlay path; this lets the game own level validation,
         // loading transitions, audio setup, and the return/quit stack.
         auto* scene = LevelInfoLayer::scene(level, false);
         CCDirector::sharedDirector()->pushScene(CCTransitionFade::create(0.25f, scene));
+    }
+
+    void onDownloadAllResources(CCObject*) {
+        m_localMessage.clear();
+        RankedAudioManager::get().downloadAll();
+    }
+
+    void onContinueResources(CCObject*) {
+        if (!RankedAudioManager::get().resourcesReady()) return;
+        m_resourceGateAcknowledged = true;
+        m_resourceGateWasMissing = false;
+        m_resourceGateMenuRestored = false;
+        RankedAudioManager::get().setMode(RankedAudioMode::Menu);
     }
 
     void onJoin(CCObject*) {
@@ -1279,6 +1557,7 @@ class CorumRankedLayer final : public CCLayerColor {
 
     void onCloseLayer(CCObject*) {
         if (RankedRuntime::get().view().stage == RuntimeStage::Queued) RankedRuntime::get().leaveQueue();
+        RankedAudioManager::get().restoreMenuMusic();
         // Ranked now lives in its own GD-style scene/tab. Return to the previous
         // Geometry Dash scene instead of merely deleting the fullscreen child.
         CCDirector::sharedDirector()->popScene();

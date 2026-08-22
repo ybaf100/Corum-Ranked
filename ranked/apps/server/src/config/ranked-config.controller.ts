@@ -15,6 +15,10 @@ export class RankedConfigController {
       queueEnabled: snapshot.operational.enabled,
       rules: snapshot.operational.rules,
       cbf: snapshot.operational.cbf,
+      client: snapshot.client ?? {
+        audio: { enabled: false, fadeInSeconds: 0.8, fadeOutSeconds: 0.6, resources: [] },
+        ui: { fadeInSeconds: 0.24, fadeOutSeconds: 0.18 },
+      },
       allowedMods: snapshot.allowedMods.filter((rule) => rule.enabled),
     };
   }

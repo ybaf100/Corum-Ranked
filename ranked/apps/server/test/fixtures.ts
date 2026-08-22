@@ -118,6 +118,15 @@ export const configDocumentFixture = (generation = "test-1"): RankedConfigDocume
   generation,
   generatedAt: "2026-08-20T00:00:00.000Z",
   operational: operational(generation),
+  client: {
+    audio: {
+      enabled: false,
+      fadeInSeconds: 0.8,
+      fadeOutSeconds: 0.6,
+      resources: [],
+    },
+    ui: { fadeInSeconds: 0.24, fadeOutSeconds: 0.18 },
+  },
   maps: maps(),
   allowedMods,
 });

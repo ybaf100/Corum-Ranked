@@ -106,6 +106,23 @@ var CORUM_RANKED_CONFIG_DEFAULTS = Object.freeze([
   Object.freeze(["readyTimeoutAction", "", "CANCEL_MATCH / FORFEIT_UNREADY"]),
   Object.freeze(["reconnectTimeoutAction", "", "CANCEL_MATCH / FORFEIT_DISCONNECTED"]),
   Object.freeze(["restartRecoveryAction", "", "CANCEL_MATCH / RESUME"]),
+
+  // Ranked client presentation/audio. Song IDs are Geometry Dash custom-song IDs.
+  // Keep rankedAudioEnabled FALSE until at least one valid song ID is configured.
+  Object.freeze(["rankedAudioEnabled", false, "Ranked 메뉴/매칭/결과 BGM 사용"]),
+  Object.freeze(["rankedAudioMenuSongId", "", "메인/큐 BGM Geometry Dash Song ID"]),
+  Object.freeze(["rankedAudioMenuStartSeconds", 0, "메인/큐 BGM 시작 지점(초)"]),
+  Object.freeze(["rankedAudioMatchSongId", "", "Match Found/Ban/준비/관전 BGM Song ID"]),
+  Object.freeze(["rankedAudioMatchStartSeconds", 0, "매칭 BGM 시작 지점(초)"]),
+  Object.freeze(["rankedAudioWinSongId", "", "승리 결과 BGM Song ID"]),
+  Object.freeze(["rankedAudioWinStartSeconds", 0, "승리 결과 BGM 시작 지점(초)"]),
+  Object.freeze(["rankedAudioLoseSongId", "", "패배 결과 BGM Song ID"]),
+  Object.freeze(["rankedAudioLoseStartSeconds", 0, "패배 결과 BGM 시작 지점(초)"]),
+  Object.freeze(["rankedAudioFadeInSeconds", 0.8, "Ranked BGM Fade In 시간"]),
+  Object.freeze(["rankedAudioFadeOutSeconds", 0.6, "Ranked BGM Fade Out 시간"]),
+  Object.freeze(["rankedUiFadeInSeconds", 0.24, "Ranked UI Fade In 시간"]),
+  Object.freeze(["rankedUiFadeOutSeconds", 0.18, "Ranked UI Fade Out 시간"]),
+
   Object.freeze(["cbfModId", "syzzi.click_between_frames", "필수 CBF Mod ID"]),
   Object.freeze(["cbf.soft-toggle", false, "CBF의 Disable CBF는 꺼짐"]),
   Object.freeze(["cbf.click-on-steps", false, "Click on Steps 모드는 꺼짐"]),
@@ -220,6 +237,8 @@ function readCorumRankedConfig_() {
   var failurePolicy = readRankedFailurePolicy_(rawConfig);
   if (failurePolicy) operational.failurePolicy = failurePolicy;
 
+  var client = readRankedClientPresentation_(rawConfig);
+
   var generationInput = {
     rules: rules,
     tierBands: tierBands,
@@ -229,17 +248,19 @@ function readCorumRankedConfig_() {
     matchmaking: matchmaking,
     failurePolicy: failurePolicy,
     cbf: operational.cbf,
+    client: client,
     maps: maps,
     allowedMods: allowedMods,
   };
   var generation = "ranked-v0.3-" + rankedStableHash_(JSON.stringify(generationInput));
   operational.generation = generation;
-  var validation = validateCorumRankedConfig_(operational, maps, allowedMods);
+  var validation = validateCorumRankedConfig_(operational, maps, allowedMods, client);
 
   return {
     generation: generation,
     generatedAt: new Date().toISOString(),
     operational: operational,
+    client: client,
     maps: maps,
     allowedMods: allowedMods,
     validation: {
@@ -501,6 +522,47 @@ function readRankedFailurePolicy_(config) {
   };
 }
 
+function readRankedClientPresentation_(config) {
+  var fadeIn = rankedNumber_(config.rankedAudioFadeInSeconds);
+  var fadeOut = rankedNumber_(config.rankedAudioFadeOutSeconds);
+  var uiFadeIn = rankedNumber_(config.rankedUiFadeInSeconds);
+  var uiFadeOut = rankedNumber_(config.rankedUiFadeOutSeconds);
+
+  function resource_(key, label, songIdKey, startKey, loop) {
+    var songId = rankedNumber_(config[songIdKey]);
+    if (songId === null || songId <= 0) return null;
+    var startSeconds = rankedNumber_(config[startKey]);
+    if (startSeconds === null || startSeconds < 0) startSeconds = 0;
+    return {
+      key: key,
+      label: label,
+      songId: Math.floor(songId),
+      startSeconds: startSeconds,
+      loop: !!loop,
+    };
+  }
+
+  var resources = [
+    resource_("menu", "Ranked Theme", "rankedAudioMenuSongId", "rankedAudioMenuStartSeconds", true),
+    resource_("match", "Match Theme", "rankedAudioMatchSongId", "rankedAudioMatchStartSeconds", true),
+    resource_("result_win", "Result Theme", "rankedAudioWinSongId", "rankedAudioWinStartSeconds", false),
+    resource_("result_lose", "Result Theme", "rankedAudioLoseSongId", "rankedAudioLoseStartSeconds", false),
+  ].filter(function (item) { return item !== null; });
+
+  return {
+    audio: {
+      enabled: rankedBoolean_(config.rankedAudioEnabled),
+      fadeInSeconds: fadeIn === null ? 0.8 : Math.max(0, fadeIn),
+      fadeOutSeconds: fadeOut === null ? 0.6 : Math.max(0, fadeOut),
+      resources: resources,
+    },
+    ui: {
+      fadeInSeconds: uiFadeIn === null ? 0.24 : Math.max(0, uiFadeIn),
+      fadeOutSeconds: uiFadeOut === null ? 0.18 : Math.max(0, uiFadeOut),
+    },
+  };
+}
+
 function rankedText_(value) {
   return String(value == null ? "" : value).trim();
 }
@@ -517,7 +579,7 @@ function rankedBoolean_(value) {
   return text === "true" || text === "yes" || text === "y" || text === "1" || text === "활성";
 }
 
-function validateCorumRankedConfig_(operational, maps, allowedMods) {
+function validateCorumRankedConfig_(operational, maps, allowedMods, client) {
   var errors = [];
   var rules = operational.rules || {};
   if (rules.rulesVersion !== "corum-ranked-v0.3") {
@@ -590,9 +652,46 @@ function validateCorumRankedConfig_(operational, maps, allowedMods) {
     }
   }
 
+  validateRankedClientPresentation_(client, errors);
   validateRankedPool_(maps, errors);
   validateRankedAllowedMods_(operational.cbf, allowedMods, errors);
   return { errors: errors };
+}
+
+function validateRankedClientPresentation_(client, errors) {
+  if (!client || !client.audio || !client.ui) return;
+  var audio = client.audio;
+  var ui = client.ui;
+
+  if (!Number.isFinite(audio.fadeInSeconds) || audio.fadeInSeconds < 0 || audio.fadeInSeconds > 10) {
+    errors.push("rankedAudioFadeInSeconds는 0~10초여야 합니다.");
+  }
+  if (!Number.isFinite(audio.fadeOutSeconds) || audio.fadeOutSeconds < 0 || audio.fadeOutSeconds > 10) {
+    errors.push("rankedAudioFadeOutSeconds는 0~10초여야 합니다.");
+  }
+  if (!Number.isFinite(ui.fadeInSeconds) || ui.fadeInSeconds < 0 || ui.fadeInSeconds > 3) {
+    errors.push("rankedUiFadeInSeconds는 0~3초여야 합니다.");
+  }
+  if (!Number.isFinite(ui.fadeOutSeconds) || ui.fadeOutSeconds < 0 || ui.fadeOutSeconds > 3) {
+    errors.push("rankedUiFadeOutSeconds는 0~3초여야 합니다.");
+  }
+
+  var seen = {};
+  (audio.resources || []).forEach(function (resource) {
+    if (!resource.key) errors.push("Ranked resource key가 비어 있습니다.");
+    if (!Number.isInteger(resource.songId) || resource.songId <= 0) {
+      errors.push("Ranked resource Song ID는 양의 정수여야 합니다.");
+    }
+    if (!Number.isFinite(resource.startSeconds) || resource.startSeconds < 0) {
+      errors.push("Ranked resource 시작 지점은 0초 이상이어야 합니다.");
+    }
+    if (seen[resource.key]) errors.push("Ranked resource key가 중복되어 있습니다: " + resource.key);
+    seen[resource.key] = true;
+  });
+
+  if (audio.enabled && (audio.resources || []).length === 0) {
+    errors.push("rankedAudioEnabled가 TRUE이면 하나 이상의 Song ID가 필요합니다.");
+  }
 }
 
 function validateRankedTiers_(tierBands, errors) {

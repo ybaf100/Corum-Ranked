@@ -271,6 +271,7 @@ void RankedRuntime::begin() {
     m_localDeathmatchSequence = 0;
     m_localDeathmatchVisualAttempts = 0;
     m_songBypassAllowed = false;
+    m_view.client = {};
     m_view.match = {};
     fetchConfig();
 }
@@ -294,6 +295,47 @@ void RankedRuntime::fetchConfig() {
                 return;
             }
             observeServerNow(root);
+
+            RankedClientPresentationView clientPresentation;
+            auto const clientNode = root["client"];
+            if (clientNode.isObject()) {
+                auto const audioNode = clientNode["audio"];
+                if (audioNode.isObject()) {
+                    clientPresentation.audio.enabled = audioNode["enabled"].asBool().unwrapOr(false);
+                    clientPresentation.audio.fadeInSeconds = std::clamp(
+                        audioNode["fadeInSeconds"].asDouble().unwrapOr(0.8), 0.0, 10.0
+                    );
+                    clientPresentation.audio.fadeOutSeconds = std::clamp(
+                        audioNode["fadeOutSeconds"].asDouble().unwrapOr(0.6), 0.0, 10.0
+                    );
+                    auto const resources = audioNode["resources"].asArray();
+                    if (resources.isOk()) {
+                        for (auto const& item : resources.unwrap()) {
+                            if (!item.isObject()) continue;
+                            RankedAudioResourceView resource;
+                            resource.key = item["key"].asString().unwrapOr("");
+                            resource.label = item["label"].asString().unwrapOr("Resource");
+                            resource.songId = item["songId"].asInt().unwrapOr(0);
+                            resource.startSeconds = std::max(0.0, item["startSeconds"].asDouble().unwrapOr(0.0));
+                            resource.loop = item["loop"].asBool().unwrapOr(true);
+                            if (!resource.key.empty() && resource.songId > 0) {
+                                clientPresentation.audio.resources.push_back(std::move(resource));
+                            }
+                        }
+                    }
+                }
+                auto const uiNode = clientNode["ui"];
+                if (uiNode.isObject()) {
+                    clientPresentation.ui.fadeInSeconds = std::clamp(
+                        uiNode["fadeInSeconds"].asDouble().unwrapOr(0.24), 0.0, 3.0
+                    );
+                    clientPresentation.ui.fadeOutSeconds = std::clamp(
+                        uiNode["fadeOutSeconds"].asDouble().unwrapOr(0.18), 0.0, 3.0
+                    );
+                }
+            }
+            m_view.client = std::move(clientPresentation);
+
             if (!root["queueEnabled"].asBool().unwrapOr(false)) {
                 setStage(RuntimeStage::Error, "The Ranked queue is disabled by operations.");
                 return;

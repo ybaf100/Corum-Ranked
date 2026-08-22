@@ -1,3 +1,13 @@
+# v0.4.0-alpha.29
+
+- Added Config-driven Ranked audio using Geometry Dash custom Song IDs with per-track start positions in seconds.
+- Added `RANKED RESOURCES` first-entry/update gate. Missing configured resources are skipped if already present and can be fetched in one action with `DOWNLOAD ALL`.
+- Added sequential resource download progress, 60-second per-resource timeout, `RETRY FAILED`, and `CONTINUE` after all resources are ready.
+- Added Ranked BGM state mapping for Main/Queue, Match/Ban/Prepare/Spectator, and Win/Lose results with fallback to already configured tracks.
+- Added configurable music fade-in/fade-out and UI fade-out/fade-in transitions. Same-track phase changes do not restart playback.
+- Ranked audio fades out before vanilla LevelInfo/gameplay and Geometry Dash menu music is restored when leaving Ranked.
+- Added server pass-through and validation for the client presentation config without changing gameplay rules or scoring.
+
 # v0.4.0-alpha.28
 
 - Removed the 30-second FINAL/LAST ATTEMPT start-intent expiry. A valid pre-deadline intent now holds the round while the player remains connected; a 15-minute hard TTL exists only as a deadlock guard.

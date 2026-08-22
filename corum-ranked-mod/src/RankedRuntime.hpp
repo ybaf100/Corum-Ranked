@@ -143,6 +143,31 @@ struct DebugBotMatchOptions {
 };
 #endif
 
+struct RankedAudioResourceView {
+    std::string key;
+    std::string label;
+    int songId = 0;
+    double startSeconds = 0.0;
+    bool loop = true;
+};
+
+struct RankedAudioConfigView {
+    bool enabled = false;
+    double fadeInSeconds = 0.8;
+    double fadeOutSeconds = 0.6;
+    std::vector<RankedAudioResourceView> resources;
+};
+
+struct RankedUiTransitionView {
+    double fadeInSeconds = 0.24;
+    double fadeOutSeconds = 0.18;
+};
+
+struct RankedClientPresentationView {
+    RankedAudioConfigView audio;
+    RankedUiTransitionView ui;
+};
+
 struct RuntimeView {
     RuntimeStage stage = RuntimeStage::Idle;
     std::string status;
@@ -152,6 +177,7 @@ struct RuntimeView {
     int placementGames = 0;
     int placementGamesRequired = 0;
     std::uint64_t revision = 0;
+    RankedClientPresentationView client;
     MatchView match;
     bool historyLoading = false;
     std::string historyError;

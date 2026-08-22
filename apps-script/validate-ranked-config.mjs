@@ -263,12 +263,31 @@ assert.equal(complete.data.operational.cbf.requiredSettings["soft-toggle"], fals
 assert.equal(complete.data.operational.cbf.requiredSettings["click-on-steps"], false);
 assert.equal(complete.data.operational.cbf.requiredSettings["physics-bypass"], false);
 assert.equal(complete.data.operational.generation, complete.data.generation);
+assert.equal(complete.data.client.audio.enabled, false);
+assert.deepEqual(complete.data.client.audio.resources, []);
+assert.equal(complete.data.client.audio.fadeInSeconds, 0.8);
+assert.equal(complete.data.client.audio.fadeOutSeconds, 0.6);
+assert.equal(complete.data.client.ui.fadeInSeconds, 0.24);
+assert.equal(complete.data.client.ui.fadeOutSeconds, 0.18);
+
+setConfig("rankedAudioMenuSongId", 123456);
+setConfig("rankedAudioMenuStartSeconds", 42.5);
+setConfig("rankedAudioMatchSongId", 234567);
+setConfig("rankedAudioMatchStartSeconds", 10);
+setConfig("rankedAudioEnabled", true);
+const withResources = responseJson();
+assert.equal(withResources.data.validation.valid, true, withResources.data.validation.errors.join("\n"));
+assert.equal(withResources.data.client.audio.enabled, true);
+assert.deepEqual(
+  withResources.data.client.audio.resources.map((resource) => [resource.key, resource.songId, resource.startSeconds]),
+  [["menu", 123456, 42.5], ["match", 234567, 10]],
+);
 
 const repeated = responseJson();
-assert.equal(repeated.data.generation, complete.data.generation);
+assert.equal(repeated.data.generation, withResources.data.generation);
 mapSheet.rows[1][qualifyingColumn] = 55;
 const changed = responseJson();
-assert.notEqual(changed.data.generation, complete.data.generation);
+assert.notEqual(changed.data.generation, withResources.data.generation);
 
 mapSheet.rows[2][poolColumn] = "";
 const excluded = responseJson();
