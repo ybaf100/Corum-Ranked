@@ -23,6 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
+      artifact_name: ${{ steps.version.outputs.artifact_name }}
     steps:
       - uses: actions/checkout@v7
       - name: Read and validate mod identity/version
@@ -42,6 +43,10 @@ jobs:
             throw new Error('Click Between Frames must remain a required dependency');
           }
           fs.appendFileSync(process.env.GITHUB_OUTPUT, `version=${manifest.version}\n`);
+          fs.appendFileSync(
+            process.env.GITHUB_OUTPUT,
+            `artifact_name=Corum-Ranked-${manifest.version}\n`,
+          );
           NODE
 
   tests:
@@ -141,6 +146,11 @@ jobs:
           PY
       - uses: actions/upload-artifact@v7
         with:
-          name: Corum-Ranked-${{ needs.metadata.outputs.version }}
+          name: ${{ needs.metadata.outputs.artifact_name }}
           path: dist/hwanhee1.corum_ranked.geode
           if-no-files-found: error
+
+      - name: Report artifact filename
+        shell: bash
+        run: |
+          echo "Artifact ZIP: ${{ needs.metadata.outputs.artifact_name }}.zip" >> "$GITHUB_STEP_SUMMARY"

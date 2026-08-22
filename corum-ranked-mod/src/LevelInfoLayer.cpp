@@ -211,7 +211,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         // never be invoked twice for the same Ranked launch.
         bool gameplayLaunchStarted = false;
         bool songGateActive = false;
-        bool songGateReadySent = false;
+        SteadyClock::time_point lastReadySubmitAt {};
         bool songGateStartingPlay = false;
         bool songGateBypassed = false;
         bool mapDownloadRequested = false;
@@ -391,11 +391,20 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         if (
             rankedPrepareState(match.state) &&
             now >= m_fields->countdownEndsAt &&
-            readyForStart &&
-            !m_fields->songGateReadySent
+            readyForStart
         ) {
-            m_fields->songGateReadySent = true;
-            runtime.submitReady();
+            // Ready is server-idempotent. Do not make this a one-shot client event:
+            // submitReady() can legitimately be skipped while another control
+            // request is busy, and a transient HTTP failure must not strand the
+            // LevelInfo gate at READY forever. Retry at a bounded cadence until
+            // authority actually publishes PLAYING.
+            auto const readyRetryDue =
+                m_fields->lastReadySubmitAt == SteadyClock::time_point{} ||
+                std::chrono::duration<double>(now - m_fields->lastReadySubmitAt).count() >= 1.0;
+            if (readyRetryDue) {
+                m_fields->lastReadySubmitAt = now;
+                runtime.submitReady();
+            }
             return;
         }
 
@@ -406,11 +415,16 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
                 m_fields->songGateStartingPlay ||
                 m_fields->gameplayLaunchStarted
             ) return;
+
+            // Keep the gate and its polling callback alive until gameplay has
+            // actually been armed. READY -> PLAYING can land between client/GD
+            // frames; tearing the gate down before armCurrentLevelForGameplay()
+            // succeeds removes the only retry loop and can strand this page at
+            // READY forever.
             m_fields->songGateStartingPlay = true;
-            teardownSongDownloadGate();
             if (!launchRankedGameplay(nullptr)) {
                 m_fields->songGateStartingPlay = false;
-                returnToRanked(0.0f);
+                return;
             }
             return;
         }
@@ -484,6 +498,9 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         if (!ready && !runtime.songBypassAllowed()) return false;
         if (!ready && runtime.songBypassAllowed()) m_level->m_showedSongWarning = true;
 
+        // Arm while the download gate is still alive. If authority/GD state is
+        // temporarily out of sync, return false and let updateSongDownloadGate()
+        // retry on its next tick instead of destroying the READY page.
         if (!runtime.armCurrentLevelForGameplay()) return false;
 
         // Latch before vanilla starts mutating/pushing the gameplay scene. A
@@ -492,6 +509,11 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         m_fields->gameplayLaunchStarted = true;
         m_fields->autoPlayScheduled = false;
         unschedule(schedule_selector(CorumRankedLevelInfoLayer::autoPlayRanked));
+
+        // Only after the authoritative gameplay context is armed do we tear down
+        // the song/download gate. This preserves the retry loop until launch is
+        // guaranteed to proceed.
+        if (m_fields->songGateActive) teardownSongDownloadGate();
 
         LevelInfoLayer::onPlay(sender);
         return true;
