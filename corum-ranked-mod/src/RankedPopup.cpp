@@ -17,6 +17,7 @@
 #include <chrono>
 #include <cctype>
 #include <cmath>
+#include <iomanip>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -65,6 +66,15 @@ std::string upper(std::string value) {
 std::string displayBanner(std::string value) {
     std::replace(value.begin(), value.end(), '_', ' ');
     return value;
+}
+
+std::string formatScore(double value) {
+    if (std::abs(value - std::round(value)) < 0.0005) {
+        return std::to_string(static_cast<long long>(std::llround(value)));
+    }
+    std::ostringstream stream;
+    stream << std::fixed << std::setprecision(1) << value;
+    return stream.str();
 }
 
 std::string twoLineTitle(std::string value, std::size_t perLine = 11) {
@@ -574,6 +584,11 @@ class CorumRankedLayer final : public CCLayerColor {
             renderPrepare(match);
             return;
         }
+        if (match.state == "ROUND_SETTLING") {
+            if (match.spectatorActive) renderSpectatorWait(match);
+            else renderInterRound(match);
+            return;
+        }
         if (
             match.state == "ROUND_PLAYING" ||
             match.state == "FINAL_ATTEMPT_WINDOW" ||
@@ -825,6 +840,46 @@ class CorumRankedLayer final : public CCLayerColor {
         }
         auto* footerPlate = makeTextPlate(footer, {210.0f, 37.0f}, {size.width / 2.0f, 27.0f}, footerAccent, 0.25f, ccc3(245, 248, 255), "goldFont.fnt");
         m_root->addChild(footerPlate, 3);
+    }
+
+    void renderSpectatorWait(MatchView const& match) {
+        auto const size = CCDirector::sharedDirector()->getWinSize();
+        auto const ownA = match.side == "A";
+        auto const ownScore = ownA ? match.scoreA : match.scoreB;
+        auto const opponentScore = ownA ? match.scoreB : match.scoreA;
+        auto const progress = match.spectatorCurrentProgress.value_or(0);
+        auto const opponent = match.spectatorOpponentName.empty()
+            ? match.opponentName
+            : match.spectatorOpponentName;
+
+        auto* title = makeLabel("YOUR ATTEMPT IS FINISHED", 0.48f, {size.width / 2.0f, size.height - 34.0f}, kGold, "goldFont.fnt");
+        title->limitLabelWidth(size.width - 70.0f, 0.48f, 0.30f);
+        m_root->addChild(title, 5);
+        auto* subtitle = makeLabel("WAITING FOR OPPONENT", 0.24f, {size.width / 2.0f, size.height - 59.0f}, kCyan);
+        m_root->addChild(subtitle, 5);
+
+        auto* panel = makeNeonPanel({246.0f, 142.0f}, {size.width / 2.0f, size.height / 2.0f - 4.0f}, kBlue, kDeepPanel, 238);
+        m_root->addChild(panel, 1);
+
+        auto* name = makeLabel(upper(shorten(opponent, 18)), 0.32f, {size.width / 2.0f, size.height / 2.0f + 38.0f});
+        name->limitLabelWidth(205.0f, 0.32f, 0.21f);
+        m_root->addChild(name, 5);
+        auto* live = makeLabel("LIVE PROGRESS", 0.16f, {size.width / 2.0f, size.height / 2.0f + 15.0f}, kCyan);
+        m_root->addChild(live, 5);
+        auto* pct = makeLabel(fmt::format("{}%", progress), 0.74f, {size.width / 2.0f, size.height / 2.0f - 15.0f}, kGold, "goldFont.fnt");
+        m_root->addChild(pct, 5);
+        auto* score = makeLabel(
+            fmt::format("YOUR SCORE  {}     OPPONENT  {}", formatScore(ownScore), formatScore(opponentScore)),
+            0.18f,
+            {size.width / 2.0f, size.height / 2.0f - 53.0f},
+            ccc3(218, 228, 244)
+        );
+        score->limitLabelWidth(220.0f, 0.18f, 0.13f);
+        m_root->addChild(score, 5);
+
+        auto* hint = makeLabel("THE ROUND WILL RESOLVE WHEN THE ACTIVE ATTEMPT ENDS", 0.15f, {size.width / 2.0f, 28.0f}, ccc3(195, 205, 224));
+        hint->limitLabelWidth(size.width - 80.0f, 0.15f, 0.11f);
+        m_root->addChild(hint, 5);
     }
 
     void renderInterRound(MatchView const& match) {

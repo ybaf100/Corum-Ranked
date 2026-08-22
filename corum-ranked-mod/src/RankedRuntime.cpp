@@ -1158,6 +1158,9 @@ bool RankedRuntime::armCurrentLevelForGameplay() {
     m_gameplayStartContextKey = currentAttemptContextKey();
     m_gameplayStartedAt = iso8601FromMillis(m_serverClock.serverNowMillis(localNowMillis()));
     m_gameplayStartEligible = true;
+    m_gameplayStartNeedsIntent =
+        m_view.match.state == "FINAL_ATTEMPT_WINDOW" ||
+        m_view.match.state == "LAST_ATTEMPT_WINDOW";
     log::debug(
         "Ranked gameplay armed: match={} level={} qualifying={} context={} startedAt={}",
         m_gameplayMatchId,
@@ -1383,6 +1386,7 @@ void RankedRuntime::cleanupAttemptTransportIfIdle() {
         m_gameplayStartContextKey.clear();
         m_gameplayStartedAt.clear();
         m_gameplayStartEligible = false;
+        m_gameplayStartNeedsIntent = false;
     }
 }
 
@@ -1447,6 +1451,21 @@ bool RankedRuntime::reportAttemptStart(int levelId) {
         .contextKey = startContext,
     };
     if (armedSceneStart) m_gameplayStartEligible = false;
+
+    // The ordinary Start/End transport is serialized for exact attempt ordering.
+    // During FINAL/LAST ATTEMPT that serialization can delay a valid visual Start
+    // beyond the 10-second start deadline. Send a lightweight, non-authoritative
+    // start intent immediately so the server knows an already-started attempt is
+    // still in flight and must not finalize the round at the deadline.
+    if (
+        (armedSceneStart && m_gameplayStartNeedsIntent) ||
+        m_view.match.state == "FINAL_ATTEMPT_WINDOW" ||
+        m_view.match.state == "LAST_ATTEMPT_WINDOW"
+    ) {
+        sendAttemptStartIntent(start);
+    }
+
+    if (armedSceneStart) m_gameplayStartNeedsIntent = false;
 
     // Geometry Dash may visually reset into the next attempt before the previous
     // HTTP end acknowledgement arrives. Never overwrite that older transport.
@@ -1587,6 +1606,41 @@ void RankedRuntime::flushAttemptEvents() {
         // already show ROUND_RESULT by the time the HTTP request gets a turn.
         sendAttemptStart();
     }
+}
+
+void RankedRuntime::sendAttemptStartIntent(PendingStart const& start) {
+    if (m_view.match.matchId.empty() || start.clientStartedAt.empty()) return;
+    matjson::Value body;
+    body["levelId"] = fmt::format("{}", start.levelId);
+    body["clientEventId"] = start.eventId;
+    body["clientStartedAt"] = start.clientStartedAt;
+    auto request = baseRequest(m_sessionToken, m_matchToken);
+    request.bodyJSON(body);
+    m_attemptIntentRequest.spawn(
+        request.post(endpoint("/api/ranked/matches/" + m_view.match.matchId + "/attempt/intent")),
+        [this, start](web::WebResponse response) {
+            if (!successful(response)) {
+                log::warn(
+                    "Ranked attempt start intent failed: level={} event={} status={} reason={}",
+                    start.levelId,
+                    start.eventId,
+                    response.code(),
+                    responseError(response)
+                );
+                return;
+            }
+            auto const root = response.json().unwrapOr(matjson::Value());
+            observeServerNow(root);
+            if (!root["accepted"].asBool().unwrapOr(false)) {
+                log::warn(
+                    "Ranked attempt start intent rejected: level={} event={} reason={}",
+                    start.levelId,
+                    start.eventId,
+                    root["reason"].asString().unwrapOr("unknown")
+                );
+            }
+        }
+    );
 }
 
 void RankedRuntime::sendAttemptStart() {

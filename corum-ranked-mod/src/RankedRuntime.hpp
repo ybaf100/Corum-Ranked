@@ -247,6 +247,7 @@ private:
     void applyAttemptSnapshot(matjson::Value const& root);
     void promoteQueuedAttempt();
     void flushAttemptEvents();
+    void sendAttemptStartIntent(PendingStart const& start);
     void sendAttemptStart();
     void sendAttemptEnd();
     void flushProgressTelemetry();
@@ -279,6 +280,7 @@ private:
     std::string m_gameplayStartContextKey;
     std::string m_gameplayStartedAt;
     bool m_gameplayStartEligible = false;
+    bool m_gameplayStartNeedsIntent = false;
     std::optional<PendingStart> m_pendingStart;
     std::optional<PendingEnd> m_pendingEnd;
     std::deque<QueuedAttempt> m_attemptBacklog;
@@ -298,6 +300,7 @@ private:
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_controlRequest;
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_pollRequest;
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_attemptRequest;
+    geode::async::TaskHolder<geode::utils::web::WebResponse> m_attemptIntentRequest;
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_progressRequest;
 };
 

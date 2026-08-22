@@ -14,6 +14,7 @@ import {
   AttemptEndDto,
   AttemptProgressDto,
   AttemptStartDto,
+  AttemptStartIntentDto,
   ReadyMatchDto,
   ResourceFailureDto,
   SubmitBanDto,
@@ -77,6 +78,16 @@ export class MatchController {
     @Body() body: ResourceFailureDto,
   ) {
     return this.matches.reportResourceFailure(matchId, matchToken, session, body);
+  }
+
+  @Post(":id/attempt/intent")
+  public startAttemptIntent(
+    @Param("id") matchId: string,
+    @Headers("x-match-token") matchToken: string,
+    @CurrentSession() session: RankedSessionContext,
+    @Body() body: AttemptStartIntentDto,
+  ) {
+    return this.matches.startAttemptIntent(matchId, matchToken, session, body);
   }
 
   @Post(":id/attempt/start")

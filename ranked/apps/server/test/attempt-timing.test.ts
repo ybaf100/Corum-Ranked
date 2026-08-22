@@ -26,6 +26,8 @@ describe("attempt transport timing", () => {
     expect(resolveAttemptStartTime("2026-08-22T04:00:08.500Z", now).toISOString())
       .toBe("2026-08-22T04:00:08.500Z");
     expect(resolveAttemptStartTime("2026-08-22T04:00:07.000Z", now).toISOString())
+      .toBe("2026-08-22T04:00:07.000Z");
+    expect(resolveAttemptStartTime("2026-08-22T04:00:04.000Z", now).toISOString())
       .toBe(now.toISOString());
     expect(resolveAttemptStartTime("2026-08-22T04:00:11.000Z", now).toISOString())
       .toBe(now.toISOString());

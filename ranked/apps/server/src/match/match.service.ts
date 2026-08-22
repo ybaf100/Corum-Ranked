@@ -20,6 +20,7 @@ import {
   scoreAttempt,
   roundDeadlineAtMs,
   startRoundAttempt,
+  startRoundAttemptFromIntent,
   tierBandFor,
   type MatchSeriesState,
   type PlayerSide,
@@ -48,6 +49,7 @@ import type {
   AttemptEndDto,
   AttemptProgressDto,
   AttemptStartDto,
+  AttemptStartIntentDto,
   ReadyMatchDto,
   ResourceFailureDto,
   SubmitBanDto,
@@ -56,6 +58,9 @@ import {
   MATCH_RUNTIME_STATE,
   type MatchRuntimeStatePort,
 } from "./match-runtime-state.js";
+
+const ATTEMPT_START_INTENT_RECEIPT_GRACE_MS = 5_000;
+const ATTEMPT_START_INTENT_HOLD_MS = 30_000;
 
 type MatchState =
   | "MATCHED"
@@ -500,6 +505,49 @@ export class MatchService {
     return this.state(matchId, matchToken, session);
   }
 
+  public async startAttemptIntent(
+    matchId: string,
+    matchToken: string,
+    session: RankedSessionContext,
+    body: AttemptStartIntentDto,
+  ) {
+    const now = this.clock.now();
+    return this.database.transaction(async (transaction) => {
+      const authorization = await this.access.authorize(transaction, matchId, session, matchToken);
+      const match = await this.lockMatch(transaction, matchId);
+      if (!this.isRoundPlaying(match.state)) {
+        return { accepted: false, reason: `ATTEMPT_INTENT_NOT_ACCEPTED_IN_${match.state}`, serverNow: now.toISOString() };
+      }
+      const round = await this.lockCurrentRound(transaction, match);
+      this.assertPlayableLevelId(body.levelId, round.playable_level_id);
+      const state = this.roundState(round);
+      const parsed = new Date(body.clientStartedAt);
+      if (Number.isNaN(parsed.getTime())) {
+        return { accepted: false, reason: "INVALID_CLIENT_STARTED_AT", serverNow: now.toISOString() };
+      }
+      const transportDelta = now.getTime() - parsed.getTime();
+      if (transportDelta < 0 || transportDelta > ATTEMPT_START_INTENT_RECEIPT_GRACE_MS) {
+        return { accepted: false, reason: "ATTEMPT_INTENT_TIMESTAMP_OUT_OF_RANGE", serverNow: now.toISOString() };
+      }
+      const deadline = state.lastAttemptWindow?.endsAtMs ?? state.finalWindowEndAtMs;
+      if (parsed.getTime() >= deadline) {
+        return { accepted: false, reason: "ATTEMPT_START_WINDOW_CLOSED", serverNow: now.toISOString() };
+      }
+      if (state.lastAttemptWindow && state.lastAttemptWindow.targetSide !== authorization.side) {
+        return { accepted: false, reason: "LAST_ATTEMPT_TARGET_ONLY", serverNow: now.toISOString() };
+      }
+      this.runtimeState.noteStartIntent(
+        match.id,
+        round.round_number,
+        authorization.side,
+        body.clientEventId,
+        parsed.getTime(),
+        now.getTime(),
+      );
+      return { accepted: true, reason: null, serverNow: now.toISOString() };
+    });
+  }
+
   public async startAttempt(
     matchId: string,
     matchToken: string,
@@ -510,7 +558,13 @@ export class MatchService {
     return this.database.transaction(async (transaction) => {
       const authorization = await this.access.authorize(transaction, matchId, session, matchToken);
       let match = await this.lockMatch(transaction, matchId);
-      match = await this.advanceLockedMatch(transaction, match, now);
+      if (match.state !== "DEATHMATCH_PLAYING" && this.isRoundPlaying(match.state) && match.current_round_number) {
+        const intent = this.runtimeState.startIntent(match.id, match.current_round_number, authorization.side);
+        const matchingIntent = intent?.eventId === body.clientEventId ? intent : null;
+        if (!matchingIntent) match = await this.advanceLockedMatch(transaction, match, now);
+      } else {
+        match = await this.advanceLockedMatch(transaction, match, now);
+      }
       if (match.state === "DEATHMATCH_PLAYING") {
         return this.startDeathmatchAttempt(
           transaction,
@@ -534,16 +588,23 @@ export class MatchService {
       this.assertPlayableLevelId(body.levelId, round.playable_level_id);
       const roundState = this.roundState(round);
       const clientStart = resolveAttemptStartTime(body.clientStartedAt, now);
-      // The domain clock is monotonic. If another poll evaluated the round after
-      // the visual start but before this packet arrived, clamp to the last
-      // evaluated instant while keeping the packet within the real start window.
+      const intent = this.runtimeState.startIntent(match.id, round.round_number, authorization.side);
+      const matchingIntent = intent?.eventId === body.clientEventId ? intent : null;
       const effectiveStartMs = Math.max(roundState.lastEvaluatedAtMs, clientStart.getTime());
-      const decision = startRoundAttempt(
-        roundState,
-        authorization.side,
-        effectiveStartMs,
-        body.clientEventId,
-      );
+      const decision = matchingIntent
+        ? startRoundAttemptFromIntent(
+            roundState,
+            authorization.side,
+            matchingIntent.startedAtMs,
+            now.getTime(),
+            body.clientEventId,
+          )
+        : startRoundAttempt(
+            roundState,
+            authorization.side,
+            effectiveStartMs,
+            body.clientEventId,
+          );
       if (decision.accepted && !decision.duplicate && decision.attemptId) {
         const attempt = decision.state.attempts[authorization.side].find(
           (candidate) => candidate.id === decision.attemptId,
@@ -567,6 +628,9 @@ export class MatchService {
             body.clientEventId,
           ],
         );
+      }
+      if (decision.accepted || decision.reason !== "ATTEMPT_ALREADY_ACTIVE") {
+        this.runtimeState.clearStartIntent(match.id, round.round_number, authorization.side, body.clientEventId);
       }
       await this.persistRoundState(transaction, match, round, decision.state, now);
       if (
@@ -944,6 +1008,24 @@ export class MatchService {
         initial,
         now,
       );
+      const startDeadlineMs = withoutOrphans.lastAttemptWindow?.endsAtMs ?? withoutOrphans.finalWindowEndAtMs;
+      const pendingStartIntent = (["A", "B"] as const).some((side) => {
+        const intent = this.runtimeState.startIntent(match.id, round.round_number, side);
+        if (!intent) return false;
+        const fresh = now.getTime() - intent.observedAtMs < ATTEMPT_START_INTENT_HOLD_MS;
+        const validStart = intent.startedAtMs < startDeadlineMs;
+        if (!fresh || !validStart) {
+          this.runtimeState.clearStartIntent(match.id, round.round_number, side, intent.eventId);
+          return false;
+        }
+        return true;
+      });
+      if (pendingStartIntent && now.getTime() >= startDeadlineMs) {
+        // A client-side visual attempt was observed before the real start
+        // deadline. Keep the round open while the serialized authoritative
+        // Start request catches up; no new gameplay start is granted here.
+        return match;
+      }
       if (shouldHoldRoundForAttemptTransport(withoutOrphans, now.getTime())) {
         // No gameplay time is added here. The visible start deadline has already
         // expired; this short hold only lets a packet stamped before that

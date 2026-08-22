@@ -7,6 +7,7 @@ import {
   endRoundAttempt,
   scoreAttempt,
   startRoundAttempt,
+  startRoundAttemptFromIntent,
   type PlayerSide,
   type RoundState,
 } from "../src/index.js";
@@ -100,6 +101,33 @@ describe("three minutes plus final attempt start window", () => {
     const decision = startRoundAttempt(state, "A", START + 191_000, "late-start");
     expect(decision.accepted).toBe(false);
     expect(decision.state.phase).toBe("ROUND_RESULT");
+  });
+
+  it("restores a pre-deadline visual start after the deadline without ending the active attempt", () => {
+    const state = createRound(1, snapshot, DOCUMENT_RULES_V0_3, START);
+    const late = startRoundAttemptFromIntent(
+      advanceRoundClock(state, START + 189_500),
+      "A",
+      START + 189_000,
+      START + 193_000,
+      "intent-start",
+    );
+    expect(late.accepted).toBe(true);
+    expect(late.state.phase).toBe("ROUND_SETTLING");
+    expect(late.state.attempts.A[0]?.endedAtMs).toBeNull();
+
+    const ended = endRoundAttempt(
+      late.state,
+      "A",
+      late.attemptId!,
+      START + 220_000,
+      88,
+      false,
+      "intent-end",
+    );
+    expect(ended.accepted).toBe(true);
+    expect(ended.state.phase).toBe("ROUND_RESULT");
+    expect(ended.state.scores.A).toBe(132);
   });
 
   it("counts a 3:09 attempt even when it ends at 3:40", () => {

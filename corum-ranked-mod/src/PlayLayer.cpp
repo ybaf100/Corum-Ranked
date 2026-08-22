@@ -172,6 +172,20 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
             return;
         }
 
+        // If our accepted final attempt has already ended and the server has
+        // switched this side into spectator mode, leave PlayLayer immediately.
+        // The opponent keeps playing their accepted attempt; the Ranked scene
+        // renders their live progress instead of leaving us on a completed/dead
+        // level screen until they finish.
+        if (
+            runtime.isSpectating() && m_fields->attemptEndReported &&
+            !m_fields->autoExitRequested
+        ) {
+            m_fields->autoExitRequested = true;
+            PlayLayer::onQuit();
+            return;
+        }
+
         auto const& matchState = runtime.view().match.state;
         auto const stillPlaying =
             matchState == "ROUND_PLAYING" ||

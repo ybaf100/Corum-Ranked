@@ -9,6 +9,12 @@ export interface AttemptProgressSnapshot {
   readonly updatedAtMs: number;
 }
 
+export interface AttemptStartIntentSnapshot {
+  readonly eventId: string;
+  readonly startedAtMs: number;
+  readonly observedAtMs: number;
+}
+
 export interface MatchRuntimeStatePort {
   beginAttempt(
     matchId: string,
@@ -36,6 +42,25 @@ export interface MatchRuntimeStatePort {
     roundNumber: number,
     side: PlayerSide,
   ): AttemptProgressSnapshot | null;
+  noteStartIntent(
+    matchId: string,
+    roundNumber: number,
+    side: PlayerSide,
+    eventId: string,
+    startedAtMs: number,
+    observedAtMs: number,
+  ): void;
+  startIntent(
+    matchId: string,
+    roundNumber: number,
+    side: PlayerSide,
+  ): AttemptStartIntentSnapshot | null;
+  clearStartIntent(
+    matchId: string,
+    roundNumber: number,
+    side: PlayerSide,
+    eventId?: string,
+  ): void;
   clearRound(matchId: string, roundNumber: number): void;
 }
 
@@ -51,6 +76,7 @@ const keyFor = (matchId: string, roundNumber: number, side: PlayerSide): string 
 @Injectable()
 export class InMemoryMatchRuntimeState implements MatchRuntimeStatePort {
   private readonly attempts = new Map<string, MutableAttemptProgress>();
+  private readonly startIntents = new Map<string, AttemptStartIntentSnapshot>();
 
   public beginAttempt(
     matchId: string,
@@ -106,8 +132,47 @@ export class InMemoryMatchRuntimeState implements MatchRuntimeStatePort {
     return current ? { ...current } : null;
   }
 
+
+  public noteStartIntent(
+    matchId: string,
+    roundNumber: number,
+    side: PlayerSide,
+    eventId: string,
+    startedAtMs: number,
+    observedAtMs: number,
+  ): void {
+    this.startIntents.set(keyFor(matchId, roundNumber, side), {
+      eventId,
+      startedAtMs,
+      observedAtMs,
+    });
+  }
+
+  public startIntent(
+    matchId: string,
+    roundNumber: number,
+    side: PlayerSide,
+  ): AttemptStartIntentSnapshot | null {
+    const intent = this.startIntents.get(keyFor(matchId, roundNumber, side));
+    return intent ? { ...intent } : null;
+  }
+
+  public clearStartIntent(
+    matchId: string,
+    roundNumber: number,
+    side: PlayerSide,
+    eventId?: string,
+  ): void {
+    const key = keyFor(matchId, roundNumber, side);
+    const current = this.startIntents.get(key);
+    if (!current) return;
+    if (!eventId || current.eventId === eventId) this.startIntents.delete(key);
+  }
+
   public clearRound(matchId: string, roundNumber: number): void {
     this.attempts.delete(keyFor(matchId, roundNumber, "A"));
     this.attempts.delete(keyFor(matchId, roundNumber, "B"));
+    this.startIntents.delete(keyFor(matchId, roundNumber, "A"));
+    this.startIntents.delete(keyFor(matchId, roundNumber, "B"));
   }
 }

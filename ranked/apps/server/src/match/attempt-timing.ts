@@ -4,7 +4,7 @@ import type { RoundState } from "@corum-ranked/rules";
 // gameplay time: a client may only claim a start timestamp that is very close
 // to server receipt time, and the timestamp still has to be before the actual
 // round/LAST ATTEMPT deadline in the domain rules.
-export const ATTEMPT_TRANSPORT_GRACE_MS = 2_000;
+export const ATTEMPT_TRANSPORT_GRACE_MS = 5_000;
 export const resolveAttemptStartTime = (
   clientStartedAt: string | undefined,
   now: Date,

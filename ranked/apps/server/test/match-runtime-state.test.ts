@@ -40,4 +40,23 @@ describe("ephemeral spectator progress state", () => {
     expect(state.progress("match-1", 1, "B")).toBeNull();
     expect(state.progress("match-1", 2, "A")?.progressPercent).toBe(0);
   });
+  it("tracks a final-window start intent independently from attempt progress", () => {
+    const state = new InMemoryMatchRuntimeState();
+    state.noteStartIntent("match-1", 1, "A", "start-final", 189_000, 189_200);
+    expect(state.startIntent("match-1", 1, "A")).toEqual({
+      eventId: "start-final",
+      startedAtMs: 189_000,
+      observedAtMs: 189_200,
+    });
+
+    state.beginAttempt("match-1", 1, "A", "A-9", 189_500);
+    expect(state.progress("match-1", 1, "A")?.attemptId).toBe("A-9");
+    expect(state.startIntent("match-1", 1, "A")?.eventId).toBe("start-final");
+
+    state.clearStartIntent("match-1", 1, "A", "wrong-event");
+    expect(state.startIntent("match-1", 1, "A")?.eventId).toBe("start-final");
+    state.clearStartIntent("match-1", 1, "A", "start-final");
+    expect(state.startIntent("match-1", 1, "A")).toBeNull();
+  });
+
 });

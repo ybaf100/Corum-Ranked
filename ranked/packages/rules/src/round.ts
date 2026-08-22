@@ -287,6 +287,106 @@ const enterLastAttemptWindow = (
   return next;
 };
 
+export const startRoundAttemptFromIntent = (
+  state: RoundState,
+  side: PlayerSide,
+  observedStartAtMs: number,
+  serverNowMs: number,
+  clientEventId: string,
+): AttemptStartDecision => {
+  if (!clientEventId.trim()) {
+    throw new RankedDomainError("INVALID_ATTEMPT", "clientEventId is required");
+  }
+  const existing = findStartedEvent(state, side, clientEventId);
+  if (existing) {
+    return {
+      state: cloneRound(state),
+      accepted: true,
+      duplicate: true,
+      attemptId: existing.id,
+      reason: null,
+    };
+  }
+  if (state.phase === "ROUND_RESULT") {
+    return {
+      state: cloneRound(state),
+      accepted: false,
+      duplicate: false,
+      attemptId: null,
+      reason: "ROUND_ALREADY_FINISHED",
+    };
+  }
+  if (!Number.isFinite(observedStartAtMs) || observedStartAtMs < state.startedAtMs) {
+    return {
+      state: cloneRound(state),
+      accepted: false,
+      duplicate: false,
+      attemptId: null,
+      reason: "ROUND_NOT_STARTED",
+    };
+  }
+  if (activeAttempts(state, side).length > 0) {
+    return {
+      state: cloneRound(state),
+      accepted: false,
+      duplicate: false,
+      attemptId: null,
+      reason: "ATTEMPT_ALREADY_ACTIVE",
+    };
+  }
+  if (state.lastAttemptWindow && side !== state.lastAttemptWindow.targetSide) {
+    return {
+      state: cloneRound(state),
+      accepted: false,
+      duplicate: false,
+      attemptId: null,
+      reason: "LAST_ATTEMPT_TARGET_ONLY",
+    };
+  }
+  const deadline = state.lastAttemptWindow?.endsAtMs ?? state.finalWindowEndAtMs;
+  if (observedStartAtMs >= deadline) {
+    return {
+      state: cloneRound(state),
+      accepted: false,
+      duplicate: false,
+      attemptId: null,
+      reason: "ATTEMPT_START_WINDOW_CLOSED",
+    };
+  }
+
+  const next = cloneRound(state);
+  const sequence = next.attempts[side].length + 1;
+  const attemptId = `${side}-${sequence}`;
+  next.attempts[side].push({
+    id: attemptId,
+    side,
+    sequence,
+    startEventId: clientEventId,
+    serverAcceptedStartAtMs: observedStartAtMs,
+    endEventId: null,
+    endedAtMs: null,
+    progressPercent: null,
+    cleared: false,
+    awardedScore: 0,
+    valid: true,
+    invalidReason: null,
+  });
+  next.stateVersion += 1;
+
+  // The event was observed before the real start deadline, but the serialized
+  // HTTP request may reach the server after the deadline. Advance from the
+  // current monotonic server clock only after the accepted active attempt has
+  // been restored; the round will therefore settle instead of forcibly ending
+  // the still-running visual attempt.
+  return {
+    state: advanceRoundClock(next, Math.max(serverNowMs, next.lastEvaluatedAtMs)),
+    accepted: true,
+    duplicate: false,
+    attemptId,
+    reason: null,
+  };
+};
+
 export const endRoundAttempt = (
   state: RoundState,
   side: PlayerSide,

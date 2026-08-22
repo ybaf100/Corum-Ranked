@@ -29,6 +29,20 @@ export class ResourceFailureDto {
   public resource!: "MAP";
 }
 
+
+export class AttemptStartIntentDto {
+  @IsString()
+  @Length(1, 40)
+  public levelId!: string;
+
+  @IsString()
+  @Length(1, 100)
+  public clientEventId!: string;
+
+  @IsISO8601()
+  public clientStartedAt!: string;
+}
+
 export class AttemptStartDto {
   @IsString()
   @Length(1, 40)
