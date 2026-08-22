@@ -71,7 +71,9 @@ private:
     void finishDownloadFailure(int songId, std::string const& reason);
     void cancelActiveDownload();
     void requestAudioSwitch();
-    void startDesiredAudio();
+    void startDesiredAudio(bool retry = false);
+    void verifyDesiredAudio();
+    void clearPlaybackState();
 
     RankedClientPresentationView m_config;
     std::string m_configSignature;
@@ -90,6 +92,10 @@ private:
     bool m_ownsMusicChannel = false;
     bool m_switchPending = false;
     std::chrono::steady_clock::time_point m_switchAt {};
+    bool m_playbackVerifyPending = false;
+    std::chrono::steady_clock::time_point m_playbackVerifyAt {};
+    int m_playbackRetryCount = 0;
+    unsigned int m_pendingStartMs = 0;
 };
 
 } // namespace corum::ranked

@@ -1,3 +1,14 @@
+# v0.4.0-alpha.32
+
+- Fixed Ranked BGM remaining completely silent even after all configured songs downloaded successfully.
+- Replaced the old `fadeOutMusic() -> playMusic()` handoff with a fade followed by `stopAllMusic(true)` before installing the Ranked track, preventing the previous Geometry Dash menu channel from remaining registered in a silent/fading state.
+- Explicitly unpauses the main music channel group and restores Geometry Dash's current music volume before Ranked playback.
+- Added a playback watchdog: the client verifies that FMOD actually created a live main-music channel and retries the track up to two times instead of permanently assuming a failed `playMusic()` call succeeded.
+- Delayed configured start-position seeking until the new music channel is confirmed active.
+- Ranked private-cache files now require a valid MP3/Ogg/FLAC/WAV/MP4 audio signature; HTML/error bodies can no longer be accepted merely because they are larger than 1 KB.
+- Leaving Ranked now hard-stops the Ranked music slot before asking Geometry Dash to recreate its normal menu music.
+- No server, scoring, MMR, map-pool, attempt, FINAL/LAST ATTEMPT, or Debug Bot behavior was changed.
+
 # v0.4.0-alpha.31
 
 - Fixed the two-Clear LAST ATTEMPT transition so the triggering player enters the opponent spectator screen immediately instead of seeing a misleading second `STARTS IN 10` prepare screen.
