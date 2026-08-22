@@ -40,6 +40,21 @@ bool rankedPlayingState(std::string const& state) {
         state == "DEATHMATCH_PLAYING";
 }
 
+bool rankedDownloadGateState(std::string const& state) {
+    return rankedPrepareState(state) || state == "ROUND_PLAYING" || state == "DEATHMATCH_PLAYING";
+}
+
+std::string rankedGateTitle() {
+    auto const& match = corum::ranked::RankedRuntime::get().view().match;
+    if (match.deathmatchSequence > 0 || match.state == "DEATHMATCH_PREPARE" || match.state == "DEATHMATCH_PLAYING") {
+        return "DEATH MATCH";
+    }
+    if (match.roundNumber <= 0) return "RANKED MATCH";
+    if (match.roundNumber == 2) return "ROUND 2 - MATCH POINT";
+    if (match.roundNumber == 3) return "ROUND 3 - TIEBREAKER";
+    return fmt::format("ROUND {}", match.roundNumber);
+}
+
 bool mapReady(GJGameLevel* level) {
     return level && !level->m_levelString.empty() && !level->m_levelNotDownloaded;
 }
@@ -214,7 +229,10 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         if (!isCurrentRankedLevel(m_level)) return;
 
         double countdownRemaining = 0.0;
-        if (rankedPrepareState(runtime.view().match.state) && consumePrepareGateRequest(m_level, countdownRemaining)) {
+        if (
+            rankedDownloadGateState(runtime.view().match.state) &&
+            consumePrepareGateRequest(m_level, countdownRemaining)
+        ) {
             setupSongDownloadGate(countdownRemaining);
             return;
         }
@@ -244,7 +262,8 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         m_fields->gateOverlay->setZOrder(1001);
         addChild(m_fields->gateOverlay, 1001);
 
-        m_fields->gateTitle = gateLabel("RANKED MATCH", 0.16f, {87.0f, 40.0f}, {52, 214, 255});
+        m_fields->gateTitle = gateLabel(rankedGateTitle(), 0.16f, {87.0f, 40.0f}, {52, 214, 255});
+        m_fields->gateTitle->limitLabelWidth(158.0f, 0.16f, 0.10f);
         m_fields->gateOverlay->addChild(m_fields->gateTitle, 3);
         m_fields->gateCountdown = gateLabel("STARTS IN  10", 0.27f, {87.0f, 25.0f}, {255, 216, 86});
         m_fields->gateOverlay->addChild(m_fields->gateCountdown, 3);
@@ -286,6 +305,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         }
 
         auto const& match = runtime.view().match;
+        if (m_fields->gateTitle) m_fields->gateTitle->setString(rankedGateTitle().c_str());
         auto const now = SteadyClock::now();
         auto const levelReady = mapReady(m_level);
 

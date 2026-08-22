@@ -15,6 +15,7 @@ import type { RankedConfigService } from "../src/config/ranked-config.service.js
 import type { ServerEnvironment } from "../src/config/server-environment.js";
 import { DebugBotService } from "../src/debug-bot/debug-bot.service.js";
 import { MatchAccessService } from "../src/match/match-access.service.js";
+import { ATTEMPT_TRANSPORT_GRACE_MS } from "../src/match/attempt-timing.js";
 import { InMemoryMatchRuntimeState } from "../src/match/match-runtime-state.js";
 import { MatchService } from "../src/match/match.service.js";
 import { QueueService, type DebugBotMatchSettings } from "../src/queue/queue.service.js";
@@ -277,7 +278,11 @@ describe("development-only Bot Match using the production Ranked engine", () => 
       // start window even when it has zero Clears. The rated-match helper must
       // let that authoritative window expire before attempting to ready the
       // following round. Otherwise the next ready call correctly returns 409.
-      clock.advance(document.operational.rules.lastAttemptWindowSeconds * 1_000);
+      clock.advance(
+        document.operational.rules.lastAttemptWindowSeconds * 1_000 +
+          ATTEMPT_TRANSPORT_GRACE_MS +
+          1,
+      );
       await matches.state(creation.matchId, creation.playerMatchToken, creation.playerContext);
 
       if (round === 1) {

@@ -215,6 +215,7 @@ private:
         int levelId = 0;
         std::string eventId;
         std::string clientStartedAt;
+        std::string contextKey;
     };
 
     struct PendingEnd {
@@ -223,6 +224,7 @@ private:
         bool cleared = false;
         std::string eventId;
         std::string clientEndedAt;
+        std::string contextKey;
         double optimisticScore = 0.0;
         int optimisticClear = 0;
     };
@@ -251,6 +253,9 @@ private:
     void sendAttemptProgress();
     void cleanupAttemptTransportIfIdle();
     [[nodiscard]] bool canFinishTrackedLevel(int levelId) const;
+    [[nodiscard]] std::string currentAttemptContextKey() const;
+    [[nodiscard]] double optimisticScoreForContext(std::string const& contextKey) const;
+    [[nodiscard]] int optimisticClearsForContext(std::string const& contextKey) const;
     void setStage(RuntimeStage stage, std::string status, std::string error = {});
     void setTransientError(std::string error);
     void observeServerNow(matjson::Value const& root);
@@ -268,8 +273,12 @@ private:
     std::string m_matchToken;
     std::string m_attemptId;
     int m_attemptLevelId = 0;
+    std::string m_attemptContextKey;
     std::optional<RankedMapView> m_gameplayMap;
     std::string m_gameplayMatchId;
+    std::string m_gameplayStartContextKey;
+    std::string m_gameplayStartedAt;
+    bool m_gameplayStartEligible = false;
     std::optional<PendingStart> m_pendingStart;
     std::optional<PendingEnd> m_pendingEnd;
     std::deque<QueuedAttempt> m_attemptBacklog;
@@ -280,8 +289,6 @@ private:
     int m_lastSubmittedProgress = -1;
     int m_localDeathmatchSequence = 0;
     int m_localDeathmatchVisualAttempts = 0;
-    double m_optimisticScoreDelta = 0.0;
-    int m_optimisticClearDelta = 0;
     std::uint64_t m_eventSequence = 0;
     bool m_controlBusy = false;
     bool m_pollBusy = false;

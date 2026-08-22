@@ -239,12 +239,15 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
 
             auto const& match = runtime.view().match;
             auto const startWindowExpired =
-                (match.state == "FINAL_ATTEMPT_WINDOW" || match.state == "LAST_ATTEMPT_WINDOW") &&
-                runtime.deadlineMillis().value_or(1) <= 0;
+                ((match.state == "FINAL_ATTEMPT_WINDOW" || match.state == "LAST_ATTEMPT_WINDOW") &&
+                 runtime.deadlineMillis().value_or(1) <= 0) ||
+                match.state == "ROUND_SETTLING";
             if (startWindowExpired) {
-                // The current attempt may finish after the start deadline, but a
-                // reset must not create a new visual attempt during the server's
-                // short transport-reconciliation hold.
+                // The current attempt may finish after the start deadline, but
+                // once the start window is closed (or the server has entered
+                // ROUND_SETTLING) a vanilla reset must never create a fake next
+                // visual attempt. Exit immediately so Ranked can show the result
+                // or the opponent spectator state instead.
                 if (!m_fields->autoExitRequested) {
                     m_fields->autoExitRequested = true;
                     PlayLayer::onQuit();

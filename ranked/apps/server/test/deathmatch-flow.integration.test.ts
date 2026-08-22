@@ -14,6 +14,7 @@ import { TokenService } from "../src/common/token.service.js";
 import type { CsmpTierSource } from "../src/config/csmp-tier.source.js";
 import type { RankedConfigService } from "../src/config/ranked-config.service.js";
 import { MatchAccessService } from "../src/match/match-access.service.js";
+import { ATTEMPT_TRANSPORT_GRACE_MS } from "../src/match/attempt-timing.js";
 import { InMemoryMatchRuntimeState } from "../src/match/match-runtime-state.js";
 import { MatchService } from "../src/match/match.service.js";
 import { OutboxService } from "../src/relay/outbox.service.js";
@@ -253,7 +254,7 @@ describe("Round 3 draw and repeating deathmatch", () => {
       await service.ready(matchId, matchTokenB, contextB, {
         installedMods: structuredClone(cleanMods),
       });
-      clock.advance(191);
+      clock.advance(191 + ATTEMPT_TRANSPORT_GRACE_MS / 1_000 + 1);
       const resultState = (await service.state(matchId, matchTokenA, contextA)) as Record<string, any>;
       if (round < 3) {
         expect(resultState.state).toBe("ROUND_RESULT");

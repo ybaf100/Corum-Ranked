@@ -1100,15 +1100,17 @@ class CorumRankedLayer final : public CCLayerColor {
         return true;
     }
 
-    void openSongDownloadGate() {
+    void openSongDownloadGate(double countdownOverride = -1.0) {
         if (m_enteringSongGate) return;
         auto* level = findLevelInfoMap();
         if (!level) return;
 
-        // alpha.21: always move preparation to the real Geometry Dash level page.
-        // That LevelInfoLayer owns map download itself; Ranked no longer performs
-        // a parallel GameLevelManager map-download workflow from this screen.
-        auto const countdownRemaining = std::max(0.0, 10.0 - phaseSeconds());
+        // The real Geometry Dash LevelInfo page owns map/song acquisition. The
+        // explicit override is used as a recovery path when polling skipped a
+        // very short PREPARE phase (notably Debug Trigger Death Match).
+        auto const countdownRemaining = countdownOverride >= 0.0
+            ? countdownOverride
+            : std::max(0.0, 10.0 - phaseSeconds());
         m_enteringSongGate = corum::ranked::showRankedSongDownloadGate(level, countdownRemaining);
     }
 
@@ -1145,7 +1147,13 @@ class CorumRankedLayer final : public CCLayerColor {
         }
         auto* level = findPlayableMap();
         if (!level) {
-            m_localMessage = "Waiting for complete level data before entering.";
+            // A Debug scenario (or a fast server transition) can move PREPARE ->
+            // PLAYING between client polls. Recover by opening the same vanilla
+            // LevelInfo download gate even though PLAYING is already authoritative.
+            // LevelInfoLayer will download the map and auto-enter as soon as it is
+            // playable; this prevents the old permanent "Loading map" deadlock.
+            m_localMessage = "Opening level download recovery...";
+            openSongDownloadGate(0.0);
             return;
         }
         m_enteringLevel = true;

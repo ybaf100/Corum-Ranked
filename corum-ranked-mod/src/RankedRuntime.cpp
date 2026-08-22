@@ -256,8 +256,12 @@ void RankedRuntime::begin() {
     m_matchToken.clear();
     m_attemptId.clear();
     m_attemptLevelId = 0;
+    m_attemptContextKey.clear();
     m_gameplayMap.reset();
     m_gameplayMatchId.clear();
+    m_gameplayStartContextKey.clear();
+    m_gameplayStartedAt.clear();
+    m_gameplayStartEligible = false;
     m_pendingStart.reset();
     m_pendingEnd.reset();
     m_attemptBacklog.clear();
@@ -265,8 +269,6 @@ void RankedRuntime::begin() {
     m_lastSubmittedProgress = -1;
     m_localDeathmatchSequence = 0;
     m_localDeathmatchVisualAttempts = 0;
-    m_optimisticScoreDelta = 0.0;
-    m_optimisticClearDelta = 0;
     m_songBypassAllowed = false;
     m_view.match = {};
     fetchConfig();
@@ -826,8 +828,8 @@ void RankedRuntime::parseMatchState(matjson::Value const& root) {
                 m_pendingStart.has_value(),
                 m_pendingEnd.has_value(),
                 m_attemptBacklog.size(),
-                m_optimisticScoreDelta,
-                m_optimisticClearDelta
+                optimisticScoreForContext(currentAttemptContextKey()),
+                optimisticClearsForContext(currentAttemptContextKey())
             );
         } else {
             cleanupAttemptTransportIfIdle();
@@ -1040,8 +1042,12 @@ void RankedRuntime::dismissMatch() {
     m_matchToken.clear();
     m_attemptId.clear();
     m_attemptLevelId = 0;
+    m_attemptContextKey.clear();
     m_gameplayMap.reset();
     m_gameplayMatchId.clear();
+    m_gameplayStartContextKey.clear();
+    m_gameplayStartedAt.clear();
+    m_gameplayStartEligible = false;
     m_pendingStart.reset();
     m_pendingEnd.reset();
     m_attemptBacklog.clear();
@@ -1049,8 +1055,6 @@ void RankedRuntime::dismissMatch() {
     m_lastSubmittedProgress = -1;
     m_localDeathmatchSequence = 0;
     m_localDeathmatchVisualAttempts = 0;
-    m_optimisticScoreDelta = 0.0;
-    m_optimisticClearDelta = 0;
     m_songBypassAllowed = false;
     m_view.match = {};
     setStage(RuntimeStage::Ready, "Ranked session ready.");
@@ -1147,15 +1151,20 @@ int RankedRuntime::currentLevelId() const {
 bool RankedRuntime::armCurrentLevelForGameplay() {
     if (
         m_view.stage != RuntimeStage::Matched || !m_view.match.currentMap ||
-        m_view.match.spectatorActive || !stateAllowsActiveAttempt(m_view.match.state)
+        m_view.match.spectatorActive || !stateAllowsAttemptStart(m_view.match.state)
     ) return false;
     m_gameplayMap = *m_view.match.currentMap;
     m_gameplayMatchId = m_view.match.matchId;
+    m_gameplayStartContextKey = currentAttemptContextKey();
+    m_gameplayStartedAt = iso8601FromMillis(m_serverClock.serverNowMillis(localNowMillis()));
+    m_gameplayStartEligible = true;
     log::debug(
-        "Ranked gameplay armed: match={} level={} qualifying={}",
+        "Ranked gameplay armed: match={} level={} qualifying={} context={} startedAt={}",
         m_gameplayMatchId,
         m_gameplayMap->levelId,
-        m_gameplayMap->qualifyingPercent
+        m_gameplayMap->qualifyingPercent,
+        m_gameplayStartContextKey,
+        m_gameplayStartedAt
     );
     return true;
 }
@@ -1191,9 +1200,50 @@ bool RankedRuntime::hasLocalAttemptInFlight() const {
         m_attemptBusy;
 }
 
+std::string RankedRuntime::currentAttemptContextKey() const {
+    if (m_view.match.matchId.empty()) return {};
+    if (m_view.match.deathmatchSequence > 0) {
+        return fmt::format("{}:D:{}", m_view.match.matchId, m_view.match.deathmatchSequence);
+    }
+    if (m_view.match.roundNumber > 0) {
+        return fmt::format("{}:R:{}", m_view.match.matchId, m_view.match.roundNumber);
+    }
+    return fmt::format("{}:NONE", m_view.match.matchId);
+}
+
+double RankedRuntime::optimisticScoreForContext(std::string const& contextKey) const {
+    if (contextKey.empty()) return 0.0;
+    double total = 0.0;
+    if (m_pendingEnd && m_pendingEnd->contextKey == contextKey) {
+        total += m_pendingEnd->optimisticScore;
+    }
+    for (auto const& queued : m_attemptBacklog) {
+        if (queued.end && queued.end->contextKey == contextKey) {
+            total += queued.end->optimisticScore;
+        }
+    }
+    return total;
+}
+
+int RankedRuntime::optimisticClearsForContext(std::string const& contextKey) const {
+    if (contextKey.empty()) return 0;
+    int total = 0;
+    if (m_pendingEnd && m_pendingEnd->contextKey == contextKey) {
+        total += m_pendingEnd->optimisticClear;
+    }
+    for (auto const& queued : m_attemptBacklog) {
+        if (queued.end && queued.end->contextKey == contextKey) {
+            total += queued.end->optimisticClear;
+        }
+    }
+    return total;
+}
+
 bool RankedRuntime::canEnterCurrentLevel() const {
     if (m_view.stage != RuntimeStage::Matched || !m_view.match.currentMap || m_view.match.spectatorActive) return false;
-    if (!stateAllowsActiveAttempt(m_view.match.state)) return false;
+    // Scene entry creates a NEW visual attempt. ROUND_SETTLING allows an already
+    // accepted attempt to finish, but must never be used to enter/re-enter PlayLayer.
+    if (!stateAllowsAttemptStart(m_view.match.state)) return false;
 
     if (m_view.match.state == "DEATHMATCH_PLAYING") {
         auto const serverUsed = m_view.match.side == "A"
@@ -1215,9 +1265,10 @@ bool RankedRuntime::canEnterCurrentLevel() const {
     // to transition into LAST_ATTEMPT_WINDOW / ROUND_SETTLING. This closes the
     // clear->LevelInfo->re-enter race that could create an illegal third Clear.
     auto const committedClears = m_view.match.side == "A" ? m_view.match.clearsA : m_view.match.clearsB;
+    auto const contextKey = currentAttemptContextKey();
     if (
         stateAllowsAttemptStart(m_view.match.state) &&
-        committedClears + m_optimisticClearDelta >= 2 &&
+        committedClears + optimisticClearsForContext(contextKey) >= 2 &&
         hasLocalAttemptInFlight()
     ) return false;
 
@@ -1252,7 +1303,8 @@ double RankedRuntime::localDisplayScore(double progressPercent, std::optional<do
     auto const ownIsA = m_view.match.side == "A";
     auto const committed = ownIsA ? m_view.match.committedScoreA : m_view.match.committedScoreB;
     auto const serverDisplay = ownIsA ? m_view.match.scoreA : m_view.match.scoreB;
-    auto const optimisticBase = committed + m_optimisticScoreDelta;
+    auto const contextKey = currentAttemptContextKey();
+    auto const optimisticBase = committed + optimisticScoreForContext(contextKey);
 
     // Every Clear is worth exactly 200 under the current rules. Keep that
     // invariant visible even while attempt-end/state acknowledgements are queued.
@@ -1283,7 +1335,7 @@ double RankedRuntime::localDisplayScore(double progressPercent, std::optional<do
 
 int RankedRuntime::localDisplayClears() const {
     auto const committed = m_view.match.side == "A" ? m_view.match.clearsA : m_view.match.clearsB;
-    return std::max(0, committed + m_optimisticClearDelta);
+    return std::max(0, committed + optimisticClearsForContext(currentAttemptContextKey()));
 }
 
 bool RankedRuntime::canTrackLevel(int levelId) const {
@@ -1316,19 +1368,21 @@ void RankedRuntime::cleanupAttemptTransportIfIdle() {
     if (hasLocalAttemptInFlight()) return;
     m_attemptId.clear();
     m_attemptLevelId = 0;
+    m_attemptContextKey.clear();
     m_pendingStart.reset();
     m_pendingEnd.reset();
     m_attemptBacklog.clear();
     m_pendingProgress.reset();
     m_lastSubmittedProgress = -1;
-    m_optimisticScoreDelta = 0.0;
-    m_optimisticClearDelta = 0;
     if (
         m_view.match.state == "MATCH_RESULT" || m_view.match.state == "CANCELLED" ||
         m_view.match.state == "ROUND_RESULT" || m_view.match.state == "DEATHMATCH_RESULT"
     ) {
         m_gameplayMap.reset();
         m_gameplayMatchId.clear();
+        m_gameplayStartContextKey.clear();
+        m_gameplayStartedAt.clear();
+        m_gameplayStartEligible = false;
     }
 }
 
@@ -1350,7 +1404,12 @@ std::string RankedRuntime::newEventId(std::string_view kind) {
 }
 
 bool RankedRuntime::reportAttemptStart(int levelId) {
-    if (!canTrackLevel(levelId) || !stateAllowsAttemptStart(m_view.match.state)) return false;
+    auto const armedSceneStart =
+        m_gameplayStartEligible && m_gameplayMap &&
+        m_gameplayMatchId == m_view.match.matchId &&
+        m_gameplayMap->levelId == levelId &&
+        !m_gameplayStartContextKey.empty();
+    if ((!canTrackLevel(levelId) || !stateAllowsAttemptStart(m_view.match.state)) && !armedSceneStart) return false;
 
     if (m_view.match.state == "DEATHMATCH_PLAYING") {
         auto const serverUsed = m_view.match.side == "A"
@@ -1364,18 +1423,30 @@ bool RankedRuntime::reportAttemptStart(int levelId) {
     if (
         !m_attemptId.empty() && m_attemptLevelId == levelId &&
         !m_pendingEnd && m_attemptBacklog.empty()
-    ) return true;
+    ) {
+        if (armedSceneStart) m_gameplayStartEligible = false;
+        return true;
+    }
     if (
         m_pendingStart && m_pendingStart->levelId == levelId &&
         !m_pendingEnd && m_attemptBacklog.empty()
-    ) return true;
+    ) {
+        if (armedSceneStart) m_gameplayStartEligible = false;
+        return true;
+    }
 
     auto const observedStartMillis = m_serverClock.serverNowMillis(localNowMillis());
+    auto const startContext = armedSceneStart ? m_gameplayStartContextKey : currentAttemptContextKey();
+    auto const clientStartedAt = armedSceneStart && !m_gameplayStartedAt.empty()
+        ? m_gameplayStartedAt
+        : iso8601FromMillis(observedStartMillis);
     PendingStart start {
         .levelId = levelId,
         .eventId = newEventId("start"),
-        .clientStartedAt = iso8601FromMillis(observedStartMillis),
+        .clientStartedAt = clientStartedAt,
+        .contextKey = startContext,
     };
+    if (armedSceneStart) m_gameplayStartEligible = false;
 
     // Geometry Dash may visually reset into the next attempt before the previous
     // HTTP end acknowledgement arrives. Never overwrite that older transport.
@@ -1451,12 +1522,18 @@ bool RankedRuntime::reportAttemptEnd(int levelId, double progressPercent, bool c
         );
     }
     auto const observedEndMillis = m_serverClock.serverNowMillis(localNowMillis());
+    std::string contextKey = currentAttemptContextKey();
+    if (!m_attemptBacklog.empty()) contextKey = m_attemptBacklog.back().start.contextKey;
+    else if (m_pendingStart) contextKey = m_pendingStart->contextKey;
+    else if (!m_attemptContextKey.empty()) contextKey = m_attemptContextKey;
+
     PendingEnd end {
         .levelId = levelId,
         .progressPercent = finalProgress,
         .cleared = cleared,
         .eventId = newEventId("end"),
         .clientEndedAt = iso8601FromMillis(observedEndMillis),
+        .contextKey = contextKey,
         .optimisticScore = optimisticScore,
         .optimisticClear = cleared ? 1 : 0,
     };
@@ -1473,8 +1550,6 @@ bool RankedRuntime::reportAttemptEnd(int levelId, double progressPercent, bool c
         m_pendingEnd = end;
     }
 
-    m_optimisticScoreDelta += end.optimisticScore;
-    m_optimisticClearDelta += end.optimisticClear;
     ++m_view.revision;
     m_pendingProgress.reset();
     log::debug(
@@ -1538,14 +1613,11 @@ void RankedRuntime::sendAttemptStart() {
                         reason
                     );
                     setTransientError("Attempt start rejected: " + reason);
-                    if (m_pendingEnd) {
-                        m_optimisticScoreDelta = std::max(0.0, m_optimisticScoreDelta - m_pendingEnd->optimisticScore);
-                        m_optimisticClearDelta = std::max(0, m_optimisticClearDelta - m_pendingEnd->optimisticClear);
-                    }
                     m_pendingStart.reset();
                     m_pendingEnd.reset();
                     m_attemptId.clear();
                     m_attemptLevelId = 0;
+                    m_attemptContextKey.clear();
                     m_pendingProgress.reset();
                     m_lastSubmittedProgress = -1;
                     m_nextAttemptRetryAt = {};
@@ -1564,10 +1636,6 @@ void RankedRuntime::sendAttemptStart() {
             if (!root["accepted"].asBool().unwrapOr(false)) {
                 setTransientError(root["reason"].asString().unwrapOr("Attempt start rejected"));
                 applyAttemptSnapshot(root);
-                if (m_pendingEnd) {
-                    m_optimisticScoreDelta = std::max(0.0, m_optimisticScoreDelta - m_pendingEnd->optimisticScore);
-                    m_optimisticClearDelta = std::max(0, m_optimisticClearDelta - m_pendingEnd->optimisticClear);
-                }
                 m_pendingStart.reset();
                 m_pendingEnd.reset();
                 m_attemptLevelId = 0;
@@ -1582,6 +1650,7 @@ void RankedRuntime::sendAttemptStart() {
             }
             m_attemptId = root["attemptId"].asString().unwrapOr("");
             m_attemptLevelId = starting.levelId;
+            m_attemptContextKey = starting.contextKey;
             log::info(
                 "Ranked attempt start ACK: accepted=true attempt={} level={}",
                 m_attemptId,
@@ -1639,11 +1708,10 @@ void RankedRuntime::sendAttemptEnd() {
                     setTransientError("Attempt end rejected: " + reason);
                     m_attemptId.clear();
                     m_attemptLevelId = 0;
+                    m_attemptContextKey.clear();
                     m_pendingEnd.reset();
                     m_pendingProgress.reset();
                     m_lastSubmittedProgress = -1;
-                    m_optimisticScoreDelta = std::max(0.0, m_optimisticScoreDelta - ending.optimisticScore);
-                    m_optimisticClearDelta = std::max(0, m_optimisticClearDelta - ending.optimisticClear);
                     m_nextAttemptRetryAt = {};
                     promoteQueuedAttempt();
                     cleanupAttemptTransportIfIdle();
@@ -1675,11 +1743,10 @@ void RankedRuntime::sendAttemptEnd() {
             applyAttemptSnapshot(root);
             m_attemptId.clear();
             m_attemptLevelId = 0;
+            m_attemptContextKey.clear();
             m_pendingEnd.reset();
             m_pendingProgress.reset();
             m_lastSubmittedProgress = -1;
-            m_optimisticScoreDelta = std::max(0.0, m_optimisticScoreDelta - ending.optimisticScore);
-            m_optimisticClearDelta = std::max(0, m_optimisticClearDelta - ending.optimisticClear);
             m_nextAttemptRetryAt = {};
             m_nextPollAt = std::chrono::steady_clock::now();
             promoteQueuedAttempt();
@@ -1717,12 +1784,27 @@ void RankedRuntime::sendAttemptProgress() {
             if (successful(response)) {
                 auto const root = response.json().unwrapOr(matjson::Value());
                 observeServerNow(root);
-                applyAttemptSnapshot(root);
-                if (m_attemptId == attemptId) m_lastSubmittedProgress = progress;
+                // Progress is intentionally best-effort telemetry. If this response
+                // arrives after the visual attempt has already ended (or after the
+                // transport advanced to another attempt), its live snapshot is stale
+                // and must never overwrite a newer Clear/end snapshot.
+                if (m_attemptId == attemptId && !m_pendingEnd) {
+                    applyAttemptSnapshot(root);
+                    m_lastSubmittedProgress = progress;
+                } else {
+                    log::debug(
+                        "Ignoring stale Ranked progress snapshot: responseAttempt={} activeAttempt={} pendingEnd={}",
+                        attemptId,
+                        m_attemptId,
+                        m_pendingEnd.has_value()
+                    );
+                }
             } else {
                 log::debug("Ranked spectator telemetry dropped: {}", response.code());
             }
-            if (m_pendingProgress && *m_pendingProgress == progress) m_pendingProgress.reset();
+            if (m_attemptId == attemptId && m_pendingProgress && *m_pendingProgress == progress) {
+                m_pendingProgress.reset();
+            }
             flushProgressTelemetry();
         }
     );

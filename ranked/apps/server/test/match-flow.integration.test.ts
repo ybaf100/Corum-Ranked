@@ -8,6 +8,7 @@ import { TokenService } from "../src/common/token.service.js";
 import type { CsmpTierSource } from "../src/config/csmp-tier.source.js";
 import type { RankedConfigService } from "../src/config/ranked-config.service.js";
 import { MatchAccessService } from "../src/match/match-access.service.js";
+import { ATTEMPT_TRANSPORT_GRACE_MS } from "../src/match/attempt-timing.js";
 import { InMemoryMatchRuntimeState } from "../src/match/match-runtime-state.js";
 import { MatchService } from "../src/match/match.service.js";
 import { QueueService } from "../src/queue/queue.service.js";
@@ -325,7 +326,11 @@ describe("two-client authoritative match flow", () => {
     expect(state.currentRound.lastAttemptWindow).toMatchObject({ triggerSide: "A", targetSide: "B" });
     expect(state.spectator).toMatchObject({ active: true });
 
-    clock.advanceSeconds(11);
+    clock.advanceSeconds(
+      document.operational.rules.lastAttemptWindowSeconds +
+        ATTEMPT_TRANSPORT_GRACE_MS / 1_000 +
+        1,
+    );
     state = (await matches.state(matchId, statusA.matchToken, playerA)) as Record<string, any>;
     expect(state.state).toBe("ROUND_RESULT");
     expect(state.currentRound.outcome).toMatchObject({ winner: "A", reason: "LAST_ATTEMPT_EXPIRED" });
@@ -335,6 +340,8 @@ describe("two-client authoritative match flow", () => {
     expect(state.state).toBe("ROUND_PREPARE");
     expect(state.currentRound.roundNumber).toBe(2);
     expect(state.currentRound.banner).toBe("MATCH_POINT");
+    expect(state.currentRound.scores).toEqual({ A: 0, B: 0 });
+    expect(state.currentRound.displayScores).toEqual({ A: 0, B: 0 });
     expect(state.currentRound.clears).toEqual({ A: 0, B: 0 });
 
     await matches.ready(matchId, statusA.matchToken, playerA, {
