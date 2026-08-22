@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <filesystem>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -56,7 +57,9 @@ std::string rankedGateTitle() {
 }
 
 bool mapReady(GJGameLevel* level) {
-    return level && !level->m_levelString.empty() && !level->m_levelNotDownloaded;
+    if (!level || level->m_levelString.empty() || level->m_levelNotDownloaded) return false;
+    auto const expectedLevelId = corum::ranked::RankedRuntime::get().currentLevelId();
+    return expectedLevelId > 0 && expectedLevelId == static_cast<int>(level->m_levelID);
 }
 
 std::vector<int> collectSongIds(GJGameLevel* level) {
@@ -75,14 +78,46 @@ std::vector<int> collectSongIds(GJGameLevel* level) {
     return result;
 }
 
-bool songsReady(GJGameLevel* level) {
+bool songFileExists(MusicDownloadManager* manager, int id) {
+#if defined(GEODE_IS_WINDOWS)
+    if (!manager || id <= 0) return false;
+    auto const path = manager->pathForSong(id);
+    if (path.empty()) return false;
+    std::error_code error;
+    return std::filesystem::exists(std::filesystem::path(path.c_str()), error) && !error;
+#else
+    (void)manager;
+    (void)id;
+    return false;
+#endif
+}
+
+bool songIdReady(MusicDownloadManager* manager, int id) {
+    if (!manager || id <= 0) return false;
+    return
+        manager->isResourceSong(id) ||
+        manager->isSongDownloaded(id) ||
+        songFileExists(manager, id);
+}
+
+bool songsReady(GJGameLevel* level, CustomSongWidget* songWidget) {
     if (!mapReady(level)) return false;
+
+    // Trust the real vanilla widget first. In particular, built-in RobTop songs
+    // (the Windows Stereo Madness case) do not require a MusicDownloadManager
+    // custom-song download even when raw song ID fields are populated.
+    if (songWidget && songWidget->m_isRobtopSong) return true;
+
+    auto* manager = MusicDownloadManager::sharedState();
+    if (songWidget && songWidget->m_customSongID > 0) {
+        return songIdReady(manager, songWidget->m_customSongID);
+    }
+
     auto ids = collectSongIds(level);
     if (ids.empty()) return true;
-    auto* manager = MusicDownloadManager::sharedState();
     if (!manager) return false;
     for (auto id : ids) {
-        if (!manager->isResourceSong(id) && !manager->isSongDownloaded(id)) return false;
+        if (!songIdReady(manager, id)) return false;
     }
     return true;
 }
@@ -345,7 +380,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
                 m_fields->songWaitStartedAt = now;
             }
 
-            auto const ready = songsReady(m_level);
+            auto const ready = songsReady(m_level, m_songWidget);
             auto const songElapsed = std::chrono::duration<double>(now - m_fields->songWaitStartedAt).count();
             if (ready) {
                 runtime.setSongBypassAllowed(false);
@@ -374,7 +409,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
             0,
             static_cast<int>(std::ceil(std::chrono::duration<double>(m_fields->countdownEndsAt - now).count()))
         );
-        auto const readyForStart = levelReady && (songsReady(m_level) || runtime.songBypassAllowed());
+        auto const readyForStart = levelReady && (songsReady(m_level, m_songWidget) || runtime.songBypassAllowed());
 
         auto const ownReady = match.side == "A" ? match.readyA : match.readyB;
         auto const opponentReady = match.side == "A" ? match.readyB : match.readyA;
@@ -390,6 +425,12 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
                 m_fields->gateCountdown->setString("WAITING FOR OPPONENT");
             } else if (rankedPrepareState(match.state) && ownReady && opponentReady) {
                 m_fields->gateCountdown->setString("STARTING...");
+            } else if (rankedPrepareState(match.state) && !runtime.view().error.empty()) {
+                // Do not hide an authoritative Ready endpoint failure behind an
+                // endless SENDING READY label. The bounded retry below remains
+                // active, while the player can see that the server rejected or
+                // failed the previous request.
+                m_fields->gateCountdown->setString("SERVER ERROR - RETRYING");
             } else {
                 m_fields->gateCountdown->setString("SENDING READY...");
             }
@@ -465,15 +506,45 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
     }
 
     void levelDownloadFinished(GJGameLevel* level) override {
-        // Let vanilla LevelInfoLayer replace/update its level object and rebuild
-        // all normal UI first. Ranked only re-locks controls afterwards.
-        LevelInfoLayer::levelDownloadFinished(level);
-        if (!m_fields->songGateActive) return;
-
-        m_fields->mapDownloadRequested = false;
-        if (mapReady(m_level)) {
-            m_fields->songWaitStartedAt = SteadyClock::now();
+        if (!m_fields->songGateActive) {
+            LevelInfoLayer::levelDownloadFinished(level);
+            return;
         }
+
+        // Reject a callback for anything except the exact server-selected playable
+        // (alternate) Level ID before vanilla is allowed to replace m_level. This
+        // keeps the original expected-ID shell intact for a retry instead of
+        // accidentally switching the Ranked page to an unrelated cached payload.
+        auto const expectedLevelId = corum::ranked::RankedRuntime::get().currentLevelId();
+        auto const validPayload =
+            level &&
+            expectedLevelId > 0 &&
+            static_cast<int>(level->m_levelID) == expectedLevelId &&
+            !level->m_levelString.empty() &&
+            !level->m_levelNotDownloaded;
+        if (!validPayload) {
+            m_fields->mapDownloadRequested = false;
+            if (m_fields->gateStatus) {
+                m_fields->gateStatus->setString("MAP PAYLOAD MISMATCH - RETRYING");
+                m_fields->gateStatus->setColor({255, 92, 92});
+            }
+            requestVanillaMapDownload();
+            return;
+        }
+
+        // Only a verified payload may become the LevelInfoLayer's live level.
+        // Vanilla then rebuilds its song metadata/widget from that exact payload.
+        LevelInfoLayer::levelDownloadFinished(level);
+        m_fields->mapDownloadRequested = false;
+        if (!isCurrentRankedLevel(m_level) || !mapReady(m_level)) {
+            if (m_fields->gateStatus) {
+                m_fields->gateStatus->setString("MAP LOAD INCOMPLETE - RETRYING");
+                m_fields->gateStatus->setColor({255, 92, 92});
+            }
+            requestVanillaMapDownload();
+            return;
+        }
+        m_fields->songWaitStartedAt = SteadyClock::now();
         lockInteractionToSong(this, m_songWidget);
         updateSongDownloadGate(0.0f);
     }
@@ -502,7 +573,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
             return false;
         }
 
-        auto const ready = songsReady(m_level);
+        auto const ready = songsReady(m_level, m_songWidget);
         if (!ready && !runtime.songBypassAllowed()) return false;
         if (!ready && runtime.songBypassAllowed()) m_level->m_showedSongWarning = true;
 

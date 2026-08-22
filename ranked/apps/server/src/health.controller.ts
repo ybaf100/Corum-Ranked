@@ -20,11 +20,18 @@ export class HealthController {
 
   @Get("ready")
   public async ready(): Promise<object> {
-    const databaseReady = await this.database.ping();
+    const [databaseConnected, schema] = await Promise.all([
+      this.database.ping(),
+      this.database.schemaStatus(),
+    ]);
     const config = this.rankedConfig.getStatus();
+    const databaseReady = databaseConnected && schema.ready;
     return {
       ready: databaseReady && config.ready,
       databaseReady,
+      databaseConnected,
+      schemaReady: schema.ready,
+      missingSchema: schema.missing,
       config,
       serverNow: new Date().toISOString(),
     };

@@ -8,10 +8,12 @@ on:
       - "**"
     paths:
       - "corum-ranked-mod/**"
+      - "ranked/apps/server/src/session/client-version.ts"
       - ".github/workflows/build-ranked-mod.yml"
   pull_request:
     paths:
       - "corum-ranked-mod/**"
+      - "ranked/apps/server/src/session/client-version.ts"
       - ".github/workflows/build-ranked-mod.yml"
 
 permissions:
@@ -41,6 +43,21 @@ jobs:
           }
           if (!manifest.dependencies?.['syzzi.click_between_frames']) {
             throw new Error('Click Between Frames must remain a required dependency');
+          }
+          const versionSource = fs.readFileSync(
+            'ranked/apps/server/src/session/client-version.ts',
+            'utf8',
+          );
+          const requiredVersion = versionSource.match(
+            /REQUIRED_RANKED_CLIENT_VERSION\s*=\s*["']([^"']+)["']/,
+          )?.[1];
+          if (!requiredVersion) {
+            throw new Error('Could not read REQUIRED_RANKED_CLIENT_VERSION');
+          }
+          if (requiredVersion !== manifest.version) {
+            throw new Error(
+              `Client/server version mismatch: mod=${manifest.version}, server=${requiredVersion}`,
+            );
           }
           fs.appendFileSync(process.env.GITHUB_OUTPUT, `version=${manifest.version}\n`);
           fs.appendFileSync(

@@ -3,11 +3,17 @@ import {
   ExecutionContext,
   Inject,
   Injectable,
+  HttpException,
+  HttpStatus,
   UnauthorizedException,
 } from "@nestjs/common";
 import type { DisplayTier } from "@corum-ranked/rules";
 import { TokenService } from "../common/token.service.js";
 import { DATABASE, type DatabasePort } from "../database/database.port.js";
+import {
+  REQUIRED_RANKED_CLIENT_VERSION,
+  normalizeRankedClientVersion,
+} from "./client-version.js";
 import type { RankedRequest, RankedSessionContext } from "./session.types.js";
 
 interface SessionRow {
@@ -18,6 +24,7 @@ interface SessionRow {
   displayed_tier: DisplayTier;
   hidden_mmr: number;
   placement_games: number;
+  client_version: string;
 }
 
 @Injectable()
@@ -36,6 +43,7 @@ export class SessionGuard implements CanActivate {
     const result = await this.database.query<SessionRow>(
       `SELECT
          s.id AS session_id,
+         s.client_version,
          p.id AS player_id,
          p.gd_account_id::text AS gd_account_id,
          p.gd_username,
@@ -52,6 +60,17 @@ export class SessionGuard implements CanActivate {
     );
     const row = result.rows[0];
     if (!row || row.hidden_mmr === null) throw new UnauthorizedException("Invalid or expired session");
+    if (
+      normalizeRankedClientVersion(row.client_version) !==
+      normalizeRankedClientVersion(REQUIRED_RANKED_CLIENT_VERSION)
+    ) {
+      throw new HttpException({
+        code: "RANKED_CLIENT_UPDATE_REQUIRED",
+        message: `Corum Ranked ${REQUIRED_RANKED_CLIENT_VERSION} is required. Update the mod before entering Ranked.`,
+        requiredVersion: REQUIRED_RANKED_CLIENT_VERSION,
+        clientVersion: row.client_version,
+      }, HttpStatus.UPGRADE_REQUIRED);
+    }
     const session: RankedSessionContext = {
       sessionId: row.session_id,
       playerId: row.player_id,

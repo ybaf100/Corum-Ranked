@@ -1,4 +1,5 @@
 import { Controller, Get } from "@nestjs/common";
+import { REQUIRED_RANKED_CLIENT_VERSION } from "../session/client-version.js";
 import { RankedConfigService } from "./ranked-config.service.js";
 
 @Controller("api/ranked")
@@ -12,6 +13,7 @@ export class RankedConfigController {
       serverNow: new Date().toISOString(),
       generation: snapshot.generation,
       rulesVersion: snapshot.operational.rules.rulesVersion,
+      requiredClientVersion: REQUIRED_RANKED_CLIENT_VERSION,
       queueEnabled: snapshot.operational.enabled,
       rules: snapshot.operational.rules,
       cbf: snapshot.operational.cbf,

@@ -12,19 +12,23 @@ export const makeMap = (
   pool: PoolNumber,
   index: number,
   overrides: Partial<RankedMap> = {},
-): RankedMap => ({
-  levelId: `${pool}${String(index).padStart(3, "0")}`,
-  canonicalLevelId: `${pool}${String(index).padStart(3, "0")}`,
-  alternateLevelId: null,
-  playableLevelId: `${pool}${String(index).padStart(3, "0")}`,
-  title: `Pool ${pool} Map ${index}`,
-  creator: `Creator ${index}`,
-  difficulty: `Difficulty ${pool}`,
-  pool,
-  qualifyingPercent: 50 + pool,
-  active: true,
-  ...overrides,
-});
+): RankedMap => {
+  const canonicalLevelId = `${pool}${String(index).padStart(3, "0")}`;
+  const alternateLevelId = `9${canonicalLevelId}`;
+  return {
+    levelId: alternateLevelId,
+    canonicalLevelId,
+    alternateLevelId,
+    playableLevelId: alternateLevelId,
+    title: `Pool ${pool} Map ${index}`,
+    creator: `Creator ${index}`,
+    difficulty: `Difficulty ${pool}`,
+    pool,
+    qualifyingPercent: 50 + pool,
+    active: true,
+    ...overrides,
+  };
+};
 
 export const allPoolMaps = (): RankedMap[] =>
   ([1, 2, 3, 4, 5, 6] as const).flatMap((pool) =>

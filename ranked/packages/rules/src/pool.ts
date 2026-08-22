@@ -26,7 +26,7 @@ const validateMap = (map: RankedMap): void => {
   if (map.playableLevelId !== expectedPlayable || map.levelId !== expectedPlayable) {
     throw new RankedDomainError(
       "INVALID_MAP",
-      "playableLevelId must resolve from alternateLevelId with canonical fallback",
+      "playableLevelId and levelId must exactly match alternateLevelId",
       { map, expectedPlayable },
     );
   }
@@ -52,7 +52,14 @@ export const resolvePlayableLevelId = (
     throw new RankedDomainError("INVALID_MAP", "A positive canonical Level ID is required");
   }
   const alternate = alternateLevelId?.trim() ?? "";
-  return isValidLevelId(alternate) && alternate !== canonical ? alternate : canonical;
+  if (!isValidLevelId(alternate)) {
+    throw new RankedDomainError(
+      "INVALID_MAP",
+      "A positive alternate Level ID is required for every Ranked map; canonical fallback is forbidden",
+      { canonicalLevelId: canonical, alternateLevelId },
+    );
+  }
+  return alternate;
 };
 
 const equivalentCanonicalRegistration = (left: RankedMap, right: RankedMap): boolean =>
@@ -68,9 +75,12 @@ export const canonicalActiveMaps = (maps: readonly RankedMap[]): RankedMap[] => 
   const canonical = new Map<string, RankedMap>();
   const aliases = new Map<string, string>();
   for (const map of maps) {
-    validateMap(map);
-    if (!map.active) continue;
-    const existing = canonical.get(map.canonicalLevelId);
+    // Preserve the stronger canonical-registration error when a duplicate row is
+    // already known to describe the same canonical map differently. The first
+    // registration was validated when inserted; validate the current row after
+    // conflict classification so legacy regression tests and operator messages
+    // do not get downgraded to a secondary field-shape error.
+    const existing = map.active ? canonical.get(map.canonicalLevelId) : undefined;
     if (existing && !equivalentCanonicalRegistration(existing, map)) {
       throw new RankedDomainError(
         "CONFLICTING_CANONICAL_MAP",
@@ -78,6 +88,8 @@ export const canonicalActiveMaps = (maps: readonly RankedMap[]): RankedMap[] => 
         { existing, conflicting: map },
       );
     }
+    validateMap(map);
+    if (!map.active) continue;
     if (!existing) canonical.set(map.canonicalLevelId, map);
     const identifiers = [map.canonicalLevelId, map.alternateLevelId].filter(isValidLevelId);
     for (const identifier of identifiers) {
