@@ -401,14 +401,18 @@ function readRankedMapsFromCorumSheet_() {
     if (pool === null) continue;
     var canonicalLevelId = rankedText_(displayRow[columns.canonicalLevelId]);
     if (!/^\d+$/.test(canonicalLevelId) || /^0+$/.test(canonicalLevelId)) continue;
+    // Ranked gameplay uses the explicit value in "대체 맵 코드" as the
+    // playable Geometry Dash Level ID. Do not call normalizeAlternateLevelId_
+    // here because that shared helper intentionally collapses an alternate ID
+    // equal to the canonical ID into an empty string.
     var alternateLevelId = columns.alternateLevelId === -1
       ? ""
-      : normalizeAlternateLevelId_(displayRow[columns.alternateLevelId], canonicalLevelId);
+      : rankedText_(displayRow[columns.alternateLevelId]);
     result.push({
-      levelId: alternateLevelId || canonicalLevelId,
+      levelId: alternateLevelId,
       canonicalLevelId: canonicalLevelId,
       alternateLevelId: alternateLevelId || null,
-      playableLevelId: alternateLevelId || canonicalLevelId,
+      playableLevelId: alternateLevelId,
       title: rankedText_(row[columns.title]),
       creator: rankedText_(row[columns.creator]),
       difficulty: rankedText_(row[columns.difficulty]),
@@ -744,6 +748,23 @@ function validateRankedPool_(maps, errors) {
   var counts = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 };
   maps.forEach(function (map) {
     if (!map.active) return;
+    if (!map.alternateLevelId || !/^[1-9]\d*$/.test(String(map.alternateLevelId))) {
+      errors.push(
+        "Ranked Pool 맵은 대체 맵 코드가 반드시 필요합니다. Canonical Level ID: " +
+          (map.canonicalLevelId || "(없음)"),
+      );
+      return;
+    }
+    if (
+      String(map.levelId) !== String(map.alternateLevelId) ||
+      String(map.playableLevelId) !== String(map.alternateLevelId)
+    ) {
+      errors.push(
+        "Ranked 실제 플레이 맵 코드는 대체 맵 코드와 정확히 같아야 합니다. Canonical Level ID: " +
+          map.canonicalLevelId,
+      );
+      return;
+    }
     if (!map.levelId || !map.canonicalLevelId || !map.title || !map.creator || !map.difficulty) {
       errors.push("Ranked Pool 활성 맵의 필수 텍스트 값이 비어 있습니다: " + (map.levelId || "(Level ID 없음)"));
       return;
