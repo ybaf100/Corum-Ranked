@@ -839,9 +839,20 @@ class CorumRankedLayer final : public CCLayerColor {
             renderPrepare(match);
             return;
         }
+        // Once this player has triggered the opponent-only LAST ATTEMPT flow,
+        // they are a spectator immediately. Do not render the ordinary round
+        // prepare/countdown screen for the 10-second start window; that made a
+        // player who had already reached two Clears see a misleading second
+        // "STARTS IN 10" screen before spectator mode appeared.
+        if (
+            (match.state == "LAST_ATTEMPT_WINDOW" || match.state == "ROUND_SETTLING") &&
+            match.spectatorActive
+        ) {
+            renderSpectatorWait(match);
+            return;
+        }
         if (match.state == "ROUND_SETTLING") {
-            if (match.spectatorActive) renderSpectatorWait(match);
-            else renderInterRound(match);
+            renderInterRound(match);
             return;
         }
         if (
@@ -1102,6 +1113,7 @@ class CorumRankedLayer final : public CCLayerColor {
         auto const ownA = match.side == "A";
         auto const ownScore = ownA ? match.scoreA : match.scoreB;
         auto const opponentScore = ownA ? match.scoreB : match.scoreA;
+        auto const opponentAttemptActive = match.spectatorCurrentProgress.has_value();
         auto const progress = match.spectatorCurrentProgress.value_or(0);
         auto const opponent = match.spectatorOpponentName.empty()
             ? match.opponentName
@@ -1119,9 +1131,20 @@ class CorumRankedLayer final : public CCLayerColor {
         auto* name = makeLabel(upper(shorten(opponent, 18)), 0.32f, {size.width / 2.0f, size.height / 2.0f + 38.0f});
         name->limitLabelWidth(205.0f, 0.32f, 0.21f);
         m_root->addChild(name, 5);
-        auto* live = makeLabel("LIVE PROGRESS", 0.16f, {size.width / 2.0f, size.height / 2.0f + 15.0f}, kCyan);
+        auto* live = makeLabel(
+            opponentAttemptActive ? "LIVE PROGRESS" : "WAITING TO START",
+            0.16f,
+            {size.width / 2.0f, size.height / 2.0f + 15.0f},
+            kCyan
+        );
         m_root->addChild(live, 5);
-        auto* pct = makeLabel(fmt::format("{}%", progress), 0.74f, {size.width / 2.0f, size.height / 2.0f - 15.0f}, kGold, "goldFont.fnt");
+        auto* pct = makeLabel(
+            opponentAttemptActive ? fmt::format("{}%", progress) : "--",
+            0.74f,
+            {size.width / 2.0f, size.height / 2.0f - 15.0f},
+            kGold,
+            "goldFont.fnt"
+        );
         m_root->addChild(pct, 5);
         auto* score = makeLabel(
             fmt::format("YOUR SCORE  {}     OPPONENT  {}", formatScore(ownScore), formatScore(opponentScore)),
@@ -1132,7 +1155,12 @@ class CorumRankedLayer final : public CCLayerColor {
         score->limitLabelWidth(220.0f, 0.18f, 0.13f);
         m_root->addChild(score, 5);
 
-        auto* hint = makeLabel("THE ROUND WILL RESOLVE WHEN THE ACTIVE ATTEMPT ENDS", 0.15f, {size.width / 2.0f, 28.0f}, ccc3(195, 205, 224));
+        std::string hintText = "THE ROUND WILL RESOLVE WHEN THE ACTIVE ATTEMPT ENDS";
+        if (!opponentAttemptActive && match.state == "LAST_ATTEMPT_WINDOW") {
+            auto const seconds = std::max<std::int64_t>(0, RankedRuntime::get().deadlineSeconds().value_or(0));
+            hintText = fmt::format("OPPONENT HAS {}s TO START THE LAST ATTEMPT", seconds);
+        }
+        auto* hint = makeLabel(hintText, 0.15f, {size.width / 2.0f, 28.0f}, ccc3(195, 205, 224));
         hint->limitLabelWidth(size.width - 80.0f, 0.15f, 0.11f);
         m_root->addChild(hint, 5);
     }

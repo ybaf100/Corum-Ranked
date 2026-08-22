@@ -259,16 +259,28 @@ export class DebugBotService implements OnModuleInit, OnApplicationShutdown {
         }
         return;
       }
-      if (["ROUND_PLAYING", "FINAL_ATTEMPT_WINDOW", "LAST_ATTEMPT_WINDOW"].includes(state.state)) {
+      if (["ROUND_PLAYING", "FINAL_ATTEMPT_WINDOW", "LAST_ATTEMPT_WINDOW", "ROUND_SETTLING"].includes(state.state)) {
         const round = state.currentRound as Record<string, any> | null;
         if (!round) return;
-        await this.seedScenarioRound(driver, state, round);
+
+        // ROUND_SETTLING means the start window has closed but an already
+        // accepted attempt is still alive. Scenario seeding must never create
+        // new attempts here, but a Bot attempt that started before the deadline
+        // still needs to keep receiving progress/end ticks until it naturally
+        // finishes. alpha.30 stopped driving the Bot as soon as the match entered
+        // ROUND_SETTLING, permanently trapping LAST ATTEMPT Bot Matches.
+        if (state.state !== "ROUND_SETTLING") {
+          await this.seedScenarioRound(driver, state, round);
+        }
         const refreshed = await this.matches.state(
           matchId,
           driver.creation.botMatchToken,
           driver.creation.botContext,
         ) as Record<string, any>;
-        if (["ROUND_PLAYING", "FINAL_ATTEMPT_WINDOW", "LAST_ATTEMPT_WINDOW"].includes(refreshed.state)) {
+        if (["ROUND_PLAYING", "FINAL_ATTEMPT_WINDOW", "LAST_ATTEMPT_WINDOW", "ROUND_SETTLING"].includes(refreshed.state)) {
+          if (refreshed.state === "ROUND_SETTLING" && !driver.attemptId) {
+            await this.recoverSettlingBotAttempt(driver, refreshed);
+          }
           await this.simulateBotAttempt(driver, refreshed, false);
         }
         return;
@@ -401,6 +413,46 @@ export class DebugBotService implements OnModuleInit, OnApplicationShutdown {
     });
   }
 
+  private async recoverSettlingBotAttempt(
+    driver: BotDriver,
+    state: Record<string, any>,
+  ): Promise<void> {
+    if (driver.attemptId || state.state !== "ROUND_SETTLING") return;
+    const roundNumber = Number(state.currentRound?.roundNumber ?? 0);
+    if (!Number.isSafeInteger(roundNumber) || roundNumber <= 0) return;
+
+    // Debug Bot state is intentionally in-memory, but Render/dev restarts can
+    // recreate the driver while an authoritative Bot attempt is still open in
+    // PostgreSQL. Recover that attempt instead of trying to start a new one after
+    // the start window has already closed. Live progress is ephemeral, so resume
+    // from 0 and let the normal progress endpoint recreate its runtime snapshot.
+    const active = await this.database.query<{ domain_attempt_id: string }>(
+      `SELECT a.domain_attempt_id
+       FROM ranked_attempts a
+       JOIN ranked_rounds r ON r.id = a.round_id
+       WHERE r.match_id = $1
+         AND r.round_number = $2
+         AND a.player_id = $3
+         AND a.ended_at IS NULL
+         AND a.valid = TRUE
+       ORDER BY a.attempt_sequence DESC
+       LIMIT 1`,
+      [driver.creation.matchId, roundNumber, driver.creation.botContext.playerId],
+    );
+    const attemptId = active.rows[0]?.domain_attempt_id;
+    if (!attemptId) return;
+
+    const map = state.currentRound?.map as Record<string, any> | undefined;
+    driver.attemptId = attemptId;
+    driver.attemptProgress = 0;
+    driver.attemptTarget = this.chooseAttemptTarget(
+      Number(map?.qualifyingPercent ?? 100),
+      driver.creation.settings.difficulty,
+    );
+    driver.attemptLastTickMs = this.clock.now().getTime();
+    driver.nextAttemptAtMs = 0;
+  }
+
   private async simulateBotAttempt(
     driver: BotDriver,
     state: Record<string, any>,
@@ -417,6 +469,9 @@ export class DebugBotService implements OnModuleInit, OnApplicationShutdown {
     if (!levelId) return;
     const nowMs = this.clock.now().getTime();
     if (!driver.attemptId) {
+      // ROUND_SETTLING never grants a new start. It exists only to let an
+      // attempt accepted before the deadline finish naturally.
+      if (state.state === "ROUND_SETTLING") return;
       if (nowMs < driver.nextAttemptAtMs) return;
       const started = await this.matches.startAttempt(
         driver.creation.matchId,

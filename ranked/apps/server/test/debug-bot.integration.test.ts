@@ -451,5 +451,25 @@ describe("development-only Bot Match using the production Ranked engine", () => 
       levelId: state.currentRound.map.playableLevelId,
       clientEventId: "spectator-blocked",
     })).resolves.toMatchObject({ accepted: false, reason: "LAST_ATTEMPT_TARGET_ONLY" });
+
+    // Regression: if the Bot's accepted final attempt is still alive when the
+    // 10-second start window expires, MatchService correctly enters
+    // ROUND_SETTLING. DebugBotService must continue ticking that already-started
+    // attempt there; alpha.30 stopped the simulator at this phase and trapped the
+    // match forever.
+    clock.advance(11_000);
+    await debug.tickOnce();
+    state = await matches.state(created.matchId, created.matchToken, player) as Record<string, any>;
+    expect(state.state).not.toBe("ROUND_SETTLING");
+    const orphanedBotAttempt = await database.query<{ count: number }>(
+      `SELECT COUNT(*)::int AS count
+       FROM ranked_attempts a
+       JOIN ranked_rounds r ON r.id = a.round_id
+       WHERE r.match_id = $1
+         AND a.player_id = (SELECT player_b_id FROM ranked_matches WHERE id = $1)
+         AND a.ended_at IS NULL`,
+      [created.matchId],
+    );
+    expect(Number(orphanedBotAttempt.rows[0]?.count ?? 0)).toBe(0);
   });
 });

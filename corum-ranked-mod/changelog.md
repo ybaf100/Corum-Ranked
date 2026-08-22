@@ -1,3 +1,13 @@
+# v0.4.0-alpha.31
+
+- Fixed the two-Clear LAST ATTEMPT transition so the triggering player enters the opponent spectator screen immediately instead of seeing a misleading second `STARTS IN 10` prepare screen.
+- The spectator screen now distinguishes an opponent that has not started yet (`WAITING TO START`) from a live attempt and shows the remaining LAST ATTEMPT start window.
+- Fixed Debug Bot Match deadlock when a Bot attempt survives past the LAST ATTEMPT start deadline and the round enters `ROUND_SETTLING`.
+- Debug Bot simulation now continues progress/end ticks for an already accepted Bot attempt during `ROUND_SETTLING`, while still forbidding new attempts after the deadline.
+- Added recovery for an authoritative in-progress Bot attempt after a dev/Render server restart during `ROUND_SETTLING`.
+- Added a regression test that verifies the Bot final attempt is closed and the match leaves `ROUND_SETTLING`.
+- No scoring, MMR, map-pool, ban, FINAL/LAST ATTEMPT deadline, or normal PvP attempt semantics were changed.
+
 # v0.4.0-alpha.30
 
 - Fixed Ranked lobby/resource BGM downloads that could fail when Geometry Dash had not already loaded the configured Song ID metadata.
