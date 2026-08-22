@@ -3,7 +3,6 @@ import { fileURLToPath } from "node:url";
 import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
-  SeededRandom,
   createMatchSeries,
   scoreAttempt,
   type CsmpTier,
@@ -127,7 +126,9 @@ describe("Round 3 draw and repeating deathmatch", () => {
       database,
       clock,
       ids,
-      new SeededRandom(5150),
+      // Keep shuffle order stable. Before this fix the old implementation
+      // deterministically picked a forbidden Pool-4 map.
+      { next: () => 0.999999 },
       new MatchAccessService(tokens, clock),
       sessions,
       new OutboxService(ids),
@@ -160,7 +161,17 @@ describe("Round 3 draw and repeating deathmatch", () => {
     };
     const matchTokenA = tokens.deriveMatchToken(matchId, playerAId, sessionAId);
     const matchTokenB = tokens.deriveMatchToken(matchId, playerBId, sessionBId);
-    const selectedMaps: RankedMapSnapshot[] = document.maps.slice(0, 3).map((map) => ({
+    const deathmatchPoolMaps = document.maps.filter((map) => map.pool === 4);
+    const selectedMapSources = [
+      deathmatchPoolMaps[0]!,
+      deathmatchPoolMaps[1]!,
+      document.maps[0]!,
+    ];
+    const bannedDeathmatchMap = deathmatchPoolMaps[2]!;
+    const allowedDeathmatchMaps = deathmatchPoolMaps.slice(3);
+    expect(allowedDeathmatchMaps).toHaveLength(2);
+
+    const selectedMaps: RankedMapSnapshot[] = selectedMapSources.map((map) => ({
       levelId: map.levelId,
       canonicalLevelId: map.canonicalLevelId,
       alternateLevelId: map.alternateLevelId,
@@ -201,11 +212,13 @@ describe("Round 3 draw and repeating deathmatch", () => {
          mmr_a_before, mmr_b_before, effective_rating_average, effective_tier,
          candidate_maps_snapshot, selected_round_maps_snapshot, series_state,
          current_round_number, state, deadline_at, rules_version,
-         last_heartbeat_a_at, last_heartbeat_b_at, started_at
+         last_heartbeat_a_at, last_heartbeat_b_at, started_at,
+         ban_a_canonical_id, ban_a_confirmed_at
        ) VALUES (
          $1, $2, $3, $4, 2500, 2500, 2500, 'BRONZE',
          $5::jsonb, $5::jsonb, $6::jsonb,
-         1, 'ROUND_PREPARE', $7, $8, $9, $9, $9
+         1, 'ROUND_PREPARE', $7, $8, $9, $9, $9,
+         $10, $9
        )`,
       [
         matchId,
@@ -217,6 +230,7 @@ describe("Round 3 draw and repeating deathmatch", () => {
         readyDeadline,
         snapshot.operational.rules.rulesVersion,
         now,
+        bannedDeathmatchMap.canonicalLevelId,
       ],
     );
     await database.query(
@@ -267,6 +281,14 @@ describe("Round 3 draw and repeating deathmatch", () => {
         expect(next.currentRound.roundNumber).toBe(round + 1);
       } else {
         expect(resultState.state).toBe("DEATHMATCH_PREPARE");
+        const forbiddenCanonicalIds = new Set([
+          ...selectedMaps.map((map) => map.canonicalLevelId),
+          bannedDeathmatchMap.canonicalLevelId,
+        ]);
+        expect(forbiddenCanonicalIds.has(resultState.deathmatch.map.canonicalLevelId)).toBe(false);
+        expect(
+          allowedDeathmatchMaps.map((map) => map.canonicalLevelId),
+        ).toContain(resultState.deathmatch.map.canonicalLevelId);
       }
     }
 
@@ -349,6 +371,12 @@ describe("Round 3 draw and repeating deathmatch", () => {
     expect(deathState.state).toBe("DEATHMATCH_PREPARE");
     expect(deathState.deathmatch.sequence).toBe(2);
     expect(deathState.deathmatch.map.canonicalLevelId).not.toBe(firstDeathMap);
+    expect(
+      [
+        ...selectedMaps.map((map) => map.canonicalLevelId),
+        bannedDeathmatchMap.canonicalLevelId,
+      ],
+    ).not.toContain(deathState.deathmatch.map.canonicalLevelId);
 
     deathState = await playDeathmatch(80, 70);
     expect(deathState.state).toBe("MATCH_RESULT");

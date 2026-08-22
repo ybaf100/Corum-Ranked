@@ -171,6 +171,7 @@ describe("development-only Bot Match using the production Ranked engine", () => 
   const completeTwoClears = async (
     creation: Awaited<ReturnType<QueueService["createDebugBotMatch"]>>,
     playerWins: boolean,
+    roundNumber: number,
   ) => {
     const state = await matches.state(
       creation.matchId,
@@ -183,12 +184,12 @@ describe("development-only Bot Match using the production Ranked engine", () => 
     for (let index = 0; index < 2; index += 1) {
       const started = await matches.startAttempt(creation.matchId, token, context, {
         levelId,
-        clientEventId: `rating-${creation.matchId}-${index}-start`,
+        clientEventId: `rating-${creation.matchId}-r${roundNumber}-${index}-start`,
       });
       await matches.endAttempt(creation.matchId, token, context, {
         levelId,
         attemptId: started.attemptId!,
-        clientEventId: `rating-${creation.matchId}-${index}-end`,
+        clientEventId: `rating-${creation.matchId}-r${roundNumber}-${index}-end`,
         progressPercent: 100,
         cleared: true,
       });
@@ -268,7 +269,7 @@ describe("development-only Bot Match using the production Ranked engine", () => 
           { levelId: playing.currentRound.map.canonicalLevelId, clientEventId: "wrong-level" },
         )).rejects.toThrow("playableLevelId");
       }
-      await completeTwoClears(creation, playerWins);
+      await completeTwoClears(creation, playerWins, round);
       const scored = await matches.state(
         creation.matchId,
         creation.playerMatchToken,

@@ -206,6 +206,10 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
     struct Fields {
         bool returningToRanked = false;
         bool autoPlayScheduled = false;
+        // Automatic start, manual Play/Space, and song-gate completion must all
+        // share one scene-transition latch. Vanilla LevelInfoLayer::onPlay must
+        // never be invoked twice for the same Ranked launch.
+        bool gameplayLaunchStarted = false;
         bool songGateActive = false;
         bool songGateReadySent = false;
         bool songGateStartingPlay = false;
@@ -396,19 +400,18 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         }
 
         if (rankedPlayingState(match.state)) {
-            if (!readyForStart || !runtime.canEnterCurrentLevel() || m_fields->songGateStartingPlay) return;
+            if (
+                !readyForStart ||
+                !runtime.canEnterCurrentLevel() ||
+                m_fields->songGateStartingPlay ||
+                m_fields->gameplayLaunchStarted
+            ) return;
             m_fields->songGateStartingPlay = true;
-            if (!songsReady(m_level) && runtime.songBypassAllowed()) {
-                m_level->m_showedSongWarning = true;
-            }
             teardownSongDownloadGate();
-            if (!runtime.armCurrentLevelForGameplay()) {
+            if (!launchRankedGameplay(nullptr)) {
+                m_fields->songGateStartingPlay = false;
                 returnToRanked(0.0f);
-                return;
             }
-            // Start directly from the same real LevelInfoLayer that downloaded the
-            // map. This keeps Geometry Dash's normal load/audio/return stack.
-            LevelInfoLayer::onPlay(nullptr);
             return;
         }
 
@@ -464,56 +467,71 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         lockInteractionToSong(this, m_songWidget);
     }
 
+    bool launchRankedGameplay(CCObject* sender) {
+        if (m_fields->gameplayLaunchStarted || m_fields->returningToRanked) return false;
+
+        auto& runtime = corum::ranked::RankedRuntime::get();
+        if (
+            !isCurrentRankedLevel(m_level) ||
+            !rankedPlayingState(runtime.view().match.state) ||
+            !runtime.canEnterCurrentLevel() ||
+            !mapReady(m_level)
+        ) {
+            return false;
+        }
+
+        auto const ready = songsReady(m_level);
+        if (!ready && !runtime.songBypassAllowed()) return false;
+        if (!ready && runtime.songBypassAllowed()) m_level->m_showedSongWarning = true;
+
+        if (!runtime.armCurrentLevelForGameplay()) return false;
+
+        // Latch before vanilla starts mutating/pushing the gameplay scene. A
+        // scheduled callback and user Space/Play can otherwise fire in adjacent
+        // frames and enter LevelInfoLayer::onPlay twice.
+        m_fields->gameplayLaunchStarted = true;
+        m_fields->autoPlayScheduled = false;
+        unschedule(schedule_selector(CorumRankedLevelInfoLayer::autoPlayRanked));
+
+        LevelInfoLayer::onPlay(sender);
+        return true;
+    }
+
     void scheduleAutoPlay(float delay) {
-        if (m_fields->autoPlayScheduled || m_fields->returningToRanked || m_fields->songGateActive) return;
+        if (
+            m_fields->gameplayLaunchStarted ||
+            m_fields->autoPlayScheduled ||
+            m_fields->returningToRanked ||
+            m_fields->songGateActive
+        ) return;
         m_fields->autoPlayScheduled = true;
         scheduleOnce(schedule_selector(CorumRankedLevelInfoLayer::autoPlayRanked), delay);
     }
 
     void autoPlayRanked(float) {
         m_fields->autoPlayScheduled = false;
-        auto& runtime = corum::ranked::RankedRuntime::get();
-        if (!isCurrentRankedLevel(m_level)) return;
-        if (!rankedPlayingState(runtime.view().match.state)) {
+        if (m_fields->gameplayLaunchStarted) return;
+        if (!launchRankedGameplay(nullptr)) {
             returnToRanked(0.0f);
-            return;
         }
-        if (!runtime.canEnterCurrentLevel() || !mapReady(m_level)) {
-            returnToRanked(0.0f);
-            return;
-        }
-
-        auto const ready = songsReady(m_level);
-        if (!ready && !runtime.songBypassAllowed()) {
-            returnToRanked(0.0f);
-            return;
-        }
-
-        if (!ready && runtime.songBypassAllowed()) m_level->m_showedSongWarning = true;
-        if (!runtime.armCurrentLevelForGameplay()) {
-            returnToRanked(0.0f);
-            return;
-        }
-        LevelInfoLayer::onPlay(nullptr);
     }
 
     void onPlay(CCObject* sender) {
         auto& runtime = corum::ranked::RankedRuntime::get();
-        if (m_fields->songGateActive) {
-            // During the countdown only the vanilla song download control is legal.
+        if (m_fields->songGateActive || m_fields->gameplayLaunchStarted) {
+            // Only song acquisition is legal during the gate, and repeated
+            // Play/Space becomes inert once the Ranked scene launch has started.
             return;
         }
         if (isCurrentRankedLevel(m_level) && rankedPlayingState(runtime.view().match.state)) {
-            if (!mapReady(m_level)) return;
-            if (!songsReady(m_level) && runtime.songBypassAllowed()) m_level->m_showedSongWarning = true;
-            if (!runtime.armCurrentLevelForGameplay()) return;
-            LevelInfoLayer::onPlay(sender);
+            launchRankedGameplay(sender);
             return;
         }
         LevelInfoLayer::onPlay(sender);
     }
 
     void returnToRanked(float) {
+        if (m_fields->gameplayLaunchStarted) return;
         auto& runtime = corum::ranked::RankedRuntime::get();
         if (m_fields->songGateActive && rankedPrepareState(runtime.view().match.state)) return;
         if (isCurrentRankedLevel(m_level) && rankedPlayingState(runtime.view().match.state) && runtime.canEnterCurrentLevel()) return;
@@ -523,7 +541,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
     }
 
     void onBack(CCObject* sender) {
-        if (m_fields->songGateActive) return;
+        if (m_fields->songGateActive || m_fields->gameplayLaunchStarted) return;
         if (!isCurrentRankedLevel(m_level)) {
             LevelInfoLayer::onBack(sender);
             return;
@@ -538,7 +556,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
     }
 
     void keyBackClicked() override {
-        if (m_fields->songGateActive) return;
+        if (m_fields->songGateActive || m_fields->gameplayLaunchStarted) return;
         if (!isCurrentRankedLevel(m_level)) {
             LevelInfoLayer::keyBackClicked();
             return;

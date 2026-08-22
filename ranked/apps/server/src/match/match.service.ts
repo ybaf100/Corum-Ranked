@@ -697,7 +697,6 @@ export class MatchService {
       } else {
         match = await this.advanceLockedMatch(transaction, match, now);
       }
-
       if (match.state === "DEATHMATCH_PLAYING") {
         return this.startDeathmatchAttempt(
           transaction,
@@ -2393,11 +2392,28 @@ export class MatchService {
     const priorCanonicalIds = prior.rows.map(
       (row) => parseJson<RankedMapSnapshot>(row.map_snapshot).canonicalLevelId,
     );
+
+    // Bans are match-wide exclusions. Standard Round maps are also permanently
+    // excluded from Death Match so the Bo3 never repeats there. Previous Death
+    // Match maps stay a separate prefer-unused list; selectDeathmatchMap may only
+    // reuse one when the remaining eligible Death Match pool is exhausted.
+    const permanentlyExcludedCanonicalIds = new Set<string>();
+    if (match.ban_a_canonical_id) permanentlyExcludedCanonicalIds.add(match.ban_a_canonical_id);
+    if (match.ban_b_canonical_id) permanentlyExcludedCanonicalIds.add(match.ban_b_canonical_id);
+    if (match.selected_round_maps_snapshot) {
+      for (const roundMap of parseJson<RankedMapSnapshot[]>(match.selected_round_maps_snapshot)) {
+        permanentlyExcludedCanonicalIds.add(roundMap.canonicalLevelId);
+      }
+    }
+    const deathmatchEligibleMaps = config.maps.filter(
+      (candidate) => !permanentlyExcludedCanonicalIds.has(candidate.canonicalLevelId),
+    );
+
     const effectiveTier = match.effective_tier as RankedConfigSnapshot["operational"]["tierBands"][number]["tier"];
     const band = tierBandFor(effectiveTier, config.operational.tierBands);
     const map = selectDeathmatchMap(
       band.deathmatchPool,
-      config.maps,
+      deathmatchEligibleMaps,
       priorCanonicalIds,
       this.random,
     );
@@ -2561,10 +2577,6 @@ export class MatchService {
             domain.clears[viewerSide] === 2 &&
             domain.clears[opponentSide] <= 1;
 
-          // Once the normal 3:00 + final-start window has expired, no new
-          // attempts may begin. If this viewer has no active attempt but the
-          // opponent still has an accepted attempt running, switch the viewer to
-          // a read-only live-progress spectator view until that attempt ends.
           const finalWindowSpectator =
             domain.phase === "ROUND_SETTLING" &&
             domain.lastAttemptWindow === null &&
@@ -2690,10 +2702,6 @@ export class MatchService {
         match.state === "BAN_PHASE"
           ? parseJson<RankedMapSnapshot[]>(match.candidate_maps_snapshot)
           : null,
-      // During BAN_PHASE each client may see only its own acknowledgement.
-      // The opponent's choice remains private until the phase ends. This also
-      // prevents the client from treating a rejected/late optimistic tap as a
-      // confirmed ban.
       banStatus: {
         confirmed: ownBanConfirmed,
         canonicalLevelId: ownBanConfirmed ? ownBanCanonicalLevelId : null,
