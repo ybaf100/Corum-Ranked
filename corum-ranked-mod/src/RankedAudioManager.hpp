@@ -4,6 +4,7 @@
 
 #include <chrono>
 #include <deque>
+#include <filesystem>
 #include <set>
 #include <string>
 #include <vector>
@@ -57,10 +58,18 @@ private:
 
     [[nodiscard]] std::string configSignature(RankedClientPresentationView const& config) const;
     [[nodiscard]] bool songReady(int songId) const;
+    [[nodiscard]] bool gdSongReady(int songId) const;
+    [[nodiscard]] std::filesystem::path cachedSongPath(int songId) const;
+    [[nodiscard]] std::string readySongPath(int songId) const;
     [[nodiscard]] std::vector<int> uniqueSongIds() const;
     [[nodiscard]] RankedAudioResourceView const* findResource(std::string const& key) const;
     [[nodiscard]] RankedAudioResourceView const* resourceForMode(RankedAudioMode mode) const;
     void startNextDownload();
+    void fetchSongInfo(int songId);
+    void downloadSongFile(int songId, std::string url);
+    void finishDownloadSuccess(int songId);
+    void finishDownloadFailure(int songId, std::string const& reason);
+    void cancelActiveDownload();
     void requestAudioSwitch();
     void startDesiredAudio();
 
@@ -70,6 +79,10 @@ private:
     std::set<int> m_failedSongIds;
     int m_activeDownloadSongId = 0;
     std::chrono::steady_clock::time_point m_downloadStartedAt {};
+    int m_activeDownloadProgress = 0;
+    std::uint64_t m_downloadGeneration = 0;
+    geode::async::TaskHolder<geode::utils::web::WebResponse> m_songInfoRequest;
+    geode::async::TaskHolder<geode::utils::web::WebResponse> m_songFileRequest;
     RankedResourceDownloadState m_downloadState = RankedResourceDownloadState::Idle;
 
     RankedAudioMode m_desiredMode = RankedAudioMode::Silent;

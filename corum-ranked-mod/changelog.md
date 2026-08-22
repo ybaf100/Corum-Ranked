@@ -1,3 +1,11 @@
+# v0.4.0-alpha.30
+
+- Fixed Ranked lobby/resource BGM downloads that could fail when Geometry Dash had not already loaded the configured Song ID metadata.
+- Removed direct `MusicDownloadManager::downloadSong()` use from Ranked resource acquisition.
+- Ranked now fetches Geometry Dash song metadata and downloads configured BGM sequentially with Geode `WebRequest` into a private Ranked audio cache.
+- Existing Geometry Dash-downloaded songs remain preferred and are reused without duplicate downloads.
+- Preserved `RANKED RESOURCES`, download progress, `RETRY FAILED`, `CONTINUE`, audio fades, and all existing gameplay/scoring/MMR behavior.
+
 # v0.4.0-alpha.29
 
 - Added Config-driven Ranked audio using Geometry Dash custom Song IDs with per-track start positions in seconds.

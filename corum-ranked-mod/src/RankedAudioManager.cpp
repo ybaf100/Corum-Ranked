@@ -5,18 +5,82 @@
 #include <Geode/binding/MusicDownloadManager.hpp>
 
 #include <algorithm>
+#include <charconv>
 #include <cmath>
+#include <cctype>
 #include <initializer_list>
 #include <sstream>
+#include <system_error>
 
 using namespace geode::prelude;
 
 namespace corum::ranked {
 namespace {
-constexpr auto kDownloadTimeout = std::chrono::seconds(60);
+constexpr auto kSongInfoTimeout = std::chrono::seconds(20);
+constexpr auto kSongFileTimeout = std::chrono::seconds(90);
+constexpr auto kDownloadGuardTimeout = std::chrono::seconds(105);
+constexpr std::uintmax_t kMinimumCachedSongBytes = 1024;
+constexpr char kSongInfoEndpoint[] = "https://www.boomlings.com/database/getGJSongInfo.php";
+constexpr char kGdSecret[] = "Wmfd2893gb7";
 
 int clampProgress(int value) {
     return std::clamp(value, 0, 100);
+}
+
+int hexValue(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return 10 + c - 'a';
+    if (c >= 'A' && c <= 'F') return 10 + c - 'A';
+    return -1;
+}
+
+std::string urlDecode(std::string_view value) {
+    std::string result;
+    result.reserve(value.size());
+    for (std::size_t i = 0; i < value.size(); ++i) {
+        if (value[i] == '%' && i + 2 < value.size()) {
+            auto const hi = hexValue(value[i + 1]);
+            auto const lo = hexValue(value[i + 2]);
+            if (hi >= 0 && lo >= 0) {
+                result.push_back(static_cast<char>((hi << 4) | lo));
+                i += 2;
+                continue;
+            }
+        }
+        result.push_back(value[i] == '+' ? ' ' : value[i]);
+    }
+    return result;
+}
+
+std::optional<std::string> songDownloadUrl(std::string const& response) {
+    if (response.empty() || response == "-1") return std::nullopt;
+
+    constexpr std::string_view delimiter = "~|~";
+    std::size_t cursor = 0;
+    std::vector<std::string_view> fields;
+    while (cursor <= response.size()) {
+        auto const next = response.find(delimiter, cursor);
+        if (next == std::string::npos) {
+            fields.emplace_back(response.data() + cursor, response.size() - cursor);
+            break;
+        }
+        fields.emplace_back(response.data() + cursor, next - cursor);
+        cursor = next + delimiter.size();
+    }
+
+    for (std::size_t i = 0; i + 1 < fields.size(); i += 2) {
+        if (fields[i] != "10") continue;
+        auto decoded = urlDecode(fields[i + 1]);
+        if (decoded.starts_with("https://") || decoded.starts_with("http://")) return decoded;
+        return std::nullopt;
+    }
+    return std::nullopt;
+}
+
+bool usableFile(std::filesystem::path const& path) {
+    std::error_code ec;
+    return std::filesystem::is_regular_file(path, ec) && !ec &&
+        std::filesystem::file_size(path, ec) >= kMinimumCachedSongBytes && !ec;
 }
 } // namespace
 
@@ -42,12 +106,11 @@ void RankedAudioManager::configure(RankedClientPresentationView const& config) {
     if (signature == m_configSignature) return;
 
     auto const wasOwningMusic = m_ownsMusicChannel;
+    cancelActiveDownload();
     m_config = config;
     m_configSignature = signature;
     m_downloadQueue.clear();
     m_failedSongIds.clear();
-    m_activeDownloadSongId = 0;
-    m_downloadStartedAt = {};
     m_downloadState = resourcesReady() ? RankedResourceDownloadState::Ready : RankedResourceDownloadState::Idle;
 
     if (wasOwningMusic) {
@@ -76,11 +139,34 @@ std::vector<int> RankedAudioManager::uniqueSongIds() const {
     return result;
 }
 
-bool RankedAudioManager::songReady(int songId) const {
+bool RankedAudioManager::gdSongReady(int songId) const {
     if (songId <= 0) return true;
     auto* manager = MusicDownloadManager::sharedState();
-    if (!manager) return false;
-    return manager->isResourceSong(songId) || manager->isSongDownloaded(songId);
+    return manager && (manager->isResourceSong(songId) || manager->isSongDownloaded(songId));
+}
+
+std::filesystem::path RankedAudioManager::cachedSongPath(int songId) const {
+    auto* mod = Mod::get();
+    if (!mod) return {};
+    return mod->getSaveDir() / "ranked-audio" / (std::to_string(songId) + ".mp3");
+}
+
+std::string RankedAudioManager::readySongPath(int songId) const {
+    if (songId <= 0) return {};
+    if (gdSongReady(songId)) {
+        if (auto* manager = MusicDownloadManager::sharedState()) {
+            auto const path = manager->pathForSong(songId);
+            if (!path.empty()) return path;
+        }
+    }
+    auto const cached = cachedSongPath(songId);
+    if (usableFile(cached)) return cached.string();
+    return {};
+}
+
+bool RankedAudioManager::songReady(int songId) const {
+    if (songId <= 0) return true;
+    return !readySongPath(songId).empty();
 }
 
 bool RankedAudioManager::resourcesReady() const {
@@ -105,15 +191,21 @@ RankedResourceDownloadView RankedAudioManager::downloadView() const {
     view.failed = static_cast<int>(m_failedSongIds.size());
     view.activeSongId = m_activeDownloadSongId;
     view.state = resourcesReady() ? RankedResourceDownloadState::Ready : m_downloadState;
-    if (m_activeDownloadSongId > 0) {
-        if (auto* manager = MusicDownloadManager::sharedState()) {
-            view.activeProgress = clampProgress(manager->getDownloadProgress(m_activeDownloadSongId));
-        }
-    }
+    view.activeProgress = m_activeDownloadSongId > 0 ? clampProgress(m_activeDownloadProgress) : 0;
     return view;
 }
 
+void RankedAudioManager::cancelActiveDownload() {
+    ++m_downloadGeneration;
+    m_songInfoRequest.cancel();
+    m_songFileRequest.cancel();
+    m_activeDownloadSongId = 0;
+    m_activeDownloadProgress = 0;
+    m_downloadStartedAt = {};
+}
+
 void RankedAudioManager::downloadAll() {
+    cancelActiveDownload();
     if (!enabled()) {
         m_downloadState = RankedResourceDownloadState::Ready;
         return;
@@ -121,7 +213,6 @@ void RankedAudioManager::downloadAll() {
 
     m_downloadQueue.clear();
     m_failedSongIds.clear();
-    m_activeDownloadSongId = 0;
     for (auto const id : uniqueSongIds()) {
         if (!songReady(id)) m_downloadQueue.push_back(id);
     }
@@ -149,20 +240,106 @@ void RankedAudioManager::startNextDownload() {
         return;
     }
 
-    auto* manager = MusicDownloadManager::sharedState();
-    if (!manager) {
-        while (!m_downloadQueue.empty()) {
-            m_failedSongIds.insert(m_downloadQueue.front());
-            m_downloadQueue.pop_front();
-        }
-        m_downloadState = RankedResourceDownloadState::Failed;
-        return;
-    }
-
     m_activeDownloadSongId = m_downloadQueue.front();
     m_downloadQueue.pop_front();
+    m_activeDownloadProgress = 0;
     m_downloadStartedAt = std::chrono::steady_clock::now();
-    manager->downloadSong(m_activeDownloadSongId);
+    fetchSongInfo(m_activeDownloadSongId);
+}
+
+void RankedAudioManager::fetchSongInfo(int songId) {
+    auto const generation = m_downloadGeneration;
+    web::WebRequest request;
+    request.timeout(kSongInfoTimeout);
+    request.header("Content-Type", "application/x-www-form-urlencoded");
+    request.bodyString(fmt::format("songID={}&secret={}", songId, kGdSecret));
+
+    log::info("Ranked audio: fetching metadata for GD song {}", songId);
+    m_songInfoRequest.spawn(
+        request.post(kSongInfoEndpoint),
+        [this, generation, songId](web::WebResponse response) {
+            if (generation != m_downloadGeneration || songId != m_activeDownloadSongId) return;
+            if (!response.ok()) {
+                finishDownloadFailure(songId, fmt::format("song info HTTP {}", response.code()));
+                return;
+            }
+            auto body = response.string();
+            if (body.isErr()) {
+                finishDownloadFailure(songId, "invalid song info response");
+                return;
+            }
+            auto const url = songDownloadUrl(body.unwrap());
+            if (!url) {
+                finishDownloadFailure(songId, "song download URL missing");
+                return;
+            }
+            downloadSongFile(songId, *url);
+        }
+    );
+}
+
+void RankedAudioManager::downloadSongFile(int songId, std::string url) {
+    auto const generation = m_downloadGeneration;
+    web::WebRequest request;
+    request.timeout(kSongFileTimeout);
+    request.followRedirects(true);
+    request.onProgress([this, generation, songId](web::WebProgress const& progress) {
+        if (generation != m_downloadGeneration || songId != m_activeDownloadSongId) return;
+        if (auto value = progress.downloadProgress()) {
+            m_activeDownloadProgress = clampProgress(static_cast<int>(std::lround(*value)));
+        }
+    });
+
+    log::info("Ranked audio: downloading GD song {} to private cache", songId);
+    m_songFileRequest.spawn(
+        request.get(std::move(url)),
+        [this, generation, songId](web::WebResponse response) {
+            if (generation != m_downloadGeneration || songId != m_activeDownloadSongId) return;
+            if (!response.ok()) {
+                finishDownloadFailure(songId, fmt::format("audio HTTP {}", response.code()));
+                return;
+            }
+
+            auto const target = cachedSongPath(songId);
+            if (target.empty()) {
+                finishDownloadFailure(songId, "cache path unavailable");
+                return;
+            }
+            std::error_code ec;
+            std::filesystem::create_directories(target.parent_path(), ec);
+            if (ec) {
+                finishDownloadFailure(songId, "failed to create audio cache directory");
+                return;
+            }
+            auto write = response.into(target);
+            if (write.isErr() || !usableFile(target)) {
+                std::filesystem::remove(target, ec);
+                finishDownloadFailure(songId, "failed to save downloaded audio");
+                return;
+            }
+            finishDownloadSuccess(songId);
+        }
+    );
+}
+
+void RankedAudioManager::finishDownloadSuccess(int songId) {
+    if (songId != m_activeDownloadSongId) return;
+    log::info("Ranked audio: GD song {} cached successfully", songId);
+    m_failedSongIds.erase(songId);
+    m_activeDownloadProgress = 100;
+    m_activeDownloadSongId = 0;
+    m_downloadStartedAt = {};
+    startNextDownload();
+}
+
+void RankedAudioManager::finishDownloadFailure(int songId, std::string const& reason) {
+    if (songId != m_activeDownloadSongId) return;
+    log::warn("Ranked audio: GD song {} download failed: {}", songId, reason);
+    m_failedSongIds.insert(songId);
+    m_activeDownloadSongId = 0;
+    m_activeDownloadProgress = 0;
+    m_downloadStartedAt = {};
+    startNextDownload();
 }
 
 RankedAudioResourceView const* RankedAudioManager::findResource(std::string const& key) const {
@@ -212,8 +389,6 @@ void RankedAudioManager::requestAudioSwitch() {
 
     auto* engine = FMODAudioEngine::sharedEngine();
     auto const fadeOut = static_cast<float>(std::max(0.0, m_config.audio.fadeOutSeconds));
-    // First Ranked playback fades Geometry Dash's current menu track. Later
-    // switches fade the Ranked-owned track on the same main music channel.
     if (engine && (desired || m_ownsMusicChannel)) engine->fadeOutMusic(fadeOut, 0);
 
     m_ownsMusicChannel = false;
@@ -233,11 +408,10 @@ void RankedAudioManager::startDesiredAudio() {
     m_switchPending = false;
     auto const* resource = resourceForMode(m_desiredMode);
     if (!resource || !songReady(resource->songId)) return;
-    auto* downloads = MusicDownloadManager::sharedState();
     auto* engine = FMODAudioEngine::sharedEngine();
-    if (!downloads || !engine) return;
+    if (!engine) return;
 
-    auto const path = downloads->pathForSong(resource->songId);
+    auto const path = readySongPath(resource->songId);
     if (path.empty()) return;
     engine->playMusic(
         path,
@@ -272,19 +446,14 @@ void RankedAudioManager::restoreMenuMusic() {
 void RankedAudioManager::tick() {
     auto const now = std::chrono::steady_clock::now();
 
-    if (m_activeDownloadSongId > 0) {
-        if (songReady(m_activeDownloadSongId)) {
-            m_activeDownloadSongId = 0;
-            m_downloadStartedAt = {};
-            startNextDownload();
-        } else if (m_downloadStartedAt != std::chrono::steady_clock::time_point{} &&
-                   now - m_downloadStartedAt >= kDownloadTimeout) {
-            m_failedSongIds.insert(m_activeDownloadSongId);
-            m_activeDownloadSongId = 0;
-            m_downloadStartedAt = {};
-            startNextDownload();
-        }
-    } else if (m_downloadState == RankedResourceDownloadState::Downloading) {
+    if (m_activeDownloadSongId > 0 &&
+        m_downloadStartedAt != std::chrono::steady_clock::time_point{} &&
+        now - m_downloadStartedAt >= kDownloadGuardTimeout) {
+        auto const songId = m_activeDownloadSongId;
+        m_songInfoRequest.cancel();
+        m_songFileRequest.cancel();
+        finishDownloadFailure(songId, "download timed out");
+    } else if (m_activeDownloadSongId == 0 && m_downloadState == RankedResourceDownloadState::Downloading) {
         startNextDownload();
     }
 
