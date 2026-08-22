@@ -138,13 +138,17 @@ CCLabelBMFont* makeLabel(
     return label;
 }
 
-CCScale9Sprite* makePanel(CCSize size, CCPoint position, ccColor3B color = kPanelColor, GLubyte opacity = 235) {
-    auto* panel = CCScale9Sprite::create("square02_001.png", {0.0f, 0.0f, 80.0f, 80.0f});
-    panel->setContentSize(size);
-    panel->setColor(color);
-    panel->setOpacity(opacity);
-    panel->setPosition(position);
-    return panel;
+CCNode* makePanel(CCSize size, CCPoint position, ccColor3B color = kPanelColor, GLubyte opacity = 235) {
+    auto* node = CCNode::create();
+    node->setContentSize(size);
+    node->setAnchorPoint({0.5f, 0.5f});
+    node->setPosition(position);
+
+    auto* fill = CCLayerColor::create({color.r, color.g, color.b, opacity});
+    fill->setContentSize(size);
+    fill->setPosition(CCPointZero);
+    node->addChild(fill, 0);
+    return node;
 }
 
 CCNode* makeNeonPanel(
@@ -159,39 +163,34 @@ CCNode* makeNeonPanel(
     node->setAnchorPoint({0.5f, 0.5f});
     node->setPosition(position);
 
-    auto makeSlice = [](CCSize sliceSize, ccColor3B color, GLubyte opacity) {
-        auto* sprite = CCScale9Sprite::create("square02_001.png", {0.0f, 0.0f, 80.0f, 80.0f});
-        sprite->setContentSize(sliceSize);
-        sprite->setColor(color);
-        sprite->setOpacity(opacity);
-        return sprite;
-    };
-
-    auto* shadow = makeSlice({size.width + 6.0f, size.height + 6.0f}, {3, 7, 16}, 130);
-    shadow->setPosition({size.width / 2.0f, size.height / 2.0f - 3.0f});
+    // Do not stretch Geometry Dash sprites as arbitrary Scale9 backgrounds.
+    // Some base-game atlases render opaque black source rectangles when scaled,
+    // which caused the alpha.24 cards/HUD to cover gameplay. Build the panel out
+    // of plain CCLayerColor nodes instead so every platform gets the same bounds.
+    auto* shadow = CCLayerColor::create({2, 6, 16, 92});
+    shadow->setContentSize({size.width + 4.0f, size.height + 4.0f});
+    shadow->setPosition({-2.0f, -4.0f});
     node->addChild(shadow, -1);
 
-    auto* glow = makeSlice(size, accent, 92);
-    glow->setPosition({size.width / 2.0f, size.height / 2.0f});
-    node->addChild(glow, 0);
+    auto* border = CCLayerColor::create({accent.r, accent.g, accent.b, 118});
+    border->setContentSize(size);
+    border->setPosition(CCPointZero);
+    node->addChild(border, 0);
 
-    auto const borderSize = CCSize{std::max(4.0f, size.width - 1.0f), std::max(4.0f, size.height - 1.0f)};
-    auto* border = makeSlice(borderSize, accent, 72);
-    border->setPosition({size.width / 2.0f, size.height / 2.0f});
-    node->addChild(border, 1);
+    auto* inner = CCLayerColor::create({fill.r, fill.g, fill.b, fillOpacity});
+    inner->setContentSize({std::max(2.0f, size.width - 4.0f), std::max(2.0f, size.height - 4.0f)});
+    inner->setPosition({2.0f, 2.0f});
+    node->addChild(inner, 1);
 
-    auto const innerSize = CCSize{std::max(2.0f, size.width - 6.0f), std::max(2.0f, size.height - 6.0f)};
-    auto* inner = makeSlice(innerSize, fill, fillOpacity);
-    inner->setPosition({size.width / 2.0f, size.height / 2.0f});
-    node->addChild(inner, 2);
+    auto* top = CCLayerColor::create({accent.r, accent.g, accent.b, 220});
+    top->setContentSize({std::max(4.0f, size.width - 14.0f), 2.0f});
+    top->setPosition({7.0f, size.height - 4.0f});
+    node->addChild(top, 2);
 
-    auto* topGlow = makeSlice({std::max(2.0f, size.width - 18.0f), 2.0f}, accent, 220);
-    topGlow->setPosition({size.width / 2.0f, size.height - 5.0f});
-    node->addChild(topGlow, 3);
-
-    auto* bottomGlow = makeSlice({std::max(2.0f, size.width - 24.0f), 2.0f}, accent, 120);
-    bottomGlow->setPosition({size.width / 2.0f, 5.0f});
-    node->addChild(bottomGlow, 3);
+    auto* bottom = CCLayerColor::create({accent.r, accent.g, accent.b, 90});
+    bottom->setContentSize({std::max(4.0f, size.width - 24.0f), 1.0f});
+    bottom->setPosition({12.0f, 4.0f});
+    node->addChild(bottom, 2);
     return node;
 }
 
@@ -552,6 +551,18 @@ class CorumRankedLayer final : public CCLayerColor {
     void renderMatch(RuntimeView const& view) {
         auto const& match = view.match;
         if (match.state == "MATCH_RESULT" || match.state == "CANCELLED") {
+            if (RankedRuntime::get().hasLocalAttemptInFlight()) {
+                auto const size = CCDirector::sharedDirector()->getWinSize();
+                auto* title = makeLabel("SYNCING RESULT", 0.58f, {size.width / 2.0f, size.height / 2.0f + 48.0f}, kGold, "goldFont.fnt");
+                m_root->addChild(title, 5);
+                auto* spinner = LoadingSpinner::create(58.0f);
+                spinner->setPosition({size.width / 2.0f, size.height / 2.0f});
+                m_root->addChild(spinner, 5);
+                auto* status = makeLabel("CONFIRMING FINAL ATTEMPT EVENTS...", 0.20f, {size.width / 2.0f, size.height / 2.0f - 50.0f}, ccc3(220, 230, 245));
+                status->limitLabelWidth(size.width - 90.0f, 0.20f, 0.14f);
+                m_root->addChild(status, 5);
+                return;
+            }
             renderResult(view);
             return;
         }

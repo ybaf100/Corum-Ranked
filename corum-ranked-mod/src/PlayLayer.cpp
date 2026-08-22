@@ -54,23 +54,13 @@ CCNode* hudPanel(CCSize size, CCPoint position, ccColor3B accent = {74, 226, 255
     node->setAnchorPoint({0.5f, 0.5f});
     node->setPosition(position);
 
-    auto makeSlice = [](CCSize sliceSize, ccColor3B color, GLubyte opacity) {
-        auto* sprite = CCScale9Sprite::create("square02_001.png", {0.0f, 0.0f, 80.0f, 80.0f});
-        sprite->setContentSize(sliceSize);
-        sprite->setColor(color);
-        sprite->setOpacity(opacity);
-        return sprite;
-    };
-
-    auto* glow = makeSlice(size, accent, 70);
-    glow->setPosition({size.width / 2.0f, size.height / 2.0f});
-    node->addChild(glow, 0);
-    auto* inner = makeSlice({std::max(4.0f, size.width - 4.0f), std::max(4.0f, size.height - 4.0f)}, {8, 14, 26}, 150);
-    inner->setPosition({size.width / 2.0f, size.height / 2.0f});
+    auto* border = CCLayerColor::create({accent.r, accent.g, accent.b, 72});
+    border->setContentSize(size);
+    node->addChild(border, 0);
+    auto* inner = CCLayerColor::create({5, 10, 20, 92});
+    inner->setContentSize({std::max(2.0f, size.width - 3.0f), std::max(2.0f, size.height - 3.0f)});
+    inner->setPosition({1.5f, 1.5f});
     node->addChild(inner, 1);
-    auto* top = makeSlice({std::max(8.0f, size.width - 18.0f), 2.0f}, accent, 190);
-    top->setPosition({size.width / 2.0f, size.height - 4.0f});
-    node->addChild(top, 2);
     return node;
 }
 
@@ -190,9 +180,19 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
             matchState == "ROUND_SETTLING" ||
             matchState == "DEATHMATCH_PLAYING";
         if ((!stillPlaying || runtime.currentLevelId() != m_fields->levelId) && !m_fields->autoExitRequested) {
-            // alpha.10: Ranked never leaves a finished map waiting for the user.
-            // Use Geometry Dash's normal PlayLayer quit path so scene/audio cleanup
-            // remains owned by the game.
+            // Polling can reach ROUND_RESULT a frame before the final HTTP End ACK.
+            // Journal the visual attempt before leaving PlayLayer; calling the
+            // vanilla onQuit path directly without this step was another route to
+            // a local Clear/progress disappearing from the authoritative result.
+            if (!m_fields->attemptEndReported && runtime.hasLocalAttemptInFlight()) {
+                auto const progress = rankedProgressPercent(this);
+                m_fields->attemptEndReported = runtime.reportAttemptEnd(
+                    m_fields->levelId,
+                    progress,
+                    false,
+                    m_fields->qualifyingPercent
+                );
+            }
             m_fields->autoExitRequested = true;
             PlayLayer::onQuit();
             return;
@@ -238,6 +238,19 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
             }
 
             auto const& match = runtime.view().match;
+            auto const startWindowExpired =
+                (match.state == "FINAL_ATTEMPT_WINDOW" || match.state == "LAST_ATTEMPT_WINDOW") &&
+                runtime.deadlineMillis().value_or(1) <= 0;
+            if (startWindowExpired) {
+                // The current attempt may finish after the start deadline, but a
+                // reset must not create a new visual attempt during the server's
+                // short transport-reconciliation hold.
+                if (!m_fields->autoExitRequested) {
+                    m_fields->autoExitRequested = true;
+                    PlayLayer::onQuit();
+                }
+                return;
+            }
             if (match.state == "DEATHMATCH_PLAYING") {
                 // A reset creates the next *visual* attempt immediately, before the
                 // prior /attempt/end request may be acknowledged. Reserve the next
@@ -355,13 +368,11 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         m_fields->hudRoot->setPosition({0.0f, 0.0f});
         m_fields->hudRoot->setContentSize(size);
 
-        auto* leftPanel = hudPanel({110.0f, 48.0f}, {layout.topLeftX + 54.0f, top - 22.0f}, {74, 226, 255});
+        auto* leftPanel = hudPanel({98.0f, 34.0f}, {layout.topLeftX + 48.0f, top - 19.0f}, {74, 226, 255});
         m_fields->hudRoot->addChild(leftPanel, 1);
-        auto* rightPanel = hudPanel({110.0f, 48.0f}, {right - 54.0f, top - 22.0f}, {74, 226, 255});
+        auto* rightPanel = hudPanel({98.0f, 34.0f}, {right - 48.0f, top - 19.0f}, {74, 226, 255});
         m_fields->hudRoot->addChild(rightPanel, 1);
-        auto* centerPanel = hudPanel({124.0f, 42.0f}, {size.width / 2.0f, top - 15.0f}, {255, 214, 90});
-        m_fields->hudRoot->addChild(centerPanel, 1);
-        auto* bottomPanel = hudPanel({102.0f, 22.0f}, {layout.bottomLeftX + 51.0f, layout.bottomY + 10.0f}, {74, 226, 255});
+        auto* bottomPanel = hudPanel({92.0f, 20.0f}, {layout.bottomLeftX + 45.0f, layout.bottomY + 9.0f}, {74, 226, 255});
         m_fields->hudRoot->addChild(bottomPanel, 1);
 
         m_fields->fpsLabel = label("FPS : -", "bigFont.fnt", 0.28f, {0.0f, 1.0f}, {layout.topLeftX, top});
@@ -381,10 +392,10 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         // The authoritative clock belongs in the visual center. alpha.15 makes
         // it larger and center-aligned so FINAL/LAST ATTEMPT timing is readable
         // without looking away from gameplay.
-        m_fields->timerLabel = label("", "bigFont.fnt", 0.66f, {0.5f, 1.0f}, {size.width / 2.0f, top - 4.0f});
+        m_fields->timerLabel = label("", "bigFont.fnt", 0.66f, {0.5f, 1.0f}, {size.width / 2.0f, top - 10.0f});
         m_fields->timerLabel->setID("ranked-countdown"_spr);
         m_fields->hudRoot->addChild(m_fields->timerLabel, 3);
-        m_fields->stateLabel = label("", "goldFont.fnt", 0.40f, {0.5f, 1.0f}, {size.width / 2.0f, top - 32.0f});
+        m_fields->stateLabel = label("", "goldFont.fnt", 0.40f, {0.5f, 1.0f}, {size.width / 2.0f, top - 39.0f});
         m_fields->stateLabel->setID("ranked-round-state"_spr);
         m_fields->hudRoot->addChild(m_fields->stateLabel, 3);
 
@@ -422,13 +433,9 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         auto const layout = corum::ranked::layoutHud(size.width, size.height);
         m_fields->spectatorPanel->setPosition({layout.spectatorCenterX, layout.spectatorCenterY});
 
-        auto* background = CCScale9Sprite::create(
-            "square02_001.png",
-            {0.0f, 0.0f, 80.0f, 80.0f}
-        );
+        auto* background = CCLayerColor::create({8, 14, 26, 200});
         background->setContentSize({width, 92.0f});
-        background->setColor(ccc3(8, 14, 26));
-        background->setOpacity(200);
+        background->setPosition({-width / 2.0f, -46.0f});
         m_fields->spectatorPanel->addChild(background, 0);
 
         auto* waiting = label("SPECTATING OPPONENT", "goldFont.fnt", 0.28f, {0.5f, 0.5f}, {0.0f, 32.0f});
@@ -512,8 +519,8 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         m_fields->stateLabel->setString(presentation.stateText.c_str());
         m_fields->timerLabel->setVisible(!presentation.timerText.empty());
         m_fields->stateLabel->setVisible(!presentation.stateText.empty());
-        m_fields->timerLabel->setPosition({size.width / 2.0f, top - 4.0f});
-        m_fields->stateLabel->setPosition({size.width / 2.0f, top - 32.0f});
+        m_fields->timerLabel->setPosition({size.width / 2.0f, top - 10.0f});
+        m_fields->stateLabel->setPosition({size.width / 2.0f, top - 39.0f});
 
         m_fields->spectatorPanel->setVisible(presentation.spectatorVisible);
         if (presentation.spectatorVisible) {

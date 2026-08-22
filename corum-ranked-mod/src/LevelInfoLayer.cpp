@@ -145,29 +145,24 @@ CCNode* gatePanel(CCSize size, CCPoint position, ccColor3B accent = {52, 214, 25
     node->setAnchorPoint({0.5f, 0.5f});
     node->setPosition(position);
 
-    auto makeSlice = [](CCSize sliceSize, ccColor3B color, GLubyte opacity) {
-        auto* sprite = CCScale9Sprite::create("square02_001.png", {0.0f, 0.0f, 80.0f, 80.0f});
-        sprite->setContentSize(sliceSize);
-        sprite->setColor(color);
-        sprite->setOpacity(opacity);
-        return sprite;
-    };
-
-    auto* shadow = makeSlice({size.width + 6.0f, size.height + 6.0f}, {4, 8, 18}, 120);
-    shadow->setPosition({size.width / 2.0f, size.height / 2.0f - 3.0f});
+    auto* shadow = CCLayerColor::create({2, 6, 16, 88});
+    shadow->setContentSize({size.width + 4.0f, size.height + 4.0f});
+    shadow->setPosition({-2.0f, -4.0f});
     node->addChild(shadow, -1);
-    auto* glow = makeSlice(size, accent, 96);
-    glow->setPosition({size.width / 2.0f, size.height / 2.0f});
-    node->addChild(glow, 0);
-    auto* inner = makeSlice({size.width - 6.0f, size.height - 6.0f}, {7, 18, 40}, 238);
-    inner->setPosition({size.width / 2.0f, size.height / 2.0f});
+
+    auto* border = CCLayerColor::create({accent.r, accent.g, accent.b, 118});
+    border->setContentSize(size);
+    node->addChild(border, 0);
+
+    auto* inner = CCLayerColor::create({7, 18, 40, 228});
+    inner->setContentSize({std::max(2.0f, size.width - 4.0f), std::max(2.0f, size.height - 4.0f)});
+    inner->setPosition({2.0f, 2.0f});
     node->addChild(inner, 1);
-    auto* line = makeSlice({size.width - 18.0f, 2.0f}, accent, 220);
-    line->setPosition({size.width / 2.0f, size.height - 5.0f});
+
+    auto* line = CCLayerColor::create({accent.r, accent.g, accent.b, 220});
+    line->setContentSize({std::max(4.0f, size.width - 16.0f), 2.0f});
+    line->setPosition({8.0f, size.height - 4.0f});
     node->addChild(line, 2);
-    auto* bottom = makeSlice({size.width - 28.0f, 2.0f}, accent, 120);
-    bottom->setPosition({size.width / 2.0f, 5.0f});
-    node->addChild(bottom, 2);
     return node;
 }
 
@@ -245,16 +240,16 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         // competitive Ranked banner in the open space above the song widget.
         // This is intentionally native Cocos/Geode UI, not a screenshot overlay,
         // so the vanilla song button remains a real interactive control.
-        m_fields->gateOverlay = gatePanel({206.0f, 70.0f}, {size.width / 2.0f, size.height / 2.0f - 48.0f});
+        m_fields->gateOverlay = gatePanel({174.0f, 52.0f}, {size.width / 2.0f, size.height / 2.0f - 30.0f});
         m_fields->gateOverlay->setZOrder(1001);
         addChild(m_fields->gateOverlay, 1001);
 
-        m_fields->gateTitle = gateLabel("RANKED MATCH", 0.19f, {103.0f, 54.0f}, {52, 214, 255});
+        m_fields->gateTitle = gateLabel("RANKED MATCH", 0.16f, {87.0f, 40.0f}, {52, 214, 255});
         m_fields->gateOverlay->addChild(m_fields->gateTitle, 3);
-        m_fields->gateCountdown = gateLabel("STARTS IN  10", 0.33f, {103.0f, 34.0f}, {255, 216, 86});
+        m_fields->gateCountdown = gateLabel("STARTS IN  10", 0.27f, {87.0f, 25.0f}, {255, 216, 86});
         m_fields->gateOverlay->addChild(m_fields->gateCountdown, 3);
-        m_fields->gateStatus = gateLabel("ONLY SONG DOWNLOAD IS AVAILABLE", 0.14f, {103.0f, 14.0f}, {215, 228, 245});
-        m_fields->gateStatus->limitLabelWidth(186.0f, 0.14f, 0.10f);
+        m_fields->gateStatus = gateLabel("ONLY SONG DOWNLOAD AVAILABLE", 0.11f, {87.0f, 10.0f}, {215, 228, 245});
+        m_fields->gateStatus->limitLabelWidth(158.0f, 0.11f, 0.09f);
         m_fields->gateOverlay->addChild(m_fields->gateStatus, 3);
 
         lockInteractionToSong(this, m_songWidget);

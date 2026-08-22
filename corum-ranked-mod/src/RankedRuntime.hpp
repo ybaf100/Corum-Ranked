@@ -214,6 +214,7 @@ private:
     struct PendingStart {
         int levelId = 0;
         std::string eventId;
+        std::string clientStartedAt;
     };
 
     struct PendingEnd {
@@ -221,6 +222,7 @@ private:
         double progressPercent = 0.0;
         bool cleared = false;
         std::string eventId;
+        std::string clientEndedAt;
         double optimisticScore = 0.0;
         int optimisticClear = 0;
     };
@@ -247,6 +249,8 @@ private:
     void sendAttemptEnd();
     void flushProgressTelemetry();
     void sendAttemptProgress();
+    void cleanupAttemptTransportIfIdle();
+    [[nodiscard]] bool canFinishTrackedLevel(int levelId) const;
     void setStage(RuntimeStage stage, std::string status, std::string error = {});
     void setTransientError(std::string error);
     void observeServerNow(matjson::Value const& root);

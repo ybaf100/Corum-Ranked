@@ -8,7 +8,10 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <ctime>
+#include <iomanip>
 #include <iterator>
+#include <sstream>
 #include <string_view>
 #include <utility>
 
@@ -28,6 +31,22 @@ std::int64_t localNowMillis() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::system_clock::now().time_since_epoch()
     ).count();
+}
+
+std::string iso8601FromMillis(std::int64_t millis) {
+    auto const seconds = static_cast<std::time_t>(millis / 1000);
+    auto fractional = static_cast<int>(millis % 1000);
+    if (fractional < 0) fractional += 1000;
+    std::tm utc {};
+#if defined(_WIN32)
+    if (gmtime_s(&utc, &seconds) != 0) return {};
+#else
+    if (gmtime_r(&seconds, &utc) == nullptr) return {};
+#endif
+    std::ostringstream stream;
+    stream << std::put_time(&utc, "%Y-%m-%dT%H:%M:%S")
+           << '.' << std::setw(3) << std::setfill('0') << fractional << 'Z';
+    return stream.str();
 }
 
 std::string trim(std::string value) {
@@ -793,36 +812,31 @@ void RankedRuntime::parseMatchState(matjson::Value const& root) {
         }
     }
 
-    if (!stateAllowsActiveAttempt(m_view.match.state) && !m_attemptBusy) {
-        m_attemptId.clear();
-        m_attemptLevelId = 0;
-        m_pendingStart.reset();
-        m_pendingEnd.reset();
-        m_attemptBacklog.clear();
+    if (!stateAllowsActiveAttempt(m_view.match.state)) {
+        // Never erase an observed visual attempt merely because polling advanced
+        // the public match state first. On a slow/free-host connection the final
+        // Start/End ACK can arrive after ROUND_RESULT/MATCH_RESULT. alpha.24
+        // discarded that FIFO here, which is exactly how a locally scored Clear
+        // could end up as 0 score / 0 clears in the authoritative result.
         m_pendingProgress.reset();
-        m_lastSubmittedProgress = -1;
-        m_optimisticScoreDelta = 0.0;
-        m_optimisticClearDelta = 0;
-        if (
-            m_view.match.state == "MATCH_RESULT" || m_view.match.state == "CANCELLED" ||
-            m_view.match.state == "ROUND_RESULT" || m_view.match.state == "DEATHMATCH_RESULT"
-        ) {
-            m_gameplayMap.reset();
-            m_gameplayMatchId.clear();
+        if (hasLocalAttemptInFlight()) {
+            log::warn(
+                "Ranked result reconciliation pending: state={} pendingStart={} pendingEnd={} backlog={} optimisticScore={} optimisticClears={}",
+                m_view.match.state,
+                m_pendingStart.has_value(),
+                m_pendingEnd.has_value(),
+                m_attemptBacklog.size(),
+                m_optimisticScoreDelta,
+                m_optimisticClearDelta
+            );
+        } else {
+            cleanupAttemptTransportIfIdle();
         }
     }
     if (m_view.match.spectatorActive) {
-        // A trigger-side player must not create a new visual attempt after the
-        // server enters LAST_ATTEMPT. Any speculative future starts are invalid.
-        // Preserve the currently transmitting end acknowledgement, but discard
-        // queued later visuals and their optimistic presentation contribution.
-        for (auto const& queued : m_attemptBacklog) {
-            if (!queued.end) continue;
-            m_optimisticScoreDelta = std::max(0.0, m_optimisticScoreDelta - queued.end->optimisticScore);
-            m_optimisticClearDelta = std::max(0, m_optimisticClearDelta - queued.end->optimisticClear);
-        }
-        m_attemptBacklog.clear();
-        m_pendingStart.reset();
+        // Spectator mode prevents *new* visual attempts. Do not destroy starts or
+        // ends that were already observed before the server switched this viewer
+        // into spectator mode; those events still need authoritative ACKs.
         m_pendingProgress.reset();
     }
     if (m_view.match.state == "MATCH_RESULT") {
@@ -1010,6 +1024,11 @@ void RankedRuntime::reportMapDownloadFailure() {
 void RankedRuntime::dismissMatch() {
     if (m_view.stage != RuntimeStage::Matched) return;
     if (m_view.match.state != "MATCH_RESULT" && m_view.match.state != "CANCELLED") return;
+    if (hasLocalAttemptInFlight()) {
+        setTransientError("Synchronizing final attempt result with the server...");
+        flushAttemptEvents();
+        return;
+    }
     if (m_view.match.state == "MATCH_RESULT") {
         auto const ownSide = m_view.match.side;
         auto const& tier = ownSide == "A" ? m_view.match.profileAfterTierA : m_view.match.profileAfterTierB;
@@ -1040,6 +1059,11 @@ void RankedRuntime::dismissMatch() {
 void RankedRuntime::queueAgain() {
     if (m_view.stage != RuntimeStage::Matched) return;
     if (m_view.match.state != "MATCH_RESULT" && m_view.match.state != "CANCELLED") return;
+    if (hasLocalAttemptInFlight()) {
+        setTransientError("Synchronizing final attempt result with the server...");
+        flushAttemptEvents();
+        return;
+    }
     dismissMatch();
     joinQueue();
 }
@@ -1270,6 +1294,44 @@ bool RankedRuntime::canTrackLevel(int levelId) const {
         isGameplayLevel(levelId);
 }
 
+bool RankedRuntime::canFinishTrackedLevel(int levelId) const {
+    if (m_view.stage != RuntimeStage::Matched || m_view.match.matchId.empty()) return false;
+    auto const sameGameplayMap =
+        m_gameplayMap && m_gameplayMatchId == m_view.match.matchId &&
+        m_gameplayMap->levelId == levelId;
+    auto const currentMapMatches =
+        m_view.match.currentMap && m_view.match.currentMap->levelId == levelId;
+    if (!sameGameplayMap && !currentMapMatches) return false;
+
+    // A visual attempt that already owns a local transport slot must be allowed
+    // to queue its End even if polling has just advanced to a result/spectator
+    // state. The server remains authoritative and may accept/reject it using the
+    // original event timestamp.
+    return
+        !m_attemptId.empty() || m_pendingStart.has_value() ||
+        m_pendingEnd.has_value() || !m_attemptBacklog.empty() || m_attemptBusy;
+}
+
+void RankedRuntime::cleanupAttemptTransportIfIdle() {
+    if (hasLocalAttemptInFlight()) return;
+    m_attemptId.clear();
+    m_attemptLevelId = 0;
+    m_pendingStart.reset();
+    m_pendingEnd.reset();
+    m_attemptBacklog.clear();
+    m_pendingProgress.reset();
+    m_lastSubmittedProgress = -1;
+    m_optimisticScoreDelta = 0.0;
+    m_optimisticClearDelta = 0;
+    if (
+        m_view.match.state == "MATCH_RESULT" || m_view.match.state == "CANCELLED" ||
+        m_view.match.state == "ROUND_RESULT" || m_view.match.state == "DEATHMATCH_RESULT"
+    ) {
+        m_gameplayMap.reset();
+        m_gameplayMatchId.clear();
+    }
+}
+
 bool RankedRuntime::isSpectating() const {
     return m_view.match.spectatorActive;
 }
@@ -1308,9 +1370,11 @@ bool RankedRuntime::reportAttemptStart(int levelId) {
         !m_pendingEnd && m_attemptBacklog.empty()
     ) return true;
 
+    auto const observedStartMillis = m_serverClock.serverNowMillis(localNowMillis());
     PendingStart start {
         .levelId = levelId,
         .eventId = newEventId("start"),
+        .clientStartedAt = iso8601FromMillis(observedStartMillis),
     };
 
     // Geometry Dash may visually reset into the next attempt before the previous
@@ -1349,7 +1413,7 @@ void RankedRuntime::reportAttemptProgress(int levelId, double progressPercent) {
 }
 
 bool RankedRuntime::reportAttemptEnd(int levelId, double progressPercent, bool cleared, std::optional<double> qualifyingPercentOverride) {
-    if (!canTrackLevel(levelId)) return false;
+    if (!canTrackLevel(levelId) && !canFinishTrackedLevel(levelId)) return false;
 
     // Self-heal a missed init-time start. PlayLayer can be created on the same
     // frame as a state refresh; if the first reportAttemptStart() was skipped,
@@ -1386,11 +1450,13 @@ bool RankedRuntime::reportAttemptEnd(int levelId, double progressPercent, bool c
             qualifying
         );
     }
+    auto const observedEndMillis = m_serverClock.serverNowMillis(localNowMillis());
     PendingEnd end {
         .levelId = levelId,
         .progressPercent = finalProgress,
         .cleared = cleared,
         .eventId = newEventId("end"),
+        .clientEndedAt = iso8601FromMillis(observedEndMillis),
         .optimisticScore = optimisticScore,
         .optimisticClear = cleared ? 1 : 0,
     };
@@ -1441,7 +1507,9 @@ void RankedRuntime::flushAttemptEvents() {
         sendAttemptEnd();
         return;
     }
-    if (m_attemptId.empty() && m_pendingStart && canTrackLevel(m_pendingStart->levelId)) {
+    if (m_attemptId.empty() && m_pendingStart) {
+        // Once a visual start has been journaled, always deliver it. Polling may
+        // already show ROUND_RESULT by the time the HTTP request gets a turn.
         sendAttemptStart();
     }
 }
@@ -1452,6 +1520,7 @@ void RankedRuntime::sendAttemptStart() {
     matjson::Value body;
     body["levelId"] = fmt::format("{}", starting.levelId);
     body["clientEventId"] = starting.eventId;
+    if (!starting.clientStartedAt.empty()) body["clientStartedAt"] = starting.clientStartedAt;
     auto request = baseRequest(m_sessionToken, m_matchToken);
     request.bodyJSON(body);
     m_attemptBusy = true;
@@ -1460,7 +1529,33 @@ void RankedRuntime::sendAttemptStart() {
         [this, starting](web::WebResponse response) {
             m_attemptBusy = false;
             if (!successful(response)) {
-                setTransientError("Attempt start retrying: " + responseError(response));
+                auto const reason = responseError(response);
+                if (response.code() == 409) {
+                    log::error(
+                        "Ranked attempt start permanently rejected: level={} event={} reason={}",
+                        starting.levelId,
+                        starting.eventId,
+                        reason
+                    );
+                    setTransientError("Attempt start rejected: " + reason);
+                    if (m_pendingEnd) {
+                        m_optimisticScoreDelta = std::max(0.0, m_optimisticScoreDelta - m_pendingEnd->optimisticScore);
+                        m_optimisticClearDelta = std::max(0, m_optimisticClearDelta - m_pendingEnd->optimisticClear);
+                    }
+                    m_pendingStart.reset();
+                    m_pendingEnd.reset();
+                    m_attemptId.clear();
+                    m_attemptLevelId = 0;
+                    m_pendingProgress.reset();
+                    m_lastSubmittedProgress = -1;
+                    m_nextAttemptRetryAt = {};
+                    promoteQueuedAttempt();
+                    cleanupAttemptTransportIfIdle();
+                    ++m_view.revision;
+                    flushAttemptEvents();
+                    return;
+                }
+                setTransientError("Attempt start retrying: " + reason);
                 m_nextAttemptRetryAt = std::chrono::steady_clock::now() + std::chrono::seconds(1);
                 return;
             }
@@ -1480,6 +1575,7 @@ void RankedRuntime::sendAttemptStart() {
                 m_lastSubmittedProgress = -1;
                 m_nextAttemptRetryAt = {};
                 promoteQueuedAttempt();
+                cleanupAttemptTransportIfIdle();
                 ++m_view.revision;
                 flushAttemptEvents();
                 return;
@@ -1522,6 +1618,7 @@ void RankedRuntime::sendAttemptEnd() {
     body["clientEventId"] = ending.eventId;
     body["progressPercent"] = ending.progressPercent;
     body["cleared"] = ending.cleared;
+    if (!ending.clientEndedAt.empty()) body["clientEndedAt"] = ending.clientEndedAt;
     auto request = baseRequest(m_sessionToken, m_matchToken);
     request.bodyJSON(body);
     m_attemptBusy = true;
@@ -1530,7 +1627,31 @@ void RankedRuntime::sendAttemptEnd() {
         [this, ending](web::WebResponse response) {
             m_attemptBusy = false;
             if (!successful(response)) {
-                setTransientError("Attempt end retrying: " + responseError(response));
+                auto const reason = responseError(response);
+                if (response.code() == 409) {
+                    log::error(
+                        "Ranked attempt end permanently rejected: attempt={} level={} event={} reason={}",
+                        m_attemptId,
+                        ending.levelId,
+                        ending.eventId,
+                        reason
+                    );
+                    setTransientError("Attempt end rejected: " + reason);
+                    m_attemptId.clear();
+                    m_attemptLevelId = 0;
+                    m_pendingEnd.reset();
+                    m_pendingProgress.reset();
+                    m_lastSubmittedProgress = -1;
+                    m_optimisticScoreDelta = std::max(0.0, m_optimisticScoreDelta - ending.optimisticScore);
+                    m_optimisticClearDelta = std::max(0, m_optimisticClearDelta - ending.optimisticClear);
+                    m_nextAttemptRetryAt = {};
+                    promoteQueuedAttempt();
+                    cleanupAttemptTransportIfIdle();
+                    ++m_view.revision;
+                    flushAttemptEvents();
+                    return;
+                }
+                setTransientError("Attempt end retrying: " + reason);
                 m_nextAttemptRetryAt = std::chrono::steady_clock::now() + std::chrono::seconds(1);
                 return;
             }
@@ -1562,6 +1683,7 @@ void RankedRuntime::sendAttemptEnd() {
             m_nextAttemptRetryAt = {};
             m_nextPollAt = std::chrono::steady_clock::now();
             promoteQueuedAttempt();
+            cleanupAttemptTransportIfIdle();
             ++m_view.revision;
             flushAttemptEvents();
         }

@@ -40,6 +40,10 @@ import { OutboxService } from "../relay/outbox.service.js";
 import type { RankedSessionContext } from "../session/session.types.js";
 import { SessionService } from "../session/session.service.js";
 import { MatchAccessService } from "./match-access.service.js";
+import {
+  resolveAttemptStartTime,
+  shouldHoldRoundForAttemptTransport,
+} from "./attempt-timing.js";
 import type {
   AttemptEndDto,
   AttemptProgressDto,
@@ -518,15 +522,26 @@ export class MatchService {
         );
       }
       if (!this.isRoundPlaying(match.state)) {
-        throw new ConflictException(`Attempt start is not accepted in ${match.state}`);
+        return {
+          accepted: false,
+          duplicate: false,
+          attemptId: null,
+          reason: `ATTEMPT_START_NOT_ACCEPTED_IN_${match.state}`,
+          serverNow: now.toISOString(),
+        };
       }
       const round = await this.lockCurrentRound(transaction, match);
       this.assertPlayableLevelId(body.levelId, round.playable_level_id);
       const roundState = this.roundState(round);
+      const clientStart = resolveAttemptStartTime(body.clientStartedAt, now);
+      // The domain clock is monotonic. If another poll evaluated the round after
+      // the visual start but before this packet arrived, clamp to the last
+      // evaluated instant while keeping the packet within the real start window.
+      const effectiveStartMs = Math.max(roundState.lastEvaluatedAtMs, clientStart.getTime());
       const decision = startRoundAttempt(
         roundState,
         authorization.side,
-        now.getTime(),
+        effectiveStartMs,
         body.clientEventId,
       );
       if (decision.accepted && !decision.duplicate && decision.attemptId) {
@@ -547,7 +562,7 @@ export class MatchService {
             attempt.sequence,
             attempt.id,
             now.toISOString(),
-            body.clientStartedAt ?? null,
+            body.clientStartedAt ? clientStart.toISOString() : null,
             body.levelId,
             body.clientEventId,
           ],
@@ -609,7 +624,13 @@ export class MatchService {
         );
       }
       if (!this.isRoundPlaying(match.state)) {
-        throw new ConflictException(`Attempt end is not accepted in ${match.state}`);
+        return {
+          accepted: false,
+          duplicate: false,
+          reason: `ATTEMPT_END_NOT_ACCEPTED_IN_${match.state}`,
+          awardedScore: 0,
+          serverNow: now.toISOString(),
+        };
       }
       const round = await this.lockCurrentRound(transaction, match);
       this.assertPlayableLevelId(body.levelId, round.playable_level_id);
@@ -923,6 +944,12 @@ export class MatchService {
         initial,
         now,
       );
+      if (shouldHoldRoundForAttemptTransport(withoutOrphans, now.getTime())) {
+        // No gameplay time is added here. The visible start deadline has already
+        // expired; this short hold only lets a packet stamped before that
+        // deadline reach the authoritative server before the round is finalized.
+        return match;
+      }
       const advanced = advanceRoundClock(withoutOrphans, now.getTime());
       if (
         advanced.phase === initial.phase &&
