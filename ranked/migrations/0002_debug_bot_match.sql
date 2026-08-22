@@ -13,7 +13,13 @@ ALTER TABLE ranked_matches
     ADD COLUMN IF NOT EXISTS debug_config JSONB,
     ADD COLUMN IF NOT EXISTS debug_discord_events BOOLEAN NOT NULL DEFAULT FALSE;
 
+-- IMPORTANT:
+-- 0001 historically declared match_type with an unnamed inline CHECK, so
+-- PostgreSQL generated ranked_matches_match_type_check. Some intermediate
+-- alpha schemas used the explicitly named ranked_match_type_check instead.
+-- Drop BOTH before converting PVP -> RANKED_PVP.
 ALTER TABLE ranked_matches
+    DROP CONSTRAINT IF EXISTS ranked_matches_match_type_check,
     DROP CONSTRAINT IF EXISTS ranked_match_type_check,
     DROP CONSTRAINT IF EXISTS ranked_match_debug_shape;
 
