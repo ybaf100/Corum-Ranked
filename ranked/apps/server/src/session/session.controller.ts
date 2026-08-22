@@ -2,7 +2,6 @@ import {
   Body,
   Controller,
   HttpException,
-  HttpStatus,
   Post,
   UseGuards,
 } from "@nestjs/common";
@@ -29,7 +28,7 @@ export class SessionController {
         requiredVersion: decision.requiredVersion,
         clientVersion: decision.clientVersion,
         installedModVersion: decision.installedModVersion,
-      }, HttpStatus.UPGRADE_REQUIRED);
+      }, 426);
     }
     return this.sessions.create(body);
   }

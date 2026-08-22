@@ -4,7 +4,6 @@ import {
   Inject,
   Injectable,
   HttpException,
-  HttpStatus,
   UnauthorizedException,
 } from "@nestjs/common";
 import type { DisplayTier } from "@corum-ranked/rules";
@@ -69,7 +68,7 @@ export class SessionGuard implements CanActivate {
         message: `Corum Ranked ${REQUIRED_RANKED_CLIENT_VERSION} is required. Update the mod before entering Ranked.`,
         requiredVersion: REQUIRED_RANKED_CLIENT_VERSION,
         clientVersion: row.client_version,
-      }, HttpStatus.UPGRADE_REQUIRED);
+      }, 426);
     }
     const session: RankedSessionContext = {
       sessionId: row.session_id,
