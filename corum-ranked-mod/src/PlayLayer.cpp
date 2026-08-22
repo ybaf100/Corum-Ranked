@@ -48,6 +48,32 @@ CCSprite* checkIcon(CCPoint position) {
     result->setOpacity(220);
     return result;
 }
+CCNode* hudPanel(CCSize size, CCPoint position, ccColor3B accent = {74, 226, 255}) {
+    auto* node = CCNode::create();
+    node->setContentSize(size);
+    node->setAnchorPoint({0.5f, 0.5f});
+    node->setPosition(position);
+
+    auto makeSlice = [](CCSize sliceSize, ccColor3B color, GLubyte opacity) {
+        auto* sprite = CCScale9Sprite::create("square02_001.png", {0.0f, 0.0f, 80.0f, 80.0f});
+        sprite->setContentSize(sliceSize);
+        sprite->setColor(color);
+        sprite->setOpacity(opacity);
+        return sprite;
+    };
+
+    auto* glow = makeSlice(size, accent, 70);
+    glow->setPosition({size.width / 2.0f, size.height / 2.0f});
+    node->addChild(glow, 0);
+    auto* inner = makeSlice({std::max(4.0f, size.width - 4.0f), std::max(4.0f, size.height - 4.0f)}, {8, 14, 26}, 150);
+    inner->setPosition({size.width / 2.0f, size.height / 2.0f});
+    node->addChild(inner, 1);
+    auto* top = makeSlice({std::max(8.0f, size.width - 18.0f), 2.0f}, accent, 190);
+    top->setPosition({size.width / 2.0f, size.height - 4.0f});
+    node->addChild(top, 2);
+    return node;
+}
+
 
 void applyCheck(CCSprite* icon, corum::ranked::ClearCheckColor color) {
     if (!icon) return;
@@ -329,6 +355,15 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         m_fields->hudRoot->setPosition({0.0f, 0.0f});
         m_fields->hudRoot->setContentSize(size);
 
+        auto* leftPanel = hudPanel({110.0f, 48.0f}, {layout.topLeftX + 54.0f, top - 22.0f}, {74, 226, 255});
+        m_fields->hudRoot->addChild(leftPanel, 1);
+        auto* rightPanel = hudPanel({110.0f, 48.0f}, {right - 54.0f, top - 22.0f}, {74, 226, 255});
+        m_fields->hudRoot->addChild(rightPanel, 1);
+        auto* centerPanel = hudPanel({124.0f, 42.0f}, {size.width / 2.0f, top - 15.0f}, {255, 214, 90});
+        m_fields->hudRoot->addChild(centerPanel, 1);
+        auto* bottomPanel = hudPanel({102.0f, 22.0f}, {layout.bottomLeftX + 51.0f, layout.bottomY + 10.0f}, {74, 226, 255});
+        m_fields->hudRoot->addChild(bottomPanel, 1);
+
         m_fields->fpsLabel = label("FPS : -", "bigFont.fnt", 0.28f, {0.0f, 1.0f}, {layout.topLeftX, top});
         m_fields->fpsLabel->setID("ranked-fps"_spr);
         m_fields->hudRoot->addChild(m_fields->fpsLabel, 3);
@@ -392,8 +427,8 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
             {0.0f, 0.0f, 80.0f, 80.0f}
         );
         background->setContentSize({width, 92.0f});
-        background->setColor(ccc3(20, 27, 38));
-        background->setOpacity(220);
+        background->setColor(ccc3(8, 14, 26));
+        background->setOpacity(200);
         m_fields->spectatorPanel->addChild(background, 0);
 
         auto* waiting = label("SPECTATING OPPONENT", "goldFont.fnt", 0.28f, {0.5f, 0.5f}, {0.0f, 32.0f});

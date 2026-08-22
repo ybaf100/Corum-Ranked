@@ -153,15 +153,21 @@ CCNode* gatePanel(CCSize size, CCPoint position, ccColor3B accent = {52, 214, 25
         return sprite;
     };
 
-    auto* glow = makeSlice(size, accent, 105);
+    auto* shadow = makeSlice({size.width + 6.0f, size.height + 6.0f}, {4, 8, 18}, 120);
+    shadow->setPosition({size.width / 2.0f, size.height / 2.0f - 3.0f});
+    node->addChild(shadow, -1);
+    auto* glow = makeSlice(size, accent, 96);
     glow->setPosition({size.width / 2.0f, size.height / 2.0f});
     node->addChild(glow, 0);
-    auto* inner = makeSlice({size.width - 4.0f, size.height - 4.0f}, {7, 18, 40}, 242);
+    auto* inner = makeSlice({size.width - 6.0f, size.height - 6.0f}, {7, 18, 40}, 238);
     inner->setPosition({size.width / 2.0f, size.height / 2.0f});
     node->addChild(inner, 1);
-    auto* line = makeSlice({size.width - 14.0f, 2.0f}, accent, 220);
-    line->setPosition({size.width / 2.0f, size.height - 4.0f});
+    auto* line = makeSlice({size.width - 18.0f, 2.0f}, accent, 220);
+    line->setPosition({size.width / 2.0f, size.height - 5.0f});
     node->addChild(line, 2);
+    auto* bottom = makeSlice({size.width - 28.0f, 2.0f}, accent, 120);
+    bottom->setPosition({size.width / 2.0f, 5.0f});
+    node->addChild(bottom, 2);
     return node;
 }
 
@@ -239,16 +245,16 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         // competitive Ranked banner in the open space above the song widget.
         // This is intentionally native Cocos/Geode UI, not a screenshot overlay,
         // so the vanilla song button remains a real interactive control.
-        m_fields->gateOverlay = gatePanel({184.0f, 58.0f}, {size.width / 2.0f, size.height / 2.0f - 53.0f});
+        m_fields->gateOverlay = gatePanel({206.0f, 70.0f}, {size.width / 2.0f, size.height / 2.0f - 48.0f});
         m_fields->gateOverlay->setZOrder(1001);
         addChild(m_fields->gateOverlay, 1001);
 
-        m_fields->gateTitle = gateLabel("RANKED MATCH", 0.19f, {92.0f, 45.0f}, {52, 214, 255});
+        m_fields->gateTitle = gateLabel("RANKED MATCH", 0.19f, {103.0f, 54.0f}, {52, 214, 255});
         m_fields->gateOverlay->addChild(m_fields->gateTitle, 3);
-        m_fields->gateCountdown = gateLabel("STARTS IN  10", 0.29f, {92.0f, 28.0f}, {255, 216, 86});
+        m_fields->gateCountdown = gateLabel("STARTS IN  10", 0.33f, {103.0f, 34.0f}, {255, 216, 86});
         m_fields->gateOverlay->addChild(m_fields->gateCountdown, 3);
-        m_fields->gateStatus = gateLabel("DOWNLOADING MAP...", 0.15f, {92.0f, 11.0f}, {215, 228, 245});
-        m_fields->gateStatus->limitLabelWidth(168.0f, 0.15f, 0.11f);
+        m_fields->gateStatus = gateLabel("ONLY SONG DOWNLOAD IS AVAILABLE", 0.14f, {103.0f, 14.0f}, {215, 228, 245});
+        m_fields->gateStatus->limitLabelWidth(186.0f, 0.14f, 0.10f);
         m_fields->gateOverlay->addChild(m_fields->gateStatus, 3);
 
         lockInteractionToSong(this, m_songWidget);
