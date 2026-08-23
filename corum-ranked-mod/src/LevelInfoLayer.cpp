@@ -289,6 +289,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         // never be invoked twice for the same Ranked launch.
         bool gameplayLaunchStarted = false;
         bool vanillaPlayActivation = false;
+        bool vanillaPlayForwarded = false;
         bool manualPlayFallback = false;
         int gameplayLaunchAttempts = 0;
         SteadyClock::time_point nextGameplayLaunchAt {};
@@ -688,48 +689,54 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
 
     void activateRankedPlayButton(float) {
         if (!m_fields->gameplayLaunchStarted || m_fields->returningToRanked) return;
-        auto* playButton = vanillaPlayButton(m_playBtnMenu, m_playSprite);
+        auto* nativePlayButton = vanillaPlayButton(m_playBtnMenu, m_playSprite);
 
-        // Some platform/mod layouts add controls to m_playBtnMenu without node
-        // IDs or replace the vanilla item after LevelInfoLayer::init. Never fall
-        // back to "the first CCMenuItem": that was the alpha.40 STARTING/FAILED
-        // loop. A temporary menu item invokes this exact layer's onPlay selector,
-        // which then forwards to vanilla LevelInfoLayer::onPlay through the
-        // one-shot bypass below. No PlayLayer scene is built directly.
-        CCMenuItemSpriteExtra* selectorProxy = nullptr;
-        if (!playButton) {
-            auto* sprite = CCSprite::createWithSpriteFrameName("GJ_playBtn_001.png");
-            if (sprite) {
-                selectorProxy = CCMenuItemSpriteExtra::create(
-                    sprite,
-                    this,
-                    menu_selector(CorumRankedLevelInfoLayer::onPlay)
-                );
-                playButton = selectorProxy;
-            }
-        }
-        if (!playButton) {
-            log::error("Ranked could not resolve or proxy the LevelInfo Play button");
-            verifyGameplayLaunch(0.0f);
-            return;
-        }
+        // Always dispatch through a short-lived selector owned by this exact
+        // modified LevelInfoLayer instance. On iOS, another LevelInfo hook can
+        // leave the visible vanilla item's stored target/selector pointing at a
+        // different hook chain. Calling that item's activate() then animates the
+        // button but never reaches CorumRankedLevelInfoLayer::onPlay, producing
+        // the observed STARTING -> FAILED loop. The proxy is still the ordinary
+        // LevelInfo onPlay route; it never constructs PlayLayer directly.
+        auto* proxySprite = CCSprite::createWithSpriteFrameName("GJ_playBtn_001.png");
+        auto* selectorProxy = proxySprite
+            ? CCMenuItemSpriteExtra::create(
+                proxySprite,
+                this,
+                menu_selector(CorumRankedLevelInfoLayer::onPlay)
+            )
+            : nullptr;
 
         // The prepare gate disables every menu item except song acquisition.
-        // Re-enable the actual Play item only for this programmatic activation;
-        // onExit tears the gate down after vanilla accepts the transition.
-        playButton->setEnabled(true);
+        // Re-enable and pulse the visible item, while the instance-owned proxy
+        // performs the deterministic selector dispatch.
+        if (nativePlayButton) {
+            nativePlayButton->setEnabled(true);
+            nativePlayButton->selected();
+            nativePlayButton->unselected();
+        }
         m_fields->vanillaPlayActivation = true;
+        m_fields->vanillaPlayForwarded = false;
         log::info(
             "Activating Ranked Play selector: match={} level={} source={}",
             corum::ranked::RankedRuntime::get().view().match.matchId,
             static_cast<int>(m_level->m_levelID),
-            selectorProxy ? "selector-proxy" : "native-play-sprite"
+            selectorProxy ? "instance-selector-proxy" : "direct-hook-fallback"
         );
         // The selector can synchronously begin a scene transition and run
         // onExit. Keep this layer alive until the activation callback returns so
         // clearing the one-shot bypass below never touches a released object.
         retain();
-        playButton->activate();
+        if (selectorProxy) selectorProxy->activate();
+        else onPlay(nativePlayButton);
+        if (!m_fields->vanillaPlayForwarded) {
+            // This should only be reachable if a platform rejects activation of
+            // an unattached proxy. Preserve the same vanilla callback as a final
+            // deterministic fallback rather than entering another retry loop.
+            log::warn("Ranked selector proxy did not forward onPlay; using direct hook fallback");
+            m_fields->vanillaPlayForwarded = true;
+            LevelInfoLayer::onPlay(nativePlayButton);
+        }
         m_fields->vanillaPlayActivation = false;
         release();
     }
@@ -743,6 +750,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         );
         m_fields->gameplayLaunchStarted = false;
         m_fields->vanillaPlayActivation = false;
+        m_fields->vanillaPlayForwarded = false;
         m_fields->songGateStartingPlay = false;
 
         if (m_fields->gameplayLaunchAttempts >= 3) {
@@ -811,6 +819,12 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
     void onPlay(CCObject* sender) {
         auto& runtime = corum::ranked::RankedRuntime::get();
         if (m_fields->vanillaPlayActivation) {
+            m_fields->vanillaPlayForwarded = true;
+            log::debug(
+                "Ranked LevelInfo onPlay forwarded to vanilla: match={} level={}",
+                runtime.view().match.matchId,
+                m_level ? static_cast<int>(m_level->m_levelID) : 0
+            );
             LevelInfoLayer::onPlay(sender);
             return;
         }
@@ -861,10 +875,33 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
     }
 
     void returnToRanked(float) {
-        if (m_fields->gameplayLaunchStarted) return;
         auto& runtime = corum::ranked::RankedRuntime::get();
+        auto const currentLevel = isCurrentRankedLevel(m_level);
+
+        // Authority may replace ROUND_PLAYING with a Death Match (or another
+        // Round/map) while the old LevelInfo selector is still waiting for a
+        // transition. Do not let the old launch latch hold that obsolete scene
+        // for the full watchdog interval; it otherwise stacks a second
+        // LevelInfo page and starts two contexts against one visible screen.
+        if (!currentLevel) {
+            log::warn(
+                "Discarding obsolete Ranked LevelInfo launch: shownLevel={} expectedLevel={} state={}",
+                m_level ? static_cast<int>(m_level->m_levelID) : 0,
+                runtime.currentLevelId(),
+                runtime.view().match.state
+            );
+            unschedule(schedule_selector(CorumRankedLevelInfoLayer::activateRankedPlayButton));
+            unschedule(schedule_selector(CorumRankedLevelInfoLayer::verifyGameplayLaunch));
+            m_fields->gameplayLaunchStarted = false;
+            m_fields->vanillaPlayActivation = false;
+            m_fields->vanillaPlayForwarded = false;
+            m_fields->songGateStartingPlay = false;
+            if (m_fields->songGateActive) teardownSongDownloadGate();
+        } else if (m_fields->gameplayLaunchStarted) {
+            return;
+        }
         if (m_fields->songGateActive && rankedPrepareState(runtime.view().match.state)) return;
-        if (isCurrentRankedLevel(m_level) && rankedPlayingState(runtime.view().match.state) && runtime.canEnterCurrentLevel()) return;
+        if (currentLevel && rankedPlayingState(runtime.view().match.state) && runtime.canEnterCurrentLevel()) return;
         if (m_fields->returningToRanked) return;
         m_fields->returningToRanked = true;
         CCDirector::sharedDirector()->popScene();

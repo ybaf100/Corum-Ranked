@@ -1,6 +1,15 @@
+# v0.5.0-beta.2
+
+- Fixed the iOS `STARTING -> FAILED` loop by dispatching automatic Play through a selector owned by the active Corum Ranked `LevelInfoLayer`, instead of trusting a visible Play item's possibly rebound callback.
+- Added a direct vanilla `onPlay` fallback and explicit launch forwarding logs so a rejected proxy activation cannot silently consume all retries.
+- Cancels and closes an obsolete LevelInfo launch immediately when server authority replaces the Round/map context, preventing Round and Death Match level pages from stacking during a fast state transition.
+- Includes the iOS build header hotfix for `CCParticleFire` and the fully-qualified `corum::ranked::RatingEventView` hotfix.
+- Integrated the development-only Debug Bot build switch into `Build Corum Ranked Mod`; manual runs default to Debug ON, while push/PR/reusable official builds remain OFF and validate the compiled binaries.
+- Updated the exact client/server gate and workspace package metadata to `v0.5.0-beta.2`. No database migration or Apps Script update is required from beta.1.
+
 # v0.5.0-beta.1
 
-- Split visible LP from hidden MMR.  Placement begins at hidden LP 0, records `O/X` outcomes, and reveals a cutoff-safe final placement only on the last placement result.
+- Split visible LP from hidden MMR. Placement begins at hidden LP 0, records `O/X` outcomes, and reveals a cutoff-safe final placement only on the last placement result.
 - Added configurable promotion series, cutoff-1 entry, cutoff+50 success, cutoff-50 failure, tier-floor protection, demotion warnings, and demotion/re-promotion handling.
 - Added score/clear-margin and streak-weighted hidden MMR changes, with reduced movement when the series winner trails in total Score or Clears.
 - Added placement/promotion tracks, green `PLACED`, LP transition animation, promotion flames, demotion warnings, and 2x+ win/loss streak labels to the lobby and result UI.
