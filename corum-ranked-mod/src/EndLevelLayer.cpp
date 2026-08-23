@@ -23,8 +23,13 @@ class $modify(CorumRankedEndLevelLayer, EndLevelLayer) {
         bool rankedExitRequested = false;
     };
 
-    bool init(PlayLayer* playLayer) {
-        if (!EndLevelLayer::init(playLayer)) return false;
+    void customSetup() {
+        EndLevelLayer::customSetup();
+
+        // EndLevelLayer::init(PlayLayer*) is inline on Windows and iOS, so
+        // Geode deliberately rejects hooks for it on those targets. By the
+        // time customSetup() runs, init has already assigned m_playLayer.
+        auto* playLayer = m_playLayer;
 
         auto& runtime = corum::ranked::RankedRuntime::get();
         auto const levelId =
@@ -43,7 +48,6 @@ class $modify(CorumRankedEndLevelLayer, EndLevelLayer) {
         if (m_fields->rankedLevel) {
             schedule(schedule_selector(CorumRankedEndLevelLayer::watchRankedExit), 0.10f);
         }
-        return true;
     }
 
     void watchRankedExit(float) {
