@@ -867,6 +867,26 @@ void RankedRuntime::parseMatchState(matjson::Value const& root) {
         }
     }
 
+    // The Last Attempt window itself is authoritative enough to identify its
+    // spectator: the trigger side has finished two Clears and only the target
+    // side may start. Recover that state locally if a state response races with
+    // the attempt-end acknowledgement or temporarily omits the convenience
+    // `spectator` projection. Without this fallback the popup can remain on its
+    // ordinary OPENING LEVEL / WAITING FOR MAP presentation indefinitely.
+    auto const lastAttempt = round["lastAttemptWindow"];
+    auto const inLastAttemptFlow =
+        m_view.match.state == "LAST_ATTEMPT_WINDOW" ||
+        m_view.match.state == "ROUND_SETTLING";
+    if (!m_view.match.spectatorActive && inLastAttemptFlow && lastAttempt.isObject()) {
+        auto const trigger = lastAttempt["triggerSide"].asString().unwrapOr("");
+        auto const target = lastAttempt["targetSide"].asString().unwrapOr("");
+        if (!trigger.empty() && trigger == m_view.match.side && target != m_view.match.side) {
+            m_view.match.spectatorActive = true;
+            m_view.match.spectatorOpponentName = m_view.match.opponentName;
+            m_view.match.spectatorCurrentProgress.reset();
+        }
+    }
+
     auto const result = root["result"];
     m_view.match.winnerSide = result["winnerSide"].asString().unwrapOr("");
     m_view.match.ownMmrDelta.reset();
@@ -1009,7 +1029,11 @@ void RankedRuntime::applyAttemptSnapshot(matjson::Value const& root) {
                     m_view.match.spectatorOpponentName = m_view.match.opponentName;
                     m_view.match.spectatorCurrentProgress.reset();
                 }
-            } else if (!inLastAttemptFlow) {
+            } else if (phase == "ROUND_RESULT") {
+                // A non-Last-Attempt ACK can be older than a state poll that has
+                // already enabled spectator mode. Do not let such an ACK clear a
+                // newer authoritative projection. Round result is the only phase
+                // in this response where spectator mode is certainly finished.
                 m_view.match.spectatorActive = false;
                 m_view.match.spectatorCurrentProgress.reset();
                 m_view.match.spectatorOpponentName.clear();

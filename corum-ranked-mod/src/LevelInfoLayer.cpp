@@ -720,6 +720,30 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         LevelInfoLayer::onPlay(sender);
     }
 
+    void keyDown(cocos2d::enumKeyCodes key, double timestamp) override {
+        auto& runtime = corum::ranked::RankedRuntime::get();
+        if (
+            isCurrentRankedLevel(m_level) &&
+            (
+                m_fields->songGateActive ||
+                m_fields->gameplayLaunchStarted ||
+                rankedPrepareState(runtime.view().match.state) ||
+                rankedPlayingState(runtime.view().match.state)
+            )
+        ) {
+            // LevelInfoLayer maps keyboard shortcuts such as Space directly to
+            // Play. During Ranked prepare/launch that bypasses the disabled menu
+            // item and can start a second, re-entrant scene transition while the
+            // keyboard dispatcher is still iterating its delegates. iOS then
+            // dereferences the released delegate (the observed SIGBUS). Ranked
+            // already owns automatic Play activation, so keyboard shortcuts on
+            // this transient page must be inert; the real touch Play callback is
+            // still handled by onPlay() above whenever manual input is legal.
+            return;
+        }
+        LevelInfoLayer::keyDown(key, timestamp);
+    }
+
     void returnToRanked(float) {
         if (m_fields->gameplayLaunchStarted) return;
         auto& runtime = corum::ranked::RankedRuntime::get();

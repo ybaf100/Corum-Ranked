@@ -412,10 +412,11 @@ class CorumRankedLayer final : public CCLayerColor {
             return fmt::format("stage:{}", static_cast<int>(view.stage));
         }
         auto key = fmt::format(
-            "match:{}:{}:{}",
+            "match:{}:{}:{}:spectator:{}",
             view.match.state,
             view.match.roundNumber,
-            view.match.deathmatchSequence
+            view.match.deathmatchSequence,
+            view.match.spectatorActive
         );
         if (view.match.state == "BAN_PHASE") {
             key += fmt::format(
@@ -1029,14 +1030,18 @@ class CorumRankedLayer final : public CCLayerColor {
             renderPrepare(match);
             return;
         }
-        // Once this player has triggered the opponent-only LAST ATTEMPT flow,
-        // they are a spectator immediately. Do not render the ordinary round
-        // prepare/countdown screen for the 10-second start window; that made a
-        // player who had already reached two Clears see a misleading second
-        // "STARTS IN 10" screen before spectator mode appeared.
+        // spectatorActive can arrive after the phase itself (state polling and
+        // attempt acknowledgements are independent). Prefer it throughout every
+        // live Round phase, and include it in presentationKey(), so a late false
+        // -> true projection always replaces OPENING LEVEL with the observer UI.
         if (
-            (match.state == "LAST_ATTEMPT_WINDOW" || match.state == "ROUND_SETTLING") &&
-            match.spectatorActive
+            match.spectatorActive &&
+            (
+                match.state == "ROUND_PLAYING" ||
+                match.state == "FINAL_ATTEMPT_WINDOW" ||
+                match.state == "LAST_ATTEMPT_WINDOW" ||
+                match.state == "ROUND_SETTLING"
+            )
         ) {
             renderSpectatorWait(match);
             return;
