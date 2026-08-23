@@ -22,28 +22,28 @@ describe("Ranked client version gate", () => {
 
   it("accepts the same current version with or without a leading v", () => {
     expect(
-      evaluateRankedClientVersion("0.4.0-alpha.38", [clientMod("0.4.0-alpha.38")]).allowed,
+      evaluateRankedClientVersion("0.4.0-alpha.39", [clientMod("0.4.0-alpha.39")]).allowed,
     ).toBe(true);
   });
 
   it("rejects an older declared client version", () => {
-    const result = evaluateRankedClientVersion("v0.4.0-alpha.37", [
+    const result = evaluateRankedClientVersion("v0.4.0-alpha.38", [
       clientMod(REQUIRED_RANKED_CLIENT_VERSION),
     ]);
     expect(result).toMatchObject({
       allowed: false,
-      requiredVersion: "v0.4.0-alpha.38",
-      clientVersion: "v0.4.0-alpha.37",
+      requiredVersion: "v0.4.0-alpha.39",
+      clientVersion: "v0.4.0-alpha.38",
     });
   });
 
   it("rejects when the active installed mod itself is not current", () => {
     const result = evaluateRankedClientVersion(REQUIRED_RANKED_CLIENT_VERSION, [
-      clientMod("v0.4.0-alpha.37"),
+      clientMod("v0.4.0-alpha.38"),
     ]);
     expect(result).toMatchObject({
       allowed: false,
-      installedModVersion: "v0.4.0-alpha.37",
+      installedModVersion: "v0.4.0-alpha.38",
     });
   });
 

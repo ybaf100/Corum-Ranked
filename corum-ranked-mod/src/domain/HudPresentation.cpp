@@ -73,6 +73,24 @@ HudPresentation presentHud(HudInput const& input) {
     auto const ownAttempts = ownIsA ? input.deathmatchAttemptsUsedA : input.deathmatchAttemptsUsedB;
     auto const opponentAttempts = ownIsA ? input.deathmatchAttemptsUsedB : input.deathmatchAttemptsUsedA;
 
+    // A poll can still say ROUND_PLAYING for a fraction of a second after the
+    // three-minute deadline. The normal deadline is also the start of the fixed
+    // 10-second FINAL ATTEMPT window, so derive that presentation locally from
+    // the signed server clock instead of briefly displaying a misleading 00:00.
+    auto displayState = input.state;
+    auto displayRemainingMillis = input.remainingMillis;
+    if (
+        displayState == "ROUND_PLAYING" && input.signedRemainingMillis &&
+        *input.signedRemainingMillis <= 0
+    ) {
+        displayState = "FINAL_ATTEMPT_WINDOW";
+        displayRemainingMillis = std::clamp<std::int64_t>(
+            *input.signedRemainingMillis + 10'000,
+            0,
+            10'000
+        );
+    }
+
     HudPresentation result;
     result.fpsText = input.renderFps && std::isfinite(*input.renderFps) && *input.renderFps > 0.0
         ? "FPS : " + std::to_string(static_cast<int>(std::lround(*input.renderFps)))
@@ -88,18 +106,18 @@ HudPresentation presentHud(HudInput const& input) {
         result.opponentAttemptText = "Attempts : " + std::to_string(std::clamp(opponentAttempts, 0, 3)) + "/3";
     }
 
-    if (input.state == "DEATHMATCH_PLAYING") {
+    if (displayState == "DEATHMATCH_PLAYING") {
         result.stateText = "DEATH MATCH";
         result.timerText = "3 ATTEMPTS";
-    } else if (input.state == "LAST_ATTEMPT_WINDOW") {
+    } else if (displayState == "LAST_ATTEMPT_WINDOW") {
         result.stateText = "LAST ATTEMPT";
-        result.timerText = windowCountdown(input.remainingMillis);
+        result.timerText = windowCountdown(displayRemainingMillis);
         result.windowStateFirst = true;
-    } else if (input.state == "FINAL_ATTEMPT_WINDOW") {
+    } else if (displayState == "FINAL_ATTEMPT_WINDOW") {
         result.stateText = "FINAL ATTEMPT";
-        result.timerText = windowCountdown(input.remainingMillis);
+        result.timerText = windowCountdown(displayRemainingMillis);
         result.windowStateFirst = true;
-    } else if (input.state == "ROUND_SETTLING") {
+    } else if (displayState == "ROUND_SETTLING") {
         // The 10-second value is a start deadline. Once it reaches zero, keep the
         // terminal 0.0 visible while an attempt that started in time finishes.
         // A two-Clear trigger uses LAST ATTEMPT; the ordinary three-minute expiry
@@ -109,7 +127,7 @@ HudPresentation presentHud(HudInput const& input) {
         result.timerText = "0.0";
         result.windowStateFirst = true;
     } else {
-        result.timerText = normalCountdown(input.remainingMillis);
+        result.timerText = normalCountdown(displayRemainingMillis);
         if (input.banner == "MATCH_POINT") result.stateText = "MATCH POINT";
         if (input.banner == "TIEBREAKER") result.stateText = "TIEBREAKER";
     }

@@ -209,6 +209,7 @@ public:
     [[nodiscard]] RuntimeView const& view() const;
     [[nodiscard]] std::optional<std::int64_t> deadlineSeconds() const;
     [[nodiscard]] std::optional<std::int64_t> deadlineMillis() const;
+    [[nodiscard]] std::optional<std::int64_t> signedDeadlineMillis() const;
     [[nodiscard]] bool canTrackLevel(int levelId) const;
     // Snapshot the revealed server map immediately before LevelInfoLayer enters
     // PlayLayer. This decouples gameplay attempt capture from later poll/UI
@@ -278,6 +279,7 @@ private:
     void cleanupAttemptTransportIfIdle();
     [[nodiscard]] bool hasLocalOpenAttempt() const;
     [[nodiscard]] bool canFinishTrackedLevel(int levelId) const;
+    [[nodiscard]] bool attemptStartWindowOpen() const;
     [[nodiscard]] std::string currentAttemptContextKey() const;
     [[nodiscard]] double optimisticScoreForContext(std::string const& contextKey) const;
     [[nodiscard]] int optimisticClearsForContext(std::string const& contextKey) const;
@@ -304,7 +306,6 @@ private:
     std::string m_gameplayStartContextKey;
     std::string m_gameplayStartedAt;
     bool m_gameplayStartEligible = false;
-    bool m_gameplayStartNeedsIntent = false;
     std::optional<PendingStart> m_pendingStart;
     std::optional<PendingEnd> m_pendingEnd;
     std::deque<QueuedAttempt> m_attemptBacklog;

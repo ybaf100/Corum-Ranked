@@ -54,7 +54,7 @@
 | `POST` | `/api/ranked/matches/:id/ban` | `{ "canonicalLevelId": "..." }` 또는 `{}` |
 | `POST` | `/api/ranked/matches/:id/attempt/start` | `playable levelId`, `clientEventId` |
 | `POST` | `/api/ranked/matches/:id/attempt/progress` | `playable levelId`, `attemptId`, `progressPercent` 0..100 정수 |
-| `POST` | `/api/ranked/matches/:id/attempt/end` | `playable levelId`, `attemptId`, 새 `clientEventId`, `progressPercent`, `cleared` |
+| `POST` | `/api/ranked/matches/:id/attempt/end` | `playable levelId`, `attemptId`, 새 `clientEventId`, `progressPercent` 0..100 (최대 소수 3자리; in-range 입력은 검증 전에 3자리로 정규화), `cleared` |
 | `POST` | `/api/ranked/matches/:id/heartbeat` | 없음 |
 
 Start/End의 `clientEventId`와 DB unique constraint로 재시도를 idempotent하게 처리합니다. 서버는 accepted start 시각을 기록하고 attempt ID를 발급합니다. Client가 winner, 점수, MMR, deadline을 제출하는 API는 없습니다.

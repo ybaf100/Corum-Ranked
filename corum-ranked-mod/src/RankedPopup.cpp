@@ -662,12 +662,19 @@ class CorumRankedLayer final : public CCLayerColor {
 
         if (m_prepareFooterLabel) {
             auto const ownA = match.side == "A";
+            auto& runtime = RankedRuntime::get();
+            auto const clearSyncPending =
+                match.deathmatchSequence <= 0 &&
+                runtime.localDisplayClears() >= 2 &&
+                runtime.hasLocalAttemptInFlight();
             auto const seconds = std::max(0, 10 - static_cast<int>(std::floor(phaseSeconds())));
             std::string footer = fmt::format("STARTS IN  {:02d}", seconds);
-            if (match.state == "DEATHMATCH_PLAYING") {
+            if (clearSyncPending) {
+                footer = "SYNCING CLEAR...";
+            } else if (match.state == "DEATHMATCH_PLAYING") {
                 auto displayOwnUsed = ownA ? match.deathmatchAttemptsUsedA : match.deathmatchAttemptsUsedB;
                 auto displayOpponentUsed = ownA ? match.deathmatchAttemptsUsedB : match.deathmatchAttemptsUsedA;
-                displayOwnUsed = std::max(displayOwnUsed, RankedRuntime::get().localDeathmatchVisualAttemptsUsed());
+                displayOwnUsed = std::max(displayOwnUsed, runtime.localDeathmatchVisualAttemptsUsed());
                 footer = displayOwnUsed >= 3
                     ? fmt::format("WAITING FOR OPPONENT   {}/3", displayOpponentUsed)
                     : fmt::format("ATTEMPT  {}  OF  3", std::min(3, displayOwnUsed + 1));
@@ -1249,12 +1256,20 @@ class CorumRankedLayer final : public CCLayerColor {
         auto* local = findPlayableMap();
         auto const mapReady = local != nullptr;
         auto const songReady = mapReady && isSongReady(local);
+        auto& runtime = RankedRuntime::get();
+        auto const clearSyncPending =
+            !deathmatch &&
+            runtime.localDisplayClears() >= 2 &&
+            runtime.hasLocalAttemptInFlight();
         auto* infoPlate = makeNeonPanel({168.0f, 124.0f}, {size.width / 2.0f, size.height / 2.0f - 28.0f}, kBlue, kDeepPanel2, 244);
         m_root->addChild(infoPlate, 1);
 
         auto const mapPos = CCPoint{size.width / 2.0f, size.height / 2.0f - 14.0f};
         auto const songPos = CCPoint{size.width / 2.0f, size.height / 2.0f - 48.0f};
-        if (mapReady) {
+        if (clearSyncPending) {
+            auto* plate = makeTextPlate("CLEAR RECORDED", {128.0f, 29.0f}, mapPos, kGreen, 0.20f, kGreen);
+            m_root->addChild(plate, 3);
+        } else if (mapReady) {
             auto* plate = makeTextPlate("MAP DOWNLOADED", {128.0f, 29.0f}, mapPos, kGreen, 0.20f, kGreen);
             m_root->addChild(plate, 3);
         } else {
@@ -1262,7 +1277,10 @@ class CorumRankedLayer final : public CCLayerColor {
             m_root->addChild(plate, 3);
         }
 
-        if (!mapReady) {
+        if (clearSyncPending) {
+            auto* plate = makeTextPlate("SYNCING RESULT", {128.0f, 29.0f}, songPos, kCyan, 0.19f, ccc3(218, 228, 244));
+            m_root->addChild(plate, 3);
+        } else if (!mapReady) {
             auto* plate = makeTextPlate("WAITING FOR MAP", {128.0f, 29.0f}, songPos, kBlue, 0.19f, ccc3(218, 228, 244));
             m_root->addChild(plate, 3);
         } else if (songReady) {
@@ -1280,7 +1298,10 @@ class CorumRankedLayer final : public CCLayerColor {
         auto const seconds = std::max(0, 10 - static_cast<int>(std::floor(phaseSeconds())));
         std::string footer = fmt::format("STARTS IN  {:02d}", seconds);
         ccColor3B footerAccent = seconds <= 3 ? kSideRed : kBlue;
-        if (match.state == "DEATHMATCH_PLAYING") {
+        if (clearSyncPending) {
+            footer = "SYNCING CLEAR...";
+            footerAccent = kCyan;
+        } else if (match.state == "DEATHMATCH_PLAYING") {
             auto const ownUsed = ownA ? displayDeathmatchUsedA : displayDeathmatchUsedB;
             auto const opponentUsed = ownA ? displayDeathmatchUsedB : displayDeathmatchUsedA;
             footer = ownUsed >= 3

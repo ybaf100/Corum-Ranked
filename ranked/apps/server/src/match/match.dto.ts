@@ -1,4 +1,4 @@
-import { Type } from "class-transformer";
+import { Transform, Type } from "class-transformer";
 import {
   IsBoolean,
   IsISO8601,
@@ -57,6 +57,12 @@ export class AttemptStartDto {
   public clientStartedAt?: string;
 }
 
+export const normalizeAttemptEndProgress = (value: unknown): number => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric < 0 || numeric > 100) return numeric;
+  return Math.round(numeric * 1_000) / 1_000;
+};
+
 export class AttemptEndDto {
   @IsString()
   @Length(1, 40)
@@ -70,7 +76,11 @@ export class AttemptEndDto {
   @Length(1, 100)
   public clientEventId!: string;
 
-  @Type(() => Number)
+  // Older clients can send the raw Geometry Dash percentage with many binary
+  // decimal places. Normalize valid in-range input before validating the
+  // protocol's three-decimal transport contract; invalid/range errors remain
+  // invalid and are still rejected below.
+  @Transform(({ value }) => normalizeAttemptEndProgress(value), { toClassOnly: true })
   @IsNumber({ maxDecimalPlaces: 3 })
   @Min(0)
   @Max(100)

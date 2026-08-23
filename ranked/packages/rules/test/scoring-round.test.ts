@@ -141,6 +141,28 @@ describe("three minutes plus final attempt start window", () => {
     expect(state.outcome?.winner).toBe("A");
   });
 
+  it("opens a fresh LAST ATTEMPT window when the second clear finishes after three minutes", () => {
+    let state = createRound(1, snapshot, DOCUMENT_RULES_V0_3, START);
+    const first = start(state, "A", 1, "late-clear-a1-start");
+    state = end(first.state, "A", first.attemptId, 2, 100, true, "late-clear-a1-end");
+
+    const second = start(state, "A", 189, "late-clear-a2-start");
+    state = advanceRoundClock(second.state, START + 190_000);
+    expect(state.phase).toBe("ROUND_SETTLING");
+
+    state = end(state, "A", second.attemptId, 220, 100, true, "late-clear-a2-end");
+    expect(state.phase).toBe("LAST_ATTEMPT_WINDOW");
+    expect(state.lastAttemptWindow).toMatchObject({
+      triggerSide: "A",
+      targetSide: "B",
+      startedAtMs: START + 220_000,
+      endsAtMs: START + 230_000,
+    });
+
+    const target = startRoundAttempt(state, "B", START + 229_000, "late-clear-b-start");
+    expect(target.accepted).toBe(true);
+  });
+
   it("settles equal totals as a Draw", () => {
     let state = createRound(1, snapshot, DOCUMENT_RULES_V0_3, START);
     const a = start(state, "A", 1, "a-start");
@@ -259,6 +281,25 @@ describe("two-clear and LAST ATTEMPT rules", () => {
     state = end(a2.state, "A", a2.attemptId, 6, 100, true, "a2e");
     const b2 = start(state, "B", 15, "b2s");
     state = end(b2.state, "B", b2.attemptId, 20, 80, false, "b2e");
+    expect(state.outcome).toMatchObject({ winner: "A", reason: "LAST_ATTEMPT_EXPIRED" });
+  });
+
+  it("keeps LAST ATTEMPT authoritative when its window crosses the original three-minute deadline", () => {
+    let state = createRound(1, snapshot, DOCUMENT_RULES_V0_3, START);
+    const a1 = start(state, "A", 160, "cross-a1-start");
+    state = end(a1.state, "A", a1.attemptId, 161, 100, true, "cross-a1-end");
+    const a2 = start(state, "A", 174, "cross-a2-start");
+    state = end(a2.state, "A", a2.attemptId, 175, 100, true, "cross-a2-end");
+    expect(state.lastAttemptWindow?.endsAtMs).toBe(START + 185_000);
+
+    const b = start(state, "B", 179, "cross-b-start");
+    state = advanceRoundClock(b.state, START + 180_000);
+    expect(state.phase).toBe("LAST_ATTEMPT_WINDOW");
+    state = advanceRoundClock(state, START + 185_000);
+    expect(state.phase).toBe("ROUND_SETTLING");
+
+    state = end(state, "B", b.attemptId, 200, 80, false, "cross-b-end");
+    expect(state.phase).toBe("ROUND_RESULT");
     expect(state.outcome).toMatchObject({ winner: "A", reason: "LAST_ATTEMPT_EXPIRED" });
   });
 });

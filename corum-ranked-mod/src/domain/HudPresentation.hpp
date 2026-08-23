@@ -35,6 +35,7 @@ struct HudInput {
     int deathmatchAttemptsUsedB = 0;
     double qualifyingPercent = 100.0;
     std::optional<std::int64_t> remainingMillis;
+    std::optional<std::int64_t> signedRemainingMillis;
     std::optional<double> renderFps;
     bool spectatorActive = false;
     std::string spectatorOpponentName;

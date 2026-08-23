@@ -101,7 +101,7 @@ class MockSpreadsheet {
           "Extreme Demon",
           "Long",
           `${pool}${index}001`,
-          pool === 5 && index === 1 ? "987654321" : "",
+          pool === 5 && index === 1 ? "987654321" : `8${pool}${index}001`,
           "Creator",
           "Verifier",
           50,
@@ -252,7 +252,9 @@ assert.equal(complete.data.validation.valid, true, complete.data.validation.erro
 assert.equal(complete.data.validation.queueReady, true);
 assert.equal(complete.data.maps.length, 30);
 assert.equal(complete.data.maps[0].canonicalLevelId, "11001");
-assert.equal(complete.data.maps[0].playableLevelId, "11001");
+assert.equal(complete.data.maps[0].alternateLevelId, "811001");
+assert.equal(complete.data.maps[0].playableLevelId, "811001");
+assert.equal(complete.data.maps[0].levelId, "811001");
 assert.equal(complete.data.maps[0].qualifyingPercent, 35);
 const alternate = complete.data.maps.find((map) => map.canonicalLevelId === "51001");
 assert.equal(alternate.alternateLevelId, "987654321");

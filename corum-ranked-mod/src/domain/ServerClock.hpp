@@ -21,6 +21,10 @@ public:
         std::string_view deadlineAt,
         std::int64_t localNowMillis
     ) const;
+    [[nodiscard]] std::optional<std::int64_t> signedRemainingMillis(
+        std::string_view deadlineAt,
+        std::int64_t localNowMillis
+    ) const;
 
 private:
     bool m_synchronized = false;

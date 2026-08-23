@@ -70,6 +70,15 @@ bool successful(web::WebResponse const& response) {
     return response.code() >= 200 && response.code() < 300;
 }
 
+bool permanentClientError(int status) {
+    // Request timeout, Too Early, and rate limiting are explicitly retryable.
+    // Other 4xx responses describe a deterministic request/session rejection;
+    // retrying the exact same FIFO event forever blocks every later attempt.
+    return
+        status >= 400 && status < 500 &&
+        status != 408 && status != 425 && status != 429;
+}
+
 std::string responseError(web::WebResponse& response) {
     auto const root = response.json().unwrapOr(matjson::Value());
     if (root.isObject()) {
@@ -151,14 +160,6 @@ bool stateAllowsActiveAttempt(std::string const& state) {
         state == "FINAL_ATTEMPT_WINDOW" ||
         state == "LAST_ATTEMPT_WINDOW" ||
         state == "ROUND_SETTLING" ||
-        state == "DEATHMATCH_PLAYING";
-}
-
-bool stateAllowsAttemptStart(std::string const& state) {
-    return
-        state == "ROUND_PLAYING" ||
-        state == "FINAL_ATTEMPT_WINDOW" ||
-        state == "LAST_ATTEMPT_WINDOW" ||
         state == "DEATHMATCH_PLAYING";
 }
 
@@ -283,7 +284,6 @@ void RankedRuntime::begin() {
     m_gameplayStartContextKey.clear();
     m_gameplayStartedAt.clear();
     m_gameplayStartEligible = false;
-    m_gameplayStartNeedsIntent = false;
     m_pendingStart.reset();
     m_pendingEnd.reset();
     m_attemptBacklog.clear();
@@ -1161,7 +1161,6 @@ void RankedRuntime::dismissMatch() {
     m_gameplayStartContextKey.clear();
     m_gameplayStartedAt.clear();
     m_gameplayStartEligible = false;
-    m_gameplayStartNeedsIntent = false;
     m_pendingStart.reset();
     m_pendingEnd.reset();
     m_attemptBacklog.clear();
@@ -1269,6 +1268,11 @@ std::optional<std::int64_t> RankedRuntime::deadlineMillis() const {
     return m_serverClock.remainingMillis(m_view.match.deadlineAt, localNowMillis());
 }
 
+std::optional<std::int64_t> RankedRuntime::signedDeadlineMillis() const {
+    if (m_view.match.deadlineAt.empty()) return std::nullopt;
+    return m_serverClock.signedRemainingMillis(m_view.match.deadlineAt, localNowMillis());
+}
+
 int RankedRuntime::currentLevelId() const {
     return m_view.match.currentMap ? m_view.match.currentMap->levelId : 0;
 }
@@ -1276,16 +1280,13 @@ int RankedRuntime::currentLevelId() const {
 bool RankedRuntime::armCurrentLevelForGameplay() {
     if (
         m_view.stage != RuntimeStage::Matched || !m_view.match.currentMap ||
-        m_view.match.spectatorActive || !stateAllowsAttemptStart(m_view.match.state)
+        m_view.match.spectatorActive || !attemptStartWindowOpen()
     ) return false;
     m_gameplayMap = *m_view.match.currentMap;
     m_gameplayMatchId = m_view.match.matchId;
     m_gameplayStartContextKey = currentAttemptContextKey();
     m_gameplayStartedAt = iso8601FromMillis(m_serverClock.serverNowMillis(localNowMillis()));
     m_gameplayStartEligible = true;
-    m_gameplayStartNeedsIntent =
-        m_view.match.state == "FINAL_ATTEMPT_WINDOW" ||
-        m_view.match.state == "LAST_ATTEMPT_WINDOW";
     log::debug(
         "Ranked gameplay armed: match={} level={} qualifying={} context={} startedAt={}",
         m_gameplayMatchId,
@@ -1377,7 +1378,7 @@ bool RankedRuntime::canEnterCurrentLevel() const {
     if (m_view.stage != RuntimeStage::Matched || !m_view.match.currentMap || m_view.match.spectatorActive) return false;
     // Scene entry creates a NEW visual attempt. ROUND_SETTLING allows an already
     // accepted attempt to finish, but must never be used to enter/re-enter PlayLayer.
-    if (!stateAllowsAttemptStart(m_view.match.state)) return false;
+    if (!attemptStartWindowOpen()) return false;
 
     if (m_view.match.state == "DEATHMATCH_PLAYING") {
         auto const serverUsed = m_view.match.side == "A"
@@ -1401,7 +1402,7 @@ bool RankedRuntime::canEnterCurrentLevel() const {
     auto const committedClears = m_view.match.side == "A" ? m_view.match.clearsA : m_view.match.clearsB;
     auto const contextKey = currentAttemptContextKey();
     if (
-        stateAllowsAttemptStart(m_view.match.state) &&
+        attemptStartWindowOpen() &&
         committedClears + optimisticClearsForContext(contextKey) >= 2 &&
         hasLocalAttemptInFlight()
     ) return false;
@@ -1479,6 +1480,26 @@ bool RankedRuntime::canFinishTrackedLevel(int levelId) const {
         m_pendingEnd.has_value() || !m_attemptBacklog.empty() || m_attemptBusy;
 }
 
+bool RankedRuntime::attemptStartWindowOpen() const {
+    auto const& state = m_view.match.state;
+    if (state == "DEATHMATCH_PLAYING") return true;
+
+    if (state == "ROUND_PLAYING") {
+        // deadlineAt is the three-minute deadline while authority still reports
+        // ROUND_PLAYING. The rules permit new starts for exactly ten more seconds.
+        // A missing clock remains server-authoritative instead of locally locking
+        // the player out; the Start endpoint can still reject a late event.
+        auto const signedRemaining = signedDeadlineMillis();
+        return !signedRemaining || *signedRemaining > -10'000;
+    }
+
+    if (state == "FINAL_ATTEMPT_WINDOW" || state == "LAST_ATTEMPT_WINDOW") {
+        auto const remaining = deadlineMillis();
+        return !remaining || *remaining > 0;
+    }
+    return false;
+}
+
 void RankedRuntime::cleanupAttemptTransportIfIdle() {
     if (hasLocalAttemptInFlight()) return;
     m_attemptId.clear();
@@ -1502,7 +1523,6 @@ void RankedRuntime::cleanupAttemptTransportIfIdle() {
         m_gameplayStartContextKey.clear();
         m_gameplayStartedAt.clear();
         m_gameplayStartEligible = false;
-        m_gameplayStartNeedsIntent = false;
     }
 }
 
@@ -1529,7 +1549,7 @@ bool RankedRuntime::reportAttemptStart(int levelId) {
         m_gameplayMatchId == m_view.match.matchId &&
         m_gameplayMap->levelId == levelId &&
         !m_gameplayStartContextKey.empty();
-    if ((!canTrackLevel(levelId) || !stateAllowsAttemptStart(m_view.match.state)) && !armedSceneStart) return false;
+    if ((!canTrackLevel(levelId) || !attemptStartWindowOpen()) && !armedSceneStart) return false;
 
     // A PlayLayer can retry this call while waiting for the transport. Treat an
     // already registered local start as success instead of creating duplicates.
@@ -1592,8 +1612,6 @@ bool RankedRuntime::reportAttemptStart(int levelId) {
         sendAttemptStartIntent(start);
     }
 
-    if (armedSceneStart) m_gameplayStartNeedsIntent = false;
-
     // Geometry Dash may visually reset into the next attempt before the previous
     // HTTP end acknowledgement arrives. Never overwrite that older transport.
     // Store every later visual attempt in FIFO order instead.
@@ -1640,13 +1658,13 @@ bool RankedRuntime::reportAttemptEnd(int levelId, double progressPercent, bool c
         m_attemptId.empty() && !m_pendingStart && !m_attemptBusy &&
         m_attemptBacklog.empty()
     ) {
-        if (!stateAllowsAttemptStart(m_view.match.state) || !reportAttemptStart(levelId)) {
+        if (!reportAttemptStart(levelId)) {
             log::warn("Ranked attempt end could not recover a missing start: level={}", levelId);
             return false;
         }
     }
 
-    auto const finalProgress = std::clamp(progressPercent, 0.0, 100.0);
+    auto const finalProgress = normalizeAttemptProgress(progressPercent);
     RankedMapView const* scoringMap = nullptr;
     if (m_gameplayMap && m_gameplayMatchId == m_view.match.matchId && m_gameplayMap->levelId == levelId) {
         scoringMap = &*m_gameplayMap;
@@ -1852,9 +1870,10 @@ void RankedRuntime::sendAttemptStart() {
             m_attemptRequestStartedAt = {};
             if (!successful(response)) {
                 auto const reason = responseError(response);
-                if (response.code() == 409) {
+                if (permanentClientError(response.code())) {
                     log::error(
-                        "Ranked attempt start permanently rejected: level={} event={} reason={}",
+                        "Ranked attempt start permanently rejected: status={} level={} event={} reason={}",
+                        response.code(),
                         starting.levelId,
                         starting.eventId,
                         reason
@@ -1874,6 +1893,13 @@ void RankedRuntime::sendAttemptStart() {
                     flushAttemptEvents();
                     return;
                 }
+                log::warn(
+                    "Ranked attempt start transient failure: status={} level={} event={} reason={}",
+                    response.code(),
+                    starting.levelId,
+                    starting.eventId,
+                    reason
+                );
                 setTransientError("Attempt start retrying: " + reason);
                 m_nextAttemptRetryAt = std::chrono::steady_clock::now() + std::chrono::seconds(1);
                 return;
@@ -1954,9 +1980,10 @@ void RankedRuntime::sendAttemptEnd() {
             m_attemptRequestStartedAt = {};
             if (!successful(response)) {
                 auto const reason = responseError(response);
-                if (response.code() == 409) {
+                if (permanentClientError(response.code())) {
                     log::error(
-                        "Ranked attempt end permanently rejected: attempt={} level={} event={} reason={}",
+                        "Ranked attempt end permanently rejected: status={} attempt={} level={} event={} reason={}",
+                        response.code(),
                         m_attemptId,
                         ending.levelId,
                         ending.eventId,
@@ -1976,6 +2003,14 @@ void RankedRuntime::sendAttemptEnd() {
                     flushAttemptEvents();
                     return;
                 }
+                log::warn(
+                    "Ranked attempt end transient failure: status={} attempt={} level={} event={} reason={}",
+                    response.code(),
+                    m_attemptId,
+                    ending.levelId,
+                    ending.eventId,
+                    reason
+                );
                 setTransientError("Attempt end retrying: " + reason);
                 m_nextAttemptRetryAt = std::chrono::steady_clock::now() + std::chrono::seconds(1);
                 return;

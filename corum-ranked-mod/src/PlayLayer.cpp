@@ -117,11 +117,13 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
 #endif
         corum::ranked::RenderFpsMeter fpsMeter;
         std::chrono::steady_clock::time_point nextHudRefreshAt {};
+        std::chrono::steady_clock::time_point attemptJournalReadyAt {};
         std::uint64_t renderedRevision = 0;
         int levelId = 0;
         double qualifyingPercent = -1.0;
         bool rankedLevel = false;
         bool autoExitRequested = false;
+        bool gameplayFrameObserved = false;
         bool attemptStartReported = false;
         bool attemptEndReported = false;
         bool deniedDeathmatchVisualAttempt = false;
@@ -158,9 +160,10 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         if (!m_fields->rankedLevel || m_isPracticeMode || m_isTestMode) return true;
 
         addRankedHud();
+        m_fields->gameplayFrameObserved = false;
+        m_fields->attemptJournalReadyAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
         m_fields->attemptStartReported = false;
         m_fields->attemptEndReported = false;
-        m_fields->attemptStartReported = runtime.reportAttemptStart(m_fields->levelId);
         return true;
     }
 
@@ -169,6 +172,21 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         auto& runtime = corum::ranked::RankedRuntime::get();
         runtime.tick();
         if (!m_fields->rankedLevel || m_isPracticeMode || m_isTestMode) return;
+        m_fields->gameplayFrameObserved = true;
+        auto const now = std::chrono::steady_clock::now();
+
+        // Journal the visual Start only after Geometry Dash's short scene setup
+        // window. The game performs an initialization reset roughly 100-150 ms
+        // after PlayLayer construction on the supplied devices; reporting from
+        // init() turned it into Start -> End 0 -> Start. A real death/Clear before
+        // this point still self-heals through reportAttemptEnd(), preserving it.
+        if (
+            !runtime.isSpectating() &&
+            !m_fields->attemptStartReported && !m_fields->attemptEndReported &&
+            now >= m_fields->attemptJournalReadyAt
+        ) {
+            m_fields->attemptStartReported = runtime.reportAttemptStart(m_fields->levelId);
+        }
         if (m_fields->deniedDeathmatchVisualAttempt && !m_fields->autoExitRequested) {
             m_fields->autoExitRequested = true;
             PlayLayer::onQuit();
@@ -182,6 +200,7 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         // level screen until they finish.
         if (
             runtime.isSpectating() && m_fields->attemptEndReported &&
+            !m_hasCompletedLevel &&
             !m_fields->autoExitRequested
         ) {
             m_fields->autoExitRequested = true;
@@ -232,15 +251,11 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         m_fields->fpsMeter.observeFrame(steadyNowMicros());
 
         if (!runtime.isSpectating()) {
-            if (!m_fields->attemptStartReported && !m_fields->attemptEndReported) {
-                m_fields->attemptStartReported = runtime.reportAttemptStart(m_fields->levelId);
-            }
             runtime.reportAttemptProgress(
                 m_fields->levelId,
                 rankedProgressPercent(this)
             );
         }
-        auto const now = std::chrono::steady_clock::now();
         if (
             runtime.view().revision != m_fields->renderedRevision ||
             now >= m_fields->nextHudRefreshAt
@@ -254,8 +269,19 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         auto& runtime = corum::ranked::RankedRuntime::get();
         if (
             m_fields->rankedLevel && !m_isPracticeMode && !m_isTestMode &&
-            runtime.isSpectating()
+            (
+                !m_fields->gameplayFrameObserved ||
+                (
+                    !m_fields->attemptStartReported && !m_fields->attemptEndReported &&
+                    std::chrono::steady_clock::now() < m_fields->attemptJournalReadyAt
+                )
+            )
         ) {
+            // Vanilla's scene-initialization reset is not a player attempt. Let
+            // Geometry Dash finish setup, then the stable postUpdate path creates
+            // exactly one Ranked Start. Real early deaths/Clears have already set
+            // attemptEndReported through their dedicated hooks and do not enter here.
+            PlayLayer::resetLevel();
             return;
         }
         if (m_fields->rankedLevel && !m_isPracticeMode && !m_isTestMode) {
@@ -501,6 +527,7 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
             .deathmatchAttemptsUsedB = attemptsUsedB,
             .qualifyingPercent = match.currentMap ? match.currentMap->qualifyingPercent : 100.0,
             .remainingMillis = runtime.deadlineMillis(),
+            .signedRemainingMillis = runtime.signedDeadlineMillis(),
             .renderFps = m_fields->fpsMeter.fps(),
             .spectatorActive = match.spectatorActive,
             .spectatorOpponentName = match.spectatorOpponentName,

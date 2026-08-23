@@ -1,3 +1,17 @@
+# v0.4.0-alpha.39
+
+- Normalized Attempt End progress to the server's three-decimal wire contract, preventing raw Geometry Dash percentages from returning HTTP 400 and permanently blocking the FIFO before later Clears.
+- Treats deterministic HTTP 4xx Attempt Start/End failures as terminal for that event while continuing to retry network, 5xx, timeout, Too Early, and rate-limit failures.
+- Removed the initialization-only phantom `Start -> End 0 -> Start` sequence by journaling the first attempt after Geometry Dash's short scene-setup reset window; a genuine early death/Clear still self-recovers and is recorded.
+- Fixed the three-minute boundary HUD so it changes directly from the normal clock to visible `FINAL ATTEMPT 10.0 ... 0.0`, even before the next authoritative poll arrives.
+- Enforced the 10-second new-attempt deadline locally for stale `ROUND_PLAYING` snapshots while preserving every attempt that started in time until its natural death or Clear.
+- Fixed Ranked completion-layer exits: closed Replay is redirected through the vanilla Menu path, and two-Clear/result transitions leave the completion overlay without orphaning its controls.
+- Replaced the misleading `OPENING LEVEL / WAITING MAP` presentation during a pending second-Clear acknowledgement with `CLEAR RECORDED / SYNCING RESULT`.
+- Added server-side defensive Attempt End normalization plus regression tests for second Clears after 3:00 and LAST ATTEMPT windows crossing the original 3:00 deadline.
+- Fixed the `Validate Corum Ranked` Actions fixture so every locally generated Ranked Pool map includes the now-required alternate map code; the workflow no longer fails independently of the operator's real Spreadsheet values.
+- Preserved the existing Geometry Dash LevelInfo Play-button activation path and Match music handoff; gameplay is not constructed directly by Ranked.
+- Updated the exact client/server version gate and workspace metadata to `v0.4.0-alpha.39`. No database migration or Apps Script change is required.
+
 # v0.4.0-alpha.38
 
 - Fixed the reproducible iOS `CCTouchDispatcher::handleTouchesEnd` crash by stopping 200 ms full-menu rebuilds and explicitly clearing `CCMenu::m_pSelectedItem` before any structural UI cleanup. Countdown, download, queue, and spectator values now update in place.

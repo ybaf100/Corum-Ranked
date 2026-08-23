@@ -5,8 +5,10 @@
 #include "../src/domain/ServerClock.hpp"
 
 #include <cassert>
+#include <cmath>
 #include <cstdint>
 #include <iostream>
+#include <limits>
 
 using namespace corum::ranked;
 
@@ -119,6 +121,11 @@ void environmentTests() {
 }
 
 void scoringTests() {
+    assert(std::abs(normalizeAttemptProgress(0.019547325102880658) - 0.020) < 0.0000001);
+    assert(std::abs(normalizeAttemptProgress(24.505414197332836) - 24.505) < 0.0000001);
+    assert(normalizeAttemptProgress(-1.0) == 0.0);
+    assert(normalizeAttemptProgress(101.0) == 100.0);
+    assert(normalizeAttemptProgress(std::numeric_limits<double>::quiet_NaN()) == 0.0);
     assert(calculateAttemptScore(19.99, false, 20.0) == 0.0);
     assert(calculateAttemptScore(20.0, false, 20.0) == 20.0);
     assert(calculateAttemptScore(69.99, false, 20.0) == 69.0);
@@ -144,6 +151,12 @@ void clockTests() {
     assert(remaining && *remaining == 11);
     auto const remainingMillis = clock.remainingMillis("1970-01-01T00:20:10.001Z", local);
     assert(remainingMillis && *remainingMillis == 10'001);
+    auto const signedBefore = clock.signedRemainingMillis("1970-01-01T00:20:10.001Z", local);
+    assert(signedBefore && *signedBefore == 10'001);
+    auto const signedAfter = clock.signedRemainingMillis("1970-01-01T00:20:10.001Z", local + 10'501);
+    assert(signedAfter && *signedAfter == -500);
+    auto const clampedAfter = clock.remainingMillis("1970-01-01T00:20:10.001Z", local + 10'501);
+    assert(clampedAfter && *clampedAfter == 0);
 }
 
 void fpsTests() {
@@ -179,6 +192,7 @@ void hudTests() {
         .clearsB = 2,
         .qualifyingPercent = 35,
         .remainingMillis = 134'000,
+        .signedRemainingMillis = 134'000,
         .renderFps = std::nullopt,
         .spectatorActive = false,
         .spectatorOpponentName = {},
@@ -232,8 +246,28 @@ void hudTests() {
     assert(hud.opponentScoreText == "Score : 382");
     assert(hud.stateText == "TIEBREAKER");
 
+    // ROUND_PLAYING can remain visible until the next poll after 3:00. Derive
+    // the fixed FINAL ATTEMPT countdown from the signed normal deadline so the
+    // HUD never flashes 00:00 before the decimal ten-second timer appears.
+    input.state = "ROUND_PLAYING";
+    input.remainingMillis = 0;
+    input.signedRemainingMillis = 0;
+    hud = presentHud(input);
+    assert(hud.stateText == "FINAL ATTEMPT");
+    assert(hud.timerText == "10.0");
+    assert(hud.windowStateFirst);
+
+    input.signedRemainingMillis = -500;
+    hud = presentHud(input);
+    assert(hud.timerText == "9.5");
+
+    input.signedRemainingMillis = -10'100;
+    hud = presentHud(input);
+    assert(hud.timerText == "0.0");
+
     input.state = "FINAL_ATTEMPT_WINDOW";
     input.remainingMillis = 7'350;
+    input.signedRemainingMillis = 7'350;
     hud = presentHud(input);
     assert(hud.stateText == "FINAL ATTEMPT");
     assert(hud.timerText == "7.4");

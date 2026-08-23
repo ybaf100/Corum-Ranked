@@ -105,10 +105,19 @@ std::optional<std::int64_t> ServerClock::remainingMillis(
     std::string_view deadlineAt,
     std::int64_t localNowMillis
 ) const {
+    auto const remaining = signedRemainingMillis(deadlineAt, localNowMillis);
+    if (!remaining) return std::nullopt;
+    return std::max<std::int64_t>(0, *remaining);
+}
+
+std::optional<std::int64_t> ServerClock::signedRemainingMillis(
+    std::string_view deadlineAt,
+    std::int64_t localNowMillis
+) const {
     if (!m_synchronized) return std::nullopt;
     auto const deadline = parseIso8601Millis(deadlineAt);
     if (!deadline) return std::nullopt;
-    return std::max<std::int64_t>(0, *deadline - serverNowMillis(localNowMillis));
+    return *deadline - serverNowMillis(localNowMillis);
 }
 
 } // namespace corum::ranked
