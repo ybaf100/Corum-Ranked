@@ -592,13 +592,65 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         m_fields->autoPlayScheduled = false;
         unschedule(schedule_selector(CorumRankedLevelInfoLayer::autoPlayRanked));
 
-        // Only after the authoritative gameplay context is armed do we tear down
-        // the song/download gate. This preserves the retry loop until launch is
-        // guaranteed to proceed.
-        if (m_fields->songGateActive) teardownSongDownloadGate();
+        // Do NOT tear down the Ranked gate before vanilla actually leaves this
+        // LevelInfoLayer. alpha.37 previously treated the call itself as success:
+        // if vanilla onPlay() declined/failed to transition, gameplayLaunchStarted
+        // stayed latched forever while the gate had already been removed. That
+        // exact state leaves every ordinary LevelInfo control usable except Play
+        // and Back, which are intercepted by this hook.
+        //
+        // A successful scene transition calls onExit(), which cancels this
+        // watchdog and tears down the gate. If onExit() never happens, we are
+        // still on this page; release the latch and retry instead of deadlocking.
+        scheduleOnce(
+            schedule_selector(CorumRankedLevelInfoLayer::verifyGameplayLaunch),
+            0.75f
+        );
 
         LevelInfoLayer::onPlay(sender);
         return true;
+    }
+
+    void verifyGameplayLaunch(float) {
+        if (!m_fields->gameplayLaunchStarted) return;
+
+        log::warn(
+            "Ranked LevelInfoLayer::onPlay did not leave the scene; releasing launch latch for retry"
+        );
+
+        m_fields->gameplayLaunchStarted = false;
+        m_fields->songGateStartingPlay = false;
+
+        if (m_fields->songGateActive) {
+            if (m_fields->gateCountdown) {
+                m_fields->gateCountdown->setString("PLAY FAILED - RETRYING");
+                m_fields->gateCountdown->setColor({255, 92, 92});
+            }
+            // updateSongDownloadGate() is still alive and will retry on its next
+            // tick once the launch latch is released.
+            return;
+        }
+
+        // This path covers a LevelInfo page that was entered after authority had
+        // already moved to PLAYING and therefore had no download gate.
+        auto& runtime = corum::ranked::RankedRuntime::get();
+        if (
+            isCurrentRankedLevel(m_level) &&
+            rankedPlayingState(runtime.view().match.state) &&
+            runtime.canEnterCurrentLevel()
+        ) {
+            scheduleAutoPlay(0.10f);
+        }
+    }
+
+    void onExit() override {
+        // Reaching onExit is the actual proof that vanilla accepted the launch
+        // and this LevelInfo scene is leaving. Only now may we destroy the gate.
+        unschedule(schedule_selector(CorumRankedLevelInfoLayer::verifyGameplayLaunch));
+        if (m_fields->gameplayLaunchStarted && m_fields->songGateActive) {
+            teardownSongDownloadGate();
+        }
+        LevelInfoLayer::onExit();
     }
 
     void scheduleAutoPlay(float delay) {
