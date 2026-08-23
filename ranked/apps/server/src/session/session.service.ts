@@ -26,6 +26,15 @@ interface ExistingProfileRow {
   seed_applied_at: Date | string | null;
   displayed_tier: DisplayTier;
   visible_ranked_score: number | null;
+  placement_results?: unknown;
+  result_streak?: number;
+  promotion_source_tier?: string | null;
+  promotion_target_tier?: string | null;
+  promotion_cutoff?: number | null;
+  promotion_games_required?: number | null;
+  promotion_wins_required?: number | null;
+  promotion_results?: unknown;
+  demotion_warning?: boolean;
 }
 
 interface PlayerRow {
@@ -41,7 +50,19 @@ export interface SessionCreationResult {
     readonly displayedTier: DisplayTier;
     readonly placementGames: number;
     readonly placementGamesRequired: number;
-    readonly visibleRankedScore: number;
+    readonly visibleRankedScore: number | null;
+    readonly placementResults: readonly ("WIN" | "LOSS")[];
+    readonly resultStreak: number;
+    readonly promotion: {
+      readonly sourceTier: string;
+      readonly targetTier: string;
+      readonly cutoff: number;
+      readonly gamesRequired: number;
+      readonly winsRequired: number;
+      readonly results: readonly ("WIN" | "LOSS")[];
+      readonly winsRemaining: number;
+    } | null;
+    readonly demotionWarning: boolean;
   };
   readonly authenticationLevel: "SELF_ASSERTED_GD_ACCOUNT_WITH_SERVER_SESSION";
   readonly serverNow: string;
@@ -128,11 +149,43 @@ export class SessionService {
         displayedTier: profile.displayed_tier,
         placementGames: Number(profile.placement_games),
         placementGamesRequired: config.operational.mmrPolicy.placementGames,
-        visibleRankedScore: Number(profile.visible_ranked_score ?? profile.hidden_mmr ?? 0),
+        visibleRankedScore: Number(profile.placement_games) < config.operational.mmrPolicy.placementGames
+          ? null
+          : Number(profile.visible_ranked_score ?? 0),
+        placementResults: this.ratingMarks(profile.placement_results),
+        resultStreak: Number(profile.result_streak ?? 0),
+        promotion: profile.promotion_source_tier && profile.promotion_target_tier &&
+          profile.promotion_cutoff !== null && profile.promotion_cutoff !== undefined &&
+          profile.promotion_games_required !== null && profile.promotion_games_required !== undefined &&
+          profile.promotion_wins_required !== null && profile.promotion_wins_required !== undefined
+          ? {
+              sourceTier: profile.promotion_source_tier,
+              targetTier: profile.promotion_target_tier,
+              cutoff: Number(profile.promotion_cutoff),
+              gamesRequired: Number(profile.promotion_games_required),
+              winsRequired: Number(profile.promotion_wins_required),
+              results: this.ratingMarks(profile.promotion_results),
+              winsRemaining: Math.max(
+                0,
+                Number(profile.promotion_wins_required) -
+                  this.ratingMarks(profile.promotion_results).filter((mark) => mark === "WIN").length,
+              ),
+            }
+          : null,
+        demotionWarning: Boolean(profile.demotion_warning),
       },
       authenticationLevel: "SELF_ASSERTED_GD_ACCOUNT_WITH_SERVER_SESSION",
       serverNow: now.toISOString(),
     };
+  }
+
+  private ratingMarks(value: unknown): readonly ("WIN" | "LOSS")[] {
+    let parsed = value;
+    if (typeof value === "string") {
+      try { parsed = JSON.parse(value) as unknown; } catch { return []; }
+    }
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((mark): mark is "WIN" | "LOSS" => mark === "WIN" || mark === "LOSS");
   }
 
   public async heartbeat(session: RankedSessionContext): Promise<{ serverNow: string }> {
@@ -198,10 +251,10 @@ export class SessionService {
       `INSERT INTO ranked_profiles (
          player_id, displayed_tier, hidden_mmr, visible_ranked_score, initial_csmp_tier,
          initial_seed_mmr, seed_applied_at
-       ) VALUES ($1, 'UNRANKED', $2, $2, $3, $4, $5)
+       ) VALUES ($1, 'UNRANKED', $2, 0, $3, $4, $5)
        ON CONFLICT (player_id) DO UPDATE SET
          hidden_mmr = EXCLUDED.hidden_mmr,
-         visible_ranked_score = EXCLUDED.visible_ranked_score,
+         visible_ranked_score = 0,
          initial_csmp_tier = EXCLUDED.initial_csmp_tier,
          initial_seed_mmr = EXCLUDED.initial_seed_mmr,
          seed_applied_at = EXCLUDED.seed_applied_at,

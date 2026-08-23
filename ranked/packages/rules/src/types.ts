@@ -43,6 +43,9 @@ export interface TierBand {
   readonly maxExclusive: number | null;
   readonly mainPool: PoolNumber;
   readonly deathmatchPool: PoolNumber;
+  /** Promotion series played while moving from this tier to the next tier. */
+  readonly promotionGames: number;
+  readonly promotionWinsRequired: number;
 }
 
 export interface RankedRulesConfig {
@@ -62,6 +65,18 @@ export interface MmrPolicy {
   readonly regularKFactor: number;
   readonly expectedScoreDivisor: number;
   readonly deltaRounding: "NEAREST" | "FLOOR" | "CEIL";
+  readonly visibleScoreBaseChange: number;
+  readonly visibleScoreGapDivisor: number;
+  readonly visibleScoreMinFactor: number;
+  readonly visibleScoreMaxFactor: number;
+  readonly scoreMarginMaxBonus: number;
+  readonly clearMarginMaxBonus: number;
+  readonly outcomeDisagreementFactor: number;
+  readonly streakStep: number;
+  readonly streakMaxBonus: number;
+  readonly promotionScoreBonus: number;
+  readonly promotionFailurePenalty: number;
+  readonly demotionScorePenalty: number;
 }
 
 export interface TimeoutPolicy {

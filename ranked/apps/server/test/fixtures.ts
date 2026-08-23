@@ -10,14 +10,16 @@ import type { RankedConfigDocument } from "../src/config/ranked-config.document.
 import type { ServerEnvironment } from "../src/config/server-environment.js";
 
 const tierBands: readonly TierBand[] = [
-  { tier: "RED", minInclusive: 0, maxExclusive: 1_000, mainPool: 2, deathmatchPool: 2 },
-  { tier: "AQUA", minInclusive: 1_000, maxExclusive: 2_000, mainPool: 3, deathmatchPool: 3 },
+  { tier: "RED", minInclusive: 0, maxExclusive: 1_000, mainPool: 2, deathmatchPool: 2, promotionGames: 3, promotionWinsRequired: 2 },
+  { tier: "AQUA", minInclusive: 1_000, maxExclusive: 2_000, mainPool: 3, deathmatchPool: 3, promotionGames: 3, promotionWinsRequired: 2 },
   {
     tier: "BRONZE",
     minInclusive: 2_000,
     maxExclusive: 3_000,
     mainPool: 4,
     deathmatchPool: 4,
+    promotionGames: 5,
+    promotionWinsRequired: 3,
   },
   {
     tier: "SILVER",
@@ -25,8 +27,10 @@ const tierBands: readonly TierBand[] = [
     maxExclusive: 4_000,
     mainPool: 5,
     deathmatchPool: 5,
+    promotionGames: 5,
+    promotionWinsRequired: 3,
   },
-  { tier: "GOLD", minInclusive: 4_000, maxExclusive: null, mainPool: 6, deathmatchPool: 6 },
+  { tier: "GOLD", minInclusive: 4_000, maxExclusive: null, mainPool: 6, deathmatchPool: 6, promotionGames: 0, promotionWinsRequired: 0 },
 ];
 
 const operational = (generation: string): RankedOperationalConfig => ({
@@ -49,6 +53,18 @@ const operational = (generation: string): RankedOperationalConfig => ({
     regularKFactor: 32,
     expectedScoreDivisor: 400,
     deltaRounding: "NEAREST",
+    visibleScoreBaseChange: 25,
+    visibleScoreGapDivisor: 400,
+    visibleScoreMinFactor: 0.5,
+    visibleScoreMaxFactor: 1.5,
+    scoreMarginMaxBonus: 0.35,
+    clearMarginMaxBonus: 0.35,
+    outcomeDisagreementFactor: 0.6,
+    streakStep: 0.05,
+    streakMaxBonus: 0.25,
+    promotionScoreBonus: 50,
+    promotionFailurePenalty: 50,
+    demotionScorePenalty: 50,
   },
   timeouts: {
     sessionSeconds: 3_600,

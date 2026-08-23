@@ -24,6 +24,8 @@ char const* serverValue(BotDifficulty value) {
 char const* serverValue(BotScenario value) {
     switch (value) {
         case BotScenario::NormalMatch: return "NORMAL_MATCH";
+        case BotScenario::ForceWin: return "FORCE_WIN";
+        case BotScenario::ForceLose: return "FORCE_LOSE";
         case BotScenario::ForceBotOneClear: return "FORCE_BOT_1_CLEAR";
         case BotScenario::ForceBotThreeClears: return "FORCE_BOT_3_CLEARS";
         case BotScenario::TriggerLastAttempt: return "TRIGGER_LAST_ATTEMPT";
@@ -54,6 +56,8 @@ char const* displayName(BotDifficulty value) {
 char const* displayName(BotScenario value) {
     switch (value) {
         case BotScenario::NormalMatch: return "Normal Match";
+        case BotScenario::ForceWin: return "Force Win";
+        case BotScenario::ForceLose: return "Force Lose";
         case BotScenario::ForceBotOneClear: return "Force Bot 1 Clear";
         case BotScenario::ForceBotThreeClears: return "Force Bot 3 Clears";
         case BotScenario::TriggerLastAttempt: return "Trigger LAST ATTEMPT";

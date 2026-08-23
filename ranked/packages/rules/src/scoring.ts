@@ -26,11 +26,13 @@ export const scoreAttempt = (
       progressPercent,
     });
   }
-  if (cleared) return 200;
+  if (cleared) return 250;
   if (progressPercent < qualifyingPercent) return 0;
 
   const wholeProgress = Math.floor(progressPercent);
-  return wholeProgress >= 70 ? wholeProgress * 1.5 : wholeProgress;
+  if (wholeProgress >= 75) return wholeProgress * 2;
+  if (wholeProgress >= 50) return wholeProgress * 1.5;
+  return wholeProgress;
 };
 
 export const totalAttemptScore = (attempts: readonly ScoredAttempt[]): number =>

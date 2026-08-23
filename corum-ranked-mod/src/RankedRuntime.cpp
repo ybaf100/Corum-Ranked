@@ -130,6 +130,57 @@ std::optional<corum::ranked::RankedMapView> parseMap(matjson::Value const& value
     };
 }
 
+std::vector<std::string> parseRatingMarks(matjson::Value const& value) {
+    std::vector<std::string> marks;
+    auto const array = value.asArray();
+    if (array.isErr()) return marks;
+    for (auto const& item : array.unwrap()) {
+        auto const mark = item.asString().unwrapOr("");
+        if (mark == "WIN" || mark == "LOSS") marks.push_back(mark);
+    }
+    return marks;
+}
+
+corum::ranked::RankedProfileView parseRankedProfile(matjson::Value const& value) {
+    corum::ranked::RankedProfileView profile;
+    if (!value.isObject()) return profile;
+    profile.displayedTier = value["displayedTier"].asString().unwrapOr("UNRANKED");
+    auto const score = value["visibleRankedScore"].asInt();
+    if (score.isOk()) profile.visibleRankedScore = static_cast<int>(score.unwrap());
+    profile.placementGames = static_cast<int>(value["placementGames"].asInt().unwrapOr(0));
+    profile.placementGamesRequired = static_cast<int>(
+        value["placementGamesRequired"].asInt().unwrapOr(0)
+    );
+    profile.placementResults = parseRatingMarks(value["placementResults"]);
+    profile.resultStreak = static_cast<int>(value["resultStreak"].asInt().unwrapOr(0));
+    profile.demotionWarning = value["demotionWarning"].asBool().unwrapOr(false);
+    auto const promotion = value["promotion"];
+    if (promotion.isObject()) {
+        profile.promotion.active = true;
+        profile.promotion.sourceTier = promotion["sourceTier"].asString().unwrapOr("");
+        profile.promotion.targetTier = promotion["targetTier"].asString().unwrapOr("");
+        profile.promotion.cutoff = static_cast<int>(promotion["cutoff"].asInt().unwrapOr(0));
+        profile.promotion.gamesRequired = static_cast<int>(promotion["gamesRequired"].asInt().unwrapOr(0));
+        profile.promotion.winsRequired = static_cast<int>(promotion["winsRequired"].asInt().unwrapOr(0));
+        profile.promotion.winsRemaining = static_cast<int>(promotion["winsRemaining"].asInt().unwrapOr(
+            profile.promotion.winsRequired
+        ));
+        profile.promotion.results = parseRatingMarks(promotion["results"]);
+    }
+    return profile;
+}
+
+corum::ranked::RatingEventView parseRatingEvent(matjson::Value const& value) {
+    if (!value.isObject()) return {};
+    return {
+        .placementCompleted = value["placementCompleted"].asBool().unwrapOr(false),
+        .promotionStarted = value["promotionStarted"].asBool().unwrapOr(false),
+        .promotionSucceeded = value["promotionSucceeded"].asBool().unwrapOr(false),
+        .promotionFailed = value["promotionFailed"].asBool().unwrapOr(false),
+        .demoted = value["demoted"].asBool().unwrapOr(false),
+    };
+}
+
 corum::ranked::RoundSummaryView parseRoundSummary(matjson::Value const& value) {
     return {
         .roundNumber = static_cast<int>(value["roundNumber"].asInt().unwrapOr(0)),
@@ -535,12 +586,16 @@ void RankedRuntime::createSession() {
             }
             observeServerNow(root);
             auto const player = root["player"];
-            m_view.profileTier = player["displayedTier"].asString().unwrapOr("UNRANKED");
-            m_view.profileScore = static_cast<int>(player["visibleRankedScore"].asInt().unwrapOr(0));
-            m_view.placementGames = static_cast<int>(player["placementGames"].asInt().unwrapOr(0));
-            m_view.placementGamesRequired = static_cast<int>(
-                player["placementGamesRequired"].asInt().unwrapOr(0)
-            );
+            auto const profile = parseRankedProfile(player);
+            m_view.profileTier = profile.displayedTier;
+            m_view.profileScoreVisible = profile.visibleRankedScore.has_value();
+            m_view.profileScore = profile.visibleRankedScore.value_or(0);
+            m_view.placementGames = profile.placementGames;
+            m_view.placementGamesRequired = profile.placementGamesRequired;
+            m_view.placementResults = profile.placementResults;
+            m_view.resultStreak = profile.resultStreak;
+            m_view.promotion = profile.promotion;
+            m_view.demotionWarning = profile.demotionWarning;
             setStage(RuntimeStage::Ready, "Ranked session ready. Join the queue when prepared.");
         }
     );
@@ -680,7 +735,7 @@ void RankedRuntime::pollQueue() {
             if (status != "MATCHED") {
                 auto const range = root["searchRange"].asInt().unwrapOr(0);
                 m_view.status = range > 0
-                    ? fmt::format("Searching for an opponent (MMR range +/-{})...", range)
+                    ? fmt::format("Searching for an opponent (rating range +/-{})...", range)
                     : "Searching for an opponent...";
                 m_view.error.clear();
                 ++m_view.revision;
@@ -750,8 +805,12 @@ void RankedRuntime::parseMatchState(matjson::Value const& root) {
     m_view.match.playerBName = root["players"]["B"]["gdUsername"].asString().unwrapOr("Player B");
     m_view.match.playerATier = root["players"]["A"]["displayedTier"].asString().unwrapOr("UNRANKED");
     m_view.match.playerBTier = root["players"]["B"]["displayedTier"].asString().unwrapOr("UNRANKED");
-    m_view.match.playerAScore = static_cast<int>(root["players"]["A"]["visibleRankedScore"].asInt().unwrapOr(0));
-    m_view.match.playerBScore = static_cast<int>(root["players"]["B"]["visibleRankedScore"].asInt().unwrapOr(0));
+    m_view.match.playerAProfile = parseRankedProfile(root["players"]["A"]);
+    m_view.match.playerBProfile = parseRankedProfile(root["players"]["B"]);
+    m_view.match.playerAScoreVisible = m_view.match.playerAProfile.visibleRankedScore.has_value();
+    m_view.match.playerBScoreVisible = m_view.match.playerBProfile.visibleRankedScore.has_value();
+    m_view.match.playerAScore = m_view.match.playerAProfile.visibleRankedScore.value_or(0);
+    m_view.match.playerBScore = m_view.match.playerBProfile.visibleRankedScore.value_or(0);
     m_view.match.readyA = root["ready"]["A"].asBool().unwrapOr(false);
     m_view.match.readyB = root["ready"]["B"].asBool().unwrapOr(false);
     m_view.match.ownBanConfirmed = root["banStatus"]["confirmed"].asBool().unwrapOr(false);
@@ -889,36 +948,50 @@ void RankedRuntime::parseMatchState(matjson::Value const& root) {
 
     auto const result = root["result"];
     m_view.match.winnerSide = result["winnerSide"].asString().unwrapOr("");
-    m_view.match.ownMmrDelta.reset();
-    m_view.match.ownRatingAfter.reset();
-    m_view.match.mmrDeltaA.reset();
-    m_view.match.mmrDeltaB.reset();
-    m_view.match.ratingAfterA.reset();
-    m_view.match.ratingAfterB.reset();
+    m_view.match.ownRankedScoreDelta.reset();
+    m_view.match.ownRankedScoreAfter.reset();
+    m_view.match.rankedScoreDeltaA.reset();
+    m_view.match.rankedScoreDeltaB.reset();
+    m_view.match.rankedScoreAfterA.reset();
+    m_view.match.rankedScoreAfterB.reset();
     m_view.match.profileBeforeTierA.clear();
     m_view.match.profileBeforeTierB.clear();
     m_view.match.profileAfterTierA.clear();
     m_view.match.profileAfterTierB.clear();
     m_view.match.profileAfterScoreA.reset();
     m_view.match.profileAfterScoreB.reset();
+    m_view.match.profileBeforeA = {};
+    m_view.match.profileBeforeB = {};
+    m_view.match.profileAfterA = {};
+    m_view.match.profileAfterB = {};
+    m_view.match.ratingEventA = {};
+    m_view.match.ratingEventB = {};
     if (result.isObject() && !m_view.match.side.empty()) {
-        auto const deltaA = result["mmrDelta"]["A"].asInt();
-        auto const deltaB = result["mmrDelta"]["B"].asInt();
-        auto const afterA = result["ratingAfter"]["A"].asInt();
-        auto const afterB = result["ratingAfter"]["B"].asInt();
-        if (deltaA.isOk()) m_view.match.mmrDeltaA = static_cast<int>(deltaA.unwrap());
-        if (deltaB.isOk()) m_view.match.mmrDeltaB = static_cast<int>(deltaB.unwrap());
-        if (afterA.isOk()) m_view.match.ratingAfterA = static_cast<int>(afterA.unwrap());
-        if (afterB.isOk()) m_view.match.ratingAfterB = static_cast<int>(afterB.unwrap());
-        m_view.match.ownMmrDelta = m_view.match.side == "A" ? m_view.match.mmrDeltaA : m_view.match.mmrDeltaB;
-        m_view.match.ownRatingAfter = m_view.match.side == "A" ? m_view.match.ratingAfterA : m_view.match.ratingAfterB;
+        auto const deltaA = result["rankedScoreDelta"]["A"].asInt();
+        auto const deltaB = result["rankedScoreDelta"]["B"].asInt();
+        auto const afterA = result["profileAfter"]["A"]["visibleRankedScore"].asInt();
+        auto const afterB = result["profileAfter"]["B"]["visibleRankedScore"].asInt();
+        if (deltaA.isOk()) m_view.match.rankedScoreDeltaA = static_cast<int>(deltaA.unwrap());
+        if (deltaB.isOk()) m_view.match.rankedScoreDeltaB = static_cast<int>(deltaB.unwrap());
+        if (afterA.isOk()) m_view.match.rankedScoreAfterA = static_cast<int>(afterA.unwrap());
+        if (afterB.isOk()) m_view.match.rankedScoreAfterB = static_cast<int>(afterB.unwrap());
+        m_view.match.ownRankedScoreDelta = m_view.match.side == "A"
+            ? m_view.match.rankedScoreDeltaA
+            : m_view.match.rankedScoreDeltaB;
+        m_view.match.ownRankedScoreAfter = m_view.match.side == "A"
+            ? m_view.match.rankedScoreAfterA
+            : m_view.match.rankedScoreAfterB;
         auto const profileBefore = result["profileBefore"];
         if (profileBefore.isObject()) {
+            m_view.match.profileBeforeA = parseRankedProfile(profileBefore["A"]);
+            m_view.match.profileBeforeB = parseRankedProfile(profileBefore["B"]);
             m_view.match.profileBeforeTierA = profileBefore["A"]["displayedTier"].asString().unwrapOr("");
             m_view.match.profileBeforeTierB = profileBefore["B"]["displayedTier"].asString().unwrapOr("");
         }
         auto const profileAfter = result["profileAfter"];
         if (profileAfter.isObject()) {
+            m_view.match.profileAfterA = parseRankedProfile(profileAfter["A"]);
+            m_view.match.profileAfterB = parseRankedProfile(profileAfter["B"]);
             m_view.match.profileAfterTierA = profileAfter["A"]["displayedTier"].asString().unwrapOr("");
             m_view.match.profileAfterTierB = profileAfter["B"]["displayedTier"].asString().unwrapOr("");
             auto const scoreA = profileAfter["A"]["visibleRankedScore"].asInt();
@@ -926,6 +999,8 @@ void RankedRuntime::parseMatchState(matjson::Value const& root) {
             if (scoreA.isOk()) m_view.match.profileAfterScoreA = static_cast<int>(scoreA.unwrap());
             if (scoreB.isOk()) m_view.match.profileAfterScoreB = static_cast<int>(scoreB.unwrap());
         }
+        m_view.match.ratingEventA = parseRatingEvent(result["events"]["A"]);
+        m_view.match.ratingEventB = parseRatingEvent(result["events"]["B"]);
     }
 
     if (!stateAllowsActiveAttempt(m_view.match.state)) {
@@ -1170,11 +1245,16 @@ void RankedRuntime::dismissMatch() {
     m_progressBusy = false;
     if (m_view.match.state == "MATCH_RESULT") {
         auto const ownSide = m_view.match.side;
-        auto const& tier = ownSide == "A" ? m_view.match.profileAfterTierA : m_view.match.profileAfterTierB;
-        auto const score = ownSide == "A" ? m_view.match.profileAfterScoreA : m_view.match.profileAfterScoreB;
-        if (!tier.empty()) m_view.profileTier = tier;
-        if (score) m_view.profileScore = *score;
-        ++m_view.placementGames;
+        auto const& profile = ownSide == "A" ? m_view.match.profileAfterA : m_view.match.profileAfterB;
+        m_view.profileTier = profile.displayedTier;
+        m_view.profileScoreVisible = profile.visibleRankedScore.has_value();
+        m_view.profileScore = profile.visibleRankedScore.value_or(0);
+        m_view.placementGames = profile.placementGames;
+        m_view.placementGamesRequired = profile.placementGamesRequired;
+        m_view.placementResults = profile.placementResults;
+        m_view.resultStreak = profile.resultStreak;
+        m_view.promotion = profile.promotion;
+        m_view.demotionWarning = profile.demotionWarning;
     }
     m_matchToken.clear();
     m_attemptId.clear();
@@ -1253,10 +1333,10 @@ void RankedRuntime::fetchHistory() {
                     history.winnerSide = item["winnerSide"].asString().unwrapOr("");
                     history.roundWinsA = static_cast<int>(item["series"]["roundWins"]["A"].asInt().unwrapOr(0));
                     history.roundWinsB = static_cast<int>(item["series"]["roundWins"]["B"].asInt().unwrapOr(0));
-                    auto const delta = item["mmrDelta"][history.side].asInt();
-                    auto const rating = item["ratingAfter"][history.side].asInt();
-                    if (delta.isOk()) history.ownMmrDelta = static_cast<int>(delta.unwrap());
-                    if (rating.isOk()) history.ownRatingAfter = static_cast<int>(rating.unwrap());
+                    auto const delta = item["rankedScoreDelta"][history.side].asInt();
+                    auto const rating = item["profileAfter"][history.side]["visibleRankedScore"].asInt();
+                    if (delta.isOk()) history.ownRankedScoreDelta = static_cast<int>(delta.unwrap());
+                    if (rating.isOk()) history.ownRankedScoreAfter = static_cast<int>(rating.unwrap());
                     auto const rounds = item["rounds"].asArray();
                     if (rounds.isOk()) {
                         for (auto const& round : rounds.unwrap()) {
@@ -1304,11 +1384,24 @@ int RankedRuntime::currentLevelId() const {
 bool RankedRuntime::armCurrentLevelForGameplay() {
     if (
         m_view.stage != RuntimeStage::Matched || !m_view.match.currentMap ||
-        m_view.match.spectatorActive || !attemptStartWindowOpen()
+        m_view.match.spectatorActive
     ) return false;
+    auto const contextKey = currentAttemptContextKey();
+    if (
+        m_gameplayStartEligible && m_gameplayMap &&
+        m_gameplayMatchId == m_view.match.matchId &&
+        m_gameplayMap->levelId == m_view.match.currentMap->levelId &&
+        m_gameplayStartContextKey == contextKey
+    ) {
+        // A LevelInfo watchdog retry is still the same visual attempt launch.
+        // Preserve its original authoritative start timestamp instead of
+        // repeatedly re-arming and moving the accepted start time forward.
+        return true;
+    }
+    if (!attemptStartWindowOpen()) return false;
     m_gameplayMap = *m_view.match.currentMap;
     m_gameplayMatchId = m_view.match.matchId;
-    m_gameplayStartContextKey = currentAttemptContextKey();
+    m_gameplayStartContextKey = contextKey;
     m_gameplayStartedAt = iso8601FromMillis(m_serverClock.serverNowMillis(localNowMillis()));
     m_gameplayStartEligible = true;
     log::debug(
@@ -1446,9 +1539,9 @@ double RankedRuntime::localDisplayScore(double progressPercent, std::optional<do
     auto const contextKey = currentAttemptContextKey();
     auto const optimisticBase = committed + optimisticScoreForContext(contextKey);
 
-    // Every Clear is worth exactly 200 under the current rules. Keep that
+    // Every Clear is worth exactly 250 under the current rules. Keep that
     // invariant visible even while attempt-end/state acknowledgements are queued.
-    auto const clearFloor = static_cast<double>(localDisplayClears()) * 200.0;
+    auto const clearFloor = static_cast<double>(localDisplayClears()) * 250.0;
 
     if (progressPercent < 0.0 || m_view.match.spectatorActive) {
         return std::max({serverDisplay, optimisticBase, clearFloor});

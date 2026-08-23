@@ -7,8 +7,8 @@ import {
   type TierBand,
 } from "./types.js";
 
-export const DOCUMENT_RULES_V0_4: RankedRulesConfig = Object.freeze({
-  rulesVersion: "corum-ranked-v0.4",
+export const DOCUMENT_RULES_V0_5: RankedRulesConfig = Object.freeze({
+  rulesVersion: "corum-ranked-v0.5",
   roundSeconds: 300,
   clearTarget: 3,
   finalAttemptWindowSeconds: 10,
@@ -16,6 +16,9 @@ export const DOCUMENT_RULES_V0_4: RankedRulesConfig = Object.freeze({
   banSeconds: 10,
   bestOf: 3,
 });
+
+/** @deprecated Kept as a source-compatible alias for older tests/tools. */
+export const DOCUMENT_RULES_V0_4 = DOCUMENT_RULES_V0_5;
 
 export interface ConfigValidationResult {
   readonly valid: boolean;
@@ -25,19 +28,19 @@ export interface ConfigValidationResult {
 
 const validateDocumentRules = (rules: RankedRulesConfig, errors: string[]): void => {
   if (!rules.rulesVersion.trim()) errors.push("rules.rulesVersion is required");
-  if (rules.rulesVersion !== "corum-ranked-v0.4") {
-    errors.push("rules.rulesVersion must be corum-ranked-v0.4");
+  if (rules.rulesVersion !== "corum-ranked-v0.5") {
+    errors.push("rules.rulesVersion must be corum-ranked-v0.5");
   }
-  if (rules.roundSeconds !== 300) errors.push("rules.roundSeconds must be 300 for v0.4");
-  if (rules.clearTarget !== 3) errors.push("rules.clearTarget must be 3 for v0.4");
+  if (rules.roundSeconds !== 300) errors.push("rules.roundSeconds must be 300 for v0.5");
+  if (rules.clearTarget !== 3) errors.push("rules.clearTarget must be 3 for v0.5");
   if (rules.finalAttemptWindowSeconds !== 10) {
-    errors.push("rules.finalAttemptWindowSeconds must be 10 for v0.4");
+    errors.push("rules.finalAttemptWindowSeconds must be 10 for v0.5");
   }
   if (rules.lastAttemptWindowSeconds !== 10) {
-    errors.push("rules.lastAttemptWindowSeconds must be 10 for v0.4");
+    errors.push("rules.lastAttemptWindowSeconds must be 10 for v0.5");
   }
-  if (rules.banSeconds !== 10) errors.push("rules.banSeconds must be 10 for v0.4");
-  if (rules.bestOf !== 3) errors.push("rules.bestOf must be 3 for v0.4");
+  if (rules.banSeconds !== 10) errors.push("rules.banSeconds must be 10 for v0.5");
+  if (rules.bestOf !== 3) errors.push("rules.bestOf must be 3 for v0.5");
 };
 
 export const validateTierBands = (bands: readonly TierBand[]): readonly string[] => {
@@ -72,6 +75,26 @@ export const validateTierBands = (bands: readonly TierBand[]): readonly string[]
   if (finalBand && finalBand.maxExclusive !== null) {
     errors.push("the highest tier must have maxExclusive = null");
   }
+  for (const [index, band] of sorted.entries()) {
+    const highest = index === sorted.length - 1;
+    if (!Number.isInteger(band.promotionGames) || band.promotionGames < 0) {
+      errors.push(`${band.tier}.promotionGames must be a non-negative integer`);
+    }
+    if (!Number.isInteger(band.promotionWinsRequired) || band.promotionWinsRequired < 0) {
+      errors.push(`${band.tier}.promotionWinsRequired must be a non-negative integer`);
+    }
+    if (highest) {
+      if (band.promotionGames !== 0 || band.promotionWinsRequired !== 0) {
+        errors.push(`${band.tier} is the highest tier and cannot configure a promotion series`);
+      }
+    } else if (
+      band.promotionGames < 1 ||
+      band.promotionWinsRequired < 1 ||
+      band.promotionWinsRequired > band.promotionGames
+    ) {
+      errors.push(`${band.tier} promotion series must require 1..promotionGames wins`);
+    }
+  }
   return errors;
 };
 
@@ -101,6 +124,23 @@ export const validateOperationalConfig = (
     if (!(policy.regularKFactor > 0)) errors.push("mmrPolicy.regularKFactor must be positive");
     if (!(policy.expectedScoreDivisor > 0)) {
       errors.push("mmrPolicy.expectedScoreDivisor must be positive");
+    }
+    if (!(policy.visibleScoreBaseChange > 0)) errors.push("mmrPolicy.visibleScoreBaseChange must be positive");
+    if (!(policy.visibleScoreGapDivisor > 0)) errors.push("mmrPolicy.visibleScoreGapDivisor must be positive");
+    if (!(policy.visibleScoreMinFactor > 0)) errors.push("mmrPolicy.visibleScoreMinFactor must be positive");
+    if (policy.visibleScoreMaxFactor < policy.visibleScoreMinFactor) {
+      errors.push("mmrPolicy.visibleScoreMaxFactor must cover visibleScoreMinFactor");
+    }
+    for (const key of ["scoreMarginMaxBonus", "clearMarginMaxBonus", "streakStep", "streakMaxBonus"] as const) {
+      if (policy[key] < 0) errors.push(`mmrPolicy.${key} must not be negative`);
+    }
+    if (!(policy.outcomeDisagreementFactor > 0 && policy.outcomeDisagreementFactor <= 1)) {
+      errors.push("mmrPolicy.outcomeDisagreementFactor must be in (0, 1]");
+    }
+    for (const key of ["promotionScoreBonus", "promotionFailurePenalty", "demotionScorePenalty"] as const) {
+      if (!Number.isInteger(policy[key]) || policy[key] < 0) {
+        errors.push(`mmrPolicy.${key} must be a non-negative integer`);
+      }
     }
   }
 

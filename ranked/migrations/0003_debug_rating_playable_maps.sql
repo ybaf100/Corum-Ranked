@@ -39,8 +39,22 @@ WHERE attempt.deathmatch_id = deathmatch.id
 ALTER TABLE ranked_deathmatch_attempts
     ALTER COLUMN played_level_id SET NOT NULL;
 
-CREATE OR REPLACE VIEW ranked_public_match_history AS
-SELECT *
+DROP VIEW IF EXISTS ranked_public_match_history;
+CREATE VIEW ranked_public_match_history AS
+SELECT
+    id,
+    player_a_id,
+    player_b_id,
+    effective_tier,
+    series_state,
+    state,
+    winner_id,
+    rules_version,
+    match_type,
+    cancellation_reason,
+    created_at,
+    started_at,
+    finished_at
 FROM ranked_matches;
 
 CREATE OR REPLACE VIEW ranked_leaderboard AS

@@ -1,3 +1,15 @@
+# v0.5.0-beta.1
+
+- Split visible LP from hidden MMR. Placement begins at hidden LP 0, records `O/X` outcomes, and reveals a cutoff-safe final placement only on the last placement result.
+- Added configurable promotion series, cutoff-1 entry, cutoff+50 success, cutoff-50 failure, tier-floor protection, demotion warnings, and demotion/re-promotion handling.
+- Added score/clear-margin and streak-weighted hidden MMR changes, with reduced movement when the series winner trails in total Score or Clears.
+- Added placement/promotion tracks, green `PLACED`, LP transition animation, promotion flames, demotion warnings, and 2x+ win/loss streak labels to the lobby and result UI.
+- Updated attempt scoring to x1.5 from 50%, x2 from 75%, and a fixed 250 points at 100% Clear.
+- Starts Match/Result music immediately while retaining Match music through the LevelInfo countdown until the real PlayLayer starts.
+- Fixed the `STARTING -> FAILED` loop by resolving the actual vanilla Play sprite instead of activating the first menu child, preserving the original arm timestamp and bounding automatic retries.
+- Added development-only Force Win/Force Lose and changed `CORUM_RANKED_DEBUG_BOT_MATCH` to default OFF for official packages.
+- Added PostgreSQL migration `0005_v050_rating_system.sql`, Apps Script promotion/LP/MMR policy fields, `corum-ranked-v0.5`, and the exact `v0.5.0-beta.1` client/server gate.
+
 # v0.4.0-alpha.40
 
 - Moved the authoritative Ranked map catalog to `sheet2` by default while preserving Corum Integration's independent `sheet1` routing; `RANKED_MAPS_SHEET_NAME` can override only the Ranked tab.

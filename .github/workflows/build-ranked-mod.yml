@@ -82,6 +82,11 @@ jobs:
             corum-ranked-mod/src/domain/ServerClock.cpp \
             -o /tmp/corum-ranked-domain-test
           /tmp/corum-ranked-domain-test
+          g++ -std=c++23 -Wall -Wextra -Wpedantic -Werror \
+            corum-ranked-mod/tests/DebugBotDomainTest.cpp \
+            corum-ranked-mod/src/debug/DebugBotConfig.cpp \
+            -o /tmp/corum-ranked-debug-bot-domain-test
+          /tmp/corum-ranked-debug-bot-domain-test
 
   build:
     name: ${{ matrix.config.name }} ${{ needs.metadata.outputs.version }}

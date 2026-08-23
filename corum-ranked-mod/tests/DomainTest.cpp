@@ -128,11 +128,14 @@ void scoringTests() {
     assert(normalizeAttemptProgress(std::numeric_limits<double>::quiet_NaN()) == 0.0);
     assert(calculateAttemptScore(19.99, false, 20.0) == 0.0);
     assert(calculateAttemptScore(20.0, false, 20.0) == 20.0);
-    assert(calculateAttemptScore(69.99, false, 20.0) == 69.0);
+    assert(calculateAttemptScore(49.99, false, 20.0) == 49.0);
+    assert(calculateAttemptScore(50.0, false, 20.0) == 75.0);
+    assert(calculateAttemptScore(69.99, false, 20.0) == 103.5);
     assert(calculateAttemptScore(70.0, false, 20.0) == 105.0);
-    assert(calculateAttemptScore(79.99, false, 20.0) == 118.5);
-    assert(calculateAttemptScore(99.99, false, 20.0) == 148.5);
-    assert(calculateAttemptScore(100.0, true, 20.1) == 200.0);
+    assert(calculateAttemptScore(74.99, false, 20.0) == 111.0);
+    assert(calculateAttemptScore(75.0, false, 20.0) == 150.0);
+    assert(calculateAttemptScore(99.99, false, 20.0) == 198.0);
+    assert(calculateAttemptScore(100.0, true, 20.1) == 250.0);
 }
 
 void clockTests() {

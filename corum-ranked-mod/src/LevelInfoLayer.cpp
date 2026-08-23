@@ -196,10 +196,30 @@ void unlockRankedPrepareInteraction(CCNode* root) {
     setMenuItemsEnabled(root, true);
 }
 
-CCMenuItem* vanillaPlayButton(CCMenu* menu) {
+bool nodeContains(CCNode* root, CCNode* target) {
+    if (!root || !target) return false;
+    if (root == target) return true;
+    for (auto* child : root->getChildrenExt()) {
+        if (nodeContains(child, target)) return true;
+    }
+    return false;
+}
+
+CCMenuItem* vanillaPlayButton(CCMenu* menu, CCNode* playSprite) {
     if (!menu) return nullptr;
+
+    // Node IDs are the most explicit route when geode.node-ids (or another
+    // compatible ID provider) is present. They are not guaranteed on every
+    // supported client, so the native m_playSprite identity check below is the
+    // cross-platform source of truth.
+    if (auto* identified = typeinfo_cast<CCMenuItem*>(menu->getChildByID("play-button"))) {
+        return identified;
+    }
+
     for (auto* child : menu->getChildrenExt()) {
-        if (auto* item = typeinfo_cast<CCMenuItem*>(child)) return item;
+        auto* item = typeinfo_cast<CCMenuItemSprite*>(child);
+        if (!item) continue;
+        if (nodeContains(item->getNormalImage(), playSprite)) return item;
     }
     return nullptr;
 }
@@ -269,6 +289,9 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         // never be invoked twice for the same Ranked launch.
         bool gameplayLaunchStarted = false;
         bool vanillaPlayActivation = false;
+        bool manualPlayFallback = false;
+        int gameplayLaunchAttempts = 0;
+        SteadyClock::time_point nextGameplayLaunchAt {};
         bool songGateActive = false;
         SteadyClock::time_point lastReadySubmitAt {};
         bool songGateStartingPlay = false;
@@ -369,6 +392,13 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         LevelInfoLayer::downloadLevel();
     }
 
+    void enableManualRankedPlay() {
+        if (!m_playBtnMenu) return;
+        m_playBtnMenu->setEnabled(true);
+        m_playBtnMenu->setTouchEnabled(true);
+        setMenuItemsEnabled(m_playBtnMenu, true);
+    }
+
     void updateSongDownloadGate(float) {
         if (!m_fields->songGateActive) return;
         auto& runtime = corum::ranked::RankedRuntime::get();
@@ -388,6 +418,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         // payload arrives. Re-apply the interaction lock every tick so the newly
         // created vanilla song control is the only clickable UI.
         lockInteractionToSong(this, m_songWidget);
+        if (m_fields->manualPlayFallback) enableManualRankedPlay();
 
         if (!levelReady) {
             if (m_fields->gateStatus) {
@@ -500,6 +531,8 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
             if (
                 !readyForStart ||
                 !runtime.canEnterCurrentLevel() ||
+                m_fields->manualPlayFallback ||
+                now < m_fields->nextGameplayLaunchAt ||
                 m_fields->songGateStartingPlay ||
                 m_fields->gameplayLaunchStarted
             ) return;
@@ -630,11 +663,12 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         if (!runtime.armCurrentLevelForGameplay()) return false;
 
         m_fields->gameplayLaunchStarted = true;
+        if (!sender) ++m_fields->gameplayLaunchAttempts;
         m_fields->autoPlayScheduled = false;
         unschedule(schedule_selector(CorumRankedLevelInfoLayer::autoPlayRanked));
         scheduleOnce(
             schedule_selector(CorumRankedLevelInfoLayer::verifyGameplayLaunch),
-            1.0f
+            2.5f
         );
 
         if (sender) {
@@ -654,9 +688,28 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
 
     void activateRankedPlayButton(float) {
         if (!m_fields->gameplayLaunchStarted || m_fields->returningToRanked) return;
-        auto* playButton = vanillaPlayButton(m_playBtnMenu);
+        auto* playButton = vanillaPlayButton(m_playBtnMenu, m_playSprite);
+
+        // Some platform/mod layouts add controls to m_playBtnMenu without node
+        // IDs or replace the vanilla item after LevelInfoLayer::init. Never fall
+        // back to "the first CCMenuItem": that was the alpha.40 STARTING/FAILED
+        // loop. A temporary menu item invokes this exact layer's onPlay selector,
+        // which then forwards to vanilla LevelInfoLayer::onPlay through the
+        // one-shot bypass below. No PlayLayer scene is built directly.
+        CCMenuItemSpriteExtra* selectorProxy = nullptr;
         if (!playButton) {
-            log::error("Ranked could not find the vanilla LevelInfo Play button");
+            auto* sprite = CCSprite::createWithSpriteFrameName("GJ_playBtn_001.png");
+            if (sprite) {
+                selectorProxy = CCMenuItemSpriteExtra::create(
+                    sprite,
+                    this,
+                    menu_selector(CorumRankedLevelInfoLayer::onPlay)
+                );
+                playButton = selectorProxy;
+            }
+        }
+        if (!playButton) {
+            log::error("Ranked could not resolve or proxy the LevelInfo Play button");
             verifyGameplayLaunch(0.0f);
             return;
         }
@@ -667,9 +720,10 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         playButton->setEnabled(true);
         m_fields->vanillaPlayActivation = true;
         log::info(
-            "Activating vanilla Ranked Play button: match={} level={}",
+            "Activating Ranked Play selector: match={} level={} source={}",
             corum::ranked::RankedRuntime::get().view().match.matchId,
-            static_cast<int>(m_level->m_levelID)
+            static_cast<int>(m_level->m_levelID),
+            selectorProxy ? "selector-proxy" : "native-play-sprite"
         );
         // The selector can synchronously begin a scene transition and run
         // onExit. Keep this layer alive until the activation callback returns so
@@ -683,10 +737,28 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
     void verifyGameplayLaunch(float) {
         if (!m_fields->gameplayLaunchStarted) return;
 
-        log::warn("Vanilla Ranked Play button did not leave LevelInfo; releasing launch latch for retry");
+        log::warn(
+            "Ranked Play selector did not leave LevelInfo (attempt {}/3)",
+            m_fields->gameplayLaunchAttempts
+        );
         m_fields->gameplayLaunchStarted = false;
         m_fields->vanillaPlayActivation = false;
         m_fields->songGateStartingPlay = false;
+
+        if (m_fields->gameplayLaunchAttempts >= 3) {
+            // Stop the automatic loop. Leave the real page interactive so a
+            // player can use the visible Play button if an unknown layout has a
+            // platform-specific transition requirement.
+            m_fields->manualPlayFallback = true;
+            enableManualRankedPlay();
+            if (m_fields->gateCountdown) {
+                m_fields->gateCountdown->setString("AUTO PLAY FAILED - TAP PLAY");
+                m_fields->gateCountdown->setColor({255, 92, 92});
+            }
+            return;
+        }
+
+        m_fields->nextGameplayLaunchAt = SteadyClock::now() + std::chrono::milliseconds(450);
         if (m_fields->gateCountdown) {
             m_fields->gateCountdown->setString("PLAY FAILED - RETRYING");
             m_fields->gateCountdown->setColor({255, 92, 92});
@@ -699,7 +771,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
                 rankedPlayingState(runtime.view().match.state) &&
                 runtime.canEnterCurrentLevel()
             ) {
-                scheduleAutoPlay(0.10f);
+                scheduleAutoPlay(0.45f);
             } else {
                 returnToRanked(0.0f);
             }
@@ -740,6 +812,16 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         auto& runtime = corum::ranked::RankedRuntime::get();
         if (m_fields->vanillaPlayActivation) {
             LevelInfoLayer::onPlay(sender);
+            return;
+        }
+        if (
+            m_fields->manualPlayFallback &&
+            !m_fields->gameplayLaunchStarted &&
+            isCurrentRankedLevel(m_level) &&
+            rankedPlayingState(runtime.view().match.state)
+        ) {
+            m_fields->manualPlayFallback = false;
+            if (!launchRankedGameplay(sender)) m_fields->manualPlayFallback = true;
             return;
         }
         if (m_fields->songGateActive || m_fields->gameplayLaunchStarted) {

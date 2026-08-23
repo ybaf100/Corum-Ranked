@@ -17,8 +17,10 @@ namespace {
 
 constexpr char kDebugPassword[] = "2008";
 constexpr std::array<char const*, 3> kDifficulties {"EASY", "NORMAL", "HARD"};
-constexpr std::array<char const*, 7> kScenarios {
+constexpr std::array<char const*, 9> kScenarios {
     "NORMAL MATCH",
+    "FORCE WIN",
+    "FORCE LOSE",
     "FORCE BOT 1 CLEAR",
     "FORCE BOT 3 CLEARS",
     "TRIGGER LAST ATTEMPT",
@@ -26,8 +28,10 @@ constexpr std::array<char const*, 7> kScenarios {
     "TRIGGER ROUND 3",
     "TRIGGER DEATHMATCH",
 };
-constexpr std::array<char const*, 7> kScenarioValues {
+constexpr std::array<char const*, 9> kScenarioValues {
     "NORMAL_MATCH",
+    "FORCE_WIN",
+    "FORCE_LOSE",
     "FORCE_BOT_1_CLEAR",
     "FORCE_BOT_3_CLEARS",
     "TRIGGER_LAST_ATTEMPT",

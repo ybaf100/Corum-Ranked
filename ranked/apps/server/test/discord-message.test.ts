@@ -17,8 +17,8 @@ const basePayload = {
   result: "A",
   roundWins: { A: 1, B: 0 },
   winnerSide: "A",
-  mmrDelta: { A: 18, B: -18 },
-  ratingAfter: { A: 1518, B: 1482 },
+  rankedScoreDelta: { A: 18, B: -18 },
+  rankedScoreAfter: { A: 1518, B: 1482 },
   roundResults: ["DRAW", "A"],
   sequence: 1,
   scoreA: 250,
@@ -44,5 +44,25 @@ describe("Discord Ranked relay formatting", () => {
     expect(message).toContain("10s attempt-start window");
     expect(message).toContain("Beta");
   });
-});
 
+  it("publishes visible LP rather than hidden MMR at match result", () => {
+    const message = formatDiscordRelayMessage({ eventType: "MATCH_RESULT", payload: basePayload });
+    expect(message).toContain("+18 → 1518 LP");
+    expect(message).toContain("-18 → 1482 LP");
+    expect(message).not.toContain("MMR");
+  });
+
+  it("shows placement marks without a placeholder LP value", () => {
+    const message = formatDiscordRelayMessage({
+      eventType: "MATCH_RESULT",
+      payload: {
+        ...basePayload,
+        rankedScoreDelta: { A: null, B: -18 },
+        rankedScoreAfter: { A: null, B: 1482 },
+        placementResults: { A: ["WIN", "LOSS"], B: [] },
+      },
+    });
+    expect(message).toContain("Alpha UNRANKED - OX");
+    expect(message).not.toContain("Alpha +0 → 0 LP");
+  });
+});

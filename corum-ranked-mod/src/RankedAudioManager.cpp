@@ -573,30 +573,28 @@ void RankedAudioManager::requestAudioSwitch() {
     m_playbackVerifyPending = false;
     m_playbackRetryCount = 0;
 
+    // Match-found and result cues are competitive feedback, so a previous
+    // track's fade must never delay their first audible frame. startDesiredAudio
+    // owns the FMOD channel swap and stops the previous/vanilla music before
+    // unpausing the new stream in this same update tick.
+    if (desired) {
+        m_switchPending = false;
+        stopOwnedAudio();
+        startDesiredAudio();
+        return;
+    }
+
     if (m_rankedChannel) {
         m_switchPending = true;
         beginOwnedFadeOut(fadeOut);
-        if (!m_ownedFadeOutPending) {
-            m_switchPending = false;
-            if (desired) startDesiredAudio();
-        }
+        if (!m_ownedFadeOutPending) m_switchPending = false;
         return;
     }
 
     // No Ranked-owned channel exists, so this is normally the vanilla GD menu
     // track. Let GD fade it, then hard-stop it immediately before starting the
     // independent Ranked FMOD stream.
-    if (auto* engine = FMODAudioEngine::sharedEngine(); engine && desired && fadeOut > 0.0) {
-        engine->fadeOutMusic(static_cast<float>(fadeOut), 0);
-        m_switchPending = true;
-        m_switchAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(
-            static_cast<int>(std::round(fadeOut * 1000.0))
-        );
-        return;
-    }
-
     m_switchPending = false;
-    if (desired) startDesiredAudio();
 }
 
 void RankedAudioManager::startDesiredAudio(bool retry) {
@@ -666,7 +664,9 @@ void RankedAudioManager::startDesiredAudio(bool retry) {
         }
     }
 
-    auto const fadeIn = retry ? 0.0 : std::max(0.0, m_config.audio.fadeInSeconds);
+    // The stream itself must be audible immediately. The watchdog retry uses
+    // the same volume path, so result music cannot regress to a delayed fade.
+    auto const fadeIn = 0.0;
     channel->setVolume(fadeIn > 0.0 ? 0.0f : targetRankedVolume());
     channel->setMute(false);
     channel->setPaused(false);

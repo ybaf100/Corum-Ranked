@@ -15,11 +15,13 @@ double calculateAttemptScore(double progressPercent, bool cleared, double qualif
     auto const progress = std::clamp(progressPercent, 0.0, 100.0);
     auto const qualifying = std::clamp(qualifyingPercent, 0.0, 100.0);
 
-    if (cleared) return 200.0;
+    if (cleared) return 250.0;
     if (progress < qualifying) return 0.0;
 
     auto const wholeProgress = std::floor(progress);
-    return wholeProgress >= 70.0 ? wholeProgress * 1.5 : wholeProgress;
+    if (wholeProgress >= 75.0) return wholeProgress * 2.0;
+    if (wholeProgress >= 50.0) return wholeProgress * 1.5;
+    return wholeProgress;
 }
 
 } // namespace corum::ranked

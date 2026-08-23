@@ -18,6 +18,8 @@ int main() {
     assert(std::string(serverValue(BotScenario::NormalMatch)) == "NORMAL_MATCH");
     assert(std::string(serverValue(BotScenario::ForceBotOneClear)) == "FORCE_BOT_1_CLEAR");
     assert(std::string(serverValue(BotScenario::ForceBotThreeClears)) == "FORCE_BOT_3_CLEARS");
+    assert(std::string(serverValue(BotScenario::ForceWin)) == "FORCE_WIN");
+    assert(std::string(serverValue(BotScenario::ForceLose)) == "FORCE_LOSE");
     assert(std::string(serverValue(BotScenario::TriggerLastAttempt)) == "TRIGGER_LAST_ATTEMPT");
     assert(std::string(serverValue(BotScenario::TriggerRoundDraw)) == "TRIGGER_ROUND_DRAW");
     assert(std::string(serverValue(BotScenario::TriggerRoundThree)) == "TRIGGER_ROUND_3");

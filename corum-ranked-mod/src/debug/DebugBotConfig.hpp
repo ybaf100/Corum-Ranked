@@ -12,6 +12,8 @@ enum class BotDifficulty {
 
 enum class BotScenario {
     NormalMatch,
+    ForceWin,
+    ForceLose,
     ForceBotOneClear,
     ForceBotThreeClears,
     TriggerLastAttempt,

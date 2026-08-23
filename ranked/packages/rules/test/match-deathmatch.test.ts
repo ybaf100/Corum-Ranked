@@ -84,7 +84,7 @@ describe("three-attempt deathmatch", () => {
         { progressPercent: 60, cleared: false },
       ],
     );
-    expect(result).toEqual({ scoreA: 260, scoreB: 285, winner: "B", repeatRequired: false });
+    expect(result).toEqual({ scoreA: 340, scoreB: 355, winner: "B", repeatRequired: false });
   });
 
   it("requires a repeat on a tie", () => {

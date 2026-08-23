@@ -110,8 +110,15 @@ export class DebugBotService implements OnModuleInit, OnApplicationShutdown {
       mmrOffset: configuration.difficulties[body.difficulty].mmrOffset,
     };
     const creation = await this.queue.createDebugBotMatch(session, body, settings);
-    this.drivers.set(creation.matchId, this.newDriver(creation));
-    await this.drive(creation.matchId);
+    if (settings.scenario === "FORCE_WIN" || settings.scenario === "FORCE_LOSE") {
+      await this.matches.forceDebugResult(
+        creation.matchId,
+        settings.scenario === "FORCE_WIN" ? "A" : "B",
+      );
+    } else {
+      this.drivers.set(creation.matchId, this.newDriver(creation));
+      await this.drive(creation.matchId);
+    }
     return {
       debug: true,
       matchType: "DEBUG_BOT",
@@ -120,7 +127,6 @@ export class DebugBotService implements OnModuleInit, OnApplicationShutdown {
       side: "A",
       opponent: {
         name: creation.botContext.gdUsername,
-        rating: creation.botContext.hiddenMmr,
         difficulty: settings.difficulty,
       },
       scenario: settings.scenario,

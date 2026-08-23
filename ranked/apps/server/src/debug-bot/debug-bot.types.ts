@@ -3,6 +3,8 @@ export type DebugBotDifficulty = (typeof DEBUG_BOT_DIFFICULTIES)[number];
 
 export const DEBUG_BOT_SCENARIOS = [
   "NORMAL_MATCH",
+  "FORCE_WIN",
+  "FORCE_LOSE",
   "FORCE_BOT_1_CLEAR",
   "FORCE_BOT_3_CLEARS",
   "TRIGGER_LAST_ATTEMPT",

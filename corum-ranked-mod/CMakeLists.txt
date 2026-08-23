@@ -12,19 +12,27 @@ if (APPLE)
     endif()
 endif()
 
-project(CorumRanked VERSION 0.4.0)
+project(CorumRanked VERSION 0.5.0)
 
 option(
     CORUM_RANKED_DEBUG_BOT_MATCH
     "Include the temporary development-only Debug Bot Match UI and client route"
-    ON
+    OFF
 )
 
 file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS src/*.cpp)
-# The canonical Debug Bot UI lives at src/DebugBotPopup.cpp. Older working trees may
-# still contain src/debug/DebugBotPopup.cpp; ignore that stale duplicate so overlay
-# updates cannot compile/link both copies.
+# Debug Bot Match, including Force Win/Lose, is a development tool and must not
+# be linked into official packages. Add its implementation files only when the
+# opt-in development build flag is enabled.
+list(FILTER SOURCES EXCLUDE REGEX ".*/src/DebugBotPopup\\.cpp$")
+list(FILTER SOURCES EXCLUDE REGEX ".*/src/debug/DebugBotConfig\\.cpp$")
 list(FILTER SOURCES EXCLUDE REGEX ".*/src/debug/DebugBotPopup\\.cpp$")
+if (CORUM_RANKED_DEBUG_BOT_MATCH)
+    list(APPEND SOURCES
+        src/DebugBotPopup.cpp
+        src/debug/DebugBotConfig.cpp
+    )
+endif()
 add_library(${PROJECT_NAME} SHARED ${SOURCES})
 
 if (CORUM_RANKED_DEBUG_BOT_MATCH)

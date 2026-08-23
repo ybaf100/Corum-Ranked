@@ -4,7 +4,7 @@ import type {
   CsmpTier,
   DisplayTier,
   MmrPolicy,
-  PlayerSide,
+  RoundResult,
   TierBand,
 } from "./types.js";
 
@@ -82,7 +82,14 @@ export interface MmrUpdateInput {
   readonly ratingB: number;
   readonly placementGamesA: number;
   readonly placementGamesB: number;
-  readonly winner: PlayerSide;
+  readonly winner: RoundResult;
+  readonly scoreA?: number;
+  readonly scoreB?: number;
+  readonly clearsA?: number;
+  readonly clearsB?: number;
+  /** Positive is a win streak, negative is a loss streak, zero is neutral. */
+  readonly resultStreakA?: number;
+  readonly resultStreakB?: number;
 }
 
 export interface MmrUpdateResult {
@@ -90,7 +97,25 @@ export interface MmrUpdateResult {
   readonly deltaB: number;
   readonly ratingAfterA: number;
   readonly ratingAfterB: number;
+  readonly performanceFactor: number;
+  readonly streakFactorA: number;
+  readonly streakFactorB: number;
+  readonly outcomeDisagreement: boolean;
 }
+
+const normalizedDifference = (left: number, right: number): number =>
+  Math.min(1, Math.abs(left - right) / Math.max(1, Math.abs(left), Math.abs(right)));
+
+const nextStreakFactor = (
+  existing: number,
+  won: boolean | null,
+  policy: MmrPolicy,
+): number => {
+  if (won === null) return 1;
+  const continuing = won ? existing > 0 : existing < 0;
+  const nextCount = continuing ? Math.abs(existing) + 1 : 1;
+  return 1 + Math.min(policy.streakMaxBonus, Math.max(0, nextCount - 1) * policy.streakStep);
+};
 
 export const calculateMmrUpdate = (
   input: MmrUpdateInput,
@@ -107,14 +132,46 @@ export const calculateMmrUpdate = (
     input.placementGamesB < policy.placementGames
       ? policy.placementKFactor
       : policy.regularKFactor;
-  const actualA = input.winner === "A" ? 1 : 0;
-  const actualB = 1 - actualA;
+  const actualA = input.winner === "DRAW" ? 0.5 : input.winner === "A" ? 1 : 0;
+  const actualB = input.winner === "DRAW" ? 0.5 : 1 - actualA;
+  const scoreA = Number(input.scoreA ?? 0);
+  const scoreB = Number(input.scoreB ?? 0);
+  const clearsA = Number(input.clearsA ?? 0);
+  const clearsB = Number(input.clearsB ?? 0);
+  const winnerScore = input.winner === "A" ? scoreA : scoreB;
+  const loserScore = input.winner === "A" ? scoreB : scoreA;
+  const winnerClears = input.winner === "A" ? clearsA : clearsB;
+  const loserClears = input.winner === "A" ? clearsB : clearsA;
+  const outcomeDisagreement = input.winner !== "DRAW" &&
+    (winnerScore < loserScore || winnerClears < loserClears);
+  const marginBonus = input.winner === "DRAW" ? 0 :
+    normalizedDifference(scoreA, scoreB) * policy.scoreMarginMaxBonus +
+    normalizedDifference(clearsA, clearsB) * policy.clearMarginMaxBonus;
+  const marginFactor = 1 + marginBonus;
+  // A match-series win that disagrees with either total score or total Clears
+  // must never receive a decisive-win bonus. Reduce it below the ordinary
+  // movement even when the other metric has a very large margin.
+  const performanceFactor = outcomeDisagreement
+    ? Math.min(1, marginFactor * policy.outcomeDisagreementFactor)
+    : marginFactor;
+  const streakFactorA = nextStreakFactor(
+    input.resultStreakA ?? 0,
+    input.winner === "DRAW" ? null : input.winner === "A",
+    policy,
+  );
+  const streakFactorB = nextStreakFactor(
+    input.resultStreakB ?? 0,
+    input.winner === "DRAW" ? null : input.winner === "B",
+    policy,
+  );
   const deltaA = roundDelta(
-    kA * (actualA - expectedScore(input.ratingA, input.ratingB, policy.expectedScoreDivisor)),
+    kA * (actualA - expectedScore(input.ratingA, input.ratingB, policy.expectedScoreDivisor)) *
+      performanceFactor * streakFactorA,
     policy,
   );
   const deltaB = roundDelta(
-    kB * (actualB - expectedScore(input.ratingB, input.ratingA, policy.expectedScoreDivisor)),
+    kB * (actualB - expectedScore(input.ratingB, input.ratingA, policy.expectedScoreDivisor)) *
+      performanceFactor * streakFactorB,
     policy,
   );
   return {
@@ -122,5 +179,9 @@ export const calculateMmrUpdate = (
     deltaB,
     ratingAfterA: input.ratingA + deltaA,
     ratingAfterB: input.ratingB + deltaB,
+    performanceFactor,
+    streakFactorA,
+    streakFactorB,
+    outcomeDisagreement,
   };
 };

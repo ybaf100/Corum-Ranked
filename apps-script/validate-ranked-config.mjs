@@ -212,7 +212,7 @@ setConfig("clearTarget", 2);
 context.setupCorumRankedConfig();
 assert.equal(mapSheet.rows[0].filter((value) => value === "Ranked Pool (1~6)").length, 1);
 assert.equal(mapSheet.rows[0].filter((value) => value === "Qualifying %").length, 1);
-assert.equal(spreadsheet.getSheetByName("Ranked Config").rows.find((row) => row[0] === "ruleVersion")[1], "corum-ranked-v0.4");
+assert.equal(spreadsheet.getSheetByName("Ranked Config").rows.find((row) => row[0] === "ruleVersion")[1], "corum-ranked-v0.5");
 assert.equal(spreadsheet.getSheetByName("Ranked Config").rows.find((row) => row[0] === "roundSeconds")[1], 300);
 assert.equal(spreadsheet.getSheetByName("Ranked Config").rows.find((row) => row[0] === "clearTarget")[1], 3);
 
@@ -279,7 +279,7 @@ const alternate = complete.data.maps.find((map) => map.canonicalLevelId === "510
 assert.equal(alternate.alternateLevelId, "987654321");
 assert.equal(alternate.playableLevelId, "987654321");
 assert.equal(alternate.levelId, "987654321");
-assert.equal(complete.data.operational.rules.rulesVersion, "corum-ranked-v0.4");
+assert.equal(complete.data.operational.rules.rulesVersion, "corum-ranked-v0.5");
 assert.equal(complete.data.operational.rules.roundSeconds, 300);
 assert.equal(complete.data.operational.rules.clearTarget, 3);
 assert.equal(complete.data.operational.cbf.requiredSettings["soft-toggle"], false);
@@ -288,8 +288,8 @@ assert.equal(complete.data.operational.cbf.requiredSettings["physics-bypass"], f
 assert.equal(complete.data.operational.generation, complete.data.generation);
 assert.equal(complete.data.client.audio.enabled, false);
 assert.deepEqual(complete.data.client.audio.resources, []);
-assert.equal(complete.data.client.audio.fadeInSeconds, 0.8);
-assert.equal(complete.data.client.audio.fadeOutSeconds, 0.6);
+assert.equal(complete.data.client.audio.fadeInSeconds, 0);
+assert.equal(complete.data.client.audio.fadeOutSeconds, 0);
 assert.equal(complete.data.client.ui.fadeInSeconds, 0.24);
 assert.equal(complete.data.client.ui.fadeOutSeconds, 0.18);
 

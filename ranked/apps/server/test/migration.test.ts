@@ -11,6 +11,7 @@ const migrationNames = [
   "0002_attempt_start_leases.sql",
   "0003_debug_rating_playable_maps.sql",
   "0004_alpha37_schema_hardening.sql",
+  "0005_v050_rating_system.sql",
 ] as const;
 
 const migrationSql = async (migrationName: string): Promise<string> => {
@@ -79,6 +80,37 @@ describe("PostgreSQL migration", () => {
       deathmatch_played: true,
     });
     expect(result.rows[0]?.match_type_default).toContain("RANKED_PVP");
+  });
+
+  it("adds v0.5 LP/series state without exposing hidden MMR through the public view", async () => {
+    const columns = await database!.query<{ table_name: string; column_name: string }>(`
+      SELECT table_name, column_name
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name IN ('ranked_profiles', 'ranked_matches', 'ranked_public_match_history')
+      ORDER BY table_name, ordinal_position
+    `);
+    const names = (table: string) => columns.rows
+      .filter((row) => row.table_name === table)
+      .map((row) => row.column_name);
+    expect(names("ranked_profiles")).toEqual(expect.arrayContaining([
+      "placement_results",
+      "result_streak",
+      "promotion_source_tier",
+      "promotion_results",
+      "demotion_warning",
+    ]));
+    expect(names("ranked_matches")).toEqual(expect.arrayContaining([
+      "ranked_score_a_before",
+      "ranked_score_delta_a",
+      "ranked_score_a_after",
+      "rating_presentation",
+    ]));
+    expect(names("ranked_public_match_history")).toEqual(expect.arrayContaining([
+      "ranked_score_delta_a",
+      "ranked_score_a_after",
+    ]));
+    expect(names("ranked_public_match_history").some((name) => name.startsWith("mmr_"))).toBe(false);
   });
 
   it("keeps post-baseline migrations idempotent for Render restarts", async () => {

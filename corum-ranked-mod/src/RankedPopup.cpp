@@ -7,6 +7,7 @@
 
 #include <Geode/Geode.hpp>
 #include <Geode/binding/GameLevelManager.hpp>
+#include <Geode/binding/CCParticleFire.hpp>
 #include <Geode/binding/GameManager.hpp>
 #include <Geode/binding/GJGameLevel.hpp>
 #include <Geode/binding/LevelInfoLayer.hpp>
@@ -33,6 +34,7 @@ using corum::ranked::RankedRuntime;
 using corum::ranked::RankedAudioManager;
 using corum::ranked::RankedAudioMode;
 using corum::ranked::RankedResourceDownloadState;
+using corum::ranked::RankedProfileView;
 using corum::ranked::RoundSummaryView;
 using corum::ranked::RuntimeStage;
 using corum::ranked::RuntimeView;
@@ -805,16 +807,76 @@ class CorumRankedLayer final : public CCLayerColor {
         m_root->addChild(label, 2);
     }
 
+    void addRatingMarks(
+        std::vector<std::string> const& results,
+        int slots,
+        CCPoint center,
+        float spacing = 13.0f,
+        float scale = 0.24f
+    ) {
+        slots = std::clamp(slots, 1, 9);
+        auto const totalWidth = spacing * static_cast<float>(slots - 1);
+        for (int index = 0; index < slots; ++index) {
+            std::string text = "-";
+            ccColor3B color = ccc3(145, 151, 166);
+            if (index < static_cast<int>(results.size())) {
+                if (results[index] == "WIN") {
+                    text = "O";
+                    color = kGreen;
+                } else if (results[index] == "LOSS") {
+                    text = "X";
+                    color = kRed;
+                }
+            }
+            auto* label = makeLabel(
+                text,
+                scale,
+                {center.x - totalWidth / 2.0f + spacing * static_cast<float>(index), center.y},
+                color,
+                "goldFont.fnt"
+            );
+            m_root->addChild(label, 6);
+        }
+    }
+
+    void addPromotionFlames(CCPoint center, CCSize size) {
+        for (int index = 0; index < 5; ++index) {
+            auto* fire = CCParticleFire::createWithTotalParticles(20);
+            if (!fire) continue;
+            auto const ratio = static_cast<float>(index) / 4.0f;
+            fire->setPosition({center.x - size.width / 2.0f + 12.0f + ratio * (size.width - 24.0f), center.y - size.height / 2.0f + 3.0f});
+            fire->setScale(0.30f);
+            m_root->addChild(fire, 3);
+        }
+    }
+
+    void addStreakLabel(int streak, CCPoint position) {
+        if (std::abs(streak) < 2) return;
+        auto const winning = streak > 0;
+        auto* label = makeLabel(
+            fmt::format("{}x {} STREAK", std::abs(streak), winning ? "WIN" : "LOSS"),
+            0.14f,
+            position,
+            winning ? ccc3(255, 145, 45) : ccc3(20, 170, 184),
+            "goldFont.fnt"
+        );
+        label->limitLabelWidth(125.0f, 0.14f, 0.10f);
+        m_root->addChild(label, 7);
+    }
+
     void addPlayerCard(
         CCPoint center,
         std::string const& name,
-        std::string const& tier,
-        int score,
-        bool self
+        RankedProfileView const& profile,
+        bool self,
+        CCLabelBMFont** outScoreLabel = nullptr,
+        bool combineTierAndScore = false
     ) {
+        auto const& tier = profile.displayedTier;
         auto const accent = tierColor(upper(tier));
         auto* panel = makeNeonPanel({150.0f, 184.0f}, center, accent, kDeepPanel, 246);
         m_root->addChild(panel, 1);
+        if (profile.promotion.active) addPromotionFlames(center, {150.0f, 184.0f});
 
         auto* ribbon = makeTextPlate(
             self ? "YOU" : "OPPONENT",
@@ -842,18 +904,49 @@ class CorumRankedLayer final : public CCLayerColor {
             }
         }
         m_root->addChild(icon, 4);
+        addStreakLabel(profile.resultStreak, {center.x, center.y + 67.0f});
 
         auto* nameLabel = makeLabel(shorten(upper(name), 15), 0.31f, {center.x, center.y - 6.0f});
         nameLabel->limitLabelWidth(120.0f, 0.31f, 0.22f);
         m_root->addChild(nameLabel, 4);
 
-        auto* lpCaption = makeLabel("RATING", 0.14f, {center.x, center.y - 27.0f}, kCyan);
+        auto const placement = profile.placementGames < profile.placementGamesRequired;
+        auto const captionText = placement ? "PLACEMENT" : (profile.promotion.active ? "PROMOTION" : "RATING");
+        auto* lpCaption = makeLabel(captionText, 0.14f, {center.x, center.y - 27.0f}, kCyan);
         m_root->addChild(lpCaption, 4);
-        auto* lpLabel = makeLabel(fmt::format("{} LP", score), 0.27f, {center.x, center.y - 43.0f}, ccc3(240, 244, 250), "goldFont.fnt");
-        lpLabel->limitLabelWidth(118.0f, 0.27f, 0.18f);
-        m_root->addChild(lpLabel, 4);
+        if (placement) {
+            addRatingMarks(profile.placementResults, std::max(1, profile.placementGamesRequired), {center.x, center.y - 43.0f});
+        } else if (profile.promotion.active) {
+            addRatingMarks(profile.promotion.results, profile.promotion.gamesRequired, {center.x, center.y - 43.0f});
+            auto* detail = makeLabel(
+                fmt::format("PROMOTION MATCH ({} WINS)", profile.promotion.winsRequired),
+                0.105f,
+                {center.x, center.y - 57.0f},
+                ccc3(145, 255, 125)
+            );
+            detail->limitLabelWidth(128.0f, 0.105f, 0.08f);
+            m_root->addChild(detail, 6);
+        } else {
+            auto* lpLabel = makeLabel(
+                combineTierAndScore
+                    ? fmt::format("{} - {} LP", upper(tier), profile.visibleRankedScore.value_or(0))
+                    : fmt::format("{} LP", profile.visibleRankedScore.value_or(0)),
+                0.27f,
+                {center.x, center.y - 43.0f},
+                ccc3(240, 244, 250),
+                "goldFont.fnt"
+            );
+            lpLabel->limitLabelWidth(118.0f, 0.27f, 0.18f);
+            m_root->addChild(lpLabel, 4);
+            if (outScoreLabel) *outScoreLabel = lpLabel;
+            if (profile.demotionWarning) {
+                auto* warning = makeLabel("DEMOTION WARNING", 0.115f, {center.x, center.y - 58.0f}, kRed);
+                warning->limitLabelWidth(126.0f, 0.115f, 0.085f);
+                m_root->addChild(warning, 6);
+            }
+        }
 
-        auto* tierPlate = makeTextPlate(upper(tier), {96.0f, 24.0f}, {center.x, center.y - 69.0f}, accent, 0.21f, accent, "goldFont.fnt");
+        auto* tierPlate = makeTextPlate(upper(tier), {96.0f, 24.0f}, {center.x, center.y - 74.0f}, accent, 0.21f, accent, "goldFont.fnt");
         m_root->addChild(tierPlate, 3);
     }
 
@@ -961,8 +1054,19 @@ class CorumRankedLayer final : public CCLayerColor {
         auto const leftCenter = CCPoint{size.width / 2.0f - 118.0f, size.height / 2.0f - 2.0f};
         auto const rightCenter = CCPoint{size.width / 2.0f + 118.0f, size.height / 2.0f - 2.0f};
 
+        RankedProfileView profile;
+        profile.displayedTier = view.profileTier;
+        if (view.profileScoreVisible) profile.visibleRankedScore = view.profileScore;
+        profile.placementGames = view.placementGames;
+        profile.placementGamesRequired = view.placementGamesRequired;
+        profile.placementResults = view.placementResults;
+        profile.resultStreak = view.resultStreak;
+        profile.promotion = view.promotion;
+        profile.demotionWarning = view.demotionWarning;
+
         auto* profilePanel = makeNeonPanel({188.0f, 196.0f}, leftCenter, tierColor(upper(view.profileTier)), kDeepPanel, 246);
         m_root->addChild(profilePanel, 1);
+        if (profile.promotion.active) addPromotionFlames(leftCenter, {188.0f, 196.0f});
         auto* profileTitle = makeLabel("YOUR RANK", 0.18f, {leftCenter.x, leftCenter.y + 77.0f}, kCyan);
         m_root->addChild(profileTitle, 4);
         auto* emblem = CCSprite::createWithSpriteFrameName("GJ_bigStar_001.png");
@@ -970,13 +1074,32 @@ class CorumRankedLayer final : public CCLayerColor {
         emblem->setColor(tierColor(upper(view.profileTier)));
         emblem->setPosition({leftCenter.x, leftCenter.y + 30.0f});
         m_root->addChild(emblem, 4);
+        addStreakLabel(profile.resultStreak, {leftCenter.x, leftCenter.y + 62.0f});
         auto* tier = makeLabel(upper(view.profileTier), 0.42f, {leftCenter.x, leftCenter.y - 22.0f}, tierColor(upper(view.profileTier)), "goldFont.fnt");
         tier->limitLabelWidth(150.0f, 0.42f, 0.25f);
         m_root->addChild(tier, 4);
-        auto* rating = makeLabel(fmt::format("{} LP", view.profileScore), 0.35f, {leftCenter.x, leftCenter.y - 52.0f}, ccc3(240, 244, 250), "goldFont.fnt");
-        rating->limitLabelWidth(150.0f, 0.35f, 0.22f);
-        m_root->addChild(rating, 4);
-        auto* profileHint = makeLabel("SEASONAL LADDER PROGRESS", 0.15f, {leftCenter.x, leftCenter.y - 78.0f}, ccc3(195, 205, 224));
+        auto const placement = profile.placementGames < profile.placementGamesRequired;
+        if (placement) {
+            addRatingMarks(profile.placementResults, std::max(1, profile.placementGamesRequired), {leftCenter.x, leftCenter.y - 51.0f}, 16.0f, 0.30f);
+        } else if (profile.promotion.active) {
+            addRatingMarks(profile.promotion.results, profile.promotion.gamesRequired, {leftCenter.x, leftCenter.y - 49.0f}, 16.0f, 0.30f);
+        } else {
+            auto* rating = makeLabel(fmt::format("{} LP", view.profileScore), 0.35f, {leftCenter.x, leftCenter.y - 52.0f}, ccc3(240, 244, 250), "goldFont.fnt");
+            rating->limitLabelWidth(150.0f, 0.35f, 0.22f);
+            m_root->addChild(rating, 4);
+        }
+        std::string profileHintText = "SEASONAL LADDER PROGRESS";
+        ccColor3B profileHintColor = ccc3(195, 205, 224);
+        if (placement) profileHintText = "PLACEMENT MATCHES";
+        else if (profile.promotion.active) {
+            profileHintText = fmt::format("PROMOTION MATCH ({} WINS)", profile.promotion.winsRequired);
+            profileHintColor = ccc3(145, 255, 125);
+        } else if (profile.demotionWarning) {
+            profileHintText = "DEMOTION WARNING";
+            profileHintColor = kRed;
+        }
+        auto* profileHint = makeLabel(profileHintText, 0.15f, {leftCenter.x, leftCenter.y - 78.0f}, profileHintColor);
+        profileHint->limitLabelWidth(164.0f, 0.15f, 0.105f);
         m_root->addChild(profileHint, 4);
 
         auto* actionPanel = makeNeonPanel({188.0f, 196.0f}, rightCenter, kBlue, kDeepPanel, 246);
@@ -1086,8 +1209,8 @@ class CorumRankedLayer final : public CCLayerColor {
     void renderMatchFound(MatchView const& match) {
         auto const size = CCDirector::sharedDirector()->getWinSize();
         auto const ownA = match.side == "A";
-        addPlayerCard({100.0f, size.height / 2.0f - 2.0f}, match.playerAName, match.playerATier, match.playerAScore, ownA);
-        addPlayerCard({size.width - 100.0f, size.height / 2.0f - 2.0f}, match.playerBName, match.playerBTier, match.playerBScore, !ownA);
+        addPlayerCard({100.0f, size.height / 2.0f - 2.0f}, match.playerAName, match.playerAProfile, ownA);
+        addPlayerCard({size.width - 100.0f, size.height / 2.0f - 2.0f}, match.playerBName, match.playerBProfile, !ownA);
 
         auto* title = makeLabel("MATCH FOUND", 0.66f, {size.width / 2.0f, size.height - 34.0f}, ccc3(246, 249, 255), "goldFont.fnt");
         title->limitLabelWidth(size.width - 170.0f, 0.66f, 0.38f);
@@ -1194,8 +1317,8 @@ class CorumRankedLayer final : public CCLayerColor {
 
         // A/B cards keep the screen symmetric while the centre column is reserved
         // for match state, map information and resource readiness.
-        addPlayerCard({96.0f, size.height / 2.0f - 2.0f}, match.playerAName, match.playerATier, match.playerAScore, ownA);
-        addPlayerCard({size.width - 96.0f, size.height / 2.0f - 2.0f}, match.playerBName, match.playerBTier, match.playerBScore, !ownA);
+        addPlayerCard({96.0f, size.height / 2.0f - 2.0f}, match.playerAName, match.playerAProfile, ownA);
+        addPlayerCard({size.width - 96.0f, size.height / 2.0f - 2.0f}, match.playerBName, match.playerBProfile, !ownA);
 
         auto* title = makeLabel(
             deathmatch ? "DEATH MATCH" : fmt::format("ROUND {}", match.roundNumber),
@@ -1446,6 +1569,111 @@ class CorumRankedLayer final : public CCLayerColor {
         }
     }
 
+    void animateRankedScoreChange(
+        float centerX,
+        float finalY,
+        std::optional<int> delta,
+        CCLabelBMFont* finalScore,
+        RankedProfileView const& before
+    ) {
+        if (!delta || !finalScore || !before.visibleRankedScore) return;
+
+        // Show the authoritative pre-match LP first. The delta rises from below,
+        // overlaps it, and the post-match value fades in at the same position.
+        auto* previousScore = makeLabel(
+            fmt::format("{} - {} LP", upper(before.displayedTier), *before.visibleRankedScore),
+            0.27f,
+            {centerX, finalY},
+            ccc3(240, 244, 250),
+            "goldFont.fnt"
+        );
+        previousScore->limitLabelWidth(118.0f, 0.27f, 0.16f);
+        m_root->addChild(previousScore, 9);
+        previousScore->runAction(CCSequence::create(
+            CCDelayTime::create(0.56f),
+            CCFadeOut::create(0.22f),
+            nullptr
+        ));
+        finalScore->setOpacity(0);
+        finalScore->runAction(CCSequence::create(
+            CCDelayTime::create(0.72f),
+            CCFadeIn::create(0.28f),
+            nullptr
+        ));
+
+        auto* deltaLabel = makeLabel(
+            fmt::format("{:+d} LP", *delta),
+            0.28f,
+            {centerX, 58.0f},
+            *delta >= 0 ? kGreen : kRed,
+            "goldFont.fnt"
+        );
+        deltaLabel->setOpacity(0);
+        m_root->addChild(deltaLabel, 9);
+        deltaLabel->runAction(CCSequence::create(
+            CCFadeIn::create(0.16f),
+            CCEaseSineOut::create(CCMoveTo::create(0.56f, {centerX, finalY})),
+            CCFadeOut::create(0.24f),
+            nullptr
+        ));
+    }
+
+    void animatePromotionTrigger(
+        float centerX,
+        float finalY,
+        RatingEventView const& event,
+        RankedProfileView const& before,
+        std::optional<int> delta
+    ) {
+        if (!event.promotionStarted || !before.visibleRankedScore) return;
+
+        // The promotion marks are the final state, but keep them covered while
+        // the previous LP and its gain perform the same overlap transition as a
+        // normal rating update. Fading the cover reveals `-----` naturally.
+        auto* marksCover = CCLayerColor::create({7, 18, 40, 255});
+        marksCover->setContentSize({124.0f, 17.0f});
+        marksCover->setPosition({centerX - 62.0f, finalY - 8.5f});
+        m_root->addChild(marksCover, 9);
+        marksCover->runAction(CCSequence::create(
+            CCDelayTime::create(0.56f),
+            CCFadeOut::create(0.28f),
+            nullptr
+        ));
+
+        auto* prior = makeLabel(
+            fmt::format("{} - {} LP", upper(before.displayedTier), *before.visibleRankedScore),
+            0.27f,
+            {centerX, finalY},
+            ccc3(240, 244, 250),
+            "goldFont.fnt"
+        );
+        prior->limitLabelWidth(118.0f, 0.27f, 0.16f);
+        m_root->addChild(prior, 10);
+        prior->runAction(CCSequence::create(
+            CCDelayTime::create(0.56f),
+            CCFadeOut::create(0.22f),
+            nullptr
+        ));
+
+        if (delta) {
+            auto* deltaLabel = makeLabel(
+                fmt::format("{:+d} LP", *delta),
+                0.28f,
+                {centerX, 58.0f},
+                *delta >= 0 ? kGreen : kRed,
+                "goldFont.fnt"
+            );
+            deltaLabel->setOpacity(0);
+            m_root->addChild(deltaLabel, 11);
+            deltaLabel->runAction(CCSequence::create(
+                CCFadeIn::create(0.16f),
+                CCEaseSineOut::create(CCMoveTo::create(0.56f, {centerX, finalY})),
+                CCFadeOut::create(0.24f),
+                nullptr
+            ));
+        }
+    }
+
     void renderResult(RuntimeView const& view) {
         auto const& match = view.match;
         auto const size = CCDirector::sharedDirector()->getWinSize();
@@ -1472,12 +1700,11 @@ class CorumRankedLayer final : public CCLayerColor {
 
         auto const ownA = match.side == "A";
         auto const won = match.winnerSide == match.side;
-        auto const tierA = match.profileAfterTierA.empty() ? match.effectiveTier : match.profileAfterTierA;
-        auto const tierB = match.profileAfterTierB.empty() ? match.effectiveTier : match.profileAfterTierB;
-        auto const scoreA = match.profileAfterScoreA.value_or(match.ratingAfterA.value_or(0));
-        auto const scoreB = match.profileAfterScoreB.value_or(match.ratingAfterB.value_or(0));
-        addPlayerCard({100.0f, size.height / 2.0f - 5.0f}, match.playerAName, tierA, scoreA, ownA);
-        addPlayerCard({size.width - 100.0f, size.height / 2.0f - 5.0f}, match.playerBName, tierB, scoreB, !ownA);
+        CCLabelBMFont* finalScoreA = nullptr;
+        CCLabelBMFont* finalScoreB = nullptr;
+        auto const cardY = size.height / 2.0f - 5.0f;
+        addPlayerCard({100.0f, cardY}, match.playerAName, match.profileAfterA, ownA, &finalScoreA, true);
+        addPlayerCard({size.width - 100.0f, cardY}, match.playerBName, match.profileAfterB, !ownA, &finalScoreB, true);
 
         auto* title = makeLabel("MATCH END", 0.60f, {size.width / 2.0f, size.height - 25.0f}, kGold, "goldFont.fnt");
         m_root->addChild(title, 4);
@@ -1504,26 +1731,47 @@ class CorumRankedLayer final : public CCLayerColor {
             y -= 28.0f;
         }
 
-        if (match.mmrDeltaA) {
-            auto* delta = makeLabel(fmt::format("{:+d} LP", *match.mmrDeltaA), 0.28f, {100.0f, 58.0f}, *match.mmrDeltaA >= 0 ? kGreen : kRed);
-            m_root->addChild(delta, 4);
-        }
-        if (match.mmrDeltaB) {
-            auto* delta = makeLabel(fmt::format("{:+d} LP", *match.mmrDeltaB), 0.28f, {size.width - 100.0f, 58.0f}, *match.mmrDeltaB >= 0 ? kGreen : kRed);
-            m_root->addChild(delta, 4);
-        }
-        auto promotionText = [](std::string const& before, std::string const& after) -> std::string {
-            if (before.empty() || after.empty() || before == after) return {};
-            static std::vector<std::string> order = {"UNRANKED", "RED", "AQUA", "BRONZE", "SILVER", "GOLD"};
-            auto const b = std::find(order.begin(), order.end(), before);
-            auto const a = std::find(order.begin(), order.end(), after);
-            if (b == order.end() || a == order.end()) return {};
-            return a > b ? "PROMOTED" : "DEMOTED";
+        animateRankedScoreChange(
+            100.0f,
+            cardY - 43.0f,
+            match.rankedScoreDeltaA,
+            finalScoreA,
+            match.profileBeforeA
+        );
+        animateRankedScoreChange(
+            size.width - 100.0f,
+            cardY - 43.0f,
+            match.rankedScoreDeltaB,
+            finalScoreB,
+            match.profileBeforeB
+        );
+        animatePromotionTrigger(
+            100.0f,
+            cardY - 43.0f,
+            match.ratingEventA,
+            match.profileBeforeA,
+            match.rankedScoreDeltaA
+        );
+        animatePromotionTrigger(
+            size.width - 100.0f,
+            cardY - 43.0f,
+            match.ratingEventB,
+            match.profileBeforeB,
+            match.rankedScoreDeltaB
+        );
+
+        auto ratingEventText = [](corum::ranked::RatingEventView const& event) -> std::pair<std::string, ccColor3B> {
+            if (event.placementCompleted) return {"PLACED", kGreen};
+            if (event.promotionSucceeded) return {"PROMOTED", kGreen};
+            if (event.promotionFailed) return {"PROMOTION FAILED", kRed};
+            if (event.promotionStarted) return {"PROMOTION MATCH", ccc3(145, 255, 125)};
+            if (event.demoted) return {"DEMOTED", kRed};
+            return {"", ccc3(255, 255, 255)};
         };
-        auto const promotionA = promotionText(match.profileBeforeTierA, tierA);
-        auto const promotionB = promotionText(match.profileBeforeTierB, tierB);
-        if (!promotionA.empty()) m_root->addChild(makeLabel(promotionA, 0.23f, {100.0f, 20.0f}, promotionA == "PROMOTED" ? kGreen : kRed), 4);
-        if (!promotionB.empty()) m_root->addChild(makeLabel(promotionB, 0.23f, {size.width - 100.0f, 20.0f}, promotionB == "PROMOTED" ? kGreen : kRed), 4);
+        auto const eventA = ratingEventText(match.ratingEventA);
+        auto const eventB = ratingEventText(match.ratingEventB);
+        if (!eventA.first.empty()) m_root->addChild(makeLabel(eventA.first, 0.20f, {100.0f, 20.0f}, eventA.second), 8);
+        if (!eventB.first.empty()) m_root->addChild(makeLabel(eventB.first, 0.20f, {size.width - 100.0f, 20.0f}, eventB.second), 8);
 
         addButton("QUEUE AGAIN", {size.width / 2.0f, 24.0f}, menu_selector(CorumRankedLayer::onQueueAgain), false, 0.52f);
     }
@@ -1555,8 +1803,11 @@ class CorumRankedLayer final : public CCLayerColor {
             auto const won = item.side == item.winnerSide;
             auto* panel = makePanel({size.width - 110.0f, 31.0f}, {size.width / 2.0f, y}, kPanelLight);
             m_root->addChild(panel, 1);
+            auto const ratingText = item.ownRankedScoreDelta
+                ? fmt::format("{:+d} LP", *item.ownRankedScoreDelta)
+                : std::string("PLACEMENT");
             auto* row = makeLabel(
-                fmt::format("{}   VS {}   {:+d} LP", won ? "WIN" : "LOSS", shorten(item.opponentName, 14), item.ownMmrDelta.value_or(0)),
+                fmt::format("{}   VS {}   {}", won ? "WIN" : "LOSS", shorten(item.opponentName, 14), ratingText),
                 0.23f,
                 {size.width / 2.0f - 18.0f, y},
                 won ? kGreen : kRed

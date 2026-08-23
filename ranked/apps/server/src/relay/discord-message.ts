@@ -35,6 +35,24 @@ const scoreLine = (payload: Record<string, unknown>): string => {
 const roundResults = (value: unknown): string =>
   Array.isArray(value) ? value.map((result) => text(result)).join(" / ") : "";
 
+const ratingResult = (
+  side: "A" | "B",
+  deltas: Record<string, unknown>,
+  scores: Record<string, unknown>,
+  placementResults: Record<string, unknown>,
+): string => {
+  if (scores[side] === null || scores[side] === undefined) {
+    const marks = Array.isArray(placementResults[side])
+      ? (placementResults[side] as unknown[])
+        .map((mark) => mark === "WIN" ? "O" : mark === "LOSS" ? "X" : "-")
+        .join("")
+      : "";
+    return `UNRANKED${marks ? ` - ${marks}` : ""}`;
+  }
+  const delta = number(deltas[side]);
+  return `${delta >= 0 ? "+" : ""}${delta} → ${number(scores[side])} LP`;
+};
+
 export const formatDiscordRelayMessage = (event: RelayEventForFormatting): string => {
   const payload = objectValue(event.payload);
   const names = players(payload);
@@ -74,12 +92,13 @@ export const formatDiscordRelayMessage = (event: RelayEventForFormatting): strin
       break;
     }
     case "MATCH_RESULT": {
-      const deltas = objectValue(payload.mmrDelta);
-      const ratings = objectValue(payload.ratingAfter);
+      const deltas = objectValue(payload.rankedScoreDelta);
+      const scores = objectValue(payload.rankedScoreAfter);
+      const placementResults = objectValue(payload.placementResults);
       content = [
         `🏆 **Match Winner: ${sideName(payload.winnerSide, names)}**`,
-        `${names.A} ${number(deltas.A) >= 0 ? "+" : ""}${number(deltas.A)} → ${number(ratings.A)} · ` +
-          `${names.B} ${number(deltas.B) >= 0 ? "+" : ""}${number(deltas.B)} → ${number(ratings.B)}`,
+        `${names.A} ${ratingResult("A", deltas, scores, placementResults)} · ` +
+          `${names.B} ${ratingResult("B", deltas, scores, placementResults)}`,
         `Rounds: ${roundResults(payload.roundResults)} · ${match}`,
       ].join("\n");
       break;
@@ -105,4 +124,3 @@ export const formatDiscordRelayMessage = (event: RelayEventForFormatting): strin
 
   return content.slice(0, 1_900);
 };
-

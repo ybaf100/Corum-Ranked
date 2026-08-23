@@ -31,6 +31,7 @@ beforeAll(async () => {
     "0002_debug_bot_match.sql",
     "0003_debug_rating_playable_maps.sql",
     "0004_alpha37_schema_hardening.sql",
+    "0005_v050_rating_system.sql",
   ]) {
     const migrationPath = fileURLToPath(
       new URL(`../../../migrations/${migrationName}`, import.meta.url),
@@ -319,7 +320,7 @@ describe("two-client authoritative match flow", () => {
       }
       expect(secondEnd.roundSnapshot.clears.A).toBe(1);
       expect(secondEnd.roundSnapshot.scores.A).toBeCloseTo(
-        scoreAttempt(livePercent, false, qualifying) + 200,
+        scoreAttempt(livePercent, false, qualifying) + 250,
         6,
       );
 
@@ -384,7 +385,7 @@ describe("two-client authoritative match flow", () => {
         progressPercent: 100,
         cleared: true,
       });
-      expect(fourthEnd).toMatchObject({ accepted: true, awardedScore: 200 });
+      expect(fourthEnd).toMatchObject({ accepted: true, awardedScore: 250 });
       if (!("roundSnapshot" in fourthEnd)) {
         throw new Error("Expected third Clear acknowledgement after delayed Start Lease reconciliation");
       }
@@ -685,7 +686,7 @@ describe("two-client authoritative match flow", () => {
       accepted: true,
       duplicate: true,
       reason: "ATTEMPT_ALREADY_ENDED",
-      awardedScore: 200,
+      awardedScore: 250,
     });
 
     const afterFirstPoll = await database.query<{

@@ -26,6 +26,8 @@ var CORUM_RANKED_TIER_HEADERS = Object.freeze([
   "최대 점수(미포함)",
   "Main Pool",
   "Deathmatch Pool",
+  "Promotion Games",
+  "Promotion Wins Required",
 ]);
 
 var CORUM_RANKED_SEED_HEADERS = Object.freeze([
@@ -49,11 +51,11 @@ var CORUM_RANKED_CONFIG_HEADERS = Object.freeze([
 ]);
 
 var CORUM_RANKED_TIER_DEFAULTS = Object.freeze([
-  Object.freeze(["RED", "", "", 2, 2]),
-  Object.freeze(["AQUA", "", "", 3, 3]),
-  Object.freeze(["BRONZE", "", "", 4, 4]),
-  Object.freeze(["SILVER", "", "", 5, 5]),
-  Object.freeze(["GOLD", "", "", 6, 6]),
+  Object.freeze(["RED", "", "", 2, 2, 3, 2]),
+  Object.freeze(["AQUA", "", "", 3, 3, 3, 2]),
+  Object.freeze(["BRONZE", "", "", 4, 4, 5, 3]),
+  Object.freeze(["SILVER", "", "", 5, 5, 5, 3]),
+  Object.freeze(["GOLD", "", "", 6, 6, 0, 0]),
 ]);
 
 var CORUM_RANKED_SEED_DEFAULTS = Object.freeze([
@@ -86,7 +88,7 @@ var CORUM_RANKED_ALLOWED_MOD_DEFAULTS = Object.freeze([
 
 var CORUM_RANKED_CONFIG_DEFAULTS = Object.freeze([
   Object.freeze(["enabled", false, "모든 필수 운영값 입력·검증 후 TRUE"]),
-  Object.freeze(["ruleVersion", "corum-ranked-v0.4", "명세/규칙 버전"]),
+  Object.freeze(["ruleVersion", "corum-ranked-v0.5", "명세/규칙 버전"]),
   Object.freeze(["roundSeconds", 300, "일반 Round 시간"]),
   Object.freeze(["clearTarget", 3, "LAST ATTEMPT를 발동시키는 Clear 수"]),
   Object.freeze(["finalAttemptWindowSeconds", 10, "5분 이후 attempt 시작 Window"]),
@@ -99,6 +101,18 @@ var CORUM_RANKED_CONFIG_DEFAULTS = Object.freeze([
   Object.freeze(["regularKFactor", "", "운영 확정 필요"]),
   Object.freeze(["expectedScoreDivisor", "", "운영 확정 필요"]),
   Object.freeze(["deltaRounding", "", "NEAREST / FLOOR / CEIL 중 운영 확정"]),
+  Object.freeze(["visibleScoreBaseChange", 25, "일반 경기 기본 LP 변동"]),
+  Object.freeze(["visibleScoreGapDivisor", 400, "MMR-LP 보정 간격"]),
+  Object.freeze(["visibleScoreMinFactor", 0.5, "LP 변동 최소 배율"]),
+  Object.freeze(["visibleScoreMaxFactor", 1.5, "LP 변동 최대 배율"]),
+  Object.freeze(["scoreMarginMaxBonus", 0.35, "스코어 차이 MMR 최대 추가 배율"]),
+  Object.freeze(["clearMarginMaxBonus", 0.35, "Clear 차이 MMR 최대 추가 배율"]),
+  Object.freeze(["outcomeDisagreementFactor", 0.6, "승패와 스코어/Clear 우세가 엇갈릴 때 MMR 배율"]),
+  Object.freeze(["streakStep", 0.05, "연승/연패 1회당 MMR 추가 배율"]),
+  Object.freeze(["streakMaxBonus", 0.25, "연승/연패 MMR 최대 추가 배율"]),
+  Object.freeze(["promotionScoreBonus", 50, "승급 성공 시 다음 커트라인 추가 LP"]),
+  Object.freeze(["promotionFailurePenalty", 50, "승급 실패 시 커트라인 차감 LP"]),
+  Object.freeze(["demotionScorePenalty", 50, "강등 확정 시 현재 커트라인 차감 LP"]),
   Object.freeze(["sessionSeconds", "", "서버 세션 유효시간, 운영 확정 필요"]),
   Object.freeze(["readySeconds", "", "운영 확정 필요"]),
   Object.freeze(["reconnectGraceSeconds", "", "운영 확정 필요"]),
@@ -124,8 +138,8 @@ var CORUM_RANKED_CONFIG_DEFAULTS = Object.freeze([
   Object.freeze(["rankedAudioWinStartSeconds", 0, "승리 결과 BGM 시작 지점(초)"]),
   Object.freeze(["rankedAudioLoseSongId", "", "패배 결과 BGM Song ID"]),
   Object.freeze(["rankedAudioLoseStartSeconds", 0, "패배 결과 BGM 시작 지점(초)"]),
-  Object.freeze(["rankedAudioFadeInSeconds", 0.8, "Ranked BGM Fade In 시간"]),
-  Object.freeze(["rankedAudioFadeOutSeconds", 0.6, "Ranked BGM Fade Out 시간"]),
+  Object.freeze(["rankedAudioFadeInSeconds", 0, "Ranked BGM 즉시 시작(0 권장)"]),
+  Object.freeze(["rankedAudioFadeOutSeconds", 0, "Ranked BGM 즉시 전환(0 권장)"]),
   Object.freeze(["rankedUiFadeInSeconds", 0.24, "Ranked UI Fade In 시간"]),
   Object.freeze(["rankedUiFadeOutSeconds", 0.18, "Ranked UI Fade Out 시간"]),
 
@@ -168,6 +182,7 @@ function setupCorumRankedConfig() {
   appendMissingRankedRows_(allowedModsSheet, CORUM_RANKED_ALLOWED_MOD_DEFAULTS);
   appendMissingRankedRows_(configSheet, CORUM_RANKED_CONFIG_DEFAULTS);
   migrateRankedFixedRuleDefaults_(configSheet);
+  migrateRankedTierPromotionDefaults_(tiersSheet);
 
   [mapsSheet, tiersSheet, seedsSheet, allowedModsSheet, configSheet].forEach(function (sheet) {
     sheet.setFrozenRows(1);
@@ -187,8 +202,8 @@ function migrateRankedFixedRuleDefaults_(sheet) {
   var changed = false;
   for (var rowIndex = 1; rowIndex < values.length; rowIndex += 1) {
     var key = rankedText_(values[rowIndex][keyColumn]);
-    if (key === "ruleVersion" && rankedText_(values[rowIndex][valueColumn]) === "corum-ranked-v0.3") {
-      values[rowIndex][valueColumn] = "corum-ranked-v0.4";
+    if (key === "ruleVersion" && ["corum-ranked-v0.3", "corum-ranked-v0.4"].indexOf(rankedText_(values[rowIndex][valueColumn])) !== -1) {
+      values[rowIndex][valueColumn] = "corum-ranked-v0.5";
       changed = true;
     } else if (key === "roundSeconds" && Number(values[rowIndex][valueColumn]) === 180) {
       values[rowIndex][valueColumn] = 300;
@@ -196,11 +211,43 @@ function migrateRankedFixedRuleDefaults_(sheet) {
     } else if (key === "clearTarget" && Number(values[rowIndex][valueColumn]) === 2) {
       values[rowIndex][valueColumn] = 3;
       changed = true;
+    } else if (key === "rankedAudioFadeInSeconds" && Number(values[rowIndex][valueColumn]) === 0.8) {
+      values[rowIndex][valueColumn] = 0;
+      changed = true;
+    } else if (key === "rankedAudioFadeOutSeconds" && Number(values[rowIndex][valueColumn]) === 0.6) {
+      values[rowIndex][valueColumn] = 0;
+      changed = true;
     }
   }
   if (changed) {
     sheet.getRange(1, 1, values.length, values[0].length).setValues(values);
   }
+}
+
+function migrateRankedTierPromotionDefaults_(sheet) {
+  if (!sheet || sheet.getLastRow() < 2) return;
+  var values = sheet.getDataRange().getValues();
+  var tierColumn = findOptionalHeaderIndex_(values[0], ["Tier"]);
+  var gamesColumn = findOptionalHeaderIndex_(values[0], ["Promotion Games"]);
+  var winsColumn = findOptionalHeaderIndex_(values[0], ["Promotion Wins Required"]);
+  if ([tierColumn, gamesColumn, winsColumn].some(function (column) { return column === -1; })) return;
+  var defaults = {
+    RED: [3, 2], AQUA: [3, 2], BRONZE: [5, 3], SILVER: [5, 3], GOLD: [0, 0],
+  };
+  var changed = false;
+  for (var rowIndex = 1; rowIndex < values.length; rowIndex += 1) {
+    var tier = rankedText_(values[rowIndex][tierColumn]).toUpperCase();
+    if (!defaults[tier]) continue;
+    if (rankedText_(values[rowIndex][gamesColumn]) === "") {
+      values[rowIndex][gamesColumn] = defaults[tier][0];
+      changed = true;
+    }
+    if (rankedText_(values[rowIndex][winsColumn]) === "") {
+      values[rowIndex][winsColumn] = defaults[tier][1];
+      changed = true;
+    }
+  }
+  if (changed) sheet.getRange(1, 1, values.length, values[0].length).setValues(values);
 }
 
 function appendMissingRankedRows_(sheet, rows) {
@@ -286,7 +333,7 @@ function readCorumRankedConfig_() {
     maps: maps,
     allowedMods: allowedMods,
   };
-  var generation = "ranked-v0.3-" + rankedStableHash_(JSON.stringify(generationInput));
+  var generation = "ranked-v0.5-" + rankedStableHash_(JSON.stringify(generationInput));
   operational.generation = generation;
   var validation = validateCorumRankedConfig_(operational, maps, allowedMods, client);
 
@@ -328,7 +375,10 @@ function readRankedTierBands_(sheet) {
   var maximumColumn = findOptionalHeaderIndex_(header, ["최대 점수(미포함)"]);
   var mainPoolColumn = findOptionalHeaderIndex_(header, ["Main Pool"]);
   var deathmatchPoolColumn = findOptionalHeaderIndex_(header, ["Deathmatch Pool"]);
-  if ([tierColumn, minimumColumn, maximumColumn, mainPoolColumn, deathmatchPoolColumn].some(function (column) {
+  var promotionGamesColumn = findOptionalHeaderIndex_(header, ["Promotion Games"]);
+  var promotionWinsColumn = findOptionalHeaderIndex_(header, ["Promotion Wins Required"]);
+  if ([tierColumn, minimumColumn, maximumColumn, mainPoolColumn, deathmatchPoolColumn,
+    promotionGamesColumn, promotionWinsColumn].some(function (column) {
     return column === -1;
   })) return [];
 
@@ -348,6 +398,8 @@ function readRankedTierBands_(sheet) {
       maxExclusive: maximum,
       mainPool: mainPool,
       deathmatchPool: deathmatchPool,
+      promotionGames: rankedNumber_(row[promotionGamesColumn]),
+      promotionWinsRequired: rankedNumber_(row[promotionWinsColumn]),
     });
   }
   return result;
@@ -522,12 +574,26 @@ function readRankedMmrPolicy_(config) {
   var regularKFactor = rankedNumber_(config.regularKFactor);
   var expectedScoreDivisor = rankedNumber_(config.expectedScoreDivisor);
   var deltaRounding = rankedText_(config.deltaRounding).toUpperCase();
+  var extra = {
+    visibleScoreBaseChange: rankedNumber_(config.visibleScoreBaseChange),
+    visibleScoreGapDivisor: rankedNumber_(config.visibleScoreGapDivisor),
+    visibleScoreMinFactor: rankedNumber_(config.visibleScoreMinFactor),
+    visibleScoreMaxFactor: rankedNumber_(config.visibleScoreMaxFactor),
+    scoreMarginMaxBonus: rankedNumber_(config.scoreMarginMaxBonus),
+    clearMarginMaxBonus: rankedNumber_(config.clearMarginMaxBonus),
+    outcomeDisagreementFactor: rankedNumber_(config.outcomeDisagreementFactor),
+    streakStep: rankedNumber_(config.streakStep),
+    streakMaxBonus: rankedNumber_(config.streakMaxBonus),
+    promotionScoreBonus: rankedNumber_(config.promotionScoreBonus),
+    promotionFailurePenalty: rankedNumber_(config.promotionFailurePenalty),
+    demotionScorePenalty: rankedNumber_(config.demotionScorePenalty),
+  };
   if (
     placementGames === null ||
     placementKFactor === null ||
     regularKFactor === null ||
     expectedScoreDivisor === null ||
-    !deltaRounding
+    !deltaRounding || Object.keys(extra).some(function (key) { return extra[key] === null; })
   ) return null;
   return {
     algorithm: rankedText_(config.mmrAlgorithm).toUpperCase(),
@@ -536,6 +602,18 @@ function readRankedMmrPolicy_(config) {
     regularKFactor: regularKFactor,
     expectedScoreDivisor: expectedScoreDivisor,
     deltaRounding: deltaRounding,
+    visibleScoreBaseChange: extra.visibleScoreBaseChange,
+    visibleScoreGapDivisor: extra.visibleScoreGapDivisor,
+    visibleScoreMinFactor: extra.visibleScoreMinFactor,
+    visibleScoreMaxFactor: extra.visibleScoreMaxFactor,
+    scoreMarginMaxBonus: extra.scoreMarginMaxBonus,
+    clearMarginMaxBonus: extra.clearMarginMaxBonus,
+    outcomeDisagreementFactor: extra.outcomeDisagreementFactor,
+    streakStep: extra.streakStep,
+    streakMaxBonus: extra.streakMaxBonus,
+    promotionScoreBonus: extra.promotionScoreBonus,
+    promotionFailurePenalty: extra.promotionFailurePenalty,
+    demotionScorePenalty: extra.demotionScorePenalty,
   };
 }
 
@@ -605,8 +683,8 @@ function readRankedClientPresentation_(config) {
   return {
     audio: {
       enabled: rankedBoolean_(config.rankedAudioEnabled),
-      fadeInSeconds: fadeIn === null ? 0.8 : Math.max(0, fadeIn),
-      fadeOutSeconds: fadeOut === null ? 0.6 : Math.max(0, fadeOut),
+      fadeInSeconds: fadeIn === null ? 0 : Math.max(0, fadeIn),
+      fadeOutSeconds: fadeOut === null ? 0 : Math.max(0, fadeOut),
       resources: resources,
     },
     ui: {
@@ -635,8 +713,8 @@ function rankedBoolean_(value) {
 function validateCorumRankedConfig_(operational, maps, allowedMods, client) {
   var errors = [];
   var rules = operational.rules || {};
-  if (rules.rulesVersion !== "corum-ranked-v0.4") {
-    errors.push("ruleVersion은 corum-ranked-v0.4이어야 합니다.");
+  if (rules.rulesVersion !== "corum-ranked-v0.5") {
+    errors.push("ruleVersion은 corum-ranked-v0.5이어야 합니다.");
   }
   if (rules.roundSeconds !== 300) errors.push("roundSeconds는 300이어야 합니다.");
   if (rules.clearTarget !== 3) errors.push("clearTarget은 3이어야 합니다.");
@@ -667,6 +745,19 @@ function validateCorumRankedConfig_(operational, maps, allowedMods, client) {
     ["placementKFactor", "regularKFactor", "expectedScoreDivisor"].forEach(function (key) {
       if (!(mmr[key] > 0)) errors.push(key + "는 양수여야 합니다.");
     });
+    ["visibleScoreBaseChange", "visibleScoreGapDivisor", "visibleScoreMinFactor", "visibleScoreMaxFactor"].forEach(function (key) {
+      if (!(mmr[key] > 0)) errors.push(key + "는 양수여야 합니다.");
+    });
+    ["scoreMarginMaxBonus", "clearMarginMaxBonus", "streakStep", "streakMaxBonus",
+      "promotionScoreBonus", "promotionFailurePenalty", "demotionScorePenalty"].forEach(function (key) {
+      if (!(mmr[key] >= 0)) errors.push(key + "는 0 이상이어야 합니다.");
+    });
+    if (!(mmr.outcomeDisagreementFactor > 0 && mmr.outcomeDisagreementFactor <= 1)) {
+      errors.push("outcomeDisagreementFactor는 0 초과 1 이하여야 합니다.");
+    }
+    if (mmr.visibleScoreMaxFactor < mmr.visibleScoreMinFactor) {
+      errors.push("visibleScoreMaxFactor는 visibleScoreMinFactor 이상이어야 합니다.");
+    }
     if (["NEAREST", "FLOOR", "CEIL"].indexOf(mmr.deltaRounding) === -1) {
       errors.push("deltaRounding은 NEAREST/FLOOR/CEIL 중 하나여야 합니다.");
     }
@@ -786,6 +877,16 @@ function validateRankedTiers_(tierBands, errors) {
     }
     if (!Number.isInteger(band.deathmatchPool) || band.deathmatchPool < 1 || band.deathmatchPool > 6) {
       errors.push(band.tier + " Deathmatch Pool은 1~6 정수여야 합니다.");
+    }
+    var highest = index === sorted.length - 1;
+    if (!Number.isInteger(band.promotionGames) || band.promotionGames < 0 ||
+      !Number.isInteger(band.promotionWinsRequired) || band.promotionWinsRequired < 0) {
+      errors.push(band.tier + " 승급전 판수/필요 승수는 0 이상의 정수여야 합니다.");
+    } else if (highest && (band.promotionGames !== 0 || band.promotionWinsRequired !== 0)) {
+      errors.push(band.tier + "는 최상위 티어이므로 승급전 설정이 0/0이어야 합니다.");
+    } else if (!highest && (band.promotionGames < 1 || band.promotionWinsRequired < 1 ||
+      band.promotionWinsRequired > band.promotionGames)) {
+      errors.push(band.tier + " 승급전 필요 승수는 전체 판수 이하여야 합니다.");
     }
   });
   if (sorted.length > 0 && sorted[sorted.length - 1].maxExclusive !== null) {

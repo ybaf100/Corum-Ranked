@@ -59,6 +59,36 @@ struct DeathmatchSummaryView {
     std::string winnerSide;
 };
 
+struct PromotionSeriesView {
+    bool active = false;
+    std::string sourceTier;
+    std::string targetTier;
+    int cutoff = 0;
+    int gamesRequired = 0;
+    int winsRequired = 0;
+    int winsRemaining = 0;
+    std::vector<std::string> results;
+};
+
+struct RankedProfileView {
+    std::string displayedTier = "UNRANKED";
+    std::optional<int> visibleRankedScore;
+    int placementGames = 0;
+    int placementGamesRequired = 0;
+    std::vector<std::string> placementResults;
+    int resultStreak = 0;
+    PromotionSeriesView promotion;
+    bool demotionWarning = false;
+};
+
+struct RatingEventView {
+    bool placementCompleted = false;
+    bool promotionStarted = false;
+    bool promotionSucceeded = false;
+    bool promotionFailed = false;
+    bool demoted = false;
+};
+
 struct HistoryMatchView {
     std::string matchId;
     std::string finishedAt;
@@ -68,8 +98,8 @@ struct HistoryMatchView {
     std::string winnerSide;
     int roundWinsA = 0;
     int roundWinsB = 0;
-    std::optional<int> ownMmrDelta;
-    std::optional<int> ownRatingAfter;
+    std::optional<int> ownRankedScoreDelta;
+    std::optional<int> ownRankedScoreAfter;
     std::vector<RoundSummaryView> rounds;
     std::vector<DeathmatchSummaryView> deathmatches;
 };
@@ -87,6 +117,10 @@ struct MatchView {
     std::string playerBTier;
     int playerAScore = 0;
     int playerBScore = 0;
+    bool playerAScoreVisible = false;
+    bool playerBScoreVisible = false;
+    RankedProfileView playerAProfile;
+    RankedProfileView playerBProfile;
     std::string opponentName;
     std::string winnerSide;
     std::string cancellationReason;
@@ -109,18 +143,24 @@ struct MatchView {
     bool readyB = false;
     bool ownBanConfirmed = false;
     std::string ownBanCanonicalLevelId;
-    std::optional<int> ownMmrDelta;
-    std::optional<int> ownRatingAfter;
-    std::optional<int> mmrDeltaA;
-    std::optional<int> mmrDeltaB;
-    std::optional<int> ratingAfterA;
-    std::optional<int> ratingAfterB;
+    std::optional<int> ownRankedScoreDelta;
+    std::optional<int> ownRankedScoreAfter;
+    std::optional<int> rankedScoreDeltaA;
+    std::optional<int> rankedScoreDeltaB;
+    std::optional<int> rankedScoreAfterA;
+    std::optional<int> rankedScoreAfterB;
     std::string profileBeforeTierA;
     std::string profileBeforeTierB;
     std::string profileAfterTierA;
     std::string profileAfterTierB;
     std::optional<int> profileAfterScoreA;
     std::optional<int> profileAfterScoreB;
+    RankedProfileView profileBeforeA;
+    RankedProfileView profileBeforeB;
+    RankedProfileView profileAfterA;
+    RankedProfileView profileAfterB;
+    RatingEventView ratingEventA;
+    RatingEventView ratingEventB;
     bool spectatorActive = false;
     std::optional<int> spectatorCurrentProgress;
     std::string spectatorOpponentName;
@@ -174,8 +214,13 @@ struct RuntimeView {
     std::string error;
     std::string profileTier;
     int profileScore = 0;
+    bool profileScoreVisible = false;
     int placementGames = 0;
     int placementGamesRequired = 0;
+    std::vector<std::string> placementResults;
+    int resultStreak = 0;
+    PromotionSeriesView promotion;
+    bool demotionWarning = false;
     std::uint64_t revision = 0;
     RankedClientPresentationView client;
     MatchView match;

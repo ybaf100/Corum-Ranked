@@ -31,6 +31,8 @@ import type { RankedSessionContext } from "../session/session.types.js";
 export type DebugBotDifficulty = "EASY" | "NORMAL" | "HARD";
 export type DebugBotScenario =
   | "NORMAL_MATCH"
+  | "FORCE_WIN"
+  | "FORCE_LOSE"
   | "FORCE_BOT_1_CLEAR"
   | "FORCE_BOT_3_CLEARS"
   | "TRIGGER_LAST_ATTEMPT"
@@ -444,20 +446,29 @@ export class QueueService {
       matchType === "DEBUG_BOT" ? options.discordEventsEnabled ?? false : false;
     const discordEventsEnabled =
       matchType === "DEBUG_BOT" ? debugDiscordEvents : true;
+    const scoreRows = await transaction.query<{ player_id: string; visible_ranked_score: number | null }>(
+      `SELECT player_id, visible_ranked_score FROM ranked_profiles
+       WHERE player_id = $1 OR player_id = $2`,
+      [playerA.player_id, playerB.player_id],
+    );
+    const scoreBefore = (playerId: string): number => Number(
+      scoreRows.rows.find((row) => row.player_id === playerId)?.visible_ranked_score ?? 0,
+    );
 
     await transaction.query(
       `INSERT INTO ranked_matches (
          id, player_a_id, player_b_id, config_snapshot_id,
-         mmr_a_before, mmr_b_before, effective_rating_average, effective_tier,
+         mmr_a_before, mmr_b_before, ranked_score_a_before, ranked_score_b_before,
+         effective_rating_average, effective_tier,
          candidate_maps_snapshot, series_state, state, state_version,
          deadline_at, ready_deadline_at, last_heartbeat_a_at, last_heartbeat_b_at,
          rules_version, match_type, debug_bot_config, discord_events_enabled,
          debug_config, debug_discord_events, created_at
        ) VALUES (
-         $1, $2, $3, $4, $5, $6, $7, $8,
-         $9::jsonb, $10::jsonb, 'MATCHED', 1,
-         $11, $11, $13, $13, $12, $14, $15::jsonb, $16,
-         $15::jsonb, $17, $13
+         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+         $11::jsonb, $12::jsonb, 'MATCHED', 1,
+         $13, $13, $15, $15, $14, $16, $17::jsonb, $18,
+         $17::jsonb, $19, $15
        )`,
       [
         matchId,
@@ -466,6 +477,8 @@ export class QueueService {
         configSnapshotId,
         playerA.hidden_mmr_snapshot,
         playerB.hidden_mmr_snapshot,
+        scoreBefore(playerA.player_id),
+        scoreBefore(playerB.player_id),
         effective.averageRating,
         effective.tier,
         JSON.stringify(candidates),

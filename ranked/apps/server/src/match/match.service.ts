@@ -11,7 +11,6 @@ import {
   bannerForRound,
   calculateMmrUpdate,
   createRound,
-  displayedTierForProfile,
   evaluateDeathmatch,
   endRoundAttempt,
   resolveBans,
@@ -21,10 +20,17 @@ import {
   startRoundAttempt,
   startRoundAttemptFromIntent,
   tierBandFor,
+  updateRankedRatingProfile,
+  type DisplayTier,
   type MatchSeriesState,
   type PlayerSide,
+  type PromotionMark,
+  type PromotionSeriesState,
   type RandomSource,
   type RankedMapSnapshot,
+  type RankedRatingProfile,
+  type RankedRatingUpdate,
+  type RankedTier,
   type RoundState,
 } from "@corum-ranked/rules";
 import {
@@ -109,6 +115,13 @@ interface LockedMatchRow {
   mmr_delta_b: number | null;
   mmr_a_after: number | null;
   mmr_b_after: number | null;
+  ranked_score_a_before: number | null;
+  ranked_score_b_before: number | null;
+  ranked_score_delta_a: number | null;
+  ranked_score_delta_b: number | null;
+  ranked_score_a_after: number | null;
+  ranked_score_b_after: number | null;
+  rating_presentation: unknown | null;
   result_applied_at: Date | string | null;
   current_deathmatch_id: string | null;
   source_payload: unknown;
@@ -146,14 +159,24 @@ interface RoundRow {
 interface ProfileResultRow {
   player_id: string;
   hidden_mmr: number;
-  placement_games: number;
-}
-
-interface PublicProfileRow {
-  player_id: string;
-  displayed_tier: string;
   visible_ranked_score: number | null;
   placement_games: number;
+  placement_results: unknown;
+  displayed_tier: DisplayTier;
+  result_streak: number;
+  promotion_source_tier: RankedTier | null;
+  promotion_target_tier: RankedTier | null;
+  promotion_cutoff: number | null;
+  promotion_games_required: number | null;
+  promotion_wins_required: number | null;
+  promotion_results: unknown;
+  demotion_warning: boolean;
+}
+
+interface PlayerStateRow extends ProfileResultRow {
+  id: string;
+  gd_account_id: string;
+  gd_username: string;
 }
 
 interface RoundSummaryRow {
@@ -167,6 +190,13 @@ interface RoundSummaryRow {
   result: PlayerSide | "DRAW" | null;
 }
 
+interface MatchPerformanceRow {
+  score_a: number;
+  score_b: number;
+  clears_a: number;
+  clears_b: number;
+}
+
 interface HistoryMatchRow {
   id: string;
   player_a_id: string;
@@ -177,6 +207,11 @@ interface HistoryMatchRow {
   mmr_delta_b: number | null;
   mmr_a_after: number | null;
   mmr_b_after: number | null;
+  ranked_score_delta_a: number | null;
+  ranked_score_delta_b: number | null;
+  ranked_score_a_after: number | null;
+  ranked_score_b_after: number | null;
+  rating_presentation: unknown | null;
   series_state: unknown;
   finished_at: Date | string | null;
   opponent_name: string;
@@ -246,6 +281,68 @@ const parseJson = <T>(value: unknown): T => {
 const dateIso = (value: Date | string | null): string | null =>
   value === null ? null : new Date(value).toISOString();
 
+const marksFromJson = (value: unknown): readonly PromotionMark[] => {
+  const parsed = parseJson<unknown>(value ?? []);
+  if (!Array.isArray(parsed)) return [];
+  return parsed.filter((mark): mark is PromotionMark => mark === "WIN" || mark === "LOSS");
+};
+
+const promotionFromRow = (row: ProfileResultRow): PromotionSeriesState | null => {
+  if (
+    !row.promotion_source_tier || !row.promotion_target_tier ||
+    row.promotion_cutoff === null || row.promotion_games_required === null ||
+    row.promotion_wins_required === null
+  ) return null;
+  return {
+    sourceTier: row.promotion_source_tier,
+    targetTier: row.promotion_target_tier,
+    cutoff: Number(row.promotion_cutoff),
+    gamesRequired: Number(row.promotion_games_required),
+    winsRequired: Number(row.promotion_wins_required),
+    results: marksFromJson(row.promotion_results),
+  };
+};
+
+const ratingProfileFromRow = (row: ProfileResultRow): RankedRatingProfile => ({
+  hiddenMmr: Number(row.hidden_mmr),
+  visibleRankedScore: Number(row.visible_ranked_score ?? 0),
+  placementGames: Number(row.placement_games),
+  placementResults: marksFromJson(row.placement_results),
+  displayedTier: row.displayed_tier,
+  resultStreak: Number(row.result_streak ?? 0),
+  promotion: promotionFromRow(row),
+  demotionWarning: Boolean(row.demotion_warning),
+});
+
+const publicRatingProfile = (profile: RankedRatingProfile, placementGamesRequired: number) => {
+  const placement = profile.placementGames < placementGamesRequired;
+  const promotion = profile.promotion;
+  const promotionWins = promotion?.results.filter((mark) => mark === "WIN").length ?? 0;
+  return {
+    displayedTier: profile.displayedTier,
+    visibleRankedScore: placement ? null : profile.visibleRankedScore,
+    placementGames: profile.placementGames,
+    placementGamesRequired,
+    placementResults: profile.placementResults,
+    resultStreak: profile.resultStreak,
+    streak: Math.abs(profile.resultStreak) >= 2
+      ? {
+          type: profile.resultStreak > 0 ? "WIN" : "LOSS",
+          count: Math.abs(profile.resultStreak),
+        }
+      : null,
+    promotion: promotion
+      ? {
+          ...promotion,
+          wins: promotionWins,
+          losses: promotion.results.length - promotionWins,
+          winsRemaining: Math.max(0, promotion.winsRequired - promotionWins),
+        }
+      : null,
+    demotionWarning: profile.demotionWarning,
+  };
+};
+
 const sideColumn = (side: PlayerSide, prefix: string): string =>
   `${prefix}_${side.toLowerCase()}`;
 
@@ -273,6 +370,25 @@ export class MatchService {
     @Inject(MATCH_RUNTIME_STATE) private readonly runtimeState: MatchRuntimeStatePort,
   ) {}
 
+  /** Development-only entry point used by DebugBotService.
+   *  The public debug route is disabled unless DEBUG_BOT_* server settings are
+   *  explicitly configured, and this method additionally refuses real PvP.
+   */
+  public async forceDebugResult(matchId: string, winner: PlayerSide): Promise<void> {
+    const now = this.clock.now();
+    await this.database.transaction(async (transaction) => {
+      const match = await this.lockMatch(transaction, matchId);
+      if (match.match_type !== "DEBUG_BOT") {
+        throw new ConflictException("Forced results are only available for Debug Bot matches");
+      }
+      if (match.state === "MATCH_RESULT") return;
+      if (match.state === "CANCELLED") {
+        throw new ConflictException("A cancelled Debug Bot match cannot be forced");
+      }
+      await this.finalizeMatch(transaction, match, winner, now);
+    });
+  }
+
   public async history(session: RankedSessionContext) {
     const now = this.clock.now();
     const matches = await this.database.query<HistoryMatchRow>(
@@ -296,6 +412,9 @@ export class MatchService {
           : match.winner_id === match.player_b_id
             ? "B"
             : null;
+      const rating = match.rating_presentation
+        ? parseJson<Record<string, unknown>>(match.rating_presentation)
+        : {};
       items.push({
         matchId: match.id,
         finishedAt: dateIso(match.finished_at),
@@ -303,8 +422,16 @@ export class MatchService {
         opponentName: match.opponent_name,
         effectiveTier: match.effective_tier,
         winnerSide,
-        mmrDelta: { A: match.mmr_delta_a, B: match.mmr_delta_b },
-        ratingAfter: { A: match.mmr_a_after, B: match.mmr_b_after },
+        rankedScoreDelta: rating.rankedScoreDelta ?? {
+          A: match.ranked_score_delta_a,
+          B: match.ranked_score_delta_b,
+        },
+        rankedScoreAfter: {
+          A: match.ranked_score_a_after,
+          B: match.ranked_score_b_after,
+        },
+        profileAfter: rating.profileAfter ?? null,
+        ratingEvents: rating.events ?? null,
         series: parseJson<MatchSeriesState>(match.series_state),
         rounds: await this.roundSummaries(this.database, match.id),
         deathmatches: await this.deathmatchSummaries(this.database, match.id),
@@ -1913,7 +2040,7 @@ export class MatchService {
     const config = this.matchConfig(current);
     if (!config.operational.mmrPolicy) throw new Error("Missing MMR policy");
     const profiles = await transaction.query<ProfileResultRow>(
-      `SELECT player_id, hidden_mmr, placement_games
+      `SELECT *
        FROM ranked_profiles
        WHERE player_id = $1 OR player_id = $2
        ORDER BY player_id
@@ -1923,69 +2050,97 @@ export class MatchService {
     const profileA = profiles.rows.find((profile) => profile.player_id === current.player_a_id);
     const profileB = profiles.rows.find((profile) => profile.player_id === current.player_b_id);
     if (!profileA || !profileB) throw new Error("Match profile is missing");
+    const beforeA = ratingProfileFromRow(profileA);
+    const beforeB = ratingProfileFromRow(profileB);
+    const performance = await transaction.query<MatchPerformanceRow>(
+      `SELECT
+         COALESCE((SELECT SUM(score_a) FROM ranked_rounds WHERE match_id = $1), 0) +
+           COALESCE((SELECT SUM(score_a) FROM ranked_deathmatches WHERE match_id = $1), 0) AS score_a,
+         COALESCE((SELECT SUM(score_b) FROM ranked_rounds WHERE match_id = $1), 0) +
+           COALESCE((SELECT SUM(score_b) FROM ranked_deathmatches WHERE match_id = $1), 0) AS score_b,
+         COALESCE((SELECT SUM(clears_a) FROM ranked_rounds WHERE match_id = $1), 0) +
+           COALESCE((SELECT COUNT(*) FROM ranked_deathmatch_attempts a
+                     JOIN ranked_deathmatches d ON d.id = a.deathmatch_id
+                     WHERE d.match_id = $1 AND a.player_id = $2 AND a.valid = TRUE AND a.cleared = TRUE), 0) AS clears_a,
+         COALESCE((SELECT SUM(clears_b) FROM ranked_rounds WHERE match_id = $1), 0) +
+           COALESCE((SELECT COUNT(*) FROM ranked_deathmatch_attempts a
+                     JOIN ranked_deathmatches d ON d.id = a.deathmatch_id
+                     WHERE d.match_id = $1 AND a.player_id = $3 AND a.valid = TRUE AND a.cleared = TRUE), 0) AS clears_b`,
+      [current.id, current.player_a_id, current.player_b_id],
+    );
+    const totals = performance.rows[0] ?? { score_a: 0, score_b: 0, clears_a: 0, clears_b: 0 };
     const update = calculateMmrUpdate(
       {
-        ratingA: Number(profileA.hidden_mmr),
-        ratingB: Number(profileB.hidden_mmr),
-        placementGamesA: Number(profileA.placement_games),
-        placementGamesB: Number(profileB.placement_games),
+        ratingA: beforeA.hiddenMmr,
+        ratingB: beforeB.hiddenMmr,
+        placementGamesA: beforeA.placementGames,
+        placementGamesB: beforeB.placementGames,
         winner,
+        scoreA: Number(totals.score_a),
+        scoreB: Number(totals.score_b),
+        clearsA: Number(totals.clears_a),
+        clearsB: Number(totals.clears_b),
+        resultStreakA: beforeA.resultStreak,
+        resultStreakB: beforeB.resultStreak,
       },
       config.operational.mmrPolicy,
     );
-    const placementA = Number(profileA.placement_games) + 1;
-    const placementB = Number(profileB.placement_games) + 1;
-    const displayedA = displayedTierForProfile(
+    const ratingA = updateRankedRatingProfile(
+      beforeA,
+      "A",
+      winner,
       update.ratingAfterA,
-      placementA,
       config.operational.mmrPolicy,
       config.operational.tierBands,
     );
-    const displayedB = displayedTierForProfile(
+    const ratingB = updateRankedRatingProfile(
+      beforeB,
+      "B",
+      winner,
       update.ratingAfterB,
-      placementB,
       config.operational.mmrPolicy,
       config.operational.tierBands,
     );
-    await transaction.query(
-      `UPDATE ranked_profiles
-       SET hidden_mmr = $2, visible_ranked_score = $2,
-           displayed_tier = $3, placement_games = $4,
-           wins = wins + $5, losses = losses + $6, updated_at = $7
-       WHERE player_id = $1`,
-      [
-        current.player_a_id,
-        update.ratingAfterA,
-        displayedA,
-        placementA,
-        winner === "A" ? 1 : 0,
-        winner === "B" ? 1 : 0,
-        now.toISOString(),
-      ],
-    );
-    await transaction.query(
-      `UPDATE ranked_profiles
-       SET hidden_mmr = $2, visible_ranked_score = $2,
-           displayed_tier = $3, placement_games = $4,
-           wins = wins + $5, losses = losses + $6, updated_at = $7
-       WHERE player_id = $1`,
-      [
-        current.player_b_id,
-        update.ratingAfterB,
-        displayedB,
-        placementB,
-        winner === "B" ? 1 : 0,
-        winner === "A" ? 1 : 0,
-        now.toISOString(),
-      ],
-    );
+    await this.persistRatingProfile(transaction, current.player_a_id, ratingA, winner === "A", now);
+    await this.persistRatingProfile(transaction, current.player_b_id, ratingB, winner === "B", now);
+    const placementGamesRequired = config.operational.mmrPolicy.placementGames;
+    const ratingPresentation = {
+      rankedScoreDelta: { A: ratingA.visibleScoreDelta, B: ratingB.visibleScoreDelta },
+      profileBefore: {
+        A: publicRatingProfile(beforeA, placementGamesRequired),
+        B: publicRatingProfile(beforeB, placementGamesRequired),
+      },
+      profileAfter: {
+        A: publicRatingProfile(ratingA.profile, placementGamesRequired),
+        B: publicRatingProfile(ratingB.profile, placementGamesRequired),
+      },
+      events: {
+        A: {
+          placementCompleted: ratingA.placementCompleted,
+          promotionStarted: ratingA.promotionStarted,
+          promotionSucceeded: ratingA.promotionSucceeded,
+          promotionFailed: ratingA.promotionFailed,
+          demoted: ratingA.demoted,
+        },
+        B: {
+          placementCompleted: ratingB.placementCompleted,
+          promotionStarted: ratingB.promotionStarted,
+          promotionSucceeded: ratingB.promotionSucceeded,
+          promotionFailed: ratingB.promotionFailed,
+          demoted: ratingB.demoted,
+        },
+      },
+    };
     const winnerId = winner === "A" ? current.player_a_id : current.player_b_id;
     await transaction.query(
       `UPDATE ranked_matches
        SET state = 'MATCH_RESULT', winner_id = $2,
            mmr_delta_a = $3, mmr_delta_b = $4,
            mmr_a_after = $5, mmr_b_after = $6,
-           result_applied_at = $7, finished_at = $7,
+           ranked_score_delta_a = $7, ranked_score_delta_b = $8,
+           ranked_score_a_after = $9, ranked_score_b_after = $10,
+           rating_presentation = $11::jsonb,
+           result_applied_at = $12, finished_at = $12,
            deadline_at = NULL, state_version = state_version + 1
        WHERE id = $1 AND result_applied_at IS NULL`,
       [
@@ -1995,10 +2150,17 @@ export class MatchService {
         update.deltaB,
         update.ratingAfterA,
         update.ratingAfterB,
+        ratingA.visibleScoreDelta,
+        ratingB.visibleScoreDelta,
+        ratingA.profile.visibleRankedScore,
+        ratingB.profile.visibleRankedScore,
+        JSON.stringify(ratingPresentation),
         now.toISOString(),
       ],
     );
     const finalSeries = parseJson<MatchSeriesState>(current.series_state);
+    const publicAfterA = publicRatingProfile(ratingA.profile, placementGamesRequired);
+    const publicAfterB = publicRatingProfile(ratingB.profile, placementGamesRequired);
     await this.outbox.enqueueMatchEvent(
       transaction,
       current,
@@ -2007,10 +2169,59 @@ export class MatchService {
       {
         winnerSide: winner,
         roundResults: finalSeries.roundResults,
-        mmrDelta: { A: update.deltaA, B: update.deltaB },
-        ratingAfter: { A: update.ratingAfterA, B: update.ratingAfterB },
+        rankedScoreDelta: { A: ratingA.visibleScoreDelta, B: ratingB.visibleScoreDelta },
+        rankedScoreAfter: {
+          A: publicAfterA.visibleRankedScore,
+          B: publicAfterB.visibleRankedScore,
+        },
+        placementResults: {
+          A: publicAfterA.placementResults,
+          B: publicAfterB.placementResults,
+        },
+        ratingEvents: ratingPresentation.events,
       },
       now,
+    );
+  }
+
+  private async persistRatingProfile(
+    transaction: SqlExecutor,
+    playerId: string,
+    update: RankedRatingUpdate,
+    won: boolean,
+    now: Date,
+  ): Promise<void> {
+    const profile = update.profile;
+    const promotion = profile.promotion;
+    await transaction.query(
+      `UPDATE ranked_profiles
+       SET hidden_mmr = $2, visible_ranked_score = $3, displayed_tier = $4,
+           placement_games = $5, placement_results = $6::jsonb, result_streak = $7,
+           promotion_source_tier = $8, promotion_target_tier = $9,
+           promotion_cutoff = $10, promotion_games_required = $11,
+           promotion_wins_required = $12, promotion_results = $13::jsonb,
+           demotion_warning = $14,
+           wins = wins + $15, losses = losses + $16, updated_at = $17
+       WHERE player_id = $1`,
+      [
+        playerId,
+        profile.hiddenMmr,
+        profile.visibleRankedScore,
+        profile.displayedTier,
+        profile.placementGames,
+        JSON.stringify(profile.placementResults),
+        profile.resultStreak,
+        promotion?.sourceTier ?? null,
+        promotion?.targetTier ?? null,
+        promotion?.cutoff ?? null,
+        promotion?.gamesRequired ?? null,
+        promotion?.winsRequired ?? null,
+        JSON.stringify(promotion?.results ?? []),
+        profile.demotionWarning,
+        won ? 1 : 0,
+        won ? 0 : 1,
+        now.toISOString(),
+      ],
     );
   }
 
@@ -2548,15 +2759,9 @@ export class MatchService {
     viewerPlayerId: string,
     now: Date,
   ) {
-    const players = await transaction.query<{
-      id: string;
-      gd_account_id: string;
-      gd_username: string;
-      displayed_tier: string;
-      visible_ranked_score: number | null;
-    }>(
+    const players = await transaction.query<PlayerStateRow>(
       `SELECT p.id, p.gd_account_id::text AS gd_account_id, p.gd_username,
-              rp.displayed_tier, rp.visible_ranked_score
+              rp.*
        FROM ranked_players p
        JOIN ranked_profiles rp ON rp.player_id = p.id
        WHERE p.id = $1 OR p.id = $2`,
@@ -2673,49 +2878,23 @@ export class MatchService {
       : match.ban_b_canonical_id;
     const rounds = await this.roundSummaries(transaction, match.id);
     const deathmatches = await this.deathmatchSummaries(transaction, match.id);
-    let profileAfter: Record<PlayerSide, object | null> | null = null;
-    let profileBefore: Record<PlayerSide, object | null> | null = null;
+    if (!config.operational.mmrPolicy) throw new Error("Missing MMR policy");
+    const placementGamesRequired = config.operational.mmrPolicy.placementGames;
+    let ratingPresentation: Record<string, unknown> | null = null;
     if (match.state === "MATCH_RESULT") {
-      const profiles = await transaction.query<PublicProfileRow>(
-        `SELECT player_id, displayed_tier, visible_ranked_score, placement_games
-         FROM ranked_profiles WHERE player_id = $1 OR player_id = $2`,
-        [match.player_a_id, match.player_b_id],
-      );
-      const a = profiles.rows.find((profile) => profile.player_id === match.player_a_id);
-      const b = profiles.rows.find((profile) => profile.player_id === match.player_b_id);
-      profileAfter = {
-        A: a
-          ? { displayedTier: a.displayed_tier, visibleRankedScore: Number(a.visible_ranked_score ?? 0), placementGames: Number(a.placement_games) }
-          : null,
-        B: b
-          ? { displayedTier: b.displayed_tier, visibleRankedScore: Number(b.visible_ranked_score ?? 0), placementGames: Number(b.placement_games) }
-          : null,
-      };
-      if (!config.operational.mmrPolicy) throw new Error("Missing MMR policy");
-      profileBefore = {
-        A: a
-          ? {
-              displayedTier: displayedTierForProfile(
-                Number(match.mmr_a_before),
-                Math.max(0, Number(a.placement_games) - 1),
-                config.operational.mmrPolicy,
-                config.operational.tierBands,
-              ),
-              visibleRankedScore: Number(match.mmr_a_before),
-            }
-          : null,
-        B: b
-          ? {
-              displayedTier: displayedTierForProfile(
-                Number(match.mmr_b_before),
-                Math.max(0, Number(b.placement_games) - 1),
-                config.operational.mmrPolicy,
-                config.operational.tierBands,
-              ),
-              visibleRankedScore: Number(match.mmr_b_before),
-            }
-          : null,
-      };
+      ratingPresentation = match.rating_presentation
+        ? parseJson<Record<string, unknown>>(match.rating_presentation)
+        : {
+            rankedScoreDelta: {
+              A: match.ranked_score_delta_a,
+              B: match.ranked_score_delta_b,
+            },
+            profileAfter: {
+              A: playerA ? publicRatingProfile(ratingProfileFromRow(playerA), placementGamesRequired) : null,
+              B: playerB ? publicRatingProfile(ratingProfileFromRow(playerB), placementGamesRequired) : null,
+            },
+            events: { A: {}, B: {} },
+          };
     }
     return {
       matchId: match.id,
@@ -2735,16 +2914,14 @@ export class MatchService {
           ? {
               gdAccountId: playerA.gd_account_id,
               gdUsername: playerA.gd_username,
-              displayedTier: playerA.displayed_tier,
-              visibleRankedScore: Number(playerA.visible_ranked_score ?? 0),
+              ...publicRatingProfile(ratingProfileFromRow(playerA), placementGamesRequired),
             }
           : null,
         B: playerB
           ? {
               gdAccountId: playerB.gd_account_id,
               gdUsername: playerB.gd_username,
-              displayedTier: playerB.displayed_tier,
-              visibleRankedScore: Number(playerB.visible_ranked_score ?? 0),
+              ...publicRatingProfile(ratingProfileFromRow(playerB), placementGamesRequired),
             }
           : null,
       },
@@ -2769,10 +2946,7 @@ export class MatchService {
         match.state === "MATCH_RESULT"
           ? {
               winnerSide: match.winner_id === match.player_a_id ? "A" : "B",
-              mmrDelta: { A: match.mmr_delta_a, B: match.mmr_delta_b },
-              ratingAfter: { A: match.mmr_a_after, B: match.mmr_b_after },
-              profileBefore,
-              profileAfter,
+              ...ratingPresentation,
             }
           : null,
       cancellation:

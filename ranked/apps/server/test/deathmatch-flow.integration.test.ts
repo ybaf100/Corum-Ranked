@@ -35,6 +35,7 @@ beforeAll(async () => {
     "0002_debug_bot_match.sql",
     "0003_debug_rating_playable_maps.sql",
     "0004_alpha37_schema_hardening.sql",
+    "0005_v050_rating_system.sql",
   ]) {
     const migrationPath = fileURLToPath(
       new URL(`../../../migrations/${migrationName}`, import.meta.url),
