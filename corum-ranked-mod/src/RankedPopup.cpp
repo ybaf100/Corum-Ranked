@@ -6,8 +6,9 @@
 #include "RankedSongGate.hpp"
 
 #include <Geode/Geode.hpp>
+// CCParticleFire is a cocos2d particle type, not a generated GD binding.
+#include <Geode/cocos/particle_nodes/CCParticleExamples.h>
 #include <Geode/binding/GameLevelManager.hpp>
-#include <Geode/binding/CCParticleFire.hpp>
 #include <Geode/binding/GameManager.hpp>
 #include <Geode/binding/GJGameLevel.hpp>
 #include <Geode/binding/LevelInfoLayer.hpp>
