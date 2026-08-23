@@ -1622,7 +1622,7 @@ class CorumRankedLayer final : public CCLayerColor {
     void animatePromotionTrigger(
         float centerX,
         float finalY,
-        RatingEventView const& event,
+        corum::ranked::RatingEventView const& event,
         RankedProfileView const& before,
         std::optional<int> delta
     ) {
