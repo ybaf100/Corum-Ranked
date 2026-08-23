@@ -739,9 +739,9 @@ void RankedAudioManager::updateOwnedFades(std::chrono::steady_clock::time_point 
 }
 
 void RankedAudioManager::fadeOutForGameplay() {
-    // The Ranked layer stops ticking as soon as GD pushes the LevelInfo/Play
-    // scene, so a tick-driven fade could otherwise strand the custom channel in
-    // the gameplay scene. Stop it deterministically before handing audio back to GD.
+    // This is called only after vanilla successfully initializes PlayLayer. The
+    // Ranked layer no longer ticks in gameplay, so stop the independently-owned
+    // channel deterministically and hand audio ownership back to Geometry Dash.
     m_desiredMode = RankedAudioMode::Silent;
     m_switchPending = false;
     stopOwnedAudio();

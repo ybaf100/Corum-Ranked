@@ -99,6 +99,15 @@ HudPresentation presentHud(HudInput const& input) {
         result.stateText = "FINAL ATTEMPT";
         result.timerText = windowCountdown(input.remainingMillis);
         result.windowStateFirst = true;
+    } else if (input.state == "ROUND_SETTLING") {
+        // The 10-second value is a start deadline. Once it reaches zero, keep the
+        // terminal 0.0 visible while an attempt that started in time finishes.
+        // A two-Clear trigger uses LAST ATTEMPT; the ordinary three-minute expiry
+        // uses FINAL ATTEMPT.
+        auto const lastAttempt = std::max(ownClears, opponentClears) >= 2;
+        result.stateText = lastAttempt ? "LAST ATTEMPT" : "FINAL ATTEMPT";
+        result.timerText = "0.0";
+        result.windowStateFirst = true;
     } else {
         result.timerText = normalCountdown(input.remainingMillis);
         if (input.banner == "MATCH_POINT") result.stateText = "MATCH POINT";

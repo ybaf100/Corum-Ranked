@@ -1646,7 +1646,6 @@ class CorumRankedLayer final : public CCLayerColor {
         if (m_enteringSongGate) return;
         auto* level = findLevelInfoMap();
         if (!level) return;
-        RankedAudioManager::get().fadeOutForGameplay();
 
         // The real Geometry Dash LevelInfo page owns map/song acquisition. The
         // explicit override is used as a recovery path when polling skipped a
@@ -1703,7 +1702,6 @@ class CorumRankedLayer final : public CCLayerColor {
             return;
         }
         m_enteringLevel = true;
-        RankedAudioManager::get().fadeOutForGameplay();
         // Do not construct PlayLayer directly. Enter through Geometry Dash's normal
         // LevelInfoLayer -> onPlay path; this lets the game own level validation,
         // loading transitions, audio setup, and the return/quit stack.

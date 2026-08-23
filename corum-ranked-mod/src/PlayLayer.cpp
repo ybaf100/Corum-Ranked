@@ -1,4 +1,5 @@
 #include "RankedRuntime.hpp"
+#include "RankedAudioManager.hpp"
 #include "domain/HudPresentation.hpp"
 #include "domain/AttemptScoring.hpp"
 #include "domain/RenderFpsMeter.hpp"
@@ -134,6 +135,16 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         m_fields->rankedLevel =
             runtime.view().stage == corum::ranked::RuntimeStage::Matched &&
             runtime.isGameplayLevel(m_fields->levelId);
+        // Keep Match music alive throughout ROUND STARTING IN and LevelInfo.
+        // Stop it only after vanilla has successfully created the real PlayLayer.
+        if (m_fields->rankedLevel) {
+            corum::ranked::RankedAudioManager::get().fadeOutForGameplay();
+            log::info(
+                "Ranked PlayLayer initialized through vanilla Play: match={} level={}",
+                runtime.view().match.matchId,
+                m_fields->levelId
+            );
+        }
         if (m_fields->rankedLevel) {
             if (auto const qualifying = runtime.gameplayQualifyingPercent(m_fields->levelId)) {
                 m_fields->qualifyingPercent = *qualifying;

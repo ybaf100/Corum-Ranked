@@ -21,6 +21,7 @@ namespace {
 
 constexpr std::string_view kCbfId = "syzzi.click_between_frames";
 constexpr std::string_view kDefaultRankedServerURL = "https://corum-ranked.onrender.com";
+constexpr auto kAttemptRequestWatchdog = std::chrono::seconds(12);
 constexpr std::string_view kKnownCbfSettings[] = {
     "soft-toggle",
     "click-on-steps",
@@ -234,6 +235,13 @@ void RankedRuntime::invalidatePollRequest() {
     m_nextPollAt = {};
 }
 
+void RankedRuntime::invalidateAttemptRequest() {
+    ++m_attemptRequestGeneration;
+    m_attemptRequest.cancel();
+    m_attemptBusy = false;
+    m_attemptRequestStartedAt = {};
+}
+
 std::string RankedRuntime::endpoint(std::string const& path) const {
     return m_serverURL + path;
 }
@@ -247,6 +255,10 @@ void RankedRuntime::begin() {
     ) return;
 
     invalidatePollRequest();
+    invalidateAttemptRequest();
+    ++m_progressRequestGeneration;
+    m_progressRequest.cancel();
+    m_progressBusy = false;
 
     m_serverURL = trim(Mod::get()->getSettingValue<std::string>("ranked-server-url"));
     if (m_serverURL.empty()) {
@@ -271,6 +283,7 @@ void RankedRuntime::begin() {
     m_gameplayStartContextKey.clear();
     m_gameplayStartedAt.clear();
     m_gameplayStartEligible = false;
+    m_gameplayStartNeedsIntent = false;
     m_pendingStart.reset();
     m_pendingEnd.reset();
     m_attemptBacklog.clear();
@@ -279,6 +292,8 @@ void RankedRuntime::begin() {
     m_attemptIntentBusy = false;
     m_attemptIntentBacklog.clear();
     m_pendingProgress.reset();
+    m_nextAttemptRetryAt = {};
+    m_nextProgressAt = {};
     m_lastSubmittedProgress = -1;
     m_localDeathmatchSequence = 0;
     m_localDeathmatchVisualAttempts = 0;
@@ -540,6 +555,10 @@ void RankedRuntime::joinQueue() {
         return;
     }
     invalidatePollRequest();
+    invalidateAttemptRequest();
+    ++m_progressRequestGeneration;
+    m_progressRequest.cancel();
+    m_progressBusy = false;
     matjson::Value body;
     body["installedMods"] = installedModsJson();
     auto request = baseRequest(m_sessionToken);
@@ -1121,6 +1140,10 @@ void RankedRuntime::dismissMatch() {
     // pressed. Cancel it and invalidate its callback before clearing matchToken /
     // match view, otherwise the old response can resurrect the previous match.
     invalidatePollRequest();
+    invalidateAttemptRequest();
+    ++m_progressRequestGeneration;
+    m_progressRequest.cancel();
+    m_progressBusy = false;
     if (m_view.match.state == "MATCH_RESULT") {
         auto const ownSide = m_view.match.side;
         auto const& tier = ownSide == "A" ? m_view.match.profileAfterTierA : m_view.match.profileAfterTierB;
@@ -1138,6 +1161,7 @@ void RankedRuntime::dismissMatch() {
     m_gameplayStartContextKey.clear();
     m_gameplayStartedAt.clear();
     m_gameplayStartEligible = false;
+    m_gameplayStartNeedsIntent = false;
     m_pendingStart.reset();
     m_pendingEnd.reset();
     m_attemptBacklog.clear();
@@ -1147,6 +1171,8 @@ void RankedRuntime::dismissMatch() {
     m_attemptIntentBacklog.clear();
     m_nextIntentRetryAt = {};
     m_pendingProgress.reset();
+    m_nextAttemptRetryAt = {};
+    m_nextProgressAt = {};
     m_lastSubmittedProgress = -1;
     m_localDeathmatchSequence = 0;
     m_localDeathmatchVisualAttempts = 0;
@@ -1671,6 +1697,12 @@ bool RankedRuntime::reportAttemptEnd(int levelId, double progressPercent, bool c
     }
 
     ++m_view.revision;
+    // Do not leave a best-effort progress POST competing with the authoritative
+    // End on iOS. Cancelling it is safe: End carries the exact final progress,
+    // and its clientEventId is the idempotent score journal entry.
+    ++m_progressRequestGeneration;
+    m_progressRequest.cancel();
+    m_progressBusy = false;
     m_pendingProgress.reset();
     log::debug(
         "Ranked attempt end queued: level={} progress={} cleared={} optimisticScore={}",
@@ -1804,11 +1836,20 @@ void RankedRuntime::sendAttemptStart() {
     if (!starting.clientStartedAt.empty()) body["clientStartedAt"] = starting.clientStartedAt;
     auto request = baseRequest(m_sessionToken, m_matchToken);
     request.bodyJSON(body);
+    auto const requestGeneration = ++m_attemptRequestGeneration;
     m_attemptBusy = true;
+    m_attemptRequestStartedAt = std::chrono::steady_clock::now();
+    log::debug(
+        "Sending Ranked attempt start: level={} event={}",
+        starting.levelId,
+        starting.eventId
+    );
     m_attemptRequest.spawn(
         request.post(endpoint("/api/ranked/matches/" + m_view.match.matchId + "/attempt/start")),
-        [this, starting](web::WebResponse response) {
+        [this, starting, requestGeneration](web::WebResponse response) {
+            if (requestGeneration != m_attemptRequestGeneration) return;
             m_attemptBusy = false;
+            m_attemptRequestStartedAt = {};
             if (!successful(response)) {
                 auto const reason = responseError(response);
                 if (response.code() == 409) {
@@ -1896,11 +1937,21 @@ void RankedRuntime::sendAttemptEnd() {
     if (!ending.clientEndedAt.empty()) body["clientEndedAt"] = ending.clientEndedAt;
     auto request = baseRequest(m_sessionToken, m_matchToken);
     request.bodyJSON(body);
+    auto const requestGeneration = ++m_attemptRequestGeneration;
     m_attemptBusy = true;
+    m_attemptRequestStartedAt = std::chrono::steady_clock::now();
+    log::debug(
+        "Sending Ranked attempt end: attempt={} level={} event={}",
+        m_attemptId,
+        ending.levelId,
+        ending.eventId
+    );
     m_attemptRequest.spawn(
         request.post(endpoint("/api/ranked/matches/" + m_view.match.matchId + "/attempt/end")),
-        [this, ending](web::WebResponse response) {
+        [this, ending, requestGeneration](web::WebResponse response) {
+            if (requestGeneration != m_attemptRequestGeneration) return;
             m_attemptBusy = false;
+            m_attemptRequestStartedAt = {};
             if (!successful(response)) {
                 auto const reason = responseError(response);
                 if (response.code() == 409) {
@@ -1981,11 +2032,13 @@ void RankedRuntime::sendAttemptProgress() {
     body["progressPercent"] = progress;
     auto request = baseRequest(m_sessionToken, m_matchToken);
     request.bodyJSON(body);
+    auto const requestGeneration = ++m_progressRequestGeneration;
     m_progressBusy = true;
     m_nextProgressAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(100);
     m_progressRequest.spawn(
         request.post(endpoint("/api/ranked/matches/" + m_view.match.matchId + "/attempt/progress")),
-        [this, attemptId, progress](web::WebResponse response) {
+        [this, attemptId, progress, requestGeneration](web::WebResponse response) {
+            if (requestGeneration != m_progressRequestGeneration) return;
             m_progressBusy = false;
             if (successful(response)) {
                 auto const root = response.json().unwrapOr(matjson::Value());
@@ -2021,6 +2074,21 @@ void RankedRuntime::tick() {
     if (now >= m_nextPollAt) {
         if (m_view.stage == RuntimeStage::Queued) pollQueue();
         if (m_view.stage == RuntimeStage::Matched) pollMatch();
+    }
+    if (
+        m_attemptBusy &&
+        m_attemptRequestStartedAt != std::chrono::steady_clock::time_point{} &&
+        now - m_attemptRequestStartedAt >= kAttemptRequestWatchdog
+    ) {
+        auto const requestKind = !m_attemptId.empty() && m_pendingEnd ? "end" : "start";
+        log::warn(
+            "Ranked attempt {} request stalled for {}s; cancelling and retrying the same event",
+            requestKind,
+            std::chrono::duration_cast<std::chrono::seconds>(kAttemptRequestWatchdog).count()
+        );
+        invalidateAttemptRequest();
+        m_nextAttemptRetryAt = now + std::chrono::milliseconds(250);
+        setTransientError(fmt::format("Attempt {} sync timed out; retrying.", requestKind));
     }
     flushAttemptEvents();
     flushAttemptStartIntents();

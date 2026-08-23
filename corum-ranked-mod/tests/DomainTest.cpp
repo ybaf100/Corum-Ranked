@@ -239,8 +239,19 @@ void hudTests() {
     assert(hud.timerText == "7.4");
     assert(hud.windowStateFirst);
 
+    input.state = "ROUND_SETTLING";
+    input.remainingMillis.reset();
+    input.clearsA = 0;
+    input.clearsB = 0;
+    hud = presentHud(input);
+    assert(hud.stateText == "FINAL ATTEMPT");
+    assert(hud.timerText == "0.0");
+    assert(hud.windowStateFirst);
+
     input.state = "LAST_ATTEMPT_WINDOW";
     input.remainingMillis = 6'400;
+    input.clearsA = 1;
+    input.clearsB = 2;
     input.spectatorActive = true;
     input.spectatorOpponentName = "PlayerB";
     input.spectatorCurrentProgress = 73;
@@ -256,6 +267,12 @@ void hudTests() {
     assert(hud.ownChecks[1] == ClearCheckColor::Green);
     assert(hud.opponentChecks[0] == ClearCheckColor::Green);
     assert(hud.opponentChecks[1] == ClearCheckColor::Gray);
+
+    input.state = "ROUND_SETTLING";
+    input.remainingMillis.reset();
+    hud = presentHud(input);
+    assert(hud.stateText == "LAST ATTEMPT");
+    assert(hud.timerText == "0.0");
 
     input.state = "DEATHMATCH_PLAYING";
     input.deathmatch = true;
