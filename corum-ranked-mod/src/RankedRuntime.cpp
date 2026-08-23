@@ -227,6 +227,13 @@ void RankedRuntime::setTransientError(std::string error) {
     ++m_view.revision;
 }
 
+void RankedRuntime::invalidatePollRequest() {
+    ++m_pollRequestGeneration;
+    m_pollRequest.cancel();
+    m_pollBusy = false;
+    m_nextPollAt = {};
+}
+
 std::string RankedRuntime::endpoint(std::string const& path) const {
     return m_serverURL + path;
 }
@@ -238,6 +245,8 @@ void RankedRuntime::begin() {
         m_view.stage == RuntimeStage::Queued ||
         m_view.stage == RuntimeStage::Matched
     ) return;
+
+    invalidatePollRequest();
 
     m_serverURL = trim(Mod::get()->getSettingValue<std::string>("ranked-server-url"));
     if (m_serverURL.empty()) {
@@ -530,6 +539,7 @@ void RankedRuntime::joinQueue() {
         setStage(RuntimeStage::Blocked, "The active mod environment changed. Re-open Ranked to recheck.");
         return;
     }
+    invalidatePollRequest();
     matjson::Value body;
     body["installedMods"] = installedModsJson();
     auto request = baseRequest(m_sessionToken);
@@ -567,6 +577,7 @@ void RankedRuntime::startDebugBotMatch(DebugBotMatchOptions options) {
         setStage(RuntimeStage::Blocked, "The active mod environment changed. Re-open Ranked to recheck.");
         return;
     }
+    invalidatePollRequest();
     matjson::Value body;
     body["password"] = options.password;
     body["difficulty"] = options.difficulty;
@@ -607,14 +618,17 @@ void RankedRuntime::startDebugBotMatch(DebugBotMatchOptions options) {
 
 void RankedRuntime::leaveQueue() {
     if (m_controlBusy || m_sessionToken.empty() || m_view.stage != RuntimeStage::Queued) return;
+    invalidatePollRequest();
     auto request = baseRequest(m_sessionToken);
     m_controlBusy = true;
+    setStage(RuntimeStage::JoiningQueue, "Leaving the Ranked queue...");
     m_controlRequest.spawn(
         request.post(endpoint("/api/ranked/queue/leave")),
         [this](web::WebResponse response) {
             m_controlBusy = false;
             if (!successful(response)) {
-                setTransientError(responseError(response));
+                setStage(RuntimeStage::Queued, "Searching for an opponent...", responseError(response));
+                m_nextPollAt = std::chrono::steady_clock::now();
                 return;
             }
             setStage(RuntimeStage::Ready, "Left the queue.");
@@ -625,10 +639,15 @@ void RankedRuntime::leaveQueue() {
 void RankedRuntime::pollQueue() {
     if (m_pollBusy || m_sessionToken.empty() || m_view.stage != RuntimeStage::Queued) return;
     auto request = baseRequest(m_sessionToken);
+    auto const generation = ++m_pollRequestGeneration;
     m_pollBusy = true;
     m_pollRequest.spawn(
         request.get(endpoint("/api/ranked/queue/status")),
-        [this](web::WebResponse response) {
+        [this, generation](web::WebResponse response) {
+            if (generation != m_pollRequestGeneration) {
+                log::debug("Ignoring stale Ranked queue poll response");
+                return;
+            }
             m_pollBusy = false;
             m_nextPollAt = std::chrono::steady_clock::now() +
                 std::chrono::milliseconds(pollIntervalMillis());
@@ -666,11 +685,21 @@ void RankedRuntime::pollMatch() {
         m_pollBusy || m_sessionToken.empty() || m_matchToken.empty() ||
         m_view.stage != RuntimeStage::Matched || m_view.match.matchId.empty()
     ) return;
+    auto const matchId = m_view.match.matchId;
     auto request = baseRequest(m_sessionToken, m_matchToken);
+    auto const generation = ++m_pollRequestGeneration;
     m_pollBusy = true;
     m_pollRequest.spawn(
-        request.get(endpoint("/api/ranked/matches/" + m_view.match.matchId + "/state")),
-        [this](web::WebResponse response) {
+        request.get(endpoint("/api/ranked/matches/" + matchId + "/state")),
+        [this, generation, matchId](web::WebResponse response) {
+            if (
+                generation != m_pollRequestGeneration ||
+                m_view.stage != RuntimeStage::Matched ||
+                m_view.match.matchId != matchId
+            ) {
+                log::debug("Ignoring stale Ranked match poll response: match={}", matchId);
+                return;
+            }
             m_pollBusy = false;
             if (!successful(response)) {
                 m_nextPollAt = std::chrono::steady_clock::now() +
@@ -1088,6 +1117,10 @@ void RankedRuntime::dismissMatch() {
         }
         return;
     }
+    // A terminal-state poll may still be in flight when Queue Again or Close is
+    // pressed. Cancel it and invalidate its callback before clearing matchToken /
+    // match view, otherwise the old response can resurrect the previous match.
+    invalidatePollRequest();
     if (m_view.match.state == "MATCH_RESULT") {
         auto const ownSide = m_view.match.side;
         auto const& tier = ownSide == "A" ? m_view.match.profileAfterTierA : m_view.match.profileAfterTierB;

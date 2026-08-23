@@ -3,7 +3,10 @@
 
 #include <Geode/Geode.hpp>
 #include <Geode/binding/CustomSongWidget.hpp>
+#include <Geode/binding/GameLevelManager.hpp>
+#include <Geode/binding/GameManager.hpp>
 #include <Geode/binding/MusicDownloadManager.hpp>
+#include <Geode/binding/PlayLayer.hpp>
 #include <Geode/modify/LevelInfoLayer.hpp>
 
 #include <algorithm>
@@ -60,6 +63,17 @@ bool mapReady(GJGameLevel* level) {
     if (!level || level->m_levelString.empty() || level->m_levelNotDownloaded) return false;
     auto const expectedLevelId = corum::ranked::RankedRuntime::get().currentLevelId();
     return expectedLevelId > 0 && expectedLevelId == static_cast<int>(level->m_levelID);
+}
+
+GJGameLevel* canonicalPlayableLevel(GJGameLevel* fallback) {
+    auto const expectedLevelId = corum::ranked::RankedRuntime::get().currentLevelId();
+    if (expectedLevelId <= 0) return nullptr;
+    if (auto* manager = GameLevelManager::sharedState()) {
+        if (auto* saved = manager->getSavedLevel(expectedLevelId); mapReady(saved)) {
+            return saved;
+        }
+    }
+    return mapReady(fallback) ? fallback : nullptr;
 }
 
 std::vector<int> collectSongIds(GJGameLevel* level) {
@@ -424,6 +438,8 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
                 m_fields->gateCountdown->setString("WAITING FOR MAP");
             } else if (!readyForStart) {
                 m_fields->gateCountdown->setString("WAITING FOR SONG");
+            } else if (rankedPlayingState(match.state)) {
+                m_fields->gateCountdown->setString("STARTING...");
             } else if (rankedPrepareState(match.state) && ownReady && !opponentReady) {
                 m_fields->gateCountdown->setString("WAITING FOR OPPONENT");
             } else if (rankedPrepareState(match.state) && ownReady && opponentReady) {
@@ -564,6 +580,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
     }
 
     bool launchRankedGameplay(CCObject* sender) {
+        (void)sender;
         if (m_fields->gameplayLaunchStarted || m_fields->returningToRanked) return false;
 
         auto& runtime = corum::ranked::RankedRuntime::get();
@@ -576,77 +593,54 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
             return false;
         }
 
-        auto const ready = songsReady(m_level, m_songWidget);
-        if (!ready && !runtime.songBypassAllowed()) return false;
-        if (!ready && runtime.songBypassAllowed()) m_level->m_showedSongWarning = true;
+        // The LevelInfo page may have started from a synthetic online-level shell.
+        // Always launch the canonical saved payload produced by vanilla download
+        // completion when one exists; PlayLayer must never receive the shell.
+        auto* launchLevel = canonicalPlayableLevel(m_level);
+        if (!launchLevel) return false;
 
-        // Arm while the download gate is still alive. If authority/GD state is
-        // temporarily out of sync, return false and let updateSongDownloadGate()
-        // retry on its next tick instead of destroying the READY page.
+        auto const ready = songsReady(launchLevel, m_songWidget);
+        if (!ready && !runtime.songBypassAllowed()) return false;
+        if (!ready && runtime.songBypassAllowed()) launchLevel->m_showedSongWarning = true;
+
+        // Arm the exact server-selected map before constructing PlayLayer so its
+        // init hook can recognize the launch and journal the first visual Start.
         if (!runtime.armCurrentLevelForGameplay()) return false;
 
-        // Latch before vanilla starts mutating/pushing the gameplay scene. A
-        // scheduled callback and user Space/Play can otherwise fire in adjacent
-        // frames and enter LevelInfoLayer::onPlay twice.
+        // Constructing PlayLayer is the launch acknowledgement. Calling vanilla
+        // LevelInfoLayer::onPlay() and waiting for onExit was only an indirect
+        // guess; on iOS it could decline while m_isBusy/shouldDownloadLevel still
+        // reflected the preceding download and leave this page stuck forever.
         m_fields->gameplayLaunchStarted = true;
         m_fields->autoPlayScheduled = false;
         unschedule(schedule_selector(CorumRankedLevelInfoLayer::autoPlayRanked));
+        auto* gameplayScene = PlayLayer::scene(launchLevel, false, false);
+        if (!gameplayScene) {
+            m_fields->gameplayLaunchStarted = false;
+            m_fields->songGateStartingPlay = false;
+            if (m_fields->gateCountdown) {
+                m_fields->gateCountdown->setString("PLAY INIT FAILED - RETRYING");
+                m_fields->gateCountdown->setColor({255, 92, 92});
+            }
+            return false;
+        }
 
-        // Do NOT tear down the Ranked gate before vanilla actually leaves this
-        // LevelInfoLayer. alpha.37 previously treated the call itself as success:
-        // if vanilla onPlay() declined/failed to transition, gameplayLaunchStarted
-        // stayed latched forever while the gate had already been removed. That
-        // exact state leaves every ordinary LevelInfo control usable except Play
-        // and Back, which are intercepted by this hook.
-        //
-        // A successful scene transition calls onExit(), which cancels this
-        // watchdog and tears down the gate. If onExit() never happens, we are
-        // still on this page; release the latch and retry instead of deadlocking.
-        scheduleOnce(
-            schedule_selector(CorumRankedLevelInfoLayer::verifyGameplayLaunch),
-            0.75f
+        if (auto* game = GameManager::sharedState()) game->m_sceneEnum = 3;
+        setKeypadEnabled(false);
+        log::info(
+            "Ranked PlayLayer initialized: match={} level={}",
+            runtime.view().match.matchId,
+            static_cast<int>(launchLevel->m_levelID)
         );
-
-        LevelInfoLayer::onPlay(sender);
+        CCDirector::sharedDirector()->replaceScene(
+            CCTransitionFade::create(0.25f, gameplayScene)
+        );
         return true;
     }
 
-    void verifyGameplayLaunch(float) {
-        if (!m_fields->gameplayLaunchStarted) return;
-
-        log::warn(
-            "Ranked LevelInfoLayer::onPlay did not leave the scene; releasing launch latch for retry"
-        );
-
-        m_fields->gameplayLaunchStarted = false;
-        m_fields->songGateStartingPlay = false;
-
-        if (m_fields->songGateActive) {
-            if (m_fields->gateCountdown) {
-                m_fields->gateCountdown->setString("PLAY FAILED - RETRYING");
-                m_fields->gateCountdown->setColor({255, 92, 92});
-            }
-            // updateSongDownloadGate() is still alive and will retry on its next
-            // tick once the launch latch is released.
-            return;
-        }
-
-        // This path covers a LevelInfo page that was entered after authority had
-        // already moved to PLAYING and therefore had no download gate.
-        auto& runtime = corum::ranked::RankedRuntime::get();
-        if (
-            isCurrentRankedLevel(m_level) &&
-            rankedPlayingState(runtime.view().match.state) &&
-            runtime.canEnterCurrentLevel()
-        ) {
-            scheduleAutoPlay(0.10f);
-        }
-    }
-
     void onExit() override {
-        // Reaching onExit is the actual proof that vanilla accepted the launch
-        // and this LevelInfo scene is leaving. Only now may we destroy the gate.
-        unschedule(schedule_selector(CorumRankedLevelInfoLayer::verifyGameplayLaunch));
+        // PlayLayer::scene() has already initialized successfully before the scene
+        // replacement reaches this lifecycle point.
         if (m_fields->gameplayLaunchStarted && m_fields->songGateActive) {
             teardownSongDownloadGate();
         }

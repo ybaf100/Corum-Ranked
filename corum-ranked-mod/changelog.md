@@ -1,3 +1,12 @@
+# v0.4.0-alpha.38
+
+- Fixed the reproducible iOS `CCTouchDispatcher::handleTouchesEnd` crash by stopping 200 ms full-menu rebuilds and explicitly clearing `CCMenu::m_pSelectedItem` before any structural UI cleanup. Countdown, download, queue, and spectator values now update in place.
+- Added explicit Ranked scene input cleanup: the refresh schedule, keypad delegate, and menu touch dispatcher are disabled before the Ranked scene exits.
+- Added poll-request generations and cancellation. A response from a dismissed/previous match can no longer restore old match state after **QUEUE AGAIN**, Close, Leave Queue, or a new session.
+- Replaced the LevelInfo `onPlay()` watchdog/retry loop with direct construction of `PlayLayer` from Geometry Dash's canonical saved level payload. A non-null `PlayLayer::scene()` is now the launch success signal, removing the observed endless `SENDING READY...` / repeated arm loop.
+- Updated the exact client/server version gate and workspace metadata to `v0.4.0-alpha.38`.
+- Scoring, MMR/RP, map pool, ban rules, attempt limits, and server database schema are unchanged.
+
 # v0.4.0-alpha.33
 
 - Added durable PostgreSQL Start Leases for every standard-round visual attempt so a delayed FIFO Start/End cannot be lost when polling reaches a Round result first; leases survive Render process restarts.

@@ -215,12 +215,14 @@ CCNode* makeTextPlate(
     ccColor3B accent,
     float scale = 0.24f,
     ccColor3B textColor = {255, 255, 255},
-    char const* font = "bigFont.fnt"
+    char const* font = "bigFont.fnt",
+    CCLabelBMFont** outLabel = nullptr
 ) {
     auto* node = makeNeonPanel(size, position, accent, kDeepPanel2, 242);
     auto* label = makeLabel(text, scale, {size.width / 2.0f, size.height / 2.0f}, textColor, font);
     label->limitLabelWidth(size.width - 12.0f, scale, std::max(0.12f, scale * 0.65f));
     node->addChild(label, 4);
+    if (outLabel) *outLabel = label;
     return node;
 }
 
@@ -271,6 +273,18 @@ class CorumRankedLayer final : public CCLayerColor {
     bool m_uiFadingOut = false;
     bool m_fadeInNextRender = true;
     SteadyClock::time_point m_uiTransitionDeadline {};
+    CCLabelBMFont* m_resourceCountLabel = nullptr;
+    CCLayerColor* m_resourceProgressFill = nullptr;
+    CCLabelBMFont* m_resourceProgressLabel = nullptr;
+    float m_resourceProgressWidth = 0.0f;
+    CCLabelBMFont* m_mainStatusLabel = nullptr;
+    CCLabelBMFont* m_matchFoundCountdownLabel = nullptr;
+    CCLabelBMFont* m_banTimerLabel = nullptr;
+    CCLabelBMFont* m_prepareFooterLabel = nullptr;
+    CCLabelBMFont* m_spectatorStateLabel = nullptr;
+    CCLabelBMFont* m_spectatorProgressLabel = nullptr;
+    CCLabelBMFont* m_spectatorScoreLabel = nullptr;
+    CCLabelBMFont* m_spectatorHintLabel = nullptr;
 
     ~CorumRankedLayer() override = default;
 
@@ -317,6 +331,7 @@ class CorumRankedLayer final : public CCLayerColor {
         m_renderedUiKey = presentationKey();
         render();
         applyFadeInIfNeeded();
+        updateDynamicUi();
         schedule(schedule_selector(CorumRankedLayer::refresh), 0.20f);
         return true;
     }
@@ -336,6 +351,7 @@ class CorumRankedLayer final : public CCLayerColor {
             render();
             applyFadeInIfNeeded();
         }
+        updateDynamicUi();
         syncAudioMode();
         maybeEnterLevel();
     }
@@ -381,18 +397,35 @@ class CorumRankedLayer final : public CCLayerColor {
             auto const resources = RankedAudioManager::get().downloadView();
             return fmt::format("resources:{}", static_cast<int>(resources.state));
         }
-        if (m_page == Page::HistoryList) return "history:list";
-        if (m_page == Page::HistoryDetail) return "history:detail";
+        if (m_page == Page::HistoryList) {
+            auto const& view = RankedRuntime::get().view();
+            return fmt::format(
+                "history:list:{}:{}:{}",
+                view.historyLoading,
+                view.historyError,
+                view.history.size()
+            );
+        }
+        if (m_page == Page::HistoryDetail) return fmt::format("history:detail:{}", m_historyIndex);
         auto const& view = RankedRuntime::get().view();
         if (view.stage != RuntimeStage::Matched) {
             return fmt::format("stage:{}", static_cast<int>(view.stage));
         }
-        return fmt::format(
+        auto key = fmt::format(
             "match:{}:{}:{}",
             view.match.state,
             view.match.roundNumber,
             view.match.deathmatchSequence
         );
+        if (view.match.state == "BAN_PHASE") {
+            key += fmt::format(
+                ":{}:{}:{}",
+                m_selectedBan,
+                m_pendingBan,
+                view.match.ownBanConfirmed
+            );
+        }
+        return key;
     }
 
     double uiFadeInSeconds() const {
@@ -420,7 +453,11 @@ class CorumRankedLayer final : public CCLayerColor {
             return true;
         }
 
-        if (key == m_renderedUiKey) return true;
+        // Rebuilding the CCMenu every 200 ms invalidated its raw selected-item
+        // pointer between touch-began and touch-ended on iOS. The visible UI tree
+        // now changes only when its presentation key changes; countdowns and live
+        // values are updated in place by updateDynamicUi().
+        if (key == m_renderedUiKey) return false;
         m_pendingUiKey = key;
         auto const fadeOut = uiFadeOutSeconds();
         if (fadeOut <= 0.0 || !m_fadeRoot) {
@@ -536,9 +573,150 @@ class CorumRankedLayer final : public CCLayerColor {
         return std::chrono::duration<double>(SteadyClock::now() - m_phaseStartedAt).count();
     }
 
+    void resetDynamicUiPointers() {
+        m_resourceCountLabel = nullptr;
+        m_resourceProgressFill = nullptr;
+        m_resourceProgressLabel = nullptr;
+        m_resourceProgressWidth = 0.0f;
+        m_mainStatusLabel = nullptr;
+        m_matchFoundCountdownLabel = nullptr;
+        m_banTimerLabel = nullptr;
+        m_prepareFooterLabel = nullptr;
+        m_spectatorStateLabel = nullptr;
+        m_spectatorProgressLabel = nullptr;
+        m_spectatorScoreLabel = nullptr;
+        m_spectatorHintLabel = nullptr;
+    }
+
     void clearUi() {
+        resetDynamicUiPointers();
+        if (m_menu && m_menu->m_pSelectedItem) {
+            // Geode's CCMenu selected-item safety hook is not installed on iOS.
+            // Clear it explicitly before destroying children so ccTouchEnded can
+            // never activate a freed CCMenuItem.
+            m_menu->m_pSelectedItem = nullptr;
+        }
         m_root->removeAllChildrenWithCleanup(true);
         m_menu->removeAllChildrenWithCleanup(true);
+    }
+
+    void updateDynamicUi() {
+        if (showResourceGate()) {
+            auto const resourceView = RankedAudioManager::get().downloadView();
+            if (m_resourceCountLabel) {
+                m_resourceCountLabel->setString(
+                    fmt::format("{} / {} READY", resourceView.ready, resourceView.total).c_str()
+                );
+                m_resourceCountLabel->setColor(
+                    resourceView.ready == resourceView.total ? kGreen : ccc3(240, 244, 250)
+                );
+            }
+            double progress = resourceView.total > 0
+                ? static_cast<double>(resourceView.ready) / static_cast<double>(resourceView.total)
+                : 1.0;
+            if (resourceView.state == RankedResourceDownloadState::Downloading && resourceView.total > 0) {
+                progress = std::min(1.0, (
+                    static_cast<double>(resourceView.ready) +
+                    static_cast<double>(resourceView.activeProgress) / 100.0
+                ) / static_cast<double>(resourceView.total));
+            }
+            progress = std::clamp(progress, 0.0, 1.0);
+            if (m_resourceProgressFill) {
+                m_resourceProgressFill->setContentSize({
+                    static_cast<float>(m_resourceProgressWidth * progress),
+                    10.0f
+                });
+            }
+            if (m_resourceProgressLabel) {
+                m_resourceProgressLabel->setString(
+                    fmt::format("{}%", static_cast<int>(std::round(progress * 100.0))).c_str()
+                );
+            }
+            return;
+        }
+
+        if (m_page != Page::Live) return;
+        auto const& view = RankedRuntime::get().view();
+        if (view.stage != RuntimeStage::Matched) {
+            if (m_mainStatusLabel) {
+                auto detail = view.error.empty() ? view.status : view.error;
+                if (!m_localMessage.empty()) detail = m_localMessage;
+                m_mainStatusLabel->setString(shorten(detail, 90).c_str());
+                m_mainStatusLabel->setColor(view.error.empty() ? ccc3(220, 228, 244) : kRed);
+            }
+            return;
+        }
+
+        auto const& match = view.match;
+        if (match.state == "MATCHED" && m_matchFoundCountdownLabel) {
+            auto const left = std::max(0, 5 - static_cast<int>(std::floor(phaseSeconds())));
+            m_matchFoundCountdownLabel->setString(fmt::format("{}", left).c_str());
+            m_matchFoundCountdownLabel->setColor(left <= 2 ? kSideRed : kGold);
+        }
+
+        if (match.state == "BAN_PHASE" && m_banTimerLabel) {
+            auto const remaining = std::max<std::int64_t>(0, RankedRuntime::get().deadlineSeconds().value_or(0));
+            m_banTimerLabel->setString(fmt::format("{}", remaining).c_str());
+            m_banTimerLabel->setColor(remaining <= 3 ? kSideRed : ccc3(245, 248, 255));
+        }
+
+        if (m_prepareFooterLabel) {
+            auto const ownA = match.side == "A";
+            auto const seconds = std::max(0, 10 - static_cast<int>(std::floor(phaseSeconds())));
+            std::string footer = fmt::format("STARTS IN  {:02d}", seconds);
+            if (match.state == "DEATHMATCH_PLAYING") {
+                auto displayOwnUsed = ownA ? match.deathmatchAttemptsUsedA : match.deathmatchAttemptsUsedB;
+                auto displayOpponentUsed = ownA ? match.deathmatchAttemptsUsedB : match.deathmatchAttemptsUsedA;
+                displayOwnUsed = std::max(displayOwnUsed, RankedRuntime::get().localDeathmatchVisualAttemptsUsed());
+                footer = displayOwnUsed >= 3
+                    ? fmt::format("WAITING FOR OPPONENT   {}/3", displayOpponentUsed)
+                    : fmt::format("ATTEMPT  {}  OF  3", std::min(3, displayOwnUsed + 1));
+            } else if (phaseSeconds() >= 10.0) {
+                auto const ownReady = ownA ? match.readyA : match.readyB;
+                auto const opponentReady = ownA ? match.readyB : match.readyA;
+                if (!ownReady) footer = "WAITING FOR YOUR DOWNLOAD";
+                else if (!opponentReady) footer = fmt::format("WAITING FOR {}", upper(shorten(match.opponentName, 13)));
+                else footer = "STARTING...";
+            }
+            m_prepareFooterLabel->setString(footer.c_str());
+        }
+
+        if (m_spectatorProgressLabel) {
+            auto const ownA = match.side == "A";
+            auto const ownScore = ownA ? match.scoreA : match.scoreB;
+            auto const opponentScore = ownA ? match.scoreB : match.scoreA;
+            auto const opponentAttemptActive = match.spectatorCurrentProgress.has_value();
+            if (m_spectatorStateLabel) {
+                m_spectatorStateLabel->setString(
+                    opponentAttemptActive ? "LIVE PROGRESS" : "WAITING TO START"
+                );
+            }
+            m_spectatorProgressLabel->setString(
+                opponentAttemptActive
+                    ? fmt::format("{}%", match.spectatorCurrentProgress.value_or(0)).c_str()
+                    : "--"
+            );
+            if (m_spectatorScoreLabel) {
+                m_spectatorScoreLabel->setString(
+                    fmt::format(
+                        "YOUR SCORE  {}     OPPONENT  {}",
+                        formatScore(ownScore),
+                        formatScore(opponentScore)
+                    ).c_str()
+                );
+            }
+            if (m_spectatorHintLabel) {
+                std::string hint = "THE ROUND WILL RESOLVE WHEN THE ACTIVE ATTEMPT ENDS";
+                if (!opponentAttemptActive && match.state == "LAST_ATTEMPT_WINDOW") {
+                    auto const remaining = std::max<std::int64_t>(
+                        0,
+                        RankedRuntime::get().deadlineSeconds().value_or(0)
+                    );
+                    hint = fmt::format("OPPONENT HAS {}s TO START THE LAST ATTEMPT", remaining);
+                }
+                m_spectatorHintLabel->setString(hint.c_str());
+            }
+        }
     }
 
     void render() {
@@ -699,6 +877,7 @@ class CorumRankedLayer final : public CCLayerColor {
             resourceView.ready == resourceView.total ? kGreen : ccc3(240, 244, 250),
             "goldFont.fnt"
         );
+        m_resourceCountLabel = count;
         m_root->addChild(count, 4);
 
         auto const barWidth = std::min(270.0f, size.width - 180.0f);
@@ -717,6 +896,8 @@ class CorumRankedLayer final : public CCLayerColor {
         auto* barFill = CCLayerColor::create({accent.r, accent.g, accent.b, 245});
         barFill->setContentSize({static_cast<float>(barWidth * std::clamp(progress, 0.0, 1.0)), 10.0f});
         barFill->setPosition(barBack->getPosition());
+        m_resourceProgressFill = barFill;
+        m_resourceProgressWidth = barWidth;
         m_root->addChild(barFill, 4);
 
         if (resourceView.state == RankedResourceDownloadState::Downloading) {
@@ -726,6 +907,7 @@ class CorumRankedLayer final : public CCLayerColor {
                 {size.width / 2.0f, size.height / 2.0f - 40.0f},
                 kGold
             );
+            m_resourceProgressLabel = progressLabel;
             m_root->addChild(progressLabel, 4);
         } else if (resourceView.state == RankedResourceDownloadState::Ready) {
             addButton("CONTINUE", {size.width / 2.0f, size.height / 2.0f - 62.0f}, menu_selector(CorumRankedLayer::onContinueResources), false, 0.72f);
@@ -817,6 +999,7 @@ class CorumRankedLayer final : public CCLayerColor {
             m_root->addChild(statusPanel, 1);
             auto* status = makeLabel(shorten(detail, 90), 0.20f, {size.width / 2.0f, 25.0f}, view.error.empty() ? ccc3(220, 228, 244) : kRed);
             status->limitLabelWidth(size.width - 120.0f, 0.20f, 0.15f);
+            m_mainStatusLabel = status;
             m_root->addChild(status, 4);
         }
     }
@@ -889,6 +1072,7 @@ class CorumRankedLayer final : public CCLayerColor {
         auto* phase = makeLabel("MAP BAN IN", 0.23f, {size.width / 2.0f, size.height / 2.0f + 21.0f}, kCyan, "goldFont.fnt");
         m_root->addChild(phase, 5);
         auto* countdown = makeLabel(fmt::format("{}", left), 0.78f, {size.width / 2.0f, size.height / 2.0f - 10.0f}, left <= 2 ? kSideRed : kGold, "goldFont.fnt");
+        m_matchFoundCountdownLabel = countdown;
         m_root->addChild(countdown, 5);
         auto* hint = makeLabel("GET READY TO CHOOSE A PRIVATE BAN", 0.16f, {size.width / 2.0f, size.height / 2.0f - 46.0f}, ccc3(210, 219, 236));
         hint->limitLabelWidth(190.0f, 0.16f, 0.12f);
@@ -909,6 +1093,7 @@ class CorumRankedLayer final : public CCLayerColor {
         auto* timerPlate = makeNeonPanel({54.0f, 48.0f}, {size.width - 42.0f, size.height - 41.0f}, remaining <= 3 ? kSideRed : kBlue, {8, 18, 40}, 250);
         m_root->addChild(timerPlate, 3);
         auto* timer = makeLabel(fmt::format("{}", remaining), 0.48f, {size.width - 42.0f, size.height - 34.0f}, remaining <= 3 ? kSideRed : ccc3(245, 248, 255), "goldFont.fnt");
+        m_banTimerLabel = timer;
         m_root->addChild(timer, 6);
         auto* timerCaption = makeLabel("TIME LEFT", 0.13f, {size.width - 42.0f, size.height - 56.0f}, kCyan);
         m_root->addChild(timerCaption, 6);
@@ -1110,7 +1295,16 @@ class CorumRankedLayer final : public CCLayerColor {
             else footer = "STARTING...";
             footerAccent = kGold;
         }
-        auto* footerPlate = makeTextPlate(footer, {210.0f, 37.0f}, {size.width / 2.0f, 27.0f}, footerAccent, 0.25f, ccc3(245, 248, 255), "goldFont.fnt");
+        auto* footerPlate = makeTextPlate(
+            footer,
+            {210.0f, 37.0f},
+            {size.width / 2.0f, 27.0f},
+            footerAccent,
+            0.25f,
+            ccc3(245, 248, 255),
+            "goldFont.fnt",
+            &m_prepareFooterLabel
+        );
         m_root->addChild(footerPlate, 3);
     }
 
@@ -1143,6 +1337,7 @@ class CorumRankedLayer final : public CCLayerColor {
             {size.width / 2.0f, size.height / 2.0f + 15.0f},
             kCyan
         );
+        m_spectatorStateLabel = live;
         m_root->addChild(live, 5);
         auto* pct = makeLabel(
             opponentAttemptActive ? fmt::format("{}%", progress) : "--",
@@ -1151,6 +1346,7 @@ class CorumRankedLayer final : public CCLayerColor {
             kGold,
             "goldFont.fnt"
         );
+        m_spectatorProgressLabel = pct;
         m_root->addChild(pct, 5);
         auto* score = makeLabel(
             fmt::format("YOUR SCORE  {}     OPPONENT  {}", formatScore(ownScore), formatScore(opponentScore)),
@@ -1158,6 +1354,7 @@ class CorumRankedLayer final : public CCLayerColor {
             {size.width / 2.0f, size.height / 2.0f - 53.0f},
             ccc3(218, 228, 244)
         );
+        m_spectatorScoreLabel = score;
         score->limitLabelWidth(220.0f, 0.18f, 0.13f);
         m_root->addChild(score, 5);
 
@@ -1167,6 +1364,7 @@ class CorumRankedLayer final : public CCLayerColor {
             hintText = fmt::format("OPPONENT HAS {}s TO START THE LAST ATTEMPT", seconds);
         }
         auto* hint = makeLabel(hintText, 0.15f, {size.width / 2.0f, 28.0f}, ccc3(195, 205, 224));
+        m_spectatorHintLabel = hint;
         hint->limitLabelWidth(size.width - 80.0f, 0.15f, 0.11f);
         m_root->addChild(hint, 5);
     }
@@ -1595,9 +1793,29 @@ class CorumRankedLayer final : public CCLayerColor {
     void onCloseLayer(CCObject*) {
         if (RankedRuntime::get().view().stage == RuntimeStage::Queued) RankedRuntime::get().leaveQueue();
         RankedAudioManager::get().restoreMenuMusic();
+        unschedule(schedule_selector(CorumRankedLayer::refresh));
+        setKeypadEnabled(false);
+        if (m_menu) {
+            if (m_menu->m_pSelectedItem) {
+                m_menu->m_pSelectedItem = nullptr;
+            }
+            m_menu->setTouchEnabled(false);
+        }
         // Ranked now lives in its own GD-style scene/tab. Return to the previous
         // Geometry Dash scene instead of merely deleting the fullscreen child.
         CCDirector::sharedDirector()->popScene();
+    }
+
+    void onExit() override {
+        unschedule(schedule_selector(CorumRankedLayer::refresh));
+        setKeypadEnabled(false);
+        if (m_menu) {
+            if (m_menu->m_pSelectedItem) {
+                m_menu->m_pSelectedItem = nullptr;
+            }
+            m_menu->setTouchEnabled(false);
+        }
+        CCLayerColor::onExit();
     }
 
     void keyBackClicked() override {

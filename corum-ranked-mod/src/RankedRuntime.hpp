@@ -261,6 +261,7 @@ private:
 
     void fetchConfig();
     void createSession();
+    void invalidatePollRequest();
     void pollQueue();
     void pollMatch();
     void parseMatchState(matjson::Value const& root);
@@ -317,6 +318,7 @@ private:
     int m_localDeathmatchVisualAttempts = 0;
     std::uint64_t m_eventSequence = 0;
     std::uint64_t m_attemptIntentRequestGeneration = 0;
+    std::uint64_t m_pollRequestGeneration = 0;
     bool m_controlBusy = false;
     bool m_pollBusy = false;
     bool m_attemptBusy = false;

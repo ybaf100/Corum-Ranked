@@ -1,0 +1,984 @@
+diff --git a/README.md b/README.md
+index f5be2d2..16184cd 100644
+--- a/README.md
++++ b/README.md
+@@ -48,7 +48,7 @@
+ - NestJS/PostgreSQL 서버가 매칭, 시간, attempt 승인, 점수, 승패, MMR을 최종 판정합니다.
+ - Apps Script는 운영 설정만 제공하며 실시간 경기 상태를 저장하지 않습니다.
+ - Ranked Pool과 Qualifying은 별도 문서가 아니라 기존 맵 시트(`sheet1`)의 오른쪽 두 열에서 관리합니다.
+-- `v0.4.0-alpha.33`의 Debug Bot Match는 개발용이지만, 테스트 기간에는 일반 PvP와 동일하게 MMR·Ranked Score·Placement·W/L에 반영됩니다.
++- `v0.4.0-alpha.38`의 Debug Bot Match는 개발용이지만, 테스트 기간에는 일반 PvP와 동일하게 MMR·Ranked Score·Placement·W/L에 반영됩니다.
+ - 미확정 MMR Seed·티어 경계·K-factor·timeout·매칭 폭·실패 정책은 운영자가 입력하기 전까지 queue가 fail-closed 상태를 유지합니다.
+ - Production secret은 저장소에 포함하지 않습니다.
+ 
+@@ -58,4 +58,4 @@
+ ---
+ 
+ 
+-> v0.4.0-alpha.33 policy: the Ranked allowlist checks currently enabled + loaded mods only. Installed-but-disabled mods do not block Ranked; required mods such as CBF must still be active.
++> v0.4.0-alpha.38 policy: the Ranked allowlist checks currently enabled + loaded mods only. Installed-but-disabled mods do not block Ranked; required mods such as CBF must still be active.
+diff --git a/corum-ranked-mod/about.md b/corum-ranked-mod/about.md
+index 4113501..a5942bd 100644
+--- a/corum-ranked-mod/about.md
++++ b/corum-ranked-mod/about.md
+@@ -10,7 +10,7 @@ During a Ranked round, the HUD keeps both players' server scores and approved Cl
+ 
+ The production Ranked server defaults to `https://corum-ranked.onrender.com`. Production credentials and webhook secrets do not belong in the mod or repository.
+ 
+-The `v0.4.0-alpha.37` development build can include **DEBUG BOT MATCH** behind
++The `v0.4.0-alpha.38` development build can include **DEBUG BOT MATCH** behind
+ `CORUM_RANKED_DEBUG_BOT_MATCH`. Its results intentionally use the same live Ranked rating and
+ statistics path during alpha testing. Build with that CMake option OFF and disable the matching
+ server environment flag before a production release.
+diff --git a/corum-ranked-mod/changelog.md b/corum-ranked-mod/changelog.md
+index 958f9be..0b522d4 100644
+--- a/corum-ranked-mod/changelog.md
++++ b/corum-ranked-mod/changelog.md
+@@ -1,3 +1,12 @@
++# v0.4.0-alpha.38
++
++- Fixed the reproducible iOS `CCTouchDispatcher::handleTouchesEnd` crash by stopping 200 ms full-menu rebuilds and explicitly clearing `CCMenu::m_pSelectedItem` before any structural UI cleanup. Countdown, download, queue, and spectator values now update in place.
++- Added explicit Ranked scene input cleanup: the refresh schedule, keypad delegate, and menu touch dispatcher are disabled before the Ranked scene exits.
++- Added poll-request generations and cancellation. A response from a dismissed/previous match can no longer restore old match state after **QUEUE AGAIN**, Close, Leave Queue, or a new session.
++- Replaced the LevelInfo `onPlay()` watchdog/retry loop with direct construction of `PlayLayer` from Geometry Dash's canonical saved level payload. A non-null `PlayLayer::scene()` is now the launch success signal, removing the observed endless `SENDING READY...` / repeated arm loop.
++- Updated the exact client/server version gate and workspace metadata to `v0.4.0-alpha.38`.
++- Scoring, MMR/RP, map pool, ban rules, attempt limits, and server database schema are unchanged.
++
+ # v0.4.0-alpha.33
+ 
+ - Added durable PostgreSQL Start Leases for every standard-round visual attempt so a delayed FIFO Start/End cannot be lost when polling reaches a Round result first; leases survive Render process restarts.
+diff --git a/corum-ranked-mod/mod.json b/corum-ranked-mod/mod.json
+index fe7f1bd..12595cf 100644
+--- a/corum-ranked-mod/mod.json
++++ b/corum-ranked-mod/mod.json
+@@ -8,7 +8,7 @@
+   },
+   "id": "hwanhee1.corum_ranked",
+   "name": "Corum Ranked",
+-  "version": "v0.4.0-alpha.37",
++  "version": "v0.4.0-alpha.38",
+   "developer": "hwanhee1",
+   "description": "A separate server-authoritative Corum Ranked client. It does not share runtime state or UI with Corum Integration.",
+   "dependencies": {
+diff --git a/corum-ranked-mod/src/LevelInfoLayer.cpp b/corum-ranked-mod/src/LevelInfoLayer.cpp
+index 18d529a..eb643bb 100644
+--- a/corum-ranked-mod/src/LevelInfoLayer.cpp
++++ b/corum-ranked-mod/src/LevelInfoLayer.cpp
+@@ -3,7 +3,10 @@
+ 
+ #include <Geode/Geode.hpp>
+ #include <Geode/binding/CustomSongWidget.hpp>
++#include <Geode/binding/GameLevelManager.hpp>
++#include <Geode/binding/GameManager.hpp>
+ #include <Geode/binding/MusicDownloadManager.hpp>
++#include <Geode/binding/PlayLayer.hpp>
+ #include <Geode/modify/LevelInfoLayer.hpp>
+ 
+ #include <algorithm>
+@@ -62,6 +65,17 @@ bool mapReady(GJGameLevel* level) {
+     return expectedLevelId > 0 && expectedLevelId == static_cast<int>(level->m_levelID);
+ }
+ 
++GJGameLevel* canonicalPlayableLevel(GJGameLevel* fallback) {
++    auto const expectedLevelId = corum::ranked::RankedRuntime::get().currentLevelId();
++    if (expectedLevelId <= 0) return nullptr;
++    if (auto* manager = GameLevelManager::sharedState()) {
++        if (auto* saved = manager->getSavedLevel(expectedLevelId); mapReady(saved)) {
++            return saved;
++        }
++    }
++    return mapReady(fallback) ? fallback : nullptr;
++}
++
+ std::vector<int> collectSongIds(GJGameLevel* level) {
+     std::vector<int> result;
+     if (!level) return result;
+@@ -424,6 +438,8 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
+                 m_fields->gateCountdown->setString("WAITING FOR MAP");
+             } else if (!readyForStart) {
+                 m_fields->gateCountdown->setString("WAITING FOR SONG");
++            } else if (rankedPlayingState(match.state)) {
++                m_fields->gateCountdown->setString("STARTING...");
+             } else if (rankedPrepareState(match.state) && ownReady && !opponentReady) {
+                 m_fields->gateCountdown->setString("WAITING FOR OPPONENT");
+             } else if (rankedPrepareState(match.state) && ownReady && opponentReady) {
+@@ -564,6 +580,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
+     }
+ 
+     bool launchRankedGameplay(CCObject* sender) {
++        (void)sender;
+         if (m_fields->gameplayLaunchStarted || m_fields->returningToRanked) return false;
+ 
+         auto& runtime = corum::ranked::RankedRuntime::get();
+@@ -576,77 +593,54 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
+             return false;
+         }
+ 
+-        auto const ready = songsReady(m_level, m_songWidget);
++        // The LevelInfo page may have started from a synthetic online-level shell.
++        // Always launch the canonical saved payload produced by vanilla download
++        // completion when one exists; PlayLayer must never receive the shell.
++        auto* launchLevel = canonicalPlayableLevel(m_level);
++        if (!launchLevel) return false;
++
++        auto const ready = songsReady(launchLevel, m_songWidget);
+         if (!ready && !runtime.songBypassAllowed()) return false;
+-        if (!ready && runtime.songBypassAllowed()) m_level->m_showedSongWarning = true;
++        if (!ready && runtime.songBypassAllowed()) launchLevel->m_showedSongWarning = true;
+ 
+-        // Arm while the download gate is still alive. If authority/GD state is
+-        // temporarily out of sync, return false and let updateSongDownloadGate()
+-        // retry on its next tick instead of destroying the READY page.
++        // Arm the exact server-selected map before constructing PlayLayer so its
++        // init hook can recognize the launch and journal the first visual Start.
+         if (!runtime.armCurrentLevelForGameplay()) return false;
+ 
+-        // Latch before vanilla starts mutating/pushing the gameplay scene. A
+-        // scheduled callback and user Space/Play can otherwise fire in adjacent
+-        // frames and enter LevelInfoLayer::onPlay twice.
++        // Constructing PlayLayer is the launch acknowledgement. Calling vanilla
++        // LevelInfoLayer::onPlay() and waiting for onExit was only an indirect
++        // guess; on iOS it could decline while m_isBusy/shouldDownloadLevel still
++        // reflected the preceding download and leave this page stuck forever.
+         m_fields->gameplayLaunchStarted = true;
+         m_fields->autoPlayScheduled = false;
+         unschedule(schedule_selector(CorumRankedLevelInfoLayer::autoPlayRanked));
+-
+-        // Do NOT tear down the Ranked gate before vanilla actually leaves this
+-        // LevelInfoLayer. alpha.37 previously treated the call itself as success:
+-        // if vanilla onPlay() declined/failed to transition, gameplayLaunchStarted
+-        // stayed latched forever while the gate had already been removed. That
+-        // exact state leaves every ordinary LevelInfo control usable except Play
+-        // and Back, which are intercepted by this hook.
+-        //
+-        // A successful scene transition calls onExit(), which cancels this
+-        // watchdog and tears down the gate. If onExit() never happens, we are
+-        // still on this page; release the latch and retry instead of deadlocking.
+-        scheduleOnce(
+-            schedule_selector(CorumRankedLevelInfoLayer::verifyGameplayLaunch),
+-            0.75f
+-        );
+-
+-        LevelInfoLayer::onPlay(sender);
+-        return true;
+-    }
+-
+-    void verifyGameplayLaunch(float) {
+-        if (!m_fields->gameplayLaunchStarted) return;
+-
+-        log::warn(
+-            "Ranked LevelInfoLayer::onPlay did not leave the scene; releasing launch latch for retry"
+-        );
+-
+-        m_fields->gameplayLaunchStarted = false;
+-        m_fields->songGateStartingPlay = false;
+-
+-        if (m_fields->songGateActive) {
++        auto* gameplayScene = PlayLayer::scene(launchLevel, false, false);
++        if (!gameplayScene) {
++            m_fields->gameplayLaunchStarted = false;
++            m_fields->songGateStartingPlay = false;
+             if (m_fields->gateCountdown) {
+-                m_fields->gateCountdown->setString("PLAY FAILED - RETRYING");
++                m_fields->gateCountdown->setString("PLAY INIT FAILED - RETRYING");
+                 m_fields->gateCountdown->setColor({255, 92, 92});
+             }
+-            // updateSongDownloadGate() is still alive and will retry on its next
+-            // tick once the launch latch is released.
+-            return;
++            return false;
+         }
+ 
+-        // This path covers a LevelInfo page that was entered after authority had
+-        // already moved to PLAYING and therefore had no download gate.
+-        auto& runtime = corum::ranked::RankedRuntime::get();
+-        if (
+-            isCurrentRankedLevel(m_level) &&
+-            rankedPlayingState(runtime.view().match.state) &&
+-            runtime.canEnterCurrentLevel()
+-        ) {
+-            scheduleAutoPlay(0.10f);
+-        }
++        if (auto* game = GameManager::sharedState()) game->m_sceneEnum = 3;
++        setKeypadEnabled(false);
++        log::info(
++            "Ranked PlayLayer initialized: match={} level={}",
++            runtime.view().match.matchId,
++            static_cast<int>(launchLevel->m_levelID)
++        );
++        CCDirector::sharedDirector()->replaceScene(
++            CCTransitionFade::create(0.25f, gameplayScene)
++        );
++        return true;
+     }
+ 
+     void onExit() override {
+-        // Reaching onExit is the actual proof that vanilla accepted the launch
+-        // and this LevelInfo scene is leaving. Only now may we destroy the gate.
+-        unschedule(schedule_selector(CorumRankedLevelInfoLayer::verifyGameplayLaunch));
++        // PlayLayer::scene() has already initialized successfully before the scene
++        // replacement reaches this lifecycle point.
+         if (m_fields->gameplayLaunchStarted && m_fields->songGateActive) {
+             teardownSongDownloadGate();
+         }
+@@ -725,4 +719,4 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
+         }
+         returnToRanked(0.0f);
+     }
+-};
+\ No newline at end of file
++};
+diff --git a/corum-ranked-mod/src/RankedPopup.cpp b/corum-ranked-mod/src/RankedPopup.cpp
+index e54822a..e738c0c 100644
+--- a/corum-ranked-mod/src/RankedPopup.cpp
++++ b/corum-ranked-mod/src/RankedPopup.cpp
+@@ -215,12 +215,14 @@ CCNode* makeTextPlate(
+     ccColor3B accent,
+     float scale = 0.24f,
+     ccColor3B textColor = {255, 255, 255},
+-    char const* font = "bigFont.fnt"
++    char const* font = "bigFont.fnt",
++    CCLabelBMFont** outLabel = nullptr
+ ) {
+     auto* node = makeNeonPanel(size, position, accent, kDeepPanel2, 242);
+     auto* label = makeLabel(text, scale, {size.width / 2.0f, size.height / 2.0f}, textColor, font);
+     label->limitLabelWidth(size.width - 12.0f, scale, std::max(0.12f, scale * 0.65f));
+     node->addChild(label, 4);
++    if (outLabel) *outLabel = label;
+     return node;
+ }
+ 
+@@ -271,6 +273,18 @@ class CorumRankedLayer final : public CCLayerColor {
+     bool m_uiFadingOut = false;
+     bool m_fadeInNextRender = true;
+     SteadyClock::time_point m_uiTransitionDeadline {};
++    CCLabelBMFont* m_resourceCountLabel = nullptr;
++    CCLayerColor* m_resourceProgressFill = nullptr;
++    CCLabelBMFont* m_resourceProgressLabel = nullptr;
++    float m_resourceProgressWidth = 0.0f;
++    CCLabelBMFont* m_mainStatusLabel = nullptr;
++    CCLabelBMFont* m_matchFoundCountdownLabel = nullptr;
++    CCLabelBMFont* m_banTimerLabel = nullptr;
++    CCLabelBMFont* m_prepareFooterLabel = nullptr;
++    CCLabelBMFont* m_spectatorStateLabel = nullptr;
++    CCLabelBMFont* m_spectatorProgressLabel = nullptr;
++    CCLabelBMFont* m_spectatorScoreLabel = nullptr;
++    CCLabelBMFont* m_spectatorHintLabel = nullptr;
+ 
+     ~CorumRankedLayer() override = default;
+ 
+@@ -317,6 +331,7 @@ class CorumRankedLayer final : public CCLayerColor {
+         m_renderedUiKey = presentationKey();
+         render();
+         applyFadeInIfNeeded();
++        updateDynamicUi();
+         schedule(schedule_selector(CorumRankedLayer::refresh), 0.20f);
+         return true;
+     }
+@@ -336,6 +351,7 @@ class CorumRankedLayer final : public CCLayerColor {
+             render();
+             applyFadeInIfNeeded();
+         }
++        updateDynamicUi();
+         syncAudioMode();
+         maybeEnterLevel();
+     }
+@@ -381,18 +397,35 @@ class CorumRankedLayer final : public CCLayerColor {
+             auto const resources = RankedAudioManager::get().downloadView();
+             return fmt::format("resources:{}", static_cast<int>(resources.state));
+         }
+-        if (m_page == Page::HistoryList) return "history:list";
+-        if (m_page == Page::HistoryDetail) return "history:detail";
++        if (m_page == Page::HistoryList) {
++            auto const& view = RankedRuntime::get().view();
++            return fmt::format(
++                "history:list:{}:{}:{}",
++                view.historyLoading,
++                view.historyError,
++                view.history.size()
++            );
++        }
++        if (m_page == Page::HistoryDetail) return fmt::format("history:detail:{}", m_historyIndex);
+         auto const& view = RankedRuntime::get().view();
+         if (view.stage != RuntimeStage::Matched) {
+             return fmt::format("stage:{}", static_cast<int>(view.stage));
+         }
+-        return fmt::format(
++        auto key = fmt::format(
+             "match:{}:{}:{}",
+             view.match.state,
+             view.match.roundNumber,
+             view.match.deathmatchSequence
+         );
++        if (view.match.state == "BAN_PHASE") {
++            key += fmt::format(
++                ":{}:{}:{}",
++                m_selectedBan,
++                m_pendingBan,
++                view.match.ownBanConfirmed
++            );
++        }
++        return key;
+     }
+ 
+     double uiFadeInSeconds() const {
+@@ -420,7 +453,11 @@ class CorumRankedLayer final : public CCLayerColor {
+             return true;
+         }
+ 
+-        if (key == m_renderedUiKey) return true;
++        // Rebuilding the CCMenu every 200 ms invalidated its raw selected-item
++        // pointer between touch-began and touch-ended on iOS. The visible UI tree
++        // now changes only when its presentation key changes; countdowns and live
++        // values are updated in place by updateDynamicUi().
++        if (key == m_renderedUiKey) return false;
+         m_pendingUiKey = key;
+         auto const fadeOut = uiFadeOutSeconds();
+         if (fadeOut <= 0.0 || !m_fadeRoot) {
+@@ -536,11 +573,152 @@ class CorumRankedLayer final : public CCLayerColor {
+         return std::chrono::duration<double>(SteadyClock::now() - m_phaseStartedAt).count();
+     }
+ 
++    void resetDynamicUiPointers() {
++        m_resourceCountLabel = nullptr;
++        m_resourceProgressFill = nullptr;
++        m_resourceProgressLabel = nullptr;
++        m_resourceProgressWidth = 0.0f;
++        m_mainStatusLabel = nullptr;
++        m_matchFoundCountdownLabel = nullptr;
++        m_banTimerLabel = nullptr;
++        m_prepareFooterLabel = nullptr;
++        m_spectatorStateLabel = nullptr;
++        m_spectatorProgressLabel = nullptr;
++        m_spectatorScoreLabel = nullptr;
++        m_spectatorHintLabel = nullptr;
++    }
++
+     void clearUi() {
++        resetDynamicUiPointers();
++        if (m_menu && m_menu->m_pSelectedItem) {
++            // Geode's CCMenu selected-item safety hook is not installed on iOS.
++            // Clear it explicitly before destroying children so ccTouchEnded can
++            // never activate a freed CCMenuItem.
++            m_menu->m_pSelectedItem = nullptr;
++        }
+         m_root->removeAllChildrenWithCleanup(true);
+         m_menu->removeAllChildrenWithCleanup(true);
+     }
+ 
++    void updateDynamicUi() {
++        if (showResourceGate()) {
++            auto const resourceView = RankedAudioManager::get().downloadView();
++            if (m_resourceCountLabel) {
++                m_resourceCountLabel->setString(
++                    fmt::format("{} / {} READY", resourceView.ready, resourceView.total).c_str()
++                );
++                m_resourceCountLabel->setColor(
++                    resourceView.ready == resourceView.total ? kGreen : ccc3(240, 244, 250)
++                );
++            }
++            double progress = resourceView.total > 0
++                ? static_cast<double>(resourceView.ready) / static_cast<double>(resourceView.total)
++                : 1.0;
++            if (resourceView.state == RankedResourceDownloadState::Downloading && resourceView.total > 0) {
++                progress = std::min(1.0, (
++                    static_cast<double>(resourceView.ready) +
++                    static_cast<double>(resourceView.activeProgress) / 100.0
++                ) / static_cast<double>(resourceView.total));
++            }
++            progress = std::clamp(progress, 0.0, 1.0);
++            if (m_resourceProgressFill) {
++                m_resourceProgressFill->setContentSize({
++                    static_cast<float>(m_resourceProgressWidth * progress),
++                    10.0f
++                });
++            }
++            if (m_resourceProgressLabel) {
++                m_resourceProgressLabel->setString(
++                    fmt::format("{}%", static_cast<int>(std::round(progress * 100.0))).c_str()
++                );
++            }
++            return;
++        }
++
++        if (m_page != Page::Live) return;
++        auto const& view = RankedRuntime::get().view();
++        if (view.stage != RuntimeStage::Matched) {
++            if (m_mainStatusLabel) {
++                auto detail = view.error.empty() ? view.status : view.error;
++                if (!m_localMessage.empty()) detail = m_localMessage;
++                m_mainStatusLabel->setString(shorten(detail, 90).c_str());
++                m_mainStatusLabel->setColor(view.error.empty() ? ccc3(220, 228, 244) : kRed);
++            }
++            return;
++        }
++
++        auto const& match = view.match;
++        if (match.state == "MATCHED" && m_matchFoundCountdownLabel) {
++            auto const left = std::max(0, 5 - static_cast<int>(std::floor(phaseSeconds())));
++            m_matchFoundCountdownLabel->setString(fmt::format("{}", left).c_str());
++            m_matchFoundCountdownLabel->setColor(left <= 2 ? kSideRed : kGold);
++        }
++
++        if (match.state == "BAN_PHASE" && m_banTimerLabel) {
++            auto const remaining = std::max<std::int64_t>(0, RankedRuntime::get().deadlineSeconds().value_or(0));
++            m_banTimerLabel->setString(fmt::format("{}", remaining).c_str());
++            m_banTimerLabel->setColor(remaining <= 3 ? kSideRed : ccc3(245, 248, 255));
++        }
++
++        if (m_prepareFooterLabel) {
++            auto const ownA = match.side == "A";
++            auto const seconds = std::max(0, 10 - static_cast<int>(std::floor(phaseSeconds())));
++            std::string footer = fmt::format("STARTS IN  {:02d}", seconds);
++            if (match.state == "DEATHMATCH_PLAYING") {
++                auto displayOwnUsed = ownA ? match.deathmatchAttemptsUsedA : match.deathmatchAttemptsUsedB;
++                auto displayOpponentUsed = ownA ? match.deathmatchAttemptsUsedB : match.deathmatchAttemptsUsedA;
++                displayOwnUsed = std::max(displayOwnUsed, RankedRuntime::get().localDeathmatchVisualAttemptsUsed());
++                footer = displayOwnUsed >= 3
++                    ? fmt::format("WAITING FOR OPPONENT   {}/3", displayOpponentUsed)
++                    : fmt::format("ATTEMPT  {}  OF  3", std::min(3, displayOwnUsed + 1));
++            } else if (phaseSeconds() >= 10.0) {
++                auto const ownReady = ownA ? match.readyA : match.readyB;
++                auto const opponentReady = ownA ? match.readyB : match.readyA;
++                if (!ownReady) footer = "WAITING FOR YOUR DOWNLOAD";
++                else if (!opponentReady) footer = fmt::format("WAITING FOR {}", upper(shorten(match.opponentName, 13)));
++                else footer = "STARTING...";
++            }
++            m_prepareFooterLabel->setString(footer.c_str());
++        }
++
++        if (m_spectatorProgressLabel) {
++            auto const ownA = match.side == "A";
++            auto const ownScore = ownA ? match.scoreA : match.scoreB;
++            auto const opponentScore = ownA ? match.scoreB : match.scoreA;
++            auto const opponentAttemptActive = match.spectatorCurrentProgress.has_value();
++            if (m_spectatorStateLabel) {
++                m_spectatorStateLabel->setString(
++                    opponentAttemptActive ? "LIVE PROGRESS" : "WAITING TO START"
++                );
++            }
++            m_spectatorProgressLabel->setString(
++                opponentAttemptActive
++                    ? fmt::format("{}%", match.spectatorCurrentProgress.value_or(0)).c_str()
++                    : "--"
++            );
++            if (m_spectatorScoreLabel) {
++                m_spectatorScoreLabel->setString(
++                    fmt::format(
++                        "YOUR SCORE  {}     OPPONENT  {}",
++                        formatScore(ownScore),
++                        formatScore(opponentScore)
++                    ).c_str()
++                );
++            }
++            if (m_spectatorHintLabel) {
++                std::string hint = "THE ROUND WILL RESOLVE WHEN THE ACTIVE ATTEMPT ENDS";
++                if (!opponentAttemptActive && match.state == "LAST_ATTEMPT_WINDOW") {
++                    auto const remaining = std::max<std::int64_t>(
++                        0,
++                        RankedRuntime::get().deadlineSeconds().value_or(0)
++                    );
++                    hint = fmt::format("OPPONENT HAS {}s TO START THE LAST ATTEMPT", remaining);
++                }
++                m_spectatorHintLabel->setString(hint.c_str());
++            }
++        }
++    }
++
+     void render() {
+         clearUi();
+         auto const& view = RankedRuntime::get().view();
+@@ -699,6 +877,7 @@ class CorumRankedLayer final : public CCLayerColor {
+             resourceView.ready == resourceView.total ? kGreen : ccc3(240, 244, 250),
+             "goldFont.fnt"
+         );
++        m_resourceCountLabel = count;
+         m_root->addChild(count, 4);
+ 
+         auto const barWidth = std::min(270.0f, size.width - 180.0f);
+@@ -717,6 +896,8 @@ class CorumRankedLayer final : public CCLayerColor {
+         auto* barFill = CCLayerColor::create({accent.r, accent.g, accent.b, 245});
+         barFill->setContentSize({static_cast<float>(barWidth * std::clamp(progress, 0.0, 1.0)), 10.0f});
+         barFill->setPosition(barBack->getPosition());
++        m_resourceProgressFill = barFill;
++        m_resourceProgressWidth = barWidth;
+         m_root->addChild(barFill, 4);
+ 
+         if (resourceView.state == RankedResourceDownloadState::Downloading) {
+@@ -726,6 +907,7 @@ class CorumRankedLayer final : public CCLayerColor {
+                 {size.width / 2.0f, size.height / 2.0f - 40.0f},
+                 kGold
+             );
++            m_resourceProgressLabel = progressLabel;
+             m_root->addChild(progressLabel, 4);
+         } else if (resourceView.state == RankedResourceDownloadState::Ready) {
+             addButton("CONTINUE", {size.width / 2.0f, size.height / 2.0f - 62.0f}, menu_selector(CorumRankedLayer::onContinueResources), false, 0.72f);
+@@ -817,6 +999,7 @@ class CorumRankedLayer final : public CCLayerColor {
+             m_root->addChild(statusPanel, 1);
+             auto* status = makeLabel(shorten(detail, 90), 0.20f, {size.width / 2.0f, 25.0f}, view.error.empty() ? ccc3(220, 228, 244) : kRed);
+             status->limitLabelWidth(size.width - 120.0f, 0.20f, 0.15f);
++            m_mainStatusLabel = status;
+             m_root->addChild(status, 4);
+         }
+     }
+@@ -889,6 +1072,7 @@ class CorumRankedLayer final : public CCLayerColor {
+         auto* phase = makeLabel("MAP BAN IN", 0.23f, {size.width / 2.0f, size.height / 2.0f + 21.0f}, kCyan, "goldFont.fnt");
+         m_root->addChild(phase, 5);
+         auto* countdown = makeLabel(fmt::format("{}", left), 0.78f, {size.width / 2.0f, size.height / 2.0f - 10.0f}, left <= 2 ? kSideRed : kGold, "goldFont.fnt");
++        m_matchFoundCountdownLabel = countdown;
+         m_root->addChild(countdown, 5);
+         auto* hint = makeLabel("GET READY TO CHOOSE A PRIVATE BAN", 0.16f, {size.width / 2.0f, size.height / 2.0f - 46.0f}, ccc3(210, 219, 236));
+         hint->limitLabelWidth(190.0f, 0.16f, 0.12f);
+@@ -909,6 +1093,7 @@ class CorumRankedLayer final : public CCLayerColor {
+         auto* timerPlate = makeNeonPanel({54.0f, 48.0f}, {size.width - 42.0f, size.height - 41.0f}, remaining <= 3 ? kSideRed : kBlue, {8, 18, 40}, 250);
+         m_root->addChild(timerPlate, 3);
+         auto* timer = makeLabel(fmt::format("{}", remaining), 0.48f, {size.width - 42.0f, size.height - 34.0f}, remaining <= 3 ? kSideRed : ccc3(245, 248, 255), "goldFont.fnt");
++        m_banTimerLabel = timer;
+         m_root->addChild(timer, 6);
+         auto* timerCaption = makeLabel("TIME LEFT", 0.13f, {size.width - 42.0f, size.height - 56.0f}, kCyan);
+         m_root->addChild(timerCaption, 6);
+@@ -1110,7 +1295,16 @@ class CorumRankedLayer final : public CCLayerColor {
+             else footer = "STARTING...";
+             footerAccent = kGold;
+         }
+-        auto* footerPlate = makeTextPlate(footer, {210.0f, 37.0f}, {size.width / 2.0f, 27.0f}, footerAccent, 0.25f, ccc3(245, 248, 255), "goldFont.fnt");
++        auto* footerPlate = makeTextPlate(
++            footer,
++            {210.0f, 37.0f},
++            {size.width / 2.0f, 27.0f},
++            footerAccent,
++            0.25f,
++            ccc3(245, 248, 255),
++            "goldFont.fnt",
++            &m_prepareFooterLabel
++        );
+         m_root->addChild(footerPlate, 3);
+     }
+ 
+@@ -1143,6 +1337,7 @@ class CorumRankedLayer final : public CCLayerColor {
+             {size.width / 2.0f, size.height / 2.0f + 15.0f},
+             kCyan
+         );
++        m_spectatorStateLabel = live;
+         m_root->addChild(live, 5);
+         auto* pct = makeLabel(
+             opponentAttemptActive ? fmt::format("{}%", progress) : "--",
+@@ -1151,6 +1346,7 @@ class CorumRankedLayer final : public CCLayerColor {
+             kGold,
+             "goldFont.fnt"
+         );
++        m_spectatorProgressLabel = pct;
+         m_root->addChild(pct, 5);
+         auto* score = makeLabel(
+             fmt::format("YOUR SCORE  {}     OPPONENT  {}", formatScore(ownScore), formatScore(opponentScore)),
+@@ -1158,6 +1354,7 @@ class CorumRankedLayer final : public CCLayerColor {
+             {size.width / 2.0f, size.height / 2.0f - 53.0f},
+             ccc3(218, 228, 244)
+         );
++        m_spectatorScoreLabel = score;
+         score->limitLabelWidth(220.0f, 0.18f, 0.13f);
+         m_root->addChild(score, 5);
+ 
+@@ -1167,6 +1364,7 @@ class CorumRankedLayer final : public CCLayerColor {
+             hintText = fmt::format("OPPONENT HAS {}s TO START THE LAST ATTEMPT", seconds);
+         }
+         auto* hint = makeLabel(hintText, 0.15f, {size.width / 2.0f, 28.0f}, ccc3(195, 205, 224));
++        m_spectatorHintLabel = hint;
+         hint->limitLabelWidth(size.width - 80.0f, 0.15f, 0.11f);
+         m_root->addChild(hint, 5);
+     }
+@@ -1595,11 +1793,31 @@ class CorumRankedLayer final : public CCLayerColor {
+     void onCloseLayer(CCObject*) {
+         if (RankedRuntime::get().view().stage == RuntimeStage::Queued) RankedRuntime::get().leaveQueue();
+         RankedAudioManager::get().restoreMenuMusic();
++        unschedule(schedule_selector(CorumRankedLayer::refresh));
++        setKeypadEnabled(false);
++        if (m_menu) {
++            if (m_menu->m_pSelectedItem) {
++                m_menu->m_pSelectedItem = nullptr;
++            }
++            m_menu->setTouchEnabled(false);
++        }
+         // Ranked now lives in its own GD-style scene/tab. Return to the previous
+         // Geometry Dash scene instead of merely deleting the fullscreen child.
+         CCDirector::sharedDirector()->popScene();
+     }
+ 
++    void onExit() override {
++        unschedule(schedule_selector(CorumRankedLayer::refresh));
++        setKeypadEnabled(false);
++        if (m_menu) {
++            if (m_menu->m_pSelectedItem) {
++                m_menu->m_pSelectedItem = nullptr;
++            }
++            m_menu->setTouchEnabled(false);
++        }
++        CCLayerColor::onExit();
++    }
++
+     void keyBackClicked() override {
+         if (m_page != Page::Live) {
+             onHistoryBack(nullptr);
+diff --git a/corum-ranked-mod/src/RankedRuntime.cpp b/corum-ranked-mod/src/RankedRuntime.cpp
+index 0a41049..7b66513 100644
+--- a/corum-ranked-mod/src/RankedRuntime.cpp
++++ b/corum-ranked-mod/src/RankedRuntime.cpp
+@@ -227,6 +227,13 @@ void RankedRuntime::setTransientError(std::string error) {
+     ++m_view.revision;
+ }
+ 
++void RankedRuntime::invalidatePollRequest() {
++    ++m_pollRequestGeneration;
++    m_pollRequest.cancel();
++    m_pollBusy = false;
++    m_nextPollAt = {};
++}
++
+ std::string RankedRuntime::endpoint(std::string const& path) const {
+     return m_serverURL + path;
+ }
+@@ -239,6 +246,8 @@ void RankedRuntime::begin() {
+         m_view.stage == RuntimeStage::Matched
+     ) return;
+ 
++    invalidatePollRequest();
++
+     m_serverURL = trim(Mod::get()->getSettingValue<std::string>("ranked-server-url"));
+     if (m_serverURL.empty()) {
+         m_serverURL = std::string(kDefaultRankedServerURL);
+@@ -530,6 +539,7 @@ void RankedRuntime::joinQueue() {
+         setStage(RuntimeStage::Blocked, "The active mod environment changed. Re-open Ranked to recheck.");
+         return;
+     }
++    invalidatePollRequest();
+     matjson::Value body;
+     body["installedMods"] = installedModsJson();
+     auto request = baseRequest(m_sessionToken);
+@@ -567,6 +577,7 @@ void RankedRuntime::startDebugBotMatch(DebugBotMatchOptions options) {
+         setStage(RuntimeStage::Blocked, "The active mod environment changed. Re-open Ranked to recheck.");
+         return;
+     }
++    invalidatePollRequest();
+     matjson::Value body;
+     body["password"] = options.password;
+     body["difficulty"] = options.difficulty;
+@@ -607,14 +618,17 @@ void RankedRuntime::startDebugBotMatch(DebugBotMatchOptions options) {
+ 
+ void RankedRuntime::leaveQueue() {
+     if (m_controlBusy || m_sessionToken.empty() || m_view.stage != RuntimeStage::Queued) return;
++    invalidatePollRequest();
+     auto request = baseRequest(m_sessionToken);
+     m_controlBusy = true;
++    setStage(RuntimeStage::JoiningQueue, "Leaving the Ranked queue...");
+     m_controlRequest.spawn(
+         request.post(endpoint("/api/ranked/queue/leave")),
+         [this](web::WebResponse response) {
+             m_controlBusy = false;
+             if (!successful(response)) {
+-                setTransientError(responseError(response));
++                setStage(RuntimeStage::Queued, "Searching for an opponent...", responseError(response));
++                m_nextPollAt = std::chrono::steady_clock::now();
+                 return;
+             }
+             setStage(RuntimeStage::Ready, "Left the queue.");
+@@ -625,10 +639,15 @@ void RankedRuntime::leaveQueue() {
+ void RankedRuntime::pollQueue() {
+     if (m_pollBusy || m_sessionToken.empty() || m_view.stage != RuntimeStage::Queued) return;
+     auto request = baseRequest(m_sessionToken);
++    auto const generation = ++m_pollRequestGeneration;
+     m_pollBusy = true;
+     m_pollRequest.spawn(
+         request.get(endpoint("/api/ranked/queue/status")),
+-        [this](web::WebResponse response) {
++        [this, generation](web::WebResponse response) {
++            if (generation != m_pollRequestGeneration) {
++                log::debug("Ignoring stale Ranked queue poll response");
++                return;
++            }
+             m_pollBusy = false;
+             m_nextPollAt = std::chrono::steady_clock::now() +
+                 std::chrono::milliseconds(pollIntervalMillis());
+@@ -666,11 +685,21 @@ void RankedRuntime::pollMatch() {
+         m_pollBusy || m_sessionToken.empty() || m_matchToken.empty() ||
+         m_view.stage != RuntimeStage::Matched || m_view.match.matchId.empty()
+     ) return;
++    auto const matchId = m_view.match.matchId;
+     auto request = baseRequest(m_sessionToken, m_matchToken);
++    auto const generation = ++m_pollRequestGeneration;
+     m_pollBusy = true;
+     m_pollRequest.spawn(
+-        request.get(endpoint("/api/ranked/matches/" + m_view.match.matchId + "/state")),
+-        [this](web::WebResponse response) {
++        request.get(endpoint("/api/ranked/matches/" + matchId + "/state")),
++        [this, generation, matchId](web::WebResponse response) {
++            if (
++                generation != m_pollRequestGeneration ||
++                m_view.stage != RuntimeStage::Matched ||
++                m_view.match.matchId != matchId
++            ) {
++                log::debug("Ignoring stale Ranked match poll response: match={}", matchId);
++                return;
++            }
+             m_pollBusy = false;
+             if (!successful(response)) {
+                 m_nextPollAt = std::chrono::steady_clock::now() +
+@@ -1088,6 +1117,10 @@ void RankedRuntime::dismissMatch() {
+         }
+         return;
+     }
++    // A terminal-state poll may still be in flight when Queue Again or Close is
++    // pressed. Cancel it and invalidate its callback before clearing matchToken /
++    // match view, otherwise the old response can resurrect the previous match.
++    invalidatePollRequest();
+     if (m_view.match.state == "MATCH_RESULT") {
+         auto const ownSide = m_view.match.side;
+         auto const& tier = ownSide == "A" ? m_view.match.profileAfterTierA : m_view.match.profileAfterTierB;
+diff --git a/corum-ranked-mod/src/RankedRuntime.hpp b/corum-ranked-mod/src/RankedRuntime.hpp
+index 40a9191..840897a 100644
+--- a/corum-ranked-mod/src/RankedRuntime.hpp
++++ b/corum-ranked-mod/src/RankedRuntime.hpp
+@@ -261,6 +261,7 @@ private:
+ 
+     void fetchConfig();
+     void createSession();
++    void invalidatePollRequest();
+     void pollQueue();
+     void pollMatch();
+     void parseMatchState(matjson::Value const& root);
+@@ -317,6 +318,7 @@ private:
+     int m_localDeathmatchVisualAttempts = 0;
+     std::uint64_t m_eventSequence = 0;
+     std::uint64_t m_attemptIntentRequestGeneration = 0;
++    std::uint64_t m_pollRequestGeneration = 0;
+     bool m_controlBusy = false;
+     bool m_pollBusy = false;
+     bool m_attemptBusy = false;
+diff --git a/ranked/README.md b/ranked/README.md
+index 752cc57..3e5844f 100644
+--- a/ranked/README.md
++++ b/ranked/README.md
+@@ -57,11 +57,11 @@ g++ -std=c++23 -Wall -Wextra -Wpedantic -Werror \
+ 무료 alpha 호스팅 순서는 [`docs/free-hosting-render-neon.md`](docs/free-hosting-render-neon.md),
+ 기존 최초 배포 체크리스트는 [`docs/alpha-5-handoff.md`](docs/alpha-5-handoff.md),
+ Debug Bot Match 제거 방법은 [`docs/debug-bot-match.md`](docs/debug-bot-match.md)를 참고하세요.
+-최신 alpha.33 변경 파일·검증 결과는
+-[`docs/v0.4.0-alpha.33-report.md`](docs/v0.4.0-alpha.33-report.md)에 정리되어 있습니다.
++최신 alpha.38 변경 파일·검증 결과는
++[`docs/v0.4.0-alpha.38-report.md`](docs/v0.4.0-alpha.38-report.md)에 정리되어 있습니다.
+ 
+ 
+-> v0.4.0-alpha.33 policy: the Ranked allowlist checks currently enabled + loaded mods only. Installed-but-disabled mods do not block Ranked; required mods such as CBF must still be active.
++> v0.4.0-alpha.38 policy: the Ranked allowlist checks currently enabled + loaded mods only. Installed-but-disabled mods do not block Ranked; required mods such as CBF must still be active.
+ 
+ 
+ ## alpha.18 attempt scoring reliability
+diff --git a/ranked/apps/server/package.json b/ranked/apps/server/package.json
+index bbf84c5..00bb3bc 100644
+--- a/ranked/apps/server/package.json
++++ b/ranked/apps/server/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "@corum-ranked/server",
+-  "version": "0.4.0-alpha.33",
++  "version": "0.4.0-alpha.38",
+   "private": true,
+   "type": "module",
+   "scripts": {
+@@ -11,7 +11,7 @@
+     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit"
+   },
+   "dependencies": {
+-    "@corum-ranked/rules": "0.4.0-alpha.33",
++    "@corum-ranked/rules": "0.4.0-alpha.38",
+     "@nestjs/common": "11.2.1",
+     "@nestjs/core": "11.2.1",
+     "@nestjs/platform-express": "11.2.1",
+diff --git a/ranked/apps/server/src/session/client-version.ts b/ranked/apps/server/src/session/client-version.ts
+index 96a71b3..280bea3 100644
+--- a/ranked/apps/server/src/session/client-version.ts
++++ b/ranked/apps/server/src/session/client-version.ts
+@@ -1,4 +1,4 @@
+-export const REQUIRED_RANKED_CLIENT_VERSION = "v0.4.0-alpha.37";
++export const REQUIRED_RANKED_CLIENT_VERSION = "v0.4.0-alpha.38";
+ 
+ export interface RankedClientVersionMod {
+   readonly id: string;
+diff --git a/ranked/apps/server/test/client-version.test.ts b/ranked/apps/server/test/client-version.test.ts
+index 04aeb6e..0021679 100644
+--- a/ranked/apps/server/test/client-version.test.ts
++++ b/ranked/apps/server/test/client-version.test.ts
+@@ -22,28 +22,28 @@ describe("Ranked client version gate", () => {
+ 
+   it("accepts the same current version with or without a leading v", () => {
+     expect(
+-      evaluateRankedClientVersion("0.4.0-alpha.37", [clientMod("0.4.0-alpha.37")]).allowed,
++      evaluateRankedClientVersion("0.4.0-alpha.38", [clientMod("0.4.0-alpha.38")]).allowed,
+     ).toBe(true);
+   });
+ 
+   it("rejects an older declared client version", () => {
+-    const result = evaluateRankedClientVersion("v0.4.0-alpha.36", [
++    const result = evaluateRankedClientVersion("v0.4.0-alpha.37", [
+       clientMod(REQUIRED_RANKED_CLIENT_VERSION),
+     ]);
+     expect(result).toMatchObject({
+       allowed: false,
+-      requiredVersion: "v0.4.0-alpha.37",
+-      clientVersion: "v0.4.0-alpha.36",
++      requiredVersion: "v0.4.0-alpha.38",
++      clientVersion: "v0.4.0-alpha.37",
+     });
+   });
+ 
+   it("rejects when the active installed mod itself is not current", () => {
+     const result = evaluateRankedClientVersion(REQUIRED_RANKED_CLIENT_VERSION, [
+-      clientMod("v0.4.0-alpha.36"),
++      clientMod("v0.4.0-alpha.37"),
+     ]);
+     expect(result).toMatchObject({
+       allowed: false,
+-      installedModVersion: "v0.4.0-alpha.36",
++      installedModVersion: "v0.4.0-alpha.37",
+     });
+   });
+ 
+diff --git a/ranked/docs/debug-bot-match.md b/ranked/docs/debug-bot-match.md
+index 600b014..96b8f3d 100644
+--- a/ranked/docs/debug-bot-match.md
++++ b/ranked/docs/debug-bot-match.md
+@@ -1,6 +1,6 @@
+ # Debug Bot Match 개발 문서
+ 
+-`v0.4.0-alpha.33`의 Bot Match는 실제 Ranked 엔진을 시험하는 임시 개발 harness다.
++`v0.4.0-alpha.38`의 Bot Match는 실제 Ranked 엔진을 시험하는 임시 개발 harness다.
+ 비밀번호 입력값은 URL, 서버 로그, 일반 로그에 기록하지 않으며 HTTPS JSON body로만 보낸다.
+ 
+ ## 활성화
+diff --git a/diagnostic-source/Corum-Ranked-main/ranked/docs/v0.4.0-alpha.38-report.md b/ranked/docs/v0.4.0-alpha.38-report.md
+new file mode 100644
+index 0000000..94c40fb
+--- /dev/null
++++ b/ranked/docs/v0.4.0-alpha.38-report.md
+@@ -0,0 +1,42 @@
++# Corum Ranked v0.4.0-alpha.38 report
++
++## Scope
++
++alpha.38 is a client reliability release for iOS input-object lifetime, stale polling responses, and the LevelInfo-to-PlayLayer round launch transition. It does not change Ranked rules or the database schema.
++
++## 1. iOS touch-release crash
++
++The three alpha.35/alpha.37 crash reports share the same native stack fingerprint:
++
++`CCTouchDispatcher::touches -> CCEGLViewProtocol::handleTouchesEnd`
++
++`CorumRankedLayer::refresh()` ran every 200 ms, and `prepareUiTransition()` previously returned `true` even when the presentation key had not changed. Every refresh then removed all `CCMenu` children. On iOS, Geode's selected-item cleanup hook is not installed, so `CCMenu::m_pSelectedItem` could still point at a freed button when touch-end arrived.
++
++alpha.38:
++
++- does not rebuild the UI when its presentation key is unchanged;
++- updates countdowns, download progress, queue status, and spectator values in place;
++- explicitly unselects and clears `m_pSelectedItem` before structural menu cleanup;
++- disables the Ranked refresh, keypad delegate, and touch dispatcher before scene exit.
++
++## 2. Stale match response after Queue Again
++
++`dismissMatch()` previously cleared the token and match view without invalidating an in-flight `m_pollRequest`. Its callback could still parse the old terminal snapshot after Queue Again had begun.
++
++alpha.38 assigns every queue/match poll a monotonically increasing generation. Cancellation, dismissal, re-queue, leave-queue, and session initialization invalidate the previous generation. A callback must match both the current generation and current match ID before it can mutate runtime state.
++
++## 3. Round launch after Ready
++
++The supplied runtime log proves the Ready request was accepted and authority advanced from `ROUND_PREPARE` to `ROUND_PLAYING`. The client then repeatedly armed gameplay, called `LevelInfoLayer::onPlay()`, remained on the same scene, and retried.
++
++alpha.38 no longer treats a call to `onPlay()` as an attempted launch that needs a watchdog. It resolves Geometry Dash's canonical saved `GJGameLevel` payload, arms the authoritative Ranked context, constructs `PlayLayer::scene(level, false, false)` once, and replaces the LevelInfo scene only when construction succeeds. `PlayLayer::init` therefore becomes the synchronous launch success boundary.
++
++## 4. Deployment and compatibility
++
++- Client manifest: `v0.4.0-alpha.38`
++- Required server client gate: `v0.4.0-alpha.38`
++- Database migration: none
++- Apps Script change: none
++- Scoring/MMR/RP/map-pool/ban/attempt rules: unchanged
++
++The server version gate and client must be deployed together. An alpha.38 client is intentionally rejected by an alpha.37 gate, and vice versa.
+diff --git a/ranked/package-lock.json b/ranked/package-lock.json
+index 052b0b5..babd644 100644
+--- a/ranked/package-lock.json
++++ b/ranked/package-lock.json
+@@ -1,12 +1,12 @@
+ {
+   "name": "corum-ranked",
+-  "version": "0.4.0-alpha.33",
++  "version": "0.4.0-alpha.38",
+   "lockfileVersion": 3,
+   "requires": true,
+   "packages": {
+     "": {
+       "name": "corum-ranked",
+-      "version": "0.4.0-alpha.33",
++      "version": "0.4.0-alpha.38",
+       "workspaces": [
+         "packages/*",
+         "apps/*",
+@@ -22,9 +22,9 @@
+     },
+     "apps/server": {
+       "name": "@corum-ranked/server",
+-      "version": "0.4.0-alpha.33",
++      "version": "0.4.0-alpha.38",
+       "dependencies": {
+-        "@corum-ranked/rules": "0.4.0-alpha.33",
++        "@corum-ranked/rules": "0.4.0-alpha.38",
+         "@nestjs/common": "11.2.1",
+         "@nestjs/core": "11.2.1",
+         "@nestjs/platform-express": "11.2.1",
+@@ -3194,7 +3194,7 @@
+     },
+     "packages/rules": {
+       "name": "@corum-ranked/rules",
+-      "version": "0.4.0-alpha.33"
++      "version": "0.4.0-alpha.38"
+     }
+   }
+ }
+diff --git a/ranked/package.json b/ranked/package.json
+index e63489e..883245d 100644
+--- a/ranked/package.json
++++ b/ranked/package.json
+@@ -1,7 +1,7 @@
+ {
+   "name": "corum-ranked",
+   "private": true,
+-  "version": "0.4.0-alpha.33",
++  "version": "0.4.0-alpha.38",
+   "workspaces": [
+     "packages/*",
+     "apps/*",
+diff --git a/ranked/packages/rules/package.json b/ranked/packages/rules/package.json
+index b739d08..8c856b6 100644
+--- a/ranked/packages/rules/package.json
++++ b/ranked/packages/rules/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "@corum-ranked/rules",
+-  "version": "0.4.0-alpha.33",
++  "version": "0.4.0-alpha.38",
+   "private": true,
+   "type": "module",
+   "main": "./dist/index.js",
+diff --git a/diagnostic-source/Corum-Ranked-main/release/Corum-Ranked-v0.4.0-alpha.38-RELEASE-NOTES.md b/release/Corum-Ranked-v0.4.0-alpha.38-RELEASE-NOTES.md
+new file mode 100644
+index 0000000..111c321
+--- /dev/null
++++ b/release/Corum-Ranked-v0.4.0-alpha.38-RELEASE-NOTES.md
+@@ -0,0 +1,9 @@
++# Corum Ranked v0.4.0-alpha.38
++
++- Fixed frequent iOS crashes when releasing a UI button, including **QUEUE AGAIN**.
++- Ranked buttons are no longer deleted and recreated every 0.2 seconds; live countdown and status text now update without replacing the active menu.
++- Old queue/match polling responses are cancelled and ignored after a match is closed or re-queued.
++- Fixed the round-start deadlock after `SENDING READY...` by launching the canonical downloaded level through a single verified `PlayLayer` initialization instead of repeatedly calling `LevelInfoLayer::onPlay()`.
++- Added explicit keypad and touch-dispatch cleanup when leaving the Ranked scene.
++- Updated the required client version to `v0.4.0-alpha.38`. Deploy the matching server version gate before testing this client.
++- No database migration is required. Scoring, MMR/RP, map pool, ban rules, and attempt limits are unchanged.
