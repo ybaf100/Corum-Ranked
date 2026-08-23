@@ -332,8 +332,25 @@ class CorumRankedLayer final : public CCLayerColor {
         render();
         applyFadeInIfNeeded();
         updateDynamicUi();
-        schedule(schedule_selector(CorumRankedLayer::refresh), 0.20f);
         return true;
+    }
+
+    void onEnter() override {
+        CCLayerColor::onEnter();
+
+        // LevelInfoLayer and PlayLayer are pushed over this Ranked scene. The
+        // corresponding onExit() intentionally stops polling and input while a
+        // player is inside those scenes, so every return through popScene() must
+        // restore them. Without this lifecycle pair, the retained Ranked layer
+        // comes back frozen on its pre-launch "OPENING LEVEL / STARTS IN 05"
+        // frame and can never observe ROUND_RESULT or the following Round.
+        setKeypadEnabled(true);
+        if (m_menu) m_menu->setTouchEnabled(true);
+        schedule(schedule_selector(CorumRankedLayer::refresh), 0.20f);
+
+        // Reconcile any Attempt ACK or match poll that completed while the
+        // Ranked scene was covered instead of waiting for another visual frame.
+        refresh(0.0f);
     }
 
     void refresh(float) {
