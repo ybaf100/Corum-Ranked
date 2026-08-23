@@ -1,6 +1,6 @@
 # Debug Bot Match 개발 문서
 
-`v0.4.0-alpha.39`의 Bot Match는 실제 Ranked 엔진을 시험하는 임시 개발 harness다.
+`v0.4.0-alpha.40`의 Bot Match는 실제 Ranked 엔진을 시험하는 임시 개발 harness다.
 비밀번호 입력값은 URL, 서버 로그, 일반 로그에 기록하지 않으며 HTTPS JSON body로만 보낸다.
 
 ## 활성화
@@ -26,7 +26,7 @@ Easy/Normal/Hard MMR offset·Qualifying 도달 확률·Clear 확률·진행 속�
 
 - `NORMAL_MATCH`
 - `FORCE_BOT_1_CLEAR`
-- `FORCE_BOT_2_CLEARS`
+- `FORCE_BOT_3_CLEARS`
 - `TRIGGER_LAST_ATTEMPT`
 - `TRIGGER_ROUND_DRAW`
 - `TRIGGER_ROUND_3`

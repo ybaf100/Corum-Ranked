@@ -13,7 +13,7 @@ Apps Script `ranked_config`가 운영 설정의 source입니다. 서버는 마�
 - 초기/초당 확장/최대 matchmaking MMR 범위
 - ready/reconnect/restart 실패 정책
 
-고정 규칙값(180초 Round, 10초 Final/LAST start window, 10초 private ban, BO3)은 명세값으로 초기 행을 만들지만 Match snapshot에 계속 포함됩니다.
+고정 규칙값(300초 Round, 3-Clear, 10초 Final/LAST start window, 10초 private ban, BO3)은 명세값으로 초기 행을 만들지만 Match snapshot에 계속 포함됩니다.
 
 ## 2. Database
 
@@ -73,7 +73,7 @@ Ready timeout, reconnect timeout, restart recovery의 행동은 `Ranked Config`�
 - Ranked와 CBF가 allowlist의 required+enabled 행인지 확인
 - CBF `soft-toggle=false`, `click-on-steps=false`, `physics-bypass=false`
 - staging PostgreSQL migration, two-client harness, 실제 Geode package 빌드 성공
-- 일반 플레이에서 상대 progress 비공개, 2:1 LAST ATTEMPT trigger 화면에서만 관전 overlay 노출 확인
+- 일반 플레이에서 상대 progress 비공개, 3:2 LAST ATTEMPT trigger 화면에서만 관전 overlay 노출 확인
 - deadline 전환이 없는 progress 요청이 PostgreSQL row/score/stateVersion을 만들지 않는지 확인
 - HTTPS/TLS, reverse proxy request size/rate limit, DB backup/restore 확인
 - Discord staging webhook으로 모든 7개 event type 확인

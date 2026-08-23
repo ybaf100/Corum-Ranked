@@ -868,7 +868,7 @@ void RankedRuntime::parseMatchState(matjson::Value const& root) {
     }
 
     // The Last Attempt window itself is authoritative enough to identify its
-    // spectator: the trigger side has finished two Clears and only the target
+    // spectator: the trigger side has finished three Clears and only the target
     // side may start. Recover that state locally if a state response races with
     // the attempt-end acknowledgement or temporarily omits the convenience
     // `spectator` projection. Without this fallback the popup can remain on its
@@ -1016,7 +1016,7 @@ void RankedRuntime::applyAttemptSnapshot(matjson::Value const& root) {
             // Attempt-end acknowledgements can move a Round directly into
             // LAST_ATTEMPT_WINDOW / ROUND_SETTLING before the next state poll.
             // Apply that transition immediately so a player who just reached
-            // two Clears cannot be auto-entered into an illegal extra attempt.
+            // three Clears cannot be auto-entered into an illegal extra attempt.
             auto const lastAttempt = round["lastAttemptWindow"];
             auto const inLastAttemptFlow =
                 phase == "LAST_ATTEMPT_WINDOW" || phase == "ROUND_SETTLING";
@@ -1419,15 +1419,15 @@ bool RankedRuntime::canEnterCurrentLevel() const {
     }
 
     // A Clear is shown optimistically before its /attempt/end acknowledgement.
-    // If that pending Clear would make this side reach two Clears, do not let
+    // If that pending Clear would make this side reach three Clears, do not let
     // LevelInfoLayer auto-enter another PlayLayer while waiting for the server
     // to transition into LAST_ATTEMPT_WINDOW / ROUND_SETTLING. This closes the
-    // clear->LevelInfo->re-enter race that could create an illegal third Clear.
+    // clear->LevelInfo->re-enter race that could create an illegal fourth Clear.
     auto const committedClears = m_view.match.side == "A" ? m_view.match.clearsA : m_view.match.clearsB;
     auto const contextKey = currentAttemptContextKey();
     if (
         attemptStartWindowOpen() &&
-        committedClears + optimisticClearsForContext(contextKey) >= 2 &&
+        committedClears + optimisticClearsForContext(contextKey) >= 3 &&
         hasLocalAttemptInFlight()
     ) return false;
 
@@ -1509,7 +1509,7 @@ bool RankedRuntime::attemptStartWindowOpen() const {
     if (state == "DEATHMATCH_PLAYING") return true;
 
     if (state == "ROUND_PLAYING") {
-        // deadlineAt is the three-minute deadline while authority still reports
+        // deadlineAt is the five-minute deadline while authority still reports
         // ROUND_PLAYING. The rules permit new starts for exactly ten more seconds.
         // A missing clock remains server-authoritative instead of locally locking
         // the player out; the Start endpoint can still reject a late event.

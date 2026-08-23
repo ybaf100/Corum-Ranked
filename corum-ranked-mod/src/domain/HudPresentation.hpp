@@ -46,8 +46,8 @@ struct HudPresentation {
     std::string fpsText;
     std::string ownScoreText;
     std::string opponentScoreText;
-    std::array<ClearCheckColor, 2> ownChecks;
-    std::array<ClearCheckColor, 2> opponentChecks;
+    std::array<ClearCheckColor, 3> ownChecks;
+    std::array<ClearCheckColor, 3> opponentChecks;
     std::string timerText;
     std::string stateText;
     bool windowStateFirst = false;
@@ -60,7 +60,7 @@ struct HudPresentation {
     std::string spectatorProgressText;
 };
 
-[[nodiscard]] std::array<ClearCheckColor, 2> clearChecks(int approvedClears);
+[[nodiscard]] std::array<ClearCheckColor, 3> clearChecks(int approvedClears);
 [[nodiscard]] HudLayout layoutHud(float width, float height);
 [[nodiscard]] HudPresentation presentHud(HudInput const& input);
 

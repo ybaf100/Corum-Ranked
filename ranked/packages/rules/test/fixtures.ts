@@ -6,7 +6,7 @@ import type {
   RankedOperationalConfig,
   TierBand,
 } from "../src/index.js";
-import { DOCUMENT_RULES_V0_3 } from "../src/index.js";
+import { DOCUMENT_RULES_V0_4 } from "../src/index.js";
 
 export const makeMap = (
   pool: PoolNumber,
@@ -58,7 +58,7 @@ export const tierBandsFixture: readonly TierBand[] = [
 export const completeOperationalConfig = (): RankedOperationalConfig => ({
   enabled: true,
   generation: "test-generation",
-  rules: DOCUMENT_RULES_V0_3,
+  rules: DOCUMENT_RULES_V0_4,
   tierBands: tierBandsFixture,
   csmpSeeds: {
     NONE: 500,

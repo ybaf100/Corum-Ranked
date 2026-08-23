@@ -10,6 +10,11 @@ var CORUM_RANKED_SHEETS = Object.freeze({
   config: "Ranked Config",
 });
 
+// Ranked owns a separate map catalog. Corum Integration continues to use
+// MAPS_SHEET_NAME / sheet1 through Code.gs, while ranked_config reads sheet2
+// unless the operator explicitly sets RANKED_MAPS_SHEET_NAME.
+var CORUM_RANKED_DEFAULT_MAPS_SHEET = "sheet2";
+
 var CORUM_RANKED_MAP_HEADERS = Object.freeze([
   "Ranked Pool (1~6)",
   "Qualifying %",
@@ -81,10 +86,11 @@ var CORUM_RANKED_ALLOWED_MOD_DEFAULTS = Object.freeze([
 
 var CORUM_RANKED_CONFIG_DEFAULTS = Object.freeze([
   Object.freeze(["enabled", false, "모든 필수 운영값 입력·검증 후 TRUE"]),
-  Object.freeze(["ruleVersion", "corum-ranked-v0.3", "명세/규칙 버전"]),
-  Object.freeze(["roundSeconds", 180, "일반 Round 시간"]),
-  Object.freeze(["finalAttemptWindowSeconds", 10, "3분 이후 attempt 시작 Window"]),
-  Object.freeze(["lastAttemptWindowSeconds", 10, "2-Clear LAST ATTEMPT 시작 Window"]),
+  Object.freeze(["ruleVersion", "corum-ranked-v0.4", "명세/규칙 버전"]),
+  Object.freeze(["roundSeconds", 300, "일반 Round 시간"]),
+  Object.freeze(["clearTarget", 3, "LAST ATTEMPT를 발동시키는 Clear 수"]),
+  Object.freeze(["finalAttemptWindowSeconds", 10, "5분 이후 attempt 시작 Window"]),
+  Object.freeze(["lastAttemptWindowSeconds", 10, "3-Clear LAST ATTEMPT 시작 Window"]),
   Object.freeze(["banSeconds", 10, "동시 비공개 밴 시간"]),
   Object.freeze(["bestOf", 3, "최대 Round 수"]),
   Object.freeze(["mmrAlgorithm", "ELO_V1", "서버가 지원하는 MMR 계산 정책"]),
@@ -161,13 +167,40 @@ function setupCorumRankedConfig() {
   appendMissingRankedRows_(seedsSheet, CORUM_RANKED_SEED_DEFAULTS);
   appendMissingRankedRows_(allowedModsSheet, CORUM_RANKED_ALLOWED_MOD_DEFAULTS);
   appendMissingRankedRows_(configSheet, CORUM_RANKED_CONFIG_DEFAULTS);
+  migrateRankedFixedRuleDefaults_(configSheet);
 
   [mapsSheet, tiersSheet, seedsSheet, allowedModsSheet, configSheet].forEach(function (sheet) {
     sheet.setFrozenRows(1);
   });
 
-  console.log("Corum Ranked 설정 준비 완료 (맵 Pool/Qualifying은 기존 맵 시트 열 사용)");
+  console.log("Corum Ranked 설정 준비 완료 (맵 데이터: " + mapsSheet.getName() + ")");
   console.log("미확정 Seed/MMR/timeout 값을 입력하고 검증한 뒤 enabled를 TRUE로 바꾸세요.");
+}
+
+function migrateRankedFixedRuleDefaults_(sheet) {
+  if (!sheet || sheet.getLastRow() < 2) return;
+  var values = sheet.getDataRange().getValues();
+  var keyColumn = findOptionalHeaderIndex_(values[0], ["Key"]);
+  var valueColumn = findOptionalHeaderIndex_(values[0], ["Value"]);
+  if (keyColumn === -1 || valueColumn === -1) return;
+
+  var changed = false;
+  for (var rowIndex = 1; rowIndex < values.length; rowIndex += 1) {
+    var key = rankedText_(values[rowIndex][keyColumn]);
+    if (key === "ruleVersion" && rankedText_(values[rowIndex][valueColumn]) === "corum-ranked-v0.3") {
+      values[rowIndex][valueColumn] = "corum-ranked-v0.4";
+      changed = true;
+    } else if (key === "roundSeconds" && Number(values[rowIndex][valueColumn]) === 180) {
+      values[rowIndex][valueColumn] = 300;
+      changed = true;
+    } else if (key === "clearTarget" && Number(values[rowIndex][valueColumn]) === 2) {
+      values[rowIndex][valueColumn] = 3;
+      changed = true;
+    }
+  }
+  if (changed) {
+    sheet.getRange(1, 1, values.length, values[0].length).setValues(values);
+  }
 }
 
 function appendMissingRankedRows_(sheet, rows) {
@@ -201,6 +234,7 @@ function readCorumRankedConfig_() {
   var rules = {
     rulesVersion: rankedText_(rawConfig.ruleVersion),
     roundSeconds: rankedNumber_(rawConfig.roundSeconds),
+    clearTarget: rankedNumber_(rawConfig.clearTarget),
     finalAttemptWindowSeconds: rankedNumber_(rawConfig.finalAttemptWindowSeconds),
     lastAttemptWindowSeconds: rankedNumber_(rawConfig.lastAttemptWindowSeconds),
     banSeconds: rankedNumber_(rawConfig.banSeconds),
@@ -334,8 +368,23 @@ function readRankedSeeds_(sheet) {
   return result;
 }
 
+function getRankedMapsSheet_() {
+  var spreadsheet = getSpreadsheet_();
+  var configuredName = PropertiesService.getScriptProperties().getProperty(
+    "RANKED_MAPS_SHEET_NAME",
+  );
+  var sheetName = rankedText_(configuredName) || CORUM_RANKED_DEFAULT_MAPS_SHEET;
+  var sheet = spreadsheet.getSheetByName(sheetName);
+  if (sheet) return sheet;
+
+  throw new Error(
+    "Ranked 맵 시트를 찾을 수 없습니다: " + sheetName +
+      ". sheet1과 같은 열 구조의 sheet2를 만들거나 RANKED_MAPS_SHEET_NAME을 설정하세요.",
+  );
+}
+
 function ensureRankedMapColumns_() {
-  var sheet = getMapsSheet_();
+  var sheet = getRankedMapsSheet_();
   var width = Math.max(1, sheet.getLastColumn());
   var headers = sheet.getRange(1, 1, 1, width).getDisplayValues()[0];
   var missing = CORUM_RANKED_MAP_HEADERS.filter(function (header) {
@@ -369,7 +418,7 @@ function applyRankedMapValidation_(sheet) {
 }
 
 function readRankedMapsFromCorumSheet_() {
-  var sheet = getMapsSheet_();
+  var sheet = getRankedMapsSheet_();
   if (!sheet || sheet.getLastRow() < 2) return [];
   var values = sheet.getDataRange().getValues();
   var displayValues = sheet.getDataRange().getDisplayValues();
@@ -586,10 +635,11 @@ function rankedBoolean_(value) {
 function validateCorumRankedConfig_(operational, maps, allowedMods, client) {
   var errors = [];
   var rules = operational.rules || {};
-  if (rules.rulesVersion !== "corum-ranked-v0.3") {
-    errors.push("ruleVersion은 corum-ranked-v0.3이어야 합니다.");
+  if (rules.rulesVersion !== "corum-ranked-v0.4") {
+    errors.push("ruleVersion은 corum-ranked-v0.4이어야 합니다.");
   }
-  if (rules.roundSeconds !== 180) errors.push("roundSeconds는 180이어야 합니다.");
+  if (rules.roundSeconds !== 300) errors.push("roundSeconds는 300이어야 합니다.");
+  if (rules.clearTarget !== 3) errors.push("clearTarget은 3이어야 합니다.");
   if (rules.finalAttemptWindowSeconds !== 10) {
     errors.push("finalAttemptWindowSeconds는 10이어야 합니다.");
   }

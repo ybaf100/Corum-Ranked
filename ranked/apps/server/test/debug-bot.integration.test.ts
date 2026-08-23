@@ -56,7 +56,7 @@ class FixedCsmpSource implements CsmpTierSource {
 const cleanMods: CreateSessionDto["installedMods"] = [
   {
     id: "hwanhee1.corum_ranked",
-    version: "v0.4.0-alpha.36",
+    version: "v0.4.0-alpha.40",
     enabled: true,
     loaded: true,
     internal: false,
@@ -143,7 +143,7 @@ describe("development-only Bot Match using the production Ranked engine", () => 
     const created = await sessions.create({
       gdAccountId: accountId,
       gdUsername: `Debug${accountId}`,
-      clientVersion: "v0.4.0-alpha.36",
+      clientVersion: "v0.4.0-alpha.40",
       installedMods: structuredClone(cleanMods),
     });
     const result = await database.query<{
@@ -174,7 +174,7 @@ describe("development-only Bot Match using the production Ranked engine", () => 
     };
   };
 
-  const completeTwoClears = async (
+  const completeThreeClears = async (
     creation: Awaited<ReturnType<QueueService["createDebugBotMatch"]>>,
     playerWins: boolean,
     roundNumber: number,
@@ -187,7 +187,7 @@ describe("development-only Bot Match using the production Ranked engine", () => 
     const levelId = state.currentRound.map.playableLevelId as string;
     const context = playerWins ? creation.playerContext : creation.botContext;
     const token = playerWins ? creation.playerMatchToken : creation.botMatchToken;
-    for (let index = 0; index < 2; index += 1) {
+    for (let index = 0; index < document.operational.rules.clearTarget; index += 1) {
       const started = await matches.startAttempt(creation.matchId, token, context, {
         levelId,
         clientEventId: `rating-${creation.matchId}-r${roundNumber}-${index}-start`,
@@ -277,13 +277,13 @@ describe("development-only Bot Match using the production Ranked engine", () => 
           { levelId: playing.currentRound.map.canonicalLevelId, clientEventId: "wrong-level" },
         )).rejects.toThrow("playableLevelId");
       }
-      await completeTwoClears(creation, playerWins, round);
+      await completeThreeClears(creation, playerWins, round);
       const scored = await matches.state(
         creation.matchId,
         creation.playerMatchToken,
         creation.playerContext,
       ) as Record<string, any>;
-      expect(scored.currentRound.scores[playerWins ? "A" : "B"]).toBe(400);
+      expect(scored.currentRound.scores[playerWins ? "A" : "B"]).toBe(600);
 
       // alpha.10+ gives the trailing side the same 10-second LAST ATTEMPT
       // start window even when it has zero Clears. The rated-match helper must
@@ -442,7 +442,7 @@ describe("development-only Bot Match using the production Ranked engine", () => 
     await debug.tickOnce();
     let state = await matches.state(created.matchId, created.matchToken, player) as Record<string, any>;
     expect(state.state).toBe("LAST_ATTEMPT_WINDOW");
-    expect(state.currentRound.clears).toEqual({ A: 2, B: 1 });
+    expect(state.currentRound.clears).toEqual({ A: 3, B: 2 });
     expect(state.spectator).toMatchObject({ active: true, opponentName: "BOT NORMAL" });
     const scoreBeforeTelemetry = structuredClone(state.currentRound.scores);
     let sawLiveProgress = false;
@@ -487,4 +487,5 @@ describe("development-only Bot Match using the production Ranked engine", () => 
     );
     expect(Number(orphanedBotAttempt.rows[0]?.count ?? 0)).toBe(0);
   });
+
 });

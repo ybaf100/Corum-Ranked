@@ -1,3 +1,13 @@
+# v0.4.0-alpha.40
+
+- Moved the authoritative Ranked map catalog to `sheet2` by default while preserving Corum Integration's independent `sheet1` routing; `RANKED_MAPS_SHEET_NAME` can override only the Ranked tab.
+- Updated the fixed Ranked rules to `corum-ranked-v0.4`: five-minute rounds, three Clears, and the existing ten-second FINAL/LAST attempt-start windows.
+- Expanded the client HUD and result/history UI to three Clear checks, and aligned client re-entry blocking, server spectator authorization, Debug Bot scenarios, and regression fixtures with the new Clear target.
+- Preserved in-progress legacy `corum-ranked-v0.3` match snapshots as two-Clear matches during a rolling server deployment; newly created matches validate at exactly three Clears.
+- Fixed blank/default Geometry Dash LevelInfo metadata by normalizing the downloaded Ranked level as a Search Result and synchronizing the server-provided title/creator before the vanilla layer renders.
+- Fixed repeated Android Ranked resource downloads by making the mod's persistent save directory the authoritative BGM cache. Geometry Dash's custom-song path is now a best-effort compatibility mirror and can change without reopening the resource gate.
+- Updated the exact client/server version gate and workspace metadata to `v0.4.0-alpha.40`. No database migration is required; update/redeploy Apps Script and rerun `setupCorumRankedConfig()` after creating `sheet2`.
+
 # v0.4.0-alpha.39
 
 - Normalized Attempt End progress to the server's three-decimal wire contract, preventing raw Geometry Dash percentages from returning HTTP 400 and permanently blocking the FIFO before later Clears.

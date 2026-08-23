@@ -1,5 +1,5 @@
 import {
-  DOCUMENT_RULES_V0_3,
+  DOCUMENT_RULES_V0_4,
   type AllowedModRule,
   type PoolNumber,
   type RankedMap,
@@ -32,7 +32,7 @@ const tierBands: readonly TierBand[] = [
 const operational = (generation: string): RankedOperationalConfig => ({
   enabled: true,
   generation,
-  rules: DOCUMENT_RULES_V0_3,
+  rules: DOCUMENT_RULES_V0_4,
   tierBands,
   csmpSeeds: {
     NONE: 500,

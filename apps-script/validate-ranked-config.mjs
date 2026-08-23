@@ -109,7 +109,17 @@ class MockSpreadsheet {
         ]);
       }
     }
-    this.sheets = [new MockSheet("sheet1", [headers, ...maps])];
+    const integrationMaps = maps.map((row) => {
+      const copy = [...row];
+      copy[1] = `Integration ${copy[1]}`;
+      copy[4] = `9${copy[4]}`;
+      copy[5] = `7${copy[5]}`;
+      return copy;
+    });
+    this.sheets = [
+      new MockSheet("sheet1", [headers, ...integrationMaps]),
+      new MockSheet("sheet2", [headers, ...maps]),
+    ];
   }
 
   getSheetByName(name) {
@@ -184,7 +194,10 @@ for (const name of [
 }
 assert.equal(spreadsheet.getSheetByName("Ranked Pool"), null);
 
-const mapSheet = spreadsheet.getSheetByName("sheet1");
+const integrationMapSheet = spreadsheet.getSheetByName("sheet1");
+const mapSheet = spreadsheet.getSheetByName("sheet2");
+assert.equal(integrationMapSheet.rows[0].includes("Ranked Pool (1~6)"), false);
+assert.equal(integrationMapSheet.rows[0].includes("Qualifying %"), false);
 const poolColumn = mapSheet.rows[0].indexOf("Ranked Pool (1~6)");
 const qualifyingColumn = mapSheet.rows[0].indexOf("Qualifying %");
 assert.ok(poolColumn >= 0);
@@ -193,9 +206,15 @@ for (let index = 1; index < mapSheet.rows.length; index += 1) {
   mapSheet.rows[index][poolColumn] = Math.floor((index - 1) / 5) + 1;
   mapSheet.rows[index][qualifyingColumn] = index === 1 ? "35%" : 50;
 }
+setConfig("ruleVersion", "corum-ranked-v0.3");
+setConfig("roundSeconds", 180);
+setConfig("clearTarget", 2);
 context.setupCorumRankedConfig();
 assert.equal(mapSheet.rows[0].filter((value) => value === "Ranked Pool (1~6)").length, 1);
 assert.equal(mapSheet.rows[0].filter((value) => value === "Qualifying %").length, 1);
+assert.equal(spreadsheet.getSheetByName("Ranked Config").rows.find((row) => row[0] === "ruleVersion")[1], "corum-ranked-v0.4");
+assert.equal(spreadsheet.getSheetByName("Ranked Config").rows.find((row) => row[0] === "roundSeconds")[1], 300);
+assert.equal(spreadsheet.getSheetByName("Ranked Config").rows.find((row) => row[0] === "clearTarget")[1], 3);
 
 const initial = responseJson();
 assert.equal(initial.ok, true);
@@ -260,7 +279,9 @@ const alternate = complete.data.maps.find((map) => map.canonicalLevelId === "510
 assert.equal(alternate.alternateLevelId, "987654321");
 assert.equal(alternate.playableLevelId, "987654321");
 assert.equal(alternate.levelId, "987654321");
-assert.equal(complete.data.operational.rules.roundSeconds, 180);
+assert.equal(complete.data.operational.rules.rulesVersion, "corum-ranked-v0.4");
+assert.equal(complete.data.operational.rules.roundSeconds, 300);
+assert.equal(complete.data.operational.rules.clearTarget, 3);
 assert.equal(complete.data.operational.cbf.requiredSettings["soft-toggle"], false);
 assert.equal(complete.data.operational.cbf.requiredSettings["click-on-steps"], false);
 assert.equal(complete.data.operational.cbf.requiredSettings["physics-bypass"], false);
@@ -299,4 +320,4 @@ const health = JSON.parse(context.doGet({ parameter: { action: "health" } }).tex
 assert.equal(health.service, "Corum Integration API");
 assert.equal(health.version, context.CORUM_API_VERSION);
 
-console.log("Ranked map columns on sheet1, alternate/playable IDs, fail-closed config, and legacy health routing passed.");
+console.log("Ranked-only sheet2 routing, alternate/playable IDs, 3-Clear/5-minute rules, fail-closed config, and legacy health routing passed.");

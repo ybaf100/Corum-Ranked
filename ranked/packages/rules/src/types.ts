@@ -48,6 +48,7 @@ export interface TierBand {
 export interface RankedRulesConfig {
   readonly rulesVersion: string;
   readonly roundSeconds: number;
+  readonly clearTarget: number;
   readonly finalAttemptWindowSeconds: number;
   readonly lastAttemptWindowSeconds: number;
   readonly banSeconds: number;

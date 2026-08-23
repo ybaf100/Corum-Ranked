@@ -137,7 +137,7 @@ void RankedAudioManager::configure(RankedClientPresentationView const& config) {
     stopOwnedAudio();
     m_config = config;
     m_configSignature = signature;
-    migratePrivateCacheToGdPath();
+    synchronizeSongCaches();
     m_downloadQueue.clear();
     m_failedSongIds.clear();
     m_downloadState = resourcesReady() ? RankedResourceDownloadState::Ready : RankedResourceDownloadState::Idle;
@@ -178,17 +178,19 @@ std::filesystem::path RankedAudioManager::cachedSongPath(int songId) const {
 }
 
 std::filesystem::path RankedAudioManager::preferredDownloadPath(int songId) const {
-    if (songId > 0) {
-        if (auto* manager = MusicDownloadManager::sharedState()) {
-            auto const gdPath = manager->pathForSong(songId);
-            if (!gdPath.empty()) return std::filesystem::path(gdPath.c_str());
-        }
-    }
+    // The GD custom-song path is not a stable cache key on every Android setup:
+    // storage providers and MusicDownloadManager hooks can resolve the same song
+    // to a different external path after reopening Ranked. Keep the authoritative
+    // copy inside this mod's persistent save directory and mirror it to GD only
+    // for compatibility.
     return cachedSongPath(songId);
 }
 
 std::string RankedAudioManager::readySongPath(int songId) const {
     if (songId <= 0) return {};
+    auto const cached = cachedSongPath(songId);
+    if (usableFile(cached)) return cached.string();
+
     if (auto* manager = MusicDownloadManager::sharedState()) {
         auto const path = manager->pathForSong(songId);
         if (!path.empty()) {
@@ -200,8 +202,6 @@ std::string RankedAudioManager::readySongPath(int songId) const {
             }
         }
     }
-    auto const cached = cachedSongPath(songId);
-    if (usableFile(cached)) return cached.string();
     return {};
 }
 
@@ -366,6 +366,7 @@ void RankedAudioManager::downloadSongFile(int songId, std::string url) {
 void RankedAudioManager::finishDownloadSuccess(int songId) {
     if (songId != m_activeDownloadSongId) return;
     log::info("Ranked audio: GD song {} saved successfully", songId);
+    synchronizeSongCaches();
     m_failedSongIds.erase(songId);
     m_activeDownloadProgress = 100;
     m_activeDownloadSongId = 0;
@@ -484,34 +485,65 @@ void RankedAudioManager::clearPlaybackState() {
     stopOwnedAudio();
 }
 
-void RankedAudioManager::migratePrivateCacheToGdPath() {
+void RankedAudioManager::synchronizeSongCaches() {
     auto* manager = MusicDownloadManager::sharedState();
-    if (!manager) return;
 
     for (auto const songId : uniqueSongIds()) {
         auto const privatePath = cachedSongPath(songId);
-        if (!usableFile(privatePath)) continue;
+        auto gdPath = std::filesystem::path();
+        if (manager) {
+            auto const gdRawPath = manager->pathForSong(songId);
+            if (!gdRawPath.empty()) gdPath = std::filesystem::path(gdRawPath.c_str());
+        }
 
-        auto const gdRawPath = manager->pathForSong(songId);
-        if (gdRawPath.empty()) continue;
-        auto const gdPath = std::filesystem::path(gdRawPath.c_str());
-        if (usableFile(gdPath)) continue;
+        auto privateReady = usableFile(privatePath);
+        auto gdReady = !gdPath.empty() && usableFile(gdPath);
+        if (!privateReady && !gdReady) continue;
 
         std::error_code ec;
-        if (!gdPath.parent_path().empty()) {
-            std::filesystem::create_directories(gdPath.parent_path(), ec);
+        if (!privateReady && gdReady) {
+            if (!privatePath.parent_path().empty()) {
+                std::filesystem::create_directories(privatePath.parent_path(), ec);
+            }
             if (ec) {
-                log::warn("Ranked audio: failed to create GD song directory for {}: {}", songId, ec.message());
+                log::warn("Ranked audio: failed to create persistent cache directory for {}: {}", songId, ec.message());
                 continue;
             }
+            std::filesystem::copy_file(
+                gdPath,
+                privatePath,
+                std::filesystem::copy_options::overwrite_existing,
+                ec
+            );
+            privateReady = !ec && usableFile(privatePath);
+            if (!privateReady) {
+                log::warn("Ranked audio: failed to import GD song {} into persistent cache", songId);
+                continue;
+            }
+            log::info("Ranked audio: imported song {} into persistent cache '{}'", songId, privatePath.string());
         }
-        std::filesystem::copy_file(privatePath, gdPath, std::filesystem::copy_options::overwrite_existing, ec);
-        if (ec || !usableFile(gdPath)) {
-            log::warn("Ranked audio: failed to migrate private song {} into GD song storage", songId);
-            continue;
+
+        // Preserve the private copy. The GD path is only a best-effort mirror;
+        // failure here must never make the Ranked resource gate reappear.
+        if (privateReady && !gdPath.empty() && !gdReady) {
+            ec.clear();
+            if (!gdPath.parent_path().empty()) {
+                std::filesystem::create_directories(gdPath.parent_path(), ec);
+            }
+            if (!ec) {
+                std::filesystem::copy_file(
+                    privatePath,
+                    gdPath,
+                    std::filesystem::copy_options::overwrite_existing,
+                    ec
+                );
+            }
+            if (ec || !usableFile(gdPath)) {
+                log::warn("Ranked audio: GD mirror unavailable for song {}; persistent cache remains ready", songId);
+            } else {
+                log::info("Ranked audio: mirrored song {} into GD song storage", songId);
+            }
         }
-        std::filesystem::remove(privatePath, ec);
-        log::info("Ranked audio: migrated song {} into GD song storage", songId);
     }
 }
 

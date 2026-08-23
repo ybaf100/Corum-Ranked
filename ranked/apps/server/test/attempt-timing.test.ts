@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DOCUMENT_RULES_V0_3, createRound, startRoundAttempt, type RankedMapSnapshot } from "@corum-ranked/rules";
+import { DOCUMENT_RULES_V0_4, createRound, startRoundAttempt, type RankedMapSnapshot } from "@corum-ranked/rules";
 import {
   ATTEMPT_TRANSPORT_GRACE_MS,
   resolveAttemptStartTime,
@@ -18,7 +18,7 @@ const map: RankedMapSnapshot = {
   qualifyingPercent: 20,
 };
 
-const rules = DOCUMENT_RULES_V0_3;
+const rules = DOCUMENT_RULES_V0_4;
 
 describe("attempt transport timing", () => {
   it("accepts only a bounded client start timestamp", () => {

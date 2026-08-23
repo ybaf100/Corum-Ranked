@@ -44,11 +44,12 @@ std::string windowCountdown(std::optional<std::int64_t> remainingMillis) {
 
 namespace corum::ranked {
 
-std::array<ClearCheckColor, 2> clearChecks(int approvedClears) {
-    auto const count = std::clamp(approvedClears, 0, 2);
+std::array<ClearCheckColor, 3> clearChecks(int approvedClears) {
+    auto const count = std::clamp(approvedClears, 0, 3);
     return {
         count >= 1 ? ClearCheckColor::Green : ClearCheckColor::Gray,
         count >= 2 ? ClearCheckColor::Green : ClearCheckColor::Gray,
+        count >= 3 ? ClearCheckColor::Green : ClearCheckColor::Gray,
     };
 }
 
@@ -74,7 +75,7 @@ HudPresentation presentHud(HudInput const& input) {
     auto const opponentAttempts = ownIsA ? input.deathmatchAttemptsUsedB : input.deathmatchAttemptsUsedA;
 
     // A poll can still say ROUND_PLAYING for a fraction of a second after the
-    // three-minute deadline. The normal deadline is also the start of the fixed
+    // five-minute deadline. The normal deadline is also the start of the fixed
     // 10-second FINAL ATTEMPT window, so derive that presentation locally from
     // the signed server clock instead of briefly displaying a misleading 00:00.
     auto displayState = input.state;
@@ -120,9 +121,9 @@ HudPresentation presentHud(HudInput const& input) {
     } else if (displayState == "ROUND_SETTLING") {
         // The 10-second value is a start deadline. Once it reaches zero, keep the
         // terminal 0.0 visible while an attempt that started in time finishes.
-        // A two-Clear trigger uses LAST ATTEMPT; the ordinary three-minute expiry
+        // A three-Clear trigger uses LAST ATTEMPT; the ordinary five-minute expiry
         // uses FINAL ATTEMPT.
-        auto const lastAttempt = std::max(ownClears, opponentClears) >= 2;
+        auto const lastAttempt = std::max(ownClears, opponentClears) >= 3;
         result.stateText = lastAttempt ? "LAST ATTEMPT" : "FINAL ATTEMPT";
         result.timerText = "0.0";
         result.windowStateFirst = true;

@@ -683,7 +683,7 @@ class CorumRankedLayer final : public CCLayerColor {
             auto& runtime = RankedRuntime::get();
             auto const clearSyncPending =
                 match.deathmatchSequence <= 0 &&
-                runtime.localDisplayClears() >= 2 &&
+                runtime.localDisplayClears() >= 3 &&
                 runtime.hasLocalAttemptInFlight();
             auto const seconds = std::max(0, 10 - static_cast<int>(std::floor(phaseSeconds())));
             std::string footer = fmt::format("STARTS IN  {:02d}", seconds);
@@ -1281,7 +1281,7 @@ class CorumRankedLayer final : public CCLayerColor {
         auto& runtime = RankedRuntime::get();
         auto const clearSyncPending =
             !deathmatch &&
-            runtime.localDisplayClears() >= 2 &&
+            runtime.localDisplayClears() >= 3 &&
             runtime.hasLocalAttemptInFlight();
         auto* infoPlate = makeNeonPanel({168.0f, 124.0f}, {size.width / 2.0f, size.height / 2.0f - 28.0f}, kBlue, kDeepPanel2, 244);
         m_root->addChild(infoPlate, 1);
@@ -1436,7 +1436,7 @@ class CorumRankedLayer final : public CCLayerColor {
     }
 
     void addClearChecks(int clears, CCPoint base, bool rightAligned = false) {
-        auto const count = std::clamp(clears, 0, 2);
+        auto const count = std::clamp(clears, 0, 3);
         for (int i = 0; i < count; ++i) {
             auto* check = CCSprite::createWithSpriteFrameName("GJ_checkOn_001.png");
             check->setScale(0.23f);
@@ -1630,6 +1630,7 @@ class CorumRankedLayer final : public CCLayerColor {
         auto* level = GJGameLevel::create();
         if (!level) return nullptr;
         level->setLevelID(current->levelId);
+        level->m_levelType = GJLevelType::SearchResult;
         level->m_levelName = current->title;
         level->m_creatorName = current->creator;
         level->m_levelNotDownloaded = true;

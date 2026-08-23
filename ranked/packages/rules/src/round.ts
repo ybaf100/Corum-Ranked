@@ -17,7 +17,7 @@ export type RoundPhase =
 
 export type RoundResultReason =
   | "SCORE"
-  | "TWO_CLEAR_LAST_ATTEMPT"
+  | "CLEAR_TARGET_LAST_ATTEMPT"
   | "LAST_ATTEMPT_CLEAR"
   | "LAST_ATTEMPT_EXPIRED";
 
@@ -441,7 +441,7 @@ export const endRoundAttempt = (
     // alpha.10: a target that entered LAST ATTEMPT with zero clears does not
     // draw immediately on its first clear. The 10-second *start* window remains
     // open, so another attempt may start before the deadline. Only reaching the
-    // trigger side's two clears produces the draw.
+    // trigger side's configured Clear target produces the draw.
     if (next.clears[side] >= next.clears[next.lastAttemptWindow.triggerSide]) {
       return {
         state: finishRound(next, "DRAW", "LAST_ATTEMPT_CLEAR", serverAcceptedAtMs),
@@ -458,9 +458,9 @@ export const endRoundAttempt = (
     };
   }
 
-  if (cleared && next.clears[side] === 2 && !next.lastAttemptWindow) {
+  if (cleared && next.clears[side] === next.rules.clearTarget && !next.lastAttemptWindow) {
     const opponentClears = next.clears[otherSide(side)];
-    if (opponentClears <= 1) {
+    if (opponentClears < next.rules.clearTarget) {
       return {
         state: enterLastAttemptWindow(next, side, serverAcceptedAtMs),
         accepted: true,

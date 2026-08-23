@@ -189,7 +189,7 @@ void hudTests() {
         .scoreA = 382,
         .scoreB = 417,
         .clearsA = 1,
-        .clearsB = 2,
+        .clearsB = 3,
         .qualifyingPercent = 35,
         .remainingMillis = 134'000,
         .signedRemainingMillis = 134'000,
@@ -204,8 +204,10 @@ void hudTests() {
     assert(hud.opponentScoreText == "Score : 417");
     assert(hud.ownChecks[0] == ClearCheckColor::Green);
     assert(hud.ownChecks[1] == ClearCheckColor::Gray);
+    assert(hud.ownChecks[2] == ClearCheckColor::Gray);
     assert(hud.opponentChecks[0] == ClearCheckColor::Green);
     assert(hud.opponentChecks[1] == ClearCheckColor::Green);
+    assert(hud.opponentChecks[2] == ClearCheckColor::Green);
     assert(hud.timerText == "02:14");
     assert(hud.stateText == "MATCH POINT");
     assert(hud.qualifyingText == "Qualifying : 35%");
@@ -229,12 +231,14 @@ void hudTests() {
     hud = presentHud(input);
     assert(hud.ownChecks[0] == ClearCheckColor::Gray);
     assert(hud.ownChecks[1] == ClearCheckColor::Gray);
+    assert(hud.ownChecks[2] == ClearCheckColor::Gray);
     assert(hud.opponentChecks[0] == ClearCheckColor::Gray);
     assert(hud.opponentChecks[1] == ClearCheckColor::Gray);
+    assert(hud.opponentChecks[2] == ClearCheckColor::Gray);
     assert(!hud.spectatorVisible);
 
-    input.clearsA = 1;
-    input.clearsB = 2;
+    input.clearsA = 2;
+    input.clearsB = 3;
     input.spectatorCurrentProgress.reset();
 
     input.side = "B";
@@ -246,7 +250,7 @@ void hudTests() {
     assert(hud.opponentScoreText == "Score : 382");
     assert(hud.stateText == "TIEBREAKER");
 
-    // ROUND_PLAYING can remain visible until the next poll after 3:00. Derive
+    // ROUND_PLAYING can remain visible until the next poll after 5:00. Derive
     // the fixed FINAL ATTEMPT countdown from the signed normal deadline so the
     // HUD never flashes 00:00 before the decimal ten-second timer appears.
     input.state = "ROUND_PLAYING";
@@ -284,8 +288,8 @@ void hudTests() {
 
     input.state = "LAST_ATTEMPT_WINDOW";
     input.remainingMillis = 6'400;
-    input.clearsA = 1;
-    input.clearsB = 2;
+    input.clearsA = 2;
+    input.clearsB = 3;
     input.spectatorActive = true;
     input.spectatorOpponentName = "PlayerB";
     input.spectatorCurrentProgress = 73;
@@ -299,8 +303,10 @@ void hudTests() {
     assert(hud.opponentScoreText == "Score : 382");
     assert(hud.ownChecks[0] == ClearCheckColor::Green);
     assert(hud.ownChecks[1] == ClearCheckColor::Green);
+    assert(hud.ownChecks[2] == ClearCheckColor::Green);
     assert(hud.opponentChecks[0] == ClearCheckColor::Green);
-    assert(hud.opponentChecks[1] == ClearCheckColor::Gray);
+    assert(hud.opponentChecks[1] == ClearCheckColor::Green);
+    assert(hud.opponentChecks[2] == ClearCheckColor::Gray);
 
     input.state = "ROUND_SETTLING";
     input.remainingMillis.reset();

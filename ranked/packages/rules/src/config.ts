@@ -7,9 +7,10 @@ import {
   type TierBand,
 } from "./types.js";
 
-export const DOCUMENT_RULES_V0_3: RankedRulesConfig = Object.freeze({
-  rulesVersion: "corum-ranked-v0.3",
-  roundSeconds: 180,
+export const DOCUMENT_RULES_V0_4: RankedRulesConfig = Object.freeze({
+  rulesVersion: "corum-ranked-v0.4",
+  roundSeconds: 300,
+  clearTarget: 3,
   finalAttemptWindowSeconds: 10,
   lastAttemptWindowSeconds: 10,
   banSeconds: 10,
@@ -24,15 +25,19 @@ export interface ConfigValidationResult {
 
 const validateDocumentRules = (rules: RankedRulesConfig, errors: string[]): void => {
   if (!rules.rulesVersion.trim()) errors.push("rules.rulesVersion is required");
-  if (rules.roundSeconds !== 180) errors.push("rules.roundSeconds must be 180 for v0.3");
+  if (rules.rulesVersion !== "corum-ranked-v0.4") {
+    errors.push("rules.rulesVersion must be corum-ranked-v0.4");
+  }
+  if (rules.roundSeconds !== 300) errors.push("rules.roundSeconds must be 300 for v0.4");
+  if (rules.clearTarget !== 3) errors.push("rules.clearTarget must be 3 for v0.4");
   if (rules.finalAttemptWindowSeconds !== 10) {
-    errors.push("rules.finalAttemptWindowSeconds must be 10 for v0.3");
+    errors.push("rules.finalAttemptWindowSeconds must be 10 for v0.4");
   }
   if (rules.lastAttemptWindowSeconds !== 10) {
-    errors.push("rules.lastAttemptWindowSeconds must be 10 for v0.3");
+    errors.push("rules.lastAttemptWindowSeconds must be 10 for v0.4");
   }
-  if (rules.banSeconds !== 10) errors.push("rules.banSeconds must be 10 for v0.3");
-  if (rules.bestOf !== 3) errors.push("rules.bestOf must be 3 for v0.3");
+  if (rules.banSeconds !== 10) errors.push("rules.banSeconds must be 10 for v0.4");
+  if (rules.bestOf !== 3) errors.push("rules.bestOf must be 3 for v0.4");
 };
 
 export const validateTierBands = (bands: readonly TierBand[]): readonly string[] => {

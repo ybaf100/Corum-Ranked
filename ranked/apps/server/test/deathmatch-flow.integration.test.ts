@@ -276,7 +276,12 @@ describe("Round 3 draw and repeating deathmatch", () => {
       await service.ready(matchId, matchTokenB, contextB, {
         installedMods: structuredClone(cleanMods),
       });
-      clock.advance(191 + ATTEMPT_TRANSPORT_GRACE_MS / 1_000 + 1);
+      clock.advance(
+        snapshot.operational.rules.roundSeconds +
+          snapshot.operational.rules.finalAttemptWindowSeconds +
+          ATTEMPT_TRANSPORT_GRACE_MS / 1_000 +
+          1,
+      );
       const resultState = (await service.state(matchId, matchTokenA, contextA)) as Record<string, any>;
       if (round < 3) {
         expect(resultState.state).toBe("ROUND_RESULT");

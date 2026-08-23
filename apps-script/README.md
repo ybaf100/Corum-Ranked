@@ -21,9 +21,12 @@ Ranked를 처음 붙일 때 기존 Apps Script 프로젝트의 `Code.gs`를 이 
 교체하고, 같은 프로젝트에 새 스크립트 파일 `RankedConfig.gs`를 만든 뒤 동명 파일의
 전체 내용을 붙여 넣는다. 두 파일 중 하나만 반영하면 `ranked_config` API가 동작하지 않는다.
 
-`setupCorumIntegration()`을 먼저 한 번 실행한 다음 `setupCorumRankedConfig()`를 한 번
-실행한다. 후자는 별도 `Ranked Pool` 탭을 만들지 않고 현재 맵 관리 시트(기본 `sheet1`,
-또는 `MAPS_SHEET_NAME`)의 오른쪽에 다음 두 열만 추가한다.
+`setupCorumIntegration()`을 먼저 한 번 실행하고, `sheet1`과 동일한 열 레이아웃의
+`sheet2`를 만든 다음 `setupCorumRankedConfig()`를 한 번 실행한다. 일반 Corum
+Integration은 계속 `sheet1`(또는 `MAPS_SHEET_NAME`)을 사용하지만 Ranked API는 기본적으로
+`sheet2`만 읽고 그 오른쪽에 다음 두 열을 추가한다. 다른 탭을 쓰려면 별도 스크립트 속성
+`RANKED_MAPS_SHEET_NAME`을 지정한다. Ranked 탭이 없으면 설정 함수와 API는 명확한 오류로
+중단하며 `sheet1`로 자동 fallback하지 않는다.
 
 | 열 | 입력 |
 | --- | --- |

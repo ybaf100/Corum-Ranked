@@ -100,12 +100,12 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         CCNode* hudRoot = nullptr;
         CCLabelBMFont* fpsLabel = nullptr;
         CCLabelBMFont* ownScoreLabel = nullptr;
-        std::array<CCSprite*, 2> ownChecks {nullptr, nullptr};
+        std::array<CCSprite*, 3> ownChecks {nullptr, nullptr, nullptr};
         CCLabelBMFont* ownAttemptLabel = nullptr;
         CCLabelBMFont* timerLabel = nullptr;
         CCLabelBMFont* stateLabel = nullptr;
         CCLabelBMFont* opponentScoreLabel = nullptr;
-        std::array<CCSprite*, 2> opponentChecks {nullptr, nullptr};
+        std::array<CCSprite*, 3> opponentChecks {nullptr, nullptr, nullptr};
         CCLabelBMFont* opponentAttemptLabel = nullptr;
         CCLabelBMFont* qualifyingLabel = nullptr;
         CCNode* spectatorPanel = nullptr;
@@ -433,6 +433,7 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         m_fields->hudRoot->addChild(m_fields->ownScoreLabel, 3);
         m_fields->ownChecks[0] = checkIcon({layout.topLeftX + 5.0f, top - 42.0f});
         m_fields->ownChecks[1] = checkIcon({layout.topLeftX + 21.0f, top - 42.0f});
+        m_fields->ownChecks[2] = checkIcon({layout.topLeftX + 37.0f, top - 42.0f});
         for (auto* icon : m_fields->ownChecks) m_fields->hudRoot->addChild(icon, 3);
         m_fields->ownAttemptLabel = label("", "bigFont.fnt", 0.24f, {0.0f, 1.0f}, {layout.topLeftX, top - 38.0f});
         m_fields->ownAttemptLabel->setVisible(false);
@@ -451,8 +452,9 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         m_fields->opponentScoreLabel = label("Score : 0", "bigFont.fnt", 0.31f, {1.0f, 1.0f}, {right, top - 18.0f});
         m_fields->opponentScoreLabel->setID("ranked-opponent-score"_spr);
         m_fields->hudRoot->addChild(m_fields->opponentScoreLabel, 3);
-        m_fields->opponentChecks[0] = checkIcon({right - 21.0f, top - 42.0f});
-        m_fields->opponentChecks[1] = checkIcon({right - 5.0f, top - 42.0f});
+        m_fields->opponentChecks[0] = checkIcon({right - 37.0f, top - 42.0f});
+        m_fields->opponentChecks[1] = checkIcon({right - 21.0f, top - 42.0f});
+        m_fields->opponentChecks[2] = checkIcon({right - 5.0f, top - 42.0f});
         for (auto* icon : m_fields->opponentChecks) m_fields->hudRoot->addChild(icon, 3);
         m_fields->opponentAttemptLabel = label("", "bigFont.fnt", 0.24f, {1.0f, 1.0f}, {right, top - 38.0f});
         m_fields->opponentAttemptLabel->setVisible(false);
@@ -546,7 +548,7 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         m_fields->opponentScoreLabel->setString(presentation.opponentScoreText.c_str());
         auto ownChecks = presentation.ownChecks;
         if (!presentation.deathmatch) ownChecks = corum::ranked::clearChecks(runtime.localDisplayClears());
-        for (std::size_t index = 0; index < 2; ++index) {
+        for (std::size_t index = 0; index < m_fields->ownChecks.size(); ++index) {
             applyCheck(m_fields->ownChecks[index], ownChecks[index]);
             applyCheck(m_fields->opponentChecks[index], presentation.opponentChecks[index]);
             m_fields->ownChecks[index]->setVisible(!presentation.deathmatch);

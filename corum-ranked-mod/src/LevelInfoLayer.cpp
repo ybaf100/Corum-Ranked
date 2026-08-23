@@ -130,6 +130,22 @@ bool isCurrentRankedLevel(GJGameLevel* level) {
         runtime.currentLevelId() == static_cast<int>(level->m_levelID);
 }
 
+void normalizeRankedLevelInfo(GJGameLevel* level) {
+    if (!isCurrentRankedLevel(level)) return;
+    auto const& map = corum::ranked::RankedRuntime::get().view().match.currentMap;
+
+    // A GJGameLevel::create() shell defaults to GJLevelType::Default, which
+    // makes vanilla LevelInfoLayer treat an online Ranked map like an incomplete
+    // local/main-level object. The result is the blank title/creator/difficulty
+    // page seen in the report even though the Level ID is valid. SearchResult is
+    // the native type used for downloaded online levels on every platform.
+    level->m_levelType = GJLevelType::SearchResult;
+    if (map) {
+        if (!map->title.empty()) level->m_levelName = map->title;
+        if (!map->creator.empty()) level->m_creatorName = map->creator;
+    }
+}
+
 bool consumePrepareGateRequest(GJGameLevel* level, double& countdownRemainingSeconds) {
     if (!level || !g_pendingPrepareGate.pending) return false;
     if (g_pendingPrepareGate.levelId != static_cast<int>(level->m_levelID)) return false;
@@ -269,6 +285,16 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         CCLabelBMFont* gateStatus = nullptr;
         CCLabelBMFont* gateCountdown = nullptr;
     };
+
+    bool init(GJGameLevel* level, bool challenge) {
+        normalizeRankedLevelInfo(level);
+        if (!LevelInfoLayer::init(level, challenge)) return false;
+        if (isCurrentRankedLevel(m_level)) {
+            normalizeRankedLevelInfo(m_level);
+            m_levelType = GJLevelType::SearchResult;
+        }
+        return true;
+    }
 
     void onEnterTransitionDidFinish() override {
         LevelInfoLayer::onEnterTransitionDidFinish();
@@ -520,7 +546,12 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
 
     void levelDownloadFinished(GJGameLevel* level) override {
         if (!m_fields->songGateActive) {
+            normalizeRankedLevelInfo(level);
             LevelInfoLayer::levelDownloadFinished(level);
+            if (isCurrentRankedLevel(m_level)) {
+                normalizeRankedLevelInfo(m_level);
+                m_levelType = GJLevelType::SearchResult;
+            }
             return;
         }
 
@@ -547,7 +578,10 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
 
         // Only a verified payload may become the LevelInfoLayer's live level.
         // Vanilla then rebuilds its song metadata/widget from that exact payload.
+        normalizeRankedLevelInfo(level);
         LevelInfoLayer::levelDownloadFinished(level);
+        normalizeRankedLevelInfo(m_level);
+        m_levelType = GJLevelType::SearchResult;
         m_fields->mapDownloadRequested = false;
         if (!isCurrentRankedLevel(m_level) || !mapReady(m_level)) {
             if (m_fields->gateStatus) {

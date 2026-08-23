@@ -171,7 +171,7 @@ protected:
         constexpr std::array values {
             BotScenario::NormalMatch,
             BotScenario::ForceBotOneClear,
-            BotScenario::ForceBotTwoClears,
+            BotScenario::ForceBotThreeClears,
             BotScenario::TriggerLastAttempt,
             BotScenario::TriggerRoundDraw,
             BotScenario::TriggerRoundThree,
@@ -188,7 +188,7 @@ protected:
         constexpr std::array values {
             BotScenario::NormalMatch,
             BotScenario::ForceBotOneClear,
-            BotScenario::ForceBotTwoClears,
+            BotScenario::ForceBotThreeClears,
             BotScenario::TriggerLastAttempt,
             BotScenario::TriggerRoundDraw,
             BotScenario::TriggerRoundThree,

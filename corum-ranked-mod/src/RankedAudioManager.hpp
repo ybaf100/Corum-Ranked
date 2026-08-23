@@ -82,7 +82,7 @@ private:
     void startDesiredAudio(bool retry = false);
     void verifyDesiredAudio();
     void clearPlaybackState();
-    void migratePrivateCacheToGdPath();
+    void synchronizeSongCaches();
     void stopOwnedAudio();
     [[nodiscard]] bool ownedChannelPlaying() const;
     [[nodiscard]] float targetRankedVolume() const;

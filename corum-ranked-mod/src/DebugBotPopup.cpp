@@ -20,7 +20,7 @@ constexpr std::array<char const*, 3> kDifficulties {"EASY", "NORMAL", "HARD"};
 constexpr std::array<char const*, 7> kScenarios {
     "NORMAL MATCH",
     "FORCE BOT 1 CLEAR",
-    "FORCE BOT 2 CLEARS",
+    "FORCE BOT 3 CLEARS",
     "TRIGGER LAST ATTEMPT",
     "TRIGGER ROUND DRAW",
     "TRIGGER ROUND 3",
@@ -29,7 +29,7 @@ constexpr std::array<char const*, 7> kScenarios {
 constexpr std::array<char const*, 7> kScenarioValues {
     "NORMAL_MATCH",
     "FORCE_BOT_1_CLEAR",
-    "FORCE_BOT_2_CLEARS",
+    "FORCE_BOT_3_CLEARS",
     "TRIGGER_LAST_ATTEMPT",
     "TRIGGER_ROUND_DRAW",
     "TRIGGER_ROUND_3",

@@ -24,11 +24,11 @@ char const* serverValue(BotDifficulty value) {
 char const* serverValue(BotScenario value) {
     switch (value) {
         case BotScenario::NormalMatch: return "NORMAL_MATCH";
-        case BotScenario::ForceBotOneClear: return "FORCE_BOT_ONE_CLEAR";
-        case BotScenario::ForceBotTwoClears: return "FORCE_BOT_TWO_CLEARS";
+        case BotScenario::ForceBotOneClear: return "FORCE_BOT_1_CLEAR";
+        case BotScenario::ForceBotThreeClears: return "FORCE_BOT_3_CLEARS";
         case BotScenario::TriggerLastAttempt: return "TRIGGER_LAST_ATTEMPT";
         case BotScenario::TriggerRoundDraw: return "TRIGGER_ROUND_DRAW";
-        case BotScenario::TriggerRoundThree: return "TRIGGER_ROUND_THREE";
+        case BotScenario::TriggerRoundThree: return "TRIGGER_ROUND_3";
         case BotScenario::TriggerDeathmatch: return "TRIGGER_DEATHMATCH";
     }
     return "NORMAL_MATCH";
@@ -55,7 +55,7 @@ char const* displayName(BotScenario value) {
     switch (value) {
         case BotScenario::NormalMatch: return "Normal Match";
         case BotScenario::ForceBotOneClear: return "Force Bot 1 Clear";
-        case BotScenario::ForceBotTwoClears: return "Force Bot 2 Clears";
+        case BotScenario::ForceBotThreeClears: return "Force Bot 3 Clears";
         case BotScenario::TriggerLastAttempt: return "Trigger LAST ATTEMPT";
         case BotScenario::TriggerRoundDraw: return "Trigger Round Draw";
         case BotScenario::TriggerRoundThree: return "Trigger Round 3";

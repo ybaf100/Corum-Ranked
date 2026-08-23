@@ -1132,7 +1132,17 @@ export class MatchService {
 
   private roundState(round: RoundRow): RoundState {
     if (!round.domain_state) throw new ConflictException("Round has not started");
-    return parseJson<RoundState>(round.domain_state);
+    const state = parseJson<RoundState>(round.domain_state);
+    // Matches created before v0.4 did not serialize clearTarget. Preserve their
+    // snapshotted two-Clear behavior during a rolling deploy; all newly created
+    // v0.4 matches are validated at exactly three Clears.
+    if (!Number.isSafeInteger(state.rules.clearTarget) || state.rules.clearTarget <= 0) {
+      state.rules = {
+        ...state.rules,
+        clearTarget: state.rules.rulesVersion === "corum-ranked-v0.3" ? 2 : 3,
+      };
+    }
+    return state;
   }
 
   private isRoundPlaying(state: MatchState): boolean {
@@ -2614,8 +2624,8 @@ export class MatchService {
             (domain.phase === "LAST_ATTEMPT_WINDOW" || domain.phase === "ROUND_SETTLING") &&
             domain.lastAttemptWindow?.triggerSide === viewerSide &&
             domain.lastAttemptWindow.targetSide === opponentSide &&
-            domain.clears[viewerSide] === 2 &&
-            domain.clears[opponentSide] <= 1;
+            domain.clears[viewerSide] === domain.rules.clearTarget &&
+            domain.clears[opponentSide] < domain.rules.clearTarget;
 
           const finalWindowSpectator =
             domain.phase === "ROUND_SETTLING" &&

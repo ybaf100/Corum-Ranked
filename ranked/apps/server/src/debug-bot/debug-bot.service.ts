@@ -357,23 +357,30 @@ export class DebugBotService implements OnModuleInit, OnApplicationShutdown {
 
     if (scenario === "FORCE_BOT_1_CLEAR" && roundNumber === 1) {
       await bot();
-    } else if (scenario === "FORCE_BOT_2_CLEARS" && roundNumber === 1) {
+    } else if (scenario === "FORCE_BOT_3_CLEARS" && roundNumber === 1) {
+      await bot();
       await bot();
       await bot();
     } else if (scenario === "TRIGGER_LAST_ATTEMPT" && roundNumber === 1) {
       await bot();
+      await bot();
+      await player();
       await player();
       await player();
     } else if (scenario === "TRIGGER_ROUND_DRAW") {
       await bot();
       await player();
       await player();
+      await player();
+      await bot();
       await bot();
     } else if (scenario === "TRIGGER_ROUND_3") {
       if (roundNumber === 1) {
         await player();
         await player();
+        await player();
       } else if (roundNumber === 2) {
+        await bot();
         await bot();
         await bot();
       }
@@ -381,6 +388,8 @@ export class DebugBotService implements OnModuleInit, OnApplicationShutdown {
       await bot();
       await player();
       await player();
+      await player();
+      await bot();
       await bot();
     }
     driver.seededRounds.add(roundNumber);

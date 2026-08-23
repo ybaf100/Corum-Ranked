@@ -247,7 +247,7 @@ describe("two-client authoritative match flow", () => {
     expect(state.selectedRoundMaps).toBeUndefined();
     expect(state.candidateMaps).toBeNull();
 
-    const winRoundWithTwoClears = async (roundNumber: number) => {
+    const winRoundWithThreeClears = async (roundNumber: number) => {
       await matches.ready(matchId, statusA.matchToken, playerA, {
         installedMods: structuredClone(cleanMods),
       });
@@ -323,8 +323,26 @@ describe("two-client authoritative match flow", () => {
         6,
       );
 
+      clock.advanceSeconds(1);
+      const thirdStart = await matches.startAttempt(matchId, statusA.matchToken, playerA, {
+        levelId,
+        clientEventId: `r${roundNumber}-a3-start`,
+      });
+      clock.advanceSeconds(1);
+      const thirdEnd = await matches.endAttempt(matchId, statusA.matchToken, playerA, {
+        levelId,
+        attemptId: thirdStart.attemptId!,
+        clientEventId: `r${roundNumber}-a3-end`,
+        progressPercent: 100,
+        cleared: true,
+      });
+      if (!("roundSnapshot" in thirdEnd)) {
+        throw new Error("Expected second Clear acknowledgement during ROUND_PLAYING");
+      }
+      expect(thirdEnd.roundSnapshot.clears.A).toBe(2);
+
       // Regression for the real alpha.32 Round-2 Score 0 race: the visual
-      // second Clear can start before the final start deadline while its
+      // third Clear can start before the final start deadline while its
       // authoritative Start is still queued behind an earlier End/ACK. Publish
       // the lease first, move the server clock beyond the deadline, poll once,
       // then let the serialized Start/End catch up. The Round must not finalize
@@ -336,13 +354,13 @@ describe("two-client authoritative match flow", () => {
       if (millisUntilOneSecondBeforeDeadline > 0) {
         clock.advanceSeconds(millisUntilOneSecondBeforeDeadline / 1_000);
       }
-      const thirdStartedAt = clock.now().toISOString();
-      const thirdIntent = await matches.startAttemptIntent(matchId, statusA.matchToken, playerA, {
+      const fourthStartedAt = clock.now().toISOString();
+      const fourthIntent = await matches.startAttemptIntent(matchId, statusA.matchToken, playerA, {
         levelId,
-        clientEventId: `r${roundNumber}-a3-start`,
-        clientStartedAt: thirdStartedAt,
+        clientEventId: `r${roundNumber}-a4-start`,
+        clientStartedAt: fourthStartedAt,
       });
-      expect(thirdIntent).toMatchObject({ accepted: true });
+      expect(fourthIntent).toMatchObject({ accepted: true });
 
       clock.advanceSeconds(3);
       const heldForLease = (await matches.state(
@@ -352,28 +370,28 @@ describe("two-client authoritative match flow", () => {
       )) as Record<string, any>;
       expect(heldForLease.state).not.toBe("ROUND_RESULT");
 
-      const thirdStart = await matches.startAttempt(matchId, statusA.matchToken, playerA, {
+      const fourthStart = await matches.startAttempt(matchId, statusA.matchToken, playerA, {
         levelId,
-        clientEventId: `r${roundNumber}-a3-start`,
-        clientStartedAt: thirdStartedAt,
+        clientEventId: `r${roundNumber}-a4-start`,
+        clientStartedAt: fourthStartedAt,
       });
-      expect(thirdStart).toMatchObject({ accepted: true });
+      expect(fourthStart).toMatchObject({ accepted: true });
       clock.advanceSeconds(1);
-      const thirdEnd = await matches.endAttempt(matchId, statusA.matchToken, playerA, {
+      const fourthEnd = await matches.endAttempt(matchId, statusA.matchToken, playerA, {
         levelId,
-        attemptId: thirdStart.attemptId!,
-        clientEventId: `r${roundNumber}-a3-end`,
+        attemptId: fourthStart.attemptId!,
+        clientEventId: `r${roundNumber}-a4-end`,
         progressPercent: 100,
         cleared: true,
       });
-      expect(thirdEnd).toMatchObject({ accepted: true, awardedScore: 200 });
-      if (!("roundSnapshot" in thirdEnd)) {
-        throw new Error("Expected second Clear acknowledgement after delayed Start Lease reconciliation");
+      expect(fourthEnd).toMatchObject({ accepted: true, awardedScore: 200 });
+      if (!("roundSnapshot" in fourthEnd)) {
+        throw new Error("Expected third Clear acknowledgement after delayed Start Lease reconciliation");
       }
-      expect(thirdEnd.roundSnapshot.clears.A).toBe(2);
+      expect(fourthEnd.roundSnapshot.clears.A).toBe(3);
     };
 
-    await winRoundWithTwoClears(1);
+    await winRoundWithThreeClears(1);
     state = (await matches.state(matchId, statusA.matchToken, playerA)) as Record<string, any>;
     expect(state.state).toBe("LAST_ATTEMPT_WINDOW");
     expect(state.currentRound.lastAttemptWindow).toMatchObject({ triggerSide: "A", targetSide: "B" });
@@ -446,15 +464,13 @@ describe("two-client authoritative match flow", () => {
       clientEventId: "r2-b2-start",
     });
     clock.advanceSeconds(1);
-    await matches.updateAttemptProgress(matchId, statusB.matchToken, playerB, {
+    await matches.endAttempt(matchId, statusB.matchToken, playerB, {
       levelId: roundTwoLevelId,
       attemptId: b2.attemptId!,
-      progressPercent: 42,
+      clientEventId: "r2-b2-end",
+      progressPercent: 100,
+      cleared: true,
     });
-    state = (await matches.state(matchId, statusA.matchToken, playerA)) as Record<string, any>;
-    expect(state.spectator).toEqual({ active: false });
-    expect(state.spectator).not.toHaveProperty("currentProgress");
-
     clock.advanceSeconds(1);
     const a2 = await matches.startAttempt(matchId, statusA.matchToken, playerA, {
       levelId: roundTwoLevelId,
@@ -469,9 +485,38 @@ describe("two-client authoritative match flow", () => {
       cleared: true,
     });
 
+    clock.advanceSeconds(1);
+    const b3 = await matches.startAttempt(matchId, statusB.matchToken, playerB, {
+      levelId: roundTwoLevelId,
+      clientEventId: "r2-b3-start",
+    });
+    clock.advanceSeconds(1);
+    await matches.updateAttemptProgress(matchId, statusB.matchToken, playerB, {
+      levelId: roundTwoLevelId,
+      attemptId: b3.attemptId!,
+      progressPercent: 42,
+    });
+    state = (await matches.state(matchId, statusA.matchToken, playerA)) as Record<string, any>;
+    expect(state.spectator).toEqual({ active: false });
+    expect(state.spectator).not.toHaveProperty("currentProgress");
+
+    clock.advanceSeconds(1);
+    const a3 = await matches.startAttempt(matchId, statusA.matchToken, playerA, {
+      levelId: roundTwoLevelId,
+      clientEventId: "r2-a3-start",
+    });
+    clock.advanceSeconds(1);
+    await matches.endAttempt(matchId, statusA.matchToken, playerA, {
+      levelId: roundTwoLevelId,
+      attemptId: a3.attemptId!,
+      clientEventId: "r2-a3-end",
+      progressPercent: 100,
+      cleared: true,
+    });
+
     state = (await matches.state(matchId, statusA.matchToken, playerA)) as Record<string, any>;
     expect(state.state).toBe("LAST_ATTEMPT_WINDOW");
-    expect(state.currentRound.clears).toEqual({ A: 2, B: 1 });
+    expect(state.currentRound.clears).toEqual({ A: 3, B: 2 });
     expect(state.spectator).toMatchObject({
       active: true,
       opponentName: "Player9102",
@@ -508,7 +553,7 @@ describe("two-client authoritative match flow", () => {
       matchId,
       statusB.matchToken,
       playerB,
-      { levelId: roundTwoLevelId, attemptId: b2.attemptId!, progressPercent: 73 },
+      { levelId: roundTwoLevelId, attemptId: b3.attemptId!, progressPercent: 73 },
     );
     expect(progressResult).toMatchObject({ accepted: true, stored: true });
     const rowsAfterProgress = await database.query<{ count: number }>(
@@ -530,14 +575,14 @@ describe("two-client authoritative match flow", () => {
     clock.advanceSeconds(1);
     await matches.updateAttemptProgress(matchId, statusB.matchToken, playerB, {
       levelId: roundTwoLevelId,
-      attemptId: b2.attemptId!,
+      attemptId: b3.attemptId!,
       progressPercent: 83,
     });
     clock.advanceSeconds(1);
     await matches.endAttempt(matchId, statusB.matchToken, playerB, {
       levelId: roundTwoLevelId,
-      attemptId: b2.attemptId!,
-      clientEventId: "r2-b2-end",
+      attemptId: b3.attemptId!,
+      clientEventId: "r2-b3-end",
       progressPercent: 83,
       cleared: false,
     });
@@ -546,24 +591,24 @@ describe("two-client authoritative match flow", () => {
     await expect(
       matches.updateAttemptProgress(matchId, statusB.matchToken, playerB, {
         levelId: roundTwoLevelId,
-        attemptId: b2.attemptId!,
+        attemptId: b3.attemptId!,
         progressPercent: 99,
       }),
     ).rejects.toThrow("Attempt progress requires the active server attempt");
 
     clock.advanceSeconds(1);
-    const b3StartedAt = clock.now().toISOString();
-    const b3Intent = await matches.startAttemptIntent(
+    const b4StartedAt = clock.now().toISOString();
+    const b4Intent = await matches.startAttemptIntent(
       matchId,
       statusB.matchToken,
       playerB,
       {
         levelId: roundTwoLevelId,
-        clientEventId: "r2-b3-start",
-        clientStartedAt: b3StartedAt,
+        clientEventId: "r2-b4-start",
+        clientStartedAt: b4StartedAt,
       },
     );
-    expect(b3Intent).toMatchObject({ accepted: true, duplicate: false });
+    expect(b4Intent).toMatchObject({ accepted: true, duplicate: false });
 
     // Simulate a Render process restart after the visual Start lease reached
     // PostgreSQL but before the serialized authoritative Start request arrived.
@@ -587,18 +632,18 @@ describe("two-client authoritative match flow", () => {
     state = (await matches.state(matchId, statusA.matchToken, playerA)) as Record<string, any>;
     expect(state.state).not.toBe("ROUND_RESULT");
 
-    const b3 = await matches.startAttempt(matchId, statusB.matchToken, playerB, {
+    const b4 = await matches.startAttempt(matchId, statusB.matchToken, playerB, {
       levelId: roundTwoLevelId,
-      clientEventId: "r2-b3-start",
-      clientStartedAt: b3StartedAt,
+      clientEventId: "r2-b4-start",
+      clientStartedAt: b4StartedAt,
     });
-    expect(b3).toMatchObject({ accepted: true });
+    expect(b4).toMatchObject({ accepted: true });
     state = (await matches.state(matchId, statusA.matchToken, playerA)) as Record<string, any>;
     expect(state.spectator.currentProgress).toBe(0);
     clock.advanceSeconds(1);
     await matches.updateAttemptProgress(matchId, statusB.matchToken, playerB, {
       levelId: roundTwoLevelId,
-      attemptId: b3.attemptId!,
+      attemptId: b4.attemptId!,
       progressPercent: 91,
     });
 
@@ -611,8 +656,8 @@ describe("two-client authoritative match flow", () => {
     expect(state.currentRound.displayScores.B).toBe(state.currentRound.scores.B + scoreAttempt(91, false, snapshottedQualifying));
     await matches.endAttempt(matchId, statusB.matchToken, playerB, {
       levelId: roundTwoLevelId,
-      attemptId: b3.attemptId!,
-      clientEventId: "r2-b3-end",
+      attemptId: b4.attemptId!,
+      clientEventId: "r2-b4-end",
       progressPercent: 100,
       cleared: true,
     });
@@ -631,8 +676,8 @@ describe("two-client authoritative match flow", () => {
     // rejecting it because the Round is immutable.
     const duplicateFinalEnd = await matches.endAttempt(matchId, statusB.matchToken, playerB, {
       levelId: roundTwoLevelId,
-      attemptId: b3.attemptId!,
-      clientEventId: "r2-b3-end",
+      attemptId: b4.attemptId!,
+      clientEventId: "r2-b4-end",
       progressPercent: 100,
       cleared: true,
     });
@@ -666,7 +711,7 @@ describe("two-client authoritative match flow", () => {
     const attempts = await database.query<{ count: number }>(
       "SELECT COUNT(*)::int AS count FROM ranked_attempts",
     );
-    expect(attempts.rows[0]?.count).toBe(8);
+    expect(attempts.rows[0]?.count).toBe(11);
 
     const relayEvents = await database.query<{ event_type: string; count: number }>(
       `SELECT event_type, COUNT(*)::int AS count
@@ -675,7 +720,7 @@ describe("two-client authoritative match flow", () => {
        ORDER BY event_type`,
     );
     expect(relayEvents.rows).toEqual([
-      { event_type: "CLEAR_EVENT", count: 6 },
+      { event_type: "CLEAR_EVENT", count: 9 },
       { event_type: "LAST_ATTEMPT", count: 2 },
       { event_type: "MATCH_RESULT", count: 1 },
       { event_type: "ROUND_RESULT", count: 2 },
