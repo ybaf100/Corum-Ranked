@@ -2,7 +2,19 @@ name: Build Corum Ranked Mod
 
 on:
   workflow_call:
+    inputs:
+      debug_bot_match:
+        description: Include the development-only Debug Bot Match and Force Win/Lose UI
+        required: false
+        type: boolean
+        default: false
   workflow_dispatch:
+    inputs:
+      debug_bot_match:
+        description: Include DEBUG BOT MATCH and Force Win/Lose (never use for release builds)
+        required: true
+        type: boolean
+        default: true
   push:
     branches:
       - "**"
@@ -26,11 +38,14 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       artifact_name: ${{ steps.version.outputs.artifact_name }}
+      debug_enabled: ${{ steps.version.outputs.debug_enabled }}
     steps:
       - uses: actions/checkout@v7
       - name: Read and validate mod identity/version
         id: version
         shell: bash
+        env:
+          DEBUG_BOT_MATCH: ${{ inputs.debug_bot_match }}
         run: |
           node <<'NODE'
           const fs = require('fs');
@@ -60,9 +75,14 @@ jobs:
             );
           }
           fs.appendFileSync(process.env.GITHUB_OUTPUT, `version=${manifest.version}\n`);
+          const debugEnabled = process.env.DEBUG_BOT_MATCH === 'true';
           fs.appendFileSync(
             process.env.GITHUB_OUTPUT,
-            `artifact_name=Corum-Ranked-${manifest.version}\n`,
+            `artifact_name=Corum-Ranked-${manifest.version}${debugEnabled ? '-Debug' : ''}\n`,
+          );
+          fs.appendFileSync(
+            process.env.GITHUB_OUTPUT,
+            `debug_enabled=${debugEnabled}\n`,
           );
           NODE
 
@@ -89,7 +109,7 @@ jobs:
           /tmp/corum-ranked-debug-bot-domain-test
 
   build:
-    name: ${{ matrix.config.name }} ${{ needs.metadata.outputs.version }}
+    name: ${{ matrix.config.name }} ${{ needs.metadata.outputs.version }} (${{ needs.metadata.outputs.debug_enabled == 'true' && 'Debug Bot ON' || 'Release' }})
     needs:
       - metadata
       - tests
@@ -118,6 +138,7 @@ jobs:
           path: corum-ranked-mod
           target: ${{ matrix.config.target }}
           combine: true
+          configure-args: ${{ needs.metadata.outputs.debug_enabled == 'true' && '-DCORUM_RANKED_DEBUG_BOT_MATCH=ON' || '-DCORUM_RANKED_DEBUG_BOT_MATCH=OFF' }}
 
   package:
     name: Package ${{ needs.metadata.outputs.version }}
@@ -132,6 +153,7 @@ jobs:
         env:
           BUILD_OUTPUT: ${{ steps.build.outputs.build-output }}
           MOD_VERSION: ${{ needs.metadata.outputs.version }}
+          DEBUG_BOT_ENABLED: ${{ needs.metadata.outputs.debug_enabled }}
         shell: bash
         run: |
           mkdir -p dist
@@ -141,30 +163,50 @@ jobs:
             exit 1
           fi
           cp "${PACKAGES[0]}" "dist/hwanhee1.corum_ranked.geode"
-          python3 - "dist/hwanhee1.corum_ranked.geode" "$MOD_VERSION" <<'PY'
+          python3 - "dist/hwanhee1.corum_ranked.geode" "$MOD_VERSION" "$DEBUG_BOT_ENABLED" <<'PY'
           import json
           import sys
           import zipfile
 
-          package_path, expected_version = sys.argv[1:]
-          with zipfile.ZipFile(package_path) as package:
-              manifest = json.loads(package.read("mod.json"))
-              files = set(package.namelist())
-          if manifest.get("id") != "hwanhee1.corum_ranked":
-              raise SystemExit(f"Unexpected Mod ID: {manifest.get('id')}")
-          if manifest.get("version") != expected_version:
-              raise SystemExit(
-                  f"Package version {manifest.get('version')} does not match {expected_version}"
-              )
+          package_path, expected_version, debug_enabled_text = sys.argv[1:]
+          debug_enabled = debug_enabled_text == "true"
           expected_binaries = {
               "hwanhee1.corum_ranked.dll",
               "hwanhee1.corum_ranked.ios.dylib",
               "hwanhee1.corum_ranked.android32.so",
               "hwanhee1.corum_ranked.android64.so",
           }
+          debug_marker = b"DEBUG BOT MATCH"
+          with zipfile.ZipFile(package_path) as package:
+              manifest = json.loads(package.read("mod.json"))
+              files = set(package.namelist())
+              marker_state = {
+                  binary: debug_marker in package.read(binary)
+                  for binary in expected_binaries
+                  if binary in files
+              }
+          if manifest.get("id") != "hwanhee1.corum_ranked":
+              raise SystemExit(f"Unexpected Mod ID: {manifest.get('id')}")
+          if manifest.get("version") != expected_version:
+              raise SystemExit(
+                  f"Package version {manifest.get('version')} does not match {expected_version}"
+              )
           missing = sorted(expected_binaries - files)
           if missing:
               raise SystemExit("Combined package is missing: " + ", ".join(missing))
+          wrong_marker_state = sorted(
+              binary
+              for binary, marker_present in marker_state.items()
+              if marker_present != debug_enabled
+          )
+          if wrong_marker_state:
+              expected = "present" if debug_enabled else "absent"
+              raise SystemExit(
+                  "Debug Bot marker must be "
+                  + expected
+                  + " in every binary; mismatch: "
+                  + ", ".join(wrong_marker_state)
+              )
           PY
       - uses: actions/upload-artifact@v7
         with:
@@ -173,6 +215,9 @@ jobs:
           if-no-files-found: error
 
       - name: Report artifact filename
+        env:
+          DEBUG_BOT_ENABLED: ${{ needs.metadata.outputs.debug_enabled }}
         shell: bash
         run: |
           echo "Artifact ZIP: ${{ needs.metadata.outputs.artifact_name }}.zip" >> "$GITHUB_STEP_SUMMARY"
+          echo "Debug Bot Match compiled: $DEBUG_BOT_ENABLED" >> "$GITHUB_STEP_SUMMARY"
