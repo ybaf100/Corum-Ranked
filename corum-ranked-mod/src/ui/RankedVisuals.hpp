@@ -169,6 +169,27 @@ inline CCNode* surface(
     return root;
 }
 
+// Gameplay readability aid: a quiet, borderless wash that sits immediately
+// behind one line of text. Unlike surface(), this deliberately has no frame,
+// rail, highlight or shadow, so it does not become another HUD panel covering
+// the level artwork.
+inline CCNode* textScrim(
+    CCSize size,
+    CCPoint position,
+    GLubyte opacity = 42
+) {
+    auto* root = CCNode::create();
+    root->setContentSize(size);
+    root->setAnchorPoint({0.5f, 0.5f});
+    root->setPosition(position);
+
+    auto* wash = CCLayerColor::create({1, 4, 12, opacity});
+    wash->setContentSize(size);
+    wash->setPosition(CCPointZero);
+    root->addChild(wash);
+    return root;
+}
+
 inline CCNode* pill(
     std::string const& text,
     CCSize size,

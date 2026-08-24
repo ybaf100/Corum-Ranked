@@ -150,9 +150,25 @@ jobs:
                   raise SystemExit(f"Forbidden Ranked launch path returned: {forbidden}")
 
           popup = Path("corum-ranked-mod/src/RankedPopup.cpp").read_text(encoding="utf-8")
+          play = Path("corum-ranked-mod/src/PlayLayer.cpp").read_text(encoding="utf-8")
           visuals = Path("corum-ranked-mod/src/ui/RankedVisuals.hpp").read_text(encoding="utf-8")
           if '"디버그"' not in popup or 'ranked-korean-font-probe' not in popup:
               raise SystemExit("Missing debug-only Korean Paperlogy probe")
+          for required_hud in (
+              "textScrim(",
+              'ownScoreCaption = label("SCORE"',
+              'qualifyingCaption = label("Qualifying"',
+              '0.44f',
+          ):
+              if required_hud not in play and required_hud not in visuals:
+                  raise SystemExit(f"Missing compact gameplay HUD invariant: {required_hud}")
+          for forbidden_hud in (
+              "hudPanel(",
+              "{92.0f, 34.0f}",
+              "{78.0f, 38.0f}",
+          ):
+              if forbidden_hud in play:
+                  raise SystemExit(f"Rejected gameplay-covering HUD panel returned: {forbidden_hud}")
           for forbidden_visual in ("CCParticleFire", "corum-fire-promotion", "corum-fire-perfect"):
               if forbidden_visual in popup or forbidden_visual in visuals:
                   raise SystemExit(f"Rejected repeating fire visual returned: {forbidden_visual}")
