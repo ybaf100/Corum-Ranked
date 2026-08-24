@@ -64,16 +64,29 @@ jobs:
             CorumSansMedium: 'resources/CorumSansMedium.ttf',
             CorumSansSemiBold: 'resources/CorumSansSemiBold.ttf',
             CorumSansBold: 'resources/CorumSansBold.ttf',
+            CorumSansBlack: 'resources/CorumSansBlack.ttf',
           };
           for (const [name, path] of Object.entries(requiredFonts)) {
             if (manifest.resources?.fonts?.[name]?.path !== path || !fs.existsSync(`corum-ranked-mod/${path}`)) {
               throw new Error(`Missing Paperlogy UI font role: ${name}`);
             }
           }
-          const koreanProbeCharset = manifest.resources.fonts.CorumSansSemiBold.charset ?? '';
-          for (const codepoint of ['44536', '46356', '48260']) {
-            if (!koreanProbeCharset.split(',').includes(codepoint)) {
-              throw new Error(`Korean debug glyph ${codepoint} is missing from CorumSansSemiBold charset`);
+          const translations = fs.readFileSync(
+            'corum-ranked-mod/src/ui/RankedTranslations.hpp',
+            'utf8',
+          );
+          const koreanCodepoints = [...new Set(
+            [...`${translations}한국어`]
+              .map((character) => character.codePointAt(0))
+              .filter((codepoint) => codepoint >= 0xac00 && codepoint <= 0xd7a3)
+              .map(String),
+          )];
+          for (const fontName of ['CorumSansSemiBold', 'CorumSansBold', 'CorumSansBlack']) {
+            const charset = (manifest.resources.fonts[fontName].charset ?? '').split(',');
+            for (const codepoint of koreanCodepoints) {
+              if (!charset.includes(codepoint)) {
+                throw new Error(`Korean UI glyph ${codepoint} is missing from ${fontName} charset`);
+              }
             }
           }
           const versionSource = fs.readFileSync(
@@ -152,8 +165,27 @@ jobs:
           popup = Path("corum-ranked-mod/src/RankedPopup.cpp").read_text(encoding="utf-8")
           play = Path("corum-ranked-mod/src/PlayLayer.cpp").read_text(encoding="utf-8")
           visuals = Path("corum-ranked-mod/src/ui/RankedVisuals.hpp").read_text(encoding="utf-8")
-          if '"디버그"' not in popup or 'ranked-korean-font-probe' not in popup:
-              raise SystemExit("Missing debug-only Korean Paperlogy probe")
+          translations = Path("corum-ranked-mod/src/ui/RankedTranslations.hpp").read_text(encoding="utf-8")
+          if '"디버그"' in popup or 'ranked-korean-font-probe' in popup:
+              raise SystemExit("Obsolete lower-right Korean debug probe returned")
+          for required_translation in (
+              'ranked-ui-language',
+              'Translation{"score", "점수"}',
+              'Translation{"placement", "배치"}',
+              'Translation{"promoted", "승급"}',
+              'Translation{"demoted", "강등"}',
+              'Translation{"promotion-match", "승급전"}',
+          ):
+              if required_translation not in translations:
+                  raise SystemExit(f"Missing beta.6 translation invariant: {required_translation}")
+          for required_selector in (
+              '"English"',
+              '"한국어"',
+              'ranked-language-english',
+              'ranked-language-korean',
+          ):
+              if required_selector not in popup:
+                  raise SystemExit(f"Missing beta.6 language selector: {required_selector}")
           for required_hud in (
               "addShadowedHudLabel(",
               "hudShadows",

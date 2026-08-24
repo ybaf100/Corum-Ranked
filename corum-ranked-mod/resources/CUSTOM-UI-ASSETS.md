@@ -24,9 +24,16 @@ Missing custom images never block the Ranked UI or matchmaking flow.
 
 ## Typography
 
-Paperlogy v1.000 is bundled in four UI roles: Regular, Medium, SemiBold, and
-ExtraBold. The debug build includes the Korean text `디버그` in the lower-right
-corner of the Ranked lobby as an explicit bitmap-atlas glyph test.
+Paperlogy v1.000 is bundled in five UI roles: Regular, Medium, SemiBold,
+ExtraBold, and Black. beta.6 removes the old lower-right debug glyph probe and
+uses the same Paperlogy family for the selectable English/Korean Ranked UI.
+
+Korean wording is centralized in
+`corum-ranked-mod/src/ui/RankedTranslations.hpp`. Edit the Korean values there.
+If an edit introduces a Hangul syllable that is not already present in that
+file, add its decimal Unicode code point to the `CorumSansSemiBold`,
+`CorumSansBold`, and `CorumSansBlack` charsets in `mod.json` so Geode includes
+the glyph in every generated bitmap atlas.
 
 The rejected repeating fire sprites are no longer loaded. Promotion and PERFECT
 WIN states now use a restrained animated accent rail that does not cover text or

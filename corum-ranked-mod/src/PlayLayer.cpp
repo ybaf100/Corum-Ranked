@@ -3,6 +3,7 @@
 #include "domain/HudPresentation.hpp"
 #include "domain/AttemptScoring.hpp"
 #include "domain/RenderFpsMeter.hpp"
+#include "ui/RankedTranslations.hpp"
 #include "ui/RankedVisuals.hpp"
 
 #include <Geode/Geode.hpp>
@@ -31,7 +32,7 @@ std::int64_t steadyNowMicros() {
 }
 
 CCLabelBMFont* label(
-    char const* text,
+    std::string const& text,
     char const* font,
     float scale,
     CCPoint anchor,
@@ -411,7 +412,7 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
 
     CCLabelBMFont* addShadowedHudLabel(
         CCNode* parent,
-        char const* text,
+        std::string const& text,
         char const* fontRole,
         float scale,
         CCPoint anchor,
@@ -501,7 +502,7 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
 
         m_fields->ownNameLabel = addShadowedHudLabel(
             m_fields->hudRoot,
-            "YOU",
+            corum::ranked::i18n::text("you", "YOU"),
             "bigFont.fnt",
             0.30f,
             {0.0f, 1.0f},
@@ -512,7 +513,7 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
 
         m_fields->ownScoreCaption = addShadowedHudLabel(
             m_fields->hudRoot,
-            "SCORE",
+            corum::ranked::i18n::text("score", "SCORE"),
             "bigFont.fnt",
             0.30f,
             {0.0f, 1.0f},
@@ -580,7 +581,7 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
 
         m_fields->opponentNameLabel = addShadowedHudLabel(
             m_fields->hudRoot,
-            "OPPONENT",
+            corum::ranked::i18n::text("opponent", "OPPONENT"),
             "bigFont.fnt",
             0.30f,
             {1.0f, 1.0f},
@@ -591,7 +592,7 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
 
         m_fields->opponentScoreCaption = addShadowedHudLabel(
             m_fields->hudRoot,
-            "SCORE",
+            corum::ranked::i18n::text("score", "SCORE"),
             "bigFont.fnt",
             0.30f,
             {1.0f, 1.0f},
@@ -673,7 +674,7 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
 
         addShadowedHudLabel(
             m_fields->spectatorPanel,
-            "LIVE SPECTATOR",
+            corum::ranked::i18n::text("live-spectator", "LIVE SPECTATOR"),
             "bigFont.fnt",
             0.23f,
             {0.5f, 0.5f},
@@ -683,7 +684,7 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         );
         m_fields->spectatorNameLabel = addShadowedHudLabel(
             m_fields->spectatorPanel,
-            "OPPONENT",
+            corum::ranked::i18n::text("opponent", "OPPONENT"),
             "bigFont.fnt",
             0.23f,
             {0.5f, 0.5f},
@@ -694,7 +695,7 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         limitHudWidth(m_fields->spectatorNameLabel, 72.0f, 0.23f, 0.16f);
         m_fields->spectatorProgressLabel = addShadowedHudLabel(
             m_fields->spectatorPanel,
-            "CURRENT : -",
+            corum::ranked::i18n::text("current", "CURRENT") + " : -",
             "black",
             0.34f,
             {0.5f, 0.5f},

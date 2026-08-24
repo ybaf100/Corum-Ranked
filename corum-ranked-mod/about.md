@@ -10,7 +10,7 @@ During a Ranked round, the HUD keeps the current Round above the timer, plus bot
 
 The production Ranked server defaults to `https://corum-ranked.onrender.com`. Production credentials and webhook secrets do not belong in the mod or repository.
 
-The `v0.5.0-beta.5` development build can include **DEBUG BOT MATCH** behind
+The `v0.5.0-beta.6` development build can include **DEBUG BOT MATCH** behind
 `CORUM_RANKED_DEBUG_BOT_MATCH`, including Force Win and Force Lose. The CMake option defaults
 to OFF, so official packages do not contain its UI. Disable the matching server environment flag
 for production as well.

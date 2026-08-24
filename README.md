@@ -48,11 +48,12 @@
 - NestJS/PostgreSQL 서버가 매칭, 시간, attempt 승인, 점수, 승패, 숨김 MMR과 표시 LP를 최종 판정합니다. 클라이언트/API에는 MMR을 노출하지 않습니다.
 - Apps Script는 운영 설정만 제공하며 실시간 경기 상태를 저장하지 않습니다.
 - 일반 Corum Integration은 계속 `sheet1`을 사용하고, Ranked Pool과 Qualifying은 같은 레이아웃의 별도 `sheet2`에서 관리합니다.
-- `v0.5.0-beta.5`의 Debug Bot Match는 개발 전용이며 정식 클라이언트 빌드에서는 기본적으로 제외됩니다. 개발 빌드의 Force Win/Lose도 일반 PvP와 같은 결과·LP/MMR 경로를 사용하지만 `PERFECT WIN`에는 포함되지 않습니다.
+- `v0.5.0-beta.6`의 Debug Bot Match는 개발 전용이며 정식 클라이언트 빌드에서는 기본적으로 제외됩니다. 개발 빌드의 Force Win/Lose도 일반 PvP와 같은 결과·LP/MMR 경로를 사용하지만 `PERFECT WIN`에는 포함되지 않습니다.
 - 미확정 MMR Seed·티어 경계·K-factor·timeout·매칭 폭·실패 정책은 운영자가 입력하기 전까지 queue가 fail-closed 상태를 유지합니다.
 - beta.3부터 `Ranked Tiers.Main Pool`이 실제 5맵 분포를 결정하며, CSMP Seed 티어명은 고정 Ranked 표시 티어와 독립적으로 추가할 수 있습니다.
 - beta.4부터 상대 Hidden MMR이 MMR과 LP 이동량에 미치는 강도를 각각 설정할 수 있습니다. 실제 3-Clear 결정승만으로 무패 우승하면 기존 공식의 최대 MMR·LP 획득량과 노란 `PERFECT WIN` 결과가 적용됩니다.
 - beta.5는 beta.4의 경기 규칙을 그대로 유지하면서 Ranked 전체 화면, LevelInfo 대기 게이트와 게임 HUD를 새 디자인 시스템으로 교체합니다. 최신 HUD는 플레이 배경 프레임과 사각 스크림 없이 글자 그림자만 사용하고, Paperlogy SemiBold를 기본 문구에, Black을 핵심 수치와 동작에 적용합니다. 커스텀 트로피 파일 위치는 `corum-ranked-mod/resources/CUSTOM-UI-ASSETS.md`에 정리되어 있습니다.
+- beta.6는 로비에서 저장되는 `English / 한국어` 선택을 추가합니다. `CORUM RANKED`, `ROUND`, `Qualifying`, 티어명, LP, 플레이어명과 맵명은 영어를 유지하며 점수·배치·승급·강등 등 기능 문구는 `corum-ranked-mod/src/ui/RankedTranslations.hpp`에서 수정할 수 있습니다. 이전 우측 하단 `디버그` 글리프 문구는 제거했습니다.
 - Production secret은 저장소에 포함하지 않습니다.
 
 구현·테스트·배포 안내는 [`ranked/README.md`](ranked/README.md)를 참고하세요.
@@ -61,4 +62,4 @@
 ---
 
 
-> v0.5.0-beta.5 policy: the Ranked allowlist checks currently enabled + loaded mods only. Installed-but-disabled mods do not block Ranked; required mods such as CBF must still be active.
+> v0.5.0-beta.6 policy: the Ranked allowlist checks currently enabled + loaded mods only. Installed-but-disabled mods do not block Ranked; required mods such as CBF must still be active.

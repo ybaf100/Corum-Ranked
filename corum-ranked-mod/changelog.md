@@ -1,3 +1,11 @@
+# v0.5.0-beta.6
+
+- Added a persistent `English / 한국어` selector to the Ranked lobby.
+- Added the editable `src/ui/RankedTranslations.hpp` translation table and Korean UI glyph coverage for Paperlogy SemiBold, ExtraBold, and Black.
+- Korean mode translates score, placement, rating events, promotion/demotion states, matchmaking, ban, result, history, and spectator UI while intentionally keeping `CORUM RANKED`, `ROUND`, `Qualifying`, tier names, LP, player names, and map names in English.
+- Removed the obsolete lower-right Korean `디버그` font probe. The optional Debug Bot Match controls remain development-only.
+- Updated the exact client/server gate and workspace package metadata to `v0.5.0-beta.6`.
+
 # v0.5.0-beta.5
 
 - Rebuilt the Ranked presentation around a unified dark competitive design system while preserving every beta.4 server-authoritative state and gameplay callback.

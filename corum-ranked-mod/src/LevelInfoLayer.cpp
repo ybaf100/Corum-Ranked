@@ -1,5 +1,6 @@
 #include "RankedRuntime.hpp"
 #include "RankedSongGate.hpp"
+#include "ui/RankedTranslations.hpp"
 #include "ui/RankedVisuals.hpp"
 
 #include <Geode/Geode.hpp>
@@ -13,6 +14,7 @@
 #include <filesystem>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 using namespace geode::prelude;
@@ -28,6 +30,10 @@ struct PendingPrepareGate {
 };
 
 PendingPrepareGate g_pendingPrepareGate;
+
+std::string tr(std::string_view key, std::string_view english) {
+    return corum::ranked::i18n::text(key, english);
+}
 
 bool rankedPrepareState(std::string const& state) {
     return state == "ROUND_PREPARE" || state == "DEATHMATCH_PREPARE";
@@ -49,7 +55,7 @@ bool rankedDownloadGateState(std::string const& state) {
 std::string rankedGateTitle() {
     auto const& match = corum::ranked::RankedRuntime::get().view().match;
     if (match.deathmatchSequence > 0 || match.state == "DEATHMATCH_PREPARE" || match.state == "DEATHMATCH_PLAYING") {
-        return "DEATH MATCH";
+        return tr("death-match", "DEATH MATCH");
     }
     if (match.roundNumber <= 0) return "RANKED MATCH";
     if (match.roundNumber == 2) return "ROUND 2 - MATCH POINT";
@@ -352,10 +358,10 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         m_fields->gateTitle = gateLabel(rankedGateTitle(), 0.20f, {83.0f, 40.0f}, corum::ranked::ui::Cyan);
         m_fields->gateTitle->limitLabelWidth(150.0f, 0.20f, 0.14f);
         m_fields->gateOverlay->addChild(m_fields->gateTitle, 3);
-        m_fields->gateCountdown = gateLabel("STARTS IN  10", 0.34f, {83.0f, 25.0f}, corum::ranked::ui::Gold);
+        m_fields->gateCountdown = gateLabel(tr("starts-in", "STARTS IN") + "  10", 0.34f, {83.0f, 25.0f}, corum::ranked::ui::Gold);
         m_fields->gateCountdown->limitLabelWidth(152.0f, 0.34f, 0.22f);
         m_fields->gateOverlay->addChild(m_fields->gateCountdown, 3);
-        m_fields->gateStatus = gateLabel("ONLY SONG DOWNLOAD AVAILABLE", 0.16f, {83.0f, 8.0f}, corum::ranked::ui::TextMuted);
+        m_fields->gateStatus = gateLabel(tr("song-download-only", "ONLY SONG DOWNLOAD AVAILABLE"), 0.16f, {83.0f, 8.0f}, corum::ranked::ui::TextMuted);
         m_fields->gateStatus->limitLabelWidth(150.0f, 0.16f, 0.11f);
         m_fields->gateOverlay->addChild(m_fields->gateStatus, 3);
 
@@ -427,9 +433,10 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
 
         if (!levelReady) {
             if (m_fields->gateStatus) {
-                m_fields->gateStatus->setString(
-                    hasLevelPayload ? "UPDATING MAP..." : "DOWNLOADING MAP..."
-                );
+                auto const statusText = hasLevelPayload
+                    ? tr("updating-map", "UPDATING MAP...")
+                    : tr("downloading-map", "DOWNLOADING MAP...");
+                m_fields->gateStatus->setString(statusText.c_str());
                 m_fields->gateStatus->setColor({95, 180, 255});
             }
 
@@ -459,7 +466,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
                 runtime.setSongBypassAllowed(false);
                 m_fields->songGateBypassed = false;
                 if (m_fields->gateStatus) {
-                    m_fields->gateStatus->setString("SONG DOWNLOADED");
+                    m_fields->gateStatus->setString(tr("song-downloaded", "SONG DOWNLOADED").c_str());
                     m_fields->gateStatus->setColor({78, 232, 112});
                 }
             } else if (now >= m_fields->countdownEndsAt) {
@@ -471,11 +478,11 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
                 runtime.setSongBypassAllowed(true);
                 m_fields->songGateBypassed = true;
                 if (m_fields->gateStatus) {
-                    m_fields->gateStatus->setString("SONG NOT READY - STARTING WITHOUT SONG");
+                    m_fields->gateStatus->setString(tr("starting-without-song", "SONG NOT READY - STARTING WITHOUT SONG").c_str());
                     m_fields->gateStatus->setColor({255, 216, 86});
                 }
             } else if (m_fields->gateStatus) {
-                m_fields->gateStatus->setString("ONLY SONG DOWNLOAD IS AVAILABLE");
+                m_fields->gateStatus->setString(tr("song-download-only", "ONLY SONG DOWNLOAD IS AVAILABLE").c_str());
                 m_fields->gateStatus->setColor({95, 180, 255});
             }
         }
@@ -491,25 +498,25 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
 
         if (m_fields->gateCountdown) {
             if (countdownRemaining > 0) {
-                m_fields->gateCountdown->setString(fmt::format("STARTS IN  {:02d}", countdownRemaining).c_str());
+                m_fields->gateCountdown->setString(fmt::format("{}  {:02d}", tr("starts-in", "STARTS IN"), countdownRemaining).c_str());
             } else if (!levelReady) {
-                m_fields->gateCountdown->setString("WAITING FOR MAP");
+                m_fields->gateCountdown->setString(tr("waiting-map", "WAITING FOR MAP").c_str());
             } else if (!readyForStart) {
-                m_fields->gateCountdown->setString("WAITING FOR SONG");
+                m_fields->gateCountdown->setString(tr("waiting-song", "WAITING FOR SONG").c_str());
             } else if (rankedPlayingState(match.state)) {
-                m_fields->gateCountdown->setString("STARTING...");
+                m_fields->gateCountdown->setString(tr("starting", "STARTING...").c_str());
             } else if (rankedPrepareState(match.state) && ownReady && !opponentReady) {
-                m_fields->gateCountdown->setString("WAITING FOR OPPONENT");
+                m_fields->gateCountdown->setString(tr("waiting-opponent", "WAITING FOR OPPONENT").c_str());
             } else if (rankedPrepareState(match.state) && ownReady && opponentReady) {
-                m_fields->gateCountdown->setString("STARTING...");
+                m_fields->gateCountdown->setString(tr("starting", "STARTING...").c_str());
             } else if (rankedPrepareState(match.state) && !runtime.view().error.empty()) {
                 // Do not hide an authoritative Ready endpoint failure behind an
                 // endless SENDING READY label. The bounded retry below remains
                 // active, while the player can see that the server rejected or
                 // failed the previous request.
-                m_fields->gateCountdown->setString("SERVER ERROR - RETRYING");
+                m_fields->gateCountdown->setString(tr("server-error-retrying", "SERVER ERROR - RETRYING").c_str());
             } else {
-                m_fields->gateCountdown->setString("SENDING READY...");
+                m_fields->gateCountdown->setString(tr("sending-ready", "SENDING READY...").c_str());
             }
         }
 
@@ -615,7 +622,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         if (!validPayload) {
             m_fields->mapDownloadRequested = false;
             if (m_fields->gateStatus) {
-                m_fields->gateStatus->setString("MAP PAYLOAD MISMATCH - RETRYING");
+                m_fields->gateStatus->setString(tr("map-payload-mismatch", "MAP PAYLOAD MISMATCH - RETRYING").c_str());
                 m_fields->gateStatus->setColor({255, 92, 92});
             }
             requestVanillaMapDownload();
@@ -631,7 +638,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         m_fields->mapDownloadRequested = false;
         if (!isCurrentRankedLevel(m_level) || !vanillaLevelReadyForPlay()) {
             if (m_fields->gateStatus) {
-                m_fields->gateStatus->setString("MAP UPDATE INCOMPLETE - RETRYING");
+                m_fields->gateStatus->setString(tr("map-update-incomplete", "MAP UPDATE INCOMPLETE - RETRYING").c_str());
                 m_fields->gateStatus->setColor({255, 92, 92});
             }
             requestVanillaMapDownload();
@@ -647,7 +654,10 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         m_fields->mapDownloadRequested = false;
         if (!m_fields->songGateActive) return;
         if (m_fields->gateStatus) {
-            m_fields->gateStatus->setString(fmt::format("MAP DOWNLOAD FAILED ({}) - RETRYING", response).c_str());
+            auto const errorText = corum::ranked::i18n::isKorean()
+                ? fmt::format("{} ({}) - {}", tr("map-download-failed", "MAP DOWNLOAD FAILED"), response, tr("retrying", "RETRYING"))
+                : fmt::format("MAP DOWNLOAD FAILED ({}) - RETRYING", response);
+            m_fields->gateStatus->setString(errorText.c_str());
             m_fields->gateStatus->setColor({255, 92, 92});
         }
         lockInteractionToSong(this, m_songWidget);
@@ -770,7 +780,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
             m_fields->mapDownloadRequested = false;
             m_fields->nextGameplayLaunchAt = SteadyClock::now() + std::chrono::seconds(1);
             if (m_fields->gateCountdown) {
-                m_fields->gateCountdown->setString("MAP UPDATE STALLED - RETRYING");
+                m_fields->gateCountdown->setString(tr("map-update-stalled", "MAP UPDATE STALLED - RETRYING").c_str());
                 m_fields->gateCountdown->setColor({255, 92, 92});
             }
             if (!m_fields->songGateActive) scheduleAutoPlay(1.0f);
@@ -797,9 +807,10 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
 
         m_fields->nextGameplayLaunchAt = SteadyClock::now() + std::chrono::milliseconds(450);
         if (m_fields->gateCountdown) {
-            m_fields->gateCountdown->setString(
-                updateRequired ? "UPDATING MAP..." : "PLAY FAILED - RETRYING"
-            );
+            auto const retryText = updateRequired
+                ? tr("updating-map", "UPDATING MAP...")
+                : tr("play-failed", "PLAY FAILED - RETRYING");
+            m_fields->gateCountdown->setString(retryText.c_str());
             m_fields->gateCountdown->setColor(
                 updateRequired ? ccColor3B{95, 180, 255} : ccColor3B{255, 92, 92}
             );
