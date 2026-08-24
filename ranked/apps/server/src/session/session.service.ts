@@ -226,7 +226,7 @@ export class SessionService {
     transaction: SqlExecutor,
     playerId: string,
     fetchedCsmpTier: CsmpTier | null,
-    seeds: Readonly<Partial<Record<CsmpTier, number>>>,
+    seeds: Readonly<Record<CsmpTier, number>>,
     now: Date,
   ): Promise<ExistingProfileRow> {
     const locked = await transaction.query<ExistingProfileRow>(

@@ -155,6 +155,7 @@ var CORUM_RANKED_CONFIG_DEFAULTS = Object.freeze([
  */
 function setupCorumRankedConfig() {
   var spreadsheet = getSpreadsheet_();
+  var csmpTiersSheet = ensureCsmpTiersSheet_();
   var mapsSheet = ensureRankedMapColumns_();
   var tiersSheet = getOrCreateSheet_(
     spreadsheet,
@@ -179,6 +180,7 @@ function setupCorumRankedConfig() {
 
   appendMissingRankedRows_(tiersSheet, CORUM_RANKED_TIER_DEFAULTS);
   appendMissingRankedRows_(seedsSheet, CORUM_RANKED_SEED_DEFAULTS);
+  appendMissingRankedCsmpSeedRows_(seedsSheet, csmpTiersSheet);
   appendMissingRankedRows_(allowedModsSheet, CORUM_RANKED_ALLOWED_MOD_DEFAULTS);
   appendMissingRankedRows_(configSheet, CORUM_RANKED_CONFIG_DEFAULTS);
   migrateRankedFixedRuleDefaults_(configSheet);
@@ -190,6 +192,19 @@ function setupCorumRankedConfig() {
 
   console.log("Corum Ranked 설정 준비 완료 (맵 데이터: " + mapsSheet.getName() + ")");
   console.log("미확정 Seed/MMR/timeout 값을 입력하고 검증한 뒤 enabled를 TRUE로 바꾸세요.");
+}
+
+function appendMissingRankedCsmpSeedRows_(seedsSheet, csmpTiersSheet) {
+  if (!seedsSheet || !csmpTiersSheet || csmpTiersSheet.getLastRow() < 2) return;
+  var values = csmpTiersSheet.getDataRange().getDisplayValues();
+  var nameColumn = findOptionalHeaderIndex_(values[0], ["티어명", "티어 이름", "Tier", "Tier Name"]);
+  if (nameColumn === -1) return;
+  var rows = [];
+  for (var rowIndex = 1; rowIndex < values.length; rowIndex += 1) {
+    var tier = rankedText_(values[rowIndex][nameColumn]).toUpperCase();
+    if (tier && tier !== "NONE") rows.push([tier, ""]);
+  }
+  appendMissingRankedRows_(seedsSheet, rows);
 }
 
 function migrateRankedFixedRuleDefaults_(sheet) {
@@ -288,7 +303,10 @@ function readCorumRankedConfig_() {
     bestOf: rankedNumber_(rawConfig.bestOf),
   };
   var tierBands = readRankedTierBands_(spreadsheet.getSheetByName(CORUM_RANKED_SHEETS.tiers));
-  var csmpSeeds = readRankedSeeds_(spreadsheet.getSheetByName(CORUM_RANKED_SHEETS.seeds));
+  var seedsSheet = spreadsheet.getSheetByName(CORUM_RANKED_SHEETS.seeds);
+  var csmpTiersSheet = spreadsheet.getSheetByName(CORUM_SHEETS.csmpTiers);
+  var csmpTierNames = readRankedCsmpTierNames_(csmpTiersSheet);
+  var csmpSeeds = readRankedSeeds_(seedsSheet);
   var maps = readRankedMapsFromCorumSheet_();
   var allowedMods = readRankedAllowedMods_(
     spreadsheet.getSheetByName(CORUM_RANKED_SHEETS.allowedMods),
@@ -298,6 +316,7 @@ function readCorumRankedConfig_() {
     generation: "",
     rules: rules,
     tierBands: tierBands,
+    csmpTierNames: csmpTierNames,
     csmpSeeds: csmpSeeds,
     cbf: {
       modId: rankedText_(rawConfig.cbfModId),
@@ -323,6 +342,7 @@ function readCorumRankedConfig_() {
   var generationInput = {
     rules: rules,
     tierBands: tierBands,
+    csmpTierNames: csmpTierNames,
     csmpSeeds: csmpSeeds,
     mmrPolicy: mmrPolicy,
     timeouts: timeouts,
@@ -335,7 +355,14 @@ function readCorumRankedConfig_() {
   };
   var generation = "ranked-v0.5-" + rankedStableHash_(JSON.stringify(generationInput));
   operational.generation = generation;
-  var validation = validateCorumRankedConfig_(operational, maps, allowedMods, client);
+  var validation = validateCorumRankedConfig_(
+    operational,
+    maps,
+    allowedMods,
+    client,
+    seedsSheet,
+    csmpTiersSheet,
+  );
 
   return {
     generation: generation,
@@ -416,6 +443,22 @@ function readRankedSeeds_(sheet) {
     var tier = rankedText_(values[rowIndex][tierColumn]).toUpperCase();
     var seed = rankedNumber_(values[rowIndex][seedColumn]);
     if (tier && seed !== null) result[tier] = seed;
+  }
+  return result;
+}
+
+function readRankedCsmpTierNames_(sheet) {
+  if (!sheet || sheet.getLastRow() < 2) return [];
+  var values = sheet.getDataRange().getDisplayValues();
+  var tierColumn = findOptionalHeaderIndex_(
+    values[0],
+    ["티어명", "티어 이름", "Tier", "Tier Name"],
+  );
+  if (tierColumn === -1) return [];
+  var result = [];
+  for (var rowIndex = 1; rowIndex < values.length; rowIndex += 1) {
+    var tier = rankedText_(values[rowIndex][tierColumn]).toUpperCase();
+    if (tier) result.push(tier);
   }
   return result;
 }
@@ -710,7 +753,14 @@ function rankedBoolean_(value) {
   return text === "true" || text === "yes" || text === "y" || text === "1" || text === "활성";
 }
 
-function validateCorumRankedConfig_(operational, maps, allowedMods, client) {
+function validateCorumRankedConfig_(
+  operational,
+  maps,
+  allowedMods,
+  client,
+  seedsSheet,
+  csmpTiersSheet
+) {
   var errors = [];
   var rules = operational.rules || {};
   if (rules.rulesVersion !== "corum-ranked-v0.5") {
@@ -728,11 +778,7 @@ function validateCorumRankedConfig_(operational, maps, allowedMods, client) {
   if (rules.bestOf !== 3) errors.push("bestOf는 3이어야 합니다.");
 
   validateRankedTiers_(operational.tierBands || [], errors);
-  ["NONE", "RED", "AQUA", "BRONZE", "SILVER", "GOLD"].forEach(function (tier) {
-    if (!Number.isFinite(operational.csmpSeeds && operational.csmpSeeds[tier])) {
-      errors.push("Ranked CSMP Seed의 " + tier + " 값을 입력해야 합니다.");
-    }
-  });
+  validateRankedCsmpSeeds_(seedsSheet, csmpTiersSheet, errors);
 
   if (!operational.mmrPolicy) {
     errors.push("MMR/배치 운영값을 모두 입력해야 합니다.");
@@ -798,9 +844,80 @@ function validateCorumRankedConfig_(operational, maps, allowedMods, client) {
   }
 
   validateRankedClientPresentation_(client, errors);
-  validateRankedPool_(maps, errors);
+  validateRankedPool_(maps, operational.tierBands || [], errors);
   validateRankedAllowedMods_(operational.cbf, allowedMods, errors);
   return { errors: errors };
+}
+
+function validateRankedCsmpSeeds_(seedsSheet, csmpTiersSheet, errors) {
+  var seedNames = {};
+  if (!seedsSheet || seedsSheet.getLastRow() < 2) {
+    errors.push("Ranked CSMP Seed 시트에 NONE과 CSMP 티어 Seed를 입력해야 합니다.");
+  } else {
+    var seedValues = seedsSheet.getDataRange().getDisplayValues();
+    var seedTierColumn = findOptionalHeaderIndex_(seedValues[0], ["CSMP Tier"]);
+    var seedMmrColumn = findOptionalHeaderIndex_(seedValues[0], ["Initial Hidden MMR"]);
+    if (seedTierColumn === -1 || seedMmrColumn === -1) {
+      errors.push("Ranked CSMP Seed 헤더가 올바르지 않습니다.");
+    } else {
+      for (var seedRow = 1; seedRow < seedValues.length; seedRow += 1) {
+        var rawSeedTier = rankedText_(seedValues[seedRow][seedTierColumn]);
+        if (!rawSeedTier) continue;
+        var seedTier = rawSeedTier.toUpperCase();
+        if (seedTier.length > 80) {
+          errors.push("Ranked CSMP Seed 티어명은 80자 이하여야 합니다: " + rawSeedTier);
+          continue;
+        }
+        if (seedNames[seedTier]) {
+          errors.push("Ranked CSMP Seed 티어명이 중복되어 있습니다: " + seedTier);
+        }
+        seedNames[seedTier] = true;
+        var rawSeed = rankedText_(seedValues[seedRow][seedMmrColumn]);
+        var seed = rawSeed === "" ? null : Number(rawSeed);
+        if (!Number.isFinite(seed)) {
+          errors.push("Ranked CSMP Seed의 " + seedTier + " 값을 입력해야 합니다.");
+        }
+      }
+    }
+  }
+
+  if (!seedNames.NONE) errors.push("Ranked CSMP Seed에 NONE 행이 필요합니다.");
+
+  if (!csmpTiersSheet || csmpTiersSheet.getLastRow() < 2) {
+    errors.push("CSMP Tiers 시트에 하나 이상의 티어가 필요합니다.");
+    return;
+  }
+  var tierValues = csmpTiersSheet.getDataRange().getDisplayValues();
+  var tierNameColumn = findOptionalHeaderIndex_(
+    tierValues[0],
+    ["티어명", "티어 이름", "Tier", "Tier Name"],
+  );
+  if (tierNameColumn === -1) {
+    errors.push("CSMP Tiers 티어명 헤더가 올바르지 않습니다.");
+    return;
+  }
+  var csmpNames = {};
+  for (var tierRow = 1; tierRow < tierValues.length; tierRow += 1) {
+    var rawCsmpTier = rankedText_(tierValues[tierRow][tierNameColumn]);
+    if (!rawCsmpTier) continue;
+    var csmpTier = rawCsmpTier.toUpperCase();
+    if (csmpTier === "NONE") {
+      errors.push("CSMP Tiers에서 NONE은 Seed 기준값으로 예약되어 있습니다.");
+      continue;
+    }
+    if (csmpTier.length > 80) {
+      errors.push("CSMP Tiers 티어명은 80자 이하여야 합니다: " + rawCsmpTier);
+      continue;
+    }
+    if (csmpNames[csmpTier]) {
+      errors.push("CSMP Tiers 티어명이 중복되어 있습니다: " + csmpTier);
+      continue;
+    }
+    csmpNames[csmpTier] = true;
+    if (!seedNames[csmpTier]) {
+      errors.push("Ranked CSMP Seed에 " + csmpTier + " 행과 MMR 값이 필요합니다.");
+    }
+  }
 }
 
 function validateRankedClientPresentation_(client, errors) {
@@ -894,7 +1011,18 @@ function validateRankedTiers_(tierBands, errors) {
   }
 }
 
-function validateRankedPool_(maps, errors) {
+function rankedCandidatePoolRequirements_(mainPool) {
+  if (!Number.isInteger(mainPool) || mainPool < 1 || mainPool > 6) return null;
+  if (mainPool === 1) return { 1: 2, 2: 2, 3: 1 };
+  if (mainPool === 6) return { 4: 1, 5: 2, 6: 2 };
+  var requirements = {};
+  requirements[mainPool - 1] = 1;
+  requirements[mainPool] = 3;
+  requirements[mainPool + 1] = 1;
+  return requirements;
+}
+
+function validateRankedPool_(maps, tierBands, errors) {
   var canonical = {};
   var counts = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 };
   maps.forEach(function (map) {
@@ -945,18 +1073,16 @@ function validateRankedPool_(maps, errors) {
     counts[map.pool] += 1;
   });
 
-  var requiredByTier = {
-    RED: { 1: 1, 2: 3, 3: 1 },
-    AQUA: { 2: 1, 3: 3, 4: 1 },
-    BRONZE: { 3: 1, 4: 3, 5: 1 },
-    SILVER: { 4: 1, 5: 3, 6: 1 },
-    GOLD: { 4: 1, 5: 2, 6: 2 },
-  };
-  Object.keys(requiredByTier).forEach(function (tier) {
-    Object.keys(requiredByTier[tier]).forEach(function (pool) {
-      var required = requiredByTier[tier][pool];
+  tierBands.forEach(function (band) {
+    var requirements = rankedCandidatePoolRequirements_(band.mainPool);
+    if (!requirements) return;
+    Object.keys(requirements).forEach(function (pool) {
+      var required = requirements[pool];
       if (counts[pool] < required) {
-        errors.push(tier + " 후보 생성을 위한 Pool " + pool + " canonical 맵이 부족합니다.");
+        errors.push(
+          band.tier + " Main Pool " + band.mainPool +
+          " 후보 생성을 위한 Pool " + pool + " canonical 맵이 부족합니다.",
+        );
       }
     });
   });

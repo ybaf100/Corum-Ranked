@@ -7,6 +7,7 @@ Apps Script `ranked_config`가 운영 설정의 source입니다. 서버는 마�
 다음 값은 코드에 운영 기본값이 없습니다. 빈 값이면 config 검증이 실패하고 queue가 열리지 않습니다.
 
 - CSMP tier별 최초 MMR Seed
+- 각 표시 tier의 실제 후보 분포를 정하는 `Main Pool`
 - 표시 tier의 `minInclusive` / `maxExclusive`
 - placement 횟수, placement/regular K-factor, expected-score divisor, 반올림 정책
 - session, ready, reconnect, queue/match heartbeat, orphan attempt, result 화면 timeout
@@ -21,10 +22,17 @@ Apps Script `ranked_config`가 운영 설정의 source입니다. 서버는 마�
 
 ```bash
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f ranked/migrations/0001_initial_ranked.sql
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f ranked/migrations/0002_debug_bot_match.sql
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f ranked/migrations/0002_attempt_start_leases.sql
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f ranked/migrations/0003_debug_rating_playable_maps.sql
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f ranked/migrations/0004_alpha37_schema_hardening.sql
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f ranked/migrations/0005_v050_rating_system.sql
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f ranked/migrations/0006_v050_dynamic_csmp_tiers.sql
 ```
 
-이미 alpha.32 이하 schema가 적용된 운영 DB를 alpha.33으로 올릴 때는 **서버 재배포 전에 `0002_attempt_start_leases.sql`만 추가 적용**합니다. Migration은 transaction 안에서 실행됩니다. 일반적인 migration runner로 버전 관리하고 이미 적용한 migration을 임의로 재실행하지 마세요.
+이미 beta.2 schema가 적용된 운영 DB를 beta.3으로 올릴 때는 **서버 재배포 전에 `0006_v050_dynamic_csmp_tiers.sql`을 추가 적용**합니다. 이 변경은 기존 프로필의 Seed를 다시 적용하지 않고 저장된 최초 CSMP 티어명을 그대로 보존합니다. Migration은 transaction 안에서 실행됩니다.
+
+`Ranked Tiers.Main Pool`은 후보 추첨의 실제 입력입니다. Main Pool 1은 Pool 1/2/3에서 2/2/1개, 2~5는 이전/본/다음 Pool에서 1/3/1개, Main Pool 6은 Pool 4/5/6에서 1/2/2개를 요구합니다. `CSMP Tiers`의 모든 이름에는 `Ranked CSMP Seed`의 대응 MMR이 필요하며 `NONE` 기준 Seed, 중복 없는 정규화 이름, 유한 숫자가 모두 확인되어야 queue가 열립니다.
 
 ## 3. 서버 환경변수
 

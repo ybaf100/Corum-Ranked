@@ -39,12 +39,17 @@ Integration은 계속 `sheet1`(또는 `MAPS_SHEET_NAME`)을 사용하지만 Rank
 
 함수 실행 후 생성되는 별도 운영 탭은 `Ranked Tiers`, `Ranked CSMP Seed`,
 `Ranked Allowed Mods`, `Ranked Config` 네 개다. `Ranked Tiers`에는 각 티어의 LP 경계와
-함께 `Promotion Games`, `Promotion Wins Required`를 입력한다. `Ranked Config`에는 배치,
+함께 실제 후보 분포를 정하는 `Main Pool`, `Promotion Games`, `Promotion Wins Required`를 입력한다.
+`Main Pool` 1은 Pool 1/2/3에서 2/2/1개, 2~5는 이전/본/다음 Pool에서 1/3/1개,
+6은 Pool 4/5/6에서 1/2/2개를 추첨한다. `CSMP Tiers`에 새 티어를 추가한 뒤
+`setupCorumRankedConfig()`를 실행하면 대응하는 빈 Seed 행이 생기며, MMR을 입력하기 전에는
+검증이 실패한다. `NONE` Seed는 항상 필요하고 CSMP 티어명은 Ranked 표시 티어와 독립적이다.
+`Ranked Config`에는 배치,
 숨김 MMR, LP 보정, 승급·강등 정책이 생성된다. Seed/MMR/티어 경계/timeout 등 미확정
 운영값을 모두 채우고 검증 오류가 없을 때만 `Ranked Config`의 `enabled`를 `TRUE`로 바꾼다.
 마지막으로 Apps Script를 새 버전으로 재배포해야 `/exec?action=ranked_config`에 반영된다.
 
-v0.5.0-beta.1은 `sheet2`를 Ranked 맵 풀의 단일 기준으로 사용하며 경기 규칙은 5분,
+v0.5.0-beta.3은 `sheet2`를 Ranked 맵 풀의 단일 기준으로 사용하며 경기 규칙은 5분,
 3회 클리어다. 배치 중 LP/MMR은 외부에 공개되지 않고 결과 기록만 `O/X` 트랙으로
 표시된다. 배치 완료 시 숨김 MMR을 기준으로 LP를 확정하되 티어 커트라인의 ±15 LP
 구간에는 배치하지 않는다.

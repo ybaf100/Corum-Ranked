@@ -64,6 +64,7 @@ export const completeOperationalConfig = (): RankedOperationalConfig => ({
   generation: "test-generation",
   rules: DOCUMENT_RULES_V0_4,
   tierBands: tierBandsFixture,
+  csmpTierNames: ["RED", "AQUA", "BRONZE", "SILVER", "GOLD"],
   csmpSeeds: {
     NONE: 500,
     RED: 700,

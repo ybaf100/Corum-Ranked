@@ -10,6 +10,7 @@ import {
   displayedTierForProfile,
   effectiveTierForMatch,
   selectCandidateMaps,
+  tierBandFor,
   type MatchmakingPolicy,
   type RandomSource,
 } from "@corum-ranked/rules";
@@ -424,7 +425,13 @@ export class QueueService {
       Number(playerB.hidden_mmr_snapshot),
       config.operational.tierBands,
     );
-    const candidates = selectCandidateMaps(effective.tier, config.maps, this.random);
+    const effectiveBand = tierBandFor(effective.tier, config.operational.tierBands);
+    const candidates = selectCandidateMaps(
+      effective.tier,
+      effectiveBand.mainPool,
+      config.maps,
+      this.random,
+    );
     const configSnapshotId = await this.persistConfigSnapshot(transaction, config);
     const matchId = this.ids.next();
     const readyDeadline = new Date(

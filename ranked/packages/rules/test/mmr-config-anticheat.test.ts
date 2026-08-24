@@ -22,13 +22,14 @@ describe("operational config and MMR", () => {
       generation: complete.generation,
       rules: complete.rules,
       tierBands: complete.tierBands,
+      csmpTierNames: complete.csmpTierNames,
       csmpSeeds: {},
       cbf: complete.cbf,
     };
     const result = validateOperationalConfig(incomplete);
     expect(result.valid).toBe(false);
     expect(result.queueReady).toBe(false);
-    expect(result.errors).toContain("csmpSeeds.BRONZE must be configured");
+    expect(result.errors).toContain("csmpSeeds.NONE must be configured");
   });
 
   it("accepts a complete explicitly configured policy", () => {
@@ -63,6 +64,31 @@ describe("operational config and MMR", () => {
     });
     expect(second.applied).toBe(false);
     expect(second.profile).toEqual(first.profile);
+  });
+
+  it("accepts and snapshots an operator-defined CSMP tier without changing Ranked display tiers", () => {
+    const initial: RankedProfileSeedState = {
+      hiddenMmr: null,
+      placementGamesPlayed: 0,
+      initialCsmpTier: null,
+      initialSeedMmr: null,
+      seedAppliedAt: null,
+    };
+    const config = completeOperationalConfig();
+    const seeds = { ...config.csmpSeeds, DIAMOND: 5_200 };
+    expect(validateOperationalConfig({
+      ...config,
+      csmpTierNames: [...config.csmpTierNames, "DIAMOND"],
+      csmpSeeds: seeds,
+    }).valid).toBe(true);
+    expect(seedProfileOnce(initial, " diamond ", seeds, "2026-08-24T00:00:00Z")).toMatchObject({
+      applied: true,
+      profile: {
+        hiddenMmr: 5_200,
+        initialCsmpTier: "DIAMOND",
+        initialSeedMmr: 5_200,
+      },
+    });
   });
 
   it("shows UNRANKED until the configured placement count is reached", () => {

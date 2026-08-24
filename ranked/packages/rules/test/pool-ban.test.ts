@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-  CANDIDATE_POOL_DISTRIBUTIONS,
   RankedDomainError,
   SeededRandom,
+  candidatePoolDistribution,
   effectiveTierForMatch,
   resolveBans,
   selectCandidateMaps,
@@ -21,7 +21,8 @@ describe("effective tier and candidate pools", () => {
   it.each(["RED", "AQUA", "BRONZE", "SILVER", "GOLD"] as const)(
     "%s selects exactly the documented five-map distribution",
     (tier) => {
-      const selected = selectCandidateMaps(tier, allPoolMaps(), new SeededRandom(1234));
+      const mainPool = tierBandsFixture.find((band) => band.tier === tier)!.mainPool;
+      const selected = selectCandidateMaps(tier, mainPool, allPoolMaps(), new SeededRandom(1234));
       const counts = Object.fromEntries(
         [1, 2, 3, 4, 5, 6].map((pool) => [
           pool,
@@ -29,18 +30,26 @@ describe("effective tier and candidate pools", () => {
         ]),
       );
       for (const pool of [1, 2, 3, 4, 5, 6] as const) {
-        expect(counts[pool]).toBe(CANDIDATE_POOL_DISTRIBUTIONS[tier][pool] ?? 0);
+        expect(counts[pool]).toBe(candidatePoolDistribution(mainPool)[pool] ?? 0);
       }
       expect(new Set(selected.map((map) => map.canonicalLevelId)).size).toBe(5);
     },
   );
+
+  it("moves the five-map distribution when the spreadsheet Main Pool changes", () => {
+    expect(candidatePoolDistribution(1)).toEqual({ 1: 2, 2: 2, 3: 1 });
+    expect(candidatePoolDistribution(4)).toEqual({ 3: 1, 4: 3, 5: 1 });
+    expect(candidatePoolDistribution(6)).toEqual({ 4: 1, 5: 2, 6: 2 });
+    const selected = selectCandidateMaps("RED", 4, allPoolMaps(), new SeededRandom(44));
+    expect(selected.filter((map) => map.pool === 4)).toHaveLength(3);
+  });
 
   it("deduplicates equivalent registrations by canonical ID", () => {
     const maps = allPoolMaps();
     const original = maps.find((map) => map.pool === 2);
     expect(original).toBeDefined();
     maps.push({ ...original! });
-    const selected = selectCandidateMaps("RED", maps, new SeededRandom(8));
+    const selected = selectCandidateMaps("RED", 2, maps, new SeededRandom(8));
     expect(new Set(selected.map((map) => map.canonicalLevelId)).size).toBe(5);
   });
 
@@ -68,7 +77,7 @@ describe("effective tier and candidate pools", () => {
       playableLevelId: second.canonicalLevelId,
       levelId: second.canonicalLevelId,
     };
-    expect(() => selectCandidateMaps("RED", maps, new SeededRandom(1))).toThrowError(
+    expect(() => selectCandidateMaps("RED", 2, maps, new SeededRandom(1))).toThrowError(
       expect.objectContaining<Partial<RankedDomainError>>({ code: "CONFLICTING_MAP_ALIAS" }),
     );
   });
@@ -84,7 +93,7 @@ describe("effective tier and candidate pools", () => {
         qualifyingPercent: 99,
       }),
     );
-    expect(() => selectCandidateMaps("RED", maps, new SeededRandom(1))).toThrowError(
+    expect(() => selectCandidateMaps("RED", 2, maps, new SeededRandom(1))).toThrowError(
       expect.objectContaining<Partial<RankedDomainError>>({ code: "CONFLICTING_CANONICAL_MAP" }),
     );
   });
@@ -98,21 +107,21 @@ describe("effective tier and candidate pools", () => {
       playableLevelId: "99900001",
       levelId: "99900001",
     });
-    expect(() => selectCandidateMaps("RED", maps, new SeededRandom(1))).toThrowError(
+    expect(() => selectCandidateMaps("RED", 2, maps, new SeededRandom(1))).toThrowError(
       expect.objectContaining<Partial<RankedDomainError>>({ code: "CONFLICTING_CANONICAL_MAP" }),
     );
   });
 
   it("fails loudly instead of distorting a pool with insufficient maps", () => {
     const maps = allPoolMaps().filter((map) => map.pool !== 2 || map.levelId.endsWith("001"));
-    expect(() => selectCandidateMaps("RED", maps, new SeededRandom(1))).toThrowError(
+    expect(() => selectCandidateMaps("RED", 2, maps, new SeededRandom(1))).toThrowError(
       expect.objectContaining<Partial<RankedDomainError>>({ code: "INSUFFICIENT_POOL_MAPS" }),
     );
   });
 
   it("snapshots fields so later source changes do not alter selected maps", () => {
     const maps = allPoolMaps();
-    const selected = selectCandidateMaps("GOLD", maps, new SeededRandom(91));
+    const selected = selectCandidateMaps("GOLD", 6, maps, new SeededRandom(91));
     const chosen = maps.find((map) => map.canonicalLevelId === selected[0]!.canonicalLevelId)!;
     const originalTitle = selected[0]!.title;
     (chosen as { title: string }).title = "Spreadsheet changed later";
@@ -121,7 +130,7 @@ describe("effective tier and candidate pools", () => {
 });
 
 describe("simultaneous private bans", () => {
-  const candidates = selectCandidateMaps("AQUA", allPoolMaps(), new SeededRandom(77));
+  const candidates = selectCandidateMaps("AQUA", 3, allPoolMaps(), new SeededRandom(77));
 
   it("removes a shared ban once, then selects and orders three maps", () => {
     const shared = candidates[0]!.canonicalLevelId;

@@ -24,7 +24,7 @@ export interface SeedProfileResult {
 export const seedProfileOnce = (
   profile: RankedProfileSeedState,
   currentCsmpTier: CsmpTier,
-  seeds: Readonly<Partial<Record<CsmpTier, number>>>,
+  seeds: Readonly<Record<CsmpTier, number>>,
   appliedAt: string,
 ): SeedProfileResult => {
   if (profile.seedAppliedAt !== null) return { profile: { ...profile }, applied: false };
@@ -39,9 +39,13 @@ export const seedProfileOnce = (
       { profile },
     );
   }
-  const seed = seeds[currentCsmpTier];
+  const normalizedTier = currentCsmpTier.trim().toUpperCase();
+  if (!normalizedTier || normalizedTier.length > 80) {
+    throw new RankedDomainError("INVALID_CONFIG", "CSMP tier must be a 1..80 character name");
+  }
+  const seed = seeds[normalizedTier];
   if (seed === undefined || !Number.isFinite(seed)) {
-    throw new RankedDomainError("INVALID_CONFIG", `Missing seed MMR for ${currentCsmpTier}`);
+    throw new RankedDomainError("INVALID_CONFIG", `Missing seed MMR for ${normalizedTier}`);
   }
   if (!appliedAt.trim()) {
     throw new RankedDomainError("INVALID_CONFIG", "seedAppliedAt is required");
@@ -51,7 +55,7 @@ export const seedProfileOnce = (
     profile: {
       ...profile,
       hiddenMmr: seed,
-      initialCsmpTier: currentCsmpTier,
+      initialCsmpTier: normalizedTier,
       initialSeedMmr: seed,
       seedAppliedAt: appliedAt,
     },

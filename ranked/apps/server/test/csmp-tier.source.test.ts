@@ -53,6 +53,21 @@ describe("authoritative CSMP seed lookup", () => {
       ]),
     ).toBe("NONE");
   });
+
+  it("recognizes operator-defined English and Korean tier names", () => {
+    expect(
+      resolveCsmpTier(
+        [{ order: 1, name: "Diamond", required: 1, maps: [{ levelId: "90" }] }],
+        [{ levelId: "90", percent: 100, status: "verified" }],
+      ),
+    ).toBe("DIAMOND");
+    expect(
+      resolveCsmpTier(
+        [{ order: 1, name: "마스터", required: 1, maps: [{ levelId: "91" }] }],
+        [{ levelId: "91", percent: 100, status: "verified" }],
+      ),
+    ).toBe("마스터");
+  });
 });
 
 

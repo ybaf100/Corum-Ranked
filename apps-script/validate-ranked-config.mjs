@@ -282,6 +282,10 @@ assert.equal(alternate.levelId, "987654321");
 assert.equal(complete.data.operational.rules.rulesVersion, "corum-ranked-v0.5");
 assert.equal(complete.data.operational.rules.roundSeconds, 300);
 assert.equal(complete.data.operational.rules.clearTarget, 3);
+assert.deepEqual(
+  complete.data.operational.csmpTierNames,
+  ["RED", "AQUA", "BRONZE", "SILVER", "GOLD"],
+);
 assert.equal(complete.data.operational.cbf.requiredSettings["soft-toggle"], false);
 assert.equal(complete.data.operational.cbf.requiredSettings["click-on-steps"], false);
 assert.equal(complete.data.operational.cbf.requiredSettings["physics-bypass"], false);
@@ -292,6 +296,46 @@ assert.equal(complete.data.client.audio.fadeInSeconds, 0);
 assert.equal(complete.data.client.audio.fadeOutSeconds, 0);
 assert.equal(complete.data.client.ui.fadeInSeconds, 0.24);
 assert.equal(complete.data.client.ui.fadeOutSeconds, 0.18);
+
+// Main Pool is operational data, not a fixed tier-name lookup. With only one
+// Pool 1 map remaining, RED/Main Pool 2 is valid (needs one Pool 1 map), while
+// RED/Main Pool 1 is invalid (needs two).
+const removedPoolOneValues = [];
+for (let index = 2; index <= 5; index += 1) {
+  removedPoolOneValues.push(mapSheet.rows[index][poolColumn]);
+  mapSheet.rows[index][poolColumn] = "";
+}
+assert.equal(responseJson().data.validation.valid, true);
+const redTierRow = tierRows.find((row) => row[0] === "RED");
+redTierRow[3] = 1;
+const shiftedMainPool = responseJson();
+assert.equal(shiftedMainPool.data.validation.valid, false);
+assert.ok(shiftedMainPool.data.validation.errors.some((error) => error.includes("RED Main Pool 1")));
+redTierRow[3] = 2;
+for (let index = 2; index <= 5; index += 1) {
+  mapSheet.rows[index][poolColumn] = removedPoolOneValues[index - 2];
+}
+
+// New CSMP tier rows automatically receive a Seed row. They fail closed until
+// an MMR is entered, then appear in the dynamic config without changing the
+// five fixed Ranked display tiers.
+const csmpTierSheet = spreadsheet.getSheetByName("CSMP Tiers");
+csmpTierSheet.appendRow([6, "Diamond", "Diamond.png", "#88AAFF", 1]);
+context.setupCorumRankedConfig();
+const diamondSeedRow = seedRows.find((row) => row[0] === "DIAMOND");
+assert.ok(diamondSeedRow);
+assert.equal(diamondSeedRow[1], "");
+assert.equal(responseJson().data.validation.valid, false);
+diamondSeedRow[1] = 5200;
+const withDynamicCsmp = responseJson();
+assert.equal(withDynamicCsmp.data.validation.valid, true, withDynamicCsmp.data.validation.errors.join("\n"));
+assert.equal(withDynamicCsmp.data.operational.csmpSeeds.DIAMOND, 5200);
+assert.ok(withDynamicCsmp.data.operational.csmpTierNames.includes("DIAMOND"));
+csmpTierSheet.appendRow([7, " diamond ", "Diamond2.png", "#88AAFF", 1]);
+const duplicateCsmp = responseJson();
+assert.equal(duplicateCsmp.data.validation.valid, false);
+assert.ok(duplicateCsmp.data.validation.errors.some((error) => error.includes("CSMP Tiers 티어명이 중복")));
+csmpTierSheet.rows.pop();
 
 setConfig("rankedAudioMenuSongId", 123456);
 setConfig("rankedAudioMenuStartSeconds", 42.5);
@@ -320,4 +364,4 @@ const health = JSON.parse(context.doGet({ parameter: { action: "health" } }).tex
 assert.equal(health.service, "Corum Integration API");
 assert.equal(health.version, context.CORUM_API_VERSION);
 
-console.log("Ranked-only sheet2 routing, alternate/playable IDs, 3-Clear/5-minute rules, fail-closed config, and legacy health routing passed.");
+console.log("Ranked sheet2 routing, dynamic Main Pool/CSMP seeds, alternate IDs, fail-closed config, and legacy health routing passed.");

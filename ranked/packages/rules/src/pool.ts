@@ -9,14 +9,20 @@ import type {
 
 export type PoolDistribution = Readonly<Partial<Record<PoolNumber, number>>>;
 
-export const CANDIDATE_POOL_DISTRIBUTIONS: Readonly<Record<RankedTier, PoolDistribution>> =
-  Object.freeze({
-    RED: Object.freeze({ 1: 1, 2: 3, 3: 1 }),
-    AQUA: Object.freeze({ 2: 1, 3: 3, 4: 1 }),
-    BRONZE: Object.freeze({ 3: 1, 4: 3, 5: 1 }),
-    SILVER: Object.freeze({ 4: 1, 5: 3, 6: 1 }),
-    GOLD: Object.freeze({ 4: 1, 5: 2, 6: 2 }),
+export const candidatePoolDistribution = (mainPool: PoolNumber): PoolDistribution => {
+  if (!Number.isInteger(mainPool) || mainPool < 1 || mainPool > 6) {
+    throw new RankedDomainError("INVALID_CONFIG", "Main Pool must be an integer from 1 through 6", {
+      mainPool,
+    });
+  }
+  if (mainPool === 1) return Object.freeze({ 1: 2, 2: 2, 3: 1 });
+  if (mainPool === 6) return Object.freeze({ 4: 1, 5: 2, 6: 2 });
+  return Object.freeze({
+    [(mainPool - 1) as PoolNumber]: 1,
+    [mainPool]: 3,
+    [(mainPool + 1) as PoolNumber]: 1,
   });
+};
 
 const validateMap = (map: RankedMap): void => {
   if (!isValidLevelId(map.canonicalLevelId)) {
@@ -122,11 +128,12 @@ export const snapshotMap = (map: RankedMap): RankedMapSnapshot =>
 
 export const selectCandidateMaps = (
   tier: RankedTier,
+  mainPool: PoolNumber,
   maps: readonly RankedMap[],
   random: RandomSource,
 ): readonly RankedMapSnapshot[] => {
   const canonical = canonicalActiveMaps(maps);
-  const distribution = CANDIDATE_POOL_DISTRIBUTIONS[tier];
+  const distribution = candidatePoolDistribution(mainPool);
   const selected: RankedMap[] = [];
 
   for (const [poolText, required] of Object.entries(distribution)) {
@@ -135,8 +142,8 @@ export const selectCandidateMaps = (
     if (available.length < required) {
       throw new RankedDomainError(
         "INSUFFICIENT_POOL_MAPS",
-        `Pool ${pool} has ${available.length} canonical maps but ${required} are required for ${tier}`,
-        { tier, pool, required, available: available.length },
+        `Pool ${pool} has ${available.length} canonical maps but ${required} are required for ${tier} Main Pool ${mainPool}`,
+        { tier, mainPool, pool, required, available: available.length },
       );
     }
     selected.push(...sample(available, required, random));
@@ -145,6 +152,7 @@ export const selectCandidateMaps = (
   if (selected.length !== 5 || new Set(selected.map((map) => map.canonicalLevelId)).size !== 5) {
     throw new RankedDomainError("INSUFFICIENT_POOL_MAPS", "Candidate maps must be five canonical levels", {
       tier,
+      mainPool,
     });
   }
 

@@ -107,6 +107,26 @@ jobs:
             corum-ranked-mod/src/debug/DebugBotConfig.cpp \
             -o /tmp/corum-ranked-debug-bot-domain-test
           /tmp/corum-ranked-debug-bot-domain-test
+          python3 - <<'PY'
+          from pathlib import Path
+
+          source = Path("corum-ranked-mod/src/LevelInfoLayer.cpp").read_text(encoding="utf-8")
+          for required in (
+              "nativePlayButton->setTarget(",
+              "nativePlayButton->activate();",
+              "scheduleAutoPlay(0.25f);",
+          ):
+              if required not in source:
+                  raise SystemExit(f"Missing Ranked vanilla Play invariant: {required}")
+          for forbidden in (
+              "PlayLayer::scene(",
+              "manualPlayFallback",
+              "instance-selector-proxy",
+              "AUTO PLAY FAILED - TAP PLAY",
+          ):
+              if forbidden in source:
+                  raise SystemExit(f"Forbidden Ranked launch path returned: {forbidden}")
+          PY
 
   build:
     name: ${{ matrix.config.name }} ${{ needs.metadata.outputs.version }} (${{ needs.metadata.outputs.debug_enabled == 'true' && 'Debug Bot ON' || 'Release' }})

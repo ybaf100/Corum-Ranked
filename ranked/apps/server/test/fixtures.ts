@@ -38,6 +38,7 @@ const operational = (generation: string): RankedOperationalConfig => ({
   generation,
   rules: DOCUMENT_RULES_V0_4,
   tierBands,
+  csmpTierNames: ["RED", "AQUA", "BRONZE", "SILVER", "GOLD"],
   csmpSeeds: {
     NONE: 500,
     RED: 700,

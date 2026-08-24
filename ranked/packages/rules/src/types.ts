@@ -1,11 +1,13 @@
 export const RANKED_TIERS = ["RED", "AQUA", "BRONZE", "SILVER", "GOLD"] as const;
 export const DISPLAY_TIERS = ["UNRANKED", ...RANKED_TIERS] as const;
-export const CSMP_TIERS = ["NONE", ...RANKED_TIERS] as const;
 export const PLAYER_SIDES = ["A", "B"] as const;
 
 export type RankedTier = (typeof RANKED_TIERS)[number];
 export type DisplayTier = (typeof DISPLAY_TIERS)[number];
-export type CsmpTier = (typeof CSMP_TIERS)[number];
+// CSMP progression tiers are operator-defined in the CSMP Tiers and Ranked
+// CSMP Seed sheets. They deliberately do not share the fixed Ranked display
+// tier union.
+export type CsmpTier = string;
 export type PlayerSide = (typeof PLAYER_SIDES)[number];
 export type PoolNumber = 1 | 2 | 3 | 4 | 5 | 6;
 export type RoundResult = PlayerSide | "DRAW";
@@ -111,7 +113,9 @@ export interface RankedOperationalConfig {
   readonly generation: string;
   readonly rules: RankedRulesConfig;
   readonly tierBands: readonly TierBand[];
-  readonly csmpSeeds: Readonly<Partial<Record<CsmpTier, number>>>;
+  /** Normalized live names from the CSMP Tiers sheet; NONE is reserved for the baseline seed. */
+  readonly csmpTierNames: readonly CsmpTier[];
+  readonly csmpSeeds: Readonly<Record<CsmpTier, number>>;
   readonly mmrPolicy?: MmrPolicy;
   readonly timeouts?: TimeoutPolicy;
   readonly matchmaking?: MatchmakingPolicy;

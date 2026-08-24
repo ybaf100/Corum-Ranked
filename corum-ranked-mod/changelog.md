@@ -1,3 +1,12 @@
+# v0.5.0-beta.3
+
+- Replaced the unattached selector proxy with automatic activation of the real visible Geometry Dash Play menu item after normalizing its target to the active Ranked `LevelInfoLayer`; Ranked never constructs or switches to `PlayLayer` directly.
+- Removed the manual Play fallback. During the Ranked wait gate only vanilla song acquisition controls are enabled, and a failed real-button activation retries automatically while server authority still permits entry.
+- Resets the LevelInfo launch latch after a successful vanilla transition so quitting a live attempt back to the map page automatically presses Play again for the next legal attempt.
+- Made `Ranked Tiers.Main Pool` authoritative for the five-map distribution while preserving the existing default distributions.
+- Made CSMP Seed tier names operator-defined, added cross-sheet fail-closed validation, and added PostgreSQL migration `0006_v050_dynamic_csmp_tiers.sql` without re-seeding existing profiles.
+- Updated the exact client/server gate and workspace package metadata to `v0.5.0-beta.3`.
+
 # v0.5.0-beta.2
 
 - Fixed the iOS `STARTING -> FAILED` loop by dispatching automatic Play through a selector owned by the active Corum Ranked `LevelInfoLayer`, instead of trusting a visible Play item's possibly rebound callback.

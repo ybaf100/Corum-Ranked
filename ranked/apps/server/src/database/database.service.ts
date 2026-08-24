@@ -22,6 +22,7 @@ const REQUIRED_MIGRATIONS = [
   "0003_debug_rating_playable_maps.sql",
   "0004_alpha37_schema_hardening.sql",
   "0005_v050_rating_system.sql",
+  "0006_v050_dynamic_csmp_tiers.sql",
 ] as const;
 
 export interface RankedSchemaStatus {

@@ -1,6 +1,5 @@
 import { RankedDomainError } from "./errors.js";
 import {
-  CSMP_TIERS,
   RANKED_TIERS,
   type RankedOperationalConfig,
   type RankedRulesConfig,
@@ -106,10 +105,45 @@ export const validateOperationalConfig = (
   validateDocumentRules(config.rules, errors);
   errors.push(...validateTierBands(config.tierBands));
 
-  for (const tier of CSMP_TIERS) {
-    const seed = config.csmpSeeds[tier];
-    if (seed === undefined || !Number.isFinite(seed)) {
-      errors.push(`csmpSeeds.${tier} must be configured`);
+  const normalizedSeedNames = new Set<string>();
+  for (const [rawTier, seed] of Object.entries(config.csmpSeeds)) {
+    const tier = rawTier.trim().toUpperCase();
+    if (!tier || tier.length > 80 || tier !== rawTier) {
+      errors.push(`csmpSeeds key '${rawTier}' must be a normalized 1..80 character tier name`);
+      continue;
+    }
+    if (normalizedSeedNames.has(tier)) {
+      errors.push(`csmpSeeds contains duplicate normalized tier: ${tier}`);
+    }
+    normalizedSeedNames.add(tier);
+    if (!Number.isFinite(seed)) errors.push(`csmpSeeds.${tier} must be finite`);
+  }
+  if (!normalizedSeedNames.has("NONE")) {
+    errors.push("csmpSeeds.NONE must be configured");
+  }
+
+  if (!Array.isArray(config.csmpTierNames) || config.csmpTierNames.length === 0) {
+    errors.push("csmpTierNames must contain the live CSMP Tiers sheet names");
+  } else {
+    const configuredTierNames = new Set<string>();
+    for (const rawTier of config.csmpTierNames) {
+      if (typeof rawTier !== "string") {
+        errors.push("csmpTierNames entries must be strings");
+        continue;
+      }
+      const tier = rawTier.trim().toUpperCase();
+      if (!tier || tier.length > 80 || tier !== rawTier || tier === "NONE") {
+        errors.push(`csmpTierNames entry '${rawTier}' must be a normalized non-NONE 1..80 character name`);
+        continue;
+      }
+      if (configuredTierNames.has(tier)) {
+        errors.push(`csmpTierNames contains duplicate tier: ${tier}`);
+        continue;
+      }
+      configuredTierNames.add(tier);
+      if (!Number.isFinite(config.csmpSeeds[tier])) {
+        errors.push(`csmpSeeds.${tier} must be configured for the live CSMP tier`);
+      }
     }
   }
 

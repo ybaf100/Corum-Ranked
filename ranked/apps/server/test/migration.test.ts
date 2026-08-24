@@ -12,6 +12,7 @@ const migrationNames = [
   "0003_debug_rating_playable_maps.sql",
   "0004_alpha37_schema_hardening.sql",
   "0005_v050_rating_system.sql",
+  "0006_v050_dynamic_csmp_tiers.sql",
 ] as const;
 
 const migrationSql = async (migrationName: string): Promise<string> => {
@@ -128,6 +129,29 @@ describe("PostgreSQL migration", () => {
       database!.query(
         "INSERT INTO ranked_profiles (player_id, hidden_mmr) VALUES ($1, $2)",
         ["00000000-0000-4000-8000-000000000001", 2500],
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("accepts normalized operator-defined CSMP seed tiers", async () => {
+    await database!.query(
+      "INSERT INTO ranked_players (id, gd_account_id, gd_username) VALUES ($1, $2, $3)",
+      ["00000000-0000-4000-8000-000000000002", 124, "dynamic-tier-player"],
+    );
+    await expect(
+      database!.query(
+        `INSERT INTO ranked_profiles (
+           player_id, hidden_mmr, visible_ranked_score, initial_csmp_tier,
+           initial_seed_mmr, seed_applied_at
+         ) VALUES ($1, $2, 0, $3, $2, CURRENT_TIMESTAMP)`,
+        ["00000000-0000-4000-8000-000000000002", 5000, "DIAMOND"],
+      ),
+    ).resolves.toBeDefined();
+    await expect(
+      database!.query(
+        `UPDATE ranked_profiles SET initial_csmp_tier = ' diamond '
+         WHERE player_id = $1`,
+        ["00000000-0000-4000-8000-000000000002"],
       ),
     ).rejects.toThrow();
   });

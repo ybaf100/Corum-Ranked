@@ -3,6 +3,7 @@ import {
   SeededRandom,
   canonicalActiveMaps,
   selectCandidateMaps,
+  tierBandFor,
   validateOperationalConfig,
 } from "@corum-ranked/rules";
 import type { RankedConfigDocument } from "./ranked-config.document.js";
@@ -60,7 +61,8 @@ export const validateRankedConfigDocument = (document: RankedConfigDocument): re
   try {
     canonicalActiveMaps(document.maps);
     for (const [index, tier] of RANKED_TIERS.entries()) {
-      selectCandidateMaps(tier, document.maps, new SeededRandom(index + 1));
+      const band = tierBandFor(tier, document.operational.tierBands);
+      selectCandidateMaps(tier, band.mainPool, document.maps, new SeededRandom(index + 1));
     }
   } catch (error) {
     errors.push(error instanceof Error ? error.message : "Ranked map pool is invalid");

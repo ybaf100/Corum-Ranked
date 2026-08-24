@@ -75,4 +75,21 @@ describe("Ranked config snapshot loader", () => {
     expect(service.getStatus().ready).toBe(false);
     expect(() => service.getSnapshot()).toThrow("Ranked config has no valid snapshot");
   });
+
+  it("refuses a live CSMP tier that has no matching seed", async () => {
+    const source = new FakeSource();
+    source.document = {
+      ...source.document,
+      operational: {
+        ...source.document.operational,
+        csmpTierNames: [...source.document.operational.csmpTierNames, "DIAMOND"],
+      },
+    };
+    const service = new RankedConfigService(source, environmentFixture());
+    expect(await service.refresh()).toBe(false);
+    expect(service.getStatus()).toMatchObject({
+      ready: false,
+      lastError: expect.stringContaining("csmpSeeds.DIAMOND must be configured"),
+    });
+  });
 });

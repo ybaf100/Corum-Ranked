@@ -284,13 +284,11 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
     struct Fields {
         bool returningToRanked = false;
         bool autoPlayScheduled = false;
-        // Automatic start, manual Play/Space, and song-gate completion must all
-        // share one scene-transition latch. Vanilla LevelInfoLayer::onPlay must
-        // never be invoked twice for the same Ranked launch.
+        // Automatic start and song-gate completion share one scene-transition
+        // latch. Physical Play/Space input remains blocked for Ranked.
         bool gameplayLaunchStarted = false;
         bool vanillaPlayActivation = false;
         bool vanillaPlayForwarded = false;
-        bool manualPlayFallback = false;
         int gameplayLaunchAttempts = 0;
         SteadyClock::time_point nextGameplayLaunchAt {};
         bool songGateActive = false;
@@ -393,13 +391,6 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         LevelInfoLayer::downloadLevel();
     }
 
-    void enableManualRankedPlay() {
-        if (!m_playBtnMenu) return;
-        m_playBtnMenu->setEnabled(true);
-        m_playBtnMenu->setTouchEnabled(true);
-        setMenuItemsEnabled(m_playBtnMenu, true);
-    }
-
     void updateSongDownloadGate(float) {
         if (!m_fields->songGateActive) return;
         auto& runtime = corum::ranked::RankedRuntime::get();
@@ -419,7 +410,6 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         // payload arrives. Re-apply the interaction lock every tick so the newly
         // created vanilla song control is the only clickable UI.
         lockInteractionToSong(this, m_songWidget);
-        if (m_fields->manualPlayFallback) enableManualRankedPlay();
 
         if (!levelReady) {
             if (m_fields->gateStatus) {
@@ -532,7 +522,6 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
             if (
                 !readyForStart ||
                 !runtime.canEnterCurrentLevel() ||
-                m_fields->manualPlayFallback ||
                 now < m_fields->nextGameplayLaunchAt ||
                 m_fields->songGateStartingPlay ||
                 m_fields->gameplayLaunchStarted
@@ -544,7 +533,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
             // succeeds removes the only retry loop and can strand this page at
             // READY forever.
             m_fields->songGateStartingPlay = true;
-            if (!launchRankedGameplay(nullptr)) {
+            if (!launchRankedGameplay()) {
                 m_fields->songGateStartingPlay = false;
                 return;
             }
@@ -641,7 +630,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         lockInteractionToSong(this, m_songWidget);
     }
 
-    bool launchRankedGameplay(CCObject* sender) {
+    bool launchRankedGameplay() {
         if (m_fields->gameplayLaunchStarted || m_fields->returningToRanked) return false;
 
         auto& runtime = corum::ranked::RankedRuntime::get();
@@ -654,6 +643,13 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
             return false;
         }
 
+        // Arm only when the real, visible Geometry Dash Play item exists and the
+        // vanilla level page is no longer processing another action. This keeps
+        // retries harmless: no synthetic scene and no attempt timestamp are
+        // created while LevelInfo is still rebuilding after a map download.
+        auto* nativePlayButton = vanillaPlayButton(m_playBtnMenu, m_playSprite);
+        if (!nativePlayButton || m_isBusy) return false;
+
         auto const ready = songsReady(m_level, m_songWidget);
         if (!ready && !runtime.songBypassAllowed()) return false;
         if (!ready && runtime.songBypassAllowed()) m_level->m_showedSongWarning = true;
@@ -664,7 +660,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         if (!runtime.armCurrentLevelForGameplay()) return false;
 
         m_fields->gameplayLaunchStarted = true;
-        if (!sender) ++m_fields->gameplayLaunchAttempts;
+        ++m_fields->gameplayLaunchAttempts;
         m_fields->autoPlayScheduled = false;
         unschedule(schedule_selector(CorumRankedLevelInfoLayer::autoPlayRanked));
         scheduleOnce(
@@ -672,70 +668,48 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
             2.5f
         );
 
-        if (sender) {
-            // A person already pressed the real button. Continue that exact
-            // vanilla callback after Ranked has armed the attempt.
-            LevelInfoLayer::onPlay(sender);
-        } else {
-            // Automatic entry must behave like a real press, not construct or
-            // replace a PlayLayer scene behind Geometry Dash's state machine.
-            scheduleOnce(
-                schedule_selector(CorumRankedLevelInfoLayer::activateRankedPlayButton),
-                0.0f
-            );
-        }
+        // Automatic entry must behave like a real press, not construct or
+        // replace a PlayLayer scene behind Geometry Dash's state machine.
+        scheduleOnce(
+            schedule_selector(CorumRankedLevelInfoLayer::activateRankedPlayButton),
+            0.0f
+        );
         return true;
     }
 
     void activateRankedPlayButton(float) {
         if (!m_fields->gameplayLaunchStarted || m_fields->returningToRanked) return;
         auto* nativePlayButton = vanillaPlayButton(m_playBtnMenu, m_playSprite);
+        if (!nativePlayButton || m_isBusy) return;
 
-        // Always dispatch through a short-lived selector owned by this exact
-        // modified LevelInfoLayer instance. On iOS, another LevelInfo hook can
-        // leave the visible vanilla item's stored target/selector pointing at a
-        // different hook chain. Calling that item's activate() then animates the
-        // button but never reaches CorumRankedLevelInfoLayer::onPlay, producing
-        // the observed STARTING -> FAILED loop. The proxy is still the ordinary
-        // LevelInfo onPlay route; it never constructs PlayLayer directly.
-        auto* proxySprite = CCSprite::createWithSpriteFrameName("GJ_playBtn_001.png");
-        auto* selectorProxy = proxySprite
-            ? CCMenuItemSpriteExtra::create(
-                proxySprite,
-                this,
-                menu_selector(CorumRankedLevelInfoLayer::onPlay)
-            )
-            : nullptr;
-
-        // The prepare gate disables every menu item except song acquisition.
-        // Re-enable and pulse the visible item, while the instance-owned proxy
-        // performs the deterministic selector dispatch.
-        if (nativePlayButton) {
-            nativePlayButton->setEnabled(true);
-            nativePlayButton->selected();
-            nativePlayButton->unselected();
-        }
+        // Some iOS hook chains can leave the stored callback on the visible item
+        // pointing at another LevelInfo hook instance. Normalize that callback,
+        // then activate the real menu item itself. This is the same Geometry Dash
+        // button and the same vanilla onPlay transition a physical press uses.
+        nativePlayButton->setTarget(
+            this,
+            menu_selector(CorumRankedLevelInfoLayer::onPlay)
+        );
         m_fields->vanillaPlayActivation = true;
         m_fields->vanillaPlayForwarded = false;
         log::info(
-            "Activating Ranked Play selector: match={} level={} source={}",
+            "Activating real Ranked Play button: match={} level={} attempt={}",
             corum::ranked::RankedRuntime::get().view().match.matchId,
             static_cast<int>(m_level->m_levelID),
-            selectorProxy ? "instance-selector-proxy" : "direct-hook-fallback"
+            m_fields->gameplayLaunchAttempts
         );
-        // The selector can synchronously begin a scene transition and run
+        // activate() can synchronously begin a scene transition and run
         // onExit. Keep this layer alive until the activation callback returns so
         // clearing the one-shot bypass below never touches a released object.
         retain();
-        if (selectorProxy) selectorProxy->activate();
-        else onPlay(nativePlayButton);
-        if (!m_fields->vanillaPlayForwarded) {
-            // This should only be reachable if a platform rejects activation of
-            // an unattached proxy. Preserve the same vanilla callback as a final
-            // deterministic fallback rather than entering another retry loop.
-            log::warn("Ranked selector proxy did not forward onPlay; using direct hook fallback");
-            m_fields->vanillaPlayForwarded = true;
-            LevelInfoLayer::onPlay(nativePlayButton);
+        nativePlayButton->setEnabled(true);
+        nativePlayButton->activate();
+        // If Geometry Dash stayed on this page, immediately restore the Ranked
+        // interaction lock. The watchdog will automatically retry; the player is
+        // never asked to press Play manually.
+        if (m_fields->gameplayLaunchStarted) {
+            nativePlayButton->setEnabled(false);
+            if (m_fields->songGateActive) lockInteractionToSong(this, m_songWidget);
         }
         m_fields->vanillaPlayActivation = false;
         release();
@@ -745,26 +719,13 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         if (!m_fields->gameplayLaunchStarted) return;
 
         log::warn(
-            "Ranked Play selector did not leave LevelInfo (attempt {}/3)",
+            "Real Ranked Play button did not leave LevelInfo (attempt {})",
             m_fields->gameplayLaunchAttempts
         );
         m_fields->gameplayLaunchStarted = false;
         m_fields->vanillaPlayActivation = false;
         m_fields->vanillaPlayForwarded = false;
         m_fields->songGateStartingPlay = false;
-
-        if (m_fields->gameplayLaunchAttempts >= 3) {
-            // Stop the automatic loop. Leave the real page interactive so a
-            // player can use the visible Play button if an unknown layout has a
-            // platform-specific transition requirement.
-            m_fields->manualPlayFallback = true;
-            enableManualRankedPlay();
-            if (m_fields->gateCountdown) {
-                m_fields->gateCountdown->setString("AUTO PLAY FAILED - TAP PLAY");
-                m_fields->gateCountdown->setColor({255, 92, 92});
-            }
-            return;
-        }
 
         m_fields->nextGameplayLaunchAt = SteadyClock::now() + std::chrono::milliseconds(450);
         if (m_fields->gateCountdown) {
@@ -791,8 +752,21 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         // accepted the transition.
         unschedule(schedule_selector(CorumRankedLevelInfoLayer::activateRankedPlayButton));
         unschedule(schedule_selector(CorumRankedLevelInfoLayer::verifyGameplayLaunch));
-        if (m_fields->gameplayLaunchStarted && m_fields->songGateActive) {
-            teardownSongDownloadGate();
+        auto const acceptedRankedLaunch = m_fields->gameplayLaunchStarted;
+        if (acceptedRankedLaunch && m_fields->songGateActive) teardownSongDownloadGate();
+        if (acceptedRankedLaunch) {
+            // PlayLayer::onQuit returns to this same vanilla LevelInfo instance.
+            // Clear only the UI launch latch here so onEnterTransitionDidFinish
+            // can automatically activate the real Play button for the next legal
+            // attempt. RankedRuntime remains the authority for timeout, result,
+            // spectator, three-clear, and Deathmatch-attempt limits.
+            m_fields->gameplayLaunchStarted = false;
+            m_fields->vanillaPlayActivation = false;
+            m_fields->vanillaPlayForwarded = false;
+            m_fields->songGateStartingPlay = false;
+            m_fields->autoPlayScheduled = false;
+            m_fields->gameplayLaunchAttempts = 0;
+            m_fields->nextGameplayLaunchAt = {};
         }
         LevelInfoLayer::onExit();
     }
@@ -811,9 +785,21 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
     void autoPlayRanked(float) {
         m_fields->autoPlayScheduled = false;
         if (m_fields->gameplayLaunchStarted) return;
-        if (!launchRankedGameplay(nullptr)) {
-            returnToRanked(0.0f);
+        if (launchRankedGameplay()) return;
+
+        auto& runtime = corum::ranked::RankedRuntime::get();
+        if (
+            isCurrentRankedLevel(m_level) &&
+            rankedPlayingState(runtime.view().match.state) &&
+            runtime.canEnterCurrentLevel()
+        ) {
+            // The real button can be transiently absent/busy while vanilla
+            // rebuilds LevelInfo. Stay automatic and retry instead of exposing a
+            // manual Play fallback or abandoning the Ranked page.
+            scheduleAutoPlay(0.25f);
+            return;
         }
+        returnToRanked(0.0f);
     }
 
     void onPlay(CCObject* sender) {
@@ -828,23 +814,14 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
             LevelInfoLayer::onPlay(sender);
             return;
         }
-        if (
-            m_fields->manualPlayFallback &&
-            !m_fields->gameplayLaunchStarted &&
-            isCurrentRankedLevel(m_level) &&
-            rankedPlayingState(runtime.view().match.state)
-        ) {
-            m_fields->manualPlayFallback = false;
-            if (!launchRankedGameplay(sender)) m_fields->manualPlayFallback = true;
-            return;
-        }
         if (m_fields->songGateActive || m_fields->gameplayLaunchStarted) {
             // Only song acquisition is legal during the gate, and repeated
             // Play/Space becomes inert once the Ranked scene launch has started.
             return;
         }
         if (isCurrentRankedLevel(m_level) && rankedPlayingState(runtime.view().match.state)) {
-            launchRankedGameplay(sender);
+            // Ranked owns automatic activation. A physical tap cannot create a
+            // second attempt or bypass the authoritative entry checks.
             return;
         }
         LevelInfoLayer::onPlay(sender);
@@ -867,8 +844,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
             // keyboard dispatcher is still iterating its delegates. iOS then
             // dereferences the released delegate (the observed SIGBUS). Ranked
             // already owns automatic Play activation, so keyboard shortcuts on
-            // this transient page must be inert; the real touch Play callback is
-            // still handled by onPlay() above whenever manual input is legal.
+            // this transient page must be inert.
             return;
         }
         LevelInfoLayer::keyDown(key, timestamp);

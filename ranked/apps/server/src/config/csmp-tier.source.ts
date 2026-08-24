@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger, ServiceUnavailableException } from "@nestjs/common";
-import { CSMP_TIERS, type CsmpTier } from "@corum-ranked/rules";
+import type { CsmpTier } from "@corum-ranked/rules";
 import {
   SERVER_ENVIRONMENT,
   type ServerEnvironment,
@@ -52,7 +52,11 @@ export const resolveCsmpTier = (
 
   for (const stage of stages) {
     const name = String(stage.name || "").trim().toUpperCase();
-    if (!CSMP_TIERS.includes(name as CsmpTier) || name === "NONE") continue;
+    // Tier names are defined by the live CSMP sheet, not by the five Ranked
+    // display tiers. Empty/oversized names and the reserved seed baseline NONE
+    // are structural errors; every other normalized name (including Korean) is
+    // eligible for authoritative progression.
+    if (!name || name.length > 80 || name === "NONE") continue;
     const canonicalMaps = (stage.maps || []).filter((map) => String(map.levelId || "").trim());
     const required = Math.trunc(Number(stage.required));
     if (canonicalMaps.length === 0 || !Number.isFinite(required) || required <= 0) break;
@@ -63,7 +67,7 @@ export const resolveCsmpTier = (
       return ids.some((id) => completedIds.has(id));
     }).length;
     if (completed < required) break;
-    current = name as CsmpTier;
+    current = name;
   }
   return current;
 };

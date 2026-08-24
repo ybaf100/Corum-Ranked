@@ -24,7 +24,7 @@ describe("alternate Level ID is the only playable Ranked map ID", () => {
       playableLevelId: first.canonicalLevelId,
       levelId: first.canonicalLevelId,
     };
-    expect(() => selectCandidateMaps("RED", maps, new SeededRandom(1))).toThrowError(
+    expect(() => selectCandidateMaps("RED", 2, maps, new SeededRandom(1))).toThrowError(
       expect.objectContaining<Partial<RankedDomainError>>({ code: "INVALID_MAP" }),
     );
   });
