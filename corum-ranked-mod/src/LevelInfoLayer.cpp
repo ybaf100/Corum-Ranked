@@ -134,12 +134,14 @@ void normalizeRankedLevelInfo(GJGameLevel* level) {
     if (!isCurrentRankedLevel(level)) return;
     auto const& map = corum::ranked::RankedRuntime::get().view().match.currentMap;
 
-    // A GJGameLevel::create() shell defaults to GJLevelType::Default, which
-    // makes vanilla LevelInfoLayer treat an online Ranked map like an incomplete
-    // local/main-level object. The result is the blank title/creator/difficulty
-    // page seen in the report even though the Level ID is valid. SearchResult is
-    // the native type used for downloaded online levels on every platform.
-    level->m_levelType = GJLevelType::SearchResult;
+    // Only the synthetic GJGameLevel::create() shell needs normalization.
+    // GameLevelManager::getSavedLevel() returns a canonical Saved payload;
+    // changing that shared object back to SearchResult makes vanilla
+    // shouldDownloadLevel() treat an already downloaded map as download/update
+    // work on some platforms.
+    if (level->m_levelType == GJLevelType::Default) {
+        level->m_levelType = GJLevelType::SearchResult;
+    }
     if (map) {
         if (!map->title.empty()) level->m_levelName = map->title;
         if (!map->creator.empty()) level->m_creatorName = map->creator;
@@ -206,20 +208,24 @@ bool nodeContains(CCNode* root, CCNode* target) {
 }
 
 CCMenuItem* vanillaPlayButton(CCMenu* menu, CCNode* playSprite) {
-    if (!menu) return nullptr;
+    if (!menu || !playSprite) return nullptr;
+
+    auto verifiedPlayItem = [playSprite](CCNode* node) -> CCMenuItem* {
+        auto* item = typeinfo_cast<CCMenuItemSprite*>(node);
+        if (!item || !nodeContains(item->getNormalImage(), playSprite)) return nullptr;
+        return item;
+    };
 
     // Node IDs are the most explicit route when geode.node-ids (or another
-    // compatible ID provider) is present. They are not guaranteed on every
-    // supported client, so the native m_playSprite identity check below is the
-    // cross-platform source of truth.
-    if (auto* identified = typeinfo_cast<CCMenuItem*>(menu->getChildByID("play-button"))) {
+    // compatible ID provider) is present, but an ID alone is not sufficient:
+    // while LevelInfo is rebuilding, the central item can temporarily represent
+    // download/update work. Require the live native m_playSprite identity too.
+    if (auto* identified = verifiedPlayItem(menu->getChildByID("play-button"))) {
         return identified;
     }
 
     for (auto* child : menu->getChildrenExt()) {
-        auto* item = typeinfo_cast<CCMenuItemSprite*>(child);
-        if (!item) continue;
-        if (nodeContains(item->getNormalImage(), playSprite)) return item;
+        if (auto* item = verifiedPlayItem(child)) return item;
     }
     return nullptr;
 }
@@ -288,8 +294,8 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         // latch. Physical Play/Space input remains blocked for Ranked.
         bool gameplayLaunchStarted = false;
         bool vanillaPlayActivation = false;
-        bool vanillaPlayForwarded = false;
         int gameplayLaunchAttempts = 0;
+        int gameplayLaunchBusyChecks = 0;
         SteadyClock::time_point nextGameplayLaunchAt {};
         bool songGateActive = false;
         SteadyClock::time_point lastReadySubmitAt {};
@@ -313,7 +319,8 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         if (!LevelInfoLayer::init(level, challenge)) return false;
         if (isCurrentRankedLevel(m_level)) {
             normalizeRankedLevelInfo(m_level);
-            m_levelType = GJLevelType::SearchResult;
+            // Preserve vanilla's canonical Saved/SearchResult distinction.
+            m_levelType = m_level->m_levelType;
         }
         return true;
     }
@@ -375,8 +382,22 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         updateSongDownloadGate(0.0f);
     }
 
+    bool vanillaLevelReadyForPlay() {
+        // m_levelString alone is not a sufficient launch boundary. Vanilla owns
+        // the download/update decision that LevelInfoLayer::onPlay will use.
+        return mapReady(m_level) && !LevelInfoLayer::shouldDownloadLevel();
+    }
+
     void requestVanillaMapDownload() {
-        if (!m_fields->songGateActive || mapReady(m_level) || m_fields->mapDownloadRequested) return;
+        auto& runtime = corum::ranked::RankedRuntime::get();
+        auto const& state = runtime.view().match.state;
+        if (
+            m_fields->returningToRanked ||
+            !isCurrentRankedLevel(m_level) ||
+            (!rankedDownloadGateState(state) && !rankedPlayingState(state)) ||
+            m_fields->mapDownloadRequested ||
+            vanillaLevelReadyForPlay()
+        ) return;
 
         auto const now = SteadyClock::now();
         if (m_fields->mapDownloadStartedAt == SteadyClock::time_point{}) {
@@ -384,6 +405,14 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         }
         m_fields->lastMapDownloadRequestAt = now;
         m_fields->mapDownloadRequested = true;
+
+        log::info(
+            "Ranked map requires vanilla download/update: level={} type={} hasPayload={} notDownloaded={}",
+            m_level ? static_cast<int>(m_level->m_levelID) : 0,
+            m_level ? static_cast<int>(m_level->m_levelType) : -1,
+            m_level && !m_level->m_levelString.empty(),
+            m_level ? m_level->m_levelNotDownloaded : true
+        );
 
         // Important: do not call GameLevelManager::downloadLevel directly here.
         // Let the real on-screen LevelInfoLayer own its normal download delegate,
@@ -404,7 +433,8 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         auto const& match = runtime.view().match;
         if (m_fields->gateTitle) m_fields->gateTitle->setString(rankedGateTitle().c_str());
         auto const now = SteadyClock::now();
-        auto const levelReady = mapReady(m_level);
+        auto const hasLevelPayload = mapReady(m_level);
+        auto const levelReady = vanillaLevelReadyForPlay();
 
         // Base LevelInfoLayer may replace/rebuild its song widget when the level
         // payload arrives. Re-apply the interaction lock every tick so the newly
@@ -413,7 +443,9 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
 
         if (!levelReady) {
             if (m_fields->gateStatus) {
-                m_fields->gateStatus->setString("DOWNLOADING MAP...");
+                m_fields->gateStatus->setString(
+                    hasLevelPayload ? "UPDATING MAP..." : "DOWNLOADING MAP..."
+                );
                 m_fields->gateStatus->setColor({95, 180, 255});
             }
 
@@ -573,8 +605,15 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
             LevelInfoLayer::levelDownloadFinished(level);
             if (isCurrentRankedLevel(m_level)) {
                 normalizeRankedLevelInfo(m_level);
-                m_levelType = GJLevelType::SearchResult;
+                m_levelType = m_level->m_levelType;
             }
+            m_fields->mapDownloadRequested = false;
+            auto& runtime = corum::ranked::RankedRuntime::get();
+            if (
+                vanillaLevelReadyForPlay() &&
+                rankedPlayingState(runtime.view().match.state) &&
+                runtime.canEnterCurrentLevel()
+            ) scheduleAutoPlay(0.10f);
             return;
         }
 
@@ -604,11 +643,11 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         normalizeRankedLevelInfo(level);
         LevelInfoLayer::levelDownloadFinished(level);
         normalizeRankedLevelInfo(m_level);
-        m_levelType = GJLevelType::SearchResult;
+        if (m_level) m_levelType = m_level->m_levelType;
         m_fields->mapDownloadRequested = false;
-        if (!isCurrentRankedLevel(m_level) || !mapReady(m_level)) {
+        if (!isCurrentRankedLevel(m_level) || !vanillaLevelReadyForPlay()) {
             if (m_fields->gateStatus) {
-                m_fields->gateStatus->setString("MAP LOAD INCOMPLETE - RETRYING");
+                m_fields->gateStatus->setString("MAP UPDATE INCOMPLETE - RETRYING");
                 m_fields->gateStatus->setColor({255, 92, 92});
             }
             requestVanillaMapDownload();
@@ -621,8 +660,8 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
 
     void levelDownloadFailed(int response) override {
         LevelInfoLayer::levelDownloadFailed(response);
-        if (!m_fields->songGateActive) return;
         m_fields->mapDownloadRequested = false;
+        if (!m_fields->songGateActive) return;
         if (m_fields->gateStatus) {
             m_fields->gateStatus->setString(fmt::format("MAP DOWNLOAD FAILED ({}) - RETRYING", response).c_str());
             m_fields->gateStatus->setColor({255, 92, 92});
@@ -637,9 +676,12 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         if (
             !isCurrentRankedLevel(m_level) ||
             !rankedPlayingState(runtime.view().match.state) ||
-            !runtime.canEnterCurrentLevel() ||
-            !mapReady(m_level)
+            !runtime.canEnterCurrentLevel()
         ) {
+            return false;
+        }
+        if (!vanillaLevelReadyForPlay()) {
+            requestVanillaMapDownload();
             return false;
         }
 
@@ -661,11 +703,12 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
 
         m_fields->gameplayLaunchStarted = true;
         ++m_fields->gameplayLaunchAttempts;
+        m_fields->gameplayLaunchBusyChecks = 0;
         m_fields->autoPlayScheduled = false;
         unschedule(schedule_selector(CorumRankedLevelInfoLayer::autoPlayRanked));
         scheduleOnce(
             schedule_selector(CorumRankedLevelInfoLayer::verifyGameplayLaunch),
-            2.5f
+            4.0f
         );
 
         // Automatic entry must behave like a real press, not construct or
@@ -682,21 +725,21 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         auto* nativePlayButton = vanillaPlayButton(m_playBtnMenu, m_playSprite);
         if (!nativePlayButton || m_isBusy) return;
 
-        // Some iOS hook chains can leave the stored callback on the visible item
-        // pointing at another LevelInfo hook instance. Normalize that callback,
-        // then activate the real menu item itself. This is the same Geometry Dash
-        // button and the same vanilla onPlay transition a physical press uses.
-        nativePlayButton->setTarget(
-            this,
-            menu_selector(CorumRankedLevelInfoLayer::onPlay)
-        );
+        // Preserve the callback Geometry Dash installed on the real Play item.
+        // Replacing it with this hook's selector re-entered the Geode hook chain
+        // twice on iOS, which was visible as two forwarded onPlay lines for one
+        // activation. The original callback still traverses this hook normally.
+        if (!nativePlayButton->m_pListener || !nativePlayButton->m_pfnSelector) {
+            log::warn("Verified Ranked Play item has no native callback");
+            return;
+        }
         m_fields->vanillaPlayActivation = true;
-        m_fields->vanillaPlayForwarded = false;
         log::info(
-            "Activating real Ranked Play button: match={} level={} attempt={}",
+            "Activating verified Ranked Play button: match={} level={} attempt={} node={}",
             corum::ranked::RankedRuntime::get().view().match.matchId,
             static_cast<int>(m_level->m_levelID),
-            m_fields->gameplayLaunchAttempts
+            m_fields->gameplayLaunchAttempts,
+            nativePlayButton->getID()
         );
         // activate() can synchronously begin a scene transition and run
         // onExit. Keep this layer alive until the activation callback returns so
@@ -704,12 +747,11 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         retain();
         nativePlayButton->setEnabled(true);
         nativePlayButton->activate();
-        // If Geometry Dash stayed on this page, immediately restore the Ranked
-        // interaction lock. The watchdog will automatically retry; the player is
-        // never asked to press Play manually.
+        // If Geometry Dash stayed on this page, restore only the Play lock. Do
+        // not recursively mutate every LevelInfo control while vanilla's
+        // asynchronous play/update pipeline may still be running.
         if (m_fields->gameplayLaunchStarted) {
             nativePlayButton->setEnabled(false);
-            if (m_fields->songGateActive) lockInteractionToSong(this, m_songWidget);
         }
         m_fields->vanillaPlayActivation = false;
         release();
@@ -718,19 +760,70 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
     void verifyGameplayLaunch(float) {
         if (!m_fields->gameplayLaunchStarted) return;
 
-        log::warn(
-            "Real Ranked Play button did not leave LevelInfo (attempt {})",
-            m_fields->gameplayLaunchAttempts
-        );
+        // Vanilla may still be finishing its update/play steps. Re-pressing the
+        // item while that work owns the page restarts the map spinner forever.
+        if (m_isBusy && ++m_fields->gameplayLaunchBusyChecks <= 10) {
+            log::debug(
+                "Ranked vanilla Play is still processing (attempt {})",
+                m_fields->gameplayLaunchAttempts
+            );
+            scheduleOnce(
+                schedule_selector(CorumRankedLevelInfoLayer::verifyGameplayLaunch),
+                1.0f
+            );
+            return;
+        }
+
+        if (m_isBusy) {
+            log::warn(
+                "Ranked vanilla Play/update remained busy; releasing launch latch (attempt {})",
+                m_fields->gameplayLaunchAttempts
+            );
+            m_fields->gameplayLaunchStarted = false;
+            m_fields->vanillaPlayActivation = false;
+            m_fields->songGateStartingPlay = false;
+            m_fields->gameplayLaunchBusyChecks = 0;
+            m_fields->mapDownloadRequested = false;
+            m_fields->nextGameplayLaunchAt = SteadyClock::now() + std::chrono::seconds(1);
+            if (m_fields->gateCountdown) {
+                m_fields->gateCountdown->setString("MAP UPDATE STALLED - RETRYING");
+                m_fields->gateCountdown->setColor({255, 92, 92});
+            }
+            if (!m_fields->songGateActive) scheduleAutoPlay(1.0f);
+            return;
+        }
+
+        auto const updateRequired = !vanillaLevelReadyForPlay();
+
+        if (updateRequired) {
+            log::warn(
+                "Ranked Play resolved to map download/update (attempt {})",
+                m_fields->gameplayLaunchAttempts
+            );
+        } else {
+            log::warn(
+                "Verified Ranked Play button did not leave LevelInfo (attempt {})",
+                m_fields->gameplayLaunchAttempts
+            );
+        }
         m_fields->gameplayLaunchStarted = false;
         m_fields->vanillaPlayActivation = false;
-        m_fields->vanillaPlayForwarded = false;
         m_fields->songGateStartingPlay = false;
+        m_fields->gameplayLaunchBusyChecks = 0;
 
         m_fields->nextGameplayLaunchAt = SteadyClock::now() + std::chrono::milliseconds(450);
         if (m_fields->gateCountdown) {
-            m_fields->gateCountdown->setString("PLAY FAILED - RETRYING");
-            m_fields->gateCountdown->setColor({255, 92, 92});
+            m_fields->gateCountdown->setString(
+                updateRequired ? "UPDATING MAP..." : "PLAY FAILED - RETRYING"
+            );
+            m_fields->gateCountdown->setColor(
+                updateRequired ? ccColor3B{95, 180, 255} : ccColor3B{255, 92, 92}
+            );
+        }
+
+        if (updateRequired) {
+            m_fields->mapDownloadRequested = false;
+            requestVanillaMapDownload();
         }
 
         if (!m_fields->songGateActive) {
@@ -762,8 +855,8 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
             // spectator, three-clear, and Deathmatch-attempt limits.
             m_fields->gameplayLaunchStarted = false;
             m_fields->vanillaPlayActivation = false;
-            m_fields->vanillaPlayForwarded = false;
             m_fields->songGateStartingPlay = false;
+            m_fields->gameplayLaunchBusyChecks = 0;
             m_fields->autoPlayScheduled = false;
             m_fields->gameplayLaunchAttempts = 0;
             m_fields->nextGameplayLaunchAt = {};
@@ -805,7 +898,6 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
     void onPlay(CCObject* sender) {
         auto& runtime = corum::ranked::RankedRuntime::get();
         if (m_fields->vanillaPlayActivation) {
-            m_fields->vanillaPlayForwarded = true;
             log::debug(
                 "Ranked LevelInfo onPlay forwarded to vanilla: match={} level={}",
                 runtime.view().match.matchId,
@@ -870,8 +962,8 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
             unschedule(schedule_selector(CorumRankedLevelInfoLayer::verifyGameplayLaunch));
             m_fields->gameplayLaunchStarted = false;
             m_fields->vanillaPlayActivation = false;
-            m_fields->vanillaPlayForwarded = false;
             m_fields->songGateStartingPlay = false;
+            m_fields->gameplayLaunchBusyChecks = 0;
             if (m_fields->songGateActive) teardownSongDownloadGate();
         } else if (m_fields->gameplayLaunchStarted) {
             return;
