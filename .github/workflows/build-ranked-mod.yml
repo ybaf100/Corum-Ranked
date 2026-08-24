@@ -155,20 +155,26 @@ jobs:
           if '"디버그"' not in popup or 'ranked-korean-font-probe' not in popup:
               raise SystemExit("Missing debug-only Korean Paperlogy probe")
           for required_hud in (
-              "textScrim(",
-              'ownScoreCaption = label("SCORE"',
-              'qualifyingCaption = label("Qualifying"',
-              '0.44f',
+              "addShadowedHudLabel(",
+              "hudShadows",
+              '"SCORE"',
+              '"Qualifying"',
+              '0.60f',
+              '"black"',
           ):
               if required_hud not in play and required_hud not in visuals:
                   raise SystemExit(f"Missing compact gameplay HUD invariant: {required_hud}")
           for forbidden_hud in (
               "hudPanel(",
+              "textScrim(",
+              "corum::ranked::ui::surface(",
               "{92.0f, 34.0f}",
               "{78.0f, 38.0f}",
           ):
               if forbidden_hud in play:
                   raise SystemExit(f"Rejected gameplay-covering HUD panel returned: {forbidden_hud}")
+          if "CorumSansBlack.fnt" not in visuals:
+              raise SystemExit("Missing Paperlogy Black display font role")
           for forbidden_visual in ("CCParticleFire", "corum-fire-promotion", "corum-fire-perfect"):
               if forbidden_visual in popup or forbidden_visual in visuals:
                   raise SystemExit(f"Rejected repeating fire visual returned: {forbidden_visual}")

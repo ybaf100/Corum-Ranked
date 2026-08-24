@@ -30,6 +30,7 @@ enum class FontWeight {
     Medium,
     SemiBold,
     ExtraBold,
+    Black,
 };
 
 inline char const* font(FontWeight weight) {
@@ -37,17 +38,18 @@ inline char const* font(FontWeight weight) {
         case FontWeight::Medium: return "CorumSansMedium.fnt"_spr;
         case FontWeight::SemiBold: return "CorumSansSemiBold.fnt"_spr;
         case FontWeight::ExtraBold: return "CorumSansBold.fnt"_spr;
+        case FontWeight::Black: return "CorumSansBlack.fnt"_spr;
         case FontWeight::Regular: return "CorumSans.fnt"_spr;
     }
     return "CorumSans.fnt"_spr;
 }
 
 inline char const* bodyFont() {
-    return font(FontWeight::Regular);
+    return font(FontWeight::SemiBold);
 }
 
 inline char const* displayFont() {
-    return font(FontWeight::ExtraBold);
+    return font(FontWeight::Black);
 }
 
 inline ccColor3B tierColor(std::string tier) {
@@ -98,7 +100,10 @@ inline CCLabelBMFont* label(
     // The generated resource font is the preferred path, but keep every screen
     // usable if a platform-specific font atlas ever fails to load.
     if (!result) {
-        auto const emphasized = weight == FontWeight::SemiBold || weight == FontWeight::ExtraBold;
+        auto const emphasized =
+            weight == FontWeight::SemiBold ||
+            weight == FontWeight::ExtraBold ||
+            weight == FontWeight::Black;
         result = CCLabelBMFont::create(text.c_str(), emphasized ? "goldFont.fnt" : "bigFont.fnt");
     }
     result->setScale(scale);
@@ -119,7 +124,7 @@ inline CCLabelBMFont* label(
         scale,
         position,
         color,
-        display ? FontWeight::ExtraBold : FontWeight::Regular
+        display ? FontWeight::Black : FontWeight::SemiBold
     );
 }
 
@@ -166,27 +171,6 @@ inline CCNode* surface(
         root->addChild(leftRail, 3);
     }
 
-    return root;
-}
-
-// Gameplay readability aid: a quiet, borderless wash that sits immediately
-// behind one line of text. Unlike surface(), this deliberately has no frame,
-// rail, highlight or shadow, so it does not become another HUD panel covering
-// the level artwork.
-inline CCNode* textScrim(
-    CCSize size,
-    CCPoint position,
-    GLubyte opacity = 42
-) {
-    auto* root = CCNode::create();
-    root->setContentSize(size);
-    root->setAnchorPoint({0.5f, 0.5f});
-    root->setPosition(position);
-
-    auto* wash = CCLayerColor::create({1, 4, 12, opacity});
-    wash->setContentSize(size);
-    wash->setPosition(CCPointZero);
-    root->addChild(wash);
     return root;
 }
 

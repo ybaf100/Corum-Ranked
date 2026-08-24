@@ -3,10 +3,10 @@
 ## 변경 사항
 
 - Ranked 로비, 큐, Match Found, 밴픽, 라운드 준비, 관전, 라운드 결과, 최종 결과와 히스토리를 하나의 경쟁형 UI 디자인으로 전면 개편했습니다.
-- 사용자 제공 Paperlogy Regular·Medium·SemiBold·ExtraBold를 포함해 게임 HUD와 LevelInfo 대기창까지 정보 중요도별 타이포그래피를 적용했습니다.
-- 게임 HUD의 큰 좌우·중앙·하단 배경 패널을 제거하고, 이름·점수·라운드·서버 타이머·Qualifying 글자 바로 뒤에만 무테두리 저농도 스크림을 적용했습니다.
-- 게임 HUD는 편집 시안 비율에 맞춰 이름, 점수, Clear, 라운드, 타이머와 Qualifying을 확대했습니다. `SCORE`/점수 값과 `QUALIFYING`/퍼센트 값을 분리해 핵심 값에 ExtraBold를 적용했습니다.
-- Ranked 로비, Match Found, 밴픽, 준비, 관전, 결과와 히스토리의 0.1대 기능 문구를 확대하고 Regular·Medium·SemiBold·ExtraBold 계층을 다시 조정했습니다.
+- 사용자 제공 Paperlogy Regular·Medium·SemiBold·ExtraBold·Black 전 굵기를 포함했습니다. 일반 UI 문구는 SemiBold를 기본으로, 핵심 수치·타이머·LP·티어·승패는 Black으로 분리했습니다.
+- 게임 HUD의 큰 좌우·중앙·하단 배경 패널과 글자별 사각 스크림을 모두 제거했습니다. 각 글자에만 밀착된 검은 그림자를 사용해 밝은 맵에서도 읽히면서 지형을 가리지 않습니다.
+- 게임 HUD는 편집 시안 비율에 맞춰 이름, 점수, Clear, 라운드, 타이머와 Qualifying을 다시 확대하고 간격을 압축했습니다.
+- Ranked 로비, Match Found, 밴픽, 준비, 관전, 결과와 히스토리의 주요 텍스트를 확대해 빈 공간을 줄였고, 연패 표시는 빨간 Black 텍스트와 구분선으로 강화했습니다.
 - 디버그 빌드 Ranked 로비 우측 하단에 한글 `디버그` 글리프 검증 문구를 추가했습니다.
 - `PERFECT WIN` 결과에 금색 전용 배너와 최대 보상 안내를 추가했습니다.
 - 티어 트로피는 아직 미포함이며, 지정된 파일을 추가하면 자동 적용됩니다. 기존 반복 불꽃 PNG는 제거하고 텍스트를 가리지 않는 절제된 빛 레일 연출로 교체했습니다.

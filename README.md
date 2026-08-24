@@ -52,7 +52,7 @@
 - 미확정 MMR Seed·티어 경계·K-factor·timeout·매칭 폭·실패 정책은 운영자가 입력하기 전까지 queue가 fail-closed 상태를 유지합니다.
 - beta.3부터 `Ranked Tiers.Main Pool`이 실제 5맵 분포를 결정하며, CSMP Seed 티어명은 고정 Ranked 표시 티어와 독립적으로 추가할 수 있습니다.
 - beta.4부터 상대 Hidden MMR이 MMR과 LP 이동량에 미치는 강도를 각각 설정할 수 있습니다. 실제 3-Clear 결정승만으로 무패 우승하면 기존 공식의 최대 MMR·LP 획득량과 노란 `PERFECT WIN` 결과가 적용됩니다.
-- beta.5는 beta.4의 경기 규칙을 그대로 유지하면서 Ranked 전체 화면, LevelInfo 대기 게이트와 게임 HUD를 새 디자인 시스템으로 교체합니다. 최신 HUD는 큰 플레이 배경 프레임 없이 글자 밀착형 저농도 스크림만 사용하고, Paperlogy 굵기별로 핵심 값과 보조 문구를 분리합니다. 커스텀 트로피 파일 위치는 `corum-ranked-mod/resources/CUSTOM-UI-ASSETS.md`에 정리되어 있습니다.
+- beta.5는 beta.4의 경기 규칙을 그대로 유지하면서 Ranked 전체 화면, LevelInfo 대기 게이트와 게임 HUD를 새 디자인 시스템으로 교체합니다. 최신 HUD는 플레이 배경 프레임과 사각 스크림 없이 글자 그림자만 사용하고, Paperlogy SemiBold를 기본 문구에, Black을 핵심 수치와 동작에 적용합니다. 커스텀 트로피 파일 위치는 `corum-ranked-mod/resources/CUSTOM-UI-ASSETS.md`에 정리되어 있습니다.
 - Production secret은 저장소에 포함하지 않습니다.
 
 구현·테스트·배포 안내는 [`ranked/README.md`](ranked/README.md)를 참고하세요.

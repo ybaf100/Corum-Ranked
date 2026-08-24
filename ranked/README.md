@@ -40,7 +40,7 @@ g++ -std=c++23 -Wall -Wextra -Wpedantic -Werror \
 
 `test:harness`는 두 서버 세션을 실제 PGlite PostgreSQL 호환 DB에 연결해 Ready → private ban → round → MMR 흐름과 Round 3 Draw → 반복 deathmatch → 최종 승자를 검증합니다.
 
-플레이 HUD는 화면 코너에 anchor되어 실제 frame update cadence FPS, viewer 기준 양쪽 authoritative Score, 서버 승인 Clear 체크 3개, snapshot Qualifying %, 현재 Round/Death Match와 server deadline 보간 타이머를 표시합니다. 큰 배경 카드 대신 각 텍스트 줄에만 저농도 무테두리 스크림을 사용하며, Score·타이머·Qualifying 값은 Paperlogy ExtraBold로 표시합니다. 상대 현재 progress는 3-Clear 성공자가 상대의 LAST ATTEMPT를 기다리는 동안에만 서버가 허용하며, 이 telemetry는 영구 저장 및 판정에서 분리됩니다.
+플레이 HUD는 화면 코너에 anchor되어 실제 frame update cadence FPS, viewer 기준 양쪽 authoritative Score, 서버 승인 Clear 체크 3개, snapshot Qualifying %, 현재 Round/Death Match와 server deadline 보간 타이머를 표시합니다. 배경 카드와 사각 스크림 없이 글자에만 검은 그림자를 적용하며, 일반 문구는 Paperlogy SemiBold, Score·타이머·Qualifying 값은 Paperlogy Black으로 표시합니다. 상대 현재 progress는 3-Clear 성공자가 상대의 LAST ATTEMPT를 기다리는 동안에만 서버가 허용하며, 이 telemetry는 영구 저장 및 판정에서 분리됩니다.
 
 ## 배포 순서
 

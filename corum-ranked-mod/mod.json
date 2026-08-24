@@ -46,6 +46,11 @@
         "path": "resources/CorumSansBold.ttf",
         "size": 64,
         "charset": "32-126,183,8226"
+      },
+      "CorumSansBlack": {
+        "path": "resources/CorumSansBlack.ttf",
+        "size": 64,
+        "charset": "32-126,183,8226"
       }
     }
   },

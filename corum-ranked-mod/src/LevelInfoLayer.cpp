@@ -232,9 +232,8 @@ CCMenuItem* vanillaPlayButton(CCMenu* menu, CCNode* playSprite) {
 }
 
 CCLabelBMFont* gateLabel(std::string const& text, float scale, CCPoint position, ccColor3B color = {255, 255, 255}) {
-    auto weight = corum::ranked::ui::FontWeight::Regular;
-    if (scale >= 0.22f) weight = corum::ranked::ui::FontWeight::ExtraBold;
-    else if (scale >= 0.12f) weight = corum::ranked::ui::FontWeight::SemiBold;
+    auto weight = corum::ranked::ui::FontWeight::SemiBold;
+    if (scale >= 0.30f) weight = corum::ranked::ui::FontWeight::Black;
     return corum::ranked::ui::label(text, scale, position, color, weight);
 }
 
@@ -346,18 +345,18 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         // competitive Ranked banner in the open space above the song widget.
         // This is intentionally native Cocos/Geode UI, not a screenshot overlay,
         // so the vanilla song button remains a real interactive control.
-        m_fields->gateOverlay = gatePanel({154.0f, 44.0f}, {size.width / 2.0f, size.height / 2.0f - 28.0f});
+        m_fields->gateOverlay = gatePanel({166.0f, 50.0f}, {size.width / 2.0f, size.height / 2.0f - 28.0f});
         m_fields->gateOverlay->setZOrder(1001);
         addChild(m_fields->gateOverlay, 1001);
 
-        m_fields->gateTitle = gateLabel(rankedGateTitle(), 0.16f, {77.0f, 34.0f}, corum::ranked::ui::Cyan);
-        m_fields->gateTitle->limitLabelWidth(138.0f, 0.16f, 0.12f);
+        m_fields->gateTitle = gateLabel(rankedGateTitle(), 0.20f, {83.0f, 40.0f}, corum::ranked::ui::Cyan);
+        m_fields->gateTitle->limitLabelWidth(150.0f, 0.20f, 0.14f);
         m_fields->gateOverlay->addChild(m_fields->gateTitle, 3);
-        m_fields->gateCountdown = gateLabel("STARTS IN  10", 0.28f, {77.0f, 21.0f}, corum::ranked::ui::Gold);
-        m_fields->gateCountdown->limitLabelWidth(142.0f, 0.28f, 0.18f);
+        m_fields->gateCountdown = gateLabel("STARTS IN  10", 0.34f, {83.0f, 25.0f}, corum::ranked::ui::Gold);
+        m_fields->gateCountdown->limitLabelWidth(152.0f, 0.34f, 0.22f);
         m_fields->gateOverlay->addChild(m_fields->gateCountdown, 3);
-        m_fields->gateStatus = gateLabel("ONLY SONG DOWNLOAD AVAILABLE", 0.13f, {77.0f, 7.0f}, corum::ranked::ui::TextMuted);
-        m_fields->gateStatus->limitLabelWidth(138.0f, 0.13f, 0.10f);
+        m_fields->gateStatus = gateLabel("ONLY SONG DOWNLOAD AVAILABLE", 0.16f, {83.0f, 8.0f}, corum::ranked::ui::TextMuted);
+        m_fields->gateStatus->limitLabelWidth(150.0f, 0.16f, 0.11f);
         m_fields->gateOverlay->addChild(m_fields->gateStatus, 3);
 
         lockInteractionToSong(this, m_songWidget);
