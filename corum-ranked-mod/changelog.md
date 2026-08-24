@@ -1,3 +1,14 @@
+# v0.5.0-beta.5
+
+- Rebuilt the Ranked presentation around a unified dark competitive design system while preserving every beta.4 server-authoritative state and gameplay callback.
+- Added bundled Corum Sans UI fonts and replaced the mixed `bigFont`/`goldFont` presentation across the Ranked scene, gameplay HUD, LevelInfo wait gate, and main-menu shortcut.
+- Redesigned the lobby, queue, Match Found, private ban, Round prepare, spectator, inter-Round, result, PERFECT WIN, and history views with consistent cards, hierarchy, spacing, and state accents.
+- Redesigned the gameplay HUD with compact player panels and the current Round directly above the authoritative timer.
+- Added optional user-replaceable tier trophy and promotion/PERFECT WIN particle texture slots with safe built-in fallbacks.
+- Merged the Play/update-loop hotfix: canonical Saved levels retain their native type, automatic entry verifies the live Play sprite and vanilla download state, preserves Geometry Dash's original callback, and waits for busy update work instead of repeatedly pressing the update item.
+- Updated the Ranked build invariant checks so direct callback rebinding and the obsolete forwarded latch cannot return.
+- Updated the exact client/server gate and workspace package metadata to `v0.5.0-beta.5`.
+
 # v0.5.0-beta.4
 
 - Added configurable opponent-strength weighting for Hidden MMR and visible LP, rewarding wins against stronger opponents more and penalizing losses to weaker opponents more.

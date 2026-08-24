@@ -1,5 +1,6 @@
 #include "RankedRuntime.hpp"
 #include "RankedSongGate.hpp"
+#include "ui/RankedVisuals.hpp"
 
 #include <Geode/Geode.hpp>
 #include <Geode/binding/CustomSongWidget.hpp>
@@ -231,38 +232,18 @@ CCMenuItem* vanillaPlayButton(CCMenu* menu, CCNode* playSprite) {
 }
 
 CCLabelBMFont* gateLabel(std::string const& text, float scale, CCPoint position, ccColor3B color = {255, 255, 255}) {
-    auto* label = CCLabelBMFont::create(text.c_str(), "bigFont.fnt");
-    label->setScale(scale);
-    label->setColor(color);
-    label->setPosition(position);
-    return label;
+    return corum::ranked::ui::label(text, scale, position, color, scale >= 0.15f);
 }
 
 CCNode* gatePanel(CCSize size, CCPoint position, ccColor3B accent = {52, 214, 255}) {
-    auto* node = CCNode::create();
-    node->setContentSize(size);
-    node->setAnchorPoint({0.5f, 0.5f});
-    node->setPosition(position);
-
-    auto* shadow = CCLayerColor::create({2, 6, 16, 88});
-    shadow->setContentSize({size.width + 4.0f, size.height + 4.0f});
-    shadow->setPosition({-2.0f, -4.0f});
-    node->addChild(shadow, -1);
-
-    auto* border = CCLayerColor::create({accent.r, accent.g, accent.b, 118});
-    border->setContentSize(size);
-    node->addChild(border, 0);
-
-    auto* inner = CCLayerColor::create({7, 18, 40, 228});
-    inner->setContentSize({std::max(2.0f, size.width - 4.0f), std::max(2.0f, size.height - 4.0f)});
-    inner->setPosition({2.0f, 2.0f});
-    node->addChild(inner, 1);
-
-    auto* line = CCLayerColor::create({accent.r, accent.g, accent.b, 220});
-    line->setContentSize({std::max(4.0f, size.width - 16.0f), 2.0f});
-    line->setPosition({8.0f, size.height - 4.0f});
-    node->addChild(line, 2);
-    return node;
+    return corum::ranked::ui::surface(
+        size,
+        position,
+        accent,
+        corum::ranked::ui::Ink,
+        226,
+        true
+    );
 }
 
 } // namespace
@@ -362,17 +343,17 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         // competitive Ranked banner in the open space above the song widget.
         // This is intentionally native Cocos/Geode UI, not a screenshot overlay,
         // so the vanilla song button remains a real interactive control.
-        m_fields->gateOverlay = gatePanel({174.0f, 52.0f}, {size.width / 2.0f, size.height / 2.0f - 30.0f});
+        m_fields->gateOverlay = gatePanel({218.0f, 68.0f}, {size.width / 2.0f, size.height / 2.0f - 30.0f});
         m_fields->gateOverlay->setZOrder(1001);
         addChild(m_fields->gateOverlay, 1001);
 
-        m_fields->gateTitle = gateLabel(rankedGateTitle(), 0.16f, {87.0f, 40.0f}, {52, 214, 255});
-        m_fields->gateTitle->limitLabelWidth(158.0f, 0.16f, 0.10f);
+        m_fields->gateTitle = gateLabel(rankedGateTitle(), 0.17f, {109.0f, 52.0f}, corum::ranked::ui::Cyan);
+        m_fields->gateTitle->limitLabelWidth(194.0f, 0.17f, 0.11f);
         m_fields->gateOverlay->addChild(m_fields->gateTitle, 3);
-        m_fields->gateCountdown = gateLabel("STARTS IN  10", 0.27f, {87.0f, 25.0f}, {255, 216, 86});
+        m_fields->gateCountdown = gateLabel("STARTS IN  10", 0.31f, {109.0f, 32.0f}, corum::ranked::ui::Gold);
         m_fields->gateOverlay->addChild(m_fields->gateCountdown, 3);
-        m_fields->gateStatus = gateLabel("ONLY SONG DOWNLOAD AVAILABLE", 0.11f, {87.0f, 10.0f}, {215, 228, 245});
-        m_fields->gateStatus->limitLabelWidth(158.0f, 0.11f, 0.09f);
+        m_fields->gateStatus = gateLabel("ONLY SONG DOWNLOAD AVAILABLE", 0.10f, {109.0f, 12.0f}, corum::ranked::ui::TextMuted);
+        m_fields->gateStatus->limitLabelWidth(194.0f, 0.10f, 0.08f);
         m_fields->gateOverlay->addChild(m_fields->gateStatus, 3);
 
         lockInteractionToSong(this, m_songWidget);

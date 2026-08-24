@@ -56,7 +56,7 @@ class FixedCsmpSource implements CsmpTierSource {
 const cleanMods: CreateSessionDto["installedMods"] = [
   {
     id: "hwanhee1.corum_ranked",
-    version: "v0.5.0-beta.4",
+    version: "v0.5.0-beta.5",
     enabled: true,
     loaded: true,
     internal: false,
@@ -145,7 +145,7 @@ describe("development-only Bot Match using the production Ranked engine", () => 
     const created = await sessions.create({
       gdAccountId: accountId,
       gdUsername: `Debug${accountId}`,
-      clientVersion: "v0.5.0-beta.4",
+      clientVersion: "v0.5.0-beta.5",
       installedMods: structuredClone(cleanMods),
     });
     const result = await database.query<{

@@ -4,6 +4,7 @@
 #include "RankedAudioManager.hpp"
 #include "DebugBotPopup.hpp"
 #include "RankedSongGate.hpp"
+#include "ui/RankedVisuals.hpp"
 
 #include <Geode/Geode.hpp>
 // CCParticleFire is a cocos2d particle type, not a generated GD binding.
@@ -44,17 +45,16 @@ namespace {
 
 using SteadyClock = std::chrono::steady_clock;
 
-constexpr ccColor3B kPanelColor = {18, 24, 40};
-constexpr ccColor3B kPanelLight = {33, 43, 67};
-constexpr ccColor3B kAccent = {100, 200, 255};
-constexpr ccColor3B kGreen = {92, 236, 133};
-constexpr ccColor3B kRed = {255, 104, 104};
-constexpr ccColor3B kGold = {255, 214, 90};
-constexpr ccColor3B kCyan = {74, 226, 255};
-constexpr ccColor3B kBlue = {73, 147, 255};
-constexpr ccColor3B kDeepPanel = {6, 13, 28};
-constexpr ccColor3B kDeepPanel2 = {10, 20, 38};
-constexpr ccColor3B kSideRed = {255, 92, 102};
+constexpr ccColor3B kPanelColor = corum::ranked::ui::Surface;
+constexpr ccColor3B kAccent = corum::ranked::ui::Cyan;
+constexpr ccColor3B kGreen = corum::ranked::ui::Green;
+constexpr ccColor3B kRed = corum::ranked::ui::Red;
+constexpr ccColor3B kGold = corum::ranked::ui::Gold;
+constexpr ccColor3B kCyan = corum::ranked::ui::Cyan;
+constexpr ccColor3B kBlue = corum::ranked::ui::Blue;
+constexpr ccColor3B kDeepPanel = corum::ranked::ui::Ink;
+constexpr ccColor3B kDeepPanel2 = corum::ranked::ui::Surface;
+constexpr ccColor3B kSideRed = corum::ranked::ui::Red;
 
 std::string shorten(std::string value, std::size_t maximum) {
     if (value.size() <= maximum) return value;
@@ -101,12 +101,7 @@ std::string twoLineTitle(std::string value, std::size_t perLine = 11) {
 }
 
 ccColor3B tierColor(std::string const& tier) {
-    if (tier == "RED") return {240, 78, 78};
-    if (tier == "AQUA") return {86, 224, 231};
-    if (tier == "BRONZE") return {194, 125, 63};
-    if (tier == "SILVER") return {205, 210, 225};
-    if (tier == "GOLD") return {255, 208, 65};
-    return {155, 160, 175};
+    return corum::ranked::ui::tierColor(tier);
 }
 
 ccColor3B colorFromHex(int value) {
@@ -146,26 +141,14 @@ CCLabelBMFont* makeLabel(
     float scale,
     CCPoint position,
     ccColor3B color = {255, 255, 255},
-    char const* font = "bigFont.fnt"
+    char const* font = nullptr
 ) {
-    auto* label = CCLabelBMFont::create(text.c_str(), font);
-    label->setScale(scale);
-    label->setColor(color);
-    label->setPosition(position);
-    return label;
+    auto const display = font != nullptr;
+    return corum::ranked::ui::label(text, scale, position, color, display);
 }
 
 CCNode* makePanel(CCSize size, CCPoint position, ccColor3B color = kPanelColor, GLubyte opacity = 235) {
-    auto* node = CCNode::create();
-    node->setContentSize(size);
-    node->setAnchorPoint({0.5f, 0.5f});
-    node->setPosition(position);
-
-    auto* fill = CCLayerColor::create({color.r, color.g, color.b, opacity});
-    fill->setContentSize(size);
-    fill->setPosition(CCPointZero);
-    node->addChild(fill, 0);
-    return node;
+    return corum::ranked::ui::surface(size, position, color, kDeepPanel2, opacity, false);
 }
 
 CCNode* makeNeonPanel(
@@ -175,40 +158,7 @@ CCNode* makeNeonPanel(
     ccColor3B fill = kDeepPanel,
     GLubyte fillOpacity = 245
 ) {
-    auto* node = CCNode::create();
-    node->setContentSize(size);
-    node->setAnchorPoint({0.5f, 0.5f});
-    node->setPosition(position);
-
-    // Do not stretch Geometry Dash sprites as arbitrary Scale9 backgrounds.
-    // Some base-game atlases render opaque black source rectangles when scaled,
-    // which caused the alpha.24 cards/HUD to cover gameplay. Build the panel out
-    // of plain CCLayerColor nodes instead so every platform gets the same bounds.
-    auto* shadow = CCLayerColor::create({2, 6, 16, 92});
-    shadow->setContentSize({size.width + 4.0f, size.height + 4.0f});
-    shadow->setPosition({-2.0f, -4.0f});
-    node->addChild(shadow, -1);
-
-    auto* border = CCLayerColor::create({accent.r, accent.g, accent.b, 118});
-    border->setContentSize(size);
-    border->setPosition(CCPointZero);
-    node->addChild(border, 0);
-
-    auto* inner = CCLayerColor::create({fill.r, fill.g, fill.b, fillOpacity});
-    inner->setContentSize({std::max(2.0f, size.width - 4.0f), std::max(2.0f, size.height - 4.0f)});
-    inner->setPosition({2.0f, 2.0f});
-    node->addChild(inner, 1);
-
-    auto* top = CCLayerColor::create({accent.r, accent.g, accent.b, 220});
-    top->setContentSize({std::max(4.0f, size.width - 14.0f), 2.0f});
-    top->setPosition({7.0f, size.height - 4.0f});
-    node->addChild(top, 2);
-
-    auto* bottom = CCLayerColor::create({accent.r, accent.g, accent.b, 90});
-    bottom->setContentSize({std::max(4.0f, size.width - 24.0f), 1.0f});
-    bottom->setPosition({12.0f, 4.0f});
-    node->addChild(bottom, 2);
-    return node;
+    return corum::ranked::ui::surface(size, position, accent, fill, fillOpacity, true);
 }
 
 CCNode* makeTextPlate(
@@ -218,7 +168,7 @@ CCNode* makeTextPlate(
     ccColor3B accent,
     float scale = 0.24f,
     ccColor3B textColor = {255, 255, 255},
-    char const* font = "bigFont.fnt",
+    char const* font = nullptr,
     CCLabelBMFont** outLabel = nullptr
 ) {
     auto* node = makeNeonPanel(size, position, accent, kDeepPanel2, 242);
@@ -229,8 +179,35 @@ CCNode* makeTextPlate(
     return node;
 }
 
-char const* buttonBackground(bool danger = false) {
-    return danger ? "GJ_button_06.png" : "GJ_button_01.png";
+CCNode* makeActionButtonVisual(std::string const& text, bool danger = false) {
+    auto const width = std::clamp(46.0f + static_cast<float>(text.size()) * 7.0f, 104.0f, 178.0f);
+    constexpr float height = 34.0f;
+    auto const accent = danger ? kRed : kCyan;
+
+    auto* root = CCNode::create();
+    root->setAnchorPoint({0.5f, 0.5f});
+    root->setContentSize({width, height});
+
+    auto* panel = corum::ranked::ui::surface(
+        {width, height},
+        {width / 2.0f, height / 2.0f},
+        accent,
+        danger ? ccc3(39, 15, 28) : corum::ranked::ui::SurfaceRaised,
+        250,
+        true
+    );
+    root->addChild(panel, 0);
+
+    auto* caption = corum::ranked::ui::label(
+        text,
+        0.25f,
+        {width / 2.0f, height / 2.0f},
+        danger ? ccc3(255, 224, 229) : corum::ranked::ui::Text,
+        true
+    );
+    caption->limitLabelWidth(width - 20.0f, 0.25f, 0.15f);
+    root->addChild(caption, 5);
+    return root;
 }
 
 std::string resourceKey(MatchView const& match) {
@@ -297,19 +274,7 @@ class CorumRankedLayer final : public CCLayerColor {
         setKeypadEnabled(true);
 
         auto const winSize = CCDirector::sharedDirector()->getWinSize();
-        if (auto* background = CCSprite::create("GJ_gradientBG.png")) {
-            background->setAnchorPoint({0.5f, 0.5f});
-            background->setPosition({winSize.width / 2.0f, winSize.height / 2.0f});
-            auto const content = background->getContentSize();
-            if (content.width > 0.0f) background->setScaleX(winSize.width / content.width);
-            if (content.height > 0.0f) background->setScaleY(winSize.height / content.height);
-            background->setColor(ccc3(5, 67, 180));
-            addChild(background, 0);
-        }
-        if (auto* shade = CCLayerColor::create({2, 8, 24, 112})) {
-            shade->setContentSize(winSize);
-            addChild(shade, 0);
-        }
+        corum::ranked::ui::addBackdrop(this, winSize);
 
         m_fadeRoot = CCLayerColor::create({0, 0, 0, 0});
         m_fadeRoot->setContentSize(winSize);
@@ -785,6 +750,42 @@ class CorumRankedLayer final : public CCLayerColor {
         m_menu->addChild(button);
     }
 
+    void addScreenHeader(
+        std::string const& titleText,
+        std::string const& eyebrowText,
+        ccColor3B titleColor = corum::ranked::ui::Text,
+        ccColor3B accent = kCyan
+    ) {
+        auto const size = CCDirector::sharedDirector()->getWinSize();
+        auto* title = makeLabel(
+            titleText,
+            0.52f,
+            {size.width / 2.0f, size.height - 28.0f},
+            titleColor,
+            "display"
+        );
+        title->limitLabelWidth(size.width - 170.0f, 0.52f, 0.31f);
+        m_root->addChild(title, 6);
+
+        auto* eyebrow = makeLabel(
+            eyebrowText,
+            0.15f,
+            {size.width / 2.0f, size.height - 53.0f},
+            accent,
+            "display"
+        );
+        eyebrow->limitLabelWidth(190.0f, 0.15f, 0.11f);
+        m_root->addChild(eyebrow, 6);
+
+        auto const lineWidth = std::max(24.0f, std::min(92.0f, size.width / 2.0f - 122.0f));
+        for (auto const x : {size.width / 2.0f - 108.0f - lineWidth, size.width / 2.0f + 108.0f}) {
+            auto* line = CCLayerColor::create({accent.r, accent.g, accent.b, 95});
+            line->setContentSize({lineWidth, 1.0f});
+            line->setPosition({x, size.height - 53.5f});
+            m_root->addChild(line, 4);
+        }
+    }
+
     CCMenuItemSpriteExtra* addButton(
         std::string const& text,
         CCPoint position,
@@ -792,9 +793,9 @@ class CorumRankedLayer final : public CCLayerColor {
         bool danger = false,
         float scale = 0.72f
     ) {
-        auto* sprite = ButtonSprite::create(text.c_str(), "bigFont.fnt", buttonBackground(danger), 0.75f);
-        sprite->setScale(scale);
-        auto* item = CCMenuItemSpriteExtra::create(sprite, this, selector);
+        auto* visual = makeActionButtonVisual(text, danger);
+        visual->setScale(scale);
+        auto* item = CCMenuItemSpriteExtra::create(visual, this, selector);
         item->setPosition(position);
         m_menu->addChild(item);
         return item;
@@ -840,13 +841,15 @@ class CorumRankedLayer final : public CCLayerColor {
         }
     }
 
-    void addPromotionFlames(CCPoint center, CCSize size) {
-        for (int index = 0; index < 5; ++index) {
-            auto* fire = CCParticleFire::createWithTotalParticles(20);
+    void addPromotionFlames(CCPoint center, CCSize size, bool perfect = false) {
+        auto const count = perfect ? 7 : 5;
+        for (int index = 0; index < count; ++index) {
+            auto* fire = CCParticleFire::createWithTotalParticles(perfect ? 24 : 20);
             if (!fire) continue;
-            auto const ratio = static_cast<float>(index) / 4.0f;
+            auto const ratio = static_cast<float>(index) / static_cast<float>(count - 1);
             fire->setPosition({center.x - size.width / 2.0f + 12.0f + ratio * (size.width - 24.0f), center.y - size.height / 2.0f + 3.0f});
-            fire->setScale(0.30f);
+            fire->setScale(perfect ? 0.36f : 0.30f);
+            corum::ranked::ui::applyFireTexture(fire, perfect);
             m_root->addChild(fire, 3);
         }
     }
@@ -949,6 +952,9 @@ class CorumRankedLayer final : public CCLayerColor {
 
         auto* tierPlate = makeTextPlate(upper(tier), {96.0f, 24.0f}, {center.x, center.y - 74.0f}, accent, 0.21f, accent, "goldFont.fnt");
         m_root->addChild(tierPlate, 3);
+        auto* tierTrophy = corum::ranked::ui::trophy(tier, {18.0f, 18.0f});
+        tierTrophy->setPosition({center.x - 58.0f, center.y - 74.0f});
+        m_root->addChild(tierTrophy, 5);
     }
 
     void renderResources() {
@@ -1040,15 +1046,11 @@ class CorumRankedLayer final : public CCLayerColor {
     void renderMain(RuntimeView const& view) {
         auto const size = CCDirector::sharedDirector()->getWinSize();
         addTopBack(true);
+        addScreenHeader("CORUM RANKED", "COMPETITIVE 1V1 LADDER", kGold, kCyan);
 
-        auto* title = makeLabel("CORUM RANKED", 0.70f, {size.width / 2.0f, size.height - 34.0f}, kGold, "goldFont.fnt");
-        m_root->addChild(title, 4);
-        auto* subtitle = makeLabel("COMPETITIVE 1V1 LADDER", 0.19f, {size.width / 2.0f, size.height - 58.0f}, kCyan);
-        m_root->addChild(subtitle, 4);
-
-        auto* historySprite = ButtonSprite::create("HISTORY", "bigFont.fnt", "GJ_button_04.png", 0.75f);
-        historySprite->setScale(0.56f);
-        auto* history = CCMenuItemSpriteExtra::create(historySprite, this, menu_selector(CorumRankedLayer::onHistory));
+        auto* historyVisual = makeActionButtonVisual("HISTORY");
+        historyVisual->setScale(0.56f);
+        auto* history = CCMenuItemSpriteExtra::create(historyVisual, this, menu_selector(CorumRankedLayer::onHistory));
         history->setPosition({size.width - 60.0f, size.height - 28.0f});
         m_menu->addChild(history);
 
@@ -1070,9 +1072,7 @@ class CorumRankedLayer final : public CCLayerColor {
         if (profile.promotion.active) addPromotionFlames(leftCenter, {188.0f, 196.0f});
         auto* profileTitle = makeLabel("YOUR RANK", 0.18f, {leftCenter.x, leftCenter.y + 77.0f}, kCyan);
         m_root->addChild(profileTitle, 4);
-        auto* emblem = CCSprite::createWithSpriteFrameName("GJ_bigStar_001.png");
-        emblem->setScale(1.10f);
-        emblem->setColor(tierColor(upper(view.profileTier)));
+        auto* emblem = corum::ranked::ui::trophy(view.profileTier, {74.0f, 74.0f});
         emblem->setPosition({leftCenter.x, leftCenter.y + 30.0f});
         m_root->addChild(emblem, 4);
         addStreakLabel(profile.resultStreak, {leftCenter.x, leftCenter.y + 62.0f});
@@ -1109,14 +1109,22 @@ class CorumRankedLayer final : public CCLayerColor {
         m_root->addChild(actionTitle, 4);
 
         if (view.stage == RuntimeStage::Ready) {
+            auto* playHalo = makeNeonPanel(
+                {86.0f, 86.0f},
+                {rightCenter.x, rightCenter.y + 18.0f},
+                kCyan,
+                {7, 20, 40},
+                248
+            );
+            m_root->addChild(playHalo, 2);
             auto* playCircle = CCSprite::createWithSpriteFrameName("GJ_playBtn_001.png");
-            playCircle->setScale(0.92f);
+            playCircle->setScale(0.70f);
             auto* play = CCMenuItemSpriteExtra::create(playCircle, this, menu_selector(CorumRankedLayer::onJoin));
             play->setPosition({rightCenter.x, rightCenter.y + 18.0f});
             m_menu->addChild(play);
-            auto* actionText = makeLabel("START QUEUE", 0.33f, {rightCenter.x, rightCenter.y - 40.0f}, kAccent, "goldFont.fnt");
+            auto* actionText = makeLabel("START QUEUE", 0.30f, {rightCenter.x, rightCenter.y - 42.0f}, kAccent, "display");
             m_root->addChild(actionText, 4);
-            auto* actionHint = makeLabel("FIND A 1V1 MATCH", 0.18f, {rightCenter.x, rightCenter.y - 72.0f}, ccc3(210, 220, 238));
+            auto* actionHint = makeLabel("FIND A 1V1 MATCH", 0.15f, {rightCenter.x, rightCenter.y - 70.0f}, corum::ranked::ui::TextMuted);
             m_root->addChild(actionHint, 4);
         } else if (view.stage == RuntimeStage::Queued || view.stage == RuntimeStage::JoiningQueue) {
             auto* spinner = LoadingSpinner::create(58.0f);
@@ -1213,11 +1221,10 @@ class CorumRankedLayer final : public CCLayerColor {
         addPlayerCard({100.0f, size.height / 2.0f - 2.0f}, match.playerAName, match.playerAProfile, ownA);
         addPlayerCard({size.width - 100.0f, size.height / 2.0f - 2.0f}, match.playerBName, match.playerBProfile, !ownA);
 
-        auto* title = makeLabel("MATCH FOUND", 0.66f, {size.width / 2.0f, size.height - 34.0f}, ccc3(246, 249, 255), "goldFont.fnt");
-        title->limitLabelWidth(size.width - 170.0f, 0.66f, 0.38f);
-        m_root->addChild(title, 5);
-        auto* subtitle = makeLabel("PRIVATE BAN PHASE", 0.21f, {size.width / 2.0f, size.height - 60.0f}, kCyan);
-        m_root->addChild(subtitle, 5);
+        addScreenHeader("MATCH FOUND", "PRIVATE BAN PHASE", corum::ranked::ui::Text, kCyan);
+
+        auto* versus = makeLabel("VS", 0.40f, {size.width / 2.0f, size.height / 2.0f + 61.0f}, kGold, "display");
+        m_root->addChild(versus, 5);
 
         auto const left = std::max(0, 5 - static_cast<int>(std::floor(phaseSeconds())));
         auto* countdownPlate = makeNeonPanel({154.0f, 86.0f}, {size.width / 2.0f, size.height / 2.0f - 2.0f}, left <= 2 ? kSideRed : kBlue, {7, 17, 36}, 248);
@@ -1236,11 +1243,7 @@ class CorumRankedLayer final : public CCLayerColor {
         auto const size = CCDirector::sharedDirector()->getWinSize();
         addTopBack(true);
 
-        auto* title = makeLabel("MATCH FOUND", 0.64f, {size.width / 2.0f, size.height - 30.0f}, ccc3(244, 248, 255), "goldFont.fnt");
-        title->limitLabelWidth(size.width - 150.0f, 0.62f, 0.38f);
-        m_root->addChild(title, 6);
-        auto* phase = makeLabel("BAN MAP", 0.36f, {size.width / 2.0f, size.height - 60.0f}, kCyan, "goldFont.fnt");
-        m_root->addChild(phase, 6);
+        addScreenHeader("BAN MAP", "CHOOSE ONE MAP TO REMOVE", corum::ranked::ui::Text, kCyan);
 
         auto const remaining = std::max<std::int64_t>(0, RankedRuntime::get().deadlineSeconds().value_or(0));
         auto* timerPlate = makeNeonPanel({54.0f, 48.0f}, {size.width - 42.0f, size.height - 41.0f}, remaining <= 3 ? kSideRed : kBlue, {8, 18, 40}, 250);
@@ -1262,10 +1265,19 @@ class CorumRankedLayer final : public CCLayerColor {
             auto const diffColor = difficultyColor(candidate.difficulty);
             auto const selected = m_selectedBan == candidate.canonicalLevelId;
             auto const pending = m_pendingBan == candidate.canonicalLevelId;
-            auto const accent = selected ? kGreen : (pending ? kGold : kBlue);
+            auto const accent = selected ? kRed : (pending ? kGold : kBlue);
 
             auto* panel = makeNeonPanel({cardWidth - 5.0f, cardHeight}, {x, centerY}, accent, kDeepPanel, 248);
             m_root->addChild(panel, 1);
+
+            auto* mapIndex = makeLabel(
+                fmt::format("MAP {:02d}", static_cast<int>(i + 1)),
+                0.13f,
+                {x, centerY + cardHeight / 2.0f - 13.0f},
+                selected ? kRed : (pending ? kGold : corum::ranked::ui::TextMuted),
+                "display"
+            );
+            m_root->addChild(mapIndex, 5);
 
             // Decorative map emblem. This stays entirely inside base GD assets and
             // gives each card a stronger visual anchor than title-only rectangles.
@@ -1293,7 +1305,7 @@ class CorumRankedLayer final : public CCLayerColor {
 
             auto const actionY = centerY - cardHeight / 2.0f + 21.0f;
             if (selected) {
-                auto* state = makeTextPlate("BANNED", {cardWidth - 18.0f, 24.0f}, {x, actionY}, kGreen, 0.18f, kGreen);
+                auto* state = makeTextPlate("BANNED", {cardWidth - 18.0f, 24.0f}, {x, actionY}, kRed, 0.18f, kRed);
                 m_root->addChild(state, 3);
             } else if (pending) {
                 auto* state = makeTextPlate("BANNING...", {cardWidth - 18.0f, 24.0f}, {x, actionY}, kGold, 0.16f, kGold);
@@ -1413,27 +1425,27 @@ class CorumRankedLayer final : public CCLayerColor {
         auto const mapPos = CCPoint{size.width / 2.0f, size.height / 2.0f - 14.0f};
         auto const songPos = CCPoint{size.width / 2.0f, size.height / 2.0f - 48.0f};
         if (clearSyncPending) {
-            auto* plate = makeTextPlate("CLEAR RECORDED", {128.0f, 29.0f}, mapPos, kGreen, 0.20f, kGreen);
+            auto* plate = makeTextPlate("01  CLEAR RECORDED", {142.0f, 29.0f}, mapPos, kGreen, 0.18f, kGreen);
             m_root->addChild(plate, 3);
         } else if (mapReady) {
-            auto* plate = makeTextPlate("MAP DOWNLOADED", {128.0f, 29.0f}, mapPos, kGreen, 0.20f, kGreen);
+            auto* plate = makeTextPlate("01  MAP READY", {142.0f, 29.0f}, mapPos, kGreen, 0.19f, kGreen);
             m_root->addChild(plate, 3);
         } else {
-            auto* plate = makeTextPlate("OPENING LEVEL...", {128.0f, 29.0f}, mapPos, kCyan, 0.20f, ccc3(235, 242, 255));
+            auto* plate = makeTextPlate("01  MAP LOADING", {142.0f, 29.0f}, mapPos, kCyan, 0.19f, ccc3(235, 242, 255));
             m_root->addChild(plate, 3);
         }
 
         if (clearSyncPending) {
-            auto* plate = makeTextPlate("SYNCING RESULT", {128.0f, 29.0f}, songPos, kCyan, 0.19f, ccc3(218, 228, 244));
+            auto* plate = makeTextPlate("02  RESULT SYNC", {142.0f, 29.0f}, songPos, kCyan, 0.18f, ccc3(218, 228, 244));
             m_root->addChild(plate, 3);
         } else if (!mapReady) {
-            auto* plate = makeTextPlate("WAITING FOR MAP", {128.0f, 29.0f}, songPos, kBlue, 0.19f, ccc3(218, 228, 244));
+            auto* plate = makeTextPlate("02  WAITING", {142.0f, 29.0f}, songPos, kBlue, 0.19f, ccc3(218, 228, 244));
             m_root->addChild(plate, 3);
         } else if (songReady) {
-            auto* plate = makeTextPlate("SONG DOWNLOADED", {128.0f, 29.0f}, songPos, kGreen, 0.19f, kGreen);
+            auto* plate = makeTextPlate("02  AUDIO READY", {142.0f, 29.0f}, songPos, kGreen, 0.19f, kGreen);
             m_root->addChild(plate, 3);
         } else if (RankedRuntime::get().songBypassAllowed()) {
-            auto* plate = makeTextPlate("START WITHOUT SONG", {136.0f, 29.0f}, songPos, kGold, 0.18f, kGold);
+            auto* plate = makeTextPlate("02  START MUTED", {142.0f, 29.0f}, songPos, kGold, 0.18f, kGold);
             m_root->addChild(plate, 3);
         } else {
             // The real click target remains the vanilla song button on the level
@@ -1700,39 +1712,66 @@ class CorumRankedLayer final : public CCLayerColor {
         }
 
         auto const ownA = match.side == "A";
-        auto const won = match.winnerSide == match.side;
         CCLabelBMFont* finalScoreA = nullptr;
         CCLabelBMFont* finalScoreB = nullptr;
         auto const cardY = size.height / 2.0f - 5.0f;
+        auto const leftPerfect = match.perfectWinSide == "A";
+        auto const rightPerfect = match.perfectWinSide == "B";
         addPlayerCard({100.0f, cardY}, match.playerAName, match.profileAfterA, ownA, &finalScoreA, true);
         addPlayerCard({size.width - 100.0f, cardY}, match.playerBName, match.profileAfterB, !ownA, &finalScoreB, true);
+        if (leftPerfect) addPromotionFlames({100.0f, cardY}, {150.0f, 184.0f}, true);
+        if (rightPerfect) addPromotionFlames({size.width - 100.0f, cardY}, {150.0f, 184.0f}, true);
 
-        auto* title = makeLabel("MATCH END", 0.60f, {size.width / 2.0f, size.height - 25.0f}, kGold, "goldFont.fnt");
+        auto const perfect = leftPerfect || rightPerfect;
+        auto* summaryPanel = makeNeonPanel(
+            {176.0f, 210.0f},
+            {size.width / 2.0f, size.height / 2.0f - 4.0f},
+            perfect ? kGold : kBlue,
+            kDeepPanel,
+            228
+        );
+        m_root->addChild(summaryPanel, 1);
+
+        auto* title = makeLabel(
+            perfect ? "PERFECT WIN" : "MATCH COMPLETE",
+            perfect ? 0.60f : 0.52f,
+            {size.width / 2.0f, size.height - 24.0f},
+            perfect ? kGold : corum::ranked::ui::Text,
+            "display"
+        );
         m_root->addChild(title, 4);
+        if (perfect) {
+            auto* perfectHint = makeLabel(
+                "MAXIMUM RATING REWARD",
+                0.14f,
+                {size.width / 2.0f, size.height - 49.0f},
+                kGold,
+                "display"
+            );
+            m_root->addChild(perfectHint, 5);
+        }
         auto* leftFinal = makeLabel(fmt::format("{}", match.roundWinsA), 0.82f, {size.width / 2.0f - 105.0f, size.height / 2.0f + 18.0f}, match.winnerSide == "A" ? kGreen : kRed);
         auto* rightFinal = makeLabel(fmt::format("{}", match.roundWinsB), 0.82f, {size.width / 2.0f + 105.0f, size.height / 2.0f + 18.0f}, match.winnerSide == "B" ? kGreen : kRed);
         m_root->addChild(leftFinal, 4);
         m_root->addChild(rightFinal, 4);
-        auto const leftPerfect = match.perfectWinSide == "A";
-        auto const rightPerfect = match.perfectWinSide == "B";
         auto* leftResult = makeLabel(
             leftPerfect ? "PERFECT WIN" : match.winnerSide == "A" ? "WIN" : "LOSE",
             leftPerfect ? 0.28f : 0.35f,
-            {100.0f, 38.0f},
+            {100.0f, 46.0f},
             leftPerfect ? kGold : match.winnerSide == "A" ? kGreen : kRed,
             "goldFont.fnt"
         );
         auto* rightResult = makeLabel(
             rightPerfect ? "PERFECT WIN" : match.winnerSide == "B" ? "WIN" : "LOSE",
             rightPerfect ? 0.28f : 0.35f,
-            {size.width - 100.0f, 38.0f},
+            {size.width - 100.0f, 46.0f},
             rightPerfect ? kGold : match.winnerSide == "B" ? kGreen : kRed,
             "goldFont.fnt"
         );
         m_root->addChild(leftResult, 4);
         m_root->addChild(rightResult, 4);
 
-        float y = size.height - 67.0f;
+        float y = size.height - (perfect ? 82.0f : 67.0f);
         for (auto const& round : match.rounds) {
             auto* row = makeLabel(fmt::format("ROUND {}   {} : {}", round.roundNumber, round.scoreA, round.scoreB), 0.24f, {size.width / 2.0f, y});
             m_root->addChild(row, 4);
@@ -1794,8 +1833,7 @@ class CorumRankedLayer final : public CCLayerColor {
     void renderHistoryList(RuntimeView const& view) {
         auto const size = CCDirector::sharedDirector()->getWinSize();
         addTopBack(false);
-        auto* title = makeLabel("MATCH HISTORY", 0.58f, {size.width / 2.0f, size.height - 28.0f}, kGold, "goldFont.fnt");
-        m_root->addChild(title, 3);
+        addScreenHeader("MATCH HISTORY", "RECENT COMPETITIVE MATCHES", kGold, kCyan);
         if (view.historyLoading) {
             auto* spinner = LoadingSpinner::create(55.0f);
             spinner->setPosition({size.width / 2.0f, size.height / 2.0f});
@@ -1816,7 +1854,13 @@ class CorumRankedLayer final : public CCLayerColor {
             auto const& item = view.history[i];
             auto const y = size.height - 72.0f - static_cast<float>(i) * 38.0f;
             auto const won = item.side == item.winnerSide;
-            auto* panel = makePanel({size.width - 110.0f, 31.0f}, {size.width / 2.0f, y}, kPanelLight);
+            auto* panel = makeNeonPanel(
+                {size.width - 110.0f, 31.0f},
+                {size.width / 2.0f, y},
+                won ? kGreen : kRed,
+                kDeepPanel2,
+                232
+            );
             m_root->addChild(panel, 1);
             auto const ratingText = item.ownRankedScoreDelta
                 ? fmt::format("{:+d} LP", *item.ownRankedScoreDelta)
@@ -1844,11 +1888,21 @@ class CorumRankedLayer final : public CCLayerColor {
         }
         auto const& item = view.history[m_historyIndex];
         auto const won = item.side == item.winnerSide;
-        auto* title = makeLabel(won ? "WIN" : "LOSS", 0.62f, {size.width / 2.0f, size.height - 28.0f}, won ? kGreen : kRed, "goldFont.fnt");
-        m_root->addChild(title, 3);
-        auto* opponent = makeLabel(fmt::format("VS {}   {} : {}", shorten(item.opponentName, 16), item.roundWinsA, item.roundWinsB), 0.30f, {size.width / 2.0f, size.height - 58.0f});
-        m_root->addChild(opponent, 3);
-        float y = size.height - 96.0f;
+        addScreenHeader(
+            won ? "VICTORY" : "DEFEAT",
+            fmt::format("VS {}   //   {} : {}", upper(shorten(item.opponentName, 16)), item.roundWinsA, item.roundWinsB),
+            won ? kGreen : kRed,
+            won ? kGreen : kRed
+        );
+        auto* detailPanel = makeNeonPanel(
+            {std::min(344.0f, size.width - 96.0f), size.height - 98.0f},
+            {size.width / 2.0f, size.height / 2.0f - 25.0f},
+            won ? kGreen : kRed,
+            kDeepPanel,
+            224
+        );
+        m_root->addChild(detailPanel, 1);
+        float y = size.height - 88.0f;
         for (auto const& round : item.rounds) {
             auto* row = makeLabel(fmt::format("ROUND {}  {}  {} : {}", round.roundNumber, shorten(round.mapTitle, 12), round.scoreA, round.scoreB), 0.25f, {size.width / 2.0f, y});
             m_root->addChild(row, 3);

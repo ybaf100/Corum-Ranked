@@ -8,7 +8,7 @@
   },
   "id": "hwanhee1.corum_ranked",
   "name": "Corum Ranked",
-  "version": "v0.5.0-beta.4",
+  "version": "v0.5.0-beta.5",
   "developer": "hwanhee1",
   "description": "A separate server-authoritative Corum Ranked client. It does not share runtime state or UI with Corum Integration.",
   "dependencies": {
@@ -19,6 +19,21 @@
     "gameplay",
     "interface"
   ],
+  "resources": {
+    "sprites": [
+      "resources/corum-*.png"
+    ],
+    "fonts": {
+      "CorumSans": {
+        "path": "resources/CorumSans.ttf",
+        "size": 64
+      },
+      "CorumSansBold": {
+        "path": "resources/CorumSansBold.ttf",
+        "size": 64
+      }
+    }
+  },
   "settings": {
     "ranked-server-url": {
       "name": "Ranked server URL",

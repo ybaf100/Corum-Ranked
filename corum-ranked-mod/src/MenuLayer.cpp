@@ -1,9 +1,9 @@
 #include "RankedPopup.hpp"
 #include "RankedRuntime.hpp"
+#include "ui/RankedVisuals.hpp"
 
 #include <Geode/Geode.hpp>
 #include <Geode/modify/MenuLayer.hpp>
-#include <Geode/ui/BasedButtonSprite.hpp>
 
 using namespace geode::prelude;
 
@@ -59,16 +59,25 @@ class $modify(CorumRankedMenuLayer, MenuLayer) {
         if (!MenuLayer::init()) return false;
 
         auto const size = CCDirector::sharedDirector()->getWinSize();
-        auto* icon = makeCrossedSwordsIcon();
-        auto* sprite = CircleButtonSprite::create(
-            icon,
-            CircleBaseColor::Blue,
-            CircleBaseSize::Small
+        auto* visual = CCNode::create();
+        visual->setContentSize({52.0f, 52.0f});
+        visual->setAnchorPoint({0.5f, 0.5f});
+        auto* plate = corum::ranked::ui::surface(
+            {52.0f, 52.0f},
+            {26.0f, 26.0f},
+            corum::ranked::ui::Cyan,
+            corum::ranked::ui::Surface,
+            236,
+            true
         );
-        sprite->setScale(0.82f);
+        visual->addChild(plate, 0);
+        auto* icon = makeCrossedSwordsIcon();
+        icon->setPosition({26.0f, 26.0f});
+        icon->setScale(0.88f);
+        visual->addChild(icon, 3);
 
         auto* button = CCMenuItemSpriteExtra::create(
-            sprite,
+            visual,
             this,
             menu_selector(CorumRankedMenuLayer::onRanked)
         );
@@ -78,13 +87,17 @@ class $modify(CorumRankedMenuLayer, MenuLayer) {
         menu->setID("corum-ranked-menu"_spr);
         // Keep Ranked away from Geometry Dash's crowded bottom action row.
         // The user-facing entry now lives as a compact upper-right shortcut.
-        menu->setPosition({size.width - 34.0f, size.height - 36.0f});
+        menu->setPosition({size.width - 38.0f, size.height - 40.0f});
         menu->addChild(button);
         addChild(menu, 20);
 
-        auto* caption = CCLabelBMFont::create("RANKED", "bigFont.fnt");
-        caption->setScale(0.22f);
-        caption->setPosition({size.width - 34.0f, size.height - 62.0f});
+        auto* caption = corum::ranked::ui::label(
+            "RANKED",
+            0.17f,
+            {size.width - 38.0f, size.height - 69.0f},
+            corum::ranked::ui::Cyan,
+            true
+        );
         caption->setOpacity(225);
         caption->setID("corum-ranked-caption"_spr);
         addChild(caption, 20);
