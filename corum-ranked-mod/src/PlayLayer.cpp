@@ -36,13 +36,17 @@ CCLabelBMFont* label(
     CCPoint anchor,
     CCPoint position
 ) {
-    auto const display = std::string_view(font) == "goldFont.fnt";
+    auto weight = corum::ranked::ui::FontWeight::Regular;
+    auto const role = std::string_view(font);
+    if (role == "goldFont.fnt") weight = corum::ranked::ui::FontWeight::ExtraBold;
+    else if (role == "bigFont.fnt") weight = corum::ranked::ui::FontWeight::SemiBold;
+    else if (role == "medium") weight = corum::ranked::ui::FontWeight::Medium;
     auto* result = corum::ranked::ui::label(
         text,
         scale,
         position,
         corum::ranked::ui::Text,
-        display
+        weight
     );
     result->setAnchorPoint(anchor);
     return result;
@@ -50,7 +54,7 @@ CCLabelBMFont* label(
 
 CCSprite* checkIcon(CCPoint position) {
     auto* result = CCSprite::createWithSpriteFrameName("GJ_checkOn_001.png");
-    result->setScale(0.34f);
+    result->setScale(0.18f);
     result->setPosition(position);
     result->setColor(kPendingCheck);
     result->setOpacity(220);
@@ -62,7 +66,7 @@ CCNode* hudPanel(CCSize size, CCPoint position, ccColor3B accent = {74, 226, 255
         position,
         accent,
         corum::ranked::ui::Ink,
-        132,
+        108,
         false
     );
 }
@@ -414,7 +418,8 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         auto const size = CCDirector::sharedDirector()->getWinSize();
         auto const layout = corum::ranked::layoutHud(size.width, size.height);
         auto const top = layout.topY;
-        auto const right = layout.topRightX;
+        auto const left = layout.topLeftX + 8.0f;
+        auto const right = layout.topRightX - 8.0f;
 
         m_fields->hudRoot = CCNode::create();
         m_fields->hudRoot->setID("ranked-play-hud"_spr);
@@ -422,71 +427,74 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         m_fields->hudRoot->setPosition({0.0f, 0.0f});
         m_fields->hudRoot->setContentSize(size);
 
-        auto* leftPanel = hudPanel({132.0f, 58.0f}, {layout.topLeftX + 54.0f, top - 31.0f}, corum::ranked::ui::Cyan);
+        auto* leftPanel = hudPanel({92.0f, 34.0f}, {left + 38.0f, top - 18.0f}, corum::ranked::ui::Cyan);
         m_fields->hudRoot->addChild(leftPanel, 1);
-        auto* rightPanel = hudPanel({132.0f, 58.0f}, {right - 54.0f, top - 31.0f}, corum::ranked::ui::Cyan);
+        auto* rightPanel = hudPanel({92.0f, 34.0f}, {right - 38.0f, top - 18.0f}, corum::ranked::ui::Cyan);
         m_fields->hudRoot->addChild(rightPanel, 1);
-        auto* timerPanel = hudPanel({112.0f, 64.0f}, {size.width / 2.0f, top - 32.0f}, corum::ranked::ui::Blue);
+        auto* timerPanel = hudPanel({78.0f, 38.0f}, {size.width / 2.0f, top - 20.0f}, corum::ranked::ui::Blue);
         m_fields->hudRoot->addChild(timerPanel, 1);
-        auto* bottomPanel = hudPanel({138.0f, 24.0f}, {layout.bottomLeftX + 67.0f, layout.bottomY + 11.0f}, corum::ranked::ui::Cyan);
+        auto* bottomPanel = hudPanel({88.0f, 14.0f}, {layout.bottomLeftX + 42.0f, layout.bottomY + 6.0f}, corum::ranked::ui::Cyan);
         m_fields->hudRoot->addChild(bottomPanel, 1);
 
-        m_fields->fpsLabel = label("FPS : -", "bigFont.fnt", 0.19f, {0.0f, 1.0f}, {9.0f, top - 1.0f});
+        m_fields->fpsLabel = label("FPS  -", "bigFont.fnt", 0.18f, {0.0f, 1.0f}, {7.0f, top - 2.0f});
         m_fields->fpsLabel->setID("ranked-fps"_spr);
-        m_fields->fpsLabel->setColor(corum::ranked::ui::TextMuted);
+        m_fields->fpsLabel->setColor(corum::ranked::ui::Text);
         m_fields->hudRoot->addChild(m_fields->fpsLabel, 3);
 
-        m_fields->ownNameLabel = label("YOU", "goldFont.fnt", 0.19f, {0.0f, 1.0f}, {layout.topLeftX, top - 9.0f});
+        m_fields->ownNameLabel = label("YOU", "bigFont.fnt", 0.15f, {0.0f, 1.0f}, {left, top - 6.0f});
         m_fields->ownNameLabel->setColor(corum::ranked::ui::Cyan);
-        m_fields->ownNameLabel->limitLabelWidth(102.0f, 0.19f, 0.12f);
+        m_fields->ownNameLabel->limitLabelWidth(74.0f, 0.15f, 0.10f);
         m_fields->hudRoot->addChild(m_fields->ownNameLabel, 3);
 
-        m_fields->ownScoreLabel = label("SCORE  0", "bigFont.fnt", 0.25f, {0.0f, 1.0f}, {layout.topLeftX, top - 29.0f});
+        m_fields->ownScoreLabel = label("SCORE  0", "goldFont.fnt", 0.23f, {0.0f, 1.0f}, {left, top - 17.0f});
         m_fields->ownScoreLabel->setID("ranked-own-score"_spr);
+        m_fields->ownScoreLabel->limitLabelWidth(78.0f, 0.23f, 0.15f);
         m_fields->hudRoot->addChild(m_fields->ownScoreLabel, 3);
-        m_fields->ownChecks[0] = checkIcon({layout.topLeftX + 5.0f, top - 51.0f});
-        m_fields->ownChecks[1] = checkIcon({layout.topLeftX + 21.0f, top - 51.0f});
-        m_fields->ownChecks[2] = checkIcon({layout.topLeftX + 37.0f, top - 51.0f});
+        m_fields->ownChecks[0] = checkIcon({left + 4.0f, top - 29.0f});
+        m_fields->ownChecks[1] = checkIcon({left + 15.0f, top - 29.0f});
+        m_fields->ownChecks[2] = checkIcon({left + 26.0f, top - 29.0f});
         for (auto* icon : m_fields->ownChecks) m_fields->hudRoot->addChild(icon, 3);
-        m_fields->ownAttemptLabel = label("", "bigFont.fnt", 0.20f, {0.0f, 1.0f}, {layout.topLeftX, top - 49.0f});
+        m_fields->ownAttemptLabel = label("", "bigFont.fnt", 0.15f, {0.0f, 1.0f}, {left, top - 27.0f});
         m_fields->ownAttemptLabel->setVisible(false);
         m_fields->hudRoot->addChild(m_fields->ownAttemptLabel, 3);
 
-        m_fields->roundLabel = label("", "goldFont.fnt", 0.20f, {0.5f, 1.0f}, {size.width / 2.0f, top - 9.0f});
+        m_fields->roundLabel = label("", "bigFont.fnt", 0.14f, {0.5f, 1.0f}, {size.width / 2.0f, top - 6.0f});
         m_fields->roundLabel->setID("ranked-current-round"_spr);
         m_fields->roundLabel->setColor(corum::ranked::ui::Gold);
         m_fields->hudRoot->addChild(m_fields->roundLabel, 3);
 
         // Keep the authoritative clock directly below the current round.
-        m_fields->timerLabel = label("", "goldFont.fnt", 0.43f, {0.5f, 1.0f}, {size.width / 2.0f, top - 27.0f});
+        m_fields->timerLabel = label("", "goldFont.fnt", 0.33f, {0.5f, 1.0f}, {size.width / 2.0f, top - 17.0f});
         m_fields->timerLabel->setID("ranked-countdown"_spr);
         m_fields->hudRoot->addChild(m_fields->timerLabel, 3);
-        m_fields->stateLabel = label("", "goldFont.fnt", 0.22f, {0.5f, 1.0f}, {size.width / 2.0f, top - 51.0f});
+        m_fields->stateLabel = label("", "bigFont.fnt", 0.13f, {0.5f, 1.0f}, {size.width / 2.0f, top - 31.0f});
         m_fields->stateLabel->setID("ranked-round-state"_spr);
         m_fields->hudRoot->addChild(m_fields->stateLabel, 3);
 
-        m_fields->opponentNameLabel = label("OPPONENT", "goldFont.fnt", 0.19f, {1.0f, 1.0f}, {right, top - 9.0f});
+        m_fields->opponentNameLabel = label("OPPONENT", "bigFont.fnt", 0.15f, {1.0f, 1.0f}, {right, top - 6.0f});
         m_fields->opponentNameLabel->setColor(corum::ranked::ui::Red);
-        m_fields->opponentNameLabel->limitLabelWidth(102.0f, 0.19f, 0.12f);
+        m_fields->opponentNameLabel->limitLabelWidth(74.0f, 0.15f, 0.10f);
         m_fields->hudRoot->addChild(m_fields->opponentNameLabel, 3);
 
-        m_fields->opponentScoreLabel = label("SCORE  0", "bigFont.fnt", 0.25f, {1.0f, 1.0f}, {right, top - 29.0f});
+        m_fields->opponentScoreLabel = label("SCORE  0", "goldFont.fnt", 0.23f, {1.0f, 1.0f}, {right, top - 17.0f});
         m_fields->opponentScoreLabel->setID("ranked-opponent-score"_spr);
+        m_fields->opponentScoreLabel->limitLabelWidth(78.0f, 0.23f, 0.15f);
         m_fields->hudRoot->addChild(m_fields->opponentScoreLabel, 3);
-        m_fields->opponentChecks[0] = checkIcon({right - 37.0f, top - 51.0f});
-        m_fields->opponentChecks[1] = checkIcon({right - 21.0f, top - 51.0f});
-        m_fields->opponentChecks[2] = checkIcon({right - 5.0f, top - 51.0f});
+        m_fields->opponentChecks[0] = checkIcon({right - 26.0f, top - 29.0f});
+        m_fields->opponentChecks[1] = checkIcon({right - 15.0f, top - 29.0f});
+        m_fields->opponentChecks[2] = checkIcon({right - 4.0f, top - 29.0f});
         for (auto* icon : m_fields->opponentChecks) m_fields->hudRoot->addChild(icon, 3);
-        m_fields->opponentAttemptLabel = label("", "bigFont.fnt", 0.20f, {1.0f, 1.0f}, {right, top - 49.0f});
+        m_fields->opponentAttemptLabel = label("", "bigFont.fnt", 0.15f, {1.0f, 1.0f}, {right, top - 27.0f});
         m_fields->opponentAttemptLabel->setVisible(false);
         m_fields->hudRoot->addChild(m_fields->opponentAttemptLabel, 3);
 
-        m_fields->qualifyingLabel = label("QUALIFYING  -", "bigFont.fnt", 0.20f, {0.0f, 0.0f}, {layout.bottomLeftX + 5.0f, layout.bottomY + 4.0f});
+        m_fields->qualifyingLabel = label("QUALIFYING  -", "medium", 0.13f, {0.0f, 0.0f}, {layout.bottomLeftX + 4.0f, layout.bottomY + 3.0f});
         m_fields->qualifyingLabel->setID("ranked-qualifying"_spr);
+        m_fields->qualifyingLabel->limitLabelWidth(78.0f, 0.13f, 0.095f);
         m_fields->hudRoot->addChild(m_fields->qualifyingLabel, 3);
 
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
-        m_fields->debugLabel = label("BOT MATCH · DEBUG", "goldFont.fnt", 0.22f, {0.5f, 0.0f}, {size.width / 2.0f, 8.0f});
+        m_fields->debugLabel = label("BOT MATCH · DEBUG", "bigFont.fnt", 0.16f, {0.5f, 0.0f}, {size.width / 2.0f, 6.0f});
         m_fields->debugLabel->setColor(ccc3(255, 145, 105));
         m_fields->debugLabel->setVisible(corum::ranked::RankedRuntime::get().view().match.debug);
         m_fields->hudRoot->addChild(m_fields->debugLabel, 3);
@@ -498,36 +506,36 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
     }
 
     void addSpectatorPanel(CCSize const& size) {
-        auto const width = std::min(228.0f, size.width - 40.0f);
+        auto const width = std::min(150.0f, size.width - 40.0f);
         m_fields->spectatorPanel = CCNode::create();
         m_fields->spectatorPanel->setID("ranked-spectator-overlay"_spr);
-        m_fields->spectatorPanel->setContentSize({width, 76.0f});
+        m_fields->spectatorPanel->setContentSize({width, 44.0f});
         auto const layout = corum::ranked::layoutHud(size.width, size.height);
         m_fields->spectatorPanel->setPosition({layout.spectatorCenterX, layout.spectatorCenterY});
 
         auto* background = corum::ranked::ui::surface(
-            {width, 76.0f},
+            {width, 44.0f},
             {0.0f, 0.0f},
             corum::ranked::ui::Gold,
             corum::ranked::ui::Ink,
-            218,
+            184,
             true
         );
         m_fields->spectatorPanel->addChild(background, 0);
 
-        auto* waiting = label("LIVE SPECTATOR", "goldFont.fnt", 0.20f, {0.5f, 0.5f}, {0.0f, 27.0f});
+        auto* waiting = label("LIVE SPECTATOR", "bigFont.fnt", 0.14f, {0.5f, 0.5f}, {0.0f, 14.0f});
         waiting->setColor(corum::ranked::ui::Gold);
         m_fields->spectatorPanel->addChild(waiting, 2);
-        m_fields->spectatorNameLabel = label("OPPONENT", "goldFont.fnt", 0.20f, {0.5f, 0.5f}, {-48.0f, 7.0f});
-        m_fields->spectatorNameLabel->limitLabelWidth(100.0f, 0.20f, 0.13f);
+        m_fields->spectatorNameLabel = label("OPPONENT", "bigFont.fnt", 0.14f, {0.5f, 0.5f}, {-31.0f, 2.0f});
+        m_fields->spectatorNameLabel->limitLabelWidth(68.0f, 0.14f, 0.10f);
         m_fields->spectatorPanel->addChild(m_fields->spectatorNameLabel, 2);
-        m_fields->spectatorProgressLabel = label("CURRENT : -", "goldFont.fnt", 0.32f, {0.5f, 0.5f}, {51.0f, 5.0f});
+        m_fields->spectatorProgressLabel = label("CURRENT : -", "goldFont.fnt", 0.22f, {0.5f, 0.5f}, {34.0f, 1.0f});
         m_fields->spectatorProgressLabel->setColor(corum::ranked::ui::Cyan);
         m_fields->spectatorPanel->addChild(m_fields->spectatorProgressLabel, 2);
-        auto* lastAttempt = label("ROUND CLOCK", "bigFont.fnt", 0.16f, {0.5f, 0.5f}, {-25.0f, -23.0f});
+        auto* lastAttempt = label("ROUND CLOCK", "medium", 0.10f, {0.5f, 0.5f}, {-17.0f, -14.0f});
         lastAttempt->setColor(corum::ranked::ui::TextMuted);
         m_fields->spectatorPanel->addChild(lastAttempt, 2);
-        m_fields->spectatorTimerLabel = label("-", "goldFont.fnt", 0.24f, {0.0f, 0.5f}, {24.0f, -23.0f});
+        m_fields->spectatorTimerLabel = label("-", "bigFont.fnt", 0.16f, {0.0f, 0.5f}, {16.0f, -14.0f});
         m_fields->spectatorPanel->addChild(m_fields->spectatorTimerLabel, 2);
         m_fields->spectatorPanel->setVisible(false);
         m_fields->hudRoot->addChild(m_fields->spectatorPanel, 10);
@@ -612,9 +620,9 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         m_fields->roundLabel->setVisible(!presentation.roundText.empty());
         m_fields->timerLabel->setVisible(!presentation.timerText.empty());
         m_fields->stateLabel->setVisible(!presentation.stateText.empty());
-        m_fields->roundLabel->setPosition({size.width / 2.0f, top - 9.0f});
-        m_fields->timerLabel->setPosition({size.width / 2.0f, top - 27.0f});
-        m_fields->stateLabel->setPosition({size.width / 2.0f, top - 51.0f});
+        m_fields->roundLabel->setPosition({size.width / 2.0f, top - 6.0f});
+        m_fields->timerLabel->setPosition({size.width / 2.0f, top - 17.0f});
+        m_fields->stateLabel->setPosition({size.width / 2.0f, top - 31.0f});
         auto const urgent =
             match.state == "LAST_ATTEMPT_WINDOW" ||
             match.state == "FINAL_ATTEMPT_WINDOW" ||

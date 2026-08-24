@@ -59,6 +59,23 @@ jobs:
           if (!manifest.dependencies?.['syzzi.click_between_frames']) {
             throw new Error('Click Between Frames must remain a required dependency');
           }
+          const requiredFonts = {
+            CorumSans: 'resources/CorumSans.ttf',
+            CorumSansMedium: 'resources/CorumSansMedium.ttf',
+            CorumSansSemiBold: 'resources/CorumSansSemiBold.ttf',
+            CorumSansBold: 'resources/CorumSansBold.ttf',
+          };
+          for (const [name, path] of Object.entries(requiredFonts)) {
+            if (manifest.resources?.fonts?.[name]?.path !== path || !fs.existsSync(`corum-ranked-mod/${path}`)) {
+              throw new Error(`Missing Paperlogy UI font role: ${name}`);
+            }
+          }
+          const koreanProbeCharset = manifest.resources.fonts.CorumSansSemiBold.charset ?? '';
+          for (const codepoint of ['44536', '46356', '48260']) {
+            if (!koreanProbeCharset.split(',').includes(codepoint)) {
+              throw new Error(`Korean debug glyph ${codepoint} is missing from CorumSansSemiBold charset`);
+            }
+          }
           const versionSource = fs.readFileSync(
             'ranked/apps/server/src/session/client-version.ts',
             'utf8',
@@ -131,6 +148,14 @@ jobs:
           ):
               if forbidden in source:
                   raise SystemExit(f"Forbidden Ranked launch path returned: {forbidden}")
+
+          popup = Path("corum-ranked-mod/src/RankedPopup.cpp").read_text(encoding="utf-8")
+          visuals = Path("corum-ranked-mod/src/ui/RankedVisuals.hpp").read_text(encoding="utf-8")
+          if '"디버그"' not in popup or 'ranked-korean-font-probe' not in popup:
+              raise SystemExit("Missing debug-only Korean Paperlogy probe")
+          for forbidden_visual in ("CCParticleFire", "corum-fire-promotion", "corum-fire-perfect"):
+              if forbidden_visual in popup or forbidden_visual in visuals:
+                  raise SystemExit(f"Rejected repeating fire visual returned: {forbidden_visual}")
           PY
 
   build:

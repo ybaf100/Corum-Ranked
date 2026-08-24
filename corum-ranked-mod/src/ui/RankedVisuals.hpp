@@ -25,12 +25,29 @@ inline constexpr ccColor3B Red = {255, 91, 111};
 inline constexpr ccColor3B Gold = {255, 207, 74};
 inline constexpr ccColor3B Orange = {255, 145, 68};
 
-inline char const* bodyFont() {
+enum class FontWeight {
+    Regular,
+    Medium,
+    SemiBold,
+    ExtraBold,
+};
+
+inline char const* font(FontWeight weight) {
+    switch (weight) {
+        case FontWeight::Medium: return "CorumSansMedium.fnt"_spr;
+        case FontWeight::SemiBold: return "CorumSansSemiBold.fnt"_spr;
+        case FontWeight::ExtraBold: return "CorumSansBold.fnt"_spr;
+        case FontWeight::Regular: return "CorumSans.fnt"_spr;
+    }
     return "CorumSans.fnt"_spr;
 }
 
+inline char const* bodyFont() {
+    return font(FontWeight::Regular);
+}
+
 inline char const* displayFont() {
-    return "CorumSansBold.fnt"_spr;
+    return font(FontWeight::ExtraBold);
 }
 
 inline ccColor3B tierColor(std::string tier) {
@@ -74,19 +91,36 @@ inline CCLabelBMFont* label(
     std::string const& text,
     float scale,
     CCPoint position,
-    ccColor3B color = Text,
-    bool display = false
+    ccColor3B color,
+    FontWeight weight
 ) {
-    auto* result = CCLabelBMFont::create(text.c_str(), display ? displayFont() : bodyFont());
+    auto* result = CCLabelBMFont::create(text.c_str(), font(weight));
     // The generated resource font is the preferred path, but keep every screen
     // usable if a platform-specific font atlas ever fails to load.
     if (!result) {
-        result = CCLabelBMFont::create(text.c_str(), display ? "goldFont.fnt" : "bigFont.fnt");
+        auto const emphasized = weight == FontWeight::SemiBold || weight == FontWeight::ExtraBold;
+        result = CCLabelBMFont::create(text.c_str(), emphasized ? "goldFont.fnt" : "bigFont.fnt");
     }
     result->setScale(scale);
     result->setColor(color);
     result->setPosition(position);
     return result;
+}
+
+inline CCLabelBMFont* label(
+    std::string const& text,
+    float scale,
+    CCPoint position,
+    ccColor3B color = Text,
+    bool display = false
+) {
+    return label(
+        text,
+        scale,
+        position,
+        color,
+        display ? FontWeight::ExtraBold : FontWeight::Regular
+    );
 }
 
 inline CCNode* surface(
@@ -102,46 +136,34 @@ inline CCNode* surface(
     root->setAnchorPoint({0.5f, 0.5f});
     root->setPosition(position);
 
-    auto* shadow = CCLayerColor::create({1, 4, 12, 105});
-    shadow->setContentSize({size.width + 6.0f, size.height + 7.0f});
-    shadow->setPosition({-3.0f, -6.0f});
+    // Flat, low-noise chrome keeps the information hierarchy readable on a
+    // phone. The previous double glow, side rail and four corner blocks made
+    // every panel compete with the actual values displayed inside it.
+    auto* shadow = CCLayerColor::create({1, 4, 12, static_cast<GLubyte>(strong ? 82 : 54)});
+    shadow->setContentSize({size.width + 2.0f, size.height + 3.0f});
+    shadow->setPosition({-1.0f, -2.0f});
     root->addChild(shadow, -2);
 
-    auto* glow = CCLayerColor::create({accent.r, accent.g, accent.b, static_cast<GLubyte>(strong ? 42 : 22)});
-    glow->setContentSize({size.width + 4.0f, size.height + 4.0f});
-    glow->setPosition({-2.0f, -2.0f});
-    root->addChild(glow, -1);
-
-    auto* border = CCLayerColor::create({accent.r, accent.g, accent.b, static_cast<GLubyte>(strong ? 180 : 105)});
+    auto* border = CCLayerColor::create({accent.r, accent.g, accent.b, static_cast<GLubyte>(strong ? 158 : 88)});
     border->setContentSize(size);
     border->setPosition(CCPointZero);
     root->addChild(border, 0);
 
     auto* inner = CCLayerColor::create({fill.r, fill.g, fill.b, opacity});
-    inner->setContentSize({std::max(2.0f, size.width - 2.0f), std::max(2.0f, size.height - 2.0f)});
-    inner->setPosition({1.0f, 1.0f});
+    inner->setContentSize({std::max(2.0f, size.width - 1.5f), std::max(2.0f, size.height - 1.5f)});
+    inner->setPosition({0.75f, 0.75f});
     root->addChild(inner, 1);
 
     auto* highlight = CCLayerColor::create({accent.r, accent.g, accent.b, static_cast<GLubyte>(strong ? 235 : 190)});
-    highlight->setContentSize({std::max(4.0f, size.width - 18.0f), strong ? 2.0f : 1.0f});
-    highlight->setPosition({9.0f, size.height - 4.0f});
+    highlight->setContentSize({std::max(4.0f, size.width - 8.0f), strong ? 1.5f : 1.0f});
+    highlight->setPosition({4.0f, size.height - 3.0f});
     root->addChild(highlight, 3);
 
-    auto* leftRail = CCLayerColor::create({accent.r, accent.g, accent.b, static_cast<GLubyte>(strong ? 175 : 90)});
-    leftRail->setContentSize({2.0f, std::max(4.0f, size.height - 18.0f)});
-    leftRail->setPosition({4.0f, 9.0f});
-    root->addChild(leftRail, 3);
-
-    for (auto const& point : {
-        CCPoint{3.0f, 3.0f},
-        CCPoint{size.width - 7.0f, 3.0f},
-        CCPoint{3.0f, size.height - 7.0f},
-        CCPoint{size.width - 7.0f, size.height - 7.0f},
-    }) {
-        auto* corner = CCLayerColor::create({accent.r, accent.g, accent.b, 185});
-        corner->setContentSize({4.0f, 4.0f});
-        corner->setPosition(point);
-        root->addChild(corner, 4);
+    if (strong) {
+        auto* leftRail = CCLayerColor::create({accent.r, accent.g, accent.b, 138});
+        leftRail->setContentSize({1.5f, std::max(4.0f, size.height - 10.0f)});
+        leftRail->setPosition({3.0f, 5.0f});
+        root->addChild(leftRail, 3);
     }
 
     return root;
@@ -218,15 +240,6 @@ inline CCSprite* trophy(std::string const& tier, CCSize maxSize) {
         result->setScale(std::min(maxSize.width / size.width, maxSize.height / size.height));
     }
     return result;
-}
-
-inline void applyFireTexture(CCParticleSystemQuad* particle, bool perfect) {
-    if (!particle) return;
-    auto const filename = perfect ? "corum-fire-perfect.png" : "corum-fire-promotion.png";
-    auto const path = Mod::get()->getResourcesDir() / filename;
-    if (!std::filesystem::exists(path)) return;
-    auto* texture = CCTextureCache::sharedTextureCache()->addImage(path.string().c_str(), false);
-    if (texture) particle->setTexture(texture);
 }
 
 } // namespace corum::ranked::ui

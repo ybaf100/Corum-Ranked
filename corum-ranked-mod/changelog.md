@@ -1,10 +1,10 @@
 # v0.5.0-beta.5
 
 - Rebuilt the Ranked presentation around a unified dark competitive design system while preserving every beta.4 server-authoritative state and gameplay callback.
-- Added bundled Corum Sans UI fonts and replaced the mixed `bigFont`/`goldFont` presentation across the Ranked scene, gameplay HUD, LevelInfo wait gate, and main-menu shortcut.
+- Replaced the prototype font with user-supplied Paperlogy Regular, Medium, SemiBold, and ExtraBold roles across the Ranked scene, gameplay HUD, LevelInfo wait gate, and main-menu shortcut.
 - Redesigned the lobby, queue, Match Found, private ban, Round prepare, spectator, inter-Round, result, PERFECT WIN, and history views with consistent cards, hierarchy, spacing, and state accents.
-- Redesigned the gameplay HUD with compact player panels and the current Round directly above the authoritative timer.
-- Added optional user-replaceable tier trophy and promotion/PERFECT WIN particle texture slots with safe built-in fallbacks.
+- Reduced the gameplay HUD obstruction by more than half, separated metric and caption typography, and kept the current Round directly above the authoritative timer.
+- Added a debug-only Korean `디버그` font probe in the Ranked lobby, retained optional user-replaceable tier trophy slots, and replaced the repeated fire sprites with a subtle animated accent rail.
 - Merged the Play/update-loop hotfix: canonical Saved levels retain their native type, automatic entry verifies the live Play sprite and vanilla download state, preserves Geometry Dash's original callback, and waits for busy update work instead of repeatedly pressing the update item.
 - Updated the Ranked build invariant checks so direct callback rebinding and the obsolete forwarded latch cannot return.
 - Updated the exact client/server gate and workspace package metadata to `v0.5.0-beta.5`.

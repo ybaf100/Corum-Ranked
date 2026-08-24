@@ -21,16 +21,31 @@
   ],
   "resources": {
     "sprites": [
-      "resources/corum-*.png"
+      "resources/corum-trophy-*.png"
+    ],
+    "files": [
+      "resources/CorumSans-LICENSE.txt"
     ],
     "fonts": {
       "CorumSans": {
         "path": "resources/CorumSans.ttf",
-        "size": 64
+        "size": 64,
+        "charset": "32-126,183,8226"
+      },
+      "CorumSansMedium": {
+        "path": "resources/CorumSansMedium.ttf",
+        "size": 64,
+        "charset": "32-126,183,8226"
+      },
+      "CorumSansSemiBold": {
+        "path": "resources/CorumSansSemiBold.ttf",
+        "size": 64,
+        "charset": "32-126,183,8226,44536,46356,48260"
       },
       "CorumSansBold": {
         "path": "resources/CorumSansBold.ttf",
-        "size": 64
+        "size": 64,
+        "charset": "32-126,183,8226"
       }
     }
   },

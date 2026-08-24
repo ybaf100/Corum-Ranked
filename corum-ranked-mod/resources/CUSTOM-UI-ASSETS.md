@@ -18,20 +18,16 @@ Recommended format: transparent PNG, square canvas, 512 x 512 px. Keep important
 details inside the middle 80 percent because the same asset is also shown at a
 small size on player cards.
 
-## Fire textures
+The trophy images are intentionally not bundled yet. Until they are supplied,
+Corum Ranked uses a smaller built-in Geometry Dash star tinted to the tier color.
+Missing custom images never block the Ranked UI or matchmaking flow.
 
-| Filename | Used for |
-| --- | --- |
-| `corum-fire-promotion.png` | Promotion card particles |
-| `corum-fire-perfect.png` | PERFECT WIN particles |
+## Typography
 
-Recommended format: transparent PNG, 128 x 128 px. These files are particle
-textures, not complete GIF animations. Use a soft white or pale-yellow core so
-the game can tint the particles correctly.
+Paperlogy v1.000 is bundled in four UI roles: Regular, Medium, SemiBold, and
+ExtraBold. The debug build includes the Korean text `디버그` in the lower-right
+corner of the Ranked lobby as an explicit bitmap-atlas glyph test.
 
-Both fire textures are included with beta.5. To use a different design, replace
-the corresponding PNG while keeping its filename, dimensions, and alpha channel.
-
-If any image is absent, Corum Ranked falls back to its built-in star emblem or
-the standard Geometry Dash fire particle. Missing custom images never block the
-Ranked UI or matchmaking flow.
+The rejected repeating fire sprites are no longer loaded. Promotion and PERFECT
+WIN states now use a restrained animated accent rail that does not cover text or
+trophies.
