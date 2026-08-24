@@ -13,6 +13,7 @@ import {
   createRound,
   evaluateDeathmatch,
   endRoundAttempt,
+  perfectThreeClearWinner,
   resolveBans,
   selectDeathmatchMap,
   scoreAttempt,
@@ -193,6 +194,13 @@ interface RoundSummaryRow {
 interface MatchPerformanceRow {
   score_a: number;
   score_b: number;
+  clears_a: number;
+  clears_b: number;
+}
+
+interface PerfectWinRoundRow {
+  result: PlayerSide | "DRAW" | null;
+  result_reason: string | null;
   clears_a: number;
   clears_b: number;
 }
@@ -422,6 +430,7 @@ export class MatchService {
         opponentName: match.opponent_name,
         effectiveTier: match.effective_tier,
         winnerSide,
+        perfectWinSide: rating.perfectWinSide ?? null,
         rankedScoreDelta: rating.rankedScoreDelta ?? {
           A: match.ranked_score_delta_a,
           B: match.ranked_score_delta_b,
@@ -2069,6 +2078,24 @@ export class MatchService {
       [current.id, current.player_a_id, current.player_b_id],
     );
     const totals = performance.rows[0] ?? { score_a: 0, score_b: 0, clears_a: 0, clears_b: 0 };
+    const finalSeries = parseJson<MatchSeriesState>(current.series_state);
+    const completedRounds = await transaction.query<PerfectWinRoundRow>(
+      `SELECT result, result_reason, clears_a, clears_b
+       FROM ranked_rounds
+       WHERE match_id = $1 AND result IS NOT NULL
+       ORDER BY round_number`,
+      [current.id],
+    );
+    const perfectWinSide = perfectThreeClearWinner(
+      finalSeries,
+      completedRounds.rows.map((round) => ({
+        result: round.result,
+        resultReason: round.result_reason,
+        clearsA: Number(round.clears_a),
+        clearsB: Number(round.clears_b),
+      })),
+      config.operational.rules.clearTarget,
+    );
     const update = calculateMmrUpdate(
       {
         ratingA: beforeA.hiddenMmr,
@@ -2082,6 +2109,7 @@ export class MatchService {
         clearsB: Number(totals.clears_b),
         resultStreakA: beforeA.resultStreak,
         resultStreakB: beforeB.resultStreak,
+        maximumGainSide: perfectWinSide,
       },
       config.operational.mmrPolicy,
     );
@@ -2092,6 +2120,10 @@ export class MatchService {
       update.ratingAfterA,
       config.operational.mmrPolicy,
       config.operational.tierBands,
+      {
+        opponentHiddenMmr: beforeB.hiddenMmr,
+        maximumVisibleScoreGain: perfectWinSide === "A",
+      },
     );
     const ratingB = updateRankedRatingProfile(
       beforeB,
@@ -2100,11 +2132,16 @@ export class MatchService {
       update.ratingAfterB,
       config.operational.mmrPolicy,
       config.operational.tierBands,
+      {
+        opponentHiddenMmr: beforeA.hiddenMmr,
+        maximumVisibleScoreGain: perfectWinSide === "B",
+      },
     );
     await this.persistRatingProfile(transaction, current.player_a_id, ratingA, winner === "A", now);
     await this.persistRatingProfile(transaction, current.player_b_id, ratingB, winner === "B", now);
     const placementGamesRequired = config.operational.mmrPolicy.placementGames;
     const ratingPresentation = {
+      perfectWinSide,
       rankedScoreDelta: { A: ratingA.visibleScoreDelta, B: ratingB.visibleScoreDelta },
       profileBefore: {
         A: publicRatingProfile(beforeA, placementGamesRequired),
@@ -2158,7 +2195,6 @@ export class MatchService {
         now.toISOString(),
       ],
     );
-    const finalSeries = parseJson<MatchSeriesState>(current.series_state);
     const publicAfterA = publicRatingProfile(ratingA.profile, placementGamesRequired);
     const publicAfterB = publicRatingProfile(ratingB.profile, placementGamesRequired);
     await this.outbox.enqueueMatchEvent(
@@ -2168,6 +2204,7 @@ export class MatchService {
       `match:${current.id}:result`,
       {
         winnerSide: winner,
+        perfectWinSide,
         roundResults: finalSeries.roundResults,
         rankedScoreDelta: { A: ratingA.visibleScoreDelta, B: ratingB.visibleScoreDelta },
         rankedScoreAfter: {
@@ -2885,6 +2922,7 @@ export class MatchService {
       ratingPresentation = match.rating_presentation
         ? parseJson<Record<string, unknown>>(match.rating_presentation)
         : {
+            perfectWinSide: null,
             rankedScoreDelta: {
               A: match.ranked_score_delta_a,
               B: match.ranked_score_delta_b,

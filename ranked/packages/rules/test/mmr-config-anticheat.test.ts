@@ -40,6 +40,18 @@ describe("operational config and MMR", () => {
     });
   });
 
+  it("fails closed when either opponent-strength weight is outside 0..2", () => {
+    const config = completeOperationalConfig();
+    expect(validateOperationalConfig({
+      ...config,
+      mmrPolicy: { ...config.mmrPolicy!, mmrOpponentStrengthWeight: 2.01 },
+    }).valid).toBe(false);
+    expect(validateOperationalConfig({
+      ...config,
+      mmrPolicy: { ...config.mmrPolicy!, visibleScoreOpponentStrengthWeight: -0.01 },
+    }).valid).toBe(false);
+  });
+
   it("applies a Bronze CSMP seed exactly once", () => {
     const initial: RankedProfileSeedState = {
       hiddenMmr: null,

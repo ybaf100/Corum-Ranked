@@ -56,7 +56,7 @@ class FixedCsmpSource implements CsmpTierSource {
 const cleanMods: CreateSessionDto["installedMods"] = [
   {
     id: "hwanhee1.corum_ranked",
-    version: "v0.5.0-beta.3",
+    version: "v0.5.0-beta.4",
     enabled: true,
     loaded: true,
     internal: false,
@@ -145,7 +145,7 @@ describe("development-only Bot Match using the production Ranked engine", () => 
     const created = await sessions.create({
       gdAccountId: accountId,
       gdUsername: `Debug${accountId}`,
-      clientVersion: "v0.5.0-beta.3",
+      clientVersion: "v0.5.0-beta.4",
       installedMods: structuredClone(cleanMods),
     });
     const result = await database.query<{
@@ -358,6 +358,7 @@ describe("development-only Bot Match using the production Ranked engine", () => 
       clearsB: playerWins ? 0 : 6,
       resultStreakA: 0,
       resultStreakB: 0,
+      maximumGainSide: playerWins ? "A" : "B",
     }, document.operational.mmrPolicy!);
     return {
       before: player.hiddenMmr,
@@ -365,6 +366,7 @@ describe("development-only Bot Match using the production Ranked engine", () => 
       match: match.rows[0]!,
       expected,
       creation,
+      state,
     };
   };
 
@@ -403,6 +405,7 @@ describe("development-only Bot Match using the production Ranked engine", () => 
     });
     const state = await matches.state(created.matchId, created.matchToken, player) as Record<string, any>;
     expect(state).toMatchObject({ state: "MATCH_RESULT", result: { winnerSide } });
+    expect(state.result.perfectWinSide).toBeNull();
     expect(JSON.stringify(state)).not.toMatch(/hiddenMmr|hidden_mmr|mmrDelta|mmr_[ab]_/);
     const stored = await database.query<{ wins: number; losses: number; placement_results: unknown }>(
       "SELECT wins, losses, placement_results FROM ranked_profiles WHERE player_id = $1",
@@ -415,7 +418,7 @@ describe("development-only Bot Match using the production Ranked engine", () => 
     ]);
   });
 
-  it("applies ordinary Ranked MMR, score, placement, stats, and history on player victory", async () => {
+  it("applies maximum Ranked MMR and PERFECT WIN for a natural no-loss three-Clear victory", async () => {
     const result = await runRatedMatch("9302", true);
     expect(Number(result.after.hidden_mmr)).toBeGreaterThan(result.before);
     expect(Number(result.after.hidden_mmr)).toBe(result.expected.ratingAfterA);
@@ -432,6 +435,7 @@ describe("development-only Bot Match using the production Ranked engine", () => 
     expect(Number(result.match.mmr_delta_a)).toBe(result.expected.deltaA);
     expect(Number(result.match.mmr_a_after)).toBe(result.expected.ratingAfterA);
     expect(result.match.result_applied_at).toBeTruthy();
+    expect(result.state.result.perfectWinSide).toBe("A");
 
     const secondSession = await contextFor("9302");
     expect(secondSession.hiddenMmr).toBe(Number(result.after.hidden_mmr));
@@ -457,6 +461,17 @@ describe("development-only Bot Match using the production Ranked engine", () => 
       [result.creation.matchId],
     );
     expect(outbox.rows[0]?.count).toBe(0);
+  });
+
+  it("awards the existing normal LP maximum to the PERFECT WIN winner", async () => {
+    const result = await runRatedMatch("9306", true, {
+      hiddenMmr: 2_500,
+      placementGames: 5,
+      displayedTier: "BRONZE",
+    });
+    expect(result.state.result.perfectWinSide).toBe("A");
+    expect(result.state.result.rankedScoreDelta.A).toBe(38);
+    expect(Number(result.after.visible_ranked_score)).toBe(2_538);
   });
 
   it("starts a promotion series at cutoff-1 without counting the trigger win", async () => {

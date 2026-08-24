@@ -26,11 +26,13 @@ struct HudInput {
     std::string side;
     std::string state;
     std::string banner;
+    int roundNumber = 0;
     double scoreA = 0.0;
     double scoreB = 0.0;
     int clearsA = 0;
     int clearsB = 0;
     bool deathmatch = false;
+    int deathmatchSequence = 0;
     int deathmatchAttemptsUsedA = 0;
     int deathmatchAttemptsUsedB = 0;
     double qualifyingPercent = 100.0;
@@ -44,6 +46,7 @@ struct HudInput {
 
 struct HudPresentation {
     std::string fpsText;
+    std::string roundText;
     std::string ownScoreText;
     std::string opponentScoreText;
     std::array<ClearCheckColor, 3> ownChecks;

@@ -73,6 +73,55 @@ describe("v0.5 placement and LP", () => {
     expect(belowWin.visibleScoreDelta).toBe(13);
     expect(belowLoss.visibleScoreDelta).toBe(-38);
   });
+
+  it("weights LP movement by stronger and weaker opponents", () => {
+    const before = profile({ hiddenMmr: 1_000, visibleRankedScore: 500 });
+    const beatStronger = updateRankedRatingProfile(
+      before, "A", "A", 1_030, policy, tierBandsFixture,
+      { opponentHiddenMmr: 1_500 },
+    );
+    const beatWeaker = updateRankedRatingProfile(
+      before, "A", "A", 1_003, policy, tierBandsFixture,
+      { opponentHiddenMmr: 500 },
+    );
+    const loseToStronger = updateRankedRatingProfile(
+      before, "A", "B", 997, policy, tierBandsFixture,
+      { opponentHiddenMmr: 1_500 },
+    );
+    const loseToWeaker = updateRankedRatingProfile(
+      before, "A", "B", 970, policy, tierBandsFixture,
+      { opponentHiddenMmr: 500 },
+    );
+    expect(beatStronger.visibleScoreDelta).toBeGreaterThan(beatWeaker.visibleScoreDelta!);
+    expect(Math.abs(loseToStronger.visibleScoreDelta!)).toBeLessThan(
+      Math.abs(loseToWeaker.visibleScoreDelta!),
+    );
+
+    const ignoreOpponent = { ...policy, visibleScoreOpponentStrengthWeight: 0 };
+    const ignoredStrong = updateRankedRatingProfile(
+      before, "A", "A", 1_016, ignoreOpponent, tierBandsFixture,
+      { opponentHiddenMmr: 1_500 },
+    );
+    const ignoredWeak = updateRankedRatingProfile(
+      before, "A", "A", 1_016, ignoreOpponent, tierBandsFixture,
+      { opponentHiddenMmr: 500 },
+    );
+    expect(ignoredStrong.visibleScoreDelta).toBe(ignoredWeak.visibleScoreDelta);
+  });
+
+  it("uses the existing LP maximum for a PERFECT WIN", () => {
+    const before = profile({ hiddenMmr: 1_000, visibleRankedScore: 500 });
+    const normal = updateRankedRatingProfile(
+      before, "A", "A", 1_003, policy, tierBandsFixture,
+      { opponentHiddenMmr: 500 },
+    );
+    const perfect = updateRankedRatingProfile(
+      before, "A", "A", 1_068, policy, tierBandsFixture,
+      { opponentHiddenMmr: 500, maximumVisibleScoreGain: true },
+    );
+    expect(normal.visibleScoreDelta).toBe(13);
+    expect(perfect.visibleScoreDelta).toBe(38);
+  });
 });
 
 describe("v0.5 promotion and demotion", () => {
@@ -180,6 +229,52 @@ describe("v0.5 promotion and demotion", () => {
 });
 
 describe("v0.5 hidden MMR performance weighting", () => {
+  it("configures how strongly opponent MMR affects movement", () => {
+    const base = {
+      ratingA: 1_000,
+      placementGamesA: 5,
+      placementGamesB: 5,
+      winner: "A" as const,
+    };
+    const strong = calculateMmrUpdate({ ...base, ratingB: 1_500 }, policy);
+    const weak = calculateMmrUpdate({ ...base, ratingB: 500 }, policy);
+    expect(strong.deltaA).toBeGreaterThan(weak.deltaA);
+
+    const ignoreOpponent = { ...policy, mmrOpponentStrengthWeight: 0 };
+    expect(calculateMmrUpdate({ ...base, ratingB: 1_500 }, ignoreOpponent).deltaA).toBe(
+      calculateMmrUpdate({ ...base, ratingB: 500 }, ignoreOpponent).deltaA,
+    );
+  });
+
+  it("awards the theoretical existing-formula maximum only to the PERFECT WIN winner", () => {
+    const regular = calculateMmrUpdate({
+      ratingA: 1_000,
+      ratingB: 1_000,
+      placementGamesA: 5,
+      placementGamesB: 5,
+      winner: "A",
+      maximumGainSide: "A",
+    }, policy);
+    const placement = calculateMmrUpdate({
+      ratingA: 1_000,
+      ratingB: 1_000,
+      placementGamesA: 0,
+      placementGamesB: 5,
+      winner: "A",
+      maximumGainSide: "A",
+    }, policy);
+    expect(regular.deltaA).toBe(68);
+    expect(regular.deltaB).toBe(-16);
+    expect(placement.deltaA).toBe(136);
+    expect(() => calculateMmrUpdate({
+      ratingA: 1_000,
+      ratingB: 1_000,
+      placementGamesA: 5,
+      placementGamesB: 5,
+      winner: "A",
+      maximumGainSide: "B",
+    }, policy)).toThrow(/match winner/);
+  });
   it("moves more for decisive margins and less when match outcome disagrees with score/clears", () => {
     const close = calculateMmrUpdate({
       ratingA: 1_000,

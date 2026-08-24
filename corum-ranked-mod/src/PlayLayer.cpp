@@ -102,6 +102,7 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         CCLabelBMFont* ownScoreLabel = nullptr;
         std::array<CCSprite*, 3> ownChecks {nullptr, nullptr, nullptr};
         CCLabelBMFont* ownAttemptLabel = nullptr;
+        CCLabelBMFont* roundLabel = nullptr;
         CCLabelBMFont* timerLabel = nullptr;
         CCLabelBMFont* stateLabel = nullptr;
         CCLabelBMFont* opponentScoreLabel = nullptr;
@@ -439,13 +440,16 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         m_fields->ownAttemptLabel->setVisible(false);
         m_fields->hudRoot->addChild(m_fields->ownAttemptLabel, 3);
 
-        // The authoritative clock belongs in the visual center. alpha.15 makes
-        // it larger and center-aligned so FINAL/LAST ATTEMPT timing is readable
-        // without looking away from gameplay.
-        m_fields->timerLabel = label("", "bigFont.fnt", 0.66f, {0.5f, 1.0f}, {size.width / 2.0f, top - 10.0f});
+        m_fields->roundLabel = label("", "goldFont.fnt", 0.25f, {0.5f, 1.0f}, {size.width / 2.0f, top + 1.0f});
+        m_fields->roundLabel->setID("ranked-current-round"_spr);
+        m_fields->roundLabel->setColor(ccc3(255, 221, 90));
+        m_fields->hudRoot->addChild(m_fields->roundLabel, 3);
+
+        // Keep the authoritative clock directly below the current round.
+        m_fields->timerLabel = label("", "bigFont.fnt", 0.62f, {0.5f, 1.0f}, {size.width / 2.0f, top - 13.0f});
         m_fields->timerLabel->setID("ranked-countdown"_spr);
         m_fields->hudRoot->addChild(m_fields->timerLabel, 3);
-        m_fields->stateLabel = label("", "goldFont.fnt", 0.40f, {0.5f, 1.0f}, {size.width / 2.0f, top - 39.0f});
+        m_fields->stateLabel = label("", "goldFont.fnt", 0.38f, {0.5f, 1.0f}, {size.width / 2.0f, top - 41.0f});
         m_fields->stateLabel->setID("ranked-round-state"_spr);
         m_fields->hudRoot->addChild(m_fields->stateLabel, 3);
 
@@ -465,7 +469,7 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         m_fields->hudRoot->addChild(m_fields->qualifyingLabel, 3);
 
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
-        m_fields->debugLabel = label("BOT MATCH · DEBUG", "goldFont.fnt", 0.22f, {0.5f, 1.0f}, {size.width / 2.0f, top});
+        m_fields->debugLabel = label("BOT MATCH · DEBUG", "goldFont.fnt", 0.22f, {0.5f, 0.0f}, {size.width / 2.0f, 8.0f});
         m_fields->debugLabel->setColor(ccc3(255, 145, 105));
         m_fields->debugLabel->setVisible(corum::ranked::RankedRuntime::get().view().match.debug);
         m_fields->hudRoot->addChild(m_fields->debugLabel, 3);
@@ -520,11 +524,13 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
             .side = match.side,
             .state = match.state,
             .banner = match.banner,
+            .roundNumber = match.roundNumber,
             .scoreA = match.scoreA,
             .scoreB = match.scoreB,
             .clearsA = match.clearsA,
             .clearsB = match.clearsB,
             .deathmatch = match.state == "DEATHMATCH_PLAYING",
+            .deathmatchSequence = match.deathmatchSequence,
             .deathmatchAttemptsUsedA = attemptsUsedA,
             .deathmatchAttemptsUsedB = attemptsUsedB,
             .qualifyingPercent = match.currentMap ? match.currentMap->qualifyingPercent : 100.0,
@@ -567,12 +573,15 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
 
         auto const size = CCDirector::sharedDirector()->getWinSize();
         auto const top = corum::ranked::layoutHud(size.width, size.height).topY;
+        m_fields->roundLabel->setString(presentation.roundText.c_str());
         m_fields->timerLabel->setString(presentation.timerText.c_str());
         m_fields->stateLabel->setString(presentation.stateText.c_str());
+        m_fields->roundLabel->setVisible(!presentation.roundText.empty());
         m_fields->timerLabel->setVisible(!presentation.timerText.empty());
         m_fields->stateLabel->setVisible(!presentation.stateText.empty());
-        m_fields->timerLabel->setPosition({size.width / 2.0f, top - 10.0f});
-        m_fields->stateLabel->setPosition({size.width / 2.0f, top - 39.0f});
+        m_fields->roundLabel->setPosition({size.width / 2.0f, top + 1.0f});
+        m_fields->timerLabel->setPosition({size.width / 2.0f, top - 13.0f});
+        m_fields->stateLabel->setPosition({size.width / 2.0f, top - 41.0f});
 
         m_fields->spectatorPanel->setVisible(presentation.spectatorVisible);
         if (presentation.spectatorVisible) {

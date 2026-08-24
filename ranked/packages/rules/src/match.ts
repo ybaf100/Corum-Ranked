@@ -17,6 +17,46 @@ export interface MatchSeriesDecision {
   readonly nextRoundBanner: RoundBanner | null;
 }
 
+export interface PerfectWinRoundSummary {
+  readonly result: RoundResult | null;
+  readonly resultReason: string | null;
+  readonly clearsA: number;
+  readonly clearsB: number;
+}
+
+/**
+ * A PERFECT WIN is a naturally completed match with no lost rounds and at
+ * least one decisive round. Every decisive round must be a real three-Clear
+ * victory (`LAST_ATTEMPT_EXPIRED`); draws are allowed. Forced wins, forfeits,
+ * score wins, and Death Match wins therefore do not qualify.
+ */
+export const perfectThreeClearWinner = (
+  state: MatchSeriesState,
+  rounds: readonly PerfectWinRoundSummary[],
+  clearTarget: number,
+): PlayerSide | null => {
+  if (state.phase !== "MATCH_RESULT" || state.winner === null || clearTarget <= 0) return null;
+  if (rounds.length === 0 || rounds.length !== state.roundResults.length) return null;
+  const winner = state.winner;
+  const loser: PlayerSide = winner === "A" ? "B" : "A";
+  let decisiveWins = 0;
+  for (const [index, round] of rounds.entries()) {
+    if (round.result !== state.roundResults[index]) return null;
+    if (round.result === loser || round.result === null) return null;
+    if (round.result === "DRAW") continue;
+    const winnerClears = winner === "A" ? round.clearsA : round.clearsB;
+    if (
+      round.result !== winner ||
+      round.resultReason !== "LAST_ATTEMPT_EXPIRED" ||
+      winnerClears < clearTarget
+    ) {
+      return null;
+    }
+    decisiveWins += 1;
+  }
+  return decisiveWins > 0 ? winner : null;
+};
+
 export const bannerForRound = (roundNumber: 1 | 2 | 3): RoundBanner => {
   if (roundNumber === 2) return "MATCH_POINT";
   if (roundNumber === 3) return "TIEBREAKER";

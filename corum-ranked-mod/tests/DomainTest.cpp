@@ -189,6 +189,7 @@ void hudTests() {
         .side = "A",
         .state = "ROUND_PLAYING",
         .banner = "MATCH_POINT",
+        .roundNumber = 2,
         .scoreA = 382,
         .scoreB = 417,
         .clearsA = 1,
@@ -212,6 +213,7 @@ void hudTests() {
     assert(hud.opponentChecks[1] == ClearCheckColor::Green);
     assert(hud.opponentChecks[2] == ClearCheckColor::Green);
     assert(hud.timerText == "02:14");
+    assert(hud.roundText == "ROUND 2");
     assert(hud.stateText == "MATCH POINT");
     assert(hud.qualifyingText == "Qualifying : 35%");
 
@@ -319,11 +321,13 @@ void hudTests() {
 
     input.state = "DEATHMATCH_PLAYING";
     input.deathmatch = true;
+    input.deathmatchSequence = 2;
     input.deathmatchAttemptsUsedA = 3;
     input.deathmatchAttemptsUsedB = 2;
     input.spectatorActive = false;
     hud = presentHud(input);
     assert(hud.stateText == "DEATH MATCH");
+    assert(hud.roundText == "DEATH MATCH 2");
     assert(hud.timerText == "3 ATTEMPTS");
     assert(hud.ownAttemptText == "Attempts : 2/3"); // side is still B
     assert(hud.opponentAttemptText == "Attempts : 3/3");

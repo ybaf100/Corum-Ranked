@@ -93,6 +93,13 @@ HudPresentation presentHud(HudInput const& input) {
     }
 
     HudPresentation result;
+    if (input.deathmatch) {
+        result.roundText = input.deathmatchSequence > 0
+            ? "DEATH MATCH " + std::to_string(input.deathmatchSequence)
+            : "DEATH MATCH";
+    } else if (input.roundNumber >= 1 && input.roundNumber <= 3) {
+        result.roundText = "ROUND " + std::to_string(input.roundNumber);
+    }
     result.fpsText = input.renderFps && std::isfinite(*input.renderFps) && *input.renderFps > 0.0
         ? "FPS : " + std::to_string(static_cast<int>(std::lround(*input.renderFps)))
         : "FPS : -";

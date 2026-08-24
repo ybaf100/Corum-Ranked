@@ -948,6 +948,7 @@ void RankedRuntime::parseMatchState(matjson::Value const& root) {
 
     auto const result = root["result"];
     m_view.match.winnerSide = result["winnerSide"].asString().unwrapOr("");
+    m_view.match.perfectWinSide = result["perfectWinSide"].asString().unwrapOr("");
     m_view.match.ownRankedScoreDelta.reset();
     m_view.match.ownRankedScoreAfter.reset();
     m_view.match.rankedScoreDeltaA.reset();

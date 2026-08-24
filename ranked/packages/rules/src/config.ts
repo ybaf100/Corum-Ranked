@@ -159,6 +159,11 @@ export const validateOperationalConfig = (
     if (!(policy.expectedScoreDivisor > 0)) {
       errors.push("mmrPolicy.expectedScoreDivisor must be positive");
     }
+    for (const key of ["mmrOpponentStrengthWeight", "visibleScoreOpponentStrengthWeight"] as const) {
+      if (!Number.isFinite(policy[key]) || policy[key] < 0 || policy[key] > 2) {
+        errors.push(`mmrPolicy.${key} must be between 0 and 2`);
+      }
+    }
     if (!(policy.visibleScoreBaseChange > 0)) errors.push("mmrPolicy.visibleScoreBaseChange must be positive");
     if (!(policy.visibleScoreGapDivisor > 0)) errors.push("mmrPolicy.visibleScoreGapDivisor must be positive");
     if (!(policy.visibleScoreMinFactor > 0)) errors.push("mmrPolicy.visibleScoreMinFactor must be positive");

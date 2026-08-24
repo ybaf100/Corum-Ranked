@@ -215,6 +215,8 @@ assert.equal(mapSheet.rows[0].filter((value) => value === "Qualifying %").length
 assert.equal(spreadsheet.getSheetByName("Ranked Config").rows.find((row) => row[0] === "ruleVersion")[1], "corum-ranked-v0.5");
 assert.equal(spreadsheet.getSheetByName("Ranked Config").rows.find((row) => row[0] === "roundSeconds")[1], 300);
 assert.equal(spreadsheet.getSheetByName("Ranked Config").rows.find((row) => row[0] === "clearTarget")[1], 3);
+assert.equal(spreadsheet.getSheetByName("Ranked Config").rows.find((row) => row[0] === "mmrOpponentStrengthWeight")[1], 1);
+assert.equal(spreadsheet.getSheetByName("Ranked Config").rows.find((row) => row[0] === "visibleScoreOpponentStrengthWeight")[1], 1);
 
 const initial = responseJson();
 assert.equal(initial.ok, true);
@@ -282,6 +284,8 @@ assert.equal(alternate.levelId, "987654321");
 assert.equal(complete.data.operational.rules.rulesVersion, "corum-ranked-v0.5");
 assert.equal(complete.data.operational.rules.roundSeconds, 300);
 assert.equal(complete.data.operational.rules.clearTarget, 3);
+assert.equal(complete.data.operational.mmrPolicy.mmrOpponentStrengthWeight, 1);
+assert.equal(complete.data.operational.mmrPolicy.visibleScoreOpponentStrengthWeight, 1);
 assert.deepEqual(
   complete.data.operational.csmpTierNames,
   ["RED", "AQUA", "BRONZE", "SILVER", "GOLD"],
@@ -296,6 +300,21 @@ assert.equal(complete.data.client.audio.fadeInSeconds, 0);
 assert.equal(complete.data.client.audio.fadeOutSeconds, 0);
 assert.equal(complete.data.client.ui.fadeInSeconds, 0.24);
 assert.equal(complete.data.client.ui.fadeOutSeconds, 0.18);
+
+setConfig("mmrOpponentStrengthWeight", 2.01);
+const invalidMmrOpponentWeight = responseJson();
+assert.equal(invalidMmrOpponentWeight.data.validation.valid, false);
+assert.ok(invalidMmrOpponentWeight.data.validation.errors.some((error) =>
+  error.includes("mmrOpponentStrengthWeight"),
+));
+setConfig("mmrOpponentStrengthWeight", 1);
+setConfig("visibleScoreOpponentStrengthWeight", -0.01);
+const invalidVisibleOpponentWeight = responseJson();
+assert.equal(invalidVisibleOpponentWeight.data.validation.valid, false);
+assert.ok(invalidVisibleOpponentWeight.data.validation.errors.some((error) =>
+  error.includes("visibleScoreOpponentStrengthWeight"),
+));
+setConfig("visibleScoreOpponentStrengthWeight", 1);
 
 // Main Pool is operational data, not a fixed tier-name lookup. With only one
 // Pool 1 map remaining, RED/Main Pool 2 is valid (needs one Pool 1 map), while

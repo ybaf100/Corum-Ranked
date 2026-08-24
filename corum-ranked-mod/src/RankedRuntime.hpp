@@ -123,6 +123,7 @@ struct MatchView {
     RankedProfileView playerBProfile;
     std::string opponentName;
     std::string winnerSide;
+    std::string perfectWinSide;
     std::string cancellationReason;
     std::int64_t stateVersion = 0;
     int roundNumber = 0;

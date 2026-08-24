@@ -1,3 +1,12 @@
+# v0.5.0-beta.4
+
+- Added configurable opponent-strength weighting for Hidden MMR and visible LP, rewarding wins against stronger opponents more and penalizing losses to weaker opponents more.
+- Added server-authoritative `PERFECT WIN` classification for no-loss match wins whose decisive rounds all end through a real three-Clear LAST ATTEMPT result; draws remain eligible while forfeits, forced wins, score wins, and Death Match wins do not.
+- Awards the qualifying winner the existing formulas' theoretical maximum MMR and normal LP gain while leaving the loser's calculation unchanged.
+- Displays `PERFECT WIN` in yellow on the qualifying winner's result card.
+- Displays the current Round, or Death Match sequence, directly above the gameplay timer.
+- Updated the exact client/server gate and workspace package metadata to `v0.5.0-beta.4`.
+
 # v0.5.0-beta.3
 
 - Replaced the unattached selector proxy with automatic activation of the real visible Geometry Dash Play menu item after normalizing its target to the active Ranked `LevelInfoLayer`; Ranked never constructs or switches to `PlayLayer` directly.

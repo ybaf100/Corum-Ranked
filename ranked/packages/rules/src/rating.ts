@@ -1,4 +1,5 @@
 import { RankedDomainError } from "./errors.js";
+import { expectedScoreAgainst } from "./mmr.js";
 import { tierForRating } from "./tier.js";
 import type { DisplayTier, MmrPolicy, PlayerSide, RankedTier, RoundResult, TierBand } from "./types.js";
 
@@ -36,6 +37,13 @@ export interface RankedRatingUpdate {
   readonly demoted: boolean;
 }
 
+export interface RankedRatingContext {
+  /** Opponent Hidden MMR before this match. Omit only for legacy callers/tests. */
+  readonly opponentHiddenMmr?: number;
+  /** Forces the winner to the existing LP formula's maximum normal factor. */
+  readonly maximumVisibleScoreGain?: boolean;
+}
+
 const clamp = (value: number, minimum: number, maximum: number): number =>
   Math.max(minimum, Math.min(maximum, value));
 
@@ -62,6 +70,7 @@ export const updateRankedRatingProfile = (
   hiddenMmrAfter: number,
   policy: MmrPolicy,
   bands: readonly TierBand[],
+  context: RankedRatingContext = {},
 ): RankedRatingUpdate => {
   if (!Number.isFinite(hiddenMmrAfter)) {
     throw new RankedDomainError("INVALID_CONFIG", "hiddenMmrAfter must be finite");
@@ -228,13 +237,32 @@ export const updateRankedRatingProfile = (
     };
   }
 
-  const correction = clamp(
+  const gapCorrection = clamp(
     1 + (hiddenMmrAfter - before.visibleRankedScore) / policy.visibleScoreGapDivisor,
     policy.visibleScoreMinFactor,
     policy.visibleScoreMaxFactor,
   );
+  const gapFactor = won ? gapCorrection : 2 - gapCorrection;
+  const opponentFactor = context.opponentHiddenMmr === undefined
+    ? 1
+    : (() => {
+        const expected = expectedScoreAgainst(
+          before.hiddenMmr,
+          context.opponentHiddenMmr,
+          policy.expectedScoreDivisor,
+          policy.visibleScoreOpponentStrengthWeight,
+        );
+        return won ? 2 * (1 - expected) : 2 * expected;
+      })();
+  const movementFactor = context.maximumVisibleScoreGain && won
+    ? policy.visibleScoreMaxFactor
+    : clamp(
+        gapFactor * opponentFactor,
+        policy.visibleScoreMinFactor,
+        policy.visibleScoreMaxFactor,
+      );
   const magnitude = Math.max(1, Math.round(
-    policy.visibleScoreBaseChange * (won ? correction : 2 - correction),
+    policy.visibleScoreBaseChange * movementFactor,
   ));
   const projected = before.visibleRankedScore + (won ? magnitude : -magnitude);
   const currentIndex = ordered.findIndex((band) => band.tier === before.displayedTier);

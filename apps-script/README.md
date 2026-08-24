@@ -15,7 +15,7 @@
    - 액세스 권한: 모든 사용자
 8. `/exec`로 끝나는 배포 URL을 복사한다.
 
-## Corum Ranked 설정 추가 (v0.5.0-beta.1)
+## Corum Ranked 설정 추가 (v0.5.0-beta.4)
 
 Ranked를 처음 붙일 때 기존 Apps Script 프로젝트의 `Code.gs`를 이 폴더의 최신본으로
 교체하고, 같은 프로젝트에 새 스크립트 파일 `RankedConfig.gs`를 만든 뒤 동명 파일의
@@ -45,14 +45,17 @@ Integration은 계속 `sheet1`(또는 `MAPS_SHEET_NAME`)을 사용하지만 Rank
 `setupCorumRankedConfig()`를 실행하면 대응하는 빈 Seed 행이 생기며, MMR을 입력하기 전에는
 검증이 실패한다. `NONE` Seed는 항상 필요하고 CSMP 티어명은 Ranked 표시 티어와 독립적이다.
 `Ranked Config`에는 배치,
-숨김 MMR, LP 보정, 승급·강등 정책이 생성된다. Seed/MMR/티어 경계/timeout 등 미확정
+숨김 MMR, LP 보정, 승급·강등 정책이 생성된다. `mmrOpponentStrengthWeight`와
+`visibleScoreOpponentStrengthWeight`는 각각 상대 Hidden MMR이 MMR/LP 변동에 미치는 강도이며
+0은 무시, 1은 기본, 2는 2배 반영이다. Seed/MMR/티어 경계/timeout 등 미확정
 운영값을 모두 채우고 검증 오류가 없을 때만 `Ranked Config`의 `enabled`를 `TRUE`로 바꾼다.
 마지막으로 Apps Script를 새 버전으로 재배포해야 `/exec?action=ranked_config`에 반영된다.
 
-v0.5.0-beta.3은 `sheet2`를 Ranked 맵 풀의 단일 기준으로 사용하며 경기 규칙은 5분,
+v0.5.0-beta.4는 `sheet2`를 Ranked 맵 풀의 단일 기준으로 사용하며 경기 규칙은 5분,
 3회 클리어다. 배치 중 LP/MMR은 외부에 공개되지 않고 결과 기록만 `O/X` 트랙으로
 표시된다. 배치 완료 시 숨김 MMR을 기준으로 LP를 확정하되 티어 커트라인의 ±15 LP
-구간에는 배치하지 않는다.
+구간에는 배치하지 않는다. 무패이며 모든 결정승이 실제 3-Clear 종료인 승자는 기존
+MMR/LP 공식의 최대 획득량을 받고 결과창에 노란 `PERFECT WIN`이 표시된다.
 
 ## 플레이어 자동 등록
 

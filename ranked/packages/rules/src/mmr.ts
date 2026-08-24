@@ -4,6 +4,7 @@ import type {
   CsmpTier,
   DisplayTier,
   MmrPolicy,
+  PlayerSide,
   RoundResult,
   TierBand,
 } from "./types.js";
@@ -78,8 +79,26 @@ const roundDelta = (value: number, policy: MmrPolicy): number => {
   return Math.round(value);
 };
 
-const expectedScore = (rating: number, opponentRating: number, divisor: number): number =>
+const clamp = (value: number, minimum: number, maximum: number): number =>
+  Math.max(minimum, Math.min(maximum, value));
+
+const rawExpectedScore = (rating: number, opponentRating: number, divisor: number): number =>
   1 / (1 + 10 ** ((opponentRating - rating) / divisor));
+
+/**
+ * Scales the distance from an even 50% expectation. Weight 0 treats every
+ * opponent as equal, 1 preserves the existing Elo result, and 2 doubles the
+ * configured opponent-strength effect while keeping the probability bounded.
+ */
+export const expectedScoreAgainst = (
+  rating: number,
+  opponentRating: number,
+  divisor: number,
+  weight: number,
+): number => {
+  const expected = rawExpectedScore(rating, opponentRating, divisor);
+  return clamp(0.5 + (expected - 0.5) * weight, 0, 1);
+};
 
 export interface MmrUpdateInput {
   readonly ratingA: number;
@@ -94,6 +113,8 @@ export interface MmrUpdateInput {
   /** Positive is a win streak, negative is a loss streak, zero is neutral. */
   readonly resultStreakA?: number;
   readonly resultStreakB?: number;
+  /** Winner that receives the theoretical maximum positive delta. */
+  readonly maximumGainSide?: PlayerSide | null;
 }
 
 export interface MmrUpdateResult {
@@ -105,6 +126,7 @@ export interface MmrUpdateResult {
   readonly streakFactorA: number;
   readonly streakFactorB: number;
   readonly outcomeDisagreement: boolean;
+  readonly maximumGainSide: PlayerSide | null;
 }
 
 const normalizedDifference = (left: number, right: number): number =>
@@ -127,6 +149,13 @@ export const calculateMmrUpdate = (
 ): MmrUpdateResult => {
   if (policy.algorithm !== "ELO_V1") {
     throw new RankedDomainError("INVALID_CONFIG", "Unsupported MMR algorithm");
+  }
+  const maximumGainSide = input.maximumGainSide ?? null;
+  if (maximumGainSide !== null && input.winner !== maximumGainSide) {
+    throw new RankedDomainError(
+      "INVALID_MATCH_TRANSITION",
+      "Maximum MMR gain can only be assigned to the match winner",
+    );
   }
   const kA =
     input.placementGamesA < policy.placementGames
@@ -168,16 +197,35 @@ export const calculateMmrUpdate = (
     input.winner === "DRAW" ? null : input.winner === "B",
     policy,
   );
-  const deltaA = roundDelta(
-    kA * (actualA - expectedScore(input.ratingA, input.ratingB, policy.expectedScoreDivisor)) *
-      performanceFactor * streakFactorA,
+  const expectedA = expectedScoreAgainst(
+    input.ratingA,
+    input.ratingB,
+    policy.expectedScoreDivisor,
+    policy.mmrOpponentStrengthWeight,
+  );
+  const expectedB = expectedScoreAgainst(
+    input.ratingB,
+    input.ratingA,
+    policy.expectedScoreDivisor,
+    policy.mmrOpponentStrengthWeight,
+  );
+  const maximumPerformanceFactor =
+    1 + policy.scoreMarginMaxBonus + policy.clearMarginMaxBonus;
+  const maximumStreakFactor = 1 + policy.streakMaxBonus;
+  const normalDeltaA = roundDelta(
+    kA * (actualA - expectedA) * performanceFactor * streakFactorA,
     policy,
   );
-  const deltaB = roundDelta(
-    kB * (actualB - expectedScore(input.ratingB, input.ratingA, policy.expectedScoreDivisor)) *
-      performanceFactor * streakFactorB,
+  const normalDeltaB = roundDelta(
+    kB * (actualB - expectedB) * performanceFactor * streakFactorB,
     policy,
   );
+  const deltaA = maximumGainSide === "A"
+    ? roundDelta(kA * maximumPerformanceFactor * maximumStreakFactor, policy)
+    : normalDeltaA;
+  const deltaB = maximumGainSide === "B"
+    ? roundDelta(kB * maximumPerformanceFactor * maximumStreakFactor, policy)
+    : normalDeltaB;
   return {
     deltaA,
     deltaB,
@@ -187,5 +235,6 @@ export const calculateMmrUpdate = (
     streakFactorA,
     streakFactorB,
     outcomeDisagreement,
+    maximumGainSide,
   };
 };

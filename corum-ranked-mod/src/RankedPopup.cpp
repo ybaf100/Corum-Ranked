@@ -1713,8 +1713,22 @@ class CorumRankedLayer final : public CCLayerColor {
         auto* rightFinal = makeLabel(fmt::format("{}", match.roundWinsB), 0.82f, {size.width / 2.0f + 105.0f, size.height / 2.0f + 18.0f}, match.winnerSide == "B" ? kGreen : kRed);
         m_root->addChild(leftFinal, 4);
         m_root->addChild(rightFinal, 4);
-        auto* leftResult = makeLabel(match.winnerSide == "A" ? "WIN" : "LOSE", 0.35f, {100.0f, 38.0f}, match.winnerSide == "A" ? kGreen : kRed, "goldFont.fnt");
-        auto* rightResult = makeLabel(match.winnerSide == "B" ? "WIN" : "LOSE", 0.35f, {size.width - 100.0f, 38.0f}, match.winnerSide == "B" ? kGreen : kRed, "goldFont.fnt");
+        auto const leftPerfect = match.perfectWinSide == "A";
+        auto const rightPerfect = match.perfectWinSide == "B";
+        auto* leftResult = makeLabel(
+            leftPerfect ? "PERFECT WIN" : match.winnerSide == "A" ? "WIN" : "LOSE",
+            leftPerfect ? 0.28f : 0.35f,
+            {100.0f, 38.0f},
+            leftPerfect ? kGold : match.winnerSide == "A" ? kGreen : kRed,
+            "goldFont.fnt"
+        );
+        auto* rightResult = makeLabel(
+            rightPerfect ? "PERFECT WIN" : match.winnerSide == "B" ? "WIN" : "LOSE",
+            rightPerfect ? 0.28f : 0.35f,
+            {size.width - 100.0f, 38.0f},
+            rightPerfect ? kGold : match.winnerSide == "B" ? kGreen : kRed,
+            "goldFont.fnt"
+        );
         m_root->addChild(leftResult, 4);
         m_root->addChild(rightResult, 4);
 

@@ -6,6 +6,7 @@ import {
   bannerForRound,
   createMatchSeries,
   evaluateDeathmatch,
+  perfectThreeClearWinner,
   selectDeathmatchMap,
 } from "../src/index.js";
 import { allPoolMaps, makeMap } from "./fixtures.js";
@@ -53,6 +54,73 @@ describe("Bo3 match progression", () => {
       phase: "MATCH_RESULT",
       winner: "B",
     });
+  });
+});
+
+describe("PERFECT WIN classification", () => {
+  const threeClear = (result: "A" | "B", clearsA: number, clearsB: number) => ({
+    result,
+    resultReason: "LAST_ATTEMPT_EXPIRED",
+    clearsA,
+    clearsB,
+  });
+  const draw = {
+    result: "DRAW" as const,
+    resultReason: "LAST_ATTEMPT_CLEAR",
+    clearsA: 3,
+    clearsB: 3,
+  };
+
+  it("accepts two three-Clear wins with no lost round", () => {
+    let state = createMatchSeries();
+    state = applyRoundResult(state, "A").state;
+    state = applyRoundResult(state, "A").state;
+    expect(perfectThreeClearWinner(
+      state,
+      [threeClear("A", 3, 1), threeClear("A", 3, 2)],
+      3,
+    )).toBe("A");
+  });
+
+  it("accepts two draws followed by a three-Clear win", () => {
+    let state = createMatchSeries();
+    state = applyRoundResult(state, "DRAW").state;
+    state = applyRoundResult(state, "DRAW").state;
+    state = applyRoundResult(state, "B").state;
+    expect(perfectThreeClearWinner(
+      state,
+      [draw, draw, threeClear("B", 2, 3)],
+      3,
+    )).toBe("B");
+  });
+
+  it("rejects any lost round and any non-three-Clear decisive win", () => {
+    let withLoss = createMatchSeries();
+    withLoss = applyRoundResult(withLoss, "A").state;
+    withLoss = applyRoundResult(withLoss, "B").state;
+    withLoss = applyRoundResult(withLoss, "A").state;
+    expect(perfectThreeClearWinner(
+      withLoss,
+      [threeClear("A", 3, 0), threeClear("B", 1, 3), threeClear("A", 3, 2)],
+      3,
+    )).toBeNull();
+
+    let scoreWin = createMatchSeries();
+    scoreWin = applyRoundResult(scoreWin, "A").state;
+    scoreWin = applyRoundResult(scoreWin, "A").state;
+    expect(perfectThreeClearWinner(scoreWin, [
+      { ...threeClear("A", 3, 0), resultReason: "SCORE" },
+      threeClear("A", 3, 1),
+    ], 3)).toBeNull();
+  });
+
+  it("rejects a Death Match winner after three draws", () => {
+    let state = createMatchSeries();
+    state = applyRoundResult(state, "DRAW").state;
+    state = applyRoundResult(state, "DRAW").state;
+    state = applyRoundResult(state, "DRAW").state;
+    state = applyDeathmatchWinner(state, "A");
+    expect(perfectThreeClearWinner(state, [draw, draw, draw], 3)).toBeNull();
   });
 });
 

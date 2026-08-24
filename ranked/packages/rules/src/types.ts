@@ -66,11 +66,15 @@ export interface MmrPolicy {
   readonly placementKFactor: number;
   readonly regularKFactor: number;
   readonly expectedScoreDivisor: number;
+  /** 0 ignores opponent strength, 1 preserves Elo V1, 2 doubles its sensitivity. */
+  readonly mmrOpponentStrengthWeight: number;
   readonly deltaRounding: "NEAREST" | "FLOOR" | "CEIL";
   readonly visibleScoreBaseChange: number;
   readonly visibleScoreGapDivisor: number;
   readonly visibleScoreMinFactor: number;
   readonly visibleScoreMaxFactor: number;
+  /** 0 ignores opponent strength for LP, 1 mirrors Elo V1, 2 doubles its sensitivity. */
+  readonly visibleScoreOpponentStrengthWeight: number;
   readonly scoreMarginMaxBonus: number;
   readonly clearMarginMaxBonus: number;
   readonly outcomeDisagreementFactor: number;

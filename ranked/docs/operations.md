@@ -10,6 +10,7 @@ Apps Script `ranked_config`가 운영 설정의 source입니다. 서버는 마�
 - 각 표시 tier의 실제 후보 분포를 정하는 `Main Pool`
 - 표시 tier의 `minInclusive` / `maxExclusive`
 - placement 횟수, placement/regular K-factor, expected-score divisor, 반올림 정책
+- 상대 강도 가중치 `mmrOpponentStrengthWeight`, `visibleScoreOpponentStrengthWeight` (0~2)
 - session, ready, reconnect, queue/match heartbeat, orphan attempt, result 화면 timeout
 - 초기/초당 확장/최대 matchmaking MMR 범위
 - ready/reconnect/restart 실패 정책
@@ -31,6 +32,8 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f ranked/migrations/0006_v050_dynamic_c
 ```
 
 이미 beta.2 schema가 적용된 운영 DB를 beta.3으로 올릴 때는 **서버 재배포 전에 `0006_v050_dynamic_csmp_tiers.sql`을 추가 적용**합니다. 이 변경은 기존 프로필의 Seed를 다시 적용하지 않고 저장된 최초 CSMP 티어명을 그대로 보존합니다. Migration은 transaction 안에서 실행됩니다.
+
+beta.3에서 beta.4로 올릴 때 추가 DB migration은 없습니다. `PERFECT WIN` 판정은 기존 `ranked_rounds` 결과와 `rating_presentation` JSON을 사용합니다. 최신 `RankedConfig.gs`를 배포하고 `setupCorumRankedConfig()`를 다시 실행해 두 상대 강도 가중치 행을 추가한 뒤, 값이 0~2인지 검증합니다. 기존 입력 행은 덮어쓰지 않습니다.
 
 `Ranked Tiers.Main Pool`은 후보 추첨의 실제 입력입니다. Main Pool 1은 Pool 1/2/3에서 2/2/1개, 2~5는 이전/본/다음 Pool에서 1/3/1개, Main Pool 6은 Pool 4/5/6에서 1/2/2개를 요구합니다. `CSMP Tiers`의 모든 이름에는 `Ranked CSMP Seed`의 대응 MMR이 필요하며 `NONE` 기준 Seed, 중복 없는 정규화 이름, 유한 숫자가 모두 확인되어야 queue가 열립니다.
 

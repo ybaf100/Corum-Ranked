@@ -100,11 +100,13 @@ var CORUM_RANKED_CONFIG_DEFAULTS = Object.freeze([
   Object.freeze(["placementKFactor", "", "운영 확정 필요"]),
   Object.freeze(["regularKFactor", "", "운영 확정 필요"]),
   Object.freeze(["expectedScoreDivisor", "", "운영 확정 필요"]),
+  Object.freeze(["mmrOpponentStrengthWeight", 1, "상대 MMR 반영 강도: 0=무시, 1=기본, 2=2배"]),
   Object.freeze(["deltaRounding", "", "NEAREST / FLOOR / CEIL 중 운영 확정"]),
   Object.freeze(["visibleScoreBaseChange", 25, "일반 경기 기본 LP 변동"]),
   Object.freeze(["visibleScoreGapDivisor", 400, "MMR-LP 보정 간격"]),
   Object.freeze(["visibleScoreMinFactor", 0.5, "LP 변동 최소 배율"]),
   Object.freeze(["visibleScoreMaxFactor", 1.5, "LP 변동 최대 배율"]),
+  Object.freeze(["visibleScoreOpponentStrengthWeight", 1, "상대 MMR의 LP 반영 강도: 0=무시, 1=기본, 2=2배"]),
   Object.freeze(["scoreMarginMaxBonus", 0.35, "스코어 차이 MMR 최대 추가 배율"]),
   Object.freeze(["clearMarginMaxBonus", 0.35, "Clear 차이 MMR 최대 추가 배율"]),
   Object.freeze(["outcomeDisagreementFactor", 0.6, "승패와 스코어/Clear 우세가 엇갈릴 때 MMR 배율"]),
@@ -618,10 +620,12 @@ function readRankedMmrPolicy_(config) {
   var expectedScoreDivisor = rankedNumber_(config.expectedScoreDivisor);
   var deltaRounding = rankedText_(config.deltaRounding).toUpperCase();
   var extra = {
+    mmrOpponentStrengthWeight: rankedNumber_(config.mmrOpponentStrengthWeight),
     visibleScoreBaseChange: rankedNumber_(config.visibleScoreBaseChange),
     visibleScoreGapDivisor: rankedNumber_(config.visibleScoreGapDivisor),
     visibleScoreMinFactor: rankedNumber_(config.visibleScoreMinFactor),
     visibleScoreMaxFactor: rankedNumber_(config.visibleScoreMaxFactor),
+    visibleScoreOpponentStrengthWeight: rankedNumber_(config.visibleScoreOpponentStrengthWeight),
     scoreMarginMaxBonus: rankedNumber_(config.scoreMarginMaxBonus),
     clearMarginMaxBonus: rankedNumber_(config.clearMarginMaxBonus),
     outcomeDisagreementFactor: rankedNumber_(config.outcomeDisagreementFactor),
@@ -644,11 +648,13 @@ function readRankedMmrPolicy_(config) {
     placementKFactor: placementKFactor,
     regularKFactor: regularKFactor,
     expectedScoreDivisor: expectedScoreDivisor,
+    mmrOpponentStrengthWeight: extra.mmrOpponentStrengthWeight,
     deltaRounding: deltaRounding,
     visibleScoreBaseChange: extra.visibleScoreBaseChange,
     visibleScoreGapDivisor: extra.visibleScoreGapDivisor,
     visibleScoreMinFactor: extra.visibleScoreMinFactor,
     visibleScoreMaxFactor: extra.visibleScoreMaxFactor,
+    visibleScoreOpponentStrengthWeight: extra.visibleScoreOpponentStrengthWeight,
     scoreMarginMaxBonus: extra.scoreMarginMaxBonus,
     clearMarginMaxBonus: extra.clearMarginMaxBonus,
     outcomeDisagreementFactor: extra.outcomeDisagreementFactor,
@@ -793,6 +799,11 @@ function validateCorumRankedConfig_(
     });
     ["visibleScoreBaseChange", "visibleScoreGapDivisor", "visibleScoreMinFactor", "visibleScoreMaxFactor"].forEach(function (key) {
       if (!(mmr[key] > 0)) errors.push(key + "는 양수여야 합니다.");
+    });
+    ["mmrOpponentStrengthWeight", "visibleScoreOpponentStrengthWeight"].forEach(function (key) {
+      if (!Number.isFinite(mmr[key]) || mmr[key] < 0 || mmr[key] > 2) {
+        errors.push(key + "는 0 이상 2 이하여야 합니다.");
+      }
     });
     ["scoreMarginMaxBonus", "clearMarginMaxBonus", "streakStep", "streakMaxBonus",
       "promotionScoreBonus", "promotionFailurePenalty", "demotionScorePenalty"].forEach(function (key) {
