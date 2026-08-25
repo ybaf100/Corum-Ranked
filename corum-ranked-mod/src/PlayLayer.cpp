@@ -562,7 +562,7 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
             m_fields->hudRoot,
             "",
             "black",
-            1.02f,
+            0.60f * 1.70f,
             {0.5f, 1.0f},
             {size.width / 2.0f, top - 18.0f},
             corum::ranked::ui::Text
