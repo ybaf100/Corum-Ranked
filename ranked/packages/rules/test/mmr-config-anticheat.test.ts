@@ -109,6 +109,13 @@ describe("operational config and MMR", () => {
     expect(displayedTierForProfile(2_500, 5, policy, tierBandsFixture)).toBe("BRONZE");
   });
 
+  it("maps negative Hidden MMR to the lowest displayed tier after placement", () => {
+    const policy = completeOperationalConfig().mmrPolicy!;
+    expect(displayedTierForProfile(-271, policy.placementGames, policy, tierBandsFixture)).toBe(
+      "RED",
+    );
+  });
+
   it("uses explicitly configured placement and normal K factors", () => {
     const policy = completeOperationalConfig().mmrPolicy!;
     const result = calculateMmrUpdate(

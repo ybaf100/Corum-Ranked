@@ -358,15 +358,27 @@ csmpTierSheet.rows.pop();
 
 setConfig("rankedAudioMenuSongId", 123456);
 setConfig("rankedAudioMenuStartSeconds", 42.5);
+setConfig("rankedAudioDemotionWarningLobbySongId", 123457);
+setConfig("rankedAudioDemotionWarningLobbyStartSeconds", 5);
+setConfig("rankedAudioPromotionLobbySongId", 123458);
+setConfig("rankedAudioPromotionLobbyStartSeconds", 7.5);
 setConfig("rankedAudioMatchSongId", 234567);
 setConfig("rankedAudioMatchStartSeconds", 10);
+setConfig("rankedAudioRound3DeathmatchWaitSongId", 234568);
+setConfig("rankedAudioRound3DeathmatchWaitStartSeconds", 12);
 setConfig("rankedAudioEnabled", true);
 const withResources = responseJson();
 assert.equal(withResources.data.validation.valid, true, withResources.data.validation.errors.join("\n"));
 assert.equal(withResources.data.client.audio.enabled, true);
 assert.deepEqual(
   withResources.data.client.audio.resources.map((resource) => [resource.key, resource.songId, resource.startSeconds]),
-  [["menu", 123456, 42.5], ["match", 234567, 10]],
+  [
+    ["menu", 123456, 42.5],
+    ["menu_demotion_warning", 123457, 5],
+    ["menu_promotion", 123458, 7.5],
+    ["match", 234567, 10],
+    ["round3_deathmatch_wait", 234568, 12],
+  ],
 );
 
 const repeated = responseJson();

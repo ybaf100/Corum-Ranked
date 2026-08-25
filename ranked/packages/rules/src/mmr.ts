@@ -1,5 +1,5 @@
 import { RankedDomainError } from "./errors.js";
-import { tierForRating } from "./tier.js";
+import { tierForHiddenMmr } from "./tier.js";
 import type {
   CsmpTier,
   DisplayTier,
@@ -71,7 +71,7 @@ export const displayedTierForProfile = (
 ): DisplayTier =>
   placementGamesPlayed < policy.placementGames
     ? "UNRANKED"
-    : tierForRating(hiddenMmr, tierBands);
+    : tierForHiddenMmr(hiddenMmr, tierBands);
 
 const roundDelta = (value: number, policy: MmrPolicy): number => {
   if (policy.deltaRounding === "FLOOR") return Math.floor(value);

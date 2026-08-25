@@ -131,11 +131,17 @@ var CORUM_RANKED_CONFIG_DEFAULTS = Object.freeze([
 
   // Ranked client presentation/audio. Song IDs are Geometry Dash custom-song IDs.
   // Keep rankedAudioEnabled FALSE until at least one valid song ID is configured.
-  Object.freeze(["rankedAudioEnabled", false, "Ranked 메뉴/매칭/결과 BGM 사용"]),
-  Object.freeze(["rankedAudioMenuSongId", "", "메인/큐 BGM Geometry Dash Song ID"]),
-  Object.freeze(["rankedAudioMenuStartSeconds", 0, "메인/큐 BGM 시작 지점(초)"]),
-  Object.freeze(["rankedAudioMatchSongId", "", "Match Found/Ban/준비/관전 BGM Song ID"]),
-  Object.freeze(["rankedAudioMatchStartSeconds", 0, "매칭 BGM 시작 지점(초)"]),
+  Object.freeze(["rankedAudioEnabled", false, "Ranked 로비/라운드 대기/결과 BGM 사용"]),
+  Object.freeze(["rankedAudioMenuSongId", "", "일반 로비 BGM Geometry Dash Song ID"]),
+  Object.freeze(["rankedAudioMenuStartSeconds", 0, "일반 로비 BGM 시작 지점(초)"]),
+  Object.freeze(["rankedAudioDemotionWarningLobbySongId", "", "강등 경고 상태 로비 BGM Song ID (비어 있으면 일반 로비 사용)"]),
+  Object.freeze(["rankedAudioDemotionWarningLobbyStartSeconds", 0, "강등 경고 로비 BGM 시작 지점(초)"]),
+  Object.freeze(["rankedAudioPromotionLobbySongId", "", "승급전 상태 로비 BGM Song ID (비어 있으면 일반 로비 사용)"]),
+  Object.freeze(["rankedAudioPromotionLobbyStartSeconds", 0, "승급전 로비 BGM 시작 지점(초)"]),
+  Object.freeze(["rankedAudioMatchSongId", "", "1·2라운드 / Match Found / Ban / 준비 대기 BGM Song ID"]),
+  Object.freeze(["rankedAudioMatchStartSeconds", 0, "1·2라운드 대기 BGM 시작 지점(초)"]),
+  Object.freeze(["rankedAudioRound3DeathmatchWaitSongId", "", "3라운드 및 Death Match 대기 BGM Song ID (비어 있으면 1·2라운드 BGM 사용)"]),
+  Object.freeze(["rankedAudioRound3DeathmatchWaitStartSeconds", 0, "3라운드/Death Match 대기 BGM 시작 지점(초)"]),
   Object.freeze(["rankedAudioWinSongId", "", "승리 결과 BGM Song ID"]),
   Object.freeze(["rankedAudioWinStartSeconds", 0, "승리 결과 BGM 시작 지점(초)"]),
   Object.freeze(["rankedAudioLoseSongId", "", "패배 결과 BGM Song ID"]),
@@ -723,8 +729,11 @@ function readRankedClientPresentation_(config) {
   }
 
   var resources = [
-    resource_("menu", "Ranked Theme", "rankedAudioMenuSongId", "rankedAudioMenuStartSeconds", true),
-    resource_("match", "Match Theme", "rankedAudioMatchSongId", "rankedAudioMatchStartSeconds", true),
+    resource_("menu", "Lobby Theme", "rankedAudioMenuSongId", "rankedAudioMenuStartSeconds", true),
+    resource_("menu_demotion_warning", "Demotion Warning Lobby Theme", "rankedAudioDemotionWarningLobbySongId", "rankedAudioDemotionWarningLobbyStartSeconds", true),
+    resource_("menu_promotion", "Promotion Lobby Theme", "rankedAudioPromotionLobbySongId", "rankedAudioPromotionLobbyStartSeconds", true),
+    resource_("match", "Round 1/2 Theme", "rankedAudioMatchSongId", "rankedAudioMatchStartSeconds", true),
+    resource_("round3_deathmatch_wait", "Round 3 / Death Match Wait Theme", "rankedAudioRound3DeathmatchWaitSongId", "rankedAudioRound3DeathmatchWaitStartSeconds", true),
     resource_("result_win", "Result Theme", "rankedAudioWinSongId", "rankedAudioWinStartSeconds", false),
     resource_("result_lose", "Result Theme", "rankedAudioLoseSongId", "rankedAudioLoseStartSeconds", false),
   ].filter(function (item) { return item !== null; });

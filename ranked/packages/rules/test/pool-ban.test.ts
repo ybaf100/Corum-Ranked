@@ -18,6 +18,13 @@ describe("effective tier and candidate pools", () => {
     });
   });
 
+  it("projects an effective Hidden MMR below the LP floor to the lowest tier", () => {
+    expect(effectiveTierForMatch(-21, 0, tierBandsFixture)).toEqual({
+      averageRating: -10.5,
+      tier: "RED",
+    });
+  });
+
   it.each(["RED", "AQUA", "BRONZE", "SILVER", "GOLD"] as const)(
     "%s selects exactly the documented five-map distribution",
     (tier) => {

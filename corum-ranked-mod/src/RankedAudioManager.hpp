@@ -18,8 +18,11 @@ namespace corum::ranked {
 
 enum class RankedAudioMode {
     Silent,
-    Menu,
-    Match,
+    Lobby,
+    LobbyDemotionWarning,
+    LobbyPromotion,
+    Round12,
+    Round3DeathmatchWait,
     ResultWin,
     ResultLose,
 };

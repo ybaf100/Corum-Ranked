@@ -370,6 +370,56 @@ describe("development-only Bot Match using the production Ranked engine", () => 
     };
   };
 
+  it("creates an EASY bot match when Hidden MMR falls below the visible LP floor", async () => {
+    const player = await contextFor("9320");
+    await database.query(
+      `UPDATE ranked_profiles
+       SET hidden_mmr = -21, visible_ranked_score = 0
+       WHERE player_id = $1`,
+      [player.playerId],
+    );
+
+    const creation = await queue.createDebugBotMatch(
+      { ...player, hiddenMmr: -21 },
+      { installedMods: structuredClone(cleanMods) },
+      {
+        difficulty: "EASY",
+        scenario: "NORMAL_MATCH",
+        botBan: "NO_BAN",
+        sendDiscordEvents: false,
+        mmrOffset: -250,
+      },
+    );
+
+    expect(creation.botContext.hiddenMmr).toBe(-271);
+    expect(creation.botContext.displayedTier).toBe("RED");
+
+    const botProfile = await database.query<{
+      hidden_mmr: number;
+      visible_ranked_score: number;
+    }>(
+      "SELECT hidden_mmr, visible_ranked_score FROM ranked_profiles WHERE player_id = $1",
+      [creation.botContext.playerId],
+    );
+    expect(Number(botProfile.rows[0]?.hidden_mmr)).toBe(-271);
+    expect(Number(botProfile.rows[0]?.visible_ranked_score)).toBe(0);
+
+    const match = await database.query<{
+      effective_rating_average: number;
+      effective_tier: string;
+      mmr_a_before: number;
+      mmr_b_before: number;
+    }>(
+      `SELECT effective_rating_average, effective_tier, mmr_a_before, mmr_b_before
+       FROM ranked_matches WHERE id = $1`,
+      [creation.matchId],
+    );
+    expect(Number(match.rows[0]?.mmr_a_before)).toBe(-21);
+    expect(Number(match.rows[0]?.mmr_b_before)).toBe(-271);
+    expect(Number(match.rows[0]?.effective_rating_average)).toBe(-146);
+    expect(match.rows[0]?.effective_tier).toBe("RED");
+  });
+
   it("rejects an incorrect server-side password without creating a match", async () => {
     const player = await contextFor("9301");
     await expect(debug.create(player, {

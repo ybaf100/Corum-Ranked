@@ -401,11 +401,22 @@ RankedAudioResourceView const* RankedAudioManager::resourceForMode(RankedAudioMo
         return nullptr;
     };
     switch (mode) {
-        case RankedAudioMode::Menu: return first({"menu"});
-        case RankedAudioMode::Match: return first({"match", "menu"});
-        case RankedAudioMode::ResultWin: return first({"result_win", "match", "menu"});
-        case RankedAudioMode::ResultLose: return first({"result_lose", "match", "menu"});
-        case RankedAudioMode::Silent: break;
+        case RankedAudioMode::Lobby:
+            return first({"menu"});
+        case RankedAudioMode::LobbyDemotionWarning:
+            return first({"menu_demotion_warning", "menu"});
+        case RankedAudioMode::LobbyPromotion:
+            return first({"menu_promotion", "menu"});
+        case RankedAudioMode::Round12:
+            return first({"match", "menu"});
+        case RankedAudioMode::Round3DeathmatchWait:
+            return first({"round3_deathmatch_wait", "match", "menu"});
+        case RankedAudioMode::ResultWin:
+            return first({"result_win", "match", "menu"});
+        case RankedAudioMode::ResultLose:
+            return first({"result_lose", "match", "menu"});
+        case RankedAudioMode::Silent:
+            break;
     }
     return nullptr;
 }

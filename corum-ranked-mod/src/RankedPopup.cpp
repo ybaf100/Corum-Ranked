@@ -513,6 +513,16 @@ class CorumRankedLayer final : public CCLayerColor {
         if (showResourceGate()) return;
 
         auto const& view = RankedRuntime::get().view();
+        auto const lobbyMode = [&view]() {
+            // A promotion series is the stronger lobby state. In normal operation
+            // promotion and demotion warning are mutually exclusive, but this
+            // precedence keeps the audio deterministic if stale profile data ever
+            // exposes both flags during a refresh.
+            if (view.promotion.active) return RankedAudioMode::LobbyPromotion;
+            if (view.demotionWarning) return RankedAudioMode::LobbyDemotionWarning;
+            return RankedAudioMode::Lobby;
+        };
+
         if (view.stage == RuntimeStage::Matched) {
             auto const& state = view.match.state;
             auto const gameplayTransition =
@@ -524,21 +534,43 @@ class CorumRankedLayer final : public CCLayerColor {
                 state == "DEATHMATCH_PLAYING";
             if ((m_enteringSongGate || m_enteringLevel) && gameplayTransition) return;
         }
+
         if (m_page != Page::Live || view.stage != RuntimeStage::Matched) {
-            audio.setMode(RankedAudioMode::Menu);
+            audio.setMode(lobbyMode());
             return;
         }
+
         if (view.match.state == "MATCH_RESULT") {
             audio.setMode(view.match.winnerSide == view.match.side
                 ? RankedAudioMode::ResultWin
                 : RankedAudioMode::ResultLose);
             return;
         }
+
         if (view.match.state == "CANCELLED") {
-            audio.setMode(RankedAudioMode::Match);
+            audio.setMode(lobbyMode());
             return;
         }
-        audio.setMode(RankedAudioMode::Match);
+
+        auto const& state = view.match.state;
+        auto const isDeathmatchWait =
+            state == "DEATHMATCH_PREPARE" ||
+            state == "DEATHMATCH_PLAYING" ||
+            state == "DEATHMATCH_RESULT";
+        auto const isRoundThree =
+            view.match.roundNumber >= 3 &&
+            (
+                state == "ROUND_PREPARE" ||
+                state == "ROUND_PLAYING" ||
+                state == "FINAL_ATTEMPT_WINDOW" ||
+                state == "LAST_ATTEMPT_WINDOW" ||
+                state == "ROUND_SETTLING" ||
+                state == "ROUND_RESULT"
+            );
+
+        audio.setMode(isDeathmatchWait || isRoundThree
+            ? RankedAudioMode::Round3DeathmatchWait
+            : RankedAudioMode::Round12);
     }
 
     void syncPhase() {
@@ -2210,7 +2242,7 @@ class CorumRankedLayer final : public CCLayerColor {
         m_resourceGateAcknowledged = true;
         m_resourceGateWasMissing = false;
         m_resourceGateMenuRestored = false;
-        RankedAudioManager::get().setMode(RankedAudioMode::Menu);
+        syncAudioMode();
     }
 
     void onJoin(CCObject*) {

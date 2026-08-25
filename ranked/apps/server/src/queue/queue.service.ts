@@ -190,7 +190,10 @@ export class QueueService {
         throw new ConflictException("Leave the public Ranked queue before starting Debug Bot Match");
       }
 
-      const botRating = Math.max(0, Math.round(Number(profile.hidden_mmr) + settings.mmrOffset));
+      // Hidden MMR is an internal Elo value and may legitimately be negative.
+      // Keep the configured bot offset intact instead of flattening low-MMR
+      // bots to zero; visible LP is clamped separately below.
+      const botRating = Math.round(Number(profile.hidden_mmr) + settings.mmrOffset);
       const botPlayerId = this.ids.next();
       const botSessionId = this.ids.next();
       const botAccount = await transaction.query<{ id: string }>(
@@ -205,6 +208,10 @@ export class QueueService {
         mmrPolicy,
         config.operational.tierBands,
       );
+      const visibleScoreFloor = Math.min(
+        ...config.operational.tierBands.map((band) => band.minInclusive),
+      );
+      const botVisibleScore = Math.max(visibleScoreFloor, botRating);
       const botName = `BOT ${settings.difficulty}`;
       await transaction.query(
         `INSERT INTO ranked_players (id, gd_account_id, gd_username, is_bot)
@@ -215,8 +222,15 @@ export class QueueService {
         `INSERT INTO ranked_profiles (
            player_id, displayed_tier, hidden_mmr, visible_ranked_score,
            placement_games, initial_csmp_tier, initial_seed_mmr, seed_applied_at
-         ) VALUES ($1, $2, $3, $3, $4, 'NONE', $3, $5)`,
-        [botPlayerId, displayedTier, botRating, placementGames, now.toISOString()],
+         ) VALUES ($1, $2, $3, $4, $5, 'NONE', $3, $6)`,
+        [
+          botPlayerId,
+          displayedTier,
+          botRating,
+          botVisibleScore,
+          placementGames,
+          now.toISOString(),
+        ],
       );
       await transaction.query(
         `INSERT INTO ranked_sessions (
