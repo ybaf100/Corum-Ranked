@@ -9,6 +9,7 @@ import { SessionModule } from "./session/session.module.js";
 import { QueueModule } from "./queue/queue.module.js";
 import { MatchModule } from "./match/match.module.js";
 import { DebugBotModule } from "./debug-bot/debug-bot.module.js";
+import { LeaderboardModule } from "./leaderboard/leaderboard.module.js";
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { DebugBotModule } from "./debug-bot/debug-bot.module.js";
     QueueModule,
     MatchModule,
     DebugBotModule,
+    LeaderboardModule,
   ],
   controllers: [HealthController],
 })
