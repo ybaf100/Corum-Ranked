@@ -4,6 +4,7 @@
 #include "RankedAudioManager.hpp"
 #include "DebugBotPopup.hpp"
 #include "RankedSongGate.hpp"
+#include "ui/RankTransitionAnimator.hpp"
 #include "ui/RankedTranslations.hpp"
 #include "ui/RankedVisuals.hpp"
 
@@ -40,6 +41,8 @@ using corum::ranked::RankedProfileView;
 using corum::ranked::RoundSummaryView;
 using corum::ranked::RuntimeStage;
 using corum::ranked::RuntimeView;
+using corum::ranked::ui::RankTransitionAnimator;
+using corum::ranked::ui::RankTransitionType;
 
 namespace {
 
@@ -123,6 +126,39 @@ std::string twoLineTitle(std::string value, std::size_t perLine = 11) {
 
 ccColor3B tierColor(std::string const& tier) {
     return corum::ranked::ui::tierColor(tier);
+}
+
+std::optional<RankTransitionType> authoritativeTransitionType(
+    corum::ranked::RatingEventView const& event,
+    RankedProfileView const& before,
+    RankedProfileView const& after
+) {
+    auto const oldTier = upper(before.displayedTier);
+    auto const newTier = upper(after.displayedTier);
+    if (oldTier == newTier) return std::nullopt;
+
+    // The server event is the sole authority for the transition type. These
+    // checks only reject malformed presentation data; they never calculate or
+    // change the resulting tier.
+    if (event.placementCompleted && oldTier == "UNRANKED" && newTier != "UNRANKED") {
+        return RankTransitionType::Placement;
+    }
+    if (event.promotionSucceeded && oldTier != "UNRANKED" && newTier != "UNRANKED") {
+        return RankTransitionType::Promotion;
+    }
+    if (event.demoted && oldTier != "UNRANKED" && oldTier != "RED" && newTier != "UNRANKED") {
+        return RankTransitionType::Demotion;
+    }
+    return std::nullopt;
+}
+
+std::pair<std::string, ccColor3B> ratingEventText(corum::ranked::RatingEventView const& event) {
+    if (event.placementCompleted) return {tr("placed", "PLACED"), kGreen};
+    if (event.promotionSucceeded) return {tr("promoted", "PROMOTED"), kGreen};
+    if (event.promotionFailed) return {tr("promotion-failed", "PROMOTION FAILED"), kRed};
+    if (event.promotionStarted) return {tr("promotion-match", "PROMOTION MATCH"), ccc3(145, 255, 125)};
+    if (event.demoted) return {tr("demoted", "DEMOTED"), kRed};
+    return {"", ccc3(255, 255, 255)};
 }
 
 ccColor3B colorFromHex(int value) {
@@ -289,6 +325,7 @@ class CorumRankedLayer final : public CCLayerColor {
     bool m_resourceGateMenuRestored = false;
     std::string m_renderedUiKey;
     std::string m_pendingUiKey;
+    std::string m_rankTransitionPlayedKey;
     bool m_uiFadingOut = false;
     bool m_fadeInNextRender = true;
     SteadyClock::time_point m_uiTransitionDeadline {};
@@ -1017,12 +1054,18 @@ class CorumRankedLayer final : public CCLayerColor {
         m_root->addChild(label, 7);
     }
 
+    struct PlayerCardRefs {
+        CCLabelBMFont* scoreLabel = nullptr;
+        CCNode* tierPlate = nullptr;
+        CCSprite* tierTrophy = nullptr;
+    };
+
     void addPlayerCard(
         CCPoint center,
         std::string const& name,
         RankedProfileView const& profile,
         bool self,
-        CCLabelBMFont** outScoreLabel = nullptr,
+        PlayerCardRefs* outRefs = nullptr,
         bool combineTierAndScore = false
     ) {
         auto const& tier = profile.displayedTier;
@@ -1094,7 +1137,7 @@ class CorumRankedLayer final : public CCLayerColor {
             );
             lpLabel->limitLabelWidth(124.0f, 0.35f, 0.22f);
             m_root->addChild(lpLabel, 4);
-            if (outScoreLabel) *outScoreLabel = lpLabel;
+            if (outRefs) outRefs->scoreLabel = lpLabel;
             if (profile.demotionWarning) {
                 auto* warning = makeLabel(tr("demotion-warning", "DEMOTION WARNING"), 0.20f, {center.x, center.y - 62.0f}, kRed, "black");
                 warning->limitLabelWidth(134.0f, 0.20f, 0.14f);
@@ -1107,6 +1150,10 @@ class CorumRankedLayer final : public CCLayerColor {
         auto* tierTrophy = corum::ranked::ui::trophy(tier, {18.0f, 18.0f});
         tierTrophy->setPosition({center.x - 58.0f, center.y - 74.0f});
         m_root->addChild(tierTrophy, 5);
+        if (outRefs) {
+            outRefs->tierPlate = tierPlate;
+            outRefs->tierTrophy = tierTrophy;
+        }
     }
 
     void renderResources() {
@@ -1857,6 +1904,60 @@ class CorumRankedLayer final : public CCLayerColor {
         }
     }
 
+    bool playResultRankTransition(
+        CCPoint cardCenter,
+        corum::ranked::RatingEventView const& event,
+        RankedProfileView const& before,
+        RankedProfileView const& after,
+        PlayerCardRefs const& refs,
+        CCLabelBMFont* eventLabel
+    ) {
+        auto const transition = authoritativeTransitionType(event, before, after);
+        if (!transition || !refs.tierPlate || !refs.tierTrophy || !eventLabel) return false;
+
+        auto* animator = RankTransitionAnimator::create();
+        if (!animator) return false;
+        m_root->addChild(animator, 40);
+
+        auto* settledPlate = refs.tierPlate;
+        auto* settledTrophy = refs.tierTrophy;
+        auto const settledTrophyScale = settledTrophy->getScale();
+        auto const started = animator->playRankTransition(
+            before.displayedTier,
+            after.displayedTier,
+            *transition,
+            {cardCenter.x, cardCenter.y + 29.0f},
+            ratingEventText(event).first,
+            [settledPlate, settledTrophy, settledTrophyScale, eventLabel] {
+                // These nodes are siblings of the animator under the same result
+                // root. If the scene is closed, cleanup removes the animator and
+                // its pending callback together, so none of these pointers can
+                // be reached after their owning result root is gone.
+                settledPlate->setVisible(true);
+                settledPlate->setScale(0.86f);
+                settledPlate->runAction(CCEaseBackOut::create(CCScaleTo::create(0.18f, 1.0f)));
+
+                settledTrophy->setVisible(true);
+                settledTrophy->setScale(settledTrophyScale * 0.72f);
+                settledTrophy->runAction(CCEaseBackOut::create(
+                    CCScaleTo::create(0.18f, settledTrophyScale)
+                ));
+
+                eventLabel->setOpacity(0);
+                eventLabel->runAction(CCFadeIn::create(0.16f));
+            }
+        );
+        if (!started) {
+            animator->removeFromParentAndCleanup(true);
+            return false;
+        }
+
+        refs.tierPlate->setVisible(false);
+        refs.tierTrophy->setVisible(false);
+        eventLabel->setOpacity(0);
+        return true;
+    }
+
     void renderResult(RuntimeView const& view) {
         auto const& match = view.match;
         auto const size = CCDirector::sharedDirector()->getWinSize();
@@ -1884,13 +1985,13 @@ class CorumRankedLayer final : public CCLayerColor {
         }
 
         auto const ownA = match.side == "A";
-        CCLabelBMFont* finalScoreA = nullptr;
-        CCLabelBMFont* finalScoreB = nullptr;
+        PlayerCardRefs cardA;
+        PlayerCardRefs cardB;
         auto const cardY = size.height / 2.0f - 5.0f;
         auto const leftPerfect = match.perfectWinSide == "A";
         auto const rightPerfect = match.perfectWinSide == "B";
-        addPlayerCard({100.0f, cardY}, match.playerAName, match.profileAfterA, ownA, &finalScoreA, true);
-        addPlayerCard({size.width - 100.0f, cardY}, match.playerBName, match.profileAfterB, !ownA, &finalScoreB, true);
+        addPlayerCard({100.0f, cardY}, match.playerAName, match.profileAfterA, ownA, &cardA, true);
+        addPlayerCard({size.width - 100.0f, cardY}, match.playerBName, match.profileAfterB, !ownA, &cardB, true);
         if (leftPerfect) addPromotionAura({100.0f, cardY}, {150.0f, 184.0f}, true);
         if (rightPerfect) addPromotionAura({size.width - 100.0f, cardY}, {150.0f, 184.0f}, true);
 
@@ -1961,18 +2062,31 @@ class CorumRankedLayer final : public CCLayerColor {
             y -= 25.0f;
         }
 
+        auto const eventA = ratingEventText(match.ratingEventA);
+        auto const eventB = ratingEventText(match.ratingEventB);
+        CCLabelBMFont* eventLabelA = nullptr;
+        CCLabelBMFont* eventLabelB = nullptr;
+        if (!eventA.first.empty()) {
+            eventLabelA = makeLabel(eventA.first, 0.29f, {100.0f, 20.0f}, eventA.second, "black");
+            m_root->addChild(eventLabelA, 8);
+        }
+        if (!eventB.first.empty()) {
+            eventLabelB = makeLabel(eventB.first, 0.29f, {size.width - 100.0f, 20.0f}, eventB.second, "black");
+            m_root->addChild(eventLabelB, 8);
+        }
+
         animateRankedScoreChange(
             100.0f,
             cardY - 43.0f,
             match.rankedScoreDeltaA,
-            finalScoreA,
+            cardA.scoreLabel,
             match.profileBeforeA
         );
         animateRankedScoreChange(
             size.width - 100.0f,
             cardY - 43.0f,
             match.rankedScoreDeltaB,
-            finalScoreB,
+            cardB.scoreLabel,
             match.profileBeforeB
         );
         animatePromotionTrigger(
@@ -1990,20 +2104,47 @@ class CorumRankedLayer final : public CCLayerColor {
             match.rankedScoreDeltaB
         );
 
-        auto ratingEventText = [](corum::ranked::RatingEventView const& event) -> std::pair<std::string, ccColor3B> {
-            if (event.placementCompleted) return {tr("placed", "PLACED"), kGreen};
-            if (event.promotionSucceeded) return {tr("promoted", "PROMOTED"), kGreen};
-            if (event.promotionFailed) return {tr("promotion-failed", "PROMOTION FAILED"), kRed};
-            if (event.promotionStarted) return {tr("promotion-match", "PROMOTION MATCH"), ccc3(145, 255, 125)};
-            if (event.demoted) return {tr("demoted", "DEMOTED"), kRed};
-            return {"", ccc3(255, 255, 255)};
-        };
-        auto const eventA = ratingEventText(match.ratingEventA);
-        auto const eventB = ratingEventText(match.ratingEventB);
-        if (!eventA.first.empty()) m_root->addChild(makeLabel(eventA.first, 0.29f, {100.0f, 20.0f}, eventA.second, "black"), 8);
-        if (!eventB.first.empty()) m_root->addChild(makeLabel(eventB.first, 0.29f, {size.width - 100.0f, 20.0f}, eventB.second, "black"), 8);
-
         addButton(tr("queue-again", "QUEUE AGAIN"), {size.width / 2.0f, 24.0f}, menu_selector(CorumRankedLayer::onQueueAgain), false, 0.52f);
+
+        // A result can be rendered again after visiting History or after a
+        // presentation refresh. Play a tier transition only once per match;
+        // subsequent renders immediately show the authoritative settled UI.
+        auto const transitionKey = match.matchId.empty()
+            ? fmt::format("{}:{}:{}", match.playerAName, match.playerBName, match.stateVersion)
+            : match.matchId;
+        bool transitionStarted = false;
+        if (m_rankTransitionPlayedKey != transitionKey) {
+            transitionStarted |= playResultRankTransition(
+                {100.0f, cardY},
+                match.ratingEventA,
+                match.profileBeforeA,
+                match.profileAfterA,
+                cardA,
+                eventLabelA
+            );
+            transitionStarted |= playResultRankTransition(
+                {size.width - 100.0f, cardY},
+                match.ratingEventB,
+                match.profileBeforeB,
+                match.profileAfterB,
+                cardB,
+                eventLabelB
+            );
+            if (transitionStarted) m_rankTransitionPlayedKey = transitionKey;
+        }
+
+        if (transitionStarted) {
+            // Keep result actions from racing the short reveal. This action is
+            // owned by the result root, so closing the scene cancels it safely.
+            m_menu->setTouchEnabled(false);
+            m_root->runAction(CCSequence::create(
+                CCDelayTime::create(1.78f),
+                CallFuncExt::create([this] {
+                    if (m_menu) m_menu->setTouchEnabled(true);
+                }),
+                nullptr
+            ));
+        }
     }
 
     void renderHistoryList(RuntimeView const& view) {

@@ -1,5 +1,7 @@
 # v0.5.0-beta.6
 
+- Added server-authoritative tier transition animation on the result screen: distinct Placement Reveal, Promotion, and Demotion sequences use short Cocos2d scale/easing, square/diamond fragments, glow, flash, local UI shake, rise, and fall actions without changing rank, LP, MMR, placement, or promotion-series decisions.
+- Replaced every Unranked/Red/Aqua/Bronze/Silver/Gold trophy resource with the supplied candidate 5 transparent PNG set. Placement supports Unranked into any Ranked tier, while presentation guards refuse Red/Unranked demotion animation.
 - Fixed same-map Death Match re-entry after an Attempt returns to the retained Ranked round scene. The client now releases its completed child-scene launch guard and automatically opens the next legal Attempt, while the authoritative 3/3, spectator, result, and start-window checks remain unchanged.
 - Added a persistent `English / 한국어` selector to the Ranked lobby.
 - Added the editable `src/ui/RankedTranslations.hpp` translation table and Korean UI glyph coverage for Paperlogy SemiBold, ExtraBold, and Black.

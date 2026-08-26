@@ -14,13 +14,11 @@ Keep the filenames exactly as listed below.
 | `corum-trophy-silver.png` | SILVER tier |
 | `corum-trophy-gold.png` | GOLD tier |
 
-Recommended format: transparent PNG, square canvas, 512 x 512 px. Keep important
-details inside the middle 80 percent because the same asset is also shown at a
-small size on player cards.
-
-The trophy images are intentionally not bundled yet. Until they are supplied,
-Corum Ranked uses a smaller built-in Geometry Dash star tinted to the tier color.
-Missing custom images never block the Ranked UI or matchmaking flow.
+The bundled candidate 5 set uses transparent square 1254 x 1254 PNGs. Keep
+important details inside the middle 80 percent when replacing them because the
+same asset is also shown at a small size on player cards and in the result
+transition animation. A missing image still falls back to Geometry Dash's star
+sprite and never blocks matchmaking or the Ranked UI.
 
 ## Typography
 
