@@ -70,7 +70,6 @@ RankTransitionAnimator* RankTransitionAnimator::create() {
 bool RankTransitionAnimator::init() {
     if (!CCNode::init()) return false;
     setAnchorPoint({0.5f, 0.5f});
-    setCascadeOpacityEnabled(true);
     return true;
 }
 
@@ -128,14 +127,10 @@ void RankTransitionAnimator::cancel() {
     removeFromParentAndCleanup(true);
 }
 
-CCNode* RankTransitionAnimator::makeBadge(std::string const& rank, float size) {
-    auto* wrapper = CCNode::create();
-    wrapper->setAnchorPoint({0.5f, 0.5f});
-    wrapper->setCascadeOpacityEnabled(true);
+CCSprite* RankTransitionAnimator::makeBadge(std::string const& rank, float size) {
     auto* sprite = trophy(rank, {size, size});
     sprite->setPosition(CCPointZero);
-    wrapper->addChild(sprite, 2);
-    return wrapper;
+    return sprite;
 }
 
 CCSprite* RankTransitionAnimator::makeGlow(std::string const& rank, float size, GLubyte opacity) {

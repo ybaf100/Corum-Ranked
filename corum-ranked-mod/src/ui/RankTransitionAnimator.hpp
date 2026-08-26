@@ -39,7 +39,7 @@ private:
     void playPromotion(std::string const& oldRank, std::string const& newRank);
     void playDemotion(std::string const& oldRank, std::string const& newRank);
 
-    cocos2d::CCNode* makeBadge(std::string const& rank, float size);
+    cocos2d::CCSprite* makeBadge(std::string const& rank, float size);
     cocos2d::CCSprite* makeGlow(std::string const& rank, float size, GLubyte opacity);
     void addInwardParticles(std::string const& rank, int count, float radius, float startDelay);
     void addBurstParticles(std::string const& rank, int count, float distance, float startDelay, bool falling = false);
