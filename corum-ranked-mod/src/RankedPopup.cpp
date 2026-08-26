@@ -278,6 +278,11 @@ class CorumRankedLayer final : public CCLayerColor {
     bool m_matchFoundReadySent = false;
     bool m_enteringSongGate = false;
     bool m_enteringLevel = false;
+    // Set only while a vanilla LevelInfo/Play scene is covering this retained
+    // Ranked scene. A same-map Death Match retry does not change resourceKey(),
+    // so the older resource-key reset left m_enteringLevel latched forever after
+    // the child scene returned.
+    bool m_rankedChildScenePushed = false;
     bool m_resourceGateInitialized = false;
     bool m_resourceGateAcknowledged = false;
     bool m_resourceGateWasMissing = false;
@@ -339,6 +344,19 @@ class CorumRankedLayer final : public CCLayerColor {
 
     void onEnter() override {
         CCLayerColor::onEnter();
+
+        auto const resumedFromRankedChild = m_rankedChildScenePushed;
+        if (resumedFromRankedChild) {
+            // The scene pushed by this layer has finished. Release both launch
+            // guards before refresh() so maybeEnterLevel() can open the next
+            // legal attempt on the same map. canEnterCurrentLevel() remains the
+            // authority that blocks a fourth Death Match attempt, spectator
+            // entry, results, and closed attempt windows.
+            m_rankedChildScenePushed = false;
+            m_enteringSongGate = false;
+            m_enteringLevel = false;
+            log::info("Ranked child scene returned; automatic entry guard released");
+        }
 
         // LevelInfoLayer and PlayLayer are pushed over this Ranked scene. The
         // corresponding onExit() intentionally stops polling and input while a
@@ -2177,6 +2195,7 @@ class CorumRankedLayer final : public CCLayerColor {
             ? countdownOverride
             : std::max(0.0, 10.0 - phaseSeconds());
         m_enteringSongGate = corum::ranked::showRankedSongDownloadGate(level, countdownRemaining);
+        if (m_enteringSongGate) m_rankedChildScenePushed = true;
     }
 
     void updateAutomation() {
@@ -2224,11 +2243,16 @@ class CorumRankedLayer final : public CCLayerColor {
             openSongDownloadGate(0.0);
             return;
         }
-        m_enteringLevel = true;
         // Do not construct PlayLayer directly. Enter through Geometry Dash's normal
         // LevelInfoLayer -> onPlay path; this lets the game own level validation,
         // loading transitions, audio setup, and the return/quit stack.
         auto* scene = LevelInfoLayer::scene(level, false);
+        if (!scene) {
+            m_localMessage = "Unable to open the selected level. Retrying...";
+            return;
+        }
+        m_enteringLevel = true;
+        m_rankedChildScenePushed = true;
         CCDirector::sharedDirector()->pushScene(CCTransitionFade::create(0.25f, scene));
     }
 

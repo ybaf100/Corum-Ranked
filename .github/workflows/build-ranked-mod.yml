@@ -186,6 +186,13 @@ jobs:
           ):
               if required_selector not in popup:
                   raise SystemExit(f"Missing beta.6 language selector: {required_selector}")
+          for required_reentry in (
+              "m_rankedChildScenePushed",
+              "resumedFromRankedChild",
+              "Ranked child scene returned; automatic entry guard released",
+          ):
+              if required_reentry not in popup:
+                  raise SystemExit(f"Missing same-map Ranked re-entry invariant: {required_reentry}")
           for required_hud in (
               "addShadowedHudLabel(",
               "hudShadows",

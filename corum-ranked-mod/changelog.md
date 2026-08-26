@@ -1,5 +1,6 @@
 # v0.5.0-beta.6
 
+- Fixed same-map Death Match re-entry after an Attempt returns to the retained Ranked round scene. The client now releases its completed child-scene launch guard and automatically opens the next legal Attempt, while the authoritative 3/3, spectator, result, and start-window checks remain unchanged.
 - Added a persistent `English / 한국어` selector to the Ranked lobby.
 - Added the editable `src/ui/RankedTranslations.hpp` translation table and Korean UI glyph coverage for Paperlogy SemiBold, ExtraBold, and Black.
 - Korean mode translates score, placement, rating events, promotion/demotion states, matchmaking, ban, result, history, and spectator UI while intentionally keeping `CORUM RANKED`, `ROUND`, `Qualifying`, tier names, LP, player names, and map names in English.
