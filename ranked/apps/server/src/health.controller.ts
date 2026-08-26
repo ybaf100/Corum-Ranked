@@ -26,8 +26,12 @@ export class HealthController {
     ]);
     const config = this.rankedConfig.getStatus();
     const databaseReady = databaseConnected && schema.ready;
+    const publicDataReady = databaseReady;
+    const rankedReady = databaseReady && config.ready && config.queueEnabled;
     return {
-      ready: databaseReady && config.ready,
+      ready: publicDataReady,
+      publicDataReady,
+      rankedReady,
       databaseReady,
       databaseConnected,
       schemaReady: schema.ready,

@@ -7,7 +7,7 @@
 | Method | Path | 설명 |
 |---|---|---|
 | `GET` | `/health` | 프로세스 liveness |
-| `GET` | `/ready` | DB/config readiness |
+| `GET` | `/ready` | 공개 DB API와 실제 Ranked 매치 readiness |
 | `GET` | `/api/ranked/config` | client용 rules, CBF, allowlist, queue 상태 |
 | `GET` | `/api/ranked/leaderboard` | 서버 열림 상태, 공개 티어/LP, 배치·승급 상태, 승/패 순위 |
 
@@ -15,6 +15,12 @@
 visible Ranked Score, 표시 tier, placement/promotion 상태, 강등 경고와 승/패 전적만
 반환합니다. Hidden MMR은 동률 정렬에만 서버 내부에서 사용하며 응답에는 포함하지
 않습니다. 웹사이트 origin은 서버 환경변수 `CORS_ORIGINS`에 등록해야 합니다.
+
+공개 순위 조회와 실제 Ranked 매치 가능 상태는 서로 독립적입니다. DB와 스키마가
+정상이면 Ranked Config snapshot이 없거나 `enabled=false`여도 `leaderboard`는 DB 기록을
+반환하며 `serverOpen=false`로 표시합니다. 이때 placement 필요 판수처럼 config에서만
+알 수 있는 값은 `null`입니다. `/ready`의 `ready`와 `publicDataReady`는 공개 DB API
+readiness, `rankedReady`는 DB + 유효 config + `enabled=true`인 매치 readiness입니다.
 
 ## Session
 

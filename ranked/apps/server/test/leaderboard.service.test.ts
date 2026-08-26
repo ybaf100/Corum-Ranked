@@ -142,7 +142,7 @@ describe("LeaderboardService", () => {
       ping: async () => true,
     };
     const config = {
-      getSnapshot: () => ({ ...configDocumentFixture(), fetchedAt: "2026-08-26T00:00:00.000Z" }),
+      getSnapshotOrNull: () => ({ ...configDocumentFixture(), fetchedAt: "2026-08-26T00:00:00.000Z" }),
     } as RankedConfigService;
     const response = await new LeaderboardService(database, config).list();
 
@@ -169,5 +169,38 @@ describe("LeaderboardService", () => {
       demotionWarning: false,
     });
     expect(JSON.stringify(response)).not.toMatch(/draw|hiddenMmr|hidden_mmr/i);
+  });
+
+  it("returns database players while Ranked matchmaking and config are unavailable", async () => {
+    let queryCount = 0;
+    const database: DatabasePort = {
+      query: async <Row>(): Promise<SqlResult<Row>> => {
+        queryCount += 1;
+        const rows = [row({
+          gd_username: "offline-ranked-player",
+          displayed_tier: "AQUA",
+          visible_ranked_score: 1_550,
+          wins: 4,
+          losses: 2,
+        })];
+        return { rowCount: rows.length, rows: rows as unknown as readonly Row[] };
+      },
+      transaction: async (operation) => operation(database),
+      ping: async () => true,
+    };
+    const config = { getSnapshotOrNull: () => null } as RankedConfigService;
+
+    const response = await new LeaderboardService(database, config).list();
+
+    expect(queryCount).toBe(1);
+    expect(response.serverOpen).toBe(false);
+    expect(response.players[0]).toMatchObject({
+      player: "offline-ranked-player",
+      tier: "AQUA",
+      visibleRankedScore: 1_550,
+      placementGamesRequired: null,
+      wins: 4,
+      losses: 2,
+    });
   });
 });

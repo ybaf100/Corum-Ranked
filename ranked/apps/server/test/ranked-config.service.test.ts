@@ -24,7 +24,24 @@ describe("Ranked config snapshot loader", () => {
       maps: [{ ...source.document.maps[0]!, title: "changed later" }, ...source.document.maps.slice(1)],
     };
     expect(snapshot.maps[0]!.title).not.toBe("changed later");
-    expect(service.getStatus()).toMatchObject({ ready: true, generation: "test-1" });
+    expect(service.getStatus()).toMatchObject({
+      ready: true,
+      queueEnabled: true,
+      generation: "test-1",
+    });
+  });
+
+  it("keeps the validated snapshot ready when matchmaking is disabled", async () => {
+    const source = new FakeSource();
+    source.document = {
+      ...source.document,
+      operational: { ...source.document.operational, enabled: false },
+    };
+    const service = new RankedConfigService(source, environmentFixture());
+
+    expect(await service.refresh()).toBe(true);
+    expect(service.getStatus()).toMatchObject({ ready: true, queueEnabled: false });
+    expect(service.getSnapshotOrNull()?.operational.enabled).toBe(false);
   });
 
   it("accepts client presentation resources without changing gameplay config", async () => {
@@ -60,6 +77,7 @@ describe("Ranked config snapshot loader", () => {
     expect(service.getSnapshot().generation).toBe("test-1");
     expect(service.getStatus()).toMatchObject({
       ready: true,
+      queueEnabled: true,
       lastError: "temporary Apps Script failure",
     });
   });
@@ -72,7 +90,7 @@ describe("Ranked config snapshot loader", () => {
     };
     const service = new RankedConfigService(source, environmentFixture());
     expect(await service.refresh()).toBe(false);
-    expect(service.getStatus().ready).toBe(false);
+    expect(service.getStatus()).toMatchObject({ ready: false, queueEnabled: false });
     expect(() => service.getSnapshot()).toThrow("Ranked config has no valid snapshot");
   });
 

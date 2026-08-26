@@ -57,7 +57,9 @@ beta.3에서 beta.4로 올릴 때 추가 DB migration은 없습니다. `PERFECT 
 ## 4. Health와 관찰 항목
 
 - `GET /health`: 프로세스 생존
-- `GET /ready`: DB와 마지막 검증 config 상태
+- `GET /ready`: `publicDataReady`는 공개 DB API, `rankedReady`는 실제 Ranked 매치 상태.
+  Ranked가 꺼졌거나 config snapshot을 불러오지 못해도 DB와 스키마가 정상이면
+  `publicDataReady=true`이며 순위·플레이어 기록은 계속 조회 가능
 - config refresh 실패: 마지막 정상 snapshot이 있으면 기존 설정으로 계속 서비스하고 오류를 기록
 - CSMP source timeout: action 이름과 timeout/attempt만 로그에 남기고 HTTP 503 `CSMP_SOURCE_TIMEOUT`으로 반환. player ID/secret은 로그에 남기지 않음
 - outbox: `delivered_at IS NULL AND abandoned_at IS NULL`은 재시도 예정, `abandoned_at IS NOT NULL`은 최대 시도 후 포기한 알림

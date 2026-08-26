@@ -28,7 +28,7 @@ export interface PublicLeaderboardPlayer {
   readonly tier: DisplayTier;
   readonly visibleRankedScore: number | null;
   readonly placementGames: number;
-  readonly placementGamesRequired: number;
+  readonly placementGamesRequired: number | null;
   readonly placementResults: readonly RatingMark[];
   readonly promotion: {
     readonly sourceTier: string;
@@ -69,8 +69,8 @@ export class LeaderboardService {
     serverOpen: boolean;
     players: readonly PublicLeaderboardPlayer[];
   }> {
-    const snapshot = this.config.getSnapshot();
-    const placementGamesRequired = snapshot.operational.mmrPolicy?.placementGames ?? 0;
+    const snapshot = this.config.getSnapshotOrNull();
+    const placementGamesRequired = snapshot?.operational.mmrPolicy?.placementGames ?? null;
     const result = await this.database.query<LeaderboardRow>(
       `SELECT
          p.gd_username,
@@ -106,8 +106,9 @@ export class LeaderboardService {
             results: promotionResults,
           }
         : null;
-      const placementInProgress = placementGamesRequired > 0 &&
-        Number(row.placement_games) < placementGamesRequired;
+      const placementInProgress = row.displayed_tier === "UNRANKED" ||
+        row.visible_ranked_score === null ||
+        (placementGamesRequired !== null && Number(row.placement_games) < placementGamesRequired);
 
       return {
         hiddenMmr: Number(row.hidden_mmr),
@@ -136,7 +137,7 @@ export class LeaderboardService {
 
     return {
       serverNow: new Date().toISOString(),
-      serverOpen: snapshot.operational.enabled,
+      serverOpen: snapshot?.operational.enabled ?? false,
       players: [...ranked, ...unranked].map(({ player }) => player),
     };
   }

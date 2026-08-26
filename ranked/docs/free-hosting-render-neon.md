@@ -59,10 +59,12 @@ https://corum-ranked.onrender.com/api/ranked/config
 ```
 
 - `/health`: 프로세스 liveness
-- `/ready`: DB + Apps Script config readiness
+- `/ready`: 공개 DB API와 실제 Ranked 매치 readiness
 - `/api/ranked/config`: client가 실제로 소비하는 Ranked rules/CBF/allowlist snapshot
 
-`/ready`에서 `databaseReady`와 `config.ready`가 모두 `true`여야 실제 Ranked 테스트로 넘어간다.
+웹 순위 조회는 `/ready`에서 `publicDataReady=true`이면 사용할 수 있습니다. Ranked가
+꺼져 있거나 config snapshot이 아직 없더라도 DB가 정상이면 기존 순위 기록은 계속
+조회됩니다. 실제 Ranked 매치 테스트는 `rankedReady=true`일 때만 진행합니다.
 
 ## 4. Geode 모드
 

@@ -84,9 +84,14 @@ export class RankedConfigService implements OnApplicationBootstrap, OnApplicatio
     return copySnapshot(this.snapshot);
   }
 
+  public getSnapshotOrNull(): RankedConfigSnapshot | null {
+    return this.snapshot ? copySnapshot(this.snapshot) : null;
+  }
+
   public getStatus(): RankedConfigStatus {
     return {
-      ready: this.snapshot !== null && this.snapshot.operational.enabled,
+      ready: this.snapshot !== null,
+      queueEnabled: this.snapshot?.operational.enabled ?? false,
       generation: this.snapshot?.generation ?? null,
       fetchedAt: this.snapshot?.fetchedAt ?? null,
       lastAttemptAt: this.lastAttemptAt,

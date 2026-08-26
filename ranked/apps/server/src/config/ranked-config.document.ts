@@ -50,7 +50,10 @@ export interface RankedConfigSnapshot extends RankedConfigDocument {
 }
 
 export interface RankedConfigStatus {
+  /** A validated configuration snapshot is available. */
   readonly ready: boolean;
+  /** Matchmaking is enabled in the latest validated snapshot. */
+  readonly queueEnabled: boolean;
   readonly generation: string | null;
   readonly fetchedAt: string | null;
   readonly lastAttemptAt: string | null;
