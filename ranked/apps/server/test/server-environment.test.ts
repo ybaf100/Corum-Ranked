@@ -41,9 +41,9 @@ describe("server environment", () => {
       tickMs: 125,
       attemptDelayMs: 1_200,
       difficulties: {
-        EASY: { mmrOffset: -250, qualifyingChance: 0.22, clearChance: 0.01, progressPerSecond: 11 },
-        NORMAL: { mmrOffset: 0, qualifyingChance: 0.45, clearChance: 0.04, progressPerSecond: 16 },
-        HARD: { mmrOffset: 250, qualifyingChance: 0.68, clearChance: 0.10, progressPerSecond: 22 },
+        EASY: { mmrOffset: -250, qualifyingChance: 0.16, clearChance: 0.004, paceMultiplier: 0.96 },
+        NORMAL: { mmrOffset: 0, qualifyingChance: 0.30, clearChance: 0.015, paceMultiplier: 1.00 },
+        HARD: { mmrOffset: 250, qualifyingChance: 0.46, clearChance: 0.045, paceMultiplier: 1.05 },
       },
     });
   });
@@ -63,6 +63,15 @@ describe("server environment", () => {
       DEBUG_BOT_EASY_QUALIFYING_CHANCE: "0.1",
       DEBUG_BOT_EASY_CLEAR_CHANCE: "0.2",
     })).toThrow("CLEAR_CHANCE cannot exceed");
+  });
+
+  it("rejects an invalid Bot pace multiplier", () => {
+    expect(() => loadServerEnvironment({
+      ...validEnvironment(),
+      ENABLE_DEBUG_BOT_MATCH: "true",
+      DEBUG_BOT_PASSWORD: "2008",
+      DEBUG_BOT_NORMAL_PACE_MULTIPLIER: "0",
+    })).toThrow("PACE_MULTIPLIER");
   });
 
   it("loads Discord relay controls only when a webhook is configured", () => {

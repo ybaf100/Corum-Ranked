@@ -3,31 +3,30 @@ import type {
   DebugBotDifficultyProfile,
 } from "./debug-bot.types.js";
 
+/**
+ * Humanized NORMAL_MATCH defaults. Environment variables can override these at
+ * deployment time; map difficulty (1..21+), map length, and Bot Hidden MMR are
+ * applied later by debug-bot.behavior.ts on every attempt.
+ */
 export const DEBUG_BOT_DIFFICULTY_PROFILES: Readonly<
   Record<DebugBotDifficulty, DebugBotDifficultyProfile>
 > = Object.freeze({
   EASY: Object.freeze({
-    ratingOffset: -200,
-    averageProgress: 42,
-    qualifyingReachProbability: 0.3,
-    clearProbability: 0.03,
-    progressPerSecond: 28,
-    restartDelayMs: 450,
+    ratingOffset: -250,
+    qualifyingReachProbability: 0.16,
+    clearProbability: 0.004,
+    paceMultiplier: 0.96,
   }),
   NORMAL: Object.freeze({
     ratingOffset: 0,
-    averageProgress: 64,
-    qualifyingReachProbability: 0.58,
-    clearProbability: 0.1,
-    progressPerSecond: 42,
-    restartDelayMs: 300,
+    qualifyingReachProbability: 0.30,
+    clearProbability: 0.015,
+    paceMultiplier: 1.00,
   }),
   HARD: Object.freeze({
-    ratingOffset: 200,
-    averageProgress: 82,
-    qualifyingReachProbability: 0.82,
-    clearProbability: 0.24,
-    progressPerSecond: 60,
-    restartDelayMs: 200,
+    ratingOffset: 250,
+    qualifyingReachProbability: 0.46,
+    clearProbability: 0.045,
+    paceMultiplier: 1.05,
   }),
 });

@@ -27,11 +27,10 @@ export interface DebugBotMatchConfig {
   readonly botPlacementGames: number;
 }
 
+/** Base behavior before map difficulty, map length, and Hidden MMR adjustments. */
 export interface DebugBotDifficultyProfile {
   readonly ratingOffset: number;
-  readonly averageProgress: number;
   readonly qualifyingReachProbability: number;
   readonly clearProbability: number;
-  readonly progressPerSecond: number;
-  readonly restartDelayMs: number;
+  readonly paceMultiplier: number;
 }

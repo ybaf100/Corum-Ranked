@@ -1,4 +1,5 @@
 import { RankedDomainError } from "@corum-ranked/rules";
+import { DEBUG_BOT_DIFFICULTY_PROFILES } from "../debug-bot/debug-bot.config.js";
 
 export const SERVER_ENVIRONMENT = Symbol("SERVER_ENVIRONMENT");
 
@@ -18,9 +19,12 @@ export interface ServerEnvironment {
 
 export interface DebugBotDifficultyEnvironment {
   readonly mmrOffset: number;
+  /** Base chance to reach qualifying or better before map/MMR/length adjustment. */
   readonly qualifyingChance: number;
+  /** Base chance to clear before map/MMR/length adjustment. */
   readonly clearChance: number;
-  readonly progressPerSecond: number;
+  /** Real-time pace multiplier. 1.0 roughly follows the map's estimated native duration. */
+  readonly paceMultiplier: number;
 }
 
 export interface DebugBotEnvironment {
@@ -129,7 +133,7 @@ export const loadServerEnvironment = (
       offset: number,
       qualifyingChance: number,
       clearChance: number,
-      progressPerSecond: number,
+      paceMultiplier: number,
     ): DebugBotDifficultyEnvironment => {
       const resolvedQualifyingChance = probability(
         environment[`DEBUG_BOT_${name}_QUALIFYING_CHANCE`],
@@ -147,15 +151,22 @@ export const loadServerEnvironment = (
           `DEBUG_BOT_${name}_CLEAR_CHANCE cannot exceed DEBUG_BOT_${name}_QUALIFYING_CHANCE`,
         );
       }
+      const resolvedPaceMultiplier = finiteNumber(
+        environment[`DEBUG_BOT_${name}_PACE_MULTIPLIER`],
+        paceMultiplier,
+        `DEBUG_BOT_${name}_PACE_MULTIPLIER`,
+      );
+      if (resolvedPaceMultiplier <= 0 || resolvedPaceMultiplier > 3) {
+        throw new RankedDomainError(
+          "INVALID_CONFIG",
+          `DEBUG_BOT_${name}_PACE_MULTIPLIER must be greater than 0 and at most 3`,
+        );
+      }
       return {
         mmrOffset: finiteNumber(environment[`DEBUG_BOT_${name}_MMR_OFFSET`], offset, `DEBUG_BOT_${name}_MMR_OFFSET`),
         qualifyingChance: resolvedQualifyingChance,
         clearChance: resolvedClearChance,
-        progressPerSecond: finiteNumber(
-          environment[`DEBUG_BOT_${name}_PROGRESS_PER_SECOND`],
-          progressPerSecond,
-          `DEBUG_BOT_${name}_PROGRESS_PER_SECOND`,
-        ),
+        paceMultiplier: resolvedPaceMultiplier,
       };
     };
     debugBot = {
@@ -166,9 +177,27 @@ export const loadServerEnvironment = (
         "DEBUG_BOT_ATTEMPT_DELAY_MS",
       ),
       difficulties: {
-        EASY: difficulty("EASY", -250, 0.22, 0.01, 11),
-        NORMAL: difficulty("NORMAL", 0, 0.45, 0.04, 16),
-        HARD: difficulty("HARD", 250, 0.68, 0.10, 22),
+        EASY: difficulty(
+          "EASY",
+          DEBUG_BOT_DIFFICULTY_PROFILES.EASY.ratingOffset,
+          DEBUG_BOT_DIFFICULTY_PROFILES.EASY.qualifyingReachProbability,
+          DEBUG_BOT_DIFFICULTY_PROFILES.EASY.clearProbability,
+          DEBUG_BOT_DIFFICULTY_PROFILES.EASY.paceMultiplier,
+        ),
+        NORMAL: difficulty(
+          "NORMAL",
+          DEBUG_BOT_DIFFICULTY_PROFILES.NORMAL.ratingOffset,
+          DEBUG_BOT_DIFFICULTY_PROFILES.NORMAL.qualifyingReachProbability,
+          DEBUG_BOT_DIFFICULTY_PROFILES.NORMAL.clearProbability,
+          DEBUG_BOT_DIFFICULTY_PROFILES.NORMAL.paceMultiplier,
+        ),
+        HARD: difficulty(
+          "HARD",
+          DEBUG_BOT_DIFFICULTY_PROFILES.HARD.ratingOffset,
+          DEBUG_BOT_DIFFICULTY_PROFILES.HARD.qualifyingReachProbability,
+          DEBUG_BOT_DIFFICULTY_PROFILES.HARD.clearProbability,
+          DEBUG_BOT_DIFFICULTY_PROFILES.HARD.paceMultiplier,
+        ),
       },
     };
   }

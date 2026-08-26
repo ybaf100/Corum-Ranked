@@ -30,13 +30,16 @@ import {
 import type { InstalledModDto } from "../session/session.dto.js";
 import type { RankedSessionContext } from "../session/session.types.js";
 import type { CreateDebugBotMatchDto } from "./debug-bot.dto.js";
+import { createDebugBotAttemptPlan } from "./debug-bot.behavior.js";
 
 interface BotDriver {
   readonly creation: DebugBotMatchCreation;
   attemptId: string | null;
   attemptProgress: number;
   attemptTarget: number;
-  attemptLastTickMs: number;
+  attemptStartedAtMs: number;
+  attemptDurationMs: number;
+  attemptRestartDelayMs: number;
   nextAttemptAtMs: number;
   eventSequence: number;
   banSubmitted: boolean;
@@ -158,7 +161,9 @@ export class DebugBotService implements OnModuleInit, OnApplicationShutdown {
       attemptId: null,
       attemptProgress: 0,
       attemptTarget: 0,
-      attemptLastTickMs: 0,
+      attemptStartedAtMs: 0,
+      attemptDurationMs: 0,
+      attemptRestartDelayMs: 0,
       nextAttemptAtMs: 0,
       eventSequence: 0,
       banSubmitted: false,
@@ -458,13 +463,14 @@ export class DebugBotService implements OnModuleInit, OnApplicationShutdown {
     if (!attemptId) return;
 
     const map = state.currentRound?.map as Record<string, any> | undefined;
+    const nowMs = this.clock.now().getTime();
+    const plan = this.planAttempt(driver, map ?? {}, Number(map?.qualifyingPercent ?? 50));
     driver.attemptId = attemptId;
     driver.attemptProgress = 0;
-    driver.attemptTarget = this.chooseAttemptTarget(
-      Number(map?.qualifyingPercent ?? 100),
-      driver.creation.settings.difficulty,
-    );
-    driver.attemptLastTickMs = this.clock.now().getTime();
+    driver.attemptTarget = plan.targetPercent;
+    driver.attemptStartedAtMs = nowMs;
+    driver.attemptDurationMs = plan.durationMs;
+    driver.attemptRestartDelayMs = plan.restartDelayMs;
     driver.nextAttemptAtMs = 0;
   }
 
@@ -495,23 +501,25 @@ export class DebugBotService implements OnModuleInit, OnApplicationShutdown {
         { levelId, clientEventId: `debug-bot-auto-${++driver.eventSequence}-start` },
       );
       if (!started.accepted || !started.attemptId) return;
+      const plan = this.planAttempt(driver, map, Number(map.qualifyingPercent));
       driver.attemptId = started.attemptId;
       driver.attemptProgress = 0;
-      driver.attemptTarget = this.chooseAttemptTarget(
-        Number(map.qualifyingPercent),
-        driver.creation.settings.difficulty,
-      );
-      driver.attemptLastTickMs = nowMs;
+      driver.attemptTarget = plan.targetPercent;
+      driver.attemptStartedAtMs = nowMs;
+      driver.attemptDurationMs = plan.durationMs;
+      driver.attemptRestartDelayMs = plan.restartDelayMs;
       return;
     }
 
-    const difficulty = configuration.difficulties[driver.creation.settings.difficulty];
-    const elapsedSeconds = Math.max(configuration.tickMs, nowMs - driver.attemptLastTickMs) / 1_000;
+    const elapsedMs = Math.max(0, nowMs - driver.attemptStartedAtMs);
+    const progressRatio = driver.attemptDurationMs <= 0
+      ? 1
+      : Math.min(1, elapsedMs / driver.attemptDurationMs);
+    const projectedProgress = Math.floor(driver.attemptTarget * progressRatio);
     const nextProgress = Math.min(
       driver.attemptTarget,
-      Math.max(driver.attemptProgress + 1, Math.floor(driver.attemptProgress + difficulty.progressPerSecond * elapsedSeconds)),
+      Math.max(driver.attemptProgress, elapsedMs > 0 ? Math.max(1, projectedProgress) : 0),
     );
-    driver.attemptLastTickMs = nowMs;
     if (!deathmatch && nextProgress !== driver.attemptProgress) {
       await this.matches.updateAttemptProgress(
         driver.creation.matchId,
@@ -536,23 +544,36 @@ export class DebugBotService implements OnModuleInit, OnApplicationShutdown {
     );
     driver.attemptId = null;
     driver.attemptProgress = 0;
-    driver.nextAttemptAtMs = nowMs + configuration.attemptDelayMs;
+    driver.attemptStartedAtMs = 0;
+    driver.attemptDurationMs = 0;
+    driver.nextAttemptAtMs = nowMs + Math.max(
+      configuration.attemptDelayMs,
+      driver.attemptRestartDelayMs,
+    );
+    driver.attemptRestartDelayMs = 0;
   }
 
-  private chooseAttemptTarget(
+  private planAttempt(
+    driver: BotDriver,
+    stateMap: Record<string, any>,
     qualifyingPercent: number,
-    difficultyName: DebugBotMatchSettings["difficulty"],
-  ): number {
+  ) {
     const configuration = this.configuration!;
-    const difficulty = configuration.difficulties[difficultyName];
-    const outcome = this.random.next();
-    if (outcome < difficulty.clearChance) return 100;
-    if (outcome < difficulty.qualifyingChance) {
-      return Math.max(
-        Math.ceil(qualifyingPercent),
-        Math.min(99, Math.floor(qualifyingPercent + this.random.next() * (100 - qualifyingPercent))),
-      );
-    }
-    return Math.max(1, Math.min(99, Math.floor(this.random.next() * qualifyingPercent)));
+    const difficulty = configuration.difficulties[driver.creation.settings.difficulty];
+    const snapshot = this.config.getSnapshot();
+    const canonicalLevelId = String(stateMap.canonicalLevelId ?? "");
+    const configuredMap = snapshot.maps.find(
+      (candidate) => candidate.canonicalLevelId === canonicalLevelId,
+    );
+    return createDebugBotAttemptPlan({
+      qualifyingPercent,
+      botHiddenMmr: driver.creation.botContext.hiddenMmr,
+      map: {
+        difficulty: configuredMap?.difficulty ?? stateMap.difficulty,
+        length: configuredMap?.length,
+      },
+      profile: difficulty,
+      syntheticScenario: driver.creation.settings.scenario !== "NORMAL_MATCH",
+    }, this.random);
   }
 }

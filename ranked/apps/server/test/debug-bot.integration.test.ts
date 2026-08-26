@@ -112,9 +112,9 @@ describe("development-only Bot Match using the production Ranked engine", () => 
       tickMs: 125,
       attemptDelayMs: 200,
       difficulties: {
-        EASY: { mmrOffset: -250, qualifyingChance: 0.3, clearChance: 0, progressPerSecond: 20 },
-        NORMAL: { mmrOffset: 0, qualifyingChance: 0.6, clearChance: 0.1, progressPerSecond: 25 },
-        HARD: { mmrOffset: 250, qualifyingChance: 0.8, clearChance: 0.2, progressPerSecond: 35 },
+        EASY: { mmrOffset: -250, qualifyingChance: 0.3, clearChance: 0, paceMultiplier: 0.96 },
+        NORMAL: { mmrOffset: 0, qualifyingChance: 0.6, clearChance: 0.1, paceMultiplier: 1.00 },
+        HARD: { mmrOffset: 250, qualifyingChance: 0.8, clearChance: 0.2, paceMultiplier: 1.05 },
       },
     },
   };
@@ -422,6 +422,10 @@ describe("development-only Bot Match using the production Ranked engine", () => 
 
   it("rejects an incorrect server-side password without creating a match", async () => {
     const player = await contextFor("9301");
+    const matchesBefore = await database.query<{ count: number }>(
+      "SELECT COUNT(*)::int AS count FROM ranked_matches",
+    );
+
     await expect(debug.create(player, {
       password: "wrong",
       difficulty: "NORMAL",
@@ -430,8 +434,11 @@ describe("development-only Bot Match using the production Ranked engine", () => 
       sendDiscordEvents: false,
       installedMods: structuredClone(cleanMods),
     })).rejects.toThrow("Incorrect password");
-    const matchesCount = await database.query<{ count: number }>("SELECT COUNT(*)::int AS count FROM ranked_matches");
-    expect(matchesCount.rows[0]?.count).toBe(0);
+
+    const matchesAfter = await database.query<{ count: number }>(
+      "SELECT COUNT(*)::int AS count FROM ranked_matches",
+    );
+    expect(matchesAfter.rows[0]?.count).toBe(matchesBefore.rows[0]?.count);
   });
 
   it.each([

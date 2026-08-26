@@ -277,6 +277,7 @@ assert.equal(complete.data.maps[0].alternateLevelId, "811001");
 assert.equal(complete.data.maps[0].playableLevelId, "811001");
 assert.equal(complete.data.maps[0].levelId, "811001");
 assert.equal(complete.data.maps[0].qualifyingPercent, 35);
+assert.equal(complete.data.maps[0].length, "Long");
 const alternate = complete.data.maps.find((map) => map.canonicalLevelId === "51001");
 assert.equal(alternate.alternateLevelId, "987654321");
 assert.equal(alternate.playableLevelId, "987654321");

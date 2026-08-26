@@ -21,6 +21,8 @@ export interface RankedMap {
   readonly title: string;
   readonly creator: string;
   readonly difficulty: string;
+  /** Optional source-map length metadata used by server-side simulation/debug tooling. */
+  readonly length?: string;
   readonly pool: PoolNumber;
   readonly qualifyingPercent: number;
   readonly active: boolean;

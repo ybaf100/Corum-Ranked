@@ -539,6 +539,7 @@ function readRankedMapsFromCorumSheet_() {
     title: findOptionalHeaderIndex_(header, ["맵 제목", "맵제목", "제목", "Title"]),
     creator: findOptionalHeaderIndex_(header, ["제작자", "Creator"]),
     difficulty: findOptionalHeaderIndex_(header, ["난이도", "Difficulty", "Rating", "레이팅"]),
+    length: findOptionalHeaderIndex_(header, ["맵 길이", "맵길이", "길이", "Length"]),
     pool: findOptionalHeaderIndex_(header, ["Ranked Pool (1~6)"]),
     qualifyingPercent: findOptionalHeaderIndex_(header, ["Qualifying %"]),
   };
@@ -568,6 +569,7 @@ function readRankedMapsFromCorumSheet_() {
       title: rankedText_(row[columns.title]),
       creator: rankedText_(row[columns.creator]),
       difficulty: rankedText_(row[columns.difficulty]),
+      length: columns.length === -1 ? "" : rankedText_(row[columns.length]),
       pool: pool,
       qualifyingPercent: rankedPercent_(row[columns.qualifyingPercent], displayRow[columns.qualifyingPercent]),
       active: true,
