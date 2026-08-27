@@ -217,6 +217,29 @@ jobs:
           for forbidden_visual in ("CCParticleFire", "corum-fire-promotion", "corum-fire-perfect"):
               if forbidden_visual in popup or forbidden_visual in visuals:
                   raise SystemExit(f"Rejected repeating fire visual returned: {forbidden_visual}")
+
+          transition_header = Path("corum-ranked-mod/src/ui/RankTransitionLayer.hpp").read_text(encoding="utf-8")
+          transition_source = Path("corum-ranked-mod/src/ui/RankTransitionLayer.cpp").read_text(encoding="utf-8")
+          for required_transition in (
+              "class RankTransitionLayer",
+              "playPlacement()",
+              "playPromotion()",
+              "playDemotion()",
+              "makeOrnamentGroup",
+              "unlockSkip()",
+              "revealFinalState",
+              "CCDelayTime::create(1.50f)",
+              "RankTransitionLayer::create(",
+              'tr("tap-to-skip", "TAP TO SKIP")',
+          ):
+              if required_transition not in transition_header and required_transition not in transition_source and required_transition not in popup:
+                  raise SystemExit(f"Missing full-screen rank transition invariant: {required_transition}")
+          for forbidden_transition in (
+              "RankTransitionAnimator",
+              "PlayLayer::scene(",
+          ):
+              if forbidden_transition in popup or forbidden_transition in transition_source:
+                  raise SystemExit(f"Obsolete or gameplay-coupled rank transition returned: {forbidden_transition}")
           PY
 
   build:

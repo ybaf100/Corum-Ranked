@@ -17,7 +17,9 @@ Keep the filenames exactly as listed below.
 The bundled candidate 5 set uses transparent square 1254 x 1254 PNGs. Keep
 important details inside the middle 80 percent when replacing them because the
 same asset is also shown at a small size on player cards and in the result
-transition animation. A missing image still falls back to Geometry Dash's star
+transition layer. The full-screen reveal builds cumulative code-generated
+spikes, orbit pieces, armor blocks, crystal wings, and crown ornaments around
+these base trophy images. A missing image still falls back to Geometry Dash's star
 sprite and never blocks matchmaking or the Ranked UI.
 
 ## Typography

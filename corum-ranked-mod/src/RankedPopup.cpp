@@ -4,7 +4,7 @@
 #include "RankedAudioManager.hpp"
 #include "DebugBotPopup.hpp"
 #include "RankedSongGate.hpp"
-#include "ui/RankTransitionAnimator.hpp"
+#include "ui/RankTransitionLayer.hpp"
 #include "ui/RankedTranslations.hpp"
 #include "ui/RankedVisuals.hpp"
 
@@ -41,7 +41,7 @@ using corum::ranked::RankedProfileView;
 using corum::ranked::RoundSummaryView;
 using corum::ranked::RuntimeStage;
 using corum::ranked::RuntimeView;
-using corum::ranked::ui::RankTransitionAnimator;
+using corum::ranked::ui::RankTransitionLayer;
 using corum::ranked::ui::RankTransitionType;
 
 namespace {
@@ -326,6 +326,7 @@ class CorumRankedLayer final : public CCLayerColor {
     std::string m_renderedUiKey;
     std::string m_pendingUiKey;
     std::string m_rankTransitionPlayedKey;
+    RankTransitionLayer* m_rankTransitionLayer = nullptr;
     bool m_uiFadingOut = false;
     bool m_fadeInNextRender = true;
     SteadyClock::time_point m_uiTransitionDeadline {};
@@ -1905,56 +1906,35 @@ class CorumRankedLayer final : public CCLayerColor {
     }
 
     bool playResultRankTransition(
-        CCPoint cardCenter,
         corum::ranked::RatingEventView const& event,
         RankedProfileView const& before,
-        RankedProfileView const& after,
-        PlayerCardRefs const& refs,
-        CCLabelBMFont* eventLabel
+        RankedProfileView const& after
     ) {
         auto const transition = authoritativeTransitionType(event, before, after);
-        if (!transition || !refs.tierPlate || !refs.tierTrophy || !eventLabel) return false;
+        if (!transition || m_rankTransitionLayer) return false;
 
-        auto* animator = RankTransitionAnimator::create();
-        if (!animator) return false;
-        m_root->addChild(animator, 40);
-
-        auto* settledPlate = refs.tierPlate;
-        auto* settledTrophy = refs.tierTrophy;
-        auto const settledTrophyScale = settledTrophy->getScale();
-        auto const started = animator->playRankTransition(
+        auto* transitionLayer = RankTransitionLayer::create(
             before.displayedTier,
             after.displayedTier,
             *transition,
-            {cardCenter.x, cardCenter.y + 29.0f},
             ratingEventText(event).first,
-            [settledPlate, settledTrophy, settledTrophyScale, eventLabel] {
-                // These nodes are siblings of the animator under the same result
-                // root. If the scene is closed, cleanup removes the animator and
-                // its pending callback together, so none of these pointers can
-                // be reached after their owning result root is gone.
-                settledPlate->setVisible(true);
-                settledPlate->setScale(0.86f);
-                settledPlate->runAction(CCEaseBackOut::create(CCScaleTo::create(0.18f, 1.0f)));
-
-                settledTrophy->setVisible(true);
-                settledTrophy->setScale(settledTrophyScale * 0.72f);
-                settledTrophy->runAction(CCEaseBackOut::create(
-                    CCScaleTo::create(0.18f, settledTrophyScale)
-                ));
-
-                eventLabel->setOpacity(0);
-                eventLabel->runAction(CCFadeIn::create(0.16f));
+            tr("tap-to-skip", "TAP TO SKIP"),
+            tr("continue", "CONTINUE"),
+            [this] {
+                m_rankTransitionLayer = nullptr;
+                setKeypadEnabled(true);
+                if (m_menu) m_menu->setTouchEnabled(true);
             }
         );
-        if (!started) {
-            animator->removeFromParentAndCleanup(true);
-            return false;
-        }
+        if (!transitionLayer) return false;
 
-        refs.tierPlate->setVisible(false);
-        refs.tierTrophy->setVisible(false);
-        eventLabel->setOpacity(0);
+        m_rankTransitionLayer = transitionLayer;
+        if (m_menu) {
+            if (m_menu->m_pSelectedItem) m_menu->m_pSelectedItem = nullptr;
+            m_menu->setTouchEnabled(false);
+        }
+        setKeypadEnabled(false);
+        addChild(transitionLayer, 1000);
         return true;
     }
 
@@ -2112,39 +2092,21 @@ class CorumRankedLayer final : public CCLayerColor {
         auto const transitionKey = match.matchId.empty()
             ? fmt::format("{}:{}:{}", match.playerAName, match.playerBName, match.stateVersion)
             : match.matchId;
-        bool transitionStarted = false;
         if (m_rankTransitionPlayedKey != transitionKey) {
-            transitionStarted |= playResultRankTransition(
-                {100.0f, cardY},
-                match.ratingEventA,
-                match.profileBeforeA,
-                match.profileAfterA,
-                cardA,
-                eventLabelA
-            );
-            transitionStarted |= playResultRankTransition(
-                {size.width - 100.0f, cardY},
-                match.ratingEventB,
-                match.profileBeforeB,
-                match.profileAfterB,
-                cardB,
-                eventLabelB
+            auto const transitionStarted = ownA
+                ? playResultRankTransition(
+                    match.ratingEventA,
+                    match.profileBeforeA,
+                    match.profileAfterA
+                )
+                : playResultRankTransition(
+                    match.ratingEventB,
+                    match.profileBeforeB,
+                    match.profileAfterB
             );
             if (transitionStarted) m_rankTransitionPlayedKey = transitionKey;
         }
-
-        if (transitionStarted) {
-            // Keep result actions from racing the short reveal. This action is
-            // owned by the result root, so closing the scene cancels it safely.
-            m_menu->setTouchEnabled(false);
-            m_root->runAction(CCSequence::create(
-                CCDelayTime::create(1.78f),
-                CallFuncExt::create([this] {
-                    if (m_menu) m_menu->setTouchEnabled(true);
-                }),
-                nullptr
-            ));
-        }
+        if (m_rankTransitionLayer && m_menu) m_menu->setTouchEnabled(false);
     }
 
     void renderHistoryList(RuntimeView const& view) {
@@ -2511,6 +2473,7 @@ class CorumRankedLayer final : public CCLayerColor {
 
     void onExit() override {
         unschedule(schedule_selector(CorumRankedLayer::refresh));
+        m_rankTransitionLayer = nullptr;
         setKeypadEnabled(false);
         if (m_menu) {
             if (m_menu->m_pSelectedItem) {
@@ -2522,6 +2485,7 @@ class CorumRankedLayer final : public CCLayerColor {
     }
 
     void keyBackClicked() override {
+        if (m_rankTransitionLayer) return;
         if (m_page != Page::Live) {
             onHistoryBack(nullptr);
             return;

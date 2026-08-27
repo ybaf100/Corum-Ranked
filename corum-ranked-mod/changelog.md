@@ -1,6 +1,7 @@
 # v0.5.0-beta.6
 
-- Added server-authoritative tier transition animation on the result screen: distinct Placement Reveal, Promotion, and Demotion sequences use short Cocos2d scale/easing, square/diamond fragments, glow, flash, local UI shake, rise, and fall actions without changing rank, LP, MMR, placement, or promotion-series decisions.
+- Added a dedicated full-screen, server-authoritative rank reveal after the result is confirmed. Placement Reveal, Promotion, and Demotion now run for roughly 4–8 seconds with a 1.5-second Skip lock, an explicit Continue step, and safe return to the settled result screen without changing rank, LP, MMR, placement, or promotion-series decisions.
+- Built cumulative tier evolution from sprite/action layers: Red adds spikes, Aqua adds a rotating orbit, Bronze attaches armored corner blocks, Silver adds crystal wings, and Gold completes the structure with a crown and radiant ornaments. Promotion visibly attaches the newest tier part, Demotion drops that latest part first, and Placement reveals all parts up to the authoritative target tier.
 - Replaced every Unranked/Red/Aqua/Bronze/Silver/Gold trophy resource with the supplied candidate 5 transparent PNG set. Placement supports Unranked into any Ranked tier, while presentation guards refuse Red/Unranked demotion animation.
 - Fixed same-map Death Match re-entry after an Attempt returns to the retained Ranked round scene. The client now releases its completed child-scene launch guard and automatically opens the next legal Attempt, while the authoritative 3/3, spectator, result, and start-window checks remain unchanged.
 - Added a persistent `English / 한국어` selector to the Ranked lobby.

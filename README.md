@@ -54,6 +54,7 @@
 - beta.4부터 상대 Hidden MMR이 MMR과 LP 이동량에 미치는 강도를 각각 설정할 수 있습니다. 실제 3-Clear 결정승만으로 무패 우승하면 기존 공식의 최대 MMR·LP 획득량과 노란 `PERFECT WIN` 결과가 적용됩니다.
 - beta.5는 beta.4의 경기 규칙을 그대로 유지하면서 Ranked 전체 화면, LevelInfo 대기 게이트와 게임 HUD를 새 디자인 시스템으로 교체합니다. 최신 HUD는 플레이 배경 프레임과 사각 스크림 없이 글자 그림자만 사용하고, Paperlogy SemiBold를 기본 문구에, Black을 핵심 수치와 동작에 적용합니다. 커스텀 트로피 파일 위치는 `corum-ranked-mod/resources/CUSTOM-UI-ASSETS.md`에 정리되어 있습니다.
 - beta.6는 로비에서 저장되는 `English / 한국어` 선택을 추가합니다. `CORUM RANKED`, `ROUND`, `Qualifying`, 티어명, LP, 플레이어명과 맵명은 영어를 유지하며 점수·배치·승급·강등 등 기능 문구는 `corum-ranked-mod/src/ui/RankedTranslations.hpp`에서 수정할 수 있습니다. 이전 우측 하단 `디버그` 글리프 문구는 제거했습니다.
+- 티어 변경이 서버에서 확정되면 결과 화면 위에 독립된 전체화면 연출이 한 번 표시됩니다. 배치는 목표 티어까지의 누적 파츠를 공개하고, 승급은 새 파츠를 결합하며, 강등은 가장 최근 파츠부터 떨어뜨립니다. 1.5초 이후 Skip할 수 있고 Continue를 누르면 기존 결과 화면으로 돌아갑니다.
 - Production secret은 저장소에 포함하지 않습니다.
 
 구현·테스트·배포 안내는 [`ranked/README.md`](ranked/README.md)를 참고하세요.
