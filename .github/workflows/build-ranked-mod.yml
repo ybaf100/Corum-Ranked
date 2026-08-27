@@ -138,8 +138,12 @@ jobs:
             -o /tmp/corum-ranked-debug-bot-domain-test
           /tmp/corum-ranked-debug-bot-domain-test
           python3 - <<'PY'
+          import json
           from pathlib import Path
 
+          manifest = json.loads(
+              Path("corum-ranked-mod/mod.json").read_text(encoding="utf-8")
+          )
           source = Path("corum-ranked-mod/src/LevelInfoLayer.cpp").read_text(encoding="utf-8")
           for required in (
               "nativePlayButton->activate();",
@@ -220,25 +224,74 @@ jobs:
 
           transition_header = Path("corum-ranked-mod/src/ui/RankTransitionLayer.hpp").read_text(encoding="utf-8")
           transition_source = Path("corum-ranked-mod/src/ui/RankTransitionLayer.cpp").read_text(encoding="utf-8")
+          badge_header = Path("corum-ranked-mod/src/ui/RankBadgeAssets.hpp").read_text(encoding="utf-8")
+          badge_source = Path("corum-ranked-mod/src/ui/RankBadgeAssets.cpp").read_text(encoding="utf-8")
           for required_transition in (
               "class RankTransitionLayer",
               "playPlacement()",
               "playPromotion()",
               "playDemotion()",
-              "makeOrnamentGroup",
+              "createRankBadgeAssembly",
+              "animatePartAssembly",
+              "createAnimatedRankBadge",
               "unlockSkip()",
               "revealFinalState",
               "CCDelayTime::create(1.50f)",
               "RankTransitionLayer::create(",
               'tr("tap-to-skip", "TAP TO SKIP")',
           ):
-              if required_transition not in transition_header and required_transition not in transition_source and required_transition not in popup:
+              if all(required_transition not in source for source in (
+                  transition_header, transition_source, badge_header, badge_source, popup,
+              )):
                   raise SystemExit(f"Missing full-screen rank transition invariant: {required_transition}")
+          required_rank_assets = {
+              "rank-unranked-body.png", "rank-unranked-core.png",
+              "rank-unranked-fragment-tl.png", "rank-unranked-fragment-tr.png",
+              "rank-unranked-fragment-bl.png", "rank-unranked-fragment-br.png",
+              "rank-red-body.png", "rank-red-core.png", "rank-red-spikes.png",
+              "rank-aqua-body.png", "rank-aqua-core.png",
+              "rank-aqua-orbit-back.png", "rank-aqua-orbit-front.png",
+              "rank-bronze-body.png", "rank-bronze-core.png",
+              "rank-bronze-frame-top.png", "rank-bronze-frame-bottom.png",
+              "rank-bronze-frame-left.png", "rank-bronze-frame-right.png",
+              "rank-silver-body.png", "rank-silver-core.png",
+              "rank-silver-wing-left.png", "rank-silver-wing-right.png",
+              "rank-silver-crystal-top.png", "rank-gold-body.png",
+              "rank-gold-core.png", "rank-gold-side-left.png",
+              "rank-gold-side-right.png", "rank-gold-lower-crest.png",
+              "rank-gold-crown.png", "rank-gold-radiant-ornament.png",
+              "rank-transition-background.png", "rank-transition-geometry-overlay.png",
+              "fx-rank-radial-glow-white.png", "fx-rank-broken-ring-white.png",
+              "fx-rank-shockwave-circle-white.png", "fx-rank-shockwave-diamond-white.png",
+              "fx-rank-light-sweep-white.png", "fx-rank-energy-column-white.png",
+              "fx-rank-glint-white.png", "fx-rank-crack-white.png",
+              "fx-silver-halo.png", "fx-silver-orbit.png",
+              "fx-silver-crystal-sheen.png", "fx-gold-halo-inner.png",
+              "fx-gold-halo-outer.png", "fx-gold-radial-rays.png",
+              "fx-gold-crown-aura.png",
+          }
+          missing_rank_assets = sorted(
+              name for name in required_rank_assets
+              if not Path("corum-ranked-mod/resources", name).is_file()
+          )
+          if missing_rank_assets:
+              raise SystemExit("Missing structural rank assets: " + ", ".join(missing_rank_assets))
+          manifest_sprites = manifest.get("resources", {}).get("sprites", [])
+          for required_glob in (
+              "resources/corum-trophy-*.png",
+              "resources/rank-*.png",
+              "resources/fx-*.png",
+          ):
+              if required_glob not in manifest_sprites:
+                  raise SystemExit(f"Missing rank resource manifest glob: {required_glob}")
           for forbidden_transition in (
               "RankTransitionAnimator",
+              "makeOrnamentGroup",
               "PlayLayer::scene(",
           ):
-              if forbidden_transition in popup or forbidden_transition in transition_source:
+              if any(forbidden_transition in source for source in (
+                  popup, transition_source, badge_source,
+              )):
                   raise SystemExit(f"Obsolete or gameplay-coupled rank transition returned: {forbidden_transition}")
           PY
 

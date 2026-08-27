@@ -21,7 +21,9 @@
   ],
   "resources": {
     "sprites": [
-      "resources/corum-trophy-*.png"
+      "resources/corum-trophy-*.png",
+      "resources/rank-*.png",
+      "resources/fx-*.png"
     ],
     "files": [
       "resources/CorumSans-LICENSE.txt"

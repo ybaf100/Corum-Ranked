@@ -17,10 +17,24 @@ Keep the filenames exactly as listed below.
 The bundled candidate 5 set uses transparent square 1254 x 1254 PNGs. Keep
 important details inside the middle 80 percent when replacing them because the
 same asset is also shown at a small size on player cards and in the result
-transition layer. The full-screen reveal builds cumulative code-generated
-spikes, orbit pieces, armor blocks, crystal wings, and crown ornaments around
-these base trophy images. A missing image still falls back to Geometry Dash's star
-sprite and never blocks matchmaking or the Ranked UI.
+transition layer. Normal screens keep using these flattened trophies and add
+only lightweight ambient glow/orbit layers. A missing trophy still falls back
+to Geometry Dash's star sprite and never blocks matchmaking or the Ranked UI.
+
+## Structural rank-transition assets
+
+The fullscreen Placement, Promotion, and Demotion presentation is assembled
+from the transparent `rank-*.png` layers on a shared 1024 x 1024 canvas. Body
+and core layers establish the target tier; tier-specific spikes, orbit rings,
+frame plates, wings/crystal, and Gold ornaments are moved independently so
+promotion visibly adds structure and demotion removes the newest structure.
+
+Shared `fx-rank-*.png`, `fx-silver-*.png`, and `fx-gold-*.png` sprites provide
+additive glow, sweep, shockwave, crack, orbit, and halo effects. The background
+uses `rank-transition-background.png` plus
+`rank-transition-geometry-overlay.png`. These textures are loaded on demand;
+normal player cards do not instantiate transition particles or structural
+layers.
 
 ## Typography
 

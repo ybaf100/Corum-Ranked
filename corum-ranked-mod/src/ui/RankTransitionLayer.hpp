@@ -50,9 +50,6 @@ private:
     void onContinue(cocos2d::CCObject*);
     void keyBackClicked() override;
 
-    cocos2d::CCLayerColor* makeAssembly(std::string const& rank, float badgeSize, bool ambient);
-    cocos2d::CCLayerColor* makeOrnamentGroup(int stage, bool ambient);
-    void addStageOrnaments(cocos2d::CCNode* parent, int stage, bool ambient);
     void addParticles(
         std::string const& rank,
         int count,
@@ -64,6 +61,8 @@ private:
     );
     void addFlash(cocos2d::ccColor3B color, GLubyte opacity, float delay);
     void addLightSweep(cocos2d::ccColor3B color, float delay);
+    void addShockwave(cocos2d::ccColor3B color, float delay, bool diamond = false);
+    void addEnergyColumn(cocos2d::ccColor3B color, float delay);
     void runShake(float strength, float delay);
     void scheduleFinalReveal(float duration);
 

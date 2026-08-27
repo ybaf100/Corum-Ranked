@@ -4,6 +4,7 @@
 #include "RankedAudioManager.hpp"
 #include "DebugBotPopup.hpp"
 #include "RankedSongGate.hpp"
+#include "ui/RankBadgeAssets.hpp"
 #include "ui/RankTransitionLayer.hpp"
 #include "ui/RankedTranslations.hpp"
 #include "ui/RankedVisuals.hpp"
@@ -1058,7 +1059,7 @@ class CorumRankedLayer final : public CCLayerColor {
     struct PlayerCardRefs {
         CCLabelBMFont* scoreLabel = nullptr;
         CCNode* tierPlate = nullptr;
-        CCSprite* tierTrophy = nullptr;
+        CCNode* tierTrophy = nullptr;
     };
 
     void addPlayerCard(
@@ -1148,7 +1149,11 @@ class CorumRankedLayer final : public CCLayerColor {
 
         auto* tierPlate = makeTextPlate(upper(tier), {96.0f, 24.0f}, {center.x, center.y - 74.0f}, accent, 0.28f, accent, "black");
         m_root->addChild(tierPlate, 3);
-        auto* tierTrophy = corum::ranked::ui::trophy(tier, {18.0f, 18.0f});
+        auto* tierTrophy = corum::ranked::ui::createAnimatedRankBadge(
+            tier,
+            {18.0f, 18.0f},
+            corum::ranked::ui::RankBadgeDisplay::Compact
+        );
         tierTrophy->setPosition({center.x - 58.0f, center.y - 74.0f});
         m_root->addChild(tierTrophy, 5);
         if (outRefs) {
@@ -1273,7 +1278,11 @@ class CorumRankedLayer final : public CCLayerColor {
         if (profile.promotion.active) addPromotionAura(leftCenter, {188.0f, 196.0f});
         auto* profileTitle = makeLabel(tr("your-rank", "YOUR RANK"), 0.34f, {leftCenter.x, leftCenter.y + 77.0f}, kCyan, "semibold");
         m_root->addChild(profileTitle, 4);
-        auto* emblem = corum::ranked::ui::trophy(view.profileTier, {68.0f, 68.0f});
+        auto* emblem = corum::ranked::ui::createAnimatedRankBadge(
+            view.profileTier,
+            {68.0f, 68.0f},
+            corum::ranked::ui::RankBadgeDisplay::Large
+        );
         emblem->setPosition({leftCenter.x, leftCenter.y + 20.0f});
         m_root->addChild(emblem, 4);
         addStreakLabel(profile.resultStreak, {leftCenter.x, leftCenter.y + 60.0f}, 0.28f, 154.0f);
