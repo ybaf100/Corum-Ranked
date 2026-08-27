@@ -68,8 +68,8 @@ std::vector<PartSpec> partsFor(std::string const& rank) {
     return {};
 }
 
-CCNode* centeredRoot() {
-    auto* root = CCNode::create();
+CCLayerColor* centeredRoot() {
+    auto* root = CCLayerColor::create({0, 0, 0, 0});
     root->setContentSize(CCSizeZero);
     root->setCascadeColorEnabled(true);
     root->setCascadeOpacityEnabled(true);

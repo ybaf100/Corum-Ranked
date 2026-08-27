@@ -26,7 +26,10 @@ struct RankBadgePart {
 // separate from ornaments so transition scenes can attach or remove the exact
 // tier-defining structure without ever inferring a rank result.
 struct RankBadgeAssembly {
-    cocos2d::CCNode* root = nullptr;
+    // CCLayerColor implements CCRGBAProtocol consistently on every Geode
+    // target, so group fade/cascade actions do not rely on platform-specific
+    // CCNode extensions.
+    cocos2d::CCLayerColor* root = nullptr;
     std::vector<RankBadgePart> baseParts;
     std::vector<RankBadgePart> ornaments;
     std::vector<RankBadgePart> fragments;
