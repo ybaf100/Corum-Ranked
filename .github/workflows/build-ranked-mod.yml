@@ -22,11 +22,13 @@ on:
       - "corum-ranked-mod/**"
       - "ranked/apps/server/src/session/client-version.ts"
       - ".github/workflows/build-ranked-mod.yml"
+      - ".github/workflows/build-ranked-debug.yml"
   pull_request:
     paths:
       - "corum-ranked-mod/**"
       - "ranked/apps/server/src/session/client-version.ts"
       - ".github/workflows/build-ranked-mod.yml"
+      - ".github/workflows/build-ranked-debug.yml"
 
 permissions:
   contents: read
@@ -239,6 +241,8 @@ jobs:
               "CCDelayTime::create(1.50f)",
               "RankTransitionLayer::create(",
               'tr("tap-to-skip", "TAP TO SKIP")',
+              "targetAssembly.root->runAction(CCSequence::create(",
+              "CCEaseSineOut::create(CCMoveTo::create(0.52f, center))",
           ):
               if all(required_transition not in source for source in (
                   transition_header, transition_source, badge_header, badge_source, popup,
@@ -288,6 +292,7 @@ jobs:
               "RankTransitionAnimator",
               "makeOrnamentGroup",
               "PlayLayer::scene(",
+              "CCEaseSineOut::create(CCMoveBy::create(0.52f, {0.0f, 12.0f}))",
           ):
               if any(forbidden_transition in source for source in (
                   popup, transition_source, badge_source,

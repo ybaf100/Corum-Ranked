@@ -493,15 +493,20 @@ void RankTransitionLayer::playPromotion() {
     auto targetAssembly = createRankBadgeAssembly(m_newRank, gold ? 130.0f : 120.0f);
     targetAssembly.root->setPosition({center.x, center.y - 12.0f});
     m_animationRoot->addChild(targetAssembly.root, 40);
+    // Every structural PNG shares one canvas origin. Lift the common root so
+    // the body, core, and ornaments stay perfectly registered throughout the
+    // assembly instead of moving only the base/core layers by 12 px.
+    targetAssembly.root->runAction(CCSequence::create(
+        CCDelayTime::create(2.16f),
+        CCEaseSineOut::create(CCMoveTo::create(0.52f, center)),
+        nullptr
+    ));
     for (auto const& part : targetAssembly.baseParts) {
         part.sprite->setOpacity(0);
         part.sprite->setScale(part.assembledScale * 0.70f);
         part.sprite->runAction(CCSequence::create(
             CCDelayTime::create(2.16f), CCFadeIn::create(0.14f),
-            CCSpawn::create(
-                CCEaseBackOut::create(CCScaleTo::create(0.52f, part.assembledScale)),
-                CCEaseSineOut::create(CCMoveBy::create(0.52f, {0.0f, 12.0f})), nullptr
-            ),
+            CCEaseBackOut::create(CCScaleTo::create(0.52f, part.assembledScale)),
             nullptr
         ));
     }
