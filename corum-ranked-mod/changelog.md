@@ -1,3 +1,12 @@
+# v0.5.0-beta.7
+
+- Removed the synthetic `GJGameLevel::create()` fallback from Ranked map entry. The client now opens `LevelInfoLayer` only with the exact saved Geometry Dash level or an exact `SearchType::Type19` online result whose Level ID still matches the current server-authoritative match, Round, and map context.
+- Starts exact-level resolution at the beginning of the existing ten-second Round/Death Match prepare phase instead of leaving the first five seconds idle. As soon as the real level object is available, its real `LevelInfoLayer` begins vanilla-owned map/update and song acquisition in the background.
+- Added a full-screen map preparation window for the first half of the countdown, then a smooth reveal of the real Geometry Dash level page at five seconds remaining. If exact-level lookup completes after that boundary, the real page is revealed immediately.
+- Added a continuously animated overall preparation bar across level lookup, vanilla map/update, song readiness, Ready/opponent wait, and start. This is phase progress rather than a fabricated network-byte percentage, and each incomplete stage remains capped until its real completion signal arrives.
+- Preserved automatic launch through the verified real Geometry Dash Play item, server-authoritative Ready/PLAYING transitions, optional-song bypass only at countdown zero, and all existing attempt, scoring, LP, MMR, and match rules.
+- Updated the exact client/server gate and workspace package metadata to `v0.5.0-beta.7`.
+
 # v0.5.0-beta.6
 
 - Added a dedicated full-screen, server-authoritative rank reveal after the result is confirmed. Placement Reveal, Promotion, and Demotion now run for roughly 4–8 seconds with a 1.5-second Skip lock, an explicit Continue step, and safe return to the settled result screen without changing rank, LP, MMR, placement, or promotion-series decisions.

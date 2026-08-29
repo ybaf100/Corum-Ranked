@@ -1,6 +1,6 @@
 # Debug Bot Match 개발 문서
 
-`v0.5.0-beta.6`의 Bot Match는 실제 Ranked 엔진을 시험하는 임시 개발 harness다. Force Win/Force Lose는 즉시 동일한 서버 권위 결과·LP/MMR 처리 경로로 이동하며 `PERFECT WIN`으로 판정되지 않는다.
+`v0.5.0-beta.7`의 Bot Match는 실제 Ranked 엔진을 시험하는 임시 개발 harness다. Force Win/Force Lose는 즉시 동일한 서버 권위 결과·LP/MMR 처리 경로로 이동하며 `PERFECT WIN`으로 판정되지 않는다.
 비밀번호 입력값은 URL, 서버 로그, 일반 로그에 기록하지 않으며 HTTPS JSON body로만 보낸다.
 
 ## 활성화

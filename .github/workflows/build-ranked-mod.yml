@@ -172,6 +172,23 @@ jobs:
           play = Path("corum-ranked-mod/src/PlayLayer.cpp").read_text(encoding="utf-8")
           visuals = Path("corum-ranked-mod/src/ui/RankedVisuals.hpp").read_text(encoding="utf-8")
           translations = Path("corum-ranked-mod/src/ui/RankedTranslations.hpp").read_text(encoding="utf-8")
+          for required_preload in (
+              "SearchType::Type19",
+              "getOnlineLevels(search)",
+              "lookupStillTargetsCurrentMap",
+              "preparationProgressTarget()",
+              "revealExactLevelInfoPage()",
+              "displayedPreparationProgress",
+          ):
+              if required_preload not in popup and required_preload not in source:
+                  raise SystemExit(f"Missing beta.7 exact-level preload invariant: {required_preload}")
+          for forbidden_preload in (
+              "auto* level = GJGameLevel::create();",
+              "if (phaseSeconds() < 5.0) return;",
+              "level->m_creatorName = current->creator;",
+          ):
+              if forbidden_preload in popup:
+                  raise SystemExit(f"Forbidden synthetic/idle preload path returned: {forbidden_preload}")
           if '"디버그"' in popup or 'ranked-korean-font-probe' in popup:
               raise SystemExit("Obsolete lower-right Korean debug probe returned")
           for required_translation in (

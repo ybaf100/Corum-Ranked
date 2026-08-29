@@ -25,7 +25,10 @@ using SteadyClock = std::chrono::steady_clock;
 
 struct PendingPrepareGate {
     int levelId = 0;
-    double countdownRemainingSeconds = 0.0;
+    int roundNumber = 0;
+    int deathmatchSequence = 0;
+    std::string matchId;
+    SteadyClock::time_point countdownEndsAt {};
     bool pending = false;
 };
 
@@ -137,28 +140,19 @@ bool isCurrentRankedLevel(GJGameLevel* level) {
         runtime.currentLevelId() == static_cast<int>(level->m_levelID);
 }
 
-void normalizeRankedLevelInfo(GJGameLevel* level) {
-    if (!isCurrentRankedLevel(level)) return;
-    auto const& map = corum::ranked::RankedRuntime::get().view().match.currentMap;
-
-    // Only the synthetic GJGameLevel::create() shell needs normalization.
-    // GameLevelManager::getSavedLevel() returns a canonical Saved payload;
-    // changing that shared object back to SearchResult makes vanilla
-    // shouldDownloadLevel() treat an already downloaded map as download/update
-    // work on some platforms.
-    if (level->m_levelType == GJLevelType::Default) {
-        level->m_levelType = GJLevelType::SearchResult;
-    }
-    if (map) {
-        if (!map->title.empty()) level->m_levelName = map->title;
-        if (!map->creator.empty()) level->m_creatorName = map->creator;
-    }
-}
-
-bool consumePrepareGateRequest(GJGameLevel* level, double& countdownRemainingSeconds) {
+bool consumePrepareGateRequest(GJGameLevel* level, SteadyClock::time_point& countdownEndsAt) {
     if (!level || !g_pendingPrepareGate.pending) return false;
-    if (g_pendingPrepareGate.levelId != static_cast<int>(level->m_levelID)) return false;
-    countdownRemainingSeconds = std::max(0.0, g_pendingPrepareGate.countdownRemainingSeconds);
+    auto const& match = corum::ranked::RankedRuntime::get().view().match;
+    auto const exactContext =
+        g_pendingPrepareGate.levelId == static_cast<int>(level->m_levelID) &&
+        g_pendingPrepareGate.matchId == match.matchId &&
+        g_pendingPrepareGate.roundNumber == match.roundNumber &&
+        g_pendingPrepareGate.deathmatchSequence == match.deathmatchSequence;
+    if (!exactContext) {
+        g_pendingPrepareGate = {};
+        return false;
+    }
+    countdownEndsAt = g_pendingPrepareGate.countdownEndsAt;
     g_pendingPrepareGate = {};
     return true;
 }
@@ -197,6 +191,11 @@ void lockInteractionToSong(CCNode* root, CustomSongWidget* songWidget) {
     if (!root) return;
     setMenuItemsEnabled(root, false);
     enableSongAcquisitionControls(songWidget);
+}
+
+void lockAllRankedPrepareInteraction(CCNode* root) {
+    if (!root) return;
+    setMenuItemsEnabled(root, false);
 }
 
 void unlockRankedPrepareInteraction(CCNode* root) {
@@ -260,8 +259,14 @@ namespace corum::ranked {
 
 bool showRankedSongDownloadGate(GJGameLevel* level, double countdownRemainingSeconds) {
     if (!level) return false;
+    auto const& match = RankedRuntime::get().view().match;
     g_pendingPrepareGate.levelId = static_cast<int>(level->m_levelID);
-    g_pendingPrepareGate.countdownRemainingSeconds = std::max(0.0, countdownRemainingSeconds);
+    g_pendingPrepareGate.matchId = match.matchId;
+    g_pendingPrepareGate.roundNumber = match.roundNumber;
+    g_pendingPrepareGate.deathmatchSequence = match.deathmatchSequence;
+    g_pendingPrepareGate.countdownEndsAt = SteadyClock::now() + std::chrono::milliseconds(
+        static_cast<long long>(std::ceil(std::max(0.0, countdownRemainingSeconds) * 1000.0))
+    );
     g_pendingPrepareGate.pending = true;
 
     auto* scene = LevelInfoLayer::scene(level, false);
@@ -298,16 +303,29 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         SteadyClock::time_point lastMapDownloadRequestAt {};
         SteadyClock::time_point songWaitStartedAt {};
         CCNode* gateOverlay = nullptr;
+        CCLayerColor* gateIntroCover = nullptr;
+        CCNode* gateIntroPanel = nullptr;
         CCLabelBMFont* gateTitle = nullptr;
         CCLabelBMFont* gateStatus = nullptr;
         CCLabelBMFont* gateCountdown = nullptr;
+        CCLabelBMFont* gateProgressLabel = nullptr;
+        CCLayerColor* gateProgressFill = nullptr;
+        float gateProgressWidth = 0.0f;
+        CCLabelBMFont* introTitle = nullptr;
+        CCLabelBMFont* introMap = nullptr;
+        CCLabelBMFont* introCreator = nullptr;
+        CCLabelBMFont* introStatus = nullptr;
+        CCLabelBMFont* introCountdown = nullptr;
+        CCLabelBMFont* introProgressLabel = nullptr;
+        CCLayerColor* introProgressFill = nullptr;
+        float introProgressWidth = 0.0f;
+        float displayedPreparationProgress = 0.30f;
+        bool introRevealStarted = false;
     };
 
     bool init(GJGameLevel* level, bool challenge) {
-        normalizeRankedLevelInfo(level);
         if (!LevelInfoLayer::init(level, challenge)) return false;
         if (isCurrentRankedLevel(m_level)) {
-            normalizeRankedLevelInfo(m_level);
             // Preserve vanilla's canonical Saved/SearchResult distinction.
             m_levelType = m_level->m_levelType;
         }
@@ -319,12 +337,12 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         auto& runtime = corum::ranked::RankedRuntime::get();
         if (!isCurrentRankedLevel(m_level)) return;
 
-        double countdownRemaining = 0.0;
+        SteadyClock::time_point countdownEndsAt {};
         if (
             rankedDownloadGateState(runtime.view().match.state) &&
-            consumePrepareGateRequest(m_level, countdownRemaining)
+            consumePrepareGateRequest(m_level, countdownEndsAt)
         ) {
-            setupSongDownloadGate(countdownRemaining);
+            setupSongDownloadGate(countdownEndsAt);
             return;
         }
 
@@ -335,37 +353,105 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         }
     }
 
-    void setupSongDownloadGate(double countdownRemaining) {
+    void setupSongDownloadGate(SteadyClock::time_point countdownEndsAt) {
         if (m_fields->songGateActive) return;
         m_fields->songGateActive = true;
         corum::ranked::RankedRuntime::get().setSongBypassAllowed(false);
         m_fields->songGateBypassed = false;
         m_fields->gateOpenedAt = SteadyClock::now();
-        m_fields->countdownEndsAt = m_fields->gateOpenedAt + std::chrono::milliseconds(
-            static_cast<long long>(std::ceil(std::max(0.0, countdownRemaining) * 1000.0))
-        );
+        m_fields->countdownEndsAt = std::max(countdownEndsAt, m_fields->gateOpenedAt);
 
         auto const size = CCDirector::sharedDirector()->getWinSize();
 
-        // Keep the real Geometry Dash level page visible and add a compact
-        // competitive Ranked banner in the open space above the song widget.
-        // This is intentionally native Cocos/Geode UI, not a screenshot overlay,
-        // so the vanilla song button remains a real interactive control.
-        m_fields->gateOverlay = gatePanel({166.0f, 50.0f}, {size.width / 2.0f, size.height / 2.0f - 28.0f});
+        // The real LevelInfo page is already alive underneath this UI and owns
+        // vanilla map/update/song acquisition. A full-screen Ranked cover keeps
+        // the map card readable during the first half of PREPARE; at five seconds
+        // remaining it fades away to reveal that exact GD page.
+        m_fields->gateOverlay = gatePanel({200.0f, 72.0f}, {size.width / 2.0f, size.height / 2.0f - 28.0f});
         m_fields->gateOverlay->setZOrder(1001);
         addChild(m_fields->gateOverlay, 1001);
 
-        m_fields->gateTitle = gateLabel(rankedGateTitle(), 0.20f, {83.0f, 40.0f}, corum::ranked::ui::Cyan);
-        m_fields->gateTitle->limitLabelWidth(150.0f, 0.20f, 0.14f);
+        m_fields->gateTitle = gateLabel(rankedGateTitle(), 0.20f, {100.0f, 62.0f}, corum::ranked::ui::Cyan);
+        m_fields->gateTitle->limitLabelWidth(184.0f, 0.20f, 0.14f);
         m_fields->gateOverlay->addChild(m_fields->gateTitle, 3);
-        m_fields->gateCountdown = gateLabel(tr("starts-in", "STARTS IN") + "  10", 0.34f, {83.0f, 25.0f}, corum::ranked::ui::Gold);
-        m_fields->gateCountdown->limitLabelWidth(152.0f, 0.34f, 0.22f);
+        m_fields->gateCountdown = gateLabel(tr("starts-in", "STARTS IN") + "  10", 0.31f, {100.0f, 46.0f}, corum::ranked::ui::Gold);
+        m_fields->gateCountdown->limitLabelWidth(184.0f, 0.31f, 0.21f);
         m_fields->gateOverlay->addChild(m_fields->gateCountdown, 3);
-        m_fields->gateStatus = gateLabel(tr("song-download-only", "ONLY SONG DOWNLOAD AVAILABLE"), 0.16f, {83.0f, 8.0f}, corum::ranked::ui::TextMuted);
-        m_fields->gateStatus->limitLabelWidth(150.0f, 0.16f, 0.11f);
+        m_fields->gateStatus = gateLabel(tr("preparing-map", "PREPARING MAP..."), 0.15f, {100.0f, 29.0f}, corum::ranked::ui::TextMuted);
+        m_fields->gateStatus->limitLabelWidth(184.0f, 0.15f, 0.10f);
         m_fields->gateOverlay->addChild(m_fields->gateStatus, 3);
 
-        lockInteractionToSong(this, m_songWidget);
+        constexpr float compactProgressWidth = 154.0f;
+        auto* compactProgressBack = CCLayerColor::create({5, 12, 25, 245});
+        compactProgressBack->setContentSize({compactProgressWidth, 8.0f});
+        compactProgressBack->setPosition({11.0f, 8.0f});
+        m_fields->gateOverlay->addChild(compactProgressBack, 3);
+        m_fields->gateProgressFill = CCLayerColor::create({64, 224, 255, 245});
+        m_fields->gateProgressFill->setContentSize({compactProgressWidth * 0.30f, 8.0f});
+        m_fields->gateProgressFill->setPosition(compactProgressBack->getPosition());
+        m_fields->gateProgressWidth = compactProgressWidth;
+        m_fields->gateOverlay->addChild(m_fields->gateProgressFill, 4);
+        m_fields->gateProgressLabel = gateLabel("30%", 0.17f, {183.0f, 12.0f}, corum::ranked::ui::Text);
+        m_fields->gateOverlay->addChild(m_fields->gateProgressLabel, 4);
+
+        auto const remainingAtOpen = std::chrono::duration<double>(
+            m_fields->countdownEndsAt - SteadyClock::now()
+        ).count();
+        if (remainingAtOpen > 5.0) {
+            m_fields->gateIntroCover = CCLayerColor::create({5, 10, 22, 255});
+            m_fields->gateIntroCover->setContentSize(size);
+            m_fields->gateIntroCover->setPosition(CCPointZero);
+            m_fields->gateIntroCover->setCascadeOpacityEnabled(true);
+            corum::ranked::ui::addBackdrop(m_fields->gateIntroCover, size);
+            addChild(m_fields->gateIntroCover, 1002);
+
+            m_fields->gateIntroPanel = gatePanel(
+                {286.0f, 156.0f},
+                {size.width / 2.0f, size.height / 2.0f},
+                corum::ranked::ui::Cyan
+            );
+            m_fields->gateIntroPanel->setCascadeOpacityEnabled(true);
+            m_fields->gateIntroCover->addChild(m_fields->gateIntroPanel, 5);
+
+            m_fields->introTitle = gateLabel(rankedGateTitle(), 0.31f, {143.0f, 139.0f}, corum::ranked::ui::Cyan);
+            m_fields->introTitle->limitLabelWidth(264.0f, 0.31f, 0.21f);
+            m_fields->gateIntroPanel->addChild(m_fields->introTitle, 4);
+            m_fields->introMap = gateLabel(
+                m_level ? std::string(m_level->m_levelName.c_str()) : tr("selected-map", "SELECTED MAP"),
+                0.39f,
+                {143.0f, 111.0f},
+                corum::ranked::ui::Text
+            );
+            m_fields->introMap->limitLabelWidth(258.0f, 0.39f, 0.24f);
+            m_fields->gateIntroPanel->addChild(m_fields->introMap, 4);
+            auto const creator = m_level && !m_level->m_creatorName.empty()
+                ? fmt::format("BY {}", std::string(m_level->m_creatorName.c_str()))
+                : tr("creator-loading", "CREATOR LOADING...");
+            m_fields->introCreator = gateLabel(creator, 0.18f, {143.0f, 91.0f}, corum::ranked::ui::TextMuted);
+            m_fields->introCreator->limitLabelWidth(252.0f, 0.18f, 0.12f);
+            m_fields->gateIntroPanel->addChild(m_fields->introCreator, 4);
+            m_fields->introCountdown = gateLabel(tr("starts-in", "STARTS IN") + "  10", 0.30f, {143.0f, 71.0f}, corum::ranked::ui::Gold);
+            m_fields->gateIntroPanel->addChild(m_fields->introCountdown, 4);
+            m_fields->introStatus = gateLabel(tr("preparing-map", "PREPARING MAP..."), 0.19f, {143.0f, 51.0f}, corum::ranked::ui::Cyan);
+            m_fields->introStatus->limitLabelWidth(256.0f, 0.19f, 0.13f);
+            m_fields->gateIntroPanel->addChild(m_fields->introStatus, 4);
+
+            constexpr float introProgressWidth = 220.0f;
+            auto* introProgressBack = CCLayerColor::create({5, 12, 25, 245});
+            introProgressBack->setContentSize({introProgressWidth, 10.0f});
+            introProgressBack->setPosition({18.0f, 26.0f});
+            m_fields->gateIntroPanel->addChild(introProgressBack, 3);
+            m_fields->introProgressFill = CCLayerColor::create({64, 224, 255, 245});
+            m_fields->introProgressFill->setContentSize({introProgressWidth * 0.30f, 10.0f});
+            m_fields->introProgressFill->setPosition(introProgressBack->getPosition());
+            m_fields->introProgressWidth = introProgressWidth;
+            m_fields->gateIntroPanel->addChild(m_fields->introProgressFill, 4);
+            m_fields->introProgressLabel = gateLabel("PREPARING 30%", 0.18f, {143.0f, 13.0f}, corum::ranked::ui::Text);
+            m_fields->gateIntroPanel->addChild(m_fields->introProgressLabel, 4);
+        }
+
+        if (m_fields->gateIntroCover) lockAllRankedPrepareInteraction(this);
+        else lockInteractionToSong(this, m_songWidget);
         requestVanillaMapDownload();
 
         schedule(schedule_selector(CorumRankedLevelInfoLayer::updateSongDownloadGate), 0.20f);
@@ -410,6 +496,125 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         LevelInfoLayer::downloadLevel();
     }
 
+    void finishIntroReveal(float) {
+        if (m_fields->gateIntroCover) {
+            m_fields->gateIntroCover->removeFromParentAndCleanup(true);
+            m_fields->gateIntroCover = nullptr;
+        }
+        m_fields->gateIntroPanel = nullptr;
+        m_fields->introTitle = nullptr;
+        m_fields->introMap = nullptr;
+        m_fields->introCreator = nullptr;
+        m_fields->introStatus = nullptr;
+        m_fields->introCountdown = nullptr;
+        m_fields->introProgressLabel = nullptr;
+        m_fields->introProgressFill = nullptr;
+        m_fields->introProgressWidth = 0.0f;
+    }
+
+    void revealExactLevelInfoPage() {
+        if (!m_fields->gateIntroCover || m_fields->introRevealStarted) return;
+        m_fields->introRevealStarted = true;
+        lockInteractionToSong(this, m_songWidget);
+        m_fields->gateIntroCover->stopAllActions();
+        m_fields->gateIntroCover->runAction(CCFadeTo::create(0.25f, 0));
+        scheduleOnce(
+            schedule_selector(CorumRankedLevelInfoLayer::finishIntroReveal),
+            0.26f
+        );
+    }
+
+    void updatePreparationProgress(
+        SteadyClock::time_point now,
+        bool hasLevelPayload,
+        bool levelReady,
+        bool songReady,
+        bool ownReady,
+        bool opponentReady,
+        std::string const& state
+    ) {
+        float target = 0.30f;
+        std::string stage = tr("downloading-map", "DOWNLOADING MAP...");
+        if (!levelReady) {
+            auto const startedAt = m_fields->mapDownloadStartedAt == SteadyClock::time_point{}
+                ? m_fields->gateOpenedAt
+                : m_fields->mapDownloadStartedAt;
+            auto const elapsed = std::max(0.0, std::chrono::duration<double>(now - startedAt).count());
+            target += std::min(0.44f, static_cast<float>(elapsed) * 0.026f);
+            if (hasLevelPayload) {
+                target = std::max(target, 0.58f);
+                stage = tr("updating-map", "UPDATING MAP...");
+            }
+        } else if (!songReady) {
+            auto const startedAt = m_fields->songWaitStartedAt == SteadyClock::time_point{}
+                ? now
+                : m_fields->songWaitStartedAt;
+            auto const elapsed = std::max(0.0, std::chrono::duration<double>(now - startedAt).count());
+            target = 0.75f + std::min(0.16f, static_cast<float>(elapsed) * 0.025f);
+            stage = tr("waiting-song", "WAITING FOR SONG...");
+        } else {
+            target = 0.92f;
+            stage = tr("map-audio-ready", "MAP + AUDIO READY");
+        }
+
+        if (levelReady && (songReady || corum::ranked::RankedRuntime::get().songBypassAllowed())) {
+            if (rankedPlayingState(state)) {
+                target = 1.0f;
+                stage = tr("starting", "STARTING...");
+            } else if (ownReady && !opponentReady) {
+                target = std::max(target, 0.96f);
+                stage = tr("waiting-opponent", "WAITING FOR OPPONENT");
+            } else if (ownReady && opponentReady) {
+                target = std::max(target, 0.98f);
+                stage = tr("starting", "STARTING...");
+            } else {
+                target = std::max(target, 0.94f);
+                stage = tr("ready-to-start", "READY TO START");
+            }
+        }
+
+        target = std::max(target, m_fields->displayedPreparationProgress);
+        auto const delta = target - m_fields->displayedPreparationProgress;
+        m_fields->displayedPreparationProgress = std::clamp(
+            m_fields->displayedPreparationProgress + std::max(0.0025f, delta * 0.28f),
+            0.0f,
+            target
+        );
+        auto const percentage = static_cast<int>(std::round(
+            m_fields->displayedPreparationProgress * 100.0f
+        ));
+
+        if (m_fields->gateProgressFill) {
+            m_fields->gateProgressFill->setContentSize({
+                m_fields->gateProgressWidth * m_fields->displayedPreparationProgress,
+                8.0f
+            });
+        }
+        if (m_fields->gateProgressLabel) {
+            m_fields->gateProgressLabel->setString(fmt::format("{}%", percentage).c_str());
+        }
+        if (m_fields->introProgressFill) {
+            m_fields->introProgressFill->setContentSize({
+                m_fields->introProgressWidth * m_fields->displayedPreparationProgress,
+                10.0f
+            });
+        }
+        if (m_fields->introProgressLabel) {
+            m_fields->introProgressLabel->setString(
+                fmt::format("{} {}%", tr("preparing", "PREPARING"), percentage).c_str()
+            );
+        }
+        if (m_fields->introStatus) m_fields->introStatus->setString(stage.c_str());
+        if (m_fields->introMap && m_level) {
+            m_fields->introMap->setString(std::string(m_level->m_levelName.c_str()).c_str());
+        }
+        if (m_fields->introCreator && m_level && !m_level->m_creatorName.empty()) {
+            m_fields->introCreator->setString(
+                fmt::format("BY {}", std::string(m_level->m_creatorName.c_str())).c_str()
+            );
+        }
+    }
+
     void updateSongDownloadGate(float) {
         if (!m_fields->songGateActive) return;
         auto& runtime = corum::ranked::RankedRuntime::get();
@@ -422,14 +627,29 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
 
         auto const& match = runtime.view().match;
         if (m_fields->gateTitle) m_fields->gateTitle->setString(rankedGateTitle().c_str());
+        if (m_fields->introTitle) m_fields->introTitle->setString(rankedGateTitle().c_str());
         auto const now = SteadyClock::now();
         auto const hasLevelPayload = mapReady(m_level);
         auto const levelReady = vanillaLevelReadyForPlay();
+        auto const countdownRemaining = std::max(
+            0,
+            static_cast<int>(std::ceil(std::chrono::duration<double>(m_fields->countdownEndsAt - now).count()))
+        );
+        if (m_fields->introCountdown) {
+            m_fields->introCountdown->setString(
+                fmt::format("{}  {:02d}", tr("starts-in", "STARTS IN"), countdownRemaining).c_str()
+            );
+        }
+        if (countdownRemaining <= 5) revealExactLevelInfoPage();
 
         // Base LevelInfoLayer may replace/rebuild its song widget when the level
         // payload arrives. Re-apply the interaction lock every tick so the newly
         // created vanilla song control is the only clickable UI.
-        lockInteractionToSong(this, m_songWidget);
+        if (m_fields->gateIntroCover && !m_fields->introRevealStarted) {
+            lockAllRankedPrepareInteraction(this);
+        } else {
+            lockInteractionToSong(this, m_songWidget);
+        }
 
         if (!levelReady) {
             if (m_fields->gateStatus) {
@@ -487,14 +707,20 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
             }
         }
 
-        auto const countdownRemaining = std::max(
-            0,
-            static_cast<int>(std::ceil(std::chrono::duration<double>(m_fields->countdownEndsAt - now).count()))
-        );
-        auto const readyForStart = levelReady && (songsReady(m_level, m_songWidget) || runtime.songBypassAllowed());
+        auto const songReady = levelReady && songsReady(m_level, m_songWidget);
+        auto const readyForStart = levelReady && (songReady || runtime.songBypassAllowed());
 
         auto const ownReady = match.side == "A" ? match.readyA : match.readyB;
         auto const opponentReady = match.side == "A" ? match.readyB : match.readyA;
+        updatePreparationProgress(
+            now,
+            hasLevelPayload,
+            levelReady,
+            songReady,
+            ownReady,
+            opponentReady,
+            match.state
+        );
 
         if (m_fields->gateCountdown) {
             if (countdownRemaining > 0) {
@@ -577,6 +803,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         if (!m_fields->songGateActive) return;
         m_fields->songGateActive = false;
         unschedule(schedule_selector(CorumRankedLevelInfoLayer::updateSongDownloadGate));
+        unschedule(schedule_selector(CorumRankedLevelInfoLayer::finishIntroReveal));
 
         // Restore vanilla LevelInfo interaction before invoking its onPlay path.
         unlockRankedPrepareInteraction(this);
@@ -585,17 +812,31 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
             m_fields->gateOverlay->removeFromParentAndCleanup(true);
             m_fields->gateOverlay = nullptr;
         }
+        if (m_fields->gateIntroCover) {
+            m_fields->gateIntroCover->removeFromParentAndCleanup(true);
+            m_fields->gateIntroCover = nullptr;
+        }
+        m_fields->gateIntroPanel = nullptr;
         m_fields->gateTitle = nullptr;
         m_fields->gateStatus = nullptr;
         m_fields->gateCountdown = nullptr;
+        m_fields->gateProgressLabel = nullptr;
+        m_fields->gateProgressFill = nullptr;
+        m_fields->gateProgressWidth = 0.0f;
+        m_fields->introTitle = nullptr;
+        m_fields->introMap = nullptr;
+        m_fields->introCreator = nullptr;
+        m_fields->introStatus = nullptr;
+        m_fields->introCountdown = nullptr;
+        m_fields->introProgressLabel = nullptr;
+        m_fields->introProgressFill = nullptr;
+        m_fields->introProgressWidth = 0.0f;
     }
 
     void levelDownloadFinished(GJGameLevel* level) override {
         if (!m_fields->songGateActive) {
-            normalizeRankedLevelInfo(level);
             LevelInfoLayer::levelDownloadFinished(level);
             if (isCurrentRankedLevel(m_level)) {
-                normalizeRankedLevelInfo(m_level);
                 m_levelType = m_level->m_levelType;
             }
             m_fields->mapDownloadRequested = false;
@@ -610,7 +851,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
 
         // Reject a callback for anything except the exact server-selected playable
         // (alternate) Level ID before vanilla is allowed to replace m_level. This
-        // keeps the original expected-ID shell intact for a retry instead of
+        // keeps the original exact search result intact for a retry instead of
         // accidentally switching the Ranked page to an unrelated cached payload.
         auto const expectedLevelId = corum::ranked::RankedRuntime::get().currentLevelId();
         auto const validPayload =
@@ -631,9 +872,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
 
         // Only a verified payload may become the LevelInfoLayer's live level.
         // Vanilla then rebuilds its song metadata/widget from that exact payload.
-        normalizeRankedLevelInfo(level);
         LevelInfoLayer::levelDownloadFinished(level);
-        normalizeRankedLevelInfo(m_level);
         if (m_level) m_levelType = m_level->m_levelType;
         m_fields->mapDownloadRequested = false;
         if (!isCurrentRankedLevel(m_level) || !vanillaLevelReadyForPlay()) {
@@ -645,7 +884,11 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
             return;
         }
         m_fields->songWaitStartedAt = SteadyClock::now();
-        lockInteractionToSong(this, m_songWidget);
+        if (m_fields->gateIntroCover && !m_fields->introRevealStarted) {
+            lockAllRankedPrepareInteraction(this);
+        } else {
+            lockInteractionToSong(this, m_songWidget);
+        }
         updateSongDownloadGate(0.0f);
     }
 
@@ -660,7 +903,11 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
             m_fields->gateStatus->setString(errorText.c_str());
             m_fields->gateStatus->setColor({255, 92, 92});
         }
-        lockInteractionToSong(this, m_songWidget);
+        if (m_fields->gateIntroCover && !m_fields->introRevealStarted) {
+            lockAllRankedPrepareInteraction(this);
+        } else {
+            lockInteractionToSong(this, m_songWidget);
+        }
     }
 
     bool launchRankedGameplay() {
