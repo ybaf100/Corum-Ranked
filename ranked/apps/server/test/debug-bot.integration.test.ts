@@ -56,7 +56,7 @@ class FixedCsmpSource implements CsmpTierSource {
 const cleanMods: CreateSessionDto["installedMods"] = [
   {
     id: "hwanhee1.corum_ranked",
-    version: "v0.5.0-beta.7",
+    version: "v0.5.0-beta.8",
     enabled: true,
     loaded: true,
     internal: false,
@@ -88,6 +88,7 @@ beforeAll(async () => {
     "0004_alpha37_schema_hardening.sql",
     "0005_v050_rating_system.sql",
     "0006_v050_dynamic_csmp_tiers.sql",
+    "0007_solo_stage_placement.sql",
   ]) {
     const path = fileURLToPath(new URL(`../../../migrations/${migrationName}`, import.meta.url));
     await pglite.exec(await readFile(path, "utf8"));
@@ -145,9 +146,17 @@ describe("development-only Bot Match using the production Ranked engine", () => 
     const created = await sessions.create({
       gdAccountId: accountId,
       gdUsername: `Debug${accountId}`,
-      clientVersion: "v0.5.0-beta.7",
+      clientVersion: "v0.5.0-beta.8",
       installedMods: structuredClone(cleanMods),
     });
+    await database.query(
+      `UPDATE ranked_profiles
+       SET placement_games = 5, displayed_tier = 'BRONZE', visible_ranked_score = hidden_mmr
+       WHERE player_id = (
+         SELECT player_id FROM ranked_sessions WHERE token_hash = $1
+       )`,
+      [tokens.hash(created.sessionToken)],
+    );
     const result = await database.query<{
       session_id: string;
       player_id: string;
@@ -470,19 +479,17 @@ describe("development-only Bot Match using the production Ranked engine", () => 
     );
     expect(Number(stored.rows[0]?.wins)).toBe(expectedWins);
     expect(Number(stored.rows[0]?.losses)).toBe(expectedLosses);
-    expect(stored.rows[0]?.placement_results).toEqual([
-      scenario === "FORCE_WIN" ? "WIN" : "LOSS",
-    ]);
+    expect(stored.rows[0]?.placement_results).toEqual([]);
   });
 
   it("applies maximum Ranked MMR and PERFECT WIN for a natural no-loss three-Clear victory", async () => {
     const result = await runRatedMatch("9302", true);
     expect(Number(result.after.hidden_mmr)).toBeGreaterThan(result.before);
     expect(Number(result.after.hidden_mmr)).toBe(result.expected.ratingAfterA);
-    expect(Number(result.after.visible_ranked_score)).toBe(0);
-    expect(Number(result.after.placement_games)).toBe(1);
-    expect(result.after.placement_results).toEqual(["WIN"]);
-    expect(result.after.displayed_tier).toBe("UNRANKED");
+    expect(Number(result.after.visible_ranked_score)).toBeGreaterThan(2_500);
+    expect(Number(result.after.placement_games)).toBe(5);
+    expect(result.after.placement_results).toEqual([]);
+    expect(result.after.displayed_tier).toBe("BRONZE");
     expect(Number(result.after.wins)).toBe(1);
     expect(Number(result.after.losses)).toBe(0);
     expect(result.after.initial_csmp_tier).toBe("BRONZE");
@@ -496,7 +503,7 @@ describe("development-only Bot Match using the production Ranked engine", () => 
 
     const secondSession = await contextFor("9302");
     expect(secondSession.hiddenMmr).toBe(Number(result.after.hidden_mmr));
-    expect(secondSession.placementGames).toBe(1);
+    expect(secondSession.placementGames).toBe(5);
   });
 
   it("applies the same rating path, tier demotion, and Discord OFF on player loss", async () => {

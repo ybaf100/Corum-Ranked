@@ -40,6 +40,18 @@ describe("operational config and MMR", () => {
     });
   });
 
+  it("requires the legacy profile completion count to match five solo Stages", () => {
+    const config = completeOperationalConfig();
+    const result = validateOperationalConfig({
+      ...config,
+      mmrPolicy: { ...config.mmrPolicy!, placementGames: 4 },
+    });
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContain(
+      "mmrPolicy.placementGames must match the five Placement stages",
+    );
+  });
+
   it("fails closed when either opponent-strength weight is outside 0..2", () => {
     const config = completeOperationalConfig();
     expect(validateOperationalConfig({

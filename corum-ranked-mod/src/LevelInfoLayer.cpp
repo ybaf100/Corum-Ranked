@@ -39,7 +39,10 @@ std::string tr(std::string_view key, std::string_view english) {
 }
 
 bool rankedPrepareState(std::string const& state) {
-    return state == "ROUND_PREPARE" || state == "DEATHMATCH_PREPARE";
+    return
+        state == "ROUND_PREPARE" ||
+        state == "DEATHMATCH_PREPARE" ||
+        state == "MAP_PREPARE";
 }
 
 bool rankedPlayingState(std::string const& state) {
@@ -48,15 +51,29 @@ bool rankedPlayingState(std::string const& state) {
         state == "FINAL_ATTEMPT_WINDOW" ||
         state == "LAST_ATTEMPT_WINDOW" ||
         state == "ROUND_SETTLING" ||
-        state == "DEATHMATCH_PLAYING";
+        state == "DEATHMATCH_PLAYING" ||
+        state == "MAP_PLAYING" ||
+        state == "MAP_SETTLING";
 }
 
 bool rankedDownloadGateState(std::string const& state) {
-    return rankedPrepareState(state) || state == "ROUND_PLAYING" || state == "DEATHMATCH_PLAYING";
+    return
+        rankedPrepareState(state) ||
+        state == "ROUND_PLAYING" ||
+        state == "DEATHMATCH_PLAYING" ||
+        state == "MAP_PLAYING";
 }
 
 std::string rankedGateTitle() {
     auto const& match = corum::ranked::RankedRuntime::get().view().match;
+    auto const& placement = corum::ranked::RankedRuntime::get().view().placement;
+    if (match.placement) {
+        return fmt::format(
+            "STAGE {} · MAP {}",
+            placement.currentStageIndex,
+            placement.currentMapIndex
+        );
+    }
     if (match.deathmatchSequence > 0 || match.state == "DEATHMATCH_PREPARE" || match.state == "DEATHMATCH_PLAYING") {
         return tr("death-match", "DEATH MATCH");
     }
@@ -755,7 +772,11 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
 
         if (
             rankedPrepareState(match.state) &&
-            now >= m_fields->countdownEndsAt &&
+            now >= (
+                runtime.isPlacement()
+                    ? m_fields->countdownEndsAt - std::chrono::seconds(5)
+                    : m_fields->countdownEndsAt
+            ) &&
             readyForStart &&
             !ownReady
         ) {
@@ -800,7 +821,10 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
             match.state == "CANCELLED" ||
             match.state == "MATCH_RESULT" ||
             match.state == "ROUND_RESULT" ||
-            match.state == "DEATHMATCH_RESULT"
+            match.state == "DEATHMATCH_RESULT" ||
+            match.state == "MAP_RESULT" ||
+            match.state == "STAGE_RESULT" ||
+            match.state == "PLACEMENT_RESULT"
         ) {
             returnToRanked(0.0f);
         }

@@ -6,12 +6,13 @@
 
 | 경로 | 역할 |
 |---|---|
-| `packages/rules` | tier/pool, scoring, 5분 timer, 3-Clear, BO3, deathmatch, MMR, allowlist의 순수 domain |
-| `apps/server` | NestJS REST API, PostgreSQL transaction, config snapshot, session/queue/match, Discord outbox |
+| `packages/rules` | tier/pool, scoring, 5분 timer, 3-Clear, BO3, deathmatch, Placement, MMR, allowlist의 순수 domain |
+| `apps/server` | NestJS REST API, PostgreSQL transaction, config snapshot, session/queue/match/placement, Discord outbox |
 | `migrations/0001_initial_ranked.sql` | Ranked 전용 PostgreSQL 초기 schema |
 | `migrations/0002_attempt_start_leases.sql` | alpha.33 visual Start Lease 영속화 / attempt 전송 경합 방지 |
 | `migrations/0005_v050_rating_system.sql` | 숨김 MMR/표시 LP, 배치 결과, 승급전, 강등 경고, 연승/연패 상태 |
 | `migrations/0006_v050_dynamic_csmp_tiers.sql` | 운영자 정의 CSMP Seed 티어명을 허용하는 정규화 제약 |
+| `migrations/0007_solo_stage_placement.sql` | 5 Stage × 2 Map Placement Run/Map/Attempt 영속 상태와 exactly-once 결과 확인 |
 | `../apps-script/RankedConfig.gs` | Ranked 전용 `sheet2`의 맵/Pool 열 + 별도 운영 설정과 `ranked_config` 조회 API |
 | `../corum-ranked-mod` | 별도 Geode 모드 `hwanhee1.corum_ranked` |
 
@@ -46,13 +47,15 @@ g++ -std=c++23 -Wall -Wextra -Wpedantic -Werror \
 
 플레이 HUD는 화면 코너에 anchor되어 실제 frame update cadence FPS, viewer 기준 양쪽 authoritative Score, 서버 승인 Clear 체크 3개, snapshot Qualifying %, 현재 Round/Death Match와 server deadline 보간 타이머를 표시합니다. 배경 카드와 사각 스크림 없이 글자에만 검은 그림자를 적용하며, 일반 문구는 Paperlogy SemiBold, Score·타이머·Qualifying 값은 Paperlogy Black으로 표시합니다. 상대 현재 progress는 3-Clear 성공자가 상대의 LAST ATTEMPT를 기다리는 동안에만 서버가 허용하며, 이 telemetry는 영구 저장 및 판정에서 분리됩니다.
 
+배치 미완료 사용자는 일반 PvP Queue와 Debug Bot 대신 별도 `PlacementService`의 싱글플레이 Run을 사용합니다. 5개 Stage에서 현재 Pool의 서로 다른 맵 2개씩을 플레이하고, 각 Map Score는 기존 `scoreAttempt()` 결과 중 상위 3개 합계(최대 750)입니다. Grade는 Attempt 종료 ACK에서만 바뀌며, 진행 중 progress는 HUD Grade를 바꾸지 않습니다. 자세한 상태·복구·API 계약은 [`docs/v0.5.0-beta.8-solo-placement.md`](docs/v0.5.0-beta.8-solo-placement.md)를 참고하세요.
+
 ## 배포 순서
 
 1. Google Spreadsheet에 최신 Apps Script 파일을 반영하되 기존 `setupCorumIntegration()`은 그대로 둡니다.
 2. Apps Script 편집기에서 `setupCorumRankedConfig()`를 운영자가 명시적으로 한 번 실행합니다.
 3. `sheet1`과 같은 레이아웃의 `sheet2`를 만든 뒤 그 탭의 `Ranked Pool (1~6)`/`Qualifying %` 열과 `Ranked Tiers`, `Ranked CSMP Seed`, `Ranked Allowed Mods`, `Ranked Config`의 미확정 값을 입력합니다. `Main Pool`은 실제 5맵 추첨을 이동시키며, 새 `CSMP Tiers` 이름에는 대응하는 Seed MMR이 반드시 필요합니다. `mmrOpponentStrengthWeight`와 `visibleScoreOpponentStrengthWeight`는 0~2 범위이며 0은 상대 강도 무시, 1은 기본, 2는 2배 반영입니다. 일반 Integration의 `sheet1`은 그대로 유지됩니다.
 4. 설정 검증 오류가 0개인지 확인한 뒤 마지막에만 `enabled=TRUE`로 변경합니다.
-5. 서버 시작 전에 `0001_initial_ranked.sql` → `0002_debug_bot_match.sql` → `0002_attempt_start_leases.sql` → `0003_debug_rating_playable_maps.sql` → `0004_alpha37_schema_hardening.sql` → `0005_v050_rating_system.sql` → `0006_v050_dynamic_csmp_tiers.sql` 순서로 적용합니다. 기존 beta.2 DB에는 `0006_v050_dynamic_csmp_tiers.sql`을 추가 적용해야 합니다.
+5. 서버 시작 전에 `0001_initial_ranked.sql` → `0002_debug_bot_match.sql` → `0002_attempt_start_leases.sql` → `0003_debug_rating_playable_maps.sql` → `0004_alpha37_schema_hardening.sql` → `0005_v050_rating_system.sql` → `0006_v050_dynamic_csmp_tiers.sql` → `0007_solo_stage_placement.sql` 순서로 적용합니다. beta.8 배포에서 DB를 초기화하므로 과거 PvP Placement 결과를 새 Map Score로 변환하지 않습니다.
 6. `apps/server/.env.example`을 참고해 배포 환경변수를 secret manager에서 주입하고 서버를 배포합니다.
 7. `/health`, `/ready`, `/api/ranked/config`를 확인합니다.
 8. 별도 `build-ranked-mod.yml` 결과인 `hwanhee1.corum_ranked.geode`를 배포합니다. alpha.6부터 production base URL `https://corum-ranked.onrender.com`이 기본값/런타임 fallback으로 포함되어 수동 URL 입력이 필요하지 않습니다.
@@ -69,7 +72,7 @@ Debug Bot Match 제거 방법은 [`docs/debug-bot-match.md`](docs/debug-bot-matc
 [`docs/v0.5.0-beta.4-report.md`](docs/v0.5.0-beta.4-report.md)에 정리되어 있습니다.
 
 
-> v0.5.0-beta.7 policy: the Ranked allowlist checks currently enabled + loaded mods only. Installed-but-disabled mods do not block Ranked; required mods such as CBF must still be active.
+> v0.5.0-beta.8 policy: the Ranked allowlist checks currently enabled + loaded mods only. Installed-but-disabled mods do not block Ranked; required mods such as CBF must still be active.
 
 
 ## alpha.18 attempt scoring reliability

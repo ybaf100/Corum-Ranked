@@ -28,6 +28,7 @@ beforeAll(async () => {
     "0004_alpha37_schema_hardening.sql",
     "0005_v050_rating_system.sql",
     "0006_v050_dynamic_csmp_tiers.sql",
+    "0007_solo_stage_placement.sql",
   ]) {
     const migrationPath = fileURLToPath(
       new URL(`../../../migrations/${migrationName}`, import.meta.url),
@@ -101,6 +102,7 @@ const contextFor = async (
   sessions: SessionService,
   source: MutableCsmpSource,
   tokens: TokenService,
+  placed = true,
 ): Promise<RankedSessionContext> => {
   source.tier = tier;
   const created = await sessions.create({
@@ -109,6 +111,16 @@ const contextFor = async (
     clientVersion: "v0.1.0",
     installedMods: structuredClone(cleanMods),
   });
+  if (placed) {
+    await database.query(
+      `UPDATE ranked_profiles
+       SET placement_games = 5, displayed_tier = 'BRONZE', visible_ranked_score = hidden_mmr
+       WHERE player_id = (
+         SELECT player_id FROM ranked_sessions WHERE token_hash = $1
+       )`,
+      [tokens.hash(created.sessionToken)],
+    );
+  }
   const result = await database.query<{
     session_id: string;
     player_id: string;
@@ -138,6 +150,41 @@ const contextFor = async (
 };
 
 describe("transactional matchmaking queue", () => {
+  it("blocks public Queue and Debug Bot until Stage Placement is complete", async () => {
+    const document = configDocumentFixture("placement-gate-test");
+    const config = {
+      getSnapshot: () => ({ ...structuredClone(document), fetchedAt: "2026-08-20T01:00:00Z" }),
+    } as RankedConfigService;
+    const source = new MutableCsmpSource();
+    const ids = new SequenceIds();
+    const clock = new FixedClock();
+    const tokens = new TokenService(environmentFixture());
+    const sessions = new SessionService(database, source, clock, ids, config, tokens);
+    const queue = new QueueService(
+      database,
+      clock,
+      ids,
+      new SeededRandom(43),
+      config,
+      sessions,
+      tokens,
+    );
+    const unplaced = await contextFor("8001", "BRONZE", sessions, source, tokens, false);
+    await expect(queue.join(unplaced, { installedMods: structuredClone(cleanMods) }))
+      .rejects.toMatchObject({ response: { code: "PLACEMENT_REQUIRED", action: "START_PLACEMENT" } });
+    await expect(queue.createDebugBotMatch(
+      unplaced,
+      { installedMods: structuredClone(cleanMods) },
+      {
+        difficulty: "EASY",
+        scenario: "NORMAL_MATCH",
+        botBan: "NO_BAN",
+        sendDiscordEvents: false,
+        mmrOffset: -250,
+      },
+    )).rejects.toMatchObject({ response: { code: "PLACEMENT_REQUIRED", action: "START_PLACEMENT" } });
+  });
+
   it("atomically pairs compatible players and snapshots candidates/config", async () => {
     const document = configDocumentFixture("queue-test");
     const config = {

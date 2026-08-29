@@ -89,6 +89,46 @@ struct RatingEventView {
     bool demoted = false;
 };
 
+struct PlacementStageResultView {
+    int stageIndex = 0;
+    int pool = 0;
+    std::vector<int> mapScores;
+    std::vector<std::string> mapGrades;
+    double stageScore = 0.0;
+    std::string stageGrade = "D";
+    int poolDelta = 0;
+    int nextPool = 1;
+};
+
+struct PlacementFinalResultView {
+    bool placed = false;
+    int visibleRankedScore = 0;
+    std::string displayedTier = "UNRANKED";
+    std::string finalizedAt;
+};
+
+struct PlacementView {
+    bool required = false;
+    bool active = false;
+    std::string runId;
+    std::string state;
+    std::int64_t stateVersion = 0;
+    int startingPool = 0;
+    int currentStageIndex = 0;
+    int currentMapIndex = 0;
+    int totalStages = 5;
+    int mapsPerStage = 2;
+    int currentMapScore = 0;
+    std::string currentMapGrade = "D";
+    int currentMapClears = 0;
+    std::string currentMapNormalEndAt;
+    std::string currentMapFinalWindowEndAt;
+    std::string activeAttemptId;
+    std::vector<int> stagePools;
+    std::vector<PlacementStageResultView> stageResults;
+    PlacementFinalResultView finalResult;
+};
+
 struct HistoryMatchView {
     std::string matchId;
     std::string finishedAt;
@@ -105,6 +145,7 @@ struct HistoryMatchView {
 };
 
 struct MatchView {
+    bool placement = false;
     std::string matchId;
     std::string state;
     std::string side;
@@ -224,6 +265,7 @@ struct RuntimeView {
     bool demotionWarning = false;
     std::uint64_t revision = 0;
     RankedClientPresentationView client;
+    PlacementView placement;
     MatchView match;
     bool historyLoading = false;
     std::string historyError;
@@ -237,6 +279,8 @@ public:
     void begin();
     void tick();
     void joinQueue();
+    void startPlacement(int startingPool);
+    void continuePlacement();
     void leaveQueue();
     void submitReady();
     void submitBan(std::optional<std::string> canonicalLevelId);
@@ -253,6 +297,7 @@ public:
 #endif
 
     [[nodiscard]] RuntimeView const& view() const;
+    [[nodiscard]] bool isPlacement() const;
     [[nodiscard]] std::optional<std::int64_t> deadlineSeconds() const;
     [[nodiscard]] std::optional<std::int64_t> deadlineMillis() const;
     [[nodiscard]] std::optional<std::int64_t> signedDeadlineMillis() const;
@@ -308,11 +353,13 @@ private:
 
     void fetchConfig();
     void createSession();
+    void fetchActivePlacement();
     void invalidatePollRequest();
     void invalidateAttemptRequest();
     void pollQueue();
     void pollMatch();
     void parseMatchState(matjson::Value const& root);
+    void parsePlacementState(matjson::Value const& root);
     void applyAttemptSnapshot(matjson::Value const& root);
     void promoteQueuedAttempt();
     void flushAttemptEvents();
@@ -376,6 +423,7 @@ private:
     bool m_attemptIntentBusy = false;
     bool m_progressBusy = false;
     bool m_songBypassAllowed = false;
+    bool m_placementResultAcknowledged = false;
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_controlRequest;
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_pollRequest;
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_attemptRequest;

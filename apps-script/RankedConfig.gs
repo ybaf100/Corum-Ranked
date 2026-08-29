@@ -115,6 +115,26 @@ var CORUM_RANKED_CONFIG_DEFAULTS = Object.freeze([
   Object.freeze(["promotionScoreBonus", 50, "승급 성공 시 다음 커트라인 추가 LP"]),
   Object.freeze(["promotionFailurePenalty", 50, "승급 실패 시 커트라인 차감 LP"]),
   Object.freeze(["demotionScorePenalty", 50, "강등 확정 시 현재 커트라인 차감 LP"]),
+  Object.freeze(["placementStageCount", 5, "싱글플레이 Placement Stage 수"]),
+  Object.freeze(["placementMapsPerStage", 2, "Stage당 서로 다른 Map 수"]),
+  Object.freeze(["placementGradeSMin", 638, "S Grade 최소 Map/Stage Score (0~750)"]),
+  Object.freeze(["placementGradeAMin", 525, "A Grade 최소 Map/Stage Score (0~750)"]),
+  Object.freeze(["placementGradeBMin", 375, "B Grade 최소 Map/Stage Score (0~750)"]),
+  Object.freeze(["placementGradeCMin", 225, "C Grade 최소 Map/Stage Score (0~750)"]),
+  Object.freeze(["placementTransitionGuardSeconds", 0.3, "Grade animation 중복 방지 시간"]),
+  Object.freeze(["placementTopAttemptCount", 3, "Map Score에 합산할 상위 Attempt 수"]),
+  Object.freeze(["placementClearTarget", 3, "Map 즉시 종료 및 S 확정 Clear 수"]),
+  Object.freeze(["placementPool1Anchor", 0, "Pool 1 Placement Rating anchor"]),
+  Object.freeze(["placementPool2Anchor", 1000, "Pool 2 Placement Rating anchor"]),
+  Object.freeze(["placementPool3Anchor", 2000, "Pool 3 Placement Rating anchor"]),
+  Object.freeze(["placementPool4Anchor", 3000, "Pool 4 Placement Rating anchor"]),
+  Object.freeze(["placementPool5Anchor", 4000, "Pool 5 Placement Rating anchor"]),
+  Object.freeze(["placementPool6Anchor", 5000, "Pool 6 Placement Rating anchor"]),
+  Object.freeze(["placementMapScoreCenter", 450, "Pool anchor 기준 Map Score"]),
+  Object.freeze(["placementRatingPerMapScorePoint", 1.6666666667, "Map Score 1점당 Rating 변화"]),
+  Object.freeze(["placementMapRatingWeight", 0.6, "10개 Map evidence 비중"]),
+  Object.freeze(["placementStageRatingWeight", 0.25, "5개 Stage evidence 비중"]),
+  Object.freeze(["placementOverallRatingWeight", 0.15, "전체 Placement evidence 비중"]),
   Object.freeze(["sessionSeconds", "", "서버 세션 유효시간, 운영 확정 필요"]),
   Object.freeze(["readySeconds", "", "운영 확정 필요"]),
   Object.freeze(["reconnectGraceSeconds", "", "운영 확정 필요"]),
@@ -338,6 +358,8 @@ function readCorumRankedConfig_() {
 
   var mmrPolicy = readRankedMmrPolicy_(rawConfig);
   if (mmrPolicy) operational.mmrPolicy = mmrPolicy;
+  var placementPolicy = readRankedPlacementPolicy_(rawConfig);
+  if (placementPolicy) operational.placementPolicy = placementPolicy;
   var timeouts = readRankedTimeouts_(rawConfig);
   if (timeouts) operational.timeouts = timeouts;
   var matchmaking = readRankedMatchmaking_(rawConfig);
@@ -353,6 +375,7 @@ function readCorumRankedConfig_() {
     csmpTierNames: csmpTierNames,
     csmpSeeds: csmpSeeds,
     mmrPolicy: mmrPolicy,
+    placementPolicy: placementPolicy,
     timeouts: timeouts,
     matchmaking: matchmaking,
     failurePolicy: failurePolicy,
@@ -674,6 +697,45 @@ function readRankedMmrPolicy_(config) {
   };
 }
 
+function readRankedPlacementPolicy_(config) {
+  var policy = {
+    stageCount: rankedNumber_(config.placementStageCount),
+    mapsPerStage: rankedNumber_(config.placementMapsPerStage),
+    gradeThresholds: {
+      sMin: rankedNumber_(config.placementGradeSMin),
+      aMin: rankedNumber_(config.placementGradeAMin),
+      bMin: rankedNumber_(config.placementGradeBMin),
+      cMin: rankedNumber_(config.placementGradeCMin),
+    },
+    transitionGuardSeconds: rankedNumber_(config.placementTransitionGuardSeconds),
+    topAttemptCount: rankedNumber_(config.placementTopAttemptCount),
+    clearTarget: rankedNumber_(config.placementClearTarget),
+    poolRatingAnchors: [
+      rankedNumber_(config.placementPool1Anchor),
+      rankedNumber_(config.placementPool2Anchor),
+      rankedNumber_(config.placementPool3Anchor),
+      rankedNumber_(config.placementPool4Anchor),
+      rankedNumber_(config.placementPool5Anchor),
+      rankedNumber_(config.placementPool6Anchor),
+    ],
+    mapScoreCenter: rankedNumber_(config.placementMapScoreCenter),
+    ratingPerMapScorePoint: rankedNumber_(config.placementRatingPerMapScorePoint),
+    mapRatingWeight: rankedNumber_(config.placementMapRatingWeight),
+    stageRatingWeight: rankedNumber_(config.placementStageRatingWeight),
+    overallRatingWeight: rankedNumber_(config.placementOverallRatingWeight),
+  };
+  var flat = [
+    policy.stageCount, policy.mapsPerStage,
+    policy.gradeThresholds.sMin, policy.gradeThresholds.aMin,
+    policy.gradeThresholds.bMin, policy.gradeThresholds.cMin,
+    policy.transitionGuardSeconds, policy.topAttemptCount, policy.clearTarget,
+    policy.mapScoreCenter, policy.ratingPerMapScorePoint,
+    policy.mapRatingWeight, policy.stageRatingWeight, policy.overallRatingWeight,
+  ].concat(policy.poolRatingAnchors);
+  if (flat.some(function (value) { return value === null; })) return null;
+  return policy;
+}
+
 function readRankedTimeouts_(config) {
   var result = {
     sessionSeconds: rankedNumber_(config.sessionSeconds),
@@ -828,6 +890,50 @@ function validateCorumRankedConfig_(
     }
     if (["NEAREST", "FLOOR", "CEIL"].indexOf(mmr.deltaRounding) === -1) {
       errors.push("deltaRounding은 NEAREST/FLOOR/CEIL 중 하나여야 합니다.");
+    }
+  }
+
+  if (!operational.placementPolicy) {
+    errors.push("Placement 운영값을 모두 입력해야 합니다.");
+  } else {
+    var placement = operational.placementPolicy;
+    var grades = placement.gradeThresholds;
+    if (placement.stageCount !== 5) errors.push("placementStageCount는 5여야 합니다.");
+    if (placement.mapsPerStage !== 2) errors.push("placementMapsPerStage는 2여야 합니다.");
+    if (!(750 >= grades.sMin && grades.sMin > grades.aMin && grades.aMin > grades.bMin &&
+      grades.bMin > grades.cMin && grades.cMin > 0)) {
+      errors.push("Placement Grade 기준은 750 >= S > A > B > C > 0이어야 합니다.");
+    }
+    if (placement.topAttemptCount !== 3) errors.push("placementTopAttemptCount는 3이어야 합니다.");
+    if (placement.clearTarget !== 3 || placement.clearTarget !== rules.clearTarget) {
+      errors.push("placementClearTarget은 Ranked clearTarget과 같은 3이어야 합니다.");
+    }
+    if (!(placement.transitionGuardSeconds >= 0 && placement.transitionGuardSeconds <= 1)) {
+      errors.push("placementTransitionGuardSeconds는 0~1이어야 합니다.");
+    }
+    if (placement.poolRatingAnchors.length !== 6 || placement.poolRatingAnchors.some(function (value) {
+      return !Number.isFinite(value);
+    })) {
+      errors.push("Placement Pool anchor는 6개 유한값이어야 합니다.");
+    } else {
+      for (var anchorIndex = 1; anchorIndex < placement.poolRatingAnchors.length; anchorIndex += 1) {
+        if (placement.poolRatingAnchors[anchorIndex] <= placement.poolRatingAnchors[anchorIndex - 1]) {
+          errors.push("Placement Pool anchor는 오름차순이어야 합니다.");
+          break;
+        }
+      }
+    }
+    if (!(placement.mapScoreCenter >= 0 && placement.mapScoreCenter <= 750)) {
+      errors.push("placementMapScoreCenter는 0~750이어야 합니다.");
+    }
+    if (!(placement.ratingPerMapScorePoint > 0)) {
+      errors.push("placementRatingPerMapScorePoint는 양수여야 합니다.");
+    }
+    var placementWeight = placement.mapRatingWeight + placement.stageRatingWeight +
+      placement.overallRatingWeight;
+    if (placement.mapRatingWeight < 0 || placement.stageRatingWeight < 0 ||
+      placement.overallRatingWeight < 0 || Math.abs(placementWeight - 1) > 0.000001) {
+      errors.push("Placement Rating 비중 합은 1이어야 합니다.");
     }
   }
 
@@ -1094,6 +1200,14 @@ function validateRankedPool_(maps, tierBands, errors) {
     canonical[map.canonicalLevelId] = map;
     counts[map.pool] += 1;
   });
+
+  for (var placementPool = 1; placementPool <= 6; placementPool += 1) {
+    if (counts[placementPool] < 2) {
+      errors.push(
+        "Placement Pool " + placementPool + "에는 서로 다른 활성 canonical 맵이 최소 2개 필요합니다.",
+      );
+    }
+  }
 
   tierBands.forEach(function (band) {
     var requirements = rankedCandidatePoolRequirements_(band.mainPool);

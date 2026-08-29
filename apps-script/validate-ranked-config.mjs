@@ -317,15 +317,18 @@ assert.ok(invalidVisibleOpponentWeight.data.validation.errors.some((error) =>
 ));
 setConfig("visibleScoreOpponentStrengthWeight", 1);
 
-// Main Pool is operational data, not a fixed tier-name lookup. With only one
-// Pool 1 map remaining, RED/Main Pool 2 is valid (needs one Pool 1 map), while
-// RED/Main Pool 1 is invalid (needs two).
+// Stage Placement requires two canonical maps in every Pool even when the PvP
+// candidate distribution would consume only one from that Pool.
 const removedPoolOneValues = [];
 for (let index = 2; index <= 5; index += 1) {
   removedPoolOneValues.push(mapSheet.rows[index][poolColumn]);
   mapSheet.rows[index][poolColumn] = "";
 }
-assert.equal(responseJson().data.validation.valid, true);
+const insufficientPlacementPool = responseJson();
+assert.equal(insufficientPlacementPool.data.validation.valid, false);
+assert.ok(insufficientPlacementPool.data.validation.errors.some((error) =>
+  error.includes("Placement Pool 1"),
+));
 const redTierRow = tierRows.find((row) => row[0] === "RED");
 redTierRow[3] = 1;
 const shiftedMainPool = responseJson();

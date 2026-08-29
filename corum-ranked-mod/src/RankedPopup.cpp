@@ -6,6 +6,7 @@
 #include "RankedSongGate.hpp"
 #include "ui/RankBadgeAssets.hpp"
 #include "ui/RankTransitionLayer.hpp"
+#include "ui/PlacementGradeBadge.hpp"
 #include "ui/RankedTranslations.hpp"
 #include "ui/RankedVisuals.hpp"
 
@@ -341,6 +342,7 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate 
     std::string m_renderedUiKey;
     std::string m_pendingUiKey;
     std::string m_rankTransitionPlayedKey;
+    std::string m_stageResultAudioPlayedKey;
     RankTransitionLayer* m_rankTransitionLayer = nullptr;
     bool m_uiFadingOut = false;
     bool m_fadeInNextRender = true;
@@ -507,7 +509,26 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate 
         if (m_page == Page::HistoryDetail) return fmt::format("history:detail:{}", m_historyIndex);
         auto const& view = RankedRuntime::get().view();
         if (view.stage != RuntimeStage::Matched) {
-            return fmt::format("stage:{}", static_cast<int>(view.stage));
+            return fmt::format(
+                "stage:{}:placement:{}:{}",
+                static_cast<int>(view.stage),
+                view.placement.required,
+                view.placement.active
+            );
+        }
+        if (view.match.placement) {
+            return fmt::format(
+                "placement:{}:{}:{}:{}:{}:{}:{}:{}:{}",
+                view.placement.state,
+                view.placement.currentStageIndex,
+                view.placement.currentMapIndex,
+                view.placement.currentMapScore,
+                view.placement.currentMapGrade,
+                view.placement.currentMapClears,
+                view.placement.stageResults.size(),
+                view.placement.finalResult.displayedTier,
+                view.error
+            );
         }
         auto key = fmt::format(
             "match:{}:{}:{}:spectator:{}",
@@ -610,7 +631,10 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate 
                 state == "ROUND_PLAYING" ||
                 state == "FINAL_ATTEMPT_WINDOW" ||
                 state == "LAST_ATTEMPT_WINDOW" ||
-                state == "DEATHMATCH_PLAYING";
+                state == "DEATHMATCH_PLAYING" ||
+                state == "MAP_PREPARE" ||
+                state == "MAP_PLAYING" ||
+                state == "MAP_SETTLING";
             if ((m_enteringSongGate || m_enteringLevel) && gameplayTransition) return;
         }
 
@@ -628,6 +652,20 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate 
 
         if (view.match.state == "CANCELLED") {
             audio.setMode(lobbyMode());
+            return;
+        }
+
+        if (view.match.placement && view.match.state == "STAGE_RESULT") {
+            if (view.placement.stageResults.empty()) return;
+            auto const& result = view.placement.stageResults.back();
+            auto const key = fmt::format("{}:{}", view.placement.runId, result.stageIndex);
+            if (m_stageResultAudioPlayedKey == key) {
+                audio.setMode(
+                    result.stageGrade == "S" || result.stageGrade == "A" || result.stageGrade == "B"
+                        ? RankedAudioMode::ResultWin
+                        : RankedAudioMode::ResultLose
+                );
+            }
             return;
         }
 
@@ -1307,7 +1345,71 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate 
         }
     }
 
+    void renderPlacementPoolSelection(RuntimeView const& view) {
+        auto const size = CCDirector::sharedDirector()->getWinSize();
+        addTopBack(true);
+        addLanguageSelector();
+        addScreenHeader("PLACEMENT", "SELECT YOUR STARTING POOL", kGold, kCyan);
+
+        auto* explanation = makeLabel(
+            "THIS CHOICE ONLY SETS STAGE 1. YOUR RESULTS DETERMINE THE FINAL RANK.",
+            0.25f,
+            {size.width / 2.0f, size.height - 78.0f},
+            corum::ranked::ui::TextMuted,
+            "semibold"
+        );
+        explanation->limitLabelWidth(size.width - 74.0f, 0.25f, 0.17f);
+        m_root->addChild(explanation, 5);
+
+        auto* panel = makeNeonPanel(
+            {std::min(430.0f, size.width - 60.0f), 156.0f},
+            {size.width / 2.0f, size.height / 2.0f - 4.0f},
+            kBlue,
+            kDeepPanel,
+            244
+        );
+        m_root->addChild(panel, 1);
+
+        constexpr float spacing = 92.0f;
+        for (int pool = 1; pool <= 6; ++pool) {
+            auto const row = (pool - 1) / 3;
+            auto const column = (pool - 1) % 3;
+            auto const x = size.width / 2.0f + (static_cast<float>(column) - 1.0f) * spacing;
+            auto const y = size.height / 2.0f + 28.0f - static_cast<float>(row) * 64.0f;
+            auto* button = addButton(
+                fmt::format("POOL {}", pool),
+                {x, y},
+                menu_selector(CorumRankedLayer::onStartPlacement),
+                false,
+                0.57f
+            );
+            button->setTag(pool);
+        }
+
+        auto detail = view.error.empty() ? view.status : view.error;
+        if (!detail.empty()) {
+            auto* status = makeLabel(
+                shorten(detail, 96),
+                0.25f,
+                {size.width / 2.0f, 27.0f},
+                view.error.empty() ? corum::ranked::ui::TextMuted : kRed,
+                "semibold"
+            );
+            status->limitLabelWidth(size.width - 90.0f, 0.25f, 0.16f);
+            m_mainStatusLabel = status;
+            m_root->addChild(status, 5);
+        }
+    }
+
     void renderMain(RuntimeView const& view) {
+        if (
+            view.stage == RuntimeStage::Ready &&
+            view.placement.required &&
+            !view.placement.active
+        ) {
+            renderPlacementPoolSelection(view);
+            return;
+        }
         auto const size = CCDirector::sharedDirector()->getWinSize();
         addTopBack(true);
         addLanguageSelector();
@@ -1430,7 +1532,305 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate 
         }
     }
 
+    void renderPlacementMap(RuntimeView const& view) {
+        auto const size = CCDirector::sharedDirector()->getWinSize();
+        auto const& placement = view.placement;
+        auto const& match = view.match;
+        auto const pool = !placement.stagePools.empty()
+            ? placement.stagePools.back()
+            : placement.startingPool;
+        addScreenHeader(
+            fmt::format("STAGE {} · MAP {}", placement.currentStageIndex, placement.currentMapIndex),
+            fmt::format("POOL {} · SOLO PLACEMENT", pool),
+            corum::ranked::ui::Text,
+            kCyan
+        );
+
+        auto* panel = makeNeonPanel(
+            {std::min(388.0f, size.width - 74.0f), 174.0f},
+            {size.width / 2.0f, size.height / 2.0f - 5.0f},
+            match.state == "MAP_SETTLING" ? kGold : kBlue,
+            kDeepPanel,
+            244
+        );
+        m_root->addChild(panel, 1);
+
+        if (match.currentMap) {
+            auto* map = makeLabel(
+                upper(match.currentMap->title),
+                0.42f,
+                {size.width / 2.0f, size.height / 2.0f + 58.0f},
+                corum::ranked::ui::Text,
+                "black"
+            );
+            map->limitLabelWidth(278.0f, 0.42f, 0.25f);
+            m_root->addChild(map, 5);
+            auto* difficulty = makeLabel(
+                match.currentMap->difficulty,
+                0.29f,
+                {size.width / 2.0f, size.height / 2.0f + 35.0f},
+                difficultyColor(match.currentMap->difficulty),
+                "semibold"
+            );
+            m_root->addChild(difficulty, 5);
+        }
+
+        auto* grade = corum::ranked::ui::PlacementGradeBadge::create(74.0f);
+        if (grade) {
+            grade->setGrade(placement.currentMapGrade, false);
+            grade->setPosition({size.width / 2.0f - 76.0f, size.height / 2.0f - 15.0f});
+            m_root->addChild(grade, 5);
+        }
+        auto* score = makeLabel(
+            fmt::format("{} / 750", placement.currentMapScore),
+            0.49f,
+            {size.width / 2.0f + 70.0f, size.height / 2.0f - 4.0f},
+            kGold,
+            "black"
+        );
+        m_root->addChild(score, 5);
+        addClearChecks(placement.currentMapClears, {size.width / 2.0f + 70.0f, size.height / 2.0f - 34.0f});
+
+        std::string stateText = "OPENING EXACT GD LEVEL...";
+        if (match.state == "MAP_PLAYING") stateText = "MAP LIVE · GRADE UPDATES AFTER ATTEMPT END";
+        if (match.state == "MAP_SETTLING") stateText = "FINAL ATTEMPT IN PROGRESS";
+        auto* state = makeLabel(
+            stateText,
+            0.25f,
+            {size.width / 2.0f, 34.0f},
+            match.state == "MAP_SETTLING" ? kGold : kCyan,
+            "semibold"
+        );
+        state->limitLabelWidth(size.width - 90.0f, 0.25f, 0.16f);
+        m_root->addChild(state, 5);
+    }
+
+    void renderPlacementMapResult(RuntimeView const& view) {
+        auto const size = CCDirector::sharedDirector()->getWinSize();
+        auto const& placement = view.placement;
+        addScreenHeader(
+            fmt::format("MAP {} COMPLETE", placement.currentMapIndex),
+            fmt::format("STAGE {} · SERVER RESULT", placement.currentStageIndex),
+            kGold,
+            kCyan
+        );
+        auto* grade = corum::ranked::ui::PlacementGradeBadge::create(122.0f);
+        if (grade) {
+            grade->setGrade(placement.currentMapGrade, false);
+            grade->setPosition({size.width / 2.0f, size.height / 2.0f + 12.0f});
+            grade->setScale(0.82f);
+            m_root->addChild(grade, 5);
+        }
+        auto* score = makeLabel(
+            fmt::format("MAP SCORE  {} / 750", placement.currentMapScore),
+            0.36f,
+            {size.width / 2.0f, size.height / 2.0f - 65.0f},
+            corum::ranked::ui::Text,
+            "black"
+        );
+        m_root->addChild(score, 5);
+        addButton(
+            placement.currentMapIndex == 1 ? "NEXT MAP" : "SHOW STAGE RESULT",
+            {size.width / 2.0f, 30.0f},
+            menu_selector(CorumRankedLayer::onContinuePlacement),
+            false,
+            0.64f
+        );
+    }
+
+    void renderPlacementStageResult(RuntimeView const& view) {
+        auto const size = CCDirector::sharedDirector()->getWinSize();
+        if (view.placement.stageResults.empty()) return;
+        auto const result = view.placement.stageResults.back();
+        auto const map1Grade = result.mapGrades.size() > 0 ? result.mapGrades[0] : "D";
+        auto const map2Grade = result.mapGrades.size() > 1 ? result.mapGrades[1] : "D";
+        auto const audioKey = fmt::format("{}:{}", view.placement.runId, result.stageIndex);
+        addScreenHeader(
+            fmt::format("STAGE {} RESULT", result.stageIndex),
+            fmt::format("POOL {} · {:.1f} / 750", result.pool, result.stageScore),
+            kGold,
+            kCyan
+        );
+
+        auto makeGradeGroup = [&](std::string const& grade, float x) {
+            auto* group = CCLayerColor::create({0, 0, 0, 0});
+            group->setContentSize({82.0f, 82.0f});
+            group->setAnchorPoint({0.5f, 0.5f});
+            group->setPosition({x, size.height / 2.0f + 8.0f});
+            group->setCascadeOpacityEnabled(true);
+            auto* badge = corum::ranked::ui::PlacementGradeBadge::create(82.0f);
+            if (badge) {
+                badge->setGrade(grade, false);
+                badge->setPosition({41.0f, 41.0f});
+                group->addChild(badge);
+            }
+            m_root->addChild(group, 5);
+            return group;
+        };
+
+        auto* left = makeGradeGroup(map1Grade, size.width / 2.0f - 106.0f);
+        auto* right = makeGradeGroup(map2Grade, size.width / 2.0f + 106.0f);
+        left->runAction(CCSequence::create(
+            CCDelayTime::create(0.18f),
+            CCEaseSineInOut::create(CCMoveTo::create(0.36f, {size.width / 2.0f, size.height / 2.0f + 8.0f})),
+            CCFadeOut::create(0.10f),
+            nullptr
+        ));
+        right->runAction(CCSequence::create(
+            CCDelayTime::create(0.18f),
+            CCEaseSineInOut::create(CCMoveTo::create(0.36f, {size.width / 2.0f, size.height / 2.0f + 8.0f})),
+            CCFadeOut::create(0.10f),
+            nullptr
+        ));
+
+        auto* flash = CCLayerColor::create({255, 255, 255, 0});
+        flash->setContentSize({84.0f, 84.0f});
+        flash->setPosition({size.width / 2.0f - 42.0f, size.height / 2.0f - 34.0f});
+        m_root->addChild(flash, 7);
+        flash->runAction(CCSequence::create(
+            CCDelayTime::create(0.52f),
+            CCFadeTo::create(0.05f, 210),
+            CCFadeOut::create(0.12f),
+            nullptr
+        ));
+
+        auto* finalGroup = CCLayerColor::create({0, 0, 0, 0});
+        finalGroup->setContentSize({126.0f, 126.0f});
+        finalGroup->setAnchorPoint({0.5f, 0.5f});
+        finalGroup->setPosition({size.width / 2.0f, size.height / 2.0f + 8.0f});
+        finalGroup->setCascadeOpacityEnabled(true);
+        finalGroup->setOpacity(0);
+        finalGroup->setScale(0.80f);
+        auto* finalBadge = corum::ranked::ui::PlacementGradeBadge::create(126.0f);
+        if (finalBadge) {
+            finalBadge->setGrade(result.stageGrade, false);
+            finalBadge->setPosition({63.0f, 63.0f});
+            finalGroup->addChild(finalBadge);
+        }
+        m_root->addChild(finalGroup, 8);
+        finalGroup->runAction(CCSequence::create(
+            CCDelayTime::create(0.60f),
+            CCSpawn::create(
+                CCFadeTo::create(0.10f, 255),
+                CCEaseSineOut::create(CCScaleTo::create(0.14f, 1.12f)),
+                nullptr
+            ),
+            CCEaseSineInOut::create(CCScaleTo::create(0.12f, 1.0f)),
+            nullptr
+        ));
+        if (m_stageResultAudioPlayedKey != audioKey) {
+            finalGroup->runAction(CCSequence::create(
+                CCDelayTime::create(0.60f),
+                CallFuncExt::create([this, audioKey, grade = result.stageGrade] {
+                    m_stageResultAudioPlayedKey = audioKey;
+                    RankedAudioManager::get().setMode(
+                        grade == "S" || grade == "A" || grade == "B"
+                            ? RankedAudioMode::ResultWin
+                            : RankedAudioMode::ResultLose
+                    );
+                }),
+                nullptr
+            ));
+        }
+
+        auto const finalStage = result.stageIndex >= view.placement.totalStages;
+        auto* movement = makeLabel(
+            finalStage
+                ? "ALL 10 MAPS COMPLETE"
+                : fmt::format("NEXT POOL  {}  ({:+d})", result.nextPool, result.poolDelta),
+            0.30f,
+            {size.width / 2.0f, 54.0f},
+            result.poolDelta > 0 ? kGreen : result.poolDelta < 0 ? kRed : corum::ranked::ui::TextMuted,
+            "black"
+        );
+        m_root->addChild(movement, 5);
+        auto* button = addButton(
+            finalStage ? "FINAL PLACEMENT" : "NEXT STAGE",
+            {size.width / 2.0f, 25.0f},
+            menu_selector(CorumRankedLayer::onContinuePlacement),
+            false,
+            0.56f
+        );
+        button->setEnabled(false);
+        button->runAction(CCSequence::create(
+            CCDelayTime::create(0.96f),
+            CallFuncExt::create([button] { button->setEnabled(true); }),
+            nullptr
+        ));
+    }
+
+    void renderPlacementFinal(RuntimeView const& view) {
+        auto const size = CCDirector::sharedDirector()->getWinSize();
+        auto const& finalResult = view.placement.finalResult;
+        addScreenHeader("PLACEMENT COMPLETE", "10 MAPS · 5 STAGES", kGold, kCyan);
+        auto* badge = corum::ranked::ui::createAnimatedRankBadge(
+            finalResult.displayedTier,
+            {112.0f, 112.0f},
+            corum::ranked::ui::RankBadgeDisplay::Hero
+        );
+        if (badge) {
+            badge->setPosition({size.width / 2.0f, size.height / 2.0f + 28.0f});
+            m_root->addChild(badge, 5);
+        }
+        auto* tier = makeLabel(
+            fmt::format("{} - {} LP", upper(finalResult.displayedTier), finalResult.visibleRankedScore),
+            0.55f,
+            {size.width / 2.0f, size.height / 2.0f - 49.0f},
+            tierColor(finalResult.displayedTier),
+            "black"
+        );
+        tier->limitLabelWidth(size.width - 100.0f, 0.55f, 0.32f);
+        m_root->addChild(tier, 5);
+        auto* placed = makeLabel("PLACED", 0.38f, {size.width / 2.0f, size.height / 2.0f - 78.0f}, kGreen, "black");
+        m_root->addChild(placed, 5);
+        if (!view.error.empty()) {
+            auto* error = makeLabel(
+                shorten(view.error, 72),
+                0.22f,
+                {size.width / 2.0f, 51.0f},
+                kRed,
+                "semibold"
+            );
+            error->limitLabelWidth(size.width - 100.0f, 0.22f, 0.15f);
+            m_root->addChild(error, 5);
+        }
+        addButton("CONTINUE", {size.width / 2.0f, 26.0f}, menu_selector(CorumRankedLayer::onResultClose), false, 0.60f);
+
+        auto const transitionKey = "placement:" + view.placement.runId;
+        if (m_rankTransitionPlayedKey != transitionKey) {
+            if (playResultRankTransition(
+                view.match.ratingEventA,
+                view.match.profileBeforeA,
+                view.match.profileAfterA
+            )) {
+                m_rankTransitionPlayedKey = transitionKey;
+            }
+        }
+        if (m_rankTransitionLayer && m_menu) m_menu->setTouchEnabled(false);
+    }
+
+    void renderPlacement(RuntimeView const& view) {
+        auto const& state = view.placement.state;
+        if (state == "PLACEMENT_RESULT") {
+            renderPlacementFinal(view);
+        } else if (state == "STAGE_RESULT") {
+            renderPlacementStageResult(view);
+        } else if (state == "MAP_RESULT") {
+            renderPlacementMapResult(view);
+        } else if (state == "CANCELLED") {
+            auto const size = CCDirector::sharedDirector()->getWinSize();
+            addScreenHeader("PLACEMENT CANCELLED", "SERVER-AUTHORITATIVE RUN", kRed, kRed);
+            addButton("CLOSE", {size.width / 2.0f, size.height / 2.0f - 30.0f}, menu_selector(CorumRankedLayer::onResultClose), true, 0.64f);
+        } else {
+            renderPlacementMap(view);
+        }
+    }
+
     void renderMatch(RuntimeView const& view) {
+        if (view.match.placement) {
+            renderPlacement(view);
+            return;
+        }
         auto const& match = view.match;
         if (match.state == "MATCH_RESULT" || match.state == "CANCELLED") {
             // MATCH_RESULT is immutable server authority. alpha.27 could trap the
@@ -2669,7 +3069,11 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate 
             }
             return;
         }
-        if (match.state != "ROUND_PREPARE" && match.state != "DEATHMATCH_PREPARE") return;
+        if (
+            match.state != "ROUND_PREPARE" &&
+            match.state != "DEATHMATCH_PREPARE" &&
+            match.state != "MAP_PREPARE"
+        ) return;
 
         // Resolve the exact Geometry Dash level as soon as the authoritative
         // ten-second prepare phase begins. LevelInfo starts its vanilla map/update
@@ -2682,7 +3086,11 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate 
         auto const& view = RankedRuntime::get().view();
         if (m_enteringLevel || view.stage != RuntimeStage::Matched) return;
         auto const& state = view.match.state;
-        if (state != "ROUND_PLAYING" && state != "DEATHMATCH_PLAYING") return;
+        if (
+            state != "ROUND_PLAYING" &&
+            state != "DEATHMATCH_PLAYING" &&
+            state != "MAP_PLAYING"
+        ) return;
         if (!RankedRuntime::get().canEnterCurrentLevel()) {
             if (state == "DEATHMATCH_PLAYING") m_localMessage = "All 3 attempts used. Waiting for the opponent...";
             return;
@@ -2727,6 +3135,18 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate 
     void onJoin(CCObject*) {
         m_localMessage.clear();
         RankedRuntime::get().joinQueue();
+    }
+
+    void onStartPlacement(CCObject* sender) {
+        auto const pool = sender ? sender->getTag() : 0;
+        if (pool < 1 || pool > 6) return;
+        m_localMessage.clear();
+        RankedRuntime::get().startPlacement(pool);
+    }
+
+    void onContinuePlacement(CCObject*) {
+        m_localMessage.clear();
+        RankedRuntime::get().continuePlacement();
     }
 
     void onLeave(CCObject*) {

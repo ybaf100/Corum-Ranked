@@ -6,6 +6,7 @@ export * from "./errors.js";
 export * from "./match.js";
 export * from "./mmr.js";
 export * from "./pool.js";
+export * from "./placement.js";
 export * from "./rating.js";
 export * from "./random.js";
 export * from "./round.js";

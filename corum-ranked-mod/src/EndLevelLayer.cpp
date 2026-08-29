@@ -12,6 +12,9 @@ bool authoritativeExitState(std::string const& state) {
         state == "ROUND_RESULT" ||
         state == "DEATHMATCH_RESULT" ||
         state == "MATCH_RESULT" ||
+        state == "MAP_RESULT" ||
+        state == "STAGE_RESULT" ||
+        state == "PLACEMENT_RESULT" ||
         state == "CANCELLED";
 }
 

@@ -33,6 +33,7 @@ beforeAll(async () => {
     "0004_alpha37_schema_hardening.sql",
     "0005_v050_rating_system.sql",
     "0006_v050_dynamic_csmp_tiers.sql",
+    "0007_solo_stage_placement.sql",
   ]) {
     const migrationPath = fileURLToPath(
       new URL(`../../../migrations/${migrationName}`, import.meta.url),
@@ -104,6 +105,14 @@ const createContext = async (
     clientVersion: "v0.1.0",
     installedMods: structuredClone(cleanMods),
   });
+  await database.query(
+    `UPDATE ranked_profiles
+     SET placement_games = 5, displayed_tier = 'BRONZE', visible_ranked_score = hidden_mmr
+     WHERE player_id = (
+       SELECT player_id FROM ranked_sessions WHERE token_hash = $1
+     )`,
+    [tokens.hash(created.sessionToken)],
+  );
   const result = await database.query<{
     session_id: string;
     player_id: string;
@@ -706,7 +715,7 @@ describe("two-client authoritative match flow", () => {
       losses: number;
     }>("SELECT player_id, placement_games, hidden_mmr, wins, losses FROM ranked_profiles ORDER BY player_id");
     expect(afterRepeatedPoll.rows).toEqual(afterFirstPoll.rows);
-    expect(afterRepeatedPoll.rows.every((profile) => Number(profile.placement_games) === 1)).toBe(true);
+    expect(afterRepeatedPoll.rows.every((profile) => Number(profile.placement_games) === 5)).toBe(true);
     expect(afterRepeatedPoll.rows.reduce((sum, profile) => sum + Number(profile.wins), 0)).toBe(1);
     expect(afterRepeatedPoll.rows.reduce((sum, profile) => sum + Number(profile.losses), 0)).toBe(1);
 

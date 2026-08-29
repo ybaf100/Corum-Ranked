@@ -50,6 +50,28 @@ const clamp = (value: number, minimum: number, maximum: number): number =>
 const sortedBands = (bands: readonly TierBand[]): readonly TierBand[] =>
   [...bands].sort((left, right) => left.minInclusive - right.minInclusive);
 
+export interface FinalizedPlacementScore {
+  readonly visibleRankedScore: number;
+  readonly displayedTier: RankedTier;
+}
+
+/** Applies the inclusive tier-cutoff exclusion shared by every Placement flow. */
+export const finalizePlacementScore = (
+  hiddenMmr: number,
+  bands: readonly TierBand[],
+): FinalizedPlacementScore => {
+  if (!Number.isFinite(hiddenMmr)) {
+    throw new RankedDomainError("INVALID_CONFIG", "Placement Hidden MMR must be finite");
+  }
+  const ordered = sortedBands(bands);
+  const rawScore = Math.max(ordered[0]!.minInclusive, Math.round(hiddenMmr));
+  const visibleRankedScore = ordered.reduce((score, band, index) => {
+    if (index === 0 || Math.abs(score - band.minInclusive) > 15) return score;
+    return Math.min(score, band.minInclusive - 16);
+  }, rawScore);
+  return { visibleRankedScore, displayedTier: tierForRating(visibleRankedScore, bands) };
+};
+
 const streakAfter = (existing: number, result: RoundResult, side: PlayerSide): number => {
   if (result === "DRAW") return existing;
   const won = result === side;
@@ -110,13 +132,8 @@ export const updateRankedRatingProfile = (
   }
 
   if (placementCompleted) {
-    const rawScore = Math.max(ordered[0]!.minInclusive, Math.round(hiddenMmrAfter));
-    const placedScore = ordered.reduce((score, band, index) => {
-      if (index === 0 || Math.abs(score - band.minInclusive) > 15) return score;
-      // The forbidden interval is inclusive. cutoff - 16 is the nearest legal
-      // score and always moves a near-cutoff placement downward, never upward.
-      return Math.min(score, band.minInclusive - 16);
-    }, rawScore);
+    const finalized = finalizePlacementScore(hiddenMmrAfter, bands);
+    const placedScore = finalized.visibleRankedScore;
     return {
       profile: {
         ...before,
@@ -124,7 +141,7 @@ export const updateRankedRatingProfile = (
         visibleRankedScore: placedScore,
         placementGames,
         placementResults,
-        displayedTier: tierForRating(placedScore, bands),
+        displayedTier: finalized.displayedTier,
         resultStreak,
         promotion: null,
         demotionWarning: false,

@@ -30,11 +30,11 @@ readiness, `rankedReady`는 DB + 유효 config + `enabled=true`인 매치 readin
 {
   "gdAccountId": "12345",
   "gdUsername": "Player",
-  "clientVersion": "v0.4.0-alpha.7",
+  "clientVersion": "v0.5.0-beta.8",
   "installedMods": [
     {
       "id": "hwanhee1.corum_ranked",
-      "version": "v0.4.0-alpha.7",
+      "version": "v0.5.0-beta.8",
       "enabled": true,
       "loaded": true,
       "internal": false,
@@ -45,6 +45,25 @@ readiness, `rankedReady`는 DB + 유효 config + `enabled=true`인 매치 readin
 ```
 
 성공 시 runtime-only `sessionToken`, 만료시각, 표시 tier/placement 상태를 반환합니다. 이후 session API는 `Authorization: Bearer <sessionToken>`이 필요합니다.
+
+## Solo Placement
+
+배치 미완료 플레이어는 일반 Queue와 Debug Bot 대신 아래 Bearer-token API를 사용합니다. Placement에는 PvP `matchToken`이 없고 클라이언트는 Grade, Map Score, Stage Score, Placement Rating 또는 MMR을 제출하지 않습니다.
+
+| Method | Path | Body/역할 |
+|---|---|---|
+| `GET` | `/api/ranked/placement/active` | 진행 Run 또는 확인하지 않은 최종 결과 복구 |
+| `POST` | `/api/ranked/placement/start` | `startingPool` 1..6, 최신 `installedMods` |
+| `GET` | `/api/ranked/placement/:id/state` | 권위 상태, Map/Stage 결과, deadline |
+| `POST` | `/api/ranked/placement/:id/ready` | 실제 GD 레벨·음원 준비 후 최신 `installedMods` |
+| `POST` | `/api/ranked/placement/:id/attempt/start` | playable `levelId`, idempotent `clientEventId` |
+| `POST` | `/api/ranked/placement/:id/attempt/progress` | 활성 `attemptId`, progress telemetry; Grade 불변 |
+| `POST` | `/api/ranked/placement/:id/attempt/end` | progress/clear 확정, Top 3·Map Score·Grade 재계산 |
+| `POST` | `/api/ranked/placement/:id/continue` | Map Result→다음 Map/Stage Result→다음 Stage/최종화 |
+| `POST` | `/api/ranked/placement/:id/heartbeat` | Run heartbeat |
+| `POST` | `/api/ranked/placement/:id/result/acknowledge` | Placement Reveal 확인을 exactly-once 기록 |
+
+상태는 `POOL_SELECTION`, `MAP_PREPARE`, `MAP_PLAYING`, `MAP_SETTLING`, `MAP_RESULT`, `STAGE_RESULT`, `PLACEMENT_RESULT`, `CANCELLED`만 사용합니다. `active`는 확인하지 않은 `PLACEMENT_RESULT`도 복구하며, 확인 뒤에는 배치 완료 프로필에 `RANKED_QUEUE`를 반환합니다.
 
 ## Queue
 

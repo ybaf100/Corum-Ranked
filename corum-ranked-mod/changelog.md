@@ -1,3 +1,17 @@
+# v0.5.0-beta.8
+
+- Replaced PvP Placement with a separate server-authoritative solo aggregate: five Stages, two distinct Pool maps per Stage, persisted map snapshots, Attempts, top-three evidence, Stage results, deadlines, heartbeats, final rating, and result acknowledgement.
+- Blocked public PvP Queue and Debug Bot Match until solo Placement is complete. Existing placed profiles continue through the unchanged Ranked PvP path.
+- Reused the exact Ranked Attempt curve: qualifying threshold, 50%=75, 75%=150, and Clear=250. Each Map sums only its three highest authoritative Attempts; three Clears immediately force 750 points, S Grade, and Map completion.
+- Added configurable S/A/B/C/D thresholds, Stage averages, S/S and D/D consistency movement, Pool 1–6 clamping, distinct canonical map selection, unused-map preference, configurable Pool rating anchors, and all-ten-map Placement Rating finalization.
+- Preserved the existing non-lowest tier cutoff exclusion `[cutoff-15, cutoff+15] → cutoff-16`, tier floor, `TIER - N LP`, `PLACED`, and `RankTransitionLayer::Placement` reveal.
+- Replaced Placement Qualifying HUD with a single image-first Grade badge. Grade changes occur only after Attempt-end authority; same Grade does not animate, upgrades use a short 0.8→1.12→1.0 pop, downgrades use a short fade, and missing images fall back to animated text.
+- Added Map Result and Stage Result UI. The two Map Grades move inward, merge with a flash, and reveal the Stage Grade; S/A/B reuse ResultWin audio and C/D reuse ResultLose audio.
+- Bundled the supplied `placement-grade-s/a/b/c/d.png` resources without modification and retained a crash-safe text fallback.
+- Kept beta.7 exact real-level preparation: lookup/loading starts at the ten-second countdown, overall loading progress is visible, and the real `LevelInfoLayer` is revealed at five seconds remaining when ready.
+- Added recovery and regression coverage for active Attempt, Map/Stage boundaries, server restart, result acknowledgement, top-three scoring, three Clears, Pool movement, all-ten-map rating evidence, queue/debug blocking, existing PvP, Ban, BO3, LAST ATTEMPT, Deathmatch, rating, Promotion, and Demotion.
+- Updated the exact client/server version gate and workspace metadata to `v0.5.0-beta.8`.
+
 # v0.5.0-beta.7
 
 - Removed the synthetic `GJGameLevel::create()` fallback from Ranked map entry. The client now opens `LevelInfoLayer` only with the exact saved Geometry Dash level or an exact `SearchType::Type19` online result whose Level ID still matches the current server-authoritative match, Round, and map context.

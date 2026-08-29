@@ -1,5 +1,6 @@
 import {
   DOCUMENT_RULES_V0_4,
+  DEFAULT_PLACEMENT_POLICY,
   type AllowedModRule,
   type PoolNumber,
   type RankedMap,
@@ -69,6 +70,7 @@ const operational = (generation: string): RankedOperationalConfig => ({
     promotionFailurePenalty: 50,
     demotionScorePenalty: 50,
   },
+  placementPolicy: DEFAULT_PLACEMENT_POLICY,
   timeouts: {
     sessionSeconds: 3_600,
     readySeconds: 30,

@@ -5,6 +5,7 @@
 #include "domain/RenderFpsMeter.hpp"
 #include "ui/RankedTranslations.hpp"
 #include "ui/RankedVisuals.hpp"
+#include "ui/PlacementGradeBadge.hpp"
 
 #include <Geode/Geode.hpp>
 #include <Geode/modify/PlayLayer.hpp>
@@ -112,6 +113,7 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         CCLabelBMFont* opponentAttemptLabel = nullptr;
         CCLabelBMFont* qualifyingCaption = nullptr;
         CCLabelBMFont* qualifyingLabel = nullptr;
+        corum::ranked::ui::PlacementGradeBadge* placementGrade = nullptr;
         CCNode* spectatorPanel = nullptr;
         CCLabelBMFont* spectatorNameLabel = nullptr;
         CCLabelBMFont* spectatorProgressLabel = nullptr;
@@ -219,7 +221,9 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
             matchState == "FINAL_ATTEMPT_WINDOW" ||
             matchState == "LAST_ATTEMPT_WINDOW" ||
             matchState == "ROUND_SETTLING" ||
-            matchState == "DEATHMATCH_PLAYING";
+            matchState == "DEATHMATCH_PLAYING" ||
+            matchState == "MAP_PLAYING" ||
+            matchState == "MAP_SETTLING";
         if ((!stillPlaying || runtime.currentLevelId() != m_fields->levelId) && !m_fields->autoExitRequested) {
             auto const localAttemptStillAlive =
                 m_fields->attemptStartReported && !m_fields->attemptEndReported;
@@ -303,7 +307,9 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
             auto const startWindowExpired =
                 ((match.state == "FINAL_ATTEMPT_WINDOW" || match.state == "LAST_ATTEMPT_WINDOW") &&
                  runtime.deadlineMillis().value_or(1) <= 0) ||
-                match.state == "ROUND_SETTLING";
+                match.state == "ROUND_SETTLING" ||
+                match.state == "MAP_SETTLING" ||
+                (match.state == "MAP_PLAYING" && runtime.deadlineMillis().value_or(1) <= 0);
             auto const newAttemptForbidden = startWindowExpired || !runtime.canEnterCurrentLevel();
             if (newAttemptForbidden) {
                 // The current attempt may finish after the start deadline, but
@@ -646,6 +652,24 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         m_fields->qualifyingLabel->setID("ranked-qualifying"_spr);
         limitHudWidth(m_fields->qualifyingLabel, 96.0f, 0.714f, 0.28f);
 
+        if (corum::ranked::RankedRuntime::get().isPlacement()) {
+            setHudVisible(m_fields->qualifyingCaption, false);
+            setHudVisible(m_fields->qualifyingLabel, false);
+            m_fields->placementGrade = corum::ranked::ui::PlacementGradeBadge::create(52.0f);
+            if (m_fields->placementGrade) {
+                m_fields->placementGrade->setID("ranked-placement-grade"_spr);
+                m_fields->placementGrade->setPosition({
+                    layout.bottomLeftX + 30.0f,
+                    layout.bottomY + 27.0f,
+                });
+                m_fields->placementGrade->setGrade(
+                    corum::ranked::RankedRuntime::get().view().placement.currentMapGrade,
+                    false
+                );
+                m_fields->hudRoot->addChild(m_fields->placementGrade, 5);
+            }
+        }
+
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
         m_fields->debugLabel = addShadowedHudLabel(
             m_fields->hudRoot,
@@ -733,6 +757,8 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         m_fields->renderedRevision = runtime.view().revision;
         if (!m_fields->hudRoot || !m_fields->fpsLabel || !m_fields->ownScoreLabel) return;
 
+        auto const placement = runtime.isPlacement();
+
         auto attemptsUsedA = match.deathmatchAttemptsUsedA;
         auto attemptsUsedB = match.deathmatchAttemptsUsedB;
         if (match.state == "DEATHMATCH_PLAYING") {
@@ -742,7 +768,11 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         }
         auto const presentation = corum::ranked::presentHud({
             .side = match.side,
-            .state = match.state,
+            .state = placement
+                ? (match.state == "MAP_PLAYING" ? "ROUND_PLAYING"
+                    : match.state == "MAP_SETTLING" ? "ROUND_SETTLING"
+                    : match.state)
+                : match.state,
             .banner = match.banner,
             .roundNumber = match.roundNumber,
             .scoreA = match.scoreA,
@@ -765,7 +795,10 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         setHudText(m_fields->fpsLabel, presentation.fpsText);
         auto const ownIsA = match.side == "A";
         if (m_fields->ownNameLabel) {
-            setHudText(m_fields->ownNameLabel, ownIsA ? match.playerAName : match.playerBName);
+            setHudText(
+                m_fields->ownNameLabel,
+                placement ? "PLACEMENT" : (ownIsA ? match.playerAName : match.playerBName)
+            );
             limitHudWidth(m_fields->ownNameLabel, 96.0f, 0.51f, 0.21f);
         }
         if (m_fields->opponentNameLabel) {
@@ -799,31 +832,65 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
             setHudText(m_fields->opponentAttemptLabel, presentation.opponentAttemptText);
         }
         auto const qualifying = match.currentMap ? match.currentMap->qualifyingPercent : 100.0;
-        setHudText(m_fields->qualifyingLabel, formatScore(qualifying) + "%");
-        limitHudWidth(m_fields->qualifyingLabel, 96.0f, 0.714f, 0.28f);
+        if (placement) {
+            setHudVisible(m_fields->qualifyingCaption, false);
+            setHudVisible(m_fields->qualifyingLabel, false);
+            if (m_fields->placementGrade) {
+                m_fields->placementGrade->setGrade(runtime.view().placement.currentMapGrade, true);
+            }
+        } else {
+            setHudVisible(m_fields->qualifyingCaption, true);
+            setHudVisible(m_fields->qualifyingLabel, true);
+            setHudText(m_fields->qualifyingLabel, formatScore(qualifying) + "%");
+            limitHudWidth(m_fields->qualifyingLabel, 96.0f, 0.714f, 0.28f);
+        }
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
         if (m_fields->debugLabel) setHudVisible(m_fields->debugLabel, match.debug);
 #endif
 
         auto const size = CCDirector::sharedDirector()->getWinSize();
         auto const top = corum::ranked::layoutHud(size.width, size.height).topY;
-        setHudText(m_fields->roundLabel, presentation.roundText);
-        setHudText(m_fields->timerLabel, presentation.timerText);
-        setHudText(m_fields->stateLabel, presentation.stateText);
-        setHudVisible(m_fields->roundLabel, !presentation.roundText.empty());
-        setHudVisible(m_fields->timerLabel, !presentation.timerText.empty());
-        setHudVisible(m_fields->stateLabel, !presentation.stateText.empty());
+        auto const roundText = placement
+            ? fmt::format(
+                "STAGE {} / {}  ·  MAP {} / {}",
+                runtime.view().placement.currentStageIndex,
+                runtime.view().placement.totalStages,
+                runtime.view().placement.currentMapIndex,
+                runtime.view().placement.mapsPerStage
+            )
+            : presentation.roundText;
+        auto const& timerText = presentation.timerText;
+        auto const stateText = presentation.stateText;
+        setHudText(m_fields->roundLabel, roundText);
+        setHudText(m_fields->timerLabel, timerText);
+        setHudText(m_fields->stateLabel, stateText);
+        setHudVisible(m_fields->roundLabel, !roundText.empty());
+        setHudVisible(m_fields->timerLabel, !timerText.empty());
+        setHudVisible(m_fields->stateLabel, !stateText.empty());
         setHudPosition(m_fields->roundLabel, {size.width / 2.0f, top - 1.0f});
         setHudPosition(m_fields->timerLabel, {size.width / 2.0f, top - 18.0f});
         setHudPosition(m_fields->stateLabel, {size.width / 2.0f, top - 47.0f});
         auto const urgent =
             match.state == "LAST_ATTEMPT_WINDOW" ||
             match.state == "FINAL_ATTEMPT_WINDOW" ||
-            match.state == "ROUND_SETTLING";
+            match.state == "ROUND_SETTLING" ||
+            match.state == "MAP_SETTLING" ||
+            (match.state == "MAP_PLAYING" && runtime.signedDeadlineMillis().value_or(1) <= 0);
         m_fields->timerLabel->setColor(urgent ? corum::ranked::ui::Red : corum::ranked::ui::Text);
         m_fields->stateLabel->setColor(urgent ? corum::ranked::ui::Red : corum::ranked::ui::Gold);
 
         m_fields->spectatorPanel->setVisible(presentation.spectatorVisible);
+
+        if (placement) {
+            setHudVisible(m_fields->opponentNameLabel, false);
+            setHudVisible(m_fields->opponentScoreCaption, false);
+            setHudVisible(m_fields->opponentScoreLabel, false);
+            setHudVisible(m_fields->opponentAttemptLabel, false);
+            for (auto* icon : m_fields->opponentChecks) {
+                if (icon) icon->setVisible(false);
+            }
+            m_fields->spectatorPanel->setVisible(false);
+        }
         if (presentation.spectatorVisible) {
             setHudText(m_fields->spectatorNameLabel, presentation.spectatorOpponentText);
             setHudText(m_fields->spectatorProgressLabel, presentation.spectatorProgressText);

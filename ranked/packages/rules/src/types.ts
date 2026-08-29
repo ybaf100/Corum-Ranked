@@ -12,6 +12,35 @@ export type PlayerSide = (typeof PLAYER_SIDES)[number];
 export type PoolNumber = 1 | 2 | 3 | 4 | 5 | 6;
 export type RoundResult = PlayerSide | "DRAW";
 
+export const PLACEMENT_GRADES = ["S", "A", "B", "C", "D"] as const;
+export type PlacementGrade = (typeof PLACEMENT_GRADES)[number];
+
+export interface PlacementGradeThresholds {
+  readonly sMin: number;
+  readonly aMin: number;
+  readonly bMin: number;
+  readonly cMin: number;
+}
+
+/**
+ * Server-authoritative solo Placement tuning. Values are snapshot with each
+ * run so an operator config refresh cannot change a run already in progress.
+ */
+export interface PlacementPolicy {
+  readonly stageCount: 5;
+  readonly mapsPerStage: 2;
+  readonly gradeThresholds: PlacementGradeThresholds;
+  readonly transitionGuardSeconds: number;
+  readonly topAttemptCount: 3;
+  readonly clearTarget: 3;
+  readonly poolRatingAnchors: readonly [number, number, number, number, number, number];
+  readonly mapScoreCenter: number;
+  readonly ratingPerMapScorePoint: number;
+  readonly mapRatingWeight: number;
+  readonly stageRatingWeight: number;
+  readonly overallRatingWeight: number;
+}
+
 export interface RankedMap {
   /** @deprecated Use playableLevelId. Kept in the config contract during alpha migration. */
   readonly levelId: string;
@@ -123,6 +152,7 @@ export interface RankedOperationalConfig {
   readonly csmpTierNames: readonly CsmpTier[];
   readonly csmpSeeds: Readonly<Record<CsmpTier, number>>;
   readonly mmrPolicy?: MmrPolicy;
+  readonly placementPolicy?: PlacementPolicy;
   readonly timeouts?: TimeoutPolicy;
   readonly matchmaking?: MatchmakingPolicy;
   readonly failurePolicy?: FailurePolicy;

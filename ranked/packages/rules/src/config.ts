@@ -183,6 +183,53 @@ export const validateOperationalConfig = (
     }
   }
 
+  if (!config.placementPolicy) {
+    errors.push("placementPolicy must be configured");
+  } else {
+    const policy = config.placementPolicy;
+    if (policy.stageCount !== 5) errors.push("placementPolicy.stageCount must be 5");
+    if (policy.mapsPerStage !== 2) errors.push("placementPolicy.mapsPerStage must be 2");
+    const { sMin, aMin, bMin, cMin } = policy.gradeThresholds;
+    if (!(750 >= sMin && sMin > aMin && aMin > bMin && bMin > cMin && cMin > 0)) {
+      errors.push("placementPolicy grade thresholds must satisfy 750 >= S > A > B > C > 0");
+    }
+    if (!Number.isFinite(policy.transitionGuardSeconds) ||
+      policy.transitionGuardSeconds < 0 || policy.transitionGuardSeconds > 1) {
+      errors.push("placementPolicy.transitionGuardSeconds must be between 0 and 1");
+    }
+    if (policy.topAttemptCount !== 3) {
+      errors.push("placementPolicy.topAttemptCount must be 3");
+    }
+    if (policy.clearTarget !== 3 || policy.clearTarget !== config.rules.clearTarget) {
+      errors.push("placementPolicy.clearTarget must match the Ranked 3-Clear rule");
+    }
+    if (policy.poolRatingAnchors.length !== 6 ||
+      policy.poolRatingAnchors.some((anchor) => !Number.isFinite(anchor))) {
+      errors.push("placementPolicy.poolRatingAnchors must contain six finite values");
+    } else if (policy.poolRatingAnchors.some((anchor, index, anchors) =>
+      index > 0 && anchor <= anchors[index - 1]!)) {
+      errors.push("placementPolicy.poolRatingAnchors must be strictly increasing");
+    }
+    if (!Number.isFinite(policy.mapScoreCenter) ||
+      policy.mapScoreCenter < 0 || policy.mapScoreCenter > 750) {
+      errors.push("placementPolicy.mapScoreCenter must be between 0 and 750");
+    }
+    if (!(policy.ratingPerMapScorePoint > 0)) {
+      errors.push("placementPolicy.ratingPerMapScorePoint must be positive");
+    }
+    const ratingWeightTotal = policy.mapRatingWeight + policy.stageRatingWeight +
+      policy.overallRatingWeight;
+    if (policy.mapRatingWeight < 0 || policy.stageRatingWeight < 0 ||
+      policy.overallRatingWeight < 0 || Math.abs(ratingWeightTotal - 1) > 0.000_001) {
+      errors.push("placementPolicy rating weights must be non-negative and sum to 1");
+    }
+  }
+
+  if (config.mmrPolicy && config.placementPolicy &&
+    config.mmrPolicy.placementGames !== config.placementPolicy.stageCount) {
+    errors.push("mmrPolicy.placementGames must match the five Placement stages");
+  }
+
   if (!config.timeouts) {
     errors.push("timeouts must be configured");
   } else {

@@ -59,7 +59,13 @@ export const validateRankedConfigDocument = (document: RankedConfigDocument): re
   }
 
   try {
-    canonicalActiveMaps(document.maps);
+    const canonicalMaps = canonicalActiveMaps(document.maps);
+    for (let pool = 1; pool <= 6; pool += 1) {
+      const count = canonicalMaps.filter((map) => map.pool === pool).length;
+      if (count < 2) {
+        errors.push(`Placement Pool ${pool} requires at least two active canonical maps`);
+      }
+    }
     for (const [index, tier] of RANKED_TIERS.entries()) {
       const band = tierBandFor(tier, document.operational.tierBands);
       selectCandidateMaps(tier, band.mainPool, document.maps, new SeededRandom(index + 1));

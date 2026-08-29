@@ -211,7 +211,9 @@ bool stateAllowsActiveAttempt(std::string const& state) {
         state == "FINAL_ATTEMPT_WINDOW" ||
         state == "LAST_ATTEMPT_WINDOW" ||
         state == "ROUND_SETTLING" ||
-        state == "DEATHMATCH_PLAYING";
+        state == "DEATHMATCH_PLAYING" ||
+        state == "MAP_PLAYING" ||
+        state == "MAP_SETTLING";
 }
 
 int pollIntervalMillis(bool spectatorActive = false) {
@@ -266,6 +268,10 @@ char const* stageName(RuntimeStage stage) {
 
 RuntimeView const& RankedRuntime::view() const {
     return m_view;
+}
+
+bool RankedRuntime::isPlacement() const {
+    return m_view.match.placement && m_view.placement.active;
 }
 
 void RankedRuntime::setStage(RuntimeStage stage, std::string status, std::string error) {
@@ -349,7 +355,9 @@ void RankedRuntime::begin() {
     m_localDeathmatchSequence = 0;
     m_localDeathmatchVisualAttempts = 0;
     m_songBypassAllowed = false;
+    m_placementResultAcknowledged = false;
     m_view.client = {};
+    m_view.placement = {};
     m_view.match = {};
     fetchConfig();
 }
@@ -596,7 +604,101 @@ void RankedRuntime::createSession() {
             m_view.resultStreak = profile.resultStreak;
             m_view.promotion = profile.promotion;
             m_view.demotionWarning = profile.demotionWarning;
-            setStage(RuntimeStage::Ready, "Ranked session ready. Join the queue when prepared.");
+            m_view.placement.required =
+                profile.displayedTier == "UNRANKED" ||
+                profile.placementGames < profile.placementGamesRequired;
+            // Completed runs can still have an unacknowledged Reveal after a lost
+            // finalization response, so every session checks the recovery endpoint.
+            fetchActivePlacement();
+        }
+    );
+}
+
+void RankedRuntime::fetchActivePlacement() {
+    if (m_controlBusy || m_sessionToken.empty()) return;
+    auto request = baseRequest(m_sessionToken);
+    m_controlBusy = true;
+    setStage(RuntimeStage::Loading, "Checking for an active Placement run...");
+    m_controlRequest.spawn(
+        request.get(endpoint("/api/ranked/placement/active")),
+        [this](web::WebResponse response) {
+            m_controlBusy = false;
+            if (!successful(response)) {
+                setStage(RuntimeStage::Error, "Could not recover Placement.", responseError(response));
+                return;
+            }
+            auto const root = response.json().unwrapOr(matjson::Value());
+            observeServerNow(root);
+            if (!root["active"].asBool().unwrapOr(false)) {
+                m_view.placement.active = false;
+                setStage(
+                    RuntimeStage::Ready,
+                    m_view.placement.required
+                        ? "Choose the Pool that best matches your current skill."
+                        : "Ranked session ready. Join the queue when prepared."
+                );
+                return;
+            }
+            parsePlacementState(root);
+            setStage(RuntimeStage::Matched, "Placement recovered. Continue from the saved Stage and Map.");
+            m_nextPollAt = std::chrono::steady_clock::now();
+        }
+    );
+}
+
+void RankedRuntime::startPlacement(int startingPool) {
+    if (
+        m_controlBusy || m_sessionToken.empty() || m_view.stage != RuntimeStage::Ready ||
+        !m_view.placement.required || m_view.placement.active || startingPool < 1 || startingPool > 6
+    ) return;
+    m_installedMods = captureInstalledMods();
+    auto const decision = evaluateEnvironment(m_installedMods, m_environmentPolicy);
+    if (!decision.allowed) {
+        setStage(RuntimeStage::Blocked, "The active mod environment changed. Re-open Ranked to recheck.");
+        return;
+    }
+    matjson::Value body;
+    body["startingPool"] = startingPool;
+    body["installedMods"] = installedModsJson();
+    auto request = baseRequest(m_sessionToken);
+    request.bodyJSON(body);
+    m_controlBusy = true;
+    setStage(RuntimeStage::Loading, "Starting server-authoritative Placement...");
+    m_controlRequest.spawn(
+        request.post(endpoint("/api/ranked/placement/start")),
+        [this](web::WebResponse response) {
+            m_controlBusy = false;
+            if (!successful(response)) {
+                setStage(RuntimeStage::Ready, "Choose a starting Pool.", responseError(response));
+                return;
+            }
+            m_matchToken.clear();
+            parsePlacementState(response.json().unwrapOr(matjson::Value()));
+            setStage(RuntimeStage::Matched, "Placement started. Preparing Stage 1 Map 1.");
+            m_nextPollAt = std::chrono::steady_clock::now();
+        }
+    );
+}
+
+void RankedRuntime::continuePlacement() {
+    if (
+        m_controlBusy || !isPlacement() || m_view.match.matchId.empty() ||
+        (m_view.match.state != "MAP_RESULT" && m_view.match.state != "STAGE_RESULT")
+    ) return;
+    auto const runId = m_view.match.matchId;
+    auto request = baseRequest(m_sessionToken);
+    m_controlBusy = true;
+    m_controlRequest.spawn(
+        request.post(endpoint("/api/ranked/placement/" + runId + "/continue")),
+        [this, runId](web::WebResponse response) {
+            m_controlBusy = false;
+            if (!successful(response)) {
+                setTransientError(responseError(response));
+                return;
+            }
+            if (!isPlacement() || m_view.match.matchId != runId) return;
+            parsePlacementState(response.json().unwrapOr(matjson::Value()));
+            m_nextPollAt = std::chrono::steady_clock::now();
         }
     );
 }
@@ -756,16 +858,19 @@ void RankedRuntime::pollQueue() {
 
 void RankedRuntime::pollMatch() {
     if (
-        m_pollBusy || m_sessionToken.empty() || m_matchToken.empty() ||
+        m_pollBusy || m_sessionToken.empty() || (!isPlacement() && m_matchToken.empty()) ||
         m_view.stage != RuntimeStage::Matched || m_view.match.matchId.empty()
     ) return;
     auto const matchId = m_view.match.matchId;
-    auto request = baseRequest(m_sessionToken, m_matchToken);
+    auto const placement = isPlacement();
+    auto request = baseRequest(m_sessionToken, placement ? std::string() : m_matchToken);
     auto const generation = ++m_pollRequestGeneration;
     m_pollBusy = true;
     m_pollRequest.spawn(
-        request.get(endpoint("/api/ranked/matches/" + matchId + "/state")),
-        [this, generation, matchId](web::WebResponse response) {
+        request.get(endpoint(placement
+            ? "/api/ranked/placement/" + matchId + "/state"
+            : "/api/ranked/matches/" + matchId + "/state")),
+        [this, generation, matchId, placement](web::WebResponse response) {
             if (
                 generation != m_pollRequestGeneration ||
                 m_view.stage != RuntimeStage::Matched ||
@@ -782,11 +887,160 @@ void RankedRuntime::pollMatch() {
                 return;
             }
             auto const root = response.json().unwrapOr(matjson::Value());
-            parseMatchState(root);
+            if (placement) parsePlacementState(root);
+            else parseMatchState(root);
             m_nextPollAt = std::chrono::steady_clock::now() +
                 std::chrono::milliseconds(pollIntervalMillis(m_view.match.spectatorActive));
         }
     );
+}
+
+void RankedRuntime::parsePlacementState(matjson::Value const& root) {
+    if (!root.isObject()) {
+        setTransientError("Invalid Placement state response");
+        return;
+    }
+    observeServerNow(root);
+    auto const previousState = m_view.placement.state;
+    auto const runId = root["runId"].asString().unwrapOr(m_view.placement.runId);
+    if (runId.empty()) {
+        setTransientError("Placement Run ID is missing");
+        return;
+    }
+
+    m_view.placement.required = root["state"].asString().unwrapOr("") != "PLACEMENT_RESULT";
+    m_view.placement.active = true;
+    m_view.placement.runId = runId;
+    m_view.placement.state = root["state"].asString().unwrapOr("");
+    m_view.placement.stateVersion = root["stateVersion"].asInt().unwrapOr(0);
+    m_view.placement.startingPool = static_cast<int>(root["startingPool"].asInt().unwrapOr(0));
+    m_view.placement.currentStageIndex = static_cast<int>(root["currentStageIndex"].asInt().unwrapOr(0));
+    m_view.placement.currentMapIndex = static_cast<int>(root["currentMapIndex"].asInt().unwrapOr(0));
+    m_view.placement.totalStages = static_cast<int>(root["totalStages"].asInt().unwrapOr(5));
+    m_view.placement.mapsPerStage = static_cast<int>(root["mapsPerStage"].asInt().unwrapOr(2));
+    m_view.placement.stagePools.clear();
+    if (auto const pools = root["stagePools"].asArray(); pools.isOk()) {
+        for (auto const& pool : pools.unwrap()) {
+            m_view.placement.stagePools.push_back(static_cast<int>(pool.asInt().unwrapOr(0)));
+        }
+    }
+    m_view.placement.stageResults.clear();
+    if (auto const results = root["stageResults"].asArray(); results.isOk()) {
+        for (auto const& item : results.unwrap()) {
+            if (!item.isObject()) continue;
+            PlacementStageResultView result;
+            result.stageIndex = static_cast<int>(item["stageIndex"].asInt().unwrapOr(0));
+            result.pool = static_cast<int>(item["pool"].asInt().unwrapOr(0));
+            if (auto const scores = item["mapScores"].asArray(); scores.isOk()) {
+                for (auto const& score : scores.unwrap()) {
+                    result.mapScores.push_back(static_cast<int>(score.asInt().unwrapOr(0)));
+                }
+            }
+            if (auto const grades = item["mapGrades"].asArray(); grades.isOk()) {
+                for (auto const& grade : grades.unwrap()) {
+                    result.mapGrades.push_back(grade.asString().unwrapOr("D"));
+                }
+            }
+            result.stageScore = item["stageScore"].asDouble().unwrapOr(0.0);
+            result.stageGrade = item["stageGrade"].asString().unwrapOr("D");
+            result.poolDelta = static_cast<int>(item["poolDelta"].asInt().unwrapOr(0));
+            result.nextPool = static_cast<int>(item["nextPool"].asInt().unwrapOr(1));
+            m_view.placement.stageResults.push_back(std::move(result));
+        }
+    }
+
+    m_view.match = {};
+    m_view.match.placement = true;
+    m_view.match.matchId = runId;
+    m_view.match.state = m_view.placement.state;
+    m_view.match.stateVersion = m_view.placement.stateVersion;
+    m_view.match.deadlineAt = root["deadlineAt"].asString().unwrapOr("");
+    m_view.match.side = "A";
+    m_view.match.playerAName = "PLACEMENT";
+    m_view.match.playerATier = "UNRANKED";
+    m_view.match.roundNumber = m_view.placement.currentStageIndex;
+    m_view.match.spectatorActive = false;
+
+    auto const currentMap = root["currentMap"];
+    if (auto map = parseMap(currentMap)) {
+        m_view.match.currentMap = *map;
+        m_view.placement.currentMapScore = static_cast<int>(currentMap["mapScore"].asInt().unwrapOr(0));
+        m_view.placement.currentMapGrade = currentMap["mapGrade"].asString().unwrapOr("D");
+        m_view.placement.currentMapClears = static_cast<int>(currentMap["clearCount"].asInt().unwrapOr(0));
+        m_view.placement.currentMapNormalEndAt = currentMap["normalEndAt"].asString().unwrapOr("");
+        m_view.placement.currentMapFinalWindowEndAt = currentMap["finalWindowEndAt"].asString().unwrapOr("");
+        if (
+            m_view.match.state == "MAP_PLAYING" &&
+            !m_view.placement.currentMapNormalEndAt.empty()
+        ) {
+            // The ordinary HUD deadline is the five-minute Main Time. Its
+            // signed overrun drives the separate ten-second Final Attempt window.
+            m_view.match.deadlineAt = m_view.placement.currentMapNormalEndAt;
+        }
+        m_view.match.scoreA = m_view.placement.currentMapScore;
+        m_view.match.committedScoreA = m_view.placement.currentMapScore;
+        m_view.match.clearsA = m_view.placement.currentMapClears;
+    } else {
+        m_view.match.currentMap.reset();
+    }
+
+    auto const activeAttempt = root["activeAttempt"];
+    m_view.placement.activeAttemptId = activeAttempt["attemptId"].asString().unwrapOr("");
+    // A process restart cannot restore Geometry Dash's frame state, but it can
+    // retain the exact authoritative Attempt identity. The next PlayLayer scene
+    // continues that same persisted Attempt and ends it idempotently.
+    if (
+        !m_view.placement.activeAttemptId.empty() && !hasLocalAttemptInFlight() &&
+        m_view.match.currentMap
+    ) {
+        m_attemptId = m_view.placement.activeAttemptId;
+        m_attemptLevelId = m_view.match.currentMap->levelId;
+        m_attemptContextKey = currentAttemptContextKey();
+    }
+
+    m_view.placement.finalResult = {};
+    auto const finalResult = root["finalResult"];
+    if (finalResult.isObject()) {
+        m_view.placement.finalResult.placed = finalResult["placed"].asBool().unwrapOr(false);
+        m_view.placement.finalResult.visibleRankedScore = static_cast<int>(
+            finalResult["visibleRankedScore"].asInt().unwrapOr(0)
+        );
+        m_view.placement.finalResult.displayedTier = finalResult["displayedTier"].asString().unwrapOr("UNRANKED");
+        m_view.placement.finalResult.finalizedAt = finalResult["finalizedAt"].asString().unwrapOr("");
+        if (m_view.placement.finalResult.placed) {
+            m_view.match.profileBeforeA.displayedTier = "UNRANKED";
+            m_view.match.profileAfterA.displayedTier = m_view.placement.finalResult.displayedTier;
+            m_view.match.profileAfterA.visibleRankedScore = m_view.placement.finalResult.visibleRankedScore;
+            m_view.match.profileAfterA.placementGames = m_view.placement.totalStages;
+            m_view.match.profileAfterA.placementGamesRequired = m_view.placement.totalStages;
+            m_view.match.profileBeforeTierA = "UNRANKED";
+            m_view.match.profileAfterTierA = m_view.placement.finalResult.displayedTier;
+            m_view.match.profileAfterScoreA = m_view.placement.finalResult.visibleRankedScore;
+            m_view.match.ownRankedScoreAfter = m_view.placement.finalResult.visibleRankedScore;
+            m_view.match.ratingEventA.placementCompleted = true;
+        }
+    }
+
+    if (m_view.match.state == "PLACEMENT_RESULT") {
+        m_view.status = "Placement complete. Your initial Tier is ready.";
+    } else if (m_view.match.state == "STAGE_RESULT") {
+        m_view.status = "Stage complete. Review the combined Grade.";
+    } else if (m_view.match.state == "MAP_RESULT") {
+        m_view.status = "Map Grade locked by the server.";
+    } else if (m_view.match.state == "MAP_SETTLING") {
+        m_view.status = "Final accepted Attempt is still in progress.";
+    } else if (m_view.match.state == "MAP_PLAYING") {
+        m_view.status = "Placement Map live. Grade changes only after an Attempt ends.";
+    } else if (m_view.match.state == "MAP_PREPARE") {
+        m_view.status = "Placement Map revealed. Preparing the exact GD level.";
+    } else if (m_view.match.state == "CANCELLED") {
+        m_view.status = "Placement cancelled by the server.";
+    }
+    m_view.error.clear();
+    ++m_view.revision;
+    if (previousState != m_view.placement.state) {
+        log::info("Corum Ranked Placement state: {} -> {}", previousState, m_view.placement.state);
+    }
 }
 
 void RankedRuntime::parseMatchState(matjson::Value const& root) {
@@ -1154,7 +1408,12 @@ void RankedRuntime::applyAttemptSnapshot(matjson::Value const& root) {
 void RankedRuntime::submitReady() {
     if (m_controlBusy || m_view.stage != RuntimeStage::Matched) return;
     auto const& state = m_view.match.state;
-    if (state != "MATCHED" && state != "ROUND_PREPARE" && state != "DEATHMATCH_PREPARE") return;
+    auto const placement = isPlacement();
+    if (placement) {
+        if (state != "MAP_PREPARE") return;
+    } else if (state != "MATCHED" && state != "ROUND_PREPARE" && state != "DEATHMATCH_PREPARE") {
+        return;
+    }
     m_installedMods = captureInstalledMods();
     auto const decision = evaluateEnvironment(m_installedMods, m_environmentPolicy);
     if (!decision.allowed) {
@@ -1163,18 +1422,21 @@ void RankedRuntime::submitReady() {
     }
     matjson::Value body;
     body["installedMods"] = installedModsJson();
-    auto request = baseRequest(m_sessionToken, m_matchToken);
+    auto request = baseRequest(m_sessionToken, placement ? std::string() : m_matchToken);
     request.bodyJSON(body);
     m_controlBusy = true;
     m_controlRequest.spawn(
-        request.post(endpoint("/api/ranked/matches/" + m_view.match.matchId + "/ready")),
-        [this](web::WebResponse response) {
+        request.post(endpoint(placement
+            ? "/api/ranked/placement/" + m_view.match.matchId + "/ready"
+            : "/api/ranked/matches/" + m_view.match.matchId + "/ready")),
+        [this, placement](web::WebResponse response) {
             m_controlBusy = false;
             if (!successful(response)) {
                 setTransientError(responseError(response));
                 return;
             }
-            parseMatchState(response.json().unwrapOr(matjson::Value()));
+            if (placement) parsePlacementState(response.json().unwrapOr(matjson::Value()));
+            else parseMatchState(response.json().unwrapOr(matjson::Value()));
         }
     );
 }
@@ -1206,6 +1468,10 @@ void RankedRuntime::submitBan(std::optional<std::string> canonicalLevelId) {
 
 void RankedRuntime::reportMapDownloadFailure() {
     if (m_controlBusy || m_view.stage != RuntimeStage::Matched || m_view.match.matchId.empty()) return;
+    if (isPlacement()) {
+        setTransientError("The exact Placement level could not be loaded. Retry the download to continue this saved Map.");
+        return;
+    }
     matjson::Value body;
     body["resource"] = "MAP";
     auto request = baseRequest(m_sessionToken, m_matchToken);
@@ -1226,7 +1492,35 @@ void RankedRuntime::reportMapDownloadFailure() {
 
 void RankedRuntime::dismissMatch() {
     if (m_view.stage != RuntimeStage::Matched) return;
-    if (m_view.match.state != "MATCH_RESULT" && m_view.match.state != "CANCELLED") return;
+    auto const placement = m_view.match.placement;
+    if (placement) {
+        if (m_view.match.state != "PLACEMENT_RESULT" && m_view.match.state != "CANCELLED") return;
+    } else if (m_view.match.state != "MATCH_RESULT" && m_view.match.state != "CANCELLED") {
+        return;
+    }
+    if (
+        placement && m_view.match.state == "PLACEMENT_RESULT" &&
+        !m_placementResultAcknowledged
+    ) {
+        if (m_controlBusy || m_sessionToken.empty() || m_view.match.matchId.empty()) return;
+        auto const runId = m_view.match.matchId;
+        auto request = baseRequest(m_sessionToken);
+        m_controlBusy = true;
+        m_controlRequest.spawn(
+            request.post(endpoint("/api/ranked/placement/" + runId + "/result/acknowledge")),
+            [this, runId](web::WebResponse response) {
+                m_controlBusy = false;
+                if (!successful(response)) {
+                    setTransientError("Placement result acknowledgement failed: " + responseError(response));
+                    return;
+                }
+                if (m_view.match.matchId != runId || m_view.match.state != "PLACEMENT_RESULT") return;
+                m_placementResultAcknowledged = true;
+                dismissMatch();
+            }
+        );
+        return;
+    }
     if (hasLocalAttemptInFlight()) {
         if (hasLocalOpenAttempt()) {
             setTransientError("A final attempt is still active; finish it before leaving the result.");
@@ -1244,7 +1538,14 @@ void RankedRuntime::dismissMatch() {
     ++m_progressRequestGeneration;
     m_progressRequest.cancel();
     m_progressBusy = false;
-    if (m_view.match.state == "MATCH_RESULT") {
+    if (placement && m_view.match.state == "PLACEMENT_RESULT") {
+        m_view.profileTier = m_view.placement.finalResult.displayedTier;
+        m_view.profileScoreVisible = true;
+        m_view.profileScore = m_view.placement.finalResult.visibleRankedScore;
+        m_view.placement.required = false;
+        m_view.placement.active = false;
+        m_view.placementGames = std::max(m_view.placementGamesRequired, m_view.placement.totalStages);
+    } else if (m_view.match.state == "MATCH_RESULT") {
         auto const ownSide = m_view.match.side;
         auto const& profile = ownSide == "A" ? m_view.match.profileAfterA : m_view.match.profileAfterB;
         m_view.profileTier = profile.displayedTier;
@@ -1281,12 +1582,19 @@ void RankedRuntime::dismissMatch() {
     m_localDeathmatchSequence = 0;
     m_localDeathmatchVisualAttempts = 0;
     m_songBypassAllowed = false;
+    m_placementResultAcknowledged = false;
     m_view.match = {};
-    setStage(RuntimeStage::Ready, "Ranked session ready.");
+    setStage(
+        RuntimeStage::Ready,
+        m_view.placement.required
+            ? "Resume Placement before entering the Ranked queue."
+            : "Ranked session ready."
+    );
 }
 
 void RankedRuntime::queueAgain() {
     if (m_view.stage != RuntimeStage::Matched) return;
+    if (isPlacement()) return;
     if (m_view.match.state != "MATCH_RESULT" && m_view.match.state != "CANCELLED") return;
     if (hasLocalAttemptInFlight()) {
         if (hasLocalOpenAttempt()) {
@@ -1455,6 +1763,14 @@ bool RankedRuntime::hasLocalOpenAttempt() const {
 
 std::string RankedRuntime::currentAttemptContextKey() const {
     if (m_view.match.matchId.empty()) return {};
+    if (isPlacement()) {
+        return fmt::format(
+            "{}:P:{}:{}",
+            m_view.match.matchId,
+            m_view.placement.currentStageIndex,
+            m_view.placement.currentMapIndex
+        );
+    }
     if (m_view.match.deathmatchSequence > 0) {
         return fmt::format("{}:D:{}", m_view.match.matchId, m_view.match.deathmatchSequence);
     }
@@ -1498,6 +1814,10 @@ bool RankedRuntime::canEnterCurrentLevel() const {
     // accepted attempt to finish, but must never be used to enter/re-enter PlayLayer.
     if (!attemptStartWindowOpen()) return false;
 
+    if (isPlacement()) {
+        return m_view.placement.currentMapClears < 3;
+    }
+
     if (m_view.match.state == "DEATHMATCH_PLAYING") {
         auto const serverUsed = m_view.match.side == "A"
             ? m_view.match.deathmatchAttemptsUsedA
@@ -1534,6 +1854,11 @@ int RankedRuntime::localDeathmatchVisualAttemptsUsed() const {
 }
 
 double RankedRuntime::localDisplayScore(double progressPercent, std::optional<double> qualifyingPercentOverride) const {
+    if (isPlacement()) {
+        // Placement HUD is based solely on the server-confirmed Top 3 Attempts.
+        // Never project a live Attempt's progress into the displayed Map Score.
+        return static_cast<double>(m_view.placement.currentMapScore);
+    }
     auto const ownIsA = m_view.match.side == "A";
     auto const committed = ownIsA ? m_view.match.committedScoreA : m_view.match.committedScoreB;
     auto const serverDisplay = ownIsA ? m_view.match.scoreA : m_view.match.scoreB;
@@ -1568,6 +1893,7 @@ double RankedRuntime::localDisplayScore(double progressPercent, std::optional<do
 }
 
 int RankedRuntime::localDisplayClears() const {
+    if (isPlacement()) return m_view.placement.currentMapClears;
     auto const committed = m_view.match.side == "A" ? m_view.match.clearsA : m_view.match.clearsB;
     return std::max(0, committed + optimisticClearsForContext(currentAttemptContextKey()));
 }
@@ -1600,6 +1926,11 @@ bool RankedRuntime::canFinishTrackedLevel(int levelId) const {
 
 bool RankedRuntime::attemptStartWindowOpen() const {
     auto const& state = m_view.match.state;
+    if (isPlacement()) {
+        if (state != "MAP_PLAYING") return false;
+        auto const signedRemaining = signedDeadlineMillis();
+        return !signedRemaining || *signedRemaining > -10'000;
+    }
     if (state == "DEATHMATCH_PLAYING") return true;
 
     if (state == "ROUND_PLAYING") {
@@ -1634,7 +1965,9 @@ void RankedRuntime::cleanupAttemptTransportIfIdle() {
     m_lastSubmittedProgress = -1;
     if (
         m_view.match.state == "MATCH_RESULT" || m_view.match.state == "CANCELLED" ||
-        m_view.match.state == "ROUND_RESULT" || m_view.match.state == "DEATHMATCH_RESULT"
+        m_view.match.state == "ROUND_RESULT" || m_view.match.state == "DEATHMATCH_RESULT" ||
+        m_view.match.state == "MAP_RESULT" || m_view.match.state == "STAGE_RESULT" ||
+        m_view.match.state == "PLACEMENT_RESULT"
     ) {
         m_gameplayMap.reset();
         m_gameplayMatchId.clear();
@@ -1726,7 +2059,7 @@ bool RankedRuntime::reportAttemptStart(int levelId) {
     // while an earlier End/ACK may still be ahead of it in the FIFO. This closes
     // the Round-2 fast-clear race where polling could finalize the round and the
     // client would otherwise lose the queued Clear entirely.
-    if (m_view.match.state != "DEATHMATCH_PLAYING") {
+    if (!isPlacement() && m_view.match.state != "DEATHMATCH_PLAYING") {
         sendAttemptStartIntent(start);
     }
 
@@ -1970,7 +2303,8 @@ void RankedRuntime::sendAttemptStart() {
     body["levelId"] = fmt::format("{}", starting.levelId);
     body["clientEventId"] = starting.eventId;
     if (!starting.clientStartedAt.empty()) body["clientStartedAt"] = starting.clientStartedAt;
-    auto request = baseRequest(m_sessionToken, m_matchToken);
+    auto const placement = isPlacement();
+    auto request = baseRequest(m_sessionToken, placement ? std::string() : m_matchToken);
     request.bodyJSON(body);
     auto const requestGeneration = ++m_attemptRequestGeneration;
     m_attemptBusy = true;
@@ -1981,8 +2315,10 @@ void RankedRuntime::sendAttemptStart() {
         starting.eventId
     );
     m_attemptRequest.spawn(
-        request.post(endpoint("/api/ranked/matches/" + m_view.match.matchId + "/attempt/start")),
-        [this, starting, requestGeneration](web::WebResponse response) {
+        request.post(endpoint(placement
+            ? "/api/ranked/placement/" + m_view.match.matchId + "/attempt/start"
+            : "/api/ranked/matches/" + m_view.match.matchId + "/attempt/start")),
+        [this, starting, requestGeneration, placement](web::WebResponse response) {
             if (requestGeneration != m_attemptRequestGeneration) return;
             m_attemptBusy = false;
             m_attemptRequestStartedAt = {};
@@ -2040,6 +2376,7 @@ void RankedRuntime::sendAttemptStart() {
                 return;
             }
             m_attemptId = root["attemptId"].asString().unwrapOr("");
+            if (placement) m_view.placement.activeAttemptId = m_attemptId;
             m_attemptLevelId = starting.levelId;
             m_attemptContextKey = starting.contextKey;
             log::info(
@@ -2079,7 +2416,8 @@ void RankedRuntime::sendAttemptEnd() {
     body["progressPercent"] = ending.progressPercent;
     body["cleared"] = ending.cleared;
     if (!ending.clientEndedAt.empty()) body["clientEndedAt"] = ending.clientEndedAt;
-    auto request = baseRequest(m_sessionToken, m_matchToken);
+    auto const placement = isPlacement();
+    auto request = baseRequest(m_sessionToken, placement ? std::string() : m_matchToken);
     request.bodyJSON(body);
     auto const requestGeneration = ++m_attemptRequestGeneration;
     m_attemptBusy = true;
@@ -2091,8 +2429,10 @@ void RankedRuntime::sendAttemptEnd() {
         ending.eventId
     );
     m_attemptRequest.spawn(
-        request.post(endpoint("/api/ranked/matches/" + m_view.match.matchId + "/attempt/end")),
-        [this, ending, requestGeneration](web::WebResponse response) {
+        request.post(endpoint(placement
+            ? "/api/ranked/placement/" + m_view.match.matchId + "/attempt/end"
+            : "/api/ranked/matches/" + m_view.match.matchId + "/attempt/end")),
+        [this, ending, requestGeneration, placement](web::WebResponse response) {
             if (requestGeneration != m_attemptRequestGeneration) return;
             m_attemptBusy = false;
             m_attemptRequestStartedAt = {};
@@ -2150,7 +2490,26 @@ void RankedRuntime::sendAttemptEnd() {
             if (!accepted && reason != "ATTEMPT_ALREADY_ENDED") {
                 setTransientError(reason.empty() ? "Attempt end rejected" : reason);
             }
-            applyAttemptSnapshot(root);
+            if (placement) {
+                // This is the only live-game response allowed to mutate the
+                // Placement Grade. Progress telemetry is deliberately ignored.
+                auto const mapScore = root["mapScore"].asInt();
+                if (mapScore.isOk()) {
+                    m_view.placement.currentMapScore = static_cast<int>(mapScore.unwrap());
+                    m_view.match.scoreA = m_view.placement.currentMapScore;
+                    m_view.match.committedScoreA = m_view.placement.currentMapScore;
+                }
+                auto const mapGrade = root["mapGrade"].asString();
+                if (mapGrade.isOk()) m_view.placement.currentMapGrade = mapGrade.unwrap();
+                auto const clears = root["clearCount"].asInt();
+                if (clears.isOk()) {
+                    m_view.placement.currentMapClears = static_cast<int>(clears.unwrap());
+                    m_view.match.clearsA = m_view.placement.currentMapClears;
+                }
+                m_view.placement.activeAttemptId.clear();
+            } else {
+                applyAttemptSnapshot(root);
+            }
             m_attemptId.clear();
             m_attemptLevelId = 0;
             m_attemptContextKey.clear();
@@ -2183,14 +2542,17 @@ void RankedRuntime::sendAttemptProgress() {
     body["levelId"] = fmt::format("{}", m_attemptLevelId);
     body["attemptId"] = attemptId;
     body["progressPercent"] = progress;
-    auto request = baseRequest(m_sessionToken, m_matchToken);
+    auto const placement = isPlacement();
+    auto request = baseRequest(m_sessionToken, placement ? std::string() : m_matchToken);
     request.bodyJSON(body);
     auto const requestGeneration = ++m_progressRequestGeneration;
     m_progressBusy = true;
     m_nextProgressAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(100);
     m_progressRequest.spawn(
-        request.post(endpoint("/api/ranked/matches/" + m_view.match.matchId + "/attempt/progress")),
-        [this, attemptId, progress, requestGeneration](web::WebResponse response) {
+        request.post(endpoint(placement
+            ? "/api/ranked/placement/" + m_view.match.matchId + "/attempt/progress"
+            : "/api/ranked/matches/" + m_view.match.matchId + "/attempt/progress")),
+        [this, attemptId, progress, requestGeneration, placement](web::WebResponse response) {
             if (requestGeneration != m_progressRequestGeneration) return;
             m_progressBusy = false;
             if (successful(response)) {
@@ -2201,7 +2563,9 @@ void RankedRuntime::sendAttemptProgress() {
                 // transport advanced to another attempt), its live snapshot is stale
                 // and must never overwrite a newer Clear/end snapshot.
                 if (m_attemptId == attemptId && !m_pendingEnd) {
-                    applyAttemptSnapshot(root);
+                    // Placement progress ACKs expose the same authoritative Grade,
+                    // but must never be used as a Grade update boundary.
+                    if (!placement) applyAttemptSnapshot(root);
                     m_lastSubmittedProgress = progress;
                 } else {
                     log::debug(

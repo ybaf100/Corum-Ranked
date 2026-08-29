@@ -62,6 +62,8 @@ export interface DebugBotMatchCreation {
 interface ProfileRow {
   player_id: string;
   hidden_mmr: number;
+  placement_games: number;
+  displayed_tier: string;
 }
 
 interface QueueRow {
@@ -110,7 +112,8 @@ export class QueueService {
   public async join(session: RankedSessionContext, body: EnvironmentRecheckDto) {
     this.sessions.assertEnvironment(body.installedMods);
     const config = this.config.getSnapshot();
-    if (!config.operational.enabled || !config.operational.matchmaking || !config.operational.timeouts) {
+    if (!config.operational.enabled || !config.operational.matchmaking ||
+      !config.operational.timeouts || !config.operational.mmrPolicy) {
       throw new ServiceUnavailableException("Ranked queue is not operationally configured");
     }
     const matchmakingPolicy = config.operational.matchmaking;
@@ -126,6 +129,12 @@ export class QueueService {
         [staleCutoff.toISOString()],
       );
       const profile = await this.lockProfile(transaction, session.playerId);
+      await this.assertPlacementComplete(
+        transaction,
+        profile,
+        session.playerId,
+        config.operational.mmrPolicy!.placementGames,
+      );
       await this.assertNoActiveMatch(transaction, session.playerId);
       await transaction.query(
         `INSERT INTO ranked_queue_entries (
@@ -181,6 +190,12 @@ export class QueueService {
     const now = this.clock.now();
     return this.database.transaction(async (transaction) => {
       const profile = await this.lockProfile(transaction, session.playerId);
+      await this.assertPlacementComplete(
+        transaction,
+        profile,
+        session.playerId,
+        mmrPolicy.placementGames,
+      );
       await this.assertNoActiveMatch(transaction, session.playerId);
       const queued = await transaction.query<{ status: string }>(
         "SELECT status FROM ranked_queue_entries WHERE player_id = $1 AND status = 'QUEUED' FOR UPDATE",
@@ -365,7 +380,8 @@ export class QueueService {
 
   private async lockProfile(transaction: SqlExecutor, playerId: string): Promise<ProfileRow> {
     const result = await transaction.query<ProfileRow>(
-      "SELECT player_id, hidden_mmr FROM ranked_profiles WHERE player_id = $1 FOR UPDATE",
+      `SELECT player_id, hidden_mmr, placement_games, displayed_tier
+       FROM ranked_profiles WHERE player_id = $1 FOR UPDATE`,
       [playerId],
     );
     const profile = result.rows[0];
@@ -373,6 +389,28 @@ export class QueueService {
       throw new ConflictException("Ranked profile is not seeded");
     }
     return profile;
+  }
+
+  private async assertPlacementComplete(
+    transaction: SqlExecutor,
+    profile: ProfileRow,
+    playerId: string,
+    placementGamesRequired: number,
+  ): Promise<void> {
+    if (Number(profile.placement_games) >= placementGamesRequired && profile.displayed_tier !== "UNRANKED") {
+      return;
+    }
+    const active = await transaction.query<{ id: string }>(
+      `SELECT id FROM ranked_placement_runs
+       WHERE player_id = $1 AND state NOT IN ('PLACEMENT_RESULT', 'CANCELLED')
+       ORDER BY created_at DESC LIMIT 1 FOR UPDATE`,
+      [playerId],
+    );
+    throw new ConflictException({
+      code: "PLACEMENT_REQUIRED",
+      action: active.rows[0] ? "RESUME_PLACEMENT" : "START_PLACEMENT",
+      placementRunId: active.rows[0]?.id ?? null,
+    });
   }
 
   private async assertNoActiveMatch(transaction: SqlExecutor, playerId: string): Promise<void> {

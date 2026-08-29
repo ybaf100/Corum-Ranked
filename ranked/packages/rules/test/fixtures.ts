@@ -7,6 +7,7 @@ import type {
   TierBand,
 } from "../src/index.js";
 import { DOCUMENT_RULES_V0_4 } from "../src/index.js";
+import { DEFAULT_PLACEMENT_POLICY } from "../src/index.js";
 
 export const makeMap = (
   pool: PoolNumber,
@@ -95,6 +96,7 @@ export const completeOperationalConfig = (): RankedOperationalConfig => ({
     promotionFailurePenalty: 50,
     demotionScorePenalty: 50,
   },
+  placementPolicy: DEFAULT_PLACEMENT_POLICY,
   timeouts: {
     sessionSeconds: 3_600,
     readySeconds: 30,

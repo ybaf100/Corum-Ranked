@@ -10,7 +10,13 @@ During a Ranked round, the HUD keeps the current Round above the timer, plus bot
 
 The production Ranked server defaults to `https://corum-ranked.onrender.com`. Production credentials and webhook secrets do not belong in the mod or repository.
 
-The `v0.5.0-beta.7` development build can include **DEBUG BOT MATCH** behind
+Unranked players in `v0.5.0-beta.8` complete a server-authoritative solo Placement Run:
+five Stages, two distinct Ranked Pool maps per Stage, and the existing Attempt score curve.
+The bottom-left Qualifying HUD is replaced only during Placement by an image-first S/A/B/C/D
+badge whose value changes only after an authoritative Attempt end. Missing Grade images safely
+fall back to text.
+
+The `v0.5.0-beta.8` development build can include **DEBUG BOT MATCH** behind
 `CORUM_RANKED_DEBUG_BOT_MATCH`, including Force Win and Force Lose. The CMake option defaults
-to OFF, so official packages do not contain its UI. Disable the matching server environment flag
-for production as well.
+to OFF, so official packages do not contain its UI. Placement-incomplete players cannot enter it.
+Disable the matching server environment flag for production as well.

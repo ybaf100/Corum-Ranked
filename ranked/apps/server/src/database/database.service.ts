@@ -23,6 +23,7 @@ const REQUIRED_MIGRATIONS = [
   "0004_alpha37_schema_hardening.sql",
   "0005_v050_rating_system.sql",
   "0006_v050_dynamic_csmp_tiers.sql",
+  "0007_solo_stage_placement.sql",
 ] as const;
 
 export interface RankedSchemaStatus {
@@ -37,6 +38,9 @@ type SchemaProbeRow = QueryResultRow & {
   ranked_attempts: boolean;
   ranked_deathmatch_attempts: boolean;
   ranked_attempt_start_leases: boolean;
+  ranked_placement_runs: boolean;
+  ranked_placement_maps: boolean;
+  ranked_placement_attempts: boolean;
   match_type: boolean;
   debug_config: boolean;
   round_alternate_level_id: boolean;
@@ -128,6 +132,9 @@ export class DatabaseService implements DatabasePort, OnModuleInit, OnApplicatio
           to_regclass('public.ranked_attempts') IS NOT NULL AS ranked_attempts,
           to_regclass('public.ranked_deathmatch_attempts') IS NOT NULL AS ranked_deathmatch_attempts,
           to_regclass('public.ranked_attempt_start_leases') IS NOT NULL AS ranked_attempt_start_leases,
+          to_regclass('public.ranked_placement_runs') IS NOT NULL AS ranked_placement_runs,
+          to_regclass('public.ranked_placement_maps') IS NOT NULL AS ranked_placement_maps,
+          to_regclass('public.ranked_placement_attempts') IS NOT NULL AS ranked_placement_attempts,
           EXISTS (
             SELECT 1 FROM information_schema.columns
             WHERE table_schema = 'public' AND table_name = 'ranked_matches' AND column_name = 'match_type'
@@ -163,6 +170,9 @@ export class DatabaseService implements DatabasePort, OnModuleInit, OnApplicatio
         ["ranked_attempts", "table ranked_attempts"],
         ["ranked_deathmatch_attempts", "table ranked_deathmatch_attempts"],
         ["ranked_attempt_start_leases", "table ranked_attempt_start_leases"],
+        ["ranked_placement_runs", "table ranked_placement_runs"],
+        ["ranked_placement_maps", "table ranked_placement_maps"],
+        ["ranked_placement_attempts", "table ranked_placement_attempts"],
         ["match_type", "ranked_matches.match_type"],
         ["debug_config", "ranked_matches.debug_config"],
         ["round_alternate_level_id", "ranked_rounds.alternate_level_id"],

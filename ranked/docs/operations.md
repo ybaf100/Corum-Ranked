@@ -29,7 +29,10 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f ranked/migrations/0003_debug_rating_p
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f ranked/migrations/0004_alpha37_schema_hardening.sql
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f ranked/migrations/0005_v050_rating_system.sql
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f ranked/migrations/0006_v050_dynamic_csmp_tiers.sql
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f ranked/migrations/0007_solo_stage_placement.sql
 ```
+
+beta.8은 DB 초기화를 전제로 새 싱글플레이 Placement를 시작합니다. 과거 PvP Placement 1~4경기의 WIN/LOSS를 Map Score로 환산하거나 이관하지 않습니다. `0007`은 Run, 고정 config/map snapshot, 각 Attempt, Map/Stage raw score와 Grade, heartbeat/deadline, 최종 rating/MMR/Tier 및 결과 ACK를 영속화합니다.
 
 이미 beta.2 schema가 적용된 운영 DB를 beta.3으로 올릴 때는 **서버 재배포 전에 `0006_v050_dynamic_csmp_tiers.sql`을 추가 적용**합니다. 이 변경은 기존 프로필의 Seed를 다시 적용하지 않고 저장된 최초 CSMP 티어명을 그대로 보존합니다. Migration은 transaction 안에서 실행됩니다.
 
@@ -64,6 +67,7 @@ beta.3에서 beta.4로 올릴 때 추가 DB migration은 없습니다. `PERFECT 
 - CSMP source timeout: action 이름과 timeout/attempt만 로그에 남기고 HTTP 503 `CSMP_SOURCE_TIMEOUT`으로 반환. player ID/secret은 로그에 남기지 않음
 - outbox: `delivered_at IS NULL AND abandoned_at IS NULL`은 재시도 예정, `abandoned_at IS NOT NULL`은 최대 시도 후 포기한 알림
 - Match `result_applied_at`: MMR 반영 idempotency 기준
+- Placement `finalized_at` / `result_acknowledged_at`: 최초 랭크 반영과 Reveal 확인의 exactly-once 기준
 
 Discord 실패는 outbox worker에서만 처리되며 Match 판정 transaction을 되돌리지 않습니다.
 

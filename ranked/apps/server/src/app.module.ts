@@ -10,6 +10,7 @@ import { QueueModule } from "./queue/queue.module.js";
 import { MatchModule } from "./match/match.module.js";
 import { DebugBotModule } from "./debug-bot/debug-bot.module.js";
 import { LeaderboardModule } from "./leaderboard/leaderboard.module.js";
+import { PlacementModule } from "./placement/placement.module.js";
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { LeaderboardModule } from "./leaderboard/leaderboard.module.js";
     MatchModule,
     DebugBotModule,
     LeaderboardModule,
+    PlacementModule,
   ],
   controllers: [HealthController],
 })
