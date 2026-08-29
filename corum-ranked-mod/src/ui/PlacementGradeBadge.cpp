@@ -65,8 +65,6 @@ bool PlacementGradeBadge::init(float extent) {
     m_extent = std::max(12.0f, extent);
     setContentSize({m_extent, m_extent});
     setAnchorPoint({0.5f, 0.5f});
-    setCascadeColorEnabled(true);
-    setCascadeOpacityEnabled(true);
     return true;
 }
 
