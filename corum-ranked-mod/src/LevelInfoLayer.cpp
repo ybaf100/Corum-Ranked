@@ -304,7 +304,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         SteadyClock::time_point songWaitStartedAt {};
         CCNode* gateOverlay = nullptr;
         CCLayerColor* gateIntroCover = nullptr;
-        CCNode* gateIntroPanel = nullptr;
+        CCLayerColor* gateIntroPanel = nullptr;
         CCLabelBMFont* gateTitle = nullptr;
         CCLabelBMFont* gateStatus = nullptr;
         CCLabelBMFont* gateCountdown = nullptr;
@@ -405,13 +405,20 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
             corum::ranked::ui::addBackdrop(m_fields->gateIntroCover, size);
             addChild(m_fields->gateIntroCover, 1002);
 
-            m_fields->gateIntroPanel = gatePanel(
-                {286.0f, 156.0f},
-                {size.width / 2.0f, size.height / 2.0f},
-                corum::ranked::ui::Cyan
-            );
+            auto const introPanelSize = CCSize {286.0f, 156.0f};
+            m_fields->gateIntroPanel = CCLayerColor::create({0, 0, 0, 0});
+            m_fields->gateIntroPanel->setContentSize(introPanelSize);
+            m_fields->gateIntroPanel->setPosition({
+                size.width / 2.0f - introPanelSize.width / 2.0f,
+                size.height / 2.0f - introPanelSize.height / 2.0f,
+            });
             m_fields->gateIntroPanel->setCascadeOpacityEnabled(true);
             m_fields->gateIntroCover->addChild(m_fields->gateIntroPanel, 5);
+            m_fields->gateIntroPanel->addChild(gatePanel(
+                introPanelSize,
+                {introPanelSize.width / 2.0f, introPanelSize.height / 2.0f},
+                corum::ranked::ui::Cyan
+            ));
 
             m_fields->introTitle = gateLabel(rankedGateTitle(), 0.31f, {143.0f, 139.0f}, corum::ranked::ui::Cyan);
             m_fields->introTitle->limitLabelWidth(264.0f, 0.31f, 0.21f);
