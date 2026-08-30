@@ -258,6 +258,18 @@ describe("two-client authoritative match flow", () => {
     expect(state.bans).toEqual({ A: sharedBan, B: sharedBan });
     expect(state.selectedRoundMaps).toBeUndefined();
     expect(state.candidateMaps).toBeNull();
+    expect(Date.parse(state.deadlineAt as string) - clock.now().getTime()).toBe(60_000);
+
+    // Regression for beta.10: the visible ten-second PVP countdown must not be
+    // the authoritative resource timeout. A map that completes around T=0 still
+    // needs time for the client's Ready HTTP request to reach the server.
+    clock.advanceSeconds(10);
+    state = (await matches.state(
+      matchId,
+      statusA.matchToken,
+      playerA,
+    )) as Record<string, any>;
+    expect(state.state).toBe("ROUND_PREPARE");
 
     const winRoundWithThreeClears = async (roundNumber: number) => {
       await matches.ready(matchId, statusA.matchToken, playerA, {
