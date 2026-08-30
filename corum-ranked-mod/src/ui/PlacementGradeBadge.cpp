@@ -72,9 +72,9 @@ std::string const& PlacementGradeBadge::grade() const {
     return m_grade;
 }
 
-CCLayerColor* PlacementGradeBadge::createVisual(std::string const& input) const {
+CCNode* PlacementGradeBadge::createVisual(std::string const& input) const {
     auto const grade = normalizeGrade(input);
-    auto* root = CCLayerColor::create({0, 0, 0, 0});
+    auto* root = CCNode::create();
     root->setContentSize({m_extent, m_extent});
     root->setAnchorPoint({0.5f, 0.5f});
     root->setPosition({m_extent * 0.5f, m_extent * 0.5f});
@@ -116,38 +116,25 @@ void PlacementGradeBadge::setGrade(std::string input, bool animate) {
     m_visual = nextVisual;
     m_grade = next;
 
-    if (!animate || !oldVisual) {
-        if (oldVisual) oldVisual->removeFromParentAndCleanup(true);
-        nextVisual->setOpacity(255);
+    // Grade PNG alpha is authoritative. Do not fade a transparent black
+    // CCLayerColor wrapper to opacity 255, which creates a black rectangle.
+    if (oldVisual) oldVisual->removeFromParentAndCleanup(true);
+    nextVisual->stopAllActions();
+    if (!animate || transition == PlacementGradeTransition::None) {
         nextVisual->setScale(1.0f);
         return;
     }
 
-    oldVisual->stopAllActions();
-    nextVisual->stopAllActions();
-    oldVisual->runAction(CCSequence::create(
-        CCFadeTo::create(0.09f, 0),
-        CallFuncExt::create([oldVisual] {
-            if (oldVisual->getParent()) oldVisual->removeFromParentAndCleanup(true);
-        }),
-        nullptr
-    ));
-
-    nextVisual->setOpacity(0);
     if (transition == PlacementGradeTransition::Up) {
-        nextVisual->setScale(0.80f);
+        nextVisual->setScale(0.82f);
         nextVisual->runAction(CCSequence::create(
-            CCSpawn::create(
-                CCFadeTo::create(0.12f, 255),
-                CCEaseSineOut::create(CCScaleTo::create(0.17f, 1.12f)),
-                nullptr
-            ),
-            CCEaseSineInOut::create(CCScaleTo::create(0.13f, 1.0f)),
+            CCEaseSineOut::create(CCScaleTo::create(0.16f, 1.10f)),
+            CCEaseSineInOut::create(CCScaleTo::create(0.12f, 1.0f)),
             nullptr
         ));
     } else {
-        nextVisual->setScale(1.0f);
-        nextVisual->runAction(CCFadeTo::create(0.16f, 255));
+        nextVisual->setScale(1.04f);
+        nextVisual->runAction(CCEaseSineInOut::create(CCScaleTo::create(0.14f, 1.0f)));
     }
 }
 

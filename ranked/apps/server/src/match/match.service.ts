@@ -354,11 +354,12 @@ const publicRatingProfile = (profile: RankedRatingProfile, placementGamesRequire
 const sideColumn = (side: PlayerSide, prefix: string): string =>
   `${prefix}_${side.toLowerCase()}`;
 
-// alpha.10 client flow: 10s start countdown, map download may take 30s,
-// and a custom song may be allowed up to 20s. Keep server preparation
-// deadlines comfortably beyond the client-side resource window.
-const resourcePrepareSeconds = (configuredReadySeconds: number): number =>
-  Math.max(configuredReadySeconds, 60);
+// PvP preparation is a real ten-second start countdown. Resource lookup, map
+// acquisition, and song acquisition begin immediately inside that window; an
+// old alpha-era 60-second safety floor must not extend the visible wait.
+const PVP_PREPARE_SECONDS = 10;
+const resourcePrepareSeconds = (_configuredReadySeconds: number): number =>
+  PVP_PREPARE_SECONDS;
 
 // Runtime progress state is shared by normal rounds and deathmatches. Keep the
 // key-space disjoint so a Death Match can expose live score/progress without

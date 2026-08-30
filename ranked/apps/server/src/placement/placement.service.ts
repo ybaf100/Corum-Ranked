@@ -476,18 +476,20 @@ export class PlacementService {
       if (body.levelId !== map.playable_level_id) {
         throw new ConflictException("Progress Level ID does not match the Placement map snapshot");
       }
-      const updated = await transaction.query(
+      const updated = await transaction.query<{ latest_progress_percent: number }>(
         `UPDATE ranked_placement_attempts
          SET latest_progress_percent = GREATEST(latest_progress_percent, $1)
-         WHERE id = $2 AND map_id = $3 AND ended_at IS NULL AND valid = TRUE`,
+         WHERE id = $2 AND map_id = $3 AND ended_at IS NULL AND valid = TRUE
+         RETURNING latest_progress_percent`,
         [body.progressPercent, body.attemptId, map.id],
       );
       if (updated.rowCount === 0) throw new NotFoundException("Active Placement attempt not found");
+      const progressPercent = Number(updated.rows[0]?.latest_progress_percent ?? body.progressPercent);
       const snapshot = await this.loadSnapshot(transaction, run.config_snapshot_id);
       const policy = this.requirePlacementPolicy(snapshot);
       const attempts = await this.completedAttemptEvidence(transaction, map.id);
       const provisionalAttempt = scoreAttempt(
-        body.progressPercent,
+        progressPercent,
         false,
         Number(map.qualifying_percent),
       );
@@ -495,7 +497,7 @@ export class PlacementService {
         ...attempts,
         {
           attemptId: `provisional:${body.attemptId}`,
-          progressPercent: body.progressPercent,
+          progressPercent,
           cleared: false,
           valid: true,
           awardedScore: provisionalAttempt,
@@ -962,11 +964,43 @@ export class PlacementService {
       Number(map.map_index) === Number(run.current_map_index));
     const activeAttempt = currentMap ? await this.database.query<PlacementAttemptRow>(
       `SELECT id, domain_attempt_id, client_start_event_id, client_end_event_id,
-              progress_percent, cleared, awarded_score, valid, ended_at
+              latest_progress_percent AS progress_percent, cleared, awarded_score, valid, ended_at
        FROM ranked_placement_attempts
        WHERE map_id = $1 AND ended_at IS NULL AND valid = TRUE LIMIT 1`,
       [currentMap.id],
     ) : { rows: [], rowCount: 0 };
+
+    let provisionalMapScore = currentMap ? Number(currentMap.map_score) : 0;
+    let provisionalMapGrade: PlacementGrade = currentMap?.map_grade ?? "D";
+    const active = activeAttempt.rows[0];
+    if (currentMap && active) {
+      const snapshot = await this.loadSnapshot(this.database, run.config_snapshot_id);
+      const policy = this.requirePlacementPolicy(snapshot);
+      const attempts = await this.completedAttemptEvidence(this.database, currentMap.id);
+      const progressPercent = Math.max(0, Number(active.progress_percent ?? 0));
+      const provisionalAttempt = scoreAttempt(
+        progressPercent,
+        false,
+        Number(currentMap.qualifying_percent),
+      );
+      const provisional = calculatePlacementMapScore([
+        ...attempts,
+        {
+          attemptId: `provisional:${active.id}`,
+          progressPercent,
+          cleared: false,
+          valid: true,
+          awardedScore: provisionalAttempt,
+        },
+      ], policy);
+      provisionalMapScore = provisional.mapScore;
+      provisionalMapGrade = placementGradeForMapScore(
+        provisional.mapScore,
+        policy,
+        Number(currentMap.clear_count),
+      );
+    }
+
     return {
       runId: run.id,
       state: run.state,
@@ -999,8 +1033,8 @@ export class PlacementService {
         mapGrade: currentMap.map_grade,
         clearCount: Number(currentMap.clear_count),
         topAttempts: asArray(currentMap.top_attempts),
-        provisionalMapScore: Number(currentMap.map_score),
-        provisionalMapGrade: currentMap.map_grade,
+        provisionalMapScore,
+        provisionalMapGrade,
         clearTarget: 2,
         mapScoreMaximum: 500,
         prepareStartedAt: iso(currentMap.prepare_started_at),

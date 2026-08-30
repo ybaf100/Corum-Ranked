@@ -1,3 +1,11 @@
+# v0.5.0-beta.10
+
+- Restored PvP Round and Death Match preparation to an exact ten-second countdown instead of the legacy 60-second resource floor.
+- Fixed Placement Grade rendering so transparent PNGs stay transparent, reduced Grade art sizing, and rebuilt Map/Stage results as a compact `MAP 1 + MAP 2 > STAGE GRADE` three-card layout with per-card one-decimal scores.
+- Unified live Placement provisional score/Grade evidence between progress updates and normal state polling, preserving monotonic Attempt progress and preventing D/C/B Grade oscillation from stale poll responses.
+- Kept Stage-by-Stage Placement sessions, Play Later/resume, progress dots, and Placement history while standardizing Placement score presentation to one decimal.
+- Updated the exact client/server version gate and workspace metadata to `v0.5.0-beta.10`.
+
 # v0.5.0-beta.9
 
 - Changed only solo Placement Maps to a three-minute Main Time, ten-second final Attempt start window, two-Clear target, and best-two Attempt Map Score capped at 500. Ranked PvP remains five minutes, three Clears, and otherwise unchanged.
