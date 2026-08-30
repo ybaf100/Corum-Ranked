@@ -30,6 +30,38 @@ jobs:
       - name: Apply requested Placement changes
         run: python .github/apply-placement-stage-session.py
 
+      - name: Align changed Placement contracts in tests
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          rules = Path("ranked/packages/rules/test/placement.test.ts")
+          text = rules.read_text(encoding="utf-8")
+          text = text.replace("expect(result.mapScore).toBe(126.5);", "expect(result.mapScore).toBe(151.5);")
+          rules.write_text(text, encoding="utf-8")
+
+          integration = Path("ranked/apps/server/test/placement-flow.integration.test.ts")
+          text = integration.read_text(encoding="utf-8")
+          old = '''      mapScore: 75,
+                provisionalMapScore: 225,
+                mapGrade: "D",
+                gradeChanged: false,
+          '''
+          # Preserve source indentation by replacing the exact semantic block instead.
+          old = '''      mapScore: 75,
+                provisionalMapScore: 225,
+                mapGrade: "D",
+                gradeChanged: false,'''.replace("                ", "      ")
+          new = '''      mapScore: 75,
+      provisionalMapScore: 225,
+      mapGrade: "D",
+      provisionalMapGrade: "C",
+      gradeChanged: true,'''
+          if old not in text:
+              raise SystemExit("Expected active Placement progress assertion was not found")
+          integration.write_text(text.replace(old, new, 1), encoding="utf-8")
+          PY
+
       - name: Verify whitespace
         run: git diff --check
 
