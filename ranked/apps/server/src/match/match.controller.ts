@@ -75,33 +75,39 @@ export class MatchController {
   }
 
   @Post(":id/ready")
-  public ready(
+  public async ready(
     @Param("id") matchId: string,
     @Headers("x-match-token") matchToken: string,
     @CurrentSession() session: RankedSessionContext,
     @Body() body: ReadyMatchDto,
   ) {
-    return this.matches.ready(matchId, matchToken, session, body);
+    return withVisiblePrepareDeadline(
+      await this.matches.ready(matchId, matchToken, session, body),
+    );
   }
 
   @Post(":id/ban")
-  public ban(
+  public async ban(
     @Param("id") matchId: string,
     @Headers("x-match-token") matchToken: string,
     @CurrentSession() session: RankedSessionContext,
     @Body() body: SubmitBanDto,
   ) {
-    return this.matches.submitBan(matchId, matchToken, session, body);
+    return withVisiblePrepareDeadline(
+      await this.matches.submitBan(matchId, matchToken, session, body),
+    );
   }
 
   @Post(":id/resource-failure")
-  public resourceFailure(
+  public async resourceFailure(
     @Param("id") matchId: string,
     @Headers("x-match-token") matchToken: string,
     @CurrentSession() session: RankedSessionContext,
     @Body() body: ResourceFailureDto,
   ) {
-    return this.matches.reportResourceFailure(matchId, matchToken, session, body);
+    return withVisiblePrepareDeadline(
+      await this.matches.reportResourceFailure(matchId, matchToken, session, body),
+    );
   }
 
   @Post(":id/attempt/intent")
@@ -145,11 +151,13 @@ export class MatchController {
   }
 
   @Post(":id/heartbeat")
-  public heartbeat(
+  public async heartbeat(
     @Param("id") matchId: string,
     @Headers("x-match-token") matchToken: string,
     @CurrentSession() session: RankedSessionContext,
   ) {
-    return this.matches.heartbeat(matchId, matchToken, session);
+    return withVisiblePrepareDeadline(
+      await this.matches.heartbeat(matchId, matchToken, session),
+    );
   }
 }
