@@ -1,3 +1,9 @@
+# v0.5.0-beta.11
+
+- Fixed the beta.10 PVP Round 1 map-download timeout race by separating the ten-second visible countdown from the server resource safety deadline.
+- PVP and Placement now submit Ready from the five-seconds-remaining launch threshold as soon as the exact GD map is playable; late map completion can still start after the visible countdown instead of being cancelled at T=0.
+- Optional song acquisition no longer blocks a playable map past the five-second launch threshold, while the vanilla song widget may continue downloading audio.
+
 # v0.5.0-beta.10
 
 - Restored PvP Round and Death Match preparation to an exact ten-second countdown instead of the legacy 60-second resource floor.

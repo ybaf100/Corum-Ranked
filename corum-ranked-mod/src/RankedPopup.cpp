@@ -3265,11 +3265,14 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate 
         // explicit override is used as a recovery path when polling skipped a
         // very short PREPARE phase (notably Debug Trigger Death Match).
         auto const authoritativeRemaining = RankedRuntime::get().deadlineMillis();
-        auto const countdownRemaining = countdownOverride >= 0.0
+        auto countdownRemaining = countdownOverride >= 0.0
             ? countdownOverride
             : authoritativeRemaining
                 ? std::max(0.0, static_cast<double>(*authoritativeRemaining) / 1000.0)
                 : std::max(0.0, 10.0 - phaseSeconds());
+        if (!RankedRuntime::get().isPlacement()) {
+            countdownRemaining = std::min(countdownRemaining, 10.0);
+        }
         auto const usedResolvedLevel = level == m_resolvedLevel;
         m_enteringSongGate = corum::ranked::showRankedSongDownloadGate(level, countdownRemaining);
         if (m_enteringSongGate) {

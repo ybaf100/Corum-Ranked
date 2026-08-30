@@ -354,12 +354,12 @@ const publicRatingProfile = (profile: RankedRatingProfile, placementGamesRequire
 const sideColumn = (side: PlayerSide, prefix: string): string =>
   `${prefix}_${side.toLowerCase()}`;
 
-// PvP preparation is a real ten-second start countdown. Resource lookup, map
-// acquisition, and song acquisition begin immediately inside that window; an
-// old alpha-era 60-second safety floor must not extend the visible wait.
-const PVP_PREPARE_SECONDS = 10;
-const resourcePrepareSeconds = (_configuredReadySeconds: number): number =>
-  PVP_PREPARE_SECONDS;
+// The visible PVP start countdown is ten seconds, but map/song acquisition is
+// network-bound and must not share that deadline. Keep a separate server-side
+// resource safety budget so the real Geometry Dash download can finish and the
+// Ready request can arrive without racing the countdown boundary.
+const resourcePrepareSeconds = (configuredReadySeconds: number): number =>
+  Math.max(configuredReadySeconds, 60);
 
 // Runtime progress state is shared by normal rounds and deathmatches. Keep the
 // key-space disjoint so a Death Match can expose live score/progress without

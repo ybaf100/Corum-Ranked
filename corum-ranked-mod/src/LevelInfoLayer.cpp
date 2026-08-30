@@ -653,6 +653,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         if (m_fields->gateTitle) m_fields->gateTitle->setString(rankedGateTitle().c_str());
         if (m_fields->introTitle) m_fields->introTitle->setString(rankedGateTitle().c_str());
         auto const now = SteadyClock::now();
+        auto const playableStartAt = m_fields->countdownEndsAt - std::chrono::seconds(5);
         auto const hasLevelPayload = mapReady(m_level);
         auto const levelReady = vanillaLevelReadyForPlay();
         auto const countdownRemaining = std::max(
@@ -713,10 +714,10 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
                     m_fields->gateStatus->setString(tr("song-downloaded", "SONG DOWNLOADED").c_str());
                     m_fields->gateStatus->setColor({78, 232, 112});
                 }
-            } else if (now >= m_fields->countdownEndsAt) {
-                // The visible Ranked countdown is the resource wait budget for
-                // optional music. A broken/slow custom-song API must never keep a
-                // fully downloaded playable map stuck after STARTS IN 00.
+            } else if (now >= playableStartAt) {
+                // Five seconds remaining is the gameplay launch threshold. A
+                // broken/slow optional custom-song API must never keep a fully
+                // downloaded playable map from sending Ready at that point.
                 // The vanilla widget remains alive, so audio may still finish
                 // downloading while gameplay proceeds without it.
                 runtime.setSongBypassAllowed(true);
@@ -772,11 +773,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
 
         if (
             rankedPrepareState(match.state) &&
-            now >= (
-                runtime.isPlacement()
-                    ? m_fields->countdownEndsAt - std::chrono::seconds(5)
-                    : m_fields->countdownEndsAt
-            ) &&
+            now >= playableStartAt &&
             readyForStart &&
             !ownReady
         ) {
