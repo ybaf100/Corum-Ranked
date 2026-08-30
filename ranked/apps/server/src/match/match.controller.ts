@@ -21,6 +21,27 @@ import {
 } from "./match.dto.js";
 import { MatchService } from "./match.service.js";
 
+const PVP_RESOURCE_DEADLINE_FLOOR_SECONDS = 60;
+const PVP_VISIBLE_PREPARE_SECONDS = 10;
+const PVP_PREPARE_DEADLINE_OFFSET_MS =
+  (PVP_RESOURCE_DEADLINE_FLOOR_SECONDS - PVP_VISIBLE_PREPARE_SECONDS) * 1_000;
+
+const withVisiblePrepareDeadline = <T>(payload: T): T => {
+  if (!payload || typeof payload !== "object") return payload;
+  const state = payload as Record<string, unknown>;
+  if (
+    state.state !== "ROUND_PREPARE" &&
+    state.state !== "DEATHMATCH_PREPARE"
+  ) return payload;
+  if (typeof state.deadlineAt !== "string") return payload;
+  const resourceDeadlineMs = Date.parse(state.deadlineAt);
+  if (!Number.isFinite(resourceDeadlineMs)) return payload;
+  return {
+    ...state,
+    deadlineAt: new Date(resourceDeadlineMs - PVP_PREPARE_DEADLINE_OFFSET_MS).toISOString(),
+  } as T;
+};
+
 @Controller("api/ranked/matches")
 @UseGuards(SessionGuard)
 export class MatchController {
@@ -32,21 +53,25 @@ export class MatchController {
   }
 
   @Get(":id/state")
-  public state(
+  public async state(
     @Param("id") matchId: string,
     @Headers("x-match-token") matchToken: string,
     @CurrentSession() session: RankedSessionContext,
   ) {
-    return this.matches.state(matchId, matchToken, session);
+    return withVisiblePrepareDeadline(
+      await this.matches.state(matchId, matchToken, session),
+    );
   }
 
   @Get(":id")
-  public history(
+  public async history(
     @Param("id") matchId: string,
     @Headers("x-match-token") matchToken: string,
     @CurrentSession() session: RankedSessionContext,
   ) {
-    return this.matches.state(matchId, matchToken, session);
+    return withVisiblePrepareDeadline(
+      await this.matches.state(matchId, matchToken, session),
+    );
   }
 
   @Post(":id/ready")
@@ -68,7 +93,6 @@ export class MatchController {
   ) {
     return this.matches.submitBan(matchId, matchToken, session, body);
   }
-
 
   @Post(":id/resource-failure")
   public resourceFailure(
