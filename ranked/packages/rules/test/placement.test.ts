@@ -184,3 +184,14 @@ describe("solo Placement Rating and finalization", () => {
     expect(finalizePlacementScore(-500, tierBandsFixture).visibleRankedScore).toBe(0);
   });
 });
+
+describe("Placement scoring", () => {
+  it("preserves half-point Placement scores", () => {
+    const result = calculatePlacementMapScore([
+      scorePlacementAttempt("a", 51, false, 50),
+      scorePlacementAttempt("b", 50, false, 50),
+    ], DEFAULT_PLACEMENT_POLICY);
+    expect(result.mapScore).toBe(151.5);
+  });
+
+});

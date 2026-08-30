@@ -206,7 +206,8 @@ describe("server-authoritative solo Stage Placement", () => {
       mapScore: 75,
       provisionalMapScore: 225,
       mapGrade: "D",
-      gradeChanged: false,
+      provisionalMapGrade: "C",
+      gradeChanged: true,
     });
     clock.advanceSeconds(311);
 
@@ -241,7 +242,8 @@ describe("server-authoritative solo Stage Placement", () => {
       mapScore: 75,
       provisionalMapScore: 275,
       mapGrade: "D",
-      gradeChanged: false,
+      provisionalMapGrade: "B",
+      gradeChanged: true,
     });
     const settled = await recovered.endAttempt(runId, session, {
       levelId: firstLevel,
@@ -281,7 +283,7 @@ describe("server-authoritative solo Stage Placement", () => {
           attemptId: started.attemptId,
           progressPercent: 100,
         });
-        expect(progress.gradeChanged).toBe(false);
+        expect(progress.gradeChanged).toBe(true);
         await recovered.endAttempt(runId, session, {
           levelId,
           attemptId: started.attemptId,

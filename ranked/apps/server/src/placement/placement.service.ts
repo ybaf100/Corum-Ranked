@@ -11,6 +11,7 @@ import {
   calculatePlacementStageScore,
   finalizePlacementScore,
   scoreAttempt,
+  placementGradeForMapScore,
   selectPlacementReferenceMaps,
   selectPlacementStageMaps,
   type PlacementAttemptResult,
@@ -185,10 +186,18 @@ export class PlacementService {
       const completed = profile !== undefined &&
         Number(profile.placement_games) >= placementGamesRequired &&
         profile.displayed_tier !== "UNRANKED";
+      const recentResult = await this.database.query<PlacementRunRow>(
+        `SELECT * FROM ranked_placement_runs
+         WHERE player_id = $1 AND state <> 'CANCELLED'
+         ORDER BY created_at DESC LIMIT 1`,
+        [session.playerId],
+      );
+      const recentRun = recentResult.rows[0];
       return {
         active: false,
         action: completed ? "RANKED_QUEUE" : "START_PLACEMENT",
         referenceMaps: completed ? [] : selectPlacementReferenceMaps(snapshot.maps),
+        stageResults: recentRun ? asArray(recentRun.stage_results) : [],
         configGeneration: snapshot.generation,
         serverNow: this.clock.now().toISOString(),
       };
@@ -496,10 +505,14 @@ export class PlacementService {
         mapScore: Number(map.map_score),
         provisionalMapScore: provisional.mapScore,
         mapGrade: map.map_grade,
+        provisionalMapGrade: placementGradeForMapScore(provisional.mapScore, policy, Number(map.clear_count)),
       };
     });
-    // Progress telemetry is deliberately incapable of changing the HUD Grade.
-    return { ...result, gradeChanged: false, serverNow: now.toISOString() };
+    return {
+      ...result,
+      gradeChanged: result.provisionalMapGrade !== result.mapGrade,
+      serverNow: now.toISOString(),
+    };
   }
 
   public async endAttempt(
@@ -943,8 +956,9 @@ export class PlacementService {
       "SELECT * FROM ranked_placement_maps WHERE run_id = $1 ORDER BY stage_index, map_index",
       [run.id],
     );
-    const currentMap = maps.rows.find((map) =>
-      Number(map.stage_index) === Number(run.current_stage_index) &&
+    const currentStageMaps = maps.rows.filter((map) =>
+      Number(map.stage_index) === Number(run.current_stage_index));
+    const currentMap = currentStageMaps.find((map) =>
       Number(map.map_index) === Number(run.current_map_index));
     const activeAttempt = currentMap ? await this.database.query<PlacementAttemptRow>(
       `SELECT id, domain_attempt_id, client_start_event_id, client_end_event_id,
@@ -964,6 +978,12 @@ export class PlacementService {
       mapsPerStage: 2,
       stagePools: asArray(run.stage_pools),
       stageResults: asArray(run.stage_results),
+      currentStageMaps: currentStageMaps.map((map) => ({
+        mapIndex: Number(map.map_index),
+        mapScore: Number(map.map_score),
+        mapGrade: map.map_grade,
+        state: map.state,
+      })),
       currentMap: currentMap ? {
         id: currentMap.id,
         levelId: currentMap.level_id,
@@ -980,6 +1000,7 @@ export class PlacementService {
         clearCount: Number(currentMap.clear_count),
         topAttempts: asArray(currentMap.top_attempts),
         provisionalMapScore: Number(currentMap.map_score),
+        provisionalMapGrade: currentMap.map_grade,
         clearTarget: 2,
         mapScoreMaximum: 500,
         prepareStartedAt: iso(currentMap.prepare_started_at),
