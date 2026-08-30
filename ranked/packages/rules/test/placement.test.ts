@@ -184,3 +184,6 @@ describe("solo Placement Rating and finalization", () => {
     expect(finalizePlacementScore(-500, tierBandsFixture).visibleRankedScore).toBe(0);
   });
 });
+
+describe("Placement scoring", () => {
+});
