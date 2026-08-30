@@ -6,6 +6,10 @@ on:
   push:
     branches:
       - "**"
+    paths:
+      - "corum-integration-mod/**"
+      - "apps-script/**"
+      - ".github/workflows/build-mod.yml"
 
 permissions:
   contents: read
