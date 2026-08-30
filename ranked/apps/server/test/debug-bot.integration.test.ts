@@ -56,7 +56,7 @@ class FixedCsmpSource implements CsmpTierSource {
 const cleanMods: CreateSessionDto["installedMods"] = [
   {
     id: "hwanhee1.corum_ranked",
-    version: "v0.5.0-beta.8",
+    version: "v0.5.0-beta.9",
     enabled: true,
     loaded: true,
     internal: false,
@@ -89,6 +89,7 @@ beforeAll(async () => {
     "0005_v050_rating_system.sql",
     "0006_v050_dynamic_csmp_tiers.sql",
     "0007_solo_stage_placement.sql",
+    "0008_placement_beta9.sql",
   ]) {
     const path = fileURLToPath(new URL(`../../../migrations/${migrationName}`, import.meta.url));
     await pglite.exec(await readFile(path, "utf8"));
@@ -146,7 +147,7 @@ describe("development-only Bot Match using the production Ranked engine", () => 
     const created = await sessions.create({
       gdAccountId: accountId,
       gdUsername: `Debug${accountId}`,
-      clientVersion: "v0.5.0-beta.8",
+      clientVersion: "v0.5.0-beta.9",
       installedMods: structuredClone(cleanMods),
     });
     await database.query(

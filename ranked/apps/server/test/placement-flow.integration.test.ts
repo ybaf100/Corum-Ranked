@@ -29,6 +29,7 @@ beforeAll(async () => {
     "0005_v050_rating_system.sql",
     "0006_v050_dynamic_csmp_tiers.sql",
     "0007_solo_stage_placement.sql",
+    "0008_placement_beta9.sql",
   ]) {
     const migrationPath = fileURLToPath(
       new URL(`../../../migrations/${migrationName}`, import.meta.url),
@@ -42,7 +43,7 @@ afterAll(async () => {
 });
 
 class SequenceIds implements IdGenerator {
-  private value = 10_000;
+  public constructor(private value = 10_000) {}
   public next(): string {
     this.value += 1;
     return `00000000-0000-4000-8020-${String(this.value).padStart(12, "0")}`;
@@ -64,7 +65,7 @@ class FixedCsmpSource implements CsmpTierSource {
 const cleanMods: CreateSessionDto["installedMods"] = [
   {
     id: "hwanhee1.corum_ranked",
-    version: "0.5.0-beta.8",
+    version: "0.5.0-beta.9",
     enabled: true,
     loaded: true,
     internal: false,
@@ -112,7 +113,7 @@ describe("server-authoritative solo Stage Placement", () => {
     const created = await sessions.create({
       gdAccountId: "9901",
       gdUsername: "PlacementPlayer",
-      clientVersion: "v0.5.0-beta.8",
+      clientVersion: "v0.5.0-beta.9",
       installedMods: structuredClone(cleanMods),
     });
     const contextRow = await database.query<{
@@ -142,6 +143,12 @@ describe("server-authoritative solo Stage Placement", () => {
       placementGames: Number(row.placement_games),
     };
 
+    const available = await placement.active(session) as Record<string, any>;
+    expect(available).toMatchObject({ active: false, action: "START_PLACEMENT" });
+    expect(available.referenceMaps).toHaveLength(6);
+    expect(available.referenceMaps.map((map: Record<string, any>) => map.pool))
+      .toEqual([1, 2, 3, 4, 5, 6]);
+
     let state = await placement.start(session, {
       startingPool: 3,
       installedMods: structuredClone(cleanMods),
@@ -157,6 +164,10 @@ describe("server-authoritative solo Stage Placement", () => {
     state = await placement.ready(runId, session, {
       installedMods: structuredClone(cleanMods),
     }) as Record<string, any>;
+    expect(state.state).toBe("MAP_PREPARE");
+    clock.advanceSeconds(10);
+    state = await placement.state(runId, session) as Record<string, any>;
+    expect(state.state).toBe("MAP_PLAYING");
     const firstLevel = state.currentMap.playableLevelId as string;
     const first = await placement.startAttempt(runId, session, {
       levelId: firstLevel,
@@ -167,7 +178,12 @@ describe("server-authoritative solo Stage Placement", () => {
       attemptId: first.attemptId,
       progressPercent: 50,
     });
-    expect(progress50).toMatchObject({ mapScore: 0, mapGrade: "D", gradeChanged: false });
+    expect(progress50).toMatchObject({
+      mapScore: 0,
+      provisionalMapScore: 75,
+      mapGrade: "D",
+      gradeChanged: false,
+    });
     const firstEnd = await placement.endAttempt(runId, session, {
       levelId: firstLevel,
       attemptId: first.attemptId,
@@ -186,7 +202,12 @@ describe("server-authoritative solo Stage Placement", () => {
       attemptId: active.attemptId,
       progressPercent: 75,
     });
-    expect(activeProgress).toMatchObject({ mapScore: 75, mapGrade: "D", gradeChanged: false });
+    expect(activeProgress).toMatchObject({
+      mapScore: 75,
+      provisionalMapScore: 225,
+      mapGrade: "D",
+      gradeChanged: false,
+    });
     clock.advanceSeconds(311);
 
     // A new service instance models a process restart. The active Attempt ID
@@ -211,28 +232,46 @@ describe("server-authoritative solo Stage Placement", () => {
     );
     expect(new Date(heartbeatAfterRecovery.rows[0]!.last_heartbeat_at).toISOString())
       .toBe(clock.now().toISOString());
+    const finalWindowProgress = await recovered.updateAttemptProgress(runId, session, {
+      levelId: firstLevel,
+      attemptId: active.attemptId,
+      progressPercent: 100,
+    });
+    expect(finalWindowProgress).toMatchObject({
+      mapScore: 75,
+      provisionalMapScore: 275,
+      mapGrade: "D",
+      gradeChanged: false,
+    });
     const settled = await recovered.endAttempt(runId, session, {
       levelId: firstLevel,
       attemptId: active.attemptId,
       clientEventId: "active-disconnect-end",
-      progressPercent: 75,
-      cleared: false,
+      progressPercent: 100,
+      cleared: true,
     });
     expect(settled).toMatchObject({
-      mapScore: 225,
-      mapGrade: "C",
+      mapScore: 325,
+      mapGrade: "B",
       gradeChanged: true,
       gradeTransition: "UP",
       mapCompleted: true,
     });
-    expect(await recovered.state(runId, session)).toMatchObject({ state: "MAP_RESULT" });
+    expect(await recovered.state(runId, session)).toMatchObject({
+      state: "MAP_RESULT",
+      deadlineAt: clock.now().toISOString(),
+    });
 
-    const completeThreeClears = async (): Promise<Record<string, any>> => {
+    const completeTwoClears = async (): Promise<Record<string, any>> => {
       let current = await recovered.ready(runId, session, {
         installedMods: structuredClone(cleanMods),
       }) as Record<string, any>;
+      expect(current.state).toBe("MAP_PREPARE");
+      clock.advanceSeconds(10);
+      current = await recovered.state(runId, session) as Record<string, any>;
+      expect(current.state).toBe("MAP_PLAYING");
       const levelId = current.currentMap.playableLevelId as string;
-      for (let clear = 0; clear < 3; clear += 1) {
+      for (let clear = 0; clear < 2; clear += 1) {
         const started = await recovered.startAttempt(runId, session, {
           levelId,
           clientEventId: `s${current.currentStageIndex}-m${current.currentMapIndex}-c${clear}-start`,
@@ -254,23 +293,27 @@ describe("server-authoritative solo Stage Placement", () => {
       current = await recovered.state(runId, session) as Record<string, any>;
       expect(current).toMatchObject({
         state: "MAP_RESULT",
-        currentMap: { mapScore: 750, mapGrade: "S", clearCount: 3 },
+        currentMap: { mapScore: 500, mapGrade: "S", clearCount: 2 },
       });
+      await expect(recovered.startAttempt(runId, session, {
+        levelId,
+        clientEventId: `s${current.currentStageIndex}-m${current.currentMapIndex}-third-clear-blocked`,
+      })).rejects.toThrow(/not accepting attempts/);
       return current;
     };
 
     // First Map result survives reconnect; move to Map 2 and finish Stage 1.
     await recovered.continueResult(runId, session);
-    await completeThreeClears();
+    await completeTwoClears();
     state = await recovered.continueResult(runId, session) as Record<string, any>;
     expect(state).toMatchObject({ state: "STAGE_RESULT", currentStageIndex: 1 });
     expect(state.stageResults[0]).toMatchObject({
-      mapScores: [225, 750],
-      mapGrades: ["C", "S"],
-      stageScore: 487.5,
-      stageGrade: "B",
-      poolDelta: 0,
-      nextPool: 3,
+      mapScores: [325, 500],
+      mapGrades: ["B", "S"],
+      stageScore: 412.5,
+      stageGrade: "A",
+      poolDelta: 1,
+      nextPool: 4,
     });
 
     // STAGE_RESULT also resumes after a process restart because no presentation
@@ -287,9 +330,9 @@ describe("server-authoritative solo Stage Placement", () => {
     await stageRecovered.continueResult(runId, session);
 
     for (let stage = 2; stage <= 5; stage += 1) {
-      await completeThreeClears();
+      await completeTwoClears();
       await recovered.continueResult(runId, session);
-      await completeThreeClears();
+      await completeTwoClears();
       state = await recovered.continueResult(runId, session) as Record<string, any>;
       expect(state).toMatchObject({ state: "STAGE_RESULT", currentStageIndex: stage });
       if (stage < 5) await recovered.continueResult(runId, session);
@@ -347,6 +390,89 @@ describe("server-authoritative solo Stage Placement", () => {
          (SELECT COUNT(*)::int FROM ranked_placement_attempts WHERE run_id = $1) AS attempts`,
       [runId],
     );
-    expect(evidence.rows[0]).toEqual({ maps: 10, attempts: 29 });
+    expect(evidence.rows[0]).toEqual({ maps: 10, attempts: 20 });
+  }, 30_000);
+
+  it("skips exactly once to RED 150 LP and recovers the reveal until acknowledgement", async () => {
+    const document = configDocumentFixture("placement-skip");
+    const snapshot = { ...structuredClone(document), fetchedAt: "2026-08-30T01:00:00.000Z" };
+    const config = { getSnapshot: () => structuredClone(snapshot) } as unknown as RankedConfigService;
+    const ids = new SequenceIds(30_000);
+    const clock = new MutableClock();
+    const tokens = new TokenService(environmentFixture());
+    const sessions = new SessionService(database, new FixedCsmpSource(), clock, ids, config, tokens);
+    const placement = new PlacementService(
+      database,
+      clock,
+      ids,
+      new SeededRandom(900),
+      config,
+      sessions,
+    );
+    const created = await sessions.create({
+      gdAccountId: "9902",
+      gdUsername: "PlacementSkipPlayer",
+      clientVersion: "v0.5.0-beta.9",
+      installedMods: structuredClone(cleanMods),
+    });
+    const contextRow = await database.query<{
+      session_id: string;
+      player_id: string;
+      gd_username: string;
+      displayed_tier: RankedSessionContext["displayedTier"];
+      hidden_mmr: number;
+      placement_games: number;
+    }>(
+      `SELECT s.id AS session_id, p.id AS player_id, p.gd_username,
+              r.displayed_tier, r.hidden_mmr, r.placement_games
+       FROM ranked_sessions s
+       JOIN ranked_players p ON p.id = s.player_id
+       JOIN ranked_profiles r ON r.player_id = p.id
+       WHERE s.token_hash = $1`,
+      [tokens.hash(created.sessionToken)],
+    );
+    const row = contextRow.rows[0]!;
+    const session: RankedSessionContext = {
+      sessionId: row.session_id,
+      playerId: row.player_id,
+      gdAccountId: "9902",
+      gdUsername: row.gd_username,
+      displayedTier: row.displayed_tier,
+      hiddenMmr: Number(row.hidden_mmr),
+      placementGames: Number(row.placement_games),
+    };
+    const body = { installedMods: structuredClone(cleanMods) };
+    const first = await placement.skip(session, body) as Record<string, any>;
+    const repeated = await placement.skip(session, body) as Record<string, any>;
+    expect(repeated.runId).toBe(first.runId);
+    expect(first).toMatchObject({
+      state: "PLACEMENT_RESULT",
+      finalResult: {
+        placed: true,
+        skipped: true,
+        displayedTier: "RED",
+        visibleRankedScore: 150,
+      },
+    });
+    expect(await placement.active(session)).toMatchObject({
+      active: true,
+      action: "RESUME_PLACEMENT",
+      runId: first.runId,
+      finalResult: { skipped: true },
+    });
+    const profile = await database.query<{
+      hidden_mmr: number;
+      visible_ranked_score: number;
+      displayed_tier: string;
+      placement_games: number;
+    }>("SELECT hidden_mmr, visible_ranked_score, displayed_tier, placement_games FROM ranked_profiles WHERE player_id = $1", [session.playerId]);
+    expect(profile.rows[0]).toMatchObject({
+      hidden_mmr: 150,
+      visible_ranked_score: 150,
+      displayed_tier: "RED",
+      placement_games: 5,
+    });
+    await placement.acknowledgeResult(first.runId as string, session);
+    expect(await placement.active(session)).toMatchObject({ active: false, action: "RANKED_QUEUE" });
   }, 30_000);
 });

@@ -11,6 +11,7 @@ import {
   calculatePlacementStageScore,
   finalizePlacementScore,
   scoreAttempt,
+  selectPlacementReferenceMaps,
   selectPlacementStageMaps,
   type PlacementAttemptResult,
   type PlacementGrade,
@@ -38,6 +39,7 @@ import type {
   PlacementAttemptProgressDto,
   PlacementAttemptStartDto,
   ReadyPlacementMapDto,
+  SkipPlacementDto,
   StartPlacementDto,
 } from "./placement.dto.js";
 
@@ -74,6 +76,8 @@ interface PlacementRunRow {
   started_at: Date | string | null;
   finalized_at: Date | string | null;
   result_acknowledged_at: Date | string | null;
+  completion_kind: "COMPLETED" | "SKIPPED" | null;
+  skipped_at: Date | string | null;
 }
 
 interface PlacementMapRow {
@@ -97,6 +101,9 @@ interface PlacementMapRow {
   final_window_end_at: Date | string | null;
   settled_at: Date | string | null;
   result_deadline_at: Date | string | null;
+  prepare_started_at: Date | string | null;
+  prepare_deadline_at: Date | string | null;
+  ready_at: Date | string | null;
   clear_count: number;
   top_attempts: unknown;
   map_score: number;
@@ -181,6 +188,8 @@ export class PlacementService {
       return {
         active: false,
         action: completed ? "RANKED_QUEUE" : "START_PLACEMENT",
+        referenceMaps: completed ? [] : selectPlacementReferenceMaps(snapshot.maps),
+        configGeneration: snapshot.generation,
         serverNow: this.clock.now().toISOString(),
       };
     }
@@ -195,7 +204,6 @@ export class PlacementService {
     if (!snapshot.operational.enabled || !policy || !mmrPolicy || !snapshot.operational.timeouts) {
       throw new ServiceUnavailableException("Placement is not operationally configured");
     }
-    const timeouts = snapshot.operational.timeouts;
     const now = this.clock.now();
     const runId = await this.database.transaction(async (transaction) => {
       const profileResult = await transaction.query<ProfileRow>(
@@ -228,7 +236,7 @@ export class PlacementService {
            id, player_id, config_snapshot_id, config_generation, state,
            starting_pool, current_stage_index, current_map_index, stage_pools,
            map_snapshots, last_heartbeat_at, deadline_at, started_at
-         ) VALUES ($1, $2, $3, $4, 'POOL_SELECTION', $5, 1, 1, $6::jsonb, $7::jsonb, $8, $9, $8)`,
+         ) VALUES ($1, $2, $3, $4, 'POOL_SELECTION', $5, 1, 1, $6::jsonb, $7::jsonb, $8, NULL, $8)`,
         [
           id,
           session.playerId,
@@ -238,19 +246,94 @@ export class PlacementService {
           JSON.stringify([body.startingPool]),
           JSON.stringify(serializedMaps),
           now.toISOString(),
-          new Date(now.getTime() + timeouts.readySeconds * 1_000).toISOString(),
         ],
       );
       await this.insertStageMaps(transaction, id, 1, firstMaps);
-      await transaction.query(
-        `UPDATE ranked_placement_runs
-         SET state = 'MAP_PREPARE', state_version = state_version + 1
-         WHERE id = $1 AND state = 'POOL_SELECTION'`,
-        [id],
-      );
+      await this.beginMapPrepare(transaction, id, 1, 1, now, policy);
       return id;
     });
     return this.state(runId, session);
+  }
+
+  public async skip(session: RankedSessionContext, body: SkipPlacementDto) {
+    this.sessions.assertEnvironment(body.installedMods);
+    const snapshot = this.config.getSnapshot();
+    const mmrPolicy = snapshot.operational.mmrPolicy;
+    if (!snapshot.operational.enabled || !snapshot.operational.placementPolicy || !mmrPolicy) {
+      throw new ServiceUnavailableException("Placement is not operationally configured");
+    }
+    const now = this.clock.now();
+    const runId = await this.database.transaction(async (transaction) => {
+      const profileResult = await transaction.query<ProfileRow>(
+        "SELECT placement_games, displayed_tier FROM ranked_profiles WHERE player_id = $1 FOR UPDATE",
+        [session.playerId],
+      );
+      const profile = profileResult.rows[0];
+      if (!profile) throw new ConflictException("Ranked profile is not seeded");
+      const previous = await transaction.query<{ id: string }>(
+        `SELECT id FROM ranked_placement_runs
+         WHERE player_id = $1 AND completion_kind = 'SKIPPED'
+           AND result_acknowledged_at IS NULL
+         ORDER BY created_at DESC LIMIT 1 FOR UPDATE`,
+        [session.playerId],
+      );
+      if (previous.rows[0]) return previous.rows[0].id;
+      if (Number(profile.placement_games) >= mmrPolicy.placementGames || profile.displayed_tier !== "UNRANKED") {
+        throw new ConflictException({ code: "PLACEMENT_ALREADY_COMPLETED" });
+      }
+      const active = await transaction.query<{ id: string }>(
+        `SELECT id FROM ranked_placement_runs
+         WHERE player_id = $1 AND state NOT IN ('PLACEMENT_RESULT', 'CANCELLED')
+         LIMIT 1 FOR UPDATE`,
+        [session.playerId],
+      );
+      if (active.rows[0]) throw new ConflictException("An active Placement Run cannot be skipped");
+      await this.assertNoPvPActivity(transaction, session.playerId);
+      const configSnapshotId = await this.persistConfigSnapshot(transaction, snapshot);
+      const finalized = finalizePlacementScore(150, snapshot.operational.tierBands);
+      const id = this.ids.next();
+      await transaction.query(
+        `INSERT INTO ranked_placement_runs (
+           id, player_id, config_snapshot_id, config_generation, state,
+           starting_pool, current_stage_index, current_map_index, stage_pools,
+           map_snapshots, stage_results, placement_rating, final_hidden_mmr,
+           final_visible_ranked_score, final_displayed_tier, last_heartbeat_at,
+           created_at, started_at, finalized_at, completion_kind, skipped_at
+         ) VALUES (
+           $1, $2, $3, $4, 'PLACEMENT_RESULT', 1, 1, 1, '[]'::jsonb,
+           '[]'::jsonb, '[]'::jsonb, 150, 150, $5, $6, $7,
+           $7, $7, $7, 'SKIPPED', $7
+         )`,
+        [
+          id,
+          session.playerId,
+          configSnapshotId,
+          snapshot.generation,
+          finalized.visibleRankedScore,
+          finalized.displayedTier,
+          now.toISOString(),
+        ],
+      );
+      await transaction.query(
+        `UPDATE ranked_profiles
+         SET hidden_mmr = 150, visible_ranked_score = $1, displayed_tier = $2,
+             placement_games = $3, placement_results = '[]'::jsonb,
+             result_streak = 0, promotion_source_tier = NULL, promotion_target_tier = NULL,
+             promotion_cutoff = NULL, promotion_games_required = NULL,
+             promotion_wins_required = NULL, promotion_results = '[]'::jsonb,
+             demotion_warning = FALSE, updated_at = $4
+         WHERE player_id = $5`,
+        [
+          finalized.visibleRankedScore,
+          finalized.displayedTier,
+          mmrPolicy.placementGames,
+          now.toISOString(),
+          session.playerId,
+        ],
+      );
+      return id;
+    });
+    return this.loadPublicState(runId, session.playerId, now);
   }
 
   public async state(runId: string, session: RankedSessionContext) {
@@ -266,7 +349,10 @@ export class PlacementService {
           [now.toISOString(), run.id],
         );
       }
-      if (run.state === "MAP_PLAYING" || run.state === "MAP_SETTLING") {
+      if (run.state === "MAP_PREPARE") {
+        const map = await this.lockCurrentMap(transaction, run);
+        await this.advancePreparedMap(transaction, run, map, now);
+      } else if (run.state === "MAP_PLAYING" || run.state === "MAP_SETTLING") {
         const map = await this.lockCurrentMap(transaction, run);
         await this.advanceExpiredMap(transaction, run, map, now);
       }
@@ -287,27 +373,14 @@ export class PlacementService {
       if (run.state !== "MAP_PREPARE") {
         throw new ConflictException(`Placement is ${run.state}, not MAP_PREPARE`);
       }
-      const snapshot = await this.loadSnapshot(transaction, run.config_snapshot_id);
       const map = await this.lockCurrentMap(transaction, run);
-      const normalEnd = new Date(now.getTime() + snapshot.operational.rules.roundSeconds * 1_000);
-      const finalEnd = new Date(
-        normalEnd.getTime() + snapshot.operational.rules.finalAttemptWindowSeconds * 1_000,
-      );
       await transaction.query(
         `UPDATE ranked_placement_maps
-         SET state = 'MAP_PLAYING', state_version = state_version + 1,
-             started_at = COALESCE(started_at, $1), normal_end_at = COALESCE(normal_end_at, $2),
-             final_window_end_at = COALESCE(final_window_end_at, $3)
-         WHERE id = $4`,
-        [now.toISOString(), normalEnd.toISOString(), finalEnd.toISOString(), map.id],
+         SET ready_at = COALESCE(ready_at, $1), state_version = state_version + 1
+         WHERE id = $2`,
+        [now.toISOString(), map.id],
       );
-      await transaction.query(
-        `UPDATE ranked_placement_runs
-         SET state = 'MAP_PLAYING', state_version = state_version + 1,
-             last_heartbeat_at = $1, deadline_at = $2
-         WHERE id = $3`,
-        [now.toISOString(), finalEnd.toISOString(), run.id],
-      );
+      await this.advancePreparedMap(transaction, run, { ...map, ready_at: map.ready_at ?? now }, now);
     });
     return this.loadPublicState(runId, session.playerId, now);
   }
@@ -401,7 +474,29 @@ export class PlacementService {
         [body.progressPercent, body.attemptId, map.id],
       );
       if (updated.rowCount === 0) throw new NotFoundException("Active Placement attempt not found");
-      return { mapScore: Number(map.map_score), mapGrade: map.map_grade };
+      const snapshot = await this.loadSnapshot(transaction, run.config_snapshot_id);
+      const policy = this.requirePlacementPolicy(snapshot);
+      const attempts = await this.completedAttemptEvidence(transaction, map.id);
+      const provisionalAttempt = scoreAttempt(
+        body.progressPercent,
+        false,
+        Number(map.qualifying_percent),
+      );
+      const provisional = calculatePlacementMapScore([
+        ...attempts,
+        {
+          attemptId: `provisional:${body.attemptId}`,
+          progressPercent: body.progressPercent,
+          cleared: false,
+          valid: true,
+          awardedScore: provisionalAttempt,
+        },
+      ], policy);
+      return {
+        mapScore: Number(map.map_score),
+        provisionalMapScore: provisional.mapScore,
+        mapGrade: map.map_grade,
+      };
     });
     // Progress telemetry is deliberately incapable of changing the HUD Grade.
     return { ...result, gradeChanged: false, serverNow: now.toISOString() };
@@ -502,13 +597,11 @@ export class PlacementService {
           await transaction.query(
             `UPDATE ranked_placement_runs
              SET state = 'MAP_PREPARE', current_map_index = 2,
-                 state_version = state_version + 1, deadline_at = $1
-             WHERE id = $2`,
-            [
-              new Date(now.getTime() + snapshot.operational.timeouts!.readySeconds * 1_000).toISOString(),
-              run.id,
-            ],
+                 state_version = state_version + 1, deadline_at = NULL
+             WHERE id = $1`,
+            [run.id],
           );
+          await this.beginMapPrepare(transaction, run.id, Number(run.current_stage_index), 2, now, policy);
           return;
         }
         const maps = await this.stageMaps(transaction, run.id, Number(run.current_stage_index));
@@ -570,16 +663,16 @@ export class PlacementService {
            SET state = 'MAP_PREPARE', state_version = state_version + 1,
                current_stage_index = $1, current_map_index = 1,
                stage_pools = $2::jsonb, map_snapshots = $3::jsonb,
-               deadline_at = $4
-           WHERE id = $5`,
+               deadline_at = NULL
+           WHERE id = $4`,
           [
             nextStage,
             JSON.stringify(pools),
             JSON.stringify(snapshots),
-            new Date(now.getTime() + snapshot.operational.timeouts!.readySeconds * 1_000).toISOString(),
             run.id,
           ],
         );
+        await this.beginMapPrepare(transaction, run.id, nextStage, 1, now, policy);
         return;
       }
       if (run.state !== "PLACEMENT_RESULT") {
@@ -650,6 +743,60 @@ export class PlacementService {
     await this.settleMap(transaction, run, map, score, now, snapshot);
   }
 
+  private async advancePreparedMap(
+    transaction: SqlExecutor,
+    run: PlacementRunRow,
+    map: PlacementMapRow,
+    now: Date,
+  ): Promise<void> {
+    if (!map.ready_at || !map.prepare_deadline_at ||
+      now.getTime() < new Date(map.prepare_deadline_at).getTime()) return;
+    const snapshot = await this.loadSnapshot(transaction, run.config_snapshot_id);
+    const policy = this.requirePlacementPolicy(snapshot);
+    const normalEnd = new Date(now.getTime() + policy.roundSeconds * 1_000);
+    const finalEnd = new Date(normalEnd.getTime() + policy.finalAttemptWindowSeconds * 1_000);
+    await transaction.query(
+      `UPDATE ranked_placement_maps
+       SET state = 'MAP_PLAYING', state_version = state_version + 1,
+           started_at = COALESCE(started_at, $1), normal_end_at = COALESCE(normal_end_at, $2),
+           final_window_end_at = COALESCE(final_window_end_at, $3)
+       WHERE id = $4 AND state = 'MAP_PREPARE'`,
+      [now.toISOString(), normalEnd.toISOString(), finalEnd.toISOString(), map.id],
+    );
+    await transaction.query(
+      `UPDATE ranked_placement_runs
+       SET state = 'MAP_PLAYING', state_version = state_version + 1,
+           last_heartbeat_at = $1, deadline_at = $2
+       WHERE id = $3 AND state = 'MAP_PREPARE'`,
+      [now.toISOString(), finalEnd.toISOString(), run.id],
+    );
+  }
+
+  private async beginMapPrepare(
+    transaction: SqlExecutor,
+    runId: string,
+    stageIndex: number,
+    mapIndex: number,
+    now: Date,
+    policy: PlacementPolicy,
+  ): Promise<void> {
+    const deadline = new Date(now.getTime() + policy.prepareSeconds * 1_000);
+    await transaction.query(
+      `UPDATE ranked_placement_maps
+       SET state = 'MAP_PREPARE', prepare_started_at = $1, prepare_deadline_at = $2,
+           ready_at = NULL, state_version = state_version + 1
+       WHERE run_id = $3 AND stage_index = $4 AND map_index = $5`,
+      [now.toISOString(), deadline.toISOString(), runId, stageIndex, mapIndex],
+    );
+    await transaction.query(
+      `UPDATE ranked_placement_runs
+       SET state = 'MAP_PREPARE', state_version = state_version + 1,
+           deadline_at = $1, last_heartbeat_at = $2
+       WHERE id = $3`,
+      [deadline.toISOString(), now.toISOString(), runId],
+    );
+  }
+
   private async settleMap(
     transaction: SqlExecutor,
     run: PlacementRunRow,
@@ -658,9 +805,9 @@ export class PlacementService {
     now: Date,
     snapshot: RankedConfigSnapshot,
   ): Promise<void> {
-    const resultDeadline = new Date(
-      now.getTime() + (snapshot.operational.timeouts?.roundResultSeconds ?? 5) * 1_000,
-    );
+    // Placement Result is user-advanced. Do not append an unexplained fixed
+    // five-second gameplay delay after the final-attempt window has settled.
+    const resultDeadline = now;
     await transaction.query(
       `UPDATE ranked_placement_maps
        SET state = 'MAP_RESULT', state_version = state_version + 1,
@@ -670,7 +817,7 @@ export class PlacementService {
       [
         score.mapScore,
         score.grade,
-        Math.min(score.clearCount, 3),
+        Math.min(score.clearCount, this.requirePlacementPolicy(snapshot).clearTarget),
         JSON.stringify(score.topAttempts),
         now.toISOString(),
         resultDeadline.toISOString(),
@@ -691,28 +838,41 @@ export class PlacementService {
     map: PlacementMapRow,
     policy: PlacementPolicy,
   ): Promise<PlacementMapScore> {
-    const attempts = await transaction.query<PlacementAttemptRow>(
-      `SELECT id, domain_attempt_id, client_start_event_id, client_end_event_id,
-              progress_percent, cleared, awarded_score, valid, ended_at
-       FROM ranked_placement_attempts WHERE map_id = $1 AND ended_at IS NOT NULL`,
-      [map.id],
-    );
-    const evidence: PlacementAttemptResult[] = attempts.rows.map((attempt) => ({
-      attemptId: attempt.id,
-      progressPercent: Number(attempt.progress_percent ?? 0),
-      cleared: Boolean(attempt.cleared),
-      valid: Boolean(attempt.valid),
-      awardedScore: Number(attempt.awarded_score),
-    }));
+    const evidence = await this.completedAttemptEvidence(transaction, map.id);
     const score = calculatePlacementMapScore(evidence, policy);
     await transaction.query(
       `UPDATE ranked_placement_maps
        SET map_score = $1, map_grade = $2, clear_count = $3,
            top_attempts = $4::jsonb, state_version = state_version + 1
        WHERE id = $5`,
-      [score.mapScore, score.grade, Math.min(score.clearCount, 3), JSON.stringify(score.topAttempts), map.id],
+      [
+        score.mapScore,
+        score.grade,
+        Math.min(score.clearCount, policy.clearTarget),
+        JSON.stringify(score.topAttempts),
+        map.id,
+      ],
     );
     return score;
+  }
+
+  private async completedAttemptEvidence(
+    transaction: SqlExecutor,
+    mapId: string,
+  ): Promise<PlacementAttemptResult[]> {
+    const attempts = await transaction.query<PlacementAttemptRow>(
+      `SELECT id, domain_attempt_id, client_start_event_id, client_end_event_id,
+              progress_percent, cleared, awarded_score, valid, ended_at
+       FROM ranked_placement_attempts WHERE map_id = $1 AND ended_at IS NOT NULL`,
+      [mapId],
+    );
+    return attempts.rows.map((attempt) => ({
+      attemptId: attempt.id,
+      progressPercent: Number(attempt.progress_percent ?? 0),
+      cleared: Boolean(attempt.cleared),
+      valid: Boolean(attempt.valid),
+      awardedScore: Number(attempt.awarded_score),
+    }));
   }
 
   private async finalizePlacement(
@@ -759,7 +919,7 @@ export class PlacementService {
        SET state = 'PLACEMENT_RESULT', state_version = state_version + 1,
            placement_rating = $1, final_hidden_mmr = $2,
            final_visible_ranked_score = $3, final_displayed_tier = $4,
-           finalized_at = $5, deadline_at = NULL
+           finalized_at = $5, deadline_at = NULL, completion_kind = 'COMPLETED'
        WHERE id = $6 AND finalized_at IS NULL`,
       [
         rating.placementRating,
@@ -819,6 +979,13 @@ export class PlacementService {
         mapGrade: currentMap.map_grade,
         clearCount: Number(currentMap.clear_count),
         topAttempts: asArray(currentMap.top_attempts),
+        provisionalMapScore: Number(currentMap.map_score),
+        clearTarget: 2,
+        mapScoreMaximum: 500,
+        prepareStartedAt: iso(currentMap.prepare_started_at),
+        prepareDeadlineAt: iso(currentMap.prepare_deadline_at),
+        readyAt: iso(currentMap.ready_at),
+        levelRevealRemainingSeconds: 5,
         startedAt: iso(currentMap.started_at),
         normalEndAt: iso(currentMap.normal_end_at),
         finalWindowEndAt: iso(currentMap.final_window_end_at),
@@ -831,6 +998,7 @@ export class PlacementService {
         visibleRankedScore: Number(run.final_visible_ranked_score),
         displayedTier: run.final_displayed_tier,
         placed: true,
+        skipped: run.completion_kind === "SKIPPED",
         finalizedAt: iso(run.finalized_at),
         acknowledgedAt: iso(run.result_acknowledged_at),
       } : null,
@@ -888,7 +1056,7 @@ export class PlacementService {
       mapScore: Number(map.map_score),
       grade: map.map_grade,
       clearCount: Number(map.clear_count),
-      completedByClearTarget: Number(map.clear_count) >= 3,
+      completedByClearTarget: Number(map.clear_count) >= 2,
       topAttempts: asArray(map.top_attempts) as unknown as PlacementAttemptResult[],
       validAttemptCount: 0,
     };

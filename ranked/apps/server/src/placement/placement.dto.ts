@@ -12,6 +12,7 @@ export class StartPlacementDto extends EnvironmentRecheckDto {
 }
 
 export class ReadyPlacementMapDto extends EnvironmentRecheckDto {}
+export class SkipPlacementDto extends EnvironmentRecheckDto {}
 export class PlacementAttemptStartDto extends AttemptStartDto {}
 export class PlacementAttemptEndDto extends AttemptEndDto {}
 export class PlacementAttemptProgressDto extends AttemptProgressDto {}

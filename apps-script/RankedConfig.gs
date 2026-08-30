@@ -117,21 +117,25 @@ var CORUM_RANKED_CONFIG_DEFAULTS = Object.freeze([
   Object.freeze(["demotionScorePenalty", 50, "강등 확정 시 현재 커트라인 차감 LP"]),
   Object.freeze(["placementStageCount", 5, "싱글플레이 Placement Stage 수"]),
   Object.freeze(["placementMapsPerStage", 2, "Stage당 서로 다른 Map 수"]),
-  Object.freeze(["placementGradeSMin", 638, "S Grade 최소 Map/Stage Score (0~750)"]),
-  Object.freeze(["placementGradeAMin", 525, "A Grade 최소 Map/Stage Score (0~750)"]),
-  Object.freeze(["placementGradeBMin", 375, "B Grade 최소 Map/Stage Score (0~750)"]),
-  Object.freeze(["placementGradeCMin", 225, "C Grade 최소 Map/Stage Score (0~750)"]),
+  Object.freeze(["placementRoundSeconds", 180, "Placement Map Main Time (초)"]),
+  Object.freeze(["placementFinalAttemptWindowSeconds", 10, "Placement 마지막 Attempt 시작 Window (초)"]),
+  Object.freeze(["placementPrepareSeconds", 10, "Placement Map 시작 전 로비 Countdown (초)"]),
+  Object.freeze(["placementLevelRevealRemainingSeconds", 5, "Placement 실제 Level 화면 공개 시점 (남은 초)"]),
+  Object.freeze(["placementGradeSMin", 425, "S Grade 최소 Map/Stage Score (0~500)"]),
+  Object.freeze(["placementGradeAMin", 350, "A Grade 최소 Map/Stage Score (0~500)"]),
+  Object.freeze(["placementGradeBMin", 250, "B Grade 최소 Map/Stage Score (0~500)"]),
+  Object.freeze(["placementGradeCMin", 150, "C Grade 최소 Map/Stage Score (0~500)"]),
   Object.freeze(["placementTransitionGuardSeconds", 0.3, "Grade animation 중복 방지 시간"]),
-  Object.freeze(["placementTopAttemptCount", 3, "Map Score에 합산할 상위 Attempt 수"]),
-  Object.freeze(["placementClearTarget", 3, "Map 즉시 종료 및 S 확정 Clear 수"]),
+  Object.freeze(["placementTopAttemptCount", 2, "Map Score에 합산할 상위 Attempt 수"]),
+  Object.freeze(["placementClearTarget", 2, "Map 즉시 종료 및 S 확정 Clear 수"]),
   Object.freeze(["placementPool1Anchor", 0, "Pool 1 Placement Rating anchor"]),
   Object.freeze(["placementPool2Anchor", 1000, "Pool 2 Placement Rating anchor"]),
   Object.freeze(["placementPool3Anchor", 2000, "Pool 3 Placement Rating anchor"]),
   Object.freeze(["placementPool4Anchor", 3000, "Pool 4 Placement Rating anchor"]),
   Object.freeze(["placementPool5Anchor", 4000, "Pool 5 Placement Rating anchor"]),
   Object.freeze(["placementPool6Anchor", 5000, "Pool 6 Placement Rating anchor"]),
-  Object.freeze(["placementMapScoreCenter", 450, "Pool anchor 기준 Map Score"]),
-  Object.freeze(["placementRatingPerMapScorePoint", 1.6666666667, "Map Score 1점당 Rating 변화"]),
+  Object.freeze(["placementMapScoreCenter", 300, "Pool anchor 기준 Map Score"]),
+  Object.freeze(["placementRatingPerMapScorePoint", 2.5, "Map Score 1점당 Rating 변화"]),
   Object.freeze(["placementMapRatingWeight", 0.6, "10개 Map evidence 비중"]),
   Object.freeze(["placementStageRatingWeight", 0.25, "5개 Stage evidence 비중"]),
   Object.freeze(["placementOverallRatingWeight", 0.15, "전체 Placement evidence 비중"]),
@@ -212,6 +216,7 @@ function setupCorumRankedConfig() {
   appendMissingRankedRows_(allowedModsSheet, CORUM_RANKED_ALLOWED_MOD_DEFAULTS);
   appendMissingRankedRows_(configSheet, CORUM_RANKED_CONFIG_DEFAULTS);
   migrateRankedFixedRuleDefaults_(configSheet);
+  migrateRankedPlacementBeta9Defaults_(configSheet);
   migrateRankedTierPromotionDefaults_(tiersSheet);
 
   [mapsSheet, tiersSheet, seedsSheet, allowedModsSheet, configSheet].forEach(function (sheet) {
@@ -265,6 +270,35 @@ function migrateRankedFixedRuleDefaults_(sheet) {
   if (changed) {
     sheet.getRange(1, 1, values.length, values[0].length).setValues(values);
   }
+}
+
+function migrateRankedPlacementBeta9Defaults_(sheet) {
+  if (!sheet || sheet.getLastRow() < 2) return;
+  var values = sheet.getDataRange().getValues();
+  var keyColumn = findOptionalHeaderIndex_(values[0], ["Key"]);
+  var valueColumn = findOptionalHeaderIndex_(values[0], ["Value"]);
+  if (keyColumn === -1 || valueColumn === -1) return;
+  var oldToNew = {
+    placementGradeSMin: [638, 425],
+    placementGradeAMin: [525, 350],
+    placementGradeBMin: [375, 250],
+    placementGradeCMin: [225, 150],
+    placementTopAttemptCount: [3, 2],
+    placementClearTarget: [3, 2],
+    placementMapScoreCenter: [450, 300],
+    placementRatingPerMapScorePoint: [1.6666666667, 2.5],
+  };
+  var changed = false;
+  for (var rowIndex = 1; rowIndex < values.length; rowIndex += 1) {
+    var key = rankedText_(values[rowIndex][keyColumn]);
+    var migration = oldToNew[key];
+    if (!migration) continue;
+    var current = Number(values[rowIndex][valueColumn]);
+    if (Math.abs(current - migration[0]) > 0.0000001) continue;
+    values[rowIndex][valueColumn] = migration[1];
+    changed = true;
+  }
+  if (changed) sheet.getRange(1, 1, values.length, values[0].length).setValues(values);
 }
 
 function migrateRankedTierPromotionDefaults_(sheet) {
@@ -701,6 +735,10 @@ function readRankedPlacementPolicy_(config) {
   var policy = {
     stageCount: rankedNumber_(config.placementStageCount),
     mapsPerStage: rankedNumber_(config.placementMapsPerStage),
+    roundSeconds: rankedNumber_(config.placementRoundSeconds),
+    finalAttemptWindowSeconds: rankedNumber_(config.placementFinalAttemptWindowSeconds),
+    prepareSeconds: rankedNumber_(config.placementPrepareSeconds),
+    levelRevealRemainingSeconds: rankedNumber_(config.placementLevelRevealRemainingSeconds),
     gradeThresholds: {
       sMin: rankedNumber_(config.placementGradeSMin),
       aMin: rankedNumber_(config.placementGradeAMin),
@@ -726,6 +764,8 @@ function readRankedPlacementPolicy_(config) {
   };
   var flat = [
     policy.stageCount, policy.mapsPerStage,
+    policy.roundSeconds, policy.finalAttemptWindowSeconds,
+    policy.prepareSeconds, policy.levelRevealRemainingSeconds,
     policy.gradeThresholds.sMin, policy.gradeThresholds.aMin,
     policy.gradeThresholds.bMin, policy.gradeThresholds.cMin,
     policy.transitionGuardSeconds, policy.topAttemptCount, policy.clearTarget,
@@ -900,14 +940,20 @@ function validateCorumRankedConfig_(
     var grades = placement.gradeThresholds;
     if (placement.stageCount !== 5) errors.push("placementStageCount는 5여야 합니다.");
     if (placement.mapsPerStage !== 2) errors.push("placementMapsPerStage는 2여야 합니다.");
-    if (!(750 >= grades.sMin && grades.sMin > grades.aMin && grades.aMin > grades.bMin &&
+    if (placement.roundSeconds !== 180) errors.push("placementRoundSeconds는 180이어야 합니다.");
+    if (placement.finalAttemptWindowSeconds !== 10) {
+      errors.push("placementFinalAttemptWindowSeconds는 10이어야 합니다.");
+    }
+    if (placement.prepareSeconds !== 10) errors.push("placementPrepareSeconds는 10이어야 합니다.");
+    if (placement.levelRevealRemainingSeconds !== 5) {
+      errors.push("placementLevelRevealRemainingSeconds는 5여야 합니다.");
+    }
+    if (!(500 >= grades.sMin && grades.sMin > grades.aMin && grades.aMin > grades.bMin &&
       grades.bMin > grades.cMin && grades.cMin > 0)) {
-      errors.push("Placement Grade 기준은 750 >= S > A > B > C > 0이어야 합니다.");
+      errors.push("Placement Grade 기준은 500 >= S > A > B > C > 0이어야 합니다.");
     }
-    if (placement.topAttemptCount !== 3) errors.push("placementTopAttemptCount는 3이어야 합니다.");
-    if (placement.clearTarget !== 3 || placement.clearTarget !== rules.clearTarget) {
-      errors.push("placementClearTarget은 Ranked clearTarget과 같은 3이어야 합니다.");
-    }
+    if (placement.topAttemptCount !== 2) errors.push("placementTopAttemptCount는 2여야 합니다.");
+    if (placement.clearTarget !== 2) errors.push("placementClearTarget은 2여야 합니다.");
     if (!(placement.transitionGuardSeconds >= 0 && placement.transitionGuardSeconds <= 1)) {
       errors.push("placementTransitionGuardSeconds는 0~1이어야 합니다.");
     }
@@ -923,8 +969,8 @@ function validateCorumRankedConfig_(
         }
       }
     }
-    if (!(placement.mapScoreCenter >= 0 && placement.mapScoreCenter <= 750)) {
-      errors.push("placementMapScoreCenter는 0~750이어야 합니다.");
+    if (!(placement.mapScoreCenter >= 0 && placement.mapScoreCenter <= 500)) {
+      errors.push("placementMapScoreCenter는 0~500이어야 합니다.");
     }
     if (!(placement.ratingPerMapScorePoint > 0)) {
       errors.push("placementRatingPerMapScorePoint는 양수여야 합니다.");

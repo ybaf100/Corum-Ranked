@@ -655,12 +655,12 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         if (corum::ranked::RankedRuntime::get().isPlacement()) {
             setHudVisible(m_fields->qualifyingCaption, false);
             setHudVisible(m_fields->qualifyingLabel, false);
-            m_fields->placementGrade = corum::ranked::ui::PlacementGradeBadge::create(52.0f);
+            m_fields->placementGrade = corum::ranked::ui::PlacementGradeBadge::create(38.0f);
             if (m_fields->placementGrade) {
                 m_fields->placementGrade->setID("ranked-placement-grade"_spr);
                 m_fields->placementGrade->setPosition({
-                    layout.bottomLeftX + 30.0f,
-                    layout.bottomY + 27.0f,
+                    layout.bottomLeftX + 22.0f,
+                    layout.bottomY + 21.0f,
                 });
                 m_fields->placementGrade->setGrade(
                     corum::ranked::RankedRuntime::get().view().placement.currentMapGrade,
@@ -824,6 +824,10 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
             applyCheck(m_fields->opponentChecks[index], presentation.opponentChecks[index]);
             m_fields->ownChecks[index]->setVisible(!presentation.deathmatch);
             m_fields->opponentChecks[index]->setVisible(!presentation.deathmatch);
+            if (placement && index == 2) {
+                m_fields->ownChecks[index]->setVisible(false);
+                m_fields->opponentChecks[index]->setVisible(false);
+            }
         }
         setHudVisible(m_fields->ownAttemptLabel, presentation.deathmatch);
         setHudVisible(m_fields->opponentAttemptLabel, presentation.deathmatch);

@@ -30,11 +30,11 @@ readiness, `rankedReady`는 DB + 유효 config + `enabled=true`인 매치 readin
 {
   "gdAccountId": "12345",
   "gdUsername": "Player",
-  "clientVersion": "v0.5.0-beta.8",
+  "clientVersion": "v0.5.0-beta.9",
   "installedMods": [
     {
       "id": "hwanhee1.corum_ranked",
-      "version": "v0.5.0-beta.8",
+      "version": "v0.5.0-beta.9",
       "enabled": true,
       "loaded": true,
       "internal": false,
@@ -54,11 +54,12 @@ readiness, `rankedReady`는 DB + 유효 config + `enabled=true`인 매치 readin
 |---|---|---|
 | `GET` | `/api/ranked/placement/active` | 진행 Run 또는 확인하지 않은 최종 결과 복구 |
 | `POST` | `/api/ranked/placement/start` | `startingPool` 1..6, 최신 `installedMods` |
+| `POST` | `/api/ranked/placement/skip` | 경고 확인 뒤 RED 150 LP로 exactly-once 최종화 |
 | `GET` | `/api/ranked/placement/:id/state` | 권위 상태, Map/Stage 결과, deadline |
 | `POST` | `/api/ranked/placement/:id/ready` | 실제 GD 레벨·음원 준비 후 최신 `installedMods` |
 | `POST` | `/api/ranked/placement/:id/attempt/start` | playable `levelId`, idempotent `clientEventId` |
-| `POST` | `/api/ranked/placement/:id/attempt/progress` | 활성 `attemptId`, progress telemetry; Grade 불변 |
-| `POST` | `/api/ranked/placement/:id/attempt/end` | progress/clear 확정, Top 3·Map Score·Grade 재계산 |
+| `POST` | `/api/ranked/placement/:id/attempt/progress` | 활성 `attemptId`, 서버 provisional Top 2 Score; Grade 불변 |
+| `POST` | `/api/ranked/placement/:id/attempt/end` | progress/clear 확정, Top 2·Map Score·Grade 재계산 |
 | `POST` | `/api/ranked/placement/:id/continue` | Map Result→다음 Map/Stage Result→다음 Stage/최종화 |
 | `POST` | `/api/ranked/placement/:id/heartbeat` | Run heartbeat |
 | `POST` | `/api/ranked/placement/:id/result/acknowledge` | Placement Reveal 확인을 exactly-once 기록 |

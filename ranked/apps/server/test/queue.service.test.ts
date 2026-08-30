@@ -29,6 +29,7 @@ beforeAll(async () => {
     "0005_v050_rating_system.sql",
     "0006_v050_dynamic_csmp_tiers.sql",
     "0007_solo_stage_placement.sql",
+    "0008_placement_beta9.sql",
   ]) {
     const migrationPath = fileURLToPath(
       new URL(`../../../migrations/${migrationName}`, import.meta.url),

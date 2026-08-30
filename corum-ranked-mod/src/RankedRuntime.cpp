@@ -631,6 +631,12 @@ void RankedRuntime::fetchActivePlacement() {
             observeServerNow(root);
             if (!root["active"].asBool().unwrapOr(false)) {
                 m_view.placement.active = false;
+                m_view.placement.referenceMaps.clear();
+                if (auto const references = root["referenceMaps"].asArray(); references.isOk()) {
+                    for (auto const& item : references.unwrap()) {
+                        if (auto map = parseMap(item)) m_view.placement.referenceMaps.push_back(*map);
+                    }
+                }
                 setStage(
                     RuntimeStage::Ready,
                     m_view.placement.required
@@ -642,6 +648,37 @@ void RankedRuntime::fetchActivePlacement() {
             parsePlacementState(root);
             setStage(RuntimeStage::Matched, "Placement recovered. Continue from the saved Stage and Map.");
             m_nextPollAt = std::chrono::steady_clock::now();
+        }
+    );
+}
+
+void RankedRuntime::skipPlacement() {
+    if (
+        m_controlBusy || m_sessionToken.empty() || m_view.stage != RuntimeStage::Ready ||
+        !m_view.placement.required || m_view.placement.active
+    ) return;
+    m_installedMods = captureInstalledMods();
+    auto const decision = evaluateEnvironment(m_installedMods, m_environmentPolicy);
+    if (!decision.allowed) {
+        setStage(RuntimeStage::Blocked, "The active mod environment changed. Re-open Ranked to recheck.");
+        return;
+    }
+    matjson::Value body;
+    body["installedMods"] = installedModsJson();
+    auto request = baseRequest(m_sessionToken);
+    request.bodyJSON(body);
+    m_controlBusy = true;
+    setStage(RuntimeStage::Loading, "Finalizing skipped Placement...");
+    m_controlRequest.spawn(
+        request.post(endpoint("/api/ranked/placement/skip")),
+        [this](web::WebResponse response) {
+            m_controlBusy = false;
+            if (!successful(response)) {
+                setStage(RuntimeStage::Ready, "Placement skip was not applied.", responseError(response));
+                return;
+            }
+            parsePlacementState(response.json().unwrapOr(matjson::Value()));
+            setStage(RuntimeStage::Matched, "Placement skipped. Showing the server result.");
         }
     );
 }
@@ -965,15 +1002,28 @@ void RankedRuntime::parsePlacementState(matjson::Value const& root) {
     if (auto map = parseMap(currentMap)) {
         m_view.match.currentMap = *map;
         m_view.placement.currentMapScore = static_cast<int>(currentMap["mapScore"].asInt().unwrapOr(0));
+        auto const provisional = static_cast<int>(
+            currentMap["provisionalMapScore"].asInt().unwrapOr(m_view.placement.currentMapScore)
+        );
+        if (hasLocalOpenAttempt()) {
+            m_view.placement.provisionalMapScore = std::max(
+                m_view.placement.provisionalMapScore,
+                provisional
+            );
+        } else {
+            m_view.placement.provisionalMapScore = provisional;
+        }
         m_view.placement.currentMapGrade = currentMap["mapGrade"].asString().unwrapOr("D");
         m_view.placement.currentMapClears = static_cast<int>(currentMap["clearCount"].asInt().unwrapOr(0));
         m_view.placement.currentMapNormalEndAt = currentMap["normalEndAt"].asString().unwrapOr("");
         m_view.placement.currentMapFinalWindowEndAt = currentMap["finalWindowEndAt"].asString().unwrapOr("");
+        m_view.match.readyA = !currentMap["readyAt"].asString().unwrapOr("").empty();
+        m_view.match.readyB = true;
         if (
             m_view.match.state == "MAP_PLAYING" &&
             !m_view.placement.currentMapNormalEndAt.empty()
         ) {
-            // The ordinary HUD deadline is the five-minute Main Time. Its
+            // The ordinary HUD deadline is Placement's three-minute Main Time. Its
             // signed overrun drives the separate ten-second Final Attempt window.
             m_view.match.deadlineAt = m_view.placement.currentMapNormalEndAt;
         }
@@ -1002,6 +1052,7 @@ void RankedRuntime::parsePlacementState(matjson::Value const& root) {
     auto const finalResult = root["finalResult"];
     if (finalResult.isObject()) {
         m_view.placement.finalResult.placed = finalResult["placed"].asBool().unwrapOr(false);
+        m_view.placement.finalResult.skipped = finalResult["skipped"].asBool().unwrapOr(false);
         m_view.placement.finalResult.visibleRankedScore = static_cast<int>(
             finalResult["visibleRankedScore"].asInt().unwrapOr(0)
         );
@@ -1815,7 +1866,7 @@ bool RankedRuntime::canEnterCurrentLevel() const {
     if (!attemptStartWindowOpen()) return false;
 
     if (isPlacement()) {
-        return m_view.placement.currentMapClears < 3;
+        return m_view.placement.currentMapClears < 2;
     }
 
     if (m_view.match.state == "DEATHMATCH_PLAYING") {
@@ -1855,9 +1906,9 @@ int RankedRuntime::localDeathmatchVisualAttemptsUsed() const {
 
 double RankedRuntime::localDisplayScore(double progressPercent, std::optional<double> qualifyingPercentOverride) const {
     if (isPlacement()) {
-        // Placement HUD is based solely on the server-confirmed Top 3 Attempts.
-        // Never project a live Attempt's progress into the displayed Map Score.
-        return static_cast<double>(m_view.placement.currentMapScore);
+        // The score may preview a server-calculated Top 2 replacement while the
+        // authoritative Grade remains frozen until Attempt End.
+        return static_cast<double>(m_view.placement.provisionalMapScore);
     }
     auto const ownIsA = m_view.match.side == "A";
     auto const committed = ownIsA ? m_view.match.committedScoreA : m_view.match.committedScoreB;
@@ -2496,6 +2547,7 @@ void RankedRuntime::sendAttemptEnd() {
                 auto const mapScore = root["mapScore"].asInt();
                 if (mapScore.isOk()) {
                     m_view.placement.currentMapScore = static_cast<int>(mapScore.unwrap());
+                    m_view.placement.provisionalMapScore = m_view.placement.currentMapScore;
                     m_view.match.scoreA = m_view.placement.currentMapScore;
                     m_view.match.committedScoreA = m_view.placement.currentMapScore;
                 }
@@ -2563,9 +2615,16 @@ void RankedRuntime::sendAttemptProgress() {
                 // transport advanced to another attempt), its live snapshot is stale
                 // and must never overwrite a newer Clear/end snapshot.
                 if (m_attemptId == attemptId && !m_pendingEnd) {
-                    // Placement progress ACKs expose the same authoritative Grade,
-                    // but must never be used as a Grade update boundary.
-                    if (!placement) applyAttemptSnapshot(root);
+                    if (placement) {
+                        auto const provisional = root["provisionalMapScore"].asInt();
+                        if (provisional.isOk()) {
+                            m_view.placement.provisionalMapScore = static_cast<int>(provisional.unwrap());
+                            m_view.match.scoreA = m_view.placement.provisionalMapScore;
+                            ++m_view.revision;
+                        }
+                    } else {
+                        applyAttemptSnapshot(root);
+                    }
                     m_lastSubmittedProgress = progress;
                 } else {
                     log::debug(

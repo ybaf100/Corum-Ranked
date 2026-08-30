@@ -189,19 +189,27 @@ export const validateOperationalConfig = (
     const policy = config.placementPolicy;
     if (policy.stageCount !== 5) errors.push("placementPolicy.stageCount must be 5");
     if (policy.mapsPerStage !== 2) errors.push("placementPolicy.mapsPerStage must be 2");
+    if (policy.roundSeconds !== 180) errors.push("placementPolicy.roundSeconds must be 180");
+    if (policy.finalAttemptWindowSeconds !== 10) {
+      errors.push("placementPolicy.finalAttemptWindowSeconds must be 10");
+    }
+    if (policy.prepareSeconds !== 10) errors.push("placementPolicy.prepareSeconds must be 10");
+    if (policy.levelRevealRemainingSeconds !== 5) {
+      errors.push("placementPolicy.levelRevealRemainingSeconds must be 5");
+    }
     const { sMin, aMin, bMin, cMin } = policy.gradeThresholds;
-    if (!(750 >= sMin && sMin > aMin && aMin > bMin && bMin > cMin && cMin > 0)) {
-      errors.push("placementPolicy grade thresholds must satisfy 750 >= S > A > B > C > 0");
+    if (!(500 >= sMin && sMin > aMin && aMin > bMin && bMin > cMin && cMin > 0)) {
+      errors.push("placementPolicy grade thresholds must satisfy 500 >= S > A > B > C > 0");
     }
     if (!Number.isFinite(policy.transitionGuardSeconds) ||
       policy.transitionGuardSeconds < 0 || policy.transitionGuardSeconds > 1) {
       errors.push("placementPolicy.transitionGuardSeconds must be between 0 and 1");
     }
-    if (policy.topAttemptCount !== 3) {
-      errors.push("placementPolicy.topAttemptCount must be 3");
+    if (policy.topAttemptCount !== 2) {
+      errors.push("placementPolicy.topAttemptCount must be 2");
     }
-    if (policy.clearTarget !== 3 || policy.clearTarget !== config.rules.clearTarget) {
-      errors.push("placementPolicy.clearTarget must match the Ranked 3-Clear rule");
+    if (policy.clearTarget !== 2) {
+      errors.push("placementPolicy.clearTarget must be 2 without changing Ranked PvP");
     }
     if (policy.poolRatingAnchors.length !== 6 ||
       policy.poolRatingAnchors.some((anchor) => !Number.isFinite(anchor))) {
@@ -211,8 +219,8 @@ export const validateOperationalConfig = (
       errors.push("placementPolicy.poolRatingAnchors must be strictly increasing");
     }
     if (!Number.isFinite(policy.mapScoreCenter) ||
-      policy.mapScoreCenter < 0 || policy.mapScoreCenter > 750) {
-      errors.push("placementPolicy.mapScoreCenter must be between 0 and 750");
+      policy.mapScoreCenter < 0 || policy.mapScoreCenter > 500) {
+      errors.push("placementPolicy.mapScoreCenter must be between 0 and 500");
     }
     if (!(policy.ratingPerMapScorePoint > 0)) {
       errors.push("placementPolicy.ratingPerMapScorePoint must be positive");

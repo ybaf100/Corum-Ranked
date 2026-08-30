@@ -255,7 +255,7 @@ jobs:
               if all(required_placement not in source for source in (
                   play, popup, placement_badge, runtime,
               )):
-                  raise SystemExit(f"Missing beta.8 Placement client invariant: {required_placement}")
+                  raise SystemExit(f"Missing beta.9 Placement client invariant: {required_placement}")
           required_grade_assets = {
               f"placement-grade-{grade}.png" for grade in "sabcd"
           }

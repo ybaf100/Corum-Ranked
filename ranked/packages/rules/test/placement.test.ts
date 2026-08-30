@@ -8,6 +8,7 @@ import {
   finalizePlacementScore,
   placementGradeForMapScore,
   scorePlacementAttempt,
+  selectPlacementReferenceMaps,
   selectPlacementStageMaps,
   type PlacementAttemptResult,
   type PlacementMapScore,
@@ -46,15 +47,15 @@ describe("solo Stage Placement scoring", () => {
     expect(scorePlacementAttempt("clear", 100, true, 50).awardedScore).toBe(250);
   });
 
-  it("sums only the top three and replaces a lower prior top-three result", () => {
+  it("sums only the top two and replaces the lower prior top-two result", () => {
     const first = calculatePlacementMapScore([
       attempt("a", 70, false),
       attempt("b", 120, false),
       attempt("c", 180, false),
       attempt("d", 20, false),
     ], policy);
-    expect(first.mapScore).toBe(370);
-    expect(first.topAttempts.map((value) => value.attemptId)).toEqual(["c", "b", "a"]);
+    expect(first.mapScore).toBe(300);
+    expect(first.topAttempts.map((value) => value.attemptId)).toEqual(["c", "b"]);
 
     const replaced = calculatePlacementMapScore([
       attempt("a", 70, false),
@@ -62,8 +63,8 @@ describe("solo Stage Placement scoring", () => {
       attempt("c", 180, false),
       attempt("d", 200, false),
     ], policy);
-    expect(replaced.mapScore).toBe(500);
-    expect(replaced.topAttempts.map((value) => value.attemptId)).toEqual(["d", "c", "b"]);
+    expect(replaced.mapScore).toBe(380);
+    expect(replaced.topAttempts.map((value) => value.attemptId)).toEqual(["d", "c"]);
   });
 
   it("pads zero, one, and two attempts implicitly without failing", () => {
@@ -84,14 +85,13 @@ describe("solo Stage Placement scoring", () => {
     ], policy)).toThrow(/conflicts/);
   });
 
-  it("finalizes three Clears at exactly 750 and forces S", () => {
+  it("finalizes two Clears at exactly 500 and forces S", () => {
     const score = calculatePlacementMapScore([
       attempt("c1", 250),
       attempt("c2", 250),
-      attempt("c3", 250),
       attempt("lower", 150, false),
     ], policy);
-    expect(score.mapScore).toBe(750);
+    expect(score.mapScore).toBe(500);
     expect(score.grade).toBe("S");
     expect(score.completedByClearTarget).toBe(true);
   });
@@ -99,19 +99,19 @@ describe("solo Stage Placement scoring", () => {
 
 describe("solo Stage Placement progression", () => {
   it("averages two raw Map Scores", () => {
-    const stage = calculatePlacementStageScore([map(600), map(450)], 3, policy);
-    expect(stage.stageScore).toBe(525);
+    const stage = calculatePlacementStageScore([map(400), map(300)], 3, policy);
+    expect(stage.stageScore).toBe(350);
     expect(stage.grade).toBe("A");
   });
 
   it.each([
-    [700, 700, 3, "S", 2, 5],
-    [750, 526, 3, "S", 1, 4],
-    [600, 550, 3, "A", 1, 4],
-    [450, 450, 3, "B", 0, 3],
-    [300, 300, 3, "C", -1, 2],
+    [470, 470, 3, "S", 2, 5],
+    [500, 351, 3, "S", 1, 4],
+    [400, 360, 3, "A", 1, 4],
+    [300, 300, 3, "B", 0, 3],
+    [200, 200, 3, "C", -1, 2],
     [100, 100, 3, "D", -2, 1],
-    [400, 0, 3, "D", -1, 2],
+    [250, 0, 3, "D", -1, 2],
   ] as const)("moves Pool from the Stage and both Map Grades", (
     first,
     second,
@@ -128,7 +128,7 @@ describe("solo Stage Placement progression", () => {
 
   it("clamps next Pool to 1 through 6", () => {
     expect(calculatePlacementStageScore([map(0), map(0)], 1, policy).nextPool).toBe(1);
-    expect(calculatePlacementStageScore([map(750), map(750)], 6, policy).nextPool).toBe(6);
+    expect(calculatePlacementStageScore([map(500), map(500)], 6, policy).nextPool).toBe(6);
   });
 
   it("never duplicates a same-stage canonical map and prefers globally unused maps", () => {
@@ -143,10 +143,17 @@ describe("solo Stage Placement progression", () => {
     );
     expect(new Set([...first, ...second].map((entry) => entry.canonicalLevelId)).size).toBe(4);
   });
+
+  it("selects one deterministic median qualifying Reference Map per Pool", () => {
+    const references = selectPlacementReferenceMaps(allPoolMaps());
+    expect(references).toHaveLength(6);
+    expect(references.map((entry) => entry.pool)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(selectPlacementReferenceMaps(allPoolMaps())).toEqual(references);
+  });
 });
 
 describe("solo Placement Rating and finalization", () => {
-  const tenMaps = (score = 450, pool = 3): PlacementRatingMapResult[] =>
+  const tenMaps = (score = 300, pool = 3): PlacementRatingMapResult[] =>
     Array.from({ length: 10 }, (_, index) => ({
       pool: pool as 1 | 2 | 3 | 4 | 5 | 6,
       mapScore: score,
@@ -159,15 +166,15 @@ describe("solo Placement Rating and finalization", () => {
     const strongerLastMap = tenMaps();
     strongerLastMap[9] = {
       ...strongerLastMap[9]!,
-      mapScore: 600,
-      mapGrade: placementGradeForMapScore(600, policy),
+      mapScore: 400,
+      mapGrade: placementGradeForMapScore(400, policy),
     };
     const stronger = calculatePlacementRating(strongerLastMap, policy);
     expect(stronger.placementRating).toBeGreaterThan(baseline.placementRating);
     expect(stronger.mapComponent).toBeGreaterThan(baseline.mapComponent);
     expect(stronger.stageComponent).toBeGreaterThan(baseline.stageComponent);
     expect(stronger.overallComponent).toBeGreaterThan(baseline.overallComponent);
-    expect(calculatePlacementRating(tenMaps(450, 4), policy).placementRating)
+    expect(calculatePlacementRating(tenMaps(300, 4), policy).placementRating)
       .toBeGreaterThan(baseline.placementRating);
   });
 

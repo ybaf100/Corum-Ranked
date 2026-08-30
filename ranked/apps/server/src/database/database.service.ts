@@ -24,6 +24,7 @@ const REQUIRED_MIGRATIONS = [
   "0005_v050_rating_system.sql",
   "0006_v050_dynamic_csmp_tiers.sql",
   "0007_solo_stage_placement.sql",
+  "0008_placement_beta9.sql",
 ] as const;
 
 export interface RankedSchemaStatus {
@@ -47,6 +48,8 @@ type SchemaProbeRow = QueryResultRow & {
   round_playable_level_id: boolean;
   attempt_played_level_id: boolean;
   deathmatch_attempt_played_level_id: boolean;
+  placement_prepare_deadline_at: boolean;
+  placement_completion_kind: boolean;
 };
 
 @Injectable()
@@ -158,7 +161,15 @@ export class DatabaseService implements DatabasePort, OnModuleInit, OnApplicatio
           EXISTS (
             SELECT 1 FROM information_schema.columns
             WHERE table_schema = 'public' AND table_name = 'ranked_deathmatch_attempts' AND column_name = 'played_level_id'
-          ) AS deathmatch_attempt_played_level_id
+          ) AS deathmatch_attempt_played_level_id,
+          EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = 'ranked_placement_maps' AND column_name = 'prepare_deadline_at'
+          ) AS placement_prepare_deadline_at,
+          EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = 'ranked_placement_runs' AND column_name = 'completion_kind'
+          ) AS placement_completion_kind
       `);
       const row = result.rows[0];
       if (!row) return { ready: false, missing: ["schema probe returned no row"] };
@@ -179,6 +190,8 @@ export class DatabaseService implements DatabasePort, OnModuleInit, OnApplicatio
         ["round_playable_level_id", "ranked_rounds.playable_level_id"],
         ["attempt_played_level_id", "ranked_attempts.played_level_id"],
         ["deathmatch_attempt_played_level_id", "ranked_deathmatch_attempts.played_level_id"],
+        ["placement_prepare_deadline_at", "ranked_placement_maps.prepare_deadline_at"],
+        ["placement_completion_kind", "ranked_placement_runs.completion_kind"],
       ];
       const missing = required.filter(([key]) => !row[key]).map(([, label]) => label);
 

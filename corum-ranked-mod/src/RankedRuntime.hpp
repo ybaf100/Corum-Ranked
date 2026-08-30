@@ -102,6 +102,7 @@ struct PlacementStageResultView {
 
 struct PlacementFinalResultView {
     bool placed = false;
+    bool skipped = false;
     int visibleRankedScore = 0;
     std::string displayedTier = "UNRANKED";
     std::string finalizedAt;
@@ -119,11 +120,13 @@ struct PlacementView {
     int totalStages = 5;
     int mapsPerStage = 2;
     int currentMapScore = 0;
+    int provisionalMapScore = 0;
     std::string currentMapGrade = "D";
     int currentMapClears = 0;
     std::string currentMapNormalEndAt;
     std::string currentMapFinalWindowEndAt;
     std::string activeAttemptId;
+    std::vector<RankedMapView> referenceMaps;
     std::vector<int> stagePools;
     std::vector<PlacementStageResultView> stageResults;
     PlacementFinalResultView finalResult;
@@ -280,6 +283,7 @@ public:
     void tick();
     void joinQueue();
     void startPlacement(int startingPool);
+    void skipPlacement();
     void continuePlacement();
     void leaveQueue();
     void submitReady();

@@ -22,18 +22,18 @@ describe("Ranked client version gate", () => {
 
   it("accepts the same current version with or without a leading v", () => {
     expect(
-      evaluateRankedClientVersion("0.5.0-beta.8", [clientMod("0.5.0-beta.8")]).allowed,
+      evaluateRankedClientVersion("0.5.0-beta.9", [clientMod("0.5.0-beta.9")]).allowed,
     ).toBe(true);
   });
 
   it("rejects an older declared client version", () => {
-    const result = evaluateRankedClientVersion("v0.5.0-beta.7", [
+    const result = evaluateRankedClientVersion("v0.5.0-beta.8", [
       clientMod(REQUIRED_RANKED_CLIENT_VERSION),
     ]);
     expect(result).toMatchObject({
       allowed: false,
-      requiredVersion: "v0.5.0-beta.8",
-      clientVersion: "v0.5.0-beta.7",
+      requiredVersion: "v0.5.0-beta.9",
+      clientVersion: "v0.5.0-beta.8",
     });
   });
 

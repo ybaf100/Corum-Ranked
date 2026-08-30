@@ -1,3 +1,14 @@
+# v0.5.0-beta.9
+
+- Changed only solo Placement Maps to a three-minute Main Time, ten-second final Attempt start window, two-Clear target, and best-two Attempt Map Score capped at 500. Ranked PvP remains five minutes, three Clears, and otherwise unchanged.
+- Added server-authoritative live provisional Map Score updates when an active Attempt fills or improves the current Top 2; the S/A/B/C/D Grade still changes only after Attempt End.
+- Added persisted ten-second Placement preparation. Exact map loading starts immediately, the real GD LevelInfo page appears with five seconds left, and MAP_PLAYING begins at zero.
+- Added deterministic per-Pool Reference Maps to the starting Pool screen, preserved literal `POOL 1` through `POOL 6`, and completed the Korean translations for the surrounding Placement UI.
+- Moved starting-Pool selection behind the lobby's explicit Start Placement action and added a custom red skip confirmation that finalizes exactly once at RED - 150 LP.
+- Reworked Placement Map/Stage result presentation with smaller transparent Grade art and a three-card `MAP 1 + MAP 2 > STAGE GRADE` composition, while retaining image-to-text fallback and existing result audio.
+- Removed the unexplained fixed five-second post-window delay; an accepted active final Attempt still settles its Death/Clear and score before the Map Result becomes available.
+- Added migration `0008_placement_beta9.sql`, recovery/skip/provisional/final-window regression coverage, and bumped the exact client/server gate to `v0.5.0-beta.9`.
+
 # v0.5.0-beta.8
 
 - Replaced PvP Placement with a separate server-authoritative solo aggregate: five Stages, two distinct Pool maps per Stage, persisted map snapshots, Attempts, top-three evidence, Stage results, deadlines, heartbeats, final rating, and result acknowledgement.

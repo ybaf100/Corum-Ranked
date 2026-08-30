@@ -10,18 +10,22 @@ import type {
   RankedMapSnapshot,
 } from "./types.js";
 
-export const PLACEMENT_MAP_SCORE_MAXIMUM = 750;
+export const PLACEMENT_MAP_SCORE_MAXIMUM = 500;
 
 export const DEFAULT_PLACEMENT_POLICY: PlacementPolicy = Object.freeze({
   stageCount: 5,
   mapsPerStage: 2,
-  gradeThresholds: Object.freeze({ sMin: 638, aMin: 525, bMin: 375, cMin: 225 }),
+  roundSeconds: 180,
+  finalAttemptWindowSeconds: 10,
+  prepareSeconds: 10,
+  levelRevealRemainingSeconds: 5,
+  gradeThresholds: Object.freeze({ sMin: 425, aMin: 350, bMin: 250, cMin: 150 }),
   transitionGuardSeconds: 0.3,
-  topAttemptCount: 3,
-  clearTarget: 3,
+  topAttemptCount: 2,
+  clearTarget: 2,
   poolRatingAnchors: Object.freeze([0, 1_000, 2_000, 3_000, 4_000, 5_000] as const),
-  mapScoreCenter: 450,
-  ratingPerMapScorePoint: 5 / 3,
+  mapScoreCenter: 300,
+  ratingPerMapScorePoint: 2.5,
   mapRatingWeight: 0.6,
   stageRatingWeight: 0.25,
   overallRatingWeight: 0.15,
@@ -116,7 +120,7 @@ const sameAttempt = (left: PlacementAttemptResult, right: PlacementAttemptResult
   left.awardedScore === right.awardedScore;
 
 /**
- * Deduplicates by authoritative attempt identity, then sums only the three
+ * Deduplicates by authoritative attempt identity, then sums only the two
  * highest valid awarded scores. A conflicting retry is rejected instead of
  * being counted twice or silently changing prior evidence.
  */
@@ -229,6 +233,32 @@ export const selectPlacementStageMaps = (
     : available.filter((map) => map.canonicalLevelId !== first.canonicalLevelId);
   const second = sample(secondCandidates, 1, random)[0]!;
   return [snapshotMap(first), snapshotMap(second)];
+};
+
+/**
+ * Selects one stable representative map for each Pool. The median qualifying
+ * requirement is more representative than a random/first row, and canonical
+ * ID tie-breaking keeps the selection stable across server restarts.
+ */
+export const selectPlacementReferenceMaps = (
+  maps: readonly RankedMap[],
+): readonly RankedMapSnapshot[] => {
+  const canonical = canonicalActiveMaps(maps);
+  return ([1, 2, 3, 4, 5, 6] as const).map((pool) => {
+    const available = canonical
+      .filter((map) => map.pool === pool)
+      .sort((left, right) =>
+        left.qualifyingPercent - right.qualifyingPercent ||
+        left.canonicalLevelId.localeCompare(right.canonicalLevelId));
+    if (available.length < 2) {
+      throw new RankedDomainError(
+        "INSUFFICIENT_POOL_MAPS",
+        `Placement Pool ${pool} requires at least two canonical maps`,
+        { pool, available: available.length },
+      );
+    }
+    return snapshotMap(available[Math.floor((available.length - 1) / 2)]!);
+  });
 };
 
 const ratingEvidence = (

@@ -29,10 +29,18 @@ export interface PlacementGradeThresholds {
 export interface PlacementPolicy {
   readonly stageCount: 5;
   readonly mapsPerStage: 2;
+  /** Placement-only play clock. PvP keeps RankedRulesConfig.roundSeconds. */
+  readonly roundSeconds: 180;
+  /** Placement-only last-attempt start window. */
+  readonly finalAttemptWindowSeconds: 10;
+  /** Authoritative pre-map lobby countdown. */
+  readonly prepareSeconds: 10;
+  /** Reveal the real GD LevelInfo page at this remaining countdown value. */
+  readonly levelRevealRemainingSeconds: 5;
   readonly gradeThresholds: PlacementGradeThresholds;
   readonly transitionGuardSeconds: number;
-  readonly topAttemptCount: 3;
-  readonly clearTarget: 3;
+  readonly topAttemptCount: 2;
+  readonly clearTarget: 2;
   readonly poolRatingAnchors: readonly [number, number, number, number, number, number];
   readonly mapScoreCenter: number;
   readonly ratingPerMapScorePoint: number;

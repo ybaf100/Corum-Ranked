@@ -1,3308 +1,2188 @@
-#include "RankedPopup.hpp"
-
-#include "RankedRuntime.hpp"
-#include "RankedAudioManager.hpp"
-#include "DebugBotPopup.hpp"
-#include "RankedSongGate.hpp"
-#include "ui/RankBadgeAssets.hpp"
-#include "ui/RankTransitionLayer.hpp"
-#include "ui/PlacementGradeBadge.hpp"
-#include "ui/RankedTranslations.hpp"
-#include "ui/RankedVisuals.hpp"
-
-#include <Geode/Geode.hpp>
-#include <Geode/binding/GameLevelManager.hpp>
-#include <Geode/binding/GameManager.hpp>
-#include <Geode/binding/GJGameLevel.hpp>
-#include <Geode/binding/GJSearchObject.hpp>
-#include <Geode/binding/LevelInfoLayer.hpp>
-#include <Geode/binding/LevelManagerDelegate.hpp>
-#include <Geode/binding/MusicDownloadManager.hpp>
-#include <Geode/binding/SimplePlayer.hpp>
-#include <Geode/ui/LoadingSpinner.hpp>
-
-#include <algorithm>
-#include <chrono>
-#include <cctype>
-#include <cmath>
-#include <iomanip>
-#include <optional>
-#include <sstream>
-#include <string>
-#include <string_view>
-#include <unordered_map>
-#include <vector>
-
-using namespace geode::prelude;
-using corum::ranked::DeathmatchSummaryView;
-using corum::ranked::HistoryMatchView;
-using corum::ranked::MatchView;
-using corum::ranked::RankedRuntime;
-using corum::ranked::RankedAudioManager;
-using corum::ranked::RankedAudioMode;
-using corum::ranked::RankedResourceDownloadState;
-using corum::ranked::RankedProfileView;
-using corum::ranked::RoundSummaryView;
-using corum::ranked::RuntimeStage;
-using corum::ranked::RuntimeView;
-using corum::ranked::ui::RankTransitionLayer;
-using corum::ranked::ui::RankTransitionType;
-
-namespace {
-
-using SteadyClock = std::chrono::steady_clock;
-
-constexpr ccColor3B kPanelColor = corum::ranked::ui::Surface;
-constexpr ccColor3B kAccent = corum::ranked::ui::Cyan;
-constexpr ccColor3B kGreen = corum::ranked::ui::Green;
-constexpr ccColor3B kRed = corum::ranked::ui::Red;
-constexpr ccColor3B kGold = corum::ranked::ui::Gold;
-constexpr ccColor3B kCyan = corum::ranked::ui::Cyan;
-constexpr ccColor3B kBlue = corum::ranked::ui::Blue;
-constexpr ccColor3B kDeepPanel = corum::ranked::ui::Ink;
-constexpr ccColor3B kDeepPanel2 = corum::ranked::ui::Surface;
-constexpr ccColor3B kSideRed = corum::ranked::ui::Red;
-
-std::string tr(std::string_view key, std::string_view english) {
-    return corum::ranked::i18n::text(key, english);
-}
-
-std::string shorten(std::string value, std::size_t maximum) {
-    if (value.size() <= maximum) return value;
-    if (maximum <= 3) return value.substr(0, maximum);
-    value.resize(maximum - 3);
-    return value + "...";
-}
-
-std::string upper(std::string value) {
-    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
-        return static_cast<char>(std::toupper(ch));
-    });
-    return value;
-}
-
-std::string displayBanner(std::string value) {
-    std::replace(value.begin(), value.end(), '_', ' ');
-    return value;
-}
-
-std::string formatScore(double value) {
-    if (std::abs(value - std::round(value)) < 0.0005) {
-        return std::to_string(static_cast<long long>(std::llround(value)));
-    }
-    std::ostringstream stream;
-    stream << std::fixed << std::setprecision(1) << value;
-    return stream.str();
-}
-
-std::string scoreComparison(double ownScore, double opponentScore) {
-    if (!corum::ranked::i18n::isKorean()) {
-        return fmt::format(
-            "YOUR SCORE  {}     OPPONENT  {}",
-            formatScore(ownScore),
-            formatScore(opponentScore)
-        );
-    }
-    return fmt::format(
-        "ë‚´ {}  {}     {}  {}",
-        tr("score", "SCORE"),
-        formatScore(ownScore),
-        tr("opponent", "OPPONENT"),
-        formatScore(opponentScore)
-    );
-}
-
-std::string twoLineTitle(std::string value, std::size_t perLine = 11) {
-    if (value.size() <= perLine) return value;
-    auto splitAt = value.rfind(' ', perLine);
-    if (splitAt == std::string::npos || splitAt < perLine / 2) splitAt = perLine;
-    auto first = value.substr(0, splitAt);
-    auto secondStart = splitAt;
-    while (secondStart < value.size() && value[secondStart] == ' ') ++secondStart;
-    auto second = value.substr(secondStart);
-    auto const maxSecond = perLine + 2;
-    if (second.size() > maxSecond) {
-        second.resize(maxSecond > 3 ? maxSecond - 3 : maxSecond);
-        second += "...";
-    }
-    return first + "\n" + second;
-}
-
-ccColor3B tierColor(std::string const& tier) {
-    return corum::ranked::ui::tierColor(tier);
-}
-
-std::optional<RankTransitionType> authoritativeTransitionType(
-    corum::ranked::RatingEventView const& event,
-    RankedProfileView const& before,
-    RankedProfileView const& after
-) {
-    auto const oldTier = upper(before.displayedTier);
-    auto const newTier = upper(after.displayedTier);
-    if (oldTier == newTier) return std::nullopt;
-
-    // The server event is the sole authority for the transition type. These
-    // checks only reject malformed presentation data; they never calculate or
-    // change the resulting tier.
-    if (event.placementCompleted && oldTier == "UNRANKED" && newTier != "UNRANKED") {
-        return RankTransitionType::Placement;
-    }
-    if (event.promotionSucceeded && oldTier != "UNRANKED" && newTier != "UNRANKED") {
-        return RankTransitionType::Promotion;
-    }
-    if (event.demoted && oldTier != "UNRANKED" && oldTier != "RED" && newTier != "UNRANKED") {
-        return RankTransitionType::Demotion;
-    }
-    return std::nullopt;
-}
-
-std::pair<std::string, ccColor3B> ratingEventText(corum::ranked::RatingEventView const& event) {
-    if (event.placementCompleted) return {tr("placed", "PLACED"), kGreen};
-    if (event.promotionSucceeded) return {tr("promoted", "PROMOTED"), kGreen};
-    if (event.promotionFailed) return {tr("promotion-failed", "PROMOTION FAILED"), kRed};
-    if (event.promotionStarted) return {tr("promotion-match", "PROMOTION MATCH"), ccc3(145, 255, 125)};
-    if (event.demoted) return {tr("demoted", "DEMOTED"), kRed};
-    return {"", ccc3(255, 255, 255)};
-}
-
-ccColor3B colorFromHex(int value) {
-    return ccc3(
-        static_cast<GLubyte>((value >> 16) & 0xff),
-        static_cast<GLubyte>((value >> 8) & 0xff),
-        static_cast<GLubyte>(value & 0xff)
-    );
-}
-
-// Corum difficulty/rating palette. Keep this local to Corum Ranked; Corum
-// Integration remains a separate mod and is not linked into this target.
-ccColor3B difficultyColor(std::string rating) {
-    while (!rating.empty() && std::isspace(static_cast<unsigned char>(rating.front()))) rating.erase(rating.begin());
-    while (!rating.empty() && std::isspace(static_cast<unsigned char>(rating.back()))) rating.pop_back();
-    if (rating == "20") rating = "20.0";
-
-    static std::unordered_map<std::string, int> const colors {
-        {"Tiny", 0xff6fff}, {"0", 0xe8eaed}, {"1", 0x0099ff}, {"2", 0x00bbff},
-        {"3", 0x00ddff}, {"4", 0x00ffff}, {"5", 0x00ffaa}, {"6", 0x00ff00},
-        {"7", 0x66ff00}, {"8", 0x99ff00}, {"9", 0xccff00}, {"10", 0xffff00},
-        {"11", 0xffdd00}, {"12", 0xffcc00}, {"13", 0xffaa00}, {"14", 0xff8800},
-        {"15", 0xff6600}, {"16", 0xff4400}, {"17", 0xff0000}, {"18", 0xcc0000},
-        {"18+", 0xa61c00}, {"19", 0x660000}, {"19+", 0x460c00}, {"20.0", 0x360900},
-        {"20.1", 0x240600}, {"20.2", 0x130400}, {"20.3", 0x000000}, {"20.4", 0x0a031f},
-        {"20.5", 0x11072d}, {"20.6", 0x180b3b}, {"20.7", 0x180b3b}, {"20.8", 0x261358},
-        {"20.9", 0x2d1766}, {"21", 0x351c75}, {"21+", 0x4511c9}, {"-1", 0x4c1130},
-        {"-2", 0x434343}, {"UnVF", 0x4f71a3},
-    };
-
-    auto const found = colors.find(rating);
-    return colorFromHex(found == colors.end() ? 0xffffff : found->second);
-}
-
-CCLabelBMFont* makeLabel(
-    std::string const& text,
-    float scale,
-    CCPoint position,
-    ccColor3B color = {255, 255, 255},
-    char const* font = nullptr
-) {
-    // SemiBold is the default UI voice. Medium remains available for deliberately
-    // quiet helper copy, while display/critical values opt into Paperlogy Black.
-    auto weight = corum::ranked::ui::FontWeight::SemiBold;
-    if (font) {
-        auto const role = std::string_view(font);
-        if (role == "medium") weight = corum::ranked::ui::FontWeight::Medium;
-        else if (role == "semibold") weight = corum::ranked::ui::FontWeight::SemiBold;
-        else if (role == "black" || role == "display") weight = corum::ranked::ui::FontWeight::Black;
-        else weight = corum::ranked::ui::FontWeight::ExtraBold;
-    }
-    return corum::ranked::ui::label(text, scale, position, color, weight);
-}
-
-CCNode* makePanel(CCSize size, CCPoint position, ccColor3B color = kPanelColor, GLubyte opacity = 235) {
-    return corum::ranked::ui::surface(size, position, color, kDeepPanel2, opacity, false);
-}
-
-CCNode* makeNeonPanel(
-    CCSize size,
-    CCPoint position,
-    ccColor3B accent = kCyan,
-    ccColor3B fill = kDeepPanel,
-    GLubyte fillOpacity = 245
-) {
-    return corum::ranked::ui::surface(size, position, accent, fill, fillOpacity, true);
-}
-
-CCNode* makeTextPlate(
-    std::string const& text,
-    CCSize size,
-    CCPoint position,
-    ccColor3B accent,
-    float scale = 0.24f,
-    ccColor3B textColor = {255, 255, 255},
-    char const* font = nullptr,
-    CCLabelBMFont** outLabel = nullptr
-) {
-    auto* node = makeNeonPanel(size, position, accent, kDeepPanel2, 242);
-    auto* label = makeLabel(text, scale, {size.width / 2.0f, size.height / 2.0f}, textColor, font);
-    label->limitLabelWidth(size.width - 12.0f, scale, std::max(0.12f, scale * 0.65f));
-    node->addChild(label, 4);
-    if (outLabel) *outLabel = label;
-    return node;
-}
-
-CCNode* makeActionButtonVisual(
-    std::string const& text,
-    bool danger = false,
-    bool selected = false
-) {
-    auto const width = std::clamp(46.0f + static_cast<float>(text.size()) * 7.0f, 104.0f, 178.0f);
-    constexpr float height = 34.0f;
-    auto const accent = selected ? kGold : (danger ? kRed : kCyan);
-
-    auto* root = CCNode::create();
-    root->setAnchorPoint({0.5f, 0.5f});
-    root->setContentSize({width, height});
-
-    auto* panel = corum::ranked::ui::surface(
-        {width, height},
-        {width / 2.0f, height / 2.0f},
-        accent,
-        danger ? ccc3(39, 15, 28) : corum::ranked::ui::SurfaceRaised,
-        250,
-        true
-    );
-    root->addChild(panel, 0);
-
-    auto* caption = corum::ranked::ui::label(
-        text,
-        0.38f,
-        {width / 2.0f, height / 2.0f},
-        selected ? kGold : (danger ? ccc3(255, 224, 229) : corum::ranked::ui::Text),
-        true
-    );
-    caption->limitLabelWidth(width - 20.0f, 0.38f, 0.24f);
-    root->addChild(caption, 5);
-    return root;
-}
-
-std::string resourceKey(MatchView const& match) {
-    return fmt::format(
-        "{}:{}:{}:{}",
-        match.matchId,
-        match.roundNumber,
-        match.deathmatchSequence,
-        match.currentMap ? match.currentMap->levelId : 0
-    );
-}
-
-class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate {
-    enum class Page {
-        Live,
-        HistoryList,
-        HistoryDetail,
-    };
-
-    CCLayerColor* m_fadeRoot = nullptr;
-    CCNode* m_root = nullptr;
-    CCMenu* m_menu = nullptr;
-    Page m_page = Page::Live;
-    std::size_t m_historyIndex = 0;
-    std::string m_phaseKey;
-    std::string m_resourceKey;
-    std::string m_lastMatchId;
-    std::string m_selectedBan;
-    std::string m_pendingBan;
-    std::string m_localMessage;
-    SteadyClock::time_point m_phaseStartedAt {};
-    std::vector<int> m_songIds;
-    bool m_readySent = false;
-    bool m_matchFoundReadySent = false;
-    bool m_enteringSongGate = false;
-    bool m_enteringLevel = false;
-    LevelManagerDelegate* m_previousLevelManagerDelegate = nullptr;
-    GJGameLevel* m_resolvedLevel = nullptr;
-    std::string m_resolvedLevelContext;
-    std::string m_levelLookupContext;
-    std::string m_levelLookupKey;
-    std::string m_levelLookupError;
-    int m_levelLookupTargetId = 0;
-    int m_levelLookupAttempts = 0;
-    bool m_levelLookupBusy = false;
-    SteadyClock::time_point m_levelLookupStartedAt {};
-    SteadyClock::time_point m_levelLookupLastRequestAt {};
-    SteadyClock::time_point m_levelLookupNextAttemptAt {};
-    // Set only while a vanilla LevelInfo/Play scene is covering this retained
-    // Ranked scene. A same-map Death Match retry does not change resourceKey(),
-    // so the older resource-key reset left m_enteringLevel latched forever after
-    // the child scene returned.
-    bool m_rankedChildScenePushed = false;
-    bool m_resourceGateInitialized = false;
-    bool m_resourceGateAcknowledged = false;
-    bool m_resourceGateWasMissing = false;
-    bool m_resourceGateMenuRestored = false;
-    std::string m_renderedUiKey;
-    std::string m_pendingUiKey;
-    std::string m_rankTransitionPlayedKey;
-    std::string m_stageResultAudioPlayedKey;
-    RankTransitionLayer* m_rankTransitionLayer = nullptr;
-    bool m_uiFadingOut = false;
-    bool m_fadeInNextRender = true;
-    SteadyClock::time_point m_uiTransitionDeadline {};
-    CCLabelBMFont* m_resourceCountLabel = nullptr;
-    CCLayerColor* m_resourceProgressFill = nullptr;
-    CCLabelBMFont* m_resourceProgressLabel = nullptr;
-    float m_resourceProgressWidth = 0.0f;
-    CCLabelBMFont* m_mainStatusLabel = nullptr;
-    CCLabelBMFont* m_matchFoundCountdownLabel = nullptr;
-    CCLabelBMFont* m_banTimerLabel = nullptr;
-    CCLabelBMFont* m_prepareFooterLabel = nullptr;
-    CCLabelBMFont* m_prepareLoadStageLabel = nullptr;
-    CCLabelBMFont* m_prepareLoadPercentLabel = nullptr;
-    CCLayerColor* m_prepareLoadFill = nullptr;
-    float m_prepareLoadWidth = 0.0f;
-    float m_prepareLoadVisual = 0.0f;
-    CCLabelBMFont* m_spectatorStateLabel = nullptr;
-    CCLabelBMFont* m_spectatorProgressLabel = nullptr;
-    CCLabelBMFont* m_spectatorScoreLabel = nullptr;
-    CCLabelBMFont* m_spectatorHintLabel = nullptr;
-
-    ~CorumRankedLayer() override {
-        cancelExactLevelLookup();
-        releaseResolvedLevel();
-    }
-
-    bool init() override {
-        if (!CCLayerColor::initWithColor({0, 0, 0, 0})) return false;
-        setID("corum-ranked-fullscreen"_spr);
-        setKeypadEnabled(true);
-
-        auto const winSize = CCDirector::sharedDirector()->getWinSize();
-        corum::ranked::ui::addBackdrop(this, winSize);
-
-        m_fadeRoot = CCLayerColor::create({0, 0, 0, 0});
-        m_fadeRoot->setContentSize(winSize);
-        m_fadeRoot->setPosition(CCPointZero);
-        m_fadeRoot->setCascadeOpacityEnabled(true);
-        addChild(m_fadeRoot, 1);
-
-        m_root = CCNode::create();
-        m_root->setAnchorPoint({0.0f, 0.0f});
-        m_root->setPosition(CCPointZero);
-        m_root->setContentSize(winSize);
-        m_fadeRoot->addChild(m_root, 1);
-
-        m_menu = CCMenu::create();
-        m_menu->setPosition(CCPointZero);
-        m_menu->setID("corum-ranked-fullscreen-menu"_spr);
-        m_fadeRoot->addChild(m_menu, 10);
-
-        RankedRuntime::get().begin();
-        syncPhase();
-        syncResources();
-        m_renderedUiKey = presentationKey();
-        render();
-        applyFadeInIfNeeded();
-        updateDynamicUi();
-        return true;
-    }
-
-    void onEnter() override {
-        CCLayerColor::onEnter();
-
-        auto const resumedFromRankedChild = m_rankedChildScenePushed;
-        if (resumedFromRankedChild) {
-            // The scene pushed by this layer has finished. Release both launch
-            // guards before refresh() so maybeEnterLevel() can open the next
-            // legal attempt on the same map. canEnterCurrentLevel() remains the
-            // authority that blocks a fourth Death Match attempt, spectator
-            // entry, results, and closed attempt windows.
-            m_rankedChildScenePushed = false;
-            m_enteringSongGate = false;
-            m_enteringLevel = false;
-            log::info("Ranked child scene returned; automatic entry guard released");
-        }
-
-        // LevelInfoLayer and PlayLayer are pushed over this Ranked scene. The
-        // corresponding onExit() intentionally stops polling and input while a
-        // player is inside those scenes, so every return through popScene() must
-        // restore them. Without this lifecycle pair, the retained Ranked layer
-        // comes back frozen on its pre-launch "OPENING LEVEL / STARTS IN 05"
-        // frame and can never observe ROUND_RESULT or the following Round.
-        setKeypadEnabled(true);
-        if (m_menu) m_menu->setTouchEnabled(true);
-        schedule(schedule_selector(CorumRankedLayer::refresh), 0.20f);
-
-        // Reconcile any Attempt ACK or match poll that completed while the
-        // Ranked scene was covered instead of waiting for another visual frame.
-        refresh(0.0f);
-    }
-
-    void refresh(float) {
-        auto& runtime = RankedRuntime::get();
-        runtime.tick();
-        auto& audio = RankedAudioManager::get();
-        audio.configure(runtime.view().client);
-        audio.tick();
-        syncResources();
-        syncPhase();
-        updateAutomation();
-
-        auto const uiKey = presentationKey();
-        if (prepareUiTransition(uiKey)) {
-            render();
-            applyFadeInIfNeeded();
-        }
-        updateDynamicUi();
-        syncAudioMode();
-        maybeEnterLevel();
-    }
-
-    bool showResourceGate() const {
-        auto const& audioConfig = RankedRuntime::get().view().client.audio;
-        if (!audioConfig.enabled || audioConfig.resources.empty()) return false;
-        auto const& audio = RankedAudioManager::get();
-        return audio.requiresResourceDownload() || !m_resourceGateAcknowledged;
-    }
-
-    void syncResources() {
-        auto& audio = RankedAudioManager::get();
-        auto const& audioConfig = RankedRuntime::get().view().client.audio;
-        if (!audioConfig.enabled || audioConfig.resources.empty()) {
-            m_resourceGateInitialized = true;
-            m_resourceGateAcknowledged = true;
-            m_resourceGateWasMissing = false;
-            m_resourceGateMenuRestored = false;
-            return;
-        }
-
-        auto const missing = audio.requiresResourceDownload();
-        if (!m_resourceGateInitialized) {
-            m_resourceGateInitialized = true;
-            m_resourceGateAcknowledged = !missing;
-        }
-        if (missing && !m_resourceGateWasMissing) {
-            m_resourceGateAcknowledged = false;
-            m_resourceGateMenuRestored = false;
-        }
-        m_resourceGateWasMissing = missing;
-
-        if (showResourceGate() && !m_resourceGateMenuRestored) {
-            audio.restoreMenuMusic();
-            m_resourceGateMenuRestored = true;
-        }
-        if (!showResourceGate()) m_resourceGateMenuRestored = false;
-    }
-
-    std::string presentationKey() const {
-        if (showResourceGate()) {
-            auto const resources = RankedAudioManager::get().downloadView();
-            return fmt::format("resources:{}", static_cast<int>(resources.state));
-        }
-        if (m_page == Page::HistoryList) {
-            auto const& view = RankedRuntime::get().view();
-            return fmt::format(
-                "history:list:{}:{}:{}",
-                view.historyLoading,
-                view.historyError,
-                view.history.size()
-            );
-        }
-        if (m_page == Page::HistoryDetail) return fmt::format("history:detail:{}", m_historyIndex);
-        auto const& view = RankedRuntime::get().view();
-        if (view.stage != RuntimeStage::Matched) {
-            return fmt::format(
-                "stage:{}:placement:{}:{}",
-                static_cast<int>(view.stage),
-                view.placement.required,
-                view.placement.active
-            );
-        }
-        if (view.match.placement) {
-            return fmt::format(
-                "placement:{}:{}:{}:{}:{}:{}:{}:{}:{}",
-                view.placement.state,
-                view.placement.currentStageIndex,
-                view.placement.currentMapIndex,
-                view.placement.currentMapScore,
-                view.placement.currentMapGrade,
-                view.placement.currentMapClears,
-                view.placement.stageResults.size(),
-                view.placement.finalResult.displayedTier,
-                view.error
-            );
-        }
-        auto key = fmt::format(
-            "match:{}:{}:{}:spectator:{}",
-            view.match.state,
-            view.match.roundNumber,
-            view.match.deathmatchSequence,
-            view.match.spectatorActive
-        );
-        if (view.match.state == "BAN_PHASE") {
-            key += fmt::format(
-                ":{}:{}:{}",
-                m_selectedBan,
-                m_pendingBan,
-                view.match.ownBanConfirmed
-            );
-        }
-        return key;
-    }
-
-    double uiFadeInSeconds() const {
-        return std::clamp(RankedRuntime::get().view().client.ui.fadeInSeconds, 0.0, 3.0);
-    }
-
-    double uiFadeOutSeconds() const {
-        return std::clamp(RankedRuntime::get().view().client.ui.fadeOutSeconds, 0.0, 3.0);
-    }
-
-    bool prepareUiTransition(std::string const& key) {
-        auto const now = SteadyClock::now();
-        if (m_renderedUiKey.empty()) {
-            m_renderedUiKey = key;
-            m_fadeInNextRender = true;
-            return true;
-        }
-
-        if (m_uiFadingOut) {
-            m_pendingUiKey = key;
-            if (now < m_uiTransitionDeadline) return false;
-            m_uiFadingOut = false;
-            m_renderedUiKey = m_pendingUiKey;
-            m_fadeInNextRender = true;
-            return true;
-        }
-
-        // Rebuilding the CCMenu every 200 ms invalidated its raw selected-item
-        // pointer between touch-began and touch-ended on iOS. The visible UI tree
-        // now changes only when its presentation key changes; countdowns and live
-        // values are updated in place by updateDynamicUi().
-        if (key == m_renderedUiKey) return false;
-        m_pendingUiKey = key;
-        auto const fadeOut = uiFadeOutSeconds();
-        if (fadeOut <= 0.0 || !m_fadeRoot) {
-            m_renderedUiKey = key;
-            m_fadeInNextRender = true;
-            return true;
-        }
-
-        m_uiFadingOut = true;
-        m_uiTransitionDeadline = now + std::chrono::milliseconds(
-            static_cast<int>(std::round(fadeOut * 1000.0))
-        );
-        m_fadeRoot->stopAllActions();
-        m_fadeRoot->runAction(CCFadeTo::create(static_cast<float>(fadeOut), 0));
-        return false;
-    }
-
-    void applyFadeInIfNeeded() {
-        if (!m_fadeInNextRender || !m_fadeRoot) return;
-        m_fadeInNextRender = false;
-        auto const fadeIn = uiFadeInSeconds();
-        m_fadeRoot->stopAllActions();
-        if (fadeIn <= 0.0) {
-            m_fadeRoot->setOpacity(255);
-            return;
-        }
-        m_fadeRoot->setOpacity(0);
-        m_fadeRoot->runAction(CCFadeTo::create(static_cast<float>(fadeIn), 255));
-    }
-
-    void syncAudioMode() {
-        auto& audio = RankedAudioManager::get();
-        if (showResourceGate()) return;
-
-        auto const& view = RankedRuntime::get().view();
-        auto const lobbyMode = [&view]() {
-            // A promotion series is the stronger lobby state. In normal operation
-            // promotion and demotion warning are mutually exclusive, but this
-            // precedence keeps the audio deterministic if stale profile data ever
-            // exposes both flags during a refresh.
-            if (view.promotion.active) return RankedAudioMode::LobbyPromotion;
-            if (view.demotionWarning) return RankedAudioMode::LobbyDemotionWarning;
-            return RankedAudioMode::Lobby;
-        };
-
-        if (view.stage == RuntimeStage::Matched) {
-            auto const& state = view.match.state;
-            auto const gameplayTransition =
-                state == "ROUND_PREPARE" ||
-                state == "DEATHMATCH_PREPARE" ||
-                state == "ROUND_PLAYING" ||
-                state == "FINAL_ATTEMPT_WINDOW" ||
-                state == "LAST_ATTEMPT_WINDOW" ||
-                state == "DEATHMATCH_PLAYING" ||
-                state == "MAP_PREPARE" ||
-                state == "MAP_PLAYING" ||
-                state == "MAP_SETTLING";
-            if ((m_enteringSongGate || m_enteringLevel) && gameplayTransition) return;
-        }
-
-        if (m_page != Page::Live || view.stage != RuntimeStage::Matched) {
-            audio.setMode(lobbyMode());
-            return;
-        }
-
-        if (view.match.state == "MATCH_RESULT") {
-            audio.setMode(view.match.winnerSide == view.match.side
-                ? RankedAudioMode::ResultWin
-                : RankedAudioMode::ResultLose);
-            return;
-        }
-
-        if (view.match.state == "CANCELLED") {
-            audio.setMode(lobbyMode());
-            return;
-        }
-
-        if (view.match.placement && view.match.state == "STAGE_RESULT") {
-            if (view.placement.stageResults.empty()) return;
-            auto const& result = view.placement.stageResults.back();
-            auto const key = fmt::format("{}:{}", view.placement.runId, result.stageIndex);
-            if (m_stageResultAudioPlayedKey == key) {
-                audio.setMode(
-                    result.stageGrade == "S" || result.stageGrade == "A" || result.stageGrade == "B"
-                        ? RankedAudioMode::ResultWin
-                        : RankedAudioMode::ResultLose
-                );
-            }
-            return;
-        }
-
-        auto const& state = view.match.state;
-        auto const isDeathmatchWait =
-            state == "DEATHMATCH_PREPARE" ||
-            state == "DEATHMATCH_PLAYING" ||
-            state == "DEATHMATCH_RESULT";
-        auto const isRoundThree =
-            view.match.roundNumber >= 3 &&
-            (
-                state == "ROUND_PREPARE" ||
-                state == "ROUND_PLAYING" ||
-                state == "FINAL_ATTEMPT_WINDOW" ||
-                state == "LAST_ATTEMPT_WINDOW" ||
-                state == "ROUND_SETTLING" ||
-                state == "ROUND_RESULT"
-            );
-
-        audio.setMode(isDeathmatchWait || isRoundThree
-            ? RankedAudioMode::Round3DeathmatchWait
-            : RankedAudioMode::Round12);
-    }
-
-    void syncPhase() {
-        auto const& view = RankedRuntime::get().view();
-        if (view.stage == RuntimeStage::Matched && m_lastMatchId != view.match.matchId) {
-            m_lastMatchId = view.match.matchId;
-            m_selectedBan.clear();
-            m_pendingBan.clear();
-            m_localMessage.clear();
-            m_resourceKey.clear();
-            m_matchFoundReadySent = false;
-        }
-        // Ban acknowledgement/error can change independently of the visible phase.
-        // Reconcile it before the phase-key early return.
-        if (view.stage == RuntimeStage::Matched) {
-            if (view.match.ownBanConfirmed) {
-                m_selectedBan = view.match.ownBanCanonicalLevelId;
-                m_pendingBan.clear();
-            } else if (!view.error.empty() && !m_pendingBan.empty()) {
-                m_pendingBan.clear();
-            }
-        }
-
-        auto const key = view.stage == RuntimeStage::Matched
-            ? fmt::format("{}:{}:{}", view.match.matchId, view.match.state, view.match.stateVersion)
-            : fmt::format("stage:{}", static_cast<int>(view.stage));
-        if (m_phaseKey == key) return;
-        auto const stateChanged = m_phaseKey.empty() ||
-            (view.stage == RuntimeStage::Matched && m_phaseKey.find(view.match.state) == std::string::npos);
-        m_phaseKey = key;
-        if (stateChanged) {
-            m_phaseStartedAt = SteadyClock::now();
-            m_matchFoundReadySent = false;
-        }
-
-        if (view.stage == RuntimeStage::Matched) {
-            auto const newResourceKey = resourceKey(view.match);
-            if (newResourceKey != m_resourceKey) {
-                m_resourceKey = newResourceKey;
-                m_readySent = false;
-                m_enteringSongGate = false;
-                RankedRuntime::get().setSongBypassAllowed(false);
-                m_enteringLevel = false;
-                m_songIds.clear();
-                releaseResolvedLevel();
-                m_levelLookupError.clear();
-                m_levelLookupAttempts = 0;
-                m_levelLookupStartedAt = SteadyClock::now();
-                m_levelLookupNextAttemptAt = {};
-                m_prepareLoadVisual = 0.0f;
-            }
-
-        }
-    }
-
-    double phaseSeconds() const {
-        if (m_phaseStartedAt == SteadyClock::time_point{}) return 0.0;
-        return std::chrono::duration<double>(SteadyClock::now() - m_phaseStartedAt).count();
-    }
-
-    void resetDynamicUiPointers() {
-        m_resourceCountLabel = nullptr;
-        m_resourceProgressFill = nullptr;
-        m_resourceProgressLabel = nullptr;
-        m_resourceProgressWidth = 0.0f;
-        m_mainStatusLabel = nullptr;
-        m_matchFoundCountdownLabel = nullptr;
-        m_banTimerLabel = nullptr;
-        m_prepareFooterLabel = nullptr;
-        m_prepareLoadStageLabel = nullptr;
-        m_prepareLoadPercentLabel = nullptr;
-        m_prepareLoadFill = nullptr;
-        m_prepareLoadWidth = 0.0f;
-        m_spectatorStateLabel = nullptr;
-        m_spectatorProgressLabel = nullptr;
-        m_spectatorScoreLabel = nullptr;
-        m_spectatorHintLabel = nullptr;
-    }
-
-    void clearUi() {
-        resetDynamicUiPointers();
-        if (m_menu && m_menu->m_pSelectedItem) {
-            // Geode's CCMenu selected-item safety hook is not installed on iOS.
-            // Clear it explicitly before destroying children so ccTouchEnded can
-            // never activate a freed CCMenuItem.
-            m_menu->m_pSelectedItem = nullptr;
-        }
-        m_root->removeAllChildrenWithCleanup(true);
-        m_menu->removeAllChildrenWithCleanup(true);
-    }
-
-    void updateDynamicUi() {
-        if (showResourceGate()) {
-            auto const resourceView = RankedAudioManager::get().downloadView();
-            if (m_resourceCountLabel) {
-                m_resourceCountLabel->setString(
-                    fmt::format(
-                        "{} / {} {}",
-                        resourceView.ready,
-                        resourceView.total,
-                        tr("ready", "READY")
-                    ).c_str()
-                );
-                m_resourceCountLabel->setColor(
-                    resourceView.ready == resourceView.total ? kGreen : ccc3(240, 244, 250)
-                );
-            }
-            double progress = resourceView.total > 0
-                ? static_cast<double>(resourceView.ready) / static_cast<double>(resourceView.total)
-                : 1.0;
-            if (resourceView.state == RankedResourceDownloadState::Downloading && resourceView.total > 0) {
-                progress = std::min(1.0, (
-                    static_cast<double>(resourceView.ready) +
-                    static_cast<double>(resourceView.activeProgress) / 100.0
-                ) / static_cast<double>(resourceView.total));
-            }
-            progress = std::clamp(progress, 0.0, 1.0);
-            if (m_resourceProgressFill) {
-                m_resourceProgressFill->setContentSize({
-                    static_cast<float>(m_resourceProgressWidth * progress),
-                    10.0f
-                });
-            }
-            if (m_resourceProgressLabel) {
-                m_resourceProgressLabel->setString(
-                    fmt::format("{}%", static_cast<int>(std::round(progress * 100.0))).c_str()
-                );
-            }
-            return;
-        }
-
-        if (m_page != Page::Live) return;
-        auto const& view = RankedRuntime::get().view();
-        if (view.stage != RuntimeStage::Matched) {
-            if (m_mainStatusLabel) {
-                auto detail = view.error.empty() ? view.status : view.error;
-                if (!m_localMessage.empty()) detail = m_localMessage;
-                m_mainStatusLabel->setString(shorten(detail, 90).c_str());
-                m_mainStatusLabel->setColor(view.error.empty() ? ccc3(220, 228, 244) : kRed);
-            }
-            return;
-        }
-
-        auto const& match = view.match;
-        if (match.state == "MATCHED" && m_matchFoundCountdownLabel) {
-            auto const left = std::max(0, 5 - static_cast<int>(std::floor(phaseSeconds())));
-            m_matchFoundCountdownLabel->setString(fmt::format("{}", left).c_str());
-            m_matchFoundCountdownLabel->setColor(left <= 2 ? kSideRed : kGold);
-        }
-
-        if (match.state == "BAN_PHASE" && m_banTimerLabel) {
-            auto const remaining = std::max<std::int64_t>(0, RankedRuntime::get().deadlineSeconds().value_or(0));
-            m_banTimerLabel->setString(fmt::format("{}", remaining).c_str());
-            m_banTimerLabel->setColor(remaining <= 3 ? kSideRed : ccc3(245, 248, 255));
-        }
-
-        if (m_prepareFooterLabel) {
-            auto const ownA = match.side == "A";
-            auto& runtime = RankedRuntime::get();
-            auto const clearSyncPending =
-                match.deathmatchSequence <= 0 &&
-                runtime.localDisplayClears() >= 3 &&
-                runtime.hasLocalAttemptInFlight();
-            auto const seconds = std::max(0, 10 - static_cast<int>(std::floor(phaseSeconds())));
-            std::string footer = fmt::format("{}  {:02d}", tr("starts-in", "STARTS IN"), seconds);
-            if (clearSyncPending) {
-                footer = tr("syncing-clear", "SYNCING CLEAR...");
-            } else if (match.state == "DEATHMATCH_PLAYING") {
-                auto displayOwnUsed = ownA ? match.deathmatchAttemptsUsedA : match.deathmatchAttemptsUsedB;
-                auto displayOpponentUsed = ownA ? match.deathmatchAttemptsUsedB : match.deathmatchAttemptsUsedA;
-                displayOwnUsed = std::max(displayOwnUsed, runtime.localDeathmatchVisualAttemptsUsed());
-                footer = displayOwnUsed >= 3
-                    ? fmt::format("{}   {}/3", tr("waiting-opponent", "WAITING FOR OPPONENT"), displayOpponentUsed)
-                    : corum::ranked::i18n::attemptOfThree(std::min(3, displayOwnUsed + 1));
-            } else if (phaseSeconds() >= 10.0) {
-                auto const ownReady = ownA ? match.readyA : match.readyB;
-                auto const opponentReady = ownA ? match.readyB : match.readyA;
-                if (!ownReady) footer = tr("waiting-download", "WAITING FOR YOUR DOWNLOAD");
-                else if (!opponentReady) footer = corum::ranked::i18n::waitingForPlayer(upper(shorten(match.opponentName, 13)));
-                else footer = tr("starting", "STARTING...");
-            }
-            m_prepareFooterLabel->setString(footer.c_str());
-        }
-
-        if (
-            match.state == "ROUND_PREPARE" ||
-            match.state == "DEATHMATCH_PREPARE"
-        ) {
-            auto const target = preparationProgressTarget();
-            auto const delta = std::max(0.0f, target - m_prepareLoadVisual);
-            m_prepareLoadVisual = std::clamp(
-                m_prepareLoadVisual + std::max(0.0025f, delta * 0.26f),
-                0.0f,
-                target
-            );
-            if (m_prepareLoadFill) {
-                m_prepareLoadFill->setContentSize({m_prepareLoadWidth * m_prepareLoadVisual, 8.0f});
-            }
-            if (m_prepareLoadPercentLabel) {
-                m_prepareLoadPercentLabel->setString(
-                    fmt::format("{}%", static_cast<int>(std::round(m_prepareLoadVisual * 100.0f))).c_str()
-                );
-            }
-            if (m_prepareLoadStageLabel) {
-                m_prepareLoadStageLabel->setString(preparationStageText().c_str());
-                m_prepareLoadStageLabel->setColor(
-                    m_levelLookupError.empty() ? kCyan : kGold
-                );
-            }
-        }
-
-        if (m_spectatorProgressLabel) {
-            auto const ownA = match.side == "A";
-            auto const ownScore = ownA ? match.scoreA : match.scoreB;
-            auto const opponentScore = ownA ? match.scoreB : match.scoreA;
-            auto const opponentAttemptActive = match.spectatorCurrentProgress.has_value();
-            if (m_spectatorStateLabel) {
-                auto const stateText = opponentAttemptActive
-                    ? tr("live-progress", "LIVE PROGRESS")
-                    : tr("waiting-start", "WAITING TO START");
-                m_spectatorStateLabel->setString(stateText.c_str());
-            }
-            m_spectatorProgressLabel->setString(
-                opponentAttemptActive
-                    ? fmt::format("{}%", match.spectatorCurrentProgress.value_or(0)).c_str()
-                    : "--"
-            );
-            if (m_spectatorScoreLabel) {
-                m_spectatorScoreLabel->setString(
-                    scoreComparison(ownScore, opponentScore).c_str()
-                );
-            }
-            if (m_spectatorHintLabel) {
-                std::string hint = tr("round-resolve-hint", "THE ROUND WILL RESOLVE WHEN THE ACTIVE ATTEMPT ENDS");
-                if (!opponentAttemptActive && match.state == "LAST_ATTEMPT_WINDOW") {
-                    auto const remaining = std::max<std::int64_t>(
-                        0,
-                        RankedRuntime::get().deadlineSeconds().value_or(0)
-                    );
-                    hint = corum::ranked::i18n::isKorean()
-                        ? fmt::format("{} {}ì´ˆ", tr("last-attempt-hint", "OPPONENT HAS TO START THE LAST ATTEMPT"), remaining)
-                        : fmt::format("OPPONENT HAS {}s TO START THE LAST ATTEMPT", remaining);
-                }
-                m_spectatorHintLabel->setString(hint.c_str());
-            }
-        }
-    }
-
-    void render() {
-        clearUi();
-        auto const& view = RankedRuntime::get().view();
-        if (showResourceGate()) {
-            renderResources();
-            return;
-        }
-        if (m_page == Page::HistoryList) {
-            renderHistoryList(view);
-            return;
-        }
-        if (m_page == Page::HistoryDetail) {
-            renderHistoryDetail(view);
-            return;
-        }
-
-        if (view.stage == RuntimeStage::Matched) {
-            renderMatch(view);
-        } else {
-            renderMain(view);
-        }
-    }
-
-    void addTopBack(bool closeLayer = true) {
-        auto const size = CCDirector::sharedDirector()->getWinSize();
-        auto* sprite = CCSprite::createWithSpriteFrameName("GJ_arrow_01_001.png");
-        sprite->setScale(0.62f);
-        auto* button = CCMenuItemSpriteExtra::create(
-            sprite,
-            this,
-            closeLayer
-                ? menu_selector(CorumRankedLayer::onCloseLayer)
-                : menu_selector(CorumRankedLayer::onHistoryBack)
-        );
-        button->setPosition({24.0f, size.height - 24.0f});
-        m_menu->addChild(button);
-    }
-
-    void addScreenHeader(
-        std::string const& titleText,
-        std::string const& eyebrowText,
-        ccColor3B titleColor = corum::ranked::ui::Text,
-        ccColor3B accent = kCyan
-    ) {
-        auto const size = CCDirector::sharedDirector()->getWinSize();
-        auto* title = makeLabel(
-            titleText,
-            0.70f,
-            {size.width / 2.0f, size.height - 28.0f},
-            titleColor,
-            "black"
-        );
-        title->limitLabelWidth(size.width - 170.0f, 0.70f, 0.40f);
-        m_root->addChild(title, 6);
-
-        auto* eyebrow = makeLabel(
-            eyebrowText,
-            0.26f,
-            {size.width / 2.0f, size.height - 53.0f},
-            accent,
-            "semibold"
-        );
-        eyebrow->limitLabelWidth(238.0f, 0.26f, 0.18f);
-        m_root->addChild(eyebrow, 6);
-
-        auto const lineWidth = std::max(24.0f, std::min(92.0f, size.width / 2.0f - 122.0f));
-        for (auto const x : {size.width / 2.0f - 108.0f - lineWidth, size.width / 2.0f + 108.0f}) {
-            auto* line = CCLayerColor::create({accent.r, accent.g, accent.b, 95});
-            line->setContentSize({lineWidth, 1.0f});
-            line->setPosition({x, size.height - 53.5f});
-            m_root->addChild(line, 4);
-        }
-    }
-
-    CCMenuItemSpriteExtra* addButton(
-        std::string const& text,
-        CCPoint position,
-        SEL_MenuHandler selector,
-        bool danger = false,
-        float scale = 0.72f
-    ) {
-        auto* visual = makeActionButtonVisual(text, danger);
-        visual->setScale(scale);
-        auto* item = CCMenuItemSpriteExtra::create(visual, this, selector);
-        item->setPosition(position);
-        m_menu->addChild(item);
-        return item;
-    }
-
-    void addLanguageSelector() {
-        auto const size = CCDirector::sharedDirector()->getWinSize();
-        auto const selected = corum::ranked::i18n::language();
-
-        auto* englishVisual = makeActionButtonVisual(
-            "English",
-            false,
-            selected == corum::ranked::i18n::Language::English
-        );
-        englishVisual->setScale(0.43f);
-        auto* english = CCMenuItemSpriteExtra::create(
-            englishVisual,
-            this,
-            menu_selector(CorumRankedLayer::onEnglish)
-        );
-        english->setPosition({77.0f, size.height - 28.0f});
-        english->setID("ranked-language-english"_spr);
-        m_menu->addChild(english);
-
-        auto* koreanVisual = makeActionButtonVisual(
-            "í•œêµ­ì–´",
-            false,
-            selected == corum::ranked::i18n::Language::Korean
-        );
-        koreanVisual->setScale(0.43f);
-        auto* korean = CCMenuItemSpriteExtra::create(
-            koreanVisual,
-            this,
-            menu_selector(CorumRankedLayer::onKorean)
-        );
-        korean->setPosition({128.0f, size.height - 28.0f});
-        korean->setID("ranked-language-korean"_spr);
-        m_menu->addChild(korean);
-    }
-
-    void addStatusPill(std::string const& text, CCPoint position, ccColor3B color) {
-        auto* panel = makePanel({106.0f, 28.0f}, position, color, 190);
-        m_root->addChild(panel, 1);
-        auto* label = makeLabel(text, 0.32f, position, corum::ranked::ui::Text, "semibold");
-        label->limitLabelWidth(96.0f, 0.32f, 0.20f);
-        m_root->addChild(label, 2);
-    }
-
-    void addRatingMarks(
-        std::vector<std::string> const& results,
-        int slots,
-        CCPoint center,
-        float spacing = 13.0f,
-        float scale = 0.24f
-    ) {
-        slots = std::clamp(slots, 1, 9);
-        auto const totalWidth = spacing * static_cast<float>(slots - 1);
-        for (int index = 0; index < slots; ++index) {
-            std::string text = "-";
-            ccColor3B color = ccc3(145, 151, 166);
-            if (index < static_cast<int>(results.size())) {
-                if (results[index] == "WIN") {
-                    text = "O";
-                    color = kGreen;
-                } else if (results[index] == "LOSS") {
-                    text = "X";
-                    color = kRed;
-                }
-            }
-            auto* label = makeLabel(
-                text,
-                scale,
-                {center.x - totalWidth / 2.0f + spacing * static_cast<float>(index), center.y},
-                color,
-                "black"
-            );
-            m_root->addChild(label, 6);
-        }
-    }
-
-    void addPromotionAura(CCPoint center, CCSize size, bool perfect = false) {
-        auto const accent = perfect ? kGold : ccc3(255, 137, 58);
-        auto const bottom = center.y - size.height / 2.0f + 4.0f;
-
-        // A restrained light rail replaces the repeated sticker-like fire PNGs.
-        // It preserves the special-state cue without covering trophies or text.
-        auto* glow = CCLayerColor::create({accent.r, accent.g, accent.b, static_cast<GLubyte>(perfect ? 160 : 118)});
-        glow->setContentSize({std::max(24.0f, size.width - 24.0f), perfect ? 2.0f : 1.5f});
-        glow->setPosition({center.x - glow->getContentSize().width / 2.0f, bottom});
-        glow->runAction(CCRepeatForever::create(CCSequence::create(
-            CCFadeTo::create(0.75f, perfect ? 245 : 205),
-            CCFadeTo::create(0.75f, perfect ? 125 : 88),
-            nullptr
-        )));
-        m_root->addChild(glow, 3);
-
-        for (auto const x : {center.x - size.width / 2.0f + 5.0f, center.x + size.width / 2.0f - 6.5f}) {
-            auto* rail = CCLayerColor::create({accent.r, accent.g, accent.b, static_cast<GLubyte>(perfect ? 185 : 132)});
-            rail->setContentSize({1.5f, perfect ? 24.0f : 17.0f});
-            rail->setPosition({x, bottom});
-            m_root->addChild(rail, 3);
-        }
-    }
-
-    void addStreakLabel(
-        int streak,
-        CCPoint position,
-        float scale = 0.27f,
-        float maximumWidth = 150.0f,
-        bool showDivider = true
-    ) {
-        if (std::abs(streak) < 2) return;
-        auto const winning = streak > 0;
-        auto const color = winning ? kGold : kRed;
-
-        if (showDivider) {
-            auto* divider = CCLayerColor::create({color.r, color.g, color.b, 100});
-            divider->setContentSize({std::min(112.0f, maximumWidth), 0.75f});
-            divider->setPosition({position.x - divider->getContentSize().width / 2.0f, position.y + 8.0f});
-            m_root->addChild(divider, 6);
-        }
-
-        auto* label = makeLabel(
-            corum::ranked::i18n::streak(std::abs(streak), winning),
-            scale,
-            position,
-            color,
-            "black"
-        );
-        label->limitLabelWidth(maximumWidth, scale, std::max(0.16f, scale * 0.72f));
-        m_root->addChild(label, 7);
-    }
-
-    struct PlayerCardRefs {
-        CCLabelBMFont* scoreLabel = nullptr;
-        CCNode* tierPlate = nullptr;
-        CCNode* tierTrophy = nullptr;
-    };
-
-    void addPlayerCard(
-        CCPoint center,
-        std::string const& name,
-        RankedProfileView const& profile,
-        bool self,
-        PlayerCardRefs* outRefs = nullptr,
-        bool combineTierAndScore = false
-    ) {
-        auto const& tier = profile.displayedTier;
-        auto const accent = tierColor(upper(tier));
-        auto* panel = makeNeonPanel({150.0f, 184.0f}, center, accent, kDeepPanel, 246);
-        m_root->addChild(panel, 1);
-        if (profile.promotion.active) addPromotionAura(center, {150.0f, 184.0f});
-
-        auto* ribbon = makeTextPlate(
-            self ? tr("you", "YOU") : tr("opponent", "OPPONENT"),
-            {74.0f, 18.0f},
-            {center.x, center.y + 78.0f},
-            accent,
-            0.20f,
-            self ? kGold : ccc3(220, 228, 242)
-        );
-        m_root->addChild(ribbon, 2);
-
-        int frame = 1;
-        if (self) {
-            if (auto* game = GameManager::sharedState()) frame = std::max(1, game->getPlayerFrame());
-        }
-
-        auto* iconPlate = makeNeonPanel({66.0f, 66.0f}, {center.x, center.y + 29.0f}, accent, {5, 11, 23}, 248);
-        m_root->addChild(iconPlate, 2);
-        auto* icon = SimplePlayer::create(frame);
-        icon->setScale(1.12f);
-        icon->setPosition({center.x, center.y + 29.0f});
-        if (self) {
-            if (auto* game = GameManager::sharedState()) {
-                icon->setColors(game->colorForIdx(game->getPlayerColor()), game->colorForIdx(game->getPlayerColor2()));
-            }
-        }
-        m_root->addChild(icon, 4);
-        addStreakLabel(profile.resultStreak, {center.x, center.y + 66.0f}, 0.22f, 126.0f, false);
-
-        auto* nameLabel = makeLabel(shorten(upper(name), 15), 0.38f, {center.x, center.y - 11.0f}, corum::ranked::ui::Text, "semibold");
-        nameLabel->limitLabelWidth(126.0f, 0.38f, 0.25f);
-        m_root->addChild(nameLabel, 4);
-
-        auto const placement = profile.placementGames < profile.placementGamesRequired;
-        auto const captionText = placement
-            ? tr("placement", "PLACEMENT")
-            : (profile.promotion.active ? tr("promotion", "PROMOTION") : tr("rating", "RATING"));
-        auto* lpCaption = makeLabel(captionText, 0.23f, {center.x, center.y - 32.0f}, kCyan, "semibold");
-        m_root->addChild(lpCaption, 4);
-        if (placement) {
-            addRatingMarks(profile.placementResults, std::max(1, profile.placementGamesRequired), {center.x, center.y - 47.0f});
-        } else if (profile.promotion.active) {
-            addRatingMarks(profile.promotion.results, profile.promotion.gamesRequired, {center.x, center.y - 47.0f});
-            auto* detail = makeLabel(
-                corum::ranked::i18n::promotionMatch(profile.promotion.winsRequired),
-                0.20f,
-                {center.x, center.y - 61.0f},
-                ccc3(145, 255, 125),
-                "semibold"
-            );
-            detail->limitLabelWidth(134.0f, 0.20f, 0.14f);
-            m_root->addChild(detail, 6);
-        } else {
-            auto* lpLabel = makeLabel(
-                combineTierAndScore
-                    ? fmt::format("{} - {} LP", upper(tier), profile.visibleRankedScore.value_or(0))
-                    : fmt::format("{} LP", profile.visibleRankedScore.value_or(0)),
-                0.35f,
-                {center.x, center.y - 47.0f},
-                ccc3(240, 244, 250),
-                "black"
-            );
-            lpLabel->limitLabelWidth(124.0f, 0.35f, 0.22f);
-            m_root->addChild(lpLabel, 4);
-            if (outRefs) outRefs->scoreLabel = lpLabel;
-            if (profile.demotionWarning) {
-                auto* warning = makeLabel(tr("demotion-warning", "DEMOTION WARNING"), 0.20f, {center.x, center.y - 62.0f}, kRed, "black");
-                warning->limitLabelWidth(134.0f, 0.20f, 0.14f);
-                m_root->addChild(warning, 6);
-            }
-        }
-
-        auto* tierPlate = makeTextPlate(upper(tier), {96.0f, 24.0f}, {center.x, center.y - 74.0f}, accent, 0.28f, accent, "black");
-        m_root->addChild(tierPlate, 3);
-        auto* tierTrophy = corum::ranked::ui::createAnimatedRankBadge(
-            tier,
-            {18.0f, 18.0f},
-            corum::ranked::ui::RankBadgeDisplay::Compact
-        );
-        tierTrophy->setPosition({center.x - 58.0f, center.y - 74.0f});
-        m_root->addChild(tierTrophy, 5);
-        if (outRefs) {
-            outRefs->tierPlate = tierPlate;
-            outRefs->tierTrophy = tierTrophy;
-        }
-    }
-
-    void renderResources() {
-        auto const size = CCDirector::sharedDirector()->getWinSize();
-        addTopBack(true);
-        auto const resourceView = RankedAudioManager::get().downloadView();
-
-        auto* panel = makeNeonPanel(
-            {std::min(390.0f, size.width - 90.0f), 220.0f},
-            {size.width / 2.0f, size.height / 2.0f - 2.0f},
-            kCyan,
-            kDeepPanel,
-            248
-        );
-        m_root->addChild(panel, 1);
-
-        std::string title = tr("ranked-resources", "RANKED RESOURCES");
-        std::string subtitle = tr("resources-required", "Additional resources are required.");
-        ccColor3B accent = kCyan;
-        if (resourceView.state == RankedResourceDownloadState::Downloading) {
-            title = tr("downloading-resources", "DOWNLOADING RESOURCES");
-            subtitle = tr("keep-open", "Keep this screen open until the download is complete.");
-            accent = kGold;
-        } else if (resourceView.state == RankedResourceDownloadState::Ready) {
-            title = tr("all-resources-ready", "ALL RESOURCES READY");
-            subtitle = tr("everything-ready", "Everything required for Ranked is ready.");
-            accent = kGreen;
-        } else if (resourceView.state == RankedResourceDownloadState::Failed) {
-            title = tr("resources-failed", "SOME RESOURCES FAILED");
-            subtitle = tr("retry-before-continuing", "Retry the failed download before continuing.");
-            accent = kRed;
-        }
-
-        auto* titleLabel = makeLabel(title, 0.52f, {size.width / 2.0f, size.height / 2.0f + 76.0f}, accent, "goldFont.fnt");
-        titleLabel->limitLabelWidth(size.width - 150.0f, 0.52f, 0.30f);
-        m_root->addChild(titleLabel, 4);
-        auto* subLabel = makeLabel(subtitle, 0.27f, {size.width / 2.0f, size.height / 2.0f + 47.0f}, ccc3(210, 220, 238), "semibold");
-        subLabel->limitLabelWidth(size.width - 150.0f, 0.27f, 0.18f);
-        m_root->addChild(subLabel, 4);
-
-        auto* count = makeLabel(
-            fmt::format("{} / {} {}", resourceView.ready, resourceView.total, tr("ready", "READY")),
-            0.38f,
-            {size.width / 2.0f, size.height / 2.0f + 10.0f},
-            resourceView.ready == resourceView.total ? kGreen : ccc3(240, 244, 250),
-            "black"
-        );
-        m_resourceCountLabel = count;
-        m_root->addChild(count, 4);
-
-        auto const barWidth = std::min(270.0f, size.width - 180.0f);
-        auto* barBack = CCLayerColor::create({9, 17, 32, 235});
-        barBack->setContentSize({barWidth, 10.0f});
-        barBack->setPosition({size.width / 2.0f - barWidth / 2.0f, size.height / 2.0f - 16.0f});
-        m_root->addChild(barBack, 3);
-        double progress = resourceView.total > 0
-            ? static_cast<double>(resourceView.ready) / static_cast<double>(resourceView.total)
-            : 1.0;
-        if (resourceView.state == RankedResourceDownloadState::Downloading && resourceView.total > 0) {
-            progress = std::min(1.0, (
-                static_cast<double>(resourceView.ready) + static_cast<double>(resourceView.activeProgress) / 100.0
-            ) / static_cast<double>(resourceView.total));
-        }
-        auto* barFill = CCLayerColor::create({accent.r, accent.g, accent.b, 245});
-        barFill->setContentSize({static_cast<float>(barWidth * std::clamp(progress, 0.0, 1.0)), 10.0f});
-        barFill->setPosition(barBack->getPosition());
-        m_resourceProgressFill = barFill;
-        m_resourceProgressWidth = barWidth;
-        m_root->addChild(barFill, 4);
-
-        if (resourceView.state == RankedResourceDownloadState::Downloading) {
-            auto* progressLabel = makeLabel(
-                fmt::format("{}%", static_cast<int>(std::round(progress * 100.0))),
-                0.22f,
-                {size.width / 2.0f, size.height / 2.0f - 40.0f},
-                kGold
-            );
-            m_resourceProgressLabel = progressLabel;
-            m_root->addChild(progressLabel, 4);
-        } else if (resourceView.state == RankedResourceDownloadState::Ready) {
-            addButton(tr("continue", "CONTINUE"), {size.width / 2.0f, size.height / 2.0f - 62.0f}, menu_selector(CorumRankedLayer::onContinueResources), false, 0.72f);
-        } else if (resourceView.state == RankedResourceDownloadState::Failed) {
-            addButton(tr("retry-failed", "RETRY FAILED"), {size.width / 2.0f, size.height / 2.0f - 62.0f}, menu_selector(CorumRankedLayer::onDownloadAllResources), true, 0.68f);
-        } else {
-            addButton(tr("download-all", "DOWNLOAD ALL"), {size.width / 2.0f, size.height / 2.0f - 62.0f}, menu_selector(CorumRankedLayer::onDownloadAllResources), false, 0.72f);
-        }
-    }
-
-    void renderPlacementPoolSelection(RuntimeView const& view) {
-        auto const size = CCDirector::sharedDirector()->getWinSize();
-        addTopBack(true);
-        addLanguageSelector();
-        addScreenHeader("PLACEMENT", "SELECT YOUR STARTING POOL", kGold, kCyan);
-
-        auto* explanation = makeLabel(
-            "THIS CHOICE ONLY SETS STAGE 1. YOUR RESULTS DETERMINE THE FINAL RANK.",
-            0.25f,
-            {size.width / 2.0f, size.height - 78.0f},
-            corum::ranked::ui::TextMuted,
-            "semibold"
-        );
-        explanation->limitLabelWidth(size.width - 74.0f, 0.25f, 0.17f);
-        m_root->addChild(explanation, 5);
-
-        auto* panel = makeNeonPanel(
-            {std::min(430.0f, size.width - 60.0f), 156.0f},
-            {size.width / 2.0f, size.height / 2.0f - 4.0f},
-            kBlue,
-            kDeepPanel,
-            244
-        );
-        m_root->addChild(panel, 1);
-
-        constexpr float spacing = 92.0f;
-        for (int pool = 1; pool <= 6; ++pool) {
-            auto const row = (pool - 1) / 3;
-            auto const column = (pool - 1) % 3;
-            auto const x = size.width / 2.0f + (static_cast<float>(column) - 1.0f) * spacing;
-            auto const y = size.height / 2.0f + 28.0f - static_cast<float>(row) * 64.0f;
-            auto* button = addButton(
-                fmt::format("POOL {}", pool),
-                {x, y},
-                menu_selector(CorumRankedLayer::onStartPlacement),
-                false,
-                0.57f
-            );
-            button->setTag(pool);
-        }
-
-        auto detail = view.error.empty() ? view.status : view.error;
-        if (!detail.empty()) {
-            auto* status = makeLabel(
-                shorten(detail, 96),
-                0.25f,
-                {size.width / 2.0f, 27.0f},
-                view.error.empty() ? corum::ranked::ui::TextMuted : kRed,
-                "semibold"
-            );
-            status->limitLabelWidth(size.width - 90.0f, 0.25f, 0.16f);
-            m_mainStatusLabel = status;
-            m_root->addChild(status, 5);
-        }
-    }
-
-    void renderMain(RuntimeView const& view) {
-        if (
-            view.stage == RuntimeStage::Ready &&
-            view.placement.required &&
-            !view.placement.active
-        ) {
-            renderPlacementPoolSelection(view);
-            return;
-        }
-        auto const size = CCDirector::sharedDirector()->getWinSize();
-        addTopBack(true);
-        addLanguageSelector();
-        addScreenHeader("CORUM RANKED", tr("competitive-ladder", "COMPETITIVE 1V1 LADDER"), kGold, kCyan);
-
-        auto* historyVisual = makeActionButtonVisual(tr("history", "HISTORY"));
-        historyVisual->setScale(0.78f);
-        auto* history = CCMenuItemSpriteExtra::create(historyVisual, this, menu_selector(CorumRankedLayer::onHistory));
-        history->setPosition({size.width - 60.0f, size.height - 28.0f});
-        m_menu->addChild(history);
-
-        auto const leftCenter = CCPoint{size.width / 2.0f - 118.0f, size.height / 2.0f - 2.0f};
-        auto const rightCenter = CCPoint{size.width / 2.0f + 118.0f, size.height / 2.0f - 2.0f};
-
-        RankedProfileView profile;
-        profile.displayedTier = view.profileTier;
-        if (view.profileScoreVisible) profile.visibleRankedScore = view.profileScore;
-        profile.placementGames = view.placementGames;
-        profile.placementGamesRequired = view.placementGamesRequired;
-        profile.placementResults = view.placementResults;
-        profile.resultStreak = view.resultStreak;
-        profile.promotion = view.promotion;
-        profile.demotionWarning = view.demotionWarning;
-
-        auto* profilePanel = makeNeonPanel({188.0f, 196.0f}, leftCenter, tierColor(upper(view.profileTier)), kDeepPanel, 246);
-        m_root->addChild(profilePanel, 1);
-        if (profile.promotion.active) addPromotionAura(leftCenter, {188.0f, 196.0f});
-        auto* profileTitle = makeLabel(tr("your-rank", "YOUR RANK"), 0.34f, {leftCenter.x, leftCenter.y + 77.0f}, kCyan, "semibold");
-        m_root->addChild(profileTitle, 4);
-        auto* emblem = corum::ranked::ui::createAnimatedRankBadge(
-            view.profileTier,
-            {68.0f, 68.0f},
-            corum::ranked::ui::RankBadgeDisplay::Large
-        );
-        emblem->setPosition({leftCenter.x, leftCenter.y + 20.0f});
-        m_root->addChild(emblem, 4);
-        addStreakLabel(profile.resultStreak, {leftCenter.x, leftCenter.y + 60.0f}, 0.28f, 154.0f);
-        auto* tier = makeLabel(upper(view.profileTier), 0.54f, {leftCenter.x, leftCenter.y - 25.0f}, tierColor(upper(view.profileTier)), "black");
-        tier->limitLabelWidth(150.0f, 0.54f, 0.32f);
-        m_root->addChild(tier, 4);
-        auto const placement = profile.placementGames < profile.placementGamesRequired;
-        if (placement) {
-            addRatingMarks(profile.placementResults, std::max(1, profile.placementGamesRequired), {leftCenter.x, leftCenter.y - 51.0f}, 16.0f, 0.30f);
-        } else if (profile.promotion.active) {
-            addRatingMarks(profile.promotion.results, profile.promotion.gamesRequired, {leftCenter.x, leftCenter.y - 49.0f}, 16.0f, 0.30f);
-        } else {
-            auto* rating = makeLabel(fmt::format("{} LP", view.profileScore), 0.46f, {leftCenter.x, leftCenter.y - 53.0f}, ccc3(240, 244, 250), "black");
-            rating->limitLabelWidth(150.0f, 0.46f, 0.28f);
-            m_root->addChild(rating, 4);
-        }
-        std::string profileHintText = tr("seasonal-progress", "SEASONAL LADDER PROGRESS");
-        ccColor3B profileHintColor = ccc3(195, 205, 224);
-        if (placement) profileHintText = tr("placement-matches", "PLACEMENT MATCHES");
-        else if (profile.promotion.active) {
-            profileHintText = corum::ranked::i18n::promotionMatch(profile.promotion.winsRequired);
-            profileHintColor = ccc3(145, 255, 125);
-        } else if (profile.demotionWarning) {
-            profileHintText = tr("demotion-warning", "DEMOTION WARNING");
-            profileHintColor = kRed;
-        }
-        auto* profileHint = makeLabel(profileHintText, 0.25f, {leftCenter.x, leftCenter.y - 79.0f}, profileHintColor, "semibold");
-        profileHint->limitLabelWidth(168.0f, 0.25f, 0.17f);
-        m_root->addChild(profileHint, 4);
-
-        auto* actionPanel = makeNeonPanel({188.0f, 196.0f}, rightCenter, kBlue, kDeepPanel, 246);
-        m_root->addChild(actionPanel, 1);
-        auto* actionTitle = makeLabel(tr("matchmaking", "MATCHMAKING"), 0.34f, {rightCenter.x, rightCenter.y + 77.0f}, kCyan, "semibold");
-        m_root->addChild(actionTitle, 4);
-
-        if (view.stage == RuntimeStage::Ready) {
-            auto* playHalo = makeNeonPanel(
-                {86.0f, 86.0f},
-                {rightCenter.x, rightCenter.y + 18.0f},
-                kCyan,
-                {7, 20, 40},
-                248
-            );
-            m_root->addChild(playHalo, 2);
-            auto* playCircle = CCSprite::createWithSpriteFrameName("GJ_playBtn_001.png");
-            playCircle->setScale(0.70f);
-            auto* play = CCMenuItemSpriteExtra::create(playCircle, this, menu_selector(CorumRankedLayer::onJoin));
-            play->setPosition({rightCenter.x, rightCenter.y + 18.0f});
-            m_menu->addChild(play);
-            auto* actionText = makeLabel(tr("start-queue", "START QUEUE"), 0.44f, {rightCenter.x, rightCenter.y - 40.0f}, kAccent, "black");
-            m_root->addChild(actionText, 4);
-            auto* actionHint = makeLabel(tr("find-match", "FIND A 1V1 MATCH"), 0.27f, {rightCenter.x, rightCenter.y - 68.0f}, corum::ranked::ui::TextMuted, "semibold");
-            m_root->addChild(actionHint, 4);
-        } else if (view.stage == RuntimeStage::Queued || view.stage == RuntimeStage::JoiningQueue) {
-            auto* spinner = LoadingSpinner::create(58.0f);
-            spinner->setPosition({rightCenter.x, rightCenter.y + 18.0f});
-            m_root->addChild(spinner, 4);
-            auto* queueing = makeLabel(tr("searching", "SEARCHING..."), 0.44f, {rightCenter.x, rightCenter.y - 40.0f}, kGold, "black");
-            m_root->addChild(queueing, 4);
-            addButton(tr("leave-queue", "LEAVE QUEUE"), {rightCenter.x, rightCenter.y - 75.0f}, menu_selector(CorumRankedLayer::onLeave), true, 0.56f);
-        } else if (view.stage == RuntimeStage::Loading) {
-            auto* spinner = LoadingSpinner::create(58.0f);
-            spinner->setPosition({rightCenter.x, rightCenter.y + 18.0f});
-            m_root->addChild(spinner, 4);
-            auto* loading = makeLabel(tr("syncing", "SYNCING..."), 0.44f, {rightCenter.x, rightCenter.y - 40.0f}, kGold, "black");
-            m_root->addChild(loading, 4);
-        } else {
-            auto* failed = makeLabel(tr("connection-issue", "CONNECTION ISSUE"), 0.34f, {rightCenter.x, rightCenter.y - 12.0f}, kRed, "black");
-            m_root->addChild(failed, 4);
-            addButton(tr("retry", "RETRY"), {rightCenter.x, rightCenter.y - 58.0f}, menu_selector(CorumRankedLayer::onRetry), false, 0.66f);
-        }
-
-#if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
-        addButton("DEBUG BOT MATCH", {96.0f, 30.0f}, menu_selector(CorumRankedLayer::onDebugBot), true, 0.54f);
-#endif
-
-        auto detail = view.error.empty() ? view.status : view.error;
-        if (!m_localMessage.empty()) detail = m_localMessage;
-        if (!detail.empty()) {
-            auto* statusPanel = makeNeonPanel({std::min(380.0f, size.width - 84.0f), 34.0f}, {size.width / 2.0f, 27.0f}, view.error.empty() ? kBlue : kRed, kDeepPanel2, 238);
-            m_root->addChild(statusPanel, 1);
-            auto* status = makeLabel(shorten(detail, 90), 0.28f, {size.width / 2.0f, 27.0f}, view.error.empty() ? ccc3(220, 228, 244) : kRed, "semibold");
-            status->limitLabelWidth(size.width - 120.0f, 0.28f, 0.18f);
-            m_mainStatusLabel = status;
-            m_root->addChild(status, 4);
-        }
-    }
-
-    void renderPlacementMap(RuntimeView const& view) {
-        auto const size = CCDirector::sharedDirector()->getWinSize();
-        auto const& placement = view.placement;
-        auto const& match = view.match;
-        auto const pool = !placement.stagePools.empty()
-            ? placement.stagePools.back()
-            : placement.startingPool;
-        addScreenHeader(
-            fmt::format("STAGE {} Â· MAP {}", placement.currentStageIndex, placement.currentMapIndex),
-            fmt::format("POOL {} Â· SOLO PLACEMENT", pool),
-            corum::ranked::ui::Text,
-            kCyan
-        );
-
-        auto* panel = makeNeonPanel(
-            {std::min(388.0f, size.width - 74.0f), 174.0f},
-            {size.width / 2.0f, size.height / 2.0f - 5.0f},
-            match.state == "MAP_SETTLING" ? kGold : kBlue,
-            kDeepPanel,
-            244
-        );
-        m_root->addChild(panel, 1);
-
-        if (match.currentMap) {
-            auto* map = makeLabel(
-                upper(match.currentMap->title),
-                0.42f,
-                {size.width / 2.0f, size.height / 2.0f + 58.0f},
-                corum::ranked::ui::Text,
-                "black"
-            );
-            map->limitLabelWidth(278.0f, 0.42f, 0.25f);
-            m_root->addChild(map, 5);
-            auto* difficulty = makeLabel(
-                match.currentMap->difficulty,
-                0.29f,
-                {size.width / 2.0f, size.height / 2.0f + 35.0f},
-                difficultyColor(match.currentMap->difficulty),
-                "semibold"
-            );
-            m_root->addChild(difficulty, 5);
-        }
-
-        auto* grade = corum::ranked::ui::PlacementGradeBadge::create(74.0f);
-        if (grade) {
-            grade->setGrade(placement.currentMapGrade, false);
-            grade->setPosition({size.width / 2.0f - 76.0f, size.height / 2.0f - 15.0f});
-            m_root->addChild(grade, 5);
-        }
-        auto* score = makeLabel(
-            fmt::format("{} / 750", placement.currentMapScore),
-            0.49f,
-            {size.width / 2.0f + 70.0f, size.height / 2.0f - 4.0f},
-            kGold,
-            "black"
-        );
-        m_root->addChild(score, 5);
-        addClearChecks(placement.currentMapClears, {size.width / 2.0f + 70.0f, size.height / 2.0f - 34.0f});
-
-        std::string stateText = "OPENING EXACT GD LEVEL...";
-        if (match.state == "MAP_PLAYING") stateText = "MAP LIVE Â· GRADE UPDATES AFTER ATTEMPT END";
-        if (match.state == "MAP_SETTLING") stateText = "FINAL ATTEMPT IN PROGRESS";
-        auto* state = makeLabel(
-            stateText,
-            0.25f,
-            {size.width / 2.0f, 34.0f},
-            match.state == "MAP_SETTLING" ? kGold : kCyan,
-            "semibold"
-        );
-        state->limitLabelWidth(size.width - 90.0f, 0.25f, 0.16f);
-        m_root->addChild(state, 5);
-    }
-
-    void renderPlacementMapResult(RuntimeView const& view) {
-        auto const size = CCDirector::sharedDirector()->getWinSize();
-        auto const& placement = view.placement;
-        addScreenHeader(
-            fmt::format("MAP {} COMPLETE", placement.currentMapIndex),
-            fmt::format("STAGE {} Â· SERVER RESULT", placement.currentStageIndex),
-            kGold,
-            kCyan
-        );
-        auto* grade = corum::ranked::ui::PlacementGradeBadge::create(122.0f);
-        if (grade) {
-            grade->setGrade(placement.currentMapGrade, false);
-            grade->setPosition({size.width / 2.0f, size.height / 2.0f + 12.0f});
-            grade->setScale(0.82f);
-            m_root->addChild(grade, 5);
-        }
-        auto* score = makeLabel(
-            fmt::format("MAP SCORE  {} / 750", placement.currentMapScore),
-            0.36f,
-            {size.width / 2.0f, size.height / 2.0f - 65.0f},
-            corum::ranked::ui::Text,
-            "black"
-        );
-        m_root->addChild(score, 5);
-        addButton(
-            placement.currentMapIndex == 1 ? "NEXT MAP" : "SHOW STAGE RESULT",
-            {size.width / 2.0f, 30.0f},
-            menu_selector(CorumRankedLayer::onContinuePlacement),
-            false,
-            0.64f
-        );
-    }
-
-    void renderPlacementStageResult(RuntimeView const& view) {
-        auto const size = CCDirector::sharedDirector()->getWinSize();
-        if (view.placement.stageResults.empty()) return;
-        auto const result = view.placement.stageResults.back();
-        auto const map1Grade = result.mapGrades.size() > 0 ? result.mapGrades[0] : "D";
-        auto const map2Grade = result.mapGrades.size() > 1 ? result.mapGrades[1] : "D";
-        auto const audioKey = fmt::format("{}:{}", view.placement.runId, result.stageIndex);
-        addScreenHeader(
-            fmt::format("STAGE {} RESULT", result.stageIndex),
-            fmt::format("POOL {} Â· {:.1f} / 750", result.pool, result.stageScore),
-            kGold,
-            kCyan
-        );
-
-        auto makeGradeGroup = [&](std::string const& grade, float x) {
-            auto* group = CCLayerColor::create({0, 0, 0, 0});
-            group->setContentSize({82.0f, 82.0f});
-            group->setAnchorPoint({0.5f, 0.5f});
-            group->setPosition({x, size.height / 2.0f + 8.0f});
-            group->setCascadeOpacityEnabled(true);
-            auto* badge = corum::ranked::ui::PlacementGradeBadge::create(82.0f);
-            if (badge) {
-                badge->setGrade(grade, false);
-                badge->setPosition({41.0f, 41.0f});
-                group->addChild(badge);
-            }
-            m_root->addChild(group, 5);
-            return group;
-        };
-
-        auto* left = makeGradeGroup(map1Grade, size.width / 2.0f - 106.0f);
-        auto* right = makeGradeGroup(map2Grade, size.width / 2.0f + 106.0f);
-        left->runAction(CCSequence::create(
-            CCDelayTime::create(0.18f),
-            CCEaseSineInOut::create(CCMoveTo::create(0.36f, {size.width / 2.0f, size.height / 2.0f + 8.0f})),
-            CCFadeOut::create(0.10f),
-            nullptr
-        ));
-        right->runAction(CCSequence::create(
-            CCDelayTime::create(0.18f),
-            CCEaseSineInOut::create(CCMoveTo::create(0.36f, {size.width / 2.0f, size.height / 2.0f + 8.0f})),
-            CCFadeOut::create(0.10f),
-            nullptr
-        ));
-
-        auto* flash = CCLayerColor::create({255, 255, 255, 0});
-        flash->setContentSize({84.0f, 84.0f});
-        flash->setPosition({size.width / 2.0f - 42.0f, size.height / 2.0f - 34.0f});
-        m_root->addChild(flash, 7);
-        flash->runAction(CCSequence::create(
-            CCDelayTime::create(0.52f),
-            CCFadeTo::create(0.05f, 210),
-            CCFadeOut::create(0.12f),
-            nullptr
-        ));
-
-        auto* finalGroup = CCLayerColor::create({0, 0, 0, 0});
-        finalGroup->setContentSize({126.0f, 126.0f});
-        finalGroup->setAnchorPoint({0.5f, 0.5f});
-        finalGroup->setPosition({size.width / 2.0f, size.height / 2.0f + 8.0f});
-        finalGroup->setCascadeOpacityEnabled(true);
-        finalGroup->setOpacity(0);
-        finalGroup->setScale(0.80f);
-        auto* finalBadge = corum::ranked::ui::PlacementGradeBadge::create(126.0f);
-        if (finalBadge) {
-            finalBadge->setGrade(result.stageGrade, false);
-            finalBadge->setPosition({63.0f, 63.0f});
-            finalGroup->addChild(finalBadge);
-        }
-        m_root->addChild(finalGroup, 8);
-        finalGroup->runAction(CCSequence::create(
-            CCDelayTime::create(0.60f),
-            CCSpawn::create(
-                CCFadeTo::create(0.10f, 255),
-                CCEaseSineOut::create(CCScaleTo::create(0.14f, 1.12f)),
-                nullptr
-            ),
-            CCEaseSineInOut::create(CCScaleTo::create(0.12f, 1.0f)),
-            nullptr
-        ));
-        if (m_stageResultAudioPlayedKey != audioKey) {
-            finalGroup->runAction(CCSequence::create(
-                CCDelayTime::create(0.60f),
-                CallFuncExt::create([this, audioKey, grade = result.stageGrade] {
-                    m_stageResultAudioPlayedKey = audioKey;
-                    RankedAudioManager::get().setMode(
-                        grade == "S" || grade == "A" || grade == "B"
-                            ? RankedAudioMode::ResultWin
-                            : RankedAudioMode::ResultLose
-                    );
-                }),
-                nullptr
-            ));
-        }
-
-        auto const finalStage = result.stageIndex >= view.placement.totalStages;
-        auto* movement = makeLabel(
-            finalStage
-                ? "ALL 10 MAPS COMPLETE"
-                : fmt::format("NEXT POOL  {}  ({:+d})", result.nextPool, result.poolDelta),
-            0.30f,
-            {size.width / 2.0f, 54.0f},
-            result.poolDelta > 0 ? kGreen : result.poolDelta < 0 ? kRed : corum::ranked::ui::TextMuted,
-            "black"
-        );
-        m_root->addChild(movement, 5);
-        auto* button = addButton(
-            finalStage ? "FINAL PLACEMENT" : "NEXT STAGE",
-            {size.width / 2.0f, 25.0f},
-            menu_selector(CorumRankedLayer::onContinuePlacement),
-            false,
-            0.56f
-        );
-        button->setEnabled(false);
-        button->runAction(CCSequence::create(
-            CCDelayTime::create(0.96f),
-            CallFuncExt::create([button] { button->setEnabled(true); }),
-            nullptr
-        ));
-    }
-
-    void renderPlacementFinal(RuntimeView const& view) {
-        auto const size = CCDirector::sharedDirector()->getWinSize();
-        auto const& finalResult = view.placement.finalResult;
-        addScreenHeader("PLACEMENT COMPLETE", "10 MAPS Â· 5 STAGES", kGold, kCyan);
-        auto* badge = corum::ranked::ui::createAnimatedRankBadge(
-            finalResult.displayedTier,
-            {112.0f, 112.0f},
-            corum::ranked::ui::RankBadgeDisplay::Hero
-        );
-        if (badge) {
-            badge->setPosition({size.width / 2.0f, size.height / 2.0f + 28.0f});
-            m_root->addChild(badge, 5);
-        }
-        auto* tier = makeLabel(
-            fmt::format("{} - {} LP", upper(finalResult.displayedTier), finalResult.visibleRankedScore),
-            0.55f,
-            {size.width / 2.0f, size.height / 2.0f - 49.0f},
-            tierColor(finalResult.displayedTier),
-            "black"
-        );
-        tier->limitLabelWidth(size.width - 100.0f, 0.55f, 0.32f);
-        m_root->addChild(tier, 5);
-        auto* placed = makeLabel("PLACED", 0.38f, {size.width / 2.0f, size.height / 2.0f - 78.0f}, kGreen, "black");
-        m_root->addChild(placed, 5);
-        if (!view.error.empty()) {
-            auto* error = makeLabel(
-                shorten(view.error, 72),
-                0.22f,
-                {size.width / 2.0f, 51.0f},
-                kRed,
-                "semibold"
-            );
-            error->limitLabelWidth(size.width - 100.0f, 0.22f, 0.15f);
-            m_root->addChild(error, 5);
-        }
-        addButton("CONTINUE", {size.width / 2.0f, 26.0f}, menu_selector(CorumRankedLayer::onResultClose), false, 0.60f);
-
-        auto const transitionKey = "placement:" + view.placement.runId;
-        if (m_rankTransitionPlayedKey != transitionKey) {
-            if (playResultRankTransition(
-                view.match.ratingEventA,
-                view.match.profileBeforeA,
-                view.match.profileAfterA
-            )) {
-                m_rankTransitionPlayedKey = transitionKey;
-            }
-        }
-        if (m_rankTransitionLayer && m_menu) m_menu->setTouchEnabled(false);
-    }
-
-    void renderPlacement(RuntimeView const& view) {
-        auto const& state = view.placement.state;
-        if (state == "PLACEMENT_RESULT") {
-            renderPlacementFinal(view);
-        } else if (state == "STAGE_RESULT") {
-            renderPlacementStageResult(view);
-        } else if (state == "MAP_RESULT") {
-            renderPlacementMapResult(view);
-        } else if (state == "CANCELLED") {
-            auto const size = CCDirector::sharedDirector()->getWinSize();
-            addScreenHeader("PLACEMENT CANCELLED", "SERVER-AUTHORITATIVE RUN", kRed, kRed);
-            addButton("CLOSE", {size.width / 2.0f, size.height / 2.0f - 30.0f}, menu_selector(CorumRankedLayer::onResultClose), true, 0.64f);
-        } else {
-            renderPlacementMap(view);
-        }
-    }
-
-    void renderMatch(RuntimeView const& view) {
-        if (view.match.placement) {
-            renderPlacement(view);
-            return;
-        }
-        auto const& match = view.match;
-        if (match.state == "MATCH_RESULT" || match.state == "CANCELLED") {
-            // MATCH_RESULT is immutable server authority. alpha.27 could trap the
-            // UI forever on SYNCING RESULT when an ACK was lost even though the
-            // server had already finalized. Transport cleanup now happens in the
-            // runtime; always render the authoritative result here.
-            renderResult(view);
-            return;
-        }
-        if (match.state == "BAN_PHASE") {
-            renderBan(match);
-            return;
-        }
-        if (match.state == "ROUND_PREPARE" || match.state == "DEATHMATCH_PREPARE") {
-            renderPrepare(match);
-            return;
-        }
-        // spectatorActive can arrive after the phase itself (state polling and
-        // attempt acknowledgements are independent). Prefer it throughout every
-        // live Round phase, and include it in presentationKey(), so a late false
-        // -> true projection always replaces OPENING LEVEL with the observer UI.
-        if (
-            match.spectatorActive &&
-            (
-                match.state == "ROUND_PLAYING" ||
-                match.state == "FINAL_ATTEMPT_WINDOW" ||
-                match.state == "LAST_ATTEMPT_WINDOW" ||
-                match.state == "ROUND_SETTLING"
-            )
-        ) {
-            renderSpectatorWait(match);
-            return;
-        }
-        if (match.state == "ROUND_SETTLING") {
-            renderInterRound(match);
-            return;
-        }
-        if (
-            match.state == "ROUND_PLAYING" ||
-            match.state == "FINAL_ATTEMPT_WINDOW" ||
-            match.state == "LAST_ATTEMPT_WINDOW" ||
-            match.state == "DEATHMATCH_PLAYING"
-        ) {
-            renderPrepare(match);
-            return;
-        }
-        if (match.state == "MATCHED") {
-            renderMatchFound(match);
-            return;
-        }
-        renderInterRound(match);
-    }
-
-    void renderMatchFound(MatchView const& match) {
-        auto const size = CCDirector::sharedDirector()->getWinSize();
-        auto const ownA = match.side == "A";
-        addPlayerCard({100.0f, size.height / 2.0f - 2.0f}, match.playerAName, match.playerAProfile, ownA);
-        addPlayerCard({size.width - 100.0f, size.height / 2.0f - 2.0f}, match.playerBName, match.playerBProfile, !ownA);
-
-        addScreenHeader(
-            tr("match-found", "MATCH FOUND"),
-            tr("private-ban-phase", "PRIVATE BAN PHASE"),
-            corum::ranked::ui::Text,
-            kCyan
-        );
-
-        auto* versus = makeLabel("VS", 0.40f, {size.width / 2.0f, size.height / 2.0f + 61.0f}, kGold, "display");
-        m_root->addChild(versus, 5);
-
-        auto const left = std::max(0, 5 - static_cast<int>(std::floor(phaseSeconds())));
-        auto* countdownPlate = makeNeonPanel({116.0f, 58.0f}, {size.width / 2.0f, size.height / 2.0f - 2.0f}, left <= 2 ? kSideRed : kBlue, {7, 17, 36}, 236);
-        m_root->addChild(countdownPlate, 2);
-        auto* phase = makeLabel(tr("map-ban-in", "MAP BAN IN"), 0.27f, {size.width / 2.0f, size.height / 2.0f + 14.0f}, kCyan, "semibold");
-        m_root->addChild(phase, 5);
-        auto* countdown = makeLabel(fmt::format("{}", left), 0.64f, {size.width / 2.0f, size.height / 2.0f - 8.0f}, left <= 2 ? kSideRed : kGold, "black");
-        m_matchFoundCountdownLabel = countdown;
-        m_root->addChild(countdown, 5);
-        auto* hint = makeLabel(tr("prepare-private-ban", "GET READY TO CHOOSE A PRIVATE BAN"), 0.24f, {size.width / 2.0f, size.height / 2.0f - 35.0f}, ccc3(210, 219, 236), "semibold");
-        hint->limitLabelWidth(176.0f, 0.24f, 0.16f);
-        m_root->addChild(hint, 5);
-    }
-
-    void renderBan(MatchView const& match) {
-        auto const size = CCDirector::sharedDirector()->getWinSize();
-        addTopBack(true);
-
-        addScreenHeader(
-            tr("ban-map", "BAN MAP"),
-            tr("choose-map-remove", "CHOOSE ONE MAP TO REMOVE"),
-            corum::ranked::ui::Text,
-            kCyan
-        );
-
-        auto const remaining = std::max<std::int64_t>(0, RankedRuntime::get().deadlineSeconds().value_or(0));
-        auto* timerPlate = makeNeonPanel({54.0f, 48.0f}, {size.width - 42.0f, size.height - 41.0f}, remaining <= 3 ? kSideRed : kBlue, {8, 18, 40}, 250);
-        m_root->addChild(timerPlate, 3);
-        auto* timer = makeLabel(fmt::format("{}", remaining), 0.58f, {size.width - 42.0f, size.height - 34.0f}, remaining <= 3 ? kSideRed : ccc3(245, 248, 255), "black");
-        m_banTimerLabel = timer;
-        m_root->addChild(timer, 6);
-        auto* timerCaption = makeLabel(tr("time-left", "TIME LEFT"), 0.24f, {size.width - 42.0f, size.height - 56.0f}, kCyan, "semibold");
-        m_root->addChild(timerCaption, 6);
-
-        auto const count = std::min<std::size_t>(5, match.candidateMaps.size());
-        auto const cardWidth = (size.width - 34.0f) / 5.0f;
-        auto const cardHeight = std::min(170.0f, size.height - 122.0f);
-        auto const startX = 17.0f + cardWidth / 2.0f;
-        auto const centerY = size.height / 2.0f + 2.0f;
-        for (std::size_t i = 0; i < count; ++i) {
-            auto const x = startX + cardWidth * static_cast<float>(i);
-            auto const& candidate = match.candidateMaps[i];
-            auto const diffColor = difficultyColor(candidate.difficulty);
-            auto const selected = m_selectedBan == candidate.canonicalLevelId;
-            auto const pending = m_pendingBan == candidate.canonicalLevelId;
-            auto const accent = selected ? kRed : (pending ? kGold : kBlue);
-
-            auto* panel = makeNeonPanel({cardWidth - 5.0f, cardHeight}, {x, centerY}, accent, kDeepPanel, 248);
-            m_root->addChild(panel, 1);
-
-            auto* mapIndex = makeLabel(
-                fmt::format("{} {:02d}", tr("map", "MAP"), static_cast<int>(i + 1)),
-                0.22f,
-                {x, centerY + cardHeight / 2.0f - 13.0f},
-                selected ? kRed : (pending ? kGold : corum::ranked::ui::TextMuted),
-                "semibold"
-            );
-            m_root->addChild(mapIndex, 5);
-
-            // Decorative map emblem. This stays entirely inside base GD assets and
-            // gives each card a stronger visual anchor than title-only rectangles.
-            auto* emblemBack = makeNeonPanel({40.0f, 40.0f}, {x, centerY + 47.0f}, diffColor, {5, 12, 27}, 250);
-            m_root->addChild(emblemBack, 2);
-            auto* emblem = CCSprite::createWithSpriteFrameName("GJ_bigStar_001.png");
-            if (emblem) {
-                emblem->setScale(0.34f);
-                emblem->setColor(diffColor);
-                emblem->setPosition({x, centerY + 47.0f});
-                m_root->addChild(emblem, 4);
-            }
-
-            auto* map = makeLabel(twoLineTitle(upper(candidate.title), 10), 0.31f, {x, centerY + 15.0f}, corum::ranked::ui::Text, "semibold");
-            map->limitLabelWidth(cardWidth - 12.0f, 0.31f, 0.20f);
-            m_root->addChild(map, 4);
-
-            auto* difficultyPlate = makeNeonPanel({cardWidth - 22.0f, 28.0f}, {x, centerY - 20.0f}, diffColor, {11, 20, 36}, 245);
-            m_root->addChild(difficultyPlate, 2);
-            auto* diffCaption = makeLabel(tr("difficulty", "DIFFICULTY"), 0.23f, {x, centerY - 14.0f}, kCyan, "semibold");
-            m_root->addChild(diffCaption, 4);
-            auto* diff = makeLabel(candidate.difficulty, 0.35f, {x, centerY - 27.0f}, diffColor, "black");
-            diff->limitLabelWidth(cardWidth - 28.0f, 0.35f, 0.22f);
-            m_root->addChild(diff, 4);
-
-            auto const actionY = centerY - cardHeight / 2.0f + 21.0f;
-            if (selected) {
-                auto* state = makeTextPlate(tr("banned", "BANNED"), {cardWidth - 18.0f, 24.0f}, {x, actionY}, kRed, 0.18f, kRed);
-                m_root->addChild(state, 3);
-            } else if (pending) {
-                auto* state = makeTextPlate(tr("banning", "BANNING..."), {cardWidth - 18.0f, 24.0f}, {x, actionY}, kGold, 0.16f, kGold);
-                m_root->addChild(state, 3);
-            } else if (m_selectedBan.empty() && m_pendingBan.empty()) {
-                auto* button = addButton(tr("ban", "BAN"), {x, actionY}, menu_selector(CorumRankedLayer::onBan), true, 0.46f);
-                button->setTag(static_cast<int>(i));
-            }
-        }
-
-        auto* privacyPlate = makeNeonPanel({248.0f, 36.0f}, {size.width / 2.0f, 24.0f}, kBlue, {8, 18, 36}, 242);
-        m_root->addChild(privacyPlate, 1);
-        auto* privacy = makeLabel(tr("private-ban-notice", "YOUR BAN IS PRIVATE  |  REVEALED WHEN THE PHASE ENDS"), 0.25f, {size.width / 2.0f, 24.0f}, ccc3(215, 225, 242), "semibold");
-        privacy->limitLabelWidth(236.0f, 0.25f, 0.16f);
-        m_root->addChild(privacy, 4);
-    }
-
-    void renderPrepare(MatchView const& match) {
-        auto const size = CCDirector::sharedDirector()->getWinSize();
-        auto const ownA = match.side == "A";
-        auto const deathmatch = match.deathmatchSequence > 0;
-
-        // A/B cards keep the screen symmetric while the centre column is reserved
-        // for match state, map information and resource readiness.
-        addPlayerCard({96.0f, size.height / 2.0f - 2.0f}, match.playerAName, match.playerAProfile, ownA);
-        addPlayerCard({size.width - 96.0f, size.height / 2.0f - 2.0f}, match.playerBName, match.playerBProfile, !ownA);
-
-        auto* title = makeLabel(
-            deathmatch ? tr("death-match", "DEATH MATCH") : fmt::format("ROUND {}", match.roundNumber),
-            deathmatch ? 0.62f : 0.56f,
-            {size.width / 2.0f, size.height - 27.0f},
-            ccc3(245, 248, 255),
-            "black"
-        );
-        title->limitLabelWidth(size.width - 180.0f, deathmatch ? 0.62f : 0.56f, 0.34f);
-        m_root->addChild(title, 6);
-
-        auto displayDeathmatchUsedA = match.deathmatchAttemptsUsedA;
-        auto displayDeathmatchUsedB = match.deathmatchAttemptsUsedB;
-        if (deathmatch) {
-            auto const localOwnUsed = RankedRuntime::get().localDeathmatchVisualAttemptsUsed();
-            if (ownA) displayDeathmatchUsedA = std::max(displayDeathmatchUsedA, localOwnUsed);
-            else displayDeathmatchUsedB = std::max(displayDeathmatchUsedB, localOwnUsed);
-
-            auto* sub = makeLabel(tr("three-attempts", "3 ATTEMPTS"), 0.34f, {size.width / 2.0f, size.height - 52.0f}, kCyan, "black");
-            m_root->addChild(sub, 6);
-            auto* attemptsPlate = makeNeonPanel({132.0f, 24.0f}, {size.width / 2.0f, size.height - 72.0f}, kBlue, {8, 18, 38}, 245);
-            m_root->addChild(attemptsPlate, 2);
-            auto* attempts = makeLabel(
-                fmt::format("A  {}/3    |    B  {}/3", displayDeathmatchUsedA, displayDeathmatchUsedB),
-                0.26f,
-                {size.width / 2.0f, size.height - 72.0f},
-                ccc3(226, 232, 245),
-                "semibold"
-            );
-            m_root->addChild(attempts, 6);
-        } else if (!match.banner.empty() && match.banner != "NONE") {
-            auto* sub = makeTextPlate(
-                displayBanner(match.banner),
-                {132.0f, 24.0f},
-                {size.width / 2.0f, size.height - 57.0f},
-                match.banner == "TIEBREAKER" ? kGold : kSideRed,
-                0.20f,
-                match.banner == "TIEBREAKER" ? kGold : kSideRed,
-                "goldFont.fnt"
-            );
-            m_root->addChild(sub, 3);
-        }
-
-        // Series score is deliberately compact. It represents round wins in the
-        // Bo3, never the score accumulated inside the current map.
-        auto const seriesY = deathmatch ? size.height - 94.0f : size.height - 84.0f;
-        auto* seriesPlate = makeNeonPanel({116.0f, 27.0f}, {size.width / 2.0f, seriesY}, kBlue, {7, 17, 35}, 245);
-        m_root->addChild(seriesPlate, 2);
-        auto* seriesCaption = makeLabel(tr("series", "SERIES"), 0.23f, {size.width / 2.0f, seriesY + 7.0f}, kCyan, "semibold");
-        m_root->addChild(seriesCaption, 6);
-        auto* seriesScore = makeLabel(
-            fmt::format("{}   :   {}", match.roundWinsA, match.roundWinsB),
-            0.33f,
-            {size.width / 2.0f, seriesY - 5.0f},
-            ccc3(245, 248, 255),
-            "black"
-        );
-        m_root->addChild(seriesScore, 6);
-
-        auto const mapY = size.height / 2.0f + 41.0f;
-        if (match.currentMap) {
-            auto* crown = CCSprite::createWithSpriteFrameName("GJ_bigStar_001.png");
-            if (crown) {
-                crown->setScale(0.24f);
-                crown->setColor(kCyan);
-                crown->setPosition({size.width / 2.0f, mapY + 31.0f});
-                m_root->addChild(crown, 4);
-            }
-            auto* mapName = makeLabel(twoLineTitle(upper(match.currentMap->title), 15), 0.40f, {size.width / 2.0f, mapY + 7.0f}, corum::ranked::ui::Text, "semibold");
-            mapName->limitLabelWidth(154.0f, 0.40f, 0.24f);
-            m_root->addChild(mapName, 6);
-
-            auto const diffColor = difficultyColor(match.currentMap->difficulty);
-            auto* diffPlate = makeNeonPanel({74.0f, 32.0f}, {size.width / 2.0f, mapY - 27.0f}, diffColor, {12, 17, 27}, 246);
-            m_root->addChild(diffPlate, 2);
-            auto* difficulty = makeLabel(match.currentMap->difficulty, 0.42f, {size.width / 2.0f, mapY - 27.0f}, diffColor, "black");
-            difficulty->limitLabelWidth(62.0f, 0.42f, 0.25f);
-            m_root->addChild(difficulty, 6);
-        }
-
-        auto* local = findPlayableMap();
-        auto const mapReady = local != nullptr;
-        auto const songReady = mapReady && isSongReady(local);
-        auto& runtime = RankedRuntime::get();
-        auto const clearSyncPending =
-            !deathmatch &&
-            runtime.localDisplayClears() >= 3 &&
-            runtime.hasLocalAttemptInFlight();
-        auto* infoPlate = makeNeonPanel({154.0f, 118.0f}, {size.width / 2.0f, size.height / 2.0f - 36.0f}, kBlue, kDeepPanel2, 224);
-        m_root->addChild(infoPlate, 1);
-
-        auto const mapPos = CCPoint{size.width / 2.0f, size.height / 2.0f - 14.0f};
-        auto const songPos = CCPoint{size.width / 2.0f, size.height / 2.0f - 42.0f};
-        if (clearSyncPending) {
-            auto* plate = makeTextPlate("01  " + tr("clear-recorded", "CLEAR RECORDED"), {116.0f, 23.0f}, mapPos, kGreen, 0.24f, kGreen, "semibold");
-            m_root->addChild(plate, 3);
-        } else if (mapReady) {
-            auto* plate = makeTextPlate("01  " + tr("map-ready", "MAP READY"), {116.0f, 23.0f}, mapPos, kGreen, 0.25f, kGreen, "semibold");
-            m_root->addChild(plate, 3);
-        } else {
-            auto* plate = makeTextPlate("01  " + tr("map-loading", "MAP LOADING"), {116.0f, 23.0f}, mapPos, kCyan, 0.25f, ccc3(235, 242, 255), "semibold");
-            m_root->addChild(plate, 3);
-        }
-
-        if (clearSyncPending) {
-            auto* plate = makeTextPlate("02  " + tr("result-sync", "RESULT SYNC"), {116.0f, 23.0f}, songPos, kCyan, 0.24f, ccc3(218, 228, 244), "semibold");
-            m_root->addChild(plate, 3);
-        } else if (!mapReady) {
-            auto* plate = makeTextPlate("02  " + tr("waiting", "WAITING"), {116.0f, 23.0f}, songPos, kBlue, 0.25f, ccc3(218, 228, 244), "semibold");
-            m_root->addChild(plate, 3);
-        } else if (songReady) {
-            auto* plate = makeTextPlate("02  " + tr("audio-ready", "AUDIO READY"), {116.0f, 23.0f}, songPos, kGreen, 0.25f, kGreen, "semibold");
-            m_root->addChild(plate, 3);
-        } else if (RankedRuntime::get().songBypassAllowed()) {
-            auto* plate = makeTextPlate("02  " + tr("start-muted", "START MUTED"), {116.0f, 23.0f}, songPos, kGold, 0.24f, kGold, "semibold");
-            m_root->addChild(plate, 3);
-        } else {
-            // The real click target remains the vanilla song button on the level
-            // info page. This button only opens that gated page.
-            addButton(tr("download-song", "DOWNLOAD SONG"), songPos, menu_selector(CorumRankedLayer::onDownloadSong), false, 0.48f);
-        }
-
-        auto const loadStageY = size.height / 2.0f - 66.0f;
-        m_prepareLoadStageLabel = makeLabel(
-            preparationStageText(),
-            0.18f,
-            {size.width / 2.0f, loadStageY},
-            m_levelLookupError.empty() ? kCyan : kGold,
-            "semibold"
-        );
-        m_prepareLoadStageLabel->limitLabelWidth(138.0f, 0.18f, 0.12f);
-        m_root->addChild(m_prepareLoadStageLabel, 6);
-
-        constexpr float prepareBarWidth = 112.0f;
-        auto* prepareBarBack = CCLayerColor::create({5, 12, 25, 245});
-        prepareBarBack->setContentSize({prepareBarWidth, 8.0f});
-        prepareBarBack->setPosition({size.width / 2.0f - 68.0f, size.height / 2.0f - 85.0f});
-        m_root->addChild(prepareBarBack, 4);
-        m_prepareLoadFill = CCLayerColor::create({kCyan.r, kCyan.g, kCyan.b, 245});
-        m_prepareLoadFill->setContentSize({prepareBarWidth * m_prepareLoadVisual, 8.0f});
-        m_prepareLoadFill->setPosition(prepareBarBack->getPosition());
-        m_prepareLoadWidth = prepareBarWidth;
-        m_root->addChild(m_prepareLoadFill, 5);
-        m_prepareLoadPercentLabel = makeLabel(
-            fmt::format("{}%", static_cast<int>(std::round(m_prepareLoadVisual * 100.0f))),
-            0.20f,
-            {size.width / 2.0f + 61.0f, size.height / 2.0f - 81.0f},
-            ccc3(235, 242, 255),
-            "black"
-        );
-        m_root->addChild(m_prepareLoadPercentLabel, 6);
-
-        auto const seconds = std::max(0, 10 - static_cast<int>(std::floor(phaseSeconds())));
-        std::string footer = fmt::format("{}  {:02d}", tr("starts-in", "STARTS IN"), seconds);
-        ccColor3B footerAccent = seconds <= 3 ? kSideRed : kBlue;
-        if (clearSyncPending) {
-            footer = tr("syncing-clear", "SYNCING CLEAR...");
-            footerAccent = kCyan;
-        } else if (match.state == "DEATHMATCH_PLAYING") {
-            auto const ownUsed = ownA ? displayDeathmatchUsedA : displayDeathmatchUsedB;
-            auto const opponentUsed = ownA ? displayDeathmatchUsedB : displayDeathmatchUsedA;
-            footer = ownUsed >= 3
-                ? fmt::format("{}   {}/3", tr("waiting-opponent", "WAITING FOR OPPONENT"), opponentUsed)
-                : corum::ranked::i18n::attemptOfThree(std::min(3, ownUsed + 1));
-            footerAccent = ownUsed >= 3 ? kBlue : kGold;
-        } else if (phaseSeconds() >= 10.0) {
-            auto const ownReady = ownA ? match.readyA : match.readyB;
-            auto const opponentReady = ownA ? match.readyB : match.readyA;
-            if (!ownReady) footer = tr("waiting-download", "WAITING FOR YOUR DOWNLOAD");
-            else if (!opponentReady) footer = corum::ranked::i18n::waitingForPlayer(upper(shorten(match.opponentName, 13)));
-            else footer = tr("starting", "STARTING...");
-            footerAccent = kGold;
-        }
-        auto* footerPlate = makeTextPlate(
-            footer,
-            {170.0f, 28.0f},
-            {size.width / 2.0f, 27.0f},
-            footerAccent,
-            0.31f,
-            ccc3(245, 248, 255),
-            "black",
-            &m_prepareFooterLabel
-        );
-        m_root->addChild(footerPlate, 3);
-    }
-
-    void renderSpectatorWait(MatchView const& match) {
-        auto const size = CCDirector::sharedDirector()->getWinSize();
-        auto const ownA = match.side == "A";
-        auto const ownScore = ownA ? match.scoreA : match.scoreB;
-        auto const opponentScore = ownA ? match.scoreB : match.scoreA;
-        auto const opponentAttemptActive = match.spectatorCurrentProgress.has_value();
-        auto const progress = match.spectatorCurrentProgress.value_or(0);
-        auto const opponent = match.spectatorOpponentName.empty()
-            ? match.opponentName
-            : match.spectatorOpponentName;
-
-        auto* title = makeLabel(tr("attempt-finished", "YOUR ATTEMPT IS FINISHED"), 0.48f, {size.width / 2.0f, size.height - 34.0f}, kGold, "goldFont.fnt");
-        title->limitLabelWidth(size.width - 70.0f, 0.48f, 0.30f);
-        m_root->addChild(title, 5);
-        auto* subtitle = makeLabel(tr("waiting-opponent", "WAITING FOR OPPONENT"), 0.24f, {size.width / 2.0f, size.height - 59.0f}, kCyan);
-        m_root->addChild(subtitle, 5);
-
-        auto* panel = makeNeonPanel({246.0f, 142.0f}, {size.width / 2.0f, size.height / 2.0f - 4.0f}, kBlue, kDeepPanel, 238);
-        m_root->addChild(panel, 1);
-
-        auto* name = makeLabel(upper(shorten(opponent, 18)), 0.32f, {size.width / 2.0f, size.height / 2.0f + 38.0f});
-        name->limitLabelWidth(205.0f, 0.32f, 0.21f);
-        m_root->addChild(name, 5);
-        auto* live = makeLabel(
-            opponentAttemptActive
-                ? tr("live-progress", "LIVE PROGRESS")
-                : tr("waiting-start", "WAITING TO START"),
-            0.20f,
-            {size.width / 2.0f, size.height / 2.0f + 15.0f},
-            kCyan,
-            "semibold"
-        );
-        m_spectatorStateLabel = live;
-        m_root->addChild(live, 5);
-        auto* pct = makeLabel(
-            opponentAttemptActive ? fmt::format("{}%", progress) : "--",
-            0.74f,
-            {size.width / 2.0f, size.height / 2.0f - 15.0f},
-            kGold,
-            "goldFont.fnt"
-        );
-        m_spectatorProgressLabel = pct;
-        m_root->addChild(pct, 5);
-        auto* score = makeLabel(
-            scoreComparison(ownScore, opponentScore),
-            0.22f,
-            {size.width / 2.0f, size.height / 2.0f - 53.0f},
-            ccc3(218, 228, 244),
-            "semibold"
-        );
-        m_spectatorScoreLabel = score;
-        score->limitLabelWidth(225.0f, 0.22f, 0.16f);
-        m_root->addChild(score, 5);
-
-        std::string hintText = tr("round-resolve-hint", "THE ROUND WILL RESOLVE WHEN THE ACTIVE ATTEMPT ENDS");
-        if (!opponentAttemptActive && match.state == "LAST_ATTEMPT_WINDOW") {
-            auto const seconds = std::max<std::int64_t>(0, RankedRuntime::get().deadlineSeconds().value_or(0));
-            hintText = corum::ranked::i18n::isKorean()
-                ? fmt::format("{} {}ì´ˆ", tr("last-attempt-hint", "OPPONENT HAS TO START THE LAST ATTEMPT"), seconds)
-                : fmt::format("OPPONENT HAS {}s TO START THE LAST ATTEMPT", seconds);
-        }
-        auto* hint = makeLabel(hintText, 0.24f, {size.width / 2.0f, 28.0f}, ccc3(195, 205, 224), "semibold");
-        m_spectatorHintLabel = hint;
-        hint->limitLabelWidth(size.width - 80.0f, 0.24f, 0.16f);
-        m_root->addChild(hint, 5);
-    }
-
-    void renderInterRound(MatchView const& match) {
-        auto const size = CCDirector::sharedDirector()->getWinSize();
-        auto* title = makeLabel(
-            match.state == "DEATHMATCH_RESULT" ? "DEATH MATCH RESULT" : "ROUND RESULT",
-            0.62f,
-            {size.width / 2.0f, size.height / 2.0f + 58.0f},
-            ccc3(245, 248, 255),
-            "goldFont.fnt"
-        );
-        title->limitLabelWidth(size.width - 90.0f, 0.62f, 0.34f);
-        m_root->addChild(title, 5);
-
-        auto* series = makeNeonPanel({150.0f, 58.0f}, {size.width / 2.0f, size.height / 2.0f - 1.0f}, kBlue, {7, 17, 36}, 248);
-        m_root->addChild(series, 2);
-        auto* caption = makeLabel(tr("series-score", "SERIES SCORE"), 0.20f, {size.width / 2.0f, size.height / 2.0f + 14.0f}, kCyan, "semibold");
-        m_root->addChild(caption, 5);
-        auto* score = makeLabel(fmt::format("{}   :   {}", match.roundWinsA, match.roundWinsB), 0.45f, {size.width / 2.0f, size.height / 2.0f - 10.0f}, ccc3(245, 248, 255), "goldFont.fnt");
-        m_root->addChild(score, 5);
-
-        auto* next = makeTextPlate(tr("next-map-preparing", "NEXT MAP PREPARING..."), {166.0f, 30.0f}, {size.width / 2.0f, size.height / 2.0f - 58.0f}, kCyan, 0.21f, ccc3(225, 235, 248), "semibold");
-        m_root->addChild(next, 3);
-    }
-
-    void addClearChecks(int clears, CCPoint base, bool rightAligned = false) {
-        auto const count = std::clamp(clears, 0, 3);
-        for (int i = 0; i < count; ++i) {
-            auto* check = CCSprite::createWithSpriteFrameName("GJ_checkOn_001.png");
-            check->setScale(0.26f);
-            check->setColor(kGreen);
-            check->setPosition({base.x + (rightAligned ? -1.0f : 1.0f) * i * 13.0f, base.y});
-            m_root->addChild(check, 5);
-        }
-    }
-
-    void animateRankedScoreChange(
-        float centerX,
-        float finalY,
-        std::optional<int> delta,
-        CCLabelBMFont* finalScore,
-        RankedProfileView const& before
-    ) {
-        if (!delta || !finalScore || !before.visibleRankedScore) return;
-
-        // Show the authoritative pre-match LP first. The delta rises from below,
-        // overlaps it, and the post-match value fades in at the same position.
-        auto* previousScore = makeLabel(
-            fmt::format("{} - {} LP", upper(before.displayedTier), *before.visibleRankedScore),
-            0.27f,
-            {centerX, finalY},
-            ccc3(240, 244, 250),
-            "goldFont.fnt"
-        );
-        previousScore->limitLabelWidth(118.0f, 0.27f, 0.16f);
-        m_root->addChild(previousScore, 9);
-        previousScore->runAction(CCSequence::create(
-            CCDelayTime::create(0.56f),
-            CCFadeOut::create(0.22f),
-            nullptr
-        ));
-        finalScore->setOpacity(0);
-        finalScore->runAction(CCSequence::create(
-            CCDelayTime::create(0.72f),
-            CCFadeIn::create(0.28f),
-            nullptr
-        ));
-
-        auto* deltaLabel = makeLabel(
-            fmt::format("{:+d} LP", *delta),
-            0.28f,
-            {centerX, 58.0f},
-            *delta >= 0 ? kGreen : kRed,
-            "goldFont.fnt"
-        );
-        deltaLabel->setOpacity(0);
-        m_root->addChild(deltaLabel, 9);
-        deltaLabel->runAction(CCSequence::create(
-            CCFadeIn::create(0.16f),
-            CCEaseSineOut::create(CCMoveTo::create(0.56f, {centerX, finalY})),
-            CCFadeOut::create(0.24f),
-            nullptr
-        ));
-    }
-
-    void animatePromotionTrigger(
-        float centerX,
-        float finalY,
-        corum::ranked::RatingEventView const& event,
-        RankedProfileView const& before,
-        std::optional<int> delta
-    ) {
-        if (!event.promotionStarted || !before.visibleRankedScore) return;
-
-        // The promotion marks are the final state, but keep them covered while
-        // the previous LP and its gain perform the same overlap transition as a
-        // normal rating update. Fading the cover reveals `-----` naturally.
-        auto* marksCover = CCLayerColor::create({7, 18, 40, 255});
-        marksCover->setContentSize({124.0f, 17.0f});
-        marksCover->setPosition({centerX - 62.0f, finalY - 8.5f});
-        m_root->addChild(marksCover, 9);
-        marksCover->runAction(CCSequence::create(
-            CCDelayTime::create(0.56f),
-            CCFadeOut::create(0.28f),
-            nullptr
-        ));
-
-        auto* prior = makeLabel(
-            fmt::format("{} - {} LP", upper(before.displayedTier), *before.visibleRankedScore),
-            0.27f,
-            {centerX, finalY},
-            ccc3(240, 244, 250),
-            "goldFont.fnt"
-        );
-        prior->limitLabelWidth(118.0f, 0.27f, 0.16f);
-        m_root->addChild(prior, 10);
-        prior->runAction(CCSequence::create(
-            CCDelayTime::create(0.56f),
-            CCFadeOut::create(0.22f),
-            nullptr
-        ));
-
-        if (delta) {
-            auto* deltaLabel = makeLabel(
-                fmt::format("{:+d} LP", *delta),
-                0.28f,
-                {centerX, 58.0f},
-                *delta >= 0 ? kGreen : kRed,
-                "goldFont.fnt"
-            );
-            deltaLabel->setOpacity(0);
-            m_root->addChild(deltaLabel, 11);
-            deltaLabel->runAction(CCSequence::create(
-                CCFadeIn::create(0.16f),
-                CCEaseSineOut::create(CCMoveTo::create(0.56f, {centerX, finalY})),
-                CCFadeOut::create(0.24f),
-                nullptr
-            ));
-        }
-    }
-
-    bool playResultRankTransition(
-        corum::ranked::RatingEventView const& event,
-        RankedProfileView const& before,
-        RankedProfileView const& after
-    ) {
-        auto const transition = authoritativeTransitionType(event, before, after);
-        if (!transition || m_rankTransitionLayer) return false;
-
-        auto* transitionLayer = RankTransitionLayer::create(
-            before.displayedTier,
-            after.displayedTier,
-            *transition,
-            ratingEventText(event).first,
-            tr("tap-to-skip", "TAP TO SKIP"),
-            tr("continue", "CONTINUE"),
-            [this] {
-                m_rankTransitionLayer = nullptr;
-                setKeypadEnabled(true);
-                if (m_menu) m_menu->setTouchEnabled(true);
-            }
-        );
-        if (!transitionLayer) return false;
-
-        m_rankTransitionLayer = transitionLayer;
-        if (m_menu) {
-            if (m_menu->m_pSelectedItem) m_menu->m_pSelectedItem = nullptr;
-            m_menu->setTouchEnabled(false);
-        }
-        setKeypadEnabled(false);
-        addChild(transitionLayer, 1000);
-        return true;
-    }
-
-    void renderResult(RuntimeView const& view) {
-        auto const& match = view.match;
-        auto const size = CCDirector::sharedDirector()->getWinSize();
-        auto* close = CCSprite::createWithSpriteFrameName("GJ_closeBtn_001.png");
-        close->setScale(0.60f);
-        auto* closeButton = CCMenuItemSpriteExtra::create(close, this, menu_selector(CorumRankedLayer::onResultClose));
-        closeButton->setPosition({24.0f, size.height - 24.0f});
-        m_menu->addChild(closeButton);
-
-        if (match.state == "CANCELLED") {
-            auto* title = makeLabel(tr("match-canceled", "MATCH CANCELED"), 0.70f, {size.width / 2.0f, size.height / 2.0f + 58.0f}, kRed, "goldFont.fnt");
-            m_root->addChild(title, 3);
-            auto* reason = makeLabel(
-                match.cancellationReason.empty()
-                    ? tr("invalid-no-rating", "MATCH INVALID - NO RATING CHANGES")
-                    : match.cancellationReason,
-                0.28f,
-                {size.width / 2.0f, size.height / 2.0f + 12.0f},
-                ccc3(220, 220, 225)
-            );
-            reason->limitLabelWidth(size.width - 100.0f, 0.28f, 0.18f);
-            m_root->addChild(reason, 3);
-            addButton(tr("queue-again", "QUEUE AGAIN"), {size.width / 2.0f, size.height / 2.0f - 55.0f}, menu_selector(CorumRankedLayer::onQueueAgain), false, 0.66f);
-            return;
-        }
-
-        auto const ownA = match.side == "A";
-        PlayerCardRefs cardA;
-        PlayerCardRefs cardB;
-        auto const cardY = size.height / 2.0f - 5.0f;
-        auto const leftPerfect = match.perfectWinSide == "A";
-        auto const rightPerfect = match.perfectWinSide == "B";
-        addPlayerCard({100.0f, cardY}, match.playerAName, match.profileAfterA, ownA, &cardA, true);
-        addPlayerCard({size.width - 100.0f, cardY}, match.playerBName, match.profileAfterB, !ownA, &cardB, true);
-        if (leftPerfect) addPromotionAura({100.0f, cardY}, {150.0f, 184.0f}, true);
-        if (rightPerfect) addPromotionAura({size.width - 100.0f, cardY}, {150.0f, 184.0f}, true);
-
-        auto const perfect = leftPerfect || rightPerfect;
-        auto const summaryRows = std::max<std::size_t>(1, match.rounds.size() + match.deathmatches.size());
-        auto const summaryTop = size.height - (perfect ? 66.0f : 52.0f);
-        auto const summaryHeight = std::clamp(34.0f + static_cast<float>(summaryRows) * 27.0f, 72.0f, 170.0f);
-        auto const summaryBottom = std::max(52.0f, summaryTop - summaryHeight);
-        auto* summaryPanel = makeNeonPanel(
-            {164.0f, summaryTop - summaryBottom},
-            {size.width / 2.0f, (summaryTop + summaryBottom) / 2.0f},
-            perfect ? kGold : kBlue,
-            kDeepPanel,
-            214
-        );
-        m_root->addChild(summaryPanel, 1);
-
-        auto* title = makeLabel(
-            perfect ? "PERFECT WIN" : tr("match-complete", "MATCH COMPLETE"),
-            perfect ? 0.60f : 0.52f,
-            {size.width / 2.0f, size.height - 24.0f},
-            perfect ? kGold : corum::ranked::ui::Text,
-            "black"
-        );
-        m_root->addChild(title, 4);
-        if (perfect) {
-            auto* perfectHint = makeLabel(
-                tr("maximum-rating-reward", "MAXIMUM RATING REWARD"),
-                0.25f,
-                {size.width / 2.0f, size.height - 49.0f},
-                kGold,
-                "black"
-            );
-            m_root->addChild(perfectHint, 5);
-        }
-        auto* leftFinal = makeLabel(fmt::format("{}", match.roundWinsA), 0.82f, {size.width / 2.0f - 105.0f, size.height / 2.0f + 18.0f}, match.winnerSide == "A" ? kGreen : kRed);
-        auto* rightFinal = makeLabel(fmt::format("{}", match.roundWinsB), 0.82f, {size.width / 2.0f + 105.0f, size.height / 2.0f + 18.0f}, match.winnerSide == "B" ? kGreen : kRed);
-        m_root->addChild(leftFinal, 4);
-        m_root->addChild(rightFinal, 4);
-        auto* leftResult = makeLabel(
-            leftPerfect ? std::string("PERFECT WIN") : match.winnerSide == "A" ? tr("win", "WIN") : tr("lose", "LOSE"),
-            leftPerfect ? 0.28f : 0.35f,
-            {100.0f, 46.0f},
-            leftPerfect ? kGold : match.winnerSide == "A" ? kGreen : kRed,
-            "black"
-        );
-        auto* rightResult = makeLabel(
-            rightPerfect ? std::string("PERFECT WIN") : match.winnerSide == "B" ? tr("win", "WIN") : tr("lose", "LOSE"),
-            rightPerfect ? 0.28f : 0.35f,
-            {size.width - 100.0f, 46.0f},
-            rightPerfect ? kGold : match.winnerSide == "B" ? kGreen : kRed,
-            "black"
-        );
-        m_root->addChild(leftResult, 4);
-        m_root->addChild(rightResult, 4);
-
-        float y = summaryTop - 17.0f;
-        for (auto const& round : match.rounds) {
-            auto* row = makeLabel(fmt::format("ROUND {}   {} : {}", round.roundNumber, round.scoreA, round.scoreB), 0.31f, {size.width / 2.0f, y}, corum::ranked::ui::Text, "semibold");
-            m_root->addChild(row, 4);
-            addClearChecks(round.clearsA, {size.width / 2.0f - 50.0f, y - 10.0f});
-            addClearChecks(round.clearsB, {size.width / 2.0f + 50.0f, y - 10.0f}, true);
-            y -= 27.0f;
-        }
-        for (auto const& deathmatch : match.deathmatches) {
-            auto* row = makeLabel(fmt::format("{} {}   {} : {}", tr("death-match", "DEATH MATCH"), deathmatch.sequence, deathmatch.scoreA, deathmatch.scoreB), 0.29f, {size.width / 2.0f, y}, kRed, "semibold");
-            m_root->addChild(row, 4);
-            y -= 25.0f;
-        }
-
-        auto const eventA = ratingEventText(match.ratingEventA);
-        auto const eventB = ratingEventText(match.ratingEventB);
-        CCLabelBMFont* eventLabelA = nullptr;
-        CCLabelBMFont* eventLabelB = nullptr;
-        if (!eventA.first.empty()) {
-            eventLabelA = makeLabel(eventA.first, 0.29f, {100.0f, 20.0f}, eventA.second, "black");
-            m_root->addChild(eventLabelA, 8);
-        }
-        if (!eventB.first.empty()) {
-            eventLabelB = makeLabel(eventB.first, 0.29f, {size.width - 100.0f, 20.0f}, eventB.second, "black");
-            m_root->addChild(eventLabelB, 8);
-        }
-
-        animateRankedScoreChange(
-            100.0f,
-            cardY - 43.0f,
-            match.rankedScoreDeltaA,
-            cardA.scoreLabel,
-            match.profileBeforeA
-        );
-        animateRankedScoreChange(
-            size.width - 100.0f,
-            cardY - 43.0f,
-            match.rankedScoreDeltaB,
-            cardB.scoreLabel,
-            match.profileBeforeB
-        );
-        animatePromotionTrigger(
-            100.0f,
-            cardY - 43.0f,
-            match.ratingEventA,
-            match.profileBeforeA,
-            match.rankedScoreDeltaA
-        );
-        animatePromotionTrigger(
-            size.width - 100.0f,
-            cardY - 43.0f,
-            match.ratingEventB,
-            match.profileBeforeB,
-            match.rankedScoreDeltaB
-        );
-
-        addButton(tr("queue-again", "QUEUE AGAIN"), {size.width / 2.0f, 24.0f}, menu_selector(CorumRankedLayer::onQueueAgain), false, 0.52f);
-
-        // A result can be rendered again after visiting History or after a
-        // presentation refresh. Play a tier transition only once per match;
-        // subsequent renders immediately show the authoritative settled UI.
-        auto const transitionKey = match.matchId.empty()
-            ? fmt::format("{}:{}:{}", match.playerAName, match.playerBName, match.stateVersion)
-            : match.matchId;
-        if (m_rankTransitionPlayedKey != transitionKey) {
-            auto const transitionStarted = ownA
-                ? playResultRankTransition(
-                    match.ratingEventA,
-                    match.profileBeforeA,
-                    match.profileAfterA
-                )
-                : playResultRankTransition(
-                    match.ratingEventB,
-                    match.profileBeforeB,
-                    match.profileAfterB
-            );
-            if (transitionStarted) m_rankTransitionPlayedKey = transitionKey;
-        }
-        if (m_rankTransitionLayer && m_menu) m_menu->setTouchEnabled(false);
-    }
-
-    void renderHistoryList(RuntimeView const& view) {
-        auto const size = CCDirector::sharedDirector()->getWinSize();
-        addTopBack(false);
-        addScreenHeader(tr("match-history", "MATCH HISTORY"), tr("recent-matches", "RECENT COMPETITIVE MATCHES"), kGold, kCyan);
-        if (view.historyLoading) {
-            auto* spinner = LoadingSpinner::create(55.0f);
-            spinner->setPosition({size.width / 2.0f, size.height / 2.0f});
-            m_root->addChild(spinner, 3);
-            return;
-        }
-        if (!view.historyError.empty()) {
-            m_root->addChild(makeLabel(view.historyError, 0.27f, {size.width / 2.0f, size.height / 2.0f}, kRed), 3);
-            addButton(tr("retry", "RETRY"), {size.width / 2.0f, size.height / 2.0f - 40.0f}, menu_selector(CorumRankedLayer::onHistory), false, 0.55f);
-            return;
-        }
-        if (view.history.empty()) {
-            m_root->addChild(makeLabel(tr("no-completed-matches", "NO COMPLETED MATCHES"), 0.32f, {size.width / 2.0f, size.height / 2.0f}, ccc3(190, 195, 210)), 3);
-            return;
-        }
-        auto const count = std::min<std::size_t>(7, view.history.size());
-        for (std::size_t i = 0; i < count; ++i) {
-            auto const& item = view.history[i];
-            auto const y = size.height - 67.0f - static_cast<float>(i) * 31.0f;
-            auto const won = item.side == item.winnerSide;
-            auto* panel = makeNeonPanel(
-                {size.width - 110.0f, 23.0f},
-                {size.width / 2.0f, y},
-                won ? kGreen : kRed,
-                kDeepPanel2,
-                232
-            );
-            m_root->addChild(panel, 1);
-            auto const ratingText = item.ownRankedScoreDelta
-                ? fmt::format("{:+d} LP", *item.ownRankedScoreDelta)
-                : tr("placement", "PLACEMENT");
-            auto* row = makeLabel(
-                fmt::format("{}   VS {}   {}", won ? tr("win", "WIN") : tr("loss", "LOSS"), shorten(item.opponentName, 14), ratingText),
-                0.30f,
-                {size.width / 2.0f - 18.0f, y},
-                won ? kGreen : kRed,
-                "semibold"
-            );
-            row->limitLabelWidth(size.width - 190.0f, 0.30f, 0.20f);
-            m_root->addChild(row, 3);
-            auto* detail = addButton(tr("detail", "DETAIL"), {size.width - 72.0f, y}, menu_selector(CorumRankedLayer::onHistoryDetail), false, 0.50f);
-            detail->setTag(static_cast<int>(i));
-        }
-    }
-
-    void renderHistoryDetail(RuntimeView const& view) {
-        auto const size = CCDirector::sharedDirector()->getWinSize();
-        addTopBack(false);
-        if (m_historyIndex >= view.history.size()) {
-            m_page = Page::HistoryList;
-            renderHistoryList(view);
-            return;
-        }
-        auto const& item = view.history[m_historyIndex];
-        auto const won = item.side == item.winnerSide;
-        addScreenHeader(
-            won ? tr("victory", "VICTORY") : tr("defeat", "DEFEAT"),
-            fmt::format("VS {}   //   {} : {}", upper(shorten(item.opponentName, 16)), item.roundWinsA, item.roundWinsB),
-            won ? kGreen : kRed,
-            won ? kGreen : kRed
-        );
-        auto* detailPanel = makeNeonPanel(
-            {std::min(344.0f, size.width - 96.0f), size.height - 98.0f},
-            {size.width / 2.0f, size.height / 2.0f - 25.0f},
-            won ? kGreen : kRed,
-            kDeepPanel,
-            224
-        );
-        m_root->addChild(detailPanel, 1);
-        float y = size.height - 88.0f;
-        for (auto const& round : item.rounds) {
-            auto* row = makeLabel(fmt::format("ROUND {}  {}  {} : {}", round.roundNumber, shorten(round.mapTitle, 12), round.scoreA, round.scoreB), 0.31f, {size.width / 2.0f, y}, corum::ranked::ui::Text, "semibold");
-            m_root->addChild(row, 3);
-            addClearChecks(round.clearsA, {size.width / 2.0f - 48.0f, y - 13.0f});
-            addClearChecks(round.clearsB, {size.width / 2.0f + 48.0f, y - 13.0f}, true);
-            y -= 40.0f;
-        }
-        for (auto const& deathmatch : item.deathmatches) {
-            auto* row = makeLabel(fmt::format("{} {}  {} : {}", tr("death-match", "DEATH MATCH"), deathmatch.sequence, deathmatch.scoreA, deathmatch.scoreB), 0.30f, {size.width / 2.0f, y}, kRed, "semibold");
-            m_root->addChild(row, 3);
-            y -= 32.0f;
-        }
-    }
-
-    GJGameLevel* findLocalMap() const {
-        auto const id = RankedRuntime::get().currentLevelId();
-        if (id <= 0) return nullptr;
-        auto* manager = GameLevelManager::sharedState();
-        return manager ? manager->getSavedLevel(id) : nullptr;
-    }
-
-    bool isPlayableLevel(GJGameLevel* level) const {
-        if (!level) return false;
-        if (static_cast<int>(level->m_levelID) != RankedRuntime::get().currentLevelId()) return false;
-        // getSavedLevel() may return only list metadata. PlayLayer needs the actual
-        // downloaded level string; entering on metadata alone is what caused the
-        // repeated "Load Failed" screen in alpha.11.
-        return !level->m_levelString.empty() && !level->m_levelNotDownloaded;
-    }
-
-    GJGameLevel* findPlayableMap() const {
-        auto* level = findLocalMap();
-        return isPlayableLevel(level) ? level : nullptr;
-    }
-
-    void releaseResolvedLevel() {
-        if (m_resolvedLevel) {
-            m_resolvedLevel->release();
-            m_resolvedLevel = nullptr;
-        }
-        m_resolvedLevelContext.clear();
-    }
-
-    bool levelLookupKeyMatches(char const* key) const {
-        return
-            m_levelLookupBusy &&
-            key &&
-            !m_levelLookupKey.empty() &&
-            m_levelLookupKey == key;
-    }
-
-    void finishExactLevelLookup() {
-        if (m_levelLookupBusy || m_previousLevelManagerDelegate) {
-            auto* manager = GameLevelManager::sharedState();
-            if (manager && manager->m_levelManagerDelegate == this) {
-                manager->m_levelManagerDelegate = m_previousLevelManagerDelegate;
-            }
-        }
-        m_previousLevelManagerDelegate = nullptr;
-        m_levelLookupBusy = false;
-        m_levelLookupKey.clear();
-        m_levelLookupContext.clear();
-        m_levelLookupTargetId = 0;
-    }
-
-    void cancelExactLevelLookup() {
-        finishExactLevelLookup();
-    }
-
-    bool lookupStillTargetsCurrentMap(std::string const& context, int levelId) const {
-        auto const& view = RankedRuntime::get().view();
-        return
-            view.stage == RuntimeStage::Matched &&
-            levelId > 0 &&
-            RankedRuntime::get().currentLevelId() == levelId &&
-            resourceKey(view.match) == context;
-    }
-
-    void acceptExactLevelResults(CCArray* levels, char const* key) {
-        if (!levelLookupKeyMatches(key)) return;
-
-        auto const context = m_levelLookupContext;
-        auto const targetId = m_levelLookupTargetId;
-        GJGameLevel* exactLevel = nullptr;
-        if (levels) {
-            for (unsigned int index = 0; index < levels->count(); ++index) {
-                auto* candidate = typeinfo_cast<GJGameLevel*>(levels->objectAtIndex(index));
-                if (candidate && static_cast<int>(candidate->m_levelID) == targetId) {
-                    exactLevel = candidate;
-                    break;
-                }
-            }
-        }
-
-        auto const stillCurrent = lookupStillTargetsCurrentMap(context, targetId);
-        finishExactLevelLookup();
-        if (!stillCurrent) return;
-
-        if (!exactLevel) {
-            m_levelLookupError = tr("exact-level-not-found", "EXACT GD LEVEL NOT FOUND - RETRYING");
-            m_levelLookupNextAttemptAt = SteadyClock::now() + std::chrono::milliseconds(1400);
-            return;
-        }
-
-        exactLevel->retain();
-        releaseResolvedLevel();
-        m_resolvedLevel = exactLevel;
-        m_resolvedLevelContext = context;
-        m_levelLookupError.clear();
-        m_prepareLoadVisual = std::max(m_prepareLoadVisual, 0.30f);
-        log::info(
-            "Resolved exact Ranked GD level: match={} round={} level={} name={}",
-            RankedRuntime::get().view().match.matchId,
-            RankedRuntime::get().view().match.roundNumber,
-            targetId,
-            std::string(exactLevel->m_levelName.c_str())
-        );
-    }
-
-    void rejectExactLevelResults(char const* key) {
-        if (!levelLookupKeyMatches(key)) return;
-        auto const context = m_levelLookupContext;
-        auto const targetId = m_levelLookupTargetId;
-        auto const stillCurrent = lookupStillTargetsCurrentMap(context, targetId);
-        finishExactLevelLookup();
-        if (!stillCurrent) return;
-        m_levelLookupError = tr("level-lookup-failed", "LEVEL LOOKUP FAILED - RETRYING");
-        auto const backoffMilliseconds = std::min(4000, 900 + m_levelLookupAttempts * 450);
-        m_levelLookupNextAttemptAt = SteadyClock::now() + std::chrono::milliseconds(backoffMilliseconds);
-    }
-
-    void loadLevelsFinished(CCArray* levels, char const* key) override {
-        if (levelLookupKeyMatches(key)) {
-            acceptExactLevelResults(levels, key);
-            return;
-        }
-        if (m_previousLevelManagerDelegate && m_previousLevelManagerDelegate != this) {
-            m_previousLevelManagerDelegate->loadLevelsFinished(levels, key);
-        }
-    }
-
-    void loadLevelsFailed(char const* key) override {
-        if (levelLookupKeyMatches(key)) {
-            rejectExactLevelResults(key);
-            return;
-        }
-        if (m_previousLevelManagerDelegate && m_previousLevelManagerDelegate != this) {
-            m_previousLevelManagerDelegate->loadLevelsFailed(key);
-        }
-    }
-
-    void loadLevelsFinished(CCArray* levels, char const* key, int type) override {
-        if (levelLookupKeyMatches(key)) {
-            acceptExactLevelResults(levels, key);
-            return;
-        }
-        if (m_previousLevelManagerDelegate && m_previousLevelManagerDelegate != this) {
-            m_previousLevelManagerDelegate->loadLevelsFinished(levels, key, type);
-        }
-    }
-
-    void loadLevelsFailed(char const* key, int type) override {
-        if (levelLookupKeyMatches(key)) {
-            rejectExactLevelResults(key);
-            return;
-        }
-        if (m_previousLevelManagerDelegate && m_previousLevelManagerDelegate != this) {
-            m_previousLevelManagerDelegate->loadLevelsFailed(key, type);
-        }
-    }
-
-    void setupPageInfo(gd::string info, char const* key) override {
-        if (levelLookupKeyMatches(key)) return;
-        if (m_previousLevelManagerDelegate && m_previousLevelManagerDelegate != this) {
-            m_previousLevelManagerDelegate->setupPageInfo(info, key);
-        }
-    }
-
-    bool exactLevelLookupStateAllowed() const {
-        auto const& view = RankedRuntime::get().view();
-        if (view.stage != RuntimeStage::Matched) return false;
-        auto const& state = view.match.state;
-        return
-            state == "ROUND_PREPARE" ||
-            state == "DEATHMATCH_PREPARE" ||
-            state == "ROUND_PLAYING" ||
-            state == "DEATHMATCH_PLAYING";
-    }
-
-    void beginExactLevelLookup() {
-        if (!exactLevelLookupStateAllowed() || findLocalMap()) return;
-        auto const& match = RankedRuntime::get().view().match;
-        auto const targetId = RankedRuntime::get().currentLevelId();
-        if (targetId <= 0 || !match.currentMap) return;
-        auto const context = resourceKey(match);
-        if (
-            m_resolvedLevel &&
-            m_resolvedLevelContext == context &&
-            static_cast<int>(m_resolvedLevel->m_levelID) == targetId
-        ) return;
-
-        auto const now = SteadyClock::now();
-        if (m_levelLookupBusy) {
-            auto const stalled =
-                m_levelLookupLastRequestAt != SteadyClock::time_point{} &&
-                std::chrono::duration<double>(now - m_levelLookupLastRequestAt).count() >= 8.0;
-            if (!stalled) return;
-
-            auto* manager = GameLevelManager::sharedState();
-            if (!manager || manager->m_levelManagerDelegate != this) {
-                // Another vanilla screen took ownership of the singleton delegate.
-                // Do not overwrite that live owner; retry after it releases control.
-                m_previousLevelManagerDelegate = nullptr;
-                m_levelLookupBusy = false;
-                m_levelLookupKey.clear();
-                m_levelLookupNextAttemptAt = now + std::chrono::seconds(1);
-                return;
-            }
-            auto* retrySearch = GJSearchObject::create(
-                SearchType::Type19,
-                fmt::format("{}&gameVersion=22", m_levelLookupTargetId)
-            );
-            if (!retrySearch) return;
-            m_levelLookupKey = retrySearch->getKey() ? retrySearch->getKey() : "";
-            m_levelLookupLastRequestAt = now;
-            ++m_levelLookupAttempts;
-            manager->getOnlineLevels(retrySearch);
-            return;
-        }
-        if (
-            m_levelLookupNextAttemptAt != SteadyClock::time_point{} &&
-            now < m_levelLookupNextAttemptAt
-        ) return;
-
-        auto* manager = GameLevelManager::sharedState();
-        auto* search = GJSearchObject::create(
-            SearchType::Type19,
-            fmt::format("{}&gameVersion=22", targetId)
-        );
-        if (!manager || !search || !search->getKey()) {
-            m_levelLookupError = tr("level-lookup-unavailable", "LEVEL LOOKUP UNAVAILABLE - RETRYING");
-            m_levelLookupNextAttemptAt = now + std::chrono::seconds(1);
-            return;
-        }
-
-        m_previousLevelManagerDelegate = manager->m_levelManagerDelegate == this
-            ? nullptr
-            : manager->m_levelManagerDelegate;
-        manager->m_levelManagerDelegate = this;
-        m_levelLookupBusy = true;
-        m_levelLookupContext = context;
-        m_levelLookupTargetId = targetId;
-        m_levelLookupKey = search->getKey();
-        m_levelLookupLastRequestAt = now;
-        m_levelLookupNextAttemptAt = {};
-        m_levelLookupError.clear();
-        if (m_levelLookupStartedAt == SteadyClock::time_point{}) m_levelLookupStartedAt = now;
-        ++m_levelLookupAttempts;
-        log::info(
-            "Resolving exact Ranked GD level: match={} round={} level={} attempt={}",
-            match.matchId,
-            match.roundNumber,
-            targetId,
-            m_levelLookupAttempts
-        );
-        manager->getOnlineLevels(search);
-    }
-
-    GJGameLevel* findLevelInfoMap() const {
-        auto const& view = RankedRuntime::get().view();
-        if (view.stage != RuntimeStage::Matched) return nullptr;
-        auto const targetId = RankedRuntime::get().currentLevelId();
-        if (
-            m_resolvedLevel &&
-            m_resolvedLevelContext == resourceKey(view.match) &&
-            static_cast<int>(m_resolvedLevel->m_levelID) == targetId
-        ) return m_resolvedLevel;
-        return findLocalMap();
-    }
-
-    float preparationProgressTarget() {
-        if (auto* level = findLevelInfoMap()) {
-            if (!isPlayableLevel(level)) return 0.30f;
-            return isSongReady(level) ? 0.92f : 0.75f;
-        }
-        if (m_levelLookupStartedAt == SteadyClock::time_point{}) return 0.0f;
-        auto const elapsed = std::chrono::duration<double>(
-            SteadyClock::now() - m_levelLookupStartedAt
-        ).count();
-        return std::min(0.29f, 0.035f + static_cast<float>(elapsed) * 0.04f);
-    }
-
-    std::string preparationStageText() {
-        if (auto* level = findLevelInfoMap()) {
-            if (!isPlayableLevel(level)) return tr("exact-level-found", "EXACT GD LEVEL FOUND");
-            return isSongReady(level)
-                ? tr("preparation-ready", "PREPARATION READY")
-                : tr("waiting-song", "WAITING FOR SONG");
-        }
-        if (m_levelLookupBusy) return tr("finding-exact-level", "FINDING EXACT GD LEVEL...");
-        if (!m_levelLookupError.empty()) return m_levelLookupError;
-        return tr("waiting-level-lookup", "WAITING FOR LEVEL LOOKUP...");
-    }
-
-    std::vector<int> collectSongIds(GJGameLevel* level) const {
-        std::vector<int> result;
-        if (!level) return result;
-
-        auto add = [&result](int id) {
-            if (id <= 0) return;
-            if (std::find(result.begin(), result.end(), id) == result.end()) result.push_back(id);
-        };
-        add(static_cast<int>(level->m_songID));
-
-        // GD 2.2 stores every custom song referenced by the downloaded level in
-        // m_songIDs as a comma-separated list. Do not only check m_songID.
-        std::stringstream stream(std::string(level->m_songIDs.c_str()));
-        std::string token;
-        while (std::getline(stream, token, ',')) {
-            try {
-                add(std::stoi(token));
-            } catch (...) {
-                // Ignore malformed/empty entries. The primary m_songID is still
-                // handled above and the game remains playable without song audio.
-            }
-        }
-        return result;
-    }
-
-    void refreshSongIds(GJGameLevel* level) {
-        auto ids = collectSongIds(level);
-        if (ids == m_songIds) return;
-        m_songIds = std::move(ids);
-    }
-
-    bool songIdReady(MusicDownloadManager* manager, int id) const {
-        if (!manager || id <= 0) return true;
-        // Resource songs are already part of the game installation. Custom songs
-        // must have a downloaded file according to MusicDownloadManager.
-        return manager->isResourceSong(id) || manager->isSongDownloaded(id);
-    }
-
-    bool isSongReady(GJGameLevel* level) {
-        if (!level) return false;
-        refreshSongIds(level);
-        auto* manager = MusicDownloadManager::sharedState();
-        if (!manager) return m_songIds.empty();
-        for (auto const id : m_songIds) {
-            if (!songIdReady(manager, id)) return false;
-        }
-        return true;
-    }
-
-    void openSongDownloadGate(double countdownOverride = -1.0) {
-        if (m_enteringSongGate) return;
-        auto* level = findLevelInfoMap();
-        if (!level) {
-            beginExactLevelLookup();
-            return;
-        }
-
-        // The real Geometry Dash LevelInfo page owns map/song acquisition. The
-        // explicit override is used as a recovery path when polling skipped a
-        // very short PREPARE phase (notably Debug Trigger Death Match).
-        auto const countdownRemaining = countdownOverride >= 0.0
-            ? countdownOverride
-            : std::max(0.0, 10.0 - phaseSeconds());
-        auto const usedResolvedLevel = level == m_resolvedLevel;
-        m_enteringSongGate = corum::ranked::showRankedSongDownloadGate(level, countdownRemaining);
-        if (m_enteringSongGate) {
-            m_rankedChildScenePushed = true;
-            if (usedResolvedLevel) releaseResolvedLevel();
-        }
-    }
-
-    void updateAutomation() {
-        auto& runtime = RankedRuntime::get();
-        auto const& view = runtime.view();
-        if (view.stage != RuntimeStage::Matched) return;
-        auto const& match = view.match;
-
-        if (match.state == "MATCHED") {
-            if (!m_matchFoundReadySent && phaseSeconds() >= 5.0) {
-                m_matchFoundReadySent = true;
-                runtime.submitReady();
-            }
-            return;
-        }
-        if (
-            match.state != "ROUND_PREPARE" &&
-            match.state != "DEATHMATCH_PREPARE" &&
-            match.state != "MAP_PREPARE"
-        ) return;
-
-        // Resolve the exact Geometry Dash level as soon as the authoritative
-        // ten-second prepare phase begins. LevelInfo starts its vanilla map/update
-        // work behind the Ranked cover immediately; the real page is revealed at
-        // five seconds remaining instead of spending the first half idle.
-        openSongDownloadGate();
-    }
-
-    void maybeEnterLevel() {
-        auto const& view = RankedRuntime::get().view();
-        if (m_enteringLevel || view.stage != RuntimeStage::Matched) return;
-        auto const& state = view.match.state;
-        if (
-            state != "ROUND_PLAYING" &&
-            state != "DEATHMATCH_PLAYING" &&
-            state != "MAP_PLAYING"
-        ) return;
-        if (!RankedRuntime::get().canEnterCurrentLevel()) {
-            if (state == "DEATHMATCH_PLAYING") m_localMessage = "All 3 attempts used. Waiting for the opponent...";
-            return;
-        }
-        auto* level = findPlayableMap();
-        if (!level) {
-            // A Debug scenario (or a fast server transition) can move PREPARE ->
-            // PLAYING between client polls. Recover by opening the same vanilla
-            // LevelInfo download gate even though PLAYING is already authoritative.
-            // LevelInfoLayer will download the map and auto-enter as soon as it is
-            // playable; this prevents the old permanent "Loading map" deadlock.
-            m_localMessage = "Opening level download recovery...";
-            openSongDownloadGate(0.0);
-            return;
-        }
-        // Do not construct PlayLayer directly. Enter through Geometry Dash's normal
-        // LevelInfoLayer -> onPlay path; this lets the game own level validation,
-        // loading transitions, audio setup, and the return/quit stack.
-        auto* scene = LevelInfoLayer::scene(level, false);
-        if (!scene) {
-            m_localMessage = "Unable to open the selected level. Retrying...";
-            return;
-        }
-        m_enteringLevel = true;
-        m_rankedChildScenePushed = true;
-        CCDirector::sharedDirector()->pushScene(CCTransitionFade::create(0.25f, scene));
-    }
-
-    void onDownloadAllResources(CCObject*) {
-        m_localMessage.clear();
-        RankedAudioManager::get().downloadAll();
-    }
-
-    void onContinueResources(CCObject*) {
-        if (!RankedAudioManager::get().resourcesReady()) return;
-        m_resourceGateAcknowledged = true;
-        m_resourceGateWasMissing = false;
-        m_resourceGateMenuRestored = false;
-        syncAudioMode();
-    }
-
-    void onJoin(CCObject*) {
-        m_localMessage.clear();
-        RankedRuntime::get().joinQueue();
-    }
-
-    void onStartPlacement(CCObject* sender) {
-        auto const pool = sender ? sender->getTag() : 0;
-        if (pool < 1 || pool > 6) return;
-        m_localMessage.clear();
-        RankedRuntime::get().startPlacement(pool);
-    }
-
-    void onContinuePlacement(CCObject*) {
-        m_localMessage.clear();
-        RankedRuntime::get().continuePlacement();
-    }
-
-    void onLeave(CCObject*) {
-        RankedRuntime::get().leaveQueue();
-    }
-
-    void onRetry(CCObject*) {
-        RankedRuntime::get().begin();
-    }
-
-    void selectLanguage(corum::ranked::i18n::Language language) {
-        if (corum::ranked::i18n::language() == language) return;
-        corum::ranked::i18n::setLanguage(language);
-        // The selected menu item is still inside CCMenu::activate() here. Let the
-        // next scheduled UI pass rebuild the tree after touch dispatch finishes.
-        m_renderedUiKey.clear();
-        m_fadeInNextRender = false;
-    }
-
-    void onEnglish(CCObject*) {
-        selectLanguage(corum::ranked::i18n::Language::English);
-    }
-
-    void onKorean(CCObject*) {
-        selectLanguage(corum::ranked::i18n::Language::Korean);
-    }
-
-#if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
-    void onDebugBot(CCObject*) {
-        corum::ranked::showDebugBotPasswordPopup();
-    }
-#endif
-
-    void onBan(CCObject* sender) {
-        if (!m_selectedBan.empty() || !m_pendingBan.empty()) return;
-        auto const index = sender ? sender->getTag() : -1;
-        auto const& maps = RankedRuntime::get().view().match.candidateMaps;
-        if (index < 0 || static_cast<std::size_t>(index) >= maps.size()) return;
-        m_pendingBan = maps[static_cast<std::size_t>(index)].canonicalLevelId;
-        RankedRuntime::get().submitBan(m_pendingBan);
-    }
-
-    void onDownloadMap(CCObject*) {
-        openSongDownloadGate();
-    }
-
-    void onDownloadSong(CCObject*) {
-        openSongDownloadGate();
-    }
-
-    void onQueueAgain(CCObject*) {
-        m_page = Page::Live;
-        RankedRuntime::get().queueAgain();
-    }
-
-    void onResultClose(CCObject*) {
-        RankedRuntime::get().dismissMatch();
-        m_page = Page::Live;
-    }
-
-    void onHistory(CCObject*) {
-        m_page = Page::HistoryList;
-        RankedRuntime::get().fetchHistory();
-    }
-
-    void onHistoryDetail(CCObject* sender) {
-        auto const index = sender ? sender->getTag() : -1;
-        if (index < 0) return;
-        m_historyIndex = static_cast<std::size_t>(index);
-        m_page = Page::HistoryDetail;
-    }
-
-    void onHistoryBack(CCObject*) {
-        if (m_page == Page::HistoryDetail) {
-            m_page = Page::HistoryList;
-        } else {
-            m_page = Page::Live;
-        }
-    }
-
-    void onCloseLayer(CCObject*) {
-        if (RankedRuntime::get().view().stage == RuntimeStage::Queued) RankedRuntime::get().leaveQueue();
-        RankedAudioManager::get().restoreMenuMusic();
-        unschedule(schedule_selector(CorumRankedLayer::refresh));
-        setKeypadEnabled(false);
-        if (m_menu) {
-            if (m_menu->m_pSelectedItem) {
-                m_menu->m_pSelectedItem = nullptr;
-            }
-            m_menu->setTouchEnabled(false);
-        }
-        // Ranked now lives in its own GD-style scene/tab. Return to the previous
-        // Geometry Dash scene instead of merely deleting the fullscreen child.
-        CCDirector::sharedDirector()->popScene();
-    }
-
-    void onExit() override {
-        unschedule(schedule_selector(CorumRankedLayer::refresh));
-        cancelExactLevelLookup();
-        m_rankTransitionLayer = nullptr;
-        setKeypadEnabled(false);
-        if (m_menu) {
-            if (m_menu->m_pSelectedItem) {
-                m_menu->m_pSelectedItem = nullptr;
-            }
-            m_menu->setTouchEnabled(false);
-        }
-        CCLayerColor::onExit();
-    }
-
-    void keyBackClicked() override {
-        if (m_rankTransitionLayer) return;
-        if (m_page != Page::Live) {
-            onHistoryBack(nullptr);
-            return;
-        }
-        auto const& view = RankedRuntime::get().view();
-        if (
-            view.stage == RuntimeStage::Matched &&
-            view.match.state != "MATCH_RESULT" &&
-            view.match.state != "CANCELLED"
-        ) {
-            m_localMessage = "Ranked is active. Finish the match before leaving this screen.";
-            return;
-        }
-        onCloseLayer(nullptr);
-    }
-
-public:
-    static CorumRankedLayer* create() {
-        auto* layer = new CorumRankedLayer();
-        if (layer && layer->init()) {
-            layer->autorelease();
-            return layer;
-        }
-        delete layer;
-        return nullptr;
-    }
-};
-
-} // namespace
-
-namespace corum::ranked {
-
-void showRankedPopup() {
-    auto* running = CCDirector::sharedDirector()->getRunningScene();
-    if (!running || running->getChildByID("corum-ranked-fullscreen"_spr)) return;
-
-    auto* scene = CCScene::create();
-    scene->setID("corum-ranked-scene"_spr);
-    if (auto* layer = CorumRankedLayer::create()) {
-        scene->addChild(layer, 1);
-    } else {
-        return;
-    }
-    CCDirector::sharedDirector()->pushScene(CCTransitionFade::create(0.25f, scene));
-}
-
-} // namespace corum::ranked
+×ıÛÇ(®é«jyvjşÊÜı§‘çO¢›©ršHÚ[˜ÛYH”˜[šÙYÜ\š‚‚ˆÚ[˜ÛYH”˜[šÙY[[YKš‚ˆÚ[˜ÛYH”˜[šÙY]Y[ÓX[˜YÙ\‹š‚ˆÚ[˜ÛYH‘XYĞ›İÜ\š‚ˆÚ[˜ÛYH”˜[šÙYÛÛ™ÑØ]Kš‚ˆÚ[˜ÛYHZKÔ˜[šĞ˜YÙP\ÜÙ]Ëš‚ˆÚ[˜ÛYHZKÔ˜[šÕ˜[œÚ][Û“^Y\‹š‚ˆÚ[˜ÛYHZKÔXÙ[Y[Ü˜YP˜YÙKš‚ˆÚ[˜ÛYHZKÔ˜[šÙY˜[œÛ][ÛœËš‚ˆÚ[˜ÛYHZKÔ˜[šÙYš\İX[Ëš‚‚ˆÚ[˜ÛYHÙ[ÙKÑÙ[ÙKš‚ˆÚ[˜ÛYHÙ[ÙKØš[™[™ËÑØ[YS]™[X[˜YÙ\‹š‚ˆÚ[˜ÛYHÙ[ÙKØš[™[™ËÑØ[YSX[˜YÙ\‹š‚ˆÚ[˜ÛYHÙ[ÙKØš[™[™ËÑÒ‘Ø[YS]™[š‚ˆÚ[˜ÛYHÙ[ÙKØš[™[™ËÑÒ”ÙX\˜ÚØš™Xİš‚ˆÚ[˜ÛYHÙ[ÙKØš[™[™ËÓ]™[[™›Ó^Y\‹š‚ˆÚ[˜ÛYHÙ[ÙKØš[™[™ËÓ]™[X[˜YÙ\‘[YØ]Kš‚ˆÚ[˜ÛYHÙ[ÙKØš[™[™ËÓ]\ÚXÑİÛ›ØYX[˜YÙ\‹š‚ˆÚ[˜ÛYHÙ[ÙKØš[™[™ËÔÚ[\T^Y\‹š‚ˆÚ[˜ÛYHÙ[ÙKİZKÓØY[™ÔÜ[›™\‹š‚‚ˆÚ[˜ÛYH[ÛÜš]O‚ˆÚ[˜ÛYHÚ›Û›Ï‚ˆÚ[˜ÛYHØİ\O‚ˆÚ[˜ÛYHÛX]‚ˆÚ[˜ÛYH[ÛX[š\‚ˆÚ[˜ÛYHÜ[Û˜[‚ˆÚ[˜ÛYHÜİ™X[O‚ˆÚ[˜ÛYHİš[™Ï‚ˆÚ[˜ÛYHİš[™×İšY]Ï‚ˆÚ[˜ÛYH[›Ü™\™YÛX\‚ˆÚ[˜ÛYH™XİÜ‚‚\Ú[™È˜[Y\ÜXÙHÙ[ÙNœ™[YNÂ\Ú[™ÈÛÜ[Nœ˜[šÙY‘X]X]Úİ[[X\UšY]ÎÂ\Ú[™ÈÛÜ[Nœ˜[šÙY’\İÜSX]ÚšY]ÎÂ\Ú[™ÈÛÜ[Nœ˜[šÙY“X]ÚšY]ÎÂ\Ú[™ÈÛÜ[Nœ˜[šÙY”˜[šÙY[[YNÂ\Ú[™ÈÛÜ[Nœ˜[šÙY”˜[šÙY]Y[ÓX[˜YÙ\Â\Ú[™ÈÛÜ[Nœ˜[šÙY”˜[šÙY]Y[Ó[ÙNÂ\Ú[™ÈÛÜ[Nœ˜[šÙY”˜[šÙY™\Ûİ\˜ÙQİÛ›ØYİ]NÂ\Ú[™ÈÛÜ[Nœ˜[šÙY”˜[šÙY›Ùš[UšY]ÎÂ\Ú[™ÈÛÜ[Nœ˜[šÙY”˜[šÙYX\šY]ÎÂ\Ú[™ÈÛÜ[Nœ˜[šÙY”›İ[™İ[[X\UšY]ÎÂ\Ú[™ÈÛÜ[Nœ˜[šÙY”[[YTİYÙNÂ\Ú[™ÈÛÜ[Nœ˜[šÙY”[[YUšY]ÎÂ\Ú[™ÈÛÜ[Nœ˜[šÙYZN”˜[šÕ˜[œÚ][Û“^Y\Â\Ú[™ÈÛÜ[Nœ˜[šÙYZN”˜[šÕ˜[œÚ][Û•\NÂ‚›˜[Y\ÜXÙHÂ‚\Ú[™ÈİXYPÛØÚÈHİ˜Ú›Û›ÎœİXYWØÛØÚÎÂ‚˜ÛÛœİ^ˆØĞÛÛÜŒĞˆÔ[™[ÛÛÜˆHÛÜ[Nœ˜[šÙYZN”İ\™˜XÙNÂ˜ÛÛœİ^ˆØĞÛÛÜŒĞˆĞXØÙ[HÛÜ[Nœ˜[šÙYZNŞX[Â˜ÛÛœİ^ˆØĞÛÛÜŒĞˆÑÜ™Y[ˆHÛÜ[Nœ˜[šÙYZN‘Ü™Y[Â˜ÛÛœİ^ˆØĞÛÛÜŒĞˆÔ™YHÛÜ[Nœ˜[šÙYZN”™YÂ˜ÛÛœİ^ˆØĞÛÛÜŒĞˆÑÛÛHÛÜ[Nœ˜[šÙYZN‘ÛÛÂ˜ÛÛœİ^ˆØĞÛÛÜŒĞˆĞŞX[ˆHÛÜ[Nœ˜[šÙYZNŞX[Â˜ÛÛœİ^ˆØĞÛÛÜŒĞˆĞ›YHHÛÜ[Nœ˜[šÙYZN›YNÂ˜ÛÛœİ^ˆØĞÛÛÜŒĞˆÑY\[™[HÛÜ[Nœ˜[šÙYZN’[šÎÂ˜ÛÛœİ^ˆØĞÛÛÜŒĞˆÑY\[™[ˆHÛÜ[Nœ˜[šÙYZN”İ\™˜XÙNÂ˜ÛÛœİ^ˆØĞÛÛÜŒĞˆÔÚYT™YHÛÜ[Nœ˜[šÙYZN”™YÂ‚œİœİš[™ÈŠİœİš[™×İšY]ÈÙ^Kİœİš[™×İšY]È[™Û\Ú
+HÂˆ™]\›ˆÛÜ[Nœ˜[šÙYšLN^
+Ù^K[™Û\Ú
+NÂŸB‚œİœİš[™ÈÚÜ[Šİœİš[™È˜[YKİœÚ^™WİX^[][JHÂˆYˆ
+˜[YKœÚ^™J
+HHX^[][JH™]\›ˆ˜[YNÂˆYˆ
+X^[][HHÊH™]\›ˆ˜[YKœİXœİŠX^[][JNÂˆ˜[YKœ™\Ú^™JX^[][HHÊNÂˆ™]\›ˆ˜[YH
+È‹‹‹ˆÂŸB‚œİœİš[™È\\Šİœİš[™È˜[YJHÂˆİ˜[œÙ›Ü›J˜[YK˜™YÚ[Š
+K˜[YK™[™
+
+K˜[YK˜™YÚ[Š
+K×J[œÚYÛ™YÚ\ˆÚ
+HÂˆ™]\›ˆİ]X×ØØ\İÚ\Šİİ\\ŠÚ
+JNÂˆJNÂˆ™]\›ˆ˜[YNÂŸB‚œİœİš[™È\Ü^P˜[›™\Šİœİš[™È˜[YJHÂˆİœ™\XÙJ˜[YK˜™YÚ[Š
+K˜[YK™[™
+
+K	×ÉË	È	ÊNÂˆ™]\›ˆ˜[YNÂŸB‚œİœİš[™È›Ü›X]ØÛÜ™JİX›H˜[YJHÂˆYˆ
+İ˜XœÊ˜[YHHİœ›İ[™
+˜[YJJHŒJHÂˆ™]\›ˆİ×Üİš[™Êİ]X×ØØ\İÛ™ÈÛ™ÏŠİ››İ[™
+˜[YJJJNÂˆBˆİ›Üİš[™Üİ™X[Hİ™X[NÂˆİ™X[Hİ™š^YİœÙ]™XÚ\Ú[ÛŠJH˜[YNÂˆ™]\›ˆİ™X[KœİŠ
+NÂŸB‚œİœİš[™ÈØÛÜ™PÛÛ\\š\ÛÛŠİX›HİÛ”ØÛÜ™KİX›HÜÛ™[ØÛÜ™JHÂˆYˆ
+XÛÜ[Nœ˜[šÙYšLNš\ÒÛÜ™X[Š
+JHÂˆ™]\›ˆ›]™›Ü›X]
+ˆ–SÕTˆĞÓÔ‘HßHÔÓ‘S•ßH‹ˆ›Ü›X]ØÛÜ™JİÛ”ØÛÜ™JKˆ›Ü›X]ØÛÜ™JÜÛ™[ØÛÜ™JBˆ
+NÂˆBˆ™]\›ˆ›]™›Ü›X]
+ˆºà­ßHßHßHßH‹ˆŠœØÛÜ™H‹”ĞÓÔ‘HŠKˆ›Ü›X]ØÛÜ™JİÛ”ØÛÜ™JKˆŠ›ÜÛ™[‹“ÔÓ‘S•ŠKˆ›Ü›X]ØÛÜ™JÜÛ™[ØÛÜ™JBˆ
+NÂŸB‚œİœİš[™ÈÛÓ[™U]Jİœİš[™È˜[YKİœÚ^™Wİ\“[™HHLJHÂˆYˆ
+˜[YKœÚ^™J
+HH\“[™JH™]\›ˆ˜[YNÂˆ]]ÈÜ]]H˜[YKœ™š[™
+	È	Ë\“[™JNÂˆYˆ
+Ü]]OHİœİš[™Î›œÜÈÜ]]\“[™HÈŠHÜ]]H\“[™NÂˆ]]Èš\œİH˜[YKœİXœİŠÜ]]
+NÂˆ]]ÈÙXÛÛ™İ\HÜ]]ÂˆÚ[H
+ÙXÛÛ™İ\˜[YKœÚ^™J
+H	‰ˆ˜[YVÜÙXÛÛ™İ\HOH	È	ÊH
+ÊÜÙXÛÛ™İ\Âˆ]]ÈÙXÛÛ™H˜[YKœİXœİŠÙXÛÛ™İ\
+NÂˆ]]ÈÛÛœİX^ÙXÛÛ™H\“[™H
+ÈÂˆYˆ
+ÙXÛÛ™œÚ^™J
+HˆX^ÙXÛÛ™
+HÂˆÙXÛÛ™œ™\Ú^™JX^ÙXÛÛ™ˆÈÈX^ÙXÛÛ™HÈˆX^ÙXÛÛ™
+NÂˆÙXÛÛ™
+ÏH‹‹‹ˆÂˆBˆ™]\›ˆš\œİ
+È—ˆˆ
+ÈÙXÛÛ™ÂŸB‚˜ØĞÛÛÜŒĞˆY\ÛÛÜŠİœİš[™ÈÛÛœİ	ˆY\ŠHÂˆ™]\›ˆÛÜ[Nœ˜[šÙYZNY\ÛÛÜŠY\ŠNÂŸB‚œİ›Ü[Û˜[˜[šÕ˜[œÚ][Û•\Oˆ]]Üš]]]™U˜[œÚ][Û•\JˆÛÜ[Nœ˜[šÙY”˜][™Ñ]™[šY]ÈÛÛœİ	ˆ]™[ˆ˜[šÙY›Ùš[UšY]ÈÛÛœİ	ˆ™Y›Ü™Kˆ˜[šÙY›Ùš[UšY]ÈÛÛœİ	ˆY\‚ŠHÂˆ]]ÈÛÛœİÛY\ˆH\\Š™Y›Ü™K™\Ü^YYY\ŠNÂˆ]]ÈÛÛœİ™]ÕY\ˆH\\ŠY\‹™\Ü^YYY\ŠNÂˆYˆ
+ÛY\ˆOH™]ÕY\ŠH™]\›ˆİ›[ÜÂ‚ˆËÈHÙ\™\ˆ]™[\ÈHÛÛH]]Üš]H›ÜˆH˜[œÚ][Ûˆ\Kˆ\ÙBˆËÈÚXÚÜÈÛ›H™Z™XİX[›Ü›YY™\Ù[][Ûˆ]NÈ^H™]™\ˆØ[İ[]HÜ‚ˆËÈÚ[™ÙHH™\İ[[™ÈY\‹‚ˆYˆ
+]™[œXÙ[Y[ÛÛ\]Y	‰ˆÛY\ˆOH•S”S’ÑQˆ	‰ˆ™]ÕY\ˆOH•S”S’ÑQŠHÂˆ™]\›ˆ˜[šÕ˜[œÚ][Û•\N”XÙ[Y[ÂˆBˆYˆ
+]™[œ›Û[İ[Û”İXØÙYYY	‰ˆÛY\ˆOH•S”S’ÑQˆ	‰ˆ™]ÕY\ˆOH•S”S’ÑQŠHÂˆ™]\›ˆ˜[šÕ˜[œÚ][Û•\N”›Û[İ[ÛÂˆBˆYˆ
+]™[™[[İY	‰ˆÛY\ˆOH•S”S’ÑQˆ	‰ˆÛY\ˆOH”‘Qˆ	‰ˆ™]ÕY\ˆOH•S”S’ÑQŠHÂˆ™]\›ˆ˜[šÕ˜[œÚ][Û•\N‘[[İ[ÛÂˆBˆ™]\›ˆİ›[ÜÂŸB‚œİœZ\İœİš[™ËØĞÛÛÜŒĞˆ˜][™Ñ]™[^
+ÛÜ[Nœ˜[šÙY”˜][™Ñ]™[šY]ÈÛÛœİ	ˆ]™[
+HÂˆYˆ
+]™[œXÙ[Y[ÛÛ\]Y
+H™]\›ˆİŠœXÙY‹”PÑQŠKÑÜ™Y[ŸNÂˆYˆ
+]™[œ›Û[İ[Û”İXØÙYYY
+H™]\›ˆİŠœ›Û[İY‹”“ÓSÕQŠKÑÜ™Y[ŸNÂˆYˆ
+]™[œ›Û[İ[Û‘˜Z[Y
+H™]\›ˆİŠœ›Û[İ[Û‹Y˜Z[Y‹”“ÓSÕSÓˆRSQŠKÔ™YNÂˆYˆ
+]™[œ›Û[İ[Û”İ\Y
+H™]\›ˆİŠœ›Û[İ[Û‹[X]Ú‹”“ÓSÕSÓˆPUÒŠKØØÌÊMKMKLJ_NÂˆYˆ
+]™[™[[İY
+H™]\›ˆİŠ™[[İY‹‘SSÕQŠKÔ™YNÂˆ™]\›ˆÈˆ‹ØØÌÊMKMKMJ_NÂŸB‚˜ØĞÛÛÜŒĞˆÛÛÜ‘œ›ÛR^
+[˜[YJHÂˆ™]\›ˆØØÌÊˆİ]X×ØØ\İÓX]OŠ
+˜[YHˆMŠH	ˆ™ŠKˆİ]X×ØØ\İÓX]OŠ
+˜[YHˆ
+H	ˆ™ŠKˆİ]X×ØØ\İÓX]OŠ˜[YH	ˆ™ŠBˆ
+NÂŸB‚‹ËÈÛÜ[HY™šXİ[KÜ˜][™È[]KˆÙY\\ÈØØ[ÈÛÜ[H˜[šÙYÈÛÜ[B‹ËÈ[YÜ˜][Ûˆ™[XZ[œÈHÙ\\˜]H[Ù[™\È›İ[šÙY[È\È\™Ù]‚˜ØĞÛÛÜŒĞˆY™šXİ[PÛÛÜŠİœİš[™È˜][™ÊHÂˆÚ[H
+\˜][™Ë™[\J
+H	‰ˆİš\ÜÜXÙJİ]X×ØØ\İ[œÚYÛ™YÚ\Š˜][™Ë™œ›Û
+
+JJJH˜][™Ë™\˜\ÙJ˜][™Ë˜™YÚ[Š
+JNÂˆÚ[H
+\˜][™Ë™[\J
+H	‰ˆİš\ÜÜXÙJİ]X×ØØ\İ[œÚYÛ™YÚ\Š˜][™Ë˜˜XÚÊ
+JJJH˜][™ËœÜØ˜XÚÊ
+NÂˆYˆ
+˜][™ÈOHŒŒŠH˜][™ÈHŒŒŒÂ‚ˆİ]XÈİ[›Ü™\™YÛX\İœİš[™Ë[ˆÛÛœİÛÛÜœÈÂˆÈ•[H‹™™™™ŸKÈŒ‹NXYYKÈŒH‹NY™ŸKÈŒˆ‹˜™™ŸKˆÈŒÈ‹™ŸKÈ‹™™™ŸKÈH‹™˜X_KÈˆ‹™ŒKˆÈÈ‹™™ŒKÈ‹NY™ŒKÈH‹ØÙ™ŒKÈŒL‹™™™ŒKˆÈŒLH‹™™KÈŒLˆ‹™˜ØÌKÈŒLÈ‹™˜XLKÈŒM‹™KˆÈŒMH‹™ŒKÈŒMˆ‹™KÈŒMÈ‹™ŒKÈŒN‹ØÌKˆÈŒN
+È‹MŒXÌKÈŒNH‹ŒKÈŒNJÈ‹ŒÌKÈŒŒŒ‹ÍŒLKˆÈŒŒŒH‹ŒKÈŒŒŒˆ‹LÌKÈŒŒŒÈ‹KÈŒŒ‹LÌYŸKˆÈŒŒH‹LLÌ™KÈŒŒˆ‹NŒØŸKÈŒŒÈ‹NŒØŸKÈŒŒ‹ŒLÍNKˆÈŒŒH‹™MÍŸKÈŒŒH‹ÍLXÍÍ_KÈŒŒJÈ‹LLXÎ_KÈ‹LH‹ÌLLÌKˆÈ‹Lˆ‹ÍÍßKÈ•[•‘ˆ‹ÌXLßKˆNÂ‚ˆ]]ÈÛÛœİ›İ[™HÛÛÜœË™š[™
+˜][™ÊNÂˆ™]\›ˆÛÛÜ‘œ›ÛR^
+›İ[™OHÛÛÜœË™[™
+
+HÈ™™™™™ˆˆ›İ[™OœÙXÛÛ™
+NÂŸB‚ĞÓX™[“Q›Û
+ˆXZÙSX™[
+ˆİœİš[™ÈÛÛœİ	ˆ^ˆ›Ø]ØØ[KˆĞÔÚ[ÜÚ][Û‹ˆØĞÛÛÜŒĞˆÛÛÜˆHÌMKMKM_KˆÚ\ˆÛÛœİ
+ˆ›ÛH[‚ŠHÂˆËÈÙ[ZP›Û\ÈHY˜][RH›ÚXÙKˆYY][H™[XZ[œÈ]˜Z[X›H›Üˆ[X™\˜][BˆËÈ]ZY][\ˆÛÜKÚ[H\Ü^KØÜš]XØ[˜[Y\ÈÜ[È\\›ÙŞH›XÚË‚ˆ]]ÈÙZYÚHÛÜ[Nœ˜[šÙYZN‘›ÛÙZYÚ”Ù[ZP›ÛÂˆYˆ
+›Û
+HÂˆ]]ÈÛÛœİ›ÛHHİœİš[™×İšY]Ê›Û
+NÂˆYˆ
+›ÛHOH›YY][HŠHÙZYÚHÛÜ[Nœ˜[šÙYZN‘›ÛÙZYÚ“YY][NÂˆ[ÙHYˆ
+›ÛHOHœÙ[ZX›ÛŠHÙZYÚHÛÜ[Nœ˜[šÙYZN‘›ÛÙZYÚ”Ù[ZP›ÛÂˆ[ÙHYˆ
+›ÛHOH˜›XÚÈˆ›ÛHOH™\Ü^HŠHÙZYÚHÛÜ[Nœ˜[šÙYZN‘›ÛÙZYÚ›XÚÎÂˆ[ÙHÙZYÚHÛÜ[Nœ˜[šÙYZN‘›ÛÙZYÚ‘^˜P›ÛÂˆBˆ™]\›ˆÛÜ[Nœ˜[šÙYZN›X™[
+^ØØ[KÜÚ][Û‹ÛÛÜ‹ÙZYÚ
+NÂŸB‚ĞÓ›ÙJˆXZÙT[™[
+ĞÔÚ^™HÚ^™KĞÔÚ[ÜÚ][Û‹ØĞÛÛÜŒĞˆÛÛÜˆHÔ[™[ÛÛÜ‹ÓX]HÜXÚ]HHŒÍJHÂˆ™]\›ˆÛÜ[Nœ˜[šÙYZNœİ\™˜XÙJÚ^™KÜÚ][Û‹ÛÛÜ‹ÑY\[™[‹ÜXÚ]K˜[ÙJNÂŸB‚ĞÓ›ÙJˆXZÙS™[Û”[™[
+ˆĞÔÚ^™HÚ^™KˆĞÔÚ[ÜÚ][Û‹ˆØĞÛÛÜŒĞˆXØÙ[HĞŞX[‹ˆØĞÛÛÜŒĞˆš[HÑY\[™[ˆÓX]Hš[ÜXÚ]HHBŠHÂˆ™]\›ˆÛÜ[Nœ˜[šÙYZNœİ\™˜XÙJÚ^™KÜÚ][Û‹XØÙ[š[š[ÜXÚ]KYJNÂŸB‚ĞÓ›ÙJˆXZÙU^]Jˆİœİš[™ÈÛÛœİ	ˆ^ˆĞÔÚ^™HÚ^™KˆĞÔÚ[ÜÚ][Û‹ˆØĞÛÛÜŒĞˆXØÙ[ˆ›Ø]ØØ[HHŒ‹ˆØĞÛÛÜŒĞˆ^ÛÛÜˆHÌMKMKM_KˆÚ\ˆÛÛœİ
+ˆ›ÛH[‹ˆĞÓX™[“Q›Û
+Šˆİ]X™[H[‚ŠHÂˆ]]Êˆ›ÙHHXZÙS™[Û”[™[
+Ú^™KÜÚ][Û‹XØÙ[ÑY\[™[‹ŠNÂˆ]]ÊˆX™[HXZÙSX™[
+^ØØ[KÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚÈ‹ŒŸK^ÛÛÜ‹›Û
+NÂˆX™[O›[Z]X™[ÚY
+Ú^™KÚYHL‹Œ‹ØØ[Kİ›X^
+ŒL™‹ØØ[H
+ˆYŠJNÂˆ›ÙKO˜YÚ[
+X™[
+NÂˆYˆ
+İ]X™[
+H
+›İ]X™[HX™[Âˆ™]\›ˆ›ÙNÂŸB‚ĞÓ›ÙJˆXZÙPXİ[Û]Û•š\İX[
+ˆİœİš[™ÈÛÛœİ	ˆ^ˆ›ÛÛ[™Ù\ˆH˜[ÙKˆ›ÛÛÙ[XİYH˜[ÙBŠHÂˆ]]ÈÛÛœİÚYHİ˜Û[\
+‹Œˆ
+Èİ]X×ØØ\İ›Ø]Š^œÚ^™J
+JH
+ˆËŒ‹LŒ‹MÎŒŠNÂˆÛÛœİ^ˆ›Ø]ZYÚHÍŒÂˆ]]ÈÛÛœİXØÙ[HÙ[XİYÈÑÛÛˆ
+[™Ù\ˆÈÔ™YˆĞŞX[ŠNÂ‚ˆ]]Êˆ›ÛİHĞÓ›ÙN˜Ü™X]J
+NÂˆ›ÛİOœÙ][˜ÚÜ”Ú[
+ÌY‹YŸJNÂˆ›ÛİOœÙ]ÛÛ[Ú^™JİÚYZYÚJNÂ‚ˆ]]Êˆ[™[HÛÜ[Nœ˜[šÙYZNœİ\™˜XÙJˆİÚYZYÚKˆİÚYÈ‹Œ‹ZYÚÈ‹ŒŸKˆXØÙ[ˆ[™Ù\ˆÈØØÌÊÎKMK
+HˆÛÜ[Nœ˜[šÙYZN”İ\™˜XÙT˜Z\ÙYˆLˆYBˆ
+NÂˆ›ÛİO˜YÚ[
+[™[
+NÂ‚ˆ]]ÊˆØ\[ÛˆHÛÜ[Nœ˜[šÙYZN›X™[
+ˆ^ˆŒÎ‹ˆİÚYÈ‹Œ‹ZYÚÈ‹ŒŸKˆÙ[XİYÈÑÛÛˆ
+[™Ù\ˆÈØØÌÊMKŒŒJHˆÛÜ[Nœ˜[šÙYZN•^
+KˆYBˆ
+NÂˆØ\[Û‹O›[Z]X™[ÚY
+ÚYHŒŒ‹ŒÎ‹ŒŠNÂˆ›ÛİO˜YÚ[
+Ø\[Û‹JNÂˆ™]\›ˆ›ÛİÂŸB‚œİœİš[™È™\Ûİ\˜ÙRÙ^JX]ÚšY]ÈÛÛœİ	ˆX]Ú
+HÂˆ™]\›ˆ›]™›Ü›X]
+ˆßNßNßNßH‹ˆX]Ú›X]ÚYˆX]Úœ›İ[™[X™\‹ˆX]Ú™X]X]ÚÙ\]Y[˜ÙKˆX]Ú˜İ\œ™[X\ÈX]Ú˜İ\œ™[X\O›]™[Yˆˆ
+NÂŸB‚˜Û\ÜÈÛÜ[T˜[šÙY^Y\ˆš[˜[ˆX›XÈĞÓ^Y\ÛÛÜ‹X›XÈ]™[X[˜YÙ\‘[YØ]HÂˆ[[HÛ\ÜÈYÙHÂˆ]™KˆXÙ[Y[ÛÛÙ[Xİ[Û‹ˆXÙ[Y[ÚÚ\ÛÛ™š\›Kˆ\İÜS\İˆ\İÜQ]Z[ˆNÂ‚ˆĞÓ^Y\ÛÛÜŠˆWÙ˜YT›ÛİH[ÂˆĞÓ›ÙJˆWÜ›ÛİH[ÂˆĞÓY[JˆWÛY[HH[ÂˆYÙHWÜYÙHHYÙN“]™NÂˆİœÚ^™WİWÚ\İÜR[™^HÂˆİœİš[™ÈWÜ\ÙRÙ^NÂˆİœİš[™ÈWÜ™\Ûİ\˜ÙRÙ^NÂˆİœİš[™ÈWÛ\İX]ÚYÂˆİœİš[™ÈWÜÙ[XİY˜[Âˆİœİš[™ÈWÜ[™[™Ğ˜[Âˆİœİš[™ÈWÛØØ[Y\ÜØYÙNÂˆİXYPÛØÚÎ[YWÜÚ[WÜ\ÙTİ\Y]ßNÂˆİ™XİÜ[ˆWÜÛÛ™ÒYÎÂˆ›ÛÛWÜ™XYTÙ[H˜[ÙNÂˆ›ÛÛWÛX]Ú›İ[™™XYTÙ[H˜[ÙNÂˆ›ÛÛWÙ[\š[™ÔÛÛ™ÑØ]HH˜[ÙNÂˆ›ÛÛWÙ[\š[™Ó]™[H˜[ÙNÂˆ]™[X[˜YÙ\‘[YØ]JˆWÜ™]š[İ\Ó]™[X[˜YÙ\‘[YØ]HH[ÂˆÒ‘Ø[YS]™[
+ˆWÜ™\ÛÛ™Y]™[H[Âˆİœİš[™ÈWÜ™\ÛÛ™Y]™[ÛÛ^Âˆİœİš[™ÈWÛ]™[ÛÚİ\ÛÛ^Âˆİœİš[™ÈWÛ]™[ÛÚİ\Ù^NÂˆİœİš[™ÈWÛ]™[ÛÚİ\\œ›ÜÂˆ[WÛ]™[ÛÚİ\\™Ù]YHÂˆ[WÛ]™[ÛÚİ\][\ÈHÂˆ›ÛÛWÛ]™[ÛÚİ\\ŞHH˜[ÙNÂˆİXYPÛØÚÎ[YWÜÚ[WÛ]™[ÛÚİ\İ\Y]ßNÂˆİXYPÛØÚÎ[YWÜÚ[WÛ]™[ÛÚİ\\İ™\]Y\İ]ßNÂˆİXYPÛØÚÎ[YWÜÚ[WÛ]™[ÛÚİ\™^][\]ßNÂˆËÈÙ]Û›HÚ[HH˜[š[H]™[[™›ËÔ^HØÙ[™H\ÈÛİ™\š[™È\È™]Z[™YˆËÈ˜[šÙYØÙ[™KˆHØ[YK[X\X]X]Ú™]HÙ\È›İÚ[™ÙH™\Ûİ\˜ÙRÙ^J
+KˆËÈÛÈHÛ\ˆ™\Ûİ\˜ÙKZÙ^H™\Ù]YWÙ[\š[™Ó]™[]ÚY›Ü™]™\ˆY\‚ˆËÈHÚ[ØÙ[™H™]\›™Y‚ˆ›ÛÛWÜ˜[šÙYÚ[ØÙ[™T\ÚYH˜[ÙNÂˆ›ÛÛWÜ™\Ûİ\˜ÙQØ]R[š]X[^™YH˜[ÙNÂˆ›ÛÛWÜ™\Ûİ\˜ÙQØ]PXÚÛ›İÛYÙYH˜[ÙNÂˆ›ÛÛWÜ™\Ûİ\˜ÙQØ]UØ\ÓZ\ÜÚ[™ÈH˜[ÙNÂˆ›ÛÛWÜ™\Ûİ\˜ÙQØ]SY[T™\İÜ™YH˜[ÙNÂˆİœİš[™ÈWÜ™[™\™YZRÙ^NÂˆİœİš[™ÈWÜ[™[™ÕZRÙ^NÂˆİœİš[™ÈWÜ˜[šÕ˜[œÚ][Û”^YYÙ^NÂˆİœİš[™ÈWÜİYÙT™\İ[]Y[Ô^YYÙ^NÂˆ˜[šÕ˜[œÚ][Û“^Y\ŠˆWÜ˜[šÕ˜[œÚ][Û“^Y\ˆH[Âˆ›ÛÛWİZQ˜Y[™Óİ]H˜[ÙNÂˆ›ÛÛWÙ˜YR[“™^™[™\ˆHYNÂˆİXYPÛØÚÎ[YWÜÚ[WİZU˜[œÚ][Û‘XY[™HßNÂˆĞÓX™[“Q›Û
+ˆWÜ™\Ûİ\˜ÙPÛİ[X™[H[ÂˆĞÓ^Y\ÛÛÜŠˆWÜ™\Ûİ\˜ÙT›ÙÜ™\ÜÑš[H[ÂˆĞÓX™[“Q›Û
+ˆWÜ™\Ûİ\˜ÙT›ÙÜ™\ÜÓX™[H[Âˆ›Ø]WÜ™\Ûİ\˜ÙT›ÙÜ™\ÜÕÚYHŒÂˆĞÓX™[“Q›Û
+ˆWÛXZ[”İ]\ÓX™[H[ÂˆĞÓX™[“Q›Û
+ˆWÛX]Ú›İ[™Ûİ[İÛ“X™[H[ÂˆĞÓX™[“Q›Û
+ˆWØ˜[•[Y\“X™[H[ÂˆĞÓX™[“Q›Û
+ˆWÜ™\\™Q›Ûİ\“X™[H[ÂˆĞÓX™[“Q›Û
+ˆWÜ™\\™SØYİYÙSX™[H[ÂˆĞÓX™[“Q›Û
+ˆWÜ™\\™SØY\˜Ù[X™[H[ÂˆĞÓ^Y\ÛÛÜŠˆWÜ™\\™SØYš[H[Âˆ›Ø]WÜ™\\™SØYÚYHŒÂˆ›Ø]WÜ™\\™SØYš\İX[HŒÂˆĞÓX™[“Q›Û
+ˆWÜÜXİ]Ü”İ]SX™[H[ÂˆĞÓX™[“Q›Û
+ˆWÜÜXİ]Ü”›ÙÜ™\ÜÓX™[H[ÂˆĞÓX™[“Q›Û
+ˆWÜÜXİ]Ü”ØÛÜ™SX™[H[ÂˆĞÓX™[“Q›Û
+ˆWÜÜXİ]Ü’[X™[H[Â‚ˆÛÜ[T˜[šÙY^Y\Š
+Hİ™\œšYHÂˆØ[˜Ù[^Xİ]™[ÛÚİ\
+
+NÂˆ™[X\ÙT™\ÛÛ™Y]™[
+
+NÂˆB‚ˆ›ÛÛ[š]
+
+Hİ™\œšYHÂˆYˆ
+PĞÓ^Y\ÛÛÜš[š]Ú]ÛÛÜŠÌJJH™]\›ˆ˜[ÙNÂˆÙ]Q
+˜ÛÜ[K\˜[šÙYY[ØÜ™Y[ˆ—ÜÜŠNÂˆÙ]Ù^\Y[˜X›Y
+YJNÂ‚ˆ]]ÈÛÛœİÚ[”Ú^™HHĞÑ\™XİÜœÚ\™Y\™XİÜŠ
+KO™Ù]Ú[”Ú^™J
+NÂˆÛÜ[Nœ˜[šÙYZN˜Y˜XÚÙ›Ü
+\ËÚ[”Ú^™JNÂ‚ˆWÙ˜YT›ÛİHĞÓ^Y\ÛÛÜ˜Ü™X]JÌJNÂˆWÙ˜YT›ÛİOœÙ]ÛÛ[Ú^™JÚ[”Ú^™JNÂˆWÙ˜YT›ÛİOœÙ]ÜÚ][ÛŠĞÔÚ[™\›ÊNÂˆWÙ˜YT›ÛİOœÙ]Ø\ØØYSÜXÚ]Q[˜X›Y
+YJNÂˆYÚ[
+WÙ˜YT›ÛİJNÂ‚ˆWÜ›ÛİHĞÓ›ÙN˜Ü™X]J
+NÂˆWÜ›ÛİOœÙ][˜ÚÜ”Ú[
+ÌŒ‹ŒŸJNÂˆWÜ›ÛİOœÙ]ÜÚ][ÛŠĞÔÚ[™\›ÊNÂˆWÜ›ÛİOœÙ]ÛÛ[Ú^™JÚ[”Ú^™JNÂˆWÙ˜YT›ÛİO˜YÚ[
+WÜ›ÛİJNÂ‚ˆWÛY[HHĞÓY[N˜Ü™X]J
+NÂˆWÛY[KOœÙ]ÜÚ][ÛŠĞÔÚ[™\›ÊNÂˆWÛY[KOœÙ]Q
+˜ÛÜ[K\˜[šÙYY[ØÜ™Y[‹[Y[H—ÜÜŠNÂˆWÙ˜YT›ÛİO˜YÚ[
+WÛY[KL
+NÂ‚ˆ˜[šÙY[[YN™Ù]
+
+K˜™YÚ[Š
+NÂˆŞ[˜Ô\ÙJ
+NÂˆŞ[˜Ô™\Ûİ\˜Ù\Ê
+NÂˆWÜ™[™\™YZRÙ^HH™\Ù[][Û’Ù^J
+NÂˆ™[™\Š
+NÂˆ\Q˜YR[’Y“™YYY
+
+NÂˆ\]Q[˜[ZXÕZJ
+NÂˆ™]\›ˆYNÂˆB‚ˆ›ÚYÛ‘[\Š
+Hİ™\œšYHÂˆĞÓ^Y\ÛÛÜ›Û‘[\Š
+NÂ‚ˆ]]ÈÛÛœİ™\İ[YYœ›ÛT˜[šÙYÚ[HWÜ˜[šÙYÚ[ØÙ[™T\ÚYÂˆYˆ
+™\İ[YYœ›ÛT˜[šÙYÚ[
+HÂˆËÈHØÙ[™H\ÚYH\È^Y\ˆ\Èš[š\ÚYˆ™[X\ÙH›İ][˜ÚˆËÈİX\™È™Y›Ü™H™Yœ™\Ú
+
+HÛÈX^X™Q[\“]™[
+
+HØ[ˆÜ[ˆH™^ˆËÈYØ[][\ÛˆHØ[YHX\ˆØ[‘[\İ\œ™[]™[
+
+H™[XZ[œÈBˆËÈ]]Üš]H]›ØÚÜÈH›İ\X]X]Ú][\ÜXİ]Ü‚ˆËÈ[K™\İ[Ë[™ÛÜÙY][\Ú[™İÜË‚ˆWÜ˜[šÙYÚ[ØÙ[™T\ÚYH˜[ÙNÂˆWÙ[\š[™ÔÛÛ™ÑØ]HH˜[ÙNÂˆWÙ[\š[™Ó]™[H˜[ÙNÂˆÙÎš[™›Ê”˜[šÙYÚ[ØÙ[™H™]\›™YÈ]]ÛX]XÈ[HİX\™™[X\ÙYŠNÂˆB‚ˆËÈ]™[[™›Ó^Y\ˆ[™^S^Y\ˆ\™H\ÚYİ™\ˆ\È˜[šÙYØÙ[™KˆBˆËÈÛÜœ™\ÜÛ™[™ÈÛ‘^]
+
+H[[[Û˜[HİÜÈÛ[™È[™[œ]Ú[HBˆËÈ^Y\ˆ\È[œÚYHÜÙHØÙ[™\ËÛÈ]™\H™]\›ˆ›İYÚÜØÙ[™J
+H]\İˆËÈ™\İÜ™H[KˆÚ]İ]\ÈY™XŞXÛHZ\‹H™]Z[™Y˜[šÙY^Y\‚ˆËÈÛÛY\È˜XÚÈœ›Ş™[ˆÛˆ]È™K[][˜Ú“ÔS’S‘ÈU‘SÈÕT•ÈSˆH‚ˆËÈœ˜[YH[™Ø[ˆ™]™\ˆØœÙ\™H“ÕS‘Ô‘TÕSÜˆH›ÛİÚ[™È›İ[™‚ˆÙ]Ù^\Y[˜X›Y
+YJNÂˆYˆ
+WÛY[JHWÛY[KOœÙ]İXÚ[˜X›Y
+YJNÂˆØÚY[JØÚY[WÜÙ[XİÜŠÛÜ[T˜[šÙY^Y\œ™Yœ™\Ú
+KŒŒŠNÂ‚ˆËÈ™XÛÛ˜Ú[H[H][\PÒÈÜˆX]ÚÛ]ÛÛ\]YÚ[HBˆËÈ˜[šÙYØÙ[™HØ\ÈÛİ™\™Y[œİXYÙˆØZ][™È›Üˆ[›İ\ˆš\İX[œ˜[YK‚ˆ™Yœ™\Ú
+ŒŠNÂˆB‚ˆ›ÚY™Yœ™\Ú
+›Ø]
+HÂˆ]]Éˆ[[YHH˜[šÙY[[YN™Ù]
+
+NÂˆ[[YKXÚÊ
+NÂˆ]]Éˆ]Y[ÈH˜[šÙY]Y[ÓX[˜YÙ\™Ù]
+
+NÂˆ]Y[Ë˜ÛÛ™šYİ\™J[[YKšY]Ê
+K˜ÛY[
+NÂˆ]Y[ËXÚÊ
+NÂˆŞ[˜Ô™\Ûİ\˜Ù\Ê
+NÂˆŞ[˜Ô\ÙJ
+NÂˆ\]P]]ÛX][ÛŠ
+NÂ‚ˆ]]ÈÛÛœİZRÙ^HH™\Ù[][Û’Ù^J
+NÂˆYˆ
+™\\™UZU˜[œÚ][ÛŠZRÙ^JJHÂˆ™[™\Š
+NÂˆ\Q˜YR[’Y“™YYY
+
+NÂˆBˆ\]Q[˜[ZXÕZJ
+NÂˆŞ[˜Ğ]Y[Ó[ÙJ
+NÂˆX^X™Q[\“]™[
+
+NÂˆB‚ˆ›ÛÛÚİÔ™\Ûİ\˜ÙQØ]J
+HÛÛœİÂˆ]]ÈÛÛœİ	ˆ]Y[ĞÛÛ™šYÈH˜[šÙY[[YN™Ù]
+
+KšY]Ê
+K˜ÛY[˜]Y[ÎÂˆYˆ
+X]Y[ĞÛÛ™šYË™[˜X›Y]Y[ĞÛÛ™šYËœ™\Ûİ\˜Ù\Ë™[\J
+JH™]\›ˆ˜[ÙNÂˆ]]ÈÛÛœİ	ˆ]Y[ÈH˜[šÙY]Y[ÓX[˜YÙ\™Ù]
+
+NÂˆ™]\›ˆ]Y[Ëœ™\]Z\™\Ô™\Ûİ\˜ÙQİÛ›ØY
+
+H[WÜ™\Ûİ\˜ÙQØ]PXÚÛ›İÛYÙYÂˆB‚ˆ›ÚYŞ[˜Ô™\Ûİ\˜Ù\Ê
+HÂˆ]]Éˆ]Y[ÈH˜[šÙY]Y[ÓX[˜YÙ\™Ù]
+
+NÂˆ]]ÈÛÛœİ	ˆ]Y[ĞÛÛ™šYÈH˜[šÙY[[YN™Ù]
+
+KšY]Ê
+K˜ÛY[˜]Y[ÎÂˆYˆ
+X]Y[ĞÛÛ™šYË™[˜X›Y]Y[ĞÛÛ™šYËœ™\Ûİ\˜Ù\Ë™[\J
+JHÂˆWÜ™\Ûİ\˜ÙQØ]R[š]X[^™YHYNÂˆWÜ™\Ûİ\˜ÙQØ]PXÚÛ›İÛYÙYHYNÂˆWÜ™\Ûİ\˜ÙQØ]UØ\ÓZ\ÜÚ[™ÈH˜[ÙNÂˆWÜ™\Ûİ\˜ÙQØ]SY[T™\İÜ™YH˜[ÙNÂˆ™]\›ÂˆB‚ˆ]]ÈÛÛœİZ\ÜÚ[™ÈH]Y[Ëœ™\]Z\™\Ô™\Ûİ\˜ÙQİÛ›ØY
+
+NÂˆYˆ
+[WÜ™\Ûİ\˜ÙQØ]R[š]X[^™Y
+HÂˆWÜ™\Ûİ\˜ÙQØ]R[š]X[^™YHYNÂˆWÜ™\Ûİ\˜ÙQØ]PXÚÛ›İÛYÙYH[Z\ÜÚ[™ÎÂˆBˆYˆ
+Z\ÜÚ[™È	‰ˆ[WÜ™\Ûİ\˜ÙQØ]UØ\ÓZ\ÜÚ[™ÊHÂˆWÜ™\Ûİ\˜ÙQØ]PXÚÛ›İÛYÙYH˜[ÙNÂˆWÜ™\Ûİ\˜ÙQØ]SY[T™\İÜ™YH˜[ÙNÂˆBˆWÜ™\Ûİ\˜ÙQØ]UØ\ÓZ\ÜÚ[™ÈHZ\ÜÚ[™ÎÂ‚ˆYˆ
+ÚİÔ™\Ûİ\˜ÙQØ]J
+H	‰ˆ[WÜ™\Ûİ\˜ÙQØ]SY[T™\İÜ™Y
+HÂˆ]Y[Ëœ™\İÜ™SY[S]\ÚXÊ
+NÂˆWÜ™\Ûİ\˜ÙQØ]SY[T™\İÜ™YHYNÂˆBˆYˆ
+\ÚİÔ™\Ûİ\˜ÙQØ]J
+JHWÜ™\Ûİ\˜ÙQØ]SY[T™\İÜ™YH˜[ÙNÂˆB‚ˆİœİš[™È™\Ù[][Û’Ù^J
+HÛÛœİÂˆYˆ
+ÚİÔ™\Ûİ\˜ÙQØ]J
+JHÂˆ]]ÈÛÛœİ™\Ûİ\˜Ù\ÈH˜[šÙY]Y[ÓX[˜YÙ\™Ù]
+
+K™İÛ›ØYšY]Ê
+NÂˆ™]\›ˆ›]™›Ü›X]
+œ™\Ûİ\˜Ù\ÎßH‹İ]X×ØØ\İ[Š™\Ûİ\˜Ù\Ëœİ]JJNÂˆBˆYˆ
+WÜYÙHOHYÙN’\İÜS\İ
+HÂˆ]]ÈÛÛœİ	ˆšY]ÈH˜[šÙY[[YN™Ù]
+
+KšY]Ê
+NÂˆ™]\›ˆ›]™›Ü›X]
+ˆš\İÜN›\İßNßNßH‹ˆšY]Ëš\İÜSØY[™ËˆšY]Ëš\İÜQ\œ›Ü‹ˆšY]Ëš\İÜKœÚ^™J
+Bˆ
+NÂˆBˆYˆ
+WÜYÙHOHYÙN’\İÜQ]Z[
+H™]\›ˆ›]™›Ü›X]
+š\İÜN™]Z[ßH‹WÚ\İÜR[™^
+NÂˆYˆ
+WÜYÙHOHYÙN”XÙ[Y[ÛÛÙ[Xİ[ÛŠHÂˆ™]\›ˆ›]™›Ü›X]
+œXÙ[Y[œÛÛßNßH‹˜[šÙY[[YN™Ù]
+
+KšY]Ê
+Kœ™]š\Ú[Û‹WÛØØ[Y\ÜØYÙJNÂˆBˆYˆ
+WÜYÙHOHYÙN”XÙ[Y[ÚÚ\ÛÛ™š\›JH™]\›ˆœXÙ[Y[œÚÚ\XÛÛ™š\›HÂˆ]]ÈÛÛœİ	ˆšY]ÈH˜[šÙY[[YN™Ù]
+
+KšY]Ê
+NÂˆYˆ
+šY]ËœİYÙHOH[[YTİYÙN“X]ÚY
+HÂˆ™]\›ˆ›]™›Ü›X]
+ˆœİYÙNßNœXÙ[Y[ßNßH‹ˆİ]X×ØØ\İ[ŠšY]ËœİYÙJKˆšY]ËœXÙ[Y[œ™\]Z\™YˆšY]ËœXÙ[Y[˜Xİ]™Bˆ
+NÂˆBˆYˆ
+šY]Ë›X]ÚœXÙ[Y[
+HÂˆ™]\›ˆ›]™›Ü›X]
+ˆœXÙ[Y[ßNßNßNßNßNßNßNßNßNßH‹ˆšY]ËœXÙ[Y[œİ]KˆšY]ËœXÙ[Y[˜İ\œ™[İYÙR[™^ˆšY]ËœXÙ[Y[˜İ\œ™[X\[™^ˆšY]ËœXÙ[Y[˜İ\œ™[X\ØÛÜ™KˆšY]ËœXÙ[Y[œ›İš\Ú[Û˜[X\ØÛÜ™KˆšY]ËœXÙ[Y[˜İ\œ™[X\Ü˜YKˆšY]ËœXÙ[Y[˜İ\œ™[X\ÛX\œËˆšY]ËœXÙ[Y[œİYÙT™\İ[ËœÚ^™J
+KˆšY]ËœXÙ[Y[™š[˜[™\İ[™\Ü^YYY\‹ˆšY]Ë™\œ›Ü‚ˆ
+NÂˆBˆ]]ÈÙ^HH›]™›Ü›X]
+ˆ›X]ÚßNßNßNœÜXİ]ÜßH‹ˆšY]Ë›X]Úœİ]KˆšY]Ë›X]Úœ›İ[™[X™\‹ˆšY]Ë›X]Ú™X]X]ÚÙ\]Y[˜ÙKˆšY]Ë›X]ÚœÜXİ]ÜXİ]™Bˆ
+NÂˆYˆ
+šY]Ë›X]Úœİ]HOHS—ÔTÑHŠHÂˆÙ^H
+ÏH›]™›Ü›X]
+ˆßNßNßH‹ˆWÜÙ[XİY˜[‹ˆWÜ[™[™Ğ˜[‹ˆšY]Ë›X]Ú›İÛ˜[ÛÛ™š\›YYˆ
+NÂˆBˆ™]\›ˆÙ^NÂˆB‚ˆİX›HZQ˜YR[”ÙXÛÛ™Ê
+HÛÛœİÂˆ™]\›ˆİ˜Û[\
+˜[šÙY[[YN™Ù]
+
+KšY]Ê
+K˜ÛY[ZK™˜YR[”ÙXÛÛ™ËŒËŒ
+NÂˆB‚ˆİX›HZQ˜YSİ]ÙXÛÛ™Ê
+HÛÛœİÂˆ™]\›ˆİ˜Û[\
+˜[šÙY[[YN™Ù]
+
+KšY]Ê
+K˜ÛY[ZK™˜YSİ]ÙXÛÛ™ËŒËŒ
+NÂˆB‚ˆ›ÛÛ™\\™UZU˜[œÚ][ÛŠİœİš[™ÈÛÛœİ	ˆÙ^JHÂˆ]]ÈÛÛœİ›İÈHİXYPÛØÚÎ››İÊ
+NÂˆYˆ
+WÜ™[™\™YZRÙ^K™[\J
+JHÂˆWÜ™[™\™YZRÙ^HHÙ^NÂˆWÙ˜YR[“™^™[™\ˆHYNÂˆ™]\›ˆYNÂˆB‚ˆYˆ
+WİZQ˜Y[™Óİ]
+HÂˆWÜ[™[™ÕZRÙ^HHÙ^NÂˆYˆ
+›İÈWİZU˜[œÚ][Û‘XY[™JH™]\›ˆ˜[ÙNÂˆWİZQ˜Y[™Óİ]H˜[ÙNÂˆWÜ™[™\™YZRÙ^HHWÜ[™[™ÕZRÙ^NÂˆWÙ˜YR[“™^™[™\ˆHYNÂˆ™]\›ˆYNÂˆB‚ˆËÈ™XZ[[™ÈHĞÓY[H]™\HŒ\È[˜[Y]Y]È˜]ÈÙ[XİYZ][BˆËÈÚ[\ˆ™]ÙY[ˆİXÚX™YØ[ˆ[™İXÚY[™YÛˆSÔËˆHš\ÚX›HRH™YBˆËÈ›İÈÚ[™Ù\ÈÛ›HÚ[ˆ]È™\Ù[][ÛˆÙ^HÚ[™Ù\ÎÈÛİ[İÛœÈ[™]™BˆËÈ˜[Y\È\™H\]Y[ˆXÙHH\]Q[˜[ZXÕZJ
+K‚ˆYˆ
+Ù^HOHWÜ™[™\™YZRÙ^JH™]\›ˆ˜[ÙNÂˆWÜ[™[™ÕZRÙ^HHÙ^NÂˆ]]ÈÛÛœİ˜YSİ]HZQ˜YSİ]ÙXÛÛ™Ê
+NÂˆYˆ
+˜YSİ]HŒ[WÙ˜YT›Ûİ
+HÂˆWÜ™[™\™YZRÙ^HHÙ^NÂˆWÙ˜YR[“™^™[™\ˆHYNÂˆ™]\›ˆYNÂˆB‚ˆWİZQ˜Y[™Óİ]HYNÂˆWİZU˜[œÚ][Û‘XY[™HH›İÈ
+Èİ˜Ú›Û›Î›Z[\ÙXÛÛ™Êˆİ]X×ØØ\İ[Šİœ›İ[™
+˜YSİ]
+ˆLŒ
+JBˆ
+NÂˆWÙ˜YT›ÛİOœİÜ[Xİ[ÛœÊ
+NÂˆWÙ˜YT›ÛİOœ[Xİ[ÛŠĞÑ˜YUÎ˜Ü™X]Jİ]X×ØØ\İ›Ø]Š˜YSİ]
+K
+JNÂˆ™]\›ˆ˜[ÙNÂˆB‚ˆ›ÚY\Q˜YR[’Y“™YYY
+
+HÂˆYˆ
+[WÙ˜YR[“™^™[™\ˆ[WÙ˜YT›Ûİ
+H™]\›ÂˆWÙ˜YR[“™^™[™\ˆH˜[ÙNÂˆ]]ÈÛÛœİ˜YR[ˆHZQ˜YR[”ÙXÛÛ™Ê
+NÂˆWÙ˜YT›ÛİOœİÜ[Xİ[ÛœÊ
+NÂˆYˆ
+˜YR[ˆHŒ
+HÂˆWÙ˜YT›ÛİOœÙ]ÜXÚ]JMJNÂˆ™]\›ÂˆBˆWÙ˜YT›ÛİOœÙ]ÜXÚ]J
+NÂˆWÙ˜YT›ÛİOœ[Xİ[ÛŠĞÑ˜YUÎ˜Ü™X]Jİ]X×ØØ\İ›Ø]Š˜YR[ŠKMJJNÂˆB‚ˆ›ÚYŞ[˜Ğ]Y[Ó[ÙJ
+HÂˆ]]Éˆ]Y[ÈH˜[šÙY]Y[ÓX[˜YÙ\™Ù]
+
+NÂˆYˆ
+ÚİÔ™\Ûİ\˜ÙQØ]J
+JH™]\›Â‚ˆ]]ÈÛÛœİ	ˆšY]ÈH˜[šÙY[[YN™Ù]
+
+KšY]Ê
+NÂˆ]]ÈÛÛœİØ˜S[ÙHHÉšY]×J
+HÂˆËÈH›Û[İ[ÛˆÙ\šY\È\ÈHİ›Û™Ù\ˆØ˜Hİ]Kˆ[ˆ›Ü›X[Ü\˜][Û‚ˆËÈ›Û[İ[Ûˆ[™[[İ[ÛˆØ\›š[™È\™H]]X[H^Û\Ú]™K]\ÂˆËÈ™XÙY[˜ÙHÙY\ÈH]Y[È]\›Z[š\İXÈYˆİ[H›Ùš[H]H]™\‚ˆËÈ^ÜÙ\È›İ›YÜÈ\š[™ÈH™Yœ™\Ú‚ˆYˆ
+šY]Ëœ›Û[İ[Û‹˜Xİ]™JH™]\›ˆ˜[šÙY]Y[Ó[ÙN“Ø˜T›Û[İ[ÛÂˆYˆ
+šY]Ë™[[İ[Û•Ø\›š[™ÊH™]\›ˆ˜[šÙY]Y[Ó[ÙN“Ø˜Q[[İ[Û•Ø\›š[™ÎÂˆ™]\›ˆ˜[šÙY]Y[Ó[ÙN“Ø˜NÂˆNÂ‚ˆYˆ
+šY]ËœİYÙHOH[[YTİYÙN“X]ÚY
+HÂˆ]]ÈÛÛœİ	ˆİ]HHšY]Ë›X]Úœİ]NÂˆ]]ÈÛÛœİØ[Y\^U˜[œÚ][ÛˆBˆİ]HOH”“ÕS‘Ô‘TT‘Hˆˆİ]HOH‘PUPUÒÔ‘TT‘Hˆˆİ]HOH”“ÕS‘ÔVRS‘Èˆˆİ]HOH‘’SSĞUSTÕÒS‘ÕÈˆˆİ]HOH“TÕĞUSTÕÒS‘ÕÈˆˆİ]HOH‘PUPUÒÔVRS‘Èˆˆİ]HOH“PTÔ‘TT‘Hˆˆİ]HOH“PTÔVRS‘Èˆˆİ]HOH“PTÔÑUS‘ÈÂˆYˆ
+
+WÙ[\š[™ÔÛÛ™ÑØ]HWÙ[\š[™Ó]™[
+H	‰ˆØ[Y\^U˜[œÚ][ÛŠH™]\›ÂˆB‚ˆYˆ
+WÜYÙHOHYÙN“]™HšY]ËœİYÙHOH[[YTİYÙN“X]ÚY
+HÂˆ]Y[ËœÙ][ÙJØ˜S[ÙJ
+JNÂˆ™]\›ÂˆB‚ˆYˆ
+šY]Ë›X]Úœİ]HOH“PUÒÔ‘TÕSŠHÂˆ]Y[ËœÙ][ÙJšY]Ë›X]ÚÚ[›™\”ÚYHOHšY]Ë›X]ÚœÚYBˆÈ˜[šÙY]Y[Ó[ÙN”™\İ[Ú[‚ˆˆ˜[šÙY]Y[Ó[ÙN”™\İ[ÜÙJNÂˆ™]\›ÂˆB‚ˆYˆ
+šY]Ë›X]Úœİ]HOHĞSÑSQŠHÂˆ]Y[ËœÙ][ÙJØ˜S[ÙJ
+JNÂˆ™]\›ÂˆB‚ˆYˆ
+šY]Ë›X]ÚœXÙ[Y[	‰ˆšY]Ë›X]Úœİ]HOH”ÕQÑWÔ‘TÕSŠHÂˆYˆ
+šY]ËœXÙ[Y[œİYÙT™\İ[Ë™[\J
+JH™]\›Âˆ]]ÈÛÛœİ	ˆ™\İ[HšY]ËœXÙ[Y[œİYÙT™\İ[Ë˜˜XÚÊ
+NÂˆ]]ÈÛÛœİÙ^HH›]™›Ü›X]
+ßNßH‹šY]ËœXÙ[Y[œ[’Y™\İ[œİYÙR[™^
+NÂˆYˆ
+WÜİYÙT™\İ[]Y[Ô^YYÙ^HOHÙ^JHÂˆ]Y[ËœÙ][ÙJˆ™\İ[œİYÙQÜ˜YHOH”Èˆ™\İ[œİYÙQÜ˜YHOHHˆ™\İ[œİYÙQÜ˜YHOHˆ‚ˆÈ˜[šÙY]Y[Ó[ÙN”™\İ[Ú[‚ˆˆ˜[šÙY]Y[Ó[ÙN”™\İ[ÜÙBˆ
+NÂˆBˆ™]\›ÂˆB‚ˆ]]ÈÛÛœİ	ˆİ]HHšY]Ë›X]Úœİ]NÂˆ]]ÈÛÛœİ\ÑX]X]ÚØZ]Bˆİ]HOH‘PUPUÒÔ‘TT‘Hˆˆİ]HOH‘PUPUÒÔVRS‘Èˆˆİ]HOH‘PUPUÒÔ‘TÕSÂˆ]]ÈÛÛœİ\Ô›İ[™™YHBˆšY]Ë›X]Úœ›İ[™[X™\ˆHÈ	‰‚ˆ
+ˆİ]HOH”“ÕS‘Ô‘TT‘Hˆˆİ]HOH”“ÕS‘ÔVRS‘Èˆˆİ]HOH‘’SSĞUSTÕÒS‘ÕÈˆˆİ]HOH“TÕĞUSTÕÒS‘ÕÈˆˆİ]HOH”“ÕS‘ÔÑUS‘Èˆˆİ]HOH”“ÕS‘Ô‘TÕS‚ˆ
+NÂ‚ˆ]Y[ËœÙ][ÙJ\ÑX]X]ÚØZ]\Ô›İ[™™YBˆÈ˜[šÙY]Y[Ó[ÙN”›İ[™ÑX]X]ÚØZ]ˆˆ˜[šÙY]Y[Ó[ÙN”›İ[™LŠNÂˆB‚ˆ›ÚYŞ[˜Ô\ÙJ
+HÂˆ]]ÈÛÛœİ	ˆšY]ÈH˜[šÙY[[YN™Ù]
+
+KšY]Ê
+NÂˆYˆ
+šY]ËœİYÙHOH[[YTİYÙN“X]ÚY	‰ˆWÛ\İX]ÚYOHšY]Ë›X]Ú›X]ÚY
+HÂˆWÛ\İX]ÚYHšY]Ë›X]Ú›X]ÚYÂˆWÜÙ[XİY˜[‹˜ÛX\Š
+NÂˆWÜ[™[™Ğ˜[‹˜ÛX\Š
+NÂˆWÛØØ[Y\ÜØYÙK˜ÛX\Š
+NÂˆWÜ™\Ûİ\˜ÙRÙ^K˜ÛX\Š
+NÂˆWÛX]Ú›İ[™™XYTÙ[H˜[ÙNÂˆBˆËÈ˜[ˆXÚÛ›İÛYÙ[Y[Ù\œ›ÜˆØ[ˆÚ[™ÙH[™\[™[HÙˆHš\ÚX›H\ÙK‚ˆËÈ™XÛÛ˜Ú[H]™Y›Ü™HH\ÙKZÙ^HX\›H™]\›‹‚ˆYˆ
+šY]ËœİYÙHOH[[YTİYÙN“X]ÚY
+HÂˆYˆ
+šY]Ë›X]Ú›İÛ˜[ÛÛ™š\›YY
+HÂˆWÜÙ[XİY˜[ˆHšY]Ë›X]Ú›İÛ˜[Ø[›ÛšXØ[]™[YÂˆWÜ[™[™Ğ˜[‹˜ÛX\Š
+NÂˆH[ÙHYˆ
+]šY]Ë™\œ›Ü‹™[\J
+H	‰ˆ[WÜ[™[™Ğ˜[‹™[\J
+JHÂˆWÜ[™[™Ğ˜[‹˜ÛX\Š
+NÂˆBˆB‚ˆ]]ÈÛÛœİÙ^HHšY]ËœİYÙHOH[[YTİYÙN“X]ÚYˆÈ›]™›Ü›X]
+ßNßNßH‹šY]Ë›X]Ú›X]ÚYšY]Ë›X]Úœİ]KšY]Ë›X]Úœİ]U™\œÚ[ÛŠBˆˆ›]™›Ü›X]
+œİYÙNßH‹İ]X×ØØ\İ[ŠšY]ËœİYÙJJNÂˆYˆ
+WÜ\ÙRÙ^HOHÙ^JH™]\›Âˆ]]ÈÛÛœİİ]PÚ[™ÙYHWÜ\ÙRÙ^K™[\J
+Hˆ
+šY]ËœİYÙHOH[[YTİYÙN“X]ÚY	‰ˆWÜ\ÙRÙ^K™š[™
+šY]Ë›X]Úœİ]JHOHİœİš[™Î›œÜÊNÂˆWÜ\ÙRÙ^HHÙ^NÂˆYˆ
+İ]PÚ[™ÙY
+HÂˆWÜ\ÙTİ\Y]HİXYPÛØÚÎ››İÊ
+NÂˆWÛX]Ú›İ[™™XYTÙ[H˜[ÙNÂˆB‚ˆYˆ
+šY]ËœİYÙHOH[[YTİYÙN“X]ÚY
+HÂˆ]]ÈÛÛœİ™]Ô™\Ûİ\˜ÙRÙ^HH™\Ûİ\˜ÙRÙ^JšY]Ë›X]Ú
+NÂˆYˆ
+™]Ô™\Ûİ\˜ÙRÙ^HOHWÜ™\Ûİ\˜ÙRÙ^JHÂˆWÜ™\Ûİ\˜ÙRÙ^HH™]Ô™\Ûİ\˜ÙRÙ^NÂˆWÜ™XYTÙ[H˜[ÙNÂˆWÙ[\š[™ÔÛÛ™ÑØ]HH˜[ÙNÂˆ˜[šÙY[[YN™Ù]
+
+KœÙ]ÛÛ™Ğ\\ÜĞ[İÙY
+˜[ÙJNÂˆWÙ[\š[™Ó]™[H˜[ÙNÂˆWÜÛÛ™ÒYË˜ÛX\Š
+NÂˆ™[X\ÙT™\ÛÛ™Y]™[
+
+NÂˆWÛ]™[ÛÚİ\\œ›Ü‹˜ÛX\Š
+NÂˆWÛ]™[ÛÚİ\][\ÈHÂˆWÛ]™[ÛÚİ\İ\Y]HİXYPÛØÚÎ››İÊ
+NÂˆWÛ]™[ÛÚİ\™^][\]HßNÂˆWÜ™\\™SØYš\İX[HŒÂˆB‚ˆBˆB‚ˆİX›H\ÙTÙXÛÛ™Ê
+HÛÛœİÂˆYˆ
+WÜ\ÙTİ\Y]OHİXYPÛØÚÎ[YWÜÚ[ßJH™]\›ˆŒÂˆ™]\›ˆİ˜Ú›Û›Î™\˜][ÛİX›OŠİXYPÛØÚÎ››İÊ
+HHWÜ\ÙTİ\Y]
+K˜Ûİ[
+
+NÂˆB‚ˆ›ÚY™\Ù][˜[ZXÕZTÚ[\œÊ
+HÂˆWÜ™\Ûİ\˜ÙPÛİ[X™[H[ÂˆWÜ™\Ûİ\˜ÙT›ÙÜ™\ÜÑš[H[ÂˆWÜ™\Ûİ\˜ÙT›ÙÜ™\ÜÓX™[H[ÂˆWÜ™\Ûİ\˜ÙT›ÙÜ™\ÜÕÚYHŒÂˆWÛXZ[”İ]\ÓX™[H[ÂˆWÛX]Ú›İ[™Ûİ[İÛ“X™[H[ÂˆWØ˜[•[Y\“X™[H[ÂˆWÜ™\\™Q›Ûİ\“X™[H[ÂˆWÜ™\\™SØYİYÙSX™[H[ÂˆWÜ™\\™SØY\˜Ù[X™[H[ÂˆWÜ™\\™SØYš[H[ÂˆWÜ™\\™SØYÚYHŒÂˆWÜÜXİ]Ü”İ]SX™[H[ÂˆWÜÜXİ]Ü”›ÙÜ™\ÜÓX™[H[ÂˆWÜÜXİ]Ü”ØÛÜ™SX™[H[ÂˆWÜÜXİ]Ü’[X™[H[ÂˆB‚ˆ›ÚYÛX\•ZJ
+HÂˆ™\Ù][˜[ZXÕZTÚ[\œÊ
+NÂˆYˆ
+WÛY[H	‰ˆWÛY[KO›WÜÙ[XİY][JHÂˆËÈÙ[ÙIÜÈĞÓY[HÙ[XİYZ][HØY™]HÛÚÈ\È›İ[œİ[YÛˆSÔË‚ˆËÈÛX\ˆ]^XÚ]H™Y›Ü™H\İ›ŞZ[™ÈÚ[™[ˆÛÈØÕİXÚ[™YØ[‚ˆËÈ™]™\ˆXİ]˜]HHœ™YYĞÓY[R][K‚ˆWÛY[KO›WÜÙ[XİY][HH[ÂˆBˆWÜ›ÛİOœ™[[İ™P[Ú[™[•Ú]ÛX[\
+YJNÂˆWÛY[KOœ™[[İ™P[Ú[™[•Ú]ÛX[\
+YJNÂˆB‚ˆ›ÚY\]Q[˜[ZXÕZJ
+HÂˆYˆ
+ÚİÔ™\Ûİ\˜ÙQØ]J
+JHÂˆ]]ÈÛÛœİ™\Ûİ\˜ÙUšY]ÈH˜[šÙY]Y[ÓX[˜YÙ\™Ù]
+
+K™İÛ›ØYšY]Ê
+NÂˆYˆ
+WÜ™\Ûİ\˜ÙPÛİ[X™[
+HÂˆWÜ™\Ûİ\˜ÙPÛİ[X™[OœÙ]İš[™Êˆ›]™›Ü›X]
+ˆßHÈßHßH‹ˆ™\Ûİ\˜ÙUšY]Ëœ™XYKˆ™\Ûİ\˜ÙUšY]Ëİ[ˆŠœ™XYH‹”‘PQHŠBˆ
+K˜×ÜİŠ
+Bˆ
+NÂˆWÜ™\Ûİ\˜ÙPÛİ[X™[OœÙ]ÛÛÜŠˆ™\Ûİ\˜ÙUšY]Ëœ™XYHOH™\Ûİ\˜ÙUšY]Ëİ[ÈÑÜ™Y[ˆˆØØÌÊL
+Bˆ
+NÂˆBˆİX›H›ÙÜ™\ÜÈH™\Ûİ\˜ÙUšY]Ëİ[ˆˆÈİ]X×ØØ\İİX›OŠ™\Ûİ\˜ÙUšY]Ëœ™XYJHÈİ]X×ØØ\İİX›OŠ™\Ûİ\˜ÙUšY]Ëİ[
+BˆˆKŒÂˆYˆ
+™\Ûİ\˜ÙUšY]Ëœİ]HOH˜[šÙY™\Ûİ\˜ÙQİÛ›ØYİ]N‘İÛ›ØY[™È	‰ˆ™\Ûİ\˜ÙUšY]Ëİ[ˆ
+HÂˆ›ÙÜ™\ÜÈHİ›Z[ŠKŒ
+ˆİ]X×ØØ\İİX›OŠ™\Ûİ\˜ÙUšY]Ëœ™XYJH
+Âˆİ]X×ØØ\İİX›OŠ™\Ûİ\˜ÙUšY]Ë˜Xİ]™T›ÙÜ™\ÜÊHÈLŒˆ
+HÈİ]X×ØØ\İİX›OŠ™\Ûİ\˜ÙUšY]Ëİ[
+JNÂˆBˆ›ÙÜ™\ÜÈHİ˜Û[\
+›ÙÜ™\ÜËŒKŒ
+NÂˆYˆ
+WÜ™\Ûİ\˜ÙT›ÙÜ™\ÜÑš[
+HÂˆWÜ™\Ûİ\˜ÙT›ÙÜ™\ÜÑš[OœÙ]ÛÛ[Ú^™JÂˆİ]X×ØØ\İ›Ø]ŠWÜ™\Ûİ\˜ÙT›ÙÜ™\ÜÕÚY
+ˆ›ÙÜ™\ÜÊKˆLŒ‚ˆJNÂˆBˆYˆ
+WÜ™\Ûİ\˜ÙT›ÙÜ™\ÜÓX™[
+HÂˆWÜ™\Ûİ\˜ÙT›ÙÜ™\ÜÓX™[OœÙ]İš[™Êˆ›]™›Ü›X]
+ßIH‹İ]X×ØØ\İ[Šİœ›İ[™
+›ÙÜ™\ÜÈ
+ˆLŒ
+JJK˜×ÜİŠ
+Bˆ
+NÂˆBˆ™]\›ÂˆB‚ˆYˆ
+WÜYÙHOHYÙN“]™JH™]\›Âˆ]]ÈÛÛœİ	ˆšY]ÈH˜[šÙY[[YN™Ù]
+
+KšY]Ê
+NÂˆYˆ
+šY]ËœİYÙHOH[[YTİYÙN“X]ÚY
+HÂˆYˆ
+WÛXZ[”İ]\ÓX™[
+HÂˆ]]È]Z[HšY]Ë™\œ›Ü‹™[\J
+HÈšY]Ëœİ]\ÈˆšY]Ë™\œ›ÜÂˆYˆ
+[WÛØØ[Y\ÜØYÙK™[\J
+JH]Z[HWÛØØ[Y\ÜØYÙNÂˆWÛXZ[”İ]\ÓX™[OœÙ]İš[™ÊÚÜ[Š]Z[L
+K˜×ÜİŠ
+JNÂˆWÛXZ[”İ]\ÓX™[OœÙ]ÛÛÜŠšY]Ë™\œ›Ü‹™[\J
+HÈØØÌÊŒŒŒ
+HˆÔ™Y
+NÂˆBˆ™]\›ÂˆB‚ˆ]]ÈÛÛœİ	ˆX]ÚHšY]Ë›X]ÚÂˆYˆ
+X]Úœİ]HOH“PUÒQˆ	‰ˆWÛX]Ú›İ[™Ûİ[İÛ“X™[
+HÂˆ]]ÈÛÛœİYHİ›X^
+HHİ]X×ØØ\İ[Šİ™›ÛÜŠ\ÙTÙXÛÛ™Ê
+JJJNÂˆWÛX]Ú›İ[™Ûİ[İÛ“X™[OœÙ]İš[™Ê›]™›Ü›X]
+ßH‹Y
+K˜×ÜİŠ
+JNÂˆWÛX]Ú›İ[™Ûİ[İÛ“X™[OœÙ]ÛÛÜŠYHˆÈÔÚYT™YˆÑÛÛ
+NÂˆB‚ˆYˆ
+X]Úœİ]HOHS—ÔTÑHˆ	‰ˆWØ˜[•[Y\“X™[
+HÂˆ]]ÈÛÛœİ™[XZ[š[™ÈHİ›X^İš[İŠ˜[šÙY[[YN™Ù]
+
+K™XY[™TÙXÛÛ™Ê
+K˜[YWÛÜŠ
+JNÂˆWØ˜[•[Y\“X™[OœÙ]İš[™Ê›]™›Ü›X]
+ßH‹™[XZ[š[™ÊK˜×ÜİŠ
+JNÂˆWØ˜[•[Y\“X™[OœÙ]ÛÛÜŠ™[XZ[š[™ÈHÈÈÔÚYT™YˆØØÌÊKMJJNÂˆB‚ˆYˆ
+WÜ™\\™Q›Ûİ\“X™[
+HÂˆ]]ÈÛÛœİİÛHHX]ÚœÚYHOHHÂˆ]]Éˆ[[YHH˜[šÙY[[YN™Ù]
+
+NÂˆ]]ÈÛÛœİÛX\”Ş[˜Ô[™[™ÈBˆX]Ú™X]X]ÚÙ\]Y[˜ÙHH	‰‚ˆ[[YK›ØØ[\Ü^PÛX\œÊ
+HHÈ	‰‚ˆ[[YKš\ÓØØ[][\[‘›YÚ
+
+NÂˆ]]ÈÛÛœİÙXÛÛ™ÈHİ›X^
+LHİ]X×ØØ\İ[Šİ™›ÛÜŠ\ÙTÙXÛÛ™Ê
+JJJNÂˆİœİš[™È›Ûİ\ˆH›]™›Ü›X]
+ßHÎŒ™H‹Šœİ\ËZ[ˆ‹”ÕT•ÈSˆŠKÙXÛÛ™ÊNÂˆYˆ
+ÛX\”Ş[˜Ô[™[™ÊHÂˆ›Ûİ\ˆHŠœŞ[˜Ú[™ËXÛX\ˆ‹”ÖSÒS‘ÈÓPT‹‹‹ˆŠNÂˆH[ÙHYˆ
+X]Úœİ]HOH‘PUPUÒÔVRS‘ÈŠHÂˆ]]È\Ü^SİÛ•\ÙYHİÛHÈX]Ú™X]X]Ú][\Õ\ÙYHˆX]Ú™X]X]Ú][\Õ\ÙYÂˆ]]È\Ü^SÜÛ™[\ÙYHİÛHÈX]Ú™X]X]Ú][\Õ\ÙYˆˆX]Ú™X]X]Ú][\Õ\ÙYNÂˆ\Ü^SİÛ•\ÙYHİ›X^
+\Ü^SİÛ•\ÙY[[YK›ØØ[X]X]Úš\İX[][\Õ\ÙY
+
+JNÂˆ›Ûİ\ˆH\Ü^SİÛ•\ÙYHÂˆÈ›]™›Ü›X]
+ßHßKÌÈ‹ŠØZ][™Ë[ÜÛ™[‹•ĞRUS‘È“ÔˆÔÓ‘S•ŠK\Ü^SÜÛ™[\ÙY
+BˆˆÛÜ[Nœ˜[šÙYšLN˜][\Ù•™YJİ›Z[ŠË\Ü^SİÛ•\ÙY
+ÈJJNÂˆH[ÙHYˆ
+\ÙTÙXÛÛ™Ê
+HHLŒ
+HÂˆ]]ÈÛÛœİİÛ”™XYHHİÛHÈX]Úœ™XYPHˆX]Úœ™XYPÂˆ]]ÈÛÛœİÜÛ™[™XYHHİÛHÈX]Úœ™XYPˆˆX]Úœ™XYPNÂˆYˆ
+[İÛ”™XYJH›Ûİ\ˆHŠØZ][™ËYİÛ›ØY‹•ĞRUS‘È“ÔˆSÕTˆÕÓ“ĞQŠNÂˆ[ÙHYˆ
+[ÜÛ™[™XYJH›Ûİ\ˆHÛÜ[Nœ˜[šÙYšLNØZ][™Ñ›Ü”^Y\Š\\ŠÚÜ[ŠX]Ú›ÜÛ™[˜[YKLÊJJNÂˆ[ÙH›Ûİ\ˆHŠœİ\[™È‹”ÕT•S‘Ë‹‹ˆŠNÂˆBˆWÜ™\\™Q›Ûİ\“X™[OœÙ]İš[™Ê›Ûİ\‹˜×ÜİŠ
+JNÂˆB‚ˆYˆ
+ˆX]Úœİ]HOH”“ÕS‘Ô‘TT‘HˆˆX]Úœİ]HOH‘PUPUÒÔ‘TT‘H‚ˆ
+HÂˆ]]ÈÛÛœİ\™Ù]H™\\˜][Û”›ÙÜ™\ÜÕ\™Ù]
+
+NÂˆ]]ÈÛÛœİ[HHİ›X^
+Œ‹\™Ù]HWÜ™\\™SØYš\İX[
+NÂˆWÜ™\\™SØYš\İX[Hİ˜Û[\
+ˆWÜ™\\™SØYš\İX[
+Èİ›X^
+ŒY‹[H
+ˆŒ™ŠKˆŒ‹ˆ\™Ù]ˆ
+NÂˆYˆ
+WÜ™\\™SØYš[
+HÂˆWÜ™\\™SØYš[OœÙ]ÛÛ[Ú^™JÛWÜ™\\™SØYÚY
+ˆWÜ™\\™SØYš\İX[ŒŸJNÂˆBˆYˆ
+WÜ™\\™SØY\˜Ù[X™[
+HÂˆWÜ™\\™SØY\˜Ù[X™[OœÙ]İš[™Êˆ›]™›Ü›X]
+ßIH‹İ]X×ØØ\İ[Šİœ›İ[™
+WÜ™\\™SØYš\İX[
+ˆLŒŠJJK˜×ÜİŠ
+Bˆ
+NÂˆBˆYˆ
+WÜ™\\™SØYİYÙSX™[
+HÂˆWÜ™\\™SØYİYÙSX™[OœÙ]İš[™Ê™\\˜][Û”İYÙU^
+
+K˜×ÜİŠ
+JNÂˆWÜ™\\™SØYİYÙSX™[OœÙ]ÛÛÜŠˆWÛ]™[ÛÚİ\\œ›Ü‹™[\J
+HÈĞŞX[ˆˆÑÛÛˆ
+NÂˆBˆB‚ˆYˆ
+WÜÜXİ]Ü”›ÙÜ™\ÜÓX™[
+HÂˆ]]ÈÛÛœİİÛHHX]ÚœÚYHOHHÂˆ]]ÈÛÛœİİÛ”ØÛÜ™HHİÛHÈX]ÚœØÛÜ™PHˆX]ÚœØÛÜ™PÂˆ]]ÈÛÛœİÜÛ™[ØÛÜ™HHİÛHÈX]ÚœØÛÜ™PˆˆX]ÚœØÛÜ™PNÂˆ]]ÈÛÛœİÜÛ™[][\Xİ]™HHX]ÚœÜXİ]Üİ\œ™[›ÙÜ™\ÜËš\×İ˜[YJ
+NÂˆYˆ
+WÜÜXİ]Ü”İ]SX™[
+HÂˆ]]ÈÛÛœİİ]U^HÜÛ™[][\Xİ]™BˆÈŠ›]™K\›ÙÜ™\ÜÈ‹“U‘H“ÑÔ‘TÔÈŠBˆˆŠØZ][™Ë\İ\‹•ĞRUS‘ÈÈÕT•ŠNÂˆWÜÜXİ]Ü”İ]SX™[OœÙ]İš[™Êİ]U^˜×ÜİŠ
+JNÂˆBˆWÜÜXİ]Ü”›ÙÜ™\ÜÓX™[OœÙ]İš[™ÊˆÜÛ™[][\Xİ]™BˆÈ›]™›Ü›X]
+ßIH‹X]ÚœÜXİ]Üİ\œ™[›ÙÜ™\ÜË˜[YWÛÜŠ
+JK˜×ÜİŠ
+Bˆˆ‹KH‚ˆ
+NÂˆYˆ
+WÜÜXİ]Ü”ØÛÜ™SX™[
+HÂˆWÜÜXİ]Ü”ØÛÜ™SX™[OœÙ]İš[™ÊˆØÛÜ™PÛÛ\\š\ÛÛŠİÛ”ØÛÜ™KÜÛ™[ØÛÜ™JK˜×ÜİŠ
+Bˆ
+NÂˆBˆYˆ
+WÜÜXİ]Ü’[X™[
+HÂˆİœİš[™È[HŠœ›İ[™\™\ÛÛ™KZ[‹•H“ÕS‘ÒS‘TÓÓ‘HÒSˆHPÕU‘HUSTS‘ÈŠNÂˆYˆ
+[ÜÛ™[][\Xİ]™H	‰ˆX]Úœİ]HOH“TÕĞUSTÕÒS‘ÕÈŠHÂˆ]]ÈÛÛœİ™[XZ[š[™ÈHİ›X^İš[İŠˆˆ˜[šÙY[[YN™Ù]
+
+K™XY[™TÙXÛÛ™Ê
+K˜[YWÛÜŠ
+Bˆ
+NÂˆ[HÛÜ[Nœ˜[šÙYšLNš\ÒÛÜ™X[Š
+BˆÈ›]™›Ü›X]
+ßHß{-"‹Š›\İX][\Z[‹“ÔÓ‘S•TÈÈÕT•HTÕUSTŠK™[XZ[š[™ÊBˆˆ›]™›Ü›X]
+“ÔÓ‘S•TÈß\ÈÈÕT•HTÕUST‹™[XZ[š[™ÊNÂˆBˆWÜÜXİ]Ü’[X™[OœÙ]İš[™Ê[˜×ÜİŠ
+JNÂˆBˆBˆB‚ˆ›ÚY™[™\Š
+HÂˆÛX\•ZJ
+NÂˆ]]ÈÛÛœİ	ˆšY]ÈH˜[šÙY[[YN™Ù]
+
+KšY]Ê
+NÂˆYˆ
+ÚİÔ™\Ûİ\˜ÙQØ]J
+JHÂˆ™[™\”™\Ûİ\˜Ù\Ê
+NÂˆ™]\›ÂˆBˆYˆ
+WÜYÙHOHYÙN’\İÜS\İ
+HÂˆ™[™\’\İÜS\İ
+šY]ÊNÂˆ™]\›ÂˆBˆYˆ
+WÜYÙHOHYÙN’\İÜQ]Z[
+HÂˆ™[™\’\İÜQ]Z[
+šY]ÊNÂˆ™]\›ÂˆBˆYˆ
+WÜYÙHOHYÙN”XÙ[Y[ÛÛÙ[Xİ[ÛŠHÂˆ™[™\”XÙ[Y[ÛÛÙ[Xİ[ÛŠšY]ÊNÂˆ™]\›ÂˆBˆYˆ
+WÜYÙHOHYÙN”XÙ[Y[ÚÚ\ÛÛ™š\›JHÂˆ™[™\”XÙ[Y[ÚÚ\ÛÛ™š\›J
+NÂˆ™]\›ÂˆB‚ˆYˆ
+šY]ËœİYÙHOH[[YTİYÙN“X]ÚY
+HÂˆ™[™\“X]Ú
+šY]ÊNÂˆH[ÙHÂˆ™[™\“XZ[ŠšY]ÊNÂˆBˆB‚ˆ›ÚYYÜ˜XÚÊ›ÛÛÛÜÙS^Y\ˆHYJHÂˆ]]ÈÛÛœİÚ^™HHĞÑ\™XİÜœÚ\™Y\™XİÜŠ
+KO™Ù]Ú[”Ú^™J
+NÂˆ]]ÊˆÜš]HHĞÔÜš]N˜Ü™X]UÚ]Üš]Qœ˜[YS˜[YJ‘Ò—Ø\œ›İ×ÌWÌKœ™ÈŠNÂˆÜš]KOœÙ]ØØ[JŒ™ŠNÂˆ]]Êˆ]ÛˆHĞÓY[R][TÜš]Q^˜N˜Ü™X]JˆÜš]Kˆ\ËˆÛÜÙS^Y\‚ˆÈY[WÜÙ[XİÜŠÛÜ[T˜[šÙY^Y\›ÛÛÜÙS^Y\ŠBˆˆY[WÜÙ[XİÜŠÛÜ[T˜[šÙY^Y\›Û’\İÜP˜XÚÊBˆ
+NÂˆ]Û‹OœÙ]ÜÚ][ÛŠÌŒ‹Ú^™KšZYÚHŒŸJNÂˆWÛY[KO˜YÚ[
+]ÛŠNÂˆB‚ˆ›ÚYYØÜ™Y[’XY\Šˆİœİš[™ÈÛÛœİ	ˆ]U^ˆİœİš[™ÈÛÛœİ	ˆ^YXœ›İÕ^ˆØĞÛÛÜŒĞˆ]PÛÛÜˆHÛÜ[Nœ˜[šÙYZN•^ˆØĞÛÛÜŒĞˆXØÙ[HĞŞX[‚ˆ
+HÂˆ]]ÈÛÛœİÚ^™HHĞÑ\™XİÜœÚ\™Y\™XİÜŠ
+KO™Ù]Ú[”Ú^™J
+NÂˆ]]Êˆ]HHXZÙSX™[
+ˆ]U^ˆÌ‹ˆÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚHŒŸKˆ]PÛÛÜ‹ˆ˜›XÚÈ‚ˆ
+NÂˆ]KO›[Z]X™[ÚY
+Ú^™KÚYHMÌŒ‹Ì‹ŠNÂˆWÜ›ÛİO˜YÚ[
+]KŠNÂ‚ˆ]]Êˆ^YXœ›İÈHXZÙSX™[
+ˆ^YXœ›İÕ^ˆŒ™‹ˆÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚHLËŒŸKˆXØÙ[ˆœÙ[ZX›Û‚ˆ
+NÂˆ^YXœ›İËO›[Z]X™[ÚY
+ŒÎŒ‹Œ™‹ŒNŠNÂˆWÜ›ÛİO˜YÚ[
+^YXœ›İËŠNÂ‚ˆ]]ÈÛÛœİ[™UÚYHİ›X^
+Œ‹İ›Z[ŠL‹Œ‹Ú^™KÚYÈ‹ŒˆHLŒ‹ŒŠJNÂˆ›Üˆ
+]]ÈÛÛœİˆÜÚ^™KÚYÈ‹ŒˆHLŒˆH[™UÚYÚ^™KÚYÈ‹Œˆ
+ÈLŒŸJHÂˆ]]Êˆ[™HHĞÓ^Y\ÛÛÜ˜Ü™X]JØXØÙ[œ‹XØÙ[™ËXØÙ[˜‹M_JNÂˆ[™KOœÙ]ÛÛ[Ú^™JÛ[™UÚYKŒŸJNÂˆ[™KOœÙ]ÜÚ][ÛŠŞÚ^™KšZYÚHLËYŸJNÂˆWÜ›ÛİO˜YÚ[
+[™K
+NÂˆBˆB‚ˆĞÓY[R][TÜš]Q^˜JˆY]ÛŠˆİœİš[™ÈÛÛœİ	ˆ^ˆĞÔÚ[ÜÚ][Û‹ˆÑSÓY[R[™\ˆÙ[XİÜ‹ˆ›ÛÛ[™Ù\ˆH˜[ÙKˆ›Ø]ØØ[HHÌ™‚ˆ
+HÂˆ]]Êˆš\İX[HXZÙPXİ[Û]Û•š\İX[
+^[™Ù\ŠNÂˆš\İX[OœÙ]ØØ[JØØ[JNÂˆ]]Êˆ][HHĞÓY[R][TÜš]Q^˜N˜Ü™X]Jš\İX[\ËÙ[XİÜŠNÂˆ][KOœÙ]ÜÚ][ÛŠÜÚ][ÛŠNÂˆWÛY[KO˜YÚ[
+][JNÂˆ™]\›ˆ][NÂˆB‚ˆ›ÚYY[™İXYÙTÙ[XİÜŠ
+HÂˆ]]ÈÛÛœİÚ^™HHĞÑ\™XİÜœÚ\™Y\™XİÜŠ
+KO™Ù]Ú[”Ú^™J
+NÂˆ]]ÈÛÛœİÙ[XİYHÛÜ[Nœ˜[šÙYšLN›[™İXYÙJ
+NÂ‚ˆ]]Êˆ[™Û\Úš\İX[HXZÙPXİ[Û]Û•š\İX[
+ˆ‘[™Û\Ú‹ˆ˜[ÙKˆÙ[XİYOHÛÜ[Nœ˜[šÙYšLN“[™İXYÙN‘[™Û\Úˆ
+NÂˆ[™Û\Úš\İX[OœÙ]ØØ[JÙŠNÂˆ]]Êˆ[™Û\ÚHĞÓY[R][TÜš]Q^˜N˜Ü™X]Jˆ[™Û\Úš\İX[ˆ\ËˆY[WÜÙ[XİÜŠÛÜ[T˜[šÙY^Y\›Û‘[™Û\Ú
+Bˆ
+NÂˆ[™Û\ÚOœÙ]ÜÚ][ÛŠÍÍËŒ‹Ú^™KšZYÚHŒŸJNÂˆ[™Û\ÚOœÙ]Q
+œ˜[šÙY[[™İXYÙKY[™Û\Ú—ÜÜŠNÂˆWÛY[KO˜YÚ[
+[™Û\Ú
+NÂ‚ˆ]]ÊˆÛÜ™X[•š\İX[HXZÙPXİ[Û]Û•š\İX[
+ˆ»eg:­k{%­‹ˆ˜[ÙKˆÙ[XİYOHÛÜ[Nœ˜[šÙYšLN“[™İXYÙN’ÛÜ™X[‚ˆ
+NÂˆÛÜ™X[•š\İX[OœÙ]ØØ[JÙŠNÂˆ]]ÊˆÛÜ™X[ˆHĞÓY[R][TÜš]Q^˜N˜Ü™X]JˆÛÜ™X[•š\İX[ˆ\ËˆY[WÜÙ[XİÜŠÛÜ[T˜[šÙY^Y\›Û’ÛÜ™X[ŠBˆ
+NÂˆÛÜ™X[‹OœÙ]ÜÚ][ÛŠÌLŒ‹Ú^™KšZYÚHŒŸJNÂˆÛÜ™X[‹OœÙ]Q
+œ˜[šÙY[[™İXYÙKZÛÜ™X[ˆ—ÜÜŠNÂˆWÛY[KO˜YÚ[
+ÛÜ™X[ŠNÂˆB‚ˆ›ÚYYİ]\Ô[
+İœİš[™ÈÛÛœİ	ˆ^ĞÔÚ[ÜÚ][Û‹ØĞÛÛÜŒĞˆÛÛÜŠHÂˆ]]Êˆ[™[HXZÙT[™[
+ÌL‹Œ‹ŒŸKÜÚ][Û‹ÛÛÜ‹NL
+NÂˆWÜ›ÛİO˜YÚ[
+[™[JNÂˆ]]ÊˆX™[HXZÙSX™[
+^ŒÌ™‹ÜÚ][Û‹ÛÜ[Nœ˜[šÙYZN•^œÙ[ZX›ÛŠNÂˆX™[O›[Z]X™[ÚY
+M‹Œ‹ŒÌ™‹ŒŒŠNÂˆWÜ›ÛİO˜YÚ[
+X™[ŠNÂˆB‚ˆ›ÚYY˜][™ÓX\šÜÊˆİ™XİÜİœİš[™ÏˆÛÛœİ	ˆ™\İ[Ëˆ[ÛİËˆĞÔÚ[Ù[\‹ˆ›Ø]ÜXÚ[™ÈHLËŒ‹ˆ›Ø]ØØ[HHŒ‚ˆ
+HÂˆÛİÈHİ˜Û[\
+ÛİËKJNÂˆ]]ÈÛÛœİİ[ÚYHÜXÚ[™È
+ˆİ]X×ØØ\İ›Ø]ŠÛİÈHJNÂˆ›Üˆ
+[[™^HÈ[™^ÛİÎÈ
+ÊÚ[™^
+HÂˆİœİš[™È^H‹HÂˆØĞÛÛÜŒĞˆÛÛÜˆHØØÌÊMKMLKMŠNÂˆYˆ
+[™^İ]X×ØØ\İ[Š™\İ[ËœÚ^™J
+JJHÂˆYˆ
+™\İ[ÖÚ[™^HOH•ÒSˆŠHÂˆ^H“ÈÂˆÛÛÜˆHÑÜ™Y[ÂˆH[ÙHYˆ
+™\İ[ÖÚ[™^HOH“ÔÔÈŠHÂˆ^H–ÂˆÛÛÜˆHÔ™YÂˆBˆBˆ]]ÊˆX™[HXZÙSX™[
+ˆ^ˆØØ[KˆØÙ[\‹Hİ[ÚYÈ‹Œˆ
+ÈÜXÚ[™È
+ˆİ]X×ØØ\İ›Ø]Š[™^
+KÙ[\‹_KˆÛÛÜ‹ˆ˜›XÚÈ‚ˆ
+NÂˆWÜ›ÛİO˜YÚ[
+X™[ŠNÂˆBˆB‚ˆ›ÚYY›Û[İ[Û]\˜JĞÔÚ[Ù[\‹ĞÔÚ^™HÚ^™K›ÛÛ\™™XİH˜[ÙJHÂˆ]]ÈÛÛœİXØÙ[H\™™XİÈÑÛÛˆØØÌÊMKLÍËN
+NÂˆ]]ÈÛÛœİ›İÛHHÙ[\‹HHÚ^™KšZYÚÈ‹Œˆ
+ÈŒÂ‚ˆËÈH™\İ˜Z[™YYÚ˜Z[™\XÙ\ÈH™\X]YİXÚÙ\‹[ZÙHš\™H‘ÜË‚ˆËÈ]™\Ù\™\ÈHÜXÚX[\İ]HİYHÚ]İ]Ûİ™\š[™È›ÜY\ÈÜˆ^‚ˆ]]ÊˆÛİÈHĞÓ^Y\ÛÛÜ˜Ü™X]JØXØÙ[œ‹XØÙ[™ËXØÙ[˜‹İ]X×ØØ\İÓX]OŠ\™™XİÈMŒˆLN
+_JNÂˆÛİËOœÙ]ÛÛ[Ú^™JÜİ›X^
+Œ‹Ú^™KÚYHŒŠK\™™XİÈ‹ŒˆˆKYŸJNÂˆÛİËOœÙ]ÜÚ][ÛŠØÙ[\‹HÛİËO™Ù]ÛÛ[Ú^™J
+KÚYÈ‹Œ‹›İÛ_JNÂˆÛİËOœ[Xİ[ÛŠĞÔ™\X]›Ü™]™\˜Ü™X]JĞÔÙ\]Y[˜ÙN˜Ü™X]JˆĞÑ˜YUÎ˜Ü™X]JÍY‹\™™XİÈHˆŒJKˆĞÑ˜YUÎ˜Ü™X]JÍY‹\™™XİÈLHˆ
+Kˆ[‚ˆ
+JJNÂˆWÜ›ÛİO˜YÚ[
+ÛİËÊNÂ‚ˆ›Üˆ
+]]ÈÛÛœİˆØÙ[\‹HÚ^™KÚYÈ‹Œˆ
+ÈKŒ‹Ù[\‹
+ÈÚ^™KÚYÈ‹ŒˆH‹YŸJHÂˆ]]Êˆ˜Z[HĞÓ^Y\ÛÛÜ˜Ü™X]JØXØÙ[œ‹XØÙ[™ËXØÙ[˜‹İ]X×ØØ\İÓX]OŠ\™™XİÈNHˆLÌŠ_JNÂˆ˜Z[OœÙ]ÛÛ[Ú^™JÌKY‹\™™XİÈŒˆˆMËŒŸJNÂˆ˜Z[OœÙ]ÜÚ][ÛŠŞ›İÛ_JNÂˆWÜ›ÛİO˜YÚ[
+˜Z[ÊNÂˆBˆB‚ˆ›ÚYYİ™XZÓX™[
+ˆ[İ™XZËˆĞÔÚ[ÜÚ][Û‹ˆ›Ø]ØØ[HHŒÙ‹ˆ›Ø]X^[][UÚYHMLŒ‹ˆ›ÛÛÚİÑ]šY\ˆHYBˆ
+HÂˆYˆ
+İ˜XœÊİ™XZÊHŠH™]\›Âˆ]]ÈÛÛœİÚ[›š[™ÈHİ™XZÈˆÂˆ]]ÈÛÛœİÛÛÜˆHÚ[›š[™ÈÈÑÛÛˆÔ™YÂ‚ˆYˆ
+ÚİÑ]šY\ŠHÂˆ]]Êˆ]šY\ˆHĞÓ^Y\ÛÛÜ˜Ü™X]JØÛÛÜ‹œ‹ÛÛÜ‹™ËÛÛÜ‹˜‹LJNÂˆ]šY\‹OœÙ]ÛÛ[Ú^™JÜİ›Z[ŠLL‹Œ‹X^[][UÚY
+KÍYŸJNÂˆ]šY\‹OœÙ]ÜÚ][ÛŠÜÜÚ][Û‹H]šY\‹O™Ù]ÛÛ[Ú^™J
+KÚYÈ‹Œ‹ÜÚ][Û‹H
+ÈŒŸJNÂˆWÜ›ÛİO˜YÚ[
+]šY\‹ŠNÂˆB‚ˆ]]ÊˆX™[HXZÙSX™[
+ˆÛÜ[Nœ˜[šÙYšLNœİ™XZÊİ˜XœÊİ™XZÊKÚ[›š[™ÊKˆØØ[KˆÜÚ][Û‹ˆÛÛÜ‹ˆ˜›XÚÈ‚ˆ
+NÂˆX™[O›[Z]X™[ÚY
+X^[][UÚYØØ[Kİ›X^
+ŒM™‹ØØ[H
+ˆÌ™ŠJNÂˆWÜ›ÛİO˜YÚ[
+X™[ÊNÂˆB‚ˆİXİ^Y\Ø\™™YœÈÂˆĞÓX™[“Q›Û
+ˆØÛÜ™SX™[H[ÂˆĞÓ›ÙJˆY\”]HH[ÂˆĞÓ›ÙJˆY\•›ÜHH[ÂˆNÂ‚ˆ›ÚYY^Y\Ø\™
+ˆĞÔÚ[Ù[\‹ˆİœİš[™ÈÛÛœİ	ˆ˜[YKˆ˜[šÙY›Ùš[UšY]ÈÛÛœİ	ˆ›Ùš[Kˆ›ÛÛÙ[‹ˆ^Y\Ø\™™YœÊˆİ]™YœÈH[‹ˆ›ÛÛÛÛXš[™UY\[™ØÛÜ™HH˜[ÙBˆ
+HÂˆ]]ÈÛÛœİ	ˆY\ˆH›Ùš[K™\Ü^YYY\Âˆ]]ÈÛÛœİXØÙ[HY\ÛÛÜŠ\\ŠY\ŠJNÂˆ]]Êˆ[™[HXZÙS™[Û”[™[
+ÌMLŒ‹NŒŸKÙ[\‹XØÙ[ÑY\[™[ŠNÂˆWÜ›ÛİO˜YÚ[
+[™[JNÂˆYˆ
+›Ùš[Kœ›Û[İ[Û‹˜Xİ]™JHY›Û[İ[Û]\˜JÙ[\‹ÌMLŒ‹NŒŸJNÂ‚ˆ]]ÊˆšX˜›ÛˆHXZÙU^]JˆÙ[ˆÈŠ[İH‹–SÕHŠHˆŠ›ÜÛ™[‹“ÔÓ‘S•ŠKˆÍÍŒ‹NŒŸKˆØÙ[\‹Ù[\‹H
+ÈÎŒŸKˆXØÙ[ˆŒŒ‹ˆÙ[ˆÈÑÛÛˆØØÌÊŒŒŒŠBˆ
+NÂˆWÜ›ÛİO˜YÚ[
+šX˜›Û‹ŠNÂ‚ˆ[œ˜[YHHNÂˆYˆ
+Ù[ŠHÂˆYˆ
+]]ÊˆØ[YHHØ[YSX[˜YÙ\œÚ\™Yİ]J
+JHœ˜[YHHİ›X^
+KØ[YKO™Ù]^Y\‘œ˜[YJ
+JNÂˆB‚ˆ]]ÊˆXÛÛ”]HHXZÙS™[Û”[™[
+Í‹Œ‹‹ŒŸKØÙ[\‹Ù[\‹H
+ÈKŒŸKXØÙ[ÍKLKŒßK
+NÂˆWÜ›ÛİO˜YÚ[
+XÛÛ”]KŠNÂˆ]]ÊˆXÛÛˆHÚ[\T^Y\˜Ü™X]Jœ˜[YJNÂˆXÛÛ‹OœÙ]ØØ[JKŒL™ŠNÂˆXÛÛ‹OœÙ]ÜÚ][ÛŠØÙ[\‹Ù[\‹H
+ÈKŒŸJNÂˆYˆ
+Ù[ŠHÂˆYˆ
+]]ÊˆØ[YHHØ[YSX[˜YÙ\œÚ\™Yİ]J
+JHÂˆXÛÛ‹OœÙ]ÛÛÜœÊØ[YKO˜ÛÛÜ‘›Ü’Y
+Ø[YKO™Ù]^Y\ÛÛÜŠ
+JKØ[YKO˜ÛÛÜ‘›Ü’Y
+Ø[YKO™Ù]^Y\ÛÛÜŒŠ
+JJNÂˆBˆBˆWÜ›ÛİO˜YÚ[
+XÛÛ‹
+NÂˆYİ™XZÓX™[
+›Ùš[Kœ™\İ[İ™XZËØÙ[\‹Ù[\‹H
+È‹ŒŸKŒŒ™‹L‹Œ‹˜[ÙJNÂ‚ˆ]]Êˆ˜[YSX™[HXZÙSX™[
+ÚÜ[Š\\Š˜[YJKMJKŒÎ‹ØÙ[\‹Ù[\‹HHLKŒŸKÛÜ[Nœ˜[šÙYZN•^œÙ[ZX›ÛŠNÂˆ˜[YSX™[O›[Z]X™[ÚY
+L‹Œ‹ŒÎ‹ŒYŠNÂˆWÜ›ÛİO˜YÚ[
+˜[YSX™[
+NÂ‚ˆ]]ÈÛÛœİXÙ[Y[H›Ùš[KœXÙ[Y[Ø[Y\È›Ùš[KœXÙ[Y[Ø[Y\Ô™\]Z\™YÂˆ]]ÈÛÛœİØ\[Û•^HXÙ[Y[ˆÈŠœXÙ[Y[‹”PÑSQS•ŠBˆˆ
+›Ùš[Kœ›Û[İ[Û‹˜Xİ]™HÈŠœ›Û[İ[Ûˆ‹”“ÓSÕSÓˆŠHˆŠœ˜][™È‹”US‘ÈŠJNÂˆ]]ÊˆØ\[ÛˆHXZÙSX™[
+Ø\[Û•^ŒŒÙ‹ØÙ[\‹Ù[\‹HHÌ‹ŒŸKĞŞX[‹œÙ[ZX›ÛŠNÂˆWÜ›ÛİO˜YÚ[
+Ø\[Û‹
+NÂˆYˆ
+XÙ[Y[
+HÂˆY˜][™ÓX\šÜÊ›Ùš[KœXÙ[Y[™\İ[Ëİ›X^
+K›Ùš[KœXÙ[Y[Ø[Y\Ô™\]Z\™Y
+KØÙ[\‹Ù[\‹HHËŒŸJNÂˆH[ÙHYˆ
+›Ùš[Kœ›Û[İ[Û‹˜Xİ]™JHÂˆY˜][™ÓX\šÜÊ›Ùš[Kœ›Û[İ[Û‹œ™\İ[Ë›Ùš[Kœ›Û[İ[Û‹™Ø[Y\Ô™\]Z\™YØÙ[\‹Ù[\‹HHËŒŸJNÂˆ]]Êˆ]Z[HXZÙSX™[
+ˆÛÜ[Nœ˜[šÙYšLNœ›Û[İ[Û“X]Ú
+›Ùš[Kœ›Û[İ[Û‹Ú[œÔ™\]Z\™Y
+KˆŒŒ‹ˆØÙ[\‹Ù[\‹HHŒKŒŸKˆØØÌÊMKMKLJKˆœÙ[ZX›Û‚ˆ
+NÂˆ]Z[O›[Z]X™[ÚY
+LÍŒ‹ŒŒ‹ŒMŠNÂˆWÜ›ÛİO˜YÚ[
+]Z[ŠNÂˆH[ÙHÂˆ]]ÊˆX™[HXZÙSX™[
+ˆÛÛXš[™UY\[™ØÛÜ™BˆÈ›]™›Ü›X]
+ßHHßH‹\\ŠY\ŠK›Ùš[Kš\ÚX›T˜[šÙYØÛÜ™K˜[YWÛÜŠ
+JBˆˆ›]™›Ü›X]
+ßH‹›Ùš[Kš\ÚX›T˜[šÙYØÛÜ™K˜[YWÛÜŠ
+JKˆŒÍY‹ˆØÙ[\‹Ù[\‹HHËŒŸKˆØØÌÊL
+Kˆ˜›XÚÈ‚ˆ
+NÂˆX™[O›[Z]X™[ÚY
+LŒ‹ŒÍY‹ŒŒ™ŠNÂˆWÜ›ÛİO˜YÚ[
+X™[
+NÂˆYˆ
+İ]™YœÊHİ]™YœËOœØÛÜ™SX™[HX™[ÂˆYˆ
+›Ùš[K™[[İ[Û•Ø\›š[™ÊHÂˆ]]ÊˆØ\›š[™ÈHXZÙSX™[
+Š™[[İ[Û‹]Ø\›š[™È‹‘SSÕSÓˆĞT“’S‘ÈŠKŒŒ‹ØÙ[\‹Ù[\‹HHŒ‹ŒŸKÔ™Y˜›XÚÈŠNÂˆØ\›š[™ËO›[Z]X™[ÚY
+LÍŒ‹ŒŒ‹ŒMŠNÂˆWÜ›ÛİO˜YÚ[
+Ø\›š[™ËŠNÂˆBˆB‚ˆ]]ÊˆY\”]HHXZÙU^]J\\ŠY\ŠKÎM‹Œ‹ŒŸKØÙ[\‹Ù[\‹HHÍŒŸKXØÙ[Œ‹XØÙ[˜›XÚÈŠNÂˆWÜ›ÛİO˜YÚ[
+Y\”]KÊNÂˆ]]ÊˆY\•›ÜHHÛÜ[Nœ˜[šÙYZN˜Ü™X]P[š[X]Y˜[šĞ˜YÙJˆY\‹ˆÌNŒ‹NŒŸKˆÛÜ[Nœ˜[šÙYZN”˜[šĞ˜YÙQ\Ü^NÛÛ\Xİˆ
+NÂˆY\•›ÜKOœÙ]ÜÚ][ÛŠØÙ[\‹HNŒ‹Ù[\‹HHÍŒŸJNÂˆWÜ›ÛİO˜YÚ[
+Y\•›ÜKJNÂˆYˆ
+İ]™YœÊHÂˆİ]™YœËOY\”]HHY\”]NÂˆİ]™YœËOY\•›ÜHHY\•›ÜNÂˆBˆB‚ˆ›ÚY™[™\”™\Ûİ\˜Ù\Ê
+HÂˆ]]ÈÛÛœİÚ^™HHĞÑ\™XİÜœÚ\™Y\™XİÜŠ
+KO™Ù]Ú[”Ú^™J
+NÂˆYÜ˜XÚÊYJNÂˆ]]ÈÛÛœİ™\Ûİ\˜ÙUšY]ÈH˜[šÙY]Y[ÓX[˜YÙ\™Ù]
+
+K™İÛ›ØYšY]Ê
+NÂ‚ˆ]]Êˆ[™[HXZÙS™[Û”[™[
+ˆÜİ›Z[ŠÎLŒ‹Ú^™KÚYHLŒŠKŒŒŒŸKˆÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚÈ‹ŒˆH‹ŒŸKˆĞŞX[‹ˆÑY\[™[ˆˆ
+NÂˆWÜ›ÛİO˜YÚ[
+[™[JNÂ‚ˆİœİš[™È]HHŠœ˜[šÙY\™\Ûİ\˜Ù\È‹”S’ÑQ‘TÓÕTÑTÈŠNÂˆİœİš[™ÈİX]HHŠœ™\Ûİ\˜Ù\Ë\™\]Z\™Y‹Y][Û˜[™\Ûİ\˜Ù\È\™H™\]Z\™YˆŠNÂˆØĞÛÛÜŒĞˆXØÙ[HĞŞX[ÂˆYˆ
+™\Ûİ\˜ÙUšY]Ëœİ]HOH˜[šÙY™\Ûİ\˜ÙQİÛ›ØYİ]N‘İÛ›ØY[™ÊHÂˆ]HHŠ™İÛ›ØY[™Ë\™\Ûİ\˜Ù\È‹‘ÕÓ“ĞQS‘È‘TÓÕTÑTÈŠNÂˆİX]HHŠšÙY\[Ü[ˆ‹’ÙY\\ÈØÜ™Y[ˆÜ[ˆ[[HİÛ›ØY\ÈÛÛ\]KˆŠNÂˆXØÙ[HÑÛÛÂˆH[ÙHYˆ
+™\Ûİ\˜ÙUšY]Ëœİ]HOH˜[šÙY™\Ûİ\˜ÙQİÛ›ØYİ]N”™XYJHÂˆ]HHŠ˜[\™\Ûİ\˜Ù\Ë\™XYH‹S‘TÓÕTÑTÈ‘PQHŠNÂˆİX]HHŠ™]™\][™Ë\™XYH‹‘]™\][™È™\]Z\™Y›Üˆ˜[šÙY\È™XYKˆŠNÂˆXØÙ[HÑÜ™Y[ÂˆH[ÙHYˆ
+™\Ûİ\˜ÙUšY]Ëœİ]HOH˜[šÙY™\Ûİ\˜ÙQİÛ›ØYİ]N‘˜Z[Y
+HÂˆ]HHŠœ™\Ûİ\˜Ù\ËY˜Z[Y‹”ÓÓQH‘TÓÕTÑTÈRSQŠNÂˆİX]HHŠœ™]KX™Y›Ü™KXÛÛ[Z[™È‹”™]HH˜Z[YİÛ›ØY™Y›Ü™HÛÛ[Z[™ËˆŠNÂˆXØÙ[HÔ™YÂˆB‚ˆ]]Êˆ]SX™[HXZÙSX™[
+]KL™‹ÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚÈ‹Œˆ
+ÈÍ‹ŒŸKXØÙ[™ÛÛ›Û™›ŠNÂˆ]SX™[O›[Z]X™[ÚY
+Ú^™KÚYHMLŒ‹L™‹ŒÌŠNÂˆWÜ›ÛİO˜YÚ[
+]SX™[
+NÂˆ]]ÊˆİX“X™[HXZÙSX™[
+İX]KŒÙ‹ÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚÈ‹Œˆ
+ÈËŒŸKØØÌÊŒLŒŒŒÎ
+KœÙ[ZX›ÛŠNÂˆİX“X™[O›[Z]X™[ÚY
+Ú^™KÚYHMLŒ‹ŒÙ‹ŒNŠNÂˆWÜ›ÛİO˜YÚ[
+İX“X™[
+NÂ‚ˆ]]ÊˆÛİ[HXZÙSX™[
+ˆ›]™›Ü›X]
+ßHÈßHßH‹™\Ûİ\˜ÙUšY]Ëœ™XYK™\Ûİ\˜ÙUšY]Ëİ[Šœ™XYH‹”‘PQHŠJKˆŒÎ‹ˆÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚÈ‹Œˆ
+ÈLŒŸKˆ™\Ûİ\˜ÙUšY]Ëœ™XYHOH™\Ûİ\˜ÙUšY]Ëİ[ÈÑÜ™Y[ˆˆØØÌÊL
+Kˆ˜›XÚÈ‚ˆ
+NÂˆWÜ™\Ûİ\˜ÙPÛİ[X™[HÛİ[ÂˆWÜ›ÛİO˜YÚ[
+Ûİ[
+NÂ‚ˆ]]ÈÛÛœİ˜\•ÚYHİ›Z[ŠÌŒ‹Ú^™KÚYHNŒŠNÂˆ]]Êˆ˜\˜XÚÈHĞÓ^Y\ÛÛÜ˜Ü™X]JÎKMËÌ‹ŒÍ_JNÂˆ˜\˜XÚËOœÙ]ÛÛ[Ú^™JØ˜\•ÚYLŒŸJNÂˆ˜\˜XÚËOœÙ]ÜÚ][ÛŠÜÚ^™KÚYÈ‹ŒˆH˜\•ÚYÈ‹Œ‹Ú^™KšZYÚÈ‹ŒˆHM‹ŒŸJNÂˆWÜ›ÛİO˜YÚ[
+˜\˜XÚËÊNÂˆİX›H›ÙÜ™\ÜÈH™\Ûİ\˜ÙUšY]Ëİ[ˆˆÈİ]X×ØØ\İİX›OŠ™\Ûİ\˜ÙUšY]Ëœ™XYJHÈİ]X×ØØ\İİX›OŠ™\Ûİ\˜ÙUšY]Ëİ[
+BˆˆKŒÂˆYˆ
+™\Ûİ\˜ÙUšY]Ëœİ]HOH˜[šÙY™\Ûİ\˜ÙQİÛ›ØYİ]N‘İÛ›ØY[™È	‰ˆ™\Ûİ\˜ÙUšY]Ëİ[ˆ
+HÂˆ›ÙÜ™\ÜÈHİ›Z[ŠKŒ
+ˆİ]X×ØØ\İİX›OŠ™\Ûİ\˜ÙUšY]Ëœ™XYJH
+Èİ]X×ØØ\İİX›OŠ™\Ûİ\˜ÙUšY]Ë˜Xİ]™T›ÙÜ™\ÜÊHÈLŒˆ
+HÈİ]X×ØØ\İİX›OŠ™\Ûİ\˜ÙUšY]Ëİ[
+JNÂˆBˆ]]Êˆ˜\‘š[HĞÓ^Y\ÛÛÜ˜Ü™X]JØXØÙ[œ‹XØÙ[™ËXØÙ[˜‹_JNÂˆ˜\‘š[OœÙ]ÛÛ[Ú^™JÜİ]X×ØØ\İ›Ø]Š˜\•ÚY
+ˆİ˜Û[\
+›ÙÜ™\ÜËŒKŒ
+JKLŒŸJNÂˆ˜\‘š[OœÙ]ÜÚ][ÛŠ˜\˜XÚËO™Ù]ÜÚ][ÛŠ
+JNÂˆWÜ™\Ûİ\˜ÙT›ÙÜ™\ÜÑš[H˜\‘š[ÂˆWÜ™\Ûİ\˜ÙT›ÙÜ™\ÜÕÚYH˜\•ÚYÂˆWÜ›ÛİO˜YÚ[
+˜\‘š[
+NÂ‚ˆYˆ
+™\Ûİ\˜ÙUšY]Ëœİ]HOH˜[šÙY™\Ûİ\˜ÙQİÛ›ØYİ]N‘İÛ›ØY[™ÊHÂˆ]]Êˆ›ÙÜ™\ÜÓX™[HXZÙSX™[
+ˆ›]™›Ü›X]
+ßIH‹İ]X×ØØ\İ[Šİœ›İ[™
+›ÙÜ™\ÜÈ
+ˆLŒ
+JJKˆŒŒ™‹ˆÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚÈ‹ŒˆHŒŸKˆÑÛÛˆ
+NÂˆWÜ™\Ûİ\˜ÙT›ÙÜ™\ÜÓX™[H›ÙÜ™\ÜÓX™[ÂˆWÜ›ÛİO˜YÚ[
+›ÙÜ™\ÜÓX™[
+NÂˆH[ÙHYˆ
+™\Ûİ\˜ÙUšY]Ëœİ]HOH˜[šÙY™\Ûİ\˜ÙQİÛ›ØYİ]N”™XYJHÂˆY]ÛŠŠ˜ÛÛ[YH‹ÓÓ•S•QHŠKÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚÈ‹ŒˆHŒ‹ŒŸKY[WÜÙ[XİÜŠÛÜ[T˜[šÙY^Y\›ÛÛÛ[YT™\Ûİ\˜Ù\ÊK˜[ÙKÌ™ŠNÂˆH[ÙHYˆ
+™\Ûİ\˜ÙUšY]Ëœİ]HOH˜[šÙY™\Ûİ\˜ÙQİÛ›ØYİ]N‘˜Z[Y
+HÂˆY]ÛŠŠœ™]KY˜Z[Y‹”‘U–HRSQŠKÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚÈ‹ŒˆHŒ‹ŒŸKY[WÜÙ[XİÜŠÛÜ[T˜[šÙY^Y\›Û‘İÛ›ØY[™\Ûİ\˜Ù\ÊKYKŠNÂˆH[ÙHÂˆY]ÛŠŠ™İÛ›ØYX[‹‘ÕÓ“ĞQSŠKÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚÈ‹ŒˆHŒ‹ŒŸKY[WÜÙ[XİÜŠÛÜ[T˜[šÙY^Y\›Û‘İÛ›ØY[™\Ûİ\˜Ù\ÊK˜[ÙKÌ™ŠNÂˆBˆB‚ˆ›ÚY™[™\”XÙ[Y[ÛÛÙ[Xİ[ÛŠ[[YUšY]ÈÛÛœİ	ˆšY]ÊHÂˆ]]ÈÛÛœİÚ^™HHĞÑ\™XİÜœÚ\™Y\™XİÜŠ
+KO™Ù]Ú[”Ú^™J
+NÂˆYÜ˜XÚÊ˜[ÙJNÂˆY[™İXYÙTÙ[XİÜŠ
+NÂˆYØÜ™Y[’XY\ŠˆŠœXÙ[Y[[X]Ú\È‹”PÑSQS•ŠKˆŠœÙ[Xİ\İ\[™Ë\ÛÛ‹”ÑSPÕSÕTˆÕT•S‘ÈÓÓŠKˆÑÛÛˆĞŞX[‚ˆ
+NÂ‚ˆ]]Êˆ^[˜][ÛˆHXZÙSX™[
+ˆŠœÛÛXÚÚXÙKY^[˜][Ûˆ‹•TÈÒÒPÑHÓ“HÑUÈÕQÑHKˆSÕTˆ‘TÕSÈUT“RS‘HH’SSS’ËˆŠKˆŒŒÙ‹ˆÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚHÎŒŸKˆÛÜ[Nœ˜[šÙYZN•^]]YˆœÙ[ZX›Û‚ˆ
+NÂˆ^[˜][Û‹O›[Z]X™[ÚY
+Ú^™KÚYHÍŒ‹ŒY‹ŒMÙŠNÂˆWÜ›ÛİO˜YÚ[
+^[˜][Û‹JNÂ‚ˆ]]Êˆ[™[HXZÙS™[Û”[™[
+ˆÜİ›Z[ŠÌŒ‹Ú^™KÚYHŒŒŠKMÍŒŸKˆÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚÈ‹Œˆ
+ÈKŒŸKˆĞ›YKˆÑY\[™[ˆˆ
+NÂˆWÜ›ÛİO˜YÚ[
+[™[JNÂ‚ˆÛÛœİ^ˆ›Ø]ÜXÚ[™ÈHLŒÂˆ›Üˆ
+[ÛÛHNÈÛÛHÈ
+ÊÜÛÛ
+HÂˆ]]ÈÛÛœİ›İÈH
+ÛÛHJHÈÎÂˆ]]ÈÛÛœİÛÛ[[ˆH
+ÛÛHJH	HÎÂˆ]]ÈÛÛœİHÚ^™KÚYÈ‹Œˆ
+È
+İ]X×ØØ\İ›Ø]ŠÛÛ[[ŠHHKŒŠH
+ˆÜXÚ[™ÎÂˆ]]ÈÛÛœİHHÚ^™KšZYÚÈ‹Œˆ
+ÈKŒˆHİ]X×ØØ\İ›Ø]Š›İÊH
+ˆÍ‹ŒÂˆ]]Êˆ]ÛˆHY]ÛŠˆ›]™›Ü›X]
+”ÓÓßH‹ÛÛ
+KˆŞ_KˆY[WÜÙ[XİÜŠÛÜ[T˜[šÙY^Y\›Û”İ\XÙ[Y[
+Kˆ˜[ÙKˆMÙ‚ˆ
+NÂˆ]Û‹OœÙ]YÊÛÛ
+NÂ‚ˆ]]ÈÛÛœİ™Y™\™[˜ÙHHİ™š[™ÚYŠˆšY]ËœXÙ[Y[œ™Y™\™[˜ÙSX\Ë˜™YÚ[Š
+KˆšY]ËœXÙ[Y[œ™Y™\™[˜ÙSX\Ë™[™
+
+KˆÜÛÛJ˜[šÙYX\šY]ÈÛÛœİ	ˆX\
+HÈ™]\›ˆX\œÛÛOHÛÛÈBˆ
+NÂˆ]]ÈÛÛœİ™Y™\™[˜ÙU^H™Y™\™[˜ÙHOHšY]ËœXÙ[Y[œ™Y™\™[˜ÙSX\Ë™[™
+
+BˆÈŠœ™Y™\™[˜ÙK[ØY[™È‹”‘Q‘T‘SÑHPTĞQS‘Ë‹‹ˆŠBˆˆ›]™›Ü›X]
+ßH0­ÈßH0­ÈQßH‹™Y™\™[˜ÙKO]K™Y™\™[˜ÙKO™Y™šXİ[K™Y™\™[˜ÙKO›]™[Y
+NÂˆ]]Êˆ™Y™\™[˜ÙSX™[HXZÙSX™[
+ˆ™Y™\™[˜ÙU^ˆŒN‹ˆŞHHŒKŒŸKˆÛÜ[Nœ˜[šÙYZN•^]]YˆœÙ[ZX›Û‚ˆ
+NÂˆ™Y™\™[˜ÙSX™[O›[Z]X™[ÚY
+LL‹Œ‹ŒN‹ŒL™ŠNÂˆWÜ›ÛİO˜YÚ[
+™Y™\™[˜ÙSX™[JNÂˆB‚ˆY]ÛŠˆŠœÚÚ\\XÙ[Y[‹”ÒÒTPÑSQS•ŠKˆÜÚ^™KÚYÈ‹Œ‹Œ‹ŒŸKˆY[WÜÙ[XİÜŠÛÜ[T˜[šÙY^Y\›Û“Ü[”XÙ[Y[ÚÚ\
+KˆYKˆMY‚ˆ
+NÂ‚ˆ]]È]Z[HšY]Ë™\œ›Ü‹™[\J
+HÈšY]Ëœİ]\ÈˆšY]Ë™\œ›ÜÂˆYˆ
+Y]Z[™[\J
+H	‰ˆ]šY]Ë™\œ›Ü‹™[\J
+JHÂˆ]]Êˆİ]\ÈHXZÙSX™[
+ˆÚÜ[Š]Z[MŠKˆŒY‹ˆÜÚ^™KÚYÈ‹Œ‹ËŒŸKˆšY]Ë™\œ›Ü‹™[\J
+HÈÛÜ[Nœ˜[šÙYZN•^]]YˆÔ™YˆœÙ[ZX›Û‚ˆ
+NÂˆİ]\ËO›[Z]X™[ÚY
+Ú^™KÚYHLŒ‹ŒY‹ŒM™ŠNÂˆWÛXZ[”İ]\ÓX™[Hİ]\ÎÂˆWÜ›ÛİO˜YÚ[
+İ]\ËJNÂˆBˆB‚ˆ›ÚY™[™\”XÙ[Y[ÚÚ\ÛÛ™š\›J
+HÂˆ]]ÈÛÛœİÚ^™HHĞÑ\™XİÜœÚ\™Y\™XİÜŠ
+KO™Ù]Ú[”Ú^™J
+NÂˆYÜ˜XÚÊ˜[ÙJNÂˆY[™İXYÙTÙ[XİÜŠ
+NÂˆYØÜ™Y[’XY\ŠˆŠœÚÚ\\XÙ[Y[‹”ÒÒTPÑSQS•ŠKˆŠš\œ™]™\œÚX›KXÚÚXÙH‹’T”‘U‘T”ÒP“HÒÒPÑHŠKˆÔ™YˆÔ™Yˆ
+NÂˆ]]Êˆ[™[HXZÙS™[Û”[™[
+ˆÜİ›Z[ŠÎLŒ‹Ú^™KÚYHÍŒŠKMÌŒŸKˆÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚÈ‹ŒˆH‹ŒŸKˆÔ™YˆÑY\[™[ˆˆ
+NÂˆWÜ›ÛİO˜YÚ[
+[™[JNÂˆ]]ÊˆØ\›š[™ÈHXZÙSX™[
+ˆŠœÚÚ\\XÙ[Y[]Ø\›š[™È‹”ÒÒTS‘ÈS‘ÈPÑSQS•SSQQPUSHS‘ĞS““Õ‘HS‘Ó‘KˆŠKˆŒY‹ˆÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚÈ‹Œˆ
+È‹ŒŸKˆÛÜ[Nœ˜[šÙYZN•^ˆ˜›XÚÈ‚ˆ
+NÂˆØ\›š[™ËO›[Z]X™[ÚY
+ÌÌŒ‹ŒY‹ŒNŠNÂˆWÜ›ÛİO˜YÚ[
+Ø\›š[™ËJNÂˆ]]Êˆ™\İ[HXZÙSX™[
+ˆŠœÚÚ\\XÙ[Y[\™\İ[‹–SÕHÒS‘HPÑQU‘QHMLˆŠKˆŒÎ‹ˆÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚÈ‹Œˆ
+ÈŒŸKˆÔ™Yˆ˜›XÚÈ‚ˆ
+NÂˆ™\İ[O›[Z]X™[ÚY
+ÌŒŒ‹ŒÎ‹ŒŒ™ŠNÂˆWÜ›ÛİO˜YÚ[
+™\İ[JNÂˆY]ÛŠˆŠ˜Ø[˜Ù[‹ĞSÑSŠKˆÜÚ^™KÚYÈ‹ŒˆHÍKŒ‹Ú^™KšZYÚÈ‹ŒˆHMKŒŸKˆY[WÜÙ[XİÜŠÛÜ[T˜[šÙY^Y\›Û”XÙ[Y[ÛÛ˜XÚÊKˆ˜[ÙKˆŒ‚ˆ
+NÂˆY]ÛŠˆŠ˜ÛÛ™š\›K\ÚÚ\‹”ÒÒTS‘PÑHŠKˆÜÚ^™KÚYÈ‹Œˆ
+ÈÍKŒ‹Ú^™KšZYÚÈ‹ŒˆHMKŒŸKˆY[WÜÙ[XİÜŠÛÜ[T˜[šÙY^Y\›ÛÛÛ™š\›TXÙ[Y[ÚÚ\
+KˆYKˆM™‚ˆ
+NÂˆB‚ˆ›ÚY™[™\“XZ[Š[[YUšY]ÈÛÛœİ	ˆšY]ÊHÂˆ]]ÈÛÛœİÚ^™HHĞÑ\™XİÜœÚ\™Y\™XİÜŠ
+KO™Ù]Ú[”Ú^™J
+NÂˆYÜ˜XÚÊYJNÂˆY[™İXYÙTÙ[XİÜŠ
+NÂˆYØÜ™Y[’XY\ŠÓÔ•SHS’ÑQ‹Š˜ÛÛ\]]]™K[Y\ˆ‹ÓÓTUUU‘HUŒHQTˆŠKÑÛÛĞŞX[ŠNÂ‚ˆ]]Êˆ\İÜUš\İX[HXZÙPXİ[Û]Û•š\İX[
+Šš\İÜH‹’TÕÔ–HŠJNÂˆ\İÜUš\İX[OœÙ]ØØ[JÎŠNÂˆ]]Êˆ\İÜHHĞÓY[R][TÜš]Q^˜N˜Ü™X]J\İÜUš\İX[\ËY[WÜÙ[XİÜŠÛÜ[T˜[šÙY^Y\›Û’\İÜJJNÂˆ\İÜKOœÙ]ÜÚ][ÛŠÜÚ^™KÚYHŒŒ‹Ú^™KšZYÚHŒŸJNÂˆWÛY[KO˜YÚ[
+\İÜJNÂ‚ˆ]]ÈÛÛœİYÙ[\ˆHĞÔÚ[ÜÚ^™KÚYÈ‹ŒˆHLNŒ‹Ú^™KšZYÚÈ‹ŒˆH‹ŒŸNÂˆ]]ÈÛÛœİšYÚÙ[\ˆHĞÔÚ[ÜÚ^™KÚYÈ‹Œˆ
+ÈLNŒ‹Ú^™KšZYÚÈ‹ŒˆH‹ŒŸNÂ‚ˆ˜[šÙY›Ùš[UšY]È›Ùš[NÂˆ›Ùš[K™\Ü^YYY\ˆHšY]Ëœ›Ùš[UY\ÂˆYˆ
+šY]Ëœ›Ùš[TØÛÜ™Uš\ÚX›JH›Ùš[Kš\ÚX›T˜[šÙYØÛÜ™HHšY]Ëœ›Ùš[TØÛÜ™NÂˆ›Ùš[KœXÙ[Y[Ø[Y\ÈHšY]ËœXÙ[Y[Ø[Y\ÎÂˆ›Ùš[KœXÙ[Y[Ø[Y\Ô™\]Z\™YHšY]ËœXÙ[Y[Ø[Y\Ô™\]Z\™YÂˆ›Ùš[KœXÙ[Y[™\İ[ÈHšY]ËœXÙ[Y[™\İ[ÎÂˆ›Ùš[Kœ™\İ[İ™XZÈHšY]Ëœ™\İ[İ™XZÎÂˆ›Ùš[Kœ›Û[İ[ÛˆHšY]Ëœ›Û[İ[ÛÂˆ›Ùš[K™[[İ[Û•Ø\›š[™ÈHšY]Ë™[[İ[Û•Ø\›š[™ÎÂ‚ˆ]]Êˆ›Ùš[T[™[HXZÙS™[Û”[™[
+ÌNŒ‹NM‹ŒŸKYÙ[\‹Y\ÛÛÜŠ\\ŠšY]Ëœ›Ùš[UY\ŠJKÑY\[™[ŠNÂˆWÜ›ÛİO˜YÚ[
+›Ùš[T[™[JNÂˆYˆ
+›Ùš[Kœ›Û[İ[Û‹˜Xİ]™JHY›Û[İ[Û]\˜JYÙ[\‹ÌNŒ‹NM‹ŒŸJNÂˆ]]Êˆ›Ùš[U]HHXZÙSX™[
+Š[İ\‹\˜[šÈ‹–SÕTˆS’ÈŠKŒÍ‹ÛYÙ[\‹YÙ[\‹H
+ÈÍËŒŸKĞŞX[‹œÙ[ZX›ÛŠNÂˆWÜ›ÛİO˜YÚ[
+›Ùš[U]K
+NÂˆ]]Êˆ[X›[HHÛÜ[Nœ˜[šÙYZN˜Ü™X]P[š[X]Y˜[šĞ˜YÙJˆšY]Ëœ›Ùš[UY\‹ˆÍŒ‹ŒŸKˆÛÜ[Nœ˜[šÙYZN”˜[šĞ˜YÙQ\Ü^N“\™ÙBˆ
+NÂˆ[X›[KOœÙ]ÜÚ][ÛŠÛYÙ[\‹YÙ[\‹H
+ÈŒŒŸJNÂˆWÜ›ÛİO˜YÚ[
+[X›[K
+NÂˆYİ™XZÓX™[
+›Ùš[Kœ™\İ[İ™XZËÛYÙ[\‹YÙ[\‹H
+ÈŒŒŸKŒ‹MMŒŠNÂˆ]]ÊˆY\ˆHXZÙSX™[
+\\ŠšY]Ëœ›Ùš[UY\ŠKM‹ÛYÙ[\‹YÙ[\‹HHKŒŸKY\ÛÛÜŠ\\ŠšY]Ëœ›Ùš[UY\ŠJK˜›XÚÈŠNÂˆY\‹O›[Z]X™[ÚY
+MLŒ‹M‹ŒÌ™ŠNÂˆWÜ›ÛİO˜YÚ[
+Y\‹
+NÂˆ]]ÈÛÛœİXÙ[Y[H›Ùš[KœXÙ[Y[Ø[Y\È›Ùš[KœXÙ[Y[Ø[Y\Ô™\]Z\™YÂˆYˆ
+XÙ[Y[
+HÂˆY˜][™ÓX\šÜÊ›Ùš[KœXÙ[Y[™\İ[Ëİ›X^
+K›Ùš[KœXÙ[Y[Ø[Y\Ô™\]Z\™Y
+KÛYÙ[\‹YÙ[\‹HHLKŒŸKM‹Œ‹ŒÌŠNÂˆH[ÙHYˆ
+›Ùš[Kœ›Û[İ[Û‹˜Xİ]™JHÂˆY˜][™ÓX\šÜÊ›Ùš[Kœ›Û[İ[Û‹œ™\İ[Ë›Ùš[Kœ›Û[İ[Û‹™Ø[Y\Ô™\]Z\™YÛYÙ[\‹YÙ[\‹HHKŒŸKM‹Œ‹ŒÌŠNÂˆH[ÙHÂˆ]]Êˆ˜][™ÈHXZÙSX™[
+›]™›Ü›X]
+ßH‹šY]Ëœ›Ùš[TØÛÜ™JK™‹ÛYÙ[\‹YÙ[\‹HHLËŒŸKØØÌÊL
+K˜›XÚÈŠNÂˆ˜][™ËO›[Z]X™[ÚY
+MLŒ‹™‹ŒŠNÂˆWÜ›ÛİO˜YÚ[
+˜][™Ë
+NÂˆBˆİœİš[™È›Ùš[R[^HŠœÙX\ÛÛ˜[\›ÙÜ™\ÜÈ‹”ÑPTÓÓSQTˆ“ÑÔ‘TÔÈŠNÂˆØĞÛÛÜŒĞˆ›Ùš[R[ÛÛÜˆHØØÌÊNMKŒKŒ
+NÂˆYˆ
+XÙ[Y[
+H›Ùš[R[^HŠœXÙ[Y[[X]Ú\È‹”PÑSQS•PUÒTÈŠNÂˆ[ÙHYˆ
+›Ùš[Kœ›Û[İ[Û‹˜Xİ]™JHÂˆ›Ùš[R[^HÛÜ[Nœ˜[šÙYšLNœ›Û[İ[Û“X]Ú
+›Ùš[Kœ›Û[İ[Û‹Ú[œÔ™\]Z\™Y
+NÂˆ›Ùš[R[ÛÛÜˆHØØÌÊMKMKLJNÂˆH[ÙHYˆ
+›Ùš[K™[[İ[Û•Ø\›š[™ÊHÂˆ›Ùš[R[^HŠ™[[İ[Û‹]Ø\›š[™È‹‘SSÕSÓˆĞT“’S‘ÈŠNÂˆ›Ùš[R[ÛÛÜˆHÔ™YÂˆBˆ]]Êˆ›Ùš[R[HXZÙSX™[
+›Ùš[R[^ŒY‹ÛYÙ[\‹YÙ[\‹HHÎKŒŸK›Ùš[R[ÛÛÜ‹œÙ[ZX›ÛŠNÂˆ›Ùš[R[O›[Z]X™[ÚY
+MŒ‹ŒY‹ŒMÙŠNÂˆWÜ›ÛİO˜YÚ[
+›Ùš[R[
+NÂ‚ˆ]]ÊˆXİ[Û”[™[HXZÙS™[Û”[™[
+ÌNŒ‹NM‹ŒŸKšYÚÙ[\‹Ğ›YKÑY\[™[ŠNÂˆWÜ›ÛİO˜YÚ[
+Xİ[Û”[™[JNÂˆ]]ÊˆXİ[Û•]HHXZÙSX™[
+Š›X]ÚXZÚ[™È‹“PUÒPRÒS‘ÈŠKŒÍ‹ÜšYÚÙ[\‹šYÚÙ[\‹H
+ÈÍËŒŸKĞŞX[‹œÙ[ZX›ÛŠNÂˆWÜ›ÛİO˜YÚ[
+Xİ[Û•]K
+NÂ‚ˆYˆ
+šY]ËœİYÙHOH[[YTİYÙN”™XYJHÂˆ]]Êˆ^R[ÈHXZÙS™[Û”[™[
+ˆÎ‹Œ‹‹ŒŸKˆÜšYÚÙ[\‹šYÚÙ[\‹H
+ÈNŒŸKˆĞŞX[‹ˆÍËŒKˆˆ
+NÂˆWÜ›ÛİO˜YÚ[
+^R[ËŠNÂˆ]]Êˆ^PÚ\˜ÛHHĞÔÜš]N˜Ü™X]UÚ]Üš]Qœ˜[YS˜[YJ‘Ò—Ü^P—ÌKœ™ÈŠNÂˆ^PÚ\˜ÛKOœÙ]ØØ[JÌŠNÂˆ]]Êˆ^HHĞÓY[R][TÜš]Q^˜N˜Ü™X]Jˆ^PÚ\˜ÛKˆ\ËˆšY]ËœXÙ[Y[œ™\]Z\™YˆÈY[WÜÙ[XİÜŠÛÜ[T˜[šÙY^Y\›Û“Ü[”XÙ[Y[
+BˆˆY[WÜÙ[XİÜŠÛÜ[T˜[šÙY^Y\›Û’›Ú[ŠBˆ
+NÂˆ^KOœÙ]ÜÚ][ÛŠÜšYÚÙ[\‹šYÚÙ[\‹H
+ÈNŒŸJNÂˆWÛY[KO˜YÚ[
+^JNÂˆ]]ÊˆXİ[Û•^HXZÙSX™[
+ˆšY]ËœXÙ[Y[œ™\]Z\™YˆÈŠœİ\\XÙ[Y[‹”ÕT•PÑSQS•ŠBˆˆŠœİ\\]Y]YH‹”ÕT•UQUQHŠKˆ‹ˆÜšYÚÙ[\‹šYÚÙ[\‹HHŒŸKˆĞXØÙ[ˆ˜›XÚÈ‚ˆ
+NÂˆWÜ›ÛİO˜YÚ[
+Xİ[Û•^
+NÂˆ]]ÊˆXİ[Û’[HXZÙSX™[
+ˆšY]ËœXÙ[Y[œ™\]Z\™YˆÈŠ˜ÚÛÜÙKYš\œİ\ÛÛ‹ÒÓÔÑHSÕTˆ’T”ÕÕQÑHÓÓŠBˆˆŠ™š[™[X]Ú‹‘’S‘HUŒHPUÒŠKˆŒÙ‹ˆÜšYÚÙ[\‹šYÚÙ[\‹HHŒŸKˆÛÜ[Nœ˜[šÙYZN•^]]YˆœÙ[ZX›Û‚ˆ
+NÂˆWÜ›ÛİO˜YÚ[
+Xİ[Û’[
+NÂˆH[ÙHYˆ
+šY]ËœİYÙHOH[[YTİYÙN”]Y]YYšY]ËœİYÙHOH[[YTİYÙN’›Ú[š[™Ô]Y]YJHÂˆ]]ÊˆÜ[›™\ˆHØY[™ÔÜ[›™\˜Ü™X]JNŒŠNÂˆÜ[›™\‹OœÙ]ÜÚ][ÛŠÜšYÚÙ[\‹šYÚÙ[\‹H
+ÈNŒŸJNÂˆWÜ›ÛİO˜YÚ[
+Ü[›™\‹
+NÂˆ]]Êˆ]Y]YZ[™ÈHXZÙSX™[
+ŠœÙX\˜Ú[™È‹”ÑPTÒS‘Ë‹‹ˆŠK‹ÜšYÚÙ[\‹šYÚÙ[\‹HHŒŸKÑÛÛ˜›XÚÈŠNÂˆWÜ›ÛİO˜YÚ[
+]Y]YZ[™Ë
+NÂˆY]ÛŠŠ›X]™K\]Y]YH‹“PU‘HUQUQHŠKÜšYÚÙ[\‹šYÚÙ[\‹HHÍKŒŸKY[WÜÙ[XİÜŠÛÜ[T˜[šÙY^Y\›Û“X]™JKYKM™ŠNÂˆH[ÙHYˆ
+šY]ËœİYÙHOH[[YTİYÙN“ØY[™ÊHÂˆ]]ÊˆÜ[›™\ˆHØY[™ÔÜ[›™\˜Ü™X]JNŒŠNÂˆÜ[›™\‹OœÙ]ÜÚ][ÛŠÜšYÚÙ[\‹šYÚÙ[\‹H
+ÈNŒŸJNÂˆWÜ›ÛİO˜YÚ[
+Ü[›™\‹
+NÂˆ]]ÊˆØY[™ÈHXZÙSX™[
+ŠœŞ[˜Ú[™È‹”ÖSÒS‘Ë‹‹ˆŠK‹ÜšYÚÙ[\‹šYÚÙ[\‹HHŒŸKÑÛÛ˜›XÚÈŠNÂˆWÜ›ÛİO˜YÚ[
+ØY[™Ë
+NÂˆH[ÙHÂˆ]]Êˆ˜Z[YHXZÙSX™[
+Š˜ÛÛ›™Xİ[Û‹Z\ÜİYH‹ÓÓ“‘PÕSÓˆTÔÕQHŠKŒÍ‹ÜšYÚÙ[\‹šYÚÙ[\‹HHL‹ŒŸKÔ™Y˜›XÚÈŠNÂˆWÜ›ÛİO˜YÚ[
+˜Z[Y
+NÂˆY]ÛŠŠœ™]H‹”‘U–HŠKÜšYÚÙ[\‹šYÚÙ[\‹HHNŒŸKY[WÜÙ[XİÜŠÛÜ[T˜[šÙY^Y\›Û”™]JK˜[ÙK™ŠNÂˆB‚ˆÚYˆYš[™Y
+ÓÔ•SWÔS’ÑQÑP•Q×Ğ“ÕÓPUÒ
+BˆYˆ
+]šY]ËœXÙ[Y[œ™\]Z\™Y
+HÂˆY]ÛŠ‘P•QÈ“ÕPUÒ‹ÎM‹Œ‹ÌŒŸKY[WÜÙ[XİÜŠÛÜ[T˜[šÙY^Y\›Û‘XYĞ›İ
+KYKMŠNÂˆBˆÙ[™Y‚‚ˆ]]È]Z[HšY]Ë™\œ›Ü‹™[\J
+HÈšY]Ëœİ]\ÈˆšY]Ë™\œ›ÜÂˆYˆ
+[WÛØØ[Y\ÜØYÙK™[\J
+JH]Z[HWÛØØ[Y\ÜØYÙNÂˆYˆ
+Y]Z[™[\J
+JHÂˆ]]Êˆİ]\Ô[™[HXZÙS™[Û”[™[
+Üİ›Z[ŠÎŒ‹Ú^™KÚYHŒŠKÍŒŸKÜÚ^™KÚYÈ‹Œ‹ËŒŸKšY]Ë™\œ›Ü‹™[\J
+HÈĞ›YHˆÔ™YÑY\[™[‹ŒÎ
+NÂˆWÜ›ÛİO˜YÚ[
+İ]\Ô[™[JNÂˆ]]Êˆİ]\ÈHXZÙSX™[
+ÚÜ[Š]Z[L
+KŒ‹ÜÚ^™KÚYÈ‹Œ‹ËŒŸKšY]Ë™\œ›Ü‹™[\J
+HÈØØÌÊŒŒŒ
+HˆÔ™YœÙ[ZX›ÛŠNÂˆİ]\ËO›[Z]X™[ÚY
+Ú^™KÚYHLŒŒ‹Œ‹ŒNŠNÂˆWÛXZ[”İ]\ÓX™[Hİ]\ÎÂˆWÜ›ÛİO˜YÚ[
+İ]\Ë
+NÂˆBˆB‚ˆ›ÚY™[™\”XÙ[Y[X\
+[[YUšY]ÈÛÛœİ	ˆšY]ÊHÂˆ]]ÈÛÛœİÚ^™HHĞÑ\™XİÜœÚ\™Y\™XİÜŠ
+KO™Ù]Ú[”Ú^™J
+NÂˆ]]ÈÛÛœİ	ˆXÙ[Y[HšY]ËœXÙ[Y[Âˆ]]ÈÛÛœİ	ˆX]ÚHšY]Ë›X]ÚÂˆ]]ÈÛÛœİÛÛH\XÙ[Y[œİYÙTÛÛË™[\J
+BˆÈXÙ[Y[œİYÙTÛÛË˜˜XÚÊ
+BˆˆXÙ[Y[œİ\[™ÔÛÛÂˆYØÜ™Y[’XY\Šˆ›]™›Ü›X]
+”ÕQÑHßH0­ÈPTßH‹XÙ[Y[˜İ\œ™[İYÙR[™^XÙ[Y[˜İ\œ™[X\[™^
+Kˆ›]™›Ü›X]
+”ÓÓßH0­ÈßH‹ÛÛŠœÛÛË\XÙ[Y[‹”ÓÓÈPÑSQS•ŠJKˆÛÜ[Nœ˜[šÙYZN•^ˆĞŞX[‚ˆ
+NÂ‚ˆ]]Êˆ[™[HXZÙS™[Û”[™[
+ˆÜİ›Z[ŠÎŒ‹Ú^™KÚYHÍŒŠKMÍŒŸKˆÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚÈ‹ŒˆHKŒŸKˆX]Úœİ]HOH“PTÔÑUS‘ÈˆÈÑÛÛˆĞ›YKˆÑY\[™[ˆˆ
+NÂˆWÜ›ÛİO˜YÚ[
+[™[JNÂ‚ˆYˆ
+X]Ú˜İ\œ™[X\
+HÂˆ]]ÊˆX\HXZÙSX™[
+ˆ\\ŠX]Ú˜İ\œ™[X\O]JKˆ™‹ˆÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚÈ‹Œˆ
+ÈNŒŸKˆÛÜ[Nœ˜[šÙYZN•^ˆ˜›XÚÈ‚ˆ
+NÂˆX\O›[Z]X™[ÚY
+ÎŒ‹™‹ŒYŠNÂˆWÜ›ÛİO˜YÚ[
+X\JNÂˆ]]ÊˆY™šXİ[HHXZÙSX™[
+ˆX]Ú˜İ\œ™[X\O™Y™šXİ[KˆŒY‹ˆÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚÈ‹Œˆ
+ÈÍKŒŸKˆY™šXİ[PÛÛÜŠX]Ú˜İ\œ™[X\O™Y™šXİ[JKˆœÙ[ZX›Û‚ˆ
+NÂˆWÜ›ÛİO˜YÚ[
+Y™šXİ[KJNÂˆB‚ˆ]]ÊˆÜ˜YHHÛÜ[Nœ˜[šÙYZN”XÙ[Y[Ü˜YP˜YÙN˜Ü™X]JŒŠNÂˆYˆ
+Ü˜YJHÂˆÜ˜YKOœÙ]Ü˜YJXÙ[Y[˜İ\œ™[X\Ü˜YK˜[ÙJNÂˆÜ˜YKOœÙ]ÜÚ][ÛŠÜÚ^™KÚYÈ‹ŒˆHÍ‹Œ‹Ú^™KšZYÚÈ‹ŒˆHMKŒŸJNÂˆWÜ›ÛİO˜YÚ[
+Ü˜YKJNÂˆBˆ]]ÊˆØÛÜ™HHXZÙSX™[
+ˆ›]™›Ü›X]
+ßHÈL‹XÙ[Y[œ›İš\Ú[Û˜[X\ØÛÜ™JKˆY‹ˆÜÚ^™KÚYÈ‹Œˆ
+ÈÌŒ‹Ú^™KšZYÚÈ‹ŒˆHŒŸKˆÑÛÛˆ˜›XÚÈ‚ˆ
+NÂˆWÜ›ÛİO˜YÚ[
+ØÛÜ™KJNÂˆYÛX\ÚXÚÜÊXÙ[Y[˜İ\œ™[X\ÛX\œËÜÚ^™KÚYÈ‹Œˆ
+ÈÌŒ‹Ú^™KšZYÚÈ‹ŒˆHÍŒŸJNÂ‚ˆİœİš[™Èİ]U^HŠ›Ü[š[™ËY^Xİ[]™[‹“ÔS’S‘ÈVPÕÑU‘S‹‹ˆŠNÂˆYˆ
+X]Úœİ]HOH“PTÔVRS‘ÈŠHİ]U^HŠœXÙ[Y[[X\[]™H‹“PTU‘H0­ÈÔQHTUTÈQ•TˆUSTS‘ŠNÂˆYˆ
+X]Úœİ]HOH“PTÔÑUS‘ÈŠHİ]U^HŠ™š[˜[X][\\›ÙÜ™\ÜÈ‹‘’SSUSTSˆ“ÑÔ‘TÔÈŠNÂˆ]]Êˆİ]HHXZÙSX™[
+ˆİ]U^ˆŒY‹ˆÜÚ^™KÚYÈ‹Œ‹ÍŒŸKˆX]Úœİ]HOH“PTÔÑUS‘ÈˆÈÑÛÛˆĞŞX[‹ˆœÙ[ZX›Û‚ˆ
+NÂˆİ]KO›[Z]X™[ÚY
+Ú^™KÚYHLŒ‹ŒY‹ŒM™ŠNÂˆWÜ›ÛİO˜YÚ[
+İ]KJNÂˆB‚ˆ›ÚY™[™\”XÙ[Y[X\™\İ[
+[[YUšY]ÈÛÛœİ	ˆšY]ÊHÂˆ]]ÈÛÛœİÚ^™HHĞÑ\™XİÜœÚ\™Y\™XİÜŠ
+KO™Ù]Ú[”Ú^™J
+NÂˆ]]ÈÛÛœİ	ˆXÙ[Y[HšY]ËœXÙ[Y[ÂˆYØÜ™Y[’XY\Šˆ›]™›Ü›X]
+“PTßHßH‹XÙ[Y[˜İ\œ™[X\[™^Š˜ÛÛ\]H‹ÓÓTUHŠJKˆ›]™›Ü›X]
+”ÕQÑHßH0­ÈßH‹XÙ[Y[˜İ\œ™[İYÙR[™^ŠœÙ\™\‹\™\İ[‹”ÑT•‘Tˆ‘TÕSŠJKˆÑÛÛˆĞŞX[‚ˆ
+NÂˆ]]ÊˆÜ˜YHHÛÜ[Nœ˜[šÙYZN”XÙ[Y[Ü˜YP˜YÙN˜Ü™X]JÍ‹ŒŠNÂˆYˆ
+Ü˜YJHÂˆÜ˜YKOœÙ]Ü˜YJXÙ[Y[˜İ\œ™[X\Ü˜YK˜[ÙJNÂˆÜ˜YKOœÙ]ÜÚ][ÛŠÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚÈ‹Œˆ
+ÈL‹ŒŸJNÂˆWÜ›ÛİO˜YÚ[
+Ü˜YKJNÂˆBˆ]]ÊˆØÛÜ™HHXZÙSX™[
+ˆ›]™›Ü›X]
+ßHßHÈL‹Š›X\\ØÛÜ™H‹“PTĞÓÔ‘HŠKXÙ[Y[˜İ\œ™[X\ØÛÜ™JKˆŒÍ™‹ˆÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚÈ‹ŒˆHKŒŸKˆÛÜ[Nœ˜[šÙYZN•^ˆ˜›XÚÈ‚ˆ
+NÂˆWÜ›ÛİO˜YÚ[
+ØÛÜ™KJNÂˆY]ÛŠˆXÙ[Y[˜İ\œ™[X\[™^OHBˆÈŠ›™^[X\‹“‘VPTŠBˆˆŠœÚİË\İYÙK\™\İ[‹”ÒÕÈÕQÑH‘TÕSŠKˆÜÚ^™KÚYÈ‹Œ‹ÌŒŸKˆY[WÜÙ[XİÜŠÛÜ[T˜[šÙY^Y\›ÛÛÛ[YTXÙ[Y[
+Kˆ˜[ÙKˆ‚ˆ
+NÂˆB‚ˆ›ÚY™[™\”XÙ[Y[İYÙT™\İ[
+[[YUšY]ÈÛÛœİ	ˆšY]ÊHÂˆ]]ÈÛÛœİÚ^™HHĞÑ\™XİÜœÚ\™Y\™XİÜŠ
+KO™Ù]Ú[”Ú^™J
+NÂˆYˆ
+šY]ËœXÙ[Y[œİYÙT™\İ[Ë™[\J
+JH™]\›Âˆ]]ÈÛÛœİ™\İ[HšY]ËœXÙ[Y[œİYÙT™\İ[Ë˜˜XÚÊ
+NÂˆ]]ÈÛÛœİX\QÜ˜YHH™\İ[›X\Ü˜Y\ËœÚ^™J
+HˆÈ™\İ[›X\Ü˜Y\ÖÌHˆ‘Âˆ]]ÈÛÛœİX\‘Ü˜YHH™\İ[›X\Ü˜Y\ËœÚ^™J
+HˆHÈ™\İ[›X\Ü˜Y\ÖÌWHˆ‘Âˆ]]ÈÛÛœİ]Y[ÒÙ^HH›]™›Ü›X]
+ßNßH‹šY]ËœXÙ[Y[œ[’Y™\İ[œİYÙR[™^
+NÂˆYØÜ™Y[’XY\Šˆ›]™›Ü›X]
+”ÕQÑHßHßH‹™\İ[œİYÙR[™^Šœ™\İ[‹”‘TÕSŠJKˆ›]™›Ü›X]
+”ÓÓßH0­ÈÎ‹ŒYŸHÈL‹™\İ[œÛÛ™\İ[œİYÙTØÛÜ™JKˆÑÛÛˆĞŞX[‚ˆ
+NÂ‚ˆ]]ÈXZÙQÜ˜YPØ\™HÉ—Jİœİš[™ÈÛÛœİ	ˆØ\[Û‹İœİš[™ÈÛÛœİ	ˆÜ˜YK›Ø]›ÛÛš[˜[
+HÂˆ]]ÊˆÜ›İ\HĞÓ^Y\ÛÛÜ˜Ü™X]JÌJNÂˆÜ›İ\OœÙ]ÛÛ[Ú^™JÎ‹Œ‹LŒŸJNÂˆÜ›İ\OœÙ][˜ÚÜ”Ú[
+ÌY‹YŸJNÂˆÜ›İ\OœÙ]ÜÚ][ÛŠŞÚ^™KšZYÚÈ‹Œˆ
+ÈËŒŸJNÂˆÜ›İ\OœÙ]Ø\ØØYSÜXÚ]Q[˜X›Y
+YJNÂˆ]]Êˆ[™[HXZÙS™[Û”[™[
+ˆÎ‹Œ‹LŒŸKˆÍËŒ‹MŒŸKˆš[˜[ÈÑÛÛˆĞ›YKˆÑY\[™[ˆˆ
+NÂˆÜ›İ\O˜YÚ[
+[™[JNÂˆ]]Êˆ]HHXZÙSX™[
+Ø\[Û‹ŒŒ™‹ÍËŒ‹LËŒŸKš[˜[ÈÑÛÛˆĞŞX[‹œÙ[ZX›ÛŠNÂˆ]KO›[Z]X™[ÚY
+ÍŒ‹ŒŒ™‹ŒMYŠNÂˆÜ›İ\O˜YÚ[
+]KÊNÂˆ]]Êˆ˜YÙHHÛÜ[Nœ˜[šÙYZN”XÙ[Y[Ü˜YP˜YÙN˜Ü™X]Jš[˜[ÈŒ‹ŒˆˆMŒŠNÂˆYˆ
+˜YÙJHÂˆ˜YÙKOœÙ]Ü˜YJÜ˜YK˜[ÙJNÂˆ˜YÙKOœÙ]ÜÚ][ÛŠÍËŒ‹ŒŸJNÂˆÜ›İ\O˜YÚ[
+˜YÙK
+NÂˆBˆWÜ›ÛİO˜YÚ[
+Ü›İ\JNÂˆ™]\›ˆÜ›İ\ÂˆNÂ‚ˆ]]ÊˆYHXZÙQÜ˜YPØ\™
+“PTH‹X\QÜ˜YKÚ^™KÚYÈ‹ŒˆHMLŒ‹˜[ÙJNÂˆ]]ÊˆšYÚHXZÙQÜ˜YPØ\™
+“PTˆ‹X\‘Ü˜YKÚ^™KÚYÈ‹ŒˆHÍKŒ‹˜[ÙJNÂˆ]]Êˆš[˜[Ü›İ\HXZÙQÜ˜YPØ\™
+ˆŠœİYÙKYÜ˜YH‹”ÕQÑHÔQHŠKˆ™\İ[œİYÙQÜ˜YKˆÚ^™KÚYÈ‹Œˆ
+ÈMŒ‹ˆYBˆ
+NÂˆ]]Êˆ\ÈHXZÙSX™[
+ŠÈ‹Œ™‹ÜÚ^™KÚYÈ‹ŒˆHL‹Œ‹Ú^™KšZYÚÈ‹Œˆ
+ÈËŒŸKÑÛÛ˜›XÚÈŠNÂˆ]]Êˆ\œ›İÈHXZÙSX™[
+ˆ‹MY‹ÜÚ^™KÚYÈ‹Œˆ
+ÈL‹Œ‹Ú^™KšZYÚÈ‹Œˆ
+ÈËŒŸKĞŞX[‹˜›XÚÈŠNÂˆWÜ›ÛİO˜YÚ[
+\ËŠNÂˆWÜ›ÛİO˜YÚ[
+\œ›İËŠNÂ‚ˆYOœ[Xİ[ÛŠĞÔÙ\]Y[˜ÙN˜Ü™X]JˆĞÑ[^U[YN˜Ü™X]JŒNŠKˆĞÑX\ÙTÚ[™R[“İ]˜Ü™X]JĞÓ[İ™PN˜Ü™X]JŒN‹ÍŒ‹ŒŸJJKˆĞÑX\ÙTÚ[™R[“İ]˜Ü™X]JĞÓ[İ™PN˜Ü™X]JŒN‹ËMŒ‹ŒŸJJKˆ[‚ˆ
+JNÂˆšYÚOœ[Xİ[ÛŠĞÔÙ\]Y[˜ÙN˜Ü™X]JˆĞÑ[^U[YN˜Ü™X]JŒNŠKˆĞÑX\ÙTÚ[™R[“İ]˜Ü™X]JĞÓ[İ™PN˜Ü™X]JŒN‹ËMŒ‹ŒŸJJKˆĞÑX\ÙTÚ[™R[“İ]˜Ü™X]JĞÓ[İ™PN˜Ü™X]JŒN‹ÍŒ‹ŒŸJJKˆ[‚ˆ
+JNÂ‚ˆ]]Êˆ›\ÚHĞÓ^Y\ÛÛÜ˜Ü™X]JÌMKMKMKJNÂˆ›\ÚOœÙ]ÛÛ[Ú^™JÌÍŒ‹LŒŸJNÂˆ›\ÚOœÙ]ÜÚ][ÛŠÜÚ^™KÚYÈ‹Œˆ
+ÈÍKŒ‹Ú^™KšZYÚÈ‹ŒˆHLKŒŸJNÂˆWÜ›ÛİO˜YÚ[
+›\ÚÊNÂˆ›\ÚOœ[Xİ[ÛŠĞÔÙ\]Y[˜ÙN˜Ü™X]JˆĞÑ[^U[YN˜Ü™X]JŠKˆĞÑ˜YUÎ˜Ü™X]JŒY‹ŒL
+KˆĞÑ˜YSİ]˜Ü™X]JŒL™ŠKˆ[‚ˆ
+JNÂ‚ˆš[˜[Ü›İ\OœÙ]ÜXÚ]J
+NÂˆš[˜[Ü›İ\OœÙ]ØØ[JŠNÂˆš[˜[Ü›İ\Oœ[Xİ[ÛŠĞÔÙ\]Y[˜ÙN˜Ü™X]JˆĞÑ[^U[YN˜Ü™X]JMYŠKˆĞÔÜ]Û˜Ü™X]JˆĞÑ˜YUÎ˜Ü™X]JŒL‹MJKˆĞÑX\ÙTÚ[™Sİ]˜Ü™X]JĞÔØØ[UÎ˜Ü™X]JŒM‹KŒL™ŠJKˆ[‚ˆ
+KˆĞÑX\ÙTÚ[™R[“İ]˜Ü™X]JĞÔØØ[UÎ˜Ü™X]JŒL™‹KŒŠJKˆ[‚ˆ
+JNÂˆYˆ
+WÜİYÙT™\İ[]Y[Ô^YYÙ^HOH]Y[ÒÙ^JHÂˆš[˜[Ü›İ\Oœ[Xİ[ÛŠĞÔÙ\]Y[˜ÙN˜Ü™X]JˆĞÑ[^U[YN˜Ü™X]JMYŠKˆØ[[˜Ñ^˜Ü™X]Jİ\Ë]Y[ÒÙ^KÜ˜YHH™\İ[œİYÙQÜ˜YWHÂˆWÜİYÙT™\İ[]Y[Ô^YYÙ^HH]Y[ÒÙ^NÂˆ˜[šÙY]Y[ÓX[˜YÙ\™Ù]
+
+KœÙ][ÙJˆÜ˜YHOH”ÈˆÜ˜YHOHHˆÜ˜YHOHˆ‚ˆÈ˜[šÙY]Y[Ó[ÙN”™\İ[Ú[‚ˆˆ˜[šÙY]Y[Ó[ÙN”™\İ[ÜÙBˆ
+NÂˆJKˆ[‚ˆ
+JNÂˆB‚ˆ]]ÈÛÛœİš[˜[İYÙHH™\İ[œİYÙR[™^HšY]ËœXÙ[Y[İ[İYÙ\ÎÂˆ]]Êˆ[İ™[Y[HXZÙSX™[
+ˆš[˜[İYÙBˆÈŠ˜[\XÙ[Y[[X\ËXÛÛ\]H‹SLPTÈÓÓTUHŠBˆˆ›]™›Ü›X]
+ßHÓÓßH
+ÎŠÙJH‹Š›™^‹“‘VŠK™\İ[›™^ÛÛ™\İ[œÛÛ[JKˆŒÌ‹ˆÜÚ^™KÚYÈ‹Œ‹MŒŸKˆ™\İ[œÛÛ[HˆÈÑÜ™Y[ˆˆ™\İ[œÛÛ[HÈÔ™YˆÛÜ[Nœ˜[šÙYZN•^]]Yˆ˜›XÚÈ‚ˆ
+NÂˆWÜ›ÛİO˜YÚ[
+[İ™[Y[JNÂˆ]]Êˆ]ÛˆHY]ÛŠˆš[˜[İYÙBˆÈŠ™š[˜[\XÙ[Y[‹‘’SSPÑSQS•ŠBˆˆŠ›™^\İYÙH‹“‘VÕQÑHŠKˆÜÚ^™KÚYÈ‹Œ‹KŒŸKˆY[WÜÙ[XİÜŠÛÜ[T˜[šÙY^Y\›ÛÛÛ[YTXÙ[Y[
+Kˆ˜[ÙKˆM™‚ˆ
+NÂˆ]Û‹OœÙ][˜X›Y
+˜[ÙJNÂˆ]Û‹Oœ[Xİ[ÛŠĞÔÙ\]Y[˜ÙN˜Ü™X]JˆĞÑ[^U[YN˜Ü™X]JM™ŠKˆØ[[˜Ñ^˜Ü™X]JØ]Û—HÈ]Û‹OœÙ][˜X›Y
+YJNÈJKˆ[‚ˆ
+JNÂˆB‚ˆ›ÚY™[™\”XÙ[Y[š[˜[
+[[YUšY]ÈÛÛœİ	ˆšY]ÊHÂˆ]]ÈÛÛœİÚ^™HHĞÑ\™XİÜœÚ\™Y\™XİÜŠ
+KO™Ù]Ú[”Ú^™J
+NÂˆ]]ÈÛÛœİ	ˆš[˜[™\İ[HšY]ËœXÙ[Y[™š[˜[™\İ[ÂˆYØÜ™Y[’XY\ŠˆŠœXÙ[Y[XÛÛ\]H‹”PÑSQS•ÓÓTUHŠKˆš[˜[™\İ[œÚÚ\YÈŠœXÙ[Y[\ÚÚ\Y‹”PÑSQS•ÒÒTQŠHˆŠ[‹[X\ËYš]™K\İYÙ\È‹ŒLPTÈ0­ÈHÕQÑTÈŠKˆÑÛÛˆĞŞX[‚ˆ
+NÂˆ]]Êˆ˜YÙHHÛÜ[Nœ˜[šÙYZN˜Ü™X]P[š[X]Y˜[šĞ˜YÙJˆš[˜[™\İ[™\Ü^YYY\‹ˆÌLL‹Œ‹LL‹ŒŸKˆÛÜ[Nœ˜[šÙYZN”˜[šĞ˜YÙQ\Ü^N’\›Âˆ
+NÂˆYˆ
+˜YÙJHÂˆ˜YÙKOœÙ]ÜÚ][ÛŠÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚÈ‹Œˆ
+ÈŒŸJNÂˆWÜ›ÛİO˜YÚ[
+˜YÙKJNÂˆBˆ]]ÊˆY\ˆHXZÙSX™[
+ˆ›]™›Ü›X]
+ßHHßH‹\\Šš[˜[™\İ[™\Ü^YYY\ŠKš[˜[™\İ[š\ÚX›T˜[šÙYØÛÜ™JKˆMY‹ˆÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚÈ‹ŒˆHKŒŸKˆY\ÛÛÜŠš[˜[™\İ[™\Ü^YYY\ŠKˆ˜›XÚÈ‚ˆ
+NÂˆY\‹O›[Z]X™[ÚY
+Ú^™KÚYHLŒ‹MY‹ŒÌ™ŠNÂˆWÜ›ÛİO˜YÚ[
+Y\‹JNÂˆ]]ÊˆXÙYHXZÙSX™[
+ŠœXÙY‹”PÑQŠKŒÎ‹ÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚÈ‹ŒˆHÎŒŸKÑÜ™Y[‹˜›XÚÈŠNÂˆWÜ›ÛİO˜YÚ[
+XÙYJNÂˆYˆ
+]šY]Ë™\œ›Ü‹™[\J
+JHÂˆ]]Êˆ\œ›ÜˆHXZÙSX™[
+ˆÚÜ[ŠšY]Ë™\œ›Ü‹ÌŠKˆŒŒ™‹ˆÜÚ^™KÚYÈ‹Œ‹LKŒŸKˆÔ™YˆœÙ[ZX›Û‚ˆ
+NÂˆ\œ›Ü‹O›[Z]X™[ÚY
+Ú^™KÚYHLŒ‹ŒŒ™‹ŒMYŠNÂˆWÜ›ÛİO˜YÚ[
+\œ›Ü‹JNÂˆBˆY]ÛŠŠ˜ÛÛ[YH‹ÓÓ•S•QHŠKÜÚ^™KÚYÈ‹Œ‹‹ŒŸKY[WÜÙ[XİÜŠÛÜ[T˜[šÙY^Y\›Û”™\İ[ÛÜÙJK˜[ÙKŒŠNÂ‚ˆ]]ÈÛÛœİ˜[œÚ][Û’Ù^HHœXÙ[Y[ˆˆ
+ÈšY]ËœXÙ[Y[œ[’YÂˆYˆ
+WÜ˜[šÕ˜[œÚ][Û”^YYÙ^HOH˜[œÚ][Û’Ù^JHÂˆYˆ
+^T™\İ[˜[šÕ˜[œÚ][ÛŠˆšY]Ë›X]Úœ˜][™Ñ]™[KˆšY]Ë›X]Úœ›Ùš[P™Y›Ü™PKˆšY]Ë›X]Úœ›Ùš[PY\Bˆ
+JHÂˆWÜ˜[šÕ˜[œÚ][Û”^YYÙ^HH˜[œÚ][Û’Ù^NÂˆBˆBˆYˆ
+WÜ˜[šÕ˜[œÚ][Û“^Y\ˆ	‰ˆWÛY[JHWÛY[KOœÙ]İXÚ[˜X›Y
+˜[ÙJNÂˆB‚ˆ›ÚY™[™\”XÙ[Y[
+[[YUšY]ÈÛÛœİ	ˆšY]ÊHÂˆ]]ÈÛÛœİ	ˆİ]HHšY]ËœXÙ[Y[œİ]NÂˆYˆ
+İ]HOH”PÑSQS•Ô‘TÕSŠHÂˆ™[™\”XÙ[Y[š[˜[
+šY]ÊNÂˆH[ÙHYˆ
+İ]HOH”ÕQÑWÔ‘TÕSŠHÂˆ™[™\”XÙ[Y[İYÙT™\İ[
+šY]ÊNÂˆH[ÙHYˆ
+İ]HOH“PTÔ‘TÕSŠHÂˆ™[™\”XÙ[Y[X\™\İ[
+šY]ÊNÂˆH[ÙHYˆ
+İ]HOHĞSÑSQŠHÂˆ]]ÈÛÛœİÚ^™HHĞÑ\™XİÜœÚ\™Y\™XİÜŠ
+KO™Ù]Ú[”Ú^™J
+NÂˆYØÜ™Y[’XY\ŠŠœXÙ[Y[XØ[˜Ù[Y‹”PÑSQS•ĞSÑSQŠKŠœÙ\™\‹\[ˆ‹”ÑT•‘T‹PUUÔ’UUU‘H•SˆŠKÔ™YÔ™Y
+NÂˆY]ÛŠŠ˜ÛÜÙH‹ÓÔÑHŠKÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚÈ‹ŒˆHÌŒŸKY[WÜÙ[XİÜŠÛÜ[T˜[šÙY^Y\›Û”™\İ[ÛÜÙJKYKŠNÂˆH[ÙHÂˆ™[™\”XÙ[Y[X\
+šY]ÊNÂˆBˆB‚ˆ›ÚY™[™\“X]Ú
+[[YUšY]ÈÛÛœİ	ˆšY]ÊHÂˆYˆ
+šY]Ë›X]ÚœXÙ[Y[
+HÂˆ™[™\”XÙ[Y[
+šY]ÊNÂˆ™]\›ÂˆBˆ]]ÈÛÛœİ	ˆX]ÚHšY]Ë›X]ÚÂˆYˆ
+X]Úœİ]HOH“PUÒÔ‘TÕSˆX]Úœİ]HOHĞSÑSQŠHÂˆËÈPUÒÔ‘TÕS\È[[]]X›HÙ\™\ˆ]]Üš]Kˆ[KŒÈÛİ[˜\BˆËÈRH›Ü™]™\ˆÛˆÖSÒS‘È‘TÕSÚ[ˆ[ˆPÒÈØ\ÈÜİ]™[ˆİYÚBˆËÈÙ\™\ˆY[™XYHš[˜[^™Yˆ˜[œÜÜÛX[\›İÈ\[œÈ[ˆBˆËÈ[[YNÈ[Ø^\È™[™\ˆH]]Üš]]]™H™\İ[\™K‚ˆ™[™\”™\İ[
+šY]ÊNÂˆ™]\›ÂˆBˆYˆ
+X]Úœİ]HOHS—ÔTÑHŠHÂˆ™[™\˜[ŠX]Ú
+NÂˆ™]\›ÂˆBˆYˆ
+X]Úœİ]HOH”“ÕS‘Ô‘TT‘HˆX]Úœİ]HOH‘PUPUÒÔ‘TT‘HŠHÂˆ™[™\”™\\™JX]Ú
+NÂˆ™]\›ÂˆBˆËÈÜXİ]ÜXİ]™HØ[ˆ\œš]™HY\ˆH\ÙH]Ù[ˆ
+İ]HÛ[™È[™ˆËÈ][\XÚÛ›İÛYÙ[Y[È\™H[™\[™[
+Kˆ™Y™\ˆ]›İYÚİ]]™\BˆËÈ]™H›İ[™\ÙK[™[˜ÛYH][ˆ™\Ù[][Û’Ù^J
+KÛÈH]H˜[ÙBˆËÈOˆYH›Ú™Xİ[Ûˆ[Ø^\È™\XÙ\ÈÔS’S‘ÈU‘SÚ]HØœÙ\™\ˆRK‚ˆYˆ
+ˆX]ÚœÜXİ]ÜXİ]™H	‰‚ˆ
+ˆX]Úœİ]HOH”“ÕS‘ÔVRS‘ÈˆˆX]Úœİ]HOH‘’SSĞUSTÕÒS‘ÕÈˆˆX]Úœİ]HOH“TÕĞUSTÕÒS‘ÕÈˆˆX]Úœİ]HOH”“ÕS‘ÔÑUS‘È‚ˆ
+Bˆ
+HÂˆ™[™\”ÜXİ]Ü•ØZ]
+X]Ú
+NÂˆ™]\›ÂˆBˆYˆ
+X]Úœİ]HOH”“ÕS‘ÔÑUS‘ÈŠHÂˆ™[™\’[\”›İ[™
+X]Ú
+NÂˆ™]\›ÂˆBˆYˆ
+ˆX]Úœİ]HOH”“ÕS‘ÔVRS‘ÈˆˆX]Úœİ]HOH‘’SSĞUSTÕÒS‘ÕÈˆˆX]Úœİ]HOH“TÕĞUSTÕÒS‘ÕÈˆˆX]Úœİ]HOH‘PUPUÒÔVRS‘È‚ˆ
+HÂˆ™[™\”™\\™JX]Ú
+NÂˆ™]\›ÂˆBˆYˆ
+X]Úœİ]HOH“PUÒQŠHÂˆ™[™\“X]Ú›İ[™
+X]Ú
+NÂˆ™]\›ÂˆBˆ™[™\’[\”›İ[™
+X]Ú
+NÂˆB‚ˆ›ÚY™[™\“X]Ú›İ[™
+X]ÚšY]ÈÛÛœİ	ˆX]Ú
+HÂˆ]]ÈÛÛœİÚ^™HHĞÑ\™XİÜœÚ\™Y\™XİÜŠ
+KO™Ù]Ú[”Ú^™J
+NÂˆ]]ÈÛÛœİİÛHHX]ÚœÚYHOHHÂˆY^Y\Ø\™
+ÌLŒ‹Ú^™KšZYÚÈ‹ŒˆH‹ŒŸKX]Úœ^Y\S˜[YKX]Úœ^Y\T›Ùš[KİÛJNÂˆY^Y\Ø\™
+ÜÚ^™KÚYHLŒ‹Ú^™KšZYÚÈ‹ŒˆH‹ŒŸKX]Úœ^Y\“˜[YKX]Úœ^Y\”›Ùš[K[İÛJNÂ‚ˆYØÜ™Y[’XY\ŠˆŠ›X]ÚY›İ[™‹“PUÒ“ÕS‘ŠKˆŠœš]˜]KX˜[‹\\ÙH‹”’UUHSˆTÑHŠKˆÛÜ[Nœ˜[šÙYZN•^ˆĞŞX[‚ˆ
+NÂ‚ˆ]]Êˆ™\œİ\ÈHXZÙSX™[
+•”È‹‹ÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚÈ‹Œˆ
+ÈŒKŒŸKÑÛÛ™\Ü^HŠNÂˆWÜ›ÛİO˜YÚ[
+™\œİ\ËJNÂ‚ˆ]]ÈÛÛœİYHİ›X^
+HHİ]X×ØØ\İ[Šİ™›ÛÜŠ\ÙTÙXÛÛ™Ê
+JJJNÂˆ]]ÊˆÛİ[İÛ”]HHXZÙS™[Û”[™[
+ÌLM‹Œ‹NŒŸKÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚÈ‹ŒˆH‹ŒŸKYHˆÈÔÚYT™YˆĞ›YKÍËMËÍŸKŒÍŠNÂˆWÜ›ÛİO˜YÚ[
+Ûİ[İÛ”]KŠNÂˆ]]Êˆ\ÙHHXZÙSX™[
+Š›X\X˜[‹Z[ˆ‹“PTSˆSˆŠKŒÙ‹ÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚÈ‹Œˆ
+ÈMŒŸKĞŞX[‹œÙ[ZX›ÛŠNÂˆWÜ›ÛİO˜YÚ[
+\ÙKJNÂˆ]]ÊˆÛİ[İÛˆHXZÙSX™[
+›]™›Ü›X]
+ßH‹Y
+K‹ÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚÈ‹ŒˆHŒŸKYHˆÈÔÚYT™YˆÑÛÛ˜›XÚÈŠNÂˆWÛX]Ú›İ[™Ûİ[İÛ“X™[HÛİ[İÛÂˆWÜ›ÛİO˜YÚ[
+Ûİ[İÛ‹JNÂˆ]]Êˆ[HXZÙSX™[
+Šœ™\\™K\š]˜]KX˜[ˆ‹‘ÑU‘PQHÈÒÓÔÑHH’UUHSˆŠKŒ‹ÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚÈ‹ŒˆHÍKŒŸKØØÌÊŒLŒNKŒÍŠKœÙ[ZX›ÛŠNÂˆ[O›[Z]X™[ÚY
+MÍ‹Œ‹Œ‹ŒM™ŠNÂˆWÜ›ÛİO˜YÚ[
+[JNÂˆB‚ˆ›ÚY™[™\˜[ŠX]ÚšY]ÈÛÛœİ	ˆX]Ú
+HÂˆ]]ÈÛÛœİÚ^™HHĞÑ\™XİÜœÚ\™Y\™XİÜŠ
+KO™Ù]Ú[”Ú^™J
+NÂˆYÜ˜XÚÊYJNÂ‚ˆYØÜ™Y[’XY\ŠˆŠ˜˜[‹[X\‹SˆPTŠKˆŠ˜ÚÛÜÙK[X\\™[[İ™H‹ÒÓÔÑHÓ‘HPTÈ‘SSÕ‘HŠKˆÛÜ[Nœ˜[šÙYZN•^ˆĞŞX[‚ˆ
+NÂ‚ˆ]]ÈÛÛœİ™[XZ[š[™ÈHİ›X^İš[İŠ˜[šÙY[[YN™Ù]
+
+K™XY[™TÙXÛÛ™Ê
+K˜[YWÛÜŠ
+JNÂˆ]]Êˆ[Y\”]HHXZÙS™[Û”[™[
+ÍMŒ‹ŒŸKÜÚ^™KÚYH‹Œ‹Ú^™KšZYÚHKŒŸK™[XZ[š[™ÈHÈÈÔÚYT™YˆĞ›YKÎNKL
+NÂˆWÜ›ÛİO˜YÚ[
+[Y\”]KÊNÂˆ]]Êˆ[Y\ˆHXZÙSX™[
+›]™›Ü›X]
+ßH‹™[XZ[š[™ÊKN‹ÜÚ^™KÚYH‹Œ‹Ú^™KšZYÚHÍŒŸK™[XZ[š[™ÈHÈÈÔÚYT™YˆØØÌÊKMJK˜›XÚÈŠNÂˆWØ˜[•[Y\“X™[H[Y\ÂˆWÜ›ÛİO˜YÚ[
+[Y\‹ŠNÂˆ]]Êˆ[Y\Ø\[ÛˆHXZÙSX™[
+Š[YK[Y‹•SQHQ•ŠKŒ‹ÜÚ^™KÚYH‹Œ‹Ú^™KšZYÚHM‹ŒŸKĞŞX[‹œÙ[ZX›ÛŠNÂˆWÜ›ÛİO˜YÚ[
+[Y\Ø\[Û‹ŠNÂ‚ˆ]]ÈÛÛœİÛİ[Hİ›Z[İœÚ^™WİŠKX]Ú˜Ø[™Y]SX\ËœÚ^™J
+JNÂˆ]]ÈÛÛœİØ\™ÚYH
+Ú^™KÚYHÍŒŠHÈKŒÂˆ]]ÈÛÛœİØ\™ZYÚHİ›Z[ŠMÌŒ‹Ú^™KšZYÚHLŒ‹ŒŠNÂˆ]]ÈÛÛœİİ\HMËŒˆ
+ÈØ\™ÚYÈ‹ŒÂˆ]]ÈÛÛœİÙ[\–HHÚ^™KšZYÚÈ‹Œˆ
+È‹ŒÂˆ›Üˆ
+İœÚ^™WİHHÈHÛİ[È
+ÊÚJHÂˆ]]ÈÛÛœİHİ\
+ÈØ\™ÚY
+ˆİ]X×ØØ\İ›Ø]ŠJNÂˆ]]ÈÛÛœİ	ˆØ[™Y]HHX]Ú˜Ø[™Y]SX\ÖÚWNÂˆ]]ÈÛÛœİY™ÛÛÜˆHY™šXİ[PÛÛÜŠØ[™Y]K™Y™šXİ[JNÂˆ]]ÈÛÛœİÙ[XİYHWÜÙ[XİY˜[ˆOHØ[™Y]K˜Ø[›ÛšXØ[]™[YÂˆ]]ÈÛÛœİ[™[™ÈHWÜ[™[™Ğ˜[ˆOHØ[™Y]K˜Ø[›ÛšXØ[]™[YÂˆ]]ÈÛÛœİXØÙ[HÙ[XİYÈÔ™Yˆ
+[™[™ÈÈÑÛÛˆĞ›YJNÂ‚ˆ]]Êˆ[™[HXZÙS™[Û”[™[
+ØØ\™ÚYHKŒ‹Ø\™ZYÚKŞÙ[\–_KXØÙ[ÑY\[™[
+NÂˆWÜ›ÛİO˜YÚ[
+[™[JNÂ‚ˆ]]ÊˆX\[™^HXZÙSX™[
+ˆ›]™›Ü›X]
+ßHÎŒ™H‹Š›X\‹“PTŠKİ]X×ØØ\İ[ŠH
+ÈJJKˆŒŒ™‹ˆŞÙ[\–H
+ÈØ\™ZYÚÈ‹ŒˆHLËŒŸKˆÙ[XİYÈÔ™Yˆ
+[™[™ÈÈÑÛÛˆÛÜ[Nœ˜[šÙYZN•^]]Y
+KˆœÙ[ZX›Û‚ˆ
+NÂˆWÜ›ÛİO˜YÚ[
+X\[™^JNÂ‚ˆËÈXÛÜ˜]]™HX\[X›[Kˆ\Èİ^\È[\™[H[œÚYH˜\ÙHÑ\ÜÙ]È[™ˆËÈÚ]™\ÈXXÚØ\™Hİ›Û™Ù\ˆš\İX[[˜ÚÜˆ[ˆ]K[Û›H™Xİ[™Û\Ë‚ˆ]]Êˆ[X›[P˜XÚÈHXZÙS™[Û”[™[
+ÍŒ‹ŒŸKŞÙ[\–H
+ÈËŒŸKY™ÛÛÜ‹ÍKL‹ßKL
+NÂˆWÜ›ÛİO˜YÚ[
+[X›[P˜XÚËŠNÂˆ]]Êˆ[X›[HHĞÔÜš]N˜Ü™X]UÚ]Üš]Qœ˜[YS˜[YJ‘Ò—ØšYÔİ\—ÌKœ™ÈŠNÂˆYˆ
+[X›[JHÂˆ[X›[KOœÙ]ØØ[JŒÍŠNÂˆ[X›[KOœÙ]ÛÛÜŠY™ÛÛÜŠNÂˆ[X›[KOœÙ]ÜÚ][ÛŠŞÙ[\–H
+ÈËŒŸJNÂˆWÜ›ÛİO˜YÚ[
+[X›[K
+NÂˆB‚ˆ]]ÊˆX\HXZÙSX™[
+ÛÓ[™U]J\\ŠØ[™Y]K]JKL
+KŒÌY‹ŞÙ[\–H
+ÈMKŒŸKÛÜ[Nœ˜[šÙYZN•^œÙ[ZX›ÛŠNÂˆX\O›[Z]X™[ÚY
+Ø\™ÚYHL‹Œ‹ŒÌY‹ŒŒŠNÂˆWÜ›ÛİO˜YÚ[
+X\
+NÂ‚ˆ]]ÊˆY™šXİ[T]HHXZÙS™[Û”[™[
+ØØ\™ÚYHŒ‹Œ‹ŒŸKŞÙ[\–HHŒŒŸKY™ÛÛÜ‹ÌLKŒÍŸKJNÂˆWÜ›ÛİO˜YÚ[
+Y™šXİ[T]KŠNÂˆ]]ÊˆY™Ø\[ÛˆHXZÙSX™[
+Š™Y™šXİ[H‹‘Q‘’PÕSHŠKŒŒÙ‹ŞÙ[\–HHMŒŸKĞŞX[‹œÙ[ZX›ÛŠNÂˆWÜ›ÛİO˜YÚ[
+Y™Ø\[Û‹
+NÂˆ]]ÊˆY™ˆHXZÙSX™[
+Ø[™Y]K™Y™šXİ[KŒÍY‹ŞÙ[\–HHËŒŸKY™ÛÛÜ‹˜›XÚÈŠNÂˆY™‹O›[Z]X™[ÚY
+Ø\™ÚYHŒ‹ŒÍY‹ŒŒ™ŠNÂˆWÜ›ÛİO˜YÚ[
+Y™‹
+NÂ‚ˆ]]ÈÛÛœİXİ[Û–HHÙ[\–HHØ\™ZYÚÈ‹Œˆ
+ÈŒKŒÂˆYˆ
+Ù[XİY
+HÂˆ]]Êˆİ]HHXZÙU^]JŠ˜˜[›™Y‹S“‘QŠKØØ\™ÚYHNŒ‹ŒŸKŞXİ[Û–_KÔ™YŒN‹Ô™Y
+NÂˆWÜ›ÛİO˜YÚ[
+İ]KÊNÂˆH[ÙHYˆ
+[™[™ÊHÂˆ]]Êˆİ]HHXZÙU^]JŠ˜˜[›š[™È‹S“’S‘Ë‹‹ˆŠKØØ\™ÚYHNŒ‹ŒŸKŞXİ[Û–_KÑÛÛŒM™‹ÑÛÛ
+NÂˆWÜ›ÛİO˜YÚ[
+İ]KÊNÂˆH[ÙHYˆ
+WÜÙ[XİY˜[‹™[\J
+H	‰ˆWÜ[™[™Ğ˜[‹™[\J
+JHÂˆ]]Êˆ]ÛˆHY]ÛŠŠ˜˜[ˆ‹SˆŠKŞXİ[Û–_KY[WÜÙ[XİÜŠÛÜ[T˜[šÙY^Y\›Û˜[ŠKYK™ŠNÂˆ]Û‹OœÙ]YÊİ]X×ØØ\İ[ŠJJNÂˆBˆB‚ˆ]]Êˆš]˜XŞT]HHXZÙS™[Û”[™[
+ÌŒ‹Í‹ŒŸKÜÚ^™KÚYÈ‹Œ‹ŒŸKĞ›YKÎNÍŸKŠNÂˆWÜ›ÛİO˜YÚ[
+š]˜XŞT]KJNÂˆ]]Êˆš]˜XŞHHXZÙSX™[
+Šœš]˜]KX˜[‹[›İXÙH‹–SÕTˆSˆTÈ’UUH‘U‘PSQÒSˆHTÑHS‘ÈŠKŒY‹ÜÚ^™KÚYÈ‹Œ‹ŒŸKØØÌÊŒMKŒKŠKœÙ[ZX›ÛŠNÂˆš]˜XŞKO›[Z]X™[ÚY
+ŒÍ‹Œ‹ŒY‹ŒM™ŠNÂˆWÜ›ÛİO˜YÚ[
+š]˜XŞK
+NÂˆB‚ˆ›ÚY™[™\”™\\™JX]ÚšY]ÈÛÛœİ	ˆX]Ú
+HÂˆ]]ÈÛÛœİÚ^™HHĞÑ\™XİÜœÚ\™Y\™XİÜŠ
+KO™Ù]Ú[”Ú^™J
+NÂˆ]]ÈÛÛœİİÛHHX]ÚœÚYHOHHÂˆ]]ÈÛÛœİX]X]ÚHX]Ú™X]X]ÚÙ\]Y[˜ÙHˆÂ‚ˆËÈKĞˆØ\™ÈÙY\HØÜ™Y[ˆŞ[[Y]šXÈÚ[HHÙ[™HÛÛ[[ˆ\È™\Ù\™YˆËÈ›ÜˆX]Úİ]KX\[™›Ü›X][Ûˆ[™™\Ûİ\˜ÙH™XY[™\ÜË‚ˆY^Y\Ø\™
+ÎM‹Œ‹Ú^™KšZYÚÈ‹ŒˆH‹ŒŸKX]Úœ^Y\S˜[YKX]Úœ^Y\T›Ùš[KİÛJNÂˆY^Y\Ø\™
+ÜÚ^™KÚYHM‹Œ‹Ú^™KšZYÚÈ‹ŒˆH‹ŒŸKX]Úœ^Y\“˜[YKX]Úœ^Y\”›Ùš[K[İÛJNÂ‚ˆ]]Êˆ]HHXZÙSX™[
+ˆX]X]ÚÈŠ™X][X]Ú‹‘PUPUÒŠHˆ›]™›Ü›X]
+”“ÕS‘ßH‹X]Úœ›İ[™[X™\ŠKˆX]X]ÚÈŒ™ˆˆM™‹ˆÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚHËŒŸKˆØØÌÊKMJKˆ˜›XÚÈ‚ˆ
+NÂˆ]KO›[Z]X™[ÚY
+Ú^™KÚYHNŒ‹X]X]ÚÈŒ™ˆˆM™‹ŒÍŠNÂˆWÜ›ÛİO˜YÚ[
+]KŠNÂ‚ˆ]]È\Ü^QX]X]Ú\ÙYHHX]Ú™X]X]Ú][\Õ\ÙYNÂˆ]]È\Ü^QX]X]Ú\ÙYˆHX]Ú™X]X]Ú][\Õ\ÙYÂˆYˆ
+X]X]Ú
+HÂˆ]]ÈÛÛœİØØ[İÛ•\ÙYH˜[šÙY[[YN™Ù]
+
+K›ØØ[X]X]Úš\İX[][\Õ\ÙY
+
+NÂˆYˆ
+İÛJH\Ü^QX]X]Ú\ÙYHHİ›X^
+\Ü^QX]X]Ú\ÙYKØØ[İÛ•\ÙY
+NÂˆ[ÙH\Ü^QX]X]Ú\ÙYˆHİ›X^
+\Ü^QX]X]Ú\ÙY‹ØØ[İÛ•\ÙY
+NÂ‚ˆ]]ÊˆİXˆHXZÙSX™[
+Š™YKX][\È‹ŒÈUSTÈŠKŒÍ‹ÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚHL‹ŒŸKĞŞX[‹˜›XÚÈŠNÂˆWÜ›ÛİO˜YÚ[
+İX‹ŠNÂˆ]]Êˆ][\Ô]HHXZÙS™[Û”[™[
+ÌLÌ‹Œ‹ŒŸKÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚHÌ‹ŒŸKĞ›YKÎNÎKJNÂˆWÜ›ÛİO˜YÚ[
+][\Ô]KŠNÂˆ]]Êˆ][\ÈHXZÙSX™[
+ˆ›]™›Ü›X]
+HßKÌÈˆßKÌÈ‹\Ü^QX]X]Ú\ÙYK\Ü^QX]X]Ú\ÙYŠKˆŒ™‹ˆÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚHÌ‹ŒŸKˆØØÌÊŒ‹ŒÌ‹JKˆœÙ[ZX›Û‚ˆ
+NÂˆWÜ›ÛİO˜YÚ[
+][\ËŠNÂˆH[ÙHYˆ
+[X]Ú˜˜[›™\‹™[\J
+H	‰ˆX]Ú˜˜[›™\ˆOH““Ó‘HŠHÂˆ]]ÊˆİXˆHXZÙU^]Jˆ\Ü^P˜[›™\ŠX]Ú˜˜[›™\ŠKˆÌLÌ‹Œ‹ŒŸKˆÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚHMËŒŸKˆX]Ú˜˜[›™\ˆOH•QP”‘PRÑTˆˆÈÑÛÛˆÔÚYT™YˆŒŒ‹ˆX]Ú˜˜[›™\ˆOH•QP”‘PRÑTˆˆÈÑÛÛˆÔÚYT™Yˆ™ÛÛ›Û™›‚ˆ
+NÂˆWÜ›ÛİO˜YÚ[
+İX‹ÊNÂˆB‚ˆËÈÙ\šY\ÈØÛÜ™H\È[X™\˜][HÛÛ\Xİˆ]™\™\Ù[È›İ[™Ú[œÈ[ˆBˆËÈ›ÌË™]™\ˆHØÛÜ™HXØİ[][]Y[œÚYHHİ\œ™[X\‚ˆ]]ÈÛÛœİÙ\šY\ÖHHX]X]ÚÈÚ^™KšZYÚHMŒˆˆÚ^™KšZYÚHŒÂˆ]]ÊˆÙ\šY\Ô]HHXZÙS™[Û”[™[
+ÌLM‹Œ‹ËŒŸKÜÚ^™KÚYÈ‹Œ‹Ù\šY\Ö_KĞ›YKÍËMËÍ_KJNÂˆWÜ›ÛİO˜YÚ[
+Ù\šY\Ô]KŠNÂˆ]]ÊˆÙ\šY\ĞØ\[ÛˆHXZÙSX™[
+ŠœÙ\šY\È‹”ÑT’QTÈŠKŒŒÙ‹ÜÚ^™KÚYÈ‹Œ‹Ù\šY\ÖH
+ÈËŒŸKĞŞX[‹œÙ[ZX›ÛŠNÂˆWÜ›ÛİO˜YÚ[
+Ù\šY\ĞØ\[Û‹ŠNÂˆ]]ÊˆÙ\šY\ÔØÛÜ™HHXZÙSX™[
+ˆ›]™›Ü›X]
+ßHˆßH‹X]Úœ›İ[™Ú[œĞKX]Úœ›İ[™Ú[œĞŠKˆŒÌÙ‹ˆÜÚ^™KÚYÈ‹Œ‹Ù\šY\ÖHHKŒŸKˆØØÌÊKMJKˆ˜›XÚÈ‚ˆ
+NÂˆWÜ›ÛİO˜YÚ[
+Ù\šY\ÔØÛÜ™KŠNÂ‚ˆ]]ÈÛÛœİX\HHÚ^™KšZYÚÈ‹Œˆ
+ÈKŒÂˆYˆ
+X]Ú˜İ\œ™[X\
+HÂˆ]]ÊˆÜ›İÛˆHĞÔÜš]N˜Ü™X]UÚ]Üš]Qœ˜[YS˜[YJ‘Ò—ØšYÔİ\—ÌKœ™ÈŠNÂˆYˆ
+Ü›İÛŠHÂˆÜ›İÛ‹OœÙ]ØØ[JŒŠNÂˆÜ›İÛ‹OœÙ]ÛÛÜŠĞŞX[ŠNÂˆÜ›İÛ‹OœÙ]ÜÚ][ÛŠÜÚ^™KÚYÈ‹Œ‹X\H
+ÈÌKŒŸJNÂˆWÜ›ÛİO˜YÚ[
+Ü›İÛ‹
+NÂˆBˆ]]ÊˆX\˜[YHHXZÙSX™[
+ÛÓ[™U]J\\ŠX]Ú˜İ\œ™[X\O]JKMJK‹ÜÚ^™KÚYÈ‹Œ‹X\H
+ÈËŒŸKÛÜ[Nœ˜[šÙYZN•^œÙ[ZX›ÛŠNÂˆX\˜[YKO›[Z]X™[ÚY
+MMŒ‹‹ŒŠNÂˆWÜ›ÛİO˜YÚ[
+X\˜[YKŠNÂ‚ˆ]]ÈÛÛœİY™ÛÛÜˆHY™šXİ[PÛÛÜŠX]Ú˜İ\œ™[X\O™Y™šXİ[JNÂˆ]]ÊˆY™”]HHXZÙS™[Û”[™[
+ÍÍŒ‹Ì‹ŒŸKÜÚ^™KÚYÈ‹Œ‹X\HHËŒŸKY™ÛÛÜ‹ÌL‹MËßKŠNÂˆWÜ›ÛİO˜YÚ[
+Y™”]KŠNÂˆ]]ÊˆY™šXİ[HHXZÙSX™[
+X]Ú˜İ\œ™[X\O™Y™šXİ[K™‹ÜÚ^™KÚYÈ‹Œ‹X\HHËŒŸKY™ÛÛÜ‹˜›XÚÈŠNÂˆY™šXİ[KO›[Z]X™[ÚY
+Œ‹Œ‹™‹ŒYŠNÂˆWÜ›ÛİO˜YÚ[
+Y™šXİ[KŠNÂˆB‚ˆ]]ÊˆØØ[Hš[™^XX›SX\
+
+NÂˆ]]ÈÛÛœİX\™XYHHØØ[OH[Âˆ]]ÈÛÛœİÛÛ™Ô™XYHHX\™XYH	‰ˆ\ÔÛÛ™Ô™XYJØØ[
+NÂˆ]]Éˆ[[YHH˜[šÙY[[YN™Ù]
+
+NÂˆ]]ÈÛÛœİÛX\”Ş[˜Ô[™[™ÈBˆYX]X]Ú	‰‚ˆ[[YK›ØØ[\Ü^PÛX\œÊ
+HHÈ	‰‚ˆ[[YKš\ÓØØ[][\[‘›YÚ
+
+NÂˆ]]Êˆ[™›Ô]HHXZÙS™[Û”[™[
+ÌMMŒ‹LNŒŸKÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚÈ‹ŒˆHÍ‹ŒŸKĞ›YKÑY\[™[‹Œ
+NÂˆWÜ›ÛİO˜YÚ[
+[™›Ô]KJNÂ‚ˆ]]ÈÛÛœİX\ÜÈHĞÔÚ[ÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚÈ‹ŒˆHMŒŸNÂˆ]]ÈÛÛœİÛÛ™ÔÜÈHĞÔÚ[ÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚÈ‹ŒˆH‹ŒŸNÂˆYˆ
+ÛX\”Ş[˜Ô[™[™ÊHÂˆ]]Êˆ]HHXZÙU^]JŒHˆ
+ÈŠ˜ÛX\‹\™XÛÜ™Y‹ÓPTˆ‘PÓÔ‘QŠKÌLM‹Œ‹ŒËŒŸKX\ÜËÑÜ™Y[‹Œ‹ÑÜ™Y[‹œÙ[ZX›ÛŠNÂˆWÜ›ÛİO˜YÚ[
+]KÊNÂˆH[ÙHYˆ
+X\™XYJHÂˆ]]Êˆ]HHXZÙU^]JŒHˆ
+ÈŠ›X\\™XYH‹“PT‘PQHŠKÌLM‹Œ‹ŒËŒŸKX\ÜËÑÜ™Y[‹ŒY‹ÑÜ™Y[‹œÙ[ZX›ÛŠNÂˆWÜ›ÛİO˜YÚ[
+]KÊNÂˆH[ÙHÂˆ]]Êˆ]HHXZÙU^]JŒHˆ
+ÈŠ›X\[ØY[™È‹“PTĞQS‘ÈŠKÌLM‹Œ‹ŒËŒŸKX\ÜËĞŞX[‹ŒY‹ØØÌÊŒÍK‹MJKœÙ[ZX›ÛŠNÂˆWÜ›ÛİO˜YÚ[
+]KÊNÂˆB‚ˆYˆ
+ÛX\”Ş[˜Ô[™[™ÊHÂˆ]]Êˆ]HHXZÙU^]JŒˆˆ
+ÈŠœ™\İ[\Ş[˜È‹”‘TÕSÖSÈŠKÌLM‹Œ‹ŒËŒŸKÛÛ™ÔÜËĞŞX[‹Œ‹ØØÌÊŒNŒ
+KœÙ[ZX›ÛŠNÂˆWÜ›ÛİO˜YÚ[
+]KÊNÂˆH[ÙHYˆ
+[X\™XYJHÂˆ]]Êˆ]HHXZÙU^]JŒˆˆ
+ÈŠØZ][™È‹•ĞRUS‘ÈŠKÌLM‹Œ‹ŒËŒŸKÛÛ™ÔÜËĞ›YKŒY‹ØØÌÊŒNŒ
+KœÙ[ZX›ÛŠNÂˆWÜ›ÛİO˜YÚ[
+]KÊNÂˆH[ÙHYˆ
+ÛÛ™Ô™XYJHÂˆ]]Êˆ]HHXZÙU^]JŒˆˆ
+ÈŠ˜]Y[Ë\™XYH‹UQSÈ‘PQHŠKÌLM‹Œ‹ŒËŒŸKÛÛ™ÔÜËÑÜ™Y[‹ŒY‹ÑÜ™Y[‹œÙ[ZX›ÛŠNÂˆWÜ›ÛİO˜YÚ[
+]KÊNÂˆH[ÙHYˆ
+˜[šÙY[[YN™Ù]
+
+KœÛÛ™Ğ\\ÜĞ[İÙY
+
+JHÂˆ]]Êˆ]HHXZÙU^]JŒˆˆ
+ÈŠœİ\[]]Y‹”ÕT•UUQŠKÌLM‹Œ‹ŒËŒŸKÛÛ™ÔÜËÑÛÛŒ‹ÑÛÛœÙ[ZX›ÛŠNÂˆWÜ›ÛİO˜YÚ[
+]KÊNÂˆH[ÙHÂˆËÈH™X[ÛXÚÈ\™Ù]™[XZ[œÈH˜[š[HÛÛ™È]ÛˆÛˆH]™[ˆËÈ[™›ÈYÙKˆ\È]ÛˆÛ›HÜ[œÈ]Ø]YYÙK‚ˆY]ÛŠŠ™İÛ›ØY\ÛÛ™È‹‘ÕÓ“ĞQÓÓ‘ÈŠKÛÛ™ÔÜËY[WÜÙ[XİÜŠÛÜ[T˜[šÙY^Y\›Û‘İÛ›ØYÛÛ™ÊK˜[ÙKŠNÂˆB‚ˆ]]ÈÛÛœİØYİYÙVHHÚ^™KšZYÚÈ‹ŒˆH‹ŒÂˆWÜ™\\™SØYİYÙSX™[HXZÙSX™[
+ˆ™\\˜][Û”İYÙU^
+
+KˆŒN‹ˆÜÚ^™KÚYÈ‹Œ‹ØYİYÙV_KˆWÛ]™[ÛÚİ\\œ›Ü‹™[\J
+HÈĞŞX[ˆˆÑÛÛˆœÙ[ZX›Û‚ˆ
+NÂˆWÜ™\\™SØYİYÙSX™[O›[Z]X™[ÚY
+LÎŒ‹ŒN‹ŒL™ŠNÂˆWÜ›ÛİO˜YÚ[
+WÜ™\\™SØYİYÙSX™[ŠNÂ‚ˆÛÛœİ^ˆ›Ø]™\\™P˜\•ÚYHLL‹ŒÂˆ]]Êˆ™\\™P˜\˜XÚÈHĞÓ^Y\ÛÛÜ˜Ü™X]JÍKL‹K_JNÂˆ™\\™P˜\˜XÚËOœÙ]ÛÛ[Ú^™JÜ™\\™P˜\•ÚYŒŸJNÂˆ™\\™P˜\˜XÚËOœÙ]ÜÚ][ÛŠÜÚ^™KÚYÈ‹ŒˆHŒ‹Ú^™KšZYÚÈ‹ŒˆHKŒŸJNÂˆWÜ›ÛİO˜YÚ[
+™\\™P˜\˜XÚË
+NÂˆWÜ™\\™SØYš[HĞÓ^Y\ÛÛÜ˜Ü™X]JÚĞŞX[‹œ‹ĞŞX[‹™ËĞŞX[‹˜‹_JNÂˆWÜ™\\™SØYš[OœÙ]ÛÛ[Ú^™JÜ™\\™P˜\•ÚY
+ˆWÜ™\\™SØYš\İX[ŒŸJNÂˆWÜ™\\™SØYš[OœÙ]ÜÚ][ÛŠ™\\™P˜\˜XÚËO™Ù]ÜÚ][ÛŠ
+JNÂˆWÜ™\\™SØYÚYH™\\™P˜\•ÚYÂˆWÜ›ÛİO˜YÚ[
+WÜ™\\™SØYš[JNÂˆWÜ™\\™SØY\˜Ù[X™[HXZÙSX™[
+ˆ›]™›Ü›X]
+ßIH‹İ]X×ØØ\İ[Šİœ›İ[™
+WÜ™\\™SØYš\İX[
+ˆLŒŠJJKˆŒŒ‹ˆÜÚ^™KÚYÈ‹Œˆ
+ÈŒKŒ‹Ú^™KšZYÚÈ‹ŒˆHKŒŸKˆØØÌÊŒÍK‹MJKˆ˜›XÚÈ‚ˆ
+NÂˆWÜ›ÛİO˜YÚ[
+WÜ™\\™SØY\˜Ù[X™[ŠNÂ‚ˆ]]ÈÛÛœİÙXÛÛ™ÈHİ›X^
+LHİ]X×ØØ\İ[Šİ™›ÛÜŠ\ÙTÙXÛÛ™Ê
+JJJNÂˆİœİš[™È›Ûİ\ˆH›]™›Ü›X]
+ßHÎŒ™H‹Šœİ\ËZ[ˆ‹”ÕT•ÈSˆŠKÙXÛÛ™ÊNÂˆØĞÛÛÜŒĞˆ›Ûİ\XØÙ[HÙXÛÛ™ÈHÈÈÔÚYT™YˆĞ›YNÂˆYˆ
+ÛX\”Ş[˜Ô[™[™ÊHÂˆ›Ûİ\ˆHŠœŞ[˜Ú[™ËXÛX\ˆ‹”ÖSÒS‘ÈÓPT‹‹‹ˆŠNÂˆ›Ûİ\XØÙ[HĞŞX[ÂˆH[ÙHYˆ
+X]Úœİ]HOH‘PUPUÒÔVRS‘ÈŠHÂˆ]]ÈÛÛœİİÛ•\ÙYHİÛHÈ\Ü^QX]X]Ú\ÙYHˆ\Ü^QX]X]Ú\ÙYÂˆ]]ÈÛÛœİÜÛ™[\ÙYHİÛHÈ\Ü^QX]X]Ú\ÙYˆˆ\Ü^QX]X]Ú\ÙYNÂˆ›Ûİ\ˆHİÛ•\ÙYHÂˆÈ›]™›Ü›X]
+ßHßKÌÈ‹ŠØZ][™Ë[ÜÛ™[‹•ĞRUS‘È“ÔˆÔÓ‘S•ŠKÜÛ™[\ÙY
+BˆˆÛÜ[Nœ˜[šÙYšLN˜][\Ù•™YJİ›Z[ŠËİÛ•\ÙY
+ÈJJNÂˆ›Ûİ\XØÙ[HİÛ•\ÙYHÈÈĞ›YHˆÑÛÛÂˆH[ÙHYˆ
+\ÙTÙXÛÛ™Ê
+HHLŒ
+HÂˆ]]ÈÛÛœİİÛ”™XYHHİÛHÈX]Úœ™XYPHˆX]Úœ™XYPÂˆ]]ÈÛÛœİÜÛ™[™XYHHİÛHÈX]Úœ™XYPˆˆX]Úœ™XYPNÂˆYˆ
+[İÛ”™XYJH›Ûİ\ˆHŠØZ][™ËYİÛ›ØY‹•ĞRUS‘È“ÔˆSÕTˆÕÓ“ĞQŠNÂˆ[ÙHYˆ
+[ÜÛ™[™XYJH›Ûİ\ˆHÛÜ[Nœ˜[šÙYšLNØZ][™Ñ›Ü”^Y\Š\\ŠÚÜ[ŠX]Ú›ÜÛ™[˜[YKLÊJJNÂˆ[ÙH›Ûİ\ˆHŠœİ\[™È‹”ÕT•S‘Ë‹‹ˆŠNÂˆ›Ûİ\XØÙ[HÑÛÛÂˆBˆ]]Êˆ›Ûİ\”]HHXZÙU^]Jˆ›Ûİ\‹ˆÌMÌŒ‹ŒŸKˆÜÚ^™KÚYÈ‹Œ‹ËŒŸKˆ›Ûİ\XØÙ[ˆŒÌY‹ˆØØÌÊKMJKˆ˜›XÚÈ‹ˆ	›WÜ™\\™Q›Ûİ\“X™[ˆ
+NÂˆWÜ›ÛİO˜YÚ[
+›Ûİ\”]KÊNÂˆB‚ˆ›ÚY™[™\”ÜXİ]Ü•ØZ]
+X]ÚšY]ÈÛÛœİ	ˆX]Ú
+HÂˆ]]ÈÛÛœİÚ^™HHĞÑ\™XİÜœÚ\™Y\™XİÜŠ
+KO™Ù]Ú[”Ú^™J
+NÂˆ]]ÈÛÛœİİÛHHX]ÚœÚYHOHHÂˆ]]ÈÛÛœİİÛ”ØÛÜ™HHİÛHÈX]ÚœØÛÜ™PHˆX]ÚœØÛÜ™PÂˆ]]ÈÛÛœİÜÛ™[ØÛÜ™HHİÛHÈX]ÚœØÛÜ™PˆˆX]ÚœØÛÜ™PNÂˆ]]ÈÛÛœİÜÛ™[][\Xİ]™HHX]ÚœÜXİ]Üİ\œ™[›ÙÜ™\ÜËš\×İ˜[YJ
+NÂˆ]]ÈÛÛœİ›ÙÜ™\ÜÈHX]ÚœÜXİ]Üİ\œ™[›ÙÜ™\ÜË˜[YWÛÜŠ
+NÂˆ]]ÈÛÛœİÜÛ™[HX]ÚœÜXİ]Ü“ÜÛ™[˜[YK™[\J
+BˆÈX]Ú›ÜÛ™[˜[YBˆˆX]ÚœÜXİ]Ü“ÜÛ™[˜[YNÂ‚ˆ]]Êˆ]HHXZÙSX™[
+Š˜][\Yš[š\ÚY‹–SÕTˆUSTTÈ’S’TÒQŠK‹ÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚHÍŒŸKÑÛÛ™ÛÛ›Û™›ŠNÂˆ]KO›[Z]X™[ÚY
+Ú^™KÚYHÌŒ‹‹ŒÌŠNÂˆWÜ›ÛİO˜YÚ[
+]KJNÂˆ]]ÊˆİX]HHXZÙSX™[
+ŠØZ][™Ë[ÜÛ™[‹•ĞRUS‘È“ÔˆÔÓ‘S•ŠKŒ‹ÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚHNKŒŸKĞŞX[ŠNÂˆWÜ›ÛİO˜YÚ[
+İX]KJNÂ‚ˆ]]Êˆ[™[HXZÙS™[Û”[™[
+Ì‹Œ‹M‹ŒŸKÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚÈ‹ŒˆHŒŸKĞ›YKÑY\[™[ŒÎ
+NÂˆWÜ›ÛİO˜YÚ[
+[™[JNÂ‚ˆ]]Êˆ˜[YHHXZÙSX™[
+\\ŠÚÜ[ŠÜÛ™[N
+JKŒÌ™‹ÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚÈ‹Œˆ
+ÈÎŒŸJNÂˆ˜[YKO›[Z]X™[ÚY
+ŒKŒ‹ŒÌ™‹ŒŒYŠNÂˆWÜ›ÛİO˜YÚ[
+˜[YKJNÂˆ]]Êˆ]™HHXZÙSX™[
+ˆÜÛ™[][\Xİ]™BˆÈŠ›]™K\›ÙÜ™\ÜÈ‹“U‘H“ÑÔ‘TÔÈŠBˆˆŠØZ][™Ë\İ\‹•ĞRUS‘ÈÈÕT•ŠKˆŒŒ‹ˆÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚÈ‹Œˆ
+ÈMKŒŸKˆĞŞX[‹ˆœÙ[ZX›Û‚ˆ
+NÂˆWÜÜXİ]Ü”İ]SX™[H]™NÂˆWÜ›ÛİO˜YÚ[
+]™KJNÂˆ]]ÊˆİHXZÙSX™[
+ˆÜÛ™[][\Xİ]™HÈ›]™›Ü›X]
+ßIH‹›ÙÜ™\ÜÊHˆ‹KH‹ˆÍ‹ˆÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚÈ‹ŒˆHMKŒŸKˆÑÛÛˆ™ÛÛ›Û™›‚ˆ
+NÂˆWÜÜXİ]Ü”›ÙÜ™\ÜÓX™[HİÂˆWÜ›ÛİO˜YÚ[
+İJNÂˆ]]ÊˆØÛÜ™HHXZÙSX™[
+ˆØÛÜ™PÛÛ\\š\ÛÛŠİÛ”ØÛÜ™KÜÛ™[ØÛÜ™JKˆŒŒ™‹ˆÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚÈ‹ŒˆHLËŒŸKˆØØÌÊŒNŒ
+KˆœÙ[ZX›Û‚ˆ
+NÂˆWÜÜXİ]Ü”ØÛÜ™SX™[HØÛÜ™NÂˆØÛÜ™KO›[Z]X™[ÚY
+ŒKŒ‹ŒŒ™‹ŒM™ŠNÂˆWÜ›ÛİO˜YÚ[
+ØÛÜ™KJNÂ‚ˆİœİš[™È[^HŠœ›İ[™\™\ÛÛ™KZ[‹•H“ÕS‘ÒS‘TÓÓ‘HÒSˆHPÕU‘HUSTS‘ÈŠNÂˆYˆ
+[ÜÛ™[][\Xİ]™H	‰ˆX]Úœİ]HOH“TÕĞUSTÕÒS‘ÕÈŠHÂˆ]]ÈÛÛœİÙXÛÛ™ÈHİ›X^İš[İŠ˜[šÙY[[YN™Ù]
+
+K™XY[™TÙXÛÛ™Ê
+K˜[YWÛÜŠ
+JNÂˆ[^HÛÜ[Nœ˜[šÙYšLNš\ÒÛÜ™X[Š
+BˆÈ›]™›Ü›X]
+ßHß{-"‹Š›\İX][\Z[‹“ÔÓ‘S•TÈÈÕT•HTÕUSTŠKÙXÛÛ™ÊBˆˆ›]™›Ü›X]
+“ÔÓ‘S•TÈß\ÈÈÕT•HTÕUST‹ÙXÛÛ™ÊNÂˆBˆ]]Êˆ[HXZÙSX™[
+[^Œ‹ÜÚ^™KÚYÈ‹Œ‹ŒŸKØØÌÊNMKŒKŒ
+KœÙ[ZX›ÛŠNÂˆWÜÜXİ]Ü’[X™[H[Âˆ[O›[Z]X™[ÚY
+Ú^™KÚYHŒ‹Œ‹ŒM™ŠNÂˆWÜ›ÛİO˜YÚ[
+[JNÂˆB‚ˆ›ÚY™[™\’[\”›İ[™
+X]ÚšY]ÈÛÛœİ	ˆX]Ú
+HÂˆ]]ÈÛÛœİÚ^™HHĞÑ\™XİÜœÚ\™Y\™XİÜŠ
+KO™Ù]Ú[”Ú^™J
+NÂˆ]]Êˆ]HHXZÙSX™[
+ˆX]Úœİ]HOH‘PUPUÒÔ‘TÕSˆÈ‘PUPUÒ‘TÕSˆˆ”“ÕS‘‘TÕS‹ˆŒ™‹ˆÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚÈ‹Œˆ
+ÈNŒŸKˆØØÌÊKMJKˆ™ÛÛ›Û™›‚ˆ
+NÂˆ]KO›[Z]X™[ÚY
+Ú^™KÚYHLŒ‹Œ™‹ŒÍŠNÂˆWÜ›ÛİO˜YÚ[
+]KJNÂ‚ˆ]]ÊˆÙ\šY\ÈHXZÙS™[Û”[™[
+ÌMLŒ‹NŒŸKÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚÈ‹ŒˆHKŒŸKĞ›YKÍËMËÍŸK
+NÂˆWÜ›ÛİO˜YÚ[
+Ù\šY\ËŠNÂˆ]]ÊˆØ\[ÛˆHXZÙSX™[
+ŠœÙ\šY\Ë\ØÛÜ™H‹”ÑT’QTÈĞÓÔ‘HŠKŒŒ‹ÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚÈ‹Œˆ
+ÈMŒŸKĞŞX[‹œÙ[ZX›ÛŠNÂˆWÜ›ÛİO˜YÚ[
+Ø\[Û‹JNÂˆ]]ÊˆØÛÜ™HHXZÙSX™[
+›]™›Ü›X]
+ßHˆßH‹X]Úœ›İ[™Ú[œĞKX]Úœ›İ[™Ú[œĞŠKY‹ÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚÈ‹ŒˆHLŒŸKØØÌÊKMJK™ÛÛ›Û™›ŠNÂˆWÜ›ÛİO˜YÚ[
+ØÛÜ™KJNÂ‚ˆ]]Êˆ™^HXZÙU^]JŠ›™^[X\\™\\š[™È‹“‘VPT‘TT’S‘Ë‹‹ˆŠKÌM‹Œ‹ÌŒŸKÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚÈ‹ŒˆHNŒŸKĞŞX[‹ŒŒY‹ØØÌÊŒKŒÍK
+KœÙ[ZX›ÛŠNÂˆWÜ›ÛİO˜YÚ[
+™^ÊNÂˆB‚ˆ›ÚYYÛX\ÚXÚÜÊ[ÛX\œËĞÔÚ[˜\ÙK›ÛÛšYÚ[YÛ™YH˜[ÙJHÂˆ]]ÈÛÛœİÛİ[Hİ˜Û[\
+ÛX\œËÊNÂˆ›Üˆ
+[HHÈHÛİ[È
+ÊÚJHÂˆ]]ÊˆÚXÚÈHĞÔÜš]N˜Ü™X]UÚ]Üš]Qœ˜[YS˜[YJ‘Ò—ØÚXÚÓÛ—ÌKœ™ÈŠNÂˆÚXÚËOœÙ]ØØ[JŒ™ŠNÂˆÚXÚËOœÙ]ÛÛÜŠÑÜ™Y[ŠNÂˆÚXÚËOœÙ]ÜÚ][ÛŠØ˜\ÙK
+È
+šYÚ[YÛ™YÈLKŒˆˆKŒŠH
+ˆH
+ˆLËŒ‹˜\ÙK_JNÂˆWÜ›ÛİO˜YÚ[
+ÚXÚËJNÂˆBˆB‚ˆ›ÚY[š[X]T˜[šÙYØÛÜ™PÚ[™ÙJˆ›Ø]Ù[\–ˆ›Ø]š[˜[Kˆİ›Ü[Û˜[[ˆ[KˆĞÓX™[“Q›Û
+ˆš[˜[ØÛÜ™Kˆ˜[šÙY›Ùš[UšY]ÈÛÛœİ	ˆ™Y›Ü™Bˆ
+HÂˆYˆ
+Y[HYš[˜[ØÛÜ™HX™Y›Ü™Kš\ÚX›T˜[šÙYØÛÜ™JH™]\›Â‚ˆËÈÚİÈH]]Üš]]]™H™K[X]Úš\œİˆH[Hš\Ù\Èœ›ÛH™[İËˆËÈİ™\›\È][™HÜİ[X]Ú˜[YH˜Y\È[ˆ]HØ[YHÜÚ][Û‹‚ˆ]]Êˆ™]š[İ\ÔØÛÜ™HHXZÙSX™[
+ˆ›]™›Ü›X]
+ßHHßH‹\\Š™Y›Ü™K™\Ü^YYY\ŠK
+˜™Y›Ü™Kš\ÚX›T˜[šÙYØÛÜ™JKˆŒÙ‹ˆØÙ[\–š[˜[_KˆØØÌÊL
+Kˆ™ÛÛ›Û™›‚ˆ
+NÂˆ™]š[İ\ÔØÛÜ™KO›[Z]X™[ÚY
+LNŒ‹ŒÙ‹ŒM™ŠNÂˆWÜ›ÛİO˜YÚ[
+™]š[İ\ÔØÛÜ™KJNÂˆ™]š[İ\ÔØÛÜ™KOœ[Xİ[ÛŠĞÔÙ\]Y[˜ÙN˜Ü™X]JˆĞÑ[^U[YN˜Ü™X]JM™ŠKˆĞÑ˜YSİ]˜Ü™X]JŒŒ™ŠKˆ[‚ˆ
+JNÂˆš[˜[ØÛÜ™KOœÙ]ÜXÚ]J
+NÂˆš[˜[ØÛÜ™KOœ[Xİ[ÛŠĞÔÙ\]Y[˜ÙN˜Ü™X]JˆĞÑ[^U[YN˜Ü™X]JÌ™ŠKˆĞÑ˜YR[˜Ü™X]JŒŠKˆ[‚ˆ
+JNÂ‚ˆ]]Êˆ[SX™[HXZÙSX™[
+ˆ›]™›Ü›X]
+ÎŠÙH‹
+™[JKˆŒ‹ˆØÙ[\–NŒŸKˆ
+™[HHÈÑÜ™Y[ˆˆÔ™Yˆ™ÛÛ›Û™›‚ˆ
+NÂˆ[SX™[OœÙ]ÜXÚ]J
+NÂˆWÜ›ÛİO˜YÚ[
+[SX™[JNÂˆ[SX™[Oœ[Xİ[ÛŠĞÔÙ\]Y[˜ÙN˜Ü™X]JˆĞÑ˜YR[˜Ü™X]JŒM™ŠKˆĞÑX\ÙTÚ[™Sİ]˜Ü™X]JĞÓ[İ™UÎ˜Ü™X]JM™‹ØÙ[\–š[˜[_JJKˆĞÑ˜YSİ]˜Ü™X]JŒŠKˆ[‚ˆ
+JNÂˆB‚ˆ›ÚY[š[X]T›Û[İ[Û•šYÙÙ\Šˆ›Ø]Ù[\–ˆ›Ø]š[˜[KˆÛÜ[Nœ˜[šÙY”˜][™Ñ]™[šY]ÈÛÛœİ	ˆ]™[ˆ˜[šÙY›Ùš[UšY]ÈÛÛœİ	ˆ™Y›Ü™Kˆİ›Ü[Û˜[[ˆ[Bˆ
+HÂˆYˆ
+Y]™[œ›Û[İ[Û”İ\YX™Y›Ü™Kš\ÚX›T˜[šÙYØÛÜ™JH™]\›Â‚ˆËÈH›Û[İ[ÛˆX\šÜÈ\™HHš[˜[İ]K]ÙY\[HÛİ™\™YÚ[BˆËÈH™]š[İ\È[™]ÈØZ[ˆ\™›Ü›HHØ[YHİ™\›\˜[œÚ][Ûˆ\ÈBˆËÈ›Ü›X[˜][™È\]Kˆ˜Y[™ÈHÛİ™\ˆ™]™X[ÈKKKKX˜]\˜[K‚ˆ]]ÊˆX\šÜĞÛİ™\ˆHĞÓ^Y\ÛÛÜ˜Ü™X]JÍËNM_JNÂˆX\šÜĞÛİ™\‹OœÙ]ÛÛ[Ú^™JÌLŒ‹MËŒŸJNÂˆX\šÜĞÛİ™\‹OœÙ]ÜÚ][ÛŠØÙ[\–HŒ‹Œ‹š[˜[HHYŸJNÂˆWÜ›ÛİO˜YÚ[
+X\šÜĞÛİ™\‹JNÂˆX\šÜĞÛİ™\‹Oœ[Xİ[ÛŠĞÔÙ\]Y[˜ÙN˜Ü™X]JˆĞÑ[^U[YN˜Ü™X]JM™ŠKˆĞÑ˜YSİ]˜Ü™X]JŒŠKˆ[‚ˆ
+JNÂ‚ˆ]]Êˆš[ÜˆHXZÙSX™[
+ˆ›]™›Ü›X]
+ßHHßH‹\\Š™Y›Ü™K™\Ü^YYY\ŠK
+˜™Y›Ü™Kš\ÚX›T˜[šÙYØÛÜ™JKˆŒÙ‹ˆØÙ[\–š[˜[_KˆØØÌÊL
+Kˆ™ÛÛ›Û™›‚ˆ
+NÂˆš[Ü‹O›[Z]X™[ÚY
+LNŒ‹ŒÙ‹ŒM™ŠNÂˆWÜ›ÛİO˜YÚ[
+š[Ü‹L
+NÂˆš[Ü‹Oœ[Xİ[ÛŠĞÔÙ\]Y[˜ÙN˜Ü™X]JˆĞÑ[^U[YN˜Ü™X]JM™ŠKˆĞÑ˜YSİ]˜Ü™X]JŒŒ™ŠKˆ[‚ˆ
+JNÂ‚ˆYˆ
+[JHÂˆ]]Êˆ[SX™[HXZÙSX™[
+ˆ›]™›Ü›X]
+ÎŠÙH‹
+™[JKˆŒ‹ˆØÙ[\–NŒŸKˆ
+™[HHÈÑÜ™Y[ˆˆÔ™Yˆ™ÛÛ›Û™›‚ˆ
+NÂˆ[SX™[OœÙ]ÜXÚ]J
+NÂˆWÜ›ÛİO˜YÚ[
+[SX™[LJNÂˆ[SX™[Oœ[Xİ[ÛŠĞÔÙ\]Y[˜ÙN˜Ü™X]JˆĞÑ˜YR[˜Ü™X]JŒM™ŠKˆĞÑX\ÙTÚ[™Sİ]˜Ü™X]JĞÓ[İ™UÎ˜Ü™X]JM™‹ØÙ[\–š[˜[_JJKˆĞÑ˜YSİ]˜Ü™X]JŒŠKˆ[‚ˆ
+JNÂˆBˆB‚ˆ›ÛÛ^T™\İ[˜[šÕ˜[œÚ][ÛŠˆÛÜ[Nœ˜[šÙY”˜][™Ñ]™[šY]ÈÛÛœİ	ˆ]™[ˆ˜[šÙY›Ùš[UšY]ÈÛÛœİ	ˆ™Y›Ü™Kˆ˜[šÙY›Ùš[UšY]ÈÛÛœİ	ˆY\‚ˆ
+HÂˆ]]ÈÛÛœİ˜[œÚ][ÛˆH]]Üš]]]™U˜[œÚ][Û•\J]™[™Y›Ü™KY\ŠNÂˆYˆ
+]˜[œÚ][ÛˆWÜ˜[šÕ˜[œÚ][Û“^Y\ŠH™]\›ˆ˜[ÙNÂ‚ˆ]]Êˆ˜[œÚ][Û“^Y\ˆH˜[šÕ˜[œÚ][Û“^Y\˜Ü™X]Jˆ™Y›Ü™K™\Ü^YYY\‹ˆY\‹™\Ü^YYY\‹ˆ
+˜[œÚ][Û‹ˆ˜][™Ñ]™[^
+]™[
+K™š\œİˆŠ\]Ë\ÚÚ\‹•TÈÒÒTŠKˆŠ˜ÛÛ[YH‹ÓÓ•S•QHŠKˆİ\×HÂˆWÜ˜[šÕ˜[œÚ][Û“^Y\ˆH[ÂˆÙ]Ù^\Y[˜X›Y
+YJNÂˆYˆ
+WÛY[JHWÛY[KOœÙ]İXÚ[˜X›Y
+YJNÂˆBˆ
+NÂˆYˆ
+]˜[œÚ][Û“^Y\ŠH™]\›ˆ˜[ÙNÂ‚ˆWÜ˜[šÕ˜[œÚ][Û“^Y\ˆH˜[œÚ][Û“^Y\ÂˆYˆ
+WÛY[JHÂˆYˆ
+WÛY[KO›WÜÙ[XİY][JHWÛY[KO›WÜÙ[XİY][HH[ÂˆWÛY[KOœÙ]İXÚ[˜X›Y
+˜[ÙJNÂˆBˆÙ]Ù^\Y[˜X›Y
+˜[ÙJNÂˆYÚ[
+˜[œÚ][Û“^Y\‹L
+NÂˆ™]\›ˆYNÂˆB‚ˆ›ÚY™[™\”™\İ[
+[[YUšY]ÈÛÛœİ	ˆšY]ÊHÂˆ]]ÈÛÛœİ	ˆX]ÚHšY]Ë›X]ÚÂˆ]]ÈÛÛœİÚ^™HHĞÑ\™XİÜœÚ\™Y\™XİÜŠ
+KO™Ù]Ú[”Ú^™J
+NÂˆ]]ÊˆÛÜÙHHĞÔÜš]N˜Ü™X]UÚ]Üš]Qœ˜[YS˜[YJ‘Ò—ØÛÜÙP—ÌKœ™ÈŠNÂˆÛÜÙKOœÙ]ØØ[JŒŠNÂˆ]]ÊˆÛÜÙP]ÛˆHĞÓY[R][TÜš]Q^˜N˜Ü™X]JÛÜÙK\ËY[WÜÙ[XİÜŠÛÜ[T˜[šÙY^Y\›Û”™\İ[ÛÜÙJJNÂˆÛÜÙP]Û‹OœÙ]ÜÚ][ÛŠÌŒ‹Ú^™KšZYÚHŒŸJNÂˆWÛY[KO˜YÚ[
+ÛÜÙP]ÛŠNÂ‚ˆYˆ
+X]Úœİ]HOHĞSÑSQŠHÂˆ]]Êˆ]HHXZÙSX™[
+Š›X]ÚXØ[˜Ù[Y‹“PUÒĞSÑSQŠKÌ‹ÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚÈ‹Œˆ
+ÈNŒŸKÔ™Y™ÛÛ›Û™›ŠNÂˆWÜ›ÛİO˜YÚ[
+]KÊNÂˆ]]Êˆ™X\ÛÛˆHXZÙSX™[
+ˆX]Ú˜Ø[˜Ù[][Û”™X\ÛÛ‹™[\J
+BˆÈŠš[˜[Y[›Ë\˜][™È‹“PUÒS•SQH“ÈUS‘ÈÒS‘ÑTÈŠBˆˆX]Ú˜Ø[˜Ù[][Û”™X\ÛÛ‹ˆŒ‹ˆÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚÈ‹Œˆ
+ÈL‹ŒŸKˆØØÌÊŒŒŒŒŒJBˆ
+NÂˆ™X\ÛÛ‹O›[Z]X™[ÚY
+Ú^™KÚYHLŒ‹Œ‹ŒNŠNÂˆWÜ›ÛİO˜YÚ[
+™X\ÛÛ‹ÊNÂˆY]ÛŠŠœ]Y]YKXYØZ[ˆ‹”UQUQHQĞRSˆŠKÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚÈ‹ŒˆHMKŒŸKY[WÜÙ[XİÜŠÛÜ[T˜[šÙY^Y\›Û”]Y]YPYØZ[ŠK˜[ÙK™ŠNÂˆ™]\›ÂˆB‚ˆ]]ÈÛÛœİİÛHHX]ÚœÚYHOHHÂˆ^Y\Ø\™™YœÈØ\™NÂˆ^Y\Ø\™™YœÈØ\™Âˆ]]ÈÛÛœİØ\™HHÚ^™KšZYÚÈ‹ŒˆHKŒÂˆ]]ÈÛÛœİY\™™XİHX]Úœ\™™XİÚ[”ÚYHOHHÂˆ]]ÈÛÛœİšYÚ\™™XİHX]Úœ\™™XİÚ[”ÚYHOHˆÂˆY^Y\Ø\™
+ÌLŒ‹Ø\™_KX]Úœ^Y\S˜[YKX]Úœ›Ùš[PY\KİÛK	˜Ø\™KYJNÂˆY^Y\Ø\™
+ÜÚ^™KÚYHLŒ‹Ø\™_KX]Úœ^Y\“˜[YKX]Úœ›Ùš[PY\‹[İÛK	˜Ø\™‹YJNÂˆYˆ
+Y\™™Xİ
+HY›Û[İ[Û]\˜JÌLŒ‹Ø\™_KÌMLŒ‹NŒŸKYJNÂˆYˆ
+šYÚ\™™Xİ
+HY›Û[İ[Û]\˜JÜÚ^™KÚYHLŒ‹Ø\™_KÌMLŒ‹NŒŸKYJNÂ‚ˆ]]ÈÛÛœİ\™™XİHY\™™XİšYÚ\™™XİÂˆ]]ÈÛÛœİİ[[X\T›İÜÈHİ›X^İœÚ^™WİŠKX]Úœ›İ[™ËœÚ^™J
+H
+ÈX]Ú™X]X]Ú\ËœÚ^™J
+JNÂˆ]]ÈÛÛœİİ[[X\UÜHÚ^™KšZYÚH
+\™™XİÈ‹ŒˆˆL‹ŒŠNÂˆ]]ÈÛÛœİİ[[X\RZYÚHİ˜Û[\
+ÍŒˆ
+Èİ]X×ØØ\İ›Ø]Šİ[[X\T›İÜÊH
+ˆËŒ‹Ì‹Œ‹MÌŒŠNÂˆ]]ÈÛÛœİİ[[X\P›İÛHHİ›X^
+L‹Œ‹İ[[X\UÜHİ[[X\RZYÚ
+NÂˆ]]Êˆİ[[X\T[™[HXZÙS™[Û”[™[
+ˆÌMŒ‹İ[[X\UÜHİ[[X\P›İÛ_KˆÜÚ^™KÚYÈ‹Œ‹
+İ[[X\UÜ
+Èİ[[X\P›İÛJHÈ‹ŒŸKˆ\™™XİÈÑÛÛˆĞ›YKˆÑY\[™[ˆŒMˆ
+NÂˆWÜ›ÛİO˜YÚ[
+İ[[X\T[™[JNÂ‚ˆ]]Êˆ]HHXZÙSX™[
+ˆ\™™XİÈ”T‘‘PÕÒSˆˆˆŠ›X]ÚXÛÛ\]H‹“PUÒÓÓTUHŠKˆ\™™XİÈŒˆˆL™‹ˆÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚHŒŸKˆ\™™XİÈÑÛÛˆÛÜ[Nœ˜[šÙYZN•^ˆ˜›XÚÈ‚ˆ
+NÂˆWÜ›ÛİO˜YÚ[
+]K
+NÂˆYˆ
+\™™Xİ
+HÂˆ]]Êˆ\™™Xİ[HXZÙSX™[
+ˆŠ›X^[][K\˜][™Ë\™]Ø\™‹“PVSUSHUS‘È‘UĞT‘ŠKˆŒY‹ˆÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚHKŒŸKˆÑÛÛˆ˜›XÚÈ‚ˆ
+NÂˆWÜ›ÛİO˜YÚ[
+\™™Xİ[JNÂˆBˆ]]ÊˆYš[˜[HXZÙSX™[
+›]™›Ü›X]
+ßH‹X]Úœ›İ[™Ú[œĞJK™‹ÜÚ^™KÚYÈ‹ŒˆHLKŒ‹Ú^™KšZYÚÈ‹Œˆ
+ÈNŒŸKX]ÚÚ[›™\”ÚYHOHHˆÈÑÜ™Y[ˆˆÔ™Y
+NÂˆ]]ÊˆšYÚš[˜[HXZÙSX™[
+›]™›Ü›X]
+ßH‹X]Úœ›İ[™Ú[œĞŠK™‹ÜÚ^™KÚYÈ‹Œˆ
+ÈLKŒ‹Ú^™KšZYÚÈ‹Œˆ
+ÈNŒŸKX]ÚÚ[›™\”ÚYHOHˆˆÈÑÜ™Y[ˆˆÔ™Y
+NÂˆWÜ›ÛİO˜YÚ[
+Yš[˜[
+NÂˆWÜ›ÛİO˜YÚ[
+šYÚš[˜[
+NÂˆ]]ÊˆY™\İ[HXZÙSX™[
+ˆY\™™XİÈİœİš[™Ê”T‘‘PÕÒSˆŠHˆX]ÚÚ[›™\”ÚYHOHHˆÈŠÚ[ˆ‹•ÒSˆŠHˆŠ›ÜÙH‹“ÔÑHŠKˆY\™™XİÈŒˆˆŒÍY‹ˆÌLŒ‹‹ŒŸKˆY\™™XİÈÑÛÛˆX]ÚÚ[›™\”ÚYHOHHˆÈÑÜ™Y[ˆˆÔ™Yˆ˜›XÚÈ‚ˆ
+NÂˆ]]ÊˆšYÚ™\İ[HXZÙSX™[
+ˆšYÚ\™™XİÈİœİš[™Ê”T‘‘PÕÒSˆŠHˆX]ÚÚ[›™\”ÚYHOHˆˆÈŠÚ[ˆ‹•ÒSˆŠHˆŠ›ÜÙH‹“ÔÑHŠKˆšYÚ\™™XİÈŒˆˆŒÍY‹ˆÜÚ^™KÚYHLŒ‹‹ŒŸKˆšYÚ\™™XİÈÑÛÛˆX]ÚÚ[›™\”ÚYHOHˆˆÈÑÜ™Y[ˆˆÔ™Yˆ˜›XÚÈ‚ˆ
+NÂˆWÜ›ÛİO˜YÚ[
+Y™\İ[
+NÂˆWÜ›ÛİO˜YÚ[
+šYÚ™\İ[
+NÂ‚ˆ›Ø]HHİ[[X\UÜHMËŒÂˆ›Üˆ
+]]ÈÛÛœİ	ˆ›İ[™ˆX]Úœ›İ[™ÊHÂˆ]]Êˆ›İÈHXZÙSX™[
+›]™›Ü›X]
+”“ÕS‘ßHßHˆßH‹›İ[™œ›İ[™[X™\‹›İ[™œØÛÜ™PK›İ[™œØÛÜ™PŠKŒÌY‹ÜÚ^™KÚYÈ‹Œ‹_KÛÜ[Nœ˜[šÙYZN•^œÙ[ZX›ÛŠNÂˆWÜ›ÛİO˜YÚ[
+›İË
+NÂˆYÛX\ÚXÚÜÊ›İ[™˜ÛX\œĞKÜÚ^™KÚYÈ‹ŒˆHLŒ‹HHLŒŸJNÂˆYÛX\ÚXÚÜÊ›İ[™˜ÛX\œĞ‹ÜÚ^™KÚYÈ‹Œˆ
+ÈLŒ‹HHLŒŸKYJNÂˆHOHËŒÂˆBˆ›Üˆ
+]]ÈÛÛœİ	ˆX]X]ÚˆX]Ú™X]X]Ú\ÊHÂˆ]]Êˆ›İÈHXZÙSX™[
+›]™›Ü›X]
+ßHßHßHˆßH‹Š™X][X]Ú‹‘PUPUÒŠKX]X]ÚœÙ\]Y[˜ÙKX]X]ÚœØÛÜ™PKX]X]ÚœØÛÜ™PŠKŒY‹ÜÚ^™KÚYÈ‹Œ‹_KÔ™YœÙ[ZX›ÛŠNÂˆWÜ›ÛİO˜YÚ[
+›İË
+NÂˆHOHKŒÂˆB‚ˆ]]ÈÛÛœİ]™[HH˜][™Ñ]™[^
+X]Úœ˜][™Ñ]™[JNÂˆ]]ÈÛÛœİ]™[ˆH˜][™Ñ]™[^
+X]Úœ˜][™Ñ]™[ŠNÂˆĞÓX™[“Q›Û
+ˆ]™[X™[HH[ÂˆĞÓX™[“Q›Û
+ˆ]™[X™[ˆH[ÂˆYˆ
+Y]™[K™š\œİ™[\J
+JHÂˆ]™[X™[HHXZÙSX™[
+]™[K™š\œİŒY‹ÌLŒ‹ŒŒŸK]™[KœÙXÛÛ™˜›XÚÈŠNÂˆWÜ›ÛİO˜YÚ[
+]™[X™[K
+NÂˆBˆYˆ
+Y]™[‹™š\œİ™[\J
+JHÂˆ]™[X™[ˆHXZÙSX™[
+]™[‹™š\œİŒY‹ÜÚ^™KÚYHLŒ‹ŒŒŸK]™[‹œÙXÛÛ™˜›XÚÈŠNÂˆWÜ›ÛİO˜YÚ[
+]™[X™[‹
+NÂˆB‚ˆ[š[X]T˜[šÙYØÛÜ™PÚ[™ÙJˆLŒ‹ˆØ\™HHËŒ‹ˆX]Úœ˜[šÙYØÛÜ™Q[PKˆØ\™KœØÛÜ™SX™[ˆX]Úœ›Ùš[P™Y›Ü™PBˆ
+NÂˆ[š[X]T˜[šÙYØÛÜ™PÚ[™ÙJˆÚ^™KÚYHLŒ‹ˆØ\™HHËŒ‹ˆX]Úœ˜[šÙYØÛÜ™Q[P‹ˆØ\™‹œØÛÜ™SX™[ˆX]Úœ›Ùš[P™Y›Ü™P‚ˆ
+NÂˆ[š[X]T›Û[İ[Û•šYÙÙ\ŠˆLŒ‹ˆØ\™HHËŒ‹ˆX]Úœ˜][™Ñ]™[KˆX]Úœ›Ùš[P™Y›Ü™PKˆX]Úœ˜[šÙYØÛÜ™Q[PBˆ
+NÂˆ[š[X]T›Û[İ[Û•šYÙÙ\ŠˆÚ^™KÚYHLŒ‹ˆØ\™HHËŒ‹ˆX]Úœ˜][™Ñ]™[‹ˆX]Úœ›Ùš[P™Y›Ü™P‹ˆX]Úœ˜[šÙYØÛÜ™Q[P‚ˆ
+NÂ‚ˆY]ÛŠŠœ]Y]YKXYØZ[ˆ‹”UQUQHQĞRSˆŠKÜÚ^™KÚYÈ‹Œ‹ŒŸKY[WÜÙ[XİÜŠÛÜ[T˜[šÙY^Y\›Û”]Y]YPYØZ[ŠK˜[ÙKL™ŠNÂ‚ˆËÈH™\İ[Ø[ˆ™H™[™\™YYØZ[ˆY\ˆš\Ú][™È\İÜHÜˆY\ˆBˆËÈ™\Ù[][Ûˆ™Yœ™\Úˆ^HHY\ˆ˜[œÚ][ÛˆÛ›HÛ˜ÙH\ˆX]ÚÂˆËÈİXœÙ\]Y[™[™\œÈ[[YYX][HÚİÈH]]Üš]]]™HÙ]YRK‚ˆ]]ÈÛÛœİ˜[œÚ][Û’Ù^HHX]Ú›X]ÚY™[\J
+BˆÈ›]™›Ü›X]
+ßNßNßH‹X]Úœ^Y\S˜[YKX]Úœ^Y\“˜[YKX]Úœİ]U™\œÚ[ÛŠBˆˆX]Ú›X]ÚYÂˆYˆ
+WÜ˜[šÕ˜[œÚ][Û”^YYÙ^HOH˜[œÚ][Û’Ù^JHÂˆ]]ÈÛÛœİ˜[œÚ][Û”İ\YHİÛBˆÈ^T™\İ[˜[šÕ˜[œÚ][ÛŠˆX]Úœ˜][™Ñ]™[KˆX]Úœ›Ùš[P™Y›Ü™PKˆX]Úœ›Ùš[PY\Bˆ
+Bˆˆ^T™\İ[˜[šÕ˜[œÚ][ÛŠˆX]Úœ˜][™Ñ]™[‹ˆX]Úœ›Ùš[P™Y›Ü™P‹ˆX]Úœ›Ùš[PY\‚ˆ
+NÂˆYˆ
+˜[œÚ][Û”İ\Y
+HWÜ˜[šÕ˜[œÚ][Û”^YYÙ^HH˜[œÚ][Û’Ù^NÂˆBˆYˆ
+WÜ˜[šÕ˜[œÚ][Û“^Y\ˆ	‰ˆWÛY[JHWÛY[KOœÙ]İXÚ[˜X›Y
+˜[ÙJNÂˆB‚ˆ›ÚY™[™\’\İÜS\İ
+[[YUšY]ÈÛÛœİ	ˆšY]ÊHÂˆ]]ÈÛÛœİÚ^™HHĞÑ\™XİÜœÚ\™Y\™XİÜŠ
+KO™Ù]Ú[”Ú^™J
+NÂˆYÜ˜XÚÊ˜[ÙJNÂˆYØÜ™Y[’XY\ŠŠ›X]ÚZ\İÜH‹“PUÒTÕÔ–HŠKŠœ™XÙ[[X]Ú\È‹”‘PÑS•ÓÓTUUU‘HPUÒTÈŠKÑÛÛĞŞX[ŠNÂˆYˆ
+šY]Ëš\İÜSØY[™ÊHÂˆ]]ÊˆÜ[›™\ˆHØY[™ÔÜ[›™\˜Ü™X]JMKŒŠNÂˆÜ[›™\‹OœÙ]ÜÚ][ÛŠÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚÈ‹ŒŸJNÂˆWÜ›ÛİO˜YÚ[
+Ü[›™\‹ÊNÂˆ™]\›ÂˆBˆYˆ
+]šY]Ëš\İÜQ\œ›Ü‹™[\J
+JHÂˆWÜ›ÛİO˜YÚ[
+XZÙSX™[
+šY]Ëš\İÜQ\œ›Ü‹ŒÙ‹ÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚÈ‹ŒŸKÔ™Y
+KÊNÂˆY]ÛŠŠœ™]H‹”‘U–HŠKÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚÈ‹ŒˆHŒŸKY[WÜÙ[XİÜŠÛÜ[T˜[šÙY^Y\›Û’\İÜJK˜[ÙKMYŠNÂˆ™]\›ÂˆBˆYˆ
+šY]Ëš\İÜK™[\J
+JHÂˆWÜ›ÛİO˜YÚ[
+XZÙSX™[
+Š››ËXÛÛ\]Y[X]Ú\È‹““ÈÓÓTUQPUÒTÈŠKŒÌ™‹ÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚÈ‹ŒŸKØØÌÊNLNMKŒL
+JKÊNÂˆ™]\›ÂˆBˆ]]ÈÛÛœİÛİ[Hİ›Z[İœÚ^™WİŠËšY]Ëš\İÜKœÚ^™J
+JNÂˆ›Üˆ
+İœÚ^™WİHHÈHÛİ[È
+ÊÚJHÂˆ]]ÈÛÛœİ	ˆ][HHšY]Ëš\İÜVÚWNÂˆ]]ÈÛÛœİHHÚ^™KšZYÚHËŒˆHİ]X×ØØ\İ›Ø]ŠJH
+ˆÌKŒÂˆ]]ÈÛÛœİÛÛˆH][KœÚYHOH][KÚ[›™\”ÚYNÂˆ]]Êˆ[™[HXZÙS™[Û”[™[
+ˆÜÚ^™KÚYHLLŒ‹ŒËŒŸKˆÜÚ^™KÚYÈ‹Œ‹_KˆÛÛˆÈÑÜ™Y[ˆˆÔ™YˆÑY\[™[‹ˆŒÌ‚ˆ
+NÂˆWÜ›ÛİO˜YÚ[
+[™[JNÂˆ]]ÈÛÛœİ˜][™Õ^H][K›İÛ”˜[šÙYØÛÜ™Q[BˆÈ›]™›Ü›X]
+ÎŠÙH‹
+š][K›İÛ”˜[šÙYØÛÜ™Q[JBˆˆŠœXÙ[Y[‹”PÑSQS•ŠNÂˆ]]Êˆ›İÈHXZÙSX™[
+ˆ›]™›Ü›X]
+ßH”ÈßHßH‹ÛÛˆÈŠÚ[ˆ‹•ÒSˆŠHˆŠ›ÜÜÈ‹“ÔÔÈŠKÚÜ[Š][K›ÜÛ™[˜[YKM
+K˜][™Õ^
+KˆŒÌ‹ˆÜÚ^™KÚYÈ‹ŒˆHNŒ‹_KˆÛÛˆÈÑÜ™Y[ˆˆÔ™YˆœÙ[ZX›Û‚ˆ
+NÂˆ›İËO›[Z]X™[ÚY
+Ú^™KÚYHNLŒ‹ŒÌ‹ŒŒŠNÂˆWÜ›ÛİO˜YÚ[
+›İËÊNÂˆ]]Êˆ]Z[HY]ÛŠŠ™]Z[‹‘URSŠKÜÚ^™KÚYHÌ‹Œ‹_KY[WÜÙ[XİÜŠÛÜ[T˜[šÙY^Y\›Û’\İÜQ]Z[
+K˜[ÙKLŠNÂˆ]Z[OœÙ]YÊİ]X×ØØ\İ[ŠJJNÂˆBˆB‚ˆ›ÚY™[™\’\İÜQ]Z[
+[[YUšY]ÈÛÛœİ	ˆšY]ÊHÂˆ]]ÈÛÛœİÚ^™HHĞÑ\™XİÜœÚ\™Y\™XİÜŠ
+KO™Ù]Ú[”Ú^™J
+NÂˆYÜ˜XÚÊ˜[ÙJNÂˆYˆ
+WÚ\İÜR[™^HšY]Ëš\İÜKœÚ^™J
+JHÂˆWÜYÙHHYÙN’\İÜS\İÂˆ™[™\’\İÜS\İ
+šY]ÊNÂˆ™]\›ÂˆBˆ]]ÈÛÛœİ	ˆ][HHšY]Ëš\İÜVÛWÚ\İÜR[™^NÂˆ]]ÈÛÛœİÛÛˆH][KœÚYHOH][KÚ[›™\”ÚYNÂˆYØÜ™Y[’XY\ŠˆÛÛˆÈŠšXİÜH‹•’PÕÔ–HŠHˆŠ™Y™X]‹‘Q‘PUŠKˆ›]™›Ü›X]
+•”ÈßHËÈßHˆßH‹\\ŠÚÜ[Š][K›ÜÛ™[˜[YKMŠJK][Kœ›İ[™Ú[œĞK][Kœ›İ[™Ú[œĞŠKˆÛÛˆÈÑÜ™Y[ˆˆÔ™YˆÛÛˆÈÑÜ™Y[ˆˆÔ™Yˆ
+NÂˆ]]Êˆ]Z[[™[HXZÙS™[Û”[™[
+ˆÜİ›Z[ŠÍŒ‹Ú^™KÚYHM‹ŒŠKÚ^™KšZYÚHNŒŸKˆÜÚ^™KÚYÈ‹Œ‹Ú^™KšZYÚÈ‹ŒˆHKŒŸKˆÛÛˆÈÑÜ™Y[ˆˆÔ™YˆÑY\[™[ˆŒˆ
+NÂˆWÜ›ÛİO˜YÚ[
+]Z[[™[JNÂˆ›Ø]HHÚ^™KšZYÚHŒÂˆ›Üˆ
+]]ÈÛÛœİ	ˆ›İ[™ˆ][Kœ›İ[™ÊHÂˆ]]Êˆ›İÈHXZÙSX™[
+›]™›Ü›X]
+”“ÕS‘ßHßHßHˆßH‹›İ[™œ›İ[™[X™\‹ÚÜ[Š›İ[™›X\]KLŠK›İ[™œØÛÜ™PK›İ[™œØÛÜ™PŠKŒÌY‹ÜÚ^™KÚYÈ‹Œ‹_KÛÜ[Nœ˜[šÙYZN•^œÙ[ZX›ÛŠNÂˆWÜ›ÛİO˜YÚ[
+›İËÊNÂˆYÛX\ÚXÚÜÊ›İ[™˜ÛX\œĞKÜÚ^™KÚYÈ‹ŒˆHŒ‹HHLËŒŸJNÂˆYÛX\ÚXÚÜÊ›İ[™˜ÛX\œĞ‹ÜÚ^™KÚYÈ‹Œˆ
+ÈŒ‹HHLËŒŸKYJNÂˆHOHŒÂˆBˆ›Üˆ
+]]ÈÛÛœİ	ˆX]X]Úˆ][K™X]X]Ú\ÊHÂˆ]]Êˆ›İÈHXZÙSX™[
+›]™›Ü›X]
+ßHßHßHˆßH‹Š™X][X]Ú‹‘PUPUÒŠKX]X]ÚœÙ\]Y[˜ÙKX]X]ÚœØÛÜ™PKX]X]ÚœØÛÜ™PŠKŒÌ‹ÜÚ^™KÚYÈ‹Œ‹_KÔ™YœÙ[ZX›ÛŠNÂˆWÜ›ÛİO˜YÚ[
+›İËÊNÂˆHOHÌ‹ŒÂˆBˆB‚ˆÒ‘Ø[YS]™[
+ˆš[™ØØ[X\
+
+HÛÛœİÂˆ]]ÈÛÛœİYH˜[šÙY[[YN™Ù]
+
+K˜İ\œ™[]™[Y
+
+NÂˆYˆ
+YH
+H™]\›ˆ[Âˆ]]ÊˆX[˜YÙ\ˆHØ[YS]™[X[˜YÙ\œÚ\™Yİ]J
+NÂˆ™]\›ˆX[˜YÙ\ˆÈX[˜YÙ\‹O™Ù]Ø]™Y]™[
+Y
+Hˆ[ÂˆB‚ˆ›ÛÛ\Ô^XX›S]™[
+Ò‘Ø[YS]™[
+ˆ]™[
+HÛÛœİÂˆYˆ
+[]™[
+H™]\›ˆ˜[ÙNÂˆYˆ
+İ]X×ØØ\İ[Š]™[O›WÛ]™[Q
+HOH˜[šÙY[[YN™Ù]
+
+K˜İ\œ™[]™[Y
+
+JH™]\›ˆ˜[ÙNÂˆËÈÙ]Ø]™Y]™[
+
+HX^H™]\›ˆÛ›H\İY]Y]Kˆ^S^Y\ˆ™YYÈHXİX[ˆËÈİÛ›ØYY]™[İš[™ÎÈ[\š[™ÈÛˆY]Y]H[Û™H\ÈÚ]Ø]\ÙYBˆËÈ™\X]Y“ØY˜Z[YˆØÜ™Y[ˆ[ˆ[KŒLK‚ˆ™]\›ˆ[]™[O›WÛ]™[İš[™Ë™[\J
+H	‰ˆ[]™[O›WÛ]™[›İİÛ›ØYYÂˆB‚ˆÒ‘Ø[YS]™[
+ˆš[™^XX›SX\
+
+HÛÛœİÂˆ]]Êˆ]™[Hš[™ØØ[X\
+
+NÂˆ™]\›ˆ\Ô^XX›S]™[
+]™[
+HÈ]™[ˆ[ÂˆB‚ˆ›ÚY™[X\ÙT™\ÛÛ™Y]™[
+
+HÂˆYˆ
+WÜ™\ÛÛ™Y]™[
+HÂˆWÜ™\ÛÛ™Y]™[Oœ™[X\ÙJ
+NÂˆWÜ™\ÛÛ™Y]™[H[ÂˆBˆWÜ™\ÛÛ™Y]™[ÛÛ^˜ÛX\Š
+NÂˆB‚ˆ›ÛÛ]™[ÛÚİ\Ù^SX]Ú\ÊÚ\ˆÛÛœİ
+ˆÙ^JHÛÛœİÂˆ™]\›‚ˆWÛ]™[ÛÚİ\\ŞH	‰‚ˆÙ^H	‰‚ˆ[WÛ]™[ÛÚİ\Ù^K™[\J
+H	‰‚ˆWÛ]™[ÛÚİ\Ù^HOHÙ^NÂˆB‚ˆ›ÚYš[š\Ú^Xİ]™[ÛÚİ\
+
+HÂˆYˆ
+WÛ]™[ÛÚİ\\ŞHWÜ™]š[İ\Ó]™[X[˜YÙ\‘[YØ]JHÂˆ]]ÊˆX[˜YÙ\ˆHØ[YS]™[X[˜YÙ\œÚ\™Yİ]J
+NÂˆYˆ
+X[˜YÙ\ˆ	‰ˆX[˜YÙ\‹O›WÛ]™[X[˜YÙ\‘[YØ]HOH\ÊHÂˆX[˜YÙ\‹O›WÛ]™[X[˜YÙ\‘[YØ]HHWÜ™]š[İ\Ó]™[X[˜YÙ\‘[YØ]NÂˆBˆBˆWÜ™]š[İ\Ó]™[X[˜YÙ\‘[YØ]HH[ÂˆWÛ]™[ÛÚİ\\ŞHH˜[ÙNÂˆWÛ]™[ÛÚİ\Ù^K˜ÛX\Š
+NÂˆWÛ]™[ÛÚİ\ÛÛ^˜ÛX\Š
+NÂˆWÛ]™[ÛÚİ\\™Ù]YHÂˆB‚ˆ›ÚYØ[˜Ù[^Xİ]™[ÛÚİ\
+
+HÂˆš[š\Ú^Xİ]™[ÛÚİ\
+
+NÂˆB‚ˆ›ÛÛÛÚİ\İ[\™Ù]Ğİ\œ™[X\
+İœİš[™ÈÛÛœİ	ˆÛÛ^[]™[Y
+HÛÛœİÂˆ]]ÈÛÛœİ	ˆšY]ÈH˜[šÙY[[YN™Ù]
+
+KšY]Ê
+NÂˆ™]\›‚ˆšY]ËœİYÙHOH[[YTİYÙN“X]ÚY	‰‚ˆ]™[Yˆ	‰‚ˆ˜[šÙY[[YN™Ù]
+
+K˜İ\œ™[]™[Y
+
+HOH]™[Y	‰‚ˆ™\Ûİ\˜ÙRÙ^JšY]Ë›X]Ú
+HOHÛÛ^ÂˆB‚ˆ›ÚYXØÙ\^Xİ]™[™\İ[ÊĞĞ\œ˜^Jˆ]™[ËÚ\ˆÛÛœİ
+ˆÙ^JHÂˆYˆ
+[]™[ÛÚİ\Ù^SX]Ú\ÊÙ^JJH™]\›Â‚ˆ]]ÈÛÛœİÛÛ^HWÛ]™[ÛÚİ\ÛÛ^Âˆ]]ÈÛÛœİ\™Ù]YHWÛ]™[ÛÚİ\\™Ù]YÂˆÒ‘Ø[YS]™[
+ˆ^Xİ]™[H[ÂˆYˆ
+]™[ÊHÂˆ›Üˆ
+[œÚYÛ™Y[[™^HÈ[™^]™[ËO˜Ûİ[
+
+NÈ
+ÊÚ[™^
+HÂˆ]]ÊˆØ[™Y]HH\Z[™›×ØØ\İÒ‘Ø[YS]™[
+Š]™[ËO›Øš™Xİ][™^
+[™^
+JNÂˆYˆ
+Ø[™Y]H	‰ˆİ]X×ØØ\İ[ŠØ[™Y]KO›WÛ]™[Q
+HOH\™Ù]Y
+HÂˆ^Xİ]™[HØ[™Y]NÂˆœ™XZÎÂˆBˆBˆB‚ˆ]]ÈÛÛœİİ[İ\œ™[HÛÚİ\İ[\™Ù]Ğİ\œ™[X\
+ÛÛ^\™Ù]Y
+NÂˆš[š\Ú^Xİ]™[ÛÚİ\
+
+NÂˆYˆ
+\İ[İ\œ™[
+H™]\›Â‚ˆYˆ
+Y^Xİ]™[
+HÂˆWÛ]™[ÛÚİ\\œ›ÜˆHŠ™^Xİ[]™[[›İY›İ[™‹‘VPÕÑU‘S“Õ“ÕS‘H‘U–RS‘ÈŠNÂˆWÛ]™[ÛÚİ\™^][\]HİXYPÛØÚÎ››İÊ
+H
+Èİ˜Ú›Û›Î›Z[\ÙXÛÛ™ÊM
+NÂˆ™]\›ÂˆB‚ˆ^Xİ]™[Oœ™]Z[Š
+NÂˆ™[X\ÙT™\ÛÛ™Y]™[
+
+NÂˆWÜ™\ÛÛ™Y]™[H^Xİ]™[ÂˆWÜ™\ÛÛ™Y]™[ÛÛ^HÛÛ^ÂˆWÛ]™[ÛÚİ\\œ›Ü‹˜ÛX\Š
+NÂˆWÜ™\\™SØYš\İX[Hİ›X^
+WÜ™\\™SØYš\İX[ŒÌŠNÂˆÙÎš[™›Êˆ”™\ÛÛ™Y^Xİ˜[šÙYÑ]™[ˆX]Ú^ßH›İ[™^ßH]™[^ßH˜[YO^ßH‹ˆ˜[šÙY[[YN™Ù]
+
+KšY]Ê
+K›X]Ú›X]ÚYˆ˜[šÙY[[YN™Ù]
+
+KšY]Ê
+K›X]Úœ›İ[™[X™\‹ˆ\™Ù]Yˆİœİš[™Ê^Xİ]™[O›WÛ]™[˜[YK˜×ÜİŠ
+JBˆ
+NÂˆB‚ˆ›ÚY™Z™Xİ^Xİ]™[™\İ[ÊÚ\ˆÛÛœİ
+ˆÙ^JHÂˆYˆ
+[]™[ÛÚİ\Ù^SX]Ú\ÊÙ^JJH™]\›Âˆ]]ÈÛÛœİÛÛ^HWÛ]™[ÛÚİ\ÛÛ^Âˆ]]ÈÛÛœİ\™Ù]YHWÛ]™[ÛÚİ\\™Ù]YÂˆ]]ÈÛÛœİİ[İ\œ™[HÛÚİ\İ[\™Ù]Ğİ\œ™[X\
+ÛÛ^\™Ù]Y
+NÂˆš[š\Ú^Xİ]™[ÛÚİ\
+
+NÂˆYˆ
+\İ[İ\œ™[
+H™]\›ÂˆWÛ]™[ÛÚİ\\œ›ÜˆHŠ›]™[[ÛÚİ\Y˜Z[Y‹“U‘SÓÒÕTRSQH‘U–RS‘ÈŠNÂˆ]]ÈÛÛœİ˜XÚÛÙ™“Z[\ÙXÛÛ™ÈHİ›Z[ŠL
+ÈWÛ]™[ÛÚİ\][\È
+ˆL
+NÂˆWÛ]™[ÛÚİ\™^][\]HİXYPÛØÚÎ››İÊ
+H
+Èİ˜Ú›Û›Î›Z[\ÙXÛÛ™Ê˜XÚÛÙ™“Z[\ÙXÛÛ™ÊNÂˆB‚ˆ›ÚYØY]™[Ñš[š\ÚY
+ĞĞ\œ˜^Jˆ]™[ËÚ\ˆÛÛœİ
+ˆÙ^JHİ™\œšYHÂˆYˆ
+]™[ÛÚİ\Ù^SX]Ú\ÊÙ^JJHÂˆXØÙ\^Xİ]™[™\İ[Ê]™[ËÙ^JNÂˆ™]\›ÂˆBˆYˆ
+WÜ™]š[İ\Ó]™[X[˜YÙ\‘[YØ]H	‰ˆWÜ™]š[İ\Ó]™[X[˜YÙ\‘[YØ]HOH\ÊHÂˆWÜ™]š[İ\Ó]™[X[˜YÙ\‘[YØ]KO›ØY]™[Ñš[š\ÚY
+]™[ËÙ^JNÂˆBˆB‚ˆ›ÚYØY]™[Ñ˜Z[Y
+Ú\ˆÛÛœİ
+ˆÙ^JHİ™\œšYHÂˆYˆ
+]™[ÛÚİ\Ù^SX]Ú\ÊÙ^JJHÂˆ™Z™Xİ^Xİ]™[™\İ[ÊÙ^JNÂˆ™]\›ÂˆBˆYˆ
+WÜ™]š[İ\Ó]™[X[˜YÙ\‘[YØ]H	‰ˆWÜ™]š[İ\Ó]™[X[˜YÙ\‘[YØ]HOH\ÊHÂˆWÜ™]š[İ\Ó]™[X[˜YÙ\‘[YØ]KO›ØY]™[Ñ˜Z[Y
+Ù^JNÂˆBˆB‚ˆ›ÚYØY]™[Ñš[š\ÚY
+ĞĞ\œ˜^Jˆ]™[ËÚ\ˆÛÛœİ
+ˆÙ^K[\JHİ™\œšYHÂˆYˆ
+]™[ÛÚİ\Ù^SX]Ú\ÊÙ^JJHÂˆXØÙ\^Xİ]™[™\İ[Ê]™[ËÙ^JNÂˆ™]\›ÂˆBˆYˆ
+WÜ™]š[İ\Ó]™[X[˜YÙ\‘[YØ]H	‰ˆWÜ™]š[İ\Ó]™[X[˜YÙ\‘[YØ]HOH\ÊHÂˆWÜ™]š[İ\Ó]™[X[˜YÙ\‘[YØ]KO›ØY]™[Ñš[š\ÚY
+]™[ËÙ^K\JNÂˆBˆB‚ˆ›ÚYØY]™[Ñ˜Z[Y
+Ú\ˆÛÛœİ
+ˆÙ^K[\JHİ™\œšYHÂˆYˆ
+]™[ÛÚİ\Ù^SX]Ú\ÊÙ^JJHÂˆ™Z™Xİ^Xİ]™[™\İ[ÊÙ^JNÂˆ™]\›ÂˆBˆYˆ
+WÜ™]š[İ\Ó]™[X[˜YÙ\‘[YØ]H	‰ˆWÜ™]š[İ\Ó]™[X[˜YÙ\‘[YØ]HOH\ÊHÂˆWÜ™]š[İ\Ó]™[X[˜YÙ\‘[YØ]KO›ØY]™[Ñ˜Z[Y
+Ù^K\JNÂˆBˆB‚ˆ›ÚYÙ]\YÙR[™›ÊÙœİš[™È[™›ËÚ\ˆÛÛœİ
+ˆÙ^JHİ™\œšYHÂˆYˆ
+]™[ÛÚİ\Ù^SX]Ú\ÊÙ^JJH™]\›ÂˆYˆ
+WÜ™]š[İ\Ó]™[X[˜YÙ\‘[YØ]H	‰ˆWÜ™]š[İ\Ó]™[X[˜YÙ\‘[YØ]HOH\ÊHÂˆWÜ™]š[İ\Ó]™[X[˜YÙ\‘[YØ]KOœÙ]\YÙR[™›Ê[™›ËÙ^JNÂˆBˆB‚ˆ›ÛÛ^Xİ]™[ÛÚİ\İ]P[İÙY
+
+HÛÛœİÂˆ]]ÈÛÛœİ	ˆšY]ÈH˜[šÙY[[YN™Ù]
+
+KšY]Ê
+NÂˆYˆ
+šY]ËœİYÙHOH[[YTİYÙN“X]ÚY
+H™]\›ˆ˜[ÙNÂˆ]]ÈÛÛœİ	ˆİ]HHšY]Ë›X]Úœİ]NÂˆ™]\›‚ˆİ]HOH”“ÕS‘Ô‘TT‘Hˆˆİ]HOH‘PUPUÒÔ‘TT‘Hˆˆİ]HOH“PTÔ‘TT‘Hˆˆİ]HOH”“ÕS‘ÔVRS‘Èˆˆİ]HOH‘PUPUÒÔVRS‘Èˆˆİ]HOH“PTÔVRS‘ÈÂˆB‚ˆ›ÚY™YÚ[‘^Xİ]™[ÛÚİ\
+
+HÂˆYˆ
+Y^Xİ]™[ÛÚİ\İ]P[İÙY
+
+Hš[™ØØ[X\
+
+JH™]\›Âˆ]]ÈÛÛœİ	ˆX]ÚH˜[šÙY[[YN™Ù]
+
+KšY]Ê
+K›X]ÚÂˆ]]ÈÛÛœİ\™Ù]YH˜[šÙY[[YN™Ù]
+
+K˜İ\œ™[]™[Y
+
+NÂˆYˆ
+\™Ù]YH[X]Ú˜İ\œ™[X\
+H™]\›Âˆ]]ÈÛÛœİÛÛ^H™\Ûİ\˜ÙRÙ^JX]Ú
+NÂˆYˆ
+ˆWÜ™\ÛÛ™Y]™[	‰‚ˆWÜ™\ÛÛ™Y]™[ÛÛ^OHÛÛ^	‰‚ˆİ]X×ØØ\İ[ŠWÜ™\ÛÛ™Y]™[O›WÛ]™[Q
+HOH\™Ù]Yˆ
+H™]\›Â‚ˆ]]ÈÛÛœİ›İÈHİXYPÛØÚÎ››İÊ
+NÂˆYˆ
+WÛ]™[ÛÚİ\\ŞJHÂˆ]]ÈÛÛœİİ[YBˆWÛ]™[ÛÚİ\\İ™\]Y\İ]OHİXYPÛØÚÎ[YWÜÚ[ßH	‰‚ˆİ˜Ú›Û›Î™\˜][ÛİX›OŠ›İÈHWÛ]™[ÛÚİ\\İ™\]Y\İ]
+K˜Ûİ[
+
+HHŒÂˆYˆ
+\İ[Y
+H™]\›Â‚ˆ]]ÊˆX[˜YÙ\ˆHØ[YS]™[X[˜YÙ\œÚ\™Yİ]J
+NÂˆYˆ
+[X[˜YÙ\ˆX[˜YÙ\‹O›WÛ]™[X[˜YÙ\‘[YØ]HOH\ÊHÂˆËÈ[›İ\ˆ˜[š[HØÜ™Y[ˆÛÚÈİÛ™\œÚ\ÙˆHÚ[™Û]Ûˆ[YØ]K‚ˆËÈÈ›İİ™\Üš]H]]™HİÛ™\È™]HY\ˆ]™[X\Ù\ÈÛÛ›Û‚ˆWÜ™]š[İ\Ó]™[X[˜YÙ\‘[YØ]HH[ÂˆWÛ]™[ÛÚİ\\ŞHH˜[ÙNÂˆWÛ]™[ÛÚİ\Ù^K˜ÛX\Š
+NÂˆWÛ]™[ÛÚİ\™^][\]H›İÈ
+Èİ˜Ú›Û›ÎœÙXÛÛ™ÊJNÂˆ™]\›ÂˆBˆ]]Êˆ™]TÙX\˜ÚHÒ”ÙX\˜ÚØš™Xİ˜Ü™X]JˆÙX\˜Ú\N•\LNKˆ›]™›Ü›X]
+ßI™Ø[YU™\œÚ[ÛLŒˆ‹WÛ]™[ÛÚİ\\™Ù]Y
+Bˆ
+NÂˆYˆ
+\™]TÙX\˜Ú
+H™]\›ÂˆWÛ]™[ÛÚİ\Ù^HH™]TÙX\˜ÚO™Ù]Ù^J
+HÈ™]TÙX\˜ÚO™Ù]Ù^J
+HˆˆÂˆWÛ]™[ÛÚİ\\İ™\]Y\İ]H›İÎÂˆ
+ÊÛWÛ]™[ÛÚİ\][\ÎÂˆX[˜YÙ\‹O™Ù]Û›[™S]™[Ê™]TÙX\˜Ú
+NÂˆ™]\›ÂˆBˆYˆ
+ˆWÛ]™[ÛÚİ\™^][\]OHİXYPÛØÚÎ[YWÜÚ[ßH	‰‚ˆ›İÈWÛ]™[ÛÚİ\™^][\]ˆ
+H™]\›Â‚ˆ]]ÊˆX[˜YÙ\ˆHØ[YS]™[X[˜YÙ\œÚ\™Yİ]J
+NÂˆ]]ÊˆÙX\˜ÚHÒ”ÙX\˜ÚØš™Xİ˜Ü™X]JˆÙX\˜Ú\N•\LNKˆ›]™›Ü›X]
+ßI™Ø[YU™\œÚ[ÛLŒˆ‹\™Ù]Y
+Bˆ
+NÂˆYˆ
+[X[˜YÙ\ˆ\ÙX\˜Ú\ÙX\˜ÚO™Ù]Ù^J
+JHÂˆWÛ]™[ÛÚİ\\œ›ÜˆHŠ›]™[[ÛÚİ\][˜]˜Z[X›H‹“U‘SÓÒÕTSURSP“HH‘U–RS‘ÈŠNÂˆWÛ]™[ÛÚİ\™^][\]H›İÈ
+Èİ˜Ú›Û›ÎœÙXÛÛ™ÊJNÂˆ™]\›ÂˆB‚ˆWÜ™]š[İ\Ó]™[X[˜YÙ\‘[YØ]HHX[˜YÙ\‹O›WÛ]™[X[˜YÙ\‘[YØ]HOH\ÂˆÈ[‚ˆˆX[˜YÙ\‹O›WÛ]™[X[˜YÙ\‘[YØ]NÂˆX[˜YÙ\‹O›WÛ]™[X[˜YÙ\‘[YØ]HH\ÎÂˆWÛ]™[ÛÚİ\\ŞHHYNÂˆWÛ]™[ÛÚİ\ÛÛ^HÛÛ^ÂˆWÛ]™[ÛÚİ\\™Ù]YH\™Ù]YÂˆWÛ]™[ÛÚİ\Ù^HHÙX\˜ÚO™Ù]Ù^J
+NÂˆWÛ]™[ÛÚİ\\İ™\]Y\İ]H›İÎÂˆWÛ]™[ÛÚİ\™^][\]HßNÂˆWÛ]™[ÛÚİ\\œ›Ü‹˜ÛX\Š
+NÂˆYˆ
+WÛ]™[ÛÚİ\İ\Y]OHİXYPÛØÚÎ[YWÜÚ[ßJHWÛ]™[ÛÚİ\İ\Y]H›İÎÂˆ
+ÊÛWÛ]™[ÛÚİ\][\ÎÂˆÙÎš[™›Êˆ”™\ÛÛš[™È^Xİ˜[šÙYÑ]™[ˆX]Ú^ßH›İ[™^ßH]™[^ßH][\^ßH‹ˆX]Ú›X]ÚYˆX]Úœ›İ[™[X™\‹ˆ\™Ù]YˆWÛ]™[ÛÚİ\][\Âˆ
+NÂˆX[˜YÙ\‹O™Ù]Û›[™S]™[ÊÙX\˜Ú
+NÂˆB‚ˆÒ‘Ø[YS]™[
+ˆš[™]™[[™›ÓX\
+
+HÛÛœİÂˆ]]ÈÛÛœİ	ˆšY]ÈH˜[šÙY[[YN™Ù]
+
+KšY]Ê
+NÂˆYˆ
+šY]ËœİYÙHOH[[YTİYÙN“X]ÚY
+H™]\›ˆ[Âˆ]]ÈÛÛœİ\™Ù]YH˜[šÙY[[YN™Ù]
+
+K˜İ\œ™[]™[Y
+
+NÂˆYˆ
+ˆWÜ™\ÛÛ™Y]™[	‰‚ˆWÜ™\ÛÛ™Y]™[ÛÛ^OH™\Ûİ\˜ÙRÙ^JšY]Ë›X]Ú
+H	‰‚ˆİ]X×ØØ\İ[ŠWÜ™\ÛÛ™Y]™[O›WÛ]™[Q
+HOH\™Ù]Yˆ
+H™]\›ˆWÜ™\ÛÛ™Y]™[Âˆ™]\›ˆš[™ØØ[X\
+
+NÂˆB‚ˆ›Ø]™\\˜][Û”›ÙÜ™\ÜÕ\™Ù]
+
+HÂˆYˆ
+]]Êˆ]™[Hš[™]™[[™›ÓX\
+
+JHÂˆYˆ
+Z\Ô^XX›S]™[
+]™[
+JH™]\›ˆŒÌÂˆ™]\›ˆ\ÔÛÛ™Ô™XYJ]™[
+HÈL™ˆˆÍYÂˆBˆYˆ
+WÛ]™[ÛÚİ\İ\Y]OHİXYPÛØÚÎ[YWÜÚ[ßJH™]\›ˆŒÂˆ]]ÈÛÛœİ[\ÙYHİ˜Ú›Û›Î™\˜][ÛİX›OŠˆİXYPÛØÚÎ››İÊ
+HHWÛ]™[ÛÚİ\İ\Y]ˆ
+K˜Ûİ[
+
+NÂˆ™]\›ˆİ›Z[ŠŒY‹ŒÍYˆ
+Èİ]X×ØØ\İ›Ø]Š[\ÙY
+H
+ˆŒŠNÂˆB‚ˆİœİš[™È™\\˜][Û”İYÙU^
+
+HÂˆYˆ
+]]Êˆ]™[Hš[™]™[[™›ÓX\
+
+JHÂˆYˆ
+Z\Ô^XX›S]™[
+]™[
+JH™]\›ˆŠ™^Xİ[]™[Y›İ[™‹‘VPÕÑU‘S“ÕS‘ŠNÂˆ™]\›ˆ\ÔÛÛ™Ô™XYJ]™[
+BˆÈŠœ™\\˜][Û‹\™XYH‹”‘TTUSÓˆ‘PQHŠBˆˆŠØZ][™Ë\ÛÛ™È‹•ĞRUS‘È“ÔˆÓÓ‘ÈŠNÂˆBˆYˆ
+WÛ]™[ÛÚİ\\ŞJH™]\›ˆŠ™š[™[™ËY^Xİ[]™[‹‘’S‘S‘ÈVPÕÑU‘S‹‹ˆŠNÂˆYˆ
+[WÛ]™[ÛÚİ\\œ›Ü‹™[\J
+JH™]\›ˆWÛ]™[ÛÚİ\\œ›ÜÂˆ™]\›ˆŠØZ][™Ë[]™[[ÛÚİ\‹•ĞRUS‘È“ÔˆU‘SÓÒÕT‹‹ˆŠNÂˆB‚ˆİ™XİÜ[ˆÛÛXİÛÛ™ÒYÊÒ‘Ø[YS]™[
+ˆ]™[
+HÛÛœİÂˆİ™XİÜ[ˆ™\İ[ÂˆYˆ
+[]™[
+H™]\›ˆ™\İ[Â‚ˆ]]ÈYHÉœ™\İ[J[Y
+HÂˆYˆ
+YH
+H™]\›ÂˆYˆ
+İ™š[™
+™\İ[˜™YÚ[Š
+K™\İ[™[™
+
+KY
+HOH™\İ[™[™
+
+JH™\İ[œ\ÚØ˜XÚÊY
+NÂˆNÂˆY
+İ]X×ØØ\İ[Š]™[O›WÜÛÛ™ÒQ
+JNÂ‚ˆËÈÑ‹ŒˆİÜ™\È]™\Hİ\İÛHÛÛ™È™Y™\™[˜ÙYHHİÛ›ØYY]™[[‚ˆËÈWÜÛÛ™ÒQÈ\ÈHÛÛ[XK\Ù\\˜]Y\İˆÈ›İÛ›HÚXÚÈWÜÛÛ™ÒQ‚ˆİœİš[™Üİ™X[Hİ™X[Jİœİš[™Ê]™[O›WÜÛÛ™ÒQË˜×ÜİŠ
+JJNÂˆİœİš[™ÈÚÙ[ÂˆÚ[H
+İ™Ù][™Jİ™X[KÚÙ[‹	Ë	ÊJHÂˆHÂˆY
+İœİÚJÚÙ[ŠJNÂˆHØ]Ú
+‹‹ŠHÂˆËÈYÛ›Ü™HX[›Ü›YYÙ[\H[šY\ËˆHš[X\HWÜÛÛ™ÒQ\Èİ[ˆËÈ[™YX›İ™H[™HØ[YH™[XZ[œÈ^XX›HÚ]İ]ÛÛ™È]Y[Ë‚ˆBˆBˆ™]\›ˆ™\İ[ÂˆB‚ˆ›ÚY™Yœ™\ÚÛÛ™ÒYÊÒ‘Ø[YS]™[
+ˆ]™[
+HÂˆ]]ÈYÈHÛÛXİÛÛ™ÒYÊ]™[
+NÂˆYˆ
+YÈOHWÜÛÛ™ÒYÊH™]\›ÂˆWÜÛÛ™ÒYÈHİ›[İ™JYÊNÂˆB‚ˆ›ÛÛÛÛ™ÒY™XYJ]\ÚXÑİÛ›ØYX[˜YÙ\ŠˆX[˜YÙ\‹[Y
+HÛÛœİÂˆYˆ
+[X[˜YÙ\ˆYH
+H™]\›ˆYNÂˆËÈ™\Ûİ\˜ÙHÛÛ™ÜÈ\™H[™XYH\ÙˆHØ[YH[œİ[][Û‹ˆİ\İÛHÛÛ™ÜÂˆËÈ]\İ]™HHİÛ›ØYYš[HXØÛÜ™[™ÈÈ]\ÚXÑİÛ›ØYX[˜YÙ\‹‚ˆ™]\›ˆX[˜YÙ\‹Oš\Ô™\Ûİ\˜ÙTÛÛ™ÊY
+HX[˜YÙ\‹Oš\ÔÛÛ™ÑİÛ›ØYY
+Y
+NÂˆB‚ˆ›ÛÛ\ÔÛÛ™Ô™XYJÒ‘Ø[YS]™[
+ˆ]™[
+HÂˆYˆ
+[]™[
+H™]\›ˆ˜[ÙNÂˆ™Yœ™\ÚÛÛ™ÒYÊ]™[
+NÂˆ]]ÊˆX[˜YÙ\ˆH]\ÚXÑİÛ›ØYX[˜YÙ\œÚ\™Yİ]J
+NÂˆYˆ
+[X[˜YÙ\ŠH™]\›ˆWÜÛÛ™ÒYË™[\J
+NÂˆ›Üˆ
+]]ÈÛÛœİYˆWÜÛÛ™ÒYÊHÂˆYˆ
+\ÛÛ™ÒY™XYJX[˜YÙ\‹Y
+JH™]\›ˆ˜[ÙNÂˆBˆ™]\›ˆYNÂˆB‚ˆ›ÚYÜ[”ÛÛ™ÑİÛ›ØYØ]JİX›HÛİ[İÛ“İ™\œšYHHLKŒ
+HÂˆYˆ
+WÙ[\š[™ÔÛÛ™ÑØ]JH™]\›Âˆ]]Êˆ]™[Hš[™]™[[™›ÓX\
+
+NÂˆYˆ
+[]™[
+HÂˆ™YÚ[‘^Xİ]™[ÛÚİ\
+
+NÂˆ™]\›ÂˆB‚ˆËÈH™X[Ù[ÛY]H\Ú]™[[™›ÈYÙHİÛœÈX\ÜÛÛ™ÈXÜ]Z\Ú][Û‹ˆBˆËÈ^XÚ]İ™\œšYH\È\ÙY\ÈH™XÛİ™\H]Ú[ˆÛ[™ÈÚÚ\YBˆËÈ™\HÚÜ‘TT‘H\ÙH
+›İX›HXYÈšYÙÙ\ˆX]X]Ú
+K‚ˆ]]ÈÛÛœİ]]Üš]]]™T™[XZ[š[™ÈH˜[šÙY[[YN™Ù]
+
+K™XY[™SZ[\Ê
+NÂˆ]]ÈÛÛœİÛİ[İÛ”™[XZ[š[™ÈHÛİ[İÛ“İ™\œšYHHŒˆÈÛİ[İÛ“İ™\œšYBˆˆ]]Üš]]]™T™[XZ[š[™ÂˆÈİ›X^
+Œİ]X×ØØ\İİX›OŠ
+˜]]Üš]]]™T™[XZ[š[™ÊHÈLŒ
+Bˆˆİ›X^
+ŒLŒH\ÙTÙXÛÛ™Ê
+JNÂˆ]]ÈÛÛœİ\ÙY™\ÛÛ™Y]™[H]™[OHWÜ™\ÛÛ™Y]™[ÂˆWÙ[\š[™ÔÛÛ™ÑØ]HHÛÜ[Nœ˜[šÙYœÚİÔ˜[šÙYÛÛ™ÑİÛ›ØYØ]J]™[Ûİ[İÛ”™[XZ[š[™ÊNÂˆYˆ
+WÙ[\š[™ÔÛÛ™ÑØ]JHÂˆWÜ˜[šÙYÚ[ØÙ[™T\ÚYHYNÂˆYˆ
+\ÙY™\ÛÛ™Y]™[
+H™[X\ÙT™\ÛÛ™Y]™[
+
+NÂˆBˆB‚ˆ›ÚY\]P]]ÛX][ÛŠ
+HÂˆ]]Éˆ[[YHH˜[šÙY[[YN™Ù]
+
+NÂˆ]]ÈÛÛœİ	ˆšY]ÈH[[YKšY]Ê
+NÂˆYˆ
+šY]ËœİYÙHOH[[YTİYÙN“X]ÚY
+H™]\›Âˆ]]ÈÛÛœİ	ˆX]ÚHšY]Ë›X]ÚÂ‚ˆYˆ
+X]Úœİ]HOH“PUÒQŠHÂˆYˆ
+[WÛX]Ú›İ[™™XYTÙ[	‰ˆ\ÙTÙXÛÛ™Ê
+HHKŒ
+HÂˆWÛX]Ú›İ[™™XYTÙ[HYNÂˆ[[YKœİX›Z]™XYJ
+NÂˆBˆ™]\›ÂˆBˆYˆ
+ˆX]Úœİ]HOH”“ÕS‘Ô‘TT‘Hˆ	‰‚ˆX]Úœİ]HOH‘PUPUÒÔ‘TT‘Hˆ	‰‚ˆX]Úœİ]HOH“PTÔ‘TT‘H‚ˆ
+H™]\›Â‚ˆËÈ™\ÛÛ™HH^XİÙ[ÛY]H\Ú]™[\ÈÛÛÛˆ\ÈH]]Üš]]]™BˆËÈ[‹\ÙXÛÛ™™\\™H\ÙH™YÚ[œËˆ]™[[™›Èİ\È]È˜[š[HX\İ\]BˆËÈÛÜšÈ™Z[™H˜[šÙYÛİ™\ˆ[[YYX][NÈH™X[YÙH\È™]™X[Y]ˆËÈš]™HÙXÛÛ™È™[XZ[š[™È[œİXYÙˆÜ[™[™ÈHš\œİ[ˆYK‚ˆÜ[”ÛÛ™ÑİÛ›ØYØ]J
+NÂˆB‚ˆ›ÚYX^X™Q[\“]™[
+
+HÂˆ]]ÈÛÛœİ	ˆšY]ÈH˜[šÙY[[YN™Ù]
+
+KšY]Ê
+NÂˆYˆ
+WÙ[\š[™Ó]™[šY]ËœİYÙHOH[[YTİYÙN“X]ÚY
+H™]\›Âˆ]]ÈÛÛœİ	ˆİ]HHšY]Ë›X]Úœİ]NÂˆYˆ
+ˆİ]HOH”“ÕS‘ÔVRS‘Èˆ	‰‚ˆİ]HOH‘PUPUÒÔVRS‘Èˆ	‰‚ˆİ]HOH“PTÔVRS‘È‚ˆ
+H™]\›ÂˆYˆ
+T˜[šÙY[[YN™Ù]
+
+K˜Ø[‘[\İ\œ™[]™[
+
+JHÂˆYˆ
+İ]HOH‘PUPUÒÔVRS‘ÈŠHWÛØØ[Y\ÜØYÙHH[È][\È\ÙYˆØZ][™È›ÜˆHÜÛ™[‹‹ˆÂˆ™]\›ÂˆBˆ]]Êˆ]™[Hš[™^XX›SX\
+
+NÂˆYˆ
+[]™[
+HÂˆËÈHXYÈØÙ[˜\š[È
+ÜˆH˜\İÙ\™\ˆ˜[œÚ][ÛŠHØ[ˆ[İ™H‘TT‘HO‚ˆËÈVRS‘È™]ÙY[ˆÛY[ÛËˆ™XÛİ™\ˆHÜ[š[™ÈHØ[YH˜[š[BˆËÈ]™[[™›ÈİÛ›ØYØ]H]™[ˆİYÚVRS‘È\È[™XYH]]Üš]]]™K‚ˆËÈ]™[[™›Ó^Y\ˆÚ[İÛ›ØYHX\[™]]ËY[\ˆ\ÈÛÛÛˆ\È]\ÂˆËÈ^XX›NÈ\È™]™[ÈHÛ\›X[™[“ØY[™ÈX\ˆXYØÚË‚ˆWÛØØ[Y\ÜØYÙHH“Ü[š[™È]™[İÛ›ØY™XÛİ™\K‹‹ˆÂˆÜ[”ÛÛ™ÑİÛ›ØYØ]JŒ
+NÂˆ™]\›ÂˆBˆËÈÈ›İÛÛœİXİ^S^Y\ˆ\™XİKˆ[\ˆ›İYÚÙ[ÛY]H\Ú	ÜÈ›Ü›X[ˆËÈ]™[[™›Ó^Y\ˆOˆÛ”^H]È\È]ÈHØ[YHİÛˆ]™[˜[Y][Û‹ˆËÈØY[™È˜[œÚ][ÛœË]Y[ÈÙ]\[™H™]\›‹Ü]Z]İXÚË‚ˆ]]ÊˆØÙ[™HH]™[[™›Ó^Y\œØÙ[™J]™[˜[ÙJNÂˆYˆ
+\ØÙ[™JHÂˆWÛØØ[Y\ÜØYÙHH•[˜X›HÈÜ[ˆHÙ[XİY]™[ˆ™]Z[™Ë‹‹ˆÂˆ™]\›ÂˆBˆWÙ[\š[™Ó]™[HYNÂˆWÜ˜[šÙYÚ[ØÙ[™T\ÚYHYNÂˆĞÑ\™XİÜœÚ\™Y\™XİÜŠ
+KOœ\ÚØÙ[™JĞÕ˜[œÚ][Û‘˜YN˜Ü™X]JŒY‹ØÙ[™JJNÂˆB‚ˆ›ÚYÛ‘İÛ›ØY[™\Ûİ\˜Ù\ÊĞÓØš™Xİ
+ŠHÂˆWÛØØ[Y\ÜØYÙK˜ÛX\Š
+NÂˆ˜[šÙY]Y[ÓX[˜YÙ\™Ù]
+
+K™İÛ›ØY[
+
+NÂˆB‚ˆ›ÚYÛÛÛ[YT™\Ûİ\˜Ù\ÊĞÓØš™Xİ
+ŠHÂˆYˆ
+T˜[šÙY]Y[ÓX[˜YÙ\™Ù]
+
+Kœ™\Ûİ\˜Ù\Ô™XYJ
+JH™]\›ÂˆWÜ™\Ûİ\˜ÙQØ]PXÚÛ›İÛYÙYHYNÂˆWÜ™\Ûİ\˜ÙQØ]UØ\ÓZ\ÜÚ[™ÈH˜[ÙNÂˆWÜ™\Ûİ\˜ÙQØ]SY[T™\İÜ™YH˜[ÙNÂˆŞ[˜Ğ]Y[Ó[ÙJ
+NÂˆB‚ˆ›ÚYÛ’›Ú[ŠĞÓØš™Xİ
+ŠHÂˆWÛØØ[Y\ÜØYÙK˜ÛX\Š
+NÂˆ˜[šÙY[[YN™Ù]
+
+Kš›Ú[”]Y]YJ
+NÂˆB‚ˆ›ÚYÛ“Ü[”XÙ[Y[
+ĞÓØš™Xİ
+ŠHÂˆYˆ
+T˜[šÙY[[YN™Ù]
+
+KšY]Ê
+KœXÙ[Y[œ™\]Z\™Y
+H™]\›ÂˆWÛØØ[Y\ÜØYÙK˜ÛX\Š
+NÂˆWÜYÙHHYÙN”XÙ[Y[ÛÛÙ[Xİ[ÛÂˆB‚ˆ›ÚYÛ”İ\XÙ[Y[
+ĞÓØš™Xİ
+ˆÙ[™\ŠHÂˆ]]ÈÛÛœİÛÛHÙ[™\ˆÈÙ[™\‹O™Ù]YÊ
+HˆÂˆYˆ
+ÛÛHÛÛˆŠH™]\›ÂˆWÛØØ[Y\ÜØYÙK˜ÛX\Š
+NÂˆWÜYÙHHYÙN“]™NÂˆ˜[šÙY[[YN™Ù]
+
+Kœİ\XÙ[Y[
+ÛÛ
+NÂˆB‚ˆ›ÚYÛ“Ü[”XÙ[Y[ÚÚ\
+ĞÓØš™Xİ
+ŠHÂˆWÛØØ[Y\ÜØYÙK˜ÛX\Š
+NÂˆWÜYÙHHYÙN”XÙ[Y[ÚÚ\ÛÛ™š\›NÂˆB‚ˆ›ÚYÛ”XÙ[Y[ÛÛ˜XÚÊĞÓØš™Xİ
+ŠHÂˆWÜYÙHHYÙN”XÙ[Y[ÛÛÙ[Xİ[ÛÂˆB‚ˆ›ÚYÛÛÛ™š\›TXÙ[Y[ÚÚ\
+ĞÓØš™Xİ
+ŠHÂˆWÜYÙHHYÙN“]™NÂˆWÛØØ[Y\ÜØYÙK˜ÛX\Š
+NÂˆ˜[šÙY[[YN™Ù]
+
+KœÚÚ\XÙ[Y[
+
+NÂˆB‚ˆ›ÚYÛÛÛ[YTXÙ[Y[
+ĞÓØš™Xİ
+ŠHÂˆWÛØØ[Y\ÜØYÙK˜ÛX\Š
+NÂˆ˜[šÙY[[YN™Ù]
+
+K˜ÛÛ[YTXÙ[Y[
+
+NÂˆB‚ˆ›ÚYÛ“X]™JĞÓØš™Xİ
+ŠHÂˆ˜[šÙY[[YN™Ù]
+
+K›X]™T]Y]YJ
+NÂˆB‚ˆ›ÚYÛ”™]JĞÓØš™Xİ
+ŠHÂˆ˜[šÙY[[YN™Ù]
+
+K˜™YÚ[Š
+NÂˆB‚ˆ›ÚYÙ[Xİ[™İXYÙJÛÜ[Nœ˜[šÙYšLN“[™İXYÙH[™İXYÙJHÂˆYˆ
+ÛÜ[Nœ˜[šÙYšLN›[™İXYÙJ
+HOH[™İXYÙJH™]\›ÂˆÛÜ[Nœ˜[šÙYšLNœÙ][™İXYÙJ[™İXYÙJNÂˆËÈHÙ[XİYY[H][H\Èİ[[œÚYHĞÓY[N˜Xİ]˜]J
+H\™Kˆ]BˆËÈ™^ØÚY[YRH\ÜÈ™XZ[H™YHY\ˆİXÚ\Ü]Úš[š\Ú\Ë‚ˆWÜ™[™\™YZRÙ^K˜ÛX\Š
+NÂˆWÙ˜YR[“™^™[™\ˆH˜[ÙNÂˆB‚ˆ›ÚYÛ‘[™Û\Ú
+ĞÓØš™Xİ
+ŠHÂˆÙ[Xİ[™İXYÙJÛÜ[Nœ˜[šÙYšLN“[™İXYÙN‘[™Û\Ú
+NÂˆB‚ˆ›ÚYÛ’ÛÜ™X[ŠĞÓØš™Xİ
+ŠHÂˆÙ[Xİ[™İXYÙJÛÜ[Nœ˜[šÙYšLN“[™İXYÙN’ÛÜ™X[ŠNÂˆB‚ˆÚYˆYš[™Y
+ÓÔ•SWÔS’ÑQÑP•Q×Ğ“ÕÓPUÒ
+Bˆ›ÚYÛ‘XYĞ›İ
+ĞÓØš™Xİ
+ŠHÂˆÛÜ[Nœ˜[šÙYœÚİÑXYĞ›İ\ÜİÛÜ™Ü\
+
+NÂˆBˆÙ[™Y‚‚ˆ›ÚYÛ˜[ŠĞÓØš™Xİ
+ˆÙ[™\ŠHÂˆYˆ
+[WÜÙ[XİY˜[‹™[\J
+H[WÜ[™[™Ğ˜[‹™[\J
+JH™]\›Âˆ]]ÈÛÛœİ[™^HÙ[™\ˆÈÙ[™\‹O™Ù]YÊ
+HˆLNÂˆ]]ÈÛÛœİ	ˆX\ÈH˜[šÙY[[YN™Ù]
+
+KšY]Ê
+K›X]Ú˜Ø[™Y]SX\ÎÂˆYˆ
+[™^İ]X×ØØ\İİœÚ^™WİŠ[™^
+HHX\ËœÚ^™J
+JH™]\›ÂˆWÜ[™[™Ğ˜[ˆHX\ÖÜİ]X×ØØ\İİœÚ^™WİŠ[™^
+WK˜Ø[›ÛšXØ[]™[YÂˆ˜[šÙY[[YN™Ù]
+
+KœİX›Z]˜[ŠWÜ[™[™Ğ˜[ŠNÂˆB‚ˆ›ÚYÛ‘İÛ›ØYX\
+ĞÓØš™Xİ
+ŠHÂˆÜ[”ÛÛ™ÑİÛ›ØYØ]J
+NÂˆB‚ˆ›ÚYÛ‘İÛ›ØYÛÛ™ÊĞÓØš™Xİ
+ŠHÂˆÜ[”ÛÛ™ÑİÛ›ØYØ]J
+NÂˆB‚ˆ›ÚYÛ”]Y]YPYØZ[ŠĞÓØš™Xİ
+ŠHÂˆWÜYÙHHYÙN“]™NÂˆ˜[šÙY[[YN™Ù]
+
+Kœ]Y]YPYØZ[Š
+NÂˆB‚ˆ›ÚYÛ”™\İ[ÛÜÙJĞÓØš™Xİ
+ŠHÂˆ˜[šÙY[[YN™Ù]
+
+K™\ÛZ\ÜÓX]Ú
+
+NÂˆWÜYÙHHYÙN“]™NÂˆB‚ˆ›ÚYÛ’\İÜJĞÓØš™Xİ
+ŠHÂˆWÜYÙHHYÙN’\İÜS\İÂˆ˜[šÙY[[YN™Ù]
+
+K™™]Ú\İÜJ
+NÂˆB‚ˆ›ÚYÛ’\İÜQ]Z[
+ĞÓØš™Xİ
+ˆÙ[™\ŠHÂˆ]]ÈÛÛœİ[™^HÙ[™\ˆÈÙ[™\‹O™Ù]YÊ
+HˆLNÂˆYˆ
+[™^
+H™]\›ÂˆWÚ\İÜR[™^Hİ]X×ØØ\İİœÚ^™WİŠ[™^
+NÂˆWÜYÙHHYÙN’\İÜQ]Z[ÂˆB‚ˆ›ÚYÛ’\İÜP˜XÚÊĞÓØš™Xİ
+ŠHÂˆYˆ
+WÜYÙHOHYÙN”XÙ[Y[ÚÚ\ÛÛ™š\›JHÂˆWÜYÙHHYÙN”XÙ[Y[ÛÛÙ[Xİ[ÛÂˆH[ÙHYˆ
+WÜYÙHOHYÙN’\İÜQ]Z[
+HÂˆWÜYÙHHYÙN’\İÜS\İÂˆH[ÙHÂˆWÜYÙHHYÙN“]™NÂˆBˆB‚ˆ›ÚYÛÛÜÙS^Y\ŠĞÓØš™Xİ
+ŠHÂˆYˆ
+˜[šÙY[[YN™Ù]
+
+KšY]Ê
+KœİYÙHOH[[YTİYÙN”]Y]YY
+H˜[šÙY[[YN™Ù]
+
+K›X]™T]Y]YJ
+NÂˆ˜[šÙY]Y[ÓX[˜YÙ\™Ù]
+
+Kœ™\İÜ™SY[S]\ÚXÊ
+NÂˆ[œØÚY[JØÚY[WÜÙ[XİÜŠÛÜ[T˜[šÙY^Y\œ™Yœ™\Ú
+JNÂˆÙ]Ù^\Y[˜X›Y
+˜[ÙJNÂˆYˆ
+WÛY[JHÂˆYˆ
+WÛY[KO›WÜÙ[XİY][JHÂˆWÛY[KO›WÜÙ[XİY][HH[ÂˆBˆWÛY[KOœÙ]İXÚ[˜X›Y
+˜[ÙJNÂˆBˆËÈ˜[šÙY›İÈ]™\È[ˆ]ÈİÛˆÑ\İ[HØÙ[™KİX‹ˆ™]\›ˆÈH™]š[İ\ÂˆËÈÙ[ÛY]H\ÚØÙ[™H[œİXYÙˆY\™[H[][™ÈH[ØÜ™Y[ˆÚ[‚ˆĞÑ\™XİÜœÚ\™Y\™XİÜŠ
+KOœÜØÙ[™J
+NÂˆB‚ˆ›ÚYÛ‘^]
+
+Hİ™\œšYHÂˆ[œØÚY[JØÚY[WÜÙ[XİÜŠÛÜ[T˜[šÙY^Y\œ™Yœ™\Ú
+JNÂˆØ[˜Ù[^Xİ]™[ÛÚİ\
+
+NÂˆWÜ˜[šÕ˜[œÚ][Û“^Y\ˆH[ÂˆÙ]Ù^\Y[˜X›Y
+˜[ÙJNÂˆYˆ
+WÛY[JHÂˆYˆ
+WÛY[KO›WÜÙ[XİY][JHÂˆWÛY[KO›WÜÙ[XİY][HH[ÂˆBˆWÛY[KOœÙ]İXÚ[˜X›Y
+˜[ÙJNÂˆBˆĞÓ^Y\ÛÛÜ›Û‘^]
+
+NÂˆB‚ˆ›ÚYÙ^P˜XÚĞÛXÚÙY
+
+Hİ™\œšYHÂˆYˆ
+WÜ˜[šÕ˜[œÚ][Û“^Y\ŠH™]\›ÂˆYˆ
+WÜYÙHOHYÙN“]™JHÂˆÛ’\İÜP˜XÚÊ[ŠNÂˆ™]\›ÂˆBˆ]]ÈÛÛœİ	ˆšY]ÈH˜[šÙY[[YN™Ù]
+
+KšY]Ê
+NÂˆYˆ
+ˆšY]ËœİYÙHOH[[YTİYÙN“X]ÚY	‰‚ˆšY]Ë›X]Úœİ]HOH“PUÒÔ‘TÕSˆ	‰‚ˆšY]Ë›X]Úœİ]HOHĞSÑSQ‚ˆ
+HÂˆWÛØØ[Y\ÜØYÙHH”˜[šÙY\ÈXİ]™Kˆš[š\ÚHX]Ú™Y›Ü™HX]š[™È\ÈØÜ™Y[‹ˆÂˆ™]\›ÂˆBˆÛÛÜÙS^Y\Š[ŠNÂˆB‚œX›XÎ‚ˆİ]XÈÛÜ[T˜[šÙY^Y\ŠˆÜ™X]J
+HÂˆ]]Êˆ^Y\ˆH™]ÈÛÜ[T˜[šÙY^Y\Š
+NÂˆYˆ
+^Y\ˆ	‰ˆ^Y\‹Oš[š]
+
+JHÂˆ^Y\‹O˜]]Ü™[X\ÙJ
+NÂˆ™]\›ˆ^Y\ÂˆBˆ[]H^Y\Âˆ™]\›ˆ[ÂˆBŸNÂ‚ŸHËÈ˜[Y\ÜXÙB‚›˜[Y\ÜXÙHÛÜ[Nœ˜[šÙYÂ‚›ÚYÚİÔ˜[šÙYÜ\
+
+HÂˆ]]Êˆ[›š[™ÈHĞÑ\™XİÜœÚ\™Y\™XİÜŠ
+KO™Ù][›š[™ÔØÙ[™J
+NÂˆYˆ
+\[›š[™È[›š[™ËO™Ù]Ú[RQ
+˜ÛÜ[K\˜[šÙYY[ØÜ™Y[ˆ—ÜÜŠJH™]\›Â‚ˆ]]ÊˆØÙ[™HHĞÔØÙ[™N˜Ü™X]J
+NÂˆØÙ[™KOœÙ]Q
+˜ÛÜ[K\˜[šÙY\ØÙ[™H—ÜÜŠNÂˆYˆ
+]]Êˆ^Y\ˆHÛÜ[T˜[šÙY^Y\˜Ü™X]J
+JHÂˆØÙ[™KO˜YÚ[
+^Y\‹JNÂˆH[ÙHÂˆ™]\›ÂˆBˆĞÑ\™XİÜœÚ\™Y\™XİÜŠ
+KOœ\ÚØÙ[™JĞÕ˜[œÚ][Û‘˜YN˜Ü™X]JŒY‹ØÙ[™JJNÂŸB‚ŸHËÈ˜[Y\ÜXÙHÛÜ[Nœ˜[šÙY
