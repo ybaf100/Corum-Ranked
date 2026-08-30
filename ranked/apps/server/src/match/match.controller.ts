@@ -39,7 +39,7 @@ const withVisiblePrepareDeadline = <T>(payload: T): T => {
   return {
     ...state,
     deadlineAt: new Date(resourceDeadlineMs - PVP_PREPARE_DEADLINE_OFFSET_MS).toISOString(),
-  } as T;
+  } as unknown as T;
 };
 
 @Controller("api/ranked/matches")
