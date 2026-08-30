@@ -1,0 +1,806 @@
+diff --git a/corum-ranked-mod/changelog.md b/corum-ranked-mod/changelog.md
+index 83c5380..439b156 100644
+--- a/corum-ranked-mod/changelog.md
++++ b/corum-ranked-mod/changelog.md
+@@ -1,3 +1,8 @@
++## v0.5.0-beta.11
++- Placement 시작 시 3회/5회 진행 방식을 선택할 수 있습니다. 선택 후에는 변경할 수 없습니다.
++- 3회 Placement는 3 Stage(6 Map)로 종료되며 최대 배치는 AQUA로 제한됩니다.
++- Placement 시작 설정 화면에 제한 경고와 배치 건너뛰기를 함께 배치했습니다.
++
+ # v0.5.0-beta.10
+ 
+ - Restored PvP Round and Death Match preparation to an exact ten-second countdown instead of the legacy 60-second resource floor.
+diff --git a/corum-ranked-mod/mod.json b/corum-ranked-mod/mod.json
+index e1f3ee1..06d4780 100644
+--- a/corum-ranked-mod/mod.json
++++ b/corum-ranked-mod/mod.json
+@@ -8,7 +8,7 @@
+   },
+   "id": "hwanhee1.corum_ranked",
+   "name": "Corum Ranked",
+-  "version": "v0.5.0-beta.10",
++  "version": "v0.5.0-beta.11",
+   "developer": "hwanhee1",
+   "description": "A separate server-authoritative Corum Ranked client. It does not share runtime state or UI with Corum Integration.",
+   "dependencies": {
+@@ -43,17 +43,17 @@
+       "CorumSansSemiBold": {
+         "path": "resources/CorumSansSemiBold.ttf",
+         "size": 64,
+-        "charset": "32-126,183,8226,44032,44036,44053,44060,44144,44160,44208,44221,44228,44256,44277,44284,44288,44397,44540,44553,44592,44620,45149,45208,45212,45216,45224,45228,45236,45432,45716,45768,45796,45800,45824,45908,45936,46020,46041,46104,46108,46121,46160,46300,46304,46321,46356,46412,46972,47000,47021,47084,47112,47196,47197,47308,47448,47484,47532,47560,47561,47588,47605,47728,47732,47784,47785,47924,48176,48180,48264,48320,48372,48512,48520,48708,49345,49353,49440,49464,49548,49549,49688,49828,49845,49849,49884,49892,50612,50630,50632,50640,50672,50724,50756,50808,50836,50868,50976,51008,51012,51020,51032,51060,51064,51068,51089,51116,51137,51204,51216,51221,51228,51333,51456,51473,51592,51596,51648,51652,51704,52286,52376,52572,52628,52712,52824,52845,53356,53364,53469,54021,54056,54596,54616,54620,54624,54633,54637,54665,54788,54868,54924,54952,54980,45733,47564,48120,48260,49436,49569,50629,53552,53944,54540,44148,45320,46832,44428,44544,45803,46028,46848,47540,48296,49905,50668,50948,51593,52395,52404,54869,9675,9679"
++        "charset": "32-126,183,8226,9675,9679,44032,44036,44053,44060,44144,44148,44160,44208,44221,44228,44256,44277,44284,44288,44397,44428,44540,44544,44553,44592,44620,45149,45208,45212,45216,45224,45228,45230,45236,45320,45432,45716,45733,45768,45796,45800,45803,45824,45908,45936,46020,46028,46041,46104,46108,46121,46160,46300,46304,46321,46356,46412,46608,46832,46848,46972,47000,47021,47084,47112,47196,47197,47308,47448,47484,47532,47540,47560,47561,47564,47588,47605,47676,47728,47732,47784,47785,47924,48120,48176,48180,48260,48264,48276,48296,48320,48372,48512,48520,48708,49345,49353,49436,49440,49444,49464,49548,49549,49569,49688,49828,49845,49849,49884,49892,49905,50500,50612,50629,50630,50632,50640,50668,50672,50724,50756,50808,50836,50868,50948,50976,51008,51012,51020,51032,51060,51064,51068,51077,51089,51116,51137,51200,51204,51216,51221,51228,51333,51456,51473,51592,51593,51596,51648,51652,51665,51704,52286,52376,52395,52404,52572,52628,52712,52824,52845,53356,53364,53469,53552,53944,54021,54056,54540,54596,54616,54620,54624,54633,54637,54665,54788,54868,54869,54924,54943,54952,54980"
+       },
+       "CorumSansBold": {
+         "path": "resources/CorumSansBold.ttf",
+         "size": 64,
+-        "charset": "32-126,183,8226,44032,44036,44053,44060,44144,44160,44208,44221,44228,44256,44277,44284,44288,44397,44540,44553,44592,44620,45149,45208,45212,45216,45224,45228,45236,45432,45716,45768,45796,45800,45824,45908,45936,46020,46041,46104,46108,46121,46160,46300,46304,46321,46356,46412,46972,47000,47021,47084,47112,47196,47197,47308,47448,47484,47532,47560,47561,47588,47605,47728,47732,47784,47785,47924,48176,48180,48264,48320,48372,48512,48520,48708,49345,49353,49440,49464,49548,49549,49688,49828,49845,49849,49884,49892,50612,50630,50632,50640,50672,50724,50756,50808,50836,50868,50976,51008,51012,51020,51032,51060,51064,51068,51089,51116,51137,51204,51216,51221,51228,51333,51456,51473,51592,51596,51648,51652,51704,52286,52376,52572,52628,52712,52824,52845,53356,53364,53469,54021,54056,54596,54616,54620,54624,54633,54637,54665,54788,54868,54924,54952,54980,45733,47564,48120,48260,49436,49569,50629,53552,53944,54540,44148,45320,46832,44428,44544,45803,46028,46848,47540,48296,49905,50668,50948,51593,52395,52404,54869,9675,9679"
++        "charset": "32-126,183,8226,9675,9679,44032,44036,44053,44060,44144,44148,44160,44208,44221,44228,44256,44277,44284,44288,44397,44428,44540,44544,44553,44592,44620,45149,45208,45212,45216,45224,45228,45230,45236,45320,45432,45716,45733,45768,45796,45800,45803,45824,45908,45936,46020,46028,46041,46104,46108,46121,46160,46300,46304,46321,46356,46412,46608,46832,46848,46972,47000,47021,47084,47112,47196,47197,47308,47448,47484,47532,47540,47560,47561,47564,47588,47605,47676,47728,47732,47784,47785,47924,48120,48176,48180,48260,48264,48276,48296,48320,48372,48512,48520,48708,49345,49353,49436,49440,49444,49464,49548,49549,49569,49688,49828,49845,49849,49884,49892,49905,50500,50612,50629,50630,50632,50640,50668,50672,50724,50756,50808,50836,50868,50948,50976,51008,51012,51020,51032,51060,51064,51068,51077,51089,51116,51137,51200,51204,51216,51221,51228,51333,51456,51473,51592,51593,51596,51648,51652,51665,51704,52286,52376,52395,52404,52572,52628,52712,52824,52845,53356,53364,53469,53552,53944,54021,54056,54540,54596,54616,54620,54624,54633,54637,54665,54788,54868,54869,54924,54943,54952,54980"
+       },
+       "CorumSansBlack": {
+         "path": "resources/CorumSansBlack.ttf",
+         "size": 64,
+-        "charset": "32-126,183,8226,44032,44036,44053,44060,44144,44160,44208,44221,44228,44256,44277,44284,44288,44397,44540,44553,44592,44620,45149,45208,45212,45216,45224,45228,45236,45432,45716,45768,45796,45800,45824,45908,45936,46020,46041,46104,46108,46121,46160,46300,46304,46321,46356,46412,46972,47000,47021,47084,47112,47196,47197,47308,47448,47484,47532,47560,47561,47588,47605,47728,47732,47784,47785,47924,48176,48180,48264,48320,48372,48512,48520,48708,49345,49353,49440,49464,49548,49549,49688,49828,49845,49849,49884,49892,50612,50630,50632,50640,50672,50724,50756,50808,50836,50868,50976,51008,51012,51020,51032,51060,51064,51068,51089,51116,51137,51204,51216,51221,51228,51333,51456,51473,51592,51596,51648,51652,51704,52286,52376,52572,52628,52712,52824,52845,53356,53364,53469,54021,54056,54596,54616,54620,54624,54633,54637,54665,54788,54868,54924,54952,54980,45733,47564,48120,48260,49436,49569,50629,53552,53944,54540,44148,45320,46832,44428,44544,45803,46028,46848,47540,48296,49905,50668,50948,51593,52395,52404,54869,9675,9679"
++        "charset": "32-126,183,8226,9675,9679,44032,44036,44053,44060,44144,44148,44160,44208,44221,44228,44256,44277,44284,44288,44397,44428,44540,44544,44553,44592,44620,45149,45208,45212,45216,45224,45228,45230,45236,45320,45432,45716,45733,45768,45796,45800,45803,45824,45908,45936,46020,46028,46041,46104,46108,46121,46160,46300,46304,46321,46356,46412,46608,46832,46848,46972,47000,47021,47084,47112,47196,47197,47308,47448,47484,47532,47540,47560,47561,47564,47588,47605,47676,47728,47732,47784,47785,47924,48120,48176,48180,48260,48264,48276,48296,48320,48372,48512,48520,48708,49345,49353,49436,49440,49444,49464,49548,49549,49569,49688,49828,49845,49849,49884,49892,49905,50500,50612,50629,50630,50632,50640,50668,50672,50724,50756,50808,50836,50868,50948,50976,51008,51012,51020,51032,51060,51064,51068,51077,51089,51116,51137,51200,51204,51216,51221,51228,51333,51456,51473,51592,51593,51596,51648,51652,51665,51704,52286,52376,52395,52404,52572,52628,52712,52824,52845,53356,53364,53469,53552,53944,54021,54056,54540,54596,54616,54620,54624,54633,54637,54665,54788,54868,54869,54924,54943,54952,54980"
+       }
+     }
+   },
+diff --git a/corum-ranked-mod/src/RankedPopup.cpp b/corum-ranked-mod/src/RankedPopup.cpp
+index a3c9467..12281ab 100644
+--- a/corum-ranked-mod/src/RankedPopup.cpp
++++ b/corum-ranked-mod/src/RankedPopup.cpp
+@@ -321,6 +321,8 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate
+     std::string m_selectedBan;
+     std::string m_pendingBan;
+     std::string m_localMessage;
++    int m_selectedPlacementStageCount = 0;
++    int m_selectedPlacementPool = 0;
+     SteadyClock::time_point m_phaseStartedAt {};
+     std::vector<int> m_songIds;
+     bool m_readySent = false;
+@@ -517,7 +519,7 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate
+         }
+         if (m_page == Page::HistoryDetail) return fmt::format("history:detail:{}", m_historyIndex);
+         if (m_page == Page::PlacementPoolSelection) {
+-            return fmt::format("placement:pool:{}:{}", RankedRuntime::get().view().revision, m_localMessage);
++            return fmt::format("placement:pool:{}:{}:{}:{}", RankedRuntime::get().view().revision, m_selectedPlacementStageCount, m_selectedPlacementPool, m_localMessage);
+         }
+         if (m_page == Page::PlacementSkipConfirm) return "placement:skip-confirm";
+         auto const& view = RankedRuntime::get().view();
+@@ -1395,42 +1397,102 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate
+         addLanguageSelector();
+         addScreenHeader(
+             tr("placement-matches", "PLACEMENT"),
+-            tr("select-starting-pool", "SELECT YOUR STARTING POOL"),
++            tr("placement-setup", "PLACEMENT SETUP"),
+             kGold,
+             kCyan
+         );
+ 
+-        auto* explanation = makeLabel(
+-            tr("pool-choice-explanation", "THIS CHOICE ONLY SETS STAGE 1. YOUR RESULTS DETERMINE THE FINAL RANK."),
+-            0.23f,
+-            {size.width / 2.0f, size.height - 78.0f},
+-            corum::ranked::ui::TextMuted,
++        auto* countTitle = makeLabel(
++            tr("placement-count", "CHOOSE PLACEMENT LENGTH"),
++            0.25f,
++            {size.width / 2.0f, size.height - 72.0f},
++            corum::ranked::ui::Text,
++            "black"
++        );
++        m_root->addChild(countTitle, 5);
++
++        auto const threeCountText = corum::ranked::i18n::isKorean()
++            ? std::string("3회")
++            : std::string("3 STAGES");
++        auto const fiveCountText = corum::ranked::i18n::isKorean()
++            ? std::string("5회")
++            : std::string("5 STAGES");
++        auto* three = addButton(
++            m_selectedPlacementStageCount == 3 ? fmt::format("[ {} ]", threeCountText) : threeCountText,
++            {size.width / 2.0f - 78.0f, size.height - 97.0f},
++            menu_selector(CorumRankedLayer::onPlacementStageCount),
++            false,
++            0.54f
++        );
++        three->setTag(3);
++        auto* five = addButton(
++            m_selectedPlacementStageCount == 5 ? fmt::format("[ {} ]", fiveCountText) : fiveCountText,
++            {size.width / 2.0f + 78.0f, size.height - 97.0f},
++            menu_selector(CorumRankedLayer::onPlacementStageCount),
++            false,
++            0.54f
++        );
++        five->setTag(5);
++
++        std::string countHint;
++        ccColor3B countHintColor = corum::ranked::ui::TextMuted;
++        if (m_selectedPlacementStageCount == 3) {
++            countHint = tr(
++                "placement-three-stage-warning",
++                "WARNING: 3 STAGES LOWERS YOUR MAX PLACEMENT. MAX: AQUA. CANNOT CHANGE AFTER START."
++            );
++            countHintColor = kRed;
++        } else if (m_selectedPlacementStageCount == 5) {
++            countHint = tr(
++                "placement-five-stage-info",
++                "5 STAGES · 10 MAPS · FULL PLACEMENT RANGE · CANNOT CHANGE AFTER START."
++            );
++            countHintColor = kGreen;
++        } else {
++            countHint = tr(
++                "placement-count-lock",
++                "SELECT 3 OR 5 STAGES. THIS CANNOT BE CHANGED AFTER START."
++            );
++        }
++        auto* countHintLabel = makeLabel(
++            countHint,
++            0.20f,
++            {size.width / 2.0f, size.height - 123.0f},
++            countHintColor,
+             "semibold"
+         );
+-        explanation->limitLabelWidth(size.width - 74.0f, 0.25f, 0.17f);
+-        m_root->addChild(explanation, 5);
++        countHintLabel->limitLabelWidth(size.width - 74.0f, 0.20f, 0.14f);
++        m_root->addChild(countHintLabel, 5);
+ 
+         auto* panel = makeNeonPanel(
+-            {std::min(430.0f, size.width - 60.0f), 174.0f},
+-            {size.width / 2.0f, size.height / 2.0f + 1.0f},
++            {std::min(430.0f, size.width - 60.0f), 132.0f},
++            {size.width / 2.0f, size.height / 2.0f - 36.0f},
+             kBlue,
+             kDeepPanel,
+             244
+         );
+         m_root->addChild(panel, 1);
++        auto* poolTitle = makeLabel(
++            tr("select-starting-pool", "SELECT YOUR STARTING POOL"),
++            0.22f,
++            {size.width / 2.0f, size.height / 2.0f + 25.0f},
++            kCyan,
++            "black"
++        );
++        m_root->addChild(poolTitle, 5);
+ 
+         constexpr float spacing = 124.0f;
+         for (int pool = 1; pool <= 6; ++pool) {
+             auto const row = (pool - 1) / 3;
+             auto const column = (pool - 1) % 3;
+             auto const x = size.width / 2.0f + (static_cast<float>(column) - 1.0f) * spacing;
+-            auto const y = size.height / 2.0f + 45.0f - static_cast<float>(row) * 76.0f;
++            auto const y = size.height / 2.0f - 2.0f - static_cast<float>(row) * 48.0f;
+             auto* button = addButton(
+-                fmt::format("POOL {}", pool),
++                m_selectedPlacementPool == pool ? fmt::format("[ POOL {} ]", pool) : fmt::format("POOL {}", pool),
+                 {x, y},
+-                menu_selector(CorumRankedLayer::onStartPlacement),
++                menu_selector(CorumRankedLayer::onPlacementPoolSelect),
+                 false,
+-                0.57f
++                0.50f
+             );
+             button->setTag(pool);
+ 
+@@ -1441,36 +1503,43 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate
+             );
+             auto const referenceText = reference == view.placement.referenceMaps.end()
+                 ? tr("reference-loading", "REFERENCE MAP LOADING...")
+-                : fmt::format("{} · {} · ID {}", reference->title, reference->difficulty, reference->levelId);
++                : fmt::format("{} · {}", reference->title, reference->difficulty);
+             auto* referenceLabel = makeLabel(
+                 referenceText,
+-                0.18f,
+-                {x, y - 21.0f},
++                0.14f,
++                {x, y - 16.0f},
+                 corum::ranked::ui::TextMuted,
+                 "semibold"
+             );
+-            referenceLabel->limitLabelWidth(112.0f, 0.18f, 0.12f);
++            referenceLabel->limitLabelWidth(112.0f, 0.14f, 0.10f);
+             m_root->addChild(referenceLabel, 5);
+         }
+ 
++        addButton(
++            tr("start-placement", "START PLACEMENT"),
++            {size.width / 2.0f + 78.0f, 23.0f},
++            menu_selector(CorumRankedLayer::onStartPlacement),
++            false,
++            0.53f
++        );
+         addButton(
+             tr("skip-placement", "SKIP PLACEMENT"),
+-            {size.width / 2.0f, 22.0f},
++            {size.width / 2.0f - 78.0f, 23.0f},
+             menu_selector(CorumRankedLayer::onOpenPlacementSkip),
+             true,
+-            0.55f
++            0.50f
+         );
+ 
+-        auto detail = view.error.empty() ? view.status : view.error;
+-        if (!detail.empty() && !view.error.empty()) {
++        auto detail = !m_localMessage.empty() ? m_localMessage : (view.error.empty() ? view.status : view.error);
++        if (!detail.empty() && (!view.error.empty() || !m_localMessage.empty())) {
+             auto* status = makeLabel(
+                 shorten(detail, 96),
+-                0.25f,
++                0.20f,
+                 {size.width / 2.0f, 7.0f},
+-                view.error.empty() ? corum::ranked::ui::TextMuted : kRed,
++                view.error.empty() ? kGold : kRed,
+                 "semibold"
+             );
+-            status->limitLabelWidth(size.width - 90.0f, 0.25f, 0.16f);
++            status->limitLabelWidth(size.width - 90.0f, 0.20f, 0.14f);
+             m_mainStatusLabel = status;
+             m_root->addChild(status, 5);
+         }
+@@ -1575,7 +1644,8 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate
+                 profile.placementGames,
+                 static_cast<int>(view.placement.stageResults.size())
+             );
+-            addPlacementProgress(completedStages, std::max(1, profile.placementGamesRequired), {leftCenter.x, leftCenter.y - 51.0f}, 16.0f, 0.30f);
++            auto const placementStageTotal = view.placement.active ? view.placement.totalStages : profile.placementGamesRequired;
++            addPlacementProgress(completedStages, std::max(1, placementStageTotal), {leftCenter.x, leftCenter.y - 51.0f}, 16.0f, 0.30f);
+         } else if (profile.promotion.active) {
+             addRatingMarks(profile.promotion.results, profile.promotion.gamesRequired, {leftCenter.x, leftCenter.y - 49.0f}, 16.0f, 0.30f);
+         } else {
+@@ -1917,7 +1987,9 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate
+         addPlacementProgress(result.stageIndex, view.placement.totalStages, {center, 67.0f}, 18.0f, 0.27f);
+         auto* movement = makeLabel(
+             finalStage
+-                ? tr("all-placement-maps-complete", "ALL 10 MAPS COMPLETE")
++                ? (corum::ranked::i18n::isKorean()
++                    ? fmt::format("전체 {}개 맵 완료", view.placement.totalStages * view.placement.mapsPerStage)
++                    : fmt::format("ALL {} MAPS COMPLETE", view.placement.totalStages * view.placement.mapsPerStage))
+                 : fmt::format("{}  POOL {}  ({:+d})", tr("next", "NEXT"), result.nextPool, result.poolDelta),
+             0.30f,
+             {center, 49.0f},
+@@ -1960,7 +2032,9 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate
+         auto const& finalResult = view.placement.finalResult;
+         addScreenHeader(
+             tr("placement-complete", "PLACEMENT COMPLETE"),
+-            finalResult.skipped ? tr("placement-skipped", "PLACEMENT SKIPPED") : tr("ten-maps-five-stages", "10 MAPS · 5 STAGES"),
++            finalResult.skipped
++                ? tr("placement-skipped", "PLACEMENT SKIPPED")
++                : fmt::format("{} MAPS · {} STAGES", view.placement.totalStages * view.placement.mapsPerStage, view.placement.totalStages),
+             kGold,
+             kCyan
+         );
+@@ -3362,15 +3436,37 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate
+     void onOpenPlacement(CCObject*) {
+         if (!RankedRuntime::get().view().placement.required) return;
+         m_localMessage.clear();
++        m_selectedPlacementStageCount = 0;
++        m_selectedPlacementPool = 0;
+         m_page = Page::PlacementPoolSelection;
+     }
+ 
+-    void onStartPlacement(CCObject* sender) {
++    void onPlacementStageCount(CCObject* sender) {
++        auto const count = sender ? sender->getTag() : 0;
++        if (count != 3 && count != 5) return;
++        m_selectedPlacementStageCount = count;
++        m_localMessage.clear();
++    }
++
++    void onPlacementPoolSelect(CCObject* sender) {
+         auto const pool = sender ? sender->getTag() : 0;
+         if (pool < 1 || pool > 6) return;
++        m_selectedPlacementPool = pool;
++        m_localMessage.clear();
++    }
++
++    void onStartPlacement(CCObject*) {
++        if (m_selectedPlacementStageCount != 3 && m_selectedPlacementStageCount != 5) {
++            m_localMessage = tr("select-placement-count-first", "SELECT 3 OR 5 STAGES FIRST.");
++            return;
++        }
++        if (m_selectedPlacementPool < 1 || m_selectedPlacementPool > 6) {
++            m_localMessage = tr("select-placement-pool-first", "SELECT A STARTING POOL FIRST.");
++            return;
++        }
+         m_localMessage.clear();
+         m_page = Page::Live;
+-        RankedRuntime::get().startPlacement(pool);
++        RankedRuntime::get().startPlacement(m_selectedPlacementPool, m_selectedPlacementStageCount);
+     }
+ 
+     void onOpenPlacementSkip(CCObject*) {
+diff --git a/corum-ranked-mod/src/RankedRuntime.cpp b/corum-ranked-mod/src/RankedRuntime.cpp
+index a6aac27..ce8cbe5 100644
+--- a/corum-ranked-mod/src/RankedRuntime.cpp
++++ b/corum-ranked-mod/src/RankedRuntime.cpp
+@@ -715,10 +715,11 @@ void RankedRuntime::skipPlacement() {
+     );
+ }
+ 
+-void RankedRuntime::startPlacement(int startingPool) {
++void RankedRuntime::startPlacement(int startingPool, int stageCount) {
+     if (
+         m_controlBusy || m_sessionToken.empty() || m_view.stage != RuntimeStage::Ready ||
+-        !m_view.placement.required || m_view.placement.active || startingPool < 1 || startingPool > 6
++        !m_view.placement.required || m_view.placement.active || startingPool < 1 || startingPool > 6 ||
++        (stageCount != 3 && stageCount != 5)
+     ) return;
+     m_installedMods = captureInstalledMods();
+     auto const decision = evaluateEnvironment(m_installedMods, m_environmentPolicy);
+@@ -728,6 +729,7 @@ void RankedRuntime::startPlacement(int startingPool) {
+     }
+     matjson::Value body;
+     body["startingPool"] = startingPool;
++    body["stageCount"] = stageCount;
+     body["installedMods"] = installedModsJson();
+     auto request = baseRequest(m_sessionToken);
+     request.bodyJSON(body);
+diff --git a/corum-ranked-mod/src/RankedRuntime.hpp b/corum-ranked-mod/src/RankedRuntime.hpp
+index b013b49..c487420 100644
+--- a/corum-ranked-mod/src/RankedRuntime.hpp
++++ b/corum-ranked-mod/src/RankedRuntime.hpp
+@@ -284,7 +284,7 @@ class RankedRuntime final {
+     void begin();
+     void tick();
+     void joinQueue();
+-    void startPlacement(int startingPool);
++    void startPlacement(int startingPool, int stageCount);
+     void skipPlacement();
+     void continuePlacement();
+     void pausePlacement();
+diff --git a/corum-ranked-mod/src/ui/RankedTranslations.hpp b/corum-ranked-mod/src/ui/RankedTranslations.hpp
+index 901305f..50f2eef 100644
+--- a/corum-ranked-mod/src/ui/RankedTranslations.hpp
++++ b/corum-ranked-mod/src/ui/RankedTranslations.hpp
+@@ -34,6 +34,13 @@ inline constexpr std::array kKoreanTranslations {
+     Translation{"seasonal-progress", "시즌 래더 진행도"},
+     Translation{"placement", "배치"},
+     Translation{"placement-matches", "배치 경기"},
++    Translation{"placement-setup", "배치 설정"},
++    Translation{"placement-count", "배치 경기 횟수 선택"},
++    Translation{"placement-count-lock", "3회 또는 5회를 선택하세요. 시작 후에는 변경할 수 없습니다."},
++    Translation{"placement-three-stage-warning", "경고: 3회 배치는 배치 최대점이 낮아집니다. 최대 배치는 AQUA입니다. 시작 후 변경할 수 없습니다."},
++    Translation{"placement-five-stage-info", "5회 · 10개 맵 · 전체 배치 범위 · 시작 후 변경할 수 없습니다."},
++    Translation{"select-placement-count-first", "먼저 3회 또는 5회를 선택하세요."},
++    Translation{"select-placement-pool-first", "먼저 시작 POOL을 선택하세요."},
+     Translation{"select-starting-pool", "시작 POOL 선택"},
+     Translation{"pool-choice-explanation", "이 선택은 STAGE 1의 시작 POOL만 정합니다. 최종 랭크는 전체 결과로 결정됩니다."},
+     Translation{"start-placement", "배치 시작"},
+diff --git a/ranked/apps/server/package.json b/ranked/apps/server/package.json
+index 6fc9312..625ff90 100644
+--- a/ranked/apps/server/package.json
++++ b/ranked/apps/server/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "@corum-ranked/server",
+-  "version": "0.5.0-beta.10",
++  "version": "0.5.0-beta.11",
+   "private": true,
+   "type": "module",
+   "scripts": {
+@@ -11,7 +11,7 @@
+     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit"
+   },
+   "dependencies": {
+-    "@corum-ranked/rules": "0.5.0-beta.10",
++    "@corum-ranked/rules": "0.5.0-beta.11",
+     "@nestjs/common": "11.2.1",
+     "@nestjs/core": "11.2.1",
+     "@nestjs/platform-express": "11.2.1",
+diff --git a/ranked/apps/server/src/placement/placement.dto.ts b/ranked/apps/server/src/placement/placement.dto.ts
+index 98b484d..2a4e2b7 100644
+--- a/ranked/apps/server/src/placement/placement.dto.ts
++++ b/ranked/apps/server/src/placement/placement.dto.ts
+@@ -1,5 +1,5 @@
+ import { Type } from "class-transformer";
+-import { IsInt, Max, Min } from "class-validator";
++import { IsIn, IsInt, Max, Min } from "class-validator";
+ import { AttemptEndDto, AttemptProgressDto, AttemptStartDto } from "../match/match.dto.js";
+ import { EnvironmentRecheckDto } from "../session/session.dto.js";
+ 
+@@ -9,6 +9,11 @@ export class StartPlacementDto extends EnvironmentRecheckDto {
+   @Min(1)
+   @Max(6)
+   public startingPool!: 1 | 2 | 3 | 4 | 5 | 6;
++
++  @Type(() => Number)
++  @IsInt()
++  @IsIn([3, 5])
++  public stageCount!: 3 | 5;
+ }
+ 
+ export class ReadyPlacementMapDto extends EnvironmentRecheckDto {}
+diff --git a/ranked/apps/server/src/placement/placement.service.ts b/ranked/apps/server/src/placement/placement.service.ts
+index 81cfcdd..fabc9b1 100644
+--- a/ranked/apps/server/src/placement/placement.service.ts
++++ b/ranked/apps/server/src/placement/placement.service.ts
+@@ -8,6 +8,7 @@ import {
+ import {
+   calculatePlacementMapScore,
+   calculatePlacementRating,
++  capPlacementRatingForStageCount,
+   calculatePlacementStageScore,
+   finalizePlacementScore,
+   scoreAttempt,
+@@ -62,6 +63,7 @@ interface PlacementRunRow {
+   state: PlacementState;
+   state_version: number;
+   starting_pool: number;
++  stage_count: number;
+   current_stage_index: number;
+   current_map_index: number;
+   stage_pools: unknown;
+@@ -243,15 +245,16 @@ export class PlacementService {
+       await transaction.query(
+         `INSERT INTO ranked_placement_runs (
+            id, player_id, config_snapshot_id, config_generation, state,
+-           starting_pool, current_stage_index, current_map_index, stage_pools,
++           starting_pool, stage_count, current_stage_index, current_map_index, stage_pools,
+            map_snapshots, last_heartbeat_at, deadline_at, started_at
+-         ) VALUES ($1, $2, $3, $4, 'POOL_SELECTION', $5, 1, 1, $6::jsonb, $7::jsonb, $8, NULL, $8)`,
++         ) VALUES ($1, $2, $3, $4, 'POOL_SELECTION', $5, $6, 1, 1, $7::jsonb, $8::jsonb, $9, NULL, $9)`,
+         [
+           id,
+           session.playerId,
+           configSnapshotId,
+           snapshot.generation,
+           body.startingPool,
++          body.stageCount,
+           JSON.stringify([body.startingPool]),
+           JSON.stringify(serializedMaps),
+           now.toISOString(),
+@@ -646,7 +649,7 @@ export class PlacementService {
+         return;
+       }
+       if (run.state === "STAGE_RESULT") {
+-        if (Number(run.current_stage_index) >= policy.stageCount) {
++        if (Number(run.current_stage_index) >= Number(run.stage_count)) {
+           await this.finalizePlacement(transaction, run, snapshot, policy, now);
+           return;
+         }
+@@ -902,13 +905,29 @@ export class PlacementService {
+       "SELECT * FROM ranked_placement_maps WHERE run_id = $1 ORDER BY stage_index, map_index FOR UPDATE",
+       [run.id],
+     );
++    const rawStageCount = Number(run.stage_count);
++    if (rawStageCount !== 3 && rawStageCount !== 5) {
++      throw new Error('Placement Run has invalid stage count');
++    }
++    const stageCount: 3 | 5 = rawStageCount;
++    const runPolicy: PlacementPolicy = { ...policy, stageCount };
+     const rating = calculatePlacementRating(maps.rows.map((map) => ({
+       pool: Number(map.pool) as PoolNumber,
+       mapScore: Number(map.map_score),
+       mapGrade: map.map_grade,
+       stageIndex: Number(map.stage_index) - 1,
+-    })), policy);
+-    const finalized = finalizePlacementScore(rating.hiddenMmr, snapshot.operational.tierBands);
++    })), runPolicy);
++    const finalPlacementRating = capPlacementRatingForStageCount(
++      rating.placementRating,
++      stageCount,
++      snapshot.operational.tierBands,
++    );
++    const finalHiddenMmr = capPlacementRatingForStageCount(
++      rating.hiddenMmr,
++      stageCount,
++      snapshot.operational.tierBands,
++    );
++    const finalized = finalizePlacementScore(finalHiddenMmr, snapshot.operational.tierBands);
+     const placementGames = snapshot.operational.mmrPolicy?.placementGames;
+     if (!placementGames) throw new Error("Placement snapshot has no MMR policy");
+     await transaction.query(
+@@ -921,7 +940,7 @@ export class PlacementService {
+            demotion_warning = FALSE, updated_at = $5
+        WHERE player_id = $6`,
+       [
+-        rating.hiddenMmr,
++        finalHiddenMmr,
+         finalized.visibleRankedScore,
+         finalized.displayedTier,
+         placementGames,
+@@ -937,8 +956,8 @@ export class PlacementService {
+            finalized_at = $5, deadline_at = NULL, completion_kind = 'COMPLETED'
+        WHERE id = $6 AND finalized_at IS NULL`,
+       [
+-        rating.placementRating,
+-        rating.hiddenMmr,
++        finalPlacementRating,
++        finalHiddenMmr,
+         finalized.visibleRankedScore,
+         finalized.displayedTier,
+         now.toISOString(),
+@@ -1008,7 +1027,7 @@ export class PlacementService {
+       startingPool: Number(run.starting_pool),
+       currentStageIndex: Number(run.current_stage_index),
+       currentMapIndex: Number(run.current_map_index),
+-      totalStages: 5,
++      totalStages: Number(run.stage_count),
+       mapsPerStage: 2,
+       stagePools: asArray(run.stage_pools),
+       stageResults: asArray(run.stage_results),
+diff --git a/ranked/apps/server/src/session/client-version.ts b/ranked/apps/server/src/session/client-version.ts
+index c8581c7..a6455fe 100644
+--- a/ranked/apps/server/src/session/client-version.ts
++++ b/ranked/apps/server/src/session/client-version.ts
+@@ -1,4 +1,4 @@
+-export const REQUIRED_RANKED_CLIENT_VERSION = "v0.5.0-beta.10";
++export const REQUIRED_RANKED_CLIENT_VERSION = "v0.5.0-beta.11";
+ 
+ export interface RankedClientVersionMod {
+   readonly id: string;
+diff --git a/ranked/apps/server/test/client-version.test.ts b/ranked/apps/server/test/client-version.test.ts
+index aca5493..e517b3c 100644
+--- a/ranked/apps/server/test/client-version.test.ts
++++ b/ranked/apps/server/test/client-version.test.ts
+@@ -22,7 +22,7 @@ describe("Ranked client version gate", () => {
+ 
+   it("accepts the same current version with or without a leading v", () => {
+     expect(
+-      evaluateRankedClientVersion("0.5.0-beta.10", [clientMod("0.5.0-beta.10")]).allowed,
++      evaluateRankedClientVersion("0.5.0-beta.11", [clientMod("0.5.0-beta.11")]).allowed,
+     ).toBe(true);
+   });
+ 
+@@ -32,7 +32,7 @@ describe("Ranked client version gate", () => {
+     ]);
+     expect(result).toMatchObject({
+       allowed: false,
+-      requiredVersion: "v0.5.0-beta.10",
++      requiredVersion: "v0.5.0-beta.11",
+       clientVersion: "v0.5.0-beta.8",
+     });
+   });
+diff --git a/ranked/apps/server/test/debug-bot.integration.test.ts b/ranked/apps/server/test/debug-bot.integration.test.ts
+index 384f67b..69f637e 100644
+--- a/ranked/apps/server/test/debug-bot.integration.test.ts
++++ b/ranked/apps/server/test/debug-bot.integration.test.ts
+@@ -56,7 +56,7 @@ class FixedCsmpSource implements CsmpTierSource {
+ const cleanMods: CreateSessionDto["installedMods"] = [
+   {
+     id: "hwanhee1.corum_ranked",
+-    version: "v0.5.0-beta.10",
++    version: "v0.5.0-beta.11",
+     enabled: true,
+     loaded: true,
+     internal: false,
+@@ -147,7 +147,7 @@ describe("development-only Bot Match using the production Ranked engine", () =>
+     const created = await sessions.create({
+       gdAccountId: accountId,
+       gdUsername: `Debug${accountId}`,
+-      clientVersion: "v0.5.0-beta.10",
++      clientVersion: "v0.5.0-beta.11",
+       installedMods: structuredClone(cleanMods),
+     });
+     await database.query(
+diff --git a/ranked/apps/server/test/placement-flow.integration.test.ts b/ranked/apps/server/test/placement-flow.integration.test.ts
+index 87ee734..89add3c 100644
+--- a/ranked/apps/server/test/placement-flow.integration.test.ts
++++ b/ranked/apps/server/test/placement-flow.integration.test.ts
+@@ -30,6 +30,7 @@ beforeAll(async () => {
+     "0006_v050_dynamic_csmp_tiers.sql",
+     "0007_solo_stage_placement.sql",
+     "0008_placement_beta9.sql",
++    "0009_placement_stage_count.sql",
+   ]) {
+     const migrationPath = fileURLToPath(
+       new URL(`../../../migrations/${migrationName}`, import.meta.url),
+@@ -65,7 +66,7 @@ class FixedCsmpSource implements CsmpTierSource {
+ const cleanMods: CreateSessionDto["installedMods"] = [
+   {
+     id: "hwanhee1.corum_ranked",
+-    version: "0.5.0-beta.10",
++    version: "0.5.0-beta.11",
+     enabled: true,
+     loaded: true,
+     internal: false,
+@@ -113,7 +114,7 @@ describe("server-authoritative solo Stage Placement", () => {
+     const created = await sessions.create({
+       gdAccountId: "9901",
+       gdUsername: "PlacementPlayer",
+-      clientVersion: "v0.5.0-beta.10",
++      clientVersion: "v0.5.0-beta.11",
+       installedMods: structuredClone(cleanMods),
+     });
+     const contextRow = await database.query<{
+@@ -151,10 +152,17 @@ describe("server-authoritative solo Stage Placement", () => {
+ 
+     let state = await placement.start(session, {
+       startingPool: 3,
++      stageCount: 5,
+       installedMods: structuredClone(cleanMods),
+     }) as Record<string, any>;
+     const runId = state.runId as string;
+-    expect(state).toMatchObject({ state: "MAP_PREPARE", currentStageIndex: 1, currentMapIndex: 1 });
++    expect(state).toMatchObject({ state: "MAP_PREPARE", currentStageIndex: 1, currentMapIndex: 1, totalStages: 5 });
++    const immutable = await placement.start(session, {
++      startingPool: 6,
++      stageCount: 3,
++      installedMods: structuredClone(cleanMods),
++    }) as Record<string, any>;
++    expect(immutable).toMatchObject({ runId, totalStages: 5, startingPool: 3 });
+     expect(await placement.active(session)).toMatchObject({
+       active: true,
+       action: "RESUME_PLACEMENT",
+@@ -414,7 +422,7 @@ describe("server-authoritative solo Stage Placement", () => {
+     const created = await sessions.create({
+       gdAccountId: "9902",
+       gdUsername: "PlacementSkipPlayer",
+-      clientVersion: "v0.5.0-beta.10",
++      clientVersion: "v0.5.0-beta.11",
+       installedMods: structuredClone(cleanMods),
+     });
+     const contextRow = await database.query<{
+diff --git a/ranked/migrations/0009_placement_stage_count.sql b/ranked/migrations/0009_placement_stage_count.sql
+new file mode 100644
+index 0000000..0254fa3
+--- /dev/null
++++ b/ranked/migrations/0009_placement_stage_count.sql
+@@ -0,0 +1,13 @@
++BEGIN;
++
++ALTER TABLE ranked_placement_runs
++    ADD COLUMN IF NOT EXISTS stage_count SMALLINT NOT NULL DEFAULT 5;
++
++ALTER TABLE ranked_placement_runs
++    DROP CONSTRAINT IF EXISTS ranked_placement_runs_stage_count_check;
++
++ALTER TABLE ranked_placement_runs
++    ADD CONSTRAINT ranked_placement_runs_stage_count_check
++    CHECK (stage_count IN (3, 5));
++
++COMMIT;
+diff --git a/ranked/package-lock.json b/ranked/package-lock.json
+index d048db5..85b85af 100644
+--- a/ranked/package-lock.json
++++ b/ranked/package-lock.json
+@@ -1,12 +1,12 @@
+ {
+   "name": "corum-ranked",
+-  "version": "0.5.0-beta.10",
++  "version": "0.5.0-beta.11",
+   "lockfileVersion": 3,
+   "requires": true,
+   "packages": {
+     "": {
+       "name": "corum-ranked",
+-      "version": "0.5.0-beta.10",
++      "version": "0.5.0-beta.11",
+       "workspaces": [
+         "packages/*",
+         "apps/*",
+@@ -22,9 +22,9 @@
+     },
+     "apps/server": {
+       "name": "@corum-ranked/server",
+-      "version": "0.5.0-beta.10",
++      "version": "0.5.0-beta.11",
+       "dependencies": {
+-        "@corum-ranked/rules": "0.5.0-beta.10",
++        "@corum-ranked/rules": "0.5.0-beta.11",
+         "@nestjs/common": "11.2.1",
+         "@nestjs/core": "11.2.1",
+         "@nestjs/platform-express": "11.2.1",
+@@ -3194,7 +3194,7 @@
+     },
+     "packages/rules": {
+       "name": "@corum-ranked/rules",
+-      "version": "0.5.0-beta.10"
++      "version": "0.5.0-beta.11"
+     }
+   }
+ }
+diff --git a/ranked/package.json b/ranked/package.json
+index 2249387..2d23e88 100644
+--- a/ranked/package.json
++++ b/ranked/package.json
+@@ -1,7 +1,7 @@
+ {
+   "name": "corum-ranked",
+   "private": true,
+-  "version": "0.5.0-beta.10",
++  "version": "0.5.0-beta.11",
+   "workspaces": [
+     "packages/*",
+     "apps/*",
+diff --git a/ranked/packages/rules/package.json b/ranked/packages/rules/package.json
+index b6085ad..abf7cef 100644
+--- a/ranked/packages/rules/package.json
++++ b/ranked/packages/rules/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "@corum-ranked/rules",
+-  "version": "0.5.0-beta.10",
++  "version": "0.5.0-beta.11",
+   "private": true,
+   "type": "module",
+   "main": "./dist/index.js",
+diff --git a/ranked/packages/rules/src/placement.ts b/ranked/packages/rules/src/placement.ts
+index 3c0415c..2579edb 100644
+--- a/ranked/packages/rules/src/placement.ts
++++ b/ranked/packages/rules/src/placement.ts
+@@ -8,6 +8,7 @@ import type {
+   PoolNumber,
+   RankedMap,
+   RankedMapSnapshot,
++  TierBand,
+ } from "./types.js";
+ 
+ export const PLACEMENT_MAP_SCORE_MAXIMUM = 500;
+@@ -261,6 +262,32 @@ export const selectPlacementReferenceMaps = (
+   });
+ };
+ 
++/**
++ * Three-stage Placement intentionally trades certainty for speed. Its result
++ * can never seed the player above the highest score that Placement may assign
++ * to AQUA. The -16 offset preserves the global inclusive +/-15 cutoff
++ * exclusion around the BRONZE boundary.
++ */
++export const capPlacementRatingForStageCount = (
++  rating: number,
++  stageCount: number,
++  bands: readonly TierBand[],
++): number => {
++  if (!Number.isFinite(rating)) {
++    throw new RankedDomainError("INVALID_CONFIG", "Placement rating must be finite");
++  }
++  if (stageCount === 5) return rating;
++  if (stageCount !== 3) {
++    throw new RankedDomainError("INVALID_CONFIG", "Placement stageCount must be 3 or 5", { stageCount });
++  }
++  const aqua = bands.find((band) => band.tier === "AQUA");
++  const bronze = bands.find((band) => band.tier === "BRONZE");
++  if (!aqua || !bronze || bronze.minInclusive <= aqua.minInclusive) {
++    throw new RankedDomainError("INVALID_CONFIG", "AQUA/BRONZE tier boundaries are invalid");
++  }
++  return Math.min(rating, bronze.minInclusive - 16);
++};
++
+ const ratingEvidence = (
+   pool: PoolNumber,
+   mapScore: number,
+diff --git a/ranked/packages/rules/src/types.ts b/ranked/packages/rules/src/types.ts
+index fb14ffd..d297bad 100644
+--- a/ranked/packages/rules/src/types.ts
++++ b/ranked/packages/rules/src/types.ts
+@@ -27,7 +27,7 @@ export interface PlacementGradeThresholds {
+  * run so an operator config refresh cannot change a run already in progress.
+  */
+ export interface PlacementPolicy {
+-  readonly stageCount: 5;
++  readonly stageCount: 3 | 5;
+   readonly mapsPerStage: 2;
+   /** Placement-only play clock. PvP keeps RankedRulesConfig.roundSeconds. */
+   readonly roundSeconds: 180;
+diff --git a/ranked/packages/rules/test/placement.test.ts b/ranked/packages/rules/test/placement.test.ts
+index ad2bdca..1b66f29 100644
+--- a/ranked/packages/rules/test/placement.test.ts
++++ b/ranked/packages/rules/test/placement.test.ts
+@@ -5,6 +5,7 @@ import {
+   calculatePlacementMapScore,
+   calculatePlacementRating,
+   calculatePlacementStageScore,
++  capPlacementRatingForStageCount,
+   finalizePlacementScore,
+   placementGradeForMapScore,
+   scorePlacementAttempt,
+@@ -183,6 +184,16 @@ describe("solo Placement Rating and finalization", () => {
+     expect(finalizePlacementScore(1_016, tierBandsFixture).visibleRankedScore).toBe(1_016);
+     expect(finalizePlacementScore(-500, tierBandsFixture).visibleRankedScore).toBe(0);
+   });
++
++  it("caps three-stage Placement at the highest legal AQUA score", () => {
++    const capped = capPlacementRatingForStageCount(4_500, 3, tierBandsFixture);
++    expect(capped).toBe(1_984);
++    expect(finalizePlacementScore(capped, tierBandsFixture)).toEqual({
++      visibleRankedScore: 1_984,
++      displayedTier: "AQUA",
++    });
++    expect(capPlacementRatingForStageCount(4_500, 5, tierBandsFixture)).toBe(4_500);
++  });
+ });
+ 
+ describe("Placement scoring", () => {
