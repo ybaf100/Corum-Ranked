@@ -128,7 +128,7 @@ void PlacementGradeBadge::setGrade(std::string input, bool animate) {
     if (transition == PlacementGradeTransition::Up) {
         nextVisual->setScale(0.82f);
         nextVisual->runAction(CCSequence::create(
-            CCEaseSineOut::create(CCScaleTo::create(0.16f, 1.10f)),
+            CCEaseSineOut::create(CCScaleTo::create(0.17f, 1.12f)),
             CCEaseSineInOut::create(CCScaleTo::create(0.12f, 1.0f)),
             nullptr
         ));
