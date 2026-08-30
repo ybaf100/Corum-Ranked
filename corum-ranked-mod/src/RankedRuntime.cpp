@@ -631,6 +631,26 @@ void RankedRuntime::fetchActivePlacement() {
             observeServerNow(root);
             if (!root["active"].asBool().unwrapOr(false)) {
                 m_view.placement.active = false;
+                m_view.placement.stageResults.clear();
+                if (auto const results = root["stageResults"].asArray(); results.isOk()) {
+                    for (auto const& item : results.unwrap()) {
+                        if (!item.isObject()) continue;
+                        PlacementStageResultView result;
+                        result.stageIndex = static_cast<int>(item["stageIndex"].asInt().unwrapOr(0));
+                        result.pool = static_cast<int>(item["pool"].asInt().unwrapOr(0));
+                        if (auto const scores = item["mapScores"].asArray(); scores.isOk()) {
+                            for (auto const& score : scores.unwrap()) result.mapScores.push_back(score.asDouble().unwrapOr(0.0));
+                        }
+                        if (auto const grades = item["mapGrades"].asArray(); grades.isOk()) {
+                            for (auto const& grade : grades.unwrap()) result.mapGrades.push_back(grade.asString().unwrapOr("D"));
+                        }
+                        result.stageScore = item["stageScore"].asDouble().unwrapOr(0.0);
+                        result.stageGrade = item["stageGrade"].asString().unwrapOr("D");
+                        result.poolDelta = static_cast<int>(item["poolDelta"].asInt().unwrapOr(0));
+                        result.nextPool = static_cast<int>(item["nextPool"].asInt().unwrapOr(1));
+                        m_view.placement.stageResults.push_back(std::move(result));
+                    }
+                }
                 m_view.placement.referenceMaps.clear();
                 if (auto const references = root["referenceMaps"].asArray(); references.isOk()) {
                     for (auto const& item : references.unwrap()) {
@@ -646,7 +666,11 @@ void RankedRuntime::fetchActivePlacement() {
                 return;
             }
             parsePlacementState(root);
-            setStage(RuntimeStage::Matched, "Placement recovered. Continue from the saved Stage and Map.");
+            if (m_view.placement.state == "STAGE_RESULT") {
+                setStage(RuntimeStage::Ready, "Placement Stage saved. Continue whenever you're ready.");
+            } else {
+                setStage(RuntimeStage::Matched, "Placement recovered. Continue from the saved Stage and Map.");
+            }
             m_nextPollAt = std::chrono::steady_clock::now();
         }
     );
@@ -735,9 +759,16 @@ void RankedRuntime::continuePlacement() {
             }
             if (!isPlacement() || m_view.match.matchId != runId) return;
             parsePlacementState(response.json().unwrapOr(matjson::Value()));
+            setStage(RuntimeStage::Matched, "Placement resumed. Preparing the next Map.");
             m_nextPollAt = std::chrono::steady_clock::now();
         }
     );
+}
+
+void RankedRuntime::pausePlacement() {
+    if (!isPlacement() || m_view.placement.state != "STAGE_RESULT") return;
+    invalidatePollRequest();
+    setStage(RuntimeStage::Ready, "Placement Stage saved. Continue whenever you're ready.");
 }
 
 void RankedRuntime::joinQueue() {
@@ -970,7 +1001,7 @@ void RankedRuntime::parsePlacementState(matjson::Value const& root) {
             result.pool = static_cast<int>(item["pool"].asInt().unwrapOr(0));
             if (auto const scores = item["mapScores"].asArray(); scores.isOk()) {
                 for (auto const& score : scores.unwrap()) {
-                    result.mapScores.push_back(static_cast<int>(score.asInt().unwrapOr(0)));
+                    result.mapScores.push_back(score.asDouble().unwrapOr(0.0));
                 }
             }
             if (auto const grades = item["mapGrades"].asArray(); grades.isOk()) {
@@ -998,13 +1029,20 @@ void RankedRuntime::parsePlacementState(matjson::Value const& root) {
     m_view.match.roundNumber = m_view.placement.currentStageIndex;
     m_view.match.spectatorActive = false;
 
+    m_view.placement.currentStageMapScores.clear();
+    m_view.placement.currentStageMapGrades.clear();
+    if (auto const stageMaps = root["currentStageMaps"].asArray(); stageMaps.isOk()) {
+        for (auto const& stageMap : stageMaps.unwrap()) {
+            m_view.placement.currentStageMapScores.push_back(stageMap["mapScore"].asDouble().unwrapOr(0.0));
+            m_view.placement.currentStageMapGrades.push_back(stageMap["mapGrade"].asString().unwrapOr("?"));
+        }
+    }
+
     auto const currentMap = root["currentMap"];
     if (auto map = parseMap(currentMap)) {
         m_view.match.currentMap = *map;
-        m_view.placement.currentMapScore = static_cast<int>(currentMap["mapScore"].asInt().unwrapOr(0));
-        auto const provisional = static_cast<int>(
-            currentMap["provisionalMapScore"].asInt().unwrapOr(m_view.placement.currentMapScore)
-        );
+        m_view.placement.currentMapScore = currentMap["mapScore"].asDouble().unwrapOr(0.0);
+        auto const provisional = currentMap["provisionalMapScore"].asDouble().unwrapOr(m_view.placement.currentMapScore);
         if (hasLocalOpenAttempt()) {
             m_view.placement.provisionalMapScore = std::max(
                 m_view.placement.provisionalMapScore,
@@ -1013,7 +1051,9 @@ void RankedRuntime::parsePlacementState(matjson::Value const& root) {
         } else {
             m_view.placement.provisionalMapScore = provisional;
         }
-        m_view.placement.currentMapGrade = currentMap["mapGrade"].asString().unwrapOr("D");
+        m_view.placement.currentMapGrade = currentMap["provisionalMapGrade"].asString().unwrapOr(
+            currentMap["mapGrade"].asString().unwrapOr("D")
+        );
         m_view.placement.currentMapClears = static_cast<int>(currentMap["clearCount"].asInt().unwrapOr(0));
         m_view.placement.currentMapNormalEndAt = currentMap["normalEndAt"].asString().unwrapOr("");
         m_view.placement.currentMapFinalWindowEndAt = currentMap["finalWindowEndAt"].asString().unwrapOr("");
@@ -1081,7 +1121,7 @@ void RankedRuntime::parsePlacementState(matjson::Value const& root) {
     } else if (m_view.match.state == "MAP_SETTLING") {
         m_view.status = "Final accepted Attempt is still in progress.";
     } else if (m_view.match.state == "MAP_PLAYING") {
-        m_view.status = "Placement Map live. Grade changes only after an Attempt ends.";
+        m_view.status = "Placement Map live. Score and Grade update from the active Top 2 evidence.";
     } else if (m_view.match.state == "MAP_PREPARE") {
         m_view.status = "Placement Map revealed. Preparing the exact GD level.";
     } else if (m_view.match.state == "CANCELLED") {
@@ -2542,11 +2582,9 @@ void RankedRuntime::sendAttemptEnd() {
                 setTransientError(reason.empty() ? "Attempt end rejected" : reason);
             }
             if (placement) {
-                // This is the only live-game response allowed to mutate the
-                // Placement Grade. Progress telemetry is deliberately ignored.
-                auto const mapScore = root["mapScore"].asInt();
+                auto const mapScore = root["mapScore"].asDouble();
                 if (mapScore.isOk()) {
-                    m_view.placement.currentMapScore = static_cast<int>(mapScore.unwrap());
+                    m_view.placement.currentMapScore = mapScore.unwrap();
                     m_view.placement.provisionalMapScore = m_view.placement.currentMapScore;
                     m_view.match.scoreA = m_view.placement.currentMapScore;
                     m_view.match.committedScoreA = m_view.placement.currentMapScore;
@@ -2616,12 +2654,14 @@ void RankedRuntime::sendAttemptProgress() {
                 // and must never overwrite a newer Clear/end snapshot.
                 if (m_attemptId == attemptId && !m_pendingEnd) {
                     if (placement) {
-                        auto const provisional = root["provisionalMapScore"].asInt();
+                        auto const provisional = root["provisionalMapScore"].asDouble();
                         if (provisional.isOk()) {
-                            m_view.placement.provisionalMapScore = static_cast<int>(provisional.unwrap());
+                            m_view.placement.provisionalMapScore = provisional.unwrap();
                             m_view.match.scoreA = m_view.placement.provisionalMapScore;
-                            ++m_view.revision;
                         }
+                        auto const provisionalGrade = root["provisionalMapGrade"].asString();
+                        if (provisionalGrade.isOk()) m_view.placement.currentMapGrade = provisionalGrade.unwrap();
+                        if (provisional.isOk() || provisionalGrade.isOk()) ++m_view.revision;
                     } else {
                         applyAttemptSnapshot(root);
                     }

@@ -92,7 +92,7 @@ struct RatingEventView {
 struct PlacementStageResultView {
     int stageIndex = 0;
     int pool = 0;
-    std::vector<int> mapScores;
+    std::vector<double> mapScores;
     std::vector<std::string> mapGrades;
     double stageScore = 0.0;
     std::string stageGrade = "D";
@@ -119,9 +119,11 @@ struct PlacementView {
     int currentMapIndex = 0;
     int totalStages = 5;
     int mapsPerStage = 2;
-    int currentMapScore = 0;
-    int provisionalMapScore = 0;
+    double currentMapScore = 0.0;
+    double provisionalMapScore = 0.0;
     std::string currentMapGrade = "D";
+    std::vector<double> currentStageMapScores;
+    std::vector<std::string> currentStageMapGrades;
     int currentMapClears = 0;
     std::string currentMapNormalEndAt;
     std::string currentMapFinalWindowEndAt;
@@ -285,6 +287,7 @@ public:
     void startPlacement(int startingPool);
     void skipPlacement();
     void continuePlacement();
+    void pausePlacement();
     void leaveQueue();
     void submitReady();
     void submitBan(std::optional<std::string> canonicalLevelId);
