@@ -321,6 +321,8 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate 
     std::string m_selectedBan;
     std::string m_pendingBan;
     std::string m_localMessage;
+    int m_selectedPlacementStageCount = 0;
+    int m_selectedPlacementPool = 0;
     SteadyClock::time_point m_phaseStartedAt {};
     std::vector<int> m_songIds;
     bool m_readySent = false;
@@ -517,7 +519,7 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate 
         }
         if (m_page == Page::HistoryDetail) return fmt::format("history:detail:{}", m_historyIndex);
         if (m_page == Page::PlacementPoolSelection) {
-            return fmt::format("placement:pool:{}:{}", RankedRuntime::get().view().revision, m_localMessage);
+            return fmt::format("placement:pool:{}:{}:{}:{}", RankedRuntime::get().view().revision, m_selectedPlacementStageCount, m_selectedPlacementPool, m_localMessage);
         }
         if (m_page == Page::PlacementSkipConfirm) return "placement:skip-confirm";
         auto const& view = RankedRuntime::get().view();
@@ -1395,42 +1397,102 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate 
         addLanguageSelector();
         addScreenHeader(
             tr("placement-matches", "PLACEMENT"),
-            tr("select-starting-pool", "SELECT YOUR STARTING POOL"),
+            tr("placement-setup", "PLACEMENT SETUP"),
             kGold,
             kCyan
         );
 
-        auto* explanation = makeLabel(
-            tr("pool-choice-explanation", "THIS CHOICE ONLY SETS STAGE 1. YOUR RESULTS DETERMINE THE FINAL RANK."),
-            0.23f,
-            {size.width / 2.0f, size.height - 78.0f},
-            corum::ranked::ui::TextMuted,
+        auto* countTitle = makeLabel(
+            tr("placement-count", "CHOOSE PLACEMENT LENGTH"),
+            0.25f,
+            {size.width / 2.0f, size.height - 72.0f},
+            corum::ranked::ui::Text,
+            "black"
+        );
+        m_root->addChild(countTitle, 5);
+
+        auto const threeCountText = corum::ranked::i18n::isKorean()
+            ? std::string("3회")
+            : std::string("3 STAGES");
+        auto const fiveCountText = corum::ranked::i18n::isKorean()
+            ? std::string("5회")
+            : std::string("5 STAGES");
+        auto* three = addButton(
+            m_selectedPlacementStageCount == 3 ? fmt::format("[ {} ]", threeCountText) : threeCountText,
+            {size.width / 2.0f - 78.0f, size.height - 97.0f},
+            menu_selector(CorumRankedLayer::onPlacementStageCount),
+            false,
+            0.54f
+        );
+        three->setTag(3);
+        auto* five = addButton(
+            m_selectedPlacementStageCount == 5 ? fmt::format("[ {} ]", fiveCountText) : fiveCountText,
+            {size.width / 2.0f + 78.0f, size.height - 97.0f},
+            menu_selector(CorumRankedLayer::onPlacementStageCount),
+            false,
+            0.54f
+        );
+        five->setTag(5);
+
+        std::string countHint;
+        ccColor3B countHintColor = corum::ranked::ui::TextMuted;
+        if (m_selectedPlacementStageCount == 3) {
+            countHint = tr(
+                "placement-three-stage-warning",
+                "WARNING: 3 STAGES LOWERS YOUR MAX PLACEMENT. MAX: AQUA. CANNOT CHANGE AFTER START."
+            );
+            countHintColor = kRed;
+        } else if (m_selectedPlacementStageCount == 5) {
+            countHint = tr(
+                "placement-five-stage-info",
+                "5 STAGES · 10 MAPS · FULL PLACEMENT RANGE · CANNOT CHANGE AFTER START."
+            );
+            countHintColor = kGreen;
+        } else {
+            countHint = tr(
+                "placement-count-lock",
+                "SELECT 3 OR 5 STAGES. THIS CANNOT BE CHANGED AFTER START."
+            );
+        }
+        auto* countHintLabel = makeLabel(
+            countHint,
+            0.20f,
+            {size.width / 2.0f, size.height - 123.0f},
+            countHintColor,
             "semibold"
         );
-        explanation->limitLabelWidth(size.width - 74.0f, 0.25f, 0.17f);
-        m_root->addChild(explanation, 5);
+        countHintLabel->limitLabelWidth(size.width - 74.0f, 0.20f, 0.14f);
+        m_root->addChild(countHintLabel, 5);
 
         auto* panel = makeNeonPanel(
-            {std::min(430.0f, size.width - 60.0f), 174.0f},
-            {size.width / 2.0f, size.height / 2.0f + 1.0f},
+            {std::min(430.0f, size.width - 60.0f), 132.0f},
+            {size.width / 2.0f, size.height / 2.0f - 36.0f},
             kBlue,
             kDeepPanel,
             244
         );
         m_root->addChild(panel, 1);
+        auto* poolTitle = makeLabel(
+            tr("select-starting-pool", "SELECT YOUR STARTING POOL"),
+            0.22f,
+            {size.width / 2.0f, size.height / 2.0f + 25.0f},
+            kCyan,
+            "black"
+        );
+        m_root->addChild(poolTitle, 5);
 
         constexpr float spacing = 124.0f;
         for (int pool = 1; pool <= 6; ++pool) {
             auto const row = (pool - 1) / 3;
             auto const column = (pool - 1) % 3;
             auto const x = size.width / 2.0f + (static_cast<float>(column) - 1.0f) * spacing;
-            auto const y = size.height / 2.0f + 45.0f - static_cast<float>(row) * 76.0f;
+            auto const y = size.height / 2.0f - 2.0f - static_cast<float>(row) * 48.0f;
             auto* button = addButton(
-                fmt::format("POOL {}", pool),
+                m_selectedPlacementPool == pool ? fmt::format("[ POOL {} ]", pool) : fmt::format("POOL {}", pool),
                 {x, y},
-                menu_selector(CorumRankedLayer::onStartPlacement),
+                menu_selector(CorumRankedLayer::onPlacementPoolSelect),
                 false,
-                0.57f
+                0.50f
             );
             button->setTag(pool);
 
@@ -1441,36 +1503,43 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate 
             );
             auto const referenceText = reference == view.placement.referenceMaps.end()
                 ? tr("reference-loading", "REFERENCE MAP LOADING...")
-                : fmt::format("{} · {} · ID {}", reference->title, reference->difficulty, reference->levelId);
+                : fmt::format("{} · {}", reference->title, reference->difficulty);
             auto* referenceLabel = makeLabel(
                 referenceText,
-                0.18f,
-                {x, y - 21.0f},
+                0.14f,
+                {x, y - 16.0f},
                 corum::ranked::ui::TextMuted,
                 "semibold"
             );
-            referenceLabel->limitLabelWidth(112.0f, 0.18f, 0.12f);
+            referenceLabel->limitLabelWidth(112.0f, 0.14f, 0.10f);
             m_root->addChild(referenceLabel, 5);
         }
 
         addButton(
+            tr("start-placement", "START PLACEMENT"),
+            {size.width / 2.0f + 78.0f, 23.0f},
+            menu_selector(CorumRankedLayer::onStartPlacement),
+            false,
+            0.53f
+        );
+        addButton(
             tr("skip-placement", "SKIP PLACEMENT"),
-            {size.width / 2.0f, 22.0f},
+            {size.width / 2.0f - 78.0f, 23.0f},
             menu_selector(CorumRankedLayer::onOpenPlacementSkip),
             true,
-            0.55f
+            0.50f
         );
 
-        auto detail = view.error.empty() ? view.status : view.error;
-        if (!detail.empty() && !view.error.empty()) {
+        auto detail = !m_localMessage.empty() ? m_localMessage : (view.error.empty() ? view.status : view.error);
+        if (!detail.empty() && (!view.error.empty() || !m_localMessage.empty())) {
             auto* status = makeLabel(
                 shorten(detail, 96),
-                0.25f,
+                0.20f,
                 {size.width / 2.0f, 7.0f},
-                view.error.empty() ? corum::ranked::ui::TextMuted : kRed,
+                view.error.empty() ? kGold : kRed,
                 "semibold"
             );
-            status->limitLabelWidth(size.width - 90.0f, 0.25f, 0.16f);
+            status->limitLabelWidth(size.width - 90.0f, 0.20f, 0.14f);
             m_mainStatusLabel = status;
             m_root->addChild(status, 5);
         }
@@ -1575,7 +1644,8 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate 
                 profile.placementGames,
                 static_cast<int>(view.placement.stageResults.size())
             );
-            addPlacementProgress(completedStages, std::max(1, profile.placementGamesRequired), {leftCenter.x, leftCenter.y - 51.0f}, 16.0f, 0.30f);
+            auto const placementStageTotal = view.placement.active ? view.placement.totalStages : profile.placementGamesRequired;
+            addPlacementProgress(completedStages, std::max(1, placementStageTotal), {leftCenter.x, leftCenter.y - 51.0f}, 16.0f, 0.30f);
         } else if (profile.promotion.active) {
             addRatingMarks(profile.promotion.results, profile.promotion.gamesRequired, {leftCenter.x, leftCenter.y - 49.0f}, 16.0f, 0.30f);
         } else {
@@ -1917,7 +1987,9 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate 
         addPlacementProgress(result.stageIndex, view.placement.totalStages, {center, 67.0f}, 18.0f, 0.27f);
         auto* movement = makeLabel(
             finalStage
-                ? tr("all-placement-maps-complete", "ALL 10 MAPS COMPLETE")
+                ? (corum::ranked::i18n::isKorean()
+                    ? fmt::format("전체 {}개 맵 완료", view.placement.totalStages * view.placement.mapsPerStage)
+                    : fmt::format("ALL {} MAPS COMPLETE", view.placement.totalStages * view.placement.mapsPerStage))
                 : fmt::format("{}  POOL {}  ({:+d})", tr("next", "NEXT"), result.nextPool, result.poolDelta),
             0.30f,
             {center, 49.0f},
@@ -1960,7 +2032,9 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate 
         auto const& finalResult = view.placement.finalResult;
         addScreenHeader(
             tr("placement-complete", "PLACEMENT COMPLETE"),
-            finalResult.skipped ? tr("placement-skipped", "PLACEMENT SKIPPED") : tr("ten-maps-five-stages", "10 MAPS · 5 STAGES"),
+            finalResult.skipped
+                ? tr("placement-skipped", "PLACEMENT SKIPPED")
+                : fmt::format("{} MAPS · {} STAGES", view.placement.totalStages * view.placement.mapsPerStage, view.placement.totalStages),
             kGold,
             kCyan
         );
@@ -3362,15 +3436,37 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate 
     void onOpenPlacement(CCObject*) {
         if (!RankedRuntime::get().view().placement.required) return;
         m_localMessage.clear();
+        m_selectedPlacementStageCount = 0;
+        m_selectedPlacementPool = 0;
         m_page = Page::PlacementPoolSelection;
     }
 
-    void onStartPlacement(CCObject* sender) {
+    void onPlacementStageCount(CCObject* sender) {
+        auto const count = sender ? sender->getTag() : 0;
+        if (count != 3 && count != 5) return;
+        m_selectedPlacementStageCount = count;
+        m_localMessage.clear();
+    }
+
+    void onPlacementPoolSelect(CCObject* sender) {
         auto const pool = sender ? sender->getTag() : 0;
         if (pool < 1 || pool > 6) return;
+        m_selectedPlacementPool = pool;
+        m_localMessage.clear();
+    }
+
+    void onStartPlacement(CCObject*) {
+        if (m_selectedPlacementStageCount != 3 && m_selectedPlacementStageCount != 5) {
+            m_localMessage = tr("select-placement-count-first", "SELECT 3 OR 5 STAGES FIRST.");
+            return;
+        }
+        if (m_selectedPlacementPool < 1 || m_selectedPlacementPool > 6) {
+            m_localMessage = tr("select-placement-pool-first", "SELECT A STARTING POOL FIRST.");
+            return;
+        }
         m_localMessage.clear();
         m_page = Page::Live;
-        RankedRuntime::get().startPlacement(pool);
+        RankedRuntime::get().startPlacement(m_selectedPlacementPool, m_selectedPlacementStageCount);
     }
 
     void onOpenPlacementSkip(CCObject*) {

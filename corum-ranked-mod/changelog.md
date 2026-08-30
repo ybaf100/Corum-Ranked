@@ -1,3 +1,8 @@
+## v0.5.0-beta.11
+- Placement 시작 시 3회/5회 진행 방식을 선택할 수 있습니다. 선택 후에는 변경할 수 없습니다.
+- 3회 Placement는 3 Stage(6 Map)로 종료되며 최대 배치는 AQUA로 제한됩니다.
+- Placement 시작 설정 화면에 제한 경고와 배치 건너뛰기를 함께 배치했습니다.
+
 # v0.5.0-beta.10
 
 - Restored PvP Round and Death Match preparation to an exact ten-second countdown instead of the legacy 60-second resource floor.

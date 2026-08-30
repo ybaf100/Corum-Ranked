@@ -8,6 +8,7 @@ import type {
   PoolNumber,
   RankedMap,
   RankedMapSnapshot,
+  TierBand,
 } from "./types.js";
 
 export const PLACEMENT_MAP_SCORE_MAXIMUM = 500;
@@ -259,6 +260,32 @@ export const selectPlacementReferenceMaps = (
     }
     return snapshotMap(available[Math.floor((available.length - 1) / 2)]!);
   });
+};
+
+/**
+ * Three-stage Placement intentionally trades certainty for speed. Its result
+ * can never seed the player above the highest score that Placement may assign
+ * to AQUA. The -16 offset preserves the global inclusive +/-15 cutoff
+ * exclusion around the BRONZE boundary.
+ */
+export const capPlacementRatingForStageCount = (
+  rating: number,
+  stageCount: number,
+  bands: readonly TierBand[],
+): number => {
+  if (!Number.isFinite(rating)) {
+    throw new RankedDomainError("INVALID_CONFIG", "Placement rating must be finite");
+  }
+  if (stageCount === 5) return rating;
+  if (stageCount !== 3) {
+    throw new RankedDomainError("INVALID_CONFIG", "Placement stageCount must be 3 or 5", { stageCount });
+  }
+  const aqua = bands.find((band) => band.tier === "AQUA");
+  const bronze = bands.find((band) => band.tier === "BRONZE");
+  if (!aqua || !bronze || bronze.minInclusive <= aqua.minInclusive) {
+    throw new RankedDomainError("INVALID_CONFIG", "AQUA/BRONZE tier boundaries are invalid");
+  }
+  return Math.min(rating, bronze.minInclusive - 16);
 };
 
 const ratingEvidence = (

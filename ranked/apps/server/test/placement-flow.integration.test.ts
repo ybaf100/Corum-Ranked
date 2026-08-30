@@ -30,6 +30,7 @@ beforeAll(async () => {
     "0006_v050_dynamic_csmp_tiers.sql",
     "0007_solo_stage_placement.sql",
     "0008_placement_beta9.sql",
+    "0009_placement_stage_count.sql",
   ]) {
     const migrationPath = fileURLToPath(
       new URL(`../../../migrations/${migrationName}`, import.meta.url),
@@ -65,7 +66,7 @@ class FixedCsmpSource implements CsmpTierSource {
 const cleanMods: CreateSessionDto["installedMods"] = [
   {
     id: "hwanhee1.corum_ranked",
-    version: "0.5.0-beta.10",
+    version: "0.5.0-beta.11",
     enabled: true,
     loaded: true,
     internal: false,
@@ -113,7 +114,7 @@ describe("server-authoritative solo Stage Placement", () => {
     const created = await sessions.create({
       gdAccountId: "9901",
       gdUsername: "PlacementPlayer",
-      clientVersion: "v0.5.0-beta.10",
+      clientVersion: "v0.5.0-beta.11",
       installedMods: structuredClone(cleanMods),
     });
     const contextRow = await database.query<{
@@ -151,10 +152,17 @@ describe("server-authoritative solo Stage Placement", () => {
 
     let state = await placement.start(session, {
       startingPool: 3,
+      stageCount: 5,
       installedMods: structuredClone(cleanMods),
     }) as Record<string, any>;
     const runId = state.runId as string;
-    expect(state).toMatchObject({ state: "MAP_PREPARE", currentStageIndex: 1, currentMapIndex: 1 });
+    expect(state).toMatchObject({ state: "MAP_PREPARE", currentStageIndex: 1, currentMapIndex: 1, totalStages: 5 });
+    const immutable = await placement.start(session, {
+      startingPool: 6,
+      stageCount: 3,
+      installedMods: structuredClone(cleanMods),
+    }) as Record<string, any>;
+    expect(immutable).toMatchObject({ runId, totalStages: 5, startingPool: 3 });
     expect(await placement.active(session)).toMatchObject({
       active: true,
       action: "RESUME_PLACEMENT",
@@ -414,7 +422,7 @@ describe("server-authoritative solo Stage Placement", () => {
     const created = await sessions.create({
       gdAccountId: "9902",
       gdUsername: "PlacementSkipPlayer",
-      clientVersion: "v0.5.0-beta.10",
+      clientVersion: "v0.5.0-beta.11",
       installedMods: structuredClone(cleanMods),
     });
     const contextRow = await database.query<{

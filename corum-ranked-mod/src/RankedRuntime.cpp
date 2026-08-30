@@ -715,10 +715,11 @@ void RankedRuntime::skipPlacement() {
     );
 }
 
-void RankedRuntime::startPlacement(int startingPool) {
+void RankedRuntime::startPlacement(int startingPool, int stageCount) {
     if (
         m_controlBusy || m_sessionToken.empty() || m_view.stage != RuntimeStage::Ready ||
-        !m_view.placement.required || m_view.placement.active || startingPool < 1 || startingPool > 6
+        !m_view.placement.required || m_view.placement.active || startingPool < 1 || startingPool > 6 ||
+        (stageCount != 3 && stageCount != 5)
     ) return;
     m_installedMods = captureInstalledMods();
     auto const decision = evaluateEnvironment(m_installedMods, m_environmentPolicy);
@@ -728,6 +729,7 @@ void RankedRuntime::startPlacement(int startingPool) {
     }
     matjson::Value body;
     body["startingPool"] = startingPool;
+    body["stageCount"] = stageCount;
     body["installedMods"] = installedModsJson();
     auto request = baseRequest(m_sessionToken);
     request.bodyJSON(body);

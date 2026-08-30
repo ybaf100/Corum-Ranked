@@ -27,7 +27,7 @@ export interface PlacementGradeThresholds {
  * run so an operator config refresh cannot change a run already in progress.
  */
 export interface PlacementPolicy {
-  readonly stageCount: 5;
+  readonly stageCount: 3 | 5;
   readonly mapsPerStage: 2;
   /** Placement-only play clock. PvP keeps RankedRulesConfig.roundSeconds. */
   readonly roundSeconds: 180;

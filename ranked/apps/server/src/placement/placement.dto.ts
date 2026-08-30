@@ -1,5 +1,5 @@
 import { Type } from "class-transformer";
-import { IsInt, Max, Min } from "class-validator";
+import { IsIn, IsInt, Max, Min } from "class-validator";
 import { AttemptEndDto, AttemptProgressDto, AttemptStartDto } from "../match/match.dto.js";
 import { EnvironmentRecheckDto } from "../session/session.dto.js";
 
@@ -9,6 +9,11 @@ export class StartPlacementDto extends EnvironmentRecheckDto {
   @Min(1)
   @Max(6)
   public startingPool!: 1 | 2 | 3 | 4 | 5 | 6;
+
+  @Type(() => Number)
+  @IsInt()
+  @IsIn([3, 5])
+  public stageCount!: 3 | 5;
 }
 
 export class ReadyPlacementMapDto extends EnvironmentRecheckDto {}

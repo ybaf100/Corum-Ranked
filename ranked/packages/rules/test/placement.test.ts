@@ -5,6 +5,7 @@ import {
   calculatePlacementMapScore,
   calculatePlacementRating,
   calculatePlacementStageScore,
+  capPlacementRatingForStageCount,
   finalizePlacementScore,
   placementGradeForMapScore,
   scorePlacementAttempt,
@@ -182,6 +183,16 @@ describe("solo Placement Rating and finalization", () => {
     expect(finalizePlacementScore(1_015, tierBandsFixture).visibleRankedScore).toBe(984);
     expect(finalizePlacementScore(1_016, tierBandsFixture).visibleRankedScore).toBe(1_016);
     expect(finalizePlacementScore(-500, tierBandsFixture).visibleRankedScore).toBe(0);
+  });
+
+  it("caps three-stage Placement at the highest legal AQUA score", () => {
+    const capped = capPlacementRatingForStageCount(4_500, 3, tierBandsFixture);
+    expect(capped).toBe(1_984);
+    expect(finalizePlacementScore(capped, tierBandsFixture)).toEqual({
+      visibleRankedScore: 1_984,
+      displayedTier: "AQUA",
+    });
+    expect(capPlacementRatingForStageCount(4_500, 5, tierBandsFixture)).toBe(4_500);
   });
 });
 

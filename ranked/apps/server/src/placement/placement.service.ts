@@ -8,6 +8,7 @@ import {
 import {
   calculatePlacementMapScore,
   calculatePlacementRating,
+  capPlacementRatingForStageCount,
   calculatePlacementStageScore,
   finalizePlacementScore,
   scoreAttempt,
@@ -62,6 +63,7 @@ interface PlacementRunRow {
   state: PlacementState;
   state_version: number;
   starting_pool: number;
+  stage_count: number;
   current_stage_index: number;
   current_map_index: number;
   stage_pools: unknown;
@@ -243,15 +245,16 @@ export class PlacementService {
       await transaction.query(
         `INSERT INTO ranked_placement_runs (
            id, player_id, config_snapshot_id, config_generation, state,
-           starting_pool, current_stage_index, current_map_index, stage_pools,
+           starting_pool, stage_count, current_stage_index, current_map_index, stage_pools,
            map_snapshots, last_heartbeat_at, deadline_at, started_at
-         ) VALUES ($1, $2, $3, $4, 'POOL_SELECTION', $5, 1, 1, $6::jsonb, $7::jsonb, $8, NULL, $8)`,
+         ) VALUES ($1, $2, $3, $4, 'POOL_SELECTION', $5, $6, 1, 1, $7::jsonb, $8::jsonb, $9, NULL, $9)`,
         [
           id,
           session.playerId,
           configSnapshotId,
           snapshot.generation,
           body.startingPool,
+          body.stageCount,
           JSON.stringify([body.startingPool]),
           JSON.stringify(serializedMaps),
           now.toISOString(),
@@ -646,7 +649,7 @@ export class PlacementService {
         return;
       }
       if (run.state === "STAGE_RESULT") {
-        if (Number(run.current_stage_index) >= policy.stageCount) {
+        if (Number(run.current_stage_index) >= Number(run.stage_count)) {
           await this.finalizePlacement(transaction, run, snapshot, policy, now);
           return;
         }
@@ -902,13 +905,29 @@ export class PlacementService {
       "SELECT * FROM ranked_placement_maps WHERE run_id = $1 ORDER BY stage_index, map_index FOR UPDATE",
       [run.id],
     );
+    const rawStageCount = Number(run.stage_count);
+    if (rawStageCount !== 3 && rawStageCount !== 5) {
+      throw new Error('Placement Run has invalid stage count');
+    }
+    const stageCount: 3 | 5 = rawStageCount;
+    const runPolicy: PlacementPolicy = { ...policy, stageCount };
     const rating = calculatePlacementRating(maps.rows.map((map) => ({
       pool: Number(map.pool) as PoolNumber,
       mapScore: Number(map.map_score),
       mapGrade: map.map_grade,
       stageIndex: Number(map.stage_index) - 1,
-    })), policy);
-    const finalized = finalizePlacementScore(rating.hiddenMmr, snapshot.operational.tierBands);
+    })), runPolicy);
+    const finalPlacementRating = capPlacementRatingForStageCount(
+      rating.placementRating,
+      stageCount,
+      snapshot.operational.tierBands,
+    );
+    const finalHiddenMmr = capPlacementRatingForStageCount(
+      rating.hiddenMmr,
+      stageCount,
+      snapshot.operational.tierBands,
+    );
+    const finalized = finalizePlacementScore(finalHiddenMmr, snapshot.operational.tierBands);
     const placementGames = snapshot.operational.mmrPolicy?.placementGames;
     if (!placementGames) throw new Error("Placement snapshot has no MMR policy");
     await transaction.query(
@@ -921,7 +940,7 @@ export class PlacementService {
            demotion_warning = FALSE, updated_at = $5
        WHERE player_id = $6`,
       [
-        rating.hiddenMmr,
+        finalHiddenMmr,
         finalized.visibleRankedScore,
         finalized.displayedTier,
         placementGames,
@@ -937,8 +956,8 @@ export class PlacementService {
            finalized_at = $5, deadline_at = NULL, completion_kind = 'COMPLETED'
        WHERE id = $6 AND finalized_at IS NULL`,
       [
-        rating.placementRating,
-        rating.hiddenMmr,
+        finalPlacementRating,
+        finalHiddenMmr,
         finalized.visibleRankedScore,
         finalized.displayedTier,
         now.toISOString(),
@@ -1008,7 +1027,7 @@ export class PlacementService {
       startingPool: Number(run.starting_pool),
       currentStageIndex: Number(run.current_stage_index),
       currentMapIndex: Number(run.current_map_index),
-      totalStages: 5,
+      totalStages: Number(run.stage_count),
       mapsPerStage: 2,
       stagePools: asArray(run.stage_pools),
       stageResults: asArray(run.stage_results),

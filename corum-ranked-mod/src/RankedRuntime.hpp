@@ -284,7 +284,7 @@ public:
     void begin();
     void tick();
     void joinQueue();
-    void startPlacement(int startingPool);
+    void startPlacement(int startingPool, int stageCount);
     void skipPlacement();
     void continuePlacement();
     void pausePlacement();
