@@ -66,6 +66,14 @@ std::string joinReasons(std::vector<std::string> const& reasons) {
     return result;
 }
 
+int placementGradeRank(std::string const& grade) {
+    if (grade == "S") return 0;
+    if (grade == "A") return 1;
+    if (grade == "B") return 2;
+    if (grade == "C") return 3;
+    return 4;
+}
+
 bool successful(web::WebResponse const& response) {
     return response.code() >= 200 && response.code() < 300;
 }
@@ -1051,9 +1059,15 @@ void RankedRuntime::parsePlacementState(matjson::Value const& root) {
         } else {
             m_view.placement.provisionalMapScore = provisional;
         }
-        m_view.placement.currentMapGrade = currentMap["provisionalMapGrade"].asString().unwrapOr(
+        auto const incomingGrade = currentMap["provisionalMapGrade"].asString().unwrapOr(
             currentMap["mapGrade"].asString().unwrapOr("D")
         );
+        if (
+            !hasLocalOpenAttempt() ||
+            placementGradeRank(incomingGrade) <= placementGradeRank(m_view.placement.currentMapGrade)
+        ) {
+            m_view.placement.currentMapGrade = incomingGrade;
+        }
         m_view.placement.currentMapClears = static_cast<int>(currentMap["clearCount"].asInt().unwrapOr(0));
         m_view.placement.currentMapNormalEndAt = currentMap["normalEndAt"].asString().unwrapOr("");
         m_view.placement.currentMapFinalWindowEndAt = currentMap["finalWindowEndAt"].asString().unwrapOr("");

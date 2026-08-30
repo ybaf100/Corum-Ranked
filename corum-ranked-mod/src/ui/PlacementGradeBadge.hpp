@@ -26,11 +26,11 @@ public:
     [[nodiscard]] std::string const& grade() const;
 
 private:
-    cocos2d::CCLayerColor* createVisual(std::string const& grade) const;
+    cocos2d::CCNode* createVisual(std::string const& grade) const;
 
     float m_extent = 58.0f;
     std::string m_grade;
-    cocos2d::CCLayerColor* m_visual = nullptr;
+    cocos2d::CCNode* m_visual = nullptr;
 };
 
 } // namespace corum::ranked::ui
