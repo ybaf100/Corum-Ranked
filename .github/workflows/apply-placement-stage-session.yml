@@ -33,7 +33,7 @@ jobs:
       - name: Align changed Placement contracts in tests
         run: |
           sed -i 's/toBe(126\.5)/toBe(151.5)/' ranked/packages/rules/test/placement.test.ts
-          python -c 'from pathlib import Path; p=Path("ranked/apps/server/test/placement-flow.integration.test.ts"); s=p.read_text(); old="provisionalMapScore: 225,\n      mapGrade: \"D\",\n      gradeChanged: false,"; new="provisionalMapScore: 225,\n      mapGrade: \"D\",\n      provisionalMapGrade: \"C\",\n      gradeChanged: true,"; assert old in s; p.write_text(s.replace(old,new,1))'
+          python -c 'from pathlib import Path; p=Path("ranked/apps/server/test/placement-flow.integration.test.ts"); s=p.read_text(); old="provisionalMapScore: 225,\n      mapGrade: \"D\",\n      gradeChanged: false,"; new="provisionalMapScore: 225,\n      mapGrade: \"D\",\n      provisionalMapGrade: \"C\",\n      gradeChanged: true,"; assert old in s; s=s.replace(old,new,1); old2="provisionalMapScore: 275,\n      mapGrade: \"D\",\n      gradeChanged: false,"; new2="provisionalMapScore: 275,\n      mapGrade: \"D\",\n      provisionalMapGrade: \"B\",\n      gradeChanged: true,"; assert old2 in s; s=s.replace(old2,new2,1); s=s.replace("expect(progress.gradeChanged).toBe(false);", "expect(progress.gradeChanged).toBe(true);"); p.write_text(s)'
 
       - name: Verify whitespace
         run: git diff --check
