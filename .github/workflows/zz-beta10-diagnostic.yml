@@ -1,0 +1,34 @@
+name: Beta10 Diagnostic
+on:
+  push:
+    branches:
+      - work/beta10-placement-fixes
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Print target snippets
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          targets = [
+              ('corum-ranked-mod/src/RankedPopup.cpp', ['renderPlacementMapResult', 'renderPlacementStageResult', 'PlacementGradeBadge::create', 'formatScore(']),
+              ('corum-ranked-mod/src/RankedRuntime.cpp', ['provisionalMapGrade', 'applyPlacementState']),
+              ('ranked/apps/server/src/placement/placement.service.ts', ['updateAttemptProgress', 'loadPublicState', 'provisionalMapGrade']),
+              ('ranked/apps/server/src/match/match.service.ts', ['resourcePrepareSeconds']),
+          ]
+          for file, needles in targets:
+              print('\n###', file)
+              lines = Path(file).read_text(encoding='utf-8').splitlines()
+              for needle in needles:
+                  hits = [i for i,l in enumerate(lines) if needle in l]
+                  print('\n--', needle, hits)
+                  for i in hits[:6]:
+                      a=max(0,i-20); b=min(len(lines),i+90)
+                      print(f'@@ lines {a+1}-{b}')
+                      for n in range(a,b): print(f'{n+1:5}: {lines[n]}')
+          PY
