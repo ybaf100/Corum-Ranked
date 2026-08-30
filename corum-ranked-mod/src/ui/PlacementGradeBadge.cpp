@@ -78,8 +78,6 @@ CCNode* PlacementGradeBadge::createVisual(std::string const& input) const {
     root->setContentSize({m_extent, m_extent});
     root->setAnchorPoint({0.5f, 0.5f});
     root->setPosition({m_extent * 0.5f, m_extent * 0.5f});
-    root->setCascadeColorEnabled(true);
-    root->setCascadeOpacityEnabled(true);
 
     if (auto* sprite = rankResourceSprite(gradeFilename(grade))) {
         sprite->setBlendFunc({GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA});
