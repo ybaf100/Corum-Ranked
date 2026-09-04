@@ -93,6 +93,14 @@ const cleanMods: CreateSessionDto["installedMods"] = [
       "physics-bypass": false,
     },
   },
+  {
+    id: "geode.node-ids",
+    version: "v1.23.3",
+    enabled: true,
+    loaded: true,
+    internal: false,
+    system: false,
+  },
 ];
 
 const createContext = async (

@@ -89,5 +89,8 @@ export const validateRankedConfigDocument = (document: RankedConfigDocument): re
   if (!requiredIds.has("hwanhee1.corum_ranked")) {
     errors.push("hwanhee1.corum_ranked must be enabled and required in allowedMods");
   }
+  if (!requiredIds.has("geode.node-ids")) {
+    errors.push("geode.node-ids must be enabled and required in allowedMods");
+  }
   return errors;
 };

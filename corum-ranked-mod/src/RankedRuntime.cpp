@@ -57,15 +57,6 @@ std::string trim(std::string value) {
     return value.substr(first, last - first + 1);
 }
 
-std::string joinReasons(std::vector<std::string> const& reasons) {
-    std::string result;
-    for (auto const& reason : reasons) {
-        if (!result.empty()) result += ", ";
-        result += reason;
-    }
-    return result;
-}
-
 int placementGradeRank(std::string const& grade) {
     if (grade == "S") return 0;
     if (grade == "A") return 1;
@@ -294,6 +285,79 @@ void RankedRuntime::setTransientError(std::string error) {
     ++m_view.revision;
 }
 
+EnvironmentModIssueView RankedRuntime::environmentModIssue(std::string const& id) const {
+    EnvironmentModIssueView issue;
+    issue.id = id;
+
+    auto const installed = std::find_if(
+        m_installedMods.begin(),
+        m_installedMods.end(),
+        [&id](InstalledModSnapshot const& mod) { return mod.id == id; }
+    );
+    if (installed != m_installedMods.end()) {
+        issue.displayName = installed->displayName;
+        issue.installedVersion = installed->version;
+    }
+
+    auto const rule = std::find_if(
+        m_environmentPolicy.allowedMods.begin(),
+        m_environmentPolicy.allowedMods.end(),
+        [&id](AllowedModRule const& candidate) { return candidate.id == id; }
+    );
+    if (rule != m_environmentPolicy.allowedMods.end()) {
+        if (issue.displayName.empty()) issue.displayName = rule->displayName;
+        issue.minimumVersion = rule->minVersion;
+        issue.maximumVersion = rule->maxVersion;
+    }
+
+    if (issue.displayName.empty()) issue.displayName = id;
+    return issue;
+}
+
+void RankedRuntime::showEnvironmentWarning(
+    EnvironmentDecision const& decision,
+    bool blockRuntime
+) {
+    EnvironmentWarningView warning;
+    warning.active = true;
+    for (auto const& id : decision.unauthorizedModIds) {
+        warning.unauthorizedMods.push_back(environmentModIssue(id));
+    }
+    for (auto const& id : decision.missingRequiredModIds) {
+        warning.missingRequiredMods.push_back(environmentModIssue(id));
+    }
+    for (auto const& id : decision.versionViolationModIds) {
+        warning.versionViolations.push_back(environmentModIssue(id));
+    }
+    warning.cbfIssues = decision.cbfIssues;
+    m_view.environmentWarning = std::move(warning);
+
+    if (blockRuntime) {
+        setStage(
+            RuntimeStage::Blocked,
+            "Ranked cannot start until the mod environment is corrected."
+        );
+    } else {
+        m_view.error = "Ranked Ready was not sent because the mod environment changed.";
+        ++m_view.revision;
+    }
+}
+
+void RankedRuntime::recheckEnvironment() {
+    m_installedMods = captureInstalledMods();
+    auto const decision = evaluateEnvironment(m_installedMods, m_environmentPolicy);
+    if (!decision.allowed) {
+        showEnvironmentWarning(decision, m_view.stage == RuntimeStage::Blocked);
+        return;
+    }
+
+    auto const restartSession = m_view.stage == RuntimeStage::Blocked;
+    m_view.environmentWarning = {};
+    m_view.error.clear();
+    ++m_view.revision;
+    if (restartSession) begin();
+}
+
 void RankedRuntime::invalidatePollRequest() {
     ++m_pollRequestGeneration;
     m_pollRequest.cancel();
@@ -365,6 +429,7 @@ void RankedRuntime::begin() {
     m_songBypassAllowed = false;
     m_placementResultAcknowledged = false;
     m_view.client = {};
+    m_view.environmentWarning = {};
     m_view.placement = {};
     m_view.match = {};
     fetchConfig();
@@ -481,16 +546,7 @@ void RankedRuntime::fetchConfig() {
             m_installedMods = captureInstalledMods();
             auto const decision = evaluateEnvironment(m_installedMods, m_environmentPolicy);
             if (!decision.allowed) {
-                std::vector<std::string> reasons;
-                reasons.insert(reasons.end(), decision.unauthorizedModIds.begin(), decision.unauthorizedModIds.end());
-                reasons.insert(reasons.end(), decision.missingRequiredModIds.begin(), decision.missingRequiredModIds.end());
-                reasons.insert(reasons.end(), decision.versionViolations.begin(), decision.versionViolations.end());
-                reasons.insert(reasons.end(), decision.cbfIssues.begin(), decision.cbfIssues.end());
-                setStage(
-                    RuntimeStage::Blocked,
-                    "Active mod environment does not match the server allowlist.",
-                    joinReasons(reasons)
-                );
+                showEnvironmentWarning(decision, true);
                 return;
             }
             createSession();
@@ -504,6 +560,7 @@ std::vector<InstalledModSnapshot> RankedRuntime::captureInstalledMods() const {
         if (!mod) continue;
         InstalledModSnapshot snapshot {
             .id = std::string(mod->getID()),
+            .displayName = std::string(mod->getName()),
             .version = mod->getVersion().toVString(),
             .enabled = mod->isOrWillBeEnabled(),
             .loaded = mod->isLoaded(),
@@ -692,7 +749,7 @@ void RankedRuntime::skipPlacement() {
     m_installedMods = captureInstalledMods();
     auto const decision = evaluateEnvironment(m_installedMods, m_environmentPolicy);
     if (!decision.allowed) {
-        setStage(RuntimeStage::Blocked, "The active mod environment changed. Re-open Ranked to recheck.");
+        showEnvironmentWarning(decision, true);
         return;
     }
     matjson::Value body;
@@ -724,7 +781,7 @@ void RankedRuntime::startPlacement(int startingPool, int stageCount) {
     m_installedMods = captureInstalledMods();
     auto const decision = evaluateEnvironment(m_installedMods, m_environmentPolicy);
     if (!decision.allowed) {
-        setStage(RuntimeStage::Blocked, "The active mod environment changed. Re-open Ranked to recheck.");
+        showEnvironmentWarning(decision, true);
         return;
     }
     matjson::Value body;
@@ -786,7 +843,7 @@ void RankedRuntime::joinQueue() {
     m_installedMods = captureInstalledMods();
     auto const decision = evaluateEnvironment(m_installedMods, m_environmentPolicy);
     if (!decision.allowed) {
-        setStage(RuntimeStage::Blocked, "The active mod environment changed. Re-open Ranked to recheck.");
+        showEnvironmentWarning(decision, true);
         return;
     }
     invalidatePollRequest();
@@ -828,7 +885,7 @@ void RankedRuntime::startDebugBotMatch(DebugBotMatchOptions options) {
     m_installedMods = captureInstalledMods();
     auto const decision = evaluateEnvironment(m_installedMods, m_environmentPolicy);
     if (!decision.allowed) {
-        setStage(RuntimeStage::Blocked, "The active mod environment changed. Re-open Ranked to recheck.");
+        showEnvironmentWarning(decision, true);
         return;
     }
     invalidatePollRequest();
@@ -1524,7 +1581,7 @@ void RankedRuntime::submitReady() {
     m_installedMods = captureInstalledMods();
     auto const decision = evaluateEnvironment(m_installedMods, m_environmentPolicy);
     if (!decision.allowed) {
-        setTransientError("Environment check failed. Ranked Ready was not sent.");
+        showEnvironmentWarning(decision, false);
         return;
     }
     matjson::Value body;

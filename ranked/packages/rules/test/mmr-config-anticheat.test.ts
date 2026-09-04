@@ -167,12 +167,21 @@ describe("allowlist and CBF gate", () => {
       "physics-bypass": false,
     },
   };
+  const nodeIds: InstalledModSnapshot = {
+    id: "geode.node-ids",
+    version: "1.23.3",
+    enabled: true,
+    loaded: true,
+    internal: false,
+    system: false,
+  };
 
   it("allows a clean environment and ignores internal/system entries", () => {
     const decision = evaluateClientEnvironment(
       [
         ranked,
         cbf,
+        nodeIds,
         {
           id: "geode.internal-loader",
           version: "5.8.2",
@@ -192,6 +201,7 @@ describe("allowlist and CBF gate", () => {
       [
         ranked,
         cbf,
+        nodeIds,
         {
           id: "not.allowed",
           version: "1.0.0",
@@ -213,6 +223,7 @@ describe("allowlist and CBF gate", () => {
       [
         ranked,
         cbf,
+        nodeIds,
         {
           id: "not.allowed",
           version: "1.0.0",
@@ -229,12 +240,12 @@ describe("allowlist and CBF gate", () => {
   });
 
   it("blocks missing or inactive CBF", () => {
-    const missing = evaluateClientEnvironment([ranked], clientPolicyFixture());
+    const missing = evaluateClientEnvironment([ranked, nodeIds], clientPolicyFixture());
     expect(missing.allowed).toBe(false);
     expect(missing.cbfIssues).toContain("CBF_NOT_INSTALLED");
 
     const inactive = evaluateClientEnvironment(
-      [ranked, { ...cbf, enabled: false, loaded: false }],
+      [ranked, nodeIds, { ...cbf, enabled: false, loaded: false }],
       clientPolicyFixture(),
     );
     expect(inactive.allowed).toBe(false);
@@ -243,10 +254,16 @@ describe("allowlist and CBF gate", () => {
 
   it("blocks a mismatched CBF input/physics profile without changing it silently", () => {
     const decision = evaluateClientEnvironment(
-      [ranked, { ...cbf, settings: { ...cbf.settings, "click-on-steps": true } }],
+      [ranked, nodeIds, { ...cbf, settings: { ...cbf.settings, "click-on-steps": true } }],
       clientPolicyFixture(),
     );
     expect(decision.allowed).toBe(false);
     expect(decision.cbfIssues).toContain("CBF_SETTING_MISMATCH:click-on-steps");
+  });
+
+  it("blocks missing Node IDs as a required dependency", () => {
+    const decision = evaluateClientEnvironment([ranked, cbf], clientPolicyFixture());
+    expect(decision.allowed).toBe(false);
+    expect(decision.missingRequiredModIds).toContain("geode.node-ids");
   });
 });

@@ -47,7 +47,9 @@ g++ -std=c++23 -Wall -Wextra -Wpedantic -Werror \
 
 플레이 HUD는 화면 코너에 anchor되어 실제 frame update cadence FPS, viewer 기준 양쪽 authoritative Score, 서버 승인 Clear 체크 3개, snapshot Qualifying %, 현재 Round/Death Match와 server deadline 보간 타이머를 표시합니다. 배경 카드와 사각 스크림 없이 글자에만 검은 그림자를 적용하며, 일반 문구는 Paperlogy SemiBold, Score·타이머·Qualifying 값은 Paperlogy Black으로 표시합니다. 상대 현재 progress는 3-Clear 성공자가 상대의 LAST ATTEMPT를 기다리는 동안에만 서버가 허용하며, 이 telemetry는 영구 저장 및 판정에서 분리됩니다.
 
-배치 미완료 사용자는 일반 PvP Queue와 Debug Bot 대신 별도 `PlacementService`의 싱글플레이 Run을 사용합니다. 5개 Stage에서 현재 Pool의 서로 다른 맵 2개씩을 플레이하며, 배치 Map만 3분·2 Clear·상위 2 Attempt 합계(최대 500)를 사용합니다. 진행 중에는 서버가 provisional Map Score만 갱신하고 Grade는 Attempt 종료 ACK에서만 바뀝니다. 자세한 상태·복구·API 계약은 [`docs/v0.5.0-beta.9-solo-placement.md`](docs/v0.5.0-beta.9-solo-placement.md)를 참고하세요.
+배치 미완료 사용자는 일반 PvP Queue와 Debug Bot 대신 별도 `PlacementService`의 싱글플레이 Run을 사용합니다. 시작 시 3개 또는 5개 Stage를 고르고 현재 Pool의 서로 다른 맵 2개씩 플레이하며, 배치 Map만 3분·2 Clear·상위 2 Attempt 합계(최대 500)를 사용합니다. 진행 중 provisional Map Score와 화면 Grade는 갱신될 수 있고, 영속 Map Grade는 Attempt 종료 ACK에서 확정됩니다. 자세한 상태·복구·API 계약은 [`docs/v0.5.0-beta.9-solo-placement.md`](docs/v0.5.0-beta.9-solo-placement.md)를 참고하세요.
+
+클라이언트는 비허용 활성 모드, 필수 모드 누락·비활성, 버전 불일치와 CBF 설정 문제를 Paperlogy 기반 게임 내 경고창으로 구분해 안내합니다. Node IDs `v1.23.3` 이상은 `mod.json` dependency이자 `Ranked Allowed Mods`의 필수 항목입니다.
 
 ## 배포 순서
 
@@ -72,7 +74,7 @@ Debug Bot Match 제거 방법은 [`docs/debug-bot-match.md`](docs/debug-bot-matc
 [`docs/v0.5.0-beta.4-report.md`](docs/v0.5.0-beta.4-report.md)에 정리되어 있습니다.
 
 
-> v0.5.0-beta.9 policy: the Ranked allowlist checks currently enabled + loaded mods only. Installed-but-disabled mods do not block Ranked; required mods such as CBF must still be active.
+> v0.5.0-beta.12 policy: the Ranked allowlist checks currently enabled + loaded mods only. Installed-but-disabled mods do not block Ranked; required mods such as CBF and Node IDs must still be active.
 
 
 ## alpha.18 attempt scoring reliability

@@ -133,6 +133,13 @@ const allowedMods: readonly AllowedModRule[] = [
     required: true,
     enabled: true,
   },
+  {
+    id: "geode.node-ids",
+    displayName: "Node IDs",
+    minVersion: "v1.23.3",
+    required: true,
+    enabled: true,
+  },
 ];
 
 export const configDocumentFixture = (generation = "test-1"): RankedConfigDocument => ({

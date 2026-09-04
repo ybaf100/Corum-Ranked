@@ -193,6 +193,12 @@ for (const name of [
   assert.ok(spreadsheet.getSheetByName(name), `Missing ${name}`);
 }
 assert.equal(spreadsheet.getSheetByName("Ranked Pool"), null);
+const allowedModRows = spreadsheet.getSheetByName("Ranked Allowed Mods").rows;
+const nodeIdsRow = allowedModRows.find((row) => row[0] === "geode.node-ids");
+assert.ok(nodeIdsRow, "Node IDs must be created in Ranked Allowed Mods");
+assert.equal(nodeIdsRow[2], "v1.23.3");
+assert.equal(nodeIdsRow[4], true);
+assert.equal(nodeIdsRow[5], true);
 
 const integrationMapSheet = spreadsheet.getSheetByName("sheet1");
 const mapSheet = spreadsheet.getSheetByName("sheet2");

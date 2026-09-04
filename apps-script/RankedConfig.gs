@@ -84,6 +84,14 @@ var CORUM_RANKED_ALLOWED_MOD_DEFAULTS = Object.freeze([
     true,
     true,
   ]),
+  Object.freeze([
+    "geode.node-ids",
+    "Node IDs",
+    "v1.23.3",
+    "",
+    true,
+    true,
+  ]),
 ]);
 
 var CORUM_RANKED_CONFIG_DEFAULTS = Object.freeze([
@@ -1277,7 +1285,7 @@ function validateRankedAllowedMods_(cbf, allowedMods, errors) {
     if (enabledById[rule.id]) errors.push("Ranked Allowed Mods에 Mod ID가 중복되어 있습니다: " + rule.id);
     enabledById[rule.id] = rule;
   });
-  ["hwanhee1.corum_ranked", cbf && cbf.modId].forEach(function (id) {
+  ["hwanhee1.corum_ranked", "geode.node-ids", cbf && cbf.modId].forEach(function (id) {
     if (!id || !enabledById[id] || !enabledById[id].required) {
       errors.push("필수 모드는 Enabled/Required 상태여야 합니다: " + (id || "CBF Mod ID 없음"));
     }

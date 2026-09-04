@@ -255,6 +255,22 @@ struct RankedClientPresentationView {
     RankedUiTransitionView ui;
 };
 
+struct EnvironmentModIssueView {
+    std::string id;
+    std::string displayName;
+    std::string installedVersion;
+    std::optional<std::string> minimumVersion;
+    std::optional<std::string> maximumVersion;
+};
+
+struct EnvironmentWarningView {
+    bool active = false;
+    std::vector<EnvironmentModIssueView> unauthorizedMods;
+    std::vector<EnvironmentModIssueView> missingRequiredMods;
+    std::vector<EnvironmentModIssueView> versionViolations;
+    std::vector<std::string> cbfIssues;
+};
+
 struct RuntimeView {
     RuntimeStage stage = RuntimeStage::Idle;
     std::string status;
@@ -270,6 +286,7 @@ struct RuntimeView {
     bool demotionWarning = false;
     std::uint64_t revision = 0;
     RankedClientPresentationView client;
+    EnvironmentWarningView environmentWarning;
     PlacementView placement;
     MatchView match;
     bool historyLoading = false;
@@ -282,6 +299,7 @@ public:
     static RankedRuntime& get();
 
     void begin();
+    void recheckEnvironment();
     void tick();
     void joinQueue();
     void startPlacement(int startingPool, int stageCount);
@@ -385,6 +403,8 @@ private:
     [[nodiscard]] int optimisticClearsForContext(std::string const& contextKey) const;
     void setStage(RuntimeStage stage, std::string status, std::string error = {});
     void setTransientError(std::string error);
+    void showEnvironmentWarning(EnvironmentDecision const& decision, bool blockRuntime);
+    [[nodiscard]] EnvironmentModIssueView environmentModIssue(std::string const& id) const;
     void observeServerNow(matjson::Value const& root);
     [[nodiscard]] std::vector<InstalledModSnapshot> captureInstalledMods() const;
     [[nodiscard]] matjson::Value installedModsJson() const;

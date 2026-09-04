@@ -47,6 +47,7 @@
 - 기존 Integration의 맵 정보·기록 제출 런타임은 Ranked와 공유하지 않습니다.
 - NestJS/PostgreSQL 서버가 매칭, 시간, attempt 승인, 점수, 승패, 숨김 MMR과 표시 LP를 최종 판정합니다. 클라이언트/API에는 MMR을 노출하지 않습니다.
 - Apps Script는 운영 설정만 제공하며 실시간 경기 상태를 저장하지 않습니다.
+- Ranked 클라이언트도 Node IDs `v1.23.3` 이상을 필수 dependency로 사용합니다. 비허용 활성 모드나 필수 모드 문제가 있으면 raw ID만 출력하지 않고 모드 이름·문제 유형·해결 안내를 게임 내 한글 경고창으로 표시합니다.
 - 일반 Corum Integration은 계속 `sheet1`을 사용하고, Ranked Pool과 Qualifying은 같은 레이아웃의 별도 `sheet2`에서 관리합니다.
 - `v0.5.0-beta.8`의 Debug Bot Match는 개발 전용이며 정식 클라이언트 빌드에서는 기본적으로 제외됩니다. 배치 미완료 플레이어는 Debug Bot과 일반 PvP Queue를 이용할 수 없습니다.
 - 미확정 MMR Seed·티어 경계·K-factor·timeout·매칭 폭·실패 정책은 운영자가 입력하기 전까지 queue가 fail-closed 상태를 유지합니다.
@@ -65,4 +66,4 @@
 ---
 
 
-> v0.5.0-beta.8 policy: the Ranked allowlist checks currently enabled + loaded mods only. Installed-but-disabled mods do not block Ranked; required mods such as CBF must still be active.
+> v0.5.0-beta.12 policy: the Ranked allowlist checks currently enabled + loaded mods only. Installed-but-disabled mods do not block Ranked; required mods such as CBF and Node IDs must still be active.

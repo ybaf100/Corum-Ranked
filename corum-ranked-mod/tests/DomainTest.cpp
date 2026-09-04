@@ -33,6 +33,14 @@ EnvironmentPolicy policy() {
                 .required = true,
                 .enabled = true,
             },
+            {
+                .id = "geode.node-ids",
+                .displayName = "Node IDs",
+                .minVersion = "v1.23.3",
+                .maxVersion = std::nullopt,
+                .required = true,
+                .enabled = true,
+            },
         },
         .cbfModId = "syzzi.click_between_frames",
         .cbfRequiredSettings = {
@@ -62,6 +70,14 @@ std::vector<InstalledModSnapshot> validMods() {
                 {"physics-bypass", false},
                 {"soft-toggle", false},
             },
+        },
+        {
+            .id = "geode.node-ids",
+            .displayName = "Node IDs",
+            .version = "v1.23.3",
+            .enabled = true,
+            .loaded = true,
+            .settings = {},
         },
         {
             .id = "geode.loader",
@@ -112,7 +128,15 @@ void environmentTests() {
     mods[1].version = "v1.5.0-beta.1";
     blocked = evaluateEnvironment(mods, policy());
     assert(!blocked.allowed);
+    assert(blocked.versionViolationModIds == std::vector<std::string>{"syzzi.click_between_frames"});
     assert(!blocked.versionViolations.empty());
+
+    mods = validMods();
+    mods.erase(mods.begin() + 1);
+    blocked = evaluateEnvironment(mods, policy());
+    assert(!blocked.allowed);
+    assert(blocked.missingRequiredModIds == std::vector<std::string>{"syzzi.click_between_frames"});
+    assert(blocked.cbfIssues == std::vector<std::string>{"CBF_NOT_INSTALLED"});
 
     assert(isAcceptableServerURL("https://ranked.example.com"));
     assert(isAcceptableServerURL("http://127.0.0.1:3000"));

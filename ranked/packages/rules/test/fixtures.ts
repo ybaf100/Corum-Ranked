@@ -142,6 +142,13 @@ export const clientPolicyFixture = (): ClientEnvironmentPolicy => ({
       required: true,
       enabled: true,
     },
+    {
+      id: "geode.node-ids",
+      displayName: "Node IDs",
+      minVersion: "v1.23.3",
+      required: true,
+      enabled: true,
+    },
   ],
   cbf: completeOperationalConfig().cbf,
 });

@@ -66,7 +66,7 @@ class FixedCsmpSource implements CsmpTierSource {
 const cleanMods: CreateSessionDto["installedMods"] = [
   {
     id: "hwanhee1.corum_ranked",
-    version: "0.5.0-beta.11",
+    version: "0.5.0-beta.12",
     enabled: true,
     loaded: true,
     internal: false,
@@ -84,6 +84,14 @@ const cleanMods: CreateSessionDto["installedMods"] = [
       "click-on-steps": false,
       "physics-bypass": false,
     },
+  },
+  {
+    id: "geode.node-ids",
+    version: "v1.23.3",
+    enabled: true,
+    loaded: true,
+    internal: false,
+    system: false,
   },
 ];
 
@@ -114,7 +122,7 @@ describe("server-authoritative solo Stage Placement", () => {
     const created = await sessions.create({
       gdAccountId: "9901",
       gdUsername: "PlacementPlayer",
-      clientVersion: "v0.5.0-beta.11",
+      clientVersion: "v0.5.0-beta.12",
       installedMods: structuredClone(cleanMods),
     });
     const contextRow = await database.query<{
@@ -422,7 +430,7 @@ describe("server-authoritative solo Stage Placement", () => {
     const created = await sessions.create({
       gdAccountId: "9902",
       gdUsername: "PlacementSkipPlayer",
-      clientVersion: "v0.5.0-beta.11",
+      clientVersion: "v0.5.0-beta.12",
       installedMods: structuredClone(cleanMods),
     });
     const contextRow = await database.query<{

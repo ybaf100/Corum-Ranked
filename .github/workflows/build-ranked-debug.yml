@@ -39,6 +39,12 @@ jobs:
           if (manifest.id !== 'hwanhee1.corum_ranked') {
             throw new Error(`Unexpected Ranked Mod ID: ${manifest.id}`);
           }
+          if (!manifest.dependencies?.['syzzi.click_between_frames']) {
+            throw new Error('Click Between Frames must remain a required dependency');
+          }
+          if (!manifest.dependencies?.['geode.node-ids']) {
+            throw new Error('Node IDs must remain a required dependency');
+          }
           const versionSource = fs.readFileSync(
             'ranked/apps/server/src/session/client-version.ts',
             'utf8',

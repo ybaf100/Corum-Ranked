@@ -35,6 +35,7 @@
 
 using namespace geode::prelude;
 using corum::ranked::DeathmatchSummaryView;
+using corum::ranked::EnvironmentModIssueView;
 using corum::ranked::HistoryMatchView;
 using corum::ranked::MatchView;
 using corum::ranked::RankedRuntime;
@@ -100,6 +101,63 @@ std::string formatPlacementScore(double value) {
     std::ostringstream stream;
     stream << std::fixed << std::setprecision(1) << value;
     return stream.str();
+}
+
+std::string environmentModIdentity(EnvironmentModIssueView const& issue) {
+    if (issue.displayName.empty() || issue.displayName == issue.id) return issue.id;
+    return fmt::format("{} ({})", issue.displayName, issue.id);
+}
+
+std::string joinEnvironmentMods(
+    std::vector<EnvironmentModIssueView> const& issues,
+    bool includeVersions
+) {
+    std::string result;
+    for (auto const& issue : issues) {
+        if (!result.empty()) result += "  |  ";
+        result += environmentModIdentity(issue);
+        if (!includeVersions) continue;
+
+        if (!issue.installedVersion.empty()) {
+            result += fmt::format(
+                " · {} {}",
+                tr("installed-version", "INSTALLED"),
+                issue.installedVersion
+            );
+        }
+        if (issue.minimumVersion || issue.maximumVersion) {
+            result += fmt::format(" · {} ", tr("required-version", "REQUIRED"));
+            if (issue.minimumVersion) {
+                result += *issue.minimumVersion + " " + tr("version-or-newer", "OR NEWER");
+            }
+            if (issue.minimumVersion && issue.maximumVersion) result += " / ";
+            if (issue.maximumVersion) {
+                result += *issue.maximumVersion + " " + tr("version-or-older", "OR OLDER");
+            }
+        }
+    }
+    return result;
+}
+
+std::string cbfSettingsText(std::vector<std::string> const& issues) {
+    std::vector<std::string> settings;
+    for (auto const& issue : issues) {
+        constexpr std::string_view prefix = "CBF_SETTING_MISMATCH:";
+        if (!issue.starts_with(prefix)) continue;
+        auto const key = issue.substr(prefix.size());
+        if (key == "soft-toggle") settings.push_back("Soft Toggle");
+        else if (key == "click-on-steps") settings.push_back("Click on Steps");
+        else if (key == "physics-bypass") settings.push_back("Physics Bypass");
+        else settings.push_back(key);
+    }
+    if (settings.empty()) return {};
+
+    std::string result = tr("cbf-setting-off", "TURN OFF THESE CBF SETTINGS") + ": ";
+    for (auto const& setting : settings) {
+        if (!result.ends_with(": ")) result += ", ";
+        result += setting;
+    }
+    return result;
 }
 
 std::string scoreComparison(double ownScore, double opponentScore) {
@@ -504,12 +562,15 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate 
     }
 
     std::string presentationKey() const {
+        auto const& view = RankedRuntime::get().view();
+        if (view.environmentWarning.active) {
+            return fmt::format("environment-warning:{}", view.revision);
+        }
         if (showResourceGate()) {
             auto const resources = RankedAudioManager::get().downloadView();
             return fmt::format("resources:{}", static_cast<int>(resources.state));
         }
         if (m_page == Page::HistoryList) {
-            auto const& view = RankedRuntime::get().view();
             return fmt::format(
                 "history:list:{}:{}:{}",
                 view.historyLoading,
@@ -522,7 +583,6 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate 
             return fmt::format("placement:pool:{}:{}:{}:{}", RankedRuntime::get().view().revision, m_selectedPlacementStageCount, m_selectedPlacementPool, m_localMessage);
         }
         if (m_page == Page::PlacementSkipConfirm) return "placement:skip-confirm";
-        auto const& view = RankedRuntime::get().view();
         if (view.stage != RuntimeStage::Matched) {
             return fmt::format(
                 "stage:{}:placement:{}:{}",
@@ -796,6 +856,7 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate 
     }
 
     void updateDynamicUi() {
+        if (RankedRuntime::get().view().environmentWarning.active) return;
         if (showResourceGate()) {
             auto const resourceView = RankedAudioManager::get().downloadView();
             if (m_resourceCountLabel) {
@@ -955,6 +1016,10 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate 
     void render() {
         clearUi();
         auto const& view = RankedRuntime::get().view();
+        if (view.environmentWarning.active) {
+            renderEnvironmentWarning(view);
+            return;
+        }
         if (showResourceGate()) {
             renderResources();
             return;
@@ -1090,6 +1155,103 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate 
         auto* label = makeLabel(text, 0.32f, position, corum::ranked::ui::Text, "semibold");
         label->limitLabelWidth(96.0f, 0.32f, 0.20f);
         m_root->addChild(label, 2);
+    }
+
+    void renderEnvironmentWarning(RuntimeView const& view) {
+        auto const size = CCDirector::sharedDirector()->getWinSize();
+        addTopBack(true);
+        addLanguageSelector();
+        addScreenHeader(
+            tr("mod-check-required", "MOD CHECK REQUIRED"),
+            tr("ranked-access-blocked", "RANKED ACCESS BLOCKED"),
+            kRed,
+            kRed
+        );
+
+        auto const panelWidth = std::min(448.0f, size.width - 64.0f);
+        auto const panelHeight = std::min(194.0f, size.height - 112.0f);
+        auto const panelCenter = CCPoint{size.width / 2.0f, size.height / 2.0f - 5.0f};
+        auto* panel = makeNeonPanel(
+            {panelWidth, panelHeight},
+            panelCenter,
+            kRed,
+            ccc3(28, 11, 23),
+            250
+        );
+        m_root->addChild(panel, 1);
+
+        auto* body = makeLabel(
+            tr("environment-warning-body", "RANKED CANNOT BE USED WITH THE CURRENT MOD SETUP."),
+            0.29f,
+            {size.width / 2.0f, panelCenter.y + panelHeight / 2.0f - 21.0f},
+            ccc3(255, 232, 236),
+            "semibold"
+        );
+        body->limitLabelWidth(panelWidth - 34.0f, 0.29f, 0.19f);
+        m_root->addChild(body, 4);
+
+        auto* action = makeLabel(
+            tr(
+                "environment-warning-action",
+                "FIX THE ITEMS BELOW, RESTART THE GAME, THEN CHECK AGAIN."
+            ),
+            0.22f,
+            {size.width / 2.0f, panelCenter.y + panelHeight / 2.0f - 43.0f},
+            corum::ranked::ui::TextMuted,
+            "semibold"
+        );
+        action->limitLabelWidth(panelWidth - 34.0f, 0.22f, 0.15f);
+        m_root->addChild(action, 4);
+
+        float rowY = panelCenter.y + panelHeight / 2.0f - 68.0f;
+        auto addSection = [&](std::string const& heading, std::string const& detail) {
+            if (detail.empty()) return;
+            auto* headingLabel = makeLabel(
+                heading,
+                0.23f,
+                {size.width / 2.0f, rowY},
+                kRed,
+                "black"
+            );
+            headingLabel->limitLabelWidth(panelWidth - 36.0f, 0.23f, 0.16f);
+            m_root->addChild(headingLabel, 4);
+
+            auto* detailLabel = makeLabel(
+                detail,
+                0.23f,
+                {size.width / 2.0f, rowY - 14.0f},
+                corum::ranked::ui::Text,
+                "semibold"
+            );
+            detailLabel->limitLabelWidth(panelWidth - 36.0f, 0.23f, 0.13f);
+            m_root->addChild(detailLabel, 4);
+            rowY -= 32.0f;
+        };
+
+        addSection(
+            tr("unauthorized-active-mods", "UNAUTHORIZED ACTIVE MODS"),
+            joinEnvironmentMods(view.environmentWarning.unauthorizedMods, false)
+        );
+        addSection(
+            tr("missing-required-mods", "MISSING OR INACTIVE REQUIRED MODS"),
+            joinEnvironmentMods(view.environmentWarning.missingRequiredMods, true)
+        );
+        addSection(
+            tr("incompatible-mod-versions", "INCOMPATIBLE MOD VERSIONS"),
+            joinEnvironmentMods(view.environmentWarning.versionViolations, true)
+        );
+        addSection(
+            tr("cbf-settings-required", "CBF SETTINGS REQUIRED"),
+            cbfSettingsText(view.environmentWarning.cbfIssues)
+        );
+
+        addButton(
+            tr("retry-check", "CHECK AGAIN"),
+            {size.width / 2.0f, 24.0f},
+            menu_selector(CorumRankedLayer::onEnvironmentRecheck),
+            false,
+            0.64f
+        );
     }
 
     void addRatingMarks(
@@ -3501,6 +3663,10 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate 
 
     void onRetry(CCObject*) {
         RankedRuntime::get().begin();
+    }
+
+    void onEnvironmentRecheck(CCObject*) {
+        RankedRuntime::get().recheckEnvironment();
     }
 
     void selectLanguage(corum::ranked::i18n::Language language) {

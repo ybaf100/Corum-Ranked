@@ -160,6 +160,7 @@ EnvironmentDecision evaluateEnvironment(
         if (rule.minVersion) {
             auto const comparison = compareVersions(mod->version, *rule.minVersion);
             if (!comparison || *comparison < 0) {
+                decision.versionViolationModIds.push_back(id);
                 decision.versionViolations.push_back(
                     id + ": active " + mod->version + ", minimum " + *rule.minVersion
                 );
@@ -168,6 +169,7 @@ EnvironmentDecision evaluateEnvironment(
         if (rule.maxVersion) {
             auto const comparison = compareVersions(mod->version, *rule.maxVersion);
             if (!comparison || *comparison > 0) {
+                decision.versionViolationModIds.push_back(id);
                 decision.versionViolations.push_back(
                     id + ": active " + mod->version + ", maximum " + *rule.maxVersion
                 );
@@ -195,6 +197,7 @@ EnvironmentDecision evaluateEnvironment(
     sortAndUnique(decision.allowedModIds);
     sortAndUnique(decision.unauthorizedModIds);
     sortAndUnique(decision.missingRequiredModIds);
+    sortAndUnique(decision.versionViolationModIds);
     sortAndUnique(decision.versionViolations);
     sortAndUnique(decision.cbfIssues);
     decision.allowed =

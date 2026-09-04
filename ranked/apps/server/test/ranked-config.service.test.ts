@@ -110,4 +110,18 @@ describe("Ranked config snapshot loader", () => {
       lastError: expect.stringContaining("csmpSeeds.DIAMOND must be configured"),
     });
   });
+
+  it("refuses an allowlist that omits the required Node IDs dependency", async () => {
+    const source = new FakeSource();
+    source.document = {
+      ...source.document,
+      allowedMods: source.document.allowedMods.filter((rule) => rule.id !== "geode.node-ids"),
+    };
+    const service = new RankedConfigService(source, environmentFixture());
+    expect(await service.refresh()).toBe(false);
+    expect(service.getStatus()).toMatchObject({
+      ready: false,
+      lastError: expect.stringContaining("geode.node-ids must be enabled and required"),
+    });
+  });
 });

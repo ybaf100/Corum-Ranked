@@ -12,6 +12,7 @@ using SettingValue = std::variant<bool, double, std::string>;
 
 struct InstalledModSnapshot {
     std::string id;
+    std::string displayName;
     std::string version;
     bool enabled = false;
     bool loaded = false;
@@ -40,6 +41,7 @@ struct EnvironmentDecision {
     std::vector<std::string> unauthorizedModIds;
     std::vector<std::string> allowedModIds;
     std::vector<std::string> missingRequiredModIds;
+    std::vector<std::string> versionViolationModIds;
     std::vector<std::string> versionViolations;
     std::vector<std::string> cbfIssues;
 };

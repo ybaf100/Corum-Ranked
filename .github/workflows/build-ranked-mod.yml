@@ -61,6 +61,9 @@ jobs:
           if (!manifest.dependencies?.['syzzi.click_between_frames']) {
             throw new Error('Click Between Frames must remain a required dependency');
           }
+          if (!manifest.dependencies?.['geode.node-ids']) {
+            throw new Error('Node IDs must remain a required dependency');
+          }
           const requiredFonts = {
             CorumSans: 'resources/CorumSans.ttf',
             CorumSansMedium: 'resources/CorumSansMedium.ttf',
@@ -209,6 +212,18 @@ jobs:
           ):
               if required_selector not in popup:
                   raise SystemExit(f"Missing beta.6 language selector: {required_selector}")
+          for required_environment_warning in (
+              "renderEnvironmentWarning",
+              "environmentWarning.unauthorizedMods",
+              "environmentWarning.missingRequiredMods",
+              "environmentWarning.versionViolations",
+              "cbfSettingsText",
+              "onEnvironmentRecheck",
+          ):
+              if required_environment_warning not in popup:
+                  raise SystemExit(
+                      f"Missing beta.12 in-game environment warning: {required_environment_warning}"
+                  )
           for required_reentry in (
               "m_rankedChildScenePushed",
               "resumedFromRankedChild",
