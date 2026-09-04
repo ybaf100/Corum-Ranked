@@ -55,6 +55,7 @@ std::vector<InstalledModSnapshot> validMods() {
     return {
         {
             .id = "hwanhee1.corum_ranked",
+            .displayName = "Corum Ranked",
             .version = "v0.1.0",
             .enabled = true,
             .loaded = true,
@@ -62,6 +63,7 @@ std::vector<InstalledModSnapshot> validMods() {
         },
         {
             .id = "syzzi.click_between_frames",
+            .displayName = "CBF",
             .version = "v1.5.0",
             .enabled = true,
             .loaded = true,
@@ -81,6 +83,7 @@ std::vector<InstalledModSnapshot> validMods() {
         },
         {
             .id = "geode.loader",
+            .displayName = "Geode",
             .version = "v5.8.2",
             .enabled = true,
             .loaded = true,
@@ -97,6 +100,7 @@ void environmentTests() {
 
     mods.push_back({
         .id = "unapproved.disabled_mod",
+        .displayName = "Disabled Test Mod",
         .version = "v1.0.0",
         .enabled = false,
         .loaded = false,
@@ -108,6 +112,7 @@ void environmentTests() {
 
     mods.push_back({
         .id = "unapproved.active_mod",
+        .displayName = "Active Test Mod",
         .version = "v1.0.0",
         .enabled = true,
         .loaded = true,
