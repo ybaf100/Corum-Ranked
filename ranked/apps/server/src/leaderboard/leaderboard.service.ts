@@ -21,7 +21,24 @@ interface LeaderboardRow {
   promotion_results: unknown;
   demotion_warning: boolean;
   updated_at: Date | string;
+  placement_state: string | null;
+  placement_total_stages: number | null;
+  placement_current_stage: number | null;
+  placement_current_map: number | null;
+  placement_completed_stages: number | null;
+  placement_completed_maps: number | null;
 }
+
+export type PublicPlacementProgress =
+  | { readonly state: "NOT_STARTED" | "CANCELLED" }
+  | {
+      readonly state: string;
+      readonly totalStages: 3 | 5;
+      readonly currentStageIndex: number;
+      readonly currentMapIndex: number;
+      readonly completedStages: number;
+      readonly completedMaps: number;
+    };
 
 export interface PublicLeaderboardPlayer {
   readonly player: string;
@@ -30,6 +47,8 @@ export interface PublicLeaderboardPlayer {
   readonly placementGames: number;
   readonly placementGamesRequired: number | null;
   readonly placementResults: readonly RatingMark[];
+  /** Solo Stage progress. Legacy placementGames/results are not Run progress. */
+  readonly placement: PublicPlacementProgress | null;
   readonly promotion: {
     readonly sourceTier: string;
     readonly targetTier: string;
@@ -87,9 +106,26 @@ export class LeaderboardService {
          rp.promotion_wins_required,
          rp.promotion_results,
          rp.demotion_warning,
-         rp.updated_at
+         rp.updated_at,
+         placement.state AS placement_state,
+         placement.stage_count AS placement_total_stages,
+         placement.current_stage_index AS placement_current_stage,
+         placement.current_map_index AS placement_current_map,
+         placement.completed_stages AS placement_completed_stages,
+         placement.completed_maps AS placement_completed_maps
        FROM ranked_profiles rp
        JOIN ranked_players p ON p.id = rp.player_id
+       LEFT JOIN LATERAL (
+         SELECT pr.state, pr.stage_count, pr.current_stage_index, pr.current_map_index,
+                jsonb_array_length(pr.stage_results) AS completed_stages,
+                (SELECT COUNT(*) FROM ranked_placement_maps pm
+                 WHERE pm.run_id = pr.id AND pm.state = 'MAP_RESULT') AS completed_maps
+         FROM ranked_placement_runs pr
+         WHERE pr.player_id = rp.player_id
+           AND (rp.displayed_tier = 'UNRANKED' OR rp.visible_ranked_score IS NULL)
+         ORDER BY pr.created_at DESC, pr.id DESC
+         LIMIT 1
+       ) placement ON TRUE
        WHERE p.is_bot = FALSE
          AND p.gd_account_id > 0`,
     );
@@ -106,9 +142,10 @@ export class LeaderboardService {
             results: promotionResults,
           }
         : null;
+      // Finalization/skip writes the tier and LP atomically. A later change to
+      // the legacy PvP placementGames setting must not unrank a finished Run.
       const placementInProgress = row.displayed_tier === "UNRANKED" ||
-        row.visible_ranked_score === null ||
-        (placementGamesRequired !== null && Number(row.placement_games) < placementGamesRequired);
+        row.visible_ranked_score === null;
 
       return {
         hiddenMmr: Number(row.hidden_mmr),
@@ -119,6 +156,7 @@ export class LeaderboardService {
           placementGames: Number(row.placement_games),
           placementGamesRequired,
           placementResults: this.ratingMarks(row.placement_results),
+          placement: placementInProgress ? this.placementProgress(row) : null,
           promotion: placementInProgress ? null : promotion,
           demotionWarning: placementInProgress ? false : Boolean(row.demotion_warning),
           wins: Number(row.wins),
@@ -140,6 +178,22 @@ export class LeaderboardService {
       serverOpen: snapshot?.operational.enabled ?? false,
       players: [...ranked, ...unranked].map(({ player }) => player),
     };
+  }
+
+  private placementProgress(row: LeaderboardRow): PublicPlacementProgress | null {
+    if (!row.placement_state) return { state: "NOT_STARTED" };
+    if (row.placement_state === "CANCELLED") return { state: "CANCELLED" };
+    const totalStages = Number(row.placement_total_stages);
+    const currentStageIndex = Number(row.placement_current_stage);
+    const currentMapIndex = Number(row.placement_current_map);
+    const completedStages = Number(row.placement_completed_stages);
+    const completedMaps = Number(row.placement_completed_maps);
+    if (totalStages !== 3 && totalStages !== 5) return null;
+    if (!Number.isInteger(currentStageIndex) || currentStageIndex < 1 || currentStageIndex > totalStages) return null;
+    if (currentMapIndex !== 1 && currentMapIndex !== 2) return null;
+    if (!Number.isInteger(completedStages) || completedStages < 0 || completedStages > totalStages) return null;
+    if (!Number.isInteger(completedMaps) || completedMaps < 0 || completedMaps > totalStages * 2) return null;
+    return { state: row.placement_state, totalStages, currentStageIndex, currentMapIndex, completedStages, completedMaps };
   }
 
   private compareRanked(left: SortableLeaderboardPlayer, right: SortableLeaderboardPlayer): number {

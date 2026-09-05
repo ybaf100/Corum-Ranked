@@ -1,10 +1,29 @@
-import { Controller, Get } from "@nestjs/common";
+import { Controller, Get, Header } from "@nestjs/common";
 import { REQUIRED_RANKED_CLIENT_VERSION } from "../session/client-version.js";
 import { RankedConfigService } from "./ranked-config.service.js";
 
 @Controller("api/ranked")
 export class RankedConfigController {
   public constructor(private readonly rankedConfig: RankedConfigService) {}
+
+  @Get("maps")
+  @Header("Cache-Control", "public, max-age=60, stale-while-revalidate=120")
+  public getPublicMaps(): object {
+    // Read the last validated sheet2 snapshot even when matchmaking is closed.
+    // Never return the complete config, private seed values or source secrets.
+    const snapshot = this.rankedConfig.getSnapshot();
+    return {
+      generation: snapshot.generation,
+      fetchedAt: snapshot.fetchedAt,
+      maps: snapshot.maps.filter((map) => map.active).map((map) => ({
+        title: map.title,
+        difficulty: map.difficulty,
+        mapCode: map.playableLevelId,
+        pool: map.pool,
+        qualifyingPercent: map.qualifyingPercent,
+      })),
+    };
+  }
 
   @Get("config")
   public getClientConfig(): object {
