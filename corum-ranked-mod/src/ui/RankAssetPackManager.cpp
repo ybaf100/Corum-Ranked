@@ -186,7 +186,17 @@ void RankAssetPackManager::prepare() {
         return;
     }
     if (activateExisting(m_metadata.assetPackVersion)) return;
+    if (m_view.state == RankAssetPackState::Failed) return;
     downloadConfiguredPack();
+}
+
+void RankAssetPackManager::retry() {
+    if (!m_metadata.configured()) return;
+    ++m_downloadGeneration;
+    m_downloadRequest.cancel();
+    m_view.state = RankAssetPackState::Disabled;
+    m_view.error.clear();
+    prepare();
 }
 
 RankAssetPackView const& RankAssetPackManager::view() const { return m_view; }

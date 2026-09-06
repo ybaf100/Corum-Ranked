@@ -2952,7 +2952,10 @@ export class MatchService {
       }
     }
     let deathmatch: object | null = null;
-    if (match.state.startsWith("DEATHMATCH") && match.current_deathmatch_id) {
+    if (
+      (match.state.startsWith("DEATHMATCH") || match.state === "MATCH_RESULT") &&
+      match.current_deathmatch_id
+    ) {
       const current = await this.currentDeathmatch(transaction, match);
       const live = await this.deathmatchLiveSnapshot(transaction, match, current);
       const deathmatchSlot = deathmatchRuntimeSlot(Number(current.sequence));

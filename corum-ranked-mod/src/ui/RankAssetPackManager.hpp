@@ -41,6 +41,7 @@ public:
     // is ready for the authoritative config values once they are supplied.
     void configure(RankAssetPackMetadata metadata);
     void prepare();
+    void retry();
 
     [[nodiscard]] RankAssetPackView const& view() const;
     [[nodiscard]] bool ready() const;

@@ -530,15 +530,30 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate 
 
     bool showResourceGate() const {
         auto const& audioConfig = RankedRuntime::get().view().client.audio;
-        if (!audioConfig.enabled || audioConfig.resources.empty()) return false;
+        auto const audioEnabled = audioConfig.enabled && !audioConfig.resources.empty();
         auto const& audio = RankedAudioManager::get();
-        return audio.requiresResourceDownload() || !m_resourceGateAcknowledged;
+        auto const assetState = corum::ranked::ui::RankAssetPackManager::get().view().state;
+        auto const assetsDownloading = assetState == corum::ranked::ui::RankAssetPackState::Downloading;
+        if (!audioEnabled) return assetsDownloading;
+        return audio.requiresResourceDownload() || assetsDownloading || !m_resourceGateAcknowledged;
     }
 
     void syncResources() {
         auto& audio = RankedAudioManager::get();
+        auto& assets = corum::ranked::ui::RankAssetPackManager::get();
+        if (assets.view().state == corum::ranked::ui::RankAssetPackState::Disabled) {
+            assets.prepare();
+        }
+        auto const assetsDownloading =
+            assets.view().state == corum::ranked::ui::RankAssetPackState::Downloading;
         auto const& audioConfig = RankedRuntime::get().view().client.audio;
         if (!audioConfig.enabled || audioConfig.resources.empty()) {
+            if (assetsDownloading) {
+                m_resourceGateInitialized = true;
+                m_resourceGateAcknowledged = false;
+                m_resourceGateWasMissing = true;
+                return;
+            }
             m_resourceGateInitialized = true;
             m_resourceGateAcknowledged = true;
             m_resourceGateWasMissing = false;
@@ -546,7 +561,7 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate 
             return;
         }
 
-        auto const missing = audio.requiresResourceDownload();
+        auto const missing = audio.requiresResourceDownload() || assetsDownloading;
         if (!m_resourceGateInitialized) {
             m_resourceGateInitialized = true;
             m_resourceGateAcknowledged = !missing;
@@ -571,7 +586,13 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate 
         }
         if (showResourceGate()) {
             auto const resources = RankedAudioManager::get().downloadView();
-            return fmt::format("resources:{}", static_cast<int>(resources.state));
+            auto const assets = corum::ranked::ui::RankAssetPackManager::get().view();
+            return fmt::format(
+                "resources:{}:{}:{}",
+                static_cast<int>(resources.state),
+                static_cast<int>(assets.state),
+                assets.activeVersion
+            );
         }
         if (m_page == Page::HistoryList) {
             return fmt::format(
@@ -1489,6 +1510,10 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate 
         auto const size = CCDirector::sharedDirector()->getWinSize();
         addTopBack(true);
         auto const resourceView = RankedAudioManager::get().downloadView();
+        auto const assetView = corum::ranked::ui::RankAssetPackManager::get().view();
+        auto const assetsDownloading = assetView.state == corum::ranked::ui::RankAssetPackState::Downloading;
+        auto const assetsFailed = assetView.state == corum::ranked::ui::RankAssetPackState::Failed;
+        auto const assetsExternalReady = assetView.state == corum::ranked::ui::RankAssetPackState::Ready;
 
         auto* panel = makeNeonPanel(
             {std::min(390.0f, size.width - 90.0f), 220.0f},
@@ -1502,7 +1527,7 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate 
         std::string title = tr("ranked-resources", "RANKED RESOURCES");
         std::string subtitle = tr("resources-required", "Additional resources are required.");
         ccColor3B accent = kCyan;
-        if (resourceView.state == RankedResourceDownloadState::Downloading) {
+        if (resourceView.state == RankedResourceDownloadState::Downloading || assetsDownloading) {
             title = tr("downloading-resources", "DOWNLOADING RESOURCES");
             subtitle = tr("keep-open", "Keep this screen open until the download is complete.");
             accent = kGold;
@@ -1533,10 +1558,42 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate 
         m_resourceCountLabel = count;
         m_root->addChild(count, 4);
 
+        auto const songState = resourceView.state == RankedResourceDownloadState::Ready
+            ? "READY"
+            : resourceView.state == RankedResourceDownloadState::Downloading
+                ? "DOWNLOADING"
+                : resourceView.state == RankedResourceDownloadState::Failed
+                    ? "FAILED"
+                    : "NOT READY";
+        auto* songRow = makeLabel(
+            fmt::format("Song — {}", songState),
+            0.25f,
+            {size.width / 2.0f, size.height / 2.0f - 5.0f},
+            resourceView.state == RankedResourceDownloadState::Ready ? kGreen :
+                resourceView.state == RankedResourceDownloadState::Failed ? kRed : kGold,
+            "semibold"
+        );
+        m_root->addChild(songRow, 4);
+
+        std::string assetStateText = "READY (BUNDLED)";
+        ccColor3B assetStateColor = kGreen;
+        if (assetsExternalReady) assetStateText = "READY (EXTERNAL)";
+        else if (assetsDownloading) { assetStateText = "DOWNLOADING"; assetStateColor = kGold; }
+        else if (assetsFailed) { assetStateText = "FAILED — BUNDLED FALLBACK"; assetStateColor = kGold; }
+        auto* assetRow = makeLabel(
+            fmt::format("Rank Visuals — {}", assetStateText),
+            0.25f,
+            {size.width / 2.0f, size.height / 2.0f - 21.0f},
+            assetStateColor,
+            "semibold"
+        );
+        assetRow->limitLabelWidth(size.width - 150.0f, 0.25f, 0.16f);
+        m_root->addChild(assetRow, 4);
+
         auto const barWidth = std::min(270.0f, size.width - 180.0f);
         auto* barBack = CCLayerColor::create({9, 17, 32, 235});
         barBack->setContentSize({barWidth, 10.0f});
-        barBack->setPosition({size.width / 2.0f - barWidth / 2.0f, size.height / 2.0f - 16.0f});
+        barBack->setPosition({size.width / 2.0f - barWidth / 2.0f, size.height / 2.0f - 38.0f});
         m_root->addChild(barBack, 3);
         double progress = resourceView.total > 0
             ? static_cast<double>(resourceView.ready) / static_cast<double>(resourceView.total)
@@ -1557,17 +1614,17 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate 
             auto* progressLabel = makeLabel(
                 fmt::format("{}%", static_cast<int>(std::round(progress * 100.0))),
                 0.22f,
-                {size.width / 2.0f, size.height / 2.0f - 40.0f},
+                {size.width / 2.0f, size.height / 2.0f - 58.0f},
                 kGold
             );
             m_resourceProgressLabel = progressLabel;
             m_root->addChild(progressLabel, 4);
         } else if (resourceView.state == RankedResourceDownloadState::Ready) {
-            addButton(tr("continue", "CONTINUE"), {size.width / 2.0f, size.height / 2.0f - 62.0f}, menu_selector(CorumRankedLayer::onContinueResources), false, 0.72f);
+            addButton(tr("continue", "CONTINUE"), {size.width / 2.0f, size.height / 2.0f - 72.0f}, menu_selector(CorumRankedLayer::onContinueResources), false, 0.72f);
         } else if (resourceView.state == RankedResourceDownloadState::Failed) {
-            addButton(tr("retry-failed", "RETRY FAILED"), {size.width / 2.0f, size.height / 2.0f - 62.0f}, menu_selector(CorumRankedLayer::onDownloadAllResources), true, 0.68f);
+            addButton(tr("retry-failed", "RETRY FAILED"), {size.width / 2.0f, size.height / 2.0f - 72.0f}, menu_selector(CorumRankedLayer::onDownloadAllResources), true, 0.68f);
         } else {
-            addButton(tr("download-all", "DOWNLOAD ALL"), {size.width / 2.0f, size.height / 2.0f - 62.0f}, menu_selector(CorumRankedLayer::onDownloadAllResources), false, 0.72f);
+            addButton(tr("download-all", "DOWNLOAD ALL"), {size.width / 2.0f, size.height / 2.0f - 72.0f}, menu_selector(CorumRankedLayer::onDownloadAllResources), false, 0.72f);
         }
     }
 
@@ -3648,10 +3705,15 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate 
     void onDownloadAllResources(CCObject*) {
         m_localMessage.clear();
         RankedAudioManager::get().downloadAll();
+        auto& assets = corum::ranked::ui::RankAssetPackManager::get();
+        if (assets.view().state == corum::ranked::ui::RankAssetPackState::Failed) assets.retry();
+        else assets.prepare();
     }
 
     void onContinueResources(CCObject*) {
         if (!RankedAudioManager::get().resourcesReady()) return;
+        if (corum::ranked::ui::RankAssetPackManager::get().view().state ==
+            corum::ranked::ui::RankAssetPackState::Downloading) return;
         m_resourceGateAcknowledged = true;
         m_resourceGateWasMissing = false;
         m_resourceGateMenuRestored = false;
