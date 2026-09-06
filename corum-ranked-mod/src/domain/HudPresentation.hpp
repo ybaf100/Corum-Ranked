@@ -36,6 +36,8 @@ struct HudInput {
     int deathmatchSequence = 0;
     int deathmatchAttemptsUsedA = 0;
     int deathmatchAttemptsUsedB = 0;
+    int deathmatchAttemptsCompletedA = 0;
+    int deathmatchAttemptsCompletedB = 0;
     double qualifyingPercent = 100.0;
     std::optional<std::int64_t> remainingMillis;
     std::optional<std::int64_t> signedRemainingMillis;
@@ -45,7 +47,8 @@ struct HudInput {
     std::optional<int> spectatorCurrentProgress;
     bool opponentProgressEnabled = false;
     std::optional<int> opponentCurrentProgress;
-    bool localPractice = false;
+    bool opponentFinished = false;
+    bool opponentPractice = false;
 };
 
 struct HudPresentation {
@@ -62,6 +65,7 @@ struct HudPresentation {
     std::string ownAttemptText;
     std::string opponentAttemptText;
     std::string qualifyingText;
+    bool qualifyingVisible = true;
     bool spectatorVisible = false;
     std::string spectatorOpponentText;
     std::string spectatorProgressText;
