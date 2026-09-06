@@ -5,6 +5,7 @@
 #include "DebugBotPopup.hpp"
 #include "RankedSongGate.hpp"
 #include "domain/PlacementStageMerge.hpp"
+#include "domain/TransitionTrace.hpp"
 #include "ui/RankBadgeAssets.hpp"
 #include "ui/RankTransitionLayer.hpp"
 #include "ui/PlacementGradeBadge.hpp"
@@ -2125,6 +2126,7 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate 
 
         auto const center = size.width / 2.0f;
         auto const timeline = corum::ranked::placementStageMergeTimeline();
+        corum::ranked::TransitionTrace::get().mark("stage-merge-node-build");
         auto* left = makeGradeCard("MAP 1", map1Grade, map1Score, center - 78.0f, false);
         auto* right = makeGradeCard("MAP 2", map2Grade, map2Score, center + 78.0f, false);
         auto* finalGroup = makeGradeCard(

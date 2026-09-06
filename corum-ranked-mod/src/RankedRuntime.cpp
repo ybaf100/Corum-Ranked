@@ -1,5 +1,6 @@
 #include "RankedRuntime.hpp"
 #include "domain/AttemptScoring.hpp"
+#include "domain/TransitionTrace.hpp"
 
 #include <Geode/binding/GJAccountManager.hpp>
 #include <Geode/loader/Loader.hpp>
@@ -1196,6 +1197,10 @@ void RankedRuntime::parsePlacementState(matjson::Value const& root) {
     ++m_view.revision;
     if (previousState != m_view.placement.state) {
         log::info("Corum Ranked Placement state: {} -> {}", previousState, m_view.placement.state);
+        TransitionTrace::get().begin(
+            fmt::format("{}:{}->{}", m_view.match.matchId, previousState, m_view.placement.state),
+            "server-state-received"
+        );
     }
 }
 
@@ -1495,6 +1500,10 @@ void RankedRuntime::parseMatchState(matjson::Value const& root) {
     ++m_view.revision;
     if (previousState != m_view.match.state) {
         log::info("Corum Ranked state: {} -> {}", previousState, m_view.match.state);
+        TransitionTrace::get().begin(
+            fmt::format("{}:{}->{}", m_view.match.matchId, previousState, m_view.match.state),
+            "server-state-received"
+        );
     }
 }
 

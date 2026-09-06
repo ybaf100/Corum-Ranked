@@ -1,10 +1,12 @@
 #include "RankBadgeAssets.hpp"
 
 #include "RankedVisuals.hpp"
+#include "../domain/TransitionTrace.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <chrono>
 #include <filesystem>
 #include <utility>
 
@@ -144,9 +146,15 @@ RankTierProfile rankTierProfile(std::string const& input) {
 }
 
 CCSprite* rankResourceSprite(std::string const& filename) {
-    auto const path = Mod::get()->getResourcesDir() / filename;
-    if (!std::filesystem::exists(path)) return nullptr;
-    return CCSprite::create(path.string().c_str());
+    auto const path = rankedVisualResourcePath(filename);
+    if (path.empty() || !std::filesystem::exists(path)) return nullptr;
+    auto const started = std::chrono::steady_clock::now();
+    auto* sprite = CCSprite::create(path.string().c_str());
+    auto const elapsedUs = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::steady_clock::now() - started
+    ).count();
+    TransitionTrace::get().mark(fmt::format("texture-decode:{}:{}us", filename, elapsedUs));
+    return sprite;
 }
 
 void fitRankSprite(CCSprite* sprite, CCSize maxSize) {

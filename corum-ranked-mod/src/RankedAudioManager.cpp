@@ -1,4 +1,5 @@
 #include "RankedAudioManager.hpp"
+#include "domain/TransitionTrace.hpp"
 
 #include <Geode/binding/FMODAudioEngine.hpp>
 #include <Geode/binding/GameManager.hpp>
@@ -436,6 +437,7 @@ void RankedAudioManager::setMode(RankedAudioMode mode) {
     }
 
     m_desiredMode = mode;
+    TransitionTrace::get().mark("audio-mode-request");
     requestAudioSwitch();
 }
 
@@ -538,6 +540,7 @@ FMOD::Sound* RankedAudioManager::preparedSound(int songId) {
         return nullptr;
     }
     m_preparedSounds[songId] = sound;
+    TransitionTrace::get().mark(fmt::format("audio-prewarm:{}:{}us", songId, elapsedUs));
     log::info("Ranked audio prewarmed song={} duration={}us path='{}'", songId, elapsedUs, path);
     return sound;
 }
@@ -738,6 +741,7 @@ void RankedAudioManager::startDesiredAudio(bool retry) {
 
     m_rankedSound = sound;
     m_rankedChannel = channel;
+    TransitionTrace::get().mark("audio-channel-started");
     m_playingKey = resource->key;
     m_ownsMusicChannel = true;
     m_playbackVerifyPending = true;

@@ -3,6 +3,7 @@
 #include "domain/HudPresentation.hpp"
 #include "domain/AttemptScoring.hpp"
 #include "domain/RankedGameplayPolicy.hpp"
+#include "domain/TransitionTrace.hpp"
 #include "domain/RenderFpsMeter.hpp"
 #include "ui/PlayerIcon.hpp"
 #include "ui/RankedTranslations.hpp"
@@ -199,6 +200,9 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         auto& runtime = corum::ranked::RankedRuntime::get();
         runtime.tick();
         if (!m_fields->rankedLevel || m_isTestMode) return;
+        if (!m_fields->gameplayFrameObserved) {
+            corum::ranked::TransitionTrace::get().mark("first-gameplay-frame");
+        }
         m_fields->gameplayFrameObserved = true;
         auto const now = std::chrono::steady_clock::now();
         m_fields->fpsMeter.observeFrame(steadyNowMicros());

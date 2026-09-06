@@ -1,5 +1,7 @@
 #pragma once
 
+#include "RankAssetPackManager.hpp"
+
 #include <Geode/Geode.hpp>
 
 #include <algorithm>
@@ -233,7 +235,7 @@ inline std::string trophyFilename(std::string tier) {
 
 inline CCSprite* trophy(std::string const& tier, CCSize maxSize) {
     auto const filename = trophyFilename(tier);
-    auto const path = Mod::get()->getResourcesDir() / filename;
+    auto const path = rankedVisualResourcePath(filename);
     CCSprite* result = nullptr;
     if (std::filesystem::exists(path)) result = CCSprite::create(path.string().c_str());
     if (!result) {
