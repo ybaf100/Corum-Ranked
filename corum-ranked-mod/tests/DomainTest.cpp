@@ -237,7 +237,7 @@ void hudTests() {
         .spectatorCurrentProgress = std::nullopt,
         .opponentProgressEnabled = true,
         .opponentCurrentProgress = std::nullopt,
-        .localPractice = false,
+        .opponentPractice = false,
     };
     auto hud = presentHud(input);
     assert(hud.fpsText == "FPS : -");
@@ -258,7 +258,7 @@ void hudTests() {
     assert(!hud.practiceIndicatorVisible);
 
     input.opponentCurrentProgress = 63;
-    input.localPractice = true;
+    input.opponentPractice = true;
     hud = presentHud(input);
     assert(hud.opponentProgressText == "63%");
     assert(hud.practiceIndicatorVisible);
@@ -268,7 +268,7 @@ void hudTests() {
     input.opponentCurrentProgress = 0;
     hud = presentHud(input);
     assert(hud.opponentProgressText == "0%");
-    input.localPractice = false;
+    input.opponentPractice = false;
 
     // Ranked score transport must preserve fractional totals produced by the
     // 70-99% x1.5 multiplier.
