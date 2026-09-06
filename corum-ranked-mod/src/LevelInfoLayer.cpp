@@ -64,6 +64,20 @@ bool rankedDownloadGateState(std::string const& state) {
         state == "MAP_PLAYING";
 }
 
+bool jukeboxLoaded() {
+    return Loader::get() && Loader::get()->isModLoaded("fleym.nongd");
+}
+
+bool hasOpenModal(CCNode* root) {
+    if (!root) return false;
+    for (auto* child : root->getChildrenExt()) {
+        if (!child) continue;
+        if (typeinfo_cast<FLAlertLayer*>(child)) return true;
+        if (hasOpenModal(child)) return true;
+    }
+    return false;
+}
+
 std::string rankedGateTitle() {
     auto const& match = corum::ranked::RankedRuntime::get().view().match;
     auto const& placement = corum::ranked::RankedRuntime::get().view().placement;
@@ -176,6 +190,15 @@ bool consumePrepareGateRequest(GJGameLevel* level, SteadyClock::time_point& coun
 
 void setMenuItemsEnabled(CCNode* root, bool enabled) {
     if (!root) return;
+    // The dedicated Level Options button stays usable during Ranked prepare so
+    // LDM / Disable Shake remain presentation choices, not anti-cheat locks.
+    if (!enabled && root->getID() == "ranked-prepare-settings-menu"_spr) {
+        if (auto* menu = typeinfo_cast<CCMenu*>(root)) menu->setTouchEnabled(true);
+        for (CCNode* child : root->getChildrenExt()) {
+            if (auto* item = typeinfo_cast<CCMenuItem*>(child)) item->setEnabled(true);
+        }
+        return;
+    }
     if (auto* item = typeinfo_cast<CCMenuItem*>(root)) item->setEnabled(enabled);
     for (CCNode* child : root->getChildrenExt()) {
         if (child) setMenuItemsEnabled(child, enabled);
@@ -184,6 +207,12 @@ void setMenuItemsEnabled(CCNode* root, bool enabled) {
 
 void enableSongAcquisitionControls(CustomSongWidget* songWidget) {
     if (!songWidget) return;
+
+    // Jukebox opens its NONG manager from the song widget itself. When it is
+    // actually loaded, restore the whole song-widget subtree rather than only
+    // vanilla download buttons. The effective file is still validated through
+    // MusicDownloadManager::pathForSong() before Ranked can launch.
+    if (jukeboxLoaded()) setMenuItemsEnabled(songWidget, true);
 
     // CustomSongWidget is a CCNode with its own button menu. Disabling parent
     // CCMenu touch dispatch (the alpha.21 approach) can leave the visible song
@@ -314,6 +343,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         bool songGateBypassed = false;
         bool mapDownloadRequested = false;
         bool mapFailureReported = false;
+        CCMenu* rankedSettingsMenu = nullptr;
         SteadyClock::time_point gateOpenedAt {};
         SteadyClock::time_point countdownEndsAt {};
         SteadyClock::time_point mapDownloadStartedAt {};
@@ -410,6 +440,23 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         m_fields->gateOverlay->addChild(m_fields->gateProgressFill, 4);
         m_fields->gateProgressLabel = gateLabel("30%", 0.17f, {183.0f, 12.0f}, corum::ranked::ui::Text);
         m_fields->gateOverlay->addChild(m_fields->gateProgressLabel, 4);
+
+        // Keep the real vanilla Level Options popup available throughout prepare.
+        // It contains LDM / Disable Shake and does not alter Ranked scoring.
+        m_fields->rankedSettingsMenu = CCMenu::create();
+        m_fields->rankedSettingsMenu->setID("ranked-prepare-settings-menu"_spr);
+        m_fields->rankedSettingsMenu->setPosition({size.width - 24.0f, size.height - 24.0f});
+        if (auto* optionsSprite = CCSprite::createWithSpriteFrameName("GJ_optionsBtn_001.png")) {
+            optionsSprite->setScale(0.62f);
+            auto* optionsItem = CCMenuItemSpriteExtra::create(
+                optionsSprite,
+                this,
+                menu_selector(CorumRankedLevelInfoLayer::onRankedLevelOptions)
+            );
+            optionsItem->setID("ranked-prepare-settings"_spr);
+            m_fields->rankedSettingsMenu->addChild(optionsItem);
+        }
+        addChild(m_fields->rankedSettingsMenu, 1005);
 
         auto const remainingAtOpen = std::chrono::duration<double>(
             m_fields->countdownEndsAt - SteadyClock::now()
@@ -639,6 +686,13 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         }
     }
 
+    void onRankedLevelOptions(CCObject* sender) {
+        if (!m_fields->songGateActive || !isCurrentRankedLevel(m_level)) return;
+        // Invoke Geometry Dash's own options layer. Ranked does not synthesize or
+        // reinterpret LDM / Disable Shake values.
+        LevelInfoLayer::onLevelOptions(sender);
+    }
+
     void updateSongDownloadGate(float) {
         if (!m_fields->songGateActive) return;
         auto& runtime = corum::ranked::RankedRuntime::get();
@@ -801,7 +855,8 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
                 !runtime.canEnterCurrentLevel() ||
                 now < m_fields->nextGameplayLaunchAt ||
                 m_fields->songGateStartingPlay ||
-                m_fields->gameplayLaunchStarted
+                m_fields->gameplayLaunchStarted ||
+                hasOpenModal(CCDirector::sharedDirector()->getRunningScene())
             ) return;
 
             // Keep the gate and its polling callback alive until gameplay has
@@ -846,6 +901,10 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         if (m_fields->gateIntroCover) {
             m_fields->gateIntroCover->removeFromParentAndCleanup(true);
             m_fields->gateIntroCover = nullptr;
+        }
+        if (m_fields->rankedSettingsMenu) {
+            m_fields->rankedSettingsMenu->removeFromParentAndCleanup(true);
+            m_fields->rankedSettingsMenu = nullptr;
         }
         m_fields->gateIntroPanel = nullptr;
         m_fields->gateTitle = nullptr;
