@@ -307,8 +307,8 @@ void RankAssetPackManager::downloadConfiguredPack() {
     m_downloadRequest.spawn(request.get(url), [this, generation, zip](web::WebResponse response) {
         if (generation != m_downloadGeneration) return;
         if (!response.ok()) { fail(fmt::format("Drive download HTTP {}", response.code())); return; }
-        auto contentType = response.header("content-type").value_or("");
-        contentType = lower(contentType);
+        std::string contentType = response.header("content-type").value_or("");
+        contentType = lower(std::move(contentType));
         if (contentType.find("text/html") != std::string::npos) {
             fail("Drive returned HTML/login/quota response instead of ZIP");
             return;
@@ -354,7 +354,7 @@ void RankAssetPackManager::finishDownloadedPack(std::filesystem::path const& zip
     auto written = geode::utils::file::writeStringSafe(root / "current.json", marker.dump());
     if (written.isErr()) { fail("asset pack activated but current.json could not be written"); return; }
     std::filesystem::remove(zipPath, ec);
-    activateExisting(m_metadata.assetPackVersion);
+    (void)activateExisting(m_metadata.assetPackVersion);
     log::info("Ranked asset pack activated: {}", m_metadata.assetPackVersion);
 }
 
