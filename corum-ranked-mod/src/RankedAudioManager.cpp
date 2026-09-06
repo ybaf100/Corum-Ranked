@@ -135,12 +135,14 @@ void RankedAudioManager::configure(RankedClientPresentationView const& config) {
 
     cancelActiveDownload();
     stopOwnedAudio();
+    releasePreparedSounds();
     m_config = config;
     m_configSignature = signature;
     synchronizeSongCaches();
     m_downloadQueue.clear();
     m_failedSongIds.clear();
     m_downloadState = resourcesReady() ? RankedResourceDownloadState::Ready : RankedResourceDownloadState::Idle;
+    if (m_downloadState == RankedResourceDownloadState::Ready) prewarmReadySounds();
 
     m_switchPending = false;
     m_playbackVerifyPending = false;
@@ -278,6 +280,7 @@ void RankedAudioManager::startNextDownload() {
         m_downloadState = m_failedSongIds.empty()
             ? RankedResourceDownloadState::Ready
             : RankedResourceDownloadState::Failed;
+        if (m_downloadState == RankedResourceDownloadState::Ready) prewarmReadySounds();
         return;
     }
 
@@ -474,10 +477,9 @@ void RankedAudioManager::stopOwnedAudio() {
         m_rankedChannel->stop();
         m_rankedChannel = nullptr;
     }
-    if (m_rankedSound) {
-        m_rankedSound->release();
-        m_rankedSound = nullptr;
-    }
+    // m_rankedSound is owned by m_preparedSounds. Keep it alive across mode
+    // changes so transition frames never reopen the audio file.
+    m_rankedSound = nullptr;
     m_ownsMusicChannel = false;
     m_playingKey.clear();
     m_playbackVerifyPending = false;
@@ -494,6 +496,57 @@ void RankedAudioManager::stopOwnedAudio() {
 
 void RankedAudioManager::clearPlaybackState() {
     stopOwnedAudio();
+}
+
+void RankedAudioManager::releasePreparedSounds() {
+    // Stop the active channel before releasing shared stream handles.
+    if (m_rankedChannel) {
+        m_rankedChannel->stop();
+        m_rankedChannel = nullptr;
+    }
+    m_rankedSound = nullptr;
+    for (auto& [songId, sound] : m_preparedSounds) {
+        (void)songId;
+        if (sound) sound->release();
+    }
+    m_preparedSounds.clear();
+}
+
+FMOD::Sound* RankedAudioManager::preparedSound(int songId) {
+    if (auto found = m_preparedSounds.find(songId); found != m_preparedSounds.end()) {
+        return found->second;
+    }
+    auto* engine = FMODAudioEngine::sharedEngine();
+    if (!engine || !engine->m_system) return nullptr;
+    auto const path = readySongPath(songId);
+    if (path.empty()) return nullptr;
+
+    auto const started = std::chrono::steady_clock::now();
+    FMOD::Sound* sound = nullptr;
+    auto const result = engine->m_system->createSound(
+        path.c_str(), FMOD_CREATESTREAM | FMOD_2D, nullptr, &sound
+    );
+    auto const elapsedUs = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::steady_clock::now() - started
+    ).count();
+    if (result != FMOD_OK || !sound) {
+        log::error(
+            "Ranked audio prewarm failed song={} result={} duration={}us path='{}'",
+            songId, static_cast<int>(result), elapsedUs, path
+        );
+        if (sound) sound->release();
+        return nullptr;
+    }
+    m_preparedSounds[songId] = sound;
+    log::info("Ranked audio prewarmed song={} duration={}us path='{}'", songId, elapsedUs, path);
+    return sound;
+}
+
+void RankedAudioManager::prewarmReadySounds() {
+    if (!enabled() || !resourcesReady()) return;
+    for (auto const songId : uniqueSongIds()) {
+        (void)preparedSound(songId);
+    }
 }
 
 void RankedAudioManager::synchronizeSongCaches() {
@@ -635,26 +688,23 @@ void RankedAudioManager::startDesiredAudio(bool retry) {
     engine->stopAllMusic(true);
     ensureFmodOutputActive();
 
-    FMOD_MODE mode = FMOD_CREATESTREAM | FMOD_2D;
-    mode |= resource->loop ? FMOD_LOOP_NORMAL : FMOD_LOOP_OFF;
-
-    FMOD::Sound* sound = nullptr;
-    auto result = engine->m_system->createSound(path.c_str(), mode, nullptr, &sound);
-    if (result != FMOD_OK || !sound) {
+    // The file-backed stream was created during resource preparation. A cache
+    // miss is retained only as a recovery fallback and is timed explicitly.
+    auto* sound = preparedSound(resource->songId);
+    if (!sound) {
         log::error(
-            "Ranked audio: createSound failed key='{}' song={} result={} path='{}'",
-            resource->key,
-            resource->songId,
-            static_cast<int>(result),
-            path
+            "Ranked audio: prepared stream unavailable key='{}' song={} path='{}'",
+            resource->key, resource->songId, path
         );
         stopOwnedAudio();
         return;
     }
-    if (resource->loop) sound->setLoopCount(-1);
+    sound->setMode(FMOD_2D | (resource->loop ? FMOD_LOOP_NORMAL : FMOD_LOOP_OFF));
+    sound->setLoopCount(resource->loop ? -1 : 0);
 
+    auto const playStarted = std::chrono::steady_clock::now();
     FMOD::Channel* channel = nullptr;
-    result = engine->m_system->playSound(sound, nullptr, true, &channel);
+    auto result = engine->m_system->playSound(sound, nullptr, true, &channel);
     if (result != FMOD_OK || !channel) {
         log::error(
             "Ranked audio: playSound failed key='{}' song={} result={} path='{}'",
@@ -663,9 +713,11 @@ void RankedAudioManager::startDesiredAudio(bool retry) {
             static_cast<int>(result),
             path
         );
-        sound->release();
         return;
     }
+    auto const playElapsedUs = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::steady_clock::now() - playStarted
+    ).count();
 
     auto const startMs = static_cast<unsigned int>(std::max(0.0, resource->startSeconds) * 1000.0);
     if (startMs > 0) {
@@ -704,6 +756,10 @@ void RankedAudioManager::startDesiredAudio(bool retry) {
         resource->loop,
         targetRankedVolume(),
         retry
+    );
+    log::debug(
+        "Ranked audio transition playSound key='{}' song={} duration={}us prepared=true",
+        resource->key, resource->songId, playElapsedUs
     );
 }
 

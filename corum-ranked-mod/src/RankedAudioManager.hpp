@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <set>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace FMOD {
@@ -86,6 +87,9 @@ private:
     void verifyDesiredAudio();
     void clearPlaybackState();
     void synchronizeSongCaches();
+    void prewarmReadySounds();
+    void releasePreparedSounds();
+    [[nodiscard]] FMOD::Sound* preparedSound(int songId);
     void stopOwnedAudio();
     [[nodiscard]] bool ownedChannelPlaying() const;
     [[nodiscard]] float targetRankedVolume() const;
@@ -116,6 +120,9 @@ private:
     unsigned int m_pendingStartMs = 0;
     unsigned int m_playbackVerifyStartPositionMs = 0;
 
+    // Prepared streaming Sounds are created while resources are prepared,
+    // never on Round/Deathmatch/Result transition callbacks.
+    std::unordered_map<int, FMOD::Sound*> m_preparedSounds;
     FMOD::Sound* m_rankedSound = nullptr;
     FMOD::Channel* m_rankedChannel = nullptr;
     bool m_ownedFadeInPending = false;
