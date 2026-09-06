@@ -1,0 +1,34 @@
+name: Apply beta14 server follow-up
+
+on:
+  push:
+    branches:
+      - beta14-followup-work
+    paths:
+      - beta14-server-followup.patch
+      - .github/workflows/apply-beta14-server-followup.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: beta14-followup-work
+          fetch-depth: 0
+      - name: Apply reviewed patch
+        run: |
+          git apply --check beta14-server-followup.patch
+          git apply beta14-server-followup.patch
+          rm beta14-server-followup.patch
+          rm .github/workflows/apply-beta14-server-followup.yml
+      - name: Commit branch-only implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat(server): apply beta14 deathmatch lifecycle follow-up [skip ci]"
+          git push origin HEAD:beta14-followup-work
