@@ -108,6 +108,13 @@ struct PlacementFinalResultView {
     std::string finalizedAt;
 };
 
+struct PlacementAttemptView {
+    std::string attemptId;
+    double progressPercent = 0.0;
+    bool cleared = false;
+    double awardedScore = 0.0;
+};
+
 struct PlacementView {
     bool required = false;
     bool active = false;
@@ -128,6 +135,7 @@ struct PlacementView {
     std::string currentMapNormalEndAt;
     std::string currentMapFinalWindowEndAt;
     std::string activeAttemptId;
+    std::vector<PlacementAttemptView> currentMapTopAttempts;
     std::vector<RankedMapView> referenceMaps;
     std::vector<int> stagePools;
     std::vector<PlacementStageResultView> stageResults;
@@ -212,6 +220,8 @@ struct MatchView {
     RatingEventView ratingEventB;
     bool spectatorActive = false;
     std::optional<int> opponentProgress;
+    bool opponentFinished = false;
+    bool opponentPractice = false;
     std::optional<int> spectatorCurrentProgress;
     std::string spectatorOpponentName;
     std::vector<RankedMapView> candidateMaps;
@@ -347,6 +357,7 @@ public:
     [[nodiscard]] bool songBypassAllowed() const;
 
     [[nodiscard]] bool reportAttemptStart(int levelId);
+    void reportPracticePresence(bool practice);
     void reportAttemptProgress(int levelId, double progressPercent);
     [[nodiscard]] bool reportAttemptEnd(int levelId, double progressPercent, bool cleared, std::optional<double> qualifyingPercentOverride = std::nullopt);
 
@@ -458,6 +469,7 @@ private:
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_attemptRequest;
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_attemptIntentRequest;
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_progressRequest;
+    geode::async::TaskHolder<geode::utils::web::WebResponse> m_presenceRequest;
 };
 
 char const* stageName(RuntimeStage stage);

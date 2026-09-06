@@ -124,6 +124,8 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         corum::ranked::ui::PlayerIcon* opponentProgressIcon = nullptr;
         CCLabelBMFont* opponentProgressLabel = nullptr;
         CCSprite* practiceIndicator = nullptr;
+        std::array<CCLabelBMFont*, 2> placementTopLabels {};
+        std::array<std::string, 2> placementTopRecordIds {};
         std::unordered_map<CCLabelBMFont*, CCLabelBMFont*> hudShadows;
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
         CCLabelBMFont* debugLabel = nullptr;
@@ -183,6 +185,7 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         if (!m_fields->rankedLevel || m_isTestMode) return true;
 
         m_fields->rankedPractice = m_isPracticeMode;
+        if (m_fields->rankedPractice) runtime.reportPracticePresence(true);
         addRankedHud();
         m_fields->gameplayFrameObserved = false;
         m_fields->attemptJournalReadyAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
@@ -420,6 +423,9 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         // A manual quit is still an attempt end. Without this hook a player could
         // leave/re-enter LevelInfoLayer while the server kept the old attempt open,
         // producing stale scores, orphan attempts, and broken Death Match counts.
+        if (m_fields->rankedPractice || m_isPracticeMode) {
+            corum::ranked::RankedRuntime::get().reportPracticePresence(false);
+        }
         if (
             scoringEnabled() &&
             !m_fields->attemptEndReported && !m_fields->autoExitRequested
@@ -464,6 +470,7 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
                 m_fields->attemptEndReported = true;
             }
             m_fields->rankedPractice = true;
+            runtime.reportPracticePresence(true);
             PlayLayer::togglePracticeMode(true);
             updateRankedHud();
             return;
@@ -473,6 +480,7 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         // suppressed. The normal postUpdate journal then starts a fresh Attempt
         // from the reset position, never from Practice progress.
         PlayLayer::togglePracticeMode(false);
+        runtime.reportPracticePresence(false);
         if (transition == corum::ranked::RankedPracticeTransition::LeaveAndExit) {
             m_fields->autoExitRequested = true;
             PlayLayer::onQuit();
@@ -728,6 +736,19 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         if (corum::ranked::RankedRuntime::get().isPlacement()) {
             setHudVisible(m_fields->qualifyingCaption, false);
             setHudVisible(m_fields->qualifyingLabel, false);
+            for (std::size_t rank = 0; rank < m_fields->placementTopLabels.size(); ++rank) {
+                auto const text = rank == 0 ? "1st - -" : "2nd - -";
+                m_fields->placementTopLabels[rank] = addShadowedHudLabel(
+                    m_fields->hudRoot,
+                    text,
+                    "black",
+                    0.36f,
+                    {1.0f, 0.5f},
+                    {size.width - 10.0f, top - 4.0f - static_cast<float>(rank) * 15.0f},
+                    corum::ranked::ui::Text,
+                    5
+                );
+            }
             m_fields->placementGrade = corum::ranked::ui::PlacementGradeBadge::create(38.0f);
             if (m_fields->placementGrade) {
                 m_fields->placementGrade->setID("ranked-placement-grade"_spr);
@@ -867,6 +888,123 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         m_fields->hudRoot->addChild(m_fields->spectatorPanel, 10);
     }
 
+    void animateHudPosition(CCLabelBMFont* foreground, CCPoint position) {
+        if (!foreground) return;
+        foreground->stopAllActions();
+        foreground->runAction(CCEaseInOut::create(CCMoveTo::create(0.22f, position), 2.0f));
+        if (auto* shadow = hudShadow(foreground)) {
+            shadow->stopAllActions();
+            shadow->runAction(CCEaseInOut::create(
+                CCMoveTo::create(0.22f, {position.x + 0.75f, position.y - 0.75f}),
+                2.0f
+            ));
+        }
+    }
+
+    void updatePlacementTopHud(double liveProgress) {
+        auto& runtime = corum::ranked::RankedRuntime::get();
+        if (!runtime.isPlacement()) return;
+        struct Record {
+            std::string id;
+            double progress = 0.0;
+            double score = 0.0;
+        };
+        std::vector<Record> records;
+        for (auto const& attempt : runtime.view().placement.currentMapTopAttempts) {
+            records.push_back({attempt.attemptId, attempt.progressPercent, attempt.awardedScore});
+        }
+        auto const& activeId = runtime.view().placement.activeAttemptId;
+        if (
+            !activeId.empty() && liveProgress >= 0.0 &&
+            scoringEnabled() && !m_fields->attemptEndReported &&
+            m_fields->qualifyingPercent >= 0.0
+        ) {
+            records.erase(
+                std::remove_if(records.begin(), records.end(), [&](Record const& record) {
+                    return record.id == activeId;
+                }),
+                records.end()
+            );
+            records.push_back({
+                activeId,
+                liveProgress,
+                corum::ranked::calculateAttemptScore(
+                    liveProgress, false, m_fields->qualifyingPercent
+                ),
+            });
+        }
+        std::sort(records.begin(), records.end(), [](Record const& left, Record const& right) {
+            if (std::abs(left.score - right.score) > 0.0005) return left.score > right.score;
+            return left.id < right.id;
+        });
+        if (records.size() > 2) records.resize(2);
+
+        auto const size = CCDirector::sharedDirector()->getWinSize();
+        auto const top = corum::ranked::layoutHud(size.width, size.height).topY;
+        std::array<bool, 2> usedNodes {false, false};
+        for (std::size_t rank = 0; rank < records.size(); ++rank) {
+            int node = -1;
+            for (std::size_t index = 0; index < m_fields->placementTopRecordIds.size(); ++index) {
+                if (m_fields->placementTopRecordIds[index] == records[rank].id) {
+                    node = static_cast<int>(index);
+                    break;
+                }
+            }
+            auto const existingIdentity = node >= 0;
+            if (node < 0) {
+                for (std::size_t index = 0; index < usedNodes.size(); ++index) {
+                    auto const retained = std::any_of(records.begin(), records.end(), [&](Record const& record) {
+                        return m_fields->placementTopRecordIds[index] == record.id;
+                    });
+                    if (!usedNodes[index] && !retained) {
+                        node = static_cast<int>(index);
+                        break;
+                    }
+                }
+            }
+            if (node < 0) node = static_cast<int>(rank);
+            usedNodes[static_cast<std::size_t>(node)] = true;
+            auto* row = m_fields->placementTopLabels[static_cast<std::size_t>(node)];
+            m_fields->placementTopRecordIds[static_cast<std::size_t>(node)] = records[rank].id;
+            auto const ordinal = rank == 0 ? "1st" : "2nd";
+            setHudText(
+                row,
+                fmt::format(
+                    "{} - {}% ({}점)",
+                    ordinal,
+                    formatScore(records[rank].progress),
+                    formatScore(records[rank].score)
+                )
+            );
+            setHudVisible(row, true);
+            auto const target = CCPoint{
+                size.width - 10.0f,
+                top - 4.0f - static_cast<float>(rank) * 15.0f,
+            };
+            if (existingIdentity && std::abs(row->getPositionY() - target.y) > 0.5f) {
+                animateHudPosition(row, target);
+            } else {
+                setHudPosition(row, target);
+            }
+        }
+        for (std::size_t rank = records.size(); rank < 2; ++rank) {
+            int node = -1;
+            for (std::size_t index = 0; index < usedNodes.size(); ++index) {
+                if (!usedNodes[index]) { node = static_cast<int>(index); break; }
+            }
+            if (node < 0) continue;
+            usedNodes[static_cast<std::size_t>(node)] = true;
+            m_fields->placementTopRecordIds[static_cast<std::size_t>(node)].clear();
+            auto* row = m_fields->placementTopLabels[static_cast<std::size_t>(node)];
+            setHudText(row, rank == 0 ? "1st - -" : "2nd - -");
+            setHudVisible(row, true);
+            setHudPosition(row, {
+                size.width - 10.0f,
+                top - 4.0f - static_cast<float>(rank) * 15.0f,
+            });
+        }
+    }
+
     void updateRankedHud() {
         auto& runtime = corum::ranked::RankedRuntime::get();
         auto const& match = runtime.view().match;
@@ -899,6 +1037,8 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
             .deathmatchSequence = match.deathmatchSequence,
             .deathmatchAttemptsUsedA = attemptsUsedA,
             .deathmatchAttemptsUsedB = attemptsUsedB,
+            .deathmatchAttemptsCompletedA = match.deathmatchAttemptsCompletedA,
+            .deathmatchAttemptsCompletedB = match.deathmatchAttemptsCompletedB,
             .qualifyingPercent = match.currentMap ? match.currentMap->qualifyingPercent : 100.0,
             .remainingMillis = runtime.deadlineMillis(),
             .signedRemainingMillis = runtime.signedDeadlineMillis(),
@@ -908,7 +1048,8 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
             .spectatorCurrentProgress = match.spectatorCurrentProgress,
             .opponentProgressEnabled = !placement,
             .opponentCurrentProgress = match.opponentProgress,
-            .localPractice = m_fields->rankedPractice || m_isPracticeMode,
+            .opponentFinished = match.opponentFinished,
+            .opponentPractice = match.opponentPractice,
         });
 
         setHudText(m_fields->fpsLabel, presentation.fpsText);
@@ -931,6 +1072,7 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
             liveProgress,
             m_fields->qualifyingPercent
         );
+        if (placement) updatePlacementTopHud(liveProgress);
         setHudText(m_fields->ownScoreLabel, formatScore(ownLiveScore));
         limitHudWidth(m_fields->ownScoreLabel, 76.0f, 0.714f, 0.26f);
         auto const opponentScore = ownIsA ? match.scoreB : match.scoreA;
@@ -948,17 +1090,13 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
                 m_fields->opponentChecks[index]->setVisible(false);
             }
         }
-        setHudVisible(m_fields->ownAttemptLabel, presentation.deathmatch);
-        setHudVisible(m_fields->opponentAttemptLabel, presentation.deathmatch);
-        if (presentation.deathmatch) {
-            setHudText(m_fields->ownAttemptLabel, presentation.ownAttemptText);
-            setHudText(m_fields->opponentAttemptLabel, presentation.opponentAttemptText);
-        }
+        setHudVisible(m_fields->ownAttemptLabel, false);
+        setHudVisible(m_fields->opponentAttemptLabel, false);
         auto const qualifying = match.currentMap ? match.currentMap->qualifyingPercent : 100.0;
-        if (placement) {
+        if (placement || !presentation.qualifyingVisible) {
             setHudVisible(m_fields->qualifyingCaption, false);
             setHudVisible(m_fields->qualifyingLabel, false);
-            if (m_fields->placementGrade) {
+            if (placement && m_fields->placementGrade) {
                 m_fields->placementGrade->setGrade(runtime.view().placement.currentMapGrade, true);
             }
         } else {

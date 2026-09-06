@@ -1089,6 +1089,18 @@ void RankedRuntime::parsePlacementState(matjson::Value const& root) {
     if (auto map = parseMap(currentMap)) {
         m_view.match.currentMap = *map;
         m_view.placement.currentMapScore = currentMap["mapScore"].asDouble().unwrapOr(0.0);
+        m_view.placement.currentMapTopAttempts.clear();
+        if (auto const topAttempts = currentMap["topAttempts"].asArray(); topAttempts.isOk()) {
+            for (auto const& item : topAttempts.unwrap()) {
+                if (!item.isObject()) continue;
+                PlacementAttemptView attempt;
+                attempt.attemptId = item["attemptId"].asString().unwrapOr("");
+                attempt.progressPercent = item["progressPercent"].asDouble().unwrapOr(0.0);
+                attempt.cleared = item["cleared"].asBool().unwrapOr(false);
+                attempt.awardedScore = item["awardedScore"].asDouble().unwrapOr(0.0);
+                if (!attempt.attemptId.empty()) m_view.placement.currentMapTopAttempts.push_back(std::move(attempt));
+            }
+        }
         auto const provisional = currentMap["provisionalMapScore"].asDouble().unwrapOr(m_view.placement.currentMapScore);
         if (hasLocalOpenAttempt()) {
             m_view.placement.provisionalMapScore = std::max(
@@ -1246,6 +1258,8 @@ void RankedRuntime::parseMatchState(matjson::Value const& root) {
     m_view.match.cancellationReason = root["cancellation"]["reason"].asString().unwrapOr("");
     m_view.match.spectatorActive = false;
     m_view.match.opponentProgress.reset();
+    m_view.match.opponentFinished = root["opponentFinished"].asBool().unwrapOr(false);
+    m_view.match.opponentPractice = root["opponentPractice"].asBool().unwrapOr(false);
     m_view.match.spectatorCurrentProgress.reset();
     m_view.match.spectatorOpponentName.clear();
 
@@ -1699,6 +1713,7 @@ void RankedRuntime::dismissMatch() {
     ++m_progressRequestGeneration;
     m_progressRequest.cancel();
     m_progressBusy = false;
+    m_presenceRequest.cancel();
     if (placement && m_view.match.state == "PLACEMENT_RESULT") {
         m_view.profileTier = m_view.placement.finalResult.displayedTier;
         m_view.profileScoreVisible = true;
@@ -2021,6 +2036,11 @@ double RankedRuntime::localDisplayScore(double progressPercent, std::optional<do
         return static_cast<double>(m_view.placement.provisionalMapScore);
     }
     auto const ownIsA = m_view.match.side == "A";
+    if (m_view.match.state == "DEATHMATCH_PLAYING") {
+        auto const serverBest = ownIsA ? m_view.match.scoreA : m_view.match.scoreB;
+        if (progressPercent < 0.0) return serverBest;
+        return std::max(serverBest, std::clamp(progressPercent, 0.0, 100.0));
+    }
     auto const committed = ownIsA ? m_view.match.committedScoreA : m_view.match.committedScoreB;
     auto const serverDisplay = ownIsA ? m_view.match.scoreA : m_view.match.scoreB;
     auto const contextKey = currentAttemptContextKey();
@@ -2243,6 +2263,27 @@ bool RankedRuntime::reportAttemptStart(int levelId) {
     return true;
 }
 
+void RankedRuntime::reportPracticePresence(bool practice) {
+    if (
+        isPlacement() || m_view.stage != RuntimeStage::Matched ||
+        m_view.match.matchId.empty() || m_matchToken.empty()
+    ) return;
+    matjson::Value body;
+    body["practice"] = practice;
+    auto request = baseRequest(m_sessionToken, m_matchToken);
+    request.bodyJSON(body);
+    m_presenceRequest.spawn(
+        request.post(endpoint("/api/ranked/matches/" + m_view.match.matchId + "/presence")),
+        [this](web::WebResponse response) {
+            if (!successful(response)) {
+                log::warn("Ranked Practice presence sync failed: {}", responseError(response));
+                return;
+            }
+            observeServerNow(response.json().unwrapOr(matjson::Value()));
+        }
+    );
+}
+
 void RankedRuntime::reportAttemptProgress(int levelId, double progressPercent) {
     // Keep the latest progress even while /attempt/start is waiting for its ACK.
     // alpha.17 discarded every progress update before m_attemptId existed and
@@ -2290,7 +2331,10 @@ bool RankedRuntime::reportAttemptEnd(int levelId, double progressPercent, bool c
         ? *qualifyingPercentOverride
         : (scoringMap ? scoringMap->qualifyingPercent : -1.0);
     auto optimisticScore = 0.0;
-    if (qualifying >= 0.0) {
+    if (m_view.match.state == "DEATHMATCH_PLAYING") {
+        // Death Match is raw best percentage; Qualifying is intentionally absent.
+        optimisticScore = cleared ? 100.0 : finalProgress;
+    } else if (qualifying >= 0.0) {
         optimisticScore = calculateAttemptScore(
             finalProgress,
             cleared,
