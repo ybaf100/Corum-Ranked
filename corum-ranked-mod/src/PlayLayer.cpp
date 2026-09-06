@@ -144,7 +144,7 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         bool rankedPractice = false;
     };
 
-    bool scoringEnabled() const {
+    bool scoringEnabled() {
         return corum::ranked::rankedScoringEnabled(
             m_fields->rankedLevel,
             m_isTestMode,
@@ -454,12 +454,13 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
             // ordinary death semantics. Vanilla practice setup runs only after
             // the local transport suppression flag is active.
             if (scoringEnabled() && !m_fields->attemptEndReported) {
-                runtime.reportAttemptEnd(
+                auto const endQueued = runtime.reportAttemptEnd(
                     m_fields->levelId,
                     rankedProgressPercent(this),
                     false,
                     m_fields->qualifyingPercent
                 );
+                (void)endQueued;
                 m_fields->attemptEndReported = true;
             }
             m_fields->rankedPractice = true;
