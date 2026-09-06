@@ -110,6 +110,18 @@ HudPresentation presentHud(HudInput const& input) {
     result.ownChecks = clearChecks(ownClears);
     result.opponentChecks = clearChecks(opponentClears);
     result.deathmatch = input.deathmatch;
+    if (input.deathmatch) {
+        auto const ownUsed = ownIsA
+            ? input.deathmatchAttemptsUsedA
+            : input.deathmatchAttemptsUsedB;
+        auto const opponentUsed = ownIsA
+            ? input.deathmatchAttemptsUsedB
+            : input.deathmatchAttemptsUsedA;
+        result.ownAttemptText = "Attempts : " +
+            std::to_string(std::clamp(ownUsed, 0, 3)) + "/3";
+        result.opponentAttemptText = "Attempts : " +
+            std::to_string(std::clamp(opponentUsed, 0, 3)) + "/3";
+    }
     result.qualifyingVisible = !input.deathmatch;
     result.qualifyingText = result.qualifyingVisible
         ? "Qualifying : " + formatNumber(input.qualifyingPercent) + "%"

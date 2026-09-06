@@ -377,13 +377,27 @@ void hudTests() {
     input.deathmatchSequence = 2;
     input.deathmatchAttemptsUsedA = 3;
     input.deathmatchAttemptsUsedB = 2;
+    input.deathmatchAttemptsCompletedA = 2;
+    input.deathmatchAttemptsCompletedB = 0;
     input.spectatorActive = false;
     hud = presentHud(input);
     assert(hud.stateText == "DEATH MATCH");
     assert(hud.roundText == "DEATH MATCH 2");
-    assert(hud.timerText == "3 ATTEMPTS");
-    assert(hud.ownAttemptText == "Attempts : 2/3"); // side is still B
+    assert(hud.timerText == "3"); // side B: no authoritative End accepted yet
+    assert(!hud.qualifyingVisible);
+    assert(hud.qualifyingText.empty());
+    assert(hud.ownAttemptText == "Attempts : 2/3");
     assert(hud.opponentAttemptText == "Attempts : 3/3");
+
+    input.deathmatchAttemptsCompletedB = 1;
+    hud = presentHud(input);
+    assert(hud.timerText == "2");
+    input.deathmatchAttemptsCompletedB = 2;
+    hud = presentHud(input);
+    assert(hud.timerText == "1");
+    input.deathmatchAttemptsCompletedB = 3;
+    hud = presentHud(input);
+    assert(hud.timerText == "0");
 }
 
 void playerIconTests() {
