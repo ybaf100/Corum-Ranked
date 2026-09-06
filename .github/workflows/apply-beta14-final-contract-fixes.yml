@@ -1,0 +1,131 @@
+name: Apply beta14 final contract fixes
+
+on:
+  push:
+    branches: [beta14-followup-work]
+    paths: [.github/workflows/apply-beta14-final-contract-fixes.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: beta14-followup-work
+          fetch-depth: 0
+      - name: Apply server terminal projection and resource gate integration
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected one target, found {count}')
+              p.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          replace_once(
+              'ranked/apps/server/src/match/match.service.ts',
+              '''    if (match.state.startsWith("DEATHMATCH") && match.current_deathmatch_id) {''',
+              '''    if (\n      (match.state.startsWith("DEATHMATCH") || match.state === "MATCH_RESULT") &&\n      match.current_deathmatch_id\n    ) {'''
+          )
+
+          replace_once(
+              'corum-ranked-mod/src/ui/RankAssetPackManager.hpp',
+              '''    void configure(RankAssetPackMetadata metadata);\n    void prepare();''',
+              '''    void configure(RankAssetPackMetadata metadata);\n    void prepare();\n    void retry();'''
+          )
+          replace_once(
+              'corum-ranked-mod/src/ui/RankAssetPackManager.cpp',
+              '''void RankAssetPackManager::prepare() {\n    if (!m_metadata.configured()) {\n        if (m_activeDir.empty()) m_view.state = RankAssetPackState::Disabled;\n        return;\n    }\n    if (activateExisting(m_metadata.assetPackVersion)) return;\n    downloadConfiguredPack();\n}\n''',
+              '''void RankAssetPackManager::prepare() {\n    if (!m_metadata.configured()) {\n        if (m_activeDir.empty()) m_view.state = RankAssetPackState::Disabled;\n        return;\n    }\n    if (activateExisting(m_metadata.assetPackVersion)) return;\n    if (m_view.state == RankAssetPackState::Failed) return;\n    downloadConfiguredPack();\n}\n\nvoid RankAssetPackManager::retry() {\n    if (!m_metadata.configured()) return;\n    ++m_downloadGeneration;\n    m_downloadRequest.cancel();\n    m_view.state = RankAssetPackState::Disabled;\n    m_view.error.clear();\n    prepare();\n}\n'''
+          )
+
+          replace_once(
+              'corum-ranked-mod/src/RankedPopup.cpp',
+              '''    bool showResourceGate() const {\n        auto const& audioConfig = RankedRuntime::get().view().client.audio;\n        if (!audioConfig.enabled || audioConfig.resources.empty()) return false;\n        auto const& audio = RankedAudioManager::get();\n        return audio.requiresResourceDownload() || !m_resourceGateAcknowledged;\n    }''',
+              '''    bool showResourceGate() const {\n        auto const& audioConfig = RankedRuntime::get().view().client.audio;\n        auto const audioEnabled = audioConfig.enabled && !audioConfig.resources.empty();\n        auto const& audio = RankedAudioManager::get();\n        auto const assetState = corum::ranked::ui::RankAssetPackManager::get().view().state;\n        auto const assetsDownloading = assetState == corum::ranked::ui::RankAssetPackState::Downloading;\n        if (!audioEnabled) return assetsDownloading;\n        return audio.requiresResourceDownload() || assetsDownloading || !m_resourceGateAcknowledged;\n    }'''
+          )
+
+          replace_once(
+              'corum-ranked-mod/src/RankedPopup.cpp',
+              '''    void syncResources() {\n        auto& audio = RankedAudioManager::get();\n        auto const& audioConfig = RankedRuntime::get().view().client.audio;\n        if (!audioConfig.enabled || audioConfig.resources.empty()) {''',
+              '''    void syncResources() {\n        auto& audio = RankedAudioManager::get();\n        auto& assets = corum::ranked::ui::RankAssetPackManager::get();\n        if (assets.view().state == corum::ranked::ui::RankAssetPackState::Disabled) {\n            assets.prepare();\n        }\n        auto const assetsDownloading =\n            assets.view().state == corum::ranked::ui::RankAssetPackState::Downloading;\n        auto const& audioConfig = RankedRuntime::get().view().client.audio;\n        if (!audioConfig.enabled || audioConfig.resources.empty()) {\n            if (assetsDownloading) {\n                m_resourceGateInitialized = true;\n                m_resourceGateAcknowledged = false;\n                m_resourceGateWasMissing = true;\n                return;\n            }'''
+          )
+
+          replace_once(
+              'corum-ranked-mod/src/RankedPopup.cpp',
+              '''        auto const missing = audio.requiresResourceDownload();''',
+              '''        auto const missing = audio.requiresResourceDownload() || assetsDownloading;'''
+          )
+
+          replace_once(
+              'corum-ranked-mod/src/RankedPopup.cpp',
+              '''        if (showResourceGate()) {\n            auto const resources = RankedAudioManager::get().downloadView();\n            return fmt::format("resources:{}", static_cast<int>(resources.state));\n        }''',
+              '''        if (showResourceGate()) {\n            auto const resources = RankedAudioManager::get().downloadView();\n            auto const assets = corum::ranked::ui::RankAssetPackManager::get().view();\n            return fmt::format(\n                "resources:{}:{}:{}",\n                static_cast<int>(resources.state),\n                static_cast<int>(assets.state),\n                assets.activeVersion\n            );\n        }'''
+          )
+
+          replace_once(
+              'corum-ranked-mod/src/RankedPopup.cpp',
+              '''        auto const resourceView = RankedAudioManager::get().downloadView();\n\n        auto* panel = makeNeonPanel(''',
+              '''        auto const resourceView = RankedAudioManager::get().downloadView();\n        auto const assetView = corum::ranked::ui::RankAssetPackManager::get().view();\n        auto const assetsDownloading = assetView.state == corum::ranked::ui::RankAssetPackState::Downloading;\n        auto const assetsFailed = assetView.state == corum::ranked::ui::RankAssetPackState::Failed;\n        auto const assetsExternalReady = assetView.state == corum::ranked::ui::RankAssetPackState::Ready;\n\n        auto* panel = makeNeonPanel('''
+          )
+
+          replace_once(
+              'corum-ranked-mod/src/RankedPopup.cpp',
+              '''        if (resourceView.state == RankedResourceDownloadState::Downloading) {\n            title = tr("downloading-resources", "DOWNLOADING RESOURCES");\n            subtitle = tr("keep-open", "Keep this screen open until the download is complete.");\n            accent = kGold;\n        } else if (resourceView.state == RankedResourceDownloadState::Ready) {''',
+              '''        if (resourceView.state == RankedResourceDownloadState::Downloading || assetsDownloading) {\n            title = tr("downloading-resources", "DOWNLOADING RESOURCES");\n            subtitle = tr("keep-open", "Keep this screen open until the download is complete.");\n            accent = kGold;\n        } else if (resourceView.state == RankedResourceDownloadState::Ready) {'''
+          )
+
+          replace_once(
+              'corum-ranked-mod/src/RankedPopup.cpp',
+              '''        m_resourceCountLabel = count;\n        m_root->addChild(count, 4);\n\n        auto const barWidth''',
+              '''        m_resourceCountLabel = count;\n        m_root->addChild(count, 4);\n\n        auto const songState = resourceView.state == RankedResourceDownloadState::Ready\n            ? "READY"\n            : resourceView.state == RankedResourceDownloadState::Downloading\n                ? "DOWNLOADING"\n                : resourceView.state == RankedResourceDownloadState::Failed\n                    ? "FAILED"\n                    : "NOT READY";\n        auto* songRow = makeLabel(\n            fmt::format("Song — {}", songState),\n            0.25f,\n            {size.width / 2.0f, size.height / 2.0f - 5.0f},\n            resourceView.state == RankedResourceDownloadState::Ready ? kGreen :\n                resourceView.state == RankedResourceDownloadState::Failed ? kRed : kGold,\n            "semibold"\n        );\n        m_root->addChild(songRow, 4);\n\n        std::string assetStateText = "READY (BUNDLED)";\n        ccColor3B assetStateColor = kGreen;\n        if (assetsExternalReady) assetStateText = "READY (EXTERNAL)";\n        else if (assetsDownloading) { assetStateText = "DOWNLOADING"; assetStateColor = kGold; }\n        else if (assetsFailed) { assetStateText = "FAILED — BUNDLED FALLBACK"; assetStateColor = kGold; }\n        auto* assetRow = makeLabel(\n            fmt::format("Rank Visuals — {}", assetStateText),\n            0.25f,\n            {size.width / 2.0f, size.height / 2.0f - 21.0f},\n            assetStateColor,\n            "semibold"\n        );\n        assetRow->limitLabelWidth(size.width - 150.0f, 0.25f, 0.16f);\n        m_root->addChild(assetRow, 4);\n\n        auto const barWidth'''
+          )
+
+          replace_once(
+              'corum-ranked-mod/src/RankedPopup.cpp',
+              '''        barBack->setPosition({size.width / 2.0f - barWidth / 2.0f, size.height / 2.0f - 16.0f});''',
+              '''        barBack->setPosition({size.width / 2.0f - barWidth / 2.0f, size.height / 2.0f - 38.0f});'''
+          )
+          replace_once(
+              'corum-ranked-mod/src/RankedPopup.cpp',
+              '''                {size.width / 2.0f, size.height / 2.0f - 40.0f},''',
+              '''                {size.width / 2.0f, size.height / 2.0f - 58.0f},'''
+          )
+          replace_once(
+              'corum-ranked-mod/src/RankedPopup.cpp',
+              '''            addButton(tr("continue", "CONTINUE"), {size.width / 2.0f, size.height / 2.0f - 62.0f}, menu_selector(CorumRankedLayer::onContinueResources), false, 0.72f);''',
+              '''            addButton(tr("continue", "CONTINUE"), {size.width / 2.0f, size.height / 2.0f - 72.0f}, menu_selector(CorumRankedLayer::onContinueResources), false, 0.72f);'''
+          )
+          replace_once(
+              'corum-ranked-mod/src/RankedPopup.cpp',
+              '''            addButton(tr("retry-failed", "RETRY FAILED"), {size.width / 2.0f, size.height / 2.0f - 62.0f}, menu_selector(CorumRankedLayer::onDownloadAllResources), true, 0.68f);''',
+              '''            addButton(tr("retry-failed", "RETRY FAILED"), {size.width / 2.0f, size.height / 2.0f - 72.0f}, menu_selector(CorumRankedLayer::onDownloadAllResources), true, 0.68f);'''
+          )
+          replace_once(
+              'corum-ranked-mod/src/RankedPopup.cpp',
+              '''            addButton(tr("download-all", "DOWNLOAD ALL"), {size.width / 2.0f, size.height / 2.0f - 62.0f}, menu_selector(CorumRankedLayer::onDownloadAllResources), false, 0.72f);''',
+              '''            addButton(tr("download-all", "DOWNLOAD ALL"), {size.width / 2.0f, size.height / 2.0f - 72.0f}, menu_selector(CorumRankedLayer::onDownloadAllResources), false, 0.72f);'''
+          )
+
+          replace_once(
+              'corum-ranked-mod/src/RankedPopup.cpp',
+              '''    void onDownloadAllResources(CCObject*) {\n        m_localMessage.clear();\n        RankedAudioManager::get().downloadAll();\n    }\n\n    void onContinueResources(CCObject*) {\n        if (!RankedAudioManager::get().resourcesReady()) return;''',
+              '''    void onDownloadAllResources(CCObject*) {\n        m_localMessage.clear();\n        RankedAudioManager::get().downloadAll();\n        auto& assets = corum::ranked::ui::RankAssetPackManager::get();\n        if (assets.view().state == corum::ranked::ui::RankAssetPackState::Failed) assets.retry();\n        else assets.prepare();\n    }\n\n    void onContinueResources(CCObject*) {\n        if (!RankedAudioManager::get().resourcesReady()) return;\n        if (corum::ranked::ui::RankAssetPackManager::get().view().state ==\n            corum::ranked::ui::RankAssetPackState::Downloading) return;'''
+          )
+          PY
+          rm .github/workflows/apply-beta14-final-contract-fixes.yml
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "fix(beta14): complete terminal lifecycle and resource gate contracts"
+          git push origin HEAD:beta14-followup-work
