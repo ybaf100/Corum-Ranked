@@ -1,0 +1,275 @@
+diff --git a/ranked/apps/server/src/match/match.service.ts b/ranked/apps/server/src/match/match.service.ts
+index 016d02f..0000000 100644
+--- a/ranked/apps/server/src/match/match.service.ts
++++ b/ranked/apps/server/src/match/match.service.ts
+@@ -43,6 +43,7 @@ import type {
+   AttemptProgressDto,
+   AttemptStartDto,
+   AttemptStartIntentDto,
++  PracticePresenceDto,
+   ReadyMatchDto,
+   ResourceFailureDto,
+   SubmitBanDto,
+@@ -658,6 +659,43 @@ export class MatchService {
+     return this.state(matchId, matchToken, session);
+   }
+ 
++  public async updatePracticePresence(
++    matchId: string,
++    matchToken: string,
++    session: RankedSessionContext,
++    body: PracticePresenceDto,
++  ) {
++    const now = this.clock.now();
++    return this.database.transaction(async (transaction) => {
++      const authorization = await this.access.authorize(transaction, matchId, session, matchToken);
++      let match = await this.lockMatch(transaction, matchId);
++      match = await this.advanceLockedMatch(transaction, match, now);
++
++      let runtimeSlot: number | null = null;
++      if (match.state === "DEATHMATCH_PLAYING" && match.current_deathmatch_id) {
++        const deathmatch = await this.currentDeathmatch(transaction, match);
++        runtimeSlot = deathmatchRuntimeSlot(Number(deathmatch.sequence));
++      } else if (this.isRoundPlaying(match.state) && match.current_round_number) {
++        runtimeSlot = Number(match.current_round_number);
++      }
++
++      if (runtimeSlot === null) {
++        return {
++          accepted: false,
++          practice: false,
++          reason: `PRACTICE_PRESENCE_NOT_ACCEPTED_IN_${match.state}`,
++          serverNow: now.toISOString(),
++        };
++      }
++
++      // Practice presence is deliberately non-scoring and ephemeral. It exists
++      // only so the opponent HUD can show the wrench; no Attempt/clock/round
++      // state is mutated here.
++      this.runtimeState.setPractice(match.id, runtimeSlot, authorization.side, body.practice);
++      return {
++        accepted: true,
++        practice: body.practice,
++        reason: null,
++        serverNow: now.toISOString(),
++      };
++    });
++  }
++
+   public async startAttemptIntent(
+     matchId: string,
+     matchToken: string,
+@@ -2389,11 +2427,7 @@ export class MatchService {
+       };
+     }
+     const map = deathmatchMap;
+-    const awardedScore = scoreAttempt(
+-      body.progressPercent,
+-      body.cleared,
+-      map.qualifyingPercent,
+-    );
++    const awardedScore = body.cleared ? 100 : body.progressPercent;
+     await transaction.query(
+       `UPDATE ranked_deathmatch_attempts
+        SET ended_at = $2, progress_percent = $3, cleared = $4,
+@@ -2427,8 +2461,8 @@ export class MatchService {
+         clears_b: number;
+       }>(
+         `SELECT
+-           COALESCE(SUM(awarded_score) FILTER (WHERE player_id = $2 AND valid), 0) AS score_a,
+-           COALESCE(SUM(awarded_score) FILTER (WHERE player_id = $3 AND valid), 0) AS score_b,
++           COALESCE(MAX(awarded_score) FILTER (WHERE player_id = $2 AND valid), 0) AS score_a,
++           COALESCE(MAX(awarded_score) FILTER (WHERE player_id = $3 AND valid), 0) AS score_b,
+            COUNT(*) FILTER (WHERE player_id = $2 AND valid AND cleared)::int AS clears_a,
+            COUNT(*) FILTER (WHERE player_id = $3 AND valid AND cleared)::int AS clears_b
+          FROM ranked_deathmatch_attempts
+@@ -2517,10 +2551,12 @@ export class MatchService {
+     );
+     const rowsA = attempts.rows.filter((attempt) => attempt.player_id === match.player_a_id);
+     const rowsB = attempts.rows.filter((attempt) => attempt.player_id === match.player_b_id);
+-    const committedScore = (rows: DeathmatchAttemptRow[]) => rows.reduce(
+-      (total, attempt) => total + (attempt.valid && attempt.ended_at !== null ? Number(attempt.awarded_score) : 0),
+-      0,
+-    );
++    const committedBestPercent = (rows: DeathmatchAttemptRow[]) => Math.max(
++      0,
++      ...rows
++        .filter((attempt) => attempt.valid && attempt.ended_at !== null)
++        .map((attempt) => Boolean(attempt.cleared) ? 100 : Number(attempt.progress_percent ?? 0)),
++    );
+     const clears = (rows: DeathmatchAttemptRow[]) => rows.filter(
+       (attempt) => attempt.valid && attempt.ended_at !== null && Boolean(attempt.cleared),
+     ).length;
+@@ -2531,22 +2567,20 @@ export class MatchService {
+     const slot = deathmatchRuntimeSlot(Number(deathmatch.sequence));
+     const progressA = this.runtimeState.progress(match.id, slot, "A");
+     const progressB = this.runtimeState.progress(match.id, slot, "B");
+-    const scoreA = committedScore(rowsA);
+-    const scoreB = committedScore(rowsB);
++    const scoreA = committedBestPercent(rowsA);
++    const scoreB = committedBestPercent(rowsB);
+     const activeA = rowsA.find((attempt) => attempt.ended_at === null) ?? null;
+     const activeB = rowsB.find((attempt) => attempt.ended_at === null) ?? null;
+     return {
+       sequence: Number(deathmatch.sequence),
+       map,
+       scores: { A: scoreA, B: scoreB },
+       displayScores: {
+-        A: scoreA + (progressA && activeA
+-          ? scoreAttempt(progressA.progressPercent, false, map.qualifyingPercent)
+-          : 0),
+-        B: scoreB + (progressB && activeB
+-          ? scoreAttempt(progressB.progressPercent, false, map.qualifyingPercent)
+-          : 0),
++        A: Math.max(scoreA, progressA && activeA ? progressA.progressPercent : 0),
++        B: Math.max(scoreB, progressB && activeB ? progressB.progressPercent : 0),
+       },
+       clears: { A: clears(rowsA), B: clears(rowsB) },
+       attemptsUsed: { A: rowsA.length, B: rowsB.length },
+       attemptsCompleted: { A: completed(rowsA), B: completed(rowsB) },
+-      attemptsRemaining: { A: Math.max(0, 3 - rowsA.length), B: Math.max(0, 3 - rowsB.length) },
++      // The HUD decrements only after authoritative End, not when Start is accepted.
++      attemptsRemaining: { A: Math.max(0, 3 - completed(rowsA)), B: Math.max(0, 3 - completed(rowsB)) },
+       activeAttemptNumber: {
+         A: activeA ? Number(activeA.attempt_sequence) : null,
+         B: activeB ? Number(activeB.attempt_sequence) : null,
+@@ -2577,8 +2611,6 @@ export class MatchService {
+       attemptsA.some((attempt) => attempt.ended_at === null) ||
+       attemptsB.some((attempt) => attempt.ended_at === null)
+     ) return;
+-    const map = parseJson<RankedMapSnapshot>(deathmatch.map_snapshot);
+     const evaluation = evaluateDeathmatch(
+-      map,
+       attemptsA.map((attempt) => ({
+         progressPercent: attempt.valid ? Number(attempt.progress_percent ?? 0) : 0,
+         cleared: attempt.valid ? Boolean(attempt.cleared) : false,
+@@ -2815,6 +2847,8 @@ export class MatchService {
+     const config = this.matchConfig(match);
+     let currentRound: object | null = null;
+     let opponentProgress: number | null = null;
++    let opponentFinished = false;
++    let opponentPractice = false;
+     let spectator: {
+       active: boolean;
+       opponentName?: string;
+@@ -2837,6 +2871,17 @@ export class MatchService {
+           round.round_number,
+           opponentSide,
+         );
++        opponentPractice = this.runtimeState.practice(match.id, round.round_number, opponentSide);
++        if (domain) {
++          const opponentAttempts = domain.attempts[opponentSide];
++          const opponentActive = opponentAttempts.some(
++            (attempt) => attempt.valid && attempt.endedAtMs === null,
++          );
++          const opponentHasEnded = opponentAttempts.some(
++            (attempt) => attempt.valid && attempt.endedAtMs !== null,
++          );
++          opponentFinished = this.runtimeState.finished(match.id, round.round_number, opponentSide) ||
++            (!opponentActive && opponentHasEnded);
++        }
+         const qualifyingPercent = Number(round.qualifying_percent);
+         const committedScores = domain?.scores ?? { A: 0, B: 0 };
+         const displayScores = {
+@@ -2904,6 +2949,13 @@ export class MatchService {
+         deathmatchRuntimeSlot(Number(current.sequence)),
+         opponentSide,
+       );
++      const deathmatchSlot = deathmatchRuntimeSlot(Number(current.sequence));
++      opponentPractice = this.runtimeState.practice(match.id, deathmatchSlot, opponentSide);
++      const liveRecord = live as {
++        attemptsCompleted: Record<PlayerSide, number>;
++        activeAttemptNumber: Record<PlayerSide, number | null>;
++      };
++      opponentFinished = liveRecord.attemptsCompleted[opponentSide] > 0 &&
++        liveRecord.activeAttemptNumber[opponentSide] === null;
+       const result = await transaction.query<{ winner_id: string | null }>(
+         "SELECT winner_id FROM ranked_deathmatches WHERE id = $1",
+         [match.current_deathmatch_id],
+@@ -2960,6 +3012,8 @@ export class MatchService {
+       debug: match.match_type === "DEBUG_BOT",
+       side: viewerSide,
+       opponentProgress,
++      opponentFinished,
++      opponentPractice,
+       ready,
+       players: {
+         A: playerA
+diff --git a/ranked/apps/server/test/deathmatch-flow.integration.test.ts b/ranked/apps/server/test/deathmatch-flow.integration.test.ts
+index 0efd6f0..0000000 100644
+--- a/ranked/apps/server/test/deathmatch-flow.integration.test.ts
++++ b/ranked/apps/server/test/deathmatch-flow.integration.test.ts
+@@ -5,7 +5,6 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
+ import {
+   createMatchSeries,
+-  scoreAttempt,
+   type CsmpTier,
+   type RankedMapSnapshot,
+ } from "@corum-ranked/rules";
+@@ -328,7 +327,6 @@ describe("Round 3 draw and repeating deathmatch", () => {
+       });
+       const playing = (await service.state(matchId, matchTokenA, contextA)) as Record<string, any>;
+       const levelId = playing.deathmatch.map.playableLevelId as string;
+-      const qualifying = Number(playing.deathmatch.map.qualifyingPercent);
+       for (const [context, token, progress, prefix] of [
+         [contextA, matchTokenA, scoreA, "a"],
+         [contextB, matchTokenB, scoreB, "b"],
+@@ -353,7 +351,7 @@ describe("Round 3 draw and repeating deathmatch", () => {
+             }
+             expect(
+               live.deathmatchSnapshot.displayScores[context === contextA ? "A" : "B"],
+-            ).toBe(scoreAttempt(progress, false, qualifying));
++            ).toBe(progress);
+             const opponentView = (await service.state(
+               matchId,
+               context === contextA ? matchTokenB : matchTokenA,
+@@ -361,6 +359,7 @@ describe("Round 3 draw and repeating deathmatch", () => {
+               context === contextA ? contextB : contextA,
+             )) as Record<string, any>;
+             expect(opponentView.opponentProgress).toBe(progress);
++            expect(opponentView.opponentFinished).toBe(false);
+           }
+           clock.advance(1);
+           const ended = await service.endAttempt(matchId, token, context, {
+@@ -383,13 +382,8 @@ describe("Round 3 draw and repeating deathmatch", () => {
+             context === contextA ? contextB : contextA,
+           )) as Record<string, any>;
+-          if (context === contextB && attempt === 3) {
+-            // The final End settles the Deathmatch and clears its runtime slot;
+-            // no stale percentage is exposed in the result state.
+-            expect(opponentViewAfterEnd.opponentProgress).toBeNull();
+-          } else {
+-            expect(opponentViewAfterEnd.opponentProgress).toBe(0);
+-          }
++          expect(opponentViewAfterEnd.opponentFinished).toBe(true);
+         }
+         if (context === contextA) {
+@@ -403,6 +397,20 @@ describe("Round 3 draw and repeating deathmatch", () => {
+             reason: "DEATHMATCH_ATTEMPTS_EXHAUSTED",
+           });
+         }
+       }
+       return service.state(matchId, matchTokenA, contextA) as Promise<Record<string, any>>;
+     };
++
++    // Practice presence is viewer-relative UI state only. It must not consume
++    // attempts or change the Death Match state.
++    await service.ready(matchId, matchTokenA, contextA, { installedMods: structuredClone(cleanMods) });
++    await service.ready(matchId, matchTokenB, contextB, { installedMods: structuredClone(cleanMods) });
++    await service.updatePracticePresence(matchId, matchTokenA, contextA, { practice: true });
++    let presenceView = (await service.state(matchId, matchTokenB, contextB)) as Record<string, any>;
++    expect(presenceView.opponentPractice).toBe(true);
++    expect(presenceView.deathmatch.attemptsUsed.A).toBe(0);
++    await service.updatePracticePresence(matchId, matchTokenA, contextA, { practice: false });
++    presenceView = (await service.state(matchId, matchTokenB, contextB)) as Record<string, any>;
++    expect(presenceView.opponentPractice).toBe(false);
+ 
+     let deathState = await playDeathmatch(70, 70);
+@@ -430,6 +438,8 @@ describe("Round 3 draw and repeating deathmatch", () => {
+     expect(deathmatches.rows).toHaveLength(2);
+     expect(deathmatches.rows[0]!.winner_id).toBeNull();
+     expect(deathmatches.rows[1]!.winner_id).toBe(playerAId);
++    expect(Number(deathmatches.rows[1]!.score_a)).toBe(80);
++    expect(Number(deathmatches.rows[1]!.score_b)).toBe(70);
+ 
+     const relayEvents = await database.query<{ event_type: string; count: number }>(
