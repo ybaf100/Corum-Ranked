@@ -9,7 +9,7 @@ import {
   perfectThreeClearWinner,
   selectDeathmatchMap,
 } from "../src/index.js";
-import { allPoolMaps, makeMap } from "./fixtures.js";
+import { allPoolMaps } from "./fixtures.js";
 
 describe("Bo3 match progression", () => {
   it("marks Round 2 as MATCH POINT and Round 3 as TIEBREAKER", () => {
@@ -125,46 +125,63 @@ describe("PERFECT WIN classification", () => {
 });
 
 describe("three-attempt deathmatch", () => {
-  const base = makeMap(3, 1, { qualifyingPercent: 50 });
-  const map = {
-    levelId: base.levelId,
-    canonicalLevelId: base.canonicalLevelId,
-    alternateLevelId: base.alternateLevelId,
-    playableLevelId: base.playableLevelId,
-    title: base.title,
-    creator: base.creator,
-    difficulty: base.difficulty,
-    pool: base.pool,
-    qualifyingPercent: base.qualifyingPercent,
-  };
-
-  it("scores exactly three attempts per player", () => {
+  it("uses the best raw percentage, never the sum or qualifying score", () => {
     const result = evaluateDeathmatch(
-      map,
       [
-        { progressPercent: 100, cleared: true },
+        { progressPercent: 40, cleared: false },
+        { progressPercent: 80, cleared: false },
         { progressPercent: 60, cleared: false },
-        { progressPercent: 20, cleared: false },
       ],
       [
-        { progressPercent: 80, cleared: false },
         { progressPercent: 70, cleared: false },
-        { progressPercent: 60, cleared: false },
+        { progressPercent: 75, cleared: false },
+        { progressPercent: 74, cleared: false },
       ],
     );
-    expect(result).toEqual({ scoreA: 340, scoreB: 355, winner: "B", repeatRequired: false });
+    expect(result).toEqual({ scoreA: 80, scoreB: 75, winner: "A", repeatRequired: false });
   });
 
-  it("requires a repeat on a tie", () => {
-    const same = [
-      { progressPercent: 60, cleared: false },
-      { progressPercent: 0, cleared: false },
-      { progressPercent: 0, cleared: false },
-    ];
-    expect(evaluateDeathmatch(map, same, same)).toMatchObject({
-      winner: null,
-      repeatRequired: true,
-    });
+  it("requires a repeat when the best percentages tie even if totals differ", () => {
+    const result = evaluateDeathmatch(
+      [
+        { progressPercent: 50, cleared: false },
+        { progressPercent: 60, cleared: false },
+        { progressPercent: 70, cleared: false },
+      ],
+      [
+        { progressPercent: 70, cleared: false },
+        { progressPercent: 10, cleared: false },
+        { progressPercent: 20, cleared: false },
+      ],
+    );
+    expect(result).toEqual({ scoreA: 70, scoreB: 70, winner: null, repeatRequired: true });
+  });
+
+  it("treats a clear as 100 percent and beats repeated 99 percent attempts", () => {
+    const result = evaluateDeathmatch(
+      [
+        { progressPercent: 100, cleared: true },
+        { progressPercent: 0, cleared: false },
+        { progressPercent: 0, cleared: false },
+      ],
+      [
+        { progressPercent: 99, cleared: false },
+        { progressPercent: 99, cleared: false },
+        { progressPercent: 99, cleared: false },
+      ],
+    );
+    expect(result).toEqual({ scoreA: 100, scoreB: 99, winner: "A", repeatRequired: false });
+  });
+
+  it("requires exactly three attempts per player", () => {
+    expect(() => evaluateDeathmatch(
+      [{ progressPercent: 100, cleared: true }],
+      [
+        { progressPercent: 10, cleared: false },
+        { progressPercent: 20, cleared: false },
+        { progressPercent: 30, cleared: false },
+      ],
+    )).toThrow(/exactly three attempts/);
   });
 
   it("chooses a different map for a repeat when the pool permits", () => {
