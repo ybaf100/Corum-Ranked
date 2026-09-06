@@ -4,9 +4,11 @@
 #include "RankedAudioManager.hpp"
 #include "DebugBotPopup.hpp"
 #include "RankedSongGate.hpp"
+#include "domain/PlacementStageMerge.hpp"
 #include "ui/RankBadgeAssets.hpp"
 #include "ui/RankTransitionLayer.hpp"
 #include "ui/PlacementGradeBadge.hpp"
+#include "ui/PlayerIcon.hpp"
 #include "ui/RankedTranslations.hpp"
 #include "ui/RankedVisuals.hpp"
 
@@ -592,6 +594,17 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate 
             );
         }
         if (view.match.placement) {
+            if (view.placement.state == "STAGE_RESULT" && !view.placement.stageResults.empty()) {
+                auto const& result = view.placement.stageResults.back();
+                return fmt::format(
+                    "placement:stage-result:{}:{}:{}:{}:{}",
+                    view.placement.runId,
+                    result.stageIndex,
+                    result.stageScore,
+                    result.stageGrade,
+                    result.nextPool
+                );
+            }
             return fmt::format(
                 "placement:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
                 view.placement.state,
@@ -1372,6 +1385,7 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate 
         std::string const& name,
         RankedProfileView const& profile,
         bool self,
+        int accountId,
         PlayerCardRefs* outRefs = nullptr,
         bool combineTierAndScore = false
     ) {
@@ -1391,22 +1405,25 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate 
         );
         m_root->addChild(ribbon, 2);
 
-        int frame = 1;
-        if (self) {
-            if (auto* game = GameManager::sharedState()) frame = std::max(1, game->getPlayerFrame());
-        }
-
         auto* iconPlate = makeNeonPanel({66.0f, 66.0f}, {center.x, center.y + 29.0f}, accent, {5, 11, 23}, 248);
         m_root->addChild(iconPlate, 2);
-        auto* icon = SimplePlayer::create(frame);
-        icon->setScale(1.12f);
-        icon->setPosition({center.x, center.y + 29.0f});
-        if (self) {
-            if (auto* game = GameManager::sharedState()) {
-                icon->setColors(game->colorForIdx(game->getPlayerColor()), game->colorForIdx(game->getPlayerColor2()));
-            }
+        if (!self && corum::ranked::ui::hasPersistentRankAmbient(tier)) {
+            auto* ambient = corum::ranked::ui::createRankAmbientFx(
+                tier,
+                {54.0f, 54.0f},
+                corum::ranked::ui::RankBadgeDisplay::Compact
+            );
+            ambient->setPosition({center.x, center.y + 29.0f});
+            m_root->addChild(ambient, 3);
         }
-        m_root->addChild(icon, 4);
+        auto* icon = self
+            ? corum::ranked::ui::PlayerIcon::createLocal()
+            : corum::ranked::ui::PlayerIcon::createRemote(accountId);
+        if (icon) {
+            icon->setScale(1.12f);
+            icon->setPosition({center.x, center.y + 29.0f});
+            m_root->addChild(icon, 4);
+        }
         addStreakLabel(profile.resultStreak, {center.x, center.y + 66.0f}, 0.22f, 126.0f, false);
 
         auto* nameLabel = makeLabel(shorten(upper(name), 15), 0.38f, {center.x, center.y - 11.0f}, corum::ranked::ui::Text, "semibold");
@@ -2076,10 +2093,12 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate 
         );
 
         auto makeGradeCard = [&](std::string const& caption, std::string const& grade, double scoreValue, float x, bool final) {
-            auto* group = CCNode::create();
+            auto* group = CCNodeRGBA::create();
             group->setContentSize({88.0f, 102.0f});
             group->setAnchorPoint({0.5f, 0.5f});
             group->setPosition({x, size.height / 2.0f + 4.0f});
+            group->setCascadeColorEnabled(true);
+            group->setCascadeOpacityEnabled(true);
             auto* panel = makeNeonPanel({88.0f, 102.0f}, {44.0f, 51.0f}, final ? kGold : kBlue, kDeepPanel, 248);
             group->addChild(panel, 1);
             auto* title = makeLabel(caption, 0.20f, {44.0f, 87.0f}, final ? kGold : kCyan, "semibold");
@@ -2105,45 +2124,92 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate 
         };
 
         auto const center = size.width / 2.0f;
-        auto* left = makeGradeCard("MAP 1", map1Grade, map1Score, center - 112.0f, false);
-        auto* right = makeGradeCard("MAP 2", map2Grade, map2Score, center, false);
-        auto* finalGroup = makeGradeCard(tr("stage-grade", "STAGE GRADE"), result.stageGrade, result.stageScore, center + 112.0f, true);
-        m_root->addChild(makeLabel("+", 0.48f, {center - 56.0f, size.height / 2.0f + 4.0f}, kGold, "black"), 6);
-        m_root->addChild(makeLabel(">", 0.46f, {center + 56.0f, size.height / 2.0f + 4.0f}, kCyan, "black"), 6);
+        auto const timeline = corum::ranked::placementStageMergeTimeline();
+        auto* left = makeGradeCard("MAP 1", map1Grade, map1Score, center - 78.0f, false);
+        auto* right = makeGradeCard("MAP 2", map2Grade, map2Score, center + 78.0f, false);
+        auto* finalGroup = makeGradeCard(
+            tr("stage-grade", "STAGE GRADE"),
+            result.stageGrade,
+            result.stageScore,
+            center,
+            true
+        );
+        auto* mergeSymbol = makeLabel(
+            "+",
+            0.48f,
+            {center, size.height / 2.0f + 4.0f},
+            kGold,
+            "black"
+        );
+        m_root->addChild(mergeSymbol, 6);
 
         left->runAction(CCSequence::create(
-            CCDelayTime::create(0.16f),
-            CCEaseSineInOut::create(CCMoveBy::create(0.16f, {2.0f, 0.0f})),
-            CCEaseSineInOut::create(CCMoveBy::create(0.16f, {-2.0f, 0.0f})),
+            CCDelayTime::create(timeline.sourceDelay),
+            CCEaseSineInOut::create(CCMoveTo::create(
+                timeline.sourceMove,
+                {center, size.height / 2.0f + 4.0f}
+            )),
+            CCFadeOut::create(timeline.sourceFade),
             nullptr
         ));
         right->runAction(CCSequence::create(
-            CCDelayTime::create(0.16f),
-            CCEaseSineInOut::create(CCMoveBy::create(0.16f, {-2.0f, 0.0f})),
-            CCEaseSineInOut::create(CCMoveBy::create(0.16f, {2.0f, 0.0f})),
+            CCDelayTime::create(timeline.sourceDelay),
+            CCEaseSineInOut::create(CCMoveTo::create(
+                timeline.sourceMove,
+                {center, size.height / 2.0f + 4.0f}
+            )),
+            CCFadeOut::create(timeline.sourceFade),
             nullptr
         ));
+        mergeSymbol->runAction(CCSequence::create(
+            CCDelayTime::create(timeline.sourceDelay + timeline.sourceMove),
+            CCFadeOut::create(timeline.sourceFade),
+            nullptr
+        ));
+
+        auto* mergeFlash = corum::ranked::ui::rankResourceSprite(
+            "fx-rank-shockwave-circle-white.png"
+        );
+        if (mergeFlash) {
+            corum::ranked::ui::fitRankSprite(mergeFlash, {104.0f, 104.0f});
+            mergeFlash->setPosition({center, size.height / 2.0f + 4.0f});
+            mergeFlash->setColor(kGold);
+            mergeFlash->setOpacity(0);
+            mergeFlash->setBlendFunc({GL_SRC_ALPHA, GL_ONE});
+            m_root->addChild(mergeFlash, 8);
+            mergeFlash->runAction(CCSequence::create(
+                CCDelayTime::create(timeline.sourceDelay + timeline.sourceMove),
+                CCSpawn::create(
+                    CCFadeTo::create(timeline.sourceFade * 0.55f, 205),
+                    CCEaseSineOut::create(CCScaleTo::create(timeline.sourceFade, 1.18f)),
+                    nullptr
+                ),
+                CCFadeOut::create(timeline.sourceFade),
+                nullptr
+            ));
+        }
+
+        finalGroup->setVisible(false);
+        finalGroup->setOpacity(0);
         finalGroup->setScale(0.84f);
         finalGroup->runAction(CCSequence::create(
-            CCDelayTime::create(0.44f),
-            CCEaseSineOut::create(CCScaleTo::create(0.14f, 1.08f)),
-            CCEaseSineInOut::create(CCScaleTo::create(0.12f, 1.0f)),
-            nullptr
-        ));
-        if (m_stageResultAudioPlayedKey != audioKey) {
-            finalGroup->runAction(CCSequence::create(
-                CCDelayTime::create(0.44f),
-                CallFuncExt::create([this, audioKey, grade = result.stageGrade] {
+            CCDelayTime::create(timeline.finalReveal),
+            CallFuncExt::create([this, finalGroup, audioKey, grade = result.stageGrade] {
+                finalGroup->setVisible(true);
+                finalGroup->setOpacity(255);
+                if (m_stageResultAudioPlayedKey != audioKey) {
                     m_stageResultAudioPlayedKey = audioKey;
                     RankedAudioManager::get().setMode(
                         grade == "S" || grade == "A" || grade == "B"
                             ? RankedAudioMode::ResultWin
                             : RankedAudioMode::ResultLose
                     );
-                }),
-                nullptr
-            ));
-        }
+                }
+            }),
+            CCEaseSineOut::create(CCScaleTo::create(timeline.popUp, 1.08f)),
+            CCEaseSineInOut::create(CCScaleTo::create(timeline.popSettle, 1.0f)),
+            nullptr
+        ));
 
         auto const finalStage = result.stageIndex >= view.placement.totalStages;
         addPlacementProgress(result.stageIndex, view.placement.totalStages, {center, 67.0f}, 18.0f, 0.27f);
@@ -2168,7 +2234,7 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate 
         );
         button->setEnabled(false);
         button->runAction(CCSequence::create(
-            CCDelayTime::create(0.76f),
+            CCDelayTime::create(timeline.controlsUnlock),
             CallFuncExt::create([button] { button->setEnabled(true); }),
             nullptr
         ));
@@ -2182,7 +2248,7 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate 
             );
             later->setEnabled(false);
             later->runAction(CCSequence::create(
-                CCDelayTime::create(0.76f),
+                CCDelayTime::create(timeline.controlsUnlock),
                 CallFuncExt::create([later] { later->setEnabled(true); }),
                 nullptr
             ));
@@ -2324,8 +2390,8 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate 
     void renderMatchFound(MatchView const& match) {
         auto const size = CCDirector::sharedDirector()->getWinSize();
         auto const ownA = match.side == "A";
-        addPlayerCard({100.0f, size.height / 2.0f - 2.0f}, match.playerAName, match.playerAProfile, ownA);
-        addPlayerCard({size.width - 100.0f, size.height / 2.0f - 2.0f}, match.playerBName, match.playerBProfile, !ownA);
+        addPlayerCard({100.0f, size.height / 2.0f - 2.0f}, match.playerAName, match.playerAProfile, ownA, match.playerAAccountId);
+        addPlayerCard({size.width - 100.0f, size.height / 2.0f - 2.0f}, match.playerBName, match.playerBProfile, !ownA, match.playerBAccountId);
 
         addScreenHeader(
             tr("match-found", "MATCH FOUND"),
@@ -2446,8 +2512,8 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate 
 
         // A/B cards keep the screen symmetric while the centre column is reserved
         // for match state, map information and resource readiness.
-        addPlayerCard({96.0f, size.height / 2.0f - 2.0f}, match.playerAName, match.playerAProfile, ownA);
-        addPlayerCard({size.width - 96.0f, size.height / 2.0f - 2.0f}, match.playerBName, match.playerBProfile, !ownA);
+        addPlayerCard({96.0f, size.height / 2.0f - 2.0f}, match.playerAName, match.playerAProfile, ownA, match.playerAAccountId);
+        addPlayerCard({size.width - 96.0f, size.height / 2.0f - 2.0f}, match.playerBName, match.playerBProfile, !ownA, match.playerBAccountId);
 
         auto* title = makeLabel(
             deathmatch ? tr("death-match", "DEATH MATCH") : fmt::format("ROUND {}", match.roundNumber),
@@ -2905,8 +2971,8 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate 
         auto const cardY = size.height / 2.0f - 5.0f;
         auto const leftPerfect = match.perfectWinSide == "A";
         auto const rightPerfect = match.perfectWinSide == "B";
-        addPlayerCard({100.0f, cardY}, match.playerAName, match.profileAfterA, ownA, &cardA, true);
-        addPlayerCard({size.width - 100.0f, cardY}, match.playerBName, match.profileAfterB, !ownA, &cardB, true);
+        addPlayerCard({100.0f, cardY}, match.playerAName, match.profileAfterA, ownA, match.playerAAccountId, &cardA, true);
+        addPlayerCard({size.width - 100.0f, cardY}, match.playerBName, match.profileAfterB, !ownA, match.playerBAccountId, &cardB, true);
         if (leftPerfect) addPromotionAura({100.0f, cardY}, {150.0f, 184.0f}, true);
         if (rightPerfect) addPromotionAura({size.width - 100.0f, cardY}, {150.0f, 184.0f}, true);
 

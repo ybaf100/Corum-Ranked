@@ -8,18 +8,18 @@ When the environment is blocked, Corum Ranked opens its own Paperlogy-font in-ga
 
 The server owns matchmaking, map snapshots, bans, clocks, attempt acceptance, scoring, round outcomes, deathmatches, hidden MMR, and visible LP. The mod only reports local input-derived attempt events and renders the authoritative public state returned by the server; hidden MMR is never rendered.
 
-During a Ranked round, the HUD keeps the current Round above the timer, plus both players' server scores and three approved Clear checks. The opponent's live attempt progress remains private except when the server places the three-Clear player into the LAST ATTEMPT waiting overlay. Progress telemetry is temporary and never decides score, Clear validity, or the winner.
+During a Ranked round, the HUD keeps the current Round above the timer, plus both players' server scores and three approved Clear checks. A compact lower-right group shows the opponent's server-reported current progress and the local Practice wrench when applicable. Progress telemetry is temporary and never decides score, Clear validity, or the winner.
 
-The production Ranked server defaults to `https://corum-ranked.onrender.com`. Production credentials and webhook secrets do not belong in the mod or repository.
+The client is locked to the production Ranked server at `https://corum-ranked.onrender.com`; it is not editable in mod settings. Production credentials and webhook secrets do not belong in the mod or repository.
 
-Unranked players in `v0.5.0-beta.12` complete a server-authoritative solo Placement Run:
+Unranked players in `v0.5.0-beta.13` complete a server-authoritative solo Placement Run:
 three or five Stages, two distinct Ranked Pool maps per Stage, three minutes and two Clears per Map,
 and the existing Attempt score curve with the best two Attempts contributing to Map Score.
 The bottom-left Qualifying HUD is replaced only during Placement by an image-first S/A/B/C/D
 badge. Provisional score and Grade can update during progress, while the persisted Map Grade is
 committed only at authoritative Attempt end. Missing Grade images safely fall back to text.
 
-The `v0.5.0-beta.12` development build can include **DEBUG BOT MATCH** behind
+The `v0.5.0-beta.13` development build can include **DEBUG BOT MATCH** behind
 `CORUM_RANKED_DEBUG_BOT_MATCH`, including Force Win and Force Lose. The CMake option defaults
 to OFF, so official packages do not contain its UI. Placement-incomplete players cannot enter it.
 Disable the matching server environment flag for production as well.

@@ -50,13 +50,6 @@ std::string iso8601FromMillis(std::int64_t millis) {
     return stream.str();
 }
 
-std::string trim(std::string value) {
-    auto const first = value.find_first_not_of(" \t\r\n");
-    if (first == std::string::npos) return {};
-    auto const last = value.find_last_not_of(" \t\r\n");
-    return value.substr(first, last - first + 1);
-}
-
 int placementGradeRank(std::string const& grade) {
     if (grade == "S") return 0;
     if (grade == "A") return 1;
@@ -373,7 +366,7 @@ void RankedRuntime::invalidateAttemptRequest() {
 }
 
 std::string RankedRuntime::endpoint(std::string const& path) const {
-    return m_serverURL + path;
+    return std::string(kDefaultRankedServerURL) + path;
 }
 
 void RankedRuntime::begin() {
@@ -389,19 +382,6 @@ void RankedRuntime::begin() {
     ++m_progressRequestGeneration;
     m_progressRequest.cancel();
     m_progressBusy = false;
-
-    m_serverURL = trim(Mod::get()->getSettingValue<std::string>("ranked-server-url"));
-    if (m_serverURL.empty()) {
-        m_serverURL = std::string(kDefaultRankedServerURL);
-    }
-    if (!isAcceptableServerURL(m_serverURL)) {
-        setStage(
-            RuntimeStage::NotConfigured,
-            "Set a valid Ranked server URL in this mod's settings.",
-            "HTTPS is required except for localhost development. Do not include a trailing slash."
-        );
-        return;
-    }
 
     m_sessionToken.clear();
     m_matchToken.clear();
@@ -1221,6 +1201,14 @@ void RankedRuntime::parseMatchState(matjson::Value const& root) {
     m_view.match.effectiveTier = root["effectiveTier"].asString().unwrapOr("");
     m_view.match.playerAName = root["players"]["A"]["gdUsername"].asString().unwrapOr("Player A");
     m_view.match.playerBName = root["players"]["B"]["gdUsername"].asString().unwrapOr("Player B");
+    auto const playerAAccountText = root["players"]["A"]["gdAccountId"].asString().unwrapOr("");
+    auto const playerBAccountText = root["players"]["B"]["gdAccountId"].asString().unwrapOr("");
+    m_view.match.playerAAccountId = numFromString<int>(playerAAccountText).unwrapOr(
+        static_cast<int>(root["players"]["A"]["gdAccountId"].asInt().unwrapOr(0))
+    );
+    m_view.match.playerBAccountId = numFromString<int>(playerBAccountText).unwrapOr(
+        static_cast<int>(root["players"]["B"]["gdAccountId"].asInt().unwrapOr(0))
+    );
     m_view.match.playerATier = root["players"]["A"]["displayedTier"].asString().unwrapOr("UNRANKED");
     m_view.match.playerBTier = root["players"]["B"]["displayedTier"].asString().unwrapOr("UNRANKED");
     m_view.match.playerAProfile = parseRankedProfile(root["players"]["A"]);
@@ -1257,11 +1245,20 @@ void RankedRuntime::parseMatchState(matjson::Value const& root) {
     m_view.match.deathmatches.clear();
     m_view.match.cancellationReason = root["cancellation"]["reason"].asString().unwrapOr("");
     m_view.match.spectatorActive = false;
+    m_view.match.opponentProgress.reset();
     m_view.match.spectatorCurrentProgress.reset();
     m_view.match.spectatorOpponentName.clear();
 
     auto const opponentSide = m_view.match.side == "A" ? "B" : "A";
     m_view.match.opponentName = root["players"][opponentSide]["gdUsername"].asString().unwrapOr("Opponent");
+    auto const opponentProgress = root["opponentProgress"].asInt();
+    if (opponentProgress.isOk()) {
+        m_view.match.opponentProgress = std::clamp(
+            static_cast<int>(opponentProgress.unwrap()),
+            0,
+            100
+        );
+    }
 
     auto const candidates = root["candidateMaps"].asArray();
     if (candidates.isOk()) {

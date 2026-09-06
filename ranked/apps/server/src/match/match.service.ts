@@ -1136,6 +1136,7 @@ export class MatchService {
           round.round_number,
           authorization.side,
           body.attemptId,
+          body.cleared,
         );
       }
       const endedAttempt = decision.state.attempts[authorization.side].find(
@@ -2441,6 +2442,7 @@ export class MatchService {
       deathmatchRuntimeSlot(Number(deathmatch.sequence)),
       playerId === match.player_a_id ? "A" : "B",
       attempt.id,
+      body.cleared,
     );
     if (attempt.valid && body.cleared) {
       const totals = await transaction.query<{
@@ -2652,6 +2654,10 @@ export class MatchService {
       },
       now,
     );
+    this.runtimeState.clearRound(
+      match.id,
+      deathmatchRuntimeSlot(Number(deathmatch.sequence)),
+    );
     if (evaluation.repeatRequired) {
       const resultSeconds = this.matchConfig(match).operational.timeouts?.roundResultSeconds;
       if (!resultSeconds) throw new Error("Missing result display timeout");
@@ -2811,6 +2817,7 @@ export class MatchService {
     const opponentSide: PlayerSide = viewerSide === "A" ? "B" : "A";
     const config = this.matchConfig(match);
     let currentRound: object | null = null;
+    let opponentProgress: number | null = null;
     let spectator: {
       active: boolean;
       opponentName?: string;
@@ -2828,6 +2835,11 @@ export class MatchService {
         const domain = round.domain_state ? this.roundState(round) : null;
         const progressA = this.runtimeState.progress(match.id, round.round_number, "A");
         const progressB = this.runtimeState.progress(match.id, round.round_number, "B");
+        opponentProgress = this.runtimeState.displayProgress(
+          match.id,
+          round.round_number,
+          opponentSide,
+        );
         const qualifyingPercent = Number(round.qualifying_percent);
         const committedScores = domain?.scores ?? { A: 0, B: 0 };
         const displayScores = {
@@ -2891,6 +2903,11 @@ export class MatchService {
     if (match.state.startsWith("DEATHMATCH") && match.current_deathmatch_id) {
       const current = await this.currentDeathmatch(transaction, match);
       const live = await this.deathmatchLiveSnapshot(transaction, match, current);
+      opponentProgress = this.runtimeState.displayProgress(
+        match.id,
+        deathmatchRuntimeSlot(Number(current.sequence)),
+        opponentSide,
+      );
       const result = await transaction.query<{ winner_id: string | null }>(
         "SELECT winner_id FROM ranked_deathmatches WHERE id = $1",
         [match.current_deathmatch_id],
@@ -2947,6 +2964,7 @@ export class MatchService {
       matchType: match.match_type,
       debug: match.match_type === "DEBUG_BOT",
       side: viewerSide,
+      opponentProgress,
       ready,
       players: {
         A: playerA

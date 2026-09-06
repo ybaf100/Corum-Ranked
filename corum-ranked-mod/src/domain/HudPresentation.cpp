@@ -59,6 +59,7 @@ HudLayout layoutHud(float width, float height) {
         .topRightX = width - 42.0f,
         .topY = height - 7.0f,
         .bottomLeftX = 10.0f,
+        .bottomRightX = width - 10.0f,
         .bottomY = 8.0f,
         .spectatorCenterX = width / 2.0f,
         .spectatorCenterY = height * 0.58f,
@@ -148,6 +149,15 @@ HudPresentation presentHud(HudInput const& input) {
         result.spectatorProgressText = input.spectatorCurrentProgress
             ? "CURRENT : " + std::to_string(*input.spectatorCurrentProgress) + "%"
             : "CURRENT : -";
+    }
+    result.opponentProgressVisible = input.opponentProgressEnabled;
+    if (result.opponentProgressVisible) {
+        result.opponentProgressText = std::to_string(std::clamp(
+            input.opponentCurrentProgress.value_or(0),
+            0,
+            100
+        )) + "%";
+        result.practiceIndicatorVisible = input.localPractice;
     }
     return result;
 }

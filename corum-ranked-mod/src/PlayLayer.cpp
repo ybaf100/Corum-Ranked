@@ -2,7 +2,9 @@
 #include "RankedAudioManager.hpp"
 #include "domain/HudPresentation.hpp"
 #include "domain/AttemptScoring.hpp"
+#include "domain/RankedGameplayPolicy.hpp"
 #include "domain/RenderFpsMeter.hpp"
+#include "ui/PlayerIcon.hpp"
 #include "ui/RankedTranslations.hpp"
 #include "ui/RankedVisuals.hpp"
 #include "ui/PlacementGradeBadge.hpp"
@@ -118,6 +120,10 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         CCLabelBMFont* spectatorNameLabel = nullptr;
         CCLabelBMFont* spectatorProgressLabel = nullptr;
         CCLabelBMFont* spectatorTimerLabel = nullptr;
+        CCNode* opponentProgressGroup = nullptr;
+        corum::ranked::ui::PlayerIcon* opponentProgressIcon = nullptr;
+        CCLabelBMFont* opponentProgressLabel = nullptr;
+        CCSprite* practiceIndicator = nullptr;
         std::unordered_map<CCLabelBMFont*, CCLabelBMFont*> hudShadows;
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
         CCLabelBMFont* debugLabel = nullptr;
@@ -135,7 +141,17 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         bool attemptEndReported = false;
         bool deniedDeathmatchVisualAttempt = false;
         bool prematureResultLogged = false;
+        bool rankedPractice = false;
     };
+
+    bool scoringEnabled() const {
+        return corum::ranked::rankedScoringEnabled(
+            m_fields->rankedLevel,
+            m_isTestMode,
+            m_fields->rankedPractice,
+            m_isPracticeMode
+        );
+    }
 
     bool init(GJGameLevel* level, bool useReplay, bool dontCreateObjects) {
         if (!PlayLayer::init(level, useReplay, dontCreateObjects)) return false;
@@ -164,8 +180,9 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
                 );
             }
         }
-        if (!m_fields->rankedLevel || m_isPracticeMode || m_isTestMode) return true;
+        if (!m_fields->rankedLevel || m_isTestMode) return true;
 
+        m_fields->rankedPractice = m_isPracticeMode;
         addRankedHud();
         m_fields->gameplayFrameObserved = false;
         m_fields->attemptJournalReadyAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
@@ -178,9 +195,28 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         PlayLayer::postUpdate(dt);
         auto& runtime = corum::ranked::RankedRuntime::get();
         runtime.tick();
-        if (!m_fields->rankedLevel || m_isPracticeMode || m_isTestMode) return;
+        if (!m_fields->rankedLevel || m_isTestMode) return;
         m_fields->gameplayFrameObserved = true;
         auto const now = std::chrono::steady_clock::now();
+        m_fields->fpsMeter.observeFrame(steadyNowMicros());
+
+        if (m_fields->rankedPractice || m_isPracticeMode) {
+            // Practice is local-only and non-scoring. Polling deliberately keeps
+            // running so opponent progress and the authoritative clock continue.
+            if (!runtime.canEnterCurrentLevel() && !m_fields->autoExitRequested) {
+                m_fields->autoExitRequested = true;
+                PlayLayer::onQuit();
+                return;
+            }
+            if (
+                runtime.view().revision != m_fields->renderedRevision ||
+                now >= m_fields->nextHudRefreshAt
+            ) {
+                updateRankedHud();
+                m_fields->nextHudRefreshAt = now + std::chrono::milliseconds(100);
+            }
+            return;
+        }
 
         // Journal the visual Start only after Geometry Dash's short scene setup
         // window. The game performs an initialization reset roughly 100-150 ms
@@ -257,8 +293,6 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
             }
         }
 
-        m_fields->fpsMeter.observeFrame(steadyNowMicros());
-
         if (!runtime.isSpectating()) {
             runtime.reportAttemptProgress(
                 m_fields->levelId,
@@ -277,7 +311,7 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
     void resetLevel() {
         auto& runtime = corum::ranked::RankedRuntime::get();
         if (
-            m_fields->rankedLevel && !m_isPracticeMode && !m_isTestMode &&
+            scoringEnabled() &&
             (
                 !m_fields->gameplayFrameObserved ||
                 (
@@ -293,39 +327,36 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
             PlayLayer::resetLevel();
             return;
         }
-        if (m_fields->rankedLevel && !m_isPracticeMode && !m_isTestMode) {
+        auto const resetActions = corum::ranked::rankedResetActions(
+            scoringEnabled(),
+            m_fields->attemptEndReported,
+            runtime.canEnterCurrentLevel()
+        );
+        if (resetActions.endAttempt) {
             // destroyPlayer() normally closes an attempt before the vanilla reset.
             // A manual restart/reset can bypass destroyPlayer(), so close it here
             // before creating the next visual attempt. This guarantees exactly one
             // end event for every start even when the user restarts while alive.
-            if (!m_fields->attemptEndReported) {
-                auto const progress = rankedProgressPercent(this);
-                m_fields->attemptEndReported = runtime.reportAttemptEnd(m_fields->levelId, progress, false, m_fields->qualifyingPercent);
+            auto const progress = rankedProgressPercent(this);
+            m_fields->attemptEndReported = runtime.reportAttemptEnd(
+                m_fields->levelId,
+                progress,
+                false,
+                m_fields->qualifyingPercent
+            );
+        }
+        if (resetActions.exitLocalGameplay) {
+            // The current attempt may finish after the start deadline, but once
+            // a new start is forbidden, reset must transition this local player
+            // exactly once. It never mutates the opponent Attempt or match clock.
+            if (!m_fields->autoExitRequested) {
+                m_fields->autoExitRequested = true;
+                PlayLayer::onQuit();
             }
-
-            auto const& match = runtime.view().match;
-            auto const startWindowExpired =
-                ((match.state == "FINAL_ATTEMPT_WINDOW" || match.state == "LAST_ATTEMPT_WINDOW") &&
-                 runtime.deadlineMillis().value_or(1) <= 0) ||
-                match.state == "ROUND_SETTLING" ||
-                match.state == "MAP_SETTLING" ||
-                (match.state == "MAP_PLAYING" && runtime.deadlineMillis().value_or(1) <= 0);
-            auto const newAttemptForbidden = startWindowExpired || !runtime.canEnterCurrentLevel();
-            if (newAttemptForbidden) {
-                // The current attempt may finish after the start deadline, but
-                // once a new start is forbidden (closed window, settling, result,
-                // spectator, or exhausted Death Match budget), vanilla reset must
-                // never create a fake visual attempt. Exit immediately so Ranked can show the result
-                // or the opponent spectator state instead.
-                if (!m_fields->autoExitRequested) {
-                    m_fields->autoExitRequested = true;
-                    PlayLayer::onQuit();
-                }
-                return;
-            }
+            return;
         }
         PlayLayer::resetLevel();
-        if (!m_fields->rankedLevel || m_isPracticeMode || m_isTestMode) return;
+        if (!resetActions.startFreshAttempt) return;
         m_fields->attemptStartReported = false;
         m_fields->attemptEndReported = false;
         m_fields->attemptStartReported = runtime.reportAttemptStart(m_fields->levelId);
@@ -346,7 +377,7 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
             return;
         }
 
-        if (m_fields->rankedLevel && !m_isPracticeMode && !m_isTestMode && !m_fields->attemptEndReported) {
+        if (scoringEnabled() && !m_fields->attemptEndReported) {
             auto const progress = rankedProgressPercent(this);
             m_fields->attemptEndReported = corum::ranked::RankedRuntime::get().reportAttemptEnd(
                 m_fields->levelId,
@@ -359,7 +390,7 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
     }
 
     void levelComplete() {
-        if (m_fields->rankedLevel && !m_isPracticeMode && !m_isTestMode && !m_fields->attemptEndReported) {
+        if (scoringEnabled() && !m_fields->attemptEndReported) {
             m_fields->attemptEndReported = corum::ranked::RankedRuntime::get().reportAttemptEnd(
                 m_fields->levelId,
                 100.0,
@@ -374,7 +405,7 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         // levelComplete() is the primary clear hook. Keep showCompleteText() as a
         // second vanilla completion-path safety net; the per-attempt guard makes
         // the pair idempotent and prevents double Clear/score accounting.
-        if (m_fields->rankedLevel && !m_isPracticeMode && !m_isTestMode && !m_fields->attemptEndReported) {
+        if (scoringEnabled() && !m_fields->attemptEndReported) {
             m_fields->attemptEndReported = corum::ranked::RankedRuntime::get().reportAttemptEnd(
                 m_fields->levelId,
                 100.0,
@@ -390,7 +421,7 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         // leave/re-enter LevelInfoLayer while the server kept the old attempt open,
         // producing stale scores, orphan attempts, and broken Death Match counts.
         if (
-            m_fields->rankedLevel && !m_isPracticeMode && !m_isTestMode &&
+            scoringEnabled() &&
             !m_fields->attemptEndReported && !m_fields->autoExitRequested
         ) {
             auto const progress = rankedProgressPercent(this);
@@ -405,15 +436,56 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
     }
 
     void togglePracticeMode(bool practiceMode) {
-        if (m_fields->rankedLevel && practiceMode) {
-            FLAlertLayer::create(
-                "Corum Ranked",
-                "Practice Mode is disabled during an active Ranked round.",
-                "OK"
-            )->show();
+        auto& runtime = corum::ranked::RankedRuntime::get();
+        auto const transition = corum::ranked::practiceTransition({
+            .rankedLevel = m_fields->rankedLevel,
+            .testMode = m_isTestMode,
+            .rankedPractice = m_fields->rankedPractice,
+            .requestedPractice = practiceMode,
+            .canStartFreshAttempt = runtime.canEnterCurrentLevel(),
+        });
+        if (transition == corum::ranked::RankedPracticeTransition::None) {
+            PlayLayer::togglePracticeMode(practiceMode);
             return;
         }
-        PlayLayer::togglePracticeMode(practiceMode);
+
+        if (transition == corum::ranked::RankedPracticeTransition::Enter) {
+            // Practice starts by closing the current normal Attempt once with
+            // ordinary death semantics. Vanilla practice setup runs only after
+            // the local transport suppression flag is active.
+            if (scoringEnabled() && !m_fields->attemptEndReported) {
+                runtime.reportAttemptEnd(
+                    m_fields->levelId,
+                    rankedProgressPercent(this),
+                    false,
+                    m_fields->qualifyingPercent
+                );
+                m_fields->attemptEndReported = true;
+            }
+            m_fields->rankedPractice = true;
+            PlayLayer::togglePracticeMode(true);
+            updateRankedHud();
+            return;
+        }
+
+        // Vanilla removes checkpoints and resets while Ranked transport remains
+        // suppressed. The normal postUpdate journal then starts a fresh Attempt
+        // from the reset position, never from Practice progress.
+        PlayLayer::togglePracticeMode(false);
+        if (transition == corum::ranked::RankedPracticeTransition::LeaveAndExit) {
+            m_fields->autoExitRequested = true;
+            PlayLayer::onQuit();
+            return;
+        }
+        m_fields->rankedPractice = false;
+        m_fields->gameplayFrameObserved = false;
+        m_fields->attemptStartReported = false;
+        m_fields->attemptEndReported = false;
+        m_fields->deniedDeathmatchVisualAttempt = false;
+        m_fields->prematureResultLogged = false;
+        m_fields->attemptJournalReadyAt =
+            std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
+        updateRankedHud();
     }
 
     CCLabelBMFont* addShadowedHudLabel(
@@ -670,6 +742,49 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
             }
         }
 
+        if (!corum::ranked::RankedRuntime::get().isPlacement()) {
+            auto const& match = corum::ranked::RankedRuntime::get().view().match;
+            auto const ownIsA = match.side == "A";
+            auto const opponentAccountId = ownIsA
+                ? match.playerBAccountId
+                : match.playerAAccountId;
+            m_fields->opponentProgressGroup = CCNode::create();
+            m_fields->opponentProgressGroup->setID("ranked-opponent-progress-hud"_spr);
+            m_fields->opponentProgressGroup->setPosition({
+                layout.bottomRightX - 42.0f,
+                layout.bottomY + 14.0f,
+            });
+            m_fields->opponentProgressIcon =
+                corum::ranked::ui::PlayerIcon::createRemote(opponentAccountId);
+            if (m_fields->opponentProgressIcon) {
+                m_fields->opponentProgressIcon->setPosition({-31.0f, 0.0f});
+                m_fields->opponentProgressIcon->setScale(0.50f);
+                m_fields->opponentProgressGroup->addChild(m_fields->opponentProgressIcon, 3);
+            }
+            m_fields->opponentProgressLabel = addShadowedHudLabel(
+                m_fields->opponentProgressGroup,
+                "0%",
+                "black",
+                0.44f,
+                {0.5f, 0.5f},
+                {0.0f, 0.0f},
+                corum::ranked::ui::Text,
+                3
+            );
+            m_fields->opponentProgressLabel->setID("ranked-opponent-progress"_spr);
+            m_fields->practiceIndicator =
+                CCSprite::createWithSpriteFrameName("GJ_practiceBtn_001.png");
+            if (m_fields->practiceIndicator) {
+                m_fields->practiceIndicator->setID("ranked-practice-indicator"_spr);
+                m_fields->practiceIndicator->setPosition({31.0f, 0.0f});
+                m_fields->practiceIndicator->setScale(0.28f);
+                m_fields->practiceIndicator->setOpacity(210);
+                m_fields->practiceIndicator->setVisible(false);
+                m_fields->opponentProgressGroup->addChild(m_fields->practiceIndicator, 3);
+            }
+            m_fields->hudRoot->addChild(m_fields->opponentProgressGroup, 5);
+        }
+
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
         m_fields->debugLabel = addShadowedHudLabel(
             m_fields->hudRoot,
@@ -790,6 +905,9 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
             .spectatorActive = match.spectatorActive,
             .spectatorOpponentName = match.spectatorOpponentName,
             .spectatorCurrentProgress = match.spectatorCurrentProgress,
+            .opponentProgressEnabled = !placement,
+            .opponentCurrentProgress = match.opponentProgress,
+            .localPractice = m_fields->rankedPractice || m_isPracticeMode,
         });
 
         setHudText(m_fields->fpsLabel, presentation.fpsText);
@@ -805,7 +923,7 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
             setHudText(m_fields->opponentNameLabel, ownIsA ? match.playerBName : match.playerAName);
             limitHudWidth(m_fields->opponentNameLabel, 96.0f, 0.51f, 0.21f);
         }
-        auto const liveProgress = m_fields->attemptEndReported
+        auto const liveProgress = !scoringEnabled() || m_fields->attemptEndReported
             ? -1.0
             : rankedProgressPercent(this);
         auto const ownLiveScore = runtime.localDisplayScore(
@@ -884,6 +1002,13 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         m_fields->stateLabel->setColor(urgent ? corum::ranked::ui::Red : corum::ranked::ui::Gold);
 
         m_fields->spectatorPanel->setVisible(presentation.spectatorVisible);
+        if (m_fields->opponentProgressGroup) {
+            m_fields->opponentProgressGroup->setVisible(presentation.opponentProgressVisible);
+        }
+        setHudText(m_fields->opponentProgressLabel, presentation.opponentProgressText);
+        if (m_fields->practiceIndicator) {
+            m_fields->practiceIndicator->setVisible(presentation.practiceIndicatorVisible);
+        }
 
         if (placement) {
             setHudVisible(m_fields->opponentNameLabel, false);

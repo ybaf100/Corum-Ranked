@@ -15,11 +15,18 @@ describe("ephemeral spectator progress state", () => {
     expect(state.updateProgress("match-1", 2, "B", "B-2", 31, 1_150)).toBe(true);
     expect(state.progress("match-1", 2, "B")?.progressPercent).toBe(31);
 
-    state.endAttempt("match-1", 2, "B", "B-2");
+    state.endAttempt("match-1", 2, "B", "B-2", false);
     expect(state.progress("match-1", 2, "B")).toBeNull();
+    expect(state.displayProgress("match-1", 2, "B")).toBe(0);
 
     state.beginAttempt("match-1", 2, "B", "B-3", 2_000);
     expect(state.progress("match-1", 2, "B")?.progressPercent).toBe(0);
+    expect(state.displayProgress("match-1", 2, "B")).toBe(0);
+
+    state.updateProgress("match-1", 2, "B", "B-3", 85, 2_100);
+    state.endAttempt("match-1", 2, "B", "B-3", true);
+    expect(state.progress("match-1", 2, "B")).toBeNull();
+    expect(state.displayProgress("match-1", 2, "B")).toBe(100);
   });
 
   it("separates matches, rounds, and player sides", () => {
@@ -39,6 +46,7 @@ describe("ephemeral spectator progress state", () => {
     expect(state.progress("match-1", 1, "A")).toBeNull();
     expect(state.progress("match-1", 1, "B")).toBeNull();
     expect(state.progress("match-1", 2, "A")?.progressPercent).toBe(0);
+    expect(state.displayProgress("match-1", 1, "A")).toBeNull();
   });
   it("tracks a final-window start intent independently from attempt progress", () => {
     const state = new InMemoryMatchRuntimeState();

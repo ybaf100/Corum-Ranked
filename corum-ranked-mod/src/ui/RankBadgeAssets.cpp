@@ -191,6 +191,99 @@ RankBadgeAssembly createRankBadgeAssembly(std::string const& input, float badgeS
     return assembly;
 }
 
+bool hasPersistentRankAmbient(std::string const& input) {
+    auto const rank = normalizeRankName(input);
+    return rank == "SILVER" || rank == "GOLD";
+}
+
+CCNode* createRankAmbientFx(
+    std::string const& input,
+    CCSize maxSize,
+    RankBadgeDisplay display
+) {
+    auto* ambient = centeredRoot();
+    auto const rank = normalizeRankName(input);
+    if (!hasPersistentRankAmbient(rank)) return ambient;
+
+    auto const longest = std::max(maxSize.width, maxSize.height);
+    auto const compact = display == RankBadgeDisplay::Compact;
+    auto const hero = display == RankBadgeDisplay::Hero;
+    if (rank == "SILVER") {
+        auto* halo = ambientSprite(
+            ambient,
+            "fx-silver-halo.png",
+            {longest * (compact ? 1.28f : 1.65f), longest * (compact ? 1.28f : 1.65f)},
+            1,
+            compact ? 46 : 108
+        );
+        auto* orbit = ambientSprite(
+            ambient,
+            "fx-silver-orbit.png",
+            {longest * (compact ? 1.18f : 1.46f), longest * (compact ? 1.18f : 1.46f)},
+            4,
+            compact ? 55 : 122
+        );
+        auto* sheen = ambientSprite(
+            ambient,
+            "fx-silver-crystal-sheen.png",
+            {longest * (compact ? 1.16f : 1.36f), longest * (compact ? 1.16f : 1.36f)},
+            6,
+            compact ? 42 : 68
+        );
+        pulseOpacity(halo, compact ? 34 : 70, compact ? 62 : 132, 1.20f);
+        if (orbit) {
+            orbit->runAction(CCRepeatForever::create(
+                CCRotateBy::create(compact ? 8.5f : 6.8f, 360.0f)
+            ));
+        }
+        if (sheen) {
+            sheen->runAction(CCRepeatForever::create(CCSequence::create(
+                CCFadeTo::create(1.25f, compact ? 78 : 118),
+                CCFadeTo::create(1.55f, compact ? 24 : 35),
+                nullptr
+            )));
+        }
+    } else {
+        auto* outer = ambientSprite(
+            ambient,
+            "fx-gold-halo-outer.png",
+            {longest * (compact ? 1.36f : 1.82f), longest * (compact ? 1.36f : 1.82f)},
+            1,
+            compact ? 52 : 118
+        );
+        auto* rays = ambientSprite(
+            ambient,
+            "fx-gold-radial-rays.png",
+            {longest * (compact ? 1.30f : 1.72f), longest * (compact ? 1.30f : 1.72f)},
+            2,
+            compact ? 44 : (hero ? 126 : 92)
+        );
+        auto* inner = ambientSprite(
+            ambient,
+            "fx-gold-halo-inner.png",
+            {longest * (compact ? 1.20f : 1.48f), longest * (compact ? 1.20f : 1.48f)},
+            4,
+            compact ? 66 : 145
+        );
+        auto* aura = ambientSprite(
+            ambient,
+            "fx-gold-crown-aura.png",
+            {longest * (compact ? 1.10f : 1.38f), longest * (compact ? 1.10f : 1.38f)},
+            6,
+            compact ? 52 : 132
+        );
+        pulseOpacity(outer, compact ? 36 : 76, compact ? 70 : 142, 1.15f);
+        pulseOpacity(inner, compact ? 48 : 94, compact ? 82 : 168, 0.92f);
+        pulseOpacity(aura, compact ? 36 : 74, compact ? 68 : 154, 0.78f);
+        if (rays) {
+            rays->runAction(CCRepeatForever::create(
+                CCRotateBy::create(compact ? 17.0f : 14.0f, 360.0f)
+            ));
+        }
+    }
+    return ambient;
+}
+
 CCNode* createAnimatedRankBadge(
     std::string const& input,
     CCSize maxSize,
@@ -222,25 +315,10 @@ CCNode* createAnimatedRankBadge(
     if (rank == "AQUA" && !compact) {
         auto* orbit = ambientSprite(ambient, "fx-rank-broken-ring-white.png", {longest * 1.32f, longest * 1.32f}, 3, 72, &profile.color);
         if (orbit) orbit->runAction(CCRepeatForever::create(CCRotateBy::create(6.2f, 360.0f)));
-    } else if (rank == "SILVER") {
-        auto* halo = ambientSprite(ambient, "fx-silver-halo.png", {longest * (compact ? 1.28f : 1.65f), longest * (compact ? 1.28f : 1.65f)}, 1, compact ? 46 : 108);
-        auto* orbit = ambientSprite(ambient, "fx-silver-orbit.png", {longest * (compact ? 1.18f : 1.46f), longest * (compact ? 1.18f : 1.46f)}, 4, compact ? 55 : 122);
-        auto* sheen = compact ? nullptr : ambientSprite(ambient, "fx-silver-crystal-sheen.png", {longest * 1.36f, longest * 1.36f}, 6, 68);
-        pulseOpacity(halo, compact ? 34 : 70, compact ? 62 : 132, 1.20f);
-        if (orbit) orbit->runAction(CCRepeatForever::create(CCRotateBy::create(compact ? 8.5f : 6.8f, 360.0f)));
-        if (sheen) sheen->runAction(CCRepeatForever::create(CCSequence::create(
-            CCFadeTo::create(1.25f, 118), CCFadeTo::create(1.55f, 35), nullptr
-        )));
-    } else if (rank == "GOLD") {
-        auto* outer = ambientSprite(ambient, "fx-gold-halo-outer.png", {longest * (compact ? 1.36f : 1.82f), longest * (compact ? 1.36f : 1.82f)}, 1, compact ? 52 : 118);
-        auto* rays = compact ? nullptr : ambientSprite(ambient, "fx-gold-radial-rays.png", {longest * 1.72f, longest * 1.72f}, 2, hero ? 126 : 92);
-        auto* inner = ambientSprite(ambient, "fx-gold-halo-inner.png", {longest * (compact ? 1.20f : 1.48f), longest * (compact ? 1.20f : 1.48f)}, 4, compact ? 66 : 145);
-        auto* aura = ambientSprite(ambient, "fx-gold-crown-aura.png", {longest * (compact ? 1.10f : 1.38f), longest * (compact ? 1.10f : 1.38f)}, 6, compact ? 52 : 132);
-        pulseOpacity(outer, compact ? 36 : 76, compact ? 70 : 142, 1.15f);
-        pulseOpacity(inner, compact ? 48 : 94, compact ? 82 : 168, 0.92f);
-        pulseOpacity(aura, compact ? 36 : 74, compact ? 68 : 154, 0.78f);
-        if (rays) rays->runAction(CCRepeatForever::create(CCRotateBy::create(14.0f, 360.0f)));
     }
+
+    auto* tierAmbient = createRankAmbientFx(rank, maxSize, display);
+    ambient->addChild(tierAmbient, 10);
 
     auto* finalBadge = trophy(rank, maxSize);
     finalBadge->setPosition(CCPointZero);

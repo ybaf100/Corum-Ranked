@@ -64,6 +64,9 @@ jobs:
           if (!manifest.dependencies?.['geode.node-ids']) {
             throw new Error('Node IDs must remain a required dependency');
           }
+          if ('ranked-server-url' in (manifest.settings ?? {})) {
+            throw new Error('Ranked server URL must not be user-configurable');
+          }
           const requiredFonts = {
             CorumSans: 'resources/CorumSans.ttf',
             CorumSansMedium: 'resources/CorumSansMedium.ttf',
@@ -222,7 +225,7 @@ jobs:
           ):
               if required_environment_warning not in popup:
                   raise SystemExit(
-                      f"Missing beta.12 in-game environment warning: {required_environment_warning}"
+                      f"Missing beta.13 in-game environment warning: {required_environment_warning}"
                   )
           for required_reentry in (
               "m_rankedChildScenePushed",
@@ -252,6 +255,42 @@ jobs:
                   raise SystemExit(f"Rejected gameplay-covering HUD panel returned: {forbidden_hud}")
           placement_badge = Path("corum-ranked-mod/src/ui/PlacementGradeBadge.cpp").read_text(encoding="utf-8")
           runtime = Path("corum-ranked-mod/src/RankedRuntime.cpp").read_text(encoding="utf-8")
+          player_icon = Path("corum-ranked-mod/src/ui/PlayerIcon.cpp").read_text(encoding="utf-8")
+          badge_source = Path("corum-ranked-mod/src/ui/RankBadgeAssets.cpp").read_text(encoding="utf-8")
+          if 'https://corum-ranked.onrender.com' not in runtime:
+              raise SystemExit("Canonical Ranked server URL is not hardcoded")
+          if 'getSettingValue<std::string>("ranked-server-url")' in runtime:
+              raise SystemExit("Editable Ranked server URL lookup returned")
+          for required_icon in (
+              "createRemote(accountId)",
+              "userInfoForAccountID",
+              "getGJUserInfo",
+              "m_glowEnabled",
+              "setGlowOutline",
+          ):
+              if required_icon not in popup and required_icon not in player_icon:
+                  raise SystemExit(f"Missing opponent cosmetic invariant: {required_icon}")
+          for required_ambient in (
+              "createRankAmbientFx",
+              "hasPersistentRankAmbient",
+              "fx-silver-crystal-sheen.png",
+              "fx-gold-radial-rays.png",
+          ):
+              if required_ambient not in popup and required_ambient not in badge_source:
+                  raise SystemExit(f"Missing persistent rank ambient invariant: {required_ambient}")
+          for required_practice in (
+              "rankedScoringEnabled",
+              "RankedPracticeTransition::Enter",
+              "reportAttemptEnd(",
+              "m_fields->rankedPractice = true",
+              '"GJ_practiceBtn_001.png"',
+          ):
+              if required_practice not in play:
+                  raise SystemExit(f"Missing Practice isolation invariant: {required_practice}")
+          if "Practice Mode is disabled during an active Ranked round." in play:
+              raise SystemExit("Obsolete Practice guard returned")
+          if 'view.placement.state == "STAGE_RESULT"' not in popup:
+              raise SystemExit("Stage Result presentation is not poll-stable")
           for required_placement in (
               '"ranked-placement-grade"_spr',
               "setHudVisible(m_fields->qualifyingCaption, false)",
@@ -289,7 +328,6 @@ jobs:
           transition_header = Path("corum-ranked-mod/src/ui/RankTransitionLayer.hpp").read_text(encoding="utf-8")
           transition_source = Path("corum-ranked-mod/src/ui/RankTransitionLayer.cpp").read_text(encoding="utf-8")
           badge_header = Path("corum-ranked-mod/src/ui/RankBadgeAssets.hpp").read_text(encoding="utf-8")
-          badge_source = Path("corum-ranked-mod/src/ui/RankBadgeAssets.cpp").read_text(encoding="utf-8")
           for required_transition in (
               "class RankTransitionLayer",
               "playPlacement()",

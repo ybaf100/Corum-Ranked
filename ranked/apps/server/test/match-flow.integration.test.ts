@@ -446,6 +446,7 @@ describe("two-client authoritative match flow", () => {
     expect(state.currentRound.scores).toEqual({ A: 0, B: 0 });
     expect(state.currentRound.displayScores).toEqual({ A: 0, B: 0 });
     expect(state.currentRound.clears).toEqual({ A: 0, B: 0 });
+    expect(state.opponentProgress).toBeNull();
 
     await matches.ready(matchId, statusA.matchToken, playerA, {
       installedMods: structuredClone(cleanMods),
@@ -522,6 +523,8 @@ describe("two-client authoritative match flow", () => {
       levelId: roundTwoLevelId,
       clientEventId: "r2-b3-start",
     });
+    state = (await matches.state(matchId, statusA.matchToken, playerA)) as Record<string, any>;
+    expect(state.opponentProgress).toBe(0);
     clock.advanceSeconds(1);
     await matches.updateAttemptProgress(matchId, statusB.matchToken, playerB, {
       levelId: roundTwoLevelId,
@@ -529,6 +532,7 @@ describe("two-client authoritative match flow", () => {
       progressPercent: 42,
     });
     state = (await matches.state(matchId, statusA.matchToken, playerA)) as Record<string, any>;
+    expect(state.opponentProgress).toBe(42);
     expect(state.spectator).toEqual({ active: false });
     expect(state.spectator).not.toHaveProperty("currentProgress");
 
@@ -561,6 +565,7 @@ describe("two-client authoritative match flow", () => {
       playerB,
     )) as Record<string, any>;
     expect(targetView.spectator).toEqual({ active: false });
+    expect(targetView.opponentProgress).toBe(100);
 
     const blockedTriggerStart = await matches.startAttempt(
       matchId,

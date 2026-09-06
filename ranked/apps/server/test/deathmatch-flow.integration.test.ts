@@ -353,6 +353,12 @@ describe("Round 3 draw and repeating deathmatch", () => {
             expect(
               live.deathmatchSnapshot.displayScores[context === contextA ? "A" : "B"],
             ).toBe(scoreAttempt(progress, false, qualifying));
+            const opponentView = (await service.state(
+              matchId,
+              context === contextA ? matchTokenB : matchTokenA,
+              context === contextA ? contextB : contextA,
+            )) as Record<string, any>;
+            expect(opponentView.opponentProgress).toBe(progress);
           }
           clock.advance(1);
           const ended = await service.endAttempt(matchId, token, context, {
@@ -368,6 +374,18 @@ describe("Round 3 draw and repeating deathmatch", () => {
           expect(
             ended.deathmatchSnapshot.attemptsCompleted[context === contextA ? "A" : "B"],
           ).toBe(attempt);
+          const opponentViewAfterEnd = (await service.state(
+            matchId,
+            context === contextA ? matchTokenB : matchTokenA,
+            context === contextA ? contextB : contextA,
+          )) as Record<string, any>;
+          if (context === contextB && attempt === 3) {
+            // The final End settles the Deathmatch and clears its runtime slot;
+            // no stale percentage is exposed in the result state.
+            expect(opponentViewAfterEnd.opponentProgress).toBeNull();
+          } else {
+            expect(opponentViewAfterEnd.opponentProgress).toBe(0);
+          }
         }
         if (context === contextA) {
           // Player A has spent exactly three attempts while B has not started yet,

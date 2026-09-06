@@ -1,3 +1,11 @@
+## v0.5.0-beta.13
+
+- Shows the real opponent Geometry Dash icon in Ranked cards and the new compact opponent-progress HUD.
+- Restores persistent Silver/Gold ambient effects across compact Ranked badge contexts and adds tier ambience behind the Prepare opponent icon.
+- Keeps eligible Placement final-window deaths inside the same PlayLayer and restores the continuous two-map-to-stage-grade merge animation.
+- Allows Practice Mode as a strictly local, non-scoring state; entering it closes the normal Attempt once and leaving it starts fresh from zero when allowed.
+- Locks the client to the canonical production Ranked server and removes the editable server URL setting.
+
 ## v0.5.0-beta.12
 - 허용되지 않은 활성 모드를 감지하면 모드 이름과 ID, 해결 방법을 Ranked 게임 내 경고창으로 안내합니다.
 - 필수 모드 누락·비활성화·버전 불일치와 CBF 설정 문제도 같은 경고창에서 구분해 표시합니다.

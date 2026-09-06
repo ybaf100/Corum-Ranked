@@ -51,6 +51,12 @@ void fitRankSprite(cocos2d::CCSprite* sprite, cocos2d::CCSize maxSize);
 void coverRankSprite(cocos2d::CCSprite* sprite, cocos2d::CCSize size);
 
 RankBadgeAssembly createRankBadgeAssembly(std::string const& rank, float badgeSize);
+bool hasPersistentRankAmbient(std::string const& rank);
+cocos2d::CCNode* createRankAmbientFx(
+    std::string const& rank,
+    cocos2d::CCSize maxSize,
+    RankBadgeDisplay display = RankBadgeDisplay::Compact
+);
 cocos2d::CCNode* createAnimatedRankBadge(
     std::string const& rank,
     cocos2d::CCSize maxSize,

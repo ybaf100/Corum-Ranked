@@ -1,6 +1,9 @@
 #include "../src/domain/AttemptScoring.hpp"
 #include "../src/domain/EnvironmentPolicy.hpp"
 #include "../src/domain/HudPresentation.hpp"
+#include "../src/domain/PlacementStageMerge.hpp"
+#include "../src/domain/PlayerIconResolution.hpp"
+#include "../src/domain/RankedGameplayPolicy.hpp"
 #include "../src/domain/RenderFpsMeter.hpp"
 #include "../src/domain/ServerClock.hpp"
 
@@ -206,6 +209,8 @@ void hudTests() {
     auto const wideLayout = layoutHud(854.0f, 480.0f);
     assert(compactLayout.topLeftX == wideLayout.topLeftX);
     assert(compactLayout.bottomLeftX == wideLayout.bottomLeftX);
+    assert(compactLayout.bottomRightX == 558.0f);
+    assert(wideLayout.bottomRightX == 844.0f);
     assert(compactLayout.bottomY == wideLayout.bottomY);
     assert(compactLayout.topRightX == 526.0f);
     assert(wideLayout.topRightX == 812.0f);
@@ -230,6 +235,9 @@ void hudTests() {
         .spectatorActive = false,
         .spectatorOpponentName = {},
         .spectatorCurrentProgress = std::nullopt,
+        .opponentProgressEnabled = true,
+        .opponentCurrentProgress = std::nullopt,
+        .localPractice = false,
     };
     auto hud = presentHud(input);
     assert(hud.fpsText == "FPS : -");
@@ -245,6 +253,22 @@ void hudTests() {
     assert(hud.roundText == "ROUND 2");
     assert(hud.stateText == "MATCH POINT");
     assert(hud.qualifyingText == "Qualifying : 35%");
+    assert(hud.opponentProgressVisible);
+    assert(hud.opponentProgressText == "0%");
+    assert(!hud.practiceIndicatorVisible);
+
+    input.opponentCurrentProgress = 63;
+    input.localPractice = true;
+    hud = presentHud(input);
+    assert(hud.opponentProgressText == "63%");
+    assert(hud.practiceIndicatorVisible);
+    input.opponentCurrentProgress = 100;
+    hud = presentHud(input);
+    assert(hud.opponentProgressText == "100%");
+    input.opponentCurrentProgress = 0;
+    hud = presentHud(input);
+    assert(hud.opponentProgressText == "0%");
+    input.localPractice = false;
 
     // Ranked score transport must preserve fractional totals produced by the
     // 70-99% x1.5 multiplier.
@@ -362,6 +386,100 @@ void hudTests() {
     assert(hud.opponentAttemptText == "Attempts : 3/3");
 }
 
+void playerIconTests() {
+    PlayerIconResolution missing(0);
+    assert(!missing.hasRemoteIdentity());
+    assert(!missing.accept(100));
+    assert(!missing.resolved());
+
+    PlayerIconResolution delayed(9102);
+    assert(delayed.hasRemoteIdentity());
+    assert(!delayed.resolved());
+    assert(!delayed.accept(9101));
+    assert(!delayed.resolved());
+    assert(delayed.accept(9102));
+    assert(delayed.resolved());
+}
+
+void placementStageMergeTests() {
+    constexpr auto timeline = placementStageMergeTimeline();
+    static_assert(validPlacementStageMergeTimeline(timeline));
+    assert(timeline.finalReveal == 0.44f);
+    assert(timeline.controlsUnlock == 0.76f);
+}
+
+void practiceIsolationTests() {
+    assert(rankedScoringEnabled(true, false, false, false));
+    assert(!rankedScoringEnabled(true, false, true, true));
+    assert(!rankedScoringEnabled(true, false, true, false));
+
+    auto transition = practiceTransition({
+        .rankedLevel = true,
+        .requestedPractice = true,
+        .canStartFreshAttempt = true,
+    });
+    assert(transition == RankedPracticeTransition::Enter);
+    auto actions = practiceActions(transition);
+    assert(actions.endNormalAttempt);
+    assert(actions.suppressScoring);
+    assert(!actions.affectOpponent);
+
+    transition = practiceTransition({
+        .rankedLevel = true,
+        .rankedPractice = true,
+        .requestedPractice = false,
+        .canStartFreshAttempt = true,
+    });
+    assert(transition == RankedPracticeTransition::LeaveForFreshAttempt);
+    actions = practiceActions(transition);
+    assert(actions.resetForFreshAttempt);
+    assert(!actions.endNormalAttempt);
+    assert(!actions.affectOpponent);
+
+    transition = practiceTransition({
+        .rankedLevel = true,
+        .rankedPractice = true,
+        .requestedPractice = false,
+        .canStartFreshAttempt = false,
+    });
+    assert(transition == RankedPracticeTransition::LeaveAndExit);
+    actions = practiceActions(transition);
+    assert(actions.suppressScoring);
+    assert(actions.exitLocalGameplay);
+    assert(!actions.affectOpponent);
+
+    // Placement uses the same local-only gate: Practice progress and Clear can
+    // never become Attempt transport or Top-2 grade evidence.
+    assert(!rankedScoringEnabled(true, false, true, true));
+}
+
+void placementFinalWindowResetTests() {
+    // A Death whose authoritative End was already emitted must remain in the
+    // same PlayLayer while the 10-second start window is open. It creates no
+    // duplicate End and at most one fresh Start after vanilla reset.
+    auto actions = rankedResetActions(true, true, true);
+    assert(!actions.endAttempt);
+    assert(actions.restartInPlace);
+    assert(actions.startFreshAttempt);
+    assert(!actions.exitLocalGameplay);
+
+    // A manual reset while alive closes that Attempt once, then follows the same
+    // in-place path while the authoritative start gate remains open.
+    actions = rankedResetActions(true, false, true);
+    assert(actions.endAttempt);
+    assert(actions.restartInPlace);
+    assert(actions.startFreshAttempt);
+    assert(!actions.exitLocalGameplay);
+
+    // Once the authoritative gate closes and no eligible Attempt remains, only
+    // the local gameplay exits; there is no extra End or restart.
+    actions = rankedResetActions(true, true, false);
+    assert(!actions.endAttempt);
+    assert(!actions.restartInPlace);
+    assert(!actions.startFreshAttempt);
+    assert(actions.exitLocalGameplay);
+}
+
 } // namespace
 
 int main() {
@@ -370,5 +488,9 @@ int main() {
     clockTests();
     fpsTests();
     hudTests();
+    playerIconTests();
+    placementStageMergeTests();
+    practiceIsolationTests();
+    placementFinalWindowResetTests();
     std::cout << "Corum Ranked domain tests passed\n";
 }

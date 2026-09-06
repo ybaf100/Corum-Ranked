@@ -17,6 +17,7 @@ struct HudLayout {
     float topRightX = 0.0f;
     float topY = 0.0f;
     float bottomLeftX = 0.0f;
+    float bottomRightX = 0.0f;
     float bottomY = 0.0f;
     float spectatorCenterX = 0.0f;
     float spectatorCenterY = 0.0f;
@@ -42,6 +43,9 @@ struct HudInput {
     bool spectatorActive = false;
     std::string spectatorOpponentName;
     std::optional<int> spectatorCurrentProgress;
+    bool opponentProgressEnabled = false;
+    std::optional<int> opponentCurrentProgress;
+    bool localPractice = false;
 };
 
 struct HudPresentation {
@@ -61,6 +65,9 @@ struct HudPresentation {
     bool spectatorVisible = false;
     std::string spectatorOpponentText;
     std::string spectatorProgressText;
+    bool opponentProgressVisible = false;
+    std::string opponentProgressText;
+    bool practiceIndicatorVisible = false;
 };
 
 [[nodiscard]] std::array<ClearCheckColor, 3> clearChecks(int approvedClears);

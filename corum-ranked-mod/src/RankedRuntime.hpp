@@ -159,6 +159,8 @@ struct MatchView {
     std::string deadlineAt;
     std::string playerAName;
     std::string playerBName;
+    int playerAAccountId = 0;
+    int playerBAccountId = 0;
     std::string playerATier;
     std::string playerBTier;
     int playerAScore = 0;
@@ -209,6 +211,7 @@ struct MatchView {
     RatingEventView ratingEventA;
     RatingEventView ratingEventB;
     bool spectatorActive = false;
+    std::optional<int> opponentProgress;
     std::optional<int> spectatorCurrentProgress;
     std::string spectatorOpponentName;
     std::vector<RankedMapView> candidateMaps;
@@ -415,7 +418,6 @@ private:
     EnvironmentPolicy m_environmentPolicy;
     std::vector<InstalledModSnapshot> m_installedMods;
     ServerClock m_serverClock;
-    std::string m_serverURL;
     std::string m_sessionToken;
     std::string m_matchToken;
     std::string m_attemptId;
