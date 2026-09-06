@@ -140,6 +140,12 @@ const allowedMods: readonly AllowedModRule[] = [
     required: true,
     enabled: true,
   },
+  {
+    id: "fleym.nongd",
+    displayName: "Jukebox",
+    required: false,
+    enabled: true,
+  },
 ];
 
 export const configDocumentFixture = (generation = "test-1"): RankedConfigDocument => ({
