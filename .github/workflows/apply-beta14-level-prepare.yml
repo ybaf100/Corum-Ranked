@@ -1,0 +1,35 @@
+name: Apply beta14 Level Prepare compatibility
+
+on:
+  push:
+    branches:
+      - beta14-followup-work
+    paths:
+      - .github/scripts/apply-beta14-level-prepare.py
+      - .github/workflows/apply-beta14-level-prepare.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: beta14-followup-work
+          fetch-depth: 0
+      - name: Apply checked replacements
+        run: python .github/scripts/apply-beta14-level-prepare.py
+      - name: Remove one-time applier
+        run: |
+          rm .github/scripts/apply-beta14-level-prepare.py
+          rm .github/workflows/apply-beta14-level-prepare.yml
+      - name: Commit branch-only implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "feat(client): allow Jukebox and Level Options in prepare [skip ci]"
+          git push origin HEAD:beta14-followup-work
