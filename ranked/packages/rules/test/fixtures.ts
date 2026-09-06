@@ -149,6 +149,12 @@ export const clientPolicyFixture = (): ClientEnvironmentPolicy => ({
       required: true,
       enabled: true,
     },
+    {
+      id: "fleym.nongd",
+      displayName: "Jukebox",
+      required: false,
+      enabled: true,
+    },
   ],
   cbf: completeOperationalConfig().cbf,
 });
