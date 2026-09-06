@@ -72,8 +72,9 @@ HudPresentation presentHud(HudInput const& input) {
     auto const opponentScore = ownIsA ? input.scoreB : input.scoreA;
     auto const ownClears = ownIsA ? input.clearsA : input.clearsB;
     auto const opponentClears = ownIsA ? input.clearsB : input.clearsA;
-    auto const ownAttempts = ownIsA ? input.deathmatchAttemptsUsedA : input.deathmatchAttemptsUsedB;
-    auto const opponentAttempts = ownIsA ? input.deathmatchAttemptsUsedB : input.deathmatchAttemptsUsedA;
+    auto const ownCompletedAttempts = ownIsA
+        ? input.deathmatchAttemptsCompletedA
+        : input.deathmatchAttemptsCompletedB;
 
     // A poll can still say ROUND_PLAYING for a fraction of a second after the
     // five-minute deadline. The normal deadline is also the start of the fixed
@@ -108,16 +109,18 @@ HudPresentation presentHud(HudInput const& input) {
     result.opponentScoreText = "Score : " + formatNumber(opponentScore);
     result.ownChecks = clearChecks(ownClears);
     result.opponentChecks = clearChecks(opponentClears);
-    result.qualifyingText = "Qualifying : " + formatNumber(input.qualifyingPercent) + "%";
     result.deathmatch = input.deathmatch;
-    if (input.deathmatch) {
-        result.ownAttemptText = "Attempts : " + std::to_string(std::clamp(ownAttempts, 0, 3)) + "/3";
-        result.opponentAttemptText = "Attempts : " + std::to_string(std::clamp(opponentAttempts, 0, 3)) + "/3";
-    }
+    result.qualifyingVisible = !input.deathmatch;
+    result.qualifyingText = result.qualifyingVisible
+        ? "Qualifying : " + formatNumber(input.qualifyingPercent) + "%"
+        : "";
 
+    // Death Match has no Qualifying threshold and no summed Attempt score. The
+    // timer position is repurposed for the local authoritative remaining budget;
+    // it decrements only when an Attempt End has been accepted by the server.
     if (displayState == "DEATHMATCH_PLAYING") {
         result.stateText = "DEATH MATCH";
-        result.timerText = "3 ATTEMPTS";
+        result.timerText = std::to_string(std::clamp(3 - ownCompletedAttempts, 0, 3));
     } else if (displayState == "LAST_ATTEMPT_WINDOW") {
         result.stateText = "LAST ATTEMPT";
         result.timerText = windowCountdown(displayRemainingMillis);
@@ -152,12 +155,14 @@ HudPresentation presentHud(HudInput const& input) {
     }
     result.opponentProgressVisible = input.opponentProgressEnabled;
     if (result.opponentProgressVisible) {
-        result.opponentProgressText = std::to_string(std::clamp(
-            input.opponentCurrentProgress.value_or(0),
-            0,
-            100
-        )) + "%";
-        result.practiceIndicatorVisible = input.localPractice;
+        result.opponentProgressText = input.opponentFinished
+            ? "Finished"
+            : std::to_string(std::clamp(
+                input.opponentCurrentProgress.value_or(0),
+                0,
+                100
+            )) + "%";
+        result.practiceIndicatorVisible = input.opponentPractice;
     }
     return result;
 }
