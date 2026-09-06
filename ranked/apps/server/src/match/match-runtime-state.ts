@@ -44,6 +44,9 @@ export interface MatchRuntimeStatePort {
     side: PlayerSide,
   ): AttemptProgressSnapshot | null;
   displayProgress(matchId: string, roundNumber: number, side: PlayerSide): number | null;
+  finished(matchId: string, roundNumber: number, side: PlayerSide): boolean;
+  setPractice(matchId: string, roundNumber: number, side: PlayerSide, practice: boolean): void;
+  practice(matchId: string, roundNumber: number, side: PlayerSide): boolean;
   noteStartIntent(
     matchId: string,
     roundNumber: number,
@@ -79,6 +82,8 @@ const keyFor = (matchId: string, roundNumber: number, side: PlayerSide): string 
 export class InMemoryMatchRuntimeState implements MatchRuntimeStatePort {
   private readonly attempts = new Map<string, MutableAttemptProgress>();
   private readonly displayedProgress = new Map<string, number>();
+  private readonly finishedAttempts = new Map<string, boolean>();
+  private readonly practicePresence = new Map<string, boolean>();
   private readonly startIntents = new Map<string, AttemptStartIntentSnapshot>();
 
   public beginAttempt(
@@ -88,12 +93,14 @@ export class InMemoryMatchRuntimeState implements MatchRuntimeStatePort {
     attemptId: string,
     atMs: number,
   ): void {
-    this.attempts.set(keyFor(matchId, roundNumber, side), {
+    const key = keyFor(matchId, roundNumber, side);
+    this.attempts.set(key, {
       attemptId,
       progressPercent: 0,
       updatedAtMs: atMs,
     });
-    this.displayedProgress.set(keyFor(matchId, roundNumber, side), 0);
+    this.displayedProgress.set(key, 0);
+    this.finishedAttempts.set(key, false);
   }
 
   public updateProgress(
@@ -109,6 +116,7 @@ export class InMemoryMatchRuntimeState implements MatchRuntimeStatePort {
     if (!current || current.attemptId !== attemptId) {
       this.attempts.set(key, { attemptId, progressPercent, updatedAtMs: atMs });
       this.displayedProgress.set(key, progressPercent);
+      this.finishedAttempts.set(key, false);
       return true;
     }
     if (current.progressPercent === progressPercent) {
@@ -135,7 +143,8 @@ export class InMemoryMatchRuntimeState implements MatchRuntimeStatePort {
     const key = keyFor(matchId, roundNumber, side);
     if (this.attempts.get(key)?.attemptId !== attemptId) return;
     this.attempts.delete(key);
-    this.displayedProgress.set(key, cleared ? 100 : 0);
+    this.displayedProgress.set(key, cleared ? 100 : this.displayedProgress.get(key) ?? 0);
+    this.finishedAttempts.set(key, true);
   }
 
   public progress(
@@ -155,6 +164,19 @@ export class InMemoryMatchRuntimeState implements MatchRuntimeStatePort {
     return this.displayedProgress.get(keyFor(matchId, roundNumber, side)) ?? null;
   }
 
+  public finished(matchId: string, roundNumber: number, side: PlayerSide): boolean {
+    return this.finishedAttempts.get(keyFor(matchId, roundNumber, side)) ?? false;
+  }
+
+  public setPractice(matchId: string, roundNumber: number, side: PlayerSide, practice: boolean): void {
+    const key = keyFor(matchId, roundNumber, side);
+    if (practice) this.practicePresence.set(key, true);
+    else this.practicePresence.delete(key);
+  }
+
+  public practice(matchId: string, roundNumber: number, side: PlayerSide): boolean {
+    return this.practicePresence.get(keyFor(matchId, roundNumber, side)) ?? false;
+  }
 
   public noteStartIntent(
     matchId: string,
@@ -193,11 +215,13 @@ export class InMemoryMatchRuntimeState implements MatchRuntimeStatePort {
   }
 
   public clearRound(matchId: string, roundNumber: number): void {
-    this.attempts.delete(keyFor(matchId, roundNumber, "A"));
-    this.attempts.delete(keyFor(matchId, roundNumber, "B"));
-    this.displayedProgress.delete(keyFor(matchId, roundNumber, "A"));
-    this.displayedProgress.delete(keyFor(matchId, roundNumber, "B"));
-    this.startIntents.delete(keyFor(matchId, roundNumber, "A"));
-    this.startIntents.delete(keyFor(matchId, roundNumber, "B"));
+    for (const side of ["A", "B"] as const) {
+      const key = keyFor(matchId, roundNumber, side);
+      this.attempts.delete(key);
+      this.displayedProgress.delete(key);
+      this.finishedAttempts.delete(key);
+      this.practicePresence.delete(key);
+      this.startIntents.delete(key);
+    }
   }
 }
