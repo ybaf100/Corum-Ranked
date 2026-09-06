@@ -74,7 +74,7 @@ Debug Bot Match 제거 방법은 [`docs/debug-bot-match.md`](docs/debug-bot-matc
 [`docs/v0.5.0-beta.4-report.md`](docs/v0.5.0-beta.4-report.md)에 정리되어 있습니다.
 
 
-> v0.5.0-beta.13 policy: the Ranked allowlist checks currently enabled + loaded mods only. Installed-but-disabled mods do not block Ranked; required mods such as CBF and Node IDs must still be active.
+> v0.5.0-beta.14 policy: the Ranked allowlist checks currently enabled + loaded mods only. Installed-but-disabled mods do not block Ranked; required mods such as CBF and Node IDs must still be active.
 
 
 ## alpha.18 attempt scoring reliability
