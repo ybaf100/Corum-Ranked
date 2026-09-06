@@ -1,0 +1,42 @@
+name: Apply beta14 asset API fix
+
+on:
+  push:
+    branches: [beta14-followup-work]
+    paths: [.github/workflows/apply-beta14-asset-api-fix.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: beta14-followup-work
+          fetch-depth: 0
+      - name: Fix Geode ZStringView conversion
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('corum-ranked-mod/src/ui/RankAssetPackManager.cpp')
+          t = p.read_text(encoding='utf-8')
+          old = '        auto contentType = response.header("content-type").value_or("");\n        contentType = lower(contentType);'
+          new = '        std::string contentType = response.header("content-type").value_or("");\n        contentType = lower(std::move(contentType));'
+          if t.count(old) != 1: raise SystemExit('content-type target mismatch')
+          t = t.replace(old, new, 1)
+          old2 = '    activateExisting(m_metadata.assetPackVersion);\n    log::info("Ranked asset pack activated: {}", m_metadata.assetPackVersion);'
+          new2 = '    (void)activateExisting(m_metadata.assetPackVersion);\n    log::info("Ranked asset pack activated: {}", m_metadata.assetPackVersion);'
+          if t.count(old2) != 1: raise SystemExit('activation target mismatch')
+          p.write_text(t.replace(old2, new2, 1), encoding='utf-8')
+          PY
+          rm .github/workflows/apply-beta14-asset-api-fix.yml
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "fix(assets): use Geode string-view API portably"
+          git push origin HEAD:beta14-followup-work
