@@ -1,0 +1,80 @@
+name: Apply beta14 version sync
+
+on:
+  push:
+    branches: [beta14-followup-work]
+    paths: [.github/workflows/apply-beta14-version-sync.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: beta14-followup-work
+          fetch-depth: 0
+      - name: Synchronize server/rules/package versions
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          OLD = '0.5.0-beta.13'
+          NEW = '0.5.0-beta.14'
+          files = [
+              Path('ranked/package.json'),
+              Path('ranked/package-lock.json'),
+              Path('ranked/apps/server/package.json'),
+              Path('ranked/packages/rules/package.json'),
+              Path('ranked/apps/server/src/session/client-version.ts'),
+              Path('ranked/README.md'),
+          ]
+          files += sorted(Path('ranked/apps/server/test').glob('*.ts'))
+          files += sorted(Path('ranked/packages/rules/test').glob('*.ts'))
+
+          changed = []
+          for path in files:
+              text = path.read_text(encoding='utf-8')
+              if OLD not in text:
+                  continue
+              path.write_text(text.replace(OLD, NEW), encoding='utf-8')
+              changed.append(str(path))
+          required = {
+              'ranked/package.json',
+              'ranked/package-lock.json',
+              'ranked/apps/server/package.json',
+              'ranked/packages/rules/package.json',
+              'ranked/apps/server/src/session/client-version.ts',
+          }
+          missing = sorted(required - set(changed))
+          if missing:
+              raise SystemExit('required beta14 version targets not changed: ' + ', '.join(missing))
+
+          changelog = Path('corum-ranked-mod/changelog.md')
+          text = changelog.read_text(encoding='utf-8')
+          if '## v0.5.0-beta.14' not in text:
+              marker = '## v0.5.0-beta.13'
+              if text.count(marker) != 1:
+                  raise SystemExit('beta13 changelog insertion marker mismatch')
+              section = '''## v0.5.0-beta.14\n\n- Death Match no longer uses Qualifying % or the normal Ranked score curve; three authoritative Attempts are compared by best raw progress %, with Clear fixed at 100% and ties repeating Death Match.\n- Death Match HUD uses the timer position for authoritative remaining Attempts (3 → 2 → 1 → 0) and keeps per-side Start usage separate.\n- Added viewer-relative opponent Finished and Practice presence without DB persistence or scoring side effects.\n- Added stable Placement Top 2 HUD rows with provisional active-Attempt insertion and animated reorder while persisted Grade remains Attempt-End authoritative.\n- Added optional Jukebox allowlist/prepare compatibility and retained effective song-path validation through Geometry Dash.\n- Prewarms Ranked FMOD streams outside competitive transition callbacks and adds transition timing instrumentation.\n- Added verified external Rank Asset Pack cache/download infrastructure with bundled fallback; production downloading remains disabled until real Drive metadata is configured.\n\n'''
+              changelog.write_text(text.replace(marker, section + marker, 1), encoding='utf-8')
+          PY
+          rm .github/workflows/apply-beta14-version-sync.yml
+      - name: Verify version coherence and commit
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          assert json.loads(Path('ranked/package.json').read_text())['version'] == '0.5.0-beta.14'
+          assert json.loads(Path('ranked/apps/server/package.json').read_text())['version'] == '0.5.0-beta.14'
+          assert json.loads(Path('ranked/packages/rules/package.json').read_text())['version'] == '0.5.0-beta.14'
+          assert 'v0.5.0-beta.14' in Path('ranked/apps/server/src/session/client-version.ts').read_text()
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "chore(release): synchronize beta14 server and rules versions"
+          git push origin HEAD:beta14-followup-work
