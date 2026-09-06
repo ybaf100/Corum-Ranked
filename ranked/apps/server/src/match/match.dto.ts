@@ -22,13 +22,16 @@ export class SubmitBanDto {
   public canonicalLevelId?: string | null;
 }
 
-
 export class ResourceFailureDto {
   @IsString()
   @IsIn(["MAP"])
   public resource!: "MAP";
 }
 
+export class PracticePresenceDto {
+  @IsBoolean()
+  public practice!: boolean;
+}
 
 export class AttemptStartIntentDto {
   @IsString()
