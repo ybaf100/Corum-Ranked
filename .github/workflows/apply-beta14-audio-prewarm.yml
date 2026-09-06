@@ -1,0 +1,35 @@
+name: Apply beta14 audio prewarm
+
+on:
+  push:
+    branches:
+      - beta14-followup-work
+    paths:
+      - .github/scripts/apply-beta14-audio-prewarm.py
+      - .github/workflows/apply-beta14-audio-prewarm.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: beta14-followup-work
+          fetch-depth: 0
+      - name: Apply checked replacements
+        run: python .github/scripts/apply-beta14-audio-prewarm.py
+      - name: Remove one-time applier
+        run: |
+          rm .github/scripts/apply-beta14-audio-prewarm.py
+          rm .github/workflows/apply-beta14-audio-prewarm.yml
+      - name: Commit branch-only implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "perf(audio): prewarm Ranked FMOD streams [skip ci]"
+          git push origin HEAD:beta14-followup-work
