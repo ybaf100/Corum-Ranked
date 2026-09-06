@@ -17,11 +17,13 @@ describe("ephemeral spectator progress state", () => {
 
     state.endAttempt("match-1", 2, "B", "B-2", false);
     expect(state.progress("match-1", 2, "B")).toBeNull();
-    expect(state.displayProgress("match-1", 2, "B")).toBe(0);
+    expect(state.displayProgress("match-1", 2, "B")).toBe(31);
+    expect(state.finished("match-1", 2, "B")).toBe(true);
 
     state.beginAttempt("match-1", 2, "B", "B-3", 2_000);
     expect(state.progress("match-1", 2, "B")?.progressPercent).toBe(0);
     expect(state.displayProgress("match-1", 2, "B")).toBe(0);
+    expect(state.finished("match-1", 2, "B")).toBe(false);
 
     state.updateProgress("match-1", 2, "B", "B-3", 85, 2_100);
     state.endAttempt("match-1", 2, "B", "B-3", true);

@@ -315,13 +315,17 @@ describe("Round 3 draw and repeating deathmatch", () => {
     }
 
     const playDeathmatch = async (scoreA: number, scoreB: number) => {
-      await service.ready(matchId, matchTokenA, contextA, {
-        installedMods: structuredClone(cleanMods),
-      });
-      await service.ready(matchId, matchTokenB, contextB, {
-        installedMods: structuredClone(cleanMods),
-      });
-      const playing = (await service.state(matchId, matchTokenA, contextA)) as Record<string, any>;
+      let playing = (await service.state(matchId, matchTokenA, contextA)) as Record<string, any>;
+      if (playing.state === "DEATHMATCH_PREPARE") {
+        await service.ready(matchId, matchTokenA, contextA, {
+          installedMods: structuredClone(cleanMods),
+        });
+        await service.ready(matchId, matchTokenB, contextB, {
+          installedMods: structuredClone(cleanMods),
+        });
+        playing = (await service.state(matchId, matchTokenA, contextA)) as Record<string, any>;
+      }
+      expect(playing.state).toBe("DEATHMATCH_PLAYING");
       const levelId = playing.deathmatch.map.playableLevelId as string;
       for (const [context, token, progress, prefix] of [
         [contextA, matchTokenA, scoreA, "a"],
