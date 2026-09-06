@@ -15,6 +15,7 @@ import {
   AttemptProgressDto,
   AttemptStartDto,
   AttemptStartIntentDto,
+  PracticePresenceDto,
   ReadyMatchDto,
   ResourceFailureDto,
   SubmitBanDto,
@@ -108,6 +109,16 @@ export class MatchController {
     return withVisiblePrepareDeadline(
       await this.matches.reportResourceFailure(matchId, matchToken, session, body),
     );
+  }
+
+  @Post(":id/presence")
+  public presence(
+    @Param("id") matchId: string,
+    @Headers("x-match-token") matchToken: string,
+    @CurrentSession() session: RankedSessionContext,
+    @Body() body: PracticePresenceDto,
+  ) {
+    return this.matches.updatePracticePresence(matchId, matchToken, session, body);
   }
 
   @Post(":id/attempt/intent")
