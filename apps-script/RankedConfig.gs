@@ -92,6 +92,14 @@ var CORUM_RANKED_ALLOWED_MOD_DEFAULTS = Object.freeze([
     true,
     true,
   ]),
+  Object.freeze([
+    "fleym.nongd",
+    "Jukebox",
+    "",
+    "",
+    false,
+    true,
+  ]),
 ]);
 
 var CORUM_RANKED_CONFIG_DEFAULTS = Object.freeze([
