@@ -57,6 +57,7 @@ import type {
   AttemptProgressDto,
   AttemptStartDto,
   AttemptStartIntentDto,
+  PracticePresenceDto,
   ReadyMatchDto,
   ResourceFailureDto,
   SubmitBanDto,
@@ -715,6 +716,48 @@ export class MatchService {
       );
     });
     return this.state(matchId, matchToken, session);
+  }
+
+  public async updatePracticePresence(
+    matchId: string,
+    matchToken: string,
+    session: RankedSessionContext,
+    body: PracticePresenceDto,
+  ) {
+    const now = this.clock.now();
+    return this.database.transaction(async (transaction) => {
+      const authorization = await this.access.authorize(transaction, matchId, session, matchToken);
+      let match = await this.lockMatch(transaction, matchId);
+      match = await this.advanceLockedMatch(transaction, match, now);
+
+      let runtimeSlot: number | null = null;
+      if (match.state === "DEATHMATCH_PLAYING" && match.current_deathmatch_id) {
+        const deathmatch = await this.currentDeathmatch(transaction, match);
+        runtimeSlot = deathmatchRuntimeSlot(Number(deathmatch.sequence));
+      } else if (this.isRoundPlaying(match.state) && match.current_round_number) {
+        runtimeSlot = Number(match.current_round_number);
+      }
+
+      if (runtimeSlot === null) {
+        return {
+          accepted: false,
+          practice: false,
+          reason: `PRACTICE_PRESENCE_NOT_ACCEPTED_IN_${match.state}`,
+          serverNow: now.toISOString(),
+        };
+      }
+
+      // Practice presence is deliberately non-scoring and ephemeral. It exists
+      // only so the opponent HUD can show the wrench; no Attempt/clock/round
+      // state is mutated here.
+      this.runtimeState.setPractice(match.id, runtimeSlot, authorization.side, body.practice);
+      return {
+        accepted: true,
+        practice: body.practice,
+        reason: null,
+        serverNow: now.toISOString(),
+      };
+    });
   }
 
   public async startAttemptIntent(
@@ -2418,11 +2461,9 @@ export class MatchService {
       };
     }
     const map = deathmatchMap;
-    const awardedScore = scoreAttempt(
-      body.progressPercent,
-      body.cleared,
-      map.qualifyingPercent,
-    );
+    // Death Match has no Qualifying threshold. Persist the raw authoritative
+    // percentage in the compatibility awarded_score column.
+    const awardedScore = body.cleared ? 100 : body.progressPercent;
     await transaction.query(
       `UPDATE ranked_deathmatch_attempts
        SET ended_at = $2, progress_percent = $3, cleared = $4,
@@ -2452,8 +2493,8 @@ export class MatchService {
         clears_b: number;
       }>(
         `SELECT
-           COALESCE(SUM(awarded_score) FILTER (WHERE player_id = $2 AND valid), 0) AS score_a,
-           COALESCE(SUM(awarded_score) FILTER (WHERE player_id = $3 AND valid), 0) AS score_b,
+           COALESCE(MAX(awarded_score) FILTER (WHERE player_id = $2 AND valid), 0) AS score_a,
+           COALESCE(MAX(awarded_score) FILTER (WHERE player_id = $3 AND valid), 0) AS score_b,
            COUNT(*) FILTER (WHERE player_id = $2 AND valid AND cleared)::int AS clears_a,
            COUNT(*) FILTER (WHERE player_id = $3 AND valid AND cleared)::int AS clears_b
          FROM ranked_deathmatch_attempts
@@ -2548,9 +2589,11 @@ export class MatchService {
     );
     const rowsA = attempts.rows.filter((attempt) => attempt.player_id === match.player_a_id);
     const rowsB = attempts.rows.filter((attempt) => attempt.player_id === match.player_b_id);
-    const committedScore = (rows: DeathmatchAttemptRow[]) => rows.reduce(
-      (total, attempt) => total + (attempt.valid && attempt.ended_at !== null ? Number(attempt.awarded_score) : 0),
+    const committedBestPercent = (rows: DeathmatchAttemptRow[]) => Math.max(
       0,
+      ...rows
+        .filter((attempt) => attempt.valid && attempt.ended_at !== null)
+        .map((attempt) => Boolean(attempt.cleared) ? 100 : Number(attempt.progress_percent ?? 0)),
     );
     const clears = (rows: DeathmatchAttemptRow[]) => rows.filter(
       (attempt) => attempt.valid && attempt.ended_at !== null && Boolean(attempt.cleared),
@@ -2561,8 +2604,8 @@ export class MatchService {
     const slot = deathmatchRuntimeSlot(Number(deathmatch.sequence));
     const progressA = this.runtimeState.progress(match.id, slot, "A");
     const progressB = this.runtimeState.progress(match.id, slot, "B");
-    const scoreA = committedScore(rowsA);
-    const scoreB = committedScore(rowsB);
+    const scoreA = committedBestPercent(rowsA);
+    const scoreB = committedBestPercent(rowsB);
     const activeA = rowsA.find((attempt) => attempt.ended_at === null) ?? null;
     const activeB = rowsB.find((attempt) => attempt.ended_at === null) ?? null;
     return {
@@ -2570,17 +2613,14 @@ export class MatchService {
       map,
       scores: { A: scoreA, B: scoreB },
       displayScores: {
-        A: scoreA + (progressA && activeA
-          ? scoreAttempt(progressA.progressPercent, false, map.qualifyingPercent)
-          : 0),
-        B: scoreB + (progressB && activeB
-          ? scoreAttempt(progressB.progressPercent, false, map.qualifyingPercent)
-          : 0),
+        A: Math.max(scoreA, progressA && activeA ? progressA.progressPercent : 0),
+        B: Math.max(scoreB, progressB && activeB ? progressB.progressPercent : 0),
       },
       clears: { A: clears(rowsA), B: clears(rowsB) },
       attemptsUsed: { A: rowsA.length, B: rowsB.length },
       attemptsCompleted: { A: completed(rowsA), B: completed(rowsB) },
-      attemptsRemaining: { A: Math.max(0, 3 - rowsA.length), B: Math.max(0, 3 - rowsB.length) },
+      // Remaining budget changes only after authoritative End.
+      attemptsRemaining: { A: Math.max(0, 3 - completed(rowsA)), B: Math.max(0, 3 - completed(rowsB)) },
       activeAttemptNumber: {
         A: activeA ? Number(activeA.attempt_sequence) : null,
         B: activeB ? Number(activeB.attempt_sequence) : null,
@@ -2611,9 +2651,7 @@ export class MatchService {
       attemptsA.some((attempt) => attempt.ended_at === null) ||
       attemptsB.some((attempt) => attempt.ended_at === null)
     ) return;
-    const map = parseJson<RankedMapSnapshot>(deathmatch.map_snapshot);
     const evaluation = evaluateDeathmatch(
-      map,
       attemptsA.map((attempt) => ({
         progressPercent: attempt.valid ? Number(attempt.progress_percent ?? 0) : 0,
         cleared: attempt.valid ? Boolean(attempt.cleared) : false,
@@ -2818,6 +2856,8 @@ export class MatchService {
     const config = this.matchConfig(match);
     let currentRound: object | null = null;
     let opponentProgress: number | null = null;
+    let opponentFinished = false;
+    let opponentPractice = false;
     let spectator: {
       active: boolean;
       opponentName?: string;
@@ -2840,6 +2880,18 @@ export class MatchService {
           round.round_number,
           opponentSide,
         );
+        opponentPractice = this.runtimeState.practice(match.id, round.round_number, opponentSide);
+        if (domain) {
+          const opponentAttempts = domain.attempts[opponentSide];
+          const opponentActive = opponentAttempts.some(
+            (attempt) => attempt.valid && attempt.endedAtMs === null,
+          );
+          const opponentHasEnded = opponentAttempts.some(
+            (attempt) => attempt.valid && attempt.endedAtMs !== null,
+          );
+          opponentFinished = this.runtimeState.finished(match.id, round.round_number, opponentSide) ||
+            (!opponentActive && opponentHasEnded);
+        }
         const qualifyingPercent = Number(round.qualifying_percent);
         const committedScores = domain?.scores ?? { A: 0, B: 0 };
         const displayScores = {
@@ -2903,11 +2955,19 @@ export class MatchService {
     if (match.state.startsWith("DEATHMATCH") && match.current_deathmatch_id) {
       const current = await this.currentDeathmatch(transaction, match);
       const live = await this.deathmatchLiveSnapshot(transaction, match, current);
+      const deathmatchSlot = deathmatchRuntimeSlot(Number(current.sequence));
       opponentProgress = this.runtimeState.displayProgress(
         match.id,
-        deathmatchRuntimeSlot(Number(current.sequence)),
+        deathmatchSlot,
         opponentSide,
       );
+      opponentPractice = this.runtimeState.practice(match.id, deathmatchSlot, opponentSide);
+      const liveRecord = live as {
+        attemptsCompleted: Record<PlayerSide, number>;
+        activeAttemptNumber: Record<PlayerSide, number | null>;
+      };
+      opponentFinished = liveRecord.attemptsCompleted[opponentSide] > 0 &&
+        liveRecord.activeAttemptNumber[opponentSide] === null;
       const result = await transaction.query<{ winner_id: string | null }>(
         "SELECT winner_id FROM ranked_deathmatches WHERE id = $1",
         [match.current_deathmatch_id],
@@ -2965,6 +3025,8 @@ export class MatchService {
       debug: match.match_type === "DEBUG_BOT",
       side: viewerSide,
       opponentProgress,
+      opponentFinished,
+      opponentPractice,
       ready,
       players: {
         A: playerA

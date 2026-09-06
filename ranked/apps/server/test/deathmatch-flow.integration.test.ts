@@ -4,7 +4,6 @@ import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   createMatchSeries,
-  scoreAttempt,
   type CsmpTier,
   type RankedMapSnapshot,
 } from "@corum-ranked/rules";
@@ -324,7 +323,6 @@ describe("Round 3 draw and repeating deathmatch", () => {
       });
       const playing = (await service.state(matchId, matchTokenA, contextA)) as Record<string, any>;
       const levelId = playing.deathmatch.map.playableLevelId as string;
-      const qualifying = Number(playing.deathmatch.map.qualifyingPercent);
       for (const [context, token, progress, prefix] of [
         [contextA, matchTokenA, scoreA, "a"],
         [contextB, matchTokenB, scoreB, "b"],
@@ -352,13 +350,14 @@ describe("Round 3 draw and repeating deathmatch", () => {
             }
             expect(
               live.deathmatchSnapshot.displayScores[context === contextA ? "A" : "B"],
-            ).toBe(scoreAttempt(progress, false, qualifying));
+            ).toBe(progress);
             const opponentView = (await service.state(
               matchId,
               context === contextA ? matchTokenB : matchTokenA,
               context === contextA ? contextB : contextA,
             )) as Record<string, any>;
             expect(opponentView.opponentProgress).toBe(progress);
+            expect(opponentView.opponentFinished).toBe(false);
           }
           clock.advance(1);
           const ended = await service.endAttempt(matchId, token, context, {
@@ -379,13 +378,7 @@ describe("Round 3 draw and repeating deathmatch", () => {
             context === contextA ? matchTokenB : matchTokenA,
             context === contextA ? contextB : contextA,
           )) as Record<string, any>;
-          if (context === contextB && attempt === 3) {
-            // The final End settles the Deathmatch and clears its runtime slot;
-            // no stale percentage is exposed in the result state.
-            expect(opponentViewAfterEnd.opponentProgress).toBeNull();
-          } else {
-            expect(opponentViewAfterEnd.opponentProgress).toBe(0);
-          }
+          expect(opponentViewAfterEnd.opponentFinished).toBe(true);
         }
         if (context === contextA) {
           // Player A has spent exactly three attempts while B has not started yet,
@@ -403,6 +396,17 @@ describe("Round 3 draw and repeating deathmatch", () => {
       }
       return service.state(matchId, matchTokenA, contextA) as Promise<Record<string, any>>;
     };
+
+    // Practice presence is viewer-relative UI state only and consumes no Attempt.
+    await service.ready(matchId, matchTokenA, contextA, { installedMods: structuredClone(cleanMods) });
+    await service.ready(matchId, matchTokenB, contextB, { installedMods: structuredClone(cleanMods) });
+    await service.updatePracticePresence(matchId, matchTokenA, contextA, { practice: true });
+    let presenceView = (await service.state(matchId, matchTokenB, contextB)) as Record<string, any>;
+    expect(presenceView.opponentPractice).toBe(true);
+    expect(presenceView.deathmatch.attemptsUsed.A).toBe(0);
+    await service.updatePracticePresence(matchId, matchTokenA, contextA, { practice: false });
+    presenceView = (await service.state(matchId, matchTokenB, contextB)) as Record<string, any>;
+    expect(presenceView.opponentPractice).toBe(false);
 
     let deathState = await playDeathmatch(70, 70);
     expect(deathState.state).toBe("DEATHMATCH_RESULT");
@@ -431,6 +435,8 @@ describe("Round 3 draw and repeating deathmatch", () => {
     expect(deathmatches.rows).toHaveLength(2);
     expect(deathmatches.rows[0]!.winner_id).toBeNull();
     expect(deathmatches.rows[1]!.winner_id).toBe(playerAId);
+    expect(Number(deathmatches.rows[1]!.score_a)).toBe(80);
+    expect(Number(deathmatches.rows[1]!.score_b)).toBe(70);
 
     const relayEvents = await database.query<{ event_type: string; count: number }>(
       `SELECT event_type, COUNT(*)::int AS count
