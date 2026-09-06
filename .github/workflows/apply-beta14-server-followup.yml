@@ -5,7 +5,7 @@ on:
     branches:
       - beta14-followup-work
     paths:
-      - beta14-server-followup.patch
+      - .github/scripts/apply-beta14-server-followup.py
       - .github/workflows/apply-beta14-server-followup.yml
 
 permissions:
@@ -19,16 +19,18 @@ jobs:
         with:
           ref: beta14-followup-work
           fetch-depth: 0
-      - name: Apply reviewed patch
+      - name: Apply checked replacements
+        run: python .github/scripts/apply-beta14-server-followup.py
+      - name: Remove one-time applier
         run: |
-          git apply --check beta14-server-followup.patch
-          git apply beta14-server-followup.patch
-          rm beta14-server-followup.patch
+          rm -f beta14-server-followup.patch
+          rm .github/scripts/apply-beta14-server-followup.py
           rm .github/workflows/apply-beta14-server-followup.yml
       - name: Commit branch-only implementation
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
+          git diff --cached --check
           git commit -m "feat(server): apply beta14 deathmatch lifecycle follow-up [skip ci]"
           git push origin HEAD:beta14-followup-work
