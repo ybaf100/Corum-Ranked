@@ -1,0 +1,98 @@
+// Integration invariants complement the compiled policy tests. They do NOT
+// substitute for native Geode builds or reproduction on Android / Windows.
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import assert from 'node:assert/strict';
+import test from 'node:test';
+
+const read = (file) => readFileSync(fileURLToPath(new URL(file, import.meta.url)), 'utf8');
+const layer = read('../src/LevelInfoLayer.cpp');
+const popup = read('../src/RankedPopup.cpp');
+const resolver = read('../src/RankedLevelPreparation.cpp');
+const policy = read('../src/domain/LevelPreparationPolicy.hpp');
+const body = (source, from, to) => {
+    const start = source.indexOf(from);
+    const end = source.indexOf(to, start + from.length);
+    assert(start >= 0 && end > start, `Missing source boundary: ${from} -> ${to}`);
+    return source.slice(start, end);
+};
+
+test('both scene entry paths use the shared metadata authority, no raw cache fallback', () => {
+    assert.match(body(popup, 'GJGameLevel* findPlayableMap()', 'bool exactLevelLookupStateAllowed()'), /findLevelInfoMap\(\)/);
+    assert.match(body(popup, 'GJGameLevel* findLevelInfoMap()', 'float preparationProgressTarget()'), /RankedLevelPreparation::get\(\)\.level\(\)/);
+    assert(!/->getSavedLevel\(|GJGameLevel::create\(/.test(popup), 'Raw saved/synthetic scene input returned');
+    assert.match(body(layer, 'bool showRankedSongDownloadGate(', '} // namespace corum::ranked'), /authorizes\(level, context\)/);
+    const init = body(layer, 'bool init(GJGameLevel* level', 'bool isCurrentRankedScene()');
+    assert(init.indexOf('authorizes(level, context)') < init.indexOf('LevelInfoLayer::init(level, challenge)'));
+    assert.match(init, /authorizes\(m_level, context\)/);
+});
+
+test('native response lifetime, immutable context and no same-key timeout overlap', () => {
+    assert.match(resolver, /m_ticket\.finish\(currentPreparationContext\(\)\)/);
+    assert.match(resolver, /m_proof\.attest\(currentPreparationContext\(\), metadata\)/);
+    assert.match(resolver, /m_proof\.matches\(context, levelMetadata\(level\)\)/);
+    assert.match(layer, /\.adopt\(m_level, m_fields->context\)/);
+    assert.match(resolver, /responseCompleted\(tag\.c_str\(\), generation\)/);
+    const busy = body(resolver, 'if (m_ticket.busy()) {', 'if (now < m_nextAttempt)');
+    assert.doesNotMatch(busy, /getOnlineLevels/);
+    assert.match(resolver, /currentStageIndex/);
+    assert.match(resolver, /currentMapIndex/);
+    assert.match(policy, /m_discarded/);
+});
+
+test('metadata gates geometry, RobTop readiness and post-download/update live objects', () => {
+    const songs = body(layer, 'bool songsReady(', 'bool isCurrentRankedLevel(');
+    assert(songs.indexOf('authorizes(') < songs.indexOf('m_isRobtopSong'));
+    assert.match(songs, /if \(songWidget && songWidget->m_isRobtopSong\) return true;/);
+    assert.match(layer, /metadataReady\(\) && mapReady\(m_level\) && !LevelInfoLayer::shouldDownloadLevel\(\)/);
+    for (const event of ['init-before', 'init-after', 'download-callback', 'download-live-after', 'update-callback', 'update-live-after', 'play-activate']) {
+        assert(layer.includes(`"${event}"`));
+    }
+    assert.match(layer, /recoverMetadata\("download-metadata-invalid"\)/);
+    assert.match(layer, /recoverMetadata\("update-metadata-invalid"\)/);
+});
+
+test('only original settings button is exempt, validated by owner and native callback', () => {
+    assert.doesNotMatch(layer, /ranked-prepare-settings|rankedSettingsMenu|onRankedLevelOptions/);
+    const options = body(layer, 'CCMenuItem* vanillaOptionsButton(', 'CCLabelBMFont* gateLabel(');
+    for (const token of ['"settings-menu"', '"settings-button"', 'm_pListener', 'm_pfnSelector', '&LevelInfoLayer::onLevelOptions']) assert(options.includes(token));
+    assert.doesNotMatch(options, /CCMenuItemSpriteExtra::create|setPosition|setTarget|->activate/);
+    assert.match(body(layer, 'void setMenuItemsEnabled(', 'void enableSongAcquisitionControls('), /typeinfo_cast<FLAlertLayer\*>\(root\)\) return/);
+});
+
+test('modal checked at scheduling AND activation; arm only at final activation', () => {
+    const launch = body(layer, 'bool launchRankedGameplay()', 'void activateRankedPlayButton(');
+    const activate = body(layer, 'void activateRankedPlayButton(', 'void verifyGameplayLaunch(');
+    assert.match(launch, /modalBlocksPlay\(\)/);
+    assert.doesNotMatch(launch, /armCurrentLevelForGameplay/);
+    assert.match(activate, /preparationAllowsLaunch/);
+    assert(activate.indexOf('modalBlocksPlay()') < activate.indexOf('armCurrentLevelForGameplay()'));
+    assert(activate.indexOf('armCurrentLevelForGameplay()') < activate.indexOf('nativePlayButton->activate()'));
+    assert.match(activate, /runtime\.tick\(\)/);
+    assert.match(activate, /scheduleAutoPlay\(0\.25f\)/);
+    assert.doesNotMatch(activate, /setTarget|PlayLayer::scene/);
+});
+
+test('Jukebox effective path exists on Android too; no hardcoded Stereo Madness workaround', () => {
+    const path = body(layer, 'bool songFileExists(', 'bool songIdReady(');
+    assert.match(path, /manager->pathForSong\(id\)/);
+    assert.doesNotMatch(path, /GEODE_IS_WINDOWS/);
+    assert.match(layer, /isModLoaded\("fleym.nongd"\)/);
+    assert.match(layer, /if \(jukeboxLoaded\(\)\) setMenuItemsEnabled\(songWidget, true\)/);
+    assert.doesNotMatch(layer, /==\s*"Stereo Madness"|find\("Stereo Madness"/);
+});
+
+test('diagnostics log values and pointer identity, never full geometry', () => {
+    for (const token of ['geometryBytes=', 'notDownloaded=', 'type=', 'song=', 'track=', 'songs=', 'widgetSong=', 'robtop=', 'static_cast<void*>(level)']) assert(resolver.includes(token));
+    assert.doesNotMatch(resolver, /m_levelString\.c_str\(\)/);
+});
+
+test('metadata recovery cancels competing return/launch callbacks and waits for modals', () => {
+    const recover = body(layer, 'void recoverMetadata(', 'void returnForMetadata(');
+    for (const callback of ['activateRankedPlayButton', 'verifyGameplayLaunch', 'autoPlayRanked', 'returnToRanked']) {
+        assert(recover.includes(`unschedule(schedule_selector(CorumRankedLevelInfoLayer::${callback}))`));
+    }
+    const back = body(layer, 'void returnForMetadata(', 'void restoreVanillaOptionsMenu(');
+    assert(back.indexOf('modalBlocksPlay()') < back.indexOf('popScene()'));
+    assert.match(back, /if \(m_fields->returningToRanked\) return/);
+});

@@ -4,6 +4,7 @@
 #include "RankedAudioManager.hpp"
 #include "DebugBotPopup.hpp"
 #include "RankedSongGate.hpp"
+#include "RankedLevelPreparation.hpp"
 #include "domain/PlacementStageMerge.hpp"
 #include "domain/TransitionTrace.hpp"
 #include "ui/RankBadgeAssets.hpp"
@@ -17,9 +18,7 @@
 #include <Geode/binding/GameLevelManager.hpp>
 #include <Geode/binding/GameManager.hpp>
 #include <Geode/binding/GJGameLevel.hpp>
-#include <Geode/binding/GJSearchObject.hpp>
 #include <Geode/binding/LevelInfoLayer.hpp>
-#include <Geode/binding/LevelManagerDelegate.hpp>
 #include <Geode/binding/MusicDownloadManager.hpp>
 #include <Geode/binding/SimplePlayer.hpp>
 #include <Geode/ui/LoadingSpinner.hpp>
@@ -353,16 +352,20 @@ CCNode* makeActionButtonVisual(
 }
 
 std::string resourceKey(MatchView const& match) {
+    auto const& placement = RankedRuntime::get().view().placement;
     return fmt::format(
-        "{}:{}:{}:{}",
+        "{}:{}:{}:{}:{}:{}:{}",
         match.matchId,
         match.roundNumber,
         match.deathmatchSequence,
-        match.currentMap ? match.currentMap->levelId : 0
+        match.currentMap ? match.currentMap->levelId : 0,
+        match.placement,
+        match.placement ? placement.currentStageIndex : 0,
+        match.placement ? placement.currentMapIndex : 0
     );
 }
 
-class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate {
+class CorumRankedLayer final : public CCLayerColor {
     enum class Page {
         Live,
         PlacementPoolSelection,
@@ -390,18 +393,9 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate 
     bool m_matchFoundReadySent = false;
     bool m_enteringSongGate = false;
     bool m_enteringLevel = false;
-    LevelManagerDelegate* m_previousLevelManagerDelegate = nullptr;
-    GJGameLevel* m_resolvedLevel = nullptr;
-    std::string m_resolvedLevelContext;
-    std::string m_levelLookupContext;
-    std::string m_levelLookupKey;
     std::string m_levelLookupError;
-    int m_levelLookupTargetId = 0;
-    int m_levelLookupAttempts = 0;
     bool m_levelLookupBusy = false;
     SteadyClock::time_point m_levelLookupStartedAt {};
-    SteadyClock::time_point m_levelLookupLastRequestAt {};
-    SteadyClock::time_point m_levelLookupNextAttemptAt {};
     // Set only while a vanilla LevelInfo/Play scene is covering this retained
     // Ranked scene. A same-map Death Match retry does not change resourceKey(),
     // so the older resource-key reset left m_enteringLevel latched forever after
@@ -436,11 +430,6 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate 
     CCLabelBMFont* m_spectatorProgressLabel = nullptr;
     CCLabelBMFont* m_spectatorScoreLabel = nullptr;
     CCLabelBMFont* m_spectatorHintLabel = nullptr;
-
-    ~CorumRankedLayer() override {
-        cancelExactLevelLookup();
-        releaseResolvedLevel();
-    }
 
     bool init() override {
         if (!CCLayerColor::initWithColor({0, 0, 0, 0})) return false;
@@ -802,6 +791,7 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate 
     }
 
     void syncPhase() {
+        corum::ranked::RankedLevelPreparation::get().observeContext();
         auto const& view = RankedRuntime::get().view();
         if (view.stage == RuntimeStage::Matched && m_lastMatchId != view.match.matchId) {
             m_lastMatchId = view.match.matchId;
@@ -843,11 +833,8 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate 
                 RankedRuntime::get().setSongBypassAllowed(false);
                 m_enteringLevel = false;
                 m_songIds.clear();
-                releaseResolvedLevel();
                 m_levelLookupError.clear();
-                m_levelLookupAttempts = 0;
                 m_levelLookupStartedAt = SteadyClock::now();
-                m_levelLookupNextAttemptAt = {};
                 m_prepareLoadVisual = 0.0f;
             }
 
@@ -3273,13 +3260,6 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate 
         }
     }
 
-    GJGameLevel* findLocalMap() const {
-        auto const id = RankedRuntime::get().currentLevelId();
-        if (id <= 0) return nullptr;
-        auto* manager = GameLevelManager::sharedState();
-        return manager ? manager->getSavedLevel(id) : nullptr;
-    }
-
     bool isPlayableLevel(GJGameLevel* level) const {
         if (!level) return false;
         if (static_cast<int>(level->m_levelID) != RankedRuntime::get().currentLevelId()) return false;
@@ -3290,255 +3270,33 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate 
     }
 
     GJGameLevel* findPlayableMap() const {
-        auto* level = findLocalMap();
+        auto* level = findLevelInfoMap();
         return isPlayableLevel(level) ? level : nullptr;
-    }
-
-    void releaseResolvedLevel() {
-        if (m_resolvedLevel) {
-            m_resolvedLevel->release();
-            m_resolvedLevel = nullptr;
-        }
-        m_resolvedLevelContext.clear();
-    }
-
-    bool levelLookupKeyMatches(char const* key) const {
-        return
-            m_levelLookupBusy &&
-            key &&
-            !m_levelLookupKey.empty() &&
-            m_levelLookupKey == key;
-    }
-
-    void finishExactLevelLookup() {
-        if (m_levelLookupBusy || m_previousLevelManagerDelegate) {
-            auto* manager = GameLevelManager::sharedState();
-            if (manager && manager->m_levelManagerDelegate == this) {
-                manager->m_levelManagerDelegate = m_previousLevelManagerDelegate;
-            }
-        }
-        m_previousLevelManagerDelegate = nullptr;
-        m_levelLookupBusy = false;
-        m_levelLookupKey.clear();
-        m_levelLookupContext.clear();
-        m_levelLookupTargetId = 0;
-    }
-
-    void cancelExactLevelLookup() {
-        finishExactLevelLookup();
-    }
-
-    bool lookupStillTargetsCurrentMap(std::string const& context, int levelId) const {
-        auto const& view = RankedRuntime::get().view();
-        return
-            view.stage == RuntimeStage::Matched &&
-            levelId > 0 &&
-            RankedRuntime::get().currentLevelId() == levelId &&
-            resourceKey(view.match) == context;
-    }
-
-    void acceptExactLevelResults(CCArray* levels, char const* key) {
-        if (!levelLookupKeyMatches(key)) return;
-
-        auto const context = m_levelLookupContext;
-        auto const targetId = m_levelLookupTargetId;
-        GJGameLevel* exactLevel = nullptr;
-        if (levels) {
-            for (unsigned int index = 0; index < levels->count(); ++index) {
-                auto* candidate = typeinfo_cast<GJGameLevel*>(levels->objectAtIndex(index));
-                if (candidate && static_cast<int>(candidate->m_levelID) == targetId) {
-                    exactLevel = candidate;
-                    break;
-                }
-            }
-        }
-
-        auto const stillCurrent = lookupStillTargetsCurrentMap(context, targetId);
-        finishExactLevelLookup();
-        if (!stillCurrent) return;
-
-        if (!exactLevel) {
-            m_levelLookupError = tr("exact-level-not-found", "EXACT GD LEVEL NOT FOUND - RETRYING");
-            m_levelLookupNextAttemptAt = SteadyClock::now() + std::chrono::milliseconds(1400);
-            return;
-        }
-
-        exactLevel->retain();
-        releaseResolvedLevel();
-        m_resolvedLevel = exactLevel;
-        m_resolvedLevelContext = context;
-        m_levelLookupError.clear();
-        m_prepareLoadVisual = std::max(m_prepareLoadVisual, 0.30f);
-        log::info(
-            "Resolved exact Ranked GD level: match={} round={} level={} name={}",
-            RankedRuntime::get().view().match.matchId,
-            RankedRuntime::get().view().match.roundNumber,
-            targetId,
-            std::string(exactLevel->m_levelName.c_str())
-        );
-    }
-
-    void rejectExactLevelResults(char const* key) {
-        if (!levelLookupKeyMatches(key)) return;
-        auto const context = m_levelLookupContext;
-        auto const targetId = m_levelLookupTargetId;
-        auto const stillCurrent = lookupStillTargetsCurrentMap(context, targetId);
-        finishExactLevelLookup();
-        if (!stillCurrent) return;
-        m_levelLookupError = tr("level-lookup-failed", "LEVEL LOOKUP FAILED - RETRYING");
-        auto const backoffMilliseconds = std::min(4000, 900 + m_levelLookupAttempts * 450);
-        m_levelLookupNextAttemptAt = SteadyClock::now() + std::chrono::milliseconds(backoffMilliseconds);
-    }
-
-    void loadLevelsFinished(CCArray* levels, char const* key) override {
-        if (levelLookupKeyMatches(key)) {
-            acceptExactLevelResults(levels, key);
-            return;
-        }
-        if (m_previousLevelManagerDelegate && m_previousLevelManagerDelegate != this) {
-            m_previousLevelManagerDelegate->loadLevelsFinished(levels, key);
-        }
-    }
-
-    void loadLevelsFailed(char const* key) override {
-        if (levelLookupKeyMatches(key)) {
-            rejectExactLevelResults(key);
-            return;
-        }
-        if (m_previousLevelManagerDelegate && m_previousLevelManagerDelegate != this) {
-            m_previousLevelManagerDelegate->loadLevelsFailed(key);
-        }
-    }
-
-    void loadLevelsFinished(CCArray* levels, char const* key, int type) override {
-        if (levelLookupKeyMatches(key)) {
-            acceptExactLevelResults(levels, key);
-            return;
-        }
-        if (m_previousLevelManagerDelegate && m_previousLevelManagerDelegate != this) {
-            m_previousLevelManagerDelegate->loadLevelsFinished(levels, key, type);
-        }
-    }
-
-    void loadLevelsFailed(char const* key, int type) override {
-        if (levelLookupKeyMatches(key)) {
-            rejectExactLevelResults(key);
-            return;
-        }
-        if (m_previousLevelManagerDelegate && m_previousLevelManagerDelegate != this) {
-            m_previousLevelManagerDelegate->loadLevelsFailed(key, type);
-        }
-    }
-
-    void setupPageInfo(gd::string info, char const* key) override {
-        if (levelLookupKeyMatches(key)) return;
-        if (m_previousLevelManagerDelegate && m_previousLevelManagerDelegate != this) {
-            m_previousLevelManagerDelegate->setupPageInfo(info, key);
-        }
     }
 
     bool exactLevelLookupStateAllowed() const {
         auto const& view = RankedRuntime::get().view();
         if (view.stage != RuntimeStage::Matched) return false;
         auto const& state = view.match.state;
-        return
-            state == "ROUND_PREPARE" ||
-            state == "DEATHMATCH_PREPARE" ||
-            state == "MAP_PREPARE" ||
-            state == "ROUND_PLAYING" ||
-            state == "DEATHMATCH_PLAYING" ||
-            state == "MAP_PLAYING";
+        return state == "ROUND_PREPARE" || state == "DEATHMATCH_PREPARE" ||
+            state == "MAP_PREPARE" || state == "ROUND_PLAYING" ||
+            state == "DEATHMATCH_PLAYING" || state == "MAP_PLAYING";
     }
 
     void beginExactLevelLookup() {
-        if (!exactLevelLookupStateAllowed() || findLocalMap()) return;
-        auto const& match = RankedRuntime::get().view().match;
-        auto const targetId = RankedRuntime::get().currentLevelId();
-        if (targetId <= 0 || !match.currentMap) return;
-        auto const context = resourceKey(match);
-        if (
-            m_resolvedLevel &&
-            m_resolvedLevelContext == context &&
-            static_cast<int>(m_resolvedLevel->m_levelID) == targetId
-        ) return;
-
-        auto const now = SteadyClock::now();
-        if (m_levelLookupBusy) {
-            auto const stalled =
-                m_levelLookupLastRequestAt != SteadyClock::time_point{} &&
-                std::chrono::duration<double>(now - m_levelLookupLastRequestAt).count() >= 8.0;
-            if (!stalled) return;
-
-            auto* manager = GameLevelManager::sharedState();
-            if (!manager || manager->m_levelManagerDelegate != this) {
-                // Another vanilla screen took ownership of the singleton delegate.
-                // Do not overwrite that live owner; retry after it releases control.
-                m_previousLevelManagerDelegate = nullptr;
-                m_levelLookupBusy = false;
-                m_levelLookupKey.clear();
-                m_levelLookupNextAttemptAt = now + std::chrono::seconds(1);
-                return;
-            }
-            auto* retrySearch = GJSearchObject::create(
-                SearchType::Type19,
-                fmt::format("{}&gameVersion=22", m_levelLookupTargetId)
-            );
-            if (!retrySearch) return;
-            m_levelLookupKey = retrySearch->getKey() ? retrySearch->getKey() : "";
-            m_levelLookupLastRequestAt = now;
-            ++m_levelLookupAttempts;
-            manager->getOnlineLevels(retrySearch);
-            return;
+        if (!exactLevelLookupStateAllowed()) return;
+        auto& preparation = corum::ranked::RankedLevelPreparation::get();
+        preparation.poll();
+        m_levelLookupBusy = preparation.busy();
+        m_levelLookupError = preparation.error();
+        if (m_levelLookupStartedAt == SteadyClock::time_point{}) {
+            m_levelLookupStartedAt = SteadyClock::now();
         }
-        if (
-            m_levelLookupNextAttemptAt != SteadyClock::time_point{} &&
-            now < m_levelLookupNextAttemptAt
-        ) return;
-
-        auto* manager = GameLevelManager::sharedState();
-        auto* search = GJSearchObject::create(
-            SearchType::Type19,
-            fmt::format("{}&gameVersion=22", targetId)
-        );
-        if (!manager || !search || !search->getKey()) {
-            m_levelLookupError = tr("level-lookup-unavailable", "LEVEL LOOKUP UNAVAILABLE - RETRYING");
-            m_levelLookupNextAttemptAt = now + std::chrono::seconds(1);
-            return;
-        }
-
-        m_previousLevelManagerDelegate = manager->m_levelManagerDelegate == this
-            ? nullptr
-            : manager->m_levelManagerDelegate;
-        manager->m_levelManagerDelegate = this;
-        m_levelLookupBusy = true;
-        m_levelLookupContext = context;
-        m_levelLookupTargetId = targetId;
-        m_levelLookupKey = search->getKey();
-        m_levelLookupLastRequestAt = now;
-        m_levelLookupNextAttemptAt = {};
-        m_levelLookupError.clear();
-        if (m_levelLookupStartedAt == SteadyClock::time_point{}) m_levelLookupStartedAt = now;
-        ++m_levelLookupAttempts;
-        log::info(
-            "Resolving exact Ranked GD level: match={} round={} level={} attempt={}",
-            match.matchId,
-            match.roundNumber,
-            targetId,
-            m_levelLookupAttempts
-        );
-        manager->getOnlineLevels(search);
     }
 
     GJGameLevel* findLevelInfoMap() const {
-        auto const& view = RankedRuntime::get().view();
-        if (view.stage != RuntimeStage::Matched) return nullptr;
-        auto const targetId = RankedRuntime::get().currentLevelId();
-        if (
-            m_resolvedLevel &&
-            m_resolvedLevelContext == resourceKey(view.match) &&
-            static_cast<int>(m_resolvedLevel->m_levelID) == targetId
-        ) return m_resolvedLevel;
-        return findLocalMap();
+        // Never substitute a raw GD saved pointer for attested online metadata.
+        return corum::ranked::RankedLevelPreparation::get().level();
     }
 
     float preparationProgressTarget() {
@@ -3597,10 +3355,7 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate 
     }
 
     bool songIdReady(MusicDownloadManager* manager, int id) const {
-        if (!manager || id <= 0) return true;
-        // Resource songs are already part of the game installation. Custom songs
-        // must have a downloaded file according to MusicDownloadManager.
-        return manager->isResourceSong(id) || manager->isSongDownloaded(id);
+        return corum::ranked::rankedSongResourceReady(manager, id);
     }
 
     bool isSongReady(GJGameLevel* level) {
@@ -3616,11 +3371,9 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate 
 
     void openSongDownloadGate(double countdownOverride = -1.0) {
         if (m_enteringSongGate) return;
+        beginExactLevelLookup();
         auto* level = findLevelInfoMap();
-        if (!level) {
-            beginExactLevelLookup();
-            return;
-        }
+        if (!level) return;
 
         // The real Geometry Dash LevelInfo page owns map/song acquisition. The
         // explicit override is used as a recovery path when polling skipped a
@@ -3631,11 +3384,9 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate 
             : authoritativeRemaining
                 ? std::max(0.0, static_cast<double>(*authoritativeRemaining) / 1000.0)
                 : std::max(0.0, 10.0 - phaseSeconds());
-        auto const usedResolvedLevel = level == m_resolvedLevel;
         m_enteringSongGate = corum::ranked::showRankedSongDownloadGate(level, countdownRemaining);
         if (m_enteringSongGate) {
             m_rankedChildScenePushed = true;
-            if (usedResolvedLevel) releaseResolvedLevel();
         }
     }
 
@@ -3692,6 +3443,7 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate 
         // Do not construct PlayLayer directly. Enter through Geometry Dash's normal
         // LevelInfoLayer -> onPlay path; this lets the game own level validation,
         // loading transitions, audio setup, and the return/quit stack.
+        corum::ranked::tracePreparedLevel("scene-before-reentry", level, nullptr, this);
         auto* scene = LevelInfoLayer::scene(level, false);
         if (!scene) {
             m_localMessage = "Unable to open the selected level. Retrying...";
@@ -3889,7 +3641,6 @@ class CorumRankedLayer final : public CCLayerColor, public LevelManagerDelegate 
 
     void onExit() override {
         unschedule(schedule_selector(CorumRankedLayer::refresh));
-        cancelExactLevelLookup();
         m_rankTransitionLayer = nullptr;
         setKeypadEnabled(false);
         if (m_menu) {

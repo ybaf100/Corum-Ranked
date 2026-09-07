@@ -1,16 +1,20 @@
 #include "RankedRuntime.hpp"
 #include "RankedSongGate.hpp"
+#include "RankedLevelPreparation.hpp"
 #include "ui/RankedTranslations.hpp"
 #include "ui/RankedVisuals.hpp"
 
 #include <Geode/Geode.hpp>
 #include <Geode/binding/CustomSongWidget.hpp>
 #include <Geode/binding/MusicDownloadManager.hpp>
+#include <Geode/binding/GameLevelOptionsLayer.hpp>
 #include <Geode/modify/LevelInfoLayer.hpp>
+#include <Geode/utils/addresser.hpp>
 
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstring>
 #include <filesystem>
 #include <sstream>
 #include <string>
@@ -24,10 +28,7 @@ namespace {
 using SteadyClock = std::chrono::steady_clock;
 
 struct PendingPrepareGate {
-    int levelId = 0;
-    int roundNumber = 0;
-    int deathmatchSequence = 0;
-    std::string matchId;
+    corum::ranked::LevelPreparationContext context;
     SteadyClock::time_point countdownEndsAt {};
     bool pending = false;
 };
@@ -69,13 +70,22 @@ bool jukeboxLoaded() {
 }
 
 bool hasOpenModal(CCNode* root) {
-    if (!root) return false;
+    if (!root || !root->isVisible()) return false;
     for (auto* child : root->getChildrenExt()) {
-        if (!child) continue;
+        if (!child || !child->isVisible()) continue;
         if (typeinfo_cast<FLAlertLayer*>(child)) return true;
         if (hasOpenModal(child)) return true;
     }
     return false;
+}
+
+GameLevelOptionsLayer* openLevelOptions(CCNode* root) {
+    if (!root || !root->isVisible()) return nullptr;
+    if (auto* options = typeinfo_cast<GameLevelOptionsLayer*>(root)) return options;
+    for (auto* child : root->getChildrenExt()) {
+        if (auto* options = openLevelOptions(child)) return options;
+    }
+    return nullptr;
 }
 
 std::string rankedGateTitle() {
@@ -120,17 +130,11 @@ std::vector<int> collectSongIds(GJGameLevel* level) {
 }
 
 bool songFileExists(MusicDownloadManager* manager, int id) {
-#if defined(GEODE_IS_WINDOWS)
     if (!manager || id <= 0) return false;
     auto const path = manager->pathForSong(id);
     if (path.empty()) return false;
     std::error_code error;
     return std::filesystem::exists(std::filesystem::path(path.c_str()), error) && !error;
-#else
-    (void)manager;
-    (void)id;
-    return false;
-#endif
 }
 
 bool songIdReady(MusicDownloadManager* manager, int id) {
@@ -142,11 +146,12 @@ bool songIdReady(MusicDownloadManager* manager, int id) {
 }
 
 bool songsReady(GJGameLevel* level, CustomSongWidget* songWidget) {
-    if (!mapReady(level)) return false;
+    if (!mapReady(level) || !songWidget ||
+        !corum::ranked::RankedLevelPreparation::get().authorizes(
+            level, corum::ranked::currentPreparationContext())) return false;
 
-    // Trust the real vanilla widget first. In particular, built-in RobTop songs
-    // (the Windows Stereo Madness case) do not require a MusicDownloadManager
-    // custom-song download even when raw song ID fields are populated.
+    // Only trust the native classification after the level's online metadata has
+    // been attested. Real RobTop songs (including track 0) still need no download.
     if (songWidget && songWidget->m_isRobtopSong) return true;
 
     auto* manager = MusicDownloadManager::sharedState();
@@ -173,12 +178,9 @@ bool isCurrentRankedLevel(GJGameLevel* level) {
 
 bool consumePrepareGateRequest(GJGameLevel* level, SteadyClock::time_point& countdownEndsAt) {
     if (!level || !g_pendingPrepareGate.pending) return false;
-    auto const& match = corum::ranked::RankedRuntime::get().view().match;
     auto const exactContext =
-        g_pendingPrepareGate.levelId == static_cast<int>(level->m_levelID) &&
-        g_pendingPrepareGate.matchId == match.matchId &&
-        g_pendingPrepareGate.roundNumber == match.roundNumber &&
-        g_pendingPrepareGate.deathmatchSequence == match.deathmatchSequence;
+        g_pendingPrepareGate.context.levelId == static_cast<int>(level->m_levelID) &&
+        g_pendingPrepareGate.context == corum::ranked::currentPreparationContext();
     if (!exactContext) {
         g_pendingPrepareGate = {};
         return false;
@@ -190,15 +192,9 @@ bool consumePrepareGateRequest(GJGameLevel* level, SteadyClock::time_point& coun
 
 void setMenuItemsEnabled(CCNode* root, bool enabled) {
     if (!root) return;
-    // The dedicated Level Options button stays usable during Ranked prepare so
-    // LDM / Disable Shake remain presentation choices, not anti-cheat locks.
-    if (!enabled && root->getID() == "ranked-prepare-settings-menu"_spr) {
-        if (auto* menu = typeinfo_cast<CCMenu*>(root)) menu->setTouchEnabled(true);
-        for (CCNode* child : root->getChildrenExt()) {
-            if (auto* item = typeinfo_cast<CCMenuItem*>(child)) item->setEnabled(true);
-        }
-        return;
-    }
+    // A popup can be attached under LevelInfo. Its own controls and close button
+    // must not be disabled by the underlying page's recurring prepare lock.
+    if (typeinfo_cast<FLAlertLayer*>(root)) return;
     if (auto* item = typeinfo_cast<CCMenuItem*>(root)) item->setEnabled(enabled);
     for (CCNode* child : root->getChildrenExt()) {
         if (child) setMenuItemsEnabled(child, enabled);
@@ -282,6 +278,26 @@ CCMenuItem* vanillaPlayButton(CCMenu* menu, CCNode* playSprite) {
     return nullptr;
 }
 
+CCMenuItem* vanillaOptionsButton(LevelInfoLayer* layer) {
+    if (!layer) return nullptr;
+    auto* menu = typeinfo_cast<CCMenu*>(layer->getChildByID("settings-menu"));
+    if (!menu) return nullptr;
+    auto* item = typeinfo_cast<CCMenuItem*>(menu->getChildByID("settings-button"));
+    if (!item || item->getParent() != menu ||
+        item->m_pListener != static_cast<CCObject*>(layer) || !item->m_pfnSelector) return nullptr;
+    // Resolve only OUR known nonvirtual binding, never an unknown candidate (a
+    // virtual member pointer is not an executable address on every GD platform).
+    // Preserve the selector's this-adjustment and accept the binding or the
+    // actual native entry installed by GD; do not change the item's callback.
+    auto const bindingSelector = menu_selector(LevelInfoLayer::onLevelOptions);
+    auto nativeSelector = bindingSelector;
+    auto const nativeAddress = geode::addresser::getNonVirtual(&LevelInfoLayer::onLevelOptions);
+    static_assert(sizeof(nativeSelector) >= sizeof(nativeAddress));
+    std::memcpy(&nativeSelector, &nativeAddress, sizeof(nativeAddress));
+    if (item->m_pfnSelector != bindingSelector && item->m_pfnSelector != nativeSelector) return nullptr;
+    return item;
+}
+
 CCLabelBMFont* gateLabel(std::string const& text, float scale, CCPoint position, ccColor3B color = {255, 255, 255}) {
     auto weight = corum::ranked::ui::FontWeight::SemiBold;
     if (scale >= 0.30f) weight = corum::ranked::ui::FontWeight::Black;
@@ -303,18 +319,20 @@ CCNode* gatePanel(CCSize size, CCPoint position, ccColor3B accent = {52, 214, 25
 
 namespace corum::ranked {
 
+bool rankedSongResourceReady(MusicDownloadManager* manager, int songId) {
+    return songIdReady(manager, songId);
+}
+
 bool showRankedSongDownloadGate(GJGameLevel* level, double countdownRemainingSeconds) {
-    if (!level) return false;
-    auto const& match = RankedRuntime::get().view().match;
-    g_pendingPrepareGate.levelId = static_cast<int>(level->m_levelID);
-    g_pendingPrepareGate.matchId = match.matchId;
-    g_pendingPrepareGate.roundNumber = match.roundNumber;
-    g_pendingPrepareGate.deathmatchSequence = match.deathmatchSequence;
+    auto const context = currentPreparationContext();
+    if (!RankedLevelPreparation::get().authorizes(level, context)) return false;
+    g_pendingPrepareGate.context = context;
     g_pendingPrepareGate.countdownEndsAt = SteadyClock::now() + std::chrono::milliseconds(
         static_cast<long long>(std::ceil(std::max(0.0, countdownRemainingSeconds) * 1000.0))
     );
     g_pendingPrepareGate.pending = true;
 
+    tracePreparedLevel("scene-before-prepare", level);
     auto* scene = LevelInfoLayer::scene(level, false);
     if (!scene) {
         g_pendingPrepareGate = {};
@@ -328,6 +346,15 @@ bool showRankedSongDownloadGate(GJGameLevel* level, double countdownRemainingSec
 
 class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
     struct Fields {
+        bool rankedOwned = false;
+        corum::ranked::LevelPreparationContext context;
+        bool metadataRecovery = false;
+        bool modalHeld = false;
+        bool optionsWarningLogged = false;
+        int lastReadiness = -1;
+        Ref<CCMenu> nativeOptionsMenu;
+        Ref<GJGameLevel> optionsEditedLevel;
+        int nativeOptionsZ = 0;
         bool returningToRanked = false;
         bool autoPlayScheduled = false;
         // Automatic start and song-gate completion share one scene-transition
@@ -343,7 +370,6 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         bool songGateBypassed = false;
         bool mapDownloadRequested = false;
         bool mapFailureReported = false;
-        CCMenu* rankedSettingsMenu = nullptr;
         SteadyClock::time_point gateOpenedAt {};
         SteadyClock::time_point countdownEndsAt {};
         SteadyClock::time_point mapDownloadStartedAt {};
@@ -371,18 +397,142 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
     };
 
     bool init(GJGameLevel* level, bool challenge) {
+        auto const ranked = isCurrentRankedLevel(level);
+        auto const context = corum::ranked::currentPreparationContext();
+        auto& preparation = corum::ranked::RankedLevelPreparation::get();
+        if (ranked) {
+            corum::ranked::tracePreparedLevel("init-before", level, nullptr, this);
+            if (!preparation.authorizes(level, context)) return false;
+        }
         if (!LevelInfoLayer::init(level, challenge)) return false;
-        if (isCurrentRankedLevel(m_level)) {
+        if (ranked) {
+            m_fields->rankedOwned = true;
+            m_fields->context = context;
+            corum::ranked::tracePreparedLevel("init-after", m_level, m_songWidget, this);
+            if (!preparation.authorizes(m_level, context)) {
+                preparation.invalidate(context);
+                return false;
+            }
+            preparation.adopt(m_level, context);
             // Preserve vanilla's canonical Saved/SearchResult distinction.
             m_levelType = m_level->m_levelType;
         }
         return true;
     }
 
+    bool isCurrentRankedScene() {
+        return m_fields->rankedOwned && m_fields->context == corum::ranked::currentPreparationContext() &&
+            isCurrentRankedLevel(m_level);
+    }
+
+    bool metadataReady() {
+        return corum::ranked::RankedLevelPreparation::get().authorizes(m_level, m_fields->context);
+    }
+
+    bool modalBlocksPlay() {
+        auto* scene = CCDirector::sharedDirector()->getRunningScene();
+        if (auto* options = openLevelOptions(scene)) {
+            if (isCurrentRankedScene() && options->m_level &&
+                static_cast<int>(options->m_level->m_levelID) == m_fields->context.levelId) {
+                m_fields->optionsEditedLevel = options->m_level;
+            }
+        } else if (m_fields->optionsEditedLevel) {
+            // GD's own popup retains its original level. A native download may
+            // replace LevelInfo's pointer while that popup is open. Transfer ONLY
+            // the native user's two preferences, never online metadata or scores.
+            if (isCurrentRankedScene() && m_level != m_fields->optionsEditedLevel.data()) {
+                m_level->m_lowDetailModeToggled = m_fields->optionsEditedLevel->m_lowDetailModeToggled;
+                m_level->m_disableShakeToggled = m_fields->optionsEditedLevel->m_disableShakeToggled;
+                corum::ranked::tracePreparedLevel("options-preserved-after-replacement", m_level, m_songWidget, this);
+            }
+            m_fields->optionsEditedLevel = nullptr;
+        }
+        auto const open = hasOpenModal(scene);
+        if (open != m_fields->modalHeld) {
+            m_fields->modalHeld = open;
+            corum::ranked::tracePreparedLevel(open ? "modal-hold" : "modal-resume", m_level, m_songWidget, this);
+        }
+        return open;
+    }
+
+    void recoverMetadata(char const* reason) {
+        if (m_fields->metadataRecovery || m_fields->returningToRanked) return;
+        corum::ranked::tracePreparedLevel(reason, m_level, m_songWidget, this);
+        corum::ranked::RankedLevelPreparation::get().invalidate(m_fields->context);
+        if (isCurrentRankedScene()) corum::ranked::RankedRuntime::get().setSongBypassAllowed(false);
+        m_fields->metadataRecovery = true;
+        m_fields->gameplayLaunchStarted = false;
+        m_fields->songGateStartingPlay = false;
+        m_fields->autoPlayScheduled = false;
+        unschedule(schedule_selector(CorumRankedLevelInfoLayer::activateRankedPlayButton));
+        unschedule(schedule_selector(CorumRankedLevelInfoLayer::verifyGameplayLaunch));
+        unschedule(schedule_selector(CorumRankedLevelInfoLayer::autoPlayRanked));
+        unschedule(schedule_selector(CorumRankedLevelInfoLayer::returnToRanked));
+        schedule(schedule_selector(CorumRankedLevelInfoLayer::returnForMetadata), 0.20f);
+    }
+
+    void returnForMetadata(float) {
+        if (m_fields->returningToRanked) return;
+        // Do not destroy a live options/Jukebox popup or reset authoritative time.
+        corum::ranked::RankedRuntime::get().tick();
+        if (modalBlocksPlay()) return;
+        unschedule(schedule_selector(CorumRankedLevelInfoLayer::returnForMetadata));
+        teardownSongDownloadGate();
+        m_fields->returningToRanked = true;
+        CCDirector::sharedDirector()->popScene();
+    }
+
+    void restoreVanillaOptionsMenu() {
+        if (m_fields->nativeOptionsMenu) {
+            m_fields->nativeOptionsMenu->setZOrder(m_fields->nativeOptionsZ);
+            m_fields->nativeOptionsMenu = nullptr;
+        }
+    }
+
+    void applyPrepareInteraction() {
+        if (m_fields->gateIntroCover && !m_fields->introRevealStarted) {
+            lockAllRankedPrepareInteraction(this);
+        } else {
+            lockInteractionToSong(this, m_songWidget);
+        }
+        auto* button = vanillaOptionsButton(this);
+        auto* menu = button ? typeinfo_cast<CCMenu*>(button->getParent()) : nullptr;
+        if (menu != m_fields->nativeOptionsMenu.data()) {
+            restoreVanillaOptionsMenu();
+            if (menu) {
+                m_fields->nativeOptionsMenu = menu;
+                m_fields->nativeOptionsZ = menu->getZOrder();
+                log::info("[RankedPrepare] vanilla-options owner={} menu={} item={}",
+                    static_cast<void*>(this), static_cast<void*>(menu), static_cast<void*>(button));
+            }
+        }
+        auto const modalOpen = modalBlocksPlay();
+        if (menu) {
+            // Use the existing position and exact button. Do not expose siblings.
+            menu->setZOrder(modalOpen ? m_fields->nativeOptionsZ : 1005);
+            menu->setTouchEnabled(true);
+            button->setEnabled(true);
+        } else if (!m_fields->optionsWarningLogged) {
+            m_fields->optionsWarningLogged = true;
+            log::warn("[RankedPrepare] native settings-button identity unavailable; no replacement created");
+        }
+        // A modal attached directly to LevelInfo must also render above its cover.
+        if (m_fields->gateOverlay) m_fields->gateOverlay->setVisible(!modalOpen);
+        if (m_fields->gateIntroCover) m_fields->gateIntroCover->setVisible(!modalOpen);
+    }
+
     void onEnterTransitionDidFinish() override {
         LevelInfoLayer::onEnterTransitionDidFinish();
         auto& runtime = corum::ranked::RankedRuntime::get();
-        if (!isCurrentRankedLevel(m_level)) return;
+        if (!m_fields->rankedOwned) return;
+        if (m_fields->metadataRecovery) {
+            schedule(schedule_selector(CorumRankedLevelInfoLayer::returnForMetadata), 0.20f);
+            return;
+        }
+        if (!isCurrentRankedScene() || !metadataReady()) {
+            recoverMetadata("reentry-metadata-invalid");
+            return;
+        }
 
         SteadyClock::time_point countdownEndsAt {};
         if (
@@ -440,23 +590,6 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         m_fields->gateOverlay->addChild(m_fields->gateProgressFill, 4);
         m_fields->gateProgressLabel = gateLabel("30%", 0.17f, {183.0f, 12.0f}, corum::ranked::ui::Text);
         m_fields->gateOverlay->addChild(m_fields->gateProgressLabel, 4);
-
-        // Keep the real vanilla Level Options popup available throughout prepare.
-        // It contains LDM / Disable Shake and does not alter Ranked scoring.
-        m_fields->rankedSettingsMenu = CCMenu::create();
-        m_fields->rankedSettingsMenu->setID("ranked-prepare-settings-menu"_spr);
-        m_fields->rankedSettingsMenu->setPosition({size.width - 24.0f, size.height - 24.0f});
-        if (auto* optionsSprite = CCSprite::createWithSpriteFrameName("GJ_optionsBtn_001.png")) {
-            optionsSprite->setScale(0.62f);
-            auto* optionsItem = CCMenuItemSpriteExtra::create(
-                optionsSprite,
-                this,
-                menu_selector(CorumRankedLevelInfoLayer::onRankedLevelOptions)
-            );
-            optionsItem->setID("ranked-prepare-settings"_spr);
-            m_fields->rankedSettingsMenu->addChild(optionsItem);
-        }
-        addChild(m_fields->rankedSettingsMenu, 1005);
 
         auto const remainingAtOpen = std::chrono::duration<double>(
             m_fields->countdownEndsAt - SteadyClock::now()
@@ -521,8 +654,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
             m_fields->gateIntroPanel->addChild(m_fields->introProgressLabel, 4);
         }
 
-        if (m_fields->gateIntroCover) lockAllRankedPrepareInteraction(this);
-        else lockInteractionToSong(this, m_songWidget);
+        applyPrepareInteraction();
         requestVanillaMapDownload();
 
         schedule(schedule_selector(CorumRankedLevelInfoLayer::updateSongDownloadGate), 0.20f);
@@ -532,15 +664,20 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
     bool vanillaLevelReadyForPlay() {
         // m_levelString alone is not a sufficient launch boundary. Vanilla owns
         // the download/update decision that LevelInfoLayer::onPlay will use.
-        return mapReady(m_level) && !LevelInfoLayer::shouldDownloadLevel();
+        return metadataReady() && mapReady(m_level) && !LevelInfoLayer::shouldDownloadLevel();
     }
 
     void requestVanillaMapDownload() {
+        if (m_fields->metadataRecovery) return;
+        if (m_fields->rankedOwned && (!isCurrentRankedScene() || !metadataReady())) {
+            recoverMetadata("download-request-metadata-invalid");
+            return;
+        }
         auto& runtime = corum::ranked::RankedRuntime::get();
         auto const& state = runtime.view().match.state;
         if (
             m_fields->returningToRanked ||
-            !isCurrentRankedLevel(m_level) ||
+            !isCurrentRankedScene() ||
             (!rankedDownloadGateState(state) && !rankedPlayingState(state)) ||
             m_fields->mapDownloadRequested ||
             vanillaLevelReadyForPlay()
@@ -564,6 +701,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         // Important: do not call GameLevelManager::downloadLevel directly here.
         // Let the real on-screen LevelInfoLayer own its normal download delegate,
         // loading UI, saved-level replacement and song metadata initialization.
+        corum::ranked::tracePreparedLevel("download-request", m_level, m_songWidget, this);
         LevelInfoLayer::downloadLevel();
     }
 
@@ -686,20 +824,17 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         }
     }
 
-    void onRankedLevelOptions(CCObject* sender) {
-        if (!m_fields->songGateActive || !isCurrentRankedLevel(m_level)) return;
-        // Invoke Geometry Dash's own options layer. Ranked does not synthesize or
-        // reinterpret LDM / Disable Shake values.
-        LevelInfoLayer::onLevelOptions(sender);
-    }
-
     void updateSongDownloadGate(float) {
-        if (!m_fields->songGateActive) return;
+        if (!m_fields->songGateActive || m_fields->metadataRecovery) return;
         auto& runtime = corum::ranked::RankedRuntime::get();
         runtime.tick();
 
-        if (!isCurrentRankedLevel(m_level)) {
+        if (!isCurrentRankedScene()) {
             returnToRanked(0.0f);
+            return;
+        }
+        if (!metadataReady()) {
+            recoverMetadata("gate-metadata-invalid");
             return;
         }
 
@@ -723,11 +858,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         // Base LevelInfoLayer may replace/rebuild its song widget when the level
         // payload arrives. Re-apply the interaction lock every tick so the newly
         // created vanilla song control is the only clickable UI.
-        if (m_fields->gateIntroCover && !m_fields->introRevealStarted) {
-            lockAllRankedPrepareInteraction(this);
-        } else {
-            lockInteractionToSong(this, m_songWidget);
-        }
+        applyPrepareInteraction();
 
         if (!levelReady) {
             if (m_fields->gateStatus) {
@@ -787,6 +918,14 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
 
         auto const songReady = levelReady && songsReady(m_level, m_songWidget);
         auto const readyForStart = levelReady && (songReady || runtime.songBypassAllowed());
+        auto const readiness = (metadataReady() ? 1 : 0) | (levelReady ? 2 : 0) |
+            (songReady ? 4 : 0) | (runtime.songBypassAllowed() ? 8 : 0) | (m_fields->modalHeld ? 16 : 0);
+        if (readiness != m_fields->lastReadiness) {
+            m_fields->lastReadiness = readiness;
+            log::info("[RankedPrepare] readiness context={} metadata={} geometry={} song={} bypass={} modal={}",
+                corum::ranked::preparationContextText(m_fields->context), metadataReady(), levelReady,
+                songReady, runtime.songBypassAllowed(), m_fields->modalHeld);
+        }
 
         auto const ownReady = match.side == "A" ? match.readyA : match.readyB;
         auto const opponentReady = match.side == "A" ? match.readyB : match.readyA;
@@ -856,7 +995,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
                 now < m_fields->nextGameplayLaunchAt ||
                 m_fields->songGateStartingPlay ||
                 m_fields->gameplayLaunchStarted ||
-                hasOpenModal(CCDirector::sharedDirector()->getRunningScene())
+                modalBlocksPlay()
             ) return;
 
             // Keep the gate and its polling callback alive until gameplay has
@@ -902,10 +1041,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
             m_fields->gateIntroCover->removeFromParentAndCleanup(true);
             m_fields->gateIntroCover = nullptr;
         }
-        if (m_fields->rankedSettingsMenu) {
-            m_fields->rankedSettingsMenu->removeFromParentAndCleanup(true);
-            m_fields->rankedSettingsMenu = nullptr;
-        }
+        restoreVanillaOptionsMenu();
         m_fields->gateIntroPanel = nullptr;
         m_fields->gateTitle = nullptr;
         m_fields->gateStatus = nullptr;
@@ -924,9 +1060,28 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
     }
 
     void levelDownloadFinished(GJGameLevel* level) override {
+        if (m_fields->rankedOwned) {
+            corum::ranked::tracePreparedLevel("download-live-before", m_level, m_songWidget, this);
+            corum::ranked::tracePreparedLevel("download-callback", level, nullptr, this);
+            if (m_fields->metadataRecovery) return;
+            if (!isCurrentRankedScene() || !level ||
+                static_cast<int>(level->m_levelID) != m_fields->context.levelId) {
+                recoverMetadata("download-stale-context");
+                return;
+            }
+            modalBlocksPlay();
+        }
         if (!m_fields->songGateActive) {
             LevelInfoLayer::levelDownloadFinished(level);
-            if (isCurrentRankedLevel(m_level)) {
+            if (m_fields->rankedOwned) {
+                corum::ranked::tracePreparedLevel("download-live-after", m_level, m_songWidget, this);
+                if (!metadataReady()) {
+                    recoverMetadata("download-metadata-invalid");
+                    return;
+                }
+                corum::ranked::RankedLevelPreparation::get().adopt(m_level, m_fields->context);
+            }
+            if (isCurrentRankedScene()) {
                 m_levelType = m_level->m_levelType;
             }
             m_fields->mapDownloadRequested = false;
@@ -960,12 +1115,18 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
             return;
         }
 
-        // Only a verified payload may become the LevelInfoLayer's live level.
-        // Vanilla then rebuilds its song metadata/widget from that exact payload.
+        // Native owns the payload replacement. Verify the resulting live metadata;
+        // geometry completion alone is NOT proof that native rebuilt everything.
         LevelInfoLayer::levelDownloadFinished(level);
+        corum::ranked::tracePreparedLevel("download-live-after", m_level, m_songWidget, this);
+        if (!metadataReady()) {
+            recoverMetadata("download-metadata-invalid");
+            return;
+        }
+        corum::ranked::RankedLevelPreparation::get().adopt(m_level, m_fields->context);
         if (m_level) m_levelType = m_level->m_levelType;
         m_fields->mapDownloadRequested = false;
-        if (!isCurrentRankedLevel(m_level) || !vanillaLevelReadyForPlay()) {
+        if (!isCurrentRankedScene() || !vanillaLevelReadyForPlay()) {
             if (m_fields->gateStatus) {
                 m_fields->gateStatus->setString(tr("map-update-incomplete", "MAP UPDATE INCOMPLETE - RETRYING").c_str());
                 m_fields->gateStatus->setColor({255, 92, 92});
@@ -974,15 +1135,12 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
             return;
         }
         m_fields->songWaitStartedAt = SteadyClock::now();
-        if (m_fields->gateIntroCover && !m_fields->introRevealStarted) {
-            lockAllRankedPrepareInteraction(this);
-        } else {
-            lockInteractionToSong(this, m_songWidget);
-        }
+        applyPrepareInteraction();
         updateSongDownloadGate(0.0f);
     }
 
     void levelDownloadFailed(int response) override {
+        if (m_fields->rankedOwned && !isCurrentRankedScene()) return;
         LevelInfoLayer::levelDownloadFailed(response);
         m_fields->mapDownloadRequested = false;
         if (!m_fields->songGateActive) return;
@@ -993,24 +1151,50 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
             m_fields->gateStatus->setString(errorText.c_str());
             m_fields->gateStatus->setColor({255, 92, 92});
         }
-        if (m_fields->gateIntroCover && !m_fields->introRevealStarted) {
-            lockAllRankedPrepareInteraction(this);
-        } else {
-            lockInteractionToSong(this, m_songWidget);
+        applyPrepareInteraction();
+    }
+
+    void levelUpdateFinished(GJGameLevel* level, UpdateResponse response) override {
+        if (m_fields->rankedOwned) {
+            corum::ranked::tracePreparedLevel("update-live-before", m_level, m_songWidget, this);
+            corum::ranked::tracePreparedLevel("update-callback", level, nullptr, this);
+            if (m_fields->metadataRecovery) return;
+            if (!isCurrentRankedScene() ||
+                (level && static_cast<int>(level->m_levelID) != m_fields->context.levelId)) {
+                recoverMetadata("update-stale-context");
+                return;
+            }
+            modalBlocksPlay();
         }
+        LevelInfoLayer::levelUpdateFinished(level, response);
+        if (!m_fields->rankedOwned) return;
+        corum::ranked::tracePreparedLevel("update-live-after", m_level, m_songWidget, this);
+        if (!metadataReady()) {
+            recoverMetadata("update-metadata-invalid");
+            return;
+        }
+        corum::ranked::RankedLevelPreparation::get().adopt(m_level, m_fields->context);
+        m_levelType = m_level->m_levelType;
+        if (m_fields->songGateActive) updateSongDownloadGate(0.0f);
+        else scheduleAutoPlay(0.25f);
     }
 
     bool launchRankedGameplay() {
-        if (m_fields->gameplayLaunchStarted || m_fields->returningToRanked) return false;
+        if (m_fields->gameplayLaunchStarted || m_fields->returningToRanked || m_fields->metadataRecovery) return false;
 
         auto& runtime = corum::ranked::RankedRuntime::get();
         if (
-            !isCurrentRankedLevel(m_level) ||
+            !isCurrentRankedScene() ||
             !rankedPlayingState(runtime.view().match.state) ||
             !runtime.canEnterCurrentLevel()
         ) {
             return false;
         }
+        if (!metadataReady()) {
+            recoverMetadata("launch-metadata-invalid");
+            return false;
+        }
+        if (modalBlocksPlay()) return false;
         if (!vanillaLevelReadyForPlay()) {
             requestVanillaMapDownload();
             return false;
@@ -1026,11 +1210,6 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         auto const ready = songsReady(m_level, m_songWidget);
         if (!ready && !runtime.songBypassAllowed()) return false;
         if (!ready && runtime.songBypassAllowed()) m_level->m_showedSongWarning = true;
-
-        // Snapshot the authoritative start before handing control to the real GD
-        // Play button. The subsequent vanilla transition may cross the deadline,
-        // but this visual attempt began while the server still allowed starts.
-        if (!runtime.armCurrentLevelForGameplay()) return false;
 
         m_fields->gameplayLaunchStarted = true;
         ++m_fields->gameplayLaunchAttempts;
@@ -1052,7 +1231,26 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
     }
 
     void activateRankedPlayButton(float) {
-        if (!m_fields->gameplayLaunchStarted || m_fields->returningToRanked) return;
+        if (!m_fields->gameplayLaunchStarted || m_fields->returningToRanked || m_fields->metadataRecovery) return;
+        auto& runtime = corum::ranked::RankedRuntime::get();
+        runtime.tick();
+        if (!isCurrentRankedScene() || !metadataReady()) {
+            recoverMetadata("activation-context-or-metadata-invalid");
+            return;
+        }
+        auto const ready = songsReady(m_level, m_songWidget);
+        if (!corum::ranked::preparationAllowsLaunch(isCurrentRankedScene(), metadataReady(),
+            vanillaLevelReadyForPlay(), ready, runtime.songBypassAllowed(),
+            rankedPlayingState(runtime.view().match.state) && runtime.canEnterCurrentLevel(),
+            modalBlocksPlay(), m_isBusy)) {
+            // A popup/state change can land between scheduling and activation.
+            // Release only the UI latch; no start timestamp has been armed yet.
+            m_fields->gameplayLaunchStarted = false;
+            m_fields->songGateStartingPlay = false;
+            unschedule(schedule_selector(CorumRankedLevelInfoLayer::verifyGameplayLaunch));
+            if (!m_fields->songGateActive) scheduleAutoPlay(0.25f);
+            return;
+        }
         auto* nativePlayButton = vanillaPlayButton(m_playBtnMenu, m_playSprite);
         if (!nativePlayButton || m_isBusy) return;
 
@@ -1064,6 +1262,16 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
             log::warn("Verified Ranked Play item has no native callback");
             return;
         }
+        // Last possible boundary: never arm an attempt while a modal is holding
+        // the launch. Runtime still preserves the accepted time for real retries.
+        if (!runtime.armCurrentLevelForGameplay()) {
+            m_fields->gameplayLaunchStarted = false;
+            m_fields->songGateStartingPlay = false;
+            unschedule(schedule_selector(CorumRankedLevelInfoLayer::verifyGameplayLaunch));
+            if (!m_fields->songGateActive) scheduleAutoPlay(0.25f);
+            return;
+        }
+        corum::ranked::tracePreparedLevel("play-activate", m_level, m_songWidget, this);
         m_fields->vanillaPlayActivation = true;
         log::info(
             "Activating verified Ranked Play button: match={} level={} attempt={} node={}",
@@ -1161,7 +1369,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         if (!m_fields->songGateActive) {
             auto& runtime = corum::ranked::RankedRuntime::get();
             if (
-                isCurrentRankedLevel(m_level) &&
+                isCurrentRankedScene() &&
                 rankedPlayingState(runtime.view().match.state) &&
                 runtime.canEnterCurrentLevel()
             ) {
@@ -1173,6 +1381,8 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
     }
 
     void onExit() override {
+        unschedule(schedule_selector(CorumRankedLevelInfoLayer::returnForMetadata));
+        unschedule(schedule_selector(CorumRankedLevelInfoLayer::returnToRanked));
         // onExit is the acknowledgement that Geometry Dash's own Play button
         // accepted the transition.
         unschedule(schedule_selector(CorumRankedLevelInfoLayer::activateRankedPlayButton));
@@ -1201,6 +1411,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
             m_fields->gameplayLaunchStarted ||
             m_fields->autoPlayScheduled ||
             m_fields->returningToRanked ||
+            m_fields->metadataRecovery ||
             m_fields->songGateActive
         ) return;
         m_fields->autoPlayScheduled = true;
@@ -1214,7 +1425,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
 
         auto& runtime = corum::ranked::RankedRuntime::get();
         if (
-            isCurrentRankedLevel(m_level) &&
+            isCurrentRankedScene() &&
             rankedPlayingState(runtime.view().match.state) &&
             runtime.canEnterCurrentLevel()
         ) {
@@ -1229,6 +1440,8 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
 
     void onPlay(CCObject* sender) {
         auto& runtime = corum::ranked::RankedRuntime::get();
+        if (m_fields->rankedOwned &&
+            (m_fields->metadataRecovery || !isCurrentRankedScene() || !metadataReady())) return;
         if (m_fields->vanillaPlayActivation) {
             log::debug(
                 "Ranked LevelInfo onPlay forwarded to vanilla: match={} level={}",
@@ -1243,7 +1456,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
             // Play/Space becomes inert once the Ranked scene launch has started.
             return;
         }
-        if (isCurrentRankedLevel(m_level) && rankedPlayingState(runtime.view().match.state)) {
+        if (isCurrentRankedScene() && rankedPlayingState(runtime.view().match.state)) {
             // Ranked owns automatic activation. A physical tap cannot create a
             // second attempt or bypass the authoritative entry checks.
             return;
@@ -1254,7 +1467,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
     void keyDown(cocos2d::enumKeyCodes key, double timestamp) override {
         auto& runtime = corum::ranked::RankedRuntime::get();
         if (
-            isCurrentRankedLevel(m_level) &&
+            m_fields->rankedOwned &&
             (
                 m_fields->songGateActive ||
                 m_fields->gameplayLaunchStarted ||
@@ -1275,8 +1488,13 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
     }
 
     void returnToRanked(float) {
+        if (m_fields->returningToRanked) return;
+        if (m_fields->rankedOwned && modalBlocksPlay()) {
+            scheduleOnce(schedule_selector(CorumRankedLevelInfoLayer::returnToRanked), 0.20f);
+            return;
+        }
         auto& runtime = corum::ranked::RankedRuntime::get();
-        auto const currentLevel = isCurrentRankedLevel(m_level);
+        auto const currentLevel = isCurrentRankedScene();
 
         // Authority may replace ROUND_PLAYING with a Death Match (or another
         // Round/map) while the old LevelInfo selector is still waiting for a
@@ -1309,7 +1527,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
 
     void onBack(CCObject* sender) {
         if (m_fields->songGateActive || m_fields->gameplayLaunchStarted) return;
-        if (!isCurrentRankedLevel(m_level)) {
+        if (!isCurrentRankedScene()) {
             LevelInfoLayer::onBack(sender);
             return;
         }
@@ -1324,7 +1542,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
 
     void keyBackClicked() override {
         if (m_fields->songGateActive || m_fields->gameplayLaunchStarted) return;
-        if (!isCurrentRankedLevel(m_level)) {
+        if (!isCurrentRankedScene()) {
             LevelInfoLayer::keyBackClicked();
             return;
         }

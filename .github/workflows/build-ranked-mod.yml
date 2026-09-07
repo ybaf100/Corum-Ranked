@@ -145,6 +145,11 @@ jobs:
             corum-ranked-mod/src/debug/DebugBotConfig.cpp \
             -o /tmp/corum-ranked-debug-bot-domain-test
           /tmp/corum-ranked-debug-bot-domain-test
+          g++ -std=c++23 -Wall -Wextra -Wpedantic -Werror \
+            corum-ranked-mod/tests/LevelPreparationTest.cpp \
+            -o /tmp/corum-ranked-level-preparation-test
+          /tmp/corum-ranked-level-preparation-test
+          node --test corum-ranked-mod/tests/LevelPreparationSourceTest.mjs
           python3 - <<'PY'
           import json
           from pathlib import Path
@@ -175,18 +180,19 @@ jobs:
                   raise SystemExit(f"Forbidden Ranked launch path returned: {forbidden}")
 
           popup = Path("corum-ranked-mod/src/RankedPopup.cpp").read_text(encoding="utf-8")
+          preparation = Path("corum-ranked-mod/src/RankedLevelPreparation.cpp").read_text(encoding="utf-8")
           play = Path("corum-ranked-mod/src/PlayLayer.cpp").read_text(encoding="utf-8")
           visuals = Path("corum-ranked-mod/src/ui/RankedVisuals.hpp").read_text(encoding="utf-8")
           translations = Path("corum-ranked-mod/src/ui/RankedTranslations.hpp").read_text(encoding="utf-8")
           for required_preload in (
               "SearchType::Type19",
               "getOnlineLevels(search)",
-              "lookupStillTargetsCurrentMap",
+              "m_ticket.finish(currentPreparationContext())",
               "preparationProgressTarget()",
               "revealExactLevelInfoPage()",
               "displayedPreparationProgress",
           ):
-              if required_preload not in popup and required_preload not in source:
+              if required_preload not in popup and required_preload not in source and required_preload not in preparation:
                   raise SystemExit(f"Missing beta.7 exact-level preload invariant: {required_preload}")
           for forbidden_preload in (
               "auto* level = GJGameLevel::create();",
