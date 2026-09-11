@@ -130,14 +130,13 @@ describe("SpectatorLiveService", () => {
     expect(lateJoin).toMatchObject({ active: true, waiting: false, fallback: false, reset: true });
     expect(lateJoin.packets.map((item) => item.sequence)).toEqual([0, 1]);
 
+    setState(standardState("B", false));
     await service.publish(
       "match-1",
       "match-token",
       session,
       packet({ sequence: 2, elapsedMs: 110, keyframe: { x: 132, y: 54, rotation: 20, dead: false, finished: false } }),
-    ).catch(() => undefined);
-    // Switch back to publisher state for the authoritative publish above, then
-    // restore viewer state before the incremental read.
+    );
     setState(standardState("A", true));
     const incremental = await service.subscribe(
       "match-1",
@@ -148,7 +147,8 @@ describe("SpectatorLiveService", () => {
       "1",
       "1",
     );
-    expect(incremental.fallback).toBe(false);
+    expect(incremental).toMatchObject({ fallback: false, reset: false });
+    expect(incremental.packets.map((item) => item.sequence)).toEqual([2]);
   });
 
   it("returns polling fallback for unsupported protocol versions", async () => {
