@@ -382,7 +382,7 @@ describe("Round 3 draw and repeating deathmatch", () => {
             context === contextA ? matchTokenB : matchTokenA,
             context === contextA ? contextB : contextA,
           )) as Record<string, any>;
-          expect(opponentViewAfterEnd.opponentFinished).toBe(true);
+          expect(opponentViewAfterEnd.opponentFinished).toBe(attempt === 3);
         }
         if (context === contextA) {
           // Player A has spent exactly three attempts while B has not started yet,

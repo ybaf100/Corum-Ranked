@@ -566,6 +566,7 @@ describe("two-client authoritative match flow", () => {
     )) as Record<string, any>;
     expect(targetView.spectator).toEqual({ active: false });
     expect(targetView.opponentProgress).toBe(100);
+    expect(targetView.opponentFinished).toBe(true);
 
     const blockedTriggerStart = await matches.startAttempt(
       matchId,
@@ -625,6 +626,7 @@ describe("two-client authoritative match flow", () => {
     });
     state = (await matches.state(matchId, statusA.matchToken, playerA)) as Record<string, any>;
     expect(state.spectator).toMatchObject({ active: true, currentProgress: null });
+    expect(state.opponentFinished).toBe(false);
     await expect(
       matches.updateAttemptProgress(matchId, statusB.matchToken, playerB, {
         levelId: roundTwoLevelId,
@@ -668,6 +670,7 @@ describe("two-client authoritative match flow", () => {
     clock.advanceSeconds(35);
     state = (await matches.state(matchId, statusA.matchToken, playerA)) as Record<string, any>;
     expect(state.state).not.toBe("ROUND_RESULT");
+    expect(state.opponentFinished).toBe(false);
 
     const b4 = await matches.startAttempt(matchId, statusB.matchToken, playerB, {
       levelId: roundTwoLevelId,
@@ -677,6 +680,7 @@ describe("two-client authoritative match flow", () => {
     expect(b4).toMatchObject({ accepted: true });
     state = (await matches.state(matchId, statusA.matchToken, playerA)) as Record<string, any>;
     expect(state.spectator.currentProgress).toBe(0);
+    expect(state.opponentFinished).toBe(false);
     clock.advanceSeconds(1);
     await matches.updateAttemptProgress(matchId, statusB.matchToken, playerB, {
       levelId: roundTwoLevelId,
@@ -707,6 +711,7 @@ describe("two-client authoritative match flow", () => {
       reason: "LAST_ATTEMPT_CLEAR",
     });
     expect(state.spectator).toEqual({ active: false });
+    expect(state.opponentFinished).toBe(true);
 
     // Simulate a lost HTTP acknowledgement for the final End. Retrying after
     // MATCH_RESULT must acknowledge the already-committed attempt instead of

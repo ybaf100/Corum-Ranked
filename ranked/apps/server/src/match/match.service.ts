@@ -1532,6 +1532,7 @@ export class MatchService {
     round: RoundRow,
     state: RoundState,
     now: Date,
+    side?: PlayerSide,
   ): Promise<boolean> {
     const result = await transaction.query<AttemptStartLeaseRow>(
       `SELECT *
@@ -1564,7 +1565,7 @@ export class MatchService {
         await this.invalidateStartLease(transaction, lease.id, now);
         continue;
       }
-      pending = true;
+      if (!side || lease.side === side) pending = true;
     }
     return pending;
   }
@@ -2889,8 +2890,26 @@ export class MatchService {
           const opponentHasEnded = opponentAttempts.some(
             (attempt) => attempt.valid && attempt.endedAtMs !== null,
           );
-          opponentFinished = this.runtimeState.finished(match.id, round.round_number, opponentSide) ||
-            (!opponentActive && opponentHasEnded);
+          const opponentHasPendingStartLease = await this.hasPendingStartLease(
+            transaction,
+            match,
+            round,
+            domain,
+            now,
+            opponentSide,
+          );
+          const opponentCanStartAnotherAttempt =
+            domain.phase !== "ROUND_RESULT" &&
+            domain.phase !== "ROUND_SETTLING" &&
+            (domain.lastAttemptWindow
+              ? opponentSide === domain.lastAttemptWindow.targetSide &&
+                now.getTime() < domain.lastAttemptWindow.endsAtMs
+              : now.getTime() < domain.finalWindowEndAtMs);
+          opponentFinished =
+            !opponentActive &&
+            !opponentHasPendingStartLease &&
+            opponentHasEnded &&
+            !opponentCanStartAnotherAttempt;
         }
         const qualifyingPercent = Number(round.qualifying_percent);
         const committedScores = domain?.scores ?? { A: 0, B: 0 };
@@ -2969,7 +2988,7 @@ export class MatchService {
         attemptsCompleted: Record<PlayerSide, number>;
         activeAttemptNumber: Record<PlayerSide, number | null>;
       };
-      opponentFinished = liveRecord.attemptsCompleted[opponentSide] > 0 &&
+      opponentFinished = liveRecord.attemptsCompleted[opponentSide] >= 3 &&
         liveRecord.activeAttemptNumber[opponentSide] === null;
       const result = await transaction.query<{ winner_id: string | null }>(
         "SELECT winner_id FROM ranked_deathmatches WHERE id = $1",

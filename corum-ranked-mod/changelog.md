@@ -2,7 +2,7 @@
 
 - Death Match no longer uses Qualifying % or the normal Ranked score curve; three authoritative Attempts are compared by best raw progress %, with Clear fixed at 100% and ties repeating Death Match.
 - Death Match HUD uses the timer position for authoritative remaining Attempts (3 → 2 → 1 → 0) and keeps per-side Start usage separate.
-- Added viewer-relative opponent Finished and Practice presence without DB persistence or scoring side effects.
+- Opponent `Finished` now appears only after that side has no legal Attempt remaining; ordinary deaths and the first two Death Match endings retain progress without falsely marking the player finished. Practice presence remains viewer-relative and non-scoring.
 - Added stable Placement Top 2 HUD rows with provisional active-Attempt insertion and animated reorder while persisted Grade remains Attempt-End authoritative.
 - Added optional Jukebox allowlist/prepare compatibility and retained effective song-path validation through Geometry Dash.
 - Prewarms Ranked FMOD streams outside competitive transition callbacks and adds transition timing instrumentation.

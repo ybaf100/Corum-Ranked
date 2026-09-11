@@ -4,7 +4,7 @@ Release candidate verification scope:
 
 - Death Match uses exactly three authoritative Attempts and compares best raw progress percentage; Qualifying % and the normal attempt score curve do not participate.
 - Death Match remaining-attempt HUD decrements only after authoritative Attempt End acceptance.
-- Opponent progress exposes viewer-relative `Finished` and opponent-only Practice presence without DB persistence or score effects.
+- Opponent progress exposes viewer-relative `Finished` only when no legal Attempt remains, including pending Start-lease protection and three-Attempt Death Match exhaustion; opponent-only Practice presence remains non-persistent and non-scoring.
 - Placement renders stable Top 2 evidence rows while persisted Map Grade remains authoritative-Attempt-End only.
 - Optional Jukebox is allowlisted without becoming required; Level Prepare continues to validate the effective Geometry Dash song path.
 - Ranked FMOD streams are prewarmed outside competitive transition callbacks where possible.
