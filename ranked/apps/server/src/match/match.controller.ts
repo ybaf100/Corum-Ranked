@@ -21,6 +21,7 @@ import {
   SubmitBanDto,
 } from "./match.dto.js";
 import { MatchService } from "./match.service.js";
+import { SpectatorLiveService } from "./spectator-live.service.js";
 
 const PVP_RESOURCE_DEADLINE_FLOOR_SECONDS = 60;
 const PVP_VISIBLE_PREPARE_SECONDS = 10;
@@ -46,7 +47,10 @@ const withVisiblePrepareDeadline = <T>(payload: T): T => {
 @Controller("api/ranked/matches")
 @UseGuards(SessionGuard)
 export class MatchController {
-  public constructor(private readonly matches: MatchService) {}
+  public constructor(
+    private readonly matches: MatchService,
+    private readonly spectatorLive: SpectatorLiveService,
+  ) {}
 
   @Get()
   public recent(@CurrentSession() session: RankedSessionContext) {
@@ -60,7 +64,9 @@ export class MatchController {
     @CurrentSession() session: RankedSessionContext,
   ) {
     return withVisiblePrepareDeadline(
-      await this.matches.state(matchId, matchToken, session),
+      this.spectatorLive.decorateState(
+        await this.matches.state(matchId, matchToken, session),
+      ),
     );
   }
 
@@ -71,7 +77,9 @@ export class MatchController {
     @CurrentSession() session: RankedSessionContext,
   ) {
     return withVisiblePrepareDeadline(
-      await this.matches.state(matchId, matchToken, session),
+      this.spectatorLive.decorateState(
+        await this.matches.state(matchId, matchToken, session),
+      ),
     );
   }
 
@@ -83,7 +91,9 @@ export class MatchController {
     @Body() body: ReadyMatchDto,
   ) {
     return withVisiblePrepareDeadline(
-      await this.matches.ready(matchId, matchToken, session, body),
+      this.spectatorLive.decorateState(
+        await this.matches.ready(matchId, matchToken, session, body),
+      ),
     );
   }
 
@@ -95,7 +105,9 @@ export class MatchController {
     @Body() body: SubmitBanDto,
   ) {
     return withVisiblePrepareDeadline(
-      await this.matches.submitBan(matchId, matchToken, session, body),
+      this.spectatorLive.decorateState(
+        await this.matches.submitBan(matchId, matchToken, session, body),
+      ),
     );
   }
 
@@ -107,7 +119,9 @@ export class MatchController {
     @Body() body: ResourceFailureDto,
   ) {
     return withVisiblePrepareDeadline(
-      await this.matches.reportResourceFailure(matchId, matchToken, session, body),
+      this.spectatorLive.decorateState(
+        await this.matches.reportResourceFailure(matchId, matchToken, session, body),
+      ),
     );
   }
 
@@ -168,7 +182,9 @@ export class MatchController {
     @CurrentSession() session: RankedSessionContext,
   ) {
     return withVisiblePrepareDeadline(
-      await this.matches.heartbeat(matchId, matchToken, session),
+      this.spectatorLive.decorateState(
+        await this.matches.heartbeat(matchId, matchToken, session),
+      ),
     );
   }
 }
