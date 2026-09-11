@@ -10,10 +10,46 @@ const standard = (spectatorActive: boolean, state = "ROUND_SETTLING") => ({
   side: "A",
   opponentPractice: false,
   players: {
-    A: { gdUsername: "alpha" },
-    B: { gdUsername: "bravo" },
+    A: {
+      gdAccountId: "1001",
+      gdUsername: "alpha",
+      displayedTier: "GOLD",
+      visibleRankedScore: 1834,
+      placementGames: 10,
+      placementGamesRequired: 10,
+      resultStreak: 2,
+      promotion: null,
+    },
+    B: {
+      gdAccountId: "1002",
+      gdUsername: "bravo",
+      displayedTier: "SILVER",
+      visibleRankedScore: 1240,
+      placementGames: 10,
+      placementGamesRequired: 10,
+      resultStreak: -1,
+      promotion: null,
+    },
   },
-  currentRound: { roundNumber: 2 },
+  currentRound: {
+    roundNumber: 2,
+    banner: "ROUND_2",
+    map: {
+      levelId: "12345",
+      canonicalLevelId: "12345",
+      alternateLevelId: null,
+      playableLevelId: "12345",
+      title: "Regression Map",
+      creator: "Builder",
+      difficulty: "12",
+      pool: 3,
+      qualifyingPercent: 50,
+    },
+    scores: { A: 75, B: 30 },
+    displayScores: { A: 80, B: 45 },
+    clears: { A: 1, B: 0 },
+    lastAttemptWindow: null,
+  },
   deathmatch: null,
   spectator: spectatorActive
     ? { active: true, opponentName: "bravo", currentProgress: 71 }
@@ -31,15 +67,32 @@ const deathmatch = (
   side: "A",
   opponentPractice: false,
   players: {
-    A: { gdUsername: "alpha" },
-    B: { gdUsername: "bravo" },
+    A: { gdAccountId: "1001", gdUsername: "alpha", displayedTier: "GOLD", visibleRankedScore: 1834 },
+    B: { gdAccountId: "1002", gdUsername: "bravo", displayedTier: "SILVER", visibleRankedScore: 1240 },
   },
   currentRound: null,
   spectator: { active: false },
   deathmatch: {
     sequence: 2,
+    map: {
+      levelId: "67890",
+      canonicalLevelId: "67890",
+      alternateLevelId: null,
+      playableLevelId: "67890",
+      title: "Deathmatch Regression Map",
+      creator: "Builder",
+      difficulty: "14",
+      pool: 4,
+      qualifyingPercent: 75,
+    },
+    scores: { A: 67, B: 72 },
+    displayScores: { A: 67, B: 81 },
+    clears: { A: 0, B: 0 },
+    attemptsUsed: { A: ownCompleted + (ownActive === null ? 0 : 1), B: opponentCompleted + (opponentActive === null ? 0 : 1) },
     attemptsCompleted: { A: ownCompleted, B: opponentCompleted },
+    attemptsRemaining: { A: Math.max(0, 3 - ownCompleted), B: Math.max(0, 3 - opponentCompleted) },
     activeAttemptNumber: { A: ownActive, B: opponentActive },
+    winnerSide: null,
   },
 });
 
@@ -64,6 +117,16 @@ describe("spectator live viewer eligibility", () => {
     });
   });
 
+  it("is lossless for player rating/profile and current-round map data", () => {
+    const raw = standard(true);
+    const state = decorateSpectatorState(raw);
+    expect(state.players).toEqual(raw.players);
+    expect(state.currentRound).toEqual(raw.currentRound);
+    expect(state.players.A?.displayedTier).toBe("GOLD");
+    expect(state.players.A?.visibleRankedScore).toBe(1834);
+    expect(state.currentRound?.map).toEqual(raw.currentRound.map);
+  });
+
   it("keeps the LAST ATTEMPT target side playable rather than spectating", () => {
     const target = { ...standard(false, "LAST_ATTEMPT_WINDOW"), side: "B" };
     expect(decorateSpectatorState(target).spectator.active).toBe(false);
@@ -85,7 +148,8 @@ describe("spectator live viewer eligibility", () => {
   });
 
   it("enables Death Match spectator only after three completed Attempts when opponent is active", () => {
-    const state = decorateSpectatorState(deathmatch(3, null, 2, 3));
+    const raw = deathmatch(3, null, 2, 3);
+    const state = decorateSpectatorState(raw);
     expect(state.spectator).toEqual({
       active: true,
       opponentName: "bravo",
@@ -96,6 +160,8 @@ describe("spectator live viewer eligibility", () => {
       roundNumber: 0,
       deathmatchSequence: 2,
     });
+    expect(state.deathmatch?.map).toEqual(raw.deathmatch.map);
+    expect(state.deathmatch?.scores).toEqual(raw.deathmatch.scores);
   });
 
   it("allows waiting spectator while the opponent still has an unused Death Match Attempt", () => {
