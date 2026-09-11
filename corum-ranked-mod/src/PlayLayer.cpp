@@ -1,5 +1,6 @@
 #include "RankedRuntime.hpp"
 #include "RankedAudioManager.hpp"
+#include "SpectatorLiveRuntime.hpp"
 #include "domain/HudPresentation.hpp"
 #include "domain/AttemptScoring.hpp"
 #include "domain/RankedGameplayPolicy.hpp"
@@ -95,6 +96,15 @@ double rankedProgressPercent(PlayLayer* layer) {
     return std::max(precise, whole);
 }
 
+bool spectatorTransitionState(std::string const& state) {
+    return
+        state == "ROUND_PLAYING" ||
+        state == "FINAL_ATTEMPT_WINDOW" ||
+        state == "LAST_ATTEMPT_WINDOW" ||
+        state == "ROUND_SETTLING" ||
+        state == "DEATHMATCH_PLAYING";
+}
+
 } // namespace
 
 class $modify(CorumRankedPlayLayer, PlayLayer) {
@@ -145,6 +155,8 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         bool deniedDeathmatchVisualAttempt = false;
         bool prematureResultLogged = false;
         bool rankedPractice = false;
+        bool spectatorMode = false;
+        bool spectatorPending = false;
     };
 
     bool scoringEnabled() {
@@ -207,7 +219,69 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         auto const now = std::chrono::steady_clock::now();
         m_fields->fpsMeter.observeFrame(steadyNowMicros());
 
+        if (runtime.isSpectating()) {
+            auto& live = corum::ranked::SpectatorLiveRuntime::get();
+            live.tickPublisher({}, true);
+            if (!m_fields->spectatorMode) {
+                m_fields->spectatorMode = true;
+                m_fields->spectatorPending = false;
+                if (m_hasCompletedLevel) {
+                    // Completion overlays are removed by EndLevelLayer; reset only
+                    // the local simulation so the canonical level can render the
+                    // read-only remote pose. No Ranked Attempt is started here.
+                    PlayLayer::resetLevel();
+                }
+            }
+            live.tickViewer();
+            if (auto pose = live.interpolatedPose()) {
+                if (m_player1) {
+                    m_player1->setVisible(true);
+                    m_player1->setPosition({pose->x, pose->y});
+                    m_player1->setRotation(pose->rotation);
+                }
+            } else if (m_player1) {
+                // Waiting/fallback keeps the polling HUD visible without showing
+                // a locally controllable avatar as though it were the opponent.
+                m_player1->setVisible(false);
+            }
+            if (
+                runtime.view().revision != m_fields->renderedRevision ||
+                now >= m_fields->nextHudRefreshAt
+            ) {
+                updateRankedHud();
+                m_fields->nextHudRefreshAt = now + std::chrono::milliseconds(100);
+            }
+            return;
+        }
+
+        if (m_fields->spectatorMode) {
+            corum::ranked::SpectatorLiveRuntime::get().reset();
+            m_fields->spectatorMode = false;
+            if (m_player1) m_player1->setVisible(true);
+        }
+
+        if (m_fields->spectatorPending) {
+            auto const& matchState = runtime.view().match.state;
+            if (!spectatorTransitionState(matchState) || runtime.currentLevelId() != m_fields->levelId) {
+                if (!m_fields->autoExitRequested) {
+                    m_fields->autoExitRequested = true;
+                    PlayLayer::onQuit();
+                }
+                return;
+            }
+            if (m_player1) m_player1->setVisible(false);
+            if (
+                runtime.view().revision != m_fields->renderedRevision ||
+                now >= m_fields->nextHudRefreshAt
+            ) {
+                updateRankedHud();
+                m_fields->nextHudRefreshAt = now + std::chrono::milliseconds(100);
+            }
+            return;
+        }
+
         if (m_fields->rankedPractice || m_isPracticeMode) {
+            corum::ranked::SpectatorLiveRuntime::get().tickPublisher({}, true);
             // Practice is local-only and non-scoring. Polling deliberately keeps
             // running so opponent progress and the authoritative clock continue.
             if (!runtime.canEnterCurrentLevel() && !m_fields->autoExitRequested) {
@@ -243,19 +317,15 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
             return;
         }
 
-        // If our accepted final attempt has already ended and the server has
-        // switched this side into spectator mode, leave PlayLayer immediately.
-        // The opponent keeps playing their accepted attempt; the Ranked scene
-        // renders their live progress instead of leaving us on a completed/dead
-        // level screen until they finish.
-        if (
-            runtime.isSpectating() && m_fields->attemptEndReported &&
-            !m_hasCompletedLevel &&
-            !m_fields->autoExitRequested
-        ) {
-            m_fields->autoExitRequested = true;
-            PlayLayer::onQuit();
-            return;
+        if (m_player1) {
+            auto const position = m_player1->getPosition();
+            corum::ranked::SpectatorLiveRuntime::get().tickPublisher({
+                .x = position.x,
+                .y = position.y,
+                .rotation = m_player1->getRotation(),
+                .dead = false,
+                .finished = false,
+            }, false);
         }
 
         auto const& matchState = runtime.view().match.state;
@@ -300,12 +370,10 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
             }
         }
 
-        if (!runtime.isSpectating()) {
-            runtime.reportAttemptProgress(
-                m_fields->levelId,
-                rankedProgressPercent(this)
-            );
-        }
+        runtime.reportAttemptProgress(
+            m_fields->levelId,
+            rankedProgressPercent(this)
+        );
         if (
             runtime.view().revision != m_fields->renderedRevision ||
             now >= m_fields->nextHudRefreshAt
@@ -317,6 +385,12 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
 
     void resetLevel() {
         auto& runtime = corum::ranked::RankedRuntime::get();
+        if (runtime.isSpectating()) {
+            PlayLayer::resetLevel();
+            m_fields->spectatorMode = true;
+            m_fields->spectatorPending = false;
+            return;
+        }
         if (
             scoringEnabled() &&
             (
@@ -353,9 +427,20 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
             );
         }
         if (resetActions.exitLocalGameplay) {
-            // The current attempt may finish after the start deadline, but once
-            // a new start is forbidden, reset must transition this local player
-            // exactly once. It never mutates the opponent Attempt or match clock.
+            // Hold the canonical PlayLayer while the just-ended terminal Attempt
+            // is being reflected by the server. If this side becomes an eligible
+            // spectator the same scene is reused; otherwise the next authoritative
+            // result poll exits normally. The hidden local avatar cannot create a
+            // new Attempt during this handoff.
+            if (
+                !runtime.isPlacement() &&
+                spectatorTransitionState(runtime.view().match.state)
+            ) {
+                m_fields->spectatorPending = true;
+                PlayLayer::resetLevel();
+                if (m_player1) m_player1->setVisible(false);
+                return;
+            }
             if (!m_fields->autoExitRequested) {
                 m_fields->autoExitRequested = true;
                 PlayLayer::onQuit();
@@ -364,12 +449,20 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         }
         PlayLayer::resetLevel();
         if (!resetActions.startFreshAttempt) return;
+        m_fields->spectatorPending = false;
+        if (m_player1) m_player1->setVisible(true);
         m_fields->attemptStartReported = false;
         m_fields->attemptEndReported = false;
         m_fields->attemptStartReported = runtime.reportAttemptStart(m_fields->levelId);
     }
 
     void destroyPlayer(PlayerObject* player, GameObject* object) {
+        auto& runtime = corum::ranked::RankedRuntime::get();
+        if (runtime.isSpectating() || m_fields->spectatorPending) {
+            // A remote pose is display-only. Local collisions and anti-cheat spikes
+            // must never kill the spectator avatar or emit an Attempt End.
+            return;
+        }
         // Geometry Dash deliberately calls destroyPlayer() for its internal
         // anti-cheat verification spike and then returns without killing the
         // player. Treating that callback as a real death closes the Ranked
@@ -386,7 +479,7 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
 
         if (scoringEnabled() && !m_fields->attemptEndReported) {
             auto const progress = rankedProgressPercent(this);
-            m_fields->attemptEndReported = corum::ranked::RankedRuntime::get().reportAttemptEnd(
+            m_fields->attemptEndReported = runtime.reportAttemptEnd(
                 m_fields->levelId,
                 progress,
                 false,
@@ -397,8 +490,10 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
     }
 
     void levelComplete() {
+        auto& runtime = corum::ranked::RankedRuntime::get();
+        if (runtime.isSpectating() || m_fields->spectatorPending) return;
         if (scoringEnabled() && !m_fields->attemptEndReported) {
-            m_fields->attemptEndReported = corum::ranked::RankedRuntime::get().reportAttemptEnd(
+            m_fields->attemptEndReported = runtime.reportAttemptEnd(
                 m_fields->levelId,
                 100.0,
                 true,
@@ -409,11 +504,13 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
     }
 
     void showCompleteText() {
+        auto& runtime = corum::ranked::RankedRuntime::get();
+        if (runtime.isSpectating() || m_fields->spectatorPending) return;
         // levelComplete() is the primary clear hook. Keep showCompleteText() as a
         // second vanilla completion-path safety net; the per-attempt guard makes
         // the pair idempotent and prevents double Clear/score accounting.
         if (scoringEnabled() && !m_fields->attemptEndReported) {
-            m_fields->attemptEndReported = corum::ranked::RankedRuntime::get().reportAttemptEnd(
+            m_fields->attemptEndReported = runtime.reportAttemptEnd(
                 m_fields->levelId,
                 100.0,
                 true,
@@ -427,12 +524,16 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         // A manual quit is still an attempt end. Without this hook a player could
         // leave/re-enter LevelInfoLayer while the server kept the old attempt open,
         // producing stale scores, orphan attempts, and broken Death Match counts.
+        if (m_fields->spectatorMode || m_fields->spectatorPending) {
+            corum::ranked::SpectatorLiveRuntime::get().reset();
+        }
         if (m_fields->rankedPractice || m_isPracticeMode) {
             corum::ranked::RankedRuntime::get().reportPracticePresence(false);
         }
         if (
             scoringEnabled() &&
-            !m_fields->attemptEndReported && !m_fields->autoExitRequested
+            !m_fields->attemptEndReported && !m_fields->autoExitRequested &&
+            !m_fields->spectatorMode && !m_fields->spectatorPending
         ) {
             auto const progress = rankedProgressPercent(this);
             m_fields->attemptEndReported = corum::ranked::RankedRuntime::get().reportAttemptEnd(
@@ -447,6 +548,11 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
 
     void togglePracticeMode(bool practiceMode) {
         auto& runtime = corum::ranked::RankedRuntime::get();
+        if (runtime.isSpectating() || m_fields->spectatorPending) {
+            // Spectator scenes are read-only. Practice cannot alter the remote
+            // player or create a local scoring lifecycle.
+            return;
+        }
         auto const transition = corum::ranked::practiceTransition({
             .rankedLevel = m_fields->rankedLevel,
             .testMode = m_isTestMode,
@@ -475,6 +581,7 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
             }
             m_fields->rankedPractice = true;
             runtime.reportPracticePresence(true);
+            corum::ranked::SpectatorLiveRuntime::get().tickPublisher({}, true);
             PlayLayer::togglePracticeMode(true);
             updateRankedHud();
             return;
