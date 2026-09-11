@@ -68,9 +68,9 @@ const parsePlayers = (
   const parse = (side: PlayerSide): SpectatorPlayerView | null => {
     const item = value[side];
     if (!isRecord(item)) return null;
-    return {
-      gdUsername: typeof item.gdUsername === "string" ? item.gdUsername : undefined,
-    };
+    return typeof item.gdUsername === "string"
+      ? { gdUsername: item.gdUsername }
+      : {};
   };
   return { A: parse("A"), B: parse("B") };
 };
@@ -114,10 +114,10 @@ const parseDeathmatch = (value: unknown): SpectatorDeathmatchView | null => {
 
 /**
  * Preserve MatchService's Standard viewer-relative spectator projection and add
- * the equivalent Death Match projection.  Death Match becomes spectatable only
+ * the equivalent Death Match projection. Death Match becomes spectatable only
  * after the viewer has authoritatively completed all three Attempts and has no
- * active Attempt.  The opponent may either be in an active Attempt or still have
- * an unused Attempt budget.  This projection never changes scoring state.
+ * active Attempt. The opponent may either be in an active Attempt or still have
+ * an unused Attempt budget. This projection never changes scoring state.
  */
 export const decorateSpectatorState = (raw: unknown): SpectatorPublicState => {
   if (!isRecord(raw)) throw new TypeError("Ranked public state must be an object");
