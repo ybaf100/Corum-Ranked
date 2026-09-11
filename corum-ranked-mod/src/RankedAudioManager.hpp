@@ -84,6 +84,8 @@ private:
     void cancelActiveDownload();
     void requestAudioSwitch();
     void startDesiredAudio(bool retry = false);
+    void updatePendingAudioStart();
+    void cancelPendingAudioStart();
     void verifyDesiredAudio();
     void clearPlaybackState();
     void synchronizeSongCaches();
@@ -113,15 +115,24 @@ private:
     std::string m_playingKey;
     bool m_ownsMusicChannel = false;
     bool m_switchPending = false;
-    std::chrono::steady_clock::time_point m_switchAt {};
+    bool m_pendingPlaybackRetry = false;
+    std::string m_pendingKey;
+    std::string m_pendingPath;
+    FMOD::Sound* m_pendingSound = nullptr;
+    FMOD::Channel* m_pendingChannel = nullptr;
+    std::chrono::steady_clock::time_point m_pendingStartedAt {};
+    unsigned int m_pendingStartMs = 0;
     bool m_playbackVerifyPending = false;
     std::chrono::steady_clock::time_point m_playbackVerifyAt {};
     int m_playbackRetryCount = 0;
-    unsigned int m_pendingStartMs = 0;
     unsigned int m_playbackVerifyStartPositionMs = 0;
 
-    // Prepared streaming Sounds are created while resources are prepared,
-    // never on Round/Deathmatch/Result transition callbacks.
+    // Paths are validated once during resource preparation. Competitive mode
+    // changes must not reopen every audio file through Android storage.
+    mutable std::unordered_map<int, std::string> m_readySongPaths;
+
+    // Prepared streaming Sounds are opened asynchronously while resources are
+    // prepared, never synchronously in Round/Deathmatch/Result callbacks.
     std::unordered_map<int, FMOD::Sound*> m_preparedSounds;
     FMOD::Sound* m_rankedSound = nullptr;
     FMOD::Channel* m_rankedChannel = nullptr;

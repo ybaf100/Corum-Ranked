@@ -150,6 +150,7 @@ jobs:
             -o /tmp/corum-ranked-level-preparation-test
           /tmp/corum-ranked-level-preparation-test
           node --test corum-ranked-mod/tests/LevelPreparationSourceTest.mjs
+          node --test corum-ranked-mod/tests/AudioTransitionSourceTest.mjs
           python3 - <<'PY'
           import json
           from pathlib import Path

@@ -6,6 +6,7 @@
 - Added stable Placement Top 2 HUD rows with provisional active-Attempt insertion and animated reorder while persisted Grade remains Attempt-End authoritative.
 - Added optional Jukebox allowlist/prepare compatibility and retained effective song-path validation through Geometry Dash.
 - Prewarms Ranked FMOD streams outside competitive transition callbacks and adds transition timing instrumentation.
+- Removed the remaining Round 3 transition stall by opening/seeking FMOD streams asynchronously, retaining the current BGM until the replacement is ready, and caching validated audio paths.
 - Added verified external Rank Asset Pack cache/download infrastructure with bundled fallback; production downloading remains disabled until real Drive metadata is configured.
 
 ## v0.5.0-beta.13
