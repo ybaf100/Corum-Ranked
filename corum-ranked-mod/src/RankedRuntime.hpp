@@ -356,6 +356,12 @@ public:
     void setSongBypassAllowed(bool allowed);
     [[nodiscard]] bool songBypassAllowed() const;
 
+    // Read-only credentials for the isolated ephemeral spectator relay. They are
+    // deliberately not mutable and are never accepted as scoring authority.
+    [[nodiscard]] std::string const& spectatorLiveSessionToken() const { return m_sessionToken; }
+    [[nodiscard]] std::string const& spectatorLiveMatchToken() const { return m_matchToken; }
+    [[nodiscard]] std::string const& spectatorLiveAttemptId() const { return m_attemptId; }
+
     [[nodiscard]] bool reportAttemptStart(int levelId);
     void reportPracticePresence(bool practice);
     void reportAttemptProgress(int levelId, double progressPercent);
