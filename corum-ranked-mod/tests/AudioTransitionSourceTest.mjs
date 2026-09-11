@@ -59,6 +59,34 @@ test('FMOD NOTREADY keeps one pending candidate and retries seek later', () => {
     assert.match(update, /m_pendingSeekAccepted = true/);
 });
 
+test('stalled pending transitions time out and fall back without killing the old BGM', () => {
+    assert.match(source, /kPendingAudioStartTimeout\s*=\s*std::chrono::seconds\(3\)/);
+    assert.match(source, /RankedAudioMode pendingTimeoutFallback\(RankedAudioMode mode\)/);
+
+    const update = body(
+        'void RankedAudioManager::updatePendingAudioStart()',
+        'void RankedAudioManager::cancelPendingAudioStart()',
+    );
+    const pending = update.slice(
+        update.indexOf('if (state == PreparedStreamState::Pending)'),
+        update.indexOf('if (state == PreparedStreamState::Error)'),
+    );
+    assert.match(pending, /now - m_pendingStartedAt < kPendingAudioStartTimeout/);
+    assert.match(pending, /audio-pending-timeout/);
+    assert.match(pending, /cancelPendingAudioStart\(\)/);
+    assert.match(pending, /m_preparedSounds\.erase\(it\)/);
+    assert.match(pending, /m_desiredMode = fallbackMode/);
+    assert.match(pending, /requestAudioSwitch\(\)/);
+    assert.doesNotMatch(pending, /stopOwnedAudio\(\)/);
+
+    const fallback = body(
+        'RankedAudioMode pendingTimeoutFallback(',
+        '} // namespace',
+    );
+    assert.match(fallback, /Round3DeathmatchWait/);
+    assert.match(fallback, /return RankedAudioMode::Round12/);
+});
+
 test('the old BGM survives until the asynchronous candidate is ready', () => {
     const request = body(
         'void RankedAudioManager::requestAudioSwitch()',
@@ -72,7 +100,8 @@ test('the old BGM survives until the asynchronous candidate is ready', () => {
         'void RankedAudioManager::updatePendingAudioStart()',
         'void RankedAudioManager::cancelPendingAudioStart()',
     );
-    assert.match(finish, /if \(state == PreparedStreamState::Pending\) return;/);
+    assert.match(finish, /state == PreparedStreamState::Pending/);
+    assert.match(finish, /kPendingAudioStartTimeout/);
     assert(finish.indexOf('stopOwnedAudio()') < finish.indexOf('channel->setPaused(false)'));
     assert.match(finish, /audio-seek-ready:/);
 });
