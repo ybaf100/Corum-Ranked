@@ -45,6 +45,24 @@ test('native response lifetime, immutable context and no same-key timeout overla
     assert.match(policy, /m_discarded/);
 });
 
+test('exact lookup coexists with a foreign singleton delegate without waiting forever', () => {
+    const poll = body(
+        resolver,
+        'void RankedLevelPreparation::poll()',
+        'std::uint64_t RankedLevelPreparation::requestGeneration',
+    );
+    assert.match(poll, /manager->getOnlineLevels\(search\)/);
+    assert.doesNotMatch(poll, /WAITING FOR GD LEVEL LOOKUP/);
+    assert.doesNotMatch(poll, /m_levelManagerDelegate\s*=\s*this/);
+
+    const hook = resolver.slice(resolver.indexOf('class $modify(CorumRankedMetadataResponse'));
+    assert.match(hook, /auto\* previousDelegate = m_levelManagerDelegate/);
+    assert.match(hook, /m_levelManagerDelegate = &preparation/);
+    assert.match(hook, /m_levelManagerDelegate = previousDelegate/);
+    assert(hook.indexOf('requestGeneration(tag.c_str())') < hook.indexOf('m_levelManagerDelegate = &preparation'));
+    assert(hook.indexOf('m_levelManagerDelegate = &preparation') < hook.indexOf('GameLevelManager::onGetOnlineLevelsCompleted(response, tag)'));
+});
+
 test('metadata gates geometry, RobTop readiness and post-download/update live objects', () => {
     const songs = body(layer, 'bool songsReady(', 'bool isCurrentRankedLevel(');
     assert(songs.indexOf('authorizes(') < songs.indexOf('m_isRobtopSong'));
