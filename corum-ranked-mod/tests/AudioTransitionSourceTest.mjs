@@ -35,6 +35,30 @@ test('Ranked streams open and seek through FMOD non-blocking state', () => {
     assert.doesNotMatch(start, /m_system->update\(\)/);
 });
 
+test('FMOD NOTREADY keeps one pending candidate and retries seek later', () => {
+    const start = body(
+        'void RankedAudioManager::startDesiredAudio(',
+        'void RankedAudioManager::updatePendingAudioStart()',
+    );
+    const seek = start.slice(start.indexOf('if (m_pendingStartMs > 0)'));
+    assert.match(seek, /seekResult == FMOD_ERR_NOTREADY/);
+    const notReady = seek.slice(
+        seek.indexOf('if (seekResult == FMOD_ERR_NOTREADY)'),
+        seek.indexOf('if (seekResult != FMOD_OK)'),
+    );
+    assert.doesNotMatch(notReady, /cancelPendingAudioStart\(\)/);
+    assert.match(notReady, /audio-seek-deferred/);
+
+    const update = body(
+        'void RankedAudioManager::updatePendingAudioStart()',
+        'void RankedAudioManager::cancelPendingAudioStart()',
+    );
+    assert.match(update, /m_pendingStartMs > 0 && !m_pendingSeekAccepted/);
+    assert.match(update, /m_pendingChannel->setPosition\(m_pendingStartMs, FMOD_TIMEUNIT_MS\)/);
+    assert.match(update, /if \(seekResult == FMOD_ERR_NOTREADY\) return;/);
+    assert.match(update, /m_pendingSeekAccepted = true/);
+});
+
 test('the old BGM survives until the asynchronous candidate is ready', () => {
     const request = body(
         'void RankedAudioManager::requestAudioSwitch()',
