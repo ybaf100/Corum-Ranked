@@ -9,16 +9,19 @@ import {
   MATCH_RUNTIME_STATE,
 } from "./match-runtime-state.js";
 import { MatchService } from "./match.service.js";
+import { SpectatorLiveController } from "./spectator-live.controller.js";
+import { SpectatorLiveService } from "./spectator-live.service.js";
 
 @Module({
   imports: [SessionModule, RelayModule],
-  controllers: [MatchController],
+  controllers: [MatchController, SpectatorLiveController],
   providers: [
     MatchAccessService,
     MatchService,
     MatchRecoveryService,
+    SpectatorLiveService,
     { provide: MATCH_RUNTIME_STATE, useClass: InMemoryMatchRuntimeState },
   ],
-  exports: [MatchService],
+  exports: [MatchService, SpectatorLiveService],
 })
 export class MatchModule {}
