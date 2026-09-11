@@ -494,6 +494,42 @@ void placementFinalWindowResetTests() {
     assert(actions.exitLocalGameplay);
 }
 
+void spectatorLevelEntryTests() {
+    auto input = SpectatorLevelEntryInput {
+        .matched = true,
+        .hasCurrentMap = true,
+        .hasMatchId = true,
+        .spectatorActive = true,
+        .state = "ROUND_PLAYING",
+    };
+    for (auto const state : {
+        "ROUND_PLAYING",
+        "FINAL_ATTEMPT_WINDOW",
+        "LAST_ATTEMPT_WINDOW",
+        "ROUND_SETTLING",
+        "DEATHMATCH_PLAYING",
+    }) {
+        input.state = state;
+        assert(spectatorLevelEntryAllowed(input));
+    }
+
+    input.state = "ROUND_RESULT";
+    assert(!spectatorLevelEntryAllowed(input));
+    input.state = "MATCH_RESULT";
+    assert(!spectatorLevelEntryAllowed(input));
+    input.state = "MAP_PLAYING";
+    assert(!spectatorLevelEntryAllowed(input));
+    input.state = "DEATHMATCH_PLAYING";
+    input.placement = true;
+    assert(!spectatorLevelEntryAllowed(input));
+    input.placement = false;
+    input.spectatorActive = false;
+    assert(!spectatorLevelEntryAllowed(input));
+    input.spectatorActive = true;
+    input.hasCurrentMap = false;
+    assert(!spectatorLevelEntryAllowed(input));
+}
+
 } // namespace
 
 int main() {
@@ -506,5 +542,6 @@ int main() {
     placementStageMergeTests();
     practiceIsolationTests();
     placementFinalWindowResetTests();
+    spectatorLevelEntryTests();
     std::cout << "Corum Ranked domain tests passed\n";
 }

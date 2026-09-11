@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string_view>
+
 namespace corum::ranked {
 
 enum class RankedPracticeTransition {
@@ -31,6 +33,30 @@ struct RankedResetActions {
     bool startFreshAttempt = false;
     bool exitLocalGameplay = false;
 };
+
+struct SpectatorLevelEntryInput {
+    bool matched = false;
+    bool hasCurrentMap = false;
+    bool hasMatchId = false;
+    bool placement = false;
+    bool spectatorActive = false;
+    std::string_view state;
+};
+
+[[nodiscard]] constexpr bool spectatorLevelEntryAllowed(
+    SpectatorLevelEntryInput const& input
+) {
+    if (
+        !input.matched || !input.hasCurrentMap || !input.hasMatchId ||
+        input.placement || !input.spectatorActive
+    ) return false;
+    return
+        input.state == "ROUND_PLAYING" ||
+        input.state == "FINAL_ATTEMPT_WINDOW" ||
+        input.state == "LAST_ATTEMPT_WINDOW" ||
+        input.state == "ROUND_SETTLING" ||
+        input.state == "DEATHMATCH_PLAYING";
+}
 
 [[nodiscard]] constexpr bool rankedScoringEnabled(
     bool rankedLevel,

@@ -160,12 +160,16 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
     };
 
     bool scoringEnabled() {
-        return corum::ranked::rankedScoringEnabled(
-            m_fields->rankedLevel,
-            m_isTestMode,
-            m_fields->rankedPractice,
-            m_isPracticeMode
-        );
+        return
+            !m_fields->spectatorMode &&
+            !m_fields->spectatorPending &&
+            !corum::ranked::RankedRuntime::get().isSpectating() &&
+            corum::ranked::rankedScoringEnabled(
+                m_fields->rankedLevel,
+                m_isTestMode,
+                m_fields->rankedPractice,
+                m_isPracticeMode
+            );
     }
 
     bool init(GJGameLevel* level, bool useReplay, bool dontCreateObjects) {
@@ -197,7 +201,12 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         }
         if (!m_fields->rankedLevel || m_isTestMode) return true;
 
-        m_fields->rankedPractice = m_isPracticeMode;
+        // Latch read-only authority during init, before any postUpdate/onQuit
+        // callback can observe the new scene. A reconnecting spectator must not
+        // emit even a transient Start/Progress/End/Clear lifecycle.
+        m_fields->spectatorMode = runtime.isSpectating();
+        m_fields->rankedPractice = !m_fields->spectatorMode && m_isPracticeMode;
+        if (m_fields->spectatorMode && m_player1) m_player1->setVisible(false);
         if (m_fields->rankedPractice) runtime.reportPracticePresence(true);
         addRankedHud();
         m_fields->gameplayFrameObserved = false;

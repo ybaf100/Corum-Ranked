@@ -60,6 +60,7 @@ private:
     bool m_publishBusy = false;
 
     std::string m_viewMatchId;
+    std::string m_viewContextKey;
     std::string m_viewAttemptId;
     std::uint64_t m_viewGeneration = 0;
     std::int64_t m_lastViewSequence = -1;
@@ -72,6 +73,7 @@ private:
     std::chrono::steady_clock::time_point m_lastPacketAt {};
     std::chrono::steady_clock::time_point m_nextViewerPollAt {};
     std::uint64_t m_viewRequestGeneration = 0;
+    std::int64_t m_lastViewerRttMs = 0;
     int m_consecutiveViewerErrors = 0;
     bool m_viewBusy = false;
 

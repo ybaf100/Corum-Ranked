@@ -473,9 +473,9 @@ class CorumRankedLayer final : public CCLayerColor {
         if (resumedFromRankedChild) {
             // The scene pushed by this layer has finished. Release both launch
             // guards before refresh() so maybeEnterLevel() can open the next
-            // legal attempt on the same map. canEnterCurrentLevel() remains the
-            // authority that blocks a fourth Death Match attempt, spectator
-            // entry, results, and closed attempt windows.
+            // legal attempt or read-only spectator view on the same map. The
+            // separate runtime predicates remain authority for fourth Death
+            // Match attempts, results, and closed attempt windows.
             m_rankedChildScenePushed = false;
             m_enteringSongGate = false;
             m_enteringLevel = false;
@@ -2407,7 +2407,8 @@ class CorumRankedLayer final : public CCLayerColor {
                 match.state == "ROUND_PLAYING" ||
                 match.state == "FINAL_ATTEMPT_WINDOW" ||
                 match.state == "LAST_ATTEMPT_WINDOW" ||
-                match.state == "ROUND_SETTLING"
+                match.state == "ROUND_SETTLING" ||
+                match.state == "DEATHMATCH_PLAYING"
             )
         ) {
             renderSpectatorWait(match);
@@ -3280,7 +3281,9 @@ class CorumRankedLayer final : public CCLayerColor {
         auto const& state = view.match.state;
         return state == "ROUND_PREPARE" || state == "DEATHMATCH_PREPARE" ||
             state == "MAP_PREPARE" || state == "ROUND_PLAYING" ||
-            state == "DEATHMATCH_PLAYING" || state == "MAP_PLAYING";
+            state == "FINAL_ATTEMPT_WINDOW" || state == "LAST_ATTEMPT_WINDOW" ||
+            state == "ROUND_SETTLING" || state == "DEATHMATCH_PLAYING" ||
+            state == "MAP_PLAYING";
     }
 
     void beginExactLevelLookup() {
@@ -3422,10 +3425,15 @@ class CorumRankedLayer final : public CCLayerColor {
         auto const& state = view.match.state;
         if (
             state != "ROUND_PLAYING" &&
+            state != "FINAL_ATTEMPT_WINDOW" &&
+            state != "LAST_ATTEMPT_WINDOW" &&
+            state != "ROUND_SETTLING" &&
             state != "DEATHMATCH_PLAYING" &&
             state != "MAP_PLAYING"
         ) return;
-        if (!RankedRuntime::get().canEnterCurrentLevel()) {
+        auto& runtime = RankedRuntime::get();
+        auto const spectatorEntry = runtime.canEnterCurrentLevelAsSpectator();
+        if (!runtime.canEnterCurrentLevel() && !spectatorEntry) {
             if (state == "DEATHMATCH_PLAYING") m_localMessage = "All 3 attempts used. Waiting for the opponent...";
             return;
         }
@@ -3442,7 +3450,8 @@ class CorumRankedLayer final : public CCLayerColor {
         }
         // Do not construct PlayLayer directly. Enter through Geometry Dash's normal
         // LevelInfoLayer -> onPlay path; this lets the game own level validation,
-        // loading transitions, audio setup, and the return/quit stack.
+        // loading transitions, audio setup, and the return/quit stack. Spectator
+        // entry follows the same metadata proof but remains unarmed/read-only.
         corum::ranked::tracePreparedLevel("scene-before-reentry", level, nullptr, this);
         auto* scene = LevelInfoLayer::scene(level, false);
         if (!scene) {

@@ -13,6 +13,8 @@ const policy = read('../src/domain/LevelPreparationPolicy.hpp');
 const play = read('../src/PlayLayer.cpp');
 const end = read('../src/EndLevelLayer.cpp');
 const spectator = read('../src/SpectatorLiveRuntime.cpp');
+const runtime = read('../src/RankedRuntime.cpp');
+const runtimeHeader = read('../src/RankedRuntime.hpp');
 const body = (source, from, to) => {
     const start = source.indexOf(from);
     const end = source.indexOf(to, start + from.length);
@@ -115,6 +117,35 @@ test('live spectator path is read-only and keeps polling fallback', () => {
     assert.match(play, /spectatorCurrentProgress = match\.spectatorCurrentProgress/);
 });
 
+test('spectator reconnect reuses canonical LevelInfo without arming an Attempt', () => {
+    const popupEntry = body(popup, 'void maybeEnterLevel()', 'void onDownloadAllResources(');
+    const levelLaunch = body(layer, 'bool launchRankedGameplay()', 'void activateRankedPlayButton(');
+    const activate = body(layer, 'void activateRankedPlayButton(', 'void verifyGameplayLaunch(');
+    const playInit = body(play, 'bool init(GJGameLevel* level', 'void postUpdate(float dt)');
+    const spectatorAuthority = body(runtime, 'bool RankedRuntime::canEnterCurrentLevelAsSpectator()', 'int RankedRuntime::localDeathmatchVisualAttemptsUsed()');
+
+    assert.match(runtimeHeader, /canEnterCurrentLevelAsSpectator\(\) const/);
+    assert.match(popupEntry, /canEnterCurrentLevelAsSpectator\(\)/);
+    assert.match(popupEntry, /findPlayableMap\(\)/);
+    assert.match(popupEntry, /LevelInfoLayer::scene\(level, false\)/);
+    assert.match(levelLaunch, /rankedLevelEntryAllowed\(runtime\)/);
+    assert.match(activate, /auto const spectatorLaunch = runtime\.canEnterCurrentLevelAsSpectator\(\)/);
+    assert.match(activate, /if \(!spectatorLaunch && !runtime\.armCurrentLevelForGameplay\(\)\)/);
+    assert(activate.indexOf('canEnterCurrentLevelAsSpectator()') < activate.indexOf('armCurrentLevelForGameplay()'));
+    assert.match(playInit, /m_fields->spectatorMode = runtime\.isSpectating\(\)/);
+    assert.match(playInit, /m_player1->setVisible\(false\)/);
+    assert.doesNotMatch(playInit, /reportAttemptStart\(|reportAttemptProgress\(|reportAttemptEnd\(/);
+    assert.match(spectatorAuthority, /spectatorLevelEntryAllowed/);
+    assert.doesNotMatch(spectatorAuthority, /MAP_PLAYING|GJGameLevel::create|PlayLayer::scene|getSavedLevel/);
+});
+
+test('spectator scoring transport is suppressed before the first gameplay frame', () => {
+    const scoring = body(play, 'bool scoringEnabled()', 'bool init(GJGameLevel* level');
+    assert.match(scoring, /!m_fields->spectatorMode/);
+    assert.match(scoring, /!m_fields->spectatorPending/);
+    assert.match(scoring, /!corum::ranked::RankedRuntime::get\(\)\.isSpectating\(\)/);
+});
+
 test('practice never publishes live gameplay and relay validates stream identity', () => {
     assert.match(play, /tickPublisher\(\{\}, true\)/);
     assert.match(spectator, /!practice/);
@@ -124,6 +155,12 @@ test('practice never publishes live gameplay and relay validates stream identity
     assert.match(spectator, /SEQUENCE_GAP/);
     assert.match(spectator, /UNSUPPORTED_PROTOCOL_VERSION/);
     assert.match(spectator, /STREAM_TIMEOUT/);
+    assert.match(spectator, /viewerContextKey/);
+    assert.match(spectator, /streamRound != expectedRound/);
+    assert.match(spectator, /streamDeathmatch != expectedDeathmatch/);
+    assert.match(spectator, /PACKET_CONTEXT_MISMATCH/);
+    assert.match(spectator, /publisherElapsedMs=.*rttMs=.*maxCorrection=/);
+    assert.match(spectator, /correction rejected/);
 });
 
 test('remote ghost uses pose keyframes without bypassing Ranked Level Prepare', () => {

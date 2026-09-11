@@ -156,13 +156,17 @@ export class MatchController {
   }
 
   @Post(":id/attempt/end")
-  public endAttempt(
+  public async endAttempt(
     @Param("id") matchId: string,
     @Headers("x-match-token") matchToken: string,
     @CurrentSession() session: RankedSessionContext,
     @Body() body: AttemptEndDto,
   ) {
-    return this.matches.endAttempt(matchId, matchToken, session, body);
+    const response = await this.matches.endAttempt(matchId, matchToken, session, body);
+    // Gameplay telemetry is ephemeral and must disappear as soon as its
+    // authoritative Attempt closes (including an idempotent End retry).
+    this.spectatorLive.clearAttempt(matchId, body.attemptId);
+    return response;
   }
 
   @Post(":id/attempt/progress")

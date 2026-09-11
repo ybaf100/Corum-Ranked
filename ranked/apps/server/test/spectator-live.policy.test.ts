@@ -69,6 +69,12 @@ describe("spectator live viewer eligibility", () => {
     expect(decorateSpectatorState(target).spectator.active).toBe(false);
   });
 
+  it("rejects a malformed viewer side instead of trusting client-relative identity", () => {
+    expect(() => decorateSpectatorState({ ...standard(false), side: "C" })).toThrow(
+      "Ranked public state is missing viewer side",
+    );
+  });
+
   it("does not enable Death Match spectator after Attempt 1 or 2", () => {
     expect(decorateSpectatorState(deathmatch(1, null, 1, null)).spectator.active).toBe(false);
     expect(decorateSpectatorState(deathmatch(2, null, 2, null)).spectator.active).toBe(false);

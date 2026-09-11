@@ -1,5 +1,6 @@
 #include "RankedRuntime.hpp"
 #include "domain/AttemptScoring.hpp"
+#include "domain/RankedGameplayPolicy.hpp"
 #include "domain/TransitionTrace.hpp"
 
 #include <Geode/binding/GJAccountManager.hpp>
@@ -2031,6 +2032,20 @@ bool RankedRuntime::canEnterCurrentLevel() const {
     ) return false;
 
     return true;
+}
+
+bool RankedRuntime::canEnterCurrentLevelAsSpectator() const {
+    // A viewer may reconnect before the opponent starts their next legal
+    // Attempt. Keep the exact canonical map open in that waiting state; the
+    // live relay will attach only after authority publishes an active Attempt.
+    return spectatorLevelEntryAllowed({
+        .matched = m_view.stage == RuntimeStage::Matched,
+        .hasCurrentMap = m_view.match.currentMap.has_value(),
+        .hasMatchId = !m_view.match.matchId.empty(),
+        .placement = m_view.match.placement,
+        .spectatorActive = m_view.match.spectatorActive,
+        .state = m_view.match.state,
+    });
 }
 
 int RankedRuntime::localDeathmatchVisualAttemptsUsed() const {

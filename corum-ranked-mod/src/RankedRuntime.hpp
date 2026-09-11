@@ -349,6 +349,9 @@ public:
     [[nodiscard]] bool isSpectating() const;
     [[nodiscard]] int currentLevelId() const;
     [[nodiscard]] bool canEnterCurrentLevel() const;
+    // Separate read-only entry authority for reconnect/re-entry. This preserves
+    // the canonical LevelInfo preparation path without arming a new Attempt.
+    [[nodiscard]] bool canEnterCurrentLevelAsSpectator() const;
     [[nodiscard]] bool hasLocalAttemptInFlight() const;
     [[nodiscard]] int localDeathmatchVisualAttemptsUsed() const;
     [[nodiscard]] double localDisplayScore(double progressPercent, std::optional<double> qualifyingPercentOverride = std::nullopt) const;

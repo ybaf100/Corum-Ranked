@@ -61,8 +61,17 @@ bool rankedDownloadGateState(std::string const& state) {
     return
         rankedPrepareState(state) ||
         state == "ROUND_PLAYING" ||
+        state == "FINAL_ATTEMPT_WINDOW" ||
+        state == "LAST_ATTEMPT_WINDOW" ||
+        state == "ROUND_SETTLING" ||
         state == "DEATHMATCH_PLAYING" ||
         state == "MAP_PLAYING";
+}
+
+bool rankedLevelEntryAllowed(corum::ranked::RankedRuntime const& runtime) {
+    return
+        runtime.canEnterCurrentLevel() ||
+        runtime.canEnterCurrentLevelAsSpectator();
 }
 
 bool jukeboxLoaded() {
@@ -543,7 +552,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
             return;
         }
 
-        if (rankedPlayingState(runtime.view().match.state) && runtime.canEnterCurrentLevel()) {
+        if (rankedPlayingState(runtime.view().match.state) && rankedLevelEntryAllowed(runtime)) {
             scheduleAutoPlay(0.22f);
         } else {
             scheduleOnce(schedule_selector(CorumRankedLevelInfoLayer::returnToRanked), 0.10f);
@@ -991,7 +1000,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         if (rankedPlayingState(match.state)) {
             if (
                 !readyForStart ||
-                !runtime.canEnterCurrentLevel() ||
+                !rankedLevelEntryAllowed(runtime) ||
                 now < m_fields->nextGameplayLaunchAt ||
                 m_fields->songGateStartingPlay ||
                 m_fields->gameplayLaunchStarted ||
@@ -1089,7 +1098,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
             if (
                 vanillaLevelReadyForPlay() &&
                 rankedPlayingState(runtime.view().match.state) &&
-                runtime.canEnterCurrentLevel()
+                rankedLevelEntryAllowed(runtime)
             ) scheduleAutoPlay(0.10f);
             return;
         }
@@ -1186,7 +1195,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         if (
             !isCurrentRankedScene() ||
             !rankedPlayingState(runtime.view().match.state) ||
-            !runtime.canEnterCurrentLevel()
+            !rankedLevelEntryAllowed(runtime)
         ) {
             return false;
         }
@@ -1241,7 +1250,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         auto const ready = songsReady(m_level, m_songWidget);
         if (!corum::ranked::preparationAllowsLaunch(isCurrentRankedScene(), metadataReady(),
             vanillaLevelReadyForPlay(), ready, runtime.songBypassAllowed(),
-            rankedPlayingState(runtime.view().match.state) && runtime.canEnterCurrentLevel(),
+            rankedPlayingState(runtime.view().match.state) && rankedLevelEntryAllowed(runtime),
             modalBlocksPlay(), m_isBusy)) {
             // A popup/state change can land between scheduling and activation.
             // Release only the UI latch; no start timestamp has been armed yet.
@@ -1262,9 +1271,11 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
             log::warn("Verified Ranked Play item has no native callback");
             return;
         }
-        // Last possible boundary: never arm an attempt while a modal is holding
-        // the launch. Runtime still preserves the accepted time for real retries.
-        if (!runtime.armCurrentLevelForGameplay()) {
+        // Last possible boundary: a reconnecting spectator uses this same
+        // verified native Play item but never arms a local Attempt. Normal play
+        // still preserves the accepted time for real watchdog retries.
+        auto const spectatorLaunch = runtime.canEnterCurrentLevelAsSpectator();
+        if (!spectatorLaunch && !runtime.armCurrentLevelForGameplay()) {
             m_fields->gameplayLaunchStarted = false;
             m_fields->songGateStartingPlay = false;
             unschedule(schedule_selector(CorumRankedLevelInfoLayer::verifyGameplayLaunch));
@@ -1274,9 +1285,10 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         corum::ranked::tracePreparedLevel("play-activate", m_level, m_songWidget, this);
         m_fields->vanillaPlayActivation = true;
         log::info(
-            "Activating verified Ranked Play button: match={} level={} attempt={} node={}",
+            "Activating verified Ranked Play button: match={} level={} launch={} attempt={} node={}",
             corum::ranked::RankedRuntime::get().view().match.matchId,
             static_cast<int>(m_level->m_levelID),
+            spectatorLaunch ? "spectator-read-only" : "gameplay",
             m_fields->gameplayLaunchAttempts,
             nativePlayButton->getID()
         );
@@ -1371,7 +1383,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
             if (
                 isCurrentRankedScene() &&
                 rankedPlayingState(runtime.view().match.state) &&
-                runtime.canEnterCurrentLevel()
+                rankedLevelEntryAllowed(runtime)
             ) {
                 scheduleAutoPlay(0.45f);
             } else {
@@ -1427,7 +1439,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         if (
             isCurrentRankedScene() &&
             rankedPlayingState(runtime.view().match.state) &&
-            runtime.canEnterCurrentLevel()
+            rankedLevelEntryAllowed(runtime)
         ) {
             // The real button can be transiently absent/busy while vanilla
             // rebuilds LevelInfo. Stay automatic and retry instead of exposing a
@@ -1519,7 +1531,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
             return;
         }
         if (m_fields->songGateActive && rankedPrepareState(runtime.view().match.state)) return;
-        if (currentLevel && rankedPlayingState(runtime.view().match.state) && runtime.canEnterCurrentLevel()) return;
+        if (currentLevel && rankedPlayingState(runtime.view().match.state) && rankedLevelEntryAllowed(runtime)) return;
         if (m_fields->returningToRanked) return;
         m_fields->returningToRanked = true;
         CCDirector::sharedDirector()->popScene();
@@ -1533,7 +1545,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         }
         auto& runtime = corum::ranked::RankedRuntime::get();
         if (rankedPlayingState(runtime.view().match.state)) {
-            if (runtime.canEnterCurrentLevel()) scheduleAutoPlay(0.05f);
+            if (rankedLevelEntryAllowed(runtime)) scheduleAutoPlay(0.05f);
             else returnToRanked(0.0f);
             return;
         }
@@ -1548,7 +1560,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         }
         auto& runtime = corum::ranked::RankedRuntime::get();
         if (rankedPlayingState(runtime.view().match.state)) {
-            if (runtime.canEnterCurrentLevel()) scheduleAutoPlay(0.05f);
+            if (rankedLevelEntryAllowed(runtime)) scheduleAutoPlay(0.05f);
             else returnToRanked(0.0f);
             return;
         }

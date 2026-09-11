@@ -66,6 +66,37 @@ interface BufferedPacket extends SpectatorLivePacket {
   readonly receivedAtMs: number;
 }
 
+export interface SpectatorLivePublishResponse {
+  readonly accepted: true;
+  readonly protocolVersion: number;
+  readonly attemptId: string;
+  readonly generation: number;
+  readonly sequence: number;
+}
+
+export interface SpectatorLiveStreamDescriptor {
+  readonly matchId: string;
+  readonly roundNumber: number;
+  readonly deathmatchSequence: number | null;
+  readonly attemptId: string;
+  readonly generation: number;
+  readonly lastSequence: number;
+  readonly opponentName: string;
+}
+
+export interface SpectatorLiveSubscribeResponse {
+  readonly protocolVersion: number;
+  readonly active: boolean;
+  readonly waiting: boolean;
+  readonly fallback: boolean;
+  readonly reason: string | null;
+  readonly reset?: boolean;
+  readonly bufferWindowMs: number;
+  readonly maxPackets: number;
+  readonly stream: SpectatorLiveStreamDescriptor | null;
+  readonly packets: readonly SpectatorLivePacket[];
+}
+
 interface LiveStream {
   readonly matchId: string;
   readonly slot: number;
@@ -187,6 +218,9 @@ const parsePacket = (value: unknown, matchId: string): SpectatorLivePacket => {
 const streamKey = (matchId: string, slot: number, side: PlayerSide): string =>
   `${matchId}:${slot}:${side}`;
 
+const publicPacket = ({ receivedAtMs: _receivedAtMs, ...packet }: BufferedPacket): SpectatorLivePacket =>
+  packet;
+
 const queryInteger = (value: string | undefined): number | null => {
   if (value === undefined || value === "") return null;
   const parsed = Number(value);
@@ -203,7 +237,9 @@ export class SpectatorLiveService {
   ) {}
 
   public decorateState(raw: unknown): SpectatorPublicState {
-    return decorateSpectatorState(raw);
+    const state = decorateSpectatorState(raw);
+    this.reconcileStreams(state);
+    return state;
   }
 
   public async publish(
@@ -211,7 +247,7 @@ export class SpectatorLiveService {
     matchToken: string,
     session: RankedSessionContext,
     body: unknown,
-  ) {
+  ): Promise<SpectatorLivePublishResponse> {
     const packet = parsePacket(body, matchId);
     if (packet.protocolVersion !== SPECTATOR_LIVE_PROTOCOL_VERSION) {
       throw new ConflictException("SPECTATOR_PROTOCOL_VERSION_MISMATCH");
@@ -234,6 +270,10 @@ export class SpectatorLiveService {
     const key = streamKey(matchId, context.slot, state.side);
     const nowMs = Date.now();
     let stream = this.streams.get(key);
+    if (stream && nowMs - stream.lastReceivedAtMs > SPECTATOR_LIVE_TIMEOUT_MS) {
+      this.streams.delete(key);
+      stream = undefined;
+    }
     if (!stream || stream.attemptId !== packet.attemptId) {
       if (packet.sequence !== 0) {
         throw new ConflictException("SPECTATOR_STREAM_MUST_START_AT_SEQUENCE_ZERO");
@@ -297,7 +337,7 @@ export class SpectatorLiveService {
     attemptId?: string,
     generationText?: string,
     afterSequenceText?: string,
-  ) {
+  ): Promise<SpectatorLiveSubscribeResponse> {
     const state = this.decorateState(await this.matches.state(matchId, matchToken, session));
     if (!state.spectator.active) {
       this.clearViewerObsoleteStreams(state);
@@ -362,21 +402,32 @@ export class SpectatorLiveService {
 
     const requestedGeneration = queryInteger(generationText);
     const afterSequence = queryInteger(afterSequenceText);
-    const sameAttempt = !attemptId || attemptId === stream.attemptId;
-    const sameGeneration = requestedGeneration === null || requestedGeneration === stream.generation;
-    const reset = !sameAttempt || !sameGeneration;
+    const hasStreamIdentity = Boolean(attemptId) && requestedGeneration !== null;
+    const sameAttempt = attemptId === stream.attemptId;
+    const sameGeneration = requestedGeneration === stream.generation;
+    // A late join has no prior stream identity and must apply the bounded buffer
+    // as a reset before switching to incremental live packets.
+    const reset = !hasStreamIdentity || !sameAttempt || !sameGeneration;
     const effectiveAfter = reset ? null : afterSequence;
-    const packets = effectiveAfter === null
+    const bufferedPackets = effectiveAfter === null
       ? stream.packets
       : stream.packets.filter((packet) => packet.sequence > effectiveAfter);
     if (
       effectiveAfter !== null &&
-      packets.length > 0 &&
-      packets[0]!.sequence > effectiveAfter + 1
+      stream.lastSequence > effectiveAfter &&
+      (bufferedPackets.length === 0 || bufferedPackets[0]!.sequence > effectiveAfter + 1)
     ) {
       this.streams.delete(key);
       return this.fallback("SEQUENCE_GAP");
     }
+    if (
+      effectiveAfter !== null &&
+      effectiveAfter > stream.lastSequence
+    ) {
+      this.streams.delete(key);
+      return this.fallback("SEQUENCE_GAP");
+    }
+    const packets = bufferedPackets.map(publicPacket);
 
     return {
       protocolVersion: SPECTATOR_LIVE_PROTOCOL_VERSION,
@@ -406,18 +457,39 @@ export class SpectatorLiveService {
     }
   }
 
-  private clearViewerObsoleteStreams(state: SpectatorPublicState): void {
-    if (
-      state.state === "ROUND_RESULT" ||
-      state.state === "DEATHMATCH_RESULT" ||
-      state.state === "MATCH_RESULT" ||
-      state.state === "CANCELLED"
-    ) {
-      this.clearMatch(state.matchId);
+  public clearAttempt(matchId: string, attemptId: string): void {
+    for (const [key, stream] of this.streams) {
+      if (stream.matchId === matchId && stream.attemptId === attemptId) {
+        this.streams.delete(key);
+      }
     }
   }
 
-  private fallback(reason: string) {
+  private reconcileStreams(state: SpectatorPublicState): void {
+    const context = spectatorLiveContext(state);
+    if (!context) {
+      this.clearMatch(state.matchId);
+      return;
+    }
+    for (const [key, stream] of this.streams) {
+      if (stream.matchId !== state.matchId) continue;
+      const authoritative = this.runtimeState.progress(state.matchId, context.slot, stream.side);
+      if (
+        stream.slot !== context.slot ||
+        !authoritative ||
+        authoritative.attemptId !== stream.attemptId ||
+        this.runtimeState.practice(state.matchId, context.slot, stream.side)
+      ) {
+        this.streams.delete(key);
+      }
+    }
+  }
+
+  private clearViewerObsoleteStreams(state: SpectatorPublicState): void {
+    this.reconcileStreams(state);
+  }
+
+  private fallback(reason: string): SpectatorLiveSubscribeResponse {
     return {
       protocolVersion: SPECTATOR_LIVE_PROTOCOL_VERSION,
       active: true,

@@ -56,6 +56,16 @@ float poseDistance(
     return std::sqrt(dx * dx + dy * dy);
 }
 
+std::string viewerContextKey(corum::ranked::MatchView const& match) {
+    return fmt::format(
+        "{}:R{}:D{}:L{}",
+        match.matchId,
+        match.roundNumber,
+        match.deathmatchSequence,
+        match.currentMap ? match.currentMap->levelId : 0
+    );
+}
+
 } // namespace
 
 namespace corum::ranked {
@@ -95,6 +105,7 @@ void SpectatorLiveRuntime::resetViewer() {
     ++m_viewRequestGeneration;
     m_viewBusy = false;
     m_viewMatchId.clear();
+    m_viewContextKey.clear();
     m_viewAttemptId.clear();
     m_viewGeneration = 0;
     m_lastViewSequence = -1;
@@ -106,6 +117,7 @@ void SpectatorLiveRuntime::resetViewer() {
     m_poseReceivedAt = {};
     m_lastPacketAt = {};
     m_nextViewerPollAt = {};
+    m_lastViewerRttMs = 0;
     m_consecutiveViewerErrors = 0;
 }
 
@@ -231,9 +243,11 @@ void SpectatorLiveRuntime::tickViewer() {
         resetViewer();
         return;
     }
-    if (m_viewMatchId != match.matchId) {
+    auto const contextKey = viewerContextKey(match);
+    if (m_viewMatchId != match.matchId || m_viewContextKey != contextKey) {
         resetViewer();
         m_viewMatchId = match.matchId;
+        m_viewContextKey = contextKey;
         m_status = SpectatorLiveStatus::Waiting;
     }
     auto const now = std::chrono::steady_clock::now();
@@ -265,13 +279,16 @@ void SpectatorLiveRuntime::pollViewer() {
     if (m_lastViewSequence >= 0) path += fmt::format("&afterSequence={}", m_lastViewSequence);
 
     auto const requestGeneration = ++m_viewRequestGeneration;
+    auto const contextKey = m_viewContextKey;
+    auto const requestStartedAt = std::chrono::steady_clock::now();
     m_viewBusy = true;
     m_viewRequest.spawn(
         request.get(endpoint(path)),
-        [this, requestGeneration, matchId](web::WebResponse response) {
+        [this, requestGeneration, matchId, contextKey, requestStartedAt](web::WebResponse response) {
             if (
                 requestGeneration != m_viewRequestGeneration ||
-                matchId != m_viewMatchId
+                matchId != m_viewMatchId || contextKey != m_viewContextKey ||
+                contextKey != viewerContextKey(RankedRuntime::get().view().match)
             ) return;
             m_viewBusy = false;
             m_nextViewerPollAt = std::chrono::steady_clock::now() +
@@ -288,6 +305,9 @@ void SpectatorLiveRuntime::pollViewer() {
                 return;
             }
             m_consecutiveViewerErrors = 0;
+            m_lastViewerRttMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - requestStartedAt
+            ).count();
             applyViewerResponse(response.json().unwrapOr(matjson::Value()));
         }
     );
@@ -308,8 +328,18 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
         return;
     }
     if (root["waiting"].asBool().unwrapOr(false)) {
+        auto const reason = root["reason"].asString().unwrapOr("WAITING");
+        if (m_status != SpectatorLiveStatus::Waiting || m_reason != reason) {
+            log::debug(
+                "[SpectatorLive] waiting match={} context={} reason={} rttMs={}",
+                m_viewMatchId,
+                m_viewContextKey,
+                reason,
+                m_lastViewerRttMs
+            );
+        }
         m_status = SpectatorLiveStatus::Waiting;
-        m_reason = root["reason"].asString().unwrapOr("WAITING");
+        m_reason = reason;
         m_previousPose.reset();
         m_currentPose.reset();
         m_lastPacketAt = {};
@@ -324,7 +354,15 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
     auto const matchId = stream["matchId"].asString().unwrapOr("");
     auto const attemptId = stream["attemptId"].asString().unwrapOr("");
     auto const generation = static_cast<std::uint64_t>(stream["generation"].asInt().unwrapOr(0));
-    if (matchId != m_viewMatchId || attemptId.empty() || generation == 0) {
+    auto const& authoritativeMatch = RankedRuntime::get().view().match;
+    auto const expectedRound = authoritativeMatch.roundNumber;
+    auto const expectedDeathmatch = authoritativeMatch.deathmatchSequence;
+    auto const streamRound = static_cast<int>(stream["roundNumber"].asInt().unwrapOr(-1));
+    auto const streamDeathmatch = static_cast<int>(stream["deathmatchSequence"].asInt().unwrapOr(0));
+    if (
+        matchId != m_viewMatchId || attemptId.empty() || generation == 0 ||
+        streamRound != expectedRound || streamDeathmatch != expectedDeathmatch
+    ) {
         setFallback("STREAM_CONTEXT_MISMATCH");
         return;
     }
@@ -340,6 +378,14 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
         m_previousPose.reset();
         m_currentPose.reset();
         m_lastPacketAt = {};
+        log::info(
+            "[SpectatorLive] stream reset match={} context={} attempt={} generation={} rttMs={}",
+            m_viewMatchId,
+            m_viewContextKey,
+            attemptId,
+            generation,
+            m_lastViewerRttMs
+        );
     }
     m_opponentName = stream["opponentName"].asString().unwrapOr("Opponent");
 
@@ -348,6 +394,9 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
         setFallback("INVALID_PACKET_ARRAY");
         return;
     }
+    int appliedPackets = 0;
+    std::int64_t publisherElapsedMs = 0;
+    float largestCorrection = 0.0f;
     for (auto const& packet : packets.unwrap()) {
         if (!packet.isObject()) {
             setFallback("INVALID_PACKET");
@@ -359,6 +408,12 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
         }
         if (packet["matchId"].asString().unwrapOr("") != m_viewMatchId) {
             setFallback("PACKET_MATCH_MISMATCH");
+            return;
+        }
+        auto const packetRound = static_cast<int>(packet["roundNumber"].asInt().unwrapOr(-1));
+        auto const packetDeathmatch = static_cast<int>(packet["deathmatchSequence"].asInt().unwrapOr(0));
+        if (packetRound != expectedRound || packetDeathmatch != expectedDeathmatch) {
+            setFallback("PACKET_CONTEXT_MISMATCH");
             return;
         }
         if (packet["attemptId"].asString().unwrapOr("") != m_viewAttemptId) {
@@ -391,21 +446,61 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
             setFallback("INVALID_POSE");
             return;
         }
-        if (m_currentPose && poseDistance(*m_currentPose, pose) > kPoseDiscontinuityDistance) {
-            setFallback("POSE_DISCONTINUITY");
-            return;
+        if (m_currentPose) {
+            auto const correction = poseDistance(*m_currentPose, pose);
+            largestCorrection = std::max(largestCorrection, correction);
+            if (correction > kPoseDiscontinuityDistance) {
+                log::warn(
+                    "[SpectatorLive] correction rejected match={} attempt={} generation={} sequence={} distance={}",
+                    m_viewMatchId,
+                    m_viewAttemptId,
+                    m_viewGeneration,
+                    sequence,
+                    correction
+                );
+                setFallback("POSE_DISCONTINUITY");
+                return;
+            }
         }
         m_previousPose = m_currentPose;
         m_currentPose = pose;
         m_poseReceivedAt = std::chrono::steady_clock::now();
         m_lastPacketAt = m_poseReceivedAt;
         m_lastViewSequence = sequence;
+        publisherElapsedMs = packet["elapsedMs"].asInt().unwrapOr(publisherElapsedMs);
+        ++appliedPackets;
+    }
+    if (appliedPackets > 0) {
+        log::debug(
+            "[SpectatorLive] applied match={} context={} attempt={} generation={} packets={} lastSequence={} publisherElapsedMs={} rttMs={} maxCorrection={}",
+            m_viewMatchId,
+            m_viewContextKey,
+            m_viewAttemptId,
+            m_viewGeneration,
+            appliedPackets,
+            m_lastViewSequence,
+            publisherElapsedMs,
+            m_lastViewerRttMs,
+            largestCorrection
+        );
     }
     m_status = m_currentPose ? SpectatorLiveStatus::Live : SpectatorLiveStatus::Waiting;
     m_reason = m_currentPose ? std::string() : "STREAM_BUFFER_EMPTY";
 }
 
 void SpectatorLiveRuntime::setFallback(std::string reason) {
+    if (m_status != SpectatorLiveStatus::Fallback || m_reason != reason) {
+        log::warn(
+            "[SpectatorLive] fallback match={} context={} attempt={} generation={} lastSequence={} reason={} rttMs={}",
+            m_viewMatchId,
+            m_viewContextKey,
+            m_viewAttemptId,
+            m_viewGeneration,
+            m_lastViewSequence,
+            reason,
+            m_lastViewerRttMs
+        );
+    }
     m_status = SpectatorLiveStatus::Fallback;
     m_reason = std::move(reason);
     m_previousPose.reset();
