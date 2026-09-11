@@ -171,6 +171,7 @@ void RankedAudioManager::configure(RankedClientPresentationView const& config) {
     m_playbackVerifyAt = {};
     m_playbackRetryCount = 0;
     m_pendingStartMs = 0;
+    m_pendingSeekAccepted = false;
     m_desiredMode = RankedAudioMode::Silent;
 }
 
@@ -818,10 +819,23 @@ void RankedAudioManager::startDesiredAudio(bool retry) {
     );
     m_pendingStartedAt = std::chrono::steady_clock::now();
     m_pendingPlaybackRetry = retry;
+    m_pendingSeekAccepted = m_pendingStartMs == 0;
     m_switchPending = true;
 
     if (m_pendingStartMs > 0) {
         auto const seekResult = channel->setPosition(m_pendingStartMs, FMOD_TIMEUNIT_MS);
+        if (seekResult == FMOD_ERR_NOTREADY) {
+            // This is a normal transient for a non-blocking stream. Keep the
+            // paused candidate alive and retry the seek on a later tick instead
+            // of destroying/recreating a channel every frame.
+            TransitionTrace::get().mark("audio-seek-deferred");
+            log::debug(
+                "Ranked audio: non-blocking seek deferred song={} result={}",
+                resource->songId,
+                static_cast<int>(seekResult)
+            );
+            return;
+        }
         if (seekResult != FMOD_OK) {
             log::warn(
                 "Ranked audio: non-blocking seek request failed song={} result={}",
@@ -832,6 +846,7 @@ void RankedAudioManager::startDesiredAudio(bool retry) {
             m_switchPending = false;
             return;
         }
+        m_pendingSeekAccepted = true;
         TransitionTrace::get().mark("audio-seek-requested");
     }
 
@@ -869,6 +884,27 @@ void RankedAudioManager::updatePendingAudioStart() {
         return;
     }
 
+    if (m_pendingStartMs > 0 && !m_pendingSeekAccepted) {
+        auto const seekResult = m_pendingChannel->setPosition(m_pendingStartMs, FMOD_TIMEUNIT_MS);
+        if (seekResult == FMOD_ERR_NOTREADY) return;
+        if (seekResult != FMOD_OK) {
+            log::warn(
+                "Ranked audio: deferred seek failed key='{}' song={} result={}",
+                resource->key,
+                resource->songId,
+                static_cast<int>(seekResult)
+            );
+            cancelPendingAudioStart();
+            m_switchPending = false;
+            return;
+        }
+        m_pendingSeekAccepted = true;
+        TransitionTrace::get().mark("audio-seek-requested");
+        // FMOD may enter OPENSTATE_SETPOSITION after accepting the request.
+        // Observe READY on a later tick before unpausing the candidate.
+        return;
+    }
+
     auto* engine = FMODAudioEngine::sharedEngine();
     if (!engine || !engine->m_system) {
         cancelPendingAudioStart();
@@ -892,6 +928,7 @@ void RankedAudioManager::updatePendingAudioStart() {
     m_pendingKey.clear();
     m_pendingPath.clear();
     m_pendingStartMs = 0;
+    m_pendingSeekAccepted = false;
     m_pendingStartedAt = {};
     m_pendingPlaybackRetry = false;
 
@@ -945,6 +982,7 @@ void RankedAudioManager::cancelPendingAudioStart() {
     m_pendingKey.clear();
     m_pendingPath.clear();
     m_pendingStartMs = 0;
+    m_pendingSeekAccepted = false;
     m_pendingStartedAt = {};
     m_pendingPlaybackRetry = false;
 }
