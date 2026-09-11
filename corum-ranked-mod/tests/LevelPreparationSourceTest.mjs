@@ -10,6 +10,9 @@ const layer = read('../src/LevelInfoLayer.cpp');
 const popup = read('../src/RankedPopup.cpp');
 const resolver = read('../src/RankedLevelPreparation.cpp');
 const policy = read('../src/domain/LevelPreparationPolicy.hpp');
+const play = read('../src/PlayLayer.cpp');
+const end = read('../src/EndLevelLayer.cpp');
+const spectator = read('../src/SpectatorLiveRuntime.cpp');
 const body = (source, from, to) => {
     const start = source.indexOf(from);
     const end = source.indexOf(to, start + from.length);
@@ -95,4 +98,38 @@ test('metadata recovery cancels competing return/launch callbacks and waits for 
     const back = body(layer, 'void returnForMetadata(', 'void restoreVanillaOptionsMenu(');
     assert(back.indexOf('modalBlocksPlay()') < back.indexOf('popScene()'));
     assert.match(back, /if \(m_fields->returningToRanked\) return/);
+});
+
+test('live spectator path is read-only and keeps polling fallback', () => {
+    const update = body(play, 'void postUpdate(float dt)', 'void resetLevel()');
+    const spectatorBranch = body(update, 'if (runtime.isSpectating()) {', 'if (m_fields->spectatorMode) {');
+    assert.match(spectatorBranch, /live\.tickViewer\(\)/);
+    assert.match(spectatorBranch, /interpolatedPose\(\)/);
+    assert.match(spectatorBranch, /setPosition\(/);
+    assert.match(spectatorBranch, /setRotation\(/);
+    for (const forbidden of ['reportAttemptStart(', 'reportAttemptProgress(', 'reportAttemptEnd(', 'levelComplete()']) {
+        assert(!spectatorBranch.includes(forbidden), `Spectator branch must not invoke ${forbidden}`);
+    }
+    assert.match(play, /m_fields->spectatorPending/);
+    assert.match(end, /Closing Ranked completion overlay for live spectator handoff/);
+    assert.match(play, /spectatorCurrentProgress = match\.spectatorCurrentProgress/);
+});
+
+test('practice never publishes live gameplay and relay validates stream identity', () => {
+    assert.match(play, /tickPublisher\(\{\}, true\)/);
+    assert.match(spectator, /!practice/);
+    assert.match(spectator, /m_publishAttemptId != attemptId/);
+    assert.match(spectator, /PACKET_ATTEMPT_MISMATCH/);
+    assert.match(spectator, /STALE_GENERATION/);
+    assert.match(spectator, /SEQUENCE_GAP/);
+    assert.match(spectator, /UNSUPPORTED_PROTOCOL_VERSION/);
+    assert.match(spectator, /STREAM_TIMEOUT/);
+});
+
+test('remote ghost uses pose keyframes without bypassing Ranked Level Prepare', () => {
+    assert.match(spectator, /keyframe\["x"\]/);
+    assert.match(spectator, /keyframe\["y"\]/);
+    assert.match(spectator, /keyframe\["rotation"\]/);
+    assert.doesNotMatch(spectator, /GJGameLevel::create|PlayLayer::scene|getSavedLevel/);
+    assert.doesNotMatch(play, /GJGameLevel::create|PlayLayer::scene|getSavedLevel/);
 });
