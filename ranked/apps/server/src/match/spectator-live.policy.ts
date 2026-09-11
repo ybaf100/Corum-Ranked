@@ -12,17 +12,17 @@ export interface SpectatorView {
   readonly currentProgress?: number | null;
 }
 
-export interface SpectatorPlayerView {
+export interface SpectatorPlayerView extends Readonly<Record<string, unknown>> {
   readonly gdUsername?: string;
 }
 
-export interface SpectatorDeathmatchView {
+export interface SpectatorDeathmatchView extends Readonly<Record<string, unknown>> {
   readonly sequence: number;
   readonly attemptsCompleted: Readonly<Record<PlayerSide, number>>;
   readonly activeAttemptNumber: Readonly<Record<PlayerSide, number | null>>;
 }
 
-export interface SpectatorRoundView {
+export interface SpectatorRoundView extends Readonly<Record<string, unknown>> {
   readonly roundNumber: number;
 }
 
@@ -68,9 +68,10 @@ const parsePlayers = (
   const parse = (side: PlayerSide): SpectatorPlayerView | null => {
     const item = value[side];
     if (!isRecord(item)) return null;
-    return typeof item.gdUsername === "string"
-      ? { gdUsername: item.gdUsername }
-      : {};
+    // This decorator sits on MatchService's authoritative public-state response.
+    // Preserve the entire player payload (tier, LP, account ID, placement,
+    // promotion, etc.) and inspect only gdUsername for spectator naming.
+    return { ...item } as SpectatorPlayerView;
   };
   return { A: parse("A"), B: parse("B") };
 };
@@ -90,7 +91,10 @@ const parseSpectator = (value: unknown): SpectatorView => {
 const parseRound = (value: unknown): SpectatorRoundView | null => {
   if (!isRecord(value)) return null;
   const roundNumber = finiteNumber(value.roundNumber);
-  return roundNumber > 0 ? { roundNumber } : null;
+  if (roundNumber <= 0) return null;
+  // Keep map/scores/clears/Last Attempt metadata intact. Spectator eligibility
+  // needs only roundNumber, but the client still consumes the rest of currentRound.
+  return { ...value, roundNumber } as SpectatorRoundView;
 };
 
 const parseDeathmatch = (value: unknown): SpectatorDeathmatchView | null => {
@@ -99,17 +103,22 @@ const parseDeathmatch = (value: unknown): SpectatorDeathmatchView | null => {
   const completed = isRecord(value.attemptsCompleted) ? value.attemptsCompleted : {};
   const active = isRecord(value.activeAttemptNumber) ? value.activeAttemptNumber : {};
   if (sequence <= 0) return null;
+  // Preserve the complete Death Match snapshot (map, scores, clears, remaining
+  // attempts, etc.) while normalizing only the fields used for eligibility.
   return {
+    ...value,
     sequence,
     attemptsCompleted: {
+      ...completed,
       A: finiteNumber(completed.A),
       B: finiteNumber(completed.B),
     },
     activeAttemptNumber: {
+      ...active,
       A: nullableNumber(active.A),
       B: nullableNumber(active.B),
     },
-  };
+  } as SpectatorDeathmatchView;
 };
 
 /**
@@ -118,6 +127,11 @@ const parseDeathmatch = (value: unknown): SpectatorDeathmatchView | null => {
  * after the viewer has authoritatively completed all three Attempts and has no
  * active Attempt. The opponent may either be in an active Attempt or still have
  * an unused Attempt budget. This projection never changes scoring state.
+ *
+ * IMPORTANT: this is a decorator, not a DTO projection. It must never discard
+ * fields from MatchService's public state because the native client consumes
+ * player rating/profile data and currentRound/deathmatch map metadata from the
+ * same response.
  */
 export const decorateSpectatorState = (raw: unknown): SpectatorPublicState => {
   if (!isRecord(raw)) throw new TypeError("Ranked public state must be an object");
