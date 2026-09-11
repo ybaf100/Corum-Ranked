@@ -60,7 +60,8 @@ test('exact lookup coexists with a foreign singleton delegate without waiting fo
     assert.match(hook, /m_levelManagerDelegate = &preparation/);
     assert.match(hook, /m_levelManagerDelegate = previousDelegate/);
     assert(hook.indexOf('requestGeneration(tag.c_str())') < hook.indexOf('m_levelManagerDelegate = &preparation'));
-    assert(hook.indexOf('m_levelManagerDelegate = &preparation') < hook.indexOf('GameLevelManager::onGetOnlineLevelsCompleted(response, tag)'));
+    const routed = hook.slice(hook.indexOf('auto* previousDelegate = m_levelManagerDelegate'));
+    assert(routed.indexOf('m_levelManagerDelegate = &preparation') < routed.indexOf('GameLevelManager::onGetOnlineLevelsCompleted(response, tag)'));
 });
 
 test('metadata gates geometry, RobTop readiness and post-download/update live objects', () => {
