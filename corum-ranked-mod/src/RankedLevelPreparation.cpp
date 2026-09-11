@@ -100,8 +100,10 @@ void RankedLevelPreparation::poll() {
         m_timeoutReported = false;
         m_nextAttempt = {};
     }
-    // Account for the entire wait, including incomplete responses, retries and
-    // a busy foreign delegate, rather than resetting this budget per HTTP call.
+    // Account for the entire wait, including incomplete responses and retries.
+    // The singleton GD delegate is intentionally NOT part of lookup ownership:
+    // another screen/mod may legitimately hold it while this exact keyed query
+    // runs. Completion temporarily routes only our matching tag to this resolver.
     if (now - m_waitStartedAt >= std::chrono::seconds(30) && !m_timeoutReported) {
         m_timeoutReported = true;
         m_error = "GD METADATA TIMEOUT - RETRYING WHEN AVAILABLE";
@@ -113,10 +115,6 @@ void RankedLevelPreparation::poll() {
         return;
     }
     if (now < m_nextAttempt) return;
-    if (manager->m_levelManagerDelegate && manager->m_levelManagerDelegate != this) {
-        m_error = "WAITING FOR GD LEVEL LOOKUP";
-        return;
-    }
     auto* search = GJSearchObject::create(SearchType::Type19,
         fmt::format("{}&gameVersion=22", current.levelId));
     if (!search || !search->getKey()) return;
@@ -131,10 +129,12 @@ void RankedLevelPreparation::poll() {
     m_key = key;
     m_level = nullptr;
     m_error.clear();
-    manager->m_levelManagerDelegate = this;
     tracePreparedLevel("cache-before-lookup", manager->getSavedLevel(current.levelId));
-    log::info("[RankedPrepare] lookup generation={} request={} key={}", m_ticket.generation(),
-        preparationContextText(current), m_key);
+    log::info(
+        "[RankedPrepare] lookup generation={} request={} key={} foreignDelegate={}",
+        m_ticket.generation(), preparationContextText(current), m_key,
+        static_cast<void*>(manager->m_levelManagerDelegate)
+    );
     manager->getOnlineLevels(search);
 }
 
@@ -155,12 +155,12 @@ bool RankedLevelPreparation::finish() {
 
 void RankedLevelPreparation::responseCompleted(char const* key, std::uint64_t generation) {
     if (!generation || requestGeneration(key) != generation) return;
-    // A different native screen may have taken the singleton delegate while the
-    // response was in flight. Drain this ticket after GD processes the response;
-    // never keep a destroyed UI delegate, steal the live one, or accept its data.
+    // If native parsing did not dispatch one of our LevelManagerDelegate methods,
+    // drain the ticket after GD processes the response and retry. Matching
+    // callbacks normally finish the ticket before this fallback is reached.
     m_ticket.discard();
     finish();
-    fail("GD LOOKUP OWNER CHANGED - RETRYING");
+    fail("GD LOOKUP CALLBACK MISSING - RETRYING");
 }
 
 void RankedLevelPreparation::fail(char const* message) {
@@ -205,7 +205,26 @@ class $modify(CorumRankedMetadataResponse, GameLevelManager) {
     void onGetOnlineLevelsCompleted(gd::string response, gd::string tag) {
         auto& preparation = corum::ranked::RankedLevelPreparation::get();
         auto const generation = preparation.requestGeneration(tag.c_str());
+        if (!generation) {
+            GameLevelManager::onGetOnlineLevelsCompleted(response, tag);
+            return;
+        }
+
+        // GameLevelManager exposes one singleton LevelManagerDelegate even though
+        // HTTP requests are independently keyed. Do not reserve/steal that slot
+        // while our request is in flight. Only for this exact matching response,
+        // route native parsing to the persistent Ranked resolver, then restore
+        // whichever foreign delegate still owns the singleton slot.
+        auto* previousDelegate = m_levelManagerDelegate;
+        m_levelManagerDelegate = &preparation;
         GameLevelManager::onGetOnlineLevelsCompleted(response, tag);
+        if (m_levelManagerDelegate == &preparation || m_levelManagerDelegate == nullptr) {
+            m_levelManagerDelegate = previousDelegate;
+        } else if (m_levelManagerDelegate != previousDelegate) {
+            log::warn(
+                "[RankedPrepare] GD installed a new level delegate during exact lookup; preserving it"
+            );
+        }
         preparation.responseCompleted(tag.c_str(), generation);
     }
 };
