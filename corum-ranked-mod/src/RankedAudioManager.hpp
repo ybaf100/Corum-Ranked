@@ -122,6 +122,7 @@ private:
     FMOD::Channel* m_pendingChannel = nullptr;
     std::chrono::steady_clock::time_point m_pendingStartedAt {};
     unsigned int m_pendingStartMs = 0;
+    bool m_pendingSeekAccepted = false;
     bool m_playbackVerifyPending = false;
     std::chrono::steady_clock::time_point m_playbackVerifyAt {};
     int m_playbackRetryCount = 0;
