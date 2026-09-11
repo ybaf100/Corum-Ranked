@@ -59,7 +59,20 @@ class $modify(CorumRankedEndLevelLayer, EndLevelLayer) {
         auto& runtime = corum::ranked::RankedRuntime::get();
         runtime.tick();
         auto const& state = runtime.view().match.state;
-        if (!runtime.isSpectating() && !authoritativeExitState(state)) return;
+        if (runtime.isSpectating()) {
+            m_fields->rankedExitRequested = true;
+            unschedule(schedule_selector(CorumRankedEndLevelLayer::watchRankedExit));
+            log::info(
+                "Closing Ranked completion overlay for live spectator handoff: state={}",
+                state
+            );
+            // Keep the canonical PlayLayer alive. The spectator path resets the
+            // completed player locally and then applies read-only remote poses;
+            // no Replay or Attempt API is invoked by this transition.
+            removeFromParentAndCleanup(true);
+            return;
+        }
+        if (!authoritativeExitState(state)) return;
 
         m_fields->rankedExitRequested = true;
         unschedule(schedule_selector(CorumRankedEndLevelLayer::watchRankedExit));
@@ -77,6 +90,12 @@ class $modify(CorumRankedEndLevelLayer, EndLevelLayer) {
     void onReplay(CCObject* sender) {
         if (m_fields->rankedLevel) {
             auto& runtime = corum::ranked::RankedRuntime::get();
+            if (runtime.isSpectating()) {
+                m_fields->rankedExitRequested = true;
+                unschedule(schedule_selector(CorumRankedEndLevelLayer::watchRankedExit));
+                removeFromParentAndCleanup(true);
+                return;
+            }
             if (!runtime.canEnterCurrentLevel()) {
                 log::info("Ranked Replay redirected to Menu because a new attempt is closed");
                 m_fields->rankedExitRequested = true;
