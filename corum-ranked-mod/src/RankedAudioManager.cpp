@@ -22,6 +22,7 @@ namespace {
 constexpr auto kSongInfoTimeout = std::chrono::seconds(20);
 constexpr auto kSongFileTimeout = std::chrono::seconds(90);
 constexpr auto kDownloadGuardTimeout = std::chrono::seconds(105);
+constexpr auto kPendingAudioStartTimeout = std::chrono::seconds(3);
 constexpr std::uintmax_t kMinimumCachedSongBytes = 1024;
 constexpr auto kPlaybackVerifyDelay = std::chrono::milliseconds(1000);
 constexpr int kMaxPlaybackRetries = 2;
@@ -129,6 +130,23 @@ PreparedStreamState preparedStreamState(FMOD::Sound* sound, FMOD_RESULT* resultO
         return PreparedStreamState::Ready;
     }
     return PreparedStreamState::Pending;
+}
+
+RankedAudioMode pendingTimeoutFallback(RankedAudioMode mode) {
+    switch (mode) {
+        case RankedAudioMode::Round3DeathmatchWait:
+        case RankedAudioMode::ResultWin:
+        case RankedAudioMode::ResultLose:
+            return RankedAudioMode::Round12;
+        case RankedAudioMode::Round12:
+        case RankedAudioMode::LobbyPromotion:
+        case RankedAudioMode::LobbyDemotionWarning:
+            return RankedAudioMode::Lobby;
+        case RankedAudioMode::Lobby:
+        case RankedAudioMode::Silent:
+            return RankedAudioMode::Silent;
+    }
+    return RankedAudioMode::Silent;
 }
 } // namespace
 
@@ -871,7 +889,57 @@ void RankedAudioManager::updatePendingAudioStart() {
 
     FMOD_RESULT openResult = FMOD_OK;
     auto const state = preparedStreamState(m_pendingSound, &openResult);
-    if (state == PreparedStreamState::Pending) return;
+    if (state == PreparedStreamState::Pending) {
+        auto const now = std::chrono::steady_clock::now();
+        if (
+            m_pendingStartedAt == std::chrono::steady_clock::time_point{} ||
+            now - m_pendingStartedAt < kPendingAudioStartTimeout
+        ) {
+            return;
+        }
+
+        auto* stalledSound = m_pendingSound;
+        auto const stalledKey = m_pendingKey;
+        auto const stalledSongId = resource->songId;
+        auto const fallbackMode = pendingTimeoutFallback(m_desiredMode);
+        auto const elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+            now - m_pendingStartedAt
+        ).count();
+        TransitionTrace::get().mark("audio-pending-timeout");
+        log::warn(
+            "Ranked audio: non-blocking transition timed out key='{}' song={} after {}ms; falling back",
+            stalledKey,
+            stalledSongId,
+            elapsedMs
+        );
+
+        cancelPendingAudioStart();
+        for (auto it = m_preparedSounds.begin(); it != m_preparedSounds.end(); ++it) {
+            if (it->second != stalledSound) continue;
+            if (it->second) it->second->release();
+            m_preparedSounds.erase(it);
+            break;
+        }
+
+        m_switchPending = false;
+        if (fallbackMode == RankedAudioMode::Silent) {
+            // Keep an already-audible Ranked channel alive rather than turning a
+            // failed decorative transition into silence. With no active channel,
+            // Silent is the only safe fallback.
+            if (!ownedChannelPlaying()) m_desiredMode = RankedAudioMode::Silent;
+            return;
+        }
+
+        m_desiredMode = fallbackMode;
+        TransitionTrace::get().mark("audio-pending-fallback");
+        log::warn(
+            "Ranked audio: fallback mode selected after stalled transition key='{}' song={}",
+            stalledKey,
+            stalledSongId
+        );
+        requestAudioSwitch();
+        return;
+    }
     if (state == PreparedStreamState::Error) {
         log::error(
             "Ranked audio: asynchronous seek failed key='{}' song={} result={}",
