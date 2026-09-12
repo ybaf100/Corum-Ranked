@@ -19,9 +19,12 @@ using namespace geode::prelude;
 namespace {
 
 constexpr float kDeltaEpsilon = 0.0005f;
-constexpr float kNormalDeltaPairOffset = 46.0f;
+constexpr float kNormalDeltaPairMinOffset = 34.0f;
+constexpr float kNormalDeltaMinGap = 10.0f;
 constexpr float kHudShadowOffsetX = 0.75f;
 constexpr float kHudShadowOffsetY = -0.75f;
+constexpr ccColor3B kPositiveDeltaLight = {184, 246, 207};
+constexpr ccColor3B kNegativeDeltaLight = {255, 188, 196};
 
 bool isRankedGameplayLevel(PlayLayer* layer) {
     if (!layer || !layer->m_level) return false;
@@ -50,6 +53,20 @@ std::string formatNumber(double value) {
     return text;
 }
 
+std::string formatDeathmatchDelta(double value) {
+    auto const magnitude = std::abs(value);
+    auto const precision = magnitude >= 5.0
+        ? 0
+        : magnitude >= 1.0
+            ? 1
+            : 2;
+
+    std::ostringstream stream;
+    if (value > 0.0) stream << '+';
+    stream << std::fixed << std::setprecision(precision) << value;
+    return stream.str();
+}
+
 ccColor3B blendColor(ccColor3B from, ccColor3B to, double ratio) {
     auto const t = std::clamp(ratio, 0.0, 1.0);
     auto const component = [t](GLubyte a, GLubyte b) {
@@ -66,14 +83,16 @@ ccColor3B blendColor(ccColor3B from, ccColor3B to, double ratio) {
 }
 
 ccColor3B deltaColor(double value, double fullColorAt) {
-    if (std::abs(value) <= kDeltaEpsilon || fullColorAt <= 0.0) {
+    if (value == 0.0 || fullColorAt <= 0.0) {
         return corum::ranked::ui::TextMuted;
     }
-    auto const target = value > 0.0
+    auto const positive = value > 0.0;
+    auto const start = positive ? kPositiveDeltaLight : kNegativeDeltaLight;
+    auto const target = positive
         ? corum::ranked::ui::Green
         : corum::ranked::ui::Red;
     return blendColor(
-        corum::ranked::ui::TextMuted,
+        start,
         target,
         std::abs(value) / fullColorAt
     );
@@ -84,6 +103,11 @@ std::string signedValue(double value, std::string const& suffix) {
     auto text = formatNumber(normalized);
     if (normalized > 0.0) text.insert(text.begin(), '+');
     return text + suffix;
+}
+
+float renderedWidth(CCLabelBMFont* label) {
+    if (!label) return 0.0f;
+    return label->getContentSize().width * std::abs(label->getScaleX());
 }
 
 struct ShadowLabel {
@@ -279,7 +303,7 @@ class $modify(CorumRankedGameplayUx, PlayLayer) {
                 "0",
                 0.60f * 1.70f,
                 {0.5f, 1.0f},
-                {size.width / 2.0f + kNormalDeltaPairOffset, timer->getPositionY()},
+                {size.width / 2.0f + kNormalDeltaPairMinOffset, timer->getPositionY()},
                 corum::ranked::ui::TextMuted,
                 4,
                 corum::ranked::ui::FontWeight::ExtraBold
@@ -366,13 +390,17 @@ class $modify(CorumRankedGameplayUx, PlayLayer) {
         if (!timer || !m_fields->scoreDelta.foreground) return;
         auto const size = CCDirector::sharedDirector()->getWinSize();
         auto const y = timer->getPositionY();
+        auto const requiredOffset =
+            (renderedWidth(timer) + renderedWidth(m_fields->scoreDelta.foreground)) * 0.25f +
+            kNormalDeltaMinGap * 0.5f;
+        auto const offset = std::max(kNormalDeltaPairMinOffset, requiredOffset);
         setExternalShadowedPosition(
             timer,
-            {size.width / 2.0f - kNormalDeltaPairOffset, y}
+            {size.width / 2.0f - offset, y}
         );
         setShadowPosition(
             m_fields->scoreDelta,
-            {size.width / 2.0f + kNormalDeltaPairOffset, y}
+            {size.width / 2.0f + offset, y}
         );
     }
 
@@ -403,10 +431,7 @@ class $modify(CorumRankedGameplayUx, PlayLayer) {
             ownScore = runtime.localDisplayScore(currentProgress(this), qualifying);
         }
         auto const difference = ownScore - opponentScore;
-        auto const suffix = corum::ranked::i18n::isKorean() ? "점" : " PTS";
-        setShadowText(m_fields->scoreDelta, signedValue(difference, suffix));
-        // 0 points is neutral gray. Saturation rises continuously and reaches the
-        // canonical red/green endpoint at an absolute 200-point lead or larger.
+        setShadowText(m_fields->scoreDelta, signedValue(difference, ""));
         setShadowColor(m_fields->scoreDelta, deltaColor(difference, 200.0));
         positionNormalTimerPair();
         setShadowVisible(m_fields->scoreDelta, true);
@@ -516,10 +541,9 @@ class $modify(CorumRankedGameplayUx, PlayLayer) {
             match.opponentProgress.has_value();
 
         // Death Match score is best raw progress, not the current attempt alone.
-        // Use the authoritative display score as the baseline, then fold in local
-        // current progress and live opponent progress when either side is still
-        // inside an attempt. This keeps the +/- indicator visible for Debug Bot
-        // matches where the synthetic Bot may not publish a live progress sample.
+        // Use the authoritative score, which remains formatted by the main Ranked
+        // HUD with up to three decimal places, and only reduce precision for the
+        // central +/- difference readout.
         auto ownDisplayScore = ownIsA ? match.scoreA : match.scoreB;
         auto opponentDisplayScore = ownIsA ? match.scoreB : match.scoreA;
         if (ownActive) {
@@ -533,8 +557,8 @@ class $modify(CorumRankedGameplayUx, PlayLayer) {
         }
         auto const difference = ownDisplayScore - opponentDisplayScore;
         overrideDeathmatchDelta(
-            signedValue(difference, "%"),
-            deltaColor(difference, 100.0)
+            formatDeathmatchDelta(difference),
+            deltaColor(difference, 200.0)
         );
 
         if (auto* oldProgress = getChildByIDRecursive("ranked-opponent-progress-hud"_spr)) {
