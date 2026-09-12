@@ -1,4 +1,5 @@
 #include "RankedRuntime.hpp"
+#include "domain/HudPresentation.hpp"
 #include "ui/PlayerIcon.hpp"
 #include "ui/RankedTranslations.hpp"
 #include "ui/RankedVisuals.hpp"
