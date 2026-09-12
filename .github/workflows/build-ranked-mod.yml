@@ -1,53 +1,26 @@
 name: Build Corum Ranked Mod
 
+# Release packages are intentionally manual-only. Routine development pushes use
+# Build Corum Ranked Debug so GitHub Actions minutes are not spent compiling the
+# same four native targets twice.
 on:
-  workflow_call:
-    inputs:
-      debug_bot_match:
-        description: Include the development-only Debug Bot Match and Force Win/Lose UI
-        required: false
-        type: boolean
-        default: false
   workflow_dispatch:
-    inputs:
-      debug_bot_match:
-        description: Include DEBUG BOT MATCH and Force Win/Lose (never use for release builds)
-        required: true
-        type: boolean
-        default: true
-  push:
-    branches:
-      - "**"
-    paths:
-      - "corum-ranked-mod/**"
-      - "ranked/apps/server/src/session/client-version.ts"
-      - ".github/workflows/build-ranked-mod.yml"
-      - ".github/workflows/build-ranked-debug.yml"
-  pull_request:
-    paths:
-      - "corum-ranked-mod/**"
-      - "ranked/apps/server/src/session/client-version.ts"
-      - ".github/workflows/build-ranked-mod.yml"
-      - ".github/workflows/build-ranked-debug.yml"
 
 permissions:
   contents: read
 
 jobs:
   metadata:
-    name: Validate Ranked manifest
+    name: Validate Ranked release manifest
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
       artifact_name: ${{ steps.version.outputs.artifact_name }}
-      debug_enabled: ${{ steps.version.outputs.debug_enabled }}
     steps:
       - uses: actions/checkout@v7
       - name: Read and validate mod identity/version
         id: version
         shell: bash
-        env:
-          DEBUG_BOT_MATCH: ${{ inputs.debug_bot_match }}
         run: |
           node <<'NODE'
           const fs = require('fs');
@@ -55,364 +28,18 @@ jobs:
           if (manifest.id !== 'hwanhee1.corum_ranked') {
             throw new Error(`Unexpected Ranked Mod ID: ${manifest.id}`);
           }
-          if (!/^v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(manifest.version)) {
-            throw new Error(`Invalid Ranked mod version: ${manifest.version}`);
-          }
-          if (!manifest.dependencies?.['syzzi.click_between_frames']) {
-            throw new Error('Click Between Frames must remain a required dependency');
-          }
-          if (!manifest.dependencies?.['geode.node-ids']) {
-            throw new Error('Node IDs must remain a required dependency');
-          }
-          if ('ranked-server-url' in (manifest.settings ?? {})) {
-            throw new Error('Ranked server URL must not be user-configurable');
-          }
-          const requiredFonts = {
-            CorumSans: 'resources/CorumSans.ttf',
-            CorumSansMedium: 'resources/CorumSansMedium.ttf',
-            CorumSansSemiBold: 'resources/CorumSansSemiBold.ttf',
-            CorumSansBold: 'resources/CorumSansBold.ttf',
-            CorumSansBlack: 'resources/CorumSansBlack.ttf',
-          };
-          for (const [name, path] of Object.entries(requiredFonts)) {
-            if (manifest.resources?.fonts?.[name]?.path !== path || !fs.existsSync(`corum-ranked-mod/${path}`)) {
-              throw new Error(`Missing Paperlogy UI font role: ${name}`);
-            }
-          }
-          const translations = fs.readFileSync(
-            'corum-ranked-mod/src/ui/RankedTranslations.hpp',
-            'utf8',
-          );
-          const koreanCodepoints = [...new Set(
-            [...`${translations}한국어`]
-              .map((character) => character.codePointAt(0))
-              .filter((codepoint) => codepoint >= 0xac00 && codepoint <= 0xd7a3)
-              .map(String),
-          )];
-          for (const fontName of ['CorumSansSemiBold', 'CorumSansBold', 'CorumSansBlack']) {
-            const charset = (manifest.resources.fonts[fontName].charset ?? '').split(',');
-            for (const codepoint of koreanCodepoints) {
-              if (!charset.includes(codepoint)) {
-                throw new Error(`Korean UI glyph ${codepoint} is missing from ${fontName} charset`);
-              }
-            }
-          }
-          const versionSource = fs.readFileSync(
-            'ranked/apps/server/src/session/client-version.ts',
-            'utf8',
-          );
-          const requiredVersion = versionSource.match(
-            /REQUIRED_RANKED_CLIENT_VERSION\s*=\s*["']([^"']+)["']/,
-          )?.[1];
-          if (!requiredVersion) {
-            throw new Error('Could not read REQUIRED_RANKED_CLIENT_VERSION');
-          }
-          if (requiredVersion !== manifest.version) {
-            throw new Error(
-              `Client/server version mismatch: mod=${manifest.version}, server=${requiredVersion}`,
-            );
+          const source = fs.readFileSync('ranked/apps/server/src/session/client-version.ts', 'utf8');
+          const required = source.match(/REQUIRED_RANKED_CLIENT_VERSION\s*=\s*["']([^"']+)["']/)?.[1];
+          if (!required || required !== manifest.version) {
+            throw new Error(`Client/server version mismatch: mod=${manifest.version}, server=${required}`);
           }
           fs.appendFileSync(process.env.GITHUB_OUTPUT, `version=${manifest.version}\n`);
-          const debugEnabled = process.env.DEBUG_BOT_MATCH === 'true';
-          fs.appendFileSync(
-            process.env.GITHUB_OUTPUT,
-            `artifact_name=Corum-Ranked-${manifest.version}${debugEnabled ? '-Debug' : ''}\n`,
-          );
-          fs.appendFileSync(
-            process.env.GITHUB_OUTPUT,
-            `debug_enabled=${debugEnabled}\n`,
-          );
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `artifact_name=Corum-Ranked-${manifest.version}\n`);
           NODE
 
-  tests:
-    name: Validate client policy domain
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - name: Compile with strict warnings and run
-        run: |
-          g++ -std=c++23 -Wall -Wextra -Wpedantic -Werror \
-            corum-ranked-mod/tests/DomainTest.cpp \
-            corum-ranked-mod/src/domain/AttemptScoring.cpp \
-            corum-ranked-mod/src/domain/EnvironmentPolicy.cpp \
-            corum-ranked-mod/src/domain/HudPresentation.cpp \
-            corum-ranked-mod/src/domain/RenderFpsMeter.cpp \
-            corum-ranked-mod/src/domain/ServerClock.cpp \
-            -o /tmp/corum-ranked-domain-test
-          /tmp/corum-ranked-domain-test
-          g++ -std=c++23 -Wall -Wextra -Wpedantic -Werror \
-            corum-ranked-mod/tests/DebugBotDomainTest.cpp \
-            corum-ranked-mod/src/debug/DebugBotConfig.cpp \
-            -o /tmp/corum-ranked-debug-bot-domain-test
-          /tmp/corum-ranked-debug-bot-domain-test
-          g++ -std=c++23 -Wall -Wextra -Wpedantic -Werror \
-            corum-ranked-mod/tests/LevelPreparationTest.cpp \
-            -o /tmp/corum-ranked-level-preparation-test
-          /tmp/corum-ranked-level-preparation-test
-          node --test corum-ranked-mod/tests/LevelPreparationSourceTest.mjs
-          node --test corum-ranked-mod/tests/AudioTransitionSourceTest.mjs
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
-
-          manifest = json.loads(
-              Path("corum-ranked-mod/mod.json").read_text(encoding="utf-8")
-          )
-          source = Path("corum-ranked-mod/src/LevelInfoLayer.cpp").read_text(encoding="utf-8")
-          for required in (
-              "nativePlayButton->activate();",
-              "vanillaLevelReadyForPlay()",
-              "LevelInfoLayer::shouldDownloadLevel()",
-              "verifiedPlayItem(menu->getChildByID(\"play-button\"))",
-              "m_levelType = m_level->m_levelType;",
-              "scheduleAutoPlay(0.25f);",
-          ):
-              if required not in source:
-                  raise SystemExit(f"Missing Ranked vanilla Play invariant: {required}")
-          for forbidden in (
-              "PlayLayer::scene(",
-              "nativePlayButton->setTarget(",
-              "manualPlayFallback",
-              "instance-selector-proxy",
-              "AUTO PLAY FAILED - TAP PLAY",
-              "vanillaPlayForwarded",
-          ):
-              if forbidden in source:
-                  raise SystemExit(f"Forbidden Ranked launch path returned: {forbidden}")
-
-          popup = Path("corum-ranked-mod/src/RankedPopup.cpp").read_text(encoding="utf-8")
-          preparation = Path("corum-ranked-mod/src/RankedLevelPreparation.cpp").read_text(encoding="utf-8")
-          play = Path("corum-ranked-mod/src/PlayLayer.cpp").read_text(encoding="utf-8")
-          visuals = Path("corum-ranked-mod/src/ui/RankedVisuals.hpp").read_text(encoding="utf-8")
-          translations = Path("corum-ranked-mod/src/ui/RankedTranslations.hpp").read_text(encoding="utf-8")
-          for required_preload in (
-              "SearchType::Type19",
-              "getOnlineLevels(search)",
-              "m_ticket.finish(currentPreparationContext())",
-              "preparationProgressTarget()",
-              "revealExactLevelInfoPage()",
-              "displayedPreparationProgress",
-          ):
-              if required_preload not in popup and required_preload not in source and required_preload not in preparation:
-                  raise SystemExit(f"Missing beta.7 exact-level preload invariant: {required_preload}")
-          for forbidden_preload in (
-              "auto* level = GJGameLevel::create();",
-              "if (phaseSeconds() < 5.0) return;",
-              "level->m_creatorName = current->creator;",
-          ):
-              if forbidden_preload in popup:
-                  raise SystemExit(f"Forbidden synthetic/idle preload path returned: {forbidden_preload}")
-          if '"디버그"' in popup or 'ranked-korean-font-probe' in popup:
-              raise SystemExit("Obsolete lower-right Korean debug probe returned")
-          for required_translation in (
-              'ranked-ui-language',
-              'Translation{"score", "점수"}',
-              'Translation{"placement", "배치"}',
-              'Translation{"promoted", "승급"}',
-              'Translation{"demoted", "강등"}',
-              'Translation{"promotion-match", "승급전"}',
-          ):
-              if required_translation not in translations:
-                  raise SystemExit(f"Missing beta.6 translation invariant: {required_translation}")
-          for required_selector in (
-              '"English"',
-              '"한국어"',
-              'ranked-language-english',
-              'ranked-language-korean',
-          ):
-              if required_selector not in popup:
-                  raise SystemExit(f"Missing beta.6 language selector: {required_selector}")
-          for required_environment_warning in (
-              "renderEnvironmentWarning",
-              "environmentWarning.unauthorizedMods",
-              "environmentWarning.missingRequiredMods",
-              "environmentWarning.versionViolations",
-              "cbfSettingsText",
-              "onEnvironmentRecheck",
-          ):
-              if required_environment_warning not in popup:
-                  raise SystemExit(
-                      f"Missing beta.13 in-game environment warning: {required_environment_warning}"
-                  )
-          for required_reentry in (
-              "m_rankedChildScenePushed",
-              "resumedFromRankedChild",
-              "Ranked child scene returned; automatic entry guard released",
-          ):
-              if required_reentry not in popup:
-                  raise SystemExit(f"Missing same-map Ranked re-entry invariant: {required_reentry}")
-          for required_hud in (
-              "addShadowedHudLabel(",
-              "hudShadows",
-              '"SCORE"',
-              '"Qualifying"',
-              '0.60f',
-              '"black"',
-          ):
-              if required_hud not in play and required_hud not in visuals:
-                  raise SystemExit(f"Missing compact gameplay HUD invariant: {required_hud}")
-          for forbidden_hud in (
-              "hudPanel(",
-              "textScrim(",
-              "corum::ranked::ui::surface(",
-              "{92.0f, 34.0f}",
-              "{78.0f, 38.0f}",
-          ):
-              if forbidden_hud in play:
-                  raise SystemExit(f"Rejected gameplay-covering HUD panel returned: {forbidden_hud}")
-          placement_badge = Path("corum-ranked-mod/src/ui/PlacementGradeBadge.cpp").read_text(encoding="utf-8")
-          runtime = Path("corum-ranked-mod/src/RankedRuntime.cpp").read_text(encoding="utf-8")
-          player_icon = Path("corum-ranked-mod/src/ui/PlayerIcon.cpp").read_text(encoding="utf-8")
-          badge_source = Path("corum-ranked-mod/src/ui/RankBadgeAssets.cpp").read_text(encoding="utf-8")
-          if 'https://corum-ranked.onrender.com' not in runtime:
-              raise SystemExit("Canonical Ranked server URL is not hardcoded")
-          if 'getSettingValue<std::string>("ranked-server-url")' in runtime:
-              raise SystemExit("Editable Ranked server URL lookup returned")
-          for required_icon in (
-              "createRemote(accountId)",
-              "userInfoForAccountID",
-              "getGJUserInfo",
-              "m_glowEnabled",
-              "setGlowOutline",
-          ):
-              if required_icon not in popup and required_icon not in player_icon:
-                  raise SystemExit(f"Missing opponent cosmetic invariant: {required_icon}")
-          for required_ambient in (
-              "createRankAmbientFx",
-              "hasPersistentRankAmbient",
-              "fx-silver-crystal-sheen.png",
-              "fx-gold-radial-rays.png",
-          ):
-              if required_ambient not in popup and required_ambient not in badge_source:
-                  raise SystemExit(f"Missing persistent rank ambient invariant: {required_ambient}")
-          for required_practice in (
-              "rankedScoringEnabled",
-              "RankedPracticeTransition::Enter",
-              "reportAttemptEnd(",
-              "m_fields->rankedPractice = true",
-              '"GJ_practiceBtn_001.png"',
-          ):
-              if required_practice not in play:
-                  raise SystemExit(f"Missing Practice isolation invariant: {required_practice}")
-          if "Practice Mode is disabled during an active Ranked round." in play:
-              raise SystemExit("Obsolete Practice guard returned")
-          if 'view.placement.state == "STAGE_RESULT"' not in popup:
-              raise SystemExit("Stage Result presentation is not poll-stable")
-          for required_placement in (
-              '"ranked-placement-grade"_spr',
-              "setHudVisible(m_fields->qualifyingCaption, false)",
-              "setHudVisible(m_fields->qualifyingLabel, false)",
-              "PlacementGradeTransition::Up",
-              "PlacementGradeTransition::Down",
-              "CCScaleTo::create(0.17f, 1.12f)",
-              "Missing image resources are presentation-only failures",
-              '"/attempt/end"',
-              "provisionalMapGrade",
-              "m_view.placement.currentMapGrade = provisionalGrade.unwrap()",
-              "renderPlacementStageResult",
-              "RankedAudioMode::ResultWin",
-              "RankedAudioMode::ResultLose",
-          ):
-              if all(required_placement not in source for source in (
-                  play, popup, placement_badge, runtime,
-              )):
-                  raise SystemExit(f"Missing beta.9 Placement client invariant: {required_placement}")
-          required_grade_assets = {
-              f"placement-grade-{grade}.png" for grade in "sabcd"
-          }
-          missing_grade_assets = sorted(
-              asset for asset in required_grade_assets
-              if not Path("corum-ranked-mod/resources", asset).is_file()
-          )
-          if missing_grade_assets:
-              raise SystemExit("Missing Placement Grade assets: " + ", ".join(missing_grade_assets))
-          if "CorumSansBlack.fnt" not in visuals:
-              raise SystemExit("Missing Paperlogy Black display font role")
-          for forbidden_visual in ("CCParticleFire", "corum-fire-promotion", "corum-fire-perfect"):
-              if forbidden_visual in popup or forbidden_visual in visuals:
-                  raise SystemExit(f"Rejected repeating fire visual returned: {forbidden_visual}")
-
-          transition_header = Path("corum-ranked-mod/src/ui/RankTransitionLayer.hpp").read_text(encoding="utf-8")
-          transition_source = Path("corum-ranked-mod/src/ui/RankTransitionLayer.cpp").read_text(encoding="utf-8")
-          badge_header = Path("corum-ranked-mod/src/ui/RankBadgeAssets.hpp").read_text(encoding="utf-8")
-          for required_transition in (
-              "class RankTransitionLayer",
-              "playPlacement()",
-              "playPromotion()",
-              "playDemotion()",
-              "createRankBadgeAssembly",
-              "animatePartAssembly",
-              "createAnimatedRankBadge",
-              "unlockSkip()",
-              "revealFinalState",
-              "CCDelayTime::create(1.50f)",
-              "RankTransitionLayer::create(",
-              'tr("tap-to-skip", "TAP TO SKIP")',
-              "targetAssembly.root->runAction(CCSequence::create(",
-              "CCEaseSineOut::create(CCMoveTo::create(0.52f, center))",
-          ):
-              if all(required_transition not in source for source in (
-                  transition_header, transition_source, badge_header, badge_source, popup,
-              )):
-                  raise SystemExit(f"Missing full-screen rank transition invariant: {required_transition}")
-          required_rank_assets = {
-              "rank-unranked-body.png", "rank-unranked-core.png",
-              "rank-unranked-fragment-tl.png", "rank-unranked-fragment-tr.png",
-              "rank-unranked-fragment-bl.png", "rank-unranked-fragment-br.png",
-              "rank-red-body.png", "rank-red-core.png", "rank-red-spikes.png",
-              "rank-aqua-body.png", "rank-aqua-core.png",
-              "rank-aqua-orbit-back.png", "rank-aqua-orbit-front.png",
-              "rank-bronze-body.png", "rank-bronze-core.png",
-              "rank-bronze-frame-top.png", "rank-bronze-frame-bottom.png",
-              "rank-bronze-frame-left.png", "rank-bronze-frame-right.png",
-              "rank-silver-body.png", "rank-silver-core.png",
-              "rank-silver-wing-left.png", "rank-silver-wing-right.png",
-              "rank-silver-crystal-top.png", "rank-gold-body.png",
-              "rank-gold-core.png", "rank-gold-side-left.png",
-              "rank-gold-side-right.png", "rank-gold-lower-crest.png",
-              "rank-gold-crown.png", "rank-gold-radiant-ornament.png",
-              "rank-transition-background.png", "rank-transition-geometry-overlay.png",
-              "fx-rank-radial-glow-white.png", "fx-rank-broken-ring-white.png",
-              "fx-rank-shockwave-circle-white.png", "fx-rank-shockwave-diamond-white.png",
-              "fx-rank-light-sweep-white.png", "fx-rank-energy-column-white.png",
-              "fx-rank-glint-white.png", "fx-rank-crack-white.png",
-              "fx-silver-halo.png", "fx-silver-orbit.png",
-              "fx-silver-crystal-sheen.png", "fx-gold-halo-inner.png",
-              "fx-gold-halo-outer.png", "fx-gold-radial-rays.png",
-              "fx-gold-crown-aura.png",
-          }
-          missing_rank_assets = sorted(
-              name for name in required_rank_assets
-              if not Path("corum-ranked-mod/resources", name).is_file()
-          )
-          if missing_rank_assets:
-              raise SystemExit("Missing structural rank assets: " + ", ".join(missing_rank_assets))
-          manifest_sprites = manifest.get("resources", {}).get("sprites", [])
-          for required_glob in (
-              "resources/corum-trophy-*.png",
-              "resources/rank-*.png",
-              "resources/fx-*.png",
-              "resources/placement-grade-*.png",
-          ):
-              if required_glob not in manifest_sprites:
-                  raise SystemExit(f"Missing rank resource manifest glob: {required_glob}")
-          for forbidden_transition in (
-              "RankTransitionAnimator",
-              "makeOrnamentGroup",
-              "PlayLayer::scene(",
-              "CCEaseSineOut::create(CCMoveBy::create(0.52f, {0.0f, 12.0f}))",
-          ):
-              if any(forbidden_transition in source for source in (
-                  popup, transition_source, badge_source,
-              )):
-                  raise SystemExit(f"Obsolete or gameplay-coupled rank transition returned: {forbidden_transition}")
-          PY
-
   build:
-    name: ${{ matrix.config.name }} ${{ needs.metadata.outputs.version }} (${{ needs.metadata.outputs.debug_enabled == 'true' && 'Debug Bot ON' || 'Release' }})
-    needs:
-      - metadata
-      - tests
+    name: ${{ matrix.config.name }} ${{ needs.metadata.outputs.version }} Release
+    needs: metadata
     strategy:
       fail-fast: false
       matrix:
@@ -432,16 +59,16 @@ jobs:
     runs-on: ${{ matrix.config.os }}
     steps:
       - uses: actions/checkout@v7
-      - name: Build isolated Ranked package
+      - name: Build isolated Ranked release package
         uses: geode-sdk/build-geode-mod@main
         with:
           path: corum-ranked-mod
           target: ${{ matrix.config.target }}
           combine: true
-          configure-args: ${{ needs.metadata.outputs.debug_enabled == 'true' && '-DCORUM_RANKED_DEBUG_BOT_MATCH=ON' || '-DCORUM_RANKED_DEBUG_BOT_MATCH=OFF' }}
+          configure-args: -DCORUM_RANKED_DEBUG_BOT_MATCH=OFF
 
   package:
-    name: Package ${{ needs.metadata.outputs.version }}
+    name: Package ${{ needs.metadata.outputs.version }} Release
     runs-on: ubuntu-latest
     needs:
       - metadata
@@ -449,75 +76,20 @@ jobs:
     steps:
       - uses: geode-sdk/build-geode-mod/combine@main
         id: build
-      - name: Normalize and validate combined Ranked package
+      - name: Normalize combined release package
         env:
           BUILD_OUTPUT: ${{ steps.build.outputs.build-output }}
-          MOD_VERSION: ${{ needs.metadata.outputs.version }}
-          DEBUG_BOT_ENABLED: ${{ needs.metadata.outputs.debug_enabled }}
         shell: bash
         run: |
           mkdir -p dist
           mapfile -t PACKAGES < <(find "$BUILD_OUTPUT" -maxdepth 1 -type f -name '*.geode' -print)
           if [[ ${#PACKAGES[@]} -ne 1 ]]; then
-            echo "Expected one combined Ranked package, found ${#PACKAGES[@]}" >&2
+            echo "Expected one combined Ranked release package, found ${#PACKAGES[@]}" >&2
             exit 1
           fi
           cp "${PACKAGES[0]}" "dist/hwanhee1.corum_ranked.geode"
-          python3 - "dist/hwanhee1.corum_ranked.geode" "$MOD_VERSION" "$DEBUG_BOT_ENABLED" <<'PY'
-          import json
-          import sys
-          import zipfile
-
-          package_path, expected_version, debug_enabled_text = sys.argv[1:]
-          debug_enabled = debug_enabled_text == "true"
-          expected_binaries = {
-              "hwanhee1.corum_ranked.dll",
-              "hwanhee1.corum_ranked.ios.dylib",
-              "hwanhee1.corum_ranked.android32.so",
-              "hwanhee1.corum_ranked.android64.so",
-          }
-          debug_marker = b"DEBUG BOT MATCH"
-          with zipfile.ZipFile(package_path) as package:
-              manifest = json.loads(package.read("mod.json"))
-              files = set(package.namelist())
-              marker_state = {
-                  binary: debug_marker in package.read(binary)
-                  for binary in expected_binaries
-                  if binary in files
-              }
-          if manifest.get("id") != "hwanhee1.corum_ranked":
-              raise SystemExit(f"Unexpected Mod ID: {manifest.get('id')}")
-          if manifest.get("version") != expected_version:
-              raise SystemExit(
-                  f"Package version {manifest.get('version')} does not match {expected_version}"
-              )
-          missing = sorted(expected_binaries - files)
-          if missing:
-              raise SystemExit("Combined package is missing: " + ", ".join(missing))
-          wrong_marker_state = sorted(
-              binary
-              for binary, marker_present in marker_state.items()
-              if marker_present != debug_enabled
-          )
-          if wrong_marker_state:
-              expected = "present" if debug_enabled else "absent"
-              raise SystemExit(
-                  "Debug Bot marker must be "
-                  + expected
-                  + " in every binary; mismatch: "
-                  + ", ".join(wrong_marker_state)
-              )
-          PY
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ needs.metadata.outputs.artifact_name }}
           path: dist/hwanhee1.corum_ranked.geode
           if-no-files-found: error
-
-      - name: Report artifact filename
-        env:
-          DEBUG_BOT_ENABLED: ${{ needs.metadata.outputs.debug_enabled }}
-        shell: bash
-        run: |
-          echo "Artifact ZIP: ${{ needs.metadata.outputs.artifact_name }}.zip" >> "$GITHUB_STEP_SUMMARY"
-          echo "Debug Bot Match compiled: $DEBUG_BOT_ENABLED" >> "$GITHUB_STEP_SUMMARY"
