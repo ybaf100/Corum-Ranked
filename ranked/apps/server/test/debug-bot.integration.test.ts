@@ -493,6 +493,17 @@ describe("development-only Bot Match using the production Ranked engine", () => 
     expect(Number(stored.rows[0]?.wins)).toBe(expectedWins);
     expect(Number(stored.rows[0]?.losses)).toBe(expectedLosses);
     expect(stored.rows[0]?.placement_results).toEqual([]);
+
+    const achievementMetrics = await database.query<{
+      ranked_wins: number;
+      ranked_matches: number;
+    }>(
+      `SELECT ranked_wins, ranked_matches
+       FROM ranked_achievement_metrics WHERE player_id = $1`,
+      [player.playerId],
+    );
+    expect(Number(achievementMetrics.rows[0]?.ranked_matches)).toBe(1);
+    expect(Number(achievementMetrics.rows[0]?.ranked_wins)).toBe(expectedWins);
   });
 
   it("applies maximum Ranked MMR and PERFECT WIN for a natural no-loss three-Clear victory", async () => {

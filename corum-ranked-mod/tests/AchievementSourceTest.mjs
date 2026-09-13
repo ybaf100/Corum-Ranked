@@ -40,19 +40,31 @@ test('Trophy badge and Claim state remain independent and bounded', () => {
     assert.match(presentation, /if \(count > 99\) return "99\+"/);
 });
 
-test('Achievement action buttons keep the native-readable hotfix sizing', () => {
+test('Lobby and Achievement text keep native-readable sizing', () => {
+    const actionVisual = body(popup, 'CCNode* makeActionButtonVisual(', 'std::string resourceKey(');
+    const language = body(popup, 'void addLanguageSelector()', 'void addStatusPill(');
+    const main = body(popup, 'void renderMain(', 'void renderPlacementMap(');
     const selector = body(popup, 'void renderAchievementTitleSelector(', 'void renderAchievements(');
     const achievements = body(popup, 'void renderAchievements(', 'void renderHistoryList(');
+
+    assert.match(actionVisual, /text,\s*0\.62f/);
+    assert.match(actionVisual, /limitLabelWidth\(width - 20\.0f, 0\.62f, 0\.30f\)/);
+    assert.equal((language.match(/setScale\(0\.48f\)/g) ?? []).length, 2);
+    assert.equal((main.match(/setScale\(0\.66f\)/g) ?? []).length, 2);
 
     assert.match(selector, /static_cast<float>\(level - 1\) \* 72\.0f/);
     assert.match(selector, /onAchievementTitleLevel[\s\S]{0,120}0\.52f/);
     assert.match(selector, /onAchievementTitleClear[\s\S]{0,120}0\.56f/);
     assert.match(selector, /onAchievementTitleSelectorClose[\s\S]{0,120}0\.56f/);
 
-    assert.match(achievements, /onAchievementClaim[\s\S]{0,120}0\.44f/);
-    assert.match(achievements, /onAchievementTitle\)[\s\S]{0,120}0\.44f/);
-    assert.match(achievements, /onAchievementPrevious[\s\S]{0,120}0\.46f/);
-    assert.match(achievements, /onAchievementNext[\s\S]{0,120}0\.46f/);
+    assert.match(achievements, /constexpr float cardHeight = 88\.0f/);
+    assert.match(achievements, /title,\s*0\.40f/);
+    assert.match(achievements, /shorten\(description[\s\S]{0,120}0\.25f/);
+    assert.match(achievements, /progressText,\s*0\.30f/);
+    assert.match(achievements, /onAchievementClaim[\s\S]{0,120}0\.50f/);
+    assert.match(achievements, /onAchievementTitle\)[\s\S]{0,120}0\.50f/);
+    assert.match(achievements, /onAchievementPrevious[\s\S]{0,120}0\.52f/);
+    assert.match(achievements, /onAchievementNext[\s\S]{0,120}0\.52f/);
 });
 
 test('Result notices are queued only from settled Match and Placement Result views', () => {

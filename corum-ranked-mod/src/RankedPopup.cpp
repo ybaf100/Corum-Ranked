@@ -396,12 +396,12 @@ CCNode* makeActionButtonVisual(
 
     auto* caption = corum::ranked::ui::label(
         text,
-        0.38f,
+        0.62f,
         {width / 2.0f, height / 2.0f},
         selected ? kGold : (danger ? ccc3(255, 224, 229) : corum::ranked::ui::Text),
         true
     );
-    caption->limitLabelWidth(width - 20.0f, 0.38f, 0.24f);
+    caption->limitLabelWidth(width - 20.0f, 0.62f, 0.30f);
     root->addChild(caption, 5);
     return root;
 }
@@ -1230,7 +1230,7 @@ class CorumRankedLayer final : public CCLayerColor {
             false,
             selected == corum::ranked::i18n::Language::English
         );
-        englishVisual->setScale(0.43f);
+        englishVisual->setScale(0.48f);
         auto* english = CCMenuItemSpriteExtra::create(
             englishVisual,
             this,
@@ -1245,7 +1245,7 @@ class CorumRankedLayer final : public CCLayerColor {
             false,
             selected == corum::ranked::i18n::Language::Korean
         );
-        koreanVisual->setScale(0.43f);
+        koreanVisual->setScale(0.48f);
         auto* korean = CCMenuItemSpriteExtra::create(
             koreanVisual,
             this,
@@ -1928,13 +1928,13 @@ class CorumRankedLayer final : public CCLayerColor {
         addScreenHeader("CORUM RANKED", tr("competitive-ladder", "COMPETITIVE 1V1 LADDER"), kGold, kCyan);
 
         auto* historyVisual = makeActionButtonVisual(tr("history", "HISTORY"));
-        historyVisual->setScale(0.62f);
+        historyVisual->setScale(0.66f);
         auto* history = CCMenuItemSpriteExtra::create(historyVisual, this, menu_selector(CorumRankedLayer::onHistory));
         history->setPosition({size.width - 53.0f, size.height - 28.0f});
         m_menu->addChild(history);
 
         auto* trophyVisual = makeActionButtonVisual(tr("achievements", "TROPHY"));
-        trophyVisual->setScale(0.62f);
+        trophyVisual->setScale(0.66f);
         auto* trophy = CCMenuItemSpriteExtra::create(
             trophyVisual,
             this,
@@ -3424,16 +3424,16 @@ class CorumRankedLayer final : public CCLayerColor {
         auto const name = corum::ranked::i18n::isKorean() ? card.nameKo : card.nameEn;
         auto* heading = makeLabel(
             name,
-            0.45f,
+            0.50f,
             {size.width / 2.0f, size.height / 2.0f + 62.0f},
             achievementCardAccent(card),
             "black"
         );
-        heading->limitLabelWidth(320.0f, 0.45f, 0.28f);
+        heading->limitLabelWidth(320.0f, 0.50f, 0.32f);
         m_root->addChild(heading, 74);
         auto* hint = makeLabel(
             tr("select-title-version", "SELECT ACHIEVEMENT TITLE VERSION"),
-            0.22f,
+            0.30f,
             {size.width / 2.0f, size.height / 2.0f + 38.0f},
             corum::ranked::ui::TextMuted,
             "semibold"
@@ -3495,7 +3495,7 @@ class CorumRankedLayer final : public CCLayerColor {
             {118.0f, 27.0f},
             {size.width / 2.0f - 68.0f, size.height - 75.0f},
             kGold,
-            0.29f,
+            0.38f,
             kGold,
             "black"
         );
@@ -3505,7 +3505,7 @@ class CorumRankedLayer final : public CCLayerColor {
             {138.0f, 27.0f},
             {size.width / 2.0f + 68.0f, size.height - 75.0f},
             view.achievements.unclaimedRewardCount > 0 ? kRed : kCyan,
-            0.25f,
+            0.34f,
             view.achievements.unclaimedRewardCount > 0 ? ccc3(255, 225, 230) : corum::ranked::ui::Text,
             "black"
         );
@@ -3520,7 +3520,7 @@ class CorumRankedLayer final : public CCLayerColor {
         if (!view.achievements.error.empty()) {
             auto* error = makeLabel(
                 shorten(view.achievements.error, 72),
-                0.23f,
+                0.28f,
                 {size.width / 2.0f, 48.0f},
                 kRed,
                 "semibold"
@@ -3537,7 +3537,7 @@ class CorumRankedLayer final : public CCLayerColor {
         m_achievementPage = std::min(m_achievementPage, pageCount - 1);
         auto const start = m_achievementPage * perPage;
         auto const cardWidth = std::min(250.0f, size.width / 2.0f - 22.0f);
-        constexpr float cardHeight = 78.0f;
+        constexpr float cardHeight = 88.0f;
         for (std::size_t slot = 0; slot < perPage && start + slot < view.achievements.cards.size(); ++slot) {
             auto const index = start + slot;
             auto const& card = view.achievements.cards[index];
@@ -3545,7 +3545,7 @@ class CorumRankedLayer final : public CCLayerColor {
             auto const row = slot / 2;
             auto const center = CCPoint{
                 column == 0 ? size.width / 4.0f : size.width * 3.0f / 4.0f,
-                size.height - 132.0f - static_cast<float>(row) * 88.0f,
+                size.height - 134.0f - static_cast<float>(row) * 94.0f,
             };
             auto const accent = achievementCardAccent(card);
             auto* panel = makeNeonPanel({cardWidth, cardHeight}, center, accent, kDeepPanel, 246);
@@ -3554,28 +3554,32 @@ class CorumRankedLayer final : public CCLayerColor {
             auto const title = card.type == "PROGRESSIVE" && card.currentLevel > 0
                 ? fmt::format("{} - {}", baseName, card.displayLabel)
                 : baseName;
+            auto const titleColor =
+                card.unlocked || card.currentLevel > 0
+                    ? accent
+                    : corum::ranked::ui::Text;
             auto* titleLabel = makeLabel(
                 title,
-                0.29f,
-                {center.x - cardWidth / 2.0f + 10.0f, center.y + 25.0f},
-                accent,
+                0.40f,
+                {center.x - cardWidth / 2.0f + 10.0f, center.y + 27.0f},
+                titleColor,
                 "semibold",
                 {0.0f, 0.5f}
             );
-            titleLabel->limitLabelWidth(cardWidth - 82.0f, 0.29f, 0.19f);
+            titleLabel->limitLabelWidth(cardWidth - 82.0f, 0.40f, 0.26f);
             m_root->addChild(titleLabel, 4);
             auto const description = corum::ranked::i18n::isKorean()
                 ? card.descriptionKo
                 : card.descriptionEn;
             auto* descriptionLabel = makeLabel(
-                shorten(description, corum::ranked::i18n::isKorean() ? 46 : 58),
-                0.17f,
+                shorten(description, corum::ranked::i18n::isKorean() ? 40 : 52),
+                0.25f,
                 {center.x - cardWidth / 2.0f + 10.0f, center.y + 7.0f},
-                corum::ranked::ui::TextMuted,
+                ccc3(192, 205, 224),
                 "medium",
                 {0.0f, 0.5f}
             );
-            descriptionLabel->limitLabelWidth(cardWidth - 90.0f, 0.17f, 0.12f);
+            descriptionLabel->limitLabelWidth(cardWidth - 90.0f, 0.25f, 0.19f);
             m_root->addChild(descriptionLabel, 4);
 
             double progress = card.type == "PROGRESSIVE"
@@ -3595,20 +3599,20 @@ class CorumRankedLayer final : public CCLayerColor {
                     : fmt::format("{} · {} AP", upper(card.rarity), card.rewardAp);
             auto* progressLabel = makeLabel(
                 progressText,
-                0.21f,
-                {center.x - cardWidth / 2.0f + 10.0f, center.y - 11.0f},
+                0.30f,
+                {center.x - cardWidth / 2.0f + 10.0f, center.y - 13.0f},
                 card.maxed ? kGold : corum::ranked::ui::Text,
                 "black",
                 {0.0f, 0.5f}
             );
-            progressLabel->limitLabelWidth(cardWidth - 92.0f, 0.21f, 0.13f);
+            progressLabel->limitLabelWidth(cardWidth - 92.0f, 0.30f, 0.21f);
             m_root->addChild(progressLabel, 4);
             auto* barBack = CCLayerColor::create({40, 50, 68, 220});
-            barBack->setContentSize({cardWidth - 92.0f, 6.0f});
-            barBack->setPosition({center.x - cardWidth / 2.0f + 10.0f, center.y - 30.0f});
+            barBack->setContentSize({cardWidth - 92.0f, 7.0f});
+            barBack->setPosition({center.x - cardWidth / 2.0f + 10.0f, center.y - 34.0f});
             m_root->addChild(barBack, 3);
             auto* barFill = CCLayerColor::create({accent.r, accent.g, accent.b, 245});
-            barFill->setContentSize({static_cast<float>((cardWidth - 92.0f) * progress), 6.0f});
+            barFill->setContentSize({static_cast<float>((cardWidth - 92.0f) * progress), 7.0f});
             barFill->setPosition(barBack->getPosition());
             m_root->addChild(barFill, 4);
 
@@ -3626,7 +3630,7 @@ class CorumRankedLayer final : public CCLayerColor {
                 {center.x + cardWidth / 2.0f - 39.0f, center.y + 14.0f},
                 menu_selector(CorumRankedLayer::onAchievementClaim),
                 false,
-                0.44f
+                0.50f
             );
             claim->setTag(static_cast<int>(index));
             claim->setEnabled(
@@ -3644,7 +3648,7 @@ class CorumRankedLayer final : public CCLayerColor {
                 {center.x + cardWidth / 2.0f - 39.0f, center.y - 18.0f},
                 menu_selector(CorumRankedLayer::onAchievementTitle),
                 false,
-                0.44f
+                0.50f
             );
             titleButton->setTag(static_cast<int>(index));
             titleButton->setEnabled(titleUnlocked && !view.achievements.loading);
@@ -3656,7 +3660,7 @@ class CorumRankedLayer final : public CCLayerColor {
                 {size.width / 2.0f - 66.0f, 20.0f},
                 menu_selector(CorumRankedLayer::onAchievementPrevious),
                 false,
-                0.46f
+                0.52f
             );
             previous->setEnabled(m_achievementPage > 0);
             auto* next = addButton(
@@ -3664,12 +3668,12 @@ class CorumRankedLayer final : public CCLayerColor {
                 {size.width / 2.0f + 66.0f, 20.0f},
                 menu_selector(CorumRankedLayer::onAchievementNext),
                 false,
-                0.46f
+                0.52f
             );
             next->setEnabled(m_achievementPage + 1 < pageCount);
             auto* page = makeLabel(
                 fmt::format("{} / {}", m_achievementPage + 1, pageCount),
-                0.24f,
+                0.32f,
                 {size.width / 2.0f, 20.0f},
                 corum::ranked::ui::Text,
                 "black"

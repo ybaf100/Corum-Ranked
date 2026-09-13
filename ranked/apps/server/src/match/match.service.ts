@@ -2202,7 +2202,11 @@ export class MatchService {
       },
     );
     let achievementUnlocks: Readonly<Record<string, readonly unknown[]>> = {};
-    if (current.match_type === "RANKED_PVP") {
+    // Debug Bot is the development harness for the production result path.
+    // When explicitly enabled, it must exercise Achievement progression too so
+    // Force Win/Lose and natural Bot Matches can validate the same server-side
+    // metrics, unlocks, and Claim flow without changing real PvP authority.
+    if (current.match_type === "RANKED_PVP" || current.match_type === "DEBUG_BOT") {
       const lastAttemptClears = await transaction.query<LastAttemptClearRow>(
         `SELECT a.player_id, COUNT(*)::int AS clear_count
          FROM ranked_attempts a
