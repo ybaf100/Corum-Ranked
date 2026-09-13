@@ -40,6 +40,21 @@ test('Trophy badge and Claim state remain independent and bounded', () => {
     assert.match(presentation, /if \(count > 99\) return "99\+"/);
 });
 
+test('Achievement action buttons keep the native-readable hotfix sizing', () => {
+    const selector = body(popup, 'void renderAchievementTitleSelector(', 'void renderAchievements(');
+    const achievements = body(popup, 'void renderAchievements(', 'void renderHistoryList(');
+
+    assert.match(selector, /static_cast<float>\(level - 1\) \* 72\.0f/);
+    assert.match(selector, /onAchievementTitleLevel[\s\S]{0,120}0\.52f/);
+    assert.match(selector, /onAchievementTitleClear[\s\S]{0,120}0\.56f/);
+    assert.match(selector, /onAchievementTitleSelectorClose[\s\S]{0,120}0\.56f/);
+
+    assert.match(achievements, /onAchievementClaim[\s\S]{0,120}0\.44f/);
+    assert.match(achievements, /onAchievementTitle\)[\s\S]{0,120}0\.44f/);
+    assert.match(achievements, /onAchievementPrevious[\s\S]{0,120}0\.46f/);
+    assert.match(achievements, /onAchievementNext[\s\S]{0,120}0\.46f/);
+});
+
 test('Result notices are queued only from settled Match and Placement Result views', () => {
     const matchResult = body(popup, 'void renderResult(', 'ccColor3B achievementCardAccent(');
     const placementResult = body(popup, 'void renderPlacementFinal(', 'void renderPlacement(');
