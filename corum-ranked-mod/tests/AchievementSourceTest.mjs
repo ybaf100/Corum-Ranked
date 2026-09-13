@@ -40,6 +40,9 @@ test('Trophy badge and Claim state remain independent and bounded', () => {
     assert.match(presentation, /if \(count > 99\) return "99\+"/);
 });
 
+// These values intentionally guard the effective native-device readability floor:
+// action captions are scaled again by their button roots, so reducing either layer
+// can make Korean/English labels unreadably small even when the layout still fits.
 test('Lobby and Achievement text keep native-readable sizing', () => {
     const actionVisual = body(popup, 'CCNode* makeActionButtonVisual(', 'std::string resourceKey(');
     const language = body(popup, 'void addLanguageSelector()', 'void addStatusPill(');
