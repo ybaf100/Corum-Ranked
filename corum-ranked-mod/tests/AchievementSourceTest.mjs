@@ -70,6 +70,20 @@ test('Lobby and Achievement text keep native-readable sizing', () => {
     assert.match(achievements, /onAchievementNext[\s\S]{0,120}0\.52f/);
 });
 
+test('Achievement selector is a true modal and the lobby badge uses stable Corum chrome', () => {
+    const main = body(popup, 'void renderMain(', 'void renderPlacementMap(');
+    const achievements = body(popup, 'void renderAchievements(', 'void renderHistoryList(');
+
+    assert.doesNotMatch(main, /GJ_button_06\.png/);
+    assert.match(main, /corum::ranked::ui::pill/);
+    assert.match(main, /ranked-achievement-notification-badge/);
+
+    assert.match(achievements, /auto const titleSelectorOpen = !m_titleSelectorAchievement\.empty\(\)/);
+    assert.match(achievements, /if \(!titleSelectorOpen\) addTopBack\(false\)/);
+    assert.match(achievements, /if \(!titleSelectorOpen\) \{[\s\S]*onAchievementClaim[\s\S]*onAchievementTitle/);
+    assert.match(achievements, /if \(pageCount > 1 && !titleSelectorOpen\)/);
+});
+
 test('Result notices are queued only from settled Match and Placement Result views', () => {
     const matchResult = body(popup, 'void renderResult(', 'ccColor3B achievementCardAccent(');
     const placementResult = body(popup, 'void renderPlacementFinal(', 'void renderPlacement(');

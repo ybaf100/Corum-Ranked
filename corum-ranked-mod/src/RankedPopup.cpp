@@ -1947,17 +1947,22 @@ class CorumRankedLayer final : public CCLayerColor {
             view.achievements.unclaimedRewardCount
         );
         if (!badgeText.empty()) {
-            auto* badgeRoot = CCNode::create();
-            badgeRoot->setPosition({47.0f, 24.0f});
-            auto* badgeCircle = CCSprite::createWithSpriteFrameName("GJ_button_06.png");
-            if (badgeCircle) {
-                badgeCircle->setColor(kRed);
-                badgeCircle->setScale(badgeText == "99+" ? 0.34f : 0.29f);
-                badgeRoot->addChild(badgeCircle, 0);
-            }
-            auto* badgeLabel = makeLabel(badgeText, badgeText == "99+" ? 0.19f : 0.23f, {0.0f, 0.0f}, corum::ranked::ui::Text, "black");
-            badgeRoot->addChild(badgeLabel, 1);
-            trophyVisual->addChild(badgeRoot, 10);
+            // Do not use a heavily downscaled vanilla GD button sprite here.
+            // Some native renderers expose its internal sprite pieces as detached
+            // squares at this size. A Corum pill is deterministic on every target.
+            auto const trophySize = trophyVisual->getContentSize();
+            auto const badgeWidth = badgeText == "99+" ? 38.0f : 26.0f;
+            auto* badge = corum::ranked::ui::pill(
+                badgeText,
+                {badgeWidth, 19.0f},
+                {trophySize.width - 5.0f, trophySize.height - 4.0f},
+                kRed,
+                badgeText == "99+" ? 0.27f : 0.35f,
+                corum::ranked::ui::Text,
+                true
+            );
+            badge->setID("ranked-achievement-notification-badge"_spr);
+            trophyVisual->addChild(badge, 10);
         }
 
         auto const leftCenter = CCPoint{size.width / 2.0f - 118.0f, size.height / 2.0f - 2.0f};
@@ -3483,7 +3488,11 @@ class CorumRankedLayer final : public CCLayerColor {
 
     void renderAchievements(RuntimeView const& view) {
         auto const size = CCDirector::sharedDirector()->getWinSize();
-        addTopBack(false);
+        // m_menu is a sibling above m_root, so base-page CCMenu items would render
+        // above the selector dim/panel even with a larger child z-order on m_root.
+        // While the selector is open, render only its controls into m_menu.
+        auto const titleSelectorOpen = !m_titleSelectorAchievement.empty();
+        if (!titleSelectorOpen) addTopBack(false);
         addScreenHeader(
             tr("achievements", "ACHIEVEMENTS"),
             tr("achievement-subtitle", "PROGRESS · AP · TITLES"),
@@ -3616,45 +3625,47 @@ class CorumRankedLayer final : public CCLayerColor {
             barFill->setPosition(barBack->getPosition());
             m_root->addChild(barFill, 4);
 
-            auto const claimState = corum::ranked::achievementClaimState(
-                card.unlocked,
-                card.currentLevel,
-                card.claimableRewards
-            );
-            auto* claim = addButton(
-                claimState == corum::ranked::AchievementClaimState::Unclaimed
-                    ? fmt::format("CLAIM +{}", card.claimableAp)
-                    : claimState == corum::ranked::AchievementClaimState::Claimed
-                        ? tr("claimed", "CLAIMED")
-                        : tr("locked", "LOCKED"),
-                {center.x + cardWidth / 2.0f - 39.0f, center.y + 14.0f},
-                menu_selector(CorumRankedLayer::onAchievementClaim),
-                false,
-                0.50f
-            );
-            claim->setTag(static_cast<int>(index));
-            claim->setEnabled(
-                claimState == corum::ranked::AchievementClaimState::Unclaimed &&
-                !view.achievements.loading
-            );
+            if (!titleSelectorOpen) {
+                auto const claimState = corum::ranked::achievementClaimState(
+                    card.unlocked,
+                    card.currentLevel,
+                    card.claimableRewards
+                );
+                auto* claim = addButton(
+                    claimState == corum::ranked::AchievementClaimState::Unclaimed
+                        ? fmt::format("CLAIM +{}", card.claimableAp)
+                        : claimState == corum::ranked::AchievementClaimState::Claimed
+                            ? tr("claimed", "CLAIMED")
+                            : tr("locked", "LOCKED"),
+                    {center.x + cardWidth / 2.0f - 39.0f, center.y + 14.0f},
+                    menu_selector(CorumRankedLayer::onAchievementClaim),
+                    false,
+                    0.50f
+                );
+                claim->setTag(static_cast<int>(index));
+                claim->setEnabled(
+                    claimState == corum::ranked::AchievementClaimState::Unclaimed &&
+                    !view.achievements.loading
+                );
 
-            auto const titleUnlocked = card.type == "PROGRESSIVE"
-                ? card.currentLevel > 0
-                : card.unlocked;
-            auto const equipped = view.achievements.equippedTitle.active &&
-                view.achievements.equippedTitle.achievementId == card.id;
-            auto* titleButton = addButton(
-                equipped ? tr("current", "CURRENT") : tr("set-title", "TITLE"),
-                {center.x + cardWidth / 2.0f - 39.0f, center.y - 18.0f},
-                menu_selector(CorumRankedLayer::onAchievementTitle),
-                false,
-                0.50f
-            );
-            titleButton->setTag(static_cast<int>(index));
-            titleButton->setEnabled(titleUnlocked && !view.achievements.loading);
+                auto const titleUnlocked = card.type == "PROGRESSIVE"
+                    ? card.currentLevel > 0
+                    : card.unlocked;
+                auto const equipped = view.achievements.equippedTitle.active &&
+                    view.achievements.equippedTitle.achievementId == card.id;
+                auto* titleButton = addButton(
+                    equipped ? tr("current", "CURRENT") : tr("set-title", "TITLE"),
+                    {center.x + cardWidth / 2.0f - 39.0f, center.y - 18.0f},
+                    menu_selector(CorumRankedLayer::onAchievementTitle),
+                    false,
+                    0.50f
+                );
+                titleButton->setTag(static_cast<int>(index));
+                titleButton->setEnabled(titleUnlocked && !view.achievements.loading);
+            }
         }
 
-        if (pageCount > 1) {
+        if (pageCount > 1 && !titleSelectorOpen) {
             auto* previous = addButton(
                 "<",
                 {size.width / 2.0f - 66.0f, 20.0f},
