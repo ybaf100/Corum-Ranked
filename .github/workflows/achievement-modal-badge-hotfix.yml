@@ -1,0 +1,80 @@
+name: One-shot Achievement Modal and Badge Hotfix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/achievement-modal-badge-hotfix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Patch achievement modal ownership and notification badge
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_exact(text, old, new, label, count=1):
+              actual = text.count(old)
+              if actual != count:
+                  raise SystemExit(f'{label}: expected {count} match(es), got {actual}')
+              return text.replace(old, new, count)
+
+          popup_path = Path('corum-ranked-mod/src/RankedPopup.cpp')
+          popup = popup_path.read_text(encoding='utf-8')
+
+          popup = replace_exact(
+              popup,
+              '''        if (!badgeText.empty()) {\n            auto* badgeRoot = CCNode::create();\n            badgeRoot->setPosition({47.0f, 24.0f});\n            auto* badgeCircle = CCSprite::createWithSpriteFrameName("GJ_button_06.png");\n            if (badgeCircle) {\n                badgeCircle->setColor(kRed);\n                badgeCircle->setScale(badgeText == "99+" ? 0.34f : 0.29f);\n                badgeRoot->addChild(badgeCircle, 0);\n            }\n            auto* badgeLabel = makeLabel(badgeText, badgeText == "99+" ? 0.19f : 0.23f, {0.0f, 0.0f}, corum::ranked::ui::Text, "black");\n            badgeRoot->addChild(badgeLabel, 1);\n            trophyVisual->addChild(badgeRoot, 10);\n        }\n''',
+              '''        if (!badgeText.empty()) {\n            // Do not use a heavily downscaled vanilla GD button sprite here.\n            // Some native renderers expose its internal sprite pieces as detached\n            // squares at this size. A Corum pill is deterministic on every target.\n            auto const trophySize = trophyVisual->getContentSize();\n            auto const badgeWidth = badgeText == "99+" ? 38.0f : 26.0f;\n            auto* badge = corum::ranked::ui::pill(\n                badgeText,\n                {badgeWidth, 19.0f},\n                {trophySize.width - 5.0f, trophySize.height - 4.0f},\n                kRed,\n                badgeText == "99+" ? 0.27f : 0.35f,\n                corum::ranked::ui::Text,\n                true\n            );\n            badge->setID("ranked-achievement-notification-badge"_spr);\n            trophyVisual->addChild(badge, 10);\n        }\n''',
+              'achievement notification badge',
+          )
+
+          popup = replace_exact(
+              popup,
+              '''    void renderAchievements(RuntimeView const& view) {\n        auto const size = CCDirector::sharedDirector()->getWinSize();\n        addTopBack(false);\n''',
+              '''    void renderAchievements(RuntimeView const& view) {\n        auto const size = CCDirector::sharedDirector()->getWinSize();\n        // m_menu is a sibling above m_root, so base-page CCMenu items would render\n        // above the selector dim/panel even with a larger child z-order on m_root.\n        // While the selector is open, render only its controls into m_menu.\n        auto const titleSelectorOpen = !m_titleSelectorAchievement.empty();\n        if (!titleSelectorOpen) addTopBack(false);\n''',
+              'achievement modal state',
+          )
+
+          old_actions = '''            auto const claimState = corum::ranked::achievementClaimState(\n                card.unlocked,\n                card.currentLevel,\n                card.claimableRewards\n            );\n            auto* claim = addButton(\n                claimState == corum::ranked::AchievementClaimState::Unclaimed\n                    ? fmt::format("CLAIM +{}", card.claimableAp)\n                    : claimState == corum::ranked::AchievementClaimState::Claimed\n                        ? tr("claimed", "CLAIMED")\n                        : tr("locked", "LOCKED"),\n                {center.x + cardWidth / 2.0f - 39.0f, center.y + 14.0f},\n                menu_selector(CorumRankedLayer::onAchievementClaim),\n                false,\n                0.50f\n            );\n            claim->setTag(static_cast<int>(index));\n            claim->setEnabled(\n                claimState == corum::ranked::AchievementClaimState::Unclaimed &&\n                !view.achievements.loading\n            );\n\n            auto const titleUnlocked = card.type == "PROGRESSIVE"\n                ? card.currentLevel > 0\n                : card.unlocked;\n            auto const equipped = view.achievements.equippedTitle.active &&\n                view.achievements.equippedTitle.achievementId == card.id;\n            auto* titleButton = addButton(\n                equipped ? tr("current", "CURRENT") : tr("set-title", "TITLE"),\n                {center.x + cardWidth / 2.0f - 39.0f, center.y - 18.0f},\n                menu_selector(CorumRankedLayer::onAchievementTitle),\n                false,\n                0.50f\n            );\n            titleButton->setTag(static_cast<int>(index));\n            titleButton->setEnabled(titleUnlocked && !view.achievements.loading);\n'''
+          new_actions = '''            if (!titleSelectorOpen) {\n                auto const claimState = corum::ranked::achievementClaimState(\n                    card.unlocked,\n                    card.currentLevel,\n                    card.claimableRewards\n                );\n                auto* claim = addButton(\n                    claimState == corum::ranked::AchievementClaimState::Unclaimed\n                        ? fmt::format("CLAIM +{}", card.claimableAp)\n                        : claimState == corum::ranked::AchievementClaimState::Claimed\n                            ? tr("claimed", "CLAIMED")\n                            : tr("locked", "LOCKED"),\n                    {center.x + cardWidth / 2.0f - 39.0f, center.y + 14.0f},\n                    menu_selector(CorumRankedLayer::onAchievementClaim),\n                    false,\n                    0.50f\n                );\n                claim->setTag(static_cast<int>(index));\n                claim->setEnabled(\n                    claimState == corum::ranked::AchievementClaimState::Unclaimed &&\n                    !view.achievements.loading\n                );\n\n                auto const titleUnlocked = card.type == "PROGRESSIVE"\n                    ? card.currentLevel > 0\n                    : card.unlocked;\n                auto const equipped = view.achievements.equippedTitle.active &&\n                    view.achievements.equippedTitle.achievementId == card.id;\n                auto* titleButton = addButton(\n                    equipped ? tr("current", "CURRENT") : tr("set-title", "TITLE"),\n                    {center.x + cardWidth / 2.0f - 39.0f, center.y - 18.0f},\n                    menu_selector(CorumRankedLayer::onAchievementTitle),\n                    false,\n                    0.50f\n                );\n                titleButton->setTag(static_cast<int>(index));\n                titleButton->setEnabled(titleUnlocked && !view.achievements.loading);\n            }\n'''
+          popup = replace_exact(popup, old_actions, new_actions, 'achievement base card actions')
+          popup = replace_exact(
+              popup,
+              '        if (pageCount > 1) {\n',
+              '        if (pageCount > 1 && !titleSelectorOpen) {\n',
+              'achievement pagination modal isolation',
+          )
+          popup_path.write_text(popup, encoding='utf-8')
+
+          test_path = Path('corum-ranked-mod/tests/AchievementSourceTest.mjs')
+          test = test_path.read_text(encoding='utf-8')
+          marker = '''test('Result notices are queued only from settled Match and Placement Result views', () => {\n'''
+          new_test = '''test('Achievement selector is a true modal and the lobby badge uses stable Corum chrome', () => {\n    const main = body(popup, 'void renderMain(', 'void renderPlacementMap(');\n    const achievements = body(popup, 'void renderAchievements(', 'void renderHistoryList(');\n\n    assert.doesNotMatch(main, /GJ_button_06\\.png/);\n    assert.match(main, /corum::ranked::ui::pill/);\n    assert.match(main, /ranked-achievement-notification-badge/);\n\n    assert.match(achievements, /auto const titleSelectorOpen = !m_titleSelectorAchievement\\.empty\\(\\)/);\n    assert.match(achievements, /if \\(!titleSelectorOpen\\) addTopBack\\(false\\)/);\n    assert.match(achievements, /if \\(!titleSelectorOpen\\) \\{[\\s\\S]*onAchievementClaim[\\s\\S]*onAchievementTitle/);\n    assert.match(achievements, /if \\(pageCount > 1 && !titleSelectorOpen\\)/);\n});\n\n'''
+          test = replace_exact(test, marker, new_test + marker, 'achievement modal source test')
+          test_path.write_text(test, encoding='utf-8')
+          PY
+
+          node --test corum-ranked-mod/tests/AchievementSourceTest.mjs
+          git diff --check
+
+      - name: Commit hotfix and remove one-shot runner
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/achievement-modal-badge-hotfix.yml
+          git add corum-ranked-mod/src/RankedPopup.cpp corum-ranked-mod/tests/AchievementSourceTest.mjs
+          git commit -m "fix(achievements): isolate title modal and repair badge"
+          git push origin HEAD:main
