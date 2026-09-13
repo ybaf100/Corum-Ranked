@@ -78,6 +78,8 @@ test('Achievement selector is a true modal and the lobby badge uses stable Corum
     assert.match(main, /corum::ranked::ui::pill/);
     assert.match(main, /ranked-achievement-notification-badge/);
 
+    // m_menu is a sibling above m_root, so the selector must omit every base-page
+    // menu item instead of relying on the dim/panel child z-order to cover it.
     assert.match(achievements, /auto const titleSelectorOpen = !m_titleSelectorAchievement\.empty\(\)/);
     assert.match(achievements, /if \(!titleSelectorOpen\) addTopBack\(false\)/);
     assert.match(achievements, /if \(!titleSelectorOpen\) \{[\s\S]*onAchievementClaim[\s\S]*onAchievementTitle/);
