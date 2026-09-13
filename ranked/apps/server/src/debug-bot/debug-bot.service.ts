@@ -520,7 +520,7 @@ export class DebugBotService implements OnModuleInit, OnApplicationShutdown {
       driver.attemptTarget,
       Math.max(driver.attemptProgress, elapsedMs > 0 ? Math.max(1, projectedProgress) : 0),
     );
-    if (!deathmatch && nextProgress !== driver.attemptProgress) {
+    if (nextProgress !== driver.attemptProgress) {
       await this.matches.updateAttemptProgress(
         driver.creation.matchId,
         driver.creation.botMatchToken,
