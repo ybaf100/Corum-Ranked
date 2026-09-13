@@ -44,6 +44,7 @@ import type {
   SkipPlacementDto,
   StartPlacementDto,
 } from "./placement.dto.js";
+import { AchievementService } from "../achievement/achievement.service.js";
 
 type PlacementState =
   | "POOL_SELECTION"
@@ -166,6 +167,7 @@ export class PlacementService {
     @Inject(RANDOM_SOURCE) private readonly random: RandomSource,
     private readonly config: RankedConfigService,
     private readonly sessions: SessionService,
+    private readonly achievements: AchievementService,
   ) {}
 
   public async active(session: RankedSessionContext) {
@@ -930,6 +932,13 @@ export class PlacementService {
     const finalized = finalizePlacementScore(finalHiddenMmr, snapshot.operational.tierBands);
     const placementGames = snapshot.operational.mmrPolicy?.placementGames;
     if (!placementGames) throw new Error("Placement snapshot has no MMR policy");
+    await this.achievements.recordPlacementCompletion(
+      transaction,
+      run.player_id,
+      run.id,
+      finalized.displayedTier === "GOLD",
+      now,
+    );
     await transaction.query(
       `UPDATE ranked_profiles
        SET hidden_mmr = $1, visible_ranked_score = $2, displayed_tier = $3,
@@ -1019,6 +1028,13 @@ export class PlacementService {
         Number(currentMap.clear_count),
       );
     }
+    const achievementUnlocks = run.state === "PLACEMENT_RESULT"
+      ? await this.achievements.noticesForSource(
+          this.database,
+          playerId,
+          `placement:${run.id}:achievement:${playerId}`,
+        )
+      : [];
 
     return {
       runId: run.id,
@@ -1075,6 +1091,7 @@ export class PlacementService {
         skipped: run.completion_kind === "SKIPPED",
         finalizedAt: iso(run.finalized_at),
         acknowledgedAt: iso(run.result_acknowledged_at),
+        achievementUnlocks,
       } : null,
       deadlineAt: iso(run.deadline_at),
       serverNow: now.toISOString(),

@@ -1,4 +1,5 @@
 #include "../src/domain/AttemptScoring.hpp"
+#include "../src/domain/AchievementPresentation.hpp"
 #include "../src/domain/EnvironmentPolicy.hpp"
 #include "../src/domain/HudPresentation.hpp"
 #include "../src/domain/PlacementStageMerge.hpp"
@@ -530,6 +531,53 @@ void spectatorLevelEntryTests() {
     assert(!spectatorLevelEntryAllowed(input));
 }
 
+void deathmatchIconProgressTests() {
+    // A new Attempt can start below the committed best without moving either
+    // player's icon backwards. Server live projection and local live progress
+    // can only advance the same-map display.
+    assert(deathmatchIconProgress(73.0, 73.0, 40.0) == 73.0);
+    assert(deathmatchIconProgress(73.0, 73.0, 81.0) == 81.0);
+    assert(deathmatchIconProgress(88.0, 88.0, std::nullopt) == 88.0);
+    assert(deathmatchIconProgress(73.0, 81.0, 60.0) == 81.0);
+    // A new Death Match sequence/map resets all authoritative projections.
+    assert(deathmatchIconProgress(0.0, 0.0, 12.0) == 12.0);
+    assert(deathmatchIconProgress(0.0, 0.0, std::nullopt) == 0.0);
+}
+
+void achievementPresentationTests() {
+    assert(achievementStageLabel(1) == "I");
+    assert(achievementStageLabel(5) == "V");
+    assert(achievementStageLabel(6).empty());
+    assert(achievementDisplayColor(1) == AchievementDisplayColor::Gray);
+    assert(achievementDisplayColor(2) == AchievementDisplayColor::Bronze);
+    assert(achievementDisplayColor(3) == AchievementDisplayColor::Silver);
+    assert(achievementDisplayColor(4) == AchievementDisplayColor::Gold);
+    assert(achievementDisplayColor(5) == AchievementDisplayColor::Diamond);
+    assert(std::abs(achievementGauge(73.0, 50.0, 100.0, false) - 0.46) < 0.0001);
+    assert(achievementGauge(812.0, 500.0, std::nullopt, true) == 1.0);
+    assert(achievementBadgeText(0).empty());
+    assert(achievementBadgeText(1) == "1");
+    assert(achievementBadgeText(99) == "99");
+    assert(achievementBadgeText(100) == "99+");
+    assert(achievementTitleLevelSelectable(1, 4));
+    assert(achievementTitleLevelSelectable(4, 4));
+    assert(!achievementTitleLevelSelectable(5, 4));
+    assert(achievementClaimState(false, 0, 0) == AchievementClaimState::Locked);
+    assert(achievementClaimState(true, 0, 1) == AchievementClaimState::Unclaimed);
+    assert(achievementClaimState(false, 3, 2) == AchievementClaimState::Unclaimed);
+    assert(achievementClaimState(true, 0, 0) == AchievementClaimState::Claimed);
+    assert(achievementClaimState(false, 3, 0) == AchievementClaimState::Claimed);
+
+    AchievementToastQueue queue;
+    assert(queue.enqueue("match-1:ranked_wins:1"));
+    assert(queue.enqueue("match-1:ranked_wins:2"));
+    assert(!queue.enqueue("match-1:ranked_wins:1"));
+    assert(queue.size() == 2);
+    assert(queue.pop() == "match-1:ranked_wins:1");
+    assert(queue.pop() == "match-1:ranked_wins:2");
+    assert(queue.empty());
+}
+
 } // namespace
 
 int main() {
@@ -543,5 +591,7 @@ int main() {
     practiceIsolationTests();
     placementFinalWindowResetTests();
     spectatorLevelEntryTests();
+    deathmatchIconProgressTests();
+    achievementPresentationTests();
     std::cout << "Corum Ranked domain tests passed\n";
 }

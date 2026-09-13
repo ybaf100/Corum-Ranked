@@ -1,4 +1,5 @@
 export * from "./anti-cheat.js";
+export * from "./achievements.js";
 export * from "./ban.js";
 export * from "./config.js";
 export * from "./deathmatch.js";

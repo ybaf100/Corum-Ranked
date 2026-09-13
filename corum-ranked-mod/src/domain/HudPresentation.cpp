@@ -66,6 +66,21 @@ HudLayout layoutHud(float width, float height) {
     };
 }
 
+double deathmatchIconProgress(
+    double committedBest,
+    double serverDisplay,
+    std::optional<double> validLiveProgress
+) {
+    auto result = std::max(
+        std::clamp(committedBest, 0.0, 100.0),
+        std::clamp(serverDisplay, 0.0, 100.0)
+    );
+    if (validLiveProgress && std::isfinite(*validLiveProgress)) {
+        result = std::max(result, std::clamp(*validLiveProgress, 0.0, 100.0));
+    }
+    return result;
+}
+
 HudPresentation presentHud(HudInput const& input) {
     auto const ownIsA = input.side == "A";
     auto const ownScore = ownIsA ? input.scoreA : input.scoreB;

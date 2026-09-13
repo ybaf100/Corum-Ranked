@@ -25,6 +25,8 @@ const REQUIRED_MIGRATIONS = [
   "0006_v050_dynamic_csmp_tiers.sql",
   "0007_solo_stage_placement.sql",
   "0008_placement_beta9.sql",
+  "0009_placement_stage_count.sql",
+  "0010_achievements_v1.sql",
 ] as const;
 
 export interface RankedSchemaStatus {
@@ -42,6 +44,10 @@ type SchemaProbeRow = QueryResultRow & {
   ranked_placement_runs: boolean;
   ranked_placement_maps: boolean;
   ranked_placement_attempts: boolean;
+  ranked_achievement_events: boolean;
+  ranked_achievement_metrics: boolean;
+  ranked_achievement_unlocks: boolean;
+  ranked_ap_ledger: boolean;
   match_type: boolean;
   debug_config: boolean;
   round_alternate_level_id: boolean;
@@ -50,6 +56,9 @@ type SchemaProbeRow = QueryResultRow & {
   deathmatch_attempt_played_level_id: boolean;
   placement_prepare_deadline_at: boolean;
   placement_completion_kind: boolean;
+  profile_total_ap: boolean;
+  profile_equipped_achievement: boolean;
+  profile_equipped_achievement_level: boolean;
 };
 
 @Injectable()
@@ -138,6 +147,10 @@ export class DatabaseService implements DatabasePort, OnModuleInit, OnApplicatio
           to_regclass('public.ranked_placement_runs') IS NOT NULL AS ranked_placement_runs,
           to_regclass('public.ranked_placement_maps') IS NOT NULL AS ranked_placement_maps,
           to_regclass('public.ranked_placement_attempts') IS NOT NULL AS ranked_placement_attempts,
+          to_regclass('public.ranked_achievement_events') IS NOT NULL AS ranked_achievement_events,
+          to_regclass('public.ranked_achievement_metrics') IS NOT NULL AS ranked_achievement_metrics,
+          to_regclass('public.ranked_achievement_unlocks') IS NOT NULL AS ranked_achievement_unlocks,
+          to_regclass('public.ranked_ap_ledger') IS NOT NULL AS ranked_ap_ledger,
           EXISTS (
             SELECT 1 FROM information_schema.columns
             WHERE table_schema = 'public' AND table_name = 'ranked_matches' AND column_name = 'match_type'
@@ -169,7 +182,19 @@ export class DatabaseService implements DatabasePort, OnModuleInit, OnApplicatio
           EXISTS (
             SELECT 1 FROM information_schema.columns
             WHERE table_schema = 'public' AND table_name = 'ranked_placement_runs' AND column_name = 'completion_kind'
-          ) AS placement_completion_kind
+          ) AS placement_completion_kind,
+          EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = 'ranked_profiles' AND column_name = 'total_ap'
+          ) AS profile_total_ap,
+          EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = 'ranked_profiles' AND column_name = 'equipped_achievement_id'
+          ) AS profile_equipped_achievement,
+          EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = 'ranked_profiles' AND column_name = 'equipped_achievement_level'
+          ) AS profile_equipped_achievement_level
       `);
       const row = result.rows[0];
       if (!row) return { ready: false, missing: ["schema probe returned no row"] };
@@ -184,6 +209,10 @@ export class DatabaseService implements DatabasePort, OnModuleInit, OnApplicatio
         ["ranked_placement_runs", "table ranked_placement_runs"],
         ["ranked_placement_maps", "table ranked_placement_maps"],
         ["ranked_placement_attempts", "table ranked_placement_attempts"],
+        ["ranked_achievement_events", "table ranked_achievement_events"],
+        ["ranked_achievement_metrics", "table ranked_achievement_metrics"],
+        ["ranked_achievement_unlocks", "table ranked_achievement_unlocks"],
+        ["ranked_ap_ledger", "table ranked_ap_ledger"],
         ["match_type", "ranked_matches.match_type"],
         ["debug_config", "ranked_matches.debug_config"],
         ["round_alternate_level_id", "ranked_rounds.alternate_level_id"],
@@ -192,6 +221,9 @@ export class DatabaseService implements DatabasePort, OnModuleInit, OnApplicatio
         ["deathmatch_attempt_played_level_id", "ranked_deathmatch_attempts.played_level_id"],
         ["placement_prepare_deadline_at", "ranked_placement_maps.prepare_deadline_at"],
         ["placement_completion_kind", "ranked_placement_runs.completion_kind"],
+        ["profile_total_ap", "ranked_profiles.total_ap"],
+        ["profile_equipped_achievement", "ranked_profiles.equipped_achievement_id"],
+        ["profile_equipped_achievement_level", "ranked_profiles.equipped_achievement_level"],
       ];
       const missing = required.filter(([key]) => !row[key]).map(([, label]) => label);
 

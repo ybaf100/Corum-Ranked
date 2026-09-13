@@ -70,6 +70,79 @@ struct PromotionSeriesView {
     std::vector<std::string> results;
 };
 
+struct AchievementTitleView {
+    bool active = false;
+    std::string achievementId;
+    std::optional<int> level;
+    std::string displayLabel;
+    std::string nameKo;
+    std::string nameEn;
+    std::string displayColor;
+    std::string rarity;
+};
+
+struct AchievementUnlockNoticeView {
+    std::string achievementId;
+    std::string type;
+    std::optional<int> level;
+    std::string displayLabel;
+    bool maxed = false;
+    int rewardAp = 0;
+    std::string nameKo;
+    std::string nameEn;
+    std::string rarity;
+};
+
+struct AchievementLevelView {
+    int level = 0;
+    std::string grade;
+    std::string displayLabel;
+    std::string displayColor;
+    int threshold = 0;
+    int ap = 0;
+};
+
+struct AchievementRewardView {
+    std::optional<int> level;
+    int rewardAp = 0;
+    std::string unlockedAt;
+    std::string claimedAt;
+};
+
+struct AchievementCardView {
+    std::string id;
+    std::string type;
+    std::string nameKo;
+    std::string nameEn;
+    std::string descriptionKo;
+    std::string descriptionEn;
+    std::string rarity;
+    bool titleEnabled = false;
+    bool unlocked = false;
+    bool claimed = false;
+    int rewardAp = 0;
+    int currentLevel = 0;
+    std::string displayLabel;
+    int metricValue = 0;
+    std::optional<int> nextThreshold;
+    double gauge = 0.0;
+    bool maxed = false;
+    int claimableRewards = 0;
+    int claimableAp = 0;
+    std::vector<AchievementLevelView> levels;
+    std::vector<AchievementRewardView> unlocks;
+};
+
+struct AchievementView {
+    bool loaded = false;
+    bool loading = false;
+    std::string error;
+    int totalAp = 0;
+    int unclaimedRewardCount = 0;
+    AchievementTitleView equippedTitle;
+    std::vector<AchievementCardView> cards;
+};
+
 struct RankedProfileView {
     std::string displayedTier = "UNRANKED";
     std::optional<int> visibleRankedScore;
@@ -79,6 +152,7 @@ struct RankedProfileView {
     int resultStreak = 0;
     PromotionSeriesView promotion;
     bool demotionWarning = false;
+    AchievementTitleView equippedTitle;
 };
 
 struct RatingEventView {
@@ -106,6 +180,7 @@ struct PlacementFinalResultView {
     int visibleRankedScore = 0;
     std::string displayedTier = "UNRANKED";
     std::string finalizedAt;
+    std::vector<AchievementUnlockNoticeView> achievementUnlocks;
 };
 
 struct PlacementAttemptView {
@@ -218,6 +293,7 @@ struct MatchView {
     RankedProfileView profileAfterB;
     RatingEventView ratingEventA;
     RatingEventView ratingEventB;
+    std::vector<AchievementUnlockNoticeView> achievementUnlocks;
     bool spectatorActive = false;
     std::optional<int> opponentProgress;
     bool opponentFinished = false;
@@ -305,6 +381,7 @@ struct RuntimeView {
     bool historyLoading = false;
     std::string historyError;
     std::vector<HistoryMatchView> history;
+    AchievementView achievements;
 };
 
 class RankedRuntime final {
@@ -326,6 +403,10 @@ public:
     void dismissMatch();
     void queueAgain();
     void fetchHistory();
+    void fetchAchievements();
+    void claimAchievement(std::string const& achievementId);
+    void equipAchievementTitle(std::string const& achievementId, std::optional<int> level);
+    void clearAchievementTitle();
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
     // Primary API: password travels inside the options object.
     void startDebugBotMatch(DebugBotMatchOptions options);
@@ -408,6 +489,7 @@ private:
     void pollMatch();
     void parseMatchState(matjson::Value const& root);
     void parsePlacementState(matjson::Value const& root);
+    void parseAchievementState(matjson::Value const& root);
     void applyAttemptSnapshot(matjson::Value const& root);
     void promoteQueuedAttempt();
     void flushAttemptEvents();
@@ -447,6 +529,7 @@ private:
     std::string m_gameplayMatchId;
     std::string m_gameplayStartContextKey;
     std::string m_gameplayStartedAt;
+    std::string m_lastAchievementNoticeContext;
     bool m_gameplayStartEligible = false;
     std::optional<PendingStart> m_pendingStart;
     std::optional<PendingEnd> m_pendingEnd;

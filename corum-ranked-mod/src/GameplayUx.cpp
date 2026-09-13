@@ -463,18 +463,28 @@ class $modify(CorumRankedGameplayUx, PlayLayer) {
         auto const startX = progressBar->getPositionX() -
             width * progressBar->getAnchorPoint().x;
         auto const barY = progressBar->getPositionY();
-        auto const ownProgress = currentProgress(this);
-        auto const opponentProgress = static_cast<double>(std::clamp(
-            match.opponentProgress.value_or(0),
-            0,
-            100
-        ));
-        auto const close = ownActive && opponentActive &&
-            std::abs(ownProgress - opponentProgress) <= 4.0;
+        auto const ownIsA = match.side == "A";
+        auto const ownCommitted = ownIsA ? match.committedScoreA : match.committedScoreB;
+        auto const opponentCommitted = ownIsA ? match.committedScoreB : match.committedScoreA;
+        auto const ownServerDisplay = ownIsA ? match.scoreA : match.scoreB;
+        auto const opponentServerDisplay = ownIsA ? match.scoreB : match.scoreA;
+        auto const ownProgress = corum::ranked::deathmatchIconProgress(
+            ownCommitted,
+            ownServerDisplay,
+            ownActive ? std::optional<double>(currentProgress(this)) : std::nullopt
+        );
+        auto const opponentProgress = corum::ranked::deathmatchIconProgress(
+            opponentCommitted,
+            opponentServerDisplay,
+            opponentActive && match.opponentProgress
+                ? std::optional<double>(static_cast<double>(*match.opponentProgress))
+                : std::nullopt
+        );
+        auto const close = std::abs(ownProgress - opponentProgress) <= 4.0;
 
         if (m_fields->ownProgressIcon) {
-            m_fields->ownProgressIcon->setVisible(ownActive);
-            if (ownActive) {
+            m_fields->ownProgressIcon->setVisible(true);
+            {
                 m_fields->ownProgressIcon->setPosition({
                     startX + width * static_cast<float>(ownProgress / 100.0),
                     barY + (close ? 6.0f : 0.0f),
@@ -482,8 +492,8 @@ class $modify(CorumRankedGameplayUx, PlayLayer) {
             }
         }
         if (m_fields->opponentProgressIcon) {
-            m_fields->opponentProgressIcon->setVisible(opponentActive);
-            if (opponentActive) {
+            m_fields->opponentProgressIcon->setVisible(true);
+            {
                 m_fields->opponentProgressIcon->setPosition({
                     startX + width * static_cast<float>(opponentProgress / 100.0),
                     barY + (close ? -6.0f : 0.0f),

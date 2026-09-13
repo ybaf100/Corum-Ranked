@@ -25,6 +25,7 @@ import { SessionService } from "../src/session/session.service.js";
 import type { RankedSessionContext } from "../src/session/session.types.js";
 import { configDocumentFixture, environmentFixture } from "./fixtures.js";
 import { PgliteDatabase } from "./pglite-database.js";
+import { AchievementService } from "../src/achievement/achievement.service.js";
 
 let pglite: PGlite;
 let database: PgliteDatabase;
@@ -98,6 +99,8 @@ beforeAll(async () => {
     "0006_v050_dynamic_csmp_tiers.sql",
     "0007_solo_stage_placement.sql",
     "0008_placement_beta9.sql",
+    "0009_placement_stage_count.sql",
+    "0010_achievements_v1.sql",
   ]) {
     const path = fileURLToPath(new URL(`../../../migrations/${migrationName}`, import.meta.url));
     await pglite.exec(await readFile(path, "utf8"));
@@ -146,6 +149,7 @@ describe("development-only Bot Match using the production Ranked engine", () => 
       new MatchAccessService(tokens, clock),
       sessions,
       new OutboxService(ids),
+      new AchievementService(database, clock, ids),
       new InMemoryMatchRuntimeState(),
     );
     debug = new DebugBotService(environment, database, clock, random, queue, matches, config, tokens);

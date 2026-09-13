@@ -13,6 +13,7 @@ import type { CreateSessionDto } from "../src/session/session.dto.js";
 import type { RankedSessionContext } from "../src/session/session.types.js";
 import { configDocumentFixture, environmentFixture } from "./fixtures.js";
 import { PgliteDatabase } from "./pglite-database.js";
+import { AchievementService } from "../src/achievement/achievement.service.js";
 
 let pglite: PGlite;
 let database: PgliteDatabase;
@@ -31,6 +32,7 @@ beforeAll(async () => {
     "0007_solo_stage_placement.sql",
     "0008_placement_beta9.sql",
     "0009_placement_stage_count.sql",
+    "0010_achievements_v1.sql",
   ]) {
     const migrationPath = fileURLToPath(
       new URL(`../../../migrations/${migrationName}`, import.meta.url),
@@ -118,6 +120,7 @@ describe("server-authoritative solo Stage Placement", () => {
       new SeededRandom(500),
       config,
       sessions,
+      new AchievementService(database, clock, ids),
     );
     const created = await sessions.create({
       gdAccountId: "9901",
@@ -236,6 +239,7 @@ describe("server-authoritative solo Stage Placement", () => {
       new SeededRandom(501),
       config,
       sessions,
+      new AchievementService(database, clock, ids),
     );
     state = await recovered.state(runId, session) as Record<string, any>;
     expect(state).toMatchObject({
@@ -343,6 +347,7 @@ describe("server-authoritative solo Stage Placement", () => {
       new SeededRandom(502),
       config,
       sessions,
+      new AchievementService(database, clock, ids),
     );
     expect(await stageRecovered.state(runId, session)).toMatchObject({ state: "STAGE_RESULT" });
     await stageRecovered.continueResult(runId, session);
@@ -364,6 +369,9 @@ describe("server-authoritative solo Stage Placement", () => {
     expect(finalized.finalResult).not.toHaveProperty("placementRating");
     expect(finalized.finalResult).not.toHaveProperty("hiddenMmr");
     expect(finalized.finalResult.visibleRankedScore).toBeGreaterThanOrEqual(0);
+    expect(finalized.finalResult.achievementUnlocks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ achievementId: "placement_complete", type: "ONE_SHOT", rewardAp: 10 }),
+    ]));
     const beforeRepeat = await database.query<{
       finalized_at: string;
       hidden_mmr: number;
@@ -409,6 +417,12 @@ describe("server-authoritative solo Stage Placement", () => {
       [runId],
     );
     expect(evidence.rows[0]).toEqual({ maps: 10, attempts: 20 });
+    const firstStep = await database.query<{ count: number }>(
+      `SELECT COUNT(*)::int AS count FROM ranked_achievement_unlocks
+       WHERE player_id = $1 AND achievement_id = 'placement_complete'`,
+      [session.playerId],
+    );
+    expect(firstStep.rows[0]?.count).toBe(1);
   }, 30_000);
 
   it("skips exactly once to RED 150 LP and recovers the reveal until acknowledgement", async () => {
@@ -426,6 +440,7 @@ describe("server-authoritative solo Stage Placement", () => {
       new SeededRandom(900),
       config,
       sessions,
+      new AchievementService(database, clock, ids),
     );
     const created = await sessions.create({
       gdAccountId: "9902",
@@ -472,6 +487,7 @@ describe("server-authoritative solo Stage Placement", () => {
         visibleRankedScore: 150,
       },
     });
+    expect(first.finalResult.achievementUnlocks).toEqual([]);
     expect(await placement.active(session)).toMatchObject({
       active: true,
       action: "RESUME_PLACEMENT",
@@ -490,6 +506,12 @@ describe("server-authoritative solo Stage Placement", () => {
       displayed_tier: "RED",
       placement_games: 5,
     });
+    const firstStep = await database.query<{ count: number }>(
+      `SELECT COUNT(*)::int AS count FROM ranked_achievement_unlocks
+       WHERE player_id = $1 AND achievement_id = 'placement_complete'`,
+      [session.playerId],
+    );
+    expect(firstStep.rows[0]?.count).toBe(0);
     await placement.acknowledgeResult(first.runId as string, session);
     expect(await placement.active(session)).toMatchObject({ active: false, action: "RANKED_QUEUE" });
   }, 30_000);

@@ -17,6 +17,8 @@ import {
   resolveBans,
   selectDeathmatchMap,
   scoreAttempt,
+  isReverseSweep,
+  isSweepWin,
   roundDeadlineAtMs,
   startRoundAttempt,
   startRoundAttemptFromIntent,
@@ -43,6 +45,7 @@ import {
 } from "../common/runtime.module.js";
 import type { RankedConfigSnapshot } from "../config/ranked-config.document.js";
 import { DATABASE, type DatabasePort, type SqlExecutor } from "../database/database.port.js";
+import { AchievementService } from "../achievement/achievement.service.js";
 import { OutboxService } from "../relay/outbox.service.js";
 import type { RankedSessionContext } from "../session/session.types.js";
 import { SessionService } from "../session/session.service.js";
@@ -173,6 +176,9 @@ interface ProfileResultRow {
   promotion_wins_required: number | null;
   promotion_results: unknown;
   demotion_warning: boolean;
+  total_ap: number;
+  equipped_achievement_id: string | null;
+  equipped_achievement_level: number | null;
 }
 
 interface PlayerStateRow extends ProfileResultRow {
@@ -197,6 +203,17 @@ interface MatchPerformanceRow {
   score_b: number;
   clears_a: number;
   clears_b: number;
+}
+
+interface LastAttemptClearRow {
+  player_id: string;
+  clear_count: number;
+}
+
+interface AchievementDeathmatchResultRow {
+  score_a: number;
+  score_b: number;
+  winner_id: string | null;
 }
 
 interface PerfectWinRoundRow {
@@ -377,6 +394,7 @@ export class MatchService {
     private readonly access: MatchAccessService,
     private readonly sessions: SessionService,
     private readonly outbox: OutboxService,
+    private readonly achievements: AchievementService,
     @Inject(MATCH_RUNTIME_STATE) private readonly runtimeState: MatchRuntimeStatePort,
   ) {}
 
@@ -2183,6 +2201,65 @@ export class MatchService {
         maximumVisibleScoreGain: perfectWinSide === "B",
       },
     );
+    let achievementUnlocks: Readonly<Record<string, readonly unknown[]>> = {};
+    if (current.match_type === "RANKED_PVP") {
+      const lastAttemptClears = await transaction.query<LastAttemptClearRow>(
+        `SELECT a.player_id, COUNT(*)::int AS clear_count
+         FROM ranked_attempts a
+         JOIN ranked_rounds r ON r.id = a.round_id
+         WHERE r.match_id = $1 AND a.valid AND a.cleared AND a.ended_at IS NOT NULL
+           AND r.last_attempt_window_start IS NOT NULL
+           AND a.server_accepted_start_at >= r.last_attempt_window_start
+         GROUP BY a.player_id`,
+        [current.id],
+      );
+      const deathmatchResults = await transaction.query<AchievementDeathmatchResultRow>(
+        `SELECT score_a, score_b, winner_id
+         FROM ranked_deathmatches
+         WHERE match_id = $1 AND finished_at IS NOT NULL
+         ORDER BY sequence`,
+        [current.id],
+      );
+      const results = finalSeries.roundResults;
+      const factsFor = (
+        side: PlayerSide,
+        playerId: string,
+        rating: RankedRatingUpdate,
+        before: RankedRatingProfile,
+        clears: number,
+      ) => ({
+        playerId,
+        won: winner === side,
+        rankedClears: clears,
+        perfectWin: perfectWinSide === side,
+        lastAttemptClears: Number(
+          lastAttemptClears.rows.find((row) => row.player_id === playerId)?.clear_count ?? 0,
+        ),
+        reverseSweep: winner === side && isReverseSweep(results, side),
+        sweepWin: winner === side && isSweepWin(results, side),
+        promotionSucceeded: rating.promotionSucceeded,
+        reachedGold: before.displayedTier !== "GOLD" && rating.profile.displayedTier === "GOLD",
+        deathmatches: deathmatchResults.rows.map((deathmatch) => ({
+          outcome: deathmatch.winner_id === null
+            ? "TIE" as const
+            : deathmatch.winner_id === playerId ? "WIN" as const : "LOSS" as const,
+          ownBest: Number(side === "A" ? deathmatch.score_a : deathmatch.score_b),
+          opponentBest: Number(side === "A" ? deathmatch.score_b : deathmatch.score_a),
+        })),
+      });
+      achievementUnlocks = await this.achievements.recordMatchResult(
+        transaction,
+        current.id,
+        [
+          factsFor("A", current.player_a_id, ratingA, beforeA, Number(totals.clears_a)),
+          factsFor("B", current.player_b_id, ratingB, beforeB, Number(totals.clears_b)),
+        ],
+        now,
+      );
+    }
+    // Evaluate against the locked pre-match profiles before persisting the new
+    // rating. Otherwise a first GOLD result could be mistaken for historical
+    // backfill and disappear from this Match Result's toast notices.
     await this.persistRatingProfile(transaction, current.player_a_id, ratingA, winner === "A", now);
     await this.persistRatingProfile(transaction, current.player_b_id, ratingB, winner === "B", now);
     const placementGamesRequired = config.operational.mmrPolicy.placementGames;
@@ -2190,12 +2267,36 @@ export class MatchService {
       perfectWinSide,
       rankedScoreDelta: { A: ratingA.visibleScoreDelta, B: ratingB.visibleScoreDelta },
       profileBefore: {
-        A: publicRatingProfile(beforeA, placementGamesRequired),
-        B: publicRatingProfile(beforeB, placementGamesRequired),
+        A: {
+          ...publicRatingProfile(beforeA, placementGamesRequired),
+          equippedTitle: this.achievements.titleProjection(
+            profileA.equipped_achievement_id, profileA.equipped_achievement_level,
+          ),
+        },
+        B: {
+          ...publicRatingProfile(beforeB, placementGamesRequired),
+          equippedTitle: this.achievements.titleProjection(
+            profileB.equipped_achievement_id, profileB.equipped_achievement_level,
+          ),
+        },
       },
       profileAfter: {
-        A: publicRatingProfile(ratingA.profile, placementGamesRequired),
-        B: publicRatingProfile(ratingB.profile, placementGamesRequired),
+        A: {
+          ...publicRatingProfile(ratingA.profile, placementGamesRequired),
+          equippedTitle: this.achievements.titleProjection(
+            profileA.equipped_achievement_id, profileA.equipped_achievement_level,
+          ),
+        },
+        B: {
+          ...publicRatingProfile(ratingB.profile, placementGamesRequired),
+          equippedTitle: this.achievements.titleProjection(
+            profileB.equipped_achievement_id, profileB.equipped_achievement_level,
+          ),
+        },
+      },
+      achievementUnlocks: {
+        A: achievementUnlocks[current.player_a_id] ?? [],
+        B: achievementUnlocks[current.player_b_id] ?? [],
       },
       events: {
         A: {
@@ -3028,8 +3129,18 @@ export class MatchService {
               B: match.ranked_score_delta_b,
             },
             profileAfter: {
-              A: playerA ? publicRatingProfile(ratingProfileFromRow(playerA), placementGamesRequired) : null,
-              B: playerB ? publicRatingProfile(ratingProfileFromRow(playerB), placementGamesRequired) : null,
+              A: playerA ? {
+                ...publicRatingProfile(ratingProfileFromRow(playerA), placementGamesRequired),
+                equippedTitle: this.achievements.titleProjection(
+                  playerA.equipped_achievement_id, playerA.equipped_achievement_level,
+                ),
+              } : null,
+              B: playerB ? {
+                ...publicRatingProfile(ratingProfileFromRow(playerB), placementGamesRequired),
+                equippedTitle: this.achievements.titleProjection(
+                  playerB.equipped_achievement_id, playerB.equipped_achievement_level,
+                ),
+              } : null,
             },
             events: { A: {}, B: {} },
           };
@@ -3056,6 +3167,9 @@ export class MatchService {
               gdAccountId: playerA.gd_account_id,
               gdUsername: playerA.gd_username,
               ...publicRatingProfile(ratingProfileFromRow(playerA), placementGamesRequired),
+              equippedTitle: this.achievements.titleProjection(
+                playerA.equipped_achievement_id, playerA.equipped_achievement_level,
+              ),
             }
           : null,
         B: playerB
@@ -3063,6 +3177,9 @@ export class MatchService {
               gdAccountId: playerB.gd_account_id,
               gdUsername: playerB.gd_username,
               ...publicRatingProfile(ratingProfileFromRow(playerB), placementGamesRequired),
+              equippedTitle: this.achievements.titleProjection(
+                playerB.equipped_achievement_id, playerB.equipped_achievement_level,
+              ),
             }
           : null,
       },

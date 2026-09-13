@@ -135,6 +135,38 @@ std::vector<std::string> parseRatingMarks(matjson::Value const& value) {
     return marks;
 }
 
+corum::ranked::AchievementTitleView parseAchievementTitle(matjson::Value const& value) {
+    corum::ranked::AchievementTitleView title;
+    if (!value.isObject()) return title;
+    title.active = true;
+    title.achievementId = value["achievementId"].asString().unwrapOr("");
+    auto const level = value["level"].asInt();
+    if (level.isOk()) title.level = static_cast<int>(level.unwrap());
+    title.displayLabel = value["displayLabel"].asString().unwrapOr("");
+    title.nameKo = value["nameKo"].asString().unwrapOr("");
+    title.nameEn = value["nameEn"].asString().unwrapOr("");
+    title.displayColor = value["displayColor"].asString().unwrapOr("");
+    title.rarity = value["rarity"].asString().unwrapOr("");
+    title.active = !title.achievementId.empty();
+    return title;
+}
+
+corum::ranked::AchievementUnlockNoticeView parseAchievementNotice(matjson::Value const& value) {
+    corum::ranked::AchievementUnlockNoticeView notice;
+    if (!value.isObject()) return notice;
+    notice.achievementId = value["achievementId"].asString().unwrapOr("");
+    notice.type = value["type"].asString().unwrapOr("");
+    auto const level = value["level"].asInt();
+    if (level.isOk()) notice.level = static_cast<int>(level.unwrap());
+    notice.displayLabel = value["displayLabel"].asString().unwrapOr("");
+    notice.maxed = value["maxed"].asBool().unwrapOr(false);
+    notice.rewardAp = static_cast<int>(value["rewardAp"].asInt().unwrapOr(0));
+    notice.nameKo = value["nameKo"].asString().unwrapOr("");
+    notice.nameEn = value["nameEn"].asString().unwrapOr("");
+    notice.rarity = value["rarity"].asString().unwrapOr("");
+    return notice;
+}
+
 corum::ranked::RankedProfileView parseRankedProfile(matjson::Value const& value) {
     corum::ranked::RankedProfileView profile;
     if (!value.isObject()) return profile;
@@ -148,6 +180,7 @@ corum::ranked::RankedProfileView parseRankedProfile(matjson::Value const& value)
     profile.placementResults = parseRatingMarks(value["placementResults"]);
     profile.resultStreak = static_cast<int>(value["resultStreak"].asInt().unwrapOr(0));
     profile.demotionWarning = value["demotionWarning"].asBool().unwrapOr(false);
+    profile.equippedTitle = parseAchievementTitle(value["equippedTitle"]);
     auto const promotion = value["promotion"];
     if (promotion.isObject()) {
         profile.promotion.active = true;
@@ -710,6 +743,7 @@ void RankedRuntime::fetchActivePlacement() {
                         ? "Choose the Pool that best matches your current skill."
                         : "Ranked session ready. Join the queue when prepared."
                 );
+                fetchAchievements();
                 return;
             }
             parsePlacementState(root);
@@ -719,6 +753,7 @@ void RankedRuntime::fetchActivePlacement() {
                 setStage(RuntimeStage::Matched, "Placement recovered. Continue from the saved Stage and Map.");
             }
             m_nextPollAt = std::chrono::steady_clock::now();
+            fetchAchievements();
         }
     );
 }
@@ -1165,6 +1200,24 @@ void RankedRuntime::parsePlacementState(matjson::Value const& root) {
         );
         m_view.placement.finalResult.displayedTier = finalResult["displayedTier"].asString().unwrapOr("UNRANKED");
         m_view.placement.finalResult.finalizedAt = finalResult["finalizedAt"].asString().unwrapOr("");
+        if (auto const unlocks = finalResult["achievementUnlocks"].asArray(); unlocks.isOk()) {
+            for (auto const& item : unlocks.unwrap()) {
+                auto notice = parseAchievementNotice(item);
+                if (!notice.achievementId.empty()) {
+                    m_view.placement.finalResult.achievementUnlocks.push_back(std::move(notice));
+                }
+            }
+        }
+        auto const noticeContext = "placement:" + m_view.placement.runId;
+        if (
+            !m_view.placement.finalResult.achievementUnlocks.empty() &&
+            m_lastAchievementNoticeContext != noticeContext
+        ) {
+            m_lastAchievementNoticeContext = noticeContext;
+            m_view.achievements.unclaimedRewardCount += static_cast<int>(
+                m_view.placement.finalResult.achievementUnlocks.size()
+            );
+        }
         if (m_view.placement.finalResult.placed) {
             m_view.match.profileBeforeA.displayedTier = "UNRANKED";
             m_view.match.profileAfterA.displayedTier = m_view.placement.finalResult.displayedTier;
@@ -1402,6 +1455,7 @@ void RankedRuntime::parseMatchState(matjson::Value const& root) {
     m_view.match.profileAfterB = {};
     m_view.match.ratingEventA = {};
     m_view.match.ratingEventB = {};
+    m_view.match.achievementUnlocks.clear();
     if (result.isObject() && !m_view.match.side.empty()) {
         auto const deltaA = result["rankedScoreDelta"]["A"].asInt();
         auto const deltaB = result["rankedScoreDelta"]["B"].asInt();
@@ -1437,6 +1491,24 @@ void RankedRuntime::parseMatchState(matjson::Value const& root) {
         }
         m_view.match.ratingEventA = parseRatingEvent(result["events"]["A"]);
         m_view.match.ratingEventB = parseRatingEvent(result["events"]["B"]);
+        if (auto const unlocks = result["achievementUnlocks"][m_view.match.side].asArray(); unlocks.isOk()) {
+            for (auto const& item : unlocks.unwrap()) {
+                auto notice = parseAchievementNotice(item);
+                if (!notice.achievementId.empty()) {
+                    m_view.match.achievementUnlocks.push_back(std::move(notice));
+                }
+            }
+        }
+        auto const noticeContext = "match:" + m_view.match.matchId;
+        if (
+            !m_view.match.achievementUnlocks.empty() &&
+            m_lastAchievementNoticeContext != noticeContext
+        ) {
+            m_lastAchievementNoticeContext = noticeContext;
+            m_view.achievements.unclaimedRewardCount += static_cast<int>(
+                m_view.match.achievementUnlocks.size()
+            );
+        }
     }
 
     if (!stateAllowsActiveAttempt(m_view.match.state)) {
@@ -1850,6 +1922,196 @@ void RankedRuntime::fetchHistory() {
             ++m_view.revision;
         }
     );
+}
+
+void RankedRuntime::fetchAchievements() {
+    if (m_controlBusy || m_sessionToken.empty()) return;
+    m_view.achievements.loading = true;
+    m_view.achievements.error.clear();
+    ++m_view.revision;
+    auto request = baseRequest(m_sessionToken);
+    m_controlBusy = true;
+    m_controlRequest.spawn(
+        request.get(endpoint("/api/ranked/achievements")),
+        [this](web::WebResponse response) {
+            m_controlBusy = false;
+            m_view.achievements.loading = false;
+            if (!successful(response)) {
+                m_view.achievements.error = responseError(response);
+                ++m_view.revision;
+                return;
+            }
+            parseAchievementState(response.json().unwrapOr(matjson::Value()));
+        }
+    );
+}
+
+void RankedRuntime::claimAchievement(std::string const& achievementId) {
+    if (m_controlBusy || m_sessionToken.empty() || achievementId.empty()) return;
+    matjson::Value body;
+    body["scope"] = "ALL_PENDING";
+    auto request = baseRequest(m_sessionToken);
+    request.bodyJSON(body);
+    m_controlBusy = true;
+    m_view.achievements.loading = true;
+    m_view.achievements.error.clear();
+    ++m_view.revision;
+    m_controlRequest.spawn(
+        request.post(endpoint("/api/ranked/achievements/" + achievementId + "/claim")),
+        [this](web::WebResponse response) {
+            m_controlBusy = false;
+            m_view.achievements.loading = false;
+            if (!successful(response)) {
+                m_view.achievements.error = responseError(response);
+                ++m_view.revision;
+                return;
+            }
+            auto const root = response.json().unwrapOr(matjson::Value());
+            observeServerNow(root);
+            m_view.achievements.totalAp = static_cast<int>(root["totalAp"].asInt().unwrapOr(
+                m_view.achievements.totalAp
+            ));
+            m_view.achievements.unclaimedRewardCount = static_cast<int>(
+                root["unclaimedRewardCount"].asInt().unwrapOr(
+                    m_view.achievements.unclaimedRewardCount
+                )
+            );
+            fetchAchievements();
+        }
+    );
+}
+
+void RankedRuntime::equipAchievementTitle(
+    std::string const& achievementId,
+    std::optional<int> level
+) {
+    if (m_controlBusy || m_sessionToken.empty() || achievementId.empty()) return;
+    matjson::Value body;
+    body["achievementId"] = achievementId;
+    if (level) body["level"] = *level;
+    auto request = baseRequest(m_sessionToken);
+    request.bodyJSON(body);
+    m_controlBusy = true;
+    m_view.achievements.loading = true;
+    m_view.achievements.error.clear();
+    ++m_view.revision;
+    m_controlRequest.spawn(
+        request.post(endpoint("/api/ranked/achievements/title/equip")),
+        [this](web::WebResponse response) {
+            m_controlBusy = false;
+            m_view.achievements.loading = false;
+            if (!successful(response)) {
+                m_view.achievements.error = responseError(response);
+                ++m_view.revision;
+                return;
+            }
+            auto const root = response.json().unwrapOr(matjson::Value());
+            observeServerNow(root);
+            m_view.achievements.equippedTitle = parseAchievementTitle(root["equippedTitle"]);
+            ++m_view.revision;
+        }
+    );
+}
+
+void RankedRuntime::clearAchievementTitle() {
+    if (m_controlBusy || m_sessionToken.empty()) return;
+    auto request = baseRequest(m_sessionToken);
+    m_controlBusy = true;
+    m_view.achievements.loading = true;
+    m_view.achievements.error.clear();
+    ++m_view.revision;
+    m_controlRequest.spawn(
+        request.post(endpoint("/api/ranked/achievements/title/clear")),
+        [this](web::WebResponse response) {
+            m_controlBusy = false;
+            m_view.achievements.loading = false;
+            if (!successful(response)) {
+                m_view.achievements.error = responseError(response);
+                ++m_view.revision;
+                return;
+            }
+            observeServerNow(response.json().unwrapOr(matjson::Value()));
+            m_view.achievements.equippedTitle = {};
+            ++m_view.revision;
+        }
+    );
+}
+
+void RankedRuntime::parseAchievementState(matjson::Value const& root) {
+    if (!root.isObject()) {
+        m_view.achievements.error = "Invalid Achievement response";
+        ++m_view.revision;
+        return;
+    }
+    observeServerNow(root);
+    m_view.achievements.loaded = true;
+    m_view.achievements.loading = false;
+    m_view.achievements.error.clear();
+    m_view.achievements.totalAp = static_cast<int>(root["totalAp"].asInt().unwrapOr(0));
+    m_view.achievements.unclaimedRewardCount = static_cast<int>(
+        root["unclaimedRewardCount"].asInt().unwrapOr(0)
+    );
+    m_view.achievements.equippedTitle = parseAchievementTitle(root["equippedTitle"]);
+    m_view.achievements.cards.clear();
+    auto const achievements = root["achievements"].asArray();
+    if (achievements.isOk()) {
+        for (auto const& value : achievements.unwrap()) {
+            if (!value.isObject()) continue;
+            AchievementCardView card;
+            card.id = value["id"].asString().unwrapOr("");
+            card.type = value["type"].asString().unwrapOr("");
+            card.nameKo = value["nameKo"].asString().unwrapOr("");
+            card.nameEn = value["nameEn"].asString().unwrapOr("");
+            card.descriptionKo = value["descriptionKo"].asString().unwrapOr("");
+            card.descriptionEn = value["descriptionEn"].asString().unwrapOr("");
+            card.rarity = value["rarity"].asString().unwrapOr("");
+            card.titleEnabled = value["titleEnabled"].asBool().unwrapOr(false);
+            card.unlocked = value["unlocked"].asBool().unwrapOr(false);
+            card.claimed = value["claimed"].asBool().unwrapOr(false);
+            card.rewardAp = static_cast<int>(value["rewardAp"].asInt().unwrapOr(0));
+            card.claimableRewards = static_cast<int>(value["claimableRewards"].asInt().unwrapOr(0));
+            card.claimableAp = static_cast<int>(value["claimableAp"].asInt().unwrapOr(0));
+            auto const progress = value["progress"];
+            if (progress.isObject()) {
+                card.currentLevel = static_cast<int>(progress["level"].asInt().unwrapOr(0));
+                card.displayLabel = progress["displayLabel"].asString().unwrapOr("");
+                card.metricValue = static_cast<int>(progress["metricValue"].asInt().unwrapOr(0));
+                auto const next = progress["nextThreshold"].asInt();
+                if (next.isOk()) card.nextThreshold = static_cast<int>(next.unwrap());
+                card.gauge = progress["gauge"].asDouble().unwrapOr(0.0);
+                card.maxed = progress["maxed"].asBool().unwrapOr(false);
+            }
+            auto const levels = value["levels"].asArray();
+            if (levels.isOk()) {
+                for (auto const& item : levels.unwrap()) {
+                    if (!item.isObject()) continue;
+                    card.levels.push_back({
+                        .level = static_cast<int>(item["level"].asInt().unwrapOr(0)),
+                        .grade = item["grade"].asString().unwrapOr(""),
+                        .displayLabel = item["displayLabel"].asString().unwrapOr(""),
+                        .displayColor = item["displayColor"].asString().unwrapOr(""),
+                        .threshold = static_cast<int>(item["threshold"].asInt().unwrapOr(0)),
+                        .ap = static_cast<int>(item["ap"].asInt().unwrapOr(0)),
+                    });
+                }
+            }
+            auto const unlocks = value["unlocks"].asArray();
+            if (unlocks.isOk()) {
+                for (auto const& item : unlocks.unwrap()) {
+                    if (!item.isObject()) continue;
+                    AchievementRewardView reward;
+                    auto const level = item["level"].asInt();
+                    if (level.isOk()) reward.level = static_cast<int>(level.unwrap());
+                    reward.rewardAp = static_cast<int>(item["rewardAp"].asInt().unwrapOr(0));
+                    reward.unlockedAt = item["unlockedAt"].asString().unwrapOr("");
+                    reward.claimedAt = item["claimedAt"].asString().unwrapOr("");
+                    card.unlocks.push_back(std::move(reward));
+                }
+            }
+            if (!card.id.empty()) m_view.achievements.cards.push_back(std::move(card));
+        }
+    }
+    ++m_view.revision;
 }
 
 void RankedRuntime::observeServerNow(matjson::Value const& root) {

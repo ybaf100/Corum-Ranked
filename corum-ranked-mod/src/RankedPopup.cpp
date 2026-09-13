@@ -6,6 +6,7 @@
 #include "RankedSongGate.hpp"
 #include "RankedLevelPreparation.hpp"
 #include "domain/PlacementStageMerge.hpp"
+#include "domain/AchievementPresentation.hpp"
 #include "domain/TransitionTrace.hpp"
 #include "ui/RankBadgeAssets.hpp"
 #include "ui/RankTransitionLayer.hpp"
@@ -71,10 +72,34 @@ std::string tr(std::string_view key, std::string_view english) {
     return corum::ranked::i18n::text(key, english);
 }
 
+std::size_t utf8Length(std::string const& value) {
+    return static_cast<std::size_t>(std::count_if(
+        value.begin(),
+        value.end(),
+        [](unsigned char byte) { return (byte & 0xc0) != 0x80; }
+    ));
+}
+
+std::size_t utf8PrefixBytes(std::string const& value, std::size_t codePoints) {
+    std::size_t seen = 0;
+    std::size_t offset = 0;
+    while (offset < value.size() && seen < codePoints) {
+        ++offset;
+        while (
+            offset < value.size() &&
+            (static_cast<unsigned char>(value[offset]) & 0xc0) == 0x80
+        ) {
+            ++offset;
+        }
+        ++seen;
+    }
+    return offset;
+}
+
 std::string shorten(std::string value, std::size_t maximum) {
-    if (value.size() <= maximum) return value;
-    if (maximum <= 3) return value.substr(0, maximum);
-    value.resize(maximum - 3);
+    if (utf8Length(value) <= maximum) return value;
+    if (maximum <= 3) return value.substr(0, utf8PrefixBytes(value, maximum));
+    value.resize(utf8PrefixBytes(value, maximum - 3));
     return value + "...";
 }
 
@@ -240,6 +265,33 @@ ccColor3B colorFromHex(int value) {
     );
 }
 
+ccColor3B colorFromCssHex(std::string const& value, ccColor3B fallback) {
+    if (value.size() != 7 || value.front() != '#') return fallback;
+    try {
+        return colorFromHex(std::stoi(value.substr(1), nullptr, 16));
+    } catch (...) {
+        return fallback;
+    }
+}
+
+ccColor3B rarityColor(std::string const& rarity) {
+    if (rarity == "LEGENDARY") return ccc3(255, 176, 70);
+    if (rarity == "EPIC") return ccc3(198, 121, 255);
+    if (rarity == "RARE") return ccc3(87, 187, 255);
+    return ccc3(178, 186, 201);
+}
+
+std::string achievementTitleText(corum::ranked::AchievementTitleView const& title) {
+    if (!title.active) return {};
+    auto const name = corum::ranked::i18n::isKorean() ? title.nameKo : title.nameEn;
+    return title.displayLabel.empty() ? name : fmt::format("{} - {}", name, title.displayLabel);
+}
+
+ccColor3B achievementTitleColor(corum::ranked::AchievementTitleView const& title) {
+    if (!title.displayColor.empty()) return colorFromCssHex(title.displayColor, kCyan);
+    return rarityColor(title.rarity);
+}
+
 // Corum difficulty/rating palette. Keep this local to Corum Ranked; Corum
 // Integration remains a separate mod and is not linked into this target.
 ccColor3B difficultyColor(std::string rating) {
@@ -269,7 +321,8 @@ CCLabelBMFont* makeLabel(
     float scale,
     CCPoint position,
     ccColor3B color = {255, 255, 255},
-    char const* font = nullptr
+    char const* font = nullptr,
+    CCPoint anchor = {0.5f, 0.5f}
 ) {
     // SemiBold is the default UI voice. Medium remains available for deliberately
     // quiet helper copy, while display/critical values opt into Paperlogy Black.
@@ -281,7 +334,9 @@ CCLabelBMFont* makeLabel(
         else if (role == "black" || role == "display") weight = corum::ranked::ui::FontWeight::Black;
         else weight = corum::ranked::ui::FontWeight::ExtraBold;
     }
-    return corum::ranked::ui::label(text, scale, position, color, weight);
+    auto* result = corum::ranked::ui::label(text, scale, position, color, weight);
+    if (result) result->setAnchorPoint(anchor);
+    return result;
 }
 
 CCNode* makePanel(CCSize size, CCPoint position, ccColor3B color = kPanelColor, GLubyte opacity = 235) {
@@ -372,6 +427,7 @@ class CorumRankedLayer final : public CCLayerColor {
         PlacementSkipConfirm,
         HistoryList,
         HistoryDetail,
+        Achievements,
     };
 
     CCLayerColor* m_fadeRoot = nullptr;
@@ -379,6 +435,8 @@ class CorumRankedLayer final : public CCLayerColor {
     CCMenu* m_menu = nullptr;
     Page m_page = Page::Live;
     std::size_t m_historyIndex = 0;
+    std::size_t m_achievementPage = 0;
+    std::string m_titleSelectorAchievement;
     std::string m_phaseKey;
     std::string m_resourceKey;
     std::string m_lastMatchId;
@@ -410,6 +468,10 @@ class CorumRankedLayer final : public CCLayerColor {
     std::string m_rankTransitionPlayedKey;
     std::string m_stageResultAudioPlayedKey;
     RankTransitionLayer* m_rankTransitionLayer = nullptr;
+    CCNode* m_achievementToastRoot = nullptr;
+    corum::ranked::AchievementToastQueue m_achievementToastQueue;
+    std::unordered_map<std::string, corum::ranked::AchievementUnlockNoticeView> m_achievementToasts;
+    bool m_achievementToastPlaying = false;
     bool m_uiFadingOut = false;
     bool m_fadeInNextRender = true;
     SteadyClock::time_point m_uiTransitionDeadline {};
@@ -455,6 +517,15 @@ class CorumRankedLayer final : public CCLayerColor {
         m_menu->setPosition(CCPointZero);
         m_menu->setID("corum-ranked-fullscreen-menu"_spr);
         m_fadeRoot->addChild(m_menu, 10);
+
+        // Result Achievement notices live outside the normal layout/fade tree.
+        // Their slide overlay never pushes Result content and survives a normal
+        // Result re-render while the sequential queue is playing.
+        m_achievementToastRoot = CCNode::create();
+        m_achievementToastRoot->setContentSize(winSize);
+        m_achievementToastRoot->setPosition(CCPointZero);
+        m_achievementToastRoot->setID("ranked-achievement-toast-root"_spr);
+        addChild(m_achievementToastRoot, 2000);
 
         RankedRuntime::get().begin();
         syncPhase();
@@ -592,6 +663,16 @@ class CorumRankedLayer final : public CCLayerColor {
             );
         }
         if (m_page == Page::HistoryDetail) return fmt::format("history:detail:{}", m_historyIndex);
+        if (m_page == Page::Achievements) {
+            return fmt::format(
+                "achievements:{}:{}:{}:{}:{}",
+                view.achievements.loaded,
+                view.achievements.loading,
+                view.achievements.unclaimedRewardCount,
+                m_achievementPage,
+                m_titleSelectorAchievement
+            ) + fmt::format(":{}", view.revision);
+        }
         if (m_page == Page::PlacementPoolSelection) {
             return fmt::format("placement:pool:{}:{}:{}:{}", RankedRuntime::get().view().revision, m_selectedPlacementStageCount, m_selectedPlacementPool, m_localMessage);
         }
@@ -1054,6 +1135,10 @@ class CorumRankedLayer final : public CCLayerColor {
             renderHistoryDetail(view);
             return;
         }
+        if (m_page == Page::Achievements) {
+            renderAchievements(view);
+            return;
+        }
         if (m_page == Page::PlacementPoolSelection) {
             renderPlacementPoolSelection(view);
             return;
@@ -1439,20 +1524,35 @@ class CorumRankedLayer final : public CCLayerColor {
         nameLabel->limitLabelWidth(126.0f, 0.38f, 0.25f);
         m_root->addChild(nameLabel, 4);
 
+        auto const hasTitle = profile.equippedTitle.active;
+        if (hasTitle) {
+            auto* titleLabel = makeLabel(
+                achievementTitleText(profile.equippedTitle),
+                0.20f,
+                {center.x, center.y - 27.0f},
+                achievementTitleColor(profile.equippedTitle),
+                "semibold"
+            );
+            titleLabel->limitLabelWidth(134.0f, 0.20f, 0.14f);
+            m_root->addChild(titleLabel, 5);
+        }
+
         auto const placement = profile.placementGames < profile.placementGamesRequired;
         auto const captionText = placement
             ? tr("placement", "PLACEMENT")
             : (profile.promotion.active ? tr("promotion", "PROMOTION") : tr("rating", "RATING"));
-        auto* lpCaption = makeLabel(captionText, 0.23f, {center.x, center.y - 32.0f}, kCyan, "semibold");
+        auto const captionY = center.y - (hasTitle ? 40.0f : 32.0f);
+        auto const valueY = center.y - (hasTitle ? 54.0f : 47.0f);
+        auto* lpCaption = makeLabel(captionText, 0.23f, {center.x, captionY}, kCyan, "semibold");
         m_root->addChild(lpCaption, 4);
         if (placement) {
-            addPlacementProgress(profile.placementGames, std::max(1, profile.placementGamesRequired), {center.x, center.y - 47.0f});
+            addPlacementProgress(profile.placementGames, std::max(1, profile.placementGamesRequired), {center.x, valueY});
         } else if (profile.promotion.active) {
-            addRatingMarks(profile.promotion.results, profile.promotion.gamesRequired, {center.x, center.y - 47.0f});
+            addRatingMarks(profile.promotion.results, profile.promotion.gamesRequired, {center.x, valueY});
             auto* detail = makeLabel(
                 corum::ranked::i18n::promotionMatch(profile.promotion.winsRequired),
                 0.20f,
-                {center.x, center.y - 61.0f},
+                {center.x, center.y - (hasTitle ? 66.0f : 61.0f)},
                 ccc3(145, 255, 125),
                 "semibold"
             );
@@ -1464,7 +1564,7 @@ class CorumRankedLayer final : public CCLayerColor {
                     ? fmt::format("{} - {} LP", upper(tier), profile.visibleRankedScore.value_or(0))
                     : fmt::format("{} LP", profile.visibleRankedScore.value_or(0)),
                 0.35f,
-                {center.x, center.y - 47.0f},
+                {center.x, valueY},
                 ccc3(240, 244, 250),
                 "black"
             );
@@ -1472,7 +1572,7 @@ class CorumRankedLayer final : public CCLayerColor {
             m_root->addChild(lpLabel, 4);
             if (outRefs) outRefs->scoreLabel = lpLabel;
             if (profile.demotionWarning) {
-                auto* warning = makeLabel(tr("demotion-warning", "DEMOTION WARNING"), 0.20f, {center.x, center.y - 62.0f}, kRed, "black");
+                auto* warning = makeLabel(tr("demotion-warning", "DEMOTION WARNING"), 0.20f, {center.x, center.y - 66.0f}, kRed, "black");
                 warning->limitLabelWidth(134.0f, 0.20f, 0.14f);
                 m_root->addChild(warning, 6);
             }
@@ -1828,10 +1928,37 @@ class CorumRankedLayer final : public CCLayerColor {
         addScreenHeader("CORUM RANKED", tr("competitive-ladder", "COMPETITIVE 1V1 LADDER"), kGold, kCyan);
 
         auto* historyVisual = makeActionButtonVisual(tr("history", "HISTORY"));
-        historyVisual->setScale(0.78f);
+        historyVisual->setScale(0.62f);
         auto* history = CCMenuItemSpriteExtra::create(historyVisual, this, menu_selector(CorumRankedLayer::onHistory));
-        history->setPosition({size.width - 60.0f, size.height - 28.0f});
+        history->setPosition({size.width - 53.0f, size.height - 28.0f});
         m_menu->addChild(history);
+
+        auto* trophyVisual = makeActionButtonVisual(tr("achievements", "TROPHY"));
+        trophyVisual->setScale(0.62f);
+        auto* trophy = CCMenuItemSpriteExtra::create(
+            trophyVisual,
+            this,
+            menu_selector(CorumRankedLayer::onAchievements)
+        );
+        trophy->setPosition({size.width - 133.0f, size.height - 28.0f});
+        trophy->setID("ranked-achievement-trophy"_spr);
+        m_menu->addChild(trophy);
+        auto const badgeText = corum::ranked::achievementBadgeText(
+            view.achievements.unclaimedRewardCount
+        );
+        if (!badgeText.empty()) {
+            auto* badgeRoot = CCNode::create();
+            badgeRoot->setPosition({47.0f, 24.0f});
+            auto* badgeCircle = CCSprite::createWithSpriteFrameName("GJ_button_06.png");
+            if (badgeCircle) {
+                badgeCircle->setColor(kRed);
+                badgeCircle->setScale(badgeText == "99+" ? 0.34f : 0.29f);
+                badgeRoot->addChild(badgeCircle, 0);
+            }
+            auto* badgeLabel = makeLabel(badgeText, badgeText == "99+" ? 0.19f : 0.23f, {0.0f, 0.0f}, corum::ranked::ui::Text, "black");
+            badgeRoot->addChild(badgeLabel, 1);
+            trophyVisual->addChild(badgeRoot, 10);
+        }
 
         auto const leftCenter = CCPoint{size.width / 2.0f - 118.0f, size.height / 2.0f - 2.0f};
         auto const rightCenter = CCPoint{size.width / 2.0f + 118.0f, size.height / 2.0f - 2.0f};
@@ -1845,6 +1972,7 @@ class CorumRankedLayer final : public CCLayerColor {
         profile.resultStreak = view.resultStreak;
         profile.promotion = view.promotion;
         profile.demotionWarning = view.demotionWarning;
+        profile.equippedTitle = view.achievements.equippedTitle;
 
         auto* profilePanel = makeNeonPanel({188.0f, 196.0f}, leftCenter, tierColor(upper(view.profileTier)), kDeepPanel, 246);
         m_root->addChild(profilePanel, 1);
@@ -1886,6 +2014,10 @@ class CorumRankedLayer final : public CCLayerColor {
         } else if (profile.demotionWarning) {
             profileHintText = tr("demotion-warning", "DEMOTION WARNING");
             profileHintColor = kRed;
+        }
+        if (view.achievements.equippedTitle.active) {
+            profileHintText = achievementTitleText(view.achievements.equippedTitle);
+            profileHintColor = achievementTitleColor(view.achievements.equippedTitle);
         }
         auto* profileHint = makeLabel(profileHintText, 0.25f, {leftCenter.x, leftCenter.y - 79.0f}, profileHintColor, "semibold");
         profileHint->limitLabelWidth(168.0f, 0.25f, 0.17f);
@@ -2356,6 +2488,10 @@ class CorumRankedLayer final : public CCLayerColor {
             }
         }
         if (m_rankTransitionLayer && m_menu) m_menu->setTouchEnabled(false);
+        enqueueAchievementToasts(
+            "placement:" + view.placement.runId,
+            finalResult.achievementUnlocks
+        );
     }
 
     void renderPlacement(RuntimeView const& view) {
@@ -2972,6 +3108,7 @@ class CorumRankedLayer final : public CCLayerColor {
                 m_rankTransitionLayer = nullptr;
                 setKeypadEnabled(true);
                 if (m_menu) m_menu->setTouchEnabled(true);
+                playNextAchievementToast();
             }
         );
         if (!transitionLayer) return false;
@@ -2984,6 +3121,93 @@ class CorumRankedLayer final : public CCLayerColor {
         setKeypadEnabled(false);
         addChild(transitionLayer, 1000);
         return true;
+    }
+
+    void playNextAchievementToast() {
+        // Result rank reveals own the foreground first. Keep notices queued until
+        // the settled Match/Placement Result UI is actually visible.
+        if (m_achievementToastPlaying || !m_achievementToastRoot || m_rankTransitionLayer) return;
+        auto const key = m_achievementToastQueue.pop();
+        if (!key) return;
+        auto const found = m_achievementToasts.find(*key);
+        if (found == m_achievementToasts.end()) {
+            playNextAchievementToast();
+            return;
+        }
+        auto const notice = found->second;
+        m_achievementToasts.erase(found);
+        m_achievementToastPlaying = true;
+        auto const size = CCDirector::sharedDirector()->getWinSize();
+        auto* group = CCNode::create();
+        group->setPosition({size.width / 2.0f, size.height + 44.0f});
+        group->setID("ranked-achievement-result-toast"_spr);
+        m_achievementToastRoot->addChild(group, 1);
+
+        auto const accent = notice.type == "PROGRESSIVE" && notice.level
+            ? [&notice] {
+                switch (*notice.level) {
+                    case 1: return ccc3(166, 172, 181);
+                    case 2: return ccc3(184, 115, 51);
+                    case 3: return ccc3(200, 208, 218);
+                    case 4: return ccc3(244, 197, 66);
+                    case 5: return ccc3(141, 235, 255);
+                    default: return kCyan;
+                }
+            }()
+            : rarityColor(notice.rarity);
+        auto* panel = makeNeonPanel({330.0f, 67.0f}, CCPointZero, accent, kDeepPanel, 255);
+        group->addChild(panel, 0);
+        auto const heading = notice.type == "ONE_SHOT"
+            ? tr("achievement-unlocked", "ACHIEVEMENT UNLOCKED")
+            : notice.maxed
+                ? tr("achievement-maxed", "ACHIEVEMENT MAXED")
+                : tr("achievement-upgraded", "ACHIEVEMENT UPGRADED");
+        auto* headingLabel = makeLabel(heading, 0.22f, {0.0f, 19.0f}, accent, "semibold");
+        group->addChild(headingLabel, 2);
+        auto const baseName = corum::ranked::i18n::isKorean() ? notice.nameKo : notice.nameEn;
+        auto const displayName = notice.displayLabel.empty()
+            ? baseName
+            : fmt::format("{} - {}", baseName, notice.displayLabel);
+        auto* name = makeLabel(displayName, 0.34f, {0.0f, 0.0f}, corum::ranked::ui::Text, "black");
+        name->limitLabelWidth(290.0f, 0.34f, 0.22f);
+        group->addChild(name, 2);
+        auto* reward = makeLabel(
+            fmt::format("+{} AP {}", notice.rewardAp, tr("available", "AVAILABLE")),
+            0.20f,
+            {0.0f, -20.0f},
+            kGold,
+            "black"
+        );
+        group->addChild(reward, 2);
+        group->runAction(CCSequence::create(
+            CCDelayTime::create(0.35f),
+            CCEaseSineOut::create(CCMoveTo::create(0.32f, {size.width / 2.0f, size.height - 43.0f})),
+            CCDelayTime::create(2.15f),
+            CCEaseSineIn::create(CCMoveTo::create(0.28f, {size.width / 2.0f, size.height + 44.0f})),
+            CallFuncExt::create([this, group] {
+                group->removeFromParentAndCleanup(true);
+                m_achievementToastPlaying = false;
+                playNextAchievementToast();
+            }),
+            nullptr
+        ));
+    }
+
+    void enqueueAchievementToasts(
+        std::string const& context,
+        std::vector<corum::ranked::AchievementUnlockNoticeView> const& notices
+    ) {
+        for (auto const& notice : notices) {
+            auto const key = fmt::format(
+                "{}:{}:{}",
+                context,
+                notice.achievementId,
+                notice.level.value_or(0)
+            );
+            if (!m_achievementToastQueue.enqueue(key)) continue;
+            m_achievementToasts.emplace(key, notice);
+        }
+        playNextAchievementToast();
     }
 
     void renderResult(RuntimeView const& view) {
@@ -3155,6 +3379,304 @@ class CorumRankedLayer final : public CCLayerColor {
             if (transitionStarted) m_rankTransitionPlayedKey = transitionKey;
         }
         if (m_rankTransitionLayer && m_menu) m_menu->setTouchEnabled(false);
+        enqueueAchievementToasts(
+            "match:" + transitionKey,
+            match.achievementUnlocks
+        );
+    }
+
+    ccColor3B achievementCardAccent(corum::ranked::AchievementCardView const& card) const {
+        if (card.type == "ONE_SHOT") return rarityColor(card.rarity);
+        if (card.currentLevel > 0 && static_cast<std::size_t>(card.currentLevel) <= card.levels.size()) {
+            return colorFromCssHex(
+                card.levels[static_cast<std::size_t>(card.currentLevel - 1)].displayColor,
+                kCyan
+            );
+        }
+        return ccc3(112, 124, 146);
+    }
+
+    void renderAchievementTitleSelector(RuntimeView const& view) {
+        if (m_titleSelectorAchievement.empty()) return;
+        auto const found = std::find_if(
+            view.achievements.cards.begin(),
+            view.achievements.cards.end(),
+            [this](auto const& card) { return card.id == m_titleSelectorAchievement; }
+        );
+        if (found == view.achievements.cards.end()) {
+            m_titleSelectorAchievement.clear();
+            return;
+        }
+        auto const& card = *found;
+        auto const size = CCDirector::sharedDirector()->getWinSize();
+        auto* dim = CCLayerColor::create({0, 0, 0, 188});
+        dim->setContentSize(size);
+        dim->setPosition(CCPointZero);
+        m_root->addChild(dim, 70);
+        auto* panel = makeNeonPanel(
+            {390.0f, 178.0f},
+            {size.width / 2.0f, size.height / 2.0f},
+            achievementCardAccent(card),
+            kDeepPanel,
+            255
+        );
+        m_root->addChild(panel, 72);
+        auto const name = corum::ranked::i18n::isKorean() ? card.nameKo : card.nameEn;
+        auto* heading = makeLabel(
+            name,
+            0.45f,
+            {size.width / 2.0f, size.height / 2.0f + 62.0f},
+            achievementCardAccent(card),
+            "black"
+        );
+        heading->limitLabelWidth(320.0f, 0.45f, 0.28f);
+        m_root->addChild(heading, 74);
+        auto* hint = makeLabel(
+            tr("select-title-version", "SELECT ACHIEVEMENT TITLE VERSION"),
+            0.22f,
+            {size.width / 2.0f, size.height / 2.0f + 38.0f},
+            corum::ranked::ui::TextMuted,
+            "semibold"
+        );
+        m_root->addChild(hint, 74);
+
+        for (int level = 1; level <= 5; ++level) {
+            auto const available = corum::ranked::achievementTitleLevelSelectable(
+                level,
+                card.currentLevel
+            );
+            auto const current = view.achievements.equippedTitle.active &&
+                view.achievements.equippedTitle.achievementId == card.id &&
+                view.achievements.equippedTitle.level == level;
+            auto const text = current
+                ? fmt::format("{}  {}", corum::ranked::achievementStageLabel(level), tr("current", "CURRENT"))
+                : available
+                    ? corum::ranked::achievementStageLabel(level)
+                    : fmt::format("{}  {}", corum::ranked::achievementStageLabel(level), tr("locked", "LOCKED"));
+            auto* button = addButton(
+                text,
+                {size.width / 2.0f - 128.0f + static_cast<float>(level - 1) * 64.0f,
+                 size.height / 2.0f},
+                menu_selector(CorumRankedLayer::onAchievementTitleLevel),
+                false,
+                0.42f
+            );
+            button->setTag(level);
+            button->setEnabled(available && !current);
+        }
+        auto* clear = addButton(
+            tr("clear-title", "CLEAR TITLE"),
+            {size.width / 2.0f - 70.0f, size.height / 2.0f - 52.0f},
+            menu_selector(CorumRankedLayer::onAchievementTitleClear),
+            true,
+            0.44f
+        );
+        clear->setEnabled(view.achievements.equippedTitle.active);
+        addButton(
+            tr("close", "CLOSE"),
+            {size.width / 2.0f + 70.0f, size.height / 2.0f - 52.0f},
+            menu_selector(CorumRankedLayer::onAchievementTitleSelectorClose),
+            false,
+            0.44f
+        );
+    }
+
+    void renderAchievements(RuntimeView const& view) {
+        auto const size = CCDirector::sharedDirector()->getWinSize();
+        addTopBack(false);
+        addScreenHeader(
+            tr("achievements", "ACHIEVEMENTS"),
+            tr("achievement-subtitle", "PROGRESS · AP · TITLES"),
+            kGold,
+            kCyan
+        );
+        auto* ap = makeTextPlate(
+            fmt::format("{} AP", view.achievements.totalAp),
+            {118.0f, 27.0f},
+            {size.width / 2.0f - 68.0f, size.height - 75.0f},
+            kGold,
+            0.29f,
+            kGold,
+            "black"
+        );
+        m_root->addChild(ap, 5);
+        auto* pending = makeTextPlate(
+            fmt::format("{} {}", view.achievements.unclaimedRewardCount, tr("claimable", "CLAIMABLE")),
+            {138.0f, 27.0f},
+            {size.width / 2.0f + 68.0f, size.height - 75.0f},
+            view.achievements.unclaimedRewardCount > 0 ? kRed : kCyan,
+            0.25f,
+            view.achievements.unclaimedRewardCount > 0 ? ccc3(255, 225, 230) : corum::ranked::ui::Text,
+            "black"
+        );
+        m_root->addChild(pending, 5);
+
+        if (view.achievements.loading && !view.achievements.loaded) {
+            auto* spinner = LoadingSpinner::create(55.0f);
+            spinner->setPosition({size.width / 2.0f, size.height / 2.0f - 8.0f});
+            m_root->addChild(spinner, 4);
+            return;
+        }
+        if (!view.achievements.error.empty()) {
+            auto* error = makeLabel(
+                shorten(view.achievements.error, 72),
+                0.23f,
+                {size.width / 2.0f, 48.0f},
+                kRed,
+                "semibold"
+            );
+            error->limitLabelWidth(size.width - 90.0f, 0.23f, 0.16f);
+            m_root->addChild(error, 8);
+        }
+
+        constexpr std::size_t perPage = 4;
+        auto const pageCount = std::max<std::size_t>(
+            1,
+            (view.achievements.cards.size() + perPage - 1) / perPage
+        );
+        m_achievementPage = std::min(m_achievementPage, pageCount - 1);
+        auto const start = m_achievementPage * perPage;
+        auto const cardWidth = std::min(250.0f, size.width / 2.0f - 22.0f);
+        constexpr float cardHeight = 78.0f;
+        for (std::size_t slot = 0; slot < perPage && start + slot < view.achievements.cards.size(); ++slot) {
+            auto const index = start + slot;
+            auto const& card = view.achievements.cards[index];
+            auto const column = slot % 2;
+            auto const row = slot / 2;
+            auto const center = CCPoint{
+                column == 0 ? size.width / 4.0f : size.width * 3.0f / 4.0f,
+                size.height - 132.0f - static_cast<float>(row) * 88.0f,
+            };
+            auto const accent = achievementCardAccent(card);
+            auto* panel = makeNeonPanel({cardWidth, cardHeight}, center, accent, kDeepPanel, 246);
+            m_root->addChild(panel, 1);
+            auto const baseName = corum::ranked::i18n::isKorean() ? card.nameKo : card.nameEn;
+            auto const title = card.type == "PROGRESSIVE" && card.currentLevel > 0
+                ? fmt::format("{} - {}", baseName, card.displayLabel)
+                : baseName;
+            auto* titleLabel = makeLabel(
+                title,
+                0.29f,
+                {center.x - cardWidth / 2.0f + 10.0f, center.y + 25.0f},
+                accent,
+                "semibold",
+                {0.0f, 0.5f}
+            );
+            titleLabel->limitLabelWidth(cardWidth - 82.0f, 0.29f, 0.19f);
+            m_root->addChild(titleLabel, 4);
+            auto const description = corum::ranked::i18n::isKorean()
+                ? card.descriptionKo
+                : card.descriptionEn;
+            auto* descriptionLabel = makeLabel(
+                shorten(description, corum::ranked::i18n::isKorean() ? 46 : 58),
+                0.17f,
+                {center.x - cardWidth / 2.0f + 10.0f, center.y + 7.0f},
+                corum::ranked::ui::TextMuted,
+                "medium",
+                {0.0f, 0.5f}
+            );
+            descriptionLabel->limitLabelWidth(cardWidth - 90.0f, 0.17f, 0.12f);
+            m_root->addChild(descriptionLabel, 4);
+
+            double progress = card.type == "PROGRESSIVE"
+                ? std::clamp(card.gauge, 0.0, 1.0)
+                : card.unlocked ? 1.0 : 0.0;
+            auto const progressText = card.type == "PROGRESSIVE"
+                ? card.maxed
+                    ? fmt::format("{}", card.metricValue)
+                    : fmt::format("{} / {}", card.metricValue, card.nextThreshold.value_or(0))
+                : card.unlocked
+                    ? fmt::format(
+                        "{} · {} · {} AP",
+                        tr("completed", "COMPLETED"),
+                        upper(card.rarity),
+                        card.rewardAp
+                    )
+                    : fmt::format("{} · {} AP", upper(card.rarity), card.rewardAp);
+            auto* progressLabel = makeLabel(
+                progressText,
+                0.21f,
+                {center.x - cardWidth / 2.0f + 10.0f, center.y - 11.0f},
+                card.maxed ? kGold : corum::ranked::ui::Text,
+                "black",
+                {0.0f, 0.5f}
+            );
+            progressLabel->limitLabelWidth(cardWidth - 92.0f, 0.21f, 0.13f);
+            m_root->addChild(progressLabel, 4);
+            auto* barBack = CCLayerColor::create({40, 50, 68, 220});
+            barBack->setContentSize({cardWidth - 92.0f, 6.0f});
+            barBack->setPosition({center.x - cardWidth / 2.0f + 10.0f, center.y - 30.0f});
+            m_root->addChild(barBack, 3);
+            auto* barFill = CCLayerColor::create({accent.r, accent.g, accent.b, 245});
+            barFill->setContentSize({static_cast<float>((cardWidth - 92.0f) * progress), 6.0f});
+            barFill->setPosition(barBack->getPosition());
+            m_root->addChild(barFill, 4);
+
+            auto const claimState = corum::ranked::achievementClaimState(
+                card.unlocked,
+                card.currentLevel,
+                card.claimableRewards
+            );
+            auto* claim = addButton(
+                claimState == corum::ranked::AchievementClaimState::Unclaimed
+                    ? fmt::format("CLAIM +{}", card.claimableAp)
+                    : claimState == corum::ranked::AchievementClaimState::Claimed
+                        ? tr("claimed", "CLAIMED")
+                        : tr("locked", "LOCKED"),
+                {center.x + cardWidth / 2.0f - 39.0f, center.y + 14.0f},
+                menu_selector(CorumRankedLayer::onAchievementClaim),
+                false,
+                0.31f
+            );
+            claim->setTag(static_cast<int>(index));
+            claim->setEnabled(
+                claimState == corum::ranked::AchievementClaimState::Unclaimed &&
+                !view.achievements.loading
+            );
+
+            auto const titleUnlocked = card.type == "PROGRESSIVE"
+                ? card.currentLevel > 0
+                : card.unlocked;
+            auto const equipped = view.achievements.equippedTitle.active &&
+                view.achievements.equippedTitle.achievementId == card.id;
+            auto* titleButton = addButton(
+                equipped ? tr("current", "CURRENT") : tr("set-title", "TITLE"),
+                {center.x + cardWidth / 2.0f - 39.0f, center.y - 18.0f},
+                menu_selector(CorumRankedLayer::onAchievementTitle),
+                false,
+                0.31f
+            );
+            titleButton->setTag(static_cast<int>(index));
+            titleButton->setEnabled(titleUnlocked && !view.achievements.loading);
+        }
+
+        if (pageCount > 1) {
+            auto* previous = addButton(
+                "<",
+                {size.width / 2.0f - 66.0f, 20.0f},
+                menu_selector(CorumRankedLayer::onAchievementPrevious),
+                false,
+                0.34f
+            );
+            previous->setEnabled(m_achievementPage > 0);
+            auto* next = addButton(
+                ">",
+                {size.width / 2.0f + 66.0f, 20.0f},
+                menu_selector(CorumRankedLayer::onAchievementNext),
+                false,
+                0.34f
+            );
+            next->setEnabled(m_achievementPage + 1 < pageCount);
+            auto* page = makeLabel(
+                fmt::format("{} / {}", m_achievementPage + 1, pageCount),
+                0.24f,
+                {size.width / 2.0f, 20.0f},
+                corum::ranked::ui::Text,
+                "black"
+            );
+            m_root->addChild(page, 5);
+        }
+        renderAchievementTitleSelector(view);
     }
 
     void renderHistoryList(RuntimeView const& view) {
@@ -3607,12 +4129,66 @@ class CorumRankedLayer final : public CCLayerColor {
 
     void onResultClose(CCObject*) {
         RankedRuntime::get().dismissMatch();
+        RankedRuntime::get().fetchAchievements();
         m_page = Page::Live;
     }
 
     void onHistory(CCObject*) {
         m_page = Page::HistoryList;
         RankedRuntime::get().fetchHistory();
+    }
+
+    void onAchievements(CCObject*) {
+        m_page = Page::Achievements;
+        m_achievementPage = 0;
+        m_titleSelectorAchievement.clear();
+        RankedRuntime::get().fetchAchievements();
+    }
+
+    void onAchievementPrevious(CCObject*) {
+        if (m_achievementPage > 0) --m_achievementPage;
+    }
+
+    void onAchievementNext(CCObject*) {
+        auto const count = RankedRuntime::get().view().achievements.cards.size();
+        auto const pages = std::max<std::size_t>(1, (count + 3) / 4);
+        if (m_achievementPage + 1 < pages) ++m_achievementPage;
+    }
+
+    void onAchievementClaim(CCObject* sender) {
+        auto const index = sender ? sender->getTag() : -1;
+        auto const& cards = RankedRuntime::get().view().achievements.cards;
+        if (index < 0 || static_cast<std::size_t>(index) >= cards.size()) return;
+        RankedRuntime::get().claimAchievement(cards[static_cast<std::size_t>(index)].id);
+    }
+
+    void onAchievementTitle(CCObject* sender) {
+        auto const index = sender ? sender->getTag() : -1;
+        auto const& cards = RankedRuntime::get().view().achievements.cards;
+        if (index < 0 || static_cast<std::size_t>(index) >= cards.size()) return;
+        auto const& card = cards[static_cast<std::size_t>(index)];
+        if (card.type == "PROGRESSIVE") {
+            m_titleSelectorAchievement = card.id;
+            return;
+        }
+        RankedRuntime::get().equipAchievementTitle(card.id, std::nullopt);
+    }
+
+    void onAchievementTitleLevel(CCObject* sender) {
+        auto const level = sender ? sender->getTag() : 0;
+        if (m_titleSelectorAchievement.empty() || level < 1 || level > 5) return;
+        auto const id = m_titleSelectorAchievement;
+        m_titleSelectorAchievement.clear();
+        RankedRuntime::get().equipAchievementTitle(id, level);
+    }
+
+    void onAchievementTitleClear(CCObject*) {
+        m_titleSelectorAchievement.clear();
+        RankedRuntime::get().clearAchievementTitle();
+    }
+
+    void onAchievementTitleSelectorClose(CCObject*) {
+        m_titleSelectorAchievement.clear();
     }
 
     void onHistoryDetail(CCObject* sender) {
@@ -3623,7 +4199,9 @@ class CorumRankedLayer final : public CCLayerColor {
     }
 
     void onHistoryBack(CCObject*) {
-        if (m_page == Page::PlacementSkipConfirm) {
+        if (m_page == Page::Achievements && !m_titleSelectorAchievement.empty()) {
+            m_titleSelectorAchievement.clear();
+        } else if (m_page == Page::PlacementSkipConfirm) {
             m_page = Page::PlacementPoolSelection;
         } else if (m_page == Page::HistoryDetail) {
             m_page = Page::HistoryList;

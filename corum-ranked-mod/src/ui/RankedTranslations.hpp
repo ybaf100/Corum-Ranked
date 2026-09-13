@@ -11,8 +11,8 @@ namespace corum::ranked::i18n {
 // Edit Korean wording in this file. CORUM RANKED, ROUND labels, Qualifying,
 // tier names, LP, player names, map names, and literal POOL 1..6 labels intentionally remain English.
 // If a newly edited Korean sentence introduces a Hangul syllable not already
-// used below, add its Unicode code point to the CorumSansSemiBold,
-// CorumSansBold, and CorumSansBlack charsets in mod.json as well.
+// used below, add its Unicode code point to the CorumSansMedium,
+// CorumSansSemiBold, CorumSansBold, and CorumSansBlack charsets in mod.json.
 enum class Language {
     English,
     Korean,
@@ -26,6 +26,19 @@ struct Translation {
 inline constexpr std::array kKoreanTranslations {
     Translation{"competitive-ladder", "경쟁 1대1 래더"},
     Translation{"history", "기록"},
+    Translation{"achievements", "도전과제"},
+    Translation{"achievement-subtitle", "진행도 · AP · 칭호"},
+    Translation{"claimable", "수령 가능"},
+    Translation{"claimed", "수령 완료"},
+    Translation{"locked", "잠김"},
+    Translation{"completed", "달성 완료"},
+    Translation{"set-title", "칭호 지정"},
+    Translation{"select-title-version", "도전과제 칭호 버전 선택"},
+    Translation{"clear-title", "칭호 해제"},
+    Translation{"achievement-unlocked", "도전과제 달성"},
+    Translation{"achievement-upgraded", "도전과제 단계 상승"},
+    Translation{"achievement-maxed", "도전과제 최고 단계"},
+    Translation{"available", "수령 가능"},
     Translation{"match-history", "경기 기록"},
     Translation{"recent-matches", "최근 경쟁 경기"},
     Translation{"your-rank", "내 랭크"},

@@ -15,6 +15,8 @@ const migrationNames = [
   "0006_v050_dynamic_csmp_tiers.sql",
   "0007_solo_stage_placement.sql",
   "0008_placement_beta9.sql",
+  "0009_placement_stage_count.sql",
+  "0010_achievements_v1.sql",
 ] as const;
 
 const migrationSql = async (migrationName: string): Promise<string> => {
@@ -42,6 +44,10 @@ describe("PostgreSQL migration", () => {
       "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename",
     );
     expect(result.rows.map((row) => row.tablename)).toEqual([
+      "ranked_achievement_events",
+      "ranked_achievement_metrics",
+      "ranked_achievement_unlocks",
+      "ranked_ap_ledger",
       "ranked_attempt_start_leases",
       "ranked_attempts",
       "ranked_config_snapshots",
@@ -59,6 +65,44 @@ describe("PostgreSQL migration", () => {
       "ranked_rounds",
       "ranked_sessions",
     ]);
+  });
+
+  it("adds idempotent Achievement/AP/title persistence", async () => {
+    const columns = await database!.query<{ column_name: string }>(`
+      SELECT column_name FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'ranked_profiles'
+    `);
+    expect(columns.rows.map((row) => row.column_name)).toEqual(expect.arrayContaining([
+      "total_ap", "equipped_achievement_id", "equipped_achievement_level",
+    ]));
+
+    const playerId = "00000000-0000-4000-8000-000000000010";
+    await database!.query(
+      "INSERT INTO ranked_players (id, gd_account_id, gd_username) VALUES ($1, $2, $3)",
+      [playerId, 130, "achievement-player"],
+    );
+    await database!.query(
+      "INSERT INTO ranked_profiles (player_id, hidden_mmr, initial_csmp_tier, initial_seed_mmr, seed_applied_at) VALUES ($1, 500, 'NONE', 500, CURRENT_TIMESTAMP)",
+      [playerId],
+    );
+    await database!.query(
+      `INSERT INTO ranked_achievement_unlocks
+         (player_id, achievement_id, achievement_level, reward_ap, unlocked_at, source_event_key)
+       VALUES ($1, 'ranked_wins', 1, 5, CURRENT_TIMESTAMP, 'test')`,
+      [playerId],
+    );
+    await database!.query(
+      `INSERT INTO ranked_ap_ledger
+         (id, player_id, achievement_id, achievement_level, amount, awarded_at)
+       VALUES ('00000000-0000-4000-8000-000000000011', $1, 'ranked_wins', 1, 5, CURRENT_TIMESTAMP)`,
+      [playerId],
+    );
+    await expect(database!.query(
+      `INSERT INTO ranked_ap_ledger
+         (id, player_id, achievement_id, achievement_level, amount, awarded_at)
+       VALUES ('00000000-0000-4000-8000-000000000012', $1, 'ranked_wins', 1, 75, CURRENT_TIMESTAMP)`,
+      [playerId],
+    )).rejects.toThrow();
   });
 
   it("contains every schema object required by alpha.37 readiness", async () => {

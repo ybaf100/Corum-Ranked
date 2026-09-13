@@ -11,6 +11,7 @@ import { MatchModule } from "./match/match.module.js";
 import { DebugBotModule } from "./debug-bot/debug-bot.module.js";
 import { LeaderboardModule } from "./leaderboard/leaderboard.module.js";
 import { PlacementModule } from "./placement/placement.module.js";
+import { AchievementModule } from "./achievement/achievement.module.js";
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { PlacementModule } from "./placement/placement.module.js";
     DebugBotModule,
     LeaderboardModule,
     PlacementModule,
+    AchievementModule,
   ],
   controllers: [HealthController],
 })

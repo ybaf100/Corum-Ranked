@@ -77,5 +77,10 @@ struct HudPresentation {
 [[nodiscard]] std::array<ClearCheckColor, 3> clearChecks(int approvedClears);
 [[nodiscard]] HudLayout layoutHud(float width, float height);
 [[nodiscard]] HudPresentation presentHud(HudInput const& input);
+[[nodiscard]] double deathmatchIconProgress(
+    double committedBest,
+    double serverDisplay,
+    std::optional<double> validLiveProgress
+);
 
 } // namespace corum::ranked

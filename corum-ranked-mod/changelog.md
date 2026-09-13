@@ -1,3 +1,13 @@
+## v0.5.0-beta.16
+
+- Added Achievement System v1 with ten five-level progressive achievements, eleven one-shot achievements, server-authoritative unlocks, claim-only AP awards, pending-reward badges, queued Result toasts, and equipable achievement titles.
+- Added additive achievement progress, unlock, event-deduplication, and append-only AP ledger storage, including idempotent multi-level Claim and safe retroactive `첫 걸음` unlocks for normally completed Placement runs only.
+- Added a Trophy screen beside Records with config-driven Korean/English cards, I–V presentation, progress bars, rarity/AP details, title-version selection, and the existing CorumSans UI font system.
+- Shows equipped titles in the Ranked profile, Match Found/Prepare, and Match Result player cards without changing gameplay authority, rating, Placement, or Practice/spectator rules.
+- Death Match progress-bar icons now remain at each side's best progress for the current Death Match map and advance only when valid live progress exceeds that best; winner/scoring logic remains unchanged.
+- Added rules, migration, server integration, claim/idempotency, title, placement-backfill, UI-domain, and Death Match best-progress regression coverage.
+- Updated the exact client/server version gate to `v0.5.0-beta.16`; Release remains manual-only.
+
 ## v0.5.0-beta.14
 
 - Death Match no longer uses Qualifying % or the normal Ranked score curve; three authoritative Attempts are compared by best raw progress %, with Clear fixed at 100% and ties repeating Death Match.

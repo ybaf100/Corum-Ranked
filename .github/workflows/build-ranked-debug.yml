@@ -85,6 +85,7 @@ jobs:
             corum-ranked-mod/src/debug/DebugBotConfig.cpp \
             -o /tmp/corum-ranked-debug-bot-domain-test
           /tmp/corum-ranked-debug-bot-domain-test
+          node --test corum-ranked-mod/tests/AchievementSourceTest.mjs
 
   build:
     name: ${{ matrix.config.name }} Debug ${{ needs.metadata.outputs.version }}
