@@ -3455,11 +3455,11 @@ class CorumRankedLayer final : public CCLayerColor {
                     : fmt::format("{}  {}", corum::ranked::achievementStageLabel(level), tr("locked", "LOCKED"));
             auto* button = addButton(
                 text,
-                {size.width / 2.0f - 128.0f + static_cast<float>(level - 1) * 64.0f,
+                {size.width / 2.0f - 144.0f + static_cast<float>(level - 1) * 72.0f,
                  size.height / 2.0f},
                 menu_selector(CorumRankedLayer::onAchievementTitleLevel),
                 false,
-                0.42f
+                0.52f
             );
             button->setTag(level);
             button->setEnabled(available && !current);
@@ -3469,7 +3469,7 @@ class CorumRankedLayer final : public CCLayerColor {
             {size.width / 2.0f - 70.0f, size.height / 2.0f - 52.0f},
             menu_selector(CorumRankedLayer::onAchievementTitleClear),
             true,
-            0.44f
+            0.56f
         );
         clear->setEnabled(view.achievements.equippedTitle.active);
         addButton(
@@ -3477,7 +3477,7 @@ class CorumRankedLayer final : public CCLayerColor {
             {size.width / 2.0f + 70.0f, size.height / 2.0f - 52.0f},
             menu_selector(CorumRankedLayer::onAchievementTitleSelectorClose),
             false,
-            0.44f
+            0.56f
         );
     }
 
@@ -3626,7 +3626,7 @@ class CorumRankedLayer final : public CCLayerColor {
                 {center.x + cardWidth / 2.0f - 39.0f, center.y + 14.0f},
                 menu_selector(CorumRankedLayer::onAchievementClaim),
                 false,
-                0.31f
+                0.44f
             );
             claim->setTag(static_cast<int>(index));
             claim->setEnabled(
@@ -3644,7 +3644,7 @@ class CorumRankedLayer final : public CCLayerColor {
                 {center.x + cardWidth / 2.0f - 39.0f, center.y - 18.0f},
                 menu_selector(CorumRankedLayer::onAchievementTitle),
                 false,
-                0.31f
+                0.44f
             );
             titleButton->setTag(static_cast<int>(index));
             titleButton->setEnabled(titleUnlocked && !view.achievements.loading);
@@ -3656,7 +3656,7 @@ class CorumRankedLayer final : public CCLayerColor {
                 {size.width / 2.0f - 66.0f, 20.0f},
                 menu_selector(CorumRankedLayer::onAchievementPrevious),
                 false,
-                0.34f
+                0.46f
             );
             previous->setEnabled(m_achievementPage > 0);
             auto* next = addButton(
@@ -3664,7 +3664,7 @@ class CorumRankedLayer final : public CCLayerColor {
                 {size.width / 2.0f + 66.0f, 20.0f},
                 menu_selector(CorumRankedLayer::onAchievementNext),
                 false,
-                0.34f
+                0.46f
             );
             next->setEnabled(m_achievementPage + 1 < pageCount);
             auto* page = makeLabel(
