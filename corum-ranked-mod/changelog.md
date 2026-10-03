@@ -1,3 +1,8 @@
+## v0.5.0-beta.19
+
+- Fix native GD CCPoint/CCSize overloaded assignment ambiguity in remote pose caches using explicit CCPoint values. Extend the complete production-renderer harness with the native-style overload.
+- Synchronize the exact client/server version gate to beta19 and reject beta18. This is a corrective code patch after beta18 native CI compile failure, not an infrastructure failure or workflow rerun.
+
 ## v0.5.0-beta.18
 
 - Spectator Phase 2 adds a dedicated render-only Cube PlayerObject, separate from the Phase 1 local dummy, using existing x/y/rotation/dead/finished telemetry and interpolation.

@@ -1,6 +1,6 @@
 # Corum Ranked Live Spectator Protocol v1
 
-Status: **Phase 1 local-dummy safety in beta17; Phase 2 dedicated remote Cube presentation in beta18. Camera/entry E2E remains Phase 3. Native-device gameplay quality is not yet certified.**
+Status: **Phase 1 local-dummy safety in beta17; Phase 2 dedicated remote Cube presentation in beta18, native CCPoint compile correction in beta19. Camera/entry E2E remains Phase 3. Native-device gameplay quality is not yet certified.**
 
 ## Phase 2 client presentation (beta18)
 

@@ -21,7 +21,11 @@ test('production Remote Player owns a separate visual and cleans up its native l
 #include <string>
 #include <vector>
 namespace cocos2d {
-struct CCPoint { float x=0, y=0; };
+struct CCSize { float width=0, height=0; };
+struct CCPoint {
+    float x=0, y=0;
+    CCPoint& operator=(CCSize const& s) { x=s.width; y=s.height; return *this; }
+};
 inline constexpr CCPoint CCPointZero{};
 struct Color { unsigned char r,g,b; };
 struct CCObject {
@@ -105,6 +109,10 @@ struct PlayLayer {
         for (const name of ['PlayLayer', 'PlayerObject', 'GJGameLevel', 'GhostTrailEffect', 'HardStreak']) {
             writeFileSync(join(dir, `Geode/binding/${name}.hpp`), '#include <Geode/Geode.hpp>\n');
         }
+        // Verify the double actually reproduces the native overload failure.
+        writeFileSync(join(dir, 'ambiguous.cpp'), '#include <Geode/Geode.hpp>\nvoid bad() { cocos2d::CCPoint p; p = {1, 2}; }\n');
+        assert.throws(() => execFileSync('g++', ['-std=c++23', '-I', dir, '-c', join(dir, 'ambiguous.cpp'),
+            '-o', join(dir, 'ambiguous.o')], { stdio: 'pipe' }), error => /ambiguous/.test(error.stderr.toString()));
         writeFileSync(join(dir, 'test.cpp'), `
 #include "${join(root, 'src/spectator/CorumRemotePlayer.hpp')}"
 #include <iostream>

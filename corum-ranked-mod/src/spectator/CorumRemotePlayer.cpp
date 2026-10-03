@@ -133,8 +133,9 @@ void CorumRemotePlayer::setVisible(bool visible) {
 void CorumRemotePlayer::applyPose(SpectatorGhostPose const& pose) {
     m_player->setPosition({pose.x, pose.y});
     m_player->setRotation(pose.rotation);
-    m_player->m_startPosition = {pose.x, pose.y};
-    m_player->m_lastPosition = {pose.x, pose.y};
+    // CCPoint also accepts CCSize assignment in GD; use an explicit type.
+    m_player->m_startPosition = CCPoint {pose.x, pose.y};
+    m_player->m_lastPosition = CCPoint {pose.x, pose.y};
     m_player->m_positionX = pose.x;
     m_player->m_positionY = pose.y;
     m_player->m_isDead = pose.dead;
