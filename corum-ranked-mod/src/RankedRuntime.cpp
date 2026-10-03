@@ -1,4 +1,5 @@
 #include "RankedRuntime.hpp"
+#include "domain/SpectatorLocalSafety.hpp"
 #include "domain/AttemptScoring.hpp"
 #include "domain/RankedGameplayPolicy.hpp"
 #include "domain/TransitionTrace.hpp"
@@ -2209,6 +2210,25 @@ bool RankedRuntime::hasLocalOpenAttempt() const {
     return !m_attemptId.empty() || m_pendingStart.has_value();
 }
 
+bool RankedRuntime::hasLocalGameplayAuthority() const {
+    return hasLocalOpenAttempt() || m_gameplayStartEligible;
+}
+
+void RankedRuntime::setSpectatorLocalTransportBlocked(void const* owner, bool blocked) {
+    if (blocked) {
+        if (m_spectatorLocalTransportOwner != owner) {
+            log::info("Spectator attempt transport suppressed");
+            ++m_progressRequestGeneration;
+            m_progressRequest.cancel();
+            m_progressBusy = false;
+        }
+        m_spectatorLocalTransportOwner = owner;
+        m_pendingProgress.reset();
+    } else if (m_spectatorLocalTransportOwner == owner) {
+        m_spectatorLocalTransportOwner = nullptr;
+    }
+}
+
 std::string RankedRuntime::currentAttemptContextKey() const {
     if (m_view.match.matchId.empty()) return {};
     if (isPlacement()) {
@@ -2297,6 +2317,7 @@ bool RankedRuntime::canEnterCurrentLevel() const {
 }
 
 bool RankedRuntime::canEnterCurrentLevelAsSpectator() const {
+    if (!isSpectating()) return false;
     // A viewer may reconnect before the opponent starts their next legal
     // Attempt. Keep the exact canonical map open in that waiting state; the
     // live relay will attach only after authority publishes an active Attempt.
@@ -2316,6 +2337,7 @@ int RankedRuntime::localDeathmatchVisualAttemptsUsed() const {
 }
 
 double RankedRuntime::localDisplayScore(double progressPercent, std::optional<double> qualifyingPercentOverride) const {
+    if (isSpectating() || m_spectatorLocalTransportOwner != nullptr) progressPercent = -1.0;
     if (isPlacement()) {
         // The score may preview a server-calculated Top 2 replacement while the
         // authoritative Grade remains frozen until Attempt End.
@@ -2369,7 +2391,7 @@ bool RankedRuntime::canTrackLevel(int levelId) const {
     return
         m_view.stage == RuntimeStage::Matched &&
         stateAllowsActiveAttempt(m_view.match.state) &&
-        !m_view.match.spectatorActive &&
+        !isSpectating() &&
         isGameplayLevel(levelId);
 }
 
@@ -2445,7 +2467,9 @@ void RankedRuntime::cleanupAttemptTransportIfIdle() {
 }
 
 bool RankedRuntime::isSpectating() const {
-    return m_view.match.spectatorActive;
+    // A poll/ACK must not cut off a live FINAL/LAST/DM or armed scene Attempt.
+    // Completed journal entries may still await ACK; those are not live gameplay.
+    return spectatorAuthorityReady(m_view.match.spectatorActive, isPlacement(), hasLocalGameplayAuthority());
 }
 
 void RankedRuntime::setSongBypassAllowed(bool allowed) {
@@ -2462,6 +2486,7 @@ std::string RankedRuntime::newEventId(std::string_view kind) {
 }
 
 bool RankedRuntime::reportAttemptStart(int levelId) {
+    if (spectatorAttemptTransportBlocked(isSpectating(), m_spectatorLocalTransportOwner != nullptr)) return false;
     auto const armedSceneStart =
         m_gameplayStartEligible && m_gameplayMap &&
         m_gameplayMatchId == m_view.match.matchId &&
@@ -2551,6 +2576,7 @@ bool RankedRuntime::reportAttemptStart(int levelId) {
 
 void RankedRuntime::reportPracticePresence(bool practice) {
     if (
+        isSpectating() || m_spectatorLocalTransportOwner != nullptr ||
         isPlacement() || m_view.stage != RuntimeStage::Matched ||
         m_view.match.matchId.empty() || m_matchToken.empty()
     ) return;
@@ -2571,6 +2597,7 @@ void RankedRuntime::reportPracticePresence(bool practice) {
 }
 
 void RankedRuntime::reportAttemptProgress(int levelId, double progressPercent) {
+    if (spectatorAttemptTransportBlocked(isSpectating(), m_spectatorLocalTransportOwner != nullptr)) return;
     // Keep the latest progress even while /attempt/start is waiting for its ACK.
     // alpha.17 discarded every progress update before m_attemptId existed and
     // then erased the buffered value on start ACK, which could leave fast levels
@@ -2587,6 +2614,7 @@ void RankedRuntime::reportAttemptProgress(int levelId, double progressPercent) {
 }
 
 bool RankedRuntime::reportAttemptEnd(int levelId, double progressPercent, bool cleared, std::optional<double> qualifyingPercentOverride) {
+    if (spectatorAttemptTransportBlocked(isSpectating(), m_spectatorLocalTransportOwner != nullptr)) return false;
     if (!canTrackLevel(levelId) && !canFinishTrackedLevel(levelId)) return false;
 
     // Self-heal a missed init-time start. PlayLayer can be created on the same
@@ -3017,14 +3045,16 @@ void RankedRuntime::sendAttemptEnd() {
 }
 
 void RankedRuntime::flushProgressTelemetry() {
+    if (spectatorAttemptTransportBlocked(isSpectating(), m_spectatorLocalTransportOwner != nullptr)) return;
     if (
         m_progressBusy || !m_pendingProgress || m_attemptId.empty() || m_pendingEnd ||
-        m_view.match.spectatorActive || std::chrono::steady_clock::now() < m_nextProgressAt
+        std::chrono::steady_clock::now() < m_nextProgressAt
     ) return;
     sendAttemptProgress();
 }
 
 void RankedRuntime::sendAttemptProgress() {
+    if (spectatorAttemptTransportBlocked(isSpectating(), m_spectatorLocalTransportOwner != nullptr)) return;
     if (!m_pendingProgress || m_attemptId.empty()) return;
     auto const progress = *m_pendingProgress;
     auto const attemptId = m_attemptId;

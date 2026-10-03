@@ -1,3 +1,12 @@
+## v0.5.0-beta.17
+
+- Spectator Phase 1 converts only server-authorized, finished local gameplay into a hidden non-scoring local dummy; live FINAL/LAST/Death Match Attempts, Placement and user Practice are excluded.
+- Noclip suppresses death only for the exact local dummy. Its physics freezes at 99%, with independent vanilla end-check/animation/completion and Ranked evidence guards; the PlayLayer stays alive.
+- Explicitly blocks dummy New Best, exact-level `savePercentage` and `saveNewScore`, including quit/reset calls, without relying on Practice flags or disabling ordinary Ranked records.
+- Blocks new Start/Progress/End/Clear/presence transport throughout pending-to-spectator handoff while preserving already-observed FIFO delivery.
+- Removes temporary spectator Practice frame semantics and local-player remote pose reuse. Opponent polling remains; separate RemotePlayer rendering/camera/mode/cosmetics/interpolation are Phase 2 only.
+- Adds strict lifecycle-policy/source regression coverage and synchronizes the client/server gate to beta17. Each future patch, including hotfixes, advances the beta version; Release remains manual-only.
+
 ## v0.5.0-beta.16
 
 - Added Achievement System v1 with ten five-level progressive achievements, eleven one-shot achievements, server-authoritative unlocks, claim-only AP awards, pending-reward badges, queued Result toasts, and equipable achievement titles.

@@ -1,6 +1,6 @@
 # Corum Ranked Live Spectator Protocol v1
 
-Status: **implemented MVP, native-device gameplay quality not yet certified**.
+Status: **Phase 1 local-dummy safety implemented in beta17; remote presentation is deferred to Phase 2. Native-device gameplay quality is not yet certified.**
 
 This document describes the live gameplay spectator relay added after `v0.5.0-beta.14`. It is deliberately non-authoritative: Ranked scoring, clears, wins, anti-cheat decisions, Attempt ownership, and match transitions continue to use the existing HTTP Attempt lifecycle only.
 
@@ -117,14 +117,28 @@ The normal path keeps the already-authorized canonical PlayLayer alive after the
 
 - local Ranked Attempt Start/Progress/End/Clear transmission is bypassed;
 - spectator Practice toggling is ignored;
-- local collision/death callbacks do not create a result event;
-- the local player object is used only as a remote pose renderer;
+- only the exact local dummy's death is suppressed; it cannot create result evidence;
+- the local player remains a hidden LOCAL dummy, never a remote pose renderer;
+- at 99% its own physics update freezes; independent end-check/animation/completion guards prevent vanilla Clear even after a large-step or direct-callback escape;
+- exact scene-level `savePercentage` and `saveNewScore`, and local `showNewBest`, are blocked independently of Practice mode, including synchronous quit/reset saves;
 - opponent name and `LIVE SPECTATOR` remain visible through the Ranked HUD;
 - if live packets are unavailable, the pre-existing `LIVE PROGRESS n%` spectator UI remains the fallback.
 
 Re-entry after reopening the Ranked popup uses a separate read-only launch authority. It reuses the exact same `RankedLevelPreparation` online metadata proof, current context/generation, exact level ID, geometry readiness, effective-song readiness (including the RobTop fast path and Jukebox path), modal hold, and verified native LevelInfo Play item. It does **not** call `armCurrentLevelForGameplay()` and latches spectator API suppression during `PlayLayer::init`, before the first update or quit callback.
 
 No raw saved-level fallback, synthetic `GJGameLevel`, direct `PlayLayer::scene`, stale LevelInfo reuse, or metadata-proof bypass was introduced. The existing vanilla settings/options popup remains available and continues to hold automatic Play while open.
+
+## Phase 1 safety and regression boundary
+
+`SpectatorLocalSafety` is a per-scene latch. Activation requires existing server spectator permission, no live local visual/transport/armed Attempt, a non-test Ranked scene, and neither Placement nor user Practice. A state refresh cannot turn a converted scene back into a scoring player. Pending handoff blocks evidence/new transport but does not enable noclip before server permission.
+
+All public runtime Start/Progress/End entries check the dummy/handoff firewall before armed-start or missing-start recovery. Practice presence is also excluded. Already-observed Start/End FIFO entries keep their idempotent delivery/ACK semantics; the firewall does not erase real gameplay evidence. AP/title/achievement evaluation, winner, rating, LP/MMR, server spectator eligibility and Placement state machines are unchanged. No new DB schema or gameplay telemetry was added.
+
+The 99% limit is local `PlayerObject::update` suppression, not a world/PlayLayer pause or `onQuit`. The normal gameplay tick and polling HUD continue. Both completion callbacks and `checkForEnd`/end-animation entry points are guarded, and exact-object persistence sinks remain blocked even if the local progress counter crosses 100%. The temporary spectator Practice frame flag has been removed; user Practice keeps its existing separate transitions.
+
+Regression coverage includes strict C++ policy/lifecycle adapters, source-hook wiring, and the actual production death/completion/save/physics callback bodies compiled and executed against lifecycle doubles. A scoped real-gameplay End lets the final genuine record finish saving before dummy conversion; subsequent dummy saves are blocked. Native platform compilation is performed by automatic Debug CI, not claimed to be an actual GD lifecycle/device run. Device QA must still verify collision/reset/dual/platformer/large-step/quit/reconnect behavior and normal versus spectator New Best persistence.
+
+Every patch, including a minor hotfix, increments the beta version and synchronizes the mod manifest with the server's exact client-version gate. Release workflow remains manual-only and is not invoked by this work.
 
 ## Current unsupported / unverified scope
 
@@ -133,7 +147,8 @@ The following are not declared complete:
 - exact remote physics/input replay for arbitrary Geometry Dash levels;
 - dual-player, platformer, gravity/mode transitions, camera triggers, and velocity correction beyond the reserved protocol fields;
 - opponent cosmetic reproduction in the remote ghost;
-- native input suppression beyond the safe read-only pose override and complete Ranked Attempt API suppression; no unverified GD input hook was invented;
+- CorumRemotePlayer / separate PlayerObject rendering, remote x/y/rotation, camera follow, remote game mode, cosmetics and interpolation (Phase 2); Phase 1 does not display a live remote ghost;
+- native input suppression beyond the non-authoritative dummy/evidence firewall; no unverified GD input hook was invented;
 - WebSocket transport; the current implementation intentionally uses the verified Geode HTTP API;
 - native-device confirmation of spectator popup/reconnect entry, including arbitrary-level compatibility;
 - measured real-device spectator latency/correction quality;

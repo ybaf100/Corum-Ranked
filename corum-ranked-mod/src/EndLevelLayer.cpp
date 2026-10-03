@@ -67,8 +67,8 @@ class $modify(CorumRankedEndLevelLayer, EndLevelLayer) {
                 state
             );
             // Keep the canonical PlayLayer alive. The spectator path resets the
-            // completed player locally and then applies read-only remote poses;
-            // no Replay or Attempt API is invoked by this transition.
+            // completed player as a hidden, non-scoring LOCAL dummy. Separate
+            // remote rendering belongs to Phase 2; no Attempt API is invoked.
             removeFromParentAndCleanup(true);
             return;
         }

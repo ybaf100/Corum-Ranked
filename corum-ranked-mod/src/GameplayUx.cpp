@@ -222,27 +222,9 @@ void setExternalShadowedText(
 
 } // namespace
 
-// This hook is intentionally inside the existing Corum Ranked postUpdate hook.
-// It exposes Practice semantics only to vanilla gameplay for the duration of the
-// original frame. The flag is restored before Ranked's own Practice/timeout
-// logic runs, so read-only spectating can never be mistaken for user Practice
-// and auto-exit because the Ranked start window has ended.
-class $modify(CorumRankedSpectatorPracticeGuard, PlayLayer) {
-    static void onModify(auto& self) {
-        if (!self.setHookPriorityPre("PlayLayer::postUpdate", Priority::Late)) {
-            log::warn("Failed to install spectator Practice frame guard priority");
-        }
-    }
-
-    void postUpdate(float dt) {
-        auto& runtime = corum::ranked::RankedRuntime::get();
-        auto const spectatorPractice = isRankedGameplayLevel(this) && runtime.isSpectating();
-        auto const previousPractice = m_isPracticeMode;
-        if (spectatorPractice) m_isPracticeMode = true;
-        PlayLayer::postUpdate(dt);
-        if (spectatorPractice) m_isPracticeMode = previousPractice;
-    }
-};
+// Spectator authority/safety lives in PlayLayer's explicit local-dummy policy.
+// No frame temporarily changes m_isPracticeMode. User Practice remains a
+// separate vanilla toggle + Ranked presence/scoring transition.
 
 class $modify(CorumRankedGameplayUx, PlayLayer) {
     struct Fields {
@@ -280,8 +262,7 @@ class $modify(CorumRankedGameplayUx, PlayLayer) {
         ) {
             // Death Match is raw best-progress competition with exactly three
             // authoritative Attempts. User Practice is therefore unavailable.
-            // Spectator read-only Practice is implemented by the separate frame
-            // guard above and never enters this user-toggle path.
+            // Spectator dummy safety never enters this user-toggle path.
             log::info("Ranked Practice Mode ignored during Death Match");
             return;
         }

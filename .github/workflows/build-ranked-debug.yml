@@ -85,7 +85,13 @@ jobs:
             corum-ranked-mod/src/debug/DebugBotConfig.cpp \
             -o /tmp/corum-ranked-debug-bot-domain-test
           /tmp/corum-ranked-debug-bot-domain-test
+          g++ -std=c++23 -Wall -Wextra -Wpedantic -Werror \
+            corum-ranked-mod/tests/SpectatorLocalSafetyTest.cpp \
+            -o /tmp/corum-ranked-spectator-safety-test
+          /tmp/corum-ranked-spectator-safety-test
           node --test corum-ranked-mod/tests/AchievementSourceTest.mjs
+          node --test corum-ranked-mod/tests/SpectatorLocalSafetySourceTest.mjs
+          node --test corum-ranked-mod/tests/SpectatorNativeHookTest.mjs
 
   build:
     name: ${{ matrix.config.name }} Debug ${{ needs.metadata.outputs.version }}

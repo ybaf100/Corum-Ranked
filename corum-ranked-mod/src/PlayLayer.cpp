@@ -4,6 +4,7 @@
 #include "domain/HudPresentation.hpp"
 #include "domain/AttemptScoring.hpp"
 #include "domain/RankedGameplayPolicy.hpp"
+#include "domain/SpectatorLocalSafety.hpp"
 #include "domain/TransitionTrace.hpp"
 #include "domain/RenderFpsMeter.hpp"
 #include "ui/PlayerIcon.hpp"
@@ -13,6 +14,8 @@
 
 #include <Geode/Geode.hpp>
 #include <Geode/modify/PlayLayer.hpp>
+#include <Geode/modify/PlayerObject.hpp>
+#include <Geode/modify/GJGameLevel.hpp>
 
 #include <algorithm>
 #include <array>
@@ -29,6 +32,24 @@ namespace {
 
 constexpr ccColor3B kPendingCheck = {112, 128, 151};
 constexpr ccColor3B kApprovedCheck = corum::ranked::ui::Green;
+
+// Vanilla quit may clear PlayLayer::get() before saving. Keep the exact owning
+// layer available ONLY during synchronous lifecycle calls (never by level ID).
+thread_local PlayLayer* persistenceOwner = nullptr;
+struct ScopedPersistenceOwner {
+    PlayLayer* previous = persistenceOwner;
+    explicit ScopedPersistenceOwner(PlayLayer* owner) { persistenceOwner = owner; }
+    ~ScopedPersistenceOwner() { persistenceOwner = previous; }
+};
+
+struct ScopedRealGameplayEnd {
+    bool& flag;
+    bool previous;
+    ScopedRealGameplayEnd(bool& value, bool realEnd) : flag(value), previous(value) {
+        flag = previous || realEnd;
+    }
+    ~ScopedRealGameplayEnd() { flag = previous; }
+};
 
 std::int64_t steadyNowMicros() {
     return std::chrono::duration_cast<std::chrono::microseconds>(
@@ -108,6 +129,7 @@ bool spectatorTransitionState(std::string const& state) {
 } // namespace
 
 class $modify(CorumRankedPlayLayer, PlayLayer) {
+public:
     struct Fields {
         CCNode* hudRoot = nullptr;
         CCLabelBMFont* fpsLabel = nullptr;
@@ -148,6 +170,7 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         int levelId = 0;
         double qualifyingPercent = -1.0;
         bool rankedLevel = false;
+        bool rankedInitialized = false;
         bool autoExitRequested = false;
         bool gameplayFrameObserved = false;
         bool attemptStartReported = false;
@@ -157,10 +180,96 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         bool rankedPractice = false;
         bool spectatorMode = false;
         bool spectatorPending = false;
+        corum::ranked::SpectatorLocalSafety localSafety;
+        bool suppressedDeathLogged = false;
+        bool suppressedCompletionLogged = false;
+        bool suppressedSaveLogged = false;
+        bool safetyRetired = false;
+        bool vanillaGameplayEndInProgress = false;
     };
 
+    static void onModify(auto& self) {
+        // Run the narrow guard before vanilla/other Corum lifecycle callbacks.
+        for (auto name : {"PlayLayer::destroyPlayer", "PlayLayer::levelComplete",
+                          "PlayLayer::checkForEnd", "PlayLayer::showCompleteText"}) {
+            if (!self.setHookPriorityPre(name, Priority::First)) {
+                log::warn("Failed to install spectator local safety priority: {}", name);
+            }
+        }
+    }
+
+    void syncSpectatorLocalSafety() {
+        if (m_fields->safetyRetired) return;
+        auto& runtime = corum::ranked::RankedRuntime::get();
+        auto const ownAttemptAlive =
+            m_fields->vanillaGameplayEndInProgress ||
+            (m_fields->attemptStartReported && !m_fields->attemptEndReported) ||
+            runtime.hasLocalGameplayAuthority();
+        if (m_fields->localSafety.activate({
+            .rankedScene = m_fields->rankedLevel,
+            .testMode = m_isTestMode,
+            .placement = runtime.isPlacement(),
+            .userPractice = m_fields->rankedPractice || m_isPracticeMode,
+            .serverSpectator = runtime.isSpectating(),
+            .ownAttemptAlive = ownAttemptAlive,
+        })) {
+            m_fields->spectatorMode = true;
+            m_fields->spectatorPending = false;
+            if (m_player1) m_player1->setVisible(false);
+            log::info("Spectator local safety activated: level={}", m_fields->levelId);
+        }
+        runtime.setSpectatorLocalTransportBlocked(
+            this, m_fields->localSafety.blocksEvidence(m_fields->spectatorPending)
+        );
+    }
+
+    bool blocksLocalEvidence() {
+        syncSpectatorLocalSafety();
+        return m_fields->localSafety.blocksEvidence(m_fields->spectatorPending);
+    }
+
+    bool suppressLocalCompletion() {
+        if (!blocksLocalEvidence()) return false;
+        if (!m_fields->suppressedCompletionLogged) {
+            log::info("Local completion suppressed for spectator: level={}", m_fields->levelId);
+            m_fields->suppressedCompletionLogged = true;
+        }
+        return true;
+    }
+
+    bool freezeLocalDummy(PlayerObject* player) {
+        if (!player || player != m_player1) return false;
+        syncSpectatorLocalSafety();
+        auto const wasFrozen = m_fields->localSafety.frozen();
+        auto const frozen = m_fields->localSafety.freezeAtCompletionBoundary(
+            player && player == m_player1, rankedProgressPercent(this)
+        );
+        if (frozen && !wasFrozen) {
+            log::info("Spectator local dummy frozen at 99% boundary: level={}", m_fields->levelId);
+        }
+        return frozen;
+    }
+
+    bool blocksLevelPersistence(GJGameLevel* level) {
+        syncSpectatorLocalSafety();
+        // The original death/Clear/manual restart must finish saving its real
+        // gameplay record even if its End ACK grants spectator permission. This
+        // scoped exception can never be entered by an already-converted dummy.
+        if (m_fields->vanillaGameplayEndInProgress && !m_fields->localSafety.active()) return false;
+        auto const blocked = m_fields->localSafety.blockPersistence(
+            level && level == m_level, m_fields->spectatorPending
+        );
+        if (blocked && !m_fields->suppressedSaveLogged) {
+            log::info("Local progress persistence suppressed for spectator: level={}", m_fields->levelId);
+            m_fields->suppressedSaveLogged = true;
+        }
+        return blocked;
+    }
+
     bool scoringEnabled() {
+        syncSpectatorLocalSafety();
         return
+            m_fields->rankedInitialized &&
             !m_fields->spectatorMode &&
             !m_fields->spectatorPending &&
             !corum::ranked::RankedRuntime::get().isSpectating() &&
@@ -173,12 +282,19 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
     }
 
     bool init(GJGameLevel* level, bool useReplay, bool dontCreateObjects) {
-        if (!PlayLayer::init(level, useReplay, dontCreateObjects)) return false;
         auto& runtime = corum::ranked::RankedRuntime::get();
         m_fields->levelId = level ? static_cast<int>(level->m_levelID) : 0;
         m_fields->rankedLevel =
             runtime.view().stage == corum::ranked::RuntimeStage::Matched &&
             runtime.isGameplayLevel(m_fields->levelId);
+        // Establish authority BEFORE vanilla init's reset/attempt callbacks.
+        syncSpectatorLocalSafety();
+        ScopedPersistenceOwner persistence(this);
+        if (!PlayLayer::init(level, useReplay, dontCreateObjects)) {
+            runtime.setSpectatorLocalTransportBlocked(this, false);
+            return false;
+        }
+        m_fields->rankedInitialized = true;
         // Keep Match music alive throughout ROUND STARTING IN and LevelInfo.
         // Stop it only after vanilla has successfully created the real PlayLayer.
         if (m_fields->rankedLevel) {
@@ -204,7 +320,7 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         // Latch read-only authority during init, before any postUpdate/onQuit
         // callback can observe the new scene. A reconnecting spectator must not
         // emit even a transient Start/Progress/End/Clear lifecycle.
-        m_fields->spectatorMode = runtime.isSpectating();
+        syncSpectatorLocalSafety();
         m_fields->rankedPractice = !m_fields->spectatorMode && m_isPracticeMode;
         if (m_fields->spectatorMode && m_player1) m_player1->setVisible(false);
         if (m_fields->rankedPractice) runtime.reportPracticePresence(true);
@@ -217,9 +333,12 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
     }
 
     void postUpdate(float dt) {
+        syncSpectatorLocalSafety();
+        ScopedPersistenceOwner persistence(this);
         PlayLayer::postUpdate(dt);
         auto& runtime = corum::ranked::RankedRuntime::get();
         runtime.tick();
+        syncSpectatorLocalSafety();
         if (!m_fields->rankedLevel || m_isTestMode) return;
         if (!m_fields->gameplayFrameObserved) {
             corum::ranked::TransitionTrace::get().mark("first-gameplay-frame");
@@ -228,30 +347,24 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         auto const now = std::chrono::steady_clock::now();
         m_fields->fpsMeter.observeFrame(steadyNowMicros());
 
-        if (runtime.isSpectating()) {
+        if (m_fields->spectatorMode) {
             auto& live = corum::ranked::SpectatorLiveRuntime::get();
             live.tickPublisher({}, true);
-            if (!m_fields->spectatorMode) {
-                m_fields->spectatorMode = true;
-                m_fields->spectatorPending = false;
-                if (m_hasCompletedLevel) {
-                    // Completion overlays are removed by EndLevelLayer; reset only
-                    // the local simulation so the canonical level can render the
-                    // read-only remote pose. No Ranked Attempt is started here.
-                    PlayLayer::resetLevel();
-                }
+            if (m_hasCompletedLevel || (m_player1 && m_player1->m_isDead)) {
+                resetLevel();
             }
-            live.tickViewer();
-            if (auto pose = live.interpolatedPose()) {
-                if (m_player1) {
-                    m_player1->setVisible(true);
-                    m_player1->setPosition({pose->x, pose->y});
-                    m_player1->setRotation(pose->rotation);
+            // Phase 1 deliberately does not render remote pose onto m_player1.
+            // It is a hidden LOCAL dummy. Opponent polling HUD remains available;
+            // Phase 2 will own a distinct CorumRemotePlayer and camera path.
+            if (m_player1) m_player1->setVisible(false);
+            (void)freezeLocalDummy(m_player1);
+            if (!spectatorTransitionState(runtime.view().match.state) ||
+                runtime.currentLevelId() != m_fields->levelId) {
+                if (!m_fields->autoExitRequested) {
+                    m_fields->autoExitRequested = true;
+                    onQuit();
                 }
-            } else if (m_player1) {
-                // Waiting/fallback keeps the polling HUD visible without showing
-                // a locally controllable avatar as though it were the opponent.
-                m_player1->setVisible(false);
+                return;
             }
             if (
                 runtime.view().revision != m_fields->renderedRevision ||
@@ -261,12 +374,6 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
                 m_fields->nextHudRefreshAt = now + std::chrono::milliseconds(100);
             }
             return;
-        }
-
-        if (m_fields->spectatorMode) {
-            corum::ranked::SpectatorLiveRuntime::get().reset();
-            m_fields->spectatorMode = false;
-            if (m_player1) m_player1->setVisible(true);
         }
 
         if (m_fields->spectatorPending) {
@@ -394,10 +501,12 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
 
     void resetLevel() {
         auto& runtime = corum::ranked::RankedRuntime::get();
-        if (runtime.isSpectating()) {
+        syncSpectatorLocalSafety();
+        ScopedPersistenceOwner persistence(this);
+        if (blocksLocalEvidence()) {
+            m_fields->localSafety.resetDummy();
             PlayLayer::resetLevel();
-            m_fields->spectatorMode = true;
-            m_fields->spectatorPending = false;
+            if (m_player1) m_player1->setVisible(false);
             return;
         }
         if (
@@ -422,6 +531,7 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
             m_fields->attemptEndReported,
             runtime.canEnterCurrentLevel()
         );
+        ScopedRealGameplayEnd finishing(m_fields->vanillaGameplayEndInProgress, resetActions.endAttempt);
         if (resetActions.endAttempt) {
             // destroyPlayer() normally closes an attempt before the vanilla reset.
             // A manual restart/reset can bypass destroyPlayer(), so close it here
@@ -446,6 +556,7 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
                 spectatorTransitionState(runtime.view().match.state)
             ) {
                 m_fields->spectatorPending = true;
+                syncSpectatorLocalSafety();
                 PlayLayer::resetLevel();
                 if (m_player1) m_player1->setVisible(false);
                 return;
@@ -467,11 +578,19 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
 
     void destroyPlayer(PlayerObject* player, GameObject* object) {
         auto& runtime = corum::ranked::RankedRuntime::get();
-        if (runtime.isSpectating() || m_fields->spectatorPending) {
-            // A remote pose is display-only. Local collisions and anti-cheat spikes
-            // must never kill the spectator avatar or emit an Attempt End.
+        syncSpectatorLocalSafety();
+        ScopedPersistenceOwner persistence(this);
+        if (m_fields->localSafety.suppressDeath(player && player == m_player1)) {
+            if (!m_fields->suppressedDeathLogged) {
+                log::info("Local death suppressed for spectator: level={}", m_fields->levelId);
+                m_fields->suppressedDeathLogged = true;
+            }
             return;
         }
+        ScopedRealGameplayEnd finishing(
+            m_fields->vanillaGameplayEndInProgress,
+            scoringEnabled() && !m_fields->attemptEndReported
+        );
         // Geometry Dash deliberately calls destroyPlayer() for its internal
         // anti-cheat verification spike and then returns without killing the
         // player. Treating that callback as a real death closes the Ranked
@@ -500,7 +619,11 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
 
     void levelComplete() {
         auto& runtime = corum::ranked::RankedRuntime::get();
-        if (runtime.isSpectating() || m_fields->spectatorPending) return;
+        if (suppressLocalCompletion()) return;
+        ScopedRealGameplayEnd finishing(
+            m_fields->vanillaGameplayEndInProgress,
+            scoringEnabled() && !m_fields->attemptEndReported
+        );
         if (scoringEnabled() && !m_fields->attemptEndReported) {
             m_fields->attemptEndReported = runtime.reportAttemptEnd(
                 m_fields->levelId,
@@ -514,7 +637,11 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
 
     void showCompleteText() {
         auto& runtime = corum::ranked::RankedRuntime::get();
-        if (runtime.isSpectating() || m_fields->spectatorPending) return;
+        if (suppressLocalCompletion()) return;
+        ScopedRealGameplayEnd finishing(
+            m_fields->vanillaGameplayEndInProgress,
+            scoringEnabled() && !m_fields->attemptEndReported
+        );
         // levelComplete() is the primary clear hook. Keep showCompleteText() as a
         // second vanilla completion-path safety net; the per-attempt guard makes
         // the pair idempotent and prevents double Clear/score accounting.
@@ -530,13 +657,19 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
     }
 
     void onQuit() {
+        syncSpectatorLocalSafety();
+        ScopedPersistenceOwner persistence(this);
+        ScopedRealGameplayEnd finishing(
+            m_fields->vanillaGameplayEndInProgress,
+            scoringEnabled() && !m_fields->attemptEndReported
+        );
         // A manual quit is still an attempt end. Without this hook a player could
         // leave/re-enter LevelInfoLayer while the server kept the old attempt open,
         // producing stale scores, orphan attempts, and broken Death Match counts.
         if (m_fields->spectatorMode || m_fields->spectatorPending) {
             corum::ranked::SpectatorLiveRuntime::get().reset();
         }
-        if (m_fields->rankedPractice || m_isPracticeMode) {
+        if (!blocksLocalEvidence() && (m_fields->rankedPractice || m_isPracticeMode)) {
             corum::ranked::RankedRuntime::get().reportPracticePresence(false);
         }
         if (
@@ -555,9 +688,45 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
         PlayLayer::onQuit();
     }
 
+    void onExit() {
+        ScopedPersistenceOwner persistence(this);
+        PlayLayer::onExit();
+        corum::ranked::RankedRuntime::get().setSpectatorLocalTransportBlocked(this, false);
+        m_fields->safetyRetired = true;
+        if (m_fields->localSafety.active()) {
+            log::info("Spectator local safety deactivated: level={}", m_fields->levelId);
+        }
+        // Keep the scene latch until destruction, including delayed quit saves.
+    }
+
+    void checkForEnd() {
+        if (suppressLocalCompletion()) return;
+        PlayLayer::checkForEnd();
+    }
+
+    void playEndAnimationToPos(CCPoint position) {
+        if (suppressLocalCompletion()) return;
+        PlayLayer::playEndAnimationToPos(position);
+    }
+
+    void playPlatformerEndAnimationToPos(CCPoint position, bool instant) {
+        if (suppressLocalCompletion()) return;
+        PlayLayer::playPlatformerEndAnimationToPos(position, instant);
+    }
+
+    void showEndLayer() {
+        if (suppressLocalCompletion()) return;
+        PlayLayer::showEndLayer();
+    }
+
+    void showNewBest(bool newReward, int orbs, int diamonds, bool demonKey, bool noRetry, bool noTitle) {
+        if (blocksLocalEvidence()) return;
+        PlayLayer::showNewBest(newReward, orbs, diamonds, demonKey, noRetry, noTitle);
+    }
+
     void togglePracticeMode(bool practiceMode) {
         auto& runtime = corum::ranked::RankedRuntime::get();
-        if (runtime.isSpectating() || m_fields->spectatorPending) {
+        if (blocksLocalEvidence()) {
             // Spectator scenes are read-only. Practice cannot alter the remote
             // player or create a local scoring lifecycle.
             return;
@@ -1284,5 +1453,54 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
             setHudText(m_fields->spectatorProgressLabel, presentation.spectatorProgressText);
             setHudText(m_fields->spectatorTimerLabel, presentation.timerText);
         }
+    }
+};
+
+namespace {
+CorumRankedPlayLayer* localSafetyLayer() {
+    auto* layer = persistenceOwner ? persistenceOwner : PlayLayer::get();
+    return layer ? static_cast<CorumRankedPlayLayer*>(layer) : nullptr;
+}
+} // namespace
+
+// Stop only the dummy's own physics at the completion boundary. Do not pause
+// PlayLayer/world/relay updates: a distinct Phase-2 remote player must be free
+// to display 100%. checkForEnd + completion callbacks cover a large single step.
+class $modify(CorumRankedSpectatorDummyPlayer, PlayerObject) {
+    static void onModify(auto& self) {
+        if (!self.setHookPriorityPre("PlayerObject::update", Priority::First)) {
+            log::warn("Failed to install spectator dummy update priority");
+        }
+    }
+
+    void update(float dt) {
+        auto* layer = localSafetyLayer();
+        if (layer && layer->freezeLocalDummy(this)) return;
+        PlayerObject::update(dt);
+    }
+};
+
+// Explicit persistence firewall, independent of m_isPracticeMode/test mode.
+// Only the exact level object of this dummy scene is guarded. Unrelated levels,
+// normal Ranked, Placement, real Death Match and user Practice retain vanilla.
+class $modify(CorumRankedSpectatorProgressSave, GJGameLevel) {
+    static void onModify(auto& self) {
+        for (auto name : {"GJGameLevel::savePercentage", "GJGameLevel::saveNewScore"}) {
+            if (!self.setHookPriorityPre(name, Priority::First)) {
+                log::warn("Failed to install spectator persistence priority: {}", name);
+            }
+        }
+    }
+
+    void savePercentage(int percent, bool practice, int clicks, int attempts, bool valid) {
+        auto* layer = localSafetyLayer();
+        if (layer && layer->blocksLevelPersistence(this)) return;
+        GJGameLevel::savePercentage(percent, practice, clicks, attempts, valid);
+    }
+
+    void saveNewScore(int value, int type, int ticks, int clicks, int coins, gd::string inputs, bool save) {
+        auto* layer = localSafetyLayer();
+        if (layer && layer->blocksLevelPersistence(this)) return;
+        GJGameLevel::saveNewScore(value, type, ticks, clicks, coins, inputs, save);
     }
 };

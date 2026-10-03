@@ -434,6 +434,8 @@ public:
     // the canonical LevelInfo preparation path without arming a new Attempt.
     [[nodiscard]] bool canEnterCurrentLevelAsSpectator() const;
     [[nodiscard]] bool hasLocalAttemptInFlight() const;
+    [[nodiscard]] bool hasLocalGameplayAuthority() const;
+    void setSpectatorLocalTransportBlocked(void const* owner, bool blocked);
     [[nodiscard]] int localDeathmatchVisualAttemptsUsed() const;
     [[nodiscard]] double localDisplayScore(double progressPercent, std::optional<double> qualifyingPercentOverride = std::nullopt) const;
     [[nodiscard]] int localDisplayClears() const;
@@ -452,6 +454,7 @@ public:
     [[nodiscard]] bool reportAttemptEnd(int levelId, double progressPercent, bool cleared, std::optional<double> qualifyingPercentOverride = std::nullopt);
 
 private:
+    void const* m_spectatorLocalTransportOwner = nullptr;
     struct PendingStart {
         int levelId = 0;
         std::string eventId;

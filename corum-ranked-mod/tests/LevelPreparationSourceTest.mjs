@@ -123,11 +123,9 @@ test('metadata recovery cancels competing return/launch callbacks and waits for 
 
 test('live spectator path is read-only and keeps polling fallback', () => {
     const update = body(play, 'void postUpdate(float dt)', 'void resetLevel()');
-    const spectatorBranch = body(update, 'if (runtime.isSpectating()) {', 'if (m_fields->spectatorMode) {');
-    assert.match(spectatorBranch, /live\.tickViewer\(\)/);
-    assert.match(spectatorBranch, /interpolatedPose\(\)/);
-    assert.match(spectatorBranch, /setPosition\(/);
-    assert.match(spectatorBranch, /setRotation\(/);
+    const spectatorBranch = body(update, 'if (m_fields->spectatorMode) {', 'if (m_fields->spectatorPending) {');
+    assert.match(spectatorBranch, /m_player1->setVisible\(false\)/);
+    assert.doesNotMatch(spectatorBranch, /interpolatedPose\(|setPosition\(|setRotation\(/);
     for (const forbidden of ['reportAttemptStart(', 'reportAttemptProgress(', 'reportAttemptEnd(', 'levelComplete()']) {
         assert(!spectatorBranch.includes(forbidden), `Spectator branch must not invoke ${forbidden}`);
     }
@@ -151,7 +149,7 @@ test('spectator reconnect reuses canonical LevelInfo without arming an Attempt',
     assert.match(activate, /auto const spectatorLaunch = runtime\.canEnterCurrentLevelAsSpectator\(\)/);
     assert.match(activate, /if \(!spectatorLaunch && !runtime\.armCurrentLevelForGameplay\(\)\)/);
     assert(activate.indexOf('canEnterCurrentLevelAsSpectator()') < activate.indexOf('armCurrentLevelForGameplay()'));
-    assert.match(playInit, /m_fields->spectatorMode = runtime\.isSpectating\(\)/);
+    assert.match(playInit, /syncSpectatorLocalSafety\(\)/);
     assert.match(playInit, /m_player1->setVisible\(false\)/);
     assert.doesNotMatch(playInit, /reportAttemptStart\(|reportAttemptProgress\(|reportAttemptEnd\(/);
     assert.match(spectatorAuthority, /spectatorLevelEntryAllowed/);
@@ -163,6 +161,7 @@ test('spectator scoring transport is suppressed before the first gameplay frame'
     assert.match(scoring, /!m_fields->spectatorMode/);
     assert.match(scoring, /!m_fields->spectatorPending/);
     assert.match(scoring, /!corum::ranked::RankedRuntime::get\(\)\.isSpectating\(\)/);
+    assert.match(scoring, /syncSpectatorLocalSafety\(\)/);
 });
 
 test('practice never publishes live gameplay and relay validates stream identity', () => {
