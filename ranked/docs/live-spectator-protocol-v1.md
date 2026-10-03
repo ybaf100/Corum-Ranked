@@ -1,6 +1,14 @@
 # Corum Ranked Live Spectator Protocol v1
 
-Status: **Phase 1 local-dummy safety implemented in beta17; remote presentation is deferred to Phase 2. Native-device gameplay quality is not yet certified.**
+Status: **Phase 1 local-dummy safety in beta17; Phase 2 dedicated remote Cube presentation in beta18. Camera/entry E2E remains Phase 3. Native-device gameplay quality is not yet certified.**
+
+## Phase 2 client presentation (beta18)
+
+`CorumRemotePlayer` owns a separate factory-created `PlayerObject` under a retained world-coordinate layer, never `m_player1`/`m_player2`. Existing interpolation feeds x/y/rotation. Missing packets hide it; dead hides and freezes it; finished holds the exact final pose. No native death, reset, completion, scoring, persistence, camera or PlayerObject physics update is invoked by the renderer.
+
+Creation requires authoritative spectator permission, an active Phase 1 local dummy and matching level/live context. Match/round/map/Death Match sequence/Attempt/generation and local presentation epoch distinguish streams; `reset:true` also advances the epoch when the server identity is unchanged. Exit/context reset/quit/scene teardown remove owned visual and native companions. Local safety/transport/New Best/99% guards remain independent and unchanged. The existing HTTP packet schema and server authority are unchanged.
+
+Camera follow/entry/waiting/fallback two-client E2E is Phase 3; game-mode and death/Clear effects Phase 4; cosmetics/interpolation/network polish Phase 5; optimization Phase 6.
 
 This document describes the live gameplay spectator relay added after `v0.5.0-beta.14`. It is deliberately non-authoritative: Ranked scoring, clears, wins, anti-cheat decisions, Attempt ownership, and match transitions continue to use the existing HTTP Attempt lifecycle only.
 

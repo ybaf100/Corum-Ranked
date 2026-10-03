@@ -125,7 +125,8 @@ test('live spectator path is read-only and keeps polling fallback', () => {
     const update = body(play, 'void postUpdate(float dt)', 'void resetLevel()');
     const spectatorBranch = body(update, 'if (m_fields->spectatorMode) {', 'if (m_fields->spectatorPending) {');
     assert.match(spectatorBranch, /m_player1->setVisible\(false\)/);
-    assert.doesNotMatch(spectatorBranch, /interpolatedPose\(|setPosition\(|setRotation\(/);
+    assert.doesNotMatch(spectatorBranch, /m_player1->setPosition\(|m_player1->setRotation\(|m_player1->setVisible\(true\)/);
+    assert.match(spectatorBranch, /remotePlayer\.update/);
     for (const forbidden of ['reportAttemptStart(', 'reportAttemptProgress(', 'reportAttemptEnd(', 'levelComplete()']) {
         assert(!spectatorBranch.includes(forbidden), `Spectator branch must not invoke ${forbidden}`);
     }

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "domain/SpectatorRemotePolicy.hpp"
+
 #include <Geode/Geode.hpp>
 #include <Geode/utils/web.hpp>
 
@@ -17,14 +19,6 @@ enum class SpectatorLiveStatus {
     Fallback,
 };
 
-struct SpectatorGhostPose {
-    float x = 0.0f;
-    float y = 0.0f;
-    float rotation = 0.0f;
-    bool dead = false;
-    bool finished = false;
-};
-
 class SpectatorLiveRuntime final {
 public:
     static SpectatorLiveRuntime& get();
@@ -37,6 +31,7 @@ public:
     [[nodiscard]] std::string const& reason() const;
     [[nodiscard]] std::string const& opponentName() const;
     [[nodiscard]] std::optional<SpectatorGhostPose> interpolatedPose() const;
+    [[nodiscard]] std::optional<SpectatorRemoteFrame> presentationFrame() const;
 
 private:
     SpectatorLiveRuntime() = default;
@@ -63,6 +58,7 @@ private:
     std::string m_viewContextKey;
     std::string m_viewAttemptId;
     std::uint64_t m_viewGeneration = 0;
+    std::uint64_t m_viewPresentationEpoch = 0;
     std::int64_t m_lastViewSequence = -1;
     std::string m_opponentName;
     std::string m_reason;

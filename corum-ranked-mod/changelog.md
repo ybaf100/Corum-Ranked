@@ -1,3 +1,11 @@
+## v0.5.0-beta.18
+
+- Spectator Phase 2 adds a dedicated render-only Cube PlayerObject, separate from the Phase 1 local dummy, using existing x/y/rotation/dead/finished telemetry and interpolation.
+- Retained world-layer visual/companion ownership, context/generation/sequence/reset-epoch validation, hidden waiting/dead state and frozen finished pose prevent local gameplay lifecycle side effects.
+- Preserve all Phase 1 noclip, 99%/completion, transport and local-record guards independently of remote rendering. No server protocol, scoring, DB, camera or Practice changes.
+- Add strict remote lifecycle policy tests and a native-double harness compiling the complete production renderer; package MIT attribution for the adapted Globed companion cleanup inventory.
+- Synchronize client/server gate to beta18. Camera follow and spectator entry E2E remain Phase 3. Release remains manual-only.
+
 ## v0.5.0-beta.17
 
 - Spectator Phase 1 converts only server-authorized, finished local gameplay into a hidden non-scoring local dummy; live FINAL/LAST/Death Match Attempts, Placement and user Practice are excluded.

@@ -22,7 +22,7 @@ describe("Ranked client version gate", () => {
 
   it("accepts the same current version with or without a leading v", () => {
     expect(
-      evaluateRankedClientVersion("0.5.0-beta.17", [clientMod("0.5.0-beta.17")]).allowed,
+      evaluateRankedClientVersion("0.5.0-beta.18", [clientMod("0.5.0-beta.18")]).allowed,
     ).toBe(true);
   });
 
@@ -32,7 +32,7 @@ describe("Ranked client version gate", () => {
     ]);
     expect(result).toMatchObject({
       allowed: false,
-      requiredVersion: "v0.5.0-beta.17",
+      requiredVersion: "v0.5.0-beta.18",
       clientVersion: "v0.5.0-beta.8",
     });
   });
@@ -49,6 +49,10 @@ describe("Ranked client version gate", () => {
 
   it("rejects beta16 after the beta17 spectator safety patch", () => {
     expect(evaluateRankedClientVersion("v0.5.0-beta.16", [clientMod("v0.5.0-beta.16")]).allowed).toBe(false);
+  });
+
+  it("rejects beta17 after the beta18 dedicated remote renderer patch", () => {
+    expect(evaluateRankedClientVersion("v0.5.0-beta.17", [clientMod("v0.5.0-beta.17")]).allowed).toBe(false);
   });
 
   it("rejects when the active Corum Ranked mod snapshot is missing", () => {

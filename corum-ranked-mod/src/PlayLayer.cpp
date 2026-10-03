@@ -5,6 +5,7 @@
 #include "domain/AttemptScoring.hpp"
 #include "domain/RankedGameplayPolicy.hpp"
 #include "domain/SpectatorLocalSafety.hpp"
+#include "spectator/CorumRemotePlayer.hpp"
 #include "domain/TransitionTrace.hpp"
 #include "domain/RenderFpsMeter.hpp"
 #include "ui/PlayerIcon.hpp"
@@ -186,6 +187,7 @@ public:
         bool suppressedSaveLogged = false;
         bool safetyRetired = false;
         bool vanillaGameplayEndInProgress = false;
+        corum::ranked::CorumRemotePlayer remotePlayer;
     };
 
     static void onModify(auto& self) {
@@ -353,19 +355,25 @@ public:
             if (m_hasCompletedLevel || (m_player1 && m_player1->m_isDead)) {
                 resetLevel();
             }
-            // Phase 1 deliberately does not render remote pose onto m_player1.
-            // It is a hidden LOCAL dummy. Opponent polling HUD remains available;
-            // Phase 2 will own a distinct CorumRemotePlayer and camera path.
+            // m_player1 remains a hidden LOCAL dummy. Only the separate visual
+            // PlayerObject below consumes opponent telemetry; camera is Phase 3.
             if (m_player1) m_player1->setVisible(false);
             (void)freezeLocalDummy(m_player1);
             if (!spectatorTransitionState(runtime.view().match.state) ||
                 runtime.currentLevelId() != m_fields->levelId) {
+                m_fields->remotePlayer.cleanup();
+                live.reset();
                 if (!m_fields->autoExitRequested) {
                     m_fields->autoExitRequested = true;
                     onQuit();
                 }
                 return;
             }
+            live.tickViewer();
+            m_fields->remotePlayer.update(
+                this, runtime.isSpectating() && m_fields->localSafety.active(),
+                live.presentationFrame()
+            );
             if (
                 runtime.view().revision != m_fields->renderedRevision ||
                 now >= m_fields->nextHudRefreshAt
@@ -376,6 +384,7 @@ public:
             return;
         }
 
+        m_fields->remotePlayer.cleanup();
         if (m_fields->spectatorPending) {
             auto const& matchState = runtime.view().match.state;
             if (!spectatorTransitionState(matchState) || runtime.currentLevelId() != m_fields->levelId) {
@@ -504,6 +513,7 @@ public:
         syncSpectatorLocalSafety();
         ScopedPersistenceOwner persistence(this);
         if (blocksLocalEvidence()) {
+            m_fields->remotePlayer.cleanup();
             m_fields->localSafety.resetDummy();
             PlayLayer::resetLevel();
             if (m_player1) m_player1->setVisible(false);
@@ -657,6 +667,7 @@ public:
     }
 
     void onQuit() {
+        m_fields->remotePlayer.cleanup();
         syncSpectatorLocalSafety();
         ScopedPersistenceOwner persistence(this);
         ScopedRealGameplayEnd finishing(
@@ -690,6 +701,10 @@ public:
 
     void onExit() {
         ScopedPersistenceOwner persistence(this);
+        m_fields->remotePlayer.cleanup();
+        if (m_fields->spectatorMode || m_fields->spectatorPending) {
+            corum::ranked::SpectatorLiveRuntime::get().reset();
+        }
         PlayLayer::onExit();
         corum::ranked::RankedRuntime::get().setSpectatorLocalTransportBlocked(this, false);
         m_fields->safetyRetired = true;

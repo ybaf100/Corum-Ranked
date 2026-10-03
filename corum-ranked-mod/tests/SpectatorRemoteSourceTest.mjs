@@ -1,0 +1,48 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+const read = path => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
+const play = read('src/PlayLayer.cpp');
+const remote = read('src/spectator/CorumRemotePlayer.cpp');
+const live = read('src/SpectatorLiveRuntime.cpp');
+
+test('only the dedicated PlayerObject receives interpolated remote pose', () => {
+    assert.match(remote, /PlayerObject::create\(1, 1, layer, root, true\)/);
+    assert.match(remote, /player == layer->m_player1 \|\| player == layer->m_player2/);
+    assert.match(remote, /m_player->setPosition\(\{pose.x, pose.y\}\)/);
+    assert.match(remote, /m_player->setRotation\(pose.rotation\)/);
+    assert.doesNotMatch(play, /m_player1->set(?:Position|Rotation)\(/);
+    assert.match(play, /remotePlayer.update\([\s\S]*?runtime.isSpectating\(\) && m_fields->localSafety.active\(\)/);
+    assert.match(play, /live.presentationFrame\(\)/);
+});
+test('remote renderer cannot invoke scoring, physics, death, completion or camera', () => {
+    assert.doesNotMatch(remote, /(?:reportAttempt|levelComplete\(|destroyPlayer\(|resetLevel\(|onQuit\(|savePercentage\(|saveNewScore\(|updateCamera\(|PlayerObject::update\()/);
+    assert.match(remote, /unscheduleAllSelectors\(\)/);
+    assert.match(remote, /isolateNativeCompanions\(player, effectsRoot\)/);
+    assert.match(remote, /discardNativeCompanions\(m_player.data\(\)\)/);
+    assert.match(remote, /if \(!frame \|\| !frame->pose\) \{\s*setVisible\(false\)/);
+});
+test('level and spectator exit clean up before vanilla teardown', () => {
+    assert.match(play, /void onQuit\(\) \{\s*m_fields->remotePlayer.cleanup\(\)/);
+    const exit = play.slice(play.indexOf('void onExit()'));
+    assert(exit.indexOf('remotePlayer.cleanup()') < exit.indexOf('PlayLayer::onExit()'));
+    assert.match(play, /remotePlayer.cleanup\(\);\s*live.reset\(\);\s*if \(!m_fields->autoExitRequested\) \{\s*m_fields->autoExitRequested = true;\s*onQuit\(\)/);
+    assert.match(read('src/spectator/CorumRemotePlayer.hpp'), /~CorumRemotePlayer\(\)/);
+});
+test('typed live frame preserves server identity and a local reset epoch', () => {
+    const frame = live.slice(live.indexOf('SpectatorLiveRuntime::presentationFrame()'));
+    for (const field of ['matchId', 'roundNumber', 'deathmatchSequence', 'levelId', 'attemptId', 'generation', 'epoch']) {
+        assert.match(frame, new RegExp(`\\.${field} =`));
+    }
+    assert.match(frame, /ranked.isPlacement\(\)/);
+    assert.match(frame, /!ranked.isSpectating\(\)/);
+    assert.match(frame, /m_viewContextKey != viewerContextKey\(match\)/);
+    assert.match(live, /if \(streamChanged \|\| resetStream\) \{\s*\+\+m_viewPresentationEpoch/);
+    assert.match(live, /if \(m_currentPose->dead \|\| m_currentPose->finished\) return m_currentPose/);
+    assert.match(live, /static_cast<float>\(elapsed\) \/ 50.0f/);
+});
+test('MIT attribution is packaged and new renderer participates in native compile', () => {
+    assert.match(read('CMakeLists.txt'), /GLOB_RECURSE[\s\S]*?src\/\*\.cpp/);
+    assert(JSON.parse(read('mod.json')).resources.files.includes('resources/GLOBED-LICENSE.txt'));
+    assert.match(read('resources/GLOBED-LICENSE.txt'), /Copyright \(c\) 2023 dank_meme/);
+});

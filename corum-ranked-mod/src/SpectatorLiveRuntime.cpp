@@ -42,9 +42,7 @@ web::WebRequest spectatorRequest(std::string const& sessionToken, std::string co
 }
 
 bool finitePose(corum::ranked::SpectatorGhostPose const& pose) {
-    return
-        std::isfinite(pose.x) && std::isfinite(pose.y) && std::isfinite(pose.rotation) &&
-        std::abs(pose.x) <= 10'000'000.0f && std::abs(pose.y) <= 10'000'000.0f;
+    return corum::ranked::finiteSpectatorPose(pose);
 }
 
 float poseDistance(
@@ -103,6 +101,8 @@ void SpectatorLiveRuntime::resetPublisher() {
 
 void SpectatorLiveRuntime::resetViewer() {
     ++m_viewRequestGeneration;
+    ++m_viewPresentationEpoch;
+    if (m_viewPresentationEpoch == 0) ++m_viewPresentationEpoch;
     m_viewBusy = false;
     m_viewMatchId.clear();
     m_viewContextKey.clear();
@@ -340,6 +340,13 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
         }
         m_status = SpectatorLiveStatus::Waiting;
         m_reason = reason;
+        if (!m_viewAttemptId.empty() || m_viewGeneration != 0 || m_currentPose) {
+            ++m_viewPresentationEpoch;
+            if (m_viewPresentationEpoch == 0) ++m_viewPresentationEpoch;
+        }
+        m_viewAttemptId.clear();
+        m_viewGeneration = 0;
+        m_lastViewSequence = -1;
         m_previousPose.reset();
         m_currentPose.reset();
         m_lastPacketAt = {};
@@ -372,6 +379,8 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
         return;
     }
     if (streamChanged || resetStream) {
+        ++m_viewPresentationEpoch;
+        if (m_viewPresentationEpoch == 0) ++m_viewPresentationEpoch;
         m_viewAttemptId = attemptId;
         m_viewGeneration = generation;
         m_lastViewSequence = -1;
@@ -470,7 +479,7 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
         publisherElapsedMs = packet["elapsedMs"].asInt().unwrapOr(publisherElapsedMs);
         ++appliedPackets;
     }
-    if (appliedPackets > 0) {
+    if (appliedPackets > 0 && (streamChanged || resetStream || m_status != SpectatorLiveStatus::Live)) {
         log::debug(
             "[SpectatorLive] applied match={} context={} attempt={} generation={} packets={} lastSequence={} publisherElapsedMs={} rttMs={} maxCorrection={}",
             m_viewMatchId,
@@ -509,6 +518,8 @@ void SpectatorLiveRuntime::setFallback(std::string reason) {
 
 std::optional<SpectatorGhostPose> SpectatorLiveRuntime::interpolatedPose() const {
     if (!m_currentPose) return std::nullopt;
+    // Terminal flags must not freeze the renderer at an earlier lerp sample.
+    if (m_currentPose->dead || m_currentPose->finished) return m_currentPose;
     if (!m_previousPose) return m_currentPose;
     auto const elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - m_poseReceivedAt
@@ -522,6 +533,30 @@ std::optional<SpectatorGhostPose> SpectatorLiveRuntime::interpolatedPose() const
     pose.dead = m_currentPose->dead;
     pose.finished = m_currentPose->finished;
     return pose;
+}
+
+std::optional<SpectatorRemoteFrame> SpectatorLiveRuntime::presentationFrame() const {
+    auto& ranked = RankedRuntime::get();
+    auto const& match = ranked.view().match;
+    if (ranked.view().stage != RuntimeStage::Matched || ranked.isPlacement() ||
+        !ranked.isSpectating() || !match.currentMap || match.matchId.empty() ||
+        m_viewMatchId != match.matchId || m_viewContextKey != viewerContextKey(match) ||
+        (m_status != SpectatorLiveStatus::Waiting && m_status != SpectatorLiveStatus::Live)) {
+        return std::nullopt;
+    }
+    return SpectatorRemoteFrame {
+        .context = {
+            .matchId = m_viewMatchId,
+            .roundNumber = match.roundNumber,
+            .deathmatchSequence = match.deathmatchSequence,
+            .levelId = match.currentMap->levelId,
+            .attemptId = m_viewAttemptId,
+            .generation = m_viewGeneration,
+            .epoch = m_viewPresentationEpoch,
+        },
+        .sequence = m_lastViewSequence,
+        .pose = interpolatedPose(),
+    };
 }
 
 } // namespace corum::ranked
