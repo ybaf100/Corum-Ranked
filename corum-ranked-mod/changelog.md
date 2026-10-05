@@ -1,3 +1,11 @@
+## v0.5.0-beta.26
+
+- Fix Debug VOICE RECORD/TEST staying in LevelInfo after map/song readiness: activate the verified native GD Play item with its original listener/selector instead of directly calling onPlay with a null sender.
+- Use a separate one-shot Debug callback latch, consumed before vanilla forwarding. Manual Play and duplicate dispatch remain blocked; Ranked authority is untouched.
+- Wait for the native item/callback and busy state. Retry a failed activation after four seconds without cancelling its server scope; LevelInfo exit or PlayLayer entry stops the watchdog. Explicit Back still finalizes an incomplete recording.
+- Execute the production native-item identity, selector dispatch, hook forwarding, PlayLayer Debug entry and runtime mode transitions in Debug ON/OFF regression tests, including missing/busy buttons, dropped/duplicate callbacks and RECORD/TEST.
+- Synchronize the exact client/server gate to beta26. Preserve verified online/Saved geometry, effective song files, server recording/playback, protocol/format v2 and Phase 1–4 spectator isolation. iPadOS retest remains required; no manual Release.
+
 ## v0.5.0-beta.25
 
 - Live Spectator protocol v2 reads actual GD Cube/Ship/Ball/UFO/Wave/Robot/Spider/Swing, mini, gravity and visual flip, using shared production/Debug capture and strict server/client validation.

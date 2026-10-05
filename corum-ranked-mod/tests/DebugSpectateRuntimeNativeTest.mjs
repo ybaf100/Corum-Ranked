@@ -4,11 +4,11 @@ import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const read = p => readFileSync(join(root, p), 'utf8');
 
-test('actual native LevelInfo gate downloads VOICE and song without a fabricated Ranked current map', () => {
+test('actual Debug gate executes native item selector, one-shot onPlay, vanilla Play and RECORD/TEST scene entry', () => {
     const source = read('src/LevelInfoLayer.cpp');
     const extract = signature => {
         const start = source.indexOf(signature);
@@ -24,12 +24,37 @@ test('actual native LevelInfo gate downloads VOICE and song without a fabricated
         return source.slice(start, end);
     };
     const helpers = ['bool mapReady(', 'std::vector<int> collectSongIds(', 'bool songFileExists(',
-        'bool songIdReady(', 'bool songsReady(', 'bool debugSpectateSongFilesReady('].map(extract).join('\n');
+        'bool songIdReady(', 'bool songsReady(', 'bool debugSpectateSongFilesReady(',
+        'bool nodeContains(', 'CCMenuItem* vanillaPlayButton('].map(extract).join('\n');
+    const debugPart = signature => {
+        const body = extract(signature);
+        return '\n' + body.slice(body.indexOf('#if'), body.indexOf('#endif') + 6) + '\n';
+    };
+    const runtimeSource = read('src/debug/DebugSpectateRuntime.cpp');
+    const runtimeMethod = signature => {
+        const start = runtimeSource.indexOf(signature);
+        assert(start >= 0, signature);
+        const open = runtimeSource.indexOf('{', start);
+        let end = open + 1, depth = 1;
+        while (depth) {
+            if (runtimeSource[end] === '{') ++depth;
+            else if (runtimeSource[end] === '}') --depth;
+            ++end;
+        }
+        return runtimeSource.slice(start, end);
+    };
+    const playSource = read('src/PlayLayer.cpp');
+    const playInit = playSource.slice(playSource.indexOf('bool init(GJGameLevel* level, bool useReplay, bool dontCreateObjects)'),
+        playSource.indexOf('m_fields->rankedLevel =', playSource.indexOf('bool init(GJGameLevel* level, bool useReplay, bool dontCreateObjects)')));
+    const debugPlayInit = playInit.slice(playInit.indexOf('m_fields->levelId ='));
     const cpp = `
+#include "${join(root, 'src/debug/DebugSpectatePolicy.hpp')}"
 #include <cassert>
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -40,6 +65,29 @@ struct GJGameLevel {
     int m_levelType=3;
 };
 struct Button {int requests=0;void activate(){++requests;}};
+struct CCObject {int references=1;virtual ~CCObject()=default;void retain(){++references;}void release(){assert(references>0);--references;}};
+using SEL_MenuHandler=void(CCObject::*)(CCObject*);
+struct CCNode:CCObject {
+    std::string id;std::vector<CCNode*> children;
+    auto const& getChildrenExt()const{return children;}
+    CCNode* getChildByID(char const* name){for(auto* n:children)if(n->id==name)return n;return nullptr;}
+};
+struct CCMenu:CCNode {};
+struct CCMenuItem:CCNode {
+    CCObject* m_pListener=nullptr;SEL_MenuHandler m_pfnSelector=nullptr;
+    int activations=0;bool enabled=false,dropCallback=false,duplicateCallback=true;
+    void setEnabled(bool value){enabled=value;}
+    void activate(){
+        if(!enabled)return;
+        ++activations;
+        if(dropCallback||!m_pListener||!m_pfnSelector)return;
+        (m_pListener->*m_pfnSelector)(this);
+        if(duplicateCallback)(m_pListener->*m_pfnSelector)(this);
+    }
+};
+struct CCMenuItemSprite:CCMenuItem {CCNode* normal=nullptr;CCNode* getNormalImage(){return normal;}};
+template<class T> T typeinfo_cast(CCNode* n){return dynamic_cast<T>(n);}
+namespace geode::log {template<class... T>void info(T...){}template<class... T>void warn(T...){} }
 struct CustomSongWidget {bool m_isRobtopSong=false;int m_customSongID=42;Button* m_downloadBtn=nullptr;};
 struct MusicDownloadManager {
     bool ready=false;std::string path;static MusicDownloadManager* sharedState(){static MusicDownloadManager m;return &m;}
@@ -47,22 +95,31 @@ struct MusicDownloadManager {
     bool isResourceSong(int)const{return false;}bool isSongDownloaded(int)const{return ready;}
 };
 namespace corum::ranked {
+enum class RuntimeStage {Ready,Matched};
 struct RankedRuntime {
     int current=0;static RankedRuntime& get(){static RankedRuntime r;return r;}
     int currentLevelId()const{return current;}
+    struct View {RuntimeStage stage=RuntimeStage::Ready;} state;
+    View const& view()const{return state;}
 };
 struct PreparationContext{int levelId=0;};
 namespace debug {
-constexpr int kDebugSpectateLevelId=88350599;
 struct DebugSpectateRuntime {
-    bool admitted=false;static DebugSpectateRuntime& get(){static DebugSpectateRuntime d;return d;}
-    bool preparedLevel(int id)const{return admitted&&id==kDebugSpectateLevelId;}
-    PreparationContext preparationContext()const{return {admitted?kDebugSpectateLevelId:0};}
+    DebugSpectateMode m_mode=DebugSpectateMode::None;
+    std::string m_token,m_id="server-record-id",m_contextId="server-scope",m_status;
+    std::chrono::steady_clock::time_point m_recordStartedAt{};
+    int cancellations=0;
+    static DebugSpectateRuntime& get(){static DebugSpectateRuntime d;return d;}
+    DebugSpectateMode mode()const{return m_mode;}
+    bool preparedLevel(int id)const;
+    void sceneEntered(int id);
+    PreparationContext preparationContext()const{return {kDebugSpectateLevelId};}
+    void cancelPreparation(){++cancellations;m_mode=DebugSpectateMode::None;m_token.clear();}
 };
 }
 PreparationContext currentPreparationContext(){
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
-    if(debug::DebugSpectateRuntime::get().admitted)return debug::DebugSpectateRuntime::get().preparationContext();
+    if(debug::DebugSpectateRuntime::get().preparedLevel(debug::kDebugSpectateLevelId))return debug::DebugSpectateRuntime::get().preparationContext();
 #endif
     return {RankedRuntime::get().currentLevelId()};
 }
@@ -73,27 +130,62 @@ struct RankedLevelPreparation {
     bool adopt(GJGameLevel* level,PreparationContext context){if(!authorizes(level,context))return false;adopted=level;return true;}
 };
 void tracePreparedLevel(char const*,GJGameLevel*,CustomSongWidget*,void*){}
+struct SpectatorLiveRuntime {
+    int viewerStarts=0;std::string path;
+    static SpectatorLiveRuntime& get(){static SpectatorLiveRuntime r;return r;}
+    void startDebugViewer(std::string const&,std::string const&,std::string p){++viewerStarts;path=p;}
+};
+}
+namespace corum::ranked::debug {
+using namespace geode;
+${runtimeMethod('bool DebugSpectateRuntime::preparedLevel(')}
+${runtimeMethod('void DebugSpectateRuntime::sceneEntered(')}
 }
 ${helpers}
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
-namespace geode::log {template<class... T> void info(T...){} }
+namespace geode {template<class T>struct Ref {T* p;explicit Ref(T* v):p(v){p->retain();}~Ref(){p->release();}};}
 using namespace geode;
 bool jukeboxLoaded(){return true;}
 struct CCDirector {static CCDirector* sharedDirector(){static CCDirector d;return &d;}void* getRunningScene(){return nullptr;}};
 bool modal=false;bool hasOpenModal(void*){return modal;}
-struct LevelInfoLayer {
+struct LevelInfoLayer:CCNode {
     GJGameLevel* m_level=nullptr;CustomSongWidget* m_songWidget=nullptr;
+    CCMenu* m_playBtnMenu=nullptr;CCNode* m_playSprite=nullptr;
     int m_levelType=4;bool m_isBusy=false;
-    int downloads=0,plays=0;
+    int downloads=0,plays=0,backs=0;CCObject* forwardedSender=nullptr;
+    std::function<void()> accepted;
     bool shouldDownloadLevel()const{return m_level->m_levelNotDownloaded;}
-    void downloadLevel(){++downloads;}void onPlay(void*){++plays;}
+    void downloadLevel(){++downloads;}
+    void onPlay(CCObject* sender){++plays;forwardedSender=sender;if(accepted)accepted();}
+    void onBack(CCObject*){++backs;}
+    void onEnterTransitionDidFinish(){}
 };
-#define schedule_selector(x) 0
+#define schedule_selector(x) &x
 struct CorumRankedLevelInfoLayer:LevelInfoLayer {
-    struct Fields {bool debugSpectateOwned=true,debugMapRequested=false,debugSongRequested=false,debugPlayRequested=false,debugMapReady=false,debugSongReady=false;} fields;
+    struct Fields {bool debugSpectateOwned=true,debugMapRequested=false,debugSongRequested=false,debugPlayRequested=false,debugMapReady=false,debugSongReady=false,debugVanillaPlayActivation=false,debugLevelInfoExited=false;} fields;
     Fields* m_fields=&fields;
-    void unschedule(int){}
+    using Tick=void(CorumRankedLevelInfoLayer::*)(float);
+    bool polling=false,watchdog=false;float watchdogLeft=0;
+    void unschedule(Tick t){if(t==&CorumRankedLevelInfoLayer::verifyDebugSpectateLaunch)watchdog=false;else polling=false;}
+    void schedule(Tick,float){polling=true;}
+    void scheduleOnce(Tick,float delay){watchdog=true;watchdogLeft=delay;}
+    void tick(){if(polling)prepareDebugSpectate(0.1f);}
+    void advance(float dt){if(watchdog){watchdogLeft-=dt;if(watchdogLeft<=0.001f){watchdog=false;verifyDebugSpectateLaunch(dt);}}}
     ${extract('void prepareDebugSpectate(float)')}
+    ${extract('void verifyDebugSpectateLaunch(float)')}
+    void onPlay(CCObject* sender){${debugPart('void onPlay(CCObject* sender)')}}
+    void onExit(){${debugPart('void onExit()')}}
+    void onBack(CCObject* sender){${debugPart('void onBack(CCObject* sender)')}}
+    void onEnterTransitionDidFinish(){${debugPart('void onEnterTransitionDidFinish()')}}
+};
+struct PlayLayer {static inline int creations=0;bool init(GJGameLevel*,bool,bool){++creations;return true;}};
+struct CorumRankedPlayLayer:PlayLayer {
+    struct Fields {int levelId=0;bool debugRecordScene=false,debugPlaybackScene=false;} fields;
+    Fields* m_fields=&fields;
+    bool init(GJGameLevel* level,bool useReplay,bool dontCreateObjects){
+        ${debugPlayInit}
+        return PlayLayer::init(level,useReplay,dontCreateObjects);
+    }
 };
 #endif
 int main(int, char** argv){
@@ -107,9 +199,13 @@ int main(int, char** argv){
     ranked.current=123;assert(!mapReady(&level)); // Normal Ranked gate remains exact.
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
     auto& debug=corum::ranked::debug::DebugSpectateRuntime::get();
-    ranked.current=0;debug.admitted=true; // Debug Ready has NO Ranked map/match.
+    ranked.current=0;debug.m_token="server-token";debug.m_mode=corum::ranked::debug::DebugSpectateMode::PreparingRecord;
     level.m_levelString.clear();level.m_levelNotDownloaded=true;MusicDownloadManager::sharedState()->ready=false;
     CorumRankedLevelInfoLayer layer;layer.m_level=&level;layer.m_songWidget=&widget;
+    CCMenu menu;CCNode sprite,wrongSprite;CCMenuItemSprite native,decoy;
+    native.id="play-button";native.normal=&sprite;decoy.id="play-button";decoy.normal=&wrongSprite;
+    native.m_pListener=&layer;native.m_pfnSelector=static_cast<SEL_MenuHandler>(&CorumRankedLevelInfoLayer::onPlay);
+    layer.m_playSprite=&sprite;layer.onEnterTransitionDidFinish();assert(layer.polling);
     layer.prepareDebugSpectate(0.1f);layer.prepareDebugSpectate(0.1f);
     assert(layer.downloads==1&&layer.plays==0&&button.requests==0);
     GJGameLevel downloaded=level;downloaded.m_levelString="actual-downloaded-geometry";downloaded.m_levelNotDownloaded=false;
@@ -123,18 +219,54 @@ int main(int, char** argv){
     modal=false;corum::ranked::RankedLevelPreparation::get().proof=false;layer.prepareDebugSpectate(0.1f);assert(layer.plays==0);
     corum::ranked::RankedLevelPreparation::get().proof=true;
     layer.m_isBusy=true;layer.prepareDebugSpectate(0.1f);assert(layer.plays==0);
-    layer.m_isBusy=false;layer.prepareDebugSpectate(0.1f);layer.prepareDebugSpectate(0.1f);
+    layer.m_isBusy=false;layer.prepareDebugSpectate(0.1f);assert(!layer.fields.debugPlayRequested);
+    layer.m_playBtnMenu=&menu;menu.children={&decoy};layer.tick();assert(!layer.fields.debugPlayRequested); // ID alone is not native identity.
+    menu.children={&decoy,&native};assert(vanillaPlayButton(&menu,&sprite)==&native); // Identity fallback.
+    native.m_pListener=nullptr;layer.tick();assert(!layer.fields.debugPlayRequested);
+    native.m_pListener=&decoy;layer.tick();assert(!layer.fields.debugPlayRequested);
+    native.m_pListener=&layer;auto const selector=native.m_pfnSelector;native.m_pfnSelector=nullptr;
+    layer.tick();assert(!layer.fields.debugPlayRequested);native.m_pfnSelector=selector;
+    layer.onPlay(&native);assert(layer.plays==0); // Manual Play is blocked.
+    native.dropCallback=true;layer.tick();assert(native.activations==1&&layer.plays==0&&layer.watchdog);
+    layer.advance(3.9f);layer.tick();assert(native.activations==1&&layer.fields.debugPlayRequested);
+    layer.advance(0.1f);assert(!layer.fields.debugPlayRequested&&!layer.fields.debugVanillaPlayActivation&&layer.polling);
+    assert(debug.m_token=="server-token"&&debug.cancellations==0); // Failed activation does not cancel server scope.
+    native.dropCallback=false;layer.tick();layer.tick();
     assert(layer.plays==1&&ranked.current==0);
+    assert(native.activations==2&&layer.forwardedSender==&native&&native.m_pfnSelector==selector);
+    assert(!layer.fields.debugVanillaPlayActivation&&native.references==1&&layer.references==1);
+    assert(layer.watchdog&&!native.enabled);layer.onPlay(&native);assert(layer.plays==1);
+    layer.advance(4.0f);assert(!layer.fields.debugPlayRequested&&debug.cancellations==0);
+    CorumRankedPlayLayer play;
+    layer.accepted=[&]{layer.onExit();assert(play.init(&downloaded,false,false));};
+    layer.tick();assert(layer.plays==2&&PlayLayer::creations==1&&play.fields.debugRecordScene);
+    assert(debug.m_mode==corum::ranked::debug::DebugSpectateMode::Recording);
+    assert(!layer.polling&&!layer.watchdog&&layer.fields.debugLevelInfoExited);
+    layer.advance(10);layer.tick();layer.onPlay(&native);assert(layer.plays==2&&PlayLayer::creations==1);
     assert(corum::ranked::RankedLevelPreparation::get().adopted==&downloaded&&layer.m_levelType==downloaded.m_levelType);
     auto requests=button.requests;
     MusicDownloadManager::sharedState()->ready=false;
+    debug.m_mode=corum::ranked::debug::DebugSpectateMode::PreparingPlayback;
     CorumRankedLevelInfoLayer saved;saved.m_level=&downloaded;saved.m_songWidget=&widget;
+    CCMenu savedMenu;CCMenuItemSprite savedNative;savedNative.normal=&sprite;savedMenu.children={&savedNative};
+    saved.m_playBtnMenu=&savedMenu;saved.m_playSprite=&sprite;savedNative.m_pListener=&saved;
+    savedNative.m_pfnSelector=static_cast<SEL_MenuHandler>(&CorumRankedLevelInfoLayer::onPlay);
+    CorumRankedPlayLayer playback;saved.accepted=[&]{assert(playback.init(&downloaded,false,false));};
+    saved.onEnterTransitionDidFinish();
     saved.prepareDebugSpectate(0.1f);saved.prepareDebugSpectate(0.1f);
     assert(saved.plays==1&&saved.downloads==0&&button.requests==requests); // Saved geometry + existing effective file.
-    debug.admitted=false;assert(!mapReady(&level));
+    assert(playback.fields.debugPlaybackScene&&debug.m_mode==corum::ranked::debug::DebugSpectateMode::Playback);
+    assert(!saved.watchdog&&!saved.polling&&corum::ranked::SpectatorLiveRuntime::get().viewerStarts==1);
+    saved.advance(10);assert(PlayLayer::creations==2&&saved.plays==1); // Entry acknowledged before onExit: no retry.
+    debug.m_mode=corum::ranked::debug::DebugSpectateMode::None;assert(!mapReady(&level));
     CorumRankedLevelInfoLayer rejected;rejected.m_level=&level;rejected.m_songWidget=&widget;
     rejected.prepareDebugSpectate(0.1f);assert(rejected.plays==0&&rejected.downloads==0);
-    debug.admitted=true;level.m_levelID=123;rejected.prepareDebugSpectate(0.1f);assert(rejected.plays==0);
+    debug.m_mode=corum::ranked::debug::DebugSpectateMode::PreparingRecord;
+    level.m_levelID=123;rejected.prepareDebugSpectate(0.1f);assert(rejected.plays==0);
+    saved.fields.debugLevelInfoExited=false;saved.fields.debugPlayRequested=false;saved.fields.debugVanillaPlayActivation=false;
+    saved.accepted={};saved.onEnterTransitionDidFinish();saved.tick();assert(saved.watchdog);
+    saved.onBack(&savedNative);assert(debug.cancellations==1&&saved.backs==1&&!saved.watchdog&&!saved.polling);
+    saved.advance(10);assert(saved.plays==2); // Only explicit Back cancels the server scope.
 #endif
     std::filesystem::remove(argv[1]);
 }
@@ -147,6 +279,23 @@ int main(int, char** argv){
             execFileSync('g++', ['-std=c++23', '-Wall', '-Wextra', '-Wpedantic', '-Werror',
                 ...(enabled ? ['-DCORUM_RANKED_DEBUG_SPECTATE=1'] : []), file, '-o', exe], { stdio: 'pipe' });
             execFileSync(exe, [join(dir, 'effective-jukebox-song.mp3')]);
+        }
+        // Prove the executable regression rejects the original direct-call
+        // path and a latch that stays open during duplicate selector dispatch.
+        const mutants = [
+            cpp.replace('nativePlayButton->activate();', 'LevelInfoLayer::onPlay(nullptr);'),
+            cpp.replace('m_fields->debugVanillaPlayActivation = false;\n            log::info("[DebugSpectate] native Play callback forwarded");',
+                'log::info("[DebugSpectate] native Play callback forwarded");'),
+        ];
+        for (const [index, mutant] of mutants.entries()) {
+            assert.notEqual(mutant, cpp);
+            const mutantFile = join(dir, `mutant-${index}.cpp`), mutantExe = join(dir, `mutant-${index}`);
+            writeFileSync(mutantFile, mutant);
+            execFileSync('g++', ['-std=c++23', '-Wall', '-Wextra', '-Wpedantic', '-Werror',
+                '-DCORUM_RANKED_DEBUG_SPECTATE=1', mutantFile, '-o', mutantExe], { stdio: 'pipe' });
+            const result = spawnSync(mutantExe, [join(dir, 'effective-jukebox-song.mp3')]);
+            assert(result.signal === 'SIGABRT' || (result.status !== null && result.status !== 0),
+                `Executable regression accepted bug mutant ${index}`);
         }
     } finally { rmSync(dir, { recursive: true, force: true }); }
 });

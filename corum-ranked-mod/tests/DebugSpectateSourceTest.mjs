@@ -20,7 +20,13 @@ test('fixed VOICE constant and production cadence are shared; native verified do
     assert.match(read('src/debug/DebugSpectatePolicy.hpp'), /time \+ kSpectatorPublishIntervalMs/);
     assert.match(level, /void prepareDebugSpectate\(float\)/);
     const gate = level.slice(level.indexOf('void prepareDebugSpectate('), level.indexOf('bool metadataReady()'));
-    for (const text of ['authorizes(', 'LevelInfoLayer::downloadLevel()', 'songsReady(', 'LevelInfoLayer::onPlay(nullptr)']) assert(gate.includes(text));
+    for (const text of ['authorizes(', 'LevelInfoLayer::downloadLevel()', 'songsReady(',
+        'vanillaPlayButton(m_playBtnMenu, m_playSprite)', 'nativePlayButton->activate()',
+        'm_isBusy', 'm_pListener', 'm_pfnSelector', 'verifyDebugSpectateLaunch']) assert(gate.includes(text));
+    assert.doesNotMatch(level, /LevelInfoLayer::onPlay\(nullptr\)/);
+    const callback = level.slice(level.indexOf('void onPlay(CCObject* sender)'), level.indexOf('void keyDown('));
+    assert.match(callback, /if \(!m_fields->debugVanillaPlayActivation \|\| !m_fields->debugPlayRequested\) return;/);
+    assert(callback.indexOf('debugVanillaPlayActivation = false') < callback.indexOf('LevelInfoLayer::onPlay(sender)'));
     assert.doesNotMatch(runtime + gate, /GJGameLevel::create|m_levelString\s*=|getStoredLevel/);
 });
 test('TEST uses real HTTP viewer decoder/interpolation/renderer/camera; no local replay or pose injection', () => {
@@ -48,7 +54,10 @@ test('verified Saved adoption and scene handoff precede native scene creation wi
     // Effective native/Jukebox path is required even if downloaded=true is stale.
     assert.match(level, /bool debugSpectateSongFilesReady\(/);
     assert.match(level, /!songsReady\(m_level, m_songWidget\) \|\| !debugSpectateSongFilesReady/);
-    for (const transition of ['preparation metadata verified', 'using downloaded saved VOICE geometry', 'map ready', 'song acquisition requested song=', 'song ready path=', 'invoking vanilla Play', 'PlayLayer entered', 'RECORDING active']) assert((runtime + level + play).includes(transition));
+    for (const transition of ['preparation metadata verified', 'using downloaded saved VOICE geometry', 'map ready',
+        'song acquisition requested song=', 'song ready path=', 'activating verified native Play button',
+        'native Play callback forwarded', 'LevelInfo exit accepted', 'native Play did not leave LevelInfo - retrying',
+        'PlayLayer entered', 'RECORDING active']) assert((runtime + level + play).includes(transition));
 });
 test('RECORD remains non-Ranked vanilla; TEST activates Phase-1 safety before init and cannot reopen Practice', () => {
     assert.match(play, /if \(m_fields->debugRecordScene \|\| m_fields->debugPlaybackScene\) return false/);
@@ -67,12 +76,13 @@ test('Official Debug OFF preprocessing removes UI and every debug API call; Debu
     assert.match(read('../.github/workflows/build-ranked-mod.yml'), /CORUM_RANKED_DEBUG_SPECTATE=OFF/);
     const dir = mkdtempSync(join(tmpdir(), 'corum-debug-off-'));
     try {
-        const sources = ['src/debug/DebugSpectateRuntime.cpp', 'src/debug/DebugSpectatePopup.cpp', 'src/SpectatorLiveRuntime.cpp', 'src/PlayLayer.cpp', 'src/RankedPopup.cpp'];
+        const sources = ['src/debug/DebugSpectateRuntime.cpp', 'src/debug/DebugSpectatePopup.cpp', 'src/SpectatorLiveRuntime.cpp', 'src/PlayLayer.cpp', 'src/RankedPopup.cpp', 'src/LevelInfoLayer.cpp'];
         for (const path of sources) {
             const file = join(dir, 'off.cpp');writeFileSync(file, read(path).replace(/^#include.*$/gm, ''));
             const off = execFileSync('g++', ['-E', '-P', '-x', 'c++', file], { encoding: 'utf8' });
             assert(!off.includes('/api/ranked/debug/spectate/'), path);
             assert(!off.includes('RECORD SPECTATE') && !off.includes('TEST SPECTATE') && !off.includes('DEBUG SPECTATE'), path);
+            assert(!off.includes('debugVanillaPlayActivation') && !off.includes('verifyDebugSpectateLaunch'), path);
         }
     } finally { rmSync(dir, { recursive: true, force: true }); }
 });

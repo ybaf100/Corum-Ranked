@@ -432,6 +432,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         bool debugSpectateOwned = false, debugMapRequested = false, debugSongRequested = false, debugPlayRequested = false;
         bool debugMapReady = false, debugSongReady = false;
+        bool debugVanillaPlayActivation = false, debugLevelInfoExited = false;
 #endif
     };
 
@@ -478,8 +479,13 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
     void prepareDebugSpectate(float) {
         auto& debug = corum::ranked::debug::DebugSpectateRuntime::get();
-        if (!m_fields->debugSpectateOwned || !m_level || !debug.preparedLevel(static_cast<int>(m_level->m_levelID))) {
-            unschedule(schedule_selector(CorumRankedLevelInfoLayer::prepareDebugSpectate)); return;
+        if (!m_fields->debugSpectateOwned || m_fields->debugLevelInfoExited || !m_level ||
+            !debug.preparedLevel(static_cast<int>(m_level->m_levelID))) {
+            m_fields->debugPlayRequested = false;
+            m_fields->debugVanillaPlayActivation = false;
+            unschedule(schedule_selector(CorumRankedLevelInfoLayer::prepareDebugSpectate));
+            unschedule(schedule_selector(CorumRankedLevelInfoLayer::verifyDebugSpectateLaunch));
+            return;
         }
         auto& preparation = corum::ranked::RankedLevelPreparation::get();
         if (!preparation.authorizes(m_level, debug.preparationContext()) || hasOpenModal(CCDirector::sharedDirector()->getRunningScene())) return;
@@ -516,12 +522,45 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
             log::info("[DebugSpectate] song ready path='{}' song={}", path, song);
         }
         if (m_fields->debugPlayRequested || m_isBusy) return;
+        auto* nativePlayButton = vanillaPlayButton(m_playBtnMenu, m_playSprite);
+        if (!nativePlayButton || nativePlayButton->m_pListener != static_cast<CCObject*>(this) ||
+            !nativePlayButton->m_pfnSelector) return;
+        // Preserve the real GD item/listener/selector; only this activation may
+        // pass the Debug onPlay guard. No Ranked Attempt authority is armed.
         m_fields->debugPlayRequested = true;
+        m_fields->debugVanillaPlayActivation = true;
         unschedule(schedule_selector(CorumRankedLevelInfoLayer::prepareDebugSpectate));
-        // Native Play keeps real downloaded GJGameLevel, song, objects and lifecycle.
-        // DebugSpectateRuntime changes mode only inside that exact PlayLayer init.
-        log::info("[DebugSpectate] invoking vanilla Play");
-        LevelInfoLayer::onPlay(nullptr);
+        scheduleOnce(schedule_selector(CorumRankedLevelInfoLayer::verifyDebugSpectateLaunch), 4.0f);
+        log::info("[DebugSpectate] activating verified native Play button");
+        // Native activation can synchronously exit/release this LevelInfo or
+        // rebuild its menu. Keep both alive until selector dispatch returns.
+        retain();
+        Ref<CCMenuItem> retainedButton(nativePlayButton);
+        nativePlayButton->setEnabled(true);
+        nativePlayButton->activate();
+        m_fields->debugVanillaPlayActivation = false;
+        if (!m_level || !debug.preparedLevel(static_cast<int>(m_level->m_levelID))) {
+            // Synchronous PlayLayer init can acknowledge entry before onExit.
+            unschedule(schedule_selector(CorumRankedLevelInfoLayer::verifyDebugSpectateLaunch));
+        }
+        if (!m_fields->debugLevelInfoExited) nativePlayButton->setEnabled(false);
+        release();
+    }
+
+    void verifyDebugSpectateLaunch(float) {
+        if (!m_fields->debugSpectateOwned || m_fields->debugLevelInfoExited || !m_fields->debugPlayRequested) return;
+        m_fields->debugPlayRequested = false;
+        m_fields->debugVanillaPlayActivation = false;
+        auto& debug = corum::ranked::debug::DebugSpectateRuntime::get();
+        // PlayLayer::init acknowledges entry before the outgoing LevelInfo may
+        // receive onExit. Either acknowledgement ends the watchdog, without
+        // touching the server recording/playback scope.
+        if (!m_level || !debug.preparedLevel(static_cast<int>(m_level->m_levelID))) {
+            unschedule(schedule_selector(CorumRankedLevelInfoLayer::prepareDebugSpectate));
+            return;
+        }
+        log::warn("[DebugSpectate] native Play did not leave LevelInfo - retrying");
+        schedule(schedule_selector(CorumRankedLevelInfoLayer::prepareDebugSpectate), 0.1f);
     }
 #endif
 
@@ -626,6 +665,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         if (m_fields->debugSpectateOwned) {
             if (corum::ranked::debug::DebugSpectateRuntime::get().preparedLevel(corum::ranked::debug::kDebugSpectateLevelId)) {
+                m_fields->debugLevelInfoExited = false;
                 schedule(schedule_selector(CorumRankedLevelInfoLayer::prepareDebugSpectate), 0.1f);
             }
             return;
@@ -1493,7 +1533,14 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
 
     void onExit() override {
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
+        if (m_fields->debugSpectateOwned && m_fields->debugPlayRequested) {
+            log::info("[DebugSpectate] LevelInfo exit accepted");
+        }
+        m_fields->debugLevelInfoExited = true;
+        m_fields->debugPlayRequested = false;
+        m_fields->debugVanillaPlayActivation = false;
         unschedule(schedule_selector(CorumRankedLevelInfoLayer::prepareDebugSpectate));
+        unschedule(schedule_selector(CorumRankedLevelInfoLayer::verifyDebugSpectateLaunch));
 #endif
         unschedule(schedule_selector(CorumRankedLevelInfoLayer::returnForMetadata));
         unschedule(schedule_selector(CorumRankedLevelInfoLayer::returnToRanked));
@@ -1554,7 +1601,15 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
 
     void onPlay(CCObject* sender) {
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
-        if (m_fields->debugSpectateOwned) return; // Only verified automatic gate invokes native Play.
+        if (m_fields->debugSpectateOwned) {
+            // Consume before forwarding so duplicate/reentrant dispatch cannot
+            // create another PlayLayer. Physical Play stays blocked.
+            if (!m_fields->debugVanillaPlayActivation || !m_fields->debugPlayRequested) return;
+            m_fields->debugVanillaPlayActivation = false;
+            log::info("[DebugSpectate] native Play callback forwarded");
+            LevelInfoLayer::onPlay(sender);
+            return;
+        }
 #endif
         auto& runtime = corum::ranked::RankedRuntime::get();
         if (m_fields->rankedOwned &&
@@ -1645,6 +1700,10 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
     void onBack(CCObject* sender) {
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         if (m_fields->debugSpectateOwned) {
+            m_fields->debugPlayRequested = false;
+            m_fields->debugVanillaPlayActivation = false;
+            unschedule(schedule_selector(CorumRankedLevelInfoLayer::prepareDebugSpectate));
+            unschedule(schedule_selector(CorumRankedLevelInfoLayer::verifyDebugSpectateLaunch));
             corum::ranked::debug::DebugSpectateRuntime::get().cancelPreparation(); LevelInfoLayer::onBack(sender); return;
         }
 #endif

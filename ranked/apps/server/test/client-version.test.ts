@@ -22,7 +22,7 @@ describe("Ranked client version gate", () => {
 
   it("accepts the same current version with or without a leading v", () => {
     expect(
-      evaluateRankedClientVersion("0.5.0-beta.25", [clientMod("0.5.0-beta.25")]).allowed,
+      evaluateRankedClientVersion("0.5.0-beta.26", [clientMod("0.5.0-beta.26")]).allowed,
     ).toBe(true);
   });
 
@@ -32,7 +32,7 @@ describe("Ranked client version gate", () => {
     ]);
     expect(result).toMatchObject({
       allowed: false,
-      requiredVersion: "v0.5.0-beta.25",
+      requiredVersion: "v0.5.0-beta.26",
       clientVersion: "v0.5.0-beta.8",
     });
   });
@@ -78,5 +78,9 @@ describe("Ranked client version gate", () => {
 
   it("rejects when the active Corum Ranked mod snapshot is missing", () => {
     expect(evaluateRankedClientVersion(REQUIRED_RANKED_CLIENT_VERSION, []).allowed).toBe(false);
+  });
+
+  it("rejects beta25 after the beta26 native Debug Play activation fix", () => {
+    expect(evaluateRankedClientVersion("v0.5.0-beta.25", [clientMod("v0.5.0-beta.25")]).allowed).toBe(false);
   });
 });
