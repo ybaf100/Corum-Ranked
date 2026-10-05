@@ -1,3 +1,9 @@
+## v0.5.0-beta.21
+
+- Correct the Phase-3 watchability helper's const qualifier: Geode Modify's m_fields accessor is non-const. This fixes beta20 native compile failure, not an infrastructure/quota failure.
+- Model that exact accessor constraint in the production scene-body harness and reproduce the invalid const access in a negative compile check. Same-scene entry, dedicated remote camera and all Phase 1/2 safeguards are otherwise unchanged.
+- Synchronize the exact client/server gate to beta21 and reject beta20. No failed workflow rerun or manual Release.
+
 ## v0.5.0-beta.20
 
 - Spectator Phase 3 adds same-PlayLayer authority-gated handoff and a presentation heartbeat that survives stopped vanilla completion updates. A live local Attempt, Placement or user Practice cannot enter spectator camera mode.

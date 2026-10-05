@@ -1,5 +1,7 @@
 # Corum Ranked v0.5.0-beta.20 — Live Spectator Phase 3
 
+Superseded by beta21's native Geode field-access compile correction; see `BETA21-RELEASE.md`. Execute the device checklist with beta21 on both clients. The Phase-3 feature scope below is unchanged.
+
 ## Implemented
 
 - Retain the exact canonical Ranked PlayLayer after the viewer's genuine final legal Attempt ends. Existing server spectator permission and the Phase-1 local safety latch are required before presentation/camera ownership changes.
@@ -25,7 +27,7 @@ No actual Geometry Dash device or two-client device E2E is available in the exec
 
 ## Required two-client device checklist (not yet executed)
 
-1. A and B run beta20, required Geode dependencies and the same real Ranked map. Record ordinary camera/input/New Best first; B's live FINAL/LAST/DM Attempt must not be cut by early spectator permission.
+1. A and B run beta21, required Geode dependencies and the same real Ranked map. Record ordinary camera/input/New Best first; B's live FINAL/LAST/DM Attempt must not be cut by early spectator permission.
 2. B naturally finishes its final legal Attempt while A is still playing. Confirm End ACK -> server spectator.active -> SAME PlayLayer conversion, no duplicate Start, hidden frozen dummy, and completion overlay removed without replay/menu/download.
 3. First packet wait must retain B's existing viewport, show WAITING, and never show B/0,0/stale opponent. When A moves, B must see the dedicated Cube and native camera X/Y must follow it through classic ground/high sections.
 4. B input/collision/retry/Practice and remote death/finished must produce no local Start/Progress/End/Clear, score, achievement evidence or GD best/percentage save. A and match outcomes remain server-authoritative.

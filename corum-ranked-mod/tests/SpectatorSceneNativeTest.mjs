@@ -45,6 +45,10 @@ struct PlayLayer: GJBaseGameLayer {
     void resetLevel(){++resets; m_hasCompletedLevel=false; if(m_player1)m_player1->m_isDead=false;}
 };
 struct ScopedPersistenceOwner { explicit ScopedPersistenceOwner(PlayLayer*){} };
+template<class T> struct GeodeFields {
+    std::unique_ptr<T> value=std::make_unique<T>();
+    T* operator->(){return value.get();} // Actual Geode Fields accessor is NON-const.
+};
 namespace corum::ranked {
 bool quitThroughRankedCompletionOverlay(PlayLayer*){return false;}
 enum class RuntimeStage { Matched, Idle };
@@ -101,7 +105,7 @@ struct CorumRankedPlayLayer: PlayLayer {
         corum::ranked::FakeRemote remotePlayer;
         corum::ranked::FakeCamera spectatorCamera;
     };
-    std::unique_ptr<Fields> m_fields=std::make_unique<Fields>();
+    GeodeFields<Fields> m_fields;
     int quits=0,huds=0;
     bool freezeLocalDummy(PlayerObject*){return m_fields->localSafety.active();}
     void updateRankedHud(){++huds;}
@@ -154,6 +158,12 @@ int main(){
 `;
     const dir = mkdtempSync(join(tmpdir(), 'corum-scene-native-'));
     try {
+        // Prove the double rejects the same unsupported const access that
+        // beta20's real Geode build found (unique_ptr alone concealed it).
+        const invalid = 'struct F { int value; }; struct Fields { F* operator->(); };\nvoid bad(Fields const& f) { (void)f->value; }\n';
+        writeFileSync(join(dir, 'const-fields.cpp'), invalid);
+        assert.throws(() => execFileSync('g++', ['-std=c++23', '-c', join(dir, 'const-fields.cpp'),
+            '-o', join(dir, 'const-fields.o')], { stdio: 'pipe' }), error => /operator->/.test(error.stderr.toString()));
         writeFileSync(join(dir, 'scene.cpp'), cpp);
         const binary = join(dir, 'scene');
         execFileSync('g++', ['-std=c++23', '-Wall', '-Wextra', '-Wpedantic', '-Werror', join(dir, 'scene.cpp'), '-o', binary], { stdio: 'pipe' });

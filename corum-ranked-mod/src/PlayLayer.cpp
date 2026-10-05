@@ -354,7 +354,7 @@ public:
         return {match.matchId, match.roundNumber, match.deathmatchSequence, runtime.currentLevelId()};
     }
 
-    bool watchableSpectatorScene() const {
+    bool watchableSpectatorScene() {
         auto& runtime = corum::ranked::RankedRuntime::get();
         return corum::ranked::spectatorSceneWatchable(
             runtime.view().stage == corum::ranked::RuntimeStage::Matched,

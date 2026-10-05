@@ -17,6 +17,7 @@ test('camera uses native forced moves, never a dummy position or player pointer 
 });
 test('same-scene viewer heartbeat owns entry/exit independently of stopped vanilla gameplay', () => {
     assert.match(play, /schedule\(schedule_selector\(CorumRankedPlayLayer::spectatorFrame\)\)/);
+    assert.doesNotMatch(play, /bool watchableSpectatorScene\(\) const/);
     assert.match(play, /if \(!prepareSpectatorScene\(\)\) return/);
     assert.match(play, /if \(!runtime.isSpectating\(\) \|\| !watchableSpectatorScene\(\)\)/);
     assert.match(play, /m_fields->spectatorScenePrepared\) return/);

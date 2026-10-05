@@ -1,6 +1,8 @@
 # Corum Ranked Live Spectator Protocol v1
 
-## Phase 3 client viewer (beta20)
+## Phase 3 client viewer (beta21)
+
+Initial beta20 implementation passed Validate but failed native Geode const field-access compilation. Beta21 removes the unsupported helper qualifier and strengthens the production-body harness; feature/protocol scope below is unchanged. See `corum-ranked-mod/BETA21-RELEASE.md` for the correction record.
 
 The existing protocol/HTTP cadence is unchanged. Only after the real local Attempt ends and existing server spectator authority is confirmed does the same PlayLayer become a viewer scene. A presentation heartbeat survives stopped vanilla completion updates and removes the completed overlay via an authority-gated same-scene bridge. Local `m_player1` is invisible/frozen and never receives remote pose/camera substitutions; all Phase-1 scoring/transport/completion/99%/vanilla-record guards remain.
 
