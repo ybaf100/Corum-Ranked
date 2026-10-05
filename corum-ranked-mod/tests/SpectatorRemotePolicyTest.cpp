@@ -161,5 +161,25 @@ int main() {
         assert(local.freezeAtCompletionBoundary(true, 100) && local.blockPersistence(true));
         remote.reset(); assert(local.active() && local.blocksEvidence());
     });
+    test("all modes/size/gravity remain discrete and invalid states fail closed", [] {
+        for (auto mode : {SpectatorGameMode::Cube, SpectatorGameMode::Ship, SpectatorGameMode::Ball,
+            SpectatorGameMode::UFO, SpectatorGameMode::Wave, SpectatorGameMode::Robot, SpectatorGameMode::Spider, SpectatorGameMode::Swing}) {
+            assert(parseSpectatorMode(spectatorModeName(mode)) == mode);
+            SpectatorRemotePolicy remote; (void)remote.reconcile(true, context());
+            auto p = pose(); p.mode = mode;
+            for (bool value : {false, true, false}) {
+                p.mini = value; p.upsideDown = value; p.flipped = value;
+                assert(remote.acceptPose(context(), 0, p) == Decision::Applied);
+                assert(remote.pose()->mode == mode && remote.pose()->mini == value && remote.pose()->upsideDown == value);
+            }
+            p.mode = static_cast<SpectatorGameMode>(100); assert(!finiteSpectatorPose(p));
+        }
+        assert(!parseSpectatorMode("cube") && !parseSpectatorMode("UNKNOWN"));
+        auto invalid = pose(); invalid.dead = invalid.finished = true; assert(!finiteSpectatorPose(invalid));
+        auto before = pose(), after = pose(); before.mode = after.mode = SpectatorGameMode::Spider;
+        after.y = 800; after.upsideDown = true; assert(spectatorPoseSnapAllowed(before, after));
+        after.y = 4000; assert(!spectatorPoseSnapAllowed(before, after));
+        after = pose(); after.x = 1000; assert(!spectatorPoseSnapAllowed(before, after));
+    });
     std::cout << scenarios << " spectator remote policy scenarios passed\n";
 }

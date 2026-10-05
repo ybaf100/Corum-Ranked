@@ -100,6 +100,7 @@ bool CorumRemotePlayer::createVisual(PlayLayer* layer) {
 
 void CorumRemotePlayer::destroyVisual() {
     m_poseCurrent = false;
+    m_appliedState.reset();
     auto const hadVisual = m_player.data() != nullptr || m_root.data() != nullptr;
     if (m_player) {
         m_player->unscheduleAllSelectors();
@@ -131,7 +132,51 @@ void CorumRemotePlayer::setVisible(bool visible) {
     if (m_root) m_root->setVisible(visible);
 }
 
+void CorumRemotePlayer::applyGameplayState(SpectatorGhostPose const& pose) {
+    auto* player = m_player.data();
+    if (!player) return;
+    auto const modeChanged = !m_appliedState || m_appliedState->mode != pose.mode;
+    auto const gravityChanged = !m_appliedState || m_appliedState->upsideDown != pose.upsideDown;
+    // Presentation flags only; flipGravity can touch movement/physics, so do not
+    // invoke it. Native mode helpers consult gravity when configuring vehicles.
+    if (gravityChanged) player->m_isUpsideDown = pose.upsideDown;
+    auto const reconfigureMode = modeChanged || (gravityChanged && pose.mode == SpectatorGameMode::Ship);
+    if (reconfigureMode) {
+        // Native GD 2.2081 vehicle setup. No portal/game-layer mode switch, update,
+        // collision registration or local player pointer replacement is involved.
+        player->toggleFlyMode(false, true);
+        player->toggleRollMode(false, true);
+        player->toggleBirdMode(false, true);
+        player->toggleDartMode(false, true);
+        player->toggleRobotMode(false, true);
+        player->toggleSpiderMode(false, true);
+        player->toggleSwingMode(false, true);
+        switch (pose.mode) {
+            case SpectatorGameMode::Cube: player->updatePlayerFrame(1); break;
+            case SpectatorGameMode::Ship: player->toggleFlyMode(true, false); player->updatePlayerShipFrame(1); break;
+            case SpectatorGameMode::Ball: player->toggleRollMode(true, true); player->updatePlayerRollFrame(1); break;
+            case SpectatorGameMode::UFO: player->toggleBirdMode(true, true); player->updatePlayerBirdFrame(1); break;
+            case SpectatorGameMode::Wave: player->toggleDartMode(true, true); player->updatePlayerDartFrame(1); break;
+            case SpectatorGameMode::Robot: player->toggleRobotMode(true, true); player->updatePlayerRobotFrame(1); break;
+            case SpectatorGameMode::Spider: player->toggleSpiderMode(true, true); player->updatePlayerSpiderFrame(1); break;
+            case SpectatorGameMode::Swing: player->toggleSwingMode(true, true); player->updatePlayerSwingFrame(1); break;
+        }
+        player->unscheduleAllSelectors();
+        player->stopAllActions();
+        player->m_playEffects = false;
+        isolateNativeCompanions(player, m_effectsRoot.data());
+    }
+    if (reconfigureMode || !m_appliedState || m_appliedState->mini != pose.mini) {
+        player->togglePlayerScale(pose.mini, true);
+        player->updatePlayerScale();
+    }
+    if (player->m_mainLayer && (reconfigureMode || !m_appliedState || m_appliedState->flipped != pose.flipped))
+        player->m_mainLayer->setScaleY(pose.flipped ? -1.0f : 1.0f);
+    m_appliedState = pose;
+}
+
 void CorumRemotePlayer::applyPose(SpectatorGhostPose const& pose) {
+    applyGameplayState(pose);
     m_player->setPosition({pose.x, pose.y});
     m_player->setRotation(pose.rotation);
     // CCPoint also accepts CCSize assignment in GD; use an explicit type.
@@ -188,6 +233,14 @@ void CorumRemotePlayer::update(
     }
     if (decision == SpectatorRemotePoseDecision::Applied) {
         applyPose(*m_policy.pose());
+        if (m_policy.state() == SpectatorRemoteState::Dead) {
+            // Safe presentation fade; no native playerDestroyed/PlayLayer lifecycle.
+            setVisible(true);
+            m_player->runAction(CCFadeOut::create(0.25f));
+            log::info("Spectator opponent death presentation");
+        } else if (m_policy.state() == SpectatorRemoteState::Finished) {
+            log::info("Spectator opponent Clear presentation: final pose held");
+        }
         if (!m_streamAttachedLogged) {
             log::info("Spectator pose stream attached: round={} dm={} generation={} epoch={}",
                 frame->context.roundNumber, frame->context.deathmatchSequence,
@@ -195,9 +248,9 @@ void CorumRemotePlayer::update(
             m_streamAttachedLogged = true;
         }
     }
-    // Dead hides; Finished holds its final pose. Neither invokes any GD lifecycle.
+    // Dead fades to opacity 0; Finished holds visibly. No GD gameplay callback.
     m_poseCurrent = true;
-    setVisible(m_policy.state() != SpectatorRemoteState::Dead && m_policy.pose().has_value());
+    setVisible(m_policy.pose().has_value());
 }
 
 } // namespace corum::ranked

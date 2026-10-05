@@ -61,6 +61,7 @@ struct GJGameLevel {
 };
 void persist(GJGameLevel*, int);
 struct PlayLayer {
+    struct {bool m_isDualMode=false;} m_gameState;
     PlayerObject* m_player1 = nullptr;
     GJGameLevel* m_level = nullptr;
     GameObject* m_anticheatSpike = nullptr;
@@ -77,6 +78,13 @@ struct PlayLayer {
     void showNewBest(bool, int, int, bool, bool, bool) { ++newBest; }
 };
 namespace corum::ranked {
+inline SpectatorGhostPose captureSpectatorPose(PlayerObject* p,bool dead=false,bool finished=false,bool dual=false){
+    auto xy=p->getPosition(); SpectatorGhostPose pose{xy.x,xy.y,p->getRotation(),dead,finished};pose.dual=dual;return pose;
+}
+struct SpectatorLiveRuntime {
+    int terminals=0; static SpectatorLiveRuntime& get(){static SpectatorLiveRuntime l;return l;}
+    void publishTerminal(SpectatorGhostPose const&,bool){++terminals;}
+};
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
 namespace debug {
 struct DebugSpectateRuntime {

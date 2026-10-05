@@ -206,12 +206,25 @@ export class DebugSpectateService implements OnModuleInit, OnApplicationShutdown
     if (frames.rows.length !== row.frame_count || frames.rows.length === 0 || frames.rows.length > DEBUG_SPECTATE_MAX_FRAMES) {
       throw new ConflictException("DEBUG_RECORDING_CORRUPT");
     }
+    // Strictly revalidate persisted JSONB before feeding the production relay.
+    const validated: Frame[] = [];
+    for (const f of frames.rows) {
+      const previous = validated.at(-1);
+      if (f.sequence !== validated.length || !Number.isSafeInteger(f.elapsed_ms) || f.elapsed_ms < 0 ||
+        (previous && (f.elapsed_ms <= previous.elapsedMs || previous.keyframe.dead || previous.keyframe.finished))) {
+        throw new ConflictException("DEBUG_RECORDING_CORRUPT");
+      }
+      validated.push({ sequence: f.sequence, elapsedMs: f.elapsed_ms, keyframe: parseSpectatorKeyframe(f.keyframe) });
+    }
+    const terminal = validated.at(-1)!;
+    if (!(terminal.keyframe.dead || terminal.keyframe.finished) || terminal.elapsedMs !== row.duration_ms) {
+      throw new ConflictException("DEBUG_RECORDING_CORRUPT");
+    }
     const id = this.ids.next();
     const token = `crds_playback_${randomBytes(32).toString("base64url")}`;
     const expiresAt = new Date(this.clock.now().getTime() + DEBUG_SPECTATE_TTL_MS);
     this.playbacks.set(id, { id, recordingId: row.id, tokenHash: this.tokens.hash(token),
-      expiresAtMs: expiresAt.getTime(), frames: frames.rows.map(f => ({ sequence: f.sequence,
-        elapsedMs: f.elapsed_ms, keyframe: f.keyframe })), startedAtMs: null, cursor: 0,
+      expiresAtMs: expiresAt.getTime(), frames: validated, startedAtMs: null, cursor: 0,
       generation: 1, sequence: 0, completed: false });
     this.logger.log(`[DebugSpectate] playback created playbackId=${id} recordingId=${row.id}`);
     // NO frame file / pose injection. Server clock starts on first in-scene poll.

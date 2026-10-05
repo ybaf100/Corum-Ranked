@@ -109,6 +109,7 @@ jobs:
           node --test corum-ranked-mod/tests/SpectatorCameraSourceTest.mjs
           node --test corum-ranked-mod/tests/SpectatorSceneNativeTest.mjs
           node --test corum-ranked-mod/tests/SpectatorLiveViewerNativeTest.mjs
+          node --test corum-ranked-mod/tests/SpectatorPublisherNativeTest.mjs
           node --test corum-ranked-mod/tests/DebugSpectateSourceTest.mjs
           node --test corum-ranked-mod/tests/DebugSpectateRuntimeNativeTest.mjs
 

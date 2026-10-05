@@ -183,9 +183,9 @@ test('practice never publishes live gameplay and relay validates stream identity
 });
 
 test('remote ghost uses pose keyframes without bypassing Ranked Level Prepare', () => {
-    assert.match(spectator, /keyframe\["x"\]/);
-    assert.match(spectator, /keyframe\["y"\]/);
-    assert.match(spectator, /keyframe\["rotation"\]/);
+    assert.match(spectator, /encodeSpectatorPose\(pose\)/);
+    const codec = read('../src/spectator/SpectatorPoseCodec.hpp');
+    for (const field of ['x', 'y', 'rotation', 'mode', 'mini', 'upsideDown']) assert(codec.includes(`value["${field}"]`));
     assert.doesNotMatch(spectator, /GJGameLevel::create|PlayLayer::scene|getSavedLevel/);
     assert.doesNotMatch(play, /GJGameLevel::create|PlayLayer::scene|getSavedLevel/);
 });

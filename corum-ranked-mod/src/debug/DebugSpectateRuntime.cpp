@@ -1,4 +1,5 @@
 #include "DebugSpectateRuntime.hpp"
+#include "../spectator/SpectatorPoseCodec.hpp"
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
 #include "../RankedRuntime.hpp"
 #include "../RankedLevelPreparation.hpp"
@@ -148,9 +149,7 @@ void DebugSpectateRuntime::pumpRecording() {
         auto frames = matjson::Value::array();
         for (auto const& f : batch) {
             matjson::Value frame; frame["sequence"] = f.sequence; frame["elapsedMs"] = f.elapsedMs;
-            matjson::Value pose; pose["x"] = static_cast<double>(f.pose.x); pose["y"] = static_cast<double>(f.pose.y);
-            pose["rotation"] = static_cast<double>(f.pose.rotation); pose["dead"] = f.pose.dead; pose["finished"] = f.pose.finished;
-            frame["keyframe"] = pose; frames.push(frame);
+            frame["keyframe"] = encodeSpectatorPose(f.pose); frames.push(frame);
         }
         body["frames"] = frames;
     } else body["completed"] = m_capture.completed();

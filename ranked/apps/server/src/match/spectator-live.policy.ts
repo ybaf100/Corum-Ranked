@@ -1,6 +1,6 @@
 import type { PlayerSide } from "@corum-ranked/rules";
 
-export const SPECTATOR_LIVE_PROTOCOL_VERSION = 1;
+export const SPECTATOR_LIVE_PROTOCOL_VERSION = 2;
 export const SPECTATOR_LIVE_BUFFER_MS = 3_000;
 export const SPECTATOR_LIVE_MAX_PACKETS = 72;
 export const SPECTATOR_LIVE_TIMEOUT_MS = 1_500;

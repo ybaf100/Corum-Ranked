@@ -55,8 +55,8 @@ test('RECORD remains non-Ranked vanilla; TEST activates Phase-1 safety before in
     assert.match(play, /runtime.setSpectatorLocalTransportBlocked\(this, true\)/);
     assert(play.indexOf('debug.sceneEntered(m_fields->levelId)') < play.indexOf('PlayLayer::init(level, useReplay'));
     assert.match(play, /debugPlaybackScene && m_fields->localSafety.activate/);
-    assert.match(play, /recordPose\(\{position.x, position.y, player->getRotation\(\), true, false\}, true\)/);
-    assert.match(play, /recordPose\(\{position.x, position.y, m_player1->getRotation\(\), false, true\}, true\)/);
+    assert.match(play, /recordPose\(corum::ranked::captureSpectatorPose\(player, true, false, m_gameState.m_isDualMode\), true\)/);
+    assert.match(play, /recordPose\(corum::ranked::captureSpectatorPose\(m_player1, false, true, m_gameState.m_isDualMode\), true\)/);
     for (const sink of ['localSafety.suppressDeath(', 'suppressLocalCompletion()', 'blocksLevelPersistence(', 'freezeAtCompletionBoundary(']) assert(play.includes(sink));
     assert.doesNotMatch(runtime, /reportAttempt|reportPractice|Achievement|updateRating|armCurrentLevelForGameplay/);
 });

@@ -1,6 +1,7 @@
 #include "SpectatorLiveRuntime.hpp"
 #include "RankedRuntime.hpp"
 #include "domain/SpectatorProtocol.hpp"
+#include "spectator/SpectatorPoseCodec.hpp"
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
 #include "debug/DebugSpectateRuntime.hpp"
 #endif
@@ -111,6 +112,7 @@ void SpectatorLiveRuntime::resetViewer() {
     m_viewMatchId.clear();
     m_viewContextKey.clear();
     m_viewAttemptId.clear();
+    m_viewTerminalAttemptId.clear();
     m_viewGeneration = 0;
     m_lastViewSequence = -1;
     m_opponentName.clear();
@@ -126,6 +128,11 @@ void SpectatorLiveRuntime::resetViewer() {
 }
 
 void SpectatorLiveRuntime::reset() {
+    ++m_terminalRequestGeneration;
+    m_terminalPending = m_terminalBusy = false;
+    m_deferredTerminalPose.reset(); m_deferredMatchId.clear();
+    m_terminalBody = matjson::Value();
+    m_terminalSessionToken.clear(); m_terminalMatchToken.clear(); m_terminalPublishAttemptId.clear();
     resetPublisher();
     resetViewer();
 }
@@ -154,6 +161,7 @@ void SpectatorLiveRuntime::startPublisherGeneration(
 }
 
 void SpectatorLiveRuntime::tickPublisher(SpectatorGhostPose const& pose, bool practice) {
+    tickTerminal();
     auto& ranked = RankedRuntime::get();
     auto const& view = ranked.view();
     auto const& match = view.match;
@@ -167,16 +175,91 @@ void SpectatorLiveRuntime::tickPublisher(SpectatorGhostPose const& pose, bool pr
         !attemptId.empty() &&
         finitePose(pose);
     if (!eligible) {
-        resetPublisher();
+        if (!m_terminalPending) resetPublisher();
         return;
     }
     if (m_publishMatchId != match.matchId || m_publishAttemptId != attemptId) {
         resetPublisher();
         startPublisherGeneration(match.matchId, attemptId);
     }
+    if (attemptId == m_terminalPublishAttemptId) return;
     auto const now = std::chrono::steady_clock::now();
     if (m_publishBusy || now < m_nextPublishAt) return;
     publish(pose);
+}
+
+void SpectatorLiveRuntime::publishTerminal(SpectatorGhostPose const& pose, bool practice) {
+    auto& ranked = RankedRuntime::get();
+    auto const& match = ranked.view().match;
+    auto const attempt = ranked.spectatorLiveAttemptId();
+    if (practice || ranked.isPlacement() || ranked.isSpectating() ||
+        ranked.view().stage != RuntimeStage::Matched || match.matchId.empty() ||
+        (!attempt.empty() && attempt == m_terminalPublishAttemptId) || !finitePose(pose) ||
+        !(pose.dead || pose.finished)) return;
+    if (attempt.empty()) {
+        // A real early death/Clear can precede Start ACK. Capture it without
+        // inventing an Attempt ID; RankedRuntime drains it at the actual ACK.
+        m_deferredTerminalPose = pose; m_deferredMatchId = match.matchId;
+        m_deferredRound = match.roundNumber; m_deferredDeathmatch = match.deathmatchSequence;
+        m_terminalDeadline = std::chrono::steady_clock::now() + kPacketTimeout;
+        return;
+    }
+    if (m_publishMatchId != match.matchId || m_publishAttemptId != attempt) {
+        resetPublisher(); startPublisherGeneration(match.matchId, attempt);
+    }
+    ++m_terminalRequestGeneration;
+    m_terminalBody = matjson::Value();
+    m_terminalBody["protocolVersion"] = kProtocolVersion;
+    m_terminalBody["matchId"] = match.matchId;
+    m_terminalBody["roundNumber"] = match.roundNumber;
+    if (match.state == "DEATHMATCH_PLAYING") m_terminalBody["deathmatchSequence"] = match.deathmatchSequence;
+    m_terminalBody["attemptId"] = attempt;
+    m_terminalBody["generation"] = static_cast<std::int64_t>(m_publishGeneration);
+    // Capture the terminal immediately, but wait for the preceding live ACK to
+    // preserve contiguous sequence delivery. It bypasses the normal 50ms delay.
+    m_terminalBody["sequence"] = static_cast<std::int64_t>(m_publishSequence + (m_publishBusy ? 1 : 0));
+    m_terminalBody["elapsedMs"] = static_cast<std::int64_t>(std::max<std::int64_t>(0,
+        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - m_publishStartedAt).count()));
+    m_terminalBody["keyframe"] = encodeSpectatorPose(pose);
+    m_terminalSessionToken = ranked.spectatorLiveSessionToken(); m_terminalMatchToken = ranked.spectatorLiveMatchToken();
+    m_terminalPublishAttemptId = attempt;
+    m_terminalDeadline = std::chrono::steady_clock::now() + kPacketTimeout;
+    m_nextTerminalAt = {}; m_terminalPending = true; m_terminalBusy = false;
+    tickTerminal();
+}
+
+void SpectatorLiveRuntime::tickTerminal() {
+    if (m_deferredTerminalPose) {
+        auto& ranked = RankedRuntime::get();
+        auto const& match = ranked.view().match;
+        if (std::chrono::steady_clock::now() >= m_terminalDeadline || match.matchId != m_deferredMatchId ||
+            match.roundNumber != m_deferredRound || match.deathmatchSequence != m_deferredDeathmatch) {
+            m_deferredTerminalPose.reset();
+        } else if (!ranked.spectatorLiveAttemptId().empty()) {
+            auto const pose = *m_deferredTerminalPose; m_deferredTerminalPose.reset();
+            publishTerminal(pose, false); return;
+        }
+    }
+    if (!m_terminalPending) return;
+    auto const now = std::chrono::steady_clock::now();
+    if (now >= m_terminalDeadline) { m_terminalPending = false; return; }
+    if (m_terminalBusy || now < m_nextTerminalAt ||
+        (m_publishBusy && m_publishAttemptId == m_terminalPublishAttemptId)) return;
+    auto const generation = m_terminalRequestGeneration;
+    auto request = spectatorRequest(m_terminalSessionToken, m_terminalMatchToken);
+    request.bodyJSON(m_terminalBody);
+    m_terminalBusy = true;
+    auto const matchId = m_terminalBody["matchId"].asString().unwrapOr("");
+    m_terminalRequest.spawn(request.post(endpoint("/api/ranked/matches/" + matchId + "/spectator-live/publish")),
+        [this, generation](web::WebResponse response) {
+            if (generation != m_terminalRequestGeneration) return;
+            m_terminalBusy = false;
+            if (successful(response) || response.code() == 400 || response.code() == 401 || response.code() == 403) {
+                m_terminalPending = false;
+            } else {
+                m_nextTerminalAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(100);
+            }
+        });
 }
 
 void SpectatorLiveRuntime::publish(SpectatorGhostPose const& pose) {
@@ -202,13 +285,7 @@ void SpectatorLiveRuntime::publish(SpectatorGhostPose const& pose) {
     body["generation"] = static_cast<std::int64_t>(m_publishGeneration);
     body["sequence"] = static_cast<std::int64_t>(m_publishSequence);
     body["elapsedMs"] = static_cast<std::int64_t>(std::max<std::int64_t>(0, elapsedMs));
-    matjson::Value keyframe;
-    keyframe["x"] = static_cast<double>(pose.x);
-    keyframe["y"] = static_cast<double>(pose.y);
-    keyframe["rotation"] = static_cast<double>(pose.rotation);
-    keyframe["dead"] = pose.dead;
-    keyframe["finished"] = pose.finished;
-    body["keyframe"] = keyframe;
+    body["keyframe"] = encodeSpectatorPose(pose);
 
     auto request = spectatorRequest(
         ranked.spectatorLiveSessionToken(),
@@ -431,6 +508,9 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
     }
     auto const resetStream = root["reset"].asBool().unwrapOr(false);
     auto const streamChanged = attemptId != m_viewAttemptId || generation != m_viewGeneration;
+    if (attemptId == m_viewAttemptId && generation < m_viewGeneration) {
+        setFallback("STALE_GENERATION"); return;
+    }
     // A timeout/network gap does not permanently poison this generation.
     // Fresh contiguous packets may recover it, through ALL the same validators.
     // Replayed sequences/empty replies cannot revive a timed-out pose.
@@ -491,6 +571,9 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
         }
         auto const sequence = packet["sequence"].asInt().unwrapOr(-1);
         if (sequence <= m_lastViewSequence) continue;
+        if (m_viewTerminalAttemptId == attemptId) {
+            setFallback("TERMINAL_STREAM_CANNOT_RESUME"); return;
+        }
         if (m_lastViewSequence >= 0 && sequence != m_lastViewSequence + 1) {
             setFallback("SEQUENCE_GAP");
             return;
@@ -500,21 +583,17 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
             setFallback("MISSING_KEYFRAME");
             return;
         }
-        SpectatorGhostPose pose {
-            .x = static_cast<float>(keyframe["x"].asDouble().unwrapOr(std::nan(""))),
-            .y = static_cast<float>(keyframe["y"].asDouble().unwrapOr(std::nan(""))),
-            .rotation = static_cast<float>(keyframe["rotation"].asDouble().unwrapOr(std::nan(""))),
-            .dead = keyframe["dead"].asBool().unwrapOr(false),
-            .finished = keyframe["finished"].asBool().unwrapOr(false),
-        };
-        if (!finitePose(pose)) {
-            setFallback("INVALID_POSE");
-            return;
+        auto const decoded = decodeSpectatorPose(keyframe);
+        if (!decoded) { setFallback("INVALID_POSE"); return; }
+        auto const pose = *decoded;
+        if (pose.dual) { setFallback("DUAL_UNSUPPORTED"); return; }
+        if (m_currentPose && (m_currentPose->dead || m_currentPose->finished)) {
+            setFallback("TERMINAL_STREAM_CANNOT_RESUME"); return;
         }
         if (m_currentPose) {
             auto const correction = poseDistance(*m_currentPose, pose);
             largestCorrection = std::max(largestCorrection, correction);
-            if (correction > kPoseDiscontinuityDistance) {
+            if (correction > kPoseDiscontinuityDistance && !spectatorPoseSnapAllowed(*m_currentPose, pose)) {
                 log::warn(
                     "[SpectatorLive] correction rejected match={} attempt={} generation={} sequence={} distance={}",
                     m_viewMatchId,
@@ -527,8 +606,10 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
                 return;
             }
         }
-        m_previousPose = m_currentPose;
+        m_previousPose = m_currentPose && spectatorPoseSnapAllowed(*m_currentPose, pose) &&
+            poseDistance(*m_currentPose, pose) > kPoseDiscontinuityDistance ? std::nullopt : m_currentPose;
         m_currentPose = pose;
+        if (pose.dead || pose.finished) m_viewTerminalAttemptId = attemptId;
         m_poseReceivedAt = std::chrono::steady_clock::now();
         m_lastPacketAt = m_poseReceivedAt;
         m_lastViewSequence = sequence;
@@ -582,7 +663,7 @@ std::optional<SpectatorGhostPose> SpectatorLiveRuntime::interpolatedPose() const
         std::chrono::steady_clock::now() - m_poseReceivedAt
     ).count();
     auto const alpha = std::clamp(static_cast<float>(elapsed) / 50.0f, 0.0f, 1.0f);
-    SpectatorGhostPose pose;
+    auto pose = *m_currentPose;
     pose.x = m_previousPose->x + (m_currentPose->x - m_previousPose->x) * alpha;
     pose.y = m_previousPose->y + (m_currentPose->y - m_previousPose->y) * alpha;
     pose.rotation = m_previousPose->rotation +

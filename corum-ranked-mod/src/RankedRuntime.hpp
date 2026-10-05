@@ -446,7 +446,12 @@ public:
     // deliberately not mutable and are never accepted as scoring authority.
     [[nodiscard]] std::string const& spectatorLiveSessionToken() const { return m_sessionToken; }
     [[nodiscard]] std::string const& spectatorLiveMatchToken() const { return m_matchToken; }
-    [[nodiscard]] std::string const& spectatorLiveAttemptId() const { return m_attemptId; }
+    [[nodiscard]] std::string const& spectatorLiveAttemptId() const {
+        static std::string const empty;
+        // A queued visual attempt has not received its server ID yet. Never
+        // label its pose with an older journal entry still awaiting End ACK.
+        return !m_pendingStart && m_attemptBacklog.empty() ? m_attemptId : empty;
+    }
 
     [[nodiscard]] bool reportAttemptStart(int levelId);
     void reportPracticePresence(bool practice);

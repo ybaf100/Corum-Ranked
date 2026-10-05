@@ -9,7 +9,7 @@
 
 namespace corum::ranked::debug {
 inline constexpr int kDebugSpectateLevelId = 88350599;
-inline constexpr int kDebugSpectateFormatVersion = 1;
+inline constexpr int kDebugSpectateFormatVersion = 2;
 inline constexpr char kDebugSpectateMapName[] = "VOICE";
 inline constexpr char kDebugSpectateCreator[] = "LiteN1ng";
 enum class DebugSpectateMode { None, PreparingRecord, Recording, FinalizingRecord, PreparingPlayback, Playback };

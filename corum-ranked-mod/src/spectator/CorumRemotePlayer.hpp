@@ -31,6 +31,7 @@ private:
     bool createVisual(PlayLayer* layer);
     void destroyVisual();
     void applyPose(SpectatorGhostPose const& pose);
+    void applyGameplayState(SpectatorGhostPose const& pose);
     void setVisible(bool visible);
 
     SpectatorRemotePolicy m_policy;
@@ -40,6 +41,7 @@ private:
     bool m_discardLogged = false;
     bool m_streamAttachedLogged = false;
     bool m_poseCurrent = false;
+    std::optional<SpectatorGhostPose> m_appliedState;
 };
 
 } // namespace corum::ranked

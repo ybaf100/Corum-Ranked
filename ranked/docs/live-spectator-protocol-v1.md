@@ -1,3 +1,5 @@
+> Historical v1 reference. Current beta25 uses [protocol v2](live-spectator-protocol-v2.md); v1 payloads/recordings are not accepted as complete gameplay state.
+
 # Corum Ranked Live Spectator Protocol v1
 
 ## Phase 3 client viewer (beta21)

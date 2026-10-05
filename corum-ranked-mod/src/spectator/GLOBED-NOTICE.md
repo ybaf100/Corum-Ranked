@@ -36,3 +36,24 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+## Phase 4 gameplay-state reference
+
+Inspected Globed main `da8920062f6ae8a0357f3a0f53e0d431d23bc6d0` (2026-10-05):
+
+- `include/globed/core/data/PlayerState.hpp`: typed per-player state and optional
+  player2, distinct from shared death/lifecycle state.
+- `src/core/hooks/GJBaseGameLayer.cpp`: reads native mode flags, vehicle size,
+  gravity and the main-layer visual flip rather than detecting portals.
+- `src/core/game/VisualPlayer.cpp`: `updateIconType`, native mode toggle sequence,
+  `togglePlayerScale`/`updatePlayerScale`, gravity-sensitive Ship refresh, pose
+  caches and object-layer companion cleanup.
+- `src/core/game/RemotePlayer.cpp`: separate visuals for player1/player2 and
+  death/respawn presentation separated from local gameplay.
+
+The native mode toggle sequence is adapted from `updateIconType` under the
+existing MIT attribution (copyright 2023 dank_meme). Corum independently implements
+strict protocol v2, shared capture/codec, terminal HTTP delivery, its fade-only
+visual death, server-backed format-v2 recordings and bounded Spider snap policy.
+Globed death handlers, physics, cosmetics, dual visuals and interpolation are not
+copied. Existing full MIT license remains packaged in `resources/GLOBED-LICENSE.txt`.

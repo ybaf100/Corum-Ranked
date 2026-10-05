@@ -61,8 +61,9 @@ struct Value {
     Result<Array> asArray()const{if(auto p=std::get_if<Array>(&data))return {*p};return {};}
 };
 }
+${readFileSync(join(root, "src/spectator/SpectatorPoseCodec.hpp"), "utf8").replace(/^#include.*$|^#pragma once$/gm, "")}
 namespace corum::ranked::log {template<class... T> void info(T...){} template<class... T> void warn(T...){} template<class... T> void debug(T...){} }
-constexpr int kProtocolVersion=1;
+constexpr int kProtocolVersion=2;
 constexpr float kPoseDiscontinuityDistance=400;
 using corum::ranked::SpectatorGhostPose;
 ${method('bool finitePose(')}
@@ -86,17 +87,50 @@ ${fields}
 ${methods}
 }
 matjson::Value response(int sequence,double x,std::string attempt="A",int generation=1){
-    matjson::Value packet;packet["protocolVersion"]=1;packet["matchId"]="match";
+    matjson::Value packet;packet["protocolVersion"]=2;packet["matchId"]="match";
     packet["roundNumber"]=1;packet["attemptId"]=attempt;packet["generation"]=generation;
     packet["sequence"]=sequence;packet["keyframe"]["x"]=x;packet["keyframe"]["y"]=80.0;
     packet["keyframe"]["rotation"]=0.0;
-    matjson::Value root;root["protocolVersion"]=1;
+    packet["keyframe"]["mode"]="CUBE";packet["keyframe"]["mini"]=false;
+    packet["keyframe"]["upsideDown"]=false;packet["keyframe"]["flipped"]=false;
+    packet["keyframe"]["dual"]=false;packet["keyframe"]["dead"]=false;packet["keyframe"]["finished"]=false;
+    matjson::Value root;root["protocolVersion"]=2;
     root["stream"]["matchId"]="match";root["stream"]["roundNumber"]=1;
     root["stream"]["attemptId"]=attempt;root["stream"]["generation"]=generation;
     root["packets"]=matjson::Value::Array{packet};return root;
 }
 int main(){
     using namespace corum::ranked;
+    // Real shared codec and decoder: all discrete states stay exact at alpha=0.
+    for(auto mode : {SpectatorGameMode::Cube,SpectatorGameMode::Ship,SpectatorGameMode::Ball,
+        SpectatorGameMode::UFO,SpectatorGameMode::Wave,SpectatorGameMode::Robot,SpectatorGameMode::Spider,SpectatorGameMode::Swing}) {
+        SpectatorGhostPose native{100,20,30,false,false};native.mode=mode;
+        native.mini=true;native.upsideDown=true;native.flipped=true;
+        auto encoded=encodeSpectatorPose(native);auto decoded=decodeSpectatorPose(encoded);
+        assert(decoded && decoded->mode==mode && decoded->mini && decoded->upsideDown && decoded->flipped);
+        encoded["mode"]="UNKNOWN";assert(!decodeSpectatorPose(encoded));
+        encoded=encodeSpectatorPose(native);encoded["mini"]=0;assert(!decodeSpectatorPose(encoded));
+        encoded=encodeSpectatorPose(native);encoded["dead"]=true;encoded["finished"]=true;assert(!decodeSpectatorPose(encoded));
+        SpectatorLiveRuntime modes;modes.m_viewMatchId="match";
+        modes.applyViewerResponse(response(0,100));
+        auto incoming=response(1,150);auto pp=incoming["packets"].asArray().unwrap();pp[0]["keyframe"]=encodeSpectatorPose(native);
+        incoming["packets"]=pp;modes.applyViewerResponse(incoming);
+        auto sample=modes.interpolatedPose();assert(sample && sample->mode==mode && sample->mini && sample->upsideDown);
+    }
+    auto replaceKeyframe=[](matjson::Value root,SpectatorGhostPose pose){
+        auto p=root["packets"].asArray().unwrap();p[0]["keyframe"]=encodeSpectatorPose(pose);root["packets"]=p;return root;
+    };
+    SpectatorLiveRuntime spider;spider.m_viewMatchId="match";
+    SpectatorGhostPose snap{100,30,0,false,false};snap.mode=SpectatorGameMode::Spider;
+    spider.applyViewerResponse(replaceKeyframe(response(0,100),snap));
+    snap.y=900;snap.upsideDown=true;spider.applyViewerResponse(replaceKeyframe(response(1,100),snap));
+    assert(spider.m_status==SpectatorLiveStatus::Live && spider.interpolatedPose()->y==900); // snap, no in-between ground
+    snap.y=4000;snap.upsideDown=false;spider.applyViewerResponse(replaceKeyframe(response(2,100),snap));
+    assert(spider.m_reason=="POSE_DISCONTINUITY");
+    SpectatorLiveRuntime dual;dual.m_viewMatchId="match";snap.dual=true;
+    dual.applyViewerResponse(replaceKeyframe(response(0,100),snap));assert(dual.m_reason=="DUAL_UNSUPPORTED");
+    SpectatorLiveRuntime legacy;legacy.m_viewMatchId="match";auto v1=response(0,100);v1["protocolVersion"]=1;
+    legacy.applyViewerResponse(v1);assert(legacy.m_reason=="UNSUPPORTED_PROTOCOL_VERSION");
     SpectatorLiveRuntime viewer;viewer.m_viewMatchId="match";
     viewer.applyViewerResponse(response(0,100));assert(viewer.m_status==SpectatorLiveStatus::Live);
     viewer.applyViewerResponse(response(1,200));
@@ -118,9 +152,11 @@ int main(){
     auto dead=response(1,30,"B",2);auto terminal=dead["packets"].asArray().unwrap();terminal[0]["keyframe"]["dead"]=true;
     dead["packets"]=terminal;viewer.applyViewerResponse(dead);
     assert(viewer.interpolatedPose()->x==30 && viewer.interpolatedPose()->dead);
+    viewer.applyViewerResponse(response(2,40,"B",2));assert(viewer.m_reason=="TERMINAL_STREAM_CANNOT_RESUME");
+    viewer.applyViewerResponse(response(3,45,"B",2));assert(viewer.m_reason=="TERMINAL_STREAM_CANNOT_RESUME");
     auto wrongRound=response(2,40,"B",2);wrongRound["stream"]["roundNumber"]=2;
     viewer.applyViewerResponse(wrongRound);assert(viewer.m_reason=="STREAM_CONTEXT_MISMATCH");
-    matjson::Value waiting;waiting["protocolVersion"]=1;waiting["waiting"]=true;
+    matjson::Value waiting;waiting["protocolVersion"]=2;waiting["waiting"]=true;
     viewer.applyViewerResponse(waiting);assert(viewer.m_status==SpectatorLiveStatus::Waiting && !viewer.interpolatedPose());
     assert(viewer.m_viewAttemptId.empty() && viewer.m_viewGeneration==0);
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)

@@ -1,4 +1,5 @@
 #include "RankedRuntime.hpp"
+#include "SpectatorLiveRuntime.hpp"
 #include "domain/SpectatorLocalSafety.hpp"
 #include "domain/AttemptScoring.hpp"
 #include "domain/RankedGameplayPolicy.hpp"
@@ -2919,6 +2920,7 @@ void RankedRuntime::sendAttemptStart() {
             ++m_view.revision;
             // m_pendingEnd may already contain a fast visual death/Clear that
             // happened before this start acknowledgement; send it immediately.
+            SpectatorLiveRuntime::get().tickTerminal();
             flushAttemptEvents();
             flushProgressTelemetry();
         }
@@ -3116,6 +3118,7 @@ void RankedRuntime::sendAttemptProgress() {
 }
 
 void RankedRuntime::tick() {
+    SpectatorLiveRuntime::get().tickTerminal();
     auto const now = std::chrono::steady_clock::now();
     if (now >= m_nextPollAt) {
         if (m_view.stage == RuntimeStage::Queued) pollQueue();

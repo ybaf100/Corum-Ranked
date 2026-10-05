@@ -59,19 +59,19 @@ describe("server-backed Debug Spectate over real HTTP and persistent PostgreSQL"
     return { status: response.status, body: await response.json() as any };
   };
   const poll = async (playback: any, query = "") => {
-    const response = await fetch(base + `/api/ranked/debug/spectate/playbacks/${playback.playbackId}/spectator-live?protocolVersion=1${query}`,
+    const response = await fetch(base + `/api/ranked/debug/spectate/playbacks/${playback.playbackId}/spectator-live?protocolVersion=2${query}`,
       { headers: { ...headers, "x-debug-spectate-token": playback.token } });
     return { status: response.status, body: await response.json() as any };
   };
   const frame = (sequence: number, elapsedMs: number, dead = false, finished = false) => ({ sequence, elapsedMs,
-    keyframe: { x: 100 + sequence * 10, y: 40 + sequence, rotation: sequence * 3, dead, finished } });
+    keyframe: { x: 100 + sequence * 10, y: 40 + sequence, rotation: sequence * 3, mode: "CUBE", mini: false, upsideDown: false, flipped: false, dual: false, dead, finished } });
   const startRecord = async () => {
     const response = await post("recordings", createBody);
     expect(response.status).toBe(201); return response.body;
   };
   const completedRecord = async (dead = true) => {
     const recording = await startRecord();
-    expect((await post(`recordings/${recording.recordingId}/frames`, { formatVersion: 1,
+    expect((await post(`recordings/${recording.recordingId}/frames`, { formatVersion: 2,
       frames: [frame(0, 0), frame(1, 50), frame(2, 100, dead, !dead)] }, recording.token)).status).toBe(201);
     expect((await post(`recordings/${recording.recordingId}/finalize`, { completed: true }, recording.token)).status).toBe(201);
     return recording;
@@ -114,13 +114,13 @@ describe("server-backed Debug Spectate over real HTTP and persistent PostgreSQL"
   });
   it("validates sequential time/pose/terminal batches atomically, with idempotent retries", async () => {
     const recording = await startRecord(); const path = `recordings/${recording.recordingId}`;
-    expect((await post(`${path}/frames`, { formatVersion: 1, frames: [frame(1, 0)] }, recording.token)).status).toBe(409);
-    expect((await post(`${path}/frames`, { formatVersion: 1, frames: [frame(0, 0), frame(1, 0)] }, recording.token)).status).toBe(409);
-    expect((await post(`${path}/frames`, { formatVersion: 1, frames: [frame(0, 0)] }, recording.token)).body.frameCount).toBe(1);
-    expect((await post(`${path}/frames`, { formatVersion: 1, frames: [frame(0, 0)] }, recording.token)).body.frameCount).toBe(1);
+    expect((await post(`${path}/frames`, { formatVersion: 2, frames: [frame(1, 0)] }, recording.token)).status).toBe(409);
+    expect((await post(`${path}/frames`, { formatVersion: 2, frames: [frame(0, 0), frame(1, 0)] }, recording.token)).status).toBe(409);
+    expect((await post(`${path}/frames`, { formatVersion: 2, frames: [frame(0, 0)] }, recording.token)).body.frameCount).toBe(1);
+    expect((await post(`${path}/frames`, { formatVersion: 2, frames: [frame(0, 0)] }, recording.token)).body.frameCount).toBe(1);
     expect((await post(`${path}/finalize`, { completed: true }, recording.token)).status).toBe(409);
-    expect((await post(`${path}/frames`, { formatVersion: 1, frames: [frame(1, 50, true)] }, recording.token)).status).toBe(201);
-    expect((await post(`${path}/frames`, { formatVersion: 1, frames: [frame(2, 100)] }, recording.token)).status).toBe(409);
+    expect((await post(`${path}/frames`, { formatVersion: 2, frames: [frame(1, 50, true)] }, recording.token)).status).toBe(201);
+    expect((await post(`${path}/frames`, { formatVersion: 2, frames: [frame(2, 100)] }, recording.token)).status).toBe(409);
     const results = await Promise.all([post(`${path}/finalize`, { completed: true }, recording.token), post(`${path}/finalize`, { completed: true }, recording.token)]);
     expect(results.map(r => r.status)).toEqual([201, 201]);
     expect((await post(`${path}/finalize`, { completed: false }, recording.token)).status).toBe(409);
@@ -147,7 +147,7 @@ describe("server-backed Debug Spectate over real HTTP and persistent PostgreSQL"
     const initial = (await poll(playback)).body;
     expect(initial.reset).toBe(true); expect(initial.packets).toHaveLength(1);
     expect(initial.stream.matchId).toBe(playback.contextId);
-    expect(initial.packets[0]).toMatchObject({ protocolVersion: 1, generation: 1, sequence: 0, elapsedMs: 0, roundNumber: 1, deathmatchSequence: null });
+    expect(initial.packets[0]).toMatchObject({ protocolVersion: 2, generation: 1, sequence: 0, elapsedMs: 0, roundNumber: 1, deathmatchSequence: null });
     const query = `&attemptId=${initial.stream.attemptId}&generation=1&afterSequence=0`;
     expect((await poll(playback, query)).body.packets).toEqual([]); // No client clock / FPS progression.
     now += 50;
@@ -184,6 +184,40 @@ describe("server-backed Debug Spectate over real HTTP and persistent PostgreSQL"
     now += 15 * 60_000;
     expect([401, 404]).toContain((await poll(playback)).status);
     expect((await post("playbacks", createBody)).status).toBe(201); // Expired memory/session buffers cleaned.
+  });
+  it("persists all v2 modes/mini/gravity through real HTTP and replays the same JSONB via production relay", async () => {
+    const before = await rankedSnapshot(); now += 1000;
+    const recording = await startRecord();
+    const modes = ["CUBE", "SHIP", "BALL", "UFO", "WAVE", "ROBOT", "SPIDER", "SWING"];
+    const frames = modes.map((mode, sequence) => ({ ...frame(sequence, sequence * 50),
+      keyframe: { ...frame(sequence, sequence * 50).keyframe, mode, mini: sequence % 2 === 1,
+        upsideDown: sequence >= 4, flipped: sequence >= 4, finished: sequence === 7 } }));
+    expect((await post(`recordings/${recording.recordingId}/frames`, { formatVersion: 2, frames }, recording.token)).status).toBe(201);
+    expect((await post(`recordings/${recording.recordingId}/finalize`, { completed: true }, recording.token)).status).toBe(201);
+    const stored = (await database.query<{ keyframe: unknown }>("SELECT keyframe FROM debug_spectate_frames WHERE recording_id = $1 ORDER BY sequence", [recording.recordingId])).rows;
+    expect(stored.map(row => row.keyframe)).toEqual(frames.map(f => f.keyframe));
+    const playback = (await post("playbacks", createBody)).body;
+    expect(playback.recordingId).toBe(recording.recordingId); expect(playback.formatVersion).toBe(2);
+    expect(playback.frames).toBeUndefined(); expect((await poll(playback)).body.waiting).toBe(true);
+    now += 50; const first = (await poll(playback)).body;
+    expect(first.packets[0].keyframe).toEqual(frames[0]!.keyframe);
+    now += 350; const rest = (await poll(playback, `&attemptId=${first.stream.attemptId}&generation=1&afterSequence=0`)).body;
+    expect(rest.packets.map((p: any) => p.keyframe)).toEqual(frames.slice(1).map(f => f.keyframe));
+    expect(rest.playbackComplete).toBe(true); expect(await rankedSnapshot()).toEqual(before);
+    expect((await post(`playbacks/${playback.playbackId}/close`, {}, playback.token)).status).toBe(201);
+  });
+  it("excludes old completed v1 recordings even when newer, and rejects corrupt expanded state", async () => {
+    now += 1000; const good = await completedRecord();
+    const old = ids.next();
+    await database.query(`INSERT INTO debug_spectate_recordings
+      (id, level_id, format_version, sample_interval_ms, completed, created_at, duration_ms, frame_count, token_hash, expires_at)
+      VALUES ($1, $2, 1, 50, true, $3, 50, 2, 'old-format-fixture', $3)`, [old, DEBUG_SPECTATE_LEVEL_ID, new Date(now + 10000)]);
+    expect((await post("playbacks", createBody)).body.recordingId).toBe(good.recordingId);
+    expect((await post("recordings", { ...createBody, formatVersion: 1 })).status).toBe(400);
+    const recording = await startRecord();
+    const invalid = frame(0, 0); invalid.keyframe.mode = "UNKNOWN";
+    expect((await post(`recordings/${recording.recordingId}/frames`, { formatVersion: 2, frames: [invalid] }, recording.token)).status).toBe(400);
+    expect((await database.query("SELECT * FROM debug_spectate_frames WHERE recording_id = $1", [recording.recordingId])).rows).toEqual([]);
   });
   it("OFF server rejects recording/playback even with valid authorization without creating debug data", async () => {
     await app.close(); await startApp(false);

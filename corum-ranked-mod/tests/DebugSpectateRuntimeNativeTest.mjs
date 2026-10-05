@@ -260,7 +260,7 @@ test('actual Debug client builds HTTP requests, drains terminal/ACK retries, and
     // runtime is compiled, not a rewritten recorder policy. Actual HTTP + PG
     // persistence/restart/playback timing is exercised by the server suite.
     const viewerFixture = read('tests/SpectatorLiveViewerNativeTest.mjs');
-    const model = viewerFixture.slice(viewerFixture.indexOf('namespace matjson {'), viewerFixture.indexOf('namespace corum::ranked::log'))
+    const model = viewerFixture.slice(viewerFixture.indexOf('namespace matjson {'), viewerFixture.indexOf('${readFileSync(join(root,'))
         .replace('    bool isObject()', '    static Value array(){return Value(Array{});} void push(Value x){std::get<Array>(data).push_back(std::move(x));}\n    bool isObject()');
     const header = read('src/debug/DebugSpectateRuntime.hpp').replace(/^#include.*$|^#pragma once$/gm, '')
         .replace('private:', 'public: // Native-harness state fault injection only.');
@@ -278,6 +278,7 @@ test('actual Debug client builds HTTP requests, drains terminal/ACK retries, and
 #include <variant>
 #include <vector>
 ${model}
+${read("src/spectator/SpectatorPoseCodec.hpp").replace(/^#include.*$|^#pragma once$/gm, "")}
 namespace geode {
 namespace log {template<class... T> void info(T...){} template<class... T> void warn(T...){} }
 namespace utils::web {
@@ -344,7 +345,7 @@ void respond(int status,matjson::Value data={}) {
     assert(!pending.empty());auto item=pending.front();pending.erase(pending.begin());item.callback({status,data});
 }
 matjson::Value admission(bool playback){
-    matjson::Value result;result["levelId"]=88350599;result["formatVersion"]=1;
+    matjson::Value result;result["levelId"]=88350599;result["formatVersion"]=2;
     result[playback?"playbackId":"recordingId"]=playback?"playback-id":"recording-id";
     result["token"]=playback?"playback-scoped-token":"recording-scoped-token";
     result["contextId"]="debug-spectate:playback-id";return result;

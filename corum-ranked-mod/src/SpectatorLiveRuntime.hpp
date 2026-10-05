@@ -24,6 +24,9 @@ public:
     static SpectatorLiveRuntime& get();
 
     void tickPublisher(SpectatorGhostPose const& pose, bool practice);
+    void publishTerminal(SpectatorGhostPose const& pose, bool practice);
+    void tickTerminal();
+    void localAttemptStarted() { m_deferredTerminalPose.reset(); }
     void tickViewer();
     void reset();
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
@@ -61,10 +64,19 @@ private:
     std::chrono::steady_clock::time_point m_nextPublishAt {};
     std::uint64_t m_publishRequestGeneration = 0;
     bool m_publishBusy = false;
+    matjson::Value m_terminalBody;
+    std::string m_terminalSessionToken, m_terminalMatchToken, m_terminalPublishAttemptId;
+    std::chrono::steady_clock::time_point m_terminalDeadline {}, m_nextTerminalAt {};
+    std::uint64_t m_terminalRequestGeneration = 0;
+    bool m_terminalPending = false, m_terminalBusy = false;
+    std::optional<SpectatorGhostPose> m_deferredTerminalPose;
+    std::string m_deferredMatchId;
+    int m_deferredRound = 0, m_deferredDeathmatch = 0;
 
     std::string m_viewMatchId;
     std::string m_viewContextKey;
     std::string m_viewAttemptId;
+    std::string m_viewTerminalAttemptId;
     std::uint64_t m_viewGeneration = 0;
     std::uint64_t m_viewPresentationEpoch = 0;
     std::int64_t m_lastViewSequence = -1;
@@ -82,6 +94,7 @@ private:
     bool m_viewBusy = false;
 
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_publishRequest;
+    geode::async::TaskHolder<geode::utils::web::WebResponse> m_terminalRequest;
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_viewRequest;
 };
 

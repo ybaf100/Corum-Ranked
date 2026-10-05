@@ -29,7 +29,7 @@ const standardState = (
 });
 
 const packet = (overrides: Record<string, unknown> = {}) => ({
-  protocolVersion: 1,
+  protocolVersion: 2,
   matchId: "match-1",
   roundNumber: 2,
   deathmatchSequence: null,
@@ -42,6 +42,7 @@ const packet = (overrides: Record<string, unknown> = {}) => ({
     x: 120,
     y: 48,
     rotation: 15,
+    mode: "CUBE", mini: false, upsideDown: false, flipped: false, dual: false,
     dead: false,
     finished: false,
   },
@@ -151,11 +152,11 @@ describe("SpectatorLiveService", () => {
       "match-1",
       "match-token",
       session,
-      packet({ sequence: 1, elapsedMs: 60, keyframe: { x: 126, y: 50, rotation: 18, dead: false, finished: false } }),
+      packet({ sequence: 1, elapsedMs: 60, keyframe: { ...packet().keyframe, x: 126, y: 50, rotation: 18, dead: false, finished: false } }),
     );
 
     setState(standardState("A", true));
-    const lateJoin = await service.subscribe("match-1", "match-token", session, "1");
+    const lateJoin = await service.subscribe("match-1", "match-token", session, "2");
     expect(lateJoin).toMatchObject({ active: true, waiting: false, fallback: false, reset: true });
     expect(lateJoin.packets.map((item) => item.sequence)).toEqual([0, 1]);
     expect(lateJoin.packets[0]).not.toHaveProperty("receivedAtMs");
@@ -165,14 +166,14 @@ describe("SpectatorLiveService", () => {
       "match-1",
       "match-token",
       session,
-      packet({ sequence: 2, elapsedMs: 110, keyframe: { x: 132, y: 54, rotation: 20, dead: false, finished: false } }),
+      packet({ sequence: 2, elapsedMs: 110, keyframe: { ...packet().keyframe, x: 132, y: 54, rotation: 20, dead: false, finished: false } }),
     );
     setState(standardState("A", true));
     const incremental = await service.subscribe(
       "match-1",
       "match-token",
       session,
-      "1",
+      "2",
       "attempt-b",
       "1",
       "1",
@@ -189,7 +190,7 @@ describe("SpectatorLiveService", () => {
       await service.publish("match-1", "match-token", session, packet({ sequence }));
     }
     setState(standardState("A", true));
-    const capped = await service.subscribe("match-1", "match-token", session, "1");
+    const capped = await service.subscribe("match-1", "match-token", session, "2");
     expect(capped.packets).toHaveLength(72);
     expect(capped.packets[0]?.sequence).toBe(8);
     expect(capped.packets.at(-1)?.sequence).toBe(79);
@@ -208,7 +209,7 @@ describe("SpectatorLiveService", () => {
       }));
     }
     setState(standardState("A", true));
-    const windowed = await service.subscribe("match-1", "match-token", session, "1");
+    const windowed = await service.subscribe("match-1", "match-token", session, "2");
     expect(windowed.packets.map((item) => item.sequence)).toEqual([1, 2, 3]);
   });
 
@@ -240,7 +241,7 @@ describe("SpectatorLiveService", () => {
       "match-1",
       "match-token",
       session,
-      "1",
+      "2",
       "attempt-b",
       "1",
       "0",
@@ -256,7 +257,7 @@ describe("SpectatorLiveService", () => {
     now.mockReturnValue(11_501);
     setState(standardState("A", true));
     await expect(
-      service.subscribe("match-1", "match-token", session, "1"),
+      service.subscribe("match-1", "match-token", session, "2"),
     ).resolves.toMatchObject({ fallback: true, reason: "STREAM_TIMEOUT" });
 
     setState(standardState("B", false));
@@ -299,7 +300,7 @@ describe("SpectatorLiveService", () => {
     service.clearAttempt("match-1", "attempt-b");
     setState(standardState("A", true));
     await expect(
-      service.subscribe("match-1", "match-token", session, "1"),
+      service.subscribe("match-1", "match-token", session, "2"),
     ).resolves.toMatchObject({ waiting: true, reason: "STREAM_NOT_READY" });
 
     setState(standardState("B", false));
@@ -312,7 +313,7 @@ describe("SpectatorLiveService", () => {
     }));
     setState(standardState("A", true));
     await expect(
-      service.subscribe("match-1", "match-token", session, "1"),
+      service.subscribe("match-1", "match-token", session, "2"),
     ).resolves.toMatchObject({ waiting: true, reason: "STREAM_NOT_READY" });
 
     setState(standardState("B", false, "ROUND_PLAYING", 3));
@@ -326,7 +327,40 @@ describe("SpectatorLiveService", () => {
     });
     setState(standardState("A", true, "ROUND_PLAYING", 3));
     await expect(
-      service.subscribe("match-1", "match-token", session, "1"),
+      service.subscribe("match-1", "match-token", session, "2"),
     ).resolves.toMatchObject({ waiting: true, reason: "STREAM_NOT_READY" });
   });
+  it("keeps the exact server-ended Attempt for terminal HTTP races, then expires it", async () => {
+    const { service, runtime, setState } = setup();
+    let now = 10000; vi.spyOn(Date, "now").mockImplementation(() => now);
+    runtime.beginAttempt("match-1", 2, "B", "attempt-b", now);
+    await service.publish("match-1", "match-token", session, packet());
+    runtime.endAttempt("match-1", 2, "B", "attempt-b", false);
+    await expect(service.publish("match-1", "match-token", session,
+      packet({ sequence: 1, elapsedMs: 60, keyframe: { ...packet().keyframe, dead: true } }))).resolves.toMatchObject({ accepted: true });
+    setState(standardState("A", true));
+    expect((await service.subscribe("match-1", "match-token", session, "2")).packets.at(-1)?.keyframe.dead).toBe(true);
+    now += 1501;
+    expect((await service.subscribe("match-1", "match-token", session, "2")).waiting).toBe(true);
+    setState(standardState("B", false));
+    await expect(service.publish("match-1", "match-token", session,
+      packet({ sequence: 2, keyframe: { ...packet().keyframe, dead: true } }))).rejects.toThrow("SPECTATOR_ATTEMPT_MISMATCH");
+  });
+  it("rejects wrong ended identity/terminal outcome and reviving the same Attempt, but permits a new Attempt", async () => {
+    const { service, runtime } = setup();
+    runtime.beginAttempt("match-1", 2, "B", "attempt-b", Date.now());
+    await service.publish("match-1", "match-token", session, packet());
+    runtime.endAttempt("match-1", 2, "B", "attempt-b", true);
+    await expect(service.publish("match-1", "match-token", session,
+      packet({ sequence: 1, keyframe: { ...packet().keyframe, dead: true } }))).rejects.toThrow("SPECTATOR_ATTEMPT_MISMATCH");
+    await service.publish("match-1", "match-token", session,
+      packet({ sequence: 1, keyframe: { ...packet().keyframe, finished: true } }));
+    await expect(service.publish("match-1", "match-token", session, packet({ sequence: 2 }))).rejects.toThrow();
+    await expect(service.publish("match-1", "match-token", session,
+      packet({ generation: 2, keyframe: { ...packet().keyframe, finished: true } }))).rejects.toThrow("SPECTATOR_TERMINAL_STREAM");
+    runtime.beginAttempt("match-1", 2, "B", "new-attempt", Date.now());
+    await expect(service.publish("match-1", "match-token", session,
+      packet({ attemptId: "new-attempt", generation: 2 }))).resolves.toMatchObject({ accepted: true });
+  });
+
 });

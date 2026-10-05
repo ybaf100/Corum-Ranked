@@ -1,3 +1,11 @@
+## v0.5.0-beta.25
+
+- Live Spectator protocol v2 reads actual GD Cube/Ship/Ball/UFO/Wave/Robot/Spider/Swing, mini, gravity and visual flip, using shared production/Debug capture and strict server/client validation.
+- Dedicated Remote Player reuses native vehicle/size helpers only on transitions. Death fades without local gameplay calls; new Attempt respawns; Clear holds its final pose and HUD status.
+- Terminal poses bypass the sampling interval, preserve Start/live ACK ordering and survive the bounded authoritative End/HTTP race. Existing dummy/no-score/no-New-Best guards remain.
+- Debug VOICE RECORD/TEST now persists and replays format v2 through the existing server clock, HTTP relay, decoder, interpolation, remote and camera. Old v1 recordings are excluded.
+- Bounded Spider gravity snaps avoid invalid interpolation. Dual explicitly falls back pending Phase 5; cosmetics/advanced interpolation/complex camera parity and optimizations remain later work.
+
 ## v0.5.0-beta.24
 
 - Keep fresh online VOICE attestation, then use the matching native downloaded Saved pointer for Debug Spectate launch instead of a geometry-empty SearchResult. Reject every identity mismatch; preserve vanilla download for absent geometry and normal Ranked entry behavior.

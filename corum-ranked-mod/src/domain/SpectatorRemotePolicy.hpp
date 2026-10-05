@@ -1,4 +1,5 @@
 #pragma once
+#include "SpectatorGameplayState.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -13,6 +14,12 @@ struct SpectatorGhostPose {
     float rotation = 0.0f;
     bool dead = false;
     bool finished = false;
+    SpectatorGameMode mode = SpectatorGameMode::Cube;
+    bool mini = false;
+    bool upsideDown = false;
+    // Native visual flip is distinct from gravity (e.g. Ship/UFO).
+    bool flipped = false;
+    bool dual = false;
 };
 
 struct SpectatorRemoteContext {
@@ -36,7 +43,19 @@ struct SpectatorRemoteFrame {
 inline bool finiteSpectatorPose(SpectatorGhostPose const& pose) {
     return std::isfinite(pose.x) && std::isfinite(pose.y) &&
         std::isfinite(pose.rotation) && std::abs(pose.x) <= 10'000'000.0f &&
-        std::abs(pose.y) <= 10'000'000.0f;
+        std::abs(pose.y) <= 10'000'000.0f && std::abs(pose.rotation) <= 100'000.0f &&
+        !spectatorModeName(pose.mode).empty() && !(pose.dead && pose.finished);
+}
+
+// Keep the original correction limit. A bounded, native Spider gravity snap or
+// mode portal transition snaps presentation instead of lerping across the map.
+inline bool spectatorPoseSnapAllowed(SpectatorGhostPose const& previous, SpectatorGhostPose const& next) {
+    auto const dx = std::abs(next.x - previous.x);
+    auto const dy = std::abs(next.y - previous.y);
+    return dx <= 400.0f && dy <= 2400.0f &&
+        (previous.mode != next.mode ||
+         (previous.mode == SpectatorGameMode::Spider && next.mode == SpectatorGameMode::Spider &&
+          previous.upsideDown != next.upsideDown));
 }
 
 enum class SpectatorRemoteLifecycle { None, Create, Recreate, Destroy };
@@ -72,7 +91,7 @@ public:
         SpectatorGhostPose const& pose
     ) {
         if (!m_context || *m_context != context || context.attemptId.empty() ||
-            sequence < 0 || sequence < m_sequence || !finiteSpectatorPose(pose)) {
+            sequence < 0 || sequence < m_sequence || !finiteSpectatorPose(pose) || pose.dual) {
             return SpectatorRemotePoseDecision::Rejected;
         }
         // Same sequence is allowed: existing interpolation samples it each frame.

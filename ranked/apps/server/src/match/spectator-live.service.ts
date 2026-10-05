@@ -31,6 +31,9 @@ interface SpectatorInputEdge {
   readonly player: 1 | 2;
 }
 
+export const SPECTATOR_GAME_MODES = ["CUBE", "SHIP", "BALL", "UFO", "WAVE", "ROBOT", "SPIDER", "SWING"] as const;
+export type SpectatorGameMode = typeof SPECTATOR_GAME_MODES[number];
+
 export interface SpectatorPoseKeyframe {
   readonly x: number;
   readonly y: number;
@@ -39,11 +42,14 @@ export interface SpectatorPoseKeyframe {
   readonly finished: boolean;
   readonly velocityX?: number;
   readonly velocityY?: number;
-  readonly mode?: string;
+  readonly mode: SpectatorGameMode;
+  readonly mini: boolean;
+  readonly upsideDown: boolean;
+  readonly flipped: boolean;
   readonly gravity?: number;
   readonly cameraX?: number;
   readonly cameraY?: number;
-  readonly dual?: boolean;
+  readonly dual: boolean;
   readonly player2X?: number;
   readonly player2Y?: number;
   readonly player2Rotation?: number;
@@ -129,8 +135,10 @@ const integer = (value: unknown, field: string, minimum: number): number => {
 const optionalFiniteNumber = (value: unknown): number | undefined =>
   typeof value === "number" && Number.isFinite(value) ? value : undefined;
 
-const optionalString = (value: unknown): string | undefined =>
-  typeof value === "string" && value.length <= 32 ? value : undefined;
+const requiredBoolean = (value: unknown, field: string): boolean => {
+  if (typeof value !== "boolean") throw new BadRequestException(`${field} must be a boolean`);
+  return value;
+};
 
 export const parseSpectatorKeyframe = (value: unknown): SpectatorPoseKeyframe => {
   if (!isRecord(value)) throw new BadRequestException("keyframe is required");
@@ -148,20 +156,27 @@ export const parseSpectatorKeyframe = (value: unknown): SpectatorPoseKeyframe =>
   const player2X = optionalFiniteNumber(value.player2X);
   const player2Y = optionalFiniteNumber(value.player2Y);
   const player2Rotation = optionalFiniteNumber(value.player2Rotation);
-  const mode = optionalString(value.mode);
+  if (typeof value.mode !== "string" || !SPECTATOR_GAME_MODES.includes(value.mode as SpectatorGameMode)) {
+    throw new BadRequestException("keyframe.mode is unsupported");
+  }
+  const mode = value.mode as SpectatorGameMode;
+  const mini = requiredBoolean(value.mini, "keyframe.mini");
+  const upsideDown = requiredBoolean(value.upsideDown, "keyframe.upsideDown");
+  const flipped = requiredBoolean(value.flipped, "keyframe.flipped");
+  const dual = requiredBoolean(value.dual, "keyframe.dual");
+  const dead = requiredBoolean(value.dead, "keyframe.dead");
+  const finished = requiredBoolean(value.finished, "keyframe.finished");
+  if (dead && finished) throw new BadRequestException("keyframe terminal flags conflict");
   return {
     x,
     y,
     rotation,
-    dead: value.dead === true,
-    finished: value.finished === true,
+    mode, mini, upsideDown, flipped, dual, dead, finished,
     ...(velocityX === undefined ? {} : { velocityX }),
     ...(velocityY === undefined ? {} : { velocityY }),
-    ...(mode === undefined ? {} : { mode }),
     ...(gravity === undefined ? {} : { gravity }),
     ...(cameraX === undefined ? {} : { cameraX }),
     ...(cameraY === undefined ? {} : { cameraY }),
-    ...(typeof value.dual === "boolean" ? { dual: value.dual } : {}),
     ...(player2X === undefined ? {} : { player2X }),
     ...(player2Y === undefined ? {} : { player2Y }),
     ...(player2Rotation === undefined ? {} : { player2Rotation }),
@@ -263,7 +278,11 @@ export class SpectatorLiveService {
       throw new ForbiddenException("PRACTICE_STREAM_SUPPRESSED");
     }
     const authoritative = this.runtimeState.progress(matchId, context.slot, state.side);
-    if (!authoritative || authoritative.attemptId !== packet.attemptId) {
+    const ended = this.runtimeState.endedAttempt?.(matchId, context.slot, state.side);
+    const validTerminal = ended && ended.attemptId === packet.attemptId &&
+      Date.now() - ended.endedAtMs <= SPECTATOR_LIVE_TIMEOUT_MS &&
+      (ended.cleared ? packet.keyframe.finished : packet.keyframe.dead);
+    if ((!authoritative || authoritative.attemptId !== packet.attemptId) && !validTerminal) {
       throw new ConflictException("SPECTATOR_ATTEMPT_MISMATCH");
     }
 
@@ -292,6 +311,9 @@ export class SpectatorLiveService {
     } else if (packet.generation < stream.generation) {
       throw new ConflictException("SPECTATOR_STALE_GENERATION");
     } else if (packet.generation > stream.generation) {
+      if (stream.packets.at(-1)?.keyframe.dead || stream.packets.at(-1)?.keyframe.finished) {
+        throw new ConflictException("SPECTATOR_TERMINAL_STREAM");
+      }
       if (packet.sequence !== 0) {
         throw new ConflictException("SPECTATOR_NEW_GENERATION_MUST_START_AT_SEQUENCE_ZERO");
       }
@@ -301,6 +323,14 @@ export class SpectatorLiveService {
     }
 
     if (packet.sequence <= stream.lastSequence) {
+      const last = stream.packets.at(-1);
+      if (last && packet.sequence === stream.lastSequence &&
+        (packet.keyframe.dead || packet.keyframe.finished) &&
+        JSON.stringify(publicPacket(last)) === JSON.stringify(packet)) {
+        // ACK loss retry of the immutable visual terminal, not a new event.
+        return { accepted: true, protocolVersion: SPECTATOR_LIVE_PROTOCOL_VERSION,
+          attemptId: stream.attemptId, generation: stream.generation, sequence: stream.lastSequence };
+      }
       throw new ConflictException("SPECTATOR_STALE_SEQUENCE");
     }
     if (
@@ -357,6 +387,15 @@ export class SpectatorLiveService {
     }
     const authoritative = this.runtimeState.progress(matchId, context.slot, opponentSide);
     if (!authoritative) {
+      const key = streamKey(matchId, context.slot, opponentSide);
+      const terminalStream = this.streams.get(key);
+      const ended = this.runtimeState.endedAttempt?.(matchId, context.slot, opponentSide);
+      const terminal = terminalStream?.packets.at(-1)?.keyframe;
+      if (terminalStream && ended && ended.attemptId === terminalStream.attemptId &&
+        Date.now() - ended.endedAtMs <= SPECTATOR_LIVE_TIMEOUT_MS && (terminal?.dead || terminal?.finished)) {
+        return this.readStream(key, terminalStream, context.roundNumber, context.deathmatchSequence,
+          state.spectator.opponentName ?? "Opponent", attemptId, generationText, afterSequenceText);
+      }
       return {
         protocolVersion: SPECTATOR_LIVE_PROTOCOL_VERSION,
         active: true,
@@ -402,6 +441,7 @@ export class SpectatorLiveService {
     if (!packet.matchId.startsWith("debug-spectate:") || packet.protocolVersion !== SPECTATOR_LIVE_PROTOCOL_VERSION) {
       throw new BadRequestException("INVALID_RECORDED_CONTEXT");
     }
+    parseSpectatorKeyframe(packet.keyframe);
     const key = `recorded:${packet.matchId}`;
     let stream = this.streams.get(key);
     if (!stream || stream.generation !== packet.generation || stream.attemptId !== packet.attemptId) {
@@ -432,6 +472,9 @@ export class SpectatorLiveService {
   }
 
   private appendPacket(stream: LiveStream, packet: SpectatorLivePacket, nowMs: number): void {
+    const last = stream.packets.at(-1);
+    if (last?.keyframe.dead || last?.keyframe.finished) throw new ConflictException("SPECTATOR_TERMINAL_STREAM");
+    if (last && packet.elapsedMs < last.elapsedMs) throw new ConflictException("SPECTATOR_REVERSE_TIMESTAMP");
     stream.lastSequence = packet.sequence;
     stream.lastReceivedAtMs = nowMs;
     stream.packets.push({ ...packet, receivedAtMs: nowMs });
@@ -518,10 +561,14 @@ export class SpectatorLiveService {
     for (const [key, stream] of this.streams) {
       if (stream.matchId !== state.matchId) continue;
       const authoritative = this.runtimeState.progress(state.matchId, context.slot, stream.side);
+      const ended = this.runtimeState.endedAttempt?.(state.matchId, context.slot, stream.side);
+      // The authoritative End can race the independent visual terminal HTTP
+      // request. Retain only its exact ended identity for the bounded relay TTL.
+      const recentEnd = ended && ended.attemptId === stream.attemptId &&
+        Date.now() - ended.endedAtMs <= SPECTATOR_LIVE_TIMEOUT_MS;
       if (
         stream.slot !== context.slot ||
-        !authoritative ||
-        authoritative.attemptId !== stream.attemptId ||
+        ((!authoritative || authoritative.attemptId !== stream.attemptId) && !recentEnd) ||
         this.runtimeState.practice(state.matchId, context.slot, stream.side)
       ) {
         this.streams.delete(key);

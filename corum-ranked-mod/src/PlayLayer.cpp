@@ -1,6 +1,7 @@
 #include "RankedRuntime.hpp"
 #include "RankedAudioManager.hpp"
 #include "SpectatorLiveRuntime.hpp"
+#include "spectator/SpectatorPlayerCapture.hpp"
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
 #include "debug/DebugSpectateRuntime.hpp"
 #include "RankedLevelPreparation.hpp"
@@ -563,8 +564,7 @@ public:
         if (m_fields->debugRecordScene) {
             if (m_player1 && !m_player1->m_isDead && !m_hasCompletedLevel && !m_isPracticeMode &&
                 std::chrono::steady_clock::now() >= m_fields->attemptJournalReadyAt) {
-                auto const position = m_player1->getPosition();
-                corum::ranked::debug::DebugSpectateRuntime::get().recordPose({position.x, position.y, m_player1->getRotation(), false, false});
+                corum::ranked::debug::DebugSpectateRuntime::get().recordPose(corum::ranked::captureSpectatorPose(m_player1, false, false, m_gameState.m_isDualMode));
                 m_fields->debugRecordHasFrame = true;
             }
             if (m_fields->debugSpectateHud) m_fields->debugSpectateHud->setString(corum::ranked::debug::DebugSpectateRuntime::get().status().c_str());
@@ -647,14 +647,8 @@ public:
         }
 
         if (m_player1) {
-            auto const position = m_player1->getPosition();
-            corum::ranked::SpectatorLiveRuntime::get().tickPublisher({
-                .x = position.x,
-                .y = position.y,
-                .rotation = m_player1->getRotation(),
-                .dead = false,
-                .finished = false,
-            }, false);
+            corum::ranked::SpectatorLiveRuntime::get().tickPublisher(
+                corum::ranked::captureSpectatorPose(m_player1, false, false, m_gameState.m_isDualMode), false);
         }
 
         auto const& matchState = runtime.view().match.state;
@@ -791,6 +785,7 @@ public:
         }
         PlayLayer::resetLevel();
         if (!resetActions.startFreshAttempt) return;
+        corum::ranked::SpectatorLiveRuntime::get().localAttemptStarted();
         m_fields->spectatorPending = false;
         if (m_player1) m_player1->setVisible(true);
         m_fields->attemptStartReported = false;
@@ -828,6 +823,8 @@ public:
         }
 
         if (scoringEnabled() && !m_fields->attemptEndReported) {
+            if (m_player1) corum::ranked::SpectatorLiveRuntime::get().publishTerminal(
+                corum::ranked::captureSpectatorPose(m_player1, true, false, m_gameState.m_isDualMode), false);
             auto const progress = rankedProgressPercent(this);
             m_fields->attemptEndReported = runtime.reportAttemptEnd(
                 m_fields->levelId,
@@ -839,8 +836,7 @@ public:
         PlayLayer::destroyPlayer(player, object);
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         if (m_fields->debugRecordScene && player && player == m_player1 && player->m_isDead) {
-            auto const position = player->getPosition();
-            corum::ranked::debug::DebugSpectateRuntime::get().recordPose({position.x, position.y, player->getRotation(), true, false}, true);
+            corum::ranked::debug::DebugSpectateRuntime::get().recordPose(corum::ranked::captureSpectatorPose(player, true, false, m_gameState.m_isDualMode), true);
         }
 #endif
     }
@@ -850,8 +846,7 @@ public:
         if (suppressLocalCompletion()) return;
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         if (m_fields->debugRecordScene && m_player1) {
-            auto const position = m_player1->getPosition();
-            corum::ranked::debug::DebugSpectateRuntime::get().recordPose({position.x, position.y, m_player1->getRotation(), false, true}, true);
+            corum::ranked::debug::DebugSpectateRuntime::get().recordPose(corum::ranked::captureSpectatorPose(m_player1, false, true, m_gameState.m_isDualMode), true);
         }
 #endif
         ScopedRealGameplayEnd finishing(
@@ -859,6 +854,8 @@ public:
             scoringEnabled() && !m_fields->attemptEndReported
         );
         if (scoringEnabled() && !m_fields->attemptEndReported) {
+            if (m_player1) corum::ranked::SpectatorLiveRuntime::get().publishTerminal(
+                corum::ranked::captureSpectatorPose(m_player1, false, true, m_gameState.m_isDualMode), false);
             m_fields->attemptEndReported = runtime.reportAttemptEnd(
                 m_fields->levelId,
                 100.0,
@@ -874,8 +871,7 @@ public:
         if (suppressLocalCompletion()) return;
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         if (m_fields->debugRecordScene && m_player1) {
-            auto const position = m_player1->getPosition();
-            corum::ranked::debug::DebugSpectateRuntime::get().recordPose({position.x, position.y, m_player1->getRotation(), false, true}, true);
+            corum::ranked::debug::DebugSpectateRuntime::get().recordPose(corum::ranked::captureSpectatorPose(m_player1, false, true, m_gameState.m_isDualMode), true);
         }
 #endif
         ScopedRealGameplayEnd finishing(
@@ -886,6 +882,8 @@ public:
         // second vanilla completion-path safety net; the per-attempt guard makes
         // the pair idempotent and prevents double Clear/score accounting.
         if (scoringEnabled() && !m_fields->attemptEndReported) {
+            if (m_player1) corum::ranked::SpectatorLiveRuntime::get().publishTerminal(
+                corum::ranked::captureSpectatorPose(m_player1, false, true, m_gameState.m_isDualMode), false);
             m_fields->attemptEndReported = runtime.reportAttemptEnd(
                 m_fields->levelId,
                 100.0,
@@ -1711,7 +1709,10 @@ public:
         if (spectatorVisible) {
             setHudText(m_fields->spectatorNameLabel, presentation.spectatorOpponentText);
             auto const status = corum::ranked::SpectatorLiveRuntime::get().status();
+            auto const rendered = m_fields->remotePlayer.cameraFrame();
             setHudText(m_fields->spectatorProgressLabel,
+                rendered && rendered->pose && rendered->pose->finished ? "CLEARED" :
+                rendered && rendered->pose && rendered->pose->dead ? "OPPONENT DOWN" :
                 status == corum::ranked::SpectatorLiveStatus::Fallback ? "POLLING..." :
                 m_fields->spectatorCamera.state() == corum::ranked::SpectatorCameraState::Waiting ?
                     "WAITING..." : presentation.spectatorProgressText);

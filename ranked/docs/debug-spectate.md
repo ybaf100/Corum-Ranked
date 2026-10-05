@@ -1,4 +1,4 @@
-# Server-backed Debug Spectate (beta22; admission beta23; native launch beta24)
+# Server-backed Debug Spectate (native launch beta24; gameplay state beta25)
 
 Beta24 retains fresh online attestation, then re-queries the native Saved VOICE object for launch. Saved geometry is reused only when all immutable proof identity fields match, the object is genuinely Saved, geometry is non-empty and notDownloaded is false. Otherwise the attested online object follows vanilla download and verified native replacement. No unverified cache shortcut or geometry reconstruction is used.
 
@@ -8,7 +8,7 @@ The supplied beta23 iPadOS log demonstrates the geometry-empty SearchResult / do
 
 Fresh RECORD/TEST admission clears the previous scope's deadline/upload backoff before issuing HTTP. The beta23 native runtime regression injects an expired prior scope and verifies it cannot cancel or delay a new recording scope.
 
-This Phase-3 QA harness is not a local replay. The sole map is **VOICE / LiteN1ng / Easy Demon / 88350599** (`DebugSpectatePolicy.hpp`, server `debug-spectate.config.ts`). There is no map selector, synthetic level or production Ranked Match. Phase 4 game modes, gravity/mini/dual and full terminal effects remain out of scope.
+This Phase-3 QA harness is not a local replay. The sole map is **VOICE / LiteN1ng / Easy Demon / 88350599** (`DebugSpectatePolicy.hpp`, server `debug-spectate.config.ts`). There is no map selector, synthetic level or production Ranked Match. Phase 4 protocol-v2 game modes, mini, gravity and native visual flip are shared by production and this harness. Dual is explicitly detected but viewer-falls back pending Phase 5; full effects/cosmetics are not implemented.
 
 ## Enable only in an authorized debug deployment
 
@@ -19,12 +19,12 @@ This Phase-3 QA harness is not a local replay. The sole map is **VOICE / LiteN1n
 
 ## API and isolation
 
-All paths below begin `/api/ranked/debug/spectate`. `x-corum-debug-spectate: 1` is required. Creation additionally uses `Authorization: Bearer <Ranked session>` and `{password, levelId: 88350599, formatVersion: 1}`. Scoped operations use `x-debug-spectate-token` instead of Ranked match/session authority.
+All paths below begin `/api/ranked/debug/spectate`. `x-corum-debug-spectate: 1` is required. Creation additionally uses `Authorization: Bearer <Ranked session>` and `{password, levelId: 88350599, formatVersion: 2}`. Scoped operations use `x-debug-spectate-token` instead of Ranked match/session authority.
 
 | Method | Path | Responsibility |
 | --- | --- | --- |
 | POST | `/recordings` | Create isolated audit metadata and recording scope |
-| POST | `/recordings/:id/frames` | `{formatVersion: 1, frames: [{sequence, elapsedMs, keyframe}]}`; up to 16 canonical production keyframes |
+| POST | `/recordings/:id/frames` | `{formatVersion: 2, frames: [{sequence, elapsedMs, keyframe}]}`; up to 16 canonical production keyframes |
 | POST | `/recordings/:id/finalize` | `{completed}`; true requires death or finished terminal; retries preserve the first outcome |
 | POST | `/playbacks` | Latest completed supported VOICE recording; metadata/scoped token only, **no frame file** |
 | GET | `/playbacks/:id/spectator-live` | Production protocolVersion/attemptId/generation/afterSequence query and live response; additive `playbackComplete` |
@@ -55,3 +55,26 @@ On an authorized debug server with the flag/secret configured and both current-v
 5. Actual A-playing/B-finished two-client spectator E2E remains separate: natural local End → server spectator.active → same scene → dedicated remote/camera; confirm FINAL/LAST/DM legal local Attempts and Placement/user Practice are not interrupted.
 
 No Release workflow is manually invoked by this task. Native platform compile/CI and device results are reported separately.
+
+## Phase 4 format compatibility and device QA
+
+`formatVersion=2` records strict protocol-v2 keyframes: x/y/rotation, mode
+(CUBE/SHIP/BALL/UFO/WAVE/ROBOT/SPIDER/SWING), mini/upsideDown/flipped/dual,
+and mutually exclusive dead/finished. Production and RECORD both use
+`captureSpectatorPose`; production and Debug upload both use `encodeSpectatorPose`.
+There is no local TEST clock or frame injection. JSONB storage needs no migration;
+latest-completed selection requires format 2 and revalidates persisted frames.
+Old format-1 recordings must be recorded again, not upgraded as fictitious Cubes.
+
+VOICE remains fixed and metadata/song attested. RECORD is real vanilla gameplay,
+so its normal GD New Best can save; TEST is an authoritative scoped spectator dummy,
+so New Best/percentage/completion cannot save. Expanded poses only drive the remote
+visual and camera; they are never Ranked score/achievement evidence.
+
+Real iPadOS and two-client E2E were not performed for beta25. Record real VOICE
+Cube/portal/mini-if-present/gravity sections and separate death/Clear attempts;
+TEST the latest recording, compare modes/rotation/orientation and vertical camera,
+verify death fade and held Clear pose, hidden dummy and unchanged TEST local best.
+Modes absent from VOICE are covered by native doubles/protocol tests only; no UI
+synthetic mode injection is provided. Dual and complex teleports/camera parity,
+full effects and device cosmetics remain Phase 5 follow-up.
