@@ -95,16 +95,24 @@ void DebugSpectateRuntime::tick() {
         fail("DEBUG SPECTATE SESSION EXPIRED"); return;
     }
     if (m_mode == DebugSpectateMode::Recording || m_mode == DebugSpectateMode::FinalizingRecord) { pumpRecording(); return; }
-    if (RankedRuntime::get().view().stage != RuntimeStage::Ready) { cancelPreparation(); return; }
+    if (RankedRuntime::get().view().stage != RuntimeStage::Ready) { cancelPreparation("Ranked lobby authority changed"); return; }
     if (m_mode == DebugSpectateMode::Playback) return;
-    if (now - m_prepareStartedAt > std::chrono::minutes(2)) { cancelPreparation(); m_status = "VOICE PREPARATION TIMEOUT"; return; }
+    if (now - m_prepareStartedAt > std::chrono::minutes(2)) { cancelPreparation("VOICE preparation timeout"); m_status = "VOICE PREPARATION TIMEOUT"; return; }
     if (!preparedLevel(kDebugSpectateLevelId) || m_launched || m_busy) return;
     auto& preparation = RankedLevelPreparation::get(); preparation.poll();
     auto* level = preparation.level();
     if (!level || !preparation.authorizes(level, preparationContext())) return;
+    log::info("[DebugSpectate] preparation metadata verified context={}", m_contextId);
+    if (preparation.adoptVerifiedSavedLevel(preparationContext())) {
+        level = preparation.level();
+        log::info("[DebugSpectate] using downloaded saved VOICE geometry");
+        tracePreparedLevel("debug-saved-launch", level);
+    }
+    // Ownership passes to LevelInfo BEFORE native construction/push. A popup
+    // close during scene teardown is not a user cancellation of that new owner.
+    m_launched = true;
     auto* scene = LevelInfoLayer::scene(level, false);
     if (!scene) { fail("CANNOT OPEN VERIFIED VOICE LEVELINFO"); return; }
-    m_launched = true;
     CCDirector::sharedDirector()->pushScene(CCTransitionFade::create(0.3f, scene));
 }
 void DebugSpectateRuntime::sceneEntered(int levelId) {
@@ -189,7 +197,13 @@ void DebugSpectateRuntime::exitScene() {
         closePlayback(); m_mode = DebugSpectateMode::None; m_token.clear(); m_contextId.clear(); ++m_generation;
     } else cancelRecording(); // Terminal/finalize drains asynchronously, including after quit.
 }
-void DebugSpectateRuntime::cancelPreparation() {
+void DebugSpectateRuntime::cancelPopupPreparation() {
+    if (m_launched) return; // LevelInfo Back/Cancel remains an explicit cancellation.
+    cancelPreparation("explicit popup cancel/back");
+}
+void DebugSpectateRuntime::cancelPreparation(char const* reason) {
+    if (m_mode == DebugSpectateMode::PreparingRecord || m_mode == DebugSpectateMode::PreparingPlayback)
+        log::info("[DebugSpectate] preparation cancelled reason={} id={}", reason, m_id);
     if ((m_mode == DebugSpectateMode::PreparingRecord || m_mode == DebugSpectateMode::PreparingPlayback) && m_token.empty()) {
         ++m_generation; m_mode = DebugSpectateMode::None; m_busy = false; return;
     }

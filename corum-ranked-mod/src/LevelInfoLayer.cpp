@@ -188,6 +188,21 @@ bool songsReady(GJGameLevel* level, CustomSongWidget* songWidget) {
     return true;
 }
 
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+bool debugSpectateSongFilesReady(GJGameLevel* level, CustomSongWidget* widget) {
+    // Jukebox may override pathForSong. A cached downloaded flag alone is not
+    // evidence that the effective file exists on this device. No NONG bypass.
+    if (!level || !widget) return false;
+    if (widget->m_isRobtopSong) return true;
+    auto* manager = MusicDownloadManager::sharedState();
+    if (!manager) return false;
+    auto ready = [manager](int id) { return manager->isResourceSong(id) || songFileExists(manager, id); };
+    if (widget->m_customSongID > 0) return ready(widget->m_customSongID);
+    for (auto id : collectSongIds(level)) if (!ready(id)) return false;
+    return true;
+}
+#endif
+
 bool isCurrentRankedLevel(GJGameLevel* level) {
     auto& runtime = corum::ranked::RankedRuntime::get();
     return
@@ -416,6 +431,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         bool introRevealStarted = false;
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         bool debugSpectateOwned = false, debugMapRequested = false, debugSongRequested = false, debugPlayRequested = false;
+        bool debugMapReady = false, debugSongReady = false;
 #endif
     };
 
@@ -433,6 +449,13 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
             if (!preparation.authorizes(level, context)) return false;
         }
         if (!LevelInfoLayer::init(level, challenge)) return false;
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+        if (m_fields->debugSpectateOwned) {
+            corum::ranked::tracePreparedLevel("debug-init-after", m_level, m_songWidget, this);
+            if (!preparation.adopt(m_level, context)) return false;
+            m_levelType = m_level->m_levelType;
+        }
+#endif
         if (ranked) {
             m_fields->rankedOwned = true;
             m_fields->context = context;
@@ -460,24 +483,44 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         }
         auto& preparation = corum::ranked::RankedLevelPreparation::get();
         if (!preparation.authorizes(m_level, debug.preparationContext()) || hasOpenModal(CCDirector::sharedDirector()->getRunningScene())) return;
-        if (!mapReady(m_level) || LevelInfoLayer::shouldDownloadLevel()) {
+        if (!mapReady(m_level)) {
             if (!m_fields->debugMapRequested) {
-                m_fields->debugMapRequested = true; LevelInfoLayer::downloadLevel();
+                m_fields->debugMapRequested = true;
+                log::info("[DebugSpectate] native geometry acquisition requested");
+                LevelInfoLayer::downloadLevel();
             }
             return;
         }
-        preparation.adopt(m_level, debug.preparationContext());
-        if (!songsReady(m_level, m_songWidget)) {
+        if (!preparation.adopt(m_level, debug.preparationContext())) return;
+        m_levelType = m_level->m_levelType;
+        if (!m_fields->debugMapReady) {
+            m_fields->debugMapReady = true;
+            log::info("[DebugSpectate] map ready");
+            corum::ranked::tracePreparedLevel("debug-map-ready", m_level, m_songWidget, this);
+        }
+        auto* music = MusicDownloadManager::sharedState();
+        auto const song = m_songWidget && m_songWidget->m_customSongID > 0 ?
+            m_songWidget->m_customSongID : m_level->m_songID;
+        auto const path = music && song > 0 ? std::string(music->pathForSong(song).c_str()) : std::string();
+        if (!songsReady(m_level, m_songWidget) || !debugSpectateSongFilesReady(m_level, m_songWidget)) {
             if (!m_fields->debugSongRequested && m_songWidget && m_songWidget->m_downloadBtn) {
-                m_fields->debugSongRequested = true; m_songWidget->m_downloadBtn->activate();
+                m_fields->debugSongRequested = true;
+                log::info("[DebugSpectate] song acquisition requested song={} path='{}' fileExists={} downloaded={} jukebox={}",
+                    song, path, songFileExists(music, song), music && music->isSongDownloaded(song), jukeboxLoaded());
+                m_songWidget->m_downloadBtn->activate();
             }
             return;
         }
-        if (m_fields->debugPlayRequested) return;
+        if (!m_fields->debugSongReady) {
+            m_fields->debugSongReady = true;
+            log::info("[DebugSpectate] song ready path='{}' song={}", path, song);
+        }
+        if (m_fields->debugPlayRequested || m_isBusy) return;
         m_fields->debugPlayRequested = true;
         unschedule(schedule_selector(CorumRankedLevelInfoLayer::prepareDebugSpectate));
         // Native Play keeps real downloaded GJGameLevel, song, objects and lifecycle.
         // DebugSpectateRuntime changes mode only inside that exact PlayLayer init.
+        log::info("[DebugSpectate] invoking vanilla Play");
         LevelInfoLayer::onPlay(nullptr);
     }
 #endif

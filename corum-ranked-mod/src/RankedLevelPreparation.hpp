@@ -26,6 +26,8 @@ public:
     GJGameLevel* level() const;
     bool authorizes(GJGameLevel* level, LevelPreparationContext const& context) const;
     bool adopt(GJGameLevel* level, LevelPreparationContext const& context);
+    // Online proof is required first; saved geometry never attests metadata.
+    bool adoptVerifiedSavedLevel(LevelPreparationContext const& context);
     bool busy() const { return m_ticket.busy(); }
     std::string const& error() const { return m_error; }
     std::uint64_t requestGeneration(char const* key) const;

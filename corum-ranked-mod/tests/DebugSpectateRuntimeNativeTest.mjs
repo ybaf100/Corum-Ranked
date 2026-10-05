@@ -24,11 +24,12 @@ test('actual native LevelInfo gate downloads VOICE and song without a fabricated
         return source.slice(start, end);
     };
     const helpers = ['bool mapReady(', 'std::vector<int> collectSongIds(', 'bool songFileExists(',
-        'bool songIdReady(', 'bool songsReady('].map(extract).join('\n');
+        'bool songIdReady(', 'bool songsReady(', 'bool debugSpectateSongFilesReady('].map(extract).join('\n');
     const cpp = `
 #include <cassert>
 #include <algorithm>
 #include <filesystem>
+#include <fstream>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -36,12 +37,13 @@ struct GJGameLevel {
     int m_levelID=88350599,m_songID=42;
     std::string m_levelString,m_songIDs;
     bool m_levelNotDownloaded=true;
+    int m_levelType=3;
 };
 struct Button {int requests=0;void activate(){++requests;}};
 struct CustomSongWidget {bool m_isRobtopSong=false;int m_customSongID=42;Button* m_downloadBtn=nullptr;};
 struct MusicDownloadManager {
-    bool ready=false;static MusicDownloadManager* sharedState(){static MusicDownloadManager m;return &m;}
-    std::string pathForSong(int)const{return {};}
+    bool ready=false;std::string path;static MusicDownloadManager* sharedState(){static MusicDownloadManager m;return &m;}
+    std::string pathForSong(int)const{return path;}
     bool isResourceSong(int)const{return false;}bool isSongDownloaded(int)const{return ready;}
 };
 namespace corum::ranked {
@@ -67,28 +69,36 @@ PreparationContext currentPreparationContext(){
 struct RankedLevelPreparation {
     bool proof=true;static RankedLevelPreparation& get(){static RankedLevelPreparation p;return p;}
     bool authorizes(GJGameLevel* l,PreparationContext c)const{return proof&&l&&l->m_levelID==c.levelId;}
-    void adopt(GJGameLevel*,PreparationContext){}
+    GJGameLevel* adopted=nullptr;
+    bool adopt(GJGameLevel* level,PreparationContext context){if(!authorizes(level,context))return false;adopted=level;return true;}
 };
+void tracePreparedLevel(char const*,GJGameLevel*,CustomSongWidget*,void*){}
 }
 ${helpers}
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
+namespace geode::log {template<class... T> void info(T...){} }
+using namespace geode;
+bool jukeboxLoaded(){return true;}
 struct CCDirector {static CCDirector* sharedDirector(){static CCDirector d;return &d;}void* getRunningScene(){return nullptr;}};
 bool modal=false;bool hasOpenModal(void*){return modal;}
 struct LevelInfoLayer {
     GJGameLevel* m_level=nullptr;CustomSongWidget* m_songWidget=nullptr;
+    int m_levelType=4;bool m_isBusy=false;
     int downloads=0,plays=0;
     bool shouldDownloadLevel()const{return m_level->m_levelNotDownloaded;}
     void downloadLevel(){++downloads;}void onPlay(void*){++plays;}
 };
 #define schedule_selector(x) 0
 struct CorumRankedLevelInfoLayer:LevelInfoLayer {
-    struct Fields {bool debugSpectateOwned=true,debugMapRequested=false,debugSongRequested=false,debugPlayRequested=false;} fields;
+    struct Fields {bool debugSpectateOwned=true,debugMapRequested=false,debugSongRequested=false,debugPlayRequested=false,debugMapReady=false,debugSongReady=false;} fields;
     Fields* m_fields=&fields;
     void unschedule(int){}
     ${extract('void prepareDebugSpectate(float)')}
 };
 #endif
-int main(){
+int main(int, char** argv){
+    MusicDownloadManager::sharedState()->path=argv[1];
+    std::filesystem::remove(argv[1]);
     GJGameLevel level;CustomSongWidget widget;Button button;widget.m_downloadBtn=&button;
     auto& ranked=corum::ranked::RankedRuntime::get();
     assert(!mapReady(&level));level.m_levelString="actual-downloaded-geometry";level.m_levelNotDownloaded=false;
@@ -102,18 +112,31 @@ int main(){
     CorumRankedLevelInfoLayer layer;layer.m_level=&level;layer.m_songWidget=&widget;
     layer.prepareDebugSpectate(0.1f);layer.prepareDebugSpectate(0.1f);
     assert(layer.downloads==1&&layer.plays==0&&button.requests==0);
-    level.m_levelString="actual-downloaded-geometry";level.m_levelNotDownloaded=false;
+    GJGameLevel downloaded=level;downloaded.m_levelString="actual-downloaded-geometry";downloaded.m_levelNotDownloaded=false;
+    layer.m_level=&downloaded; // Native callback replaces SearchResult with Saved.
     layer.prepareDebugSpectate(0.1f);layer.prepareDebugSpectate(0.1f);
     assert(layer.downloads==1&&layer.plays==0&&button.requests==1);
-    MusicDownloadManager::sharedState()->ready=true;modal=true;layer.prepareDebugSpectate(0.1f);assert(layer.plays==0);
+    MusicDownloadManager::sharedState()->ready=true;
+    layer.prepareDebugSpectate(0.1f);assert(layer.plays==0); // Stale downloaded flag, effective iOS/Jukebox file absent.
+    std::ofstream(argv[1])<<"native-song";
+    modal=true;layer.prepareDebugSpectate(0.1f);assert(layer.plays==0);
     modal=false;corum::ranked::RankedLevelPreparation::get().proof=false;layer.prepareDebugSpectate(0.1f);assert(layer.plays==0);
-    corum::ranked::RankedLevelPreparation::get().proof=true;layer.prepareDebugSpectate(0.1f);layer.prepareDebugSpectate(0.1f);
+    corum::ranked::RankedLevelPreparation::get().proof=true;
+    layer.m_isBusy=true;layer.prepareDebugSpectate(0.1f);assert(layer.plays==0);
+    layer.m_isBusy=false;layer.prepareDebugSpectate(0.1f);layer.prepareDebugSpectate(0.1f);
     assert(layer.plays==1&&ranked.current==0);
+    assert(corum::ranked::RankedLevelPreparation::get().adopted==&downloaded&&layer.m_levelType==downloaded.m_levelType);
+    auto requests=button.requests;
+    MusicDownloadManager::sharedState()->ready=false;
+    CorumRankedLevelInfoLayer saved;saved.m_level=&downloaded;saved.m_songWidget=&widget;
+    saved.prepareDebugSpectate(0.1f);saved.prepareDebugSpectate(0.1f);
+    assert(saved.plays==1&&saved.downloads==0&&button.requests==requests); // Saved geometry + existing effective file.
     debug.admitted=false;assert(!mapReady(&level));
     CorumRankedLevelInfoLayer rejected;rejected.m_level=&level;rejected.m_songWidget=&widget;
     rejected.prepareDebugSpectate(0.1f);assert(rejected.plays==0&&rejected.downloads==0);
     debug.admitted=true;level.m_levelID=123;rejected.prepareDebugSpectate(0.1f);assert(rejected.plays==0);
 #endif
+    std::filesystem::remove(argv[1]);
 }
 `;
     const dir = mkdtempSync(join(tmpdir(), 'corum-debug-level-gate-'));
@@ -123,8 +146,112 @@ int main(){
             const exe = join(dir, enabled ? 'debug' : 'official');
             execFileSync('g++', ['-std=c++23', '-Wall', '-Wextra', '-Wpedantic', '-Werror',
                 ...(enabled ? ['-DCORUM_RANKED_DEBUG_SPECTATE=1'] : []), file, '-o', exe], { stdio: 'pipe' });
-            execFileSync(exe);
+            execFileSync(exe, [join(dir, 'effective-jukebox-song.mp3')]);
         }
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('actual preparation attests online identity before adopting the native downloaded Saved pointer', () => {
+    const source = read('src/RankedLevelPreparation.cpp');
+    const extract = signature => {
+        const start = source.indexOf(signature);
+        assert(start >= 0, signature);
+        const open = source.indexOf('{', start);
+        let end = open + 1, depth = 1;
+        while (depth) {
+            if (source[end] === '{') ++depth;
+            else if (source[end] === '}') --depth;
+            ++end;
+        }
+        return source.slice(start, end);
+    };
+    const methods = ['LevelMetadata levelMetadata(', 'bool RankedLevelPreparation::authorizes(',
+        'GJGameLevel* RankedLevelPreparation::level()', 'bool RankedLevelPreparation::adopt(',
+        'bool RankedLevelPreparation::adoptVerifiedSavedLevel(',
+        'std::uint64_t RankedLevelPreparation::requestGeneration(', 'bool RankedLevelPreparation::finish()',
+        'void RankedLevelPreparation::loadLevelsFinished(CCArray* levels, char const* key)'].map(extract).join('\n');
+    const cpp = `
+#include "${join(root, 'src/domain/LevelPreparationPolicy.hpp')}"
+#include <cassert>
+#include <chrono>
+#include <functional>
+#include <vector>
+enum class GJLevelType {Saved=3,SearchResult=4,Local=2};
+struct GJGameLevel {
+    int m_levelID=88350599,m_userID=7540735,m_accountID=824772,m_songID=1184472,m_audioTrack=0,m_levelVersion=4;
+    std::string m_levelName="VOICE",m_creatorName="LiteN1ng",m_levelString;
+    GJLevelType m_levelType=GJLevelType::SearchResult;bool m_levelNotDownloaded=false;
+};
+namespace geode::log {template<class... T> void info(T...){} }
+namespace geode {template<class T> struct Ref {
+    T* value=nullptr;Ref()=default;Ref(T* p):value(p){}T* data()const{return value;}
+    T* operator->()const{return value;}explicit operator bool()const{return value!=nullptr;}
+    Ref& operator=(T* p){value=p;return *this;}
+};}
+using namespace geode;
+namespace corum::ranked {
+LevelPreparationContext current;
+LevelPreparationContext currentPreparationContext(){return current;}
+class RankedLevelPreparation {
+public:
+    LevelLookupTicket m_ticket;PreparedLevelProof m_proof;Ref<GJGameLevel> m_level;
+    std::string m_key,m_error;LevelPreparationContext m_waitContext;
+    bool authorizes(GJGameLevel*,LevelPreparationContext const&)const;
+    GJGameLevel* level()const;
+    bool adopt(GJGameLevel*,LevelPreparationContext const&);
+    bool adoptVerifiedSavedLevel(LevelPreparationContext const&);
+    std::uint64_t requestGeneration(char const*)const;
+    bool finish();void loadLevelsFinished(struct CCArray*,char const*);
+    void fail(char const*){assert(false&&"unexpected metadata failure");}
+};
+struct CCArray {std::vector<GJGameLevel*> values;unsigned count()const{return values.size();}GJGameLevel* objectAtIndex(unsigned i){return values.at(i);}};
+template<class T> T typeinfo_cast(GJGameLevel* p){return static_cast<T>(p);}
+struct GameLevelManager {
+    GJGameLevel* saved=nullptr;RankedLevelPreparation* m_levelManagerDelegate=nullptr;int queries=0;
+    static GameLevelManager* sharedState(){static GameLevelManager m;return &m;}
+    GJGameLevel* getSavedLevel(int id){++queries;return saved&&saved->m_levelID==id?saved:nullptr;}
+};
+std::string preparationContextText(LevelPreparationContext const& c){return c.matchId;}
+void tracePreparedLevel(char const*,GJGameLevel*){}
+${methods}
+}
+int main(){
+    using namespace corum::ranked;
+    current={"debug-record:server-scope",88350599,1,0,false,0,0};
+    auto* manager=GameLevelManager::sharedState();
+    GJGameLevel online,saved;saved.m_levelType=GJLevelType::Saved;saved.m_levelString="415604-bytes-native-payload";
+    manager->saved=&saved;
+    RankedLevelPreparation preparation;
+    assert(!preparation.adoptVerifiedSavedLevel(current)&&manager->queries==0); // Cache alone never attests.
+    assert(preparation.m_ticket.begin(current));preparation.m_key="online";
+    CCArray response{{&online}};preparation.loadLevelsFinished(&response,"online");
+    assert(preparation.level()==&online&&online.m_levelString.empty());
+    assert(preparation.adoptVerifiedSavedLevel(current)&&preparation.level()==&saved);
+    assert(preparation.m_proof.matches(current,levelMetadata(&online))); // Proof unchanged by replacement.
+    assert(online.m_levelString.empty()); // No raw geometry copy, Saved is the launch object.
+    std::vector<std::function<void(GJGameLevel&)>> mismatches={
+        [](auto& l){++l.m_levelID;},[](auto& l){l.m_levelName="other";},[](auto& l){l.m_creatorName="other";},
+        [](auto& l){l.m_userID=0;},[](auto& l){++l.m_accountID;},[](auto& l){++l.m_levelVersion;},
+        [](auto& l){++l.m_songID;},[](auto& l){++l.m_audioTrack;},
+        [](auto& l){l.m_levelType=GJLevelType::SearchResult;},[](auto& l){l.m_levelType=GJLevelType::Local;},
+        [](auto& l){l.m_levelString.clear();},[](auto& l){l.m_levelNotDownloaded=true;}};
+    for(auto const& mutate:mismatches){
+        assert(preparation.adopt(&online,current));auto wrong=saved;mutate(wrong);manager->saved=&wrong;
+        assert(!preparation.adoptVerifiedSavedLevel(current)&&preparation.level()==&online);
+    }
+    manager->saved=nullptr;assert(!preparation.adoptVerifiedSavedLevel(current));
+    auto downloaded=saved;assert(preparation.adopt(&downloaded,current)&&preparation.level()==&downloaded); // Native download replacement.
+    // Re-query the replacement saved pointer after online proof, not an earlier snapshot.
+    auto newer=saved;manager->saved=&newer;assert(preparation.adoptVerifiedSavedLevel(current)&&preparation.level()==&newer);
+    auto stale=current;stale.matchId="new-scope";current=stale;
+    assert(!preparation.adoptVerifiedSavedLevel(current)&&preparation.level()==nullptr);
+}
+`;
+    const dir = mkdtempSync(join(tmpdir(), 'corum-verified-saved-native-'));
+    try {
+        const file = join(dir, 'preparation.cpp'), exe = join(dir, 'preparation');writeFileSync(file, cpp);
+        execFileSync('g++', ['-std=c++23', '-Wall', '-Wextra', '-Wpedantic', '-Werror', file, '-o', exe], { stdio: 'pipe' });
+        execFileSync(exe);
     } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -138,6 +265,8 @@ test('actual Debug client builds HTTP requests, drains terminal/ACK retries, and
     const header = read('src/debug/DebugSpectateRuntime.hpp').replace(/^#include.*$|^#pragma once$/gm, '')
         .replace('private:', 'public: // Native-harness state fault injection only.');
     const source = read('src/debug/DebugSpectateRuntime.cpp').replace(/^#include.*$/gm, '');
+    const popupSource = read('src/debug/DebugSpectatePopup.cpp');
+    const popupClose = popupSource.slice(popupSource.indexOf('void onClose(CCObject* sender)'), popupSource.indexOf('\npublic:'));
     const cpp = `
 #define CORUM_RANKED_DEBUG_SPECTATE 1
 #include "${join(root, 'src/debug/DebugSpectatePolicy.hpp')}"
@@ -179,7 +308,8 @@ struct CCDirector {
     Scheduler* getScheduler(){return &scheduler;} void pushScene(Scene*){++pushed;}
 };
 struct GJGameLevel {int id=88350599;};
-struct LevelInfoLayer {static Scene* scene(GJGameLevel*,bool){static Scene s;return &s;}};
+inline std::function<void()> onSceneConstruction;
+struct LevelInfoLayer {inline static GJGameLevel* launched=nullptr;static Scene* scene(GJGameLevel* level,bool){launched=level;if(onSceneConstruction)onSceneConstruction();static Scene s;return &s;}};
 namespace geode::prelude {using namespace ::geode;namespace web=::geode::utils::web;}
 namespace corum::ranked {
 enum class RuntimeStage {Ready,Matched,Queued};
@@ -190,11 +320,13 @@ struct RankedRuntime {
     bool ownAlive=false;bool hasLocalGameplayAuthority()const{return ownAlive;}
 };
 struct RankedLevelPreparation {
-    GJGameLevel* ready=nullptr;int polls=0;
+    GJGameLevel* ready=nullptr;GJGameLevel* saved=nullptr;int polls=0;
     static RankedLevelPreparation& get(){static RankedLevelPreparation p;return p;}
     void poll(){++polls;}GJGameLevel* level()const{return ready;}
+    bool adoptVerifiedSavedLevel(LevelPreparationContext const&){if(!saved)return false;ready=saved;return true;}
     bool authorizes(GJGameLevel* level,LevelPreparationContext const& context)const{return level&&context.valid()&&level->id==context.levelId;}
 };
+void tracePreparedLevel(char const*,GJGameLevel*){}
 struct SpectatorLiveRuntime {
     std::string context,token,path;int starts=0,stops=0;
     static SpectatorLiveRuntime& get(){static SpectatorLiveRuntime l;return l;}
@@ -204,6 +336,9 @@ struct SpectatorLiveRuntime {
 }
 ${header}
 ${source}
+struct CCObject {};
+struct Popup {int closes=0;virtual ~Popup()=default;virtual void onClose(CCObject*){++closes;}};
+struct PopupCloseFixture:Popup {${popupClose}};
 void respond(int status,matjson::Value data={}) {
     using namespace geode::utils::web;
     assert(!pending.empty());auto item=pending.front();pending.erase(pending.begin());item.callback({status,data});
@@ -217,6 +352,7 @@ matjson::Value admission(bool playback){
 int main(){
     using namespace corum::ranked;using namespace corum::ranked::debug;using namespace geode::utils::web;
     auto& runtime=DebugSpectateRuntime::get();auto& ranked=RankedRuntime::get();
+    PopupCloseFixture popup;
     ranked.state.stage=RuntimeStage::Matched;runtime.start(true,"secret");assert(pending.empty());
     ranked.state.stage=RuntimeStage::Queued;runtime.start(false,"secret");assert(pending.empty());
     ranked.state.stage=RuntimeStage::Ready;ranked.ownAlive=true;runtime.start(false,"secret");assert(pending.empty());
@@ -226,8 +362,13 @@ int main(){
     assert(pending[0].operation.headers.at("Authorization")=="Bearer ranked-session");
     assert(pending[0].operation.headers.at("x-corum-debug-spectate")=="1");
     respond(201,admission(false));
-    GJGameLevel level;RankedLevelPreparation::get().ready=&level;runtime.tick();
+    GJGameLevel level,online;RankedLevelPreparation::get().ready=&online;RankedLevelPreparation::get().saved=&level;
+    onSceneConstruction=[&popup]{popup.onClose(nullptr);};
+    runtime.tick();onSceneConstruction={};
     assert(CCDirector::sharedDirector()->pushed==1);
+    assert(LevelInfoLayer::launched==&level&&LevelInfoLayer::launched!=&online);
+    assert(popup.closes==1);
+    runtime.cancelPopupPreparation();assert(runtime.mode()==DebugSpectateMode::PreparingRecord&&pending.empty());
     runtime.sceneEntered(123);assert(runtime.mode()==DebugSpectateMode::PreparingRecord);
     runtime.sceneEntered(88350599);assert(runtime.recordLevel(88350599)&&!runtime.playbackLevel(88350599));
     runtime.recordPose({100,50,0,false,false});assert(pending.size()==1);
@@ -257,6 +398,11 @@ int main(){
     assert(!pending[0].operation.body["completed"].asBool().unwrapOr(true));respond(201);
     runtime.start(true,"secret");matjson::Value absent;absent["message"]="NO RECORDED SPECTATE DATA";
     respond(404,absent);assert(runtime.mode()==DebugSpectateMode::None && runtime.status()=="NO RECORDED SPECTATE DATA");
+    runtime.start(false,"secret");respond(201,admission(false));popup.onClose(nullptr);
+    assert(pending[0].operation.url.ends_with("/finalize")&&!pending[0].operation.body["completed"].asBool().unwrapOr(true));respond(201);
+    runtime.start(false,"secret");respond(201,admission(false));runtime.tick();
+    runtime.cancelPopupPreparation();assert(runtime.mode()==DebugSpectateMode::PreparingRecord&&pending.empty());
+    runtime.cancelPreparation();assert(pending[0].operation.url.ends_with("/finalize")&&!pending[0].operation.body["completed"].asBool().unwrapOr(true));respond(201); // Explicit LevelInfo Back still cancels.
     // A previous expired/retried session must not poison the new HTTP admission.
     runtime.m_expireAt=std::chrono::steady_clock::now()-std::chrono::seconds(1);
     runtime.m_nextUploadAt=std::chrono::steady_clock::now()+std::chrono::minutes(1);

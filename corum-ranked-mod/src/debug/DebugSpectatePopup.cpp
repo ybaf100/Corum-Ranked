@@ -45,7 +45,7 @@ protected:
     void onRecord(CCObject*) { run(false); }
     void onTest(CCObject*) { run(true); }
     void onClose(CCObject* sender) override {
-        corum::ranked::debug::DebugSpectateRuntime::get().cancelPreparation(); Popup::onClose(sender);
+        corum::ranked::debug::DebugSpectateRuntime::get().cancelPopupPreparation(); Popup::onClose(sender);
     }
 public:
     static DebugSpectatePopup* create() {

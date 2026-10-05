@@ -77,6 +77,19 @@ bool RankedLevelPreparation::adopt(GJGameLevel* level, LevelPreparationContext c
     return true;
 }
 
+bool RankedLevelPreparation::adoptVerifiedSavedLevel(LevelPreparationContext const& context) {
+    // Re-query AFTER online attestation: native download may have replaced the
+    // cached pointer while the exact lookup was in flight. Retain the actual
+    // Saved object, never copy geometry into a SearchResult or synthesize a level.
+    if (!authorizes(m_level.data(), context)) return false;
+    auto* manager = GameLevelManager::sharedState();
+    auto* saved = manager ? manager->getSavedLevel(context.levelId) : nullptr;
+    if (!saved || saved->m_levelType != GJLevelType::Saved ||
+        saved->m_levelString.empty() || saved->m_levelNotDownloaded ||
+        !authorizes(saved, context)) return false;
+    return adopt(saved, context);
+}
+
 void RankedLevelPreparation::invalidate(LevelPreparationContext const& context) {
     if (m_ticket.busy() && m_ticket.context() == context) m_ticket.discard();
     if (m_proof.context() != context) return;

@@ -1,3 +1,10 @@
+## v0.5.0-beta.24
+
+- Keep fresh online VOICE attestation, then use the matching native downloaded Saved pointer for Debug Spectate launch instead of a geometry-empty SearchResult. Reject every identity mismatch; preserve vanilla download for absent geometry and normal Ranked entry behavior.
+- Wait for the effective MusicDownloadManager/Jukebox song file and native busy/modal readiness, skip existing-file acquisition, and automatically invoke vanilla Play. Add transition-only metadata/map/song/PlayLayer/recording diagnostics and cancellation reasons.
+- Separate popup cancellation from preparation ownership transferred to LevelInfo. Preserve explicit popup Cancel/LevelInfo Back incomplete finalization; exercise production native proof, download/replacement, song gate and runtime handoff regressions.
+- Synchronize mod/server exact gate to beta24; preserve server-backed recording, official Debug OFF and Phase 1–3 safety. iPadOS retest is still required; no manual Release or workflow rerun.
+
 ## v0.5.0-beta.23
 
 - Reset expired-session deadline and upload backoff before a fresh Debug Spectate HTTP admission, so an old scope cannot immediately cancel a new RECORD/TEST request.

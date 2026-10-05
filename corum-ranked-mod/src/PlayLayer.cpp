@@ -371,6 +371,8 @@ public:
         }
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         if (m_fields->debugRecordScene || m_fields->debugPlaybackScene) {
+            log::info("[DebugSpectate] PlayLayer entered level={}", m_fields->levelId);
+            if (m_fields->debugRecordScene) log::info("[DebugSpectate] RECORDING active");
             auto const size = CCDirector::sharedDirector()->getWinSize();
             m_fields->debugSpectateHud = label(debug.status(), "medium", 0.28f, {0.5f, 0.5f}, {size.width / 2.0f, size.height - 26.0f});
             addChild(m_fields->debugSpectateHud, 100);

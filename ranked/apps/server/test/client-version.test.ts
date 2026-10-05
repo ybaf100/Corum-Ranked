@@ -22,7 +22,7 @@ describe("Ranked client version gate", () => {
 
   it("accepts the same current version with or without a leading v", () => {
     expect(
-      evaluateRankedClientVersion("0.5.0-beta.23", [clientMod("0.5.0-beta.23")]).allowed,
+      evaluateRankedClientVersion("0.5.0-beta.24", [clientMod("0.5.0-beta.24")]).allowed,
     ).toBe(true);
   });
 
@@ -32,7 +32,7 @@ describe("Ranked client version gate", () => {
     ]);
     expect(result).toMatchObject({
       allowed: false,
-      requiredVersion: "v0.5.0-beta.23",
+      requiredVersion: "v0.5.0-beta.24",
       clientVersion: "v0.5.0-beta.8",
     });
   });
@@ -71,6 +71,9 @@ describe("Ranked client version gate", () => {
   });
   it("rejects beta22 after the beta23 fresh debug-scope deadline fix", () => {
     expect(evaluateRankedClientVersion("v0.5.0-beta.22", [clientMod("v0.5.0-beta.22")]).allowed).toBe(false);
+  });
+  it("rejects beta23 after the beta24 verified Saved Debug Spectate launch fix", () => {
+    expect(evaluateRankedClientVersion("v0.5.0-beta.23", [clientMod("v0.5.0-beta.23")]).allowed).toBe(false);
   });
 
   it("rejects when the active Corum Ranked mod snapshot is missing", () => {

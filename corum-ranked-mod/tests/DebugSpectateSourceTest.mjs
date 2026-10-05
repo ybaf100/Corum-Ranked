@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 const read = p => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
 const runtime = read('src/debug/DebugSpectateRuntime.cpp');
+const preparation = read('src/RankedLevelPreparation.cpp');
 const play = read('src/PlayLayer.cpp');
 const live = read('src/SpectatorLiveRuntime.cpp');
 const level = read('src/LevelInfoLayer.cpp');
@@ -32,6 +33,22 @@ test('TEST uses real HTTP viewer decoder/interpolation/renderer/camera; no local
     assert.match(play, /remotePlayer.cameraFrame\(\)/);
     assert.doesNotMatch(runtime, /applyPose|applyViewerResponse|interpolatedPose|setPosition|setRotation|ifstream|readFile|recordedFrames|playbackClock/);
     assert.doesNotMatch(play, /m_player1->set(?:Position|Rotation)\(/);
+});
+test('verified Saved adoption and scene handoff precede native scene creation without trusting cached identity', () => {
+    const adopt = preparation.slice(preparation.indexOf('bool RankedLevelPreparation::adoptVerifiedSavedLevel('), preparation.indexOf('void RankedLevelPreparation::invalidate('));
+    assert(adopt.indexOf('authorizes(m_level.data(), context)') < adopt.indexOf('manager->getSavedLevel(context.levelId)'));
+    for (const check of ['GJLevelType::Saved', 'm_levelString.empty()', 'm_levelNotDownloaded', 'authorizes(saved, context)', 'adopt(saved, context)']) assert(adopt.includes(check));
+    assert.doesNotMatch(adopt, /\.attest\(|m_levelString\s*=|GJGameLevel::create/);
+    const tick = runtime.slice(runtime.indexOf('void DebugSpectateRuntime::tick()'), runtime.indexOf('void DebugSpectateRuntime::sceneEntered('));
+    assert(tick.indexOf('preparation.poll()') < tick.indexOf('adoptVerifiedSavedLevel('));
+    assert(tick.indexOf('adoptVerifiedSavedLevel(') < tick.indexOf('LevelInfoLayer::scene('));
+    assert(tick.indexOf('m_launched = true') < tick.indexOf('LevelInfoLayer::scene('));
+    assert.match(read('src/debug/DebugSpectatePopup.cpp'), /cancelPopupPreparation\(\)/);
+    assert.match(runtime, /if \(m_launched\) return;/);
+    // Effective native/Jukebox path is required even if downloaded=true is stale.
+    assert.match(level, /bool debugSpectateSongFilesReady\(/);
+    assert.match(level, /!songsReady\(m_level, m_songWidget\) \|\| !debugSpectateSongFilesReady/);
+    for (const transition of ['preparation metadata verified', 'using downloaded saved VOICE geometry', 'map ready', 'song acquisition requested song=', 'song ready path=', 'invoking vanilla Play', 'PlayLayer entered', 'RECORDING active']) assert((runtime + level + play).includes(transition));
 });
 test('RECORD remains non-Ranked vanilla; TEST activates Phase-1 safety before init and cannot reopen Practice', () => {
     assert.match(play, /if \(m_fields->debugRecordScene \|\| m_fields->debugPlaybackScene\) return false/);

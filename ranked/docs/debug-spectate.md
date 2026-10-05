@@ -1,4 +1,10 @@
-# Server-backed Debug Spectate (beta22; lifecycle correction beta23)
+# Server-backed Debug Spectate (beta22; admission beta23; native launch beta24)
+
+Beta24 retains fresh online attestation, then re-queries the native Saved VOICE object for launch. Saved geometry is reused only when all immutable proof identity fields match, the object is genuinely Saved, geometry is non-empty and notDownloaded is false. Otherwise the attested online object follows vanilla download and verified native replacement. No unverified cache shortcut or geometry reconstruction is used.
+
+The Debug LevelInfo gate checks the effective MusicDownloadManager/Jukebox song path: existing files skip acquisition; absent files use the native song widget and wait for real readiness before vanilla Play. It also waits for native busy/modal state. Preparation ownership moves to LevelInfo before scene creation, so subsequent popup teardown cannot cancel it; explicit LevelInfo Back remains cancellable. Transition logs identify metadata, Saved adoption, map/song readiness, Play, successful PlayLayer entry and active recording, plus cancellation reasons.
+
+The supplied beta23 iPadOS log demonstrates the geometry-empty SearchResult / downloaded Saved pointer mismatch. It does not prove the song path was ready or identify the cancellation caller. Beta24 native-double regressions cover those boundaries; real-device RECORD → HUD → HTTP upload → persisted terminal verification is still required (see `corum-ranked-mod/BETA24-RELEASE.md`).
 
 Fresh RECORD/TEST admission clears the previous scope's deadline/upload backoff before issuing HTTP. The beta23 native runtime regression injects an expired prior scope and verifies it cannot cancel or delay a new recording scope.
 

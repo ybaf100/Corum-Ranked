@@ -16,7 +16,8 @@ public:
     void recordPose(SpectatorGhostPose const& pose, bool terminal = false);
     void cancelRecording();
     void exitScene();
-    void cancelPreparation();
+    void cancelPreparation(char const* reason = "explicit cancel/back");
+    void cancelPopupPreparation();
     bool recordLevel(int levelId) const;
     bool playbackLevel(int levelId) const;
     bool preparedLevel(int levelId) const;
