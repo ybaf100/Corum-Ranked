@@ -20,13 +20,13 @@ test('remote renderer cannot invoke scoring, physics, death, completion or camer
     assert.match(remote, /unscheduleAllSelectors\(\)/);
     assert.match(remote, /isolateNativeCompanions\(player, effectsRoot\)/);
     assert.match(remote, /discardNativeCompanions\(m_player.data\(\)\)/);
-    assert.match(remote, /if \(!frame \|\| !frame->pose\) \{\s*setVisible\(false\)/);
+    assert.match(remote, /if \(!frame \|\| !frame->pose\) \{\s*m_poseCurrent = false;\s*setVisible\(false\)/);
 });
 test('level and spectator exit clean up before vanilla teardown', () => {
-    assert.match(play, /void onQuit\(\) \{\s*m_fields->remotePlayer.cleanup\(\)/);
+    assert.match(play, /void onQuit\(\) \{\s*m_fields->spectatorPresentationRetired = true;\s*unschedule\([\s\S]*?cleanupSpectatorPresentation\(\)/);
     const exit = play.slice(play.indexOf('void onExit()'));
-    assert(exit.indexOf('remotePlayer.cleanup()') < exit.indexOf('PlayLayer::onExit()'));
-    assert.match(play, /remotePlayer.cleanup\(\);\s*live.reset\(\);\s*if \(!m_fields->autoExitRequested\) \{\s*m_fields->autoExitRequested = true;\s*onQuit\(\)/);
+    assert(exit.indexOf('cleanupSpectatorPresentation()') < exit.indexOf('PlayLayer::onExit()'));
+    assert.match(play, /cleanupSpectatorPresentation\(\);\s*live.reset\(\);\s*if \(!m_fields->autoExitRequested\)/);
     assert.match(read('src/spectator/CorumRemotePlayer.hpp'), /~CorumRemotePlayer\(\)/);
 });
 test('typed live frame preserves server identity and a local reset epoch', () => {

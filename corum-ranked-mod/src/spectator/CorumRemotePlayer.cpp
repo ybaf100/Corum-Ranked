@@ -99,6 +99,7 @@ bool CorumRemotePlayer::createVisual(PlayLayer* layer) {
 }
 
 void CorumRemotePlayer::destroyVisual() {
+    m_poseCurrent = false;
     auto const hadVisual = m_player.data() != nullptr || m_root.data() != nullptr;
     if (m_player) {
         m_player->unscheduleAllSelectors();
@@ -171,11 +172,13 @@ void CorumRemotePlayer::update(
     }
     if (!m_player) return;
     if (!frame || !frame->pose) {
+        m_poseCurrent = false;
         setVisible(false);
         return;
     }
     auto const decision = m_policy.acceptPose(frame->context, frame->sequence, *frame->pose);
     if (decision == SpectatorRemotePoseDecision::Rejected) {
+        m_poseCurrent = false;
         setVisible(false);
         if (!m_discardLogged) {
             log::warn("Stale or invalid spectator pose discarded");
@@ -193,6 +196,7 @@ void CorumRemotePlayer::update(
         }
     }
     // Dead hides; Finished holds its final pose. Neither invokes any GD lifecycle.
+    m_poseCurrent = true;
     setVisible(m_policy.state() != SpectatorRemoteState::Dead && m_policy.pose().has_value());
 }
 

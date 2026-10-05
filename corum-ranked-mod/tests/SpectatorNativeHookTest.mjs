@@ -129,8 +129,10 @@ int main() {
     assert(scene.deaths == 1 && runtime.ends == 1);
     scene.destroyPlayer(&other, nullptr);
     assert(scene.deaths == 2 && runtime.ends == 1);
+    scene.percent = 10; local.update(0.01f); other.update(0.01f);
+    assert(local.updates == 0 && other.updates == 1); // viewer freezes dummy immediately
     scene.percent = 99; local.update(0.01f); other.update(0.01f);
-    assert(local.updates == 0 && other.updates == 1);
+    assert(local.updates == 0 && other.updates == 2); // independent 99% backstop
     scene.percent = 100;
     scene.levelComplete(); scene.showCompleteText(); scene.checkForEnd();
     scene.playEndAnimationToPos({0, 0}); scene.playPlatformerEndAnimationToPos({0, 0}, true);

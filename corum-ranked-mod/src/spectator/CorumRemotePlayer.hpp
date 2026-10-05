@@ -23,6 +23,9 @@ public:
     );
     void cleanup();
     [[nodiscard]] PlayerObject* player() const { return m_player.data(); }
+    [[nodiscard]] std::optional<SpectatorRemoteFrame> cameraFrame() const {
+        return m_player && m_poseCurrent ? m_policy.renderedFrame() : std::nullopt;
+    }
 
 private:
     bool createVisual(PlayLayer* layer);
@@ -36,6 +39,7 @@ private:
     geode::Ref<PlayerObject> m_player;
     bool m_discardLogged = false;
     bool m_streamAttachedLogged = false;
+    bool m_poseCurrent = false;
 };
 
 } // namespace corum::ranked

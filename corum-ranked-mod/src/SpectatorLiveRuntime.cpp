@@ -375,9 +375,9 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
     }
     auto const resetStream = root["reset"].asBool().unwrapOr(false);
     auto const streamChanged = attemptId != m_viewAttemptId || generation != m_viewGeneration;
-    if (m_status == SpectatorLiveStatus::Fallback && !streamChanged && !resetStream) {
-        return;
-    }
+    // A timeout/network gap does not permanently poison this generation.
+    // Fresh contiguous packets may recover it, through ALL the same validators.
+    // Replayed sequences/empty replies cannot revive a timed-out pose.
     if (streamChanged || resetStream) {
         ++m_viewPresentationEpoch;
         if (m_viewPresentationEpoch == 0) ++m_viewPresentationEpoch;
@@ -493,6 +493,7 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
             largestCorrection
         );
     }
+    if (!m_currentPose && m_status == SpectatorLiveStatus::Fallback && !streamChanged && !resetStream) return;
     m_status = m_currentPose ? SpectatorLiveStatus::Live : SpectatorLiveStatus::Waiting;
     m_reason = m_currentPose ? std::string() : "STREAM_BUFFER_EMPTY";
 }

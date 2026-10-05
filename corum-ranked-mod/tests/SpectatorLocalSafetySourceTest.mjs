@@ -114,7 +114,8 @@ test('pending handoff blocks transport before vanilla reset without enabling ear
 
 test('Phase 1 never overwrites local dummy pose with opponent and preserves polling HUD', () => {
     const update = body(play, 'void postUpdate(float dt)');
-    const spectator = update.slice(update.indexOf('if (m_fields->spectatorMode)'), update.indexOf('if (m_fields->spectatorPending)'));
+    assert.match(update, /if \(m_fields->spectatorMode\) \{[\s\S]*?return;/);
+    const spectator = body(play, 'void updateSpectatorView(float dt)');
     assert.doesNotMatch(spectator, /m_player1->setPosition\(|m_player1->setRotation\(|m_player1->setVisible\(true\)/);
     assert.match(spectator, /localSafety\.active\(\)/);
     assert.match(spectator, /remotePlayer\.update/);

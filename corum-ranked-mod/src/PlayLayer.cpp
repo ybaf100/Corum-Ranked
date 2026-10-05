@@ -6,6 +6,8 @@
 #include "domain/RankedGameplayPolicy.hpp"
 #include "domain/SpectatorLocalSafety.hpp"
 #include "spectator/CorumRemotePlayer.hpp"
+#include "spectator/CorumSpectatorCamera.hpp"
+#include "spectator/SpectatorSceneBridge.hpp"
 #include "domain/TransitionTrace.hpp"
 #include "domain/RenderFpsMeter.hpp"
 #include "ui/PlayerIcon.hpp"
@@ -17,6 +19,7 @@
 #include <Geode/modify/PlayLayer.hpp>
 #include <Geode/modify/PlayerObject.hpp>
 #include <Geode/modify/GJGameLevel.hpp>
+#include <Geode/modify/GJBaseGameLayer.hpp>
 
 #include <algorithm>
 #include <array>
@@ -188,6 +191,10 @@ public:
         bool safetyRetired = false;
         bool vanillaGameplayEndInProgress = false;
         corum::ranked::CorumRemotePlayer remotePlayer;
+        corum::ranked::CorumSpectatorCamera spectatorCamera;
+        corum::ranked::SpectatorSceneContext sceneContext;
+        bool spectatorScenePrepared = false;
+        bool spectatorPresentationRetired = false;
     };
 
     static void onModify(auto& self) {
@@ -249,7 +256,10 @@ public:
         if (frozen && !wasFrozen) {
             log::info("Spectator local dummy frozen at 99% boundary: level={}", m_fields->levelId);
         }
-        return frozen;
+        // Phase 3 freezes the exact dummy immediately once scene setup is done.
+        // The independent Phase-1 99% boundary remains a backstop for setup and
+        // large steps; neither path pauses the world, remote renderer or relay.
+        return frozen || (m_fields->rankedInitialized && m_fields->localSafety.active());
     }
 
     bool blocksLevelPersistence(GJGameLevel* level) {
@@ -289,6 +299,7 @@ public:
         m_fields->rankedLevel =
             runtime.view().stage == corum::ranked::RuntimeStage::Matched &&
             runtime.isGameplayLevel(m_fields->levelId);
+        m_fields->sceneContext = currentSpectatorSceneContext();
         // Establish authority BEFORE vanilla init's reset/attempt callbacks.
         syncSpectatorLocalSafety();
         ScopedPersistenceOwner persistence(this);
@@ -331,7 +342,127 @@ public:
         m_fields->attemptJournalReadyAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
         m_fields->attemptStartReported = false;
         m_fields->attemptEndReported = false;
+        // Scene-owned presentation heartbeat also runs after vanilla completion
+        // has stopped gameplay postUpdate. It cannot create gameplay evidence.
+        schedule(schedule_selector(CorumRankedPlayLayer::spectatorFrame));
         return true;
+    }
+
+    corum::ranked::SpectatorSceneContext currentSpectatorSceneContext() const {
+        auto& runtime = corum::ranked::RankedRuntime::get();
+        auto const& match = runtime.view().match;
+        return {match.matchId, match.roundNumber, match.deathmatchSequence, runtime.currentLevelId()};
+    }
+
+    bool watchableSpectatorScene() const {
+        auto& runtime = corum::ranked::RankedRuntime::get();
+        return corum::ranked::spectatorSceneWatchable(
+            runtime.view().stage == corum::ranked::RuntimeStage::Matched,
+            m_fields->sceneContext, currentSpectatorSceneContext(), runtime.view().match.state
+        );
+    }
+
+    bool prepareSpectatorScene() {
+        syncSpectatorLocalSafety();
+        auto& runtime = corum::ranked::RankedRuntime::get();
+        if (!m_fields->rankedInitialized || m_fields->spectatorPresentationRetired || !m_fields->localSafety.active() ||
+            !runtime.isSpectating() || !watchableSpectatorScene() ||
+            m_fields->vanillaGameplayEndInProgress) return false;
+        if (m_fields->spectatorScenePrepared) return true;
+        ScopedPersistenceOwner persistence(this);
+        // Capture the real viewport BEFORE vanilla reset clears completion/death
+        // presentation. Waiting never follows the reset dummy or teleports to 0.
+        m_fields->spectatorCamera.update(this, true, std::nullopt, std::nullopt);
+        m_fields->spectatorScenePrepared = true;
+        if (m_hasCompletedLevel || (m_player1 && m_player1->m_isDead)) {
+            m_fields->localSafety.resetDummy();
+            PlayLayer::resetLevel();
+        }
+        if (m_player1) {
+            m_player1->stopAllActions();
+            m_player1->setVisible(false);
+        }
+        log::info("Spectator mode activated in existing PlayLayer: match={} level={}",
+            m_fields->sceneContext.matchId, m_fields->levelId);
+        return true;
+    }
+
+    void driveSpectatorCamera() {
+        if (!m_fields->spectatorScenePrepared) return;
+        auto& runtime = corum::ranked::RankedRuntime::get();
+        auto const active = !m_fields->spectatorPresentationRetired && !m_fields->autoExitRequested &&
+            m_fields->localSafety.active() && runtime.isSpectating() && watchableSpectatorScene();
+        auto const frame = corum::ranked::SpectatorLiveRuntime::get().presentationFrame();
+        m_fields->spectatorCamera.update(this, active,
+            frame ? std::optional(frame->context) : std::nullopt,
+            m_fields->remotePlayer.cameraFrame());
+    }
+
+    void cleanupSpectatorPresentation() {
+        // Release ownership before destroying its visual or native scene state.
+        m_fields->spectatorCamera.cleanup(this);
+        m_fields->remotePlayer.cleanup();
+    }
+
+    void updateSpectatorView(float dt) {
+        auto& runtime = corum::ranked::RankedRuntime::get();
+        auto& live = corum::ranked::SpectatorLiveRuntime::get();
+        live.tickPublisher({}, true);
+        if (!runtime.isSpectating() || !watchableSpectatorScene()) {
+            cleanupSpectatorPresentation();
+            live.reset();
+            if (!m_fields->autoExitRequested) {
+                m_fields->autoExitRequested = true;
+                log::info("Spectator mode exited: authority/context no longer watchable");
+                if (!corum::ranked::quitThroughRankedCompletionOverlay(this)) onQuit();
+            }
+            return;
+        }
+        if (!prepareSpectatorScene()) return;
+        if (m_player1) m_player1->setVisible(false);
+        (void)freezeLocalDummy(m_player1);
+        live.tickViewer();
+        m_fields->remotePlayer.update(
+            this, runtime.isSpectating() && m_fields->localSafety.active(), live.presentationFrame()
+        );
+        driveSpectatorCamera();
+        // Native postUpdate may be stopped by the genuine prior Clear. Continue
+        // applying the native world camera without simulating a Ranked Attempt.
+        GJBaseGameLayer::updateCamera(dt);
+        auto const now = std::chrono::steady_clock::now();
+        if (runtime.view().revision != m_fields->renderedRevision || now >= m_fields->nextHudRefreshAt) {
+            updateRankedHud();
+            m_fields->nextHudRefreshAt = now + std::chrono::milliseconds(100);
+        }
+    }
+
+    void spectatorFrame(float dt) {
+        if (!m_fields->rankedInitialized || m_fields->safetyRetired ||
+            m_fields->spectatorPresentationRetired || m_fields->autoExitRequested ||
+            m_isTestMode || m_fields->vanillaGameplayEndInProgress) return;
+        auto& runtime = corum::ranked::RankedRuntime::get();
+        if (!m_fields->spectatorMode && !m_fields->spectatorPending &&
+            !m_fields->attemptEndReported && !runtime.isSpectating()) return;
+        runtime.tick();
+        syncSpectatorLocalSafety();
+        if (m_fields->spectatorMode) {
+            updateSpectatorView(dt);
+            return;
+        }
+        // An ended terminal Attempt waits for authority in THIS scene. Ordinary
+        // deaths with another legal Attempt, Placement and user Practice do not.
+        if (m_fields->attemptEndReported && !runtime.hasLocalGameplayAuthority() &&
+            !runtime.canEnterCurrentLevel() && !runtime.isPlacement() &&
+            !m_fields->rankedPractice && !m_isPracticeMode && watchableSpectatorScene()) {
+            m_fields->spectatorPending = true;
+            syncSpectatorLocalSafety();
+        }
+        // Completion overlays own their canonical result exit (onMenu); don't
+        // tear out the PlayLayer from underneath an interactive overlay.
+        if (m_fields->spectatorPending && !watchableSpectatorScene() && !m_hasCompletedLevel) {
+            m_fields->autoExitRequested = true;
+            onQuit();
+        }
     }
 
     void postUpdate(float dt) {
@@ -350,41 +481,12 @@ public:
         m_fields->fpsMeter.observeFrame(steadyNowMicros());
 
         if (m_fields->spectatorMode) {
-            auto& live = corum::ranked::SpectatorLiveRuntime::get();
-            live.tickPublisher({}, true);
-            if (m_hasCompletedLevel || (m_player1 && m_player1->m_isDead)) {
-                resetLevel();
-            }
-            // m_player1 remains a hidden LOCAL dummy. Only the separate visual
-            // PlayerObject below consumes opponent telemetry; camera is Phase 3.
-            if (m_player1) m_player1->setVisible(false);
-            (void)freezeLocalDummy(m_player1);
-            if (!spectatorTransitionState(runtime.view().match.state) ||
-                runtime.currentLevelId() != m_fields->levelId) {
-                m_fields->remotePlayer.cleanup();
-                live.reset();
-                if (!m_fields->autoExitRequested) {
-                    m_fields->autoExitRequested = true;
-                    onQuit();
-                }
-                return;
-            }
-            live.tickViewer();
-            m_fields->remotePlayer.update(
-                this, runtime.isSpectating() && m_fields->localSafety.active(),
-                live.presentationFrame()
-            );
-            if (
-                runtime.view().revision != m_fields->renderedRevision ||
-                now >= m_fields->nextHudRefreshAt
-            ) {
-                updateRankedHud();
-                m_fields->nextHudRefreshAt = now + std::chrono::milliseconds(100);
-            }
+            // Presentation heartbeat owns viewer updates even when genuine
+            // completion has stopped vanilla gameplay updates.
             return;
         }
 
-        m_fields->remotePlayer.cleanup();
+        cleanupSpectatorPresentation();
         if (m_fields->spectatorPending) {
             auto const& matchState = runtime.view().match.state;
             if (!spectatorTransitionState(matchState) || runtime.currentLevelId() != m_fields->levelId) {
@@ -513,7 +615,10 @@ public:
         syncSpectatorLocalSafety();
         ScopedPersistenceOwner persistence(this);
         if (blocksLocalEvidence()) {
-            m_fields->remotePlayer.cleanup();
+            // Once converted, manual/automatic Retry must not restart even a
+            // dummy simulation or destroy the acquired spectator viewport.
+            if (m_fields->spectatorScenePrepared) return;
+            cleanupSpectatorPresentation();
             m_fields->localSafety.resetDummy();
             PlayLayer::resetLevel();
             if (m_player1) m_player1->setVisible(false);
@@ -667,7 +772,9 @@ public:
     }
 
     void onQuit() {
-        m_fields->remotePlayer.cleanup();
+        m_fields->spectatorPresentationRetired = true;
+        unschedule(schedule_selector(CorumRankedPlayLayer::spectatorFrame));
+        cleanupSpectatorPresentation();
         syncSpectatorLocalSafety();
         ScopedPersistenceOwner persistence(this);
         ScopedRealGameplayEnd finishing(
@@ -700,8 +807,10 @@ public:
     }
 
     void onExit() {
+        m_fields->spectatorPresentationRetired = true;
+        unschedule(schedule_selector(CorumRankedPlayLayer::spectatorFrame));
         ScopedPersistenceOwner persistence(this);
-        m_fields->remotePlayer.cleanup();
+        cleanupSpectatorPresentation();
         if (m_fields->spectatorMode || m_fields->spectatorPending) {
             corum::ranked::SpectatorLiveRuntime::get().reset();
         }
@@ -1444,7 +1553,9 @@ public:
         m_fields->timerLabel->setColor(urgent ? corum::ranked::ui::Red : corum::ranked::ui::Text);
         m_fields->stateLabel->setColor(urgent ? corum::ranked::ui::Red : corum::ranked::ui::Gold);
 
-        m_fields->spectatorPanel->setVisible(presentation.spectatorVisible);
+        auto const spectatorVisible = m_fields->spectatorMode && m_fields->localSafety.active() &&
+            runtime.isSpectating() && presentation.spectatorVisible;
+        m_fields->spectatorPanel->setVisible(spectatorVisible);
         if (m_fields->opponentProgressGroup) {
             m_fields->opponentProgressGroup->setVisible(presentation.opponentProgressVisible);
         }
@@ -1463,13 +1574,23 @@ public:
             }
             m_fields->spectatorPanel->setVisible(false);
         }
-        if (presentation.spectatorVisible) {
+        if (spectatorVisible) {
             setHudText(m_fields->spectatorNameLabel, presentation.spectatorOpponentText);
-            setHudText(m_fields->spectatorProgressLabel, presentation.spectatorProgressText);
+            auto const status = corum::ranked::SpectatorLiveRuntime::get().status();
+            setHudText(m_fields->spectatorProgressLabel,
+                status == corum::ranked::SpectatorLiveStatus::Fallback ? "POLLING..." :
+                m_fields->spectatorCamera.state() == corum::ranked::SpectatorCameraState::Waiting ?
+                    "WAITING..." : presentation.spectatorProgressText);
+            limitHudWidth(m_fields->spectatorProgressLabel, 72.0f, 0.34f, 0.16f);
             setHudText(m_fields->spectatorTimerLabel, presentation.timerText);
         }
     }
 };
+
+bool corum::ranked::prepareSpectatorScene(PlayLayer* layer) {
+    if (!layer || layer != PlayLayer::get()) return false;
+    return static_cast<CorumRankedPlayLayer*>(layer)->prepareSpectatorScene();
+}
 
 namespace {
 CorumRankedPlayLayer* localSafetyLayer() {
@@ -1477,6 +1598,23 @@ CorumRankedPlayLayer* localSafetyLayer() {
     return layer ? static_cast<CorumRankedPlayLayer*>(layer) : nullptr;
 }
 } // namespace
+
+// Native forced-camera ownership, not player pointer/pose swapping. The exact
+// current scene's controller is inert for every ordinary gameplay mode.
+class $modify(CorumRankedSpectatorCameraHook, GJBaseGameLayer) {
+    static void onModify(auto& self) {
+        if (!self.setHookPriorityPre("GJBaseGameLayer::updateCamera", Priority::First)) {
+            log::warn("Failed to install spectator camera priority");
+        }
+    }
+    void updateCamera(float dt) {
+        auto* layer = PlayLayer::get();
+        if (layer && static_cast<GJBaseGameLayer*>(layer) == this) {
+            static_cast<CorumRankedPlayLayer*>(layer)->driveSpectatorCamera();
+        }
+        GJBaseGameLayer::updateCamera(dt);
+    }
+};
 
 // Stop only the dummy's own physics at the completion boundary. Do not pause
 // PlayLayer/world/relay updates: a distinct Phase-2 remote player must be free

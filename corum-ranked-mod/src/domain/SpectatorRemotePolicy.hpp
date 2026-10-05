@@ -95,6 +95,10 @@ public:
     }
     [[nodiscard]] SpectatorRemoteState state() const { return m_state; }
     [[nodiscard]] std::optional<SpectatorGhostPose> const& pose() const { return m_pose; }
+    [[nodiscard]] std::optional<SpectatorRemoteFrame> renderedFrame() const {
+        if (!m_context || !m_pose) return std::nullopt;
+        return SpectatorRemoteFrame{*m_context, m_sequence, m_pose};
+    }
 
 private:
     std::optional<SpectatorRemoteContext> m_context;

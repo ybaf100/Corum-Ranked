@@ -1,3 +1,11 @@
+## v0.5.0-beta.20
+
+- Spectator Phase 3 adds same-PlayLayer authority-gated handoff and a presentation heartbeat that survives stopped vanilla completion updates. A live local Attempt, Placement or user Practice cannot enter spectator camera mode.
+- Follow the dedicated Remote Player with native forced X/Y camera targets, without moving/swapping local `m_player1`. The hidden local dummy freezes immediately after conversion; all Phase 1 noclip, 99%/completion, evidence and exact-level record guards remain independent.
+- Hold the real viewport while waiting/timeout, show compact WAITING/POLLING status, resume only on validated fresh packets, and release camera/remote/live state on authority loss, result, context change or exit. Same-generation timeout recovery retains all existing stream/sequence validators.
+- Add pure camera/context policy tests, actual scene/decoder callback harnesses, and a two-client mock compiling complete production renderer + camera; preserve Phase 1/2 regressions. Device two-client E2E and complex trigger/platformer parity remain unverified.
+- Synchronize the exact mod/server gate to beta20 and reject beta19. No scoring/DB/protocol redesign, manual Release or workflow rerun.
+
 ## v0.5.0-beta.19
 
 - Fix native GD CCPoint/CCSize overloaded assignment ambiguity in remote pose caches using explicit CCPoint values. Extend the complete production-renderer harness with the native-style overload.

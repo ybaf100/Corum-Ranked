@@ -122,8 +122,8 @@ test('metadata recovery cancels competing return/launch callbacks and waits for 
 });
 
 test('live spectator path is read-only and keeps polling fallback', () => {
-    const update = body(play, 'void postUpdate(float dt)', 'void resetLevel()');
-    const spectatorBranch = body(update, 'if (m_fields->spectatorMode) {', 'if (m_fields->spectatorPending) {');
+    const spectatorBranch = body(play, 'void updateSpectatorView(float dt)', 'void spectatorFrame(float dt)');
+    assert.match(play, /schedule\(schedule_selector\(CorumRankedPlayLayer::spectatorFrame\)\)/);
     assert.match(spectatorBranch, /m_player1->setVisible\(false\)/);
     assert.doesNotMatch(spectatorBranch, /m_player1->setPosition\(|m_player1->setRotation\(|m_player1->setVisible\(true\)/);
     assert.match(spectatorBranch, /remotePlayer\.update/);

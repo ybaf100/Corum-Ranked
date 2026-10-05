@@ -10,7 +10,7 @@ const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 
 // Compile the COMPLETE production renderer translation unit. These observable
 // native lifecycle doubles verify ownership/control flow, not GD ABI or visuals.
-test('production Remote Player owns a separate visual and cleans up its native lifecycle', () => {
+test('production Remote Player + camera follow two-client presentation without local gameplay writes', () => {
     const dir = mkdtempSync(join(tmpdir(), 'corum-remote-native-'));
     try {
         mkdirSync(join(dir, 'Geode/binding'), { recursive: true });
@@ -59,8 +59,13 @@ struct CCNode: CCObject {
     void setRotation(float r) { rotation=r; ++rotationWrites; }
     void setVisible(bool b) { visible=b; }
     int getZOrder() const { return z; }
+    float getScale() const { return 1.0f; }
 };
 struct CCLayer: CCNode { static CCLayer* create() { auto* p=new CCLayer; p->autorelease(); return p; } };
+struct CCDirector {
+    static CCDirector* sharedDirector() { static CCDirector d; return &d; }
+    CCSize getWinSize() const { return {600,300}; }
+};
 }
 namespace geode {
 template<class T> class Ref {
@@ -98,15 +103,30 @@ struct PlayerObject: cocos2d::CCNode {
     }
     void setColor(cocos2d::Color) {} void setSecondColor(cocos2d::Color) {}
 };
-struct PlayLayer {
-    cocos2d::CCLayer* m_objectLayer=nullptr; PlayerObject* m_player1=nullptr;
+struct GJBaseGameLayer {
+    struct GameState {
+        bool m_unkBool4=false,m_unkBool5=false;
+        float m_unkInt13=0;
+        cocos2d::CCPoint m_cameraPosition{};
+        void stopTweenAction(int) {}
+    } m_gameState;
+    int cameraUpdates=0;
+    void cameraMoveX(float x,float,float,bool) { m_gameState.m_unkBool4=true; m_gameState.m_cameraPosition.x=x; }
+    void cameraMoveY(float y,float,float,bool) {
+        m_gameState.m_unkBool5=true; m_gameState.m_unkInt13=y; m_gameState.m_cameraPosition.y=y;
+    }
+    void updateCamera(float) { ++cameraUpdates; }
+    cocos2d::CCLayer* m_objectLayer=nullptr;
+};
+struct PlayLayer: GJBaseGameLayer {
+    PlayerObject* m_player1=nullptr;
     PlayerObject* m_player2=nullptr; GJGameLevel* m_level=nullptr;
     // No reset/death/completion/Attempt methods: production renderer must not
     // invoke them. An accidental gameplay dependency fails this compilation.
 };
 `;
         writeFileSync(join(dir, 'Geode/Geode.hpp'), header);
-        for (const name of ['PlayLayer', 'PlayerObject', 'GJGameLevel', 'GhostTrailEffect', 'HardStreak']) {
+        for (const name of ['PlayLayer', 'GJBaseGameLayer', 'PlayerObject', 'GJGameLevel', 'GhostTrailEffect', 'HardStreak']) {
             writeFileSync(join(dir, `Geode/binding/${name}.hpp`), '#include <Geode/Geode.hpp>\n');
         }
         // Verify the double actually reproduces the native overload failure.
@@ -115,6 +135,8 @@ struct PlayLayer {
             '-o', join(dir, 'ambiguous.o')], { stdio: 'pipe' }), error => /ambiguous/.test(error.stderr.toString()));
         writeFileSync(join(dir, 'test.cpp'), `
 #include "${join(root, 'src/spectator/CorumRemotePlayer.hpp')}"
+#include "${join(root, 'src/spectator/CorumSpectatorCamera.hpp')}"
+#include "${join(root, 'src/domain/SpectatorLocalSafety.hpp')}"
 #include <iostream>
 using namespace corum::ranked; using namespace cocos2d;
 int main() {
@@ -125,8 +147,15 @@ int main() {
     local.setPosition({11,22}); local.setRotation(33);
     SpectatorRemoteFrame f{{"match",1,0,123,"attempt",1,1},0,std::nullopt};
     CorumRemotePlayer remote;
+    CorumSpectatorCamera camera;
+    auto drive=[&](bool authorized) {
+        camera.update(&layer,authorized,f.context,remote.cameraFrame()); layer.updateCamera(0.01f);
+    };
+    layer.m_gameState.m_cameraPosition=CCPoint{150,20};
+    drive(false); assert(!camera.ownsCamera() && layer.m_gameState.m_cameraPosition.x==150);
     remote.update(&layer,false,f); assert(!remote.player() && PlayerObject::creates==0);
     remote.update(&layer,true,f); auto* first=remote.player(); assert(first && first!=&local && first!=&other && !first->visible);
+    drive(true); assert(camera.state()==SpectatorCameraState::Waiting && layer.m_gameState.m_cameraPosition.x==150);
     CCObject::drain();
     for(int i=0;i<1000;++i)remote.update(&layer,true,f);
     assert(PlayerObject::creates==1 && remote.player()==first);
@@ -134,16 +163,38 @@ int main() {
     assert(first->position.x==50 && first->position.y==70 && first->rotation==90 && first->visible);
     assert(first->unschedules>0 && !first->m_regularTrail->visible);
     assert(local.position.x==11 && local.position.y==22 && local.rotation==33 && local.positionWrites==1);
+    // Mock Client A telemetry -> B's COMPLETE production renderer + camera.
+    PlayerObject clientA; clientA.setPosition({1000,400}); clientA.setRotation(120);
+    f.pose=SpectatorGhostPose{clientA.position.x,clientA.position.y,clientA.rotation,false,false}; ++f.sequence;
+    remote.update(&layer,true,f); drive(true);
+    assert(remote.player()->position.x==1000 && layer.m_gameState.m_cameraPosition.x==790);
+    assert(layer.m_gameState.m_cameraPosition.y==265 && local.positionWrites==1 && local.rotationWrites==1);
+    local.setPosition({9000,9000}); drive(true);
+    assert(layer.m_gameState.m_cameraPosition.x==790); // dummy cannot steer camera
+    // Stale/rejected/no packet never exposes a renderer target to the camera.
+    auto saved=f; --f.sequence; remote.update(&layer,true,f); drive(true);
+    assert(!remote.cameraFrame() && camera.state()==SpectatorCameraState::Waiting);
+    f=saved; f.pose.reset(); remote.update(&layer,true,f); drive(true);
+    assert(!first->visible && layer.m_gameState.m_cameraPosition.x==790);
+    f=saved; f.pose->x=1100; ++f.sequence; remote.update(&layer,true,f); drive(true);
+    assert(layer.m_gameState.m_cameraPosition.x==890); // recovered stream
+    f.pose=SpectatorGhostPose{50,70,90,false,false}; ++f.sequence; remote.update(&layer,true,f);
     f.pose->dead=true; ++f.sequence; remote.update(&layer,true,f); assert(!first->visible && first->m_isDead);
+    drive(true); assert(camera.state()==SpectatorCameraState::Terminal);
     f.pose->dead=false; f.pose->x=200; ++f.sequence; remote.update(&layer,true,f);
     assert(!first->visible && first->position.x==50);
+    drive(true); assert(layer.m_gameState.m_cameraPosition.x==0); // frozen DEAD renderer, not later pose
     geode::Ref<PlayerObject> old(first); ++f.context.epoch;
     remote.update(&layer,true,f); assert(remote.player()!=first && !first->parent && !first->m_regularTrail);
     auto* second=remote.player(); f.pose->finished=true; f.pose->x=300; ++f.sequence;
     remote.update(&layer,true,f); assert(second->visible && second->position.x==300);
     f.pose->x=400; ++f.sequence; remote.update(&layer,true,f); assert(second->position.x==300);
+    drive(true); assert(layer.m_gameState.m_cameraPosition.x==90); // terminal camera matches rendered pose
     f.pose.reset(); remote.update(&layer,true,f); assert(!second->visible);
     remote.update(&layer,false,f); assert(!remote.player() && world->children.empty());
+    camera.cleanup(&layer); camera.cleanup(&layer);
+    assert(!camera.ownsCamera() && !layer.m_gameState.m_unkBool4 && !layer.m_gameState.m_unkBool5);
+    assert(layer.m_gameState.m_cameraPosition.x==150);
     remote.cleanup(); remote.cleanup();
     PlayerObject::fail=true; ++f.context.generation; remote.update(&layer,true,f);
     auto creates=PlayerObject::creates; for(int i=0;i<20;++i)remote.update(&layer,true,f);
@@ -153,7 +204,7 @@ int main() {
     // Simulated parent teardown before wrapper cleanup; retained visual/root
     // ownership prevents use-after-free. Cleanup removes all owned companions.
     worldOwner=nullptr; layer.m_objectLayer=nullptr; remote.cleanup(); CCObject::drain();
-    assert(local.position.x==11 && local.rotation==33);
+    assert(local.position.x==9000 && local.rotation==33);
   }
   CCObject::drain(); assert(CCObject::alive==0);
   std::cout << "production remote lifecycle/pose/ownership scenarios passed\\n";
@@ -161,7 +212,8 @@ int main() {
 `);
         const binary = join(dir, 'test');
         execFileSync('g++', ['-std=c++23', '-Wall', '-Wextra', '-Wpedantic', '-Werror', '-I', dir,
-            join(root, 'src/spectator/CorumRemotePlayer.cpp'), join(dir, 'test.cpp'), '-o', binary], { stdio: 'pipe' });
+            join(root, 'src/spectator/CorumRemotePlayer.cpp'), join(root, 'src/spectator/CorumSpectatorCamera.cpp'),
+            join(dir, 'test.cpp'), '-o', binary], { stdio: 'pipe' });
         assert.match(execFileSync(binary, { encoding: 'utf8' }), /scenarios passed/);
     } finally { rmSync(dir, { recursive: true, force: true }); }
 });

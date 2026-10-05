@@ -93,11 +93,18 @@ jobs:
             corum-ranked-mod/tests/SpectatorRemotePolicyTest.cpp \
             -o /tmp/corum-ranked-spectator-remote-test
           /tmp/corum-ranked-spectator-remote-test
+          g++ -std=c++23 -Wall -Wextra -Wpedantic -Werror \
+            corum-ranked-mod/tests/SpectatorCameraPolicyTest.cpp \
+            -o /tmp/corum-ranked-spectator-camera-test
+          /tmp/corum-ranked-spectator-camera-test
           node --test corum-ranked-mod/tests/AchievementSourceTest.mjs
           node --test corum-ranked-mod/tests/SpectatorLocalSafetySourceTest.mjs
           node --test corum-ranked-mod/tests/SpectatorNativeHookTest.mjs
           node --test corum-ranked-mod/tests/SpectatorRemoteSourceTest.mjs
           node --test corum-ranked-mod/tests/SpectatorRemoteNativeTest.mjs
+          node --test corum-ranked-mod/tests/SpectatorCameraSourceTest.mjs
+          node --test corum-ranked-mod/tests/SpectatorSceneNativeTest.mjs
+          node --test corum-ranked-mod/tests/SpectatorLiveViewerNativeTest.mjs
 
   build:
     name: ${{ matrix.config.name }} Debug ${{ needs.metadata.outputs.version }}

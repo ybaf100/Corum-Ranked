@@ -1,4 +1,5 @@
 #include "RankedRuntime.hpp"
+#include "spectator/SpectatorSceneBridge.hpp"
 
 #include <Geode/Geode.hpp>
 #include <Geode/modify/EndLevelLayer.hpp>
@@ -6,6 +7,8 @@
 using namespace geode::prelude;
 
 namespace {
+
+WeakRef<EndLevelLayer> rankedCompletionOverlay;
 
 bool authoritativeExitState(std::string const& state) {
     return
@@ -49,6 +52,7 @@ class $modify(CorumRankedEndLevelLayer, EndLevelLayer) {
                 runtime.isGameplayLevel(levelId)
             );
         if (m_fields->rankedLevel) {
+            rankedCompletionOverlay = WeakRef<EndLevelLayer>(this);
             schedule(schedule_selector(CorumRankedEndLevelLayer::watchRankedExit), 0.10f);
         }
     }
@@ -60,15 +64,17 @@ class $modify(CorumRankedEndLevelLayer, EndLevelLayer) {
         runtime.tick();
         auto const& state = runtime.view().match.state;
         if (runtime.isSpectating()) {
+            // Reset may remove the overlay: retain this callback's owner first.
+            Ref<EndLevelLayer> retained(this);
+            if (!corum::ranked::prepareSpectatorScene(m_playLayer)) return;
             m_fields->rankedExitRequested = true;
             unschedule(schedule_selector(CorumRankedEndLevelLayer::watchRankedExit));
             log::info(
                 "Closing Ranked completion overlay for live spectator handoff: state={}",
                 state
             );
-            // Keep the canonical PlayLayer alive. The spectator path resets the
-            // completed player as a hidden, non-scoring LOCAL dummy. Separate
-            // remote rendering belongs to Phase 2; no Attempt API is invoked.
+            // Same canonical PlayLayer: hidden frozen dummy, dedicated remote
+            // renderer and scene-owned camera heartbeat. No Attempt is armed.
             removeFromParentAndCleanup(true);
             return;
         }
@@ -91,6 +97,8 @@ class $modify(CorumRankedEndLevelLayer, EndLevelLayer) {
         if (m_fields->rankedLevel) {
             auto& runtime = corum::ranked::RankedRuntime::get();
             if (runtime.isSpectating()) {
+                Ref<EndLevelLayer> retained(this);
+                if (!corum::ranked::prepareSpectatorScene(m_playLayer)) return;
                 m_fields->rankedExitRequested = true;
                 unschedule(schedule_selector(CorumRankedEndLevelLayer::watchRankedExit));
                 removeFromParentAndCleanup(true);
@@ -115,3 +123,10 @@ class $modify(CorumRankedEndLevelLayer, EndLevelLayer) {
         EndLevelLayer::onMenu(sender);
     }
 };
+
+bool corum::ranked::quitThroughRankedCompletionOverlay(PlayLayer* layer) {
+    auto overlay = rankedCompletionOverlay.lock();
+    if (!overlay || !overlay->getParent() || overlay->m_playLayer != layer) return false;
+    overlay->onMenu(nullptr);
+    return true;
+}

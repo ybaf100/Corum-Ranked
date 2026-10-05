@@ -1,5 +1,13 @@
 # Corum Ranked Live Spectator Protocol v1
 
+## Phase 3 client viewer (beta20)
+
+The existing protocol/HTTP cadence is unchanged. Only after the real local Attempt ends and existing server spectator authority is confirmed does the same PlayLayer become a viewer scene. A presentation heartbeat survives stopped vanilla completion updates and removes the completed overlay via an authority-gated same-scene bridge. Local `m_player1` is invisible/frozen and never receives remote pose/camera substitutions; all Phase-1 scoring/transport/completion/99%/vanilla-record guards remain.
+
+The dedicated Phase-2 Remote Player supplies an accepted render frame to a separate camera controller. Native forced X/Y camera targets follow basic classic remote motion; native updateCamera retains transform ownership. No pose/timeout means a held safe viewport, hidden/waiting remote and compact Corum-font WAITING/POLLING status, not a local-avatar or (0,0) fallback. Fresh same-generation packets may recover timeout through unchanged identity/sequence/finite-pose validators; replayed/empty replies cannot revive stale presentation. Interpolation remains bounded.
+
+Authority loss, result/cancel, match/round/map/DM-sequence changes and scene exit release camera/remote/live state before native teardown; a converted scene never returns to scoring. Remote dead/finished are presentation-only. Mock two-client/native-body checks do not certify real Geometry Dash device E2E or complex camera-trigger/platformer parity. See `corum-ranked-mod/BETA20-RELEASE.md` for the exact pending device checklist and Phase 4–6 boundaries.
+
 Status: **Phase 1 local-dummy safety in beta17; Phase 2 dedicated remote Cube presentation in beta18, native CCPoint compile correction in beta19. Camera/entry E2E remains Phase 3. Native-device gameplay quality is not yet certified.**
 
 ## Phase 2 client presentation (beta18)
