@@ -1,3 +1,12 @@
+## v0.5.0-beta.22
+
+- Add development-only RECORD SPECTATE / TEST SPECTATE for fixed VOICE (88350599), using verified native GD preparation/download and normal vanilla recording gameplay.
+- Record the production 50 ms pose cadence through HTTP, preserve death/Clear terminal frames and persist a bounded recording in an isolated PostgreSQL debug domain with one bulk finalize transaction. Retry/finalize are idempotent; incomplete data is not TEST eligible.
+- Server-owned playback clock starts with the in-scene HTTP viewer WAITING handshake, feeds the production SpectatorLiveService buffer/response, and uses the same client decoder, bounded interpolation, dedicated Remote Player and native remote camera. No local replay clock/frame file/injection and no synthetic Ranked Match.
+- Keep Phase 1 dummy noclip/99%/completion/Attempt/Practice/New Best/save guards and Phase 2 separate PlayerObject. Debug data never awards rating, LP/MMR, statistics, achievements/AP/titles or Placement results.
+- Opt-in server flag/password/scoped expiring tokens; Debug CI flag ON, official client flag/UI/API code OFF. Add real HTTP + disk-persistent PostgreSQL restart tests, strict recorder/native runtime tests and Debug ON/OFF native scene/decoder/safety regressions.
+- Exact mod/server gate advances to beta22. Native-device RECORD/TEST E2E and two-client gameplay E2E still require device QA. No manual Release or failed-workflow rerun.
+
 ## v0.5.0-beta.21
 
 - Correct the Phase-3 watchability helper's const qualifier: Geode Modify's m_fields accessor is non-const. This fixes beta20 native compile failure, not an infrastructure/quota failure.

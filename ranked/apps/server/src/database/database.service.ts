@@ -27,6 +27,7 @@ const REQUIRED_MIGRATIONS = [
   "0008_placement_beta9.sql",
   "0009_placement_stage_count.sql",
   "0010_achievements_v1.sql",
+  "0011_debug_spectate.sql",
 ] as const;
 
 export interface RankedSchemaStatus {

@@ -30,7 +30,7 @@ interface SessionRow {
 export class SessionGuard implements CanActivate {
   public constructor(
     @Inject(DATABASE) private readonly database: DatabasePort,
-    private readonly tokens: TokenService,
+    @Inject(TokenService) private readonly tokens: TokenService,
   ) {}
 
   public async canActivate(context: ExecutionContext): Promise<boolean> {

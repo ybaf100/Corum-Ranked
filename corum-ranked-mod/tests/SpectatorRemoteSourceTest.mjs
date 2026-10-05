@@ -12,7 +12,8 @@ test('only the dedicated PlayerObject receives interpolated remote pose', () => 
     assert.match(remote, /m_player->setPosition\(\{pose.x, pose.y\}\)/);
     assert.match(remote, /m_player->setRotation\(pose.rotation\)/);
     assert.doesNotMatch(play, /m_player1->set(?:Position|Rotation)\(/);
-    assert.match(play, /remotePlayer.update\([\s\S]*?runtime.isSpectating\(\) && m_fields->localSafety.active\(\)/);
+    assert.match(play, /auto spectatorAuthority = runtime.isSpectating\(\)/);
+    assert.match(play, /remotePlayer.update\([\s\S]*?spectatorAuthority && m_fields->localSafety.active\(\)/);
     assert.match(play, /live.presentationFrame\(\)/);
 });
 test('remote renderer cannot invoke scoring, physics, death, completion or camera', () => {

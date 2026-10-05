@@ -1,5 +1,8 @@
 #include "RankedLevelPreparation.hpp"
 #include "RankedRuntime.hpp"
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+#include "debug/DebugSpectateRuntime.hpp"
+#endif
 #include <Geode/binding/CustomSongWidget.hpp>
 #include <Geode/binding/GJGameLevel.hpp>
 #include <Geode/binding/GJSearchObject.hpp>
@@ -10,6 +13,10 @@ using namespace geode::prelude;
 namespace corum::ranked {
 
 LevelPreparationContext currentPreparationContext() {
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+    auto const debugContext = debug::DebugSpectateRuntime::get().preparationContext();
+    if (debugContext.valid()) return debugContext;
+#endif
     auto const& runtime = RankedRuntime::get();
     auto const& view = runtime.view();
     if (view.stage != RuntimeStage::Matched) return {};
@@ -107,6 +114,9 @@ void RankedLevelPreparation::poll() {
     if (now - m_waitStartedAt >= std::chrono::seconds(30) && !m_timeoutReported) {
         m_timeoutReported = true;
         m_error = "GD METADATA TIMEOUT - RETRYING WHEN AVAILABLE";
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+        if (!debug::DebugSpectateRuntime::get().preparationContext().valid())
+#endif
         RankedRuntime::get().reportMapDownloadFailure();
     }
     if (m_ticket.busy()) {

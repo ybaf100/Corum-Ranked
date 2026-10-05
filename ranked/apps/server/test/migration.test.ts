@@ -17,6 +17,7 @@ const migrationNames = [
   "0008_placement_beta9.sql",
   "0009_placement_stage_count.sql",
   "0010_achievements_v1.sql",
+  "0011_debug_spectate.sql",
 ] as const;
 
 const migrationSql = async (migrationName: string): Promise<string> => {
@@ -44,6 +45,8 @@ describe("PostgreSQL migration", () => {
       "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename",
     );
     expect(result.rows.map((row) => row.tablename)).toEqual([
+      "debug_spectate_frames",
+      "debug_spectate_recordings",
       "ranked_achievement_events",
       "ranked_achievement_metrics",
       "ranked_achievement_unlocks",

@@ -19,7 +19,8 @@ test('same-scene viewer heartbeat owns entry/exit independently of stopped vanil
     assert.match(play, /schedule\(schedule_selector\(CorumRankedPlayLayer::spectatorFrame\)\)/);
     assert.doesNotMatch(play, /bool watchableSpectatorScene\(\) const/);
     assert.match(play, /if \(!prepareSpectatorScene\(\)\) return/);
-    assert.match(play, /if \(!runtime.isSpectating\(\) \|\| !watchableSpectatorScene\(\)\)/);
+    assert.match(play, /auto spectatorAuthority = runtime.isSpectating\(\)/);
+    assert.match(play, /if \(!spectatorAuthority \|\| !watchableSpectatorScene\(\)\)/);
     assert.match(play, /m_fields->spectatorScenePrepared\) return/);
     assert.match(play, /frozen \|\| \(m_fields->rankedInitialized && m_fields->localSafety.active\(\)\)/);
     assert.match(end, /Ref<EndLevelLayer> retained\(this\);\s*if \(!corum::ranked::prepareSpectatorScene\(m_playLayer\)\) return;/);

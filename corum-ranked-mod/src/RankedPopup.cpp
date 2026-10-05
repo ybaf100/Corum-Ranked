@@ -3,6 +3,9 @@
 #include "RankedRuntime.hpp"
 #include "RankedAudioManager.hpp"
 #include "DebugBotPopup.hpp"
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+#include "debug/DebugSpectateRuntime.hpp"
+#endif
 #include "RankedSongGate.hpp"
 #include "RankedLevelPreparation.hpp"
 #include "domain/PlacementStageMerge.hpp"
@@ -2103,6 +2106,11 @@ class CorumRankedLayer final : public CCLayerColor {
             addButton("DEBUG BOT MATCH", {96.0f, 30.0f}, menu_selector(CorumRankedLayer::onDebugBot), true, 0.54f);
         }
 #endif
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+        if (view.stage == RuntimeStage::Ready) {
+            addButton("DEBUG SPECTATE", {96.0f, 62.0f}, menu_selector(CorumRankedLayer::onDebugSpectate), true, 0.50f);
+        }
+#endif
 
         auto detail = view.error.empty() ? view.status : view.error;
         if (!m_localMessage.empty()) detail = m_localMessage;
@@ -4117,6 +4125,11 @@ class CorumRankedLayer final : public CCLayerColor {
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
     void onDebugBot(CCObject*) {
         corum::ranked::showDebugBotPasswordPopup();
+    }
+#endif
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+    void onDebugSpectate(CCObject*) {
+        corum::ranked::debug::showDebugSpectatePopup();
     }
 #endif
 

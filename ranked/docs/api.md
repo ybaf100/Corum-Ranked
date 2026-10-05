@@ -22,6 +22,10 @@ visible Ranked Score, 표시 tier, placement/promotion 상태, 강등 경고와 
 알 수 있는 값은 `null`입니다. `/ready`의 `ready`와 `publicDataReady`는 공개 DB API
 readiness, `rankedReady`는 DB + 유효 config + `enabled=true`인 매치 readiness입니다.
 
+## Debug Spectate (beta22, default OFF)
+
+Development-only fixed VOICE recording and server-clock spectator playback use isolated scoped APIs under `/api/ranked/debug/spectate`. See [Debug Spectate API / auth / persistence / production transport](debug-spectate.md). They do not create Ranked Match/Attempt/result/rating authority. Official clients exclude the UI/API code.
+
 ## Session
 
 `POST /api/ranked/session`

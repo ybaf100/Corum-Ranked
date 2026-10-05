@@ -37,6 +37,7 @@ test('production native safety hook bodies execute through death/completion/save
     const saves = [method('void savePercentage('), method('void saveNewScore(')].join('\n');
     const cpp = `
 #include "${join(root, 'src/domain/SpectatorLocalSafety.hpp')}"
+#include "${join(root, 'src/domain/SpectatorRemotePolicy.hpp')}"
 #include "${join(root, 'src/domain/RankedGameplayPolicy.hpp')}"
 #include <algorithm>
 #include <cassert>
@@ -48,7 +49,11 @@ namespace geode::log { template<class... T> void info(T...) {} }
 using namespace geode;
 struct CCPoint { float x, y; };
 struct GameObject { int m_uniqueID = 0; };
-struct PlayerObject { int updates = 0; void setVisible(bool) {} void update(float) { ++updates; } };
+struct PlayerObject {
+    int updates = 0; bool m_isDead=false;
+    void setVisible(bool) {} void update(float) { ++updates; }
+    CCPoint getPosition()const{return {100,50};} float getRotation()const{return 0;}
+};
 struct GJGameLevel {
     int best = 41, scores = 0;
     void savePercentage(int p, bool, int, int, bool) { best = std::max(best, p); }
@@ -62,7 +67,7 @@ struct PlayLayer {
     bool m_isTestMode = false, m_isPracticeMode = false;
     int deaths = 0, completions = 0, checks = 0, texts = 0, animations = 0, endLayers = 0, newBest = 0;
     double percent = 0;
-    void destroyPlayer(PlayerObject*, GameObject*) { ++deaths; persist(m_level, int(percent)); }
+    void destroyPlayer(PlayerObject* player, GameObject*) { ++deaths; if(player)player->m_isDead=true; persist(m_level, int(percent)); }
     void levelComplete() { ++completions; persist(m_level, 100); }
     void showCompleteText() { ++texts; }
     void checkForEnd() { ++checks; }
@@ -72,6 +77,16 @@ struct PlayLayer {
     void showNewBest(bool, int, int, bool, bool, bool) { ++newBest; }
 };
 namespace corum::ranked {
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+namespace debug {
+struct DebugSpectateRuntime {
+    bool authorized=false;int terminals=0;
+    static DebugSpectateRuntime& get(){static DebugSpectateRuntime d;return d;}
+    bool playbackLevel(int id)const{return authorized && id==88350599;}
+    void recordPose(SpectatorGhostPose const&,bool terminal){terminals+=terminal;}
+};
+}
+#endif
 struct RankedRuntime {
     bool serverSpectator = false, ownAlive = true, placement = false;
     void const* owner = nullptr;
@@ -99,6 +114,9 @@ struct CorumRankedPlayLayer : PlayLayer {
         bool suppressedDeathLogged = false, suppressedCompletionLogged = false, suppressedSaveLogged = false;
         int levelId = 123; double qualifyingPercent = 50;
         corum::ranked::SpectatorLocalSafety localSafety;
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+        bool debugRecordScene=false,debugPlaybackScene=false;
+#endif
     };
     std::unique_ptr<Fields> m_fields = std::make_unique<Fields>();
     ${callbacks}
@@ -112,6 +130,7 @@ void persist(GJGameLevel* level, int percent) {
 }
 int main() {
     using corum::ranked::RankedRuntime;
+    using namespace corum::ranked;
     auto& runtime = RankedRuntime::get();
     PlayerHook local, other;
     SaveHook level, unrelated;
@@ -153,6 +172,26 @@ int main() {
     normal.showNewBest(false, 0, 0, false, false, false);
     assert(normal.completions == 1 && normal.texts == 1 && normal.checks == 1 && normal.newBest == 1);
     assert(normalLevel.best == 100 && runtime.clears == 1 && local.updates == 1);
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+    runtime={};debug::DebugSpectateRuntime::get().authorized=true;
+    CorumRankedPlayLayer viewer; SaveHook protectedLevel;
+    currentLayer=&viewer;viewer.m_level=&protectedLevel;viewer.m_player1=&local;
+    viewer.m_fields->rankedLevel=false;viewer.m_fields->debugPlaybackScene=true;viewer.m_fields->levelId=88350599;
+    viewer.syncSpectatorLocalSafety();
+    viewer.percent=100;viewer.destroyPlayer(&local,nullptr);viewer.levelComplete();viewer.showCompleteText();
+    viewer.checkForEnd();viewer.playEndAnimationToPos({0,0});viewer.showEndLayer();
+    viewer.showNewBest(false,0,0,false,false,false);protectedLevel.savePercentage(100,false,0,0,true);
+    protectedLevel.saveNewScore(100,0,0,0,0,"",true);
+    assert(viewer.deaths==0 && viewer.completions==0 && viewer.texts==0 && viewer.newBest==0);
+    assert(protectedLevel.best==41 && protectedLevel.scores==0 && runtime.ends==0 && runtime.clears==0);
+    local.update(0.01f);assert(viewer.freezeLocalDummy(&local));
+    CorumRankedPlayLayer recorder;SaveHook realRecordLevel;
+    currentLayer=&recorder;recorder.m_level=&realRecordLevel;recorder.m_player1=&local;
+    recorder.m_fields->rankedLevel=false;recorder.m_fields->debugRecordScene=true;recorder.m_fields->levelId=88350599;
+    recorder.percent=73;recorder.destroyPlayer(&local,nullptr);
+    assert(recorder.deaths==1 && !recorder.m_fields->localSafety.active() && realRecordLevel.best==73);
+    assert(debug::DebugSpectateRuntime::get().terminals==1 && runtime.ends==0 && runtime.clears==0);
+#endif
 }
 `;
     const dir = mkdtempSync(join(tmpdir(), 'corum-native-safety-'));
@@ -161,6 +200,9 @@ int main() {
         const binary = join(dir, 'hooks');
         writeFileSync(file, cpp);
         execFileSync('g++', ['-std=c++23', '-Wall', '-Wextra', '-Wpedantic', '-Werror', file, '-o', binary], { stdio: 'pipe' });
+        execFileSync(binary, [], { stdio: 'pipe' });
+        execFileSync('g++', ['-std=c++23', '-Wall', '-Wextra', '-Wpedantic', '-Werror',
+            '-DCORUM_RANKED_DEBUG_SPECTATE=1', file, '-o', binary], { stdio: 'pipe' });
         execFileSync(binary, [], { stdio: 'pipe' });
     } finally {
         rmSync(dir, { recursive: true, force: true });

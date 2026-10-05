@@ -132,7 +132,7 @@ const optionalFiniteNumber = (value: unknown): number | undefined =>
 const optionalString = (value: unknown): string | undefined =>
   typeof value === "string" && value.length <= 32 ? value : undefined;
 
-const parseKeyframe = (value: unknown): SpectatorPoseKeyframe => {
+export const parseSpectatorKeyframe = (value: unknown): SpectatorPoseKeyframe => {
   if (!isRecord(value)) throw new BadRequestException("keyframe is required");
   const x = finiteNumber(value.x, "keyframe.x");
   const y = finiteNumber(value.y, "keyframe.y");
@@ -211,7 +211,7 @@ const parsePacket = (value: unknown, matchId: string): SpectatorLivePacket => {
     sequence: integer(value.sequence, "sequence", 0),
     elapsedMs: integer(value.elapsedMs, "elapsedMs", 0),
     inputEdges: parseInputEdges(value.inputEdges),
-    keyframe: parseKeyframe(value.keyframe),
+    keyframe: parseSpectatorKeyframe(value.keyframe),
   };
 };
 
@@ -311,15 +311,7 @@ export class SpectatorLiveService {
       throw new ConflictException("SPECTATOR_SEQUENCE_GAP");
     }
 
-    const buffered: BufferedPacket = { ...packet, receivedAtMs: nowMs };
-    stream.lastSequence = packet.sequence;
-    stream.lastReceivedAtMs = nowMs;
-    stream.packets.push(buffered);
-    const cutoff = nowMs - SPECTATOR_LIVE_BUFFER_MS;
-    stream.packets = stream.packets.filter((item) => item.receivedAtMs >= cutoff);
-    if (stream.packets.length > SPECTATOR_LIVE_MAX_PACKETS) {
-      stream.packets.splice(0, stream.packets.length - SPECTATOR_LIVE_MAX_PACKETS);
-    }
+    this.appendPacket(stream, packet, nowMs);
     return {
       accepted: true,
       protocolVersion: SPECTATOR_LIVE_PROTOCOL_VERSION,
@@ -400,6 +392,58 @@ export class SpectatorLiveService {
       return this.fallback("STREAM_TIMEOUT");
     }
 
+    return this.readStream(key, stream, context.roundNumber, context.deathmatchSequence,
+      state.spectator.opponentName ?? "Opponent", attemptId, generationText, afterSequenceText);
+  }
+
+  // Internal authorization/context adapter for the isolated Recorded Publisher.
+  // No MatchService, Attempt, profile, score or outbox operation is invoked here.
+  public publishRecorded(packet: SpectatorLivePacket, nowMs: number): void {
+    if (!packet.matchId.startsWith("debug-spectate:") || packet.protocolVersion !== SPECTATOR_LIVE_PROTOCOL_VERSION) {
+      throw new BadRequestException("INVALID_RECORDED_CONTEXT");
+    }
+    const key = `recorded:${packet.matchId}`;
+    let stream = this.streams.get(key);
+    if (!stream || stream.generation !== packet.generation || stream.attemptId !== packet.attemptId) {
+      if (stream && packet.generation < stream.generation) throw new ConflictException("SPECTATOR_STALE_GENERATION");
+      if (packet.sequence !== 0) throw new ConflictException("SPECTATOR_STREAM_MUST_START_AT_SEQUENCE_ZERO");
+      stream = { matchId: packet.matchId, slot: 1, side: "A", attemptId: packet.attemptId,
+        generation: packet.generation, lastSequence: -1, lastReceivedAtMs: nowMs, packets: [] };
+      this.streams.set(key, stream);
+    }
+    if (packet.sequence !== stream.lastSequence + 1) throw new ConflictException("SPECTATOR_SEQUENCE_GAP");
+    this.appendPacket(stream, packet, nowMs);
+  }
+
+  public subscribeRecorded(contextId: string, nowMs: number, protocolVersionText?: string,
+    attemptId?: string, generationText?: string, afterSequenceText?: string): SpectatorLiveSubscribeResponse {
+    if (protocolVersionText !== undefined && queryInteger(protocolVersionText) !== SPECTATOR_LIVE_PROTOCOL_VERSION) {
+      return this.fallback("UNSUPPORTED_PROTOCOL_VERSION");
+    }
+    const key = `recorded:${contextId}`;
+    const stream = this.streams.get(key);
+    if (!stream) return { ...this.fallback("STREAM_NOT_READY"), waiting: true, fallback: false };
+    const terminal = stream.packets.at(-1)?.keyframe;
+    if (!terminal?.dead && !terminal?.finished && nowMs - stream.lastReceivedAtMs > SPECTATOR_LIVE_TIMEOUT_MS) {
+      return this.fallback("STREAM_TIMEOUT");
+    }
+    return this.readStream(key, stream, 1, null, "VOICE Recorded Publisher", attemptId,
+      generationText, afterSequenceText);
+  }
+
+  private appendPacket(stream: LiveStream, packet: SpectatorLivePacket, nowMs: number): void {
+    stream.lastSequence = packet.sequence;
+    stream.lastReceivedAtMs = nowMs;
+    stream.packets.push({ ...packet, receivedAtMs: nowMs });
+    stream.packets = stream.packets.filter((item) => item.receivedAtMs >= nowMs - SPECTATOR_LIVE_BUFFER_MS);
+    if (stream.packets.length > SPECTATOR_LIVE_MAX_PACKETS) {
+      stream.packets.splice(0, stream.packets.length - SPECTATOR_LIVE_MAX_PACKETS);
+    }
+  }
+
+  private readStream(key: string, stream: LiveStream, roundNumber: number, deathmatchSequence: number | null,
+    opponentName: string, attemptId?: string, generationText?: string,
+    afterSequenceText?: string): SpectatorLiveSubscribeResponse {
     const requestedGeneration = queryInteger(generationText);
     const afterSequence = queryInteger(afterSequenceText);
     const hasStreamIdentity = Boolean(attemptId) && requestedGeneration !== null;
@@ -439,13 +483,13 @@ export class SpectatorLiveService {
       bufferWindowMs: SPECTATOR_LIVE_BUFFER_MS,
       maxPackets: SPECTATOR_LIVE_MAX_PACKETS,
       stream: {
-        matchId,
-        roundNumber: context.roundNumber,
-        deathmatchSequence: context.deathmatchSequence,
+        matchId: stream.matchId,
+        roundNumber,
+        deathmatchSequence,
         attemptId: stream.attemptId,
         generation: stream.generation,
         lastSequence: stream.lastSequence,
-        opponentName: state.spectator.opponentName ?? "Opponent",
+        opponentName,
       },
       packets,
     };

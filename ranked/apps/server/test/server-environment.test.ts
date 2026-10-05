@@ -20,6 +20,7 @@ describe("server environment", () => {
       rankedCsmpFetchTimeoutMs: 30_000,
       discordRelay: null,
       debugBot: null,
+      debugSpectate: null,
     });
   });
 
@@ -53,6 +54,12 @@ describe("server environment", () => {
       ...validEnvironment(),
       ENABLE_DEBUG_BOT_MATCH: "true",
     })).toThrow("DEBUG_BOT_PASSWORD must be explicitly configured");
+  });
+  it("Debug Spectate is independent of Bot and fails closed without its explicit secret", () => {
+    expect(loadServerEnvironment({ ...validEnvironment(), ENABLE_DEBUG_SPECTATE: "true", DEBUG_SPECTATE_PASSWORD: "debug-only-secret" }).debugSpectate)
+      .toEqual({ password: "debug-only-secret" });
+    expect(() => loadServerEnvironment({ ...validEnvironment(), ENABLE_DEBUG_SPECTATE: "true" }))
+      .toThrow("DEBUG_SPECTATE_PASSWORD must be explicitly configured");
   });
 
   it("rejects a Bot clear probability above its qualifying probability", () => {

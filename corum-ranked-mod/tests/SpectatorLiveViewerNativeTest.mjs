@@ -75,6 +75,9 @@ struct RankedRuntime {
 };
 enum class SpectatorLiveStatus { Idle,Waiting,Live,Fallback };
 struct SpectatorLiveRuntime {
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+    std::string m_debugContextId;
+#endif
 ${fields}
     void applyViewerResponse(matjson::Value const&);
     void setFallback(std::string);
@@ -120,6 +123,25 @@ int main(){
     matjson::Value waiting;waiting["protocolVersion"]=1;waiting["waiting"]=true;
     viewer.applyViewerResponse(waiting);assert(viewer.m_status==SpectatorLiveStatus::Waiting && !viewer.interpolatedPose());
     assert(viewer.m_viewAttemptId.empty() && viewer.m_viewGeneration==0);
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+    viewer.m_debugContextId="debug-spectate:scope";viewer.m_viewMatchId=viewer.m_debugContextId;
+    RankedRuntime::get().state.match.roundNumber=99;
+    auto debug=response(0,120,"recording",1);
+    debug["stream"]["matchId"]=viewer.m_debugContextId;
+    auto packets=debug["packets"].asArray().unwrap();packets[0]["matchId"]=viewer.m_debugContextId;
+    debug["packets"]=packets;viewer.applyViewerResponse(debug);
+    assert(viewer.m_status==SpectatorLiveStatus::Live && viewer.interpolatedPose()->x==120);
+    auto debugStale=debug;auto stalePackets=packets;stalePackets[0]["generation"]=0;
+    debugStale["packets"]=stalePackets;viewer.applyViewerResponse(debugStale);
+    assert(viewer.m_reason=="STALE_GENERATION" && !viewer.interpolatedPose());
+    auto gap=debug;auto gapPackets=packets;gapPackets[0]["sequence"]=3;
+    gap["packets"]=gapPackets;viewer.applyViewerResponse(gap);
+    assert(viewer.m_reason=="SEQUENCE_GAP");
+    debug["reset"]=true;debug["stream"]["generation"]=2;
+    packets[0]["generation"]=2;packets[0]["keyframe"]["finished"]=true;
+    debug["packets"]=packets;viewer.applyViewerResponse(debug);
+    assert(viewer.interpolatedPose()->finished && viewer.interpolatedPose()->x==120);
+#endif
 }
 `;
     const dir = mkdtempSync(join(tmpdir(), 'corum-viewer-native-'));
@@ -127,6 +149,9 @@ int main(){
         writeFileSync(join(dir, 'viewer.cpp'), cpp);
         const binary = join(dir, 'viewer');
         execFileSync('g++', ['-std=c++23', '-Wall', '-Wextra', '-Wpedantic', '-Werror', join(dir, 'viewer.cpp'), '-o', binary], { stdio: 'pipe' });
+        execFileSync(binary, [], { stdio: 'pipe' });
+        execFileSync('g++', ['-std=c++23', '-Wall', '-Wextra', '-Wpedantic', '-Werror',
+            '-DCORUM_RANKED_DEBUG_SPECTATE=1', join(dir, 'viewer.cpp'), '-o', binary], { stdio: 'pipe' });
         execFileSync(binary, [], { stdio: 'pipe' });
     } finally { rmSync(dir, { recursive: true, force: true }); }
 });

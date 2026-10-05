@@ -65,7 +65,7 @@ jobs:
           path: corum-ranked-mod
           target: ${{ matrix.config.target }}
           combine: true
-          configure-args: -DCORUM_RANKED_DEBUG_BOT_MATCH=OFF
+          configure-args: -DCORUM_RANKED_DEBUG_BOT_MATCH=OFF -DCORUM_RANKED_DEBUG_SPECTATE=OFF
 
   package:
     name: Package ${{ needs.metadata.outputs.version }} Release

@@ -1,5 +1,9 @@
 #include "SpectatorLiveRuntime.hpp"
 #include "RankedRuntime.hpp"
+#include "domain/SpectatorProtocol.hpp"
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+#include "debug/DebugSpectateRuntime.hpp"
+#endif
 
 #include <Geode/loader/Loader.hpp>
 #include <Geode/loader/Mod.hpp>
@@ -12,8 +16,8 @@ using namespace geode::prelude;
 
 namespace {
 
-constexpr int kProtocolVersion = 1;
-constexpr auto kPublishInterval = std::chrono::milliseconds(50);
+constexpr int kProtocolVersion = corum::ranked::kSpectatorProtocolVersion;
+constexpr auto kPublishInterval = std::chrono::milliseconds(corum::ranked::kSpectatorPublishIntervalMs);
 constexpr auto kViewerPollInterval = std::chrono::milliseconds(80);
 constexpr auto kFallbackRepollInterval = std::chrono::milliseconds(150);
 constexpr auto kPacketTimeout = std::chrono::milliseconds(1500);
@@ -125,6 +129,16 @@ void SpectatorLiveRuntime::reset() {
     resetPublisher();
     resetViewer();
 }
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+void SpectatorLiveRuntime::startDebugViewer(std::string contextId, std::string token, std::string path) {
+    reset();
+    m_debugContextId = std::move(contextId); m_debugToken = std::move(token); m_debugPath = std::move(path);
+    m_status = SpectatorLiveStatus::Waiting;
+}
+void SpectatorLiveRuntime::stopDebugViewer() {
+    m_debugContextId.clear(); m_debugToken.clear(); m_debugPath.clear(); reset();
+}
+#endif
 
 void SpectatorLiveRuntime::startPublisherGeneration(
     std::string const& matchId,
@@ -235,26 +249,38 @@ void SpectatorLiveRuntime::tickViewer() {
     auto& ranked = RankedRuntime::get();
     auto const& view = ranked.view();
     auto const& match = view.match;
-    if (
-        view.stage != RuntimeStage::Matched || ranked.isPlacement() ||
-        !ranked.isSpectating() || match.matchId.empty() ||
-        ranked.spectatorLiveSessionToken().empty() || ranked.spectatorLiveMatchToken().empty()
-    ) {
-        resetViewer();
-        return;
+    bool eligible =
+        view.stage == RuntimeStage::Matched && !ranked.isPlacement() &&
+        ranked.isSpectating() && !match.matchId.empty() &&
+        !ranked.spectatorLiveSessionToken().empty() && !ranked.spectatorLiveMatchToken().empty();
+    auto matchId = match.matchId;
+    auto contextKey = viewerContextKey(match);
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+    if (!m_debugContextId.empty()) {
+        eligible = debug::DebugSpectateRuntime::get().playbackLevel(debug::kDebugSpectateLevelId);
+        matchId = m_debugContextId;
+        contextKey = fmt::format("{}:R1:D0:L{}", matchId, debug::kDebugSpectateLevelId);
     }
-    auto const contextKey = viewerContextKey(match);
-    if (m_viewMatchId != match.matchId || m_viewContextKey != contextKey) {
+#endif
+    if (!eligible) {
+        resetViewer(); return;
+    }
+    // Debug admission uses a separate server-issued scope, not a fake Ranked Match.
+    if (m_viewMatchId != matchId || m_viewContextKey != contextKey) {
         resetViewer();
-        m_viewMatchId = match.matchId;
+        m_viewMatchId = matchId;
         m_viewContextKey = contextKey;
         m_status = SpectatorLiveStatus::Waiting;
     }
     auto const now = std::chrono::steady_clock::now();
-    if (
+    bool terminalHeld = false;
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+    terminalHeld = !m_debugContextId.empty() && m_currentPose && (m_currentPose->dead || m_currentPose->finished);
+#endif
+    if (!terminalHeld && (
         m_status == SpectatorLiveStatus::Live && m_lastPacketAt.time_since_epoch().count() != 0 &&
         now - m_lastPacketAt > kPacketTimeout
-    ) {
+    )) {
         setFallback("STREAM_TIMEOUT");
     }
     if (m_viewBusy || now < m_nextViewerPollAt) return;
@@ -263,7 +289,10 @@ void SpectatorLiveRuntime::tickViewer() {
 
 void SpectatorLiveRuntime::pollViewer() {
     auto& ranked = RankedRuntime::get();
-    auto const matchId = ranked.view().match.matchId;
+    auto matchId = ranked.view().match.matchId;
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+    if (!m_debugContextId.empty()) matchId = m_debugContextId;
+#endif
     if (matchId.empty()) return;
     auto request = spectatorRequest(
         ranked.spectatorLiveSessionToken(),
@@ -274,6 +303,14 @@ void SpectatorLiveRuntime::pollViewer() {
         matchId,
         kProtocolVersion
     );
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+    if (!m_debugContextId.empty()) {
+        request = spectatorRequest({}, {});
+        request.header("x-corum-debug-spectate", "1");
+        request.header("x-debug-spectate-token", m_debugToken);
+        path = m_debugPath + fmt::format("?protocolVersion={}", kProtocolVersion);
+    }
+#endif
     if (!m_viewAttemptId.empty()) path += "&attemptId=" + m_viewAttemptId;
     if (m_viewGeneration > 0) path += fmt::format("&generation={}", m_viewGeneration);
     if (m_lastViewSequence >= 0) path += fmt::format("&afterSequence={}", m_lastViewSequence);
@@ -285,16 +322,25 @@ void SpectatorLiveRuntime::pollViewer() {
     m_viewRequest.spawn(
         request.get(endpoint(path)),
         [this, requestGeneration, matchId, contextKey, requestStartedAt](web::WebResponse response) {
+            auto currentContextKey = viewerContextKey(RankedRuntime::get().view().match);
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+            if (!m_debugContextId.empty()) currentContextKey = fmt::format("{}:R1:D0:L{}", m_debugContextId, debug::kDebugSpectateLevelId);
+#endif
             if (
                 requestGeneration != m_viewRequestGeneration ||
                 matchId != m_viewMatchId || contextKey != m_viewContextKey ||
-                contextKey != viewerContextKey(RankedRuntime::get().view().match)
+                contextKey != currentContextKey
             ) return;
             m_viewBusy = false;
             m_nextViewerPollAt = std::chrono::steady_clock::now() +
                 (m_status == SpectatorLiveStatus::Fallback
                     ? kFallbackRepollInterval
                     : kViewerPollInterval);
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+            if (!m_debugContextId.empty() && (response.code() == 401 || response.code() == 403 || response.code() == 404)) {
+                debug::DebugSpectateRuntime::get().viewerResponse(false, true); return;
+            }
+#endif
             if (response.code() == 403) {
                 resetViewer();
                 return;
@@ -308,7 +354,14 @@ void SpectatorLiveRuntime::pollViewer() {
             m_lastViewerRttMs = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::steady_clock::now() - requestStartedAt
             ).count();
-            applyViewerResponse(response.json().unwrapOr(matjson::Value()));
+            auto const root = response.json().unwrapOr(matjson::Value());
+            applyViewerResponse(root);
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+            if (!m_debugContextId.empty() && m_status == SpectatorLiveStatus::Live && m_currentPose &&
+                (m_currentPose->dead || m_currentPose->finished)) {
+                debug::DebugSpectateRuntime::get().viewerResponse(root["playbackComplete"].asBool().unwrapOr(false), false);
+            }
+#endif
         }
     );
 }
@@ -362,8 +415,11 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
     auto const attemptId = stream["attemptId"].asString().unwrapOr("");
     auto const generation = static_cast<std::uint64_t>(stream["generation"].asInt().unwrapOr(0));
     auto const& authoritativeMatch = RankedRuntime::get().view().match;
-    auto const expectedRound = authoritativeMatch.roundNumber;
-    auto const expectedDeathmatch = authoritativeMatch.deathmatchSequence;
+    auto expectedRound = authoritativeMatch.roundNumber;
+    auto expectedDeathmatch = authoritativeMatch.deathmatchSequence;
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+    if (!m_debugContextId.empty()) { expectedRound = 1; expectedDeathmatch = 0; }
+#endif
     auto const streamRound = static_cast<int>(stream["roundNumber"].asInt().unwrapOr(-1));
     auto const streamDeathmatch = static_cast<int>(stream["deathmatchSequence"].asInt().unwrapOr(0));
     if (
@@ -537,6 +593,19 @@ std::optional<SpectatorGhostPose> SpectatorLiveRuntime::interpolatedPose() const
 }
 
 std::optional<SpectatorRemoteFrame> SpectatorLiveRuntime::presentationFrame() const {
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+    if (!m_debugContextId.empty()) {
+        if (!debug::DebugSpectateRuntime::get().playbackLevel(debug::kDebugSpectateLevelId) ||
+            m_viewMatchId != m_debugContextId ||
+            (m_status != SpectatorLiveStatus::Waiting && m_status != SpectatorLiveStatus::Live)) return std::nullopt;
+        return SpectatorRemoteFrame {
+            .context = { .matchId = m_viewMatchId, .roundNumber = 1, .deathmatchSequence = 0,
+                .levelId = debug::kDebugSpectateLevelId, .attemptId = m_viewAttemptId,
+                .generation = m_viewGeneration, .epoch = m_viewPresentationEpoch },
+            .sequence = m_lastViewSequence, .pose = interpolatedPose(),
+        };
+    }
+#endif
     auto& ranked = RankedRuntime::get();
     auto const& match = ranked.view().match;
     if (ranked.view().stage != RuntimeStage::Matched || ranked.isPlacement() ||

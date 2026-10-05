@@ -15,6 +15,7 @@ export interface ServerEnvironment {
   readonly corsOrigins: readonly string[];
   readonly discordRelay: DiscordRelayEnvironment | null;
   readonly debugBot: DebugBotEnvironment | null;
+  readonly debugSpectate: { readonly password: string } | null;
 }
 
 export interface DebugBotDifficultyEnvironment {
@@ -286,5 +287,8 @@ export const loadServerEnvironment = (
     corsOrigins,
     discordRelay,
     debugBot,
+    debugSpectate: environment.ENABLE_DEBUG_SPECTATE?.trim().toLowerCase() === "true"
+      ? { password: requireValue(environment, "DEBUG_SPECTATE_PASSWORD") }
+      : null,
   };
 };

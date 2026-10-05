@@ -26,6 +26,11 @@ public:
     void tickPublisher(SpectatorGhostPose const& pose, bool practice);
     void tickViewer();
     void reset();
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+    // Server-approved scoped context/HTTP route only; no replay frames accepted.
+    void startDebugViewer(std::string contextId, std::string token, std::string path);
+    void stopDebugViewer();
+#endif
 
     [[nodiscard]] SpectatorLiveStatus status() const;
     [[nodiscard]] std::string const& reason() const;
@@ -46,6 +51,9 @@ private:
     [[nodiscard]] std::string endpoint(std::string const& path) const;
 
     std::string m_publishMatchId;
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+    std::string m_debugContextId, m_debugToken, m_debugPath;
+#endif
     std::string m_publishAttemptId;
     std::uint64_t m_publishGeneration = 0;
     std::uint64_t m_publishSequence = 0;

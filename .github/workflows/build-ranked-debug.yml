@@ -86,6 +86,10 @@ jobs:
             -o /tmp/corum-ranked-debug-bot-domain-test
           /tmp/corum-ranked-debug-bot-domain-test
           g++ -std=c++23 -Wall -Wextra -Wpedantic -Werror \
+            corum-ranked-mod/tests/DebugSpectateDomainTest.cpp \
+            -o /tmp/corum-ranked-debug-spectate-domain-test
+          /tmp/corum-ranked-debug-spectate-domain-test
+          g++ -std=c++23 -Wall -Wextra -Wpedantic -Werror \
             corum-ranked-mod/tests/SpectatorLocalSafetyTest.cpp \
             -o /tmp/corum-ranked-spectator-safety-test
           /tmp/corum-ranked-spectator-safety-test
@@ -105,6 +109,8 @@ jobs:
           node --test corum-ranked-mod/tests/SpectatorCameraSourceTest.mjs
           node --test corum-ranked-mod/tests/SpectatorSceneNativeTest.mjs
           node --test corum-ranked-mod/tests/SpectatorLiveViewerNativeTest.mjs
+          node --test corum-ranked-mod/tests/DebugSpectateSourceTest.mjs
+          node --test corum-ranked-mod/tests/DebugSpectateRuntimeNativeTest.mjs
 
   build:
     name: ${{ matrix.config.name }} Debug ${{ needs.metadata.outputs.version }}
@@ -136,7 +142,7 @@ jobs:
           path: corum-ranked-mod
           target: ${{ matrix.config.target }}
           combine: true
-          configure-args: -DCORUM_RANKED_DEBUG_BOT_MATCH=ON
+          configure-args: -DCORUM_RANKED_DEBUG_BOT_MATCH=ON -DCORUM_RANKED_DEBUG_SPECTATE=ON
 
   package:
     name: Package Debug ${{ needs.metadata.outputs.version }}

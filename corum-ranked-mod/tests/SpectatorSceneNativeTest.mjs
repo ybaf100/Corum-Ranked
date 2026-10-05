@@ -37,6 +37,7 @@ test('actual scene callbacks hand off only after End/authority, even with vanill
 namespace geode::log { template<class... T> void info(T...) {} }
 using namespace geode;
 struct PlayerObject { bool m_isDead=false,visible=true; void setVisible(bool b){visible=b;} void stopAllActions(){} };
+struct CCLabelBMFont { void setString(char const*){} };
 struct GJBaseGameLayer { int cameras=0; void updateCamera(float){++cameras;} };
 struct PlayLayer: GJBaseGameLayer {
     PlayerObject* m_player1=nullptr;
@@ -50,6 +51,18 @@ template<class T> struct GeodeFields {
     T* operator->(){return value.get();} // Actual Geode Fields accessor is NON-const.
 };
 namespace corum::ranked {
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+namespace debug {
+constexpr int kDebugSpectateLevelId=88350599;
+struct DebugSpectateRuntime {
+    bool authorized=false;
+    static DebugSpectateRuntime& get(){static DebugSpectateRuntime d;return d;}
+    bool playbackLevel(int id)const{return authorized && id==kDebugSpectateLevelId;}
+    std::string contextId()const{return "debug-spectate:server-approved";}
+    bool playbackComplete()const{return false;}
+};
+}
+#endif
 bool quitThroughRankedCompletionOverlay(PlayLayer*){return false;}
 enum class RuntimeStage { Matched, Idle };
 struct RankedRuntime {
@@ -74,8 +87,11 @@ struct SpectatorLiveRuntime {
     void tickPublisher(SpectatorGhostPose const&,bool){}
     void tickViewer(){++viewers;}
     auto presentationFrame()const{return frame;}
+    enum class Status {Waiting,Fallback};
+    Status status()const{return Status::Waiting;}
     void reset(){++resets;frame.reset();}
 };
+using SpectatorLiveStatus=SpectatorLiveRuntime::Status;
 struct FakeRemote {
     std::optional<SpectatorRemoteFrame> frame; int creates=0;
     void update(PlayLayer*,bool active,std::optional<SpectatorRemoteFrame> f){
@@ -97,6 +113,10 @@ struct CorumRankedPlayLayer: PlayLayer {
         bool safetyRetired=false,vanillaGameplayEndInProgress=false,rankedInitialized=true,rankedLevel=true;
         bool rankedPractice=false,spectatorMode=false,spectatorPending=false,spectatorScenePrepared=false;
         bool spectatorPresentationRetired=false;
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+        bool debugRecordScene=false,debugPlaybackScene=false;
+        CCLabelBMFont* debugSpectateHud=nullptr;
+#endif
         bool attemptStartReported=true,attemptEndReported=false,autoExitRequested=false;
         int levelId=123,renderedRevision=0;
         std::chrono::steady_clock::time_point nextHudRefreshAt{};
@@ -154,6 +174,33 @@ int main(){
         ordinary.spectatorFrame(0.01f);
         assert(!ordinary.m_fields->localSafety.active() && ordinary.cameras==0 && ordinary.resets==0);
     }
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+    runtime={}; runtime.data.stage=RuntimeStage::Idle;runtime.ownAlive=false;
+    CorumRankedPlayLayer recorder;recorder.m_player1=&local;recorder.m_fields->rankedLevel=false;
+    recorder.m_fields->debugRecordScene=true;recorder.syncSpectatorLocalSafety();
+    assert(!recorder.m_fields->localSafety.active() && runtime.blocked); // Real vanilla RECORD, no Ranked transport.
+    CorumRankedPlayLayer test;test.m_player1=&local;test.m_fields->rankedLevel=false;
+    test.m_fields->debugPlaybackScene=true;test.m_fields->levelId=debug::kDebugSpectateLevelId;
+    test.m_fields->sceneContext={"debug-spectate:server-approved",1,0,debug::kDebugSpectateLevelId};
+    test.syncSpectatorLocalSafety();assert(!test.m_fields->localSafety.active());
+    debug::DebugSpectateRuntime::get().authorized=true;
+    test.syncSpectatorLocalSafety(); // Exact init handoff after server-issued scope.
+    live.frame=SpectatorRemoteFrame{{"debug-spectate:server-approved",1,0,debug::kDebugSpectateLevelId,"",0,10},-1,std::nullopt};
+    test.spectatorFrame(0.01f);
+    assert(test.m_fields->localSafety.active() && !local.visible && test.m_fields->spectatorScenePrepared);
+    assert(test.m_fields->spectatorCamera.policy.state()==SpectatorCameraState::Waiting);
+    live.frame=SpectatorRemoteFrame{{"debug-spectate:server-approved",1,0,debug::kDebugSpectateLevelId,"recording",1,11},0,SpectatorGhostPose{1500,500,30,false,false}};
+    test.spectatorFrame(0.01f);
+    assert(test.m_fields->spectatorCamera.policy.origin().x==1290 && runtime.blocked && test.quits==0);
+    assert(test.m_fields->localSafety.suppressDeath(true) && test.m_fields->localSafety.blockPersistence(true));
+    assert(test.m_fields->localSafety.freezeAtCompletionBoundary(true,99));
+    auto origin=test.m_fields->spectatorCamera.policy.origin();
+    live.frame.reset();test.spectatorFrame(0.01f);
+    assert(test.m_fields->spectatorCamera.policy.origin().x==origin.x); // No 0,0 camera while waiting.
+    debug::DebugSpectateRuntime::get().authorized=false;test.spectatorFrame(0.01f);
+    assert(test.quits==1 && !test.m_fields->remotePlayer.frame && !test.m_fields->spectatorCamera.policy.ownsCamera());
+    assert(test.m_fields->localSafety.active()); // Async exit saves still blocked.
+#endif
 }
 `;
     const dir = mkdtempSync(join(tmpdir(), 'corum-scene-native-'));
@@ -167,6 +214,9 @@ int main(){
         writeFileSync(join(dir, 'scene.cpp'), cpp);
         const binary = join(dir, 'scene');
         execFileSync('g++', ['-std=c++23', '-Wall', '-Wextra', '-Wpedantic', '-Werror', join(dir, 'scene.cpp'), '-o', binary], { stdio: 'pipe' });
+        execFileSync(binary, [], { stdio: 'pipe' });
+        execFileSync('g++', ['-std=c++23', '-Wall', '-Wextra', '-Wpedantic', '-Werror',
+            '-DCORUM_RANKED_DEBUG_SPECTATE=1', join(dir, 'scene.cpp'), '-o', binary], { stdio: 'pipe' });
         execFileSync(binary, [], { stdio: 'pipe' });
     } finally { rmSync(dir, { recursive: true, force: true }); }
 });

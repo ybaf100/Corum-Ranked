@@ -1,6 +1,9 @@
 #include "RankedRuntime.hpp"
 #include "RankedSongGate.hpp"
 #include "RankedLevelPreparation.hpp"
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+#include "debug/DebugSpectateRuntime.hpp"
+#endif
 #include "ui/RankedTranslations.hpp"
 #include "ui/RankedVisuals.hpp"
 
@@ -118,7 +121,15 @@ std::string rankedGateTitle() {
 
 bool mapReady(GJGameLevel* level) {
     if (!level || level->m_levelString.empty() || level->m_levelNotDownloaded) return false;
-    auto const expectedLevelId = corum::ranked::RankedRuntime::get().currentLevelId();
+    auto expectedLevelId = corum::ranked::RankedRuntime::get().currentLevelId();
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+    // Debug admission is deliberately not a Ranked Match. While its exact
+    // server-issued preparation scope is active, reuse the native download/song
+    // checks against VOICE without fabricating RankedRuntime.currentLevelId().
+    if (corum::ranked::debug::DebugSpectateRuntime::get().preparedLevel(static_cast<int>(level->m_levelID))) {
+        expectedLevelId = corum::ranked::debug::kDebugSpectateLevelId;
+    }
+#endif
     return expectedLevelId > 0 && expectedLevelId == static_cast<int>(level->m_levelID);
 }
 
@@ -403,9 +414,17 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         float introProgressWidth = 0.0f;
         float displayedPreparationProgress = 0.30f;
         bool introRevealStarted = false;
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+        bool debugSpectateOwned = false, debugMapRequested = false, debugSongRequested = false, debugPlayRequested = false;
+#endif
     };
 
     bool init(GJGameLevel* level, bool challenge) {
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+        m_fields->debugSpectateOwned = level && corum::ranked::debug::DebugSpectateRuntime::get().preparedLevel(static_cast<int>(level->m_levelID));
+        if (m_fields->debugSpectateOwned && !corum::ranked::RankedLevelPreparation::get().authorizes(
+            level, corum::ranked::currentPreparationContext())) return false;
+#endif
         auto const ranked = isCurrentRankedLevel(level);
         auto const context = corum::ranked::currentPreparationContext();
         auto& preparation = corum::ranked::RankedLevelPreparation::get();
@@ -433,6 +452,35 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         return m_fields->rankedOwned && m_fields->context == corum::ranked::currentPreparationContext() &&
             isCurrentRankedLevel(m_level);
     }
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+    void prepareDebugSpectate(float) {
+        auto& debug = corum::ranked::debug::DebugSpectateRuntime::get();
+        if (!m_fields->debugSpectateOwned || !m_level || !debug.preparedLevel(static_cast<int>(m_level->m_levelID))) {
+            unschedule(schedule_selector(CorumRankedLevelInfoLayer::prepareDebugSpectate)); return;
+        }
+        auto& preparation = corum::ranked::RankedLevelPreparation::get();
+        if (!preparation.authorizes(m_level, debug.preparationContext()) || hasOpenModal(CCDirector::sharedDirector()->getRunningScene())) return;
+        if (!mapReady(m_level) || LevelInfoLayer::shouldDownloadLevel()) {
+            if (!m_fields->debugMapRequested) {
+                m_fields->debugMapRequested = true; LevelInfoLayer::downloadLevel();
+            }
+            return;
+        }
+        preparation.adopt(m_level, debug.preparationContext());
+        if (!songsReady(m_level, m_songWidget)) {
+            if (!m_fields->debugSongRequested && m_songWidget && m_songWidget->m_downloadBtn) {
+                m_fields->debugSongRequested = true; m_songWidget->m_downloadBtn->activate();
+            }
+            return;
+        }
+        if (m_fields->debugPlayRequested) return;
+        m_fields->debugPlayRequested = true;
+        unschedule(schedule_selector(CorumRankedLevelInfoLayer::prepareDebugSpectate));
+        // Native Play keeps real downloaded GJGameLevel, song, objects and lifecycle.
+        // DebugSpectateRuntime changes mode only inside that exact PlayLayer init.
+        LevelInfoLayer::onPlay(nullptr);
+    }
+#endif
 
     bool metadataReady() {
         return corum::ranked::RankedLevelPreparation::get().authorizes(m_level, m_fields->context);
@@ -532,6 +580,14 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
 
     void onEnterTransitionDidFinish() override {
         LevelInfoLayer::onEnterTransitionDidFinish();
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+        if (m_fields->debugSpectateOwned) {
+            if (corum::ranked::debug::DebugSpectateRuntime::get().preparedLevel(corum::ranked::debug::kDebugSpectateLevelId)) {
+                schedule(schedule_selector(CorumRankedLevelInfoLayer::prepareDebugSpectate), 0.1f);
+            }
+            return;
+        }
+#endif
         auto& runtime = corum::ranked::RankedRuntime::get();
         if (!m_fields->rankedOwned) return;
         if (m_fields->metadataRecovery) {
@@ -1393,6 +1449,9 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
     }
 
     void onExit() override {
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+        unschedule(schedule_selector(CorumRankedLevelInfoLayer::prepareDebugSpectate));
+#endif
         unschedule(schedule_selector(CorumRankedLevelInfoLayer::returnForMetadata));
         unschedule(schedule_selector(CorumRankedLevelInfoLayer::returnToRanked));
         // onExit is the acknowledgement that Geometry Dash's own Play button
@@ -1451,6 +1510,9 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
     }
 
     void onPlay(CCObject* sender) {
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+        if (m_fields->debugSpectateOwned) return; // Only verified automatic gate invokes native Play.
+#endif
         auto& runtime = corum::ranked::RankedRuntime::get();
         if (m_fields->rankedOwned &&
             (m_fields->metadataRecovery || !isCurrentRankedScene() || !metadataReady())) return;
@@ -1538,6 +1600,11 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
     }
 
     void onBack(CCObject* sender) {
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+        if (m_fields->debugSpectateOwned) {
+            corum::ranked::debug::DebugSpectateRuntime::get().cancelPreparation(); LevelInfoLayer::onBack(sender); return;
+        }
+#endif
         if (m_fields->songGateActive || m_fields->gameplayLaunchStarted) return;
         if (!isCurrentRankedScene()) {
             LevelInfoLayer::onBack(sender);
@@ -1553,6 +1620,11 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
     }
 
     void keyBackClicked() override {
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+        if (m_fields->debugSpectateOwned) {
+            corum::ranked::debug::DebugSpectateRuntime::get().cancelPreparation(); LevelInfoLayer::keyBackClicked(); return;
+        }
+#endif
         if (m_fields->songGateActive || m_fields->gameplayLaunchStarted) return;
         if (!isCurrentRankedScene()) {
             LevelInfoLayer::keyBackClicked();
