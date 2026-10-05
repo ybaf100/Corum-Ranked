@@ -12,6 +12,20 @@ inline matjson::Value encodeSpectatorPose(SpectatorGhostPose const& pose) {
     value["mini"] = pose.mini; value["upsideDown"] = pose.upsideDown;
     value["flipped"] = pose.flipped; value["dual"] = pose.dual;
     value["dead"] = pose.dead; value["finished"] = pose.finished;
+    value["visible"] = pose.visible;
+    if (pose.camera && validSpectatorCamera(*pose.camera)) {
+        value["cameraX"] = static_cast<double>(pose.camera->x);
+        value["cameraY"] = static_cast<double>(pose.camera->y);
+        value["cameraSnap"] = pose.cameraSnap;
+    }
+    if (pose.discontinuity && finiteSpectatorSnap(*pose.discontinuity)) {
+        auto const& snap = *pose.discontinuity;
+        value["discontinuity"]["type"] = std::string(spectatorDiscontinuityName(snap.type));
+        value["discontinuity"]["fromX"] = static_cast<double>(snap.fromX);
+        value["discontinuity"]["fromY"] = static_cast<double>(snap.fromY);
+        value["discontinuity"]["toX"] = static_cast<double>(snap.toX);
+        value["discontinuity"]["toY"] = static_cast<double>(snap.toY);
+    }
     return value;
 }
 inline std::optional<SpectatorGhostPose> decodeSpectatorPose(matjson::Value const& value) {
@@ -33,6 +47,25 @@ inline std::optional<SpectatorGhostPose> decodeSpectatorPose(matjson::Value cons
     pose.dual = value["dual"].asBool().unwrapOr(false);
     pose.dead = value["dead"].asBool().unwrapOr(false);
     pose.finished = value["finished"].asBool().unwrapOr(false);
+    pose.visible = value["visible"].asBool().unwrapOr(true);
+    SpectatorCameraOrigin camera{
+        static_cast<float>(value["cameraX"].asDouble().unwrapOr(nan)),
+        static_cast<float>(value["cameraY"].asDouble().unwrapOr(nan))};
+    if (validSpectatorCamera(camera)) pose.camera = camera;
+    pose.cameraSnap = pose.camera.has_value() && value["cameraSnap"].asBool().unwrapOr(false);
+    auto const evidence = value["discontinuity"];
+    if (evidence.isObject()) {
+        auto const type = evidence["type"].asString().unwrapOr("");
+        if (type != "TELEPORT" && type != "SPIDER_SNAP") return std::nullopt;
+        SpectatorSnapEvidence snap{
+            type == "TELEPORT" ? SpectatorDiscontinuity::Teleport : SpectatorDiscontinuity::SpiderSnap,
+            static_cast<float>(evidence["fromX"].asDouble().unwrapOr(nan)),
+            static_cast<float>(evidence["fromY"].asDouble().unwrapOr(nan)),
+            static_cast<float>(evidence["toX"].asDouble().unwrapOr(nan)),
+            static_cast<float>(evidence["toY"].asDouble().unwrapOr(nan))};
+        if (!finiteSpectatorSnap(snap)) return std::nullopt;
+        pose.discontinuity = snap;
+    } else if (evidence.asBool().unwrapOr(false) || !evidence.asString().unwrapOr("").empty()) return std::nullopt;
     return finiteSpectatorPose(pose) ? std::optional(pose) : std::nullopt;
 }
 }

@@ -21,6 +21,7 @@ SpectatorGhostPose captureSpectatorPose(PlayerObject* player, bool dead, bool fi
     pose.flipped = player->m_mainLayer && player->m_mainLayer->getScaleY() < 0.0f;
     pose.dead = dead || player->m_isDead;
     pose.finished = finished; pose.dual = dual;
+    pose.visible = player->isVisible();
     return pose;
 }
 }

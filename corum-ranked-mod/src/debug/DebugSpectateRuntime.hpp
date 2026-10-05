@@ -13,7 +13,7 @@ public:
     void start(bool playback, std::string password);
     void tick();
     void sceneEntered(int levelId);
-    void recordPose(SpectatorGhostPose const& pose, bool terminal = false);
+    bool recordPose(SpectatorGhostPose const& pose, bool terminal = false);
     void cancelRecording();
     void exitScene();
     void cancelPreparation(char const* reason = "explicit cancel/back");
@@ -35,6 +35,7 @@ private:
     DebugSpectateMode m_mode = DebugSpectateMode::None;
     std::string m_id, m_token, m_contextId, m_status;
     DebugSpectateCapture m_capture;
+    std::optional<SpectatorGhostPose> m_previousCapturedPose;
     std::chrono::steady_clock::time_point m_recordStartedAt {}, m_nextUploadAt {}, m_expireAt {}, m_prepareStartedAt {};
     std::uint64_t m_generation = 0;
     int m_errors = 0;

@@ -31,7 +31,7 @@ test('production native safety hook bodies execute through death/completion/save
         'bool blocksLevelPersistence(', 'bool scoringEnabled()',
         'void destroyPlayer(', 'void levelComplete()', 'void showCompleteText()',
         'void checkForEnd()', 'void playEndAnimationToPos(',
-        'void playPlatformerEndAnimationToPos(', 'void showEndLayer()', 'void showNewBest(',
+        'void playPlatformerEndAnimationToPos(', 'void showEndLayer()', 'void showNewBest(', 'void updateAttempts()',
     ].map(signature => method(signature)).join('\n');
     const player = method('void update(float dt)', source.indexOf('class $modify(CorumRankedSpectatorDummyPlayer'));
     const saves = [method('void savePercentage('), method('void saveNewScore(')].join('\n');
@@ -50,7 +50,7 @@ using namespace geode;
 struct CCPoint { float x, y; };
 struct GameObject { int m_uniqueID = 0; };
 struct PlayerObject {
-    int updates = 0; bool m_isDead=false;
+    int updates = 0; bool m_isDead=false,m_wasTeleported=false;
     void setVisible(bool) {} void update(float) { ++updates; }
     CCPoint getPosition()const{return {100,50};} float getRotation()const{return 0;}
 };
@@ -76,6 +76,7 @@ struct PlayLayer {
     void playPlatformerEndAnimationToPos(CCPoint, bool) { ++animations; }
     void showEndLayer() { ++endLayers; }
     void showNewBest(bool, int, int, bool, bool, bool) { ++newBest; }
+    int attempts=0;void updateAttempts(){++attempts;}
 };
 namespace corum::ranked {
 inline SpectatorGhostPose captureSpectatorPose(PlayerObject* p,bool dead=false,bool finished=false,bool dual=false){
@@ -114,6 +115,12 @@ struct ScopedPersistenceOwner { explicit ScopedPersistenceOwner(PlayLayer*) {} }
 ${source.slice(source.indexOf('struct ScopedRealGameplayEnd {'), source.indexOf('std::int64_t steadyNowMicros()'))}
 double rankedProgressPercent(PlayLayer* layer) { return layer->percent; }
 struct CorumRankedPlayLayer : PlayLayer {
+    corum::ranked::SpectatorGhostPose observedSpectatorPose(bool dead=false,bool finished=false) {
+        return corum::ranked::captureSpectatorPose(m_player1,dead,finished,m_gameState.m_isDualMode);
+    }
+    void observeSpectatorNativeUpdate(PlayerObject*) {}
+    bool observesSpectatorPlayer(PlayerObject*) {return false;}
+    void observeSpectatorNativeSnap(PlayerObject*,corum::ranked::SpectatorDiscontinuity,corum::ranked::SpectatorGhostPose const&) {}
     struct Fields {
         bool safetyRetired = false, vanillaGameplayEndInProgress = false;
         bool attemptStartReported = true, attemptEndReported = false;
@@ -164,6 +171,7 @@ int main() {
     scene.levelComplete(); scene.showCompleteText(); scene.checkForEnd();
     scene.playEndAnimationToPos({0, 0}); scene.playPlatformerEndAnimationToPos({0, 0}, true);
     scene.showEndLayer(); scene.showNewBest(false, 0, 0, false, false, false);
+    scene.updateAttempts();assert(scene.attempts==0);
     level.savePercentage(100, false, 0, 0, true);
     level.saveNewScore(100, 0, 0, 0, 0, "", true);
     assert(scene.completions == 0 && scene.texts == 0 && scene.checks == 0 && scene.animations == 0);

@@ -223,13 +223,18 @@ export class DebugSpectateService implements OnModuleInit, OnApplicationShutdown
     const id = this.ids.next();
     const token = `crds_playback_${randomBytes(32).toString("base64url")}`;
     const expiresAt = new Date(this.clock.now().getTime() + DEBUG_SPECTATE_TTL_MS);
+    // Preserve persisted format-v2 data and validate its original duration first.
+    // Only the playback clock/relayed elapsed times lose the leading blank time.
+    const leadingMs = validated[0]!.elapsedMs;
+    const normalized = validated.map(frame => ({ ...frame, elapsedMs: frame.elapsedMs - leadingMs }));
     this.playbacks.set(id, { id, recordingId: row.id, tokenHash: this.tokens.hash(token),
-      expiresAtMs: expiresAt.getTime(), frames: validated, startedAtMs: null, cursor: 0,
+      expiresAtMs: expiresAt.getTime(), frames: normalized, startedAtMs: null, cursor: 0,
       generation: 1, sequence: 0, completed: false });
     this.logger.log(`[DebugSpectate] playback created playbackId=${id} recordingId=${row.id}`);
     // NO frame file / pose injection. Server clock starts on first in-scene poll.
     return { ...this.metadata(row), playbackId: id, token, contextId: debugSpectateContextId(id),
-      protocolVersion: SPECTATOR_LIVE_PROTOCOL_VERSION, startedAt: null, expiresAt: expiresAt.toISOString() };
+      protocolVersion: SPECTATOR_LIVE_PROTOCOL_VERSION, playbackLeadingMs: leadingMs,
+      playbackDurationMs: terminal.elapsedMs - leadingMs, startedAt: null, expiresAt: expiresAt.toISOString() };
     } finally { --this.startingPlaybacks; }
   }
   private playback(id: string, token: string | undefined, clientDebug?: string): Playback {
@@ -244,9 +249,8 @@ export class DebugSpectateService implements OnModuleInit, OnApplicationShutdown
     const playback = this.playback(id, token, clientDebug);
     const nowMs = this.clock.now().getTime();
     if (playback.startedAtMs === null) {
-      playback.startedAtMs = nowMs + DEBUG_SPECTATE_SAMPLE_MS;
+      playback.startedAtMs = nowMs;
       this.logger.log(`[DebugSpectate] playback started playbackId=${id}`);
-      return this.relay.subscribeRecorded(debugSpectateContextId(id), nowMs, protocolVersion);
     }
     this.advance(playback, nowMs);
     const response = this.relay.subscribeRecorded(debugSpectateContextId(id), nowMs,
@@ -299,7 +303,7 @@ export class DebugSpectateService implements OnModuleInit, OnApplicationShutdown
       attemptId: playback.recordingId, generation: playback.generation, sequence: playback.sequence++,
       elapsedMs: frame.elapsedMs, inputEdges: [], keyframe: frame.keyframe }, nowMs);
     if (playback.cursor === 0 && playback.generation === 1) {
-      this.logger.log(`[DebugSpectate] first packet emitted playbackId=${playback.id}`);
+      this.logger.log(`[DebugSpectate] first normalized packet emitted playbackId=${playback.id} elapsedMs=${frame.elapsedMs}`);
     }
   }
 }

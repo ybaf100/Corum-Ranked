@@ -23,7 +23,7 @@ test('actual production publisher sends shared v2 state and terminal capture acr
     const header = read('src/SpectatorLiveRuntime.hpp');
     const fields = header.slice(header.indexOf('    std::string m_publishMatchId;'), header.indexOf('    std::string m_viewMatchId;'));
     const methods = ['void SpectatorLiveRuntime::resetPublisher(', 'void SpectatorLiveRuntime::startPublisherGeneration(',
-        'void SpectatorLiveRuntime::tickPublisher(', 'void SpectatorLiveRuntime::publish(',
+        'bool SpectatorLiveRuntime::tickPublisher(', 'void SpectatorLiveRuntime::publish(',
         'void SpectatorLiveRuntime::publishTerminal(', 'void SpectatorLiveRuntime::tickTerminal('].map(method).join('\n');
     const cpp = `
 #include "${join(root, 'src/domain/SpectatorRemotePolicy.hpp')}"
@@ -68,7 +68,7 @@ struct SpectatorLiveRuntime {
 ${fields}
     geode::async::TaskHolder<web::WebResponse> m_publishRequest,m_terminalRequest;
     void resetPublisher();void startPublisherGeneration(std::string const&,std::string const&);
-    void tickPublisher(SpectatorGhostPose const&,bool);void publish(SpectatorGhostPose const&);
+    bool tickPublisher(SpectatorGhostPose const&,bool);void publish(SpectatorGhostPose const&);
     void publishTerminal(SpectatorGhostPose const&,bool);void tickTerminal();
     std::string endpoint(std::string const& path)const{return path;}
 };
@@ -82,6 +82,7 @@ ${methods}
 int main(){
     using namespace corum::ranked;auto& ranked=RankedRuntime::get();SpectatorLiveRuntime live;
     SpectatorGhostPose pose{100,400,90,false,false};pose.mode=SpectatorGameMode::Ship;pose.mini=true;pose.upsideDown=true;
+    pose.camera=SpectatorCameraOrigin{50,75};
     ranked.placement=true;live.tickPublisher(pose,false);assert(web::pending.empty());ranked.placement=false;
     ranked.spectating=true;live.tickPublisher(pose,false);assert(web::pending.empty());ranked.spectating=false;
     live.tickPublisher(pose,true);assert(web::pending.empty());
@@ -91,6 +92,8 @@ int main(){
     assert(web::pending[0].request.body["protocolVersion"].asInt().unwrapOr(0)==2);
     auto decoded=decodeSpectatorPose(web::pending[0].request.body["keyframe"]);
     assert(decoded&&decoded->mode==SpectatorGameMode::Ship&&decoded->mini&&decoded->upsideDown);
+    assert(decoded->camera && decoded->camera->x==50 && decoded->camera->y==75);
+    assert(!live.tickPublisher(pose,false)); // in-flight ACK does not consume a native observation
     pose.dead=true;live.publishTerminal(pose,false);assert(web::pending.size()==1); // pose preserved while live ACK outstanding
     live.publishTerminal(pose,false);assert(web::pending.size()==1);
     web::pending[0].callback({200});live.tickTerminal();assert(web::pending.size()==2);

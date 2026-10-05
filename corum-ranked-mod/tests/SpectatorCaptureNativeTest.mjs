@@ -1,0 +1,131 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { execFileSync } from 'node:child_process';
+const root=resolve(fileURLToPath(new URL('..',import.meta.url)));
+const source=readFileSync(join(root,'src/PlayLayer.cpp'),'utf8');
+function method(name,from=0){
+    const start=source.indexOf(name,from);assert(start>=0,name);const open=source.indexOf('{',start);
+    let depth=1,end=open+1;while(depth){if(source[end]==='{')++depth;if(source[end]==='}')--depth;++end;}return source.slice(start,end);
+}
+for(const debugOn of [false,true]) test(`native update/rotation/teleport -> completed camera snapshot -> 50ms capture (Debug ${debugOn?'ON':'OFF'})`,()=>{
+    const owner=['bool observesSpectatorPlayer(', 'corum::ranked::SpectatorGhostPose observedSpectatorPose(',
+        'void observeSpectatorNativeUpdate(', 'void observeSpectatorNativeSnap(', 'void sampleSpectatorPresentation()'].map(n=>method(n)).join('\n');
+    const playerAt=source.indexOf('class $modify(CorumRankedSpectatorDummyPlayer');
+    const worldAt=source.indexOf('class $modify(CorumRankedSpectatorCameraHook');
+    const capture=readFileSync(join(root,'src/spectator/SpectatorPlayerCapture.cpp'),'utf8').replace(/^#include.*$/gm,'');
+    const cpp=`
+#include "${join(root,'src/domain/SpectatorCapturePolicy.hpp')}"
+#include "${join(root,'src/debug/DebugSpectatePolicy.hpp')}"
+#include "${join(root,'src/spectator/SpectatorPlayerCapture.hpp')}"
+#include <cassert>
+#include <chrono>
+#include <limits>
+#include <vector>
+using namespace corum::ranked;
+static std::int64_t clockMs=0;
+struct CCPoint{float x=0,y=0;};struct GJBaseGameLayer;
+struct MainLayer{float getScaleY()const{return 1;}};
+struct PlayerObject {
+ GJBaseGameLayer* m_gameLayer=nullptr;CCPoint position{100,40};MainLayer main;MainLayer* m_mainLayer=&main;
+ bool m_isShip=false,m_isBall=false,m_isBird=false,m_isDart=false,m_isRobot=false,m_isSpider=false,m_isSwing=false;
+ bool m_isUpsideDown=false,m_isDead=false,m_wasTeleported=false,moving=false,nativeTeleport=false;
+ float m_vehicleSize=1,rotation=0;int updates=0;
+ CCPoint getPosition()const{return position;}float getRotation()const{return rotation;}bool isVisible()const{return true;}
+ virtual ~PlayerObject()=default;
+ virtual void update(float){++updates;if(moving)position.x+=5;if(nativeTeleport){position.x+=729.7268f;m_wasTeleported=true;nativeTeleport=false;}}
+ virtual void updateRotation(float){if(moving)rotation+=3;}
+ virtual void spiderTestJump(bool){position.y+=700;m_isUpsideDown=!m_isUpsideDown;}
+};
+struct TeleportPortalObject{};
+struct GJBaseGameLayer {
+ struct {bool m_isDualMode=false;CCPoint m_cameraPosition;} m_gameState;
+ PlayerObject* m_player1=nullptr;double m_attemptTime=0;bool m_inResetDelay=false,m_isPaused=false;
+ virtual ~GJBaseGameLayer()=default;
+ virtual void update(float dt){clockMs+=std::int64_t(dt*1000);m_attemptTime+=dt;
+  if(m_player1){m_player1->update(dt);m_player1->updateRotation(dt);m_gameState.m_cameraPosition={m_player1->position.x-200,m_player1->position.y-100};}}
+ void teleportPlayer(TeleportPortalObject*,PlayerObject* p){p->position.x+=729.7268f;p->m_wasTeleported=true;}
+};
+struct PlayLayer:GJBaseGameLayer {
+ bool m_isTestMode=false,m_isPracticeMode=false,m_hasCompletedLevel=false;
+ static inline PlayLayer* current=nullptr;static PlayLayer* get(){return current;}
+};
+${capture}
+namespace corum::ranked {
+struct RankedRuntime {bool spectator=false;static RankedRuntime& get(){static RankedRuntime r;return r;}bool isSpectating()const{return spectator;}};
+struct SpectatorLiveRuntime {
+ bool busy=false;std::int64_t next=0;std::vector<SpectatorGhostPose> sent;
+ static SpectatorLiveRuntime& get(){static SpectatorLiveRuntime r;return r;}
+ bool tickPublisher(SpectatorGhostPose const& p,bool){if(busy||clockMs<next)return false;sent.push_back(p);next=clockMs+50;return true;}
+};
+namespace debug {
+struct DebugSpectateRuntime {
+ DebugSpectateCapture capture;std::vector<SpectatorGhostPose> sent;
+ static DebugSpectateRuntime& get(){static DebugSpectateRuntime d;return d;}
+ bool recordPose(SpectatorGhostPose const& p){if(!capture.capture(clockMs,p))return false;sent.push_back(p);return true;}
+};
+}
+}
+struct CorumRankedPlayLayer:PlayLayer {
+ struct Fields{bool rankedInitialized=false,rankedLevel=true,safetyRetired=false,spectatorMode=false,spectatorPending=false;
+  bool debugRecordScene=false,debugPlaybackScene=false,debugRecordHasFrame=false;SpectatorCapturePolicy spectatorCapture;}fields;
+ Fields* m_fields=&fields;
+ bool freezeLocalDummy(PlayerObject*)const{return fields.spectatorMode || fields.debugPlaybackScene;}
+ ${owner}
+};
+static CorumRankedPlayLayer* localSafetyLayer(){return static_cast<CorumRankedPlayLayer*>(PlayLayer::get());}
+struct PlayerHook:PlayerObject {
+ ${['void update(float dt)', 'void updateRotation(float dt)', 'void spiderTestJump(bool dynamic)'].map(n=>method(n,playerAt)).join('\n')}
+};
+struct WorldHook:CorumRankedPlayLayer {
+ ${method('void update(float dt)',worldAt)}
+ ${method('void teleportPlayer(',worldAt)}
+};
+int main(){
+ auto& publisher=SpectatorLiveRuntime::get();PlayerHook player;WorldHook world;PlayLayer::current=&world;
+ player.m_gameLayer=&world;world.m_player1=&player;
+ world.update(.016f);assert(publisher.sent.empty()); // vanilla init has no capture authority
+ world.fields.rankedInitialized=true;
+ for(int i=0;i<40;++i){world.update(.016f);}assert(publisher.sent.empty()); // default entrance pose is not stable gameplay
+ clockMs=0;player.moving=true;
+ world.update(.016f);world.update(.016f);world.update(.016f);
+ assert(publisher.sent.size()==1 && clockMs<500);
+ auto first=publisher.sent.back();assert(first.rotation==6 && first.camera->x==first.x-200);
+ auto latest=world.fields.spectatorCapture.snapshot();assert(latest->rotation==player.rotation && latest->camera->x==player.position.x-200);
+ publisher.busy=true;TeleportPortalObject portal;world.teleportPlayer(&portal,&player);
+ for(int i=0;i<4;++i){world.update(.016f);}assert(publisher.sent.size()==1);
+ publisher.busy=false;world.update(.016f);assert(publisher.sent.size()==2);
+ auto snap=publisher.sent.back();assert(snap.discontinuity && verifiedSpectatorSnap(first,snap));
+ assert(snap.cameraSnap && snap.camera->x==player.position.x-200);
+ assert(!world.fields.spectatorCapture.snapshot()->discontinuity); // consumed only when sampled
+ auto count=publisher.sent.size();player.m_isSpider=true;
+ world.update(.016f);player.spiderTestJump(false);world.update(.016f);
+ assert(publisher.sent.size()==count);world.update(.016f);world.update(.016f);
+ assert(publisher.sent.back().discontinuity && publisher.sent.back().discontinuity->type==SpectatorDiscontinuity::SpiderSnap);
+ // An arbitrary coordinate change without a native event never creates proof.
+ world.fields.spectatorCapture.sampled();player.position.x+=729.7268f;world.observeSpectatorNativeUpdate(&player);
+ assert(!world.fields.spectatorCapture.snapshot()->discontinuity);
+ world.fields.spectatorCapture.reset();player.m_wasTeleported=false;player.nativeTeleport=true;world.update(.016f);
+ assert(world.fields.spectatorCapture.snapshot()->discontinuity); // genuine native flag rising edge
+ auto dummyUpdates=player.updates;world.fields.spectatorMode=true;
+ for(int i=0;i<3;++i){world.update(.016f);}assert(player.updates==dummyUpdates);
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+ auto& debug=debug::DebugSpectateRuntime::get();world.fields.spectatorMode=false;world.fields.rankedLevel=false;
+ world.fields.debugRecordScene=true;world.fields.spectatorCapture.reset();clockMs=0;
+ world.update(.016f);world.update(.016f);world.update(.016f);assert(debug.sent.size()==1 && world.fields.debugRecordHasFrame);
+ assert(debug.sent.back().camera && clockMs<500);
+ auto size=debug.sent.size();world.update(.016f);assert(debug.sent.size()==size);
+ world.fields.debugRecordScene=false;world.fields.debugPlaybackScene=true;dummyUpdates=player.updates;
+ world.update(.016f);assert(player.updates==dummyUpdates && debug.sent.size()==size);
+#endif
+}
+`;
+    const dir=mkdtempSync(join(tmpdir(),'corum-capture-native-'));
+    try{const file=join(dir,'capture.cpp'),binary=join(dir,'capture');writeFileSync(file,cpp);
+        execFileSync('g++',['-std=c++23','-Wall','-Wextra','-Wpedantic','-Werror',...(debugOn?['-DCORUM_RANKED_DEBUG_SPECTATE=1']:[]),file,'-o',binary],{stdio:'pipe'});
+        execFileSync(binary,[],{stdio:'pipe'});
+    }finally{rmSync(dir,{recursive:true,force:true});}
+});

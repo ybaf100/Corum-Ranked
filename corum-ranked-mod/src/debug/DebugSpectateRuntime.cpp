@@ -45,6 +45,7 @@ void DebugSpectateRuntime::start(bool playback, std::string password) {
     m_mode = playback ? DebugSpectateMode::PreparingPlayback : DebugSpectateMode::PreparingRecord;
     m_status = playback ? "REQUESTING SERVER PLAYBACK..." : "CREATING SERVER RECORDING...";
     m_launched = false; m_playbackComplete = false; m_errors = 0; m_capture = {};
+    m_previousCapturedPose.reset();
     m_id.clear(); m_token.clear(); m_contextId.clear();
     // Admission belongs to a NEW scope. A deadline/backoff left by an expired
     // or failed scope must not cancel this request before its HTTP ACK arrives.
@@ -128,12 +129,26 @@ void DebugSpectateRuntime::sceneEntered(int levelId) {
             "/api/ranked/debug/spectate/playbacks/" + m_id + "/spectator-live");
     }
 }
-void DebugSpectateRuntime::recordPose(SpectatorGhostPose const& pose, bool terminal) {
-    if (m_mode != DebugSpectateMode::Recording || m_capture.ended()) return;
+bool DebugSpectateRuntime::recordPose(SpectatorGhostPose const& pose, bool terminal) {
+    if (m_mode != DebugSpectateMode::Recording || m_capture.ended()) return false;
     auto const elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - m_recordStartedAt).count();
-    m_capture.capture(elapsed, pose, terminal);
+    auto const sequence = m_capture.nextSequence();
+    auto const accepted = m_capture.capture(elapsed, pose, terminal);
+    if (accepted) {
+        if (sequence >= 18 && sequence <= 22 && m_previousCapturedPose) {
+            auto const& previous = *m_previousCapturedPose;
+            log::info("[DebugSpectate] capture forensic sequence={} elapsedMs={} x={} y={} deltaX={} deltaY={} distance={} previousMode={} mode={} mini={} upsideDown={} flipped={} dual={} cameraX={} cameraY={} discontinuity={}",
+                sequence, elapsed, pose.x, pose.y, pose.x - previous.x, pose.y - previous.y,
+                std::hypot(pose.x - previous.x, pose.y - previous.y), spectatorModeName(previous.mode),
+                spectatorModeName(pose.mode), pose.mini, pose.upsideDown, pose.flipped, pose.dual,
+                pose.camera ? pose.camera->x : 0, pose.camera ? pose.camera->y : 0,
+                pose.discontinuity ? spectatorDiscontinuityName(pose.discontinuity->type) : "NONE");
+        }
+        m_previousCapturedPose = pose;
+    }
     if (m_capture.ended()) m_mode = DebugSpectateMode::FinalizingRecord;
     pumpRecording();
+    return accepted;
 }
 void DebugSpectateRuntime::cancelRecording() {
     if (m_mode != DebugSpectateMode::Recording) return;

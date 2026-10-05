@@ -41,6 +41,7 @@ private:
     bool m_discardLogged = false;
     bool m_streamAttachedLogged = false;
     bool m_poseCurrent = false;
+    bool m_creationAttempted = false;
     std::optional<SpectatorGhostPose> m_appliedState;
 };
 

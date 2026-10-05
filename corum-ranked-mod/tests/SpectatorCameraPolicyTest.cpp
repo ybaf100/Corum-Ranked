@@ -32,6 +32,11 @@ int main() {
     update(true, frame);
     assert(camera.state() == SpectatorCameraState::Following);
     assert((camera.origin() == SpectatorCameraPoint{790, 265}));
+    frame.pose->camera = SpectatorCameraOrigin{520, -100}; update(true, frame);
+    assert((camera.origin() == SpectatorCameraPoint{520, -100}));
+    frame.pose->camera = SpectatorCameraOrigin{std::numeric_limits<float>::infinity(), 0}; update(true, frame);
+    assert((camera.origin() == SpectatorCameraPoint{790, 265}));
+    frame.pose->camera.reset();
     frame.pose->x += 300; frame.pose->y += 200; ++frame.sequence; update(true, frame);
     assert((camera.origin() == SpectatorCameraPoint{1090, 465}));
     auto const held = camera.origin();

@@ -23,7 +23,7 @@ class SpectatorLiveRuntime final {
 public:
     static SpectatorLiveRuntime& get();
 
-    void tickPublisher(SpectatorGhostPose const& pose, bool practice);
+    bool tickPublisher(SpectatorGhostPose const& pose, bool practice);
     void publishTerminal(SpectatorGhostPose const& pose, bool practice);
     void tickTerminal();
     void localAttemptStarted() { m_deferredTerminalPose.reset(); }

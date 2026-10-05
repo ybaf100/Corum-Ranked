@@ -8,6 +8,20 @@
 
 namespace corum::ranked {
 
+struct SpectatorCameraOrigin { float x = 0, y = 0; };
+inline bool validSpectatorCamera(SpectatorCameraOrigin camera) {
+    return std::isfinite(camera.x) && std::isfinite(camera.y) &&
+        std::abs(camera.x) <= 10'000'000.0f && std::abs(camera.y) <= 10'000'000.0f;
+}
+enum class SpectatorDiscontinuity { Teleport, SpiderSnap };
+inline std::string_view spectatorDiscontinuityName(SpectatorDiscontinuity type) {
+    return type == SpectatorDiscontinuity::Teleport ? "TELEPORT" : "SPIDER_SNAP";
+}
+struct SpectatorSnapEvidence {
+    SpectatorDiscontinuity type = SpectatorDiscontinuity::Teleport;
+    float fromX = 0, fromY = 0, toX = 0, toY = 0;
+};
+
 struct SpectatorGhostPose {
     float x = 0.0f;
     float y = 0.0f;
@@ -20,6 +34,11 @@ struct SpectatorGhostPose {
     // Native visual flip is distinct from gravity (e.g. Ship/UFO).
     bool flipped = false;
     bool dual = false;
+    bool visible = true;
+    std::optional<SpectatorCameraOrigin> camera = std::nullopt;
+    bool cameraSnap = false;
+    // Native event endpoints, never an unrestricted large-jump opt-out.
+    std::optional<SpectatorSnapEvidence> discontinuity = std::nullopt;
 };
 
 struct SpectatorRemoteContext {
@@ -47,9 +66,30 @@ inline bool finiteSpectatorPose(SpectatorGhostPose const& pose) {
         !spectatorModeName(pose.mode).empty() && !(pose.dead && pose.finished);
 }
 
+inline bool finiteSpectatorSnap(SpectatorSnapEvidence const& snap) {
+    if (!validSpectatorCamera({snap.fromX, snap.fromY}) ||
+        !validSpectatorCamera({snap.toX, snap.toY})) return false;
+    auto const dx = snap.toX - snap.fromX, dy = snap.toY - snap.fromY;
+    auto const distance = std::hypot(dx, dy);
+    return distance > 0 && (snap.type == SpectatorDiscontinuity::Teleport ? distance <= 100'000.0f :
+        std::abs(dx) <= 400.0f && std::abs(dy) <= 2400.0f);
+}
+inline bool verifiedSpectatorSnap(SpectatorGhostPose const& previous, SpectatorGhostPose const& next) {
+    if (!next.discontinuity || !finiteSpectatorSnap(*next.discontinuity)) return false;
+    auto const& snap = *next.discontinuity;
+    // Both endpoints must align with adjacent accepted samples. The residual
+    // continuous motion still has the original 400-unit safety bound.
+    if (std::hypot(snap.fromX - previous.x, snap.fromY - previous.y) > 400.0f ||
+        std::hypot(next.x - snap.toX, next.y - snap.toY) > 400.0f) return false;
+    return snap.type == SpectatorDiscontinuity::Teleport ||
+        (next.mode == SpectatorGameMode::Spider &&
+         (previous.mode != next.mode || previous.upsideDown != next.upsideDown));
+}
+
 // Keep the original correction limit. A bounded, native Spider gravity snap or
 // mode portal transition snaps presentation instead of lerping across the map.
 inline bool spectatorPoseSnapAllowed(SpectatorGhostPose const& previous, SpectatorGhostPose const& next) {
+    if (next.discontinuity) return verifiedSpectatorSnap(previous, next);
     auto const dx = std::abs(next.x - previous.x);
     auto const dy = std::abs(next.y - previous.y);
     return dx <= 400.0f && dy <= 2400.0f &&

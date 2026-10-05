@@ -1,12 +1,53 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
+const read = path => readFileSync(join(root,path),'utf8');
+const wire = process.env.CORUM_SPECTATOR_WIRE_FIXTURE ? JSON.parse(readFileSync(process.env.CORUM_SPECTATOR_WIRE_FIXTURE,'utf8')) : null;
+function method(source,name) {
+    const start=source.indexOf(name);assert(start>=0,name);
+    const open=source.indexOf('{',start);let depth=1,end=open+1;
+    while(depth){if(source[end]==='{')++depth;if(source[end]==='}')--depth;++end;}return source.slice(start,end);
+}
+function cppValue(value) {
+    if(value===null)return 'matjson::Value{}';
+    if(typeof value==='number')return Number.isInteger(value)?`matjson::Value(std::int64_t(${value}))`:`matjson::Value(double(${value}))`;
+    if(typeof value==='boolean'||typeof value==='string')return `matjson::Value(${JSON.stringify(value)})`;
+    if(Array.isArray(value))return `matjson::Value(matjson::Value::Array{${value.map(cppValue).join(',')}})`;
+    return `matjson::Value(matjson::Value::Object{${Object.entries(value).map(([k,v])=>`{${JSON.stringify(k)},${cppValue(v)}}`).join(',')}})`;
+}
+const viewerSource=read('src/SpectatorLiveRuntime.cpp'), viewerHeader=read('src/SpectatorLiveRuntime.hpp');
+const viewerTest=read('tests/SpectatorLiveViewerNativeTest.mjs');
+const valueModel=viewerTest.slice(viewerTest.indexOf('namespace matjson {'),viewerTest.indexOf('${readFileSync(join(root,'));
+const decoderHarness=`
+#include <chrono>
+#include <limits>
+#include <map>
+#include <variant>
+${valueModel}
+${read('src/spectator/SpectatorPoseCodec.hpp').replace(/^#include.*$|^#pragma once$/gm,'')}
+constexpr int kProtocolVersion=2;constexpr float kPoseDiscontinuityDistance=400;
+${method(viewerSource,'float poseDistance(')}
+namespace corum::ranked {
+namespace log=geode::log;
+struct RankedRuntime {
+ struct Match{int roundNumber=1,deathmatchSequence=0;};struct View{Match match;}data;
+ static RankedRuntime& get(){static RankedRuntime r;return r;}View const& view()const{return data;}
+};
+enum class SpectatorLiveStatus{Idle,Waiting,Live,Fallback};
+struct SpectatorLiveRuntime {
+${viewerHeader.slice(viewerHeader.indexOf('    std::string m_viewMatchId;'),viewerHeader.indexOf('    geode::async::TaskHolder'))}
+ void applyViewerResponse(matjson::Value const&);void setFallback(std::string);
+ std::optional<SpectatorGhostPose> interpolatedPose()const;
+};
+${['void SpectatorLiveRuntime::applyViewerResponse(', 'void SpectatorLiveRuntime::setFallback(', 'std::optional<SpectatorGhostPose> SpectatorLiveRuntime::interpolatedPose()'].map(n=>method(viewerSource,n)).join('\n')}
+}
+`;
 
 // Compile the COMPLETE production renderer translation unit. These observable
 // native lifecycle doubles verify ownership/control flow, not GD ABI or visuals.
@@ -62,6 +103,7 @@ struct CCNode: CCObject {
     void setPosition(CCPoint p) { position=p; ++positionWrites; }
     void setRotation(float r) { rotation=r; ++rotationWrites; }
     void setVisible(bool b) { visible=b; }
+    bool isVisible() const { return visible; }
     int getZOrder() const { return z; }
     float getScale() const { return 1.0f; }
 };
@@ -83,7 +125,7 @@ public:
     T* data() const { return p; } T* operator->() const { return p; }
     explicit operator bool() const { return p!=nullptr; }
 };
-namespace log { template<class... T> void info(T...) {} template<class... T> void warn(T...) {} }
+namespace log { template<class... T> void info(T...) {} template<class... T> void warn(T...) {} template<class... T> void debug(T...) {} }
 namespace prelude { using namespace cocos2d; using geode::Ref; namespace log=geode::log; }
 }
 struct GJGameLevel { int m_levelID=123; };
@@ -160,7 +202,8 @@ struct PlayLayer: GJBaseGameLayer {
 #include "${join(root, 'src/domain/SpectatorLocalSafety.hpp')}"
 #include "${join(root, 'src/spectator/SpectatorPlayerCapture.hpp')}"
 #include <iostream>
-using namespace corum::ranked; using namespace cocos2d;
+using namespace corum::ranked; using namespace cocos2d; using namespace geode::prelude;
+${decoderHarness}
 int main() {
   {
     GJGameLevel level; PlayerObject local, other; PlayLayer layer;
@@ -176,12 +219,13 @@ int main() {
     layer.m_gameState.m_cameraPosition=CCPoint{150,20};
     drive(false); assert(!camera.ownsCamera() && layer.m_gameState.m_cameraPosition.x==150);
     remote.update(&layer,false,f); assert(!remote.player() && PlayerObject::creates==0);
-    remote.update(&layer,true,f); auto* first=remote.player(); assert(first && first!=&local && first!=&other && !first->visible);
+    remote.update(&layer,true,f); assert(!remote.player() && PlayerObject::creates==0);
     drive(true); assert(camera.state()==SpectatorCameraState::Waiting && layer.m_gameState.m_cameraPosition.x==150);
     CCObject::drain();
     for(int i=0;i<1000;++i)remote.update(&layer,true,f);
-    assert(PlayerObject::creates==1 && remote.player()==first);
+    assert(PlayerObject::creates==0 && !remote.player());
     f.pose=SpectatorGhostPose{50,70,90,false,false}; remote.update(&layer,true,f);
+    auto* first=remote.player(); assert(first && first!=&local && first!=&other && PlayerObject::creates==1);
     assert(first->position.x==50 && first->position.y==70 && first->rotation==90 && first->visible);
     assert(first->unschedules>0 && !first->m_regularTrail->visible);
     assert(local.position.x==11 && local.position.y==22 && local.rotation==33 && local.positionWrites==1);
@@ -241,7 +285,29 @@ int main() {
     camera.cleanup(&layer); camera.cleanup(&layer);
     assert(!camera.ownsCamera() && !layer.m_gameState.m_unkBool4 && !layer.m_gameState.m_unkBool5);
     assert(layer.m_gameState.m_cameraPosition.x==150);
+    ${wire ? `
+    // Real Nest HTTP -> PostgreSQL -> server playback clock/relay responses
+    // enter the production C++ decoder, renderer and camera. No local replay clock.
+    remote.cleanup();camera.cleanup(&layer);level.m_levelID=88350599;
+    SpectatorLiveRuntime viewer;viewer.m_viewMatchId=${JSON.stringify(wire[0].stream.matchId)};
+    PlayerObject* wirePlayer=nullptr;std::uint64_t wireEpoch=0;
+    ${wire.map((response,i)=>`
+    viewer.applyViewerResponse(${cppValue(response)});
+    assert(viewer.m_status==SpectatorLiveStatus::Live);
+    f.context={viewer.m_viewMatchId,1,0,88350599,viewer.m_viewAttemptId,viewer.m_viewGeneration,viewer.m_viewPresentationEpoch};
+    f.sequence=viewer.m_lastViewSequence;f.pose=viewer.interpolatedPose();
+    remote.update(&layer,true,f);drive(true);assert(remote.player() && f.pose->camera);
+    ${i===0?'wirePlayer=remote.player();wireEpoch=viewer.m_viewPresentationEpoch;': 'assert(remote.player()==wirePlayer && viewer.m_viewPresentationEpoch==wireEpoch);'}
+    assert(layer.m_gameState.m_cameraPosition.x==f.pose->camera->x && layer.m_gameState.m_cameraPosition.y==f.pose->camera->y);
+    ${i===1?'assert(!viewer.m_previousPose && remote.player()->position.x==f.pose->x);':''}
+    `).join('\n')}
+    assert(f.pose->dead || f.pose->finished);auto held=remote.player()->position;
+    viewer.m_poseReceivedAt=std::chrono::steady_clock::now()-std::chrono::seconds(5);
+    f.pose=viewer.interpolatedPose();remote.update(&layer,true,f);drive(true);
+    assert(remote.player()==wirePlayer && remote.player()->position.x==held.x);
+    ` : ''}
     remote.cleanup(); remote.cleanup();
+    f.pose=SpectatorGhostPose{50,70,90,false,false};
     PlayerObject::fail=true; ++f.context.generation; remote.update(&layer,true,f);
     auto creates=PlayerObject::creates; for(int i=0;i<20;++i)remote.update(&layer,true,f);
     assert(PlayerObject::creates==creates && !remote.player() && world->children.empty());

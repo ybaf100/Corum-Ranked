@@ -33,6 +33,10 @@ interface SpectatorInputEdge {
 
 export const SPECTATOR_GAME_MODES = ["CUBE", "SHIP", "BALL", "UFO", "WAVE", "ROBOT", "SPIDER", "SWING"] as const;
 export type SpectatorGameMode = typeof SPECTATOR_GAME_MODES[number];
+export interface SpectatorSnapEvidence {
+  readonly type: "TELEPORT" | "SPIDER_SNAP";
+  readonly fromX: number; readonly fromY: number; readonly toX: number; readonly toY: number;
+}
 
 export interface SpectatorPoseKeyframe {
   readonly x: number;
@@ -49,6 +53,9 @@ export interface SpectatorPoseKeyframe {
   readonly gravity?: number;
   readonly cameraX?: number;
   readonly cameraY?: number;
+  readonly cameraSnap?: boolean;
+  readonly discontinuity?: SpectatorSnapEvidence;
+  readonly visible?: boolean;
   readonly dual: boolean;
   readonly player2X?: number;
   readonly player2Y?: number;
@@ -153,6 +160,23 @@ export const parseSpectatorKeyframe = (value: unknown): SpectatorPoseKeyframe =>
   const gravity = optionalFiniteNumber(value.gravity);
   const cameraX = optionalFiniteNumber(value.cameraX);
   const cameraY = optionalFiniteNumber(value.cameraY);
+  const validCamera = cameraX !== undefined && cameraY !== undefined &&
+    Math.abs(cameraX) <= 10_000_000 && Math.abs(cameraY) <= 10_000_000;
+  let discontinuity: SpectatorSnapEvidence | undefined;
+  if (value.discontinuity !== undefined) {
+    const snap = value.discontinuity;
+    if (!isRecord(snap) || (snap.type !== "TELEPORT" && snap.type !== "SPIDER_SNAP")) {
+      throw new BadRequestException("keyframe.discontinuity requires a supported native event");
+    }
+    const fromX = finiteNumber(snap.fromX, "discontinuity.fromX"), fromY = finiteNumber(snap.fromY, "discontinuity.fromY");
+    const toX = finiteNumber(snap.toX, "discontinuity.toX"), toY = finiteNumber(snap.toY, "discontinuity.toY");
+    const dx = toX - fromX, dy = toY - fromY, distance = Math.hypot(dx, dy);
+    if ([fromX, fromY, toX, toY].some(v => Math.abs(v) > 10_000_000) || distance === 0 ||
+      (snap.type === "TELEPORT" ? distance > 100_000 : Math.abs(dx) > 400 || Math.abs(dy) > 2400)) {
+      throw new BadRequestException("keyframe.discontinuity is outside native event bounds");
+    }
+    discontinuity = { type: snap.type, fromX, fromY, toX, toY };
+  }
   const player2X = optionalFiniteNumber(value.player2X);
   const player2Y = optionalFiniteNumber(value.player2Y);
   const player2Rotation = optionalFiniteNumber(value.player2Rotation);
@@ -175,8 +199,9 @@ export const parseSpectatorKeyframe = (value: unknown): SpectatorPoseKeyframe =>
     ...(velocityX === undefined ? {} : { velocityX }),
     ...(velocityY === undefined ? {} : { velocityY }),
     ...(gravity === undefined ? {} : { gravity }),
-    ...(cameraX === undefined ? {} : { cameraX }),
-    ...(cameraY === undefined ? {} : { cameraY }),
+    ...(validCamera ? { cameraX, cameraY, cameraSnap: value.cameraSnap === true } : {}),
+    ...(discontinuity === undefined ? {} : { discontinuity }),
+    ...(value.visible === undefined ? {} : { visible: requiredBoolean(value.visible, "keyframe.visible") }),
     ...(player2X === undefined ? {} : { player2X }),
     ...(player2Y === undefined ? {} : { player2Y }),
     ...(player2Rotation === undefined ? {} : { player2Rotation }),

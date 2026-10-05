@@ -1,5 +1,7 @@
 import "reflect-metadata";
-import { readFile, mkdtemp, rm } from "node:fs/promises";
+import { readFile, writeFile, mkdtemp, rm } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -139,12 +141,11 @@ describe("server-backed Debug Spectate over real HTTP and persistent PostgreSQL"
     expect(playback.body.frames).toBeUndefined(); expect(playback.body.packets).toBeUndefined();
     expect((await post(`recordings/${recording.recordingId}/finalize`, { completed: true }, recording.token)).status).toBe(201);
   }, 60_000);
-  it("starts WAITING over HTTP, only server clock advances packets, reuses production stream/terminal/sequence semantics", async () => {
+  it("first HTTP reply emits t=0, only server clock advances packets, reuses production stream/terminal/sequence semantics", async () => {
     const before = await rankedSnapshot(); const playback = (await post("playbacks", createBody)).body;
     const first = await poll(playback); expect(first.status).toBe(200);
-    expect(first.body.waiting).toBe(true); expect(first.body.packets).toEqual([]);
-    now += 50;
-    const initial = (await poll(playback)).body;
+    expect(first.body.waiting).toBe(false);
+    const initial = first.body;
     expect(initial.reset).toBe(true); expect(initial.packets).toHaveLength(1);
     expect(initial.stream.matchId).toBe(playback.contextId);
     expect(initial.packets[0]).toMatchObject({ protocolVersion: 2, generation: 1, sequence: 0, elapsedMs: 0, roundNumber: 1, deathmatchSequence: null });
@@ -198,13 +199,69 @@ describe("server-backed Debug Spectate over real HTTP and persistent PostgreSQL"
     expect(stored.map(row => row.keyframe)).toEqual(frames.map(f => f.keyframe));
     const playback = (await post("playbacks", createBody)).body;
     expect(playback.recordingId).toBe(recording.recordingId); expect(playback.formatVersion).toBe(2);
-    expect(playback.frames).toBeUndefined(); expect((await poll(playback)).body.waiting).toBe(true);
-    now += 50; const first = (await poll(playback)).body;
+    expect(playback.frames).toBeUndefined(); const first = (await poll(playback)).body;
     expect(first.packets[0].keyframe).toEqual(frames[0]!.keyframe);
     now += 350; const rest = (await poll(playback, `&attemptId=${first.stream.attemptId}&generation=1&afterSequence=0`)).body;
     expect(rest.packets.map((p: any) => p.keyframe)).toEqual(frames.slice(1).map(f => f.keyframe));
     expect(rest.playbackComplete).toBe(true); expect(await rankedSnapshot()).toEqual(before);
     expect((await post(`playbacks/${playback.playbackId}/close`, {}, playback.token)).status).toBe(201);
+  });
+  it.each([true, false])("normalizes persisted leading time, preserves relative timing/terminal/camera over HTTP (dead=%s)", async dead => {
+    now += 1000; const before = await rankedSnapshot(); const recording = await startRecord();
+    const leading = 1239;
+    const frames = [frame(0, leading), frame(1, leading + 51), frame(2, leading + 101, dead, !dead)].map((f, i) => ({
+      ...f, keyframe: { ...f.keyframe, cameraX: 700 + i * 10, cameraY: -20 + i * 5, cameraSnap: false, visible: true },
+    }));
+    frames[1]!.keyframe.x = frames[0]!.keyframe.x + 729.7268;
+    frames[2]!.keyframe.x = frames[1]!.keyframe.x + 10;
+    const snap = { type: "TELEPORT", fromX: frames[0]!.keyframe.x, fromY: frames[0]!.keyframe.y,
+      toX: frames[1]!.keyframe.x, toY: frames[1]!.keyframe.y };
+    const recorded = frames.map((f, i) => i === 1 ? { ...f, keyframe: { ...f.keyframe, discontinuity: snap, cameraSnap: true } } : f);
+    const path = `recordings/${recording.recordingId}`;
+    expect((await post(`${path}/frames`, { formatVersion: 2, frames: recorded }, recording.token)).status).toBe(201);
+    expect((await post(`${path}/finalize`, { completed: true }, recording.token)).status).toBe(201);
+    const persisted = (await database.query<{ elapsed_ms: number; keyframe: unknown }>(
+      "SELECT elapsed_ms, keyframe FROM debug_spectate_frames WHERE recording_id = $1 ORDER BY sequence", [recording.recordingId])).rows;
+    expect(persisted.map(f => f.elapsed_ms)).toEqual([1239, 1290, 1340]);
+    expect(persisted.map(f => f.keyframe)).toEqual(recorded.map(f => f.keyframe));
+    const playback = (await post("playbacks", createBody)).body;
+    expect(playback).toMatchObject({ playbackLeadingMs: leading, playbackDurationMs: 101, durationMs: 1340 });
+    const first = (await poll(playback)).body;
+    expect(first.packets).toHaveLength(1); expect(first.packets[0]).toMatchObject({ elapsedMs: 0, keyframe: recorded[0]!.keyframe });
+    const query = `&attemptId=${first.stream.attemptId}&generation=1&afterSequence=0`;
+    // Repeated render polls never advance server playback time.
+    for (let render = 0; render < 144; ++render) expect((await poll(playback, query)).body.packets).toEqual([]);
+    now += 50; expect((await poll(playback, query)).body.packets).toEqual([]);
+    now += 1; const middle = (await poll(playback, query)).body;
+    expect(middle.packets).toHaveLength(1); expect(middle.packets[0]).toMatchObject({ elapsedMs: 51, keyframe: recorded[1]!.keyframe });
+    expect(middle.playbackComplete).toBe(false);
+    now += 49; expect((await poll(playback, query + "&unused=ignored")).body.playbackComplete).toBe(false);
+    now += 1; const terminal = (await poll(playback, `&attemptId=${first.stream.attemptId}&generation=1&afterSequence=1`)).body;
+    expect(terminal.playbackComplete).toBe(true);
+    expect(terminal.packets[0]).toMatchObject({ elapsedMs: 101, keyframe: recorded[2]!.keyframe });
+    const wirePath = join(dir, `http-wire-${dead ? "dead" : "finished"}.json`);
+    await writeFile(wirePath, JSON.stringify([first, middle, terminal]));
+    await promisify(execFile)(process.execPath, ["--test", fileURLToPath(new URL(
+      "../../../../corum-ranked-mod/tests/SpectatorRemoteNativeTest.mjs", import.meta.url))], {
+      env: { ...process.env, CORUM_SPECTATOR_WIRE_FIXTURE: wirePath }, maxBuffer: 4 * 1024 * 1024,
+    }).catch(error => { throw new Error(String(error.stdout) + String(error.stderr)); });
+    now += 5000; expect((await poll(playback)).body.packets.at(-1).keyframe).toEqual(recorded[2]!.keyframe);
+    expect(await rankedSnapshot()).toEqual(before); expect(rankedState).not.toHaveBeenCalled();
+    await post(`playbacks/${playback.playbackId}/close`, {}, playback.token);
+  }, 60_000);
+  it("drops only invalid camera fields and rejects malformed native event evidence over actual HTTP", async () => {
+    now += 1000; const recording = await startRecord(); const path = `recordings/${recording.recordingId}/frames`;
+    const pose = frame(0, 0);
+    for (const discontinuity of [true, { type: "ALLOW_LARGE_JUMP" }, { type: "TELEPORT", fromX: 0, fromY: 0, toX: 1e20, toY: 0 }]) {
+      expect((await post(path, { formatVersion: 2, frames: [{ ...pose, keyframe: { ...pose.keyframe, discontinuity } }] }, recording.token)).status).toBe(400);
+    }
+    expect((await post(path, { formatVersion: 2, frames: [{ ...pose, keyframe: { ...pose.keyframe, cameraX: 1e20, cameraY: 0 } }] }, recording.token)).status).toBe(201);
+    expect((await post(path, { formatVersion: 2, frames: [{ ...frame(1, 50, true),
+      keyframe: { ...frame(1, 50, true).keyframe, cameraX: null, cameraY: 40 } }] }, recording.token)).status).toBe(201);
+    await post(`recordings/${recording.recordingId}/finalize`, { completed: true }, recording.token);
+    const persisted = (await database.query<{ keyframe: any }>("SELECT keyframe FROM debug_spectate_frames WHERE recording_id = $1", [recording.recordingId])).rows;
+    expect(persisted).toHaveLength(2);
+    for (const f of persisted) { expect(f.keyframe.cameraX).toBeUndefined(); expect(f.keyframe.cameraY).toBeUndefined(); expect(f.keyframe.x).toBeGreaterThan(0); }
   });
   it("excludes old completed v1 recordings even when newer, and rejects corrupt expanded state", async () => {
     now += 1000; const good = await completedRecord();

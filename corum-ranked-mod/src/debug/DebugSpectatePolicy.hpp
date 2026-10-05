@@ -45,6 +45,7 @@ public:
     bool empty() const { return m_pending.empty(); }
     bool ended() const { return m_ended; }
     bool completed() const { return m_completed; }
+    std::int64_t nextSequence() const { return m_nextSequence; }
 private:
     std::deque<DebugSpectateFrame> m_pending;
     std::int64_t m_nextSequence = 0, m_nextSampleMs = 0, m_lastElapsedMs = -1;

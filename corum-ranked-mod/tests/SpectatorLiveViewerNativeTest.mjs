@@ -8,6 +8,7 @@ import { execFileSync } from 'node:child_process';
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const source = readFileSync(join(root, 'src/SpectatorLiveRuntime.cpp'), 'utf8');
 const header = readFileSync(join(root, 'src/SpectatorLiveRuntime.hpp'), 'utf8');
+const evidence = JSON.parse(readFileSync(join(root, 'tests/fixtures/debug-spectate-ipados-beta26.json'), 'utf8'));
 const method = signature => {
     const start = source.indexOf(signature); assert(start >= 0);
     const open = source.indexOf('{', start);
@@ -120,6 +121,47 @@ int main(){
     auto replaceKeyframe=[](matjson::Value root,SpectatorGhostPose pose){
         auto p=root["packets"].asArray().unwrap();p[0]["keyframe"]=encodeSpectatorPose(pose);root["packets"]=p;return root;
     };
+    // Preserve the actual iPadOS rejection magnitude/sequence. Coordinates and
+    // native event endpoints here are deliberately synthetic, not recovered data.
+    SpectatorLiveRuntime relocation;relocation.m_viewMatchId="match";
+    SpectatorGhostPose start{1000,40,0,false,false};start.camera=SpectatorCameraOrigin{700,-20};
+    relocation.applyViewerResponse(replaceKeyframe(response(0,1000),start));
+    relocation.m_lastViewSequence=${evidence.previousSequence};
+    auto identity=relocation.m_viewPresentationEpoch;
+    auto snapped=start;snapped.x+=${evidence.distance};snapped.rotation=90;
+    snapped.camera=SpectatorCameraOrigin{1429.7268f,200};
+    snapped.discontinuity=SpectatorSnapEvidence{SpectatorDiscontinuity::Teleport,start.x,start.y,snapped.x,snapped.y};
+    relocation.applyViewerResponse(replaceKeyframe(response(${evidence.rejectedSequence},snapped.x),snapped));
+    assert(relocation.m_status==SpectatorLiveStatus::Live && relocation.m_viewPresentationEpoch==identity);
+    assert(!relocation.m_previousPose && relocation.interpolatedPose()->x==snapped.x);
+    assert(relocation.interpolatedPose()->rotation==90 && relocation.interpolatedPose()->camera->y==200);
+    auto continuous=snapped;continuous.discontinuity.reset();continuous.x+=10;
+    continuous.camera=SpectatorCameraOrigin{1439.7268f,210};
+    relocation.applyViewerResponse(replaceKeyframe(response(21,continuous.x),continuous));
+    relocation.m_poseReceivedAt=std::chrono::steady_clock::now()-std::chrono::milliseconds(25);
+    auto smooth=relocation.interpolatedPose();assert(smooth->x>snapped.x && smooth->x<continuous.x);
+    assert(smooth->camera->y>200 && smooth->camera->y<210);
+    continuous.cameraSnap=true;continuous.camera->y=1500;
+    relocation.applyViewerResponse(replaceKeyframe(response(22,continuous.x),continuous));
+    assert(relocation.interpolatedPose()->camera->y==1500); // native camera relocation independent from pose
+    continuous.dead=true;relocation.applyViewerResponse(replaceKeyframe(response(23,continuous.x),continuous));
+    assert(relocation.interpolatedPose()->dead && relocation.interpolatedPose()->camera->y==1500);
+    relocation.m_poseReceivedAt=std::chrono::steady_clock::now()-std::chrono::hours(1);
+    assert(relocation.interpolatedPose()->x==continuous.x); // exact terminal, no extrapolation
+    SpectatorLiveRuntime corrupt;corrupt.m_viewMatchId="match";
+    corrupt.applyViewerResponse(replaceKeyframe(response(0,start.x),start));
+    auto unverified=snapped;unverified.discontinuity.reset();
+    corrupt.applyViewerResponse(replaceKeyframe(response(1,unverified.x),unverified));
+    assert(corrupt.m_reason=="POSE_DISCONTINUITY"); // old/raw recordings are never given fabricated authority
+    SpectatorLiveRuntime badProof;badProof.m_viewMatchId="match";
+    badProof.applyViewerResponse(replaceKeyframe(response(0,start.x),start));
+    snapped.discontinuity->fromX+=5000;
+    badProof.applyViewerResponse(replaceKeyframe(response(1,snapped.x),snapped));
+    assert(badProof.m_reason=="POSE_DISCONTINUITY");
+    for(auto invalid : {std::numeric_limits<double>::quiet_NaN(),std::numeric_limits<double>::infinity(),1e20}) {
+        auto encoded=encodeSpectatorPose(start);encoded["cameraX"]=invalid;
+        auto fallback=decodeSpectatorPose(encoded);assert(fallback && !fallback->camera && fallback->x==1000);
+    }
     SpectatorLiveRuntime spider;spider.m_viewMatchId="match";
     SpectatorGhostPose snap{100,30,0,false,false};snap.mode=SpectatorGameMode::Spider;
     spider.applyViewerResponse(replaceKeyframe(response(0,100),snap));
@@ -157,8 +199,9 @@ int main(){
     auto wrongRound=response(2,40,"B",2);wrongRound["stream"]["roundNumber"]=2;
     viewer.applyViewerResponse(wrongRound);assert(viewer.m_reason=="STREAM_CONTEXT_MISMATCH");
     matjson::Value waiting;waiting["protocolVersion"]=2;waiting["waiting"]=true;
+    auto waitingEpoch=viewer.m_viewPresentationEpoch;
     viewer.applyViewerResponse(waiting);assert(viewer.m_status==SpectatorLiveStatus::Waiting && !viewer.interpolatedPose());
-    assert(viewer.m_viewAttemptId.empty() && viewer.m_viewGeneration==0);
+    assert(viewer.m_viewAttemptId=="B" && viewer.m_viewGeneration==2 && viewer.m_viewPresentationEpoch==waitingEpoch);
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
     viewer.m_debugContextId="debug-spectate:scope";viewer.m_viewMatchId=viewer.m_debugContextId;
     RankedRuntime::get().state.match.roundNumber=99;

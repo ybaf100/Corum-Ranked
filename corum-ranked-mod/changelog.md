@@ -1,3 +1,13 @@
+## v0.5.0-beta.27
+
+- Hand Ranked-owned lobby/match audio to gameplay only after successful native PlayLayer init, including Debug RECORD and TEST. Retained Ranked returns reselect the current authoritative lobby mode; GD level music and full-menu restore semantics are preserved.
+- Normalize server playback elapsed times against the first persisted valid frame, preserving relative movement/terminal timing and format-v2 DB compatibility. The first in-scene HTTP reply can emit t=0 without the recording's leading blank time.
+- Observe native player/rotation frames and sample the completed world/camera update at the existing 50ms cadence. Debug visual capture waits for stable moving native gameplay independently from the Ranked journal's unchanged settling window.
+- Relay bounded native TELEPORT/SPIDER_SNAP endpoint evidence and optional actual native camera/visibility state. Verified snaps clear interpolation without changing Remote Player identity; unverified large corrections still reject. Missing/invalid camera uses the existing pose-follow fallback; terminal pose/camera holds exactly.
+- Avoid pre-packet Remote Player allocation and retain the object across transient waiting/fallback. Guard native spectator updateAttempts and keep existing dummy/persistence/Ranked isolation. Debug-only forensic logging is bounded to sequences 18–22.
+- Add executed native audio/capture regressions and actual HTTP -> PostgreSQL -> server clock -> production C++ decoder/Remote Player/camera tests for death and Clear. The supplied beta26 log proves the repeated 729-unit rejection, but does not identify its native cause or contain raw poses; no teleport evidence/camera is invented for old recordings. Re-record on beta27 for complete capture and diagnosis.
+- Synchronize the exact client/server gate to beta27. Keep protocol/Debug format v2 and Phase 1–4; full Dual/cosmetics/jitter/reconnect/camera zoom/platformer and network optimizations remain later phases. No manual Release.
+
 ## v0.5.0-beta.26
 
 - Fix Debug VOICE RECORD/TEST staying in LevelInfo after map/song readiness: activate the verified native GD Play item with its original listener/selector instead of directly calling onPlay with a null sender.

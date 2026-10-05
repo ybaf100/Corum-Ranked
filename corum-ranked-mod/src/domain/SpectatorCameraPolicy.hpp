@@ -64,10 +64,12 @@ public:
             coverage.x <= 0 || coverage.y <= 0) return;
         m_sequence = rendered->sequence;
         auto const& pose = *rendered->pose;
-        // Classic-level look-ahead; Y keeps grounded Cube at the ground and
-        // follows airborne/high sections. Trigger/platformer parity is later.
-        m_origin = {std::max(0.0f, pose.x - coverage.x * 0.35f),
-                    std::max(0.0f, pose.y - coverage.y * 0.45f)};
+        // Native publisher camera, with safe pose-follow for older recordings
+        // or invalid optional camera fields. Interpolation belongs to runtime.
+        m_origin = pose.camera && validSpectatorCamera(*pose.camera)
+            ? SpectatorCameraPoint{pose.camera->x, pose.camera->y}
+            : SpectatorCameraPoint{std::max(0.0f, pose.x - coverage.x * 0.35f),
+                                   std::max(0.0f, pose.y - coverage.y * 0.45f)};
         m_state = pose.dead || pose.finished ? SpectatorCameraState::Terminal :
             SpectatorCameraState::Following;
     }

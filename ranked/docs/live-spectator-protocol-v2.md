@@ -1,6 +1,6 @@
-# Live Spectator Phase 4 — protocol v2 (beta25)
+# Live Spectator Phase 4 — protocol v2 (beta27 hotfix)
 
-Exact client/server gate: **v0.5.0-beta.25**. Production protocol **2** and Debug
+Exact client/server gate: **v0.5.0-beta.27**. Production protocol **2** and Debug
 recording format **2** require complete gameplay presentation state. V1 is rejected;
 an absent/unknown mode never silently becomes Cube. The old v1 document is historical.
 
@@ -32,7 +32,8 @@ WebSocket or general DB/polling optimization is included.
 - `upsideDown` is native gravity; `flipped` is native main-layer visual orientation.
 - `dual` is observed from native game state. Phase 4 renders one opponent object;
   dual enters explicit `DUAL_UNSUPPORTED` polling fallback rather than false parity.
-- Existing optional velocity/camera/player2 reserved fields remain unused. Input
+- Optional camera/visibility/native discontinuity fields are described below;
+  velocity/player2 reserved fields remain unused. Input
   edges are not replayed; there is no opponent physics or portal reconstruction.
 
 The existing envelope retains match/round/Death Match sequence/Attempt/generation,
@@ -41,6 +42,54 @@ state and unsupported protocol fail closed. Terminal streams cannot resume in th
 same Attempt; a fresh server Attempt/context re-acquires the visual and camera.
 
 ## Native capture and rendering
+
+beta27 observes native PlayerObject update/rotation and teleport/Spider callbacks.
+The completed GJBaseGameLayer update samples the latest pose with the actual
+`m_gameState.m_cameraPosition`, at the existing 50ms HTTP opportunity. Unsampled
+native event endpoints are retained until a sample is submitted. Debug visual
+capture requires advancing native attempt time and stable moving gameplay frames;
+it does not share the Ranked Attempt journal's unchanged 500ms settling window.
+
+Optional additive v2 fields (older format-v2 recordings remain readable):
+
+```json
+{
+  "cameraX": 700,
+  "cameraY": -20,
+  "cameraSnap": true,
+  "visible": true,
+  "discontinuity": {
+    "type": "TELEPORT",
+    "fromX": 1000,
+    "fromY": 40,
+    "toX": 1729.7268,
+    "toY": 40
+  }
+}
+```
+
+These coordinates are synthetic regression values using the observed iPadOS
+rejection magnitude, not the missing original recording coordinates. Publishers
+mark TELEPORT only from the native portal callback or rising native teleport flag;
+SPIDER_SNAP requires a native Spider callback/gravity transition. Endpoint vectors
+must be finite/bounded (Teleport length <=100,000; Spider |dx| <=400, |dy| <=2400).
+Viewer endpoints must align within the existing 400-unit continuous-motion bound
+of the adjacent accepted samples. A generic large-jump flag is not accepted.
+
+Verified relocation clears previous interpolation and applies current position,
+rotation and camera exactly. It does not reset Attempt/generation/epoch or allocate
+another Remote Player. Camera-only native frame relocation uses cameraSnap without
+bypassing pose checks. Normal camera samples interpolate with normal pose samples;
+terminal samples hold exact pose/camera without extrapolation. Discrete state uses
+accepted sample boundaries. Camera fields are a finite bounded pair; invalid or
+missing camera drops only that optional presentation and uses safe pose-follow.
+Remote objects are allocated on the first valid pose and retained across transient
+waiting/fallback; true context/Attempt/generation reset or exit still cleans them.
+
+Debug server playback subtracts the first persisted elapsed time after validating
+the original DB duration/terminal. Inter-frame and terminal timing remain unchanged.
+The first in-scene HTTP poll starts the server clock and can emit elapsedMs=0.
+Persisted JSONB is not rewritten and TEST never downloads a local replay file.
 
 `SpectatorPlayerCapture` reads GD 2.2081 PlayerObject mode flags, vehicle size,
 gravity and main-layer flip. The exact bindings were inspected at
@@ -81,8 +130,9 @@ Position/rotation keep bounded interpolation. Discrete fields use the latest
 accepted state, never numeric interpolation. Terminal poses are exact. The normal
 400-unit correction check remains. A mode change or same-Spider gravity flip can
 snap with |Δx| ≤ 400 and |Δy| ≤ 2400; large accepted snaps clear the previous lerp
-sample. Unbounded/unknown teleport corrections still fall back. Complex teleport
-and camera trigger parity requires device/map investigation in Phase 5.
+sample. Explicit native evidence is checked before this legacy bounded-state
+fallback. Unbounded/unknown corrections still reject; existing recordings lacking
+evidence are not silently authorized. Full complex camera parity remains Phase 5.
 
 ## Debug compatibility and remaining limits
 

@@ -1,4 +1,24 @@
-# Server-backed Debug Spectate (native launch beta24; gameplay state beta25)
+# Server-backed Debug Spectate (native launch beta26; presentation hotfix beta27)
+
+beta27 stops Ranked-owned lobby/match channels only after native PlayLayer init
+succeeds, for normal Ranked, RECORD and TEST. LevelInfo preparation and failed
+init retain ownership; GD gameplay music is not stopped. Returning to the retained
+Ranked layer uses its existing onEnter -> refresh -> syncAudioMode lifecycle to
+select current Lobby/Promotion/Demotion audio, without calling GD-menu restore.
+
+TEST normalizes the validated persisted timeline to first elapsedMs=0 on the
+server only. DB times and relative/terminal timing are unchanged. RECORD observes
+native player/rotation/events, samples the completed world/camera frame at 50ms,
+and arms on stable native gameplay instead of the Ranked journal settling timer.
+Optional camera/visibility/bounded snap evidence stays on the existing format-v2
+HTTP/JSONB/relay route; see [protocol v2](live-spectator-protocol-v2.md).
+
+The supplied beta26 log/video prove delayed initial playback and repeatable
+sequence-20/21 rejection near 729 units, but provide no raw position/state/camera
+or native event. This hotfix does not invent old camera or teleport evidence.
+Fresh beta27 RECORD is required for exact camera/snap playback; Debug-only
+sequences 18–22 forensic logs also allow investigating the old persisted recording.
+Actual native cause and iPadOS success must be verified with that evidence.
 
 Beta24 retains fresh online attestation, then re-queries the native Saved VOICE object for launch. Saved geometry is reused only when all immutable proof identity fields match, the object is genuinely Saved, geometry is non-empty and notDownloaded is false. Otherwise the attested online object follows vanilla download and verified native replacement. No unverified cache shortcut or geometry reconstruction is used.
 

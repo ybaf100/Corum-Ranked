@@ -125,6 +125,7 @@ void CorumRemotePlayer::cleanup() {
     m_policy.reset();
     m_discardLogged = false;
     m_streamAttachedLogged = false;
+    m_creationAttempted = false;
 }
 
 void CorumRemotePlayer::setVisible(bool visible) {
@@ -200,20 +201,30 @@ void CorumRemotePlayer::update(
         destroyVisual();
         m_discardLogged = false;
         m_streamAttachedLogged = false;
+        m_creationAttempted = false;
         return;
     }
     if (action == SpectatorRemoteLifecycle::Create || action == SpectatorRemoteLifecycle::Recreate) {
-        if (action == SpectatorRemoteLifecycle::Recreate) {
+        if (action == SpectatorRemoteLifecycle::Recreate && m_player) {
             log::info("Spectator Remote Player reset");
             destroyVisual();
         }
         m_discardLogged = false;
         m_streamAttachedLogged = false;
+        m_creationAttempted = false;
+        // WAITING has no native visual allocation. The first validated packet
+        // creates it once; an empty response retains an already attached object.
+        if (!frame->pose) return;
+        m_creationAttempted = true;
         if (!createVisual(layer)) {
             // One creation attempt per context; no per-frame allocation/error loop.
             log::warn("Spectator Remote Player creation failed; polling HUD retained");
             return;
         }
+    }
+    if (!m_player && !m_creationAttempted && frame && frame->pose && action == SpectatorRemoteLifecycle::None) {
+        m_creationAttempted = true;
+        if (!createVisual(layer)) return;
     }
     if (!m_player) return;
     if (!frame || !frame->pose) {
@@ -250,7 +261,7 @@ void CorumRemotePlayer::update(
     }
     // Dead fades to opacity 0; Finished holds visibly. No GD gameplay callback.
     m_poseCurrent = true;
-    setVisible(m_policy.pose().has_value());
+    setVisible(m_policy.pose().has_value() && m_policy.pose()->visible);
 }
 
 } // namespace corum::ranked

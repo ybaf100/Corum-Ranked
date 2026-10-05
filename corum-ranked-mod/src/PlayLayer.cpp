@@ -1,6 +1,7 @@
 #include "RankedRuntime.hpp"
 #include "RankedAudioManager.hpp"
 #include "SpectatorLiveRuntime.hpp"
+#include "domain/SpectatorCapturePolicy.hpp"
 #include "spectator/SpectatorPlayerCapture.hpp"
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
 #include "debug/DebugSpectateRuntime.hpp"
@@ -182,6 +183,7 @@ public:
         bool rankedInitialized = false;
         bool autoExitRequested = false;
         bool gameplayFrameObserved = false;
+        corum::ranked::SpectatorCapturePolicy spectatorCapture;
         bool attemptStartReported = false;
         bool attemptEndReported = false;
         bool deniedDeathmatchVisualAttempt = false;
@@ -209,7 +211,7 @@ public:
     static void onModify(auto& self) {
         // Run the narrow guard before vanilla/other Corum lifecycle callbacks.
         for (auto name : {"PlayLayer::destroyPlayer", "PlayLayer::levelComplete",
-                          "PlayLayer::checkForEnd", "PlayLayer::showCompleteText"}) {
+                          "PlayLayer::checkForEnd", "PlayLayer::showCompleteText", "PlayLayer::updateAttempts"}) {
             if (!self.setHookPriorityPre(name, Priority::First)) {
                 log::warn("Failed to install spectator local safety priority: {}", name);
             }
@@ -350,10 +352,14 @@ public:
             return false;
         }
         m_fields->rankedInitialized = true;
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+        if (m_fields->debugRecordScene || m_fields->debugPlaybackScene)
+            log::info("[DebugSpectate] PlayLayer entered level={}", m_fields->levelId);
+#endif
+        acquireGameplayAudio();
         // Keep Match music alive throughout ROUND STARTING IN and LevelInfo.
         // Stop it only after vanilla has successfully created the real PlayLayer.
         if (m_fields->rankedLevel) {
-            corum::ranked::RankedAudioManager::get().fadeOutForGameplay();
             log::info(
                 "Ranked PlayLayer initialized through vanilla Play: match={} level={}",
                 runtime.view().match.matchId,
@@ -372,13 +378,10 @@ public:
         }
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         if (m_fields->debugRecordScene || m_fields->debugPlaybackScene) {
-            log::info("[DebugSpectate] PlayLayer entered level={}", m_fields->levelId);
             if (m_fields->debugRecordScene) log::info("[DebugSpectate] RECORDING active");
             auto const size = CCDirector::sharedDirector()->getWinSize();
             m_fields->debugSpectateHud = label(debug.status(), "medium", 0.28f, {0.5f, 0.5f}, {size.width / 2.0f, size.height - 26.0f});
             addChild(m_fields->debugSpectateHud, 100);
-            // Same native initialization-reset settling window as Ranked Start.
-            m_fields->attemptJournalReadyAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
             if (m_fields->debugPlaybackScene) schedule(schedule_selector(CorumRankedPlayLayer::spectatorFrame));
             return true;
         }
@@ -401,6 +404,72 @@ public:
         // has stopped gameplay postUpdate. It cannot create gameplay evidence.
         schedule(schedule_selector(CorumRankedPlayLayer::spectatorFrame));
         return true;
+    }
+
+    void acquireGameplayAudio() {
+        auto const corumGameplayScene = m_fields->rankedLevel
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+            || m_fields->debugRecordScene || m_fields->debugPlaybackScene
+#endif
+            ;
+        if (!m_fields->rankedInitialized || !corumGameplayScene) return;
+        corum::ranked::RankedAudioManager::get().fadeOutForGameplay();
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+        if (m_fields->debugRecordScene || m_fields->debugPlaybackScene)
+            log::info("[DebugSpectate] Ranked gameplay audio ownership acquired");
+#endif
+    }
+
+    bool observesSpectatorPlayer(PlayerObject* player) {
+        if (!m_fields->rankedInitialized || player != m_player1 || !player ||
+            m_isTestMode || m_isPracticeMode || m_fields->safetyRetired ||
+            m_fields->spectatorMode || m_fields->spectatorPending) return false;
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+        if (m_fields->debugRecordScene) return true;
+        if (m_fields->debugPlaybackScene) return false;
+#endif
+        return m_fields->rankedLevel && !corum::ranked::RankedRuntime::get().isSpectating();
+    }
+
+    corum::ranked::SpectatorGhostPose observedSpectatorPose(bool dead = false, bool finished = false) {
+        auto pose = corum::ranked::captureSpectatorPose(m_player1, dead, finished, m_gameState.m_isDualMode);
+        auto const camera = m_gameState.m_cameraPosition;
+        corum::ranked::SpectatorCameraOrigin origin{camera.x, camera.y};
+        if (corum::ranked::validSpectatorCamera(origin)) pose.camera = origin;
+        m_fields->spectatorCapture.observe(pose);
+        return m_fields->spectatorCapture.snapshot().value_or(pose);
+    }
+
+    void observeSpectatorNativeUpdate(PlayerObject* player) {
+        if (observesSpectatorPlayer(player)) (void)observedSpectatorPose();
+    }
+
+    void observeSpectatorNativeSnap(PlayerObject* player, corum::ranked::SpectatorDiscontinuity type,
+                                    corum::ranked::SpectatorGhostPose const& before) {
+        if (!observesSpectatorPlayer(player)) return;
+        auto const after = corum::ranked::captureSpectatorPose(player, false, false, m_gameState.m_isDualMode);
+        m_fields->spectatorCapture.nativeSnap(type, before, after);
+        (void)observedSpectatorPose();
+    }
+
+    void sampleSpectatorPresentation() {
+        if (!observesSpectatorPlayer(m_player1) || m_player1->m_isDead || m_hasCompletedLevel) return;
+        // End of the native world update, after physics, rotation and camera.
+        auto const pose = observedSpectatorPose();
+        auto const ready = m_fields->spectatorCapture.stableNativeFrame(m_attemptTime,
+            !m_inResetDelay && !m_isPaused && m_player1->m_gameLayer == this &&
+            std::isfinite(m_player1->m_vehicleSize) && m_player1->m_vehicleSize > 0);
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+        if (m_fields->debugRecordScene) {
+            if (ready && corum::ranked::debug::DebugSpectateRuntime::get().recordPose(pose)) {
+                m_fields->debugRecordHasFrame = true;
+                m_fields->spectatorCapture.sampled();
+            }
+            return;
+        }
+#endif
+        if (ready && corum::ranked::SpectatorLiveRuntime::get().tickPublisher(pose, false))
+            m_fields->spectatorCapture.sampled();
     }
 
     corum::ranked::SpectatorSceneContext currentSpectatorSceneContext() const {
@@ -562,11 +631,6 @@ public:
         PlayLayer::postUpdate(dt);
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         if (m_fields->debugRecordScene) {
-            if (m_player1 && !m_player1->m_isDead && !m_hasCompletedLevel && !m_isPracticeMode &&
-                std::chrono::steady_clock::now() >= m_fields->attemptJournalReadyAt) {
-                corum::ranked::debug::DebugSpectateRuntime::get().recordPose(corum::ranked::captureSpectatorPose(m_player1, false, false, m_gameState.m_isDualMode));
-                m_fields->debugRecordHasFrame = true;
-            }
             if (m_fields->debugSpectateHud) m_fields->debugSpectateHud->setString(corum::ranked::debug::DebugSpectateRuntime::get().status().c_str());
             return;
         }
@@ -646,10 +710,6 @@ public:
             return;
         }
 
-        if (m_player1) {
-            corum::ranked::SpectatorLiveRuntime::get().tickPublisher(
-                corum::ranked::captureSpectatorPose(m_player1, false, false, m_gameState.m_isDualMode), false);
-        }
 
         auto const& matchState = runtime.view().match.state;
         auto const stillPlaying =
@@ -707,6 +767,7 @@ public:
     }
 
     void resetLevel() {
+        m_fields->spectatorCapture.reset();
         auto& runtime = corum::ranked::RankedRuntime::get();
         syncSpectatorLocalSafety();
         ScopedPersistenceOwner persistence(this);
@@ -824,7 +885,7 @@ public:
 
         if (scoringEnabled() && !m_fields->attemptEndReported) {
             if (m_player1) corum::ranked::SpectatorLiveRuntime::get().publishTerminal(
-                corum::ranked::captureSpectatorPose(m_player1, true, false, m_gameState.m_isDualMode), false);
+                observedSpectatorPose(true, false), false);
             auto const progress = rankedProgressPercent(this);
             m_fields->attemptEndReported = runtime.reportAttemptEnd(
                 m_fields->levelId,
@@ -833,10 +894,16 @@ public:
                 m_fields->qualifyingPercent
             );
         }
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+        // Death effects may mutate native presentation. Record the real contact
+        // pose captured before vanilla, but commit it only after confirmed death.
+        auto const debugTerminal = m_fields->debugRecordScene && player == m_player1
+            ? std::optional(observedSpectatorPose(true, false)) : std::nullopt;
+#endif
         PlayLayer::destroyPlayer(player, object);
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
-        if (m_fields->debugRecordScene && player && player == m_player1 && player->m_isDead) {
-            corum::ranked::debug::DebugSpectateRuntime::get().recordPose(corum::ranked::captureSpectatorPose(player, true, false, m_gameState.m_isDualMode), true);
+        if (debugTerminal && player && player->m_isDead) {
+            corum::ranked::debug::DebugSpectateRuntime::get().recordPose(*debugTerminal, true);
         }
 #endif
     }
@@ -846,7 +913,7 @@ public:
         if (suppressLocalCompletion()) return;
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         if (m_fields->debugRecordScene && m_player1) {
-            corum::ranked::debug::DebugSpectateRuntime::get().recordPose(corum::ranked::captureSpectatorPose(m_player1, false, true, m_gameState.m_isDualMode), true);
+            corum::ranked::debug::DebugSpectateRuntime::get().recordPose(observedSpectatorPose(false, true), true);
         }
 #endif
         ScopedRealGameplayEnd finishing(
@@ -855,7 +922,7 @@ public:
         );
         if (scoringEnabled() && !m_fields->attemptEndReported) {
             if (m_player1) corum::ranked::SpectatorLiveRuntime::get().publishTerminal(
-                corum::ranked::captureSpectatorPose(m_player1, false, true, m_gameState.m_isDualMode), false);
+                observedSpectatorPose(false, true), false);
             m_fields->attemptEndReported = runtime.reportAttemptEnd(
                 m_fields->levelId,
                 100.0,
@@ -871,7 +938,7 @@ public:
         if (suppressLocalCompletion()) return;
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         if (m_fields->debugRecordScene && m_player1) {
-            corum::ranked::debug::DebugSpectateRuntime::get().recordPose(corum::ranked::captureSpectatorPose(m_player1, false, true, m_gameState.m_isDualMode), true);
+            corum::ranked::debug::DebugSpectateRuntime::get().recordPose(observedSpectatorPose(false, true), true);
         }
 #endif
         ScopedRealGameplayEnd finishing(
@@ -883,7 +950,7 @@ public:
         // the pair idempotent and prevents double Clear/score accounting.
         if (scoringEnabled() && !m_fields->attemptEndReported) {
             if (m_player1) corum::ranked::SpectatorLiveRuntime::get().publishTerminal(
-                corum::ranked::captureSpectatorPose(m_player1, false, true, m_gameState.m_isDualMode), false);
+                observedSpectatorPose(false, true), false);
             m_fields->attemptEndReported = runtime.reportAttemptEnd(
                 m_fields->levelId,
                 100.0,
@@ -975,6 +1042,11 @@ public:
     void showNewBest(bool newReward, int orbs, int diamonds, bool demonKey, bool noRetry, bool noTitle) {
         if (blocksLocalEvidence()) return;
         PlayLayer::showNewBest(newReward, orbs, diamonds, demonKey, noRetry, noTitle);
+    }
+
+    void updateAttempts() {
+        if (blocksLocalEvidence()) return;
+        PlayLayer::updateAttempts();
     }
 
     void togglePracticeMode(bool practiceMode) {
@@ -1741,6 +1813,9 @@ class $modify(CorumRankedSpectatorCameraHook, GJBaseGameLayer) {
         if (!self.setHookPriorityPre("GJBaseGameLayer::updateCamera", Priority::First)) {
             log::warn("Failed to install spectator camera priority");
         }
+        if (!self.setHookPriorityPre("GJBaseGameLayer::update", Priority::First)) {
+            log::warn("Failed to install spectator completed-frame observation priority");
+        }
     }
     void updateCamera(float dt) {
         auto* layer = PlayLayer::get();
@@ -1748,6 +1823,23 @@ class $modify(CorumRankedSpectatorCameraHook, GJBaseGameLayer) {
             static_cast<CorumRankedPlayLayer*>(layer)->driveSpectatorCamera();
         }
         GJBaseGameLayer::updateCamera(dt);
+    }
+
+    void update(float dt) {
+        GJBaseGameLayer::update(dt);
+        auto* layer = PlayLayer::get();
+        if (layer && static_cast<GJBaseGameLayer*>(layer) == this)
+            static_cast<CorumRankedPlayLayer*>(layer)->sampleSpectatorPresentation();
+    }
+
+    void teleportPlayer(TeleportPortalObject* object, PlayerObject* player) {
+        auto* layer = PlayLayer::get();
+        auto* owner = layer && static_cast<GJBaseGameLayer*>(layer) == this
+            ? static_cast<CorumRankedPlayLayer*>(layer) : nullptr;
+        auto const observed = owner && object && owner->observesSpectatorPlayer(player);
+        auto const before = observed ? corum::ranked::captureSpectatorPose(player) : corum::ranked::SpectatorGhostPose{};
+        GJBaseGameLayer::teleportPlayer(object, player);
+        if (observed) owner->observeSpectatorNativeSnap(player, corum::ranked::SpectatorDiscontinuity::Teleport, before);
     }
 };
 
@@ -1764,7 +1856,29 @@ class $modify(CorumRankedSpectatorDummyPlayer, PlayerObject) {
     void update(float dt) {
         auto* layer = localSafetyLayer();
         if (layer && layer->freezeLocalDummy(this)) return;
+        auto const observed = layer && layer->observesSpectatorPlayer(this);
+        auto const teleportedBefore = m_wasTeleported;
+        auto const before = observed ? corum::ranked::captureSpectatorPose(this) : corum::ranked::SpectatorGhostPose{};
         PlayerObject::update(dt);
+        // Native teleport flag also covers object-driven relocation outside the
+        // portal entry callback. A position delta alone never creates evidence.
+        if (observed && !teleportedBefore && m_wasTeleported)
+            layer->observeSpectatorNativeSnap(this, corum::ranked::SpectatorDiscontinuity::Teleport, before);
+        if (layer) layer->observeSpectatorNativeUpdate(this);
+    }
+
+    void updateRotation(float dt) {
+        PlayerObject::updateRotation(dt);
+        if (auto* layer = localSafetyLayer()) layer->observeSpectatorNativeUpdate(this);
+    }
+
+    void spiderTestJump(bool dynamic) {
+        auto* layer = localSafetyLayer();
+        auto const observed = layer && m_isSpider && layer->observesSpectatorPlayer(this);
+        auto const before = observed ? corum::ranked::captureSpectatorPose(this) : corum::ranked::SpectatorGhostPose{};
+        PlayerObject::spiderTestJump(dynamic);
+        if (observed && before.upsideDown != m_isUpsideDown)
+            layer->observeSpectatorNativeSnap(this, corum::ranked::SpectatorDiscontinuity::SpiderSnap, before);
     }
 };
 
