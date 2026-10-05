@@ -1,3 +1,9 @@
+## v0.5.0-beta.23
+
+- Reset expired-session deadline and upload backoff before a fresh Debug Spectate HTTP admission, so an old scope cannot immediately cancel a new RECORD/TEST request.
+- Reproduce the lifecycle failure using the compiled production client runtime and verify fresh admission/record cancellation succeeds after expired-scope fault injection.
+- Advance the exact mod/server gate and reject beta22. Preserve beta22 server-backed storage/clock, production presentation and all dummy guards. No manual Release or workflow rerun.
+
 ## v0.5.0-beta.22
 
 - Add development-only RECORD SPECTATE / TEST SPECTATE for fixed VOICE (88350599), using verified native GD preparation/download and normal vanilla recording gameplay.

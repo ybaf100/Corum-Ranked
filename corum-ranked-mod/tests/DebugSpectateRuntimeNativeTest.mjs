@@ -135,7 +135,8 @@ test('actual Debug client builds HTTP requests, drains terminal/ACK retries, and
     const viewerFixture = read('tests/SpectatorLiveViewerNativeTest.mjs');
     const model = viewerFixture.slice(viewerFixture.indexOf('namespace matjson {'), viewerFixture.indexOf('namespace corum::ranked::log'))
         .replace('    bool isObject()', '    static Value array(){return Value(Array{});} void push(Value x){std::get<Array>(data).push_back(std::move(x));}\n    bool isObject()');
-    const header = read('src/debug/DebugSpectateRuntime.hpp').replace(/^#include.*$|^#pragma once$/gm, '');
+    const header = read('src/debug/DebugSpectateRuntime.hpp').replace(/^#include.*$|^#pragma once$/gm, '')
+        .replace('private:', 'public: // Native-harness state fault injection only.');
     const source = read('src/debug/DebugSpectateRuntime.cpp').replace(/^#include.*$/gm, '');
     const cpp = `
 #define CORUM_RANKED_DEBUG_SPECTATE 1
@@ -256,6 +257,14 @@ int main(){
     assert(!pending[0].operation.body["completed"].asBool().unwrapOr(true));respond(201);
     runtime.start(true,"secret");matjson::Value absent;absent["message"]="NO RECORDED SPECTATE DATA";
     respond(404,absent);assert(runtime.mode()==DebugSpectateMode::None && runtime.status()=="NO RECORDED SPECTATE DATA");
+    // A previous expired/retried session must not poison the new HTTP admission.
+    runtime.m_expireAt=std::chrono::steady_clock::now()-std::chrono::seconds(1);
+    runtime.m_nextUploadAt=std::chrono::steady_clock::now()+std::chrono::minutes(1);
+    runtime.start(false,"secret");runtime.tick();
+    assert(runtime.mode()==DebugSpectateMode::PreparingRecord&&pending.size()==1);
+    assert(runtime.m_expireAt.time_since_epoch().count()==0 && runtime.m_nextUploadAt.time_since_epoch().count()==0);
+    respond(201,admission(false));runtime.sceneEntered(88350599);runtime.cancelRecording();respond(201);
+    assert(runtime.mode()==DebugSpectateMode::None);
 }
 `;
     const dir = mkdtempSync(join(tmpdir(), 'corum-debug-runtime-native-'));

@@ -1,4 +1,6 @@
-# Server-backed Debug Spectate (beta22)
+# Server-backed Debug Spectate (beta22; lifecycle correction beta23)
+
+Fresh RECORD/TEST admission clears the previous scope's deadline/upload backoff before issuing HTTP. The beta23 native runtime regression injects an expired prior scope and verifies it cannot cancel or delay a new recording scope.
 
 This Phase-3 QA harness is not a local replay. The sole map is **VOICE / LiteN1ng / Easy Demon / 88350599** (`DebugSpectatePolicy.hpp`, server `debug-spectate.config.ts`). There is no map selector, synthetic level or production Ranked Match. Phase 4 game modes, gravity/mini/dual and full terminal effects remain out of scope.
 

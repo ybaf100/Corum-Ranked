@@ -45,6 +45,9 @@ void DebugSpectateRuntime::start(bool playback, std::string password) {
     m_status = playback ? "REQUESTING SERVER PLAYBACK..." : "CREATING SERVER RECORDING...";
     m_launched = false; m_playbackComplete = false; m_errors = 0; m_capture = {};
     m_id.clear(); m_token.clear(); m_contextId.clear();
+    // Admission belongs to a NEW scope. A deadline/backoff left by an expired
+    // or failed scope must not cancel this request before its HTTP ACK arrives.
+    m_expireAt = {}; m_nextUploadAt = {}; m_recordStartedAt = {};
     m_prepareStartedAt = std::chrono::steady_clock::now();
     matjson::Value body;
     body["password"] = password; body["levelId"] = kDebugSpectateLevelId; body["formatVersion"] = kDebugSpectateFormatVersion;
