@@ -106,6 +106,7 @@ jobs:
             -o /tmp/corum-ranked-spectator-buffer-test
           /tmp/corum-ranked-spectator-buffer-test
           node --test corum-ranked-mod/tests/SpectatorCameraOwnerNativeTest.mjs
+          node --test corum-ranked-mod/tests/SpectatorWorldDriverNativeTest.mjs
           node --test corum-ranked-mod/tests/AchievementSourceTest.mjs
           node --test corum-ranked-mod/tests/SpectatorLocalSafetySourceTest.mjs
           node --test corum-ranked-mod/tests/SpectatorNativeHookTest.mjs

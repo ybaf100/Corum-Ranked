@@ -1,3 +1,12 @@
+## v0.5.0-beta.29
+
+- Feed the native world a hidden no-authority m_player1 from the same timestamp-buffered frame as the dedicated visible Remote Player and camera, before GJBaseGameLayer world processing. Keep local physics, completion, scoring and persistence blocked; allow native position/rotation writes only in the authenticated driver scope.
+- Maintain continuous previous/current coordinates and native Follow Player Y history on publisher time. Apply mode/gravity before verified Spider/teleport destinations, reset snap history once, and reconcile native portal writes without resimulating remote physics. Reset native world state only for server stream/context changes.
+- Preserve beta28 final viewport correction without forcing camera flags or cancelling world-trigger camera tweens each frame. Keep its interpolation limits, measured headroom, progress presentation and audio ownership unchanged.
+- Capture a stationary, started native world seed immediately instead of requiring two moving frames. Anchor Debug recording time to the first accepted seed; keep server normalization, HTTP/PostgreSQL RECORD/TEST and v2 protocol/format.
+- Execute production world/camera/player hook bodies and the complete driver/renderer/camera in Debug ON/OFF native regressions, including Spider/follow/background ordering, scoped native writes and 60/120/240Hz progression. Existing safety and server suites remain intact.
+- Synchronize manifest, workspace and exact server gate to beta29. Actual iPadOS trigger/background/Spider parity and native late-join history catch-up still require device verification; the server's recent 3s buffer is not full Attempt history. No manual Release.
+
 ## v0.5.0-beta.28
 
 - Give spectator viewport one final owner: native camera once, then recorded-camera correction of actual render transforms. Remove camera work from viewer polling, guard duplicate lifecycle calls and retain a camera-only scoped native remote-target fallback with exact dummy restoration.

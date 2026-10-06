@@ -131,7 +131,9 @@ void DebugSpectateRuntime::sceneEntered(int levelId) {
 }
 bool DebugSpectateRuntime::recordPose(SpectatorGhostPose const& pose, bool terminal) {
     if (m_mode != DebugSpectateMode::Recording || m_capture.ended()) return false;
-    auto const elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - m_recordStartedAt).count();
+    auto const now = std::chrono::steady_clock::now();
+    if (m_capture.nextSequence() == 0 && finiteSpectatorPose(pose)) m_recordStartedAt = now;
+    auto const elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_recordStartedAt).count();
     auto const sequence = m_capture.nextSequence();
     auto const accepted = m_capture.capture(elapsed, pose, terminal);
     if (accepted) {

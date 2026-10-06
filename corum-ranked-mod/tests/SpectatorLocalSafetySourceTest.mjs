@@ -112,13 +112,16 @@ test('pending handoff blocks transport before vanilla reset without enabling ear
     assert.doesNotMatch(body(policy, 'bool suppressDeath('), /handoffPending/);
 });
 
-test('Phase 1 never overwrites local dummy pose with opponent and preserves polling HUD', () => {
+test('Phase 1 permits only authenticated world-driver pose writes and preserves polling HUD', () => {
     const update = body(play, 'void postUpdate(float dt)');
     assert.match(update, /if \(m_fields->spectatorMode\) \{[\s\S]*?return;/);
     const spectator = body(play, 'void updateSpectatorView(float dt)');
     assert.doesNotMatch(spectator, /m_player1->setPosition\(|m_player1->setRotation\(|m_player1->setVisible\(true\)/);
     assert.match(body(play, 'bool spectatorCameraActive()'), /localSafety\.active\(\)/);
-    assert.match(body(play, 'bool beginSpectatorCameraFrame()'), /remotePlayer\.update/);
+    const frame = body(play, 'bool beginSpectatorPresentationFrame()');
+    assert.match(frame, /spectatorWorldDriver.apply\(this, spectatorCameraActive\(\), rendered\)/);
+    assert.match(frame, /remotePlayer\.update/);
+    assert.match(body(play, 'bool blocksSpectatorNativePlayerWrite('), /localSafety.active\(\)[\s\S]*ScopedSpectatorWorldDriverWrite::allows/);
     assert.doesNotMatch(spectator, /updateCamera\(|driveSpectatorCamera/);
     assert.match(spectator, /m_player1->setVisible\(false\)/);
     assert.match(spectator, /updateRankedHud\(\)/);

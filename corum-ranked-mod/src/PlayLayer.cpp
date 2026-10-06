@@ -5,6 +5,7 @@
 #include "domain/SpectatorProgressPolicy.hpp"
 #include "spectator/ScopedCameraTargetOverride.hpp"
 #include "spectator/SpectatorPlayerCapture.hpp"
+#include "spectator/SpectatorWorldDriver.hpp"
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
 #include "debug/DebugSpectateRuntime.hpp"
 #include "RankedLevelPreparation.hpp"
@@ -201,17 +202,24 @@ public:
         bool vanillaGameplayEndInProgress = false;
         corum::ranked::CorumRemotePlayer remotePlayer;
         corum::ranked::CorumSpectatorCamera spectatorCamera;
+        corum::ranked::SpectatorWorldDriver spectatorWorldDriver;
         corum::ranked::SpectatorSceneContext sceneContext;
         bool spectatorScenePrepared = false;
         bool spectatorPresentationRetired = false;
         std::optional<corum::ranked::SpectatorRemoteFrame> spectatorRenderedFrame;
         std::optional<unsigned int> spectatorCameraFrameNumber;
+        std::optional<unsigned int> spectatorPresentationFrameNumber, spectatorWorldFrameNumber;
+        bool spectatorWorldUpdateInProgress = false;
+        bool spectatorWorldResetInProgress = false;
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         bool debugRecordScene = false, debugPlaybackScene = false, debugRecordHasFrame = false;
         CCLabelBMFont* debugSpectateHud = nullptr;
         int cameraForensicFrames = 0;
         std::int64_t cameraForensicSequence = -1;
         bool cameraForensicFrame = false;
+        int worldForensicFrames = 0;
+        std::optional<corum::ranked::SpectatorGhostPose> worldForensicPose;
+        std::int64_t worldForensicSequence = -1;
 #endif
     };
 
@@ -292,10 +300,16 @@ public:
         if (frozen && !wasFrozen) {
             log::info("Spectator local dummy frozen at 99% boundary: level={}", m_fields->levelId);
         }
-        // Phase 3 freezes the exact dummy immediately once scene setup is done.
+        // Freeze physics, not its network-driven world coordinates.
         // The independent Phase-1 99% boundary remains a backstop for setup and
         // large steps; neither path pauses the world, remote renderer or relay.
         return frozen || (m_fields->rankedInitialized && m_fields->localSafety.active());
+    }
+
+    bool blocksSpectatorNativePlayerWrite(PlayerObject* player) {
+        return player && player == m_player1 && m_fields->localSafety.active() &&
+            m_fields->spectatorWorldDriver.owns(player) &&
+            !corum::ranked::ScopedSpectatorWorldDriverWrite::allows(player);
     }
 
     bool blocksLevelPersistence(GJGameLevel* level) {
@@ -464,11 +478,14 @@ public:
         // End of the native world update, after physics, rotation and camera.
         auto const pose = observedSpectatorPose();
         auto const ready = m_fields->spectatorCapture.stableNativeFrame(m_attemptTime,
-            !m_inResetDelay && !m_isPaused && m_player1->m_gameLayer == this &&
+            m_started && !m_inResetDelay && !m_isPaused && m_player1->m_gameLayer == this &&
             std::isfinite(m_player1->m_vehicleSize) && m_player1->m_vehicleSize > 0);
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         if (m_fields->debugRecordScene) {
             if (ready && corum::ranked::debug::DebugSpectateRuntime::get().recordPose(pose)) {
+                if (!m_fields->debugRecordHasFrame)
+                    log::info("[DebugSpectate] initial world seed nativeElapsedMs={} x={} y={} cameraX={} cameraY={}",
+                        m_attemptTime * 1000, pose.x, pose.y, pose.camera ? pose.camera->x : 0, pose.camera ? pose.camera->y : 0);
                 m_fields->debugRecordHasFrame = true;
                 m_fields->spectatorCapture.sampled();
             }
@@ -545,11 +562,22 @@ public:
             m_fields->localSafety.active() && spectatorAuthority && watchableSpectatorScene();
     }
 
-    bool beginSpectatorCameraFrame() {
+    bool beginSpectatorPresentationFrame() {
         auto const frameNumber = CCDirector::sharedDirector()->getTotalFrames();
-        if (m_fields->spectatorCameraFrameNumber == frameNumber) return false;
-        m_fields->spectatorCameraFrameNumber = frameNumber;
+        if (m_fields->spectatorPresentationFrameNumber == frameNumber) return false;
+        m_fields->spectatorPresentationFrameNumber = frameNumber;
         m_fields->spectatorRenderedFrame = corum::ranked::SpectatorLiveRuntime::get().presentationFrame();
+        auto const& rendered = m_fields->spectatorRenderedFrame;
+        if (rendered && rendered->pose && m_fields->spectatorWorldDriver.contextChanged(rendered->context)) {
+            // Only a server stream/epoch change can reset trigger state. Manual
+            // Retry remains blocked; all native reset evidence is still guarded.
+            m_fields->spectatorWorldDriver.reset();
+            m_fields->localSafety.resetDummy();
+            ScopedPersistenceOwner persistence(this);
+            ScopedRealGameplayEnd resetting(m_fields->spectatorWorldResetInProgress, true);
+            PlayLayer::resetLevel();
+        }
+        m_fields->spectatorWorldDriver.apply(this, spectatorCameraActive(), rendered);
         m_fields->remotePlayer.update(this, true, m_fields->spectatorRenderedFrame);
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         auto const frame = m_fields->remotePlayer.cameraFrame();
@@ -561,6 +589,40 @@ public:
         }
 #endif
         return true;
+    }
+
+    bool beginSpectatorWorldFrame() {
+        auto const frameNumber = CCDirector::sharedDirector()->getTotalFrames();
+        if (m_fields->spectatorWorldFrameNumber == frameNumber) return false;
+        m_fields->spectatorWorldFrameNumber = frameNumber;
+        (void)beginSpectatorPresentationFrame();
+        return true;
+    }
+
+    void reconcileSpectatorWorldDriver() {
+        if (spectatorCameraActive()) m_fields->spectatorWorldDriver.reconcile(this);
+    }
+
+    void logSpectatorWorldDriver() {
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+        auto const& frame = m_fields->spectatorWorldDriver.frame();
+        if (!m_fields->debugPlaybackScene || !frame || !frame->pose || !m_player1) return;
+        auto const& pose = *frame->pose;
+        auto const& previous = m_fields->worldForensicPose;
+        auto const transition = !previous || previous->mode != pose.mode || previous->upsideDown != pose.upsideDown;
+        auto const snap = pose.discontinuity && frame->sequence != m_fields->worldForensicSequence;
+        if (m_fields->worldForensicFrames < 24 && (transition || snap ||
+            (frame->sequence != m_fields->worldForensicSequence && frame->sequence <= 2))) {
+            ++m_fields->worldForensicFrames;
+            log::info("[DebugSpectate] world-driver sequence={} elapsedMs={} remoteX={} remoteY={} driverX={} driverY={} mode={} driverSpider={} upsideDown={} driverUpsideDown={} cameraX={} cameraY={} nativeCameraX={} nativeCameraY={} nativeZoom={} snap={} followIndex={}",
+                frame->sequence, frame->publisherElapsedMs, pose.x, pose.y, m_player1->getPositionX(), m_player1->getPositionY(),
+                corum::ranked::spectatorModeName(pose.mode), m_player1->m_isSpider, pose.upsideDown, m_player1->m_isUpsideDown,
+                pose.camera ? pose.camera->x : 0, pose.camera ? pose.camera->y : 0,
+                m_gameState.m_cameraPosition.x, m_gameState.m_cameraPosition.y, m_gameState.m_cameraZoom,
+                snap ? corum::ranked::spectatorDiscontinuityName(pose.discontinuity->type) : "NONE", m_player1->m_followRelated);
+        }
+        m_fields->worldForensicPose = pose; m_fields->worldForensicSequence = frame->sequence;
+#endif
     }
 
     std::optional<CCPoint> spectatorNativeCameraTarget() {
@@ -616,17 +678,19 @@ public:
     }
 
     void ensureSpectatorCameraFrame(float dt) {
-        // The hook is the sole owner. Heartbeat fills in a stopped native
-        // lifecycle, but cannot cause a second camera calculation in this frame.
-        if (spectatorCameraActive() && m_fields->spectatorCameraFrameNumber != CCDirector::sharedDirector()->getTotalFrames())
-            GJBaseGameLayer::updateCamera(dt);
+        // Heartbeat enters the SAME world owner if vanilla has stopped; never
+        // calculate camera against an unprepared frame or advance twice.
+        if (spectatorCameraActive() && m_fields->spectatorWorldFrameNumber != CCDirector::sharedDirector()->getTotalFrames())
+            GJBaseGameLayer::update(dt);
     }
 
     void cleanupSpectatorPresentation() {
         // Release ownership before destroying its visual or native scene state.
         m_fields->spectatorCamera.cleanup(this);
         m_fields->remotePlayer.cleanup();
+        m_fields->spectatorWorldDriver.reset();
         m_fields->spectatorRenderedFrame.reset(); m_fields->spectatorCameraFrameNumber.reset();
+        m_fields->spectatorPresentationFrameNumber.reset(); m_fields->spectatorWorldFrameNumber.reset();
     }
 
     void updateSpectatorView(float dt) {
@@ -1892,7 +1956,7 @@ class $modify(CorumRankedSpectatorCameraHook, GJBaseGameLayer) {
             log::warn("Failed to install spectator camera priority");
         }
         if (!self.setHookPriorityPre("GJBaseGameLayer::update", Priority::First)) {
-            log::warn("Failed to install spectator completed-frame observation priority");
+            log::warn("Failed to install spectator world-frame ownership priority");
         }
     }
     void updateCamera(float dt) {
@@ -1902,22 +1966,48 @@ class $modify(CorumRankedSpectatorCameraHook, GJBaseGameLayer) {
         if (!owner || !owner->spectatorCameraActive()) {
             GJBaseGameLayer::updateCamera(dt); return;
         }
-        if (!owner->beginSpectatorCameraFrame()) return;
+        auto const frameNumber = CCDirector::sharedDirector()->getTotalFrames();
+        // World ownership prepares the frame first. Repeated native sub-step /
+        // heartbeat calls cannot overwrite the final viewport in this frame.
+        if (owner->m_fields->spectatorWorldResetInProgress ||
+            owner->m_fields->spectatorWorldFrameNumber != frameNumber ||
+            owner->m_fields->spectatorCameraFrameNumber == frameNumber) return;
+        owner->m_fields->spectatorCameraFrameNumber = frameNumber;
+        owner->reconcileSpectatorWorldDriver();
         owner->logSpectatorNativeCamera("before vanilla");
         {
             corum::ranked::ScopedCameraTargetOverride target(m_player1, owner->spectatorNativeCameraTarget());
             GJBaseGameLayer::updateCamera(dt);
         }
         owner->logSpectatorNativeCamera("after vanilla");
-        owner->driveSpectatorCamera();
-        owner->logSpectatorNativeCamera("after spectator correction");
+        if (!owner->m_fields->spectatorWorldUpdateInProgress) {
+            owner->driveSpectatorCamera();
+            owner->logSpectatorNativeCamera("after spectator correction");
+        }
     }
 
     void update(float dt) {
-        GJBaseGameLayer::update(dt);
         auto* layer = PlayLayer::get();
-        if (layer && static_cast<GJBaseGameLayer*>(layer) == this)
-            static_cast<CorumRankedPlayLayer*>(layer)->sampleSpectatorPresentation();
+        auto* owner = layer && static_cast<GJBaseGameLayer*>(layer) == this
+            ? static_cast<CorumRankedPlayLayer*>(layer) : nullptr;
+        if (owner && owner->prepareSpectatorScene() && owner->spectatorCameraActive()) {
+            if (!owner->beginSpectatorWorldFrame()) return;
+            {
+                ScopedRealGameplayEnd worldUpdate(owner->m_fields->spectatorWorldUpdateInProgress, true);
+                GJBaseGameLayer::update(dt);
+                owner->reconcileSpectatorWorldDriver();
+                // Some native paths omit updateCamera. Its hook still owns the
+                // one calculation, with correction deferred until world exits.
+                if (owner->m_fields->spectatorCameraFrameNumber != CCDirector::sharedDirector()->getTotalFrames())
+                    updateCamera(dt);
+            }
+            owner->driveSpectatorCamera();
+            owner->logSpectatorNativeCamera("after spectator correction");
+            owner->logSpectatorWorldDriver();
+            return;
+        }
+        GJBaseGameLayer::update(dt);
+        if (owner) owner->sampleSpectatorPresentation();
     }
 
     void teleportPlayer(TeleportPortalObject* object, PlayerObject* player) {
@@ -1936,8 +2026,11 @@ class $modify(CorumRankedSpectatorCameraHook, GJBaseGameLayer) {
 // to display 100%. checkForEnd + completion callbacks cover a large single step.
 class $modify(CorumRankedSpectatorDummyPlayer, PlayerObject) {
     static void onModify(auto& self) {
-        if (!self.setHookPriorityPre("PlayerObject::update", Priority::First)) {
-            log::warn("Failed to install spectator dummy update priority");
+        for (auto name : {"PlayerObject::update", "PlayerObject::updateRotation", "PlayerObject::spiderTestJump",
+                          "PlayerObject::setPosition", "PlayerObject::setRotation", "PlayerObject::updateSpecial",
+                          "PlayerObject::setVisible"}) {
+            if (!self.setHookPriorityPre(name, Priority::First))
+                log::warn("Failed to install spectator world-driver safety priority: {}", name);
         }
     }
 
@@ -1956,17 +2049,44 @@ class $modify(CorumRankedSpectatorDummyPlayer, PlayerObject) {
     }
 
     void updateRotation(float dt) {
+        if (auto* layer = localSafetyLayer(); layer && layer->freezeLocalDummy(this)) return;
         PlayerObject::updateRotation(dt);
         if (auto* layer = localSafetyLayer()) layer->observeSpectatorNativeUpdate(this);
     }
 
     void spiderTestJump(bool dynamic) {
         auto* layer = localSafetyLayer();
+        if (layer && layer->freezeLocalDummy(this)) return;
         auto const observed = layer && m_isSpider && layer->observesSpectatorPlayer(this);
         auto const before = observed ? corum::ranked::captureSpectatorPose(this) : corum::ranked::SpectatorGhostPose{};
         PlayerObject::spiderTestJump(dynamic);
         if (observed && before.upsideDown != m_isUpsideDown)
             layer->observeSpectatorNativeSnap(this, corum::ranked::SpectatorDiscontinuity::SpiderSnap, before);
+    }
+
+    void setPosition(CCPoint const& position) {
+        auto* layer = localSafetyLayer();
+        if (layer && layer->blocksSpectatorNativePlayerWrite(this)) return;
+        PlayerObject::setPosition(position);
+    }
+
+    void setRotation(float rotation) {
+        auto* layer = localSafetyLayer();
+        if (layer && layer->blocksSpectatorNativePlayerWrite(this)) return;
+        PlayerObject::setRotation(rotation);
+    }
+
+    void updateSpecial(float dt) {
+        auto* layer = localSafetyLayer();
+        if (layer && layer->freezeLocalDummy(this) &&
+            !corum::ranked::ScopedSpectatorWorldDriverWrite::allows(this)) return;
+        PlayerObject::updateSpecial(dt);
+    }
+
+    void setVisible(bool visible) {
+        auto* layer = localSafetyLayer();
+        if (visible && layer && layer->freezeLocalDummy(this)) visible = false;
+        PlayerObject::setVisible(visible);
     }
 };
 

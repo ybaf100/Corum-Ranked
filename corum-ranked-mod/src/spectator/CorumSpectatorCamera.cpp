@@ -23,20 +23,16 @@ void CorumSpectatorCamera::attach(GJBaseGameLayer* layer) {
 }
 
 void CorumSpectatorCamera::prepareNativeFallback(GJBaseGameLayer* layer) {
-    if (!layer || !m_attached) return;
-    layer->m_gameState.stopTweenAction(1); layer->m_gameState.stopTweenAction(2);
-    layer->m_gameState.m_unkBool4 = m_previousForceX;
-    layer->m_gameState.m_unkBool5 = m_previousForceY;
-    layer->m_gameState.m_unkInt13 = m_previousTargetY;
+    // Native world-driver triggers own free/static/offset camera mechanics.
+    // A fallback must not restore entry flags over their current state.
+    (void)layer;
 }
 
 void CorumSpectatorCamera::applyViewport(GJBaseGameLayer* layer, SpectatorCameraPoint target) {
     auto const previous = layer->m_gameState.m_cameraPosition;
-    // cameraMove establishes ownership/tween state; it does NOT guarantee that
-    // the render nodes moved. This is a final correction AFTER updateCamera.
-    layer->cameraMoveX(target.x, 0.0f, 1.0f, false);
-    layer->cameraMoveY(target.y, 0.0f, 1.0f, true);
-    layer->m_gameState.stopTweenAction(1); layer->m_gameState.stopTweenAction(2);
+    // Final origin drift correction AFTER native world/camera processing.
+    // cameraMoveX/Y set forced-camera flags and cancel native trigger tweens;
+    // keep those mechanics intact and correct only the viewport origin/nodes.
     layer->m_gameState.m_cameraPosition = CCPoint{target.x, target.y};
     layer->m_gameState.m_cameraPosition2 = CCPoint{target.x, target.y};
     layer->m_gameState.m_cameraStepDiff.x += target.x - previous.x;

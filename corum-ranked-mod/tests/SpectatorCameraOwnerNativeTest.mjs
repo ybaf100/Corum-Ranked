@@ -23,17 +23,19 @@ test('actual camera owner hook ends in recorded viewport, drives once, restores 
         writeFileSync(join(dir,'Geode/Geode.hpp'),read('tests/helpers/SpectatorNativeDouble.hpp'));
         for(const name of ['PlayLayer','GJBaseGameLayer','PlayerObject','GJGameLevel','GhostTrailEffect','HardStreak'])
             writeFileSync(join(dir,`Geode/binding/${name}.hpp`),'#include <Geode/Geode.hpp>\n');
-        const methods=['bool spectatorCameraActive()','bool beginSpectatorCameraFrame()',
+        const methods=['bool spectatorCameraActive()','bool beginSpectatorPresentationFrame()', 'bool beginSpectatorWorldFrame()', 'void reconcileSpectatorWorldDriver()',
             'std::optional<CCPoint> spectatorNativeCameraTarget()','void logSpectatorNativeCamera(char const* stage)',
             'void applySpectatorProgressPresentation()','void updateProgressbar()',
             'void driveSpectatorCamera()','void ensureSpectatorCameraFrame(float dt)',
             'void cleanupSpectatorPresentation()'].map(s=>method(s)).join('\n');
         const hook=method('void updateCamera(float dt)',source.indexOf('class $modify(CorumRankedSpectatorCameraHook')).replace('void updateCamera(', 'void cameraHook(');
+        const worldHook=method('void update(float dt)',source.indexOf('class $modify(CorumRankedSpectatorCameraHook')).replace('void update(', 'void worldHook(');
         const cpp=`
 #include "${join(root,'src/spectator/CorumRemotePlayer.hpp')}"
 #include "${join(root,'src/spectator/CorumSpectatorCamera.hpp')}"
 #include "${join(root,'src/spectator/ScopedCameraTargetOverride.hpp')}"
 #include "${join(root,'src/domain/SpectatorProgressPolicy.hpp')}"
+#include "${join(root,'src/spectator/SpectatorWorldDriver.hpp')}"
 #include <memory>
 #include <iostream>
 using namespace geode::prelude;
@@ -58,15 +60,19 @@ namespace debug { struct DebugSpectateRuntime {
 }; }
 #endif
 }
+struct ScopedPersistenceOwner{explicit ScopedPersistenceOwner(PlayLayer*){}};
+struct ScopedRealGameplayEnd{bool& flag;bool previous;ScopedRealGameplayEnd(bool& f,bool b):flag(f),previous(f){flag=b;}~ScopedRealGameplayEnd(){flag=previous;}};
 template<class T>struct FieldsAccess { std::unique_ptr<T> value=std::make_unique<T>();T* operator->(){return value.get();} };
 struct CorumRankedPlayLayer: PlayLayer {
     struct Fields {
         bool spectatorScenePrepared=true,spectatorPresentationRetired=false,autoExitRequested=false;
-        struct Safety{bool enabled=true;bool active()const{return enabled;}}localSafety;
+        struct Safety{bool enabled=true;bool active()const{return enabled;}void resetDummy(){}}localSafety;
         corum::ranked::CorumRemotePlayer remotePlayer;
         corum::ranked::CorumSpectatorCamera spectatorCamera;
         std::optional<corum::ranked::SpectatorRemoteFrame> spectatorRenderedFrame;
-        std::optional<unsigned> spectatorCameraFrameNumber;
+        std::optional<unsigned> spectatorCameraFrameNumber,spectatorPresentationFrameNumber,spectatorWorldFrameNumber;
+        bool spectatorWorldUpdateInProgress=false,spectatorWorldResetInProgress=false;
+        corum::ranked::SpectatorWorldDriver spectatorWorldDriver;
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         bool debugPlaybackScene=true,cameraForensicFrame=false;
         int levelId=88350599,cameraForensicFrames=0;std::int64_t cameraForensicSequence=-1;
@@ -74,15 +80,18 @@ struct CorumRankedPlayLayer: PlayLayer {
     };
     FieldsAccess<Fields> m_fields;bool watchable=true;
     bool watchableSpectatorScene(){return watchable;}
+    bool prepareSpectatorScene(){return spectatorCameraActive();}
+    void sampleSpectatorPresentation(){}void logSpectatorWorldDriver(){}
     ${methods}
     ${hook}
+    ${worldHook}
 };
 void close(float a,float b){assert(std::abs(a-b)<0.001f);}
 int main(){
     using namespace corum::ranked;
     {
         CorumRankedPlayLayer scene;PlayerObject dummy,second;
-        scene.m_player1=&dummy;scene.m_player2=&second;PlayLayer::current=&scene;
+        scene.m_player1=&dummy;scene.m_player2=&second;dummy.m_gameLayer=&scene;PlayLayer::current=&scene;
         GJGameLevel level;level.m_levelID=88350599;scene.m_level=&level;
         auto* world=CCLayer::create();geode::Ref<CCLayer> owner(world);scene.m_objectLayer=world;
         auto* shader=CCLayer::create();auto* above=CCLayer::create();
@@ -108,6 +117,7 @@ int main(){
         scene.m_fields->spectatorCamera.cleanup(&scene);
         scene.m_fields->spectatorCamera.attach(&scene);
         GJBaseGameLayer::cameraDispatch=[](GJBaseGameLayer* layer,float dt){static_cast<CorumRankedPlayLayer*>(layer)->cameraHook(dt);};
+        GJBaseGameLayer::worldDispatch=[](GJBaseGameLayer* layer,float dt){static_cast<CorumRankedPlayLayer*>(layer)->worldHook(dt);};
         auto frame=[](){++CCDirector::sharedDirector()->totalFrames;};
         ${evidence.frames.map(f=>`
         frame();live.frame->sequence=${f.sequence};live.frame->publisherElapsedMs=${f.elapsedMs};
@@ -115,7 +125,7 @@ int main(){
         live.frame->pose->camera=SpectatorCameraOrigin{${f.cameraX}f,${f.cameraY}f};
         {
             auto calls=scene.cameraUpdates,reads=live.reads;
-            scene.GJBaseGameLayer::updateCamera(0.016f);scene.ensureSpectatorCameraFrame(0.016f);scene.GJBaseGameLayer::updateCamera(0.016f);
+            scene.GJBaseGameLayer::update(0.016f);scene.ensureSpectatorCameraFrame(0.016f);scene.GJBaseGameLayer::updateCamera(0.016f);
             assert(scene.cameraUpdates==calls+1 && live.reads==reads+1);
             close(scene.m_gameState.m_cameraPosition.x,${f.cameraX}f);close(scene.m_gameState.m_cameraPosition.y,${f.cameraY}f);
             for(auto* node:{world,shader,above}){
@@ -136,13 +146,13 @@ int main(){
         // Missing recorded camera borrows dummy position only during native calculation.
         frame();++live.frame->sequence;live.frame->pose->camera.reset();live.frame->pose->x=500;live.frame->pose->y=600;
         scene.ensureSpectatorCameraFrame(0.016f);close(scene.m_gameState.m_cameraPosition.x,335);close(scene.m_gameState.m_cameraPosition.y,500);
-        close(dummy.getPosition().x,original.x);close(dummy.getPosition().y,original.y);
-        assert(dummy.m_positionX==x && dummy.m_positionY==y && !dummy.visible && dummy.m_lastPosition.x==5 && dummy.gameplayPositionWrites==1);
+        close(dummy.getPosition().x,500);close(dummy.getPosition().y,600);assert(!dummy.visible);
+        original=dummy.getPosition();x=dummy.m_positionX;y=dummy.m_positionY;
         // Early return and throwing native code restore exact independent coordinate mirrors.
-        auto early=[&](){ScopedCameraTargetOverride scoped(&dummy,CCPoint{999,888});return;};early();assert(dummy.m_positionX==x && dummy.getPosition().x==11);
+        auto early=[&](){ScopedCameraTargetOverride scoped(&dummy,CCPoint{999,888});return;};early();assert(dummy.m_positionX==x && dummy.getPosition().x==original.x);
         frame();scene.throwCamera=true;bool thrown=false;
         try{scene.ensureSpectatorCameraFrame(0.016f);}catch(std::runtime_error const&){thrown=true;}
-        assert(thrown && dummy.m_positionX==x && dummy.m_positionY==y && dummy.getPosition().x==11);scene.throwCamera=false;
+        assert(thrown && dummy.m_positionX==x && dummy.m_positionY==y && dummy.getPosition().x==original.x);scene.throwCamera=false;
         frame();live.frame->pose->cameraInvalid=true;scene.ensureSpectatorCameraFrame(0.016f);close(scene.m_gameState.m_cameraPosition.x,335);
         frame();live.frame.reset();scene.ensureSpectatorCameraFrame(0.016f);close(scene.m_gameState.m_cameraPosition.x,335);
         // Progress/UI uses remote rendered frame. Native dummy journal/completion never changes.
@@ -155,7 +165,7 @@ int main(){
         RankedRuntime::get().data.match.opponentProgress.reset();
 #endif
         level.m_timestamp=0;live.frame->pose->finished=true;live.frame->sequence=32;frame();scene.ensureSpectatorCameraFrame(0.016f);scene.updateProgressbar();close(fill.rect.width,200);assert(label.text=="100%");
-        assert(scene.m_currentProgress==0 && scene.newBest==7 && scene.savedPercentage==7 && dummy.getPosition().x==11);
+        assert(scene.m_currentProgress==0 && scene.newBest==7 && scene.savedPercentage==7 && !dummy.visible);
         // Ordinary Ranked, Placement and user Practice have unchanged native camera/UI behavior.
         for(int ordinary=0;ordinary<3;++ordinary){
             scene.m_fields->localSafety.enabled=true;scene.m_isPracticeMode=false;scene.m_isTestMode=false;
@@ -165,7 +175,7 @@ int main(){
             calls=scene.cameraUpdates;scene.GJBaseGameLayer::updateCamera(0.016f);scene.GJBaseGameLayer::updateCamera(0.016f);assert(scene.cameraUpdates==calls+2);
             scene.updateProgressbar();close(fill.rect.width,0);assert(label.text=="0%");
         }
-        scene.cleanupSpectatorPresentation();GJBaseGameLayer::cameraDispatch=nullptr;PlayLayer::current=nullptr;
+        scene.cleanupSpectatorPresentation();GJBaseGameLayer::cameraDispatch=nullptr;GJBaseGameLayer::worldDispatch=nullptr;PlayLayer::current=nullptr;
         CCObject::drain();
     }
     CCObject::drain();assert(CCObject::alive==0);
@@ -176,7 +186,7 @@ int main(){
         for(const debug of [false,true]){
             const binary=join(dir,'test');
             execFileSync('g++',['-std=c++23','-Wall','-Wextra','-Wpedantic','-Werror',...(debug?['-DCORUM_RANKED_DEBUG_SPECTATE=1']:[]),'-I',dir,
-                join(root,'src/spectator/CorumRemotePlayer.cpp'),join(root,'src/spectator/CorumSpectatorCamera.cpp'),join(dir,'test.cpp'),'-o',binary],{stdio:'pipe'});
+                join(root,'src/spectator/CorumRemotePlayer.cpp'),join(root,'src/spectator/CorumSpectatorCamera.cpp'),join(root,'src/spectator/SpectatorWorldDriver.cpp'),join(dir,'test.cpp'),'-o',binary],{stdio:'pipe'});
             assert.match(execFileSync(binary,{encoding:'utf8'}),/UI safety passed/);
         }
     } finally {rmSync(dir,{recursive:true,force:true});}

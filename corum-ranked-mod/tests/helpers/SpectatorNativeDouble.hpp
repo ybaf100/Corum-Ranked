@@ -98,6 +98,7 @@ namespace prelude { using namespace cocos2d; using geode::Ref; namespace log=geo
 }
 struct GJGameLevel { int m_levelID=123,m_timestamp=0; };
 struct PlayLayer;
+struct GJBaseGameLayer;
 struct PlayerObject: cocos2d::CCNode {
     inline static int creates=0; inline static bool fail=false;
     bool m_playEffects=true,m_isHidden=false,m_isDead=false;
@@ -119,8 +120,15 @@ struct PlayerObject: cocos2d::CCNode {
     void updatePlayerSpiderFrame(int){frame=6;} void updatePlayerSwingFrame(int){frame=7;}
     cocos2d::CCPoint m_startPosition{},m_lastPosition{};
     double m_positionX=0,m_positionY=0;
-    int gameplayPositionWrites=0;
-    void setPosition(cocos2d::CCPoint p){++gameplayPositionWrites;cocos2d::CCNode::setPosition(p);m_positionX=p.x;m_positionY=p.y;}
+    int gameplayPositionWrites=0,physicsUpdates=0,rotationUpdates=0,spiderJumps=0;
+    bool m_wasTeleported=false;int m_followRelated=0;float m_unk838=0;std::vector<float> m_playerFollowFloats=std::vector<float>(200);
+    GJBaseGameLayer* m_gameLayer=nullptr;
+    virtual void update(float){++physicsUpdates;} virtual void updateRotation(float){++rotationUpdates;}
+    virtual void spiderTestJump(bool){++spiderJumps;}
+    virtual void updateSpecial(float dt){m_unk838+=dt;if(m_unk838>=.01f){++m_followRelated;m_unk838-=.01f;}m_playerFollowFloats[m_followRelated%200]=position.y;}
+    virtual void setPosition(cocos2d::CCPoint const& p){++gameplayPositionWrites;cocos2d::CCNode::setPosition(p);m_positionX=p.x;m_positionY=p.y;}
+    virtual void setRotation(float r){cocos2d::CCNode::setRotation(r);}
+    virtual void setVisible(bool b){cocos2d::CCNode::setVisible(b);}
     cocos2d::CCNode *m_shipStreak=nullptr,*m_regularTrail=nullptr,*m_waveTrail=nullptr,*m_ghostTrail=nullptr,
       *m_playerGroundParticles=nullptr,*m_trailingParticles=nullptr,*m_shipClickParticles=nullptr,
       *m_vehicleGroundParticles=nullptr,*m_ufoClickParticles=nullptr,*m_robotBurstParticles=nullptr,
@@ -144,7 +152,14 @@ struct GJBaseGameLayer {
         float m_cameraZoom=1;
         void stopTweenAction(int) {}
     } m_gameState;
-    int cameraUpdates=0;
+    int cameraUpdates=0,worldUpdates=0;
+    inline static void(*worldDispatch)(GJBaseGameLayer*,float)=nullptr;
+    inline static void(*nativeWorldObserver)(GJBaseGameLayer*,float)=nullptr;
+    bool worldDispatching=false;
+    void update(float dt){
+      if(worldDispatch && !worldDispatching){worldDispatching=true;try{worldDispatch(this,dt);}catch(...){worldDispatching=false;throw;}worldDispatching=false;return;}
+      ++worldUpdates;if(nativeWorldObserver)nativeWorldObserver(this,dt);else updateCamera(dt);
+    }
     void cameraMoveX(float x,float,float,bool) { m_gameState.m_unkBool4=true; m_gameState.m_cameraPosition.x=x; }
     void cameraMoveY(float y,float,float,bool) {
         m_gameState.m_unkBool5=true; m_gameState.m_unkInt13=y; m_gameState.m_cameraPosition.y=y;
@@ -169,7 +184,8 @@ struct GJBaseGameLayer {
 struct PlayLayer: GJBaseGameLayer {
     GJGameLevel* m_level=nullptr; float m_levelLength=1000,m_progressWidth=200,m_progressHeight=10;
     bool m_isTestMode=false,m_isPracticeMode=false,m_decimalPercentage=false;
-    int m_currentProgress=0,newBest=7,savedPercentage=7;
+    int m_currentProgress=0,newBest=7,savedPercentage=7,resets=0;
+    void resetLevel(){++resets;}
     cocos2d::CCSprite* m_progressFill=nullptr; cocos2d::CCLabelBMFont* m_percentageLabel=nullptr;
     inline static PlayLayer* current=nullptr; static PlayLayer* get(){return current;}
     void updateProgressbar(){if(m_progressFill)m_progressFill->setTextureRect({0,0,0,m_progressHeight});if(m_percentageLabel)m_percentageLabel->setString("0%");}

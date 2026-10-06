@@ -125,7 +125,8 @@ struct CorumRankedPlayLayer: PlayLayer {
         corum::ranked::SpectatorSceneContext sceneContext{"match",1,0,123};
         corum::ranked::FakeRemote remotePlayer;
         corum::ranked::FakeCamera spectatorCamera;
-        std::optional<corum::ranked::SpectatorRemoteFrame> spectatorRenderedFrame;std::optional<unsigned> spectatorCameraFrameNumber;
+        std::optional<corum::ranked::SpectatorRemoteFrame> spectatorRenderedFrame;std::optional<unsigned> spectatorCameraFrameNumber,spectatorPresentationFrameNumber,spectatorWorldFrameNumber;
+        struct Driver {void reset(){}} spectatorWorldDriver;
     };
     GeodeFields<Fields> m_fields;
     int quits=0,huds=0;

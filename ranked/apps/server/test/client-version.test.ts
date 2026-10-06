@@ -22,7 +22,7 @@ describe("Ranked client version gate", () => {
 
   it("accepts the same current version with or without a leading v", () => {
     expect(
-      evaluateRankedClientVersion("0.5.0-beta.28", [clientMod("0.5.0-beta.28")]).allowed,
+      evaluateRankedClientVersion("0.5.0-beta.29", [clientMod("0.5.0-beta.29")]).allowed,
     ).toBe(true);
   });
 
@@ -32,7 +32,7 @@ describe("Ranked client version gate", () => {
     ]);
     expect(result).toMatchObject({
       allowed: false,
-      requiredVersion: "v0.5.0-beta.28",
+      requiredVersion: "v0.5.0-beta.29",
       clientVersion: "v0.5.0-beta.8",
     });
   });
@@ -89,4 +89,8 @@ describe("Ranked client version gate", () => {
   it("rejects beta27 after the beta28 final viewport and publisher-clock presentation hotfix", () => {
     expect(evaluateRankedClientVersion("v0.5.0-beta.27", [clientMod("v0.5.0-beta.27")]).allowed).toBe(false);
   });
+  it("rejects beta28 after the beta29 hidden world-driver hotfix", () => {
+    expect(evaluateRankedClientVersion("v0.5.0-beta.28", [clientMod("v0.5.0-beta.28")]).allowed).toBe(false);
+  });
+
 });

@@ -27,6 +27,10 @@ for(const debugOn of [false,true]) test(`native update/rotation/teleport -> comp
 #include <vector>
 using namespace corum::ranked;
 static std::int64_t clockMs=0;
+namespace geode::log {template<class... T>void info(T...){} }
+using namespace geode;
+struct CCDirector { static CCDirector* sharedDirector(){static CCDirector d;return &d;} unsigned getTotalFrames()const{return 0;} };
+struct ScopedRealGameplayEnd { bool& flag;bool previous;ScopedRealGameplayEnd(bool& f,bool b):flag(f),previous(f){flag=b;}~ScopedRealGameplayEnd(){flag=previous;} };
 struct CCPoint{float x=0,y=0;};struct GJBaseGameLayer;
 struct MainLayer{float getScaleY()const{return 1;}};
 struct PlayerObject {
@@ -43,7 +47,8 @@ struct PlayerObject {
 struct TeleportPortalObject{};
 struct GJBaseGameLayer {
  struct {bool m_isDualMode=false;CCPoint m_cameraPosition;} m_gameState;
- PlayerObject* m_player1=nullptr;double m_attemptTime=0;bool m_inResetDelay=false,m_isPaused=false;
+ PlayerObject* m_player1=nullptr;double m_attemptTime=0;bool m_inResetDelay=false,m_isPaused=false,m_started=false;
+ void updateCamera(float){}
  virtual ~GJBaseGameLayer()=default;
  virtual void update(float dt){clockMs+=std::int64_t(dt*1000);m_attemptTime+=dt;
   if(m_player1){m_player1->update(dt);m_player1->updateRotation(dt);m_gameState.m_cameraPosition={m_player1->position.x-200,m_player1->position.y-100};}}
@@ -71,8 +76,10 @@ struct DebugSpectateRuntime {
 }
 struct CorumRankedPlayLayer:PlayLayer {
  struct Fields{bool rankedInitialized=false,rankedLevel=true,safetyRetired=false,spectatorMode=false,spectatorPending=false;
-  bool debugRecordScene=false,debugPlaybackScene=false,debugRecordHasFrame=false;SpectatorCapturePolicy spectatorCapture;}fields;
+  bool debugRecordScene=false,debugPlaybackScene=false,debugRecordHasFrame=false;SpectatorCapturePolicy spectatorCapture;bool spectatorWorldUpdateInProgress=false;std::optional<unsigned> spectatorCameraFrameNumber;}fields;
  Fields* m_fields=&fields;
+ bool prepareSpectatorScene(){return false;}bool spectatorCameraActive(){return false;}bool beginSpectatorWorldFrame(){return false;}
+ void reconcileSpectatorWorldDriver(){}void driveSpectatorCamera(){}void logSpectatorNativeCamera(char const*){}void logSpectatorWorldDriver(){}
  bool freezeLocalDummy(PlayerObject*)const{return fields.spectatorMode || fields.debugPlaybackScene;}
  ${owner}
 };
@@ -90,14 +97,15 @@ int main(){
  world.update(.016f);assert(publisher.sent.empty()); // vanilla init has no capture authority
  world.fields.rankedInitialized=true;
  for(int i=0;i<40;++i){world.update(.016f);}assert(publisher.sent.empty()); // default entrance pose is not stable gameplay
- clockMs=0;player.moving=true;
- world.update(.016f);world.update(.016f);world.update(.016f);
- assert(publisher.sent.size()==1 && clockMs<500);
- auto first=publisher.sent.back();assert(first.rotation==6 && first.camera->x==first.x-200);
+ clockMs=0;world.m_started=true;world.update(.001f);
+ assert(publisher.sent.size()==1 && publisher.sent.front().x==100 && publisher.sent.front().rotation==0); // valid stationary initial world seed
+ player.moving=true;world.update(.016f);world.update(.016f);world.update(.016f);world.update(.016f);
+ assert(publisher.sent.size()==2 && clockMs<500);
+ auto first=publisher.sent.back();assert(first.rotation==12 && first.camera->x==first.x-200);
  auto latest=world.fields.spectatorCapture.snapshot();assert(latest->rotation==player.rotation && latest->camera->x==player.position.x-200);
  publisher.busy=true;TeleportPortalObject portal;world.teleportPlayer(&portal,&player);
- for(int i=0;i<4;++i){world.update(.016f);}assert(publisher.sent.size()==1);
- publisher.busy=false;world.update(.016f);assert(publisher.sent.size()==2);
+ for(int i=0;i<4;++i){world.update(.016f);}assert(publisher.sent.size()==2);
+ publisher.busy=false;world.update(.016f);assert(publisher.sent.size()==3);
  auto snap=publisher.sent.back();assert(snap.discontinuity && verifiedSpectatorSnap(first,snap));
  assert(snap.cameraSnap && snap.camera->x==player.position.x-200);
  assert(!world.fields.spectatorCapture.snapshot()->discontinuity); // consumed only when sampled
@@ -115,7 +123,7 @@ int main(){
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
  auto& debug=debug::DebugSpectateRuntime::get();world.fields.spectatorMode=false;world.fields.rankedLevel=false;
  world.fields.debugRecordScene=true;world.fields.spectatorCapture.reset();clockMs=0;
- world.update(.016f);world.update(.016f);world.update(.016f);assert(debug.sent.size()==1 && world.fields.debugRecordHasFrame);
+ world.update(.001f);world.update(.016f);world.update(.016f);assert(debug.sent.size()==1 && world.fields.debugRecordHasFrame);
  assert(debug.sent.back().camera && clockMs<500);
  auto size=debug.sent.size();world.update(.016f);assert(debug.sent.size()==size);
  world.fields.debugRecordScene=false;world.fields.debugPlaybackScene=true;dummyUpdates=player.updates;
@@ -126,6 +134,57 @@ int main(){
     const dir=mkdtempSync(join(tmpdir(),'corum-capture-native-'));
     try{const file=join(dir,'capture.cpp'),binary=join(dir,'capture');writeFileSync(file,cpp);
         execFileSync('g++',['-std=c++23','-Wall','-Wextra','-Wpedantic','-Werror',...(debugOn?['-DCORUM_RANKED_DEBUG_SPECTATE=1']:[]),file,'-o',binary],{stdio:'pipe'});
+        execFileSync(binary,[],{stdio:'pipe'});
+    }finally{rmSync(dir,{recursive:true,force:true});}
+});
+
+test('actual Debug recording clock seeds at the first valid native world and preserves relative terminal time',()=>{
+    const runtime=readFileSync(join(root,'src/debug/DebugSpectateRuntime.cpp'),'utf8');
+    const start=runtime.indexOf('bool DebugSpectateRuntime::recordPose('),open=runtime.indexOf('{',start);
+    let end=open+1,depth=1;while(depth){if(runtime[end]==='{')++depth;if(runtime[end]==='}')--depth;++end;}
+    const body=runtime.slice(start,end).replaceAll('std::chrono::steady_clock::now()', 'testClockNow()');
+    const cpp=`
+#include "${join(root,'src/debug/DebugSpectatePolicy.hpp')}"
+#include "${join(root,'src/domain/SpectatorCapturePolicy.hpp')}"
+#include <chrono>
+#include <cassert>
+#include <limits>
+namespace geode::log {template<class... T>void info(T...){} }
+using namespace geode;
+namespace corum::ranked::debug {
+static std::chrono::steady_clock::time_point wall{};
+auto testClockNow(){return wall;}
+struct DebugSpectateRuntime {
+ DebugSpectateMode m_mode=DebugSpectateMode::Recording;
+ DebugSpectateCapture m_capture;
+ std::chrono::steady_clock::time_point m_recordStartedAt{};
+ std::optional<SpectatorGhostPose> m_previousCapturedPose;
+ int uploads=0;void pumpRecording(){++uploads;}
+ bool recordPose(SpectatorGhostPose const&,bool terminal=false);
+};
+${body}
+}
+int main(){
+ using namespace corum::ranked;using namespace corum::ranked::debug;
+ SpectatorCapturePolicy native;
+ SpectatorGhostPose initial{100,40,0,false,false};initial.camera=SpectatorCameraOrigin{-65,-60};
+ native.observe(initial);assert(!native.stableNativeFrame(0,false)); // finite init alone is insufficient
+ assert(native.stableNativeFrame(0,true)); // started, completed world can be stationary
+ auto garbage=initial;garbage.x=std::numeric_limits<float>::quiet_NaN();native.observe(garbage);
+ assert(!native.stableNativeFrame(.01,true) && !native.snapshot());
+ native.observe(initial);assert(native.stableNativeFrame(.02,true));
+ DebugSpectateRuntime record;wall+=std::chrono::milliseconds(1701);
+ assert(record.recordPose(initial));assert(record.m_capture.batch().front().elapsedMs==0);
+ wall+=std::chrono::milliseconds(50);initial.x=120;assert(record.recordPose(initial));
+ wall+=std::chrono::milliseconds(50);initial.x=140;assert(record.recordPose(initial));
+ auto frames=record.m_capture.batch();assert(frames[1].elapsedMs==50 && frames[2].elapsedMs==100);
+ wall+=std::chrono::milliseconds(17);initial.dead=true;assert(record.recordPose(initial,true));
+ assert(record.m_capture.batch().back().elapsedMs==117 && record.m_capture.completed());
+}
+`;
+    const dir=mkdtempSync(join(tmpdir(),'corum-world-seed-'));
+    try{const file=join(dir,'seed.cpp'),binary=join(dir,'seed');writeFileSync(file,cpp);
+        execFileSync('g++',['-std=c++23','-Wall','-Wextra','-Wpedantic','-Werror',file,'-o',binary],{stdio:'pipe'});
         execFileSync(binary,[],{stdio:'pipe'});
     }finally{rmSync(dir,{recursive:true,force:true});}
 });

@@ -6,12 +6,17 @@ const play = read('src/PlayLayer.cpp');
 const remote = read('src/spectator/CorumRemotePlayer.cpp');
 const live = read('src/SpectatorLiveRuntime.cpp');
 
-test('only the dedicated PlayerObject receives interpolated remote pose', () => {
+test('dedicated visible renderer stays separate from scoped hidden world driver', () => {
     assert.match(remote, /PlayerObject::create\(1, 1, layer, root, true\)/);
     assert.match(remote, /player == layer->m_player1 \|\| player == layer->m_player2/);
     assert.match(remote, /m_player->setPosition\(\{pose.x, pose.y\}\)/);
     assert.match(remote, /m_player->setRotation\(pose.rotation\)/);
-    assert.doesNotMatch(play, /m_player1->set(?:Position|Rotation)\(/);
+    assert.match(play, /spectatorWorldDriver.apply\(this, spectatorCameraActive\(\), rendered\)/);
+    const driver = read('src/spectator/SpectatorWorldDriver.cpp');
+    assert.match(driver, /ScopedSpectatorWorldDriverWrite scope\(m_player\)/);
+    assert.match(driver, /m_player = layer->m_player1/);
+    assert.match(driver, /m_player->setPosition\(\{pose.x, pose.y\}\)/);
+    assert.doesNotMatch(driver, /reportAttempt|savePercentage|saveNewScore|levelComplete|spiderTestJump|PlayerObject::update\(/);
     assert.match(play, /auto spectatorAuthority = runtime.isSpectating\(\)/);
     assert.match(play, /remotePlayer.update\(this, true, m_fields->spectatorRenderedFrame\)/);
     assert.match(play, /SpectatorLiveRuntime::get\(\).presentationFrame\(\)/);

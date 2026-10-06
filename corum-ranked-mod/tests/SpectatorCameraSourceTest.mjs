@@ -7,13 +7,15 @@ const camera = read('src/spectator/CorumSpectatorCamera.cpp');
 const end = read('src/EndLevelLayer.cpp');
 
 test('camera final adapter moves render transforms; target override stays scoped and separate', () => {
-    assert.match(camera, /cameraMoveX\(target.x, 0.0f/);
-    assert.match(camera, /cameraMoveY\(target.y, 0.0f/);
+    assert.doesNotMatch(camera.replace(/\/\/[^\n]*/g, ''), /cameraMoveX\(/);
+    assert.doesNotMatch(camera.replace(/\/\/[^\n]*/g, ''), /cameraMoveY\(/);
     assert.match(play, /class \$modify\(CorumRankedSpectatorCameraHook, GJBaseGameLayer\)/);
     assert.match(play, /GJBaseGameLayer::updateCamera\(dt\)/);
     assert.match(play, /remotePlayer.cameraFrame\(\)/);
     assert.doesNotMatch(camera.replace(/\/\/[^\n]*/g, ''), /m_player[12]|reportAttempt|destroyPlayer\(|levelComplete\(/);
-    assert.doesNotMatch(play, /m_player1->set(?:Position|Rotation)\(|m_player1\s*=/);
+    assert.doesNotMatch(play, /m_player1\s*=/);
+    assert.match(play, /ScopedSpectatorWorldDriverWrite::allows\(player\)/);
+    assert.match(play, /spectatorWorldDriver.apply\(this, spectatorCameraActive\(\), rendered\)/);
 });
 test('single camera owner applies native before final correction with no viewer duplicate', () => {
     const hook=play.slice(play.indexOf('class $modify(CorumRankedSpectatorCameraHook'));

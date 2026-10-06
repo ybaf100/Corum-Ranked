@@ -8,7 +8,7 @@ namespace corum::ranked {
 class SpectatorCapturePolicy {
 public:
     void observe(SpectatorGhostPose pose) {
-        if (!finiteSpectatorPose(pose)) return;
+        if (!finiteSpectatorPose(pose)) { m_latest.reset(); return; }
         if (pose.camera && !validSpectatorCamera(*pose.camera)) pose.camera.reset();
         if (m_latest && m_latest->camera && pose.camera &&
             std::hypot(pose.camera->x - m_latest->camera->x,
@@ -31,18 +31,16 @@ public:
         m_snap = snap; m_cameraSnap = true;
     }
     bool stableNativeFrame(double nativeTime, bool nativeReady) {
-        if (!nativeReady || !std::isfinite(nativeTime) || nativeTime <= 0 || nativeTime <= m_nativeTime) {
-            m_stableFrames = 0; m_nativeTime = nativeTime; m_nativePose.reset(); return false;
+        if (!nativeReady || !m_latest || !std::isfinite(nativeTime) || nativeTime < 0 ||
+            (m_seeded && nativeTime < m_nativeTime)) {
+            m_nativeTime = nativeTime; return false;
         }
         m_nativeTime = nativeTime;
-        auto const moved = m_latest && m_nativePose &&
-            (std::hypot(m_latest->x - m_nativePose->x, m_latest->y - m_nativePose->y) > 0.01f ||
-             m_latest->mode != m_nativePose->mode || m_latest->rotation != m_nativePose->rotation);
-        m_nativePose = m_latest;
-        // Default/static entrance poses do not arm capture just because a clock
-        // advanced. Two completed native gameplay frames establish readiness.
-        if (m_stableFrames < 2) m_stableFrames = moved ? m_stableFrames + 1 : 0;
-        return m_stableFrames >= 2;
+        // The caller proves a completed, started native world (not init/reset).
+        // A stationary initial player is a valid world seed; requiring motion
+        // used to discard early trigger history before playback normalization.
+        m_seeded = true;
+        return true;
     }
     std::optional<SpectatorGhostPose> snapshot() const {
         if (!m_latest) return std::nullopt;
@@ -50,13 +48,12 @@ public:
         return pose;
     }
     void sampled() { m_snap.reset(); m_cameraSnap = false; }
-    void reset() { m_latest.reset(); m_nativePose.reset(); sampled(); m_nativeTime = 0; m_stableFrames = 0; }
+    void reset() { m_latest.reset(); sampled(); m_nativeTime = 0; m_seeded = false; }
 private:
     std::optional<SpectatorGhostPose> m_latest;
-    std::optional<SpectatorGhostPose> m_nativePose;
     std::optional<SpectatorSnapEvidence> m_snap;
     double m_nativeTime = 0;
-    int m_stableFrames = 0;
     bool m_cameraSnap = false;
+    bool m_seeded = false;
 };
 } // namespace corum::ranked
