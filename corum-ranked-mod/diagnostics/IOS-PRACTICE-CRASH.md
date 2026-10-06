@@ -89,6 +89,12 @@ The prior two-hook candidate is retained for historical comparison, not required
 this single-target fix. Full-minus-visible and functional candidate outcomes remain
 unreported; main/beta.31 still require device acceptance and feature regression.
 
+[Stage 4 CI and exact downloads](IOS-PRACTICE-CRASH-VISIBLE.md#validation-and-artifact-downloads)
+are complete: CI 37481669894 passed 85 source/native tests, eight strict C++ suites and
+five iOS arm64 builds at `30a560baa2124e7b8242316422389265b51de4a0`. Both fixed packages
+remove only the setVisible detour while retaining updateSpecial and the other five B
+hooks. This is packaged source/build validation, not a Stage 4 iPad result.
+
 ## Stage 2 compiled-out comparisons
 
 All eight comparison artifacts use Debug ON and exclude A/native probes. C, D, E,

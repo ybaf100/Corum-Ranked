@@ -109,5 +109,28 @@ is allowed and spectator death/result/save remains blocked. These are host doubl
 not real GD execution or iPad verification. Default beta.30 source bodies/layout,
 version, protocol and Debug OFF probe exclusion regressions remain passing.
 
-Exact source SHA, CI run and download mapping will be recorded after iOS builds finish.
-No Stage 4 device result or acceptance is inferred from successful CI.
+[CI run 37481669894](https://github.com/ybaf100/Corum-Ranked/actions/runs/37481669894)
+**passed** at source `30a560baa2124e7b8242316422389265b51de4a0`: 85 source/native tests,
+eight strict C++ executable suites and all five iOS arm64 builds. No workflow rerun
+was needed. All complete native marker sets match the selected profiles. The two
+fixed packages each retain six B detours (updateSpecial included) with setVisible
+absent and the explicit visibility replacement tag present. They contain no Follow-Y
+replacement tag. Original-default compile controls retain seven B hooks and contain
+no diagnostic code. The companion Debug validation workflow also passed; its usual
+official package build is intentionally skipped on diagnostic branches.
+
+| Download artifact | Verified unique native targets | Role |
+|---|---:|---|
+| [stage4-all-player-control](https://github.com/ybaf100/Corum-Ranked/actions/runs/37481669894/artifacts/11422150542) | 44 | Original full B, A excluded; not the fix |
+| [stage4-visible-fix-debug](https://github.com/ybaf100/Corum-Ranked/actions/runs/37481669894/artifacts/11422340415) | 43 | setVisible absent, updateSpecial retained, Debug ON |
+| [stage4-visible-fix-off](https://github.com/ybaf100/Corum-Ranked/actions/runs/37481669894/artifacts/11421059364) | 43 | Same minimal fix, Debug OFF |
+| [compile-check-beta30-debug-on](https://github.com/ybaf100/Corum-Ranked/actions/runs/37481669894/artifacts/11420679933) | 53 | Original unchanged default, diagnostic OFF |
+| [compile-check-beta30-debug-off](https://github.com/ybaf100/Corum-Ranked/actions/runs/37481669894/artifacts/11422480334) | 44 | Original unchanged default, diagnostic OFF |
+
+Every artifact has a named .geode and diagnostic-provenance.json recording source/
+package SHA-256, exact enabled/disabled B hooks, SDK/runtime/bindings and ownership
+selection. Downloads expire on 2026-10-20. Later documentation-only commits do not
+change these artifact sources. Main remains `58d643d21734243e2f3a45e3006d27f178cad83e`,
+v0.5.0-beta.30. No beta.31, main merge, force push or manual Release was performed.
+The assistant has not run GD on iPad. Stage 4 device results and functional acceptance
+remain pending; successful CI alone does not establish that the crash is fixed.

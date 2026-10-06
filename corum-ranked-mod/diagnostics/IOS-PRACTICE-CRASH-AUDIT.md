@@ -301,3 +301,12 @@ the owned spectator dummy at existing world/camera/postUpdate boundaries. The na
 Follow-Y guard/sampler and World Driver layout/code stay beta.30; the previous history
 snapshot replacement is not used. No new detour, Tulip patch or protocol/gate change
 is introduced. Main and beta.31 remain pending actual Practice plus feature acceptance.
+
+Stage 4 [CI 37481669894](https://github.com/ybaf100/Corum-Ranked/actions/runs/37481669894)
+passed at `30a560baa2124e7b8242316422389265b51de4a0`: 85 source/native callback tests,
+eight strict C++ executable suites and five iOS arm64 packages. Both minimal fixed
+packages have 43 unique native targets, exact six B hooks with setVisible absent and
+updateSpecial retained, and the visibility-only replacement tag. No new native target
+or Follow-Y replacement is present. Default Debug ON/OFF remain original beta.30.
+The [download mapping](IOS-PRACTICE-CRASH-VISIBLE.md#validation-and-artifact-downloads)
+records code provenance and the separate remaining actual device acceptance.
