@@ -107,6 +107,7 @@ jobs:
           /tmp/corum-ranked-spectator-buffer-test
           node --test corum-ranked-mod/tests/SpectatorCameraOwnerNativeTest.mjs
           node --test corum-ranked-mod/tests/SpectatorWorldDriverNativeTest.mjs
+          node --test corum-ranked-mod/tests/SpectatorVisibilityNativeTest.mjs
           node --test corum-ranked-mod/tests/AchievementSourceTest.mjs
           node --test corum-ranked-mod/tests/SpectatorLocalSafetySourceTest.mjs
           node --test corum-ranked-mod/tests/SpectatorNativeHookTest.mjs
@@ -156,6 +157,36 @@ jobs:
           combine: true
           configure-args: -DCORUM_RANKED_DEBUG_BOT_MATCH=ON -DCORUM_RANKED_DEBUG_SPECTATE=ON
 
+  ios-debug-off:
+    name: Validate iOS Debug OFF ${{ needs.metadata.outputs.version }}
+    needs:
+      - metadata
+      - tests
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Compile official iOS configuration
+        id: build
+        uses: geode-sdk/build-geode-mod@main
+        with:
+          path: corum-ranked-mod
+          target: iOS
+          combine: false
+          configure-args: -DCORUM_RANKED_DEBUG_BOT_MATCH=OFF -DCORUM_RANKED_DEBUG_SPECTATE=OFF
+      - name: Verify packaged iOS detours and Debug exclusion
+        env:
+          BUILD_OUTPUT: ${{ steps.build.outputs.build-output }}
+          MOD_VERSION: ${{ needs.metadata.outputs.version }}
+        shell: bash
+        run: |
+          python3 corum-ranked-mod/tests/verify-visibility-package.py \
+            "$BUILD_OUTPUT" "$MOD_VERSION" --ios-only
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Corum-Ranked-${{ needs.metadata.outputs.version }}-iOS-Debug-OFF
+          path: ${{ steps.build.outputs.build-output }}/*.geode
+          if-no-files-found: error
+
   package:
     name: Package Debug ${{ needs.metadata.outputs.version }}
     runs-on: ubuntu-latest
@@ -203,6 +234,8 @@ jobs:
           if missing:
               raise SystemExit("Combined package is missing: " + ", ".join(missing))
           PY
+          python3 corum-ranked-mod/tests/verify-visibility-package.py \
+            dist/hwanhee1.corum_ranked.geode "$MOD_VERSION" --debug
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ needs.metadata.outputs.artifact_name }}

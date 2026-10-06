@@ -139,7 +139,7 @@ int main(){
    p->updateSpecial(dt); // native helper cannot double-write driver follow history
 #endif
    // Windows updateSpecial is inline in its blocked physics caller; no detour.
-   p->setVisible(true);assert(!p->isVisible());
+   p->setVisible(true);assert(p->isVisible()); // unhooked native setter; owner hides before camera/presentation
    // A native portal may mutate flags. Position writes cannot win over the scoped frame.
    p->setPosition({9999,9999});p->setRotation(123);
    close(p->getPosition().x,f.pose->x);close(p->getRotation(),f.pose->rotation);

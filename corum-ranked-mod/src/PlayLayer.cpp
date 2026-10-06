@@ -603,7 +603,13 @@ public:
     }
 
     void reconcileSpectatorWorldDriver() {
-        if (spectatorCameraActive()) m_fields->spectatorWorldDriver.reconcile(this);
+        if (spectatorCameraActive()) {
+            // Own visibility at the spectator frame boundary, including the
+            // wait for a remote pose. A global PlayerObject setter detour also
+            // intercepts ordinary animation/Practice and is not needed here.
+            if (m_player1) m_player1->setVisible(false);
+            m_fields->spectatorWorldDriver.reconcile(this);
+        }
     }
 
     void logSpectatorWorldDriver() {
@@ -795,6 +801,7 @@ public:
         syncSpectatorLocalSafety();
         ScopedPersistenceOwner persistence(this);
         PlayLayer::postUpdate(dt);
+        reconcileSpectatorWorldDriver();
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         if (m_fields->debugRecordScene) {
             if (m_fields->debugSpectateHud) m_fields->debugSpectateHud->setString(corum::ranked::debug::DebugSpectateRuntime::get().status().c_str());
@@ -2057,8 +2064,7 @@ class $modify(CorumRankedSpectatorCameraHook, GJBaseGameLayer) {
 class $modify(CorumRankedSpectatorDummyPlayer, PlayerObject) {
     static void onModify(auto& self) {
         for (auto name : {"PlayerObject::update", "PlayerObject::updateRotation", "PlayerObject::spiderTestJump",
-                          "PlayerObject::setPosition", "PlayerObject::setRotation",
-                          "PlayerObject::setVisible"}) {
+                          "PlayerObject::setPosition", "PlayerObject::setRotation"}) {
             if (!self.setHookPriorityPre(name, Priority::First))
                 log::warn("Failed to install spectator world-driver safety priority: {}", name);
         }
@@ -2127,11 +2133,6 @@ class $modify(CorumRankedSpectatorDummyPlayer, PlayerObject) {
     }
 #endif
 
-    void setVisible(bool visible) {
-        auto* layer = localSafetyLayer();
-        if (visible && layer && layer->freezeLocalDummy(this)) visible = false;
-        PlayerObject::setVisible(visible);
-    }
 };
 
 // Explicit persistence firewall, independent of m_isPracticeMode/test mode.
