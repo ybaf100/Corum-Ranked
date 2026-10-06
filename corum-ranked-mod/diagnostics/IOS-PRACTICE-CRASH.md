@@ -49,6 +49,9 @@ Excluded safety groups deliberately make these packages unsuitable for Ranked,
 Placement, RECORD/TEST or Live Spectator. Use them only for ordinary Practice isolation.
 They reuse beta.30's exact mod ID/version and do not change the client/server gate or
 protocol v2. The label/provenance JSON and startup log identify each variant.
+Build SDK stays 5.8.2, as declared by the unchanged beta.30 manifest; device runtime
+stays Geode 5.10.1. The two versions are distinct. All variants pin the same SDK,
+GD bindings and build action, so those inputs do not change between A/B packages.
 
 ## Installation boundaries and regression
 

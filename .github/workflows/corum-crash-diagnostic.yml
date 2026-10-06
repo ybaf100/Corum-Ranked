@@ -56,7 +56,9 @@ jobs:
         with:
           path: corum-ranked-mod
           target: iOS
-          sdk: '5.10.1'
+          # Preserve the SDK of beta.30's geode=5.8.2 manifest. The device
+          # runtime under investigation is Geode 5.10.1; it is a separate input.
+          sdk: '5.8.2'
           bindings-ref: d641858f3e1cd2c6d86013c799f224ebdb8ec1cd
           combine: false
           configure-args: >-
@@ -68,7 +70,7 @@ jobs:
       - name: Label and verify the diagnostic artifact
         env:
           VARIANT: ${{ matrix.variant }}
-          OUTPUT_DIR: ${{ steps.build.outputs.output }}
+          OUTPUT_DIR: ${{ steps.build.outputs.build-output }}
         shell: bash
         run: |
           python3 - <<'PY'
@@ -88,7 +90,7 @@ jobs:
           provenance = {
               'variant': variant, 'commit': os.environ['GITHUB_SHA'],
               'baseline': '58d643d21734243e2f3a45e3006d27f178cad83e',
-              'version': manifest['version'], 'geodeSDK': '5.10.1',
+              'version': manifest['version'], 'geodeSDK': '5.8.2', 'deviceGeodeRuntime': '5.10.1',
               'bindings': 'd641858f3e1cd2c6d86013c799f224ebdb8ec1cd',
               'sha256': hashlib.sha256(target.read_bytes()).hexdigest(),
               'diagnosticOnly': True, 'purpose': 'ordinary Practice isolation; do not use Ranked/Spectator with excluded safety hooks'
@@ -99,6 +101,6 @@ jobs:
         with:
           name: corum-beta30-diag-${{ matrix.variant }}
           path: |
-            ${{ steps.build.outputs.output }}/*.geode
-            ${{ steps.build.outputs.output }}/diagnostic-provenance.json
+            ${{ steps.build.outputs.build-output }}/*.geode
+            ${{ steps.build.outputs.build-output }}/diagnostic-provenance.json
           retention-days: 14
