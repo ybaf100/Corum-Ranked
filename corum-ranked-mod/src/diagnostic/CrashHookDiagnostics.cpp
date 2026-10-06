@@ -1,0 +1,35 @@
+#if defined(CORUM_CRASH_DIAG)
+#include "CrashHookDiagnostics.hpp"
+#include <Geode/loader/ModEvent.hpp>
+#include <set>
+
+using namespace geode::prelude;
+
+$on_mod(Loaded) {
+    auto const hooks = Mod::get()->getHooks();
+    std::set<std::string_view> classes;
+    std::set<std::uintptr_t> targets;
+    unsigned debugOnly = 0, enabled = 0;
+    for (auto* hook : hooks) {
+        auto const name = hook->getDisplayName();
+        classes.insert(name.substr(0, name.find("::")));
+        targets.insert(hook->getAddress());
+        bool const isProbe = name == "EffectGameObject::triggerObject" ||
+            (name.starts_with("GJBaseGameLayer::") && name != "GJBaseGameLayer::update" &&
+             name != "GJBaseGameLayer::updateCamera" && name != "GJBaseGameLayer::teleportPlayer");
+        // teleportPlayer has one extra debug probe detour on the same target.
+        if (isProbe) ++debugOnly;
+        if (hook->isEnabled()) ++enabled;
+        log::info("[CorumCrashDiag] hook={} address={:#x} enabled={} priority={}",
+            name, hook->getAddress(), hook->isEnabled(), hook->getPriority());
+    }
+#if defined(CORUM_RANKED_DEBUG_SPECTATE) && !defined(CORUM_CRASH_DIAG_NO_PROBES_HOOKS)
+    ++debugOnly;
+#endif
+    log::info("[CorumCrashDiag] variant={} version={} baseline=58d643d21734243e2f3a45e3006d27f178cad83e modifyClasses={} functionHooks={} enabled={} uniqueTargets={} targetClasses={} debugProbeHooks={} priorityFailures={}",
+        CORUM_CRASH_DIAG_VARIANT, Mod::get()->getVersion().toString(),
+        corum::ranked::diagnostic::modifyClasses.load(std::memory_order_relaxed), hooks.size(), enabled,
+        targets.size(), classes.size(), debugOnly,
+        corum::ranked::diagnostic::priorityFailures.load(std::memory_order_relaxed));
+}
+#endif

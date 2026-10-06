@@ -1,3 +1,4 @@
+#include "diagnostic/CrashHookDiagnostics.hpp"
 #include "RankedPopup.hpp"
 #include "RankedRuntime.hpp"
 #include "ui/RankedVisuals.hpp"
@@ -55,6 +56,12 @@ CCNode* makeCrossedSwordsIcon() {
 } // namespace
 
 class $modify(CorumRankedMenuLayer, MenuLayer) {
+    static void onModify(auto& self) {
+#if defined(CORUM_CRASH_DIAG)
+        CORUM_CRASH_MODIFY(self, "CorumRankedMenuLayer");
+#endif
+    }
+
     bool init() {
         if (!MenuLayer::init()) return false;
 

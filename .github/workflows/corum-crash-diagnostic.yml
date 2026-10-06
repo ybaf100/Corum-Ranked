@@ -1,0 +1,104 @@
+name: Corum iOS Practice Crash Diagnostics
+
+on:
+  push:
+    branches: ['diagnostic/ios-practice-crash-*']
+    paths:
+      - 'corum-ranked-mod/**'
+      - '.github/workflows/corum-crash-diagnostic.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: Source and production callback regressions
+        run: node --test --test-concurrency=2 corum-ranked-mod/tests/*.mjs
+
+  ios-diagnostic:
+    runs-on: macos-latest
+    needs: native-regression
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: baseline-debug
+            debug: ON
+            exclusions: ''
+          - variant: no-probes
+            debug: ON
+            exclusions: '-DCORUM_CRASH_DIAG_NO_PROBES_HOOKS=ON'
+          - variant: official-debug-off
+            debug: OFF
+            exclusions: ''
+          - variant: no-probes-player
+            debug: ON
+            exclusions: '-DCORUM_CRASH_DIAG_NO_PROBES_HOOKS=ON -DCORUM_CRASH_DIAG_NO_PLAYER_HOOKS=ON'
+          - variant: no-world-persistence
+            debug: ON
+            exclusions: '-DCORUM_CRASH_DIAG_NO_WORLD_HOOKS=ON -DCORUM_CRASH_DIAG_NO_PERSISTENCE_HOOKS=ON'
+          - variant: no-gameplay
+            debug: ON
+            exclusions: '-DCORUM_CRASH_DIAG_NO_GAMEPLAY_HOOKS=ON'
+    name: iOS ${{ matrix.variant }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build diagnostic iOS package
+        id: build
+        uses: geode-sdk/build-geode-mod@586d1046506e351d1b366c7ed5e3ae1ed73bd541
+        with:
+          path: corum-ranked-mod
+          target: iOS
+          sdk: '5.10.1'
+          bindings-ref: d641858f3e1cd2c6d86013c799f224ebdb8ec1cd
+          combine: false
+          configure-args: >-
+            -DCORUM_RANKED_DEBUG_BOT_MATCH=${{ matrix.debug }}
+            -DCORUM_RANKED_DEBUG_SPECTATE=${{ matrix.debug }}
+            -DCORUM_CRASH_DIAG=ON
+            -DCORUM_CRASH_DIAG_VARIANT=${{ matrix.variant }}
+            ${{ matrix.exclusions }}
+      - name: Label and verify the diagnostic artifact
+        env:
+          VARIANT: ${{ matrix.variant }}
+          OUTPUT_DIR: ${{ steps.build.outputs.output }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, zipfile
+          out = pathlib.Path(os.environ['OUTPUT_DIR'])
+          packages = list(out.glob('*.geode'))
+          assert len(packages) == 1, packages
+          original = packages[0]
+          with zipfile.ZipFile(original) as z:
+              manifest = json.loads(z.read('mod.json'))
+              assert manifest['id'] == 'hwanhee1.corum_ranked'
+              assert manifest['version'] == 'v0.5.0-beta.30'
+              assert any(n.endswith('.ios.dylib') for n in z.namelist())
+          variant = os.environ['VARIANT']
+          target = out / f'corum-beta30-diag-{variant}.geode'
+          original.rename(target)
+          provenance = {
+              'variant': variant, 'commit': os.environ['GITHUB_SHA'],
+              'baseline': '58d643d21734243e2f3a45e3006d27f178cad83e',
+              'version': manifest['version'], 'geodeSDK': '5.10.1',
+              'bindings': 'd641858f3e1cd2c6d86013c799f224ebdb8ec1cd',
+              'sha256': hashlib.sha256(target.read_bytes()).hexdigest(),
+              'diagnosticOnly': True, 'purpose': 'ordinary Practice isolation; do not use Ranked/Spectator with excluded safety hooks'
+          }
+          (out / 'diagnostic-provenance.json').write_text(json.dumps(provenance, indent=2) + '\n')
+          PY
+      - uses: actions/upload-artifact@v7
+        with:
+          name: corum-beta30-diag-${{ matrix.variant }}
+          path: |
+            ${{ steps.build.outputs.output }}/*.geode
+            ${{ steps.build.outputs.output }}/diagnostic-provenance.json
+          retention-days: 14

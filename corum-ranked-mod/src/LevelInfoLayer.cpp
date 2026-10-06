@@ -1,3 +1,4 @@
+#include "diagnostic/CrashHookDiagnostics.hpp"
 #include "RankedRuntime.hpp"
 #include "RankedSongGate.hpp"
 #include "RankedLevelPreparation.hpp"
@@ -380,6 +381,12 @@ bool showRankedSongDownloadGate(GJGameLevel* level, double countdownRemainingSec
 } // namespace corum::ranked
 
 class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
+    static void onModify(auto& self) {
+#if defined(CORUM_CRASH_DIAG)
+        CORUM_CRASH_MODIFY(self, "CorumRankedLevelInfoLayer");
+#endif
+    }
+
     struct Fields {
         bool rankedOwned = false;
         corum::ranked::LevelPreparationContext context;

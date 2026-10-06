@@ -1,3 +1,4 @@
+#include "diagnostic/CrashHookDiagnostics.hpp"
 #include "RankedRuntime.hpp"
 #include "spectator/SpectatorSceneBridge.hpp"
 
@@ -24,6 +25,15 @@ bool authoritativeExitState(std::string const& state) {
 } // namespace
 
 class $modify(CorumRankedEndLevelLayer, EndLevelLayer) {
+    static void onModify(auto& self) {
+#if defined(CORUM_CRASH_DIAG)
+        if (corum::ranked::diagnostic::excludeGameplayGroup(self, "CorumRankedEndLevelLayer")) return;
+#endif
+#if defined(CORUM_CRASH_DIAG)
+        CORUM_CRASH_MODIFY(self, "CorumRankedEndLevelLayer");
+#endif
+    }
+
     struct Fields {
         bool rankedLevel = false;
         bool rankedExitRequested = false;

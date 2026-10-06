@@ -21,6 +21,17 @@ option(
 )
 option(CORUM_RANKED_DEBUG_SPECTATE "Include server-backed VOICE Debug Spectate harness" OFF)
 
+# Temporary crash-isolation switches. Defaults reproduce beta.30 unchanged.
+# Never enable these exclusions in a Ranked/Spectator release package.
+option(CORUM_CRASH_DIAG "Include bounded hook registry/ordinary-Practice diagnostics" OFF)
+set(CORUM_CRASH_DIAG_VARIANT "baseline-debug" CACHE STRING "Diagnostic artifact label")
+foreach(group PROBES PLAYER WORLD PERSISTENCE GAMEPLAY)
+    option(CORUM_CRASH_DIAG_NO_${group}_HOOKS "Exclude ${group} hook group for Practice isolation" OFF)
+    if (CORUM_CRASH_DIAG_NO_${group}_HOOKS AND NOT CORUM_CRASH_DIAG)
+        message(FATAL_ERROR "Hook exclusions require CORUM_CRASH_DIAG=ON; diagnostic builds only")
+    endif()
+endforeach()
+
 file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS src/*.cpp)
 # Debug Bot Match, including Force Win/Lose, is a development tool and must not
 # be linked into official packages. Add its implementation files only when the
@@ -39,6 +50,16 @@ if (CORUM_RANKED_DEBUG_SPECTATE)
     list(APPEND SOURCES src/debug/DebugSpectateRuntime.cpp src/debug/DebugSpectatePopup.cpp)
 endif()
 add_library(${PROJECT_NAME} SHARED ${SOURCES})
+
+if (CORUM_CRASH_DIAG)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE
+        CORUM_CRASH_DIAG=1 CORUM_CRASH_DIAG_VARIANT="${CORUM_CRASH_DIAG_VARIANT}")
+    foreach(group PROBES PLAYER WORLD PERSISTENCE GAMEPLAY)
+        if (CORUM_CRASH_DIAG_NO_${group}_HOOKS)
+            target_compile_definitions(${PROJECT_NAME} PRIVATE CORUM_CRASH_DIAG_NO_${group}_HOOKS=1)
+        endif()
+    endforeach()
+endif()
 
 if (CORUM_RANKED_DEBUG_BOT_MATCH)
     target_compile_definitions(${PROJECT_NAME} PRIVATE CORUM_RANKED_DEBUG_BOT_MATCH=1)

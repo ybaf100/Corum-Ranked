@@ -1,5 +1,6 @@
-#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+#if defined(CORUM_RANKED_DEBUG_SPECTATE) && !defined(CORUM_CRASH_DIAG_NO_PROBES_HOOKS)
 #include "../domain/SpectatorNativeProbe.hpp"
+#include "../diagnostic/CrashHookDiagnostics.hpp"
 #include <Geode/Geode.hpp>
 #include <Geode/modify/GJBaseGameLayer.hpp>
 #include <Geode/modify/EffectGameObject.hpp>
@@ -11,6 +12,11 @@ using corum::ranked::noteSpectatorNativePath;
 // Pass-through probes: deliberately never add a second collision pass. Native
 // collision is broader than trigger observation (portals/rings/pickups/damage).
 class $modify(CorumSpectatorNativeInteractionProbe, GJBaseGameLayer) {
+    static void onModify(auto& self) {
+#if defined(CORUM_CRASH_DIAG)
+        CORUM_CRASH_MODIFY(self, "CorumSpectatorNativeInteractionProbe");
+#endif
+    }
     int checkCollisions(PlayerObject* player, float dt, bool ignoreDamage) {
         noteSpectatorNativePath(this, player, SpectatorNativePath::CheckCollisions);
         return GJBaseGameLayer::checkCollisions(player, dt, ignoreDamage);
@@ -58,6 +64,11 @@ class $modify(CorumSpectatorNativeInteractionProbe, GJBaseGameLayer) {
 };
 
 class $modify(CorumSpectatorNativeTriggerProbe, EffectGameObject) {
+    static void onModify(auto& self) {
+#if defined(CORUM_CRASH_DIAG)
+        CORUM_CRASH_MODIFY(self, "CorumSpectatorNativeTriggerProbe");
+#endif
+    }
     void triggerObject(GJBaseGameLayer* layer, int uniqueId, gd::vector<int> const* remapKeys) override {
         corum::ranked::noteSpectatorNativeTrigger(layer, m_uniqueID);
         EffectGameObject::triggerObject(layer, uniqueId, remapKeys);

@@ -22,6 +22,9 @@ permissions:
 
 jobs:
   metadata:
+    # Practice-isolation branches publish explicitly labelled iOS diagnostics
+    # through corum-crash-diagnostic.yml, never the usual Debug package.
+    if: ${{ !startsWith(github.ref_name, 'diagnostic/ios-practice-crash-') }}
     name: Validate Ranked debug manifest
     runs-on: ubuntu-latest
     outputs:

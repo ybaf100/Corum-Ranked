@@ -1,3 +1,4 @@
+#include "diagnostic/CrashHookDiagnostics.hpp"
 #include "RankedRuntime.hpp"
 #include "domain/HudPresentation.hpp"
 #include "ui/PlayerIcon.hpp"
@@ -237,10 +238,22 @@ class $modify(CorumRankedGameplayUx, PlayLayer) {
     };
 
     static void onModify(auto& self) {
+#if defined(CORUM_CRASH_DIAG)
+        if (corum::ranked::diagnostic::excludeGameplayGroup(self, "CorumRankedGameplayUx")) return;
+#endif
+#if defined(CORUM_CRASH_DIAG)
+        CORUM_CRASH_MODIFY(self, "CorumRankedGameplayUx");
+#endif
         if (!self.setHookPriorityPre("PlayLayer::postUpdate", Priority::First)) {
+#if defined(CORUM_CRASH_DIAG)
+            CORUM_CRASH_PRIORITY_FAILURE("PlayLayer::postUpdate");
+#endif
             log::warn("Failed to install Ranked gameplay UX postUpdate priority");
         }
         if (!self.setHookPriorityPre("PlayLayer::togglePracticeMode", Priority::First)) {
+#if defined(CORUM_CRASH_DIAG)
+            CORUM_CRASH_PRIORITY_FAILURE("PlayLayer::togglePracticeMode");
+#endif
             log::warn("Failed to install Death Match Practice guard priority");
         }
     }

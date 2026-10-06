@@ -1,4 +1,5 @@
 #include "RankedRuntime.hpp"
+#include "diagnostic/CrashHookDiagnostics.hpp"
 #include "RankedAudioManager.hpp"
 #include "SpectatorLiveRuntime.hpp"
 #include "domain/SpectatorCapturePolicy.hpp"
@@ -227,10 +228,19 @@ public:
     };
 
     static void onModify(auto& self) {
+#if defined(CORUM_CRASH_DIAG)
+        if (corum::ranked::diagnostic::excludeGameplayGroup(self, "CorumRankedPlayLayer")) return;
+#endif
+#if defined(CORUM_CRASH_DIAG)
+        CORUM_CRASH_MODIFY(self, "CorumRankedPlayLayer");
+#endif
         // Run the narrow guard before vanilla/other Corum lifecycle callbacks.
         for (auto name : {"PlayLayer::destroyPlayer", "PlayLayer::levelComplete",
                           "PlayLayer::checkForEnd", "PlayLayer::showCompleteText", "PlayLayer::updateAttempts"}) {
             if (!self.setHookPriorityPre(name, Priority::First)) {
+#if defined(CORUM_CRASH_DIAG)
+                CORUM_CRASH_PRIORITY_FAILURE(name);
+#endif
                 log::warn("Failed to install spectator local safety priority: {}", name);
             }
         }
@@ -792,6 +802,9 @@ public:
     }
 
     void postUpdate(float dt) {
+#if defined(CORUM_CRASH_DIAG)
+        CORUM_CRASH_TRACE(this, "PlayLayer::postUpdate");
+#endif
         syncSpectatorLocalSafety();
         ScopedPersistenceOwner persistence(this);
         PlayLayer::postUpdate(dt);
@@ -1021,6 +1034,9 @@ public:
     }
 
     void destroyPlayer(PlayerObject* player, GameObject* object) {
+#if defined(CORUM_CRASH_DIAG)
+        CORUM_CRASH_TRACE(this, "PlayLayer::destroyPlayer");
+#endif
         auto& runtime = corum::ranked::RankedRuntime::get();
         syncSpectatorLocalSafety();
         ScopedPersistenceOwner persistence(this);
@@ -1077,6 +1093,9 @@ public:
     void levelComplete() {
         auto& runtime = corum::ranked::RankedRuntime::get();
         if (suppressLocalCompletion()) return;
+#if defined(CORUM_CRASH_DIAG)
+        CORUM_CRASH_TRACE(this, "PlayLayer::levelComplete");
+#endif
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         if (m_fields->debugRecordScene && m_player1) {
             corum::ranked::debug::DebugSpectateRuntime::get().recordPose(observedSpectatorPose(false, true), true);
@@ -1975,12 +1994,22 @@ CorumRankedPlayLayer* localSafetyLayer() {
 
 // One final viewport owner. Ordinary gameplay delegates unchanged; only a
 // scoped missing-camera fallback borrows the dummy as a native camera target.
+#if !defined(CORUM_CRASH_DIAG_NO_WORLD_HOOKS)
 class $modify(CorumRankedSpectatorCameraHook, GJBaseGameLayer) {
     static void onModify(auto& self) {
+#if defined(CORUM_CRASH_DIAG)
+        CORUM_CRASH_MODIFY(self, "CorumRankedSpectatorCameraHook");
+#endif
         if (!self.setHookPriorityPre("GJBaseGameLayer::updateCamera", Priority::First)) {
+#if defined(CORUM_CRASH_DIAG)
+            CORUM_CRASH_PRIORITY_FAILURE("GJBaseGameLayer::updateCamera");
+#endif
             log::warn("Failed to install spectator camera priority");
         }
         if (!self.setHookPriorityPre("GJBaseGameLayer::update", Priority::First)) {
+#if defined(CORUM_CRASH_DIAG)
+            CORUM_CRASH_PRIORITY_FAILURE("GJBaseGameLayer::update");
+#endif
             log::warn("Failed to install spectator world-frame ownership priority");
         }
     }
@@ -1988,6 +2017,9 @@ class $modify(CorumRankedSpectatorCameraHook, GJBaseGameLayer) {
         auto* layer = PlayLayer::get();
         auto* owner = layer && static_cast<GJBaseGameLayer*>(layer) == this
             ? static_cast<CorumRankedPlayLayer*>(layer) : nullptr;
+#if defined(CORUM_CRASH_DIAG)
+        CORUM_CRASH_TRACE(owner, "GJBaseGameLayer::updateCamera");
+#endif
         if (!owner || !owner->spectatorCameraActive()) {
             GJBaseGameLayer::updateCamera(dt); return;
         }
@@ -2015,6 +2047,9 @@ class $modify(CorumRankedSpectatorCameraHook, GJBaseGameLayer) {
         auto* layer = PlayLayer::get();
         auto* owner = layer && static_cast<GJBaseGameLayer*>(layer) == this
             ? static_cast<CorumRankedPlayLayer*>(layer) : nullptr;
+#if defined(CORUM_CRASH_DIAG)
+        CORUM_CRASH_TRACE(owner, "GJBaseGameLayer::update");
+#endif
         if (owner && owner->prepareSpectatorScene() && owner->spectatorCameraActive()) {
             if (!owner->beginSpectatorWorldFrame()) return;
             {
@@ -2044,31 +2079,50 @@ class $modify(CorumRankedSpectatorCameraHook, GJBaseGameLayer) {
         auto* layer = PlayLayer::get();
         auto* owner = layer && static_cast<GJBaseGameLayer*>(layer) == this
             ? static_cast<CorumRankedPlayLayer*>(layer) : nullptr;
+#if defined(CORUM_CRASH_DIAG)
+        CORUM_CRASH_TRACE(owner, "GJBaseGameLayer::teleportPlayer");
+#endif
         auto const observed = owner && object && owner->observesSpectatorPlayer(player);
         auto const before = observed ? corum::ranked::captureSpectatorPose(player) : corum::ranked::SpectatorGhostPose{};
         GJBaseGameLayer::teleportPlayer(object, player);
         if (observed) owner->observeSpectatorNativeSnap(player, corum::ranked::SpectatorDiscontinuity::Teleport, before);
     }
 };
+#endif // diagnostic WORLD hook group
 
 // Stop only the dummy's own physics at the completion boundary. Do not pause
 // PlayLayer/world/relay updates: a distinct Phase-2 remote player must be free
 // to display 100%. checkForEnd + completion callbacks cover a large single step.
+#if !defined(CORUM_CRASH_DIAG_NO_PLAYER_HOOKS)
 class $modify(CorumRankedSpectatorDummyPlayer, PlayerObject) {
     static void onModify(auto& self) {
+#if defined(CORUM_CRASH_DIAG)
+        CORUM_CRASH_MODIFY(self, "CorumRankedSpectatorDummyPlayer");
+#endif
         for (auto name : {"PlayerObject::update", "PlayerObject::updateRotation", "PlayerObject::spiderTestJump",
                           "PlayerObject::setPosition", "PlayerObject::setRotation",
                           "PlayerObject::setVisible"}) {
-            if (!self.setHookPriorityPre(name, Priority::First))
+            if (!self.setHookPriorityPre(name, Priority::First)) {
+#if defined(CORUM_CRASH_DIAG)
+                CORUM_CRASH_PRIORITY_FAILURE(name);
+#endif
                 log::warn("Failed to install spectator world-driver safety priority: {}", name);
+            }
         }
 #if !defined(GEODE_IS_WINDOWS)
-        if (!self.setHookPriorityPre("PlayerObject::updateSpecial", Priority::First))
+        if (!self.setHookPriorityPre("PlayerObject::updateSpecial", Priority::First)) {
+#if defined(CORUM_CRASH_DIAG)
+            CORUM_CRASH_PRIORITY_FAILURE("PlayerObject::updateSpecial");
+#endif
             log::warn("Failed to install spectator follow-history safety priority");
+        }
 #endif
     }
 
     void update(float dt) {
+#if defined(CORUM_CRASH_DIAG)
+        CORUM_CRASH_TRACE(localSafetyLayer(), "PlayerObject::update");
+#endif
         auto* layer = localSafetyLayer();
         if (layer && layer->freezeLocalDummy(this)) {
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
@@ -2088,12 +2142,18 @@ class $modify(CorumRankedSpectatorDummyPlayer, PlayerObject) {
     }
 
     void updateRotation(float dt) {
+#if defined(CORUM_CRASH_DIAG)
+        CORUM_CRASH_TRACE(localSafetyLayer(), "PlayerObject::updateRotation");
+#endif
         if (auto* layer = localSafetyLayer(); layer && layer->freezeLocalDummy(this)) return;
         PlayerObject::updateRotation(dt);
         if (auto* layer = localSafetyLayer()) layer->observeSpectatorNativeUpdate(this);
     }
 
     void spiderTestJump(bool dynamic) {
+#if defined(CORUM_CRASH_DIAG)
+        CORUM_CRASH_TRACE(localSafetyLayer(), "PlayerObject::spiderTestJump");
+#endif
         auto* layer = localSafetyLayer();
         if (layer && layer->freezeLocalDummy(this)) return;
         auto const observed = layer && m_isSpider && layer->observesSpectatorPlayer(this);
@@ -2104,12 +2164,18 @@ class $modify(CorumRankedSpectatorDummyPlayer, PlayerObject) {
     }
 
     void setPosition(CCPoint const& position) {
+#if defined(CORUM_CRASH_DIAG)
+        CORUM_CRASH_TRACE(localSafetyLayer(), "PlayerObject::setPosition");
+#endif
         auto* layer = localSafetyLayer();
         if (layer && layer->blocksSpectatorNativePlayerWrite(this)) return;
         PlayerObject::setPosition(position);
     }
 
     void setRotation(float rotation) {
+#if defined(CORUM_CRASH_DIAG)
+        CORUM_CRASH_TRACE(localSafetyLayer(), "PlayerObject::setRotation");
+#endif
         auto* layer = localSafetyLayer();
         if (layer && layer->blocksSpectatorNativePlayerWrite(this)) return;
         PlayerObject::setRotation(rotation);
@@ -2120,6 +2186,9 @@ class $modify(CorumRankedSpectatorDummyPlayer, PlayerObject) {
     // Its physics caller is blocked by update(); the driver calls that narrow
     // inline sampler directly. iOS/Android can guard the native helper as well.
     void updateSpecial(float dt) {
+#if defined(CORUM_CRASH_DIAG)
+        CORUM_CRASH_TRACE(localSafetyLayer(), "PlayerObject::updateSpecial");
+#endif
         auto* layer = localSafetyLayer();
         if (layer && layer->freezeLocalDummy(this) &&
             !corum::ranked::ScopedSpectatorWorldDriverWrite::allows(this)) return;
@@ -2128,19 +2197,30 @@ class $modify(CorumRankedSpectatorDummyPlayer, PlayerObject) {
 #endif
 
     void setVisible(bool visible) {
+#if defined(CORUM_CRASH_DIAG)
+        CORUM_CRASH_TRACE(localSafetyLayer(), "PlayerObject::setVisible");
+#endif
         auto* layer = localSafetyLayer();
         if (visible && layer && layer->freezeLocalDummy(this)) visible = false;
         PlayerObject::setVisible(visible);
     }
 };
+#endif // diagnostic PLAYER hook group
 
 // Explicit persistence firewall, independent of m_isPracticeMode/test mode.
 // Only the exact level object of this dummy scene is guarded. Unrelated levels,
 // normal Ranked, Placement, real Death Match and user Practice retain vanilla.
+#if !defined(CORUM_CRASH_DIAG_NO_PERSISTENCE_HOOKS)
 class $modify(CorumRankedSpectatorProgressSave, GJGameLevel) {
     static void onModify(auto& self) {
+#if defined(CORUM_CRASH_DIAG)
+        CORUM_CRASH_MODIFY(self, "CorumRankedSpectatorProgressSave");
+#endif
         for (auto name : {"GJGameLevel::savePercentage", "GJGameLevel::storeNewLocalScore"}) {
             if (!self.setHookPriorityPre(name, Priority::First)) {
+#if defined(CORUM_CRASH_DIAG)
+                CORUM_CRASH_PRIORITY_FAILURE(name);
+#endif
                 log::warn("Failed to install spectator persistence priority: {}", name);
             }
         }
@@ -2149,6 +2229,9 @@ class $modify(CorumRankedSpectatorProgressSave, GJGameLevel) {
     void savePercentage(int percent, bool practice, int clicks, int attempts, bool valid) {
         auto* layer = localSafetyLayer();
         if (layer && layer->blocksLevelPersistence(this)) return;
+#if defined(CORUM_CRASH_DIAG)
+        CORUM_CRASH_TRACE(localSafetyLayer(), "GJGameLevel::savePercentage");
+#endif
         GJGameLevel::savePercentage(percent, practice, clicks, attempts, valid);
     }
 
@@ -2159,6 +2242,10 @@ class $modify(CorumRankedSpectatorProgressSave, GJGameLevel) {
     void storeNewLocalScore(int value, int type) {
         auto* layer = localSafetyLayer();
         if (layer && layer->blocksLevelPersistence(this)) return;
+#if defined(CORUM_CRASH_DIAG)
+        CORUM_CRASH_TRACE(localSafetyLayer(), "GJGameLevel::storeNewLocalScore");
+#endif
         GJGameLevel::storeNewLocalScore(value, type);
     }
 };
+#endif // diagnostic PERSISTENCE hook group

@@ -1,3 +1,4 @@
+#include "diagnostic/CrashHookDiagnostics.hpp"
 #include "RankedLevelPreparation.hpp"
 #include "RankedRuntime.hpp"
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
@@ -225,6 +226,12 @@ void RankedLevelPreparation::loadLevelsFailed(char const* key, int) { loadLevels
 } // namespace corum::ranked
 
 class $modify(CorumRankedMetadataResponse, GameLevelManager) {
+    static void onModify(auto& self) {
+#if defined(CORUM_CRASH_DIAG)
+        CORUM_CRASH_MODIFY(self, "CorumRankedMetadataResponse");
+#endif
+    }
+
     void onGetOnlineLevelsCompleted(gd::string response, gd::string tag) {
         auto& preparation = corum::ranked::RankedLevelPreparation::get();
         auto const generation = preparation.requestGeneration(tag.c_str());
