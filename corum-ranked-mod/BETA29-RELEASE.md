@@ -32,6 +32,10 @@ provide concrete evidence for the player dependency:
 - PlayerObject::updateSpecial updates that 200-entry Y history at native 10ms cadence.
   It contains no physics, collision, death or persistence work. Calling only this
   narrow native sampler preserves follow history while update() stays suppressed.
+  Windows provides it inline with no hookable address, so the driver calls that
+  inline helper directly and its native physics caller remains blocked. The native
+  helper guard is compiled only for iOS/Android; Windows inline behavior has a
+  separate compile/execute regression, in addition to the actual SDK CI build.
 - cameraMoveX/Y set forced-camera flags and install camera tweens. The old final
   correction called them and stopped the tweens each frame, overriding native
   trigger mechanics. The adapter now preserves those flags/tweens and corrects

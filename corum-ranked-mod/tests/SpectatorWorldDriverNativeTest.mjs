@@ -94,9 +94,9 @@ struct CorumRankedPlayLayer: PlayLayer {
     ${worldHook}
 };
 CorumRankedPlayLayer* localSafetyLayer(){return static_cast<CorumRankedPlayLayer*>(PlayLayer::get());}
-struct PlayerHook:PlayerObject {
- ${['void update(float dt)','void updateRotation(float dt)','void spiderTestJump(bool dynamic)', 'void setPosition(CCPoint const& position)','void setRotation(float rotation)','void updateSpecial(float dt)','void setVisible(bool visible)'].map(s=>method(s,source.indexOf('class $modify(CorumRankedSpectatorDummyPlayer'))).join('\n')}
-};
+enum class Priority {First};
+${method('class $modify(CorumRankedSpectatorDummyPlayer, PlayerObject)').replace('class $modify(CorumRankedSpectatorDummyPlayer, PlayerObject)', 'struct PlayerHook:PlayerObject')};
+
 void close(float a,float b,std::source_location where=std::source_location::current()){if(std::abs(a-b)>=0.001f)std::cerr<<"close "<<a<<" != "<<b<<" at line "<<where.line()<<std::endl;assert(std::abs(a-b)<0.001f);}
 int main(){
  using namespace corum::ranked;
@@ -133,7 +133,10 @@ int main(){
    for(int x:{110,125,140,180})if(p->m_lastPosition.x<x && p->getPosition().x>=x){events->push_back(x);if(x==110||x==180)++*bg;}
    if(std::abs(p->getPosition().y-p->m_lastPosition.y)>400)++*sweeps;
    p->update(dt);p->updateRotation(dt);p->spiderTestJump(false); // all local physics blocked
-   p->updateSpecial(dt); // native lifecycle cannot double-write the driver follow history
+#if !defined(GEODE_IS_WINDOWS)
+   p->updateSpecial(dt); // native helper cannot double-write driver follow history
+#endif
+   // Windows updateSpecial is inline in its blocked physics caller; no detour.
    p->setVisible(true);assert(!p->isVisible());
    // A native portal may mutate flags. Position writes cannot win over the scoped frame.
    p->setPosition({9999,9999});p->setRotation(123);
@@ -210,9 +213,9 @@ int main(){
 }
 `;
         writeFileSync(join(dir,'test.cpp'),cpp);
-        for(const debug of [false,true]){
+        for(const config of [{debug:false,windows:false},{debug:true,windows:false},{debug:true,windows:true}]){
             const binary=join(dir,'test');
-            execFileSync('g++',['-std=c++23','-Wall','-Wextra','-Wpedantic','-Werror',...(debug?['-DCORUM_RANKED_DEBUG_SPECTATE=1']:[]),'-I',dir,
+            execFileSync('g++',['-std=c++23','-Wall','-Wextra','-Wpedantic','-Werror',...(config.debug?['-DCORUM_RANKED_DEBUG_SPECTATE=1']:[]),...(config.windows?['-DGEODE_IS_WINDOWS=1']:[]),'-I',dir,
                 join(root,'src/spectator/CorumRemotePlayer.cpp'),join(root,'src/spectator/CorumSpectatorCamera.cpp'),join(root,'src/spectator/SpectatorWorldDriver.cpp'),join(root,'src/spectator/SpectatorPlayerCapture.cpp'),join(dir,'test.cpp'),'-o',binary],{stdio:'pipe'});
             assert.match(execFileSync(binary,{encoding:'utf8'}),/60-120-240Hz passed/);
         }

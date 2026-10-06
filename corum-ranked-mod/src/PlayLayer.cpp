@@ -2027,11 +2027,15 @@ class $modify(CorumRankedSpectatorCameraHook, GJBaseGameLayer) {
 class $modify(CorumRankedSpectatorDummyPlayer, PlayerObject) {
     static void onModify(auto& self) {
         for (auto name : {"PlayerObject::update", "PlayerObject::updateRotation", "PlayerObject::spiderTestJump",
-                          "PlayerObject::setPosition", "PlayerObject::setRotation", "PlayerObject::updateSpecial",
+                          "PlayerObject::setPosition", "PlayerObject::setRotation",
                           "PlayerObject::setVisible"}) {
             if (!self.setHookPriorityPre(name, Priority::First))
                 log::warn("Failed to install spectator world-driver safety priority: {}", name);
         }
+#if !defined(GEODE_IS_WINDOWS)
+        if (!self.setHookPriorityPre("PlayerObject::updateSpecial", Priority::First))
+            log::warn("Failed to install spectator follow-history safety priority");
+#endif
     }
 
     void update(float dt) {
@@ -2076,12 +2080,17 @@ class $modify(CorumRankedSpectatorDummyPlayer, PlayerObject) {
         PlayerObject::setRotation(rotation);
     }
 
+#if !defined(GEODE_IS_WINDOWS)
+    // Windows has no hookable native address: the SDK provides an inline body.
+    // Its physics caller is blocked by update(); the driver calls that narrow
+    // inline sampler directly. iOS/Android can guard the native helper as well.
     void updateSpecial(float dt) {
         auto* layer = localSafetyLayer();
         if (layer && layer->freezeLocalDummy(this) &&
             !corum::ranked::ScopedSpectatorWorldDriverWrite::allows(this)) return;
         PlayerObject::updateSpecial(dt);
     }
+#endif
 
     void setVisible(bool visible) {
         auto* layer = localSafetyLayer();
