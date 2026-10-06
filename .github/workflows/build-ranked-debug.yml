@@ -105,6 +105,11 @@ jobs:
             corum-ranked-mod/tests/SpectatorInterpolationBufferTest.cpp \
             -o /tmp/corum-ranked-spectator-buffer-test
           /tmp/corum-ranked-spectator-buffer-test
+          g++ -std=c++23 -Wall -Wextra -Wpedantic -Werror \
+            corum-ranked-mod/tests/MatchPauseBudgetTest.cpp \
+            -o /tmp/corum-ranked-match-pause-test
+          /tmp/corum-ranked-match-pause-test
+          node --test corum-ranked-mod/tests/GameplayControlsNativeTest.mjs
           node --test corum-ranked-mod/tests/SpectatorCameraOwnerNativeTest.mjs
           node --test corum-ranked-mod/tests/SpectatorWorldDriverNativeTest.mjs
           node --test corum-ranked-mod/tests/SpectatorVisibilityNativeTest.mjs

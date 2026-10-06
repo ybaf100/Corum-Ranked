@@ -16,6 +16,8 @@ import {
   AttemptStartDto,
   AttemptStartIntentDto,
   PracticePresenceDto,
+  MatchPauseDto,
+  SurrenderDto,
   ReadyMatchDto,
   ResourceFailureDto,
   SubmitBanDto,
@@ -64,7 +66,7 @@ export class MatchController {
     @CurrentSession() session: RankedSessionContext,
   ) {
     return withVisiblePrepareDeadline(
-      this.spectatorLive.decorateState(
+      this.spectatorLive.decorateConfiguredState(
         await this.matches.state(matchId, matchToken, session),
       ),
     );
@@ -77,7 +79,7 @@ export class MatchController {
     @CurrentSession() session: RankedSessionContext,
   ) {
     return withVisiblePrepareDeadline(
-      this.spectatorLive.decorateState(
+      this.spectatorLive.decorateConfiguredState(
         await this.matches.state(matchId, matchToken, session),
       ),
     );
@@ -91,7 +93,7 @@ export class MatchController {
     @Body() body: ReadyMatchDto,
   ) {
     return withVisiblePrepareDeadline(
-      this.spectatorLive.decorateState(
+      this.spectatorLive.decorateConfiguredState(
         await this.matches.ready(matchId, matchToken, session, body),
       ),
     );
@@ -105,7 +107,7 @@ export class MatchController {
     @Body() body: SubmitBanDto,
   ) {
     return withVisiblePrepareDeadline(
-      this.spectatorLive.decorateState(
+      this.spectatorLive.decorateConfiguredState(
         await this.matches.submitBan(matchId, matchToken, session, body),
       ),
     );
@@ -119,7 +121,7 @@ export class MatchController {
     @Body() body: ResourceFailureDto,
   ) {
     return withVisiblePrepareDeadline(
-      this.spectatorLive.decorateState(
+      this.spectatorLive.decorateConfiguredState(
         await this.matches.reportResourceFailure(matchId, matchToken, session, body),
       ),
     );
@@ -133,6 +135,20 @@ export class MatchController {
     @Body() body: PracticePresenceDto,
   ) {
     return this.matches.updatePracticePresence(matchId, matchToken, session, body);
+  }
+
+  @Post(":id/pause")
+  public async pause(@Param("id") id: string, @Headers("x-match-token") token: string,
+    @CurrentSession() session: RankedSessionContext, @Body() body: MatchPauseDto) {
+    const result = await this.matches.changePause(id, token, session, body);
+    if (result.accepted && "side" in result) this.spectatorLive.notePublisherPause(id, result.side, result.active);
+    return result;
+  }
+
+  @Post(":id/surrender")
+  public async surrender(@Param("id") id: string, @Headers("x-match-token") token: string,
+    @CurrentSession() session: RankedSessionContext, @Body() body: SurrenderDto) {
+    return this.spectatorLive.decorateConfiguredState(await this.matches.surrender(id, token, session, body));
   }
 
   @Post(":id/attempt/intent")
@@ -186,7 +202,7 @@ export class MatchController {
     @CurrentSession() session: RankedSessionContext,
   ) {
     return withVisiblePrepareDeadline(
-      this.spectatorLive.decorateState(
+      this.spectatorLive.decorateConfiguredState(
         await this.matches.heartbeat(matchId, matchToken, session),
       ),
     );

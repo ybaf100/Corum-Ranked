@@ -1,13 +1,21 @@
-# Live Spectator Phase 4 — protocol v2 (beta27 hotfix)
+# Live Spectator — protocol v2 (beta32)
 
-Exact client/server gate: **v0.5.0-beta.27**. Production protocol **2** and Debug
+Exact client/server gate: **v0.5.0-beta.32**. Production protocol **2** and Debug
 recording format **2** require complete gameplay presentation state. V1 is rejected;
 an absent/unknown mode never silently becomes Cube. The old v1 document is historical.
 
-Existing authenticated HTTP publish/subscribe routes, scoped Debug routes, 50ms
-publish opportunity, 80ms viewer polling, 150ms fallback polling, 3s/72-packet
-buffer and 1.5s timeout remain. Actual publish cadence depends on HTTP RTT. No
-WebSocket or general DB/polling optimization is included.
+Existing authenticated HTTP publish/subscribe routes and scoped Debug routes
+remain. Production captures every 50ms independently of serialized HTTP ACKs,
+with immediate native-snap capture. One immutable request carries up to 16 v2
+packets; a bounded 64-packet pending queue drains in sequence before the terminal.
+The previous beta31 publisher sampled at RTT + 50ms (about 160ms at RTT 110ms).
+HTTP requests remain ACK-bound, but captured sample timestamps are independent.
+Viewer polling remains the beta30 adaptive 40/20/5ms serialized policy, with
+bounded error backoff. The relay retains 3s/72 packets; a join/reset seeds only
+the latest 350ms/16 packets, within the client's 2s/64-sample presentation window.
+An expired subscriber cursor resets only its presentation, preserving the
+publisher stream. Real network loss still uses the existing safe fallback.
+No WebSocket or parallel/unordered publisher requests are introduced.
 
 ## Required keyframe
 
@@ -45,8 +53,9 @@ same Attempt; a fresh server Attempt/context re-acquires the visual and camera.
 
 beta27 observes native PlayerObject update/rotation and teleport/Spider callbacks.
 The completed GJBaseGameLayer update samples the latest pose with the actual
-`m_gameState.m_cameraPosition`, at the existing 50ms HTTP opportunity. Unsampled
-native event endpoints are retained until a sample is submitted. Debug visual
+`m_gameState.m_cameraPosition`, at the independent 50ms capture opportunity.
+Native event endpoints cause an immediate capture, even while HTTP is in flight;
+evidence is consumed by capture, not by ACK. Debug visual
 capture requires advancing native attempt time and stable moving gameplay frames;
 it does not share the Ranked Attempt journal's unchanged 500ms settling window.
 
@@ -63,7 +72,9 @@ Optional additive v2 fields (older format-v2 recordings remain readable):
     "fromX": 1000,
     "fromY": 40,
     "toX": 1729.7268,
-    "toY": 40
+    "toY": 40,
+    "cameraFromX": 700,
+    "cameraFromY": -20
   }
 }
 ```
@@ -76,9 +87,13 @@ must be finite/bounded (Teleport length <=100,000; Spider |dx| <=400, |dy| <=240
 Viewer endpoints must align within the existing 400-unit continuous-motion bound
 of the adjacent accepted samples. A generic large-jump flag is not accepted.
 
-Verified relocation clears previous interpolation and applies current position,
-rotation and camera exactly. It does not reset Attempt/generation/epoch or allocate
-another Remote Player. Camera-only native frame relocation uses cameraSnap without
+Verified relocation adds a presentation segment boundary without clearing the
+deque. A native-proven source endpoint permits interpolation from the preceding
+sample to that source, never from source to destination. Optional source camera
+coordinates preserve pre-click camera travel. Position, rotation, camera and
+discrete state change atomically at the destination timestamp. Legacy samples
+without source evidence safely hold at a boundary. No snap resets Attempt,
+generation, epoch, or Remote Player. Camera-only relocation uses cameraSnap without
 bypassing pose checks. Normal camera samples interpolate with normal pose samples;
 terminal samples hold exact pose/camera without extrapolation. Discrete state uses
 accepted sample boundaries. Camera fields are a finite bounded pair; invalid or
@@ -117,8 +132,9 @@ the real Attempt ID; a pending live ACK preserves contiguous sequence delivery.
 The terminal then bypasses the normal 50ms delay, through its own bounded HTTP
 request/retry state. Dummy/Practice/Placement do not publish these packets.
 
-The server may accept only the exact authoritative just-ended Attempt's matching
-dead/non-Clear or finished/Clear presentation for 1.5s. This handles End-vs-visual
+The server may drain queued nonterminal samples and the exact authoritative
+just-ended Attempt's matching dead/non-Clear or finished/Clear terminal for 1.5s.
+This handles End-vs-visual
 HTTP ordering without reopening gameplay rights. Exact terminal ACK-loss retries
 are idempotent. New Attempt, Practice, changed round/map/DM/match or timeout removes
 old presentation. No visual packet changes score, Clear evidence, LP/MMR, AP or
@@ -126,11 +142,12 @@ Achievement state; the existing Attempt API remains the result authority.
 
 ## Interpolation and discontinuities
 
-Position/rotation keep bounded interpolation. Discrete fields use the latest
-accepted state, never numeric interpolation. Terminal poses are exact. The normal
+Position/rotation keep bounded interpolation. Discrete fields use the rendered
+publisher-time boundary, never the latest HTTP arrival or numeric interpolation.
+Terminal poses are exact. The normal
 400-unit correction check remains. A mode change or same-Spider gravity flip can
-snap with |Δx| ≤ 400 and |Δy| ≤ 2400; large accepted snaps clear the previous lerp
-sample. Explicit native evidence is checked before this legacy bounded-state
+snap with |Δx| ≤ 400 and |Δy| ≤ 2400; accepted snaps retain the deque and segment it.
+Explicit native evidence is checked before this legacy bounded-state
 fallback. Unbounded/unknown corrections still reject; existing recordings lacking
 evidence are not silently authorized. Full complex camera parity remains Phase 5.
 
@@ -140,6 +157,25 @@ VOICE 88350599 remains fixed. Format-v2 keyframes bulk-persist in existing JSONB
 latest-completed selection filters exact format and revalidates frames. Old v1
 data is left intact but excluded. TEST continues DB → server clock → production
 relay → HTTP → decoder/interpolation → Remote Player → camera; no local replay.
+
+Production and Debug TEST have different upstream paths: actual gameplay →
+capture queue → serialized HTTP publisher → memory relay versus PostgreSQL
+recording → server playback clock → relay. Debug smoothness does not establish
+production device/network smoothness. Native snap capture is immediate in both.
+
+The publish route accepts the legacy single-packet body or an additive
+`{ "packets": [ /* 1..16 complete v2 envelopes */ ] }` body. A batch must have
+one Attempt/generation/round/DM context, contiguous sequences, nondecreasing
+timestamps and no samples following a terminal. It commits atomically; an exact
+immutable batch retry is idempotent. The exact beta32 client gate coordinates the
+batch-capable server deployment without changing packet v2 or Debug format v2.
+
+An authenticated match pause freezes the publisher gameplay clock and suppresses
+new captures, while already captured batches drain. Subscribe returns optional
+`paused: true` for the authoritative opponent pause; the viewer holds without
+counting starvation/timeouts. Resume preserves Attempt/generation and rebuilds
+normal headroom. Match pause budgets and the server-global live switch are
+documented in [gameplay-controls.md](gameplay-controls.md).
 
 The configured map pool stores metadata/IDs, not a reliable dual/teleport feature
 inventory. Absence of dual cannot be certified from it. Player2/dual presentation,

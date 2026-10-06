@@ -16,6 +16,7 @@ export type RoundPhase =
   | "ROUND_RESULT";
 
 export type RoundResultReason =
+  | "SURRENDER"
   | "SCORE"
   | "CLEAR_TARGET_LAST_ATTEMPT"
   | "LAST_ATTEMPT_CLEAR"
@@ -130,6 +131,19 @@ const finishRound = (
 const finishByScore = (state: RoundState, atMs: number): RoundState => {
   const comparison = compareRoundScores(state.scores.A, state.scores.B);
   return finishRound(state, comparison.result, "SCORE", atMs);
+};
+
+// Voluntary concession preserves already earned scores; abandoned active runs
+// are not Clears and cannot later submit result evidence into the next round.
+export const surrenderRound = (state: RoundState, side: PlayerSide, atMs: number): RoundState => {
+  assertServerTime(state, atMs);
+  if (state.outcome) return state;
+  const next = cloneRound(state);
+  for (const attempt of activeAttempts(next)) {
+    attempt.endedAtMs = atMs; attempt.valid = false; attempt.invalidReason = "SURRENDER";
+    attempt.cleared = false; attempt.awardedScore = 0;
+  }
+  return finishRound(next, otherSide(side), "SURRENDER", atMs);
 };
 
 export const createRound = (

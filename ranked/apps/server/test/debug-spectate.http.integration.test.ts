@@ -49,7 +49,7 @@ describe("server-backed Debug Spectate over real HTTP and persistent PostgreSQL"
         { provide: SERVER_ENVIRONMENT, useValue: { ...environment, debugSpectate: enabled ? environment.debugSpectate : null } },
         { provide: SERVER_CLOCK, useValue: clock }, { provide: ID_GENERATOR, useValue: ids },
         { provide: TokenService, useValue: tokens }, { provide: SpectatorLiveService,
-          useValue: new SpectatorLiveService(rankedMatch, new InMemoryMatchRuntimeState()) }] }).compile();
+          useValue: new SpectatorLiveService(rankedMatch, new InMemoryMatchRuntimeState(), database) }] }).compile();
     app = module.createNestApplication();
     app.useLogger(false);
     await app.listen(0, "127.0.0.1");
@@ -90,7 +90,7 @@ describe("server-backed Debug Spectate over real HTTP and persistent PostgreSQL"
     for (const migration of ["0001_initial_ranked", "0002_attempt_start_leases", "0002_debug_bot_match",
       "0003_debug_rating_playable_maps", "0004_alpha37_schema_hardening", "0005_v050_rating_system",
       "0006_v050_dynamic_csmp_tiers", "0007_solo_stage_placement", "0008_placement_beta9",
-      "0009_placement_stage_count", "0010_achievements_v1", "0011_debug_spectate"]) {
+      "0009_placement_stage_count", "0010_achievements_v1", "0011_debug_spectate", "0012_gameplay_controls"]) {
       await pg.exec(await readFile(fileURLToPath(new URL(`../../../migrations/${migration}.sql`, import.meta.url)), "utf8"));
     }
     const player = ids.next();
@@ -275,6 +275,18 @@ describe("server-backed Debug Spectate over real HTTP and persistent PostgreSQL"
     const invalid = frame(0, 0); invalid.keyframe.mode = "UNKNOWN";
     expect((await post(`recordings/${recording.recordingId}/frames`, { formatVersion: 2, frames: [invalid] }, recording.token)).status).toBe(400);
     expect((await database.query("SELECT * FROM debug_spectate_frames WHERE recording_id = $1", [recording.recordingId])).rows).toEqual([]);
+  });
+  it("persists the global live switch across server restart, authorizes writes and keeps Debug TEST independent", async () => {
+    const url = base + "/api/ranked/debug/spectate/live-setting";
+    expect((await (await fetch(url, { headers })).json()).liveEnabled).toBe(true);
+    expect((await post("live-setting", { ...createBody, password: "wrong", liveEnabled: false })).status).toBe(401);
+    expect((await post("live-setting", { ...createBody, liveEnabled: "false" })).status).toBe(400);
+    expect((await post("live-setting", { ...createBody, liveEnabled: false })).body.liveEnabled).toBe(false);
+    await app.close(); await startApp();
+    expect((await (await fetch(base + "/api/ranked/debug/spectate/live-setting", { headers })).json()).liveEnabled).toBe(false);
+    expect((await post("playbacks", createBody)).status).toBe(201);
+    expect((await post("live-setting", { ...createBody, liveEnabled: true })).body.liveEnabled).toBe(true);
+    expect(rankedState).not.toHaveBeenCalled();
   });
   it("OFF server rejects recording/playback even with valid authorization without creating debug data", async () => {
     await app.close(); await startApp(false);

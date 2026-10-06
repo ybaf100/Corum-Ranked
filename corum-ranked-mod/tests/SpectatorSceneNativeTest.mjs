@@ -66,12 +66,13 @@ struct DebugSpectateRuntime {
 bool quitThroughRankedCompletionOverlay(PlayLayer*){return false;}
 enum class RuntimeStage { Matched, Idle };
 struct RankedRuntime {
-    struct Match {std::string matchId="match",state="ROUND_PLAYING"; int roundNumber=1,deathmatchSequence=0;};
+    struct Match {std::string matchId="match",state="ROUND_PLAYING"; int roundNumber=1,deathmatchSequence=0;bool spectatorLiveEnabled=true;};
     struct View {RuntimeStage stage=RuntimeStage::Matched; Match match; int revision=1;} data;
     bool serverSpectator=false,ownAlive=true,placement=false,canEnter=false;
     bool blocked=false; int ticks=0,levelId=123;
     static RankedRuntime& get(){static RankedRuntime r;return r;}
     View const& view()const{return data;}
+    bool gameplayConceded(int,int)const{return false;}
     bool isSpectating()const{return serverSpectator&&!ownAlive&&!placement;}
     bool isPlacement()const{return placement;}
     bool hasLocalGameplayAuthority()const{return ownAlive;}
@@ -185,6 +186,11 @@ int main(){
         ordinary.spectatorFrame(0.01f);
         assert(!ordinary.m_fields->localSafety.active() && ordinary.cameras==0 && ordinary.resets==0);
     }
+    runtime={};runtime.serverSpectator=true;runtime.ownAlive=false;runtime.data.match.spectatorLiveEnabled=false;
+    CorumRankedPlayLayer disabled;disabled.m_player1=&local;disabled.m_fields->attemptEndReported=true;
+    disabled.spectatorFrame(0.01f);
+    assert(disabled.quits==1 && disabled.m_fields->localSafety.active() && runtime.blocked);
+    assert(!disabled.m_fields->spectatorCamera.policy.ownsCamera() && !disabled.m_fields->remotePlayer.frame);
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
     runtime={}; runtime.data.stage=RuntimeStage::Idle;runtime.ownAlive=false;
     CorumRankedPlayLayer recorder;recorder.m_player1=&local;recorder.m_fields->rankedLevel=false;

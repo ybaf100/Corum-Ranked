@@ -89,6 +89,16 @@ export class DebugSpectateService implements OnModuleInit, OnApplicationShutdown
       throw new UnauthorizedException("INVALID_OR_EXPIRED_DEBUG_SCOPE");
     }
   }
+  public async liveSetting(clientDebug?: string) {
+    this.enabled(clientDebug);
+    return { liveEnabled: await this.relay.getLiveEnabled() };
+  }
+  public async setLiveSetting(body: unknown, clientDebug?: string) {
+    this.authorizeStart(body, clientDebug);
+    const value = object(body);
+    if (typeof value.liveEnabled !== "boolean") throw new BadRequestException("LIVE_ENABLED_MUST_BE_BOOLEAN");
+    return { liveEnabled: await this.relay.setLiveEnabled(value.liveEnabled) };
+  }
   public async createRecording(session: RankedSessionContext, body: unknown, clientDebug?: string) {
     this.authorizeStart(body, clientDebug);
     if (this.recordings.size + this.startingRecordings >= DEBUG_SPECTATE_MAX_SESSIONS) throw new ConflictException("DEBUG_RECORDING_CAPACITY");

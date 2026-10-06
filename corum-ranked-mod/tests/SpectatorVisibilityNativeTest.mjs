@@ -52,7 +52,7 @@ test('native visibility owner hides only an authorized dummy, including waiting;
 #include "${join(root, 'src/spectator/SpectatorWorldDriver.hpp')}"
 #include <Geode/Geode.hpp>
 #include <cassert>
-namespace corum::ranked {struct RankedRuntime{bool spectator=false;static RankedRuntime& get(){static RankedRuntime r;return r;}bool isSpectating(){return spectator;}};}
+namespace corum::ranked {struct RankedRuntime{struct Match{bool spectatorLiveEnabled=true;};struct View{Match match;} data;View const& view()const{return data;}bool spectator=false;static RankedRuntime& get(){static RankedRuntime r;return r;}bool isSpectating(){return spectator;}};}
 struct Owner:PlayLayer {
  struct Fields{bool spectatorScenePrepared=false,spectatorPresentationRetired=false,autoExitRequested=false;struct Safety{bool enabled=false;bool active(){return enabled;}}localSafety;corum::ranked::SpectatorWorldDriver spectatorWorldDriver;} fields;
  Fields* m_fields=&fields;bool watchable=true;bool watchableSpectatorScene(){return watchable;}

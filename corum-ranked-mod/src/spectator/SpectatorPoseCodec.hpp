@@ -25,6 +25,10 @@ inline matjson::Value encodeSpectatorPose(SpectatorGhostPose const& pose) {
         value["discontinuity"]["fromY"] = static_cast<double>(snap.fromY);
         value["discontinuity"]["toX"] = static_cast<double>(snap.toX);
         value["discontinuity"]["toY"] = static_cast<double>(snap.toY);
+        if (snap.fromCamera && validSpectatorCamera(*snap.fromCamera)) {
+            value["discontinuity"]["cameraFromX"] = static_cast<double>(snap.fromCamera->x);
+            value["discontinuity"]["cameraFromY"] = static_cast<double>(snap.fromCamera->y);
+        }
     }
     return value;
 }
@@ -65,6 +69,10 @@ inline std::optional<SpectatorGhostPose> decodeSpectatorPose(matjson::Value cons
             static_cast<float>(evidence["toX"].asDouble().unwrapOr(nan)),
             static_cast<float>(evidence["toY"].asDouble().unwrapOr(nan))};
         if (!finiteSpectatorSnap(snap)) return std::nullopt;
+        SpectatorCameraOrigin sourceCamera {
+            static_cast<float>(evidence["cameraFromX"].asDouble().unwrapOr(nan)),
+            static_cast<float>(evidence["cameraFromY"].asDouble().unwrapOr(nan))};
+        if (validSpectatorCamera(sourceCamera)) snap.fromCamera = sourceCamera;
         pose.discontinuity = snap;
     } else if (evidence.asBool().unwrapOr(false) || !evidence.asString().unwrapOr("").empty()) return std::nullopt;
     return finiteSpectatorPose(pose) ? std::optional(pose) : std::nullopt;

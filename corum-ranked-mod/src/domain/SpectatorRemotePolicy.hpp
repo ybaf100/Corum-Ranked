@@ -20,6 +20,7 @@ inline std::string_view spectatorDiscontinuityName(SpectatorDiscontinuity type) 
 struct SpectatorSnapEvidence {
     SpectatorDiscontinuity type = SpectatorDiscontinuity::Teleport;
     float fromX = 0, fromY = 0, toX = 0, toY = 0;
+    std::optional<SpectatorCameraOrigin> fromCamera = std::nullopt;
 };
 
 struct SpectatorGhostPose {

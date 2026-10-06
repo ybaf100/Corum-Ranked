@@ -33,6 +33,24 @@ export class PracticePresenceDto {
   public practice!: boolean;
 }
 
+export class MatchPauseDto {
+  @IsString() @Length(1, 100)
+  public leaseId!: string;
+  @IsBoolean()
+  public paused!: boolean;
+}
+
+export class SurrenderDto {
+  @IsString() @IsIn(["ROUND", "MATCH"])
+  public scope!: "ROUND" | "MATCH";
+  @IsString() @Length(1, 100)
+  public clientEventId!: string;
+  @IsInt() @Min(0) @Max(3)
+  public roundNumber!: number;
+  @IsInt() @Min(0) @Max(10000)
+  public deathmatchSequence!: number;
+}
+
 export class AttemptStartIntentDto {
   @IsString()
   @Length(1, 40)

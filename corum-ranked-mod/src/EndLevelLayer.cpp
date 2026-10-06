@@ -63,6 +63,11 @@ class $modify(CorumRankedEndLevelLayer, EndLevelLayer) {
         auto& runtime = corum::ranked::RankedRuntime::get();
         runtime.tick();
         auto const& state = runtime.view().match.state;
+        if (runtime.isSpectating() && !runtime.view().match.spectatorLiveEnabled) {
+            m_fields->rankedExitRequested = true;
+            unschedule(schedule_selector(CorumRankedEndLevelLayer::watchRankedExit));
+            EndLevelLayer::onMenu(nullptr); return;
+        }
         if (runtime.isSpectating()) {
             // Reset may remove the overlay: retain this callback's owner first.
             Ref<EndLevelLayer> retained(this);
@@ -96,7 +101,7 @@ class $modify(CorumRankedEndLevelLayer, EndLevelLayer) {
     void onReplay(CCObject* sender) {
         if (m_fields->rankedLevel) {
             auto& runtime = corum::ranked::RankedRuntime::get();
-            if (runtime.isSpectating()) {
+            if (runtime.isSpectating() && runtime.view().match.spectatorLiveEnabled) {
                 Ref<EndLevelLayer> retained(this);
                 if (!corum::ranked::prepareSpectatorScene(m_playLayer)) return;
                 m_fields->rankedExitRequested = true;

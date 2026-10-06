@@ -8,6 +8,8 @@ export const SPECTATOR_LIVE_MAX_SEQUENCE_GAP = 8;
 
 export interface SpectatorView {
   readonly active: boolean;
+  readonly liveEnabled?: boolean;
+  readonly liveSettingVersion?: number;
   readonly opponentName?: string;
   readonly currentProgress?: number | null;
 }
@@ -30,8 +32,9 @@ export interface SpectatorPublicState extends Record<string, unknown> {
   readonly matchId: string;
   readonly state: string;
   readonly side: PlayerSide;
-  readonly spectator: SpectatorView;
+  spectator: SpectatorView;
   readonly opponentPractice: boolean;
+  readonly opponentPaused?: boolean;
   readonly players: Readonly<Record<PlayerSide, SpectatorPlayerView | null>>;
   readonly currentRound: SpectatorRoundView | null;
   readonly deathmatch: SpectatorDeathmatchView | null;

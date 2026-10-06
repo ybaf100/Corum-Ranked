@@ -19,12 +19,14 @@ public:
                     SpectatorGhostPose const& after) {
         if (!finiteSpectatorPose(before) || !finiteSpectatorPose(after)) return;
         SpectatorSnapEvidence snap{type, before.x, before.y, after.x, after.y};
+        if (before.camera && validSpectatorCamera(*before.camera)) snap.fromCamera = before.camera;
         if (!finiteSpectatorSnap(snap)) return;
         if (m_snap) {
             // Coalesce only an observed native event chain. Never bridge an
             // arbitrary correction or an unrelated callback's coordinates.
             if (std::hypot(before.x - m_snap->toX, before.y - m_snap->toY) > 400.0f) return;
             snap.fromX = m_snap->fromX; snap.fromY = m_snap->fromY;
+            snap.fromCamera = m_snap->fromCamera;
             if (m_snap->type == SpectatorDiscontinuity::Teleport) snap.type = m_snap->type;
             if (!finiteSpectatorSnap(snap)) return;
         }

@@ -48,7 +48,7 @@ namespace fmt { std::string format(char const* pattern,float value){
 } }
 namespace corum::ranked {
 struct RankedRuntime {
-    struct Match{std::optional<int> opponentProgress;};struct View{Match match;} data;
+    struct Match{std::optional<int> opponentProgress;bool spectatorLiveEnabled=true;};struct View{Match match;} data;
     bool spectator=true;static RankedRuntime& get(){static RankedRuntime r;return r;}
     bool isSpectating()const{return spectator;}View const& view()const{return data;}
 };
@@ -88,7 +88,8 @@ struct CorumRankedPlayLayer: PlayLayer {
     bool prepareSpectatorScene(){return spectatorCameraActive();}
     void sampleSpectatorPresentation(){}void logSpectatorWorldDriver(){}void logSpectatorNativeProbe(){}
     bool freezeLocalDummy(PlayerObject* p){return p==m_player1 && m_fields->localSafety.active();}
-    bool observesSpectatorPlayer(PlayerObject*){return false;}
+    corum::ranked::SpectatorGhostPose observedSpectatorPose(){return corum::ranked::captureSpectatorPose(m_player1);}
+ bool observesSpectatorPlayer(PlayerObject*){return false;}
     void observeSpectatorNativeUpdate(PlayerObject*){}
     void observeSpectatorNativeSnap(PlayerObject*,corum::ranked::SpectatorDiscontinuity,corum::ranked::SpectatorGhostPose const&){}
     ${methods}

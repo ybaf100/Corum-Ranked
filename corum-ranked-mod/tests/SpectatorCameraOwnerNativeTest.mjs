@@ -45,7 +45,7 @@ namespace fmt { std::string format(char const* pattern,float value){
 } }
 namespace corum::ranked {
 struct RankedRuntime {
-    struct Match{std::optional<int> opponentProgress;};struct View{Match match;} data;
+    struct Match{std::optional<int> opponentProgress;bool spectatorLiveEnabled=true;};struct View{Match match;} data;
     bool spectator=true;static RankedRuntime& get(){static RankedRuntime r;return r;}
     bool isSpectating()const{return spectator;}View const& view()const{return data;}
 };

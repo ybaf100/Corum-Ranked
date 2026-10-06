@@ -439,6 +439,7 @@ struct WebRequest {
     void header(std::string name,std::string value){headers[name]=value;}
     void followRedirects(bool){} void timeout(std::chrono::seconds){}
     void bodyJSON(matjson::Value value){body=std::move(value);}
+    Operation get(std::string const& url)const{return post(url);}
     Operation post(std::string const& url)const{return {url,headers,body};}
 };
 struct Pending {Operation operation;std::function<void(WebResponse)> callback;};

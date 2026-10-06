@@ -2,6 +2,7 @@
 
 #include "domain/EnvironmentPolicy.hpp"
 #include "domain/ServerClock.hpp"
+#include "domain/MatchPauseBudget.hpp"
 
 #include <Geode/Geode.hpp>
 #include <Geode/utils/web.hpp>
@@ -296,6 +297,10 @@ struct MatchView {
     RatingEventView ratingEventB;
     std::vector<AchievementUnlockNoticeView> achievementUnlocks;
     bool spectatorActive = false;
+    bool spectatorLiveEnabled = true;
+    std::int64_t spectatorLiveSettingVersion = 0;
+    std::string surrenderScope;
+    int surrenderRound = 0, surrenderDeathmatch = 0;
     std::optional<int> opponentProgress;
     bool opponentFinished = false;
     bool opponentPractice = false;
@@ -401,6 +406,13 @@ public:
     void submitReady();
     void submitBan(std::optional<std::string> canonicalLevelId);
     void reportMapDownloadFailure();
+    void surrenderCurrentMatch(bool wholeMatch);
+    [[nodiscard]] bool surrenderPending() const { return m_pendingSurrender.isObject(); }
+    [[nodiscard]] bool gameplayConceded(int round, int deathmatch) const;
+    std::string beginMatchGameplayPause(int levelId);
+    void endMatchGameplayPause(std::string const& leaseId);
+    void syncMatchGameplayPause(bool nativePaused);
+    [[nodiscard]] double matchPauseRemainingMs() const;
     void dismissMatch();
     void queueAgain();
     void fetchHistory();
@@ -562,6 +574,15 @@ private:
     std::uint64_t m_progressRequestGeneration = 0;
     std::uint64_t m_pollRequestGeneration = 0;
     bool m_controlBusy = false;
+    MatchPauseBudget m_matchPauseBudget;
+    std::string m_pauseMatchId, m_pauseLeaseId;
+    bool m_pauseDesired = false, m_pauseNeedsSync = false, m_pauseBusy = false;
+    std::chrono::steady_clock::time_point m_nextPauseAt {}, m_nextSurrenderAt {};
+    matjson::Value m_pendingSurrender;
+    bool m_surrenderBusy = false;
+    void flushGameplayControls();
+    void resetGameplayControls();
+    void retireConcededAttemptTransport();
     bool m_pollBusy = false;
     bool m_attemptBusy = false;
     bool m_attemptIntentBusy = false;
@@ -574,6 +595,7 @@ private:
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_attemptIntentRequest;
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_progressRequest;
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_presenceRequest;
+    geode::async::TaskHolder<geode::utils::web::WebResponse> m_pauseRequest, m_surrenderRequest;
 };
 
 char const* stageName(RuntimeStage stage);

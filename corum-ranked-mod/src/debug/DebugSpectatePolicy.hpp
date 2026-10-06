@@ -23,7 +23,7 @@ class DebugSpectateCapture {
 public:
     bool capture(std::int64_t elapsedMs, SpectatorGhostPose const& pose, bool terminal = false) {
         if (m_ended || !finiteSpectatorPose(pose) || (pose.dead && pose.finished)) return false;
-        if (!terminal && elapsedMs < m_nextSampleMs) return false;
+        if (!terminal && !pose.discontinuity && !pose.cameraSnap && elapsedMs < m_nextSampleMs) return false;
         if (m_pending.size() >= 256 || m_nextSequence >= 12001 || elapsedMs > 600000) {
             m_ended = true; m_completed = false; return false;
         }

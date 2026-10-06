@@ -1,4 +1,5 @@
 #pragma once
+#include "domain/SpectatorPublishQueue.hpp"
 
 #include "domain/SpectatorRemotePolicy.hpp"
 #include "domain/SpectatorInterpolationBuffer.hpp"
@@ -26,6 +27,7 @@ public:
     static SpectatorLiveRuntime& get();
 
     bool tickPublisher(SpectatorGhostPose const& pose, bool practice);
+    void publisherPaused(bool paused);
     void publishTerminal(SpectatorGhostPose const& pose, bool practice);
     void tickTerminal();
     void localAttemptStarted() { m_deferredTerminalPose.reset(); }
@@ -56,6 +58,14 @@ private:
     [[nodiscard]] std::string endpoint(std::string const& path) const;
 
     std::string m_publishMatchId;
+    int m_publishRound = 0, m_publishDeathmatch = 0;
+    SpectatorPublishQueue m_publishQueue;
+    std::chrono::steady_clock::time_point m_publisherPausedAt {};
+    std::int64_t m_publisherPausedMs = 0;
+    bool m_publisherPaused = false;
+    std::int64_t publisherElapsedMs() const;
+    matjson::Value m_publishBatchBody;
+    std::int64_t m_publishBatchLastSequence = -1;
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
     std::string m_debugContextId, m_debugToken, m_debugPath;
 #endif
@@ -76,6 +86,7 @@ private:
     int m_deferredRound = 0, m_deferredDeathmatch = 0;
 
     std::string m_viewMatchId;
+    bool m_viewOpponentPaused = false;
     std::string m_viewContextKey;
     std::string m_viewAttemptId;
     std::string m_viewTerminalAttemptId;

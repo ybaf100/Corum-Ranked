@@ -130,6 +130,24 @@ int main() {
     close(segments.render(125)->pose.x, 766.5); // C -> D resumes normally
     assert(segments.starvations() == 0);
 
+    // Real native source coordinates/camera allow continuous travel up to the
+    // click. They never interpolate across the vertical Spider destination.
+    SpectatorInterpolationBuffer sources;
+    auto a = linear(0), b = linear(1), c = linear(2), d = linear(3);
+    c.pose.mode = d.pose.mode = SpectatorGameMode::Spider;
+    c.pose.y = d.pose.y = 740; c.pose.upsideDown = d.pose.upsideDown = true;
+    c.pose.rotation = d.pose.rotation = 271;
+    c.pose.camera = SpectatorCameraOrigin{-135, 200}; d.pose.camera = SpectatorCameraOrigin{-120, 200};
+    c.pose.discontinuity = SpectatorSnapEvidence{SpectatorDiscontinuity::SpiderSnap,30,80,30,740};
+    c.pose.discontinuity->fromCamera = SpectatorCameraOrigin{-135,40};
+    assert(sources.push(a,false,0) && sources.push(b,false,0) && sources.push(c,true,0) && sources.push(d,false,0));
+    auto beforeClick = sources.render(75);
+    close(beforeClick->pose.x,22.5); close(beforeClick->pose.y,80); close(beforeClick->pose.camera->x,-142.5);
+    close(beforeClick->pose.camera->y,40); assert(!beforeClick->pose.upsideDown);
+    auto atClick = sources.render(100);
+    close(atClick->pose.x,30); close(atClick->pose.y,740); close(atClick->pose.rotation,271); close(atClick->pose.camera->y,200);
+    assert(atClick->pose.upsideDown && atClick->segment==1 && sources.starvations()==0);
+
     // Multiple snaps in one batch, including same-timestamp terminal. Replacing
     // the final sample cannot erase the destination segment boundary.
     SpectatorInterpolationBuffer multiple;
@@ -200,6 +218,20 @@ int main() {
     for (int i = 3; i < 6; ++i) assert(starving.push(linear(i), false, 800));
     close(starving.render(816)->pose.x, 34.8); assert(!starving.buffering());
     starving.clear(); assert(!starving.render(900));
+
+    // Intentional server-authorized pause drains to the last frame and holds
+    // without a stream reset/starvation. Gameplay timestamps exclude wall time.
+    SpectatorInterpolationBuffer paused;
+    for (int i = 0; i < 4; ++i) assert(paused.push(linear(i), false, 0));
+    paused.render(50); paused.setSourcePaused(true, 50);
+    close(paused.render(200)->publisherElapsedMs, 150);
+    close(paused.render(12200)->publisherElapsedMs, 150);
+    assert(!paused.buffering() && !paused.starving() && paused.starvations() == 0);
+    paused.setSourcePaused(false, 12200);
+    paused.render(12201); assert(paused.starvations() == 0);
+    for (int i = 4; i < 8; ++i) assert(paused.push(linear(i), false, 12201));
+    close(paused.render(12251)->publisherElapsedMs, 200);
+    assert(paused.starvations() == 0);
 
     SpectatorInterpolationBuffer bounded;
     bool overflow = false;

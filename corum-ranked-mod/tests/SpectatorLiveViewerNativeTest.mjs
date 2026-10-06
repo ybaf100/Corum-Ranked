@@ -241,6 +241,19 @@ int main(){
     auto waitingEpoch=viewer.m_viewPresentationEpoch;
     viewer.applyViewerResponse(waiting);assert(viewer.m_status==SpectatorLiveStatus::Waiting && !viewer.interpolatedPose());
     assert(viewer.m_viewAttemptId=="B" && viewer.m_viewGeneration==2 && viewer.m_viewPresentationEpoch==waitingEpoch);
+    // A paused first/reset reply must preserve the buffer pause flag after
+    // clear(), drain its final pose and hold without induced starvation.
+    SpectatorLiveRuntime paused;paused.m_viewMatchId="match";
+    auto pauseReply=response(0,100);pauseReply["paused"]=true;
+    paused.applyViewerResponse(pauseReply);paused.interpolatedPose();advance(12000);
+    assert(paused.interpolatedPose()->x==100 && paused.m_sampleBuffer.starvations()==0);
+    auto pauseEpoch=paused.m_viewPresentationEpoch;
+    paused.applyViewerResponse(response(1,110));
+    paused.applyViewerResponse(response(2,120));
+    paused.applyViewerResponse(response(3,130));
+    paused.interpolatedPose();advance(50);
+    assert(paused.interpolatedPose()->x==110 && paused.m_viewPresentationEpoch==pauseEpoch);
+    assert(paused.m_sampleBuffer.starvations()==0);
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
     viewer.m_debugContextId="debug-spectate:scope";viewer.m_viewMatchId=viewer.m_debugContextId;
     RankedRuntime::get().state.match.roundNumber=99;

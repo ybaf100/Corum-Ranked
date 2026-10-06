@@ -7,6 +7,14 @@ import { DebugSpectateService } from "./debug-spectate.service.js";
 @Controller("api/ranked/debug/spectate")
 export class DebugSpectateController {
   public constructor(@Inject(DebugSpectateService) private readonly debug: DebugSpectateService) {}
+  @Get("live-setting") @UseGuards(SessionGuard)
+  public setting(@Headers("x-corum-debug-spectate") client?: string) {
+    return this.debug.liveSetting(client);
+  }
+  @Post("live-setting") @UseGuards(SessionGuard)
+  public setSetting(@Body() body: unknown, @Headers("x-corum-debug-spectate") client?: string) {
+    return this.debug.setLiveSetting(body, client);
+  }
   @Post("recordings") @UseGuards(SessionGuard)
   public record(@CurrentSession() session: RankedSessionContext, @Body() body: unknown,
     @Headers("x-corum-debug-spectate") client?: string) { return this.debug.createRecording(session, body, client); }

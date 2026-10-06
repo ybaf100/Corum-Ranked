@@ -22,6 +22,10 @@
 using namespace geode::prelude;
 
 namespace {
+double gameplayControlNowMs() {
+    return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
 
 constexpr std::string_view kCbfId = "syzzi.click_between_frames";
 constexpr std::string_view kDefaultRankedServerURL = "https://corum-ranked.onrender.com";
@@ -414,6 +418,7 @@ void RankedRuntime::begin() {
         m_view.stage == RuntimeStage::Matched
     ) return;
 
+    resetGameplayControls();
     invalidatePollRequest();
     invalidateAttemptRequest();
     ++m_progressRequestGeneration;
@@ -1277,6 +1282,11 @@ void RankedRuntime::parseMatchState(matjson::Value const& root) {
         setTransientError("Invalid match state response");
         return;
     }
+    if (root["matchId"].asString().unwrapOr("") == m_view.match.matchId &&
+        root["stateVersion"].asInt().unwrapOr(0) > 0 &&
+        root["stateVersion"].asInt().unwrapOr(0) < m_view.match.stateVersion) {
+        log::debug("Ignoring older Ranked state after authoritative transition"); return;
+    }
     observeServerNow(root);
     auto const previousState = m_view.match.state;
     m_view.match.state = root["state"].asString().unwrapOr("");
@@ -1412,6 +1422,23 @@ void RankedRuntime::parseMatchState(matjson::Value const& root) {
         }
     }
 
+    auto const settingVersion = root["spectator"]["liveSettingVersion"].asInt().unwrapOr(0);
+    if (settingVersion >= m_view.match.spectatorLiveSettingVersion) {
+        m_view.match.spectatorLiveEnabled = root["spectator"]["liveEnabled"].asBool().unwrapOr(true);
+        m_view.match.spectatorLiveSettingVersion = settingVersion;
+    }
+    m_view.match.surrenderScope = root["surrender"]["scope"].asString().unwrapOr("");
+    m_view.match.surrenderRound = static_cast<int>(root["surrender"]["roundNumber"].asInt().unwrapOr(0));
+    m_view.match.surrenderDeathmatch = static_cast<int>(root["surrender"]["deathmatchSequence"].asInt().unwrapOr(0));
+    if (root["pause"].isObject()) {
+        m_matchPauseBudget.bind(m_view.match.matchId);
+        m_matchPauseBudget.observe(root["pause"]["remainingMs"].asDouble().unwrapOr(30000), gameplayControlNowMs());
+    }
+    auto const concededKey = m_view.match.surrenderDeathmatch > 0
+        ? fmt::format("{}:D:{}", m_view.match.matchId, m_view.match.surrenderDeathmatch)
+        : fmt::format("{}:R:{}", m_view.match.matchId, m_view.match.surrenderRound);
+    if (m_view.match.surrenderScope == "MATCH" || (m_view.match.surrenderScope == "ROUND" &&
+        (m_attemptContextKey == concededKey || m_gameplayStartContextKey == concededKey))) retireConcededAttemptTransport();
     auto const spectator = root["spectator"];
     if (spectator.isObject() && spectator["active"].asBool().unwrapOr(false)) {
         m_view.match.spectatorActive = true;
@@ -1737,6 +1764,114 @@ void RankedRuntime::submitBan(std::optional<std::string> canonicalLevelId) {
     );
 }
 
+bool RankedRuntime::gameplayConceded(int round, int deathmatch) const {
+    auto const& match = m_view.match;
+    if (match.surrenderScope == "MATCH") return true;
+    if (match.surrenderScope != "ROUND") return false;
+    return deathmatch > 0 ? deathmatch == match.surrenderDeathmatch :
+        match.surrenderDeathmatch == 0 && round > 0 && round == match.surrenderRound;
+}
+
+void RankedRuntime::retireConcededAttemptTransport() {
+    // Explicit authenticated concession is different from a deadline. Normal
+    // timer=0 final Attempts still retain their Start/End journal and authority.
+    invalidateAttemptRequest();
+    ++m_attemptIntentRequestGeneration; m_attemptIntentRequest.cancel(); m_attemptIntentBusy = false;
+    ++m_progressRequestGeneration; m_progressRequest.cancel(); m_progressBusy = false;
+    m_pendingStart.reset(); m_pendingEnd.reset(); m_attemptBacklog.clear(); m_attemptIntentBacklog.clear();
+    m_attemptId.clear(); m_attemptLevelId = 0; m_attemptContextKey.clear();
+    m_pendingProgress.reset(); m_gameplayStartEligible = false;
+}
+
+void RankedRuntime::surrenderCurrentMatch(bool wholeMatch) {
+    if (m_view.stage != RuntimeStage::Matched || isPlacement() || m_view.match.matchId.empty() ||
+        !stateAllowsActiveAttempt(m_view.match.state) || m_pendingSurrender.isObject()) return;
+    if (hasLocalAttemptInFlight() && !hasLocalOpenAttempt()) {
+        setTransientError("Completed attempt is still syncing; wait before surrendering.");
+        flushAttemptEvents(); return;
+    }
+    m_pendingSurrender = matjson::Value();
+    m_pendingSurrender["scope"] = wholeMatch ? "MATCH" : "ROUND";
+    m_pendingSurrender["clientEventId"] = newEventId("surrender");
+    m_pendingSurrender["roundNumber"] = m_view.match.roundNumber;
+    m_pendingSurrender["deathmatchSequence"] = m_view.match.deathmatchSequence;
+    m_nextSurrenderAt = {}; flushGameplayControls();
+}
+
+std::string RankedRuntime::beginMatchGameplayPause(int levelId) {
+    if (m_view.stage != RuntimeStage::Matched || isPlacement() ||
+        !isGameplayLevel(levelId) || !stateAllowsActiveAttempt(m_view.match.state)) return {};
+    if (m_pauseMatchId != m_view.match.matchId) {
+        m_pauseRequest.cancel(); m_pauseBusy = false;
+        m_pauseMatchId = m_view.match.matchId; m_pauseLeaseId.clear();
+    }
+    m_matchPauseBudget.bind(m_pauseMatchId);
+    if (m_pauseDesired) return m_pauseLeaseId;
+    m_pauseLeaseId = newEventId("pause"); m_pauseDesired = true; m_pauseNeedsSync = true;
+    SpectatorLiveRuntime::get().publisherPaused(true);
+    m_matchPauseBudget.begin(gameplayControlNowMs()); m_nextPauseAt = {};
+    flushGameplayControls(); return m_pauseLeaseId;
+}
+void RankedRuntime::endMatchGameplayPause(std::string const& leaseId) {
+    if (leaseId.empty() || leaseId != m_pauseLeaseId || !m_pauseDesired) return;
+    m_matchPauseBudget.end(gameplayControlNowMs());
+    SpectatorLiveRuntime::get().publisherPaused(false);
+    m_pauseDesired = false; m_pauseNeedsSync = true; m_nextPauseAt = {};
+    flushGameplayControls();
+}
+double RankedRuntime::matchPauseRemainingMs() const {
+    return m_matchPauseBudget.remaining(gameplayControlNowMs());
+}
+void RankedRuntime::syncMatchGameplayPause(bool nativePaused) {
+    if (!nativePaused && m_pauseDesired) endMatchGameplayPause(m_pauseLeaseId);
+}
+void RankedRuntime::flushGameplayControls() {
+    auto const now = std::chrono::steady_clock::now();
+    if (!m_pauseBusy && m_pauseNeedsSync && now >= m_nextPauseAt && !m_pauseMatchId.empty() &&
+        m_pauseMatchId == m_view.match.matchId) {
+        auto request = baseRequest(m_sessionToken, m_matchToken);
+        matjson::Value body; body["leaseId"] = m_pauseLeaseId; body["paused"] = m_pauseDesired;
+        request.bodyJSON(body);
+        auto const matchId = m_pauseMatchId, lease = m_pauseLeaseId;
+        auto const paused = m_pauseDesired; m_pauseBusy = true; m_pauseNeedsSync = false;
+        m_pauseRequest.spawn(request.post(endpoint("/api/ranked/matches/" + matchId + "/pause")),
+            [this, matchId, lease, paused](web::WebResponse response) {
+                if (matchId != m_pauseMatchId) return;
+                m_pauseBusy = false;
+                if (successful(response)) {
+                    auto const root = response.json().unwrapOr(matjson::Value());
+                    if (lease == m_pauseLeaseId) {
+                        m_matchPauseBudget.observe(root["remainingMs"].asDouble().unwrapOr(0), gameplayControlNowMs());
+                        if (!root["accepted"].asBool().unwrapOr(false)) m_matchPauseBudget.observe(0, gameplayControlNowMs());
+                    }
+                } else { m_pauseNeedsSync = true; m_nextPauseAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(500); }
+                if (lease != m_pauseLeaseId || paused != m_pauseDesired) m_pauseNeedsSync = true;
+            });
+    }
+    if (!m_surrenderBusy && m_pendingSurrender.isObject() && now >= m_nextSurrenderAt &&
+        m_view.stage == RuntimeStage::Matched) {
+        auto request = baseRequest(m_sessionToken, m_matchToken); request.bodyJSON(m_pendingSurrender);
+        auto const matchId = m_view.match.matchId; m_surrenderBusy = true;
+        m_surrenderRequest.spawn(request.post(endpoint("/api/ranked/matches/" + matchId + "/surrender")),
+            [this, matchId](web::WebResponse response) {
+                if (matchId != m_view.match.matchId) return;
+                m_surrenderBusy = false;
+                if (successful(response)) { m_pendingSurrender = {}; parseMatchState(response.json().unwrapOr(matjson::Value())); }
+                else if (response.code() >= 400 && response.code() < 500) {
+                    m_pendingSurrender = {}; setTransientError(responseError(response));
+                } else { m_nextSurrenderAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(500); }
+            });
+    }
+}
+
+void RankedRuntime::resetGameplayControls() {
+    SpectatorLiveRuntime::get().publisherPaused(false);
+    m_pauseRequest.cancel(); m_surrenderRequest.cancel();
+    m_pauseBusy = m_pauseDesired = m_pauseNeedsSync = m_surrenderBusy = false;
+    m_pauseMatchId.clear(); m_pauseLeaseId.clear(); m_pendingSurrender = {};
+    m_matchPauseBudget.bind("");
+}
+
 void RankedRuntime::reportMapDownloadFailure() {
     if (m_controlBusy || m_view.stage != RuntimeStage::Matched || m_view.match.matchId.empty()) return;
     if (isPlacement()) {
@@ -1801,6 +1936,7 @@ void RankedRuntime::dismissMatch() {
         }
         return;
     }
+    resetGameplayControls();
     // A terminal-state poll may still be in flight when Queue Again or Close is
     // pressed. Cancel it and invalidate its callback before clearing matchToken /
     // match view, otherwise the old response can resurrect the previous match.
@@ -2330,7 +2466,7 @@ bool RankedRuntime::canEnterCurrentLevel() const {
 }
 
 bool RankedRuntime::canEnterCurrentLevelAsSpectator() const {
-    if (!isSpectating()) return false;
+    if (!isSpectating() || !m_view.match.spectatorLiveEnabled) return false;
     // A viewer may reconnect before the opponent starts their next legal
     // Attempt. Keep the exact canonical map open in that waiting state; the
     // live relay will attach only after authority publishes an active Attempt.
@@ -3134,6 +3270,7 @@ void RankedRuntime::sendAttemptProgress() {
 }
 
 void RankedRuntime::tick() {
+    flushGameplayControls();
     SpectatorLiveRuntime::get().tickTerminal();
     auto const now = std::chrono::steady_clock::now();
     if (now >= m_nextPollAt) {

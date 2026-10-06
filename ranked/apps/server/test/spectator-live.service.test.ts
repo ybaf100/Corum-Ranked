@@ -17,6 +17,8 @@ const standardState = (
   state,
   side,
   opponentPractice: false,
+  opponentPaused: false,
+  pause: { active: false },
   players: {
     A: { gdUsername: "alpha" },
     B: { gdUsername: "bravo" },
@@ -70,6 +72,65 @@ describe("SpectatorLiveService", () => {
     vi.restoreAllMocks();
   });
 
+  it("holds an authorized opponent pause without timeout, then resumes the same generation and gameplay clock", async () => {
+    const { service, runtime, setState } = setup();
+    let now = 10_000; vi.spyOn(Date, "now").mockImplementation(() => now);
+    runtime.beginAttempt("match-1", 2, "B", "attempt-b", now);
+    await service.publish("match-1", "token", session, packet());
+    service.notePublisherPause("match-1", "B", true);
+    setState({ ...standardState("A", true), opponentPaused: true });
+    now += 12_000;
+    const held = await service.subscribe("match-1", "token", session, "2");
+    expect(held).toMatchObject({ paused: true, fallback: false, waiting: false });
+    expect(held.stream!.generation).toBe(1);
+    service.notePublisherPause("match-1", "B", false);
+    setState(standardState("B", false));
+    await service.publish("match-1", "token", session, packet({ sequence: 1, elapsedMs: 60 }));
+    setState(standardState("A", true));
+    const resumed = await service.subscribe("match-1", "token", session, "2", "attempt-b", "1", "0");
+    expect(resumed).toMatchObject({ paused: false, reset: false, fallback: false });
+    expect(resumed.packets[0]).toMatchObject({ sequence: 1, generation: 1, elapsedMs: 60 });
+    now += 1501;
+    expect((await service.subscribe("match-1", "token", session, "2")).reason).toBe("STREAM_TIMEOUT");
+  });
+
+  it("accepts ordered 50ms/native-snap batches, retries immutable ACKs and rejects whole malformed batches atomically", async () => {
+    const { service, runtime, setState, stateCall } = setup(); runtime.beginAttempt("match-1",2,"B","attempt-b",1000);
+    const samples = [0,50,60,100,110].map((elapsedMs,sequence) => packet({elapsedMs,sequence}));
+    samples[2] = packet({sequence:2,elapsedMs:60,keyframe:{ ...samples[2]!.keyframe, mode:"SPIDER",upsideDown:true,
+      discontinuity:{type:"SPIDER_SNAP",fromX:120,fromY:48,toX:120,toY:740,cameraFromX:100,cameraFromY:40},y:740 }});
+    expect(await service.publish("match-1","token",session,{packets:samples})).toMatchObject({accepted:true,sequence:4});
+    expect(stateCall).toHaveBeenCalledTimes(1); // authenticate once per ordered batch
+    expect(await service.publish("match-1","token",session,{packets:samples})).toMatchObject({sequence:4});
+    await expect(service.publish("match-1","token",session,{packets:[packet({sequence:5,elapsedMs:250}),packet({sequence:6,elapsedMs:200})]})).rejects.toThrow("SPECTATOR_BATCH_ORDER");
+    const changed=structuredClone(samples); changed[1]!.keyframe.x=999;
+    await expect(service.publish("match-1","token",session,{packets:changed})).rejects.toThrow("SPECTATOR_STALE_SEQUENCE");
+    setState(standardState("A",true)); const stream=await service.subscribe("match-1","token",session);
+    expect(stream.packets.map(p=>p.sequence)).toEqual([0,1,2,3,4]);
+    expect(stream.packets[2]!.keyframe.discontinuity).toMatchObject({cameraFromX:100,cameraFromY:40});
+  });
+  it("drains queued presentation after exact End ACK without changing Ranked authority", async () => {
+    const { service,runtime,setState }=setup();runtime.beginAttempt("match-1",2,"B","attempt-b",1000);
+    runtime.endAttempt("match-1",2,"B","attempt-b",false);
+    await service.publish("match-1","token",session,{packets:[packet(),packet({sequence:1,elapsedMs:50})]});
+    const terminal=packet({sequence:2,elapsedMs:60,keyframe:{...packet().keyframe,dead:true}});
+    await service.publish("match-1","token",session,terminal);
+    await service.publish("match-1","token",session,terminal); // immutable terminal ACK retry
+    setState(standardState("A",true));expect((await service.subscribe("match-1","token",session)).packets.at(-1)!.keyframe.dead).toBe(true);
+    expect(runtime.progress("match-1",2,"B")).toBeNull();
+    expect(runtime.endedAttempt("match-1",2,"B")!.cleared).toBe(false);
+  });
+  it("late-join and expired-cursor replies always fit the client presentation window", async () => {
+    const {service,runtime,setState}=setup();runtime.beginAttempt("match-1",2,"B","attempt-b",1000);
+    for(let sequence=0;sequence<100;++sequence)await service.publish("match-1","token",session,packet({sequence,elapsedMs:sequence*50}));
+    setState(standardState("A",true));
+    const late=await service.subscribe("match-1","token",session);
+    expect(late.reset).toBe(true);expect(late.packets.length).toBeLessThanOrEqual(16);
+    expect(late.packets.at(-1)!.elapsedMs-late.packets[0]!.elapsedMs).toBeLessThanOrEqual(350);
+    const recovered=await service.subscribe("match-1","token",session,"2","attempt-b","1","0");
+    expect(recovered).toMatchObject({reset:true,fallback:false});
+    expect((await service.subscribe("match-1","token",session,"2","attempt-b","1","99")).stream!.lastSequence).toBe(99);
+  });
   it("rejects stream subscription for a viewer without spectator.active", async () => {
     const { service, stateCall } = setup();
     await expect(
@@ -182,7 +243,7 @@ describe("SpectatorLiveService", () => {
     expect(incremental.packets.map((item) => item.sequence)).toEqual([2]);
   });
 
-  it("bounds late join by both 72 packets and the three-second window", async () => {
+  it("bounds late join to the live 350ms / 16-sample edge while retaining the three-second relay", async () => {
     const { service, runtime, setState } = setup();
     const now = vi.spyOn(Date, "now").mockReturnValue(10_000);
     runtime.beginAttempt("match-1", 2, "B", "attempt-b", 1_000);
@@ -191,8 +252,8 @@ describe("SpectatorLiveService", () => {
     }
     setState(standardState("A", true));
     const capped = await service.subscribe("match-1", "match-token", session, "2");
-    expect(capped.packets).toHaveLength(72);
-    expect(capped.packets[0]?.sequence).toBe(8);
+    expect(capped.packets).toHaveLength(16);
+    expect(capped.packets[0]?.sequence).toBe(64);
     expect(capped.packets.at(-1)?.sequence).toBe(79);
 
     setState(standardState("B", false));
@@ -230,7 +291,7 @@ describe("SpectatorLiveService", () => {
     ).rejects.toThrow("SPECTATOR_SEQUENCE_GAP");
   });
 
-  it("falls back when the subscriber cursor has fallen behind the retained buffer", async () => {
+  it("resets an expired subscriber cursor without destroying the publisher stream", async () => {
     const { service, runtime, setState } = setup();
     runtime.beginAttempt("match-1", 2, "B", "attempt-b", 1_000);
     for (let sequence = 0; sequence < 80; sequence += 1) {
@@ -246,7 +307,7 @@ describe("SpectatorLiveService", () => {
       "1",
       "0",
     );
-    expect(result).toMatchObject({ fallback: true, reason: "SEQUENCE_GAP" });
+    expect(result).toMatchObject({ fallback: false, reset: true });
   });
 
   it("discards a timed-out stream and requires a fresh sequence-zero generation", async () => {

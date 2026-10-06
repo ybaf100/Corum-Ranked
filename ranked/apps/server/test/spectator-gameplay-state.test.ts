@@ -12,6 +12,13 @@ describe("strict spectator gameplay protocol v2", () => {
       }
     });
   }
+  it("keeps optional native source camera in v2 and ignores malformed optional camera without weakening snap endpoints", () => {
+    const discontinuity={type:"SPIDER_SNAP",fromX:100,fromY:80,toX:100,toY:740,cameraFromX:20,cameraFromY:40};
+    expect(parseSpectatorKeyframe({...pose(),mode:"SPIDER",y:740,discontinuity}).discontinuity).toEqual(discontinuity);
+    const malformed={...discontinuity,cameraFromX:1e20};
+    expect(parseSpectatorKeyframe({...pose(),discontinuity:malformed}).discontinuity!.cameraFromX).toBeUndefined();
+    expect(()=>parseSpectatorKeyframe({...pose(),discontinuity:{...discontinuity,toY:100000}})).toThrow();
+  });
   it("rejects unknown/missing modes and incomplete v1 keyframes", () => {
     for (const mode of [undefined, null, "cube", "JETPACK", "UNKNOWN", 1]) {
       expect(() => parseSpectatorKeyframe({ ...pose(), mode })).toThrow();

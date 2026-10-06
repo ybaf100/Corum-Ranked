@@ -528,7 +528,7 @@ public:
     bool prepareSpectatorScene() {
         syncSpectatorLocalSafety();
         auto& runtime = corum::ranked::RankedRuntime::get();
-        auto spectatorAuthority = runtime.isSpectating();
+        auto spectatorAuthority = runtime.isSpectating() && runtime.view().match.spectatorLiveEnabled;
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         if (m_fields->debugPlaybackScene) spectatorAuthority = corum::ranked::debug::DebugSpectateRuntime::get().playbackLevel(m_fields->levelId);
 #endif
@@ -557,7 +557,7 @@ public:
     bool spectatorCameraActive() {
         if (!m_fields->spectatorScenePrepared || m_isTestMode || m_isPracticeMode) return false;
         auto& runtime = corum::ranked::RankedRuntime::get();
-        auto spectatorAuthority = runtime.isSpectating();
+        auto spectatorAuthority = runtime.isSpectating() && runtime.view().match.spectatorLiveEnabled;
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         if (m_fields->debugPlaybackScene) spectatorAuthority = corum::ranked::debug::DebugSpectateRuntime::get().playbackLevel(m_fields->levelId);
 #endif
@@ -729,7 +729,7 @@ public:
         auto& runtime = corum::ranked::RankedRuntime::get();
         auto& live = corum::ranked::SpectatorLiveRuntime::get();
         live.tickPublisher({}, true);
-        auto spectatorAuthority = runtime.isSpectating();
+        auto spectatorAuthority = runtime.isSpectating() && runtime.view().match.spectatorLiveEnabled;
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         if (m_fields->debugPlaybackScene) spectatorAuthority = corum::ranked::debug::DebugSpectateRuntime::get().playbackLevel(m_fields->levelId);
 #endif
@@ -768,6 +768,14 @@ public:
     }
 
     void spectatorFrame(float dt) {
+        auto& controls = corum::ranked::RankedRuntime::get();
+        if (m_fields->rankedLevel && m_fields->sceneContext.matchId == controls.view().match.matchId &&
+            controls.gameplayConceded(m_fields->sceneContext.roundNumber, m_fields->sceneContext.deathmatchSequence) &&
+            !m_fields->autoExitRequested) {
+            m_fields->autoExitRequested = true; m_fields->attemptEndReported = true;
+            if (!corum::ranked::quitThroughRankedCompletionOverlay(this)) onQuit();
+            return;
+        }
         if (!m_fields->rankedInitialized || m_fields->safetyRetired ||
             m_fields->spectatorPresentationRetired || m_fields->autoExitRequested ||
             m_isTestMode || m_fields->vanillaGameplayEndInProgress) return;
@@ -798,6 +806,7 @@ public:
     }
 
     void postUpdate(float dt) {
+        if (m_fields->rankedLevel) corum::ranked::RankedRuntime::get().syncMatchGameplayPause(m_isPaused);
         syncSpectatorLocalSafety();
         ScopedPersistenceOwner persistence(this);
         PlayLayer::postUpdate(dt);
@@ -2052,7 +2061,7 @@ class $modify(CorumRankedSpectatorCameraHook, GJBaseGameLayer) {
         auto* owner = layer && static_cast<GJBaseGameLayer*>(layer) == this
             ? static_cast<CorumRankedPlayLayer*>(layer) : nullptr;
         auto const observed = owner && object && owner->observesSpectatorPlayer(player);
-        auto const before = observed ? corum::ranked::captureSpectatorPose(player) : corum::ranked::SpectatorGhostPose{};
+        auto const before = observed ? owner->observedSpectatorPose() : corum::ranked::SpectatorGhostPose{};
         GJBaseGameLayer::teleportPlayer(object, player);
         if (observed) owner->observeSpectatorNativeSnap(player, corum::ranked::SpectatorDiscontinuity::Teleport, before);
     }
@@ -2084,7 +2093,7 @@ class $modify(CorumRankedSpectatorDummyPlayer, PlayerObject) {
         }
         auto const observed = layer && layer->observesSpectatorPlayer(this);
         auto const teleportedBefore = m_wasTeleported;
-        auto const before = observed ? corum::ranked::captureSpectatorPose(this) : corum::ranked::SpectatorGhostPose{};
+        auto const before = observed ? layer->observedSpectatorPose() : corum::ranked::SpectatorGhostPose{};
         PlayerObject::update(dt);
         // Native teleport flag also covers object-driven relocation outside the
         // portal entry callback. A position delta alone never creates evidence.
@@ -2103,7 +2112,7 @@ class $modify(CorumRankedSpectatorDummyPlayer, PlayerObject) {
         auto* layer = localSafetyLayer();
         if (layer && layer->freezeLocalDummy(this)) return;
         auto const observed = layer && m_isSpider && layer->observesSpectatorPlayer(this);
-        auto const before = observed ? corum::ranked::captureSpectatorPose(this) : corum::ranked::SpectatorGhostPose{};
+        auto const before = observed ? layer->observedSpectatorPose() : corum::ranked::SpectatorGhostPose{};
         PlayerObject::spiderTestJump(dynamic);
         if (observed && before.upsideDown != m_isUpsideDown)
             layer->observeSpectatorNativeSnap(this, corum::ranked::SpectatorDiscontinuity::SpiderSnap, before);

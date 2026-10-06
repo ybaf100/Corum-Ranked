@@ -100,11 +100,14 @@ void SpectatorLiveRuntime::resetPublisher() {
     m_publishMatchId.clear();
     m_publishAttemptId.clear();
     m_publishSequence = 0;
+    m_publishQueue = {}; m_publishBatchBody = {}; m_publishBatchLastSequence = -1;
+    m_publisherPaused = false; m_publisherPausedAt = {}; m_publisherPausedMs = 0;
     m_publishStartedAt = {};
     m_nextPublishAt = {};
 }
 
 void SpectatorLiveRuntime::resetViewer() {
+    m_viewOpponentPaused = false;
     m_viewerPollGapMs = 20;
     ++m_viewRequestGeneration;
     ++m_viewPresentationEpoch;
@@ -155,6 +158,9 @@ void SpectatorLiveRuntime::startPublisherGeneration(
 ) {
     m_publishMatchId = matchId;
     m_publishAttemptId = attemptId;
+    auto const& match = RankedRuntime::get().view().match;
+    m_publishRound = match.roundNumber;
+    m_publishDeathmatch = match.state == "DEATHMATCH_PLAYING" ? match.deathmatchSequence : 0;
     ++m_publishGeneration;
     if (m_publishGeneration == 0) m_publishGeneration = 1;
     m_publishSequence = 0;
@@ -162,6 +168,20 @@ void SpectatorLiveRuntime::startPublisherGeneration(
     m_nextPublishAt = m_publishStartedAt;
 }
 
+void SpectatorLiveRuntime::publisherPaused(bool paused) {
+    auto const now = std::chrono::steady_clock::now();
+    if (paused && !m_publisherPaused) m_publisherPausedAt = now;
+    if (!paused && m_publisherPaused) m_publisherPausedMs +=
+        std::chrono::duration_cast<std::chrono::milliseconds>(now - m_publisherPausedAt).count();
+    m_publisherPaused = paused;
+}
+std::int64_t SpectatorLiveRuntime::publisherElapsedMs() const {
+    auto const now = std::chrono::steady_clock::now();
+    auto const activePause = m_publisherPaused ?
+        std::chrono::duration_cast<std::chrono::milliseconds>(now - m_publisherPausedAt).count() : 0;
+    return std::max<std::int64_t>(0, std::chrono::duration_cast<std::chrono::milliseconds>(now - m_publishStartedAt).count()
+        - m_publisherPausedMs - activePause);
+}
 bool SpectatorLiveRuntime::tickPublisher(SpectatorGhostPose const& pose, bool practice) {
     tickTerminal();
     auto& ranked = RankedRuntime::get();
@@ -171,7 +191,7 @@ bool SpectatorLiveRuntime::tickPublisher(SpectatorGhostPose const& pose, bool pr
     auto const eligible =
         view.stage == RuntimeStage::Matched &&
         !ranked.isPlacement() &&
-        !ranked.isSpectating() &&
+        !ranked.isSpectating() && match.spectatorLiveEnabled &&
         !practice &&
         !match.matchId.empty() &&
         !attemptId.empty() &&
@@ -186,17 +206,21 @@ bool SpectatorLiveRuntime::tickPublisher(SpectatorGhostPose const& pose, bool pr
     }
     if (attemptId == m_terminalPublishAttemptId) return false;
     auto const now = std::chrono::steady_clock::now();
-    if (m_publishBusy || now < m_nextPublishAt) return false;
-    auto const sequence = m_publishSequence;
-    publish(pose);
-    return m_publishBusy || m_publishSequence != sequence;
+    if (m_publishQueue.full()) {
+        resetPublisher(); startPublisherGeneration(match.matchId, attemptId);
+    }
+    auto const captured = !m_publisherPaused && m_publishQueue.capture(publisherElapsedMs(), pose);
+    m_publishSequence = static_cast<std::uint64_t>(m_publishQueue.nextSequence());
+    if (!m_publishBusy && now >= m_nextPublishAt) publish(pose);
+    // Consumed native evidence is tied to capture, never to HTTP request/ACK.
+    return captured;
 }
 
 void SpectatorLiveRuntime::publishTerminal(SpectatorGhostPose const& pose, bool practice) {
     auto& ranked = RankedRuntime::get();
     auto const& match = ranked.view().match;
     auto const attempt = ranked.spectatorLiveAttemptId();
-    if (practice || ranked.isPlacement() || ranked.isSpectating() ||
+    if (practice || !match.spectatorLiveEnabled || ranked.isPlacement() || ranked.isSpectating() ||
         ranked.view().stage != RuntimeStage::Matched || match.matchId.empty() ||
         (!attempt.empty() && attempt == m_terminalPublishAttemptId) || !finitePose(pose) ||
         !(pose.dead || pose.finished)) return;
@@ -221,9 +245,10 @@ void SpectatorLiveRuntime::publishTerminal(SpectatorGhostPose const& pose, bool 
     m_terminalBody["generation"] = static_cast<std::int64_t>(m_publishGeneration);
     // Capture the terminal immediately, but wait for the preceding live ACK to
     // preserve contiguous sequence delivery. It bypasses the normal 50ms delay.
-    m_terminalBody["sequence"] = static_cast<std::int64_t>(m_publishSequence + (m_publishBusy ? 1 : 0));
+    m_terminalBody["sequence"] = static_cast<std::int64_t>(m_publishQueue.nextSequence());
     m_terminalBody["elapsedMs"] = static_cast<std::int64_t>(std::max<std::int64_t>(0,
-        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - m_publishStartedAt).count()));
+        publisherElapsedMs()));
+    m_terminalBody["elapsedMs"] = std::max(m_terminalBody["elapsedMs"].asInt().unwrapOr(0), m_publishQueue.lastElapsedMs() + 1);
     m_terminalBody["keyframe"] = encodeSpectatorPose(pose);
     m_terminalSessionToken = ranked.spectatorLiveSessionToken(); m_terminalMatchToken = ranked.spectatorLiveMatchToken();
     m_terminalPublishAttemptId = attempt;
@@ -249,6 +274,9 @@ void SpectatorLiveRuntime::tickTerminal() {
     if (now >= m_terminalDeadline) { m_terminalPending = false; return; }
     if (m_terminalBusy || now < m_nextTerminalAt ||
         (m_publishBusy && m_publishAttemptId == m_terminalPublishAttemptId)) return;
+    if (!m_publishQueue.empty() || m_publishBatchBody.isObject()) {
+        publish({}); return; // drain captured frames in sequence before terminal
+    }
     auto const generation = m_terminalRequestGeneration;
     auto request = spectatorRequest(m_terminalSessionToken, m_terminalMatchToken);
     request.bodyJSON(m_terminalBody);
@@ -266,62 +294,62 @@ void SpectatorLiveRuntime::tickTerminal() {
         });
 }
 
-void SpectatorLiveRuntime::publish(SpectatorGhostPose const& pose) {
+void SpectatorLiveRuntime::publish(SpectatorGhostPose const&) {
     auto& ranked = RankedRuntime::get();
-    auto const& match = ranked.view().match;
-    if (
-        m_publishMatchId.empty() || m_publishAttemptId.empty() ||
-        ranked.spectatorLiveSessionToken().empty() || ranked.spectatorLiveMatchToken().empty()
-    ) return;
-
-    auto const now = std::chrono::steady_clock::now();
-    auto const elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
-        now - m_publishStartedAt
-    ).count();
-    matjson::Value body;
-    body["protocolVersion"] = kProtocolVersion;
-    body["matchId"] = m_publishMatchId;
-    body["roundNumber"] = match.roundNumber;
-    if (match.state == "DEATHMATCH_PLAYING" && match.deathmatchSequence > 0) {
-        body["deathmatchSequence"] = match.deathmatchSequence;
+    if (m_publishBusy || m_publishMatchId.empty() || m_publishAttemptId.empty()) return;
+    auto const session = m_terminalPending ? m_terminalSessionToken : ranked.spectatorLiveSessionToken();
+    auto const token = m_terminalPending ? m_terminalMatchToken : ranked.spectatorLiveMatchToken();
+    if (session.empty() || token.empty()) return;
+    if (!m_publishBatchBody.isObject()) {
+        auto const batch = m_publishQueue.batch();
+        if (batch.empty()) return;
+        auto packets = matjson::Value::array();
+        for (auto const& sample : batch) {
+            matjson::Value packet;
+            packet["protocolVersion"] = kProtocolVersion;
+            packet["matchId"] = m_publishMatchId; packet["roundNumber"] = m_publishRound;
+            if (m_publishDeathmatch > 0) packet["deathmatchSequence"] = m_publishDeathmatch;
+            packet["attemptId"] = m_publishAttemptId;
+            packet["generation"] = static_cast<std::int64_t>(m_publishGeneration);
+            packet["sequence"] = sample.sequence; packet["elapsedMs"] = sample.elapsedMs;
+            packet["keyframe"] = encodeSpectatorPose(sample.pose);
+            packets.push(packet);
+        }
+        m_publishBatchBody = matjson::Value(); m_publishBatchBody["packets"] = packets;
+        m_publishBatchLastSequence = batch.back().sequence;
     }
-    body["attemptId"] = m_publishAttemptId;
-    body["generation"] = static_cast<std::int64_t>(m_publishGeneration);
-    body["sequence"] = static_cast<std::int64_t>(m_publishSequence);
-    body["elapsedMs"] = static_cast<std::int64_t>(std::max<std::int64_t>(0, elapsedMs));
-    body["keyframe"] = encodeSpectatorPose(pose);
-
-    auto request = spectatorRequest(
-        ranked.spectatorLiveSessionToken(),
-        ranked.spectatorLiveMatchToken()
-    );
-    request.bodyJSON(body);
+    auto request = spectatorRequest(session, token); request.bodyJSON(m_publishBatchBody);
     auto const requestGeneration = ++m_publishRequestGeneration;
-    auto const matchId = m_publishMatchId;
-    auto const attemptId = m_publishAttemptId;
-    auto const sequence = m_publishSequence;
+    auto const matchId = m_publishMatchId, attemptId = m_publishAttemptId;
+    auto const lastSequence = m_publishBatchLastSequence;
     m_publishBusy = true;
     m_publishRequest.spawn(
         request.post(endpoint("/api/ranked/matches/" + matchId + "/spectator-live/publish")),
-        [this, requestGeneration, matchId, attemptId, sequence](web::WebResponse response) {
-            if (
-                requestGeneration != m_publishRequestGeneration ||
-                matchId != m_publishMatchId || attemptId != m_publishAttemptId
-            ) return;
+        [this, requestGeneration, matchId, attemptId, lastSequence](web::WebResponse response) {
+            if (requestGeneration != m_publishRequestGeneration || matchId != m_publishMatchId ||
+                attemptId != m_publishAttemptId) return;
             m_publishBusy = false;
-            m_nextPublishAt = std::chrono::steady_clock::now() + kPublishInterval;
             if (successful(response)) {
-                if (sequence == m_publishSequence) ++m_publishSequence;
+                m_publishQueue.acknowledge(lastSequence);
+                m_publishBatchBody = {}; m_publishBatchLastSequence = -1;
+                m_nextPublishAt = std::chrono::steady_clock::now(); // no extra ACK-bound 50ms wait
                 return;
             }
+            m_nextPublishAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(100);
             if (response.code() == 409) {
-                ++m_publishGeneration;
-                if (m_publishGeneration == 0) m_publishGeneration = 1;
-                m_publishSequence = 0;
-                m_publishStartedAt = std::chrono::steady_clock::now();
-                m_nextPublishAt = m_publishStartedAt;
+                ++m_publishGeneration; if (!m_publishGeneration) m_publishGeneration = 1;
+                m_publishQueue = {}; m_publishBatchBody = {}; m_publishBatchLastSequence = -1;
+                m_publishSequence = 0; m_publishStartedAt = std::chrono::steady_clock::now();
+                m_publisherPausedMs = 0;
+                if (m_publisherPaused) m_publisherPausedAt = m_publishStartedAt;
+                if (m_terminalPending) {
+                    m_terminalBody["generation"] = static_cast<std::int64_t>(m_publishGeneration);
+                    m_terminalBody["sequence"] = 0;
+                }
                 log::debug("Restarting spectator relay generation after HTTP 409");
             }
+            // Network failures retry the exact batch, including native snap
+            // evidence and capture timestamps. Capture can continue meanwhile.
         }
     );
 }
@@ -332,7 +360,7 @@ void SpectatorLiveRuntime::tickViewer() {
     auto const& match = view.match;
     bool eligible =
         view.stage == RuntimeStage::Matched && !ranked.isPlacement() &&
-        ranked.isSpectating() && !match.matchId.empty() &&
+        ranked.isSpectating() && match.spectatorLiveEnabled && !match.matchId.empty() &&
         !ranked.spectatorLiveSessionToken().empty() && !ranked.spectatorLiveMatchToken().empty();
     auto matchId = match.matchId;
     auto contextKey = viewerContextKey(match);
@@ -362,7 +390,7 @@ void SpectatorLiveRuntime::tickViewer() {
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
     terminalHeld = !m_debugContextId.empty() && m_lastAcceptedPose && (m_lastAcceptedPose->dead || m_lastAcceptedPose->finished);
 #endif
-    if (!terminalHeld && (
+    if (!terminalHeld && !m_viewOpponentPaused && (
         m_status == SpectatorLiveStatus::Live && m_lastPacketAt.time_since_epoch().count() != 0 &&
         now - m_lastPacketAt > kPacketTimeout
     )) {
@@ -465,6 +493,11 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
         setFallback("UNSUPPORTED_PROTOCOL_VERSION");
         return;
     }
+    auto const paused = root["paused"].asBool().unwrapOr(false);
+    if (m_viewOpponentPaused && !paused) m_lastPacketAt = std::chrono::steady_clock::now();
+    m_viewOpponentPaused = paused;
+    m_sampleBuffer.setSourcePaused(paused, std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now().time_since_epoch()).count());
     if (root["fallback"].asBool().unwrapOr(false)) {
         setFallback(root["reason"].asString().unwrapOr("SERVER_FALLBACK"));
         return;
@@ -549,6 +582,8 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
     }
     auto const responseNow = std::chrono::steady_clock::now();
     auto const presentationNowMs = std::chrono::duration<double, std::milli>(responseNow.time_since_epoch()).count();
+    // A reset clears buffer-local state, including its pause flag.
+    m_sampleBuffer.setSourcePaused(paused, presentationNowMs);
     m_sampleBuffer.noteResponse(presentationNowMs, m_lastViewerRttMs, m_viewerPollGapMs, packets.unwrap().size());
     int appliedPackets = 0;
     std::int64_t publisherElapsedMs = 0;

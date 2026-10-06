@@ -21,6 +21,17 @@ public:
     static constexpr std::size_t kMaxSamples = 64;
     static constexpr double kMaxSpanMs = 2000;
     static constexpr double kMinDelayMs = 100, kMaxDelayMs = 350;
+    void setSourcePaused(bool paused, double nowMs) {
+        if (!std::isfinite(nowMs)) return;
+        if (paused != m_sourcePaused) {
+            m_lastRenderWallMs = nowMs;
+            // Resume with the measured headroom, rather than advancing through
+            // wall-clock pause time or counting an intentional pause as loss.
+            if (!paused) m_running = false;
+            m_starved = false; m_starvedSinceMs = 0;
+        }
+        m_sourcePaused = paused;
+    }
 
     void noteResponse(double nowMs, double rttMs, double pollGapMs, std::size_t packets) {
         if (!std::isfinite(nowMs)) return;
@@ -72,14 +83,14 @@ public:
         if (m_terminalRendered) return m_samples.back();
         auto const latest = m_samples.back().publisherElapsedMs;
         auto const terminal = m_samples.back().pose.dead || m_samples.back().pose.finished;
-        if (!m_running && (latest - m_renderMs >= m_delayMs || terminal)) {
+        if (!m_running && (latest - m_renderMs >= m_delayMs || terminal || m_sourcePaused)) {
             // First pose is visible immediately. Warm-up never skips its early
             // movement; after warm-up the publisher clock advances at 1x.
             m_running = true; m_starved = false; m_starvedSinceMs = 0;
         } else if (m_running) {
             auto const wanted = m_renderMs + delta;
             m_renderMs = std::min(wanted, latest);
-            if (wanted > latest + 0.001 && !terminal) {
+            if (wanted > latest + 0.001 && !terminal && !m_sourcePaused) {
                 if (!m_starved) { ++m_starvations; m_starvedSinceMs = nowMs; }
                 m_starved = true;
                 if (nowMs - m_starvedSinceMs >= 250) m_running = false;
@@ -91,7 +102,7 @@ public:
         auto result = m_samples.front();
         result.publisherElapsedMs = m_renderMs;
         // prune() switches ALL fields atomically at the destination timestamp.
-        // Until then hold the preceding pose/camera; never sweep B -> snap C.
+        // Until then stay in the source segment; never sweep B -> snap C.
         if (m_samples.size() > 1 && m_samples[0].segment == m_samples[1].segment) {
             auto const& older = m_samples[0]; auto const& newer = m_samples[1];
             auto const interval = newer.publisherElapsedMs - older.publisherElapsedMs;
@@ -107,6 +118,24 @@ public:
                 result.pose.camera = SpectatorCameraOrigin{lerp(older.pose.camera->x, newer.pose.camera->x),
                     lerp(older.pose.camera->y, newer.pose.camera->y)};
             }
+        } else if (m_samples.size() > 1 && m_samples[1].pose.discontinuity) {
+            // A native event proves its source as well as its destination. Move
+            // continuously TO that source, never THROUGH the teleport. Holding
+            // the whole preceding pose used to stop horizontal Spider travel
+            // at every click even with a healthy presentation buffer.
+            auto const& older = m_samples[0]; auto const& newer = m_samples[1];
+            auto const& snap = *newer.pose.discontinuity;
+            auto const interval = newer.publisherElapsedMs - older.publisherElapsedMs;
+            auto const t = interval > 0 ? std::clamp((m_renderMs - older.publisherElapsedMs) / interval, 0.0, 1.0) : 0.0;
+            result.pose.x = static_cast<float>(older.pose.x + (snap.fromX - older.pose.x) * t);
+            result.pose.y = static_cast<float>(older.pose.y + (snap.fromY - older.pose.y) * t);
+            if (older.pose.camera && snap.fromCamera && validSpectatorCamera(*snap.fromCamera)) {
+                result.pose.camera = SpectatorCameraOrigin {
+                    static_cast<float>(older.pose.camera->x + (snap.fromCamera->x - older.pose.camera->x) * t),
+                    static_cast<float>(older.pose.camera->y + (snap.fromCamera->y - older.pose.camera->y) * t)};
+            }
+            // Rotation, gravity, mode and camera remain in the source segment;
+            // prune() applies the entire destination atomically at its timestamp.
         }
         if ((result.pose.dead || result.pose.finished) && m_renderMs >= latest) m_terminalRendered = true;
         return result;
@@ -115,6 +144,7 @@ public:
     void clear() {
         m_samples.clear(); m_renderMs = 0; m_lastRenderWallMs = 0;
         m_segment = 0;
+        m_sourcePaused = false;
         m_running = m_wallSet = m_starved = m_terminalRendered = false; m_starvedSinceMs = 0;
     }
     void reset() { *this = SpectatorInterpolationBuffer{}; }
@@ -143,5 +173,6 @@ private:
     std::uint64_t m_responses = 0, m_packets = 0, m_arrivalCount = 0, m_starvations = 0;
     std::uint64_t m_segment = 0;
     bool m_running = false, m_wallSet = false, m_starved = false, m_terminalRendered = false;
+    bool m_sourcePaused = false;
 };
 } // namespace corum::ranked

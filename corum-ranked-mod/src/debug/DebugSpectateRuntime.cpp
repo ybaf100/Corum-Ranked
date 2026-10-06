@@ -35,6 +35,31 @@ void installPump() {
 }
 namespace corum::ranked::debug {
 DebugSpectateRuntime& DebugSpectateRuntime::get() { static auto* value = new DebugSpectateRuntime; return *value; }
+void DebugSpectateRuntime::refreshLiveSetting() {
+    if (m_settingBusy) return;
+    auto http = request();
+    http.header("Authorization", "Bearer " + RankedRuntime::get().spectatorLiveSessionToken());
+    m_settingBusy = true;
+    m_settingRequest.spawn(http.get(endpoint("live-setting")), [this](web::WebResponse response) {
+        m_settingBusy = false;
+        if (!success(response)) { m_status = "LIVE SETTING UNAVAILABLE / SERVER DEBUG DISABLED"; return; }
+        m_liveEnabled = response.json().unwrapOr(matjson::Value())["liveEnabled"].asBool().unwrapOr(true);
+    });
+}
+void DebugSpectateRuntime::toggleLiveSetting(std::string password) {
+    if (m_settingBusy || !m_liveEnabled) return;
+    matjson::Value body; body["password"] = password; body["liveEnabled"] = !*m_liveEnabled;
+    body["levelId"] = kDebugSpectateLevelId; body["formatVersion"] = kDebugSpectateFormatVersion;
+    std::fill(password.begin(), password.end(), '\0');
+    auto http = request(); http.header("Authorization", "Bearer " + RankedRuntime::get().spectatorLiveSessionToken()); http.bodyJSON(body);
+    m_settingBusy = true;
+    m_settingRequest.spawn(http.post(endpoint("live-setting")), [this](web::WebResponse response) {
+        m_settingBusy = false;
+        if (!success(response)) { m_status = "LIVE SETTING CHANGE FAILED - CHECK SERVER PASSWORD"; return; }
+        m_liveEnabled = response.json().unwrapOr(matjson::Value())["liveEnabled"].asBool().unwrapOr(true);
+        m_status = *m_liveEnabled ? "LIVE SPECTATOR ENABLED FOR ALL MATCHES" : "LIVE SPECTATOR DISABLED - PERCENTAGE WAIT SCREEN";
+    });
+}
 void DebugSpectateRuntime::start(bool playback, std::string password) {
     auto& ranked = RankedRuntime::get();
     if (m_mode != DebugSpectateMode::None || m_busy || ranked.view().stage != RuntimeStage::Ready ||
