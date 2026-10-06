@@ -129,6 +129,9 @@ int main(){
    close(p->getPosition().x,f.pose->x);close(p->getPosition().y,f.pose->y);
    assert(!p->isVisible() && p->m_isUpsideDown==f.pose->upsideDown);
    assert(p->m_isSpider==(f.pose->mode==SpectatorGameMode::Spider));
+   [[maybe_unused]] auto const ownedHistory=p->m_playerFollowFloats;
+   [[maybe_unused]] auto const ownedIndex=p->m_followRelated;
+   [[maybe_unused]] auto const ownedAccumulator=p->m_unk838;
    *spiderReady=p->m_isSpider && p->m_isUpsideDown;
    *follow=float(p->m_positionX);
    // Synthetic position-trigger crossing including a Follow Player target and background.
@@ -139,12 +142,22 @@ int main(){
    p->updateSpecial(dt); // native helper cannot double-write driver follow history
 #endif
    // Windows updateSpecial is inline in its blocked physics caller; no detour.
-   p->setVisible(true);assert(!p->isVisible());
+   p->setVisible(true);
+#if defined(CORUM_CRASH_DIAG_WORLD_OWNED_PRESENTATION)
+   assert(p->isVisible()); // no global setter hook; hide before scene traversal
+#else
+   assert(!p->isVisible());
+#endif
    // A native portal may mutate flags. Position writes cannot win over the scoped frame.
    p->setPosition({9999,9999});p->setRotation(123);
    close(p->getPosition().x,f.pose->x);close(p->getRotation(),f.pose->rotation);
    p->m_isSpider=false;p->m_isUpsideDown=false;
    b->updateCamera(dt);b->updateCamera(dt);
+   assert(!p->isVisible());
+#if defined(CORUM_CRASH_DIAG_WORLD_OWNED_PRESENTATION)
+   assert(p->m_followRelated==ownedIndex && p->m_unk838==ownedAccumulator);
+   assert(p->m_playerFollowFloats==ownedHistory); // no native dt double-write
+#endif
    close(p->getPosition().x,f.pose->x);assert(p->m_isSpider==(f.pose->mode==SpectatorGameMode::Spider));
    p->m_isSpider=false;p->m_isUpsideDown=false; // a later native write is reconciled after world
   };
@@ -252,9 +265,13 @@ int main(){
 }
 `;
         writeFileSync(join(dir,'test.cpp'),cpp);
-        for(const config of [{debug:false,windows:false},{debug:true,windows:false},{debug:true,windows:true}]){
+        for(const config of [{debug:false,windows:false},{debug:true,windows:false},{debug:true,windows:true},
+            {debug:false,windows:false,candidate:true},{debug:true,windows:false,candidate:true},
+            {debug:true,windows:true,candidate:true}]){
             const binary=join(dir,'test');
-            execFileSync('g++',['-std=c++23','-Wall','-Wextra','-Wpedantic','-Werror',...(config.debug?['-DCORUM_RANKED_DEBUG_SPECTATE=1']:[]),...(config.windows?['-DGEODE_IS_WINDOWS=1']:[]),'-I',dir,
+            execFileSync('g++',['-std=c++23','-Wall','-Wextra','-Wpedantic','-Werror',...(config.debug?['-DCORUM_RANKED_DEBUG_SPECTATE=1']:[]),...(config.windows?['-DGEODE_IS_WINDOWS=1']:[]),
+                ...(config.candidate?['-DCORUM_CRASH_DIAG_WORLD_OWNED_PRESENTATION=1',
+                    '-DCORUM_CRASH_DIAG_NO_PLAYER_SET_VISIBLE_HOOK=1','-DCORUM_CRASH_DIAG_NO_PLAYER_UPDATE_SPECIAL_HOOK=1']:[]),'-I',dir,
                 join(root,'src/spectator/CorumRemotePlayer.cpp'),join(root,'src/spectator/CorumSpectatorCamera.cpp'),join(root,'src/spectator/SpectatorWorldDriver.cpp'),join(root,'src/spectator/SpectatorPlayerCapture.cpp'),join(dir,'test.cpp'),'-o',binary],{stdio:'pipe'});
             assert.match(execFileSync(binary,{encoding:'utf8'}),/60-120-240Hz passed/);
         }

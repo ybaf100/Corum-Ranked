@@ -47,6 +47,9 @@ bool SpectatorWorldDriver::apply(PlayLayer* layer, bool authorizedDummy,
             m_player->updateSpecial(0.01f);
         }
         m_followRemainderMs = std::max(0.0, m_followRemainderMs - steps * 10);
+#if defined(CORUM_CRASH_DIAG_WORLD_OWNED_PRESENTATION)
+        snapshotFollowHistory();
+#endif
         write(layer, false);
     }
     return true;
@@ -80,12 +83,42 @@ void SpectatorWorldDriver::write(PlayLayer* layer, bool resetHistory) {
         m_player->m_playerFollowFloats.assign(200, pose.y);
         m_player->m_followRelated = 0; m_player->m_unk838 = 0;
         m_followRemainderMs = 0;
+#if defined(CORUM_CRASH_DIAG_WORLD_OWNED_PRESENTATION)
+        snapshotFollowHistory();
+#endif
     }
+#if defined(CORUM_CRASH_DIAG_WORLD_OWNED_PRESENTATION)
+    else restoreFollowHistory();
+#endif
     m_player->setVisible(false);
 }
+
+#if defined(CORUM_CRASH_DIAG_WORLD_OWNED_PRESENTATION)
+void SpectatorWorldDriver::snapshotFollowHistory() {
+    if (!m_player || m_player->m_playerFollowFloats.size() != m_followHistory.size()) return;
+    std::copy_n(m_player->m_playerFollowFloats.begin(), m_followHistory.size(), m_followHistory.begin());
+    m_followIndex = m_player->m_followRelated;
+    m_followAccumulator = m_player->m_unk838;
+    m_hasFollowHistory = true;
+}
+
+void SpectatorWorldDriver::restoreFollowHistory() {
+    if (!m_player || !m_hasFollowHistory) return;
+    // Only the exact owned dummy. Native frame/sub-step observations may write
+    // its sampler, but cannot advance the publisher-time Follow-Y history.
+    if (m_player->m_playerFollowFloats.size() != m_followHistory.size())
+        m_player->m_playerFollowFloats.assign(m_followHistory.begin(), m_followHistory.end());
+    else std::copy(m_followHistory.begin(), m_followHistory.end(), m_player->m_playerFollowFloats.begin());
+    m_player->m_followRelated = m_followIndex;
+    m_player->m_unk838 = m_followAccumulator;
+}
+#endif
 
 void SpectatorWorldDriver::reconcile(PlayLayer* layer) { write(layer, false); }
 void SpectatorWorldDriver::reset() {
     m_player = nullptr; m_frame.reset(); m_previous.reset(); m_followRemainderMs = 0;
+#if defined(CORUM_CRASH_DIAG_WORLD_OWNED_PRESENTATION)
+    m_hasFollowHistory = false; m_followIndex = 0; m_followAccumulator = 0;
+#endif
 }
 } // namespace corum::ranked

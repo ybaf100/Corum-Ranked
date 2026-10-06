@@ -57,6 +57,24 @@ UUID/offsets and Clear-specific PlayLayer/EndLevelLayer frames using
 [the report comparison table](IOS-PRACTICE-CRASH-AUDIT.md#stage-1-device-results-authoritative-user-evidence).
 Do not equate it with Repro A or the earlier Placement saveNewScore SIGSEGV.
 
+## Stage 2 visible/special result and current work
+
+The user subsequently confirmed on device:
+
+| Stage 2 artifact | User device result |
+|---|---|
+| stage2-player-visible-special-only | **CRASH** |
+| stage2-player-transform-setters-only | **NO CRASH** |
+
+Both exclude A and the legacy cohort. This narrows the strongest reproduction subset
+to setVisible/updateSpecial. The two individual outcomes, full-B complements and
+exact runtime mechanism are still unconfirmed. Do not infer results for the other
+Stage 2 packages or treat subset-only NO CRASH as exoneration under full B.
+
+[Stage 3 singles, full-B complements and the concrete world-owned fix candidate](IOS-PRACTICE-CRASH-VISIBLE-SPECIAL.md).
+The candidate is opt-in on this diagnostic branch; production main and default beta.30
+remain unchanged until device Practice and spectator acceptance.
+
 ## Stage 2 compiled-out comparisons
 
 All eight comparison artifacts use Debug ON and exclude A/native probes. C, D, E,

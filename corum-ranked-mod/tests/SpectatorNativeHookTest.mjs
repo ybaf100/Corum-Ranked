@@ -238,6 +238,13 @@ int main() {
         writeFileSync(file, cpp);
         execFileSync('g++', ['-std=c++23', '-Wall', '-Wextra', '-Wpedantic', '-Werror', file, '-o', binary], { stdio: 'pipe' });
         execFileSync(binary, [], { stdio: 'pipe' });
+        // The candidate removes visibility/helper detours, while every actual
+        // death/result/score firewall callback above remains unchanged.
+        execFileSync('g++', ['-std=c++23', '-Wall', '-Wextra', '-Wpedantic', '-Werror',
+            '-DCORUM_RANKED_DEBUG_SPECTATE=1', '-DCORUM_CRASH_DIAG_WORLD_OWNED_PRESENTATION=1',
+            '-DCORUM_CRASH_DIAG_NO_PLAYER_SET_VISIBLE_HOOK=1', '-DCORUM_CRASH_DIAG_NO_PLAYER_UPDATE_SPECIAL_HOOK=1',
+            file, '-o', binary], { stdio: 'pipe' });
+        execFileSync(binary, [], { stdio: 'pipe' });
         execFileSync('g++', ['-std=c++23', '-Wall', '-Wextra', '-Wpedantic', '-Werror',
             '-DCORUM_RANKED_DEBUG_SPECTATE=1', file, '-o', binary], { stdio: 'pipe' });
         execFileSync(binary, [], { stdio: 'pipe' });

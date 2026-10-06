@@ -7,6 +7,9 @@
 using namespace geode::prelude;
 
 $on_mod(Loaded) {
+#if defined(CORUM_CRASH_DIAG_WORLD_OWNED_PRESENTATION)
+    log::info("[CorumCrashDiag] world-owned-presentation=true visible/special-detours=absent device-acceptance=pending");
+#endif
     auto const hooks = Mod::get()->getHooks();
     std::set<std::string_view> classes;
     std::set<std::uintptr_t> targets;

@@ -613,7 +613,17 @@ public:
     }
 
     void reconcileSpectatorWorldDriver() {
+#if defined(CORUM_CRASH_DIAG_WORLD_OWNED_PRESENTATION)
+        if (spectatorCameraActive()) {
+            // The existing world/camera boundaries run before scene traversal.
+            // Hide even while waiting for the first remote frame; no global
+            // visibility detour or ordinary-Practice mutation is needed.
+            if (m_player1) m_player1->setVisible(false);
+            m_fields->spectatorWorldDriver.reconcile(this);
+        }
+#else
         if (spectatorCameraActive()) m_fields->spectatorWorldDriver.reconcile(this);
+#endif
     }
 
     void logSpectatorWorldDriver() {
@@ -808,6 +818,9 @@ public:
         syncSpectatorLocalSafety();
         ScopedPersistenceOwner persistence(this);
         PlayLayer::postUpdate(dt);
+#if defined(CORUM_CRASH_DIAG_WORLD_OWNED_PRESENTATION)
+        reconcileSpectatorWorldDriver();
+#endif
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         if (m_fields->debugRecordScene) {
             if (m_fields->debugSpectateHud) m_fields->debugSpectateHud->setString(corum::ranked::debug::DebugSpectateRuntime::get().status().c_str());

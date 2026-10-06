@@ -243,3 +243,34 @@ seven iOS B detours. Default runtime body/Fields hashes remain the beta.30 snaps
 Stage 2 device outcomes and actual startup registry logs have not been received.
 Build success is not an iPad crash resolution. No main merge, beta.31 or protocol/gate
 change is made. The assistant has not performed device gameplay.
+
+## Stage 2 narrowed subset: visible/special
+
+The user confirmed visible-special-only CRASH and transform-setters-only NO CRASH.
+A and legacy B hooks are absent from both. The strongest known crashing subset now
+consists of setVisible and updateSpecial, without an individual culprit or allocator
+mechanism proven. The Clear transition report remains a separate unconfirmed signature.
+
+The pinned GD 2.2081 binding blob
+`a2dff8330b809535f643a550fd70d88945b2d792` at bindings commit
+`d641858f3e1cd2c6d86013c799f224ebdb8ec1cd` was read and SHA-verified. It declares:
+
+- virtual void PlayerObject::setVisible(bool), iOS 0x22e7a8.
+- void PlayerObject::updateSpecial(float), iOS 0x21d6d4; Windows inline.
+
+Corum's signatures/priority targets match; no ABI mismatch was found in the binding
+comparison. The official inline sampler adds dt, advances m_followRelated at 10ms,
+and writes m_obPosition.y into its 200-entry Follow-Y ring. The current Corum helper
+detour guards that sampler and delegates once; the visibility detour guards visible
+writes and delegates once. Ordinary Practice still passes through both installed
+native detours, although safety is inactive. This explains why a spectator-only
+runtime branch cannot remove the suspected hook-runtime interaction; it does not
+prove a specific body corrupts memory or recover the crash's uniqueIndex.
+
+[Stage 3 candidate and device interpretation](IOS-PRACTICE-CRASH-VISIBLE-SPECIAL.md).
+It compiles out both detours and moves hidden visibility plus authoritative Follow-Y
+snapshot/reconcile into existing world/camera/postUpdate boundaries. Native sampler,
+10ms publisher time, Windows inline path and all five other B safety/capture hooks
+remain. No new native hook, private Tulip patch, protocol/gate change or beta.31 is added.
+The exact native consumer ordering and actual iPad behavior still need device checks;
+post-frame history restoration alone does not prove every intra-frame native read.

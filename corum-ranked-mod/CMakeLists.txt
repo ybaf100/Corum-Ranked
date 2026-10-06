@@ -42,6 +42,25 @@ foreach(method IN LISTS CORUM_CRASH_DIAG_PLAYER_METHODS)
     endif()
 endforeach()
 
+# Opt-in candidate on the diagnostic branch. Production beta.30 stays unchanged
+# until fixed-device A/B and spectator regression accept the new ownership path.
+option(CORUM_CRASH_DIAG_WORLD_OWNED_PRESENTATION "Keep hidden visibility/Follow-Y at the spectator world boundary" OFF)
+if (CORUM_CRASH_DIAG_WORLD_OWNED_PRESENTATION)
+    if (NOT CORUM_CRASH_DIAG OR NOT CORUM_CRASH_DIAG_NO_PLAYER_SET_VISIBLE_HOOK OR NOT CORUM_CRASH_DIAG_NO_PLAYER_UPDATE_SPECIAL_HOOK)
+        message(FATAL_ERROR "World-owned candidate requires diagnostic mode and both visible/special detours compiled out")
+    endif()
+    foreach(group PLAYER WORLD PERSISTENCE GAMEPLAY)
+        if (CORUM_CRASH_DIAG_NO_${group}_HOOKS)
+            message(FATAL_ERROR "World-owned candidate must retain ${group} safety/ownership hooks")
+        endif()
+    endforeach()
+    foreach(method UPDATE UPDATE_ROTATION SPIDER_TEST_JUMP SET_POSITION SET_ROTATION)
+        if (CORUM_CRASH_DIAG_NO_PLAYER_${method}_HOOK)
+            message(FATAL_ERROR "World-owned candidate must retain PlayerObject ${method}")
+        endif()
+    endforeach()
+endif()
+
 file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS src/*.cpp)
 # Debug Bot Match, including Force Win/Lose, is a development tool and must not
 # be linked into official packages. Add its implementation files only when the
@@ -62,6 +81,9 @@ endif()
 add_library(${PROJECT_NAME} SHARED ${SOURCES})
 
 if (CORUM_CRASH_DIAG)
+    if (CORUM_CRASH_DIAG_WORLD_OWNED_PRESENTATION)
+        target_compile_definitions(${PROJECT_NAME} PRIVATE CORUM_CRASH_DIAG_WORLD_OWNED_PRESENTATION=1)
+    endif()
     target_compile_definitions(${PROJECT_NAME} PRIVATE
         CORUM_CRASH_DIAG=1 CORUM_CRASH_DIAG_VARIANT="${CORUM_CRASH_DIAG_VARIANT}")
     foreach(group PROBES PLAYER WORLD PERSISTENCE GAMEPLAY)

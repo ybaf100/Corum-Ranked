@@ -1,0 +1,227 @@
+{
+  "baseline": "58d643d21734243e2f3a45e3006d27f178cad83e",
+  "diagnosticStart": "e24bbe199d05912b7de5b99e04b653cd3970cc2b",
+  "version": "v0.5.0-beta.30",
+  "protocolVersion": 2,
+  "debugRecordingFormatVersion": 2,
+  "playerHooks": [
+    {
+      "function": "update",
+      "exclusionOption": "CORUM_CRASH_DIAG_NO_PLAYER_UPDATE_HOOK",
+      "cohort": "legacy",
+      "iosBinding": "0x2196c8"
+    },
+    {
+      "function": "updateRotation",
+      "exclusionOption": "CORUM_CRASH_DIAG_NO_PLAYER_UPDATE_ROTATION_HOOK",
+      "cohort": "legacy",
+      "iosBinding": "0x2242b0"
+    },
+    {
+      "function": "spiderTestJump",
+      "exclusionOption": "CORUM_CRASH_DIAG_NO_PLAYER_SPIDER_TEST_JUMP_HOOK",
+      "cohort": "legacy",
+      "iosBinding": "0x21e058"
+    },
+    {
+      "function": "setPosition",
+      "exclusionOption": "CORUM_CRASH_DIAG_NO_PLAYER_SET_POSITION_HOOK",
+      "cohort": "beta29",
+      "iosBinding": "0x22b6d0"
+    },
+    {
+      "function": "setRotation",
+      "exclusionOption": "CORUM_CRASH_DIAG_NO_PLAYER_SET_ROTATION_HOOK",
+      "cohort": "beta29",
+      "iosBinding": "0x22e72c"
+    },
+    {
+      "function": "setVisible",
+      "exclusionOption": "CORUM_CRASH_DIAG_NO_PLAYER_SET_VISIBLE_HOOK",
+      "cohort": "beta29",
+      "iosBinding": "0x22e7a8"
+    },
+    {
+      "function": "updateSpecial",
+      "exclusionOption": "CORUM_CRASH_DIAG_NO_PLAYER_UPDATE_SPECIAL_HOOK",
+      "cohort": "beta29",
+      "iosBinding": "0x21d6d4"
+    }
+  ],
+  "variants": [
+    {
+      "variant": "stage3-visible-special-control",
+      "debug": "ON",
+      "diagnostic": "ON",
+      "exclusions": [
+        "CORUM_CRASH_DIAG_NO_PROBES_HOOKS",
+        "CORUM_CRASH_DIAG_NO_PLAYER_UPDATE_HOOK",
+        "CORUM_CRASH_DIAG_NO_PLAYER_UPDATE_ROTATION_HOOK",
+        "CORUM_CRASH_DIAG_NO_PLAYER_SPIDER_TEST_JUMP_HOOK",
+        "CORUM_CRASH_DIAG_NO_PLAYER_SET_POSITION_HOOK",
+        "CORUM_CRASH_DIAG_NO_PLAYER_SET_ROTATION_HOOK"
+      ],
+      "enabledPlayerHooks": [
+        "setVisible",
+        "updateSpecial"
+      ],
+      "worldOwnedPresentation": false
+    },
+    {
+      "variant": "stage3-player-visible-only",
+      "debug": "ON",
+      "diagnostic": "ON",
+      "exclusions": [
+        "CORUM_CRASH_DIAG_NO_PROBES_HOOKS",
+        "CORUM_CRASH_DIAG_NO_PLAYER_UPDATE_HOOK",
+        "CORUM_CRASH_DIAG_NO_PLAYER_UPDATE_ROTATION_HOOK",
+        "CORUM_CRASH_DIAG_NO_PLAYER_SPIDER_TEST_JUMP_HOOK",
+        "CORUM_CRASH_DIAG_NO_PLAYER_SET_POSITION_HOOK",
+        "CORUM_CRASH_DIAG_NO_PLAYER_SET_ROTATION_HOOK",
+        "CORUM_CRASH_DIAG_NO_PLAYER_UPDATE_SPECIAL_HOOK"
+      ],
+      "enabledPlayerHooks": [
+        "setVisible"
+      ],
+      "worldOwnedPresentation": false
+    },
+    {
+      "variant": "stage3-player-special-only",
+      "debug": "ON",
+      "diagnostic": "ON",
+      "exclusions": [
+        "CORUM_CRASH_DIAG_NO_PROBES_HOOKS",
+        "CORUM_CRASH_DIAG_NO_PLAYER_UPDATE_HOOK",
+        "CORUM_CRASH_DIAG_NO_PLAYER_UPDATE_ROTATION_HOOK",
+        "CORUM_CRASH_DIAG_NO_PLAYER_SPIDER_TEST_JUMP_HOOK",
+        "CORUM_CRASH_DIAG_NO_PLAYER_SET_POSITION_HOOK",
+        "CORUM_CRASH_DIAG_NO_PLAYER_SET_ROTATION_HOOK",
+        "CORUM_CRASH_DIAG_NO_PLAYER_SET_VISIBLE_HOOK"
+      ],
+      "enabledPlayerHooks": [
+        "updateSpecial"
+      ],
+      "worldOwnedPresentation": false
+    },
+    {
+      "variant": "stage3-full-minus-visible",
+      "debug": "ON",
+      "diagnostic": "ON",
+      "exclusions": [
+        "CORUM_CRASH_DIAG_NO_PROBES_HOOKS",
+        "CORUM_CRASH_DIAG_NO_PLAYER_SET_VISIBLE_HOOK"
+      ],
+      "enabledPlayerHooks": [
+        "update",
+        "updateRotation",
+        "spiderTestJump",
+        "setPosition",
+        "setRotation",
+        "updateSpecial"
+      ],
+      "worldOwnedPresentation": false
+    },
+    {
+      "variant": "stage3-full-minus-special",
+      "debug": "ON",
+      "diagnostic": "ON",
+      "exclusions": [
+        "CORUM_CRASH_DIAG_NO_PROBES_HOOKS",
+        "CORUM_CRASH_DIAG_NO_PLAYER_UPDATE_SPECIAL_HOOK"
+      ],
+      "enabledPlayerHooks": [
+        "update",
+        "updateRotation",
+        "spiderTestJump",
+        "setPosition",
+        "setRotation",
+        "setVisible"
+      ],
+      "worldOwnedPresentation": false
+    },
+    {
+      "variant": "stage3-full-minus-visible-special",
+      "debug": "ON",
+      "diagnostic": "ON",
+      "exclusions": [
+        "CORUM_CRASH_DIAG_NO_PROBES_HOOKS",
+        "CORUM_CRASH_DIAG_NO_PLAYER_SET_VISIBLE_HOOK",
+        "CORUM_CRASH_DIAG_NO_PLAYER_UPDATE_SPECIAL_HOOK"
+      ],
+      "enabledPlayerHooks": [
+        "update",
+        "updateRotation",
+        "spiderTestJump",
+        "setPosition",
+        "setRotation"
+      ],
+      "worldOwnedPresentation": false
+    },
+    {
+      "variant": "stage3-fix-candidate-debug",
+      "debug": "ON",
+      "diagnostic": "ON",
+      "exclusions": [
+        "CORUM_CRASH_DIAG_NO_PROBES_HOOKS",
+        "CORUM_CRASH_DIAG_NO_PLAYER_SET_VISIBLE_HOOK",
+        "CORUM_CRASH_DIAG_NO_PLAYER_UPDATE_SPECIAL_HOOK"
+      ],
+      "enabledPlayerHooks": [
+        "update",
+        "updateRotation",
+        "spiderTestJump",
+        "setPosition",
+        "setRotation"
+      ],
+      "worldOwnedPresentation": true
+    },
+    {
+      "variant": "stage3-fix-candidate-off",
+      "debug": "OFF",
+      "diagnostic": "ON",
+      "exclusions": [
+        "CORUM_CRASH_DIAG_NO_PROBES_HOOKS",
+        "CORUM_CRASH_DIAG_NO_PLAYER_SET_VISIBLE_HOOK",
+        "CORUM_CRASH_DIAG_NO_PLAYER_UPDATE_SPECIAL_HOOK"
+      ],
+      "enabledPlayerHooks": [
+        "update",
+        "updateRotation",
+        "spiderTestJump",
+        "setPosition",
+        "setRotation"
+      ],
+      "worldOwnedPresentation": true
+    },
+    {
+      "variant": "compile-check-beta30-debug-on",
+      "debug": "ON",
+      "diagnostic": "OFF",
+      "exclusions": [],
+      "enabledPlayerHooks": [
+        "update",
+        "updateRotation",
+        "spiderTestJump",
+        "setPosition",
+        "setRotation",
+        "setVisible",
+        "updateSpecial"
+      ]
+    },
+    {
+      "variant": "compile-check-beta30-debug-off",
+      "debug": "OFF",
+      "diagnostic": "OFF",
+      "exclusions": [],
+      "enabledPlayerHooks": [
+        "update",
+        "updateRotation",
+        "spiderTestJump",
+        "setPosition",
+        "setRotation",
+        "setVisible",
+        "updateSpecial"
+      ]
+    }
+  ]
+}

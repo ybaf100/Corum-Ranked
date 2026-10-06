@@ -16,6 +16,7 @@ INVENTORY = json.loads((HERE / "hook-inventory-beta30.json").read_text())
 def matrix():
     return {"include": [dict(
         variant=v["variant"], debug=v["debug"], diagnostic=v["diagnostic"],
+        world_owned="ON" if v.get("worldOwnedPresentation", False) else "OFF",
         exclusions=" ".join(f"-D{flag}=ON" for flag in v["exclusions"]),
     ) for v in SELECTION["variants"]]}
 
@@ -38,6 +39,7 @@ def verify_binary(binary, variant):
     assert actual == expected, {"missing": sorted(expected - actual), "unexpected": sorted(actual - expected)}
     diagnostic = b"[CorumCrashDiag]" in binary
     assert diagnostic == (variant["diagnostic"] == "ON"), "diagnostic code default exclusion mismatch"
+    assert (b"world-owned-presentation=true" in binary) == variant.get("worldOwnedPresentation", False), "candidate ownership path mismatch"
     # Thin iOS arm64 Mach-O, matching the Stage 1 build target.
     assert struct.unpack_from("<II", binary) == (0xFEEDFACF, 0x0100000C), "expected iOS arm64 dylib"
     return sorted(actual)
@@ -68,6 +70,7 @@ def verify_package(output, variant):
         "sha256": hashlib.sha256(target.read_bytes()).hexdigest(),
         "compileDefinitions": variant["exclusions"],
         "diagnosticCompiledIn": variant["diagnostic"] == "ON", "debug": variant["debug"],
+        "worldOwnedPresentation": variant.get("worldOwnedPresentation", False),
         "nativeProbesExcluded": "GJBaseGameLayer::checkCollisions" not in markers,
         "enabledPlayerHooks": enabled, "disabledPlayerHooks": disabled,
         "verifiedNativeModifyTargets": markers,
@@ -75,7 +78,8 @@ def verify_package(output, variant):
         "startupRegistryCheck": "require player-registry-match=true and priorityFailures=0 on device"
             if variant["diagnostic"] == "ON" else "not compiled in; production-default compile check",
         "diagnosticOnly": True, "deviceVerified": False,
-        "purpose": "ordinary Practice isolation; excluded safety hooks are unsuitable for Ranked/Spectator",
+        "purpose": "world-owned fix candidate; Practice and spectator acceptance pending" if variant.get("worldOwnedPresentation", False)
+            else "ordinary Practice isolation; excluded safety hooks are unsuitable for Ranked/Spectator",
     }
     (output / "diagnostic-provenance.json").write_text(json.dumps(provenance, indent=2) + "\n")
     print(json.dumps({"variant": variant["variant"], "enabledPlayerHooks": enabled,
@@ -87,7 +91,9 @@ if __name__ == "__main__":
     parser.add_argument("--matrix", action="store_true")
     parser.add_argument("--variant")
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--selection", type=Path, default=HERE / "player-hook-stage2.json")
     args = parser.parse_args()
+    SELECTION = json.loads(args.selection.read_text())
     if args.matrix:
         print("matrix=" + json.dumps(matrix(), separators=(",", ":")))
     else:

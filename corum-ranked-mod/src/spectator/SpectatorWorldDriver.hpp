@@ -1,5 +1,8 @@
 #pragma once
 #include "../domain/SpectatorRemotePolicy.hpp"
+#if defined(CORUM_CRASH_DIAG_WORLD_OWNED_PRESENTATION)
+#include <array>
+#endif
 
 class PlayLayer;
 class PlayerObject;
@@ -34,6 +37,14 @@ public:
     std::optional<SpectatorRemoteFrame> const& frame() const { return m_frame; }
 private:
     void write(PlayLayer* layer, bool resetHistory);
+#if defined(CORUM_CRASH_DIAG_WORLD_OWNED_PRESENTATION)
+    void snapshotFollowHistory();
+    void restoreFollowHistory();
+    std::array<float, 200> m_followHistory{};
+    int m_followIndex = 0;
+    float m_followAccumulator = 0;
+    bool m_hasFollowHistory = false;
+#endif
     PlayerObject* m_player = nullptr;
     std::optional<SpectatorRemoteFrame> m_frame;
     std::optional<SpectatorGhostPose> m_previous;

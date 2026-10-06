@@ -10,6 +10,7 @@ on:
       - 'corum-ranked-mod/mod.json'
       - 'corum-ranked-mod/diagnostics/hook-inventory-beta30.json'
       - 'corum-ranked-mod/diagnostics/player-hook-stage2.json'
+      - 'corum-ranked-mod/diagnostics/player-hook-stage3.json'
       - 'corum-ranked-mod/diagnostics/verify-crash-artifact.py'
       - '.github/workflows/corum-crash-diagnostic.yml'
   workflow_dispatch:
@@ -50,9 +51,11 @@ jobs:
               "corum-ranked-mod/tests/$suite.cpp" -o "/tmp/corum-$suite"
             "/tmp/corum-$suite"
           done
-      - name: Exact Stage 2 selections and production Debug ON/OFF compile controls
+      - name: Exact visible/special selections, fix candidates and production compile controls
         id: matrix
-        run: python3 corum-ranked-mod/diagnostics/verify-crash-artifact.py --matrix >> "$GITHUB_OUTPUT"
+        run: >-
+          python3 corum-ranked-mod/diagnostics/verify-crash-artifact.py --matrix
+          --selection corum-ranked-mod/diagnostics/player-hook-stage3.json >> "$GITHUB_OUTPUT"
 
   ios-diagnostic:
     runs-on: macos-latest
@@ -78,6 +81,7 @@ jobs:
             -DCORUM_RANKED_DEBUG_BOT_MATCH=${{ matrix.debug }}
             -DCORUM_RANKED_DEBUG_SPECTATE=${{ matrix.debug }}
             -DCORUM_CRASH_DIAG=${{ matrix.diagnostic }}
+            -DCORUM_CRASH_DIAG_WORLD_OWNED_PRESENTATION=${{ matrix.world_owned }}
             -DCORUM_CRASH_DIAG_VARIANT=${{ matrix.variant }}
             ${{ matrix.exclusions }}
       - name: Label and verify the diagnostic artifact
@@ -87,7 +91,8 @@ jobs:
         shell: bash
         run: |
           python3 corum-ranked-mod/diagnostics/verify-crash-artifact.py \
-            --variant "$VARIANT" --output "$OUTPUT_DIR"
+            --variant "$VARIANT" --output "$OUTPUT_DIR" \
+            --selection corum-ranked-mod/diagnostics/player-hook-stage3.json
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.variant }}
