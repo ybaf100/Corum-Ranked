@@ -32,12 +32,12 @@ First compare `baseline-debug`, `no-probes`, `official-debug-off`:
 
 | Artifact suffix | Debug harness | Excluded group | Device result |
 |---|---|---|---|
-| baseline-debug | ON | none | pending |
-| no-probes | ON | A: native instrumentation only | pending |
-| official-debug-off | OFF | official Debug code absent | pending |
-| no-probes-player | ON | A + B: native probes + PlayerObject | pending |
-| no-world-persistence | ON | C + D: GJBase world/camera + persistence | pending |
-| no-gameplay | ON | E: PlayLayer + Gameplay UX + EndLevel + app audio hooks | pending |
+| [baseline-debug](https://github.com/ybaf100/Corum-Ranked/actions/runs/37441228999/artifacts/11401586763) | ON | none | pending |
+| [no-probes](https://github.com/ybaf100/Corum-Ranked/actions/runs/37441228999/artifacts/11400754090) | ON | A: native instrumentation only | pending |
+| [official-debug-off](https://github.com/ybaf100/Corum-Ranked/actions/runs/37441228999/artifacts/11401576551) | OFF | official Debug code absent | pending |
+| [no-probes-player](https://github.com/ybaf100/Corum-Ranked/actions/runs/37441228999/artifacts/11401695888) | ON | A + B: native probes + PlayerObject | pending |
+| [no-world-persistence](https://github.com/ybaf100/Corum-Ranked/actions/runs/37441228999/artifacts/11401237624) | ON | C + D: GJBase world/camera + persistence | pending |
+| [no-gameplay](https://github.com/ybaf100/Corum-Ranked/actions/runs/37441228999/artifacts/11401561675) | ON | E: PlayLayer + Gameplay UX + EndLevel + app audio hooks | pending |
 
 If removing A is stable, isolate its individual probe functions next; also compare the
 original beta.30 Debug artifact to the instrumented baseline. If both first controls
@@ -76,3 +76,20 @@ See [hook-inventory-beta30.json](hook-inventory-beta30.json) for each target's G
 iOS binding and pre-beta.29 presence. Exact Geode/Tulip source, ARM64 and ordinary-path
 audit findings are being added separately; allocation, corruption and hook-count
 causation remain unproven until crash originals and device isolation results arrive.
+
+## Completed artifact validation (not device validation)
+
+[CI run 37441228999](https://github.com/ybaf100/Corum-Ranked/actions/runs/37441228999) passed native/source regression plus all six iOS arm64 builds.
+All packages passed mod ID/version/native binary and embedded Corum modify-marker
+exclusion checks. Each artifact contains the labelled .geode plus SHA-256 provenance.
+Artifact code commit: `4c455b89cbdd5982c0016a2e46aa035d76f868c8`; later documentation
+commits do not change those sources.
+
+Local validation: 73 source/native callback tests and 8 strict C++ executable suites
+pass, including Placement final-clear persistence/stale-state, native capture/snap,
+world/camera ownership and spectator safety. These fixtures do not run native GD on iPad.
+No ten-minute ordinary Practice/device A/B exposure has been performed here. Root cause,
+minimal causal hook set and actual device stability remain pending.
+
+See [the full forensic/source audit](IOS-PRACTICE-CRASH-AUDIT.md) for the report comparison
+placeholders, exact released Tulip ARM64 offsets, register caveats and hook audit.
