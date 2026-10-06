@@ -194,6 +194,7 @@ jobs:
       - metadata
       - build
     steps:
+      - uses: actions/checkout@v7
       - uses: geode-sdk/build-geode-mod/combine@main
         id: build
       - name: Normalize and validate combined Debug package
