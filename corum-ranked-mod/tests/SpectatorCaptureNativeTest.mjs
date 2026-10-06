@@ -19,6 +19,7 @@ for(const debugOn of [false,true]) test(`native update/rotation/teleport -> comp
     const capture=readFileSync(join(root,'src/spectator/SpectatorPlayerCapture.cpp'),'utf8').replace(/^#include.*$/gm,'');
     const cpp=`
 #include "${join(root,'src/domain/SpectatorCapturePolicy.hpp')}"
+#include "${join(root,'src/domain/SpectatorNativeProbe.hpp')}"
 #include "${join(root,'src/debug/DebugSpectatePolicy.hpp')}"
 #include "${join(root,'src/spectator/SpectatorPlayerCapture.hpp')}"
 #include <cassert>
@@ -75,11 +76,11 @@ struct DebugSpectateRuntime {
 }
 }
 struct CorumRankedPlayLayer:PlayLayer {
- struct Fields{bool rankedInitialized=false,rankedLevel=true,safetyRetired=false,spectatorMode=false,spectatorPending=false;
+ struct Fields{SpectatorNativeProbe spectatorNativeProbe;bool rankedInitialized=false,rankedLevel=true,safetyRetired=false,spectatorMode=false,spectatorPending=false;
   bool debugRecordScene=false,debugPlaybackScene=false,debugRecordHasFrame=false;SpectatorCapturePolicy spectatorCapture;bool spectatorWorldUpdateInProgress=false;std::optional<unsigned> spectatorCameraFrameNumber;}fields;
  Fields* m_fields=&fields;
  bool prepareSpectatorScene(){return false;}bool spectatorCameraActive(){return false;}bool beginSpectatorWorldFrame(){return false;}
- void reconcileSpectatorWorldDriver(){}void driveSpectatorCamera(){}void logSpectatorNativeCamera(char const*){}void logSpectatorWorldDriver(){}
+ void reconcileSpectatorWorldDriver(){}void driveSpectatorCamera(){}void logSpectatorNativeCamera(char const*){}void logSpectatorWorldDriver(){}void logSpectatorNativeProbe(){}
  bool freezeLocalDummy(PlayerObject*)const{return fields.spectatorMode || fields.debugPlaybackScene;}
  ${owner}
 };

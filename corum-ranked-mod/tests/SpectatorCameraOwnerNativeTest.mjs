@@ -36,6 +36,7 @@ test('actual camera owner hook ends in recorded viewport, drives once, restores 
 #include "${join(root,'src/spectator/ScopedCameraTargetOverride.hpp')}"
 #include "${join(root,'src/domain/SpectatorProgressPolicy.hpp')}"
 #include "${join(root,'src/spectator/SpectatorWorldDriver.hpp')}"
+#include "${join(root, 'src/domain/SpectatorNativeProbe.hpp')}"
 #include <memory>
 #include <iostream>
 using namespace geode::prelude;
@@ -74,6 +75,7 @@ struct CorumRankedPlayLayer: PlayLayer {
         bool spectatorWorldUpdateInProgress=false,spectatorWorldResetInProgress=false;
         corum::ranked::SpectatorWorldDriver spectatorWorldDriver;
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
+        corum::ranked::SpectatorNativeProbe spectatorNativeProbe;
         bool debugPlaybackScene=true,cameraForensicFrame=false;
         int levelId=88350599,cameraForensicFrames=0;std::int64_t cameraForensicSequence=-1;
 #endif
@@ -81,7 +83,7 @@ struct CorumRankedPlayLayer: PlayLayer {
     FieldsAccess<Fields> m_fields;bool watchable=true;
     bool watchableSpectatorScene(){return watchable;}
     bool prepareSpectatorScene(){return spectatorCameraActive();}
-    void sampleSpectatorPresentation(){}void logSpectatorWorldDriver(){}
+    void sampleSpectatorPresentation(){}void logSpectatorWorldDriver(){}void logSpectatorNativeProbe(){}
     ${methods}
     ${hook}
     ${worldHook}

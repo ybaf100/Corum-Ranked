@@ -14,7 +14,7 @@ const method = name => {
     while (depth) { if (source[end] === '{') ++depth; if (source[end] === '}') --depth; ++end; }
     return source.slice(start, end);
 };
-test('actual production publisher sends shared v2 state and terminal capture across in-flight ACK without cadence loss', () => {
+test('actual production publisher remains ordered and ACK-bound at RTT + 50ms, preserving terminal capture', () => {
     const viewer = read('tests/SpectatorLiveViewerNativeTest.mjs');
     const model = viewer.slice(viewer.indexOf('namespace matjson {'), viewer.indexOf('${readFileSync(join(root,'));
     const rankedHeader = read('src/RankedRuntime.hpp');
@@ -24,7 +24,8 @@ test('actual production publisher sends shared v2 state and terminal capture acr
     const fields = header.slice(header.indexOf('    std::string m_publishMatchId;'), header.indexOf('    std::string m_viewMatchId;'));
     const methods = ['void SpectatorLiveRuntime::resetPublisher(', 'void SpectatorLiveRuntime::startPublisherGeneration(',
         'bool SpectatorLiveRuntime::tickPublisher(', 'void SpectatorLiveRuntime::publish(',
-        'void SpectatorLiveRuntime::publishTerminal(', 'void SpectatorLiveRuntime::tickTerminal('].map(method).join('\n');
+        'void SpectatorLiveRuntime::publishTerminal(', 'void SpectatorLiveRuntime::tickTerminal('].map(method).join('\n')
+        .replaceAll('std::chrono::steady_clock::now()', 'testClockNow()');
     const cpp = `
 #include "${join(root, 'src/domain/SpectatorRemotePolicy.hpp')}"
 #include <algorithm>
@@ -51,6 +52,8 @@ namespace geode::async {template<class T> struct TaskHolder {
     void spawn(web::Operation request,std::function<void(T)> callback){web::pending.push_back({request,callback});}
 };}
 namespace corum::ranked {
+auto publishTestClock=std::chrono::steady_clock::time_point(std::chrono::seconds(10));
+auto testClockNow(){return publishTestClock;}
 namespace log {template<class... T> void debug(T...){} }
 enum class RuntimeStage {Ready,Matched};
 struct RankedRuntime {
@@ -113,7 +116,7 @@ int main(){
     pose.finished=true;live.publishTerminal(pose,false);assert(web::pending.size()==4);
     web::pending[3].callback({200});live.tickTerminal();assert(web::pending.size()==5);
     assert(web::pending[4].request.body["deathmatchSequence"].asInt().unwrapOr(0)==2);
-    live.m_terminalDeadline=std::chrono::steady_clock::now()-std::chrono::seconds(1);live.tickTerminal();assert(!live.m_terminalPending);
+    live.m_terminalDeadline=testClockNow()-std::chrono::seconds(1);live.tickTerminal();assert(!live.m_terminalPending);
     ranked.m_attemptId="attempt-3";ranked.placement=true;live.publishTerminal(pose,false);assert(web::pending.size()==5);
     ranked.placement=false;ranked.spectating=true;live.publishTerminal(pose,false);assert(web::pending.size()==5);
     ranked.spectating=false;ranked.m_attemptId.clear();SpectatorLiveRuntime early;
@@ -121,6 +124,18 @@ int main(){
     ranked.m_attemptId="server-issued-early-attempt";early.tickTerminal();assert(web::pending.size()==6);
     assert(web::pending[5].request.body["attemptId"].asString().unwrapOr("")==ranked.m_attemptId);
     assert(web::pending[5].request.body["sequence"].asInt().unwrapOr(-1)==0);
+    // Production is NOT Debug RECORD's independent 50ms capture/batch queue.
+    // Five serialized publish callbacks at RTT 110ms produce 160ms/sample.
+    ranked={};SpectatorLiveRuntime serial;web::pending.clear();pose={100,40,0,false,false};
+    for(int sample=0;sample<5;++sample){
+        assert(serial.tickPublisher(pose,false));assert(web::pending.size()==static_cast<std::size_t>(sample+1));
+        assert(web::pending.back().request.body["sequence"].asInt().unwrapOr(-1)==sample);
+        assert(web::pending.back().request.body["elapsedMs"].asInt().unwrapOr(-1)==sample*160);
+        assert(!serial.tickPublisher(pose,false));
+        publishTestClock+=std::chrono::milliseconds(110);web::pending.back().callback({200});
+        assert(!serial.tickPublisher(pose,false));publishTestClock+=std::chrono::milliseconds(49);
+        assert(!serial.tickPublisher(pose,false));publishTestClock+=std::chrono::milliseconds(1);pose.x+=10;
+    }
 }
 `;
     const dir = mkdtempSync(join(tmpdir(), 'corum-publisher-native-'));

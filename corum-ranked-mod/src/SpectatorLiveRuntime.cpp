@@ -1,4 +1,5 @@
 #include "SpectatorLiveRuntime.hpp"
+#include "domain/SpectatorViewerPollPolicy.hpp"
 #include "RankedRuntime.hpp"
 #include "domain/SpectatorProtocol.hpp"
 #include "spectator/SpectatorPoseCodec.hpp"
@@ -19,8 +20,6 @@ namespace {
 
 constexpr int kProtocolVersion = corum::ranked::kSpectatorProtocolVersion;
 constexpr auto kPublishInterval = std::chrono::milliseconds(corum::ranked::kSpectatorPublishIntervalMs);
-constexpr auto kViewerPollInterval = std::chrono::milliseconds(80);
-constexpr auto kFallbackRepollInterval = std::chrono::milliseconds(150);
 constexpr auto kPacketTimeout = std::chrono::milliseconds(1500);
 constexpr float kPoseDiscontinuityDistance = 400.0f;
 constexpr std::string_view kDefaultRankedServerURL = "https://corum-ranked.onrender.com";
@@ -106,6 +105,7 @@ void SpectatorLiveRuntime::resetPublisher() {
 }
 
 void SpectatorLiveRuntime::resetViewer() {
+    m_viewerPollGapMs = 20;
     ++m_viewRequestGeneration;
     ++m_viewPresentationEpoch;
     if (m_viewPresentationEpoch == 0) ++m_viewPresentationEpoch;
@@ -373,6 +373,7 @@ void SpectatorLiveRuntime::tickViewer() {
 }
 
 void SpectatorLiveRuntime::pollViewer() {
+    if (m_viewBusy) return;
     auto& ranked = RankedRuntime::get();
     auto matchId = ranked.view().match.matchId;
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
@@ -417,10 +418,6 @@ void SpectatorLiveRuntime::pollViewer() {
                 contextKey != currentContextKey
             ) return;
             m_viewBusy = false;
-            m_nextViewerPollAt = std::chrono::steady_clock::now() +
-                (m_status == SpectatorLiveStatus::Fallback
-                    ? kFallbackRepollInterval
-                    : kViewerPollInterval);
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
             if (!m_debugContextId.empty() && (response.code() == 401 || response.code() == 403 || response.code() == 404)) {
                 debug::DebugSpectateRuntime::get().viewerResponse(false, true); return;
@@ -433,6 +430,8 @@ void SpectatorLiveRuntime::pollViewer() {
             if (!successful(response)) {
                 ++m_consecutiveViewerErrors;
                 if (m_consecutiveViewerErrors >= 3) setFallback("NETWORK_ERROR");
+                m_viewerPollGapMs = spectatorViewerPollGapMs(false, true, false, false, 0, 0, 0, m_consecutiveViewerErrors);
+                m_nextViewerPollAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(m_viewerPollGapMs);
                 return;
             }
             m_consecutiveViewerErrors = 0;
@@ -441,6 +440,12 @@ void SpectatorLiveRuntime::pollViewer() {
             ).count();
             auto const root = response.json().unwrapOr(matjson::Value());
             applyViewerResponse(root);
+            m_viewerPollGapMs = spectatorViewerPollGapMs(
+                m_status == SpectatorLiveStatus::Live, m_status == SpectatorLiveStatus::Fallback,
+                m_sampleBuffer.starving(), m_sampleBuffer.terminalRendered(),
+                m_sampleBuffer.latestTimeMs() - m_sampleBuffer.renderTimeMs(),
+                m_sampleBuffer.delayMs(), m_lastViewerRttMs, 0);
+            m_nextViewerPollAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(m_viewerPollGapMs);
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
             if (!m_debugContextId.empty() && m_lastAcceptedPose &&
                 (m_lastAcceptedPose->dead || m_lastAcceptedPose->finished))
@@ -544,7 +549,7 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
     }
     auto const responseNow = std::chrono::steady_clock::now();
     auto const presentationNowMs = std::chrono::duration<double, std::milli>(responseNow.time_since_epoch()).count();
-    m_sampleBuffer.noteResponse(presentationNowMs, m_lastViewerRttMs, kViewerPollInterval.count(), packets.unwrap().size());
+    m_sampleBuffer.noteResponse(presentationNowMs, m_lastViewerRttMs, m_viewerPollGapMs, packets.unwrap().size());
     int appliedPackets = 0;
     std::int64_t publisherElapsedMs = 0;
     float largestCorrection = 0.0f;
@@ -632,7 +637,7 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
             if (snap) {
                 log::info("[SpectatorLive] verified discontinuity type={}",
                     pose.discontinuity ? spectatorDiscontinuityName(pose.discontinuity->type) : "BOUNDED_STATE_TRANSITION");
-                log::info("[SpectatorLive] interpolation history reset for snap");
+                log::debug("[SpectatorLive] timeline snap boundary retained sequence={} elapsedMs={}", sequence, elapsedMs);
             }
         }
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
@@ -671,10 +676,10 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
     if (!m_debugContextId.empty() && responseNow >= m_nextBufferMetricAt) {
         m_nextBufferMetricAt = responseNow + std::chrono::seconds(1);
-        log::info("[DebugSpectate] buffer samples={} span={}ms delay={}ms rtt={}ms arrival={}ms packetsPerResponse={} renderPublisherElapsedMs={} latestPublisherElapsedMs={} starvation={}",
+        log::info("[DebugSpectate] buffer samples={} span={}ms delay={}ms rtt={}ms arrival={}ms packetsPerResponse={} renderPublisherElapsedMs={} latestPublisherElapsedMs={} starvation={} pollGapMs={}",
             m_sampleBuffer.size(), m_sampleBuffer.spanMs(), m_sampleBuffer.delayMs(), m_sampleBuffer.averageRttMs(),
             m_sampleBuffer.averageArrivalMs(), m_sampleBuffer.packetsPerResponse(), m_sampleBuffer.renderTimeMs(),
-            m_sampleBuffer.latestTimeMs(), m_sampleBuffer.starvations());
+            m_sampleBuffer.latestTimeMs(), m_sampleBuffer.starvations(), m_viewerPollGapMs);
     }
 #endif
 }
@@ -722,6 +727,7 @@ std::optional<SpectatorRemoteFrame> SpectatorLiveRuntime::presentationFrame() co
             .sequence = sample ? sample->sequence : m_lastViewSequence,
             .pose = sample ? std::optional(sample->pose) : std::nullopt,
             .publisherElapsedMs = sample ? sample->publisherElapsedMs : 0,
+            .presentationSegment = sample ? sample->segment : 0,
         };
     }
 #endif
@@ -747,6 +753,7 @@ std::optional<SpectatorRemoteFrame> SpectatorLiveRuntime::presentationFrame() co
         .sequence = sample ? sample->sequence : m_lastViewSequence,
         .pose = sample ? std::optional(sample->pose) : std::nullopt,
         .publisherElapsedMs = sample ? sample->publisherElapsedMs : 0,
+        .presentationSegment = sample ? sample->segment : 0,
     };
 }
 

@@ -1054,13 +1054,25 @@ void RankedRuntime::parsePlacementState(matjson::Value const& root) {
         setTransientError("Invalid Placement state response");
         return;
     }
-    observeServerNow(root);
     auto const previousState = m_view.placement.state;
     auto const runId = root["runId"].asString().unwrapOr(m_view.placement.runId);
     if (runId.empty()) {
         setTransientError("Placement Run ID is missing");
         return;
     }
+
+    auto const incomingAttemptId = root["activeAttempt"]["attemptId"].asString().unwrapOr("");
+    auto const incomingVersion = root["stateVersion"].asInt().unwrapOr(0);
+    if (m_acknowledgedPlacementEnds.contains(incomingAttemptId) ||
+        (runId == m_view.placement.runId && incomingVersion < m_view.placement.stateVersion)) {
+        // Ignore the whole stale snapshot, including score/result/timer fields.
+        // A different, genuinely active UUID can still be restored normally.
+        log::debug("Ignoring stale Placement state: run={} attempt={} version={}",
+            runId, incomingAttemptId, incomingVersion);
+        m_nextPollAt = std::chrono::steady_clock::now();
+        return;
+    }
+    observeServerNow(root);
 
     m_view.placement.required = root["state"].asString().unwrapOr("") != "PLACEMENT_RESULT";
     m_view.placement.active = true;
@@ -2930,9 +2942,10 @@ void RankedRuntime::sendAttemptStart() {
 void RankedRuntime::sendAttemptEnd() {
     if (!m_pendingEnd || m_attemptId.empty()) return;
     auto const ending = *m_pendingEnd;
+    auto const endingAttemptId = m_attemptId;
     matjson::Value body;
     body["levelId"] = fmt::format("{}", ending.levelId);
-    body["attemptId"] = m_attemptId;
+    body["attemptId"] = endingAttemptId;
     body["clientEventId"] = ending.eventId;
     body["progressPercent"] = ending.progressPercent;
     body["cleared"] = ending.cleared;
@@ -2953,7 +2966,7 @@ void RankedRuntime::sendAttemptEnd() {
         request.post(endpoint(placement
             ? "/api/ranked/placement/" + m_view.match.matchId + "/attempt/end"
             : "/api/ranked/matches/" + m_view.match.matchId + "/attempt/end")),
-        [this, ending, requestGeneration, placement](web::WebResponse response) {
+        [this, ending, endingAttemptId, requestGeneration, placement](web::WebResponse response) {
             if (requestGeneration != m_attemptRequestGeneration) return;
             m_attemptBusy = false;
             m_attemptRequestStartedAt = {};
@@ -3012,6 +3025,9 @@ void RankedRuntime::sendAttemptEnd() {
                 setTransientError(reason.empty() ? "Attempt end rejected" : reason);
             }
             if (placement) {
+                if (accepted || reason == "ATTEMPT_ALREADY_ENDED") {
+                    m_acknowledgedPlacementEnds.insert(endingAttemptId);
+                }
                 auto const mapScore = root["mapScore"].asDouble();
                 if (mapScore.isOk()) {
                     m_view.placement.currentMapScore = mapScore.unwrap();

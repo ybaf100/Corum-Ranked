@@ -43,7 +43,7 @@ test('destroyPlayer noclip is exact local dummy only; normal vanilla death still
 
 test('99 safety freezes only PlayerObject update, not the PlayLayer or remote world', () => {
     const player = play.slice(play.indexOf('class $modify(CorumRankedSpectatorDummyPlayer'));
-    assert.match(body(player, 'void update(float dt)'), /freezeLocalDummy\(this\)\) return;[\s\S]*PlayerObject::update\(dt\)/);
+    assert.match(body(player, 'void update(float dt)'), /freezeLocalDummy\(this\)\)[\s\S]*return;[\s\S]*PlayerObject::update\(dt\)/);
     assert.match(body(play, 'bool freezeLocalDummy('), /player != m_player1\) return false/);
     assert.match(policy, /progress >= 99\.0/);
     assert.doesNotMatch(body(play, 'bool freezeLocalDummy('), /onQuit\(|pauseGame\(|resetLevel\(/);
@@ -65,7 +65,8 @@ test('New Best and both percentage/record persistence sinks use explicit exact-o
     const exact = body(play, 'bool blocksLevelPersistence(');
     assert.match(exact, /level && level == m_level/);
     assert.doesNotMatch(exact, /m_levelID/);
-    for (const signature of ['void savePercentage(', 'void saveNewScore(']) {
+    assert.doesNotMatch(play, /void saveNewScore\(/);
+    for (const signature of ['void savePercentage(', 'void storeNewLocalScore(']) {
         const save = body(play, signature);
         assert.match(save, /if \(layer && layer->blocksLevelPersistence\(this\)\) return;/);
         assert(save.indexOf('blocksLevelPersistence(this)') < save.indexOf('GJGameLevel::'));

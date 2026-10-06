@@ -61,6 +61,9 @@ struct SpectatorRemoteFrame {
     std::int64_t sequence = -1;
     std::optional<SpectatorGhostPose> pose;
     double publisherElapsedMs = 0;
+    // Client presentation segment; not serialized. Survives skipped render
+    // frames so native crossing history cannot sweep through a snap.
+    std::uint64_t presentationSegment = 0;
 };
 
 inline bool finiteSpectatorPose(SpectatorGhostPose const& pose) {

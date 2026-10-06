@@ -11,6 +11,7 @@
 #include <deque>
 #include <optional>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace corum::ranked {
@@ -531,6 +532,9 @@ private:
     std::string m_sessionToken;
     std::string m_matchToken;
     std::string m_attemptId;
+    // Attempt UUIDs acknowledged closed by Placement End. A concurrent /state
+    // response may predate that ACK even when stateVersion is unchanged.
+    std::unordered_set<std::string> m_acknowledgedPlacementEnds;
     int m_attemptLevelId = 0;
     std::string m_attemptContextKey;
     std::optional<RankedMapView> m_gameplayMap;

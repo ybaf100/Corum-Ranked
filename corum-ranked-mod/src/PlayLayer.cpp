@@ -6,6 +6,7 @@
 #include "spectator/ScopedCameraTargetOverride.hpp"
 #include "spectator/SpectatorPlayerCapture.hpp"
 #include "spectator/SpectatorWorldDriver.hpp"
+#include "domain/SpectatorNativeProbe.hpp"
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
 #include "debug/DebugSpectateRuntime.hpp"
 #include "RankedLevelPreparation.hpp"
@@ -213,6 +214,8 @@ public:
         bool spectatorWorldResetInProgress = false;
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         bool debugRecordScene = false, debugPlaybackScene = false, debugRecordHasFrame = false;
+        corum::ranked::SpectatorNativeProbe spectatorNativeProbe;
+        std::chrono::steady_clock::time_point nextNativeProbeLog {};
         CCLabelBMFont* debugSpectateHud = nullptr;
         int cameraForensicFrames = 0;
         std::int64_t cameraForensicSequence = -1;
@@ -622,6 +625,28 @@ public:
                 snap ? corum::ranked::spectatorDiscontinuityName(pose.discontinuity->type) : "NONE", m_player1->m_followRelated);
         }
         m_fields->worldForensicPose = pose; m_fields->worldForensicSequence = frame->sequence;
+#endif
+    }
+
+    void logSpectatorNativeProbe() {
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+        auto& probe = m_fields->spectatorNativeProbe;
+        auto const now = std::chrono::steady_clock::now();
+        auto const& frame = m_fields->spectatorRenderedFrame;
+        if (!m_fields->debugPlaybackScene || !frame || !frame->pose || !m_player1 ||
+            probe.logs >= 120 || now < m_fields->nextNativeProbeLog) return;
+        m_fields->nextNativeProbeLog = now + std::chrono::seconds(1);
+        ++probe.logs;
+        using P = corum::ranked::SpectatorNativePath;
+        log::info("[DebugSpectate] native-path window={} frames={} sequence={} elapsedMs={} segment={} blockedUpdate={} checkCollisions={} collisionObjects={} touchedObject={} activatedObjectIDs={} touchedTrigger={} canActivate={} allowed={} teleport={} spawn={} commands={} follow={} dynamicMove={} triggerObject={} repeatedTriggerCalls={} lastX={} lastY={} x={} y={}",
+            probe.logs, probe.frames, frame->sequence, frame->publisherElapsedMs, frame->presentationSegment,
+            probe.count(P::BlockedPlayerUpdate), probe.count(P::CheckCollisions), probe.count(P::CollisionObjects),
+            probe.count(P::TouchedObject), m_gameState.m_activatedObjectIDs.size(), probe.count(P::TouchedTrigger),
+            probe.count(P::ActivationQuery), probe.count(P::ActivationAllowed), probe.count(P::Teleport),
+            probe.count(P::Spawn), probe.count(P::Commands), probe.count(P::Follow), probe.count(P::DynamicMove),
+            probe.count(P::TriggerObject), probe.repeatedTriggerCalls,
+            m_player1->m_lastPosition.x, m_player1->m_lastPosition.y, m_player1->getPositionX(), m_player1->getPositionY());
+        probe.clearWindow();
 #endif
     }
 
@@ -1993,8 +2018,13 @@ class $modify(CorumRankedSpectatorCameraHook, GJBaseGameLayer) {
         if (owner && owner->prepareSpectatorScene() && owner->spectatorCameraActive()) {
             if (!owner->beginSpectatorWorldFrame()) return;
             {
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+                corum::ranked::ScopedSpectatorNativeProbe nativeProbe(owner->m_fields->spectatorNativeProbe,
+                    owner, m_player1, owner->m_fields->debugPlaybackScene);
+#endif
                 ScopedRealGameplayEnd worldUpdate(owner->m_fields->spectatorWorldUpdateInProgress, true);
                 GJBaseGameLayer::update(dt);
+                owner->logSpectatorNativeProbe();
                 owner->reconcileSpectatorWorldDriver();
                 // Some native paths omit updateCamera. Its hook still owns the
                 // one calculation, with correction deferred until world exits.
@@ -2040,7 +2070,12 @@ class $modify(CorumRankedSpectatorDummyPlayer, PlayerObject) {
 
     void update(float dt) {
         auto* layer = localSafetyLayer();
-        if (layer && layer->freezeLocalDummy(this)) return;
+        if (layer && layer->freezeLocalDummy(this)) {
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+            corum::ranked::noteSpectatorNativePath(layer, this, corum::ranked::SpectatorNativePath::BlockedPlayerUpdate);
+#endif
+            return;
+        }
         auto const observed = layer && layer->observesSpectatorPlayer(this);
         auto const teleportedBefore = m_wasTeleported;
         auto const before = observed ? corum::ranked::captureSpectatorPose(this) : corum::ranked::SpectatorGhostPose{};
@@ -2104,7 +2139,7 @@ class $modify(CorumRankedSpectatorDummyPlayer, PlayerObject) {
 // normal Ranked, Placement, real Death Match and user Practice retain vanilla.
 class $modify(CorumRankedSpectatorProgressSave, GJGameLevel) {
     static void onModify(auto& self) {
-        for (auto name : {"GJGameLevel::savePercentage", "GJGameLevel::saveNewScore"}) {
+        for (auto name : {"GJGameLevel::savePercentage", "GJGameLevel::storeNewLocalScore"}) {
             if (!self.setHookPriorityPre(name, Priority::First)) {
                 log::warn("Failed to install spectator persistence priority: {}", name);
             }
@@ -2117,9 +2152,13 @@ class $modify(CorumRankedSpectatorProgressSave, GJGameLevel) {
         GJGameLevel::savePercentage(percent, practice, clicks, attempts, valid);
     }
 
-    void saveNewScore(int value, int type, int ticks, int clicks, int coins, gd::string inputs, bool save) {
+    // GD 2.2081 routes real completion's local score through this two-int
+    // boundary. Avoid the global saveNewScore thunk's by-value gd::string on
+    // iOS arm64/JIT-less; the exact spectator scene guard remains independent
+    // of the percentage and completion firewalls above.
+    void storeNewLocalScore(int value, int type) {
         auto* layer = localSafetyLayer();
         if (layer && layer->blocksLevelPersistence(this)) return;
-        GJGameLevel::saveNewScore(value, type, ticks, clicks, coins, inputs, save);
+        GJGameLevel::storeNewLocalScore(value, type);
     }
 };

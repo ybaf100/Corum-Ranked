@@ -105,11 +105,82 @@ int main() {
     assert(boundary->pose.mini && boundary->pose.upsideDown && boundary->pose.flipped && !boundary->pose.visible);
     close(boundary->pose.camera->x, 700);
 
-    // Verified snap discards old history and exact-applies pose/rotation/camera.
-    auto snap = linear(3); snap.pose.x = 729; snap.pose.rotation = 271;
-    snap.pose.camera = SpectatorCameraOrigin{564, 200};
-    assert(states.push(snap, true, 55)); assert(states.size() == 1);
-    auto exact = states.render(55); close(exact->pose.x, 729); close(exact->pose.rotation, 271); close(exact->pose.camera->x, 564);
+    // One HTTP batch retains A/B/snap C/D/E. All fields cross the boundary on
+    // publisher time, and no position/rotation/camera field sweeps B -> C.
+    SpectatorInterpolationBuffer segments;
+    for (int i = 0; i < 5; ++i) {
+        auto s = linear(i); s.publisherElapsedMs += 1000;
+        if (i >= 2) {
+            s.pose.x += 729; s.pose.y = 740; s.pose.rotation = 271;
+            s.pose.mode = SpectatorGameMode::Spider;
+            s.pose.upsideDown = s.pose.mini = s.pose.flipped = true;
+            s.pose.camera = SpectatorCameraOrigin{s.pose.x - 165, 200};
+        }
+        assert(segments.push(s, i == 2, 0));
+    }
+    assert(segments.size() == 5 && segments.renderTimeMs() == 1000);
+    auto hold = segments.render(75); close(hold->pose.x, 15); close(hold->pose.y, 80);
+    assert(hold->segment == 0 && hold->pose.mode == SpectatorGameMode::Cube);
+    close(hold->pose.rotation, 1); close(hold->pose.camera->x, -150);
+    assert(!hold->pose.upsideDown && !hold->pose.mini && !hold->pose.flipped);
+    auto exact = segments.render(100); close(exact->pose.x, 759); close(exact->pose.rotation, 271);
+    close(exact->pose.camera->x, 594); close(exact->pose.camera->y, 200);
+    assert(exact->segment == 1 && exact->pose.mode == SpectatorGameMode::Spider);
+    assert(exact->pose.upsideDown && exact->pose.mini && exact->pose.flipped);
+    close(segments.render(125)->pose.x, 766.5); // C -> D resumes normally
+    assert(segments.starvations() == 0);
+
+    // Multiple snaps in one batch, including same-timestamp terminal. Replacing
+    // the final sample cannot erase the destination segment boundary.
+    SpectatorInterpolationBuffer multiple;
+    for (int i = 0; i < 7; ++i) assert(multiple.push(linear(i), i == 2 || i == 4, 0));
+    assert(multiple.size() == 7); close(multiple.render(75)->pose.x, 15);
+    assert(multiple.render(100)->segment == 1); close(multiple.render(175)->pose.x, 45);
+    assert(multiple.render(200)->segment == 2);
+    for (bool dead : {true, false}) {
+        SpectatorInterpolationBuffer immediate;
+        assert(immediate.push(linear(0), false, 0));
+        assert(immediate.push(linear(1), false, 0));
+        auto destination = linear(2); destination.pose.y = 740;
+        assert(immediate.push(destination, true, 0));
+        destination.sequence = 3; destination.pose.dead = dead; destination.pose.finished = !dead;
+        assert(immediate.push(destination, false, 0));
+        assert(immediate.size() == 3); close(immediate.render(75)->pose.y, 80);
+        auto final = immediate.render(100); assert(final->segment == 1);
+        close(final->pose.y, 740); assert(final->pose.dead == dead && final->pose.finished == !dead);
+    }
+
+    // 26 Spider snaps at alternating 150/200ms, under the ORIGINAL 80ms poll
+    // gap + 110ms RTT. Compare the clock/starvation to a continuous control.
+    // The snap itself must never consume buffer headroom or change 1x speed.
+    for (int fps : {60,120,144,240}) {
+        SpectatorInterpolationBuffer stress, control;
+        int nextSample = 0, nextSnap = 3, snaps = 0;
+        double arrival = 190;
+        for (double wall = 0; wall < 5000; wall += 1000.0 / fps) {
+            while (arrival <= wall) {
+                auto last = static_cast<int>(arrival / 50);
+                auto packets = last - nextSample + 1;
+                stress.noteResponse(arrival,110,80,packets); control.noteResponse(arrival,110,80,packets);
+                for (; nextSample <= last; ++nextSample) {
+                    bool snap = nextSample == nextSnap;
+                    if (snap) { ++snaps; nextSnap += snaps % 2 ? 4 : 3; }
+                    auto s = linear(nextSample); s.pose.mode = SpectatorGameMode::Spider;
+                    s.pose.y = snaps % 2 ? 740 : 40; s.pose.upsideDown = snaps % 2;
+                    s.pose.camera->y = s.pose.y - 100;
+                    auto beforeTime = stress.renderTimeMs(); auto beforeSize = stress.size();
+                    assert(stress.push(s,snap,arrival)); assert(control.push(s,false,arrival));
+                    if (snap) { close(stress.renderTimeMs(),beforeTime); assert(stress.size()==beforeSize+1); }
+                }
+                arrival += 190;
+            }
+            auto a=stress.render(wall),b=control.render(wall);
+            assert(bool(a)==bool(b));
+            if (a) { close(a->publisherElapsedMs,b->publisherElapsedMs); assert(a->segment<=static_cast<unsigned>(snaps)); }
+            assert(stress.starvations()==control.starvations());
+        }
+        assert(snaps>=26 && stress.starvations()==0 && stress.size()>1);
+    }
 
     // Both terminal types occur on publisher time, not HTTP receipt, then hold.
     for (bool dead : {true, false}) {

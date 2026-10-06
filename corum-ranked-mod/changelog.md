@@ -1,3 +1,11 @@
+## v0.5.0-beta.30
+
+- Replace the global by-value-string saveNewScore hook with exact-scene storeNewLocalScore(int,int), preserving spectator percentage/completion/death/transport safety and real local/Ranked/Placement saves. Keep the accepted final Placement Attempt alive in MAP_SETTLING, and reject state snapshots that resurrect End-ACKed UUIDs or roll back stateVersion.
+- Retain the entire timestamp deque across Spider/teleport snaps. Validated client presentation segments hold before the destination, switch position/rotation/camera/discrete state atomically, then resume interpolation. Carry the segment to the hidden world driver to reset only local crossing/Follow Player Y history, including skipped render frames.
+- Add bounded Debug TEST native collision/touch/activation/Spawn/commands/follow/dynamic/trigger probes. Preserve the native world pass and blocked PlayerObject physics. No unverified extra collision pass: actual missing native interaction and background/touch parity still need GD 2.2081 device traces.
+- Adapt serialized viewer idle gaps to 40/20/5ms for sufficient/low/starving buffers with bounded error backoff. Preserve one in-flight request. Explicitly regress and document production's unchanged ACK-bound RTT + 50ms publishing; Debug RECORD's independent 50ms capture does not establish production cadence.
+- Keep spectator protocol v2 and Debug recording format v2. Device verification remains outstanding; see BETA30-RELEASE.md for evidence and limits. No manual Release.
+
 ## v0.5.0-beta.29
 
 - Feed the native world a hidden no-authority m_player1 from the same timestamp-buffered frame as the dedicated visible Remote Player and camera, before GJBaseGameLayer world processing. Keep local physics, completion, scoring and persistence blocked; allow native position/rotation writes only in the authenticated driver scope.

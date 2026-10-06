@@ -140,7 +140,9 @@ int main(){
     snapped.discontinuity=SpectatorSnapEvidence{SpectatorDiscontinuity::Teleport,start.x,start.y,snapped.x,snapped.y};
     relocation.applyViewerResponse(replaceKeyframe(response(${evidence.rejectedSequence},snapped.x),snapped));
     assert(relocation.m_status==SpectatorLiveStatus::Live && relocation.m_viewPresentationEpoch==identity);
-    assert(relocation.m_sampleBuffer.size()==1 && relocation.interpolatedPose()->x==snapped.x);
+    assert(relocation.m_sampleBuffer.size()==2 && relocation.interpolatedPose()->x==start.x);
+    advance(1000); // packet arrival never advances the rendered clock to snap
+    assert(relocation.interpolatedPose()->x==snapped.x);
     assert(relocation.interpolatedPose()->rotation==90 && relocation.interpolatedPose()->camera->y==200);
     auto continuous=snapped;continuous.discontinuity.reset();continuous.x+=10;
     continuous.camera=SpectatorCameraOrigin{1439.7268f,210};
@@ -157,6 +159,29 @@ int main(){
     assert(relocation.interpolatedPose()->dead && relocation.interpolatedPose()->camera->y==1500);
     advance(3600000);
     assert(relocation.interpolatedPose()->x==continuous.x); // exact terminal, no extrapolation
+    // Production decoder receives multiple native Spider boundaries per HTTP
+    // batch. No generation/epoch reset and no snap-induced buffer starvation.
+    {SpectatorLiveRuntime repeated;repeated.m_viewMatchId="match";
+    int next=0,nextSnap=3,snaps=0;SpectatorGhostPose previous{100,40,0,false,false};
+    auto repeatedEpoch=std::uint64_t(0);
+    for(int batch=1;batch<=30;++batch){
+        matjson::Value::Array all;
+        for(;next<=batch*190/50;++next){
+            auto p=previous;p.x=100+next*10.0f;p.mode=SpectatorGameMode::Spider;p.discontinuity.reset();
+            if(next==nextSnap){
+                ++snaps;nextSnap+=snaps%2?4:3;p.y=snaps%2?740:40;p.upsideDown=snaps%2;
+                p.discontinuity=SpectatorSnapEvidence{SpectatorDiscontinuity::SpiderSnap,previous.x,previous.y,p.x,p.y};
+            }
+            p.camera=SpectatorCameraOrigin{p.x-165,p.y-100};
+            all.push_back(replaceKeyframe(response(next,p.x),p)["packets"].asArray().unwrap()[0]);previous=p;
+        }
+        auto root=response(next-1,previous.x);root["packets"]=all;repeated.applyViewerResponse(root);
+        assert(repeated.m_status==SpectatorLiveStatus::Live);
+        if(batch==1)repeatedEpoch=repeated.m_viewPresentationEpoch;
+        assert(repeated.m_viewPresentationEpoch==repeatedEpoch && repeated.m_viewGeneration==1);
+        repeated.interpolatedPose();advance(190);
+    }
+    assert(snaps>=30 && repeated.m_sampleBuffer.starvations()==0);}
     SpectatorLiveRuntime corrupt;corrupt.m_viewMatchId="match";
     corrupt.applyViewerResponse(replaceKeyframe(response(0,start.x),start));
     auto unverified=snapped;unverified.discontinuity.reset();
@@ -175,8 +200,12 @@ int main(){
     SpectatorGhostPose snap{100,30,0,false,false};snap.mode=SpectatorGameMode::Spider;
     spider.applyViewerResponse(replaceKeyframe(response(0,100),snap));
     snap.y=900;snap.upsideDown=true;spider.applyViewerResponse(replaceKeyframe(response(1,100),snap));
-    assert(spider.m_status==SpectatorLiveStatus::Live && spider.interpolatedPose()->y==900); // snap, no in-between ground
-    snap.y=4000;snap.upsideDown=false;spider.applyViewerResponse(replaceKeyframe(response(2,100),snap));
+    assert(spider.m_status==SpectatorLiveStatus::Live && spider.interpolatedPose()->y==30);
+    assert(!spider.interpolatedPose()->upsideDown);
+    spider.applyViewerResponse(replaceKeyframe(response(2,100),snap));
+    spider.applyViewerResponse(replaceKeyframe(response(3,100),snap));advance(50);
+    assert(spider.interpolatedPose()->y==900 && spider.interpolatedPose()->upsideDown);
+    snap.y=4000;snap.upsideDown=false;spider.applyViewerResponse(replaceKeyframe(response(4,100),snap));
     assert(spider.m_reason=="POSE_DISCONTINUITY");
     SpectatorLiveRuntime dual;dual.m_viewMatchId="match";snap.dual=true;
     dual.applyViewerResponse(replaceKeyframe(response(0,100),snap));assert(dual.m_reason=="DUAL_UNSUPPORTED");

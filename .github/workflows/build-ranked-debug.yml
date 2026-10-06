@@ -110,6 +110,9 @@ jobs:
           node --test corum-ranked-mod/tests/AchievementSourceTest.mjs
           node --test corum-ranked-mod/tests/SpectatorLocalSafetySourceTest.mjs
           node --test corum-ranked-mod/tests/SpectatorNativeHookTest.mjs
+          node --test corum-ranked-mod/tests/PlacementRuntimeNativeTest.mjs
+          node --test corum-ranked-mod/tests/SpectatorNativeInstrumentationTest.mjs
+          node --test corum-ranked-mod/tests/SpectatorViewerPollingNativeTest.mjs
           node --test corum-ranked-mod/tests/SpectatorRemoteSourceTest.mjs
           node --test corum-ranked-mod/tests/SpectatorRemoteNativeTest.mjs
           node --test corum-ranked-mod/tests/SpectatorCameraSourceTest.mjs

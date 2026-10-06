@@ -9,6 +9,9 @@ struct SpectatorBufferedSample {
     std::int64_t sequence = -1;
     double publisherElapsedMs = 0;
     SpectatorGhostPose pose;
+    // Validated client-side segment boundary, not another wire event. Evidence
+    // remains in pose.discontinuity; this also covers bounded legacy snaps.
+    std::uint64_t segment = 0;
 };
 
 // One publisher clock for pose AND camera. HTTP arrival is used only for clock
@@ -43,11 +46,9 @@ public:
             // Equal native timestamps are legal (e.g. a terminal at contact).
             if (delta == 0) m_samples.pop_back();
         }
-        if (verifiedSnap) {
-            clear();
-            m_renderMs = sample.publisherElapsedMs;
-            m_lastRenderWallMs = nowMs; m_wallSet = true; m_running = true;
-        }
+        if (verifiedSnap) ++m_segment;
+        // A same-timestamp terminal inherits the current destination segment.
+        sample.segment = m_segment;
         if (m_samples.empty() && !m_wallSet) m_renderMs = sample.publisherElapsedMs;
         m_samples.push_back(std::move(sample));
         prune(); updateDelay();
@@ -89,7 +90,9 @@ public:
         prune();
         auto result = m_samples.front();
         result.publisherElapsedMs = m_renderMs;
-        if (m_samples.size() > 1) {
+        // prune() switches ALL fields atomically at the destination timestamp.
+        // Until then hold the preceding pose/camera; never sweep B -> snap C.
+        if (m_samples.size() > 1 && m_samples[0].segment == m_samples[1].segment) {
             auto const& older = m_samples[0]; auto const& newer = m_samples[1];
             auto const interval = newer.publisherElapsedMs - older.publisherElapsedMs;
             auto const t = interval > 0 ? std::clamp((m_renderMs - older.publisherElapsedMs) / interval, 0.0, 1.0) : 0.0;
@@ -111,6 +114,7 @@ public:
 
     void clear() {
         m_samples.clear(); m_renderMs = 0; m_lastRenderWallMs = 0;
+        m_segment = 0;
         m_running = m_wallSet = m_starved = m_terminalRendered = false; m_starvedSinceMs = 0;
     }
     void reset() { *this = SpectatorInterpolationBuffer{}; }
@@ -121,6 +125,7 @@ public:
     [[nodiscard]] double delayMs() const { return m_delayMs; }
     [[nodiscard]] std::uint64_t starvations() const { return m_starvations; }
     [[nodiscard]] bool buffering() const { return m_starved && !m_running; }
+    [[nodiscard]] bool starving() const { return m_starved; }
     [[nodiscard]] bool terminalRendered() const { return m_terminalRendered; }
     [[nodiscard]] double averageRttMs() const { return m_responses ? m_rttTotal / m_responses : 0; }
     [[nodiscard]] double averageArrivalMs() const { return m_arrivalCount ? m_arrivalTotal / m_arrivalCount : 0; }
@@ -136,6 +141,7 @@ private:
     double m_delayMs = 100, m_sampleMs = 50, m_arrivalMs = 0;
     double m_lastResponseMs = 0, m_rttTotal = 0, m_arrivalTotal = 0;
     std::uint64_t m_responses = 0, m_packets = 0, m_arrivalCount = 0, m_starvations = 0;
+    std::uint64_t m_segment = 0;
     bool m_running = false, m_wallSet = false, m_starved = false, m_terminalRendered = false;
 };
 } // namespace corum::ranked

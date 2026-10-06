@@ -95,6 +95,7 @@ private:
     std::chrono::steady_clock::time_point m_nextViewerPollAt {};
     std::uint64_t m_viewRequestGeneration = 0;
     std::int64_t m_lastViewerRttMs = 0;
+    int m_viewerPollGapMs = 20;
     int m_consecutiveViewerErrors = 0;
     bool m_viewBusy = false;
 

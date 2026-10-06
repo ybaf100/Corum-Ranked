@@ -247,6 +247,13 @@ describe("server-authoritative solo Stage Placement", () => {
       activeAttempt: { attemptId: active.attemptId },
       currentMap: { mapScore: 75, mapGrade: "D" },
     });
+    // Both Main Time and the Final Attempt window have expired. The already
+    // acknowledged Attempt remains alive; a fresh Start is forbidden.
+    expect(new Date(state.currentMap.finalWindowEndAt).getTime()).toBeLessThan(clock.now().getTime());
+    await expect(recovered.startAttempt(runId, session, {
+      levelId: firstLevel,
+      clientEventId: "forbidden-after-timer-zero",
+    })).rejects.toThrow();
     const heartbeatAfterRecovery = await database.query<{ last_heartbeat_at: string }>(
       "SELECT last_heartbeat_at FROM ranked_placement_runs WHERE id = $1",
       [runId],
@@ -282,7 +289,22 @@ describe("server-authoritative solo Stage Placement", () => {
     expect(await recovered.state(runId, session)).toMatchObject({
       state: "MAP_RESULT",
       deadlineAt: clock.now().toISOString(),
+      activeAttempt: null,
     });
+    const repeatedFinalEnd = await recovered.endAttempt(runId, session, {
+      levelId: firstLevel,
+      attemptId: active.attemptId,
+      clientEventId: "active-disconnect-end",
+      progressPercent: 100,
+      cleared: true,
+    });
+    expect(repeatedFinalEnd).toMatchObject({ accepted: true });
+    const storedFinalAttempt = await database.query<{ progress_percent: number; cleared: boolean; count: number }>(
+      `SELECT progress_percent::float AS progress_percent, cleared, COUNT(*) OVER()::int AS count
+       FROM ranked_placement_attempts WHERE id = $1 AND ended_at IS NOT NULL`,
+      [active.attemptId],
+    );
+    expect(storedFinalAttempt.rows).toEqual([{ progress_percent: 100, cleared: true, count: 1 }]);
 
     const completeTwoClears = async (): Promise<Record<string, any>> => {
       let current = await recovered.ready(runId, session, {

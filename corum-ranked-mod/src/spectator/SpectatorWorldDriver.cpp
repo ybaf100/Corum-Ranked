@@ -22,8 +22,9 @@ bool SpectatorWorldDriver::apply(PlayLayer* layer, bool authorizedDummy,
     if (sameContext && (frame->sequence < m_frame->sequence || frame->publisherElapsedMs < m_frame->publisherElapsedMs)) return false;
     auto const& pose = *frame->pose;
     auto const newBoundary = !sameContext || frame->sequence != m_frame->sequence;
-    auto const snap = newBoundary && pose.discontinuity && finiteSpectatorSnap(*pose.discontinuity) &&
-        (!sameContext || verifiedSpectatorSnap(*m_frame->pose, pose));
+    auto const snap = (sameContext && frame->presentationSegment != m_frame->presentationSegment) ||
+        (newBoundary && pose.discontinuity && finiteSpectatorSnap(*pose.discontinuity) &&
+         (!sameContext || verifiedSpectatorSnap(*m_frame->pose, pose)));
     auto const deltaMs = sameContext ? frame->publisherElapsedMs - m_frame->publisherElapsedMs : 0;
     if (!sameContext && frame->sequence > 0)
         log::info("Spectator world history partial: firstSequence={} elapsedMs={} (native catch-up requires device verification)",

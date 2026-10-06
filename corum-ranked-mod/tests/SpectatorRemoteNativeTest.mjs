@@ -179,6 +179,13 @@ int main() {
     assert(layer.m_gameState.m_cameraPosition.x==f.pose->camera->x && layer.m_gameState.m_cameraPosition.y==f.pose->camera->y);
     ${i===1?'assert(viewer.m_sampleBuffer.size()>=1 && remote.player()->position.x==f.pose->x);':''}
     `).join('\n')}
+    // The final HTTP packet is still ahead of the rendered clock. A snap must
+    // NOT jump that clock forward. Drain the remaining publisher timeline,
+    // then validate exact terminal presentation and its indefinitely held pose.
+    assert(!f.pose->dead && !f.pose->finished);
+    wireClock+=std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+        std::chrono::duration<double,std::milli>(viewer.m_sampleBuffer.latestTimeMs()-viewer.m_sampleBuffer.renderTimeMs()));
+    f.pose=viewer.interpolatedPose();remote.update(&layer,true,f);drive(true);
     assert(f.pose->dead || f.pose->finished);auto held=remote.player()->position;
     wireClock+=std::chrono::seconds(5);
     f.pose=viewer.interpolatedPose();remote.update(&layer,true,f);drive(true);

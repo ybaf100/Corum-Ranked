@@ -34,13 +34,14 @@ test('production native safety hook bodies execute through death/completion/save
         'void playPlatformerEndAnimationToPos(', 'void showEndLayer()', 'void showNewBest(', 'void updateAttempts()',
     ].map(signature => method(signature)).join('\n');
     const player = method('void update(float dt)', source.indexOf('class $modify(CorumRankedSpectatorDummyPlayer'));
-    const saves = [method('void savePercentage('), method('void saveNewScore(')].join('\n');
+    const saves = [method('void savePercentage('), method('void storeNewLocalScore(')].join('\n');
     const cpp = `
 #include "${join(root, 'src/domain/SpectatorLocalSafety.hpp')}"
 #include "${join(root, 'src/domain/SpectatorRemotePolicy.hpp')}"
 #include "${join(root, 'src/domain/RankedGameplayPolicy.hpp')}"
 #include <algorithm>
 #include <cassert>
+#include "${join(root, 'src/domain/SpectatorNativeProbe.hpp')}"
 #include <memory>
 #include <optional>
 #include <string>
@@ -57,7 +58,7 @@ struct PlayerObject {
 struct GJGameLevel {
     int best = 41, scores = 0;
     void savePercentage(int p, bool, int, int, bool) { best = std::max(best, p); }
-    void saveNewScore(int, int, int, int, int, gd::string, bool) { ++scores; }
+    void storeNewLocalScore(int, int) { ++scores; }
 };
 void persist(GJGameLevel*, int);
 struct PlayLayer {
@@ -141,7 +142,10 @@ CorumRankedPlayLayer* localSafetyLayer() { return currentLayer; }
 struct PlayerHook : PlayerObject { ${player} };
 struct SaveHook : GJGameLevel { ${saves} };
 void persist(GJGameLevel* level, int percent) {
-    if (level) static_cast<SaveHook*>(level)->savePercentage(percent, false, 0, 0, true);
+    if (level) {
+        static_cast<SaveHook*>(level)->savePercentage(percent, false, 0, 0, true);
+        if (percent == 100) static_cast<SaveHook*>(level)->storeNewLocalScore(100, 0);
+    }
 }
 int main() {
     using corum::ranked::RankedRuntime;
@@ -173,12 +177,13 @@ int main() {
     scene.showEndLayer(); scene.showNewBest(false, 0, 0, false, false, false);
     scene.updateAttempts();assert(scene.attempts==0);
     level.savePercentage(100, false, 0, 0, true);
-    level.saveNewScore(100, 0, 0, 0, 0, "", true);
+    level.storeNewLocalScore(100, 0);
     assert(scene.completions == 0 && scene.texts == 0 && scene.checks == 0 && scene.animations == 0);
     assert(scene.endLayers == 0 && scene.newBest == 0 && runtime.clears == 0);
     assert(level.best == 83 && level.scores == 0 && !scene.m_isPracticeMode);
     unrelated.savePercentage(95, false, 0, 0, true);
-    assert(unrelated.best == 95);
+    unrelated.storeNewLocalScore(100,0);
+    assert(unrelated.best == 95 && unrelated.scores == 1);
     // Fresh normal scene has all original callbacks and persistence intact.
     CorumRankedPlayLayer normal;
     SaveHook normalLevel;
@@ -187,7 +192,23 @@ int main() {
     normal.levelComplete(); normal.showCompleteText(); normal.checkForEnd();
     normal.showNewBest(false, 0, 0, false, false, false);
     assert(normal.completions == 1 && normal.texts == 1 && normal.checks == 1 && normal.newBest == 1);
-    assert(normalLevel.best == 100 && runtime.clears == 1 && local.updates == 1);
+    assert(normalLevel.best == 100 && normalLevel.scores == 1 && runtime.clears == 1 && local.updates == 1);
+    // Real local / Ranked / Placement saves share the same vanilla boundary.
+    // Placement final accepted Attempt survives both timers reaching zero;
+    // MAP_SETTLING is still gameplay, never spectator authority.
+    for (int scenario = 0; scenario < 4; ++scenario) {
+        runtime = {}; runtime.placement = scenario >= 2;
+        CorumRankedPlayLayer real; SaveHook realLevel;
+        currentLayer = &real; real.m_player1 = &local; real.m_level = &realLevel;
+        real.m_fields->rankedLevel = scenario != 0;
+        real.percent = 100;
+        real.syncSpectatorLocalSafety();
+        assert(!real.m_fields->localSafety.active());
+        real.levelComplete(); real.showCompleteText(); real.showCompleteText();
+        assert(real.completions == 1 && realLevel.scores == 1 && realLevel.best == 100);
+        assert(runtime.clears == (scenario == 0 ? 0 : 1));
+        assert(!real.blocksLevelPersistence(&realLevel));
+    }
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
     runtime={};debug::DebugSpectateRuntime::get().authorized=true;
     CorumRankedPlayLayer viewer; SaveHook protectedLevel;
@@ -197,7 +218,7 @@ int main() {
     viewer.percent=100;viewer.destroyPlayer(&local,nullptr);viewer.levelComplete();viewer.showCompleteText();
     viewer.checkForEnd();viewer.playEndAnimationToPos({0,0});viewer.showEndLayer();
     viewer.showNewBest(false,0,0,false,false,false);protectedLevel.savePercentage(100,false,0,0,true);
-    protectedLevel.saveNewScore(100,0,0,0,0,"",true);
+    protectedLevel.storeNewLocalScore(100,0);
     assert(viewer.deaths==0 && viewer.completions==0 && viewer.texts==0 && viewer.newBest==0);
     assert(protectedLevel.best==41 && protectedLevel.scores==0 && runtime.ends==0 && runtime.clears==0);
     local.update(0.01f);assert(viewer.freezeLocalDummy(&local));

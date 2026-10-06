@@ -38,6 +38,7 @@ test('actual world owner synchronizes triggers, Spider and native camera before 
 #include "${join(root,'src/spectator/SpectatorWorldDriver.hpp')}"
 #include "${join(root,'src/domain/SpectatorInterpolationBuffer.hpp')}"
 #include "${join(root,'src/spectator/SpectatorPlayerCapture.hpp')}"
+#include "${join(root, 'src/domain/SpectatorNativeProbe.hpp')}"
 #include <memory>
 #include <iostream>
 #include <source_location>
@@ -77,6 +78,7 @@ struct CorumRankedPlayLayer: PlayLayer {
         bool spectatorWorldUpdateInProgress=false,spectatorWorldResetInProgress=false;
         corum::ranked::SpectatorWorldDriver spectatorWorldDriver;
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
+        corum::ranked::SpectatorNativeProbe spectatorNativeProbe;
         bool debugPlaybackScene=true,cameraForensicFrame=false;
         int levelId=88350599,cameraForensicFrames=0;std::int64_t cameraForensicSequence=-1;
 #endif
@@ -84,7 +86,7 @@ struct CorumRankedPlayLayer: PlayLayer {
     FieldsAccess<Fields> m_fields;bool watchable=true;
     bool watchableSpectatorScene(){return watchable;}
     bool prepareSpectatorScene(){return spectatorCameraActive();}
-    void sampleSpectatorPresentation(){}void logSpectatorWorldDriver(){}
+    void sampleSpectatorPresentation(){}void logSpectatorWorldDriver(){}void logSpectatorNativeProbe(){}
     bool freezeLocalDummy(PlayerObject* p){return p==m_player1 && m_fields->localSafety.active();}
     bool observesSpectatorPlayer(PlayerObject*){return false;}
     void observeSpectatorNativeUpdate(PlayerObject*){}
@@ -194,7 +196,7 @@ int main(){
   PlayLayer::current=nullptr;CCObject::drain();
  }
  // The unchanged publisher buffer drives continuous world coordinates at every render FPS.
- for(int fps:{60,120,240}){
+ for(int fps:{60,120,144,240}){
   PlayLayer scene;PlayerObject p;GJGameLevel level;scene.m_player1=&p;scene.m_level=&level;p.m_gameLayer=&scene;
   SpectatorInterpolationBuffer buffer;SpectatorWorldDriver driver;
   SpectatorRemoteContext c{"match",1,0,level.m_levelID,"attempt",1,1};
@@ -207,6 +209,43 @@ int main(){
    previous=p.getPosition().x;
   }
   close(p.getPosition().x,500);assert(p.m_followRelated==100 && p.physicsUpdates==0 && !p.isVisible());
+ }
+ // Repeated buffered snaps: renderer identity, driver phase and camera owner
+ // survive 26 boundaries under the old 80ms + 110ms serialized HTTP cadence.
+ for(int fps:{60,120,144,240}){
+  PlayLayer scene;PlayerObject dummy;GJGameLevel level;scene.m_player1=&dummy;scene.m_level=&level;dummy.m_gameLayer=&scene;
+  auto* world=CCLayer::create();geode::Ref<CCLayer> root(world);scene.m_objectLayer=world;
+  SpectatorInterpolationBuffer buffer;SpectatorWorldDriver driver;CorumRemotePlayer remote;CorumSpectatorCamera camera;
+  camera.attach(&scene);SpectatorRemoteContext c{"match",1,0,level.m_levelID,"attempt",1,1};
+  PlayerObject* identity=nullptr;int next=0,nextSnap=3,snaps=0;double arrival=190;unsigned segment=0;
+  for(double wall=0;wall<5000;wall+=1000.0/fps){
+   while(arrival<=wall){
+    int last=int(arrival/50);buffer.noteResponse(arrival,110,80,last-next+1);
+    for(;next<=last;++next){bool snap=next==nextSnap;if(snap){++snaps;nextSnap+=snaps%2?4:3;}
+     SpectatorGhostPose pose{100+next*10.0f,snaps%2?740.0f:40.0f,0,false,false};pose.mode=SpectatorGameMode::Spider;
+     pose.upsideDown=snaps%2;pose.camera=SpectatorCameraOrigin{pose.x-165,pose.y-100};
+     assert(buffer.push({next,next*50.0,pose},snap,arrival));
+    }arrival+=190;
+   }
+   auto sample=buffer.render(wall);if(!sample)continue;
+   SpectatorRemoteFrame f{c,sample->sequence,sample->pose,sample->publisherElapsedMs,sample->segment};
+   assert(driver.apply(&scene,true,f));remote.update(&scene,true,f);camera.update(&scene,true,c,remote.cameraFrame());
+   if(!identity){identity=remote.player();}assert(remote.player()==identity && identity!=&dummy);
+   close(dummy.getPosition().x,identity->getPosition().x);close(dummy.getPosition().y,identity->getPosition().y);
+   close(scene.m_gameState.m_cameraPosition.x,f.pose->camera->x);close(scene.m_gameState.m_cameraPosition.y,f.pose->camera->y);
+   assert(dummy.m_isUpsideDown==f.pose->upsideDown && f.context==c && camera.ownsCamera());
+   if(sample->segment!=segment){close(dummy.m_lastPosition.x,f.pose->x);close(dummy.m_lastPosition.y,f.pose->y);segment=unsigned(sample->segment);}
+   assert(dummy.physicsUpdates==0 && dummy.spiderJumps==0);
+  }
+  assert(snaps>=26 && buffer.starvations()==0);camera.cleanup(&scene);remote.cleanup();driver.reset();
+ }
+ // A skipped render frame landing AFTER C still resets native crossing history.
+ {
+  PlayLayer s;PlayerObject p;GJGameLevel l;s.m_player1=&p;s.m_level=&l;p.m_gameLayer=&s;SpectatorWorldDriver d;
+  SpectatorRemoteContext c{"m",1,0,l.m_levelID,"a",1,1};
+  assert(d.apply(&s,true,SpectatorRemoteFrame{c,0,SpectatorGhostPose{100,40,0},0,0}));
+  assert(d.apply(&s,true,SpectatorRemoteFrame{c,4,SpectatorGhostPose{800,740,0},200,1}));
+  close(p.m_lastPosition.x,800);close(p.m_lastPosition.y,740);assert(p.m_followRelated==0);
  }
  CCObject::drain();assert(CCObject::alive==0);
  std::cout<<"world ordering/Spider/follow history/scoped writes/60-120-240Hz passed\\n";
