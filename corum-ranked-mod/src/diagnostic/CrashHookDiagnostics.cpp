@@ -1,5 +1,6 @@
 #if defined(CORUM_CRASH_DIAG)
 #include "CrashHookDiagnostics.hpp"
+#include "PlayerHookSelection.hpp"
 #include <Geode/loader/ModEvent.hpp>
 #include <set>
 
@@ -10,6 +11,8 @@ $on_mod(Loaded) {
     std::set<std::string_view> classes;
     std::set<std::uintptr_t> targets;
     unsigned debugOnly = 0, enabled = 0;
+    std::array<corum::ranked::diagnostic::PlayerHookRegistration, 7> playerHooks{};
+    unsigned unknownPlayerHooks = 0;
     for (auto* hook : hooks) {
         auto const name = hook->getDisplayName();
         classes.insert(name.substr(0, name.find("::")));
@@ -20,9 +23,30 @@ $on_mod(Loaded) {
         // teleportPlayer has one extra debug probe detour on the same target.
         if (isProbe) ++debugOnly;
         if (hook->isEnabled()) ++enabled;
+        if (name.starts_with("PlayerObject::")) {
+            bool known = false;
+            for (std::size_t i = 0; i < playerHooks.size(); ++i) {
+                if (name != corum::ranked::diagnostic::playerHookExpectations[i].target) continue;
+                known = true;
+                ++playerHooks[i].registered;
+                if (hook->isEnabled()) ++playerHooks[i].enabled;
+            }
+            if (!known) ++unknownPlayerHooks;
+        }
         log::info("[CorumCrashDiag] hook={} address={:#x} enabled={} priority={}",
             name, hook->getAddress(), hook->isEnabled(), hook->getPriority());
     }
+    for (std::size_t i = 0; i < playerHooks.size(); ++i) {
+        auto const& expected = corum::ranked::diagnostic::playerHookExpectations[i];
+        log::info("[CorumCrashDiag] player-selection target={} expected={} registered={} enabled={}",
+            expected.target, expected.selected, playerHooks[i].registered, playerHooks[i].enabled);
+    }
+    bool const playerRegistryMatches = unknownPlayerHooks == 0 &&
+        corum::ranked::diagnostic::playerHookRegistryMatches(playerHooks);
+    log::info("[CorumCrashDiag] player-registry-match={} unknownPlayerHooks={}",
+        playerRegistryMatches, unknownPlayerHooks);
+    if (!playerRegistryMatches)
+        log::warn("[CorumCrashDiag] INVALID COMPARISON: PlayerObject registry differs from compiled selection");
 #if defined(CORUM_RANKED_DEBUG_SPECTATE) && !defined(CORUM_CRASH_DIAG_NO_PROBES_HOOKS)
     ++debugOnly;
 #endif

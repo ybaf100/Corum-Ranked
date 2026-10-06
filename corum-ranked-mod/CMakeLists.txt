@@ -32,6 +32,16 @@ foreach(group PROBES PLAYER WORLD PERSISTENCE GAMEPLAY)
     endif()
 endforeach()
 
+# Stage 2 excludes individual declarations, not merely their runtime bodies.
+set(CORUM_CRASH_DIAG_PLAYER_METHODS
+    UPDATE UPDATE_ROTATION SPIDER_TEST_JUMP SET_POSITION SET_ROTATION SET_VISIBLE UPDATE_SPECIAL)
+foreach(method IN LISTS CORUM_CRASH_DIAG_PLAYER_METHODS)
+    option(CORUM_CRASH_DIAG_NO_PLAYER_${method}_HOOK "Exclude PlayerObject ${method} detour for Practice isolation" OFF)
+    if (CORUM_CRASH_DIAG_NO_PLAYER_${method}_HOOK AND NOT CORUM_CRASH_DIAG)
+        message(FATAL_ERROR "Player hook exclusions require CORUM_CRASH_DIAG=ON; diagnostic builds only")
+    endif()
+endforeach()
+
 file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS src/*.cpp)
 # Debug Bot Match, including Force Win/Lose, is a development tool and must not
 # be linked into official packages. Add its implementation files only when the
@@ -57,6 +67,11 @@ if (CORUM_CRASH_DIAG)
     foreach(group PROBES PLAYER WORLD PERSISTENCE GAMEPLAY)
         if (CORUM_CRASH_DIAG_NO_${group}_HOOKS)
             target_compile_definitions(${PROJECT_NAME} PRIVATE CORUM_CRASH_DIAG_NO_${group}_HOOKS=1)
+        endif()
+    endforeach()
+    foreach(method IN LISTS CORUM_CRASH_DIAG_PLAYER_METHODS)
+        if (CORUM_CRASH_DIAG_NO_PLAYER_${method}_HOOK)
+            target_compile_definitions(${PROJECT_NAME} PRIVATE CORUM_CRASH_DIAG_NO_PLAYER_${method}_HOOK=1)
         endif()
     endforeach()
 endif()

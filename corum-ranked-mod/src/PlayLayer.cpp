@@ -2099,9 +2099,29 @@ class $modify(CorumRankedSpectatorDummyPlayer, PlayerObject) {
 #if defined(CORUM_CRASH_DIAG)
         CORUM_CRASH_MODIFY(self, "CorumRankedSpectatorDummyPlayer");
 #endif
-        for (auto name : {"PlayerObject::update", "PlayerObject::updateRotation", "PlayerObject::spiderTestJump",
-                          "PlayerObject::setPosition", "PlayerObject::setRotation",
-                          "PlayerObject::setVisible"}) {
+        char const* const priorityTargets[] = {
+#if !defined(CORUM_CRASH_DIAG_NO_PLAYER_UPDATE_HOOK)
+            "PlayerObject::update",
+#endif
+#if !defined(CORUM_CRASH_DIAG_NO_PLAYER_UPDATE_ROTATION_HOOK)
+            "PlayerObject::updateRotation",
+#endif
+#if !defined(CORUM_CRASH_DIAG_NO_PLAYER_SPIDER_TEST_JUMP_HOOK)
+            "PlayerObject::spiderTestJump",
+#endif
+#if !defined(CORUM_CRASH_DIAG_NO_PLAYER_SET_POSITION_HOOK)
+            "PlayerObject::setPosition",
+#endif
+#if !defined(CORUM_CRASH_DIAG_NO_PLAYER_SET_ROTATION_HOOK)
+            "PlayerObject::setRotation",
+#endif
+#if !defined(CORUM_CRASH_DIAG_NO_PLAYER_SET_VISIBLE_HOOK)
+            "PlayerObject::setVisible",
+#endif
+            nullptr, // valid even when all six targets are excluded
+        };
+        for (auto name : priorityTargets) {
+            if (!name) continue;
             if (!self.setHookPriorityPre(name, Priority::First)) {
 #if defined(CORUM_CRASH_DIAG)
                 CORUM_CRASH_PRIORITY_FAILURE(name);
@@ -2109,7 +2129,7 @@ class $modify(CorumRankedSpectatorDummyPlayer, PlayerObject) {
                 log::warn("Failed to install spectator world-driver safety priority: {}", name);
             }
         }
-#if !defined(GEODE_IS_WINDOWS)
+#if !defined(GEODE_IS_WINDOWS) && !defined(CORUM_CRASH_DIAG_NO_PLAYER_UPDATE_SPECIAL_HOOK)
         if (!self.setHookPriorityPre("PlayerObject::updateSpecial", Priority::First)) {
 #if defined(CORUM_CRASH_DIAG)
             CORUM_CRASH_PRIORITY_FAILURE("PlayerObject::updateSpecial");
@@ -2119,6 +2139,7 @@ class $modify(CorumRankedSpectatorDummyPlayer, PlayerObject) {
 #endif
     }
 
+#if !defined(CORUM_CRASH_DIAG_NO_PLAYER_UPDATE_HOOK)
     void update(float dt) {
 #if defined(CORUM_CRASH_DIAG)
         CORUM_CRASH_TRACE(localSafetyLayer(), "PlayerObject::update");
@@ -2140,7 +2161,9 @@ class $modify(CorumRankedSpectatorDummyPlayer, PlayerObject) {
             layer->observeSpectatorNativeSnap(this, corum::ranked::SpectatorDiscontinuity::Teleport, before);
         if (layer) layer->observeSpectatorNativeUpdate(this);
     }
+#endif
 
+#if !defined(CORUM_CRASH_DIAG_NO_PLAYER_UPDATE_ROTATION_HOOK)
     void updateRotation(float dt) {
 #if defined(CORUM_CRASH_DIAG)
         CORUM_CRASH_TRACE(localSafetyLayer(), "PlayerObject::updateRotation");
@@ -2149,7 +2172,9 @@ class $modify(CorumRankedSpectatorDummyPlayer, PlayerObject) {
         PlayerObject::updateRotation(dt);
         if (auto* layer = localSafetyLayer()) layer->observeSpectatorNativeUpdate(this);
     }
+#endif
 
+#if !defined(CORUM_CRASH_DIAG_NO_PLAYER_SPIDER_TEST_JUMP_HOOK)
     void spiderTestJump(bool dynamic) {
 #if defined(CORUM_CRASH_DIAG)
         CORUM_CRASH_TRACE(localSafetyLayer(), "PlayerObject::spiderTestJump");
@@ -2162,7 +2187,9 @@ class $modify(CorumRankedSpectatorDummyPlayer, PlayerObject) {
         if (observed && before.upsideDown != m_isUpsideDown)
             layer->observeSpectatorNativeSnap(this, corum::ranked::SpectatorDiscontinuity::SpiderSnap, before);
     }
+#endif
 
+#if !defined(CORUM_CRASH_DIAG_NO_PLAYER_SET_POSITION_HOOK)
     void setPosition(CCPoint const& position) {
 #if defined(CORUM_CRASH_DIAG)
         CORUM_CRASH_TRACE(localSafetyLayer(), "PlayerObject::setPosition");
@@ -2171,7 +2198,9 @@ class $modify(CorumRankedSpectatorDummyPlayer, PlayerObject) {
         if (layer && layer->blocksSpectatorNativePlayerWrite(this)) return;
         PlayerObject::setPosition(position);
     }
+#endif
 
+#if !defined(CORUM_CRASH_DIAG_NO_PLAYER_SET_ROTATION_HOOK)
     void setRotation(float rotation) {
 #if defined(CORUM_CRASH_DIAG)
         CORUM_CRASH_TRACE(localSafetyLayer(), "PlayerObject::setRotation");
@@ -2180,8 +2209,9 @@ class $modify(CorumRankedSpectatorDummyPlayer, PlayerObject) {
         if (layer && layer->blocksSpectatorNativePlayerWrite(this)) return;
         PlayerObject::setRotation(rotation);
     }
+#endif
 
-#if !defined(GEODE_IS_WINDOWS)
+#if !defined(GEODE_IS_WINDOWS) && !defined(CORUM_CRASH_DIAG_NO_PLAYER_UPDATE_SPECIAL_HOOK)
     // Windows has no hookable native address: the SDK provides an inline body.
     // Its physics caller is blocked by update(); the driver calls that narrow
     // inline sampler directly. iOS/Android can guard the native helper as well.
@@ -2196,6 +2226,7 @@ class $modify(CorumRankedSpectatorDummyPlayer, PlayerObject) {
     }
 #endif
 
+#if !defined(CORUM_CRASH_DIAG_NO_PLAYER_SET_VISIBLE_HOOK)
     void setVisible(bool visible) {
 #if defined(CORUM_CRASH_DIAG)
         CORUM_CRASH_TRACE(localSafetyLayer(), "PlayerObject::setVisible");
@@ -2204,6 +2235,7 @@ class $modify(CorumRankedSpectatorDummyPlayer, PlayerObject) {
         if (visible && layer && layer->freezeLocalDummy(this)) visible = false;
         PlayerObject::setVisible(visible);
     }
+#endif
 };
 #endif // diagnostic PLAYER hook group
 

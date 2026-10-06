@@ -31,6 +31,52 @@ The removed Placement `saveNewScore` hook caused a different reported SIGSEGV pa
 Its beta.30 removal and safer exact-level store guard remain intact; they do not prove
 resolution of this SIGABRT.
 
+## Stage 1 device results (authoritative user evidence)
+
+The user tested all six artifacts on the same iPad, Monopole, Practice mode and
+unchanged other-mod set. This is user-performed device evidence, not host/CI inference.
+
+| Stage 1 artifact | Device result |
+|---|---|
+| baseline-debug | **CRASH** |
+| no-probes | **CRASH** |
+| official-debug-off | **CRASH** |
+| no-probes-player | **NO CRASH** |
+| no-world-persistence | **CRASH** |
+| no-gameplay | **CRASH** |
+
+All crashing variants reproduced at the same Monopole section, around 4%, where
+Robot jumps on a yellow orb (**Repro A**). Exposure duration/count and complete
+per-variant crash originals have not been supplied; NO CRASH is the reported outcome,
+not a claim of ten-minute stability or complete acceptance.
+
+The strongest comparison is no-probes versus no-probes-player: A is absent from both,
+and removing B changes CRASH to NO CRASH. The seven PlayerObject hooks in B are the
+strongest discriminator and a strong necessary/trigger condition for this reproduction.
+Debug instrumentation alone is insufficient: no-probes and official-debug-off crash.
+Removing C+D or E also did not prevent Repro A. This does not identify an individual
+B hook, legacy/new cohort, heap corruption, invalid index, OOM, hook-count cause or
+specific other-mod interaction.
+
+The user also reports a **level Clear transition crash (Repro B)**. It is a separate
+reproduction record until full reports establish the same signal and stack signature.
+The no-gameplay result does not re-establish E as Repro A's root cause. Neither
+Clear entry nor the word Clear equates this report with the older Placement SIGSEGV.
+
+| Compare from full reports | Repro A: Monopole 4% | Repro B: Clear transition |
+|---|---|---|
+| Signal / SIGABRT | Original needed | Original needed |
+| Fault thread | Original needed | Original needed |
+| vector `__append` | Reported ordinary-Practice signature; per-run original needed | Unconfirmed |
+| `Pool::getCommonHandler` | Reported ordinary-Practice signature; per-run original needed | Unconfirmed |
+| GeometryJump address/offset | Original needed | Original needed |
+| `SpriteAnimationManager::callAnimationFinished` | Reported signature; exact frame needed | Unconfirmed |
+| Released Geode/Tulip UUID and ASLR-adjusted offsets | Match against the released image below | Must match independently |
+| Clear-specific PlayLayer / EndLevelLayer frames | Record presence/absence | Record presence/absence |
+
+No new native hooks are added to investigate either scene. Existing startup registry
+and bounded entry logs are the only diagnostic observation points.
+
 ## Exact Geode/Tulip and ARM64 findings
 
 Connected GitHub reads pinned:
@@ -152,14 +198,18 @@ removes a detour/decrements users. In Tulip runtime-intervening-disabled mode, t
 removal does not restore a prepatched function: Pool/handler/common-handler/TLS machinery
 remains. A compiled-out group removes Corum detours, not other mods or Geode wrappers.
 
-A/B/C/D preprocess out their entire modify declarations. E clears public m_hooks in
+A/B/C/D Stage 1 controls preprocess out their entire modify declarations. Stage 2 B
+subsets preprocess out each excluded method and its priority target; the original
+whole-B exclusion remains available. E clears public m_hooks in
 onModify before claimHook/enable, verified in SDK 5.8.2 and runtime 5.10.1 sources;
 its PlayLayer Fields type remains for sibling groups. No new native hooks were added.
 Package modify-marker checks and startup public API registry establish the distinction
 from merely adding if(!ranked). Normal logs saturate at three entries per function.
 
-No production hook reduction has been finalized. If B is implicated, split the four
-beta.29 setter/special hooks from update/rotation/spider. Consider frame capture and
+No production hook reduction has been finalized. Stage 1 has now strongly implicated B;
+Stage 2 splits its legacy update/rotation/spider from the four beta.29 setter/special
+hooks, with A excluded from every comparison. See [the Stage 2 matrix and interpretation
+rules](IOS-PRACTICE-CRASH.md#stage-2-compiled-out-comparisons). Consider frame capture and
 scoped reconciliation only with native ordering/safety evidence. Preserve exact native
 Spider/Teleport endpoints; never infer verified snaps from position distance alone.
 If C is implicated, establish world/camera order before moving capture to postUpdate;

@@ -9,6 +9,8 @@ on:
       - 'corum-ranked-mod/CMakeLists.txt'
       - 'corum-ranked-mod/mod.json'
       - 'corum-ranked-mod/diagnostics/hook-inventory-beta30.json'
+      - 'corum-ranked-mod/diagnostics/player-hook-stage2.json'
+      - 'corum-ranked-mod/diagnostics/verify-crash-artifact.py'
       - '.github/workflows/corum-crash-diagnostic.yml'
   workflow_dispatch:
 
@@ -18,6 +20,8 @@ permissions:
 jobs:
   native-regression:
     runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v6
@@ -25,32 +29,37 @@ jobs:
           node-version: 24
       - name: Source and production callback regressions
         run: node --test --test-concurrency=2 corum-ranked-mod/tests/*.mjs
+      - name: Eight strict C++ executable suites
+        shell: bash
+        run: |
+          g++ -std=c++23 -Wall -Wextra -Wpedantic -Werror \
+            corum-ranked-mod/tests/DomainTest.cpp \
+            corum-ranked-mod/src/domain/AttemptScoring.cpp \
+            corum-ranked-mod/src/domain/EnvironmentPolicy.cpp \
+            corum-ranked-mod/src/domain/HudPresentation.cpp \
+            corum-ranked-mod/src/domain/RenderFpsMeter.cpp \
+            corum-ranked-mod/src/domain/ServerClock.cpp -o /tmp/corum-domain
+          /tmp/corum-domain
+          g++ -std=c++23 -Wall -Wextra -Wpedantic -Werror \
+            corum-ranked-mod/tests/DebugBotDomainTest.cpp \
+            corum-ranked-mod/src/debug/DebugBotConfig.cpp -o /tmp/corum-debug-bot
+          /tmp/corum-debug-bot
+          for suite in DebugSpectateDomainTest SpectatorLocalSafetyTest SpectatorRemotePolicyTest \
+            SpectatorCameraPolicyTest SpectatorInterpolationBufferTest LevelPreparationTest; do
+            g++ -std=c++23 -Wall -Wextra -Wpedantic -Werror \
+              "corum-ranked-mod/tests/$suite.cpp" -o "/tmp/corum-$suite"
+            "/tmp/corum-$suite"
+          done
+      - name: Exact Stage 2 selections and production Debug ON/OFF compile controls
+        id: matrix
+        run: python3 corum-ranked-mod/diagnostics/verify-crash-artifact.py --matrix >> "$GITHUB_OUTPUT"
 
   ios-diagnostic:
     runs-on: macos-latest
     needs: native-regression
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - variant: baseline-debug
-            debug: ON
-            exclusions: ''
-          - variant: no-probes
-            debug: ON
-            exclusions: '-DCORUM_CRASH_DIAG_NO_PROBES_HOOKS=ON'
-          - variant: official-debug-off
-            debug: OFF
-            exclusions: ''
-          - variant: no-probes-player
-            debug: ON
-            exclusions: '-DCORUM_CRASH_DIAG_NO_PROBES_HOOKS=ON -DCORUM_CRASH_DIAG_NO_PLAYER_HOOKS=ON'
-          - variant: no-world-persistence
-            debug: ON
-            exclusions: '-DCORUM_CRASH_DIAG_NO_WORLD_HOOKS=ON -DCORUM_CRASH_DIAG_NO_PERSISTENCE_HOOKS=ON'
-          - variant: no-gameplay
-            debug: ON
-            exclusions: '-DCORUM_CRASH_DIAG_NO_GAMEPLAY_HOOKS=ON'
+      matrix: ${{ fromJSON(needs.native-regression.outputs.matrix) }}
     name: iOS ${{ matrix.variant }}
     steps:
       - uses: actions/checkout@v7
@@ -68,7 +77,7 @@ jobs:
           configure-args: >-
             -DCORUM_RANKED_DEBUG_BOT_MATCH=${{ matrix.debug }}
             -DCORUM_RANKED_DEBUG_SPECTATE=${{ matrix.debug }}
-            -DCORUM_CRASH_DIAG=ON
+            -DCORUM_CRASH_DIAG=${{ matrix.diagnostic }}
             -DCORUM_CRASH_DIAG_VARIANT=${{ matrix.variant }}
             ${{ matrix.exclusions }}
       - name: Label and verify the diagnostic artifact
@@ -77,47 +86,11 @@ jobs:
           OUTPUT_DIR: ${{ steps.build.outputs.build-output }}
         shell: bash
         run: |
-          python3 - <<'PY'
-          import hashlib, json, os, pathlib, zipfile
-          out = pathlib.Path(os.environ['OUTPUT_DIR'])
-          packages = list(out.glob('*.geode'))
-          assert len(packages) == 1, packages
-          original = packages[0]
-          with zipfile.ZipFile(original) as z:
-              manifest = json.loads(z.read('mod.json'))
-              assert manifest['id'] == 'hwanhee1.corum_ranked'
-              assert manifest['version'] == 'v0.5.0-beta.30'
-              native = [n for n in z.namelist() if n.endswith('.ios.dylib')]
-              assert len(native) == 1, native
-              binary = z.read(native[0])
-          variant = os.environ['VARIANT']
-          # SDK markers identify Corum detours, not imported binding names.
-          def has(target):
-              return ('[GEODE_MODIFY_NAME] ' + target + ' ').encode() in binary
-          no_probes = variant in ['no-probes', 'no-probes-player', 'official-debug-off']
-          assert has('GJBaseGameLayer::checkCollisions') == (not no_probes)
-          assert has('EffectGameObject::triggerObject') == (not no_probes)
-          assert has('PlayerObject::update') == (variant != 'no-probes-player')
-          assert has('PlayerObject::setPosition') == (variant != 'no-probes-player')
-          assert has('GJBaseGameLayer::updateCamera') == (variant != 'no-world-persistence')
-          assert has('GJGameLevel::storeNewLocalScore') == (variant != 'no-world-persistence')
-          target = out / f'corum-beta30-diag-{variant}.geode'
-          original.rename(target)
-          provenance = {
-              'variant': variant, 'commit': os.environ['GITHUB_SHA'],
-              'baseline': '58d643d21734243e2f3a45e3006d27f178cad83e',
-              'version': manifest['version'], 'geodeSDK': '5.8.2', 'deviceGeodeRuntime': '5.10.1',
-              'bindings': 'd641858f3e1cd2c6d86013c799f224ebdb8ec1cd',
-              'sha256': hashlib.sha256(target.read_bytes()).hexdigest(),
-              'diagnosticOnly': True,
-              'nativeHookExclusionMarkersVerified': True,
-              'purpose': 'ordinary Practice isolation; do not use Ranked/Spectator with excluded safety hooks'
-          }
-          (out / 'diagnostic-provenance.json').write_text(json.dumps(provenance, indent=2) + '\n')
-          PY
+          python3 corum-ranked-mod/diagnostics/verify-crash-artifact.py \
+            --variant "$VARIANT" --output "$OUTPUT_DIR"
       - uses: actions/upload-artifact@v7
         with:
-          name: corum-beta30-diag-${{ matrix.variant }}
+          name: ${{ matrix.variant }}
           path: |
             ${{ steps.build.outputs.build-output }}/*.geode
             ${{ steps.build.outputs.build-output }}/diagnostic-provenance.json
