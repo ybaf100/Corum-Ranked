@@ -1862,6 +1862,7 @@ public:
             setHudText(m_fields->spectatorProgressLabel,
                 rendered && rendered->pose && rendered->pose->finished ? "CLEARED" :
                 rendered && rendered->pose && rendered->pose->dead ? "OPPONENT DOWN" :
+                status == corum::ranked::SpectatorLiveStatus::Buffering ? "BUFFERING..." :
                 status == corum::ranked::SpectatorLiveStatus::Fallback ? "POLLING..." :
                 m_fields->spectatorCamera.state() == corum::ranked::SpectatorCameraState::Waiting ?
                     "WAITING..." : presentation.spectatorProgressText);
