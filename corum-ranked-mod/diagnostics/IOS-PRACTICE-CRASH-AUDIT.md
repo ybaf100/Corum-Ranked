@@ -178,6 +178,13 @@ count and name failures. No bad priority target was found in source; device regi
 remain pending. Native hook inventory excludes helper methods without generated binding
 entries rather than assuming every member in a modify class becomes a hook.
 
+Registry timing was checked against Geode 5.10.1: LoaderImpl::setup calls loadHooks
+(readyToHook=true) before refreshModGraph; ModImpl::loadBinary sets loaded=true before
+loading the mod binary, and claimHook enables auto-enabled hooks before the mod Loaded
+event is sent. The existing Loaded callback therefore checks the claimed/enabled B set
+without adding a native observer. A mismatch invalidates that package's device comparison;
+the host fixture also rejects missing, duplicate, disabled and unexpected B hooks.
+
 Ordinary path: PlayLayer init creates Fields and sets rankedInitialized=true even with
 rankedLevel=false. postUpdate performs safety synchronization, vanilla and runtime tick
 before its Ranked early return. Non-Ranked safety stays inactive; Practice capture is
@@ -220,3 +227,19 @@ Practice/Placement saves and timer-zero active final attempts.
 Require repeated fixed-device A/B exposure plus Ranked/Placement/RECORD/TEST/Live Spectator/
 Spider/world/camera/Safe Mode regression before a clean beta.31 main patch. Protocol v2,
 snap segments, adaptive polling, stale Attempt protection and persistence fix are preserved.
+
+## Stage 2 completed build validation
+
+[CI run 37465106107](https://github.com/ybaf100/Corum-Ranked/actions/runs/37465106107) at
+`5438206bb8c9e088e48c6e6803586dd1b61b5d52` passed 77 source/native callback tests, eight strict C++ executables,
+eight iOS arm64 B-comparison builds and production-default Debug ON/OFF iOS builds.
+Every packaged native target set matches the pinned inventory minus the exact selected
+B exclusions and common A exclusion; there are no additional native detours. All seven
+B targets are independently checked, and provenance records enabled/disabled sets.
+The two production compile controls contain no diagnostic code and retain beta.30's
+seven iOS B detours. Default runtime body/Fields hashes remain the beta.30 snapshot.
+
+[Exact download mapping and device order](IOS-PRACTICE-CRASH.md#stage-2-compiled-out-comparisons).
+Stage 2 device outcomes and actual startup registry logs have not been received.
+Build success is not an iPad crash resolution. No main merge, beta.31 or protocol/gate
+change is made. The assistant has not performed device gameplay.

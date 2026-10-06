@@ -68,14 +68,14 @@ Every function in this table is a PlayerObject detour:
 
 | Artifact / .geode filename stem | B functions actually selected | Expected total Corum detours |
 |---|---|---:|
-| stage2-no-probes-all-player | update, updateRotation, spiderTestJump, setPosition, setRotation, setVisible, updateSpecial | 46 |
-| stage2-no-probes-no-player | none | 39 |
-| stage2-player-legacy-only | update, updateRotation, spiderTestJump | 42 |
-| stage2-player-beta29-only | setPosition, setRotation, setVisible, updateSpecial | 43 |
-| stage2-player-update-rotation-only | update, updateRotation | 41 |
-| stage2-player-spider-only | spiderTestJump | 40 |
-| stage2-player-transform-setters-only | setPosition, setRotation | 41 |
-| stage2-player-visible-special-only | setVisible, updateSpecial | 41 |
+| [stage2-no-probes-all-player](https://github.com/ybaf100/Corum-Ranked/actions/runs/37465106107/artifacts/11413814290) | update, updateRotation, spiderTestJump, setPosition, setRotation, setVisible, updateSpecial | 46 |
+| [stage2-no-probes-no-player](https://github.com/ybaf100/Corum-Ranked/actions/runs/37465106107/artifacts/11414508623) | none | 39 |
+| [stage2-player-legacy-only](https://github.com/ybaf100/Corum-Ranked/actions/runs/37465106107/artifacts/11413664155) | update, updateRotation, spiderTestJump | 42 |
+| [stage2-player-beta29-only](https://github.com/ybaf100/Corum-Ranked/actions/runs/37465106107/artifacts/11414596178) | setPosition, setRotation, setVisible, updateSpecial | 43 |
+| [stage2-player-update-rotation-only](https://github.com/ybaf100/Corum-Ranked/actions/runs/37465106107/artifacts/11414508615) | update, updateRotation | 41 |
+| [stage2-player-spider-only](https://github.com/ybaf100/Corum-Ranked/actions/runs/37465106107/artifacts/11414567354) | spiderTestJump | 40 |
+| [stage2-player-transform-setters-only](https://github.com/ybaf100/Corum-Ranked/actions/runs/37465106107/artifacts/11413849798) | setPosition, setRotation | 41 |
+| [stage2-player-visible-special-only](https://github.com/ybaf100/Corum-Ranked/actions/runs/37465106107/artifacts/11414561615) | setVisible, updateSpecial | 41 |
 
 The first two are Stage 1 no-probes/no-probes-player controls rebuilt from the same
 Stage 2 source. Legacy is exactly the three pre-beta.29 hooks; beta29 is exactly the
@@ -142,8 +142,8 @@ capture, native snap, shared timeline, world-driver/camera, persistence and Plac
 stale-state regressions still run. They are host doubles, not iPad native execution.
 
 See [hook-inventory-beta30.json](hook-inventory-beta30.json) for each target's GD 2.2081
-iOS binding and pre-beta.29 presence. Exact Geode/Tulip source, ARM64 and ordinary-path
-audit findings are being added separately; allocation, corruption and hook-count
+iOS binding and pre-beta.29 presence. The linked forensic audit records exact
+Geode/Tulip source, ARM64 and ordinary-path findings; allocation, corruption and hook-count
 causation remain unproven. Stage 1 results implicate B; Stage 2 results and original
 report/register evidence are still needed to isolate the cause.
 
@@ -184,5 +184,19 @@ The existing Placement final-attempt/persistence/stale-state, native Spider/Tele
 capture, segment deque, World Driver crossing/Follow-Y, camera ownership, polling,
 Safe Mode, Debug RECORD/TEST and wire-version regressions remain in place.
 
-Stage 2 CI run and artifact download links are recorded below after the build finishes.
-Stage 2 device outcomes remain to be supplied by the user.
+[Stage 2 CI run 37465106107](https://github.com/ybaf100/Corum-Ranked/actions/runs/37465106107)
+**passed**: 77 source/native callback tests, all 8 strict C++ executable suites and all
+10 iOS arm64 builds. The eight links in the Stage 2 matrix above download each exact
+comparison. Artifact code commit: `5438206bb8c9e088e48c6e6803586dd1b61b5d52`; later documentation-only commits do
+not change their source. All ten packages passed full native target marker, arm64,
+ID/version and diagnostic-code inclusion/exclusion checks. No workflow rerun was needed.
+
+Production-default compile checks (all diagnostic switches OFF):
+
+
+- [compile-check-beta30-debug-on](https://github.com/ybaf100/Corum-Ranked/actions/runs/37465106107/artifacts/11414610317)
+- [compile-check-beta30-debug-off](https://github.com/ybaf100/Corum-Ranked/actions/runs/37465106107/artifacts/11414561619)
+
+Stage 2 packages have not yet been tested on iPad. Startup registry and Monopole/Clear
+outcomes remain device checks; CI green does not establish a crash fix or stability.
+Main remains beta.30 and unchanged; this diagnostic branch was not merged to main.
