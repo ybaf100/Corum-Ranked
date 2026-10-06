@@ -17,7 +17,10 @@ const method = name => {
 test('actual publisher captures during 110ms ACKs, sends immutable ordered batches and drains terminal exactly once', () => {
     const viewer = read('tests/SpectatorLiveViewerNativeTest.mjs');
     const model = viewer.slice(viewer.indexOf('namespace matjson {'), viewer.indexOf('${readFileSync(join(root,'))
-        .replace('Value()=default;', 'Value()=default; static Value array(){return Value(Array{});} void push(Value v){std::get<Array>(data).push_back(std::move(v));}');
+        .replace('Value()=default;', 'Value()=default; static Value array(){return Value(Array{});} void push(Value v){std::get<Array>(data).push_back(std::move(v));}')
+        // Exercise the distinct JSON/chrono 64-bit integer types seen by the
+        // real iOS SDK; an untyped std::max used to compile only on the host.
+        .replace('Result<std::int64_t> asInt()const{', 'Result<long long> asInt()const{');
     const rankedHeader = read('src/RankedRuntime.hpp');
     const begin = rankedHeader.indexOf('[[nodiscard]] std::string const& spectatorLiveAttemptId()');
     const getter = rankedHeader.slice(begin, rankedHeader.indexOf('\n    }', begin) + 6);

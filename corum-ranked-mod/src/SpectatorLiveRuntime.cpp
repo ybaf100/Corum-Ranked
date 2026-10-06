@@ -248,7 +248,8 @@ void SpectatorLiveRuntime::publishTerminal(SpectatorGhostPose const& pose, bool 
     m_terminalBody["sequence"] = static_cast<std::int64_t>(m_publishQueue.nextSequence());
     m_terminalBody["elapsedMs"] = static_cast<std::int64_t>(std::max<std::int64_t>(0,
         publisherElapsedMs()));
-    m_terminalBody["elapsedMs"] = std::max(m_terminalBody["elapsedMs"].asInt().unwrapOr(0), m_publishQueue.lastElapsedMs() + 1);
+    m_terminalBody["elapsedMs"] = std::max<std::int64_t>(
+        m_terminalBody["elapsedMs"].asInt().unwrapOr(0), m_publishQueue.lastElapsedMs() + 1);
     m_terminalBody["keyframe"] = encodeSpectatorPose(pose);
     m_terminalSessionToken = ranked.spectatorLiveSessionToken(); m_terminalMatchToken = ranked.spectatorLiveMatchToken();
     m_terminalPublishAttemptId = attempt;

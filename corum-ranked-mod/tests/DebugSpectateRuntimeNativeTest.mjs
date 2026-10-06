@@ -504,6 +504,19 @@ int main(){
     using namespace corum::ranked;using namespace corum::ranked::debug;using namespace geode::utils::web;
     auto& runtime=DebugSpectateRuntime::get();auto& ranked=RankedRuntime::get();
     PopupCloseFixture popup;
+    runtime.refreshLiveSetting();assert(pending.size()==1&&runtime.liveSettingBusy()&&!runtime.liveEnabled());
+    assert(pending[0].operation.url.ends_with("/live-setting"));
+    assert(pending[0].operation.headers.at("Authorization")=="Bearer ranked-session");
+    matjson::Value setting;setting["liveEnabled"]=true;respond(200,setting);
+    assert(runtime.liveEnabled()&&*runtime.liveEnabled());
+    runtime.toggleLiveSetting("secret");assert(pending.size()==1);
+    assert(!pending[0].operation.body["liveEnabled"].asBool().unwrapOr(true));
+    assert(*runtime.liveEnabled()); // only the server ACK changes ON/OFF
+    setting["liveEnabled"]=false;respond(200,setting);assert(runtime.liveEnabled()&&!*runtime.liveEnabled());
+    runtime.refreshLiveSetting();respond(503);assert(!runtime.liveEnabled());
+    runtime.refreshLiveSetting();respond(200);assert(!runtime.liveEnabled()); // malformed ACK is not assumed ON
+    runtime.refreshLiveSetting();respond(200,setting);
+    runtime.toggleLiveSetting("secret");respond(500);assert(!runtime.liveEnabled()&&pending.empty());
     ranked.state.stage=RuntimeStage::Matched;runtime.start(true,"secret");assert(pending.empty());
     ranked.state.stage=RuntimeStage::Queued;runtime.start(false,"secret");assert(pending.empty());
     ranked.state.stage=RuntimeStage::Ready;ranked.ownAlive=true;runtime.start(false,"secret");assert(pending.empty());

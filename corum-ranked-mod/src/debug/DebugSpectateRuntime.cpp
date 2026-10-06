@@ -42,8 +42,11 @@ void DebugSpectateRuntime::refreshLiveSetting() {
     m_settingBusy = true;
     m_settingRequest.spawn(http.get(endpoint("live-setting")), [this](web::WebResponse response) {
         m_settingBusy = false;
-        if (!success(response)) { m_status = "LIVE SETTING UNAVAILABLE / SERVER DEBUG DISABLED"; return; }
-        m_liveEnabled = response.json().unwrapOr(matjson::Value())["liveEnabled"].asBool().unwrapOr(true);
+        auto const enabled = response.json().unwrapOr(matjson::Value())["liveEnabled"].asBool();
+        if (!success(response) || enabled.isErr()) {
+            m_liveEnabled.reset(); m_status = "LIVE SETTING UNAVAILABLE / SERVER DEBUG DISABLED"; return;
+        }
+        m_liveEnabled = enabled.unwrap();
     });
 }
 void DebugSpectateRuntime::toggleLiveSetting(std::string password) {
@@ -55,8 +58,11 @@ void DebugSpectateRuntime::toggleLiveSetting(std::string password) {
     m_settingBusy = true;
     m_settingRequest.spawn(http.post(endpoint("live-setting")), [this](web::WebResponse response) {
         m_settingBusy = false;
-        if (!success(response)) { m_status = "LIVE SETTING CHANGE FAILED - CHECK SERVER PASSWORD"; return; }
-        m_liveEnabled = response.json().unwrapOr(matjson::Value())["liveEnabled"].asBool().unwrapOr(true);
+        auto const enabled = response.json().unwrapOr(matjson::Value())["liveEnabled"].asBool();
+        if (!success(response) || enabled.isErr()) {
+            m_liveEnabled.reset(); m_status = "LIVE SETTING CHANGE FAILED - CHECK SERVER PASSWORD"; return;
+        }
+        m_liveEnabled = enabled.unwrap();
         m_status = *m_liveEnabled ? "LIVE SPECTATOR ENABLED FOR ALL MATCHES" : "LIVE SPECTATOR DISABLED - PERCENTAGE WAIT SCREEN";
     });
 }
