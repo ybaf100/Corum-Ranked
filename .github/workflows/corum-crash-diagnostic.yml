@@ -4,7 +4,11 @@ on:
   push:
     branches: ['diagnostic/ios-practice-crash-*']
     paths:
-      - 'corum-ranked-mod/**'
+      - 'corum-ranked-mod/src/**'
+      - 'corum-ranked-mod/tests/**'
+      - 'corum-ranked-mod/CMakeLists.txt'
+      - 'corum-ranked-mod/mod.json'
+      - 'corum-ranked-mod/diagnostics/hook-inventory-beta30.json'
       - '.github/workflows/corum-crash-diagnostic.yml'
   workflow_dispatch:
 
@@ -83,8 +87,20 @@ jobs:
               manifest = json.loads(z.read('mod.json'))
               assert manifest['id'] == 'hwanhee1.corum_ranked'
               assert manifest['version'] == 'v0.5.0-beta.30'
-              assert any(n.endswith('.ios.dylib') for n in z.namelist())
+              native = [n for n in z.namelist() if n.endswith('.ios.dylib')]
+              assert len(native) == 1, native
+              binary = z.read(native[0])
           variant = os.environ['VARIANT']
+          # SDK markers identify Corum detours, not imported binding names.
+          def has(target):
+              return ('[GEODE_MODIFY_NAME] ' + target + ' ').encode() in binary
+          no_probes = variant in ['no-probes', 'no-probes-player', 'official-debug-off']
+          assert has('GJBaseGameLayer::checkCollisions') == (not no_probes)
+          assert has('EffectGameObject::triggerObject') == (not no_probes)
+          assert has('PlayerObject::update') == (variant != 'no-probes-player')
+          assert has('PlayerObject::setPosition') == (variant != 'no-probes-player')
+          assert has('GJBaseGameLayer::updateCamera') == (variant != 'no-world-persistence')
+          assert has('GJGameLevel::storeNewLocalScore') == (variant != 'no-world-persistence')
           target = out / f'corum-beta30-diag-{variant}.geode'
           original.rename(target)
           provenance = {
@@ -93,7 +109,9 @@ jobs:
               'version': manifest['version'], 'geodeSDK': '5.8.2', 'deviceGeodeRuntime': '5.10.1',
               'bindings': 'd641858f3e1cd2c6d86013c799f224ebdb8ec1cd',
               'sha256': hashlib.sha256(target.read_bytes()).hexdigest(),
-              'diagnosticOnly': True, 'purpose': 'ordinary Practice isolation; do not use Ranked/Spectator with excluded safety hooks'
+              'diagnosticOnly': True,
+              'nativeHookExclusionMarkersVerified': True,
+              'purpose': 'ordinary Practice isolation; do not use Ranked/Spectator with excluded safety hooks'
           }
           (out / 'diagnostic-provenance.json').write_text(json.dumps(provenance, indent=2) + '\n')
           PY

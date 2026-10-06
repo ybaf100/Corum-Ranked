@@ -27,7 +27,7 @@ $on_mod(Loaded) {
     ++debugOnly;
 #endif
     log::info("[CorumCrashDiag] variant={} version={} baseline=58d643d21734243e2f3a45e3006d27f178cad83e modifyClasses={} functionHooks={} enabled={} uniqueTargets={} targetClasses={} debugProbeHooks={} priorityFailures={}",
-        CORUM_CRASH_DIAG_VARIANT, Mod::get()->getVersion().toString(),
+        CORUM_CRASH_DIAG_VARIANT, Mod::get()->getVersion().toVString(),
         corum::ranked::diagnostic::modifyClasses.load(std::memory_order_relaxed), hooks.size(), enabled,
         targets.size(), classes.size(), debugOnly,
         corum::ranked::diagnostic::priorityFailures.load(std::memory_order_relaxed));
