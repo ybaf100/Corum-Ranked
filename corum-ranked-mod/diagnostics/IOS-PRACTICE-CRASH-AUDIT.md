@@ -240,7 +240,8 @@ The two production compile controls contain no diagnostic code and retain beta.3
 seven iOS B detours. Default runtime body/Fields hashes remain the beta.30 snapshot.
 
 [Exact download mapping and device order](IOS-PRACTICE-CRASH.md#stage-2-compiled-out-comparisons).
-Stage 2 device outcomes and actual startup registry logs have not been received.
+The user has now supplied the two Stage 2 subset outcomes recorded below. Remaining
+Stage 2 outcomes and actual startup registry logs have not been received.
 Build success is not an iPad crash resolution. No main merge, beta.31 or protocol/gate
 change is made. The assistant has not performed device gameplay.
 
@@ -274,3 +275,12 @@ snapshot/reconcile into existing world/camera/postUpdate boundaries. Native samp
 remain. No new native hook, private Tulip patch, protocol/gate change or beta.31 is added.
 The exact native consumer ordering and actual iPad behavior still need device checks;
 post-frame history restoration alone does not prove every intra-frame native read.
+
+[Stage 3 CI run 37471925024](https://github.com/ybaf100/Corum-Ranked/actions/runs/37471925024)
+at `6eb3db615a221ff8bd67f9c19e3cd1889ab39375` passed 81 source/native regressions, eight
+strict C++ executables and all ten iOS arm64 package builds. Candidate Debug ON/OFF
+each have exactly five B detours with setVisible/updateSpecial absent. The full binary
+marker set and world-owned replacement tag match each profile. Default Debug ON/OFF
+retain beta.30's seven B detours and no diagnostic code. Exact downloads and exposure
+order are in the Stage 3 document. This is build validation; no candidate device
+acceptance, single-hook culprit or allocator mechanism is established by CI.

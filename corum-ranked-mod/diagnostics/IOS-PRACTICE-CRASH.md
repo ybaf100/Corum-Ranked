@@ -162,8 +162,9 @@ stale-state regressions still run. They are host doubles, not iPad native execut
 See [hook-inventory-beta30.json](hook-inventory-beta30.json) for each target's GD 2.2081
 iOS binding and pre-beta.29 presence. The linked forensic audit records exact
 Geode/Tulip source, ARM64 and ordinary-path findings; allocation, corruption and hook-count
-causation remain unproven. Stage 1 results implicate B; Stage 2 results and original
-report/register evidence are still needed to isolate the cause.
+causation remain unproven. Stage 1 results implicate B; the two received Stage 2
+subset results narrow it to visible/special. Further member/complement comparisons
+and original report/register evidence are still needed to isolate the cause.
 
 ## Stage 1 completed artifact validation
 
@@ -177,8 +178,8 @@ Local validation: 73 source/native callback tests and 8 strict C++ executable su
 pass, including Placement final-clear persistence/stale-state, native capture/snap,
 world/camera ownership and spectator safety. These fixtures do not run native GD on iPad.
 The assistant has not performed device gameplay. The user has completed Stage 1
-A/B above. Root cause, minimal causal hook set, Stage 2 results and ten-minute stability
-acceptance remain unverified; do not call these builds an iOS crash fix.
+A/B above. Root cause, minimal causal hook set, remaining Stage 2 results and ten-minute
+stability acceptance remain unverified; do not call these builds an iOS crash fix.
 
 See [the full forensic/source audit](IOS-PRACTICE-CRASH-AUDIT.md) for the report comparison
 placeholders, exact released Tulip ARM64 offsets, register caveats and hook audit.
@@ -215,6 +216,14 @@ Production-default compile checks (all diagnostic switches OFF):
 - [compile-check-beta30-debug-on](https://github.com/ybaf100/Corum-Ranked/actions/runs/37465106107/artifacts/11414610317)
 - [compile-check-beta30-debug-off](https://github.com/ybaf100/Corum-Ranked/actions/runs/37465106107/artifacts/11414561619)
 
-Stage 2 packages have not yet been tested on iPad. Startup registry and Monopole/Clear
-outcomes remain device checks; CI green does not establish a crash fix or stability.
+The user tested visible-special-only (CRASH) and transform-setters-only (NO CRASH)
+on iPad. Remaining Stage 2 outcomes and startup registry logs are unavailable. Clear
+signature comparison and candidate acceptance remain device checks; CI green does
+not establish a crash fix or stability.
 Main remains beta.30 and unchanged; this diagnostic branch was not merged to main.
+
+[Stage 3 downloads and world-owned candidate](IOS-PRACTICE-CRASH-VISIBLE-SPECIAL.md#validation-and-downloads)
+are now available from CI run 37471925024: 81 source/native tests, eight strict C++
+suites and ten iOS arm64 builds passed. Individual and full-B complement profiles
+separate setVisible from updateSpecial; candidate Debug ON/OFF remove both with an
+explicit visibility/Follow-Y ownership substitute. No Stage 3 device result is implied.
