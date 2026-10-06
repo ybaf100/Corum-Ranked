@@ -10,6 +10,9 @@ $on_mod(Loaded) {
 #if defined(CORUM_CRASH_DIAG_WORLD_OWNED_PRESENTATION)
     log::info("[CorumCrashDiag] world-owned-presentation=true visible/special-detours=absent device-acceptance=pending");
 #endif
+#if defined(CORUM_CRASH_DIAG_WORLD_OWNED_VISIBILITY)
+    log::info("[CorumCrashDiag] world-owned-visibility=true set-visible-detour=absent update-special-detour=retained device-acceptance=pending");
+#endif
     auto const hooks = Mod::get()->getHooks();
     std::set<std::string_view> classes;
     std::set<std::uintptr_t> targets;

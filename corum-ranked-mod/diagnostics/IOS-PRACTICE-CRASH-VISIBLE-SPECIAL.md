@@ -7,9 +7,12 @@ client gate/protocol change or manual Release is authorized before device accept
 ## Evidence and cause boundary
 
 The user confirmed visible-special-only **CRASH**, transform-setters-only **NO CRASH**.
-With probes and legacy B absent in both, setVisible/updateSpecial is the strongest
-crashing subset. A particular member, direct body corruption, invalid uniqueIndex,
-OOM or count/order/mod interaction has not yet been proven. Monopole Practice 4%
+With probes and legacy B absent in both, setVisible/updateSpecial was the strongest
+crashing subset at that stage. The user has now confirmed visible-only CRASH and
+special-only NO CRASH: setVisible is the minimum known crashing B subset in this setup.
+Direct body corruption, invalid uniqueIndex, OOM or count/order/mod interaction remains
+unproven. The [smaller visibility-only fix](IOS-PRACTICE-CRASH-VISIBLE.md) retains updateSpecial
+and supersedes this two-hook candidate for next device acceptance. Monopole Practice 4%
 Robot yellow-orb jump remains Repro A. Clear transition remains separate Repro B;
 its full report must match signal/thread/stack/runtime UUID before causes are combined.
 
@@ -144,4 +147,6 @@ diagnostic-provenance.json and logs for each run. Later documentation-only commi
 not change these artifact sources. Main remains `58d643d21734243e2f3a45e3006d27f178cad83e`
 and beta.30; no beta.31, main merge or manual Release was performed.
 
-Stage 3 device outcomes and candidate acceptance remain pending.
+Stage 3 single outcomes are now received: visible-only CRASH, special-only NO CRASH.
+Full-B complements, either functional candidate and exposure/startup logs remain
+unreported. Candidate acceptance remains pending; do not infer it from these singles.

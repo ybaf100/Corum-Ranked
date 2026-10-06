@@ -1,4 +1,4 @@
-"""Stage 2 matrix and packaged native detour verification; no device claims."""
+"""Crash-isolation matrix and packaged native detour verification; no device claims."""
 import argparse
 import hashlib
 import json
@@ -17,6 +17,7 @@ def matrix():
     return {"include": [dict(
         variant=v["variant"], debug=v["debug"], diagnostic=v["diagnostic"],
         world_owned="ON" if v.get("worldOwnedPresentation", False) else "OFF",
+        visibility_owned="ON" if v.get("worldOwnedVisibility", False) else "OFF",
         exclusions=" ".join(f"-D{flag}=ON" for flag in v["exclusions"]),
     ) for v in SELECTION["variants"]]}
 
@@ -40,6 +41,7 @@ def verify_binary(binary, variant):
     diagnostic = b"[CorumCrashDiag]" in binary
     assert diagnostic == (variant["diagnostic"] == "ON"), "diagnostic code default exclusion mismatch"
     assert (b"world-owned-presentation=true" in binary) == variant.get("worldOwnedPresentation", False), "candidate ownership path mismatch"
+    assert (b"world-owned-visibility=true" in binary) == variant.get("worldOwnedVisibility", False), "visibility-only ownership path mismatch"
     # Thin iOS arm64 Mach-O, matching the Stage 1 build target.
     assert struct.unpack_from("<II", binary) == (0xFEEDFACF, 0x0100000C), "expected iOS arm64 dylib"
     return sorted(actual)
@@ -71,6 +73,7 @@ def verify_package(output, variant):
         "compileDefinitions": variant["exclusions"],
         "diagnosticCompiledIn": variant["diagnostic"] == "ON", "debug": variant["debug"],
         "worldOwnedPresentation": variant.get("worldOwnedPresentation", False),
+        "worldOwnedVisibility": variant.get("worldOwnedVisibility", False),
         "nativeProbesExcluded": "GJBaseGameLayer::checkCollisions" not in markers,
         "enabledPlayerHooks": enabled, "disabledPlayerHooks": disabled,
         "verifiedNativeModifyTargets": markers,
@@ -78,8 +81,10 @@ def verify_package(output, variant):
         "startupRegistryCheck": "require player-registry-match=true and priorityFailures=0 on device"
             if variant["diagnostic"] == "ON" else "not compiled in; production-default compile check",
         "diagnosticOnly": True, "deviceVerified": False,
-        "purpose": "world-owned fix candidate; Practice and spectator acceptance pending" if variant.get("worldOwnedPresentation", False)
-            else "ordinary Practice isolation; excluded safety hooks are unsuitable for Ranked/Spectator",
+        "purpose": "visibility-only fix candidate; updateSpecial retained; device acceptance pending" if variant.get("worldOwnedVisibility", False)
+            else "world-owned fix candidate; Practice and spectator acceptance pending" if variant.get("worldOwnedPresentation", False)
+            else "production-default compile check" if variant["diagnostic"] == "OFF"
+            else "ordinary Practice isolation; not a functional fix candidate",
     }
     (output / "diagnostic-provenance.json").write_text(json.dumps(provenance, indent=2) + "\n")
     print(json.dumps({"variant": variant["variant"], "enabledPlayerHooks": enabled,

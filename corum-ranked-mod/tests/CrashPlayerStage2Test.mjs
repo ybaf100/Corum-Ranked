@@ -114,7 +114,8 @@ namespace prelude {using geode::Mod;namespace log=geode::log;}
 `);
         writeFileSync(join(dir, 'Geode/loader/ModEvent.hpp'), '#pragma once\n#include <Geode/Geode.hpp>\n');
         const stage3 = JSON.parse(readFileSync(join(root, 'diagnostics/player-hook-stage3.json'), 'utf8'));
-        for (const v of [...selection.variants, ...stage3.variants].filter(v => v.diagnostic === 'ON')) {
+        const stage4 = JSON.parse(readFileSync(join(root, 'diagnostics/player-hook-stage4.json'), 'utf8'));
+        for (const v of [...selection.variants, ...stage3.variants, ...stage4.variants].filter(v => v.diagnostic === 'ON')) {
             const file = join(dir, 'test.cpp'), binary = join(dir, 'test');
             writeFileSync(file, `
 #include "${join(root, 'src/diagnostic/CrashHookDiagnostics.cpp')}"
@@ -138,6 +139,7 @@ geode::Hook unknown{"PlayerObject::newAccidentalHook"};registry.push_back(&unkno
 `);
             execFileSync('g++', ['-std=c++23', '-Wall', '-Wextra', '-Wpedantic', '-Werror', ...diagnosticFlags,
                 ...(v.worldOwnedPresentation ? ['-DCORUM_CRASH_DIAG_WORLD_OWNED_PRESENTATION=1'] : []),
+                ...(v.worldOwnedVisibility ? ['-DCORUM_CRASH_DIAG_WORLD_OWNED_VISIBILITY=1'] : []),
                 '-DCORUM_CRASH_DIAG_VARIANT="host-fixture"', ...v.exclusions.map(f => `-D${f}=1`),
                 '-I', dir, file, '-o', binary], { stdio: 'pipe' });
             execFileSync(binary, [], { stdio: 'pipe' });

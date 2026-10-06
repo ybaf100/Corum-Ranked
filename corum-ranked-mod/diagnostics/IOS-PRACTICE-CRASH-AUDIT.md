@@ -284,3 +284,20 @@ marker set and world-owned replacement tag match each profile. Default Debug ON/
 retain beta.30's seven B detours and no diagnostic code. Exact downloads and exposure
 order are in the Stage 3 document. This is build validation; no candidate device
 acceptance, single-hook culprit or allocator mechanism is established by CI.
+
+## Stage 3 user isolation: setVisible
+
+The user explicitly confirmed visible-only CRASH / special-only NO CRASH. These two
+packages exclude A and each have 38 verified unique native targets. Only the selected
+B target differs. setVisible at GD 2.2081 iOS 0x22e7a8 is therefore the minimum known
+crashing B subset in this fixed setup. This result supersedes the earlier pair-level
+uncertainty about the individual target; it does not prove heap/body corruption, an
+invalid index, exact Tulip instruction cause or full-client fix acceptance. Clear's
+matching signature remains unconfirmed. No full-minus-visible/candidate result was given.
+
+The [Stage 4 visibility-only fix](IOS-PRACTICE-CRASH-VISIBLE.md) removes that detour and
+its priority target, keeps updateSpecial and all five other B hooks, and hides only
+the owned spectator dummy at existing world/camera/postUpdate boundaries. The native
+Follow-Y guard/sampler and World Driver layout/code stay beta.30; the previous history
+snapshot replacement is not used. No new detour, Tulip patch or protocol/gate change
+is introduced. Main and beta.31 remain pending actual Practice plus feature acceptance.

@@ -1,4 +1,4 @@
-# iOS ordinary Practice crash isolation (beta.30 Stage 2 diagnostics)
+# iOS ordinary Practice crash isolation (beta.30 diagnostics)
 
 This branch is diagnostic only. Main remains `58d643d21734243e2f3a45e3006d27f178cad83e`, `v0.5.0-beta.30`.
 There is no beta.31 root-cause fix or device stability claim yet.
@@ -47,7 +47,7 @@ jumps on a yellow orb (**Repro A**). The decisive comparison is no-probes versus
 no-probes-player: with A identically absent, removing B changes CRASH to NO CRASH.
 B is the strongest discriminator and a strong reproduction condition. An individual
 hook, direct hook-body corruption, invalid uniqueIndex, OOM, count/ordering pressure,
-legacy/new cohort or other-mod interaction has not been proven. The reported NO CRASH
+legacy/new cohort or other-mod interaction was not proven at Stage 1. The reported NO CRASH
 has no supplied exposure count/duration; it is not complete stability acceptance.
 
 The user separately observed a **Clear entry crash (Repro B)**. Keep its runs/logs
@@ -67,13 +67,27 @@ The user subsequently confirmed on device:
 | stage2-player-transform-setters-only | **NO CRASH** |
 
 Both exclude A and the legacy cohort. This narrows the strongest reproduction subset
-to setVisible/updateSpecial. The two individual outcomes, full-B complements and
-exact runtime mechanism are still unconfirmed. Do not infer results for the other
+to setVisible/updateSpecial. The subsequent Stage 3 singles below further isolate
+setVisible; full-B complements and exact runtime mechanism remain unconfirmed. Do not infer results for the other
 Stage 2 packages or treat subset-only NO CRASH as exoneration under full B.
 
 [Stage 3 singles, full-B complements and the concrete world-owned fix candidate](IOS-PRACTICE-CRASH-VISIBLE-SPECIAL.md).
 The candidate is opt-in on this diagnostic branch; production main and default beta.30
 remain unchanged until device Practice and spectator acceptance.
+
+## Stage 3 individual result and minimal visible fix
+
+The user confirmed **visible-only CRASH / special-only NO CRASH**. Both Stage 3 packages
+have the same 38 verified unique native targets, exclude A, and differ only in the B
+member. setVisible is the minimum known crashing B subset in this setup. Direct body
+corruption, invalid uniqueIndex, allocation cause and full-client fix acceptance are
+not established by this isolation.
+
+[Stage 4 minimal visibility fix, preserving updateSpecial](IOS-PRACTICE-CRASH-VISIBLE.md)
+replaces only the global setVisible detour with existing spectator frame ownership.
+The prior two-hook candidate is retained for historical comparison, not required by
+this single-target fix. Full-minus-visible and functional candidate outcomes remain
+unreported; main/beta.31 still require device acceptance and feature regression.
 
 ## Stage 2 compiled-out comparisons
 
@@ -178,8 +192,8 @@ Local validation: 73 source/native callback tests and 8 strict C++ executable su
 pass, including Placement final-clear persistence/stale-state, native capture/snap,
 world/camera ownership and spectator safety. These fixtures do not run native GD on iPad.
 The assistant has not performed device gameplay. The user has completed Stage 1
-A/B above. Root cause, minimal causal hook set, remaining Stage 2 results and ten-minute
-stability acceptance remain unverified; do not call these builds an iOS crash fix.
+A/B above. Tulip failure mechanism, full-client complement/candidate results and
+ten-minute stability acceptance remain unverified; do not call these builds an iOS crash fix.
 
 See [the full forensic/source audit](IOS-PRACTICE-CRASH-AUDIT.md) for the report comparison
 placeholders, exact released Tulip ARM64 offsets, register caveats and hook audit.

@@ -143,7 +143,7 @@ int main(){
 #endif
    // Windows updateSpecial is inline in its blocked physics caller; no detour.
    p->setVisible(true);
-#if defined(CORUM_CRASH_DIAG_WORLD_OWNED_PRESENTATION)
+#if defined(CORUM_CRASH_DIAG_WORLD_OWNED_PRESENTATION) || defined(CORUM_CRASH_DIAG_WORLD_OWNED_VISIBILITY)
    assert(p->isVisible()); // no global setter hook; hide before scene traversal
 #else
    assert(!p->isVisible());
@@ -154,7 +154,7 @@ int main(){
    p->m_isSpider=false;p->m_isUpsideDown=false;
    b->updateCamera(dt);b->updateCamera(dt);
    assert(!p->isVisible());
-#if defined(CORUM_CRASH_DIAG_WORLD_OWNED_PRESENTATION)
+#if defined(CORUM_CRASH_DIAG_WORLD_OWNED_PRESENTATION) || defined(CORUM_CRASH_DIAG_WORLD_OWNED_VISIBILITY)
    assert(p->m_followRelated==ownedIndex && p->m_unk838==ownedAccumulator);
    assert(p->m_playerFollowFloats==ownedHistory); // no native dt double-write
 #endif
@@ -267,11 +267,15 @@ int main(){
         writeFileSync(join(dir,'test.cpp'),cpp);
         for(const config of [{debug:false,windows:false},{debug:true,windows:false},{debug:true,windows:true},
             {debug:false,windows:false,candidate:true},{debug:true,windows:false,candidate:true},
-            {debug:true,windows:true,candidate:true}]){
+            {debug:true,windows:true,candidate:true},
+            {debug:false,windows:false,visibility:true},{debug:true,windows:false,visibility:true},
+            {debug:true,windows:true,visibility:true}]){
             const binary=join(dir,'test');
             execFileSync('g++',['-std=c++23','-Wall','-Wextra','-Wpedantic','-Werror',...(config.debug?['-DCORUM_RANKED_DEBUG_SPECTATE=1']:[]),...(config.windows?['-DGEODE_IS_WINDOWS=1']:[]),
                 ...(config.candidate?['-DCORUM_CRASH_DIAG_WORLD_OWNED_PRESENTATION=1',
-                    '-DCORUM_CRASH_DIAG_NO_PLAYER_SET_VISIBLE_HOOK=1','-DCORUM_CRASH_DIAG_NO_PLAYER_UPDATE_SPECIAL_HOOK=1']:[]),'-I',dir,
+                    '-DCORUM_CRASH_DIAG_NO_PLAYER_SET_VISIBLE_HOOK=1','-DCORUM_CRASH_DIAG_NO_PLAYER_UPDATE_SPECIAL_HOOK=1']:[]),
+                ...(config.visibility?['-DCORUM_CRASH_DIAG_WORLD_OWNED_VISIBILITY=1',
+                    '-DCORUM_CRASH_DIAG_NO_PLAYER_SET_VISIBLE_HOOK=1']:[]),'-I',dir,
                 join(root,'src/spectator/CorumRemotePlayer.cpp'),join(root,'src/spectator/CorumSpectatorCamera.cpp'),join(root,'src/spectator/SpectatorWorldDriver.cpp'),join(root,'src/spectator/SpectatorPlayerCapture.cpp'),join(dir,'test.cpp'),'-o',binary],{stdio:'pipe'});
             assert.match(execFileSync(binary,{encoding:'utf8'}),/60-120-240Hz passed/);
         }

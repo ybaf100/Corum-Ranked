@@ -238,6 +238,12 @@ int main() {
         writeFileSync(file, cpp);
         execFileSync('g++', ['-std=c++23', '-Wall', '-Wextra', '-Wpedantic', '-Werror', file, '-o', binary], { stdio: 'pipe' });
         execFileSync(binary, [], { stdio: 'pipe' });
+        // Visible-only fix retains the original Follow-Y guard and all result
+        // protection; it does not require the earlier history replacement.
+        execFileSync('g++', ['-std=c++23', '-Wall', '-Wextra', '-Wpedantic', '-Werror',
+            '-DCORUM_RANKED_DEBUG_SPECTATE=1', '-DCORUM_CRASH_DIAG_WORLD_OWNED_VISIBILITY=1',
+            '-DCORUM_CRASH_DIAG_NO_PLAYER_SET_VISIBLE_HOOK=1', file, '-o', binary], { stdio: 'pipe' });
+        execFileSync(binary, [], { stdio: 'pipe' });
         // The candidate removes visibility/helper detours, while every actual
         // death/result/score firewall callback above remains unchanged.
         execFileSync('g++', ['-std=c++23', '-Wall', '-Wextra', '-Wpedantic', '-Werror',
