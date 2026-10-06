@@ -1,3 +1,11 @@
+## v0.5.0-beta.28
+
+- Give spectator viewport one final owner: native camera once, then recorded-camera correction of actual render transforms. Remove camera work from viewer polling, guard duplicate lifecycle calls and retain a camera-only scoped native remote-target fallback with exact dummy restoration.
+- Render every accepted packet on a bounded publisher timestamp buffer shared by Remote Player and camera. Adapt warm-up headroom to HTTP arrival cadence; preserve 1x gameplay, shortest rotation, discrete boundaries, verified snaps and exact terminal hold. Keep HTTP rates/server architecture unchanged.
+- Override spectator progress sprite/label only; preserve hidden/frozen dummy, normal Ranked/Placement/Practice, New Best, persistence and score authority. Add bounded native transform diagnostics and aggregate Debug buffer/RTT metrics.
+- Execute actual camera hook/renderer/adapter against exact beta27 iPadOS sequence18–22; test batching, starvation, bounds and 60/120/144/240Hz. Preserve existing HTTP/PostgreSQL Debug and audio/safety regressions. Actual post-fix iPadOS visual QA is still required.
+- Synchronize beta28 manifest, exact client/server gate and npm workspace/lock versions. No new source copied from Globed/AttemptPlaybackMod, no manual Release or Web changes. See BETA28-RELEASE.md for measured-data limits and device checklist.
+
 ## v0.5.0-beta.27
 
 - Hand Ranked-owned lobby/match audio to gameplay only after successful native PlayLayer init, including Debug RECORD and TEST. Retained Ranked returns reselect the current authoritative lobby mode; GD level music and full-menu restore semantics are preserved.

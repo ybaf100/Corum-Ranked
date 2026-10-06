@@ -2,6 +2,8 @@
 #include "RankedAudioManager.hpp"
 #include "SpectatorLiveRuntime.hpp"
 #include "domain/SpectatorCapturePolicy.hpp"
+#include "domain/SpectatorProgressPolicy.hpp"
+#include "spectator/ScopedCameraTargetOverride.hpp"
 #include "spectator/SpectatorPlayerCapture.hpp"
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
 #include "debug/DebugSpectateRuntime.hpp"
@@ -202,9 +204,14 @@ public:
         corum::ranked::SpectatorSceneContext sceneContext;
         bool spectatorScenePrepared = false;
         bool spectatorPresentationRetired = false;
+        std::optional<corum::ranked::SpectatorRemoteFrame> spectatorRenderedFrame;
+        std::optional<unsigned int> spectatorCameraFrameNumber;
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         bool debugRecordScene = false, debugPlaybackScene = false, debugRecordHasFrame = false;
         CCLabelBMFont* debugSpectateHud = nullptr;
+        int cameraForensicFrames = 0;
+        std::int64_t cameraForensicSequence = -1;
+        bool cameraForensicFrame = false;
 #endif
     };
 
@@ -512,7 +519,7 @@ public:
         ScopedPersistenceOwner persistence(this);
         // Capture the real viewport BEFORE vanilla reset clears completion/death
         // presentation. Waiting never follows the reset dummy or teleports to 0.
-        m_fields->spectatorCamera.update(this, true, std::nullopt, std::nullopt);
+        m_fields->spectatorCamera.attach(this);
         m_fields->spectatorScenePrepared = true;
         if (m_hasCompletedLevel || (m_player1 && m_player1->m_isDead)) {
             m_fields->localSafety.resetDummy();
@@ -527,28 +534,103 @@ public:
         return true;
     }
 
-    void driveSpectatorCamera() {
-        if (!m_fields->spectatorScenePrepared) return;
+    bool spectatorCameraActive() {
+        if (!m_fields->spectatorScenePrepared || m_isTestMode || m_isPracticeMode) return false;
         auto& runtime = corum::ranked::RankedRuntime::get();
         auto spectatorAuthority = runtime.isSpectating();
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         if (m_fields->debugPlaybackScene) spectatorAuthority = corum::ranked::debug::DebugSpectateRuntime::get().playbackLevel(m_fields->levelId);
 #endif
-        auto const active = !m_fields->spectatorPresentationRetired && !m_fields->autoExitRequested &&
+        return !m_fields->spectatorPresentationRetired && !m_fields->autoExitRequested &&
             m_fields->localSafety.active() && spectatorAuthority && watchableSpectatorScene();
-        auto const frame = corum::ranked::SpectatorLiveRuntime::get().presentationFrame();
-        m_fields->spectatorCamera.update(this, active,
+    }
+
+    bool beginSpectatorCameraFrame() {
+        auto const frameNumber = CCDirector::sharedDirector()->getTotalFrames();
+        if (m_fields->spectatorCameraFrameNumber == frameNumber) return false;
+        m_fields->spectatorCameraFrameNumber = frameNumber;
+        m_fields->spectatorRenderedFrame = corum::ranked::SpectatorLiveRuntime::get().presentationFrame();
+        m_fields->remotePlayer.update(this, true, m_fields->spectatorRenderedFrame);
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+        auto const frame = m_fields->remotePlayer.cameraFrame();
+        m_fields->cameraForensicFrame = m_fields->debugPlaybackScene && frame && frame->pose &&
+            m_fields->cameraForensicFrames < 8 && frame->sequence != m_fields->cameraForensicSequence &&
+            (frame->sequence <= 1 || (frame->sequence >= 18 && frame->sequence <= 22));
+        if (m_fields->cameraForensicFrame) {
+            ++m_fields->cameraForensicFrames; m_fields->cameraForensicSequence = frame->sequence;
+        }
+#endif
+        return true;
+    }
+
+    std::optional<CCPoint> spectatorNativeCameraTarget() {
+        auto const frame = m_fields->remotePlayer.cameraFrame();
+        if (!frame || !frame->pose || frame->pose->cameraInvalid || frame->pose->camera) return std::nullopt;
+        m_fields->spectatorCamera.prepareNativeFallback(this);
+        return CCPoint{frame->pose->x, frame->pose->y};
+    }
+
+    void logSpectatorNativeCamera(char const* stage) {
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+        if (!m_fields->cameraForensicFrame) return;
+        auto const frame = m_fields->remotePlayer.cameraFrame();
+        auto const& pose = *frame->pose;
+        auto const native = m_gameState.m_cameraPosition;
+        auto const transform = m_objectLayer->nodeToWorldTransform();
+        log::info("[SpectatorCamera] {} frame={} renderSequence={} renderElapsedMs={} remoteX={} remoteY={} hasPacketCamera={} packetCameraX={} packetCameraY={} nativeCameraX={} nativeCameraY={} objectLayerX={} objectLayerY={} viewportTX={} viewportTY={}",
+            stage, CCDirector::sharedDirector()->getTotalFrames(), frame->sequence, frame->publisherElapsedMs,
+            pose.x, pose.y, pose.camera.has_value(), pose.camera ? pose.camera->x : 0, pose.camera ? pose.camera->y : 0,
+            native.x, native.y, m_objectLayer->getPositionX(), m_objectLayer->getPositionY(), transform.tx, transform.ty);
+#else
+        (void)stage;
+#endif
+    }
+
+    void applySpectatorProgressPresentation() {
+        if (!spectatorCameraActive() || !m_level) return;
+        auto const frame = m_fields->remotePlayer.cameraFrame();
+        if (!frame) return;
+        auto const& runtime = corum::ranked::RankedRuntime::get();
+        auto authoritative = runtime.view().match.opponentProgress;
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+        if (m_fields->debugPlaybackScene) authoritative.reset();
+#endif
+        auto const percent = corum::ranked::spectatorProgressPercent(*frame, m_levelLength, m_level->m_timestamp, authoritative);
+        if (!percent) return;
+        if (m_progressFill) m_progressFill->setTextureRect({0, 0, m_progressWidth * *percent / 100.0f, m_progressHeight});
+        if (m_percentageLabel) m_percentageLabel->setString((m_decimalPercentage
+            ? fmt::format("{:.2f}%", *percent) : fmt::format("{:.0f}%", std::floor(*percent))).c_str());
+    }
+
+    void updateProgressbar() {
+        PlayLayer::updateProgressbar();
+        applySpectatorProgressPresentation();
+    }
+
+    void driveSpectatorCamera() {
+        auto const& frame = m_fields->spectatorRenderedFrame;
+        m_fields->spectatorCamera.update(this, spectatorCameraActive(),
             frame ? std::optional(frame->context) : std::nullopt,
             m_fields->remotePlayer.cameraFrame());
+        applySpectatorProgressPresentation();
+    }
+
+    void ensureSpectatorCameraFrame(float dt) {
+        // The hook is the sole owner. Heartbeat fills in a stopped native
+        // lifecycle, but cannot cause a second camera calculation in this frame.
+        if (spectatorCameraActive() && m_fields->spectatorCameraFrameNumber != CCDirector::sharedDirector()->getTotalFrames())
+            GJBaseGameLayer::updateCamera(dt);
     }
 
     void cleanupSpectatorPresentation() {
         // Release ownership before destroying its visual or native scene state.
         m_fields->spectatorCamera.cleanup(this);
         m_fields->remotePlayer.cleanup();
+        m_fields->spectatorRenderedFrame.reset(); m_fields->spectatorCameraFrameNumber.reset();
     }
 
     void updateSpectatorView(float dt) {
+        (void)dt;
         auto& runtime = corum::ranked::RankedRuntime::get();
         auto& live = corum::ranked::SpectatorLiveRuntime::get();
         live.tickPublisher({}, true);
@@ -570,22 +652,16 @@ public:
         if (m_player1) m_player1->setVisible(false);
         (void)freezeLocalDummy(m_player1);
         live.tickViewer();
-        m_fields->remotePlayer.update(
-            this, spectatorAuthority && m_fields->localSafety.active(), live.presentationFrame()
-        );
-        driveSpectatorCamera();
-        // Native postUpdate may be stopped by the genuine prior Clear. Continue
-        // applying the native world camera without simulating a Ranked Attempt.
-        GJBaseGameLayer::updateCamera(dt);
         auto const now = std::chrono::steady_clock::now();
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         if (m_fields->debugPlaybackScene) {
             if (m_fields->debugSpectateHud) {
                 auto const waiting = live.status() == corum::ranked::SpectatorLiveStatus::Waiting;
                 auto const fallback = live.status() == corum::ranked::SpectatorLiveStatus::Fallback;
+                auto const buffering = live.status() == corum::ranked::SpectatorLiveStatus::Buffering;
                 auto const complete = corum::ranked::debug::DebugSpectateRuntime::get().playbackComplete();
                 m_fields->debugSpectateHud->setString(complete ? "SERVER PLAYBACK COMPLETE" :
-                    waiting ? "LIVE SPECTATOR - WAITING FOR OPPONENT..." : fallback ? "LIVE SPECTATOR - POLLING..." : "LIVE SPECTATOR - VOICE");
+                    waiting ? "LIVE SPECTATOR - WAITING FOR OPPONENT..." : buffering ? "LIVE SPECTATOR - BUFFERING..." : fallback ? "LIVE SPECTATOR - POLLING..." : "LIVE SPECTATOR - VOICE");
             }
             return;
         }
@@ -607,6 +683,7 @@ public:
         syncSpectatorLocalSafety();
         if (m_fields->spectatorMode) {
             updateSpectatorView(dt);
+            ensureSpectatorCameraFrame(dt);
             return;
         }
         // An ended terminal Attempt waits for authority in THIS scene. Ordinary
@@ -1806,8 +1883,8 @@ CorumRankedPlayLayer* localSafetyLayer() {
 }
 } // namespace
 
-// Native forced-camera ownership, not player pointer/pose swapping. The exact
-// current scene's controller is inert for every ordinary gameplay mode.
+// One final viewport owner. Ordinary gameplay delegates unchanged; only a
+// scoped missing-camera fallback borrows the dummy as a native camera target.
 class $modify(CorumRankedSpectatorCameraHook, GJBaseGameLayer) {
     static void onModify(auto& self) {
         if (!self.setHookPriorityPre("GJBaseGameLayer::updateCamera", Priority::First)) {
@@ -1819,10 +1896,20 @@ class $modify(CorumRankedSpectatorCameraHook, GJBaseGameLayer) {
     }
     void updateCamera(float dt) {
         auto* layer = PlayLayer::get();
-        if (layer && static_cast<GJBaseGameLayer*>(layer) == this) {
-            static_cast<CorumRankedPlayLayer*>(layer)->driveSpectatorCamera();
+        auto* owner = layer && static_cast<GJBaseGameLayer*>(layer) == this
+            ? static_cast<CorumRankedPlayLayer*>(layer) : nullptr;
+        if (!owner || !owner->spectatorCameraActive()) {
+            GJBaseGameLayer::updateCamera(dt); return;
         }
-        GJBaseGameLayer::updateCamera(dt);
+        if (!owner->beginSpectatorCameraFrame()) return;
+        owner->logSpectatorNativeCamera("before vanilla");
+        {
+            corum::ranked::ScopedCameraTargetOverride target(m_player1, owner->spectatorNativeCameraTarget());
+            GJBaseGameLayer::updateCamera(dt);
+        }
+        owner->logSpectatorNativeCamera("after vanilla");
+        owner->driveSpectatorCamera();
+        owner->logSpectatorNativeCamera("after spectator correction");
     }
 
     void update(float dt) {

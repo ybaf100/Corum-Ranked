@@ -126,7 +126,8 @@ test('live spectator path is read-only and keeps polling fallback', () => {
     assert.match(play, /schedule\(schedule_selector\(CorumRankedPlayLayer::spectatorFrame\)\)/);
     assert.match(spectatorBranch, /m_player1->setVisible\(false\)/);
     assert.doesNotMatch(spectatorBranch, /m_player1->setPosition\(|m_player1->setRotation\(|m_player1->setVisible\(true\)/);
-    assert.match(spectatorBranch, /remotePlayer\.update/);
+    assert.doesNotMatch(spectatorBranch, /remotePlayer\.update|driveSpectatorCamera|updateCamera\(/);
+    assert.match(play, /bool beginSpectatorCameraFrame\(\)[\s\S]*?remotePlayer\.update/);
     for (const forbidden of ['reportAttemptStart(', 'reportAttemptProgress(', 'reportAttemptEnd(', 'levelComplete()']) {
         assert(!spectatorBranch.includes(forbidden), `Spectator branch must not invoke ${forbidden}`);
     }

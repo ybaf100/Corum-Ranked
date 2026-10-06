@@ -243,6 +243,7 @@ void CorumRemotePlayer::update(
         return;
     }
     if (decision == SpectatorRemotePoseDecision::Applied) {
+        m_renderedElapsedMs = frame->publisherElapsedMs;
         applyPose(*m_policy.pose());
         if (m_policy.state() == SpectatorRemoteState::Dead) {
             // Safe presentation fade; no native playerDestroyed/PlayLayer lifecycle.

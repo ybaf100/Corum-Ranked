@@ -1,6 +1,7 @@
 #pragma once
 
 #include "domain/SpectatorRemotePolicy.hpp"
+#include "domain/SpectatorInterpolationBuffer.hpp"
 
 #include <Geode/Geode.hpp>
 #include <Geode/utils/web.hpp>
@@ -16,6 +17,7 @@ enum class SpectatorLiveStatus {
     Idle,
     Waiting,
     Live,
+    Buffering,
     Fallback,
 };
 
@@ -83,9 +85,12 @@ private:
     std::string m_opponentName;
     std::string m_reason;
     SpectatorLiveStatus m_status = SpectatorLiveStatus::Idle;
-    std::optional<SpectatorGhostPose> m_previousPose;
-    std::optional<SpectatorGhostPose> m_currentPose;
-    std::chrono::steady_clock::time_point m_poseReceivedAt {};
+    // Latest accepted pose is validation state, never the rendering timeline.
+    std::optional<SpectatorGhostPose> m_lastAcceptedPose;
+    std::int64_t m_lastPublisherElapsedMs = -1;
+    mutable SpectatorInterpolationBuffer m_sampleBuffer;
+    std::chrono::steady_clock::time_point m_nextBufferMetricAt {};
+    bool m_serverPlaybackComplete = false;
     std::chrono::steady_clock::time_point m_lastPacketAt {};
     std::chrono::steady_clock::time_point m_nextViewerPollAt {};
     std::uint64_t m_viewRequestGeneration = 0;

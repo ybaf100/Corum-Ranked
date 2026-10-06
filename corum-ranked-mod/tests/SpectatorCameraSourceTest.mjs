@@ -6,7 +6,7 @@ const play = read('src/PlayLayer.cpp');
 const camera = read('src/spectator/CorumSpectatorCamera.cpp');
 const end = read('src/EndLevelLayer.cpp');
 
-test('camera uses native forced moves, never a dummy position or player pointer swap', () => {
+test('camera final adapter moves render transforms; target override stays scoped and separate', () => {
     assert.match(camera, /cameraMoveX\(target.x, 0.0f/);
     assert.match(camera, /cameraMoveY\(target.y, 0.0f/);
     assert.match(play, /class \$modify\(CorumRankedSpectatorCameraHook, GJBaseGameLayer\)/);
@@ -14,6 +14,19 @@ test('camera uses native forced moves, never a dummy position or player pointer 
     assert.match(play, /remotePlayer.cameraFrame\(\)/);
     assert.doesNotMatch(camera.replace(/\/\/[^\n]*/g, ''), /m_player[12]|reportAttempt|destroyPlayer\(|levelComplete\(/);
     assert.doesNotMatch(play, /m_player1->set(?:Position|Rotation)\(|m_player1\s*=/);
+});
+test('single camera owner applies native before final correction with no viewer duplicate', () => {
+    const hook=play.slice(play.indexOf('class $modify(CorumRankedSpectatorCameraHook'));
+    assert(hook.indexOf('GJBaseGameLayer::updateCamera(dt);\n        }') < hook.indexOf('owner->driveSpectatorCamera()'));
+    assert.match(hook, /ScopedCameraTargetOverride/);
+    const view=play.slice(play.indexOf('void updateSpectatorView('),play.indexOf('void spectatorFrame('));
+    assert.doesNotMatch(view, /updateCamera\(|driveSpectatorCamera|remotePlayer.update/);
+    assert.match(play, /getTotalFrames\(\)/);
+    assert.match(camera, /nodeToParentTransform\(\)/);assert.match(camera, /node->setPosition/);
+    assert.match(camera, /updateCameraBGArt/);
+    const scoped=read('src/spectator/ScopedCameraTargetOverride.hpp');
+    assert.match(scoped, /~ScopedCameraTargetOverride/);assert.match(scoped, /m_positionX = m_x/);
+    assert.match(scoped, /cocos2d::CCNode::setPosition/);
 });
 test('same-scene viewer heartbeat owns entry/exit independently of stopped vanilla gameplay', () => {
     assert.match(play, /schedule\(schedule_selector\(CorumRankedPlayLayer::spectatorFrame\)\)/);

@@ -11,6 +11,9 @@ namespace corum::ranked {
 // Camera ownership is released by the scene before native teardown.
 class CorumSpectatorCamera final {
 public:
+    // Capture the pre-reset waiting viewport without driving native camera.
+    void attach(GJBaseGameLayer* layer);
+    void prepareNativeFallback(GJBaseGameLayer* layer);
     void update(
         GJBaseGameLayer* layer, bool authorizedDummy,
         std::optional<SpectatorRemoteContext> const& liveContext,
@@ -21,6 +24,7 @@ public:
     [[nodiscard]] SpectatorCameraState state() const { return m_policy.state(); }
 
 private:
+    void applyViewport(GJBaseGameLayer* layer, SpectatorCameraPoint target);
     SpectatorCameraPolicy m_policy;
     bool m_attached = false;
     bool m_previousForceX = false;

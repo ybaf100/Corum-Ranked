@@ -23,10 +23,11 @@ const method = signature => {
 
 test('actual viewer decoder recovers timeout only on fresh validated packets and keeps interpolation bounded', () => {
     const methods = ['void SpectatorLiveRuntime::applyViewerResponse(', 'void SpectatorLiveRuntime::setFallback(',
-        'std::optional<SpectatorGhostPose> SpectatorLiveRuntime::interpolatedPose()'].map(method).join('\n');
+        'std::optional<SpectatorGhostPose> SpectatorLiveRuntime::interpolatedPose()'].map(method).join('\n').replaceAll('std::chrono::steady_clock::now()', 'testClockNow()');
     const fields = header.slice(header.indexOf('    std::string m_viewMatchId;'), header.indexOf('    geode::async::TaskHolder'));
     const cpp = `
 #include "${join(root, 'src/domain/SpectatorRemotePolicy.hpp')}"
+#include "${join(root, 'src/domain/SpectatorInterpolationBuffer.hpp')}"
 #include <algorithm>
 #include <cassert>
 #include <chrono>
@@ -47,6 +48,7 @@ struct Value {
     Value(std::int64_t x):data(x){} Value(double x):data(x){}
     Value(char const* x):data(std::string(x)){} Value(std::string x):data(std::move(x)){}
     Value(Array x):data(std::move(x)){} Value(Object x):data(std::move(x)){}
+    bool contains(std::string const& k)const{auto p=std::get_if<Object>(&data);return p && p->contains(k);}
     bool isObject()const{return std::holds_alternative<Object>(data);}
     Value operator[](std::string const& k)const{
         if(auto p=std::get_if<Object>(&data)){auto i=p->find(k);if(i!=p->end())return i->second;}return {};
@@ -64,6 +66,10 @@ struct Value {
 }
 ${readFileSync(join(root, "src/spectator/SpectatorPoseCodec.hpp"), "utf8").replace(/^#include.*$|^#pragma once$/gm, "")}
 namespace corum::ranked::log {template<class... T> void info(T...){} template<class... T> void warn(T...){} template<class... T> void debug(T...){} }
+auto testWall = std::chrono::steady_clock::time_point{};
+auto testClockNow(){return testWall;}
+void advance(double ms){testWall+=std::chrono::milliseconds(static_cast<int>(ms));}
+constexpr auto kViewerPollInterval=std::chrono::milliseconds(80);
 constexpr int kProtocolVersion=2;
 constexpr float kPoseDiscontinuityDistance=400;
 using corum::ranked::SpectatorGhostPose;
@@ -90,7 +96,7 @@ ${methods}
 matjson::Value response(int sequence,double x,std::string attempt="A",int generation=1){
     matjson::Value packet;packet["protocolVersion"]=2;packet["matchId"]="match";
     packet["roundNumber"]=1;packet["attemptId"]=attempt;packet["generation"]=generation;
-    packet["sequence"]=sequence;packet["keyframe"]["x"]=x;packet["keyframe"]["y"]=80.0;
+    packet["sequence"]=sequence;packet["elapsedMs"]=sequence*50;packet["keyframe"]["x"]=x;packet["keyframe"]["y"]=80.0;
     packet["keyframe"]["rotation"]=0.0;
     packet["keyframe"]["mode"]="CUBE";packet["keyframe"]["mini"]=false;
     packet["keyframe"]["upsideDown"]=false;packet["keyframe"]["flipped"]=false;
@@ -116,7 +122,8 @@ int main(){
         modes.applyViewerResponse(response(0,100));
         auto incoming=response(1,150);auto pp=incoming["packets"].asArray().unwrap();pp[0]["keyframe"]=encodeSpectatorPose(native);
         incoming["packets"]=pp;modes.applyViewerResponse(incoming);
-        auto sample=modes.interpolatedPose();assert(sample && sample->mode==mode && sample->mini && sample->upsideDown);
+        auto sample=modes.interpolatedPose();assert(sample && sample->mode==SpectatorGameMode::Cube && !sample->mini);
+        assert(modes.m_lastAcceptedPose->mode==mode && modes.m_lastAcceptedPose->mini && modes.m_lastAcceptedPose->upsideDown);
     }
     auto replaceKeyframe=[](matjson::Value root,SpectatorGhostPose pose){
         auto p=root["packets"].asArray().unwrap();p[0]["keyframe"]=encodeSpectatorPose(pose);root["packets"]=p;return root;
@@ -133,20 +140,22 @@ int main(){
     snapped.discontinuity=SpectatorSnapEvidence{SpectatorDiscontinuity::Teleport,start.x,start.y,snapped.x,snapped.y};
     relocation.applyViewerResponse(replaceKeyframe(response(${evidence.rejectedSequence},snapped.x),snapped));
     assert(relocation.m_status==SpectatorLiveStatus::Live && relocation.m_viewPresentationEpoch==identity);
-    assert(!relocation.m_previousPose && relocation.interpolatedPose()->x==snapped.x);
+    assert(relocation.m_sampleBuffer.size()==1 && relocation.interpolatedPose()->x==snapped.x);
     assert(relocation.interpolatedPose()->rotation==90 && relocation.interpolatedPose()->camera->y==200);
     auto continuous=snapped;continuous.discontinuity.reset();continuous.x+=10;
     continuous.camera=SpectatorCameraOrigin{1439.7268f,210};
     relocation.applyViewerResponse(replaceKeyframe(response(21,continuous.x),continuous));
-    relocation.m_poseReceivedAt=std::chrono::steady_clock::now()-std::chrono::milliseconds(25);
+    advance(25);
     auto smooth=relocation.interpolatedPose();assert(smooth->x>snapped.x && smooth->x<continuous.x);
     assert(smooth->camera->y>200 && smooth->camera->y<210);
     continuous.cameraSnap=true;continuous.camera->y=1500;
     relocation.applyViewerResponse(replaceKeyframe(response(22,continuous.x),continuous));
+    assert(relocation.interpolatedPose()->camera->y<1500);advance(75);
     assert(relocation.interpolatedPose()->camera->y==1500); // native camera relocation independent from pose
     continuous.dead=true;relocation.applyViewerResponse(replaceKeyframe(response(23,continuous.x),continuous));
+    assert(!relocation.interpolatedPose()->dead);advance(50);
     assert(relocation.interpolatedPose()->dead && relocation.interpolatedPose()->camera->y==1500);
-    relocation.m_poseReceivedAt=std::chrono::steady_clock::now()-std::chrono::hours(1);
+    advance(3600000);
     assert(relocation.interpolatedPose()->x==continuous.x); // exact terminal, no extrapolation
     SpectatorLiveRuntime corrupt;corrupt.m_viewMatchId="match";
     corrupt.applyViewerResponse(replaceKeyframe(response(0,start.x),start));
@@ -176,8 +185,8 @@ int main(){
     SpectatorLiveRuntime viewer;viewer.m_viewMatchId="match";
     viewer.applyViewerResponse(response(0,100));assert(viewer.m_status==SpectatorLiveStatus::Live);
     viewer.applyViewerResponse(response(1,200));
-    viewer.m_poseReceivedAt=std::chrono::steady_clock::now()-std::chrono::seconds(5);
-    assert(viewer.interpolatedPose()->x==200); // NO extrapolation
+    advance(5000);
+    assert(viewer.interpolatedPose()->x==100); // Warm-up holds first pose; NO extrapolation
     viewer.setFallback("STREAM_TIMEOUT");assert(!viewer.interpolatedPose());
     viewer.applyViewerResponse(response(1,200));assert(viewer.m_status==SpectatorLiveStatus::Fallback);
     auto empty=response(1,200);empty["packets"]=matjson::Value::Array{};
@@ -193,6 +202,7 @@ int main(){
     viewer.applyViewerResponse(next);assert(viewer.m_viewPresentationEpoch>epoch && viewer.interpolatedPose()->x==20);
     auto dead=response(1,30,"B",2);auto terminal=dead["packets"].asArray().unwrap();terminal[0]["keyframe"]["dead"]=true;
     dead["packets"]=terminal;viewer.applyViewerResponse(dead);
+    assert(!viewer.interpolatedPose()->dead);advance(50);
     assert(viewer.interpolatedPose()->x==30 && viewer.interpolatedPose()->dead);
     viewer.applyViewerResponse(response(2,40,"B",2));assert(viewer.m_reason=="TERMINAL_STREAM_CANNOT_RESUME");
     viewer.applyViewerResponse(response(3,45,"B",2));assert(viewer.m_reason=="TERMINAL_STREAM_CANNOT_RESUME");

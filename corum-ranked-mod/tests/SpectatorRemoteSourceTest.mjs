@@ -13,8 +13,8 @@ test('only the dedicated PlayerObject receives interpolated remote pose', () => 
     assert.match(remote, /m_player->setRotation\(pose.rotation\)/);
     assert.doesNotMatch(play, /m_player1->set(?:Position|Rotation)\(/);
     assert.match(play, /auto spectatorAuthority = runtime.isSpectating\(\)/);
-    assert.match(play, /remotePlayer.update\([\s\S]*?spectatorAuthority && m_fields->localSafety.active\(\)/);
-    assert.match(play, /live.presentationFrame\(\)/);
+    assert.match(play, /remotePlayer.update\(this, true, m_fields->spectatorRenderedFrame\)/);
+    assert.match(play, /SpectatorLiveRuntime::get\(\).presentationFrame\(\)/);
 });
 test('remote renderer cannot invoke scoring, physics, death, completion or camera', () => {
     assert.doesNotMatch(remote, /(?:reportAttempt|levelComplete\(|destroyPlayer\(|resetLevel\(|onQuit\(|savePercentage\(|saveNewScore\(|updateCamera\(|PlayerObject::update\()/);
@@ -39,8 +39,8 @@ test('typed live frame preserves server identity and a local reset epoch', () =>
     assert.match(frame, /!ranked.isSpectating\(\)/);
     assert.match(frame, /m_viewContextKey != viewerContextKey\(match\)/);
     assert.match(live, /if \(streamChanged \|\| resetStream\) \{\s*\+\+m_viewPresentationEpoch/);
-    assert.match(live, /if \(m_currentPose->dead \|\| m_currentPose->finished\) return m_currentPose/);
-    assert.match(live, /static_cast<float>\(elapsed\) \/ 50.0f/);
+    assert.match(live, /m_sampleBuffer.render\(nowMs\)/);
+    assert.doesNotMatch(live, /m_previousPose|m_poseReceivedAt|elapsed\) \/ 50.0f/);
 });
 test('MIT attribution is packaged and new renderer participates in native compile', () => {
     assert.match(read('CMakeLists.txt'), /GLOB_RECURSE[\s\S]*?src\/\*\.cpp/);

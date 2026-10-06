@@ -31,14 +31,16 @@ int main() {
     assert(camera.state() == SpectatorCameraState::Waiting && camera.origin() == origin);
     update(true, frame);
     assert(camera.state() == SpectatorCameraState::Following);
-    assert((camera.origin() == SpectatorCameraPoint{790, 265}));
+    assert((camera.origin() == origin));
     frame.pose->camera = SpectatorCameraOrigin{520, -100}; update(true, frame);
     assert((camera.origin() == SpectatorCameraPoint{520, -100}));
     frame.pose->camera = SpectatorCameraOrigin{std::numeric_limits<float>::infinity(), 0}; update(true, frame);
-    assert((camera.origin() == SpectatorCameraPoint{790, 265}));
-    frame.pose->camera.reset();
+    assert((camera.origin() == SpectatorCameraPoint{520, -100}));
+    frame.pose->camera.reset(); frame.pose->cameraInvalid=true; update(true,frame);
+    assert((camera.origin() == SpectatorCameraPoint{520, -100}));
+    frame.pose->cameraInvalid=false;
     frame.pose->x += 300; frame.pose->y += 200; ++frame.sequence; update(true, frame);
-    assert((camera.origin() == SpectatorCameraPoint{1090, 465}));
+    assert((camera.origin() == origin));
     auto const held = camera.origin();
     // Dummy/new vanilla camera position is irrelevant while holding/waiting.
     camera.update(true, {9000, 9000}, coverage, context, std::nullopt);
@@ -54,13 +56,13 @@ int main() {
     update(true, frame); assert(camera.origin() == held);
     frame.context = context; frame.sequence = 0;
     frame.pose = SpectatorGhostPose{2000, 500, 0, false, false}; update(true, frame);
-    assert(camera.origin().x == 1790 && camera.state() == SpectatorCameraState::Following);
+    assert(camera.origin().x == origin.x && camera.state() == SpectatorCameraState::Following);
     frame.pose->dead = true; ++frame.sequence; update(true, frame);
     assert(camera.state() == SpectatorCameraState::Terminal);
     frame.pose->dead = false; frame.pose->finished = true; update(true, frame);
     assert(camera.state() == SpectatorCameraState::Terminal);
     camera.update(true, {999, 999}, {}, context, frame);
-    assert(camera.state() == SpectatorCameraState::Waiting && camera.origin().x == 1790);
+    assert(camera.state() == SpectatorCameraState::Waiting && camera.origin().x == origin.x);
     update(false, frame); assert(!camera.ownsCamera());
 
     SpectatorSceneContext scene{"match", 1, 0, 123};

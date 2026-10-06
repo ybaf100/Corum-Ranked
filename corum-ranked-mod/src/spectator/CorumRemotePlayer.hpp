@@ -24,7 +24,9 @@ public:
     void cleanup();
     [[nodiscard]] PlayerObject* player() const { return m_player.data(); }
     [[nodiscard]] std::optional<SpectatorRemoteFrame> cameraFrame() const {
-        return m_player && m_poseCurrent ? m_policy.renderedFrame() : std::nullopt;
+        auto frame = m_player && m_poseCurrent ? m_policy.renderedFrame() : std::nullopt;
+        if (frame) frame->publisherElapsedMs = m_renderedElapsedMs;
+        return frame;
     }
 
 private:
@@ -42,6 +44,7 @@ private:
     bool m_streamAttachedLogged = false;
     bool m_poseCurrent = false;
     bool m_creationAttempted = false;
+    double m_renderedElapsedMs = 0;
     std::optional<SpectatorGhostPose> m_appliedState;
 };
 

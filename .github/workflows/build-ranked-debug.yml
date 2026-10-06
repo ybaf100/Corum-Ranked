@@ -101,6 +101,11 @@ jobs:
             corum-ranked-mod/tests/SpectatorCameraPolicyTest.cpp \
             -o /tmp/corum-ranked-spectator-camera-test
           /tmp/corum-ranked-spectator-camera-test
+          g++ -std=c++23 -Wall -Wextra -Wpedantic -Werror \
+            corum-ranked-mod/tests/SpectatorInterpolationBufferTest.cpp \
+            -o /tmp/corum-ranked-spectator-buffer-test
+          /tmp/corum-ranked-spectator-buffer-test
+          node --test corum-ranked-mod/tests/SpectatorCameraOwnerNativeTest.mjs
           node --test corum-ranked-mod/tests/AchievementSourceTest.mjs
           node --test corum-ranked-mod/tests/SpectatorLocalSafetySourceTest.mjs
           node --test corum-ranked-mod/tests/SpectatorNativeHookTest.mjs

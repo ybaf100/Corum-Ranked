@@ -25,7 +25,7 @@ const method = signature => {
 test('actual scene callbacks hand off only after End/authority, even with vanilla postUpdate stopped', () => {
     const callbacks = [
         'void syncSpectatorLocalSafety()', 'corum::ranked::SpectatorSceneContext currentSpectatorSceneContext()',
-        'bool watchableSpectatorScene()', 'bool prepareSpectatorScene()', 'void driveSpectatorCamera()',
+        'bool watchableSpectatorScene()', 'bool prepareSpectatorScene()',
         'void cleanupSpectatorPresentation()', 'void updateSpectatorView(float dt)', 'void spectatorFrame(float dt)',
     ].map(method).join('\n');
     const cpp = `
@@ -87,7 +87,7 @@ struct SpectatorLiveRuntime {
     void tickPublisher(SpectatorGhostPose const&,bool){}
     void tickViewer(){++viewers;}
     auto presentationFrame()const{return frame;}
-    enum class Status {Waiting,Fallback};
+    enum class Status {Waiting,Fallback,Buffering};
     Status status()const{return Status::Waiting;}
     void reset(){++resets;frame.reset();}
 };
@@ -102,6 +102,7 @@ struct FakeRemote {
 };
 struct FakeCamera {
     SpectatorCameraPolicy policy;
+    void attach(GJBaseGameLayer*){policy.update(true,{150,20},{600,300},std::nullopt,std::nullopt);}
     void update(GJBaseGameLayer*,bool active,std::optional<SpectatorRemoteContext> c,std::optional<SpectatorRemoteFrame> f){
         policy.update(active,{150,20},{600,300},c,f);
     }
@@ -124,9 +125,18 @@ struct CorumRankedPlayLayer: PlayLayer {
         corum::ranked::SpectatorSceneContext sceneContext{"match",1,0,123};
         corum::ranked::FakeRemote remotePlayer;
         corum::ranked::FakeCamera spectatorCamera;
+        std::optional<corum::ranked::SpectatorRemoteFrame> spectatorRenderedFrame;std::optional<unsigned> spectatorCameraFrameNumber;
     };
     GeodeFields<Fields> m_fields;
     int quits=0,huds=0;
+    struct DummyFrameGuard{};
+    void ensureSpectatorCameraFrame(float dt){
+        if(!m_fields->spectatorMode||m_fields->autoExitRequested)return;
+        auto frame=corum::ranked::SpectatorLiveRuntime::get().presentationFrame();
+        m_fields->remotePlayer.update(this,true,frame);
+        GJBaseGameLayer::updateCamera(dt);
+        m_fields->spectatorCamera.update(this,true,frame?std::optional(frame->context):std::nullopt,m_fields->remotePlayer.cameraFrame());
+    }
     bool freezeLocalDummy(PlayerObject*){return m_fields->localSafety.active();}
     void updateRankedHud(){++huds;}
     void onQuit(){++quits;cleanupSpectatorPresentation();}
@@ -150,7 +160,7 @@ int main(){
     live.frame=SpectatorRemoteFrame{{"match",1,0,123,"A",1,1},0,SpectatorGhostPose{1000,400,90,false,false}};
     scene.spectatorFrame(0.01f);scene.spectatorFrame(0.01f);
     assert(scene.resets==1 && scene.m_fields->remotePlayer.creates==1 && scene.cameras==3);
-    assert(scene.m_fields->spectatorCamera.policy.origin().x==790 && runtime.blocked);
+    assert(scene.m_fields->spectatorCamera.policy.origin().x==150 && runtime.blocked);
     runtime.serverSpectator=false;scene.spectatorFrame(0.01f);
     assert(scene.quits==1 && !scene.m_fields->remotePlayer.frame);
     assert(!scene.m_fields->spectatorCamera.policy.ownsCamera() && scene.m_fields->localSafety.active());
@@ -191,7 +201,7 @@ int main(){
     assert(test.m_fields->spectatorCamera.policy.state()==SpectatorCameraState::Waiting);
     live.frame=SpectatorRemoteFrame{{"debug-spectate:server-approved",1,0,debug::kDebugSpectateLevelId,"recording",1,11},0,SpectatorGhostPose{1500,500,30,false,false}};
     test.spectatorFrame(0.01f);
-    assert(test.m_fields->spectatorCamera.policy.origin().x==1290 && runtime.blocked && test.quits==0);
+    assert(test.m_fields->spectatorCamera.policy.origin().x==150 && runtime.blocked && test.quits==0);
     assert(test.m_fields->localSafety.suppressDeath(true) && test.m_fields->localSafety.blockPersistence(true));
     assert(test.m_fields->localSafety.freezeAtCompletionBoundary(true,99));
     auto origin=test.m_fields->spectatorCamera.policy.origin();

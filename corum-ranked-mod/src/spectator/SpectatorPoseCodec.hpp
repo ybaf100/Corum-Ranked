@@ -52,6 +52,7 @@ inline std::optional<SpectatorGhostPose> decodeSpectatorPose(matjson::Value cons
         static_cast<float>(value["cameraX"].asDouble().unwrapOr(nan)),
         static_cast<float>(value["cameraY"].asDouble().unwrapOr(nan))};
     if (validSpectatorCamera(camera)) pose.camera = camera;
+    pose.cameraInvalid = !pose.camera && (value.contains("cameraX") || value.contains("cameraY"));
     pose.cameraSnap = pose.camera.has_value() && value["cameraSnap"].asBool().unwrapOr(false);
     auto const evidence = value["discontinuity"];
     if (evidence.isObject()) {

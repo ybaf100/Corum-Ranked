@@ -22,7 +22,7 @@ describe("Ranked client version gate", () => {
 
   it("accepts the same current version with or without a leading v", () => {
     expect(
-      evaluateRankedClientVersion("0.5.0-beta.27", [clientMod("0.5.0-beta.27")]).allowed,
+      evaluateRankedClientVersion("0.5.0-beta.28", [clientMod("0.5.0-beta.28")]).allowed,
     ).toBe(true);
   });
 
@@ -32,7 +32,7 @@ describe("Ranked client version gate", () => {
     ]);
     expect(result).toMatchObject({
       allowed: false,
-      requiredVersion: "v0.5.0-beta.27",
+      requiredVersion: "v0.5.0-beta.28",
       clientVersion: "v0.5.0-beta.8",
     });
   });
@@ -85,5 +85,8 @@ describe("Ranked client version gate", () => {
   });
   it("rejects beta26 after the beta27 spectator audio/timeline/native presentation hotfix", () => {
     expect(evaluateRankedClientVersion("v0.5.0-beta.26", [clientMod("v0.5.0-beta.26")]).allowed).toBe(false);
+  });
+  it("rejects beta27 after the beta28 final viewport and publisher-clock presentation hotfix", () => {
+    expect(evaluateRankedClientVersion("v0.5.0-beta.27", [clientMod("v0.5.0-beta.27")]).allowed).toBe(false);
   });
 });

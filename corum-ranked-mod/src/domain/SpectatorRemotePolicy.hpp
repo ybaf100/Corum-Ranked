@@ -39,6 +39,9 @@ struct SpectatorGhostPose {
     bool cameraSnap = false;
     // Native event endpoints, never an unrestricted large-jump opt-out.
     std::optional<SpectatorSnapEvidence> discontinuity = std::nullopt;
+    // Decoder-only distinction: malformed camera holds the prior viewport;
+    // an absent camera may use the scoped native remote-target fallback.
+    bool cameraInvalid = false;
 };
 
 struct SpectatorRemoteContext {
@@ -57,6 +60,7 @@ struct SpectatorRemoteFrame {
     SpectatorRemoteContext context;
     std::int64_t sequence = -1;
     std::optional<SpectatorGhostPose> pose;
+    double publisherElapsedMs = 0;
 };
 
 inline bool finiteSpectatorPose(SpectatorGhostPose const& pose) {

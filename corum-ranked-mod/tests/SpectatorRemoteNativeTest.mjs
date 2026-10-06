@@ -25,12 +25,15 @@ const viewerSource=read('src/SpectatorLiveRuntime.cpp'), viewerHeader=read('src/
 const viewerTest=read('tests/SpectatorLiveViewerNativeTest.mjs');
 const valueModel=viewerTest.slice(viewerTest.indexOf('namespace matjson {'),viewerTest.indexOf('${readFileSync(join(root,'));
 const decoderHarness=`
+#include "${join(root, 'src/domain/SpectatorInterpolationBuffer.hpp')}"
 #include <chrono>
 #include <limits>
 #include <map>
 #include <variant>
 ${valueModel}
 ${read('src/spectator/SpectatorPoseCodec.hpp').replace(/^#include.*$|^#pragma once$/gm,'')}
+auto wireClock=std::chrono::steady_clock::time_point{};auto testClockNow(){return wireClock;}
+constexpr auto kViewerPollInterval=std::chrono::milliseconds(80);
 constexpr int kProtocolVersion=2;constexpr float kPoseDiscontinuityDistance=400;
 ${method(viewerSource,'float poseDistance(')}
 namespace corum::ranked {
@@ -45,7 +48,7 @@ ${viewerHeader.slice(viewerHeader.indexOf('    std::string m_viewMatchId;'),view
  void applyViewerResponse(matjson::Value const&);void setFallback(std::string);
  std::optional<SpectatorGhostPose> interpolatedPose()const;
 };
-${['void SpectatorLiveRuntime::applyViewerResponse(', 'void SpectatorLiveRuntime::setFallback(', 'std::optional<SpectatorGhostPose> SpectatorLiveRuntime::interpolatedPose()'].map(n=>method(viewerSource,n)).join('\n')}
+${['void SpectatorLiveRuntime::applyViewerResponse(', 'void SpectatorLiveRuntime::setFallback(', 'std::optional<SpectatorGhostPose> SpectatorLiveRuntime::interpolatedPose()'].map(n=>method(viewerSource,n)).join('\n').replaceAll('std::chrono::steady_clock::now()','testClockNow()')}
 }
 `;
 
@@ -55,139 +58,7 @@ test('production Remote Player + camera follow two-client presentation without l
     const dir = mkdtempSync(join(tmpdir(), 'corum-remote-native-'));
     try {
         mkdirSync(join(dir, 'Geode/binding'), { recursive: true });
-        const header = `
-#pragma once
-#include <algorithm>
-#include <cassert>
-#include <string>
-#include <vector>
-namespace cocos2d {
-struct CCSize { float width=0, height=0; };
-struct CCPoint {
-    float x=0, y=0;
-    CCPoint& operator=(CCSize const& s) { x=s.width; y=s.height; return *this; }
-};
-inline constexpr CCPoint CCPointZero{};
-struct Color { unsigned char r,g,b; };
-struct CCObject {
-    inline static int alive=0;
-    inline static std::vector<CCObject*> pool;
-    int refs=1;
-    CCObject() { ++alive; }
-    virtual ~CCObject() { --alive; }
-    void retain() { ++refs; }
-    void release() { if (--refs==0) delete this; }
-    void autorelease() { pool.push_back(this); }
-    static void drain() { auto objects=pool; pool.clear(); for (auto* o:objects) o->release(); }
-};
-struct CCFadeOut: CCObject { static CCFadeOut* create(float) { auto* a=new CCFadeOut; a->autorelease(); return a; } };
-struct CCNode: CCObject {
-    CCNode* parent=nullptr; std::vector<CCNode*> children;
-    CCPoint position{}; float rotation=0; bool visible=true; int z=0;
-    int positionWrites=0, rotationWrites=0, unschedules=0; float scaleY=1; unsigned char opacity=255;
-    void runAction(CCFadeOut*) { opacity=0; }
-    void setScaleY(float s) { scaleY=s; } float getScaleY()const{return scaleY;}
-    CCPoint getPosition()const{return position;} float getRotation()const{return rotation;}
-    static CCNode* create() { auto* p=new CCNode; p->autorelease(); return p; }
-    ~CCNode() override { for(auto* p:children) { p->parent=nullptr; p->release(); } }
-    void addChild(CCNode* p,int order=0) { assert(!p->parent); p->retain(); p->parent=this; p->z=order; children.push_back(p); }
-    void removeFromParentAndCleanup(bool) {
-        if (!parent) return;
-        auto& c=parent->children; c.erase(std::find(c.begin(),c.end(),this)); parent=nullptr; release();
-    }
-    void unscheduleAllSelectors() { ++unschedules; }
-    void stopAllActions() {}
-    void setID(std::string const&) {}
-    void setAnchorPoint(CCPoint) {}
-    void ignoreAnchorPointForPosition(bool) {}
-    void setPosition(CCPoint p) { position=p; ++positionWrites; }
-    void setRotation(float r) { rotation=r; ++rotationWrites; }
-    void setVisible(bool b) { visible=b; }
-    bool isVisible() const { return visible; }
-    int getZOrder() const { return z; }
-    float getScale() const { return 1.0f; }
-};
-struct CCLayer: CCNode { static CCLayer* create() { auto* p=new CCLayer; p->autorelease(); return p; } };
-struct CCDirector {
-    static CCDirector* sharedDirector() { static CCDirector d; return &d; }
-    CCSize getWinSize() const { return {600,300}; }
-};
-}
-namespace geode {
-template<class T> class Ref {
-    T* p=nullptr;
-public:
-    Ref()=default; Ref(T* v):p(v) { if(p)p->retain(); }
-    Ref(Ref const& v):Ref(v.p) {}
-    ~Ref() { if(p)p->release(); }
-    Ref& operator=(T* v) { if(v)v->retain(); if(p)p->release(); p=v; return *this; }
-    Ref& operator=(Ref const& v) { return *this=v.p; }
-    T* data() const { return p; } T* operator->() const { return p; }
-    explicit operator bool() const { return p!=nullptr; }
-};
-namespace log { template<class... T> void info(T...) {} template<class... T> void warn(T...) {} template<class... T> void debug(T...) {} }
-namespace prelude { using namespace cocos2d; using geode::Ref; namespace log=geode::log; }
-}
-struct GJGameLevel { int m_levelID=123; };
-struct PlayLayer;
-struct PlayerObject: cocos2d::CCNode {
-    inline static int creates=0; inline static bool fail=false;
-    bool m_playEffects=true,m_isHidden=false,m_isDead=false;
-    bool m_isShip=false,m_isBall=false,m_isBird=false,m_isDart=false,m_isRobot=false,m_isSpider=false,m_isSwing=false,m_isUpsideDown=false;
-    float m_vehicleSize=1; int nativeModeCalls=0,miniCalls=0,frame=0;
-    cocos2d::CCNode* m_mainLayer=nullptr;
-    void toggleFlyMode(bool b,bool){m_isShip=b;++nativeModeCalls;}
-    void toggleRollMode(bool b,bool){m_isBall=b;++nativeModeCalls;}
-    void toggleBirdMode(bool b,bool){m_isBird=b;++nativeModeCalls;}
-    void toggleDartMode(bool b,bool){m_isDart=b;++nativeModeCalls;}
-    void toggleRobotMode(bool b,bool){m_isRobot=b;++nativeModeCalls;}
-    void toggleSpiderMode(bool b,bool){m_isSpider=b;++nativeModeCalls;}
-    void toggleSwingMode(bool b,bool){m_isSwing=b;++nativeModeCalls;}
-    void togglePlayerScale(bool b,bool){m_vehicleSize=b?0.6f:1.0f;++miniCalls;}
-    void updatePlayerScale(){}
-    void updatePlayerFrame(int){frame=0;} void updatePlayerShipFrame(int){frame=1;}
-    void updatePlayerRollFrame(int){frame=2;} void updatePlayerBirdFrame(int){frame=3;}
-    void updatePlayerDartFrame(int){frame=4;} void updatePlayerRobotFrame(int){frame=5;}
-    void updatePlayerSpiderFrame(int){frame=6;} void updatePlayerSwingFrame(int){frame=7;}
-    cocos2d::CCPoint m_startPosition{},m_lastPosition{};
-    double m_positionX=0,m_positionY=0;
-    cocos2d::CCNode *m_shipStreak=nullptr,*m_regularTrail=nullptr,*m_waveTrail=nullptr,*m_ghostTrail=nullptr,
-      *m_playerGroundParticles=nullptr,*m_trailingParticles=nullptr,*m_shipClickParticles=nullptr,
-      *m_vehicleGroundParticles=nullptr,*m_ufoClickParticles=nullptr,*m_robotBurstParticles=nullptr,
-      *m_dashParticles=nullptr,*m_swingBurstParticles1=nullptr,*m_swingBurstParticles2=nullptr,
-      *m_landParticles0=nullptr,*m_landParticles1=nullptr;
-    static PlayerObject* create(int,int,PlayLayer*,cocos2d::CCLayer* layer,bool) {
-        ++creates; if(fail)return nullptr;
-        auto* p=new PlayerObject; p->autorelease();
-        p->m_mainLayer=cocos2d::CCNode::create(); p->addChild(p->m_mainLayer);
-        p->m_regularTrail=cocos2d::CCNode::create(); layer->addChild(p->m_regularTrail);
-        p->m_shipStreak=cocos2d::CCNode::create(); layer->addChild(p->m_shipStreak);
-        return p;
-    }
-    void setColor(cocos2d::Color) {} void setSecondColor(cocos2d::Color) {}
-};
-struct GJBaseGameLayer {
-    struct GameState {
-        bool m_unkBool4=false,m_unkBool5=false;
-        float m_unkInt13=0;
-        cocos2d::CCPoint m_cameraPosition{};
-        void stopTweenAction(int) {}
-    } m_gameState;
-    int cameraUpdates=0;
-    void cameraMoveX(float x,float,float,bool) { m_gameState.m_unkBool4=true; m_gameState.m_cameraPosition.x=x; }
-    void cameraMoveY(float y,float,float,bool) {
-        m_gameState.m_unkBool5=true; m_gameState.m_unkInt13=y; m_gameState.m_cameraPosition.y=y;
-    }
-    void updateCamera(float) { ++cameraUpdates; }
-    cocos2d::CCLayer* m_objectLayer=nullptr;
-};
-struct PlayLayer: GJBaseGameLayer {
-    PlayerObject* m_player1=nullptr;
-    PlayerObject* m_player2=nullptr; GJGameLevel* m_level=nullptr;
-    // No reset/death/completion/Attempt methods: production renderer must not
-    // invoke them. An accidental gameplay dependency fails this compilation.
-};
-`;
+        const header = read('tests/helpers/SpectatorNativeDouble.hpp');
         writeFileSync(join(dir, 'Geode/Geode.hpp'), header);
         for (const name of ['PlayLayer', 'GJBaseGameLayer', 'PlayerObject', 'GJGameLevel', 'GhostTrailEffect', 'HardStreak']) {
             writeFileSync(join(dir, `Geode/binding/${name}.hpp`), '#include <Geode/Geode.hpp>\n');
@@ -201,6 +72,7 @@ struct PlayLayer: GJBaseGameLayer {
 #include "${join(root, 'src/spectator/CorumSpectatorCamera.hpp')}"
 #include "${join(root, 'src/domain/SpectatorLocalSafety.hpp')}"
 #include "${join(root, 'src/spectator/SpectatorPlayerCapture.hpp')}"
+#include "${join(root, 'src/spectator/ScopedCameraTargetOverride.hpp')}"
 #include <iostream>
 using namespace corum::ranked; using namespace cocos2d; using namespace geode::prelude;
 ${decoderHarness}
@@ -214,10 +86,15 @@ int main() {
     CorumRemotePlayer remote;
     CorumSpectatorCamera camera;
     auto drive=[&](bool authorized) {
-        camera.update(&layer,authorized,f.context,remote.cameraFrame()); layer.updateCamera(0.01f);
+        auto frame=remote.cameraFrame();
+        if(authorized)camera.attach(&layer);
+        auto target=authorized && frame && frame->pose && !frame->pose->camera && !frame->pose->cameraInvalid
+          ?std::optional(CCPoint{frame->pose->x,frame->pose->y}):std::nullopt;
+        {ScopedCameraTargetOverride overrideTarget(&local,target);layer.updateCamera(0.01f);}
+        camera.update(&layer,authorized,f.context,frame);
     };
     layer.m_gameState.m_cameraPosition=CCPoint{150,20};
-    drive(false); assert(!camera.ownsCamera() && layer.m_gameState.m_cameraPosition.x==150);
+    camera.update(&layer,false,f.context,std::nullopt); assert(!camera.ownsCamera() && layer.m_gameState.m_cameraPosition.x==150);
     remote.update(&layer,false,f); assert(!remote.player() && PlayerObject::creates==0);
     remote.update(&layer,true,f); assert(!remote.player() && PlayerObject::creates==0);
     drive(true); assert(camera.state()==SpectatorCameraState::Waiting && layer.m_gameState.m_cameraPosition.x==150);
@@ -228,7 +105,7 @@ int main() {
     auto* first=remote.player(); assert(first && first!=&local && first!=&other && PlayerObject::creates==1);
     assert(first->position.x==50 && first->position.y==70 && first->rotation==90 && first->visible);
     assert(first->unschedules>0 && !first->m_regularTrail->visible);
-    assert(local.position.x==11 && local.position.y==22 && local.rotation==33 && local.positionWrites==1);
+    assert(local.position.x==11 && local.position.y==22 && local.rotation==33 && local.positionWrites>=1);
     // Every mode uses the SAME visual object, with native state observation only.
     int modeIndex=0;
     for(auto mode : {SpectatorGameMode::Cube,SpectatorGameMode::Ship,SpectatorGameMode::Ball,
@@ -251,35 +128,35 @@ int main() {
     for(auto mode : {SpectatorGameMode::Ship,SpectatorGameMode::Wave,SpectatorGameMode::Spider}) {
         f.pose->mode=mode;f.pose->x=1000;f.pose->y=800;f.pose->upsideDown=true;++f.sequence;
         remote.update(&layer,true,f);drive(true);
-        assert(layer.m_gameState.m_cameraPosition.y==665 && camera.state()==SpectatorCameraState::Following);
+        assert(layer.m_gameState.m_cameraPosition.y==700 && camera.state()==SpectatorCameraState::Following);
     }
     // Mock Client A telemetry -> B's COMPLETE production renderer + camera.
     PlayerObject clientA; clientA.setPosition({1000,400}); clientA.setRotation(120);
     f.pose=SpectatorGhostPose{clientA.position.x,clientA.position.y,clientA.rotation,false,false}; ++f.sequence;
     remote.update(&layer,true,f); drive(true);
-    assert(remote.player()->position.x==1000 && layer.m_gameState.m_cameraPosition.x==790);
-    assert(layer.m_gameState.m_cameraPosition.y==265 && local.positionWrites==1 && local.rotationWrites==1);
+    assert(remote.player()->position.x==1000 && layer.m_gameState.m_cameraPosition.x==835);
+    assert(layer.m_gameState.m_cameraPosition.y==300 && local.positionWrites>=1 && local.rotationWrites==1);
     local.setPosition({9000,9000}); drive(true);
-    assert(layer.m_gameState.m_cameraPosition.x==790); // dummy cannot steer camera
+    assert(layer.m_gameState.m_cameraPosition.x==835); // dummy cannot steer camera
     // Stale/rejected/no packet never exposes a renderer target to the camera.
     auto saved=f; --f.sequence; remote.update(&layer,true,f); drive(true);
     assert(!remote.cameraFrame() && camera.state()==SpectatorCameraState::Waiting);
     f=saved; f.pose.reset(); remote.update(&layer,true,f); drive(true);
-    assert(!first->visible && layer.m_gameState.m_cameraPosition.x==790);
+    assert(!first->visible && layer.m_gameState.m_cameraPosition.x==835);
     f=saved; f.pose->x=1100; ++f.sequence; remote.update(&layer,true,f); drive(true);
-    assert(layer.m_gameState.m_cameraPosition.x==890); // recovered stream
+    assert(layer.m_gameState.m_cameraPosition.x==935); // recovered stream
     f.pose=SpectatorGhostPose{50,70,90,false,false}; ++f.sequence; remote.update(&layer,true,f);
     f.pose->dead=true; ++f.sequence; remote.update(&layer,true,f); assert(first->opacity==0 && first->m_isDead);
     drive(true); assert(camera.state()==SpectatorCameraState::Terminal);
     f.pose->dead=false; f.pose->x=200; ++f.sequence; remote.update(&layer,true,f);
     assert(first->opacity==0 && first->position.x==50);
-    drive(true); assert(layer.m_gameState.m_cameraPosition.x==0); // frozen DEAD renderer, not later pose
+    drive(true); assert(layer.m_gameState.m_cameraPosition.x==-115); // frozen DEAD renderer, not later pose
     geode::Ref<PlayerObject> old(first); ++f.context.epoch;
     remote.update(&layer,true,f); assert(remote.player()!=first && !first->parent && !first->m_regularTrail);
     auto* second=remote.player(); f.pose->finished=true; f.pose->x=300; ++f.sequence;
     remote.update(&layer,true,f); assert(second->visible && second->position.x==300);
     f.pose->x=400; ++f.sequence; remote.update(&layer,true,f); assert(second->position.x==300);
-    drive(true); assert(layer.m_gameState.m_cameraPosition.x==90); // terminal camera matches rendered pose
+    drive(true); assert(layer.m_gameState.m_cameraPosition.x==135); // terminal camera matches rendered pose
     f.pose.reset(); remote.update(&layer,true,f); assert(!second->visible);
     remote.update(&layer,false,f); assert(!remote.player() && world->children.empty());
     camera.cleanup(&layer); camera.cleanup(&layer);
@@ -292,6 +169,7 @@ int main() {
     SpectatorLiveRuntime viewer;viewer.m_viewMatchId=${JSON.stringify(wire[0].stream.matchId)};
     PlayerObject* wirePlayer=nullptr;std::uint64_t wireEpoch=0;
     ${wire.map((response,i)=>`
+    wireClock=std::chrono::steady_clock::time_point{}+std::chrono::milliseconds(${response.packets.at(-1).elapsedMs});
     viewer.applyViewerResponse(${cppValue(response)});
     assert(viewer.m_status==SpectatorLiveStatus::Live);
     f.context={viewer.m_viewMatchId,1,0,88350599,viewer.m_viewAttemptId,viewer.m_viewGeneration,viewer.m_viewPresentationEpoch};
@@ -299,10 +177,10 @@ int main() {
     remote.update(&layer,true,f);drive(true);assert(remote.player() && f.pose->camera);
     ${i===0?'wirePlayer=remote.player();wireEpoch=viewer.m_viewPresentationEpoch;': 'assert(remote.player()==wirePlayer && viewer.m_viewPresentationEpoch==wireEpoch);'}
     assert(layer.m_gameState.m_cameraPosition.x==f.pose->camera->x && layer.m_gameState.m_cameraPosition.y==f.pose->camera->y);
-    ${i===1?'assert(!viewer.m_previousPose && remote.player()->position.x==f.pose->x);':''}
+    ${i===1?'assert(viewer.m_sampleBuffer.size()>=1 && remote.player()->position.x==f.pose->x);':''}
     `).join('\n')}
     assert(f.pose->dead || f.pose->finished);auto held=remote.player()->position;
-    viewer.m_poseReceivedAt=std::chrono::steady_clock::now()-std::chrono::seconds(5);
+    wireClock+=std::chrono::seconds(5);
     f.pose=viewer.interpolatedPose();remote.update(&layer,true,f);drive(true);
     assert(remote.player()==wirePlayer && remote.player()->position.x==held.x);
     ` : ''}
