@@ -83,6 +83,10 @@ private:
     void finishDownloadFailure(int songId, std::string const& reason);
     void cancelActiveDownload();
     void requestAudioSwitch();
+    [[nodiscard]] RankedAudioMode availableMode(RankedAudioMode requested) const;
+    [[nodiscard]] bool audioStartTimedOut() const;
+    void failDesiredAudio(char const* phase, int result = 0);
+    void retireOwnedChannel(double seconds);
     void startDesiredAudio(bool retry = false);
     void updatePendingAudioStart();
     void cancelPendingAudioStart();
@@ -112,6 +116,11 @@ private:
     RankedResourceDownloadState m_downloadState = RankedResourceDownloadState::Idle;
 
     RankedAudioMode m_desiredMode = RankedAudioMode::Silent;
+    // The UI repeats its requested mode every refresh. Keep failures scoped to
+    // that request so fallback cannot be undone by the next identical refresh.
+    RankedAudioMode m_requestedMode = RankedAudioMode::Silent;
+    std::set<std::string> m_failedPlaybackKeys;
+    std::chrono::steady_clock::time_point m_audioStartBeganAt {};
     std::string m_playingKey;
     bool m_ownsMusicChannel = false;
     bool m_switchPending = false;
@@ -137,6 +146,11 @@ private:
     std::unordered_map<int, FMOD::Sound*> m_preparedSounds;
     FMOD::Sound* m_rankedSound = nullptr;
     FMOD::Channel* m_rankedChannel = nullptr;
+    FMOD::Channel* m_retiringChannel = nullptr;
+    std::chrono::steady_clock::time_point m_retiringUntil {};
+    bool m_ownedDspFadeIn = false;
+    unsigned long long m_ownedFadeDspStart = 0;
+    unsigned long long m_ownedFadeDspEnd = 0;
     bool m_ownedFadeInPending = false;
     bool m_ownedFadeOutPending = false;
     std::chrono::steady_clock::time_point m_ownedFadeStartedAt {};

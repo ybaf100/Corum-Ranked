@@ -48,6 +48,7 @@ test('FMOD NOTREADY keeps one pending candidate and retries seek later', () => {
     );
     assert.doesNotMatch(notReady, /cancelPendingAudioStart\(\)/);
     assert.match(notReady, /audio-seek-deferred/);
+    assert.match(notReady, /audioStartTimedOut\(\)/);
 
     const update = body(
         'void RankedAudioManager::updatePendingAudioStart()',
@@ -55,7 +56,8 @@ test('FMOD NOTREADY keeps one pending candidate and retries seek later', () => {
     );
     assert.match(update, /m_pendingStartMs > 0 && !m_pendingSeekAccepted/);
     assert.match(update, /m_pendingChannel->setPosition\(m_pendingStartMs, FMOD_TIMEUNIT_MS\)/);
-    assert.match(update, /if \(seekResult == FMOD_ERR_NOTREADY\) return;/);
+    assert.match(update, /seekResult == FMOD_ERR_NOTREADY/);
+    assert.match(update, /failDesiredAudio\("seek-notready-timeout"/);
     assert.match(update, /m_pendingSeekAccepted = true/);
 });
 
@@ -71,13 +73,14 @@ test('stalled pending transitions time out and fall back without killing the old
         update.indexOf('if (state == PreparedStreamState::Pending)'),
         update.indexOf('if (state == PreparedStreamState::Error)'),
     );
-    assert.match(pending, /now - m_pendingStartedAt < kPendingAudioStartTimeout/);
+    assert.match(pending, /audioStartTimedOut\(\)/);
     assert.match(pending, /audio-pending-timeout/);
-    assert.match(pending, /cancelPendingAudioStart\(\)/);
-    assert.match(pending, /m_preparedSounds\.erase\(it\)/);
-    assert.match(pending, /m_desiredMode = fallbackMode/);
-    assert.match(pending, /requestAudioSwitch\(\)/);
+    assert.match(pending, /failDesiredAudio\("buffer-seek-timeout"/);
     assert.doesNotMatch(pending, /stopOwnedAudio\(\)/);
+    const failure = body('void RankedAudioManager::failDesiredAudio(', 'void RankedAudioManager::retireOwnedChannel(');
+    assert.match(failure, /m_failedPlaybackKeys\.insert\(resource->key\)/);
+    assert.match(failure, /m_desiredMode = availableMode\(m_requestedMode\)/);
+    assert.doesNotMatch(failure, /sound->release\(\)|stopOwnedAudio\(\)/);
 
     const fallback = body(
         'RankedAudioMode pendingTimeoutFallback(',
@@ -101,8 +104,10 @@ test('the old BGM survives until the asynchronous candidate is ready', () => {
         'void RankedAudioManager::cancelPendingAudioStart()',
     );
     assert.match(finish, /state == PreparedStreamState::Pending/);
-    assert.match(finish, /kPendingAudioStartTimeout/);
-    assert(finish.indexOf('stopOwnedAudio()') < finish.indexOf('channel->setPaused(false)'));
+    assert.match(finish, /audioStartTimedOut\(\)/);
+    assert(finish.indexOf('channel->setPaused(false)') < finish.indexOf('retireOwnedChannel('));
+    assert.match(finish, /channel->addFadePoint\(clock, 0\)/);
+    assert.match(finish, /channel->addFadePoint\(clock \+.*fadeIn \* rate\), 1\)/);
     assert.match(finish, /audio-seek-ready:/);
 });
 

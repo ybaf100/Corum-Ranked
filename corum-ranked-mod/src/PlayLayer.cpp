@@ -26,6 +26,7 @@
 #include "ui/RankedTranslations.hpp"
 #include "ui/RankedVisuals.hpp"
 #include "ui/RankedEntryOverlay.hpp"
+#include "ui/RankedInput.hpp"
 #include "ui/PlacementGradeBadge.hpp"
 
 #include <Geode/Geode.hpp>
@@ -193,7 +194,7 @@ public:
         bool nativeEntryHeld = false;
         bool entryAttemptCountDeferred = false;
         bool entryWasPaused = false, entryTouchEnabled = false, entryKeyboardEnabled = false;
-        bool entryUITouchEnabled = false, entryUIKeyboardEnabled = false, entryUIKeypadEnabled = false;
+        bool entryUIKeyboardEnabled = false, entryUIKeypadEnabled = false;
         bool entryUIPauseEnabled = false;
         corum::ranked::ui::RankedEntryOverlay* entryOverlay = nullptr;
         bool autoExitRequested = false;
@@ -448,10 +449,11 @@ public:
             setTouchEnabled(false);
             setKeyboardEnabled(false);
             if (m_uiLayer) {
-                m_fields->entryUITouchEnabled = m_uiLayer->isTouchEnabled();
                 m_fields->entryUIKeyboardEnabled = m_uiLayer->isKeyboardEnabled();
                 m_fields->entryUIKeypadEnabled = m_uiLayer->isKeypadEnabled();
-                m_uiLayer->setTouchEnabled(false);
+                // The countdown owns the swallowing touch delegate. Leave the
+                // native UILayer registered in its original scene-entry order;
+                // re-registering it at GO can put it ahead of its Pause menu.
                 m_uiLayer->setKeyboardEnabled(false);
                 m_uiLayer->setKeypadEnabled(false);
                 m_uiLayer->resetAllButtons();
@@ -512,19 +514,21 @@ public:
         setKeyboardEnabled(m_fields->entryKeyboardEnabled);
         if (m_uiLayer) {
             m_uiLayer->resetAllButtons();
-            m_uiLayer->setTouchEnabled(m_fields->entryUITouchEnabled);
             m_uiLayer->setKeyboardEnabled(m_fields->entryUIKeyboardEnabled);
             m_uiLayer->setKeypadEnabled(m_fields->entryUIKeypadEnabled);
             if (m_uiLayer->m_pauseBtn) {
-                if (!m_isPaused) m_uiLayer->enableMenu();
-                else m_uiLayer->m_pauseBtn->setEnabled(m_fields->entryUIPauseEnabled);
+                if (!m_isPaused) {
+                    m_uiLayer->enableMenu();
+                    auto* menu = typeinfo_cast<CCMenu*>(m_uiLayer->m_pauseBtn->getParent());
+                    corum::ranked::ui::restorePauseMenuInput(menu, m_uiLayer);
+                } else m_uiLayer->m_pauseBtn->setEnabled(m_fields->entryUIPauseEnabled);
             }
         }
         if (m_player1) m_player1->releaseAllButtons();
         if (m_player2) m_player2->releaseAllButtons();
         m_queuedButtons.clear();
         if (m_fields->entryOverlay) {
-            m_fields->entryOverlay->removeFromParentAndCleanup(true);
+            m_fields->entryOverlay->dismiss();
             m_fields->entryOverlay = nullptr;
         }
         m_fields->attemptJournalReadyAt = std::chrono::steady_clock::now();
@@ -539,6 +543,16 @@ public:
         log::info("[RankedEntry] shared countdown complete; gameplay released level={} paused={} pauseBeforeHold={} pauseEnabled={}",
             m_fields->levelId, m_isPaused, m_fields->entryUIPauseEnabled,
             m_uiLayer && m_uiLayer->m_pauseBtn && m_uiLayer->m_pauseBtn->isEnabled());
+        if (m_uiLayer && m_uiLayer->m_pauseBtn) {
+            auto* menu = typeinfo_cast<CCMenu*>(m_uiLayer->m_pauseBtn->getParent());
+            auto* dispatcher = CCDirector::sharedDirector()->getTouchDispatcher();
+            auto* inputHandler = dispatcher->findHandler(m_uiLayer);
+            auto* menuHandler = menu ? dispatcher->findHandler(menu) : nullptr;
+            log::info("[RankedInput] GO level={} uiTouch={} menuTouch={} menuEnabled={} uiPriority={} menuPriority={}",
+                m_fields->levelId, m_uiLayer->isTouchEnabled(), menu && menu->isTouchEnabled(),
+                menu && menu->isEnabled(), inputHandler ? inputHandler->m_nPriority : 0,
+                menuHandler ? menuHandler->m_nPriority : 0);
+        }
         return false;
     }
 
@@ -1332,6 +1346,10 @@ public:
     }
 
     void onExit() {
+        if (m_fields->entryOverlay) {
+            m_fields->entryOverlay->dismiss();
+            m_fields->entryOverlay = nullptr;
+        }
         m_fields->spectatorPresentationRetired = true;
         unschedule(schedule_selector(CorumRankedPlayLayer::spectatorFrame));
         ScopedPersistenceOwner persistence(this);

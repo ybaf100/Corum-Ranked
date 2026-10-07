@@ -3,7 +3,6 @@
 #include <Geode/Geode.hpp>
 #include <Geode/modify/PauseLayer.hpp>
 #include <Geode/binding/PlayLayer.hpp>
-#include <Geode/ui/BasedButtonSprite.hpp>
 #include <cmath>
 using namespace geode::prelude;
 
@@ -16,16 +15,6 @@ bool ownsRankedPlayerPause() {
     return layer && layer->m_level && !ranked.isPlacement() && !ranked.isSpectating() &&
         ranked.view().stage == corum::ranked::RuntimeStage::Matched &&
         ranked.isGameplayLevel(static_cast<int>(layer->m_level->m_levelID));
-}
-CCNode* surrenderFlag() {
-    // White flag on native green circle; no guessed sprite-frame dependency.
-    auto* flag = CCNode::create(); flag->setContentSize({32, 34});
-    auto* pole = CCLayerColor::create({18, 29, 24, 255}); pole->setContentSize({2.5f, 31});
-    pole->setPosition({5, 1}); flag->addChild(pole);
-    auto* cloth = CCDrawNode::create();
-    CCPoint points[] = {{7, 30}, {17, 33}, {29, 29}, {26, 19}, {17, 23}, {7, 20}};
-    cloth->drawPolygon(points, 6, {1, 1, 1, 1}, 0.8f, {0.9f, 1, 0.93f, 1});
-    flag->addChild(cloth); return flag;
 }
 }
 
@@ -46,6 +35,9 @@ class $modify(CorumRankedPauseLayer, PauseLayer) {
         if (!ownsRankedPlayerPause()) return;
         auto& ranked = RankedRuntime::get(); auto* layer = PlayLayer::get();
         m_fields->leaseId = ranked.beginMatchGameplayPause(static_cast<int>(layer->m_level->m_levelID));
+        log::info("[RankedPause] opened level={} round={} lease={}",
+            static_cast<int>(layer->m_level->m_levelID), ranked.view().match.roundNumber,
+            !m_fields->leaseId.empty());
         auto const& match = ranked.view().match;
         m_fields->matchId = match.matchId; m_fields->round = match.roundNumber; m_fields->deathmatch = match.deathmatchSequence;
         auto* center = typeinfo_cast<CCMenu*>(getChildByIDRecursive("center-button-menu"));
@@ -62,8 +54,8 @@ class $modify(CorumRankedPauseLayer, PauseLayer) {
             center = CCMenu::create(); center->setID("ranked-surrender-menu"_spr);
             center->setPosition({size.width / 2 - 130, size.height / 2 - 38}); addChild(center, 100);
         }
-        auto* button = CircleButtonSprite::create(surrenderFlag(), CircleBaseColor::Green, CircleBaseSize::Medium);
-        button->setScale(0.85f);
+        auto* button = CCSprite::createWithSpriteFrameName("GJ_closeBtn_001.png");
+        button->setScale(0.95f);
         m_fields->surrender = CCMenuItemSpriteExtra::create(button, this, menu_selector(CorumRankedPauseLayer::onSurrender));
         m_fields->surrender->setID("ranked-surrender-button"_spr);
         center->addChild(m_fields->surrender, -1); center->sortAllChildren(); center->updateLayout();

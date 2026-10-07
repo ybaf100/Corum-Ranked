@@ -26,8 +26,9 @@ test('packaged Corum font charsets cover Korean countdown, pause and surrender l
     }
 });
 
-test('pause surrender uses native green circle and Corum modal/font, never vanilla alert',()=>{
-    assert.match(pause,/CircleButtonSprite::create\(surrenderFlag\(\), CircleBaseColor::Green/);
+test('pause surrender uses native GD X sprite and Corum modal/font, never vanilla alert',()=>{
+    assert.match(pause,/CCSprite::createWithSpriteFrameName\("GJ_closeBtn_001\.png"\)/);
+    assert.doesNotMatch(pause,/surrenderFlag|drawPolygon|CircleButtonSprite/);
     assert.match(pause,/getChildByIDRecursive\("center-button-menu"\)/);
     assert.match(pause,/exit->setEnabled\(false\)/);
     assert.match(pause,/exit->setTarget\(this, menu_selector\(CorumRankedPauseLayer::onBlockedQuit\)\)/);

@@ -18,6 +18,7 @@
 #include "ui/PlayerIcon.hpp"
 #include "ui/RankedTranslations.hpp"
 #include "ui/RankedVisuals.hpp"
+#include "ui/RankedInput.hpp"
 
 #include <Geode/Geode.hpp>
 #include <Geode/binding/GameLevelManager.hpp>
@@ -543,6 +544,13 @@ class CorumRankedLayer final : public CCLayerColor {
     }
 
     void onEnter() override {
+        // Restore flags BEFORE CCLayer enters its children, so their delegates
+        // register in native parent/child order rather than after scene entry.
+        setKeypadEnabled(!m_rankTransitionLayer);
+        if (m_menu) {
+            corum::ranked::ui::cancelMenuTouch(m_menu);
+            m_menu->setTouchEnabled(!m_rankTransitionLayer);
+        }
         CCLayerColor::onEnter();
 
         auto const resumedFromRankedChild = m_rankedChildScenePushed;
@@ -564,13 +572,15 @@ class CorumRankedLayer final : public CCLayerColor {
         // restore them. Without this lifecycle pair, the retained Ranked layer
         // comes back frozen on its pre-launch "OPENING LEVEL / STARTS IN 05"
         // frame and can never observe ROUND_RESULT or the following Round.
-        setKeypadEnabled(true);
-        if (m_menu) m_menu->setTouchEnabled(true);
         schedule(schedule_selector(CorumRankedLayer::refresh), 0.20f);
 
         // Reconcile any Attempt ACK or match poll that completed while the
         // Ranked scene was covered instead of waiting for another visual frame.
         refresh(0.0f);
+        auto* handler = m_menu ? CCDirector::sharedDirector()->getTouchDispatcher()->findHandler(m_menu) : nullptr;
+        log::info("[RankedInput] lobby entered resumed={} menuTouch={} menuState={} menuPriority={}",
+            resumedFromRankedChild, m_menu && m_menu->isTouchEnabled(),
+            m_menu ? static_cast<int>(m_menu->m_eState) : -1, handler ? handler->m_nPriority : 0);
     }
 
     void refresh(float) {
@@ -966,12 +976,7 @@ class CorumRankedLayer final : public CCLayerColor {
 
     void clearUi() {
         resetDynamicUiPointers();
-        if (m_menu && m_menu->m_pSelectedItem) {
-            // Geode's CCMenu selected-item safety hook is not installed on iOS.
-            // Clear it explicitly before destroying children so ccTouchEnded can
-            // never activate a freed CCMenuItem.
-            m_menu->m_pSelectedItem = nullptr;
-        }
+        corum::ranked::ui::cancelMenuTouch(m_menu);
         m_root->removeAllChildrenWithCleanup(true);
         m_menu->removeAllChildrenWithCleanup(true);
     }
@@ -3136,7 +3141,10 @@ class CorumRankedLayer final : public CCLayerColor {
             [this] {
                 m_rankTransitionLayer = nullptr;
                 setKeypadEnabled(true);
-                if (m_menu) m_menu->setTouchEnabled(true);
+                if (m_menu) {
+                    corum::ranked::ui::cancelMenuTouch(m_menu);
+                    m_menu->setTouchEnabled(true);
+                }
                 playNextAchievementToast();
             }
         );
@@ -3144,7 +3152,7 @@ class CorumRankedLayer final : public CCLayerColor {
 
         m_rankTransitionLayer = transitionLayer;
         if (m_menu) {
-            if (m_menu->m_pSelectedItem) m_menu->m_pSelectedItem = nullptr;
+            corum::ranked::ui::cancelMenuTouch(m_menu);
             m_menu->setTouchEnabled(false);
         }
         setKeypadEnabled(false);
@@ -4251,9 +4259,7 @@ class CorumRankedLayer final : public CCLayerColor {
         unschedule(schedule_selector(CorumRankedLayer::refresh));
         setKeypadEnabled(false);
         if (m_menu) {
-            if (m_menu->m_pSelectedItem) {
-                m_menu->m_pSelectedItem = nullptr;
-            }
+            corum::ranked::ui::cancelMenuTouch(m_menu);
             m_menu->setTouchEnabled(false);
         }
         // Ranked now lives in its own GD-style scene/tab. Return to the previous
@@ -4263,12 +4269,9 @@ class CorumRankedLayer final : public CCLayerColor {
 
     void onExit() override {
         unschedule(schedule_selector(CorumRankedLayer::refresh));
-        m_rankTransitionLayer = nullptr;
         setKeypadEnabled(false);
         if (m_menu) {
-            if (m_menu->m_pSelectedItem) {
-                m_menu->m_pSelectedItem = nullptr;
-            }
+            corum::ranked::ui::cancelMenuTouch(m_menu);
             m_menu->setTouchEnabled(false);
         }
         CCLayerColor::onExit();

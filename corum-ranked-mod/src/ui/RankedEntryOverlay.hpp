@@ -8,6 +8,7 @@ class RankedEntryOverlay final : public cocos2d::CCLayerColor {
 public:
     static RankedEntryOverlay* create();
     void present(bool bothEntered, std::optional<std::int64_t> remainingMs);
+    void dismiss();
     void registerWithTouchDispatcher() override;
     bool ccTouchBegan(cocos2d::CCTouch*, cocos2d::CCEvent*) override { return true; }
     void keyBackClicked() override {}

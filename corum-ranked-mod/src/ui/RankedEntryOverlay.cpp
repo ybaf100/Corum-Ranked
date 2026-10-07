@@ -24,6 +24,13 @@ RankedEntryOverlay* RankedEntryOverlay::create() {
 void RankedEntryOverlay::registerWithTouchDispatcher() {
     CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, -500, true);
 }
+void RankedEntryOverlay::dismiss() {
+    // Release the blocker before restoring gameplay/returning to a retained
+    // round scene, including entry cancellation rather than only successful GO.
+    setTouchEnabled(false);
+    setKeypadEnabled(false);
+    removeFromParentAndCleanup(true);
+}
 void RankedEntryOverlay::present(bool bothEntered, std::optional<std::int64_t> remainingMs) {
     auto const frame = entryCountdownFrame(remainingMs);
     auto const korean = i18n::isKorean();

@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cctype>
 #include <initializer_list>
+#include <limits>
 #include <fstream>
 #include <array>
 #include <sstream>
@@ -123,10 +124,11 @@ PreparedStreamState preparedStreamState(FMOD::Sound* sound, FMOD_RESULT* resultO
     if (!sound) return PreparedStreamState::Error;
 
     FMOD_OPENSTATE state = FMOD_OPENSTATE_ERROR;
-    auto const result = sound->getOpenState(&state, nullptr, nullptr, nullptr);
+    bool starving = false;
+    auto const result = sound->getOpenState(&state, nullptr, &starving, nullptr);
     if (resultOut) *resultOut = result;
     if (result != FMOD_OK || state == FMOD_OPENSTATE_ERROR) return PreparedStreamState::Error;
-    if (state == FMOD_OPENSTATE_READY || state == FMOD_OPENSTATE_PLAYING) {
+    if (!starving && (state == FMOD_OPENSTATE_READY || state == FMOD_OPENSTATE_PLAYING)) {
         return PreparedStreamState::Ready;
     }
     return PreparedStreamState::Pending;
@@ -191,6 +193,9 @@ void RankedAudioManager::configure(RankedClientPresentationView const& config) {
     m_pendingStartMs = 0;
     m_pendingSeekAccepted = false;
     m_desiredMode = RankedAudioMode::Silent;
+    m_requestedMode = RankedAudioMode::Silent;
+    m_failedPlaybackKeys.clear();
+    m_audioStartBeganAt = {};
 }
 
 bool RankedAudioManager::enabled() const {
@@ -479,12 +484,17 @@ RankedAudioResourceView const* RankedAudioManager::resourceForMode(RankedAudioMo
 
 void RankedAudioManager::setMode(RankedAudioMode mode) {
     if (!enabled() || !resourcesReady()) mode = RankedAudioMode::Silent;
+    if (mode != m_requestedMode) {
+        m_requestedMode = mode;
+        m_failedPlaybackKeys.clear();
+    }
+    mode = availableMode(mode);
     auto const* desired = resourceForMode(mode);
     auto const desiredKey = desired ? desired->key : std::string();
 
     if (mode == m_desiredMode) {
         if (m_switchPending || m_ownedFadeOutPending || m_playbackVerifyPending) return;
-        if (!desired && !m_ownsMusicChannel) return;
+        if (!desired && (!m_ownsMusicChannel || !m_failedPlaybackKeys.empty())) return;
         if (desired && desiredKey == m_playingKey && ownedChannelPlaying()) return;
     }
 
@@ -527,6 +537,11 @@ void RankedAudioManager::ensureFmodOutputActive() const {
 }
 
 void RankedAudioManager::stopOwnedAudio() {
+    if (m_retiringChannel) {
+        m_retiringChannel->stop();
+        m_retiringChannel = nullptr;
+    }
+    m_retiringUntil = {};
     if (m_rankedChannel) {
         m_rankedChannel->stop();
         m_rankedChannel = nullptr;
@@ -540,6 +555,9 @@ void RankedAudioManager::stopOwnedAudio() {
     m_playbackVerifyAt = {};
     m_playbackVerifyStartPositionMs = 0;
     m_ownedFadeInPending = false;
+    m_ownedDspFadeIn = false;
+    m_ownedFadeDspStart = 0;
+    m_ownedFadeDspEnd = 0;
     m_ownedFadeOutPending = false;
     m_ownedFadeStartedAt = {};
     m_ownedFadeDurationSeconds = 0.0;
@@ -555,10 +573,7 @@ void RankedAudioManager::clearPlaybackState() {
 void RankedAudioManager::releasePreparedSounds() {
     // Stop every channel before releasing shared stream handles.
     cancelPendingAudioStart();
-    if (m_rankedChannel) {
-        m_rankedChannel->stop();
-        m_rankedChannel = nullptr;
-    }
+    stopOwnedAudio();
     m_rankedSound = nullptr;
     for (auto& [songId, sound] : m_preparedSounds) {
         (void)songId;
@@ -686,17 +701,9 @@ void RankedAudioManager::synchronizeSongCaches() {
 }
 
 void RankedAudioManager::beginOwnedFadeOut(double seconds) {
-    if (!m_rankedChannel || !ownedChannelPlaying() || seconds <= 0.0) {
-        stopOwnedAudio();
-        return;
-    }
-    float currentVolume = targetRankedVolume();
-    if (m_rankedChannel->getVolume(&currentVolume) != FMOD_OK) currentVolume = targetRankedVolume();
-    m_ownedFadeStartVolume = std::clamp(currentVolume, 0.0f, 1.0f);
-    m_ownedFadeDurationSeconds = seconds;
-    m_ownedFadeStartedAt = std::chrono::steady_clock::now();
-    m_ownedFadeOutPending = true;
-    m_ownedFadeInPending = false;
+    // Silent uses the same DSP retirement as a replacement. Changing only the
+    // base volume during an incomplete DSP fade would multiply two envelopes.
+    retireOwnedChannel(seconds);
 }
 
 void RankedAudioManager::requestAudioSwitch() {
@@ -711,6 +718,7 @@ void RankedAudioManager::requestAudioSwitch() {
     auto const fadeOut = std::max(0.0, m_config.audio.fadeOutSeconds);
     m_playbackVerifyPending = false;
     m_playbackRetryCount = 0;
+    m_audioStartBeganAt = std::chrono::steady_clock::now();
 
     // Opening and seeking compressed streams can take seconds on affected
     // Android storage. Keep the current channel alive while FMOD prepares the
@@ -738,12 +746,80 @@ void RankedAudioManager::requestAudioSwitch() {
     m_switchPending = false;
 }
 
+RankedAudioMode RankedAudioManager::availableMode(RankedAudioMode requested) const {
+    while (auto const* resource = resourceForMode(requested)) {
+        if (!m_failedPlaybackKeys.contains(resource->key)) return requested;
+        requested = pendingTimeoutFallback(requested);
+    }
+    return RankedAudioMode::Silent;
+}
+
+bool RankedAudioManager::audioStartTimedOut() const {
+    return m_audioStartBeganAt != std::chrono::steady_clock::time_point{} &&
+        std::chrono::steady_clock::now() - m_audioStartBeganAt >= kPendingAudioStartTimeout;
+}
+
+void RankedAudioManager::failDesiredAudio(char const* phase, int result) {
+    if (auto const* resource = resourceForMode(m_desiredMode)) {
+        m_failedPlaybackKeys.insert(resource->key);
+        log::warn("Ranked audio: transition failed key='{}' song={} phase={} result={}; holding fallback until mode changes",
+            resource->key, resource->songId, phase, result);
+    }
+    cancelPendingAudioStart();
+    m_switchPending = false;
+    m_playbackVerifyPending = false;
+    m_desiredMode = availableMode(m_requestedMode);
+    // Do not release an asynchronously-opening Sound here: release itself can
+    // wait for the decoder. Keep the current audible channel while fallback
+    // prepares, and prevent the repeated UI mode from restarting this failure.
+    if (resourceForMode(m_desiredMode)) {
+        TransitionTrace::get().mark("audio-pending-fallback");
+        requestAudioSwitch();
+    }
+}
+
+void RankedAudioManager::retireOwnedChannel(double seconds) {
+    auto* outgoing = m_rankedChannel;
+    auto const fadingIn = m_ownedDspFadeIn;
+    auto const fadeStart = m_ownedFadeDspStart;
+    auto const fadeEnd = m_ownedFadeDspEnd;
+    m_rankedChannel = nullptr;
+    stopOwnedAudio(); // clears previous retirement, not the detached outgoing
+    if (!outgoing) return;
+    auto* engine = FMODAudioEngine::sharedEngine();
+    unsigned long long clock = 0;
+    int rate = 0;
+    if (seconds > 0 && engine && engine->m_system &&
+        engine->m_system->getSoftwareFormat(&rate, nullptr, nullptr) == FMOD_OK && rate > 0 &&
+        outgoing->getDSPClock(nullptr, &clock) == FMOD_OK) {
+        // Fade points multiply setVolume; getVolume excludes this envelope.
+        // Interrupt a still-running fade at its actual DSP-clock gain, rather
+        // than jumping to full volume or keeping its future fade-in endpoint.
+        auto const gain = fadingIn && fadeEnd > fadeStart
+            ? static_cast<float>(std::clamp(
+                (static_cast<double>(clock) - static_cast<double>(fadeStart)) /
+                    static_cast<double>(fadeEnd - fadeStart), 0.0, 1.0))
+            : 1.0f;
+        auto const end = clock + static_cast<unsigned long long>(seconds * rate);
+        if (outgoing->removeFadePoints(clock, std::numeric_limits<unsigned long long>::max()) == FMOD_OK &&
+            outgoing->addFadePoint(clock, gain) == FMOD_OK &&
+            outgoing->addFadePoint(end, 0) == FMOD_OK &&
+            outgoing->setDelay(0, end, true) == FMOD_OK) {
+            m_retiringChannel = outgoing;
+            m_retiringUntil = std::chrono::steady_clock::now() +
+                std::chrono::milliseconds(static_cast<int>(seconds * 1000));
+            return;
+        }
+    }
+    outgoing->stop();
+}
+
 void RankedAudioManager::startDesiredAudio(bool retry) {
     auto const* resource = resourceForMode(m_desiredMode);
     if (!resource || !songReady(resource->songId)) {
         cancelPendingAudioStart();
         m_switchPending = false;
-        stopOwnedAudio();
+        failDesiredAudio("resource");
         return;
     }
 
@@ -751,7 +827,7 @@ void RankedAudioManager::startDesiredAudio(bool retry) {
     if (!engine || !engine->m_system) {
         cancelPendingAudioStart();
         m_switchPending = false;
-        stopOwnedAudio();
+        failDesiredAudio("engine");
         return;
     }
 
@@ -759,7 +835,7 @@ void RankedAudioManager::startDesiredAudio(bool retry) {
     if (path.empty()) {
         cancelPendingAudioStart();
         m_switchPending = false;
-        stopOwnedAudio();
+        failDesiredAudio("path");
         return;
     }
 
@@ -770,6 +846,8 @@ void RankedAudioManager::startDesiredAudio(bool retry) {
             return;
         }
     }
+    if (m_audioStartBeganAt == std::chrono::steady_clock::time_point{})
+        m_audioStartBeganAt = std::chrono::steady_clock::now();
 
     // FMOD_NONBLOCKING moves both stream open and stream seek work to FMOD's
     // non-blocking thread. Never call playSound until the initial open is ready.
@@ -778,6 +856,7 @@ void RankedAudioManager::startDesiredAudio(bool retry) {
     auto const openState = preparedStreamState(sound, &openResult);
     if (openState == PreparedStreamState::Pending) {
         m_switchPending = true;
+        if (audioStartTimedOut()) failDesiredAudio("open-timeout");
         return;
     }
     if (openState == PreparedStreamState::Error) {
@@ -788,7 +867,7 @@ void RankedAudioManager::startDesiredAudio(bool retry) {
             static_cast<int>(openResult),
             path
         );
-        m_switchPending = false;
+        failDesiredAudio("open", static_cast<int>(openResult));
         return;
     }
 
@@ -809,6 +888,7 @@ void RankedAudioManager::startDesiredAudio(bool retry) {
     ).count();
     if (playResult == FMOD_ERR_NOTREADY) {
         m_switchPending = true;
+        if (audioStartTimedOut()) failDesiredAudio("play-notready-timeout", static_cast<int>(playResult));
         return;
     }
     if (playResult != FMOD_OK || !channel) {
@@ -819,7 +899,7 @@ void RankedAudioManager::startDesiredAudio(bool retry) {
             static_cast<int>(playResult),
             path
         );
-        m_switchPending = false;
+        failDesiredAudio("play", static_cast<int>(playResult));
         return;
     }
 
@@ -852,6 +932,7 @@ void RankedAudioManager::startDesiredAudio(bool retry) {
                 resource->songId,
                 static_cast<int>(seekResult)
             );
+            if (audioStartTimedOut()) failDesiredAudio("seek-notready-timeout", static_cast<int>(seekResult));
             return;
         }
         if (seekResult != FMOD_OK) {
@@ -860,8 +941,7 @@ void RankedAudioManager::startDesiredAudio(bool retry) {
                 resource->songId,
                 static_cast<int>(seekResult)
             );
-            cancelPendingAudioStart();
-            m_switchPending = false;
+            failDesiredAudio("seek", static_cast<int>(seekResult));
             return;
         }
         m_pendingSeekAccepted = true;
@@ -890,54 +970,10 @@ void RankedAudioManager::updatePendingAudioStart() {
     FMOD_RESULT openResult = FMOD_OK;
     auto const state = preparedStreamState(m_pendingSound, &openResult);
     if (state == PreparedStreamState::Pending) {
-        auto const now = std::chrono::steady_clock::now();
-        if (
-            m_pendingStartedAt == std::chrono::steady_clock::time_point{} ||
-            now - m_pendingStartedAt < kPendingAudioStartTimeout
-        ) {
-            return;
+        if (audioStartTimedOut()) {
+            TransitionTrace::get().mark("audio-pending-timeout");
+            failDesiredAudio("buffer-seek-timeout", static_cast<int>(openResult));
         }
-
-        auto* stalledSound = m_pendingSound;
-        auto const stalledKey = m_pendingKey;
-        auto const stalledSongId = resource->songId;
-        auto const fallbackMode = pendingTimeoutFallback(m_desiredMode);
-        auto const elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
-            now - m_pendingStartedAt
-        ).count();
-        TransitionTrace::get().mark("audio-pending-timeout");
-        log::warn(
-            "Ranked audio: non-blocking transition timed out key='{}' song={} after {}ms; falling back",
-            stalledKey,
-            stalledSongId,
-            elapsedMs
-        );
-
-        cancelPendingAudioStart();
-        for (auto it = m_preparedSounds.begin(); it != m_preparedSounds.end(); ++it) {
-            if (it->second != stalledSound) continue;
-            if (it->second) it->second->release();
-            m_preparedSounds.erase(it);
-            break;
-        }
-
-        m_switchPending = false;
-        if (fallbackMode == RankedAudioMode::Silent) {
-            // Keep an already-audible Ranked channel alive rather than turning a
-            // failed decorative transition into silence. With no active channel,
-            // Silent is the only safe fallback.
-            if (!ownedChannelPlaying()) m_desiredMode = RankedAudioMode::Silent;
-            return;
-        }
-
-        m_desiredMode = fallbackMode;
-        TransitionTrace::get().mark("audio-pending-fallback");
-        log::warn(
-            "Ranked audio: fallback mode selected after stalled transition key='{}' song={}",
-            stalledKey,
-            stalledSongId
-        );
-        requestAudioSwitch();
         return;
     }
     if (state == PreparedStreamState::Error) {
@@ -947,14 +983,16 @@ void RankedAudioManager::updatePendingAudioStart() {
             resource->songId,
             static_cast<int>(openResult)
         );
-        cancelPendingAudioStart();
-        m_switchPending = false;
+        failDesiredAudio("async-seek", static_cast<int>(openResult));
         return;
     }
 
     if (m_pendingStartMs > 0 && !m_pendingSeekAccepted) {
         auto const seekResult = m_pendingChannel->setPosition(m_pendingStartMs, FMOD_TIMEUNIT_MS);
-        if (seekResult == FMOD_ERR_NOTREADY) return;
+        if (seekResult == FMOD_ERR_NOTREADY) {
+            if (audioStartTimedOut()) failDesiredAudio("seek-notready-timeout", static_cast<int>(seekResult));
+            return;
+        }
         if (seekResult != FMOD_OK) {
             log::warn(
                 "Ranked audio: deferred seek failed key='{}' song={} result={}",
@@ -962,8 +1000,7 @@ void RankedAudioManager::updatePendingAudioStart() {
                 resource->songId,
                 static_cast<int>(seekResult)
             );
-            cancelPendingAudioStart();
-            m_switchPending = false;
+            failDesiredAudio("deferred-seek", static_cast<int>(seekResult));
             return;
         }
         m_pendingSeekAccepted = true;
@@ -975,8 +1012,7 @@ void RankedAudioManager::updatePendingAudioStart() {
 
     auto* engine = FMODAudioEngine::sharedEngine();
     if (!engine || !engine->m_system) {
-        cancelPendingAudioStart();
-        m_switchPending = false;
+        failDesiredAudio("engine-after-seek");
         return;
     }
 
@@ -990,7 +1026,7 @@ void RankedAudioManager::updatePendingAudioStart() {
         std::chrono::steady_clock::now() - m_pendingStartedAt
     ).count();
 
-    // Detach the ready candidate before stopping the old active channel.
+    // Detach the ready candidate before retiring the old active channel.
     m_pendingSound = nullptr;
     m_pendingChannel = nullptr;
     m_pendingKey.clear();
@@ -1000,11 +1036,20 @@ void RankedAudioManager::updatePendingAudioStart() {
     m_pendingStartedAt = {};
     m_pendingPlaybackRetry = false;
 
-    stopOwnedAudio();
-    engine->stopAllMusic(true);
     ensureFmodOutputActive();
 
-    channel->setVolume(targetRankedVolume());
+    auto const fadeIn = std::clamp(m_config.audio.fadeInSeconds, 0.0, 10.0);
+    unsigned long long clock = 0;
+    int rate = 0;
+    auto const dspFade = fadeIn > 0 &&
+        engine->m_system->getSoftwareFormat(&rate, nullptr, nullptr) == FMOD_OK && rate > 0 &&
+        channel->getDSPClock(nullptr, &clock) == FMOD_OK &&
+        channel->addFadePoint(clock, 0) == FMOD_OK &&
+        channel->addFadePoint(clock + static_cast<unsigned long long>(fadeIn * rate), 1) == FMOD_OK;
+    if (!dspFade) channel->removeFadePoints(0, std::numeric_limits<unsigned long long>::max());
+    // Base music volume and the DSP fade envelope are separate multipliers.
+    // A zero base volume would leave the stream silent even after its DSP fade.
+    channel->setVolume(dspFade || fadeIn <= 0 ? targetRankedVolume() : 0);
     channel->setMute(false);
     auto const unpauseResult = channel->setPaused(false);
     if (unpauseResult != FMOD_OK) {
@@ -1015,9 +1060,14 @@ void RankedAudioManager::updatePendingAudioStart() {
             static_cast<int>(unpauseResult)
         );
         channel->stop();
-        m_switchPending = false;
+        failDesiredAudio("unpause", static_cast<int>(unpauseResult));
         return;
     }
+
+    // Accept the new channel before retiring the audible one. FMOD DSP ramps
+    // run independently of the Ranked UI's 200ms polling/render heartbeat.
+    if (!m_ownsMusicChannel) engine->stopAllMusic(true);
+    retireOwnedChannel(std::clamp(m_config.audio.fadeOutSeconds, 0.0, 10.0));
 
     m_rankedSound = sound;
     m_rankedChannel = channel;
@@ -1027,7 +1077,13 @@ void RankedAudioManager::updatePendingAudioStart() {
     m_switchPending = false;
     m_playbackVerifyPending = true;
     m_playbackVerifyAt = std::chrono::steady_clock::now() + kPlaybackVerifyDelay;
-    m_ownedFadeInPending = false;
+    m_audioStartBeganAt = {};
+    m_ownedFadeInPending = fadeIn > 0;
+    m_ownedFadeStartedAt = std::chrono::steady_clock::now();
+    m_ownedFadeDurationSeconds = fadeIn;
+    m_ownedDspFadeIn = dspFade;
+    m_ownedFadeDspStart = dspFade ? clock : 0;
+    m_ownedFadeDspEnd = dspFade ? clock + static_cast<unsigned long long>(fadeIn * rate) : 0;
 
     TransitionTrace::get().mark(fmt::format("audio-seek-ready:{}us", seekElapsedUs));
     TransitionTrace::get().mark("audio-channel-started");
@@ -1092,6 +1148,7 @@ void RankedAudioManager::verifyDesiredAudio() {
         );
         stopOwnedAudio();
         m_switchPending = true;
+        m_audioStartBeganAt = std::chrono::steady_clock::now();
         startDesiredAudio(true);
         return;
     }
@@ -1102,10 +1159,15 @@ void RankedAudioManager::verifyDesiredAudio() {
         resource->key,
         resource->songId
     );
-    stopOwnedAudio();
+    failDesiredAudio("verification-retries-exhausted");
 }
 
 void RankedAudioManager::updateOwnedFades(std::chrono::steady_clock::time_point now) {
+    if (m_retiringChannel && now >= m_retiringUntil) {
+        m_retiringChannel->stop();
+        m_retiringChannel = nullptr;
+        m_retiringUntil = {};
+    }
     if (m_ownedFadeOutPending && m_rankedChannel) {
         auto const elapsed = std::chrono::duration<double>(now - m_ownedFadeStartedAt).count();
         auto const t = m_ownedFadeDurationSeconds <= 0.0
@@ -1126,8 +1188,12 @@ void RankedAudioManager::updateOwnedFades(std::chrono::steady_clock::time_point 
         auto const t = m_ownedFadeDurationSeconds <= 0.0
             ? 1.0
             : std::clamp(elapsed / m_ownedFadeDurationSeconds, 0.0, 1.0);
-        m_rankedChannel->setVolume(targetRankedVolume() * static_cast<float>(t));
-        if (t >= 1.0) m_ownedFadeInPending = false;
+        if (!m_ownedDspFadeIn || t >= 1.0)
+            m_rankedChannel->setVolume(targetRankedVolume() * static_cast<float>(t));
+        if (t >= 1.0) {
+            m_ownedFadeInPending = false;
+            m_ownedDspFadeIn = false;
+        }
     }
 }
 
@@ -1136,6 +1202,9 @@ void RankedAudioManager::fadeOutForGameplay() {
     // Ranked layer no longer ticks in gameplay, so stop the independently-owned
     // channel deterministically and hand audio ownership back to Geometry Dash.
     m_desiredMode = RankedAudioMode::Silent;
+    m_requestedMode = RankedAudioMode::Silent;
+    m_failedPlaybackKeys.clear();
+    m_audioStartBeganAt = {};
     m_switchPending = false;
     cancelPendingAudioStart();
     stopOwnedAudio();
@@ -1147,6 +1216,7 @@ void RankedAudioManager::onApplicationPause() {
     // This prevents the direct stream from escaping GD's normal background-audio
     // lifecycle on platforms where pauseSound() only visits registered channels.
     if (m_rankedChannel) m_rankedChannel->setPaused(true);
+    if (m_retiringChannel) m_retiringChannel->setPaused(true);
 }
 
 void RankedAudioManager::onApplicationResume() {
@@ -1158,6 +1228,9 @@ void RankedAudioManager::onApplicationResume() {
 
 void RankedAudioManager::restoreMenuMusic() {
     m_desiredMode = RankedAudioMode::Silent;
+    m_requestedMode = RankedAudioMode::Silent;
+    m_failedPlaybackKeys.clear();
+    m_audioStartBeganAt = {};
     m_switchPending = false;
     m_playbackRetryCount = 0;
     cancelPendingAudioStart();
@@ -1219,10 +1292,14 @@ void RankedAudioManager::tick() {
 
     // If another scene/mod unexpectedly kills the direct Ranked channel, recover
     // looped menu/match/result BGM instead of remaining silently "owned" forever.
-    if (m_ownsMusicChannel && !m_ownedFadeOutPending && !m_playbackVerifyPending) {
+    if (m_ownsMusicChannel && !m_switchPending && !m_ownedFadeOutPending && !m_playbackVerifyPending) {
         if (auto const* resource = resourceForMode(m_desiredMode); resource && resource->loop && !ownedChannelPlaying()) {
             log::warn("Ranked audio: owned channel stopped unexpectedly; restarting key='{}' song={}", resource->key, resource->songId);
-            startDesiredAudio(true);
+            if (m_playbackRetryCount < kMaxPlaybackRetries) {
+                ++m_playbackRetryCount;
+                m_audioStartBeganAt = now;
+                startDesiredAudio(true);
+            } else failDesiredAudio("channel-retries-exhausted");
         }
     }
 }

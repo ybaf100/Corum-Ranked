@@ -21,6 +21,8 @@ for (const debugOn of [false, true]) test(`production audio handoff + retained l
     assert(begin >= 0 && end > begin);
     const cpp = `
 #include <cassert>
+#include <chrono>
+#include <set>
 #include <string>
 #include <vector>
 namespace geode::log {template<class... T> void info(T...) {}}
@@ -36,10 +38,13 @@ enum class RankedAudioMode {Silent,Lobby,LobbyPromotion,LobbyDemotionWarning,Res
 struct TransitionTrace {static TransitionTrace& get(){static TransitionTrace t;return t;}void mark(char const*){}};
 struct RankedAudioManager {
  RankedAudioMode m_desiredMode=RankedAudioMode::Lobby;bool m_switchPending=false,m_ownedFadeOutPending=false,m_playbackVerifyPending=false;
+ RankedAudioMode m_requestedMode=RankedAudioMode::Lobby;std::set<std::string> m_failedPlaybackKeys;
+ std::chrono::steady_clock::time_point m_audioStartBeganAt{};
  bool m_ownsMusicChannel=true;std::string m_playingKey="lobby";int m_playbackRetryCount=0,channels=1,creations=1,fadeouts=0;
  static RankedAudioManager& get(){static RankedAudioManager a;return a;}
  struct Resource{std::string key;};Resource resource;
  bool enabled()const{return true;}bool resourcesReady()const{return true;}
+ RankedAudioMode availableMode(RankedAudioMode mode)const{return mode;}
  Resource* resourceForMode(RankedAudioMode mode){if(mode==RankedAudioMode::Silent)return nullptr;resource.key=std::to_string(int(mode));return &resource;}
  bool ownedChannelPlaying()const{return channels==1;}
  void cancelPendingAudioStart(){}void stopOwnedAudio(){channels=0;m_ownsMusicChannel=false;++fadeouts;}
@@ -74,13 +79,18 @@ struct CorumRankedPlayLayer: PlayLayer {
   return true;
  }
 };
-struct Menu{void setTouchEnabled(bool){}};
+struct Menu{int m_eState=0;bool touch=true;void setTouchEnabled(bool value){touch=value;}bool isTouchEnabled(){return touch;}};
+namespace corum::ranked::ui {void cancelMenuTouch(Menu*){}}
+struct Handler{int m_nPriority=0;};
+struct Dispatcher{Handler* findHandler(Menu*){return nullptr;}};
+struct CCDirector{Dispatcher d;static CCDirector* sharedDirector(){static CCDirector c;return &c;}Dispatcher* getTouchDispatcher(){return &d;}};
 struct CCLayerColor{virtual ~CCLayerColor()=default;virtual void onEnter(){}};
 #define schedule_selector(x) 0
 using namespace corum::ranked;
 struct CorumRankedLayer: CCLayerColor {
  enum class Page{Live,Profile};Page m_page=Page::Live;
  bool m_rankedChildScenePushed=true,m_enteringSongGate=false,m_enteringLevel=false;
+ void* m_rankTransitionLayer=nullptr;
  std::string m_stageResultAudioPlayedKey;Menu* m_menu=nullptr;
  void setKeypadEnabled(bool){}void schedule(int,float){}
  bool showResourceGate()const{return false;}void syncResources(){}void syncPhase(){}void updateAutomation(){}

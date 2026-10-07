@@ -119,6 +119,7 @@ jobs:
           node --test corum-ranked-mod/tests/RoundPreparationNativeTest.mjs
           node --test corum-ranked-mod/tests/NativeEntryTransportTest.mjs
           node --test corum-ranked-mod/tests/EntryGameplayNativeTest.mjs
+          node --test corum-ranked-mod/tests/RankedInputNativeTest.mjs
           node --test corum-ranked-mod/tests/EntryDeathmatchRuntimeNativeTest.mjs
           node --test corum-ranked-mod/tests/LevelPreparationSourceTest.mjs
           node --test corum-ranked-mod/tests/SpectatorCameraOwnerNativeTest.mjs
@@ -137,6 +138,8 @@ jobs:
           node --test corum-ranked-mod/tests/SpectatorLiveViewerNativeTest.mjs
           node --test corum-ranked-mod/tests/SpectatorPublisherNativeTest.mjs
           node --test corum-ranked-mod/tests/SpectatorAudioNativeTest.mjs
+          node --test corum-ranked-mod/tests/AudioTransitionSourceTest.mjs
+          node --test corum-ranked-mod/tests/RankedAudioTransitionNativeTest.mjs
           node --test corum-ranked-mod/tests/SpectatorCaptureNativeTest.mjs
           node --test corum-ranked-mod/tests/DebugSpectateSourceTest.mjs
           node --test corum-ranked-mod/tests/DebugSpectateRuntimeNativeTest.mjs

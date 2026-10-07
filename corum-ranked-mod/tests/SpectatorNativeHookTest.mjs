@@ -126,6 +126,7 @@ ${source.slice(source.indexOf('thread_local PlayLayer* persistenceOwner'), sourc
 ${source.slice(source.indexOf('struct ScopedRealGameplayEnd {'), source.indexOf('std::int64_t steadyNowMicros()'))}
 double rankedProgressPercent(PlayLayer* layer) { return layer->percent; }
 struct CorumRankedPlayLayer : PlayLayer {
+    struct EntryOverlay { int dismissed=0; void dismiss(){++dismissed;} };
     corum::ranked::SpectatorGhostPose observedSpectatorPose(bool dead=false,bool finished=false) {
         return corum::ranked::captureSpectatorPose(m_player1,dead,finished,m_gameState.m_isDualMode);
     }
@@ -133,6 +134,7 @@ struct CorumRankedPlayLayer : PlayLayer {
     bool observesSpectatorPlayer(PlayerObject*) {return false;}
     void observeSpectatorNativeSnap(PlayerObject*,corum::ranked::SpectatorDiscontinuity,corum::ranked::SpectatorGhostPose const&) {}
     struct Fields {
+        EntryOverlay* entryOverlay = nullptr;
         bool nativeEntryHeld = false;
         bool spectatorPresentationRetired=false,spectatorScenePrepared=false,autoExitRequested=false;
         bool entryAttemptCountDeferred = false;
@@ -268,7 +270,10 @@ int main() {
         assert(teardown.quits==1&&!teardown.m_isTestMode);
         assert(teardownLevel.scores==(spectator?0:1));
         assert(teardownLevel.best==(spectator?41:100));
+        CorumRankedPlayLayer::EntryOverlay entryOverlay;
+        teardown.m_fields->entryOverlay=&entryOverlay;
         currentLayer=&teardown;teardown.onExit();
+        assert(entryOverlay.dismissed==1 && teardown.m_fields->entryOverlay==nullptr);
         assert(teardown.exits==1&&!teardown.m_isTestMode);
         assert(teardownLevel.scores==(spectator?0:2));
         assert(runtime.ends==0);

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { readFileSync, mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -39,6 +39,9 @@ test('actual native entry gate owns input/audio and releases once after shared s
 #include <memory>
 #include <string>
 #include <vector>
+#include "${join(root, 'src/ui/RankedInput.hpp')}"
+using namespace cocos2d;
+using geode::cast::typeinfo_cast;
 #include "${join(root, 'src/domain/FontMetrics.hpp')}"
 namespace geode::log {template<class... T>void info(T...) {}}
 using namespace geode;
@@ -58,20 +61,22 @@ struct RankedEntryOverlay {
     int removed=0;
     static RankedEntryOverlay* create();
     void present(bool,std::optional<std::int64_t>);
-    void removeFromParentAndCleanup(bool){++removed;}
+    void dismiss(){++removed;}
 };
 std::vector<std::unique_ptr<RankedEntryOverlay>> overlays;
 RankedEntryOverlay* RankedEntryOverlay::create(){overlays.push_back(std::make_unique<RankedEntryOverlay>());return overlays.back().get();}
 ${presentation}
 }
-struct FakeButton {bool enabled=true;int writes=0;bool isEnabled()const{return enabled;}
+struct FakeButton:CCMenuItem {int writes=0;bool isEnabled()const{return enabled;}
 void setEnabled(bool value){enabled=value;++writes;}};
-struct UILayer {
-    bool touch=true,keyboard=true,keypad=true,held=true;int resets=0,menuEnables=0,menuDisables=0;
+struct UILayer:CCLayer {
+    bool keyboard=true,keypad=true,held=true;int resets=0,menuEnables=0,menuDisables=0;
     FakeButton pause;FakeButton* m_pauseBtn=&pause;
+    CCMenu pauseMenu;
+    UILayer(){pause.parent=&pauseMenu;pauseMenu.item=&pause;onEnter();pauseMenu.onEnter();}
     bool isTouchEnabled()const{return touch;}bool isKeyboardEnabled()const{return keyboard;}
     bool isKeypadEnabled()const{return keypad;}
-    void setTouchEnabled(bool value){touch=value;}void setKeyboardEnabled(bool value){keyboard=value;}
+    void setKeyboardEnabled(bool value){keyboard=value;}
     void setKeypadEnabled(bool value){keypad=value;}void resetAllButtons(){held=false;++resets;}
     void enableMenu(){++menuEnables;m_pauseBtn->setEnabled(true);}
     void disableMenu(){++menuDisables;m_pauseBtn->setEnabled(false);}
@@ -134,7 +139,7 @@ struct CorumRankedPlayLayer:PlayLayer {
     struct Fields {
         bool nativeEntryHeld=true,autoExitRequested=false,entryWasPaused=false;
         bool entryTouchEnabled=true,entryKeyboardEnabled=true;
-        bool entryUITouchEnabled=false,entryUIKeyboardEnabled=false,entryUIKeypadEnabled=false,entryUIPauseEnabled=false;
+        bool entryUIKeyboardEnabled=false,entryUIKeypadEnabled=false,entryUIPauseEnabled=false;
         bool entryAttemptCountDeferred=false;
         int levelId=123;
         struct Context {std::string matchId="match";int roundNumber=1,deathmatchSequence=0;} sceneContext;
@@ -156,7 +161,9 @@ int main(){
     scene.m_isPaused=false;scene.touch=true;scene.keyboard=true;scene.m_queuedButtons={1,2};
     scene.updateAttempts();scene.updateAttempts();assert(scene.attemptCounts==0&&scene.fields.entryAttemptCountDeferred);
     scene.initializeEntryInputHold();auto& overlay=*scene.fields.entryOverlay;
-    assert(!uiLayer.touch&&!uiLayer.keyboard&&!uiLayer.keypad&&!uiLayer.pause.enabled&&!uiLayer.held);
+    assert(uiLayer.touch&&!uiLayer.keyboard&&!uiLayer.keypad&&!uiLayer.pause.enabled&&!uiLayer.held);
+    auto* inputHandler=CCDirector::sharedDirector()->dispatcher.findHandler(&uiLayer);
+    assert(inputHandler&&uiLayer.touchWrites==0);
     assert(uiLayer.resets==1&&player1.releases==1&&player2.releases==1&&!player1.held&&!player2.held);
     scene.running=false;scene.m_queuedButtons={1,2};
     assert(scene.blockEntryGameplayUpdate());
@@ -182,6 +189,11 @@ int main(){
     assert(runtime.arms==2&&!scene.fields.nativeEntryHeld&&!scene.m_isPaused&&scene.touch&&scene.keyboard);
     assert(scene.touchWrites==2&&scene.keyboardWrites==2&&overlay.removed==1&&scene.fields.entryOverlay==nullptr);
     assert(uiLayer.touch&&uiLayer.keyboard&&uiLayer.keypad&&uiLayer.pause.enabled&&uiLayer.resets==2);
+    assert(uiLayer.touchWrites==0&&CCDirector::sharedDirector()->dispatcher.findHandler(&uiLayer)==inputHandler);
+    auto* pauseHandler=CCDirector::sharedDirector()->dispatcher.findHandler(&uiLayer.pauseMenu);
+    assert(pauseHandler&&pauseHandler->m_nPriority<inputHandler->m_nPriority);
+    auto& dispatch=CCDirector::sharedDirector()->dispatcher;dispatch.began(1);dispatch.ended(1);
+    assert(uiLayer.pause.activations==1); // enabled=true alone did not test this path before
     assert(player1.releases==2&&player2.releases==2&&!player1.held&&!player2.held);
     assert(scene.attemptCounts==1&&!scene.fields.entryAttemptCountDeferred);
     assert(audio.resumes==1&&!audio.paused&&scene.musicStarts==1);
@@ -196,7 +208,7 @@ int main(){
     runtime.data.match.entry={true,true};runtime.remaining=0;
     CorumRankedPlayLayer paused;paused.fields.entryWasPaused=true;
     paused.fields.entryTouchEnabled=false;paused.fields.entryKeyboardEnabled=false;
-    UILayer pausedUI;pausedUI.touch=false;pausedUI.keyboard=true;pausedUI.keypad=false;pausedUI.pause.enabled=false;
+    UILayer pausedUI;pausedUI.setTouchEnabled(false);pausedUI.keyboard=true;pausedUI.keypad=false;pausedUI.pause.enabled=false;
     paused.m_uiLayer=&pausedUI;paused.initializeEntryInputHold();
     assert(!paused.blockEntryGameplayUpdate());
     assert(paused.m_isPaused&&!paused.touch&&!paused.keyboard&&audio.paused&&audio.resumes==0&&paused.musicStarts==0);
@@ -298,11 +310,13 @@ int main(){
 `;
     const dir = mkdtempSync(join(tmpdir(), 'corum-entry-native-'));
     try {
+        mkdirSync(join(dir, 'Geode'));
+        writeFileSync(join(dir, 'Geode/Geode.hpp'), readFileSync(join(root, 'tests/helpers/RankedInputNativeDouble.hpp'), 'utf8'));
         writeFileSync(join(dir, 'entry.cpp'), cpp);
         for (const platform of ['GEODE_IS_WINDOWS', 'GEODE_IS_IOS']) {
             const binary = join(dir, platform);
             execFileSync('g++', ['-std=c++23', '-Wall', '-Wextra', '-Wpedantic', '-Werror',
-                `-D${platform}=1`, join(dir, 'entry.cpp'), '-o', binary], { stdio: 'pipe' });
+                `-D${platform}=1`, '-I', dir, join(dir, 'entry.cpp'), '-o', binary], { stdio: 'pipe' });
             execFileSync(binary, [], { stdio: 'pipe' });
         }
     } finally { rmSync(dir, { recursive: true, force: true }); }
