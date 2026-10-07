@@ -51,7 +51,7 @@ test('Lobby and Achievement text keep native-readable sizing', () => {
     const achievements = body(popup, 'void renderAchievements(', 'void renderHistoryList(');
 
     assert.match(actionVisual, /text,\s*0\.62f/);
-    assert.match(actionVisual, /limitLabelWidth\(width - 20\.0f, 0\.62f, 0\.30f\)/);
+    assert.match(actionVisual, /fitLabelWidth\(caption, width - 20\.0f, 0\.62f, 0\.30f\)/);
     assert.equal((language.match(/setScale\(0\.48f\)/g) ?? []).length, 2);
     assert.equal((main.match(/setScale\(0\.66f\)/g) ?? []).length, 2);
 

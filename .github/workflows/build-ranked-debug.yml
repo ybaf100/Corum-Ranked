@@ -115,6 +115,7 @@ jobs:
           /tmp/corum-ranked-level-prepare-test
           node --test corum-ranked-mod/tests/GameplayControlsNativeTest.mjs
           node --test corum-ranked-mod/tests/RankedPauseNativeTest.mjs
+          node --test corum-ranked-mod/tests/FontTypographyNativeTest.mjs
           node --test corum-ranked-mod/tests/RoundPreparationNativeTest.mjs
           node --test corum-ranked-mod/tests/NativeEntryTransportTest.mjs
           node --test corum-ranked-mod/tests/EntryGameplayNativeTest.mjs
@@ -196,6 +197,7 @@ jobs:
         run: |
           python3 corum-ranked-mod/tests/verify-visibility-package.py \
             "$BUILD_OUTPUT" "$MOD_VERSION" --ios-only
+          python3 corum-ranked-mod/tests/verify-font-package.py "$BUILD_OUTPUT"
       - uses: actions/upload-artifact@v7
         with:
           name: Corum-Ranked-${{ needs.metadata.outputs.version }}-iOS-Debug-OFF
@@ -252,6 +254,7 @@ jobs:
           PY
           python3 corum-ranked-mod/tests/verify-visibility-package.py \
             dist/hwanhee1.corum_ranked.geode "$MOD_VERSION" --debug
+          python3 corum-ranked-mod/tests/verify-font-package.py dist/hwanhee1.corum_ranked.geode
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ needs.metadata.outputs.artifact_name }}

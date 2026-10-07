@@ -9,6 +9,7 @@ import { execFileSync } from 'node:child_process';
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const play = readFileSync(join(root, 'src/PlayLayer.cpp'), 'utf8');
 const overlay = readFileSync(join(root, 'src/ui/RankedEntryOverlay.cpp'), 'utf8');
+const visuals = readFileSync(join(root, 'src/ui/RankedVisuals.hpp'), 'utf8');
 function method(source, signature) {
     const start = source.indexOf(signature);
     assert(start >= 0, signature);
@@ -38,14 +39,19 @@ test('actual native entry gate owns input/audio and releases once after shared s
 #include <memory>
 #include <string>
 #include <vector>
+#include "${join(root, 'src/domain/FontMetrics.hpp')}"
 namespace geode::log {template<class... T>void info(T...) {}}
 using namespace geode;
 struct FakeLabel {
     std::string text;float scale=0;unsigned char opacity=0;
     void setString(char const* s){text=s;}void setScale(float s){scale=s;}
     void setOpacity(unsigned char o){opacity=o;}
+    char const* getFntFile()const{return "CorumSansCountdown.fnt";}
 };
 namespace corum::ranked::ui {
+using CCLabelBMFont=FakeLabel;
+${method(visuals, 'inline float fontScale(')}
+${method(visuals, 'inline void setLabelScale(')}
 namespace i18n {bool korean=false;bool isKorean(){return korean;}}
 struct RankedEntryOverlay {
     FakeLabel heading,digit;FakeLabel* m_heading=&heading;FakeLabel* m_digit=&digit;
@@ -251,7 +257,7 @@ int main(){
             animated.present(true,remaining);
             auto const expected=entryCountdownFrame(remaining);
             assert(animated.digit.text==(expected.digit?std::to_string(expected.digit):""));
-            assert(animated.digit.scale==1.7f*expected.scale&&animated.digit.opacity==expected.opacity);
+            assert(animated.digit.scale==corumFontScale(1.7f*expected.scale,"CorumSansCountdown.fnt")&&animated.digit.opacity==expected.opacity);
         }
         animated.present(true,2500);assert(animated.digit.text=="3"&&animated.digit.opacity==255);
         animated.present(true,1500);assert(animated.digit.text=="2"&&animated.digit.opacity==255);

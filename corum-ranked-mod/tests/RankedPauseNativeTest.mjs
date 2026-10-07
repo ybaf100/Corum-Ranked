@@ -9,6 +9,7 @@ const root=resolve(fileURLToPath(new URL('..',import.meta.url)));
 const read=p=>readFileSync(join(root,p),'utf8');
 const pause=read('src/RankedPauseLayer.cpp');
 const popup=read('src/ui/RankedSurrenderPopup.hpp');
+const visuals=read('src/ui/RankedVisuals.hpp');
 const body=(source,name)=>{const at=source.indexOf(name);assert(at>=0,name);const open=source.indexOf('{',at);let end=open+1,depth=1;while(depth){if(source[end]==='{')++depth;if(source[end]==='}')--depth;++end;}return source.slice(at,end);};
 
 test('packaged Corum font charsets cover Korean countdown, pause and surrender labels',()=>{
@@ -47,9 +48,10 @@ test('actual pause/modal callbacks block only owned manual quit, send exact scop
     const cpp=`
 #include <cassert>
 #include <string>
+#include "${join(root, 'src/domain/FontMetrics.hpp')}"
 struct CCObject {};
 struct Node { bool parent=true;void* getParent()const{return parent?(void*)this:nullptr;} };
-struct Label {std::string text;void setString(char const* s){text=s;}void limitLabelWidth(float,float,float){};};
+struct Label {std::string text;void setString(char const* s){text=s;}void limitLabelWidth(float,float,float){};char const* getFntFile()const{return "CorumSansBold.fnt";}};
 struct PauseLayer:Node {int quits=0,resumes=0;void onQuit(CCObject*){++quits;}void onResume(CCObject*){++resumes;}};
 struct Level{int m_levelID=123;};
 struct PlayLayer{Level* m_level=nullptr;inline static PlayLayer* active=nullptr;int quits=0;static PlayLayer* get(){return active;}void onQuit(){++quits;}};
@@ -73,6 +75,9 @@ struct RankedRuntime {
 };
 namespace i18n {inline bool korean=false;std::string text(char const* key,char const* fallback){return korean?std::string("ko:")+key:fallback;}}
 namespace ui {
+using CCLabelBMFont=Label;
+${body(visuals,'inline float fontScale(')}
+${body(visuals,'inline void fitLabelWidth(')}
 struct RankedSurrenderPopup:Popup {
  WeakRef<PauseLayer> m_owner;std::string m_matchId="m";int m_round=1,m_deathmatch=0;
  bool m_wholeMatch=false,m_confirmation=false,m_submitted=false,m_closed=false,m_showSubmissionStatus=false;Label label;Label* m_status=&label;int renders=0;

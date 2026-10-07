@@ -1493,9 +1493,9 @@ public:
 
     void limitHudWidth(CCLabelBMFont* foreground, float width, float maximumScale, float minimumScale) {
         if (!foreground) return;
-        foreground->limitLabelWidth(width, maximumScale, minimumScale);
+        corum::ranked::ui::fitLabelWidth(foreground, width, maximumScale, minimumScale);
         if (auto* shadow = hudShadow(foreground)) {
-            shadow->limitLabelWidth(width, maximumScale, minimumScale);
+            corum::ranked::ui::fitLabelWidth(shadow, width, maximumScale, minimumScale);
         }
     }
 

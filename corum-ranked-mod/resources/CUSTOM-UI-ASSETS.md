@@ -42,10 +42,29 @@ Paperlogy v1.000 is bundled in five UI roles: Regular, Medium, SemiBold,
 ExtraBold, and Black. beta.6 removes the old lower-right debug glyph probe and
 uses the same Paperlogy family for the selectable English/Korean Ranked UI.
 
+beta.36 generates those five roles at source size 128 (SD/HD/UHD 32/64/128),
+twice the previous raster resolution. `RankedVisuals.hpp` normalizes authored
+UI scales and width clamps using `domain/FontMetrics.hpp`. Call
+`setLabelScale` and `fitLabelWidth` when resizing a Corum label; raw literal
+`setScale` / `limitLabelWidth` calls would undo that normalization. These
+helpers leave native `bigFont` / `goldFont` fallbacks at their authored scale.
+
+The animated entry digits use a separate `CorumSansCountdown` font from the
+same Black TTF at source size 256 (SD/HD/UHD 64/128/256). Its charset contains
+only space and 0–9, so large digits do not require a 256px Hangul atlas. The
+heading continues using the standard Black font. Both initial and animated
+digit scales use the same reference metrics.
+
+`tests/verify-font-package.py` checks the actual generated .fnt/.png bundles
+in Debug and iOS Debug OFF CI, including raster sizes, requested glyphs,
+glyph rectangles, single-page atlas dimensions and a 96 MiB combined RGBA
+pixel budget per quality tier. This is a resource estimate, not on-device
+texture allocation or peak process memory measurement.
+
 Korean wording is centralized in
 `corum-ranked-mod/src/ui/RankedTranslations.hpp`. Edit the Korean values there.
 If an edit introduces a Hangul syllable that is not already present in that
-file, add its decimal Unicode code point to the `CorumSansSemiBold`,
+file, add its decimal Unicode code point to the `CorumSansMedium`, `CorumSansSemiBold`,
 `CorumSansBold`, and `CorumSansBlack` charsets in `mod.json` so Geode includes
 the glyph in every generated bitmap atlas.
 

@@ -717,13 +717,13 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         addChild(m_fields->gateOverlay, 1001);
 
         m_fields->gateTitle = gateLabel(rankedGateTitle(), 0.20f, {100.0f, 62.0f}, corum::ranked::ui::Cyan);
-        m_fields->gateTitle->limitLabelWidth(184.0f, 0.20f, 0.14f);
+        corum::ranked::ui::fitLabelWidth(m_fields->gateTitle, 184.0f, 0.20f, 0.14f);
         m_fields->gateOverlay->addChild(m_fields->gateTitle, 3);
         m_fields->gateCountdown = gateLabel(tr("starts-in", "STARTS IN") + "  10", 0.31f, {100.0f, 46.0f}, corum::ranked::ui::Gold);
-        m_fields->gateCountdown->limitLabelWidth(184.0f, 0.31f, 0.21f);
+        corum::ranked::ui::fitLabelWidth(m_fields->gateCountdown, 184.0f, 0.31f, 0.21f);
         m_fields->gateOverlay->addChild(m_fields->gateCountdown, 3);
         m_fields->gateStatus = gateLabel(tr("preparing-map", "PREPARING MAP..."), 0.15f, {100.0f, 29.0f}, corum::ranked::ui::TextMuted);
-        m_fields->gateStatus->limitLabelWidth(184.0f, 0.15f, 0.10f);
+        corum::ranked::ui::fitLabelWidth(m_fields->gateStatus, 184.0f, 0.15f, 0.10f);
         m_fields->gateOverlay->addChild(m_fields->gateStatus, 3);
 
         constexpr float compactProgressWidth = 154.0f;
@@ -766,7 +766,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
             ));
 
             m_fields->introTitle = gateLabel(rankedGateTitle(), 0.31f, {143.0f, 139.0f}, corum::ranked::ui::Cyan);
-            m_fields->introTitle->limitLabelWidth(264.0f, 0.31f, 0.21f);
+            corum::ranked::ui::fitLabelWidth(m_fields->introTitle, 264.0f, 0.31f, 0.21f);
             m_fields->gateIntroPanel->addChild(m_fields->introTitle, 4);
             m_fields->introMap = gateLabel(
                 m_level ? std::string(m_level->m_levelName.c_str()) : tr("selected-map", "SELECTED MAP"),
@@ -774,18 +774,18 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
                 {143.0f, 111.0f},
                 corum::ranked::ui::Text
             );
-            m_fields->introMap->limitLabelWidth(258.0f, 0.39f, 0.24f);
+            corum::ranked::ui::fitLabelWidth(m_fields->introMap, 258.0f, 0.39f, 0.24f);
             m_fields->gateIntroPanel->addChild(m_fields->introMap, 4);
             auto const creator = m_level && !m_level->m_creatorName.empty()
                 ? fmt::format("BY {}", std::string(m_level->m_creatorName.c_str()))
                 : tr("creator-loading", "CREATOR LOADING...");
             m_fields->introCreator = gateLabel(creator, 0.18f, {143.0f, 91.0f}, corum::ranked::ui::TextMuted);
-            m_fields->introCreator->limitLabelWidth(252.0f, 0.18f, 0.12f);
+            corum::ranked::ui::fitLabelWidth(m_fields->introCreator, 252.0f, 0.18f, 0.12f);
             m_fields->gateIntroPanel->addChild(m_fields->introCreator, 4);
             m_fields->introCountdown = gateLabel(tr("starts-in", "STARTS IN") + "  10", 0.30f, {143.0f, 71.0f}, corum::ranked::ui::Gold);
             m_fields->gateIntroPanel->addChild(m_fields->introCountdown, 4);
             m_fields->introStatus = gateLabel(tr("preparing-map", "PREPARING MAP..."), 0.19f, {143.0f, 51.0f}, corum::ranked::ui::Cyan);
-            m_fields->introStatus->limitLabelWidth(256.0f, 0.19f, 0.13f);
+            corum::ranked::ui::fitLabelWidth(m_fields->introStatus, 256.0f, 0.19f, 0.13f);
             m_fields->gateIntroPanel->addChild(m_fields->introStatus, 4);
 
             constexpr float introProgressWidth = 220.0f;

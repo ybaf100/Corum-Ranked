@@ -369,7 +369,7 @@ CCNode* makeTextPlate(
 ) {
     auto* node = makeNeonPanel(size, position, accent, kDeepPanel2, 242);
     auto* label = makeLabel(text, scale, {size.width / 2.0f, size.height / 2.0f}, textColor, font);
-    label->limitLabelWidth(size.width - 12.0f, scale, std::max(0.12f, scale * 0.65f));
+    corum::ranked::ui::fitLabelWidth(label, size.width - 12.0f, scale, std::max(0.12f, scale * 0.65f));
     node->addChild(label, 4);
     if (outLabel) *outLabel = label;
     return node;
@@ -405,7 +405,7 @@ CCNode* makeActionButtonVisual(
         selected ? kGold : (danger ? ccc3(255, 224, 229) : corum::ranked::ui::Text),
         true
     );
-    caption->limitLabelWidth(width - 20.0f, 0.62f, 0.30f);
+    corum::ranked::ui::fitLabelWidth(caption, width - 20.0f, 0.62f, 0.30f);
     root->addChild(caption, 5);
     return root;
 }
@@ -1206,7 +1206,7 @@ class CorumRankedLayer final : public CCLayerColor {
             titleColor,
             "black"
         );
-        title->limitLabelWidth(size.width - 170.0f, 0.70f, 0.40f);
+        corum::ranked::ui::fitLabelWidth(title, size.width - 170.0f, 0.70f, 0.40f);
         m_root->addChild(title, 6);
 
         auto* eyebrow = makeLabel(
@@ -1216,7 +1216,7 @@ class CorumRankedLayer final : public CCLayerColor {
             accent,
             "semibold"
         );
-        eyebrow->limitLabelWidth(238.0f, 0.26f, 0.18f);
+        corum::ranked::ui::fitLabelWidth(eyebrow, 238.0f, 0.26f, 0.18f);
         m_root->addChild(eyebrow, 6);
 
         auto const lineWidth = std::max(24.0f, std::min(92.0f, size.width / 2.0f - 122.0f));
@@ -1282,7 +1282,7 @@ class CorumRankedLayer final : public CCLayerColor {
         auto* panel = makePanel({106.0f, 28.0f}, position, color, 190);
         m_root->addChild(panel, 1);
         auto* label = makeLabel(text, 0.32f, position, corum::ranked::ui::Text, "semibold");
-        label->limitLabelWidth(96.0f, 0.32f, 0.20f);
+        corum::ranked::ui::fitLabelWidth(label, 96.0f, 0.32f, 0.20f);
         m_root->addChild(label, 2);
     }
 
@@ -1316,7 +1316,7 @@ class CorumRankedLayer final : public CCLayerColor {
             ccc3(255, 232, 236),
             "semibold"
         );
-        body->limitLabelWidth(panelWidth - 34.0f, 0.29f, 0.19f);
+        corum::ranked::ui::fitLabelWidth(body, panelWidth - 34.0f, 0.29f, 0.19f);
         m_root->addChild(body, 4);
 
         auto* action = makeLabel(
@@ -1329,7 +1329,7 @@ class CorumRankedLayer final : public CCLayerColor {
             corum::ranked::ui::TextMuted,
             "semibold"
         );
-        action->limitLabelWidth(panelWidth - 34.0f, 0.22f, 0.15f);
+        corum::ranked::ui::fitLabelWidth(action, panelWidth - 34.0f, 0.22f, 0.15f);
         m_root->addChild(action, 4);
 
         float rowY = panelCenter.y + panelHeight / 2.0f - 68.0f;
@@ -1342,7 +1342,7 @@ class CorumRankedLayer final : public CCLayerColor {
                 kRed,
                 "black"
             );
-            headingLabel->limitLabelWidth(panelWidth - 36.0f, 0.23f, 0.16f);
+            corum::ranked::ui::fitLabelWidth(headingLabel, panelWidth - 36.0f, 0.23f, 0.16f);
             m_root->addChild(headingLabel, 4);
 
             auto* detailLabel = makeLabel(
@@ -1352,7 +1352,7 @@ class CorumRankedLayer final : public CCLayerColor {
                 corum::ranked::ui::Text,
                 "semibold"
             );
-            detailLabel->limitLabelWidth(panelWidth - 36.0f, 0.23f, 0.13f);
+            corum::ranked::ui::fitLabelWidth(detailLabel, panelWidth - 36.0f, 0.23f, 0.13f);
             m_root->addChild(detailLabel, 4);
             rowY -= 32.0f;
         };
@@ -1486,7 +1486,7 @@ class CorumRankedLayer final : public CCLayerColor {
             color,
             "black"
         );
-        label->limitLabelWidth(maximumWidth, scale, std::max(0.16f, scale * 0.72f));
+        corum::ranked::ui::fitLabelWidth(label, maximumWidth, scale, std::max(0.16f, scale * 0.72f));
         m_root->addChild(label, 7);
     }
 
@@ -1543,7 +1543,7 @@ class CorumRankedLayer final : public CCLayerColor {
         addStreakLabel(profile.resultStreak, {center.x, center.y + 66.0f}, 0.22f, 126.0f, false);
 
         auto* nameLabel = makeLabel(shorten(upper(name), 15), 0.38f, {center.x, center.y - 11.0f}, corum::ranked::ui::Text, "semibold");
-        nameLabel->limitLabelWidth(126.0f, 0.38f, 0.25f);
+        corum::ranked::ui::fitLabelWidth(nameLabel, 126.0f, 0.38f, 0.25f);
         m_root->addChild(nameLabel, 4);
 
         auto const hasTitle = profile.equippedTitle.active;
@@ -1555,7 +1555,7 @@ class CorumRankedLayer final : public CCLayerColor {
                 achievementTitleColor(profile.equippedTitle),
                 "semibold"
             );
-            titleLabel->limitLabelWidth(134.0f, 0.20f, 0.14f);
+            corum::ranked::ui::fitLabelWidth(titleLabel, 134.0f, 0.20f, 0.14f);
             m_root->addChild(titleLabel, 5);
         }
 
@@ -1570,7 +1570,7 @@ class CorumRankedLayer final : public CCLayerColor {
         auto const showDemotion = !placement && !profile.promotion.active && profile.demotionWarning;
         auto* lpCaption = makeLabel(captionText, showDemotion ? 0.20f : 0.23f,
             {center.x, captionY}, showDemotion ? kRed : kCyan, showDemotion ? "black" : "semibold");
-        lpCaption->limitLabelWidth(134.0f, showDemotion ? 0.20f : 0.23f, 0.14f);
+        corum::ranked::ui::fitLabelWidth(lpCaption, 134.0f, showDemotion ? 0.20f : 0.23f, 0.14f);
         m_root->addChild(lpCaption, 4);
         if (placement) {
             addPlacementProgress(profile.placementGames, std::max(1, profile.placementGamesRequired), {center.x, valueY});
@@ -1583,7 +1583,7 @@ class CorumRankedLayer final : public CCLayerColor {
                 ccc3(145, 255, 125),
                 "semibold"
             );
-            detail->limitLabelWidth(134.0f, 0.20f, 0.14f);
+            corum::ranked::ui::fitLabelWidth(detail, 134.0f, 0.20f, 0.14f);
             m_root->addChild(detail, 6);
         } else {
             auto* lpLabel = makeLabel(
@@ -1595,7 +1595,7 @@ class CorumRankedLayer final : public CCLayerColor {
                 ccc3(240, 244, 250),
                 "black"
             );
-            lpLabel->limitLabelWidth(124.0f, 0.35f, 0.22f);
+            corum::ranked::ui::fitLabelWidth(lpLabel, 124.0f, 0.35f, 0.22f);
             m_root->addChild(lpLabel, 4);
             if (outRefs) outRefs->scoreLabel = lpLabel;
         }
@@ -1651,10 +1651,10 @@ class CorumRankedLayer final : public CCLayerColor {
         }
 
         auto* titleLabel = makeLabel(title, 0.52f, {size.width / 2.0f, size.height / 2.0f + 76.0f}, accent, "goldFont.fnt");
-        titleLabel->limitLabelWidth(size.width - 150.0f, 0.52f, 0.30f);
+        corum::ranked::ui::fitLabelWidth(titleLabel, size.width - 150.0f, 0.52f, 0.30f);
         m_root->addChild(titleLabel, 4);
         auto* subLabel = makeLabel(subtitle, 0.27f, {size.width / 2.0f, size.height / 2.0f + 47.0f}, ccc3(210, 220, 238), "semibold");
-        subLabel->limitLabelWidth(size.width - 150.0f, 0.27f, 0.18f);
+        corum::ranked::ui::fitLabelWidth(subLabel, size.width - 150.0f, 0.27f, 0.18f);
         m_root->addChild(subLabel, 4);
 
         auto* count = makeLabel(
@@ -1696,7 +1696,7 @@ class CorumRankedLayer final : public CCLayerColor {
             assetStateColor,
             "semibold"
         );
-        assetRow->limitLabelWidth(size.width - 150.0f, 0.25f, 0.16f);
+        corum::ranked::ui::fitLabelWidth(assetRow, size.width - 150.0f, 0.25f, 0.16f);
         m_root->addChild(assetRow, 4);
 
         auto const barWidth = std::min(270.0f, size.width - 180.0f);
@@ -1807,7 +1807,7 @@ class CorumRankedLayer final : public CCLayerColor {
             countHintColor,
             "semibold"
         );
-        countHintLabel->limitLabelWidth(size.width - 74.0f, 0.20f, 0.14f);
+        corum::ranked::ui::fitLabelWidth(countHintLabel, size.width - 74.0f, 0.20f, 0.14f);
         m_root->addChild(countHintLabel, 5);
 
         auto* panel = makeNeonPanel(
@@ -1857,7 +1857,7 @@ class CorumRankedLayer final : public CCLayerColor {
                 corum::ranked::ui::TextMuted,
                 "semibold"
             );
-            referenceLabel->limitLabelWidth(112.0f, 0.14f, 0.10f);
+            corum::ranked::ui::fitLabelWidth(referenceLabel, 112.0f, 0.14f, 0.10f);
             m_root->addChild(referenceLabel, 5);
         }
 
@@ -1885,7 +1885,7 @@ class CorumRankedLayer final : public CCLayerColor {
                 view.error.empty() ? kGold : kRed,
                 "semibold"
             );
-            status->limitLabelWidth(size.width - 90.0f, 0.20f, 0.14f);
+            corum::ranked::ui::fitLabelWidth(status, size.width - 90.0f, 0.20f, 0.14f);
             m_mainStatusLabel = status;
             m_root->addChild(status, 5);
         }
@@ -1916,7 +1916,7 @@ class CorumRankedLayer final : public CCLayerColor {
             corum::ranked::ui::Text,
             "black"
         );
-        warning->limitLabelWidth(330.0f, 0.29f, 0.18f);
+        corum::ranked::ui::fitLabelWidth(warning, 330.0f, 0.29f, 0.18f);
         m_root->addChild(warning, 5);
         auto* result = makeLabel(
             tr("skip-placement-result", "YOU WILL BE PLACED AT RED - 150 LP."),
@@ -1925,7 +1925,7 @@ class CorumRankedLayer final : public CCLayerColor {
             kRed,
             "black"
         );
-        result->limitLabelWidth(320.0f, 0.38f, 0.22f);
+        corum::ranked::ui::fitLabelWidth(result, 320.0f, 0.38f, 0.22f);
         m_root->addChild(result, 5);
         addButton(
             tr("cancel", "CANCEL"),
@@ -2015,7 +2015,7 @@ class CorumRankedLayer final : public CCLayerColor {
         m_root->addChild(emblem, 4);
         addStreakLabel(profile.resultStreak, {leftCenter.x, leftCenter.y + 60.0f}, 0.28f, 154.0f);
         auto* tier = makeLabel(upper(view.profileTier), 0.54f, {leftCenter.x, leftCenter.y - 25.0f}, tierColor(upper(view.profileTier)), "black");
-        tier->limitLabelWidth(150.0f, 0.54f, 0.32f);
+        corum::ranked::ui::fitLabelWidth(tier, 150.0f, 0.54f, 0.32f);
         m_root->addChild(tier, 4);
         auto const placement = profile.placementGames < profile.placementGamesRequired;
         if (placement) {
@@ -2029,7 +2029,7 @@ class CorumRankedLayer final : public CCLayerColor {
             addRatingMarks(profile.promotion.results, profile.promotion.gamesRequired, {leftCenter.x, leftCenter.y - 49.0f}, 16.0f, 0.30f);
         } else {
             auto* rating = makeLabel(fmt::format("{} LP", view.profileScore), 0.46f, {leftCenter.x, leftCenter.y - 53.0f}, ccc3(240, 244, 250), "black");
-            rating->limitLabelWidth(150.0f, 0.46f, 0.28f);
+            corum::ranked::ui::fitLabelWidth(rating, 150.0f, 0.46f, 0.28f);
             m_root->addChild(rating, 4);
         }
         std::string profileHintText = tr("seasonal-progress", "SEASONAL LADDER PROGRESS");
@@ -2051,7 +2051,7 @@ class CorumRankedLayer final : public CCLayerColor {
                 achievementTitleColor(view.achievements.equippedTitle),
                 "semibold"
             );
-            equippedTitle->limitLabelWidth(168.0f, 0.20f, 0.14f);
+            corum::ranked::ui::fitLabelWidth(equippedTitle, 168.0f, 0.20f, 0.14f);
             equippedTitle->setID("ranked-profile-equipped-title"_spr);
             m_root->addChild(equippedTitle, 4);
         }
@@ -2059,7 +2059,7 @@ class CorumRankedLayer final : public CCLayerColor {
         auto* profileHint = makeLabel(profileHintText, hasTitle ? 0.22f : 0.25f,
             {leftCenter.x, leftCenter.y - (hasTitle ? 85.0f : 79.0f)}, profileHintColor,
             profile.demotionWarning && !placement && !profile.promotion.active ? "black" : "semibold");
-        profileHint->limitLabelWidth(168.0f, hasTitle ? 0.22f : 0.25f, 0.15f);
+        corum::ranked::ui::fitLabelWidth(profileHint, 168.0f, hasTitle ? 0.22f : 0.25f, 0.15f);
         profileHint->setID("ranked-profile-progress-status"_spr);
         m_root->addChild(profileHint, 4);
 
@@ -2150,7 +2150,7 @@ class CorumRankedLayer final : public CCLayerColor {
             auto* statusPanel = makeNeonPanel({std::min(380.0f, size.width - 84.0f), 34.0f}, {size.width / 2.0f, 27.0f}, view.error.empty() ? kBlue : kRed, kDeepPanel2, 238);
             m_root->addChild(statusPanel, 1);
             auto* status = makeLabel(shorten(detail, 90), 0.28f, {size.width / 2.0f, 27.0f}, view.error.empty() ? ccc3(220, 228, 244) : kRed, "semibold");
-            status->limitLabelWidth(size.width - 120.0f, 0.28f, 0.18f);
+            corum::ranked::ui::fitLabelWidth(status, size.width - 120.0f, 0.28f, 0.18f);
             m_mainStatusLabel = status;
             m_root->addChild(status, 4);
         }
@@ -2187,7 +2187,7 @@ class CorumRankedLayer final : public CCLayerColor {
                 corum::ranked::ui::Text,
                 "black"
             );
-            map->limitLabelWidth(278.0f, 0.42f, 0.25f);
+            corum::ranked::ui::fitLabelWidth(map, 278.0f, 0.42f, 0.25f);
             m_root->addChild(map, 5);
             auto* difficulty = makeLabel(
                 match.currentMap->difficulty,
@@ -2236,7 +2236,7 @@ class CorumRankedLayer final : public CCLayerColor {
             match.state == "MAP_SETTLING" ? kGold : kCyan,
             "semibold"
         );
-        state->limitLabelWidth(size.width - 90.0f, 0.25f, 0.16f);
+        corum::ranked::ui::fitLabelWidth(state, size.width - 90.0f, 0.25f, 0.16f);
         m_root->addChild(state, 5);
     }
 
@@ -2275,7 +2275,7 @@ class CorumRankedLayer final : public CCLayerColor {
             auto* panel = makeNeonPanel({88.0f, 102.0f}, {44.0f, 51.0f}, final ? kGold : kBlue, kDeepPanel, 248);
             group->addChild(panel, 1);
             auto* title = makeLabel(caption, 0.20f, {44.0f, 87.0f}, final ? kGold : kCyan, "semibold");
-            title->limitLabelWidth(76.0f, 0.20f, 0.14f);
+            corum::ranked::ui::fitLabelWidth(title, 76.0f, 0.20f, 0.14f);
             group->addChild(title, 3);
             if (grade == "?") {
                 group->addChild(makeLabel("?", 0.68f, {44.0f, 53.0f}, corum::ranked::ui::TextMuted, "black"), 4);
@@ -2288,7 +2288,7 @@ class CorumRankedLayer final : public CCLayerColor {
                 }
             }
             auto* score = makeLabel(scoreText, 0.18f, {44.0f, 16.0f}, corum::ranked::ui::TextMuted, "semibold");
-            score->limitLabelWidth(76.0f, 0.18f, 0.13f);
+            corum::ranked::ui::fitLabelWidth(score, 76.0f, 0.18f, 0.13f);
             group->addChild(score, 4);
             m_root->addChild(group, 5);
         };
@@ -2335,7 +2335,7 @@ class CorumRankedLayer final : public CCLayerColor {
             auto* panel = makeNeonPanel({88.0f, 102.0f}, {44.0f, 51.0f}, final ? kGold : kBlue, kDeepPanel, 248);
             group->addChild(panel, 1);
             auto* title = makeLabel(caption, 0.20f, {44.0f, 87.0f}, final ? kGold : kCyan, "semibold");
-            title->limitLabelWidth(76.0f, 0.20f, 0.14f);
+            corum::ranked::ui::fitLabelWidth(title, 76.0f, 0.20f, 0.14f);
             group->addChild(title, 3);
             auto* badge = corum::ranked::ui::PlacementGradeBadge::create(40.0f);
             if (badge) {
@@ -2350,7 +2350,7 @@ class CorumRankedLayer final : public CCLayerColor {
                 final ? kGold : corum::ranked::ui::TextMuted,
                 "semibold"
             );
-            score->limitLabelWidth(76.0f, 0.18f, 0.13f);
+            corum::ranked::ui::fitLabelWidth(score, 76.0f, 0.18f, 0.13f);
             group->addChild(score, 4);
             m_root->addChild(group, 5);
             return group;
@@ -2516,7 +2516,7 @@ class CorumRankedLayer final : public CCLayerColor {
             tierColor(finalResult.displayedTier),
             "black"
         );
-        tier->limitLabelWidth(size.width - 100.0f, 0.55f, 0.32f);
+        corum::ranked::ui::fitLabelWidth(tier, size.width - 100.0f, 0.55f, 0.32f);
         m_root->addChild(tier, 5);
         auto* placed = makeLabel(tr("placed", "PLACED"), 0.38f, {size.width / 2.0f, size.height / 2.0f - 78.0f}, kGreen, "black");
         m_root->addChild(placed, 5);
@@ -2528,7 +2528,7 @@ class CorumRankedLayer final : public CCLayerColor {
                 kRed,
                 "semibold"
             );
-            error->limitLabelWidth(size.width - 100.0f, 0.22f, 0.15f);
+            corum::ranked::ui::fitLabelWidth(error, size.width - 100.0f, 0.22f, 0.15f);
             m_root->addChild(error, 5);
         }
         addButton(tr("continue", "CONTINUE"), {size.width / 2.0f, 26.0f}, menu_selector(CorumRankedLayer::onResultClose), false, 0.60f);
@@ -2652,7 +2652,7 @@ class CorumRankedLayer final : public CCLayerColor {
         m_matchFoundCountdownLabel = countdown;
         m_root->addChild(countdown, 5);
         auto* hint = makeLabel(tr("prepare-private-ban", "GET READY TO CHOOSE A PRIVATE BAN"), 0.24f, {size.width / 2.0f, size.height / 2.0f - 35.0f}, ccc3(210, 219, 236), "semibold");
-        hint->limitLabelWidth(176.0f, 0.24f, 0.16f);
+        corum::ranked::ui::fitLabelWidth(hint, 176.0f, 0.24f, 0.16f);
         m_root->addChild(hint, 5);
     }
 
@@ -2714,7 +2714,7 @@ class CorumRankedLayer final : public CCLayerColor {
             }
 
             auto* map = makeLabel(twoLineTitle(upper(candidate.title), 10), 0.31f, {x, centerY + 15.0f}, corum::ranked::ui::Text, "semibold");
-            map->limitLabelWidth(cardWidth - 12.0f, 0.31f, 0.20f);
+            corum::ranked::ui::fitLabelWidth(map, cardWidth - 12.0f, 0.31f, 0.20f);
             m_root->addChild(map, 4);
 
             auto* difficultyPlate = makeNeonPanel({cardWidth - 22.0f, 28.0f}, {x, centerY - 20.0f}, diffColor, {11, 20, 36}, 245);
@@ -2722,7 +2722,7 @@ class CorumRankedLayer final : public CCLayerColor {
             auto* diffCaption = makeLabel(tr("difficulty", "DIFFICULTY"), 0.23f, {x, centerY - 14.0f}, kCyan, "semibold");
             m_root->addChild(diffCaption, 4);
             auto* diff = makeLabel(candidate.difficulty, 0.35f, {x, centerY - 27.0f}, diffColor, "black");
-            diff->limitLabelWidth(cardWidth - 28.0f, 0.35f, 0.22f);
+            corum::ranked::ui::fitLabelWidth(diff, cardWidth - 28.0f, 0.35f, 0.22f);
             m_root->addChild(diff, 4);
 
             auto const actionY = centerY - cardHeight / 2.0f + 21.0f;
@@ -2741,7 +2741,7 @@ class CorumRankedLayer final : public CCLayerColor {
         auto* privacyPlate = makeNeonPanel({248.0f, 36.0f}, {size.width / 2.0f, 24.0f}, kBlue, {8, 18, 36}, 242);
         m_root->addChild(privacyPlate, 1);
         auto* privacy = makeLabel(tr("private-ban-notice", "YOUR BAN IS PRIVATE  |  REVEALED WHEN THE PHASE ENDS"), 0.25f, {size.width / 2.0f, 24.0f}, ccc3(215, 225, 242), "semibold");
-        privacy->limitLabelWidth(236.0f, 0.25f, 0.16f);
+        corum::ranked::ui::fitLabelWidth(privacy, 236.0f, 0.25f, 0.16f);
         m_root->addChild(privacy, 4);
     }
 
@@ -2762,7 +2762,7 @@ class CorumRankedLayer final : public CCLayerColor {
             ccc3(245, 248, 255),
             "black"
         );
-        title->limitLabelWidth(size.width - 180.0f, deathmatch ? 0.62f : 0.56f, 0.34f);
+        corum::ranked::ui::fitLabelWidth(title, size.width - 180.0f, deathmatch ? 0.62f : 0.56f, 0.34f);
         m_root->addChild(title, 6);
 
         auto displayDeathmatchUsedA = match.deathmatchAttemptsUsedA;
@@ -2823,14 +2823,14 @@ class CorumRankedLayer final : public CCLayerColor {
                 m_root->addChild(crown, 4);
             }
             auto* mapName = makeLabel(twoLineTitle(upper(match.currentMap->title), 15), 0.40f, {size.width / 2.0f, mapY + 7.0f}, corum::ranked::ui::Text, "semibold");
-            mapName->limitLabelWidth(154.0f, 0.40f, 0.24f);
+            corum::ranked::ui::fitLabelWidth(mapName, 154.0f, 0.40f, 0.24f);
             m_root->addChild(mapName, 6);
 
             auto const diffColor = difficultyColor(match.currentMap->difficulty);
             auto* diffPlate = makeNeonPanel({74.0f, 32.0f}, {size.width / 2.0f, mapY - 27.0f}, diffColor, {12, 17, 27}, 246);
             m_root->addChild(diffPlate, 2);
             auto* difficulty = makeLabel(match.currentMap->difficulty, 0.42f, {size.width / 2.0f, mapY - 27.0f}, diffColor, "black");
-            difficulty->limitLabelWidth(62.0f, 0.42f, 0.25f);
+            corum::ranked::ui::fitLabelWidth(difficulty, 62.0f, 0.42f, 0.25f);
             m_root->addChild(difficulty, 6);
         }
 
@@ -2855,7 +2855,7 @@ class CorumRankedLayer final : public CCLayerColor {
             m_levelLookupError.empty() ? kCyan : kGold,
             "semibold"
         );
-        m_prepareLoadStageLabel->limitLabelWidth(138.0f, 0.18f, 0.12f);
+        corum::ranked::ui::fitLabelWidth(m_prepareLoadStageLabel, 138.0f, 0.18f, 0.12f);
         m_root->addChild(m_prepareLoadStageLabel, 6);
 
         constexpr float prepareBarWidth = 112.0f;
@@ -2924,7 +2924,7 @@ class CorumRankedLayer final : public CCLayerColor {
             : match.spectatorOpponentName;
 
         auto* title = makeLabel(tr("attempt-finished", "YOUR ATTEMPT IS FINISHED"), 0.48f, {size.width / 2.0f, size.height - 34.0f}, kGold, "goldFont.fnt");
-        title->limitLabelWidth(size.width - 70.0f, 0.48f, 0.30f);
+        corum::ranked::ui::fitLabelWidth(title, size.width - 70.0f, 0.48f, 0.30f);
         m_root->addChild(title, 5);
         auto* subtitle = makeLabel(tr("waiting-opponent", "WAITING FOR OPPONENT"), 0.24f, {size.width / 2.0f, size.height - 59.0f}, kCyan);
         m_root->addChild(subtitle, 5);
@@ -2933,7 +2933,7 @@ class CorumRankedLayer final : public CCLayerColor {
         m_root->addChild(panel, 1);
 
         auto* name = makeLabel(upper(shorten(opponent, 18)), 0.32f, {size.width / 2.0f, size.height / 2.0f + 38.0f});
-        name->limitLabelWidth(205.0f, 0.32f, 0.21f);
+        corum::ranked::ui::fitLabelWidth(name, 205.0f, 0.32f, 0.21f);
         m_root->addChild(name, 5);
         auto* live = makeLabel(
             opponentAttemptActive
@@ -2963,7 +2963,7 @@ class CorumRankedLayer final : public CCLayerColor {
             "semibold"
         );
         m_spectatorScoreLabel = score;
-        score->limitLabelWidth(225.0f, 0.22f, 0.16f);
+        corum::ranked::ui::fitLabelWidth(score, 225.0f, 0.22f, 0.16f);
         m_root->addChild(score, 5);
 
         std::string hintText = tr("round-resolve-hint", "THE ROUND WILL RESOLVE WHEN THE ACTIVE ATTEMPT ENDS");
@@ -2975,7 +2975,7 @@ class CorumRankedLayer final : public CCLayerColor {
         }
         auto* hint = makeLabel(hintText, 0.24f, {size.width / 2.0f, 28.0f}, ccc3(195, 205, 224), "semibold");
         m_spectatorHintLabel = hint;
-        hint->limitLabelWidth(size.width - 80.0f, 0.24f, 0.16f);
+        corum::ranked::ui::fitLabelWidth(hint, size.width - 80.0f, 0.24f, 0.16f);
         m_root->addChild(hint, 5);
     }
 
@@ -2988,7 +2988,7 @@ class CorumRankedLayer final : public CCLayerColor {
             ccc3(245, 248, 255),
             "goldFont.fnt"
         );
-        title->limitLabelWidth(size.width - 90.0f, 0.62f, 0.34f);
+        corum::ranked::ui::fitLabelWidth(title, size.width - 90.0f, 0.62f, 0.34f);
         m_root->addChild(title, 5);
 
         auto* series = makeNeonPanel({150.0f, 58.0f}, {size.width / 2.0f, size.height / 2.0f - 1.0f}, kBlue, {7, 17, 36}, 248);
@@ -3031,7 +3031,7 @@ class CorumRankedLayer final : public CCLayerColor {
             ccc3(240, 244, 250),
             "goldFont.fnt"
         );
-        previousScore->limitLabelWidth(118.0f, 0.27f, 0.16f);
+        corum::ranked::ui::fitLabelWidth(previousScore, 118.0f, 0.27f, 0.16f);
         m_root->addChild(previousScore, 9);
         previousScore->runAction(CCSequence::create(
             CCDelayTime::create(0.56f),
@@ -3091,7 +3091,7 @@ class CorumRankedLayer final : public CCLayerColor {
             ccc3(240, 244, 250),
             "goldFont.fnt"
         );
-        prior->limitLabelWidth(118.0f, 0.27f, 0.16f);
+        corum::ranked::ui::fitLabelWidth(prior, 118.0f, 0.27f, 0.16f);
         m_root->addChild(prior, 10);
         prior->runAction(CCSequence::create(
             CCDelayTime::create(0.56f),
@@ -3198,7 +3198,7 @@ class CorumRankedLayer final : public CCLayerColor {
             ? baseName
             : fmt::format("{} - {}", baseName, notice.displayLabel);
         auto* name = makeLabel(displayName, 0.34f, {0.0f, 0.0f}, corum::ranked::ui::Text, "black");
-        name->limitLabelWidth(290.0f, 0.34f, 0.22f);
+        corum::ranked::ui::fitLabelWidth(name, 290.0f, 0.34f, 0.22f);
         group->addChild(name, 2);
         auto* reward = makeLabel(
             fmt::format("+{} AP {}", notice.rewardAp, tr("available", "AVAILABLE")),
@@ -3259,7 +3259,7 @@ class CorumRankedLayer final : public CCLayerColor {
                 {size.width / 2.0f, size.height / 2.0f + 12.0f},
                 ccc3(220, 220, 225)
             );
-            reason->limitLabelWidth(size.width - 100.0f, 0.28f, 0.18f);
+            corum::ranked::ui::fitLabelWidth(reason, size.width - 100.0f, 0.28f, 0.18f);
             m_root->addChild(reason, 3);
             addButton(tr("queue-again", "QUEUE AGAIN"), {size.width / 2.0f, size.height / 2.0f - 55.0f}, menu_selector(CorumRankedLayer::onQueueAgain), false, 0.66f);
             return;
@@ -3458,7 +3458,7 @@ class CorumRankedLayer final : public CCLayerColor {
             achievementCardAccent(card),
             "black"
         );
-        heading->limitLabelWidth(320.0f, 0.50f, 0.32f);
+        corum::ranked::ui::fitLabelWidth(heading, 320.0f, 0.50f, 0.32f);
         m_root->addChild(heading, 74);
         auto* hint = makeLabel(
             tr("select-title-version", "SELECT ACHIEVEMENT TITLE VERSION"),
@@ -3558,7 +3558,7 @@ class CorumRankedLayer final : public CCLayerColor {
                 kRed,
                 "semibold"
             );
-            error->limitLabelWidth(size.width - 90.0f, 0.23f, 0.16f);
+            corum::ranked::ui::fitLabelWidth(error, size.width - 90.0f, 0.23f, 0.16f);
             m_root->addChild(error, 8);
         }
 
@@ -3599,7 +3599,7 @@ class CorumRankedLayer final : public CCLayerColor {
                 "semibold",
                 {0.0f, 0.5f}
             );
-            titleLabel->limitLabelWidth(cardWidth - 82.0f, 0.40f, 0.26f);
+            corum::ranked::ui::fitLabelWidth(titleLabel, cardWidth - 82.0f, 0.40f, 0.26f);
             m_root->addChild(titleLabel, 4);
             auto const description = corum::ranked::i18n::isKorean()
                 ? card.descriptionKo
@@ -3612,7 +3612,7 @@ class CorumRankedLayer final : public CCLayerColor {
                 "medium",
                 {0.0f, 0.5f}
             );
-            descriptionLabel->limitLabelWidth(cardWidth - 90.0f, 0.25f, 0.19f);
+            corum::ranked::ui::fitLabelWidth(descriptionLabel, cardWidth - 90.0f, 0.25f, 0.19f);
             m_root->addChild(descriptionLabel, 4);
 
             double progress = card.type == "PROGRESSIVE"
@@ -3638,7 +3638,7 @@ class CorumRankedLayer final : public CCLayerColor {
                 "black",
                 {0.0f, 0.5f}
             );
-            progressLabel->limitLabelWidth(cardWidth - 92.0f, 0.30f, 0.21f);
+            corum::ranked::ui::fitLabelWidth(progressLabel, cardWidth - 92.0f, 0.30f, 0.21f);
             m_root->addChild(progressLabel, 4);
             auto* barBack = CCLayerColor::create({40, 50, 68, 220});
             barBack->setContentSize({cardWidth - 92.0f, 7.0f});
@@ -3754,7 +3754,7 @@ class CorumRankedLayer final : public CCLayerColor {
                 kGold,
                 "semibold"
             );
-            row->limitLabelWidth(size.width - 130.0f, 0.27f, 0.17f);
+            corum::ranked::ui::fitLabelWidth(row, size.width - 130.0f, 0.27f, 0.17f);
             m_root->addChild(row, 3);
         }
 
@@ -3776,7 +3776,7 @@ class CorumRankedLayer final : public CCLayerColor {
                 won ? kGreen : kRed,
                 "semibold"
             );
-            row->limitLabelWidth(size.width - 190.0f, 0.30f, 0.20f);
+            corum::ranked::ui::fitLabelWidth(row, size.width - 190.0f, 0.30f, 0.20f);
             m_root->addChild(row, 3);
             auto* detail = addButton(tr("detail", "DETAIL"), {size.width - 72.0f, y}, menu_selector(CorumRankedLayer::onHistoryDetail), false, 0.50f);
             detail->setTag(static_cast<int>(i));

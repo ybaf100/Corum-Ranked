@@ -54,7 +54,7 @@ CCNode* buttonVisual(std::string const& text, ccColor3B accent, bool subtle) {
         subtle ? TextMuted : Text,
         subtle ? FontWeight::SemiBold : FontWeight::Black
     );
-    labelNode->limitLabelWidth(size.width - 12.0f, subtle ? 0.25f : 0.34f, 0.18f);
+    corum::ranked::ui::fitLabelWidth(labelNode, size.width - 12.0f, subtle ? 0.25f : 0.34f, 0.18f);
     root->addChild(labelNode, 2);
     return root;
 }

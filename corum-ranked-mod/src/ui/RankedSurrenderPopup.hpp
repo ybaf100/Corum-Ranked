@@ -21,7 +21,7 @@ class RankedSurrenderPopup final : public Popup {
         ccColor3B accent, SEL_MenuHandler callback, float width = 130) {
         auto* face = surface({width, 35}, {}, accent, SurfaceRaised, 250, true);
         auto* text = label(caption, 0.31f, {width / 2, 17.5f}, Text, FontWeight::ExtraBold);
-        text->limitLabelWidth(width - 14, 0.31f, 0.18f); face->addChild(text, 5);
+        corum::ranked::ui::fitLabelWidth(text, width - 14, 0.31f, 0.18f); face->addChild(text, 5);
         auto* item = CCMenuItemSpriteExtra::create(face, this, callback);
         item->setPosition(position); menu->addChild(item);
     }
@@ -40,15 +40,15 @@ class RankedSurrenderPopup final : public Popup {
         auto title = i18n::text(m_confirmation ? "surrender-confirm" : "surrender",
             m_confirmation ? "CONFIRM SURRENDER" : "SURRENDER");
         auto* header = label(title, 0.55f, {185, 202}, Text, FontWeight::Black);
-        header->limitLabelWidth(330, 0.55f, 0.32f); m_contents->addChild(header, 10);
+        corum::ranked::ui::fitLabelWidth(header, 330, 0.55f, 0.32f); m_contents->addChild(header, 10);
         auto const warning = m_confirmation
             ? i18n::text(m_wholeMatch || m_deathmatch > 0 ? "surrender-match-warning" : "surrender-round-warning",
                 m_wholeMatch || m_deathmatch > 0 ? "End this match as a defeat?" : "Concede this round?")
             : i18n::text("surrender-choice", "Concede this round or the entire match.");
         auto* detail = label(warning, 0.27f, {185, 157}, Text);
-        detail->limitLabelWidth(332, 0.27f, 0.16f); m_contents->addChild(detail, 10);
+        corum::ranked::ui::fitLabelWidth(detail, 332, 0.27f, 0.16f); m_contents->addChild(detail, 10);
         auto* kept = label(i18n::text("surrender-score-kept", "Already earned scores are kept."),
-            0.23f, {185, 133}, TextMuted); kept->limitLabelWidth(332, 0.23f, 0.16f);
+            0.23f, {185, 133}, TextMuted); corum::ranked::ui::fitLabelWidth(kept, 332, 0.23f, 0.16f);
         m_contents->addChild(kept, 10);
         m_status = label("", 0.25f, {185, 108}, Gold); m_contents->addChild(m_status, 10);
         auto* menu = CCMenu::create(); menu->setPosition(CCPointZero); m_contents->addChild(menu, 20);
@@ -94,7 +94,7 @@ class RankedSurrenderPopup final : public Popup {
                 m_submitted = false; break;
             case Status::Idle: break;
         }
-        m_status->setString(text.c_str()); m_status->limitLabelWidth(336, 0.25f, 0.15f);
+        m_status->setString(text.c_str()); corum::ranked::ui::fitLabelWidth(m_status, 336, 0.25f, 0.15f);
     }
 public:
     static RankedSurrenderPopup* create(PauseLayer* owner, std::string matchId, int round, int deathmatch) {

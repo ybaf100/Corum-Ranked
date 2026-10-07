@@ -1,6 +1,7 @@
 #pragma once
 
 #include "RankAssetPackManager.hpp"
+#include "../domain/FontMetrics.hpp"
 
 #include <Geode/Geode.hpp>
 
@@ -9,6 +10,7 @@
 #include <cmath>
 #include <filesystem>
 #include <string>
+#include <string_view>
 
 namespace corum::ranked::ui {
 
@@ -54,6 +56,26 @@ inline char const* displayFont() {
     return font(FontWeight::Black);
 }
 
+inline char const* countdownFont() {
+    return "CorumSansCountdown.fnt"_spr;
+}
+
+// Callers continue using the authored UI scales. Only Corum's larger bitmap
+// fonts need normalization; native fallback fonts retain their own metrics.
+inline float fontScale(CCLabelBMFont* caption, float logicalScale) {
+    auto const* resource = caption ? caption->getFntFile() : nullptr;
+    return corumFontScale(logicalScale, resource ? std::string_view(resource) : std::string_view{});
+}
+
+inline void setLabelScale(CCLabelBMFont* caption, float logicalScale) {
+    if (caption) caption->setScale(fontScale(caption, logicalScale));
+}
+
+inline void fitLabelWidth(CCLabelBMFont* caption, float width, float maximumScale, float minimumScale) {
+    if (caption) caption->limitLabelWidth(width,
+        fontScale(caption, maximumScale), fontScale(caption, minimumScale));
+}
+
 inline ccColor3B tierColor(std::string tier) {
     std::transform(tier.begin(), tier.end(), tier.begin(), [](unsigned char ch) {
         return static_cast<char>(std::toupper(ch));
@@ -96,9 +118,10 @@ inline CCLabelBMFont* label(
     float scale,
     CCPoint position,
     ccColor3B color,
-    FontWeight weight
+    FontWeight weight,
+    char const* resource = nullptr
 ) {
-    auto* result = CCLabelBMFont::create(text.c_str(), font(weight));
+    auto* result = CCLabelBMFont::create(text.c_str(), resource ? resource : font(weight));
     // The generated resource font is the preferred path, but keep every screen
     // usable if a platform-specific font atlas ever fails to load.
     if (!result) {
@@ -108,7 +131,7 @@ inline CCLabelBMFont* label(
             weight == FontWeight::Black;
         result = CCLabelBMFont::create(text.c_str(), emphasized ? "goldFont.fnt" : "bigFont.fnt");
     }
-    result->setScale(scale);
+    setLabelScale(result, scale);
     result->setColor(color);
     result->setPosition(position);
     return result;
@@ -187,7 +210,7 @@ inline CCNode* pill(
 ) {
     auto* root = surface(size, position, accent, SurfaceRaised, 246, false);
     auto* caption = label(text, textScale, {size.width / 2.0f, size.height / 2.0f}, textColor, display);
-    caption->limitLabelWidth(size.width - 12.0f, textScale, std::max(0.10f, textScale * 0.65f));
+    fitLabelWidth(caption, size.width - 12.0f, textScale, std::max(0.10f, textScale * 0.65f));
     root->addChild(caption, 6);
     return root;
 }

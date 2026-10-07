@@ -46,10 +46,10 @@ protected:
             m_liveSetting->setString(runtime.liveSettingBusy() ? "SERVER LIVE SPECTATOR: SYNCING..." :
                 !enabled ? "SERVER LIVE SPECTATOR: UNKNOWN (REFRESH)" : *enabled ? "SERVER LIVE SPECTATOR: ON (DISABLE)" : "SERVER LIVE SPECTATOR: OFF (ENABLE)");
             m_liveSetting->setColor(enabled && *enabled ? corum::ranked::ui::Green : corum::ranked::ui::Gold);
-            m_liveSetting->limitLabelWidth(380, 0.35f, 0.20f);
+            corum::ranked::ui::fitLabelWidth(m_liveSetting, 380, 0.35f, 0.20f);
         }
         auto const& text = runtime.status();
-        if (!text.empty()) { m_status->setString(text.c_str()); m_status->limitLabelWidth(380, 0.25f, 0.14f); }
+        if (!text.empty()) { m_status->setString(text.c_str()); corum::ranked::ui::fitLabelWidth(m_status, 380, 0.25f, 0.14f); }
     }
     void run(bool test) {
         auto password = m_password->getString(); m_password->setString("");
