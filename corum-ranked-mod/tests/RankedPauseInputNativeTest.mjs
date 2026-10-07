@@ -9,7 +9,7 @@ const root=resolve(fileURLToPath(new URL('..',import.meta.url)));
 const source=readFileSync(join(root,'src/ui/RankedEntryOverlay.cpp'),'utf8');
 function body(signature){const a=source.indexOf(signature);assert(a>=0);let b=source.indexOf('{',a)+1,d=1;
  while(d){if(source[b]==='{')++d;if(source[b]==='}')--d;++b;}return source.slice(a,b);}
-for(const debug of [false,true])test(`scene-owned Pause dispatch creates native menu and releases other UI (Debug ${debug?'ON':'OFF'})`,()=>{
+for(const debug of [false,true])test(`scene-owned Pause verifies native result, recovers no-op callbacks and releases other UI (Debug ${debug?'ON':'OFF'})`,()=>{
 const code=`
 #include "${join(root,'src/ui/RankedInput.hpp')}"
 #include <memory>
@@ -20,22 +20,27 @@ using geode::cast::typeinfo_cast;
 struct Button:CCMenuItem {void selected(){CCMenuItem::selected=true;}};
 struct PlayLayer;
 struct UILayer:CCLayer {Button* m_pauseBtn=nullptr;PlayLayer* owner=nullptr;
- PlayLayer* m_gameLayer=nullptr;int touchID=5,resets=0,hits=0,buttonCallbacks=0;bool nativeRequest=false;void doPause();void onPause();
+ PlayLayer* m_gameLayer=nullptr;int touchID=5,resets=0,hits=0,buttonCallbacks=0;bool callbackNoOp=false;void doPause();void onPause();
+ void resetAllButtons(){touchID=-1;++resets;}
  bool ccTouchBegan(CCTouch*,CCEvent*) override {++hits;return true;}};
 struct PlayLayer:CCNode {static inline PlayLayer* current=nullptr;bool m_isPaused=false,running=true,complete=false;
  std::shared_ptr<int> life=std::make_shared<int>(0);UILayer ui;UILayer* m_uiLayer=&ui;Button pause;CCMenu menu;
  struct Level {int m_levelID=123;}level;Level* m_level=&level;
- int pauseMenus=0,pauseCounter=0;
- PlayLayer(){current=this;ui.owner=this;ui.m_gameLayer=this;pause.callback=[this]{ui.onPause();};ui.parent=this;ui.m_pauseBtn=&pause;menu.parent=&ui;
+ struct {unsigned int m_pauseCounter=0,m_pauseBufferTimer=0;}m_gameState;
+ int pauseMenus=0,nativeCalls=0;bool rejectNativePause=false;
+ PlayLayer(){current=this;ui.owner=this;ui.m_gameLayer=this;pause.m_pListener=&ui;pause.m_pfnSelector=+[]{};pause.callback=[this]{ui.onPause();};ui.parent=this;ui.m_pauseBtn=&pause;menu.parent=&ui;
    menu.item=&pause;pause.parent=&menu;pause.origin={100,100};}
  ~PlayLayer(){if(current==this)current=nullptr;}static PlayLayer* get(){return current;}
  bool isRunning()const{return running;}bool canPauseGame()const{return !complete;}
- void pauseGame(bool){if(m_isPaused||!canPauseGame())return;m_isPaused=true;++pauseMenus;}
+ void pauseGame(bool){++nativeCalls;if(rejectNativePause||m_isPaused||!canPauseGame())return;m_isPaused=true;++pauseMenus;}
  void resume(){m_isPaused=false;}};
-void UILayer::onPause(){++buttonCallbacks;nativeRequest=true;doPause();}
-// Boundary double models an internal step requiring a native button request.
-// This is a regression for preserving the public entry path, not iOS disassembly.
-void UILayer::doPause(){if(!nativeRequest)return;nativeRequest=false;touchID=-1;++resets;owner->pauseGame(false);++owner->pauseCounter;}
+void UILayer::onPause(){++buttonCallbacks;if(!callbackNoOp)doPause();}
+// The beta40 device log observes the native callback return with paused=false
+// in Round 2. Model that result, not a speculative iOS internal precondition.
+// Healthy doPause follows the released bindings' observable reset/count path.
+void UILayer::doPause(){resetAllButtons();owner->pauseGame(false);++owner->m_gameState.m_pauseCounter;}
+struct GameManager {PlayLayer* m_gameLayer=nullptr;
+ static GameManager* sharedState(){static GameManager manager;return &manager;}};
 namespace geode {namespace log {template<class...T>void info(T...) {}}
  template<class T>struct WeakRef {T* p=nullptr;std::weak_ptr<int> life;
  WeakRef()=default;explicit WeakRef(T* v):p(v){if(v)life=v->life;}
@@ -73,10 +78,9 @@ int main(){
      // beta38 -500 is behind the native menu; its callback can consume the
      // touch without opening Pause. Direct callback tests missed this ordering.
      assert(play.pauseMenus==1 && play.pause.activations==1);play.resume();
-     play.pauseMenus=0;play.pauseCounter=0;
+     play.pauseMenus=0;play.m_gameState.m_pauseCounter=0;play.nativeCalls=0;
      input.m_holding=true;}
    assert(input.ccTouchBegan(&pause,nullptr));input.releaseToGameplay(&play);input.ccTouchEnded(&pause,nullptr);
-   play.ui.doPause();assert(play.pauseMenus==0); // internal call alone is not a public request
    assert(play.pauseMenus==0&&!input.m_holding&&input.opacity==0&&!input.keypad&&!input.heading.visible&&!input.digit.visible);
    assert(dispatcher.findHandler(&input)->m_nPriority < dispatcher.findHandler(&play.ui)->m_nPriority);
    assert(dispatcher.findHandler(&input)->m_nPriority < dispatcher.findHandler(&play.menu)->m_nPriority);
@@ -84,8 +88,10 @@ int main(){
    assert(writes==dispatcher.priorityWrites); // no registration/priority churn
    assert(!input.ccTouchBegan(&other,nullptr));
    play.pause.enabled=false;play.menu.m_eState=kCCMenuStateTrackingTouch;
+   play.ui.callbackNoOp=round>1;
    for(int resume=0;resume<3;++resume){dispatcher.began(10+resume);dispatcher.ended(10+resume);
-     assert(play.m_isPaused&&play.pauseMenus==resume+1&&play.pauseCounter==resume+1);
+     assert(play.m_isPaused&&play.pauseMenus==resume+1&&play.m_gameState.m_pauseCounter==static_cast<unsigned int>(resume+1));
+     assert(play.nativeCalls==resume+1); // healthy native callback must not be paused twice
      assert(play.ui.touchID==-1&&!play.pause.CCMenuItem::selected);
      // The observer returns false while paused, even if an external modal has
      // a numerically later priority. It cannot steal native/menu dialog clicks.
@@ -100,6 +106,31 @@ int main(){
    assert(!play.pause.CCMenuItem::selected);input.ccTouchEnded(&pause,nullptr);assert(play.pauseMenus==3);
    assert(!dispatcher.findHandler(&input));play.menu.onExit();play.ui.onExit();assert(dispatcher.handlers.empty());
  }
+ // A native refusal must remain a refusal: no fabricated paused flag, menu,
+ // counter increment or repeated immediate native request.
+ {PlayLayer play;RankedEntryOverlay input;input.releaseToGameplay(&play);
+   play.ui.callbackNoOp=true;play.rejectNativePause=true;play.m_gameState.m_pauseCounter=13;
+   CCTouch touch{20,{110,110}};assert(input.ccTouchBegan(&touch,nullptr));input.ccTouchEnded(&touch,nullptr);
+   assert(!play.m_isPaused&&play.pauseMenus==0&&play.nativeCalls==1&&play.m_gameState.m_pauseCounter==13);}
+ // Do not double-count a wrapper that already observed the native request.
+ {PlayLayer play;RankedEntryOverlay input;input.releaseToGameplay(&play);
+   play.m_gameState.m_pauseCounter=13;play.m_gameState.m_pauseBufferTimer=999;
+   play.pause.callback=[&]{++play.m_gameState.m_pauseCounter;};
+   auto* target=play.pause.m_pListener;auto selector=play.pause.m_pfnSelector;
+   CCTouch touch{21,{110,110}};assert(input.ccTouchBegan(&touch,nullptr));input.ccTouchEnded(&touch,nullptr);
+   assert(play.m_isPaused&&play.pauseMenus==1&&play.nativeCalls==1&&play.m_gameState.m_pauseCounter==14);
+   assert(play.m_gameState.m_pauseBufferTimer==999&&play.pause.m_pListener==target&&play.pause.m_pfnSelector==selector);}
+ // Callback-side completion/detach/current-scene replacement cannot fall back
+ // into the departed scene, even while its WeakRef still locks.
+ for(int change=0;change<3;++change){PlayLayer play;RankedEntryOverlay input;input.releaseToGameplay(&play);
+   play.pause.callback=[&]{if(change==0)play.complete=true;else if(change==1)play.running=false;else PlayLayer::current=nullptr;};
+   CCTouch touch{22+change,{110,110}};assert(input.ccTouchBegan(&touch,nullptr));input.ccTouchEnded(&touch,nullptr);
+   assert(play.nativeCalls==0&&!play.m_isPaused&&play.pauseMenus==0&&play.m_gameState.m_pauseCounter==0);
+   PlayLayer::current=&play;}
+ // Same parent hierarchy is insufficient when UILayer points at a different
+ // native owner. Ordinary/foreign scene state is never reconciled by this UI.
+ {PlayLayer play;RankedEntryOverlay input;input.releaseToGameplay(&play);play.ui.m_gameLayer=nullptr;
+   CCTouch touch{25,{110,110}};assert(!input.ccTouchBegan(&touch,nullptr));assert(play.nativeCalls==0);}
  RankedEntryOverlay stale;{auto destroyed=std::make_unique<PlayLayer>();stale.releaseToGameplay(destroyed.get());}
  CCTouch pause{1,{110,110}};assert(!stale.ccTouchBegan(&pause,nullptr));
 }

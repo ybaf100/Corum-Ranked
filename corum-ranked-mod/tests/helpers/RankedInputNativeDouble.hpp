@@ -121,6 +121,8 @@ struct CCLayer : CCNode, CCTouchDelegate {
     ~CCLayer() override { if (running && touch) CCDirector::sharedDirector()->dispatcher.removeDelegate(this); }
 };
 struct CCMenuItem : CCNode {
+    CCObject* m_pListener = nullptr;
+    void (*m_pfnSelector)() = nullptr;
     bool enabled = true, selected = false;
     int activations = 0, unselections = 0;
     bool isEnabled() const { return enabled; }

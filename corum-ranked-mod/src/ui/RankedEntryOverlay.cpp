@@ -3,6 +3,7 @@
 #include "RankedTranslations.hpp"
 #include "RankedInput.hpp"
 #include "../domain/EntryCountdown.hpp"
+#include <Geode/binding/GameManager.hpp>
 #include <Geode/binding/UILayer.hpp>
 
 using namespace geode::prelude;
@@ -59,7 +60,8 @@ void RankedEntryOverlay::synchronizeTouchPriority(PlayLayer* play) {
 }
 bool RankedEntryOverlay::pauseHit(PlayLayer* play, CCTouch* touch) const {
     if (!play || play != PlayLayer::get() || !play->isRunning() || play->m_isPaused ||
-        !play->canPauseGame() || !play->m_uiLayer || !play->m_uiLayer->m_pauseBtn) return false;
+        !play->canPauseGame() || !play->m_uiLayer || play->m_uiLayer->m_gameLayer != play ||
+        !play->m_uiLayer->m_pauseBtn) return false;
     auto* button = play->m_uiLayer->m_pauseBtn;
     for (CCNode* node = button; node; node = node->getParent()) {
         if (!node->isVisible()) return false;
@@ -93,14 +95,36 @@ void RankedEntryOverlay::ccTouchEnded(CCTouch* touch, CCEvent*) {
     auto const activate = pauseHit(play.data(), touch);
     cancelPauseTouch();
     if (!activate) return;
-    // Enter through the native BUTTON callback. doPause is an internal step;
-    // its Windows inline implementation does not establish the iOS entry path.
-    // Preserve the target/selector installed by native UILayer and other mods.
-    play->m_uiLayer->m_pauseBtn->activate();
+    auto* ui = play->m_uiLayer;
+    auto const counterBefore = play->m_gameState.m_pauseCounter;
+    auto const bufferBefore = play->m_gameState.m_pauseBufferTimer;
+    auto const buttonTargetMatches = ui->m_pauseBtn->m_pListener == ui;
+    auto const selectorPresent = ui->m_pauseBtn->m_pfnSelector != nullptr;
+    auto const baseOwnerMatches = GameManager::sharedState()->m_gameLayer == play.data();
+    // Keep the installed button callback first. beta40 device evidence proves
+    // that returning from activate() does NOT imply that native Pause opened.
+    ui->m_pauseBtn->activate();
+    auto const buttonPaused = play->m_isPaused;
+    bool nativeFallback = false;
+    if (!buttonPaused && !m_holding && play->m_uiLayer == ui && pauseHit(play.data(), touch)) {
+        // Recheck exact ownership/canPause after the callback: it may have
+        // completed, detached or replaced this scene. Use the same native
+        // PlayLayer entry point used by Geode's PopupManager, never fabricate
+        // m_isPaused/PauseLayer or retry a successful callback.
+        nativeFallback = true;
+        ui->resetAllButtons();
+        play->pauseGame(false);
+        // UILayer::doPause normally increments this counter. Preserve a
+        // callback's increment; count a successful direct request only once.
+        if (play->m_isPaused && play->m_gameState.m_pauseCounter == counterBefore)
+            ++play->m_gameState.m_pauseCounter;
+    }
     if (m_pauseDiagnostics++ < 5)
-        log::info("[RankedPauseInput] native button dispatched level={} paused={} canPause={} uiOwnerMatches={}",
+        log::info("[RankedPauseInput] request level={} buttonPaused={} nativeFallback={} paused={} canPause={} uiOwnerMatches={} baseOwnerMatches={} buttonTargetMatches={} selectorPresent={} pauseCounterBefore={} pauseCounterAfter={} pauseBufferBefore={}",
             play->m_level ? static_cast<int>(play->m_level->m_levelID) : 0,
-            play->m_isPaused, play->canPauseGame(), play->m_uiLayer->m_gameLayer == play.data());
+            buttonPaused, nativeFallback, play->m_isPaused, play->canPauseGame(),
+            play->m_uiLayer == ui, baseOwnerMatches, buttonTargetMatches, selectorPresent,
+            counterBefore, play->m_gameState.m_pauseCounter, bufferBefore);
 }
 void RankedEntryOverlay::ccTouchCancelled(CCTouch* touch, CCEvent*) {
     if (touch->getID() == m_pauseTouchId) cancelPauseTouch();

@@ -1,3 +1,83 @@
+# Ranked Pause result verification — beta41
+
+Starting authoritative main: `e15a601906f89bcf055999f8d91c99875efc19f5`
+(beta40). Client/workspace/server exact gate: `v0.5.0-beta.41`.
+
+## New device evidence supersedes the beta40 Pause prediction
+
+`Geode 2026-10-07 23.00.17.log` loads beta40 / Geode 5.10.1 / bindings
+7f6c2a75 / GD 2.2081. The user confirms that surrender now returns immediately.
+At 23:01:00 the authenticated round surrender and queued scene return complete
+in the same second; native Round 2 entry follows normally. Preserve that fix.
+
+Round 1 (93217777) opens native Pause and reports button dispatch paused=true.
+Round 2 (56455318) GO is unpaused/enabled with UI/menu priorities 0/-128 and
+observer -500. At 23:01:19, :20, :22 and :23, the button dispatch returns with
+paused=false, canPause=true and uiOwnerMatches=true. No Round 2 native Pause
+opening is recorded. This rejects both the old priority-only explanation and
+beta40's assumption that activating the native button necessarily opens Pause.
+
+The earlier test invented an internal `nativeRequest` prerequisite and then
+always made a native button request succeed. Neither behavior came from iOS
+disassembly. It missed this device failure; those predictions are superseded.
+
+## Verify the result and use the exact scene's native entry point
+
+The scene-owned observer preserves the installed native button callback. Only
+if it returns unpaused does the observer recheck the exact current/running
+PlayLayer, unchanged UILayer ownership, canPauseGame, visibility, touch position
+and released entry gate. Then it resets native UI button state and makes one
+direct `PlayLayer::pauseGame(false)` request. This is the public native entry
+point used by Geode 5.10.1 `PopupManager::update` for gameplay popups:
+
+- [Exact released Geode implementation](https://github.com/geode-sdk/geode/blob/7e41336/loader/src/ui/PopupManager.cpp)
+- [Exact released bindings](https://github.com/geode-sdk/bindings/blob/7f6c2a75/bindings/2.2081/GeometryDash.bro)
+- [Windows-only doPause counter/reset reference](https://github.com/geode-sdk/bindings/blob/7f6c2a75/bindings/2.2081/inline/UILayer.cpp)
+
+A successful button request has no direct retry. A callback that completes,
+detaches or changes the current scene cannot trigger the direct request. A
+native refusal stays unpaused: no direct m_isPaused write or replacement Pause
+menu is introduced. Native PauseLayer/customSetup/resume/restart, Corum's
+match-wide 30s lease and authenticated surrender UI remain the owners.
+
+The direct successful request increments m_pauseCounter only when the button
+callback did not already increment it. There is no counter clamp/reset or
+pauseBufferTimer modification. Five bounded request logs per scene distinguish
+buttonPaused, nativeFallback and final paused, and record callback target/
+selector presence, the base global owner and counter/buffer observations.
+No native diagnostic detour, global input reset or other-mod patch is added.
+
+## What is and is not established
+
+The broken boundary is device-observed: the installed button/UILayer dispatch
+returns without entering native Pause for a live Round 2 scene. The precise iOS
+instruction or hook-chain participant that causes this no-op is not recovered.
+Do not claim that WeakRef cleanup, a stale global pointer, pause buffering or a
+specific other mod is its proven cause. The new metadata makes those narrower
+hypotheses distinguishable without changing global hooks.
+
+The revised executable regression makes Round 1 native callbacks succeed and
+Round 2/3 callbacks return without pausing, matching the device's observable
+result. It fails on unmodified beta40 and passes with result verification. It
+also covers healthy callback single invocation, retained target/selector,
+already-incremented counter, unchanged buffer timer, native refusal, foreign
+UI ownership, callback-side completion/detach/replacement, held/cancelled touch,
+modal input and teardown in Debug ON/OFF. It does not emulate undiscovered iOS
+instructions or prove device success.
+
+Existing concession return, Placement final Attempt/persistence, capture/snap,
+World Driver/camera, Safe Mode, audio and retained UI tests remain. Spectator
+protocol v2 and Debug recording v2 are unchanged. No PlayerObject hook is added;
+setVisible and global saveNewScore/storeNewLocalScore remain absent.
+
+Acceptance still requires the same iPad/mod-stack R1 Pause -> surrender ->
+automatic return -> R2/R3 Pause/resume/restart run. The native opening marker
+and final request paused=true must agree. If nativeFallback=true still returns
+paused=false, the failure is now narrowed past the UILayer/button dispatch to
+the native PlayLayer entry point; do not mark that device scenario successful.
+
+## Prior beta40 investigation (device results now recorded above)
+
 # Ranked Pause and authenticated concession lifecycle — beta40
 
 Starting authoritative main: `1f2471f45a78f1c71a357e3d097b11c0b7b90f47`
