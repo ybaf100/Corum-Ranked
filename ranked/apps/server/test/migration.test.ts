@@ -19,6 +19,7 @@ const migrationNames = [
   "0010_achievements_v1.sql",
   "0011_debug_spectate.sql",
     "0012_gameplay_controls.sql",
+    "0013_native_scene_entry.sql",
 ] as const;
 
 const migrationSql = async (migrationName: string): Promise<string> => {
@@ -108,6 +109,21 @@ describe("PostgreSQL migration", () => {
        VALUES ('00000000-0000-4000-8000-000000000012', $1, 'ranked_wins', 1, 75, CURRENT_TIMESTAMP)`,
       [playerId],
     )).rejects.toThrow();
+  });
+
+  it("persists native entry barriers and admits entering states without starting a round", async () => {
+    const columns = await database!.query<{ column_name: string }>(`
+      SELECT column_name FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'ranked_matches'
+    `);
+    expect(columns.rows.map((row) => row.column_name)).toContain("entry_state");
+    const constraints = await database!.query<{ definition: string }>(`
+      SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+      WHERE conname IN ('ranked_matches_state_check', 'ranked_rounds_phase_check')
+    `);
+    expect(constraints.rows).toHaveLength(2);
+    expect(constraints.rows.every((row) => row.definition.includes("ROUND_ENTERING"))).toBe(true);
+    expect(constraints.rows.some((row) => row.definition.includes("DEATHMATCH_ENTERING"))).toBe(true);
   });
 
   it("contains every schema object required by alpha.37 readiness", async () => {

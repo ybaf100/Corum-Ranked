@@ -105,7 +105,7 @@ void RankedRoundPreparation::pump() {
             if (!ticket.discarded && ticket.context == m_context && !resourceReady(key)) {
                 m_retries[key].failed(now);
                 if (m_retries[key].attempts >= 3)
-                    m_view.error = fmt::format("{} {} FAILED - TAP MUSIC DOWNLOAD TO RETRY",
+                    m_view.error = fmt::format("{} {} FAILED",
                         key.kind == RoundResourceKind::Sfx ? "SFX" : "SONG", key.id);
             }
             it = m_tickets.erase(it);
@@ -192,7 +192,7 @@ void RankedRoundPreparation::pumpMap(double now) {
             if (m_downloaded && !metadata.authorizes(m_downloaded.data(), m_context)) metadata.invalidate(m_context);
             m_mapRetry.failed(now);
             if (m_mapRetry.attempts >= 3)
-                m_view.error = "MAP DOWNLOAD FAILED - TAP MAP DOWNLOAD TO RETRY";
+                m_view.error = "MAP DOWNLOAD FAILED";
         }
     }
     m_downloaded = nullptr;
@@ -280,7 +280,7 @@ void RankedRoundPreparation::pumpAudio(GJGameLevel* level, double now) {
             m_urlPending = true; m_urlQuiet = 0; m_urlBegan = now; ++m_urlAttempts;
             music->getCustomContentURL();
         }
-        if (m_urlAttempts >= 3 && !m_urlPending) m_view.error = "CONTENT URL FAILED - TAP MUSIC DOWNLOAD TO RETRY";
+        if (m_urlAttempts >= 3 && !m_urlPending) m_view.error = "CONTENT URL FAILED";
         return;
     }
     // Keep native concurrency bounded, including stale tickets and foreign work.
@@ -298,7 +298,7 @@ void RankedRoundPreparation::pumpAudio(GJGameLevel* level, double now) {
     auto request = [&](RoundResourceKey key) {
         if (occupied >= 3 || m_tickets.contains(key) || nativeActive(key)) return;
         if (m_retries[key].attempts >= 3) {
-            m_view.error = fmt::format("AUDIO {} FAILED - TAP MUSIC DOWNLOAD TO RETRY", key.id);
+            m_view.error = fmt::format("AUDIO {} FAILED", key.id);
             return;
         }
         if (!m_retries[key].available(now)) return;
@@ -320,7 +320,8 @@ bool RankedRoundPreparation::launch(CCScene* origin) {
     auto& preparation = RankedLevelPreparation::get();
     auto* level = preparation.level();
     bool const spectator = runtime.canEnterCurrentLevelAsSpectator();
-    bool const allowed = runtime.canEnterCurrentLevel() || spectator;
+    bool const entering = runtime.canEnterNativeRoundScene();
+    bool const allowed = runtime.canEnterCurrentLevel() || entering || spectator;
     if (roundPrepareState(runtime.view().match.state) || !allowed || !ready() ||
         !origin || origin != CCDirector::sharedDirector()->getRunningScene() ||
         roundModalOpen(origin) || !preparation.authorizes(level, m_context)) return false;
@@ -337,7 +338,7 @@ bool RankedRoundPreparation::launch(CCScene* origin) {
     if (auto current = m_play.lock(); current && current->isRunning()) return false;
     // Preserve exact server start eligibility/time and all existing PlayLayer
     // journal/ACK gates. A viewer never arms a local attempt.
-    if (!spectator && !runtime.armCurrentLevelForGameplay()) return false;
+    if (!spectator && !entering && !runtime.armCurrentLevelForGameplay()) return false;
     tracePreparedLevel("round-native-launch", level, nullptr, this);
     auto* scene = PlayLayer::scene(level, false, false);
     auto* play = PlayLayer::get();
@@ -353,6 +354,8 @@ bool RankedRoundPreparation::launch(CCScene* origin) {
     m_launchedLevel = level;
     m_returnQueued = m_quitting = false;
     CCDirector::sharedDirector()->pushScene(scene);
+    // pushScene schedules the transition. Actual entry is ACKed by the running
+    // PlayLayer heartbeat, after onEnter rather than before the scene exists.
     return true;
 }
 bool RankedRoundPreparation::beginNativeQuit(PlayLayer* play) {

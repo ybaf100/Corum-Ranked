@@ -822,6 +822,8 @@ class CorumRankedLayer final : public CCLayerColor {
             auto const gameplayTransition =
                 state == "ROUND_PREPARE" ||
                 state == "DEATHMATCH_PREPARE" ||
+                state == "ROUND_ENTERING" ||
+                state == "DEATHMATCH_ENTERING" ||
                 state == "ROUND_PLAYING" ||
                 state == "FINAL_ATTEMPT_WINDOW" ||
                 state == "LAST_ATTEMPT_WINDOW" ||
@@ -866,12 +868,14 @@ class CorumRankedLayer final : public CCLayerColor {
         auto const& state = view.match.state;
         auto const isDeathmatchWait =
             state == "DEATHMATCH_PREPARE" ||
+            state == "DEATHMATCH_ENTERING" ||
             state == "DEATHMATCH_PLAYING" ||
             state == "DEATHMATCH_RESULT";
         auto const isRoundThree =
             view.match.roundNumber >= 3 &&
             (
                 state == "ROUND_PREPARE" ||
+                state == "ROUND_ENTERING" ||
                 state == "ROUND_PLAYING" ||
                 state == "FINAL_ATTEMPT_WINDOW" ||
                 state == "LAST_ATTEMPT_WINDOW" ||
@@ -1069,7 +1073,10 @@ class CorumRankedLayer final : public CCLayerColor {
 
         if (
             match.state == "ROUND_PREPARE" ||
-            match.state == "DEATHMATCH_PREPARE"
+            match.state == "DEATHMATCH_PREPARE" ||
+            match.state == "ROUND_ENTERING" ||
+            match.state == "DEATHMATCH_ENTERING" ||
+            match.state == "MAP_PREPARE"
         ) {
             auto const target = preparationProgressTarget();
             auto const delta = std::max(0.0f, target - m_prepareLoadVisual);
@@ -1555,10 +1562,15 @@ class CorumRankedLayer final : public CCLayerColor {
         auto const placement = profile.placementGames < profile.placementGamesRequired;
         auto const captionText = placement
             ? tr("placement", "PLACEMENT")
-            : (profile.promotion.active ? tr("promotion", "PROMOTION") : tr("rating", "RATING"));
+            : (profile.promotion.active ? tr("promotion", "PROMOTION")
+                : (profile.demotionWarning ? tr("demotion-warning", "DEMOTION WARNING") : tr("rating", "RATING")));
         auto const captionY = center.y - (hasTitle ? 40.0f : 32.0f);
         auto const valueY = center.y - (hasTitle ? 54.0f : 47.0f);
-        auto* lpCaption = makeLabel(captionText, 0.23f, {center.x, captionY}, kCyan, "semibold");
+        // Put the warning in the status row rather than over the tier plate.
+        auto const showDemotion = !placement && !profile.promotion.active && profile.demotionWarning;
+        auto* lpCaption = makeLabel(captionText, showDemotion ? 0.20f : 0.23f,
+            {center.x, captionY}, showDemotion ? kRed : kCyan, showDemotion ? "black" : "semibold");
+        lpCaption->limitLabelWidth(134.0f, showDemotion ? 0.20f : 0.23f, 0.14f);
         m_root->addChild(lpCaption, 4);
         if (placement) {
             addPlacementProgress(profile.placementGames, std::max(1, profile.placementGamesRequired), {center.x, valueY});
@@ -1586,11 +1598,6 @@ class CorumRankedLayer final : public CCLayerColor {
             lpLabel->limitLabelWidth(124.0f, 0.35f, 0.22f);
             m_root->addChild(lpLabel, 4);
             if (outRefs) outRefs->scoreLabel = lpLabel;
-            if (profile.demotionWarning) {
-                auto* warning = makeLabel(tr("demotion-warning", "DEMOTION WARNING"), 0.20f, {center.x, center.y - 66.0f}, kRed, "black");
-                warning->limitLabelWidth(134.0f, 0.20f, 0.14f);
-                m_root->addChild(warning, 6);
-            }
         }
 
         auto* tierPlate = makeTextPlate(upper(tier), {96.0f, 24.0f}, {center.x, center.y - 74.0f}, accent, 0.28f, accent, "black");
@@ -2035,12 +2042,25 @@ class CorumRankedLayer final : public CCLayerColor {
             profileHintText = tr("demotion-warning", "DEMOTION WARNING");
             profileHintColor = kRed;
         }
-        if (view.achievements.equippedTitle.active) {
-            profileHintText = achievementTitleText(view.achievements.equippedTitle);
-            profileHintColor = achievementTitleColor(view.achievements.equippedTitle);
+        auto const hasTitle = view.achievements.equippedTitle.active;
+        if (hasTitle) {
+            auto* equippedTitle = makeLabel(
+                achievementTitleText(view.achievements.equippedTitle),
+                0.20f,
+                {leftCenter.x, leftCenter.y - 68.0f},
+                achievementTitleColor(view.achievements.equippedTitle),
+                "semibold"
+            );
+            equippedTitle->limitLabelWidth(168.0f, 0.20f, 0.14f);
+            equippedTitle->setID("ranked-profile-equipped-title"_spr);
+            m_root->addChild(equippedTitle, 4);
         }
-        auto* profileHint = makeLabel(profileHintText, 0.25f, {leftCenter.x, leftCenter.y - 79.0f}, profileHintColor, "semibold");
-        profileHint->limitLabelWidth(168.0f, 0.25f, 0.17f);
+        // The progression warning always has its own line, even with a title.
+        auto* profileHint = makeLabel(profileHintText, hasTitle ? 0.22f : 0.25f,
+            {leftCenter.x, leftCenter.y - (hasTitle ? 85.0f : 79.0f)}, profileHintColor,
+            profile.demotionWarning && !placement && !profile.promotion.active ? "black" : "semibold");
+        profileHint->limitLabelWidth(168.0f, hasTitle ? 0.22f : 0.25f, 0.15f);
+        profileHint->setID("ranked-profile-progress-status"_spr);
         m_root->addChild(profileHint, 4);
 
         auto* actionPanel = makeNeonPanel({188.0f, 196.0f}, rightCenter, kBlue, kDeepPanel, 246);
@@ -2196,10 +2216,14 @@ class CorumRankedLayer final : public CCLayerColor {
         addClearChecks(placement.currentMapClears, {size.width / 2.0f + 70.0f, size.height / 2.0f - 34.0f});
 
         if (match.state == "MAP_PREPARE") {
-            addButton("MAP DOWNLOAD", {size.width / 2.0f - 88.0f, size.height / 2.0f - 68.0f},
-                menu_selector(CorumRankedLayer::onDownloadMap), false, 0.40f);
-            addButton("MUSIC DOWNLOAD", {size.width / 2.0f + 88.0f, size.height / 2.0f - 68.0f},
-                menu_selector(CorumRankedLayer::onDownloadSong), false, 0.40f);
+            addPreparationStatusRows(
+                {size.width / 2.0f - 80.0f, size.height / 2.0f - 63.0f},
+                {size.width / 2.0f + 80.0f, size.height / 2.0f - 63.0f},
+                144.0f
+            );
+            m_prepareLoadPercentLabel = makeLabel("0%", 0.18f,
+                {size.width / 2.0f, size.height / 2.0f - 82.0f}, kCyan, "black");
+            m_root->addChild(m_prepareLoadPercentLabel, 5);
             addRoundOptions(59.0f);
         }
         std::string stateText = preparationStageText();
@@ -2561,7 +2585,8 @@ class CorumRankedLayer final : public CCLayerColor {
             renderBan(match);
             return;
         }
-        if (match.state == "ROUND_PREPARE" || match.state == "DEATHMATCH_PREPARE") {
+        if (match.state == "ROUND_PREPARE" || match.state == "DEATHMATCH_PREPARE" ||
+            match.state == "ROUND_ENTERING" || match.state == "DEATHMATCH_ENTERING") {
             renderPrepare(match);
             return;
         }
@@ -2809,9 +2834,6 @@ class CorumRankedLayer final : public CCLayerColor {
             m_root->addChild(difficulty, 6);
         }
 
-        auto* local = findPlayableMap();
-        auto const mapReady = local != nullptr;
-        auto const songReady = mapReady && isSongReady(local);
         auto& runtime = RankedRuntime::get();
         auto const clearSyncPending =
             !deathmatch &&
@@ -2822,31 +2844,7 @@ class CorumRankedLayer final : public CCLayerColor {
 
         auto const mapPos = CCPoint{size.width / 2.0f, size.height / 2.0f - 14.0f};
         auto const songPos = CCPoint{size.width / 2.0f, size.height / 2.0f - 42.0f};
-        if (clearSyncPending) {
-            auto* plate = makeTextPlate("01  " + tr("clear-recorded", "CLEAR RECORDED"), {116.0f, 23.0f}, mapPos, kGreen, 0.24f, kGreen, "semibold");
-            m_root->addChild(plate, 3);
-        } else if (mapReady) {
-            auto* plate = makeTextPlate("01  " + tr("map-ready", "MAP READY"), {116.0f, 23.0f}, mapPos, kGreen, 0.25f, kGreen, "semibold");
-            m_root->addChild(plate, 3);
-        } else {
-            addButton("MAP DOWNLOAD", mapPos, menu_selector(CorumRankedLayer::onDownloadMap), false, 0.45f);
-        }
-
-        if (clearSyncPending) {
-            auto* plate = makeTextPlate("02  " + tr("result-sync", "RESULT SYNC"), {116.0f, 23.0f}, songPos, kCyan, 0.24f, ccc3(218, 228, 244), "semibold");
-            m_root->addChild(plate, 3);
-        } else if (!mapReady) {
-            auto* plate = makeTextPlate("02  " + tr("waiting", "WAITING"), {116.0f, 23.0f}, songPos, kBlue, 0.25f, ccc3(218, 228, 244), "semibold");
-            m_root->addChild(plate, 3);
-        } else if (songReady) {
-            auto* plate = makeTextPlate("02  " + tr("audio-ready", "AUDIO READY"), {116.0f, 23.0f}, songPos, kGreen, 0.25f, kGreen, "semibold");
-            m_root->addChild(plate, 3);
-        } else if (RankedRuntime::get().songBypassAllowed()) {
-            auto* plate = makeTextPlate("02  " + tr("start-muted", "START MUTED"), {116.0f, 23.0f}, songPos, kGold, 0.24f, kGold, "semibold");
-            m_root->addChild(plate, 3);
-        } else {
-            addButton("MUSIC DOWNLOAD", songPos, menu_selector(CorumRankedLayer::onDownloadSong), false, 0.45f);
-        }
+        addPreparationStatusRows(mapPos, songPos, 116.0f, clearSyncPending);
 
         addRoundOptions(size.height / 2.0f - 106.0f);
         auto const loadStageY = size.height / 2.0f - 66.0f;
@@ -3843,6 +3841,7 @@ class CorumRankedLayer final : public CCLayerColor {
         if (view.stage != RuntimeStage::Matched) return false;
         auto const& state = view.match.state;
         return state == "ROUND_PREPARE" || state == "DEATHMATCH_PREPARE" ||
+            state == "ROUND_ENTERING" || state == "DEATHMATCH_ENTERING" ||
             state == "MAP_PREPARE" || state == "ROUND_PLAYING" ||
             state == "FINAL_ATTEMPT_WINDOW" || state == "LAST_ATTEMPT_WINDOW" ||
             state == "ROUND_SETTLING" || state == "DEATHMATCH_PLAYING" ||
@@ -3874,11 +3873,43 @@ class CorumRankedLayer final : public CCLayerColor {
 
     std::string preparationStageText() {
         auto const& preparation = corum::ranked::RankedRoundPreparation::get().view();
-        if (!preparation.error.empty()) return preparation.error;
+        if (!preparation.error.empty()) {
+            if (preparation.error.find("WAITING") != std::string::npos)
+                return tr("waiting-download-response", "WAITING FOR DOWNLOAD...");
+            if (preparation.error.find("RETRYING") != std::string::npos)
+                return tr("retrying", "RETRYING");
+            return tr("download-failed", "DOWNLOAD FAILED");
+        }
         if (!preparation.mapReady) return tr("downloading-map", "DOWNLOADING MAP...");
         if (preparation.audioReady) return tr("preparation-ready", "PREPARATION READY");
-        return fmt::format("MUSIC {}/{}  SFX {}/{}", preparation.songsDone, preparation.songsTotal,
-            preparation.sfxDone, preparation.sfxTotal);
+        return fmt::format("{}  {}/{}", tr("downloading-audio", "DOWNLOADING AUDIO..."),
+            preparation.songsDone + preparation.sfxDone, preparation.songsTotal + preparation.sfxTotal);
+    }
+
+    void addPreparationStatusRows(CCPoint mapPosition, CCPoint audioPosition, float width,
+        bool clearSyncPending = false) {
+        auto const& preparation = corum::ranked::RankedRoundPreparation::get().view();
+        auto const mapReady = preparation.mapReady && findPlayableMap() != nullptr;
+        auto const audioReady = mapReady && preparation.audioReady;
+        auto const failed = !preparation.error.empty() &&
+            preparation.error.find("WAITING") == std::string::npos &&
+            preparation.error.find("RETRYING") == std::string::npos;
+        auto addStatus = [&](std::string const& text, CCPoint position, ccColor3B color, char const* id) {
+            // Passive Corum plate: no CCMenuItem or native download selector.
+            auto* plate = makeTextPlate(text, {width, 23.0f}, position, color, 0.23f, color, "semibold");
+            plate->setID(id);
+            m_root->addChild(plate, 3);
+        };
+        auto mapText = clearSyncPending ? tr("clear-recorded", "CLEAR RECORDED")
+            : (mapReady ? tr("map-ready", "MAP READY")
+                : (failed ? tr("download-failed", "DOWNLOAD FAILED") : tr("downloading", "DOWNLOADING...")));
+        auto audioText = clearSyncPending ? tr("result-sync", "RESULT SYNC")
+            : (audioReady ? tr("audio-ready", "AUDIO READY")
+                : (failed && mapReady ? tr("download-failed", "DOWNLOAD FAILED") : tr("downloading", "DOWNLOADING...")));
+        addStatus("01  " + mapText, mapPosition,
+            clearSyncPending || mapReady ? kGreen : (failed ? kRed : kCyan), "ranked-map-download-status"_spr);
+        addStatus("02  " + audioText, audioPosition,
+            audioReady ? kGreen : (failed && mapReady ? kRed : kCyan), "ranked-audio-download-status"_spr);
     }
 
     std::vector<int> collectSongIds(GJGameLevel* level) const {
@@ -3920,13 +3951,6 @@ class CorumRankedLayer final : public CCLayerColor {
         return level && corum::ranked::RankedRoundPreparation::get().view().audioReady;
     }
 
-    void openSongDownloadGate(double = -1.0) {
-        // Existing download buttons now retry the in-screen native preparation;
-        // never navigate to LevelInfo or lend a temporary scene its callbacks.
-        corum::ranked::RankedRoundPreparation::get().retry();
-        corum::ranked::RankedRoundPreparation::get().pump();
-    }
-
     void updateAutomation() {
         auto& runtime = RankedRuntime::get();
         auto const& view = runtime.view();
@@ -3964,7 +3988,7 @@ class CorumRankedLayer final : public CCLayerColor {
             corum::ranked::roundPrepareState(view.match.state) ||
             !corum::ranked::roundAcquireState(view.match.state)) return;
         auto& runtime = RankedRuntime::get();
-        if (!runtime.canEnterCurrentLevel() && !runtime.canEnterCurrentLevelAsSpectator()) return;
+        if (!runtime.canEnterCurrentLevel() && !runtime.canEnterNativeRoundScene() && !runtime.canEnterCurrentLevelAsSpectator()) return;
         if (!corum::ranked::RankedRoundPreparation::get().launch(CCDirector::sharedDirector()->getRunningScene())) return;
         m_enteringLevel = true;
         m_rankedChildScenePushed = true;
@@ -3989,9 +4013,9 @@ class CorumRankedLayer final : public CCLayerColor {
     void addRoundOptions(float y) {
         auto const size = CCDirector::sharedDirector()->getWinSize();
         auto* level = findPlayableMap();
-        auto* ldm = addButton(fmt::format("LDM: {}", level && level->m_lowDetailModeToggled ? "ON" : "OFF"),
+        auto* ldm = addButton(fmt::format("{}: {}", tr("low-detail", "LDM"), level && level->m_lowDetailModeToggled ? "ON" : "OFF"),
             {size.width / 2.0f - 48.0f, y}, menu_selector(CorumRankedLayer::onLowDetail), false, 0.35f);
-        auto* shake = addButton(fmt::format("DISABLE SHAKE: {}", level && level->m_disableShakeToggled ? "ON" : "OFF"),
+        auto* shake = addButton(fmt::format("{}: {}", tr("disable-shake", "DISABLE SHAKE"), level && level->m_disableShakeToggled ? "ON" : "OFF"),
             {size.width / 2.0f + 47.0f, y}, menu_selector(CorumRankedLayer::onDisableShake), false, 0.35f);
         ldm->setID("ranked-round-ldm"_spr);
         shake->setID("ranked-round-disable-shake"_spr);
@@ -4131,14 +4155,6 @@ class CorumRankedLayer final : public CCLayerColor {
         if (index < 0 || static_cast<std::size_t>(index) >= maps.size()) return;
         m_pendingBan = maps[static_cast<std::size_t>(index)].canonicalLevelId;
         RankedRuntime::get().submitBan(m_pendingBan);
-    }
-
-    void onDownloadMap(CCObject*) {
-        openSongDownloadGate();
-    }
-
-    void onDownloadSong(CCObject*) {
-        openSongDownloadGate();
     }
 
     void onQueueAgain(CCObject*) {

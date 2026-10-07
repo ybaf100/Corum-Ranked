@@ -19,6 +19,7 @@ import {
   MatchPauseDto,
   SurrenderDto,
   ReadyMatchDto,
+  NativeSceneEnteredDto,
   ResourceFailureDto,
   SubmitBanDto,
 } from "./match.dto.js";
@@ -96,6 +97,18 @@ export class MatchController {
       this.spectatorLive.decorateConfiguredState(
         await this.matches.ready(matchId, matchToken, session, body),
       ),
+    );
+  }
+
+  @Post(":id/entered")
+  public async entered(
+    @Param("id") matchId: string,
+    @Headers("x-match-token") matchToken: string,
+    @CurrentSession() session: RankedSessionContext,
+    @Body() body: NativeSceneEnteredDto,
+  ) {
+    return this.spectatorLive.decorateConfiguredState(
+      await this.matches.entered(matchId, matchToken, session, body),
     );
   }
 

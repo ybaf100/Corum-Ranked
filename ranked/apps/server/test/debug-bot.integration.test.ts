@@ -1,3 +1,4 @@
+import { enterPreparedMatch } from "./native-entry-helper.js";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { PGlite } from "@electric-sql/pglite";
@@ -101,6 +102,7 @@ beforeAll(async () => {
     "0008_placement_beta9.sql",
     "0009_placement_stage_count.sql",
     "0010_achievements_v1.sql",
+    "0013_native_scene_entry.sql",
   ]) {
     const path = fileURLToPath(new URL(`../../../migrations/${migrationName}`, import.meta.url));
     await pglite.exec(await readFile(path, "utf8"));
@@ -284,12 +286,15 @@ describe("development-only Bot Match using the production Ranked engine", () => 
     expect(state.currentRound.map.playableLevelId).not.toBe(state.currentRound.map.canonicalLevelId);
 
     for (let round = 1; round <= 2; round += 1) {
-      const readyState = await matches.ready(
+      await matches.ready(
         creation.matchId,
         creation.playerMatchToken,
         creation.playerContext,
         { installedMods: structuredClone(cleanMods) },
-      ) as Record<string, any>;
+      );
+      const readyState = await enterPreparedMatch(matches, creation.matchId,
+        creation.playerMatchToken, creation.playerContext, creation.botMatchToken, creation.botContext,
+        (seconds) => clock.advance(seconds * 1000));
       expect(readyState.state).toBe("ROUND_PLAYING");
       expect(readyState.ready).toEqual({ A: true, B: true });
       if (round === 1) {
@@ -595,6 +600,13 @@ describe("development-only Bot Match using the production Ranked engine", () => 
     await matches.ready(created.matchId, created.matchToken, player, {
       installedMods: structuredClone(cleanMods),
     });
+    const entering = await matches.state(created.matchId, created.matchToken, player);
+    expect(entering.state).toBe("ROUND_ENTERING");
+    await matches.entered(created.matchId, created.matchToken, player, {
+      roundNumber: entering.entry!.roundNumber, deathmatchSequence: entering.entry!.deathmatchSequence,
+      playableLevelId: entering.entry!.playableLevelId,
+    });
+    clock.advance(3000);
     await debug.tickOnce();
     let state = await matches.state(created.matchId, created.matchToken, player) as Record<string, any>;
     expect(state.state).toBe("LAST_ATTEMPT_WINDOW");

@@ -1,3 +1,4 @@
+import { enterPreparedMatch } from "./native-entry-helper.js";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { PGlite } from "@electric-sql/pglite";
@@ -10,6 +11,7 @@ import type { RankedConfigService } from "../src/config/ranked-config.service.js
 import { MatchAccessService } from "../src/match/match-access.service.js";
 import { InMemoryMatchRuntimeState } from "../src/match/match-runtime-state.js";
 import { MatchService } from "../src/match/match.service.js";
+import { MatchRecoveryService } from "../src/match/match-recovery.service.js";
 import { QueueService } from "../src/queue/queue.service.js";
 import { OutboxService } from "../src/relay/outbox.service.js";
 import type { CreateSessionDto } from "../src/session/session.dto.js";
@@ -38,6 +40,7 @@ beforeAll(async () => {
     "0009_placement_stage_count.sql",
     "0010_achievements_v1.sql",
     "0012_gameplay_controls.sql",
+    "0013_native_scene_entry.sql",
   ]) {
     const migrationPath = fileURLToPath(
       new URL(`../../../migrations/${migrationName}`, import.meta.url),
@@ -48,6 +51,112 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await pglite.close();
+});
+
+const entryBody = (entry: { roundNumber: number; deathmatchSequence: number; playableLevelId: string }) => ({
+  roundNumber: entry.roundNumber, deathmatchSequence: entry.deathmatchSequence, playableLevelId: entry.playableLevelId,
+});
+
+describe("persisted native scene entry and shared countdown", () => {
+  it("waits for both native clients, retries idempotently and starts at the stored clock origin after restart", async () => {
+    const f = await playingMatch(false), body = entryBody(f.state.entry);
+    expect(f.state.state).toBe("ROUND_ENTERING");
+    expect(f.state.entry).toMatchObject({ entered: { A: false, B: false }, startsAt: null });
+    const untouched = await database.query("SELECT domain_state, started_at FROM ranked_rounds WHERE match_id = $1", [f.id]);
+    expect(untouched.rows[0]).toEqual({ domain_state: null, started_at: null });
+    await expect(f.matches.entered(f.id, f.ta, f.a, { ...body, playableLevelId: "wrong-map" })).rejects.toThrow("NATIVE_ENTRY_CONTEXT_CHANGED");
+    await expect(f.matches.entered(f.id, "wrong-token", f.a, body)).rejects.toThrow();
+    expect(await f.matches.startAttempt(f.id, f.ta, f.a, { levelId: body.playableLevelId, clientEventId: "before-entry" }))
+      .toMatchObject({ accepted: false, reason: "ATTEMPT_START_NOT_ACCEPTED_IN_ROUND_ENTERING" });
+    expect(await f.matches.startAttemptIntent(f.id, f.ta, f.a, { levelId: body.playableLevelId,
+      clientEventId: "intent-before-entry", clientStartedAt: f.clock.now().toISOString() })).toMatchObject({ accepted: false });
+    expect(await f.matches.changePause(f.id, f.ta, f.a, { leaseId: "pre-start", paused: true })).toMatchObject({ accepted: false });
+    const first = await f.matches.entered(f.id, f.ta, f.a, body);
+    expect(first.entry).toMatchObject({ entered: { A: true, B: false }, startsAt: null });
+    expect((await f.matches.entered(f.id, f.ta, f.a, body)).stateVersion).toBe(first.stateVersion);
+    f.clock.advanceSeconds(20);
+    const retryReady = await f.matches.ready(f.id, f.ta, f.a, { installedMods: structuredClone(cleanMods) });
+    expect(retryReady.entry).toEqual(first.entry); expect(retryReady.pause.remainingMs).toBe(30000);
+    const countdown = await f.matches.entered(f.id, f.tb, f.b, body);
+    const startsAtMs = Date.parse(countdown.entry.startsAt);
+    expect(startsAtMs - f.clock.now().getTime()).toBe(3000);
+    expect((await f.matches.entered(f.id, f.tb, f.b, body)).stateVersion).toBe(countdown.stateVersion);
+    expect((await f.matches.entered(f.id, f.ta, f.a, body)).entry.startsAt).toBe(countdown.entry.startsAt);
+    f.clock.advanceSeconds(2.999);
+    expect((await f.matches.state(f.id, f.ta, f.a)).state).toBe("ROUND_ENTERING");
+    expect(await f.matches.startAttempt(f.id, f.ta, f.a, { levelId: body.playableLevelId, clientEventId: "before-countdown" }))
+      .toMatchObject({ accepted: false });
+    const recovered = await new MatchRecoveryService(database, f.clock).recover();
+    expect(recovered.resumed).toBeGreaterThan(0);
+    const restarted = f.makeService();
+    expect((await restarted.state(f.id, f.ta, f.a)).entry).toEqual(countdown.entry);
+    f.clock.advanceSeconds(2);
+    const playing = await restarted.state(f.id, f.tb, f.b);
+    expect(playing.state).toBe("ROUND_PLAYING");
+    expect(Date.parse(playing.deadlineAt!) - startsAtMs).toBe(f.document.operational.rules.roundSeconds * 1000);
+    const persisted = await database.query<{ started_at: Date }>("SELECT started_at FROM ranked_rounds WHERE match_id = $1", [f.id]);
+    expect(new Date(persisted.rows[0]!.started_at).getTime()).toBe(startsAtMs);
+    expect((await restarted.entered(f.id, f.ta, f.a, body)).entry).toEqual(countdown.entry);
+    expect(await restarted.startAttemptIntent(f.id, f.ta, f.a, { levelId: body.playableLevelId,
+      clientEventId: "backdated-pre-countdown", clientStartedAt: new Date(startsAtMs - 1).toISOString() }))
+      .toMatchObject({ accepted: false, reason: "ATTEMPT_INTENT_TIMESTAMP_BEFORE_COUNTDOWN" });
+    expect(await restarted.startAttempt(f.id, f.ta, f.a, { levelId: body.playableLevelId, clientEventId: "real-start" }))
+      .toMatchObject({ accepted: true, duplicate: false });
+  });
+
+  it("accepts pause at the shared GO time without a preceding playing-state poll", async () => {
+    const f = await playingMatch(false), body = entryBody(f.state.entry);
+    await f.matches.entered(f.id, f.ta, f.a, body);
+    const countdown = await f.matches.entered(f.id, f.tb, f.b, body);
+    f.clock.advanceSeconds(2.999);
+    expect(await f.matches.changePause(f.id, f.ta, f.a, { leaseId: "too-early", paused: true })).toMatchObject({ accepted: false });
+    f.clock.advanceSeconds(0.001);
+    expect(await f.matches.changePause(f.id, f.ta, f.a, { leaseId: "at-go", paused: true }))
+      .toMatchObject({ accepted: true, active: true, remainingMs: 30000 });
+    const state = await f.matches.state(f.id, f.ta, f.a);
+    expect(state.state).toBe("ROUND_PLAYING");
+    expect(Date.parse(state.deadlineAt) - Date.parse(countdown.entry.startsAt)).toBe(f.document.operational.rules.roundSeconds * 1000);
+  });
+
+  it("adopts the synthetic bot only after the real A native scene enters", async () => {
+    const f = await playingMatch(false), body = entryBody(f.state.entry);
+    await database.query("UPDATE ranked_matches SET match_type = 'DEBUG_BOT', debug_config = '{}'::jsonb WHERE id = $1", [f.id]);
+    await expect(f.matches.entered(f.id, f.tb, f.b, body)).rejects.toThrow("NATIVE_ENTRY_REQUIRES_REAL_PLAYER");
+    f.clock.advanceSeconds(12);
+    expect((await f.matches.state(f.id, f.ta, f.a)).entry).toMatchObject({ entered: { A: false, B: false }, startsAt: null });
+    const countdown = await f.matches.entered(f.id, f.ta, f.a, body);
+    expect(countdown.entry.entered).toEqual({ A: true, B: true });
+    expect(Date.parse(countdown.entry.startsAt) - f.clock.now().getTime()).toBe(3000);
+    f.clock.advanceSeconds(3);
+    expect((await f.matches.state(f.id, f.ta, f.a)).state).toBe("ROUND_PLAYING");
+  });
+
+  it("cancels a bounded Round-1 entry wait without scoring an unplayed match", async () => {
+    const f = await playingMatch(false);
+    await f.matches.entered(f.id, f.ta, f.a, entryBody(f.state.entry));
+    f.clock.advanceSeconds(60);
+    const state = await f.matches.entered(f.id, f.tb, f.b, entryBody(f.state.entry));
+    expect(state.state).toBe("CANCELLED"); expect(state.cancellation.reason).toBe("NATIVE_ENTRY_TIMEOUT");
+    const row = await database.query("SELECT result_applied_at FROM ranked_matches WHERE id = $1", [f.id]);
+    expect(row.rows[0]).toEqual({ result_applied_at: null });
+  });
+
+  it("clears the prior entry certificate and cannot revive it in the next round", async () => {
+    const f = await playingMatch(), previous = entryBody(f.state.entry);
+    await f.matches.surrender(f.id, f.ta, f.a, { scope: "ROUND", clientEventId: "old-round", roundNumber: 1, deathmatchSequence: 0 });
+    f.clock.advanceSeconds(f.document.operational.timeouts!.roundResultSeconds + 1);
+    const preparing = await f.matches.state(f.id, f.ta, f.a);
+    expect(preparing.state).toBe("ROUND_PREPARE"); expect(preparing.entry).toBeNull();
+    await expect(f.matches.entered(f.id, f.ta, f.a, previous)).rejects.toThrow("NATIVE_ENTRY_CONTEXT_CHANGED");
+    await f.matches.ready(f.id, f.ta, f.a, { installedMods: structuredClone(cleanMods) });
+    const entering = await f.matches.ready(f.id, f.tb, f.b, { installedMods: structuredClone(cleanMods) });
+    expect(entering.entry).toMatchObject({ roundNumber: 2, entered: { A: false, B: false }, startsAt: null });
+    await expect(f.matches.entered(f.id, f.ta, f.a, previous)).rejects.toThrow("NATIVE_ENTRY_CONTEXT_CHANGED");
+    await f.matches.entered(f.id, f.tb, f.b, entryBody(entering.entry));
+    f.clock.advanceSeconds(60);
+    const forfeited = await f.matches.state(f.id, f.tb, f.b);
+    expect(forfeited.state).toBe("MATCH_RESULT"); expect(forfeited.result.winnerSide).toBe("B");
+  });
 });
 
 class SequenceIds implements IdGenerator {
@@ -156,10 +265,12 @@ const createContext = async (
 
 const ids = new SequenceIds();
 let account = 95000;
-const playingMatch = async () => {
+const playingMatch = async (enterScene = true) => {
   const clock = new MutableClock();
   const base = configDocumentFixture("gameplay-controls");
-  const document = { ...base, operational: { ...base.operational, timeouts: { ...base.operational.timeouts!, reconnectGraceSeconds: 10_000 } } };
+  const document = { ...base, operational: { ...base.operational,
+    failurePolicy: { ...base.operational.failurePolicy!, restartRecoveryAction: "RESUME" as const },
+    timeouts: { ...base.operational.timeouts!, reconnectGraceSeconds: 10_000 } } };
   const config = { getSnapshot: () => ({ ...structuredClone(document), fetchedAt: clock.now().toISOString() }) } as unknown as RankedConfigService;
   const tokens = new TokenService(environmentFixture());
   const sessions = new SessionService(database, new FixedCsmpSource(), clock, ids, config, tokens);
@@ -177,7 +288,10 @@ const playingMatch = async () => {
   await matches.submitBan(id, qa.matchToken, a, {}); await matches.submitBan(id, qb.matchToken, b, {});
   const startRound = async () => {
     await matches.ready(id, qa.matchToken, a, ready);
-    return await matches.ready(id, qb.matchToken, b, ready) as any;
+    const entering = await matches.ready(id, qb.matchToken, b, ready);
+    if (!enterScene) return entering;
+    return enterPreparedMatch(matches, id, qa.matchToken, a, qb.matchToken, b,
+      (seconds) => clock.advanceSeconds(seconds));
   };
   const state = await startRound();
   return { matches, makeService, clock, document, a, b, id, ta: qa.matchToken, tb: qb.matchToken, state, startRound };

@@ -15,6 +15,15 @@ import { EnvironmentRecheckDto } from "../session/session.dto.js";
 
 export class ReadyMatchDto extends EnvironmentRecheckDto {}
 
+export class NativeSceneEnteredDto {
+  @IsInt() @Min(0) @Max(3)
+  public roundNumber!: number;
+  @IsInt() @Min(0) @Max(10000)
+  public deathmatchSequence!: number;
+  @IsString() @Length(1, 40)
+  public playableLevelId!: string;
+}
+
 export class SubmitBanDto {
   @IsOptional()
   @IsString()

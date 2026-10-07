@@ -3,6 +3,7 @@
 #include "domain/SpectatorLocalSafety.hpp"
 #include "domain/AttemptScoring.hpp"
 #include "domain/RankedGameplayPolicy.hpp"
+#include "domain/RoundResourcePolicy.hpp"
 #include "domain/TransitionTrace.hpp"
 
 #include <Geode/binding/GJAccountManager.hpp>
@@ -1049,7 +1050,7 @@ void RankedRuntime::pollMatch() {
             if (placement) parsePlacementState(root);
             else parseMatchState(root);
             m_nextPollAt = std::chrono::steady_clock::now() +
-                std::chrono::milliseconds(pollIntervalMillis(m_view.match.spectatorActive));
+                std::chrono::milliseconds(roundEnteringState(m_view.match.state) ? 100 : pollIntervalMillis(m_view.match.spectatorActive));
         }
     );
 }
@@ -1293,6 +1294,16 @@ void RankedRuntime::parseMatchState(matjson::Value const& root) {
     m_view.match.stateVersion = root["stateVersion"].asInt().unwrapOr(0);
     m_view.match.deadlineAt = root["deadlineAt"].asString().unwrapOr("");
     m_view.match.side = root["side"].asString().unwrapOr("");
+    auto const entry = root["entry"];
+    m_view.match.entry = {};
+    if (entry.isObject()) {
+        m_view.match.entry.roundNumber = static_cast<int>(entry["roundNumber"].asInt().unwrapOr(0));
+        m_view.match.entry.deathmatchSequence = static_cast<int>(entry["deathmatchSequence"].asInt().unwrapOr(0));
+        m_view.match.entry.levelId = numFromString<int>(entry["playableLevelId"].asString().unwrapOr("")).unwrapOr(0);
+        m_view.match.entry.enteredA = entry["entered"]["A"].asBool().unwrapOr(false);
+        m_view.match.entry.enteredB = entry["entered"]["B"].asBool().unwrapOr(false);
+        m_view.match.entry.startsAt = entry["startsAt"].asString().unwrapOr("");
+    }
     m_view.match.effectiveTier = root["effectiveTier"].asString().unwrapOr("");
     m_view.match.playerAName = root["players"]["A"]["gdUsername"].asString().unwrapOr("Player A");
     m_view.match.playerBName = root["players"]["B"]["gdUsername"].asString().unwrapOr("Player B");
@@ -1552,7 +1563,7 @@ void RankedRuntime::parseMatchState(matjson::Value const& root) {
         }
     }
 
-    if (!stateAllowsActiveAttempt(m_view.match.state)) {
+    if (!stateAllowsActiveAttempt(m_view.match.state) && !nativeEntryStartGranted()) {
         m_pendingProgress.reset();
         if (hasLocalAttemptInFlight()) {
             if (hasLocalOpenAttempt()) {
@@ -1785,22 +1796,30 @@ void RankedRuntime::retireConcededAttemptTransport() {
 
 void RankedRuntime::surrenderCurrentMatch(bool wholeMatch) {
     if (m_view.stage != RuntimeStage::Matched || isPlacement() || m_view.match.matchId.empty() ||
-        !stateAllowsActiveAttempt(m_view.match.state) || m_pendingSurrender.isObject()) return;
-    if (hasLocalAttemptInFlight() && !hasLocalOpenAttempt()) {
-        setTransientError("Completed attempt is still syncing; wait before surrendering.");
-        flushAttemptEvents(); return;
+        !(stateAllowsActiveAttempt(m_view.match.state) || nativeEntryStartGranted())) {
+        m_surrenderStatus = SurrenderStatus::Rejected;
+        return;
     }
-    m_pendingSurrender = matjson::Value();
-    m_pendingSurrender["scope"] = wholeMatch ? "MATCH" : "ROUND";
-    m_pendingSurrender["clientEventId"] = newEventId("surrender");
-    m_pendingSurrender["roundNumber"] = m_view.match.roundNumber;
-    m_pendingSurrender["deathmatchSequence"] = m_view.match.deathmatchSequence;
+    if (m_pendingSurrender) return;
+    matjson::Value body;
+    body["scope"] = wholeMatch ? "MATCH" : "ROUND";
+    body["clientEventId"] = newEventId("surrender");
+    body["roundNumber"] = m_view.match.roundNumber;
+    body["deathmatchSequence"] = m_view.match.deathmatchSequence;
+    m_pendingSurrender = std::move(body);
+    m_surrenderMatchId = m_view.match.matchId;
+    ++m_surrenderRequestGeneration;
+    m_surrenderStatus = hasLocalAttemptInFlight() && !hasLocalOpenAttempt()
+        ? SurrenderStatus::WaitingAttempt : SurrenderStatus::Sending;
+    log::info("[RankedSurrender] queued scope={} round={} deathmatch={} waitingAttempt={}",
+        wholeMatch ? "MATCH" : "ROUND", m_view.match.roundNumber, m_view.match.deathmatchSequence,
+        m_surrenderStatus == SurrenderStatus::WaitingAttempt);
     m_nextSurrenderAt = {}; flushGameplayControls();
 }
 
 std::string RankedRuntime::beginMatchGameplayPause(int levelId) {
     if (m_view.stage != RuntimeStage::Matched || isPlacement() ||
-        !isGameplayLevel(levelId) || !stateAllowsActiveAttempt(m_view.match.state)) return {};
+        !isGameplayLevel(levelId) || !(stateAllowsActiveAttempt(m_view.match.state) || nativeEntryStartGranted())) return {};
     if (m_pauseMatchId != m_view.match.matchId) {
         m_pauseRequest.cancel(); m_pauseBusy = false;
         m_pauseMatchId = m_view.match.matchId; m_pauseLeaseId.clear();
@@ -1848,18 +1867,48 @@ void RankedRuntime::flushGameplayControls() {
                 if (lease != m_pauseLeaseId || paused != m_pauseDesired) m_pauseNeedsSync = true;
             });
     }
-    if (!m_surrenderBusy && m_pendingSurrender.isObject() && now >= m_nextSurrenderAt &&
-        m_view.stage == RuntimeStage::Matched) {
-        auto request = baseRequest(m_sessionToken, m_matchToken); request.bodyJSON(m_pendingSurrender);
-        auto const matchId = m_view.match.matchId; m_surrenderBusy = true;
+    if (!m_surrenderBusy && m_pendingSurrender && now >= m_nextSurrenderAt) {
+        auto const& body = *m_pendingSurrender;
+        if (m_view.stage != RuntimeStage::Matched || m_surrenderMatchId != m_view.match.matchId ||
+            body["roundNumber"].asInt().unwrapOr(0) != m_view.match.roundNumber ||
+            body["deathmatchSequence"].asInt().unwrapOr(0) != m_view.match.deathmatchSequence ||
+            !(stateAllowsActiveAttempt(m_view.match.state) || nativeEntryStartGranted())) {
+            m_pendingSurrender.reset(); m_surrenderStatus = SurrenderStatus::Rejected;
+            log::warn("[RankedSurrender] discarded stale round request");
+            return;
+        }
+        if (hasLocalAttemptInFlight() && !hasLocalOpenAttempt()) {
+            m_surrenderStatus = SurrenderStatus::WaitingAttempt;
+            flushAttemptEvents(); return;
+        }
+        auto request = baseRequest(m_sessionToken, m_matchToken); request.bodyJSON(body);
+        auto const matchId = m_surrenderMatchId;
+        auto const generation = m_surrenderRequestGeneration;
+        auto const round = m_view.match.roundNumber;
+        auto const deathmatch = m_view.match.deathmatchSequence;
+        m_surrenderBusy = true; m_surrenderStatus = SurrenderStatus::Sending;
+        log::info("[RankedSurrender] POST scope={} round={}",
+            body["scope"].asString().unwrapOr(""), m_view.match.roundNumber);
         m_surrenderRequest.spawn(request.post(endpoint("/api/ranked/matches/" + matchId + "/surrender")),
-            [this, matchId](web::WebResponse response) {
-                if (matchId != m_view.match.matchId) return;
+            [this, matchId, generation, round, deathmatch](web::WebResponse response) {
+                if (generation != m_surrenderRequestGeneration || matchId != m_view.match.matchId) return;
                 m_surrenderBusy = false;
-                if (successful(response)) { m_pendingSurrender = {}; parseMatchState(response.json().unwrapOr(matjson::Value())); }
+                if (round != m_view.match.roundNumber || deathmatch != m_view.match.deathmatchSequence) {
+                    m_pendingSurrender.reset(); m_surrenderStatus = SurrenderStatus::Rejected;
+                    return;
+                }
+                log::info("[RankedSurrender] response status={}", response.code());
+                if (successful(response)) {
+                    m_pendingSurrender.reset(); parseMatchState(response.json().unwrapOr(matjson::Value()));
+                    m_surrenderStatus = SurrenderStatus::Accepted;
+                }
                 else if (response.code() >= 400 && response.code() < 500) {
-                    m_pendingSurrender = {}; setTransientError(responseError(response));
-                } else { m_nextSurrenderAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(500); }
+                    m_pendingSurrender.reset(); m_surrenderStatus = SurrenderStatus::Rejected;
+                    setTransientError(responseError(response));
+                } else {
+                    m_surrenderStatus = SurrenderStatus::Retrying;
+                    m_nextSurrenderAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
+                }
             });
     }
 }
@@ -1868,7 +1917,9 @@ void RankedRuntime::resetGameplayControls() {
     SpectatorLiveRuntime::get().publisherPaused(false);
     m_pauseRequest.cancel(); m_surrenderRequest.cancel();
     m_pauseBusy = m_pauseDesired = m_pauseNeedsSync = m_surrenderBusy = false;
-    m_pauseMatchId.clear(); m_pauseLeaseId.clear(); m_pendingSurrender = {};
+    m_pauseMatchId.clear(); m_pauseLeaseId.clear(); m_pendingSurrender.reset();
+    m_surrenderMatchId.clear(); ++m_surrenderRequestGeneration;
+    m_surrenderStatus = SurrenderStatus::Idle;
     m_matchPauseBudget.bind("");
 }
 
@@ -2309,7 +2360,9 @@ bool RankedRuntime::armCurrentLevelForGameplay() {
     m_gameplayMap = *m_view.match.currentMap;
     m_gameplayMatchId = m_view.match.matchId;
     m_gameplayStartContextKey = contextKey;
-    m_gameplayStartedAt = iso8601FromMillis(m_serverClock.serverNowMillis(localNowMillis()));
+    m_gameplayStartedAt = nativeEntryStartGranted()
+        ? m_view.match.entry.startsAt
+        : iso8601FromMillis(m_serverClock.serverNowMillis(localNowMillis()));
     m_gameplayStartEligible = true;
     log::debug(
         "Ranked gameplay armed: match={} level={} qualifying={} context={} startedAt={}",
@@ -2435,7 +2488,7 @@ bool RankedRuntime::canEnterCurrentLevel() const {
         return m_view.placement.currentMapClears < 2;
     }
 
-    if (m_view.match.state == "DEATHMATCH_PLAYING") {
+    if (m_view.match.deathmatchSequence > 0) {
         auto const serverUsed = m_view.match.side == "A"
             ? m_view.match.deathmatchAttemptsUsedA
             : m_view.match.deathmatchAttemptsUsedB;
@@ -2485,6 +2538,73 @@ int RankedRuntime::localDeathmatchVisualAttemptsUsed() const {
     return std::clamp(m_localDeathmatchVisualAttempts, 0, 3);
 }
 
+bool RankedRuntime::canEnterNativeRoundScene() const {
+    auto const& match = m_view.match;
+    if (m_view.stage != RuntimeStage::Matched || isPlacement() || isSpectating() ||
+        !roundEnteringState(match.state) || match.matchId.empty() || !match.currentMap ||
+        match.entry.levelId != match.currentMap->levelId) return false;
+    return match.deathmatchSequence > 0
+        ? match.entry.roundNumber == 0 && match.entry.deathmatchSequence == match.deathmatchSequence
+        : match.entry.roundNumber == match.roundNumber && match.entry.deathmatchSequence == 0;
+}
+
+std::optional<std::int64_t> RankedRuntime::nativeEntryCountdownMillis() const {
+    if (m_view.match.entry.startsAt.empty()) return std::nullopt;
+    return m_serverClock.remainingMillis(m_view.match.entry.startsAt, localNowMillis());
+}
+
+bool RankedRuntime::nativeEntryStartGranted() const {
+    if (!canEnterNativeRoundScene() || !m_view.match.entry.enteredA ||
+        !m_view.match.entry.enteredB || m_view.match.entry.startsAt.empty()) return false;
+    auto const remaining = m_serverClock.signedRemainingMillis(
+        m_view.match.entry.startsAt, localNowMillis());
+    // This exact-context server certificate avoids another polling RTT at GO.
+    // A disconnected/stale certificate cannot open a new attempt indefinitely.
+    return remaining && *remaining <= 0 && *remaining >= -3'000;
+}
+
+void RankedRuntime::noteNativeRoundSceneEntered(int levelId) {
+    if (!canEnterNativeRoundScene() || levelId != m_view.match.entry.levelId) return;
+    auto const& match = m_view.match;
+    auto const key = fmt::format("{}:{}:{}:{}", match.matchId, match.entry.roundNumber,
+        match.entry.deathmatchSequence, levelId);
+    if (key != m_nativeEntryKey) {
+        ++m_nativeEntryGeneration;
+        m_nativeEntryRequest.cancel();
+        m_nativeEntryKey = key;
+        m_nativeEntryBusy = false;
+        m_nextNativeEntryAt = {};
+    }
+    auto const ownEntered = match.side == "A" ? match.entry.enteredA : match.entry.enteredB;
+    if (ownEntered || m_nativeEntryBusy || std::chrono::steady_clock::now() < m_nextNativeEntryAt) return;
+    matjson::Value body;
+    body["roundNumber"] = match.entry.roundNumber;
+    body["deathmatchSequence"] = match.entry.deathmatchSequence;
+    body["playableLevelId"] = std::to_string(levelId);
+    auto request = baseRequest(m_sessionToken, m_matchToken); request.bodyJSON(body);
+    auto const generation = m_nativeEntryGeneration;
+    auto const matchId = match.matchId;
+    m_nativeEntryBusy = true;
+    log::info("[RankedEntry] native scene entered context={}", key);
+    m_nativeEntryRequest.spawn(request.post(endpoint("/api/ranked/matches/" + matchId + "/entered")),
+        [this, key, generation, matchId](web::WebResponse response) {
+            if (generation != m_nativeEntryGeneration || key != m_nativeEntryKey ||
+                matchId != m_view.match.matchId) return;
+            m_nativeEntryBusy = false;
+            if (!canEnterNativeRoundScene() || key != fmt::format("{}:{}:{}:{}",
+                m_view.match.matchId, m_view.match.entry.roundNumber,
+                m_view.match.entry.deathmatchSequence, m_view.match.entry.levelId)) return;
+            m_nextNativeEntryAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
+            if (successful(response)) {
+                parseMatchState(response.json().unwrapOr(matjson::Value()));
+                m_nextPollAt = {};
+            } else {
+                log::warn("[RankedEntry] entry acknowledgement failed context={} status={}", key, response.code());
+                setTransientError(responseError(response));
+            }
+        });
+}
+
 double RankedRuntime::localDisplayScore(double progressPercent, std::optional<double> qualifyingPercentOverride) const {
     if (isSpectating() || m_spectatorLocalTransportOwner != nullptr) progressPercent = -1.0;
     if (isPlacement()) {
@@ -2493,7 +2613,7 @@ double RankedRuntime::localDisplayScore(double progressPercent, std::optional<do
         return static_cast<double>(m_view.placement.provisionalMapScore);
     }
     auto const ownIsA = m_view.match.side == "A";
-    if (m_view.match.state == "DEATHMATCH_PLAYING") {
+    if (m_view.match.deathmatchSequence > 0) {
         auto const serverBest = ownIsA ? m_view.match.scoreA : m_view.match.scoreB;
         if (progressPercent < 0.0) return serverBest;
         return std::max(serverBest, std::clamp(progressPercent, 0.0, 100.0));
@@ -2539,7 +2659,7 @@ int RankedRuntime::localDisplayClears() const {
 bool RankedRuntime::canTrackLevel(int levelId) const {
     return
         m_view.stage == RuntimeStage::Matched &&
-        stateAllowsActiveAttempt(m_view.match.state) &&
+        (stateAllowsActiveAttempt(m_view.match.state) || nativeEntryStartGranted()) &&
         !isSpectating() &&
         isGameplayLevel(levelId);
 }
@@ -2569,6 +2689,7 @@ bool RankedRuntime::attemptStartWindowOpen() const {
         auto const signedRemaining = signedDeadlineMillis();
         return !signedRemaining || *signedRemaining > -10'000;
     }
+    if (nativeEntryStartGranted()) return true;
     if (state == "DEATHMATCH_PLAYING") return true;
 
     if (state == "ROUND_PLAYING") {
@@ -2660,7 +2781,7 @@ bool RankedRuntime::reportAttemptStart(int levelId) {
         return true;
     }
 
-    if (m_view.match.state == "DEATHMATCH_PLAYING") {
+    if (m_view.match.deathmatchSequence > 0) {
         auto const sequence = m_view.match.deathmatchSequence;
         if (sequence <= 0) return false;
         auto const serverUsed = m_view.match.side == "A"
@@ -2700,7 +2821,7 @@ bool RankedRuntime::reportAttemptStart(int levelId) {
     // while an earlier End/ACK may still be ahead of it in the FIFO. This closes
     // the Round-2 fast-clear race where polling could finalize the round and the
     // client would otherwise lose the queued Clear entirely.
-    if (!isPlacement() && m_view.match.state != "DEATHMATCH_PLAYING") {
+    if (!isPlacement() && m_view.match.deathmatchSequence <= 0) {
         sendAttemptStartIntent(start);
     }
 
@@ -2794,7 +2915,7 @@ bool RankedRuntime::reportAttemptEnd(int levelId, double progressPercent, bool c
         ? *qualifyingPercentOverride
         : (scoringMap ? scoringMap->qualifyingPercent : -1.0);
     auto optimisticScore = 0.0;
-    if (m_view.match.state == "DEATHMATCH_PLAYING") {
+    if (m_view.match.deathmatchSequence > 0) {
         // Death Match is raw best percentage; Qualifying is intentionally absent.
         optimisticScore = cleared ? 100.0 : finalProgress;
     } else if (qualifying >= 0.0) {
@@ -3053,7 +3174,7 @@ void RankedRuntime::sendAttemptStart() {
                 starting.levelId
             );
             applyAttemptSnapshot(root);
-            if (m_view.match.state == "DEATHMATCH_PLAYING") {
+            if (m_view.match.deathmatchSequence > 0) {
                 auto const attemptNumber = static_cast<int>(root["attemptNumber"].asInt().unwrapOr(0));
                 if (attemptNumber > 0) {
                     if (m_view.match.side == "A") m_view.match.deathmatchAttemptsUsedA = std::max(m_view.match.deathmatchAttemptsUsedA, attemptNumber);

@@ -63,6 +63,7 @@ std::optional<RankedMapView> parseMap(matjson::Value const& v){if(!v.isObject())
 int placementGradeRank(std::string const&){return 0;}
 AchievementUnlockNoticeView parseAchievementNotice(matjson::Value const&){return {};}
 bool RankedRuntime::isPlacement()const{return m_view.match.placement;}
+bool RankedRuntime::nativeEntryStartGranted()const{return false;}
 void RankedRuntime::observeServerNow(matjson::Value const&){}
 void RankedRuntime::setTransientError(std::string s){m_view.error=s;}
 std::string RankedRuntime::endpoint(std::string const& p)const{return p;}

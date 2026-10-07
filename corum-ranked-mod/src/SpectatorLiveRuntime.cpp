@@ -160,7 +160,10 @@ void SpectatorLiveRuntime::startPublisherGeneration(
     m_publishAttemptId = attemptId;
     auto const& match = RankedRuntime::get().view().match;
     m_publishRound = match.roundNumber;
-    m_publishDeathmatch = match.state == "DEATHMATCH_PLAYING" ? match.deathmatchSequence : 0;
+    // A server start certificate can release this Attempt before the next state
+    // poll changes DEATHMATCH_ENTERING to PLAYING. Context is an exact identity,
+    // not a presentation phase; retain it across that delayed state projection.
+    m_publishDeathmatch = match.deathmatchSequence > 0 ? match.deathmatchSequence : 0;
     ++m_publishGeneration;
     if (m_publishGeneration == 0) m_publishGeneration = 1;
     m_publishSequence = 0;
@@ -240,7 +243,7 @@ void SpectatorLiveRuntime::publishTerminal(SpectatorGhostPose const& pose, bool 
     m_terminalBody["protocolVersion"] = kProtocolVersion;
     m_terminalBody["matchId"] = match.matchId;
     m_terminalBody["roundNumber"] = match.roundNumber;
-    if (match.state == "DEATHMATCH_PLAYING") m_terminalBody["deathmatchSequence"] = match.deathmatchSequence;
+    if (match.deathmatchSequence > 0) m_terminalBody["deathmatchSequence"] = match.deathmatchSequence;
     m_terminalBody["attemptId"] = attempt;
     m_terminalBody["generation"] = static_cast<std::int64_t>(m_publishGeneration);
     // Capture the terminal immediately, but wait for the preceding live ACK to

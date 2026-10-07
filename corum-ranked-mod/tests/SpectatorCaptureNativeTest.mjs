@@ -76,6 +76,7 @@ struct DebugSpectateRuntime {
 }
 }
 struct CorumRankedPlayLayer:PlayLayer {
+ bool blockEntryGameplayUpdate(){return false;}
  struct Fields{SpectatorNativeProbe spectatorNativeProbe;bool rankedInitialized=false,rankedLevel=true,safetyRetired=false,spectatorMode=false,spectatorPending=false;
   bool debugRecordScene=false,debugPlaybackScene=false,debugRecordHasFrame=false;SpectatorCapturePolicy spectatorCapture;bool spectatorWorldUpdateInProgress=false;std::optional<unsigned> spectatorCameraFrameNumber;}fields;
  Fields* m_fields=&fields;

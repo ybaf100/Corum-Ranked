@@ -65,6 +65,7 @@ import type {
   MatchPauseDto,
   SurrenderDto,
   ReadyMatchDto,
+  NativeSceneEnteredDto,
   ResourceFailureDto,
   SubmitBanDto,
 } from "./match.dto.js";
@@ -80,17 +81,30 @@ const ATTEMPT_START_INTENT_FUTURE_SKEW_MS = 2_000;
 // the authoritative Start packet is catching up. This hard TTL is only a final
 // deadlock guard; reconnect timeout resolves genuinely abandoned clients first.
 const ATTEMPT_START_INTENT_HARD_TTL_MS = 15 * 60_000;
+const NATIVE_ENTRY_TIMEOUT_MS = 60_000;
+const NATIVE_ENTRY_COUNTDOWN_MS = 3_000;
+
+interface NativeEntryState {
+  readonly roundNumber: number;
+  readonly deathmatchSequence: number;
+  readonly playableLevelId: string;
+  readonly deadlineAt: string;
+  readonly entered: Record<PlayerSide, boolean>;
+  startsAt: string | null;
+}
 
 type MatchState =
   | "MATCHED"
   | "BAN_PHASE"
   | "ROUND_PREPARE"
+  | "ROUND_ENTERING"
   | "ROUND_PLAYING"
   | "FINAL_ATTEMPT_WINDOW"
   | "LAST_ATTEMPT_WINDOW"
   | "ROUND_SETTLING"
   | "ROUND_RESULT"
   | "DEATHMATCH_PREPARE"
+  | "DEATHMATCH_ENTERING"
   | "DEATHMATCH_PLAYING"
   | "DEATHMATCH_RESULT"
   | "MATCH_RESULT"
@@ -144,6 +158,7 @@ interface LockedMatchRow {
   finished_at: Date | string | null;
   pause_state?: unknown;
   surrender_events?: unknown;
+  entry_state?: unknown | null;
 }
 
 interface RoundRow {
@@ -488,6 +503,8 @@ export class MatchService {
       const authorization = await this.access.authorize(transaction, matchId, session, matchToken);
       let match = await this.lockMatch(transaction, matchId);
       match = await this.advanceLockedMatch(transaction, match, now);
+      // Resource READY retries cannot restart or alter the native entry barrier.
+      if (match.state === "ROUND_ENTERING" || match.state === "DEATHMATCH_ENTERING") return;
       if (match.state === "MATCHED") {
         const column = sideColumn(authorization.side, "ready");
         if (match.match_type === "DEBUG_BOT" && authorization.side === "A") {
@@ -553,29 +570,11 @@ export class MatchService {
           if (match.ready_a_at && match.ready_b_at) {
             const deathmatch = await this.currentDeathmatch(transaction, match);
             const deathmatchMap = parseJson<RankedMapSnapshot>(deathmatch.map_snapshot);
-            await transaction.query(
-              "UPDATE ranked_deathmatches SET started_at = $2 WHERE id = $1 AND started_at IS NULL",
-              [match.current_deathmatch_id, now.toISOString()],
-            );
-            await transaction.query(
-              `UPDATE ranked_matches
-               SET state = 'DEATHMATCH_PLAYING', ready_deadline_at = NULL,
-                   deadline_at = NULL, state_version = state_version + 1
-               WHERE id = $1`,
-              [matchId],
-            );
-            await this.outbox.enqueueMatchEvent(
-              transaction,
-              match,
-              "DEATHMATCH_START",
-              `match:${match.id}:deathmatch:${deathmatch.id}:start`,
-              {
-                sequence: Number(deathmatch.sequence),
-                mapTitle: deathmatchMap.title,
-                qualifyingPercent: deathmatchMap.qualifyingPercent,
-              },
-              now,
-            );
+            await this.beginNativeEntry(transaction, match, {
+              roundNumber: 0,
+              deathmatchSequence: Number(deathmatch.sequence),
+              playableLevelId: deathmatchMap.playableLevelId,
+            }, now);
           }
           return;
         }
@@ -602,10 +601,91 @@ export class MatchService {
       }
       const updatedRound = await this.lockCurrentRound(transaction, match);
       if (updatedRound.ready_a_at && updatedRound.ready_b_at) {
-        await this.startPreparedRound(transaction, match, updatedRound, now);
+        await this.beginNativeEntry(transaction, match, {
+          roundNumber: Number(updatedRound.round_number),
+          deathmatchSequence: 0,
+          playableLevelId: updatedRound.playable_level_id,
+        }, now);
       }
     });
     return this.state(matchId, matchToken, session);
+  }
+
+  public async entered(
+    matchId: string,
+    matchToken: string,
+    session: RankedSessionContext,
+    body: NativeSceneEnteredDto,
+  ) {
+    const now = this.clock.now();
+    return this.database.transaction(async (transaction) => {
+      const authorization = await this.access.authorize(transaction, matchId, session, matchToken);
+      let match = await this.lockMatch(transaction, matchId);
+      match = await this.advanceLockedMatch(transaction, match, now);
+      const entry = match.entry_state ? parseJson<NativeEntryState>(match.entry_state) : null;
+      if (!entry || entry.roundNumber !== body.roundNumber ||
+          entry.deathmatchSequence !== body.deathmatchSequence ||
+          entry.playableLevelId !== body.playableLevelId) {
+        throw new ConflictException("NATIVE_ENTRY_CONTEXT_CHANGED");
+      }
+      if (match.state === "MATCH_RESULT" || match.state === "CANCELLED") {
+        // A late native completion must commit an elapsed entry timeout rather
+        // than rolling back that authoritative transition via a 409 exception.
+        return this.buildPublicState(transaction, match, session.playerId, now);
+      }
+      // An ACK retry after countdown/start is read-only. A previous-round retry
+      // never reaches this branch because each new PREPARE clears the certificate.
+      if (entry.entered[authorization.side]) {
+        return this.buildPublicState(transaction, match, session.playerId, now);
+      }
+      if (match.state !== "ROUND_ENTERING" && match.state !== "DEATHMATCH_ENTERING") {
+        throw new ConflictException(`Native entry is not accepted in ${match.state}`);
+      }
+      // The synthetic bot cannot prove human A's native scene is installed.
+      // Only the real A-side entry atomically admits B for a DEBUG_BOT match.
+      if (match.match_type === "DEBUG_BOT" && authorization.side !== "A") {
+        throw new ConflictException("NATIVE_ENTRY_REQUIRES_REAL_PLAYER");
+      }
+      entry.entered[authorization.side] = true;
+      if (match.match_type === "DEBUG_BOT") entry.entered.B = true;
+      if (entry.entered.A && entry.entered.B && !entry.startsAt) {
+        entry.startsAt = new Date(now.getTime() + NATIVE_ENTRY_COUNTDOWN_MS).toISOString();
+      }
+      await transaction.query(
+        `UPDATE ranked_matches SET entry_state = $2::jsonb,
+          deadline_at = $3, state_version = state_version + 1 WHERE id = $1`,
+        [match.id, JSON.stringify(entry), entry.startsAt ?? entry.deadlineAt],
+      );
+      match = await this.lockMatch(transaction, match.id);
+      return this.buildPublicState(transaction, match, session.playerId, now);
+    });
+  }
+
+  private async beginNativeEntry(
+    transaction: SqlExecutor,
+    match: LockedMatchRow,
+    context: Pick<NativeEntryState, "roundNumber" | "deathmatchSequence" | "playableLevelId">,
+    now: Date,
+  ): Promise<void> {
+    const entry: NativeEntryState = {
+      ...context,
+      deadlineAt: new Date(now.getTime() + NATIVE_ENTRY_TIMEOUT_MS).toISOString(),
+      entered: { A: false, B: false },
+      startsAt: null,
+    };
+    const state = context.deathmatchSequence ? "DEATHMATCH_ENTERING" : "ROUND_ENTERING";
+    await transaction.query(
+      `UPDATE ranked_matches SET state = $2, entry_state = $3::jsonb,
+        ready_deadline_at = NULL, deadline_at = $4, state_version = state_version + 1 WHERE id = $1`,
+      [match.id, state, JSON.stringify(entry), entry.deadlineAt],
+    );
+    if (!context.deathmatchSequence) {
+      await transaction.query(
+        `UPDATE ranked_rounds SET phase = 'ROUND_ENTERING', ready_deadline_at = NULL,
+          state_version = state_version + 1 WHERE match_id = $1 AND round_number = $2`,
+        [match.id, context.roundNumber],
+      );
+    }
   }
 
   public async reportResourceFailure(
@@ -789,7 +869,10 @@ export class MatchService {
     const now = this.clock.now();
     return this.database.transaction(async transaction => {
       const authorization = await this.access.authorize(transaction, matchId, session, matchToken);
-      const match = await this.lockMatch(transaction, matchId);
+      let match = await this.lockMatch(transaction, matchId);
+      if (match.state === "ROUND_ENTERING" || match.state === "DEATHMATCH_ENTERING") {
+        match = await this.advanceLockedMatch(transaction, match, now);
+      }
       const pauses = match.pause_state ? parseJson<Partial<Record<PlayerSide, MatchPauseState>>>(match.pause_state) : {};
       const current = pauses[authorization.side] ?? emptyMatchPause();
       if (body.paused && !this.isRoundPlaying(match.state) && match.state !== "DEATHMATCH_PLAYING") {
@@ -858,7 +941,10 @@ export class MatchService {
     const now = this.clock.now();
     return this.database.transaction(async (transaction) => {
       const authorization = await this.access.authorize(transaction, matchId, session, matchToken);
-      const match = await this.lockMatch(transaction, matchId);
+      let match = await this.lockMatch(transaction, matchId);
+      if (match.state === "ROUND_ENTERING" || match.state === "DEATHMATCH_ENTERING") {
+        match = await this.advanceLockedMatch(transaction, match, now);
+      }
 
       // Intent delivery is independently retried by the client. If the ordinary
       // authoritative Start beat this packet, acknowledge the lease as a duplicate
@@ -891,6 +977,10 @@ export class MatchService {
         return { accepted: false, reason: "INVALID_CLIENT_STARTED_AT", serverNow: now.toISOString() };
       }
       const startedAtMs = parsed.getTime();
+      const entry = match.entry_state ? parseJson<NativeEntryState>(match.entry_state) : null;
+      if (entry?.startsAt && startedAtMs < Date.parse(entry.startsAt)) {
+        return { accepted: false, reason: "ATTEMPT_INTENT_TIMESTAMP_BEFORE_COUNTDOWN", serverNow: now.toISOString() };
+      }
       const deadline = state.lastAttemptWindow?.endsAtMs ?? state.finalWindowEndAtMs;
       if (startedAtMs > now.getTime() + ATTEMPT_START_INTENT_FUTURE_SKEW_MS) {
         return { accepted: false, reason: "ATTEMPT_INTENT_TIMESTAMP_IN_FUTURE", serverNow: now.toISOString() };
@@ -1724,6 +1814,45 @@ export class MatchService {
       await this.resolveDeathmatchReadyTimeout(transaction, match, now);
       return this.lockMatch(transaction, match.id);
     }
+    if (match.state === "ROUND_ENTERING" || match.state === "DEATHMATCH_ENTERING") {
+      const entry = match.entry_state ? parseJson<NativeEntryState>(match.entry_state) : null;
+      if (!entry) throw new Error("Native entry barrier is missing its persisted certificate");
+      if (entry.startsAt && now.getTime() >= Date.parse(entry.startsAt)) {
+        // Clock origin is the shared deadline, never the first polling client.
+        const startedAt = new Date(entry.startsAt);
+        if (match.state === "ROUND_ENTERING") {
+          await this.startPreparedRound(transaction, match, await this.lockCurrentRound(transaction, match), startedAt);
+        } else {
+          const deathmatch = await this.currentDeathmatch(transaction, match);
+          const map = parseJson<RankedMapSnapshot>(deathmatch.map_snapshot);
+          await transaction.query(
+            "UPDATE ranked_deathmatches SET started_at = $2 WHERE id = $1 AND started_at IS NULL",
+            [deathmatch.id, startedAt.toISOString()],
+          );
+          await transaction.query(
+            `UPDATE ranked_matches SET state = 'DEATHMATCH_PLAYING', deadline_at = NULL,
+              state_version = state_version + 1 WHERE id = $1`, [match.id],
+          );
+          await this.outbox.enqueueMatchEvent(transaction, match, "DEATHMATCH_START",
+            `match:${match.id}:deathmatch:${deathmatch.id}:start`, {
+              sequence: Number(deathmatch.sequence), mapTitle: map.title,
+              qualifyingPercent: map.qualifyingPercent,
+            }, startedAt);
+        }
+        return this.lockMatch(transaction, match.id);
+      }
+      if (!entry.startsAt && now.getTime() >= Date.parse(entry.deadlineAt)) {
+        // Match resource policy remains unchanged: Round 1 cannot award a
+        // result before either side has played. Later contexts may forfeit.
+        if (entry.roundNumber === 1 || entry.entered.A === entry.entered.B) {
+          await this.cancelMatch(transaction, match.id, "NATIVE_ENTRY_TIMEOUT", now);
+        } else {
+          await this.finalizeMatch(transaction, match, entry.entered.A ? "A" : "B", now);
+        }
+        return this.lockMatch(transaction, match.id);
+      }
+      return match;
+    }
     if (this.isRoundPlaying(match.state)) {
       const round = await this.lockCurrentRound(transaction, match);
       const initial = this.roundState(round);
@@ -1910,7 +2039,7 @@ export class MatchService {
        SET ban_a_confirmed_at = COALESCE(ban_a_confirmed_at, $2),
            ban_b_confirmed_at = COALESCE(ban_b_confirmed_at, $2),
            selected_round_maps_snapshot = $3::jsonb,
-           state = 'ROUND_PREPARE', current_round_number = 1,
+           state = 'ROUND_PREPARE', current_round_number = 1, entry_state = NULL,
            deadline_at = $4, ban_deadline_at = NULL,
            state_version = state_version + 1
        WHERE id = $1 AND state = 'BAN_PHASE'`,
@@ -2172,7 +2301,7 @@ export class MatchService {
     await this.insertPreparedRound(transaction, match.id, roundNumber, map, readyDeadline);
     await transaction.query(
       `UPDATE ranked_matches
-       SET state = 'ROUND_PREPARE', current_round_number = $2,
+       SET state = 'ROUND_PREPARE', current_round_number = $2, entry_state = NULL,
            deadline_at = $3, state_version = state_version + 1
        WHERE id = $1`,
       [match.id, roundNumber, readyDeadline.toISOString()],
@@ -2955,7 +3084,7 @@ export class MatchService {
     );
     await transaction.query(
       `UPDATE ranked_matches
-       SET state = 'DEATHMATCH_PREPARE', current_deathmatch_id = $2,
+       SET state = 'DEATHMATCH_PREPARE', current_deathmatch_id = $2, entry_state = NULL,
            ready_a_at = NULL, ready_b_at = NULL, ready_deadline_at = $3,
            deadline_at = $3, state_version = state_version + 1
        WHERE id = $1`,
@@ -3246,6 +3375,7 @@ export class MatchService {
       pause: matchPauseView((match.pause_state
         ? parseJson<Partial<Record<PlayerSide, MatchPauseState>>>(match.pause_state)[viewerSide] : null) ?? emptyMatchPause(), now.getTime()),
       ready,
+      entry: match.entry_state ? parseJson<NativeEntryState>(match.entry_state) : null,
       players: {
         A: playerA
           ? {

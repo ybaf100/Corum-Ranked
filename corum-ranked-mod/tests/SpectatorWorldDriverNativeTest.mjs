@@ -68,6 +68,7 @@ struct ScopedPersistenceOwner{explicit ScopedPersistenceOwner(PlayLayer*){}};
 struct ScopedRealGameplayEnd{bool& flag;bool previous;ScopedRealGameplayEnd(bool& f,bool b):flag(f),previous(f){flag=b;}~ScopedRealGameplayEnd(){flag=previous;}};
 template<class T>struct FieldsAccess { std::unique_ptr<T> value=std::make_unique<T>();T* operator->(){return value.get();} };
 struct CorumRankedPlayLayer: PlayLayer {
+ bool blockEntryGameplayUpdate(){return false;}
     struct Fields {
         bool spectatorScenePrepared=true,spectatorPresentationRetired=false,autoExitRequested=false;
         struct Safety{bool enabled=true;bool active()const{return enabled;}void resetDummy(){}}localSafety;

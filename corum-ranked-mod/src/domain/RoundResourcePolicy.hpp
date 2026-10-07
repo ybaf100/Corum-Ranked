@@ -44,8 +44,11 @@ struct RoundResourceRetry {
 inline bool roundPrepareState(std::string_view state) {
     return state == "ROUND_PREPARE" || state == "DEATHMATCH_PREPARE" || state == "MAP_PREPARE";
 }
+inline bool roundEnteringState(std::string_view state) {
+    return state == "ROUND_ENTERING" || state == "DEATHMATCH_ENTERING";
+}
 inline bool roundAcquireState(std::string_view state) {
-    return roundPrepareState(state) || state == "ROUND_PLAYING" || state == "FINAL_ATTEMPT_WINDOW" ||
+    return roundPrepareState(state) || roundEnteringState(state) || state == "ROUND_PLAYING" || state == "FINAL_ATTEMPT_WINDOW" ||
         state == "LAST_ATTEMPT_WINDOW" || state == "ROUND_SETTLING" ||
         state == "DEATHMATCH_PLAYING" || state == "MAP_PLAYING";
 }

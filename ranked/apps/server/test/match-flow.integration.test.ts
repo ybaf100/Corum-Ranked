@@ -1,3 +1,4 @@
+import { enterPreparedMatch } from "./native-entry-helper.js";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { PGlite } from "@electric-sql/pglite";
@@ -38,6 +39,7 @@ beforeAll(async () => {
     "0008_placement_beta9.sql",
     "0009_placement_stage_count.sql",
     "0010_achievements_v1.sql",
+    "0013_native_scene_entry.sql",
   ]) {
     const migrationPath = fileURLToPath(
       new URL(`../../../migrations/${migrationName}`, import.meta.url),
@@ -287,9 +289,11 @@ describe("two-client authoritative match flow", () => {
       await matches.ready(matchId, statusA.matchToken, playerA, {
         installedMods: structuredClone(cleanMods),
       });
-      const playing = (await matches.ready(matchId, statusB.matchToken, playerB, {
+      await matches.ready(matchId, statusB.matchToken, playerB, {
         installedMods: structuredClone(cleanMods),
-      })) as Record<string, any>;
+      });
+      const playing = await enterPreparedMatch(matches, matchId, statusA.matchToken, playerA,
+        statusB.matchToken, playerB, (seconds) => clock.advanceSeconds(seconds));
       expect(playing.state).toBe("ROUND_PLAYING");
       expect(playing.currentRound.roundNumber).toBe(roundNumber);
       const roundStartedAtMs = clock.now().getTime();
@@ -455,9 +459,11 @@ describe("two-client authoritative match flow", () => {
     await matches.ready(matchId, statusA.matchToken, playerA, {
       installedMods: structuredClone(cleanMods),
     });
-    const roundTwoPlaying = (await matches.ready(matchId, statusB.matchToken, playerB, {
+    await matches.ready(matchId, statusB.matchToken, playerB, {
       installedMods: structuredClone(cleanMods),
-    })) as Record<string, any>;
+    });
+    const roundTwoPlaying = await enterPreparedMatch(matches, matchId, statusA.matchToken, playerA,
+      statusB.matchToken, playerB, (seconds) => clock.advanceSeconds(seconds));
     expect(roundTwoPlaying.state).toBe("ROUND_PLAYING");
     expect(roundTwoPlaying.currentRound.clears).toEqual({ A: 0, B: 0 });
     const snapshottedQualifying = roundTwoPlaying.currentRound.map.qualifyingPercent as number;

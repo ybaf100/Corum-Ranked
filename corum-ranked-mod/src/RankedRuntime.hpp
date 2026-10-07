@@ -242,6 +242,12 @@ struct MatchView {
     std::string effectiveTier;
     std::string banner;
     std::string deadlineAt;
+    // Server-persisted native-scene barrier, independent of resource READY.
+    struct Entry {
+        int roundNumber = 0, deathmatchSequence = 0, levelId = 0;
+        bool enteredA = false, enteredB = false;
+        std::string startsAt;
+    } entry;
     std::string playerAName;
     std::string playerBName;
     int playerAAccountId = 0;
@@ -406,8 +412,10 @@ public:
     void submitReady();
     void submitBan(std::optional<std::string> canonicalLevelId);
     void reportMapDownloadFailure();
+    enum class SurrenderStatus { Idle, WaitingAttempt, Sending, Retrying, Accepted, Rejected };
     void surrenderCurrentMatch(bool wholeMatch);
-    [[nodiscard]] bool surrenderPending() const { return m_pendingSurrender.isObject(); }
+    [[nodiscard]] bool surrenderPending() const { return m_pendingSurrender.has_value(); }
+    [[nodiscard]] SurrenderStatus surrenderStatus() const { return m_surrenderStatus; }
     [[nodiscard]] bool gameplayConceded(int round, int deathmatch) const;
     std::string beginMatchGameplayPause(int levelId);
     void endMatchGameplayPause(std::string const& leaseId);
@@ -446,6 +454,10 @@ public:
     // Separate read-only entry authority for reconnect/re-entry. This preserves
     // the canonical LevelInfo preparation path without arming a new Attempt.
     [[nodiscard]] bool canEnterCurrentLevelAsSpectator() const;
+    [[nodiscard]] bool canEnterNativeRoundScene() const;
+    [[nodiscard]] bool nativeEntryStartGranted() const;
+    void noteNativeRoundSceneEntered(int levelId);
+    [[nodiscard]] std::optional<std::int64_t> nativeEntryCountdownMillis() const;
     [[nodiscard]] bool hasLocalAttemptInFlight() const;
     [[nodiscard]] bool hasLocalGameplayAuthority() const;
     void setSpectatorLocalTransportBlocked(void const* owner, bool blocked);
@@ -541,6 +553,11 @@ private:
     EnvironmentPolicy m_environmentPolicy;
     std::vector<InstalledModSnapshot> m_installedMods;
     ServerClock m_serverClock;
+    std::string m_nativeEntryKey;
+    std::uint64_t m_nativeEntryGeneration = 0;
+    bool m_nativeEntryBusy = false;
+    std::chrono::steady_clock::time_point m_nextNativeEntryAt {};
+    geode::async::TaskHolder<geode::utils::web::WebResponse> m_nativeEntryRequest;
     std::string m_sessionToken;
     std::string m_matchToken;
     std::string m_attemptId;
@@ -578,7 +595,12 @@ private:
     std::string m_pauseMatchId, m_pauseLeaseId;
     bool m_pauseDesired = false, m_pauseNeedsSync = false, m_pauseBusy = false;
     std::chrono::steady_clock::time_point m_nextPauseAt {}, m_nextSurrenderAt {};
-    matjson::Value m_pendingSurrender;
+    // matjson::Value() is an object, NOT an empty/absent request. Presence must
+    // be explicit, otherwise a fresh runtime silently rejects every surrender.
+    std::optional<matjson::Value> m_pendingSurrender;
+    std::string m_surrenderMatchId;
+    std::uint64_t m_surrenderRequestGeneration = 0;
+    SurrenderStatus m_surrenderStatus = SurrenderStatus::Idle;
     bool m_surrenderBusy = false;
     void flushGameplayControls();
     void resetGameplayControls();

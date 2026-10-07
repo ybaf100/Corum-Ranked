@@ -62,6 +62,10 @@ class $modify(CorumRankedEndLevelLayer, EndLevelLayer) {
 
         auto& runtime = corum::ranked::RankedRuntime::get();
         runtime.tick();
+        // The PlayLayer heartbeat and this native completion overlay share the
+        // same terminal journal. Never pop/convert before its Start/End FIFO has
+        // drained; spectator permission alone does not prove local End ACK.
+        if (runtime.hasLocalAttemptInFlight()) return;
         auto const& state = runtime.view().match.state;
         if (runtime.isSpectating() && !runtime.view().match.spectatorLiveEnabled) {
             m_fields->rankedExitRequested = true;

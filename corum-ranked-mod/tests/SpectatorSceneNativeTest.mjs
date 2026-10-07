@@ -8,6 +8,7 @@ import { execFileSync } from 'node:child_process';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const source = readFileSync(join(root, 'src/PlayLayer.cpp'), 'utf8');
+const completion = readFileSync(join(root, 'src/EndLevelLayer.cpp'), 'utf8');
 const method = signature => {
     const start = source.indexOf(signature);
     assert(start >= 0, signature);
@@ -26,7 +27,8 @@ test('actual scene callbacks hand off only after End/authority, even with vanill
     const callbacks = [
         'void syncSpectatorLocalSafety()', 'corum::ranked::SpectatorSceneContext currentSpectatorSceneContext()',
         'bool watchableSpectatorScene()', 'bool prepareSpectatorScene()',
-        'void cleanupSpectatorPresentation()', 'void updateSpectatorView(float dt)', 'void spectatorFrame(float dt)',
+        'void cleanupSpectatorPresentation()', 'void updateSpectatorView(float dt)',
+        'bool finishTerminalGameplayHandoff()', 'void spectatorFrame(float dt)',
     ].map(method).join('\n');
     const cpp = `
 #include "${join(root, 'src/domain/SpectatorCameraPolicy.hpp')}"
@@ -68,7 +70,7 @@ enum class RuntimeStage { Matched, Idle };
 struct RankedRuntime {
     struct Match {std::string matchId="match",state="ROUND_PLAYING"; int roundNumber=1,deathmatchSequence=0;bool spectatorLiveEnabled=true;};
     struct View {RuntimeStage stage=RuntimeStage::Matched; Match match; int revision=1;} data;
-    bool serverSpectator=false,ownAlive=true,placement=false,canEnter=false;
+    bool serverSpectator=false,ownAlive=true,placement=false,canEnter=false,attemptInFlight=false;
     bool blocked=false; int ticks=0,levelId=123;
     static RankedRuntime& get(){static RankedRuntime r;return r;}
     View const& view()const{return data;}
@@ -76,6 +78,7 @@ struct RankedRuntime {
     bool isSpectating()const{return serverSpectator&&!ownAlive&&!placement;}
     bool isPlacement()const{return placement;}
     bool hasLocalGameplayAuthority()const{return ownAlive;}
+    bool hasLocalAttemptInFlight()const{return attemptInFlight;}
     bool canEnterCurrentLevel()const{return canEnter;}
     int currentLevelId()const{return levelId;}
     void tick(){++ticks;}
@@ -111,6 +114,7 @@ struct FakeCamera {
 };
 }
 struct CorumRankedPlayLayer: PlayLayer {
+ bool blockEntryGameplayUpdate(){return false;}
     struct Fields {
         bool safetyRetired=false,vanillaGameplayEndInProgress=false,rankedInitialized=true,rankedLevel=true;
         bool rankedPractice=false,spectatorMode=false,spectatorPending=false,spectatorScenePrepared=false;
@@ -121,7 +125,7 @@ struct CorumRankedPlayLayer: PlayLayer {
 #endif
         bool attemptStartReported=true,attemptEndReported=false,autoExitRequested=false;
         int levelId=123,renderedRevision=0;
-        std::chrono::steady_clock::time_point nextHudRefreshAt{};
+        std::chrono::steady_clock::time_point nextHudRefreshAt{},spectatorHandoffReadyAt{};
         corum::ranked::SpectatorLocalSafety localSafety;
         corum::ranked::SpectatorSceneContext sceneContext{"match",1,0,123};
         corum::ranked::FakeRemote remotePlayer;
@@ -191,6 +195,44 @@ int main(){
     disabled.spectatorFrame(0.01f);
     assert(disabled.quits==1 && disabled.m_fields->localSafety.active() && runtime.blocked);
     assert(!disabled.m_fields->spectatorCamera.policy.ownsCamera() && !disabled.m_fields->remotePlayer.frame);
+    // OFF must also exit when spectator permission has not arrived. A terminal
+    // death/clear must stay alive until its End ACK, never until ROUND_RESULT.
+    for(bool clear: {false,true}){
+        runtime={};runtime.data.match.state="ROUND_SETTLING";
+        runtime.data.match.spectatorLiveEnabled=false;
+        CorumRankedPlayLayer finalAttempt;finalAttempt.m_player1=&local;
+        finalAttempt.spectatorFrame(0.01f);
+        assert(finalAttempt.quits==0&&!finalAttempt.m_fields->spectatorPending);
+        runtime.ownAlive=false;runtime.attemptInFlight=true;
+        finalAttempt.m_fields->attemptEndReported=true;finalAttempt.m_hasCompletedLevel=clear;
+        finalAttempt.spectatorFrame(0.01f);finalAttempt.spectatorFrame(0.01f);
+        assert(finalAttempt.quits==0&&finalAttempt.m_fields->spectatorPending&&runtime.blocked);
+        assert(finalAttempt.resets==0&&finalAttempt.cameras==0);
+        runtime.attemptInFlight=false;finalAttempt.spectatorFrame(0.01f);
+        assert(finalAttempt.quits==1&&finalAttempt.m_fields->autoExitRequested);
+        finalAttempt.spectatorFrame(0.01f);assert(finalAttempt.quits==1);
+    }
+    // ON may attach to the same native scene after delayed ACK + eligibility,
+    // but failed eligibility after ACK has bounded percentage-view fallback.
+    runtime={};runtime.ownAlive=false;runtime.attemptInFlight=true;
+    CorumRankedPlayLayer delayed;delayed.m_player1=&local;delayed.m_fields->attemptEndReported=true;
+    delayed.spectatorFrame(0.01f);assert(delayed.quits==0&&!delayed.m_fields->spectatorScenePrepared);
+    runtime.serverSpectator=true;delayed.spectatorFrame(0.01f);
+    assert(delayed.quits==0&&!delayed.m_fields->spectatorScenePrepared);
+    runtime.attemptInFlight=false;delayed.spectatorFrame(0.01f);
+    assert(delayed.quits==0&&delayed.m_fields->spectatorScenePrepared&&delayed.cameras==1);
+    runtime={};runtime.ownAlive=false;
+    CorumRankedPlayLayer unavailable;unavailable.m_player1=&local;unavailable.m_fields->attemptEndReported=true;
+    unavailable.spectatorFrame(0.01f);assert(unavailable.quits==0&&unavailable.m_fields->spectatorPending);
+    unavailable.m_fields->spectatorHandoffReadyAt=std::chrono::steady_clock::now()-std::chrono::seconds(6);
+    unavailable.spectatorFrame(0.01f);assert(unavailable.quits==1);
+    // Legal next Attempts and an actually alive final Attempt do not wait/quit.
+    runtime={};runtime.ownAlive=false;runtime.canEnter=true;
+    CorumRankedPlayLayer nextAttempt;nextAttempt.m_player1=&local;nextAttempt.m_fields->attemptEndReported=true;
+    nextAttempt.spectatorFrame(0.01f);assert(nextAttempt.quits==0&&!nextAttempt.m_fields->spectatorPending);
+    runtime={};runtime.data.match.state="ROUND_SETTLING";runtime.data.match.spectatorLiveEnabled=false;
+    CorumRankedPlayLayer alive;alive.m_player1=&local;alive.m_fields->attemptEndReported=true;
+    alive.spectatorFrame(0.01f);assert(alive.quits==0&&!alive.m_fields->spectatorPending);
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
     runtime={}; runtime.data.stage=RuntimeStage::Idle;runtime.ownAlive=false;
     CorumRankedPlayLayer recorder;recorder.m_player1=&local;recorder.m_fields->rankedLevel=false;
@@ -235,5 +277,87 @@ int main(){
         execFileSync('g++', ['-std=c++23', '-Wall', '-Wextra', '-Wpedantic', '-Werror',
             '-DCORUM_RANKED_DEBUG_SPECTATE=1', join(dir, 'scene.cpp'), '-o', binary], { stdio: 'pipe' });
         execFileSync(binary, [], { stdio: 'pipe' });
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('programmatic scene exits preserve scoped round return and completion overlay ACK gate', () => {
+    assert.equal((source.match(/PlayLayer::onQuit\(\);/g) ?? []).length, 1,
+        'Only the canonical original call in the cleanup-owning onQuit hook is permitted');
+    const canonicalQuit = method('void onQuit()');
+    assert(canonicalQuit.indexOf('cleanupSpectatorPresentation()') < canonicalQuit.indexOf('ScopedRankedRoundQuit'));
+    assert(canonicalQuit.indexOf('ScopedRankedRoundQuit') < canonicalQuit.indexOf('PlayLayer::onQuit()'));
+    const handoff = method('bool finishTerminalGameplayHandoff()');
+    assert(handoff.indexOf('hasLocalGameplayAuthority()') < handoff.indexOf('hasLocalAttemptInFlight()'));
+    assert(handoff.indexOf('hasLocalAttemptInFlight()') < handoff.indexOf('quitThroughRankedCompletionOverlay'));
+    const watch = completion.slice(completion.indexOf('void watchRankedExit(float)'), completion.indexOf('void onReplay('));
+    assert(watch.indexOf('hasLocalAttemptInFlight()') < watch.indexOf('runtime.isSpectating()'));
+    assert(watch.indexOf('hasLocalAttemptInFlight()') < watch.indexOf('EndLevelLayer::onMenu'));
+    assert.match(method('bool prepareSpectatorScene()'), /rankedLevel && runtime\.hasLocalAttemptInFlight\(\)\) return false/);
+});
+
+test('actual completion heartbeat drains End ACK before OFF exit or ON native handoff', () => {
+    const start = completion.indexOf('void watchRankedExit(float)');
+    const open = completion.indexOf('{', start);
+    let depth = 1, end = open + 1;
+    while (depth && end < completion.length) {
+        if (completion[end] === '{') ++depth;
+        else if (completion[end] === '}') --depth;
+        ++end;
+    }
+    assert.equal(depth, 0);
+    const callback = completion.slice(start, end);
+    const cpp = `
+#include <cassert>
+#include <string>
+#define schedule_selector(...) 0
+namespace geode::log {template<class... T>void info(T...) {}}
+using namespace geode;
+template<class T>struct Ref {explicit Ref(T*){}};
+struct PlayLayer {};
+struct EndLevelLayer {PlayLayer* m_playLayer=nullptr;int exits=0,removed=0;
+void onMenu(void*){++exits;}void removeFromParentAndCleanup(bool){++removed;}void unschedule(int){}
+};
+namespace corum::ranked {
+struct RankedRuntime {
+    struct Match {std::string state="ROUND_SETTLING";bool spectatorLiveEnabled=false;};
+    struct View {Match match;} data;
+    bool inFlight=true,spectating=false;int ticks=0;
+    static RankedRuntime& get(){static RankedRuntime runtime;return runtime;}
+    void tick(){++ticks;}bool hasLocalAttemptInFlight()const{return inFlight;}
+    bool isSpectating()const{return spectating;}View const& view()const{return data;}
+};
+bool prepared=false;int prepareCalls=0;
+bool prepareSpectatorScene(PlayLayer*){++prepareCalls;return prepared;}
+}
+bool authoritativeExitState(std::string const& state){return state=="ROUND_RESULT";}
+struct CorumRankedEndLevelLayer:EndLevelLayer {
+    struct Fields {bool rankedLevel=true,rankedExitRequested=false;} fields;
+    Fields* m_fields=&fields;
+    ${callback}
+};
+int main(){
+    using namespace corum::ranked;
+    auto& runtime=RankedRuntime::get();
+    CorumRankedEndLevelLayer off;
+    runtime.spectating=true;off.watchRankedExit(0);
+    assert(off.exits==0&&off.removed==0&&prepareCalls==0);
+    runtime.inFlight=false;off.watchRankedExit(0);off.watchRankedExit(0);
+    assert(off.exits==1&&off.removed==0&&prepareCalls==0);
+    runtime={};runtime.spectating=true;runtime.data.match.spectatorLiveEnabled=true;
+    CorumRankedEndLevelLayer on;prepared=true;on.watchRankedExit(0);
+    assert(on.exits==0&&on.removed==0&&prepareCalls==0);
+    runtime.inFlight=false;on.watchRankedExit(0);on.watchRankedExit(0);
+    assert(on.exits==0&&on.removed==1&&prepareCalls==1);
+    runtime={};runtime.data.match.state="ROUND_RESULT";
+    CorumRankedEndLevelLayer result;result.watchRankedExit(0);assert(result.exits==0);
+    runtime.inFlight=false;result.watchRankedExit(0);assert(result.exits==1);
+}
+`;
+    const dir = mkdtempSync(join(tmpdir(), 'corum-completion-native-'));
+    try {
+        writeFileSync(join(dir, 'completion.cpp'), cpp);
+        execFileSync('g++', ['-std=c++23', '-Wall', '-Wextra', '-Wpedantic', '-Werror',
+            join(dir, 'completion.cpp'), '-o', join(dir, 'completion')], { stdio: 'pipe' });
+        execFileSync(join(dir, 'completion'), [], { stdio: 'pipe' });
     } finally { rmSync(dir, { recursive: true, force: true }); }
 });

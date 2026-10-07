@@ -114,7 +114,11 @@ jobs:
             -o /tmp/corum-ranked-level-prepare-test
           /tmp/corum-ranked-level-prepare-test
           node --test corum-ranked-mod/tests/GameplayControlsNativeTest.mjs
+          node --test corum-ranked-mod/tests/RankedPauseNativeTest.mjs
           node --test corum-ranked-mod/tests/RoundPreparationNativeTest.mjs
+          node --test corum-ranked-mod/tests/NativeEntryTransportTest.mjs
+          node --test corum-ranked-mod/tests/EntryGameplayNativeTest.mjs
+          node --test corum-ranked-mod/tests/EntryDeathmatchRuntimeNativeTest.mjs
           node --test corum-ranked-mod/tests/LevelPreparationSourceTest.mjs
           node --test corum-ranked-mod/tests/SpectatorCameraOwnerNativeTest.mjs
           node --test corum-ranked-mod/tests/SpectatorWorldDriverNativeTest.mjs

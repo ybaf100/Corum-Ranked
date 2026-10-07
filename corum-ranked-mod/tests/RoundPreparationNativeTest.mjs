@@ -153,10 +153,12 @@ namespace corum::ranked {
 enum class RuntimeStage {Ready,Matched};
 struct RuntimeView {RuntimeStage stage=RuntimeStage::Ready;struct Match {std::string matchId,state,side="A";bool readyA=false,readyB=false,placement=false;}match;};
 struct RankedRuntime {
-    RuntimeView state;LevelPreparationContext context;bool viewer=false,canPlay=true;int arms=0,mapFailures=0,readyRequests=0,deadlineQueries=0;
+    RuntimeView state;LevelPreparationContext context;bool viewer=false,canPlay=true,entryAllowed=false;int arms=0,mapFailures=0,readyRequests=0,deadlineQueries=0,sceneEntries=0;
     static RankedRuntime& get(){static RankedRuntime r;return r;}
     RuntimeView const& view()const{return state;}
     bool canEnterCurrentLevelAsSpectator()const{return viewer;}
+    bool canEnterNativeRoundScene()const{return entryAllowed;}
+    void noteNativeRoundSceneEntered(int id){assert(id==context.levelId);++sceneEntries;}
     bool canEnterCurrentLevel()const{return !viewer&&canPlay&&state.match.state=="ROUND_PLAYING";}
     bool armCurrentLevelForGameplay(){++arms;return canEnterCurrentLevel();}
     void reportMapDownloadFailure(){++mapFailures;}
@@ -288,6 +290,12 @@ int main(){
     // Completed assets via GD's effective NONG paths, including a built-in track 0.
     context(2);GJGameLevel track;track.m_levelID=2;track.m_songID=0;track.m_levelType=GJLevelType::Saved;track.m_levelNotDownloaded=false;track.m_levelString="geometry";
     maps->saved[2]=&track;meta.attest(&track);ticks(p);assert(p.ready()&&p.view().songsTotal==0);
+    context(2);runtime.state.match.state="ROUND_ENTERING";runtime.entryAllowed=true;
+    int const previousArms=runtime.arms;assert(p.launch(&origin));
+    assert(runtime.arms==previousArms&&runtime.sceneEntries==0&&PlayLayer::active->m_level==&track);
+    {ScopedRankedRoundQuit quit(PlayLayer::get());navigation.returnToLastScene(&track);}
+    PlayLayer::active->running=false;PlayLayer::active->live=false;PlayLayer::active=nullptr;
+    tasks=std::exchange(queued,{});for(auto& t:tasks)t();runtime.entryAllowed=false;
     // Cancel A -> B -> A: preserve the untagged native ticket until drained.
     context(3);GJGameLevel old;old.m_levelID=3;old.m_songID=0;meta.attest(&old);ticks(p,1);int const before=maps->requests;
     context(4);ticks(p,1);context(3);ticks(p,1);assert(maps->requests==before&&maps->m_levelDownloadDelegate==&p);
@@ -324,12 +332,21 @@ int main(){
     } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('round screen uses existing download UI, native user options, server gate and preserved hook inventory', () => {
+test('round preparation is passive and automatic with native user options, server gate and preserved hook inventory', () => {
     const popup = read('src/RankedPopup.cpp');
     const preparation = read('src/RankedRoundPreparation.cpp');
     const play = read('src/PlayLayer.cpp');
     assert.doesNotMatch(popup, /LevelInfoLayer::scene|showRankedSongDownloadGate/);
-    for (const label of ['MAP DOWNLOAD', 'MUSIC DOWNLOAD', 'LDM: {}', 'DISABLE SHAKE: {}']) assert(popup.includes(label));
+    assert.doesNotMatch(popup, /MAP DOWNLOAD|MUSIC DOWNLOAD|onDownloadMap|onDownloadSong|openSongDownloadGate/);
+    for (const token of ['tr("low-detail", "LDM")', 'tr("disable-shake", "DISABLE SHAKE")']) assert(popup.includes(token));
+    const status = popup.slice(popup.indexOf('    void addPreparationStatusRows('), popup.indexOf('    std::vector<int> collectSongIds('));
+    assert.match(status, /makeTextPlate\(/);
+    assert.doesNotMatch(status, /addButton\(|CCMenuItem(?:SpriteExtra)?::create|menu_selector\(/);
+    for (const token of ['"downloading"', '"map-ready"', '"audio-ready"', '"download-failed"', '"semibold"']) assert(status.includes(token));
+    const placement = popup.slice(popup.indexOf('    void renderPlacementMap('), popup.indexOf('    void renderPlacementMapResult('));
+    const round = popup.slice(popup.indexOf('    void renderPrepare('), popup.indexOf('    void renderSpectator('));
+    assert.match(placement, /addPreparationStatusRows\(/);
+    assert.match(round, /addPreparationStatusRows\(/);
     assert.match(popup, /level->m_lowDetailModeToggled = !level->m_lowDetailModeToggled/);
     assert.match(popup, /level->m_disableShakeToggled = !level->m_disableShakeToggled/);
     assert.doesNotMatch(popup, /level->m_lowDetailMode\s*=|level->m_disableShake\s*=/);
@@ -343,4 +360,20 @@ test('round screen uses existing download UI, native user options, server gate a
     assert.doesNotMatch(play, /void setVisible\(bool/);
     assert.doesNotMatch(play, /void saveNewScore\(/);
     assert.match(read('src/LevelInfoLayer.cpp'), /void prepareDebugSpectate\(float\)/);
+});
+
+test('equipped title cannot replace demotion, promotion or placement status in the lobby', () => {
+    const popup = read('src/RankedPopup.cpp');
+    const lobby = popup.slice(popup.indexOf('    void renderMain('), popup.indexOf('    void renderPlacementMap('));
+    assert.match(lobby, /profileHintText = tr\("demotion-warning"/);
+    assert.match(lobby, /profileHintText = corum::ranked::i18n::promotionMatch/);
+    assert.match(lobby, /profileHintText = tr\("placement-matches"/);
+    assert.doesNotMatch(lobby, /profileHintText = achievementTitleText|profileHintColor = achievementTitleColor/);
+    assert.match(lobby, /equippedTitle->setID\("ranked-profile-equipped-title"_spr\)/);
+    assert.match(lobby, /profileHint->setID\("ranked-profile-progress-status"_spr\)/);
+    assert.match(lobby, /leftCenter\.y - 68\.0f/);
+    assert.match(lobby, /leftCenter\.y - \(hasTitle \? 85\.0f : 79\.0f\)/);
+    const card = popup.slice(popup.indexOf('    void addPlayerCard('), popup.indexOf('    void renderResources('));
+    assert.match(card, /profile\.demotionWarning \? tr\("demotion-warning"/);
+    assert.doesNotMatch(card, /auto\* warning = makeLabel/);
 });

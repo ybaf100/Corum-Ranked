@@ -24,6 +24,7 @@
 #include "ui/PlayerIcon.hpp"
 #include "ui/RankedTranslations.hpp"
 #include "ui/RankedVisuals.hpp"
+#include "ui/RankedEntryOverlay.hpp"
 #include "ui/PlacementGradeBadge.hpp"
 
 #include <Geode/Geode.hpp>
@@ -31,6 +32,8 @@
 #include <Geode/modify/PlayerObject.hpp>
 #include <Geode/modify/GJGameLevel.hpp>
 #include <Geode/modify/GJBaseGameLayer.hpp>
+#include <Geode/binding/FMODAudioEngine.hpp>
+#include <Geode/binding/UILayer.hpp>
 
 #include <algorithm>
 #include <array>
@@ -186,6 +189,12 @@ public:
         double qualifyingPercent = -1.0;
         bool rankedLevel = false;
         bool rankedInitialized = false;
+        bool nativeEntryHeld = false;
+        bool entryAttemptCountDeferred = false;
+        bool entryWasPaused = false, entryTouchEnabled = false, entryKeyboardEnabled = false;
+        bool entryUITouchEnabled = false, entryUIKeyboardEnabled = false, entryUIKeypadEnabled = false;
+        bool entryUIPauseEnabled = false;
+        corum::ranked::ui::RankedEntryOverlay* entryOverlay = nullptr;
         bool autoExitRequested = false;
         bool gameplayFrameObserved = false;
         corum::ranked::SpectatorCapturePolicy spectatorCapture;
@@ -196,6 +205,7 @@ public:
         bool rankedPractice = false;
         bool spectatorMode = false;
         bool spectatorPending = false;
+        std::chrono::steady_clock::time_point spectatorHandoffReadyAt {};
         corum::ranked::SpectatorLocalSafety localSafety;
         bool suppressedDeathLogged = false;
         bool suppressedCompletionLogged = false;
@@ -338,7 +348,7 @@ public:
         if (m_fields->debugRecordScene || m_fields->debugPlaybackScene) return false;
 #endif
         return
-            m_fields->rankedInitialized &&
+            m_fields->rankedInitialized && !m_fields->nativeEntryHeld &&
             !m_fields->spectatorMode &&
             !m_fields->spectatorPending &&
             !corum::ranked::RankedRuntime::get().isSpectating() &&
@@ -365,6 +375,7 @@ public:
         m_fields->rankedLevel =
             runtime.view().stage == corum::ranked::RuntimeStage::Matched &&
             runtime.isGameplayLevel(m_fields->levelId);
+        m_fields->nativeEntryHeld = m_fields->rankedLevel && runtime.canEnterNativeRoundScene();
         m_fields->sceneContext = currentSpectatorSceneContext();
         // Establish authority BEFORE vanilla init's reset/attempt callbacks.
         syncSpectatorLocalSafety();
@@ -428,7 +439,96 @@ public:
         // Scene-owned presentation heartbeat also runs after vanilla completion
         // has stopped gameplay postUpdate. It cannot create gameplay evidence.
         schedule(schedule_selector(CorumRankedPlayLayer::spectatorFrame));
+        if (m_fields->nativeEntryHeld) {
+            m_fields->entryWasPaused = m_isPaused;
+            m_fields->entryTouchEnabled = isTouchEnabled();
+            m_fields->entryKeyboardEnabled = isKeyboardEnabled();
+            m_isPaused = true;
+            setTouchEnabled(false);
+            setKeyboardEnabled(false);
+            if (m_uiLayer) {
+                m_fields->entryUITouchEnabled = m_uiLayer->isTouchEnabled();
+                m_fields->entryUIKeyboardEnabled = m_uiLayer->isKeyboardEnabled();
+                m_fields->entryUIKeypadEnabled = m_uiLayer->isKeypadEnabled();
+                m_uiLayer->setTouchEnabled(false);
+                m_uiLayer->setKeyboardEnabled(false);
+                m_uiLayer->setKeypadEnabled(false);
+                m_uiLayer->resetAllButtons();
+                if (m_uiLayer->m_pauseBtn) {
+                    m_fields->entryUIPauseEnabled = m_uiLayer->m_pauseBtn->isEnabled();
+                    m_uiLayer->m_pauseBtn->setEnabled(false);
+                }
+            }
+            if (m_player1) m_player1->releaseAllButtons();
+            if (m_player2) m_player2->releaseAllButtons();
+            m_queuedButtons.clear();
+            m_fields->entryOverlay = corum::ranked::ui::RankedEntryOverlay::create();
+            if (m_fields->entryOverlay) addChild(m_fields->entryOverlay, 10000);
+            FMODAudioEngine::sharedEngine()->pauseAllMusic(true);
+        }
         return true;
+    }
+
+    // Uses the existing native world-frame owner: no additional PlayerObject
+    // detours or remote physics. Scene/UI heartbeat continues while GD gameplay,
+    // button commands, evidence and its audio clock are held at the initial pose.
+    bool blockEntryGameplayUpdate() {
+        if (!m_fields->nativeEntryHeld) return false;
+        auto& runtime = corum::ranked::RankedRuntime::get();
+        runtime.tick();
+        auto const& match = runtime.view().match;
+        if (match.matchId != m_fields->sceneContext.matchId ||
+            match.roundNumber != m_fields->sceneContext.roundNumber ||
+            match.deathmatchSequence != m_fields->sceneContext.deathmatchSequence ||
+            runtime.currentLevelId() != m_fields->levelId ||
+            (!corum::ranked::roundEnteringState(match.state) && !runtime.canEnterCurrentLevel())) {
+            if (!m_fields->autoExitRequested) {
+                m_fields->autoExitRequested = true;
+                // Defer teardown outside the running native update stack.
+                auto scene = geode::WeakRef<PlayLayer>(this);
+                queueInMainThread([scene] { if (auto layer = scene.lock(); layer && layer.data() == PlayLayer::get())
+                    static_cast<CorumRankedPlayLayer*>(layer.data())->onQuit(); });
+            }
+            return true;
+        }
+        if (isRunning()) runtime.noteNativeRoundSceneEntered(m_fields->levelId);
+        auto const remaining = runtime.nativeEntryCountdownMillis();
+        auto const bothEntered = match.entry.enteredA && match.entry.enteredB;
+        if (m_fields->entryOverlay) m_fields->entryOverlay->present(bothEntered, remaining);
+        m_queuedButtons.clear();
+        FMODAudioEngine::sharedEngine()->pauseAllMusic(true);
+        if (!bothEntered || !remaining || *remaining > 0 ||
+            (corum::ranked::roundEnteringState(match.state) && !runtime.nativeEntryStartGranted()) ||
+            !runtime.armCurrentLevelForGameplay()) return true;
+        m_fields->nativeEntryHeld = false;
+        m_isPaused = m_fields->entryWasPaused;
+        setTouchEnabled(m_fields->entryTouchEnabled);
+        setKeyboardEnabled(m_fields->entryKeyboardEnabled);
+        if (m_uiLayer) {
+            m_uiLayer->resetAllButtons();
+            m_uiLayer->setTouchEnabled(m_fields->entryUITouchEnabled);
+            m_uiLayer->setKeyboardEnabled(m_fields->entryUIKeyboardEnabled);
+            m_uiLayer->setKeypadEnabled(m_fields->entryUIKeypadEnabled);
+            if (m_uiLayer->m_pauseBtn) m_uiLayer->m_pauseBtn->setEnabled(m_fields->entryUIPauseEnabled);
+        }
+        if (m_player1) m_player1->releaseAllButtons();
+        if (m_player2) m_player2->releaseAllButtons();
+        m_queuedButtons.clear();
+        if (m_fields->entryOverlay) {
+            m_fields->entryOverlay->removeFromParentAndCleanup(true);
+            m_fields->entryOverlay = nullptr;
+        }
+        m_fields->attemptJournalReadyAt = std::chrono::steady_clock::now();
+        if (m_fields->entryAttemptCountDeferred) {
+            m_fields->entryAttemptCountDeferred = false;
+            PlayLayer::updateAttempts();
+        }
+        if (!m_isPaused) {
+            FMODAudioEngine::sharedEngine()->resumeAllMusic();
+            PlayLayer::startMusic();
+        }
+        log::info("[RankedEntry] shared countdown complete; gameplay released level={}", m_fields->levelId);
+        return false;
     }
 
     void acquireGameplayAudio() {
@@ -529,6 +629,7 @@ public:
     bool prepareSpectatorScene() {
         syncSpectatorLocalSafety();
         auto& runtime = corum::ranked::RankedRuntime::get();
+        if (m_fields->rankedLevel && runtime.hasLocalAttemptInFlight()) return false;
         auto spectatorAuthority = runtime.isSpectating() && runtime.view().match.spectatorLiveEnabled;
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         if (m_fields->debugPlaybackScene) spectatorAuthority = corum::ranked::debug::DebugSpectateRuntime::get().playbackLevel(m_fields->levelId);
@@ -768,7 +869,45 @@ public:
         }
     }
 
+    bool finishTerminalGameplayHandoff() {
+        auto& runtime = corum::ranked::RankedRuntime::get();
+        if (!m_fields->rankedLevel || !m_fields->attemptEndReported ||
+            m_fields->vanillaGameplayEndInProgress || m_isTestMode ||
+            runtime.isPlacement() || m_fields->rankedPractice || m_isPracticeMode) return false;
+        // The clock is a START deadline. Never retire a genuinely open final
+        // Attempt, and never leave before its already-journaled End is ACKed.
+        if (runtime.hasLocalGameplayAuthority()) return false;
+        if (!m_fields->spectatorMode && !m_fields->spectatorPending &&
+            runtime.canEnterCurrentLevel()) return false;
+        if (!m_fields->spectatorMode) m_fields->spectatorPending = true;
+        syncSpectatorLocalSafety();
+        if (runtime.hasLocalAttemptInFlight()) return true;
+
+        auto const now = std::chrono::steady_clock::now();
+        if (m_fields->spectatorHandoffReadyAt == std::chrono::steady_clock::time_point{})
+            m_fields->spectatorHandoffReadyAt = now;
+        bool const liveEnabled = runtime.view().match.spectatorLiveEnabled;
+        bool const sameScene = watchableSpectatorScene();
+        if (liveEnabled && sameScene && runtime.isSpectating()) return false;
+        // An already-attached native viewer follows the existing authority-loss
+        // cleanup path; the five-second allowance is only for initial handoff.
+        if (liveEnabled && m_fields->spectatorScenePrepared) return false;
+        // Permit a bounded authoritative eligibility refresh after End ACK.
+        // OFF has no native spectator work to await: return to the retained
+        // Ranked percent-only screen immediately, including genuine Clear UI.
+        if (liveEnabled && sameScene &&
+            now - m_fields->spectatorHandoffReadyAt < std::chrono::seconds(5)) return true;
+        if (!m_fields->autoExitRequested) {
+            m_fields->autoExitRequested = true;
+            log::info("Ranked terminal gameplay returned to percentage view: live={} watchable={}",
+                liveEnabled, sameScene);
+            if (!corum::ranked::quitThroughRankedCompletionOverlay(this)) onQuit();
+        }
+        return true;
+    }
+
     void spectatorFrame(float dt) {
+        if (blockEntryGameplayUpdate()) return;
         auto& controls = corum::ranked::RankedRuntime::get();
         if (m_fields->rankedLevel && m_fields->sceneContext.matchId == controls.view().match.matchId &&
             controls.gameplayConceded(m_fields->sceneContext.roundNumber, m_fields->sceneContext.deathmatchSequence) &&
@@ -785,28 +924,16 @@ public:
             !m_fields->attemptEndReported && !runtime.isSpectating()) return;
         runtime.tick();
         syncSpectatorLocalSafety();
+        if (finishTerminalGameplayHandoff()) return;
         if (m_fields->spectatorMode) {
             updateSpectatorView(dt);
             ensureSpectatorCameraFrame(dt);
             return;
         }
-        // An ended terminal Attempt waits for authority in THIS scene. Ordinary
-        // deaths with another legal Attempt, Placement and user Practice do not.
-        if (m_fields->attemptEndReported && !runtime.hasLocalGameplayAuthority() &&
-            !runtime.canEnterCurrentLevel() && !runtime.isPlacement() &&
-            !m_fields->rankedPractice && !m_isPracticeMode && watchableSpectatorScene()) {
-            m_fields->spectatorPending = true;
-            syncSpectatorLocalSafety();
-        }
-        // Completion overlays own their canonical result exit (onMenu); don't
-        // tear out the PlayLayer from underneath an interactive overlay.
-        if (m_fields->spectatorPending && !watchableSpectatorScene() && !m_hasCompletedLevel) {
-            m_fields->autoExitRequested = true;
-            onQuit();
-        }
     }
 
     void postUpdate(float dt) {
+        if (blockEntryGameplayUpdate()) return;
         if (m_fields->rankedLevel) corum::ranked::RankedRuntime::get().syncMatchGameplayPause(m_isPaused);
         syncSpectatorLocalSafety();
         ScopedPersistenceOwner persistence(this);
@@ -822,6 +949,7 @@ public:
         runtime.tick();
         syncSpectatorLocalSafety();
         if (!m_fields->rankedLevel || m_isTestMode) return;
+        if (finishTerminalGameplayHandoff()) return;
         if (!m_fields->gameplayFrameObserved) {
             corum::ranked::TransitionTrace::get().mark("first-gameplay-frame");
         }
@@ -841,7 +969,7 @@ public:
             if (!spectatorTransitionState(matchState) || runtime.currentLevelId() != m_fields->levelId) {
                 if (!m_fields->autoExitRequested) {
                     m_fields->autoExitRequested = true;
-                    PlayLayer::onQuit();
+                    if (!corum::ranked::quitThroughRankedCompletionOverlay(this)) onQuit();
                 }
                 return;
             }
@@ -862,7 +990,7 @@ public:
             // running so opponent progress and the authoritative clock continue.
             if (!runtime.canEnterCurrentLevel() && !m_fields->autoExitRequested) {
                 m_fields->autoExitRequested = true;
-                PlayLayer::onQuit();
+                if (!corum::ranked::quitThroughRankedCompletionOverlay(this)) onQuit();
                 return;
             }
             if (
@@ -889,13 +1017,14 @@ public:
         }
         if (m_fields->deniedDeathmatchVisualAttempt && !m_fields->autoExitRequested) {
             m_fields->autoExitRequested = true;
-            PlayLayer::onQuit();
+            if (!corum::ranked::quitThroughRankedCompletionOverlay(this)) onQuit();
             return;
         }
 
 
         auto const& matchState = runtime.view().match.state;
         auto const stillPlaying =
+            runtime.nativeEntryStartGranted() ||
             matchState == "ROUND_PLAYING" ||
             matchState == "FINAL_ATTEMPT_WINDOW" ||
             matchState == "LAST_ATTEMPT_WINDOW" ||
@@ -931,7 +1060,7 @@ public:
                     );
                 }
                 m_fields->autoExitRequested = true;
-                PlayLayer::onQuit();
+                if (!corum::ranked::quitThroughRankedCompletionOverlay(this)) onQuit();
                 return;
             }
         }
@@ -1017,13 +1146,17 @@ public:
             ) {
                 m_fields->spectatorPending = true;
                 syncSpectatorLocalSafety();
+                // End transmission may still be in flight. Do not create a
+                // fresh visual Attempt; the frame heartbeat owns ACK/eligibility
+                // and the OFF/timeout return through the scoped native quit.
+                if (finishTerminalGameplayHandoff()) return;
                 PlayLayer::resetLevel();
                 if (m_player1) m_player1->setVisible(false);
                 return;
             }
             if (!m_fields->autoExitRequested) {
                 m_fields->autoExitRequested = true;
-                PlayLayer::onQuit();
+                if (!corum::ranked::quitThroughRankedCompletionOverlay(this)) onQuit();
             }
             return;
         }
@@ -1031,6 +1164,7 @@ public:
         if (!resetActions.startFreshAttempt) return;
         corum::ranked::SpectatorLiveRuntime::get().localAttemptStarted();
         m_fields->spectatorPending = false;
+        m_fields->spectatorHandoffReadyAt = {};
         if (m_player1) m_player1->setVisible(true);
         m_fields->attemptStartReported = false;
         m_fields->attemptEndReported = false;
@@ -1229,6 +1363,10 @@ public:
     }
 
     void updateAttempts() {
+        if (m_fields->nativeEntryHeld) {
+            m_fields->entryAttemptCountDeferred = true;
+            return;
+        }
         if (blocksLocalEvidence()) return;
         PlayLayer::updateAttempts();
     }
@@ -1284,7 +1422,7 @@ public:
         runtime.reportPracticePresence(false);
         if (transition == corum::ranked::RankedPracticeTransition::LeaveAndExit) {
             m_fields->autoExitRequested = true;
-            PlayLayer::onQuit();
+            if (!corum::ranked::quitThroughRankedCompletionOverlay(this)) onQuit();
             return;
         }
         m_fields->rankedPractice = false;
@@ -1816,7 +1954,7 @@ public:
 
         auto attemptsUsedA = match.deathmatchAttemptsUsedA;
         auto attemptsUsedB = match.deathmatchAttemptsUsedB;
-        if (match.state == "DEATHMATCH_PLAYING") {
+        if (match.deathmatchSequence > 0) {
             auto const localVisualUsed = runtime.localDeathmatchVisualAttemptsUsed();
             if (match.side == "A") attemptsUsedA = std::max(attemptsUsedA, localVisualUsed);
             if (match.side == "B") attemptsUsedB = std::max(attemptsUsedB, localVisualUsed);
@@ -1827,22 +1965,28 @@ public:
                 ? (match.state == "MAP_PLAYING" ? "ROUND_PLAYING"
                     : match.state == "MAP_SETTLING" ? "ROUND_SETTLING"
                     : match.state)
-                : match.state,
+                : runtime.nativeEntryStartGranted()
+                    ? (match.deathmatchSequence > 0 ? "DEATHMATCH_PLAYING" : "ROUND_PLAYING")
+                    : match.state,
             .banner = match.banner,
             .roundNumber = match.roundNumber,
             .scoreA = match.scoreA,
             .scoreB = match.scoreB,
             .clearsA = match.clearsA,
             .clearsB = match.clearsB,
-            .deathmatch = match.state == "DEATHMATCH_PLAYING",
+            .deathmatch = match.deathmatchSequence > 0,
             .deathmatchSequence = match.deathmatchSequence,
             .deathmatchAttemptsUsedA = attemptsUsedA,
             .deathmatchAttemptsUsedB = attemptsUsedB,
             .deathmatchAttemptsCompletedA = match.deathmatchAttemptsCompletedA,
             .deathmatchAttemptsCompletedB = match.deathmatchAttemptsCompletedB,
             .qualifyingPercent = match.currentMap ? match.currentMap->qualifyingPercent : 100.0,
-            .remainingMillis = runtime.deadlineMillis(),
-            .signedRemainingMillis = runtime.signedDeadlineMillis(),
+            .remainingMillis = runtime.nativeEntryStartGranted() && match.deathmatchSequence == 0
+                ? std::optional<std::int64_t>(300'000 + runtime.signedDeadlineMillis().value_or(0))
+                : runtime.deadlineMillis(),
+            .signedRemainingMillis = runtime.nativeEntryStartGranted() && match.deathmatchSequence == 0
+                ? std::optional<std::int64_t>(300'000 + runtime.signedDeadlineMillis().value_or(0))
+                : runtime.signedDeadlineMillis(),
             .renderFps = m_fields->fpsMeter.fps(),
             .spectatorActive = match.spectatorActive,
             .spectatorOpponentName = match.spectatorOpponentName,
@@ -2033,6 +2177,7 @@ class $modify(CorumRankedSpectatorCameraHook, GJBaseGameLayer) {
         auto* layer = PlayLayer::get();
         auto* owner = layer && static_cast<GJBaseGameLayer*>(layer) == this
             ? static_cast<CorumRankedPlayLayer*>(layer) : nullptr;
+        if (owner && owner->blockEntryGameplayUpdate()) return;
         if (owner && owner->prepareSpectatorScene() && owner->spectatorCameraActive()) {
             if (!owner->beginSpectatorWorldFrame()) return;
             {

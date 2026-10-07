@@ -29,6 +29,7 @@ const REQUIRED_MIGRATIONS = [
   "0010_achievements_v1.sql",
   "0011_debug_spectate.sql",
   "0012_gameplay_controls.sql",
+  "0013_native_scene_entry.sql",
 ] as const;
 
 export interface RankedSchemaStatus {
@@ -52,6 +53,7 @@ type SchemaProbeRow = QueryResultRow & {
   ranked_ap_ledger: boolean;
   match_type: boolean;
   debug_config: boolean;
+  match_entry_state: boolean;
   round_alternate_level_id: boolean;
   round_playable_level_id: boolean;
   attempt_played_level_id: boolean;
@@ -196,7 +198,11 @@ export class DatabaseService implements DatabasePort, OnModuleInit, OnApplicatio
           EXISTS (
             SELECT 1 FROM information_schema.columns
             WHERE table_schema = 'public' AND table_name = 'ranked_profiles' AND column_name = 'equipped_achievement_level'
-          ) AS profile_equipped_achievement_level
+          ) AS profile_equipped_achievement_level,
+          EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = 'ranked_matches' AND column_name = 'entry_state'
+          ) AS match_entry_state
       `);
       const row = result.rows[0];
       if (!row) return { ready: false, missing: ["schema probe returned no row"] };
@@ -217,6 +223,7 @@ export class DatabaseService implements DatabasePort, OnModuleInit, OnApplicatio
         ["ranked_ap_ledger", "table ranked_ap_ledger"],
         ["match_type", "ranked_matches.match_type"],
         ["debug_config", "ranked_matches.debug_config"],
+        ["match_entry_state", "ranked_matches.entry_state"],
         ["round_alternate_level_id", "ranked_rounds.alternate_level_id"],
         ["round_playable_level_id", "ranked_rounds.playable_level_id"],
         ["attempt_played_level_id", "ranked_attempts.played_level_id"],

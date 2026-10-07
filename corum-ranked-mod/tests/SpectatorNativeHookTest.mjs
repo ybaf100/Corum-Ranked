@@ -123,6 +123,8 @@ struct CorumRankedPlayLayer : PlayLayer {
     bool observesSpectatorPlayer(PlayerObject*) {return false;}
     void observeSpectatorNativeSnap(PlayerObject*,corum::ranked::SpectatorDiscontinuity,corum::ranked::SpectatorGhostPose const&) {}
     struct Fields {
+        bool nativeEntryHeld = false;
+        bool entryAttemptCountDeferred = false;
         bool safetyRetired = false, vanillaGameplayEndInProgress = false;
         bool attemptStartReported = true, attemptEndReported = false;
         bool rankedLevel = true, rankedInitialized = true, rankedPractice = false;

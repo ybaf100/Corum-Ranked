@@ -129,6 +129,45 @@ int main(){
     ranked.m_attemptId="server-issued-early-attempt";early.tickTerminal();assert(web::pending.size()==5);
     assert(web::pending[4].request.body["sequence"].asInt().unwrapOr(-1)==0);
     web::pending[4].callback({200});
+    // startsAt is authoritative even when the next HTTP state projection is
+    // still DEATHMATCH_ENTERING. First poses and terminals carry the exact DM
+    // sequence; roundNumber retains the server's currentRound wire identity.
+    ranked={};web::pending.clear();SpectatorLiveRuntime entering;
+    ranked.state.match.state="DEATHMATCH_ENTERING";
+    ranked.state.match.roundNumber=3;ranked.state.match.deathmatchSequence=2;
+    pose={100,40,0,false,false};assert(entering.tickPublisher(pose,false));
+    auto dmPacket=web::pending.back().request.body["packets"].asArray().unwrap().front();
+    assert(dmPacket["roundNumber"].asInt().unwrapOr(-1)==3);
+    assert(dmPacket["deathmatchSequence"].asInt().unwrapOr(-1)==2);
+    auto dmGeneration=entering.m_publishGeneration;web::pending.back().callback({200});
+    pose.dead=true;entering.publishTerminal(pose,false);
+    assert(web::pending.size()==2);
+    assert(web::pending.back().request.body["deathmatchSequence"].asInt().unwrapOr(-1)==2);
+    assert(web::pending.back().request.body["roundNumber"].asInt().unwrapOr(-1)==3);
+    assert(web::pending.back().request.body["keyframe"]["dead"].asBool().unwrapOr(false));
+    ranked.state.match.state="DEATHMATCH_PLAYING";web::pending.back().callback({200});
+    assert(!entering.tickPublisher(pose,false)&&entering.m_publishGeneration==dmGeneration);
+    entering.publishTerminal(pose,false);assert(web::pending.size()==2);
+    // A new real Attempt uses the same context across ENTERING -> PLAYING and
+    // does not reset the publisher generation merely because state caught up.
+    ranked.m_attemptId="deathmatch-attempt-2";ranked.state.match.state="DEATHMATCH_ENTERING";
+    pose.dead=false;assert(entering.tickPublisher(pose,false));
+    dmGeneration=entering.m_publishGeneration;web::pending.back().callback({200});
+    ranked.state.match.state="DEATHMATCH_PLAYING";publishTestClock+=std::chrono::milliseconds(50);
+    assert(entering.tickPublisher(pose,false)&&entering.m_publishGeneration==dmGeneration);
+    assert(web::pending.back().request.body["packets"].asArray().unwrap().front()["deathmatchSequence"].asInt().unwrapOr(-1)==2);
+    web::pending.back().callback({200});
+    // Early Clear before Start ACK is deferred rather than losing DM identity.
+    ranked={};web::pending.clear();SpectatorLiveRuntime dmEarly;
+    ranked.state.match.state="DEATHMATCH_ENTERING";ranked.state.match.roundNumber=0;
+    ranked.state.match.deathmatchSequence=3;ranked.m_attemptId.clear();pose.finished=true;
+    dmEarly.publishTerminal(pose,false);assert(dmEarly.m_deferredTerminalPose&&web::pending.empty());
+    ranked.state.match.state="DEATHMATCH_PLAYING";ranked.m_attemptId="deathmatch-clear-attempt";
+    dmEarly.tickTerminal();assert(web::pending.size()==1);
+    assert(web::pending.back().request.body["roundNumber"].asInt().unwrapOr(-1)==0);
+    assert(web::pending.back().request.body["deathmatchSequence"].asInt().unwrapOr(-1)==3);
+    assert(web::pending.back().request.body["keyframe"]["finished"].asBool().unwrapOr(false));
+    web::pending.back().callback({200});
     // A 50ms capture clock continues at RTT110; serialized HTTP sends 2-3
     // packets per ACK rather than sampling once every RTT+50 (160ms).
     ranked={};SpectatorLiveRuntime serial;web::pending.clear();pose={100,40,0,false,false};

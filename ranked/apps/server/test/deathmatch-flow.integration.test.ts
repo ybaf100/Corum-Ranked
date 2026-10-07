@@ -1,3 +1,4 @@
+import { enterPreparedMatch } from "./native-entry-helper.js";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { PGlite } from "@electric-sql/pglite";
@@ -41,6 +42,7 @@ beforeAll(async () => {
     "0008_placement_beta9.sql",
     "0009_placement_stage_count.sql",
     "0010_achievements_v1.sql",
+    "0013_native_scene_entry.sql",
   ]) {
     const migrationPath = fileURLToPath(
       new URL(`../../../migrations/${migrationName}`, import.meta.url),
@@ -291,6 +293,8 @@ describe("Round 3 draw and repeating deathmatch", () => {
       await service.ready(matchId, matchTokenB, contextB, {
         installedMods: structuredClone(cleanMods),
       });
+      await enterPreparedMatch(service, matchId, matchTokenA, contextA, matchTokenB, contextB,
+        (seconds) => clock.advance(seconds));
       clock.advance(
         snapshot.operational.rules.roundSeconds +
           snapshot.operational.rules.finalAttemptWindowSeconds +
@@ -327,7 +331,8 @@ describe("Round 3 draw and repeating deathmatch", () => {
         await service.ready(matchId, matchTokenB, contextB, {
           installedMods: structuredClone(cleanMods),
         });
-        playing = (await service.state(matchId, matchTokenA, contextA)) as Record<string, any>;
+        playing = await enterPreparedMatch(service, matchId, matchTokenA, contextA, matchTokenB, contextB,
+          (seconds) => clock.advance(seconds));
       }
       expect(playing.state).toBe("DEATHMATCH_PLAYING");
       const levelId = playing.deathmatch.map.playableLevelId as string;
@@ -408,6 +413,8 @@ describe("Round 3 draw and repeating deathmatch", () => {
     // Practice presence is viewer-relative UI state only and consumes no Attempt.
     await service.ready(matchId, matchTokenA, contextA, { installedMods: structuredClone(cleanMods) });
     await service.ready(matchId, matchTokenB, contextB, { installedMods: structuredClone(cleanMods) });
+    await enterPreparedMatch(service, matchId, matchTokenA, contextA, matchTokenB, contextB,
+      (seconds) => clock.advance(seconds));
     await service.updatePracticePresence(matchId, matchTokenA, contextA, { practice: true });
     let presenceView = (await service.state(matchId, matchTokenB, contextB)) as Record<string, any>;
     expect(presenceView.opponentPractice).toBe(true);
