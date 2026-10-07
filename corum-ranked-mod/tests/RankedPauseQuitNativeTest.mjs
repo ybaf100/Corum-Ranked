@@ -23,6 +23,7 @@ test('actual quit preparation resumes only the owned Pause and rejects failed na
 #include <optional>
 #include <string>
 struct CCObject{};
+namespace geode::log {template<class... T>void info(T...) {}}
 struct PlayLayer {inline static PlayLayer* current=nullptr;bool m_isPaused=true;static PlayLayer* get(){return current;}};
 template<class T>struct Ref{T* p=nullptr;T* data()const{return p;}T* operator->()const{return p;}explicit operator bool()const{return p;}};
 template<class T>struct WeakRef{T* p;explicit WeakRef(T* v):p(v){}Ref<T> lock()const{return {p};}};
@@ -33,6 +34,7 @@ std::optional<WeakRef<PauseLayer>> activeRankedPause;
 #define schedule_selector(x) 0
 struct CorumRankedPauseLayer:PauseLayer {struct Fields{std::optional<WeakRef<Popup>> popup;std::optional<WeakRef<PlayLayer>> owner;std::string leaseId="lease";}fields;Fields* m_fields=&fields;void unschedule(int){}
 ${body('void retireRankedPause()')}
+${body('void releaseRankedPauseOwnership()')}
 ${body('void onResume(CCObject* sender)')}
 };
 ${body('bool resumeRankedPauseBeforeQuit(PlayLayer* layer)')}
@@ -53,6 +55,9 @@ int main(){
   assert(resumeRankedPauseBeforeQuit(&a)&&detached.resumes==0);activeRankedPause.reset();}
  {CorumRankedPauseLayer refusal;a.m_isPaused=true;refusal.refuseResume=true;refusal.fields.owner.emplace(&a);activeRankedPause.emplace(&refusal);
   assert(!resumeRankedPauseBeforeQuit(&a)&&a.m_isPaused&&refusal.resumes==1); // no forced flags
+  assert(!resumeRankedPauseBeforeQuit(&a)&&a.m_isPaused&&refusal.resumes==2); // repeated Quit cannot bypass refusal
+  refusal.parent=false;assert(!resumeRankedPauseBeforeQuit(&a)&&refusal.resumes==2);
+  assert(activeRankedPause&&refusal.fields.owner);activeRankedPause.reset();
  }
  // New match R1 owns a fresh Pause, independent of old scene/match lifetime.
  {CorumRankedPauseLayer next;PlayLayer::current=&b;next.fields.owner.emplace(&b);activeRankedPause.emplace(&next);

@@ -57,7 +57,7 @@ struct Node { bool parent=true;void* getParent()const{return parent?(void*)this:
 struct Label {std::string text;void setString(char const* s){text=s;}void limitLabelWidth(float,float,float){};char const* getFntFile()const{return "CorumSansBold.fnt";}};
 struct PauseLayer:Node {int quits=0,resumes=0;void onQuit(CCObject*){++quits;}void onResume(CCObject*){++resumes;}};
 struct Level{int m_levelID=123;};
-struct PlayLayer{Level* m_level=nullptr;inline static PlayLayer* active=nullptr;int quits=0;static PlayLayer* get(){return active;}void onQuit(){++quits;}};
+struct PlayLayer{Level* m_level=nullptr;inline static PlayLayer* active=nullptr;bool m_isPaused=false;int quits=0;static PlayLayer* get(){return active;}void onQuit(){++quits;}};
 template<class T>struct Ref {T* p=nullptr;Ref()=default;explicit Ref(T* v):p(v){}T* data()const{return p;}T* operator->()const{return p;}explicit operator bool()const{return p;}};
  template<class T>struct WeakRef{T* value=nullptr;explicit WeakRef(T* p):value(p){}Ref<T> lock()const{return Ref<T>(value);}};
  namespace geode {template<class T>using WeakRef=::WeakRef<T>;}
@@ -105,6 +105,7 @@ struct CorumRankedPauseLayer:PauseLayer {
  ${body(pause,'void onQuit(CCObject* sender)')}
  ${body(pause,'void watchBudget(float)')}
  ${body(pause,'void retireRankedPause()')}
+ ${body(pause,'void releaseRankedPauseOwnership()')}
  ${body(pause,'void onResume(CCObject* sender)')}
  ${body(pause,'void resumeRankedPause(CCObject* sender)')}
 };

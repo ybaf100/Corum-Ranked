@@ -97,17 +97,23 @@ public:
         m_fields->popup.reset();
         RankedRuntime::get().endMatchGameplayPause(m_fields->leaseId);
         m_fields->leaseId.clear();
+        unschedule(schedule_selector(CorumRankedPauseLayer::watchBudget));
+    }
+    void releaseRankedPauseOwnership() {
         if (activeRankedPause) {
             auto active = activeRankedPause->lock();
             if (!active || active.data() == this) activeRankedPause.reset();
         }
         m_fields->owner.reset();
-        unschedule(schedule_selector(CorumRankedPauseLayer::watchBudget));
     }
     void onResume(CCObject* sender) {
         // Native pause state/menu teardown must not wait for a retained
         // surrender dialog or Fields destructor in a later round.
+        auto owner = m_fields->owner ? m_fields->owner->lock() : Ref<PlayLayer>();
         retireRankedPause(); PauseLayer::onResume(sender);
+        // Keep the exact ownership if a native/other-hook Resume refuses. A
+        // second quit must not bypass the refusal just because the lease ended.
+        if (!owner || !owner->m_isPaused) releaseRankedPauseOwnership();
     }
     void resumeRankedPause(CCObject* sender) {
         onResume(sender);
@@ -139,10 +145,12 @@ bool resumeRankedPauseBeforeQuit(PlayLayer* layer) {
         auto* rankedPause = static_cast<CorumRankedPauseLayer*>(pause.data());
         auto owner = rankedPause->m_fields->owner
             ? rankedPause->m_fields->owner->lock() : Ref<PlayLayer>();
-        if (owner && owner.data() == layer && pause->getParent()) {
+        if (owner && owner.data() == layer) {
+            if (!pause->getParent()) return !layer->m_isPaused;
             // The presentation heartbeat may observe an ACK before watchBudget.
             // Native Resume must complete even on that ordering, before native Quit.
             rankedPause->onResume(nullptr);
+            geode::log::info("[RankedPause] quit resume result paused={}", layer->m_isPaused);
             return !layer->m_isPaused;
         }
     }
