@@ -25,6 +25,7 @@ bool effectiveFileExists(gd::string const& path) {
 bool roundModalOpen(CCNode* node) {
     if (!node || !node->isVisible()) return false;
     for (auto* child : node->getChildrenExt()) {
+        if (!child || !child->isVisible()) continue;
         if (typeinfo_cast<FLAlertLayer*>(child) || roundModalOpen(child)) return true;
     }
     return false;
@@ -360,7 +361,15 @@ bool RankedRoundPreparation::beginNativeQuit(PlayLayer* play) {
     m_quitting = true;
     return true;
 }
-void RankedRoundPreparation::endNativeQuit() { m_quitting = false; }
+void RankedRoundPreparation::endNativeQuit() {
+    m_quitting = false;
+#if defined(GEODE_IS_WINDOWS) || defined(GEODE_IS_MACOS)
+    // Our scoped return bypasses the native LevelInfo navigation. Restore the
+    // desktop cursor for the round UI, as the direct-scene Versus path does.
+    PlatformToolbox::toggleLockCursor(false);
+    PlatformToolbox::showCursor();
+#endif
+}
 bool RankedRoundPreparation::returnFromNativeQuit(GJGameLevel* level) {
     auto origin = m_origin.lock();
     if (!m_quitting || !origin || !m_launchedLevel || level != m_launchedLevel.data()) return false;

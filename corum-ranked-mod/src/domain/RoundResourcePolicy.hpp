@@ -1,6 +1,7 @@
 #pragma once
 
 #include <charconv>
+#include <compare>
 #include <map>
 #include <string_view>
 #include <vector>

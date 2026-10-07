@@ -146,6 +146,8 @@ struct PlayLayer:CCNode {
         auto* s=new CCScene;s->children.push_back(p);return s;}
 };
 struct GameManager {int vanillaReturns=0;void returnToLastScene(GJGameLevel*){++vanillaReturns;}};
+struct PlatformToolbox {static inline int cursorRestores=0;
+    static void toggleLockCursor(bool lock){assert(!lock);}static void showCursor(){++cursorRestores;}};
 namespace corum::ranked {
 enum class RuntimeStage {Ready,Matched};
 struct RuntimeView {RuntimeStage stage=RuntimeStage::Ready;struct Match {std::string matchId,state,side="A";}match;};
@@ -197,6 +199,12 @@ int main(){
     std::vector<int> ids{42};assert(appendRoundResourceIds(ids,"42,51,51"));assert(ids.size()==2);
     for(auto s:{"42x","2147483648","0","-2",",5","5,"}){std::vector<int> bad;assert(!appendRoundResourceIds(bad,s));}
     auto& p=RankedRoundPreparation::get();auto* maps=GameLevelManager::sharedState();auto* music=MusicDownloadManager::sharedState();
+#if defined(GEODE_IS_WINDOWS)
+    music->base+="win/";
+#else
+    music->base+="ios/";
+#endif
+    std::filesystem::create_directories(music->base);
     auto& meta=RankedLevelPreparation::get();auto& runtime=RankedRuntime::get();
     // Ordinary non-Ranked Practice: no metadata/resource/native scene mutations.
     ticks(p);assert(maps->requests==0&&music->requests.empty()&&meta.polls==0);
@@ -220,7 +228,8 @@ int main(){
     runtime.state.match.state="ROUND_PLAYING";runtime.canPlay=false;assert(!p.launch(&origin));runtime.canPlay=true;
     downloaded.m_levelNotDownloaded=true;assert(!p.launch(&origin)&&runtime.arms==0);downloaded.m_levelNotDownloaded=false;
     downloaded.m_songIDs="42,43,909";assert(!p.launch(&origin)&&runtime.arms==0);downloaded.m_songIDs="42,43";
-    FLAlertLayer modal;origin.children={&modal};assert(!p.launch(&origin)&&runtime.arms==0);origin.children.clear();
+    FLAlertLayer modal;origin.children={&modal};assert(!p.launch(&origin)&&runtime.arms==0);
+    modal.visible=false; // hidden, retained popups must not strand launch forever
     RoundOptions options;options.onLowDetail(nullptr);assert(options.renders==0);
     options.level=&downloaded;options.onLowDetail(nullptr);options.onDisableShake(nullptr);
     assert(downloaded.m_lowDetailModeToggled&&downloaded.m_disableShakeToggled&&options.renders==2);
@@ -240,6 +249,11 @@ int main(){
     {ScopedRankedRoundQuit quit(PlayLayer::get());navigation.returnToLastScene(&downloaded);}
     PlayLayer::active->running=false;PlayLayer::active->live=false;PlayLayer::active=nullptr;
     tasks=std::exchange(queued,{});for(auto& t:tasks)t();runtime.viewer=false;
+#if defined(GEODE_IS_WINDOWS)
+    assert(PlatformToolbox::cursorRestores==2);
+#else
+    assert(PlatformToolbox::cursorRestores==0);
+#endif
     // Completed assets via GD's effective NONG paths, including a built-in track 0.
     context(2);GJGameLevel track;track.m_levelID=2;track.m_songID=0;track.m_levelType=GJLevelType::Saved;track.m_levelNotDownloaded=false;track.m_levelString="geometry";
     maps->saved[2]=&track;meta.attest(&track);ticks(p);assert(p.ready()&&p.view().songsTotal==0);
@@ -272,8 +286,10 @@ int main(){
 `;
     try {
         writeFileSync(join(dir, 'test.cpp'), cpp);
-        execFileSync('g++', ['-std=c++23', '-Wall', '-Wextra', '-Wpedantic', '-Werror', join(dir, 'test.cpp'), '-o', join(dir, 'test')], { stdio: 'pipe' });
-        execFileSync(join(dir, 'test'), [], { stdio: 'pipe' });
+        for (const platform of ['GEODE_IS_WINDOWS', 'GEODE_IS_IOS']) {
+            execFileSync('g++', ['-std=c++23', '-Wall', '-Wextra', '-Wpedantic', '-Werror', '-D' + platform, join(dir, 'test.cpp'), '-o', join(dir, 'test')], { stdio: 'pipe' });
+            execFileSync(join(dir, 'test'), [], { stdio: 'pipe' });
+        }
     } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
