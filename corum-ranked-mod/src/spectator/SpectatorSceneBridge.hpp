@@ -12,4 +12,7 @@ bool quitThroughRankedCompletionOverlay(PlayLayer* layer);
 // Idempotent, deferred scene return after an authenticated concession. It does
 // not use a timer deadline or create an additional Attempt End.
 bool requestConcededGameplayReturn(PlayLayer* layer);
+// Retire the exact scene's native Ranked Pause before quitting gameplay.
+// False means vanilla Resume did not restore an unpaused scene; never force flags.
+bool resumeRankedPauseBeforeQuit(PlayLayer* layer);
 } // namespace corum::ranked

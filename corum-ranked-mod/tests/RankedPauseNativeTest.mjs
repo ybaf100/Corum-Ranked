@@ -61,6 +61,7 @@ struct PlayLayer{Level* m_level=nullptr;inline static PlayLayer* active=nullptr;
 template<class T>struct Ref {T* p=nullptr;Ref()=default;explicit Ref(T* v):p(v){}T* data()const{return p;}T* operator->()const{return p;}explicit operator bool()const{return p;}};
  template<class T>struct WeakRef{T* value=nullptr;explicit WeakRef(T* p):value(p){}Ref<T> lock()const{return Ref<T>(value);}};
  namespace geode {template<class T>using WeakRef=::WeakRef<T>;}
+ std::optional<geode::WeakRef<PauseLayer>> activeRankedPause;
  namespace fmt {template<class...T>std::string format(char const*,T...){return "budget";}}
 struct Popup{int closes=0;void onClose(CCObject*){++closes;}};
 #define schedule_selector(x) 0
@@ -99,7 +100,7 @@ namespace i18n=corum::ranked::i18n;
 ${body(pause,'bool ownsRankedPlayerPause()')}
 struct CorumRankedPauseLayer:PauseLayer {
  struct Button {bool enabled=true;void setEnabled(bool v){enabled=v;}} button;Label clock;
- struct Fields{std::optional<WeakRef<ui::RankedSurrenderPopup>> popup;std::string leaseId="lease",matchId="m";int round=1,deathmatch=0;Label* budget;Button* surrender;}f{{},"lease","m",1,0,&clock,&button};Fields* m_fields=&f;
+ struct Fields{std::optional<WeakRef<ui::RankedSurrenderPopup>> popup;std::string leaseId="lease",matchId="m";int round=1,deathmatch=0;Label* budget;Button* surrender;std::optional<WeakRef<PlayLayer>> owner;}f{{},"lease","m",1,0,&clock,&button,{}};Fields* m_fields=&f;
  void unschedule(int){}
  ${body(pause,'void onQuit(CCObject* sender)')}
  ${body(pause,'void watchBudget(float)')}

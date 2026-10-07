@@ -12,6 +12,7 @@ namespace {
 using corum::ranked::RankedRuntime;
 namespace ui = corum::ranked::ui;
 namespace i18n = corum::ranked::i18n;
+std::optional<WeakRef<PauseLayer>> activeRankedPause;
 bool ownsRankedPlayerPause() {
     auto* layer = PlayLayer::get(); auto const& ranked = RankedRuntime::get();
     return layer && layer->m_level && !ranked.isPlacement() && !ranked.isSpectating() &&
@@ -21,12 +22,14 @@ bool ownsRankedPlayerPause() {
 }
 
 class $modify(CorumRankedPauseLayer, PauseLayer) {
+public:
     struct Fields {
         std::string leaseId, matchId;
         int round = 0, deathmatch = 0;
         CCLabelBMFont* budget = nullptr;
         CCMenuItemSpriteExtra* surrender = nullptr;
         std::optional<WeakRef<ui::RankedSurrenderPopup>> popup;
+        std::optional<WeakRef<PlayLayer>> owner;
         ~Fields() {
             if (popup) if (auto dialog = popup->lock()) dialog->dismiss();
             popup.reset();
@@ -37,6 +40,8 @@ class $modify(CorumRankedPauseLayer, PauseLayer) {
         PauseLayer::customSetup();
         if (!ownsRankedPlayerPause()) return;
         auto& ranked = RankedRuntime::get(); auto* layer = PlayLayer::get();
+        m_fields->owner.emplace(layer);
+        activeRankedPause.emplace(this);
         m_fields->leaseId = ranked.beginMatchGameplayPause(static_cast<int>(layer->m_level->m_levelID));
         log::info("[RankedPause] opened level={} round={} lease={}",
             static_cast<int>(layer->m_level->m_levelID), ranked.view().match.roundNumber,
@@ -92,6 +97,11 @@ class $modify(CorumRankedPauseLayer, PauseLayer) {
         m_fields->popup.reset();
         RankedRuntime::get().endMatchGameplayPause(m_fields->leaseId);
         m_fields->leaseId.clear();
+        if (activeRankedPause) {
+            auto active = activeRankedPause->lock();
+            if (!active || active.data() == this) activeRankedPause.reset();
+        }
+        m_fields->owner.reset();
         unschedule(schedule_selector(CorumRankedPauseLayer::watchBudget));
     }
     void onResume(CCObject* sender) {
@@ -120,3 +130,23 @@ class $modify(CorumRankedPauseLayer, PauseLayer) {
         if (popup) { m_fields->popup.emplace(popup); popup->show(); }
     }
 };
+
+namespace corum::ranked {
+bool resumeRankedPauseBeforeQuit(PlayLayer* layer) {
+    if (!layer || layer != PlayLayer::get()) return true;
+    auto pause = activeRankedPause ? activeRankedPause->lock() : Ref<PauseLayer>();
+    if (pause) {
+        auto* rankedPause = static_cast<CorumRankedPauseLayer*>(pause.data());
+        auto owner = rankedPause->m_fields->owner
+            ? rankedPause->m_fields->owner->lock() : Ref<PlayLayer>();
+        if (owner && owner.data() == layer && pause->getParent()) {
+            // The presentation heartbeat may observe an ACK before watchBudget.
+            // Native Resume must complete even on that ordering, before native Quit.
+            rankedPause->onResume(nullptr);
+            return !layer->m_isPaused;
+        }
+    }
+    // Unowned/ordinary/Placement Pause keeps its existing vanilla quit path.
+    return true;
+}
+} // namespace corum::ranked

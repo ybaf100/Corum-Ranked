@@ -29,7 +29,7 @@ test('remote renderer cannot invoke scoring, physics, death, completion or camer
     assert.match(remote, /if \(!frame \|\| !frame->pose\) \{\s*m_poseCurrent = false;\s*setVisible\(false\)/);
 });
 test('level and spectator exit clean up before vanilla teardown', () => {
-    assert.match(play, /void onQuit\(\) \{\s*m_fields->spectatorPresentationRetired = true;\s*unschedule\([\s\S]*?cleanupSpectatorPresentation\(\)/);
+    assert.match(play, /void onQuit\(\) \{[\s\S]*?m_fields->spectatorPresentationRetired = true;\s*unschedule\([\s\S]*?cleanupSpectatorPresentation\(\)/);
     const exit = play.slice(play.indexOf('void onExit()'));
     assert(exit.indexOf('cleanupSpectatorPresentation()') < exit.indexOf('PlayLayer::onExit()'));
     assert.match(play, /cleanupSpectatorPresentation\(\);\s*live.reset\(\);\s*if \(!m_fields->autoExitRequested\)/);

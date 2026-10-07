@@ -198,6 +198,7 @@ public:
         bool entryUIPauseEnabled = false;
         corum::ranked::ui::RankedEntryOverlay* entryOverlay = nullptr;
         bool autoExitRequested = false;
+        bool pauseQuitBlockedLogged = false;
         bool gameplayFrameObserved = false;
         corum::ranked::SpectatorCapturePolicy spectatorCapture;
         bool attemptStartReported = false;
@@ -1320,6 +1321,13 @@ public:
     }
 
     void onQuit() {
+        if (m_fields->rankedLevel && !corum::ranked::resumeRankedPauseBeforeQuit(this)) {
+            if (!m_fields->pauseQuitBlockedLogged) {
+                m_fields->pauseQuitBlockedLogged = true;
+                log::error("[RankedPause] native quit blocked: scene still paused level={}", m_fields->levelId);
+            }
+            return;
+        }
         m_fields->spectatorPresentationRetired = true;
         unschedule(schedule_selector(CorumRankedPlayLayer::spectatorFrame));
         cleanupSpectatorPresentation();

@@ -50,7 +50,7 @@ test('production native safety hook bodies execute through death/completion/save
 #include <optional>
 #include <string>
 namespace gd { using string = std::string; }
-namespace geode::log { template<class... T> void info(T...) {} }
+namespace geode::log { template<class... T> void info(T...) {} template<class... T> void error(T...) {} }
 using namespace geode;
 struct CCPoint { float x, y; };
 struct GameObject { int m_uniqueID = 0; };
@@ -86,6 +86,7 @@ struct PlayLayer {
     void onQuit();void onExit();void resetLevel();
 };
 namespace corum::ranked {
+inline bool resumeRankedPauseBeforeQuit(PlayLayer*) { return true; } // tested by RankedPauseQuitNativeTest
 inline SpectatorGhostPose captureSpectatorPose(PlayerObject* p,bool dead=false,bool finished=false,bool dual=false){
     auto xy=p->getPosition(); SpectatorGhostPose pose{xy.x,xy.y,p->getRotation(),dead,finished};pose.dual=dual;return pose;
 }
@@ -140,6 +141,7 @@ struct CorumRankedPlayLayer : PlayLayer {
         bool entryAttemptCountDeferred = false;
         bool safetyRetired = false, vanillaGameplayEndInProgress = false;
         bool attemptStartReported = true, attemptEndReported = false;
+        bool pauseQuitBlockedLogged = false;
         bool rankedLevel = true, rankedInitialized = true, rankedPractice = false;
         bool spectatorMode = false, spectatorPending = false;
         bool suppressedDeathLogged = false, suppressedCompletionLogged = false, suppressedSaveLogged = false;
