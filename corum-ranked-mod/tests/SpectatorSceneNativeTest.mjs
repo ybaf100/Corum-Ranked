@@ -51,6 +51,7 @@ struct PlayLayer: GJBaseGameLayer {
     PlayerObject* m_player1=nullptr;
     bool m_isTestMode=false,m_isPracticeMode=false,m_hasCompletedLevel=false;
     int resets=0;
+    void onQuit(); // Binding entry dispatches to the installed mock hook below.
     void resetLevel(){++resets; m_hasCompletedLevel=false; if(m_player1)m_player1->m_isDead=false;}
 };
 struct ScopedPersistenceOwner { explicit ScopedPersistenceOwner(PlayLayer*){} };
@@ -154,6 +155,7 @@ struct CorumRankedPlayLayer: PlayLayer {
     void onQuit(){++quits;cleanupSpectatorPresentation();}
     ${callbacks}
 };
+void PlayLayer::onQuit(){static_cast<CorumRankedPlayLayer*>(this)->onQuit();}
 int main(){
     using namespace corum::ranked;
     auto& runtime=RankedRuntime::get(); auto& live=SpectatorLiveRuntime::get();

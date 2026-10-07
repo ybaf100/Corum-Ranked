@@ -944,8 +944,9 @@ public:
             auto scene = geode::WeakRef<PlayLayer>(this);
             queueInMainThread([scene] {
                 if (auto layer = scene.lock(); layer && layer.data() == PlayLayer::get() && layer->isRunning()) {
-                    auto* ranked = static_cast<CorumRankedPlayLayer*>(layer.data());
-                    if (!corum::ranked::quitThroughRankedCompletionOverlay(ranked)) ranked->onQuit();
+                    // This callback is outside the native onQuit detour. Enter
+                    // the binding so the installed quit chain runs normally.
+                    if (!corum::ranked::quitThroughRankedCompletionOverlay(layer.data())) layer->onQuit();
                 }
             });
             return true;

@@ -109,6 +109,9 @@ public:
     void onResume(CCObject* sender) {
         // Native pause state/menu teardown must not wait for a retained
         // surrender dialog or Fields destructor in a later round.
+        // Vanilla Resume removes the Pause from its parent. Keep it alive
+        // through our post-call ownership cleanup even for native menu callers.
+        [[maybe_unused]] Ref<PauseLayer> keepAlive(this);
         auto owner = m_fields->owner ? m_fields->owner->lock() : Ref<PlayLayer>();
         retireRankedPause(); PauseLayer::onResume(sender);
         // Keep the exact ownership if a native/other-hook Resume refuses. A
@@ -146,7 +149,12 @@ bool resumeRankedPauseBeforeQuit(PlayLayer* layer) {
         auto owner = rankedPause->m_fields->owner
             ? rankedPause->m_fields->owner->lock() : Ref<PlayLayer>();
         if (owner && owner.data() == layer) {
-            if (!pause->getParent()) return !layer->m_isPaused;
+            if (!pause->getParent()) {
+                if (layer->m_isPaused) return false;
+                rankedPause->retireRankedPause();
+                rankedPause->releaseRankedPauseOwnership();
+                return true;
+            }
             // The presentation heartbeat may observe an ACK before watchBudget.
             // Native Resume must complete even on that ordering, before native Quit.
             // Enter through the binding so installed Resume hooks run once in
