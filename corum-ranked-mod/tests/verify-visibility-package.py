@@ -18,13 +18,16 @@ def verify_binary(binary, platform, debug):
     if player != expected:
         raise ValueError({"platform": platform, "missing": sorted(expected - player),
                           "unexpected": sorted(player - expected)})
-    required = {"GJGameLevel::savePercentage", "GJGameLevel::storeNewLocalScore",
+    required = {"GJGameLevel::savePercentage",
                 "PlayLayer::destroyPlayer", "PlayLayer::levelComplete",
+                "PlayLayer::checkForEnd", "PlayLayer::showCompleteText", "PlayLayer::showNewBest",
+                "PlayLayer::onQuit", "PlayLayer::onExit", "PlayLayer::resetLevel", "PlayLayer::updateAttempts",
                 "PauseLayer::customSetup",
                 "GameManager::returnToLastScene",
                 "GJBaseGameLayer::update", "GJBaseGameLayer::updateCamera",
                 "GJBaseGameLayer::teleportPlayer"}
-    if not required <= targets or "GJGameLevel::saveNewScore" in targets:
+    forbidden = {"GJGameLevel::saveNewScore", "GJGameLevel::storeNewLocalScore"}
+    if not required <= targets or targets & forbidden:
         raise ValueError("missing safety/capture boundary or unsafe persistence detour")
     if b"[CorumCrashDiag]" in binary:
         raise ValueError("diagnostic runtime must not enter production packages")

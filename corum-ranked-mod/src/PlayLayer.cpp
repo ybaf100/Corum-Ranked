@@ -7,6 +7,7 @@
 #include "spectator/ScopedCameraTargetOverride.hpp"
 #include "spectator/SpectatorPlayerCapture.hpp"
 #include "spectator/SpectatorWorldDriver.hpp"
+#include "spectator/ScopedSpectatorPersistenceMode.hpp"
 #include "domain/SpectatorNativeProbe.hpp"
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
 #include "debug/DebugSpectateRuntime.hpp"
@@ -465,6 +466,8 @@ public:
             m_fields->entryOverlay = corum::ranked::ui::RankedEntryOverlay::create();
             if (m_fields->entryOverlay) addChild(m_fields->entryOverlay, 10000);
             FMODAudioEngine::sharedEngine()->pauseAllMusic(true);
+            log::info("[RankedEntry] native hold level={} pausedBeforeHold={} pauseBeforeHold={}",
+                m_fields->levelId, m_fields->entryWasPaused, m_fields->entryUIPauseEnabled);
         }
         return true;
     }
@@ -474,6 +477,9 @@ public:
     // button commands, evidence and its audio clock are held at the initial pose.
     bool blockEntryGameplayUpdate() {
         if (!m_fields->nativeEntryHeld) return false;
+        // Scene-entry actions can enable the native menu after init. Keep our
+        // lock while waiting, then release it through vanilla at successful GO.
+        if (m_uiLayer && m_uiLayer->m_pauseBtn) m_uiLayer->disableMenu();
         auto& runtime = corum::ranked::RankedRuntime::get();
         runtime.tick();
         auto const& match = runtime.view().match;
@@ -509,7 +515,10 @@ public:
             m_uiLayer->setTouchEnabled(m_fields->entryUITouchEnabled);
             m_uiLayer->setKeyboardEnabled(m_fields->entryUIKeyboardEnabled);
             m_uiLayer->setKeypadEnabled(m_fields->entryUIKeypadEnabled);
-            if (m_uiLayer->m_pauseBtn) m_uiLayer->m_pauseBtn->setEnabled(m_fields->entryUIPauseEnabled);
+            if (m_uiLayer->m_pauseBtn) {
+                if (!m_isPaused) m_uiLayer->enableMenu();
+                else m_uiLayer->m_pauseBtn->setEnabled(m_fields->entryUIPauseEnabled);
+            }
         }
         if (m_player1) m_player1->releaseAllButtons();
         if (m_player2) m_player2->releaseAllButtons();
@@ -527,7 +536,9 @@ public:
             FMODAudioEngine::sharedEngine()->resumeAllMusic();
             PlayLayer::startMusic();
         }
-        log::info("[RankedEntry] shared countdown complete; gameplay released level={}", m_fields->levelId);
+        log::info("[RankedEntry] shared countdown complete; gameplay released level={} paused={} pauseBeforeHold={} pauseEnabled={}",
+            m_fields->levelId, m_isPaused, m_fields->entryUIPauseEnabled,
+            m_uiLayer && m_uiLayer->m_pauseBtn && m_uiLayer->m_pauseBtn->isEnabled());
         return false;
     }
 
@@ -1094,6 +1105,7 @@ public:
             if (m_fields->spectatorScenePrepared) return;
             cleanupSpectatorPresentation();
             m_fields->localSafety.resetDummy();
+            corum::ranked::ScopedSpectatorPersistenceMode noSave(m_isTestMode, blocksLevelPersistence(m_level));
             PlayLayer::resetLevel();
             if (m_player1) m_player1->setVisible(false);
             return;
@@ -1150,6 +1162,7 @@ public:
                 // fresh visual Attempt; the frame heartbeat owns ACK/eligibility
                 // and the OFF/timeout return through the scoped native quit.
                 if (finishTerminalGameplayHandoff()) return;
+                corum::ranked::ScopedSpectatorPersistenceMode noSave(m_isTestMode, blocksLevelPersistence(m_level));
                 PlayLayer::resetLevel();
                 if (m_player1) m_player1->setVisible(false);
                 return;
@@ -1314,6 +1327,7 @@ public:
             );
         }
         corum::ranked::ScopedRankedRoundQuit roundQuit(this);
+        corum::ranked::ScopedSpectatorPersistenceMode noSave(m_isTestMode, blocksLevelPersistence(m_level));
         PlayLayer::onQuit();
     }
 
@@ -1328,6 +1342,7 @@ public:
         if (m_fields->spectatorMode || m_fields->spectatorPending) {
             corum::ranked::SpectatorLiveRuntime::get().reset();
         }
+        corum::ranked::ScopedSpectatorPersistenceMode noSave(m_isTestMode, blocksLevelPersistence(m_level));
         PlayLayer::onExit();
         corum::ranked::RankedRuntime::get().setSpectatorLocalTransportBlocked(this, false);
         m_fields->safetyRetired = true;
@@ -2296,7 +2311,7 @@ class $modify(CorumRankedSpectatorDummyPlayer, PlayerObject) {
 // normal Ranked, Placement, real Death Match and user Practice retain vanilla.
 class $modify(CorumRankedSpectatorProgressSave, GJGameLevel) {
     static void onModify(auto& self) {
-        for (auto name : {"GJGameLevel::savePercentage", "GJGameLevel::storeNewLocalScore"}) {
+        for (auto name : {"GJGameLevel::savePercentage"}) {
             if (!self.setHookPriorityPre(name, Priority::First)) {
                 log::warn("Failed to install spectator persistence priority: {}", name);
             }
@@ -2309,13 +2324,8 @@ class $modify(CorumRankedSpectatorProgressSave, GJGameLevel) {
         GJGameLevel::savePercentage(percent, practice, clicks, attempts, valid);
     }
 
-    // GD 2.2081 routes real completion's local score through this two-int
-    // boundary. Avoid the global saveNewScore thunk's by-value gd::string on
-    // iOS arm64/JIT-less; the exact spectator scene guard remains independent
-    // of the percentage and completion firewalls above.
-    void storeNewLocalScore(int value, int type) {
-        auto* layer = localSafetyLayer();
-        if (layer && layer->blocksLevelPersistence(this)) return;
-        GJGameLevel::storeNewLocalScore(value, type);
-    }
+    // Do not register saveNewScore or storeNewLocalScore. Genuine completion
+    // must reach GD's score/string implementation without a Corum detour.
+    // Spectator score writes are prevented at the scene's completion/death
+    // boundaries, with scoped native no-save mode for reset/quit/exit cleanup.
 };

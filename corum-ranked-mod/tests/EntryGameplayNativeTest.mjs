@@ -67,12 +67,14 @@ ${presentation}
 struct FakeButton {bool enabled=true;int writes=0;bool isEnabled()const{return enabled;}
 void setEnabled(bool value){enabled=value;++writes;}};
 struct UILayer {
-    bool touch=true,keyboard=true,keypad=true,held=true;int resets=0;
+    bool touch=true,keyboard=true,keypad=true,held=true;int resets=0,menuEnables=0,menuDisables=0;
     FakeButton pause;FakeButton* m_pauseBtn=&pause;
     bool isTouchEnabled()const{return touch;}bool isKeyboardEnabled()const{return keyboard;}
     bool isKeypadEnabled()const{return keypad;}
     void setTouchEnabled(bool value){touch=value;}void setKeyboardEnabled(bool value){keyboard=value;}
     void setKeypadEnabled(bool value){keypad=value;}void resetAllButtons(){held=false;++resets;}
+    void enableMenu(){++menuEnables;m_pauseBtn->setEnabled(true);}
+    void disableMenu(){++menuDisables;m_pauseBtn->setEnabled(false);}
 };
 struct PlayerObject {bool held=true;int releases=0;void releaseAllButtons(){held=false;++releases;}};
 struct FMODAudioEngine {
@@ -199,6 +201,29 @@ int main(){
     assert(!paused.blockEntryGameplayUpdate());
     assert(paused.m_isPaused&&!paused.touch&&!paused.keyboard&&audio.paused&&audio.resumes==0&&paused.musicStarts==0);
     assert(!pausedUI.touch&&pausedUI.keyboard&&!pausedUI.keypad&&!pausedUI.pause.enabled&&!pausedUI.held);
+    assert(pausedUI.menuEnables==0);
+
+    // Regression: vanilla init has a temporarily disabled Pause button. Native
+    // scene entry later enables it. The old GO code restored the init-time false
+    // snapshot and permanently locked Pause. Our hold must stay locked, then
+    // vanilla enableMenu must release it exactly once at the certified GO.
+    runtime={};audio={};
+    CorumRankedPlayLayer transient;UILayer transientUI;transient.m_uiLayer=&transientUI;
+    transient.m_isPaused=false;transientUI.pause.enabled=false;
+    transient.initializeEntryInputHold();assert(!transient.fields.entryUIPauseEnabled);
+    transientUI.enableMenu();assert(transientUI.pause.enabled);
+    assert(transient.blockEntryGameplayUpdate());assert(!transientUI.pause.enabled);
+    runtime.data.match.entry={true,true};runtime.remaining=0;runtime.startGranted=true;
+    assert(!transient.blockEntryGameplayUpdate());
+    assert(!transient.m_isPaused&&transientUI.pause.enabled&&transientUI.menuEnables==2);
+    for(int i=0;i<20;++i)assert(!transient.blockEntryGameplayUpdate());
+    assert(transientUI.menuEnables==2);
+
+    // An ordinary scene never acquires/releases a Ranked entry menu lock.
+    {runtime={};CorumRankedPlayLayer ordinary;UILayer ordinaryUI;ordinary.m_uiLayer=&ordinaryUI;
+    ordinary.fields.nativeEntryHeld=false;ordinaryUI.pause.enabled=false;
+    assert(!ordinary.blockEntryGameplayUpdate());
+    assert(!ordinaryUI.pause.enabled&&ordinaryUI.menuEnables==0&&ordinaryUI.menuDisables==0);}
 
     // An exact server startsAt certificate can release at GO while the latest
     // poll still says ENTERING. No extra polling RTT may extend the countdown.

@@ -60,17 +60,23 @@ test('vanilla completion has independent guards before every relevant original/e
     }
 });
 
-test('New Best and both percentage/record persistence sinks use explicit exact-object guard', () => {
+test('percentage and scene cleanup use exact-object guards without any score/string detour', () => {
     assert.match(body(play, 'void showNewBest('), /if \(blocksLocalEvidence\(\)\) return;/);
     const exact = body(play, 'bool blocksLevelPersistence(');
     assert.match(exact, /level && level == m_level/);
     assert.doesNotMatch(exact, /m_levelID/);
     assert.doesNotMatch(play, /void saveNewScore\(/);
-    for (const signature of ['void savePercentage(', 'void storeNewLocalScore(']) {
-        const save = body(play, signature);
-        assert.match(save, /if \(layer && layer->blocksLevelPersistence\(this\)\) return;/);
-        assert(save.indexOf('blocksLevelPersistence(this)') < save.indexOf('GJGameLevel::'));
-        assert.doesNotMatch(save, /m_isPracticeMode|m_isTestMode/);
+    assert.doesNotMatch(play, /void storeNewLocalScore\(/);
+    assert.doesNotMatch(play, /"GJGameLevel::(?:saveNewScore|storeNewLocalScore)"/);
+    const save = body(play, 'void savePercentage(');
+    assert.match(save, /if \(layer && layer->blocksLevelPersistence\(this\)\) return;/);
+    assert(save.indexOf('blocksLevelPersistence(this)') < save.indexOf('GJGameLevel::'));
+    assert.doesNotMatch(save, /m_isPracticeMode|m_isTestMode/);
+    for (const signature of ['void onQuit()', 'void onExit()', 'void resetLevel()']) {
+        const cleanup = body(play, signature);
+        assert.match(cleanup, /ScopedSpectatorPersistenceMode noSave\(m_isTestMode, blocksLevelPersistence\(m_level\)\)/);
+        const name = signature.match(/void (\w+)/)[1];
+        assert(cleanup.indexOf('ScopedSpectatorPersistenceMode') < cleanup.indexOf(`PlayLayer::${name}(`));
     }
 });
 

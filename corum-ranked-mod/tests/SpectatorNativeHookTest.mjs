@@ -32,13 +32,17 @@ test('production native safety hook bodies execute through death/completion/save
         'void destroyPlayer(', 'void levelComplete()', 'void showCompleteText()',
         'void checkForEnd()', 'void playEndAnimationToPos(',
         'void playPlatformerEndAnimationToPos(', 'void showEndLayer()', 'void showNewBest(', 'void updateAttempts()',
+        'void onQuit()', 'void onExit()',
     ].map(signature => method(signature)).join('\n');
     const player = method('void update(float dt)', source.indexOf('class $modify(CorumRankedSpectatorDummyPlayer'));
-    const saves = [method('void savePercentage('), method('void storeNewLocalScore(')].join('\n');
+    const saves = method('void savePercentage(');
+    const reset = method('void resetLevel()');
+    const dummyReset = reset.slice(reset.indexOf('if (blocksLocalEvidence())'), reset.indexOf('        if (\n            scoringEnabled()'));
     const cpp = `
 #include "${join(root, 'src/domain/SpectatorLocalSafety.hpp')}"
 #include "${join(root, 'src/domain/SpectatorRemotePolicy.hpp')}"
 #include "${join(root, 'src/domain/RankedGameplayPolicy.hpp')}"
+#include "${join(root, 'src/spectator/ScopedSpectatorPersistenceMode.hpp')}"
 #include <algorithm>
 #include <cassert>
 #include "${join(root, 'src/domain/SpectatorNativeProbe.hpp')}"
@@ -78,6 +82,8 @@ struct PlayLayer {
     void showEndLayer() { ++endLayers; }
     void showNewBest(bool, int, int, bool, bool, bool) { ++newBest; }
     int attempts=0;void updateAttempts(){++attempts;}
+    int quits=0,exits=0,resets=0;
+    void onQuit();void onExit();void resetLevel();
 };
 namespace corum::ranked {
 inline SpectatorGhostPose captureSpectatorPose(PlayerObject* p,bool dead=false,bool finished=false,bool dual=false){
@@ -86,7 +92,9 @@ inline SpectatorGhostPose captureSpectatorPose(PlayerObject* p,bool dead=false,b
 struct SpectatorLiveRuntime {
     int terminals=0; static SpectatorLiveRuntime& get(){static SpectatorLiveRuntime l;return l;}
     void publishTerminal(SpectatorGhostPose const&,bool){++terminals;}
+    void reset(){}
 };
+struct ScopedRankedRoundQuit {explicit ScopedRankedRoundQuit(PlayLayer*){}};
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
 namespace debug {
 struct DebugSpectateRuntime {
@@ -94,6 +102,7 @@ struct DebugSpectateRuntime {
     static DebugSpectateRuntime& get(){static DebugSpectateRuntime d;return d;}
     bool playbackLevel(int id)const{return authorized && id==88350599;}
     void recordPose(SpectatorGhostPose const&,bool terminal){terminals+=terminal;}
+    void exitScene(){authorized=false;}
 };
 }
 #endif
@@ -104,6 +113,7 @@ struct RankedRuntime {
     static RankedRuntime& get() { static RankedRuntime value; return value; }
     bool hasLocalGameplayAuthority() { return ownAlive; }
     bool isPlacement() { return placement; }
+    void reportPracticePresence(bool){}
     bool isSpectating() { return spectatorAuthorityReady(serverSpectator, placement, ownAlive); }
     void setSpectatorLocalTransportBlocked(void const* p, bool b) { if (b) owner = p; else if (owner == p) owner = nullptr; }
     bool reportAttemptEnd(int, double, bool clear, std::optional<double>) {
@@ -112,7 +122,7 @@ struct RankedRuntime {
     }
 };
 }
-struct ScopedPersistenceOwner { explicit ScopedPersistenceOwner(PlayLayer*) {} };
+${source.slice(source.indexOf('thread_local PlayLayer* persistenceOwner'), source.indexOf('struct ScopedRealGameplayEnd {'))}
 ${source.slice(source.indexOf('struct ScopedRealGameplayEnd {'), source.indexOf('std::int64_t steadyNowMicros()'))}
 double rankedProgressPercent(PlayLayer* layer) { return layer->percent; }
 struct CorumRankedPlayLayer : PlayLayer {
@@ -124,6 +134,7 @@ struct CorumRankedPlayLayer : PlayLayer {
     void observeSpectatorNativeSnap(PlayerObject*,corum::ranked::SpectatorDiscontinuity,corum::ranked::SpectatorGhostPose const&) {}
     struct Fields {
         bool nativeEntryHeld = false;
+        bool spectatorPresentationRetired=false,spectatorScenePrepared=false,autoExitRequested=false;
         bool entryAttemptCountDeferred = false;
         bool safetyRetired = false, vanillaGameplayEndInProgress = false;
         bool attemptStartReported = true, attemptEndReported = false;
@@ -137,10 +148,15 @@ struct CorumRankedPlayLayer : PlayLayer {
 #endif
     };
     std::unique_ptr<Fields> m_fields = std::make_unique<Fields>();
+    void cleanupSpectatorPresentation(){}
+    void spectatorFrame(float){}
+    void unschedule(int){}
+    #define schedule_selector(x) 0
+    void testDummyResetBoundary(){${dummyReset}}
     ${callbacks}
 };
 CorumRankedPlayLayer* currentLayer = nullptr;
-CorumRankedPlayLayer* localSafetyLayer() { return currentLayer; }
+CorumRankedPlayLayer* localSafetyLayer() { return persistenceOwner ? static_cast<CorumRankedPlayLayer*>(persistenceOwner) : currentLayer; }
 struct PlayerHook : PlayerObject { ${player} };
 struct SaveHook : GJGameLevel { ${saves} };
 void persist(GJGameLevel* level, int percent) {
@@ -149,6 +165,9 @@ void persist(GJGameLevel* level, int percent) {
         if (percent == 100) static_cast<SaveHook*>(level)->storeNewLocalScore(100, 0);
     }
 }
+void PlayLayer::onQuit(){++quits;currentLayer=nullptr;if(!m_isTestMode)persist(m_level,int(percent));}
+void PlayLayer::onExit(){++exits;currentLayer=nullptr;if(!m_isTestMode)persist(m_level,int(percent));}
+void PlayLayer::resetLevel(){++resets;if(!m_isTestMode)persist(m_level,int(percent));}
 int main() {
     using corum::ranked::RankedRuntime;
     using namespace corum::ranked;
@@ -179,7 +198,7 @@ int main() {
     scene.showEndLayer(); scene.showNewBest(false, 0, 0, false, false, false);
     scene.updateAttempts();assert(scene.attempts==0);
     level.savePercentage(100, false, 0, 0, true);
-    level.storeNewLocalScore(100, 0);
+    for(int i=0;i<20;++i){scene.levelComplete();scene.checkForEnd();scene.showCompleteText();}
     assert(scene.completions == 0 && scene.texts == 0 && scene.checks == 0 && scene.animations == 0);
     assert(scene.endLayers == 0 && scene.newBest == 0 && runtime.clears == 0);
     assert(level.best == 83 && level.scores == 0 && !scene.m_isPracticeMode);
@@ -220,7 +239,7 @@ int main() {
     viewer.percent=100;viewer.destroyPlayer(&local,nullptr);viewer.levelComplete();viewer.showCompleteText();
     viewer.checkForEnd();viewer.playEndAnimationToPos({0,0});viewer.showEndLayer();
     viewer.showNewBest(false,0,0,false,false,false);protectedLevel.savePercentage(100,false,0,0,true);
-    protectedLevel.storeNewLocalScore(100,0);
+    viewer.levelComplete();viewer.showCompleteText();
     assert(viewer.deaths==0 && viewer.completions==0 && viewer.texts==0 && viewer.newBest==0);
     assert(protectedLevel.best==41 && protectedLevel.scores==0 && runtime.ends==0 && runtime.clears==0);
     local.update(0.01f);assert(viewer.freezeLocalDummy(&local));
@@ -230,7 +249,39 @@ int main() {
     recorder.percent=73;recorder.destroyPlayer(&local,nullptr);
     assert(recorder.deaths==1 && !recorder.m_fields->localSafety.active() && realRecordLevel.best==73);
     assert(debug::DebugSpectateRuntime::get().terminals==1 && runtime.ends==0 && runtime.clears==0);
+    recorder.levelComplete();
+    assert(realRecordLevel.best==100&&realRecordLevel.scores==1&&debug::DebugSpectateRuntime::get().terminals==2);
 #endif
+    // Ordinary local/Ranked/Placement cleanup keeps GD saves enabled even after
+    // PlayLayer::get() is cleared. Spectator cleanup runs vanilla in scoped
+    // no-save mode and restores the flag; result guards stay independent.
+    for(bool spectator : {false,true}){
+        runtime={};runtime.serverSpectator=spectator;runtime.ownAlive=!spectator;
+        CorumRankedPlayLayer teardown;SaveHook teardownLevel;
+        teardown.m_level=&teardownLevel;teardown.m_player1=&local;teardown.percent=100;
+        teardown.m_fields->attemptStartReported=!spectator;
+        teardown.m_fields->attemptEndReported=true;
+        currentLayer=&teardown;teardown.syncSpectatorLocalSafety();
+        if(spectator){teardown.testDummyResetBoundary();
+            assert(teardown.resets==1&&teardownLevel.scores==0&&!teardown.m_isTestMode);}
+        teardown.onQuit();
+        assert(teardown.quits==1&&!teardown.m_isTestMode);
+        assert(teardownLevel.scores==(spectator?0:1));
+        assert(teardownLevel.best==(spectator?41:100));
+        currentLayer=&teardown;teardown.onExit();
+        assert(teardown.exits==1&&!teardown.m_isTestMode);
+        assert(teardownLevel.scores==(spectator?0:2));
+        assert(runtime.ends==0);
+    }
+    // Native no-save flag restoration is exception-safe and nesting-safe.
+    bool nativeMode=false;
+    try{ScopedSpectatorPersistenceMode outer(nativeMode,true);assert(nativeMode);
+        {ScopedSpectatorPersistenceMode inner(nativeMode,false);assert(nativeMode);}
+        assert(nativeMode);throw 1;
+    }catch(int){}
+    assert(!nativeMode);
+    nativeMode=true;{ScopedSpectatorPersistenceMode scope(nativeMode,false);assert(nativeMode);}assert(nativeMode);
+    nativeMode=false;{ScopedSpectatorPersistenceMode ordinary(nativeMode,false);nativeMode=true;}assert(nativeMode);
 }
 `;
     const dir = mkdtempSync(join(tmpdir(), 'corum-native-safety-'));
