@@ -11,11 +11,23 @@
 // delegates register newest-first, and End/Cancel only reaches a claimed touch.
 // This is a host fixture, not a claim about the iPad's exact handler priorities.
 namespace cocos2d {
-struct CCTouch { int id; };
+struct CCPoint { float x=0,y=0; };
+struct CCSize { float width=40,height=40; };
+struct CCRect {float x,y,w,h; CCRect(float a,float b,float c,float d):x(a),y(b),w(c),h(d){}
+    bool containsPoint(CCPoint p) const {return p.x>=x && p.x<=x+w && p.y>=y && p.y<=y+h;}};
+struct CCTouch { int id; CCPoint point{110,110}; int getID() const {return id;}
+    CCPoint getLocation() const {return point;} };
 struct CCEvent {};
 struct CCObject { virtual ~CCObject() = default; };
 struct CCNode : CCObject {
     CCNode* parent = nullptr;
+    bool visible = true;
+    CCPoint origin;
+    CCSize size;
+    bool isVisible() const {return visible;}
+    void setVisible(bool v) {visible=v;}
+    CCSize getContentSize() const {return size;}
+    CCPoint convertToNodeSpace(CCPoint p) const {return {p.x-origin.x,p.y-origin.y};}
     CCNode* getParent() { return parent; }
 };
 struct CCTouchDelegate {
@@ -63,16 +75,16 @@ struct CCTouchDispatcher {
             return a->m_nPriority < b->m_nPriority;
         });
     }
-    void began(int id) {
-        CCTouch touch{id};
+    void began(int id, CCPoint point = {110,110}) {
+        CCTouch touch{id,point};
         for (auto& h : handlers) {
             if (h->delegate->ccTouchBegan(&touch, nullptr)) {
                 h->claimed.ids.insert(id); if (h->swallow) break;
             }
         }
     }
-    void ended(int id) {
-        CCTouch touch{id};
+    void ended(int id, CCPoint point = {110,110}) {
+        CCTouch touch{id,point};
         for (auto& h : handlers) if (h->claimed.ids.contains(id)) {
             h->delegate->ccTouchEnded(&touch, nullptr);
             h->claimed.ids.erase(id);

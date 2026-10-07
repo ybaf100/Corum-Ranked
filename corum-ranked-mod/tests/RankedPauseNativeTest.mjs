@@ -125,3 +125,45 @@ int main(){using namespace corum::ranked;
     const dir=mkdtempSync(join(tmpdir(),'corum-pause-native-'));
     try{writeFileSync(join(dir,'test.cpp'),cpp);execFileSync('g++',['-std=c++23','-Wall','-Wextra','-Wpedantic','-Werror',join(dir,'test.cpp'),'-o',join(dir,'test')],{stdio:'pipe'});execFileSync(join(dir,'test'),[],{stdio:'pipe'});}finally{rmSync(dir,{recursive:true,force:true});}
 });
+
+// Geode 5.10.1 Popup::init registers force-priority, but Popup::~Popup is its
+// only cleanup. Model delayed destruction by keeping a closed modal alive.
+// Compile Corum's actual onExit, so it must release ONLY that owner promptly.
+test('closed retained surrender modal releases force priority before the next round',()=>{
+    const exit=body(popup,'void onExit() override');
+    const cpp=`
+#include <cassert>
+#include <set>
+struct CCObject {virtual ~CCObject()=default;};
+struct CCTouchDispatcher {
+ std::set<CCObject*> forceOwners;
+ static CCTouchDispatcher* get(){static CCTouchDispatcher d;return &d;}
+ void unregisterForcePrio(CCObject* o){forceOwners.erase(o);}
+};
+struct Popup:CCObject {
+ bool parent=true;int exits=0;
+ Popup(){CCTouchDispatcher::get()->forceOwners.insert(this);}
+ virtual ~Popup(){CCTouchDispatcher::get()->unregisterForcePrio(this);}
+ virtual void onExit(){parent=false;++exits;}
+};
+#define schedule_selector(x) 0
+struct RankedSurrenderPopup:Popup {void unschedule(int){} ${exit}};
+int main(){auto* d=CCTouchDispatcher::get();Popup external;
+ for(int round=1;round<=3;++round){
+   Popup old;old.onExit();assert(d->forceOwners.contains(&old)); // old lifecycle leak until destruction
+   {RankedSurrenderPopup modal;
+    assert(d->forceOwners.contains(&modal));modal.onExit();
+    assert(!d->forceOwners.contains(&modal)&&!modal.parent&&modal.exits==1);
+    assert(d->forceOwners.contains(&external)&&d->forceOwners.contains(&old));
+    modal.onExit();assert(!d->forceOwners.contains(&modal));}
+   assert(d->forceOwners.contains(&external));
+ }
+ assert(d->forceOwners.size()==1);
+}
+`;
+    const dir=mkdtempSync(join(tmpdir(),'corum-modal-priority-'));
+    try{writeFileSync(join(dir,'test.cpp'),cpp);
+        execFileSync('g++',['-std=c++23','-Wall','-Wextra','-Wpedantic','-Werror',join(dir,'test.cpp'),'-o',join(dir,'test')],{stdio:'pipe'});
+        execFileSync(join(dir,'test'),[],{stdio:'pipe'});
+    }finally{rmSync(dir,{recursive:true,force:true});}
+});

@@ -5,7 +5,7 @@ import test from 'node:test';
 const source=readFileSync(fileURLToPath(new URL('../src/RankedAudioManager.cpp',import.meta.url)),'utf8');
 const popup=readFileSync(fileURLToPath(new URL('../src/RankedPopup.cpp',import.meta.url)),'utf8');
 function body(from,to){const a=source.indexOf(from),b=source.indexOf(to,a+from.length);assert(a>=0&&b>a);return source.slice(a,b);}
-test('single-use streams prebuffer exact offsets without a transition-time seek',()=>{
+test('single-use streams prepare silent offset channels ahead of transitions',()=>{
  const prepared=body('FMOD::Sound* RankedAudioManager::preparedSound(','void RankedAudioManager::synchronizeSongCaches()');
  assert.match(prepared,/FMOD_CREATESOUNDEXINFO info \{\}/);
  assert.match(prepared,/info\.cbsize = sizeof\(info\)/);
@@ -13,17 +13,24 @@ test('single-use streams prebuffer exact offsets without a transition-time seek'
  assert.match(prepared,/FMOD_CREATESTREAM \| FMOD_2D \| FMOD_NONBLOCKING \| FMOD_ACCURATETIME/);
  assert.match(prepared,/m_preparedSounds\[resource\.key\]/);
  assert.match(prepared,/m_consumedPreparedKeys\.contains\(resource\.key\)/);
- assert.doesNotMatch(source,/->setPosition\(/); // not a mocked seek-success claim
+ assert.doesNotMatch(body('void RankedAudioManager::startDesiredAudio(', 'void RankedAudioManager::updatePendingAudioStart()'),/->setPosition\(|playSound\(/);
+ assert.match(source,/prewarmReadyChannels\(\);/);
+ const warm=body('FMOD::Channel* RankedAudioManager::preparedChannel(', 'void RankedAudioManager::prewarmReadyChannels()');
+ assert.match(warm,/if \(!prepared\.seekSubmitted\)/);
+ assert.match(warm,/prepared\.channel->setPosition\(startMs, FMOD_TIMEUNIT_MS\)/);
+ assert.match(warm,/prepared\.seekSubmitted = true/);
+ assert.match(warm,/prepared\.channel->setMute\(true\)/);
  assert.match(source,/prewarmReadySounds\(\);\n}\n\nvoid RankedAudioManager::onApplicationPause/);
 });
-test('an initial offset mismatch stays muted and cannot silently start at zero',()=>{
+test('initial offset mismatch is repaired while muted; transferred offset still validated',()=>{
  const start=body('void RankedAudioManager::startDesiredAudio(','void RankedAudioManager::updatePendingAudioStart()');
- assert.match(start,/playSound\(sound, nullptr, true, &channel\)/);
+ assert.match(source,/playSound\(sound, nullptr, true, &prepared\.channel\)/);
+ assert.match(start,/preparedChannel\(\*resource, sound, prepareResult\)/);
  assert.match(start,/m_consumedPreparedKeys\.insert\(resource->key\)/);
  assert.match(start,/channel->setMute\(true\)/);assert.doesNotMatch(start,/setPaused\(false\)/);
  const finish=body('void RankedAudioManager::updatePendingAudioStart()','void RankedAudioManager::cancelPendingAudioStart()');
  assert(finish.indexOf('getPosition(&position')<finish.indexOf('setPaused(false)'));
- assert.match(finish,/failDesiredAudio\("initial-position"/);
+ assert.match(finish,/failDesiredAudio\("prepared-position"/);
 });
 test('stream starvation mute is preserved during normal refresh and application resume',()=>{
  const health=body('void RankedAudioManager::updateStreamHealth()','void RankedAudioManager::synchronizeSongCaches()');

@@ -1,6 +1,7 @@
 #include "RankedEntryOverlay.hpp"
 #include "RankedVisuals.hpp"
 #include "RankedTranslations.hpp"
+#include "RankedInput.hpp"
 #include "../domain/EntryCountdown.hpp"
 #include <Geode/binding/UILayer.hpp>
 
@@ -42,11 +43,19 @@ void RankedEntryOverlay::releaseToGameplay(PlayLayer* play) {
     cancelPauseTouch();
     m_holding = false;
     m_play = play;
+    synchronizeTouchPriority(play);
     setOpacity(0);
     m_heading->setVisible(false);
     m_digit->setVisible(false);
     setKeypadEnabled(false);
-    log::info("[RankedPauseInput] scene-owned native button ready");
+    auto* handler = CCDirector::sharedDirector()->getTouchDispatcher()->findHandler(this);
+    log::info("[RankedPauseInput] scene-owned native button ready priority={}",
+        handler ? handler->m_nPriority : 0);
+}
+void RankedEntryOverlay::synchronizeTouchPriority(PlayLayer* play) {
+    if (!play || play != PlayLayer::get() || !play->m_uiLayer || !play->m_uiLayer->m_pauseBtn) return;
+    auto* menu = typeinfo_cast<CCMenu*>(play->m_uiLayer->m_pauseBtn->getParent());
+    alignPauseObserverPriority(this, play->m_uiLayer, menu);
 }
 bool RankedEntryOverlay::pauseHit(PlayLayer* play, CCTouch* touch) const {
     if (!play || play != PlayLayer::get() || !play->isRunning() || play->m_isPaused ||
@@ -96,6 +105,9 @@ void RankedEntryOverlay::ccTouchCancelled(CCTouch* touch, CCEvent*) {
     if (touch->getID() == m_pauseTouchId) cancelPauseTouch();
 }
 void RankedEntryOverlay::present(bool bothEntered, std::optional<std::int64_t> remainingMs) {
+    // The native child delegates have registered by this scene heartbeat. Keep
+    // the countdown blocker ahead of them too, including rounds after modals.
+    synchronizeTouchPriority(PlayLayer::get());
     auto const frame = entryCountdownFrame(remainingMs);
     auto const korean = i18n::isKorean();
     m_heading->setString(bothEntered

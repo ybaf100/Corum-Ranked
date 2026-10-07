@@ -1,6 +1,8 @@
 #pragma once
 
 #include <Geode/Geode.hpp>
+#include <algorithm>
+#include <initializer_list>
 #include <limits>
 
 namespace corum::ranked::ui {
@@ -36,6 +38,24 @@ inline void restorePauseMenuInput(cocos2d::CCMenu* menu, cocos2d::CCLayer* input
         menuHandler->m_nPriority >= inputHandler->m_nPriority) {
         dispatcher->setPriority(inputHandler->m_nPriority - 1, menu);
     }
+}
+
+// Modal force-priority changes can put a new round's native delegates below
+// -500. The scene-owned observer must precede BOTH of its native delegates;
+// changing only the Pause menu leaves the observer behind swallowing gameplay.
+// Never reorder unrelated/modal handlers or alter the force-priority registry.
+inline void alignPauseObserverPriority(cocos2d::CCLayer* observer,
+    cocos2d::CCLayer* input, cocos2d::CCMenu* menu) {
+    auto* dispatcher = cocos2d::CCDirector::sharedDirector()->getTouchDispatcher();
+    auto* own = observer ? dispatcher->findHandler(observer) : nullptr;
+    if (!own) return;
+    auto priority = own->m_nPriority;
+    for (cocos2d::CCLayer* native : {input, static_cast<cocos2d::CCLayer*>(menu)}) {
+        auto* handler = native ? dispatcher->findHandler(native) : nullptr;
+        if (handler && handler->m_nPriority > std::numeric_limits<int>::min())
+            priority = std::min(priority, handler->m_nPriority - 1);
+    }
+    if (priority != own->m_nPriority) dispatcher->setPriority(priority, observer);
 }
 
 } // namespace corum::ranked::ui

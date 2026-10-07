@@ -17,6 +17,7 @@ public:
     void ccTouchCancelled(cocos2d::CCTouch*, cocos2d::CCEvent*) override;
     void keyBackClicked() override {}
 private:
+    void synchronizeTouchPriority(PlayLayer* play);
     bool pauseHit(PlayLayer* play, cocos2d::CCTouch* touch) const;
     void cancelPauseTouch();
     geode::WeakRef<PlayLayer> m_play;

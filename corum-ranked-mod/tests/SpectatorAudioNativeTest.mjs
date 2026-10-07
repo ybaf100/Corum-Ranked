@@ -25,6 +25,7 @@ for (const debugOn of [false, true]) test(`production audio handoff + retained l
 #include <set>
 #include <string>
 #include <vector>
+#include <unordered_map>
 namespace geode::log {template<class... T> void info(T...) {}}
 using namespace geode;
 namespace fmt {template<class... T> std::string format(T...) {return "key";}}
@@ -37,6 +38,10 @@ namespace corum::ranked {
 enum class RankedAudioMode {Silent,Lobby,LobbyPromotion,LobbyDemotionWarning,ResultWin,ResultLose,Round3DeathmatchWait,Round12};
 struct TransitionTrace {static TransitionTrace& get(){static TransitionTrace t;return t;}void mark(char const*){}};
 struct RankedAudioManager {
+ struct PreparedChannel{struct Channel{void stop(){}};Channel* channel=nullptr;bool failed=false;};
+ std::unordered_map<std::string,PreparedChannel> m_preparedChannels;
+ std::set<std::string> m_consumedPreparedKeys;
+ void stopPreparedChannels(){m_preparedChannels.clear();}
  RankedAudioMode m_desiredMode=RankedAudioMode::Lobby;bool m_switchPending=false,m_ownedFadeOutPending=false,m_playbackVerifyPending=false;
  RankedAudioMode m_requestedMode=RankedAudioMode::Lobby;std::set<std::string> m_failedPlaybackKeys;
  std::chrono::steady_clock::time_point m_audioStartBeganAt{};

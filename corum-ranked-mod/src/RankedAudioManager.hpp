@@ -94,6 +94,10 @@ private:
     void clearPlaybackState();
     void synchronizeSongCaches();
     void prewarmReadySounds();
+    void prewarmReadyChannels();
+    void stopPreparedChannels();
+    [[nodiscard]] FMOD::Channel* preparedChannel(RankedAudioResourceView const& resource,
+        FMOD::Sound* sound, int& result);
     void releasePreparedSounds();
     [[nodiscard]] FMOD::Sound* preparedSound(RankedAudioResourceView const& resource);
     void reapRetainedSounds();
@@ -147,6 +151,17 @@ private:
     // Each resource has its own initially-seeked, single-use stream. Replaying
     // the same streaming Sound resets it and discards its initial seek buffer.
     std::unordered_map<std::string, FMOD::Sound*> m_preparedSounds;
+    struct PreparedChannel {
+        FMOD::Channel* channel = nullptr;
+        std::chrono::steady_clock::time_point beganAt {};
+        bool seekSubmitted = false;
+        bool failed = false;
+        int result = 0;
+    };
+    // A Sound's initial seek is not a certificate of the paused Channel's
+    // position. Prepare/repair that channel asynchronously while it is muted;
+    // consume it once only, after its actual offset/buffer is ready.
+    std::unordered_map<std::string, PreparedChannel> m_preparedChannels;
     std::set<std::string> m_consumedPreparedKeys;
     std::vector<FMOD::Sound*> m_retainedSounds;
     FMOD::Sound* m_rankedSound = nullptr;

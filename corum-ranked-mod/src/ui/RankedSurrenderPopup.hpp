@@ -97,6 +97,15 @@ class RankedSurrenderPopup final : public Popup {
         m_status->setString(text.c_str()); corum::ranked::ui::fitLabelWidth(m_status, 336, 0.25f, 0.15f);
     }
 public:
+    void onExit() override {
+        unschedule(schedule_selector(RankedSurrenderPopup::watchContext));
+        // Geode 5.10.1 Popup releases this registration only in its destructor.
+        // A closed Popup can survive there in WeakRefPool; release OUR modal
+        // registration at scene exit rather than shifting the next round's UI.
+        CCTouchDispatcher::get()->unregisterForcePrio(this);
+        Popup::onExit();
+    }
+    void onClose(CCObject*) override { dismiss(); }
     static RankedSurrenderPopup* create(PauseLayer* owner, std::string matchId, int round, int deathmatch) {
         auto* popup = new RankedSurrenderPopup;
         if (popup->init(owner, std::move(matchId), round, deathmatch)) { popup->autorelease(); return popup; }

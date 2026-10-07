@@ -29,6 +29,9 @@ for (const debug of [false, true]) test(`production audio transitions, bounded f
         'void RankedAudioManager::releasePreparedSounds()',
         'FMOD::Sound* RankedAudioManager::preparedSound(',
         'void RankedAudioManager::prewarmReadySounds()',
+        'FMOD::Channel* RankedAudioManager::preparedChannel(',
+        'void RankedAudioManager::prewarmReadyChannels()',
+        'void RankedAudioManager::stopPreparedChannels()',
         'void RankedAudioManager::reapRetainedSounds()',
         'void RankedAudioManager::updateStreamHealth()',
         'void RankedAudioManager::beginOwnedFadeOut(',
@@ -90,7 +93,7 @@ struct Sound {
 };
 struct Channel {
     Sound* sound=nullptr;bool playing=true,paused=true,muted=false,failUnpause=false,failSecondFade=false;
-    int stops=0,unpauses=0,volumeWrites=0;float volume=1;unsigned int position=0;
+    int stops=0,unpauses=0,volumeWrites=0;float volume=1;unsigned int position=0,pendingPosition=0;
     unsigned long long clock=4800000,stopAt=0;bool dspAvailable=true;
     std::vector<std::pair<unsigned long long,float>> fadePoints;
     FMOD_RESULT stop(){++stops;playing=false;return FMOD_OK;}
@@ -100,7 +103,7 @@ struct Channel {
     FMOD_RESULT setMute(bool value){muted=value;return FMOD_OK;}FMOD_RESULT getMute(bool* value){*value=muted;return FMOD_OK;}
     FMOD_RESULT setVolume(float value){volume=value;++volumeWrites;return FMOD_OK;}FMOD_RESULT getVolume(float* value){*value=volume;return FMOD_OK;}
     FMOD_RESULT setPosition(unsigned int value,int){++sound->seekCalls;if(sound->seek==Sound::NotReadyForever)return FMOD_ERR_NOTREADY;
-        position=value;if(sound->seek==Sound::Async)sound->state=FMOD_OPENSTATE_SETPOSITION;return FMOD_OK;}
+        if(sound->seek==Sound::Async){pendingPosition=value;sound->state=FMOD_OPENSTATE_SETPOSITION;}else position=value;return FMOD_OK;}
     FMOD_RESULT getPosition(unsigned int* value,int){*value=position;return FMOD_OK;}
     FMOD_RESULT getDSPClock(unsigned long long*,unsigned long long* parent){if(!dspAvailable)return FMOD_ERR_INVALID_HANDLE;*parent=clock;return FMOD_OK;}
     FMOD_RESULT addFadePoint(unsigned long long at,float value){
@@ -129,6 +132,7 @@ struct System {
     FMOD_RESULT getMasterChannelGroup(ChannelGroup** value){*value=&master;return FMOD_OK;}
     void advance(int ms){AudioClock::current+=std::chrono::milliseconds(ms);for(auto& c:channels){
         c->clock+=static_cast<unsigned long long>(ms)*48;
+        if(c->pendingPosition&&c->sound->state==FMOD_OPENSTATE_READY){c->position=c->pendingPosition;c->pendingPosition=0;}
         if(c->playing&&!c->paused&&c->sound->state==FMOD_OPENSTATE_READY&&!c->sound->starving)c->position+=ms;
         if(c->stopAt&&c->clock>=c->stopAt)c->playing=false;}}
 };
@@ -236,10 +240,56 @@ int main(){
         assert(old->sound->releases==0);f.audio.setMode(RankedAudioMode::ResultWin);
         auto* next=f.audio.m_rankedChannel;assert(next&&next->sound!=old->sound&&next->position==29000);
         assert(f.audio.m_retiringChannel==old&&old->stops==0&&old->sound->releases==0);f.step(2000);}
-    // Reject accidental reused buffers with a wrong offset while still muted.
-    {Fixture f;auto* old=f.start(RankedAudioMode::Lobby);auto* match=f.sound(786863);match->plays=1;
-        f.audio.setMode(RankedAudioMode::Round12);assert(f.audio.m_failedPlaybackKeys.contains("match"));
-        assert(f.audio.m_rankedChannel==old&&old->stops==0&&match->seekCalls==0);}
+    // A READY Sound followed by a successful paused playSound may still report
+    // zero. beta38 immediately latched menu -> Silent here (device result=0).
+    // Cover every configured offset, including zero, with the ACTUAL class.
+    for(unsigned int offset:{0u,2000u,26000u,29000u,182000u}) {Fixture f;
+        f.audio.m_config.audio.resources={{"menu","",224958,double(offset)/1000,true}};
+        f.system.configureChannel=[](auto* c){c->position=0;};
+        f.audio.setMode(RankedAudioMode::Lobby);
+        if(offset){assert(!f.audio.m_rankedChannel&&!f.audio.m_failedPlaybackKeys.contains("menu"));
+            auto* candidate=f.system.channels.back().get();assert(candidate->paused&&candidate->muted);
+            assert(candidate->sound->seekCalls==1);f.step(20);}
+        auto* c=f.audio.m_rankedChannel;assert(c&&c->position==offset&&!c->paused&&!c->muted);
+        f.step(2000);assert(near(c->audible(),0.8f));
+        assert(c->sound->seekCalls==(offset?1:0));}
+    // Async seek leaves getPosition stale until the buffer is ready. The old
+    // channel continues; the candidate never unpauses at the wrong position.
+    {Fixture f;auto* old=f.start(RankedAudioMode::Lobby);auto* s=f.sound(786863);
+        s->seek=FMOD::Sound::Async;
+        f.system.configureChannel=[](auto* c){c->position=0;c->sound->seek=FMOD::Sound::Async;};
+        f.audio.setMode(RankedAudioMode::Round12);auto* pending=f.system.channels.back().get();
+        assert(f.audio.m_rankedChannel==old&&pending->paused&&pending->muted&&s->seekCalls==1);
+        assert(pending->position==0&&s->state==FMOD_OPENSTATE_SETPOSITION);
+        for(int i=0;i<40;++i) {f.audio.setMode(RankedAudioMode::Round12);f.step(20);}
+        assert(s->seekCalls==1&&old->stops==0&&!f.audio.m_failedPlaybackKeys.contains("match"));
+        s->state=FMOD_OPENSTATE_READY;f.step(20);
+        assert(f.audio.m_rankedChannel==pending&&pending->position==26000&&f.audio.m_retiringChannel==old);}
+    // Warm the paused R3 candidate during the lobby. Mode changes must transfer
+    // that exact prepared channel without a new play/seek or 182s flush.
+    {Fixture f;f.audio.prewarmReadySounds();
+        f.system.configureChannel=[](auto* c){c->position=0;};f.audio.setMode(RankedAudioMode::Lobby);
+        f.step(20);f.step(20);auto* r3=f.sound(99477);
+        auto* standby=f.audio.m_preparedChannels.at("round3_deathmatch_wait").channel;
+        assert(standby&&standby->paused&&standby->muted&&standby->position==182000&&r3->seekCalls==1);
+        auto const plays=f.system.plays;f.audio.setMode(RankedAudioMode::Round3DeathmatchWait);
+        assert(f.audio.m_rankedChannel==standby&&f.system.plays==plays&&r3->seekCalls==1);
+        f.step(2000);assert(near(standby->audible(),0.8f));}
+    // An accepted but permanently stale seek stays silent and times out once.
+    {Fixture f;auto* old=f.start(RankedAudioMode::Lobby);auto* s=f.sound(786863);
+        f.system.configureChannel=[](auto* c){c->position=0;c->sound->seek=FMOD::Sound::Async;};
+        f.audio.setMode(RankedAudioMode::Round12);
+        for(int i=0;i<170;++i){f.audio.setMode(RankedAudioMode::Round12);f.step(20);}
+        assert(s->seekCalls==1&&f.audio.m_failedPlaybackKeys.contains("match"));
+        assert(f.audio.m_rankedChannel==old&&old->stops==0);
+        const int plays=f.system.plays;for(int i=0;i<100;++i){f.audio.setMode(RankedAudioMode::Round12);f.step(20);}
+        assert(f.system.plays==plays);}
+    // All muted standby channels are stopped on gameplay/close/config teardown.
+    for(int path=0;path<3;++path){Fixture f;f.audio.prewarmReadySounds();f.start(RankedAudioMode::Lobby);
+        auto* standby=f.audio.m_preparedChannels.at("match").channel;assert(standby&&standby->paused);
+        if(path==0){f.audio.fadeOutForGameplay();}if(path==1){f.audio.restoreMenuMusic();}if(path==2){f.audio.releasePreparedSounds();}
+        assert(standby->stops==1&&f.audio.m_preparedChannels.empty());}
+
     // Interrupted fades preserve instantaneous DSP gain, including Silent.
     for(bool silent:{false,true}){Fixture f;f.audio.setMode(RankedAudioMode::Lobby);
         auto* old=f.audio.m_rankedChannel;f.step(900);assert(near(old->audible(),0.4f));

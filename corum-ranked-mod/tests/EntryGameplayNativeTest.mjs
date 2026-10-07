@@ -45,6 +45,7 @@ using geode::cast::typeinfo_cast;
 #include "${join(root, 'src/domain/FontMetrics.hpp')}"
 namespace geode::log {template<class... T>void info(T...) {}}
 using namespace geode;
+struct PlayLayer;
 struct FakeLabel {
     std::string text;float scale=0;unsigned char opacity=0;
     void setString(char const* s){text=s;}void setScale(float s){scale=s;}
@@ -63,10 +64,10 @@ struct RankedEntryOverlay {
     void present(bool,std::optional<std::int64_t>);
     void dismiss(){++removed;}
     void releaseToGameplay(void*){++releases;}
+    void synchronizeTouchPriority(PlayLayer*){} // dispatcher behavior covered in RankedPauseInputNativeTest
 };
 std::vector<std::unique_ptr<RankedEntryOverlay>> overlays;
 RankedEntryOverlay* RankedEntryOverlay::create(){overlays.push_back(std::make_unique<RankedEntryOverlay>());return overlays.back().get();}
-${presentation}
 }
 struct FakeButton:CCMenuItem {int writes=0;bool isEnabled()const{return enabled;}
 void setEnabled(bool value){enabled=value;++writes;}};
@@ -108,6 +109,7 @@ struct PlayLayer {
         if(m_player1){assert(!m_player1->held);}if(m_player2){assert(!m_player2->held);}++attemptCounts;}
     void addChild(corum::ranked::ui::RankedEntryOverlay*,int){}
 };
+namespace corum::ranked::ui {${presentation}}
 namespace geode {
 template<class T>struct WeakRef {
     T* pointer;std::weak_ptr<int> life;

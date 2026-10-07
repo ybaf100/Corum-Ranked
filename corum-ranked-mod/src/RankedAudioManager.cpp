@@ -127,6 +127,7 @@ PreparedStreamState preparedStreamState(FMOD::Sound* sound, FMOD_RESULT* resultO
     bool starving = false;
     auto const result = sound->getOpenState(&state, nullptr, &starving, nullptr);
     if (resultOut) *resultOut = result;
+    if (result == FMOD_ERR_NOTREADY) return PreparedStreamState::Pending;
     if (result != FMOD_OK || state == FMOD_OPENSTATE_ERROR) return PreparedStreamState::Error;
     if (!starving && (state == FMOD_OPENSTATE_READY || state == FMOD_OPENSTATE_PLAYING)) {
         return PreparedStreamState::Ready;
@@ -486,6 +487,15 @@ void RankedAudioManager::setMode(RankedAudioMode mode) {
     if (mode != m_requestedMode) {
         m_requestedMode = mode;
         m_failedPlaybackKeys.clear();
+        // Retry a failed preparation only on a NEW request, never every UI tick.
+        std::erase_if(m_preparedChannels, [this](auto const& entry) {
+            if (!entry.second.failed) return false;
+            if (entry.second.channel) {
+                entry.second.channel->stop();
+                m_consumedPreparedKeys.insert(entry.first);
+            }
+            return true;
+        });
     }
     mode = availableMode(mode);
     auto const* desired = resourceForMode(mode);
@@ -577,6 +587,7 @@ void RankedAudioManager::releasePreparedSounds() {
     // Stop every channel before releasing shared stream handles.
     cancelPendingAudioStart();
     stopOwnedAudio();
+    stopPreparedChannels();
     m_rankedSound = nullptr;
     for (auto& [songId, sound] : m_preparedSounds) {
         (void)songId;
@@ -595,6 +606,10 @@ FMOD::Sound* RankedAudioManager::preparedSound(RankedAudioResourceView const& re
             preparedStreamState(found->second) != PreparedStreamState::Error) return found->second;
         // Retain active/fading/pending or still-loading handles. release() can
         // wait for decoder work; never release a loading stream in a switch.
+        if (auto channel = m_preparedChannels.find(resource.key); channel != m_preparedChannels.end()) {
+            if (channel->second.channel) channel->second.channel->stop();
+            m_preparedChannels.erase(channel);
+        }
         m_retainedSounds.push_back(found->second);
         m_preparedSounds.erase(found);
         m_consumedPreparedKeys.erase(resource.key);
@@ -635,6 +650,97 @@ void RankedAudioManager::prewarmReadySounds() {
     for (auto const& resource : m_config.audio.resources) {
         if (resource.songId > 0 && !resource.key.empty()) (void)preparedSound(resource);
     }
+}
+
+FMOD::Channel* RankedAudioManager::preparedChannel(RankedAudioResourceView const& resource,
+    FMOD::Sound* sound, int& result) {
+    result = FMOD_ERR_NOTREADY;
+    if (!sound) { result = FMOD_ERR_INVALID_HANDLE; return nullptr; }
+    auto& prepared = m_preparedChannels[resource.key];
+    auto const now = std::chrono::steady_clock::now();
+    if (prepared.beganAt == std::chrono::steady_clock::time_point{}) prepared.beganAt = now;
+    auto fail = [&](int error, char const* phase) -> FMOD::Channel* {
+        prepared.failed = true; prepared.result = error; result = error;
+        log::warn("[RankedAudio] channel preparation failed key='{}' phase={} result={}",
+            resource.key, phase, error);
+        return nullptr;
+    };
+    if (prepared.failed) { result = prepared.result; return nullptr; }
+
+    FMOD_RESULT openResult = FMOD_OK;
+    auto const state = preparedStreamState(sound, &openResult);
+    if (state == PreparedStreamState::Error) return fail(static_cast<int>(openResult), "open");
+    if (state == PreparedStreamState::Pending) {
+        if (now - prepared.beganAt >= kPendingAudioStartTimeout)
+            return fail(FMOD_ERR_NOTREADY, "buffer-timeout");
+        return nullptr;
+    }
+
+    if (!prepared.channel) {
+        auto* engine = FMODAudioEngine::sharedEngine();
+        if (!engine || !engine->m_system) return fail(FMOD_ERR_INVALID_HANDLE, "engine");
+        sound->setMode(FMOD_2D | (resource.loop ? FMOD_LOOP_NORMAL : FMOD_LOOP_OFF));
+        sound->setLoopCount(resource.loop ? -1 : 0);
+        auto const playResult = engine->m_system->playSound(sound, nullptr, true, &prepared.channel);
+        if (playResult == FMOD_ERR_NOTREADY) {
+            if (now - prepared.beganAt >= kPendingAudioStartTimeout)
+                return fail(playResult, "play-timeout");
+            return nullptr;
+        }
+        if (playResult != FMOD_OK || !prepared.channel)
+            return fail(playResult == FMOD_OK ? FMOD_ERR_INVALID_HANDLE : playResult, "play");
+        prepared.channel->setVolume(0);
+        prepared.channel->setMute(true);
+    }
+
+    auto const startMs = static_cast<unsigned int>(std::clamp(resource.startSeconds * 1000.0,
+        0.0, static_cast<double>(std::numeric_limits<unsigned int>::max())));
+    unsigned int position = 0;
+    auto const positionResult = prepared.channel->getPosition(&position, FMOD_TIMEUNIT_MS);
+    if (positionResult != FMOD_OK && positionResult != FMOD_ERR_NOTREADY)
+        return fail(positionResult, "position");
+    if (positionResult == FMOD_OK && std::abs(static_cast<double>(position) - startMs) <= 250.0) {
+        result = FMOD_OK;
+        return prepared.channel;
+    }
+    if (now - prepared.beganAt >= kPendingAudioStartTimeout)
+        return fail(FMOD_ERR_NOTREADY, "position-timeout");
+    if (positionResult == FMOD_ERR_NOTREADY) return nullptr;
+    if (!prepared.seekSubmitted) {
+        // beta38 cancelled a successful playSound here. A READY Sound alone
+        // does not prove that this Channel reports the requested initial seek.
+        // Repair ONLY the silent candidate, once. NONBLOCKING flushes/decodes
+        // asynchronously; getPosition may remain stale until it completes.
+        auto const seekResult = prepared.channel->setPosition(startMs, FMOD_TIMEUNIT_MS);
+        if (seekResult == FMOD_ERR_NOTREADY) return nullptr;
+        log::info("[RankedAudio] prepare offset key='{}' expected={}ms observed={}ms seekResult={}",
+            resource.key, startMs, position, static_cast<int>(seekResult));
+        if (seekResult != FMOD_OK) return fail(seekResult, "seek");
+        prepared.seekSubmitted = true;
+    }
+    // Wait for a subsequent audio heartbeat, READY/non-starving and the actual
+    // position. Never replay/reseek an audible or fading predecessor.
+    return nullptr;
+}
+
+void RankedAudioManager::prewarmReadyChannels() {
+    if (!enabled() || m_requestedMode == RankedAudioMode::Silent) return;
+    for (auto const& resource : m_config.audio.resources) {
+        if (m_consumedPreparedKeys.contains(resource.key) || m_failedPlaybackKeys.contains(resource.key)) continue;
+        auto const found = m_preparedSounds.find(resource.key);
+        if (found == m_preparedSounds.end()) continue;
+        int result = 0;
+        (void)preparedChannel(resource, found->second, result);
+    }
+}
+
+void RankedAudioManager::stopPreparedChannels() {
+    for (auto const& [key, prepared] : m_preparedChannels) if (prepared.channel) {
+        prepared.channel->stop();
+        // Even a muted first play consumes initialseekposition.
+        m_consumedPreparedKeys.insert(key);
+    }
+    m_preparedChannels.clear();
 }
 
 void RankedAudioManager::reapRetainedSounds() {
@@ -906,33 +1012,23 @@ void RankedAudioManager::startDesiredAudio(bool retry) {
         return;
     }
 
-    sound->setMode(FMOD_2D | (resource->loop ? FMOD_LOOP_NORMAL : FMOD_LOOP_OFF));
-    sound->setLoopCount(resource->loop ? -1 : 0);
-
-    // Initial seek and compressed-file indexing happened in prewarming. Each
-    // resource owns an independent, single-use stream even for shared song IDs.
+    // Prewarming advances a paused channel as well as its Sound. Initial
+    // position mismatches are repaired there, not treated as immediate failure.
     auto const playStarted = std::chrono::steady_clock::now();
-    FMOD::Channel* channel = nullptr;
-    auto const playResult = engine->m_system->playSound(sound, nullptr, true, &channel);
+    int prepareResult = FMOD_OK;
+    auto* channel = preparedChannel(*resource, sound, prepareResult);
     auto const playElapsedUs = std::chrono::duration_cast<std::chrono::microseconds>(
-        std::chrono::steady_clock::now() - playStarted
-    ).count();
-    if (playResult == FMOD_ERR_NOTREADY) {
+        std::chrono::steady_clock::now() - playStarted).count();
+    if (!channel) {
         m_switchPending = true;
-        if (audioStartTimedOut()) failDesiredAudio("play-notready-timeout", static_cast<int>(playResult));
+        auto const prepared = m_preparedChannels.find(resource->key);
+        if (prepareResult != FMOD_ERR_NOTREADY ||
+            (prepared != m_preparedChannels.end() && prepared->second.failed))
+            failDesiredAudio("channel-prepare", prepareResult);
+        else if (audioStartTimedOut()) failDesiredAudio("channel-prepare-timeout", prepareResult);
         return;
     }
-    if (playResult != FMOD_OK || !channel) {
-        log::error(
-            "Ranked audio: playSound failed key='{}' song={} result={} path='{}'",
-            resource->key,
-            resource->songId,
-            static_cast<int>(playResult),
-            path
-        );
-        failDesiredAudio("play", static_cast<int>(playResult));
-        return;
-    }
+    m_preparedChannels.erase(resource->key); // transfer the single-use channel
 
     // Keep the candidate paused/muted until its prepared offset is verified.
     // The predecessor stays audible unless its own stream is starving.
@@ -989,8 +1085,9 @@ void RankedAudioManager::updatePendingAudioStart() {
         return;
     }
 
-    // Verify the initial offset before allowing any audible data. Never repair
-    // a reused/incorrect stream by seeking at the presentation boundary.
+    // Revalidate the prepared channel before allowing audible data. Initial
+    // offset mismatch/async seek was handled while warming, never by discarding
+    // a successful playSound simply because its first getPosition was stale.
     unsigned int position = 0;
     auto const positionResult = m_pendingChannel->getPosition(&position, FMOD_TIMEUNIT_MS);
     if (positionResult == FMOD_ERR_NOTREADY) {
@@ -998,7 +1095,9 @@ void RankedAudioManager::updatePendingAudioStart() {
         return;
     }
     if (positionResult != FMOD_OK || std::abs(static_cast<double>(position) - m_pendingStartMs) > 250.0) {
-        failDesiredAudio("initial-position", static_cast<int>(positionResult));
+        log::warn("[RankedAudio] prepared position changed key='{}' expected={}ms observed={}ms result={}",
+            resource->key, m_pendingStartMs, position, static_cast<int>(positionResult));
+        failDesiredAudio("prepared-position", static_cast<int>(positionResult));
         return;
     }
 
@@ -1206,7 +1305,9 @@ void RankedAudioManager::fadeOutForGameplay() {
     m_switchPending = false;
     cancelPendingAudioStart();
     stopOwnedAudio();
-    // Re-arm consumed offsets before the next retained round scene is shown.
+    // No paused standby channels may survive into native gameplay. Re-arm
+    // their first-play streams for the next retained Ranked scene instead.
+    stopPreparedChannels();
     prewarmReadySounds();
 }
 
@@ -1235,6 +1336,7 @@ void RankedAudioManager::restoreMenuMusic() {
     m_playbackRetryCount = 0;
     cancelPendingAudioStart();
     stopOwnedAudio();
+    stopPreparedChannels();
     if (auto* engine = FMODAudioEngine::sharedEngine()) engine->stopAllMusic(true);
     if (auto* game = GameManager::sharedState()) game->playMenuMusic();
 }
@@ -1261,6 +1363,10 @@ void RankedAudioManager::tick() {
         m_failedSongIds.clear();
         prewarmReadySounds();
     }
+
+    // Warm future Round/R3/Result channels during the visible Ranked scene;
+    // the gameplay handoff stops them and the covered scene does not tick.
+    prewarmReadyChannels();
 
     if (m_resumeRecoveryRequested) {
         m_resumeRecoveryRequested = false;
