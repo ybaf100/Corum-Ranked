@@ -76,6 +76,8 @@ inline constexpr std::array kKoreanTranslations {
     Translation{"surrender-sending", "항복 전송 중..."},
     Translation{"surrender-retrying", "연결 오류 · 항복 재전송 중..."},
     Translation{"surrender-accepted", "항복 처리 완료"},
+    Translation{"opponent-surrender-round", "상대가 라운드에 항복했습니다."},
+    Translation{"opponent-surrender-match", "상대가 경기에서 항복했습니다."},
     Translation{"surrender-rejected", "항복할 수 없습니다. 경기 상태를 확인 후 다시 시도하세요."},
     Translation{"match-pause", "경기 일시정지"},
     Translation{"confirm-skip", "건너뛰고 배치"},

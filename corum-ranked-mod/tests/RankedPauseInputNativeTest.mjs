@@ -20,20 +20,25 @@ using geode::cast::typeinfo_cast;
 struct Button:CCMenuItem {void selected(){CCMenuItem::selected=true;}};
 struct PlayLayer;
 struct UILayer:CCLayer {Button* m_pauseBtn=nullptr;PlayLayer* owner=nullptr;
- int touchID=5,resets=0,hits=0;void doPause();
+ PlayLayer* m_gameLayer=nullptr;int touchID=5,resets=0,hits=0,buttonCallbacks=0;bool nativeRequest=false;void doPause();void onPause();
  bool ccTouchBegan(CCTouch*,CCEvent*) override {++hits;return true;}};
 struct PlayLayer:CCNode {static inline PlayLayer* current=nullptr;bool m_isPaused=false,running=true,complete=false;
  std::shared_ptr<int> life=std::make_shared<int>(0);UILayer ui;UILayer* m_uiLayer=&ui;Button pause;CCMenu menu;
+ struct Level {int m_levelID=123;}level;Level* m_level=&level;
  int pauseMenus=0,pauseCounter=0;
- PlayLayer(){current=this;ui.owner=this;ui.parent=this;ui.m_pauseBtn=&pause;menu.parent=&ui;
+ PlayLayer(){current=this;ui.owner=this;ui.m_gameLayer=this;pause.callback=[this]{ui.onPause();};ui.parent=this;ui.m_pauseBtn=&pause;menu.parent=&ui;
    menu.item=&pause;pause.parent=&menu;pause.origin={100,100};}
  ~PlayLayer(){if(current==this)current=nullptr;}static PlayLayer* get(){return current;}
  bool isRunning()const{return running;}bool canPauseGame()const{return !complete;}
  void pauseGame(bool){if(m_isPaused||!canPauseGame())return;m_isPaused=true;++pauseMenus;}
  void resume(){m_isPaused=false;}};
-void UILayer::doPause(){touchID=-1;++resets;owner->pauseGame(false);++owner->pauseCounter;}
+void UILayer::onPause(){++buttonCallbacks;nativeRequest=true;doPause();}
+// Boundary double models an internal step requiring a native button request.
+// This is a regression for preserving the public entry path, not iOS disassembly.
+void UILayer::doPause(){if(!nativeRequest)return;nativeRequest=false;touchID=-1;++resets;owner->pauseGame(false);++owner->pauseCounter;}
 namespace geode {namespace log {template<class...T>void info(T...) {}}
  template<class T>struct WeakRef {T* p=nullptr;std::weak_ptr<int> life;
+ WeakRef()=default;explicit WeakRef(T* v):p(v){if(v)life=v->life;}
  WeakRef& operator=(T* v){p=v;if(v)life=v->life;else life.reset();return *this;}
  struct Ref {T* p;T* data()const{return p;}explicit operator bool()const{return p;}T* operator->()const{return p;}};
  Ref lock()const{return {life.expired()?nullptr:p};}};}
@@ -67,9 +72,11 @@ int main(){
      dispatcher.began(90);dispatcher.ended(90);
      // beta38 -500 is behind the native menu; its callback can consume the
      // touch without opening Pause. Direct callback tests missed this ordering.
-     assert(play.pauseMenus==0 && play.pause.activations==1);
+     assert(play.pauseMenus==1 && play.pause.activations==1);play.resume();
+     play.pauseMenus=0;play.pauseCounter=0;
      input.m_holding=true;}
    assert(input.ccTouchBegan(&pause,nullptr));input.releaseToGameplay(&play);input.ccTouchEnded(&pause,nullptr);
+   play.ui.doPause();assert(play.pauseMenus==0); // internal call alone is not a public request
    assert(play.pauseMenus==0&&!input.m_holding&&input.opacity==0&&!input.keypad&&!input.heading.visible&&!input.digit.visible);
    assert(dispatcher.findHandler(&input)->m_nPriority < dispatcher.findHandler(&play.ui)->m_nPriority);
    assert(dispatcher.findHandler(&input)->m_nPriority < dispatcher.findHandler(&play.menu)->m_nPriority);

@@ -28,7 +28,7 @@ test('actual scene callbacks hand off only after End/authority, even with vanill
         'void syncSpectatorLocalSafety()', 'corum::ranked::SpectatorSceneContext currentSpectatorSceneContext()',
         'bool watchableSpectatorScene()', 'bool prepareSpectatorScene()',
         'void cleanupSpectatorPresentation()', 'void updateSpectatorView(float dt)',
-        'bool finishTerminalGameplayHandoff()', 'void spectatorFrame(float dt)',
+        'bool finishTerminalGameplayHandoff()', 'bool finishConcededGameplayHandoff()', 'void spectatorFrame(float dt)',
     ].map(method).join('\n');
     const cpp = `
 #include "${join(root, 'src/domain/SpectatorCameraPolicy.hpp')}"
@@ -36,12 +36,18 @@ test('actual scene callbacks hand off only after End/authority, even with vanill
 #include <cassert>
 #include <chrono>
 #include <memory>
+#include <vector>
+#include <functional>
 namespace geode::log { template<class... T> void info(T...) {} }
+namespace geode {template<class T>struct WeakRef {T* p;explicit WeakRef(T* v):p(v){}struct Ref{T* p;T* data(){return p;}T* operator->(){return p;}explicit operator bool(){return p;}};Ref lock()const{return {p};}};}
+std::vector<std::function<void()>> pendingSceneReturns;
+void queueInMainThread(std::function<void()> f){pendingSceneReturns.push_back(f);}
 using namespace geode;
 struct PlayerObject { bool m_isDead=false,visible=true; void setVisible(bool b){visible=b;} void stopAllActions(){} };
 struct CCLabelBMFont { void setString(char const*){} };
 struct GJBaseGameLayer { int cameras=0; void updateCamera(float){++cameras;} };
 struct PlayLayer: GJBaseGameLayer {
+ static inline PlayLayer* current=nullptr;PlayLayer(){current=this;}static PlayLayer* get(){return current;}bool isRunning(){return true;}
     PlayerObject* m_player1=nullptr;
     bool m_isTestMode=false,m_isPracticeMode=false,m_hasCompletedLevel=false;
     int resets=0;
@@ -74,7 +80,7 @@ struct RankedRuntime {
     bool blocked=false; int ticks=0,levelId=123;
     static RankedRuntime& get(){static RankedRuntime r;return r;}
     View const& view()const{return data;}
-    bool gameplayConceded(int,int)const{return false;}
+    bool conceded=false;bool gameplayConceded(int,int)const{return conceded;}
     bool isSpectating()const{return serverSpectator&&!ownAlive&&!placement;}
     bool isPlacement()const{return placement;}
     bool hasLocalGameplayAuthority()const{return ownAlive;}
@@ -151,6 +157,16 @@ struct CorumRankedPlayLayer: PlayLayer {
 int main(){
     using namespace corum::ranked;
     auto& runtime=RankedRuntime::get(); auto& live=SpectatorLiveRuntime::get();
+    {CorumRankedPlayLayer surrendered;runtime.conceded=true;
+     assert(surrendered.finishConcededGameplayHandoff());
+     surrendered.spectatorFrame(0.01f);assert(surrendered.quits==0&&pendingSceneReturns.size()==1);
+     assert(surrendered.m_fields->attemptEndReported&&surrendered.m_fields->autoExitRequested);
+     // Server advances before the deferred return. The old scene still returns exactly once.
+     runtime.data.match.roundNumber=2;pendingSceneReturns.front()();pendingSceneReturns.clear();
+     assert(surrendered.quits==1);runtime.conceded=false;runtime.data.match.roundNumber=1;}
+    {CorumRankedPlayLayer old;runtime.conceded=true;old.finishConcededGameplayHandoff();
+     CorumRankedPlayLayer newer;pendingSceneReturns.front()();pendingSceneReturns.clear();
+     assert(old.quits==0&&newer.quits==0);runtime.conceded=false;}
     CorumRankedPlayLayer scene; PlayerObject local; scene.m_player1=&local;
     runtime.serverSpectator=true; scene.spectatorFrame(0.01f);
     assert(!scene.m_fields->spectatorMode && scene.cameras==0 && local.visible);

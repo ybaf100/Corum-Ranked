@@ -17,10 +17,12 @@ test('actual gameplay controls serialize pause leases, preserve 30s across round
     const methods=['std::string RankedRuntime::beginMatchGameplayPause(', 'void RankedRuntime::endMatchGameplayPause(',
         'double RankedRuntime::matchPauseRemainingMs()', 'void RankedRuntime::flushGameplayControls()',
         'void RankedRuntime::resetGameplayControls()', 'void RankedRuntime::surrenderCurrentMatch(',
-        'bool RankedRuntime::gameplayConceded('].map(body).join('\n').replaceAll('std::chrono::steady_clock::now()','testNow()');
+        'bool RankedRuntime::gameplayConceded(', 'void RankedRuntime::observeGameplayConcession(', 'bool RankedRuntime::opponentConceded('].map(body).join('\n').replaceAll('std::chrono::steady_clock::now()','testNow()');
     const cpp=`
 #include "${join(root,'src/domain/MatchPauseBudget.hpp')}"
+#include "${join(root,'src/domain/GameplayConcession.hpp')}"
 #include <cassert>
+#include <string_view>
 #include <chrono>
 #include <functional>
 #include <map>
@@ -28,6 +30,7 @@ test('actual gameplay controls serialize pause leases, preserve 30s across round
 #include <variant>
 #include <vector>
 ${model}
+namespace fmt {std::string format(std::string_view p,std::string const& id,int n){return id+(p.find(":D:")==std::string_view::npos?":R:":":D:")+std::to_string(n);}}
 namespace corum::ranked {
 namespace log { template<class... T> void info(T...) {} template<class... T> void warn(T...) {} }
 inline auto gameplayTestClock=std::chrono::steady_clock::time_point(std::chrono::milliseconds(1000));
@@ -50,10 +53,13 @@ struct SpectatorLiveRuntime {
  void publisherPaused(bool value){paused=value;}
 };
 struct RankedRuntime {
- struct Match {std::string matchId="match",state="ROUND_PLAYING",surrenderScope;int roundNumber=1,deathmatchSequence=0,surrenderRound=0,surrenderDeathmatch=0;};
+ struct Match {std::string matchId="match",state="ROUND_PLAYING",surrenderScope,surrenderSide,side="A";int roundNumber=1,deathmatchSequence=0,surrenderRound=0,surrenderDeathmatch=0;};
  struct View {RuntimeStage stage=RuntimeStage::Ready;Match match;} m_view;
  bool placement=false,pendingResult=false,granted=false;int event=0,parsed=0,errors=0,attemptFlushes=0;
  std::string m_sessionToken="session",m_matchToken="match-token";
+ GameplayConcessionJournal m_concessions;
+ std::string m_attemptContextKey,m_gameplayStartContextKey;int retired=0;
+ void retireConcededAttemptTransport(){++retired;m_attemptContextKey.clear();}
  MatchPauseBudget m_matchPauseBudget;std::string m_pauseMatchId,m_pauseLeaseId;
  bool m_pauseDesired=false,m_pauseNeedsSync=false,m_pauseBusy=false,m_surrenderBusy=false;
  enum class SurrenderStatus {Idle,WaitingAttempt,Sending,Retrying,Accepted,Rejected};
@@ -70,6 +76,7 @@ struct RankedRuntime {
  std::string beginMatchGameplayPause(int);void endMatchGameplayPause(std::string const&);
  double matchPauseRemainingMs()const;void flushGameplayControls();void resetGameplayControls();
  void surrenderCurrentMatch(bool);bool gameplayConceded(int,int)const;
+ void observeGameplayConcession(std::string const&,int,int,std::string const&);bool opponentConceded(int,int)const;
 };
 ${methods}
 }
@@ -115,7 +122,16 @@ int main(){using namespace corum::ranked;
  // Even an in-flight success cannot project the older round after a newer GET.
  RankedRuntime late;late.m_view.stage=RuntimeStage::Matched;late.surrenderCurrentMatch(false);
  auto oldRoundAck=web::pending.back().callback;late.m_view.match.roundNumber=2;
+ late.m_attemptContextKey="match:R:2";
  oldRoundAck({200,{}});assert(late.parsed==0&&!late.m_surrenderBusy&&!late.m_pendingSurrender);
+ assert(late.gameplayConceded(1,0)&&!late.gameplayConceded(2,0)&&late.retired==0);
+ assert(late.m_attemptContextKey=="match:R:2"); // late ACK cannot kill a newer legitimate Attempt
+ late.observeGameplayConcession("",0,0,"");assert(late.gameplayConceded(1,0)); // missing poll cannot revoke ACK
+ late.observeGameplayConcession("ROUND",2,0,"B");assert(late.opponentConceded(2,0));
+ assert(!late.opponentConceded(3,0));
+ late.observeGameplayConcession("ROUND",1,0,"A");assert(late.opponentConceded(2,0)); // old own ACK cannot hide newer opponent notice
+ late.m_view.match.side="B";assert(!late.opponentConceded(2,0));
+ late.resetGameplayControls();assert(!late.m_concessions.conceded("match",1,0));
  s.m_view.match.surrenderScope="ROUND";s.m_view.match.surrenderRound=1;assert(s.gameplayConceded(1,0)&&!s.gameplayConceded(2,0));
  s.m_view.match.surrenderDeathmatch=1;assert(s.gameplayConceded(3,1)&&!s.gameplayConceded(3,2));
  s.m_view.match.surrenderScope="MATCH";assert(s.gameplayConceded(3,2));

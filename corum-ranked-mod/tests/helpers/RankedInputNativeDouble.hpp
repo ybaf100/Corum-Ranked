@@ -126,7 +126,8 @@ struct CCMenuItem : CCNode {
     bool isEnabled() const { return enabled; }
     void setEnabled(bool value) { enabled = value; }
     void unselected() { selected = false; ++unselections; }
-    void activate() { assert(enabled); ++activations; }
+    std::function<void()> callback;
+    void activate() { assert(enabled); ++activations; if (callback) callback(); }
 };
 enum tCCMenuState { kCCMenuStateWaiting, kCCMenuStateTrackingTouch };
 struct CCMenu : CCLayer {

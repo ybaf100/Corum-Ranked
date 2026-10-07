@@ -3,6 +3,7 @@
 #include "domain/EnvironmentPolicy.hpp"
 #include "domain/ServerClock.hpp"
 #include "domain/MatchPauseBudget.hpp"
+#include "domain/GameplayConcession.hpp"
 
 #include <Geode/Geode.hpp>
 #include <Geode/utils/web.hpp>
@@ -305,7 +306,7 @@ struct MatchView {
     bool spectatorActive = false;
     bool spectatorLiveEnabled = true;
     std::int64_t spectatorLiveSettingVersion = 0;
-    std::string surrenderScope;
+    std::string surrenderScope, surrenderSide;
     int surrenderRound = 0, surrenderDeathmatch = 0;
     std::optional<int> opponentProgress;
     bool opponentFinished = false;
@@ -417,6 +418,7 @@ public:
     [[nodiscard]] bool surrenderPending() const { return m_pendingSurrender.has_value(); }
     [[nodiscard]] SurrenderStatus surrenderStatus() const { return m_surrenderStatus; }
     [[nodiscard]] bool gameplayConceded(int round, int deathmatch) const;
+    [[nodiscard]] bool opponentConceded(int round, int deathmatch) const;
     std::string beginMatchGameplayPause(int levelId);
     void endMatchGameplayPause(std::string const& leaseId);
     void syncMatchGameplayPause(bool nativePaused);
@@ -602,6 +604,8 @@ private:
     std::uint64_t m_surrenderRequestGeneration = 0;
     SurrenderStatus m_surrenderStatus = SurrenderStatus::Idle;
     bool m_surrenderBusy = false;
+    GameplayConcessionJournal m_concessions;
+    void observeGameplayConcession(std::string const& scope, int round, int deathmatch, std::string const& side);
     void flushGameplayControls();
     void resetGameplayControls();
     void retireConcededAttemptTransport();

@@ -30,7 +30,7 @@ void RankedEntryOverlay::dismiss() {
     // Release the blocker before restoring gameplay/returning to a retained
     // round scene, including entry cancellation rather than only successful GO.
     cancelPauseTouch();
-    m_play = nullptr;
+    { [[maybe_unused]] auto retiredOwner = std::move(m_play); }
     setTouchEnabled(false);
     setKeypadEnabled(false);
     removeFromParentAndCleanup(true);
@@ -42,7 +42,7 @@ void RankedEntryOverlay::releaseToGameplay(PlayLayer* play) {
     // A finger held through the countdown must not become a Pause click.
     cancelPauseTouch();
     m_holding = false;
-    m_play = play;
+    m_play = geode::WeakRef<PlayLayer>(play);
     synchronizeTouchPriority(play);
     setOpacity(0);
     m_heading->setVisible(false);
@@ -93,13 +93,14 @@ void RankedEntryOverlay::ccTouchEnded(CCTouch* touch, CCEvent*) {
     auto const activate = pauseHit(play.data(), touch);
     cancelPauseTouch();
     if (!activate) return;
-    // doPause resets native touch IDs/UI state, calls PlayLayer::pauseGame and
-    // increments the vanilla pause counter. PauseLayer and its resume/restart
-    // behavior remain native; RankedPauseLayer adds its existing lease/UI.
-    play->m_uiLayer->doPause();
+    // Enter through the native BUTTON callback. doPause is an internal step;
+    // its Windows inline implementation does not establish the iOS entry path.
+    // Preserve the target/selector installed by native UILayer and other mods.
+    play->m_uiLayer->m_pauseBtn->activate();
     if (m_pauseDiagnostics++ < 5)
-        log::info("[RankedPauseInput] native dispatch paused={} canPause={}",
-            play->m_isPaused, play->canPauseGame());
+        log::info("[RankedPauseInput] native button dispatched level={} paused={} canPause={} uiOwnerMatches={}",
+            play->m_level ? static_cast<int>(play->m_level->m_levelID) : 0,
+            play->m_isPaused, play->canPauseGame(), play->m_uiLayer->m_gameLayer == play.data());
 }
 void RankedEntryOverlay::ccTouchCancelled(CCTouch* touch, CCEvent*) {
     if (touch->getID() == m_pauseTouchId) cancelPauseTouch();

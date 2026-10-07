@@ -349,8 +349,8 @@ bool RankedRoundPreparation::launch(CCScene* origin) {
         return false;
     }
     ++m_launchGeneration;
-    m_play = play;
-    m_origin = origin;
+    m_play = geode::WeakRef<PlayLayer>(play);
+    m_origin = geode::WeakRef<CCScene>(origin);
     m_launchedLevel = level;
     m_returnQueued = m_quitting = false;
     CCDirector::sharedDirector()->pushScene(scene);
@@ -383,7 +383,10 @@ bool RankedRoundPreparation::returnFromNativeQuit(GJGameLevel* level) {
     queueInMainThread([this, generation] {
         auto origin = m_origin.lock();
         if (generation != m_launchGeneration || !m_returnQueued || !origin) return;
-        m_play = nullptr; m_origin = nullptr; m_launchedLevel = nullptr;
+        // Geode 5.10.1 WeakRef pointer assignment to nullptr drops the
+        // controller without running its native-owner release check.
+        { [[maybe_unused]] auto departedPlay = std::move(m_play); [[maybe_unused]] auto retainedOrigin = std::move(m_origin); }
+        m_launchedLevel = nullptr;
         m_returnQueued = false;
         CCDirector::sharedDirector()->popScene();
     });

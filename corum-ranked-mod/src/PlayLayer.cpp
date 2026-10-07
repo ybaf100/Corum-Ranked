@@ -930,16 +930,30 @@ public:
         return true;
     }
 
-    void spectatorFrame(float dt) {
-        if (blockEntryGameplayUpdate()) return;
+    bool finishConcededGameplayHandoff() {
         auto& controls = corum::ranked::RankedRuntime::get();
         if (m_fields->rankedLevel && m_fields->sceneContext.matchId == controls.view().match.matchId &&
-            controls.gameplayConceded(m_fields->sceneContext.roundNumber, m_fields->sceneContext.deathmatchSequence) &&
-            !m_fields->autoExitRequested) {
+            controls.gameplayConceded(m_fields->sceneContext.roundNumber, m_fields->sceneContext.deathmatchSequence)) {
+            if (m_fields->autoExitRequested) return true;
             m_fields->autoExitRequested = true; m_fields->attemptEndReported = true;
-            if (!corum::ranked::quitThroughRankedCompletionOverlay(this)) onQuit();
-            return;
+            log::info("[RankedSurrender] scene return queued level={} round={} deathmatch={}",
+                m_fields->levelId, m_fields->sceneContext.roundNumber, m_fields->sceneContext.deathmatchSequence);
+            // Never destroy a PlayLayer/PauseLayer while its native update or
+            // menu callback is still running. The exact departed scene owns it.
+            auto scene = geode::WeakRef<PlayLayer>(this);
+            queueInMainThread([scene] {
+                if (auto layer = scene.lock(); layer && layer.data() == PlayLayer::get() && layer->isRunning()) {
+                    auto* ranked = static_cast<CorumRankedPlayLayer*>(layer.data());
+                    if (!corum::ranked::quitThroughRankedCompletionOverlay(ranked)) ranked->onQuit();
+                }
+            });
+            return true;
         }
+        return false;
+    }
+
+    void spectatorFrame(float dt) {
+        if (blockEntryGameplayUpdate() || finishConcededGameplayHandoff()) return;
         if (!m_fields->rankedInitialized || m_fields->safetyRetired ||
             m_fields->spectatorPresentationRetired || m_fields->autoExitRequested ||
             m_isTestMode || m_fields->vanillaGameplayEndInProgress) return;
@@ -957,7 +971,7 @@ public:
     }
 
     void postUpdate(float dt) {
-        if (blockEntryGameplayUpdate()) return;
+        if (blockEntryGameplayUpdate() || finishConcededGameplayHandoff()) return;
         if (m_fields->rankedLevel) corum::ranked::RankedRuntime::get().syncMatchGameplayPause(m_isPaused);
         syncSpectatorLocalSafety();
         ScopedPersistenceOwner persistence(this);
@@ -973,6 +987,7 @@ public:
         runtime.tick();
         syncSpectatorLocalSafety();
         if (!m_fields->rankedLevel || m_isTestMode) return;
+        if (finishConcededGameplayHandoff()) return;
         if (finishTerminalGameplayHandoff()) return;
         if (!m_fields->gameplayFrameObserved) {
             corum::ranked::TransitionTrace::get().mark("first-gameplay-frame");
@@ -2158,6 +2173,11 @@ public:
 bool corum::ranked::prepareSpectatorScene(PlayLayer* layer) {
     if (!layer || layer != PlayLayer::get()) return false;
     return static_cast<CorumRankedPlayLayer*>(layer)->prepareSpectatorScene();
+}
+
+bool corum::ranked::requestConcededGameplayReturn(PlayLayer* layer) {
+    if (!layer || layer != PlayLayer::get()) return false;
+    return static_cast<CorumRankedPlayLayer*>(layer)->finishConcededGameplayHandoff();
 }
 
 namespace {

@@ -9,4 +9,7 @@ bool prepareSpectatorScene(PlayLayer* layer);
 // Use vanilla completion-menu exit if that exact scene still owns an overlay.
 // Weak ownership in EndLevelLayer.cpp prevents stale cross-scene pointers.
 bool quitThroughRankedCompletionOverlay(PlayLayer* layer);
+// Idempotent, deferred scene return after an authenticated concession. It does
+// not use a timer deadline or create an additional Attempt End.
+bool requestConcededGameplayReturn(PlayLayer* layer);
 } // namespace corum::ranked

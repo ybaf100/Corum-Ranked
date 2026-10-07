@@ -486,6 +486,8 @@ class CorumRankedLayer final : public CCLayerColor {
     CCLabelBMFont* m_resourceProgressLabel = nullptr;
     float m_resourceProgressWidth = 0.0f;
     CCLabelBMFont* m_mainStatusLabel = nullptr;
+    CCLayerColor* m_concessionNotice = nullptr;
+    CCLabelBMFont* m_concessionNoticeText = nullptr;
     CCLabelBMFont* m_matchFoundCountdownLabel = nullptr;
     CCLabelBMFont* m_banTimerLabel = nullptr;
     CCLabelBMFont* m_prepareFooterLabel = nullptr;
@@ -532,6 +534,14 @@ class CorumRankedLayer final : public CCLayerColor {
         m_achievementToastRoot->setPosition(CCPointZero);
         m_achievementToastRoot->setID("ranked-achievement-toast-root"_spr);
         addChild(m_achievementToastRoot, 2000);
+
+        m_concessionNotice = CCLayerColor::create({5, 17, 29, 240}, std::min(290.0f, winSize.width - 70), 26);
+        m_concessionNotice->setPosition({(winSize.width - m_concessionNotice->getContentSize().width) / 2, winSize.height - 60});
+        m_concessionNotice->setID("ranked-opponent-surrender-notice"_spr);
+        m_concessionNoticeText = corum::ranked::ui::label("", 0.30f,
+            {m_concessionNotice->getContentSize().width / 2, 13}, kGold, corum::ranked::ui::FontWeight::ExtraBold);
+        m_concessionNotice->addChild(m_concessionNoticeText); m_concessionNotice->setVisible(false);
+        addChild(m_concessionNotice, 2500);
 
         RankedRuntime::get().begin();
         syncPhase();
@@ -987,6 +997,22 @@ class CorumRankedLayer final : public CCLayerColor {
     }
 
     void updateDynamicUi() {
+        auto const& runtime = RankedRuntime::get();
+        auto const& noticeMatch = runtime.view().match;
+        auto const opponentSurrender = m_page == Page::Live && runtime.view().stage == RuntimeStage::Matched &&
+            !runtime.view().environmentWarning.active && !showResourceGate() &&
+            runtime.opponentConceded(noticeMatch.roundNumber, noticeMatch.deathmatchSequence);
+        if (m_concessionNotice) {
+            m_concessionNotice->setVisible(opponentSurrender);
+            if (opponentSurrender) {
+                auto const text = noticeMatch.surrenderScope == "MATCH"
+                    ? tr("opponent-surrender-match", "OPPONENT SURRENDERED THE MATCH")
+                    : tr("opponent-surrender-round", "OPPONENT SURRENDERED THE ROUND");
+                m_concessionNoticeText->setString(text.c_str());
+                corum::ranked::ui::fitLabelWidth(m_concessionNoticeText,
+                    m_concessionNotice->getContentSize().width - 16, 0.30f, 0.20f);
+            }
+        }
         if (RankedRuntime::get().view().environmentWarning.active) return;
         if (showResourceGate()) {
             auto const resourceView = RankedAudioManager::get().downloadView();

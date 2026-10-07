@@ -12,6 +12,9 @@ const clientMod = (version: string) => ({
 });
 
 describe("Ranked client version gate", () => {
+  it("rejects beta39 before native Pause callback and conceded-scene return fixes", () => {
+    expect(evaluateRankedClientVersion("v0.5.0-beta.39", [clientMod("v0.5.0-beta.39")]).allowed).toBe(false);
+  });
   it("rejects beta34 before the beta35 native scene entry barrier", () => {
     expect(evaluateRankedClientVersion("v0.5.0-beta.34", [clientMod("v0.5.0-beta.34")]).allowed).toBe(false);
   });
@@ -40,7 +43,7 @@ describe("Ranked client version gate", () => {
 
   it("accepts the same current version with or without a leading v", () => {
     expect(
-      evaluateRankedClientVersion("0.5.0-beta.39", [clientMod("0.5.0-beta.39")]).allowed,
+      evaluateRankedClientVersion("0.5.0-beta.40", [clientMod("0.5.0-beta.40")]).allowed,
     ).toBe(true);
   });
 
@@ -50,7 +53,7 @@ describe("Ranked client version gate", () => {
     ]);
     expect(result).toMatchObject({
       allowed: false,
-      requiredVersion: "v0.5.0-beta.39",
+      requiredVersion: "v0.5.0-beta.40",
       clientVersion: "v0.5.0-beta.8",
     });
   });

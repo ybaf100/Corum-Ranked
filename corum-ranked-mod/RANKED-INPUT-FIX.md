@@ -1,3 +1,96 @@
+# Ranked Pause and authenticated concession lifecycle — beta40
+
+Starting authoritative main: `1f2471f45a78f1c71a357e3d097b11c0b7b90f47`
+(beta39). Client/workspace/server exact gate: `v0.5.0-beta.40`.
+Spectator protocol v2, Debug format v2, scoring, match-wide 30s budget,
+Placement final-attempt rules, Spider segment boundaries and safety stay intact.
+
+## Device evidence and limits
+
+`Geode 2026-10-07 20.37.26.log` actually loads beta39 / Geode 5.10.1 / GD
+2.2081. At 20:38:06 round surrender POST returns 201 and the server enters
+ROUND_RESULT. The client immediately logs `Ignoring premature Ranked state
+transition while visual attempt is alive`. The server enters ROUND_PREPARE at
+20:38:11; the native child does not return until the user's exit at 20:38:23.
+Round 2 GO has enabled/unpaused input, UI/menu priorities 0/-128 and observer
+priority -500. Five observer logs AFTER `UILayer::doPause()` report paused=false,
+canPause=true. There is no Round 2 Pause opening log. This disproves a claim
+that beta39's remaining failure is merely missing touch delivery or priority.
+
+The trace establishes the failing boundaries, not the exact iOS native return
+instruction. Released 2.2081 bindings expose iOS UILayer::onPause at 0x49540,
+doPause at 0x49ff0 and PlayLayer::pauseGame at 0x1227f0. The doPause body in the
+bindings inline source is Windows-only: it is not iOS disassembly. No actual
+iOS GD executable/register trace is available here. The native Pause double
+previously opened a menu unconditionally once canPause succeeded. Successful
+host tests therefore did not establish device success.
+
+## Corrections
+
+The scene observer activates the existing native Pause BUTTON, preserving its
+installed target/selector and native onPause path. It no longer calls internal
+doPause directly or builds a replacement Pause menu. Existing scene/visibility/
+canPause/held-touch checks and scoped priority remain. Ordinary gameplay has no
+observer. Bounded logs identify the level, native result and UILayer ownership.
+No new PlayerObject/GJBaseGameLayer/UILayer hot detour is added.
+
+Geode 5.10.1 WeakRefPool retains native objects and WeakRef pointer assignment to
+nullptr only drops the controller. Pause fields and surrender Popup formerly
+retained each other through WeakRef, and cleanup relied partly on destruction.
+Popup owner and Pause modal references now have explicit destructible optional
+ownership. Closing/exiting a Popup releases its owner and its own force priority;
+Pause resume retires its modal, scheduler and lease BEFORE native onResume.
+Detached dialogs cannot block a fresh surrender click. Scene observer and round
+return owners move their old WeakRefs into a scoped destructor rather than using
+the problematic nullptr assignment. Native cleanup no longer depends on a later
+round discovering the previous objects. This is a source-confirmed lifecycle
+correction, not proof of one native iOS guard or a specific other-mod culprit.
+
+An authenticated surrender ACK latches an exact match/round/deathmatch terminal
+command independently of a public-state snapshot. Missing/stale polls cannot
+revoke it. Late ACKs cannot replace a newer notice, roll back the public round,
+or retire a new round's Attempt. MATCH concession ends the entire match. A
+confirmed server concession also latches the command for both players.
+
+PlayLayer handles that command before the normal alive-Attempt protection in
+postUpdate as well as the spectator heartbeat. Pause's active budget watcher
+resumes its native menu then requests the same handoff, even if the native
+PlayLayer heartbeat is paused/unscheduled. The helper marks the visual Attempt
+ended and queues an idempotent return outside the native callback stack. It only
+exits the exact current scene. There is no second Attempt End POST. A normal
+timer=0 final Attempt remains alive until actual death/Clear; it does not create
+a concession command.
+
+Pause remaining time uses the Corum font on a dark plate at the upper left.
+The retained Ranked UI shows a non-interactive Corum-font opponent concession
+notice in Korean/English only when the authenticated side is the opponent and
+that current context was conceded. ROUND notices stop at the next round; MATCH
+notices persist through match results. Existing surrender controls keep the GD
+X sprite and localized Corum confirmation UI. Font charsets include the new
+Korean text; CI regenerates and validates SD/HD/UHD bundles.
+
+## Regression and device acceptance
+
+Executable source/native-boundary tests cover R1/R2/R3 button callback dispatch,
+internal-step versus public-request semantics, timeout/concession resume,
+explicit modal/owner cleanup, deferred exactly-once scene return, stale scene
+rejection, concession ACK after round advancement, preservation of a legitimate
+new Attempt, newer opponent notice and lease budget. The public request fixture
+models a native precondition; it is explicitly not a recovered iOS instruction.
+Existing Placement, real Clear persistence, entry, downloads, capture/snap,
+World Driver, camera, Safe Mode and audio regressions remain.
+
+Prior spectator tests hard-coded gameplayConceded=false; the revised suite
+executes the actual handoff helper and drains its deferred callback. Full
+source/native tests, strict C++ suites, workspace/server tests and CI validate
+the code. iOS Debug ON/OFF builds are required before main promotion. None of
+these are device verification. With the same iPad/mod stack, acceptance still
+requires repeated R1 surrender -> automatic return -> R2/R3 Pause, manual
+resume/restart, timer exhaustion and opponent/match surrender. Do not describe
+the remaining iOS native guard as proven or these device scenarios as passed.
+
+## Prior beta39 investigation (superseded predictions)
+
 # Ranked round input and music preparation — beta39
 
 Authoritative starting main: `d104f2bbcf779320e4a8ee0a560d9cb604725ebf`

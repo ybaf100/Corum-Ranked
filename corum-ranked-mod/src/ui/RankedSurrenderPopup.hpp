@@ -9,7 +9,9 @@ namespace corum::ranked::ui {
 using namespace geode::prelude;
 
 class RankedSurrenderPopup final : public Popup {
-    WeakRef<PauseLayer> m_owner;
+    // reset() runs WeakRef's destructor (Geode 5.10.1's pointer assignment to
+    // nullptr only drops its controller). Release the native owner on EXIT.
+    std::optional<WeakRef<PauseLayer>> m_owner;
     std::string m_matchId;
     int m_round = 0, m_deathmatch = 0;
     bool m_wholeMatch = false, m_confirmation = false, m_submitted = false, m_closed = false;
@@ -27,7 +29,7 @@ class RankedSurrenderPopup final : public Popup {
     }
     bool init(PauseLayer* owner, std::string matchId, int round, int deathmatch) {
         if (!Popup::init(370, 235)) return false;
-        m_owner = owner; m_matchId = std::move(matchId); m_round = round; m_deathmatch = deathmatch;
+        m_owner.emplace(owner); m_matchId = std::move(matchId); m_round = round; m_deathmatch = deathmatch;
         m_bgSprite->setVisible(false); m_closeBtn->setVisible(false);
         setID("ranked-surrender-popup"_spr);
         render(); schedule(schedule_selector(RankedSurrenderPopup::watchContext), 0.05f);
@@ -78,7 +80,8 @@ class RankedSurrenderPopup final : public Popup {
     }
     void onCancel(CCObject*) { dismiss(); }
     void watchContext(float) {
-        auto owner = m_owner.lock(); auto& ranked = RankedRuntime::get();
+        if (m_closed) return;
+        auto owner = m_owner ? m_owner->lock() : Ref<PauseLayer>(); auto& ranked = RankedRuntime::get();
         // Remove the modal before a timeout resumes gameplay underneath it.
         if (!owner || !owner->getParent() || !sameRound() || ranked.matchPauseRemainingMs() <= 0 ||
             ranked.gameplayConceded(m_round, m_deathmatch)) { dismiss(); return; }
@@ -98,11 +101,13 @@ class RankedSurrenderPopup final : public Popup {
     }
 public:
     void onExit() override {
+        m_closed = true;
         unschedule(schedule_selector(RankedSurrenderPopup::watchContext));
         // Geode 5.10.1 Popup releases this registration only in its destructor.
         // A closed Popup can survive there in WeakRefPool; release OUR modal
         // registration at scene exit rather than shifting the next round's UI.
         CCTouchDispatcher::get()->unregisterForcePrio(this);
+        m_owner.reset();
         Popup::onExit();
     }
     void onClose(CCObject*) override { dismiss(); }
@@ -114,6 +119,7 @@ public:
     void dismiss() {
         if (m_closed) return;
         m_closed = true;
+        m_owner.reset();
         unschedule(schedule_selector(RankedSurrenderPopup::watchContext)); Popup::onClose(nullptr);
     }
 };

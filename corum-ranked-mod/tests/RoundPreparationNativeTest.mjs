@@ -55,7 +55,10 @@ template<class T> struct Ref {
     explicit operator bool()const{return ptr;}
 };
 template<class T> struct WeakRef {
-    T* ptr=nullptr; WeakRef& operator=(T* p){ptr=p;return *this;}
+    T* ptr=nullptr;WeakRef()=default;explicit WeakRef(T* p):ptr(p){}
+    WeakRef(WeakRef&& other):ptr(std::exchange(other.ptr,nullptr)){}
+    WeakRef& operator=(WeakRef&& other){ptr=std::exchange(other.ptr,nullptr);return *this;}
+    WeakRef& operator=(T* p){ptr=p;return *this;}
     Ref<T> lock()const{return ptr&&ptr->live?ptr:nullptr;}
 };
 namespace log {template<class... T>void info(T...){}template<class... T>void warn(T...){} }

@@ -1438,9 +1438,10 @@ void RankedRuntime::parseMatchState(matjson::Value const& root) {
         m_view.match.spectatorLiveEnabled = root["spectator"]["liveEnabled"].asBool().unwrapOr(true);
         m_view.match.spectatorLiveSettingVersion = settingVersion;
     }
-    m_view.match.surrenderScope = root["surrender"]["scope"].asString().unwrapOr("");
-    m_view.match.surrenderRound = static_cast<int>(root["surrender"]["roundNumber"].asInt().unwrapOr(0));
-    m_view.match.surrenderDeathmatch = static_cast<int>(root["surrender"]["deathmatchSequence"].asInt().unwrapOr(0));
+    observeGameplayConcession(root["surrender"]["scope"].asString().unwrapOr(""),
+        static_cast<int>(root["surrender"]["roundNumber"].asInt().unwrapOr(0)),
+        static_cast<int>(root["surrender"]["deathmatchSequence"].asInt().unwrapOr(0)),
+        root["surrender"]["side"].asString().unwrapOr(""));
     if (root["pause"].isObject()) {
         m_matchPauseBudget.bind(m_view.match.matchId);
         m_matchPauseBudget.observe(root["pause"]["remainingMs"].asDouble().unwrapOr(30000), gameplayControlNowMs());
@@ -1776,11 +1777,31 @@ void RankedRuntime::submitBan(std::optional<std::string> canonicalLevelId) {
 }
 
 bool RankedRuntime::gameplayConceded(int round, int deathmatch) const {
+    if (m_concessions.conceded(m_view.match.matchId, round, deathmatch)) return true;
     auto const& match = m_view.match;
     if (match.surrenderScope == "MATCH") return true;
     if (match.surrenderScope != "ROUND") return false;
     return deathmatch > 0 ? deathmatch == match.surrenderDeathmatch :
         match.surrenderDeathmatch == 0 && round > 0 && round == match.surrenderRound;
+}
+
+void RankedRuntime::observeGameplayConcession(std::string const& scope, int round, int deathmatch, std::string const& side) {
+    if (!m_concessions.observe(m_view.match.matchId, scope, round, deathmatch)) return;
+    auto& match = m_view.match;
+    // Retain the old scene command without replacing a newer opponent notice
+    // when an earlier POST ACK arrives after a later authoritative state.
+    if (match.surrenderScope == "MATCH" && scope != "MATCH") return;
+    if (scope != "MATCH" && (deathmatch < match.surrenderDeathmatch ||
+        (deathmatch == 0 && match.surrenderDeathmatch == 0 && round < match.surrenderRound))) return;
+    match.surrenderScope = scope; match.surrenderRound = round; match.surrenderDeathmatch = deathmatch;
+    match.surrenderSide = side;
+}
+
+bool RankedRuntime::opponentConceded(int round, int deathmatch) const {
+    auto const& match = m_view.match;
+    return (match.side == "A" || match.side == "B") &&
+        (match.surrenderSide == "A" || match.surrenderSide == "B") &&
+        match.surrenderSide != match.side && gameplayConceded(round, deathmatch);
 }
 
 void RankedRuntime::retireConcededAttemptTransport() {
@@ -1886,20 +1907,31 @@ void RankedRuntime::flushGameplayControls() {
         auto const generation = m_surrenderRequestGeneration;
         auto const round = m_view.match.roundNumber;
         auto const deathmatch = m_view.match.deathmatchSequence;
+        auto const scope = body["scope"].asString().unwrapOr("");
+        auto const side = m_view.match.side;
         m_surrenderBusy = true; m_surrenderStatus = SurrenderStatus::Sending;
         log::info("[RankedSurrender] POST scope={} round={}",
             body["scope"].asString().unwrapOr(""), m_view.match.roundNumber);
         m_surrenderRequest.spawn(request.post(endpoint("/api/ranked/matches/" + matchId + "/surrender")),
-            [this, matchId, generation, round, deathmatch](web::WebResponse response) {
+            [this, matchId, generation, round, deathmatch, scope, side](web::WebResponse response) {
                 if (generation != m_surrenderRequestGeneration || matchId != m_view.match.matchId) return;
                 m_surrenderBusy = false;
-                if (round != m_view.match.roundNumber || deathmatch != m_view.match.deathmatchSequence) {
+                auto const sameRound = round == m_view.match.roundNumber && deathmatch == m_view.match.deathmatchSequence;
+                if (!sameRound && !successful(response)) {
                     m_pendingSurrender.reset(); m_surrenderStatus = SurrenderStatus::Rejected;
                     return;
                 }
                 log::info("[RankedSurrender] response status={}", response.code());
                 if (successful(response)) {
-                    m_pendingSurrender.reset(); parseMatchState(response.json().unwrapOr(matjson::Value()));
+                    // ACK closes this exact scene even if a following GET has
+                    // advanced the public round or omits its surrender object.
+                    observeGameplayConcession(scope, round, deathmatch, side);
+                    auto const key = deathmatch > 0 ? fmt::format("{}:D:{}", matchId, deathmatch)
+                        : fmt::format("{}:R:{}", matchId, round);
+                    if (scope == "MATCH" || key == m_attemptContextKey || key == m_gameplayStartContextKey)
+                        retireConcededAttemptTransport();
+                    m_pendingSurrender.reset();
+                    if (sameRound) parseMatchState(response.json().unwrapOr(matjson::Value()));
                     m_surrenderStatus = SurrenderStatus::Accepted;
                 }
                 else if (response.code() >= 400 && response.code() < 500) {
@@ -1914,6 +1946,7 @@ void RankedRuntime::flushGameplayControls() {
 }
 
 void RankedRuntime::resetGameplayControls() {
+    m_concessions.bind({});
     SpectatorLiveRuntime::get().publisherPaused(false);
     m_pauseRequest.cancel(); m_surrenderRequest.cancel();
     m_pauseBusy = m_pauseDesired = m_pauseNeedsSync = m_surrenderBusy = false;
