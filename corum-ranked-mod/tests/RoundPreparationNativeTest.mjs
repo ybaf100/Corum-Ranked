@@ -18,6 +18,7 @@ test('actual round preparation executes native download/resource/delegate/launch
     source = source.replace(/double clockSeconds\(\) \{[\s\S]*?\n\}/, 'double clockSeconds() { return fakeNow; }');
     source = source.replace('class $modify(CorumRankedRoundReturn, GameManager)', 'struct CorumRankedRoundReturn : GameManager');
     const popup = read('src/RankedPopup.cpp');
+    const automationMethod = popup.slice(popup.indexOf('    void updateAutomation()'), popup.indexOf('    void maybeEnterLevel()'));
     const optionMethods = popup.slice(popup.indexOf('    void onLowDetail(CCObject*)'), popup.indexOf('    void addRoundOptions('));
     const cpp = String.raw`
 #include "${join(root, 'src/domain/LevelPreparationPolicy.hpp')}"
@@ -150,15 +151,17 @@ struct PlatformToolbox {static inline int cursorRestores=0;
     static void toggleLockCursor(bool lock){assert(!lock);}static void showCursor(){++cursorRestores;}};
 namespace corum::ranked {
 enum class RuntimeStage {Ready,Matched};
-struct RuntimeView {RuntimeStage stage=RuntimeStage::Ready;struct Match {std::string matchId,state,side="A";}match;};
+struct RuntimeView {RuntimeStage stage=RuntimeStage::Ready;struct Match {std::string matchId,state,side="A";bool readyA=false,readyB=false,placement=false;}match;};
 struct RankedRuntime {
-    RuntimeView state;LevelPreparationContext context;bool viewer=false,canPlay=true;int arms=0,mapFailures=0;
+    RuntimeView state;LevelPreparationContext context;bool viewer=false,canPlay=true;int arms=0,mapFailures=0,readyRequests=0,deadlineQueries=0;
     static RankedRuntime& get(){static RankedRuntime r;return r;}
     RuntimeView const& view()const{return state;}
     bool canEnterCurrentLevelAsSpectator()const{return viewer;}
     bool canEnterCurrentLevel()const{return !viewer&&canPlay&&state.match.state=="ROUND_PLAYING";}
     bool armCurrentLevelForGameplay(){++arms;return canEnterCurrentLevel();}
     void reportMapDownloadFailure(){++mapFailures;}
+    void submitReady(){++readyRequests;}
+    std::optional<std::int64_t> deadlineMillis(){++deadlineQueries;return 50000;}
 };
 LevelPreparationContext currentPreparationContext(){return RankedRuntime::get().context;}
 std::string preparationContextText(LevelPreparationContext const&){return "context";}
@@ -167,6 +170,7 @@ struct RankedLevelPreparation {
     PreparedLevelProof proof;GJGameLevel* current=nullptr;int polls=0,invalidations=0;
     static RankedLevelPreparation& get(){static RankedLevelPreparation p;return p;}
     void poll(){++polls;}
+    bool busy()const{return false;}
     std::string const& error()const{static std::string s;return s;}
     bool authorizes(GJGameLevel* l,LevelPreparationContext const& c)const{return l&&c==currentPreparationContext()&&proof.matches(c,levelMetadata(l));}
     GJGameLevel* level()const{return authorizes(current,currentPreparationContext())?current:nullptr;}
@@ -186,6 +190,15 @@ struct RoundOptions {
     GJGameLevel* level=nullptr;bool m_enteringLevel=false;int renders=0;
     GJGameLevel* findPlayableMap(){return level;}void render(){++renders;}
     ${optionMethods}
+};
+using SteadyClock=std::chrono::steady_clock;
+struct RoundAutomation {
+    bool m_matchFoundReadySent=false,m_levelLookupBusy=false;
+    std::string m_levelLookupError,m_resourceKey="fixture";
+    SteadyClock::time_point m_lastReadySubmitAt{};
+    double elapsed=0;
+    double phaseSeconds()const{return elapsed;}
+    ${automationMethod}
 };
 void ticks(RankedRoundPreparation& p,int n=3){for(int i=0;i<n;++i){fakeNow+=.21;p.pump();}}
 void context(int id,std::string match="match"){auto& r=RankedRuntime::get();r.state.stage=RuntimeStage::Matched;r.state.match={match,"ROUND_PREPARE","A"};r.context={match,id,1,0,false,0,0};}
@@ -221,8 +234,26 @@ int main(){
     music->info(42);music->info(43);ticks(p);assert(music->requests["song42"]==1&&music->requests["song43"]==1);
     music->cachedDownloaded=true;music->file(42,false,false);ticks(p);assert(!p.ready()); // callback/cache alone proves nothing
     music->file(43);music->file(7,true);ticks(p);assert(p.view().songsDone==1&&p.view().sfxDone==1&&!p.ready());
+    RoundAutomation incomplete;incomplete.elapsed=50;incomplete.updateAutomation();assert(runtime.readyRequests==0);
     fakeNow+=5;ticks(p);assert(music->requests["song42"]==2);music->file(42);ticks(p);assert(p.ready());
     assert(p.view().songsTotal==2&&p.view().sfxTotal==1&&p.view().audioProgress==1);
+    // Execute the actual popup automation against completed automatic map/song/SFX
+    // acquisition. With 50s still on the server's resource deadline, READY must
+    // occur at the independent 10s countdown, never at timeout. No button click.
+    RoundAutomation automation;
+    automation.elapsed=9.9;automation.updateAutomation();assert(runtime.readyRequests==0);
+    automation.elapsed=10;automation.updateAutomation();assert(runtime.readyRequests==1);
+    assert(runtime.deadlineQueries==0); // safety deadline cannot drive READY
+    automation.updateAutomation();assert(runtime.readyRequests==1); // one-second retry bound
+    automation.m_lastReadySubmitAt-=std::chrono::seconds(2);
+    automation.updateAutomation();assert(runtime.readyRequests==2); // ACK may be delayed
+    runtime.state.match.readyA=true;automation.m_lastReadySubmitAt-=std::chrono::seconds(2);
+    automation.updateAutomation();assert(runtime.readyRequests==2); // ACK stops retries
+    runtime.state.match.readyA=false;
+    runtime.state.match.placement=true;runtime.state.match.state="MAP_PREPARE";
+    automation.elapsed=4.9;automation.updateAutomation();assert(runtime.readyRequests==2);
+    automation.elapsed=5;automation.updateAutomation();assert(runtime.readyRequests==3);
+    runtime.state.match.placement=false;runtime.state.match.state="ROUND_PREPARE";
     CCScene origin;origin.running=true;auto* director=CCDirector::sharedDirector();director->stack={&origin};
     assert(!p.launch(&origin)&&PlayLayer::constructions==0&&runtime.arms==0); // READY is not PLAYING
     runtime.state.match.state="ROUND_PLAYING";runtime.canPlay=false;assert(!p.launch(&origin));runtime.canPlay=true;
@@ -302,8 +333,9 @@ test('round screen uses existing download UI, native user options, server gate a
     assert.match(popup, /level->m_lowDetailModeToggled = !level->m_lowDetailModeToggled/);
     assert.match(popup, /level->m_disableShakeToggled = !level->m_disableShakeToggled/);
     assert.doesNotMatch(popup, /level->m_lowDetailMode\s*=|level->m_disableShake\s*=/);
-    assert.match(popup, /roundReadyDue\(match.state, match.placement, elapsed, preparation.ready\(\)\)/);
-    assert.match(popup, /runtime.deadlineMillis\(\)/);
+    assert.match(popup, /roundReadyDue\(match.state, match.placement, phaseSeconds\(\), preparation.ready\(\)\)/);
+    const automation = popup.slice(popup.indexOf('    void updateAutomation()'), popup.indexOf('    void maybeEnterLevel()'));
+    assert.doesNotMatch(automation, /runtime.deadlineMillis\(\)/);
     assert(play.indexOf('ScopedRankedRoundQuit roundQuit(this)') < play.indexOf('PlayLayer::onQuit();', play.indexOf('void onQuit()')));
     assert.equal((preparation.match(/class \$modify\(/g) || []).length, 1);
     assert.match(preparation, /class \$modify\(CorumRankedRoundReturn, GameManager\)/);

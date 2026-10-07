@@ -1059,7 +1059,8 @@ class CorumRankedLayer final : public CCLayerColor {
             } else if (phaseSeconds() >= 10.0) {
                 auto const ownReady = ownA ? match.readyA : match.readyB;
                 auto const opponentReady = ownA ? match.readyB : match.readyA;
-                if (!ownReady) footer = tr("waiting-download", "WAITING FOR YOUR DOWNLOAD");
+                if (!ownReady) footer = corum::ranked::RankedRoundPreparation::get().ready()
+                    ? tr("sending-ready", "SENDING READY...") : tr("waiting-download", "WAITING FOR YOUR DOWNLOAD");
                 else if (!opponentReady) footer = corum::ranked::i18n::waitingForPlayer(upper(shorten(match.opponentName, 13)));
                 else footer = tr("starting", "STARTING...");
             }
@@ -2894,7 +2895,8 @@ class CorumRankedLayer final : public CCLayerColor {
         } else if (phaseSeconds() >= 10.0) {
             auto const ownReady = ownA ? match.readyA : match.readyB;
             auto const opponentReady = ownA ? match.readyB : match.readyA;
-            if (!ownReady) footer = tr("waiting-download", "WAITING FOR YOUR DOWNLOAD");
+            if (!ownReady) footer = corum::ranked::RankedRoundPreparation::get().ready()
+                ? tr("sending-ready", "SENDING READY...") : tr("waiting-download", "WAITING FOR YOUR DOWNLOAD");
             else if (!opponentReady) footer = corum::ranked::i18n::waitingForPlayer(upper(shorten(match.opponentName, 13)));
             else footer = tr("starting", "STARTING...");
             footerAccent = kGold;
@@ -3943,12 +3945,14 @@ class CorumRankedLayer final : public CCLayerColor {
         m_levelLookupBusy = corum::ranked::RankedLevelPreparation::get().busy();
         m_levelLookupError = preparation.view().error;
         bool ownReady = match.side == "A" ? match.readyA : match.readyB;
-        auto const remaining = runtime.deadlineMillis();
-        double const elapsed = remaining ? 10.0 - static_cast<double>(*remaining) / 1000.0 : phaseSeconds();
-        if (!ownReady && corum::ranked::roundReadyDue(match.state, match.placement, elapsed, preparation.ready())) {
+        // deadlineAt is the server's resource safety budget (at least 60s),
+        // not the 10s/5s visual countdown. Converting it with 10 - remaining
+        // delayed READY until expiry and raced ROUND_1_MAP_DOWNLOAD_TIMEOUT.
+        if (!ownReady && corum::ranked::roundReadyDue(match.state, match.placement, phaseSeconds(), preparation.ready())) {
             auto now = SteadyClock::now();
             if (m_lastReadySubmitAt == SteadyClock::time_point{} || now - m_lastReadySubmitAt >= std::chrono::seconds(1)) {
                 m_lastReadySubmitAt = now;
+                log::info("[RankedPrepare] auto-ready context={} phase={} resourcesReady=true", m_resourceKey, phaseSeconds());
                 runtime.submitReady();
             }
         }

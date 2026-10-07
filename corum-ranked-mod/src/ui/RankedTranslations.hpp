@@ -178,6 +178,7 @@ inline constexpr std::array kKoreanTranslations {
     Translation{"attempt", "시도"},
     Translation{"of", "중"},
     Translation{"waiting-download", "내 다운로드 대기 중"},
+    Translation{"sending-ready", "준비 완료 전송 중..."},
     Translation{"waiting-player", "대기 중"},
     Translation{"starting", "시작 중..."},
     Translation{"attempt-finished", "내 시도가 끝났습니다"},
