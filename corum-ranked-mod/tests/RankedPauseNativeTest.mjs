@@ -55,7 +55,7 @@ test('actual pause/modal callbacks block only owned manual quit, send exact scop
 struct CCObject {};
 struct Node { bool parent=true;void* getParent()const{return parent?(void*)this:nullptr;} };
 struct Label {std::string text;void setString(char const* s){text=s;}void limitLabelWidth(float,float,float){};char const* getFntFile()const{return "CorumSansBold.fnt";}};
-struct PauseLayer:Node {int quits=0,resumes=0;void onQuit(CCObject*){++quits;}void onResume(CCObject*){++resumes;}};
+struct PauseLayer:Node {int quits=0,resumes=0;bool dispatching=false;void onQuit(CCObject*){++quits;}void onResume(CCObject*);};
 struct Level{int m_levelID=123;};
 struct PlayLayer{Level* m_level=nullptr;inline static PlayLayer* active=nullptr;bool m_isPaused=false;int quits=0;static PlayLayer* get(){return active;}void onQuit(){++quits;}};
 template<class T>struct Ref {T* p=nullptr;Ref()=default;explicit Ref(T* v):p(v){}T* data()const{return p;}T* operator->()const{return p;}explicit operator bool()const{return p;}};
@@ -109,6 +109,8 @@ struct CorumRankedPauseLayer:PauseLayer {
  ${body(pause,'void onResume(CCObject* sender)')}
  ${body(pause,'void resumeRankedPause(CCObject* sender)')}
 };
+// Model the binding entering the Corum hook, then its next-original call.
+void PauseLayer::onResume(CCObject* sender){if(dispatching){++resumes;return;}dispatching=true;static_cast<CorumRankedPauseLayer*>(this)->onResume(sender);dispatching=false;}
 int main(){using namespace corum::ranked;
  Level level;PlayLayer play;play.m_level=&level;PlayLayer::active=&play;
  auto& r=RankedRuntime::get();CorumRankedPauseLayer p;p.onQuit(nullptr);assert(p.quits==1);

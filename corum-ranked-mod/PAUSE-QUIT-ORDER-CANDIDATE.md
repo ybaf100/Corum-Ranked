@@ -23,6 +23,8 @@ Native Resume/Quit in this fixture are explicit boundary doubles. These results 
 
 Track the native Ranked Pause and its exact PlayLayer with Geode WeakRef ownership. The already-existing PlayLayer::onQuit boundary retires that exact Pause using vanilla PauseLayer::onResume before performing gameplay cleanup and native Quit. Retirement clears the surrender modal, exact pause lease and tracking references. If the owned native Resume returns with m_isPaused still true, abort Quit and emit one bounded error instead of forcing private/global state.
 
+The quit preparation and scheduled Resume helper enter through the PauseLayer binding, allowing the installed Resume chain to run normally. Geode binding code generation (`geode-sdk/bindings`, `7f6c2a75`, `codegen/src/SourceGen.cpp`) and Tulip Handler nesting were inspected; direct detour calls are not treated as binding entry in the updated test doubles.
+
 No new native detours, pauseGame replacement, AppDelegate flag writes, manually created PauseLayer, transport/result changes, or version bump. Unowned, ordinary and Placement Pause keep their existing quit path. Spider, persistence, camera, and protocol implementations are unchanged.
 
 `RankedPauseQuitNativeTest.mjs` executes the real Corum helper and retirement callbacks with an explicit native Resume double. It covers exact ownership, stale/detached Pause, idempotence, native refusal, next-match R1, and ordering before gameplay cleanup. Existing safety suites remain required.

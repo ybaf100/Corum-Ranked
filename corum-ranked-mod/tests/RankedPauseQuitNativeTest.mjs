@@ -13,6 +13,8 @@ test('every Ranked native quit prepares its exact Pause before cleanup; no new n
  assert.match(play.slice(at,cleanup),/resumeRankedPauseBeforeQuit\(this\)/);
  assert.doesNotMatch(source,/m_gamePaused\s*=|m_isPaused\s*=/);
  assert.match(source,/m_fields->owner.emplace\(layer\)/);
+ assert.match(body('bool resumeRankedPauseBeforeQuit(PlayLayer* layer)'),/pause->onResume\(nullptr\)/);
+ assert.doesNotMatch(body('bool resumeRankedPauseBeforeQuit(PlayLayer* layer)'),/rankedPause->onResume/);
  assert.equal((source.match(/class \$modify/g)||[]).length,1);
 });
 test('actual quit preparation resumes only the owned Pause and rejects failed native Resume',()=>{
@@ -27,7 +29,7 @@ namespace geode::log {template<class... T>void info(T...) {}}
 struct PlayLayer {inline static PlayLayer* current=nullptr;bool m_isPaused=true;static PlayLayer* get(){return current;}};
 template<class T>struct Ref{T* p=nullptr;T* data()const{return p;}T* operator->()const{return p;}explicit operator bool()const{return p;}};
 template<class T>struct WeakRef{T* p;explicit WeakRef(T* v):p(v){}Ref<T> lock()const{return {p};}};
-struct PauseLayer{bool parent=true,refuseResume=false;int resumes=0;void* getParent(){return parent?this:nullptr;}void onResume(CCObject*){++resumes;if(!refuseResume){PlayLayer::get()->m_isPaused=false;parent=false;}}};
+struct PauseLayer{bool parent=true,refuseResume=false,dispatching=false;int resumes=0,hookEntries=0;void* getParent(){return parent?this:nullptr;}void onResume(CCObject*);void nativeResume(){++resumes;if(!refuseResume){PlayLayer::get()->m_isPaused=false;parent=false;}}};
 struct Popup{int dismisses=0;void dismiss(){++dismisses;}};
 struct RankedRuntime{int ends=0;static RankedRuntime& get(){static RankedRuntime r;return r;}void endMatchGameplayPause(std::string const& lease){ends+=!lease.empty();}};
 std::optional<WeakRef<PauseLayer>> activeRankedPause;
@@ -37,6 +39,8 @@ ${body('void retireRankedPause()')}
 ${body('void releaseRankedPauseOwnership()')}
 ${body('void onResume(CCObject* sender)')}
 };
+// Model the binding/next-original distinction; no actual Tulip/GD runtime.
+void PauseLayer::onResume(CCObject* sender){if(dispatching){nativeResume();return;}dispatching=true;++hookEntries;static_cast<CorumRankedPauseLayer*>(this)->onResume(sender);dispatching=false;}
 ${body('bool resumeRankedPauseBeforeQuit(PlayLayer* layer)')}
 int main(){
  PlayLayer a,b;PlayLayer::current=&a;
@@ -48,7 +52,7 @@ int main(){
   PlayLayer::current=&b;assert(resumeRankedPauseBeforeQuit(&b));assert(pause.resumes==0&&activeRankedPause);
   assert(resumeRankedPauseBeforeQuit(&a));assert(pause.resumes==0);
   PlayLayer::current=&a;assert(resumeRankedPauseBeforeQuit(&a));
-  assert(!a.m_isPaused&&pause.resumes==1&&dialog.dismisses==1&&!activeRankedPause&&!pause.fields.owner&&!pause.fields.popup&&pause.fields.leaseId.empty());
+  assert(!a.m_isPaused&&pause.resumes==1&&pause.hookEntries==1&&dialog.dismisses==1&&!activeRankedPause&&!pause.fields.owner&&!pause.fields.popup&&pause.fields.leaseId.empty());
   assert(resumeRankedPauseBeforeQuit(&a)&&pause.resumes==1); // no duplicate Resume
  }
  {CorumRankedPauseLayer detached;detached.parent=false;detached.fields.owner.emplace(&a);activeRankedPause.emplace(&detached);

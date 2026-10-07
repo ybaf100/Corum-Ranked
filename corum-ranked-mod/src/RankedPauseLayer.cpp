@@ -116,7 +116,7 @@ public:
         if (!owner || !owner->m_isPaused) releaseRankedPauseOwnership();
     }
     void resumeRankedPause(CCObject* sender) {
-        onResume(sender);
+        PauseLayer::onResume(sender);
     }
     void onBlockedQuit(CCObject*) {}
     void onQuit(CCObject* sender) {
@@ -149,7 +149,9 @@ bool resumeRankedPauseBeforeQuit(PlayLayer* layer) {
             if (!pause->getParent()) return !layer->m_isPaused;
             // The presentation heartbeat may observe an ACK before watchBudget.
             // Native Resume must complete even on that ordering, before native Quit.
-            rankedPause->onResume(nullptr);
+            // Enter through the binding so installed Resume hooks run once in
+            // their normal Tulip chain, rather than directly calling our detour.
+            pause->onResume(nullptr);
             geode::log::info("[RankedPause] quit resume result paused={}", layer->m_isPaused);
             return !layer->m_isPaused;
         }
