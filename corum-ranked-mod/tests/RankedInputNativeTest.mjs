@@ -132,7 +132,7 @@ int main(){
         lobby.onExit();assert(d.handlers.empty());lobby.onEnter();d.ended(30+round);
         assert(!lobby.m_rankedChildScenePushed && !lobby.m_enteringLevel && menu.m_eState==kCCMenuStateWaiting);
     }
-    assert(lobby.refreshed==4 && lobby.scheduled==1 && lobby.keypad);
+    assert(lobby.refreshed==4 && lobby.scheduled==2 && lobby.keypad);
     RankedRuntime::get().data.match.state="MATCH_RESULT";
     lobby.clearUi();menu.item=&button;d.began(99);d.ended(99);assert(button.activations==4);
     // Covering a scene must not orphan a still-owned rank reveal layer.
@@ -148,6 +148,8 @@ test('countdown blocker explicitly releases touch/keypad on GO and canceled entr
 #include <Geode/Geode.hpp>
 using namespace cocos2d;
 struct RankedEntryOverlay : CCLayer {
+    void cancelPauseTouch(){}
+    void* m_play=nullptr;
     bool keypad=true,removed=false; int gameplayTouches=0;
     void setKeypadEnabled(bool v){keypad=v;}
     void removeFromParentAndCleanup(bool){assert(!touch&&!keypad);removed=true;}
@@ -164,7 +166,7 @@ int main(){
     menu.onExit();assert(d.handlers.empty());
 }
 `);
-    assert.match(body(play, 'bool blockEntryGameplayUpdate()'), /entryOverlay->dismiss\(\)/);
+    assert.match(body(play, 'bool blockEntryGameplayUpdate()'), /entryOverlay->releaseToGameplay\(this\)/);
     assert.match(body(play, 'void onExit()'), /entryOverlay->dismiss\(\)/);
     assert.doesNotMatch(read('src/ui/RankedInput.hpp')+overlay, /\$modify|incrementForcePrio|registerForcePrio/);
 });

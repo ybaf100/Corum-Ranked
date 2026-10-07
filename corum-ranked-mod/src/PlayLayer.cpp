@@ -528,8 +528,7 @@ public:
         if (m_player2) m_player2->releaseAllButtons();
         m_queuedButtons.clear();
         if (m_fields->entryOverlay) {
-            m_fields->entryOverlay->dismiss();
-            m_fields->entryOverlay = nullptr;
+            m_fields->entryOverlay->releaseToGameplay(this);
         }
         m_fields->attemptJournalReadyAt = std::chrono::steady_clock::now();
         if (m_fields->entryAttemptCountDeferred) {

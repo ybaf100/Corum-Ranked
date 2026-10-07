@@ -573,6 +573,9 @@ class CorumRankedLayer final : public CCLayerColor {
         // comes back frozen on its pre-launch "OPENING LEVEL / STARTS IN 05"
         // frame and can never observe ROUND_RESULT or the following Round.
         schedule(schedule_selector(CorumRankedLayer::refresh), 0.20f);
+        // Stream health is independent of the HTTP/UI refresh. A starving
+        // decode buffer must be muted before it repeatedly replays old data.
+        schedule(schedule_selector(CorumRankedLayer::audioFrame), 0.02f);
 
         // Reconcile any Attempt ACK or match poll that completed while the
         // Ranked scene was covered instead of waiting for another visual frame.
@@ -582,6 +585,8 @@ class CorumRankedLayer final : public CCLayerColor {
             resumedFromRankedChild, m_menu && m_menu->isTouchEnabled(),
             m_menu ? static_cast<int>(m_menu->m_eState) : -1, handler ? handler->m_nPriority : 0);
     }
+
+    void audioFrame(float) { RankedAudioManager::get().tick(); }
 
     void refresh(float) {
         auto& runtime = RankedRuntime::get();
@@ -4257,6 +4262,7 @@ class CorumRankedLayer final : public CCLayerColor {
         if (RankedRuntime::get().view().stage == RuntimeStage::Queued) RankedRuntime::get().leaveQueue();
         RankedAudioManager::get().restoreMenuMusic();
         unschedule(schedule_selector(CorumRankedLayer::refresh));
+        unschedule(schedule_selector(CorumRankedLayer::audioFrame));
         setKeypadEnabled(false);
         if (m_menu) {
             corum::ranked::ui::cancelMenuTouch(m_menu);
@@ -4269,6 +4275,7 @@ class CorumRankedLayer final : public CCLayerColor {
 
     void onExit() override {
         unschedule(schedule_selector(CorumRankedLayer::refresh));
+        unschedule(schedule_selector(CorumRankedLayer::audioFrame));
         setKeypadEnabled(false);
         if (m_menu) {
             corum::ranked::ui::cancelMenuTouch(m_menu);

@@ -95,7 +95,9 @@ private:
     void synchronizeSongCaches();
     void prewarmReadySounds();
     void releasePreparedSounds();
-    [[nodiscard]] FMOD::Sound* preparedSound(int songId);
+    [[nodiscard]] FMOD::Sound* preparedSound(RankedAudioResourceView const& resource);
+    void reapRetainedSounds();
+    void updateStreamHealth();
     void stopOwnedAudio();
     [[nodiscard]] bool ownedChannelPlaying() const;
     [[nodiscard]] float targetRankedVolume() const;
@@ -131,7 +133,6 @@ private:
     FMOD::Channel* m_pendingChannel = nullptr;
     std::chrono::steady_clock::time_point m_pendingStartedAt {};
     unsigned int m_pendingStartMs = 0;
-    bool m_pendingSeekAccepted = false;
     bool m_playbackVerifyPending = false;
     std::chrono::steady_clock::time_point m_playbackVerifyAt {};
     int m_playbackRetryCount = 0;
@@ -143,8 +144,17 @@ private:
 
     // Prepared streaming Sounds are opened asynchronously while resources are
     // prepared, never synchronously in Round/Deathmatch/Result callbacks.
-    std::unordered_map<int, FMOD::Sound*> m_preparedSounds;
+    // Each resource has its own initially-seeked, single-use stream. Replaying
+    // the same streaming Sound resets it and discards its initial seek buffer.
+    std::unordered_map<std::string, FMOD::Sound*> m_preparedSounds;
+    std::set<std::string> m_consumedPreparedKeys;
+    std::vector<FMOD::Sound*> m_retainedSounds;
     FMOD::Sound* m_rankedSound = nullptr;
+    FMOD::Sound* m_retiringSound = nullptr;
+    bool m_ownedStreamMuted = false;
+    bool m_retiringStreamMuted = false;
+    unsigned int m_streamDiagnostics = 0;
+    std::chrono::steady_clock::time_point m_streamStarvedAt {};
     FMOD::Channel* m_rankedChannel = nullptr;
     FMOD::Channel* m_retiringChannel = nullptr;
     std::chrono::steady_clock::time_point m_retiringUntil {};

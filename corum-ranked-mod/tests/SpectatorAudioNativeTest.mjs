@@ -49,7 +49,7 @@ struct RankedAudioManager {
  bool ownedChannelPlaying()const{return channels==1;}
  void cancelPendingAudioStart(){}void stopOwnedAudio(){channels=0;m_ownsMusicChannel=false;++fadeouts;}
  void requestAudioSwitch(){stopOwnedAudio();if(m_desiredMode!=RankedAudioMode::Silent){channels=1;m_ownsMusicChannel=true;++creations;m_playingKey=resourceForMode(m_desiredMode)->key;}}
- void configure(int){}void tick(){}
+ void configure(int){}void tick(){}void prewarmReadySounds(){}
  void setMode(RankedAudioMode);void fadeOutForGameplay();void restoreMenuMusic();
 };
 ${['void RankedAudioManager::setMode(', 'void RankedAudioManager::fadeOutForGameplay()', 'void RankedAudioManager::restoreMenuMusic()'].map(n => method(audio,n)).join('\n')}

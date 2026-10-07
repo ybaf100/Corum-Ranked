@@ -29,6 +29,8 @@ for (const debug of [false, true]) test(`production audio transitions, bounded f
         'void RankedAudioManager::releasePreparedSounds()',
         'FMOD::Sound* RankedAudioManager::preparedSound(',
         'void RankedAudioManager::prewarmReadySounds()',
+        'void RankedAudioManager::reapRetainedSounds()',
+        'void RankedAudioManager::updateStreamHealth()',
         'void RankedAudioManager::beginOwnedFadeOut(',
         'void RankedAudioManager::requestAudioSwitch()',
         'RankedAudioMode RankedAudioManager::availableMode(',
@@ -59,6 +61,7 @@ for (const debug of [false, true]) test(`production audio transitions, bounded f
 #include <chrono>
 #include <cmath>
 #include <initializer_list>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <string>
@@ -74,10 +77,11 @@ using namespace geode;
 namespace fmt {template<class... T> std::string format(T...){return "trace";}}
 enum FMOD_RESULT {FMOD_OK, FMOD_ERR_NOTREADY, FMOD_ERR_INVALID_HANDLE};
 enum FMOD_OPENSTATE {FMOD_OPENSTATE_READY,FMOD_OPENSTATE_PLAYING,FMOD_OPENSTATE_SETPOSITION,FMOD_OPENSTATE_LOADING,FMOD_OPENSTATE_ERROR};
-constexpr int FMOD_TIMEUNIT_MS=1,FMOD_CREATESTREAM=2,FMOD_2D=4,FMOD_NONBLOCKING=8,FMOD_LOOP_NORMAL=16,FMOD_LOOP_OFF=32;
+constexpr int FMOD_TIMEUNIT_MS=1,FMOD_CREATESTREAM=2,FMOD_2D=4,FMOD_NONBLOCKING=8,FMOD_LOOP_NORMAL=16,FMOD_LOOP_OFF=32,FMOD_ACCURATETIME=64;
+struct FMOD_CREATESOUNDEXINFO {int cbsize=0;unsigned int initialseekposition=0;int initialseekpostype=0;};
 namespace FMOD {
 struct Sound {
-    FMOD_OPENSTATE state=FMOD_OPENSTATE_READY;bool starving=false;int releases=0,seekCalls=0;
+    FMOD_OPENSTATE state=FMOD_OPENSTATE_READY;bool starving=false;int releases=0,seekCalls=0,plays=0;unsigned int initial=0;
     enum Seek {Immediate,Async,NotReadyForever} seek=Immediate;
     FMOD_RESULT openResult=FMOD_OK;
     FMOD_RESULT getOpenState(FMOD_OPENSTATE* s,unsigned int*,bool* hungry,bool*){*s=state;if(hungry)*hungry=starving;return openResult;}
@@ -114,12 +118,13 @@ struct Channel {
 struct ChannelGroup {FMOD_RESULT setPaused(bool){return FMOD_OK;}FMOD_RESULT setMute(bool){return FMOD_OK;}};
 struct System {
     std::unordered_map<std::string,Sound*> sounds;std::vector<std::unique_ptr<Sound>> soundOwners;
-    std::vector<std::unique_ptr<Channel>> channels;int creates=0,plays=0;FMOD_RESULT playResult=FMOD_OK;ChannelGroup master;
-    FMOD_RESULT createSound(char const* path,int flags,void*,Sound** value){
-        assert((flags&FMOD_NONBLOCKING)&&(flags&FMOD_CREATESTREAM));++creates;
-        soundOwners.push_back(std::make_unique<Sound>());*value=soundOwners.back().get();sounds[path]=*value;return FMOD_OK;}
+    std::vector<std::unique_ptr<Channel>> channels;int creates=0,plays=0;FMOD_RESULT playResult=FMOD_OK;ChannelGroup master;std::function<void(Channel*)> configureChannel;
+    FMOD_RESULT createSound(char const* path,int flags,FMOD_CREATESOUNDEXINFO* info,Sound** value){
+        assert((flags&FMOD_NONBLOCKING)&&(flags&FMOD_CREATESTREAM)&&(flags&FMOD_ACCURATETIME));
+        assert(info&&info->cbsize==sizeof(FMOD_CREATESOUNDEXINFO)&&info->initialseekpostype==FMOD_TIMEUNIT_MS);++creates;
+        soundOwners.push_back(std::make_unique<Sound>());*value=soundOwners.back().get();sounds[path]=*value;(*value)->initial=info->initialseekposition;return FMOD_OK;}
     FMOD_RESULT playSound(Sound* sound,void*,bool paused,Channel** value){++plays;if(playResult!=FMOD_OK)return playResult;
-        channels.push_back(std::make_unique<Channel>());*value=channels.back().get();(*value)->sound=sound;(*value)->paused=paused;return FMOD_OK;}
+        channels.push_back(std::make_unique<Channel>());*value=channels.back().get();(*value)->sound=sound;(*value)->paused=paused;(*value)->position=sound->plays++?0:sound->initial;if(configureChannel)configureChannel(*value);return FMOD_OK;}
     FMOD_RESULT getSoftwareFormat(int* rate,void*,void*){*rate=48000;return FMOD_OK;}
     FMOD_RESULT getMasterChannelGroup(ChannelGroup** value){*value=&master;return FMOD_OK;}
     void advance(int ms){AudioClock::current+=std::chrono::milliseconds(ms);for(auto& c:channels){
@@ -157,96 +162,110 @@ struct Fixture {
         audio.m_config.audio.enabled=true;audio.m_config.audio.fadeInSeconds=1.8;audio.m_config.audio.fadeOutSeconds=1.8;
         audio.m_config.audio.resources={{"menu","",224958,2,true},{"match","",786863,26,true},{"round3_deathmatch_wait","",99477,182,true}};}
     ~Fixture(){audio.fadeOutForGameplay();}
-    FMOD::Sound* sound(int id){return audio.preparedSound(id);}
+    FMOD::Sound* sound(int id){for(auto const& r:audio.m_config.audio.resources)if(r.songId==id)return audio.preparedSound(r);return nullptr;}
     void step(int ms){system.advance(ms);audio.tick();}
     FMOD::Channel* start(RankedAudioMode mode){audio.setMode(mode);auto* c=audio.m_rankedChannel;assert(c);step(2000);assert(near(c->audible(),0.8f));return c;}
 };
 int main(){
-    // Slow 26s compressed seek: no old-channel stop, no repeated candidate.
-    {Fixture f;auto* old=f.start(RankedAudioMode::Lobby);auto* match=f.sound(786863);match->seek=FMOD::Sound::Async;
-        int plays=f.system.plays,stops=FMODAudioEngine::sharedEngine()->stops;f.audio.setMode(RankedAudioMode::Round12);
-        auto* candidate=f.audio.m_pendingChannel;assert(candidate&&candidate->paused&&candidate->muted&&candidate->position==26000);
-        for(int i=0;i<8;++i){f.audio.setMode(RankedAudioMode::Round12);f.step(200);assert(old->stops==0&&old->audible()>0);}
-        assert(f.system.plays==plays+1&&candidate->unpauses==0);
-        match->state=FMOD_OPENSTATE_READY;f.audio.tick();assert(f.audio.m_rankedChannel==candidate&&f.audio.m_retiringChannel==old);
-        assert(candidate->unpauses==1&&near(candidate->volume,0.8f)&&near(candidate->audible(),0)&&old->stops==0);
-        // DSP clock ramps between 200ms UI ticks; base volume stays nonzero.
+    // All configured offsets, especially 182s, are decoded during prewarming.
+    // The transition itself performs zero seeks and does not restart the old
+    // stream. first-play semantics deliberately reset a reused Sound to zero.
+    {Fixture f;f.audio.prewarmReadySounds();auto* prepared=f.sound(786863);auto* r3=f.sound(99477);
+        assert(prepared->initial==26000&&r3->initial==182000);
+        auto* old=f.start(RankedAudioMode::Lobby);int creates=f.system.creates;
+        f.audio.setMode(RankedAudioMode::Round12);auto* candidate=f.audio.m_rankedChannel;
+        assert(candidate&&candidate->position==26000&&prepared->seekCalls==0);
+        assert(f.system.creates==creates&&f.audio.m_retiringChannel==old&&old->stops==0);
         f.system.advance(900);assert(near(old->audible(),0.4f)&&near(candidate->audible(),0.4f));
-        assert(FMODAudioEngine::sharedEngine()->stops==stops);f.step(1000);
-        assert(!f.audio.m_retiringChannel&&near(candidate->audible(),0.8f)&&old->stops==1);}
-    // A pending 182s R3 seek times out once; UI must keep the match fallback.
-    {Fixture f;auto* match=f.start(RankedAudioMode::Round12);auto* r3=f.sound(99477);r3->seek=FMOD::Sound::Async;
-        f.audio.setMode(RankedAudioMode::Round3DeathmatchWait);auto* candidate=f.audio.m_pendingChannel;assert(candidate->position==182000);
-        for(int i=0;i<16;++i){f.audio.setMode(RankedAudioMode::Round3DeathmatchWait);f.step(200);}
-        assert(candidate->stops==1&&r3->releases==0&&match->stops==0);
-        assert(f.audio.m_desiredMode==RankedAudioMode::Round12&&f.audio.m_failedPlaybackKeys.contains("round3_deathmatch_wait"));
-        auto plays=f.system.plays,creates=f.system.creates;
-        for(int i=0;i<300;++i){f.audio.setMode(RankedAudioMode::Round3DeathmatchWait);f.step(200);}
-        assert(f.system.plays==plays&&f.system.creates==creates&&f.audio.m_rankedChannel==match);
-        // A genuinely new requested mode can retry a previously failed track.
-        r3->seek=FMOD::Sound::Immediate;r3->state=FMOD_OPENSTATE_READY;
-        f.audio.setMode(RankedAudioMode::Round12);f.audio.setMode(RankedAudioMode::Round3DeathmatchWait);
-        assert(f.audio.m_playingKey=="round3_deathmatch_wait"&&!f.audio.m_failedPlaybackKeys.contains("round3_deathmatch_wait"));}
-    // Initial async open (no pending Channel) and repeated READY/NOTREADY seek
-    // failures share the same bounded deadline, not a reset on every retry.
+        f.step(1000);assert(!f.audio.m_retiringChannel&&old->stops==1);
+        f.audio.setMode(RankedAudioMode::Round3DeathmatchWait);
+        assert(f.audio.m_rankedChannel->position==182000&&r3->seekCalls==0);}
+    // A non-ready prebuffer must keep the old BGM; one initial open and a single
+    // bounded deadline replace the old transition-time setPosition loop.
     for(int path=0;path<3;++path){Fixture f;auto* old=f.start(RankedAudioMode::Lobby);auto* match=f.sound(786863);
         if(path==0)match->state=FMOD_OPENSTATE_LOADING;
-        if(path==1)match->seek=FMOD::Sound::NotReadyForever;
+        if(path==1)match->starving=true;
         if(path==2)f.system.playResult=FMOD_ERR_NOTREADY;
-        f.audio.setMode(RankedAudioMode::Round12);if(path!=1)assert(!f.audio.m_pendingChannel);
+        f.audio.setMode(RankedAudioMode::Round12);
         for(int i=0;i<20;++i){f.audio.setMode(RankedAudioMode::Round12);f.step(200);}
-        assert(f.audio.m_desiredMode==RankedAudioMode::Lobby&&f.audio.m_failedPlaybackKeys.contains("match"));
-        assert(f.audio.m_rankedChannel==old&&old->stops==0&&match->releases==0);auto plays=f.system.plays;
-        for(int i=0;i<20;++i){f.audio.setMode(RankedAudioMode::Round12);f.step(200);}assert(f.system.plays==plays);}
-    // READY but starving must not unpause/swap; recovering buffer can finish.
-    {Fixture f;auto* old=f.start(RankedAudioMode::Lobby);auto* match=f.sound(786863);match->starving=true;
-        f.audio.setMode(RankedAudioMode::Round12);f.step(1000);assert(f.audio.m_rankedChannel==old&&!f.audio.m_pendingChannel);
-        match->starving=false;f.audio.tick();assert(f.audio.m_playingKey=="match");}
-    // Start failure must keep the original channel, never replace it with mute.
-    {Fixture f;auto* old=f.start(RankedAudioMode::Lobby);auto* match=f.sound(786863);match->seek=FMOD::Sound::Async;
-        f.audio.setMode(RankedAudioMode::Round12);auto* candidate=f.audio.m_pendingChannel;candidate->failUnpause=true;
-        match->state=FMOD_OPENSTATE_READY;f.audio.tick();assert(candidate->stops==1&&old->stops==0&&old->audible()>0);
-        assert(f.audio.m_rankedChannel==old&&f.audio.m_desiredMode==RankedAudioMode::Lobby);}
-    // Interrupting an incomplete DSP fade must not jump to full old volume or
-    // retain a future fade-in endpoint; its starting gain is the current gain.
-    {Fixture f;f.audio.setMode(RankedAudioMode::Lobby);auto* old=f.audio.m_rankedChannel;f.step(900);assert(near(old->audible(),0.4f));
-        f.audio.setMode(RankedAudioMode::Round12);assert(near(old->audible(),0.4f)&&old->fadePoints.back().second==0);
-        f.system.advance(900);assert(near(old->audible(),0.2f)&&near(f.audio.m_rankedChannel->audible(),0.4f));}
-    // Silent also retires at the current DSP gain, without multiplying a second
-    // tick-driven envelope or keeping the ended stream as an active owner.
-    {Fixture f;f.audio.setMode(RankedAudioMode::Lobby);auto* old=f.audio.m_rankedChannel;f.step(900);
-        f.audio.setMode(RankedAudioMode::Silent);assert(!f.audio.m_rankedChannel&&f.audio.m_retiringChannel==old);
-        assert(near(old->audible(),0.4f));f.system.advance(900);assert(near(old->audible(),0.2f));
-        f.step(1000);assert(!f.audio.m_retiringChannel&&old->stops==1);}
-    // If DSP scheduling is unavailable/partial, the bounded tick fade remains
-    // usable and no stray zero envelope silences the candidate permanently.
-    for(int path=0;path<2;++path){Fixture f;auto* match=f.sound(786863);match->seek=FMOD::Sound::Async;
-        f.audio.setMode(RankedAudioMode::Round12);auto* c=f.audio.m_pendingChannel;
-        if(path==0)c->dspAvailable=false;else c->failSecondFade=true;
-        match->state=FMOD_OPENSTATE_READY;f.audio.tick();assert(!f.audio.m_ownedDspFadeIn&&c->fadePoints.empty());
-        f.step(2000);assert(near(c->audible(),0.8f));}
-    // No-progress verification gets two retries. Repeated UI calls cannot
-    // reset that budget; failures across the chain eventually become Silent.
+        assert(f.audio.m_failedPlaybackKeys.contains("match")&&f.audio.m_desiredMode==RankedAudioMode::Lobby);
+        assert(f.audio.m_rankedChannel==old&&old->stops==0&&match->seekCalls==0);
+        auto creates=f.system.creates,plays=f.system.plays;
+        for(int i=0;i<20;++i){f.audio.setMode(RankedAudioMode::Round12);f.step(200);}
+        assert(f.system.creates==creates&&f.system.plays==plays);}
+    // R3 preparation failure remains latched through 300 identical requests.
+    {Fixture f;auto* match=f.start(RankedAudioMode::Round12);auto* r3=f.sound(99477);r3->state=FMOD_OPENSTATE_LOADING;
+        f.audio.setMode(RankedAudioMode::Round3DeathmatchWait);for(int i=0;i<16;++i)f.step(200);
+        assert(f.audio.m_desiredMode==RankedAudioMode::Round12&&match->stops==0&&r3->releases==0);
+        auto creates=f.system.creates,plays=f.system.plays;
+        for(int i=0;i<300;++i){f.audio.setMode(RankedAudioMode::Round3DeathmatchWait);f.step(200);}
+        assert(f.system.creates==creates&&f.system.plays==plays);
+        r3->state=FMOD_OPENSTATE_READY;f.audio.setMode(RankedAudioMode::Round12);
+        f.audio.setMode(RankedAudioMode::Round3DeathmatchWait);assert(f.audio.m_rankedChannel->position==182000);}
+    // Actual buffer starvation must mute stale data, never reset the stream on
+    // every refresh. Recovery unmutes the same channel at its existing clock.
+    {Fixture f;auto* current=f.start(RankedAudioMode::Lobby);auto* sound=current->sound;
+        auto plays=f.system.plays;sound->starving=true;f.step(20);
+        assert(current->muted&&near(current->audible(),0)&&current->stops==0);
+        for(int i=0;i<25;++i){f.audio.setMode(RankedAudioMode::Lobby);f.step(20);}
+        assert(f.system.plays==plays&&current->stops==0);
+        sound->starving=false;f.step(20);assert(!current->muted&&near(current->audible(),0.8f));
+        assert(f.audio.m_rankedChannel==current&&f.system.plays==plays);}
+    // Both active and retiring channels are protected; steady/resume volume
+    // writes may not undo the starvation mute during a pending replacement.
+    {Fixture f;auto* old=f.start(RankedAudioMode::Lobby);f.audio.setMode(RankedAudioMode::Round12);
+        auto* current=f.audio.m_rankedChannel;old->sound->starving=true;current->sound->starving=true;
+        f.audio.onApplicationResume();f.step(20);assert(old->muted&&current->muted);
+        old->sound->starving=false;current->sound->starving=false;f.step(20);assert(!old->muted&&!current->muted);}
+    // Sustained starvation is bounded and falls back instead of looping new
+    // channels or leaving an indefinitely audible repeated decode block.
+    {Fixture f;auto* current=f.start(RankedAudioMode::Round12);current->sound->starving=true;
+        for(int i=0;i<160;++i){f.audio.setMode(RankedAudioMode::Round12);f.step(20);}
+        assert(f.audio.m_failedPlaybackKeys.contains("match")&&f.audio.m_desiredMode==RankedAudioMode::Lobby);
+        assert(current->muted||current->stops>0);}
+    // Offset buffers are single use. Three rounds re-arm during gameplay and
+    // never seek/restart/release a Sound used by a currently fading channel.
+    {Fixture f;for(int round=0;round<3;++round){auto* c=f.start(RankedAudioMode::Round12);
+        assert(c->position>=26000&&c->sound->plays==1&&c->sound->seekCalls==0);
+        auto* used=c->sound;f.audio.fadeOutForGameplay();assert(c->stops==1);
+        auto* next=f.sound(786863);assert(next!=used&&next->initial==26000);f.audio.tick();
+        assert(used->releases==1&&next->releases==0);}}
+    // Shared song IDs with different modes/offsets require independent buffers.
+    {Fixture f;f.audio.m_config.audio.resources.push_back({"result_win","",786863,29,false});
+        auto* old=f.start(RankedAudioMode::Round12);f.audio.prewarmReadySounds();
+        assert(old->sound->releases==0);f.audio.setMode(RankedAudioMode::ResultWin);
+        auto* next=f.audio.m_rankedChannel;assert(next&&next->sound!=old->sound&&next->position==29000);
+        assert(f.audio.m_retiringChannel==old&&old->stops==0&&old->sound->releases==0);f.step(2000);}
+    // Reject accidental reused buffers with a wrong offset while still muted.
+    {Fixture f;auto* old=f.start(RankedAudioMode::Lobby);auto* match=f.sound(786863);match->plays=1;
+        f.audio.setMode(RankedAudioMode::Round12);assert(f.audio.m_failedPlaybackKeys.contains("match"));
+        assert(f.audio.m_rankedChannel==old&&old->stops==0&&match->seekCalls==0);}
+    // Interrupted fades preserve instantaneous DSP gain, including Silent.
+    for(bool silent:{false,true}){Fixture f;f.audio.setMode(RankedAudioMode::Lobby);
+        auto* old=f.audio.m_rankedChannel;f.step(900);assert(near(old->audible(),0.4f));
+        f.audio.setMode(silent?RankedAudioMode::Silent:RankedAudioMode::Round12);
+        assert(near(old->audible(),0.4f)&&old->fadePoints.back().second==0);
+        f.system.advance(900);assert(near(old->audible(),0.2f));f.step(1000);assert(old->stops==1);}
+    // Partial/unsupported DSP fades must clear their zero multiplier.
+    for(int path=0;path<2;++path){Fixture f;
+        f.system.configureChannel=[path](auto* c){if(path==0)c->dspAvailable=false;else c->failSecondFade=true;};
+        f.audio.setMode(RankedAudioMode::Round12);auto* c=f.audio.m_rankedChannel;
+        assert(c&&!f.audio.m_ownedDspFadeIn&&c->fadePoints.empty());f.step(2000);assert(near(c->audible(),0.8f));}
+    // No-progress verification remains bounded; one-use fresh streams preserve
+    // configured offsets on retry rather than incorrectly playing from zero.
     {Fixture f;f.audio.setMode(RankedAudioMode::Round12);
         for(int i=0;i<30;++i){f.audio.setMode(RankedAudioMode::Round12);f.system.advance(1100);
             if(f.audio.m_rankedChannel)f.audio.m_rankedChannel->position=f.audio.m_playbackVerifyStartPositionMs;
             f.audio.tick();}
         assert(f.audio.m_failedPlaybackKeys.contains("match")&&f.audio.m_failedPlaybackKeys.contains("menu"));
-        assert(f.audio.m_desiredMode==RankedAudioMode::Silent);auto plays=f.system.plays;
-        for(int i=0;i<20;++i){f.audio.setMode(RankedAudioMode::Round12);f.step(200);}assert(f.system.plays==plays);}
-    // Don't loop recovery/create while a slow replacement is already pending.
-    {Fixture f;auto* old=f.start(RankedAudioMode::Lobby);auto* match=f.sound(786863);match->seek=FMOD::Sound::Async;
-        f.audio.setMode(RankedAudioMode::Round12);old->playing=false;auto plays=f.system.plays;
-        for(int i=0;i<5;++i){f.step(200);}assert(f.system.plays==plays&&f.audio.m_pendingChannel);}
-    // Gameplay handoff/close/config teardown stop all independently owned
-    // channels, including the fading predecessor and the muted seek candidate.
-    for(int path=0;path<3;++path){Fixture f;auto* old=f.start(RankedAudioMode::Lobby);f.audio.setMode(RankedAudioMode::Round12);
-        auto* current=f.audio.m_rankedChannel;assert(f.audio.m_retiringChannel==old);auto* r3=f.sound(99477);r3->seek=FMOD::Sound::Async;
-        f.audio.setMode(RankedAudioMode::Round3DeathmatchWait);auto* pending=f.audio.m_pendingChannel;
-        f.audio.onApplicationPause();assert(old->paused&&current->paused&&pending->paused);
+        assert(f.audio.m_desiredMode==RankedAudioMode::Silent);}
+    // Application/close/gameplay/config teardown stops every independent owner.
+    for(int path=0;path<3;++path){Fixture f;auto* old=f.start(RankedAudioMode::Lobby);
+        f.audio.setMode(RankedAudioMode::Round12);auto* current=f.audio.m_rankedChannel;
+        f.audio.onApplicationPause();assert(old->paused&&current->paused);
         if(path==0){f.audio.fadeOutForGameplay();}if(path==1){f.audio.restoreMenuMusic();}if(path==2){f.audio.releasePreparedSounds();}
-        assert(old->stops==1&&current->stops==1&&pending->stops==1);
-        assert(!f.audio.m_rankedChannel&&!f.audio.m_pendingChannel&&!f.audio.m_retiringChannel);}
+        assert(old->stops==1&&current->stops==1&&!f.audio.m_rankedChannel&&!f.audio.m_retiringChannel);}
+
 }
 `;
     const dir = mkdtempSync(join(tmpdir(), 'corum-audio-transition-'));

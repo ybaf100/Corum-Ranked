@@ -1,118 +1,57 @@
-// Source invariants for the Round 3 FMOD transition hotfix. Native builds
-// remain the ABI gate; affected-device traces remain the runtime proof.
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import {readFileSync} from 'node:fs';
+import {fileURLToPath} from 'node:url';
 import assert from 'node:assert/strict';
 import test from 'node:test';
-
-const source = readFileSync(
-    fileURLToPath(new URL('../src/RankedAudioManager.cpp', import.meta.url)),
-    'utf8',
-);
-
-const body = (from, to) => {
-    const start = source.indexOf(from);
-    const end = source.indexOf(to, start + from.length);
-    assert(start >= 0 && end > start, `Missing source boundary: ${from} -> ${to}`);
-    return source.slice(start, end);
-};
-
-test('Ranked streams open and seek through FMOD non-blocking state', () => {
-    const prepared = body(
-        'FMOD::Sound* RankedAudioManager::preparedSound(',
-        'void RankedAudioManager::prewarmReadySounds()',
-    );
-    assert.match(prepared, /FMOD_CREATESTREAM\s*\|\s*FMOD_2D\s*\|\s*FMOD_NONBLOCKING/);
-    assert.match(source, /FMOD_OPENSTATE_SETPOSITION|PreparedStreamState::Pending/);
-
-    const start = body(
-        'void RankedAudioManager::startDesiredAudio(',
-        'void RankedAudioManager::updatePendingAudioStart()',
-    );
-    assert.match(start, /channel->setPosition\(m_pendingStartMs, FMOD_TIMEUNIT_MS\)/);
-    assert(start.indexOf('m_pendingChannel = channel') < start.indexOf('channel->setPosition'));
-    assert.doesNotMatch(start, /channel->setPaused\(false\)/);
-    assert.doesNotMatch(start, /m_system->update\(\)/);
+const source=readFileSync(fileURLToPath(new URL('../src/RankedAudioManager.cpp',import.meta.url)),'utf8');
+const popup=readFileSync(fileURLToPath(new URL('../src/RankedPopup.cpp',import.meta.url)),'utf8');
+function body(from,to){const a=source.indexOf(from),b=source.indexOf(to,a+from.length);assert(a>=0&&b>a);return source.slice(a,b);}
+test('single-use streams prebuffer exact offsets without a transition-time seek',()=>{
+ const prepared=body('FMOD::Sound* RankedAudioManager::preparedSound(','void RankedAudioManager::synchronizeSongCaches()');
+ assert.match(prepared,/FMOD_CREATESOUNDEXINFO info \{\}/);
+ assert.match(prepared,/info\.cbsize = sizeof\(info\)/);
+ assert.match(prepared,/info\.initialseekposition/);assert.match(prepared,/info\.initialseekpostype = FMOD_TIMEUNIT_MS/);
+ assert.match(prepared,/FMOD_CREATESTREAM \| FMOD_2D \| FMOD_NONBLOCKING \| FMOD_ACCURATETIME/);
+ assert.match(prepared,/m_preparedSounds\[resource\.key\]/);
+ assert.match(prepared,/m_consumedPreparedKeys\.contains\(resource\.key\)/);
+ assert.doesNotMatch(source,/->setPosition\(/); // not a mocked seek-success claim
+ assert.match(source,/prewarmReadySounds\(\);\n}\n\nvoid RankedAudioManager::onApplicationPause/);
 });
-
-test('FMOD NOTREADY keeps one pending candidate and retries seek later', () => {
-    const start = body(
-        'void RankedAudioManager::startDesiredAudio(',
-        'void RankedAudioManager::updatePendingAudioStart()',
-    );
-    const seek = start.slice(start.indexOf('if (m_pendingStartMs > 0)'));
-    assert.match(seek, /seekResult == FMOD_ERR_NOTREADY/);
-    const notReady = seek.slice(
-        seek.indexOf('if (seekResult == FMOD_ERR_NOTREADY)'),
-        seek.indexOf('if (seekResult != FMOD_OK)'),
-    );
-    assert.doesNotMatch(notReady, /cancelPendingAudioStart\(\)/);
-    assert.match(notReady, /audio-seek-deferred/);
-    assert.match(notReady, /audioStartTimedOut\(\)/);
-
-    const update = body(
-        'void RankedAudioManager::updatePendingAudioStart()',
-        'void RankedAudioManager::cancelPendingAudioStart()',
-    );
-    assert.match(update, /m_pendingStartMs > 0 && !m_pendingSeekAccepted/);
-    assert.match(update, /m_pendingChannel->setPosition\(m_pendingStartMs, FMOD_TIMEUNIT_MS\)/);
-    assert.match(update, /seekResult == FMOD_ERR_NOTREADY/);
-    assert.match(update, /failDesiredAudio\("seek-notready-timeout"/);
-    assert.match(update, /m_pendingSeekAccepted = true/);
+test('an initial offset mismatch stays muted and cannot silently start at zero',()=>{
+ const start=body('void RankedAudioManager::startDesiredAudio(','void RankedAudioManager::updatePendingAudioStart()');
+ assert.match(start,/playSound\(sound, nullptr, true, &channel\)/);
+ assert.match(start,/m_consumedPreparedKeys\.insert\(resource->key\)/);
+ assert.match(start,/channel->setMute\(true\)/);assert.doesNotMatch(start,/setPaused\(false\)/);
+ const finish=body('void RankedAudioManager::updatePendingAudioStart()','void RankedAudioManager::cancelPendingAudioStart()');
+ assert(finish.indexOf('getPosition(&position')<finish.indexOf('setPaused(false)'));
+ assert.match(finish,/failDesiredAudio\("initial-position"/);
 });
-
-test('stalled pending transitions time out and fall back without killing the old BGM', () => {
-    assert.match(source, /kPendingAudioStartTimeout\s*=\s*std::chrono::seconds\(3\)/);
-    assert.match(source, /RankedAudioMode pendingTimeoutFallback\(RankedAudioMode mode\)/);
-
-    const update = body(
-        'void RankedAudioManager::updatePendingAudioStart()',
-        'void RankedAudioManager::cancelPendingAudioStart()',
-    );
-    const pending = update.slice(
-        update.indexOf('if (state == PreparedStreamState::Pending)'),
-        update.indexOf('if (state == PreparedStreamState::Error)'),
-    );
-    assert.match(pending, /audioStartTimedOut\(\)/);
-    assert.match(pending, /audio-pending-timeout/);
-    assert.match(pending, /failDesiredAudio\("buffer-seek-timeout"/);
-    assert.doesNotMatch(pending, /stopOwnedAudio\(\)/);
-    const failure = body('void RankedAudioManager::failDesiredAudio(', 'void RankedAudioManager::retireOwnedChannel(');
-    assert.match(failure, /m_failedPlaybackKeys\.insert\(resource->key\)/);
-    assert.match(failure, /m_desiredMode = availableMode\(m_requestedMode\)/);
-    assert.doesNotMatch(failure, /sound->release\(\)|stopOwnedAudio\(\)/);
-
-    const fallback = body(
-        'RankedAudioMode pendingTimeoutFallback(',
-        '} // namespace',
-    );
-    assert.match(fallback, /Round3DeathmatchWait/);
-    assert.match(fallback, /return RankedAudioMode::Round12/);
+test('stream starvation mute is preserved during normal refresh and application resume',()=>{
+ const health=body('void RankedAudioManager::updateStreamHealth()','void RankedAudioManager::synchronizeSongCaches()');
+ assert.match(health,/getOpenState\(&state, &buffered, &starving, &diskBusy\)/);
+ assert.match(health,/channel->setMute\(mustMute\)/);
+ assert.match(health,/observe\(m_retiringSound, m_retiringChannel/);
+ assert.match(health,/failDesiredAudio\("active-buffer-timeout"/);
+ assert.match(source,/m_rankedChannel->setMute\(m_ownedStreamMuted\)/);
+ assert.doesNotMatch(source,/m_rankedChannel->setMute\(false\)/);
+ assert.match(popup,/schedule\(schedule_selector\(CorumRankedLayer::audioFrame\), 0\.02f\)/);
+ assert.match(popup,/void audioFrame\(float\) \{ RankedAudioManager::get\(\)\.tick\(\); \}/);
+ assert.equal((popup.match(/unschedule\(schedule_selector\(CorumRankedLayer::audioFrame\)\)/g)||[]).length,2);
 });
-
-test('the old BGM survives until the asynchronous candidate is ready', () => {
-    const request = body(
-        'void RankedAudioManager::requestAudioSwitch()',
-        'void RankedAudioManager::startDesiredAudio(',
-    );
-    const desired = request.slice(request.indexOf('if (desired) {'), request.indexOf('cancelPendingAudioStart();\n    if (m_rankedChannel)'));
-    assert.match(desired, /m_switchPending = true;\s*startDesiredAudio\(\);/);
-    assert.doesNotMatch(desired, /stopOwnedAudio\(\)/);
-
-    const finish = body(
-        'void RankedAudioManager::updatePendingAudioStart()',
-        'void RankedAudioManager::cancelPendingAudioStart()',
-    );
-    assert.match(finish, /state == PreparedStreamState::Pending/);
-    assert.match(finish, /audioStartTimedOut\(\)/);
-    assert(finish.indexOf('channel->setPaused(false)') < finish.indexOf('retireOwnedChannel('));
-    assert.match(finish, /channel->addFadePoint\(clock, 0\)/);
-    assert.match(finish, /channel->addFadePoint\(clock \+.*fadeIn \* rate\), 1\)/);
-    assert.match(finish, /audio-seek-ready:/);
+test('bounded preparation failures keep the audible predecessor and latch a fallback',()=>{
+ assert.match(source,/kPendingAudioStartTimeout = std::chrono::seconds\(3\)/);
+ const fail=body('void RankedAudioManager::failDesiredAudio(','void RankedAudioManager::retireOwnedChannel(');
+ assert.match(fail,/m_failedPlaybackKeys\.insert\(resource->key\)/);
+ assert.match(fail,/availableMode\(m_requestedMode\)/);
+ assert.doesNotMatch(fail,/sound->release\(\)|stopOwnedAudio\(\)/);
+ const finish=body('void RankedAudioManager::updatePendingAudioStart()','void RankedAudioManager::cancelPendingAudioStart()');
+ assert(finish.indexOf('channel->setPaused(false)')<finish.indexOf('retireOwnedChannel('));
+ assert.match(finish,/channel->addFadePoint\(clock, 0\)/);assert.match(finish,/audio-prebuffer-ready:/);
 });
-
-test('competitive switches reuse validated paths and never force an FMOD update', () => {
-    assert.match(source, /m_readySongPaths\.find\(songId\)/);
-    assert.match(source, /m_readySongPaths\.emplace\(songId,/);
-    assert.doesNotMatch(source, /m_system->update\(\)/);
+test('paths stay cached and discarded loading/active Sounds are not synchronously released in switches',()=>{
+ assert.match(source,/m_readySongPaths\.find\(songId\)/);
+ const prepared=body('FMOD::Sound* RankedAudioManager::preparedSound(','void RankedAudioManager::updateStreamHealth()');
+ assert.match(prepared,/m_retainedSounds\.push_back\(found->second\)/);
+ assert.match(prepared,/sound == m_rankedSound \|\| sound == m_retiringSound \|\| sound == m_pendingSound/);
+ assert.match(prepared,/preparedStreamState\(sound\) == PreparedStreamState::Pending/);
+ assert.doesNotMatch(source,/m_system->update\(\)/);
 });

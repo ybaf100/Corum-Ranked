@@ -1,148 +1,125 @@
-# Ranked Pause, retained round input and music transition hotfix
+# Ranked Pause input and prebuffered music — beta38
 
-Starting remote main: `c01980c1ca0fd008960a3a92e3d7b2e024b4ad69`.
-Client/server version remains `v0.5.0-beta.37`; spectator protocol and Debug
-recording format remain v2. Identify this patch by its commit, not an earlier
-beta37 artifact. A package built from the previous commit does not contain it.
+Starting authoritative remote main: `363c1bcf2bded5168868f6936b2abce4b9b82c87`.
+Client/workspace/server exact gate: `v0.5.0-beta.38`. Spectator protocol v2 and
+Debug recording format v2 are unchanged. Build the package before promoting
+this commit to main, so the automatic server deployment cannot precede it.
 
-## Device evidence
+## Device evidence and correction of the previous hypothesis
 
-`Geode 2026-10-07 15.18.23.log` loads beta37 on Geode 5.10.1 / GD 2.2081.
-The user's report is that Pause still does not open, and round/result UI stops
-responding from round 2. The log confirms shared countdown GO for Scrap round 1
-at 15:27:38 and VOICE round 2 at 15:33:15. Both log `paused=false`,
-`pauseBeforeHold=true`, and `pauseEnabled=true`.
+The user reports that both symptoms remain after the previous commit: Ranked
+Pause never opens (ordinary gameplay works), and music repeatedly stutters
+while changing Ranked screens. `Geode 2026-10-07 18.24.38.log` only records
+startup; `Geode 2026-10-07 18.19.53.log` contains the actual reproduction.
+Both load beta37 / Geode 5.10.1 / GD 2.2081. The reproduction includes the new
+`[RankedInput] GO` marker, proving the previous input patch is installed.
 
-Round 2 gameplay and Attempt End ACKs continue, and `MATCH_RESULT` is received
-at 15:38:33. This is not evidence of a stopped match poll or a still-disabled
-Pause item. It also does not prove that the native Pause callback received a
-touch. That log has no touch-handler priority/claim snapshot.
+Aeoning 89425733 enters natively at 18:23:27; shared GO occurs at 18:23:31.
+GO records `paused=false`, `pauseEnabled=true`, UILayer touch=true, menu
+touch/enabled=true, UILayer priority=0 and menu priority=-128. Attempts and
+End ACKs progress afterward. No `[RankedPause] opened` appears. Thus an
+init-time disabled button or the prior proposed equal-priority ordering
+cannot explain this recorded GO. The log does not show the actual failed
+finger-down/callback or later native button state, so the precise iOS drop
+inside touch dispatch / UILayer::onPause is still unproved. Do not label a
+host double or the correct GO flags as proof that the old patch fixed Pause.
 
-## Source findings and repair
+The exact released bindings (7f6c2a75, GD 2.2081) identify iOS UILayer::onPause
+0x49540, doPause 0x49ff0, PlayLayer::pauseGame 0x1227f0 and canPauseGame
+0x1227cc. The same binding revision's Windows inline doPause resets touch
+IDs/UI state, calls the current PlayLayer's pauseGame and increments the native
+pause counter. This is source evidence for the intended native API; it is not
+an iOS game disassembly or evidence of which onPause branch failed.
 
-1. The entry hold disabled UILayer touch, then re-registered its swallowing
-   gameplay delegate at GO, after the child Pause menu was already registered.
-   Cocos handlers with equal priority are ordered newest first. An enabled item
-   can therefore lose all touches to a later swallowing delegate. The host
-   fixture reproduces this ordering failure; the device's exact priorities were
-   not recorded, so this is not proof of that exact iPad ordering.
-   Keep UILayer touch registered during the hold. The existing countdown blocker
-   consumes touch, keyboard/keypad and Pause remain locked, native updates remain
-   held, and button state/queued inputs are flushed at GO. At GO restore the
-   native Pause menu's enabled/touch flags and place only that child menu before
-   its input delegate if needed. Preserve an already-higher priority and leave
-   other menus and force-priority ownership unchanged.
+## Scene-owned Pause input
 
-2. Pointer-only CCMenu cleanup does not cancel `TrackingTouch` or the dispatcher's
-   claimed touch. Disabling/re-enabling a menu while a touch is active can leave
-   it rejecting new touches; a late finger-up can also reach a rebuilt UI.
-   Use one scene-scoped cancellation helper before replacing items, covering or
-   closing the Ranked scene, and transferring result rank-reveal ownership.
-   Unselect the live item, clear its pointer, return to `Waiting`, and discard
-   only that menu's claims. No delegate removal/re-registration is needed for
-   this cancellation. Restore input flags before base `onEnter`, allowing normal
-   child registration order. A covered rank reveal keeps its actual owner pointer
-   rather than orphaning the child while clearing the pointer.
+The existing countdown delegate stays owned by the exact Ranked PlayLayer.
+During waiting/countdown it swallows input and holds gameplay as before. At GO
+it becomes transparent and only claims touches inside the existing native
+Pause item's transformed bounds. Every other gameplay touch passes through.
+A countdown-held finger cannot turn into a Pause click. Finger cancel/drag-out
+unselects without activating. The current, running PlayLayer must match its
+weak owner, remain unpaused and satisfy native canPauseGame; the button and its
+ancestors must be visible and belong to that scene.
 
-3. Explicitly dismiss the countdown's touch/keypad blocker on successful GO and
-   canceled scene exit before removing it. This covers both entry lifecycles;
-   the old log does not prove a leaked blocker on the user's device.
+A completed click calls native UILayer::doPause, retaining native PauseLayer,
+resume/restart, pause counter and RankedPauseLayer's existing 30-second match
+lease, Paperlogy budget text, native X, localized surrender and blocked exit.
+While paused it claims no touches, so PauseLayer and surrender dialogs own
+input. Exit disables and removes the delegate and weak owner. Ordinary scenes
+never create this observer. No new global detour, setter hook, forced-priority
+patch, separate drawn Pause button or private hook-runtime change is introduced.
 
-4. Replace the hand-drawn white surrender flag with GD's native
-   `GJ_closeBtn_001.png` X button. Round/match choices, Korean translations,
-   Paperlogy font, match-wide 30-second pause budget, and the blocked manual exit
-   route remain unchanged.
+Bounded `[RankedPauseInput] native dispatch paused=... canPause=...` and existing
+`[RankedPause] opened` now distinguish a real native opening from GO flags.
+This explicitly replaces the fragile CCMenu callback dependency in this owned
+scene; it does not claim to have identified an unavailable iOS instruction.
 
-No new native detours, UILayer hook, animation callback hook or global CCMenu
-hook is introduced. Ordinary non-Ranked gameplay never enters this entry repair.
-The beta37 score-hook removal, exact-level persistence boundary, local spectator
-authority firewall, final Attempt lifecycle, Spider segment buffer, capture,
-World Driver, camera and transport are unchanged.
+## Music findings and changes
 
-## Music transition evidence and repair
+The reproduction records menu seek preparation at 200102us and menu-to-match
+at **1600480us**, with match song 786863's 26s offset. Earlier device evidence
+also recorded a 1.6s result seek. The configured R3 song 99477 starts at 182s;
+there is no R3 transition in this new log, so its device failure remains
+unconfirmed. Configured songs, offsets and volume are preserved.
 
-The same device log records the menu-to-match seek from 15:27:17 to 15:27:19:
-`audio-seek-ready:1601240us` for song 786863, starting at 26 seconds. The result
-track seek takes 1600659us. Resume recovery also logs failed non-blocking streams
-with result 28 and repeated channel-restart warnings while a replacement is
-pending. Result 28 is FMOD_ERR_INTERNAL in the SDK header; the log does not
-establish the cause of that error. There is no Round 3 music transition in this
-attached log, so it cannot establish the device's precise Round 3 failure path.
+Opening a stream at zero in prewarming did not prewarm its configured offset.
+The old mode switch still performed Channel::setPosition. Prewarming now uses
+FMOD_CREATESOUNDEXINFO.initialseekposition/initialseekpostype and ACCURATETIME
+with CREATESTREAM|NONBLOCKING. Indexing, initial seek and buffering occur before
+the competitive transition. Ready paused playback must report the intended
+offset (250ms tolerance) before unmute; a wrong offset fails quietly and never
+triggers a presentation-time repair seek. There are zero Channel::setPosition
+calls in the Ranked audio manager.
 
-The production config read during this investigation enables audio with 1.8s
-fade-in/out and sets Round 3 song 99477's start at **182 seconds**. Keep these
-configured songs and offsets. Do not mistake a completed file download for a
-ready compressed stream at that offset.
+Initial seek applies only to the first play of a streaming Sound. Streams are
+therefore keyed by resource, not song ID, and consumed once. Gameplay handoff
+re-arms consumed buffers before returning to the retained round UI. Modes that
+share a song get independent buffers/offsets. Displaced active/fading/loading
+Sounds are retained; cleanup releases only stopped, ready/error handles, never
+an active/fading/pending or still-loading stream in a transition.
 
-Source defects are reproducible without guessing a new server or audio format:
+The other confirmed source defect was unconditional active-channel unmute on
+refresh/resume, even if that stream was starving. FMOD explicitly documents
+that starvation repeats old decode data. Stream health now checks both active
+and retiring channels, mutes non-ready/starving streams and unmutes the same
+channel on recovery. It does not restart a temporarily muted stream. Sustained
+failure uses the existing bounded fallback. Verification waits for recovery.
+A 20ms scene-owned audio heartbeat is independent of the 200ms HTTP/UI refresh,
+and is unscheduled when that scene is covered/exited. Limited logs record owner,
+open state, starvation, buffered percentage, disk busy and result. The previous
+log did not record these fields; actual device starvation is a hypothesis to
+verify, not a measured fact.
 
-- Timeout only covered a pending Channel with a non-READY Sound. Initial async
-  open, playSound NOTREADY, and repeated seek NOTREADY could wait indefinitely.
-  One 3-second preparation deadline now covers all these paths, including
-  starving streams. A candidate remains paused/muted until it is ready.
-- A timeout changed the effective mode but not the UI's requested mode. The
-  next 200ms refresh could undo the fallback and retry the failed Round 3 track.
-  Track failures by resource key for the current requested mode. Keep its
-  effective match/menu fallback until the requested mode actually changes,
-  config changes, or gameplay/close hands off ownership. Bound verification and
-  stopped-channel recovery retries, and skip recovery while a candidate is
-  already pending. Do not release a still-opening Sound on the timeout path;
-  its release can wait for decoder work on the main thread.
-- The old channel was stopped before confirming new-channel unpause, and
-  fadeInSeconds was never activated. Accept the ready new channel first, retain
-  the outgoing channel for fade-out, and schedule both envelopes on FMOD's
-  parent DSP clock. Fades now run between UI ticks. Separate setVolume's base
-  volume from the 0-to-1 fade multiplier; a zero base would remain silent. On an
-  interrupted fade, use its actual DSP-clock gain and replace future points.
-  A failed DSP setup clears partial points and uses the bounded tick fade.
-  Stop outgoing/active/pending channels on gameplay handoff, close, and Sound
-  teardown, and pause the outgoing channel on application suspension too.
+Public FMOD references:
+- [Sound::getOpenState — repeated decode data and mute](https://www.fmod.com/docs/2.03/api/core-api-sound.html#sound_getopenstate)
+- [Initial seek is first-play only](https://qa.fmod.com/t/how-to-change-position-time-in-programmer-sounds/16716)
+- [Stream priming and preparing ahead](https://qa.fmod.com/t/channel-setposition-using-fmod-timeunit-rawbytes/19588/2)
 
-FMOD's published API support explanation confirms that fade-point gain and
-get/setVolume are independent: [FMOD support thread](https://qa.fmod.com/t/22995).
-All changes use public FMOD APIs already declared in Geode 5.10.1's SDK. No
-FMOD global buffer tuning, full MP3 decoding in memory, new native audio hooks,
-vendored Geode source, server protocol or song/download changes are introduced.
-Streams intentionally sharing one Sound/song ID still cannot play two instances
-from that single stream buffer; the existing stop-before-reseek rule remains.
+DSP fades, bounded failures/requested-mode fallback latch and cached paths remain.
+No full-track PCM allocation, global FMOD buffer tuning, new audio detours or
+song/protocol changes are introduced. A blocked mixer/OS/storage path beyond
+these public stream states cannot be proven or eliminated by host tests.
 
-## Validation and device follow-up
+## Validation boundary
 
-`RankedInputNativeTest.mjs` executes the actual helper and retained scene
-callbacks against Cocos touch/claim doubles in Debug ON and OFF. It reproduces
-pointer-only cleanup and equal-priority ordering failures, then checks canceled
-finger-up, item replacement, three scene push/pop cycles, result clicks, existing
-modal priority, and entry blocker retirement. `EntryGameplayNativeTest.mjs` now
-checks an actual dispatched Pause click and stable UILayer registration, in
-addition to shared start authority, input/audio hold, animation, stale context,
-and ordinary gameplay. Existing local safety callbacks also exercise entry
-blocker cleanup through spectator and real scene teardown.
+RankedPauseInputNativeTest executes the actual scene observer methods in Debug
+ON/OFF, including native Pause creation via doPause, repeated resume across
+three rounds, initial disabled native menu, held fingers, cancel/drag-out,
+completion, hidden nodes, foreign scenes, expired owner and teardown. Its native
+API boundary is a double, not the iOS game binary. Existing entry, retained UI,
+persistence/final Attempt, spectator, camera and Safe Mode regressions remain.
 
-`RankedAudioTransitionNativeTest.mjs` compiles the production audio class and
-callback bodies in Debug ON/OFF against public FMOD doubles and a controlled
-steady clock. It checks the 1.6-second menu/match seek, the 182-second Round 3
-seek timeout followed by 300 identical UI requests, initial-open and NOTREADY
-timeouts, starving/recovering buffers, unpause failure with the old BGM kept,
-interrupted and partial DSP fades, bounded no-progress retries, single pending
-candidate, and complete gameplay/application/close/Sound teardown ownership.
-These tests verify transition logic, not actual MP3 decoding or iPad audibility.
+RankedAudioTransitionNativeTest executes the actual production audio methods
+with FMOD API doubles. It models first-play-only initial seek, 26/182s buffers,
+zero transition seeks, repeated R3 fallback requests, active/retiring starvation,
+resume, recovery without restart, sustained starvation, fresh buffers over three
+rounds, shared song IDs, wrong offset rejection, retained lifetime, interrupted
+DSP fades, failed DSP setup and bounded retries/teardown. These tests do not
+decode actual MP3s or measure speaker output.
 
-Source/native callback suites: 95 pass. Strict C++ suites: 9 pass. Workspace
-typecheck/build pass. These are host and source validations; they do not replace
-an iOS SDK compile or iPad testing.
-
-The previous GitHub Actions run `37581234074` failed before any job steps and
-produced no execution logs. Its underlying error has not been confirmed through
-the connected API. Do not relabel it as a compiler failure or a successful build,
-and do not change the live exact client gate before a new package is available.
-
-Recheck on iPad with the same mod set: open/resume Pause after GO in rounds 1 and
-2, tap the X and both surrender scopes, reach the next round/result and click
-their controls, hold a finger through a UI rebuild/scene transition, and confirm
-waiting/countdown still prevents gameplay. New bounded logs record
-`[RankedInput] GO` menu/input priorities and menu flags,
-`[RankedInput] lobby entered` menu state, and `[RankedPause] opened` when the real
-Pause setup runs. Recheck menu-to-match, Round 3, results, and minimize/resume
-audio too; failures now log a bounded key/song/phase/result instead of silently
-retrying the same track. Device success and the exact device failure paths
-remain unverified until this package is tested.
+Acceptance still requires iPad testing with Corum enabled: Pause after GO in
+R1/R2/R3, native resume/restart, X and both surrender scopes, round/result input,
+menu-to-match/R3/result music and background/resume. Record the new dispatch,
+PauseLayer and buffer logs. A passing CI build is not device verification or
+proof that the reported audible symptom is gone.

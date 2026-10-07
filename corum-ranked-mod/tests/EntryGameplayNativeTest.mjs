@@ -58,10 +58,11 @@ ${method(visuals, 'inline void setLabelScale(')}
 namespace i18n {bool korean=false;bool isKorean(){return korean;}}
 struct RankedEntryOverlay {
     FakeLabel heading,digit;FakeLabel* m_heading=&heading;FakeLabel* m_digit=&digit;
-    int removed=0;
+    int removed=0,releases=0;
     static RankedEntryOverlay* create();
     void present(bool,std::optional<std::int64_t>);
     void dismiss(){++removed;}
+    void releaseToGameplay(void*){++releases;}
 };
 std::vector<std::unique_ptr<RankedEntryOverlay>> overlays;
 RankedEntryOverlay* RankedEntryOverlay::create(){overlays.push_back(std::make_unique<RankedEntryOverlay>());return overlays.back().get();}
@@ -187,7 +188,7 @@ int main(){
     assert(scene.m_queuedButtons.empty()&&uiLayer.held&&player1.held&&player2.held&&scene.attemptCounts==0);
     runtime.armAllowed=true;assert(!scene.blockEntryGameplayUpdate());
     assert(runtime.arms==2&&!scene.fields.nativeEntryHeld&&!scene.m_isPaused&&scene.touch&&scene.keyboard);
-    assert(scene.touchWrites==2&&scene.keyboardWrites==2&&overlay.removed==1&&scene.fields.entryOverlay==nullptr);
+    assert(scene.touchWrites==2&&scene.keyboardWrites==2&&overlay.removed==0&&overlay.releases==1&&scene.fields.entryOverlay==&overlay);
     assert(uiLayer.touch&&uiLayer.keyboard&&uiLayer.keypad&&uiLayer.pause.enabled&&uiLayer.resets==2);
     assert(uiLayer.touchWrites==0&&CCDirector::sharedDirector()->dispatcher.findHandler(&uiLayer)==inputHandler);
     auto* pauseHandler=CCDirector::sharedDirector()->dispatcher.findHandler(&uiLayer.pauseMenu);
