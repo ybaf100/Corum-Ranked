@@ -125,6 +125,9 @@ public:
     void onQuit(CCObject* sender) {
         // Server-driven return uses PlayLayer::onQuit, not this manual route.
         if (ownsRankedPlayerPause()) return;
+        // The nested PlayLayer quit may resume/remove this Pause before the
+        // vanilla Pause quit caller finishes returning.
+        [[maybe_unused]] Ref<PauseLayer> keepAlive(this);
         PauseLayer::onQuit(sender);
     }
     void onSurrender(CCObject*) {

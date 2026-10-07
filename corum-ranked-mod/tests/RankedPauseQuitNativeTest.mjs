@@ -14,6 +14,7 @@ test('every Ranked native quit prepares its exact Pause before cleanup; no new n
  assert.doesNotMatch(source,/m_gamePaused\s*=|m_isPaused\s*=/);
  assert.match(source,/m_fields->owner.emplace\(layer\)/);
  assert.match(body('void onResume(CCObject* sender)'),/Ref<PauseLayer> keepAlive\(this\)/);
+ assert.match(body('void onQuit(CCObject* sender)'),/Ref<PauseLayer> keepAlive\(this\)/);
  assert.match(body('bool resumeRankedPauseBeforeQuit(PlayLayer* layer)'),/pause->onResume\(nullptr\)/);
  assert.doesNotMatch(body('bool resumeRankedPauseBeforeQuit(PlayLayer* layer)'),/rankedPause->onResume/);
  const concession=play.slice(play.indexOf('bool finishConcededGameplayHandoff()'),play.indexOf('void spectatorFrame(float dt)'));
