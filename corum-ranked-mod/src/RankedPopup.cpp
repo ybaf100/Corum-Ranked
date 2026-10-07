@@ -8,6 +8,7 @@
 #endif
 #include "RankedSongGate.hpp"
 #include "RankedLevelPreparation.hpp"
+#include "RankedRoundPreparation.hpp"
 #include "domain/PlacementStageMerge.hpp"
 #include "domain/AchievementPresentation.hpp"
 #include "domain/TransitionTrace.hpp"
@@ -451,6 +452,7 @@ class CorumRankedLayer final : public CCLayerColor {
     SteadyClock::time_point m_phaseStartedAt {};
     std::vector<int> m_songIds;
     bool m_readySent = false;
+    SteadyClock::time_point m_lastReadySubmitAt {};
     bool m_matchFoundReadySent = false;
     bool m_enteringSongGate = false;
     bool m_enteringLevel = false;
@@ -556,7 +558,7 @@ class CorumRankedLayer final : public CCLayerColor {
             log::info("Ranked child scene returned; automatic entry guard released");
         }
 
-        // LevelInfoLayer and PlayLayer are pushed over this Ranked scene. The
+        // Native PlayLayer scenes are pushed over this Ranked scene. The
         // corresponding onExit() intentionally stops polling and input while a
         // player is inside those scenes, so every return through popScene() must
         // restore them. Without this lifecycle pair, the retained Ranked layer
@@ -642,6 +644,14 @@ class CorumRankedLayer final : public CCLayerColor {
         if (!showResourceGate()) m_resourceGateMenuRestored = false;
     }
 
+    std::string preparationPresentationKey() const {
+        auto const& p = corum::ranked::RankedRoundPreparation::get().view();
+        auto* level = findPlayableMap();
+        return fmt::format(":prepare:{}:{}:{}:{}:{}:{}:{}:{}:{}", p.mapReady, p.audioReady,
+            p.songsDone, p.songsTotal, p.sfxDone, p.sfxTotal, p.error,
+            level && level->m_lowDetailModeToggled, level && level->m_disableShakeToggled);
+    }
+
     std::string presentationKey() const {
         auto const& view = RankedRuntime::get().view();
         if (view.environmentWarning.active) {
@@ -712,7 +722,7 @@ class CorumRankedLayer final : public CCLayerColor {
                 view.placement.stageResults.size(),
                 view.placement.finalResult.displayedTier,
                 view.error
-            );
+            ) + preparationPresentationKey();
         }
         auto key = fmt::format(
             "match:{}:{}:{}:spectator:{}",
@@ -729,7 +739,7 @@ class CorumRankedLayer final : public CCLayerColor {
                 view.match.ownBanConfirmed
             );
         }
-        return key;
+        return key + preparationPresentationKey();
     }
 
     double uiFadeInSeconds() const {
@@ -913,6 +923,7 @@ class CorumRankedLayer final : public CCLayerColor {
             if (newResourceKey != m_resourceKey) {
                 m_resourceKey = newResourceKey;
                 m_readySent = false;
+                m_lastReadySubmitAt = {};
                 m_enteringSongGate = false;
                 RankedRuntime::get().setSongBypassAllowed(false);
                 m_enteringLevel = false;
@@ -2183,7 +2194,14 @@ class CorumRankedLayer final : public CCLayerColor {
         m_root->addChild(score, 5);
         addClearChecks(placement.currentMapClears, {size.width / 2.0f + 70.0f, size.height / 2.0f - 34.0f});
 
-        std::string stateText = tr("opening-exact-level", "OPENING EXACT GD LEVEL...");
+        if (match.state == "MAP_PREPARE") {
+            addButton("MAP DOWNLOAD", {size.width / 2.0f - 88.0f, size.height / 2.0f - 68.0f},
+                menu_selector(CorumRankedLayer::onDownloadMap), false, 0.40f);
+            addButton("MUSIC DOWNLOAD", {size.width / 2.0f + 88.0f, size.height / 2.0f - 68.0f},
+                menu_selector(CorumRankedLayer::onDownloadSong), false, 0.40f);
+            addRoundOptions(59.0f);
+        }
+        std::string stateText = preparationStageText();
         if (match.state == "MAP_PLAYING") stateText = tr("placement-map-live", "MAP LIVE · SCORE + GRADE UPDATE IN REAL TIME");
         if (match.state == "MAP_SETTLING") stateText = tr("final-attempt-progress", "FINAL ATTEMPT IN PROGRESS");
         auto* state = makeLabel(
@@ -2810,8 +2828,7 @@ class CorumRankedLayer final : public CCLayerColor {
             auto* plate = makeTextPlate("01  " + tr("map-ready", "MAP READY"), {116.0f, 23.0f}, mapPos, kGreen, 0.25f, kGreen, "semibold");
             m_root->addChild(plate, 3);
         } else {
-            auto* plate = makeTextPlate("01  " + tr("map-loading", "MAP LOADING"), {116.0f, 23.0f}, mapPos, kCyan, 0.25f, ccc3(235, 242, 255), "semibold");
-            m_root->addChild(plate, 3);
+            addButton("MAP DOWNLOAD", mapPos, menu_selector(CorumRankedLayer::onDownloadMap), false, 0.45f);
         }
 
         if (clearSyncPending) {
@@ -2827,11 +2844,10 @@ class CorumRankedLayer final : public CCLayerColor {
             auto* plate = makeTextPlate("02  " + tr("start-muted", "START MUTED"), {116.0f, 23.0f}, songPos, kGold, 0.24f, kGold, "semibold");
             m_root->addChild(plate, 3);
         } else {
-            // The real click target remains the vanilla song button on the level
-            // info page. This button only opens that gated page.
-            addButton(tr("download-song", "DOWNLOAD SONG"), songPos, menu_selector(CorumRankedLayer::onDownloadSong), false, 0.48f);
+            addButton("MUSIC DOWNLOAD", songPos, menu_selector(CorumRankedLayer::onDownloadSong), false, 0.45f);
         }
 
+        addRoundOptions(size.height / 2.0f - 106.0f);
         auto const loadStageY = size.height / 2.0f - 66.0f;
         m_prepareLoadStageLabel = makeLabel(
             preparationStageText(),
@@ -3812,7 +3828,7 @@ class CorumRankedLayer final : public CCLayerColor {
         // getSavedLevel() may return only list metadata. PlayLayer needs the actual
         // downloaded level string; entering on metadata alone is what caused the
         // repeated "Load Failed" screen in alpha.11.
-        return !level->m_levelString.empty() && !level->m_levelNotDownloaded;
+        return level->m_levelType == GJLevelType::Saved && !level->m_levelString.empty() && !level->m_levelNotDownloaded;
     }
 
     GJGameLevel* findPlayableMap() const {
@@ -3848,27 +3864,19 @@ class CorumRankedLayer final : public CCLayerColor {
     }
 
     float preparationProgressTarget() {
-        if (auto* level = findLevelInfoMap()) {
-            if (!isPlayableLevel(level)) return 0.30f;
-            return isSongReady(level) ? 0.92f : 0.75f;
-        }
-        if (m_levelLookupStartedAt == SteadyClock::time_point{}) return 0.0f;
-        auto const elapsed = std::chrono::duration<double>(
-            SteadyClock::now() - m_levelLookupStartedAt
-        ).count();
-        return std::min(0.29f, 0.035f + static_cast<float>(elapsed) * 0.04f);
+        auto const& preparation = corum::ranked::RankedRoundPreparation::get().view();
+        if (!preparation.mapReady) return 0.0f; // native map endpoint has no byte progress
+        return (1.0f + preparation.audioProgress * (preparation.songsTotal + preparation.sfxTotal)) /
+            (1.0f + preparation.songsTotal + preparation.sfxTotal);
     }
 
     std::string preparationStageText() {
-        if (auto* level = findLevelInfoMap()) {
-            if (!isPlayableLevel(level)) return tr("exact-level-found", "EXACT GD LEVEL FOUND");
-            return isSongReady(level)
-                ? tr("preparation-ready", "PREPARATION READY")
-                : tr("waiting-song", "WAITING FOR SONG");
-        }
-        if (m_levelLookupBusy) return tr("finding-exact-level", "FINDING EXACT GD LEVEL...");
-        if (!m_levelLookupError.empty()) return m_levelLookupError;
-        return tr("waiting-level-lookup", "WAITING FOR LEVEL LOOKUP...");
+        auto const& preparation = corum::ranked::RankedRoundPreparation::get().view();
+        if (!preparation.error.empty()) return preparation.error;
+        if (!preparation.mapReady) return tr("downloading-map", "DOWNLOADING MAP...");
+        if (preparation.audioReady) return tr("preparation-ready", "PREPARATION READY");
+        return fmt::format("MUSIC {}/{}  SFX {}/{}", preparation.songsDone, preparation.songsTotal,
+            preparation.sfxDone, preparation.sfxTotal);
     }
 
     std::vector<int> collectSongIds(GJGameLevel* level) const {
@@ -3907,35 +3915,14 @@ class CorumRankedLayer final : public CCLayerColor {
     }
 
     bool isSongReady(GJGameLevel* level) {
-        if (!level) return false;
-        refreshSongIds(level);
-        auto* manager = MusicDownloadManager::sharedState();
-        if (!manager) return m_songIds.empty();
-        for (auto const id : m_songIds) {
-            if (!songIdReady(manager, id)) return false;
-        }
-        return true;
+        return level && corum::ranked::RankedRoundPreparation::get().view().audioReady;
     }
 
-    void openSongDownloadGate(double countdownOverride = -1.0) {
-        if (m_enteringSongGate) return;
-        beginExactLevelLookup();
-        auto* level = findLevelInfoMap();
-        if (!level) return;
-
-        // The real Geometry Dash LevelInfo page owns map/song acquisition. The
-        // explicit override is used as a recovery path when polling skipped a
-        // very short PREPARE phase (notably Debug Trigger Death Match).
-        auto const authoritativeRemaining = RankedRuntime::get().deadlineMillis();
-        auto const countdownRemaining = countdownOverride >= 0.0
-            ? countdownOverride
-            : authoritativeRemaining
-                ? std::max(0.0, static_cast<double>(*authoritativeRemaining) / 1000.0)
-                : std::max(0.0, 10.0 - phaseSeconds());
-        m_enteringSongGate = corum::ranked::showRankedSongDownloadGate(level, countdownRemaining);
-        if (m_enteringSongGate) {
-            m_rankedChildScenePushed = true;
-        }
+    void openSongDownloadGate(double = -1.0) {
+        // Existing download buttons now retry the in-screen native preparation;
+        // never navigate to LevelInfo or lend a temporary scene its callbacks.
+        corum::ranked::RankedRoundPreparation::get().retry();
+        corum::ranked::RankedRoundPreparation::get().pump();
     }
 
     void updateAutomation() {
@@ -3943,7 +3930,6 @@ class CorumRankedLayer final : public CCLayerColor {
         auto const& view = runtime.view();
         if (view.stage != RuntimeStage::Matched) return;
         auto const& match = view.match;
-
         if (match.state == "MATCHED") {
             if (!m_matchFoundReadySent && phaseSeconds() >= 5.0) {
                 m_matchFoundReadySent = true;
@@ -3951,61 +3937,62 @@ class CorumRankedLayer final : public CCLayerColor {
             }
             return;
         }
-        if (
-            match.state != "ROUND_PREPARE" &&
-            match.state != "DEATHMATCH_PREPARE" &&
-            match.state != "MAP_PREPARE"
-        ) return;
-
-        // Resolve the exact Geometry Dash level as soon as the authoritative
-        // ten-second prepare phase begins. LevelInfo starts its vanilla map/update
-        // work behind the Ranked cover immediately; the real page is revealed at
-        // five seconds remaining instead of spending the first half idle.
-        openSongDownloadGate();
+        if (!corum::ranked::roundAcquireState(match.state)) return;
+        auto& preparation = corum::ranked::RankedRoundPreparation::get();
+        preparation.pump();
+        m_levelLookupBusy = corum::ranked::RankedLevelPreparation::get().busy();
+        m_levelLookupError = preparation.view().error;
+        bool ownReady = match.side == "A" ? match.readyA : match.readyB;
+        auto const remaining = runtime.deadlineMillis();
+        double const elapsed = remaining ? 10.0 - static_cast<double>(*remaining) / 1000.0 : phaseSeconds();
+        if (!ownReady && corum::ranked::roundReadyDue(match.state, match.placement, elapsed, preparation.ready())) {
+            auto now = SteadyClock::now();
+            if (m_lastReadySubmitAt == SteadyClock::time_point{} || now - m_lastReadySubmitAt >= std::chrono::seconds(1)) {
+                m_lastReadySubmitAt = now;
+                runtime.submitReady();
+            }
+        }
     }
 
     void maybeEnterLevel() {
         auto const& view = RankedRuntime::get().view();
-        if (m_enteringLevel || view.stage != RuntimeStage::Matched) return;
-        auto const& state = view.match.state;
-        if (
-            state != "ROUND_PLAYING" &&
-            state != "FINAL_ATTEMPT_WINDOW" &&
-            state != "LAST_ATTEMPT_WINDOW" &&
-            state != "ROUND_SETTLING" &&
-            state != "DEATHMATCH_PLAYING" &&
-            state != "MAP_PLAYING"
-        ) return;
+        if (m_enteringLevel || view.stage != RuntimeStage::Matched ||
+            corum::ranked::roundPrepareState(view.match.state) ||
+            !corum::ranked::roundAcquireState(view.match.state)) return;
         auto& runtime = RankedRuntime::get();
-        auto const spectatorEntry = runtime.canEnterCurrentLevelAsSpectator();
-        if (!runtime.canEnterCurrentLevel() && !spectatorEntry) {
-            if (state == "DEATHMATCH_PLAYING") m_localMessage = "All 3 attempts used. Waiting for the opponent...";
-            return;
-        }
-        auto* level = findPlayableMap();
-        if (!level) {
-            // A Debug scenario (or a fast server transition) can move PREPARE ->
-            // PLAYING between client polls. Recover by opening the same vanilla
-            // LevelInfo download gate even though PLAYING is already authoritative.
-            // LevelInfoLayer will download the map and auto-enter as soon as it is
-            // playable; this prevents the old permanent "Loading map" deadlock.
-            m_localMessage = "Opening level download recovery...";
-            openSongDownloadGate(0.0);
-            return;
-        }
-        // Do not construct PlayLayer directly. Enter through Geometry Dash's normal
-        // LevelInfoLayer -> onPlay path; this lets the game own level validation,
-        // loading transitions, audio setup, and the return/quit stack. Spectator
-        // entry follows the same metadata proof but remains unarmed/read-only.
-        corum::ranked::tracePreparedLevel("scene-before-reentry", level, nullptr, this);
-        auto* scene = LevelInfoLayer::scene(level, false);
-        if (!scene) {
-            m_localMessage = "Unable to open the selected level. Retrying...";
-            return;
-        }
+        if (!runtime.canEnterCurrentLevel() && !runtime.canEnterCurrentLevelAsSpectator()) return;
+        if (!corum::ranked::RankedRoundPreparation::get().launch(CCDirector::sharedDirector()->getRunningScene())) return;
         m_enteringLevel = true;
         m_rankedChildScenePushed = true;
-        CCDirector::sharedDirector()->pushScene(CCTransitionFade::create(0.25f, scene));
+    }
+
+    void onLowDetail(CCObject*) {
+        auto* level = findPlayableMap();
+        if (!level || m_enteringLevel) return;
+        level->m_lowDetailModeToggled = !level->m_lowDetailModeToggled;
+        // The exact native Saved object persists user options; never overwrite
+        // the map author's m_lowDetailMode capability or any score/metadata.
+        render();
+    }
+
+    void onDisableShake(CCObject*) {
+        auto* level = findPlayableMap();
+        if (!level || m_enteringLevel) return;
+        level->m_disableShakeToggled = !level->m_disableShakeToggled;
+        render();
+    }
+
+    void addRoundOptions(float y) {
+        auto const size = CCDirector::sharedDirector()->getWinSize();
+        auto* level = findPlayableMap();
+        auto* ldm = addButton(fmt::format("LDM: {}", level && level->m_lowDetailModeToggled ? "ON" : "OFF"),
+            {size.width / 2.0f - 48.0f, y}, menu_selector(CorumRankedLayer::onLowDetail), false, 0.35f);
+        auto* shake = addButton(fmt::format("DISABLE SHAKE: {}", level && level->m_disableShakeToggled ? "ON" : "OFF"),
+            {size.width / 2.0f + 47.0f, y}, menu_selector(CorumRankedLayer::onDisableShake), false, 0.35f);
+        ldm->setID("ranked-round-ldm"_spr);
+        shake->setID("ranked-round-disable-shake"_spr);
+        ldm->setEnabled(level != nullptr);
+        shake->setEnabled(level != nullptr);
     }
 
     void onDownloadAllResources(CCObject*) {

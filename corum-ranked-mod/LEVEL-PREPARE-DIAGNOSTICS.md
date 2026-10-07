@@ -1,4 +1,10 @@
-# LevelInfo metadata preparation — local implementation, 2026-09-07
+# LevelInfo metadata preparation — historical implementation, 2026-09-07
+
+**beta.33 update:** production Ranked/Death Match/Placement now acquire native
+map/music/SFX and launch directly on the round screen. See
+[BETA33-RELEASE.md](BETA33-RELEASE.md) for current ownership, READY, options and
+return behavior. The LevelInfo-specific flow below remains relevant to the
+separate Debug RECORD/TEST harness and historical investigations.
 
 Base: `main` / `d116d74b0fdb755136ec226f326a53160a02eb00`, `v0.5.0-beta.14`.
 No version bump, commit, push, server/rules change, or asset-pack activation.

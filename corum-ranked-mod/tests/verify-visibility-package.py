@@ -21,6 +21,7 @@ def verify_binary(binary, platform, debug):
     required = {"GJGameLevel::savePercentage", "GJGameLevel::storeNewLocalScore",
                 "PlayLayer::destroyPlayer", "PlayLayer::levelComplete",
                 "PauseLayer::customSetup",
+                "GameManager::returnToLastScene",
                 "GJBaseGameLayer::update", "GJBaseGameLayer::updateCamera",
                 "GJBaseGameLayer::teleportPlayer"}
     if not required <= targets or "GJGameLevel::saveNewScore" in targets:

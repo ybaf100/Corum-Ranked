@@ -109,7 +109,13 @@ jobs:
             corum-ranked-mod/tests/MatchPauseBudgetTest.cpp \
             -o /tmp/corum-ranked-match-pause-test
           /tmp/corum-ranked-match-pause-test
+          g++ -std=c++23 -Wall -Wextra -Wpedantic -Werror \
+            corum-ranked-mod/tests/LevelPreparationTest.cpp \
+            -o /tmp/corum-ranked-level-prepare-test
+          /tmp/corum-ranked-level-prepare-test
           node --test corum-ranked-mod/tests/GameplayControlsNativeTest.mjs
+          node --test corum-ranked-mod/tests/RoundPreparationNativeTest.mjs
+          node --test corum-ranked-mod/tests/LevelPreparationSourceTest.mjs
           node --test corum-ranked-mod/tests/SpectatorCameraOwnerNativeTest.mjs
           node --test corum-ranked-mod/tests/SpectatorWorldDriverNativeTest.mjs
           node --test corum-ranked-mod/tests/SpectatorVisibilityNativeTest.mjs

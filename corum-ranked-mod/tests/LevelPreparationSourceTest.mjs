@@ -136,7 +136,7 @@ test('live spectator path is read-only and keeps polling fallback', () => {
     assert.match(play, /spectatorCurrentProgress = match\.spectatorCurrentProgress/);
 });
 
-test('spectator reconnect reuses canonical LevelInfo without arming an Attempt', () => {
+test('spectator reconnect reuses attested native round entry without arming an Attempt', () => {
     const popupEntry = body(popup, 'void maybeEnterLevel()', 'void onDownloadAllResources(');
     const levelLaunch = body(layer, 'bool launchRankedGameplay()', 'void activateRankedPlayButton(');
     const activate = body(layer, 'void activateRankedPlayButton(', 'void verifyGameplayLaunch(');
@@ -146,7 +146,12 @@ test('spectator reconnect reuses canonical LevelInfo without arming an Attempt',
     assert.match(runtimeHeader, /canEnterCurrentLevelAsSpectator\(\) const/);
     assert.match(popupEntry, /canEnterCurrentLevelAsSpectator\(\)/);
     assert.match(popupEntry, /findPlayableMap\(\)/);
-    assert.match(popupEntry, /LevelInfoLayer::scene\(level, false\)/);
+    assert.match(popupEntry, /RankedRoundPreparation::get\(\)\.launch/);
+    assert.doesNotMatch(popupEntry, /LevelInfoLayer::scene/);
+    const round = read('../src/RankedRoundPreparation.cpp');
+    assert.match(round, /preparation.authorizes\(level, m_context\)/);
+    assert.match(round, /if \(!spectator && !runtime.armCurrentLevelForGameplay\(\)\)/);
+    assert.match(round, /PlayLayer::scene\(level, false, false\)/);
     assert.match(levelLaunch, /rankedLevelEntryAllowed\(runtime\)/);
     assert.match(activate, /auto const spectatorLaunch = runtime\.canEnterCurrentLevelAsSpectator\(\)/);
     assert.match(activate, /if \(!spectatorLaunch && !runtime\.armCurrentLevelForGameplay\(\)\)/);

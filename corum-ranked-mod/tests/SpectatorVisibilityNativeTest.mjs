@@ -95,12 +95,12 @@ import sys,struct,importlib.util
 sys.dont_write_bytecode=True
 spec=importlib.util.spec_from_file_location('v',${JSON.stringify(join(root, 'tests/verify-visibility-package.py'))});v=importlib.util.module_from_spec(spec);spec.loader.exec_module(v)
 player={'PlayerObject::'+name for name in ('update','updateRotation','spiderTestJump','setPosition','setRotation','updateSpecial')}
-safety={'GJGameLevel::savePercentage','GJGameLevel::storeNewLocalScore','PlayLayer::destroyPlayer','PlayLayer::levelComplete','PauseLayer::customSetup','GJBaseGameLayer::update','GJBaseGameLayer::updateCamera','GJBaseGameLayer::teleportPlayer'}
+safety={'GJGameLevel::savePercentage','GJGameLevel::storeNewLocalScore','PlayLayer::destroyPlayer','PlayLayer::levelComplete','PauseLayer::customSetup','GameManager::returnToLastScene','GJBaseGameLayer::update','GJBaseGameLayer::updateCamera','GJBaseGameLayer::teleportPlayer'}
 probes={'GJBaseGameLayer::checkCollisions','GJBaseGameLayer::collisionCheckObjects','GJBaseGameLayer::playerTouchedTrigger','EffectGameObject::triggerObject'}
 def binary(targets):return struct.pack('<II',0xFEEDFACF,0x0100000C)+b''.join(('[GEODE_MODIFY_NAME] '+name+' [GEODE_MODIFY_ADDRESS] 0x0\\0').encode() for name in targets)
 assert set(v.verify_binary(binary(player|safety),'ios',False))==player
 assert set(v.verify_binary(binary(player|safety|probes),'ios',True))==player
-for data in [binary(player|safety|{'PlayerObject::setVisible'}),binary((player|safety)-{'PlayerObject::updateSpecial'}),binary((player|safety)-{'GJGameLevel::storeNewLocalScore'}),binary((player|safety)-{'PauseLayer::customSetup'}),binary(player|safety|probes),binary(player|safety)+b'[CorumCrashDiag]']:
+for data in [binary(player|safety|{'PlayerObject::setVisible'}),binary((player|safety)-{'PlayerObject::updateSpecial'}),binary((player|safety)-{'GJGameLevel::storeNewLocalScore'}),binary((player|safety)-{'PauseLayer::customSetup'}),binary((player|safety)-{'GameManager::returnToLastScene'}),binary(player|safety|probes),binary(player|safety)+b'[CorumCrashDiag]']:
  try:v.verify_binary(data,'ios',False)
  except ValueError:pass
  else:raise AssertionError('unsafe or mislabelled native package accepted')

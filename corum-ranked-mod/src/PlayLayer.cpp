@@ -1,4 +1,5 @@
 #include "RankedRuntime.hpp"
+#include "RankedRoundPreparation.hpp"
 #include "RankedAudioManager.hpp"
 #include "SpectatorLiveRuntime.hpp"
 #include "domain/SpectatorCapturePolicy.hpp"
@@ -1178,6 +1179,7 @@ public:
                 m_fields->qualifyingPercent
             );
         }
+        corum::ranked::ScopedRankedRoundQuit roundQuit(this);
         PlayLayer::onQuit();
     }
 
