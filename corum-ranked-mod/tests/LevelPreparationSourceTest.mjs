@@ -60,7 +60,7 @@ test('exact lookup coexists with a foreign singleton delegate without waiting fo
     assert.match(hook, /m_levelManagerDelegate = &preparation/);
     assert.match(hook, /m_levelManagerDelegate = previousDelegate/);
     assert(hook.indexOf('requestGeneration(tag.c_str())') < hook.indexOf('m_levelManagerDelegate = &preparation'));
-    const routed = hook.slice(hook.indexOf('auto* previousDelegate = m_levelManagerDelegate'));
+    const routed = hook.slice(hook.lastIndexOf('auto* previousDelegate = m_levelManagerDelegate'));
     assert(routed.indexOf('m_levelManagerDelegate = &preparation') < routed.indexOf('GameLevelManager::onGetOnlineLevelsCompleted(response, tag)'));
 });
 
@@ -195,3 +195,4 @@ test('remote ghost uses pose keyframes without bypassing Ranked Level Prepare', 
     assert.doesNotMatch(spectator, /GJGameLevel::create|PlayLayer::scene|getSavedLevel/);
     assert.doesNotMatch(play, /GJGameLevel::create|PlayLayer::scene|getSavedLevel/);
 });
+

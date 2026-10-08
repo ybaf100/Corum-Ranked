@@ -16,6 +16,21 @@ const validateClientPresentation = (document: RankedConfigDocument): string[] =>
   const { audio, ui } = client;
   if (!audio || !ui) return ["client.audio and client.ui are required when client is present"];
 
+  const assets = client.assets;
+  if (assets && typeof assets.enabled !== "boolean") errors.push("client.assets.enabled must be a boolean");
+  if (assets?.enabled) {
+    if (typeof assets.assetPackVersion !== "string" ||
+        !/^[A-Za-z0-9._-]{1,64}$/.test(assets.assetPackVersion) || [".", ".."].includes(assets.assetPackVersion)) {
+      errors.push("client.assets.assetPackVersion must be a safe immutable release tag");
+    }
+    if (typeof assets.sha256 !== "string" || !/^[A-Fa-f0-9]{64}$/.test(assets.sha256)) {
+      errors.push("client.assets.sha256 must contain 64 hexadecimal characters");
+    }
+    if (!Number.isSafeInteger(assets.sizeBytes) || assets.sizeBytes <= 0 || assets.sizeBytes > 64 * 1024 * 1024) {
+      errors.push("client.assets.sizeBytes must be between 1 and 67108864");
+    }
+  }
+
   if (!Number.isFinite(audio.fadeInSeconds) || audio.fadeInSeconds < 0 || audio.fadeInSeconds > 10) {
     errors.push("client.audio.fadeInSeconds must be between 0 and 10");
   }
@@ -94,3 +109,4 @@ export const validateRankedConfigDocument = (document: RankedConfigDocument): re
   }
   return errors;
 };
+

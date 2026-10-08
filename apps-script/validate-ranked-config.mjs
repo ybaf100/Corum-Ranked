@@ -393,6 +393,34 @@ assert.deepEqual(
 
 const repeated = responseJson();
 assert.equal(repeated.data.generation, withResources.data.generation);
+
+// Images use an immutable server-selected tag, with one ZIP digest/size.
+assert.equal(repeated.data.client.assets.enabled, false);
+setConfig("rankedAssetPackEnabled", true);
+assert.equal(responseJson().data.validation.valid, false);
+setConfig("rankedAssetPackVersion", "visuals-v1");
+setConfig("rankedAssetPackSha256", "A".repeat(64));
+setConfig("rankedAssetPackSizeBytes", 24957530);
+const withAssets = responseJson();
+assert.equal(withAssets.data.validation.valid, true, withAssets.data.validation.errors.join("\n"));
+assert.deepEqual(withAssets.data.client.assets, {
+  enabled: true, assetPackVersion: "visuals-v1", sha256: "a".repeat(64), sizeBytes: 24957530,
+});
+assert.notEqual(withAssets.data.generation, repeated.data.generation);
+for (const invalid of ["../other", ".", "..", "a/b", "x".repeat(65)]) {
+  setConfig("rankedAssetPackVersion", invalid);
+  assert.equal(responseJson().data.validation.valid, false);
+}
+setConfig("rankedAssetPackVersion", "visuals-v2");
+setConfig("rankedAssetPackSha256", "wrong");
+assert.equal(responseJson().data.validation.valid, false);
+setConfig("rankedAssetPackSha256", "b".repeat(64));
+for (const invalid of [0, -1, 2.5, 67108865]) {
+  setConfig("rankedAssetPackSizeBytes", invalid);
+  assert.equal(responseJson().data.validation.valid, false);
+}
+setConfig("rankedAssetPackSizeBytes", 25000000);
+assert.equal(responseJson().data.validation.valid, true);
 mapSheet.rows[1][qualifyingColumn] = 55;
 const changed = responseJson();
 assert.notEqual(changed.data.generation, withResources.data.generation);
@@ -406,3 +434,4 @@ assert.equal(health.service, "Corum Integration API");
 assert.equal(health.version, context.CORUM_API_VERSION);
 
 console.log("Ranked sheet2 routing, dynamic Main Pool/CSMP seeds, alternate IDs, fail-closed config, and legacy health routing passed.");
+

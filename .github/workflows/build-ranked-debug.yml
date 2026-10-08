@@ -119,6 +119,9 @@ jobs:
           node --test corum-ranked-mod/tests/RankedPauseConcessionNativeTest.mjs
           node --test corum-ranked-mod/tests/RankedPauseInputNativeTest.mjs
           node --test corum-ranked-mod/tests/RankedVolumeNativeTest.mjs
+          node --test corum-ranked-mod/tests/MapDetailsNativeTest.mjs
+          node --test corum-ranked-mod/tests/RankAssetPackNativeTest.mjs
+          python3 corum-ranked-mod/tests/AssetPackBuildTest.py
           node --test corum-ranked-mod/tests/FontTypographyNativeTest.mjs
           node --test corum-ranked-mod/tests/RoundPreparationNativeTest.mjs
           node --test corum-ranked-mod/tests/NativeEntryTransportTest.mjs
@@ -205,6 +208,7 @@ jobs:
           python3 corum-ranked-mod/tests/verify-visibility-package.py \
             "$BUILD_OUTPUT" "$MOD_VERSION" --ios-only
           python3 corum-ranked-mod/tests/verify-font-package.py "$BUILD_OUTPUT"
+          find "$BUILD_OUTPUT" -name '*.geode' -exec python3 corum-ranked-mod/tests/verify-asset-package.py --mod {} \;
       - uses: actions/upload-artifact@v7
         with:
           name: Corum-Ranked-${{ needs.metadata.outputs.version }}-iOS-Debug-OFF
@@ -262,6 +266,7 @@ jobs:
           python3 corum-ranked-mod/tests/verify-visibility-package.py \
             dist/hwanhee1.corum_ranked.geode "$MOD_VERSION" --debug
           python3 corum-ranked-mod/tests/verify-font-package.py dist/hwanhee1.corum_ranked.geode
+          python3 corum-ranked-mod/tests/verify-asset-package.py --mod dist/hwanhee1.corum_ranked.geode
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ needs.metadata.outputs.artifact_name }}
@@ -272,3 +277,30 @@ jobs:
         shell: bash
         run: |
           echo "Debug artifact ZIP: ${{ needs.metadata.outputs.artifact_name }}.zip" >> "$GITHUB_STEP_SUMMARY"
+
+  assets:
+    name: Package external Ranked images
+    runs-on: ubuntu-latest
+    needs: package
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build deterministic single image ZIP and server metadata
+        id: pack
+        run: |
+          python3 corum-ranked-mod/tools/build-asset-pack.py --output asset-pack-dist
+          python3 corum-ranked-mod/tests/verify-asset-package.py \
+            --pack asset-pack-dist/Corum-Ranked-Assets.zip \
+            --metadata asset-pack-dist/asset-pack-metadata.json
+          python3 - <<'PY'
+          import json, os
+          metadata = json.load(open('asset-pack-dist/asset-pack-metadata.json'))
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('tag=' + metadata['releaseTag'] + '\n')
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
+              summary.write('External pack: ' + metadata['releaseTag'] + ' / ' + str(metadata['client']['assets']['sizeBytes']) + ' bytes\n')
+          PY
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Corum-Ranked-Assets-${{ steps.pack.outputs.tag }}
+          path: asset-pack-dist/*
+          if-no-files-found: error

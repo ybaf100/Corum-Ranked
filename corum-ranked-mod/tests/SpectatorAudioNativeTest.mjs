@@ -100,7 +100,7 @@ struct CorumRankedLayer: CCLayerColor {
  std::string m_stageResultAudioPlayedKey;Menu* m_menu=nullptr;
  Menu* m_settingsMenu=nullptr;unsigned long m_volumeSession=0;
  void setKeypadEnabled(bool){}void schedule(int,float){}
- bool showResourceGate()const{return false;}void syncResources(){}void syncPhase(){}void updateAutomation(){}
+ bool showResourceGate()const{return false;}void syncResources(){}void syncMapDetails(){}void syncPhase(){}void updateAutomation(){}
  std::string presentationKey()const{return "lobby";}bool prepareUiTransition(std::string const&){return false;}
  void render(){}void applyFadeInIfNeeded(){}void updateDynamicUi(){}void maybeEnterLevel(){}
  ${method(popup,'void syncAudioMode()')}

@@ -4,6 +4,7 @@
 #include "domain/ServerClock.hpp"
 #include "domain/MatchPauseBudget.hpp"
 #include "domain/GameplayConcession.hpp"
+#include "domain/RankAssetPolicy.hpp"
 
 #include <Geode/Geode.hpp>
 #include <Geode/utils/web.hpp>
@@ -355,6 +356,7 @@ struct RankedUiTransitionView {
 struct RankedClientPresentationView {
     RankedAudioConfigView audio;
     RankedUiTransitionView ui;
+    RankAssetMetadata assets;
 };
 
 struct EnvironmentModIssueView {
@@ -627,3 +629,4 @@ private:
 char const* stageName(RuntimeStage stage);
 
 } // namespace corum::ranked
+

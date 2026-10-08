@@ -341,6 +341,7 @@ using namespace geode;
 namespace corum::ranked {
 LevelPreparationContext current;
 LevelPreparationContext currentPreparationContext(){return current;}
+struct RankedMapDetails {static RankedMapDetails& get(){static RankedMapDetails d;return d;}void remember(GJGameLevel*){}};
 class RankedLevelPreparation {
 public:
     LevelLookupTicket m_ticket;PreparedLevelProof m_proof;Ref<GJGameLevel> m_level;
@@ -585,3 +586,4 @@ int main(){
         execFileSync(binary, [], { stdio: 'pipe' });
     } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+

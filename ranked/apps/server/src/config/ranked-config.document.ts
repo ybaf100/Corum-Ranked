@@ -24,9 +24,18 @@ export interface RankedClientUiConfig {
   readonly fadeOutSeconds: number;
 }
 
+export interface RankedClientAssetPackConfig {
+  readonly enabled: boolean;
+  /** Exact immutable tag in ybaf100/corum-ranked-assets; never `latest`. */
+  readonly assetPackVersion: string;
+  readonly sha256: string;
+  readonly sizeBytes: number;
+}
+
 export interface RankedClientPresentationConfig {
   readonly audio: RankedClientAudioConfig;
   readonly ui: RankedClientUiConfig;
+  readonly assets?: RankedClientAssetPackConfig;
 }
 
 export interface RankedConfigDocument {
@@ -59,3 +68,4 @@ export interface RankedConfigStatus {
   readonly lastAttemptAt: string | null;
   readonly lastError: string | null;
 }
+

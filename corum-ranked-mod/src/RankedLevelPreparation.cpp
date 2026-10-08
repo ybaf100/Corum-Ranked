@@ -1,5 +1,6 @@
 #include "RankedLevelPreparation.hpp"
 #include "RankedRuntime.hpp"
+#include "RankedMapDetails.hpp"
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
 #include "debug/DebugSpectateRuntime.hpp"
 #endif
@@ -211,6 +212,7 @@ void RankedLevelPreparation::loadLevelsFinished(CCArray* levels, char const* key
         return;
     }
     m_level = exact;
+    RankedMapDetails::get().remember(exact.data());
     m_error.clear();
 }
 
@@ -229,6 +231,17 @@ class $modify(CorumRankedMetadataResponse, GameLevelManager) {
         auto& preparation = corum::ranked::RankedLevelPreparation::get();
         auto const generation = preparation.requestGeneration(tag.c_str());
         if (!generation) {
+            auto& details = corum::ranked::RankedMapDetails::get();
+            auto const visualGeneration = details.requestGeneration(tag.c_str());
+            if (visualGeneration) {
+                auto* previousDelegate = m_levelManagerDelegate;
+                m_levelManagerDelegate = &details;
+                GameLevelManager::onGetOnlineLevelsCompleted(response, tag);
+                if (m_levelManagerDelegate == &details || m_levelManagerDelegate == nullptr)
+                    m_levelManagerDelegate = previousDelegate;
+                details.responseCompleted(tag.c_str(), visualGeneration);
+                return;
+            }
             GameLevelManager::onGetOnlineLevelsCompleted(response, tag);
             return;
         }
@@ -251,3 +264,4 @@ class $modify(CorumRankedMetadataResponse, GameLevelManager) {
         preparation.responseCompleted(tag.c_str(), generation);
     }
 };
+

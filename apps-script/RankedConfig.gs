@@ -191,6 +191,12 @@ var CORUM_RANKED_CONFIG_DEFAULTS = Object.freeze([
   Object.freeze(["rankedUiFadeInSeconds", 0.24, "Ranked UI Fade In 시간"]),
   Object.freeze(["rankedUiFadeOutSeconds", 0.18, "Ranked UI Fade Out 시간"]),
 
+  // Publish the exact ZIP release first, then enable its generated metadata.
+  Object.freeze(["rankedAssetPackEnabled", false, "외부 이미지팩 사용 (업로드와 검증 후 TRUE)"]),
+  Object.freeze(["rankedAssetPackVersion", "", "ybaf100/corum-ranked-assets의 정확한 릴리스 태그"]),
+  Object.freeze(["rankedAssetPackSha256", "", "Corum-Ranked-Assets.zip SHA-256 (64자리)"]),
+  Object.freeze(["rankedAssetPackSizeBytes", "", "Corum-Ranked-Assets.zip 정확한 바이트 크기"]),
+
   Object.freeze(["cbfModId", "syzzi.click_between_frames", "필수 CBF Mod ID"]),
   Object.freeze(["cbf.soft-toggle", false, "CBF의 Disable CBF는 꺼짐"]),
   Object.freeze(["cbf.click-on-steps", false, "Click on Steps 모드는 꺼짐"]),
@@ -869,6 +875,12 @@ function readRankedClientPresentation_(config) {
       fadeInSeconds: uiFadeIn === null ? 0.24 : Math.max(0, uiFadeIn),
       fadeOutSeconds: uiFadeOut === null ? 0.18 : Math.max(0, uiFadeOut),
     },
+    assets: {
+      enabled: rankedBoolean_(config.rankedAssetPackEnabled),
+      assetPackVersion: rankedText_(config.rankedAssetPackVersion),
+      sha256: rankedText_(config.rankedAssetPackSha256).toLowerCase(),
+      sizeBytes: rankedNumber_(config.rankedAssetPackSizeBytes) || 0,
+    },
   };
 }
 
@@ -1112,6 +1124,16 @@ function validateRankedCsmpSeeds_(seedsSheet, csmpTiersSheet, errors) {
 
 function validateRankedClientPresentation_(client, errors) {
   if (!client || !client.audio || !client.ui) return;
+  var assets = client.assets;
+  if (assets && assets.enabled) {
+    if (!/^[A-Za-z0-9._-]{1,64}$/.test(assets.assetPackVersion) || assets.assetPackVersion === "." || assets.assetPackVersion === "..") {
+      errors.push("rankedAssetPackVersion must be a safe immutable release tag");
+    }
+    if (!/^[a-f0-9]{64}$/.test(assets.sha256)) errors.push("rankedAssetPackSha256 must contain 64 hexadecimal characters");
+    if (!Number.isSafeInteger(assets.sizeBytes) || assets.sizeBytes <= 0 || assets.sizeBytes > 67108864) {
+      errors.push("rankedAssetPackSizeBytes must be between 1 and 67108864");
+    }
+  }
   var audio = client.audio;
   var ui = client.ui;
 
@@ -1308,3 +1330,4 @@ function rankedStableHash_(text) {
   }
   return (hash >>> 0).toString(16).padStart(8, "0");
 }
+

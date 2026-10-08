@@ -320,7 +320,7 @@ int main(){
 `;
     const dir = mkdtempSync(join(tmpdir(), 'corum-audio-transition-'));
     try {
-        writeFileSync(join(dir, 'AudioConfigDouble.hpp'), `#pragma once\n#include <cstdint>\n#include <string>\n#include <vector>\nnamespace geode {namespace utils::web {struct WebResponse {};} namespace async {template<class T> struct TaskHolder {void cancel(){}};}}\nnamespace corum::ranked {${config}}\n`);
+        writeFileSync(join(dir, 'AudioConfigDouble.hpp'), `#pragma once\n#include "${join(root, 'src/domain/RankAssetPolicy.hpp')}"\n#include <cstdint>\n#include <string>\n#include <vector>\nnamespace geode {namespace utils::web {struct WebResponse {};} namespace async {template<class T> struct TaskHolder {void cancel(){}};}}\nnamespace corum::ranked {${config}}\n`);
         writeFileSync(join(dir, 'AudioManagerUnderTest.hpp'), header);
         writeFileSync(join(dir, 'test.cpp'), cpp);
         const binary = join(dir, 'test');
@@ -329,3 +329,4 @@ int main(){
         execFileSync(binary, [], {stdio:'pipe'});
     } finally {rmSync(dir, {recursive:true, force:true});}
 });
+

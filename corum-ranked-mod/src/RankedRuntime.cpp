@@ -481,6 +481,15 @@ void RankedRuntime::fetchConfig() {
             RankedClientPresentationView clientPresentation;
             auto const clientNode = root["client"];
             if (clientNode.isObject()) {
+                auto const assetsNode = clientNode["assets"];
+                if (assetsNode.isObject()) {
+                    auto& assets = clientPresentation.assets;
+                    assets.enabled = assetsNode["enabled"].asBool().unwrapOr(false);
+                    assets.assetPackVersion = assetsNode["assetPackVersion"].asString().unwrapOr("");
+                    assets.sha256 = assetsNode["sha256"].asString().unwrapOr("");
+                    auto const size = assetsNode["sizeBytes"].asInt().unwrapOr(0);
+                    assets.sizeBytes = size > 0 ? static_cast<std::uintmax_t>(size) : 0;
+                }
                 auto const audioNode = clientNode["audio"];
                 if (audioNode.isObject()) {
                     clientPresentation.audio.enabled = audioNode["enabled"].asBool().unwrapOr(false);
@@ -3452,3 +3461,4 @@ void RankedRuntime::tick() {
 }
 
 } // namespace corum::ranked
+
