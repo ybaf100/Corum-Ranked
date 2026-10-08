@@ -59,7 +59,7 @@ struct Node { bool parent=true;void* getParent()const{return parent?(void*)this:
 struct Label {std::string text;void setString(char const* s){text=s;}void limitLabelWidth(float,float,float){};char const* getFntFile()const{return "CorumSansBold.fnt";}};
 struct PauseLayer:Node {int quits=0,resumes=0;bool dispatching=false;void onQuit(CCObject*){++quits;}void onResume(CCObject*);};
 struct Level{int m_levelID=123;};
-struct PlayLayer{Level* m_level=nullptr;inline static PlayLayer* active=nullptr;bool m_isPaused=false;int quits=0;static PlayLayer* get(){return active;}void onQuit(){++quits;}};
+struct PlayLayer{Level* m_level=nullptr;inline static PlayLayer* active=nullptr;bool m_isPaused=false;int quits=0;static PlayLayer* get(){return active;}void onQuit(){++quits;}void resume(){m_isPaused=false;AppDelegate::get()->m_gamePaused=false;}};
 template<class T>struct Ref {T* p=nullptr;Ref()=default;explicit Ref(T* v):p(v){}T* data()const{return p;}T* operator->()const{return p;}explicit operator bool()const{return p;}};
  template<class T>struct WeakRef{T* value=nullptr;explicit WeakRef(T* p):value(p){}Ref<T> lock()const{return Ref<T>(value);}};
  namespace geode {template<class T>using WeakRef=::WeakRef<T>;}

@@ -2241,7 +2241,6 @@ class CorumRankedLayer final : public CCLayerColor {
                 {size.width / 2.0f, size.height / 2.0f - 82.0f}, kCyan, "black");
             m_root->addChild(m_prepareLoadPercentLabel, 5);
             addRoundOptions(59.0f);
-            addJukeboxButton({size.width / 2.0f + 135, size.height / 2.0f + 12}, 0.35f);
         }
         std::string stateText = preparationStageText();
         if (match.state == "MAP_PLAYING") stateText = tr("placement-map-live", "MAP LIVE · SCORE + GRADE UPDATE IN REAL TIME");
@@ -2862,7 +2861,6 @@ class CorumRankedLayer final : public CCLayerColor {
         auto const mapPos = CCPoint{size.width / 2.0f, size.height / 2.0f - 14.0f};
         auto const songPos = CCPoint{size.width / 2.0f, size.height / 2.0f - 42.0f};
         addPreparationStatusRows(mapPos, songPos, 116.0f, clearSyncPending);
-        addJukeboxButton({size.width / 2.0f + 116, songPos.y});
 
         addRoundOptions(size.height / 2.0f - 106.0f);
         auto const loadStageY = size.height / 2.0f - 66.0f;
@@ -4034,14 +4032,16 @@ class CorumRankedLayer final : public CCLayerColor {
     void addRoundOptions(float y) {
         auto const size = CCDirector::sharedDirector()->getWinSize();
         auto* level = findPlayableMap();
+        auto const jukebox = corum::ranked::ui::rankedJukeboxLoaded();
         auto* ldm = addButton(fmt::format("{}: {}", tr("low-detail", "LDM"), level && level->m_lowDetailModeToggled ? "ON" : "OFF"),
-            {size.width / 2.0f - 48.0f, y}, menu_selector(CorumRankedLayer::onLowDetail), false, 0.35f);
+            {size.width / 2.0f - (jukebox ? 103.0f : 48.0f), y}, menu_selector(CorumRankedLayer::onLowDetail), false, 0.35f);
         auto* shake = addButton(fmt::format("{}: {}", tr("disable-shake", "DISABLE SHAKE"), level && level->m_disableShakeToggled ? "ON" : "OFF"),
-            {size.width / 2.0f + 47.0f, y}, menu_selector(CorumRankedLayer::onDisableShake), false, 0.35f);
+            {size.width / 2.0f + (jukebox ? 0.0f : 47.0f), y}, menu_selector(CorumRankedLayer::onDisableShake), false, 0.35f);
         ldm->setID("ranked-round-ldm"_spr);
         shake->setID("ranked-round-disable-shake"_spr);
         ldm->setEnabled(level != nullptr);
         shake->setEnabled(level != nullptr);
+        if (jukebox) addJukeboxButton({size.width / 2.0f + 116.0f, y}, 0.35f);
     }
 
     void onDownloadAllResources(CCObject*) {

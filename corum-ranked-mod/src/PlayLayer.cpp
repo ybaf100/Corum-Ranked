@@ -947,7 +947,11 @@ public:
                     layer->getParent() == CCDirector::sharedDirector()->getRunningScene()) {
                     // This callback is outside the native onQuit detour. Enter
                     // the binding so the installed quit chain runs normally.
-                    if (!corum::ranked::quitRankedPauseForConcession(layer.data()) &&
+                    if (corum::ranked::quitRankedPauseForConcession(layer.data())) return;
+                    // Native Resume/Quit callbacks may already have departed
+                    // this scene. Recheck before the independent fallback.
+                    if (layer.data() == PlayLayer::get() &&
+                        layer->getParent() == CCDirector::sharedDirector()->getRunningScene() &&
                         !corum::ranked::quitThroughRankedCompletionOverlay(layer.data())) layer->onQuit();
                 }
             });

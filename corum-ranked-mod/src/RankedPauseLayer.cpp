@@ -121,7 +121,12 @@ public:
         retireRankedPause(); PauseLayer::onResume(sender);
         // Keep the exact ownership if a native/other-hook Resume refuses. A
         // second quit must not bypass the refusal just because the lease ended.
-        if (!owner || !owner->m_isPaused) releaseRankedPauseOwnership();
+        // Keep the exact owner across our Resume -> native Quit transaction,
+        // including after Resume detaches the window. Both native pause states
+        // must be released before an independent PlayLayer quit can proceed.
+        if (!m_fields->nativeQuitInProgress &&
+            (!owner || (!owner->m_isPaused && !AppDelegate::get()->m_gamePaused)))
+            releaseRankedPauseOwnership();
     }
     void resumeRankedPause(CCObject* sender) {
         PauseLayer::onResume(sender);
@@ -141,8 +146,17 @@ public:
             retireRankedPause();
             m_fields->nativeQuitInProgress = true;
             m_fields->nativeQuitReachedPlay = false;
+            // Restore this exact PlayLayer through its native Resume binding.
+            // Keep Pause attached for its original Quit handler to close; never
+            // invoke that handler on a window we already removed via onResume.
+            owner->resume();
+            geode::log::info("[RankedPause] concession resume paused={} appPaused={} attached={}",
+                owner->m_isPaused, AppDelegate::get()->m_gamePaused, getParent() != nullptr);
         }
-        PauseLayer::onQuit(sender);
+        // A Resume hook can depart this scene. Never let native Pause Quit
+        // resolve a different PlayLayer after that callback has returned.
+        if (!authenticatedConcession || owner.data() == PlayLayer::get())
+            PauseLayer::onQuit(sender);
         if (authenticatedConcession) {
             m_fields->nativeQuitInProgress = false;
             m_fields->concessionQuit = false;
@@ -178,7 +192,10 @@ bool quitRankedPauseForConcession(PlayLayer* layer) {
     // Public binding entry, with the installed native Pause quit hooks. The
     // Corum hook's qualified call below it advances to next-original once.
     pause->onQuit(nullptr);
-    return true;
+    // Invoking a native route is not success: the device log shows the old
+    // Play quit guard refusing it. Allow the existing deferred fallback when
+    // the native Pause route never reached the PlayLayer quit boundary.
+    return rankedPause->m_fields->nativeQuitReachedPlay;
 }
 
 bool resumeRankedPauseBeforeQuit(PlayLayer* layer) {
@@ -190,15 +207,15 @@ bool resumeRankedPauseBeforeQuit(PlayLayer* layer) {
             ? rankedPause->m_fields->owner->lock() : Ref<PlayLayer>();
         if (owner && owner.data() == layer) {
             if (rankedPause->m_fields->nativeQuitInProgress) {
-                // Native Pause Quit already owns Resume -> PlayLayer Quit.
-                // Re-entering onResume here would dismantle its caller while
-                // that native Quit stack is still active.
-                if (layer->m_isPaused) return false;
+                // The exact authenticated native Pause Quit owns this stack.
+                // Its PlayLayer quit can be entered while native flags are
+                // still paused; those flags are not a precondition for native
+                // teardown. Do not block that teardown or re-enter Resume.
                 rankedPause->m_fields->nativeQuitReachedPlay = true;
                 return true;
             }
             if (!pause->getParent()) {
-                if (layer->m_isPaused) return false;
+                if (layer->m_isPaused || AppDelegate::get()->m_gamePaused) return false;
                 rankedPause->retireRankedPause();
                 rankedPause->releaseRankedPauseOwnership();
                 return true;
@@ -208,8 +225,9 @@ bool resumeRankedPauseBeforeQuit(PlayLayer* layer) {
             // Enter through the binding so installed Resume hooks run once in
             // their normal Tulip chain, rather than directly calling our detour.
             pause->onResume(nullptr);
-            geode::log::info("[RankedPause] quit resume result paused={}", layer->m_isPaused);
-            return !layer->m_isPaused;
+            geode::log::info("[RankedPause] quit resume result paused={} appPaused={}",
+                layer->m_isPaused, AppDelegate::get()->m_gamePaused);
+            return !layer->m_isPaused && !AppDelegate::get()->m_gamePaused;
         }
     }
     // Unowned/ordinary/Placement Pause keeps its existing vanilla quit path.

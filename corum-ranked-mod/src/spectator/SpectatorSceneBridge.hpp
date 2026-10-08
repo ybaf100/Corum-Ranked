@@ -13,9 +13,11 @@ bool quitThroughRankedCompletionOverlay(PlayLayer* layer);
 // not use a timer deadline or create an additional Attempt End.
 bool requestConcededGameplayReturn(PlayLayer* layer);
 // Enter the exact owned Pause's native Quit after authenticated concession.
-// True means the native route was invoked; it never grants manual exit.
+// True means its native route reached the PlayLayer quit boundary. False leaves
+// the existing deferred fallback available; it never grants manual exit.
 bool quitRankedPauseForConcession(PlayLayer* layer);
 // Retire the exact scene's native Ranked Pause before quitting gameplay.
-// False means vanilla Resume did not restore an unpaused scene; never force flags.
+// Authenticated native Pause Quit owns its teardown even with intermediate pause
+// flags. Independent quit requires both native pause states restored by Resume.
 bool resumeRankedPauseBeforeQuit(PlayLayer* layer);
 } // namespace corum::ranked

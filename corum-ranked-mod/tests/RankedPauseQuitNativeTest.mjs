@@ -30,11 +30,12 @@ test('actual quit preparation resumes only the owned Pause and rejects failed na
 #include <optional>
 #include <string>
 struct CCObject{};
+struct AppDelegate {bool m_gamePaused=false;static AppDelegate* get(){static AppDelegate a;return &a;}};
 namespace geode::log {template<class... T>void info(T...) {}}
 struct PlayLayer {inline static PlayLayer* current=nullptr;bool m_isPaused=true;static PlayLayer* get(){return current;}};
 template<class T>struct Ref{T* p=nullptr;T* data()const{return p;}T* operator->()const{return p;}explicit operator bool()const{return p;}};
 template<class T>struct WeakRef{T* p;explicit WeakRef(T* v):p(v){}Ref<T> lock()const{return {p};}};
-struct PauseLayer{bool parent=true,refuseResume=false,dispatching=false;int resumes=0,hookEntries=0;void* getParent(){return parent?this:nullptr;}void onResume(CCObject*);void nativeResume(){++resumes;if(!refuseResume){PlayLayer::get()->m_isPaused=false;parent=false;}}};
+struct PauseLayer{bool parent=true,refuseResume=false,dispatching=false;int resumes=0,hookEntries=0;void* getParent(){return parent?this:nullptr;}void onResume(CCObject*);void nativeResume(){++resumes;if(!refuseResume){PlayLayer::get()->m_isPaused=false;AppDelegate::get()->m_gamePaused=false;parent=false;}}};
 struct Popup{int dismisses=0;void dismiss(){++dismisses;}};
 struct RankedRuntime{int ends=0;static RankedRuntime& get(){static RankedRuntime r;return r;}void endMatchGameplayPause(std::string const& lease){ends+=!lease.empty();}};
 std::optional<WeakRef<PauseLayer>> activeRankedPause;
@@ -61,6 +62,8 @@ int main(){
   assert(resumeRankedPauseBeforeQuit(&a)&&pause.resumes==1); // no duplicate Resume
  }
  {CorumRankedPauseLayer detached;detached.parent=false;detached.fields.owner.emplace(&a);activeRankedPause.emplace(&detached);
+  AppDelegate::get()->m_gamePaused=true;assert(!resumeRankedPauseBeforeQuit(&a)&&activeRankedPause); // local unpaused is not global recovery
+  AppDelegate::get()->m_gamePaused=false;
   assert(resumeRankedPauseBeforeQuit(&a)&&detached.resumes==0&&!activeRankedPause&&!detached.fields.owner&&detached.fields.leaseId.empty());}
  {CorumRankedPauseLayer refusal;a.m_isPaused=true;refusal.refuseResume=true;refusal.fields.owner.emplace(&a);activeRankedPause.emplace(&refusal);
   assert(!resumeRankedPauseBeforeQuit(&a)&&a.m_isPaused&&refusal.resumes==1); // no forced flags
@@ -87,6 +90,7 @@ test('actual Resume callback keeps the removed Pause alive until ownership clean
 #include <string>
 #include <utility>
 struct CCObject{};
+struct AppDelegate {bool m_gamePaused=false;static AppDelegate* get(){static AppDelegate a;return &a;}};
 struct Object {int refs=1;bool alive=true;void retain(){assert(alive);++refs;}void release(){assert(alive&&refs>0);if(--refs==0)alive=false;}};
 struct PlayLayer:Object {bool m_isPaused=true;inline static PlayLayer* current=nullptr;static PlayLayer* get(){return current;}};
 template<class T>struct Ref{T* p=nullptr;Ref()=default;explicit Ref(T* v):p(v){if(p)p->retain();}Ref(Ref const& v):Ref(v.p){}Ref(Ref&& v):p(std::exchange(v.p,nullptr)){}~Ref(){if(p)p->release();}T* data()const{return p;}T* operator->()const{assert(p&&p->alive);return p;}explicit operator bool()const{return p;}};
@@ -97,7 +101,7 @@ struct RankedRuntime{static RankedRuntime& get(){static RankedRuntime r;return r
 std::optional<WeakRef<PauseLayer>> activeRankedPause;
 #define schedule_selector(x) 0
 struct CorumRankedPauseLayer:PauseLayer {
- struct Fields{std::optional<WeakRef<Popup>> popup;std::optional<WeakRef<PlayLayer>> owner;std::string leaseId="lease";}fields;
+ struct Fields{std::optional<WeakRef<Popup>> popup;std::optional<WeakRef<PlayLayer>> owner;std::string leaseId="lease";bool nativeQuitInProgress=false;}fields;
  struct CheckedFields {Fields* p;PauseLayer* owner;Fields* operator->(){assert(owner->alive);return p;}}m_fields{&fields,this};
  void unschedule(int){}
  ${body('void retireRankedPause()')}
