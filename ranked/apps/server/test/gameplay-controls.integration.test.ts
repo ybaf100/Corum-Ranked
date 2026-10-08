@@ -313,10 +313,50 @@ describe("match-wide pause and explicit concession", () => {
     expect((await f.matches.changePause(f.id, f.ta, f.a, { leaseId: "pause-2", paused: true })).remainingMs).toBe(18000);
     await f.matches.changePause(f.id, f.ta, f.a, { leaseId: "pause-1", paused: false });
     f.clock.advanceSeconds(18);
-    expect((await f.matches.state(f.id, f.ta, f.a)).pause).toMatchObject({ remainingMs: 0, active: false });
+    const result = await f.makeService().state(f.id, f.ta, f.a);
+    expect(result.pause).toMatchObject({ remainingMs: 0, active: false });
+    expect(result.state).toBe("MATCH_RESULT");
+    expect(result.result!.winnerSide).toBe("B");
+    expect(result.surrender).toMatchObject({ side: "A", scope: "MATCH", roundNumber: 2, reason: "PAUSE_BUDGET_EXHAUSTED" });
     await f.matches.changePause(f.id, f.ta, f.a, { leaseId: "pause-2", paused: false });
     expect((await f.makeService().state(f.id, f.ta, f.a)).pause.remainingMs).toBe(0);
     expect((await f.matches.state(f.id, f.tb, f.b)).pause.remainingMs).toBe(30000);
+  });
+  it("forfeits on the exact deadline even if Resume arrives before a state poll; late ACK/Clear cannot alter ratings", async () => {
+    const f = await playingMatch(), levelId = f.state.currentRound.map.playableLevelId;
+    const earned = await f.matches.startAttempt(f.id, f.ta, f.a, { levelId, clientEventId: "timeout-earned" });
+    await f.matches.endAttempt(f.id, f.ta, f.a, { levelId, attemptId: earned.attemptId!, clientEventId: "timeout-earned-end", progressPercent: 60, cleared: false });
+    const score = (await f.matches.state(f.id, f.ta, f.a)).currentRound!.scores.A;
+    const run = await f.matches.startAttempt(f.id, f.ta, f.a, { levelId, clientEventId: "timeout-open" });
+    await f.matches.changePause(f.id, f.ta, f.a, { leaseId: "timeout-race", paused: true });
+    f.clock.advanceSeconds(29.999);
+    expect((await f.matches.state(f.id, f.ta, f.a)).state).toBe("ROUND_PLAYING");
+    f.clock.advanceSeconds(0.001);
+    await f.matches.changePause(f.id, f.ta, f.a, { leaseId: "timeout-race", paused: false });
+    const result = await f.matches.state(f.id, f.ta, f.a);
+    expect(result.state).toBe("MATCH_RESULT"); expect(result.result!.winnerSide).toBe("B");
+    expect(result.currentRound!.scores.A).toBe(score); expect(result.result!.perfectWinSide).toBeNull();
+    expect(result.surrender).toMatchObject({ scope: "MATCH", reason: "PAUSE_BUDGET_EXHAUSTED" });
+    const once = await database.query("SELECT mmr_delta_a, mmr_delta_b, result_applied_at FROM ranked_matches WHERE id = $1", [f.id]);
+    const ack = await f.matches.surrender(f.id, f.ta, f.a, { scope: "MATCH", clientEventId: "automatic-client-ack", roundNumber: 1, deathmatchSequence: 0 });
+    expect(ack.surrender).toEqual(result.surrender); expect(ack.result).toEqual(result.result);
+    const late = await f.matches.endAttempt(f.id, f.ta, f.a, { levelId, attemptId: run.attemptId!, clientEventId: "timeout-late-clear", progressPercent: 100, cleared: true });
+    expect(late.accepted).toBe(false);
+    expect(await database.query("SELECT mmr_delta_a, mmr_delta_b, result_applied_at FROM ranked_matches WHERE id = $1", [f.id])).toEqual(once);
+    expect((await f.makeService().state(f.id, f.tb, f.b)).surrender).toEqual(result.surrender);
+  });
+  it("a timely Resume closes the lease and cannot auto-forfeit while normal gameplay continues", async () => {
+    const f = await playingMatch();
+    await f.matches.changePause(f.id, f.tb, f.b, { leaseId: "timely-resume", paused: true });
+    f.clock.advanceSeconds(29);
+    expect(await f.matches.changePause(f.id, f.tb, f.b, { leaseId: "timely-resume", paused: false })).toMatchObject({ remainingMs: 1000, active: false });
+    f.clock.advanceSeconds(5);
+    expect((await f.matches.state(f.id, f.ta, f.a)).state).toBe("ROUND_PLAYING");
+    await f.matches.changePause(f.id, f.tb, f.b, { leaseId: "last-second", paused: true });
+    f.clock.advanceSeconds(1);
+    const result = await f.matches.state(f.id, f.ta, f.a);
+    expect(result.state).toBe("MATCH_RESULT"); expect(result.result!.winnerSide).toBe("A");
+    expect(result.surrender).toMatchObject({ side: "B", scope: "MATCH" });
   });
   it("round concession preserves committed scores, closes active runs/leases and cannot concede the next round on ACK retry", async () => {
     const f = await playingMatch(); const levelId = f.state.currentRound.map.playableLevelId;
@@ -361,6 +401,22 @@ describe("match-wide pause and explicit concession", () => {
     const dm = await f.startRound(); expect(dm.state).toBe("DEATHMATCH_PLAYING");
     const result = await f.matches.surrender(f.id, f.ta, f.a, { scope: "ROUND", clientEventId: "dm-concede", roundNumber: 3, deathmatchSequence: 1 });
     expect(result.state).toBe("MATCH_RESULT"); expect(result.result!.winnerSide).toBe("B");
+    expect((await database.query(`SELECT a.* FROM ranked_deathmatch_attempts a JOIN ranked_deathmatches d ON d.id = a.deathmatch_id WHERE d.match_id = $1`, [f.id])).rows).toHaveLength(0);
+  });
+  it("Death Match Pause timeout also forfeits the whole match and cannot require another decisive attempt", async () => {
+    const f = await playingMatch();
+    for (let round = 1; round <= 3; ++round) {
+      f.clock.advanceSeconds(f.document.operational.rules.roundSeconds + f.document.operational.rules.finalAttemptWindowSeconds + 5);
+      const state = await f.matches.state(f.id, f.ta, f.a);
+      if (round < 3) { f.clock.advanceSeconds(f.document.operational.timeouts!.roundResultSeconds + 1); await f.matches.state(f.id, f.ta, f.a); await f.startRound(); }
+      else expect(state.state).toBe("DEATHMATCH_PREPARE");
+    }
+    expect((await f.startRound()).state).toBe("DEATHMATCH_PLAYING");
+    await f.matches.changePause(f.id, f.ta, f.a, { leaseId: "dm-timeout", paused: true });
+    f.clock.advanceSeconds(30);
+    const result = await f.matches.state(f.id, f.ta, f.a);
+    expect(result.state).toBe("MATCH_RESULT"); expect(result.result!.winnerSide).toBe("B");
+    expect(result.surrender).toMatchObject({ scope: "MATCH", deathmatchSequence: 1, reason: "PAUSE_BUDGET_EXHAUSTED" });
     expect((await database.query(`SELECT a.* FROM ranked_deathmatch_attempts a JOIN ranked_deathmatches d ON d.id = a.deathmatch_id WHERE d.match_id = $1`, [f.id])).rows).toHaveLength(0);
   });
 });

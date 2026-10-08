@@ -21,6 +21,7 @@ const migrationNames = [
     "0012_gameplay_controls.sql",
     "0013_native_scene_entry.sql",
     "0014_forum_records.sql",
+    "0015_forum_refresh_cooldown.sql",
 ] as const;
 
 const migrationSql = async (migrationName: string): Promise<string> => {
@@ -60,6 +61,7 @@ describe("PostgreSQL migration", () => {
       "ranked_deathmatch_attempts",
       "ranked_deathmatches",
       "ranked_forum_records",
+      "ranked_forum_refresh_cooldowns",
       "ranked_match_tokens",
       "ranked_matches",
       "ranked_outbox_events",

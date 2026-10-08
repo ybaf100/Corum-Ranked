@@ -154,6 +154,7 @@ jobs:
           node --test corum-ranked-mod/tests/PlayerInfoPopupNativeTest.mjs
           node --test corum-ranked-mod/tests/RankedPauseInputNativeTest.mjs
           node --test corum-ranked-mod/tests/RankedVolumeNativeTest.mjs
+          node --test corum-ranked-mod/tests/RankedSettingsNativeTest.mjs
           node --test corum-ranked-mod/tests/MapDetailsNativeTest.mjs
           node --test corum-ranked-mod/tests/RankAssetPackNativeTest.mjs
           python3 corum-ranked-mod/tests/AssetPackBuildTest.py

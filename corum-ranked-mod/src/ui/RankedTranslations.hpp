@@ -96,6 +96,8 @@ inline constexpr std::array kKoreanTranslations {
     Translation{"opponent-surrender-match", "상대가 경기에서 항복했습니다."},
     Translation{"surrender-rejected", "항복할 수 없습니다. 경기 상태를 확인 후 다시 시도하세요."},
     Translation{"match-pause", "경기 일시정지"},
+    Translation{"pause-timeout-warning", "0초가 되면 경기 전체가 항복 처리됩니다."},
+    Translation{"forum-refresh-cooldown", "다음 갱신까지"},
     Translation{"confirm-skip", "건너뛰고 배치"},
     Translation{"solo-placement", "싱글 배치"},
     Translation{"opening-exact-level", "정확한 GD 레벨을 여는 중..."},

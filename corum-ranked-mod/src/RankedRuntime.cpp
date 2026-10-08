@@ -148,6 +148,7 @@ corum::ranked::ForumRecordsView parseForumRecords(matjson::Value const& root) {
     auto const records = root["records"].asArray();
     if (records.isErr()) { result.error = "Invalid forum records response"; return result; }
     result.loaded = true;
+    result.refreshAvailableAt = root["refreshAvailableAt"].asString().unwrapOr("");
     for (auto const& item : records.unwrap()) {
         corum::ranked::ForumRankView record;
         record.provider = item["provider"].asString().unwrapOr("");
@@ -2312,7 +2313,8 @@ void RankedRuntime::fetchPlayerInfo(std::string const& side) {
 }
 
 void RankedRuntime::fetchForumRecords(bool refresh) {
-    if (m_sessionToken.empty() || m_view.forumRecords.loading || (!refresh && m_view.forumRecords.loaded)) return;
+    if (m_sessionToken.empty() || m_view.forumRecords.loading ||
+        (refresh && forumRefreshRemainingMs() > 0)) return;
     auto const generation = ++m_forumRecordsGeneration;
     auto const session = m_sessionToken;
     m_view.forumRecords.loading = true; m_view.forumRecords.error.clear(); ++m_view.revision;
@@ -2323,9 +2325,17 @@ void RankedRuntime::fetchForumRecords(bool refresh) {
         if (generation != m_forumRecordsGeneration || session != m_sessionToken) return;
         m_view.forumRecords.loading = false;
         if (!successful(response)) { m_view.forumRecords.error = responseError(response); ++m_view.revision; return; }
-        m_view.forumRecords = parseForumRecords(response.json().unwrapOr(matjson::Value()));
+        auto const root = response.json().unwrapOr(matjson::Value());
+        observeServerNow(root);
+        m_view.forumRecords = parseForumRecords(root);
         ++m_view.revision;
     });
+}
+
+std::int64_t RankedRuntime::forumRefreshRemainingMs() const {
+    if (m_view.forumRecords.refreshAvailableAt.empty()) return 0;
+    return std::clamp<std::int64_t>(m_serverClock.remainingMillis(
+        m_view.forumRecords.refreshAvailableAt, localNowMillis()).value_or(3600000), 0, 3600000);
 }
 
 void RankedRuntime::claimAchievement(std::string const& achievementId) {

@@ -56,10 +56,47 @@ let client: PGlite, database: PgliteDatabase;
 beforeAll(async () => {
   client = new PGlite(); database = new PgliteDatabase(client);
   await client.exec(await readFile(new URL('../../../migrations/0014_forum_records.sql', import.meta.url), 'utf8'));
+  await client.exec(await readFile(new URL('../../../migrations/0015_forum_refresh_cooldown.sql', import.meta.url), 'utf8'));
 }, 60_000);
 afterAll(async () => { await client.close(); });
 
 describe('durable forum cache', () => {
+  it('limits manual refresh per account for one hour across workers/restarts, with an exact server deadline', async () => {
+    let now = Date.parse('2026-10-10T00:00:00Z');
+    let fail = false;
+    const fetchRecord = vi.fn(async (provider: ForumRecord['provider'], username: string, id: number | null) => {
+      if (fail && username === 'CooldownUser') throw new Error('API unavailable');
+      return { provider, externalId: id ?? 42, externalName: username, rank: 10, status: 'RANKED' as const };
+    });
+    const createService = () => new ForumRecordsService(database, { now: () => new Date(now) }, { fetch: fetchRecord });
+    const service = createService(), otherWorker = createService();
+    const ownFetchCount = () => fetchRecord.mock.calls.filter(([, name]) => name === 'CooldownUser').length;
+    const account = '12345';
+    expect((await service.read(account)).refreshAvailableAt).toBeNull();
+    const clicks = await Promise.all([service.refreshOwn(account, 'CooldownUser'), otherWorker.refreshOwn(account, 'CooldownUser')]);
+    expect(clicks.filter(reply => reply.refreshAccepted)).toHaveLength(1);
+    expect(clicks.every(reply => reply.refreshAvailableAt === '2026-10-10T01:00:00.000Z')).toBe(true);
+    expect(ownFetchCount()).toBe(2);
+    expect(await otherWorker.read(account)).toMatchObject({ refreshAvailableAt: '2026-10-10T01:00:00.000Z', serverNow: '2026-10-10T00:00:00.000Z' });
+    now += 3_599_999;
+    expect((await createService().refreshOwn(account, 'CooldownUser')).refreshAccepted).toBe(false);
+    expect(ownFetchCount()).toBe(2);
+    now += 1;
+    fail = true;
+    const failed = await otherWorker.refreshOwn(account, 'CooldownUser');
+    expect(failed).toMatchObject({ refreshAccepted: true, refreshAvailableAt: '2026-10-10T02:00:00.000Z' });
+    expect(failed.records.every(row => row.status === 'ERROR' && row.rank === 10)).toBe(true);
+    expect(ownFetchCount()).toBe(4); // failure preserves ranks but still consumes the request
+    expect((await createService().refreshOwn(account, 'CooldownUser')).refreshAccepted).toBe(false);
+    const independent = createService();
+    expect((await independent.refreshOwn('12346', 'OtherUser')).refreshAccepted).toBe(true);
+    // Automatic initialization remains independent from manual user cooldowns.
+    await service.refresh('12347', 'NewProfile', false);
+    expect((await service.read('12347')).refreshAvailableAt).toBeNull();
+    await Promise.all([service, otherWorker, independent].flatMap(worker =>
+      [...(worker as unknown as { pending: Map<string, Promise<void>> }).pending.values()]));
+    await database.query('DELETE FROM ranked_forum_records WHERE gd_account_id = $1', [COJONG.accountId]);
+  });
   it('fetches once, reads instantly, deduplicates refreshes and preserves last good ranks on API failure', async () => {
     let now = Date.parse('2026-10-08T00:00:00Z');
     let fail = false;

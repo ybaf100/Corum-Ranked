@@ -3516,6 +3516,7 @@ class CorumRankedLayer final : public CCLayerColor {
             );
             button->setTag(level);
             button->setEnabled(available && !current);
+            if (!available) corum::ranked::ui::grayButtonVisual(button);
         }
         auto* clear = addButton(
             tr("clear-title", "CLEAR TITLE"),
@@ -3711,6 +3712,7 @@ class CorumRankedLayer final : public CCLayerColor {
                 );
                 titleButton->setTag(static_cast<int>(index));
                 titleButton->setEnabled(titleUnlocked && !view.achievements.loading);
+                if (!titleUnlocked) corum::ranked::ui::grayButtonVisual(titleButton);
             }
         }
 

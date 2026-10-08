@@ -14,6 +14,7 @@ interface CacheRow {
   last_success_at: Date | string | null;
 }
 const iso = (value: Date | string | null): string | null => value ? new Date(value).toISOString() : null;
+export const FORUM_MANUAL_REFRESH_COOLDOWN_MS = 60 * 60 * 1_000;
 
 @Injectable()
 export class ForumRecordsService implements OnModuleInit {
@@ -42,7 +43,10 @@ export class ForumRecordsService implements OnModuleInit {
     const result = await this.database.query<CacheRow>(
       `SELECT provider, external_id, external_name, rank, status, fetched_at, last_success_at
        FROM ranked_forum_records WHERE gd_account_id = $1 ORDER BY provider`, [accountId]);
-    return { gdAccountId: accountId, records: FORUM_PROVIDERS.map((provider) => {
+    const cooldown = await this.database.query<{ next_refresh_at: Date | string }>(
+      `SELECT next_refresh_at FROM ranked_forum_refresh_cooldowns WHERE gd_account_id = $1`, [accountId]);
+    return { gdAccountId: accountId, refreshAvailableAt: iso(cooldown.rows[0]?.next_refresh_at ?? null),
+      records: FORUM_PROVIDERS.map((provider) => {
       const row = result.rows.find((candidate) => candidate.provider === provider);
       return { provider, externalId: row?.external_id ? Number(row.external_id) : null,
         externalName: row?.external_name ?? null, rank: row?.rank ?? null,
@@ -92,10 +96,21 @@ export class ForumRecordsService implements OnModuleInit {
   }
 
   public async refreshOwn(accountId: string, username: string) {
+    const now = this.clock.now();
+    const next = new Date(now.getTime() + FORUM_MANUAL_REFRESH_COOLDOWN_MS).toISOString();
+    // One atomic account claim, before either public API is called. An API
+    // failure still consumes this manual request's cooldown; stale ranks stay.
+    const claimed = await this.database.query<{ next_refresh_at: Date | string }>(
+      `INSERT INTO ranked_forum_refresh_cooldowns (gd_account_id, next_refresh_at)
+       VALUES ($1, $2) ON CONFLICT (gd_account_id) DO UPDATE
+       SET next_refresh_at = EXCLUDED.next_refresh_at
+       WHERE ranked_forum_refresh_cooldowns.next_refresh_at <= $3
+       RETURNING next_refresh_at`, [accountId, next, now.toISOString()]);
+    if (claimed.rowCount === 0) return { ...await this.read(accountId), refreshAccepted: false };
     // Explicit refresh includes the bot reference as requested. Never refresh
     // another matched player's records on behalf of a viewer.
     const result = await this.refresh(accountId, username);
     if (accountId !== COJONG.accountId) this.enqueue(COJONG.accountId, COJONG.username, true);
-    return result;
+    return { ...result, refreshAccepted: true };
   }
 }

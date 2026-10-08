@@ -15,8 +15,19 @@ class RankedSettingsPopup final : public Popup {
     Slider* m_volume = nullptr;
     CCLabelBMFont* m_percent = nullptr;
     CCLabelBMFont* m_forumStatus = nullptr;
+    CCLabelBMFont* m_forumCooldown = nullptr;
     CCMenuItemSpriteExtra* m_refreshRecords = nullptr;
+    bool m_refreshDisabled = false;
     bool m_closed = false, m_exited = false, m_dirty = false;
+
+    CCNode* refreshButtonFace(bool disabled) {
+        auto* face = surface({264, 31}, {}, Cyan, SurfaceRaised, 250, true);
+        auto* caption = menuLabel(i18n::text("forum-refresh", "Refresh forum records"),
+            0.34f, {132, 15.5f}, Text, FontWeight::ExtraBold);
+        fitMenuLabelWidth(caption, 242, 0.34f, 0.26f); face->addChild(caption, 5);
+        if (disabled) grayButtonVisual(face);
+        return face;
+    }
 
     bool init() {
         if (!Popup::init(300, 252)) return false;
@@ -42,15 +53,15 @@ class RankedSettingsPopup final : public Popup {
             0.24f, {150, 108}, TextMuted);
         fitMenuLabelWidth(detail, 264, 0.24f, 0.20f); panel->addChild(detail, 10);
         auto* menu = CCMenu::create(); menu->setPosition(CCPointZero); panel->addChild(menu, 20);
-        auto* refreshFace = surface({264, 31}, {}, Cyan, SurfaceRaised, 250, true);
-        auto* refreshText = menuLabel(i18n::text("forum-refresh", "Refresh forum records"),
-            0.34f, {132, 15.5f}, Text, FontWeight::ExtraBold);
-        fitMenuLabelWidth(refreshText, 242, 0.34f, 0.26f); refreshFace->addChild(refreshText, 5);
+        auto* refreshFace = refreshButtonFace(false);
         m_refreshRecords = CCMenuItemSpriteExtra::create(refreshFace, this, menu_selector(RankedSettingsPopup::onRefreshRecords));
         m_refreshRecords->setID("ranked-forum-refresh-button"_spr);
-        m_refreshRecords->setPosition({150, 77}); menu->addChild(m_refreshRecords);
-        m_forumStatus = menuLabel("", 0.22f, {150, 46}, TextMuted);
+        m_refreshRecords->setPosition({150, 84}); menu->addChild(m_refreshRecords);
+        m_forumStatus = menuLabel("", 0.22f, {150, 59}, TextMuted);
         panel->addChild(m_forumStatus, 10);
+        m_forumCooldown = menuLabel("", 0.26f, {150, 41}, TextMuted, FontWeight::ExtraBold);
+        m_forumCooldown->setID("ranked-forum-refresh-cooldown"_spr);
+        panel->addChild(m_forumCooldown, 10);
         RankedRuntime::get().fetchForumRecords();
         schedule(schedule_selector(RankedSettingsPopup::updateForumStatus), 0.15f);
         updateForumStatus(0);
@@ -77,7 +88,18 @@ class RankedSettingsPopup final : public Popup {
     void updateForumStatus(float) {
         if (m_closed) return;
         auto const& view = RankedRuntime::get().view().forumRecords;
-        m_refreshRecords->setEnabled(!view.loading);
+        auto const remaining = RankedRuntime::get().forumRefreshRemainingMs();
+        auto const disabled = view.loading || remaining > 0;
+        m_refreshRecords->setEnabled(!disabled);
+        if (disabled != m_refreshDisabled) {
+            m_refreshDisabled = disabled;
+            m_refreshRecords->setNormalImage(refreshButtonFace(disabled));
+        }
+        auto const seconds = (remaining + 999) / 1000;
+        auto const cooldown = remaining > 0 ? fmt::format("{} {:02}:{:02}",
+            i18n::text("forum-refresh-cooldown", "Next refresh in"), seconds / 60, seconds % 60) : "";
+        m_forumCooldown->setString(cooldown.c_str());
+        fitMenuLabelWidth(m_forumCooldown, 264, 0.26f, 0.22f);
         std::string text;
         if (view.loading) text = i18n::text("forum-updating", "Updating forum records...");
         else if (!view.error.empty()) text = i18n::text("forum-update-failed", "Update failed. Try again.");
@@ -92,7 +114,7 @@ class RankedSettingsPopup final : public Popup {
             }
             if (failed) text += "\n" + i18n::text("forum-cache-kept", "API unavailable; cached records kept.");
         }
-        m_forumStatus->setString(text.c_str()); fitFullMenuLabel(m_forumStatus, 264, 20, 0.22f);
+        m_forumStatus->setString(text.c_str()); fitFullMenuLabel(m_forumStatus, 264, 14, 0.22f);
     }
 public:
     static RankedSettingsPopup* create() {

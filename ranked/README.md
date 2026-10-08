@@ -53,13 +53,14 @@ g++ -std=c++23 -Wall -Wextra -Wpedantic -Werror \
 
 ## 배포 순서
 
-beta.45의 native 모드는 [Build Corum Ranked Debug](https://github.com/ybaf100/Corum-Ranked/actions/workflows/build-ranked-debug.yml)
-GitHub workflow에서 빌드합니다. `Corum-Ranked-v0.5.0-beta.45-Debug` artifact의
+beta.46의 native 모드는 [Build Corum Ranked Debug](https://github.com/ybaf100/Corum-Ranked/actions/workflows/build-ranked-debug.yml)
+GitHub workflow에서 빌드합니다. `Corum-Ranked-v0.5.0-beta.46-Debug` artifact의
 `hwanhee1.corum_ranked.geode`를 사용합니다. Windows 로컬 빌드는
 [`../corum-ranked-mod/WINDOWS-BUILD.md`](../corum-ranked-mod/WINDOWS-BUILD.md)의 선택 사항입니다.
-서버와 클라이언트의 exact gate는 함께 beta.45를 사용합니다.
+서버와 클라이언트의 exact gate는 함께 beta.46를 사용합니다.
 
-beta.45는 Ranked 메뉴 글자와 버튼을 확대하고 정보·설정 창을 작게 정리합니다.
+beta.46은 Pause 5초 이하를 빨간색으로 표시하고, 0초에 경기 전체를 자동 항복 처리합니다.
+항복 안내는 Pause 중에만 표시되며 재개하면 닫힙니다. 미획득 칭호와 미달성 성장형 단계 버튼은 회색입니다.
 설정의 개인 볼륨은 로비·매칭·결과 화면의 Ranked BGM에만 적용합니다.
 플레이 중 GD 음악과 효과음, GD의 저장된 볼륨 설정은 변경하지 않습니다.
 
@@ -71,7 +72,10 @@ beta.44의 포럼 기록 캐시는 서버 시작 시 `0014_forum_records.sql`을
 API 키나 Spreadsheet 설정은 필요하지 않습니다. 상대 정보 카드는 매치 토큰으로 조회하며,
 포럼 순위는 첫 프로필 생성 후 한 번 조회하고 이후 DB에서 읽습니다. 설정의
 포럼 기록 갱신 버튼은 본인과 봇전 참고 프로필 CoJong을 갱신 대상으로 포함합니다.
-갱신은 서비스별 60초 cooldown을 적용하며, API 오류 시 마지막 정상 순위를 보존합니다.
+사용자의 수동 갱신은 계정별 1시간에 한 번 가능합니다. 남은 시간은 설정에 표시되고,
+쿨다운 동안 버튼은 회색으로 비활성화됩니다. 재접속이나 서버 재시작으로 초기화되지 않습니다.
+최초 프로필 조회와 CoJong 자동 초기화는 이 수동 제한과 별개이며, API 오류 시 마지막 정상 순위를 보존합니다.
+`0015_forum_refresh_cooldown.sql`은 서버 시작 시 자동 적용됩니다.
 
 Ranked 메뉴 BGM은 `Ranked Config`의 기존 `rankedAudioMenuSongId`에
 Newgrounds 또는 GD Music Library의 전체 Song ID를 입력합니다. `rankedAudioEnabled=TRUE`,

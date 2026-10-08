@@ -58,6 +58,7 @@ public:
         std::optional<WeakRef<ui::RankedExitConfirmation>> exitConfirmation;
         std::optional<WeakRef<PlayLayer>> owner;
         bool concessionQuit = false, nativeQuitInProgress = false, nativeQuitReachedPlay = false;
+        bool timeoutSurrenderRequested = false;
         ~Fields() {
             if (popup) if (auto dialog = popup->lock()) dialog->dismiss();
             if (exitConfirmation) if (auto dialog = exitConfirmation->lock()) dialog->dismiss();
@@ -96,11 +97,17 @@ public:
         m_fields->surrender = CCMenuItemSpriteExtra::create(button, this, menu_selector(CorumRankedPauseLayer::onSurrender));
         m_fields->surrender->setID("ranked-surrender-button"_spr);
         center->addChild(m_fields->surrender, -1); center->sortAllChildren(); center->updateLayout();
-        auto* budgetPlate = CCLayerColor::create({0, 0, 0, 215}, std::min(260.0f, size.width * 0.48f), 29);
-        budgetPlate->setPosition({8, size.height - 37}); addChild(budgetPlate, 1000);
-        m_fields->budget = ui::label("", 0.31f, {8, 23}, ui::Gold, ui::FontWeight::ExtraBold);
+        auto const plateWidth = std::min(300.0f, size.width * 0.56f);
+        auto* budgetPlate = CCLayerColor::create({0, 0, 0, 215}, plateWidth, 48);
+        budgetPlate->setPosition({8, size.height - 56}); addChild(budgetPlate, 1000);
+        m_fields->budget = ui::label("", 0.31f, {8, 42}, ui::Gold, ui::FontWeight::ExtraBold);
         m_fields->budget->setAnchorPoint({0, 1});
         m_fields->budget->setID("ranked-pause-budget"_spr); budgetPlate->addChild(m_fields->budget, 1);
+        auto* warning = ui::label(i18n::text("pause-timeout-warning", "At 0s, you forfeit the entire match."),
+            0.26f, {8, 18}, ui::TextMuted, ui::FontWeight::SemiBold);
+        warning->setAnchorPoint({0, 1});
+        ui::fitLabelWidth(warning, plateWidth - 16, 0.26f, 0.22f);
+        warning->setID("ranked-pause-timeout-warning"_spr); budgetPlate->addChild(warning, 1);
         schedule(schedule_selector(CorumRankedPauseLayer::watchBudget), 0.05f); watchBudget(0);
     }
     void watchBudget(float) {
@@ -110,6 +117,7 @@ public:
         auto const text = fmt::format("{}: {:.1f} / 30{}", i18n::text("match-pause", "MATCH PAUSE"),
             std::ceil(remaining / 100) / 10, i18n::isKorean() ? "초" : "s");
         m_fields->budget->setString(text.c_str());
+        m_fields->budget->setColor(remaining <= 5000 ? ui::Red : ui::Gold);
         m_fields->surrender->setEnabled(!m_fields->leaseId.empty());
         if (ranked.gameplayConceded(m_fields->round, m_fields->deathmatch)) {
             // Keep the native Pause attached until its own Quit boundary.
@@ -120,9 +128,20 @@ public:
             if (owner) corum::ranked::requestConcededGameplayReturn(owner.data());
             return;
         }
-        if ((!m_fields->leaseId.empty() && remaining <= 0) || ranked.view().match.matchId != m_fields->matchId ||
+        if (ranked.view().match.matchId != m_fields->matchId ||
             ranked.view().match.roundNumber != m_fields->round || ranked.view().match.deathmatchSequence != m_fields->deathmatch ||
-            ranked.view().stage != corum::ranked::RuntimeStage::Matched) resumeRankedPause(nullptr);
+            ranked.view().stage != corum::ranked::RuntimeStage::Matched) {
+            resumeRankedPause(nullptr); return;
+        }
+        if (!m_fields->leaseId.empty() && remaining <= 0) {
+            // Keep the exact native Pause attached until the authenticated
+            // concession ACK/poll invokes the existing native Quit handoff.
+            if (!m_fields->timeoutSurrenderRequested && !ranked.surrenderPending()) {
+                m_fields->timeoutSurrenderRequested = true;
+                ranked.surrenderCurrentMatch(true);
+                geode::log::info("[RankedPause] budget exhausted; full match surrender requested round={}", m_fields->round);
+            }
+        }
     }
     void retireRankedPause() {
         if (m_fields->owner) dismissNativeRankedExitConfirmation(this);

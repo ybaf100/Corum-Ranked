@@ -31,6 +31,7 @@ const REQUIRED_MIGRATIONS = [
   "0012_gameplay_controls.sql",
   "0013_native_scene_entry.sql",
   "0014_forum_records.sql",
+  "0015_forum_refresh_cooldown.sql",
 ] as const;
 
 export interface RankedSchemaStatus {
@@ -53,6 +54,7 @@ type SchemaProbeRow = QueryResultRow & {
   ranked_achievement_unlocks: boolean;
   ranked_ap_ledger: boolean;
   ranked_forum_records: boolean;
+  ranked_forum_refresh_cooldowns: boolean;
   match_type: boolean;
   debug_config: boolean;
   match_entry_state: boolean;
@@ -158,6 +160,7 @@ export class DatabaseService implements DatabasePort, OnModuleInit, OnApplicatio
           to_regclass('public.ranked_achievement_unlocks') IS NOT NULL AS ranked_achievement_unlocks,
           to_regclass('public.ranked_ap_ledger') IS NOT NULL AS ranked_ap_ledger,
           to_regclass('public.ranked_forum_records') IS NOT NULL AS ranked_forum_records,
+          to_regclass('public.ranked_forum_refresh_cooldowns') IS NOT NULL AS ranked_forum_refresh_cooldowns,
           EXISTS (
             SELECT 1 FROM information_schema.columns
             WHERE table_schema = 'public' AND table_name = 'ranked_matches' AND column_name = 'match_type'
@@ -225,6 +228,7 @@ export class DatabaseService implements DatabasePort, OnModuleInit, OnApplicatio
         ["ranked_achievement_unlocks", "table ranked_achievement_unlocks"],
         ["ranked_ap_ledger", "table ranked_ap_ledger"],
         ["ranked_forum_records", "table ranked_forum_records"],
+        ["ranked_forum_refresh_cooldowns", "table ranked_forum_refresh_cooldowns"],
         ["match_type", "ranked_matches.match_type"],
         ["debug_config", "ranked_matches.debug_config"],
         ["match_entry_state", "ranked_matches.entry_state"],

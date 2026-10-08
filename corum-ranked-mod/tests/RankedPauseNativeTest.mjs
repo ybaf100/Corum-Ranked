@@ -44,7 +44,7 @@ test('pause surrender uses native GD X sprite and Corum modal/font, never vanill
     assert.doesNotMatch(pause.slice(start,end),/leaseId\.empty\(\).*return/);
 });
 
-test('actual pause/modal callbacks block only owned manual quit, send exact scope once and close before timeout resume',()=>{
+test('actual pause/modal callbacks preserve native cleanup and surrender the whole match once at budget expiry',()=>{
     const modalMethods=['bool sameRound() const','void onRound(','void onMatch(','void onConfirm(','void onCancel(','void watchContext(','void dismiss()'].map(n=>body(popup,n)).join('\n');
     const cpp=`
 #include <cassert>
@@ -53,10 +53,11 @@ test('actual pause/modal callbacks block only owned manual quit, send exact scop
 #include <cmath>
 #include "${join(root, 'src/domain/FontMetrics.hpp')}"
 struct CCObject {};
+struct ccColor3B {unsigned char r,g,b;bool operator==(ccColor3B const&)const=default;};
 struct AppDelegate {bool m_gamePaused=false;static AppDelegate* get(){static AppDelegate app;return &app;}};
 namespace geode::log {template<class...T>void info(T...) {}}
 struct Node { bool parent=true;void* getParent()const{return parent?(void*)this:nullptr;} };
-struct Label {std::string text;void setString(char const* s){text=s;}void limitLabelWidth(float,float,float){};char const* getFntFile()const{return "CorumSansBold.fnt";}};
+struct Label {std::string text;ccColor3B color{};void setString(char const* s){text=s;}void setColor(ccColor3B c){color=c;}void limitLabelWidth(float,float,float){};char const* getFntFile()const{return "CorumSansBold.fnt";}};
 struct PauseLayer:Node {int quits=0,resumes=0;bool dispatching=false;void onQuit(CCObject*){++quits;}void onResume(CCObject*);};
 struct Level{int m_levelID=123;};
 struct PlayLayer{Level* m_level=nullptr;inline static PlayLayer* active=nullptr;bool m_isPaused=false;int quits=0;static PlayLayer* get(){return active;}void onQuit(){++quits;}void resume(){m_isPaused=false;AppDelegate::get()->m_gamePaused=false;}};
@@ -79,12 +80,14 @@ struct RankedRuntime {
  void tick(){}auto const& view()const{return v;}bool isPlacement()const{return placement;}bool isSpectating()const{return spectator;}
  bool isGameplayLevel(int id)const{return id==123;}double matchPauseRemainingMs()const{return remaining;}
  bool gameplayConceded(int,int)const{return conceded;}SurrenderStatus surrenderStatus()const{return status;}
+ bool surrenderPending()const{return status==SurrenderStatus::Sending||status==SurrenderStatus::WaitingAttempt||status==SurrenderStatus::Retrying;}
  void surrenderCurrentMatch(bool value){whole=value;++sends;status=SurrenderStatus::Sending;}
  void endMatchGameplayPause(std::string const&){++ends;}
 };
 int returnRequests=0;bool requestConcededGameplayReturn(PlayLayer*){++returnRequests;return true;}
  namespace i18n {inline bool korean=false;bool isKorean(){return korean;}std::string text(char const* key,char const* fallback){return korean?std::string("ko:")+key:fallback;}}
 namespace ui {
+inline constexpr ccColor3B Red={255,91,111},Gold={255,207,74};
 using CCLabelBMFont=Label;
 ${body(visuals,'inline float fontScale(')}
 ${body(visuals,'inline void fitLabelWidth(')}
@@ -103,7 +106,7 @@ ${body(pause,'bool ownsRankedPlayerPause()')}
 void dismissNativeRankedExitConfirmation(PauseLayer*){};
 struct CorumRankedPauseLayer:PauseLayer {
  struct Button {bool enabled=true;void setEnabled(bool v){enabled=v;}} button;Label clock;
- struct Fields{std::optional<WeakRef<ui::RankedSurrenderPopup>> popup;std::string leaseId="lease",matchId="m";int round=1,deathmatch=0;Label* budget;Button* surrender;std::optional<WeakRef<PlayLayer>> owner;bool concessionQuit=false,nativeQuitInProgress=false,nativeQuitReachedPlay=false;std::optional<WeakRef<ui::RankedSurrenderPopup>> exitConfirmation{};}f{{},"lease","m",1,0,&clock,&button,{}};Fields* m_fields=&f;
+ struct Fields{std::optional<WeakRef<ui::RankedSurrenderPopup>> popup;std::string leaseId="lease",matchId="m";int round=1,deathmatch=0;Label* budget;Button* surrender;std::optional<WeakRef<PlayLayer>> owner;bool concessionQuit=false,nativeQuitInProgress=false,nativeQuitReachedPlay=false,timeoutSurrenderRequested=false;std::optional<WeakRef<ui::RankedSurrenderPopup>> exitConfirmation{};}f{{},"lease","m",1,0,&clock,&button,{}};Fields* m_fields=&f;
  int exitWarnings=0;void confirmRankedExit(){++exitWarnings;}
  void unschedule(int){}
  ${body(pause,'void onQuit(CCObject* sender)')}
@@ -144,7 +147,19 @@ int main(){using namespace corum::ranked;
  assert(p.resumes==1&&returnRequests==1&&p.f.leaseId=="second"); // keep native Pause for its deferred Quit
  r.conceded=false;p.f.leaseId="third";r.remaining=30000;r.v.match.roundNumber=2;p.f.round=2;
  p.watchBudget(0);assert(p.resumes==1&&returnRequests==1); // new round is not conceded
- r.remaining=0;p.watchBudget(0);assert(p.resumes==2&&returnRequests==1); // timeout resumes, never concedes
+ r.status=RankedRuntime::SurrenderStatus::Idle;
+ r.remaining=5001;p.watchBudget(0);assert(p.clock.color==ui::Gold&&r.sends==2);
+ r.remaining=5000;p.watchBudget(0);assert(p.clock.color==ui::Red&&r.sends==2);
+ r.remaining=1;p.watchBudget(0);assert(r.sends==2);
+ r.remaining=0;p.watchBudget(0);assert(p.resumes==1&&returnRequests==1&&r.sends==3&&r.whole);
+ assert(p.f.timeoutSurrenderRequested&&p.f.leaseId=="third"); // native Pause stays attached for ACK-bound Quit
+ p.watchBudget(0);r.status=RankedRuntime::SurrenderStatus::Retrying;p.watchBudget(0);assert(r.sends==3);
+ r.conceded=true;p.watchBudget(0);assert(returnRequests==2&&p.resumes==1); // authoritative proof requests the existing handoff
+ r.conceded=false;r.status=RankedRuntime::SurrenderStatus::Sending;
+ CorumRankedPauseLayer pending;pending.f.round=2;pending.watchBudget(0);assert(!pending.f.timeoutSurrenderRequested&&r.sends==3);
+ r.status=RankedRuntime::SurrenderStatus::Rejected;pending.watchBudget(0);assert(pending.f.timeoutSurrenderRequested&&r.sends==4&&r.whole);
+ // A stale scene/context must clean up normally, never concede a new match.
+ r.v.match.matchId="new-match";pending.watchBudget(0);assert(pending.resumes==1&&r.sends==4);
 }
 `;
     const dir=mkdtempSync(join(tmpdir(),'corum-pause-native-'));

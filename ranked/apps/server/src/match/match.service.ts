@@ -74,7 +74,7 @@ import {
   type MatchRuntimeStatePort,
 } from "./match-runtime-state.js";
 
-import { changeMatchPause, emptyMatchPause, matchPauseView, type MatchPauseState } from "./match-pause.policy.js";
+import { changeMatchPause, emptyMatchPause, matchPauseView, expiredMatchPauseSide, type MatchPauseState } from "./match-pause.policy.js";
 
 const ATTEMPT_START_INTENT_FUTURE_SKEW_MS = 2_000;
 // A valid start-intent must never expire while the player is still connected and
@@ -870,9 +870,8 @@ export class MatchService {
     return this.database.transaction(async transaction => {
       const authorization = await this.access.authorize(transaction, matchId, session, matchToken);
       let match = await this.lockMatch(transaction, matchId);
-      if (match.state === "ROUND_ENTERING" || match.state === "DEATHMATCH_ENTERING") {
-        match = await this.advanceLockedMatch(transaction, match, now);
-      }
+      // Settle an exhausted active lease before End can erase its timestamp.
+      match = await this.advanceLockedMatch(transaction, match, now);
       const pauses = match.pause_state ? parseJson<Partial<Record<PlayerSide, MatchPauseState>>>(match.pause_state) : {};
       const current = pauses[authorization.side] ?? emptyMatchPause();
       if (body.paused && !this.isRoundPlaying(match.state) && match.state !== "DEATHMATCH_PLAYING") {
@@ -881,6 +880,8 @@ export class MatchService {
       pauses[authorization.side] = changeMatchPause(current, body.leaseId, body.paused, now.getTime());
       await transaction.query("UPDATE ranked_matches SET pause_state = $2::jsonb WHERE id = $1",
         [matchId, JSON.stringify(pauses)]);
+      // A newly opened lease with an already-spent match budget also forfeits.
+      await this.advanceLockedMatch(transaction, await this.lockMatch(transaction, match.id), now);
       // Wall-clock round deadlines and final Attempt permissions never change.
       return { ...matchPauseView(pauses[authorization.side]!, now.getTime()), accepted: true, side: authorization.side, serverNow: now.toISOString() };
     });
@@ -896,40 +897,52 @@ export class MatchService {
         return this.buildPublicState(transaction, match, session.playerId, now);
       }
       match = await this.advanceLockedMatch(transaction, match, now);
-      const winner: PlayerSide = authorization.side === "A" ? "B" : "A";
-      if (match.state === "DEATHMATCH_PLAYING" && match.current_deathmatch_id) {
-        const deathmatch = await this.currentDeathmatch(transaction, match);
-        if (body.deathmatchSequence !== Number(deathmatch.sequence)) throw new ConflictException("SURRENDER_CONTEXT_CHANGED");
-        await transaction.query(`UPDATE ranked_deathmatch_attempts SET ended_at = $2, valid = FALSE,
-          invalid_reason = 'SURRENDER', cleared = FALSE, awarded_score = 0
-          WHERE deathmatch_id = $1 AND ended_at IS NULL`, [deathmatch.id, now.toISOString()]);
-        await transaction.query(`UPDATE ranked_deathmatches SET winner_id = $2, finished_at = $3
-          WHERE id = $1 AND finished_at IS NULL`, [deathmatch.id,
-          winner === "A" ? match.player_a_id : match.player_b_id, now.toISOString()]);
-        const series = applyDeathmatchWinner(parseJson<MatchSeriesState>(match.series_state), winner);
-        await transaction.query("UPDATE ranked_matches SET series_state = $2::jsonb WHERE id = $1", [match.id, JSON.stringify(series)]);
-        this.runtimeState.clearRound(match.id, deathmatchRuntimeSlot(Number(deathmatch.sequence)));
-        await this.outbox.enqueueMatchEvent(transaction, match, "DEATHMATCH_RESULT", `match:${match.id}:deathmatch:${deathmatch.id}:result`,
-          { sequence: Number(deathmatch.sequence), winnerSide: winner, reason: "SURRENDER", repeatRequired: false }, now);
-        await this.finalizeMatch(transaction, match, winner, now);
-      } else {
-        if (!this.isRoundPlaying(match.state) || body.deathmatchSequence !== 0 || body.roundNumber !== Number(match.current_round_number)) {
-          throw new ConflictException("SURRENDER_CONTEXT_CHANGED");
-        }
-        const round = await this.lockCurrentRound(transaction, match);
-        const domain = surrenderRound(this.roundState(round), authorization.side, now.getTime());
-        await transaction.query(`UPDATE ranked_attempts SET ended_at = $2, valid = FALSE,
-          invalid_reason = 'SURRENDER', cleared = FALSE, awarded_score = 0
-          WHERE round_id = $1 AND ended_at IS NULL`, [round.id, now.toISOString()]);
-        await transaction.query(`UPDATE ranked_attempt_start_leases SET invalidated_at = $2
-          WHERE round_id = $1 AND consumed_at IS NULL AND invalidated_at IS NULL`, [round.id, now.toISOString()]);
-        await this.persistRoundState(transaction, match, round, domain, now, body.scope === "MATCH");
+      // A pause timeout may have settled the match while this authenticated
+      // client was sending its automatic concession. Return that same proof.
+      if (match.state === "MATCH_RESULT" && match.surrender_events &&
+          parseJson<Array<{ scope: string }>>(match.surrender_events).some(event => event.scope === "MATCH")) {
+        return this.buildPublicState(transaction, match, session.playerId, now);
       }
+      await this.applyGameplaySurrender(transaction, match, authorization.side, body, now);
       events.push({ side: authorization.side, id: body.clientEventId, scope: body.scope, roundNumber: body.roundNumber, deathmatchSequence: body.deathmatchSequence });
       await transaction.query("UPDATE ranked_matches SET surrender_events = $2::jsonb WHERE id = $1", [match.id, JSON.stringify(events)]);
       const completed = await this.lockMatch(transaction, match.id);
       return this.buildPublicState(transaction, completed, session.playerId, now);
     });
+  }
+
+  private async applyGameplaySurrender(
+    transaction: SqlExecutor, match: LockedMatchRow, side: PlayerSide, body: SurrenderDto, now: Date,
+  ): Promise<void> {
+    const winner: PlayerSide = side === "A" ? "B" : "A";
+    if (match.state === "DEATHMATCH_PLAYING" && match.current_deathmatch_id) {
+      const deathmatch = await this.currentDeathmatch(transaction, match);
+      if (body.deathmatchSequence !== Number(deathmatch.sequence)) throw new ConflictException("SURRENDER_CONTEXT_CHANGED");
+      await transaction.query(`UPDATE ranked_deathmatch_attempts SET ended_at = $2, valid = FALSE,
+        invalid_reason = 'SURRENDER', cleared = FALSE, awarded_score = 0
+        WHERE deathmatch_id = $1 AND ended_at IS NULL`, [deathmatch.id, now.toISOString()]);
+      await transaction.query(`UPDATE ranked_deathmatches SET winner_id = $2, finished_at = $3
+        WHERE id = $1 AND finished_at IS NULL`, [deathmatch.id,
+        winner === "A" ? match.player_a_id : match.player_b_id, now.toISOString()]);
+      const series = applyDeathmatchWinner(parseJson<MatchSeriesState>(match.series_state), winner);
+      await transaction.query("UPDATE ranked_matches SET series_state = $2::jsonb WHERE id = $1", [match.id, JSON.stringify(series)]);
+      this.runtimeState.clearRound(match.id, deathmatchRuntimeSlot(Number(deathmatch.sequence)));
+      await this.outbox.enqueueMatchEvent(transaction, match, "DEATHMATCH_RESULT", `match:${match.id}:deathmatch:${deathmatch.id}:result`,
+        { sequence: Number(deathmatch.sequence), winnerSide: winner, reason: "SURRENDER", repeatRequired: false }, now);
+      await this.finalizeMatch(transaction, match, winner, now);
+    } else {
+      if (!this.isRoundPlaying(match.state) || body.deathmatchSequence !== 0 || body.roundNumber !== Number(match.current_round_number)) {
+        throw new ConflictException("SURRENDER_CONTEXT_CHANGED");
+      }
+      const round = await this.lockCurrentRound(transaction, match);
+      const domain = surrenderRound(this.roundState(round), side, now.getTime());
+      await transaction.query(`UPDATE ranked_attempts SET ended_at = $2, valid = FALSE,
+        invalid_reason = 'SURRENDER', cleared = FALSE, awarded_score = 0
+        WHERE round_id = $1 AND ended_at IS NULL`, [round.id, now.toISOString()]);
+      await transaction.query(`UPDATE ranked_attempt_start_leases SET invalidated_at = $2
+        WHERE round_id = $1 AND consumed_at IS NULL AND invalidated_at IS NULL`, [round.id, now.toISOString()]);
+      await this.persistRoundState(transaction, match, round, domain, now, body.scope === "MATCH");
+    }
   }
 
   public async startAttemptIntent(
@@ -1757,6 +1770,23 @@ export class MatchService {
     const config = this.matchConfig(match);
     if (!config.operational.timeouts || !config.operational.failurePolicy) {
       throw new Error("Match snapshot is missing timeout/failure policy");
+    }
+
+    if (this.isRoundPlaying(match.state) || match.state === "DEATHMATCH_PLAYING") {
+      const pauses = match.pause_state ? parseJson<Partial<Record<PlayerSide, MatchPauseState>>>(match.pause_state) : {};
+      const expired = expiredMatchPauseSide(pauses, now.getTime());
+      if (expired) {
+        const deathmatchSequence = match.state === "DEATHMATCH_PLAYING"
+          ? Number((await this.currentDeathmatch(transaction, match)).sequence) : 0;
+        const body: SurrenderDto = { scope: "MATCH", clientEventId: `pause-timeout:${pauses[expired]!.leaseId}`,
+          roundNumber: Number(match.current_round_number), deathmatchSequence };
+        await this.applyGameplaySurrender(transaction, match, expired, body, now);
+        const events = match.surrender_events ? parseJson<unknown[]>(match.surrender_events) : [];
+        events.push({ side: expired, id: body.clientEventId, scope: "MATCH", roundNumber: body.roundNumber,
+          deathmatchSequence, reason: "PAUSE_BUDGET_EXHAUSTED" });
+        await transaction.query("UPDATE ranked_matches SET surrender_events = $2::jsonb WHERE id = $1", [match.id, JSON.stringify(events)]);
+        return this.lockMatch(transaction, match.id);
+      }
     }
 
     if (

@@ -29,6 +29,24 @@ inline constexpr ccColor3B Red = {255, 91, 111};
 inline constexpr ccColor3B Gold = {255, 207, 74};
 inline constexpr ccColor3B Orange = {255, 145, 68};
 
+// Disabled custom buttons are composed of several independent color nodes;
+// tinting only their menu item does not desaturate the border or the caption.
+inline void grayButtonVisual(CCNode* node) {
+    if (!node) return;
+    auto gray = [](ccColor3B color) {
+        auto const value = static_cast<GLubyte>((299 * color.r + 587 * color.g + 114 * color.b) / 1000);
+        return ccc3(value, value, value);
+    };
+    if (auto* caption = typeinfo_cast<CCLabelBMFont*>(node)) {
+        caption->setColor({176, 176, 176});
+    } else if (auto* layer = typeinfo_cast<CCLayerColor*>(node)) {
+        layer->setColor(gray(layer->getColor()));
+    } else if (auto* sprite = typeinfo_cast<CCSprite*>(node)) {
+        sprite->setColor(gray(sprite->getColor()));
+    }
+    for (auto* child : node->getChildrenExt()) grayButtonVisual(child);
+}
+
 enum class FontWeight {
     Regular,
     Medium,

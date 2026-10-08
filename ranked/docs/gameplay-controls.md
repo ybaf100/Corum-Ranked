@@ -29,7 +29,7 @@ turn ordinary timer expiry into a concession or terminate the final Attempt.
 
 Each player has **30,000ms for the entire match**, cumulative across all rounds
 and Death Match. This is a per-player budget, not 30 seconds per round or a shared
-budget. Pause shows the remaining time and automatically resumes at zero.
+budget. Pause shows the remaining time; beta.46 forfeits the entire match at zero.
 Wall-clock round deadlines continue; pause does not extend Ranked time windows.
 Placement remains unchanged.
 
@@ -46,6 +46,16 @@ restarting the service, or returning from a scene does not refill it. The client
 monotonic timer starts immediately and accepts server observations only when they
 reduce the remaining budget. A paused publisher keeps its same spectator
 Attempt/generation with a frozen gameplay timeline, rather than a 30-second gap.
+
+From beta.46, an open Pause with 0 seconds left forfeits the **entire match**.
+The server checks the active lease before processing Resume or normal match
+advancement, so a late End cannot erase an exhausted Pause. Timely Resume closes
+the lease and prevents expiry while the player is playing. Expiry is persisted
+as `surrender.scope=MATCH` with `reason=PAUSE_BUDGET_EXHAUSTED` and uses the same
+score/rating settlement and authenticated scene handoff as manual surrender.
+Death Match uses the same match-wide budget. The Pause timer turns red at 5
+seconds or less; its warning is a child of that exact native Pause, removed on
+Resume and recreated on reopening. No additional native detour is installed.
 
 ## Server-global live spectator setting
 

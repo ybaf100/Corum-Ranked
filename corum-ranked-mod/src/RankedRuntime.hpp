@@ -154,6 +154,7 @@ struct ForumRankView {
 struct ForumRecordsView {
     bool loaded = false, loading = false;
     std::string error;
+    std::string refreshAvailableAt;
     std::vector<ForumRankView> records;
 };
 struct PlayerInfoView {
@@ -452,6 +453,7 @@ public:
     void fetchAchievements();
     void fetchPlayerInfo(std::string const& side);
     void fetchForumRecords(bool refresh = false);
+    [[nodiscard]] std::int64_t forumRefreshRemainingMs() const;
     void claimAchievement(std::string const& achievementId);
     void equipAchievementTitle(std::string const& achievementId, std::optional<int> level);
     void clearAchievementTitle();

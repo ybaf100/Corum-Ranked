@@ -141,7 +141,7 @@ int main(){using namespace corum::ranked;auto& r=RankedRuntime::get();PlayLayer 
 
 test('both concession observers queue one attached-scene handoff and leave native Pause retirement to native Quit',()=>{
     const watch=body(pause,'void watchBudget(float)');
-    const concession=watch.slice(watch.indexOf('if (ranked.gameplayConceded'),watch.indexOf('if ((!m_fields->leaseId'));
+    const concession=body(watch,'if (ranked.gameplayConceded');
     assert.match(concession,/requestConcededGameplayReturn\(owner.data\(\)\)/);
     assert.doesNotMatch(concession,/resumeRankedPause/);
     const handoff=body(play,'bool finishConcededGameplayHandoff()');

@@ -38,6 +38,11 @@ test('Trophy badge and Claim state remain independent and bounded', () => {
     assert.match(achievements, /achievementClaimState/);
     assert.match(achievements, /claimableRewards/);
     assert.match(presentation, /if \(count > 99\) return "99\+"/);
+    assert.match(achievements, /titleButton->setEnabled\(titleUnlocked && !view\.achievements\.loading\)/);
+    assert.match(achievements, /if \(!titleUnlocked\) corum::ranked::ui::grayButtonVisual\(titleButton\)/);
+    const selector = body(popup, 'void renderAchievementTitleSelector(', 'void renderAchievements(');
+    assert.match(selector, /achievementTitleLevelSelectable\(\s*level,\s*card\.currentLevel\s*\)/);
+    assert.match(selector, /if \(!available\) corum::ranked::ui::grayButtonVisual\(button\)/);
 });
 
 // These values intentionally guard the effective native-device readability floor:
