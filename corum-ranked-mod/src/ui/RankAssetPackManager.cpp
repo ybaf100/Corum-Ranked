@@ -299,9 +299,10 @@ void RankAssetPackManager::downloadConfiguredPack() {
     m_downloadRequest.spawn(request.get(m_metadata.downloadUrl()), [this, generation, zip](web::WebResponse response) {
         if (generation != m_downloadGeneration) return;
         if (!response.ok()) { fail(fmt::format("asset release HTTP {}", response.code())); return; }
-        if (lower(response.header("content-type").value_or("")).find("text/html") != std::string::npos) {
-            fail("release returned HTML instead of the asset ZIP"); return;
-        }
+        // Geode 5.10.1 accumulates headers across redirects; header() returns
+        // the first value. GitHub's 302 is text/html even when the final body
+        // is the correct ZIP. Verify the saved payload's size/signature/SHA
+        // below rather than accepting or rejecting it by those headers.
         auto saved = response.into(zip);
         if (saved.isErr()) { fail("failed to save asset ZIP"); return; }
         finishDownloadedPack(zip, generation);

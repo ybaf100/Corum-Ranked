@@ -68,9 +68,32 @@ Read [ASSET-PACK-RELEASE.md](ASSET-PACK-RELEASE.md) for upload, Apps Script/serv
 configuration and immutable release rules. No external release or live config
 has been published as part of this source change.
 
+## GitHub redirect download correction (2026-10-08)
+
+Both supplied device logs reject the pack with
+`release returned HTML instead of the asset ZIP`. The published `visuals-v1`
+release, the live server configuration and an independently downloaded ZIP all
+agree: **24,649,307 bytes**, SHA-256
+`9c91279a1a11406217a29ee210f6fbb10bdce461bb83f7e4ef7a0f6bfa3762a0`.
+The actual ZIP passes CRC, inventory, manifest and every file's size/hash checks.
+
+GitHub returns **302 `text/html` → 200 `application/octet-stream`**. Geode 5.10.1
+keeps headers from every response; `WebResponse::header()` returns the first
+value. The previous Corum callback mistook that redirect header for the ZIP's
+content type and rejected the successful download before inspecting its body.
+It now passes the saved body through the existing size, ZIP signature, SHA-256,
+archive and manifest verifier. Genuine HTML and corrupt downloads remain rejected.
+
+A new executable regression runs the actual download callback and background
+size/signature/SHA verifier. It fails on the previous source and passes after this
+correction, including absent content type, actual HTML, truncated/corrupt payload,
+HTTP failure, save failure and stale HTTP completion. HTTP/archive/manifest and
+main-thread boundaries are doubles; this is not iPad installation verification.
+The existing uploaded pack and server metadata do not require replacement.
+
 ## Validation
 
-- Source/native boundary suites: **111 passed** (includes previous Pause/volume,
+- Source/native boundary suites: **112 passed** (includes previous Pause/volume,
   spectator safety, native preparation and transport suites).
 - Strict C++ policy executables: **9 suites passed**.
 - Pack builder/verifier: **5 Python tests passed** (synthetic PNG boundary data;

@@ -12,7 +12,7 @@ const read=p=>readFileSync(join(root,p),'utf8');
 function body(source,marker){const start=source.indexOf(marker);assert(start>=0,marker);
 let end=source.indexOf('{',start)+1,depth=1;while(depth){depth+=(source[end]==='{')-(source[end]==='}');++end;}return source.slice(start,end);}
 function run(source){const dir=mkdtempSync(join(tmpdir(),'corum-asset-native-'));
-try{writeFileSync(join(dir,'test.cpp'),source);execFileSync('g++',['-std=c++23','-Wall','-Wextra','-Wpedantic','-Werror',join(dir,'test.cpp'),'-o',join(dir,'test')],{stdio:'pipe'});
+try{writeFileSync(join(dir,'test.cpp'),source);execFileSync('g++',['-std=c++23','-pthread','-Wall','-Wextra','-Wpedantic','-Werror',join(dir,'test.cpp'),'-o',join(dir,'test')],{stdio:'pipe'});
 execFileSync(join(dir,'test'),[join(dir,'cache')],{stdio:'pipe'});}finally{rmSync(dir,{recursive:true,force:true});}}
 
 test('exact-tag metadata rejects traversal, wrong hashes and oversized ZIPs; inventory covers all 61 PNGs',()=>{
@@ -30,6 +30,136 @@ m.sha256=std::string(64,'a');m.sizeBytes=67108865;assert(!m.configured());m.size
 assert(!rankAssetEntryAllowed("../rank-gold-body.png"));assert(!rankAssetEntryAllowed("resources/rank-gold-body.png"));
 assert(!rankAssetEntryAllowed("mod.json"));assert(rankAssetEntryAllowed("corum-fire-perfect.png"));
 assert(rankAssetEntryAllowed("corum-fire-promotion.png"));assert(kRankVisualFiles.size()==61);}
+`);
+});
+
+test('GitHub redirect headers cannot reject a verified ZIP; HTTP, payload and stale responses remain gated',()=>{
+    const source=read('src/ui/RankAssetPackManager.cpp');
+    const header=read('src/ui/RankAssetPackManager.hpp').replace(/^#include.*$|^#pragma once$/gm,'').replace('private:','public:');
+    const methods=[
+        'std::filesystem::path RankAssetPackManager::rootDir()',
+        'bool RankAssetPackManager::hasZipSignature(', 'std::string RankAssetPackManager::sha256File(',
+        'void RankAssetPackManager::fail(', 'void RankAssetPackManager::downloadConfiguredPack()',
+        'void RankAssetPackManager::finishDownloadedPack(',
+    ].map(n=>body(source,n)).join('\n');
+    // Execute the real request callback and size/signature/SHA verifier. HTTP,
+    // archive decoding, manifest decoding and the main-thread queue are doubles.
+    // Geode 5.10.1 appends headers across redirects and header() returns front().
+    run(`
+#include "${join(root,'src/domain/RankAssetPolicy.hpp')}"
+#include <algorithm>
+#include <array>
+#include <cassert>
+#include <cctype>
+#include <chrono>
+#include <condition_variable>
+#include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <functional>
+#include <iomanip>
+#include <map>
+#include <mutex>
+#include <optional>
+#include <set>
+#include <sstream>
+#include <thread>
+#include <vector>
+template<class T>struct Result {std::optional<T> value;bool isErr()const{return !value;}T& unwrap(){return *value;}};
+std::filesystem::path cacheRoot;
+struct Mod {static Mod* get(){static Mod m;return &m;}std::filesystem::path getSaveDir(){return cacheRoot;}};
+namespace fmt {template<class T>std::string format(std::string text,T const& value){std::ostringstream out;out<<value;
+auto pos=text.find("{}");if(pos!=std::string::npos)text.replace(pos,2,out.str());return text;}}
+namespace geode::utils::web {
+struct WebResponse {
+    int status=200;std::string bytes;std::vector<std::string> contentTypes;bool failSave=false;
+    bool ok()const{return status>=200&&status<300;}int code()const{return status;}
+    std::optional<std::string> header(std::string_view name)const{
+        if(name=="content-type"&&!contentTypes.empty()){return contentTypes.front();}return {};}
+    Result<int> into(std::filesystem::path const& path)const{if(failSave)return {};
+        std::ofstream(path,std::ios::binary).write(bytes.data(),static_cast<std::streamsize>(bytes.size()));return {1};}
+};
+struct WebProgress {std::size_t bytes=0;std::size_t downloaded()const{return bytes;}};
+struct Request {std::string url;bool redirects;std::chrono::seconds timeout;std::function<void(WebProgress const&)> progress;};
+struct WebRequest {Request request;
+    void timeout(std::chrono::seconds duration){request.timeout=duration;}
+    void followRedirects(bool value){request.redirects=value;}
+    void onProgress(std::function<void(WebProgress const&)> cb){request.progress=std::move(cb);}
+    Request get(std::string url){request.url=std::move(url);return request;}
+};
+struct Pending {Request request;std::function<void(WebResponse)> callback;};std::vector<Pending> pending;
+}
+namespace geode::async {template<class T>struct TaskHolder {
+void spawn(geode::utils::web::Request request,std::function<void(T)> cb){geode::utils::web::pending.push_back({request,cb});}};}
+namespace geode {
+std::mutex mutex;std::condition_variable queued;std::vector<std::function<void()>> callbacks;
+void queueInMainThread(std::function<void()> cb){{std::lock_guard lock(mutex);callbacks.push_back(std::move(cb));}queued.notify_one();}
+void drainWorker(){std::unique_lock lock(mutex);
+assert(queued.wait_for(lock,std::chrono::seconds(5),[]{return !callbacks.empty();}));
+auto cb=std::move(callbacks.front());callbacks.erase(callbacks.begin());lock.unlock();cb();}
+namespace utils::file {
+int opens=0,extractions=0;
+struct Archive {
+std::vector<std::filesystem::path> getEntries()const{std::vector<std::filesystem::path> entries;
+for(auto name:corum::ranked::kRankVisualFiles)entries.emplace_back(name);
+entries.emplace_back("GLOBED-LICENSE.txt");entries.emplace_back("asset-manifest.json");return entries;}
+Result<int> extractTo(std::filesystem::path const&,std::filesystem::path const& path){++extractions;std::ofstream(path)<<"fixture";return {1};}
+};
+struct Unzip {static Result<Archive> create(std::filesystem::path const&){++opens;return {Archive{}};}};
+}
+namespace prelude {using ::Mod;namespace web=geode::utils::web;
+namespace log {template<class...T>void warn(T...){}template<class...T>void info(T...){}}}
+}
+${header}
+namespace corum::ranked::ui {
+using namespace geode::prelude;
+constexpr auto kDownloadTimeout=std::chrono::seconds(120);
+${body(source,'std::string lower(')}
+${body(source,'class Sha256 final')};
+RankAssetPackManager::RankAssetPackManager(){}
+bool RankAssetPackManager::verifyDirectory(std::filesystem::path const&,std::string const&){return true;}
+void RankAssetPackManager::activateDownloadedPack(std::filesystem::path const& temp,
+    std::filesystem::path const& zip,RankAssetPackMetadata const&,std::uint64_t generation,std::string error){
+std::filesystem::remove_all(temp);std::filesystem::remove(zip);if(generation!=m_downloadGeneration)return;
+if(!error.empty())fail(std::move(error));else{m_view.state=RankAssetPackState::Ready;m_view.verifying=false;}}
+${methods}
+}
+using namespace corum::ranked;using namespace corum::ranked::ui;
+namespace web=geode::utils::web;
+void complete(RankAssetPackManager& manager,web::WebResponse response){
+assert(!web::pending.empty());auto pending=std::move(web::pending.back());web::pending.pop_back();
+pending.callback(std::move(response));if(manager.m_view.verifying)geode::drainWorker();}
+int main(int argc,char** argv){assert(argc==2);cacheRoot=argv[1];std::filesystem::create_directories(cacheRoot);
+std::string zipBytes="PK";zipBytes.push_back(3);zipBytes.push_back(4);zipBytes+="verified ZIP boundary payload";
+auto fixture=cacheRoot/"fixture.zip";std::ofstream(fixture,std::ios::binary)<<zipBytes;
+RankAssetMetadata metadata{true,"visuals-v1",RankAssetPackManager::sha256File(fixture),zipBytes.size()};
+web::WebResponse redirected{200,zipBytes,{"text/html; charset=utf-8","application/octet-stream"},false};
+assert(redirected.header("content-type")->find("text/html")!=std::string::npos);
+RankAssetPackManager manager;manager.m_metadata=metadata;manager.downloadConfiguredPack();manager.downloadConfiguredPack();
+assert(web::pending.size()==1);assert(web::pending.back().request.redirects);
+assert(web::pending.back().request.timeout==std::chrono::seconds(120));
+assert(web::pending.back().request.url==metadata.downloadUrl());
+complete(manager,redirected);
+assert(manager.m_view.state==RankAssetPackState::Ready);assert(geode::utils::file::opens==1&&geode::utils::file::extractions==63);
+// Missing or misleading Content-Type cannot replace integrity validation.
+manager.m_view.state=RankAssetPackState::Disabled;manager.downloadConfiguredPack();
+auto noHeader=redirected;noHeader.contentTypes.clear();complete(manager,noHeader);assert(manager.m_view.state==RankAssetPackState::Ready);
+auto bad=redirected;bad.bytes=std::string(zipBytes.size(),' ');bad.bytes.replace(0,6,"<html>");
+manager.m_view.state=RankAssetPackState::Disabled;manager.downloadConfiguredPack();complete(manager,bad);
+assert(manager.m_view.state==RankAssetPackState::Failed&&manager.m_view.error=="asset download is not a ZIP");
+bad=redirected;bad.bytes.pop_back();manager.m_view.state=RankAssetPackState::Disabled;manager.downloadConfiguredPack();complete(manager,bad);
+assert(manager.m_view.error=="asset ZIP size mismatch");
+bad=redirected;bad.bytes.back()='X';manager.m_view.state=RankAssetPackState::Disabled;manager.downloadConfiguredPack();complete(manager,bad);
+assert(manager.m_view.error=="asset ZIP SHA-256 mismatch");assert(geode::utils::file::opens==2);
+bad=redirected;bad.status=404;manager.m_view.state=RankAssetPackState::Disabled;manager.downloadConfiguredPack();complete(manager,bad);
+assert(manager.m_view.state==RankAssetPackState::Failed&&manager.m_view.error=="asset release HTTP 404");
+bad=redirected;bad.failSave=true;manager.m_view.state=RankAssetPackState::Disabled;manager.downloadConfiguredPack();complete(manager,bad);
+assert(manager.m_view.error=="failed to save asset ZIP");
+manager.m_view.state=RankAssetPackState::Disabled;manager.downloadConfiguredPack();auto staleGeneration=manager.m_downloadGeneration;
+++manager.m_downloadGeneration;manager.m_view.state=RankAssetPackState::Disabled;complete(manager,redirected);
+assert(manager.m_view.state==RankAssetPackState::Disabled&&geode::utils::file::opens==2);
+assert(!std::filesystem::exists(manager.rootDir()/fmt::format("download-{}.zip.tmp",staleGeneration)));
+}
 `);
 });
 
