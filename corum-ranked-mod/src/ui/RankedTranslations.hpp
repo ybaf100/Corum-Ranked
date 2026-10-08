@@ -24,6 +24,9 @@ struct Translation {
 };
 
 inline constexpr std::array kKoreanTranslations {
+    Translation{"settings", "설정"},
+    Translation{"ranked-volume", "랭크전 소리 크기"},
+    Translation{"ranked-volume-scope", "랭크전 음악과 효과음"},
     Translation{"competitive-ladder", "경쟁 1대1 래더"},
     Translation{"history", "기록"},
     Translation{"achievements", "도전과제"},

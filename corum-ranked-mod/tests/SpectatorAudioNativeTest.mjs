@@ -35,6 +35,7 @@ struct FMODAudioEngine {static inline bool voice=true;static inline int stops=0;
 struct GameManager {static inline int menus=0;static GameManager* sharedState(){static GameManager g;return &g;}
  void playMenuMusic(){++menus;}};
 namespace corum::ranked {
+struct RankedVolumeControl {static RankedVolumeControl& get(){static RankedVolumeControl c;return c;}unsigned long beginSession(){return 1;}};
 enum class RankedAudioMode {Silent,Lobby,LobbyPromotion,LobbyDemotionWarning,ResultWin,ResultLose,Round3DeathmatchWait,Round12};
 struct TransitionTrace {static TransitionTrace& get(){static TransitionTrace t;return t;}void mark(char const*){}};
 struct RankedAudioManager {
@@ -97,6 +98,7 @@ struct CorumRankedLayer: CCLayerColor {
  bool m_rankedChildScenePushed=true,m_enteringSongGate=false,m_enteringLevel=false;
  void* m_rankTransitionLayer=nullptr;
  std::string m_stageResultAudioPlayedKey;Menu* m_menu=nullptr;
+ Menu* m_settingsMenu=nullptr;unsigned long m_volumeSession=0;
  void setKeypadEnabled(bool){}void schedule(int,float){}
  bool showResourceGate()const{return false;}void syncResources(){}void syncPhase(){}void updateAutomation(){}
  std::string presentationKey()const{return "lobby";}bool prepareUiTransition(std::string const&){return false;}

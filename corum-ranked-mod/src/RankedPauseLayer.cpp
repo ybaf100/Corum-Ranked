@@ -4,6 +4,7 @@
 #include <Geode/Geode.hpp>
 #include <Geode/modify/PauseLayer.hpp>
 #include <Geode/binding/PlayLayer.hpp>
+#include <Geode/binding/AppDelegate.hpp>
 #include <algorithm>
 #include <cmath>
 using namespace geode::prelude;
@@ -30,6 +31,7 @@ public:
         CCMenuItemSpriteExtra* surrender = nullptr;
         std::optional<WeakRef<ui::RankedSurrenderPopup>> popup;
         std::optional<WeakRef<PlayLayer>> owner;
+        bool concessionQuit = false, nativeQuitInProgress = false, nativeQuitReachedPlay = false;
         ~Fields() {
             if (popup) if (auto dialog = popup->lock()) dialog->dismiss();
             popup.reset();
@@ -83,9 +85,12 @@ public:
         m_fields->budget->setString(text.c_str());
         m_fields->surrender->setEnabled(!m_fields->leaseId.empty());
         if (ranked.gameplayConceded(m_fields->round, m_fields->deathmatch)) {
-            auto play = geode::WeakRef<PlayLayer>(PlayLayer::get());
-            resumeRankedPause(nullptr);
-            if (auto scene = play.lock()) corum::ranked::requestConcededGameplayReturn(scene.data());
+            // Keep the native Pause attached until its own Quit boundary.
+            // Resume/removal followed by a separate PlayLayer quit is not the
+            // native Pause quit lifecycle. Both watchers request the same
+            // deferred handoff; neither tears down native UI in a callback.
+            auto owner = m_fields->owner ? m_fields->owner->lock() : Ref<PlayLayer>();
+            if (owner) corum::ranked::requestConcededGameplayReturn(owner.data());
             return;
         }
         if ((!m_fields->leaseId.empty() && remaining <= 0) || ranked.view().match.matchId != m_fields->matchId ||
@@ -123,12 +128,28 @@ public:
     }
     void onBlockedQuit(CCObject*) {}
     void onQuit(CCObject* sender) {
-        // Server-driven return uses PlayLayer::onQuit, not this manual route.
-        if (ownsRankedPlayerPause()) return;
+        auto owner = m_fields->owner ? m_fields->owner->lock() : Ref<PlayLayer>();
+        auto& ranked = RankedRuntime::get();
+        auto const authenticatedConcession = m_fields->concessionQuit && owner &&
+            owner.data() == PlayLayer::get() && ranked.view().match.matchId == m_fields->matchId &&
+            ranked.gameplayConceded(m_fields->round, m_fields->deathmatch);
+        if (ownsRankedPlayerPause() && !authenticatedConcession) return;
         // The nested PlayLayer quit may resume/remove this Pause before the
         // vanilla Pause quit caller finishes returning.
         [[maybe_unused]] Ref<PauseLayer> keepAlive(this);
+        if (authenticatedConcession) {
+            retireRankedPause();
+            m_fields->nativeQuitInProgress = true;
+            m_fields->nativeQuitReachedPlay = false;
+        }
         PauseLayer::onQuit(sender);
+        if (authenticatedConcession) {
+            m_fields->nativeQuitInProgress = false;
+            m_fields->concessionQuit = false;
+            geode::log::info("[RankedPause] native concession quit reachedPlay={} paused={} appPaused={}",
+                m_fields->nativeQuitReachedPlay, owner->m_isPaused, AppDelegate::get()->m_gamePaused);
+            if (m_fields->nativeQuitReachedPlay) releaseRankedPauseOwnership();
+        }
     }
     void onSurrender(CCObject*) {
         if (m_fields->leaseId.empty()) return;
@@ -144,6 +165,22 @@ public:
 };
 
 namespace corum::ranked {
+bool quitRankedPauseForConcession(PlayLayer* layer) {
+    if (!layer || layer != PlayLayer::get()) return false;
+    auto pause = activeRankedPause ? activeRankedPause->lock() : Ref<PauseLayer>();
+    if (!pause || !pause->getParent()) return false;
+    auto* rankedPause = static_cast<CorumRankedPauseLayer*>(pause.data());
+    auto owner = rankedPause->m_fields->owner ? rankedPause->m_fields->owner->lock() : Ref<PlayLayer>();
+    auto const& ranked = RankedRuntime::get();
+    if (!owner || owner.data() != layer || ranked.view().match.matchId != rankedPause->m_fields->matchId ||
+        !ranked.gameplayConceded(rankedPause->m_fields->round, rankedPause->m_fields->deathmatch)) return false;
+    rankedPause->m_fields->concessionQuit = true;
+    // Public binding entry, with the installed native Pause quit hooks. The
+    // Corum hook's qualified call below it advances to next-original once.
+    pause->onQuit(nullptr);
+    return true;
+}
+
 bool resumeRankedPauseBeforeQuit(PlayLayer* layer) {
     if (!layer || layer != PlayLayer::get()) return true;
     auto pause = activeRankedPause ? activeRankedPause->lock() : Ref<PauseLayer>();
@@ -152,6 +189,14 @@ bool resumeRankedPauseBeforeQuit(PlayLayer* layer) {
         auto owner = rankedPause->m_fields->owner
             ? rankedPause->m_fields->owner->lock() : Ref<PlayLayer>();
         if (owner && owner.data() == layer) {
+            if (rankedPause->m_fields->nativeQuitInProgress) {
+                // Native Pause Quit already owns Resume -> PlayLayer Quit.
+                // Re-entering onResume here would dismantle its caller while
+                // that native Quit stack is still active.
+                if (layer->m_isPaused) return false;
+                rankedPause->m_fields->nativeQuitReachedPlay = true;
+                return true;
+            }
             if (!pause->getParent()) {
                 if (layer->m_isPaused) return false;
                 rankedPause->retireRankedPause();

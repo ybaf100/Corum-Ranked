@@ -2,6 +2,8 @@
 
 This is a candidate on a work branch, not a device-verified iOS fix. Production main, client/server beta41 gates and protocol v2 remain unchanged.
 
+**Latest status:** the user reports that the `ed73bd8` candidate still fails after surrender. The next investigation and implemented Settings/volume scope are recorded in [PAUSE-NATIVE-QUIT-SETTINGS-CANDIDATE.md](PAUSE-NATIVE-QUIT-SETTINGS-CANDIDATE.md). The contract and planned UI below describe the previous candidate, not the current implementation or device acceptance.
+
 ## Evidence
 
 The user log `Geode 2026-10-07 23.48.57.log` loads beta41. Pause opens in match `b47d4992-43f5-439d-bf51-89a2a88c502d` R1 at 23:51:03. MATCH surrender is acknowledged at 23:51:16. In a **different match**, `a893908d-e117-4dcd-b1d1-c1c7fb86fe72` R1, five requests at 23:51:45–47 report `buttonPaused=false`, `nativeFallback=true`, `paused=false`, `canPause=true`, correct scene/UI/button ownership, and native pause-counter increments. There is no subsequent Ranked Pause opened message.
@@ -38,3 +40,4 @@ One final candidate artifact may be checked on the user's existing iPad/mod stac
 Read-only production config on 2026-10-07 returned fadeInSeconds=1.8 and fadeOutSeconds=1.8. RankedAudioManager applies overlapping DSP ramps with those durations; a short 0.2–0.3s transition is the proposed change. No live config has been modified.
 
 A bottom-right bilingual Settings/설정 button and persistent Ranked volume control remain planned. Native gameplay audio ownership transfers back to GD, so an own-channel slider alone would not cover the entire Ranked gameplay sound scope. Those changes are intentionally not included in this narrow Pause candidate.
+

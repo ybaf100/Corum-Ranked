@@ -96,7 +96,10 @@ test('actual retained Ranked callbacks restore menu registration before onEnter,
 using namespace cocos2d;
 namespace geode::log { template<class... T> void info(T...) {} }
 using namespace geode;
-namespace corum::ranked {struct Runtime {struct View{struct{std::string state="ROUND_PLAYING";}match;}data;auto const& view(){return data;}};}
+namespace corum::ranked {
+struct RankedVolumeControl {int begins=0;static RankedVolumeControl& get(){static RankedVolumeControl c;return c;}unsigned long beginSession(){++begins;return 1;}};
+struct Runtime {struct View{struct{std::string state="ROUND_PLAYING";}match;}data;auto const& view(){return data;}};
+}
 struct RankedRuntime { static corum::ranked::Runtime& get(){static corum::ranked::Runtime r;return r;} };
 #define schedule_selector(x) 0
 struct CCLayerColor {
@@ -109,6 +112,7 @@ struct Root { CCMenu* menu; void removeAllChildrenWithCleanup(bool){assert(menu-
 struct Menu : CCMenu {void removeAllChildrenWithCleanup(bool){assert(m_eState==kCCMenuStateWaiting && !m_pSelectedItem);item=nullptr;}};
 struct CorumRankedLayer : CCLayerColor {
     Menu* m_menu=nullptr; Root* m_root=nullptr; void* m_rankTransitionLayer=nullptr;
+    CCMenu* m_settingsMenu=nullptr;unsigned long m_volumeSession=0;void closeSettings(){}
     bool m_rankedChildScenePushed=false,m_enteringSongGate=false,m_enteringLevel=false,keypad=true;
     int refreshed=0,scheduled=0;
     void setKeypadEnabled(bool v){keypad=v;}

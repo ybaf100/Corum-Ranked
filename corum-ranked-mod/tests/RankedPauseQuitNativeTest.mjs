@@ -39,7 +39,7 @@ struct Popup{int dismisses=0;void dismiss(){++dismisses;}};
 struct RankedRuntime{int ends=0;static RankedRuntime& get(){static RankedRuntime r;return r;}void endMatchGameplayPause(std::string const& lease){ends+=!lease.empty();}};
 std::optional<WeakRef<PauseLayer>> activeRankedPause;
 #define schedule_selector(x) 0
-struct CorumRankedPauseLayer:PauseLayer {struct Fields{std::optional<WeakRef<Popup>> popup;std::optional<WeakRef<PlayLayer>> owner;std::string leaseId="lease";}fields;Fields* m_fields=&fields;void unschedule(int){}
+struct CorumRankedPauseLayer:PauseLayer {struct Fields{std::optional<WeakRef<Popup>> popup;std::optional<WeakRef<PlayLayer>> owner;std::string leaseId="lease";bool nativeQuitInProgress=false,nativeQuitReachedPlay=false;}fields;Fields* m_fields=&fields;void unschedule(int){}
 ${body('void retireRankedPause()')}
 ${body('void releaseRankedPauseOwnership()')}
 ${body('void onResume(CCObject* sender)')}

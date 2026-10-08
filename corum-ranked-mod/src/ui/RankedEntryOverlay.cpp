@@ -4,6 +4,7 @@
 #include "RankedInput.hpp"
 #include "../domain/EntryCountdown.hpp"
 #include <Geode/binding/GameManager.hpp>
+#include <Geode/binding/AppDelegate.hpp>
 #include <Geode/binding/UILayer.hpp>
 
 using namespace geode::prelude;
@@ -101,6 +102,7 @@ void RankedEntryOverlay::ccTouchEnded(CCTouch* touch, CCEvent*) {
     auto const buttonTargetMatches = ui->m_pauseBtn->m_pListener == ui;
     auto const selectorPresent = ui->m_pauseBtn->m_pfnSelector != nullptr;
     auto const baseOwnerMatches = GameManager::sharedState()->m_gameLayer == play.data();
+    auto const appPausedBefore = AppDelegate::get()->m_gamePaused;
     // Keep the installed button callback first. beta40 device evidence proves
     // that returning from activate() does NOT imply that native Pause opened.
     ui->m_pauseBtn->activate();
@@ -120,11 +122,12 @@ void RankedEntryOverlay::ccTouchEnded(CCTouch* touch, CCEvent*) {
             ++play->m_gameState.m_pauseCounter;
     }
     if (m_pauseDiagnostics++ < 5)
-        log::info("[RankedPauseInput] request level={} buttonPaused={} nativeFallback={} paused={} canPause={} uiOwnerMatches={} baseOwnerMatches={} buttonTargetMatches={} selectorPresent={} pauseCounterBefore={} pauseCounterAfter={} pauseBufferBefore={}",
+        log::info("[RankedPauseInput] request level={} buttonPaused={} nativeFallback={} paused={} canPause={} uiOwnerMatches={} baseOwnerMatches={} buttonTargetMatches={} selectorPresent={} pauseCounterBefore={} pauseCounterAfter={} pauseBufferBefore={} appPausedBefore={} appPausedAfter={}",
             play->m_level ? static_cast<int>(play->m_level->m_levelID) : 0,
             buttonPaused, nativeFallback, play->m_isPaused, play->canPauseGame(),
             play->m_uiLayer == ui, baseOwnerMatches, buttonTargetMatches, selectorPresent,
-            counterBefore, play->m_gameState.m_pauseCounter, bufferBefore);
+            counterBefore, play->m_gameState.m_pauseCounter, bufferBefore,
+            appPausedBefore, AppDelegate::get()->m_gamePaused);
 }
 void RankedEntryOverlay::ccTouchCancelled(CCTouch* touch, CCEvent*) {
     if (touch->getID() == m_pauseTouchId) cancelPauseTouch();

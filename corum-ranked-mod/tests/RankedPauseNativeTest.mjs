@@ -53,6 +53,8 @@ test('actual pause/modal callbacks block only owned manual quit, send exact scop
 #include <cmath>
 #include "${join(root, 'src/domain/FontMetrics.hpp')}"
 struct CCObject {};
+struct AppDelegate {bool m_gamePaused=false;static AppDelegate* get(){static AppDelegate app;return &app;}};
+namespace geode::log {template<class...T>void info(T...) {}}
 struct Node { bool parent=true;void* getParent()const{return parent?(void*)this:nullptr;} };
 struct Label {std::string text;void setString(char const* s){text=s;}void limitLabelWidth(float,float,float){};char const* getFntFile()const{return "CorumSansBold.fnt";}};
 struct PauseLayer:Node {int quits=0,resumes=0;bool dispatching=false;void onQuit(CCObject*){++quits;}void onResume(CCObject*);};
@@ -100,7 +102,7 @@ namespace i18n=corum::ranked::i18n;
 ${body(pause,'bool ownsRankedPlayerPause()')}
 struct CorumRankedPauseLayer:PauseLayer {
  struct Button {bool enabled=true;void setEnabled(bool v){enabled=v;}} button;Label clock;
- struct Fields{std::optional<WeakRef<ui::RankedSurrenderPopup>> popup;std::string leaseId="lease",matchId="m";int round=1,deathmatch=0;Label* budget;Button* surrender;std::optional<WeakRef<PlayLayer>> owner;}f{{},"lease","m",1,0,&clock,&button,{}};Fields* m_fields=&f;
+ struct Fields{std::optional<WeakRef<ui::RankedSurrenderPopup>> popup;std::string leaseId="lease",matchId="m";int round=1,deathmatch=0;Label* budget;Button* surrender;std::optional<WeakRef<PlayLayer>> owner;bool concessionQuit=false,nativeQuitInProgress=false,nativeQuitReachedPlay=false;}f{{},"lease","m",1,0,&clock,&button,{}};Fields* m_fields=&f;
  void unschedule(int){}
  ${body(pause,'void onQuit(CCObject* sender)')}
  ${body(pause,'void watchBudget(float)')}
@@ -136,11 +138,11 @@ int main(){using namespace corum::ranked;
  late.onConfirm(nullptr);assert(r.sends==2);late.watchContext(0);assert(late.closes==1);
  r.v.match.roundNumber=1;ui::RankedSurrenderPopup gone;gone.m_owner.emplace(&p);p.parent=false;
  gone.watchContext(0);assert(gone.closes==1); // no raw owner callback after scene retirement
- p.parent=true;r.conceded=true;p.f.leaseId="second";p.watchBudget(0);
- assert(p.resumes==2&&returnRequests==1&&p.f.leaseId.empty()); // native PlayLayer heartbeat can be paused/lost
+ p.parent=true;r.conceded=true;p.f.leaseId="second";p.f.owner.emplace(&play);p.watchBudget(0);
+ assert(p.resumes==1&&returnRequests==1&&p.f.leaseId=="second"); // keep native Pause for its deferred Quit
  r.conceded=false;p.f.leaseId="third";r.remaining=30000;r.v.match.roundNumber=2;p.f.round=2;
- p.watchBudget(0);assert(p.resumes==2&&returnRequests==1); // new round is not conceded
- r.remaining=0;p.watchBudget(0);assert(p.resumes==3&&returnRequests==1); // timeout resumes, never concedes
+ p.watchBudget(0);assert(p.resumes==1&&returnRequests==1); // new round is not conceded
+ r.remaining=0;p.watchBudget(0);assert(p.resumes==2&&returnRequests==1); // timeout resumes, never concedes
 }
 `;
     const dir=mkdtempSync(join(tmpdir(),'corum-pause-native-'));

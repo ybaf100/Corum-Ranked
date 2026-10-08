@@ -46,12 +46,14 @@ using namespace geode;
 struct PlayerObject { bool m_isDead=false,visible=true; void setVisible(bool b){visible=b;} void stopAllActions(){} };
 struct CCLabelBMFont { void setString(char const*){} };
 struct GJBaseGameLayer { int cameras=0; void updateCamera(float){++cameras;} };
+struct CCDirector {void* scene=this;static CCDirector* sharedDirector(){static CCDirector d;return &d;}void* getRunningScene(){return scene;}};
 struct PlayLayer: GJBaseGameLayer {
  static inline PlayLayer* current=nullptr;PlayLayer(){current=this;}static PlayLayer* get(){return current;}bool isRunning(){return true;}
     PlayerObject* m_player1=nullptr;
     bool m_isTestMode=false,m_isPracticeMode=false,m_hasCompletedLevel=false;
     int resets=0;
     void onQuit(); // Binding entry dispatches to the installed mock hook below.
+    void* getParent(){return CCDirector::sharedDirector()->getRunningScene();}
     void resetLevel(){++resets; m_hasCompletedLevel=false; if(m_player1)m_player1->m_isDead=false;}
 };
 struct ScopedPersistenceOwner { explicit ScopedPersistenceOwner(PlayLayer*){} };
@@ -73,6 +75,7 @@ struct DebugSpectateRuntime {
 }
 #endif
 bool quitThroughRankedCompletionOverlay(PlayLayer*){return false;}
+bool quitRankedPauseForConcession(PlayLayer*){return false;}
 enum class RuntimeStage { Matched, Idle };
 struct RankedRuntime {
     struct Match {std::string matchId="match",state="ROUND_PLAYING"; int roundNumber=1,deathmatchSequence=0;bool spectatorLiveEnabled=true;};

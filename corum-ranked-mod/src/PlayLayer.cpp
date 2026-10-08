@@ -943,10 +943,12 @@ public:
             // menu callback is still running. The exact departed scene owns it.
             auto scene = geode::WeakRef<PlayLayer>(this);
             queueInMainThread([scene] {
-                if (auto layer = scene.lock(); layer && layer.data() == PlayLayer::get() && layer->isRunning()) {
+                if (auto layer = scene.lock(); layer && layer.data() == PlayLayer::get() &&
+                    layer->getParent() == CCDirector::sharedDirector()->getRunningScene()) {
                     // This callback is outside the native onQuit detour. Enter
                     // the binding so the installed quit chain runs normally.
-                    if (!corum::ranked::quitThroughRankedCompletionOverlay(layer.data())) layer->onQuit();
+                    if (!corum::ranked::quitRankedPauseForConcession(layer.data()) &&
+                        !corum::ranked::quitThroughRankedCompletionOverlay(layer.data())) layer->onQuit();
                 }
             });
             return true;

@@ -19,6 +19,7 @@
 #include "ui/RankedTranslations.hpp"
 #include "ui/RankedVisuals.hpp"
 #include "ui/RankedInput.hpp"
+#include "ui/RankedSettingsPopup.hpp"
 
 #include <Geode/Geode.hpp>
 #include <Geode/binding/GameLevelManager.hpp>
@@ -438,6 +439,10 @@ class CorumRankedLayer final : public CCLayerColor {
     CCLayerColor* m_fadeRoot = nullptr;
     CCNode* m_root = nullptr;
     CCMenu* m_menu = nullptr;
+    CCMenu* m_settingsMenu = nullptr;
+    CCLabelBMFont* m_settingsLabel = nullptr;
+    std::optional<WeakRef<corum::ranked::ui::RankedSettingsPopup>> m_settings;
+    std::uint64_t m_volumeSession = 0;
     Page m_page = Page::Live;
     std::size_t m_historyIndex = 0;
     std::size_t m_achievementPage = 0;
@@ -526,6 +531,18 @@ class CorumRankedLayer final : public CCLayerColor {
         m_menu->setID("corum-ranked-fullscreen-menu"_spr);
         m_fadeRoot->addChild(m_menu, 10);
 
+        // Independent of page re-renders: always the same bottom-right entry.
+        m_settingsMenu = CCMenu::create(); m_settingsMenu->setPosition(CCPointZero);
+        m_settingsMenu->setID("ranked-settings-menu"_spr); addChild(m_settingsMenu, 100);
+        auto* settingsFace = corum::ranked::ui::surface({92, 28}, {}, kBlue, kDeepPanel2, 250, true);
+        m_settingsLabel = corum::ranked::ui::label(tr("settings", "Settings"), 0.27f, {46, 14},
+            corum::ranked::ui::Text, corum::ranked::ui::FontWeight::ExtraBold);
+        corum::ranked::ui::fitLabelWidth(m_settingsLabel, 78, 0.27f, 0.18f);
+        settingsFace->addChild(m_settingsLabel, 5);
+        auto* settingsButton = CCMenuItemSpriteExtra::create(settingsFace, this, menu_selector(CorumRankedLayer::onSettings));
+        settingsButton->setID("ranked-settings-button"_spr);
+        settingsButton->setPosition({winSize.width - 60, 22}); m_settingsMenu->addChild(settingsButton);
+
         // Result Achievement notices live outside the normal layout/fade tree.
         // Their slide overlay never pushes Result content and survives a normal
         // Result re-render while the sequential queue is playing.
@@ -554,6 +571,7 @@ class CorumRankedLayer final : public CCLayerColor {
     }
 
     void onEnter() override {
+        if (!m_volumeSession) m_volumeSession = corum::ranked::RankedVolumeControl::get().beginSession();
         // Restore flags BEFORE CCLayer enters its children, so their delegates
         // register in native parent/child order rather than after scene entry.
         setKeypadEnabled(!m_rankTransitionLayer);
@@ -561,6 +579,7 @@ class CorumRankedLayer final : public CCLayerColor {
             corum::ranked::ui::cancelMenuTouch(m_menu);
             m_menu->setTouchEnabled(!m_rankTransitionLayer);
         }
+        if (m_settingsMenu) m_settingsMenu->setTouchEnabled(!m_rankTransitionLayer);
         CCLayerColor::onEnter();
 
         auto const resumedFromRankedChild = m_rankedChildScenePushed;
@@ -997,6 +1016,11 @@ class CorumRankedLayer final : public CCLayerColor {
     }
 
     void updateDynamicUi() {
+        if (m_settingsLabel) {
+            m_settingsLabel->setString(tr("settings", "Settings").c_str());
+            corum::ranked::ui::fitLabelWidth(m_settingsLabel, 78, 0.27f, 0.18f);
+        }
+        if (m_settingsMenu) m_settingsMenu->setVisible(!m_rankTransitionLayer && m_titleSelectorAchievement.empty());
         auto const& runtime = RankedRuntime::get();
         auto const& noticeMatch = runtime.view().match;
         auto const opponentSurrender = m_page == Page::Live && runtime.view().stage == RuntimeStage::Matched &&
@@ -4284,7 +4308,31 @@ class CorumRankedLayer final : public CCLayerColor {
         }
     }
 
+    void onSettings(CCObject*) {
+        if (m_rankTransitionLayer || !m_titleSelectorAchievement.empty()) return;
+        if (m_settings) {
+            auto popup = m_settings->lock();
+            if (popup && popup->getParent()) return;
+            m_settings.reset();
+        }
+        if (auto* popup = corum::ranked::ui::RankedSettingsPopup::create()) {
+            m_settings.emplace(popup); popup->show();
+        }
+    }
+
+    void closeSettings() {
+        if (m_settings) if (auto popup = m_settings->lock()) popup->dismiss();
+        m_settings.reset();
+        if (m_settingsMenu) {
+            corum::ranked::ui::cancelMenuTouch(m_settingsMenu);
+            m_settingsMenu->setTouchEnabled(false);
+        }
+    }
+
     void onCloseLayer(CCObject*) {
+        closeSettings();
+        corum::ranked::RankedVolumeControl::get().endSession(m_volumeSession);
+        m_volumeSession = 0;
         if (RankedRuntime::get().view().stage == RuntimeStage::Queued) RankedRuntime::get().leaveQueue();
         RankedAudioManager::get().restoreMenuMusic();
         unschedule(schedule_selector(CorumRankedLayer::refresh));
@@ -4300,6 +4348,7 @@ class CorumRankedLayer final : public CCLayerColor {
     }
 
     void onExit() override {
+        closeSettings();
         unschedule(schedule_selector(CorumRankedLayer::refresh));
         unschedule(schedule_selector(CorumRankedLayer::audioFrame));
         setKeypadEnabled(false);
@@ -4329,6 +4378,10 @@ class CorumRankedLayer final : public CCLayerColor {
     }
 
 public:
+    ~CorumRankedLayer() override {
+        corum::ranked::RankedVolumeControl::get().endSession(m_volumeSession);
+    }
+
     static CorumRankedLayer* create() {
         auto* layer = new CorumRankedLayer();
         if (layer && layer->init()) {

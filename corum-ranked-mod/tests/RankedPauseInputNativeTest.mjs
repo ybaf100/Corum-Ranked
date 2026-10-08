@@ -19,6 +19,7 @@ using namespace corum::ranked::ui;
 using geode::cast::typeinfo_cast;
 struct Button:CCMenuItem {void selected(){CCMenuItem::selected=true;}};
 struct PlayLayer;
+struct AppDelegate {bool m_gamePaused=false;static AppDelegate* get(){static AppDelegate app;return &app;}};
 struct UILayer:CCLayer {Button* m_pauseBtn=nullptr;PlayLayer* owner=nullptr;
  PlayLayer* m_gameLayer=nullptr;int touchID=5,resets=0,hits=0,buttonCallbacks=0;bool callbackNoOp=false;void doPause();void onPause();
  void resetAllButtons(){touchID=-1;++resets;}
