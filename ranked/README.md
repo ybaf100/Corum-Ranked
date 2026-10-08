@@ -53,10 +53,11 @@ g++ -std=c++23 -Wall -Wextra -Wpedantic -Werror \
 
 ## 배포 순서
 
-beta.43은 사용자 Windows PC에서만 native 모드를 빌드합니다.
-[`../corum-ranked-mod/WINDOWS-BUILD.md`](../corum-ranked-mod/WINDOWS-BUILD.md)의
-PowerShell 명령을 사용합니다. 자동 테스트는 유지하며 다음 beta부터 CI native 빌드를 재개합니다.
-서버와 클라이언트의 exact gate는 함께 beta.43으로 변경합니다.
+beta.43의 native 모드는 [Build Corum Ranked Debug](https://github.com/ybaf100/Corum-Ranked/actions/workflows/build-ranked-debug.yml)
+GitHub workflow에서 빌드합니다. `Corum-Ranked-v0.5.0-beta.43-Debug` artifact의
+`hwanhee1.corum_ranked.geode`를 사용합니다. Windows 로컬 빌드는
+[`../corum-ranked-mod/WINDOWS-BUILD.md`](../corum-ranked-mod/WINDOWS-BUILD.md)의 선택 사항입니다.
+서버와 클라이언트의 exact gate는 함께 beta.43을 사용합니다.
 
 Ranked 계정 접속은 로비부터 한 연결만 허용합니다. 클라이언트는 기존 process scheduler에서
 5초마다 접속을 갱신하고 정상 로비 종료 시 `/api/ranked/session/close`를 전송합니다.

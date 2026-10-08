@@ -1,9 +1,8 @@
 # Windows 로컬 빌드
 
-사용자 요청에 따라 **beta.43만** GitHub의 Windows/iOS/Android native 빌드 및
-통합 패키지를 건너뛴다. 자동 source/native/server 테스트는 유지하고 다음 beta부터
-원래 CI 빌드로 돌아간다. 이 작업은 Windows PC에서 아래 스크립트를 실행하도록
-준비한 것이며, 사용자의 PC에 원격으로 접속하거나 빌드를 실행한 것은 아니다.
+기본 배포 빌드는 [Build Corum Ranked Debug](https://github.com/ybaf100/Corum-Ranked/actions/workflows/build-ranked-debug.yml)
+GitHub workflow에서 생성한다. beta.43의 로컬 빌드 한정 설정은 사용자 요청으로 철회했다.
+아래 스크립트는 원하는 경우 사용할 수 있는 Windows 로컬 빌드 방법이다.
 
 ## 처음 한 번 준비
 

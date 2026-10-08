@@ -62,13 +62,18 @@ player row에서 serialize하고 queue/session lock 순서도 맞춘다. 오래�
 실제 Corum lifecycle bodies를 C++로 추출해 heartbeat 만료·늦은 응답·정확한 token Close,
 주크박스 callback/owned dialog/timer/priority와 Result ESC를 실행했다. Cocos/GD/HTTP 경계는
 doubles이며 실제 Windows 또는 iPad의 native 동작을 검증했다고 주장하지 않는다.
-새 UI·주크박스 기기 확인과 사용자 Windows 전체 모드 빌드는 아직 실행하지 않았다.
+새 UI·주크박스 실기기 확인은 아직 수행하지 않았다. 전체 native 모드 빌드는 GitHub
+workflow에서 수행하며, 그 최종 결과는 해당 Actions run에서 확인한다.
 
 ## 이번 버전 빌드
 
 client manifest, 서버 exact gate, npm workspace/lockfile을 beta.43으로 함께 변경했다.
-사용자 요청에 따라 beta.43만 GitHub native build/package를 건너뛴다. 자동 테스트는 유지하고
-다음 버전부터 기본 CI native build를 재개한다. manual Release는 실행하지 않는다.
+사용자가 Windows 로컬 빌드 요청을 철회하여 GitHub native build/package를 다시 활성화했다.
+Windows/iOS/Android32/Android64 Debug와 iOS Debug OFF를 기존 workflow에서 빌드한다.
+자동 테스트와 통합 패키지 검증도 유지한다. manual Release는 실행하지 않는다.
+이 변경은 빌드 설정과 문서에만 적용하며 beta.43 버전과 exact gate를 유지한다.
 
-Windows 준비 사항, 빌드 명령과 산출물은 [WINDOWS-BUILD.md](WINDOWS-BUILD.md)를 따른다.
+[Build Corum Ranked Debug](https://github.com/ybaf100/Corum-Ranked/actions/workflows/build-ranked-debug.yml)의
+`Corum-Ranked-v0.5.0-beta.43-Debug` artifact 안 `hwanhee1.corum_ranked.geode`를 사용한다.
+선택 사항인 Windows 로컬 빌드는 [WINDOWS-BUILD.md](WINDOWS-BUILD.md)를 따른다.
 이미지 에셋팩은 변경되지 않아 새 패키지나 업로드가 필요하지 않다.

@@ -187,8 +187,6 @@ jobs:
 
   build:
     name: ${{ matrix.config.name }} Debug ${{ needs.metadata.outputs.version }}
-    # beta43 is built on the user's Windows PC; future betas resume CI builds.
-    if: needs.metadata.outputs.version != 'v0.5.0-beta.43'
     needs:
       - metadata
       - tests
@@ -221,7 +219,6 @@ jobs:
 
   ios-debug-off:
     name: Validate iOS Debug OFF ${{ needs.metadata.outputs.version }}
-    if: needs.metadata.outputs.version != 'v0.5.0-beta.43'
     needs:
       - metadata
       - tests

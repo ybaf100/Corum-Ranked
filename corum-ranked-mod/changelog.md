@@ -4,7 +4,7 @@
 - Keep result-screen ESC in Ranked and return to its lobby. Open installed Jukebox directly, show an upper-right preparation countdown while its dialog is open, and close the owned dialog before the native gameplay modal gate.
 - Show claimable achievements first using stable original card indices; use the existing red Claim button style. Start every exact round's LDM choice at OFF instead of inheriting a saved GD object's prior selection.
 - Enforce one live Ranked session per account at lobby admission. Maintain an independent 5-second heartbeat, release on lobby Close, and expire lost connections after 20 seconds. Serialize admission/heartbeat/Close and retire stale tokens and callbacks.
-- Synchronize client/server exact gate and workspace versions to beta43. This version alone uses the user's Windows native build; retain automatic tests and provide [WINDOWS-BUILD.md](WINDOWS-BUILD.md) and its PowerShell script. Assets are unchanged. See [BETA43-LOBBY-LIFECYCLE.md](BETA43-LOBBY-LIFECYCLE.md) for evidence and validation limits.
+- Synchronize client/server exact gate and workspace versions to beta43. Restore the standard GitHub native build/package workflow after the user's build preference changed; retain automatic tests and the optional [WINDOWS-BUILD.md](WINDOWS-BUILD.md) PowerShell script. Assets are unchanged. See [BETA43-LOBBY-LIFECYCLE.md](BETA43-LOBBY-LIFECYCLE.md) for evidence and validation limits.
 
 ## v0.5.0-beta.42
 
