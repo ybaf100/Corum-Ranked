@@ -394,6 +394,19 @@ assert.deepEqual(
 const repeated = responseJson();
 assert.equal(repeated.data.generation, withResources.data.generation);
 
+// Library IDs use the same spreadsheet keys and protocol fields as NG songs.
+setConfig("rankedAudioMenuSongId", "10000001");
+setConfig("rankedAudioWinSongId", 10000002);
+setConfig("rankedAudioWinStartSeconds", 12.25);
+const withLibrary = responseJson();
+assert.equal(withLibrary.data.validation.valid, true, withLibrary.data.validation.errors.join("\n"));
+assert.deepEqual(
+  withLibrary.data.client.audio.resources.filter((resource) => ["menu", "result_win"].includes(resource.key))
+    .map((resource) => [resource.key, resource.songId, resource.startSeconds, resource.loop]),
+  [["menu", 10000001, 42.5, true], ["result_win", 10000002, 12.25, false]],
+);
+assert.notEqual(withLibrary.data.generation, repeated.data.generation);
+
 // Images use an immutable server-selected tag, with one ZIP digest/size.
 assert.equal(repeated.data.client.assets.enabled, false);
 setConfig("rankedAssetPackEnabled", true);

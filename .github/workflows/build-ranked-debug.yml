@@ -179,6 +179,7 @@ jobs:
           node --test corum-ranked-mod/tests/SpectatorAudioNativeTest.mjs
           node --test corum-ranked-mod/tests/AudioTransitionSourceTest.mjs
           node --test corum-ranked-mod/tests/RankedAudioTransitionNativeTest.mjs
+          node --test corum-ranked-mod/tests/RankedAudioDownloadNativeTest.mjs
           node --test corum-ranked-mod/tests/SpectatorCaptureNativeTest.mjs
           node --test corum-ranked-mod/tests/DebugSpectateSourceTest.mjs
           node --test corum-ranked-mod/tests/DebugSpectateRuntimeNativeTest.mjs

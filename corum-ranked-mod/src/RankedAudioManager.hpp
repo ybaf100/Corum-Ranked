@@ -78,6 +78,7 @@ private:
     [[nodiscard]] RankedAudioResourceView const* resourceForMode(RankedAudioMode mode) const;
     void startNextDownload();
     void fetchSongInfo(int songId);
+    void updateLibraryDownload();
     void downloadSongFile(int songId, std::string url);
     void finishDownloadSuccess(int songId);
     void finishDownloadFailure(int songId, std::string const& reason);
@@ -117,6 +118,11 @@ private:
     std::chrono::steady_clock::time_point m_downloadStartedAt {};
     int m_activeDownloadProgress = 0;
     std::uint64_t m_downloadGeneration = 0;
+    // Observe the native downloader without replacing its delegates or
+    // cancelling requests owned by GD/another mod when our config changes.
+    bool m_libraryUrlRequested = false;
+    bool m_librarySongRequested = false;
+    std::chrono::steady_clock::time_point m_libraryQuietSince {};
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_songInfoRequest;
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_songFileRequest;
     RankedResourceDownloadState m_downloadState = RankedResourceDownloadState::Idle;

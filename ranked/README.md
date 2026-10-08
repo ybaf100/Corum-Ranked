@@ -53,6 +53,11 @@ g++ -std=c++23 -Wall -Wextra -Wpedantic -Werror \
 
 ## 배포 순서
 
+Ranked 메뉴 BGM은 `Ranked Config`의 기존 `rankedAudioMenuSongId`에
+Newgrounds 또는 GD Music Library의 전체 Song ID를 입력합니다. `rankedAudioEnabled=TRUE`,
+`rankedAudioMenuStartSeconds`(초) 설정과 다운로드 동작은
+[`../corum-ranked-mod/MUSIC-LIBRARY-AUDIO.md`](../corum-ranked-mod/MUSIC-LIBRARY-AUDIO.md)를 참고하세요.
+
 1. Google Spreadsheet에 최신 Apps Script 파일을 반영하되 기존 `setupCorumIntegration()`은 그대로 둡니다.
 2. Apps Script 편집기에서 `setupCorumRankedConfig()`를 운영자가 명시적으로 한 번 실행합니다.
 3. `sheet1`과 같은 레이아웃의 `sheet2`를 만든 뒤 그 탭의 `Ranked Pool (1~6)`/`Qualifying %` 열과 `Ranked Tiers`, `Ranked CSMP Seed`, `Ranked Allowed Mods`, `Ranked Config`의 미확정 값을 입력합니다. `Main Pool`은 실제 5맵 추첨을 이동시키며, 새 `CSMP Tiers` 이름에는 대응하는 Seed MMR이 반드시 필요합니다. `mmrOpponentStrengthWeight`와 `visibleScoreOpponentStrengthWeight`는 0~2 범위이며 0은 상대 강도 무시, 1은 기본, 2는 2배 반영입니다. 일반 Integration의 `sheet1`은 그대로 유지됩니다.

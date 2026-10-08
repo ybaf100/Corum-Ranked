@@ -1,3 +1,9 @@
+## v0.5.0-beta.42
+
+- Accept GD Music Library IDs in the existing Ranked audio spreadsheet keys. Library songs use GD's native custom-content downloader; Newgrounds songs retain the existing metadata/download path. Preserve configured start offsets, loops, fades, volume and gameplay/Jukebox ownership.
+- Share existing native song requests, reject unfinished/error files, import completed audio into the persistent Ranked cache, and bound failures with the existing resource retry UI. Configuration changes retire local tracking without cancelling another caller's native request.
+- Add executed download/cache/cancellation tests for Debug ON/OFF and spreadsheet Library ID regression coverage. Synchronize the manifest, exact server gate, workspace versions and lockfile to beta42. See [MUSIC-LIBRARY-AUDIO.md](MUSIC-LIBRARY-AUDIO.md) for configuration and verification limits. Assets are unchanged; no manual Release.
+
 ## v0.5.0-beta.30
 
 - Replace the global by-value-string saveNewScore hook with exact-scene storeNewLocalScore(int,int), preserving spectator percentage/completion/death/transport safety and real local/Ranked/Placement saves. Keep the accepted final Placement Attempt alive in MAP_SETTLING, and reject state snapshots that resurrect End-ACKed UUIDs or roll back stateVersion.

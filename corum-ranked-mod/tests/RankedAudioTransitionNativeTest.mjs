@@ -148,6 +148,7 @@ namespace corum::ranked {
 struct TransitionTrace {static TransitionTrace& get(){static TransitionTrace t;return t;}template<class T>void mark(T const&){} };
 constexpr auto kPendingAudioStartTimeout=std::chrono::seconds(3),kDownloadGuardTimeout=std::chrono::seconds(105);
 constexpr auto kPlaybackVerifyDelay=std::chrono::milliseconds(1000);
+constexpr int kMusicLibraryFirstSongId=10000000;
 constexpr int kMaxPlaybackRetries=2;constexpr float kRankedRelativeVolume=0.8f;
 ${helpers}
 ${methods.map(n => method(source, n)).join('\n').replaceAll('std::chrono::steady_clock::now()', 'AudioClock::now()')}
@@ -156,6 +157,8 @@ bool RankedAudioManager::songReady(int)const{return true;}
 std::string RankedAudioManager::readySongPath(int song)const{return std::to_string(song);}
 std::vector<int> RankedAudioManager::uniqueSongIds()const{return {224958,786863,99477};}
 void RankedAudioManager::startNextDownload(){}
+// The actual download state machine is exercised by RankedAudioDownloadNativeTest.
+void RankedAudioManager::updateLibraryDownload(){}
 void RankedAudioManager::finishDownloadFailure(int,std::string const&){}
 }
 using namespace corum::ranked;

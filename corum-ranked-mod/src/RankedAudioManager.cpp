@@ -23,6 +23,8 @@ namespace {
 constexpr auto kSongInfoTimeout = std::chrono::seconds(20);
 constexpr auto kSongFileTimeout = std::chrono::seconds(90);
 constexpr auto kDownloadGuardTimeout = std::chrono::seconds(105);
+constexpr int kMusicLibraryFirstSongId = 10000000;
+constexpr auto kLibraryDownloadQuietTimeout = std::chrono::seconds(2);
 constexpr auto kPendingAudioStartTimeout = std::chrono::seconds(3);
 constexpr std::uintmax_t kMinimumCachedSongBytes = 1024;
 constexpr auto kPlaybackVerifyDelay = std::chrono::milliseconds(1000);
@@ -33,6 +35,11 @@ constexpr char kGdSecret[] = "Wmfd2893gb7";
 
 int clampProgress(int value) {
     return std::clamp(value, 0, 100);
+}
+
+bool nativeSongDownloadActive(MusicDownloadManager* manager, int songId) {
+    return manager && (manager->isRunningActionForSongID(songId) ||
+        manager->isDLActive(manager->getSongDownloadKey(songId)));
 }
 
 int hexValue(char c) {
@@ -248,12 +255,15 @@ std::string RankedAudioManager::readySongPath(int songId) const {
     }
 
     if (auto* manager = MusicDownloadManager::sharedState()) {
+        // A native download may already have an audio header while its file is
+        // still incomplete. Only the persistent copy is usable during it.
+        if (nativeSongDownloadActive(manager, songId)) return {};
         auto const path = manager->pathForSong(songId);
         if (!path.empty()) {
             auto const fsPath = std::filesystem::path(path.c_str());
             // Trust built-in resource songs, and also accept a valid on-disk song
             // even if GD's in-memory "downloaded" state has not refreshed yet.
-            if (manager->isResourceSong(songId) || manager->isSongDownloaded(songId) || usableFile(fsPath)) {
+            if (manager->isResourceSong(songId) || usableFile(fsPath)) {
                 auto readyPath = std::string(path.c_str());
                 m_readySongPaths.emplace(songId, readyPath);
                 return readyPath;
@@ -301,6 +311,9 @@ void RankedAudioManager::cancelActiveDownload() {
     m_activeDownloadSongId = 0;
     m_activeDownloadProgress = 0;
     m_downloadStartedAt = {};
+    m_libraryUrlRequested = false;
+    m_librarySongRequested = false;
+    m_libraryQuietSince = {};
 }
 
 void RankedAudioManager::downloadAll() {
@@ -345,10 +358,19 @@ void RankedAudioManager::startNextDownload() {
     m_downloadQueue.pop_front();
     m_activeDownloadProgress = 0;
     m_downloadStartedAt = std::chrono::steady_clock::now();
+    m_libraryUrlRequested = false;
+    m_librarySongRequested = false;
+    m_libraryQuietSince = {};
     fetchSongInfo(m_activeDownloadSongId);
 }
 
 void RankedAudioManager::fetchSongInfo(int songId) {
+    // GD Music Library uses the game's custom-content service, not the
+    // Newgrounds metadata endpoint. Let GD resolve and download that source.
+    if (songId >= kMusicLibraryFirstSongId) {
+        updateLibraryDownload();
+        return;
+    }
     auto const generation = m_downloadGeneration;
     web::WebRequest request;
     request.timeout(kSongInfoTimeout);
@@ -377,6 +399,54 @@ void RankedAudioManager::fetchSongInfo(int songId) {
             downloadSongFile(songId, *url);
         }
     );
+}
+
+void RankedAudioManager::updateLibraryDownload() {
+    auto const songId = m_activeDownloadSongId;
+    if (songId < kMusicLibraryFirstSongId) return;
+    auto* manager = MusicDownloadManager::sharedState();
+    if (!manager) {
+        finishDownloadFailure(songId, "native music downloader unavailable");
+        return;
+    }
+
+    auto const now = std::chrono::steady_clock::now();
+    if (nativeSongDownloadActive(manager, songId)) {
+        // Join an existing request instead of issuing a duplicate or taking
+        // over the shared MusicDownloadDelegate chain.
+        m_librarySongRequested = true;
+        m_libraryQuietSince = {};
+        m_activeDownloadProgress = std::clamp(manager->getDownloadProgress(songId), 0, 99);
+        return;
+    }
+    if (songReady(songId)) {
+        finishDownloadSuccess(songId);
+        return;
+    }
+
+    if (!m_librarySongRequested) {
+        if (manager->m_customContentURL.empty()) {
+            if (now - m_downloadStartedAt >= kSongInfoTimeout) {
+                finishDownloadFailure(songId, "Music Library content URL timed out");
+            } else if (!m_libraryUrlRequested) {
+                m_libraryUrlRequested = true;
+                manager->getCustomContentURL();
+            }
+            return;
+        }
+        m_librarySongRequested = true;
+        m_libraryQuietSince = now;
+        log::info("Ranked audio: downloading Music Library song {} through GD", songId);
+        manager->downloadSong(songId);
+        return;
+    }
+
+    // Native failures have no Corum web callback. Bound the inactive wait and
+    // keep the existing resource dialog's retry path available.
+    if (m_libraryQuietSince == std::chrono::steady_clock::time_point{}) m_libraryQuietSince = now;
+    if (now - m_libraryQuietSince >= kLibraryDownloadQuietTimeout) {
+        finishDownloadFailure(songId, "Music Library download ended without valid audio");
+    }
 }
 
 void RankedAudioManager::downloadSongFile(int songId, std::string url) {
@@ -781,6 +851,9 @@ void RankedAudioManager::synchronizeSongCaches() {
     auto* manager = MusicDownloadManager::sharedState();
 
     for (auto const songId : uniqueSongIds()) {
+        // Never import an unfinished native file or overwrite a shared
+        // downloader's destination with our compatibility mirror.
+        if (nativeSongDownloadActive(manager, songId)) continue;
         auto const privatePath = cachedSongPath(songId);
         auto gdPath = std::filesystem::path();
         if (manager) {
@@ -1354,6 +1427,8 @@ void RankedAudioManager::tick() {
         m_songInfoRequest.cancel();
         m_songFileRequest.cancel();
         finishDownloadFailure(songId, "download timed out");
+    } else if (m_activeDownloadSongId >= kMusicLibraryFirstSongId) {
+        updateLibraryDownload();
     } else if (m_activeDownloadSongId == 0 && m_downloadState == RankedResourceDownloadState::Downloading) {
         startNextDownload();
     }
