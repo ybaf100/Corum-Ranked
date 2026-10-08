@@ -1,0 +1,816 @@
+import { BadRequestException, ConflictException, Inject, Injectable } from "@nestjs/common";
+import {
+  ACHIEVEMENT_DEFINITIONS,
+  ONE_SHOT_ACHIEVEMENTS,
+  PROGRESSIVE_ACHIEVEMENTS,
+  achievementDefinition,
+  evaluateAchievementMatch,
+  isReverseSweep,
+  isSweepWin,
+  progressiveLevelForMetric,
+  progressiveProgressPresentation,
+  type AchievementDeathmatchFact,
+  type AchievementId,
+  type AchievementLevel,
+  type AchievementMatchFacts,
+  type AchievementMetrics,
+  type OneShotAchievementId,
+  type ProgressiveAchievementDefinition,
+} from "@corum-ranked/rules";
+import { ID_GENERATOR, SERVER_CLOCK, type IdGenerator, type ServerClock } from "../common/runtime.module.js";
+import { DATABASE, type DatabasePort, type SqlExecutor } from "../database/database.port.js";
+
+interface MetricRow {
+  player_id: string;
+  ranked_wins: number;
+  ranked_matches: number;
+  ranked_clears: number;
+  perfect_wins: number;
+  current_win_streak: number;
+  best_win_streak: number;
+  deathmatch_wins: number;
+  last_attempt_clears: number;
+  reverse_sweeps: number;
+  sweep_wins: number;
+  promotion_wins: number;
+  current_perfect_win_streak: number;
+  backfilled_at: Date | string | null;
+}
+
+interface UnlockRow {
+  achievement_id: AchievementId;
+  achievement_level: number;
+  reward_ap: number;
+  unlocked_at: Date | string;
+  claimed_at: Date | string | null;
+  source_event_key: string;
+}
+
+interface ProfileAchievementRow {
+  total_ap: number;
+  displayed_tier: string;
+  placement_games: number;
+  equipped_achievement_id: string | null;
+  equipped_achievement_level: number | null;
+}
+
+interface HistoricalMatchRow {
+  id: string;
+  player_a_id: string;
+  player_b_id: string;
+  winner_id: string;
+  series_state: unknown;
+  rating_presentation: unknown;
+  finished_at: Date | string;
+}
+
+interface HistoricalCountRow {
+  ranked_clears: number;
+  last_attempt_clears: number;
+}
+
+interface HistoricalDeathmatchRow {
+  score_a: number;
+  score_b: number;
+  winner_id: string | null;
+}
+
+export interface AchievementUnlockNotice {
+  readonly achievementId: AchievementId;
+  readonly type: "PROGRESSIVE" | "ONE_SHOT";
+  readonly level: AchievementLevel | null;
+  readonly displayLabel: string | null;
+  readonly maxed: boolean;
+  readonly rewardAp: number;
+  readonly nameKo: string;
+  readonly nameEn: string;
+  readonly rarity: string | null;
+}
+
+export interface AchievementMatchPlayerRecord {
+  readonly playerId: string;
+  readonly won: boolean;
+  readonly rankedClears: number;
+  readonly perfectWin: boolean;
+  readonly lastAttemptClears: number;
+  readonly reverseSweep: boolean;
+  readonly sweepWin: boolean;
+  readonly promotionSucceeded: boolean;
+  readonly reachedGold: boolean;
+  readonly deathmatches: readonly AchievementDeathmatchFact[];
+}
+
+const parseObject = (value: unknown): Record<string, unknown> => {
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? parsed as Record<string, unknown>
+        : {};
+    } catch {
+      return {};
+    }
+  }
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+};
+
+const iso = (value: Date | string | null): string | null =>
+  value === null ? null : new Date(value).toISOString();
+
+const metricsFromRow = (row: MetricRow): AchievementMetrics => ({
+  ranked_wins: Number(row.ranked_wins),
+  ranked_matches: Number(row.ranked_matches),
+  ranked_clears: Number(row.ranked_clears),
+  perfect_wins: Number(row.perfect_wins),
+  current_win_streak: Number(row.current_win_streak),
+  win_streak: Number(row.best_win_streak),
+  deathmatch_wins: Number(row.deathmatch_wins),
+  last_attempt_clears: Number(row.last_attempt_clears),
+  reverse_sweeps: Number(row.reverse_sweeps),
+  sweep_wins: Number(row.sweep_wins),
+  promotion_wins: Number(row.promotion_wins),
+  current_perfect_win_streak: Number(row.current_perfect_win_streak),
+});
+
+const metricValue = (metrics: AchievementMetrics, definition: ProgressiveAchievementDefinition): number =>
+  metrics[definition.metric];
+
+@Injectable()
+export class AchievementService {
+  public constructor(
+    @Inject(DATABASE) private readonly database: DatabasePort,
+    @Inject(SERVER_CLOCK) private readonly clock: ServerClock,
+    @Inject(ID_GENERATOR) private readonly ids: IdGenerator,
+  ) {}
+
+  public async state(playerId: string) {
+    const now = this.clock.now();
+    return this.database.transaction(async (transaction) => {
+      await this.lockProfile(transaction, playerId);
+      await this.ensureBackfilled(transaction, playerId, now);
+      return this.buildState(transaction, playerId, now);
+    });
+  }
+
+  public async claim(playerId: string, achievementId: string) {
+    const definition = achievementDefinition(achievementId);
+    if (!definition) throw new BadRequestException("Unknown Achievement ID");
+    const now = this.clock.now();
+    return this.database.transaction(async (transaction) => {
+      await this.lockProfile(transaction, playerId);
+      await this.ensureBackfilled(transaction, playerId, now);
+      const pending = await transaction.query<UnlockRow>(
+        `SELECT achievement_id, achievement_level, reward_ap, unlocked_at, claimed_at, source_event_key
+         FROM ranked_achievement_unlocks
+         WHERE player_id = $1 AND achievement_id = $2 AND claimed_at IS NULL
+         ORDER BY achievement_level
+         FOR UPDATE`,
+        [playerId, definition.id],
+      );
+      let claimedAmount = 0;
+      let claimedRewards = 0;
+      for (const reward of pending.rows) {
+        const inserted = await transaction.query<{ amount: number }>(
+          `INSERT INTO ranked_ap_ledger (
+             id, player_id, achievement_id, achievement_level, amount, awarded_at
+           ) VALUES ($1, $2, $3, $4, $5, $6)
+           ON CONFLICT (player_id, achievement_id, achievement_level) DO NOTHING
+           RETURNING amount`,
+          [
+            this.ids.next(), playerId, reward.achievement_id,
+            Number(reward.achievement_level), Number(reward.reward_ap), now.toISOString(),
+          ],
+        );
+        if (inserted.rows[0]) {
+          claimedAmount += Number(inserted.rows[0].amount);
+          claimedRewards += 1;
+        }
+        await transaction.query(
+          `UPDATE ranked_achievement_unlocks
+           SET claimed_at = COALESCE(claimed_at, $4)
+           WHERE player_id = $1 AND achievement_id = $2 AND achievement_level = $3
+             AND EXISTS (
+               SELECT 1 FROM ranked_ap_ledger
+               WHERE player_id = $1 AND achievement_id = $2 AND achievement_level = $3
+             )`,
+          [playerId, reward.achievement_id, Number(reward.achievement_level), now.toISOString()],
+        );
+      }
+      const total = await this.reconcileTotalAp(transaction, playerId);
+      const count = await this.unclaimedCount(transaction, playerId);
+      return {
+        achievementId: definition.id,
+        claimedAmount,
+        claimedRewards,
+        duplicate: pending.rows.length === 0,
+        totalAp: total,
+        unclaimedRewardCount: count,
+        serverNow: now.toISOString(),
+      };
+    });
+  }
+
+  public async equipTitle(playerId: string, achievementId: string, requestedLevel?: number) {
+    const definition = achievementDefinition(achievementId);
+    if (!definition || !definition.titleEnabled) {
+      throw new BadRequestException("Achievement title is unavailable");
+    }
+    const level = definition.type === "PROGRESSIVE" ? requestedLevel ?? null : 0;
+    if (definition.type === "PROGRESSIVE" && (!level || level < 1 || level > 5)) {
+      throw new BadRequestException("A progressive title requires level 1-5");
+    }
+    if (definition.type === "ONE_SHOT" && requestedLevel !== undefined) {
+      throw new BadRequestException("A one-shot title has no level");
+    }
+    const now = this.clock.now();
+    return this.database.transaction(async (transaction) => {
+      await this.lockProfile(transaction, playerId);
+      await this.ensureBackfilled(transaction, playerId, now);
+      const unlocked = await transaction.query<{ unlocked: boolean }>(
+        `SELECT EXISTS (
+           SELECT 1 FROM ranked_achievement_unlocks
+           WHERE player_id = $1 AND achievement_id = $2 AND achievement_level = $3
+         ) AS unlocked`,
+        [playerId, definition.id, level],
+      );
+      if (!unlocked.rows[0]?.unlocked) {
+        throw new ConflictException("Achievement title is still locked");
+      }
+      await transaction.query(
+        `UPDATE ranked_profiles
+         SET equipped_achievement_id = $2, equipped_achievement_level = $3, updated_at = $4
+         WHERE player_id = $1`,
+        [playerId, definition.id, level, now.toISOString()],
+      );
+      return {
+        equippedTitle: this.titleProjection(definition.id, level),
+        serverNow: now.toISOString(),
+      };
+    });
+  }
+
+  public async clearTitle(playerId: string) {
+    const now = this.clock.now();
+    await this.database.query(
+      `UPDATE ranked_profiles
+       SET equipped_achievement_id = NULL, equipped_achievement_level = NULL, updated_at = $2
+       WHERE player_id = $1`,
+      [playerId, now.toISOString()],
+    );
+    return { equippedTitle: null, serverNow: now.toISOString() };
+  }
+
+  public async recordMatchResult(
+    transaction: SqlExecutor,
+    matchId: string,
+    records: readonly AchievementMatchPlayerRecord[],
+    now: Date,
+  ): Promise<Readonly<Record<string, readonly AchievementUnlockNotice[]>>> {
+    const notices: Record<string, readonly AchievementUnlockNotice[]> = {};
+    for (const record of records) {
+      await this.ensureBackfilled(transaction, record.playerId, now);
+      notices[record.playerId] = await this.applyMatchEvent(
+        transaction,
+        record.playerId,
+        `match:${matchId}:achievement:${record.playerId}`,
+        matchId,
+        record,
+        now,
+      );
+    }
+    return notices;
+  }
+
+  public async recordPlacementCompletion(
+    transaction: SqlExecutor,
+    playerId: string,
+    runId: string,
+    reachedGold: boolean,
+    now: Date,
+  ): Promise<readonly AchievementUnlockNotice[]> {
+    await this.lockProfile(transaction, playerId);
+    await this.ensureBackfilled(transaction, playerId, now);
+    const eventKey = `placement:${runId}:achievement:${playerId}`;
+    const inserted = await this.insertEvent(
+      transaction, eventKey, playerId, "PLACEMENT_RESULT", runId, now,
+    );
+    if (!inserted) return [];
+    return this.unlockOneShots(
+      transaction,
+      playerId,
+      reachedGold ? ["placement_complete", "gold_reached"] : ["placement_complete"],
+      eventKey,
+      now,
+    );
+  }
+
+  public titleProjection(achievementId: string | null, level: number | null) {
+    if (!achievementId || level === null) return null;
+    const definition = achievementDefinition(achievementId);
+    if (!definition) return null;
+    if (definition.type === "ONE_SHOT") {
+      if (level !== 0) return null;
+      return {
+        achievementId: definition.id,
+        level: null,
+        displayLabel: null,
+        nameKo: definition.nameKo,
+        nameEn: definition.nameEn,
+        displayColor: null,
+        rarity: definition.rarity,
+      };
+    }
+    const stage = definition.levels[level - 1];
+    if (!stage) return null;
+    return {
+      achievementId: definition.id,
+      level: stage.level,
+      displayLabel: stage.displayLabel,
+      nameKo: definition.nameKo,
+      nameEn: definition.nameEn,
+      displayColor: stage.displayColor,
+      rarity: null,
+    };
+  }
+
+  public async noticesForSource(
+    executor: SqlExecutor,
+    playerId: string,
+    sourceEventKey: string,
+  ): Promise<readonly AchievementUnlockNotice[]> {
+    const rows = await executor.query<UnlockRow>(
+      `SELECT achievement_id, achievement_level, reward_ap, unlocked_at, claimed_at, source_event_key
+       FROM ranked_achievement_unlocks
+       WHERE player_id = $1 AND source_event_key = $2
+       ORDER BY unlocked_at, achievement_id, achievement_level`,
+      [playerId, sourceEventKey],
+    );
+    const notices: AchievementUnlockNotice[] = [];
+    for (const unlock of rows.rows) {
+      const definition = achievementDefinition(unlock.achievement_id);
+      if (!definition) continue;
+      if (definition.type === "ONE_SHOT") {
+        notices.push({
+          achievementId: definition.id,
+          type: "ONE_SHOT",
+          level: null,
+          displayLabel: null,
+          maxed: false,
+          rewardAp: Number(unlock.reward_ap),
+          nameKo: definition.nameKo,
+          nameEn: definition.nameEn,
+          rarity: definition.rarity,
+        });
+        continue;
+      }
+      const level = definition.levels[Number(unlock.achievement_level) - 1];
+      if (!level) continue;
+      notices.push({
+        achievementId: definition.id,
+        type: "PROGRESSIVE",
+        level: level.level,
+        displayLabel: level.displayLabel,
+        maxed: level.level === 5,
+        rewardAp: Number(unlock.reward_ap),
+        nameKo: definition.nameKo,
+        nameEn: definition.nameEn,
+        rarity: null,
+      });
+    }
+    return notices;
+  }
+
+  private async applyMatchEvent(
+    transaction: SqlExecutor,
+    playerId: string,
+    eventKey: string,
+    matchId: string,
+    facts: AchievementMatchFacts,
+    now: Date,
+  ): Promise<readonly AchievementUnlockNotice[]> {
+    const inserted = await this.insertEvent(
+      transaction, eventKey, playerId, "MATCH_RESULT", matchId, now,
+    );
+    if (!inserted) return [];
+    const row = await this.lockMetrics(transaction, playerId);
+    const evaluation = evaluateAchievementMatch(metricsFromRow(row), facts);
+    await this.writeMetrics(transaction, playerId, evaluation.metrics, now);
+    const progressive = await this.unlockProgressive(
+      transaction, playerId, evaluation.metrics, eventKey, now,
+    );
+    const oneShots = await this.unlockOneShots(
+      transaction, playerId, evaluation.oneShots, eventKey, now,
+    );
+    return [...progressive, ...oneShots];
+  }
+
+  private async ensureBackfilled(
+    transaction: SqlExecutor,
+    playerId: string,
+    now: Date,
+  ): Promise<void> {
+    await transaction.query(
+      `INSERT INTO ranked_achievement_metrics (player_id)
+       VALUES ($1) ON CONFLICT (player_id) DO NOTHING`,
+      [playerId],
+    );
+    let metricRow = await this.lockMetrics(transaction, playerId);
+    if (metricRow.backfilled_at) return;
+
+    const matches = await transaction.query<HistoricalMatchRow>(
+      `SELECT id, player_a_id, player_b_id, winner_id, series_state,
+              rating_presentation, finished_at
+       FROM ranked_matches
+       WHERE match_type = 'RANKED_PVP' AND state = 'MATCH_RESULT'
+         AND result_applied_at IS NOT NULL
+         AND (player_a_id = $1 OR player_b_id = $1)
+       ORDER BY finished_at, id`,
+      [playerId],
+    );
+    for (const match of matches.rows) {
+      const eventKey = `backfill:match:${match.id}:${playerId}`;
+      if (!await this.insertEvent(
+        transaction, eventKey, playerId, "BACKFILL", match.id, new Date(match.finished_at),
+      )) continue;
+      const facts = await this.historicalMatchFacts(transaction, match, playerId);
+      const evaluation = evaluateAchievementMatch(metricsFromRow(metricRow), facts);
+      await this.writeMetrics(transaction, playerId, evaluation.metrics, new Date(match.finished_at));
+      await this.unlockOneShots(
+        transaction, playerId, evaluation.oneShots, eventKey, new Date(match.finished_at),
+      );
+      metricRow = { ...metricRow, ...this.metricRowPatch(evaluation.metrics) };
+    }
+
+    const placement = await transaction.query<{
+      id: string;
+      finalized_at: Date | string;
+      final_displayed_tier: string | null;
+    }>(
+      `SELECT id, finalized_at, final_displayed_tier FROM ranked_placement_runs
+       WHERE player_id = $1 AND completion_kind = 'COMPLETED' AND finalized_at IS NOT NULL
+       ORDER BY finalized_at LIMIT 1`,
+      [playerId],
+    );
+    const completed = placement.rows[0];
+    if (completed) {
+      const eventKey = `backfill:placement:${completed.id}:${playerId}`;
+      await this.insertEvent(
+        transaction, eventKey, playerId, "BACKFILL", completed.id, new Date(completed.finalized_at),
+      );
+      await this.unlockOneShots(
+        transaction,
+        playerId,
+        completed.final_displayed_tier === "GOLD"
+          ? ["placement_complete", "gold_reached"]
+          : ["placement_complete"],
+        eventKey,
+        new Date(completed.finalized_at),
+      );
+    }
+
+    const profile = await transaction.query<ProfileAchievementRow>(
+      `SELECT total_ap, displayed_tier, placement_games,
+              equipped_achievement_id, equipped_achievement_level
+       FROM ranked_profiles WHERE player_id = $1`,
+      [playerId],
+    );
+    const profileRow = profile.rows[0];
+    if (!completed && profileRow && Number(profileRow.placement_games) > 0 &&
+        profileRow.displayed_tier !== "UNRANKED") {
+      const skipped = await transaction.query<{ skipped: boolean }>(
+        `SELECT EXISTS (
+           SELECT 1 FROM ranked_placement_runs
+           WHERE player_id = $1 AND completion_kind = 'SKIPPED'
+         ) AS skipped`,
+        [playerId],
+      );
+      if (!skipped.rows[0]?.skipped) {
+        const eventKey = `backfill:placement:legacy:${playerId}`;
+        await this.insertEvent(transaction, eventKey, playerId, "BACKFILL", null, now);
+        await this.unlockOneShots(
+          transaction,
+          playerId,
+          profileRow.displayed_tier === "GOLD"
+            ? ["placement_complete", "gold_reached"]
+            : ["placement_complete"],
+          eventKey,
+          now,
+        );
+      }
+    }
+    if (profileRow?.displayed_tier === "GOLD") {
+      const eventKey = `backfill:gold:${playerId}`;
+      await this.insertEvent(transaction, eventKey, playerId, "BACKFILL", null, now);
+      await this.unlockOneShots(transaction, playerId, ["gold_reached"], eventKey, now);
+    }
+    const finalMetrics = metricsFromRow(await this.lockMetrics(transaction, playerId));
+    await this.unlockProgressive(
+      transaction, playerId, finalMetrics, `backfill:progress:${playerId}`, now,
+    );
+    await transaction.query(
+      `UPDATE ranked_achievement_metrics
+       SET backfilled_at = $2, updated_at = $2 WHERE player_id = $1`,
+      [playerId, now.toISOString()],
+    );
+  }
+
+  private async historicalMatchFacts(
+    transaction: SqlExecutor,
+    match: HistoricalMatchRow,
+    playerId: string,
+  ): Promise<AchievementMatchFacts> {
+    const ownIsA = match.player_a_id === playerId;
+    const side = ownIsA ? "A" : "B";
+    const counts = await transaction.query<HistoricalCountRow>(
+      `SELECT
+         (SELECT COUNT(*)::int FROM ranked_attempts a
+            JOIN ranked_rounds r ON r.id = a.round_id
+          WHERE r.match_id = $1 AND a.player_id = $2 AND a.valid AND a.cleared AND a.ended_at IS NOT NULL)
+         +
+         (SELECT COUNT(*)::int FROM ranked_deathmatch_attempts a
+            JOIN ranked_deathmatches d ON d.id = a.deathmatch_id
+          WHERE d.match_id = $1 AND a.player_id = $2 AND a.valid AND a.cleared AND a.ended_at IS NOT NULL)
+           AS ranked_clears,
+         (SELECT COUNT(*)::int FROM ranked_attempts a
+            JOIN ranked_rounds r ON r.id = a.round_id
+          WHERE r.match_id = $1 AND a.player_id = $2 AND a.valid AND a.cleared
+            AND a.ended_at IS NOT NULL AND r.last_attempt_window_start IS NOT NULL
+            AND a.server_accepted_start_at >= r.last_attempt_window_start)
+           AS last_attempt_clears`,
+      [match.id, playerId],
+    );
+    const deathmatches = await transaction.query<HistoricalDeathmatchRow>(
+      `SELECT score_a, score_b, winner_id FROM ranked_deathmatches
+       WHERE match_id = $1 AND finished_at IS NOT NULL ORDER BY sequence`,
+      [match.id],
+    );
+    const series = parseObject(match.series_state);
+    const results = Array.isArray(series.roundResults)
+      ? series.roundResults.filter((item): item is string => typeof item === "string")
+      : [];
+    const won = match.winner_id === playerId;
+    const winnerSide = won ? side : side === "A" ? "B" : "A";
+    const rating = parseObject(match.rating_presentation);
+    const events = parseObject(parseObject(rating.events)[side]);
+    const after = parseObject(parseObject(rating.profileAfter)[side]);
+    return {
+      won,
+      rankedClears: Number(counts.rows[0]?.ranked_clears ?? 0),
+      perfectWin: rating.perfectWinSide === side,
+      lastAttemptClears: Number(counts.rows[0]?.last_attempt_clears ?? 0),
+      reverseSweep: won && isReverseSweep(results, winnerSide),
+      sweepWin: won && isSweepWin(results, winnerSide),
+      promotionSucceeded: events.promotionSucceeded === true,
+      reachedGold: after.displayedTier === "GOLD",
+      deathmatches: deathmatches.rows.map((deathmatch) => ({
+        outcome: deathmatch.winner_id === null
+          ? "TIE"
+          : deathmatch.winner_id === playerId ? "WIN" : "LOSS",
+        ownBest: Number(ownIsA ? deathmatch.score_a : deathmatch.score_b),
+        opponentBest: Number(ownIsA ? deathmatch.score_b : deathmatch.score_a),
+      })),
+    };
+  }
+
+  private async buildState(transaction: SqlExecutor, playerId: string, now: Date) {
+    const metricRow = await this.lockMetrics(transaction, playerId);
+    const metrics = metricsFromRow(metricRow);
+    const unlocks = await transaction.query<UnlockRow>(
+      `SELECT achievement_id, achievement_level, reward_ap, unlocked_at, claimed_at, source_event_key
+       FROM ranked_achievement_unlocks WHERE player_id = $1
+       ORDER BY unlocked_at, achievement_id, achievement_level`,
+      [playerId],
+    );
+    const row = await this.lockProfile(transaction, playerId);
+    const totalAp = await this.reconcileTotalAp(transaction, playerId);
+    const unclaimedRewardCount = unlocks.rows.filter((unlock) => unlock.claimed_at === null).length;
+    return {
+      totalAp,
+      unclaimedRewardCount,
+      equippedTitle: this.titleProjection(
+        row.equipped_achievement_id,
+        row.equipped_achievement_level,
+      ),
+      achievements: ACHIEVEMENT_DEFINITIONS.map((definition) => {
+        const ownUnlocks = unlocks.rows.filter((unlock) => unlock.achievement_id === definition.id);
+        const common = {
+          id: definition.id,
+          type: definition.type,
+          nameKo: definition.nameKo,
+          nameEn: definition.nameEn,
+          descriptionKo: definition.descriptionKo,
+          descriptionEn: definition.descriptionEn,
+          titleEnabled: definition.titleEnabled,
+          unlocks: ownUnlocks.map((unlock) => ({
+            level: Number(unlock.achievement_level) === 0 ? null : Number(unlock.achievement_level),
+            rewardAp: Number(unlock.reward_ap),
+            unlockedAt: iso(unlock.unlocked_at),
+            claimedAt: iso(unlock.claimed_at),
+          })),
+          claimableRewards: ownUnlocks.filter((unlock) => unlock.claimed_at === null).length,
+          claimableAp: ownUnlocks
+            .filter((unlock) => unlock.claimed_at === null)
+            .reduce((sum, unlock) => sum + Number(unlock.reward_ap), 0),
+        };
+        if (definition.type === "ONE_SHOT") {
+          return {
+            ...common,
+            rarity: definition.rarity,
+            rewardAp: definition.ap,
+            unlocked: ownUnlocks.length > 0,
+            claimed: ownUnlocks.some((unlock) => unlock.claimed_at !== null),
+          };
+        }
+        const value = metricValue(metrics, definition);
+        return {
+          ...common,
+          levels: definition.levels,
+          progress: progressiveProgressPresentation(definition, value),
+        };
+      }),
+      serverNow: now.toISOString(),
+    };
+  }
+
+  private async unlockProgressive(
+    transaction: SqlExecutor,
+    playerId: string,
+    metrics: AchievementMetrics,
+    eventKey: string,
+    now: Date,
+  ): Promise<readonly AchievementUnlockNotice[]> {
+    const notices: AchievementUnlockNotice[] = [];
+    for (const definition of PROGRESSIVE_ACHIEVEMENTS) {
+      const attained = progressiveLevelForMetric(definition, metricValue(metrics, definition));
+      for (const level of definition.levels) {
+        if (level.level > attained) break;
+        const inserted = await transaction.query<{ achievement_id: AchievementId }>(
+          `INSERT INTO ranked_achievement_unlocks (
+             player_id, achievement_id, achievement_level, reward_ap, unlocked_at, source_event_key
+           ) VALUES ($1, $2, $3, $4, $5, $6)
+           ON CONFLICT (player_id, achievement_id, achievement_level) DO NOTHING
+           RETURNING achievement_id`,
+          [playerId, definition.id, level.level, level.ap, now.toISOString(), eventKey],
+        );
+        if (inserted.rows[0]) {
+          notices.push({
+            achievementId: definition.id,
+            type: "PROGRESSIVE",
+            level: level.level,
+            displayLabel: level.displayLabel,
+            maxed: level.level === 5,
+            rewardAp: level.ap,
+            nameKo: definition.nameKo,
+            nameEn: definition.nameEn,
+            rarity: null,
+          });
+        }
+      }
+    }
+    return notices;
+  }
+
+  private async unlockOneShots(
+    transaction: SqlExecutor,
+    playerId: string,
+    achievementIds: readonly OneShotAchievementId[],
+    eventKey: string,
+    now: Date,
+  ): Promise<readonly AchievementUnlockNotice[]> {
+    const notices: AchievementUnlockNotice[] = [];
+    for (const achievementId of new Set(achievementIds)) {
+      const definition = ONE_SHOT_ACHIEVEMENTS.find((item) => item.id === achievementId);
+      if (!definition) continue;
+      const inserted = await transaction.query<{ achievement_id: AchievementId }>(
+        `INSERT INTO ranked_achievement_unlocks (
+           player_id, achievement_id, achievement_level, reward_ap, unlocked_at, source_event_key
+         ) VALUES ($1, $2, 0, $3, $4, $5)
+         ON CONFLICT (player_id, achievement_id, achievement_level) DO NOTHING
+         RETURNING achievement_id`,
+        [playerId, definition.id, definition.ap, now.toISOString(), eventKey],
+      );
+      if (inserted.rows[0]) {
+        notices.push({
+          achievementId: definition.id,
+          type: "ONE_SHOT",
+          level: null,
+          displayLabel: null,
+          maxed: false,
+          rewardAp: definition.ap,
+          nameKo: definition.nameKo,
+          nameEn: definition.nameEn,
+          rarity: definition.rarity,
+        });
+      }
+    }
+    return notices;
+  }
+
+  private async insertEvent(
+    transaction: SqlExecutor,
+    eventKey: string,
+    playerId: string,
+    sourceType: "MATCH_RESULT" | "PLACEMENT_RESULT" | "BACKFILL",
+    sourceId: string | null,
+    now: Date,
+  ): Promise<boolean> {
+    const result = await transaction.query<{ event_key: string }>(
+      `INSERT INTO ranked_achievement_events (
+         event_key, player_id, source_type, source_id, occurred_at
+       ) VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (event_key) DO NOTHING RETURNING event_key`,
+      [eventKey, playerId, sourceType, sourceId, now.toISOString()],
+    );
+    return Boolean(result.rows[0]);
+  }
+
+  private async lockMetrics(transaction: SqlExecutor, playerId: string): Promise<MetricRow> {
+    const result = await transaction.query<MetricRow>(
+      "SELECT * FROM ranked_achievement_metrics WHERE player_id = $1 FOR UPDATE",
+      [playerId],
+    );
+    const row = result.rows[0];
+    if (!row) throw new Error("Achievement metric row is missing");
+    return row;
+  }
+
+  private async lockProfile(
+    transaction: SqlExecutor,
+    playerId: string,
+  ): Promise<ProfileAchievementRow> {
+    const result = await transaction.query<ProfileAchievementRow>(
+      `SELECT total_ap, displayed_tier, placement_games,
+              equipped_achievement_id, equipped_achievement_level
+       FROM ranked_profiles WHERE player_id = $1 FOR UPDATE`,
+      [playerId],
+    );
+    const row = result.rows[0];
+    if (!row) throw new ConflictException("Ranked profile is missing");
+    return row;
+  }
+
+  private metricRowPatch(metrics: AchievementMetrics): Partial<MetricRow> {
+    return {
+      ranked_wins: metrics.ranked_wins,
+      ranked_matches: metrics.ranked_matches,
+      ranked_clears: metrics.ranked_clears,
+      perfect_wins: metrics.perfect_wins,
+      current_win_streak: metrics.current_win_streak,
+      best_win_streak: metrics.win_streak,
+      deathmatch_wins: metrics.deathmatch_wins,
+      last_attempt_clears: metrics.last_attempt_clears,
+      reverse_sweeps: metrics.reverse_sweeps,
+      sweep_wins: metrics.sweep_wins,
+      promotion_wins: metrics.promotion_wins,
+      current_perfect_win_streak: metrics.current_perfect_win_streak,
+    };
+  }
+
+  private async writeMetrics(
+    transaction: SqlExecutor,
+    playerId: string,
+    metrics: AchievementMetrics,
+    now: Date,
+  ): Promise<void> {
+    await transaction.query(
+      `UPDATE ranked_achievement_metrics SET
+         ranked_wins = $2, ranked_matches = $3, ranked_clears = $4,
+         perfect_wins = $5, current_win_streak = $6, best_win_streak = $7,
+         deathmatch_wins = $8, last_attempt_clears = $9,
+         reverse_sweeps = $10, sweep_wins = $11, promotion_wins = $12,
+         current_perfect_win_streak = $13, updated_at = $14
+       WHERE player_id = $1`,
+      [
+        playerId, metrics.ranked_wins, metrics.ranked_matches, metrics.ranked_clears,
+        metrics.perfect_wins, metrics.current_win_streak, metrics.win_streak,
+        metrics.deathmatch_wins, metrics.last_attempt_clears, metrics.reverse_sweeps,
+        metrics.sweep_wins, metrics.promotion_wins, metrics.current_perfect_win_streak,
+        now.toISOString(),
+      ],
+    );
+  }
+
+  private async unclaimedCount(transaction: SqlExecutor, playerId: string): Promise<number> {
+    const result = await transaction.query<{ count: number }>(
+      `SELECT COUNT(*)::int AS count FROM ranked_achievement_unlocks
+       WHERE player_id = $1 AND claimed_at IS NULL`,
+      [playerId],
+    );
+    return Number(result.rows[0]?.count ?? 0);
+  }
+
+  private async reconcileTotalAp(transaction: SqlExecutor, playerId: string): Promise<number> {
+    const sum = await transaction.query<{ total: number }>(
+      "SELECT COALESCE(SUM(amount), 0)::int AS total FROM ranked_ap_ledger WHERE player_id = $1",
+      [playerId],
+    );
+    const total = Number(sum.rows[0]?.total ?? 0);
+    await transaction.query(
+      "UPDATE ranked_profiles SET total_ap = $2 WHERE player_id = $1 AND total_ap IS DISTINCT FROM $2",
+      [playerId, total],
+    );
+    return total;
+  }
+}

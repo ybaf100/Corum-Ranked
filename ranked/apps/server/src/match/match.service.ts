@@ -1,0 +1,3431 @@
+import {
+  ConflictException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
+import {
+  advanceRoundClock,
+  applyDeathmatchWinner,
+  applyRoundResult,
+  bannerForRound,
+  calculateMmrUpdate,
+  createRound,
+  evaluateDeathmatch,
+  endRoundAttempt,
+  perfectThreeClearWinner,
+  resolveBans,
+  selectDeathmatchMap,
+  scoreAttempt,
+  isReverseSweep,
+  isSweepWin,
+  roundDeadlineAtMs,
+  surrenderRound,
+  startRoundAttempt,
+  startRoundAttemptFromIntent,
+  tierBandFor,
+  updateRankedRatingProfile,
+  type DisplayTier,
+  type MatchSeriesState,
+  type PlayerSide,
+  type PromotionMark,
+  type PromotionSeriesState,
+  type RandomSource,
+  type RankedMapSnapshot,
+  type RankedRatingProfile,
+  type RankedRatingUpdate,
+  type RankedTier,
+  type RoundState,
+} from "@corum-ranked/rules";
+import {
+  ID_GENERATOR,
+  RANDOM_SOURCE,
+  SERVER_CLOCK,
+  type IdGenerator,
+  type ServerClock,
+} from "../common/runtime.module.js";
+import type { RankedConfigSnapshot } from "../config/ranked-config.document.js";
+import { DATABASE, type DatabasePort, type SqlExecutor } from "../database/database.port.js";
+import { AchievementService } from "../achievement/achievement.service.js";
+import { OutboxService } from "../relay/outbox.service.js";
+import type { RankedSessionContext } from "../session/session.types.js";
+import { SessionService } from "../session/session.service.js";
+import { MatchAccessService } from "./match-access.service.js";
+import {
+  ATTEMPT_TRANSPORT_GRACE_MS,
+  resolveAttemptStartTime,
+  shouldHoldRoundForAttemptTransport,
+} from "./attempt-timing.js";
+import type {
+  AttemptEndDto,
+  AttemptProgressDto,
+  AttemptStartDto,
+  AttemptStartIntentDto,
+  PracticePresenceDto,
+  MatchPauseDto,
+  SurrenderDto,
+  ReadyMatchDto,
+  NativeSceneEnteredDto,
+  ResourceFailureDto,
+  SubmitBanDto,
+} from "./match.dto.js";
+import {
+  MATCH_RUNTIME_STATE,
+  type MatchRuntimeStatePort,
+} from "./match-runtime-state.js";
+
+import { changeMatchPause, emptyMatchPause, matchPauseView, type MatchPauseState } from "./match-pause.policy.js";
+
+const ATTEMPT_START_INTENT_FUTURE_SKEW_MS = 2_000;
+// A valid start-intent must never expire while the player is still connected and
+// the authoritative Start packet is catching up. This hard TTL is only a final
+// deadlock guard; reconnect timeout resolves genuinely abandoned clients first.
+const ATTEMPT_START_INTENT_HARD_TTL_MS = 15 * 60_000;
+const NATIVE_ENTRY_TIMEOUT_MS = 60_000;
+const NATIVE_ENTRY_COUNTDOWN_MS = 3_000;
+
+interface NativeEntryState {
+  readonly roundNumber: number;
+  readonly deathmatchSequence: number;
+  readonly playableLevelId: string;
+  readonly deadlineAt: string;
+  readonly entered: Record<PlayerSide, boolean>;
+  startsAt: string | null;
+}
+
+type MatchState =
+  | "MATCHED"
+  | "BAN_PHASE"
+  | "ROUND_PREPARE"
+  | "ROUND_ENTERING"
+  | "ROUND_PLAYING"
+  | "FINAL_ATTEMPT_WINDOW"
+  | "LAST_ATTEMPT_WINDOW"
+  | "ROUND_SETTLING"
+  | "ROUND_RESULT"
+  | "DEATHMATCH_PREPARE"
+  | "DEATHMATCH_ENTERING"
+  | "DEATHMATCH_PLAYING"
+  | "DEATHMATCH_RESULT"
+  | "MATCH_RESULT"
+  | "CANCELLED";
+
+interface LockedMatchRow {
+  id: string;
+  player_a_id: string;
+  player_b_id: string;
+  mmr_a_before: number;
+  mmr_b_before: number;
+  effective_tier: string;
+  candidate_maps_snapshot: unknown;
+  selected_round_maps_snapshot: unknown | null;
+  series_state: unknown;
+  state: MatchState;
+  state_version: number;
+  current_round_number: number | null;
+  ready_a_at: Date | string | null;
+  ready_b_at: Date | string | null;
+  ready_deadline_at: Date | string | null;
+  last_heartbeat_a_at: Date | string | null;
+  last_heartbeat_b_at: Date | string | null;
+  ban_a_canonical_id: string | null;
+  ban_b_canonical_id: string | null;
+  ban_a_confirmed_at: Date | string | null;
+  ban_b_confirmed_at: Date | string | null;
+  ban_deadline_at: Date | string | null;
+  deadline_at: Date | string | null;
+  winner_id: string | null;
+  mmr_delta_a: number | null;
+  mmr_delta_b: number | null;
+  mmr_a_after: number | null;
+  mmr_b_after: number | null;
+  ranked_score_a_before: number | null;
+  ranked_score_b_before: number | null;
+  ranked_score_delta_a: number | null;
+  ranked_score_delta_b: number | null;
+  ranked_score_a_after: number | null;
+  ranked_score_b_after: number | null;
+  rating_presentation: unknown | null;
+  result_applied_at: Date | string | null;
+  current_deathmatch_id: string | null;
+  source_payload: unknown;
+  match_type: "RANKED_PVP" | "DEBUG_BOT";
+  debug_config: unknown | null;
+  debug_discord_events: boolean;
+  // Retained compatibility column used by the existing OutboxService.
+  discord_events_enabled: boolean;
+  cancellation_reason: string | null;
+  finished_at: Date | string | null;
+  pause_state?: unknown;
+  surrender_events?: unknown;
+  entry_state?: unknown | null;
+}
+
+interface RoundRow {
+  id: string;
+  match_id: string;
+  round_number: 1 | 2 | 3;
+  level_id: string;
+  canonical_level_id: string;
+  alternate_level_id: string | null;
+  playable_level_id: string;
+  title: string;
+  creator: string;
+  difficulty: string;
+  pool: 1 | 2 | 3 | 4 | 5 | 6;
+  qualifying_percent: number;
+  phase: string;
+  domain_state: unknown | null;
+  ready_a_at: Date | string | null;
+  ready_b_at: Date | string | null;
+  ready_deadline_at: Date | string | null;
+  result_deadline_at: Date | string | null;
+  result: PlayerSide | "DRAW" | null;
+}
+
+interface ProfileResultRow {
+  player_id: string;
+  hidden_mmr: number;
+  visible_ranked_score: number | null;
+  placement_games: number;
+  placement_results: unknown;
+  displayed_tier: DisplayTier;
+  result_streak: number;
+  promotion_source_tier: RankedTier | null;
+  promotion_target_tier: RankedTier | null;
+  promotion_cutoff: number | null;
+  promotion_games_required: number | null;
+  promotion_wins_required: number | null;
+  promotion_results: unknown;
+  demotion_warning: boolean;
+  total_ap: number;
+  equipped_achievement_id: string | null;
+  equipped_achievement_level: number | null;
+}
+
+interface PlayerStateRow extends ProfileResultRow {
+  id: string;
+  gd_account_id: string;
+  gd_username: string;
+}
+
+interface RoundSummaryRow {
+  round_number: number;
+  title: string;
+  difficulty: string;
+  score_a: number;
+  score_b: number;
+  clears_a: number;
+  clears_b: number;
+  result: PlayerSide | "DRAW" | null;
+}
+
+interface MatchPerformanceRow {
+  score_a: number;
+  score_b: number;
+  clears_a: number;
+  clears_b: number;
+}
+
+interface LastAttemptClearRow {
+  player_id: string;
+  clear_count: number;
+}
+
+interface AchievementDeathmatchResultRow {
+  score_a: number;
+  score_b: number;
+  winner_id: string | null;
+}
+
+interface PerfectWinRoundRow {
+  result: PlayerSide | "DRAW" | null;
+  result_reason: string | null;
+  clears_a: number;
+  clears_b: number;
+}
+
+interface HistoryMatchRow {
+  id: string;
+  player_a_id: string;
+  player_b_id: string;
+  effective_tier: string;
+  winner_id: string | null;
+  mmr_delta_a: number | null;
+  mmr_delta_b: number | null;
+  mmr_a_after: number | null;
+  mmr_b_after: number | null;
+  ranked_score_delta_a: number | null;
+  ranked_score_delta_b: number | null;
+  ranked_score_a_after: number | null;
+  ranked_score_b_after: number | null;
+  rating_presentation: unknown | null;
+  series_state: unknown;
+  finished_at: Date | string | null;
+  opponent_name: string;
+}
+
+
+interface DeathmatchRow {
+  id: string;
+  sequence: number;
+  map_snapshot: unknown;
+  started_at: Date | string | null;
+  finished_at: Date | string | null;
+}
+
+interface DeathmatchAttemptRow {
+  id: string;
+  player_id: string;
+  attempt_sequence: number;
+  server_accepted_start_at: Date | string;
+  ended_at: Date | string | null;
+  progress_percent: number | null;
+  cleared: boolean;
+  awarded_score: number;
+  valid: boolean;
+  client_start_event_id: string;
+  client_end_event_id: string | null;
+}
+
+interface AttemptStartLeaseRow {
+  id: string;
+  match_id: string;
+  round_id: string;
+  player_id: string;
+  side: PlayerSide;
+  level_id: string;
+  client_start_event_id: string;
+  client_started_at: Date | string;
+  observed_at: Date | string;
+  consumed_at: Date | string | null;
+  invalidated_at: Date | string | null;
+}
+
+interface RankedAttemptLookupRow {
+  round_id: string;
+  domain_attempt_id: string;
+  attempt_sequence: number;
+  ended_at: Date | string | null;
+  awarded_score: number;
+  client_end_event_id: string | null;
+}
+
+interface DeathmatchAttemptLookupRow {
+  id: string;
+  deathmatch_id: string;
+  attempt_sequence: number;
+  ended_at: Date | string | null;
+  awarded_score: number | null;
+  client_start_event_id: string;
+  client_end_event_id: string | null;
+}
+
+const parseJson = <T>(value: unknown): T => {
+  if (typeof value === "string") return JSON.parse(value) as T;
+  return structuredClone(value) as T;
+};
+
+const dateIso = (value: Date | string | null): string | null =>
+  value === null ? null : new Date(value).toISOString();
+
+const marksFromJson = (value: unknown): readonly PromotionMark[] => {
+  const parsed = parseJson<unknown>(value ?? []);
+  if (!Array.isArray(parsed)) return [];
+  return parsed.filter((mark): mark is PromotionMark => mark === "WIN" || mark === "LOSS");
+};
+
+const promotionFromRow = (row: ProfileResultRow): PromotionSeriesState | null => {
+  if (
+    !row.promotion_source_tier || !row.promotion_target_tier ||
+    row.promotion_cutoff === null || row.promotion_games_required === null ||
+    row.promotion_wins_required === null
+  ) return null;
+  return {
+    sourceTier: row.promotion_source_tier,
+    targetTier: row.promotion_target_tier,
+    cutoff: Number(row.promotion_cutoff),
+    gamesRequired: Number(row.promotion_games_required),
+    winsRequired: Number(row.promotion_wins_required),
+    results: marksFromJson(row.promotion_results),
+  };
+};
+
+const ratingProfileFromRow = (row: ProfileResultRow): RankedRatingProfile => ({
+  hiddenMmr: Number(row.hidden_mmr),
+  visibleRankedScore: Number(row.visible_ranked_score ?? 0),
+  placementGames: Number(row.placement_games),
+  placementResults: marksFromJson(row.placement_results),
+  displayedTier: row.displayed_tier,
+  resultStreak: Number(row.result_streak ?? 0),
+  promotion: promotionFromRow(row),
+  demotionWarning: Boolean(row.demotion_warning),
+});
+
+const publicRatingProfile = (profile: RankedRatingProfile, placementGamesRequired: number) => {
+  const placement = profile.placementGames < placementGamesRequired;
+  const promotion = profile.promotion;
+  const promotionWins = promotion?.results.filter((mark) => mark === "WIN").length ?? 0;
+  return {
+    displayedTier: profile.displayedTier,
+    visibleRankedScore: placement ? null : profile.visibleRankedScore,
+    placementGames: profile.placementGames,
+    placementGamesRequired,
+    placementResults: profile.placementResults,
+    resultStreak: profile.resultStreak,
+    streak: Math.abs(profile.resultStreak) >= 2
+      ? {
+          type: profile.resultStreak > 0 ? "WIN" : "LOSS",
+          count: Math.abs(profile.resultStreak),
+        }
+      : null,
+    promotion: promotion
+      ? {
+          ...promotion,
+          wins: promotionWins,
+          losses: promotion.results.length - promotionWins,
+          winsRemaining: Math.max(0, promotion.winsRequired - promotionWins),
+        }
+      : null,
+    demotionWarning: profile.demotionWarning,
+  };
+};
+
+const sideColumn = (side: PlayerSide, prefix: string): string =>
+  `${prefix}_${side.toLowerCase()}`;
+
+// The visible PVP start countdown is ten seconds, but map/song acquisition is
+// network-bound and must not share that deadline. Keep a separate server-side
+// resource safety budget so the real Geometry Dash download can finish and the
+// Ready request can arrive without racing the countdown boundary.
+const resourcePrepareSeconds = (configuredReadySeconds: number): number =>
+  Math.max(configuredReadySeconds, 60);
+
+// Runtime progress state is shared by normal rounds and deathmatches. Keep the
+// key-space disjoint so a Death Match can expose live score/progress without
+// colliding with Round 1-3 telemetry.
+const deathmatchRuntimeSlot = (sequence: number): number => 1_000 + sequence;
+
+@Injectable()
+export class MatchService {
+  public constructor(
+    @Inject(DATABASE) private readonly database: DatabasePort,
+    @Inject(SERVER_CLOCK) private readonly clock: ServerClock,
+    @Inject(ID_GENERATOR) private readonly ids: IdGenerator,
+    @Inject(RANDOM_SOURCE) private readonly random: RandomSource,
+    private readonly access: MatchAccessService,
+    private readonly sessions: SessionService,
+    private readonly outbox: OutboxService,
+    private readonly achievements: AchievementService,
+    @Inject(MATCH_RUNTIME_STATE) private readonly runtimeState: MatchRuntimeStatePort,
+  ) {}
+
+  /** Development-only entry point used by DebugBotService.
+   *  The public debug route is disabled unless DEBUG_BOT_* server settings are
+   *  explicitly configured, and this method additionally refuses real PvP.
+   */
+  public async forceDebugResult(matchId: string, winner: PlayerSide): Promise<void> {
+    const now = this.clock.now();
+    await this.database.transaction(async (transaction) => {
+      const match = await this.lockMatch(transaction, matchId);
+      if (match.match_type !== "DEBUG_BOT") {
+        throw new ConflictException("Forced results are only available for Debug Bot matches");
+      }
+      if (match.state === "MATCH_RESULT") return;
+      if (match.state === "CANCELLED") {
+        throw new ConflictException("A cancelled Debug Bot match cannot be forced");
+      }
+      await this.finalizeMatch(transaction, match, winner, now);
+    });
+  }
+
+  public async history(session: RankedSessionContext) {
+    const now = this.clock.now();
+    const matches = await this.database.query<HistoryMatchRow>(
+      `SELECT m.*,
+              CASE WHEN m.player_a_id = $1 THEN pb.gd_username ELSE pa.gd_username END AS opponent_name
+       FROM ranked_matches m
+       JOIN ranked_players pa ON pa.id = m.player_a_id
+       JOIN ranked_players pb ON pb.id = m.player_b_id
+       WHERE (m.player_a_id = $1 OR m.player_b_id = $1)
+         AND m.state = 'MATCH_RESULT'
+       ORDER BY m.finished_at DESC NULLS LAST, m.created_at DESC
+       LIMIT 20`,
+      [session.playerId],
+    );
+    const items = [];
+    for (const match of matches.rows) {
+      const side: PlayerSide = match.player_a_id === session.playerId ? "A" : "B";
+      const winnerSide: PlayerSide | null =
+        match.winner_id === match.player_a_id
+          ? "A"
+          : match.winner_id === match.player_b_id
+            ? "B"
+            : null;
+      const rating = match.rating_presentation
+        ? parseJson<Record<string, unknown>>(match.rating_presentation)
+        : {};
+      items.push({
+        matchId: match.id,
+        finishedAt: dateIso(match.finished_at),
+        side,
+        opponentName: match.opponent_name,
+        effectiveTier: match.effective_tier,
+        winnerSide,
+        perfectWinSide: rating.perfectWinSide ?? null,
+        rankedScoreDelta: rating.rankedScoreDelta ?? {
+          A: match.ranked_score_delta_a,
+          B: match.ranked_score_delta_b,
+        },
+        rankedScoreAfter: {
+          A: match.ranked_score_a_after,
+          B: match.ranked_score_b_after,
+        },
+        profileAfter: rating.profileAfter ?? null,
+        ratingEvents: rating.events ?? null,
+        series: parseJson<MatchSeriesState>(match.series_state),
+        rounds: await this.roundSummaries(this.database, match.id),
+        deathmatches: await this.deathmatchSummaries(this.database, match.id),
+      });
+    }
+    return { matches: items, serverNow: now.toISOString() };
+  }
+
+  public async ready(
+    matchId: string,
+    matchToken: string,
+    session: RankedSessionContext,
+    body: ReadyMatchDto,
+  ) {
+    this.sessions.assertEnvironment(body.installedMods);
+    const now = this.clock.now();
+    await this.database.transaction(async (transaction) => {
+      const authorization = await this.access.authorize(transaction, matchId, session, matchToken);
+      let match = await this.lockMatch(transaction, matchId);
+      match = await this.advanceLockedMatch(transaction, match, now);
+      // Resource READY retries cannot restart or alter the native entry barrier.
+      if (match.state === "ROUND_ENTERING" || match.state === "DEATHMATCH_ENTERING") return;
+      if (match.state === "MATCHED") {
+        const column = sideColumn(authorization.side, "ready");
+        if (match.match_type === "DEBUG_BOT" && authorization.side === "A") {
+          // The Debug Bot has no real client/resource gate. Player A Ready must
+          // therefore make the synthetic B side Ready in the same transaction;
+          // relying on the background Bot driver creates a PREPARE deadlock if
+          // its timer is delayed, restarted, or one tick fails.
+          await transaction.query(
+            `UPDATE ranked_matches
+             SET ready_a_at = COALESCE(ready_a_at, $2),
+                 ready_b_at = COALESCE(ready_b_at, $2),
+                 state_version = state_version + 1
+             WHERE id = $1`,
+            [matchId, now.toISOString()],
+          );
+        } else {
+          await transaction.query(
+            `UPDATE ranked_matches
+             SET ${column}_at = COALESCE(${column}_at, $2), state_version = state_version + 1
+             WHERE id = $1`,
+            [matchId, now.toISOString()],
+          );
+        }
+        match = await this.lockMatch(transaction, matchId);
+        if (match.ready_a_at && match.ready_b_at) {
+          const config = this.matchConfig(match);
+          const deadline = new Date(
+            now.getTime() + config.operational.rules.banSeconds * 1_000,
+          );
+          await transaction.query(
+            `UPDATE ranked_matches
+             SET state = 'BAN_PHASE', ban_deadline_at = $2, deadline_at = $2,
+                 ready_deadline_at = NULL, state_version = state_version + 1,
+                 started_at = COALESCE(started_at, $3)
+             WHERE id = $1`,
+            [matchId, deadline.toISOString(), now.toISOString()],
+          );
+        }
+        return;
+      }
+
+      if (match.state !== "ROUND_PREPARE" || !match.current_round_number) {
+        if (match.state === "DEATHMATCH_PREPARE" && match.current_deathmatch_id) {
+          const column = sideColumn(authorization.side, "ready");
+          if (match.match_type === "DEBUG_BOT" && authorization.side === "A") {
+            await transaction.query(
+              `UPDATE ranked_matches
+               SET ready_a_at = COALESCE(ready_a_at, $2),
+                   ready_b_at = COALESCE(ready_b_at, $2),
+                   state_version = state_version + 1
+               WHERE id = $1`,
+              [matchId, now.toISOString()],
+            );
+          } else {
+            await transaction.query(
+              `UPDATE ranked_matches
+               SET ${column}_at = COALESCE(${column}_at, $2), state_version = state_version + 1
+               WHERE id = $1`,
+              [matchId, now.toISOString()],
+            );
+          }
+          match = await this.lockMatch(transaction, matchId);
+          if (match.ready_a_at && match.ready_b_at) {
+            const deathmatch = await this.currentDeathmatch(transaction, match);
+            const deathmatchMap = parseJson<RankedMapSnapshot>(deathmatch.map_snapshot);
+            await this.beginNativeEntry(transaction, match, {
+              roundNumber: 0,
+              deathmatchSequence: Number(deathmatch.sequence),
+              playableLevelId: deathmatchMap.playableLevelId,
+            }, now);
+          }
+          return;
+        }
+        throw new ConflictException(`Ready is not accepted in ${match.state}`);
+      }
+      const round = await this.lockCurrentRound(transaction, match);
+      const column = sideColumn(authorization.side, "ready");
+      if (match.match_type === "DEBUG_BOT" && authorization.side === "A") {
+        await transaction.query(
+          `UPDATE ranked_rounds
+           SET ready_a_at = COALESCE(ready_a_at, $2),
+               ready_b_at = COALESCE(ready_b_at, $2),
+               state_version = state_version + 1
+           WHERE id = $1`,
+          [round.id, now.toISOString()],
+        );
+      } else {
+        await transaction.query(
+          `UPDATE ranked_rounds
+           SET ${column}_at = COALESCE(${column}_at, $2), state_version = state_version + 1
+           WHERE id = $1`,
+          [round.id, now.toISOString()],
+        );
+      }
+      const updatedRound = await this.lockCurrentRound(transaction, match);
+      if (updatedRound.ready_a_at && updatedRound.ready_b_at) {
+        await this.beginNativeEntry(transaction, match, {
+          roundNumber: Number(updatedRound.round_number),
+          deathmatchSequence: 0,
+          playableLevelId: updatedRound.playable_level_id,
+        }, now);
+      }
+    });
+    return this.state(matchId, matchToken, session);
+  }
+
+  public async entered(
+    matchId: string,
+    matchToken: string,
+    session: RankedSessionContext,
+    body: NativeSceneEnteredDto,
+  ) {
+    const now = this.clock.now();
+    return this.database.transaction(async (transaction) => {
+      const authorization = await this.access.authorize(transaction, matchId, session, matchToken);
+      let match = await this.lockMatch(transaction, matchId);
+      match = await this.advanceLockedMatch(transaction, match, now);
+      const entry = match.entry_state ? parseJson<NativeEntryState>(match.entry_state) : null;
+      if (!entry || entry.roundNumber !== body.roundNumber ||
+          entry.deathmatchSequence !== body.deathmatchSequence ||
+          entry.playableLevelId !== body.playableLevelId) {
+        throw new ConflictException("NATIVE_ENTRY_CONTEXT_CHANGED");
+      }
+      if (match.state === "MATCH_RESULT" || match.state === "CANCELLED") {
+        // A late native completion must commit an elapsed entry timeout rather
+        // than rolling back that authoritative transition via a 409 exception.
+        return this.buildPublicState(transaction, match, session.playerId, now);
+      }
+      // An ACK retry after countdown/start is read-only. A previous-round retry
+      // never reaches this branch because each new PREPARE clears the certificate.
+      if (entry.entered[authorization.side]) {
+        return this.buildPublicState(transaction, match, session.playerId, now);
+      }
+      if (match.state !== "ROUND_ENTERING" && match.state !== "DEATHMATCH_ENTERING") {
+        throw new ConflictException(`Native entry is not accepted in ${match.state}`);
+      }
+      // The synthetic bot cannot prove human A's native scene is installed.
+      // Only the real A-side entry atomically admits B for a DEBUG_BOT match.
+      if (match.match_type === "DEBUG_BOT" && authorization.side !== "A") {
+        throw new ConflictException("NATIVE_ENTRY_REQUIRES_REAL_PLAYER");
+      }
+      entry.entered[authorization.side] = true;
+      if (match.match_type === "DEBUG_BOT") entry.entered.B = true;
+      if (entry.entered.A && entry.entered.B && !entry.startsAt) {
+        entry.startsAt = new Date(now.getTime() + NATIVE_ENTRY_COUNTDOWN_MS).toISOString();
+      }
+      await transaction.query(
+        `UPDATE ranked_matches SET entry_state = $2::jsonb,
+          deadline_at = $3, state_version = state_version + 1 WHERE id = $1`,
+        [match.id, JSON.stringify(entry), entry.startsAt ?? entry.deadlineAt],
+      );
+      match = await this.lockMatch(transaction, match.id);
+      return this.buildPublicState(transaction, match, session.playerId, now);
+    });
+  }
+
+  private async beginNativeEntry(
+    transaction: SqlExecutor,
+    match: LockedMatchRow,
+    context: Pick<NativeEntryState, "roundNumber" | "deathmatchSequence" | "playableLevelId">,
+    now: Date,
+  ): Promise<void> {
+    const entry: NativeEntryState = {
+      ...context,
+      deadlineAt: new Date(now.getTime() + NATIVE_ENTRY_TIMEOUT_MS).toISOString(),
+      entered: { A: false, B: false },
+      startsAt: null,
+    };
+    const state = context.deathmatchSequence ? "DEATHMATCH_ENTERING" : "ROUND_ENTERING";
+    await transaction.query(
+      `UPDATE ranked_matches SET state = $2, entry_state = $3::jsonb,
+        ready_deadline_at = NULL, deadline_at = $4, state_version = state_version + 1 WHERE id = $1`,
+      [match.id, state, JSON.stringify(entry), entry.deadlineAt],
+    );
+    if (!context.deathmatchSequence) {
+      await transaction.query(
+        `UPDATE ranked_rounds SET phase = 'ROUND_ENTERING', ready_deadline_at = NULL,
+          state_version = state_version + 1 WHERE match_id = $1 AND round_number = $2`,
+        [match.id, context.roundNumber],
+      );
+    }
+  }
+
+  public async reportResourceFailure(
+    matchId: string,
+    matchToken: string,
+    session: RankedSessionContext,
+    body: ResourceFailureDto,
+  ) {
+    if (body.resource !== "MAP") {
+      throw new ConflictException("Only map download failure is a Ranked-fatal resource failure");
+    }
+    const now = this.clock.now();
+    await this.database.transaction(async (transaction) => {
+      const authorization = await this.access.authorize(transaction, matchId, session, matchToken);
+      let match = await this.lockMatch(transaction, matchId);
+      match = await this.advanceLockedMatch(transaction, match, now);
+      if (match.state === "ROUND_PREPARE" && match.current_round_number) {
+        const round = await this.lockCurrentRound(transaction, match);
+        if (round.round_number === 1) {
+          await this.cancelMatch(transaction, match.id, "ROUND_1_MAP_DOWNLOAD_TIMEOUT", now);
+          return;
+        }
+        await this.finalizeMatch(
+          transaction,
+          match,
+          authorization.side === "A" ? "B" : "A",
+          now,
+        );
+        return;
+      }
+      if (match.state === "DEATHMATCH_PREPARE") {
+        await this.finalizeMatch(
+          transaction,
+          match,
+          authorization.side === "A" ? "B" : "A",
+          now,
+        );
+        return;
+      }
+      if (match.state === "MATCH_RESULT" || match.state === "CANCELLED") return;
+      throw new ConflictException(`Map download failure is not accepted in ${match.state}`);
+    });
+    return this.state(matchId, matchToken, session);
+  }
+
+  public async submitBan(
+    matchId: string,
+    matchToken: string,
+    session: RankedSessionContext,
+    body: SubmitBanDto,
+  ) {
+    const now = this.clock.now();
+    await this.database.transaction(async (transaction) => {
+      const authorization = await this.access.authorize(transaction, matchId, session, matchToken);
+      let match = await this.lockMatch(transaction, matchId);
+      match = await this.advanceLockedMatch(transaction, match, now);
+      if (match.state !== "BAN_PHASE") {
+        throw new ConflictException(`Ban is not accepted in ${match.state}`);
+      }
+      const canonicalLevelId = body.canonicalLevelId?.trim() || null;
+      const candidates = parseJson<RankedMapSnapshot[]>(match.candidate_maps_snapshot);
+      if (
+        canonicalLevelId &&
+        !candidates.some((candidate) => candidate.canonicalLevelId === canonicalLevelId)
+      ) {
+        throw new ConflictException("Selected ban is outside the candidate set");
+      }
+      const confirmedColumn = sideColumn(authorization.side, "ban") + "_confirmed_at";
+      const banColumn = sideColumn(authorization.side, "ban") + "_canonical_id";
+      const existingConfirmed = authorization.side === "A"
+        ? match.ban_a_confirmed_at
+        : match.ban_b_confirmed_at;
+      const existingBan = authorization.side === "A"
+        ? match.ban_a_canonical_id
+        : match.ban_b_canonical_id;
+      if (existingConfirmed) {
+        if (existingBan !== canonicalLevelId) {
+          throw new ConflictException("A confirmed ban cannot be changed");
+        }
+        return;
+      }
+      await transaction.query(
+        `UPDATE ranked_matches
+         SET ${banColumn} = $2, ${confirmedColumn} = $3, state_version = state_version + 1
+         WHERE id = $1`,
+        [matchId, canonicalLevelId, now.toISOString()],
+      );
+      match = await this.lockMatch(transaction, matchId);
+      if (match.ban_a_confirmed_at && match.ban_b_confirmed_at) {
+        await this.finalizeBans(transaction, match, now);
+      }
+    });
+    return this.state(matchId, matchToken, session);
+  }
+
+  public async state(
+    matchId: string,
+    matchToken: string,
+    session: RankedSessionContext,
+  ) {
+    const now = this.clock.now();
+    return this.database.transaction(async (transaction) => {
+      const authorization = await this.access.authorize(transaction, matchId, session, matchToken);
+      let match = await this.lockMatch(transaction, matchId);
+      match = await this.advanceLockedMatch(transaction, match, now);
+      if (match.state !== "MATCH_RESULT" && match.state !== "CANCELLED") {
+        const column = sideColumn(authorization.side, "last_heartbeat");
+        await transaction.query(
+          `UPDATE ranked_matches SET ${column}_at = $2 WHERE id = $1`,
+          [matchId, now.toISOString()],
+        );
+        match = await this.lockMatch(transaction, matchId);
+      }
+      return this.buildPublicState(transaction, match, session.playerId, now);
+    });
+  }
+
+  public async heartbeat(
+    matchId: string,
+    matchToken: string,
+    session: RankedSessionContext,
+  ) {
+    const now = this.clock.now();
+    await this.database.transaction(async (transaction) => {
+      const authorization = await this.access.authorize(transaction, matchId, session, matchToken);
+      let match = await this.lockMatch(transaction, matchId);
+      match = await this.advanceLockedMatch(transaction, match, now);
+      if (match.state === "MATCH_RESULT" || match.state === "CANCELLED") return;
+      const column = sideColumn(authorization.side, "last_heartbeat");
+      await transaction.query(
+        `UPDATE ranked_matches SET ${column}_at = $2 WHERE id = $1`,
+        [matchId, now.toISOString()],
+      );
+    });
+    return this.state(matchId, matchToken, session);
+  }
+
+  public async updatePracticePresence(
+    matchId: string,
+    matchToken: string,
+    session: RankedSessionContext,
+    body: PracticePresenceDto,
+  ) {
+    const now = this.clock.now();
+    return this.database.transaction(async (transaction) => {
+      const authorization = await this.access.authorize(transaction, matchId, session, matchToken);
+      let match = await this.lockMatch(transaction, matchId);
+      match = await this.advanceLockedMatch(transaction, match, now);
+
+      let runtimeSlot: number | null = null;
+      if (match.state === "DEATHMATCH_PLAYING" && match.current_deathmatch_id) {
+        const deathmatch = await this.currentDeathmatch(transaction, match);
+        runtimeSlot = deathmatchRuntimeSlot(Number(deathmatch.sequence));
+      } else if (this.isRoundPlaying(match.state) && match.current_round_number) {
+        runtimeSlot = Number(match.current_round_number);
+      }
+
+      if (runtimeSlot === null) {
+        return {
+          accepted: false,
+          practice: false,
+          reason: `PRACTICE_PRESENCE_NOT_ACCEPTED_IN_${match.state}`,
+          serverNow: now.toISOString(),
+        };
+      }
+
+      // Practice presence is deliberately non-scoring and ephemeral. It exists
+      // only so the opponent HUD can show the wrench; no Attempt/clock/round
+      // state is mutated here.
+      this.runtimeState.setPractice(match.id, runtimeSlot, authorization.side, body.practice);
+      return {
+        accepted: true,
+        practice: body.practice,
+        reason: null,
+        serverNow: now.toISOString(),
+      };
+    });
+  }
+
+  public async changePause(matchId: string, matchToken: string, session: RankedSessionContext, body: MatchPauseDto) {
+    const now = this.clock.now();
+    return this.database.transaction(async transaction => {
+      const authorization = await this.access.authorize(transaction, matchId, session, matchToken);
+      let match = await this.lockMatch(transaction, matchId);
+      if (match.state === "ROUND_ENTERING" || match.state === "DEATHMATCH_ENTERING") {
+        match = await this.advanceLockedMatch(transaction, match, now);
+      }
+      const pauses = match.pause_state ? parseJson<Partial<Record<PlayerSide, MatchPauseState>>>(match.pause_state) : {};
+      const current = pauses[authorization.side] ?? emptyMatchPause();
+      if (body.paused && !this.isRoundPlaying(match.state) && match.state !== "DEATHMATCH_PLAYING") {
+        return { ...matchPauseView(current, now.getTime()), accepted: false, serverNow: now.toISOString() };
+      }
+      pauses[authorization.side] = changeMatchPause(current, body.leaseId, body.paused, now.getTime());
+      await transaction.query("UPDATE ranked_matches SET pause_state = $2::jsonb WHERE id = $1",
+        [matchId, JSON.stringify(pauses)]);
+      // Wall-clock round deadlines and final Attempt permissions never change.
+      return { ...matchPauseView(pauses[authorization.side]!, now.getTime()), accepted: true, side: authorization.side, serverNow: now.toISOString() };
+    });
+  }
+
+  public async surrender(matchId: string, matchToken: string, session: RankedSessionContext, body: SurrenderDto) {
+    const now = this.clock.now();
+    return this.database.transaction(async transaction => {
+      const authorization = await this.access.authorize(transaction, matchId, session, matchToken);
+      let match = await this.lockMatch(transaction, matchId);
+      const events = match.surrender_events ? parseJson<Array<{ side: PlayerSide; id: string; scope: "ROUND" | "MATCH"; roundNumber: number; deathmatchSequence: number }>>(match.surrender_events) : [];
+      if (events.some(event => event.side === authorization.side && event.id === body.clientEventId)) {
+        return this.buildPublicState(transaction, match, session.playerId, now);
+      }
+      match = await this.advanceLockedMatch(transaction, match, now);
+      const winner: PlayerSide = authorization.side === "A" ? "B" : "A";
+      if (match.state === "DEATHMATCH_PLAYING" && match.current_deathmatch_id) {
+        const deathmatch = await this.currentDeathmatch(transaction, match);
+        if (body.deathmatchSequence !== Number(deathmatch.sequence)) throw new ConflictException("SURRENDER_CONTEXT_CHANGED");
+        await transaction.query(`UPDATE ranked_deathmatch_attempts SET ended_at = $2, valid = FALSE,
+          invalid_reason = 'SURRENDER', cleared = FALSE, awarded_score = 0
+          WHERE deathmatch_id = $1 AND ended_at IS NULL`, [deathmatch.id, now.toISOString()]);
+        await transaction.query(`UPDATE ranked_deathmatches SET winner_id = $2, finished_at = $3
+          WHERE id = $1 AND finished_at IS NULL`, [deathmatch.id,
+          winner === "A" ? match.player_a_id : match.player_b_id, now.toISOString()]);
+        const series = applyDeathmatchWinner(parseJson<MatchSeriesState>(match.series_state), winner);
+        await transaction.query("UPDATE ranked_matches SET series_state = $2::jsonb WHERE id = $1", [match.id, JSON.stringify(series)]);
+        this.runtimeState.clearRound(match.id, deathmatchRuntimeSlot(Number(deathmatch.sequence)));
+        await this.outbox.enqueueMatchEvent(transaction, match, "DEATHMATCH_RESULT", `match:${match.id}:deathmatch:${deathmatch.id}:result`,
+          { sequence: Number(deathmatch.sequence), winnerSide: winner, reason: "SURRENDER", repeatRequired: false }, now);
+        await this.finalizeMatch(transaction, match, winner, now);
+      } else {
+        if (!this.isRoundPlaying(match.state) || body.deathmatchSequence !== 0 || body.roundNumber !== Number(match.current_round_number)) {
+          throw new ConflictException("SURRENDER_CONTEXT_CHANGED");
+        }
+        const round = await this.lockCurrentRound(transaction, match);
+        const domain = surrenderRound(this.roundState(round), authorization.side, now.getTime());
+        await transaction.query(`UPDATE ranked_attempts SET ended_at = $2, valid = FALSE,
+          invalid_reason = 'SURRENDER', cleared = FALSE, awarded_score = 0
+          WHERE round_id = $1 AND ended_at IS NULL`, [round.id, now.toISOString()]);
+        await transaction.query(`UPDATE ranked_attempt_start_leases SET invalidated_at = $2
+          WHERE round_id = $1 AND consumed_at IS NULL AND invalidated_at IS NULL`, [round.id, now.toISOString()]);
+        await this.persistRoundState(transaction, match, round, domain, now, body.scope === "MATCH");
+      }
+      events.push({ side: authorization.side, id: body.clientEventId, scope: body.scope, roundNumber: body.roundNumber, deathmatchSequence: body.deathmatchSequence });
+      await transaction.query("UPDATE ranked_matches SET surrender_events = $2::jsonb WHERE id = $1", [match.id, JSON.stringify(events)]);
+      const completed = await this.lockMatch(transaction, match.id);
+      return this.buildPublicState(transaction, completed, session.playerId, now);
+    });
+  }
+
+  public async startAttemptIntent(
+    matchId: string,
+    matchToken: string,
+    session: RankedSessionContext,
+    body: AttemptStartIntentDto,
+  ) {
+    const now = this.clock.now();
+    return this.database.transaction(async (transaction) => {
+      const authorization = await this.access.authorize(transaction, matchId, session, matchToken);
+      let match = await this.lockMatch(transaction, matchId);
+      if (match.state === "ROUND_ENTERING" || match.state === "DEATHMATCH_ENTERING") {
+        match = await this.advanceLockedMatch(transaction, match, now);
+      }
+
+      // Intent delivery is independently retried by the client. If the ordinary
+      // authoritative Start beat this packet, acknowledge the lease as a duplicate
+      // instead of recreating a stale hold after the attempt already exists.
+      const existingAttempt = await this.findRoundAttemptByStartEvent(
+        transaction,
+        match.id,
+        session.playerId,
+        body.clientEventId,
+      );
+      if (existingAttempt) {
+        await this.consumeStartLeaseByIdentity(
+          transaction,
+          match.id,
+          session.playerId,
+          body.clientEventId,
+          now,
+        );
+        return { accepted: true, duplicate: true, reason: null, serverNow: now.toISOString() };
+      }
+
+      if (!this.isRoundPlaying(match.state)) {
+        return { accepted: false, reason: `ATTEMPT_INTENT_NOT_ACCEPTED_IN_${match.state}`, serverNow: now.toISOString() };
+      }
+      const round = await this.lockCurrentRound(transaction, match);
+      this.assertPlayableLevelId(body.levelId, round.playable_level_id);
+      const state = this.roundState(round);
+      const parsed = new Date(body.clientStartedAt);
+      if (Number.isNaN(parsed.getTime())) {
+        return { accepted: false, reason: "INVALID_CLIENT_STARTED_AT", serverNow: now.toISOString() };
+      }
+      const startedAtMs = parsed.getTime();
+      const entry = match.entry_state ? parseJson<NativeEntryState>(match.entry_state) : null;
+      if (entry?.startsAt && startedAtMs < Date.parse(entry.startsAt)) {
+        return { accepted: false, reason: "ATTEMPT_INTENT_TIMESTAMP_BEFORE_COUNTDOWN", serverNow: now.toISOString() };
+      }
+      const deadline = state.lastAttemptWindow?.endsAtMs ?? state.finalWindowEndAtMs;
+      if (startedAtMs > now.getTime() + ATTEMPT_START_INTENT_FUTURE_SKEW_MS) {
+        return { accepted: false, reason: "ATTEMPT_INTENT_TIMESTAMP_IN_FUTURE", serverNow: now.toISOString() };
+      }
+      // alpha.33: the lease covers EVERY visual Round attempt, not only the
+      // FINAL/LAST window. This closes the Round-2 fast-clear race where the
+      // serialized Start/End queue could still be behind when polling finalized
+      // the Round. The server-observed intent must still arrive near the real
+      // start deadline, so a client cannot back-date an attempt after time expires.
+      if (startedAtMs < state.startedAtMs - ATTEMPT_START_INTENT_FUTURE_SKEW_MS) {
+        return { accepted: false, reason: "ATTEMPT_INTENT_TIMESTAMP_BEFORE_ROUND", serverNow: now.toISOString() };
+      }
+      if (startedAtMs >= deadline) {
+        return { accepted: false, reason: "ATTEMPT_START_WINDOW_CLOSED", serverNow: now.toISOString() };
+      }
+      if (now.getTime() > deadline + ATTEMPT_TRANSPORT_GRACE_MS) {
+        return { accepted: false, reason: "ATTEMPT_INTENT_ARRIVED_TOO_LATE", serverNow: now.toISOString() };
+      }
+      if (state.lastAttemptWindow && state.lastAttemptWindow.targetSide !== authorization.side) {
+        return { accepted: false, reason: "LAST_ATTEMPT_TARGET_ONLY", serverNow: now.toISOString() };
+      }
+
+      const lease = await this.noteStartLease(
+        transaction,
+        match,
+        round,
+        session.playerId,
+        authorization.side,
+        body.levelId,
+        body.clientEventId,
+        parsed,
+        now,
+      );
+      return {
+        accepted: true,
+        duplicate: lease.duplicate,
+        reason: null,
+        serverNow: now.toISOString(),
+      };
+    });
+  }
+
+  public async startAttempt(
+    matchId: string,
+    matchToken: string,
+    session: RankedSessionContext,
+    body: AttemptStartDto,
+  ) {
+    const now = this.clock.now();
+    return this.database.transaction(async (transaction) => {
+      const authorization = await this.access.authorize(transaction, matchId, session, matchToken);
+      let match = await this.lockMatch(transaction, matchId);
+
+      // ACK loss must be idempotent even after the Round has already advanced.
+      // Check the durable attempt row before advancing clocks/state.
+      const existing = await this.findRoundAttemptByStartEvent(
+        transaction,
+        match.id,
+        session.playerId,
+        body.clientEventId,
+      );
+      if (existing) {
+        await this.consumeStartLeaseByIdentity(
+          transaction,
+          match.id,
+          session.playerId,
+          body.clientEventId,
+          now,
+        );
+        return {
+          accepted: true,
+          duplicate: true,
+          attemptId: existing.domain_attempt_id,
+          reason: null,
+          serverNow: now.toISOString(),
+        };
+      }
+
+      // Death Match Start is idempotent as well. The original Start can commit
+      // and its HTTP acknowledgement can be lost just as the third attempt ends
+      // and the match advances to DEATHMATCH_RESULT/MATCH_RESULT. A retry must
+      // retire the client journal instead of being rejected by the newer state.
+      const existingDeathmatchStart = await this.findDeathmatchAttemptByStartEvent(
+        transaction,
+        match.id,
+        session.playerId,
+        body.clientEventId,
+      );
+      if (existingDeathmatchStart) {
+        return {
+          accepted: true,
+          duplicate: true,
+          attemptId: existingDeathmatchStart.id,
+          attemptNumber: Number(existingDeathmatchStart.attempt_sequence),
+          reason: null,
+          serverNow: now.toISOString(),
+        };
+      }
+
+      let matchingLease: AttemptStartLeaseRow | null = null;
+      if (match.state !== "DEATHMATCH_PLAYING" && this.isRoundPlaying(match.state) && match.current_round_number) {
+        const currentRound = await this.lockCurrentRound(transaction, match);
+        matchingLease = await this.findStartLease(
+          transaction,
+          currentRound.id,
+          session.playerId,
+          body.clientEventId,
+        );
+        // A durable lease was observed while the visual attempt was legal. Do not
+        // let a clock poll finalize the Round before this serialized Start catches up.
+        if (!matchingLease) match = await this.advanceLockedMatch(transaction, match, now);
+      } else {
+        match = await this.advanceLockedMatch(transaction, match, now);
+      }
+      if (match.state === "DEATHMATCH_PLAYING") {
+        return this.startDeathmatchAttempt(
+          transaction,
+          match,
+          authorization.side,
+          session.playerId,
+          body,
+          now,
+        );
+      }
+      if (!this.isRoundPlaying(match.state)) {
+        return {
+          accepted: false,
+          duplicate: false,
+          attemptId: null,
+          reason: `ATTEMPT_START_NOT_ACCEPTED_IN_${match.state}`,
+          serverNow: now.toISOString(),
+        };
+      }
+
+      const round = await this.lockCurrentRound(transaction, match);
+      this.assertPlayableLevelId(body.levelId, round.playable_level_id);
+      const roundState = this.roundState(round);
+      const clientStart = resolveAttemptStartTime(body.clientStartedAt, now);
+      if (!matchingLease || matchingLease.round_id !== round.id) {
+        matchingLease = await this.findStartLease(
+          transaction,
+          round.id,
+          session.playerId,
+          body.clientEventId,
+        );
+      }
+      const effectiveStartMs = Math.max(roundState.lastEvaluatedAtMs, clientStart.getTime());
+      const decision = matchingLease
+        ? startRoundAttemptFromIntent(
+            roundState,
+            authorization.side,
+            new Date(matchingLease.client_started_at).getTime(),
+            now.getTime(),
+            body.clientEventId,
+          )
+        : startRoundAttempt(
+            roundState,
+            authorization.side,
+            effectiveStartMs,
+            body.clientEventId,
+          );
+
+      if (decision.accepted && !decision.duplicate && decision.attemptId) {
+        const attempt = decision.state.attempts[authorization.side].find(
+          (candidate) => candidate.id === decision.attemptId,
+        );
+        if (!attempt) throw new Error("Accepted attempt was not persisted in domain state");
+        await transaction.query(
+          `INSERT INTO ranked_attempts (
+             id, round_id, player_id, attempt_sequence, domain_attempt_id,
+             server_accepted_start_at, client_started_at,
+             level_id, played_level_id, client_start_event_id
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8, $9)
+           ON CONFLICT (round_id, player_id, client_start_event_id) DO NOTHING`,
+          [
+            this.ids.next(),
+            round.id,
+            session.playerId,
+            attempt.sequence,
+            attempt.id,
+            now.toISOString(),
+            body.clientStartedAt ? clientStart.toISOString() : null,
+            body.levelId,
+            body.clientEventId,
+          ],
+        );
+      }
+
+      if (matchingLease) {
+        if (decision.accepted || decision.duplicate) {
+          await this.consumeStartLease(transaction, matchingLease.id, now);
+        } else if (decision.reason !== "ATTEMPT_ALREADY_ACTIVE") {
+          await this.invalidateStartLease(transaction, matchingLease.id, now);
+        }
+      }
+      await this.persistRoundState(transaction, match, round, decision.state, now);
+      if (
+        decision.accepted &&
+        decision.attemptId &&
+        !this.runtimeState.progress(match.id, round.round_number, authorization.side)
+      ) {
+        this.runtimeState.beginAttempt(
+          match.id,
+          round.round_number,
+          authorization.side,
+          decision.attemptId,
+          now.getTime(),
+        );
+      }
+      return {
+        accepted: decision.accepted,
+        duplicate: decision.duplicate,
+        attemptId: decision.attemptId,
+        reason: decision.reason,
+        stateVersion: decision.state.stateVersion,
+        deadlineAt: this.domainDeadlineIso(decision.state),
+        roundSnapshot: {
+          roundNumber: Number(round.round_number),
+          phase: decision.state.phase,
+          scores: decision.state.scores,
+          displayScores: decision.state.scores,
+          clears: decision.state.clears,
+          lastAttemptWindow: decision.state.lastAttemptWindow,
+        },
+        serverNow: now.toISOString(),
+      };
+    });
+  }
+
+  public async endAttempt(
+    matchId: string,
+    matchToken: string,
+    session: RankedSessionContext,
+    body: AttemptEndDto,
+  ) {
+    const now = this.clock.now();
+    return this.database.transaction(async (transaction) => {
+      const authorization = await this.access.authorize(transaction, matchId, session, matchToken);
+      let match = await this.lockMatch(transaction, matchId);
+
+      // End retries can arrive after the authoritative Round result when the
+      // original database commit succeeded but its HTTP ACK was lost. Accept the
+      // stored result before advancing clocks so the client can safely retire the
+      // journal entry without double scoring.
+      const existingEnded = await this.findRoundEndedAttemptByEndEvent(
+        transaction,
+        match.id,
+        session.playerId,
+        body.clientEventId,
+      );
+      if (existingEnded) {
+        return {
+          accepted: true,
+          duplicate: true,
+          reason: "ATTEMPT_ALREADY_ENDED",
+          awardedScore: Number(existingEnded.awarded_score),
+          serverNow: now.toISOString(),
+        };
+      }
+
+      const existingDeathmatchEnd = await this.findDeathmatchAttemptByEndEvent(
+        transaction,
+        match.id,
+        session.playerId,
+        body.clientEventId,
+      );
+      if (existingDeathmatchEnd) {
+        return {
+          accepted: true,
+          duplicate: true,
+          reason: "ATTEMPT_ALREADY_ENDED",
+          awardedScore: Number(existingDeathmatchEnd.awarded_score ?? 0),
+          serverNow: now.toISOString(),
+        };
+      }
+
+      match = await this.advanceLockedMatch(transaction, match, now);
+      if (match.state === "DEATHMATCH_PLAYING") {
+        return this.endDeathmatchAttempt(
+          transaction,
+          match,
+          authorization.side,
+          session.playerId,
+          body,
+          now,
+        );
+      }
+      if (!this.isRoundPlaying(match.state)) {
+        return {
+          accepted: false,
+          duplicate: false,
+          reason: `ATTEMPT_END_NOT_ACCEPTED_IN_${match.state}`,
+          awardedScore: 0,
+          serverNow: now.toISOString(),
+        };
+      }
+      const round = await this.lockCurrentRound(transaction, match);
+      this.assertPlayableLevelId(body.levelId, round.playable_level_id);
+      const decision = endRoundAttempt(
+        this.roundState(round),
+        authorization.side,
+        body.attemptId,
+        now.getTime(),
+        body.progressPercent,
+        body.cleared,
+        body.clientEventId,
+      );
+      if (decision.accepted && !decision.duplicate) {
+        const attempt = decision.state.attempts[authorization.side].find(
+          (candidate) => candidate.id === body.attemptId,
+        );
+        if (!attempt) throw new Error("Ended attempt is missing from domain state");
+        await transaction.query(
+          `UPDATE ranked_attempts
+           SET ended_at = $4, client_ended_at = $5, progress_percent = $6,
+               cleared = $7, awarded_score = $8, valid = $9,
+               invalid_reason = $10, client_end_event_id = $11
+           WHERE round_id = $1 AND player_id = $2 AND domain_attempt_id = $3
+             AND ended_at IS NULL`,
+          [
+            round.id,
+            session.playerId,
+            body.attemptId,
+            now.toISOString(),
+            body.clientEndedAt ?? null,
+            attempt.progressPercent,
+            attempt.cleared,
+            attempt.awardedScore,
+            attempt.valid,
+            attempt.invalidReason,
+            body.clientEventId,
+          ],
+        );
+        if (attempt.valid && attempt.cleared) {
+          await this.outbox.enqueueMatchEvent(
+            transaction,
+            match,
+            "CLEAR_EVENT",
+            `match:${match.id}:round:${round.round_number}:clear:${attempt.id}`,
+            {
+              phase: "ROUND",
+              roundNumber: Number(round.round_number),
+              mapTitle: round.title,
+              side: authorization.side,
+              scores: decision.state.scores,
+              clears: decision.state.clears,
+            },
+            now,
+          );
+        }
+        const previousState = this.roundState(round);
+        if (!previousState.lastAttemptWindow && decision.state.lastAttemptWindow) {
+          await this.outbox.enqueueMatchEvent(
+            transaction,
+            match,
+            "LAST_ATTEMPT",
+            `match:${match.id}:round:${round.round_number}:last-attempt`,
+            {
+              roundNumber: Number(round.round_number),
+              targetSide: decision.state.lastAttemptWindow.targetSide,
+              windowSeconds: Math.round(
+                (decision.state.lastAttemptWindow.endsAtMs -
+                  decision.state.lastAttemptWindow.startedAtMs) /
+                  1_000,
+              ),
+            },
+            now,
+          );
+        }
+      }
+      await this.persistRoundState(transaction, match, round, decision.state, now);
+      if (decision.accepted) {
+        this.runtimeState.endAttempt(
+          match.id,
+          round.round_number,
+          authorization.side,
+          body.attemptId,
+          body.cleared,
+        );
+      }
+      const endedAttempt = decision.state.attempts[authorization.side].find(
+        (candidate) => candidate.id === body.attemptId,
+      );
+      return {
+        accepted: decision.accepted,
+        duplicate: decision.duplicate,
+        reason: decision.reason,
+        awardedScore: endedAttempt?.awardedScore ?? 0,
+        stateVersion: decision.state.stateVersion,
+        deadlineAt: this.domainDeadlineIso(decision.state),
+        roundSnapshot: {
+          roundNumber: Number(round.round_number),
+          phase: decision.state.phase,
+          scores: decision.state.scores,
+          displayScores: decision.state.scores,
+          clears: decision.state.clears,
+          lastAttemptWindow: decision.state.lastAttemptWindow,
+        },
+        serverNow: now.toISOString(),
+      };
+    });
+  }
+
+  public async updateAttemptProgress(
+    matchId: string,
+    matchToken: string,
+    session: RankedSessionContext,
+    body: AttemptProgressDto,
+  ) {
+    const now = this.clock.now();
+    return this.database.transaction(async (transaction) => {
+      const authorization = await this.access.authorize(transaction, matchId, session, matchToken);
+      let match = await this.lockMatch(transaction, matchId);
+      if (match.deadline_at && now.getTime() >= new Date(match.deadline_at).getTime()) {
+        match = await this.advanceLockedMatch(transaction, match, now);
+      }
+      if (match.state === "DEATHMATCH_PLAYING") {
+        return this.updateDeathmatchAttemptProgress(
+          transaction,
+          match,
+          authorization.side,
+          session.playerId,
+          body,
+          now,
+        );
+      }
+      if (!this.isRoundPlaying(match.state)) {
+        throw new ConflictException(`Attempt progress is not accepted in ${match.state}`);
+      }
+      const round = await this.lockCurrentRound(transaction, match);
+      this.assertPlayableLevelId(body.levelId, round.playable_level_id);
+      const state = this.roundState(round);
+      const activeAttempt = state.attempts[authorization.side].find(
+        (attempt) =>
+          attempt.id === body.attemptId &&
+          attempt.valid &&
+          attempt.endedAtMs === null,
+      );
+      if (!activeAttempt) {
+        throw new ConflictException("Attempt progress requires the active server attempt");
+      }
+      const stored = this.runtimeState.updateProgress(
+        match.id,
+        round.round_number,
+        authorization.side,
+        body.attemptId,
+        body.progressPercent,
+        now.getTime(),
+      );
+      const progressA = this.runtimeState.progress(match.id, round.round_number, "A");
+      const progressB = this.runtimeState.progress(match.id, round.round_number, "B");
+      const qualifyingPercent = Number(round.qualifying_percent);
+      return {
+        accepted: true,
+        stored,
+        roundSnapshot: {
+          roundNumber: Number(round.round_number),
+          phase: state.phase,
+          scores: state.scores,
+          displayScores: {
+            A: state.scores.A + (progressA
+              ? scoreAttempt(progressA.progressPercent, false, qualifyingPercent)
+              : 0),
+            B: state.scores.B + (progressB
+              ? scoreAttempt(progressB.progressPercent, false, qualifyingPercent)
+              : 0),
+          },
+          clears: state.clears,
+          lastAttemptWindow: state.lastAttemptWindow,
+        },
+        serverNow: now.toISOString(),
+      };
+    });
+  }
+
+  private async lockMatch(transaction: SqlExecutor, matchId: string): Promise<LockedMatchRow> {
+    const result = await transaction.query<LockedMatchRow>(
+      `SELECT m.*, c.source_payload
+       FROM ranked_matches m
+       JOIN ranked_config_snapshots c ON c.id = m.config_snapshot_id
+       WHERE m.id = $1
+       FOR UPDATE OF m`,
+      [matchId],
+    );
+    const match = result.rows[0];
+    if (!match) throw new NotFoundException("Ranked match not found");
+    return match;
+  }
+
+  private matchConfig(match: LockedMatchRow): RankedConfigSnapshot {
+    return parseJson<RankedConfigSnapshot>(match.source_payload);
+  }
+
+  private async lockCurrentRound(
+    transaction: SqlExecutor,
+    match: LockedMatchRow,
+  ): Promise<RoundRow> {
+    if (!match.current_round_number) throw new ConflictException("Match has no current round");
+    const result = await transaction.query<RoundRow>(
+      `SELECT * FROM ranked_rounds
+       WHERE match_id = $1 AND round_number = $2
+       FOR UPDATE`,
+      [match.id, match.current_round_number],
+    );
+    const round = result.rows[0];
+    if (!round) throw new Error("Current round row is missing");
+    return round;
+  }
+
+  private roundState(round: RoundRow): RoundState {
+    if (!round.domain_state) throw new ConflictException("Round has not started");
+    const state = parseJson<RoundState>(round.domain_state);
+    // Matches created before v0.4 did not serialize clearTarget. Preserve their
+    // snapshotted two-Clear behavior during a rolling deploy; all newly created
+    // v0.4 matches are validated at exactly three Clears.
+    if (!Number.isSafeInteger(state.rules.clearTarget) || state.rules.clearTarget <= 0) {
+      state.rules = {
+        ...state.rules,
+        clearTarget: state.rules.rulesVersion === "corum-ranked-v0.3" ? 2 : 3,
+      };
+    }
+    return state;
+  }
+
+  private isRoundPlaying(state: MatchState): boolean {
+    return [
+      "ROUND_PLAYING",
+      "FINAL_ATTEMPT_WINDOW",
+      "LAST_ATTEMPT_WINDOW",
+      "ROUND_SETTLING",
+    ].includes(state);
+  }
+
+  private domainDeadlineIso(state: RoundState): string | null {
+    const deadline = roundDeadlineAtMs(state);
+    return deadline === null ? null : new Date(deadline).toISOString();
+  }
+
+  private assertPlayableLevelId(actual: string, expected: string): void {
+    if (actual.trim() !== expected) {
+      throw new ConflictException("Attempt Level ID does not match the Round playableLevelId snapshot");
+    }
+  }
+
+  private async findRoundAttemptByStartEvent(
+    transaction: SqlExecutor,
+    matchId: string,
+    playerId: string,
+    clientStartEventId: string,
+  ): Promise<RankedAttemptLookupRow | null> {
+    const result = await transaction.query<RankedAttemptLookupRow>(
+      `SELECT a.round_id, a.domain_attempt_id, a.attempt_sequence, a.ended_at,
+              a.awarded_score, a.client_end_event_id
+       FROM ranked_attempts a
+       JOIN ranked_rounds r ON r.id = a.round_id
+       WHERE r.match_id = $1 AND a.player_id = $2 AND a.client_start_event_id = $3
+       ORDER BY r.round_number DESC
+       LIMIT 1`,
+      [matchId, playerId, clientStartEventId],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  private async findRoundEndedAttemptByEndEvent(
+    transaction: SqlExecutor,
+    matchId: string,
+    playerId: string,
+    clientEndEventId: string,
+  ): Promise<RankedAttemptLookupRow | null> {
+    const result = await transaction.query<RankedAttemptLookupRow>(
+      `SELECT a.round_id, a.domain_attempt_id, a.attempt_sequence, a.ended_at,
+              a.awarded_score, a.client_end_event_id
+       FROM ranked_attempts a
+       JOIN ranked_rounds r ON r.id = a.round_id
+       WHERE r.match_id = $1 AND a.player_id = $2
+         AND a.client_end_event_id = $3 AND a.ended_at IS NOT NULL
+       ORDER BY r.round_number DESC
+       LIMIT 1`,
+      [matchId, playerId, clientEndEventId],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  private async findDeathmatchAttemptByStartEvent(
+    transaction: SqlExecutor,
+    matchId: string,
+    playerId: string,
+    clientStartEventId: string,
+  ): Promise<DeathmatchAttemptLookupRow | null> {
+    const result = await transaction.query<DeathmatchAttemptLookupRow>(
+      `SELECT a.id, a.deathmatch_id, a.attempt_sequence, a.ended_at,
+              a.awarded_score, a.client_start_event_id, a.client_end_event_id
+       FROM ranked_deathmatch_attempts a
+       JOIN ranked_deathmatches d ON d.id = a.deathmatch_id
+       WHERE d.match_id = $1 AND a.player_id = $2 AND a.client_start_event_id = $3
+       ORDER BY d.sequence DESC
+       LIMIT 1`,
+      [matchId, playerId, clientStartEventId],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  private async findDeathmatchAttemptByEndEvent(
+    transaction: SqlExecutor,
+    matchId: string,
+    playerId: string,
+    clientEndEventId: string,
+  ): Promise<DeathmatchAttemptLookupRow | null> {
+    const result = await transaction.query<DeathmatchAttemptLookupRow>(
+      `SELECT a.id, a.deathmatch_id, a.attempt_sequence, a.ended_at,
+              a.awarded_score, a.client_start_event_id, a.client_end_event_id
+       FROM ranked_deathmatch_attempts a
+       JOIN ranked_deathmatches d ON d.id = a.deathmatch_id
+       WHERE d.match_id = $1 AND a.player_id = $2
+         AND a.client_end_event_id = $3 AND a.ended_at IS NOT NULL
+       ORDER BY d.sequence DESC
+       LIMIT 1`,
+      [matchId, playerId, clientEndEventId],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  private async findStartLease(
+    transaction: SqlExecutor,
+    roundId: string,
+    playerId: string,
+    clientStartEventId: string,
+  ): Promise<AttemptStartLeaseRow | null> {
+    const result = await transaction.query<AttemptStartLeaseRow>(
+      `SELECT *
+       FROM ranked_attempt_start_leases
+       WHERE round_id = $1 AND player_id = $2 AND client_start_event_id = $3
+         AND consumed_at IS NULL AND invalidated_at IS NULL
+       LIMIT 1`,
+      [roundId, playerId, clientStartEventId],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  private async noteStartLease(
+    transaction: SqlExecutor,
+    match: LockedMatchRow,
+    round: RoundRow,
+    playerId: string,
+    side: PlayerSide,
+    levelId: string,
+    clientStartEventId: string,
+    clientStartedAt: Date,
+    observedAt: Date,
+  ): Promise<{ lease: AttemptStartLeaseRow; duplicate: boolean }> {
+    const inserted = await transaction.query<AttemptStartLeaseRow>(
+      `INSERT INTO ranked_attempt_start_leases (
+         id, match_id, round_id, player_id, side, level_id,
+         client_start_event_id, client_started_at, observed_at
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       ON CONFLICT (round_id, player_id, client_start_event_id) DO NOTHING
+       RETURNING *`,
+      [
+        this.ids.next(),
+        match.id,
+        round.id,
+        playerId,
+        side,
+        levelId,
+        clientStartEventId,
+        clientStartedAt.toISOString(),
+        observedAt.toISOString(),
+      ],
+    );
+    if (inserted.rows[0]) return { lease: inserted.rows[0], duplicate: false };
+
+    const existing = await transaction.query<AttemptStartLeaseRow>(
+      `SELECT * FROM ranked_attempt_start_leases
+       WHERE round_id = $1 AND player_id = $2 AND client_start_event_id = $3
+       LIMIT 1`,
+      [round.id, playerId, clientStartEventId],
+    );
+    const lease = existing.rows[0];
+    if (!lease) throw new Error("Attempt start lease conflict row is missing");
+    return { lease, duplicate: true };
+  }
+
+  private async consumeStartLease(
+    transaction: SqlExecutor,
+    leaseId: string,
+    now: Date,
+  ): Promise<void> {
+    await transaction.query(
+      `UPDATE ranked_attempt_start_leases
+       SET consumed_at = COALESCE(consumed_at, $2)
+       WHERE id = $1 AND invalidated_at IS NULL`,
+      [leaseId, now.toISOString()],
+    );
+  }
+
+  private async consumeStartLeaseByIdentity(
+    transaction: SqlExecutor,
+    matchId: string,
+    playerId: string,
+    clientStartEventId: string,
+    now: Date,
+  ): Promise<void> {
+    await transaction.query(
+      `UPDATE ranked_attempt_start_leases
+       SET consumed_at = COALESCE(consumed_at, $4)
+       WHERE match_id = $1 AND player_id = $2 AND client_start_event_id = $3
+         AND invalidated_at IS NULL`,
+      [matchId, playerId, clientStartEventId, now.toISOString()],
+    );
+  }
+
+  private async invalidateStartLease(
+    transaction: SqlExecutor,
+    leaseId: string,
+    now: Date,
+  ): Promise<void> {
+    await transaction.query(
+      `UPDATE ranked_attempt_start_leases
+       SET invalidated_at = COALESCE(invalidated_at, $2)
+       WHERE id = $1 AND consumed_at IS NULL`,
+      [leaseId, now.toISOString()],
+    );
+  }
+
+  private async hasPendingStartLease(
+    transaction: SqlExecutor,
+    match: LockedMatchRow,
+    round: RoundRow,
+    state: RoundState,
+    now: Date,
+    side?: PlayerSide,
+  ): Promise<boolean> {
+    const result = await transaction.query<AttemptStartLeaseRow>(
+      `SELECT *
+       FROM ranked_attempt_start_leases
+       WHERE match_id = $1 AND round_id = $2
+         AND consumed_at IS NULL AND invalidated_at IS NULL
+       ORDER BY observed_at ASC`,
+      [match.id, round.id],
+    );
+    const deadline = state.lastAttemptWindow?.endsAtMs ?? state.finalWindowEndAtMs;
+    let pending = false;
+    for (const lease of result.rows) {
+      const authoritative = state.attempts[lease.side].some(
+        (attempt) => attempt.startEventId === lease.client_start_event_id,
+      );
+      if (authoritative) {
+        await this.consumeStartLease(transaction, lease.id, now);
+        continue;
+      }
+      const startedAtMs = new Date(lease.client_started_at).getTime();
+      const observedAtMs = new Date(lease.observed_at).getTime();
+      const hardExpired = now.getTime() - observedAtMs >= ATTEMPT_START_INTENT_HARD_TTL_MS;
+      const invalidTimestamp =
+        !Number.isFinite(startedAtMs) ||
+        startedAtMs < state.startedAtMs - ATTEMPT_START_INTENT_FUTURE_SKEW_MS ||
+        startedAtMs >= deadline;
+      const wrongLastAttemptSide =
+        Boolean(state.lastAttemptWindow) && state.lastAttemptWindow?.targetSide !== lease.side;
+      if (hardExpired || invalidTimestamp || wrongLastAttemptSide) {
+        await this.invalidateStartLease(transaction, lease.id, now);
+        continue;
+      }
+      if (!side || lease.side === side) pending = true;
+    }
+    return pending;
+  }
+
+  private async advanceLockedMatch(
+    transaction: SqlExecutor,
+    match: LockedMatchRow,
+    now: Date,
+  ): Promise<LockedMatchRow> {
+    const config = this.matchConfig(match);
+    if (!config.operational.timeouts || !config.operational.failurePolicy) {
+      throw new Error("Match snapshot is missing timeout/failure policy");
+    }
+
+    if (
+      !["MATCH_RESULT", "CANCELLED"].includes(match.state) &&
+      match.last_heartbeat_a_at &&
+      match.last_heartbeat_b_at
+    ) {
+      const graceMs = config.operational.timeouts.reconnectGraceSeconds * 1_000;
+      const staleA = now.getTime() - new Date(match.last_heartbeat_a_at).getTime() >= graceMs;
+      const staleB = now.getTime() - new Date(match.last_heartbeat_b_at).getTime() >= graceMs;
+      if (staleA || staleB) {
+        if (
+          config.operational.failurePolicy.reconnectTimeoutAction === "FORFEIT_DISCONNECTED" &&
+          staleA !== staleB
+        ) {
+          await this.finalizeMatch(transaction, match, staleA ? "B" : "A", now);
+        } else {
+          await this.cancelMatch(transaction, match.id, "RECONNECT_TIMEOUT", now);
+        }
+        return this.lockMatch(transaction, match.id);
+      }
+    }
+
+    if (
+      match.state === "MATCHED" &&
+      match.ready_deadline_at &&
+      now.getTime() >= new Date(match.ready_deadline_at).getTime()
+    ) {
+      await this.resolveReadyTimeout(transaction, match, now);
+      return this.lockMatch(transaction, match.id);
+    }
+    if (
+      match.state === "BAN_PHASE" &&
+      match.ban_deadline_at &&
+      now.getTime() >= new Date(match.ban_deadline_at).getTime()
+    ) {
+      await this.finalizeBans(transaction, match, now);
+      return this.lockMatch(transaction, match.id);
+    }
+    if (match.state === "ROUND_PREPARE") {
+      const round = await this.lockCurrentRound(transaction, match);
+      if (
+        round.ready_deadline_at &&
+        now.getTime() >= new Date(round.ready_deadline_at).getTime()
+      ) {
+        await this.resolveRoundReadyTimeout(transaction, match, round, now);
+        return this.lockMatch(transaction, match.id);
+      }
+    }
+    if (
+      match.state === "DEATHMATCH_PREPARE" &&
+      match.ready_deadline_at &&
+      now.getTime() >= new Date(match.ready_deadline_at).getTime()
+    ) {
+      await this.resolveDeathmatchReadyTimeout(transaction, match, now);
+      return this.lockMatch(transaction, match.id);
+    }
+    if (match.state === "ROUND_ENTERING" || match.state === "DEATHMATCH_ENTERING") {
+      const entry = match.entry_state ? parseJson<NativeEntryState>(match.entry_state) : null;
+      if (!entry) throw new Error("Native entry barrier is missing its persisted certificate");
+      if (entry.startsAt && now.getTime() >= Date.parse(entry.startsAt)) {
+        // Clock origin is the shared deadline, never the first polling client.
+        const startedAt = new Date(entry.startsAt);
+        if (match.state === "ROUND_ENTERING") {
+          await this.startPreparedRound(transaction, match, await this.lockCurrentRound(transaction, match), startedAt);
+        } else {
+          const deathmatch = await this.currentDeathmatch(transaction, match);
+          const map = parseJson<RankedMapSnapshot>(deathmatch.map_snapshot);
+          await transaction.query(
+            "UPDATE ranked_deathmatches SET started_at = $2 WHERE id = $1 AND started_at IS NULL",
+            [deathmatch.id, startedAt.toISOString()],
+          );
+          await transaction.query(
+            `UPDATE ranked_matches SET state = 'DEATHMATCH_PLAYING', deadline_at = NULL,
+              state_version = state_version + 1 WHERE id = $1`, [match.id],
+          );
+          await this.outbox.enqueueMatchEvent(transaction, match, "DEATHMATCH_START",
+            `match:${match.id}:deathmatch:${deathmatch.id}:start`, {
+              sequence: Number(deathmatch.sequence), mapTitle: map.title,
+              qualifyingPercent: map.qualifyingPercent,
+            }, startedAt);
+        }
+        return this.lockMatch(transaction, match.id);
+      }
+      if (!entry.startsAt && now.getTime() >= Date.parse(entry.deadlineAt)) {
+        // Match resource policy remains unchanged: Round 1 cannot award a
+        // result before either side has played. Later contexts may forfeit.
+        if (entry.roundNumber === 1 || entry.entered.A === entry.entered.B) {
+          await this.cancelMatch(transaction, match.id, "NATIVE_ENTRY_TIMEOUT", now);
+        } else {
+          await this.finalizeMatch(transaction, match, entry.entered.A ? "A" : "B", now);
+        }
+        return this.lockMatch(transaction, match.id);
+      }
+      return match;
+    }
+    if (this.isRoundPlaying(match.state)) {
+      const round = await this.lockCurrentRound(transaction, match);
+      const initial = this.roundState(round);
+      const withoutOrphans = await this.expireOrphanRoundAttempts(
+        transaction,
+        match,
+        round,
+        initial,
+        now,
+      );
+      const startDeadlineMs = withoutOrphans.lastAttemptWindow?.endsAtMs ?? withoutOrphans.finalWindowEndAtMs;
+      const pendingStartLease = await this.hasPendingStartLease(
+        transaction,
+        match,
+        round,
+        withoutOrphans,
+        now,
+      );
+      if (pendingStartLease && now.getTime() >= startDeadlineMs) {
+        // A visual Start lease was server-observed before the real start deadline.
+        // Keep the round open while the serialized authoritative Start/End journal
+        // catches up. Leases live in PostgreSQL, so a Render restart cannot erase
+        // the protection and turn a completed Round-2 clear into Score 0.
+        return match;
+      }
+      if (shouldHoldRoundForAttemptTransport(withoutOrphans, now.getTime())) {
+        // No gameplay time is added here. The visible start deadline has already
+        // expired; this short hold only lets a packet stamped before that
+        // deadline reach the authoritative server before the round is finalized.
+        return match;
+      }
+      const advanced = advanceRoundClock(withoutOrphans, now.getTime());
+      if (
+        advanced.phase === initial.phase &&
+        advanced.stateVersion === initial.stateVersion &&
+        advanced.outcome?.result === initial.outcome?.result
+      ) {
+        return match;
+      }
+      await this.persistRoundState(transaction, match, round, advanced, now);
+      return this.lockMatch(transaction, match.id);
+    }
+    if (match.state === "ROUND_RESULT" && match.deadline_at) {
+      if (now.getTime() >= new Date(match.deadline_at).getTime()) {
+        await this.prepareNextRound(transaction, match, now);
+        return this.lockMatch(transaction, match.id);
+      }
+    }
+    if (match.state === "DEATHMATCH_PLAYING") {
+      await this.expireOrphanDeathmatchAttempts(transaction, match, now);
+      await this.settleDeathmatchIfComplete(transaction, match, now);
+      return this.lockMatch(transaction, match.id);
+    }
+    if (match.state === "DEATHMATCH_RESULT" && match.deadline_at) {
+      if (now.getTime() >= new Date(match.deadline_at).getTime()) {
+        await this.prepareDeathmatch(transaction, match, now);
+        return this.lockMatch(transaction, match.id);
+      }
+    }
+    return match;
+  }
+
+  private async expireOrphanRoundAttempts(
+    _transaction: SqlExecutor,
+    _match: LockedMatchRow,
+    _round: RoundRow,
+    initial: RoundState,
+    _now: Date,
+  ): Promise<RoundState> {
+    // A Ranked attempt has no maximum gameplay duration. In particular, an
+    // attempt that started inside FINAL/LAST ATTEMPT must be allowed to finish
+    // naturally no matter how long the level takes. Abandoned clients are
+    // handled by the match reconnect timeout instead of an absolute attempt age.
+    return initial;
+  }
+
+  private async expireOrphanDeathmatchAttempts(
+    _transaction: SqlExecutor,
+    _match: LockedMatchRow,
+    _now: Date,
+  ): Promise<void> {
+    // Death Match attempts follow the same natural-end rule. The three-attempt
+    // budget remains authoritative; disconnect/recovery policy handles orphans.
+  }
+
+  private async resolveReadyTimeout(
+    transaction: SqlExecutor,
+    match: LockedMatchRow,
+    now: Date,
+  ): Promise<void> {
+    const policy = this.matchConfig(match).operational.failurePolicy;
+    if (
+      policy?.readyTimeoutAction === "FORFEIT_UNREADY" &&
+      Boolean(match.ready_a_at) !== Boolean(match.ready_b_at)
+    ) {
+      await this.finalizeMatch(
+        transaction,
+        match,
+        match.ready_a_at ? "A" : "B",
+        now,
+      );
+      return;
+    }
+    await this.cancelMatch(transaction, match.id, "READY_TIMEOUT", now);
+  }
+
+  private async resolveRoundReadyTimeout(
+    transaction: SqlExecutor,
+    match: LockedMatchRow,
+    round: RoundRow,
+    now: Date,
+  ): Promise<void> {
+    // Round 1 resource failure invalidates the match completely. From Round 2
+    // onward, a one-sided map preparation failure is a match forfeit. If both
+    // sides are unready, there is no fair winner, so the match is cancelled.
+    if (round.round_number === 1) {
+      await this.cancelMatch(transaction, match.id, "ROUND_1_MAP_DOWNLOAD_TIMEOUT", now);
+      return;
+    }
+    if (Boolean(round.ready_a_at) !== Boolean(round.ready_b_at)) {
+      await this.finalizeMatch(
+        transaction,
+        match,
+        round.ready_a_at ? "A" : "B",
+        now,
+      );
+      return;
+    }
+    await this.cancelMatch(transaction, match.id, "ROUND_RESOURCE_TIMEOUT_BOTH", now);
+  }
+
+  private async resolveDeathmatchReadyTimeout(
+    transaction: SqlExecutor,
+    match: LockedMatchRow,
+    now: Date,
+  ): Promise<void> {
+    if (Boolean(match.ready_a_at) !== Boolean(match.ready_b_at)) {
+      await this.finalizeMatch(
+        transaction,
+        match,
+        match.ready_a_at ? "A" : "B",
+        now,
+      );
+      return;
+    }
+    await this.cancelMatch(transaction, match.id, "DEATHMATCH_RESOURCE_TIMEOUT_BOTH", now);
+  }
+
+  private async cancelMatch(
+    transaction: SqlExecutor,
+    matchId: string,
+    reason: string,
+    now: Date,
+  ): Promise<void> {
+    await transaction.query(
+      `UPDATE ranked_matches
+       SET state = 'CANCELLED', cancellation_reason = $2, finished_at = $3,
+           deadline_at = NULL, state_version = state_version + 1
+       WHERE id = $1 AND state NOT IN ('MATCH_RESULT', 'CANCELLED')`,
+      [matchId, reason, now.toISOString()],
+    );
+  }
+
+  private async finalizeBans(
+    transaction: SqlExecutor,
+    match: LockedMatchRow,
+    now: Date,
+  ): Promise<void> {
+    if (match.state !== "BAN_PHASE") return;
+    const config = this.matchConfig(match);
+    if (!config.operational.timeouts) throw new Error("Missing timeout policy");
+    const candidates = parseJson<RankedMapSnapshot[]>(match.candidate_maps_snapshot);
+    const resolution = resolveBans(
+      candidates,
+      match.ban_a_confirmed_at ? match.ban_a_canonical_id : null,
+      match.ban_b_confirmed_at ? match.ban_b_canonical_id : null,
+      this.random,
+    );
+    const readyDeadline = new Date(
+      now.getTime() + resourcePrepareSeconds(config.operational.timeouts.readySeconds) * 1_000,
+    );
+    await transaction.query(
+      `UPDATE ranked_matches
+       SET ban_a_confirmed_at = COALESCE(ban_a_confirmed_at, $2),
+           ban_b_confirmed_at = COALESCE(ban_b_confirmed_at, $2),
+           selected_round_maps_snapshot = $3::jsonb,
+           state = 'ROUND_PREPARE', current_round_number = 1, entry_state = NULL,
+           deadline_at = $4, ban_deadline_at = NULL,
+           state_version = state_version + 1
+       WHERE id = $1 AND state = 'BAN_PHASE'`,
+      [
+        match.id,
+        now.toISOString(),
+        JSON.stringify(resolution.selectedRoundMaps),
+        readyDeadline.toISOString(),
+      ],
+    );
+    await this.insertPreparedRound(
+      transaction,
+      match.id,
+      1,
+      resolution.selectedRoundMaps[0]!,
+      readyDeadline,
+    );
+  }
+
+  private async insertPreparedRound(
+    transaction: SqlExecutor,
+    matchId: string,
+    roundNumber: 1 | 2 | 3,
+    map: RankedMapSnapshot,
+    readyDeadline: Date,
+  ): Promise<void> {
+    await transaction.query(
+      `INSERT INTO ranked_rounds (
+         id, match_id, round_number, level_id, canonical_level_id,
+         alternate_level_id, playable_level_id,
+         title, creator, difficulty, pool, qualifying_percent,
+         phase, ready_deadline_at
+       ) VALUES (
+         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+         'ROUND_PREPARE', $13
+       )
+       ON CONFLICT (match_id, round_number) DO NOTHING`,
+      [
+        this.ids.next(),
+        matchId,
+        roundNumber,
+        map.playableLevelId,
+        map.canonicalLevelId,
+        map.alternateLevelId,
+        map.playableLevelId,
+        map.title,
+        map.creator,
+        map.difficulty,
+        map.pool,
+        map.qualifyingPercent,
+        readyDeadline.toISOString(),
+      ],
+    );
+  }
+
+  private async startPreparedRound(
+    transaction: SqlExecutor,
+    match: LockedMatchRow,
+    round: RoundRow,
+    now: Date,
+  ): Promise<void> {
+    const config = this.matchConfig(match);
+    const map: RankedMapSnapshot = {
+      levelId: round.level_id,
+      canonicalLevelId: round.canonical_level_id,
+      alternateLevelId: round.alternate_level_id,
+      playableLevelId: round.playable_level_id,
+      title: round.title,
+      creator: round.creator,
+      difficulty: round.difficulty,
+      pool: Number(round.pool) as RankedMapSnapshot["pool"],
+      qualifyingPercent: Number(round.qualifying_percent),
+    };
+    const domain = createRound(round.round_number, map, config.operational.rules, now.getTime());
+    await transaction.query(
+      `UPDATE ranked_rounds
+       SET phase = 'ROUND_PLAYING', domain_state = $2::jsonb,
+           started_at = $3, normal_end_at = $4, final_window_end_at = $5,
+           ready_deadline_at = NULL, state_version = $6
+       WHERE id = $1`,
+      [
+        round.id,
+        JSON.stringify(domain),
+        now.toISOString(),
+        new Date(domain.normalEndAtMs).toISOString(),
+        new Date(domain.finalWindowEndAtMs).toISOString(),
+        domain.stateVersion,
+      ],
+    );
+    await transaction.query(
+      `UPDATE ranked_matches
+       SET state = 'ROUND_PLAYING', deadline_at = $2,
+           state_version = state_version + 1
+       WHERE id = $1`,
+      [match.id, new Date(domain.normalEndAtMs).toISOString()],
+    );
+    await this.outbox.enqueueMatchEvent(
+      transaction,
+      match,
+      "ROUND_START",
+      `match:${match.id}:round:${round.round_number}:start`,
+      {
+        roundNumber: Number(round.round_number),
+        banner: bannerForRound(round.round_number),
+        mapTitle: map.title,
+        qualifyingPercent: map.qualifyingPercent,
+      },
+      now,
+    );
+  }
+
+  private async persistRoundState(
+    transaction: SqlExecutor,
+    match: LockedMatchRow,
+    round: RoundRow,
+    state: RoundState,
+    now: Date,
+    surrenderMatch = false,
+  ): Promise<void> {
+    await transaction.query(
+      `UPDATE ranked_rounds
+       SET phase = $2, domain_state = $3::jsonb,
+           score_a = $4, score_b = $5, clears_a = $6, clears_b = $7,
+           result = $8, result_reason = $9,
+           two_clear_rule_triggered = $10,
+           last_attempt_target = $11,
+           last_attempt_window_start = $12,
+           last_attempt_window_end = $13,
+           settled_at = $14, state_version = $15
+       WHERE id = $1`,
+      [
+        round.id,
+        state.phase,
+        JSON.stringify(state),
+        state.scores.A,
+        state.scores.B,
+        state.clears.A,
+        state.clears.B,
+        state.outcome?.result ?? null,
+        state.outcome?.reason ?? null,
+        Boolean(state.lastAttemptWindow),
+        state.lastAttemptWindow?.targetSide ?? null,
+        state.lastAttemptWindow
+          ? new Date(state.lastAttemptWindow.startedAtMs).toISOString()
+          : null,
+        state.lastAttemptWindow
+          ? new Date(state.lastAttemptWindow.endsAtMs).toISOString()
+          : null,
+        state.outcome ? new Date(state.outcome.settledAtMs).toISOString() : null,
+        state.stateVersion,
+      ],
+    );
+    if (state.outcome) {
+      this.runtimeState.clearRound(match.id, round.round_number);
+      await this.settleRound(transaction, match, round, state, now, surrenderMatch);
+      return;
+    }
+    await transaction.query(
+      `UPDATE ranked_matches
+       SET state = $2, deadline_at = $3, state_version = state_version + 1
+       WHERE id = $1`,
+      [match.id, state.phase, this.domainDeadlineIso(state)],
+    );
+  }
+
+  private async settleRound(
+    transaction: SqlExecutor,
+    match: LockedMatchRow,
+    round: RoundRow,
+    roundState: RoundState,
+    now: Date,
+    surrenderMatch = false,
+  ): Promise<void> {
+    if (!roundState.outcome) return;
+    if (round.result) return;
+    const config = this.matchConfig(match);
+    if (!config.operational.timeouts) throw new Error("Missing timeout policy");
+    const series = parseJson<MatchSeriesState>(match.series_state);
+    const decision = applyRoundResult(series, roundState.outcome.result);
+    if (surrenderMatch && roundState.outcome.winner) {
+      decision.state.phase = "MATCH_RESULT";
+      decision.state.winner = roundState.outcome.winner;
+    }
+    await transaction.query(
+      `UPDATE ranked_rounds
+       SET result = $2, result_reason = $3, phase = 'ROUND_RESULT',
+           result_deadline_at = $4
+       WHERE id = $1`,
+      [
+        round.id,
+        roundState.outcome.result,
+        roundState.outcome.reason,
+        new Date(now.getTime() + config.operational.timeouts.roundResultSeconds * 1_000).toISOString(),
+      ],
+    );
+    await this.outbox.enqueueMatchEvent(
+      transaction,
+      match,
+      "ROUND_RESULT",
+      `match:${match.id}:round:${round.round_number}:result`,
+      {
+        roundNumber: Number(round.round_number),
+        result: roundState.outcome.result,
+        reason: roundState.outcome.reason,
+        scores: roundState.scores,
+        clears: roundState.clears,
+        roundWins: decision.state.roundWins,
+        roundResults: decision.state.roundResults,
+      },
+      now,
+    );
+
+    if (decision.state.phase === "MATCH_RESULT" && decision.state.winner) {
+      await transaction.query(
+        "UPDATE ranked_matches SET series_state = $2::jsonb WHERE id = $1",
+        [match.id, JSON.stringify(decision.state)],
+      );
+      await this.finalizeMatch(transaction, match, decision.state.winner, now);
+      return;
+    }
+    if (decision.state.phase === "DEATHMATCH_REQUIRED") {
+      await transaction.query(
+        "UPDATE ranked_matches SET series_state = $2::jsonb WHERE id = $1",
+        [match.id, JSON.stringify(decision.state)],
+      );
+      await this.prepareDeathmatch(transaction, match, now);
+      return;
+    }
+    const resultDeadline = new Date(
+      now.getTime() + config.operational.timeouts.roundResultSeconds * 1_000,
+    );
+    await transaction.query(
+      `UPDATE ranked_matches
+       SET series_state = $2::jsonb, state = 'ROUND_RESULT',
+           deadline_at = $3, state_version = state_version + 1
+       WHERE id = $1`,
+      [match.id, JSON.stringify(decision.state), resultDeadline.toISOString()],
+    );
+  }
+
+  private async prepareNextRound(
+    transaction: SqlExecutor,
+    match: LockedMatchRow,
+    now: Date,
+  ): Promise<void> {
+    const config = this.matchConfig(match);
+    if (!config.operational.timeouts) throw new Error("Missing timeout policy");
+    const series = parseJson<MatchSeriesState>(match.series_state);
+    const roundNumber = (series.roundResults.length + 1) as 1 | 2 | 3;
+    if (roundNumber < 2 || roundNumber > 3) {
+      throw new Error("Series does not require another standard round");
+    }
+    const selected = parseJson<RankedMapSnapshot[]>(match.selected_round_maps_snapshot);
+    const map = selected[roundNumber - 1];
+    if (!map) throw new Error("Selected round map snapshot is missing");
+    const readyDeadline = new Date(
+      now.getTime() + resourcePrepareSeconds(config.operational.timeouts.readySeconds) * 1_000,
+    );
+    await this.insertPreparedRound(transaction, match.id, roundNumber, map, readyDeadline);
+    await transaction.query(
+      `UPDATE ranked_matches
+       SET state = 'ROUND_PREPARE', current_round_number = $2, entry_state = NULL,
+           deadline_at = $3, state_version = state_version + 1
+       WHERE id = $1`,
+      [match.id, roundNumber, readyDeadline.toISOString()],
+    );
+  }
+
+  private async finalizeMatch(
+    transaction: SqlExecutor,
+    match: LockedMatchRow,
+    winner: PlayerSide,
+    now: Date,
+  ): Promise<void> {
+    const current = await this.lockMatch(transaction, match.id);
+    if (current.result_applied_at) return;
+    const config = this.matchConfig(current);
+    if (!config.operational.mmrPolicy) throw new Error("Missing MMR policy");
+    const profiles = await transaction.query<ProfileResultRow>(
+      `SELECT *
+       FROM ranked_profiles
+       WHERE player_id = $1 OR player_id = $2
+       ORDER BY player_id
+       FOR UPDATE`,
+      [current.player_a_id, current.player_b_id],
+    );
+    const profileA = profiles.rows.find((profile) => profile.player_id === current.player_a_id);
+    const profileB = profiles.rows.find((profile) => profile.player_id === current.player_b_id);
+    if (!profileA || !profileB) throw new Error("Match profile is missing");
+    const beforeA = ratingProfileFromRow(profileA);
+    const beforeB = ratingProfileFromRow(profileB);
+    const performance = await transaction.query<MatchPerformanceRow>(
+      `SELECT
+         COALESCE((SELECT SUM(score_a) FROM ranked_rounds WHERE match_id = $1), 0) +
+           COALESCE((SELECT SUM(score_a) FROM ranked_deathmatches WHERE match_id = $1), 0) AS score_a,
+         COALESCE((SELECT SUM(score_b) FROM ranked_rounds WHERE match_id = $1), 0) +
+           COALESCE((SELECT SUM(score_b) FROM ranked_deathmatches WHERE match_id = $1), 0) AS score_b,
+         COALESCE((SELECT SUM(clears_a) FROM ranked_rounds WHERE match_id = $1), 0) +
+           COALESCE((SELECT COUNT(*) FROM ranked_deathmatch_attempts a
+                     JOIN ranked_deathmatches d ON d.id = a.deathmatch_id
+                     WHERE d.match_id = $1 AND a.player_id = $2 AND a.valid = TRUE AND a.cleared = TRUE), 0) AS clears_a,
+         COALESCE((SELECT SUM(clears_b) FROM ranked_rounds WHERE match_id = $1), 0) +
+           COALESCE((SELECT COUNT(*) FROM ranked_deathmatch_attempts a
+                     JOIN ranked_deathmatches d ON d.id = a.deathmatch_id
+                     WHERE d.match_id = $1 AND a.player_id = $3 AND a.valid = TRUE AND a.cleared = TRUE), 0) AS clears_b`,
+      [current.id, current.player_a_id, current.player_b_id],
+    );
+    const totals = performance.rows[0] ?? { score_a: 0, score_b: 0, clears_a: 0, clears_b: 0 };
+    const finalSeries = parseJson<MatchSeriesState>(current.series_state);
+    const completedRounds = await transaction.query<PerfectWinRoundRow>(
+      `SELECT result, result_reason, clears_a, clears_b
+       FROM ranked_rounds
+       WHERE match_id = $1 AND result IS NOT NULL
+       ORDER BY round_number`,
+      [current.id],
+    );
+    const perfectWinSide = perfectThreeClearWinner(
+      finalSeries,
+      completedRounds.rows.map((round) => ({
+        result: round.result,
+        resultReason: round.result_reason,
+        clearsA: Number(round.clears_a),
+        clearsB: Number(round.clears_b),
+      })),
+      config.operational.rules.clearTarget,
+    );
+    const update = calculateMmrUpdate(
+      {
+        ratingA: beforeA.hiddenMmr,
+        ratingB: beforeB.hiddenMmr,
+        placementGamesA: beforeA.placementGames,
+        placementGamesB: beforeB.placementGames,
+        winner,
+        scoreA: Number(totals.score_a),
+        scoreB: Number(totals.score_b),
+        clearsA: Number(totals.clears_a),
+        clearsB: Number(totals.clears_b),
+        resultStreakA: beforeA.resultStreak,
+        resultStreakB: beforeB.resultStreak,
+        maximumGainSide: perfectWinSide,
+      },
+      config.operational.mmrPolicy,
+    );
+    const ratingA = updateRankedRatingProfile(
+      beforeA,
+      "A",
+      winner,
+      update.ratingAfterA,
+      config.operational.mmrPolicy,
+      config.operational.tierBands,
+      {
+        opponentHiddenMmr: beforeB.hiddenMmr,
+        maximumVisibleScoreGain: perfectWinSide === "A",
+      },
+    );
+    const ratingB = updateRankedRatingProfile(
+      beforeB,
+      "B",
+      winner,
+      update.ratingAfterB,
+      config.operational.mmrPolicy,
+      config.operational.tierBands,
+      {
+        opponentHiddenMmr: beforeA.hiddenMmr,
+        maximumVisibleScoreGain: perfectWinSide === "B",
+      },
+    );
+    let achievementUnlocks: Readonly<Record<string, readonly unknown[]>> = {};
+    // Debug Bot is the development harness for the production result path.
+    // When explicitly enabled, it must exercise Achievement progression too so
+    // Force Win/Lose and natural Bot Matches can validate the same server-side
+    // metrics, unlocks, and Claim flow without changing real PvP authority.
+    if (current.match_type === "RANKED_PVP" || current.match_type === "DEBUG_BOT") {
+      const lastAttemptClears = await transaction.query<LastAttemptClearRow>(
+        `SELECT a.player_id, COUNT(*)::int AS clear_count
+         FROM ranked_attempts a
+         JOIN ranked_rounds r ON r.id = a.round_id
+         WHERE r.match_id = $1 AND a.valid AND a.cleared AND a.ended_at IS NOT NULL
+           AND r.last_attempt_window_start IS NOT NULL
+           AND a.server_accepted_start_at >= r.last_attempt_window_start
+         GROUP BY a.player_id`,
+        [current.id],
+      );
+      const deathmatchResults = await transaction.query<AchievementDeathmatchResultRow>(
+        `SELECT score_a, score_b, winner_id
+         FROM ranked_deathmatches
+         WHERE match_id = $1 AND finished_at IS NOT NULL
+         ORDER BY sequence`,
+        [current.id],
+      );
+      const results = finalSeries.roundResults;
+      const factsFor = (
+        side: PlayerSide,
+        playerId: string,
+        rating: RankedRatingUpdate,
+        before: RankedRatingProfile,
+        clears: number,
+      ) => ({
+        playerId,
+        won: winner === side,
+        rankedClears: clears,
+        perfectWin: perfectWinSide === side,
+        lastAttemptClears: Number(
+          lastAttemptClears.rows.find((row) => row.player_id === playerId)?.clear_count ?? 0,
+        ),
+        reverseSweep: winner === side && isReverseSweep(results, side),
+        sweepWin: winner === side && isSweepWin(results, side),
+        promotionSucceeded: rating.promotionSucceeded,
+        reachedGold: before.displayedTier !== "GOLD" && rating.profile.displayedTier === "GOLD",
+        deathmatches: deathmatchResults.rows.map((deathmatch) => ({
+          outcome: deathmatch.winner_id === null
+            ? "TIE" as const
+            : deathmatch.winner_id === playerId ? "WIN" as const : "LOSS" as const,
+          ownBest: Number(side === "A" ? deathmatch.score_a : deathmatch.score_b),
+          opponentBest: Number(side === "A" ? deathmatch.score_b : deathmatch.score_a),
+        })),
+      });
+      achievementUnlocks = await this.achievements.recordMatchResult(
+        transaction,
+        current.id,
+        [
+          factsFor("A", current.player_a_id, ratingA, beforeA, Number(totals.clears_a)),
+          factsFor("B", current.player_b_id, ratingB, beforeB, Number(totals.clears_b)),
+        ],
+        now,
+      );
+    }
+    // Evaluate against the locked pre-match profiles before persisting the new
+    // rating. Otherwise a first GOLD result could be mistaken for historical
+    // backfill and disappear from this Match Result's toast notices.
+    await this.persistRatingProfile(transaction, current.player_a_id, ratingA, winner === "A", now);
+    await this.persistRatingProfile(transaction, current.player_b_id, ratingB, winner === "B", now);
+    const placementGamesRequired = config.operational.mmrPolicy.placementGames;
+    const ratingPresentation = {
+      perfectWinSide,
+      rankedScoreDelta: { A: ratingA.visibleScoreDelta, B: ratingB.visibleScoreDelta },
+      profileBefore: {
+        A: {
+          ...publicRatingProfile(beforeA, placementGamesRequired),
+          equippedTitle: this.achievements.titleProjection(
+            profileA.equipped_achievement_id, profileA.equipped_achievement_level,
+          ),
+        },
+        B: {
+          ...publicRatingProfile(beforeB, placementGamesRequired),
+          equippedTitle: this.achievements.titleProjection(
+            profileB.equipped_achievement_id, profileB.equipped_achievement_level,
+          ),
+        },
+      },
+      profileAfter: {
+        A: {
+          ...publicRatingProfile(ratingA.profile, placementGamesRequired),
+          equippedTitle: this.achievements.titleProjection(
+            profileA.equipped_achievement_id, profileA.equipped_achievement_level,
+          ),
+        },
+        B: {
+          ...publicRatingProfile(ratingB.profile, placementGamesRequired),
+          equippedTitle: this.achievements.titleProjection(
+            profileB.equipped_achievement_id, profileB.equipped_achievement_level,
+          ),
+        },
+      },
+      achievementUnlocks: {
+        A: achievementUnlocks[current.player_a_id] ?? [],
+        B: achievementUnlocks[current.player_b_id] ?? [],
+      },
+      events: {
+        A: {
+          placementCompleted: ratingA.placementCompleted,
+          promotionStarted: ratingA.promotionStarted,
+          promotionSucceeded: ratingA.promotionSucceeded,
+          promotionFailed: ratingA.promotionFailed,
+          demoted: ratingA.demoted,
+        },
+        B: {
+          placementCompleted: ratingB.placementCompleted,
+          promotionStarted: ratingB.promotionStarted,
+          promotionSucceeded: ratingB.promotionSucceeded,
+          promotionFailed: ratingB.promotionFailed,
+          demoted: ratingB.demoted,
+        },
+      },
+    };
+    const winnerId = winner === "A" ? current.player_a_id : current.player_b_id;
+    await transaction.query(
+      `UPDATE ranked_matches
+       SET state = 'MATCH_RESULT', winner_id = $2,
+           mmr_delta_a = $3, mmr_delta_b = $4,
+           mmr_a_after = $5, mmr_b_after = $6,
+           ranked_score_delta_a = $7, ranked_score_delta_b = $8,
+           ranked_score_a_after = $9, ranked_score_b_after = $10,
+           rating_presentation = $11::jsonb,
+           result_applied_at = $12, finished_at = $12,
+           deadline_at = NULL, state_version = state_version + 1
+       WHERE id = $1 AND result_applied_at IS NULL`,
+      [
+        current.id,
+        winnerId,
+        update.deltaA,
+        update.deltaB,
+        update.ratingAfterA,
+        update.ratingAfterB,
+        ratingA.visibleScoreDelta,
+        ratingB.visibleScoreDelta,
+        ratingA.profile.visibleRankedScore,
+        ratingB.profile.visibleRankedScore,
+        JSON.stringify(ratingPresentation),
+        now.toISOString(),
+      ],
+    );
+    const publicAfterA = publicRatingProfile(ratingA.profile, placementGamesRequired);
+    const publicAfterB = publicRatingProfile(ratingB.profile, placementGamesRequired);
+    await this.outbox.enqueueMatchEvent(
+      transaction,
+      current,
+      "MATCH_RESULT",
+      `match:${current.id}:result`,
+      {
+        winnerSide: winner,
+        perfectWinSide,
+        roundResults: finalSeries.roundResults,
+        rankedScoreDelta: { A: ratingA.visibleScoreDelta, B: ratingB.visibleScoreDelta },
+        rankedScoreAfter: {
+          A: publicAfterA.visibleRankedScore,
+          B: publicAfterB.visibleRankedScore,
+        },
+        placementResults: {
+          A: publicAfterA.placementResults,
+          B: publicAfterB.placementResults,
+        },
+        ratingEvents: ratingPresentation.events,
+      },
+      now,
+    );
+  }
+
+  private async persistRatingProfile(
+    transaction: SqlExecutor,
+    playerId: string,
+    update: RankedRatingUpdate,
+    won: boolean,
+    now: Date,
+  ): Promise<void> {
+    const profile = update.profile;
+    const promotion = profile.promotion;
+    await transaction.query(
+      `UPDATE ranked_profiles
+       SET hidden_mmr = $2, visible_ranked_score = $3, displayed_tier = $4,
+           placement_games = $5, placement_results = $6::jsonb, result_streak = $7,
+           promotion_source_tier = $8, promotion_target_tier = $9,
+           promotion_cutoff = $10, promotion_games_required = $11,
+           promotion_wins_required = $12, promotion_results = $13::jsonb,
+           demotion_warning = $14,
+           wins = wins + $15, losses = losses + $16, updated_at = $17
+       WHERE player_id = $1`,
+      [
+        playerId,
+        profile.hiddenMmr,
+        profile.visibleRankedScore,
+        profile.displayedTier,
+        profile.placementGames,
+        JSON.stringify(profile.placementResults),
+        profile.resultStreak,
+        promotion?.sourceTier ?? null,
+        promotion?.targetTier ?? null,
+        promotion?.cutoff ?? null,
+        promotion?.gamesRequired ?? null,
+        promotion?.winsRequired ?? null,
+        JSON.stringify(promotion?.results ?? []),
+        profile.demotionWarning,
+        won ? 1 : 0,
+        won ? 0 : 1,
+        now.toISOString(),
+      ],
+    );
+  }
+
+  private async currentDeathmatch(
+    transaction: SqlExecutor,
+    match: LockedMatchRow,
+  ): Promise<DeathmatchRow> {
+    if (!match.current_deathmatch_id) throw new Error("Current deathmatch ID is missing");
+    const result = await transaction.query<DeathmatchRow>(
+      "SELECT * FROM ranked_deathmatches WHERE id = $1 FOR UPDATE",
+      [match.current_deathmatch_id],
+    );
+    const deathmatch = result.rows[0];
+    if (!deathmatch) throw new Error("Current deathmatch row is missing");
+    return deathmatch;
+  }
+
+  private async startDeathmatchAttempt(
+    transaction: SqlExecutor,
+    match: LockedMatchRow,
+    side: PlayerSide,
+    playerId: string,
+    body: AttemptStartDto,
+    now: Date,
+  ) {
+    const deathmatch = await this.currentDeathmatch(transaction, match);
+    const map = parseJson<RankedMapSnapshot>(deathmatch.map_snapshot);
+    this.assertPlayableLevelId(body.levelId, map.playableLevelId);
+    const duplicate = await transaction.query<DeathmatchAttemptRow>(
+      `SELECT * FROM ranked_deathmatch_attempts
+       WHERE deathmatch_id = $1 AND player_id = $2 AND client_start_event_id = $3`,
+      [deathmatch.id, playerId, body.clientEventId],
+    );
+    if (duplicate.rows[0]) {
+      return {
+        accepted: true,
+        duplicate: true,
+        attemptId: duplicate.rows[0].id,
+        attemptNumber: Number(duplicate.rows[0].attempt_sequence),
+        reason: null,
+        deathmatchSnapshot: await this.deathmatchLiveSnapshot(transaction, match, deathmatch),
+        serverNow: now.toISOString(),
+      };
+    }
+    const attempts = await transaction.query<DeathmatchAttemptRow>(
+      `SELECT * FROM ranked_deathmatch_attempts
+       WHERE deathmatch_id = $1 AND player_id = $2
+       ORDER BY attempt_sequence FOR UPDATE`,
+      [deathmatch.id, playerId],
+    );
+    if (attempts.rows.some((attempt) => attempt.ended_at === null)) {
+      return {
+        accepted: false,
+        duplicate: false,
+        attemptId: null,
+        reason: "ATTEMPT_ALREADY_ACTIVE",
+        serverNow: now.toISOString(),
+      };
+    }
+    if (attempts.rows.length >= 3) {
+      return {
+        accepted: false,
+        duplicate: false,
+        attemptId: null,
+        reason: "DEATHMATCH_ATTEMPTS_EXHAUSTED",
+        serverNow: now.toISOString(),
+      };
+    }
+    const attemptId = this.ids.next();
+    await transaction.query(
+      `INSERT INTO ranked_deathmatch_attempts (
+         id, deathmatch_id, player_id, attempt_sequence,
+         server_accepted_start_at, level_id, played_level_id, client_start_event_id
+       ) VALUES ($1, $2, $3, $4, $5, $6, $6, $7)`,
+      [
+        attemptId,
+        deathmatch.id,
+        playerId,
+        attempts.rows.length + 1,
+        now.toISOString(),
+        body.levelId,
+        body.clientEventId,
+      ],
+    );
+    await transaction.query(
+      "UPDATE ranked_matches SET state_version = state_version + 1 WHERE id = $1",
+      [match.id],
+    );
+    this.runtimeState.beginAttempt(
+      match.id,
+      deathmatchRuntimeSlot(Number(deathmatch.sequence)),
+      side,
+      attemptId,
+      now.getTime(),
+    );
+    return {
+      accepted: true,
+      duplicate: false,
+      attemptId,
+      attemptNumber: attempts.rows.length + 1,
+      side,
+      reason: null,
+      deathmatchSnapshot: await this.deathmatchLiveSnapshot(transaction, match, deathmatch),
+      serverNow: now.toISOString(),
+    };
+  }
+
+  private async endDeathmatchAttempt(
+    transaction: SqlExecutor,
+    match: LockedMatchRow,
+    _side: PlayerSide,
+    playerId: string,
+    body: AttemptEndDto,
+    now: Date,
+  ) {
+    const deathmatch = await this.currentDeathmatch(transaction, match);
+    const deathmatchMap = parseJson<RankedMapSnapshot>(deathmatch.map_snapshot);
+    this.assertPlayableLevelId(body.levelId, deathmatchMap.playableLevelId);
+    const duplicate = await transaction.query<DeathmatchAttemptRow>(
+      `SELECT * FROM ranked_deathmatch_attempts
+       WHERE deathmatch_id = $1 AND player_id = $2 AND client_end_event_id = $3`,
+      [deathmatch.id, playerId, body.clientEventId],
+    );
+    if (duplicate.rows[0]) {
+      return {
+        accepted: true,
+        duplicate: true,
+        reason: null,
+        awardedScore: Number(duplicate.rows[0].awarded_score ?? 0),
+        deathmatchSnapshot: await this.deathmatchLiveSnapshot(transaction, match, deathmatch),
+        serverNow: now.toISOString(),
+      };
+    }
+    const attemptResult = await transaction.query<DeathmatchAttemptRow>(
+      `SELECT * FROM ranked_deathmatch_attempts
+       WHERE id = $1 AND deathmatch_id = $2 AND player_id = $3
+       FOR UPDATE`,
+      [body.attemptId, deathmatch.id, playerId],
+    );
+    const attempt = attemptResult.rows[0];
+    if (!attempt) {
+      return {
+        accepted: false,
+        duplicate: false,
+        reason: "ATTEMPT_NOT_FOUND",
+        serverNow: now.toISOString(),
+      };
+    }
+    if (attempt.ended_at !== null) {
+      return {
+        accepted: false,
+        duplicate: false,
+        reason: "ATTEMPT_ALREADY_ENDED",
+        serverNow: now.toISOString(),
+      };
+    }
+    const map = deathmatchMap;
+    // Death Match has no Qualifying threshold. Persist the raw authoritative
+    // percentage in the compatibility awarded_score column.
+    const awardedScore = body.cleared ? 100 : body.progressPercent;
+    await transaction.query(
+      `UPDATE ranked_deathmatch_attempts
+       SET ended_at = $2, progress_percent = $3, cleared = $4,
+           awarded_score = $5, client_end_event_id = $6
+       WHERE id = $1`,
+      [
+        attempt.id,
+        now.toISOString(),
+        body.progressPercent,
+        body.cleared,
+        awardedScore,
+        body.clientEventId,
+      ],
+    );
+    this.runtimeState.endAttempt(
+      match.id,
+      deathmatchRuntimeSlot(Number(deathmatch.sequence)),
+      playerId === match.player_a_id ? "A" : "B",
+      attempt.id,
+      body.cleared,
+    );
+    if (attempt.valid && body.cleared) {
+      const totals = await transaction.query<{
+        score_a: number;
+        score_b: number;
+        clears_a: number;
+        clears_b: number;
+      }>(
+        `SELECT
+           COALESCE(MAX(awarded_score) FILTER (WHERE player_id = $2 AND valid), 0) AS score_a,
+           COALESCE(MAX(awarded_score) FILTER (WHERE player_id = $3 AND valid), 0) AS score_b,
+           COUNT(*) FILTER (WHERE player_id = $2 AND valid AND cleared)::int AS clears_a,
+           COUNT(*) FILTER (WHERE player_id = $3 AND valid AND cleared)::int AS clears_b
+         FROM ranked_deathmatch_attempts
+         WHERE deathmatch_id = $1`,
+        [deathmatch.id, match.player_a_id, match.player_b_id],
+      );
+      const currentTotals = totals.rows[0];
+      await this.outbox.enqueueMatchEvent(
+        transaction,
+        match,
+        "CLEAR_EVENT",
+        `match:${match.id}:deathmatch:${deathmatch.id}:clear:${attempt.id}`,
+        {
+          phase: "DEATHMATCH",
+          deathmatchSequence: Number(deathmatch.sequence),
+          attemptNumber: Number(attempt.attempt_sequence),
+          mapTitle: map.title,
+          side: playerId === match.player_a_id ? "A" : "B",
+          scores: { A: Number(currentTotals?.score_a ?? 0), B: Number(currentTotals?.score_b ?? 0) },
+          clears: {
+            A: Number(currentTotals?.clears_a ?? 0),
+            B: Number(currentTotals?.clears_b ?? 0),
+          },
+        },
+        now,
+      );
+    }
+    await transaction.query(
+      "UPDATE ranked_matches SET state_version = state_version + 1 WHERE id = $1",
+      [match.id],
+    );
+    await this.settleDeathmatchIfComplete(transaction, match, now);
+    const deathmatchSnapshot = await this.deathmatchLiveSnapshot(transaction, match, deathmatch);
+    return {
+      accepted: true,
+      duplicate: false,
+      reason: null,
+      awardedScore,
+      deathmatchSnapshot,
+      serverNow: now.toISOString(),
+    };
+  }
+
+  private async updateDeathmatchAttemptProgress(
+    transaction: SqlExecutor,
+    match: LockedMatchRow,
+    side: PlayerSide,
+    playerId: string,
+    body: AttemptProgressDto,
+    now: Date,
+  ) {
+    const deathmatch = await this.currentDeathmatch(transaction, match);
+    const map = parseJson<RankedMapSnapshot>(deathmatch.map_snapshot);
+    this.assertPlayableLevelId(body.levelId, map.playableLevelId);
+    const active = await transaction.query<DeathmatchAttemptRow>(
+      `SELECT * FROM ranked_deathmatch_attempts
+       WHERE id = $1 AND deathmatch_id = $2 AND player_id = $3
+         AND ended_at IS NULL AND valid
+       FOR UPDATE`,
+      [body.attemptId, deathmatch.id, playerId],
+    );
+    if (!active.rows[0]) {
+      throw new ConflictException("Deathmatch progress requires the active server attempt");
+    }
+    const stored = this.runtimeState.updateProgress(
+      match.id,
+      deathmatchRuntimeSlot(Number(deathmatch.sequence)),
+      side,
+      body.attemptId,
+      body.progressPercent,
+      now.getTime(),
+    );
+    return {
+      accepted: true,
+      stored,
+      deathmatchSnapshot: await this.deathmatchLiveSnapshot(transaction, match, deathmatch),
+      serverNow: now.toISOString(),
+    };
+  }
+
+  private async deathmatchLiveSnapshot(
+    executor: SqlExecutor,
+    match: LockedMatchRow,
+    deathmatch: DeathmatchRow,
+  ) {
+    const map = parseJson<RankedMapSnapshot>(deathmatch.map_snapshot);
+    const attempts = await executor.query<DeathmatchAttemptRow>(
+      `SELECT * FROM ranked_deathmatch_attempts
+       WHERE deathmatch_id = $1
+       ORDER BY player_id, attempt_sequence`,
+      [deathmatch.id],
+    );
+    const rowsA = attempts.rows.filter((attempt) => attempt.player_id === match.player_a_id);
+    const rowsB = attempts.rows.filter((attempt) => attempt.player_id === match.player_b_id);
+    const committedBestPercent = (rows: DeathmatchAttemptRow[]) => Math.max(
+      0,
+      ...rows
+        .filter((attempt) => attempt.valid && attempt.ended_at !== null)
+        .map((attempt) => Boolean(attempt.cleared) ? 100 : Number(attempt.progress_percent ?? 0)),
+    );
+    const clears = (rows: DeathmatchAttemptRow[]) => rows.filter(
+      (attempt) => attempt.valid && attempt.ended_at !== null && Boolean(attempt.cleared),
+    ).length;
+    const completed = (rows: DeathmatchAttemptRow[]) => rows.filter(
+      (attempt) => attempt.ended_at !== null,
+    ).length;
+    const slot = deathmatchRuntimeSlot(Number(deathmatch.sequence));
+    const progressA = this.runtimeState.progress(match.id, slot, "A");
+    const progressB = this.runtimeState.progress(match.id, slot, "B");
+    const scoreA = committedBestPercent(rowsA);
+    const scoreB = committedBestPercent(rowsB);
+    const activeA = rowsA.find((attempt) => attempt.ended_at === null) ?? null;
+    const activeB = rowsB.find((attempt) => attempt.ended_at === null) ?? null;
+    return {
+      sequence: Number(deathmatch.sequence),
+      map,
+      scores: { A: scoreA, B: scoreB },
+      displayScores: {
+        A: Math.max(scoreA, progressA && activeA ? progressA.progressPercent : 0),
+        B: Math.max(scoreB, progressB && activeB ? progressB.progressPercent : 0),
+      },
+      clears: { A: clears(rowsA), B: clears(rowsB) },
+      attemptsUsed: { A: rowsA.length, B: rowsB.length },
+      attemptsCompleted: { A: completed(rowsA), B: completed(rowsB) },
+      // Remaining budget changes only after authoritative End.
+      attemptsRemaining: { A: Math.max(0, 3 - completed(rowsA)), B: Math.max(0, 3 - completed(rowsB)) },
+      activeAttemptNumber: {
+        A: activeA ? Number(activeA.attempt_sequence) : null,
+        B: activeB ? Number(activeB.attempt_sequence) : null,
+      },
+      winnerSide: null,
+    };
+  }
+
+  private async settleDeathmatchIfComplete(
+    transaction: SqlExecutor,
+    match: LockedMatchRow,
+    now: Date,
+  ): Promise<void> {
+    if (match.state !== "DEATHMATCH_PLAYING" || !match.current_deathmatch_id) return;
+    const deathmatch = await this.currentDeathmatch(transaction, match);
+    if (deathmatch.finished_at) return;
+    const attempts = await transaction.query<DeathmatchAttemptRow>(
+      `SELECT * FROM ranked_deathmatch_attempts
+       WHERE deathmatch_id = $1
+       ORDER BY player_id, attempt_sequence`,
+      [deathmatch.id],
+    );
+    const attemptsA = attempts.rows.filter((attempt) => attempt.player_id === match.player_a_id);
+    const attemptsB = attempts.rows.filter((attempt) => attempt.player_id === match.player_b_id);
+    if (
+      attemptsA.length !== 3 ||
+      attemptsB.length !== 3 ||
+      attemptsA.some((attempt) => attempt.ended_at === null) ||
+      attemptsB.some((attempt) => attempt.ended_at === null)
+    ) return;
+    const evaluation = evaluateDeathmatch(
+      attemptsA.map((attempt) => ({
+        progressPercent: attempt.valid ? Number(attempt.progress_percent ?? 0) : 0,
+        cleared: attempt.valid ? Boolean(attempt.cleared) : false,
+      })),
+      attemptsB.map((attempt) => ({
+        progressPercent: attempt.valid ? Number(attempt.progress_percent ?? 0) : 0,
+        cleared: attempt.valid ? Boolean(attempt.cleared) : false,
+      })),
+    );
+    const winnerId = evaluation.winner === "A"
+      ? match.player_a_id
+      : evaluation.winner === "B"
+        ? match.player_b_id
+        : null;
+    await transaction.query(
+      `UPDATE ranked_deathmatches
+       SET score_a = $2, score_b = $3, winner_id = $4, finished_at = $5
+       WHERE id = $1 AND finished_at IS NULL`,
+      [
+        deathmatch.id,
+        evaluation.scoreA,
+        evaluation.scoreB,
+        winnerId,
+        now.toISOString(),
+      ],
+    );
+    await this.outbox.enqueueMatchEvent(
+      transaction,
+      match,
+      "DEATHMATCH_RESULT",
+      `match:${match.id}:deathmatch:${deathmatch.id}:result`,
+      {
+        sequence: Number(deathmatch.sequence),
+        scoreA: evaluation.scoreA,
+        scoreB: evaluation.scoreB,
+        winnerSide: evaluation.winner,
+        repeatRequired: evaluation.repeatRequired,
+      },
+      now,
+    );
+    this.runtimeState.clearRound(
+      match.id,
+      deathmatchRuntimeSlot(Number(deathmatch.sequence)),
+    );
+    if (evaluation.repeatRequired) {
+      const resultSeconds = this.matchConfig(match).operational.timeouts?.roundResultSeconds;
+      if (!resultSeconds) throw new Error("Missing result display timeout");
+      const deadline = new Date(now.getTime() + resultSeconds * 1_000);
+      await transaction.query(
+        `UPDATE ranked_matches
+         SET state = 'DEATHMATCH_RESULT', deadline_at = $2,
+             state_version = state_version + 1
+         WHERE id = $1`,
+        [match.id, deadline.toISOString()],
+      );
+      return;
+    }
+    if (!evaluation.winner) throw new Error("Deathmatch result has no winner");
+    const series = applyDeathmatchWinner(
+      parseJson<MatchSeriesState>(match.series_state),
+      evaluation.winner,
+    );
+    await transaction.query(
+      "UPDATE ranked_matches SET series_state = $2::jsonb WHERE id = $1",
+      [match.id, JSON.stringify(series)],
+    );
+    await this.finalizeMatch(transaction, match, evaluation.winner, now);
+  }
+
+  private async prepareDeathmatch(
+    transaction: SqlExecutor,
+    match: LockedMatchRow,
+    now: Date,
+  ): Promise<void> {
+    const config = this.matchConfig(match);
+    if (!config.operational.timeouts) throw new Error("Missing timeout policy");
+    const prior = await transaction.query<{ map_snapshot: unknown; sequence: number }>(
+      "SELECT map_snapshot, sequence FROM ranked_deathmatches WHERE match_id = $1 ORDER BY sequence",
+      [match.id],
+    );
+    const priorCanonicalIds = prior.rows.map(
+      (row) => parseJson<RankedMapSnapshot>(row.map_snapshot).canonicalLevelId,
+    );
+
+    // Bans are match-wide exclusions. Standard Round maps are also permanently
+    // excluded from Death Match so the Bo3 never repeats there. Previous Death
+    // Match maps stay a separate prefer-unused list; selectDeathmatchMap may only
+    // reuse one when the remaining eligible Death Match pool is exhausted.
+    const permanentlyExcludedCanonicalIds = new Set<string>();
+    if (match.ban_a_canonical_id) permanentlyExcludedCanonicalIds.add(match.ban_a_canonical_id);
+    if (match.ban_b_canonical_id) permanentlyExcludedCanonicalIds.add(match.ban_b_canonical_id);
+    if (match.selected_round_maps_snapshot) {
+      for (const roundMap of parseJson<RankedMapSnapshot[]>(match.selected_round_maps_snapshot)) {
+        permanentlyExcludedCanonicalIds.add(roundMap.canonicalLevelId);
+      }
+    }
+    const deathmatchEligibleMaps = config.maps.filter(
+      (candidate) => !permanentlyExcludedCanonicalIds.has(candidate.canonicalLevelId),
+    );
+
+    const effectiveTier = match.effective_tier as RankedConfigSnapshot["operational"]["tierBands"][number]["tier"];
+    const band = tierBandFor(effectiveTier, config.operational.tierBands);
+    const map = selectDeathmatchMap(
+      band.deathmatchPool,
+      deathmatchEligibleMaps,
+      priorCanonicalIds,
+      this.random,
+    );
+    const deathmatchId = this.ids.next();
+    const sequence = prior.rows.length + 1;
+    const readyDeadline = new Date(
+      now.getTime() + resourcePrepareSeconds(config.operational.timeouts.readySeconds) * 1_000,
+    );
+    await transaction.query(
+      `INSERT INTO ranked_deathmatches (id, match_id, sequence, map_snapshot)
+       VALUES ($1, $2, $3, $4::jsonb)`,
+      [deathmatchId, match.id, sequence, JSON.stringify(map)],
+    );
+    await transaction.query(
+      `UPDATE ranked_matches
+       SET state = 'DEATHMATCH_PREPARE', current_deathmatch_id = $2, entry_state = NULL,
+           ready_a_at = NULL, ready_b_at = NULL, ready_deadline_at = $3,
+           deadline_at = $3, state_version = state_version + 1
+       WHERE id = $1`,
+      [match.id, deathmatchId, readyDeadline.toISOString()],
+    );
+  }
+
+  private async roundSummaries(executor: SqlExecutor, matchId: string) {
+    const rows = await executor.query<RoundSummaryRow>(
+      `SELECT round_number, title, difficulty, score_a, score_b, clears_a, clears_b, result
+       FROM ranked_rounds WHERE match_id = $1 ORDER BY round_number`,
+      [matchId],
+    );
+    return rows.rows.map((round) => ({
+      roundNumber: Number(round.round_number),
+      mapTitle: round.title,
+      difficulty: round.difficulty,
+      scoreA: Number(round.score_a ?? 0),
+      scoreB: Number(round.score_b ?? 0),
+      clearsA: Number(round.clears_a ?? 0),
+      clearsB: Number(round.clears_b ?? 0),
+      result: round.result,
+    }));
+  }
+
+  private async deathmatchSummaries(executor: SqlExecutor, matchId: string) {
+    const rows = await executor.query<{
+      sequence: number;
+      map_snapshot: unknown;
+      score_a: number | null;
+      score_b: number | null;
+      winner_id: string | null;
+      finished_at: Date | string | null;
+    }>(
+      `SELECT sequence, map_snapshot, score_a, score_b, winner_id, finished_at
+       FROM ranked_deathmatches WHERE match_id = $1 ORDER BY sequence`,
+      [matchId],
+    );
+    const match = await executor.query<{ player_a_id: string; player_b_id: string }>(
+      "SELECT player_a_id, player_b_id FROM ranked_matches WHERE id = $1",
+      [matchId],
+    );
+    const participants = match.rows[0];
+    return rows.rows.map((deathmatch) => {
+      const map = parseJson<RankedMapSnapshot>(deathmatch.map_snapshot);
+      return {
+        sequence: Number(deathmatch.sequence),
+        mapTitle: map.title,
+        difficulty: map.difficulty,
+        scoreA: deathmatch.score_a === null ? null : Number(deathmatch.score_a),
+        scoreB: deathmatch.score_b === null ? null : Number(deathmatch.score_b),
+        winnerSide:
+          deathmatch.winner_id && deathmatch.winner_id === participants?.player_a_id
+            ? "A"
+            : deathmatch.winner_id && deathmatch.winner_id === participants?.player_b_id
+              ? "B"
+              : null,
+        finishedAt: dateIso(deathmatch.finished_at),
+      };
+    });
+  }
+
+  private async buildPublicState(
+    transaction: SqlExecutor,
+    match: LockedMatchRow,
+    viewerPlayerId: string,
+    now: Date,
+  ) {
+    const players = await transaction.query<PlayerStateRow>(
+      `SELECT p.id, p.gd_account_id::text AS gd_account_id, p.gd_username,
+              rp.*
+       FROM ranked_players p
+       JOIN ranked_profiles rp ON rp.player_id = p.id
+       WHERE p.id = $1 OR p.id = $2`,
+      [match.player_a_id, match.player_b_id],
+    );
+    const playerA = players.rows.find((player) => player.id === match.player_a_id);
+    const playerB = players.rows.find((player) => player.id === match.player_b_id);
+    const viewerSide: PlayerSide = viewerPlayerId === match.player_a_id ? "A" : "B";
+    const opponentSide: PlayerSide = viewerSide === "A" ? "B" : "A";
+    const config = this.matchConfig(match);
+    let currentRound: object | null = null;
+    let opponentProgress: number | null = null;
+    let opponentFinished = false;
+    let opponentPractice = false;
+    let spectator: {
+      active: boolean;
+      opponentName?: string;
+      currentProgress?: number | null;
+    } = { active: false };
+    let ready = { A: Boolean(match.ready_a_at), B: Boolean(match.ready_b_at) };
+    if (match.current_round_number) {
+      const roundResult = await transaction.query<RoundRow>(
+        "SELECT * FROM ranked_rounds WHERE match_id = $1 AND round_number = $2",
+        [match.id, match.current_round_number],
+      );
+      const round = roundResult.rows[0];
+      if (round) {
+        ready = { A: Boolean(round.ready_a_at), B: Boolean(round.ready_b_at) };
+        const domain = round.domain_state ? this.roundState(round) : null;
+        const progressA = this.runtimeState.progress(match.id, round.round_number, "A");
+        const progressB = this.runtimeState.progress(match.id, round.round_number, "B");
+        opponentProgress = this.runtimeState.displayProgress(
+          match.id,
+          round.round_number,
+          opponentSide,
+        );
+        opponentPractice = this.runtimeState.practice(match.id, round.round_number, opponentSide);
+        if (domain) {
+          const opponentAttempts = domain.attempts[opponentSide];
+          const opponentActive = opponentAttempts.some(
+            (attempt) => attempt.valid && attempt.endedAtMs === null,
+          );
+          const opponentHasEnded = opponentAttempts.some(
+            (attempt) => attempt.valid && attempt.endedAtMs !== null,
+          );
+          const opponentHasPendingStartLease = await this.hasPendingStartLease(
+            transaction,
+            match,
+            round,
+            domain,
+            now,
+            opponentSide,
+          );
+          const opponentCanStartAnotherAttempt =
+            domain.phase !== "ROUND_RESULT" &&
+            domain.phase !== "ROUND_SETTLING" &&
+            (domain.lastAttemptWindow
+              ? opponentSide === domain.lastAttemptWindow.targetSide &&
+                now.getTime() < domain.lastAttemptWindow.endsAtMs
+              : now.getTime() < domain.finalWindowEndAtMs);
+          opponentFinished =
+            !opponentActive &&
+            !opponentHasPendingStartLease &&
+            opponentHasEnded &&
+            !opponentCanStartAnotherAttempt;
+        }
+        const qualifyingPercent = Number(round.qualifying_percent);
+        const committedScores = domain?.scores ?? { A: 0, B: 0 };
+        const displayScores = {
+          A: committedScores.A + (progressA
+            ? scoreAttempt(progressA.progressPercent, false, qualifyingPercent)
+            : 0),
+          B: committedScores.B + (progressB
+            ? scoreAttempt(progressB.progressPercent, false, qualifyingPercent)
+            : 0),
+        };
+        currentRound = {
+          roundNumber: Number(round.round_number),
+          banner: bannerForRound(round.round_number),
+          phase: round.phase,
+          map: {
+            levelId: round.level_id,
+            canonicalLevelId: round.canonical_level_id,
+            alternateLevelId: round.alternate_level_id,
+            playableLevelId: round.playable_level_id,
+            title: round.title,
+            creator: round.creator,
+            difficulty: round.difficulty,
+            pool: Number(round.pool),
+            qualifyingPercent,
+          },
+          scores: committedScores,
+          displayScores,
+          clears: domain?.clears ?? { A: 0, B: 0 },
+          lastAttemptWindow: domain?.lastAttemptWindow ?? null,
+          outcome: domain?.outcome ?? null,
+        };
+        if (domain) {
+          const viewerProgress = viewerSide === "A" ? progressA : progressB;
+          const opponentProgress = opponentSide === "A" ? progressA : progressB;
+
+          const lastAttemptSpectator =
+            (domain.phase === "LAST_ATTEMPT_WINDOW" || domain.phase === "ROUND_SETTLING") &&
+            domain.lastAttemptWindow?.triggerSide === viewerSide &&
+            domain.lastAttemptWindow.targetSide === opponentSide &&
+            domain.clears[viewerSide] === domain.rules.clearTarget &&
+            domain.clears[opponentSide] < domain.rules.clearTarget;
+
+          const finalWindowSpectator =
+            domain.phase === "ROUND_SETTLING" &&
+            domain.lastAttemptWindow === null &&
+            !viewerProgress &&
+            Boolean(opponentProgress);
+
+          if (lastAttemptSpectator || finalWindowSpectator) {
+            const opponent = opponentSide === "A" ? playerA : playerB;
+            spectator = {
+              active: true,
+              opponentName: opponent?.gd_username ?? "Opponent",
+              currentProgress: opponentProgress?.progressPercent ?? null,
+            };
+          }
+        }
+      }
+    }
+    let deathmatch: object | null = null;
+    if (
+      (match.state.startsWith("DEATHMATCH") || match.state === "MATCH_RESULT") &&
+      match.current_deathmatch_id
+    ) {
+      const current = await this.currentDeathmatch(transaction, match);
+      const live = await this.deathmatchLiveSnapshot(transaction, match, current);
+      const deathmatchSlot = deathmatchRuntimeSlot(Number(current.sequence));
+      opponentProgress = this.runtimeState.displayProgress(
+        match.id,
+        deathmatchSlot,
+        opponentSide,
+      );
+      opponentPractice = this.runtimeState.practice(match.id, deathmatchSlot, opponentSide);
+      const liveRecord = live as {
+        attemptsCompleted: Record<PlayerSide, number>;
+        activeAttemptNumber: Record<PlayerSide, number | null>;
+      };
+      opponentFinished = liveRecord.attemptsCompleted[opponentSide] >= 3 &&
+        liveRecord.activeAttemptNumber[opponentSide] === null;
+      const result = await transaction.query<{ winner_id: string | null }>(
+        "SELECT winner_id FROM ranked_deathmatches WHERE id = $1",
+        [match.current_deathmatch_id],
+      );
+      const winnerId = result.rows[0]?.winner_id ?? null;
+      deathmatch = {
+        ...live,
+        winnerSide:
+          winnerId === match.player_a_id
+            ? "A"
+            : winnerId === match.player_b_id
+              ? "B"
+              : null,
+      };
+    }
+    const series = parseJson<MatchSeriesState>(match.series_state);
+    const bansVisible = !["MATCHED", "BAN_PHASE"].includes(match.state);
+    const ownBanConfirmed = viewerSide === "A"
+      ? Boolean(match.ban_a_confirmed_at)
+      : Boolean(match.ban_b_confirmed_at);
+    const ownBanCanonicalLevelId = viewerSide === "A"
+      ? match.ban_a_canonical_id
+      : match.ban_b_canonical_id;
+    const rounds = await this.roundSummaries(transaction, match.id);
+    const deathmatches = await this.deathmatchSummaries(transaction, match.id);
+    if (!config.operational.mmrPolicy) throw new Error("Missing MMR policy");
+    const placementGamesRequired = config.operational.mmrPolicy.placementGames;
+    let ratingPresentation: Record<string, unknown> | null = null;
+    if (match.state === "MATCH_RESULT") {
+      ratingPresentation = match.rating_presentation
+        ? parseJson<Record<string, unknown>>(match.rating_presentation)
+        : {
+            perfectWinSide: null,
+            rankedScoreDelta: {
+              A: match.ranked_score_delta_a,
+              B: match.ranked_score_delta_b,
+            },
+            profileAfter: {
+              A: playerA ? {
+                ...publicRatingProfile(ratingProfileFromRow(playerA), placementGamesRequired),
+                equippedTitle: this.achievements.titleProjection(
+                  playerA.equipped_achievement_id, playerA.equipped_achievement_level,
+                ),
+              } : null,
+              B: playerB ? {
+                ...publicRatingProfile(ratingProfileFromRow(playerB), placementGamesRequired),
+                equippedTitle: this.achievements.titleProjection(
+                  playerB.equipped_achievement_id, playerB.equipped_achievement_level,
+                ),
+              } : null,
+            },
+            events: { A: {}, B: {} },
+          };
+    }
+    return {
+      matchId: match.id,
+      state: match.state,
+      stateVersion: Number(match.state_version),
+      deadlineAt: dateIso(match.deadline_at),
+      serverNow: now.toISOString(),
+      rulesVersion: config.operational.rules.rulesVersion,
+      configGeneration: config.generation,
+      effectiveTier: match.effective_tier,
+      matchType: match.match_type,
+      debug: match.match_type === "DEBUG_BOT",
+      side: viewerSide,
+      opponentProgress,
+      opponentFinished,
+      opponentPractice,
+      opponentPaused: matchPauseView((match.pause_state ? parseJson<Partial<Record<PlayerSide, MatchPauseState>>>(match.pause_state)[opponentSide] : null) ?? emptyMatchPause(), now.getTime()).active,
+      surrender: match.surrender_events ? parseJson<unknown[]>(match.surrender_events).at(-1) ?? null : null,
+      pause: matchPauseView((match.pause_state
+        ? parseJson<Partial<Record<PlayerSide, MatchPauseState>>>(match.pause_state)[viewerSide] : null) ?? emptyMatchPause(), now.getTime()),
+      ready,
+      entry: match.entry_state ? parseJson<NativeEntryState>(match.entry_state) : null,
+      players: {
+        A: playerA
+          ? {
+              gdAccountId: playerA.gd_account_id,
+              gdUsername: playerA.gd_username,
+              ...publicRatingProfile(ratingProfileFromRow(playerA), placementGamesRequired),
+              equippedTitle: this.achievements.titleProjection(
+                playerA.equipped_achievement_id, playerA.equipped_achievement_level,
+              ),
+            }
+          : null,
+        B: playerB
+          ? {
+              gdAccountId: playerB.gd_account_id,
+              gdUsername: playerB.gd_username,
+              ...publicRatingProfile(ratingProfileFromRow(playerB), placementGamesRequired),
+              equippedTitle: this.achievements.titleProjection(
+                playerB.equipped_achievement_id, playerB.equipped_achievement_level,
+              ),
+            }
+          : null,
+      },
+      candidateMaps:
+        match.state === "BAN_PHASE"
+          ? parseJson<RankedMapSnapshot[]>(match.candidate_maps_snapshot)
+          : null,
+      banStatus: {
+        confirmed: ownBanConfirmed,
+        canonicalLevelId: ownBanConfirmed ? ownBanCanonicalLevelId : null,
+      },
+      bans: bansVisible
+        ? { A: match.ban_a_canonical_id, B: match.ban_b_canonical_id }
+        : null,
+      series,
+      rounds,
+      currentRound,
+      spectator,
+      deathmatch,
+      deathmatches,
+      result:
+        match.state === "MATCH_RESULT"
+          ? {
+              winnerSide: match.winner_id === match.player_a_id ? "A" : "B",
+              ...ratingPresentation,
+            }
+          : null,
+      cancellation:
+        match.state === "CANCELLED"
+          ? { cancelled: true, reason: match.cancellation_reason }
+          : null,
+    };
+  }
+}

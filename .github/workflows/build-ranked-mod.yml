@@ -1,0 +1,95 @@
+name: Build Corum Ranked Mod
+
+# Release packages are intentionally manual-only. Routine development pushes use
+# Build Corum Ranked Debug so GitHub Actions minutes are not spent compiling the
+# same four native targets twice.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  metadata:
+    name: Validate Ranked release manifest
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      artifact_name: ${{ steps.version.outputs.artifact_name }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Read and validate mod identity/version
+        id: version
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const manifest = JSON.parse(fs.readFileSync('corum-ranked-mod/mod.json', 'utf8'));
+          if (manifest.id !== 'hwanhee1.corum_ranked') {
+            throw new Error(`Unexpected Ranked Mod ID: ${manifest.id}`);
+          }
+          const source = fs.readFileSync('ranked/apps/server/src/session/client-version.ts', 'utf8');
+          const required = source.match(/REQUIRED_RANKED_CLIENT_VERSION\s*=\s*["']([^"']+)["']/)?.[1];
+          if (!required || required !== manifest.version) {
+            throw new Error(`Client/server version mismatch: mod=${manifest.version}, server=${required}`);
+          }
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `version=${manifest.version}\n`);
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `artifact_name=Corum-Ranked-${manifest.version}\n`);
+          NODE
+
+  build:
+    name: ${{ matrix.config.name }} ${{ needs.metadata.outputs.version }} Release
+    needs: metadata
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - name: Windows
+            os: windows-latest
+            target: Win64
+          - name: iOS
+            os: macos-latest
+            target: iOS
+          - name: Android32
+            os: ubuntu-latest
+            target: Android32
+          - name: Android64
+            os: ubuntu-latest
+            target: Android64
+    runs-on: ${{ matrix.config.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build isolated Ranked release package
+        uses: geode-sdk/build-geode-mod@main
+        with:
+          path: corum-ranked-mod
+          target: ${{ matrix.config.target }}
+          combine: true
+          configure-args: -DCORUM_RANKED_DEBUG_BOT_MATCH=OFF -DCORUM_RANKED_DEBUG_SPECTATE=OFF
+
+  package:
+    name: Package ${{ needs.metadata.outputs.version }} Release
+    runs-on: ubuntu-latest
+    needs:
+      - metadata
+      - build
+    steps:
+      - uses: geode-sdk/build-geode-mod/combine@main
+        id: build
+      - name: Normalize combined release package
+        env:
+          BUILD_OUTPUT: ${{ steps.build.outputs.build-output }}
+        shell: bash
+        run: |
+          mkdir -p dist
+          mapfile -t PACKAGES < <(find "$BUILD_OUTPUT" -maxdepth 1 -type f -name '*.geode' -print)
+          if [[ ${#PACKAGES[@]} -ne 1 ]]; then
+            echo "Expected one combined Ranked release package, found ${#PACKAGES[@]}" >&2
+            exit 1
+          fi
+          cp "${PACKAGES[0]}" "dist/hwanhee1.corum_ranked.geode"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ needs.metadata.outputs.artifact_name }}
+          path: dist/hwanhee1.corum_ranked.geode
+          if-no-files-found: error
