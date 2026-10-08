@@ -1,4 +1,5 @@
-import { ConflictException, ForbiddenException, Inject, Injectable, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
+import { ConflictException, ForbiddenException, Inject, Injectable, Optional, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
+import { ForumRecordsService } from "../forum/forum-records.service.js";
 import {
   evaluateClientEnvironment,
   seedProfileOnce,
@@ -80,6 +81,7 @@ export class SessionService {
     @Inject(ID_GENERATOR) private readonly ids: IdGenerator,
     private readonly config: RankedConfigService,
     private readonly tokens: TokenService,
+    @Optional() private readonly forumRecords?: ForumRecordsService,
   ) {}
 
   public assertEnvironment(installedMods: readonly InstalledModDto[]): void {
@@ -167,6 +169,9 @@ export class SessionService {
       return seededProfile;
     });
 
+    // Queue the first fetch only after the transaction commits. Returning users
+    // hit the durable cache; external APIs never hold the profile/session lock.
+    this.forumRecords?.enqueue(dto.gdAccountId, dto.gdUsername);
     return {
       sessionToken,
       expiresAt: expiresAt.toISOString(),

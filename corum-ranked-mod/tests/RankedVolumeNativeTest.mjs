@@ -133,6 +133,8 @@ using CCTouchDispatcher=Dispatcher;
 struct Mod {int saves=0;static Mod* get(){static Mod m;return &m;}void saveData(){++saves;}};
 struct Popup:CCObject {int exits=0;void onExit(){++exits;}};
 struct RankedSettingsPopup:Popup {bool m_closed=false,m_exited=false,m_dirty=true;
+    void unschedule(int){}
+#define schedule_selector(x) 0
     ${body(popup, 'void onExit() override').replace(' override', '')}
 };
 int main(){Popup external;RankedSettingsPopup popup;auto* d=Dispatcher::get();d->owners={&external,&popup};

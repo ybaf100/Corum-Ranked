@@ -12,10 +12,12 @@ import {
 import { MatchService } from "./match.service.js";
 import { SpectatorLiveController } from "./spectator-live.controller.js";
 import { SpectatorLiveService } from "./spectator-live.service.js";
+import { ForumRecordsModule } from "../forum/forum-records.module.js";
+import { MatchPlayerInfoController } from "../forum/match-player-info.controller.js";
 
 @Module({
-  imports: [SessionModule, RelayModule, AchievementModule],
-  controllers: [MatchController, SpectatorLiveController],
+  imports: [SessionModule, RelayModule, AchievementModule, ForumRecordsModule],
+  controllers: [MatchController, SpectatorLiveController, MatchPlayerInfoController],
   providers: [
     MatchAccessService,
     MatchService,
@@ -26,3 +28,4 @@ import { SpectatorLiveService } from "./spectator-live.service.js";
   exports: [MatchService, SpectatorLiveService],
 })
 export class MatchModule {}
+

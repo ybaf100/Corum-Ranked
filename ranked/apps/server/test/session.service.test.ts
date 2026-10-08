@@ -1,7 +1,8 @@
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { PGlite } from "@electric-sql/pglite";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ForumRecordsService } from "../src/forum/forum-records.service.js";
 import type { CsmpTier } from "@corum-ranked/rules";
 import type { IdGenerator, ServerClock } from "../src/common/runtime.module.js";
 import { TokenService } from "../src/common/token.service.js";
@@ -101,7 +102,7 @@ const cleanDto = (accountId: string): CreateSessionDto => ({
   ],
 });
 
-const buildService = (source: FakeCsmpSource, clock = new FixedClock()) => {
+const buildService = (source: FakeCsmpSource, clock = new FixedClock(), records?: ForumRecordsService) => {
   const document = configDocumentFixture();
   const config = {
     getSnapshot: () => ({ ...structuredClone(document), fetchedAt: "2026-08-20T00:00:00Z" }),
@@ -113,10 +114,26 @@ const buildService = (source: FakeCsmpSource, clock = new FixedClock()) => {
     new SequenceIds(),
     config,
     new TokenService(environmentFixture()),
+    records,
   );
 };
 
 describe("Ranked session/profile creation", () => {
+  it("queues the first forum fetch only after the profile/session transaction commits", async () => {
+    let inTransaction = false;
+    const original = database.transaction.bind(database);
+    const transaction = vi.spyOn(database, 'transaction').mockImplementation(async (operation) => {
+      inTransaction = true;
+      try { return await original(operation); }
+      finally { inTransaction = false; }
+    });
+    const enqueue = vi.fn(() => { expect(inTransaction).toBe(false); });
+    try {
+      const dto = cleanDto('7044');
+      await buildService(new FakeCsmpSource(), new FixedClock(), { enqueue } as unknown as ForumRecordsService).create(dto);
+      expect(enqueue).toHaveBeenCalledWith(dto.gdAccountId, dto.gdUsername);
+    } finally { transaction.mockRestore(); }
+  });
   const contextFor = async (token: string): Promise<RankedSessionContext> => {
     const result = await database.query<{ id: string; player_id: string }>(
       "SELECT id, player_id FROM ranked_sessions WHERE token_hash = $1",

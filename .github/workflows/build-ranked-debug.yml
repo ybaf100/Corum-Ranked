@@ -149,6 +149,9 @@ jobs:
           node --test corum-ranked-mod/tests/RankedPauseNativeTest.mjs
           node --test corum-ranked-mod/tests/RankedPauseQuitNativeTest.mjs
           node --test corum-ranked-mod/tests/RankedPauseConcessionNativeTest.mjs
+          node --test corum-ranked-mod/tests/RankedExitNativeTest.mjs
+          node --test corum-ranked-mod/tests/PlayerInfoPresentationTest.mjs
+          node --test corum-ranked-mod/tests/PlayerInfoPopupNativeTest.mjs
           node --test corum-ranked-mod/tests/RankedPauseInputNativeTest.mjs
           node --test corum-ranked-mod/tests/RankedVolumeNativeTest.mjs
           node --test corum-ranked-mod/tests/MapDetailsNativeTest.mjs

@@ -143,6 +143,24 @@ std::vector<std::string> parseRatingMarks(matjson::Value const& value) {
     return marks;
 }
 
+corum::ranked::ForumRecordsView parseForumRecords(matjson::Value const& root) {
+    corum::ranked::ForumRecordsView result;
+    auto const records = root["records"].asArray();
+    if (records.isErr()) { result.error = "Invalid forum records response"; return result; }
+    result.loaded = true;
+    for (auto const& item : records.unwrap()) {
+        corum::ranked::ForumRankView record;
+        record.provider = item["provider"].asString().unwrapOr("");
+        record.externalName = item["externalName"].asString().unwrapOr("");
+        record.status = item["status"].asString().unwrapOr("PENDING");
+        record.lastSuccessAt = item["lastSuccessAt"].asString().unwrapOr("");
+        auto const rank = item["rank"].asInt();
+        if (rank.isOk() && rank.unwrap() > 0) record.rank = static_cast<int>(rank.unwrap());
+        result.records.push_back(std::move(record));
+    }
+    return result;
+}
+
 corum::ranked::AchievementTitleView parseAchievementTitle(matjson::Value const& value) {
     corum::ranked::AchievementTitleView title;
     if (!value.isObject()) return title;
@@ -433,6 +451,8 @@ void RankedRuntime::begin() {
     m_progressBusy = false;
 
     m_sessionToken.clear();
+    ++m_playerInfoGeneration; ++m_forumRecordsGeneration;
+    m_playerInfoRequest.cancel(); m_forumRecordsRequest.cancel();
     m_matchToken.clear();
     m_attemptId.clear();
     m_attemptLevelId = 0;
@@ -461,6 +481,8 @@ void RankedRuntime::begin() {
     m_view.environmentWarning = {};
     m_view.placement = {};
     m_view.match = {};
+    m_view.playerInfo = {};
+    m_view.forumRecords = {};
     fetchConfig();
 }
 
@@ -734,6 +756,9 @@ void RankedRuntime::leaveRanked() {
     ++m_sessionGeneration;
     m_sessionHeartbeatRequest.cancel(); m_sessionHeartbeatBusy = false;
     m_controlRequest.cancel(); m_controlBusy = false;
+    ++m_playerInfoGeneration; ++m_forumRecordsGeneration;
+    m_playerInfoRequest.cancel(); m_forumRecordsRequest.cancel();
+    m_view.playerInfo.forum.loading = m_view.forumRecords.loading = false;
     invalidatePollRequest();
     auto const token = std::exchange(m_sessionToken, {});
     m_sessionLeaseDeadline = {}; m_nextSessionHeartbeatAt = {};
@@ -1364,6 +1389,7 @@ void RankedRuntime::parseMatchState(matjson::Value const& root) {
     observeServerNow(root);
     auto const previousState = m_view.match.state;
     m_view.match.state = root["state"].asString().unwrapOr("");
+    m_view.match.matchType = root["matchType"].asString().unwrapOr("");
     m_view.match.stateVersion = root["stateVersion"].asInt().unwrapOr(0);
     m_view.match.deadlineAt = root["deadlineAt"].asString().unwrapOr("");
     m_view.match.side = root["side"].asString().unwrapOr("");
@@ -2251,6 +2277,55 @@ void RankedRuntime::fetchAchievements() {
             parseAchievementState(response.json().unwrapOr(matjson::Value()));
         }
     );
+}
+
+void RankedRuntime::fetchPlayerInfo(std::string const& side) {
+    if ((side != "A" && side != "B") || m_sessionToken.empty() || m_matchToken.empty() ||
+        m_view.stage != RuntimeStage::Matched || m_view.match.matchId.empty()) return;
+    m_playerInfoRequest.cancel();
+    auto const generation = ++m_playerInfoGeneration;
+    auto const matchId = m_view.match.matchId;
+    auto const session = m_sessionToken;
+    m_view.playerInfo = {};
+    auto& info = m_view.playerInfo;
+    info.side = side;
+    info.accountId = side == "A" ? m_view.match.playerAAccountId : m_view.match.playerBAccountId;
+    info.username = side == "A" ? m_view.match.playerAName : m_view.match.playerBName;
+    if (m_view.match.matchType == "DEBUG_BOT" && side == "B") {
+        info.accountId = 16792985; info.username = "CoJong"; info.botReference = true;
+    }
+    info.forum.loading = true;
+    ++m_view.revision;
+    auto request = baseRequest(session, m_matchToken);
+    m_playerInfoRequest.spawn(request.get(endpoint("/api/ranked/matches/" + matchId + "/player-info/" + side)),
+        [this, generation, matchId, session](web::WebResponse response) {
+            if (generation != m_playerInfoGeneration || matchId != m_view.match.matchId || session != m_sessionToken) return;
+            auto& info = m_view.playerInfo;
+            info.forum.loading = false;
+            if (!successful(response)) { info.forum.error = responseError(response); ++m_view.revision; return; }
+            auto const root = response.json().unwrapOr(matjson::Value());
+            auto const account = numFromString<int>(root["gdAccountId"].asString().unwrapOr("")).unwrapOr(0);
+            if (account != info.accountId) { info.forum.error = "Player identity changed"; ++m_view.revision; return; }
+            info.forum = parseForumRecords(root);
+            ++m_view.revision;
+        });
+}
+
+void RankedRuntime::fetchForumRecords(bool refresh) {
+    if (m_sessionToken.empty() || m_view.forumRecords.loading || (!refresh && m_view.forumRecords.loaded)) return;
+    auto const generation = ++m_forumRecordsGeneration;
+    auto const session = m_sessionToken;
+    m_view.forumRecords.loading = true; m_view.forumRecords.error.clear(); ++m_view.revision;
+    auto request = baseRequest(session);
+    auto task = refresh ? request.post(endpoint("/api/ranked/session/forum-records/refresh"))
+                        : request.get(endpoint("/api/ranked/session/forum-records"));
+    m_forumRecordsRequest.spawn(std::move(task), [this, generation, session](web::WebResponse response) {
+        if (generation != m_forumRecordsGeneration || session != m_sessionToken) return;
+        m_view.forumRecords.loading = false;
+        if (!successful(response)) { m_view.forumRecords.error = responseError(response); ++m_view.revision; return; }
+        m_view.forumRecords = parseForumRecords(response.json().unwrapOr(matjson::Value()));
+        ++m_view.revision;
+    });
 }
 
 void RankedRuntime::claimAchievement(std::string const& achievementId) {

@@ -147,6 +147,22 @@ struct AchievementView {
     std::vector<AchievementCardView> cards;
 };
 
+struct ForumRankView {
+    std::string provider, externalName, status = "PENDING", lastSuccessAt;
+    std::optional<int> rank;
+};
+struct ForumRecordsView {
+    bool loaded = false, loading = false;
+    std::string error;
+    std::vector<ForumRankView> records;
+};
+struct PlayerInfoView {
+    int accountId = 0;
+    std::string username, side;
+    bool botReference = false;
+    ForumRecordsView forum;
+};
+
 struct RankedProfileView {
     std::string displayedTier = "UNRANKED";
     std::optional<int> visibleRankedScore;
@@ -237,6 +253,7 @@ struct HistoryMatchView {
 };
 
 struct MatchView {
+    std::string matchType;
     bool placement = false;
     std::string matchId;
     std::string state;
@@ -397,6 +414,8 @@ struct RuntimeView {
     std::string historyError;
     std::vector<HistoryMatchView> history;
     AchievementView achievements;
+    ForumRecordsView forumRecords;
+    PlayerInfoView playerInfo;
 };
 
 class RankedRuntime final {
@@ -431,6 +450,8 @@ public:
     void queueAgain();
     void fetchHistory();
     void fetchAchievements();
+    void fetchPlayerInfo(std::string const& side);
+    void fetchForumRecords(bool refresh = false);
     void claimAchievement(std::string const& achievementId);
     void equipAchievementTitle(std::string const& achievementId, std::optional<int> level);
     void clearAchievementTitle();
@@ -631,6 +652,8 @@ private:
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_progressRequest;
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_presenceRequest;
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_pauseRequest, m_surrenderRequest;
+    geode::async::TaskHolder<geode::utils::web::WebResponse> m_playerInfoRequest, m_forumRecordsRequest;
+    std::uint64_t m_playerInfoGeneration = 0, m_forumRecordsGeneration = 0;
 };
 
 char const* stageName(RuntimeStage stage);

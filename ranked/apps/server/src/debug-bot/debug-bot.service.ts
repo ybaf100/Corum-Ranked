@@ -285,6 +285,7 @@ export class DebugBotService implements OnModuleInit, OnApplicationShutdown {
         // ROUND_SETTLING, permanently trapping LAST ATTEMPT Bot Matches.
         if (state.state !== "ROUND_SETTLING") {
           await this.seedScenarioRound(driver, state, round);
+          if (!driver.seededRounds.has(Number(round.roundNumber))) return;
         }
         const refreshed = await this.matches.state(
           matchId,
@@ -384,48 +385,46 @@ export class DebugBotService implements OnModuleInit, OnApplicationShutdown {
     if (driver.seededRounds.has(roundNumber)) return;
     const scenario = driver.creation.settings.scenario;
     const levelId = String(round.map.playableLevelId);
-    const bot = () => this.completeAttempt(driver, false, levelId, 100, true, "scenario-bot");
-    const player = () => this.completeAttempt(driver, true, levelId, 100, true, "scenario-player");
-
+    let steps: boolean[] = [];
     if (scenario === "FORCE_BOT_1_CLEAR" && roundNumber === 1) {
-      await bot();
+      steps = [false];
     } else if (scenario === "FORCE_BOT_3_CLEARS" && roundNumber === 1) {
-      await bot();
-      await bot();
-      await bot();
+      steps = [false, false, false];
     } else if (scenario === "TRIGGER_LAST_ATTEMPT" && roundNumber === 1) {
-      await bot();
-      await bot();
-      await player();
-      await player();
-      await player();
+      steps = [false, false, true, true, true];
     } else if (scenario === "TRIGGER_ROUND_DRAW") {
-      await bot();
-      await player();
-      await player();
-      await player();
-      await bot();
-      await bot();
+      steps = [false, true, true, true, false, false];
     } else if (scenario === "TRIGGER_ROUND_3") {
-      if (roundNumber === 1) {
-        await player();
-        await player();
-        await player();
-      } else if (roundNumber === 2) {
-        await bot();
-        await bot();
-        await bot();
-      }
+      if (roundNumber === 1) steps = [true, true, true];
+      else if (roundNumber === 2) steps = [false, false, false];
     } else if (scenario === "TRIGGER_DEATHMATCH") {
-      await bot();
-      await player();
-      await player();
-      await player();
-      await bot();
-      await bot();
+      steps = [false, true, true, true, false, false];
+    }
+    const targets = { A: 0, B: 0 };
+    let current = state;
+    for (const [index, player] of steps.entries()) {
+      const side = player ? "A" : "B";
+      targets[side] += 1;
+      // Durable clear counts are the checkpoint, including after a lost ACK
+      // or driver restart. Never repeat the already completed Bot prefix.
+      const clears = Number(current.currentRound?.clears?.[side] ?? 0);
+      if (clears >= targets[side]) continue;
+      if (!this.isSameSeedRound(current, roundNumber, levelId)) return;
+      await this.completeAttempt(driver, player, levelId, 100, true,
+        `scenario-r${roundNumber}-step${index}`, roundNumber);
+      current = await this.matches.state(driver.creation.matchId,
+        driver.creation.botMatchToken, driver.creation.botContext) as Record<string, any>;
+      const refreshedClears = Number(current.currentRound?.clears?.[side] ?? 0);
+      if (refreshedClears < targets[side]) return;
     }
     driver.seededRounds.add(roundNumber);
     if (state.state !== "ROUND_PLAYING") driver.attemptId = null;
+  }
+
+  private isSameSeedRound(state: Record<string, any>, round: number, levelId: string): boolean {
+    return ["ROUND_PLAYING", "FINAL_ATTEMPT_WINDOW", "LAST_ATTEMPT_WINDOW"].includes(state.state) &&
+      Number(state.currentRound?.roundNumber) === round &&
+      String(state.currentRound?.map?.playableLevelId) === levelId;
   }
 
   private async completeAttempt(
@@ -435,23 +434,42 @@ export class DebugBotService implements OnModuleInit, OnApplicationShutdown {
     progressPercent: number,
     cleared: boolean,
     kind: string,
-  ): Promise<void> {
+    roundNumber: number,
+  ): Promise<boolean> {
     const creation = driver.creation;
     const context = player ? creation.playerContext : creation.botContext;
     const token = player ? creation.playerMatchToken : creation.botMatchToken;
-    const sequence = ++driver.eventSequence;
+    const event = `debug-bot-${kind}`;
     const started = await this.matches.startAttempt(creation.matchId, token, context, {
       levelId,
-      clientEventId: `debug-bot-${kind}-${sequence}-start`,
+      clientEventId: `${event}-start`,
     });
-    if (!started.accepted || !started.attemptId) return;
-    await this.matches.endAttempt(creation.matchId, token, context, {
+    let attemptId = started.accepted ? started.attemptId : null;
+    if (!attemptId && started.reason === "ATTEMPT_ALREADY_ACTIVE") {
+      // These development scenarios explicitly simulate both players. GO can
+      // already have admitted the real client's first Attempt. Complete that
+      // exact accepted Attempt through the normal End authority, rather than
+      // silently skipping it or changing scores/entry state in the database.
+      const active = await this.database.query<{ domain_attempt_id: string }>(
+        `SELECT a.domain_attempt_id FROM ranked_attempts a
+         JOIN ranked_rounds r ON r.id = a.round_id
+         WHERE r.match_id = $1 AND r.round_number = $2 AND a.player_id = $3
+           AND a.played_level_id = $4 AND a.ended_at IS NULL AND a.valid = TRUE
+         ORDER BY a.attempt_sequence DESC LIMIT 1`,
+        [creation.matchId, roundNumber, context.playerId, levelId],
+      );
+      attemptId = active.rows[0]?.domain_attempt_id ?? null;
+    }
+    if (!attemptId) return false;
+    const ended = await this.matches.endAttempt(creation.matchId, token, context, {
       levelId,
-      attemptId: started.attemptId,
-      clientEventId: `debug-bot-${kind}-${sequence}-end`,
+      attemptId,
+      clientEventId: `${event}-end`,
       progressPercent,
       cleared,
     });
+    if (ended.accepted && !player && driver.attemptId === attemptId) driver.attemptId = null;
+    return ended.accepted;
   }
 
   private async recoverSettlingBotAttempt(

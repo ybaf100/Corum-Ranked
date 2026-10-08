@@ -64,6 +64,9 @@ enum class RuntimeStage {Idle,Error};
 struct RankedRuntime {
 ${fields}
  bool m_controlBusy=true;geode::async::TaskHolder<web::WebResponse> m_controlRequest;int pollRetirements=0;
+ std::uint64_t m_playerInfoGeneration=0,m_forumRecordsGeneration=0;
+ geode::async::TaskHolder<web::WebResponse> m_playerInfoRequest,m_forumRecordsRequest;
+ struct {struct {struct {bool loading=true;}forum;}playerInfo;struct {bool loading=true;}forumRecords;}m_view;
  RuntimeStage stage=RuntimeStage::Idle;
  void invalidatePollRequest(){++pollRetirements;}
  void setStage(RuntimeStage value,std::string,std::string={}){stage=value;}

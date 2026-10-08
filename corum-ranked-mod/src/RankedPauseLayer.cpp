@@ -1,5 +1,6 @@
 #include "RankedRuntime.hpp"
 #include "ui/RankedSurrenderPopup.hpp"
+#include "ui/RankedExitConfirmation.hpp"
 #include "spectator/SpectatorSceneBridge.hpp"
 #include <Geode/Geode.hpp>
 #include <Geode/modify/PauseLayer.hpp>
@@ -14,6 +15,30 @@ using corum::ranked::RankedRuntime;
 namespace ui = corum::ranked::ui;
 namespace i18n = corum::ranked::i18n;
 std::optional<WeakRef<PauseLayer>> activeRankedPause;
+void dismissNativeRankedExitConfirmation(PauseLayer* pause) {
+    auto* scene = CCDirector::sharedDirector()->getRunningScene();
+    if (!scene) return;
+    auto* delegate = static_cast<FLAlertLayerProtocol*>(pause);
+    std::vector<Ref<CCNode>> pending;
+    std::vector<Ref<FLAlertLayer>> dialogs;
+    pending.emplace_back(scene);
+    while (!pending.empty()) {
+        auto node = std::move(pending.back()); pending.pop_back();
+        if (auto* alert = typeinfo_cast<FLAlertLayer*>(node.data()); alert && alert->m_alertProtocol == delegate)
+            dialogs.emplace_back(alert);
+        for (auto* child : node->getChildrenExt()) pending.emplace_back(child);
+    }
+    for (auto const& alert : dialogs) {
+        if (!alert->getParent() || alert->m_alertProtocol != delegate) continue;
+        if (alert->m_forcePrioRegistered) {
+            CCTouchDispatcher::get()->unregisterForcePrio(alert.data());
+            alert->m_forcePrioRegistered = false;
+        }
+        // Cancel the original GD Confirm Exit while its exact Pause is still
+        // alive. A budget timeout must not leave its raw delegate behind.
+        alert->onBtn1(nullptr);
+    }
+}
 bool ownsRankedPlayerPause() {
     auto* layer = PlayLayer::get(); auto const& ranked = RankedRuntime::get();
     return layer && layer->m_level && !ranked.isPlacement() && !ranked.isSpectating() &&
@@ -30,10 +55,12 @@ public:
         CCLabelBMFont* budget = nullptr;
         CCMenuItemSpriteExtra* surrender = nullptr;
         std::optional<WeakRef<ui::RankedSurrenderPopup>> popup;
+        std::optional<WeakRef<ui::RankedExitConfirmation>> exitConfirmation;
         std::optional<WeakRef<PlayLayer>> owner;
         bool concessionQuit = false, nativeQuitInProgress = false, nativeQuitReachedPlay = false;
         ~Fields() {
             if (popup) if (auto dialog = popup->lock()) dialog->dismiss();
+            if (exitConfirmation) if (auto dialog = exitConfirmation->lock()) dialog->dismiss();
             popup.reset();
             RankedRuntime::get().endMatchGameplayPause(leaseId);
         }
@@ -98,6 +125,9 @@ public:
             ranked.view().stage != corum::ranked::RuntimeStage::Matched) resumeRankedPause(nullptr);
     }
     void retireRankedPause() {
+        if (m_fields->owner) dismissNativeRankedExitConfirmation(this);
+        if (m_fields->exitConfirmation) if (auto dialog = m_fields->exitConfirmation->lock()) dialog->dismiss();
+        m_fields->exitConfirmation.reset();
         if (m_fields->popup) if (auto dialog = m_fields->popup->lock()) dialog->dismiss();
         m_fields->popup.reset();
         RankedRuntime::get().endMatchGameplayPause(m_fields->leaseId);
@@ -133,37 +163,63 @@ public:
     }
     void onBlockedQuit(CCObject*) {}
     void onQuit(CCObject* sender) {
-        auto owner = m_fields->owner ? m_fields->owner->lock() : Ref<PlayLayer>();
+        // The Windows confirmation crash reaches this hook's Fields lookup.
+        // Do not trust the native callback's incoming receiver for Fields;
+        // the tracked WeakRef is the only Ranked Pause authority.
+        auto pause = activeRankedPause ? activeRankedPause->lock() : Ref<PauseLayer>();
+        if (!pause) {
+            if (!ownsRankedPlayerPause()) PauseLayer::onQuit(sender);
+            return;
+        }
+        auto* rankedPause = static_cast<CorumRankedPauseLayer*>(pause.data());
+        auto& fields = rankedPause->m_fields;
+        auto owner = fields->owner ? fields->owner->lock() : Ref<PlayLayer>();
         auto& ranked = RankedRuntime::get();
-        auto const authenticatedConcession = m_fields->concessionQuit && owner &&
-            owner.data() == PlayLayer::get() && ranked.view().match.matchId == m_fields->matchId &&
-            ranked.gameplayConceded(m_fields->round, m_fields->deathmatch);
-        if (ownsRankedPlayerPause() && !authenticatedConcession) return;
+        auto const authenticatedConcession = fields->concessionQuit && owner &&
+            owner.data() == PlayLayer::get() && ranked.view().match.matchId == fields->matchId &&
+            ranked.gameplayConceded(fields->round, fields->deathmatch);
+        if (!authenticatedConcession && !ownsRankedPlayerPause()) { PauseLayer::onQuit(sender); return; }
+        if (!owner || owner.data() != PlayLayer::get() || !pause->getParent() ||
+            ranked.view().match.matchId != fields->matchId) return;
+        if (!authenticatedConcession) { rankedPause->confirmRankedExit(); return; }
         // The nested PlayLayer quit may resume/remove this Pause before the
         // vanilla Pause quit caller finishes returning.
-        [[maybe_unused]] Ref<PauseLayer> keepAlive(this);
+        [[maybe_unused]] Ref<PauseLayer> keepAlive(pause.data());
         if (authenticatedConcession) {
-            retireRankedPause();
-            m_fields->nativeQuitInProgress = true;
-            m_fields->nativeQuitReachedPlay = false;
+            rankedPause->retireRankedPause();
+            fields->nativeQuitInProgress = true;
+            fields->nativeQuitReachedPlay = false;
             // Restore this exact PlayLayer through its native Resume binding.
             // Keep Pause attached for its original Quit handler to close; never
             // invoke that handler on a window we already removed via onResume.
             owner->resume();
             geode::log::info("[RankedPause] concession resume paused={} appPaused={} attached={}",
-                owner->m_isPaused, AppDelegate::get()->m_gamePaused, getParent() != nullptr);
+                owner->m_isPaused, AppDelegate::get()->m_gamePaused, pause->getParent() != nullptr);
         }
         // A Resume hook can depart this scene. Never let native Pause Quit
         // resolve a different PlayLayer after that callback has returned.
         if (!authenticatedConcession || owner.data() == PlayLayer::get())
             PauseLayer::onQuit(sender);
         if (authenticatedConcession) {
-            m_fields->nativeQuitInProgress = false;
-            m_fields->concessionQuit = false;
+            fields->nativeQuitInProgress = false;
+            fields->concessionQuit = false;
             geode::log::info("[RankedPause] native concession quit reachedPlay={} paused={} appPaused={}",
-                m_fields->nativeQuitReachedPlay, owner->m_isPaused, AppDelegate::get()->m_gamePaused);
-            if (m_fields->nativeQuitReachedPlay) releaseRankedPauseOwnership();
+                fields->nativeQuitReachedPlay, owner->m_isPaused, AppDelegate::get()->m_gamePaused);
+            if (fields->nativeQuitReachedPlay) rankedPause->releaseRankedPauseOwnership();
         }
+    }
+    void confirmRankedExit() {
+        if (m_fields->leaseId.empty() || RankedRuntime::get().surrenderPending()) return;
+        if (m_fields->exitConfirmation) {
+            if (auto dialog = m_fields->exitConfirmation->lock(); dialog && dialog->getParent()) return;
+            m_fields->exitConfirmation.reset();
+        }
+        if (m_fields->popup) if (auto dialog = m_fields->popup->lock()) dialog->dismiss();
+        m_fields->popup.reset();
+        auto owner = m_fields->owner ? m_fields->owner->lock() : Ref<PlayLayer>();
+        if (!owner || owner.data() != PlayLayer::get()) return;
+        auto* dialog = ui::RankedExitConfirmation::create(this, owner.data());
+        if (dialog) { m_fields->exitConfirmation.emplace(dialog); addChild(dialog); dialog->show(); }
     }
     void onSurrender(CCObject*) {
         if (m_fields->leaseId.empty()) return;

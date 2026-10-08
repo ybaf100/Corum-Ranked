@@ -100,9 +100,11 @@ using corum::ranked::RankedRuntime;
 namespace ui=corum::ranked::ui;
 namespace i18n=corum::ranked::i18n;
 ${body(pause,'bool ownsRankedPlayerPause()')}
+void dismissNativeRankedExitConfirmation(PauseLayer*){};
 struct CorumRankedPauseLayer:PauseLayer {
  struct Button {bool enabled=true;void setEnabled(bool v){enabled=v;}} button;Label clock;
- struct Fields{std::optional<WeakRef<ui::RankedSurrenderPopup>> popup;std::string leaseId="lease",matchId="m";int round=1,deathmatch=0;Label* budget;Button* surrender;std::optional<WeakRef<PlayLayer>> owner;bool concessionQuit=false,nativeQuitInProgress=false,nativeQuitReachedPlay=false;}f{{},"lease","m",1,0,&clock,&button,{}};Fields* m_fields=&f;
+ struct Fields{std::optional<WeakRef<ui::RankedSurrenderPopup>> popup;std::string leaseId="lease",matchId="m";int round=1,deathmatch=0;Label* budget;Button* surrender;std::optional<WeakRef<PlayLayer>> owner;bool concessionQuit=false,nativeQuitInProgress=false,nativeQuitReachedPlay=false;std::optional<WeakRef<ui::RankedSurrenderPopup>> exitConfirmation{};}f{{},"lease","m",1,0,&clock,&button,{}};Fields* m_fields=&f;
+ int exitWarnings=0;void confirmRankedExit(){++exitWarnings;}
  void unschedule(int){}
  ${body(pause,'void onQuit(CCObject* sender)')}
  ${body(pause,'void watchBudget(float)')}
@@ -115,7 +117,7 @@ struct CorumRankedPauseLayer:PauseLayer {
 void PauseLayer::onResume(CCObject* sender){if(dispatching){++resumes;return;}dispatching=true;static_cast<CorumRankedPauseLayer*>(this)->onResume(sender);dispatching=false;}
 int main(){using namespace corum::ranked;
  Level level;PlayLayer play;play.m_level=&level;PlayLayer::active=&play;
- auto& r=RankedRuntime::get();CorumRankedPauseLayer p;p.onQuit(nullptr);assert(p.quits==1);
+ auto& r=RankedRuntime::get();CorumRankedPauseLayer p;p.f.owner.emplace(&play);activeRankedPause.emplace(&p);p.onQuit(nullptr);assert(p.quits==1);
  r.v.stage=RuntimeStage::Matched;p.onQuit(nullptr);assert(p.quits==1);
  r.spectator=true;p.onQuit(nullptr);assert(p.quits==2);r.spectator=false;
  r.placement=true;p.onQuit(nullptr);assert(p.quits==3);r.placement=false;

@@ -48,9 +48,11 @@ using corum::ranked::RankedRuntime;
 std::optional<WeakRef<PauseLayer>> activeRankedPause;
 #define schedule_selector(x) 0
 ${body(pause,'bool ownsRankedPlayerPause()')}
+void dismissNativeRankedExitConfirmation(PauseLayer*){};
 struct CorumRankedPauseLayer:PauseLayer {
-    struct Fields{std::optional<WeakRef<Popup>> popup;std::optional<WeakRef<PlayLayer>> owner;std::string leaseId="lease",matchId="m";int round=1,deathmatch=0;bool concessionQuit=false,nativeQuitInProgress=false,nativeQuitReachedPlay=false;}f;
+    struct Fields{std::optional<WeakRef<Popup>> popup,exitConfirmation;std::optional<WeakRef<PlayLayer>> owner;std::string leaseId="lease",matchId="m";int round=1,deathmatch=0;bool concessionQuit=false,nativeQuitInProgress=false,nativeQuitReachedPlay=false;}f;
     struct CheckedFields{Fields* p;CCObject* owner;Fields* operator->(){assert(owner->alive);return p;}}m_fields{&f,this};
+    int exitWarnings=0;void confirmRankedExit(){++exitWarnings;}
     void unschedule(int){}
     ${body(pause,'void retireRankedPause()')}
     ${body(pause,'void releaseRankedPauseOwnership()')}
@@ -147,7 +149,7 @@ test('both concession observers queue one attached-scene handoff and leave nativ
     assert.match(handoff,/getParent\(\) == CCDirector::sharedDirector\(\)->getRunningScene\(\)/);
     assert(handoff.indexOf('quitRankedPauseForConcession')<handoff.indexOf('layer->onQuit()'));
     const quit=body(pause,'void onQuit(CCObject* sender)');
-    assert(quit.indexOf('owner->resume()')<quit.indexOf('PauseLayer::onQuit(sender)'));
+    assert(quit.indexOf('owner->resume()')<quit.lastIndexOf('PauseLayer::onQuit(sender)'));
     assert.match(body(pause,'bool quitRankedPauseForConcession(PlayLayer* layer)'),/return rankedPause->m_fields->nativeQuitReachedPlay;/);
     assert.doesNotMatch(pause,/m_gamePaused\s*=|m_isPaused\s*=/);
 });

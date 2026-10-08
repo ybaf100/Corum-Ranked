@@ -202,6 +202,51 @@ describe("development-only Bot Match using the production Ranked engine", () => 
     };
   };
 
+  it("triggers Death Match through three actual draws even when the native client starts first", async () => {
+    const player = await contextFor("9344");
+    const created = await debug.create(player, { password: "2008", difficulty: "NORMAL", scenario: "TRIGGER_DEATHMATCH",
+      botBan: "NO_BAN", sendDiscordEvents: false, installedMods: structuredClone(cleanMods) });
+    await matches.ready(created.matchId, created.matchToken, player, { installedMods: structuredClone(cleanMods) });
+    await debug.tickOnce();
+    await matches.submitBan(created.matchId, created.matchToken, player, { canonicalLevelId: null });
+    await debug.tickOnce();
+    for (let round = 1; round <= 3; round += 1) {
+      await debug.tickOnce();
+      let state = await matches.state(created.matchId, created.matchToken, player) as Record<string, any>;
+      expect(state.state).toBe('ROUND_ENTERING');
+      const entry = state.entry;
+      await matches.entered(created.matchId, created.matchToken, player, {
+        roundNumber: entry.roundNumber, deathmatchSequence: entry.deathmatchSequence, playableLevelId: entry.playableLevelId });
+      clock.advance(3000);
+      const start = await matches.startAttempt(created.matchId, created.matchToken, player,
+        { levelId: entry.playableLevelId, clientEventId: `native-client-R${round}` });
+      expect(start.accepted).toBe(true);
+      await debug.tickOnce();
+      state = await matches.state(created.matchId, created.matchToken, player) as Record<string, any>;
+      expect(state.state).toBe(round === 3 ? 'DEATHMATCH_PREPARE' : 'ROUND_RESULT');
+      expect(state.rounds.find((summary: Record<string, unknown>) => summary.roundNumber === round))
+        .toMatchObject({ clearsA: 3, clearsB: 3, result: 'DRAW' });
+      await debug.tickOnce();
+      await debug.tickOnce();
+    }
+    await debug.tickOnce();
+    let state = await matches.state(created.matchId, created.matchToken, player) as Record<string, any>;
+    expect(state.state).toBe('DEATHMATCH_ENTERING');
+    expect(state.rounds.map((round: Record<string, unknown>) => round.result)).toEqual(['DRAW', 'DRAW', 'DRAW']);
+    const body = { roundNumber: state.entry.roundNumber, deathmatchSequence: state.entry.deathmatchSequence,
+      playableLevelId: state.entry.playableLevelId };
+    expect((await matches.startAttempt(created.matchId, created.matchToken, player,
+      { levelId: body.playableLevelId, clientEventId: 'before-native-deathmatch-entry' })).accepted).toBe(false);
+    await matches.entered(created.matchId, created.matchToken, player, body);
+    clock.advance(3000); await debug.tickOnce();
+    state = await matches.state(created.matchId, created.matchToken, player) as Record<string, any>;
+    expect(state.state).toBe('DEATHMATCH_PLAYING');
+    const driver = (debug as any).drivers.get(created.matchId);
+    expect(driver.attemptId).toBeTruthy();
+    for (let tick = 0; tick < 20 && driver.attemptProgress === 0; tick += 1) { clock.advance(125); await debug.tickOnce(); }
+    expect(driver.attemptProgress).toBeGreaterThan(0);
+  });
+
   it("retires the surrendered round's Bot context and starts/progresses a new R2 Attempt", async () => {
     const player = await contextFor("9343");
     const created = await debug.create(player, { password: "2008", difficulty: "NORMAL", scenario: "NORMAL_MATCH",

@@ -22,6 +22,7 @@
 #include "ui/RankedInput.hpp"
 #include "ui/RankedSettingsPopup.hpp"
 #include "ui/RankedJukeboxPopup.hpp"
+#include "ui/RankedPlayerInfoPopup.hpp"
 #include "ui/MapDifficultyBadge.hpp"
 
 #include <Geode/Geode.hpp>
@@ -30,6 +31,7 @@
 #include <Geode/binding/GJGameLevel.hpp>
 #include <Geode/binding/LevelInfoLayer.hpp>
 #include <Geode/binding/MusicDownloadManager.hpp>
+#include <Geode/ui/ScrollLayer.hpp>
 #include <Geode/binding/SimplePlayer.hpp>
 #include <Geode/ui/LoadingSpinner.hpp>
 
@@ -211,22 +213,6 @@ std::string scoreComparison(double ownScore, double opponentScore) {
         tr("opponent", "OPPONENT"),
         formatScore(opponentScore)
     );
-}
-
-std::string twoLineTitle(std::string value, std::size_t perLine = 11) {
-    if (value.size() <= perLine) return value;
-    auto splitAt = value.rfind(' ', perLine);
-    if (splitAt == std::string::npos || splitAt < perLine / 2) splitAt = perLine;
-    auto first = value.substr(0, splitAt);
-    auto secondStart = splitAt;
-    while (secondStart < value.size() && value[secondStart] == ' ') ++secondStart;
-    auto second = value.substr(secondStart);
-    auto const maxSecond = perLine + 2;
-    if (second.size() > maxSecond) {
-        second.resize(maxSecond > 3 ? maxSecond - 3 : maxSecond);
-        second += "...";
-    }
-    return first + "\n" + second;
 }
 
 ccColor3B tierColor(std::string const& tier) {
@@ -446,6 +432,7 @@ class CorumRankedLayer final : public CCLayerColor {
     CCLabelBMFont* m_settingsLabel = nullptr;
     std::optional<WeakRef<corum::ranked::ui::RankedSettingsPopup>> m_settings;
     std::optional<WeakRef<corum::ranked::ui::RankedJukeboxPopup>> m_jukebox;
+    std::optional<WeakRef<corum::ranked::ui::RankedPlayerInfoPopup>> m_playerInfo;
     CCMenuItemSpriteExtra* m_jukeboxButton = nullptr;
     std::uint64_t m_volumeSession = 0;
     Page m_page = Page::Live;
@@ -1596,6 +1583,15 @@ class CorumRankedLayer final : public CCLayerColor {
         );
         m_root->addChild(ribbon, 2);
 
+        auto const& match = RankedRuntime::get().view().match;
+        if (!RankedRuntime::get().isPlacement() && !match.matchId.empty()) {
+            auto* face = makeTextPlate(tr("info", "INFO"), {34, 18}, {}, kCyan, 0.18f);
+            auto* info = CCMenuItemSpriteExtra::create(face, this, menu_selector(CorumRankedLayer::onPlayerInfo));
+            info->setID("ranked-player-info-button"_spr);
+            info->setTag(self ? (match.side == "A" ? 0 : 1) : (match.side == "A" ? 1 : 0));
+            info->setPosition({center.x - 55, center.y + 78}); m_menu->addChild(info, 10);
+        }
+
         auto* iconPlate = makeNeonPanel({66.0f, 66.0f}, {center.x, center.y + 29.0f}, accent, {5, 11, 23}, 248);
         m_root->addChild(iconPlate, 2);
         if (!self && corum::ranked::ui::hasPersistentRankAmbient(tier)) {
@@ -2740,8 +2736,8 @@ class CorumRankedLayer final : public CCLayerColor {
                 m_root->addChild(emblem, 4);
             }
 
-            auto* map = makeLabel(twoLineTitle(upper(candidate.title), 10), 0.31f, {x, centerY + 15.0f}, corum::ranked::ui::Text, "semibold");
-            corum::ranked::ui::fitLabelWidth(map, cardWidth - 12.0f, 0.31f, 0.20f);
+            auto* map = makeLabel(candidate.title, 0.31f, {x, centerY + 13.0f}, corum::ranked::ui::Text, "semibold");
+            corum::ranked::ui::fitFullLabel(map, cardWidth - 12.0f, 26.0f, 0.31f);
             m_root->addChild(map, 4);
 
             auto* difficultyPlate = makeNeonPanel({cardWidth - 22.0f, 38.0f}, {x, centerY - 20.0f}, diffColor, {11, 20, 36}, 245);
@@ -2848,8 +2844,8 @@ class CorumRankedLayer final : public CCLayerColor {
                 crown->setPosition({size.width / 2.0f, mapY + 31.0f});
                 m_root->addChild(crown, 4);
             }
-            auto* mapName = makeLabel(twoLineTitle(upper(match.currentMap->title), 15), 0.40f, {size.width / 2.0f, mapY + 7.0f}, corum::ranked::ui::Text, "semibold");
-            corum::ranked::ui::fitLabelWidth(mapName, 154.0f, 0.40f, 0.24f);
+            auto* mapName = makeLabel(match.currentMap->title, 0.40f, {size.width / 2.0f, mapY + 7.0f}, corum::ranked::ui::Text, "semibold");
+            corum::ranked::ui::fitFullLabel(mapName, 154.0f, 32.0f, 0.40f);
             m_root->addChild(mapName, 6);
 
             auto const diffColor = difficultyColor(match.currentMap->difficulty);
@@ -3029,14 +3025,14 @@ class CorumRankedLayer final : public CCLayerColor {
         m_root->addChild(next, 3);
     }
 
-    void addClearChecks(int clears, CCPoint base, bool rightAligned = false) {
+    void addClearChecks(int clears, CCPoint base, bool rightAligned = false, CCNode* parent = nullptr) {
         auto const count = std::clamp(clears, 0, 3);
         for (int i = 0; i < count; ++i) {
             auto* check = CCSprite::createWithSpriteFrameName("GJ_checkOn_001.png");
             check->setScale(0.26f);
             check->setColor(kGreen);
             check->setPosition({base.x + (rightAligned ? -1.0f : 1.0f) * i * 13.0f, base.y});
-            m_root->addChild(check, 5);
+            (parent ? parent : m_root)->addChild(check, 5);
         }
     }
 
@@ -3838,19 +3834,35 @@ class CorumRankedLayer final : public CCLayerColor {
             224
         );
         m_root->addChild(detailPanel, 1);
-        float y = size.height - 88.0f;
+        auto const viewport = CCSize {detailPanel->getContentSize().width - 16, detailPanel->getContentSize().height - 16};
+        auto* scroll = ScrollLayer::create(viewport);
+        scroll->setID("ranked-history-rounds-scroll"_spr);
+        scroll->setPosition({(size.width - viewport.width) / 2, size.height / 2 - 25 - viewport.height / 2});
+        m_root->addChild(scroll, 3);
+        auto* content = scroll->m_contentLayer;
+        auto const contentHeight = std::max(viewport.height,
+            static_cast<float>(item.rounds.size() * 59 + item.deathmatches.size() * 54 + 16));
+        content->setContentSize({viewport.width, contentHeight});
+        float y = contentHeight - 22;
         for (auto const& round : item.rounds) {
-            auto* row = makeLabel(fmt::format("ROUND {}  {}  {} : {}", round.roundNumber, shorten(round.mapTitle, 12), round.scoreA, round.scoreB), 0.31f, {size.width / 2.0f, y}, corum::ranked::ui::Text, "semibold");
-            m_root->addChild(row, 3);
-            addClearChecks(round.clearsA, {size.width / 2.0f - 48.0f, y - 13.0f});
-            addClearChecks(round.clearsB, {size.width / 2.0f + 48.0f, y - 13.0f}, true);
-            y -= 40.0f;
+            auto* row = makeLabel(round.mapTitle, 0.31f, {viewport.width / 2, y}, corum::ranked::ui::Text, "semibold");
+            corum::ranked::ui::fitFullLabel(row, viewport.width - 12, 27, 0.31f);
+            content->addChild(row, 3);
+            auto* score = makeLabel(fmt::format("ROUND {}   {} : {}", round.roundNumber, round.scoreA, round.scoreB),
+                0.25f, {viewport.width / 2, y - 23}, corum::ranked::ui::TextMuted, "semibold");
+            content->addChild(score, 3);
+            addClearChecks(round.clearsA, {viewport.width / 2 - 48, y - 37}, false, content);
+            addClearChecks(round.clearsB, {viewport.width / 2 + 48, y - 37}, true, content);
+            y -= 59.0f;
         }
         for (auto const& deathmatch : item.deathmatches) {
-            auto* row = makeLabel(fmt::format("{} {}  {} : {}", tr("death-match", "DEATH MATCH"), deathmatch.sequence, deathmatch.scoreA, deathmatch.scoreB), 0.30f, {size.width / 2.0f, y}, kRed, "semibold");
-            m_root->addChild(row, 3);
-            y -= 32.0f;
+            auto* title = makeLabel(deathmatch.mapTitle, 0.31f, {viewport.width / 2, y}, corum::ranked::ui::Text, "semibold");
+            corum::ranked::ui::fitFullLabel(title, viewport.width - 12, 27, 0.31f); content->addChild(title, 3);
+            auto* row = makeLabel(fmt::format("{} {}  {} : {}", tr("death-match", "DEATH MATCH"), deathmatch.sequence, deathmatch.scoreA, deathmatch.scoreB), 0.25f, {viewport.width / 2, y - 23}, kRed, "semibold");
+            corum::ranked::ui::fitLabelWidth(row, viewport.width - 12, 0.25f, 0.17f); content->addChild(row, 3);
+            y -= 54.0f;
         }
+        scroll->scrollToTop();
     }
 
     bool isPlayableLevel(GJGameLevel* level) const {
@@ -4020,11 +4032,15 @@ class CorumRankedLayer final : public CCLayerColor {
             !corum::ranked::roundAcquireState(view.match.state)) return;
         auto& runtime = RankedRuntime::get();
         if (!runtime.canEnterCurrentLevel() && !runtime.canEnterNativeRoundScene() && !runtime.canEnterCurrentLevelAsSpectator()) return;
-        // The owned Jukebox dialog must yield before the native modal gate.
+        // Owned Ranked dialogs must yield before the native modal gate.
         // Close only dialogs opened by this exact carrier; other modals retain
         // their existing launch protection.
         if (m_jukebox) if (auto popup = m_jukebox->lock()) popup->dismiss();
         m_jukebox.reset();
+        if (m_playerInfo) if (auto popup = m_playerInfo->lock()) popup->dismiss();
+        m_playerInfo.reset();
+        if (m_settings) if (auto popup = m_settings->lock()) popup->dismiss();
+        m_settings.reset();
         if (!corum::ranked::RankedRoundPreparation::get().launch(CCDirector::sharedDirector()->getRunningScene())) return;
         m_enteringLevel = true;
         m_rankedChildScenePushed = true;
@@ -4294,6 +4310,17 @@ class CorumRankedLayer final : public CCLayerColor {
         }
     }
 
+    void onPlayerInfo(CCObject* sender) {
+        if (m_rankTransitionLayer || !m_titleSelectorAchievement.empty()) return;
+        auto* item = typeinfo_cast<CCMenuItemSpriteExtra*>(sender);
+        if (!item) return;
+        if (m_playerInfo) if (auto popup = m_playerInfo->lock(); popup && popup->getParent()) return;
+        m_playerInfo.reset();
+        if (auto* popup = corum::ranked::ui::RankedPlayerInfoPopup::create(item->getTag() == 0 ? "A" : "B")) {
+            m_playerInfo.emplace(popup); popup->show();
+        }
+    }
+
     void onJukebox(CCObject*) {
         if (!corum::ranked::ui::rankedJukeboxLoaded()) return;
         if (m_jukebox) if (auto popup = m_jukebox->lock(); popup && popup->getParent()) return;
@@ -4304,6 +4331,8 @@ class CorumRankedLayer final : public CCLayerColor {
     }
 
     void closeSettings() {
+        if (m_playerInfo) if (auto popup = m_playerInfo->lock()) popup->dismiss();
+        m_playerInfo.reset();
         if (m_jukebox) if (auto popup = m_jukebox->lock()) popup->dismiss();
         m_jukebox.reset();
         if (m_settings) if (auto popup = m_settings->lock()) popup->dismiss();

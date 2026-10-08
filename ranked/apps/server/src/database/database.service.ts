@@ -30,6 +30,7 @@ const REQUIRED_MIGRATIONS = [
   "0011_debug_spectate.sql",
   "0012_gameplay_controls.sql",
   "0013_native_scene_entry.sql",
+  "0014_forum_records.sql",
 ] as const;
 
 export interface RankedSchemaStatus {
@@ -51,6 +52,7 @@ type SchemaProbeRow = QueryResultRow & {
   ranked_achievement_metrics: boolean;
   ranked_achievement_unlocks: boolean;
   ranked_ap_ledger: boolean;
+  ranked_forum_records: boolean;
   match_type: boolean;
   debug_config: boolean;
   match_entry_state: boolean;
@@ -155,6 +157,7 @@ export class DatabaseService implements DatabasePort, OnModuleInit, OnApplicatio
           to_regclass('public.ranked_achievement_metrics') IS NOT NULL AS ranked_achievement_metrics,
           to_regclass('public.ranked_achievement_unlocks') IS NOT NULL AS ranked_achievement_unlocks,
           to_regclass('public.ranked_ap_ledger') IS NOT NULL AS ranked_ap_ledger,
+          to_regclass('public.ranked_forum_records') IS NOT NULL AS ranked_forum_records,
           EXISTS (
             SELECT 1 FROM information_schema.columns
             WHERE table_schema = 'public' AND table_name = 'ranked_matches' AND column_name = 'match_type'
@@ -221,6 +224,7 @@ export class DatabaseService implements DatabasePort, OnModuleInit, OnApplicatio
         ["ranked_achievement_metrics", "table ranked_achievement_metrics"],
         ["ranked_achievement_unlocks", "table ranked_achievement_unlocks"],
         ["ranked_ap_ledger", "table ranked_ap_ledger"],
+        ["ranked_forum_records", "table ranked_forum_records"],
         ["match_type", "ranked_matches.match_type"],
         ["debug_config", "ranked_matches.debug_config"],
         ["match_entry_state", "ranked_matches.entry_state"],
@@ -351,3 +355,4 @@ class PgClientAdapter implements SqlExecutor {
     }));
   }
 }
+

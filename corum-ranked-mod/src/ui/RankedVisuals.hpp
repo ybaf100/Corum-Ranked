@@ -153,6 +153,21 @@ inline CCLabelBMFont* label(
     );
 }
 
+// Cocos wraps decoded UTF-8 glyphs. Keep the original text intact, including
+// long names without spaces, and fit the complete block into its reserved box.
+inline void fitFullLabel(CCLabelBMFont* text, float width, float height, float scale) {
+    if (!text || width <= 0 || height <= 0) return;
+    text->setAlignment(kCCTextAlignmentCenter);
+    text->setLineBreakWithoutSpace(true);
+    for (int pass = 0; pass < 20; ++pass) {
+        setLabelScale(text, scale);
+        text->setWidth(width / text->getScale());
+        auto const displayedHeight = text->getContentSize().height * text->getScale();
+        if (displayedHeight <= height) return;
+        scale *= std::max(0.25f, std::sqrt(height / displayedHeight) * 0.95f);
+    }
+}
+
 inline CCNode* surface(
     CCSize size,
     CCPoint position,
@@ -273,3 +288,4 @@ inline CCSprite* trophy(std::string const& tier, CCSize maxSize) {
 }
 
 } // namespace corum::ranked::ui
+
