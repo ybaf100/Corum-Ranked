@@ -3,6 +3,7 @@
 #include <optional>
 #include <cstdint>
 #include <Geode/binding/PlayLayer.hpp>
+#include "../domain/EntryCountdown.hpp"
 
 namespace corum::ranked::ui {
 class RankedEntryOverlay final : public cocos2d::CCLayerColor {
@@ -24,7 +25,10 @@ private:
     bool m_holding = true;
     int m_pauseTouchId = -1;
     unsigned int m_pauseDiagnostics = 0;
+    EntryCountdownPresentation m_countdown;
+    int m_headingState = -1, m_presentedDigit = -1;
     cocos2d::CCLabelBMFont* m_heading = nullptr;
     cocos2d::CCLabelBMFont* m_digit = nullptr;
 };
 } // namespace corum::ranked::ui
+

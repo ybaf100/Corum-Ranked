@@ -168,6 +168,32 @@ inline void fitFullLabel(CCLabelBMFont* text, float width, float height, float s
     }
 }
 
+inline void fitMenuLabelWidth(CCLabelBMFont* text, float width, float maximumScale, float minimumScale) {
+    fitLabelWidth(text, width, rankedMenuTextScale(maximumScale), rankedMenuTextScale(minimumScale));
+    // A readability floor must not place long translated text outside a button.
+    if (text && width > 0 && text->getContentSize().width * text->getScale() > width)
+        text->setScale(width / text->getContentSize().width);
+}
+
+inline void fitFullMenuLabel(CCLabelBMFont* text, float width, float height, float scale) {
+    fitFullLabel(text, width, height, rankedMenuTextScale(scale));
+}
+
+inline CCLabelBMFont* menuLabel(std::string const& text, float scale, CCPoint position,
+    ccColor3B color, FontWeight weight, char const* resource = nullptr) {
+    auto* result = label(text, rankedMenuTextScale(scale), position, color, weight, resource);
+    // surface() draws its opaque fill at z=1 and chrome at z=3. Default addChild
+    // must keep menu captions above them, including retained modal buttons.
+    if (result) result->setZOrder(5);
+    return result;
+}
+
+inline CCLabelBMFont* menuLabel(std::string const& text, float scale, CCPoint position,
+    ccColor3B color = Text, bool display = false) {
+    return menuLabel(text, scale, position, color,
+        display ? FontWeight::Black : FontWeight::SemiBold);
+}
+
 inline CCNode* surface(
     CCSize size,
     CCPoint position,
@@ -228,6 +254,11 @@ inline CCNode* pill(
     fitLabelWidth(caption, size.width - 12.0f, textScale, std::max(0.10f, textScale * 0.65f));
     root->addChild(caption, 6);
     return root;
+}
+
+inline CCNode* menuPill(std::string const& text, CCSize size, CCPoint position,
+    ccColor3B accent, float scale = 0.22f, ccColor3B color = Text, bool display = true) {
+    return pill(text, size, position, accent, rankedMenuTextScale(scale), color, display);
 }
 
 inline void addBackdrop(CCNode* parent, CCSize const& size) {

@@ -24,4 +24,22 @@ inline EntryCountdownFrame entryCountdownFrame(std::optional<std::int64_t> remai
     return {digit, 1.32f - 0.32f * ease,
         static_cast<unsigned char>(std::lround(255.0f * alpha))};
 }
+
+// HTTP clock observations can move remaining time backwards around a second
+// boundary. A scene's presentation progresses once through 3, 2, 1; gameplay
+// release still uses the original server certificate and unmodified clock.
+class EntryCountdownPresentation {
+public:
+    EntryCountdownFrame observe(std::optional<std::int64_t> remainingMs) {
+        if (remainingMs) {
+            auto const value = std::clamp<std::int64_t>(*remainingMs, 0, 3000);
+            m_remaining = m_remaining ? std::min(*m_remaining, value) : value;
+        }
+        return entryCountdownFrame(m_remaining);
+    }
+    bool started() const { return m_remaining.has_value(); }
+private:
+    std::optional<std::int64_t> m_remaining;
+};
 } // namespace corum::ranked
+

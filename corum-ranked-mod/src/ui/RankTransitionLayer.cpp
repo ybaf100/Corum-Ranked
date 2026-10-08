@@ -47,14 +47,14 @@ CCNode* buttonVisual(std::string const& text, ccColor3B accent, bool subtle) {
         auto* panel = surface(size, {size.width / 2.0f, size.height / 2.0f}, accent, SurfaceRaised, 244, true);
         root->addChild(panel, 0);
     }
-    auto* labelNode = label(
+    auto* labelNode = menuLabel(
         text,
         subtle ? 0.25f : 0.34f,
         {size.width / 2.0f, size.height / 2.0f},
         subtle ? TextMuted : Text,
         subtle ? FontWeight::SemiBold : FontWeight::Black
     );
-    corum::ranked::ui::fitLabelWidth(labelNode, size.width - 12.0f, subtle ? 0.25f : 0.34f, 0.18f);
+    corum::ranked::ui::fitMenuLabelWidth(labelNode, size.width - 12.0f, subtle ? 0.25f : 0.34f, 0.18f);
     root->addChild(labelNode, 2);
     return root;
 }
@@ -636,14 +636,14 @@ void RankTransitionLayer::revealFinalState(bool skipped) {
         addParticles(m_newRank, 10 + target.stage, 8.0f, 66.0f, 0.04f, false, false);
     }
 
-    auto* eventLabel = label(
+    auto* eventLabel = menuLabel(
         m_eventText, 0.47f,
         {size.width / 2.0f, size.height / 2.0f - 62.0f},
         target.color, FontWeight::Black
     );
     eventLabel->setOpacity(0);
     m_animationRoot->addChild(eventLabel, 30);
-    auto* tierLabel = label(
+    auto* tierLabel = menuLabel(
         m_newRank, m_newRank == "GOLD" ? 0.78f : 0.68f,
         {size.width / 2.0f, size.height / 2.0f - 92.0f},
         m_newRank == "GOLD" ? Gold : Text, FontWeight::Black
@@ -681,3 +681,4 @@ void RankTransitionLayer::keyBackClicked() {
 }
 
 } // namespace corum::ranked::ui
+

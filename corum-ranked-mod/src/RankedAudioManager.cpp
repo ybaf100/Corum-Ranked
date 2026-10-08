@@ -1,4 +1,5 @@
 #include "RankedAudioManager.hpp"
+#include "RankedVolumeControl.hpp"
 #include "domain/TransitionTrace.hpp"
 
 #include <Geode/binding/FMODAudioEngine.hpp>
@@ -599,6 +600,46 @@ float RankedAudioManager::targetRankedVolume() const {
     return gdMusicVolume * kRankedRelativeVolume;
 }
 
+void RankedAudioManager::refreshVolume() {
+    if (!m_musicGroup) return;
+    auto* engine = FMODAudioEngine::sharedEngine();
+    if (!engine || engine->m_system != m_musicSystem) {
+        // Handles from a replaced FMOD System are no longer ours to dereference.
+        m_musicGroup = nullptr; m_musicSystem = nullptr; m_appliedMenuVolume = -1;
+        return;
+    }
+    auto const volume = RankedVolumeControl::get().volume();
+    if (volume != m_appliedMenuVolume && m_musicGroup->setVolume(volume) == FMOD_OK)
+        m_appliedMenuVolume = volume;
+}
+
+FMOD::ChannelGroup* RankedAudioManager::ownedMusicGroup() {
+    refreshVolume();
+    if (m_musicGroup) return m_musicGroup;
+    auto* engine = FMODAudioEngine::sharedEngine();
+    if (!engine || !engine->m_system) return nullptr;
+    FMOD::ChannelGroup* group = nullptr;
+    FMOD::ChannelGroup* master = nullptr;
+    auto result = engine->m_system->createChannelGroup("Corum Ranked menu BGM", &group);
+    if (result == FMOD_OK && group) result = engine->m_system->getMasterChannelGroup(&master);
+    auto const volume = RankedVolumeControl::get().volume();
+    if (result == FMOD_OK && master && group) result = group->setVolume(volume);
+    if (result == FMOD_OK && master && group) result = master->addGroup(group);
+    if (result != FMOD_OK || !master || !group) {
+        if (group) group->release();
+        return nullptr;
+    }
+    m_musicSystem = engine->m_system; m_musicGroup = group; m_appliedMenuVolume = volume;
+    return group;
+}
+
+void RankedAudioManager::releaseMusicGroup() {
+    // Call only after active, retiring, pending and standby channels have stopped.
+    auto* engine = FMODAudioEngine::sharedEngine();
+    if (m_musicGroup && engine && engine->m_system == m_musicSystem) m_musicGroup->release();
+    m_musicGroup = nullptr; m_musicSystem = nullptr; m_appliedMenuVolume = -1;
+}
+
 void RankedAudioManager::ensureFmodOutputActive() const {
     auto* engine = FMODAudioEngine::sharedEngine();
     if (!engine || !engine->m_system) return;
@@ -658,6 +699,7 @@ void RankedAudioManager::releasePreparedSounds() {
     cancelPendingAudioStart();
     stopOwnedAudio();
     stopPreparedChannels();
+    releaseMusicGroup();
     m_rankedSound = nullptr;
     for (auto& [songId, sound] : m_preparedSounds) {
         (void)songId;
@@ -749,9 +791,11 @@ FMOD::Channel* RankedAudioManager::preparedChannel(RankedAudioResourceView const
     if (!prepared.channel) {
         auto* engine = FMODAudioEngine::sharedEngine();
         if (!engine || !engine->m_system) return fail(FMOD_ERR_INVALID_HANDLE, "engine");
+        auto* group = ownedMusicGroup();
+        if (!group) return fail(FMOD_ERR_NOTREADY, "menu-group");
         sound->setMode(FMOD_2D | (resource.loop ? FMOD_LOOP_NORMAL : FMOD_LOOP_OFF));
         sound->setLoopCount(resource.loop ? -1 : 0);
-        auto const playResult = engine->m_system->playSound(sound, nullptr, true, &prepared.channel);
+        auto const playResult = engine->m_system->playSound(sound, group, true, &prepared.channel);
         if (playResult == FMOD_ERR_NOTREADY) {
             if (now - prepared.beganAt >= kPendingAudioStartTimeout)
                 return fail(playResult, "play-timeout");
@@ -1381,6 +1425,7 @@ void RankedAudioManager::fadeOutForGameplay() {
     // No paused standby channels may survive into native gameplay. Re-arm
     // their first-play streams for the next retained Ranked scene instead.
     stopPreparedChannels();
+    releaseMusicGroup();
     prewarmReadySounds();
 }
 
@@ -1410,11 +1455,13 @@ void RankedAudioManager::restoreMenuMusic() {
     cancelPendingAudioStart();
     stopOwnedAudio();
     stopPreparedChannels();
+    releaseMusicGroup();
     if (auto* engine = FMODAudioEngine::sharedEngine()) engine->stopAllMusic(true);
     if (auto* game = GameManager::sharedState()) game->playMenuMusic();
 }
 
 void RankedAudioManager::tick() {
+    refreshVolume();
     auto const now = std::chrono::steady_clock::now();
     updateOwnedFades(now);
     reapRetainedSounds();

@@ -36,6 +36,7 @@ test('actual native entry gate owns input/audio and releases once after shared s
     const cpp = `
 #include "${join(root, 'src/domain/RoundResourcePolicy.hpp')}"
 #include "${join(root, 'src/domain/EntryCountdown.hpp')}"
+#include "${join(root, 'src/domain/ServerClock.hpp')}"
 #include <cassert>
 #include <chrono>
 #include <functional>
@@ -54,8 +55,8 @@ struct GJGameLevel {int refs=1;void retain(){++refs;}void release(){--refs;}};
 struct SceneParent:CCNode {bool running=true;std::shared_ptr<int> life=std::make_shared<int>(0);bool isRunning()const{return running;}};
 struct PlayLayer;
 struct FakeLabel {
-    std::string text;float scale=0;unsigned char opacity=0;
-    void setString(char const* s){text=s;}void setScale(float s){scale=s;}
+    std::string text;float scale=0;unsigned char opacity=0;int writes=0;
+    void setString(char const* s){text=s;++writes;}void setScale(float s){scale=s;}
     void setOpacity(unsigned char o){opacity=o;}
     char const* getFntFile()const{return "CorumSansCountdown.fnt";}
 };
@@ -67,6 +68,7 @@ namespace i18n {bool korean=false;bool isKorean(){return korean;}}
 struct RankedEntryOverlay {
     FakeLabel heading,digit;FakeLabel* m_heading=&heading;FakeLabel* m_digit=&digit;
     int removed=0,releases=0;
+    EntryCountdownPresentation m_countdown;int m_headingState=-1,m_presentedDigit=-1;
     static RankedEntryOverlay* create();
     void present(bool,std::optional<std::int64_t>);
     void dismiss(){++removed;}
@@ -452,11 +454,31 @@ int main(){
             assert(animated.digit.text==(expected.digit?std::to_string(expected.digit):""));
             assert(animated.digit.scale==corumFontScale(1.7f*expected.scale,"CorumSansCountdown.fnt")&&animated.digit.opacity==expected.opacity);
         }
-        animated.present(true,2500);assert(animated.digit.text=="3"&&animated.digit.opacity==255);
-        animated.present(true,1500);assert(animated.digit.text=="2"&&animated.digit.opacity==255);
-        animated.present(true,500);assert(animated.digit.text=="1"&&animated.digit.opacity==255);
-        animated.present(true,0);assert(animated.digit.text.empty()&&animated.digit.opacity==0);
+        assert(animated.digit.writes==4&&animated.heading.writes==1);
+        animated.present(true,2500);assert(animated.digit.text.empty()&&animated.digit.opacity==0);
+        ui::RankedEntryOverlay nextRound;nextRound.present(true,2500);assert(nextRound.digit.text=="3");
+        nextRound.present(true,1500);assert(nextRound.digit.text=="2");
+        nextRound.present(true,500);assert(nextRound.digit.text=="1");
+        nextRound.present(true,0);assert(nextRound.digit.text.empty());
     }
+    // Reproduce the actual ServerClock correction around the 3 -> 2 boundary.
+    ServerClock serverClock;ui::RankedEntryOverlay corrected;
+    serverClock.observe("2026-10-08T00:00:00.900Z",1000);
+    corrected.present(true,serverClock.remainingMillis("2026-10-08T00:00:03.000Z",1000));
+    assert(corrected.digit.text=="3");
+    serverClock.observe("2026-10-08T00:00:01.010Z",1020);
+    corrected.present(true,serverClock.remainingMillis("2026-10-08T00:00:03.000Z",1020));
+    assert(corrected.digit.text=="2");auto const writes=corrected.digit.writes;
+    for(int i=0;i<100;++i){
+        serverClock.observe("2026-10-08T00:00:00.980Z",1040+i);
+        auto remaining=serverClock.remainingMillis("2026-10-08T00:00:03.000Z",1040+i);
+        assert(remaining&&*remaining==2020);
+        corrected.present(true,remaining);assert(corrected.digit.text=="2");
+    }
+    assert(corrected.digit.writes==writes);
+    corrected.present(true,std::nullopt);assert(corrected.digit.text=="2");
+    corrected.present(true,500);assert(corrected.digit.text=="1");
+    corrected.present(true,0);corrected.present(true,500);assert(corrected.digit.text.empty());
     for(auto boundary:{3000,2000,1000}){
         auto initial=entryCountdownFrame(boundary),appear=entryCountdownFrame(boundary-60),hold=entryCountdownFrame(boundary-500),fade=entryCountdownFrame(boundary-950);
         assert(initial.scale>appear.scale&&appear.scale>hold.scale&&hold.scale==1);
@@ -472,7 +494,7 @@ int main(){
         for (const platform of ['GEODE_IS_WINDOWS', 'GEODE_IS_IOS']) {
             const binary = join(dir, platform);
             execFileSync('g++', ['-std=c++23', '-Wall', '-Wextra', '-Wpedantic', '-Werror',
-                `-D${platform}=1`, '-I', dir, join(dir, 'entry.cpp'), '-o', binary], { stdio: 'pipe' });
+                `-D${platform}=1`, '-I', dir, join(dir, 'entry.cpp'), join(root, 'src/domain/ServerClock.cpp'), '-o', binary], { stdio: 'pipe' });
             execFileSync(binary, [], { stdio: 'pipe' });
         }
     } finally { rmSync(dir, { recursive: true, force: true }); }

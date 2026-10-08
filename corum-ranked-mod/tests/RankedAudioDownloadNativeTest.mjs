@@ -140,6 +140,7 @@ ${(methods.map(n => method(source, n)).join('\n') + '\n' + downloadTick).replace
 void RankedAudioManager::cancelPendingAudioStart(){}
 void RankedAudioManager::stopOwnedAudio(){}
 void RankedAudioManager::releasePreparedSounds(){}
+void RankedAudioManager::refreshVolume(){}
 void RankedAudioManager::prewarmReadySounds(){}
 void RankedAudioManager::updateOwnedFades(std::chrono::steady_clock::time_point){}
 void RankedAudioManager::reapRetainedSounds(){}

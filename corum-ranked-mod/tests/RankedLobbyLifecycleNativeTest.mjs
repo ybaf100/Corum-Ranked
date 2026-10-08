@@ -92,6 +92,12 @@ int main(){
   assert(r.m_sessionToken=="token-B"&&r.m_rankedOpen&&r.m_sessionLeaseDeadline==deadline&&!r.m_sessionHeartbeatBusy);}
  for(int code:{401,403,426}){web::jobs.clear();auto r=connected();r.updateSessionHeartbeat();web::jobs.back()->callback({code,20});
   assert(r.stage==RuntimeStage::Error&&r.m_sessionRejected&&!r.m_rankedOpen);auto count=web::jobs.size();r.updateSessionHeartbeat();assert(web::jobs.size()==count);}
+ {web::jobs.clear();auto r=connected();r.updateSessionHeartbeat();advance(2000);web::jobs.back()->callback({200,90});
+  auto const deadline=r.m_sessionLeaseDeadline;assert(deadline==Clock::now()+std::chrono::seconds(88));
+  advance(30000);r.updateSessionHeartbeat();web::jobs.back()->callback({500,120});
+  assert(r.m_rankedOpen&&r.m_sessionLeaseDeadline==deadline);
+  advance(57999);r.updateSessionHeartbeat();assert(r.m_rankedOpen);
+  advance(1);r.updateSessionHeartbeat();assert(!r.m_rankedOpen&&r.stage==RuntimeStage::Error);}
  {web::jobs.clear();RankedRuntime r;r.updateSessionHeartbeat();assert(web::jobs.empty());r.leaveRanked();assert(web::jobs.empty());}
 }
 `);
@@ -142,8 +148,8 @@ std::string operator""_spr(char const* p,std::size_t size){return {p,size};}
 using LevelPreparationContext=int;int context=1;int currentPreparationContext(){return context;}
 enum class FontWeight {ExtraBold};constexpr int Cyan=1,Surface=2,Gold=3;
 CCNode* surface(CCSize,CCPoint,int,int,int,bool){return new CCNode;}
-CCLabelBMFont* label(std::string text,float,CCPoint,int,FontWeight){auto* n=new CCLabelBMFont;n->text=text;return n;}
-void fitLabelWidth(CCLabelBMFont*,float,float,float){}
+CCLabelBMFont* menuLabel(std::string text,float,CCPoint,int,FontWeight){auto* n=new CCLabelBMFont;n->text=text;return n;}
+void fitMenuLabelWidth(CCLabelBMFont*,float,float,float){}
 ${method(source, 'inline bool rankedJukeboxLoaded()')}
 ${method(source, 'inline CCMenuItem* rankedJukeboxOpener(')}
 struct RankedJukeboxPopup:Popup {

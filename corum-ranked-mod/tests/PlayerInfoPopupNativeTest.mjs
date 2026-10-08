@@ -42,8 +42,8 @@ struct RankedRuntime{struct View{RuntimeStage stage=RuntimeStage::Matched;std::u
 namespace i18n{std::string text(char const*,char const* fallback){return fallback;}}
 namespace ui{enum class FontWeight{SemiBold,ExtraBold,Black};constexpr ccColor3B Cyan{1,2,3},Blue{1,2,3},Surface{1,2,3},SurfaceRaised{1,2,3},Text{1,2,3},TextMuted{1,2,3},Gold{1,2,3};
 CCNode* surface(CCPoint,CCPoint,ccColor3B,ccColor3B,int,bool){return new CCNode;}
-CCLabelBMFont* label(std::string const& text,float,CCPoint,ccColor3B,FontWeight=FontWeight::SemiBold){auto* n=new CCLabelBMFont;n->text=text;CCLabelBMFont::labels.push_back(text);return n;}
-void fitLabelWidth(CCLabelBMFont*,float,float,float){}
+CCLabelBMFont* menuLabel(std::string const& text,float,CCPoint,ccColor3B,FontWeight=FontWeight::SemiBold){auto* n=new CCLabelBMFont;n->text=text;CCLabelBMFont::labels.push_back(text);return n;}
+void fitMenuLabelWidth(CCLabelBMFont*,float,float,float){}
 }}
 ${source}
 int main(){using namespace corum::ranked;using ui::RankedPlayerInfoPopup;auto* manager=GameLevelManager::sharedState();auto& runtime=RankedRuntime::get();UserInfoDelegate foreign;

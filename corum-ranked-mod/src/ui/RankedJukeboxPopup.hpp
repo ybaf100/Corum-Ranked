@@ -93,7 +93,7 @@ class RankedJukeboxPopup final : public Popup {
             auto const size = CCDirector::sharedDirector()->getWinSize();
             auto* timer = surface({126, 30}, {size.width - 77, size.height - 25}, Cyan, Surface, 245, true);
             timer->setID("ranked-jukebox-countdown"_spr);
-            m_countdownLabel = label("", 0.25f, {63, 15}, Gold, FontWeight::ExtraBold);
+            m_countdownLabel = menuLabel("", 0.25f, {63, 15}, Gold, FontWeight::ExtraBold);
             timer->addChild(m_countdownLabel, 5);
             m_countdown = timer; scene->addChild(timer, 32000);
         }
@@ -112,7 +112,7 @@ public:
     void setCountdown(std::string const& text) {
         if (!m_closed && m_countdownLabel) {
             m_countdownLabel->setString(text.c_str());
-            fitLabelWidth(m_countdownLabel, 114, 0.25f, 0.16f);
+            fitMenuLabelWidth(m_countdownLabel, 114, 0.25f, 0.16f);
         }
     }
     static RankedJukeboxPopup* create(GJGameLevel* level) {

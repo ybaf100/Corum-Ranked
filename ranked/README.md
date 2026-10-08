@@ -53,15 +53,19 @@ g++ -std=c++23 -Wall -Wextra -Wpedantic -Werror \
 
 ## 배포 순서
 
-beta.44의 native 모드는 [Build Corum Ranked Debug](https://github.com/ybaf100/Corum-Ranked/actions/workflows/build-ranked-debug.yml)
-GitHub workflow에서 빌드합니다. `Corum-Ranked-v0.5.0-beta.44-Debug` artifact의
+beta.45의 native 모드는 [Build Corum Ranked Debug](https://github.com/ybaf100/Corum-Ranked/actions/workflows/build-ranked-debug.yml)
+GitHub workflow에서 빌드합니다. `Corum-Ranked-v0.5.0-beta.45-Debug` artifact의
 `hwanhee1.corum_ranked.geode`를 사용합니다. Windows 로컬 빌드는
 [`../corum-ranked-mod/WINDOWS-BUILD.md`](../corum-ranked-mod/WINDOWS-BUILD.md)의 선택 사항입니다.
-서버와 클라이언트의 exact gate는 함께 beta.44를 사용합니다.
+서버와 클라이언트의 exact gate는 함께 beta.45를 사용합니다.
+
+beta.45는 Ranked 메뉴 글자와 버튼을 확대하고 정보·설정 창을 작게 정리합니다.
+설정의 개인 볼륨은 로비·매칭·결과 화면의 Ranked BGM에만 적용합니다.
+플레이 중 GD 음악과 효과음, GD의 저장된 볼륨 설정은 변경하지 않습니다.
 
 Ranked 계정 접속은 로비부터 한 연결만 허용합니다. 클라이언트는 기존 process scheduler에서
 5초마다 접속을 갱신하고 정상 로비 종료 시 `/api/ranked/session/close`를 전송합니다.
-강제 종료·네트워크 단절은 마지막 heartbeat에서 20초 후 만료되어 다른 기기의 접속을 허용합니다.
+강제 종료·네트워크 단절은 마지막 heartbeat에서 90초 후 만료되어 다른 기기의 접속을 허용합니다.
 접속 제한 기능은 Spreadsheet 설정을 추가로 요구하지 않습니다.
 beta.44의 포럼 기록 캐시는 서버 시작 시 `0014_forum_records.sql`을 자동 적용합니다.
 API 키나 Spreadsheet 설정은 필요하지 않습니다. 상대 정보 카드는 매치 토큰으로 조회하며,

@@ -50,7 +50,7 @@ struct ccColor3B {unsigned char r,g,b;};
 struct CCLabelBMFont {
     static inline bool failCustom=false;
     static inline std::vector<std::unique_ptr<CCLabelBMFont>> labels;
-    std::string text, resource;float scale=1, naturalWidth=240;ccColor3B color{};CCPoint position{};
+    std::string text, resource;int z=0;float scale=1, naturalWidth=240;ccColor3B color{};CCPoint position{};
     static CCLabelBMFont* create(char const* text,char const* resource) {
         if(failCustom&&std::string_view(resource).find("CorumSans")!=std::string_view::npos)return nullptr;
         auto p=std::make_unique<CCLabelBMFont>();p->text=text;p->resource=resource;
@@ -60,6 +60,9 @@ struct CCLabelBMFont {
     }
     char const* getFntFile()const{return resource.c_str();}
     void setScale(float value){scale=value;}
+    void setZOrder(int value){z=value;}
+    float getScale()const{return scale;}
+    struct Size{float width,height;};Size getContentSize()const{return {naturalWidth,32};}
     void setColor(ccColor3B value){color=value;}
     void setPosition(CCPoint value){position=value;}
     void limitLabelWidth(float width,float maximum,float minimum){
@@ -74,6 +77,8 @@ ${method(visuals, 'inline float fontScale(')}
 ${method(visuals, 'inline void setLabelScale(')}
 ${method(visuals, 'inline void fitLabelWidth(')}
 ${method(visuals, 'inline CCLabelBMFont* label(')}
+${method(visuals, 'inline CCLabelBMFont* menuLabel(')}
+${method(visuals, 'inline void fitMenuLabelWidth(')}
 }
 bool same(float a,float b){return std::abs(a-b)<0.0001f;}
 int main(){
@@ -98,6 +103,12 @@ int main(){
         assert(same(before*0.4f,(static_cast<float>(CorumFontRasterSize)/factor)*corumFontScale(0.4f,"CorumSans-hd.fnt")));
         assert(same(before*1.7f,(static_cast<float>(CorumCountdownRasterSize)/factor)*corumFontScale(1.7f,"CorumSansCountdown-uhd.fnt")));
     }
+    auto* menu=menuLabel("Menu",0.25f,{0,0},{255,255,255},FontWeight::Black);
+    assert(menu->scale>corumFontScale(0.25f,"CorumSansBlack.fnt")&&menu->z>3);
+    // Readability floors cannot overflow a narrow translated button.
+    fitMenuLabelWidth(menu,5,0.4f,0.3f);assert(menu->displayedWidth()<=5.001f);
+    auto* hud=label("HUD",0.25f,{0,0},{255,255,255},FontWeight::Black);
+    assert(same(hud->scale,corumFontScale(0.25f,"CorumSansBlack.fnt"))&&hud->z==0);
     CCLabelBMFont::failCustom=true;
     auto* fallback=label("Fallback",0.4f,{0,0},{255,255,255},FontWeight::Black);
     assert(fallback->resource=="goldFont.fnt"&&same(fallback->scale,0.4f));
@@ -123,3 +134,4 @@ test('Corum width clamps cannot restore an unnormalized scale in any UI screen',
         assert.doesNotMatch(read(path), /->limitLabelWidth\(/, path);
     }
 });
+

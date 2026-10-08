@@ -13,6 +13,8 @@
 namespace FMOD {
 class Sound;
 class Channel;
+class ChannelGroup;
+class System;
 }
 
 namespace corum::ranked {
@@ -63,6 +65,7 @@ public:
     void restoreMenuMusic();
     void onApplicationPause();
     void onApplicationResume();
+    void refreshVolume();
 
 private:
     RankedAudioManager() = default;
@@ -106,11 +109,16 @@ private:
     void stopOwnedAudio();
     [[nodiscard]] bool ownedChannelPlaying() const;
     [[nodiscard]] float targetRankedVolume() const;
+    [[nodiscard]] FMOD::ChannelGroup* ownedMusicGroup();
+    void releaseMusicGroup();
     void ensureFmodOutputActive() const;
     void beginOwnedFadeOut(double seconds);
     void updateOwnedFades(std::chrono::steady_clock::time_point now);
 
     RankedClientPresentationView m_config;
+    FMOD::System* m_musicSystem = nullptr;
+    FMOD::ChannelGroup* m_musicGroup = nullptr;
+    float m_appliedMenuVolume = -1;
     std::string m_configSignature;
     std::deque<int> m_downloadQueue;
     std::set<int> m_failedSongIds;

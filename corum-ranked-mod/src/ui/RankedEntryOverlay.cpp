@@ -136,12 +136,20 @@ void RankedEntryOverlay::present(bool bothEntered, std::optional<std::int64_t> r
     // The native child delegates have registered by this scene heartbeat. Keep
     // the countdown blocker ahead of them too, including rounds after modals.
     synchronizeTouchPriority(PlayLayer::get());
-    auto const frame = entryCountdownFrame(remainingMs);
+    auto const frame = m_countdown.observe(bothEntered ? remainingMs : std::nullopt);
     auto const korean = i18n::isKorean();
-    m_heading->setString(bothEntered
-        ? (korean ? "시작까지..." : "STARTS IN...")
-        : (korean ? "상대 입장 대기 중..." : "WAITING FOR OPPONENT..."));
-    m_digit->setString(frame.digit > 0 ? std::to_string(frame.digit).c_str() : "");
+    auto const counting = bothEntered || m_countdown.started();
+    auto const headingState = static_cast<int>(korean) * 2 + static_cast<int>(counting);
+    if (m_headingState != headingState) {
+        m_headingState = headingState;
+        m_heading->setString(counting
+            ? (korean ? "시작까지..." : "STARTS IN...")
+            : (korean ? "상대 입장 대기 중..." : "WAITING FOR OPPONENT..."));
+    }
+    if (m_presentedDigit != frame.digit) {
+        m_presentedDigit = frame.digit;
+        m_digit->setString(frame.digit > 0 ? std::to_string(frame.digit).c_str() : "");
+    }
     setLabelScale(m_digit, 1.7f * frame.scale);
     m_digit->setOpacity(frame.opacity);
 }

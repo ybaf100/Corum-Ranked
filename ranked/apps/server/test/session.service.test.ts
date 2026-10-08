@@ -152,17 +152,17 @@ describe("Ranked session/profile creation", () => {
     const second = await service.create(other);
     expect(second.sessionToken).not.toBe(first.sessionToken);
     await expect(service.heartbeat(await contextFor(first.sessionToken))).rejects.toMatchObject({ status: 401 });
-    expect((await service.heartbeat(await contextFor(second.sessionToken))).sessionLeaseSeconds).toBe(20);
+    expect((await service.heartbeat(await contextFor(second.sessionToken))).sessionLeaseSeconds).toBe(90);
   });
 
-  it("expires a crashed process in 20s; heartbeat renews and an expired token cannot revive", async () => {
+  it("expires a crashed process in 90s; heartbeat renews and an expired token cannot revive", async () => {
     const clock = new FixedClock(), service = buildService(new FakeCsmpSource(), clock);
     const first = await service.create(cleanDto("7001")), firstContext = await contextFor(first.sessionToken);
     const other = { ...cleanDto("7001"), clientInstanceId: "second-device-instance" };
-    clock.advance(15000);await service.heartbeat(firstContext);
-    clock.advance(19000);await expect(service.create(other)).rejects.toMatchObject({ status: 409 });
+    clock.advance(30000);await service.heartbeat(firstContext);
+    clock.advance(89000);await expect(service.create(other)).rejects.toMatchObject({ status: 409 });
     clock.advance(1000);await expect(service.heartbeat(firstContext)).rejects.toMatchObject({ status: 401 });
-    await expect(service.create(other)).resolves.toMatchObject({ sessionLeaseSeconds: 20, sessionHeartbeatSeconds: 5 });
+    await expect(service.create(other)).resolves.toMatchObject({ sessionLeaseSeconds: 90, sessionHeartbeatSeconds: 5 });
     await expect(service.heartbeat(firstContext)).rejects.toMatchObject({ status: 401 });
   });
 
@@ -186,7 +186,7 @@ describe("Ranked session/profile creation", () => {
     const { REQUIRED_RANKED_CLIENT_VERSION } = await import("../src/session/client-version.js");
     await database.query("UPDATE ranked_sessions SET client_version = $1", [REQUIRED_RANKED_CLIENT_VERSION]);
     await expect(guard.canActivate(context)).resolves.toBe(true);
-    clock.advance(20000);await expect(guard.canActivate(context)).rejects.toMatchObject({ status: 401 });
+    clock.advance(90000);await expect(guard.canActivate(context)).rejects.toMatchObject({ status: 401 });
     await service.create(cleanDto("7001"));await expect(guard.canActivate(context)).rejects.toMatchObject({ status: 401 });
   });
   it("persists a CSMP seed once and never reseeds after CSMP changes", async () => {

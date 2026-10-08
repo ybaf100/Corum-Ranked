@@ -31,7 +31,7 @@ class RankedPlayerInfoPopup final : public Popup, public UserInfoDelegate {
         if (view.stage != RuntimeStage::Matched || view.match.state == "ROUND_ENTERING" ||
             view.match.state == "DEATHMATCH_ENTERING" || view.match.state == "ROUND_PLAYING" ||
             view.match.state == "DEATHMATCH_PLAYING") return false;
-        if (!Popup::init(350, 285)) return false;
+        if (!Popup::init(300, 252)) return false;
         m_bgSprite->setVisible(false); m_closeBtn->setVisible(false);
         setID("ranked-player-info-popup"_spr);
         m_side = std::move(side); m_matchId = RankedRuntime::get().view().match.matchId;
@@ -39,14 +39,14 @@ class RankedPlayerInfoPopup final : public Popup, public UserInfoDelegate {
         m_accountId = RankedRuntime::get().view().playerInfo.accountId;
         if (m_accountId <= 0) return false;
         m_lookupDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(25);
-        m_panel = surface({350, 285}, {175, 142.5f}, Cyan, Surface, 255, true);
+        m_panel = surface({300, 252}, {150, 126}, Cyan, Surface, 255, true);
         m_mainLayer->addChild(m_panel, 10);
         auto* menu = CCMenu::create(); menu->setPosition(CCPointZero); m_panel->addChild(menu, 30);
-        auto* face = surface({130, 29}, {}, Blue, SurfaceRaised, 250, true);
-        auto* caption = label(i18n::text("close", "Close"), 0.28f, {65, 14.5f}, Text, FontWeight::ExtraBold);
-        face->addChild(caption);
+        auto* face = surface({120, 26}, {}, Blue, SurfaceRaised, 250, true);
+        auto* caption = menuLabel(i18n::text("close", "Close"), 0.36f, {60, 13}, Text, FontWeight::ExtraBold);
+        fitMenuLabelWidth(caption, 100, 0.36f, 0.26f); face->addChild(caption, 5);
         auto* close = CCMenuItemSpriteExtra::create(face, this, menu_selector(RankedPlayerInfoPopup::onClose));
-        close->setPosition({175, 23}); menu->addChild(close);
+        close->setPosition({150, 19}); menu->addChild(close);
         schedule(schedule_selector(RankedPlayerInfoPopup::refresh), 0.1f); render(); refresh(0);
         return true;
     }
@@ -77,30 +77,30 @@ class RankedPlayerInfoPopup final : public Popup, public UserInfoDelegate {
         manager->getGJUserInfo(m_accountId);
     }
     void row(std::string const& caption, std::string const& value, float y, ccColor3B color = Text) {
-        auto* text = label(caption, 0.25f, {23, y}, TextMuted, FontWeight::SemiBold);
-        text->setAnchorPoint({0, 0.5f}); fitLabelWidth(text, 190, 0.25f, 0.16f); m_contents->addChild(text);
-        auto* number = label(value, 0.29f, {327, y}, color, FontWeight::ExtraBold);
-        number->setAnchorPoint({1, 0.5f}); fitLabelWidth(number, 113, 0.29f, 0.16f); m_contents->addChild(number);
+        auto* text = menuLabel(caption, 0.37f, {18, y}, TextMuted, FontWeight::SemiBold);
+        text->setAnchorPoint({0, 0.5f}); fitMenuLabelWidth(text, 160, 0.37f, 0.28f); m_contents->addChild(text);
+        auto* number = menuLabel(value, 0.41f, {282, y}, color, FontWeight::ExtraBold);
+        number->setAnchorPoint({1, 0.5f}); fitMenuLabelWidth(number, 97, 0.41f, 0.28f); m_contents->addChild(number);
     }
     void render() {
         if (m_contents) m_contents->removeFromParentAndCleanup(true);
         m_contents = CCNode::create(); m_panel->addChild(m_contents, 10);
         auto const& info = RankedRuntime::get().view().playerInfo;
-        auto* title = label(i18n::text("player-info", "PLAYER INFO"), 0.46f, {175, 257}, Text, FontWeight::Black);
-        fitLabelWidth(title, 306, 0.46f, 0.28f); m_contents->addChild(title);
-        auto* name = label(info.username, 0.35f, {175, 229}, Gold, FontWeight::ExtraBold);
-        fitLabelWidth(name, 300, 0.35f, 0.20f); m_contents->addChild(name);
-        float y = 202;
+        auto* title = menuLabel(i18n::text("player-info", "PLAYER INFO"), 0.50f, {150, 226}, Text, FontWeight::Black);
+        fitMenuLabelWidth(title, 268, 0.50f, 0.34f); m_contents->addChild(title);
+        auto* name = menuLabel(info.username, 0.42f, {150, 203}, Gold, FontWeight::ExtraBold);
+        fitMenuLabelWidth(name, 264, 0.42f, 0.30f); m_contents->addChild(name);
+        float y = 181;
         if (m_statistics && m_statistics->globalRank > 0) {
-            row("GD Global Rank", fmt::format("#{}", m_statistics->globalRank), y, Gold); y -= 22;
+            row("GD Global Rank", fmt::format("#{}", m_statistics->globalRank), y, Gold); y -= 20;
         }
         auto const unavailable = i18n::text("info-unavailable", "Unavailable");
         auto const waiting = m_lookupFailed ? unavailable : i18n::text("loading", "Loading...");
-        row(i18n::text("info-stars", "Stars"), m_statistics ? fmt::format("{}", m_statistics->stars) : waiting, y); y -= 22;
-        row(i18n::text("info-moons", "Moons"), m_statistics ? fmt::format("{}", m_statistics->moons) : waiting, y); y -= 22;
-        row(i18n::text("info-demons", "Demons"), m_statistics ? fmt::format("{}", m_statistics->demons) : waiting, y); y -= 22;
+        row(i18n::text("info-stars", "Stars"), m_statistics ? fmt::format("{}", m_statistics->stars) : waiting, y); y -= 20;
+        row(i18n::text("info-moons", "Moons"), m_statistics ? fmt::format("{}", m_statistics->moons) : waiting, y); y -= 20;
+        row(i18n::text("info-demons", "Demons"), m_statistics ? fmt::format("{}", m_statistics->demons) : waiting, y); y -= 20;
         row("Extreme Demons", m_statistics && m_statistics->extreme ? fmt::format("{}", *m_statistics->extreme) :
-            (m_statistics ? unavailable : waiting), y); y -= 25;
+            (m_statistics ? unavailable : waiting), y); y -= 23;
         for (auto const& provider : {std::string("GDKF"), std::string("POINTERCRATE")}) {
             std::string value = info.forum.loading ? i18n::text("loading", "Loading...") : unavailable;
             ccColor3B color = TextMuted;
@@ -111,11 +111,11 @@ class RankedPlayerInfoPopup final : public Popup, public UserInfoDelegate {
                 else if (record.status == "PENDING") value = i18n::text("loading", "Loading...");
                 if (record.status == "ERROR" && record.rank) value += " *";
             }
-            row(provider == "GDKF" ? "GDKF" : "Pointercrate", value, y, color); y -= 22;
+            row(provider == "GDKF" ? "GDKF" : "Pointercrate", value, y, color); y -= 20;
         }
         if (info.botReference) {
-            auto* hint = label(i18n::text("info-bot-reference", "Bot reference: CoJong"), 0.18f,
-                {175, 49}, TextMuted); fitLabelWidth(hint, 310, 0.18f, 0.13f); m_contents->addChild(hint);
+            auto* hint = menuLabel(i18n::text("info-bot-reference", "Bot reference: CoJong"), 0.26f,
+                {150, 40}, TextMuted); fitMenuLabelWidth(hint, 264, 0.26f, 0.20f); m_contents->addChild(hint);
         }
     }
     void refresh(float) {

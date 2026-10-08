@@ -15,9 +15,9 @@ inline cocos2d::CCNode* mapDifficultyBadge(int levelId, float width, float heigh
         if (size.width > 0 && size.height > 0) icon->setScale(std::min(iconWidth / size.width, iconWidth / size.height));
         icon->setPosition({iconWidth / 2 + 1, height / 2}); row->addChild(icon);
     }
-    auto* text = label(std::string(value.label), 0.23f, {(width + iconWidth + 4) / 2, height / 2},
+    auto* text = menuLabel(std::string(value.label), 0.23f, {(width + iconWidth + 4) / 2, height / 2},
         Text, FontWeight::SemiBold);
-    fitLabelWidth(text, std::max(10.0f, width - iconWidth - 5), 0.23f, 0.12f);
+    fitMenuLabelWidth(text, std::max(10.0f, width - iconWidth - 5), 0.23f, 0.12f);
     row->addChild(text);
     row->setID("ranked-map-difficulty"_spr);
     return row;

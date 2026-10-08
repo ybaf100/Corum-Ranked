@@ -23,7 +23,7 @@ test('Achievement cards are server-configured and all Korean UI uses Corum label
         assert(cards.includes(`value["${field}"]`));
     }
     assert(cards.includes('item["displayColor"]'));
-    assert.match(body(popup, 'CCLabelBMFont* makeLabel(', 'CCNode* makePanel('), /corum::ranked::ui::label/);
+    assert.match(body(popup, 'CCLabelBMFont* makeLabel(', 'CCNode* makePanel('), /corum::ranked::ui::menuLabel/);
     for (const hardcoded of ['승리자', '경쟁자', '클리어러', '완벽주의자', '한 끗 차이']) {
         assert.doesNotMatch(popup, new RegExp(hardcoded));
     }
@@ -51,7 +51,7 @@ test('Lobby and Achievement text keep native-readable sizing', () => {
     const achievements = body(popup, 'void renderAchievements(', 'void renderHistoryList(');
 
     assert.match(actionVisual, /text,\s*0\.62f/);
-    assert.match(actionVisual, /fitLabelWidth\(caption, width - 20\.0f, 0\.62f, 0\.30f\)/);
+    assert.match(actionVisual, /fitMenuLabelWidth\(caption, width - 20\.0f, 0\.62f, 0\.30f\)/);
     assert.equal((language.match(/setScale\(0\.48f\)/g) ?? []).length, 2);
     assert.equal((main.match(/setScale\(0\.66f\)/g) ?? []).length, 2);
 
@@ -75,7 +75,7 @@ test('Achievement selector is a true modal and the lobby badge uses stable Corum
     const achievements = body(popup, 'void renderAchievements(', 'void renderHistoryList(');
 
     assert.doesNotMatch(main, /GJ_button_06\.png/);
-    assert.match(main, /corum::ranked::ui::pill/);
+    assert.match(main, /corum::ranked::ui::menuPill/);
     assert.match(main, /ranked-achievement-notification-badge/);
 
     // m_menu is a sibling above m_root, so the selector must omit every base-page

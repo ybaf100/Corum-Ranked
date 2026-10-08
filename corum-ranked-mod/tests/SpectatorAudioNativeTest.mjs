@@ -43,6 +43,7 @@ struct RankedAudioManager {
  std::unordered_map<std::string,PreparedChannel> m_preparedChannels;
  std::set<std::string> m_consumedPreparedKeys;
  void stopPreparedChannels(){m_preparedChannels.clear();}
+ void releaseMusicGroup(){}
  RankedAudioMode m_desiredMode=RankedAudioMode::Lobby;bool m_switchPending=false,m_ownedFadeOutPending=false,m_playbackVerifyPending=false;
  RankedAudioMode m_requestedMode=RankedAudioMode::Lobby;std::set<std::string> m_failedPlaybackKeys;
  std::chrono::steady_clock::time_point m_audioStartBeganAt{};

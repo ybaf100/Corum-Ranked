@@ -24,7 +24,7 @@ test('single-use streams prepare silent offset channels ahead of transitions',()
 });
 test('initial offset mismatch is repaired while muted; transferred offset still validated',()=>{
  const start=body('void RankedAudioManager::startDesiredAudio(','void RankedAudioManager::updatePendingAudioStart()');
- assert.match(source,/playSound\(sound, nullptr, true, &prepared\.channel\)/);
+ assert.match(source,/playSound\(sound, group, true, &prepared\.channel\)/);
  assert.match(start,/preparedChannel\(\*resource, sound, prepareResult\)/);
  assert.match(start,/m_consumedPreparedKeys\.insert\(resource->key\)/);
  assert.match(start,/channel->setMute\(true\)/);assert.doesNotMatch(start,/setPaused\(false\)/);
@@ -62,3 +62,4 @@ test('paths stay cached and discarded loading/active Sounds are not synchronousl
  assert.match(prepared,/preparedStreamState\(sound\) == PreparedStreamState::Pending/);
  assert.doesNotMatch(source,/m_system->update\(\)/);
 });
+

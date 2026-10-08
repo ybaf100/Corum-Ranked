@@ -728,7 +728,7 @@ void RankedRuntime::createSession() {
                 return;
             }
             observeServerNow(root);
-            m_sessionLeaseDeadline = sentAt + std::chrono::seconds(std::clamp<std::int64_t>(root["sessionLeaseSeconds"].asInt().unwrapOr(20), 5, 120));
+            m_sessionLeaseDeadline = sentAt + std::chrono::seconds(std::clamp<std::int64_t>(root["sessionLeaseSeconds"].asInt().unwrapOr(90), 5, 120));
             m_nextSessionHeartbeatAt = std::chrono::steady_clock::now();
             auto const player = root["player"];
             auto const profile = parseRankedProfile(player);
@@ -790,7 +790,7 @@ void RankedRuntime::updateSessionHeartbeat() {
             m_sessionHeartbeatBusy = false;
             if (successful(response)) {
                 auto const root = response.json().unwrapOr(matjson::Value());
-                m_sessionLeaseDeadline = now + std::chrono::seconds(std::clamp<std::int64_t>(root["sessionLeaseSeconds"].asInt().unwrapOr(20), 5, 120));
+                m_sessionLeaseDeadline = now + std::chrono::seconds(std::clamp<std::int64_t>(root["sessionLeaseSeconds"].asInt().unwrapOr(90), 5, 120));
             } else if (response.code() == 401 || response.code() == 403 || response.code() == 426) {
                 auto const error = responseError(response);
                 leaveRanked(); setStage(RuntimeStage::Error, "Ranked connection is no longer valid.", error);

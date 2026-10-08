@@ -24,6 +24,9 @@ for (const debug of [false, true]) test(`production audio transitions, bounded f
         'void RankedAudioManager::setMode(',
         'bool RankedAudioManager::ownedChannelPlaying()',
         'float RankedAudioManager::targetRankedVolume()',
+        'void RankedAudioManager::refreshVolume()',
+        'FMOD::ChannelGroup* RankedAudioManager::ownedMusicGroup()',
+        'void RankedAudioManager::releaseMusicGroup()',
         'void RankedAudioManager::ensureFmodOutputActive()',
         'void RankedAudioManager::stopOwnedAudio()',
         'void RankedAudioManager::releasePreparedSounds()',
@@ -83,6 +86,14 @@ enum FMOD_OPENSTATE {FMOD_OPENSTATE_READY,FMOD_OPENSTATE_PLAYING,FMOD_OPENSTATE_
 constexpr int FMOD_TIMEUNIT_MS=1,FMOD_CREATESTREAM=2,FMOD_2D=4,FMOD_NONBLOCKING=8,FMOD_LOOP_NORMAL=16,FMOD_LOOP_OFF=32,FMOD_ACCURATETIME=64;
 struct FMOD_CREATESOUNDEXINFO {int cbsize=0;unsigned int initialseekposition=0;int initialseekpostype=0;};
 namespace FMOD {
+struct ChannelGroup {
+    float volume=1;int writes=0,releases=0;ChannelGroup* parent=nullptr;
+    FMOD_RESULT setPaused(bool){return FMOD_OK;}FMOD_RESULT setMute(bool){return FMOD_OK;}
+    FMOD_RESULT setVolume(float value){volume=value;++writes;return FMOD_OK;}
+    FMOD_RESULT addGroup(ChannelGroup* group){group->parent=this;return FMOD_OK;}
+    FMOD_RESULT release(){++releases;parent=nullptr;return FMOD_OK;}
+    float gain()const{return volume*(parent?parent->gain():1);}
+};
 struct Sound {
     FMOD_OPENSTATE state=FMOD_OPENSTATE_READY;bool starving=false;int releases=0,seekCalls=0,plays=0;unsigned int initial=0;
     enum Seek {Immediate,Async,NotReadyForever} seek=Immediate;
@@ -92,7 +103,7 @@ struct Sound {
     FMOD_RESULT release(){++releases;return FMOD_OK;}
 };
 struct Channel {
-    Sound* sound=nullptr;bool playing=true,paused=true,muted=false,failUnpause=false,failSecondFade=false;
+    Sound* sound=nullptr;ChannelGroup* group=nullptr;bool playing=true,paused=true,muted=false,failUnpause=false,failSecondFade=false;
     int stops=0,unpauses=0,volumeWrites=0;float volume=1;unsigned int position=0,pendingPosition=0;
     unsigned long long clock=4800000,stopAt=0;bool dspAvailable=true;
     std::vector<std::pair<unsigned long long,float>> fadePoints;
@@ -116,19 +127,19 @@ struct Channel {
         for(std::size_t i=1;i<fadePoints.size();++i)if(clock<fadePoints[i].first){auto a=fadePoints[i-1],b=fadePoints[i];
             return a.second+(b.second-a.second)*float(double(clock-a.first)/double(b.first-a.first));}
         return fadePoints.back().second;}
-    float audible()const{return playing&&!paused&&!muted?volume*gain():0;}
+    float audible()const{return playing&&!paused&&!muted?volume*gain()*(group?group->gain():1):0;}
 };
-struct ChannelGroup {FMOD_RESULT setPaused(bool){return FMOD_OK;}FMOD_RESULT setMute(bool){return FMOD_OK;}};
 struct System {
     std::unordered_map<std::string,Sound*> sounds;std::vector<std::unique_ptr<Sound>> soundOwners;
-    std::vector<std::unique_ptr<Channel>> channels;int creates=0,plays=0;FMOD_RESULT playResult=FMOD_OK;ChannelGroup master;std::function<void(Channel*)> configureChannel;
+    std::vector<std::unique_ptr<Channel>> channels;std::vector<std::unique_ptr<ChannelGroup>> groups;int creates=0,plays=0;FMOD_RESULT playResult=FMOD_OK;ChannelGroup master;std::function<void(Channel*)> configureChannel;
     FMOD_RESULT createSound(char const* path,int flags,FMOD_CREATESOUNDEXINFO* info,Sound** value){
         assert((flags&FMOD_NONBLOCKING)&&(flags&FMOD_CREATESTREAM)&&(flags&FMOD_ACCURATETIME));
         assert(info&&info->cbsize==sizeof(FMOD_CREATESOUNDEXINFO)&&info->initialseekpostype==FMOD_TIMEUNIT_MS);++creates;
         soundOwners.push_back(std::make_unique<Sound>());*value=soundOwners.back().get();sounds[path]=*value;(*value)->initial=info->initialseekposition;return FMOD_OK;}
-    FMOD_RESULT playSound(Sound* sound,void*,bool paused,Channel** value){++plays;if(playResult!=FMOD_OK)return playResult;
-        channels.push_back(std::make_unique<Channel>());*value=channels.back().get();(*value)->sound=sound;(*value)->paused=paused;(*value)->position=sound->plays++?0:sound->initial;if(configureChannel)configureChannel(*value);return FMOD_OK;}
+    FMOD_RESULT playSound(Sound* sound,ChannelGroup* group,bool paused,Channel** value){++plays;if(playResult!=FMOD_OK)return playResult;
+        channels.push_back(std::make_unique<Channel>());*value=channels.back().get();(*value)->sound=sound;(*value)->group=group;(*value)->paused=paused;(*value)->position=sound->plays++?0:sound->initial;if(configureChannel)configureChannel(*value);return FMOD_OK;}
     FMOD_RESULT getSoftwareFormat(int* rate,void*,void*){*rate=48000;return FMOD_OK;}
+    FMOD_RESULT createChannelGroup(char const*,ChannelGroup** value){groups.push_back(std::make_unique<ChannelGroup>());*value=groups.back().get();return FMOD_OK;}
     FMOD_RESULT getMasterChannelGroup(ChannelGroup** value){*value=&master;return FMOD_OK;}
     void advance(int ms){AudioClock::current+=std::chrono::milliseconds(ms);for(auto& c:channels){
         c->clock+=static_cast<unsigned long long>(ms)*48;
@@ -145,6 +156,7 @@ struct FMODAudioEngine {
 struct GameManager {static GameManager* sharedState(){static GameManager g;return &g;}int menus=0;void playMenuMusic(){++menus;}};
 #include "AudioManagerUnderTest.hpp"
 namespace corum::ranked {
+struct RankedVolumeControl{float value=1;static RankedVolumeControl& get(){static RankedVolumeControl c;return c;}float volume()const{return value;}};
 struct TransitionTrace {static TransitionTrace& get(){static TransitionTrace t;return t;}template<class T>void mark(T const&){} };
 constexpr auto kPendingAudioStartTimeout=std::chrono::seconds(3),kDownloadGuardTimeout=std::chrono::seconds(105);
 constexpr auto kPlaybackVerifyDelay=std::chrono::milliseconds(1000);
@@ -165,7 +177,7 @@ using namespace corum::ranked;
 bool near(float a,float b){return std::abs(a-b)<0.001f;}
 struct Fixture {
     FMOD::System system;RankedAudioManager audio;
-    Fixture(){FMODAudioEngine::sharedEngine()->m_system=&system;audio.m_downloadState=RankedResourceDownloadState::Ready;
+    Fixture(){RankedVolumeControl::get().value=1;FMODAudioEngine::sharedEngine()->m_system=&system;audio.m_downloadState=RankedResourceDownloadState::Ready;
         audio.m_config.audio.enabled=true;audio.m_config.audio.fadeInSeconds=1.8;audio.m_config.audio.fadeOutSeconds=1.8;
         audio.m_config.audio.resources={{"menu","",224958,2,true},{"match","",786863,26,true},{"round3_deathmatch_wait","",99477,182,true}};}
     ~Fixture(){audio.fadeOutForGameplay();}
@@ -174,6 +186,29 @@ struct Fixture {
     FMOD::Channel* start(RankedAudioMode mode){audio.setMode(mode);auto* c=audio.m_rankedChannel;assert(c);step(2000);assert(near(c->audible(),0.8f));return c;}
 };
 int main(){
+    // Only Corum-owned menu BGM joins this group. Both sides of a crossfade
+    // change immediately; GD/native music and SFX remain outside its gain.
+    {Fixture f;auto* old=f.start(RankedAudioMode::Lobby);
+        FMOD::Sound nativeMusic,nativeSfx;FMOD::Channel* music=nullptr;FMOD::Channel* sfx=nullptr;
+        f.system.playSound(&nativeMusic,&f.system.master,false,&music);music->setVolume(.65f);
+        f.system.playSound(&nativeSfx,&f.system.master,false,&sfx);sfx->setVolume(.25f);
+        f.audio.setMode(RankedAudioMode::Round12);auto* current=f.audio.m_rankedChannel;
+        auto* group=f.audio.m_musicGroup;assert(group&&old->group==group&&current->group==group);
+        f.system.advance(900);auto oldBefore=old->audible(),newBefore=current->audible();
+        auto const plays=f.system.plays,oldSeeks=old->sound->seekCalls,newSeeks=current->sound->seekCalls;
+        RankedVolumeControl::get().value=.4f;f.audio.refreshVolume();
+        assert(near(old->audible(),oldBefore*.4f)&&near(current->audible(),newBefore*.4f));
+        assert(near(music->audible(),.65f)&&near(sfx->audible(),.25f)&&f.system.master.volume==1);
+        auto const writes=group->writes;for(int i=0;i<100;++i)f.audio.refreshVolume();assert(group->writes==writes);
+        RankedVolumeControl::get().value=0;f.audio.refreshVolume();assert(old->audible()==0&&current->audible()==0);
+        RankedVolumeControl::get().value=.25f;f.audio.refreshVolume();assert(near(current->audible(),newBefore*.25f));
+        assert(f.system.plays==plays&&old->sound->seekCalls==oldSeeks&&current->sound->seekCalls==newSeeks);
+        assert(old->stops==0&&current->stops==0);
+        f.audio.fadeOutForGameplay();assert(!f.audio.m_musicGroup&&group->releases==1&&old->stops==1&&current->stops==1);
+        assert(near(music->audible(),.65f)&&near(sfx->audible(),.25f)&&f.system.master.releases==0);
+        f.audio.setMode(RankedAudioMode::ResultWin); // no configured result: still no unrelated gain
+        assert(near(music->audible(),.65f));
+    }
     // All configured offsets, especially 182s, are decoded during prewarming.
     // The transition itself performs zero seeks and does not restart the old
     // stream. first-play semantics deliberately reset a reused Sound to zero.

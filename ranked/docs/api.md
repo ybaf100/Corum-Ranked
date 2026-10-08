@@ -60,11 +60,11 @@ beta.43은 로비 진입부터 계정당 한 live connection을 허용합니다.
 
 | Method | Path | 역할 |
 |---|---|---|
-| `POST` | `/api/ranked/session/heartbeat` | 5초마다 갱신; `serverNow`, `sessionLeaseSeconds: 20` 반환 |
+| `POST` | `/api/ranked/session/heartbeat` | 5초마다 갱신; `serverNow`, `sessionLeaseSeconds: 90` 반환 |
 | `POST` | `/api/ranked/session/close` | 해당 token만 폐기하고 해당 session의 queue entry 삭제 |
 
-session 생성 응답은 `sessionLeaseSeconds: 20`, `sessionHeartbeatSeconds: 5`도 반환합니다.
-정상 로비 종료는 Close를 전송하고 강제 종료/연결 단절은 마지막 heartbeat에서 20초 후
+session 생성 응답은 `sessionLeaseSeconds: 90`, `sessionHeartbeatSeconds: 5`도 반환합니다.
+정상 로비 종료는 Close를 전송하고 강제 종료/연결 단절은 마지막 heartbeat에서 90초 후
 만료됩니다. 만료된 token은 모든 인증 route에서 `401`이며 heartbeat로 부활하지 않습니다.
 queue/Match/Placement heartbeat와 session heartbeat는 서로 별개입니다. 기존 장기 token
 TTL과 exact client version gate도 유지합니다. DB migration은 추가하지 않습니다.
