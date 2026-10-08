@@ -14,7 +14,7 @@
 ## 최초 업로드 순서
 
 1. GitHub에서 `ybaf100/corum-ranked-assets`를 **Public**으로 생성합니다. 빈 저장소라면 README를 포함해 최초 커밋을 만듭니다. 이 작업은 Corum-Ranked-Web이나 Geode 소스를 옮기는 작업이 아닙니다.
-2. `Corum-Ranked`의 이번 후보 HEAD에 대한 **Build Corum Ranked Debug** 자동 CI가 모두 성공했는지 확인합니다. `Corum-Ranked-Assets-visuals-v1` artifact를 다운로드하고 바깥 ZIP을 풀면 `Corum-Ranked-Assets.zip`과 `asset-pack-metadata.json`이 나옵니다. 모드 패키지 artifact와 이미지팩 artifact는 서로 다릅니다. 수동 Release workflow 실행은 필요 없습니다.
+2. `Corum-Ranked`에서 **이미지팩을 변경한 커밋**의 **Build Corum Ranked Debug** 자동 CI가 모두 성공했는지 확인합니다. `Corum-Ranked-Assets-visuals-v1` artifact를 다운로드하고 바깥 ZIP을 풀면 `Corum-Ranked-Assets.zip`과 `asset-pack-metadata.json`이 나옵니다. 모드 패키지 artifact와 이미지팩 artifact는 서로 다릅니다. 수동 Release workflow 실행은 필요 없습니다.
 3. 별도 에셋 저장소의 **Releases → Draft a new release**에서 태그 `visuals-v1`을 만들고 생성된 내부 `Corum-Ranked-Assets.zip`을 그대로 첨부합니다. `asset-pack-metadata.json`도 첨부하면 운영 확인에 편리합니다. 릴리스 본문에 버전·SHA-256·크기·이미지 변경 내용을 기록하고 게시합니다.
 4. 로그아웃 상태에서도 위 태그 다운로드 URL이 ZIP을 반환하는지 확인합니다. 다운로드한 ZIP의 SHA-256/바이트 크기가 `asset-pack-metadata.json`과 일치해야 합니다. 이미지 61개, LICENSE, `asset-manifest.json`을 루트에 그대로 유지합니다. 다시 압축하면 ZIP의 해시/크기가 달라집니다.
 5. 운영 Apps Script에 이 브랜치의 `apps-script/RankedConfig.gs` 변경을 반영하고 `setupCorumRankedConfig()`를 한 번 실행해 **누락된 네 설정 행만 추가**합니다. 기존 운영 값은 유지됩니다. 웹 앱 배포도 최신 소스로 갱신합니다. 원격 서버 역시 이 브랜치의 설정 타입/검증 코드를 반영해야 합니다.
@@ -39,6 +39,8 @@
 다른 다운로드 오류가 발생하면 릴리스의 정확한 태그와 고정 ZIP 파일명, 공개 다운로드 가능 여부, 서버가 지정한 크기·SHA-256을 먼저 대조합니다. 브라우저가 거치는 중간 리다이렉트의 `text/html`만으로 업로드가 잘못됐다고 판단하지 않습니다.
 
 ## 다음 이미지팩 업데이트
+
+자동 CI는 PNG 원본, `GLOBED-LICENSE.txt`, `asset-pack.json` 또는 `tools/build-asset-pack.py`가 변경된 경우에만 이미지팩을 패키징하고 artifact를 업로드합니다. Push와 PR 업데이트는 해당 변경 범위 전체를 비교하며, 비교할 이전 커밋이 없는 최초 빌드는 팩을 생성합니다. 수동 Debug 빌드는 선택한 커밋과 바로 이전 커밋을 비교합니다. 코드·폰트·문서만 바뀐 빌드에서는 에셋팩 작업이 건너뛰어지므로 기존 릴리스의 ZIP과 서버 설정을 그대로 사용합니다.
 
 1. 이미지 원본은 `Corum-Ranked/corum-ranked-mod/resources`에서 관리합니다. `asset-pack.json`의 `assetPackVersion`을 `visuals-v2`로 바꿉니다. 현재 팩 포맷 1은 정확히 61개 이미지 목록을 사용합니다. 원본 폰트 파일과 모드 바이너리는 팩에 넣지 않습니다.
 2. 자동 CI의 새 에셋 artifact를 받거나, 전체 checkout에서 `python3 corum-ranked-mod/tools/build-asset-pack.py --version visuals-v2 --output asset-pack-dist`를 실행합니다. ZIP을 재현 가능하게 생성하고 해시/크기도 함께 계산합니다.
