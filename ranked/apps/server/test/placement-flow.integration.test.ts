@@ -126,6 +126,7 @@ describe("server-authoritative solo Stage Placement", () => {
       gdAccountId: "9901",
       gdUsername: "PlacementPlayer",
       clientVersion: "v0.5.0-beta.14",
+      clientInstanceId: "test-process-instance",
       installedMods: structuredClone(cleanMods),
     });
     const contextRow = await database.query<{
@@ -468,6 +469,7 @@ describe("server-authoritative solo Stage Placement", () => {
       gdAccountId: "9902",
       gdUsername: "PlacementSkipPlayer",
       clientVersion: "v0.5.0-beta.14",
+      clientInstanceId: "test-process-instance",
       installedMods: structuredClone(cleanMods),
     });
     const contextRow = await database.query<{

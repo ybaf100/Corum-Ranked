@@ -404,6 +404,8 @@ public:
     static RankedRuntime& get();
 
     void begin();
+    void leaveRanked();
+    void updateSessionHeartbeat();
     void recheckEnvironment();
     void tick();
     void joinQueue();
@@ -563,6 +565,11 @@ private:
     std::chrono::steady_clock::time_point m_nextNativeEntryAt {};
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_nativeEntryRequest;
     std::string m_sessionToken;
+    std::string m_clientInstanceId;
+    bool m_rankedOpen = false, m_sessionRejected = false, m_sessionHeartbeatBusy = false;
+    std::uint64_t m_sessionGeneration = 0;
+    std::chrono::steady_clock::time_point m_nextSessionHeartbeatAt {}, m_sessionLeaseDeadline {};
+    geode::async::TaskHolder<geode::utils::web::WebResponse> m_sessionHeartbeatRequest, m_sessionCloseRequest;
     std::string m_matchToken;
     std::string m_attemptId;
     // Attempt UUIDs acknowledged closed by Placement End. A concurrent /state

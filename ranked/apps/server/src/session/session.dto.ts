@@ -37,6 +37,12 @@ export class InstalledModDto {
 }
 
 export class CreateSessionDto {
+  @IsOptional()
+  @IsString()
+  @Length(16, 80)
+  @Matches(/^[a-zA-Z0-9-]+$/)
+  public clientInstanceId?: string;
+
   @IsString()
   @Matches(/^[1-9]\d{0,19}$/)
   public gdAccountId!: string;

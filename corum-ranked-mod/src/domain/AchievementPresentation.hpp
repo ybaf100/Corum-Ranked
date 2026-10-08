@@ -73,6 +73,17 @@ inline AchievementClaimState achievementClaimState(
     return AchievementClaimState::Locked;
 }
 
+template<class Cards>
+inline std::vector<std::size_t> achievementDisplayOrder(Cards const& cards) {
+    std::vector<std::size_t> order;
+    order.reserve(cards.size());
+    // Stable partition by indices preserves the server's order and the exact
+    // original card tags used by Claim/Title callbacks, across pagination.
+    for (std::size_t i = 0; i < cards.size(); ++i) if (cards[i].claimableRewards > 0) order.push_back(i);
+    for (std::size_t i = 0; i < cards.size(); ++i) if (cards[i].claimableRewards <= 0) order.push_back(i);
+    return order;
+}
+
 class AchievementToastQueue final {
 public:
     bool enqueue(std::string key) {

@@ -35,6 +35,7 @@ import { createDebugBotAttemptPlan } from "./debug-bot.behavior.js";
 interface BotDriver {
   readonly creation: DebugBotMatchCreation;
   attemptId: string | null;
+  attemptContextKey: string;
   attemptProgress: number;
   attemptTarget: number;
   attemptStartedAtMs: number;
@@ -159,6 +160,7 @@ export class DebugBotService implements OnModuleInit, OnApplicationShutdown {
     return {
       creation,
       attemptId: null,
+      attemptContextKey: "",
       attemptProgress: 0,
       attemptTarget: 0,
       attemptStartedAtMs: 0,
@@ -242,6 +244,7 @@ export class DebugBotService implements OnModuleInit, OnApplicationShutdown {
         driver.creation.botMatchToken,
         driver.creation.botContext,
       ) as Record<string, any>;
+      this.synchronizeAttemptContext(driver, state);
       if (state.state === "MATCH_RESULT" || state.state === "CANCELLED") {
         this.drivers.delete(matchId);
         return;
@@ -288,6 +291,7 @@ export class DebugBotService implements OnModuleInit, OnApplicationShutdown {
           driver.creation.botMatchToken,
           driver.creation.botContext,
         ) as Record<string, any>;
+        this.synchronizeAttemptContext(driver, refreshed);
         if (["ROUND_PLAYING", "FINAL_ATTEMPT_WINDOW", "LAST_ATTEMPT_WINDOW", "ROUND_SETTLING"].includes(refreshed.state)) {
           if (refreshed.state === "ROUND_SETTLING" && !driver.attemptId) {
             await this.recoverSettlingBotAttempt(driver, refreshed);
@@ -322,6 +326,23 @@ export class DebugBotService implements OnModuleInit, OnApplicationShutdown {
         }
         return mod;
       });
+  }
+
+  private synchronizeAttemptContext(driver: BotDriver, state: Record<string, any>): void {
+    const deathmatch = String(state.state).startsWith("DEATHMATCH_");
+    const key = deathmatch
+      ? `D${Number(state.deathmatch?.sequence ?? 0)}`
+      : `R${Number(state.currentRound?.roundNumber ?? 0)}`;
+    if (driver.attemptContextKey === key && state.state !== "ROUND_RESULT" &&
+        state.state !== "DEATHMATCH_RESULT") return;
+    // Surrender closes both authoritative attempts without the driver's End
+    // callback. Never send the old attempt/progress against the next round/map.
+    // LAST_ATTEMPT_WINDOW / ROUND_SETTLING keep the same context and attempt.
+    driver.attemptContextKey = key;
+    driver.attemptId = null;
+    driver.attemptProgress = driver.attemptTarget = 0;
+    driver.attemptStartedAtMs = driver.attemptDurationMs = 0;
+    driver.attemptRestartDelayMs = driver.nextAttemptAtMs = 0;
   }
 
   private async ready(driver: BotDriver, player: boolean): Promise<void> {

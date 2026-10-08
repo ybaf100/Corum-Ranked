@@ -31,6 +31,7 @@ public:
     RoundPreparationView const& view() const { return m_view; }
     bool ready() const;
     bool launch(cocos2d::CCScene* origin);
+    void setLowDetail(bool enabled);
     bool beginNativeQuit(PlayLayer* play);
     void endNativeQuit();
     bool returnFromNativeQuit(GJGameLevel* level);
@@ -80,6 +81,7 @@ private:
     std::uint64_t m_launchGeneration = 0;
     double m_nextLaunchAt = 0;
     float m_timer = 0;
+    bool m_lowDetail = false;
 };
 
 // Scope covers vanilla teardown, including GameManager return after PlayLayer's

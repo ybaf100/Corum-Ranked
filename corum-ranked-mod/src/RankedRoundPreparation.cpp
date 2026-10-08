@@ -49,6 +49,7 @@ RankedRoundPreparation& RankedRoundPreparation::get() {
     return *instance;
 }
 void RankedRoundPreparation::update(float dt) {
+    RankedRuntime::get().updateSessionHeartbeat();
     m_timer -= dt;
     if (m_timer > 0) return;
     m_timer = 0.2f;
@@ -82,6 +83,7 @@ void RankedRoundPreparation::pump() {
     if (context.matchId != runtime.view().match.matchId) context = {};
     if (m_context != context) {
         m_context = context;
+        m_lowDetail = false;
         m_contextBegan = now;
         m_nextLaunchAt = 0;
         m_view = {};
@@ -131,6 +133,10 @@ void RankedRoundPreparation::pump() {
     metadata.poll();
     metadata.adoptVerifiedSavedLevel(context);
     auto* level = metadata.level();
+    // Saved GD objects may carry a prior ordinary-play or Ranked LDM choice.
+    // Ranked owns a fresh OFF default per exact round, and reapplies only this
+    // round's explicit choice if native metadata/download replaces the object.
+    if (level) level->m_lowDetailModeToggled = m_lowDetail;
     m_view.mapReady = level && level->m_levelType == GJLevelType::Saved &&
         !level->m_levelString.empty() && !level->m_levelNotDownloaded;
     if (!m_view.mapReady) {
@@ -311,6 +317,13 @@ void RankedRoundPreparation::pumpAudio(GJGameLevel* level, double now) {
         else request({RoundResourceKind::Song, id});
     }
     for (int id : m_sfx) if (!resourceReady({RoundResourceKind::Sfx, id})) request({RoundResourceKind::Sfx, id});
+}
+
+void RankedRoundPreparation::setLowDetail(bool enabled) {
+    auto* level = RankedLevelPreparation::get().level();
+    if (m_context != currentPreparationContext() || !level) return;
+    m_lowDetail = enabled;
+    level->m_lowDetailModeToggled = enabled;
 }
 
 bool RankedRoundPreparation::launch(CCScene* origin) {

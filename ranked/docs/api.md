@@ -34,11 +34,12 @@ Development-only fixed VOICE recording and server-clock spectator playback use i
 {
   "gdAccountId": "12345",
   "gdUsername": "Player",
-  "clientVersion": "v0.5.0-beta.9",
+  "clientVersion": "v0.5.0-beta.43",
+  "clientInstanceId": "c51de09ade0f471ca46e670ba21d5f02",
   "installedMods": [
     {
       "id": "hwanhee1.corum_ranked",
-      "version": "v0.5.0-beta.9",
+      "version": "v0.5.0-beta.43",
       "enabled": true,
       "loaded": true,
       "internal": false,
@@ -49,6 +50,24 @@ Development-only fixed VOICE recording and server-clock spectator playback use i
 ```
 
 성공 시 runtime-only `sessionToken`, 만료시각, 표시 tier/placement 상태를 반환합니다. 이후 session API는 `Authorization: Bearer <sessionToken>`이 필요합니다.
+
+beta.43은 로비 진입부터 계정당 한 live connection을 허용합니다.
+`clientInstanceId`는 게임 프로세스마다 새로 만든 128-bit random ID이며 재진입/재시도에만
+같은 값을 사용합니다. 다른 기기의 살아 있는 session이 있으면 `409`와
+`code: RANKED_ACCOUNT_ACTIVE`, `retryAfterSeconds: 20`을 반환합니다. 같은 process의
+재시도는 token을 교체하고 이전 token을 폐기합니다. ID를 생략한 기존 호출도 새 session을
+만들 수 있지만 살아 있는 session을 재사용할 수 없습니다.
+
+| Method | Path | 역할 |
+|---|---|---|
+| `POST` | `/api/ranked/session/heartbeat` | 5초마다 갱신; `serverNow`, `sessionLeaseSeconds: 20` 반환 |
+| `POST` | `/api/ranked/session/close` | 해당 token만 폐기하고 해당 session의 queue entry 삭제 |
+
+session 생성 응답은 `sessionLeaseSeconds: 20`, `sessionHeartbeatSeconds: 5`도 반환합니다.
+정상 로비 종료는 Close를 전송하고 강제 종료/연결 단절은 마지막 heartbeat에서 20초 후
+만료됩니다. 만료된 token은 모든 인증 route에서 `401`이며 heartbeat로 부활하지 않습니다.
+queue/Match/Placement heartbeat와 session heartbeat는 서로 별개입니다. 기존 장기 token
+TTL과 exact client version gate도 유지합니다. DB migration은 추가하지 않습니다.
 
 ## Solo Placement
 

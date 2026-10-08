@@ -180,12 +180,15 @@ jobs:
           node --test corum-ranked-mod/tests/AudioTransitionSourceTest.mjs
           node --test corum-ranked-mod/tests/RankedAudioTransitionNativeTest.mjs
           node --test corum-ranked-mod/tests/RankedAudioDownloadNativeTest.mjs
+          node --test corum-ranked-mod/tests/RankedLobbyLifecycleNativeTest.mjs
           node --test corum-ranked-mod/tests/SpectatorCaptureNativeTest.mjs
           node --test corum-ranked-mod/tests/DebugSpectateSourceTest.mjs
           node --test corum-ranked-mod/tests/DebugSpectateRuntimeNativeTest.mjs
 
   build:
     name: ${{ matrix.config.name }} Debug ${{ needs.metadata.outputs.version }}
+    # beta43 is built on the user's Windows PC; future betas resume CI builds.
+    if: needs.metadata.outputs.version != 'v0.5.0-beta.43'
     needs:
       - metadata
       - tests
@@ -218,6 +221,7 @@ jobs:
 
   ios-debug-off:
     name: Validate iOS Debug OFF ${{ needs.metadata.outputs.version }}
+    if: needs.metadata.outputs.version != 'v0.5.0-beta.43'
     needs:
       - metadata
       - tests

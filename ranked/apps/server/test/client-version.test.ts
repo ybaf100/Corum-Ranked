@@ -12,6 +12,9 @@ const clientMod = (version: string) => ({
 });
 
 describe("Ranked client version gate", () => {
+  it("rejects beta42 before lobby admission leases and round/UI lifecycle fixes", () => {
+    expect(evaluateRankedClientVersion("v0.5.0-beta.42", [clientMod("v0.5.0-beta.42")]).allowed).toBe(false);
+  });
   it("rejects beta41 before Ranked Music Library song downloads", () => {
     expect(evaluateRankedClientVersion("v0.5.0-beta.41", [clientMod("v0.5.0-beta.41")]).allowed).toBe(false);
   });
@@ -49,7 +52,7 @@ describe("Ranked client version gate", () => {
 
   it("accepts the same current version with or without a leading v", () => {
     expect(
-      evaluateRankedClientVersion("0.5.0-beta.42", [clientMod("0.5.0-beta.42")]).allowed,
+      evaluateRankedClientVersion("0.5.0-beta.43", [clientMod("0.5.0-beta.43")]).allowed,
     ).toBe(true);
   });
 
@@ -59,7 +62,7 @@ describe("Ranked client version gate", () => {
     ]);
     expect(result).toMatchObject({
       allowed: false,
-      requiredVersion: "v0.5.0-beta.42",
+      requiredVersion: "v0.5.0-beta.43",
       clientVersion: "v0.5.0-beta.8",
     });
   });

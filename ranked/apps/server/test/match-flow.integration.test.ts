@@ -117,6 +117,7 @@ const createContext = async (
     gdAccountId: accountId,
     gdUsername: `Player${accountId}`,
     clientVersion: "v0.1.0",
+    clientInstanceId: "test-process-instance",
     installedMods: structuredClone(cleanMods),
   });
   await database.query(

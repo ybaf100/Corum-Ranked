@@ -16,6 +16,7 @@
 #include <ctime>
 #include <iomanip>
 #include <iterator>
+#include <random>
 #include <sstream>
 #include <string_view>
 #include <utility>
@@ -412,6 +413,8 @@ std::string RankedRuntime::endpoint(std::string const& path) const {
 }
 
 void RankedRuntime::begin() {
+    m_rankedOpen = true;
+    m_sessionRejected = false;
     if (
         m_view.stage == RuntimeStage::Loading ||
         m_view.stage == RuntimeStage::JoiningQueue ||
@@ -419,6 +422,9 @@ void RankedRuntime::begin() {
         m_view.stage == RuntimeStage::Matched
     ) return;
 
+    ++m_sessionGeneration;
+    m_sessionHeartbeatRequest.cancel(); m_sessionHeartbeatBusy = false;
+    m_sessionLeaseDeadline = {}; m_nextSessionHeartbeatAt = {};
     resetGameplayControls();
     invalidatePollRequest();
     invalidateAttemptRequest();
@@ -463,9 +469,11 @@ void RankedRuntime::fetchConfig() {
     m_controlBusy = true;
     setStage(RuntimeStage::Loading, "Loading authoritative Ranked configuration...");
     auto request = baseRequest({});
+    auto const sessionGeneration = m_sessionGeneration;
     m_controlRequest.spawn(
         request.get(endpoint("/api/ranked/config")),
-        [this](web::WebResponse response) {
+        [this, sessionGeneration](web::WebResponse response) {
+            if (sessionGeneration != m_sessionGeneration || !m_rankedOpen) return;
             m_controlBusy = false;
             if (!successful(response)) {
                 setStage(RuntimeStage::Error, "Could not load Ranked configuration.", responseError(response));
@@ -665,6 +673,11 @@ void RankedRuntime::createSession() {
     }
 
     matjson::Value body;
+    if (m_clientInstanceId.empty()) {
+        std::random_device entropy;
+        m_clientInstanceId = fmt::format("{:08x}{:08x}{:08x}{:08x}", entropy(), entropy(), entropy(), entropy());
+    }
+    body["clientInstanceId"] = m_clientInstanceId;
     body["gdAccountId"] = fmt::format("{}", accountId);
     body["gdUsername"] = username;
     body["clientVersion"] = Mod::get()->getVersion().toVString();
@@ -675,9 +688,12 @@ void RankedRuntime::createSession() {
     request.bodyJSON(body);
     m_controlBusy = true;
     setStage(RuntimeStage::Loading, "Creating a server session...");
+    auto const sessionGeneration = ++m_sessionGeneration;
+    auto const sentAt = std::chrono::steady_clock::now();
     m_controlRequest.spawn(
         request.post(endpoint("/api/ranked/session")),
-        [this](web::WebResponse response) {
+        [this, sessionGeneration, sentAt](web::WebResponse response) {
+            if (sessionGeneration != m_sessionGeneration || !m_rankedOpen) return;
             m_controlBusy = false;
             if (!successful(response)) {
                 setStage(RuntimeStage::Error, "Could not create a Ranked session.", responseError(response));
@@ -690,6 +706,8 @@ void RankedRuntime::createSession() {
                 return;
             }
             observeServerNow(root);
+            m_sessionLeaseDeadline = sentAt + std::chrono::seconds(std::clamp<std::int64_t>(root["sessionLeaseSeconds"].asInt().unwrapOr(20), 5, 120));
+            m_nextSessionHeartbeatAt = std::chrono::steady_clock::now();
             auto const player = root["player"];
             auto const profile = parseRankedProfile(player);
             m_view.profileTier = profile.displayedTier;
@@ -709,6 +727,52 @@ void RankedRuntime::createSession() {
             fetchActivePlacement();
         }
     );
+}
+
+void RankedRuntime::leaveRanked() {
+    m_rankedOpen = false; m_sessionRejected = true;
+    ++m_sessionGeneration;
+    m_sessionHeartbeatRequest.cancel(); m_sessionHeartbeatBusy = false;
+    m_controlRequest.cancel(); m_controlBusy = false;
+    invalidatePollRequest();
+    auto const token = std::exchange(m_sessionToken, {});
+    m_sessionLeaseDeadline = {}; m_nextSessionHeartbeatAt = {};
+    if (!token.empty()) {
+        auto request = baseRequest(token);
+        request.timeout(std::chrono::seconds(10));
+        m_sessionCloseRequest.spawn(request.post(endpoint("/api/ranked/session/close")), [](web::WebResponse) {});
+    }
+    setStage(RuntimeStage::Idle, "Ranked disconnected.");
+}
+
+void RankedRuntime::updateSessionHeartbeat() {
+    if (!m_rankedOpen || m_sessionToken.empty() || m_sessionRejected) return;
+    auto const now = std::chrono::steady_clock::now();
+    if (m_sessionLeaseDeadline != std::chrono::steady_clock::time_point{} && now >= m_sessionLeaseDeadline) {
+        leaveRanked();
+        setStage(RuntimeStage::Error, "Ranked connection expired. Enter Ranked again.");
+        return;
+    }
+    if (m_sessionHeartbeatBusy || now < m_nextSessionHeartbeatAt) return;
+    auto request = baseRequest(m_sessionToken);
+    request.timeout(std::chrono::seconds(10));
+    auto const generation = m_sessionGeneration;
+    m_sessionHeartbeatBusy = true;
+    m_nextSessionHeartbeatAt = now + std::chrono::seconds(5);
+    m_sessionHeartbeatRequest.spawn(request.post(endpoint("/api/ranked/session/heartbeat")),
+        [this, generation, now](web::WebResponse response) {
+            if (generation != m_sessionGeneration || !m_rankedOpen) return;
+            m_sessionHeartbeatBusy = false;
+            if (successful(response)) {
+                auto const root = response.json().unwrapOr(matjson::Value());
+                m_sessionLeaseDeadline = now + std::chrono::seconds(std::clamp<std::int64_t>(root["sessionLeaseSeconds"].asInt().unwrapOr(20), 5, 120));
+            } else if (response.code() == 401 || response.code() == 403 || response.code() == 426) {
+                auto const error = responseError(response);
+                leaveRanked(); setStage(RuntimeStage::Error, "Ranked connection is no longer valid.", error);
+            }
+            // Transport/5xx errors retain the lease only until its existing
+            // deadline; neither retries nor stale replies can extend it locally.
+        });
 }
 
 void RankedRuntime::fetchActivePlacement() {
@@ -3433,6 +3497,8 @@ void RankedRuntime::sendAttemptProgress() {
 }
 
 void RankedRuntime::tick() {
+    updateSessionHeartbeat();
+    if (m_sessionRejected) return;
     flushGameplayControls();
     SpectatorLiveRuntime::get().tickTerminal();
     auto const now = std::chrono::steady_clock::now();

@@ -38,4 +38,10 @@ export class SessionController {
   public heartbeat(@CurrentSession() session: RankedSessionContext) {
     return this.sessions.heartbeat(session);
   }
+
+  @Post("close")
+  @UseGuards(SessionGuard)
+  public close(@CurrentSession() session: RankedSessionContext) {
+    return this.sessions.close(session);
+  }
 }

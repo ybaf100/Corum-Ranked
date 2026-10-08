@@ -9,6 +9,7 @@ const dto = (version: string): CreateSessionDto => ({
   gdAccountId: "7001",
   gdUsername: "VersionTest",
   clientVersion: version,
+  clientInstanceId: "test-process-instance",
   installedMods: [
     {
       id: "hwanhee1.corum_ranked",

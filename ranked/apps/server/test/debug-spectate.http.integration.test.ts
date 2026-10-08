@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { Controller, Get, UseGuards, type INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { PGlite } from "@electric-sql/pglite";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { DATABASE } from "../src/database/database.port.js";
 import { SERVER_ENVIRONMENT } from "../src/config/server-environment.js";
 import { SERVER_CLOCK, ID_GENERATOR } from "../src/common/runtime.module.js";
@@ -43,6 +43,12 @@ describe("server-backed Debug Spectate over real HTTP and persistent PostgreSQL"
   const createBody = { password: "fixture-secret", levelId: DEBUG_SPECTATE_LEVEL_ID, formatVersion: DEBUG_SPECTATE_FORMAT_VERSION };
   const sessionToken = "real-ranked-session-for-debug-http";
   const headers = { "content-type": "application/json", "x-corum-debug-spectate": "1", Authorization: `Bearer ${sessionToken}` };
+  // These playback tests model a connected Ranked client. Heartbeat writes are
+  // fixture setup, outside the snapshots proving Debug endpoints are read-only.
+  const connectedClientHeartbeat = () => database.query(
+    "UPDATE ranked_sessions SET last_heartbeat_at = $1 WHERE token_hash = $2",
+    [clock.now().toISOString(), tokens.hash(sessionToken)],
+  );
   const startApp = async (enabled = true) => {
     const module = await Test.createTestingModule({ controllers: [DebugSpectateController, AuthorityProbe],
       providers: [DebugSpectateService, SessionGuard, { provide: DATABASE, useValue: database },
@@ -98,9 +104,10 @@ describe("server-backed Debug Spectate over real HTTP and persistent PostgreSQL"
     await database.query(`INSERT INTO ranked_profiles (player_id, hidden_mmr, displayed_tier, placement_games,
       initial_csmp_tier, initial_seed_mmr, seed_applied_at) VALUES ($1, 2500, 'BRONZE', 5, 'BRONZE', 2500, CURRENT_TIMESTAMP)`, [player]);
     await database.query(`INSERT INTO ranked_sessions (id, player_id, token_hash, client_version, expires_at, environment_snapshot, last_heartbeat_at)
-      VALUES ($1, $2, $3, $4, $5, '{}'::jsonb, CURRENT_TIMESTAMP)`, [ids.next(), player, tokens.hash(sessionToken), REQUIRED_RANKED_CLIENT_VERSION, new Date(now + 3_600_000)]);
+      VALUES ($1, $2, $3, $4, $5, '{}'::jsonb, $6)`, [ids.next(), player, tokens.hash(sessionToken), REQUIRED_RANKED_CLIENT_VERSION, new Date(now + 3_600_000), clock.now()]);
     await startApp();
   }, 60_000);
+  beforeEach(async () => { await connectedClientHeartbeat(); });
   afterAll(async () => { await app?.close(); await pg?.close(); if (dir) await rm(dir, { recursive: true, force: true }); });
 
   it("requires server opt-in, debug header/password/session, and fixed map/format", async () => {
@@ -183,6 +190,9 @@ describe("server-backed Debug Spectate over real HTTP and persistent PostgreSQL"
     expect(admitted.filter(r => r.status === 201).length).toBeLessThanOrEqual(16);
     expect(admitted.some(r => r.status === 409)).toBe(true);
     now += 15 * 60_000;
+    // The playback has expired, while the underlying connected client has
+    // continued its independent Ranked heartbeat throughout this time jump.
+    await connectedClientHeartbeat();
     expect([401, 404]).toContain((await poll(playback)).status);
     expect((await post("playbacks", createBody)).status).toBe(201); // Expired memory/session buffers cleaned.
   });

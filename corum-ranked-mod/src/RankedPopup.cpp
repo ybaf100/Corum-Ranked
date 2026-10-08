@@ -566,6 +566,9 @@ class CorumRankedLayer final : public CCLayerColor {
         addChild(m_concessionNotice, 2500);
 
         RankedRuntime::get().begin();
+        // Existing process scheduler keeps the connection lease alive while
+        // gameplay/paused native scenes cover the Ranked lobby.
+        corum::ranked::RankedRoundPreparation::get();
         syncPhase();
         syncResources();
         m_renderedUiKey = presentationKey();
@@ -1045,6 +1048,14 @@ class CorumRankedLayer final : public CCLayerColor {
 
     void updateDynamicUi() {
         if (m_jukeboxButton) m_jukeboxButton->setEnabled(findPlayableMap() != nullptr);
+        if (m_jukebox) if (auto popup = m_jukebox->lock()) {
+            auto const& match = RankedRuntime::get().view().match;
+            auto const left = std::max(0, 10 - static_cast<int>(std::floor(phaseSeconds())));
+            auto const text = corum::ranked::roundPrepareState(match.state)
+                ? fmt::format("{} {:02d}", tr("starts-in", "STARTS IN"), left)
+                : tr("starting", "STARTING...");
+            popup->setCountdown(text);
+        }
         if (m_settingsLabel) {
             m_settingsLabel->setString(tr("settings", "Settings").c_str());
             corum::ranked::ui::fitLabelWidth(m_settingsLabel, 78, 0.27f, 0.18f);
@@ -3582,6 +3593,7 @@ class CorumRankedLayer final : public CCLayerColor {
         }
 
         constexpr std::size_t perPage = 4;
+        auto const order = corum::ranked::achievementDisplayOrder(view.achievements.cards);
         auto const pageCount = std::max<std::size_t>(
             1,
             (view.achievements.cards.size() + perPage - 1) / perPage
@@ -3591,7 +3603,7 @@ class CorumRankedLayer final : public CCLayerColor {
         auto const cardWidth = std::min(250.0f, size.width / 2.0f - 22.0f);
         constexpr float cardHeight = 88.0f;
         for (std::size_t slot = 0; slot < perPage && start + slot < view.achievements.cards.size(); ++slot) {
-            auto const index = start + slot;
+            auto const index = order[start + slot];
             auto const& card = view.achievements.cards[index];
             auto const column = slot % 2;
             auto const row = slot / 2;
@@ -3682,7 +3694,7 @@ class CorumRankedLayer final : public CCLayerColor {
                             : tr("locked", "LOCKED"),
                     {center.x + cardWidth / 2.0f - 39.0f, center.y + 14.0f},
                     menu_selector(CorumRankedLayer::onAchievementClaim),
-                    false,
+                    claimState == corum::ranked::AchievementClaimState::Unclaimed,
                     0.50f
                 );
                 claim->setTag(static_cast<int>(index));
@@ -4008,6 +4020,11 @@ class CorumRankedLayer final : public CCLayerColor {
             !corum::ranked::roundAcquireState(view.match.state)) return;
         auto& runtime = RankedRuntime::get();
         if (!runtime.canEnterCurrentLevel() && !runtime.canEnterNativeRoundScene() && !runtime.canEnterCurrentLevelAsSpectator()) return;
+        // The owned Jukebox dialog must yield before the native modal gate.
+        // Close only dialogs opened by this exact carrier; other modals retain
+        // their existing launch protection.
+        if (m_jukebox) if (auto popup = m_jukebox->lock()) popup->dismiss();
+        m_jukebox.reset();
         if (!corum::ranked::RankedRoundPreparation::get().launch(CCDirector::sharedDirector()->getRunningScene())) return;
         m_enteringLevel = true;
         m_rankedChildScenePushed = true;
@@ -4016,7 +4033,7 @@ class CorumRankedLayer final : public CCLayerColor {
     void onLowDetail(CCObject*) {
         auto* level = findPlayableMap();
         if (!level || m_enteringLevel) return;
-        level->m_lowDetailModeToggled = !level->m_lowDetailModeToggled;
+        corum::ranked::RankedRoundPreparation::get().setLowDetail(!level->m_lowDetailModeToggled);
         // The exact native Saved object persists user options; never overwrite
         // the map author's m_lowDetailMode capability or any score/metadata.
         render();
@@ -4282,7 +4299,7 @@ class CorumRankedLayer final : public CCLayerColor {
         if (m_jukebox) if (auto popup = m_jukebox->lock(); popup && popup->getParent()) return;
         auto* level = findPlayableMap();
         if (auto* popup = corum::ranked::ui::RankedJukeboxPopup::create(level)) {
-            m_jukebox.emplace(popup); popup->show();
+            m_jukebox.emplace(popup); popup->show(); popup->openWhenReady();
         }
     }
 
@@ -4298,10 +4315,13 @@ class CorumRankedLayer final : public CCLayerColor {
     }
 
     void onCloseLayer(CCObject*) {
+        auto& runtime = RankedRuntime::get();
+        if (runtime.view().stage == RuntimeStage::Matched && runtime.view().match.state != "MATCH_RESULT" &&
+            runtime.view().match.state != "PLACEMENT_RESULT" && runtime.view().match.state != "CANCELLED") return;
         closeSettings();
         corum::ranked::RankedVolumeControl::get().endSession(m_volumeSession);
         m_volumeSession = 0;
-        if (RankedRuntime::get().view().stage == RuntimeStage::Queued) RankedRuntime::get().leaveQueue();
+        runtime.leaveRanked();
         RankedAudioManager::get().restoreMenuMusic();
         unschedule(schedule_selector(CorumRankedLayer::refresh));
         unschedule(schedule_selector(CorumRankedLayer::audioFrame));
@@ -4334,6 +4354,11 @@ class CorumRankedLayer final : public CCLayerColor {
             return;
         }
         auto const& view = RankedRuntime::get().view();
+        if (view.stage == RuntimeStage::Matched &&
+            (view.match.state == "MATCH_RESULT" || view.match.state == "PLACEMENT_RESULT" || view.match.state == "CANCELLED")) {
+            onResultClose(nullptr);
+            return;
+        }
         if (
             view.stage == RuntimeStage::Matched &&
             view.match.state != "MATCH_RESULT" &&

@@ -14,6 +14,8 @@ import {
   normalizeRankedClientVersion,
 } from "./client-version.js";
 import type { RankedRequest, RankedSessionContext } from "./session.types.js";
+import { SERVER_CLOCK, type ServerClock } from "../common/runtime.module.js";
+import { sessionAliveSince } from "./session-presence.policy.js";
 
 interface SessionRow {
   session_id: string;
@@ -31,6 +33,7 @@ export class SessionGuard implements CanActivate {
   public constructor(
     @Inject(DATABASE) private readonly database: DatabasePort,
     @Inject(TokenService) private readonly tokens: TokenService,
+    @Inject(SERVER_CLOCK) private readonly clock: ServerClock,
   ) {}
 
   public async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -39,6 +42,7 @@ export class SessionGuard implements CanActivate {
     const match = authorization.match(/^Bearer\s+(.+)$/i);
     if (!match?.[1]) throw new UnauthorizedException("Missing Ranked session token");
     const tokenHash = this.tokens.hash(match[1]);
+    const now = this.clock.now();
     const result = await this.database.query<SessionRow>(
       `SELECT
          s.id AS session_id,
@@ -54,8 +58,9 @@ export class SessionGuard implements CanActivate {
        JOIN ranked_profiles rp ON rp.player_id = p.id
        WHERE s.token_hash = $1
          AND s.revoked_at IS NULL
-         AND s.expires_at > CURRENT_TIMESTAMP`,
-      [tokenHash],
+         AND s.expires_at > $2
+         AND s.last_heartbeat_at > $3`,
+      [tokenHash, now.toISOString(), sessionAliveSince(now)],
     );
     const row = result.rows[0];
     if (!row || row.hidden_mmr === null) throw new UnauthorizedException("Invalid or expired session");

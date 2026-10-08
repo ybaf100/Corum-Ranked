@@ -102,6 +102,7 @@ beforeAll(async () => {
     "0008_placement_beta9.sql",
     "0009_placement_stage_count.sql",
     "0010_achievements_v1.sql",
+    "0012_gameplay_controls.sql",
     "0013_native_scene_entry.sql",
   ]) {
     const path = fileURLToPath(new URL(`../../../migrations/${migrationName}`, import.meta.url));
@@ -162,6 +163,7 @@ describe("development-only Bot Match using the production Ranked engine", () => 
       gdAccountId: accountId,
       gdUsername: `Debug${accountId}`,
       clientVersion: "v0.5.0-beta.14",
+      clientInstanceId: "test-process-instance",
       installedMods: structuredClone(cleanMods),
     });
     await database.query(
@@ -199,6 +201,49 @@ describe("development-only Bot Match using the production Ranked engine", () => 
       placementGames: Number(row.placement_games),
     };
   };
+
+  it("retires the surrendered round's Bot context and starts/progresses a new R2 Attempt", async () => {
+    const player = await contextFor("9343");
+    const created = await debug.create(player, { password: "2008", difficulty: "NORMAL", scenario: "NORMAL_MATCH",
+      botBan: "NO_BAN", sendDiscordEvents: false, installedMods: structuredClone(cleanMods) });
+    await matches.ready(created.matchId, created.matchToken, player, { installedMods: structuredClone(cleanMods) });
+    await debug.tickOnce();
+    await matches.submitBan(created.matchId, created.matchToken, player, { canonicalLevelId: null });
+    await debug.tickOnce();
+    await matches.ready(created.matchId, created.matchToken, player, { installedMods: structuredClone(cleanMods) });
+    let state = await matches.state(created.matchId, created.matchToken, player);
+    await matches.entered(created.matchId, created.matchToken, player, {
+      roundNumber: state.entry!.roundNumber, deathmatchSequence: state.entry!.deathmatchSequence, playableLevelId: state.entry!.playableLevelId });
+    clock.advance(3000);await debug.tickOnce();
+    const driver = (debug as any).drivers.get(created.matchId);
+    const oldAttempt = driver.attemptId;expect(oldAttempt).toBeTruthy();
+    await matches.surrender(created.matchId, created.matchToken, player,
+      { scope: "ROUND", roundNumber: 1, deathmatchSequence: 0, clientEventId: "r1-surrender" });
+    state = await matches.state(created.matchId, created.matchToken, player);expect(state.state).toBe("ROUND_RESULT");
+    clock.advance(10000);await debug.tickOnce();
+    state = await matches.state(created.matchId, created.matchToken, player);expect(state.state).toBe("ROUND_PREPARE");
+    expect(driver.attemptId).toBeNull();
+    await matches.ready(created.matchId, created.matchToken, player, { installedMods: structuredClone(cleanMods) });
+    state = await matches.state(created.matchId, created.matchToken, player);
+    await matches.entered(created.matchId, created.matchToken, player, {
+      roundNumber: state.entry!.roundNumber, deathmatchSequence: state.entry!.deathmatchSequence, playableLevelId: state.entry!.playableLevelId });
+    clock.advance(3000);await debug.tickOnce();
+    expect(driver.attemptId).toBeTruthy();expect(driver.attemptContextKey).toBe("R2");
+    // Domain IDs (e.g. B-1) are round-scoped and may repeat. The new
+    // authoritative row/start event, not string inequality, proves R2 started.
+    const fresh = await database.query<{ domain_attempt_id: string }>(
+      `SELECT a.domain_attempt_id FROM ranked_attempts a JOIN ranked_rounds r ON r.id = a.round_id
+       WHERE r.match_id = $1 AND r.round_number = 2 AND a.ended_at IS NULL`, [created.matchId]);
+    expect(fresh.rows).toHaveLength(1);expect(fresh.rows[0]!.domain_attempt_id).toBe(driver.attemptId);
+    clock.advance(500);await debug.tickOnce();expect(driver.attemptProgress).toBeGreaterThan(0);
+    const old = await database.query<{ ended_at: unknown }>(
+      `SELECT a.ended_at FROM ranked_attempts a JOIN ranked_rounds r ON r.id = a.round_id
+       WHERE r.match_id = $1 AND r.round_number = 1 AND a.domain_attempt_id = $2`, [created.matchId, oldAttempt]);
+    expect(old.rows[0]!.ended_at).not.toBeNull();
+    await matches.surrender(created.matchId, created.matchToken, player,
+      { scope: "MATCH", roundNumber: 2, deathmatchSequence: 0, clientEventId: "cleanup-surrender" });
+    await debug.tickOnce();
+  });
 
   const completeThreeClears = async (
     creation: Awaited<ReturnType<QueueService["createDebugBotMatch"]>>,

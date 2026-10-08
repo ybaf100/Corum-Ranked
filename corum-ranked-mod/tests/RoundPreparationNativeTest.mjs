@@ -166,6 +166,7 @@ struct RankedRuntime {
     bool armCurrentLevelForGameplay(){++arms;return canEnterCurrentLevel();}
     void reportMapDownloadFailure(){++mapFailures;}
     void submitReady(){++readyRequests;}
+    void updateSessionHeartbeat(){}
     std::optional<std::int64_t> deadlineMillis(){++deadlineQueries;return 50000;}
 };
 LevelPreparationContext currentPreparationContext(){return RankedRuntime::get().context;}
@@ -234,6 +235,8 @@ int main(){
     GJGameLevel downloaded=list;downloaded.m_levelString="native geometry";downloaded.m_levelNotDownloaded=false;
     maps->finish(&downloaded);assert(!p.view().mapReady&&PlayLayer::constructions==0);ticks(p);
     assert(p.view().mapReady&&meta.level()==&downloaded&&music->requests["url"]==1&&!p.ready());
+    // A retained GD object carrying a previous LDM ON must start this round OFF.
+    downloaded.m_lowDetailModeToggled=true;ticks(p);assert(!downloaded.m_lowDetailModeToggled);
     music->url();ticks(p);assert(music->requests["info42"]==1&&music->requests["info43"]==1&&music->requests["sfx7"]==1);
     assert(music->active.size()<=3);ticks(p);assert(music->requests["info42"]==1);
     music->info(42);music->info(43);ticks(p);assert(music->requests["song42"]==1&&music->requests["song43"]==1);
@@ -269,6 +272,7 @@ int main(){
     RoundOptions options;options.onLowDetail(nullptr);assert(options.renders==0);
     options.level=&downloaded;options.onLowDetail(nullptr);options.onDisableShake(nullptr);
     assert(downloaded.m_lowDetailModeToggled&&downloaded.m_disableShakeToggled&&options.renders==2);
+    ticks(p);assert(downloaded.m_lowDetailModeToggled); // explicit choice survives pumps
     options.m_enteringLevel=true;options.onLowDetail(nullptr);assert(downloaded.m_lowDetailModeToggled&&options.renders==2);
     assert(meta.authorizes(&downloaded,currentPreparationContext())); // options do not alter metadata proof
     assert(p.launch(&origin));assert(runtime.arms==1&&PlayLayer::active->m_level==&downloaded);
@@ -292,7 +296,9 @@ int main(){
 #endif
     // Completed assets via GD's effective NONG paths, including a built-in track 0.
     context(2);GJGameLevel track;track.m_levelID=2;track.m_songID=0;track.m_levelType=GJLevelType::Saved;track.m_levelNotDownloaded=false;track.m_levelString="geometry";
+    track.m_lowDetailModeToggled=true;
     maps->saved[2]=&track;meta.attest(&track);ticks(p);assert(p.ready()&&p.view().songsTotal==0);
+    assert(!track.m_lowDetailModeToggled); // new context gets a fresh OFF default
     context(2);runtime.state.match.state="ROUND_ENTERING";runtime.entryAllowed=true;
     int const previousArms=runtime.arms;assert(p.launch(&origin));
     assert(runtime.arms==previousArms&&runtime.sceneEntries==0&&PlayLayer::active->m_level==&track);
@@ -350,7 +356,7 @@ test('round preparation is passive and automatic with native user options, serve
     const round = popup.slice(popup.indexOf('    void renderPrepare('), popup.indexOf('    void renderSpectator('));
     assert.match(placement, /addPreparationStatusRows\(/);
     assert.match(round, /addPreparationStatusRows\(/);
-    assert.match(popup, /level->m_lowDetailModeToggled = !level->m_lowDetailModeToggled/);
+    assert.match(popup, /setLowDetail\(!level->m_lowDetailModeToggled\)/);
     assert.match(popup, /level->m_disableShakeToggled = !level->m_disableShakeToggled/);
     assert.doesNotMatch(popup, /level->m_lowDetailMode\s*=|level->m_disableShake\s*=/);
     assert.match(popup, /roundReadyDue\(match.state, match.placement, phaseSeconds\(\), preparation.ready\(\)\)/);

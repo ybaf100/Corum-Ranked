@@ -1,4 +1,4 @@
-import { ForbiddenException, Inject, Injectable, ServiceUnavailableException } from "@nestjs/common";
+import { ConflictException, ForbiddenException, Inject, Injectable, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
 import {
   evaluateClientEnvironment,
   seedProfileOnce,
@@ -16,6 +16,7 @@ import { RankedConfigService } from "../config/ranked-config.service.js";
 import { DATABASE, type DatabasePort, type SqlExecutor } from "../database/database.port.js";
 import type { CreateSessionDto, InstalledModDto } from "./session.dto.js";
 import type { RankedSessionContext } from "./session.types.js";
+import { RANKED_SESSION_HEARTBEAT_SECONDS, RANKED_SESSION_LEASE_SECONDS, sessionAliveSince } from "./session-presence.policy.js";
 
 interface ExistingProfileRow {
   player_id: string;
@@ -44,6 +45,8 @@ interface PlayerRow {
 export interface SessionCreationResult {
   readonly sessionToken: string;
   readonly expiresAt: string;
+  readonly sessionLeaseSeconds: number;
+  readonly sessionHeartbeatSeconds: number;
   readonly player: {
     readonly gdAccountId: string;
     readonly gdUsername: string;
@@ -109,12 +112,36 @@ export class SessionService {
     const csmpTier = needsSeed
       ? await this.csmpTierSource.fetchCurrentTier(dto.gdAccountId)
       : null;
-    const now = this.clock.now();
+    let now = this.clock.now();
     const sessionToken = this.tokens.createSessionToken();
-    const expiresAt = new Date(now.getTime() + config.operational.timeouts.sessionSeconds * 1_000);
+    let expiresAt = new Date(now.getTime() + config.operational.timeouts.sessionSeconds * 1_000);
 
     const profile = await this.database.transaction(async (transaction) => {
       const player = await this.upsertPlayer(transaction, dto);
+      now = this.clock.now();
+      expiresAt = new Date(now.getTime() + config.operational.timeouts!.sessionSeconds * 1_000);
+      // The upsert locks the unique player row until commit. Concurrent
+      // admissions for the same account serialize even when no session exists.
+      const active = await transaction.query<{ id: string; instance_id: string | null }>(
+        `SELECT id, environment_snapshot->>'clientInstanceId' AS instance_id
+         FROM ranked_sessions WHERE player_id = $1 AND revoked_at IS NULL
+           AND expires_at > $2 AND last_heartbeat_at > $3`,
+        [player.id, now.toISOString(), sessionAliveSince(now)],
+      );
+      if (active.rows.some((row) => !dto.clientInstanceId || row.instance_id !== dto.clientInstanceId)) {
+        throw new ConflictException({
+          code: "RANKED_ACCOUNT_ACTIVE",
+          message: "This account is already connected to Ranked on another device. Leave Ranked there or wait for the connection to expire.",
+          retryAfterSeconds: RANKED_SESSION_LEASE_SECONDS,
+        });
+      }
+      // A retry from the same process rotates its token. Delayed heartbeats or
+      // Close from an older token must never revive/revoke the replacement.
+      // Matchmaking locks queue rows before renewing session rows. Use that
+      // same order so admission/Close cannot deadlock a concurrent matchmaker.
+      await transaction.query("DELETE FROM ranked_queue_entries WHERE player_id = $1", [player.id]);
+      await transaction.query("UPDATE ranked_sessions SET revoked_at = $2 WHERE player_id = $1 AND revoked_at IS NULL",
+        [player.id, now.toISOString()]);
       const seededProfile = await this.ensureSeededProfile(
         transaction,
         player.id,
@@ -132,7 +159,7 @@ export class SessionService {
           player.id,
           this.tokens.hash(sessionToken),
           dto.clientVersion,
-          JSON.stringify(dto.installedMods),
+          JSON.stringify({ installedMods: dto.installedMods, clientInstanceId: dto.clientInstanceId ?? null }),
           expiresAt.toISOString(),
           now.toISOString(),
         ],
@@ -143,6 +170,8 @@ export class SessionService {
     return {
       sessionToken,
       expiresAt: expiresAt.toISOString(),
+      sessionLeaseSeconds: RANKED_SESSION_LEASE_SECONDS,
+      sessionHeartbeatSeconds: RANKED_SESSION_HEARTBEAT_SECONDS,
       player: {
         gdAccountId: dto.gdAccountId,
         gdUsername: dto.gdUsername,
@@ -188,13 +217,31 @@ export class SessionService {
     return parsed.filter((mark): mark is "WIN" | "LOSS" => mark === "WIN" || mark === "LOSS");
   }
 
-  public async heartbeat(session: RankedSessionContext): Promise<{ serverNow: string }> {
+  public async heartbeat(session: RankedSessionContext) {
+    return this.database.transaction(async (transaction) => {
+      // Serialize against admission/Close, then sample the clock. A heartbeat
+      // waiting on a row lock cannot use its earlier time to revive a dead lease.
+      await transaction.query("SELECT id FROM ranked_players WHERE id = $1 FOR UPDATE", [session.playerId]);
+      const now = this.clock.now();
+      const result = await transaction.query(
+        `UPDATE ranked_sessions SET last_heartbeat_at = $1 WHERE id = $2 AND player_id = $4 AND revoked_at IS NULL
+         AND expires_at > $1 AND last_heartbeat_at > $3`,
+        [now.toISOString(), session.sessionId, sessionAliveSince(now), session.playerId],
+      );
+      if (!result.rowCount) throw new UnauthorizedException("Ranked connection expired; enter Ranked again.");
+      return { serverNow: now.toISOString(), sessionLeaseSeconds: RANKED_SESSION_LEASE_SECONDS };
+    });
+  }
+
+  public async close(session: RankedSessionContext) {
     const now = this.clock.now();
-    await this.database.query(
-      "UPDATE ranked_sessions SET last_heartbeat_at = $1 WHERE id = $2 AND revoked_at IS NULL",
-      [now.toISOString(), session.sessionId],
-    );
-    return { serverNow: now.toISOString() };
+    await this.database.transaction(async (transaction) => {
+      await transaction.query("SELECT id FROM ranked_players WHERE id = $1 FOR UPDATE", [session.playerId]);
+      await transaction.query("DELETE FROM ranked_queue_entries WHERE session_id = $1", [session.sessionId]);
+      await transaction.query("UPDATE ranked_sessions SET revoked_at = $2 WHERE id = $1 AND revoked_at IS NULL",
+        [session.sessionId, now.toISOString()]);
+    });
+    return { closed: true, serverNow: now.toISOString() };
   }
 
   private async findExistingProfile(gdAccountId: string): Promise<ExistingProfileRow | null> {
