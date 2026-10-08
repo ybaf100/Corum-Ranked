@@ -2,6 +2,8 @@
 
 This continues `work/ranked-pause-quit-order-beta41` from `e7058efb6d2eee9a5d01d22bcc1f581d1c6ad47f`, against production main `b418a75cd91aecbc6e787c09a8f6d5903870b874`. The prior Pause candidates were reported unsuccessful. The asset download correction was accepted on device. This is not a device-verified Pause fix; production main and the exact beta41 client/server gate remain unchanged.
 
+**Latest status:** the 12:25 device log and user accept automatic surrender return, but next-round Pause still fails. Quit returns with both pause states clear; a later boundary sets process pause again. The entry gate correction and the remaining native/device limits are recorded in [PAUSE-ENTRY-LIFECYCLE-CANDIDATE.md](PAUSE-ENTRY-LIFECYCLE-CANDIDATE.md). The evidence below describes the preceding return regression.
+
 ## Latest device evidence and limits
 
 `Geode 2026-10-08 11.22.10.log` records GD 2.2081, Geode 5.10.1 and Corum beta41. Match `cf2dd8b3-8001-40c4-8034-fa3a28d7d910` R1 (56455318) opens Pause at 11:23:09, changing AppDelegate's paused flag from false to true. At 11:23:11, ROUND surrender receives HTTP 201, queues scene return, then logs **native quit blocked: scene still paused** and **native concession quit reachedPlay=false paused=true appPaused=true**. Automatic return is blocked by Corum's own guard while the native Pause Quit is active.

@@ -52,6 +52,7 @@ test('production native safety hook bodies execute through death/completion/save
 namespace gd { using string = std::string; }
 namespace geode::log { template<class... T> void info(T...) {} template<class... T> void error(T...) {} }
 using namespace geode;
+struct AppDelegate {bool m_gamePaused=false;static AppDelegate* get(){static AppDelegate a;return &a;}};
 struct CCPoint { float x, y; };
 struct GameObject { int m_uniqueID = 0; };
 struct PlayerObject {

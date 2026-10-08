@@ -35,6 +35,7 @@
 #include <Geode/modify/GJGameLevel.hpp>
 #include <Geode/modify/GJBaseGameLayer.hpp>
 #include <Geode/binding/FMODAudioEngine.hpp>
+#include <Geode/binding/AppDelegate.hpp>
 #include <Geode/binding/UILayer.hpp>
 
 #include <algorithm>
@@ -192,6 +193,7 @@ public:
         bool rankedLevel = false;
         bool rankedInitialized = false;
         bool nativeEntryHeld = false;
+        bool entryNativeCompletionInProgress = false;
         bool entryAttemptCountDeferred = false;
         bool entryWasPaused = false, entryTouchEnabled = false, entryKeyboardEnabled = false;
         bool entryUIKeyboardEnabled = false, entryUIKeypadEnabled = false;
@@ -469,8 +471,9 @@ public:
             m_fields->entryOverlay = corum::ranked::ui::RankedEntryOverlay::create();
             if (m_fields->entryOverlay) addChild(m_fields->entryOverlay, 10000);
             FMODAudioEngine::sharedEngine()->pauseAllMusic(true);
-            log::info("[RankedEntry] native hold level={} pausedBeforeHold={} pauseBeforeHold={}",
-                m_fields->levelId, m_fields->entryWasPaused, m_fields->entryUIPauseEnabled);
+            log::info("[RankedEntry] native hold level={} pausedBeforeHold={} pauseBeforeHold={} appPaused={}",
+                m_fields->levelId, m_fields->entryWasPaused, m_fields->entryUIPauseEnabled,
+                AppDelegate::get() && AppDelegate::get()->m_gamePaused);
         }
         return true;
     }
@@ -478,8 +481,21 @@ public:
     // Uses the existing native world-frame owner: no additional PlayerObject
     // detours or remote physics. Scene/UI heartbeat continues while GD gameplay,
     // button commands, evidence and its audio clock are held at the initial pose.
+    void queueHeldEntryExit() {
+        if (m_fields->autoExitRequested) return;
+        m_fields->autoExitRequested = true;
+        // Leave the native update/lifecycle stack before retiring this scene.
+        auto scene = geode::WeakRef<PlayLayer>(this);
+        queueInMainThread([scene] {
+            if (auto layer = scene.lock(); layer && layer.data() == PlayLayer::get() &&
+                layer->getParent() && layer->getParent()->isRunning() &&
+                layer->getParent() == CCDirector::sharedDirector()->getRunningScene()) layer->onQuit();
+        });
+    }
+
     bool blockEntryGameplayUpdate() {
         if (!m_fields->nativeEntryHeld) return false;
+        if (m_fields->entryNativeCompletionInProgress || m_fields->autoExitRequested) return true;
         // Scene-entry actions can enable the native menu after init. Keep our
         // lock while waiting, then release it through vanilla at successful GO.
         if (m_uiLayer && m_uiLayer->m_pauseBtn) m_uiLayer->disableMenu();
@@ -491,13 +507,7 @@ public:
             match.deathmatchSequence != m_fields->sceneContext.deathmatchSequence ||
             runtime.currentLevelId() != m_fields->levelId ||
             (!corum::ranked::roundEnteringState(match.state) && !runtime.canEnterCurrentLevel())) {
-            if (!m_fields->autoExitRequested) {
-                m_fields->autoExitRequested = true;
-                // Defer teardown outside the running native update stack.
-                auto scene = geode::WeakRef<PlayLayer>(this);
-                queueInMainThread([scene] { if (auto layer = scene.lock(); layer && layer.data() == PlayLayer::get())
-                    static_cast<CorumRankedPlayLayer*>(layer.data())->onQuit(); });
-            }
+            queueHeldEntryExit();
             return true;
         }
         if (isRunning()) runtime.noteNativeRoundSceneEntered(m_fields->levelId);
@@ -508,9 +518,50 @@ public:
         FMODAudioEngine::sharedEngine()->pauseAllMusic(true);
         if (!bothEntered || !remaining || *remaining > 0 ||
             (corum::ranked::roundEnteringState(match.state) && !runtime.nativeEntryStartGranted()) ||
+            this != PlayLayer::get() || !isRunning() || !getParent() || !getParent()->isRunning() ||
+            getParent() != CCDirector::sharedDirector()->getRunningScene() ||
             !runtime.armCurrentLevelForGameplay()) return true;
-        m_fields->nativeEntryHeld = false;
+        // Quit returning is not scene retirement: the deferred pop/onExit can
+        // still change GD's process pause state. A local bit alone cannot certify
+        // GO. This is an already-running entry, so do not Resume/onEnter again
+        // and register its child input delegates a second time.
+        Ref<PlayLayer> const keepAlive(this);
         m_isPaused = m_fields->entryWasPaused;
+        auto* app = AppDelegate::get();
+        if (!m_fields->entryWasPaused && app && app->m_gamePaused) {
+            m_fields->entryNativeCompletionInProgress = true;
+            static_cast<PlayLayer*>(this)->onEnterTransitionDidFinish();
+            m_fields->entryNativeCompletionInProgress = false;
+            log::info("[RankedEntry] native completion level={} paused={} appPaused={}",
+                m_fields->levelId, m_isPaused, AppDelegate::get() && AppDelegate::get()->m_gamePaused);
+        }
+        auto const& currentMatch = runtime.view().match;
+        auto const currentRemaining = runtime.nativeEntryCountdownMillis();
+        bool const sameEntry = this == PlayLayer::get() && isRunning() &&
+            getParent() && getParent()->isRunning() &&
+            getParent() == CCDirector::sharedDirector()->getRunningScene() &&
+            currentMatch.matchId == m_fields->sceneContext.matchId &&
+            currentMatch.roundNumber == m_fields->sceneContext.roundNumber &&
+            currentMatch.deathmatchSequence == m_fields->sceneContext.deathmatchSequence &&
+            runtime.currentLevelId() == m_fields->levelId &&
+            (corum::ranked::roundEnteringState(currentMatch.state) || runtime.canEnterCurrentLevel()) &&
+            currentMatch.entry.enteredA && currentMatch.entry.enteredB &&
+            currentRemaining && *currentRemaining <= 0 &&
+            (!corum::ranked::roundEnteringState(currentMatch.state) || runtime.nativeEntryStartGranted());
+        app = AppDelegate::get();
+        if (!sameEntry || (!m_fields->entryWasPaused && (!app || app->m_gamePaused || m_isPaused))) {
+            // Never publish an attempt, open input or resume gameplay audio on
+            // refusal or on a scene/context changed by another lifecycle hook.
+            log::warn("[RankedEntry] GO blocked after native completion level={} sameEntry={} paused={} appPaused={}",
+                m_fields->levelId, sameEntry, m_isPaused, app && app->m_gamePaused);
+            m_isPaused = true;
+            if (this == PlayLayer::get() && getParent() && getParent()->isRunning() &&
+                getParent() == CCDirector::sharedDirector()->getRunningScene())
+                FMODAudioEngine::sharedEngine()->pauseAllMusic(true);
+            queueHeldEntryExit();
+            return true;
+        }
+        m_fields->nativeEntryHeld = false;
         setTouchEnabled(m_fields->entryTouchEnabled);
         setKeyboardEnabled(m_fields->entryKeyboardEnabled);
         if (m_uiLayer) {
@@ -540,8 +591,8 @@ public:
             FMODAudioEngine::sharedEngine()->resumeAllMusic();
             PlayLayer::startMusic();
         }
-        log::info("[RankedEntry] shared countdown complete; gameplay released level={} paused={} pauseBeforeHold={} pauseEnabled={}",
-            m_fields->levelId, m_isPaused, m_fields->entryUIPauseEnabled,
+        log::info("[RankedEntry] shared countdown complete; gameplay released level={} paused={} appPaused={} pauseBeforeHold={} pauseEnabled={}",
+            m_fields->levelId, m_isPaused, app && app->m_gamePaused, m_fields->entryUIPauseEnabled,
             m_uiLayer && m_uiLayer->m_pauseBtn && m_uiLayer->m_pauseBtn->isEnabled());
         if (m_uiLayer && m_uiLayer->m_pauseBtn) {
             auto* menu = typeinfo_cast<CCMenu*>(m_uiLayer->m_pauseBtn->getParent());
@@ -1390,7 +1441,10 @@ public:
             corum::ranked::SpectatorLiveRuntime::get().reset();
         }
         corum::ranked::ScopedSpectatorPersistenceMode noSave(m_isTestMode, blocksLevelPersistence(m_level));
+        bool const appPausedBefore = AppDelegate::get() && AppDelegate::get()->m_gamePaused;
         PlayLayer::onExit();
+        if (m_fields->rankedLevel) log::info("[RankedEntry] native exit level={} appPausedBefore={} appPausedAfter={}",
+            m_fields->levelId, appPausedBefore, AppDelegate::get() && AppDelegate::get()->m_gamePaused);
         corum::ranked::RankedRuntime::get().setSpectatorLocalTransportBlocked(this, false);
         m_fields->safetyRetired = true;
         if (m_fields->localSafety.active()) {

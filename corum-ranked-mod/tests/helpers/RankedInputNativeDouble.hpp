@@ -94,8 +94,10 @@ struct CCTouchDispatcher {
 };
 struct CCDirector {
     CCTouchDispatcher dispatcher;
+    CCNode* runningScene = nullptr;
     static CCDirector* sharedDirector() { static CCDirector director; return &director; }
     CCTouchDispatcher* getTouchDispatcher() { return &dispatcher; }
+    CCNode* getRunningScene() { return runningScene; }
 };
 struct CCLayer : CCNode, CCTouchDelegate {
     bool touch = true, running = false;
