@@ -28,6 +28,7 @@ import { DATABASE, type DatabasePort, type SqlExecutor } from "../database/datab
 import type { EnvironmentRecheckDto } from "../session/session.dto.js";
 import { SessionService } from "../session/session.service.js";
 import type { RankedSessionContext } from "../session/session.types.js";
+import { MatchService } from "../match/match.service.js";
 
 export type DebugBotDifficulty = "EASY" | "NORMAL" | "HARD";
 export type DebugBotScenario =
@@ -107,6 +108,7 @@ export class QueueService {
     private readonly config: RankedConfigService,
     private readonly sessions: SessionService,
     private readonly tokens: TokenService,
+    private readonly matches: MatchService,
   ) {}
 
   public async join(session: RankedSessionContext, body: EnvironmentRecheckDto) {
@@ -117,6 +119,7 @@ export class QueueService {
       throw new ServiceUnavailableException("Ranked queue is not operationally configured");
     }
     const matchmakingPolicy = config.operational.matchmaking;
+    await this.matches.settleActiveMatchesForPlayer(session.playerId);
     const now = this.clock.now();
     const result = await this.database.transaction(async (transaction) => {
       const staleCutoff = new Date(
@@ -135,7 +138,6 @@ export class QueueService {
         session.playerId,
         config.operational.mmrPolicy!.placementGames,
       );
-      await this.assertNoActiveMatch(transaction, session.playerId);
       await transaction.query(
         `INSERT INTO ranked_queue_entries (
            player_id, session_id, hidden_mmr_snapshot, joined_at, last_heartbeat_at, status
@@ -153,6 +155,9 @@ export class QueueService {
         [session.playerId, session.sessionId, profile.hidden_mmr, now.toISOString()],
       );
       const ownQueue = await this.lockQueueEntry(transaction, session.playerId);
+      // A concurrent matchmaker may have selected our old queued row while we
+      // were entering. Check after owning that row; rollback keeps its match.
+      await this.assertNoActiveMatch(transaction, session.playerId);
       const candidate = await this.findCandidate(
         transaction,
         ownQueue,
@@ -187,6 +192,7 @@ export class QueueService {
     }
     const timeouts = config.operational.timeouts;
     const mmrPolicy = config.operational.mmrPolicy;
+    await this.matches.settleActiveMatchesForPlayer(session.playerId);
     const now = this.clock.now();
     return this.database.transaction(async (transaction) => {
       const profile = await this.lockProfile(transaction, session.playerId);
@@ -196,12 +202,12 @@ export class QueueService {
         session.playerId,
         mmrPolicy.placementGames,
       );
-      await this.assertNoActiveMatch(transaction, session.playerId);
       const queued = await transaction.query<{ status: string }>(
-        "SELECT status FROM ranked_queue_entries WHERE player_id = $1 AND status = 'QUEUED' FOR UPDATE",
+        "SELECT status FROM ranked_queue_entries WHERE player_id = $1 FOR UPDATE",
         [session.playerId],
       );
-      if (queued.rows[0]) {
+      await this.assertNoActiveMatch(transaction, session.playerId);
+      if (queued.rows[0]?.status === "QUEUED") {
         throw new ConflictException("Leave the public Ranked queue before starting Debug Bot Match");
       }
 
@@ -414,11 +420,13 @@ export class QueueService {
   }
 
   private async assertNoActiveMatch(transaction: SqlExecutor, playerId: string): Promise<void> {
+    // Admission owns the profile/queue row. Keep this read free of match locks:
+    // Match settlement owns the match first and may then lock rating profiles.
     const active = await transaction.query<{ id: string }>(
       `SELECT id FROM ranked_matches
        WHERE (player_a_id = $1 OR player_b_id = $1)
          AND state NOT IN ('MATCH_RESULT', 'CANCELLED')
-       LIMIT 1 FOR UPDATE`,
+       LIMIT 1`,
       [playerId],
     );
     if (active.rows[0]) throw new ConflictException("Player already has an active Ranked match");

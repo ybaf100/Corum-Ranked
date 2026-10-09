@@ -53,11 +53,15 @@ g++ -std=c++23 -Wall -Wextra -Wpedantic -Werror \
 
 ## 배포 순서
 
-beta.46의 native 모드는 [Build Corum Ranked Debug](https://github.com/ybaf100/Corum-Ranked/actions/workflows/build-ranked-debug.yml)
-GitHub workflow에서 빌드합니다. `Corum-Ranked-v0.5.0-beta.46-Debug` artifact의
+beta.47의 native 모드는 [Build Corum Ranked Debug](https://github.com/ybaf100/Corum-Ranked/actions/workflows/build-ranked-debug.yml)
+GitHub workflow에서 빌드합니다. `Corum-Ranked-v0.5.0-beta.47-Debug` artifact의
 `hwanhee1.corum_ranked.geode`를 사용합니다. Windows 로컬 빌드는
 [`../corum-ranked-mod/WINDOWS-BUILD.md`](../corum-ranked-mod/WINDOWS-BUILD.md)의 선택 사항입니다.
-서버와 클라이언트의 exact gate는 함께 beta.46를 사용합니다.
+서버와 클라이언트의 exact gate는 함께 beta.47을 사용합니다.
+
+beta.47은 재매칭 전에 기존 매치의 만료 판정을 실행합니다. 양쪽 모두 재접속 유예 시간을
+넘겨 이탈한 매치는 취소되고 재매칭할 수 있으며, 살아 있는 매치의 중복 생성은 계속 차단합니다.
+세션 접속 만료와 별도로 기존 매치의 config snapshot에 저장된 재접속 정책을 적용합니다.
 
 beta.46은 Pause 5초 이하를 빨간색으로 표시하고, 0초에 경기 전체를 자동 항복 처리합니다.
 항복 안내는 Pause 중에만 표시되며 재개하면 닫힙니다. 미획득 칭호와 미달성 성장형 단계 버튼은 회색입니다.

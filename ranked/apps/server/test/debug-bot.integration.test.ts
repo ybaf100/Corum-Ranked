@@ -143,7 +143,6 @@ describe("development-only Bot Match using the production Ranked engine", () => 
   beforeAll(() => {
     tokens = new TokenService(environment);
     sessions = new SessionService(database, new FixedCsmpSource(), clock, ids, config, tokens);
-    queue = new QueueService(database, clock, ids, random, config, sessions, tokens);
     matches = new MatchService(
       database,
       clock,
@@ -155,6 +154,7 @@ describe("development-only Bot Match using the production Ranked engine", () => 
       new AchievementService(database, clock, ids),
       new InMemoryMatchRuntimeState(),
     );
+    queue = new QueueService(database, clock, ids, random, config, sessions, tokens, matches);
     debug = new DebugBotService(environment, database, clock, random, queue, matches, config, tokens);
   });
 

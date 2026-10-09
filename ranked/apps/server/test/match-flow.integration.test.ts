@@ -193,15 +193,6 @@ describe("two-client authoritative match flow", () => {
       config,
       tokens,
     );
-    const queue = new QueueService(
-      database,
-      clock,
-      ids,
-      new SeededRandom(90),
-      config,
-      sessions,
-      tokens,
-    );
     const matchRandom = new SeededRandom(91);
     let matches = new MatchService(
       database,
@@ -213,6 +204,9 @@ describe("two-client authoritative match flow", () => {
       new OutboxService(ids),
       new AchievementService(database, clock, ids),
       new InMemoryMatchRuntimeState(),
+    );
+    const queue = new QueueService(
+      database, clock, ids, new SeededRandom(90), config, sessions, tokens, matches,
     );
     const playerA = await createContext("9101", sessions, tokens);
     const playerB = await createContext("9102", sessions, tokens);

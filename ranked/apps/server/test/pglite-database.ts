@@ -20,15 +20,15 @@ export class PgliteDatabase implements DatabasePort {
   }
 
   public async transaction<T>(operation: (client: SqlExecutor) => Promise<T>): Promise<T> {
-    await this.client.exec("BEGIN");
-    try {
-      const result = await operation(this);
-      await this.client.exec("COMMIT");
-      return result;
-    } catch (error) {
-      await this.client.exec("ROLLBACK");
-      throw error;
-    }
+    // PGlite has one connection. Its transaction API serializes whole callbacks;
+    // issuing independent BEGIN/COMMIT calls lets concurrent requests share a
+    // transaction and gives misleading row-lock/idempotence test results.
+    return this.client.transaction(async transaction => operation({
+      query: async <Row>(sql: string, values: readonly unknown[] = []): Promise<SqlResult<Row>> => {
+        const result = await transaction.query<Row>(sql, [...values]);
+        return { rows: result.rows, rowCount: result.affectedRows ?? result.rows.length };
+      },
+    }));
   }
 
   public async ping(): Promise<boolean> {

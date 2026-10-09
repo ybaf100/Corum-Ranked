@@ -8,6 +8,7 @@ import { TokenService } from "../src/common/token.service.js";
 import type { CsmpTierSource } from "../src/config/csmp-tier.source.js";
 import type { RankedConfigService } from "../src/config/ranked-config.service.js";
 import { QueueService } from "../src/queue/queue.service.js";
+import type { MatchService } from "../src/match/match.service.js";
 import type { CreateSessionDto } from "../src/session/session.dto.js";
 import { SessionService } from "../src/session/session.service.js";
 import type { RankedSessionContext } from "../src/session/session.types.js";
@@ -159,6 +160,10 @@ const contextFor = async (
   };
 };
 
+// Queue-only tests isolate old-match advancement; full lifecycle regressions
+// inject the actual MatchService in gameplay-controls.integration.test.ts.
+const idleMatches = { settleActiveMatchesForPlayer: async () => undefined } as unknown as MatchService;
+
 describe("transactional matchmaking queue", () => {
   it("blocks public Queue and Debug Bot until Stage Placement is complete", async () => {
     const document = configDocumentFixture("placement-gate-test");
@@ -178,6 +183,7 @@ describe("transactional matchmaking queue", () => {
       config,
       sessions,
       tokens,
+      idleMatches,
     );
     const unplaced = await contextFor("8001", "BRONZE", sessions, source, tokens, false);
     await expect(queue.join(unplaced, { installedMods: structuredClone(cleanMods) }))
@@ -213,6 +219,7 @@ describe("transactional matchmaking queue", () => {
       config,
       sessions,
       tokens,
+      idleMatches,
     );
     const first = await contextFor("8101", "BRONZE", sessions, source, tokens);
     const second = await contextFor("8102", "BRONZE", sessions, source, tokens);
@@ -280,6 +287,7 @@ describe("transactional matchmaking queue", () => {
       config,
       sessions,
       tokens,
+      idleMatches,
     );
     const stale = await contextFor("8201", "BRONZE", sessions, source, tokens);
     expect(await queue.join(stale, { installedMods: structuredClone(cleanMods) })).toMatchObject({

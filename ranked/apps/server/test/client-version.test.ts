@@ -12,6 +12,9 @@ const clientMod = (version: string) => ({
 });
 
 describe("Ranked client version gate", () => {
+  it("rejects beta46 before abandoned-match queue admission repair", () => {
+    expect(evaluateRankedClientVersion("v0.5.0-beta.46", [clientMod("v0.5.0-beta.46")]).allowed).toBe(false);
+  });
   it("rejects beta45 before the whole-match Pause timeout warning and forum refresh cooldown", () => {
     expect(evaluateRankedClientVersion("v0.5.0-beta.45", [clientMod("v0.5.0-beta.45")]).allowed).toBe(false);
   });
@@ -55,7 +58,7 @@ describe("Ranked client version gate", () => {
 
   it("accepts the same current version with or without a leading v", () => {
     expect(
-      evaluateRankedClientVersion("0.5.0-beta.46", [clientMod("0.5.0-beta.46")]).allowed,
+      evaluateRankedClientVersion("0.5.0-beta.47", [clientMod("0.5.0-beta.47")]).allowed,
     ).toBe(true);
   });
 
@@ -65,7 +68,7 @@ describe("Ranked client version gate", () => {
     ]);
     expect(result).toMatchObject({
       allowed: false,
-      requiredVersion: "v0.5.0-beta.46",
+      requiredVersion: "v0.5.0-beta.47",
       clientVersion: "v0.5.0-beta.8",
     });
   });

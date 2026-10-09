@@ -2,7 +2,7 @@ import { enterPreparedMatch } from "./native-entry-helper.js";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { PGlite } from "@electric-sql/pglite";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { SeededRandom, type CsmpTier } from "@corum-ranked/rules";
 import type { IdGenerator, ServerClock } from "../src/common/runtime.module.js";
 import { TokenService } from "../src/common/token.service.js";
@@ -219,6 +219,7 @@ const createContext = async (
   accountId: string,
   sessions: SessionService,
   tokens: TokenService,
+  prepareProfile = true,
 ): Promise<RankedSessionContext> => {
   const created = await sessions.create({
     gdAccountId: accountId,
@@ -227,7 +228,7 @@ const createContext = async (
     clientInstanceId: "test-process-instance",
     installedMods: structuredClone(cleanMods),
   });
-  await database.query(
+  if (prepareProfile) await database.query(
     `UPDATE ranked_profiles
      SET placement_games = 5, displayed_tier = 'BRONZE', visible_ranked_score = hidden_mmr
      WHERE player_id = (
@@ -266,20 +267,22 @@ const createContext = async (
 
 const ids = new SequenceIds();
 let account = 95000;
-const playingMatch = async (enterScene = true) => {
+const playingMatch = async (enterScene = true, reconnectGraceSeconds = 10_000) => {
   const clock = new MutableClock();
-  const base = configDocumentFixture("gameplay-controls");
+  // Match config is immutable by generation; fixtures with different reconnect
+  // policies must not accidentally reuse an earlier fixture's 10,000s snapshot.
+  const base = configDocumentFixture(`gameplay-controls-${account}`);
   const document = { ...base, operational: { ...base.operational,
     failurePolicy: { ...base.operational.failurePolicy!, restartRecoveryAction: "RESUME" as const },
-    timeouts: { ...base.operational.timeouts!, reconnectGraceSeconds: 10_000 } } };
+    timeouts: { ...base.operational.timeouts!, reconnectGraceSeconds } } };
   const config = { getSnapshot: () => ({ ...structuredClone(document), fetchedAt: clock.now().toISOString() }) } as unknown as RankedConfigService;
   const tokens = new TokenService(environmentFixture());
   const sessions = new SessionService(database, new FixedCsmpSource(), clock, ids, config, tokens);
-  const queue = new QueueService(database, clock, ids, new SeededRandom(123), config, sessions, tokens);
   const makeService = () => new MatchService(database, clock, ids, new SeededRandom(456),
     new MatchAccessService(tokens, clock), sessions, new OutboxService(ids),
     new AchievementService(database, clock, ids), new InMemoryMatchRuntimeState());
   const matches: any = makeService();
+  const queue = new QueueService(database, clock, ids, new SeededRandom(123), config, sessions, tokens, matches);
   const a = await createContext(String(++account), sessions, tokens), b = await createContext(String(++account), sessions, tokens);
   await queue.join(a, { installedMods: structuredClone(cleanMods) }); await queue.join(b, { installedMods: structuredClone(cleanMods) });
   const qa = await queue.status(a) as { matchId: string; matchToken: string }, qb = await queue.status(b) as { matchId: string; matchToken: string };
@@ -295,8 +298,106 @@ const playingMatch = async (enterScene = true) => {
       (seconds) => clock.advanceSeconds(seconds));
   };
   const state = await startRound();
-  return { matches, makeService, clock, document, a, b, id, ta: qa.matchToken, tb: qb.matchToken, state, startRound };
+  return { matches, makeService, queue, sessions, tokens, clock, document, a, b, id, ta: qa.matchToken, tb: qb.matchToken, state, startRound };
 };
+
+describe("queue admission after an abandoned match", () => {
+  afterEach(async () => {
+    // These rematch cases intentionally stop while queued. Each fixture starts
+    // a fresh clock; do not pair a later fixture with a prior future-dated row.
+    await database.query("DELETE FROM ranked_queue_entries WHERE status = 'QUEUED'");
+  });
+  it.each([91, 3601])("both disconnected players can rematch after %s seconds without polling their old match", async elapsed => {
+    const f = await playingMatch(true, 20);
+    const profilesBefore = await database.query("SELECT player_id, hidden_mmr, visible_ranked_score FROM ranked_profiles WHERE player_id IN ($1, $2) ORDER BY player_id", [f.a.playerId, f.b.playerId]);
+    f.clock.advanceSeconds(elapsed); // process crash: no Close and no match/session heartbeat
+    const a = await createContext(f.a.gdAccountId, f.sessions, f.tokens, false);
+    const b = await createContext(f.b.gdAccountId, f.sessions, f.tokens, false);
+    expect(a.sessionId).not.toBe(f.a.sessionId); expect(b.sessionId).not.toBe(f.b.sessionId);
+    expect((await database.query("SELECT state FROM ranked_matches WHERE id = $1", [f.id])).rows[0]).toEqual({ state: "ROUND_PLAYING" });
+    // Reproduce the old path: new sessions alone do not retire the match, and
+    // Queue's unchanged active-match guard still rejects BOTH participants.
+    const oldPath = vi.spyOn(f.matches, "settleActiveMatchesForPlayer").mockResolvedValue(undefined);
+    try {
+      await expect(f.queue.join(a, { installedMods: structuredClone(cleanMods) })).rejects.toThrow("Player already has an active Ranked match");
+      await expect(f.queue.join(b, { installedMods: structuredClone(cleanMods) })).rejects.toThrow("Player already has an active Ranked match");
+    } finally { oldPath.mockRestore(); }
+    expect(await f.queue.join(a, { installedMods: structuredClone(cleanMods) })).toMatchObject({ status: "QUEUED" });
+    const paired = await f.queue.join(b, { installedMods: structuredClone(cleanMods) });
+    expect(paired.status).toBe("MATCHED"); expect(paired.matchId).not.toBe(f.id);
+    const old = (await database.query("SELECT state, cancellation_reason, result_applied_at FROM ranked_matches WHERE id = $1", [f.id])).rows[0];
+    expect(old).toMatchObject({ state: "CANCELLED", cancellation_reason: "RECONNECT_TIMEOUT", result_applied_at: null });
+    expect(await database.query("SELECT player_id, hidden_mmr, visible_ranked_score FROM ranked_profiles WHERE player_id IN ($1, $2) ORDER BY player_id", [f.a.playerId, f.b.playerId])).toEqual(profilesBefore);
+    const active = await database.query("SELECT id FROM ranked_matches WHERE (player_a_id IN ($1, $2) OR player_b_id IN ($1, $2)) AND state NOT IN ('MATCH_RESULT', 'CANCELLED')", [f.a.playerId, f.b.playerId]);
+    expect(active.rows).toEqual([{ id: paired.matchId }]);
+  });
+  it("also releases both players after explicit Close without rating a cancelled match", async () => {
+    const f = await playingMatch(true, 20);
+    await f.sessions.close(f.a); await f.sessions.close(f.b);
+    f.clock.advanceSeconds(20);
+    const a = await createContext(f.a.gdAccountId, f.sessions, f.tokens, false);
+    const b = await createContext(f.b.gdAccountId, f.sessions, f.tokens, false);
+    expect(await f.queue.join(a, { installedMods: structuredClone(cleanMods) })).toMatchObject({ status: "QUEUED" });
+    expect(await f.queue.join(b, { installedMods: structuredClone(cleanMods) })).toMatchObject({ status: "MATCHED" });
+    expect((await database.query("SELECT state, result_applied_at FROM ranked_matches WHERE id = $1", [f.id])).rows[0]).toEqual({ state: "CANCELLED", result_applied_at: null });
+  });
+  it("simultaneous rematch requests retire the old match once and create only one replacement", async () => {
+    const f = await playingMatch(true, 20);
+    f.clock.advanceSeconds(91);
+    const a = await createContext(f.a.gdAccountId, f.sessions, f.tokens, false);
+    const b = await createContext(f.b.gdAccountId, f.sessions, f.tokens, false);
+    const before = (await database.query<{ state_version: number }>("SELECT state_version FROM ranked_matches WHERE id = $1", [f.id])).rows[0]!.state_version;
+    await Promise.all([f.queue.join(a, { installedMods: structuredClone(cleanMods) }), f.queue.join(b, { installedMods: structuredClone(cleanMods) })]);
+    const active = await database.query<{ id: string }>("SELECT id FROM ranked_matches WHERE (player_a_id = $1 OR player_b_id = $1) AND state NOT IN ('MATCH_RESULT', 'CANCELLED')", [a.playerId]);
+    expect(active.rows).toHaveLength(1); expect(active.rows[0]!.id).not.toBe(f.id);
+    expect((await database.query("SELECT state, state_version FROM ranked_matches WHERE id = $1", [f.id])).rows[0]).toEqual({ state: "CANCELLED", state_version: before + 1 });
+    await expect(f.queue.join(a, { installedMods: structuredClone(cleanMods) })).rejects.toThrow("active Ranked match");
+    expect(await f.queue.status(a)).toMatchObject({ status: "MATCHED", matchId: active.rows[0]!.id }); // rejected admission cannot erase the match
+  });
+  it("does not revive match heartbeats or allow a second match inside the reconnect grace", async () => {
+    const f = await playingMatch(true, 20);
+    await f.matches.heartbeat(f.id, f.ta, f.a); await f.matches.heartbeat(f.id, f.tb, f.b);
+    const before = await database.query("SELECT last_heartbeat_a_at, last_heartbeat_b_at FROM ranked_matches WHERE id = $1", [f.id]);
+    f.clock.advanceSeconds(19.999);
+    await expect(f.queue.join(f.a, { installedMods: structuredClone(cleanMods) })).rejects.toThrow("active Ranked match");
+    await expect(f.queue.join(f.b, { installedMods: structuredClone(cleanMods) })).rejects.toThrow("active Ranked match");
+    expect(await database.query("SELECT last_heartbeat_a_at, last_heartbeat_b_at FROM ranked_matches WHERE id = $1", [f.id])).toEqual(before);
+    f.clock.advanceSeconds(0.001);
+    expect(await f.queue.join(f.a, { installedMods: structuredClone(cleanMods) })).toMatchObject({ status: "QUEUED" });
+    expect((await database.query("SELECT state FROM ranked_matches WHERE id = $1", [f.id])).rows[0]).toEqual({ state: "CANCELLED" });
+  });
+  it("settles a single disconnected player's forfeit once under the existing policy", async () => {
+    const f = await playingMatch(true, 20);
+    await f.matches.heartbeat(f.id, f.ta, f.a); await f.matches.heartbeat(f.id, f.tb, f.b);
+    f.clock.advanceSeconds(19); await f.matches.heartbeat(f.id, f.tb, f.b);
+    f.clock.advanceSeconds(1);
+    expect(await f.queue.join(f.a, { installedMods: structuredClone(cleanMods) })).toMatchObject({ status: "QUEUED" });
+    const result = await f.matches.state(f.id, f.tb, f.b);
+    expect(result.state).toBe("MATCH_RESULT"); expect(result.result!.winnerSide).toBe("B");
+    const once = await database.query("SELECT mmr_delta_a, mmr_delta_b, result_applied_at FROM ranked_matches WHERE id = $1", [f.id]);
+    await f.queue.join(f.a, { installedMods: structuredClone(cleanMods) });
+    expect(await database.query("SELECT mmr_delta_a, mmr_delta_b, result_applied_at FROM ranked_matches WHERE id = $1", [f.id])).toEqual(once);
+  });
+  it("preserves the prior full-match Pause expiry instead of overwriting it with a disconnect cancellation", async () => {
+    const f = await playingMatch(true, 20);
+    await f.matches.changePause(f.id, f.ta, f.a, { leaseId: "abandoned-paused", paused: true });
+    f.clock.advanceSeconds(30);
+    await f.queue.join(f.a, { installedMods: structuredClone(cleanMods) });
+    const result = await f.matches.state(f.id, f.tb, f.b);
+    expect(result.state).toBe("MATCH_RESULT"); expect(result.result!.winnerSide).toBe("B");
+    expect(result.surrender).toMatchObject({ side: "A", scope: "MATCH", reason: "PAUSE_BUDGET_EXHAUSTED" });
+  });
+  it("settles the old match before starting another Debug Bot match", async () => {
+    const f = await playingMatch(false, 20);
+    f.clock.advanceSeconds(91);
+    const a = await createContext(f.a.gdAccountId, f.sessions, f.tokens, false);
+    const bot = await f.queue.createDebugBotMatch(a, { installedMods: structuredClone(cleanMods) }, {
+      difficulty: "EASY", scenario: "NORMAL_MATCH", botBan: "NO_BAN", sendDiscordEvents: false, mmrOffset: -250,
+    });
+    expect(bot.matchId).not.toBe(f.id);
+    expect((await database.query("SELECT state FROM ranked_matches WHERE id = $1", [f.id])).rows[0]).toEqual({ state: "CANCELLED" });
+  });
+});
 
 describe("match-wide pause and explicit concession", () => {
   it("charges 30 seconds per player across rounds, retries, stale Ends and server restart without changing deadlines", async () => {

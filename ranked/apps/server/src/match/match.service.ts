@@ -420,6 +420,25 @@ export class MatchService {
     @Inject(MATCH_RUNTIME_STATE) private readonly runtimeState: MatchRuntimeStatePort,
   ) {}
 
+  /** Queue admission must settle abandoned matches even when neither client
+   * polls its old match any more. Do not renew either match heartbeat here.
+   * Commit this before queue/profile locks: a rejected new join must not roll
+   * back an expired match's result or cancellation. */
+  public async settleActiveMatchesForPlayer(playerId: string): Promise<void> {
+    await this.database.transaction(async transaction => {
+      const active = await transaction.query<{ id: string }>(
+        `SELECT id FROM ranked_matches
+         WHERE (player_a_id = $1 OR player_b_id = $1)
+           AND state NOT IN ('MATCH_RESULT', 'CANCELLED')
+         ORDER BY id FOR UPDATE`, [playerId]);
+      const now = this.clock.now(); // sample after acquiring the match locks
+      for (const row of active.rows) {
+        const match = await this.lockMatch(transaction, row.id);
+        await this.advanceLockedMatch(transaction, match, now);
+      }
+    });
+  }
+
   /** Development-only entry point used by DebugBotService.
    *  The public debug route is disabled unless DEBUG_BOT_* server settings are
    *  explicitly configured, and this method additionally refuses real PvP.
