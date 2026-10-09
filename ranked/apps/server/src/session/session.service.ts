@@ -48,6 +48,7 @@ export interface SessionCreationResult {
   readonly expiresAt: string;
   readonly sessionLeaseSeconds: number;
   readonly sessionHeartbeatSeconds: number;
+  readonly activeMatch: boolean;
   readonly player: {
     readonly gdAccountId: string;
     readonly gdUsername: string;
@@ -117,6 +118,7 @@ export class SessionService {
     let now = this.clock.now();
     const sessionToken = this.tokens.createSessionToken();
     let expiresAt = new Date(now.getTime() + config.operational.timeouts.sessionSeconds * 1_000);
+    let activeMatch = false;
 
     const profile = await this.database.transaction(async (transaction) => {
       const player = await this.upsertPlayer(transaction, dto);
@@ -130,7 +132,7 @@ export class SessionService {
            AND expires_at > $2 AND last_heartbeat_at > $3`,
         [player.id, now.toISOString(), sessionAliveSince(now)],
       );
-      if (active.rows.some((row) => !dto.clientInstanceId || row.instance_id !== dto.clientInstanceId)) {
+      if (!dto.takeOver && active.rows.some((row) => !dto.clientInstanceId || row.instance_id !== dto.clientInstanceId)) {
         throw new ConflictException({
           code: "RANKED_ACCOUNT_ACTIVE",
           message: "This account is already connected to Ranked on another device. Leave Ranked there or wait for the connection to expire.",
@@ -141,7 +143,13 @@ export class SessionService {
       // Close from an older token must never revive/revoke the replacement.
       // Matchmaking locks queue rows before renewing session rows. Use that
       // same order so admission/Close cannot deadlock a concurrent matchmaker.
-      await transaction.query("DELETE FROM ranked_queue_entries WHERE player_id = $1", [player.id]);
+      await transaction.query("SELECT player_id FROM ranked_queue_entries WHERE player_id = $1 FOR UPDATE", [player.id]);
+      const ongoing = await transaction.query<{ id: string }>(
+        `SELECT id FROM ranked_matches WHERE (player_a_id=$1 OR player_b_id=$1)
+         AND state NOT IN ('MATCH_RESULT','CANCELLED') ORDER BY created_at DESC LIMIT 1`, [player.id]);
+      const matchId = ongoing.rows[0]?.id;
+      activeMatch = !!matchId;
+      if (!matchId) await transaction.query("DELETE FROM ranked_queue_entries WHERE player_id = $1", [player.id]);
       await transaction.query("UPDATE ranked_sessions SET revoked_at = $2 WHERE player_id = $1 AND revoked_at IS NULL",
         [player.id, now.toISOString()]);
       const seededProfile = await this.ensureSeededProfile(
@@ -151,13 +159,14 @@ export class SessionService {
         config.operational.csmpSeeds,
         now,
       );
+      const sessionId = this.ids.next();
       await transaction.query(
         `INSERT INTO ranked_sessions (
            id, player_id, token_hash, client_version, environment_snapshot,
            expires_at, last_heartbeat_at
          ) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)`,
         [
-          this.ids.next(),
+          sessionId,
           player.id,
           this.tokens.hash(sessionToken),
           dto.clientVersion,
@@ -166,6 +175,22 @@ export class SessionService {
           now.toISOString(),
         ],
       );
+      if (matchId) {
+        // Move the existing assignment, not the match itself. Both explicit
+        // takeover and a retry from the same process get a new scoped token;
+        // the old device cannot keep playing with its previous credentials.
+        await transaction.query(`INSERT INTO ranked_queue_entries
+          (player_id,session_id,hidden_mmr_snapshot,joined_at,last_heartbeat_at,status,matched_match_id)
+          VALUES ($1,$2,$3,$4,$4,'MATCHED',$5) ON CONFLICT (player_id) DO UPDATE SET
+          session_id=EXCLUDED.session_id, status='MATCHED',matched_match_id=EXCLUDED.matched_match_id,
+          last_heartbeat_at=EXCLUDED.last_heartbeat_at`,
+          [player.id,sessionId,seededProfile.hidden_mmr,now.toISOString(),matchId]);
+        const matchToken = this.tokens.deriveMatchToken(matchId,player.id,sessionId);
+        await transaction.query(`INSERT INTO ranked_match_tokens (match_id,player_id,token_hash,expires_at)
+          VALUES ($1,$2,$3,$4) ON CONFLICT (match_id,player_id) DO UPDATE SET
+          token_hash=EXCLUDED.token_hash,expires_at=EXCLUDED.expires_at,revoked_at=NULL`,
+          [matchId,player.id,this.tokens.hash(matchToken),expiresAt.toISOString()]);
+      }
       return seededProfile;
     });
 
@@ -177,6 +202,7 @@ export class SessionService {
       expiresAt: expiresAt.toISOString(),
       sessionLeaseSeconds: RANKED_SESSION_LEASE_SECONDS,
       sessionHeartbeatSeconds: RANKED_SESSION_HEARTBEAT_SECONDS,
+      activeMatch,
       player: {
         gdAccountId: dto.gdAccountId,
         gdUsername: dto.gdUsername,

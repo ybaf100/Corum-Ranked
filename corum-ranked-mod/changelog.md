@@ -1,3 +1,13 @@
+## v0.5.0-beta.50
+
+- Make the result bar's rounded ends visible, move tier names beside its ends and place endpoint badges closer to the moving LP. Keep lower-tier track colors opaque and wipe a changed track color smoothly from left to right.
+- Skip/Esc first settles the final LP, assembled icons and all pending notices. The button becomes Continue; the next press retires the overlay after native input dispatch. Stamp demotion warnings and include the missing Korean promotion glyphs.
+- Move streak/promotion/demotion state into one status row above the lobby emblem and player cards, with YOUR RANK when empty. Enlarge the lobby emblem, move its halo with it, show SILVER/GOLD halos on both player cards and INFO, and append the standings population.
+- Keep Settings within the viewport and separate the language buttons. Scroll up to the most recent 30 competitive matches. Consolidate lobby debug entries into a three-button Debug menu.
+- Add server-checked hwanhee1/debug-password Admin actions for batch achievement unlock, LP/tier, MMR or both, bot deletion, nickname history reset and confirmed DB reset. Keep metrics/Claim semantics, shared opponent records and operational configuration intact.
+- Offer an explicit red-button session takeover, revoke both old session and match credentials and recover the active assignment. Recheck queue admission inside its transaction and scope late queue updates/Close to their original session.
+- Synchronize beta50 client/server exact gate, workspaces and lockfile. Image pack inputs are unchanged; no manual Release. See [BETA50-UI-ADMIN-SESSIONS.md](BETA50-UI-ADMIN-SESSIONS.md) for behavior and validation limits.
+
 ## v0.5.0-beta.49
 
 - Hold the completed promotion/demotion reveal until Continue. Explicit Skip/Esc still goes directly to the score overlay; Placement keeps its established reveal flow.

@@ -467,10 +467,12 @@ export class MatchService {
        FROM ranked_matches m
        JOIN ranked_players pa ON pa.id = m.player_a_id
        JOIN ranked_players pb ON pb.id = m.player_b_id
+       JOIN ranked_profiles own_profile ON own_profile.player_id = $1
        WHERE (m.player_a_id = $1 OR m.player_b_id = $1)
          AND m.state = 'MATCH_RESULT'
+         AND m.finished_at > own_profile.history_visible_since
        ORDER BY m.finished_at DESC NULLS LAST, m.created_at DESC
-       LIMIT 20`,
+       LIMIT 30`,
       [session.playerId],
     );
     const items = [];

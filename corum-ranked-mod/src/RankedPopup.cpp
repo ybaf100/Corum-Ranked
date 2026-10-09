@@ -3,6 +3,7 @@
 #include "RankedRuntime.hpp"
 #include "RankedAudioManager.hpp"
 #include "DebugBotPopup.hpp"
+#include "debug/DebugMenuPopup.hpp"
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
 #include "debug/DebugSpectateRuntime.hpp"
 #endif
@@ -25,6 +26,7 @@
 #include "ui/RankedSettingsPopup.hpp"
 #include "ui/RankedJukeboxPopup.hpp"
 #include "ui/RankedPlayerInfoPopup.hpp"
+#include "ui/RankedSessionConflictPopup.hpp"
 #include "ui/MapDifficultyBadge.hpp"
 
 #include <Geode/Geode.hpp>
@@ -436,6 +438,8 @@ class CorumRankedLayer final : public CCLayerColor {
     std::optional<WeakRef<corum::ranked::ui::RankedJukeboxPopup>> m_jukebox;
     std::optional<WeakRef<FLAlertLayer>> m_jukeboxNotice;
     std::optional<WeakRef<corum::ranked::ui::RankedPlayerInfoPopup>> m_playerInfo;
+    std::optional<WeakRef<corum::ranked::ui::RankedSessionConflictPopup>> m_sessionConflict;
+    bool m_accountConflictShown = false;
     CCMenuItemSpriteExtra* m_jukeboxButton = nullptr;
     Page m_page = Page::Live;
     std::size_t m_historyIndex = 0;
@@ -536,9 +540,11 @@ class CorumRankedLayer final : public CCLayerColor {
             corum::ranked::ui::Text, corum::ranked::ui::FontWeight::ExtraBold);
         corum::ranked::ui::fitMenuLabelWidth(m_settingsLabel, 78, 0.27f, 0.18f);
         settingsFace->addChild(m_settingsLabel, 5);
+        settingsFace->setAnchorPoint(CCPointZero); settingsFace->setPosition(CCPointZero);
         auto* settingsButton = CCMenuItemSpriteExtra::create(settingsFace, this, menu_selector(CorumRankedLayer::onSettings));
+        settingsButton->setContentSize({92,28}); settingsButton->setAnchorPoint({0.5f,0.5f});
         settingsButton->setID("ranked-settings-button"_spr);
-        settingsButton->setPosition({winSize.width - 60, 22}); m_settingsMenu->addChild(settingsButton);
+        settingsButton->setPosition({winSize.width - 70, 30}); m_settingsMenu->addChild(settingsButton);
 
         // Result Achievement notices live outside the normal layout/fade tree.
         // Their slide overlay never pushes Result content and survives a normal
@@ -1044,6 +1050,12 @@ class CorumRankedLayer final : public CCLayerColor {
     }
 
     void updateDynamicUi() {
+        if (!RankedRuntime::get().view().accountActiveElsewhere) m_accountConflictShown = false;
+        else if (!m_accountConflictShown) {
+            if (auto* popup = corum::ranked::ui::RankedSessionConflictPopup::create()) {
+                m_accountConflictShown = true; m_sessionConflict.emplace(popup); popup->show();
+            }
+        }
         if (m_jukeboxButton) m_jukeboxButton->setEnabled(!corum::ranked::ui::rankedJukeboxLoaded() || findPlayableMap() != nullptr);
         if (m_jukebox) if (auto popup = m_jukebox->lock()) {
             auto const& match = RankedRuntime::get().view().match;
@@ -1355,7 +1367,9 @@ class CorumRankedLayer final : public CCLayerColor {
             this,
             menu_selector(CorumRankedLayer::onKorean)
         );
-        korean->setPosition({128.0f, size.height - 28.0f});
+        auto const languageGap = (englishVisual->getContentSize().width * englishVisual->getScaleX() +
+            koreanVisual->getContentSize().width * koreanVisual->getScaleX()) / 2 + 7;
+        korean->setPosition({77.0f + languageGap, size.height - 28.0f});
         korean->setID("ranked-language-korean"_spr);
         m_menu->addChild(korean);
     }
@@ -1543,33 +1557,25 @@ class CorumRankedLayer final : public CCLayerColor {
         }
     }
 
-    void addStreakLabel(
-        int streak,
-        CCPoint position,
-        float scale = 0.27f,
-        float maximumWidth = 150.0f,
-        bool showDivider = true
-    ) {
-        if (std::abs(streak) < 2) return;
-        auto const winning = streak > 0;
-        auto const color = winning ? kGold : kRed;
-
-        if (showDivider) {
-            auto* divider = CCLayerColor::create({color.r, color.g, color.b, 100});
-            divider->setContentSize({std::min(112.0f, maximumWidth), 0.75f});
-            divider->setPosition({position.x - divider->getContentSize().width / 2.0f, position.y + 8.0f});
-            m_root->addChild(divider, 6);
+    void addRankStatus(RankedProfileView const& profile, CCPoint position, float scale, float width) {
+        std::string text;
+        auto color = kCyan;
+        if (std::abs(profile.resultStreak) >= 2) {
+            text = corum::ranked::i18n::streak(std::abs(profile.resultStreak),profile.resultStreak > 0);
+            color = profile.resultStreak > 0 ? kGold : kRed;
         }
-
-        auto* label = makeLabel(
-            corum::ranked::i18n::streak(std::abs(streak), winning),
-            scale,
-            position,
-            color,
-            "black"
-        );
-        corum::ranked::ui::fitMenuLabelWidth(label, maximumWidth, scale, std::max(0.16f, scale * 0.72f));
-        m_root->addChild(label, 7);
+        std::string state;
+        if (profile.promotion.active) {
+            state = corum::ranked::i18n::promotionMatch(profile.promotion.winsRequired);
+            color = ccc3(145,255,125);
+        } else if (profile.demotionWarning) {
+            state = tr("demotion-warning","DEMOTION WARNING"); color = kRed;
+        }
+        if (!state.empty()) text += (text.empty() ? "" : " · ") + state;
+        if (text.empty()) text = tr("your-rank","YOUR RANK");
+        auto* label = makeLabel(text,scale,position,color,"semibold");
+        corum::ranked::ui::fitMenuLabelWidth(label,width,scale,0.17f);
+        label->setID("ranked-profile-status-line"_spr); m_root->addChild(label,8);
     }
 
     struct PlayerCardRefs {
@@ -1614,7 +1620,7 @@ class CorumRankedLayer final : public CCLayerColor {
 
         auto* iconPlate = makeNeonPanel({66.0f, 66.0f}, {center.x, center.y + 29.0f}, accent, {5, 11, 23}, 248);
         m_root->addChild(iconPlate, 2);
-        if (!self && corum::ranked::ui::hasPersistentRankAmbient(tier)) {
+        if (corum::ranked::ui::hasPersistentRankAmbient(tier)) {
             auto* ambient = corum::ranked::ui::createRankAmbientFx(
                 tier,
                 {54.0f, 54.0f},
@@ -1631,7 +1637,7 @@ class CorumRankedLayer final : public CCLayerColor {
             icon->setPosition({center.x, center.y + 29.0f});
             m_root->addChild(icon, 4);
         }
-        addStreakLabel(profile.resultStreak, {center.x, center.y + 66.0f}, 0.22f, 126.0f, false);
+        addRankStatus(profile,{center.x,center.y + 66.0f},0.22f,136.0f);
 
         auto* nameLabel = makeLabel(shorten(upper(name), 15), 0.38f, {center.x, center.y - 11.0f}, corum::ranked::ui::Text, "semibold");
         corum::ranked::ui::fitMenuLabelWidth(nameLabel, 126.0f, 0.38f, 0.25f);
@@ -1651,31 +1657,17 @@ class CorumRankedLayer final : public CCLayerColor {
         }
 
         auto const placement = profile.placementGames < profile.placementGamesRequired;
-        auto const captionText = placement
-            ? tr("placement", "PLACEMENT")
-            : (profile.promotion.active ? tr("promotion", "PROMOTION")
-                : (profile.demotionWarning ? tr("demotion-warning", "DEMOTION WARNING") : tr("rating", "RATING")));
+        auto const captionText = placement ? tr("placement", "PLACEMENT") : tr("rating", "RATING");
         auto const captionY = center.y - (hasTitle ? 40.0f : 32.0f);
         auto const valueY = center.y - (hasTitle ? 54.0f : 47.0f);
         // Put the warning in the status row rather than over the tier plate.
-        auto const showDemotion = !placement && !profile.promotion.active && profile.demotionWarning;
-        auto* lpCaption = makeLabel(captionText, showDemotion ? 0.20f : 0.23f,
-            {center.x, captionY}, showDemotion ? kRed : kCyan, showDemotion ? "black" : "semibold");
-        corum::ranked::ui::fitMenuLabelWidth(lpCaption, 134.0f, showDemotion ? 0.20f : 0.23f, 0.14f);
+        auto* lpCaption = makeLabel(captionText, 0.23f, {center.x, captionY}, kCyan, "semibold");
+        corum::ranked::ui::fitMenuLabelWidth(lpCaption, 134.0f, 0.23f, 0.14f);
         m_root->addChild(lpCaption, 4);
         if (placement) {
             addPlacementProgress(profile.placementGames, std::max(1, profile.placementGamesRequired), {center.x, valueY});
         } else if (profile.promotion.active) {
             addRatingMarks(profile.promotion.results, profile.promotion.gamesRequired, {center.x, valueY});
-            auto* detail = makeLabel(
-                corum::ranked::i18n::promotionMatch(profile.promotion.winsRequired),
-                0.20f,
-                {center.x, center.y - (hasTitle ? 66.0f : 61.0f)},
-                ccc3(145, 255, 125),
-                "semibold"
-            );
-            corum::ranked::ui::fitMenuLabelWidth(detail, 134.0f, 0.20f, 0.14f);
-            m_root->addChild(detail, 6);
         } else {
             auto* lpLabel = makeLabel(
                 combineTierAndScore
@@ -2052,15 +2044,15 @@ class CorumRankedLayer final : public CCLayerColor {
         rankLine->setID("ranked-profile-standing"_spr);
         // Keep the rank immediately above the full-size badge and below the
         // streak. Its higher z keeps decorative background halos behind text.
-        rankLine->setPosition({leftCenter.x,leftCenter.y + 64.0f}); m_root->addChild(rankLine,8);
+        rankLine->setPosition({leftCenter.x,leftCenter.y + 68.0f}); m_root->addChild(rankLine,8);
         auto* emblem = corum::ranked::ui::createAnimatedRankBadge(
             view.profileTier,
-            {68.0f, 68.0f},
+            {74.0f, 74.0f},
             corum::ranked::ui::RankBadgeDisplay::Large
         );
-        emblem->setPosition({leftCenter.x, leftCenter.y + 20.0f});
+        emblem->setPosition({leftCenter.x, leftCenter.y + 18.0f});
         m_root->addChild(emblem, 4);
-        addStreakLabel(profile.resultStreak, {leftCenter.x, leftCenter.y + 87.0f}, 0.28f, 154.0f);
+        addRankStatus(profile,{leftCenter.x,leftCenter.y + 91.0f},0.26f,174.0f);
         auto* tier = makeLabel(upper(view.profileTier), 0.54f, {leftCenter.x, leftCenter.y - 25.0f}, tierColor(upper(view.profileTier)), "black");
         corum::ranked::ui::fitMenuLabelWidth(tier, 150.0f, 0.54f, 0.32f);
         m_root->addChild(tier, 4);
@@ -2086,16 +2078,6 @@ class CorumRankedLayer final : public CCLayerColor {
                 m_root->addChild(rating, 4);
             }
         }
-        std::string profileHintText = tr("seasonal-progress", "SEASONAL LADDER PROGRESS");
-        ccColor3B profileHintColor = ccc3(195, 205, 224);
-        if (placement) profileHintText = tr("placement-matches", "PLACEMENT MATCHES");
-        else if (profile.promotion.active) {
-            profileHintText = corum::ranked::i18n::promotionMatch(profile.promotion.winsRequired);
-            profileHintColor = ccc3(145, 255, 125);
-        } else if (profile.demotionWarning) {
-            profileHintText = tr("demotion-warning", "DEMOTION WARNING");
-            profileHintColor = kRed;
-        }
         auto const hasTitle = view.achievements.equippedTitle.active;
         if (hasTitle) {
             auto* equippedTitle = makeLabel(
@@ -2109,13 +2091,6 @@ class CorumRankedLayer final : public CCLayerColor {
             equippedTitle->setID("ranked-profile-equipped-title"_spr);
             m_root->addChild(equippedTitle, 4);
         }
-        // The progression warning always has its own line, even with a title.
-        auto* profileHint = makeLabel(profileHintText, hasTitle ? 0.22f : 0.25f,
-            {leftCenter.x, leftCenter.y - (hasTitle ? 85.0f : 79.0f)}, profileHintColor,
-            profile.demotionWarning && !placement && !profile.promotion.active ? "black" : "semibold");
-        corum::ranked::ui::fitMenuLabelWidth(profileHint, 168.0f, hasTitle ? 0.22f : 0.25f, 0.15f);
-        profileHint->setID("ranked-profile-progress-status"_spr);
-        m_root->addChild(profileHint, 4);
 
         auto* actionPanel = makeNeonPanel({188.0f, 196.0f}, rightCenter, kBlue, kDeepPanel, 246);
         m_root->addChild(actionPanel, 1);
@@ -2187,14 +2162,9 @@ class CorumRankedLayer final : public CCLayerColor {
             addButton(tr("retry", "RETRY"), {rightCenter.x, rightCenter.y - 58.0f}, menu_selector(CorumRankedLayer::onRetry), false, 0.66f);
         }
 
-#if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
-        if (!view.placement.required) {
-            addButton("DEBUG BOT MATCH", {96.0f, 30.0f}, menu_selector(CorumRankedLayer::onDebugBot), true, 0.54f);
-        }
-#endif
-#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+#if defined(CORUM_RANKED_DEBUG_BOT_MATCH) || defined(CORUM_RANKED_DEBUG_SPECTATE)
         if (view.stage == RuntimeStage::Ready) {
-            addButton("DEBUG SPECTATE", {96.0f, 62.0f}, menu_selector(CorumRankedLayer::onDebugSpectate), true, 0.50f);
+            addButton(tr("debug","DEBUG"),{96.0f,30.0f},menu_selector(CorumRankedLayer::onDebugMenu),true,0.54f);
         }
 #endif
 
@@ -3861,66 +3831,49 @@ class CorumRankedLayer final : public CCLayerColor {
     void renderHistoryList(RuntimeView const& view) {
         auto const size = CCDirector::sharedDirector()->getWinSize();
         addTopBack(false);
-        addScreenHeader(tr("match-history", "MATCH HISTORY"), tr("recent-matches", "PLACEMENT STAGES + COMPETITIVE MATCHES"), kGold, kCyan);
-        auto const placementCount = std::min<std::size_t>(5, view.placement.stageResults.size());
-        if (view.historyLoading && placementCount == 0) {
-            auto* spinner = LoadingSpinner::create(55.0f);
-            spinner->setPosition({size.width / 2.0f, size.height / 2.0f});
-            m_root->addChild(spinner, 3);
-            return;
+        addScreenHeader(tr("match-history","MATCH HISTORY"),tr("recent-matches","RECENT MATCHES"),kGold,kCyan);
+        if (view.historyLoading) {
+            auto* spinner = LoadingSpinner::create(55); spinner->setPosition({size.width / 2,size.height / 2});
+            m_root->addChild(spinner,3); return;
         }
-        if (!view.historyError.empty() && placementCount == 0) {
-            m_root->addChild(makeLabel(view.historyError, 0.27f, {size.width / 2.0f, size.height / 2.0f}, kRed), 3);
-            addButton(tr("retry", "RETRY"), {size.width / 2.0f, size.height / 2.0f - 40.0f}, menu_selector(CorumRankedLayer::onHistory), false, 0.55f);
-            return;
+        if (!view.historyError.empty()) {
+            m_root->addChild(makeLabel(view.historyError,0.27f,{size.width / 2,size.height / 2},kRed),3);
+            addButton(tr("retry","RETRY"),{size.width / 2,size.height / 2 - 40},menu_selector(CorumRankedLayer::onHistory),false,0.55f); return;
         }
-        if (view.history.empty() && placementCount == 0) {
-            m_root->addChild(makeLabel(tr("no-completed-matches", "NO COMPLETED MATCHES"), 0.32f, {size.width / 2.0f, size.height / 2.0f}, ccc3(190, 195, 210)), 3);
-            return;
+        auto const placements = std::min<std::size_t>(5,view.placement.stageResults.size());
+        auto const matches = std::min<std::size_t>(30,view.history.size());
+        if (!placements && !matches) {
+            m_root->addChild(makeLabel(tr("no-completed-matches","NO COMPLETED MATCHES"),0.32f,{size.width / 2,size.height / 2},kCyan),3); return;
         }
-
-        std::size_t visualRow = 0;
-        for (std::size_t i = 0; i < placementCount && visualRow < 7; ++i, ++visualRow) {
+        auto const viewport = CCSize{size.width - 80,std::max(80.0f,size.height - 116)};
+        auto* scroll = ScrollLayer::create(viewport); scroll->setID("ranked-history-matches-scroll"_spr);
+        scroll->setPosition({40,48}); m_root->addChild(scroll,3);
+        auto* content = scroll->m_contentLayer;
+        auto const height = std::max(viewport.height,static_cast<float>((placements + matches) * 36 + 12));
+        content->setContentSize({viewport.width,height});
+        auto* menu = CCMenu::create(); menu->setPosition(CCPointZero); content->addChild(menu,10);
+        float y = height - 22;
+        for (std::size_t i = 0; i < placements; ++i,y -= 36) {
             auto const& stage = view.placement.stageResults[i];
-            auto const map1 = stage.mapGrades.size() > 0 ? stage.mapGrades[0] : "?";
-            auto const map2 = stage.mapGrades.size() > 1 ? stage.mapGrades[1] : "?";
-            auto const y = size.height - 67.0f - static_cast<float>(visualRow) * 31.0f;
-            auto* panel = makeNeonPanel({size.width - 110.0f, 23.0f}, {size.width / 2.0f, y}, kGold, kDeepPanel2, 232);
-            m_root->addChild(panel, 1);
-            auto* row = makeLabel(
-                fmt::format("STAGE {}   MAP 1 {}  +  MAP 2 {}  >  {}   {:.1f}/500", stage.stageIndex, map1, map2, stage.stageGrade, stage.stageScore),
-                0.27f,
-                {size.width / 2.0f, y},
-                kGold,
-                "semibold"
-            );
-            corum::ranked::ui::fitMenuLabelWidth(row, size.width - 130.0f, 0.27f, 0.17f);
-            m_root->addChild(row, 3);
+            auto const first = stage.mapGrades.empty() ? "?" : stage.mapGrades[0];
+            auto const second = stage.mapGrades.size() < 2 ? "?" : stage.mapGrades[1];
+            auto* panel = makeNeonPanel({viewport.width - 4,29},{viewport.width / 2,y},kGold,kDeepPanel2,232); content->addChild(panel,1);
+            auto* row = makeLabel(fmt::format("STAGE {}   MAP 1 {} + MAP 2 {}  > {}   {:.1f}/500",stage.stageIndex,first,second,stage.stageGrade,stage.stageScore),
+                0.27f,{viewport.width / 2,y},kGold,"semibold");
+            corum::ranked::ui::fitMenuLabelWidth(row,viewport.width - 20,0.27f,0.20f); content->addChild(row,3);
         }
-
-        auto const matchSlots = visualRow >= 7 ? 0 : 7 - visualRow;
-        auto const matchCount = std::min<std::size_t>(matchSlots, view.history.size());
-        for (std::size_t i = 0; i < matchCount; ++i, ++visualRow) {
-            auto const& item = view.history[i];
-            auto const y = size.height - 67.0f - static_cast<float>(visualRow) * 31.0f;
-            auto const won = item.side == item.winnerSide;
-            auto* panel = makeNeonPanel({size.width - 110.0f, 23.0f}, {size.width / 2.0f, y}, won ? kGreen : kRed, kDeepPanel2, 232);
-            m_root->addChild(panel, 1);
-            auto const ratingText = item.ownRankedScoreDelta
-                ? fmt::format("{:+d} LP", *item.ownRankedScoreDelta)
-                : tr("placement", "PLACEMENT");
-            auto* row = makeLabel(
-                fmt::format("{}   VS {}   {}", won ? tr("win", "WIN") : tr("loss", "LOSS"), shorten(item.opponentName, 14), ratingText),
-                0.30f,
-                {size.width / 2.0f - 18.0f, y},
-                won ? kGreen : kRed,
-                "semibold"
-            );
-            corum::ranked::ui::fitMenuLabelWidth(row, size.width - 190.0f, 0.30f, 0.20f);
-            m_root->addChild(row, 3);
-            auto* detail = addButton(tr("detail", "DETAIL"), {size.width - 72.0f, y}, menu_selector(CorumRankedLayer::onHistoryDetail), false, 0.50f);
-            detail->setTag(static_cast<int>(i));
+        for (std::size_t i = 0; i < matches; ++i,y -= 36) {
+            auto const& item = view.history[i]; auto const won = item.side == item.winnerSide;
+            auto* panel = makeNeonPanel({viewport.width - 4,29},{viewport.width / 2,y},won ? kGreen : kRed,kDeepPanel2,232); content->addChild(panel,1);
+            auto const delta = item.ownRankedScoreDelta ? fmt::format("{:+d} LP",*item.ownRankedScoreDelta) : tr("placement","PLACEMENT");
+            auto* row = makeLabel(fmt::format("{}   VS {}   {}",won ? tr("win","WIN") : tr("loss","LOSS"),item.opponentName,delta),
+                0.29f,{(viewport.width - 68) / 2,y},won ? kGreen : kRed,"semibold");
+            corum::ranked::ui::fitMenuLabelWidth(row,viewport.width - 92,0.29f,0.20f); content->addChild(row,3);
+            auto* face = makeActionButtonVisual(tr("detail","DETAIL")); face->setScale(0.48f);
+            auto* button = CCMenuItemSpriteExtra::create(face,this,menu_selector(CorumRankedLayer::onHistoryDetail));
+            button->setPosition({viewport.width - 34,y}); button->setTag(static_cast<int>(i)); menu->addChild(button);
         }
+        scroll->scrollToTop();
     }
 
     void renderHistoryDetail(RuntimeView const& view) {
@@ -4303,14 +4256,9 @@ class CorumRankedLayer final : public CCLayerColor {
         selectLanguage(corum::ranked::i18n::Language::Korean);
     }
 
-#if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
-    void onDebugBot(CCObject*) {
-        corum::ranked::showDebugBotPasswordPopup();
-    }
-#endif
-#if defined(CORUM_RANKED_DEBUG_SPECTATE)
-    void onDebugSpectate(CCObject*) {
-        corum::ranked::debug::showDebugSpectatePopup();
+#if defined(CORUM_RANKED_DEBUG_BOT_MATCH) || defined(CORUM_RANKED_DEBUG_SPECTATE)
+    void onDebugMenu(CCObject*) {
+        corum::ranked::debug::showDebugMenuPopup();
     }
 #endif
 
@@ -4455,6 +4403,8 @@ class CorumRankedLayer final : public CCLayerColor {
     }
 
     void closeSettings() {
+        if (m_sessionConflict) if (auto popup = m_sessionConflict->lock()) popup->dismiss();
+        m_sessionConflict.reset();
         closeJukeboxNotice();
         if (m_playerInfo) if (auto popup = m_playerInfo->lock()) popup->dismiss();
         m_playerInfo.reset();

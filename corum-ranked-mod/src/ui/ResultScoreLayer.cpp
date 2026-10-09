@@ -32,7 +32,7 @@ ccColor3B trackColor(std::vector<TierCutoffView> const& bands, std::string const
 }
 
 void drawRoundedBar(CCDrawNode* node, float width, ccColor3B color, GLubyte opacity = 255) {
-    constexpr float height = 10;
+    constexpr float height = 16;
     node->clear(); node->setContentSize({width,height});
     if (width <= 0) return;
     auto const radius = std::min(height / 2,width / 2);
@@ -60,17 +60,16 @@ bool ResultScoreLayer::init(ScoreAnimationInput input, CCNode* resultScreen, std
     else log::warn("[RankedResult] result backdrop blur could not be created");
     auto* dim = CCLayerColor::create({2,5,14,148}); dim->setContentSize(size); addChild(dim, 1);
 
-    m_barLeft = std::max(50.0f, size.width * 0.125f);
+    m_barLeft = std::max(82.0f, size.width * 0.18f);
     m_barWidth = size.width - m_barLeft * 2;
-    m_barY = size.height * 0.36f; m_iconY = m_barY + 92;
+    m_barY = size.height * 0.36f; m_iconY = m_barY + 83;
+    m_icons = CCNode::create(); addChild(m_icons,5);
     m_track = CCDrawNode::create(); m_track->setPosition({m_barLeft,m_barY});
     m_track->setID("ranked-result-score-track"_spr); addChild(m_track, 10);
+    m_trackWipe = CCDrawNode::create(); m_trackWipe->setPosition({m_barLeft,m_barY});
+    m_trackWipe->setID("ranked-result-score-track-wipe"_spr); addChild(m_trackWipe, 11);
     m_fill = CCDrawNode::create(); m_fill->setPosition({m_barLeft,m_barY});
-    m_fill->setID("ranked-result-score-fill"_spr); addChild(m_fill, 11);
-    for (auto x : {m_barLeft, m_barLeft + m_barWidth}) {
-        auto* cap = CCLayerColor::create({225,235,245,190}); cap->setContentSize({1.5f,15});
-        cap->setPosition({x - 0.75f,m_barY - 3.5f}); addChild(cap, 12);
-    }
+    m_fill->setID("ranked-result-score-fill"_spr); addChild(m_fill, 12);
 
     auto* outcome = menuLabel(m_input.won ? i18n::text("win","WIN") : i18n::text("lose","LOSE"),
         1.05f, {size.width / 2, size.height * 0.80f}, m_input.won ? ccc3(90,239,133) : ccc3(255,93,113), FontWeight::Black);
@@ -79,16 +78,18 @@ bool ResultScoreLayer::init(ScoreAnimationInput input, CCNode* resultScreen, std
     m_delta = menuLabel(fmt::format("{:+d} LP", m_input.after - m_input.before), 0.44f, {},
         m_input.after == m_input.before ? TextMuted : m_input.after > m_input.before ? ccc3(90,239,133) : ccc3(255,93,113), FontWeight::ExtraBold);
     addChild(m_delta, 20);
-    m_leftTier = menuLabel("",0.48f,{m_barLeft,m_barY + 22},Text,FontWeight::Black); addChild(m_leftTier,20);
-    m_rightTier = menuLabel("",0.48f,{m_barLeft + m_barWidth,m_barY + 22},Text,FontWeight::Black); addChild(m_rightTier,20);
+    m_leftTier = menuLabel("",0.44f,{m_barLeft - 10,m_barY + 8},Text,FontWeight::Black);
+    m_leftTier->setAnchorPoint({1,0.5f}); addChild(m_leftTier,20);
+    m_rightTier = menuLabel("",0.44f,{m_barLeft + m_barWidth + 10,m_barY + 8},Text,FontWeight::Black);
+    m_rightTier->setAnchorPoint({0,0.5f}); addChild(m_rightTier,20);
     m_leftCutoff = menuLabel("",0.40f,{m_barLeft,m_barY - 18},Text,FontWeight::ExtraBold); addChild(m_leftCutoff,20);
     m_rightCutoff = menuLabel("",0.40f,{m_barLeft + m_barWidth,m_barY - 18},Text,FontWeight::ExtraBold); addChild(m_rightCutoff,20);
     m_seriesRoot = CCNode::create(); m_seriesRoot->setPosition({size.width / 2, size.height * 0.59f}); addChild(m_seriesRoot,30);
 
     m_menu = CCMenu::create(); m_menu->setPosition(CCPointZero); addChild(m_menu,100);
     auto* face = surface({118,30},{},ccc3(136,147,169),SurfaceRaised,240,true);
-    auto* label = menuLabel(i18n::text("tap-to-skip","SKIP"),0.44f,{59,15},Text,FontWeight::ExtraBold);
-    fitMenuLabelWidth(label,100,0.44f,0.34f); face->addChild(label,5);
+    m_skipCaption = menuLabel(i18n::text("tap-to-skip","SKIP"),0.44f,{59,15},Text,FontWeight::ExtraBold);
+    fitMenuLabelWidth(m_skipCaption,100,0.44f,0.34f); face->addChild(m_skipCaption,5);
     auto* skip = CCMenuItemSpriteExtra::create(face,this,menu_selector(ResultScoreLayer::onSkip));
     skip->setID("ranked-result-score-skip"_spr); skip->setPosition({size.width / 2,26}); m_menu->addChild(skip);
     applySample(sampleScoreProgress(m_input,0));
@@ -101,7 +102,7 @@ void ResultScoreLayer::onEnter() {
     if (!m_closed) {
         setKeypadEnabled(true);
         if (m_menu) { cancelMenuTouch(m_menu); m_menu->setTouchEnabled(true); }
-        if (!m_complete) scheduleUpdate();
+        if (!m_readyToClose || m_trackChanging) scheduleUpdate();
     }
 }
 
@@ -112,17 +113,53 @@ void ResultScoreLayer::onExit() {
 }
 
 void ResultScoreLayer::update(float dt) {
-    if (m_closed || m_complete) return;
-    m_elapsed = std::min(m_input.duration(),m_elapsed + std::max(0.0f,dt));
-    auto const sample = sampleScoreProgress(m_input,m_elapsed); applySample(sample);
-    if (sample.complete) { m_complete = true; unscheduleUpdate(); showNotices(); }
+    if (m_closed) return;
+    auto const step = std::max(0.0f,dt); m_clock += step;
+    if (!m_complete) {
+        m_elapsed = std::min(m_input.duration(),m_elapsed + step);
+        auto const sample = sampleScoreProgress(m_input,m_elapsed); applySample(sample);
+        if (sample.complete) { m_complete = true; showNotices(); }
+    }
+    updateTrack(step); updateContinueButton();
+    if (m_readyToClose && !m_trackChanging) unscheduleUpdate();
+}
+
+void ResultScoreLayer::updateTrack(float dt) {
+    if (!m_trackChanging) return;
+    m_trackElapsed += dt;
+    auto const fraction = std::clamp(m_trackElapsed / 0.55,0.0,1.0);
+    auto const eased = fraction * fraction * (3 - 2 * fraction);
+    drawRoundedBar(m_trackWipe,m_barWidth * static_cast<float>(eased),m_trackColor);
+    if (fraction >= 1) {
+        drawRoundedBar(m_track,m_barWidth,m_trackColor); m_trackWipe->clear(); m_trackChanging = false;
+    }
+}
+
+void ResultScoreLayer::updateContinueButton() {
+    if (!m_complete || m_clock < m_noticesReadyAt) return;
+    m_readyToClose = true; m_skipCaption->setString(i18n::text("continue","CONTINUE").c_str());
+    fitMenuLabelWidth(m_skipCaption,100,0.44f,0.34f);
+}
+
+void ResultScoreLayer::settlePresentation() {
+    // Skip may arrive during part assembly or while the old tier is falling.
+    // Replace that presentation with fully assembled final endpoint icons.
+    m_icons->removeAllChildrenWithCleanup(true);
+    m_leftIcon = m_rightIcon = nullptr; m_tier.clear(); m_targetKey.clear();
+    m_elapsed = m_input.duration(); applySample(sampleScoreProgress(m_input,m_elapsed),false);
+    m_complete = true; showNotices();
+    for (auto const& [node,scale] : m_stamps) {
+        node->stopAllActions(); node->setScale(scale); node->setVisible(true);
+    }
+    m_trackChanging = false; drawRoundedBar(m_track,m_barWidth,m_trackColor); m_trackWipe->clear();
+    m_noticesReadyAt = m_clock; updateContinueButton(); unscheduleUpdate();
 }
 
 CCLayerColor* ResultScoreLayer::tierIcon(std::string const& tier, CCPoint position, bool assemble) {
     auto const badgeSize = std::min(78.0f,getContentSize().height * 0.245f);
     auto assembly = createRankBadgeAssembly(tier,badgeSize);
     assembly.root->addChild(createRankBadgeBackdrop(tier,{badgeSize,badgeSize},RankBadgeDisplay::Large),-10);
-    assembly.root->setPosition(position); addChild(assembly.root,5);
+    assembly.root->setPosition(position); m_icons->addChild(assembly.root,5);
     if (assemble && m_input.motion() == ScoreMotion::Promotion) {
         // Same same-canvas body/core + ornament assembly used by Placed.
         for (auto const& part : assembly.baseParts) {
@@ -151,7 +188,7 @@ CCLayerColor* ResultScoreLayer::tierIcon(std::string const& tier, CCPoint positi
 CCLayerColor* ResultScoreLayer::targetIcon(ScoreProgressSample const& sample, bool assemble) {
     auto const position = ccp(m_barLeft + m_barWidth,m_iconY);
     if (sample.tier != "GOLD") return tierIcon(sample.nextTier,position,assemble);
-    auto* root = iconRoot(position); addChild(root,5);
+    auto* root = iconRoot(position); m_icons->addChild(root,5);
     auto* icon = sample.goldLeader ? PlayerIcon::createLocal()
         : PlayerIcon::createRemote(sample.standing.target && !sample.standing.target->bot ? sample.standing.target->accountId : 0);
     if (icon) { icon->setScale(1.55f); root->addChild(icon); }
@@ -202,15 +239,20 @@ void ResultScoreLayer::replaceTierIcons(ScoreProgressSample const& sample, bool 
         if (sample.tier == "GOLD") {
             auto const rank = sample.goldLeader ? sample.standing.rank
                 : sample.standing.target ? std::optional<int>(sample.standing.target->rank) : std::nullopt;
-            m_rightRank = standingNumber(rank,0.60f); m_rightRank->setPosition({m_barLeft + m_barWidth,m_barY + 25});
+            m_rightRank = standingNumber(rank,0.50f);
+            m_rightRank->setAnchorPoint({0,0.5f}); m_rightRank->setPosition({m_barLeft + m_barWidth + 10,m_barY + 8});
             addChild(m_rightRank,22);
         }
     }
 }
 
-void ResultScoreLayer::applySample(ScoreProgressSample const& sample) {
-    if (m_tier != sample.tier) drawRoundedBar(m_track,m_barWidth,trackColor(m_input.bands,sample.tier),180);
-    replaceTierIcons(sample,m_elapsed > 0);
+void ResultScoreLayer::applySample(ScoreProgressSample const& sample, bool animateIcons) {
+    if (m_tier != sample.tier) {
+        m_trackColor = trackColor(m_input.bands,sample.tier);
+        if (m_tier.empty() || !animateIcons) drawRoundedBar(m_track,m_barWidth,m_trackColor);
+        else { m_trackChanging = true; m_trackElapsed = 0; }
+    }
+    replaceTierIcons(sample,animateIcons && m_elapsed > 0);
     auto const color = tierColor(sample.tier);
     drawRoundedBar(m_fill,m_barWidth * static_cast<float>(sample.fill),color);
     m_leftTier->setString(sample.tier.c_str()); m_leftTier->setColor(color);
@@ -219,7 +261,7 @@ void ResultScoreLayer::applySample(ScoreProgressSample const& sample) {
     m_leftCutoff->setString(fmt::format("{} LP",sample.minimum).c_str());
     m_rightCutoff->setString(fmt::format("{} LP",sample.target).c_str());
     auto const labelWidth = std::clamp(m_barWidth * 0.26f,75.0f,132.0f);
-    for (auto* label : {m_leftTier,m_rightTier}) fitMenuLabelWidth(label,labelWidth,0.48f,0.34f);
+    for (auto* label : {m_leftTier,m_rightTier}) fitMenuLabelWidth(label,m_barLeft - 20,0.44f,0.30f);
     for (auto* label : {m_leftCutoff,m_rightCutoff}) fitMenuLabelWidth(label,labelWidth,0.40f,0.28f);
     m_score->setString(fmt::format("{} LP",sample.score).c_str()); m_score->setColor(color);
     fitMenuLabelWidth(m_score,140,0.64f,0.46f);
@@ -236,7 +278,9 @@ void ResultScoreLayer::applySample(ScoreProgressSample const& sample) {
 }
 
 void ResultScoreLayer::stamp(CCNode* node, float delay) {
-    auto const scale = node->getScale(); node->setScale(scale * 2.15f); node->setVisible(false);
+    auto const scale = node->getScale(); m_stamps.emplace_back(node,scale);
+    m_noticesReadyAt = std::max(m_noticesReadyAt,m_clock + delay + 0.27);
+    node->setScale(scale * 2.15f); node->setVisible(false);
     node->runAction(CCSequence::create(CCDelayTime::create(delay),CCShow::create(),
         CCEaseBackIn::create(CCScaleTo::create(0.15f,scale * 0.86f)),
         CCEaseBackOut::create(CCScaleTo::create(0.12f,scale)),nullptr));
@@ -296,10 +340,13 @@ void ResultScoreLayer::showSeries(bool entering) {
 }
 
 void ResultScoreLayer::showNotices() {
+    if (m_noticesShown) return;
+    m_noticesShown = true;
     if (m_input.promotionStarted) showSeries(true);
     if (m_input.demotionWarning) {
         auto* warning = menuLabel(i18n::text("demotion-warning","DEMOTION WARNING"),0.49f,{0,19},ccc3(255,93,113),FontWeight::Black);
         fitMenuLabelWidth(warning,getContentSize().width * 0.60f,0.49f,0.36f); m_seriesRoot->addChild(warning,5);
+        stamp(warning,0);
         auto* detail = menuLabel(i18n::text("demotion-next-loss","A loss may demote you in the next match."),0.30f,{0,-3},Text,FontWeight::ExtraBold);
         fitMenuLabelWidth(detail,getContentSize().width * 0.64f,0.30f,0.24f); m_seriesRoot->addChild(detail,5);
     }
@@ -325,7 +372,11 @@ void ResultScoreLayer::finish() {
     });
 }
 
-void ResultScoreLayer::onSkip(CCObject*) { finish(); }
-void ResultScoreLayer::keyBackClicked() { finish(); }
+void ResultScoreLayer::onSkip(CCObject*) {
+    if (m_closed) return;
+    if (!m_readyToClose) { settlePresentation(); return; }
+    finish();
+}
+void ResultScoreLayer::keyBackClicked() { onSkip(nullptr); }
 
 } // namespace corum::ranked::ui

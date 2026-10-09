@@ -332,8 +332,8 @@ CCNode* createAnimatedRankBadge(
     auto const rank = normalizeRankName(input);
     auto* root = centeredRoot();
     auto* badgeMotion = centeredRoot();
-    root->addChild(createRankBadgeBackdrop(rank,maxSize,display),0);
     root->addChild(badgeMotion,20);
+    badgeMotion->addChild(createRankBadgeBackdrop(rank,maxSize,display),0);
     auto const compact = display == RankBadgeDisplay::Compact;
     auto const hero = display == RankBadgeDisplay::Hero;
 

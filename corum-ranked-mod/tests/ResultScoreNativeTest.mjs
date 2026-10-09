@@ -248,7 +248,7 @@ int main() {
     score->update(1); assert(!score->m_complete&&!hasLabel(score,"PROMOTION MATCH"));
     score->onExit(); assert(!score->keypad&&!score->m_menu->touch&&!score->scheduled&&completions==0);
     score->onEnter(); assert(score->keypad&&score->m_menu->touch&&score->scheduled);
-    score->update(1); assert(score->m_complete&&!score->scheduled&&hasLabel(score,"PROMOTION MATCH"));
+    score->update(1); assert(score->m_complete&&score->scheduled&&hasLabel(score,"PROMOTION MATCH"));
     assert(score->m_seriesRoot->children.back()->children.size()==3&&completions==0&&score->visible);
     score->update(99); assert(completions==0&&score->m_score->text=="125 LP");
     auto const cancellations=score->m_menu->cancellations;
@@ -259,7 +259,7 @@ int main() {
     auto* warning=ResultScoreLayer::create(i,&screen,[]{}); screen.addChild(warning); warning->onEnter();
     assert(warning->m_delta->text=="+0 LP"&&warning->m_delta->color==TextMuted);
     assert(!hasLabel(warning,"DEMOTION WARNING")); warning->update(2);
-    assert(hasLabel(warning,"DEMOTION WARNING")); warning->onSkip(nullptr);drainMainQueue();
+    assert(hasLabel(warning,"DEMOTION WARNING")); warning->onSkip(nullptr);warning->onSkip(nullptr);drainMainQueue();
     i=ordinary(); i.promotionInProgress=true; i.previousMarks=1;
     i.promotion={true,"RED","AQUA",300,10,5,{"WIN","LOSS"}};
     auto* series=ResultScoreLayer::create(i,&screen,[]{}); screen.addChild(series); series->onEnter();
@@ -269,7 +269,7 @@ int main() {
     assert(grid->children[0]->children[0]->actions.empty()); // previous check remains
     assert(!grid->children[1]->children[0]->actions.empty()); // latest X stamps
     assert(grid->children[1]->children[0]->children.size()==2); // a real X, not a delete/trash icon
-    series->onSkip(nullptr);drainMainQueue();
+    series->onSkip(nullptr);series->onSkip(nullptr);drainMainQueue();
 }
 `);
 });
@@ -288,24 +288,24 @@ int main() {
     assert(promotion->m_leftIcon->children[0]->opacity==0); // Placed-style part assembly
     assert(promotion->m_fill->segmentColor.r==tierColor("AQUA").r/255.0f);
     assert(promotion->m_leftIcon->children.back()->id=="halo:AQUA");
-    promotion->onSkip(nullptr);drainMainQueue();
+    promotion->onSkip(nullptr);promotion->onSkip(nullptr);drainMainQueue();
     i=ordinary(); i.beforeTier="AQUA"; i.afterTier="RED"; i.before=300; i.after=250; i.demoted=true;
     auto* demotion=ResultScoreLayer::create(i,&screen,[]{}); screen.addChild(demotion);
     oldLeft=demotion->m_leftIcon; oldRight=demotion->m_rightIcon; demotion->update(2);
     assert(demotion->m_tier=="RED"&&demotion->m_leftIcon!=oldLeft&&demotion->m_rightIcon!=oldRight);
     for(auto* part:oldLeft->children)if(dynamic_cast<CCSprite*>(part))assert(part->actions[0]->type=="spawn"); // falling parts, not shrink
-    assert(demotion->m_leftIcon->scaleX==0.25f); demotion->onSkip(nullptr);drainMainQueue();
+    assert(demotion->m_leftIcon->scaleX==0.25f); demotion->onSkip(nullptr);demotion->onSkip(nullptr);drainMainQueue();
     i=ordinary(); i.beforeTier=i.afterTier="GOLD"; i.before=1225; i.after=1250;
     i.standingAfter.rank=5; i.standingAfter.total=10; i.standingAfter.topPercent=50;
     i.standingAfter.target=StandingTargetView{123,"bot",true,4,1275};
     auto* gold=ResultScoreLayer::create(i,&screen,[]{}); screen.addChild(gold);
     assert(PlayerIcon::accounts.back()==0&&gold->m_targetKey=="gold:123:4:1275");
     gold->update(2); assert(PlayerIcon::accounts.back()==0&&gold->m_rightCutoff->text=="1275 LP");
-    gold->onSkip(nullptr);drainMainQueue();
+    gold->onSkip(nullptr);gold->onSkip(nullptr);drainMainQueue();
     i.standingAfter.rank=1; i.standingAfter.target.reset();
     auto* leader=ResultScoreLayer::create(i,&screen,[]{}); screen.addChild(leader);
     assert(PlayerIcon::accounts.back()==99&&leader->m_targetKey=="gold-self");
-    assert(leader->m_fill->size.width==leader->m_barWidth); leader->onSkip(nullptr);drainMainQueue();
+    assert(leader->m_fill->size.width==leader->m_barWidth); leader->onSkip(nullptr);leader->onSkip(nullptr);drainMainQueue();
     assert(standingColor(1)==Gold&&standingColor(4)==ccc3(16,20,28));
     assert(standingNumber(4,0.4f)->children.size()==9); // black numbers have a light outline
     assert(standingNumber(2,0.4f)->children.size()==1);
@@ -339,20 +339,20 @@ int main() {
         assert(layer->m_leftIcon->position.x==left.x&&layer->m_rightIcon->position.x==right.x);
         assert(layer->m_leftCutoff->position.x==layer->m_barLeft);
         assert(layer->m_rightCutoff->position.x==layer->m_barLeft+layer->m_barWidth);
-        auto* fill=layer->m_fill;assert(fill->segments==1&&fill->radius>0&&fill->radius<=5);
+        auto* fill=layer->m_fill;assert(fill->segments==1&&fill->radius>0&&fill->radius<=8);
         assert(std::abs(fill->from.x-fill->radius)<0.0001f);
         assert(std::abs(fill->to.x+fill->radius-fill->size.width)<0.0001f);
         assert(layer->m_delta->position.x!=layer->m_score->position.x);
     }
-    layer->onSkip(nullptr);drainMainQueue();
+    layer->onSkip(nullptr);layer->onSkip(nullptr);drainMainQueue();
     i.before=i.after=0;auto* empty=ResultScoreLayer::create(i,&screen,[]{});screen.addChild(empty);
     assert(empty->m_fill->segments==0&&empty->m_score->position.x==empty->m_barLeft);
-    empty->onSkip(nullptr);drainMainQueue();
+    empty->onSkip(nullptr);empty->onSkip(nullptr);drainMainQueue();
     i.beforeTier=i.afterTier="GOLD";i.before=1200;i.after=1500;i.standingAfter.rank=1;
     auto* full=ResultScoreLayer::create(i,&screen,[]{});screen.addChild(full);
-    assert(full->m_fill->radius==5&&full->m_score->position.x==full->m_barLeft+full->m_barWidth);
-    assert(full->m_delta->position.x<full->m_score->position.x); // delta fits; LP stays anchored
-    full->onSkip(nullptr);drainMainQueue();
+    assert(full->m_fill->radius==8&&full->m_score->position.x==full->m_barLeft+full->m_barWidth);
+    assert(full->m_delta->position.x+full->m_delta->size.width*full->m_delta->scaleX/2<=full->size.width-12); // delta fits; LP stays anchored
+    full->onSkip(nullptr);full->onSkip(nullptr);drainMainQueue();
 }
 `);
 });
@@ -366,7 +366,7 @@ void assertTrack(ResultScoreLayer* layer, std::string const& tier) {
     auto const expected=band==bands.begin()?ccc3(100,108,124):tierColor(std::prev(band)->tier);
     auto const actual=layer->m_track->segmentColor;
     assert(actual.r==expected.r/255.0f&&actual.g==expected.g/255.0f&&actual.b==expected.b/255.0f);
-    assert(actual.a==180/255.0f&&layer->m_track->size.width==layer->m_barWidth&&layer->m_track->radius==5);
+    assert(actual.a==1.0f&&layer->m_track->size.width==layer->m_barWidth&&layer->m_track->radius==8);
     auto const foreground=tierColor(tier);
     if(layer->m_fill->size.width>0)assert(layer->m_fill->segmentColor.r==foreground.r/255.0f);
     assert(layer->m_score->color==foreground&&layer->m_tier==tier);
@@ -377,27 +377,61 @@ int main() {
         i.beforeTier=i.afterTier=band.tier;i.before=band.minimum+20;i.after=i.before+13;
         auto* layer=ResultScoreLayer::create(i,&screen,[]{});screen.addChild(layer);
         assertTrack(layer,band.tier);layer->update(1);assertTrack(layer,band.tier);
-        layer->update(1);assertTrack(layer,band.tier);layer->onSkip(nullptr);drainMainQueue();
+        layer->update(1);assertTrack(layer,band.tier);layer->onSkip(nullptr);layer->onSkip(nullptr);drainMainQueue();
     }
     for(std::size_t index=1;index<i.bands.size();++index) {
         i=ordinary();auto const& lower=i.bands[index-1];auto const& higher=i.bands[index];
         i.beforeTier=lower.tier;i.afterTier=higher.tier;i.before=higher.minimum-1;i.after=higher.minimum+50;i.promoted=true;
         auto* promotion=ResultScoreLayer::create(i,&screen,[]{});screen.addChild(promotion);
         assertTrack(promotion,lower.tier);promotion->update(2);assertTrack(promotion,higher.tier);
-        promotion->update(2);assertTrack(promotion,higher.tier);promotion->onSkip(nullptr);drainMainQueue();
+        promotion->update(2);assertTrack(promotion,higher.tier);promotion->onSkip(nullptr);promotion->onSkip(nullptr);drainMainQueue();
         i.beforeTier=higher.tier;i.afterTier=lower.tier;i.before=higher.minimum;i.after=higher.minimum-50;
         i.promoted=false;i.demoted=true;
         auto* demotion=ResultScoreLayer::create(i,&screen,[]{});screen.addChild(demotion);
         assertTrack(demotion,higher.tier);demotion->update(2);assertTrack(demotion,lower.tier);
-        demotion->update(2);assertTrack(demotion,lower.tier);demotion->onSkip(nullptr);drainMainQueue();
+        demotion->update(2);assertTrack(demotion,lower.tier);demotion->onSkip(nullptr);demotion->onSkip(nullptr);drainMainQueue();
     }
+}
+`);
+});
+
+test('Skip/Esc settles notices first; the next press retires, and track color wipes from left to right',()=>{
+    run(scoreNative+`
+using namespace corum::ranked::ui;
+int main(){
+ CCNode screen;auto i=ordinary();i.demotionWarning=true;int closed=0;
+ auto* warning=ResultScoreLayer::create(i,&screen,[&]{++closed;});screen.addChild(warning);warning->onEnter();
+ assert(warning->m_skipCaption->text=="SKIP"&&!warning->m_noticesShown);
+ warning->keyBackClicked();assert(warning->m_complete&&warning->m_readyToClose&&warning->m_noticesShown&&!warning->m_closed);
+ assert(warning->m_score->text=="125 LP"&&warning->m_skipCaption->text=="CONTINUE"&&closed==0&&mainQueue.empty());
+ for(auto const& [node,scale]:warning->m_stamps)assert(node->visible&&node->scaleX==scale&&node->actions.empty());
+ warning->keyBackClicked();assert(warning->m_closed&&closed==0&&mainQueue.size()==1);drainMainQueue();assert(closed==1);
+ auto* natural=ResultScoreLayer::create(i,&screen,[]{});screen.addChild(natural);natural->onEnter();
+ natural->update(2);assert(natural->m_complete&&!natural->m_readyToClose&&natural->scheduled);
+ natural->update(.26f);assert(!natural->m_readyToClose);natural->update(.02f);assert(natural->m_readyToClose&&!natural->scheduled);
+ natural->onSkip(nullptr);drainMainQueue();
+ i=ordinary();i.before=299;i.after=350;i.afterTier="AQUA";i.promoted=true;
+ auto* promotion=ResultScoreLayer::create(i,&screen,[]{});screen.addChild(promotion);
+ auto const previous=promotion->m_track->segmentColor;
+ for(int frame=0;frame<250&&!promotion->m_trackChanging;++frame)promotion->update(.016f);
+ assert(promotion->m_trackChanging&&promotion->m_track->segmentColor.r==previous.r);
+ auto first=promotion->m_trackWipe->size.width;assert(first>0&&first<promotion->m_barWidth);
+ promotion->update(.10f);assert(promotion->m_trackWipe->size.width>first&&promotion->m_trackChanging);
+ assert(promotion->m_trackWipe->position.x==promotion->m_barLeft);
+ promotion->update(.6f);assert(!promotion->m_trackChanging&&promotion->m_trackWipe->segments==0);
+ assert(promotion->m_track->segmentColor.r==tierColor("RED").r/255.0f);
+ assert(promotion->m_leftTier->anchor.x==1&&promotion->m_leftTier->position.x<promotion->m_barLeft);
+ assert(promotion->m_rightTier->anchor.x==0&&promotion->m_rightTier->position.x>promotion->m_barLeft+promotion->m_barWidth);
+ promotion->onSkip(nullptr);assert(promotion->m_icons->children.size()==2);
+ for(auto* part:promotion->m_leftIcon->children)if(dynamic_cast<CCSprite*>(part))assert(part->opacity==255&&part->actions.empty());
+ promotion->onSkip(nullptr);drainMainQueue();
 }
 `);
 });
 
 test('font package contains the new Korean notices and unplaced em dash without changing countdown glyphs',()=>{
     const fonts=JSON.parse(read('mod.json')).resources.fonts;
-    const required='—승급했습니다!다음 경기에서 패배하면 강등될 수 있습니다.Jukebox 모드가 필요합니다!';
+    const required='—티어로 승급했습니다!총명다른 기기 접속 끊기디버그 도전과제 모두 해금플레이어 기록 초기화다음 경기에서 패배하면 강등될 수 있습니다.Jukebox 모드가 필요합니다!';
     for(const [name,font] of Object.entries(fonts)) {
         if(name==='CorumSansCountdown') { assert.equal(font.charset,'32,48-57');continue; }
         const points=new Set;
@@ -542,7 +576,7 @@ int main() {
     owner.beginResultScore(match,*input);assert(owner.m_resultScorePending&&!owner.m_resultScoreLayer&&!owner.keypad&&!owner.menu.touch);
     owner.beginResultScore(match,*input);assert(mainQueue.size()==1);drainMainQueue();
     auto* score=owner.m_resultScoreLayer;assert(score&&!owner.m_resultScorePending);
-    Ref keepScore(score);score->onEnter();score->keyBackClicked();
+    Ref keepScore(score);score->onEnter();score->keyBackClicked();assert(score->m_readyToClose&&!score->m_closed&&mainQueue.empty());score->keyBackClicked();
     assert(owner.m_resultScoreLayer==score&&score->parent==&owner&&!owner.keypad&&owner.rendered==0);
     drainMainQueue();assert(!owner.m_resultScoreLayer&&!owner.keypad&&!owner.menu.touch&&owner.rendered==1);
     drainMainQueue();assert(owner.keypad&&owner.menu.touch&&owner.toasts==1);
@@ -561,24 +595,24 @@ int main() {
     assert(rank->controls.cancellations==cancellations&&mainQueue.size()==1);
     drainMainQueue();assert(!rank->parent&&!owner.m_rankTransitionLayer&&owner.m_resultScorePending);
     assert(!owner.m_resultScoreLayer&&!owner.keypad);
-    drainMainQueue();score=owner.m_resultScoreLayer;assert(score);score->onSkip(nullptr);
+    drainMainQueue();score=owner.m_resultScoreLayer;assert(score);score->onSkip(nullptr);score->onSkip(nullptr);
     drainMainQueue();assert(!owner.keypad);drainMainQueue();assert(owner.keypad&&owner.menu.touch);
     match=settled("promotion-skip");match.profileAfterA.displayedTier="AQUA";match.ratingEventA.promotionSucceeded=true;
     owner.beginResultScore(match,*owner.resultScoreInput(match));rank=owner.m_rankTransitionLayer;
     rank->onSkip(nullptr);assert(rank->m_finished&&!rank->m_finalShown&&owner.m_rankTransitionLayer==rank);
     drainMainQueue();assert(owner.m_resultScorePending);drainMainQueue();assert(owner.m_resultScoreLayer);
-    owner.m_resultScoreLayer->keyBackClicked();drainMainQueue();drainMainQueue();
+    owner.m_resultScoreLayer->keyBackClicked();owner.m_resultScoreLayer->keyBackClicked();drainMainQueue();drainMainQueue();
     match=settled("demotion");match.profileBeforeA.displayedTier="AQUA";match.profileBeforeA.visibleRankedScore=300;
     match.profileAfterA.visibleRankedScore=250;match.ratingEventA.demoted=true;
     owner.beginResultScore(match,*owner.resultScoreInput(match));rank=owner.m_rankTransitionLayer;
     rank->keyBackClicked();assert(!owner.m_resultScorePending&&mainQueue.size()==1);
     drainMainQueue();assert(owner.m_resultScorePending);drainMainQueue();assert(owner.m_resultScoreLayer);
-    owner.m_resultScoreLayer->onSkip(nullptr);drainMainQueue();drainMainQueue();
+    owner.m_resultScoreLayer->onSkip(nullptr);owner.m_resultScoreLayer->onSkip(nullptr);drainMainQueue();drainMainQueue();
     RankTransitionLayer placed;placed.m_chainToResult=false;placed.keyBackClicked();assert(!placed.m_finalShown&&!placed.m_finished);
     placed.m_skipAllowed=true;placed.keyBackClicked();assert(placed.m_finalShown&&!placed.m_finished);
     // A retained but retired owner must not render or open another foreground.
     match=settled("retired");owner.beginResultScore(match,*owner.resultScoreInput(match));drainMainQueue();
-    auto rendered=owner.rendered;owner.m_resultScoreLayer->onSkip(nullptr);owner.running=false;
+    auto rendered=owner.rendered;owner.m_resultScoreLayer->onSkip(nullptr);owner.m_resultScoreLayer->onSkip(nullptr);owner.running=false;
     drainMainQueue();assert(!owner.m_resultScoreLayer&&owner.rendered==rendered&&mainQueue.empty());owner.running=true;
     match=settled("retired-rank");match.profileAfterA.displayedTier="AQUA";match.ratingEventA.promotionSucceeded=true;
     owner.beginResultScore(match,*owner.resultScoreInput(match));owner.m_rankTransitionLayer->keyBackClicked();owner.running=false;
@@ -665,8 +699,8 @@ int main() {
     assert.match(method(popupSource,'void addRoundOptions('),/addJukeboxButton\(\{size.width \/ 2.0f \+ 116.0f, y\}/);
     assert.match(method(popupSource,'void addPlayerCard('),/center.x \+ \(self \? -55 : 55\)/);
     const main=method(popupSource,'void renderMain(');
-    assert.match(main,/leftCenter.y \+ 64.0f/);
-    assert.match(main,/\{68.0f, 68.0f\}/);
-    assert.match(main,/addStreakLabel\(profile.resultStreak, \{leftCenter.x, leftCenter.y \+ 87.0f\}/);
-    assert(20+68/2+1.4<64-5); // common rank slot stays above every full-size structural badge
+    assert.match(main,/leftCenter.y \+ 68.0f/);
+    assert.match(main,/\{74.0f, 74.0f\}/);
+    assert.match(main,/addRankStatus\(profile,\{leftCenter.x,leftCenter.y \+ 91.0f\}/);
+    assert(18+74/2+1.4<68-5); // common rank slot stays above every full-size structural badge
 });

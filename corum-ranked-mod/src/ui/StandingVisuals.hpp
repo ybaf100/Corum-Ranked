@@ -1,6 +1,7 @@
 #pragma once
 
 #include "RankedVisuals.hpp"
+#include "RankedTranslations.hpp"
 #include "../domain/ResultScorePresentation.hpp"
 
 namespace corum::ranked::ui {
@@ -46,7 +47,8 @@ inline CCNode* standingNumber(std::optional<int> rank, float scale) {
 inline CCNode* standingLine(StandingView const& standing, float scale, std::optional<int> lp = std::nullopt) {
     auto* root = CCNode::create(); root->setAnchorPoint({0.5f, 0.5f});
     auto* rank = standingNumber(standing.rank, scale);
-    auto* text = menuLabel(lp ? fmt::format("{} LP /", *lp) : "/ " + topPercentText(standing),
+    auto const total = i18n::isKorean() ? fmt::format(" (총 {}명)",standing.total) : fmt::format(" ({} players)",standing.total);
+    auto* text = menuLabel(lp ? fmt::format("{} LP /", *lp) : "/ " + topPercentText(standing) + total,
         scale, {}, Text, FontWeight::ExtraBold);
     auto const textSize = CCSize {text->getContentSize().width * text->getScaleX(),
         text->getContentSize().height * text->getScaleY()};

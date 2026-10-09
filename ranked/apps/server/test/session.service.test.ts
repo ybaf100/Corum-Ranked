@@ -155,6 +155,67 @@ describe("Ranked session/profile creation", () => {
     expect((await service.heartbeat(await contextFor(second.sessionToken))).sessionLeaseSeconds).toBe(90);
   });
 
+  it("explicit takeover revokes the old lobby session; a late Close cannot release the new admission", async () => {
+    const service=buildService(new FakeCsmpSource());
+    const first=await service.create(cleanDto("7001")),old=await contextFor(first.sessionToken);
+    const other={...cleanDto("7001"),clientInstanceId:"second-device-instance",takeOver:true};
+    const second=await service.create(other),fresh=await contextFor(second.sessionToken);
+    expect(second.activeMatch).toBe(false);
+    await expect(service.heartbeat(old)).rejects.toMatchObject({status:401});
+    await service.close(old);await expect(service.heartbeat(fresh)).resolves.toBeDefined();
+    await expect(service.create({...cleanDto("7001"),clientInstanceId:"third-device-instance"})).rejects.toMatchObject({status:409});
+    expect((await database.query("SELECT id FROM ranked_sessions WHERE revoked_at IS NULL")).rows).toHaveLength(1);
+  });
+
+  it("takeover and same-process retries recover the assignment and rotate match tokens without modifying match state", async () => {
+    const clock=new FixedClock(),service=buildService(new FakeCsmpSource(),clock),tokens=new TokenService(environmentFixture());
+    const first=await service.create(cleanDto("7001")),old=await contextFor(first.sessionToken);
+    const opponent=await service.create(cleanDto("7002")),other=await contextFor(opponent.sessionToken);
+    const matchId="00000000-0000-4000-8000-000000000090",snapshotId="00000000-0000-4000-8000-000000000091";
+    await database.query("INSERT INTO ranked_config_snapshots (id,generation,rules_version,source_payload,fetched_at) VALUES ($1,'takeover','test','{}',$2)",[snapshotId,clock.now()]);
+    await database.query(`INSERT INTO ranked_matches (id,player_a_id,player_b_id,config_snapshot_id,mmr_a_before,mmr_b_before,
+      effective_rating_average,effective_tier,candidate_maps_snapshot,series_state,state,state_version,rules_version)
+      VALUES ($1,$2,$3,$4,2500,2500,2500,'BRONZE','[]','{}','ROUND_PLAYING',7,'test')`,[matchId,old.playerId,other.playerId,snapshotId]);
+    const oldToken=tokens.deriveMatchToken(matchId,old.playerId,old.sessionId);
+    await database.query("INSERT INTO ranked_match_tokens (match_id,player_id,token_hash,expires_at) VALUES ($1,$2,$3,$4)",
+      [matchId,old.playerId,tokens.hash(oldToken),new Date(clock.now().getTime()+3600000)]);
+    await database.query(`INSERT INTO ranked_queue_entries (player_id,session_id,hidden_mmr_snapshot,joined_at,last_heartbeat_at,status,matched_match_id)
+      VALUES ($1,$2,2500,$3,$3,'MATCHED',$4)`,[old.playerId,old.sessionId,clock.now(),matchId]);
+    const {QueueService}=await import("../src/queue/queue.service.js");
+    const queue=Object.assign(Object.create(QueueService.prototype),{database,clock,tokens}) as InstanceType<typeof QueueService>;
+    const {MatchAccessService}=await import("../src/match/match-access.service.js");const access=new MatchAccessService(tokens,clock);
+    const dto={...cleanDto("7001"),clientInstanceId:"second-device-instance",takeOver:true};
+    const takeover=await service.create(dto),replacement=await contextFor(takeover.sessionToken);
+    expect(takeover.activeMatch).toBe(true);
+    await service.close(old);
+    await expect(queue["lockAdmission"](database,old)).rejects.toMatchObject({status:401});
+    await expect(queue["lockAdmission"](database,replacement)).resolves.toBeUndefined();
+    const recovered=await queue.status(replacement);expect(recovered).toMatchObject({status:"MATCHED",matchId,matchState:"ROUND_PLAYING",stateVersion:7});
+    expect((recovered as {matchToken:string}).matchToken).not.toBe(oldToken);
+    expect((await queue.status(old)).status).toBe("NOT_QUEUED");
+    await database.query("UPDATE ranked_queue_entries SET status='QUEUED' WHERE player_id=$1",[old.playerId]);
+    const before=(await database.query("SELECT last_heartbeat_at FROM ranked_queue_entries WHERE player_id=$1",[old.playerId])).rows[0];
+    clock.advance(1000);await queue.heartbeat(old);expect((await queue.leave(old)).left).toBe(false);
+    expect((await database.query("SELECT last_heartbeat_at FROM ranked_queue_entries WHERE player_id=$1",[old.playerId])).rows[0]).toEqual(before);
+    await database.query("UPDATE ranked_queue_entries SET status='MATCHED' WHERE player_id=$1",[old.playerId]);
+    await expect(access.authorize(database,matchId,old,oldToken)).rejects.toMatchObject({status:401});
+    await expect(access.authorize(database,matchId,replacement,(recovered as {matchToken:string}).matchToken)).resolves.toMatchObject({side:"A"});
+    const retry=await service.create({...dto,takeOver:false}),latest=await contextFor(retry.sessionToken);
+    expect(retry.activeMatch).toBe(true);await service.close(replacement);
+    expect(await queue.status(latest)).toMatchObject({status:"MATCHED",stateVersion:7});
+    await expect(service.heartbeat(replacement)).rejects.toMatchObject({status:401});
+    await expect(service.heartbeat(latest)).resolves.toBeDefined();
+    expect((await database.query("SELECT state,state_version FROM ranked_matches WHERE id=$1",[matchId])).rows[0]).toMatchObject({state:"ROUND_PLAYING",state_version:7});
+  });
+
+  it("concurrent forced admissions leave exactly one live token", async () => {
+    const service=buildService(new FakeCsmpSource());await service.create(cleanDto("7001"));
+    const results=await Promise.all(["second-device-instance","third-device-instance"].map(clientInstanceId=>service.create({...cleanDto("7001"),clientInstanceId,takeOver:true})));
+    const beats=await Promise.allSettled(results.map(async result=>service.heartbeat(await contextFor(result.sessionToken))));
+    expect(beats.filter(result=>result.status==="fulfilled")).toHaveLength(1);
+    expect((await database.query("SELECT id FROM ranked_sessions WHERE revoked_at IS NULL")).rows).toHaveLength(1);
+  });
+
   it("expires a crashed process in 90s; heartbeat renews and an expired token cannot revive", async () => {
     const clock = new FixedClock(), service = buildService(new FakeCsmpSource(), clock);
     const first = await service.create(cleanDto("7001")), firstContext = await contextFor(first.sessionToken);

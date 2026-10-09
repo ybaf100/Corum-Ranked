@@ -38,6 +38,10 @@ export class InstalledModDto {
 
 export class CreateSessionDto {
   @IsOptional()
+  @IsBoolean()
+  public takeOver?: boolean;
+
+  @IsOptional()
   @IsString()
   @Length(16, 80)
   @Matches(/^[a-zA-Z0-9-]+$/)

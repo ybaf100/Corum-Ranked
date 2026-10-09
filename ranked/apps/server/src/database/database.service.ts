@@ -32,6 +32,7 @@ const REQUIRED_MIGRATIONS = [
   "0013_native_scene_entry.sql",
   "0014_forum_records.sql",
   "0015_forum_refresh_cooldown.sql",
+  "0016_admin_history_reset.sql",
 ] as const;
 
 export interface RankedSchemaStatus {
@@ -67,6 +68,7 @@ type SchemaProbeRow = QueryResultRow & {
   profile_total_ap: boolean;
   profile_equipped_achievement: boolean;
   profile_equipped_achievement_level: boolean;
+  profile_history_visible_since: boolean;
 };
 
 @Injectable()
@@ -207,6 +209,10 @@ export class DatabaseService implements DatabasePort, OnModuleInit, OnApplicatio
           ) AS profile_equipped_achievement_level,
           EXISTS (
             SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = 'ranked_profiles' AND column_name = 'history_visible_since'
+          ) AS profile_history_visible_since,
+          EXISTS (
+            SELECT 1 FROM information_schema.columns
             WHERE table_schema = 'public' AND table_name = 'ranked_matches' AND column_name = 'entry_state'
           ) AS match_entry_state
       `);
@@ -243,6 +249,7 @@ export class DatabaseService implements DatabasePort, OnModuleInit, OnApplicatio
         ["profile_equipped_achievement_level", "ranked_profiles.equipped_achievement_level"],
       ];
       const missing = required.filter(([key]) => !row[key]).map(([, label]) => label);
+      if (!row.profile_history_visible_since) missing.push("column ranked_profiles.history_visible_since");
 
       if (row.ranked_schema_migrations) {
         const applied = await this.pool.query<{ filename: string }>(

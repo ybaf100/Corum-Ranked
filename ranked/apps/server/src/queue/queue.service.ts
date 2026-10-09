@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
   ServiceUnavailableException,
+  UnauthorizedException,
 } from "@nestjs/common";
 import {
   createMatchSeries,
@@ -28,6 +29,7 @@ import { DATABASE, type DatabasePort, type SqlExecutor } from "../database/datab
 import type { EnvironmentRecheckDto } from "../session/session.dto.js";
 import { SessionService } from "../session/session.service.js";
 import type { RankedSessionContext } from "../session/session.types.js";
+import { sessionAliveSince } from "../session/session-presence.policy.js";
 import { MatchService } from "../match/match.service.js";
 
 export type DebugBotDifficulty = "EASY" | "NORMAL" | "HARD";
@@ -122,6 +124,7 @@ export class QueueService {
     await this.matches.settleActiveMatchesForPlayer(session.playerId);
     const now = this.clock.now();
     const result = await this.database.transaction(async (transaction) => {
+      await this.lockAdmission(transaction, session);
       const staleCutoff = new Date(
         now.getTime() - config.operational.timeouts!.queueHeartbeatSeconds * 1_000,
       );
@@ -195,6 +198,7 @@ export class QueueService {
     await this.matches.settleActiveMatchesForPlayer(session.playerId);
     const now = this.clock.now();
     return this.database.transaction(async (transaction) => {
+      await this.lockAdmission(transaction, session);
       const profile = await this.lockProfile(transaction, session.playerId);
       await this.assertPlacementComplete(
         transaction,
@@ -320,8 +324,8 @@ export class QueueService {
     const result = await this.database.query(
       `UPDATE ranked_queue_entries
        SET status = 'LEFT', last_heartbeat_at = $1
-       WHERE player_id = $2 AND status = 'QUEUED'`,
-      [now.toISOString(), session.playerId],
+       WHERE player_id = $2 AND session_id = $3 AND status = 'QUEUED'`,
+      [now.toISOString(), session.playerId, session.sessionId],
     );
     return { left: result.rowCount > 0, serverNow: now.toISOString() };
   }
@@ -331,8 +335,8 @@ export class QueueService {
     await this.database.query(
       `UPDATE ranked_queue_entries
        SET last_heartbeat_at = $1
-       WHERE player_id = $2 AND status = 'QUEUED'`,
-      [now.toISOString(), session.playerId],
+       WHERE player_id = $2 AND session_id = $3 AND status = 'QUEUED'`,
+      [now.toISOString(), session.playerId, session.sessionId],
     );
     return { serverNow: now.toISOString() };
   }
@@ -340,8 +344,8 @@ export class QueueService {
   public async status(session: RankedSessionContext) {
     const now = this.clock.now();
     const queue = await this.database.query<QueueRow>(
-      "SELECT * FROM ranked_queue_entries WHERE player_id = $1",
-      [session.playerId],
+      "SELECT * FROM ranked_queue_entries WHERE player_id = $1 AND session_id = $2",
+      [session.playerId, session.sessionId],
     );
     const entry = queue.rows[0];
     if (!entry) return { status: "NOT_QUEUED", serverNow: now.toISOString() };
@@ -351,8 +355,8 @@ export class QueueService {
         await this.database.query(
           `UPDATE ranked_queue_entries
            SET last_heartbeat_at = $1
-           WHERE player_id = $2 AND status = 'QUEUED'`,
-          [now.toISOString(), session.playerId],
+           WHERE player_id = $2 AND session_id = $3 AND status = 'QUEUED'`,
+          [now.toISOString(), session.playerId, session.sessionId],
         );
       }
       const searchRange = snapshot.operational.matchmaking
@@ -382,6 +386,18 @@ export class QueueService {
       deadlineAt: match.deadline_at ? new Date(match.deadline_at).toISOString() : null,
       serverNow: now.toISOString(),
     };
+  }
+
+  private async lockAdmission(transaction: SqlExecutor, session: RankedSessionContext): Promise<void> {
+    // Serialize with Session create/Close before queue/profile locks. A request
+    // that passed the HTTP guard on the former device must not overwrite the
+    // replacement's assignment once it enters this transaction.
+    await transaction.query("SELECT id FROM ranked_players WHERE id=$1 FOR UPDATE",[session.playerId]);
+    const now=this.clock.now();
+    const current=await transaction.query(`SELECT id FROM ranked_sessions WHERE id=$1 AND player_id=$2
+      AND revoked_at IS NULL AND expires_at>$3 AND last_heartbeat_at>$4`,
+      [session.sessionId,session.playerId,now.toISOString(),sessionAliveSince(now)]);
+    if (!current.rows.length) throw new UnauthorizedException("Ranked connection expired; enter Ranked again.");
   }
 
   private async lockProfile(transaction: SqlExecutor, playerId: string): Promise<ProfileRow> {

@@ -399,6 +399,7 @@ struct RuntimeView {
     RuntimeStage stage = RuntimeStage::Idle;
     std::string status;
     std::string error;
+    bool accountActiveElsewhere = false;
     std::string profileTier;
     int profileScore = 0;
     StandingView standing;
@@ -427,6 +428,7 @@ public:
     static RankedRuntime& get();
 
     void begin();
+    void takeOverSession();
     void leaveRanked();
     void updateSessionHeartbeat();
     void recheckEnvironment();
@@ -547,7 +549,7 @@ private:
     RankedRuntime() = default;
 
     void fetchConfig();
-    void createSession();
+    void createSession(bool takeOver = false);
     void fetchActivePlacement();
     void invalidatePollRequest();
     void invalidateAttemptRequest();
@@ -629,6 +631,7 @@ private:
     std::uint64_t m_progressRequestGeneration = 0;
     std::uint64_t m_pollRequestGeneration = 0;
     bool m_controlBusy = false;
+    bool m_recoveringMatch = false;
     MatchPauseBudget m_matchPauseBudget;
     std::string m_pauseMatchId, m_pauseLeaseId;
     bool m_pauseDesired = false, m_pauseNeedsSync = false, m_pauseBusy = false;

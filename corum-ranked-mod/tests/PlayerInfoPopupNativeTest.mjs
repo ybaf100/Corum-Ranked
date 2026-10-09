@@ -38,12 +38,16 @@ std::string operator""_spr(char const* s,std::size_t n){return std::string(s,n);
 namespace geode::prelude{}
 namespace fmt{template<class T>std::string format(char const* pattern,T value){std::string s(pattern);auto p=s.find("{}");if(p!=std::string::npos)s.replace(p,2,std::to_string(value));return s;}}
 namespace corum::ranked{enum class RuntimeStage{Idle,Matched};struct ForumRankView{std::string provider,externalName,status="PENDING",lastSuccessAt;std::optional<int> rank;};struct ForumRecordsView{bool loaded=false,loading=false;std::string error;std::vector<ForumRankView> records;};struct PlayerInfoView{int accountId=123;std::string username="Human",side="A";bool botReference=false;ForumRecordsView forum;};
-struct RankedRuntime{struct View{RuntimeStage stage=RuntimeStage::Matched;std::uint64_t revision=0;struct {std::string matchId="m",state="ROUND_PREPARE";}match;PlayerInfoView playerInfo;}v;int infoReads=0;static RankedRuntime& get(){static RankedRuntime r;return r;}auto const& view()const{return v;}void fetchPlayerInfo(std::string const& side){++infoReads;v.playerInfo.side=side;}};
+struct RankedRuntime{struct View{RuntimeStage stage=RuntimeStage::Matched;std::uint64_t revision=0;struct {std::string matchId="m",state="ROUND_PREPARE"; struct Profile{std::string displayedTier="RED";} playerAProfile,playerBProfile;}match;PlayerInfoView playerInfo;}v;int infoReads=0;static RankedRuntime& get(){static RankedRuntime r;return r;}auto const& view()const{return v;}void fetchPlayerInfo(std::string const& side){++infoReads;v.playerInfo.side=side;}};
 namespace i18n{std::string text(char const*,char const* fallback){return fallback;}}
 namespace ui{enum class FontWeight{SemiBold,ExtraBold,Black};constexpr ccColor3B Cyan{1,2,3},Blue{1,2,3},Surface{1,2,3},SurfaceRaised{1,2,3},Text{1,2,3},TextMuted{1,2,3},Gold{1,2,3};
 CCNode* surface(CCPoint,CCPoint,ccColor3B,ccColor3B,int,bool){return new CCNode;}
 CCLabelBMFont* menuLabel(std::string const& text,float,CCPoint,ccColor3B,FontWeight=FontWeight::SemiBold){auto* n=new CCLabelBMFont;n->text=text;CCLabelBMFont::labels.push_back(text);return n;}
 void fitMenuLabelWidth(CCLabelBMFont*,float,float,float){}
+enum class RankBadgeDisplay{Compact};inline int haloBadges=0;
+bool hasPersistentRankAmbient(std::string const& tier){return tier=="SILVER"||tier=="GOLD";}
+CCNode* createAnimatedRankBadge(std::string const&,CCPoint,RankBadgeDisplay){++haloBadges;return new CCNode;}
+
 }}
 ${source}
 int main(){using namespace corum::ranked;using ui::RankedPlayerInfoPopup;auto* manager=GameLevelManager::sharedState();auto& runtime=RankedRuntime::get();UserInfoDelegate foreign;
@@ -56,7 +60,7 @@ int main(){using namespace corum::ranked;using ui::RankedPlayerInfoPopup;auto* m
  runtime.v.playerInfo.forum.loaded=true;runtime.v.playerInfo.forum.records.push_back({"GDKF","","PENDING","",{}});
  auto reads=runtime.infoReads;for(int i=0;i<10;++i)p->refresh(0);assert(runtime.infoReads==reads+1&&manager->requests==1);
  runtime.v.match.state="ROUND_ENTERING";p->refresh(0);assert(p->m_closed&&!p->parent&&CCTouchDispatcher::get()->releases==1);delete p;
- runtime.v.match.state="ROUND_PREPARE";auto* second=RankedPlayerInfoPopup::create("B");assert(second&&manager->m_userInfoDelegate==second);
+ runtime.v.match.state="ROUND_PREPARE";runtime.v.match.playerBProfile.displayedTier="GOLD";auto* second=RankedPlayerInfoPopup::create("B");assert(second&&manager->m_userInfoDelegate==second&&ui::haloBadges>0);
  manager->m_userInfoDelegate=&foreign;second->onExit();assert(manager->m_userInfoDelegate==&foreign);delete second;
  runtime.v.match.state="DEATHMATCH_ENTERING";assert(!RankedPlayerInfoPopup::create("A"));
 }

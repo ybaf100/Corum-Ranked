@@ -371,18 +371,20 @@ test('round preparation is passive and automatic with native user options, serve
     assert.match(read('src/LevelInfoLayer.cpp'), /void prepareDebugSpectate\(float\)/);
 });
 
-test('equipped title cannot replace demotion, promotion or placement status in the lobby', () => {
+test('equipped title stays separate from the shared streak/promotion/warning status row', () => {
     const popup = read('src/RankedPopup.cpp');
     const lobby = popup.slice(popup.indexOf('    void renderMain('), popup.indexOf('    void renderPlacementMap('));
-    assert.match(lobby, /profileHintText = tr\("demotion-warning"/);
-    assert.match(lobby, /profileHintText = corum::ranked::i18n::promotionMatch/);
-    assert.match(lobby, /profileHintText = tr\("placement-matches"/);
-    assert.doesNotMatch(lobby, /profileHintText = achievementTitleText|profileHintColor = achievementTitleColor/);
+    const status = popup.slice(popup.indexOf('    void addRankStatus('), popup.indexOf('    struct PlayerCardRefs'));
+    assert.match(status, /profile.promotion.active/);
+    assert.match(status, /i18n::promotionMatch/);
+    assert.match(status, /profile.demotionWarning/);
+    assert.match(status, /tr\("your-rank"/);
+    assert.doesNotMatch(status, /achievementTitleText|achievementTitleColor/);
     assert.match(lobby, /equippedTitle->setID\("ranked-profile-equipped-title"_spr\)/);
-    assert.match(lobby, /profileHint->setID\("ranked-profile-progress-status"_spr\)/);
+    assert.match(lobby, /addRankStatus\(profile/);
     assert.match(lobby, /leftCenter\.y - 68\.0f/);
-    assert.match(lobby, /leftCenter\.y - \(hasTitle \? 85\.0f : 79\.0f\)/);
+    assert.match(lobby, /addPlacementProgress/);
     const card = popup.slice(popup.indexOf('    void addPlayerCard('), popup.indexOf('    void renderResources('));
-    assert.match(card, /profile\.demotionWarning \? tr\("demotion-warning"/);
+    assert.match(card, /addRankStatus\(profile/);
     assert.doesNotMatch(card, /auto\* warning = makeLabel/);
 });

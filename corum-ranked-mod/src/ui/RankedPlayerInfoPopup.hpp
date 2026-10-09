@@ -4,6 +4,7 @@
 #include "../domain/PlayerInfoPresentation.hpp"
 #include "RankedTranslations.hpp"
 #include "RankedVisuals.hpp"
+#include "RankBadgeAssets.hpp"
 #include <Geode/binding/GameLevelManager.hpp>
 #include <Geode/binding/GJUserScore.hpp>
 #include <Geode/binding/UserInfoDelegate.hpp>
@@ -88,6 +89,13 @@ class RankedPlayerInfoPopup final : public Popup, public UserInfoDelegate {
         auto const& info = RankedRuntime::get().view().playerInfo;
         auto* title = menuLabel(i18n::text("player-info", "PLAYER INFO"), 0.50f, {150, 226}, Text, FontWeight::Black);
         fitMenuLabelWidth(title, 268, 0.50f, 0.34f); m_contents->addChild(title);
+        auto const& match = RankedRuntime::get().view().match;
+        auto const& tier = (m_side == "A" ? match.playerAProfile : match.playerBProfile).displayedTier;
+        if (hasPersistentRankAmbient(tier)) {
+            auto* badge = createAnimatedRankBadge(tier,{24,24},RankBadgeDisplay::Compact);
+            badge->setPosition({274,227}); m_contents->addChild(badge,5);
+            title->setPosition({137,226}); fitMenuLabelWidth(title,230,0.50f,0.34f);
+        }
         auto* name = menuLabel(info.username, 0.42f, {150, 203}, Gold, FontWeight::ExtraBold);
         fitMenuLabelWidth(name, 264, 0.42f, 0.30f); m_contents->addChild(name);
         float y = 181;

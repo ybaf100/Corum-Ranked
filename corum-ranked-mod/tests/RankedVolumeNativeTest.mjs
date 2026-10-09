@@ -56,7 +56,7 @@ int main(){using namespace corum::ranked;
 });
 
 test('Settings uses a localized bottom-right Corum modal and limits gain to menu BGM', () => {
-    assert.match(screen, /settingsButton->setPosition\(\{winSize.width - 60, 22\}\)/);
+    assert.match(screen, /settingsButton->setPosition\(\{winSize.width - 70, 30\}\)/);
     assert.match(screen, /tr\("settings", "Settings"\)/);
     assert.match(popup, /FontWeight::Black/);
     assert.match(popup, /RankedVolumeControl::get\(\).setVolume\(m_volume->getValue\(\)\)/);

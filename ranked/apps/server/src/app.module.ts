@@ -13,6 +13,7 @@ import { DebugSpectateModule } from "./debug-spectate/debug-spectate.module.js";
 import { LeaderboardModule } from "./leaderboard/leaderboard.module.js";
 import { PlacementModule } from "./placement/placement.module.js";
 import { AchievementModule } from "./achievement/achievement.module.js";
+import { AdminModule } from "./admin/admin.module.js";
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { AchievementModule } from "./achievement/achievement.module.js";
     LeaderboardModule,
     PlacementModule,
     AchievementModule,
+    AdminModule,
   ],
   controllers: [HealthController],
 })

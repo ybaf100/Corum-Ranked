@@ -499,6 +499,9 @@ void RankedRuntime::begin() {
     ) return;
 
     ++m_sessionGeneration;
+    // A successful Admin action reloads admission while a lobby metadata read
+    // may still be pending. Retire it before fetchConfig reuses this channel.
+    m_controlRequest.cancel(); m_controlBusy = false;
     ++m_standingGeneration; m_standingRequest.cancel(); m_standingBusy = false;
     m_nextStandingAt = {}; m_view.standing = {};
     m_sessionHeartbeatRequest.cancel(); m_sessionHeartbeatBusy = false;
@@ -539,10 +542,13 @@ void RankedRuntime::begin() {
     m_placementResultAcknowledged = false;
     m_view.client = {};
     m_view.environmentWarning = {};
+    m_view.accountActiveElsewhere = false;
+    m_recoveringMatch = false;
     m_view.placement = {};
     m_view.match = {};
     m_view.playerInfo = {};
     m_view.forumRecords = {};
+    m_view.historyLoading = false; m_view.historyError.clear(); m_view.history.clear();
     fetchConfig();
 }
 
@@ -744,7 +750,12 @@ matjson::Value RankedRuntime::installedModsJson() const {
     return result;
 }
 
-void RankedRuntime::createSession() {
+void RankedRuntime::takeOverSession() {
+    if (!m_rankedOpen || !m_view.accountActiveElsewhere || m_controlBusy) return;
+    createSession(true);
+}
+
+void RankedRuntime::createSession(bool takeOver) {
     if (m_controlBusy) return;
     auto* account = GJAccountManager::get();
     auto const accountId = account ? account->m_accountID : 0;
@@ -764,11 +775,13 @@ void RankedRuntime::createSession() {
     body["gdUsername"] = username;
     body["clientVersion"] = Mod::get()->getVersion().toVString();
     body["installedMods"] = installedModsJson();
+    body["takeOver"] = takeOver;
     auto request = baseRequest({});
     // Initial profile creation can require a cold Apps Script CSMP lookup plus one retry.
     request.timeout(std::chrono::seconds(70));
     request.bodyJSON(body);
     m_controlBusy = true;
+    m_view.accountActiveElsewhere = false;
     setStage(RuntimeStage::Loading, "Creating a server session...");
     auto const sessionGeneration = ++m_sessionGeneration;
     auto const sentAt = std::chrono::steady_clock::now();
@@ -778,6 +791,9 @@ void RankedRuntime::createSession() {
             if (sessionGeneration != m_sessionGeneration || !m_rankedOpen) return;
             m_controlBusy = false;
             if (!successful(response)) {
+                auto const error = response.json().unwrapOr(matjson::Value());
+                m_view.accountActiveElsewhere = response.code() == 409 &&
+                    error["code"].asString().unwrapOr("") == "RANKED_ACCOUNT_ACTIVE";
                 setStage(RuntimeStage::Error, "Could not create a Ranked session.", responseError(response));
                 return;
             }
@@ -806,7 +822,13 @@ void RankedRuntime::createSession() {
                 profile.placementGames < profile.placementGamesRequired;
             // Completed runs can still have an unacknowledged Reveal after a lost
             // finalization response, so every session checks the recovery endpoint.
-            fetchActivePlacement();
+            if (root["activeMatch"].asBool().unwrapOr(false)) {
+                m_view.placement.active = false;
+                m_recoveringMatch = true;
+                setStage(RuntimeStage::Queued, "Recovering the existing match...");
+                m_nextPollAt = std::chrono::steady_clock::now();
+                pollQueue();
+            } else fetchActivePlacement();
         }
     );
 }
@@ -866,9 +888,11 @@ void RankedRuntime::fetchActivePlacement() {
     auto request = baseRequest(m_sessionToken);
     m_controlBusy = true;
     setStage(RuntimeStage::Loading, "Checking for an active Placement run...");
+    auto const generation = m_sessionGeneration;
     m_controlRequest.spawn(
         request.get(endpoint("/api/ranked/placement/active")),
-        [this](web::WebResponse response) {
+        [this, generation](web::WebResponse response) {
+            if (generation != m_sessionGeneration || !m_rankedOpen) return;
             m_controlBusy = false;
             if (!successful(response)) {
                 setStage(RuntimeStage::Error, "Could not recover Placement.", responseError(response));
@@ -1154,6 +1178,9 @@ void RankedRuntime::pollQueue() {
             observeServerNow(root);
             auto const status = root["status"].asString().unwrapOr("");
             if (status != "MATCHED") {
+                if (m_recoveringMatch && status == "NOT_QUEUED") {
+                    m_recoveringMatch = false; fetchActivePlacement(); return;
+                }
                 auto const range = root["searchRange"].asInt().unwrapOr(0);
                 m_view.status = range > 0
                     ? fmt::format("Searching for an opponent (rating range +/-{})...", range)
@@ -1163,6 +1190,7 @@ void RankedRuntime::pollQueue() {
                 return;
             }
             m_view.match.matchId = root["matchId"].asString().unwrapOr("");
+            m_recoveringMatch = false;
             m_matchToken = root["matchToken"].asString().unwrapOr("");
             if (m_view.match.matchId.empty() || m_matchToken.empty()) {
                 setStage(RuntimeStage::Error, "The server returned an incomplete match assignment.");
@@ -2273,9 +2301,11 @@ void RankedRuntime::fetchHistory() {
     ++m_view.revision;
     auto request = baseRequest(m_sessionToken);
     m_controlBusy = true;
+    auto const generation = m_sessionGeneration;
     m_controlRequest.spawn(
         request.get(endpoint("/api/ranked/matches")),
-        [this](web::WebResponse response) {
+        [this, generation](web::WebResponse response) {
+            if (generation != m_sessionGeneration || !m_rankedOpen) return;
             m_controlBusy = false;
             m_view.historyLoading = false;
             if (!successful(response)) {
@@ -2330,9 +2360,11 @@ void RankedRuntime::fetchAchievements() {
     ++m_view.revision;
     auto request = baseRequest(m_sessionToken);
     m_controlBusy = true;
+    auto const generation = m_sessionGeneration;
     m_controlRequest.spawn(
         request.get(endpoint("/api/ranked/achievements")),
-        [this](web::WebResponse response) {
+        [this, generation](web::WebResponse response) {
+            if (generation != m_sessionGeneration || !m_rankedOpen) return;
             m_controlBusy = false;
             m_view.achievements.loading = false;
             if (!successful(response)) {

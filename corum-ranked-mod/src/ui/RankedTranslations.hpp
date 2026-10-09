@@ -24,6 +24,22 @@ struct Translation {
 };
 
 inline constexpr std::array kKoreanTranslations {
+    Translation{"session-other-device", "다른 기기에서 접속 중"},
+    Translation{"session-takeover-detail", "다른 기기의 접속을 끊고 여기서 입장합니다.\n진행 중인 경기는 이어서 복구합니다."},
+    Translation{"session-disconnect-other", "다른 기기 접속 끊기"},
+    Translation{"admin-unlock", "도전과제 모두 해금"},
+    Translation{"admin-lp", "LP 및 티어 설정"},
+    Translation{"admin-mmr", "MMR 설정"},
+    Translation{"admin-both", "LP · MMR · 티어 설정"},
+    Translation{"admin-delete-bots", "봇 전부 삭제"},
+    Translation{"admin-history", "플레이어 기록 초기화"},
+    Translation{"admin-reset", "랭크 DB 초기화"},
+    Translation{"admin-password-needed", "디버그 비밀번호를 입력하세요."},
+    Translation{"admin-player-needed", "플레이어 닉네임을 입력하세요."},
+    Translation{"admin-working", "변경 사항 적용 중..."},
+    Translation{"debug", "디버그"},
+    Translation{"debug-bot", "봇 매치"},
+    Translation{"debug-spectate", "관전"},
     Translation{"settings", "설정"},
     Translation{"info", "정보"},
     Translation{"player-info", "플레이어 정보"},

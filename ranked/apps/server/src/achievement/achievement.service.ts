@@ -624,10 +624,15 @@ export class AchievementService {
           };
         }
         const value = metricValue(metrics, definition);
+        // Admin can grant rewards without fabricating played-match metrics.
+        // Owned levels still need to be selectable/displayed as unlocked.
+        const owned = Math.max(0, ...ownUnlocks.map(unlock => Number(unlock.achievement_level)));
+        const threshold = definition.levels.find(level => level.level === owned)?.threshold ?? 0;
+        const progress = progressiveProgressPresentation(definition, Math.max(value, threshold));
         return {
           ...common,
           levels: definition.levels,
-          progress: progressiveProgressPresentation(definition, value),
+          progress: { ...progress, metricValue: value },
         };
       }),
       serverNow: now.toISOString(),
