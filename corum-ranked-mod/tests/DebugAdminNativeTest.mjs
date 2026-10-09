@@ -15,8 +15,25 @@ ${read('helpers/ResultPresentationNativeDouble.hpp').replace(/^#pragma once$/gm,
 #include <charconv>
 #include <cstdint>
 #include <map>
+#include <type_traits>
 #include <variant>
 ${json}
+namespace gd {
+#if defined(CORUM_TEST_ANDROID_GD_STRING)
+// Model Android's separate string ABI and its conversion to std::string.
+// It cannot implicitly cross a second user conversion into matjson::Value.
+class string {
+ std::string value;
+public:
+ string(std::string s):value(std::move(s)){}
+ operator std::string()const{return value;}
+ bool empty()const{return value.empty();}auto size()const{return value.size();}auto data()const{return value.data();}
+};
+static_assert(!std::is_assignable_v<matjson::Value&,string>);
+#else
+using string=std::string;
+#endif
+}
 #define schedule_selector(x) 0
 namespace cocos2d{using ::CCSize;using ::ccColor3B;}
 template<class T>T typeinfo_cast(CCObject* n){return dynamic_cast<T>(n);}
@@ -26,7 +43,7 @@ struct Popup:CCNode{CCNode* m_bgSprite=new CCNode;CCNode* m_closeBtn=new CCNode;
  inline static std::vector<Popup*> opened;virtual bool init(){return true;}bool init(float,float){return true;}
  virtual void onClose(CCObject*){removeFromParentAndCleanup(true);}void show(){static CCNode scene;scene.addChild(this);opened.push_back(this);}};
 struct TextInput:CCNode{std::string value;static TextInput* create(float,char const*){return new TextInput;}
- void setPasswordMode(bool){}void setMaxCharCount(int){}void setFilter(std::string){}auto getString()const{return value;}void setString(std::string s){value=std::move(s);}};
+ void setPasswordMode(bool){}void setMaxCharCount(int){}void setFilter(std::string){}gd::string getString()const{return value;}void setString(std::string s){value=std::move(s);}};
 struct FLAlertLayer;
 struct FLAlertLayerProtocol{virtual ~FLAlertLayerProtocol()=default;virtual void FLAlert_Clicked(FLAlertLayer*,bool)=0;};
 struct FLAlertLayer:CCNode{FLAlertLayerProtocol* m_alertProtocol=nullptr;inline static int summaries=0,confirmations=0;
@@ -61,7 +78,7 @@ namespace debug{inline int spectates=0;void showDebugSpectatePopup(){++spectates
 }
 `;
 function run(code,flags=[]){const dir=mkdtempSync(join(tmpdir(),'corum-admin-native-'));try{writeFileSync(join(dir,'test.cpp'),code);execFileSync('g++',['-std=c++23','-Wall','-Wextra','-Wpedantic','-Werror',...flags,join(dir,'test.cpp'),'-o',join(dir,'test')],{stdio:'pipe'});execFileSync(join(dir,'test'),[],{stdio:'pipe'});}catch(e){throw new Error(e.stderr?.toString()||e.message);}finally{rmSync(dir,{recursive:true,force:true});}}
-test('whole debug/Admin popups compile ON/OFF and guard names, inputs, confirmation, late callbacks and batch summary',()=>{
+for (const androidString of [false,true]) test(`whole debug/Admin popups compile ON/OFF with ${androidString?'Android gd::string':'std::string'} and guard names, inputs, confirmation, late callbacks and batch summary`,()=>{
  const source=strip(read('../src/debug/DebugAdminPopup.cpp')).replace('class DebugAdminPopup final : public Popup, public FLAlertLayerProtocol {','class DebugAdminPopup final : public Popup, public FLAlertLayerProtocol { public:');
  const menu=strip(read('../src/debug/DebugMenuPopup.cpp')).replace('class DebugMenuPopup final : public Popup {','class DebugMenuPopup final : public Popup { public:');
  run(fixture+source+menu+`
@@ -76,6 +93,7 @@ int main(){
  for(auto value:{"","-1","1.5","2147483648"}){admin->m_lp->setString(value);admin->execute(1,false);}assert(web::jobs.empty());
  admin->m_lp->setString("300");admin->m_mmr->setString("500");admin->execute(3,false);
  assert(web::jobs.size()==1&&admin->m_busy);auto job=web::jobs.back();assert(job->op.token=="Bearer session");
+ assert(job->op.body["password"].asString().unwrapOr("")=="password"&&job->op.body["username"].asString().unwrapOr("")=="hwanhee1");
  assert(job->op.body["action"].asString().unwrapOr("")=="SET_BOTH"&&job->op.body["lp"].asInt().unwrapOr(0)==300);
  matjson::Value fail;fail["message"]="Forbidden";job->callback({fail,403});assert(!admin->m_busy&&admin->m_status->text=="Forbidden");
  admin->execute(6,false);assert(web::jobs.size()==1);CCMenuItemSpriteExtra reset;reset.setTag(6);admin->onAction(&reset);
@@ -93,7 +111,7 @@ int main(){
  auto* debug=DebugMenuPopup::create();debug->show();CCMenuItemSpriteExtra first;first.setTag(0);debug->onSelect(&first);
  assert(bots==0&&debug->parent);drainMainQueue();assert(bots==1&&!debug->parent);
 }
-`,['-DCORUM_RANKED_DEBUG_BOT_MATCH=1','-DCORUM_RANKED_DEBUG_SPECTATE=1']);
+`,['-DCORUM_RANKED_DEBUG_BOT_MATCH=1','-DCORUM_RANKED_DEBUG_SPECTATE=1',...(androidString?['-DCORUM_TEST_ANDROID_GD_STRING=1']:[])]);
  run(strip(read('../src/debug/DebugAdminPopup.cpp'))+strip(read('../src/debug/DebugMenuPopup.cpp'))+'\nint main(){}');
 });
 test('whole session conflict popup needs an explicit red-button press and retires before takeover',()=>{

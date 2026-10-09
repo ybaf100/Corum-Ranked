@@ -82,11 +82,13 @@ class DebugAdminPopup final : public Popup, public FLAlertLayerProtocol {
         if (m_closed || m_busy || !allowed() || m_session!=RankedRuntime::get().spectatorLiveSessionToken()) return;
         constexpr char const* actions[]={"UNLOCK_ALL","SET_LP","SET_MMR","SET_BOTH","DELETE_BOTS","RESET_HISTORY","RESET_DB"};
         if (choice<0 || choice>6 || (choice==6 && !confirmed)) return;
-        matjson::Value body; body["action"]=actions[choice]; body["password"]=m_password->getString();
+        // Android gd::string is a distinct ABI type. Normalize before JSON;
+        // assigning it directly would require two implicit conversions.
+        matjson::Value body; body["action"]=actions[choice]; body["password"]=std::string(m_password->getString());
         if (m_password->getString().empty()) { status(i18n::text("admin-password-needed","Enter the debug password.")); return; }
         if (choice!=4 && choice!=6) {
             if (m_username->getString().empty()) { status(i18n::text("admin-player-needed","Enter a player nickname.")); return; }
-            body["username"]=m_username->getString();
+            body["username"]=std::string(m_username->getString());
         }
         if (choice==1 || choice==3) { auto value=number(m_lp); if (!value) { status("Enter valid LP (0 - 2147483647)."); return; } body["lp"]=*value; }
         if (choice==2 || choice==3) { auto value=number(m_mmr,true); if (!value) { status("Enter valid MMR (-2147483648 - 2147483647)."); return; } body["mmr"]=*value; }

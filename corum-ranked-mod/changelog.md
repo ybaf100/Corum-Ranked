@@ -1,5 +1,6 @@
 ## v0.5.0-beta.50
 
+- Normalize Admin text-input strings before JSON serialization so Android32/64 builds accept their separate gd::string ABI. Exercise both string types in the native popup regression fixture.
 - Make the result bar's rounded ends visible, move tier names beside its ends and place endpoint badges closer to the moving LP. Keep lower-tier track colors opaque and wipe a changed track color smoothly from left to right.
 - Skip/Esc first settles the final LP, assembled icons and all pending notices. The button becomes Continue; the next press retires the overlay after native input dispatch. Stamp demotion warnings and include the missing Korean promotion glyphs.
 - Move streak/promotion/demotion state into one status row above the lobby emblem and player cards, with YOUR RANK when empty. Enlarge the lobby emblem, move its halo with it, show SILVER/GOLD halos on both player cards and INFO, and append the standings population.
