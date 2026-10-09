@@ -4,6 +4,7 @@
 - Retire score/reveal input after native dispatch returns, retaining each callback target until touch cancellation, removal and parent restoration finish. Ignore repeated close events and avoid rebuilding a retired Ranked scene.
 - Restore full-size lobby badges with standings immediately below the streak. Lower result headings, retain tier halos, align LP itself to the moving fill endpoint, and use rounded bars with continuous eased interpolation over the existing 2/4-second durations.
 - Remove the blur shader's duplicate native Cocos matrix declaration. Synchronize the beta49 exact client/server gate and workspaces; image assets and their pack are unchanged.
+- Clarify score-track color as the immediately lower displayed tier (SILVER uses BRONZE), following promotion/demotion crossings. Downsample before adjacent-texel bilinear blur passes to remove offset copies of result text/edges. Record the requirement audit and local regression evidence; keep the beta49 gate and image pack unchanged.
 
 ## v0.5.0-beta.48
 

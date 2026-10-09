@@ -33,6 +33,7 @@ private:
     ScoreAnimationInput m_input;
     std::function<void()> m_completion;
     cocos2d::CCMenu* m_menu = nullptr;
+    cocos2d::CCDrawNode* m_track = nullptr;
     cocos2d::CCDrawNode* m_fill = nullptr;
     cocos2d::CCLayerColor* m_leftIcon = nullptr;
     cocos2d::CCLayerColor* m_rightIcon = nullptr;

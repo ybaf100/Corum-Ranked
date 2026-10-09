@@ -39,7 +39,7 @@ namespace cocos2d {
 struct CCSize { float width, height; CCSize(float w,float h):width(w),height(h){} };
 struct CCPoint { float x,y; };
 struct CCRect {};
-struct CCTexture2D { unsigned int getPixelsWide(); unsigned int getPixelsHigh(); };
+struct CCTexture2D { unsigned int getPixelsWide(); unsigned int getPixelsHigh(); void setAntiAliasTexParameters(); };
 struct CCGLProgram {
     bool initWithVertexShaderByteArray(char const*,char const*);
     void addAttribute(char const*,unsigned int);
@@ -67,6 +67,74 @@ ${strip(read('src/ui/ResultBackdropBlur.cpp'))}
 `);
         execFileSync('g++',['-std=c++23','-Wall','-Wextra','-Wpedantic','-Werror','-fsyntax-only',source],{stdio:'pipe'});
     } finally { rmSync(dir,{recursive:true,force:true}); }
+});
+
+test('actual blur capture downsamples once and uses adjacent bilinear texels for both axes',()=>{
+    run(`
+#include <cassert>
+#include <cmath>
+#include <vector>
+namespace cocos2d {
+struct CCSize { float width,height;CCSize(float w,float h):width(w),height(h){} };
+struct CCPoint { float x=0,y=0; };
+struct CCRect {};
+struct CCTexture2D {
+    unsigned int width,height;bool linear=false;
+    unsigned int getPixelsWide(){return width;}unsigned int getPixelsHigh(){return height;}
+    void setAntiAliasTexParameters(){linear=true;}
+};
+struct CCGLProgram {
+    CCPoint step;bool initWithVertexShaderByteArray(char const*,char const*){return true;}
+    void addAttribute(char const*,unsigned int){}bool link(){return true;}
+    void updateUniforms(){}void use(){}void autorelease(){}
+    int getUniformLocationForName(char const*){return 1;}
+    void setUniformLocationWith2f(int,float x,float y){step={x,y};}
+};
+struct CCNode { int visits=0;virtual ~CCNode()=default;virtual void visit(){++visits;} };
+struct CCSprite:CCNode {
+    CCTexture2D* texture;CCGLProgram* shader=nullptr;CCRect rect;bool flip=false;
+    float scaleX=1,scaleY=1;CCPoint position;
+    static CCSprite* createWithTexture(CCTexture2D* texture,CCRect const&){auto* s=new CCSprite;s->texture=texture;return s;}
+    CCTexture2D* getTexture(){return texture;}CCRect const& getTextureRect(){return rect;}
+    bool isFlipY(){return flip;}void setFlipY(bool value){flip=value;}
+    void setShaderProgram(CCGLProgram* program){shader=program;}
+    void setScaleX(float value){scaleX=value;}void setScaleY(float value){scaleY=value;}
+    void setPosition(CCPoint value){position=value;}void visit()override;
+};
+struct CCRenderTexture {
+    CCSprite* sprite;inline static std::vector<CCRenderTexture*> textures;
+    inline static std::vector<CCSprite*> passes;
+    static CCRenderTexture* create(int w,int h){
+        auto* target=new CCRenderTexture;target->sprite=new CCSprite;
+        // Simulate backing pixels differing from logical dimensions, as on retina.
+        target->sprite->texture=new CCTexture2D{static_cast<unsigned int>(w*2),static_cast<unsigned int>(h*2)};
+        target->sprite->flip=true;textures.push_back(target);return target;
+    }
+    CCSprite* getSprite(){return sprite;}void beginWithClear(float,float,float,float){}void end(){}
+};
+void CCSprite::visit(){CCNode::visit();CCRenderTexture::passes.push_back(this);}
+inline constexpr char kCCAttributeNamePosition[]="a_position",kCCAttributeNameColor[]="a_color",kCCAttributeNameTexCoord[]="a_texCoord";
+inline constexpr unsigned int kCCVertexAttrib_Position=0,kCCVertexAttrib_Color=1,kCCVertexAttrib_TexCoords=2;
+}
+namespace geode::prelude {using namespace cocos2d;}
+#define small char
+${strip(read('src/ui/ResultBackdropBlur.cpp'))}
+int main(){
+    using namespace cocos2d;
+    CCNode screen;auto* result=corum::ranked::ui::captureBlurredResult(&screen,{568,320});
+    auto const& targets=CCRenderTexture::textures;auto const& passes=CCRenderTexture::passes;
+    assert(result&&screen.visits==1&&targets.size()==4&&passes.size()==3);
+    assert(!passes[0]->shader&&passes[0]->texture==targets[0]->sprite->texture);
+    assert(passes[0]->scaleX==0.5f&&passes[0]->scaleY==0.5f);
+    assert(passes[1]->texture==targets[1]->sprite->texture&&passes[2]->texture==targets[2]->sprite->texture);
+    assert(passes[1]->shader->step.x==1.0f/passes[1]->texture->width&&passes[1]->shader->step.y==0);
+    assert(passes[2]->shader->step.y==1.0f/passes[2]->texture->height&&passes[2]->shader->step.x==0);
+    assert(passes[1]->texture->width==passes[2]->texture->width&&passes[1]->texture->height==passes[2]->texture->height);
+    for(auto* pass:passes)assert(pass->texture->linear&&pass->flip&&pass->position.x==142&&pass->position.y==80);
+    assert(result->texture==targets[3]->sprite->texture&&result->scaleX==2&&result->scaleY==2);
+    assert(result->position.x==284&&result->position.y==160&&result->flip);
+}
+`);
 });
 
 const model=`
@@ -111,6 +179,7 @@ int main() {
 
 const scoreNative=`
 #include "${join(root,'tests/helpers/ResultPresentationNativeDouble.hpp')}"
+#include <cctype>
 ${model}
 namespace cocos2d { using ::CCSize; using ::ccColor3B; }
 ${strip(read('src/ui/RankBadgeAssets.hpp'))}
@@ -124,11 +193,7 @@ CCLabelBMFont* menuLabel(std::string text,float scale,CCPoint position,ccColor3B
 void fitMenuLabelWidth(CCLabelBMFont* label,float width,float maximum,float) {
     label->setScale(std::min(maximum+0.18f,width/label->size.width));
 }
-ccColor3B tierColor(std::string const& tier) {
-    if(tier=="RED")return {244,76,91};
-    if(tier=="GOLD")return Gold;
-    return {55,220,234};
-}
+${method(read('src/ui/RankedVisuals.hpp'),'inline ccColor3B tierColor(')}
 CCNode* surface(CCSize size,CCPoint position,ccColor3B,ccColor3B,int,bool) {
     auto* root=CCNode::create(); root->size=size; root->position=position; return root;
 }
@@ -288,6 +353,44 @@ int main() {
     assert(full->m_fill->radius==5&&full->m_score->position.x==full->m_barLeft+full->m_barWidth);
     assert(full->m_delta->position.x<full->m_score->position.x); // delta fits; LP stays anchored
     full->onSkip(nullptr);drainMainQueue();
+}
+`);
+});
+
+test('actual score track uses the immediately lower tier and follows promotion/demotion crossings',()=>{
+    run(scoreNative+`
+using namespace corum::ranked::ui;
+void assertTrack(ResultScoreLayer* layer, std::string const& tier) {
+    auto const& bands=layer->m_input.bands;
+    auto const band=std::find_if(bands.begin(),bands.end(),[&](auto const& b){return b.tier==tier;});
+    auto const expected=band==bands.begin()?ccc3(100,108,124):tierColor(std::prev(band)->tier);
+    auto const actual=layer->m_track->segmentColor;
+    assert(actual.r==expected.r/255.0f&&actual.g==expected.g/255.0f&&actual.b==expected.b/255.0f);
+    assert(actual.a==180/255.0f&&layer->m_track->size.width==layer->m_barWidth&&layer->m_track->radius==5);
+    auto const foreground=tierColor(tier);
+    if(layer->m_fill->size.width>0)assert(layer->m_fill->segmentColor.r==foreground.r/255.0f);
+    assert(layer->m_score->color==foreground&&layer->m_tier==tier);
+}
+int main() {
+    CCNode screen;auto i=ordinary();
+    for(auto const& band:i.bands) {
+        i.beforeTier=i.afterTier=band.tier;i.before=band.minimum+20;i.after=i.before+13;
+        auto* layer=ResultScoreLayer::create(i,&screen,[]{});screen.addChild(layer);
+        assertTrack(layer,band.tier);layer->update(1);assertTrack(layer,band.tier);
+        layer->update(1);assertTrack(layer,band.tier);layer->onSkip(nullptr);drainMainQueue();
+    }
+    for(std::size_t index=1;index<i.bands.size();++index) {
+        i=ordinary();auto const& lower=i.bands[index-1];auto const& higher=i.bands[index];
+        i.beforeTier=lower.tier;i.afterTier=higher.tier;i.before=higher.minimum-1;i.after=higher.minimum+50;i.promoted=true;
+        auto* promotion=ResultScoreLayer::create(i,&screen,[]{});screen.addChild(promotion);
+        assertTrack(promotion,lower.tier);promotion->update(2);assertTrack(promotion,higher.tier);
+        promotion->update(2);assertTrack(promotion,higher.tier);promotion->onSkip(nullptr);drainMainQueue();
+        i.beforeTier=higher.tier;i.afterTier=lower.tier;i.before=higher.minimum;i.after=higher.minimum-50;
+        i.promoted=false;i.demoted=true;
+        auto* demotion=ResultScoreLayer::create(i,&screen,[]{});screen.addChild(demotion);
+        assertTrack(demotion,higher.tier);demotion->update(2);assertTrack(demotion,lower.tier);
+        demotion->update(2);assertTrack(demotion,lower.tier);demotion->onSkip(nullptr);drainMainQueue();
+    }
 }
 `);
 });

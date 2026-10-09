@@ -24,6 +24,13 @@ std::string targetKey(ScoreProgressSample const& sample) {
     return target ? fmt::format("gold:{}:{}:{}", target->accountId, target->rank, target->score) : "gold-unknown";
 }
 
+ccColor3B trackColor(std::vector<TierCutoffView> const& bands, std::string const& tier) {
+    auto const band = std::find_if(bands.begin(),bands.end(),[&](auto const& b) { return b.tier == tier; });
+    // The track represents the immediately lower display tier, rather than
+    // the player's tier before this match. RED has no lower tier.
+    return band == bands.begin() || band == bands.end() ? ccc3(100,108,124) : tierColor(std::prev(band)->tier);
+}
+
 void drawRoundedBar(CCDrawNode* node, float width, ccColor3B color, GLubyte opacity = 255) {
     constexpr float height = 10;
     node->clear(); node->setContentSize({width,height});
@@ -56,9 +63,8 @@ bool ResultScoreLayer::init(ScoreAnimationInput input, CCNode* resultScreen, std
     m_barLeft = std::max(50.0f, size.width * 0.125f);
     m_barWidth = size.width - m_barLeft * 2;
     m_barY = size.height * 0.36f; m_iconY = m_barY + 92;
-    auto const previous = m_input.beforeTier == "RED" ? ccc3(100,108,124) : tierColor(m_input.beforeTier);
-    auto* track = CCDrawNode::create(); drawRoundedBar(track,m_barWidth,previous,180);
-    track->setPosition({m_barLeft,m_barY}); addChild(track, 10);
+    m_track = CCDrawNode::create(); m_track->setPosition({m_barLeft,m_barY});
+    m_track->setID("ranked-result-score-track"_spr); addChild(m_track, 10);
     m_fill = CCDrawNode::create(); m_fill->setPosition({m_barLeft,m_barY});
     m_fill->setID("ranked-result-score-fill"_spr); addChild(m_fill, 11);
     for (auto x : {m_barLeft, m_barLeft + m_barWidth}) {
@@ -203,6 +209,7 @@ void ResultScoreLayer::replaceTierIcons(ScoreProgressSample const& sample, bool 
 }
 
 void ResultScoreLayer::applySample(ScoreProgressSample const& sample) {
+    if (m_tier != sample.tier) drawRoundedBar(m_track,m_barWidth,trackColor(m_input.bands,sample.tier),180);
     replaceTierIcons(sample,m_elapsed > 0);
     auto const color = tierColor(sample.tier);
     drawRoundedBar(m_fill,m_barWidth * static_cast<float>(sample.fill),color);
