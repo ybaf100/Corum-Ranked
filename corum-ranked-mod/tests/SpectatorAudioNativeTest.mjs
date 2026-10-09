@@ -98,6 +98,7 @@ struct CorumRankedLayer: CCLayerColor {
  enum class Page{Live,Profile};Page m_page=Page::Live;
  bool m_rankedChildScenePushed=true,m_enteringSongGate=false,m_enteringLevel=false;
  void* m_rankTransitionLayer=nullptr;
+ void* m_resultScoreLayer=nullptr;bool m_resultScorePending=false;
  std::string m_stageResultAudioPlayedKey;Menu* m_menu=nullptr;
  Menu* m_settingsMenu=nullptr;unsigned long m_volumeSession=0;
  void setKeypadEnabled(bool){}void schedule(int,float){}

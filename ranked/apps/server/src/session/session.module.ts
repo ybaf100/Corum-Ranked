@@ -5,10 +5,11 @@ import { SessionGuard } from "./session.guard.js";
 import { SessionService } from "./session.service.js";
 import { ForumRecordsModule } from "../forum/forum-records.module.js";
 import { ForumSessionController } from "../forum/forum-session.controller.js";
+import { StandingController } from "../leaderboard/standing.controller.js";
 
 @Module({
   imports: [RankedConfigModule, ForumRecordsModule],
-  controllers: [SessionController, ForumSessionController],
+  controllers: [SessionController, ForumSessionController, StandingController],
   providers: [SessionService, SessionGuard],
   exports: [SessionService, SessionGuard],
 })

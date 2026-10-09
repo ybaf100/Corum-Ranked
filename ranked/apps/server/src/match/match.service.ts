@@ -50,6 +50,7 @@ import { AchievementService } from "../achievement/achievement.service.js";
 import { OutboxService } from "../relay/outbox.service.js";
 import type { RankedSessionContext } from "../session/session.types.js";
 import { SessionService } from "../session/session.service.js";
+import { buildScorePresentation } from "./score-presentation.js";
 import { MatchAccessService } from "./match-access.service.js";
 import {
   ATTEMPT_TRANSPORT_GRACE_MS,
@@ -2523,6 +2524,10 @@ export class MatchService {
     await this.persistRatingProfile(transaction, current.player_b_id, ratingB, winner === "B", now);
     const placementGamesRequired = config.operational.mmrPolicy.placementGames;
     const ratingPresentation = {
+      scorePresentation: await buildScorePresentation(transaction, config.operational.tierBands, {
+        A: { playerId: current.player_a_id, before: beforeA, after: ratingA.profile },
+        B: { playerId: current.player_b_id, before: beforeB, after: ratingB.profile },
+      }, winner),
       perfectWinSide,
       rankedScoreDelta: { A: ratingA.visibleScoreDelta, B: ratingB.visibleScoreDelta },
       profileBefore: {

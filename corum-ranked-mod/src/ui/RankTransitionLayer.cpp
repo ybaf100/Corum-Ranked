@@ -1,4 +1,5 @@
 #include "RankTransitionLayer.hpp"
+#include "RankedInput.hpp"
 
 #include "RankBadgeAssets.hpp"
 #include "RankedVisuals.hpp"
@@ -133,12 +134,13 @@ RankTransitionLayer* RankTransitionLayer::create(
     std::string eventText,
     std::string skipText,
     std::string continueText,
-    std::function<void()> completion
+    std::function<void()> completion,
+    bool chainToResult
 ) {
     auto* result = new RankTransitionLayer();
     if (result && result->init(
         std::move(oldRank), std::move(newRank), type,
-        std::move(eventText), std::move(skipText), std::move(continueText), std::move(completion)
+        std::move(eventText), std::move(skipText), std::move(continueText), std::move(completion), chainToResult
     )) {
         result->autorelease();
         return result;
@@ -154,7 +156,8 @@ bool RankTransitionLayer::init(
     std::string eventText,
     std::string skipText,
     std::string continueText,
-    std::function<void()> completion
+    std::function<void()> completion,
+    bool chainToResult
 ) {
     if (!CCLayerColor::initWithColor({2, 5, 15, 255})) return false;
 
@@ -165,6 +168,7 @@ bool RankTransitionLayer::init(
     m_skipText = std::move(skipText);
     m_continueText = std::move(continueText);
     m_completion = std::move(completion);
+    m_chainToResult = chainToResult && m_type != RankTransitionType::Placement;
 
     if (!isKnownRankName(m_oldRank) || !isKnownRankName(m_newRank) || m_oldRank == m_newRank) return false;
     if (m_type == RankTransitionType::Placement && (m_oldRank != "UNRANKED" || m_newRank == "UNRANKED")) return false;
@@ -190,7 +194,8 @@ bool RankTransitionLayer::init(
         case RankTransitionType::Promotion: playPromotion(); break;
         case RankTransitionType::Demotion: playDemotion(); break;
     }
-    runAction(CCSequence::create(
+    if (m_chainToResult) unlockSkip();
+    else runAction(CCSequence::create(
         CCDelayTime::create(1.50f),
         CallFuncExt::create([this] { unlockSkip(); }),
         nullptr
@@ -608,6 +613,7 @@ void RankTransitionLayer::unlockSkip() {
 
 void RankTransitionLayer::revealFinalState(bool skipped) {
     if (m_finalShown || m_finished) return;
+    if (m_chainToResult) { finishChainedReveal(); return; }
     m_finalShown = true;
     m_skipAllowed = false;
     stopAllActions();
@@ -677,7 +683,18 @@ void RankTransitionLayer::onContinue(CCObject*) {
 }
 
 void RankTransitionLayer::keyBackClicked() {
+    if (m_chainToResult) { finishChainedReveal(); return; }
     if (m_skipAllowed && !m_finalShown) revealFinalState(true);
+}
+
+void RankTransitionLayer::finishChainedReveal() {
+    if (m_finished) return;
+    [[maybe_unused]] Ref<RankTransitionLayer> keepAlive(this);
+    m_finished = true; stopAllActions(); setKeypadEnabled(false); setVisible(false);
+    if (m_controlMenu) { cancelMenuTouch(m_controlMenu); m_controlMenu->setTouchEnabled(false); }
+    auto completion = std::move(m_completion);
+    removeFromParentAndCleanup(true);
+    if (completion) completion();
 }
 
 } // namespace corum::ranked::ui

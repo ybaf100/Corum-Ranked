@@ -5,6 +5,7 @@
 #include "domain/MatchPauseBudget.hpp"
 #include "domain/GameplayConcession.hpp"
 #include "domain/RankAssetPolicy.hpp"
+#include "domain/ResultScorePresentation.hpp"
 
 #include <Geode/Geode.hpp>
 #include <Geode/utils/web.hpp>
@@ -321,6 +322,7 @@ struct MatchView {
     RankedProfileView profileAfterB;
     RatingEventView ratingEventA;
     RatingEventView ratingEventB;
+    ResultScoreView scorePresentation;
     std::vector<AchievementUnlockNoticeView> achievementUnlocks;
     bool spectatorActive = false;
     bool spectatorLiveEnabled = true;
@@ -399,6 +401,7 @@ struct RuntimeView {
     std::string error;
     std::string profileTier;
     int profileScore = 0;
+    StandingView standing;
     bool profileScoreVisible = false;
     int placementGames = 0;
     int placementGamesRequired = 0;
@@ -450,6 +453,7 @@ public:
     void dismissMatch();
     void queueAgain();
     void fetchHistory();
+    void fetchStanding();
     void fetchAchievements();
     void fetchPlayerInfo(std::string const& side);
     void fetchForumRecords(bool refresh = false);
@@ -656,6 +660,10 @@ private:
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_pauseRequest, m_surrenderRequest;
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_playerInfoRequest, m_forumRecordsRequest;
     std::uint64_t m_playerInfoGeneration = 0, m_forumRecordsGeneration = 0;
+    geode::async::TaskHolder<geode::utils::web::WebResponse> m_standingRequest;
+    std::uint64_t m_standingGeneration = 0;
+    bool m_standingBusy = false;
+    std::chrono::steady_clock::time_point m_nextStandingAt {};
 };
 
 char const* stageName(RuntimeStage stage);

@@ -144,7 +144,10 @@ item.enabled=true;widget.m_songInfoObject=nullptr;assert(!rankedJukeboxOpener(&w
     assert.match(popup,/unregisterForcePrio\(this\)/);
     assert.doesNotMatch(popup, /JBSongWidget\*|reinterpret_cast|setTarget|addNongLayer\(/);
     const screen=read('src/RankedPopup.cpp');
-    assert.match(screen,/if \(!corum::ranked::ui::rankedJukeboxLoaded\(\)\) return/);
+    const button=extract(screen,'void addJukeboxButton(');
+    assert.doesNotMatch(button,/if .* return/);
+    assert.match(button,/grayButtonVisual\(m_jukeboxButton->getNormalImage\(\)\)/);
+    assert.match(screen,/tr\("jukebox-required",/);
     assert.match(screen,/m_jukebox\.reset\(\)/);
     assert.match(read('src/RankedRoundPreparation.cpp'),/roundModalOpen\(origin\)/);
 });

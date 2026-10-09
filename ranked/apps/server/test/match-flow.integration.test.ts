@@ -466,6 +466,9 @@ describe("two-client authoritative match flow", () => {
     liveDocument = {
       ...document,
       maps: document.maps.map((map) => ({ ...map, qualifyingPercent: 99 })),
+      operational: { ...document.operational, tierBands: document.operational.tierBands.map((band) => ({
+        ...band, minInclusive: band.tier === "RED" ? band.minInclusive : band.minInclusive + 10,
+      })) },
     };
     state = (await matches.state(matchId, statusA.matchToken, playerA)) as Record<string, any>;
     expect(state.currentRound.map.qualifyingPercent).toBe(snapshottedQualifying);
@@ -712,6 +715,16 @@ describe("two-client authoritative match flow", () => {
     state = (await matches.state(matchId, statusA.matchToken, playerA)) as Record<string, any>;
     expect(state.state).toBe("MATCH_RESULT");
     expect(state.result.winnerSide).toBe("A");
+    expect(state.result.scorePresentation.version).toBe(1);
+    expect(state.result.scorePresentation.tierBands).toEqual([...document.operational.tierBands]
+      .sort((a,b) => a.minInclusive - b.minInclusive).map(({tier,minInclusive}) => ({tier,minInclusive})));
+    const resultScoreSnapshot = structuredClone(state.result.scorePresentation);
+    // The persisted result must keep its ladder/target snapshot even after the
+    // live ladder changes; normal state polling must never randomize it again.
+    await database.query("UPDATE ranked_profiles SET visible_ranked_score = visible_ranked_score + 999 WHERE player_id=$1",[playerA.playerId]);
+    const replay = await matches.state(matchId,statusB.matchToken,playerB) as Record<string,any>;
+    expect(replay.result.scorePresentation).toEqual(resultScoreSnapshot);
+    await database.query("UPDATE ranked_profiles SET visible_ranked_score = visible_ranked_score - 999 WHERE player_id=$1",[playerA.playerId]);
     expect(state.currentRound.outcome).toMatchObject({
       result: "DRAW",
       reason: "LAST_ATTEMPT_CLEAR",

@@ -380,8 +380,8 @@ test('equipped title cannot replace demotion, promotion or placement status in t
     assert.doesNotMatch(lobby, /profileHintText = achievementTitleText|profileHintColor = achievementTitleColor/);
     assert.match(lobby, /equippedTitle->setID\("ranked-profile-equipped-title"_spr\)/);
     assert.match(lobby, /profileHint->setID\("ranked-profile-progress-status"_spr\)/);
-    assert.match(lobby, /leftCenter\.y - 68\.0f/);
-    assert.match(lobby, /leftCenter\.y - \(hasTitle \? 85\.0f : 79\.0f\)/);
+    assert.match(lobby, /leftCenter\.y - 83\.0f/);
+    assert.match(lobby, /leftCenter\.y - \(hasTitle \? 98\.0f : 88\.0f\)/);
     const card = popup.slice(popup.indexOf('    void addPlayerCard('), popup.indexOf('    void renderResources('));
     assert.match(card, /profile\.demotionWarning \? tr\("demotion-warning"/);
     assert.doesNotMatch(card, /auto\* warning = makeLabel/);

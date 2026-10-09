@@ -66,6 +66,8 @@ ${fields}
  bool m_controlBusy=true;geode::async::TaskHolder<web::WebResponse> m_controlRequest;int pollRetirements=0;
  std::uint64_t m_playerInfoGeneration=0,m_forumRecordsGeneration=0;
  geode::async::TaskHolder<web::WebResponse> m_playerInfoRequest,m_forumRecordsRequest;
+ std::uint64_t m_standingGeneration=0;bool m_standingBusy=false;
+ geode::async::TaskHolder<web::WebResponse> m_standingRequest;
  struct {struct {struct {bool loading=true;}forum;}playerInfo;struct {bool loading=true;}forumRecords;}m_view;
  RuntimeStage stage=RuntimeStage::Idle;
  void invalidatePollRequest(){++pollRetirements;}
@@ -198,7 +200,8 @@ struct RankedRuntime {RuntimeView state;int dismissals=0,fetches=0;bool acknowle
  static RankedRuntime& get(){static RankedRuntime r;return r;}RuntimeView const& view()const{return state;}
  void dismissMatch(){++dismissals;if(!acknowledgementPending)state.stage=RuntimeStage::Ready;}void fetchAchievements(){++fetches;}};
 struct Layer {
- enum class Page {Live,History};Page m_page=Page::Live;bool m_rankTransitionLayer=false;std::string m_localMessage;
+ enum class Page {Live,History};Page m_page=Page::Live;
+ bool m_rankTransitionLayer=false,m_resultScoreLayer=false,m_resultScorePending=false;std::string m_localMessage;
  int exits=0,historyBacks=0;void onCloseLayer(CCObject*){++exits;}void onHistoryBack(CCObject*){++historyBacks;m_page=Page::Live;}
 ${method(source, '    void onResultClose(')}
 ${method(source, '    void keyBackClicked()').replace(' override', '')}
@@ -212,6 +215,8 @@ int main(){auto& runtime=RankedRuntime::get();
  {Layer layer;runtime.state.stage=RuntimeStage::Ready;layer.keyBackClicked();assert(layer.exits==1);}
  {Layer layer;layer.m_page=Layer::Page::History;layer.keyBackClicked();assert(layer.historyBacks==1&&layer.exits==0);}
  {Layer layer;layer.m_rankTransitionLayer=true;layer.keyBackClicked();assert(layer.exits==0);}
+ {Layer layer;layer.m_resultScoreLayer=true;layer.keyBackClicked();assert(layer.exits==0);}
+ {Layer layer;layer.m_resultScorePending=true;layer.keyBackClicked();assert(layer.exits==0);}
  struct Card {std::string id;int claimableRewards;};std::vector<Card> cards={{"a",0},{"b",2},{"c",0},{"d",1},{"e",0},{"f",3}};
  auto order=corum::ranked::achievementDisplayOrder(cards);assert((order==std::vector<std::size_t>{1,3,5,0,2,4}));
  assert(cards[order[0]].id=="b"&&cards[order[3]].id=="a");cards[1].claimableRewards=0;

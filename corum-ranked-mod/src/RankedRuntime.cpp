@@ -194,6 +194,63 @@ corum::ranked::AchievementUnlockNoticeView parseAchievementNotice(matjson::Value
     return notice;
 }
 
+corum::ranked::StandingView parseStanding(matjson::Value const& value) {
+    corum::ranked::StandingView view;
+    if (!value.isObject()) return view;
+    auto const rank = value["rank"].asInt();
+    view.total = static_cast<int>(value["total"].asInt().unwrapOr(0));
+    if (rank.isOk() && rank.unwrap() > 0 && rank.unwrap() <= view.total) {
+        view.rank = static_cast<int>(rank.unwrap());
+        // Derive only the display percentage from the authoritative rank/count.
+        view.topPercent = static_cast<double>(*view.rank) / view.total * 100.0;
+    }
+    auto const target = value["target"];
+    if (view.rank && *view.rank > 1 && target.isObject()) {
+        corum::ranked::StandingTargetView t;
+        t.accountId = numFromString<int>(target["gdAccountId"].asString().unwrapOr("")).unwrapOr(0);
+        t.player = target["player"].asString().unwrapOr("");
+        t.bot = target["isBot"].asBool().unwrapOr(false);
+        t.rank = static_cast<int>(target["rank"].asInt().unwrapOr(0));
+        t.score = static_cast<int>(target["visibleRankedScore"].asInt().unwrapOr(0));
+        if (t.rank > 0 && t.rank < *view.rank) view.target = std::move(t);
+    }
+    return view;
+}
+
+corum::ranked::ScoreSeriesView parseScoreSeries(matjson::Value const& value) {
+    corum::ranked::ScoreSeriesView series;
+    if (!value.isObject()) return series;
+    series.sourceTier = value["sourceTier"].asString().unwrapOr("");
+    series.targetTier = value["targetTier"].asString().unwrapOr("");
+    series.cutoff = static_cast<int>(value["cutoff"].asInt().unwrapOr(0));
+    series.gamesRequired = static_cast<int>(value["gamesRequired"].asInt().unwrapOr(0));
+    series.winsRequired = static_cast<int>(value["winsRequired"].asInt().unwrapOr(0));
+    series.results = parseRatingMarks(value["results"]);
+    series.active = series.gamesRequired > 0 && series.winsRequired > 0 &&
+        series.winsRequired <= series.gamesRequired && series.results.size() <= static_cast<std::size_t>(series.gamesRequired);
+    return series;
+}
+
+corum::ranked::ResultScoreView parseResultScore(matjson::Value const& value) {
+    corum::ranked::ResultScoreView view;
+    if (value["version"].asInt().unwrapOr(0) != 1) return view;
+    if (auto bands = value["tierBands"].asArray(); bands.isOk()) {
+        for (auto const& band : bands.unwrap()) {
+            auto const cutoff = band["minInclusive"].asInt();
+            if (!cutoff.isOk()) return {};
+            view.bands.push_back({band["tier"].asString().unwrapOr(""), static_cast<int>(cutoff.unwrap())});
+        }
+    }
+    if (!corum::ranked::validScoreBands(view.bands)) return {};
+    auto const player = [&](char const* side) {
+        auto const data = value["players"][side];
+        return corum::ranked::ResultScorePlayerView {parseStanding(data["before"]),
+            parseStanding(data["after"]), parseScoreSeries(data["promotion"])};
+    };
+    view.playerA = player("A"); view.playerB = player("B"); view.available = true;
+    return view;
+}
+
 corum::ranked::RankedProfileView parseRankedProfile(matjson::Value const& value) {
     corum::ranked::RankedProfileView profile;
     if (!value.isObject()) return profile;
@@ -442,6 +499,8 @@ void RankedRuntime::begin() {
     ) return;
 
     ++m_sessionGeneration;
+    ++m_standingGeneration; m_standingRequest.cancel(); m_standingBusy = false;
+    m_nextStandingAt = {}; m_view.standing = {};
     m_sessionHeartbeatRequest.cancel(); m_sessionHeartbeatBusy = false;
     m_sessionLeaseDeadline = {}; m_nextSessionHeartbeatAt = {};
     resetGameplayControls();
@@ -755,6 +814,7 @@ void RankedRuntime::createSession() {
 void RankedRuntime::leaveRanked() {
     m_rankedOpen = false; m_sessionRejected = true;
     ++m_sessionGeneration;
+    ++m_standingGeneration; m_standingRequest.cancel(); m_standingBusy = false;
     m_sessionHeartbeatRequest.cancel(); m_sessionHeartbeatBusy = false;
     m_controlRequest.cancel(); m_controlBusy = false;
     ++m_playerInfoGeneration; ++m_forumRecordsGeneration;
@@ -1608,6 +1668,7 @@ void RankedRuntime::parseMatchState(matjson::Value const& root) {
     m_view.match.profileAfterB = {};
     m_view.match.ratingEventA = {};
     m_view.match.ratingEventB = {};
+    m_view.match.scorePresentation = {};
     m_view.match.achievementUnlocks.clear();
     if (result.isObject() && !m_view.match.side.empty()) {
         auto const deltaA = result["rankedScoreDelta"]["A"].asInt();
@@ -1644,6 +1705,7 @@ void RankedRuntime::parseMatchState(matjson::Value const& root) {
         }
         m_view.match.ratingEventA = parseRatingEvent(result["events"]["A"]);
         m_view.match.ratingEventB = parseRatingEvent(result["events"]["B"]);
+        m_view.match.scorePresentation = parseResultScore(result["scorePresentation"]);
         if (auto const unlocks = result["achievementUnlocks"][m_view.match.side].asArray(); unlocks.isOk()) {
             for (auto const& item : unlocks.unwrap()) {
                 auto notice = parseAchievementNotice(item);
@@ -2088,6 +2150,7 @@ void RankedRuntime::dismissMatch() {
     } else if (m_view.match.state != "MATCH_RESULT" && m_view.match.state != "CANCELLED") {
         return;
     }
+    m_nextStandingAt = {};
     if (
         placement && m_view.match.state == "PLACEMENT_RESULT" &&
         !m_placementResultAcknowledged
@@ -2149,6 +2212,8 @@ void RankedRuntime::dismissMatch() {
         m_view.resultStreak = profile.resultStreak;
         m_view.promotion = profile.promotion;
         m_view.demotionWarning = profile.demotionWarning;
+        if (m_view.match.scorePresentation.available) m_view.standing = ownSide == "A"
+            ? m_view.match.scorePresentation.playerA.after : m_view.match.scorePresentation.playerB.after;
     }
     m_matchToken.clear();
     m_attemptId.clear();
@@ -3581,12 +3646,31 @@ void RankedRuntime::sendAttemptProgress() {
     );
 }
 
+void RankedRuntime::fetchStanding() {
+    if (!m_rankedOpen || m_sessionToken.empty() || m_sessionRejected || m_standingBusy) return;
+    m_standingBusy = true;
+    m_nextStandingAt = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+    auto const generation = ++m_standingGeneration;
+    auto const session = m_sessionToken;
+    auto request = baseRequest(session);
+    request.timeout(std::chrono::seconds(10));
+    m_standingRequest.spawn(request.get(endpoint("/api/ranked/session/standing")),
+        [this, generation, session](web::WebResponse response) {
+            if (generation != m_standingGeneration || session != m_sessionToken || !m_rankedOpen) return;
+            m_standingBusy = false;
+            if (!successful(response)) return;
+            m_view.standing = parseStanding(response.json().unwrapOr(matjson::Value())["standing"]);
+            ++m_view.revision;
+        });
+}
+
 void RankedRuntime::tick() {
     updateSessionHeartbeat();
     if (m_sessionRejected) return;
     flushGameplayControls();
     SpectatorLiveRuntime::get().tickTerminal();
     auto const now = std::chrono::steady_clock::now();
+    if ((m_view.stage == RuntimeStage::Ready || m_view.stage == RuntimeStage::Queued) && now >= m_nextStandingAt) fetchStanding();
     if (now >= m_nextPollAt) {
         if (m_view.stage == RuntimeStage::Queued) pollQueue();
         if (m_view.stage == RuntimeStage::Matched) pollMatch();

@@ -103,15 +103,16 @@ struct Runtime {struct View{struct{std::string state="ROUND_PLAYING";}match;}dat
 struct RankedRuntime { static corum::ranked::Runtime& get(){static corum::ranked::Runtime r;return r;} };
 #define schedule_selector(x) 0
 struct CCLayerColor {
-    CCMenu* nativeChild=nullptr; bool running=false;
+    CCMenu* nativeChild=nullptr; bool running=false,expectNativeTouch=true;
     virtual ~CCLayerColor()=default;
-    virtual void onEnter(){ assert(nativeChild && nativeChild->isTouchEnabled()); nativeChild->onEnter(); running=true; }
+    virtual void onEnter(){ assert(nativeChild && nativeChild->isTouchEnabled()==expectNativeTouch); nativeChild->onEnter(); running=true; }
     virtual void onExit(){nativeChild->onExit();running=false;}
 };
 struct Root { CCMenu* menu; void removeAllChildrenWithCleanup(bool){assert(menu->m_eState==kCCMenuStateWaiting);menu->item=nullptr;} };
 struct Menu : CCMenu {void removeAllChildrenWithCleanup(bool){assert(m_eState==kCCMenuStateWaiting && !m_pSelectedItem);item=nullptr;}};
 struct CorumRankedLayer : CCLayerColor {
     Menu* m_menu=nullptr; Root* m_root=nullptr; void* m_rankTransitionLayer=nullptr;
+    void* m_resultScoreLayer=nullptr;bool m_resultScorePending=false;
     CCMenu* m_settingsMenu=nullptr;unsigned long m_volumeSession=0;void closeSettings(){}
     bool m_rankedChildScenePushed=false,m_enteringSongGate=false,m_enteringLevel=false,keypad=true;
     int refreshed=0,scheduled=0;
@@ -142,6 +143,10 @@ int main(){
     // Covering a scene must not orphan a still-owned rank reveal layer.
     lobby.m_rankTransitionLayer=&button;lobby.onExit();assert(lobby.m_rankTransitionLayer==&button);
     assert(d.handlers.empty());
+    lobby.expectNativeTouch=false;lobby.m_rankTransitionLayer=nullptr;lobby.m_resultScoreLayer=&button;lobby.onEnter();
+    assert(!lobby.keypad&&!menu.isTouchEnabled());lobby.onExit();assert(lobby.m_resultScoreLayer==&button);
+    lobby.m_resultScoreLayer=nullptr;lobby.m_resultScorePending=true;lobby.onEnter();
+    assert(!lobby.keypad&&!menu.isTouchEnabled());lobby.onExit();
 }
 `);
 });

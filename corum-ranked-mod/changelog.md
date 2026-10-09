@@ -1,3 +1,11 @@
+## v0.5.0-beta.48
+
+- Add the hand-drawn result score presentation over a captured, blurred Match Result: exact LP interpolation over 2 seconds, or 4 seconds for promotion/demotion; cutoff labels, tier-colored bars, paired icon changes, promotion marks and delayed entry/warning notices. Keep Placement's existing flow.
+- Chain completed/skipped promotion and demotion reveals into the score overlay. Separate keypad dispatches and restore the settled result after Skip/Esc; replay each match only once.
+- Show LP competition standings and Top % above every lobby badge, plus LP / rank for GOLD. Count all historical bot profiles and exclude unplaced profiles. GOLD targets the nearest higher score, selects the highest-MMR tied player's icon, and fixes equal-MMR random choices in the stored result without publishing MMR.
+- Restrict Settings to the lobby, Achievements and History. Move opponent INFO to the card's upper right. Keep Jukebox visible in the round-options row; an inactive mod gets a clickable gray button and requirement notice.
+- Synchronize client/server exact gate and workspace versions to beta48. Reuse existing image assets; no image pack update is required. Local executable/GPU checks are distinct from native platform and device verification.
+
 ## v0.5.0-beta.43
 
 - Reset the Debug Bot's round/deathmatch Attempt state when the authoritative context changes after surrender. Verify R1 round surrender → R2 fresh Attempt and positive progress against the actual server and database.

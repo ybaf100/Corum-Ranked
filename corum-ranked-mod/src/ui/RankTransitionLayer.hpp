@@ -25,7 +25,8 @@ public:
         std::string eventText,
         std::string skipText,
         std::string continueText,
-        std::function<void()> completion
+        std::function<void()> completion,
+        bool chainToResult = false
     );
 
 private:
@@ -36,7 +37,8 @@ private:
         std::string eventText,
         std::string skipText,
         std::string continueText,
-        std::function<void()> completion
+        std::function<void()> completion,
+        bool chainToResult
     );
 
     void createBackground();
@@ -48,6 +50,7 @@ private:
     void unlockSkip();
     void onSkip(cocos2d::CCObject*);
     void onContinue(cocos2d::CCObject*);
+    void finishChainedReveal();
     void keyBackClicked() override;
 
     void addParticles(
@@ -82,6 +85,7 @@ private:
     bool m_skipAllowed = false;
     bool m_finalShown = false;
     bool m_finished = false;
+    bool m_chainToResult = false;
 };
 
 } // namespace corum::ranked::ui

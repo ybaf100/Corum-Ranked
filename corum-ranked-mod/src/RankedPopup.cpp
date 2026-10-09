@@ -15,6 +15,8 @@
 #include "domain/TransitionTrace.hpp"
 #include "ui/RankBadgeAssets.hpp"
 #include "ui/RankTransitionLayer.hpp"
+#include "ui/ResultScoreLayer.hpp"
+#include "ui/StandingVisuals.hpp"
 #include "ui/PlacementGradeBadge.hpp"
 #include "ui/PlayerIcon.hpp"
 #include "ui/RankedTranslations.hpp"
@@ -432,6 +434,7 @@ class CorumRankedLayer final : public CCLayerColor {
     CCLabelBMFont* m_settingsLabel = nullptr;
     std::optional<WeakRef<corum::ranked::ui::RankedSettingsPopup>> m_settings;
     std::optional<WeakRef<corum::ranked::ui::RankedJukeboxPopup>> m_jukebox;
+    std::optional<WeakRef<FLAlertLayer>> m_jukeboxNotice;
     std::optional<WeakRef<corum::ranked::ui::RankedPlayerInfoPopup>> m_playerInfo;
     CCMenuItemSpriteExtra* m_jukeboxButton = nullptr;
     Page m_page = Page::Live;
@@ -470,6 +473,9 @@ class CorumRankedLayer final : public CCLayerColor {
     std::string m_rankTransitionPlayedKey;
     std::string m_stageResultAudioPlayedKey;
     RankTransitionLayer* m_rankTransitionLayer = nullptr;
+    corum::ranked::ui::ResultScoreLayer* m_resultScoreLayer = nullptr;
+    corum::ranked::ResultPresentationGate m_resultPresentationGate;
+    bool m_resultScorePending = false;
     CCNode* m_achievementToastRoot = nullptr;
     corum::ranked::AchievementToastQueue m_achievementToastQueue;
     std::unordered_map<std::string, corum::ranked::AchievementUnlockNoticeView> m_achievementToasts;
@@ -567,12 +573,12 @@ class CorumRankedLayer final : public CCLayerColor {
     void onEnter() override {
         // Restore flags BEFORE CCLayer enters its children, so their delegates
         // register in native parent/child order rather than after scene entry.
-        setKeypadEnabled(!m_rankTransitionLayer);
+        setKeypadEnabled(!m_rankTransitionLayer && !m_resultScoreLayer && !m_resultScorePending);
         if (m_menu) {
             corum::ranked::ui::cancelMenuTouch(m_menu);
-            m_menu->setTouchEnabled(!m_rankTransitionLayer);
+            m_menu->setTouchEnabled(!m_rankTransitionLayer && !m_resultScoreLayer && !m_resultScorePending);
         }
-        if (m_settingsMenu) m_settingsMenu->setTouchEnabled(!m_rankTransitionLayer);
+        if (m_settingsMenu) m_settingsMenu->setTouchEnabled(!m_rankTransitionLayer && !m_resultScoreLayer && !m_resultScorePending);
         CCLayerColor::onEnter();
 
         auto const resumedFromRankedChild = m_rankedChildScenePushed;
@@ -620,6 +626,10 @@ class CorumRankedLayer final : public CCLayerColor {
         syncMapDetails();
         syncPhase();
         updateAutomation();
+
+        if (m_rankTransitionLayer || m_resultScoreLayer || m_resultScorePending) {
+            updateDynamicUi(); syncAudioMode(); return;
+        }
 
         auto const uiKey = presentationKey();
         if (prepareUiTransition(uiKey)) {
@@ -695,10 +705,11 @@ class CorumRankedLayer final : public CCLayerColor {
     }
 
     void addJukeboxButton(CCPoint position, float scale = 0.32f) {
-        if (!corum::ranked::ui::rankedJukeboxLoaded()) return;
         m_jukeboxButton = addButton("Jukebox", position, menu_selector(CorumRankedLayer::onJukebox), false, scale);
         m_jukeboxButton->setID("ranked-jukebox-button"_spr);
-        m_jukeboxButton->setEnabled(findPlayableMap() != nullptr);
+        auto const loaded = corum::ranked::ui::rankedJukeboxLoaded();
+        if (!loaded) corum::ranked::ui::grayButtonVisual(m_jukeboxButton->getNormalImage());
+        m_jukeboxButton->setEnabled(!loaded || findPlayableMap() != nullptr);
     }
 
     std::string preparationPresentationKey() const {
@@ -751,10 +762,11 @@ class CorumRankedLayer final : public CCLayerColor {
         if (m_page == Page::PlacementSkipConfirm) return "placement:skip-confirm";
         if (view.stage != RuntimeStage::Matched) {
             return fmt::format(
-                "stage:{}:placement:{}:{}",
+                "stage:{}:placement:{}:{}:standing:{}:{}",
                 static_cast<int>(view.stage),
                 view.placement.required,
-                view.placement.active
+                view.placement.active,
+                view.standing.rank.value_or(0), view.standing.total
             );
         }
         if (view.match.placement) {
@@ -1032,7 +1044,7 @@ class CorumRankedLayer final : public CCLayerColor {
     }
 
     void updateDynamicUi() {
-        if (m_jukeboxButton) m_jukeboxButton->setEnabled(findPlayableMap() != nullptr);
+        if (m_jukeboxButton) m_jukeboxButton->setEnabled(!corum::ranked::ui::rankedJukeboxLoaded() || findPlayableMap() != nullptr);
         if (m_jukebox) if (auto popup = m_jukebox->lock()) {
             auto const& match = RankedRuntime::get().view().match;
             auto const left = std::max(0, 10 - static_cast<int>(std::floor(phaseSeconds())));
@@ -1045,7 +1057,16 @@ class CorumRankedLayer final : public CCLayerColor {
             m_settingsLabel->setString(tr("settings", "Settings").c_str());
             corum::ranked::ui::fitMenuLabelWidth(m_settingsLabel, 78, 0.27f, 0.18f);
         }
-        if (m_settingsMenu) m_settingsMenu->setVisible(!m_rankTransitionLayer && m_titleSelectorAchievement.empty());
+        if (m_settingsMenu) {
+            auto const& view = RankedRuntime::get().view();
+            auto const lobby = m_page == Page::Live && (view.stage == RuntimeStage::Ready ||
+                view.stage == RuntimeStage::Queued || view.stage == RuntimeStage::JoiningQueue);
+            auto const allowed = !m_rankTransitionLayer && !m_resultScoreLayer && !m_resultScorePending &&
+                m_titleSelectorAchievement.empty() && (lobby || m_page == Page::Achievements ||
+                    m_page == Page::HistoryList || m_page == Page::HistoryDetail);
+            if (!allowed && m_settingsMenu->isVisible()) corum::ranked::ui::cancelMenuTouch(m_settingsMenu);
+            m_settingsMenu->setVisible(allowed); m_settingsMenu->setTouchEnabled(allowed);
+        }
         auto const& runtime = RankedRuntime::get();
         auto const& noticeMatch = runtime.view().match;
         auto const opponentSurrender = m_page == Page::Live && runtime.view().stage == RuntimeStage::Matched &&
@@ -1199,6 +1220,7 @@ class CorumRankedLayer final : public CCLayerColor {
     }
 
     void render() {
+        if (m_resultScoreLayer || m_resultScorePending) return;
         clearUi();
         auto const& view = RankedRuntime::get().view();
         if (view.environmentWarning.active) {
@@ -1587,7 +1609,7 @@ class CorumRankedLayer final : public CCLayerColor {
             auto* info = CCMenuItemSpriteExtra::create(face, this, menu_selector(CorumRankedLayer::onPlayerInfo));
             info->setID("ranked-player-info-button"_spr);
             info->setTag(self ? (match.side == "A" ? 0 : 1) : (match.side == "A" ? 1 : 0));
-            info->setPosition({center.x - 55, center.y + 78}); m_menu->addChild(info, 10);
+            info->setPosition({center.x + (self ? -55 : 55), center.y + 78}); m_menu->addChild(info, 10);
         }
 
         auto* iconPlate = makeNeonPanel({66.0f, 66.0f}, {center.x, center.y + 29.0f}, accent, {5, 11, 23}, 248);
@@ -2021,20 +2043,25 @@ class CorumRankedLayer final : public CCLayerColor {
         profile.demotionWarning = view.demotionWarning;
         profile.equippedTitle = view.achievements.equippedTitle;
 
-        auto* profilePanel = makeNeonPanel({188.0f, 196.0f}, leftCenter, tierColor(upper(view.profileTier)), kDeepPanel, 246);
+        auto* profilePanel = makeNeonPanel({188.0f, 210.0f}, leftCenter, tierColor(upper(view.profileTier)), kDeepPanel, 246);
         m_root->addChild(profilePanel, 1);
-        if (profile.promotion.active) addPromotionAura(leftCenter, {188.0f, 196.0f});
-        auto* profileTitle = makeLabel(tr("your-rank", "YOUR RANK"), 0.34f, {leftCenter.x, leftCenter.y + 77.0f}, kCyan, "semibold");
-        m_root->addChild(profileTitle, 4);
+        if (profile.promotion.active) addPromotionAura(leftCenter, {188.0f, 210.0f});
+        auto standing = view.profileScoreVisible ? view.standing : corum::ranked::StandingView{};
+        auto* rankLine = corum::ranked::ui::standingLine(standing,0.37f);
+        if (rankLine->getContentSize().width > 168) rankLine->setScale(168 / rankLine->getContentSize().width);
+        rankLine->setID("ranked-profile-standing"_spr);
+        // All tiers reserve the same slot above GOLD's rotating ray footprint:
+        // 64 * 1.72 * sqrt(2) / 2 < 78; text starts above +84.
+        rankLine->setPosition({leftCenter.x,leftCenter.y + 92.0f}); m_root->addChild(rankLine,8);
         auto* emblem = corum::ranked::ui::createAnimatedRankBadge(
             view.profileTier,
-            {68.0f, 68.0f},
+            {64.0f, 64.0f},
             corum::ranked::ui::RankBadgeDisplay::Large
         );
-        emblem->setPosition({leftCenter.x, leftCenter.y + 20.0f});
+        emblem->setPosition({leftCenter.x, leftCenter.y});
         m_root->addChild(emblem, 4);
         addStreakLabel(profile.resultStreak, {leftCenter.x, leftCenter.y + 60.0f}, 0.28f, 154.0f);
-        auto* tier = makeLabel(upper(view.profileTier), 0.54f, {leftCenter.x, leftCenter.y - 25.0f}, tierColor(upper(view.profileTier)), "black");
+        auto* tier = makeLabel(upper(view.profileTier), 0.54f, {leftCenter.x, leftCenter.y - 43.0f}, tierColor(upper(view.profileTier)), "black");
         corum::ranked::ui::fitMenuLabelWidth(tier, 150.0f, 0.54f, 0.32f);
         m_root->addChild(tier, 4);
         auto const placement = profile.placementGames < profile.placementGamesRequired;
@@ -2044,13 +2071,20 @@ class CorumRankedLayer final : public CCLayerColor {
                 static_cast<int>(view.placement.stageResults.size())
             );
             auto const placementStageTotal = view.placement.active ? view.placement.totalStages : profile.placementGamesRequired;
-            addPlacementProgress(completedStages, std::max(1, placementStageTotal), {leftCenter.x, leftCenter.y - 51.0f}, 16.0f, 0.30f);
+            addPlacementProgress(completedStages, std::max(1, placementStageTotal), {leftCenter.x, leftCenter.y - 65.0f}, 16.0f, 0.30f);
         } else if (profile.promotion.active) {
-            addRatingMarks(profile.promotion.results, profile.promotion.gamesRequired, {leftCenter.x, leftCenter.y - 49.0f}, 16.0f, 0.30f);
+            addRatingMarks(profile.promotion.results, profile.promotion.gamesRequired, {leftCenter.x, leftCenter.y - 65.0f}, 16.0f, 0.30f);
         } else {
-            auto* rating = makeLabel(fmt::format("{} LP", view.profileScore), 0.46f, {leftCenter.x, leftCenter.y - 53.0f}, ccc3(240, 244, 250), "black");
-            corum::ranked::ui::fitMenuLabelWidth(rating, 150.0f, 0.46f, 0.28f);
-            m_root->addChild(rating, 4);
+            if (view.profileTier == "GOLD") {
+                auto* rating = corum::ranked::ui::standingLine(standing,0.42f,view.profileScore);
+                if (rating->getContentSize().width > 168) rating->setScale(168 / rating->getContentSize().width);
+                rating->setID("ranked-profile-gold-lp"_spr);
+                rating->setPosition({leftCenter.x,leftCenter.y - 65.0f}); m_root->addChild(rating,4);
+            } else {
+                auto* rating = makeLabel(fmt::format("{} LP", view.profileScore), 0.46f, {leftCenter.x, leftCenter.y - 65.0f}, ccc3(240, 244, 250), "black");
+                corum::ranked::ui::fitMenuLabelWidth(rating, 150.0f, 0.46f, 0.28f);
+                m_root->addChild(rating, 4);
+            }
         }
         std::string profileHintText = tr("seasonal-progress", "SEASONAL LADDER PROGRESS");
         ccColor3B profileHintColor = ccc3(195, 205, 224);
@@ -2067,7 +2101,7 @@ class CorumRankedLayer final : public CCLayerColor {
             auto* equippedTitle = makeLabel(
                 achievementTitleText(view.achievements.equippedTitle),
                 0.20f,
-                {leftCenter.x, leftCenter.y - 68.0f},
+                {leftCenter.x, leftCenter.y - 83.0f},
                 achievementTitleColor(view.achievements.equippedTitle),
                 "semibold"
             );
@@ -2077,7 +2111,7 @@ class CorumRankedLayer final : public CCLayerColor {
         }
         // The progression warning always has its own line, even with a title.
         auto* profileHint = makeLabel(profileHintText, hasTitle ? 0.22f : 0.25f,
-            {leftCenter.x, leftCenter.y - (hasTitle ? 85.0f : 79.0f)}, profileHintColor,
+            {leftCenter.x, leftCenter.y - (hasTitle ? 98.0f : 88.0f)}, profileHintColor,
             profile.demotionWarning && !placement && !profile.promotion.active ? "black" : "semibold");
         corum::ranked::ui::fitMenuLabelWidth(profileHint, 168.0f, hasTitle ? 0.22f : 0.25f, 0.15f);
         profileHint->setID("ranked-profile-progress-status"_spr);
@@ -3142,11 +3176,13 @@ class CorumRankedLayer final : public CCLayerColor {
     bool playResultRankTransition(
         corum::ranked::RatingEventView const& event,
         RankedProfileView const& before,
-        RankedProfileView const& after
+        RankedProfileView const& after,
+        std::function<void()> afterReveal = {}
     ) {
         auto const transition = authoritativeTransitionType(event, before, after);
         if (!transition || m_rankTransitionLayer) return false;
 
+        auto const weak = WeakRef<CorumRankedLayer>(this);
         auto* transitionLayer = RankTransitionLayer::create(
             before.displayedTier,
             after.displayedTier,
@@ -3154,15 +3190,13 @@ class CorumRankedLayer final : public CCLayerColor {
             ratingEventText(event).first,
             tr("tap-to-skip", "TAP TO SKIP"),
             tr("continue", "CONTINUE"),
-            [this] {
-                m_rankTransitionLayer = nullptr;
-                setKeypadEnabled(true);
-                if (m_menu) {
-                    corum::ranked::ui::cancelMenuTouch(m_menu);
-                    m_menu->setTouchEnabled(true);
+            [weak, afterReveal = std::move(afterReveal)] {
+                if (auto layer = weak.lock()) {
+                    layer->m_rankTransitionLayer = nullptr;
+                    if (afterReveal) afterReveal();
+                    else layer->restoreResultInput();
                 }
-                playNextAchievementToast();
-            }
+            }, *transition != RankTransitionType::Placement
         );
         if (!transitionLayer) return false;
 
@@ -3176,10 +3210,83 @@ class CorumRankedLayer final : public CCLayerColor {
         return true;
     }
 
+    void restoreResultInput() {
+        auto const weak = WeakRef<CorumRankedLayer>(this);
+        queueInMainThread([weak] {
+            if (auto layer = weak.lock(); layer && layer->isRunning() && !layer->m_rankTransitionLayer &&
+                !layer->m_resultScoreLayer && !layer->m_resultScorePending) {
+                layer->setKeypadEnabled(true);
+                if (layer->m_menu) {
+                    corum::ranked::ui::cancelMenuTouch(layer->m_menu); layer->m_menu->setTouchEnabled(true);
+                }
+                layer->updateDynamicUi(); layer->playNextAchievementToast();
+            }
+        });
+    }
+
+    std::optional<corum::ranked::ScoreAnimationInput> resultScoreInput(corum::ranked::MatchView const& match) const {
+        auto const ownA = match.side == "A";
+        auto const& before = ownA ? match.profileBeforeA : match.profileBeforeB;
+        auto const& after = ownA ? match.profileAfterA : match.profileAfterB;
+        if (match.placement || match.state != "MATCH_RESULT" || !match.scorePresentation.available ||
+            before.displayedTier == "UNRANKED" || after.displayedTier == "UNRANKED" ||
+            !before.visibleRankedScore || !after.visibleRankedScore ||
+            before.placementGames < before.placementGamesRequired) return std::nullopt;
+        auto const& event = ownA ? match.ratingEventA : match.ratingEventB;
+        auto const& player = ownA ? match.scorePresentation.playerA : match.scorePresentation.playerB;
+        corum::ranked::ScoreAnimationInput input;
+        input.matchId = match.matchId; input.beforeTier = before.displayedTier; input.afterTier = after.displayedTier;
+        input.before = *before.visibleRankedScore; input.after = *after.visibleRankedScore;
+        input.won = match.winnerSide == match.side; input.promotionStarted = event.promotionStarted;
+        input.promotionInProgress = before.promotion.active; input.promoted = event.promotionSucceeded;
+        input.promotionFailed = event.promotionFailed; input.demoted = event.demoted;
+        input.demotionWarning = after.demotionWarning; input.previousMarks = static_cast<int>(before.promotion.results.size());
+        input.bands = match.scorePresentation.bands; input.standingBefore = player.before;
+        input.standingAfter = player.after; input.promotion = player.promotion;
+        return input;
+    }
+
+    void queueResultScore(corum::ranked::ScoreAnimationInput input) {
+        m_resultScorePending = true; setKeypadEnabled(false);
+        if (m_menu) { corum::ranked::ui::cancelMenuTouch(m_menu); m_menu->setTouchEnabled(false); }
+        auto const weak = WeakRef<CorumRankedLayer>(this);
+        // Add the next keypad delegate outside the current Esc dispatch.
+        queueInMainThread([weak,input = std::move(input)]() mutable {
+            auto layer = weak.lock(); if (!layer) return;
+            auto const& match = RankedRuntime::get().view().match;
+            if (!layer->isRunning() || match.matchId != input.matchId || match.state != "MATCH_RESULT") {
+                layer->m_resultScorePending = false; layer->restoreResultInput(); return;
+            }
+            auto const opacity = layer->m_fadeRoot->getOpacity(); layer->m_fadeRoot->setOpacity(255);
+            auto* score = corum::ranked::ui::ResultScoreLayer::create(std::move(input),layer.data(),[weak] {
+                if (auto owner = weak.lock()) {
+                    owner->m_resultScoreLayer = nullptr;
+                    owner->render(); owner->restoreResultInput();
+                }
+            });
+            layer->m_fadeRoot->setOpacity(opacity);
+            layer->m_resultScorePending = false;
+            if (!score) { layer->restoreResultInput(); return; }
+            layer->m_resultScoreLayer = score; layer->addChild(score,1000); layer->updateDynamicUi();
+        });
+    }
+
+    void beginResultScore(corum::ranked::MatchView const& match, corum::ranked::ScoreAnimationInput input) {
+        if (!m_resultPresentationGate.begin(match.matchId)) return;
+        auto const ownA = match.side == "A";
+        auto const weak = WeakRef<CorumRankedLayer>(this);
+        auto start = [weak,input] { if (auto layer = weak.lock()) layer->queueResultScore(input); };
+        auto const started = playResultRankTransition(ownA ? match.ratingEventA : match.ratingEventB,
+            ownA ? match.profileBeforeA : match.profileBeforeB,
+            ownA ? match.profileAfterA : match.profileAfterB,start);
+        if (started) m_rankTransitionPlayedKey = match.matchId;
+        else start();
+    }
+
     void playNextAchievementToast() {
         // Result rank reveals own the foreground first. Keep notices queued until
         // the settled Match/Placement Result UI is actually visible.
-        if (m_achievementToastPlaying || !m_achievementToastRoot || m_rankTransitionLayer) return;
+        if (m_achievementToastPlaying || !m_achievementToastRoot || m_rankTransitionLayer || m_resultScoreLayer || m_resultScorePending) return;
         auto const key = m_achievementToastQueue.pop();
         if (!key) return;
         auto const found = m_achievementToasts.find(*key);
@@ -3265,6 +3372,7 @@ class CorumRankedLayer final : public CCLayerColor {
 
     void renderResult(RuntimeView const& view) {
         auto const& match = view.match;
+        auto const scoreInput = resultScoreInput(match);
         auto const size = CCDirector::sharedDirector()->getWinSize();
         auto* close = CCSprite::createWithSpriteFrameName("GJ_closeBtn_001.png");
         close->setScale(0.60f);
@@ -3380,34 +3488,36 @@ class CorumRankedLayer final : public CCLayerColor {
             m_root->addChild(eventLabelB, 8);
         }
 
-        animateRankedScoreChange(
-            100.0f,
-            cardY - 43.0f,
-            match.rankedScoreDeltaA,
-            cardA.scoreLabel,
-            match.profileBeforeA
-        );
-        animateRankedScoreChange(
-            size.width - 100.0f,
-            cardY - 43.0f,
-            match.rankedScoreDeltaB,
-            cardB.scoreLabel,
-            match.profileBeforeB
-        );
-        animatePromotionTrigger(
-            100.0f,
-            cardY - 43.0f,
-            match.ratingEventA,
-            match.profileBeforeA,
-            match.rankedScoreDeltaA
-        );
-        animatePromotionTrigger(
-            size.width - 100.0f,
-            cardY - 43.0f,
-            match.ratingEventB,
-            match.profileBeforeB,
-            match.rankedScoreDeltaB
-        );
+        if (!scoreInput) {
+            animateRankedScoreChange(
+                100.0f,
+                cardY - 43.0f,
+                match.rankedScoreDeltaA,
+                cardA.scoreLabel,
+                match.profileBeforeA
+            );
+            animateRankedScoreChange(
+                size.width - 100.0f,
+                cardY - 43.0f,
+                match.rankedScoreDeltaB,
+                cardB.scoreLabel,
+                match.profileBeforeB
+            );
+            animatePromotionTrigger(
+                100.0f,
+                cardY - 43.0f,
+                match.ratingEventA,
+                match.profileBeforeA,
+                match.rankedScoreDeltaA
+            );
+            animatePromotionTrigger(
+                size.width - 100.0f,
+                cardY - 43.0f,
+                match.ratingEventB,
+                match.profileBeforeB,
+                match.rankedScoreDeltaB
+            );
+        }
 
         addButton(tr("queue-again", "QUEUE AGAIN"), {size.width / 2.0f, 24.0f}, menu_selector(CorumRankedLayer::onQueueAgain), false, 0.52f);
 
@@ -3417,7 +3527,8 @@ class CorumRankedLayer final : public CCLayerColor {
         auto const transitionKey = match.matchId.empty()
             ? fmt::format("{}:{}:{}", match.playerAName, match.playerBName, match.stateVersion)
             : match.matchId;
-        if (m_rankTransitionPlayedKey != transitionKey) {
+        if (scoreInput) beginResultScore(match,*scoreInput);
+        else if (m_rankTransitionPlayedKey != transitionKey) {
             auto const transitionStarted = ownA
                 ? playResultRankTransition(
                     match.ratingEventA,
@@ -3431,7 +3542,7 @@ class CorumRankedLayer final : public CCLayerColor {
             );
             if (transitionStarted) m_rankTransitionPlayedKey = transitionKey;
         }
-        if (m_rankTransitionLayer && m_menu) m_menu->setTouchEnabled(false);
+        if ((m_rankTransitionLayer || m_resultScoreLayer || m_resultScorePending) && m_menu) m_menu->setTouchEnabled(false);
         enqueueAchievementToasts(
             "match:" + transitionKey,
             match.achievementUnlocks
@@ -4041,6 +4152,7 @@ class CorumRankedLayer final : public CCLayerColor {
         m_playerInfo.reset();
         if (m_settings) if (auto popup = m_settings->lock()) popup->dismiss();
         m_settings.reset();
+        closeJukeboxNotice();
         if (!corum::ranked::RankedRoundPreparation::get().launch(CCDirector::sharedDirector()->getRunningScene())) return;
         m_enteringLevel = true;
         m_rankedChildScenePushed = true;
@@ -4065,16 +4177,15 @@ class CorumRankedLayer final : public CCLayerColor {
     void addRoundOptions(float y) {
         auto const size = CCDirector::sharedDirector()->getWinSize();
         auto* level = findPlayableMap();
-        auto const jukebox = corum::ranked::ui::rankedJukeboxLoaded();
         auto* ldm = addButton(fmt::format("{}: {}", tr("low-detail", "LDM"), level && level->m_lowDetailModeToggled ? "ON" : "OFF"),
-            {size.width / 2.0f - (jukebox ? 103.0f : 48.0f), y}, menu_selector(CorumRankedLayer::onLowDetail), false, 0.35f);
+            {size.width / 2.0f - 103.0f, y}, menu_selector(CorumRankedLayer::onLowDetail), false, 0.35f);
         auto* shake = addButton(fmt::format("{}: {}", tr("disable-shake", "DISABLE SHAKE"), level && level->m_disableShakeToggled ? "ON" : "OFF"),
-            {size.width / 2.0f + (jukebox ? 0.0f : 47.0f), y}, menu_selector(CorumRankedLayer::onDisableShake), false, 0.35f);
+            {size.width / 2.0f, y}, menu_selector(CorumRankedLayer::onDisableShake), false, 0.35f);
         ldm->setID("ranked-round-ldm"_spr);
         shake->setID("ranked-round-disable-shake"_spr);
         ldm->setEnabled(level != nullptr);
         shake->setEnabled(level != nullptr);
-        if (jukebox) addJukeboxButton({size.width / 2.0f + 116.0f, y}, 0.35f);
+        addJukeboxButton({size.width / 2.0f + 116.0f, y}, 0.35f);
     }
 
     void onDownloadAllResources(CCObject*) {
@@ -4299,7 +4410,7 @@ class CorumRankedLayer final : public CCLayerColor {
     }
 
     void onSettings(CCObject*) {
-        if (m_rankTransitionLayer || !m_titleSelectorAchievement.empty()) return;
+        if (m_rankTransitionLayer || m_resultScoreLayer || m_resultScorePending || !m_titleSelectorAchievement.empty()) return;
         if (m_settings) {
             auto popup = m_settings->lock();
             if (popup && popup->getParent()) return;
@@ -4311,7 +4422,7 @@ class CorumRankedLayer final : public CCLayerColor {
     }
 
     void onPlayerInfo(CCObject* sender) {
-        if (m_rankTransitionLayer || !m_titleSelectorAchievement.empty()) return;
+        if (m_rankTransitionLayer || m_resultScoreLayer || m_resultScorePending || !m_titleSelectorAchievement.empty()) return;
         auto* item = typeinfo_cast<CCMenuItemSpriteExtra*>(sender);
         if (!item) return;
         if (m_playerInfo) if (auto popup = m_playerInfo->lock(); popup && popup->getParent()) return;
@@ -4322,7 +4433,11 @@ class CorumRankedLayer final : public CCLayerColor {
     }
 
     void onJukebox(CCObject*) {
-        if (!corum::ranked::ui::rankedJukeboxLoaded()) return;
+        if (!corum::ranked::ui::rankedJukeboxLoaded()) {
+            if (m_jukeboxNotice) if (auto notice = m_jukeboxNotice->lock(); notice && notice->getParent()) return;
+            auto* alert = FLAlertLayer::create("Jukebox",tr("jukebox-required","The Jukebox mod is required!"),"OK");
+            alert->setID("ranked-jukebox-required"_spr); m_jukeboxNotice.emplace(alert); alert->show(); return;
+        }
         if (m_jukebox) if (auto popup = m_jukebox->lock(); popup && popup->getParent()) return;
         auto* level = findPlayableMap();
         if (auto* popup = corum::ranked::ui::RankedJukeboxPopup::create(level)) {
@@ -4330,7 +4445,15 @@ class CorumRankedLayer final : public CCLayerColor {
         }
     }
 
+    void closeJukeboxNotice() {
+        if (m_jukeboxNotice) if (auto notice = m_jukeboxNotice->lock(); notice && notice->getParent()) {
+            notice->onBtn1(nullptr); CCTouchDispatcher::get()->unregisterForcePrio(notice.data());
+        }
+        m_jukeboxNotice.reset();
+    }
+
     void closeSettings() {
+        closeJukeboxNotice();
         if (m_playerInfo) if (auto popup = m_playerInfo->lock()) popup->dismiss();
         m_playerInfo.reset();
         if (m_jukebox) if (auto popup = m_jukebox->lock()) popup->dismiss();
@@ -4375,7 +4498,7 @@ class CorumRankedLayer final : public CCLayerColor {
     }
 
     void keyBackClicked() override {
-        if (m_rankTransitionLayer) return;
+        if (m_rankTransitionLayer || m_resultScoreLayer || m_resultScorePending) return;
         if (m_page != Page::Live) {
             onHistoryBack(nullptr);
             return;
