@@ -57,6 +57,11 @@ cocos2d::CCNode* createRankAmbientFx(
     cocos2d::CCSize maxSize,
     RankBadgeDisplay display = RankBadgeDisplay::Compact
 );
+cocos2d::CCNode* createRankBadgeBackdrop(
+    std::string const& rank,
+    cocos2d::CCSize maxSize,
+    RankBadgeDisplay display = RankBadgeDisplay::Compact
+);
 cocos2d::CCNode* createAnimatedRankBadge(
     std::string const& rank,
     cocos2d::CCSize maxSize,

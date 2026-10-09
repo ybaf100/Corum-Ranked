@@ -18,6 +18,7 @@ struct CCPoint { float x = 0, y = 0; CCPoint operator+(CCPoint p) const { return
 struct CCSize { float width = 0, height = 0; };
 struct ccColor3B { GLubyte r,g,b; bool operator==(ccColor3B const&) const = default; };
 struct ccColor4B { GLubyte r,g,b,a; };
+struct ccColor4F { float r,g,b,a; };
 inline CCPoint ccp(float x,float y) { return {x,y}; }
 inline ccColor3B ccc3(GLubyte r,GLubyte g,GLubyte b) { return {r,g,b}; }
 inline constexpr CCPoint CCPointZero{};
@@ -53,6 +54,7 @@ struct CCNode : CCObject {
     virtual void onExit() { running=false; }
     virtual void update(float) {} virtual void keyBackClicked() {}
     void addChild(CCNode* node,int=0) { children.push_back(node); node->parent=this; }
+    void removeAllChildrenWithCleanup(bool) { for(auto* child:children) { child->onExit(); child->parent=nullptr; --child->references; } children.clear(); }
     void removeFromParentAndCleanup(bool) { onExit(); if(parent) { std::erase(parent->children,this); parent=nullptr; --references; } }
     CCNode* getParent() { return parent; }
     auto const& getChildrenExt() { return children; }
@@ -74,28 +76,51 @@ struct CCLayerColor : CCNode {
     static CCLayerColor* create(ccColor4B c) { auto* n=new CCLayerColor; n->color={c.r,c.g,c.b}; n->opacity=c.a; return n; }
     bool initWithColor(ccColor4B c) { color={c.r,c.g,c.b}; opacity=c.a; return true; }
 };
+struct CCDrawNode : CCNode {
+    CCPoint from{},to{}; float radius=0; ccColor4F segmentColor{}; int segments=0;
+    static CCDrawNode* create() { return new CCDrawNode; }
+    void clear() { segments=0; }
+    bool drawSegment(CCPoint const& a,CCPoint const& b,float r,ccColor4F const& c) {
+        from=a;to=b;radius=r;segmentColor=c;++segments;return true;
+    }
+    bool drawDot(CCPoint const& point,float r,ccColor4F const& c) {
+        return drawSegment(point,point,r,c);
+    }
+};
 struct CCSprite : CCNode {
     static CCSprite* createWithSpriteFrameName(char const* frame) { auto* n=new CCSprite; n->id=frame; n->size={32,32}; return n; }
 };
 struct CCLabelBMFont : CCNode {
     std::string text; void setString(char const* v) { text=v; size={static_cast<float>(text.size())*7,16}; }
 };
-struct CCMenu : CCNode { bool touch=true; int cancellations=0; static CCMenu* create() { return new CCMenu; } void setTouchEnabled(bool v) { touch=v; } };
+struct CCMenu : CCNode {
+    bool touch=true,enabled=true; int cancellations=0;
+    static CCMenu* create() { return new CCMenu; }
+    void setTouchEnabled(bool v) { touch=v; } void setEnabled(bool v) { enabled=v; }
+};
 struct CCMenuItemSpriteExtra : CCNode {
     bool enabled=true; void setEnabled(bool value) { enabled=value; }
     CCNode* getNormalImage() const { return children.front(); }
     static CCMenuItemSpriteExtra* create(CCNode* face,CCNode*,int) { auto* n=new CCMenuItemSpriteExtra; n->addChild(face); return n; }
 };
 struct CCDirector { CCSize size{568,320}; static CCDirector* sharedDirector() { static CCDirector d; return &d; } CCSize getWinSize() const { return size; } };
-template<class T> struct Ref { T* ptr; explicit Ref(T* p):ptr(p) { ++ptr->references; } ~Ref() { --ptr->references; } };
+template<class T> struct Ref {
+    T* ptr=nullptr;
+    explicit Ref(T* p):ptr(p) { if(ptr)++ptr->references; }
+    Ref(Ref const& other):Ref(other.ptr) {}
+    Ref(Ref&& other) noexcept:ptr(std::exchange(other.ptr,nullptr)) {}
+    ~Ref() { if(ptr)--ptr->references; }
+    T* operator->() const { return ptr; } T* data() const { return ptr; }
+};
 template<class T> struct WeakRef { T* ptr; explicit WeakRef(T* p):ptr(p) {} struct Locked { T* p; explicit operator bool() const { return p&&p->references>0; } T* operator->() const { return p; } T* data() const { return p; } }; Locked lock() const { return {ptr}; } };
 inline std::vector<std::function<void()>> mainQueue;
 inline void queueInMainThread(std::function<void()> f) { mainQueue.push_back(std::move(f)); }
 inline void drainMainQueue() { auto queue=std::move(mainQueue); mainQueue.clear(); for(auto& callback:queue) callback(); }
 #define menu_selector(x) 0
 inline std::string operator""_spr(char const* s,std::size_t n) { return {s,n}; }
-namespace cocos2d { using ::CCObject; using ::CCNode; using ::CCLayerColor; using ::CCSprite; using ::CCLabelBMFont; using ::CCMenu; using ::CCPoint; }
+namespace cocos2d { using ::CCObject; using ::CCNode; using ::CCLayerColor; using ::CCSprite; using ::CCLabelBMFont; using ::CCMenu; using ::CCPoint; using ::CCDrawNode; }
 namespace geode::prelude {}
+namespace geode::cast { template<class T> T typeinfo_cast(CCNode* node) { return dynamic_cast<T>(node); } }
 namespace fmt {
 template<class... T> std::string format(std::string pattern,T const&... args) {
     std::vector<std::string> parts;
@@ -107,4 +132,6 @@ template<class... T> std::string format(std::string pattern,T const&... args) {
     return pattern;
 }
 }
-namespace corum::ranked::log { template<class... T> void warn(T const&...) {} }
+namespace corum::ranked::log {
+    template<class... T> void warn(T const&...) {} template<class... T> void info(T const&...) {}
+}

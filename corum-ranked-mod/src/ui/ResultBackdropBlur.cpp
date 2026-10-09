@@ -6,11 +6,12 @@ using namespace geode::prelude;
 
 namespace corum::ranked::ui {
 namespace {
+// CCGLProgram injects CC_MVPMatrix before the supplied vertex shader source.
+// Redeclaring it here fails compilation when used through the native entry.
 constexpr char kVertex[] = R"GLSL(
 attribute vec4 a_position;
 attribute vec2 a_texCoord;
 attribute vec4 a_color;
-uniform mat4 CC_MVPMatrix;
 #ifdef GL_ES
 varying mediump vec2 v_uv;
 varying lowp vec4 v_color;

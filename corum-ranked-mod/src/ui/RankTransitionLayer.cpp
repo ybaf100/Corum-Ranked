@@ -613,7 +613,6 @@ void RankTransitionLayer::unlockSkip() {
 
 void RankTransitionLayer::revealFinalState(bool skipped) {
     if (m_finalShown || m_finished) return;
-    if (m_chainToResult) { finishChainedReveal(); return; }
     m_finalShown = true;
     m_skipAllowed = false;
     stopAllActions();
@@ -669,17 +668,13 @@ void RankTransitionLayer::revealFinalState(bool skipped) {
 
 void RankTransitionLayer::onSkip(CCObject*) {
     if (!m_skipAllowed || m_finalShown) return;
+    if (m_chainToResult) { finishChainedReveal(); return; }
     revealFinalState(true);
 }
 
 void RankTransitionLayer::onContinue(CCObject*) {
     if (!m_finalShown || m_finished) return;
-    m_finished = true;
-    setKeypadEnabled(false);
-    if (m_controlMenu) m_controlMenu->setTouchEnabled(false);
-    auto completion = std::move(m_completion);
-    if (completion) completion();
-    removeFromParentAndCleanup(true);
+    finishChainedReveal();
 }
 
 void RankTransitionLayer::keyBackClicked() {
@@ -689,12 +684,19 @@ void RankTransitionLayer::keyBackClicked() {
 
 void RankTransitionLayer::finishChainedReveal() {
     if (m_finished) return;
-    [[maybe_unused]] Ref<RankTransitionLayer> keepAlive(this);
-    m_finished = true; stopAllActions(); setKeypadEnabled(false); setVisible(false);
-    if (m_controlMenu) { cancelMenuTouch(m_controlMenu); m_controlMenu->setTouchEnabled(false); }
-    auto completion = std::move(m_completion);
-    removeFromParentAndCleanup(true);
-    if (completion) completion();
+    m_finished = true; setVisible(false);
+    if (m_controlMenu) m_controlMenu->setEnabled(false);
+    // Retain the callback target until native touch/key dispatch has returned.
+    auto const keepAlive = Ref<RankTransitionLayer>(this);
+    queueInMainThread([keepAlive] {
+        keepAlive->stopAllActions(); keepAlive->setKeypadEnabled(false);
+        if (keepAlive->m_controlMenu) {
+            cancelMenuTouch(keepAlive->m_controlMenu); keepAlive->m_controlMenu->setTouchEnabled(false);
+        }
+        auto completion = std::move(keepAlive->m_completion);
+        keepAlive->removeFromParentAndCleanup(true);
+        if (completion) completion();
+    });
 }
 
 } // namespace corum::ranked::ui

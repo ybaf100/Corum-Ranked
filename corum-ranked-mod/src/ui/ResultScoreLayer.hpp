@@ -3,6 +3,7 @@
 #include "../domain/ResultScorePresentation.hpp"
 #include "RankBadgeAssets.hpp"
 #include <Geode/Geode.hpp>
+#include <Geode/cocos/draw_nodes/CCDrawNode.h>
 #include <functional>
 
 namespace corum::ranked::ui {
@@ -32,7 +33,7 @@ private:
     ScoreAnimationInput m_input;
     std::function<void()> m_completion;
     cocos2d::CCMenu* m_menu = nullptr;
-    cocos2d::CCLayerColor* m_fill = nullptr;
+    cocos2d::CCDrawNode* m_fill = nullptr;
     cocos2d::CCLayerColor* m_leftIcon = nullptr;
     cocos2d::CCLayerColor* m_rightIcon = nullptr;
     cocos2d::CCLabelBMFont* m_score = nullptr;

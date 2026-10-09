@@ -23,6 +23,16 @@ std::string targetKey(ScoreProgressSample const& sample) {
     auto const& target = sample.standing.target;
     return target ? fmt::format("gold:{}:{}:{}", target->accountId, target->rank, target->score) : "gold-unknown";
 }
+
+void drawRoundedBar(CCDrawNode* node, float width, ccColor3B color, GLubyte opacity = 255) {
+    constexpr float height = 10;
+    node->clear(); node->setContentSize({width,height});
+    if (width <= 0) return;
+    auto const radius = std::min(height / 2,width / 2);
+    ccColor4F const fill {color.r / 255.0f,color.g / 255.0f,color.b / 255.0f,opacity / 255.0f};
+    if (width <= height) node->drawDot({width / 2,height / 2},radius,fill);
+    else node->drawSegment({radius,height / 2},{width - radius,height / 2},radius,fill);
+}
 } // namespace
 
 ResultScoreLayer* ResultScoreLayer::create(ScoreAnimationInput input, CCNode* resultScreen,
@@ -45,11 +55,11 @@ bool ResultScoreLayer::init(ScoreAnimationInput input, CCNode* resultScreen, std
 
     m_barLeft = std::max(50.0f, size.width * 0.125f);
     m_barWidth = size.width - m_barLeft * 2;
-    m_barY = size.height * 0.36f; m_iconY = size.height * 0.68f;
+    m_barY = size.height * 0.36f; m_iconY = m_barY + 92;
     auto const previous = m_input.beforeTier == "RED" ? ccc3(100,108,124) : tierColor(m_input.beforeTier);
-    auto* track = CCLayerColor::create({previous.r,previous.g,previous.b,180});
-    track->setContentSize({m_barWidth,8}); track->setPosition({m_barLeft,m_barY}); addChild(track, 10);
-    m_fill = CCLayerColor::create({255,255,255,255}); m_fill->setPosition({m_barLeft,m_barY});
+    auto* track = CCDrawNode::create(); drawRoundedBar(track,m_barWidth,previous,180);
+    track->setPosition({m_barLeft,m_barY}); addChild(track, 10);
+    m_fill = CCDrawNode::create(); m_fill->setPosition({m_barLeft,m_barY});
     m_fill->setID("ranked-result-score-fill"_spr); addChild(m_fill, 11);
     for (auto x : {m_barLeft, m_barLeft + m_barWidth}) {
         auto* cap = CCLayerColor::create({225,235,245,190}); cap->setContentSize({1.5f,15});
@@ -57,7 +67,7 @@ bool ResultScoreLayer::init(ScoreAnimationInput input, CCNode* resultScreen, std
     }
 
     auto* outcome = menuLabel(m_input.won ? i18n::text("win","WIN") : i18n::text("lose","LOSE"),
-        1.05f, {size.width / 2, size.height * 0.84f}, m_input.won ? ccc3(90,239,133) : ccc3(255,93,113), FontWeight::Black);
+        1.05f, {size.width / 2, size.height * 0.80f}, m_input.won ? ccc3(90,239,133) : ccc3(255,93,113), FontWeight::Black);
     fitMenuLabelWidth(outcome, size.width * 0.48f, 1.05f, 0.68f); addChild(outcome, 20);
     m_score = menuLabel("",0.64f,{},Text,FontWeight::Black); addChild(m_score, 20);
     m_delta = menuLabel(fmt::format("{:+d} LP", m_input.after - m_input.before), 0.44f, {},
@@ -67,7 +77,7 @@ bool ResultScoreLayer::init(ScoreAnimationInput input, CCNode* resultScreen, std
     m_rightTier = menuLabel("",0.48f,{m_barLeft + m_barWidth,m_barY + 22},Text,FontWeight::Black); addChild(m_rightTier,20);
     m_leftCutoff = menuLabel("",0.40f,{m_barLeft,m_barY - 18},Text,FontWeight::ExtraBold); addChild(m_leftCutoff,20);
     m_rightCutoff = menuLabel("",0.40f,{m_barLeft + m_barWidth,m_barY - 18},Text,FontWeight::ExtraBold); addChild(m_rightCutoff,20);
-    m_seriesRoot = CCNode::create(); m_seriesRoot->setPosition({size.width / 2, size.height * 0.63f}); addChild(m_seriesRoot,30);
+    m_seriesRoot = CCNode::create(); m_seriesRoot->setPosition({size.width / 2, size.height * 0.59f}); addChild(m_seriesRoot,30);
 
     m_menu = CCMenu::create(); m_menu->setPosition(CCPointZero); addChild(m_menu,100);
     auto* face = surface({118,30},{},ccc3(136,147,169),SurfaceRaised,240,true);
@@ -105,7 +115,8 @@ void ResultScoreLayer::update(float dt) {
 CCLayerColor* ResultScoreLayer::tierIcon(std::string const& tier, CCPoint position, bool assemble) {
     auto const badgeSize = std::min(78.0f,getContentSize().height * 0.245f);
     auto assembly = createRankBadgeAssembly(tier,badgeSize);
-    assembly.root->setPosition(position); addChild(assembly.root,20);
+    assembly.root->addChild(createRankBadgeBackdrop(tier,{badgeSize,badgeSize},RankBadgeDisplay::Large),-10);
+    assembly.root->setPosition(position); addChild(assembly.root,5);
     if (assemble && m_input.motion() == ScoreMotion::Promotion) {
         // Same same-canvas body/core + ornament assembly used by Placed.
         for (auto const& part : assembly.baseParts) {
@@ -134,7 +145,7 @@ CCLayerColor* ResultScoreLayer::tierIcon(std::string const& tier, CCPoint positi
 CCLayerColor* ResultScoreLayer::targetIcon(ScoreProgressSample const& sample, bool assemble) {
     auto const position = ccp(m_barLeft + m_barWidth,m_iconY);
     if (sample.tier != "GOLD") return tierIcon(sample.nextTier,position,assemble);
-    auto* root = iconRoot(position); addChild(root,20);
+    auto* root = iconRoot(position); addChild(root,5);
     auto* icon = sample.goldLeader ? PlayerIcon::createLocal()
         : PlayerIcon::createRemote(sample.standing.target && !sample.standing.target->bot ? sample.standing.target->accountId : 0);
     if (icon) { icon->setScale(1.55f); root->addChild(icon); }
@@ -152,6 +163,8 @@ void ResultScoreLayer::retireIcon(CCLayerColor* icon, bool demotion) {
         // Tier parts separate and fall as in the existing full-screen demotion.
         int index = 0;
         for (auto* part : icon->getChildrenExt()) {
+            // The persistent halo fades with the root; only badge parts fall.
+            if (!geode::cast::typeinfo_cast<CCSprite*>(part)) continue;
             auto const horizontal = (index % 2 ? -1 : 1) * (12 + index * 2);
             ++index;
             part->stopAllActions();
@@ -191,8 +204,8 @@ void ResultScoreLayer::replaceTierIcons(ScoreProgressSample const& sample, bool 
 
 void ResultScoreLayer::applySample(ScoreProgressSample const& sample) {
     replaceTierIcons(sample,m_elapsed > 0);
-    auto const color = tierColor(sample.tier); m_fill->setColor(color);
-    m_fill->setContentSize({m_barWidth * static_cast<float>(sample.fill),8});
+    auto const color = tierColor(sample.tier);
+    drawRoundedBar(m_fill,m_barWidth * static_cast<float>(sample.fill),color);
     m_leftTier->setString(sample.tier.c_str()); m_leftTier->setColor(color);
     m_rightTier->setString(sample.nextTier.c_str());
     if (!sample.nextTier.empty()) m_rightTier->setColor(tierColor(sample.nextTier));
@@ -205,12 +218,14 @@ void ResultScoreLayer::applySample(ScoreProgressSample const& sample) {
     fitMenuLabelWidth(m_score,140,0.64f,0.46f);
     auto const scoreWidth = m_score->getContentSize().width * m_score->getScaleX();
     auto const deltaWidth = m_delta->getContentSize().width * m_delta->getScaleX();
-    auto const groupWidth = scoreWidth + 10 + deltaWidth;
     auto const end = m_barLeft + m_barWidth * static_cast<float>(sample.fill);
-    auto const half = std::min(groupWidth / 2,m_barWidth / 2);
-    auto const x = std::clamp(end,m_barLeft + half,m_barLeft + m_barWidth - half);
-    m_score->setPosition({x - (deltaWidth + 10) / 2,m_barY + 54});
-    m_delta->setPosition({x + (scoreWidth + 10) / 2,m_barY + 54});
+    // Center the score alone on the actual fill end. Delta is an independent
+    // suffix, moved to the left near the viewport edge without shifting LP.
+    m_score->setPosition({end,m_barY + 44});
+    auto deltaX = end + (scoreWidth + deltaWidth) / 2 + 10;
+    if (deltaX + deltaWidth / 2 > getContentSize().width - 12)
+        deltaX = end - (scoreWidth + deltaWidth) / 2 - 10;
+    m_delta->setPosition({deltaX,m_barY + 44});
 }
 
 void ResultScoreLayer::stamp(CCNode* node, float delay) {
@@ -285,12 +300,22 @@ void ResultScoreLayer::showNotices() {
 
 void ResultScoreLayer::finish() {
     if (m_closed) return;
-    [[maybe_unused]] Ref<ResultScoreLayer> keepAlive(this);
-    m_closed = true; unscheduleUpdate(); stopAllActions(); setKeypadEnabled(false); setVisible(false);
-    if (m_menu) { cancelMenuTouch(m_menu); m_menu->setTouchEnabled(false); }
-    auto completion = std::move(m_completion);
-    removeFromParentAndCleanup(true);
-    if (completion) completion();
+    m_closed = true; unscheduleUpdate(); setVisible(false);
+    // The native item/menu still owns this input dispatch. Do not clear its
+    // selected item, unregister delegates or destroy its callback target here.
+    if (m_menu) m_menu->setEnabled(false);
+    log::info("[RankedResult] score close requested match={}",m_input.matchId);
+    auto const keepAlive = Ref<ResultScoreLayer>(this);
+    queueInMainThread([keepAlive] {
+        keepAlive->stopAllActions(); keepAlive->setKeypadEnabled(false);
+        if (keepAlive->m_menu) {
+            cancelMenuTouch(keepAlive->m_menu); keepAlive->m_menu->setTouchEnabled(false);
+        }
+        auto completion = std::move(keepAlive->m_completion);
+        keepAlive->removeFromParentAndCleanup(true);
+        log::info("[RankedResult] score retired match={}",keepAlive->m_input.matchId);
+        if (completion) completion();
+    });
 }
 
 void ResultScoreLayer::onSkip(CCObject*) { finish(); }

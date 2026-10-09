@@ -292,22 +292,16 @@ CCNode* createRankAmbientFx(
     return ambient;
 }
 
-CCNode* createAnimatedRankBadge(
+CCNode* createRankBadgeBackdrop(
     std::string const& input,
     CCSize maxSize,
     RankBadgeDisplay display
 ) {
     auto const rank = normalizeRankName(input);
     auto const profile = rankTierProfile(rank);
-    auto* root = centeredRoot();
     auto* ambient = centeredRoot();
-    auto* badgeMotion = centeredRoot();
-    root->addChild(ambient, 0);
-    root->addChild(badgeMotion, 20);
-
     auto const longest = std::max(maxSize.width, maxSize.height);
     auto const compact = display == RankBadgeDisplay::Compact;
-    auto const hero = display == RankBadgeDisplay::Hero;
     auto const genericExtent = longest * (compact ? 1.20f : 1.52f);
 
     auto* genericGlow = ambientSprite(
@@ -327,6 +321,21 @@ CCNode* createAnimatedRankBadge(
 
     auto* tierAmbient = createRankAmbientFx(rank, maxSize, display);
     ambient->addChild(tierAmbient, 10);
+    return ambient;
+}
+
+CCNode* createAnimatedRankBadge(
+    std::string const& input,
+    CCSize maxSize,
+    RankBadgeDisplay display
+) {
+    auto const rank = normalizeRankName(input);
+    auto* root = centeredRoot();
+    auto* badgeMotion = centeredRoot();
+    root->addChild(createRankBadgeBackdrop(rank,maxSize,display),0);
+    root->addChild(badgeMotion,20);
+    auto const compact = display == RankBadgeDisplay::Compact;
+    auto const hero = display == RankBadgeDisplay::Hero;
 
     auto* finalBadge = trophy(rank, maxSize);
     finalBadge->setPosition(CCPointZero);

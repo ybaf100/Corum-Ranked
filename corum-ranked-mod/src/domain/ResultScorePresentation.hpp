@@ -83,13 +83,17 @@ inline ScoreProgressSample sampleScoreProgress(ScoreAnimationInput const& input,
     ScoreProgressSample sample;
     auto const fraction = std::clamp(elapsed / input.duration(), 0.0, 1.0);
     sample.complete = fraction >= 1.0;
-    sample.score = static_cast<int>(std::lround(input.before + (static_cast<double>(input.after) - input.before) * fraction));
+    // Ease the endpoints and retain sub-LP precision for the bar. Only the
+    // displayed number is rounded; a small gain must not move in whole-LP steps.
+    auto const eased = fraction * fraction * (3.0 - 2.0 * fraction);
+    auto const interpolated = input.before + (static_cast<double>(input.after) - input.before) * eased;
+    sample.score = static_cast<int>(std::lround(interpolated));
     sample.tier = input.beforeTier;
     if (input.beforeTier != input.afterTier) {
         auto const afterBand = std::find_if(input.bands.begin(), input.bands.end(), [&](auto const& b) { return b.tier == input.afterTier; });
         auto const beforeBand = std::find_if(input.bands.begin(), input.bands.end(), [&](auto const& b) { return b.tier == input.beforeTier; });
-        if (sample.complete || (input.promoted && afterBand != input.bands.end() && sample.score >= afterBand->minimum) ||
-            (input.demoted && beforeBand != input.bands.end() && sample.score < beforeBand->minimum)) sample.tier = input.afterTier;
+        if (sample.complete || (input.promoted && afterBand != input.bands.end() && interpolated >= afterBand->minimum) ||
+            (input.demoted && beforeBand != input.bands.end() && interpolated < beforeBand->minimum)) sample.tier = input.afterTier;
     }
     // GOLD uses the result's fixed target for the entire score reveal. Moving
     // to a newly polled ladder/target on its last frame would jump the bar.
@@ -105,7 +109,7 @@ inline ScoreProgressSample sampleScoreProgress(ScoreAnimationInput const& input,
         sample.target = sample.standing.target ? sample.standing.target->score : sample.score;
     }
     auto const span = static_cast<double>(sample.target) - sample.minimum;
-    sample.fill = sample.goldLeader ? 1.0 : span > 0 ? std::clamp((sample.score - sample.minimum) / span, 0.0, 1.0) : 0.0;
+    sample.fill = sample.goldLeader ? 1.0 : span > 0 ? std::clamp((interpolated - sample.minimum) / span, 0.0, 1.0) : 0.0;
     return sample;
 }
 

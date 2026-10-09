@@ -1,3 +1,10 @@
+## v0.5.0-beta.49
+
+- Hold the completed promotion/demotion reveal until Continue. Explicit Skip/Esc still goes directly to the score overlay; Placement keeps its established reveal flow.
+- Retire score/reveal input after native dispatch returns, retaining each callback target until touch cancellation, removal and parent restoration finish. Ignore repeated close events and avoid rebuilding a retired Ranked scene.
+- Restore full-size lobby badges with standings immediately below the streak. Lower result headings, retain tier halos, align LP itself to the moving fill endpoint, and use rounded bars with continuous eased interpolation over the existing 2/4-second durations.
+- Remove the blur shader's duplicate native Cocos matrix declaration. Synchronize the beta49 exact client/server gate and workspaces; image assets and their pack are unchanged.
+
 ## v0.5.0-beta.48
 
 - Add the hand-drawn result score presentation over a captured, blurred Match Result: exact LP interpolation over 2 seconds, or 4 seconds for promotion/demotion; cutoff labels, tier-colored bars, paired icon changes, promotion marks and delayed entry/warning notices. Keep Placement's existing flow.

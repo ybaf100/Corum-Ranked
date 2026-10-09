@@ -2050,18 +2050,18 @@ class CorumRankedLayer final : public CCLayerColor {
         auto* rankLine = corum::ranked::ui::standingLine(standing,0.37f);
         if (rankLine->getContentSize().width > 168) rankLine->setScale(168 / rankLine->getContentSize().width);
         rankLine->setID("ranked-profile-standing"_spr);
-        // All tiers reserve the same slot above GOLD's rotating ray footprint:
-        // 64 * 1.72 * sqrt(2) / 2 < 78; text starts above +84.
-        rankLine->setPosition({leftCenter.x,leftCenter.y + 92.0f}); m_root->addChild(rankLine,8);
+        // Keep the rank immediately above the full-size badge and below the
+        // streak. Its higher z keeps decorative background halos behind text.
+        rankLine->setPosition({leftCenter.x,leftCenter.y + 64.0f}); m_root->addChild(rankLine,8);
         auto* emblem = corum::ranked::ui::createAnimatedRankBadge(
             view.profileTier,
-            {64.0f, 64.0f},
+            {68.0f, 68.0f},
             corum::ranked::ui::RankBadgeDisplay::Large
         );
-        emblem->setPosition({leftCenter.x, leftCenter.y});
+        emblem->setPosition({leftCenter.x, leftCenter.y + 20.0f});
         m_root->addChild(emblem, 4);
-        addStreakLabel(profile.resultStreak, {leftCenter.x, leftCenter.y + 60.0f}, 0.28f, 154.0f);
-        auto* tier = makeLabel(upper(view.profileTier), 0.54f, {leftCenter.x, leftCenter.y - 43.0f}, tierColor(upper(view.profileTier)), "black");
+        addStreakLabel(profile.resultStreak, {leftCenter.x, leftCenter.y + 87.0f}, 0.28f, 154.0f);
+        auto* tier = makeLabel(upper(view.profileTier), 0.54f, {leftCenter.x, leftCenter.y - 25.0f}, tierColor(upper(view.profileTier)), "black");
         corum::ranked::ui::fitMenuLabelWidth(tier, 150.0f, 0.54f, 0.32f);
         m_root->addChild(tier, 4);
         auto const placement = profile.placementGames < profile.placementGamesRequired;
@@ -2071,17 +2071,17 @@ class CorumRankedLayer final : public CCLayerColor {
                 static_cast<int>(view.placement.stageResults.size())
             );
             auto const placementStageTotal = view.placement.active ? view.placement.totalStages : profile.placementGamesRequired;
-            addPlacementProgress(completedStages, std::max(1, placementStageTotal), {leftCenter.x, leftCenter.y - 65.0f}, 16.0f, 0.30f);
+            addPlacementProgress(completedStages, std::max(1, placementStageTotal), {leftCenter.x, leftCenter.y - 51.0f}, 16.0f, 0.30f);
         } else if (profile.promotion.active) {
-            addRatingMarks(profile.promotion.results, profile.promotion.gamesRequired, {leftCenter.x, leftCenter.y - 65.0f}, 16.0f, 0.30f);
+            addRatingMarks(profile.promotion.results, profile.promotion.gamesRequired, {leftCenter.x, leftCenter.y - 49.0f}, 16.0f, 0.30f);
         } else {
             if (view.profileTier == "GOLD") {
                 auto* rating = corum::ranked::ui::standingLine(standing,0.42f,view.profileScore);
                 if (rating->getContentSize().width > 168) rating->setScale(168 / rating->getContentSize().width);
                 rating->setID("ranked-profile-gold-lp"_spr);
-                rating->setPosition({leftCenter.x,leftCenter.y - 65.0f}); m_root->addChild(rating,4);
+                rating->setPosition({leftCenter.x,leftCenter.y - 53.0f}); m_root->addChild(rating,4);
             } else {
-                auto* rating = makeLabel(fmt::format("{} LP", view.profileScore), 0.46f, {leftCenter.x, leftCenter.y - 65.0f}, ccc3(240, 244, 250), "black");
+                auto* rating = makeLabel(fmt::format("{} LP", view.profileScore), 0.46f, {leftCenter.x, leftCenter.y - 53.0f}, ccc3(240, 244, 250), "black");
                 corum::ranked::ui::fitMenuLabelWidth(rating, 150.0f, 0.46f, 0.28f);
                 m_root->addChild(rating, 4);
             }
@@ -2101,7 +2101,7 @@ class CorumRankedLayer final : public CCLayerColor {
             auto* equippedTitle = makeLabel(
                 achievementTitleText(view.achievements.equippedTitle),
                 0.20f,
-                {leftCenter.x, leftCenter.y - 83.0f},
+                {leftCenter.x, leftCenter.y - 68.0f},
                 achievementTitleColor(view.achievements.equippedTitle),
                 "semibold"
             );
@@ -2111,7 +2111,7 @@ class CorumRankedLayer final : public CCLayerColor {
         }
         // The progression warning always has its own line, even with a title.
         auto* profileHint = makeLabel(profileHintText, hasTitle ? 0.22f : 0.25f,
-            {leftCenter.x, leftCenter.y - (hasTitle ? 98.0f : 88.0f)}, profileHintColor,
+            {leftCenter.x, leftCenter.y - (hasTitle ? 85.0f : 79.0f)}, profileHintColor,
             profile.demotionWarning && !placement && !profile.promotion.active ? "black" : "semibold");
         corum::ranked::ui::fitMenuLabelWidth(profileHint, 168.0f, hasTitle ? 0.22f : 0.25f, 0.15f);
         profileHint->setID("ranked-profile-progress-status"_spr);
@@ -3193,8 +3193,10 @@ class CorumRankedLayer final : public CCLayerColor {
             [weak, afterReveal = std::move(afterReveal)] {
                 if (auto layer = weak.lock()) {
                     layer->m_rankTransitionLayer = nullptr;
-                    if (afterReveal) afterReveal();
-                    else layer->restoreResultInput();
+                    if (layer->isRunning()) {
+                        if (afterReveal) afterReveal();
+                        else layer->restoreResultInput();
+                    }
                 }
             }, *transition != RankTransitionType::Placement
         );
@@ -3261,7 +3263,7 @@ class CorumRankedLayer final : public CCLayerColor {
             auto* score = corum::ranked::ui::ResultScoreLayer::create(std::move(input),layer.data(),[weak] {
                 if (auto owner = weak.lock()) {
                     owner->m_resultScoreLayer = nullptr;
-                    owner->render(); owner->restoreResultInput();
+                    if (owner->isRunning()) { owner->render(); owner->restoreResultInput(); }
                 }
             });
             layer->m_fadeRoot->setOpacity(opacity);
