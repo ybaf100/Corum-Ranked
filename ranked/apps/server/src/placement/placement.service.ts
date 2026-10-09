@@ -9,6 +9,8 @@ import {
   calculatePlacementMapScore,
   calculatePlacementRating,
   capPlacementRatingForStageCount,
+  normalizePlacementRating,
+  NORMALIZED_PLACEMENT_RATING_POLICY,
   calculatePlacementStageScore,
   finalizePlacementScore,
   scoreAttempt,
@@ -42,6 +44,7 @@ import type {
   PlacementAttemptStartDto,
   ReadyPlacementMapDto,
   SkipPlacementDto,
+  SkipPlacementMapDto,
   StartPlacementDto,
 } from "./placement.dto.js";
 import { AchievementService } from "../achievement/achievement.service.js";
@@ -65,6 +68,7 @@ interface PlacementRunRow {
   state_version: number;
   starting_pool: number;
   stage_count: number;
+  rating_policy_version: "LEGACY_CAP_V1" | "NORMALIZED_V1";
   current_stage_index: number;
   current_map_index: number;
   stage_pools: unknown;
@@ -112,6 +116,8 @@ interface PlacementMapRow {
   top_attempts: unknown;
   map_score: number;
   map_grade: PlacementGrade;
+  skip_client_event_id: string | null;
+  skipped_at: Date | string | null;
 }
 
 interface PlacementAttemptRow {
@@ -248,8 +254,8 @@ export class PlacementService {
         `INSERT INTO ranked_placement_runs (
            id, player_id, config_snapshot_id, config_generation, state,
            starting_pool, stage_count, current_stage_index, current_map_index, stage_pools,
-           map_snapshots, last_heartbeat_at, deadline_at, started_at
-         ) VALUES ($1, $2, $3, $4, 'POOL_SELECTION', $5, $6, 1, 1, $7::jsonb, $8::jsonb, $9, NULL, $9)`,
+           map_snapshots, last_heartbeat_at, deadline_at, started_at, rating_policy_version
+         ) VALUES ($1, $2, $3, $4, 'POOL_SELECTION', $5, $6, 1, 1, $7::jsonb, $8::jsonb, $9, NULL, $9, $10)`,
         [
           id,
           session.playerId,
@@ -260,6 +266,7 @@ export class PlacementService {
           JSON.stringify([body.startingPool]),
           JSON.stringify(serializedMaps),
           now.toISOString(),
+          NORMALIZED_PLACEMENT_RATING_POLICY,
         ],
       );
       await this.insertStageMaps(transaction, id, 1, firstMaps);
@@ -606,6 +613,62 @@ export class PlacementService {
     return { ...transition, serverNow: now.toISOString() };
   }
 
+  public async skipMap(runId: string, session: RankedSessionContext, body: SkipPlacementMapDto) {
+    const now = this.clock.now();
+    let duplicate = false;
+    await this.database.transaction(async (transaction) => {
+      const run = await this.lockRun(transaction, runId, session.playerId);
+      const previous = await transaction.query<PlacementMapRow>(
+        "SELECT * FROM ranked_placement_maps WHERE run_id = $1 AND skip_client_event_id = $2",
+        [run.id, body.clientEventId],
+      );
+      const replay = previous.rows[0];
+      if (replay && (Number(replay.stage_index) !== body.stageIndex ||
+          Number(replay.map_index) !== body.mapIndex || replay.playable_level_id !== body.levelId)) {
+        throw new ConflictException("Placement skip event belongs to another map");
+      }
+      const target = await transaction.query<PlacementMapRow>(
+        `SELECT * FROM ranked_placement_maps
+         WHERE run_id = $1 AND stage_index = $2 AND map_index = $3 FOR UPDATE`,
+        [run.id, body.stageIndex, body.mapIndex],
+      );
+      const map = target.rows[0];
+      if (!map || map.playable_level_id !== body.levelId) {
+        throw new ConflictException("Placement skip does not match the exact map snapshot");
+      }
+      // A delayed retry must acknowledge its old map, never skip the next map.
+      if (map.skip_client_event_id === body.clientEventId) { duplicate = true; return; }
+      if (Number(run.current_stage_index) !== body.stageIndex || Number(run.current_map_index) !== body.mapIndex) {
+        throw new ConflictException("Placement skip belongs to an earlier map");
+      }
+      if (run.state === "MAP_RESULT" && map.state === "MAP_RESULT") { duplicate = true; return; }
+      if (run.state !== "MAP_PLAYING" && run.state !== "MAP_SETTLING") {
+        throw new ConflictException("Placement Map is not accepting a skip");
+      }
+      const active = await transaction.query<{ id: string }>(
+        "SELECT id FROM ranked_placement_attempts WHERE map_id = $1 AND ended_at IS NULL AND valid = TRUE",
+        [map.id],
+      );
+      // The client freezes and delivers its current Attempt End before this
+      // request. Never drop an in-flight attempt or score unacknowledged progress.
+      if (active.rows[0]) throw new ConflictException("Sync the active Placement attempt before skipping");
+      const snapshot = await this.loadSnapshot(transaction, run.config_snapshot_id);
+      const policy = this.requirePlacementPolicy(snapshot);
+      const score = await this.recalculateMap(transaction, map, policy);
+      await transaction.query(
+        "UPDATE ranked_placement_maps SET skip_client_event_id = $1, skipped_at = $2 WHERE id = $3",
+        [body.clientEventId, now.toISOString(), map.id],
+      );
+      await this.settleMap(transaction, run, map, score, now, snapshot);
+    });
+    return {
+      ...await this.loadPublicState(runId, session.playerId, now),
+      accepted: true,
+      duplicate,
+      skippedMap: { stageIndex: body.stageIndex, mapIndex: body.mapIndex, levelId: body.levelId },
+    };
+  }
+
   public async continueResult(runId: string, session: RankedSessionContext) {
     const now = this.clock.now();
     await this.database.transaction(async (transaction) => {
@@ -919,17 +982,22 @@ export class PlacementService {
       mapGrade: map.map_grade,
       stageIndex: Number(map.stage_index) - 1,
     })), runPolicy);
-    const finalPlacementRating = capPlacementRatingForStageCount(
+    const normalized = run.rating_policy_version === NORMALIZED_PLACEMENT_RATING_POLICY;
+    const finalPlacementRating = normalized ? rating.placementRating : capPlacementRatingForStageCount(
       rating.placementRating,
       stageCount,
       snapshot.operational.tierBands,
     );
-    const finalHiddenMmr = capPlacementRatingForStageCount(
+    const convertedRating = normalized ? normalizePlacementRating(rating.placementRating, stageCount, runPolicy) : capPlacementRatingForStageCount(
       rating.hiddenMmr,
       stageCount,
       snapshot.operational.tierBands,
     );
-    const finalized = finalizePlacementScore(finalHiddenMmr, snapshot.operational.tierBands);
+    const finalized = finalizePlacementScore(convertedRating, snapshot.operational.tierBands);
+    // New placements start matchmaking on the same scale as the actual LP,
+    // including the existing tier-boundary adjustment. Legacy runs keep their
+    // start-time behavior, and completed profiles are never rewritten here.
+    const finalHiddenMmr = normalized ? finalized.visibleRankedScore : convertedRating;
     const placementGames = snapshot.operational.mmrPolicy?.placementGames;
     if (!placementGames) throw new Error("Placement snapshot has no MMR policy");
     await this.achievements.recordPlacementCompletion(
@@ -998,12 +1066,12 @@ export class PlacementService {
       [currentMap.id],
     ) : { rows: [], rowCount: 0 };
 
+    const snapshot = await this.loadSnapshot(this.database, run.config_snapshot_id);
+    const policy = this.requirePlacementPolicy(snapshot);
     let provisionalMapScore = currentMap ? Number(currentMap.map_score) : 0;
     let provisionalMapGrade: PlacementGrade = currentMap?.map_grade ?? "D";
     const active = activeAttempt.rows[0];
     if (currentMap && active) {
-      const snapshot = await this.loadSnapshot(this.database, run.config_snapshot_id);
-      const policy = this.requirePlacementPolicy(snapshot);
       const attempts = await this.completedAttemptEvidence(this.database, currentMap.id);
       const progressPercent = Math.max(0, Number(active.progress_percent ?? 0));
       const provisionalAttempt = scoreAttempt(
@@ -1044,6 +1112,8 @@ export class PlacementService {
       currentStageIndex: Number(run.current_stage_index),
       currentMapIndex: Number(run.current_map_index),
       totalStages: Number(run.stage_count),
+      ratingPolicyVersion: run.rating_policy_version,
+      mapGradeThresholds: policy.gradeThresholds,
       mapsPerStage: 2,
       stagePools: asArray(run.stage_pools),
       stageResults: asArray(run.stage_results),

@@ -41,11 +41,11 @@ struct AppDelegate{bool m_gamePaused=true;static AppDelegate* get(){static AppDe
 struct PlayLayer{inline static PlayLayer* current=nullptr;bool m_isPaused=true;static PlayLayer* get(){return current;}void resume(){m_isPaused=false;AppDelegate::get()->m_gamePaused=false;}};
 struct PauseLayer{bool parent=true;void* getParent(){return parent?this:nullptr;}};
 namespace geode::log{template<class...T>void info(T...) {}}
-namespace corum::ranked{struct RankedRuntime{struct Match{std::string matchId="m";}match;struct View{Match match;}v;bool conceded=false;static RankedRuntime& get(){static RankedRuntime r;return r;}auto const& view()const{return v;}bool gameplayConceded(int,int)const{return conceded;}};}
+namespace corum::ranked{struct RankedRuntime{struct Match{std::string matchId="m";}match;struct View{Match match;}v;bool conceded=false;static RankedRuntime& get(){static RankedRuntime r;return r;}auto const& view()const{return v;}bool gameplayConceded(int,int)const{return conceded;}bool placementMapSkipped(std::string const&,int,int)const{return false;}};}
 using corum::ranked::RankedRuntime;
-bool owned=true;bool ownsRankedPlayerPause(){return owned;}
+bool owned=true;bool ownsRankedPlayerPause(){return owned;}bool ownsManagedRankedPause(){return ownsRankedPlayerPause();}
 std::optional<WeakRef<PauseLayer>> activeRankedPause;
-struct CorumRankedPauseLayer:PauseLayer{struct Fields{std::optional<WeakRef<PlayLayer>> owner;bool concessionQuit=false,nativeQuitInProgress=false,nativeQuitReachedPlay=false;std::string matchId="m";int round=1,deathmatch=0;}f;Fields* m_fields=&f;int warnings=0;void confirmRankedExit(){++warnings;}void retireRankedPause(){}void releaseRankedPauseOwnership(){activeRankedPause.reset();}};
+struct CorumRankedPauseLayer:PauseLayer{struct Fields{std::optional<WeakRef<PlayLayer>> owner;int placementMapIndex=1;bool placement=false;bool concessionQuit=false,nativeQuitInProgress=false,nativeQuitReachedPlay=false;std::string matchId="m";int round=1,deathmatch=0;}f;Fields* m_fields=&f;${body(pause,'bool hasAcknowledgedGameplayExit()')} int warnings=0;void confirmRankedExit(){++warnings;}void retireRankedPause(){}void releaseRankedPauseOwnership(){activeRankedPause.reset();}};
 int originals=0;void nativeOriginal(CCObject*){++originals;}
 ${adapter}
 int main(){PlayLayer play;PlayLayer::current=&play;CorumRankedPauseLayer p;p.f.owner.emplace(&play);activeRankedPause.emplace(&p);
@@ -82,7 +82,7 @@ std::string operator""_spr(char const* s,std::size_t n){return std::string(s,n);
 #define schedule_selector(x) 0
 namespace geode::prelude{}
 namespace corum::ranked{enum class RuntimeStage{Idle,Matched};struct RankedRuntime{struct Match{std::string matchId="m";int roundNumber=1,deathmatchSequence=0;};struct View{RuntimeStage stage=RuntimeStage::Matched;Match match;}v;
- bool conceded=false,spectator=false,whole=false;double remaining=30000;int submissions=0;static RankedRuntime& get(){static RankedRuntime r;return r;}auto const& view()const{return v;}bool isSpectating()const{return spectator;}double matchPauseRemainingMs()const{return remaining;}bool gameplayConceded(int,int)const{return conceded;}void surrenderCurrentMatch(bool v){whole=v;++submissions;}};}
+ bool conceded=false,spectator=false,whole=false;double remaining=30000;int submissions=0;static RankedRuntime& get(){static RankedRuntime r;return r;}auto const& view()const{return v;}bool isSpectating()const{return spectator;}double matchPauseRemainingMs()const{return remaining;}bool gameplayConceded(int,int)const{return conceded;}bool placementMapSkipped(std::string const&,int,int)const{return false;}void surrenderCurrentMatch(bool v){whole=v;++submissions;}};}
 ${source}
 int main(){using namespace corum::ranked;using ui::RankedExitConfirmation;auto& runtime=RankedRuntime::get();PlayLayer play;PlayLayer::current=&play;PauseLayer pause;
  {auto* c=RankedExitConfirmation::create(&pause,&play);c->show();auto* a=FLAlertLayer::last;assert(a->first=="Stay"&&a->second=="Surrender");c->FLAlert_Clicked(a,false);assert(runtime.submissions==0&&!c->getParent()&&!a->m_alertProtocol);delete a;delete c;}

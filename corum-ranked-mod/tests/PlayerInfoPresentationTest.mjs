@@ -21,6 +21,11 @@ struct CCLabelBMFont{std::string original;float scale=1,width=1;bool wrap=false;
 void setLabelScale(CCLabelBMFont* v,float scale){v->scale=scale/2;} // actual 128px Corum font factor
 ${fit}
 int main(){using corum::ranked::extremeDemonCount;
+ using corum::ranked::matchRecordText;
+ assert(matchRecordText(0,0,true)=="0승 / 0패 (0%)");
+ assert(matchRecordText(8,2,true)=="8승 / 2패 (80%)");
+ assert(matchRecordText(1,2,false)=="1W / 2L (33.3%)");
+ assert(matchRecordText(2147483647,2147483647,false)=="2147483647W / 2147483647L (50%)");
  assert(extremeDemonCount("155,11,7,21,80,7,2,0,0,0,22,8")==80);
  assert(extremeDemonCount("0,0,0,0,3,0,0,0,0,5,99,99")==8);
  for(auto value:{"","0,0,0,0,3","0,0,0,0,-1,0,0,0,0,0,0,0","0,0,0,0,x,0,0,0,0,0,0,0","0,0,0,0,1,0,0,0,0,0,0,0,5"})assert(!extremeDemonCount(value));

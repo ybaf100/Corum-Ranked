@@ -192,6 +192,8 @@ interface ProfileResultRow {
   placement_results: unknown;
   displayed_tier: DisplayTier;
   result_streak: number;
+  wins: number;
+  losses: number;
   promotion_source_tier: RankedTier | null;
   promotion_target_tier: RankedTier | null;
   promotion_cutoff: number | null;
@@ -363,7 +365,7 @@ const ratingProfileFromRow = (row: ProfileResultRow): RankedRatingProfile => ({
   demotionWarning: Boolean(row.demotion_warning),
 });
 
-const publicRatingProfile = (profile: RankedRatingProfile, placementGamesRequired: number) => {
+const publicRatingProfile = (profile: RankedRatingProfile, placementGamesRequired: number, stats: { wins: number; losses: number }) => {
   const placement = profile.placementGames < placementGamesRequired;
   const promotion = profile.promotion;
   const promotionWins = promotion?.results.filter((mark) => mark === "WIN").length ?? 0;
@@ -374,6 +376,8 @@ const publicRatingProfile = (profile: RankedRatingProfile, placementGamesRequire
     placementGamesRequired,
     placementResults: profile.placementResults,
     resultStreak: profile.resultStreak,
+    wins: Number(stats.wins ?? 0),
+    losses: Number(stats.losses ?? 0),
     streak: Math.abs(profile.resultStreak) >= 2
       ? {
           type: profile.resultStreak > 0 ? "WIN" : "LOSS",
@@ -2534,13 +2538,13 @@ export class MatchService {
       rankedScoreDelta: { A: ratingA.visibleScoreDelta, B: ratingB.visibleScoreDelta },
       profileBefore: {
         A: {
-          ...publicRatingProfile(beforeA, placementGamesRequired),
+          ...publicRatingProfile(beforeA, placementGamesRequired, profileA),
           equippedTitle: this.achievements.titleProjection(
             profileA.equipped_achievement_id, profileA.equipped_achievement_level,
           ),
         },
         B: {
-          ...publicRatingProfile(beforeB, placementGamesRequired),
+          ...publicRatingProfile(beforeB, placementGamesRequired, profileB),
           equippedTitle: this.achievements.titleProjection(
             profileB.equipped_achievement_id, profileB.equipped_achievement_level,
           ),
@@ -2548,13 +2552,13 @@ export class MatchService {
       },
       profileAfter: {
         A: {
-          ...publicRatingProfile(ratingA.profile, placementGamesRequired),
+          ...publicRatingProfile(ratingA.profile, placementGamesRequired, { wins: Number(profileA.wins ?? 0) + (winner === "A" ? 1 : 0), losses: Number(profileA.losses ?? 0) + (winner !== "A" ? 1 : 0) }),
           equippedTitle: this.achievements.titleProjection(
             profileA.equipped_achievement_id, profileA.equipped_achievement_level,
           ),
         },
         B: {
-          ...publicRatingProfile(ratingB.profile, placementGamesRequired),
+          ...publicRatingProfile(ratingB.profile, placementGamesRequired, { wins: Number(profileB.wins ?? 0) + (winner === "B" ? 1 : 0), losses: Number(profileB.losses ?? 0) + (winner !== "B" ? 1 : 0) }),
           equippedTitle: this.achievements.titleProjection(
             profileB.equipped_achievement_id, profileB.equipped_achievement_level,
           ),
@@ -2608,8 +2612,8 @@ export class MatchService {
         now.toISOString(),
       ],
     );
-    const publicAfterA = publicRatingProfile(ratingA.profile, placementGamesRequired);
-    const publicAfterB = publicRatingProfile(ratingB.profile, placementGamesRequired);
+    const publicAfterA = publicRatingProfile(ratingA.profile, placementGamesRequired, { wins: Number(profileA.wins ?? 0) + (winner === "A" ? 1 : 0), losses: Number(profileA.losses ?? 0) + (winner !== "A" ? 1 : 0) });
+    const publicAfterB = publicRatingProfile(ratingB.profile, placementGamesRequired, { wins: Number(profileB.wins ?? 0) + (winner === "B" ? 1 : 0), losses: Number(profileB.losses ?? 0) + (winner !== "B" ? 1 : 0) });
     await this.outbox.enqueueMatchEvent(
       transaction,
       current,
@@ -3396,13 +3400,13 @@ export class MatchService {
             },
             profileAfter: {
               A: playerA ? {
-                ...publicRatingProfile(ratingProfileFromRow(playerA), placementGamesRequired),
+                ...publicRatingProfile(ratingProfileFromRow(playerA), placementGamesRequired, playerA),
                 equippedTitle: this.achievements.titleProjection(
                   playerA.equipped_achievement_id, playerA.equipped_achievement_level,
                 ),
               } : null,
               B: playerB ? {
-                ...publicRatingProfile(ratingProfileFromRow(playerB), placementGamesRequired),
+                ...publicRatingProfile(ratingProfileFromRow(playerB), placementGamesRequired, playerB),
                 equippedTitle: this.achievements.titleProjection(
                   playerB.equipped_achievement_id, playerB.equipped_achievement_level,
                 ),
@@ -3437,7 +3441,7 @@ export class MatchService {
           ? {
               gdAccountId: playerA.gd_account_id,
               gdUsername: playerA.gd_username,
-              ...publicRatingProfile(ratingProfileFromRow(playerA), placementGamesRequired),
+              ...publicRatingProfile(ratingProfileFromRow(playerA), placementGamesRequired, playerA),
               equippedTitle: this.achievements.titleProjection(
                 playerA.equipped_achievement_id, playerA.equipped_achievement_level,
               ),
@@ -3447,7 +3451,7 @@ export class MatchService {
           ? {
               gdAccountId: playerB.gd_account_id,
               gdUsername: playerB.gd_username,
-              ...publicRatingProfile(ratingProfileFromRow(playerB), placementGamesRequired),
+              ...publicRatingProfile(ratingProfileFromRow(playerB), placementGamesRequired, playerB),
               equippedTitle: this.achievements.titleProjection(
                 playerB.equipped_achievement_id, playerB.equipped_achievement_level,
               ),

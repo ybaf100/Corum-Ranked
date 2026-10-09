@@ -15,6 +15,14 @@ export interface PlayerStanding {
   readonly total: number;
   readonly topPercent: number | null;
   readonly target: StandingTarget | null;
+  readonly goldTimeline?: GoldScoreTimeline;
+}
+
+export interface GoldScoreTimeline {
+  readonly fixedTotal: number;
+  readonly higherFixed: number;
+  readonly groups: readonly { score: number; count: number; target: StandingTarget; preferMoving: boolean }[];
+  readonly moving: { beforeScore: number | null; afterScore: number | null; target: StandingTarget } | null;
 }
 
 export const unrankedStanding = (): PlayerStanding => ({ rank: null, total: 0, topPercent: null, target: null });
@@ -35,6 +43,7 @@ interface StandingRow {
   target_is_bot: boolean | null;
   target_rank: number | null;
   target_score: number | null;
+  gold_timeline: GoldScoreTimeline | null;
 }
 
 /** One SQL snapshot for all subjects/phases. Include every historical bot;
@@ -46,6 +55,7 @@ export async function readStandings(
   phases: readonly string[] = ["current"],
   overrides: readonly StandingOverride[] = [],
   tieSeed: string = randomUUID(),
+  includeGoldTimeline = false,
 ): Promise<ReadonlyMap<string, ReadonlyMap<string, PlayerStanding>>> {
   const result = await database.query<StandingRow>(
     `WITH phases AS (SELECT unnest($2::text[]) AS phase),
@@ -68,14 +78,39 @@ export async function readStandings(
        FROM eligible
      ), totals AS (
        SELECT phase, COUNT(*)::int AS total FROM eligible GROUP BY phase
+     ), fixed AS (
+       SELECT * FROM ranked WHERE phase='before' AND NOT (id=ANY($1::uuid[]))
+     ), fixed_groups AS (
+       SELECT DISTINCT ON (score) *, COUNT(*) OVER (PARTITION BY score)::int AS amount
+       FROM fixed ORDER BY score, mmr DESC, md5(id::text || $4::text)
      )
      SELECT phase.phase, requested.player_id, own.rank, COALESCE(totals.total, 0) AS total,
        target.gd_account_id::text AS target_account_id,
        target.gd_username AS target_name, target.is_bot AS target_is_bot,
-       target.rank AS target_rank, target.score AS target_score
+       target.rank AS target_rank, target.score AS target_score,
+       CASE WHEN $5::boolean AND phase.phase='before' AND (old_own.tier='GOLD' OR new_own.tier='GOLD')
+       THEN jsonb_build_object(
+         'fixedTotal',(SELECT COUNT(*)::int FROM fixed),
+         'higherFixed',(SELECT COUNT(*)::int FROM fixed WHERE score>COALESCE(above_range.score,GREATEST(old_own.score,new_own.score,moving_before.score,moving_after.score))),
+         'groups',COALESCE((SELECT jsonb_agg(jsonb_build_object('score',g.score,'count',g.amount,
+           'preferMoving', COALESCE(moving_after.mmr>g.mmr OR (moving_after.mmr=g.mmr AND md5(moving_after.id::text || $4::text)<md5(g.id::text || $4::text)),FALSE),
+           'target',jsonb_build_object('gdAccountId',g.gd_account_id::text,'player',g.gd_username,'isBot',g.is_bot,'rank',g.rank,'visibleRankedScore',g.score)) ORDER BY g.score DESC)
+           FROM fixed_groups g WHERE g.score BETWEEN LEAST(old_own.score,new_own.score,moving_before.score,moving_after.score) AND GREATEST(old_own.score,new_own.score,moving_before.score,moving_after.score)
+             OR g.score=above_range.score),'[]'::jsonb),
+         'moving',CASE WHEN moving_before.id IS NOT NULL OR moving_after.id IS NOT NULL THEN jsonb_build_object(
+           'beforeScore',moving_before.score,'afterScore',moving_after.score,
+           'target',jsonb_build_object('gdAccountId',COALESCE(moving_after.gd_account_id,moving_before.gd_account_id)::text,
+             'player',COALESCE(moving_after.gd_username,moving_before.gd_username),'isBot',COALESCE(moving_after.is_bot,moving_before.is_bot),
+             'rank',COALESCE(moving_before.rank,moving_after.rank),'visibleRankedScore',COALESCE(moving_before.score,moving_after.score))) ELSE NULL END)
+       ELSE NULL END AS gold_timeline
      FROM phases phase CROSS JOIN unnest($1::uuid[]) AS requested(player_id)
      LEFT JOIN ranked own ON own.phase = phase.phase AND own.id = requested.player_id
      LEFT JOIN totals ON totals.phase = phase.phase
+     LEFT JOIN profiles old_own ON old_own.phase='before' AND old_own.id=requested.player_id
+     LEFT JOIN profiles new_own ON new_own.phase='after' AND new_own.id=requested.player_id
+     LEFT JOIN ranked moving_before ON $5::boolean AND moving_before.phase='before' AND moving_before.id<>requested.player_id AND moving_before.id=ANY($1::uuid[])
+     LEFT JOIN ranked moving_after ON $5::boolean AND moving_after.phase='after' AND moving_after.id<>requested.player_id AND moving_after.id=ANY($1::uuid[])
+     LEFT JOIN LATERAL (SELECT * FROM fixed_groups WHERE score>GREATEST(old_own.score,new_own.score,moving_before.score,moving_after.score) ORDER BY score LIMIT 1) above_range ON TRUE
      LEFT JOIN LATERAL (
        SELECT candidate.* FROM ranked candidate
        WHERE candidate.phase = phase.phase AND candidate.score > own.score
@@ -85,7 +120,7 @@ export async function readStandings(
     [playerIds, phases, JSON.stringify(overrides.map(({ phase, playerId, profile }) => ({
       phase, player_id: playerId, displayed_tier: profile.displayedTier as DisplayTier,
       visible_ranked_score: profile.visibleRankedScore, hidden_mmr: profile.hiddenMmr,
-    }))), tieSeed],
+    }))), tieSeed, includeGoldTimeline],
   );
   const views = new Map<string, Map<string, PlayerStanding>>(phases.map((phase) => [phase, new Map()]));
   for (const row of result.rows) {
@@ -98,6 +133,7 @@ export async function readStandings(
             isBot: Boolean(row.target_is_bot), rank: Number(row.target_rank),
             visibleRankedScore: Number(row.target_score) }
         : null,
+      ...(row.gold_timeline ? {goldTimeline:row.gold_timeline} : {}),
     });
   }
   return views;

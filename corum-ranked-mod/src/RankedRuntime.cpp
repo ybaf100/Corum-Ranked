@@ -231,6 +231,45 @@ corum::ranked::ScoreSeriesView parseScoreSeries(matjson::Value const& value) {
     return series;
 }
 
+corum::ranked::GoldScoreTimeline parseGoldTimeline(matjson::Value const& value) {
+    corum::ranked::GoldScoreTimeline view;
+    if (!value.isObject()) return view;
+    auto const integer = [](matjson::Value const& v) -> std::optional<int> {
+        auto n = v.asInt();
+        if (!n.isOk() || n.unwrap() < 0 || n.unwrap() > 2147483647) return std::nullopt;
+        return static_cast<int>(n.unwrap());
+    };
+    auto const target = [&](matjson::Value const& v) -> std::optional<corum::ranked::StandingTargetView> {
+        if (!v.isObject()) return std::nullopt;
+        auto rank = integer(v["rank"]), score = integer(v["visibleRankedScore"]);
+        auto account = numFromString<int>(v["gdAccountId"].asString().unwrapOr("")).unwrapOr(0);
+        auto bot = v["isBot"].asBool().unwrapOr(false);
+        if (!rank || *rank == 0 || !score || (!bot && account <= 0)) return std::nullopt;
+        return corum::ranked::StandingTargetView {account,v["player"].asString().unwrapOr(""),bot,*rank,*score};
+    };
+    auto total = integer(value["fixedTotal"]), higher = integer(value["higherFixed"]);
+    auto groups = value["groups"].asArray();
+    if (!total || !higher || *higher > *total || *total > 2147483645 || !groups.isOk() || groups.unwrap().size() > 4096) return {};
+    view.fixedTotal = *total; view.higherFixed = *higher;
+    std::int64_t represented = *higher;
+    std::optional<int> previous;
+    for (auto const& group : groups.unwrap()) {
+        auto score = integer(group["score"]), count = integer(group["count"]);
+        auto avatar = target(group["target"]);
+        if (!score || !count || *count == 0 || !avatar || avatar->score != *score || (previous && *score >= *previous)) return {};
+        represented += *count; if (represented > *total) return {};
+        view.groups.push_back({*score,*count,*avatar,group["preferMoving"].asBool().unwrapOr(false)}); previous = *score;
+    }
+    auto const moving = value["moving"];
+    if (moving.isObject()) {
+        auto avatar = target(moving["target"]);
+        auto before = integer(moving["beforeScore"]), after = integer(moving["afterScore"]);
+        if (!avatar || (!before && !after)) return {};
+        view.moving = corum::ranked::GoldMovingRival {before,after,*avatar};
+    }
+    view.available = true; return view;
+}
+
 corum::ranked::ResultScoreView parseResultScore(matjson::Value const& value) {
     corum::ranked::ResultScoreView view;
     if (value["version"].asInt().unwrapOr(0) != 1) return view;
@@ -245,7 +284,7 @@ corum::ranked::ResultScoreView parseResultScore(matjson::Value const& value) {
     auto const player = [&](char const* side) {
         auto const data = value["players"][side];
         return corum::ranked::ResultScorePlayerView {parseStanding(data["before"]),
-            parseStanding(data["after"]), parseScoreSeries(data["promotion"])};
+            parseStanding(data["after"]), parseScoreSeries(data["promotion"]),parseGoldTimeline(data["goldTimeline"])};
     };
     view.playerA = player("A"); view.playerB = player("B"); view.available = true;
     return view;
@@ -263,6 +302,8 @@ corum::ranked::RankedProfileView parseRankedProfile(matjson::Value const& value)
     );
     profile.placementResults = parseRatingMarks(value["placementResults"]);
     profile.resultStreak = static_cast<int>(value["resultStreak"].asInt().unwrapOr(0));
+    profile.wins = std::max(0,static_cast<int>(value["wins"].asInt().unwrapOr(0)));
+    profile.losses = std::max(0,static_cast<int>(value["losses"].asInt().unwrapOr(0)));
     profile.demotionWarning = value["demotionWarning"].asBool().unwrapOr(false);
     profile.equippedTitle = parseAchievementTitle(value["equippedTitle"]);
     auto const promotion = value["promotion"];
@@ -815,6 +856,7 @@ void RankedRuntime::createSession(bool takeOver) {
             m_view.placementGamesRequired = profile.placementGamesRequired;
             m_view.placementResults = profile.placementResults;
             m_view.resultStreak = profile.resultStreak;
+            m_view.profileWins = profile.wins; m_view.profileLosses = profile.losses;
             m_view.promotion = profile.promotion;
             m_view.demotionWarning = profile.demotionWarning;
             m_view.placement.required =
@@ -1277,6 +1319,10 @@ void RankedRuntime::parsePlacementState(matjson::Value const& root) {
     m_view.placement.currentMapIndex = static_cast<int>(root["currentMapIndex"].asInt().unwrapOr(0));
     m_view.placement.totalStages = static_cast<int>(root["totalStages"].asInt().unwrapOr(5));
     m_view.placement.mapsPerStage = static_cast<int>(root["mapsPerStage"].asInt().unwrapOr(2));
+    auto const thresholds = root["mapGradeThresholds"];
+    m_view.placement.mapGradeThresholds = {
+        thresholds["cMin"].asDouble().unwrapOr(150), thresholds["bMin"].asDouble().unwrapOr(250),
+        thresholds["aMin"].asDouble().unwrapOr(350), thresholds["sMin"].asDouble().unwrapOr(425)};
     m_view.placement.stagePools.clear();
     if (auto const pools = root["stagePools"].asArray(); pools.isOk()) {
         for (auto const& pool : pools.unwrap()) {
@@ -1724,6 +1770,12 @@ void RankedRuntime::parseMatchState(matjson::Value const& root) {
         if (profileAfter.isObject()) {
             m_view.match.profileAfterA = parseRankedProfile(profileAfter["A"]);
             m_view.match.profileAfterB = parseRankedProfile(profileAfter["B"]);
+            // Older immutable results do not contain record counts. Use the
+            // live player projection rather than overwriting the lobby with 0.
+            if (!profileAfter["A"]["wins"].asInt().isOk()) m_view.match.profileAfterA.wins = m_view.match.playerAProfile.wins;
+            if (!profileAfter["A"]["losses"].asInt().isOk()) m_view.match.profileAfterA.losses = m_view.match.playerAProfile.losses;
+            if (!profileAfter["B"]["wins"].asInt().isOk()) m_view.match.profileAfterB.wins = m_view.match.playerBProfile.wins;
+            if (!profileAfter["B"]["losses"].asInt().isOk()) m_view.match.profileAfterB.losses = m_view.match.playerBProfile.losses;
             m_view.match.profileAfterTierA = profileAfter["A"]["displayedTier"].asString().unwrapOr("");
             m_view.match.profileAfterTierB = profileAfter["B"]["displayedTier"].asString().unwrapOr("");
             auto const scoreA = profileAfter["A"]["visibleRankedScore"].asInt();
@@ -2005,6 +2057,93 @@ void RankedRuntime::retireConcededAttemptTransport() {
     m_pendingProgress.reset(); m_gameplayStartEligible = false;
 }
 
+bool RankedRuntime::placementMapSkipped(std::string const& runId, int stageIndex, int mapIndex) const {
+    return m_skippedPlacementMaps.contains(fmt::format("{}:P:{}:{}", runId, stageIndex, mapIndex));
+}
+
+void RankedRuntime::skipPlacementMap(int levelId, double progressPercent) {
+    if (m_pendingPlacementMapSkip) return;
+    auto const& placement = m_view.placement;
+    if (!isPlacement() || isSpectating() || m_view.stage != RuntimeStage::Matched ||
+        (placement.state != "MAP_PLAYING" && placement.state != "MAP_SETTLING") ||
+        !m_view.match.currentMap || m_view.match.currentMap->levelId != levelId ||
+        !std::isfinite(progressPercent) || progressPercent < 0 || progressPercent > 100) {
+        m_placementMapSkipStatus = SurrenderStatus::Rejected; return;
+    }
+    // Pause freezes native progress. Deliver that exact visual Attempt End
+    // through the existing idempotent FIFO before settling this one map.
+    if ((hasLocalOpenAttempt() || (!hasLocalAttemptInFlight() && progressPercent > 0)) &&
+        !reportAttemptEnd(levelId, progressPercent, false)) {
+        m_placementMapSkipStatus = SurrenderStatus::Rejected; return;
+    }
+    matjson::Value body;
+    body["clientEventId"] = newEventId("placement-map-skip");
+    body["stageIndex"] = placement.currentStageIndex;
+    body["mapIndex"] = placement.currentMapIndex;
+    body["levelId"] = std::to_string(levelId);
+    m_pendingPlacementMapSkip = std::move(body);
+    m_placementMapSkipRunId = placement.runId;
+    ++m_placementMapSkipGeneration;
+    m_placementMapSkipStatus = hasLocalAttemptInFlight() ? SurrenderStatus::WaitingAttempt : SurrenderStatus::Sending;
+    m_nextPlacementMapSkipAt = {};
+    flushPlacementMapSkip();
+}
+
+void RankedRuntime::flushPlacementMapSkip() {
+    if (!m_pendingPlacementMapSkip || m_placementMapSkipBusy ||
+        std::chrono::steady_clock::now() < m_nextPlacementMapSkipAt) return;
+    auto const& body = *m_pendingPlacementMapSkip;
+    auto const stage = static_cast<int>(body["stageIndex"].asInt().unwrapOr(0));
+    auto const map = static_cast<int>(body["mapIndex"].asInt().unwrapOr(0));
+    auto const runId = m_placementMapSkipRunId;
+    auto const& placement = m_view.placement;
+    if (!isPlacement() || placement.runId != runId || placement.currentStageIndex != stage ||
+        placement.currentMapIndex != map || (placement.state != "MAP_PLAYING" &&
+        placement.state != "MAP_SETTLING" && placement.state != "MAP_RESULT")) {
+        m_pendingPlacementMapSkip.reset(); m_placementMapSkipStatus = SurrenderStatus::Rejected; return;
+    }
+    if (hasLocalAttemptInFlight()) {
+        m_placementMapSkipStatus = SurrenderStatus::WaitingAttempt;
+        flushAttemptEvents(); return;
+    }
+    auto request = baseRequest(m_sessionToken); request.bodyJSON(body);
+    auto const generation = m_placementMapSkipGeneration;
+    auto const levelId = body["levelId"].asString().unwrapOr("");
+    m_placementMapSkipBusy = true; m_placementMapSkipStatus = SurrenderStatus::Sending;
+    m_placementMapSkipRequest.spawn(request.post(endpoint("/api/ranked/placement/" + runId + "/map/skip")),
+        [this, runId, stage, map, levelId, generation](web::WebResponse response) {
+            if (generation != m_placementMapSkipGeneration || runId != m_view.placement.runId) return;
+            m_placementMapSkipBusy = false;
+            if (successful(response)) {
+                auto const root = response.json().unwrapOr(matjson::Value());
+                if (!root["accepted"].asBool().unwrapOr(false) || root["runId"].asString().unwrapOr("") != runId ||
+                    root["skippedMap"]["stageIndex"].asInt().unwrapOr(0) != stage ||
+                    root["skippedMap"]["mapIndex"].asInt().unwrapOr(0) != map ||
+                    root["skippedMap"]["levelId"].asString().unwrapOr("") != levelId) {
+                    m_pendingPlacementMapSkip.reset(); m_placementMapSkipStatus = SurrenderStatus::Rejected;
+                    setTransientError("Invalid Placement map skip acknowledgement"); return;
+                }
+                m_skippedPlacementMaps.insert(fmt::format("{}:P:{}:{}", runId, stage, map));
+                m_pendingPlacementMapSkip.reset(); m_placementMapSkipStatus = SurrenderStatus::Accepted;
+                parsePlacementState(root);
+                log::info("[PlacementSkip] accepted run={} stage={} map={}", runId, stage, map);
+            } else if (response.code() >= 400 && response.code() < 500) {
+                m_pendingPlacementMapSkip.reset(); m_placementMapSkipStatus = SurrenderStatus::Rejected;
+                setTransientError(responseError(response));
+            } else {
+                m_placementMapSkipStatus = SurrenderStatus::Retrying;
+                m_nextPlacementMapSkipAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
+            }
+        });
+}
+
+void RankedRuntime::resetPlacementMapSkip() {
+    ++m_placementMapSkipGeneration; m_placementMapSkipRequest.cancel();
+    m_pendingPlacementMapSkip.reset(); m_placementMapSkipBusy = false;
+    m_placementMapSkipRunId.clear(); m_skippedPlacementMaps.clear();
+    m_placementMapSkipStatus = SurrenderStatus::Idle; m_nextPlacementMapSkipAt = {};
+}
+
 void RankedRuntime::surrenderCurrentMatch(bool wholeMatch) {
     if (m_view.stage != RuntimeStage::Matched || isPlacement() || m_view.match.matchId.empty() ||
         !(stateAllowsActiveAttempt(m_view.match.state) || nativeEntryStartGranted())) {
@@ -2136,6 +2275,7 @@ void RankedRuntime::flushGameplayControls() {
 }
 
 void RankedRuntime::resetGameplayControls() {
+    resetPlacementMapSkip();
     m_concessions.bind({});
     SpectatorLiveRuntime::get().publisherPaused(false);
     m_pauseRequest.cancel(); m_surrenderRequest.cancel();
@@ -2238,6 +2378,7 @@ void RankedRuntime::dismissMatch() {
         m_view.placementGamesRequired = profile.placementGamesRequired;
         m_view.placementResults = profile.placementResults;
         m_view.resultStreak = profile.resultStreak;
+        m_view.profileWins = profile.wins; m_view.profileLosses = profile.losses;
         m_view.promotion = profile.promotion;
         m_view.demotionWarning = profile.demotionWarning;
         if (m_view.match.scorePresentation.available) m_view.standing = ownSide == "A"
@@ -2893,12 +3034,30 @@ void RankedRuntime::noteNativeRoundSceneEntered(int levelId) {
         });
 }
 
+std::string RankedRuntime::placementDisplayGrade(double score) const {
+    auto const& placement = m_view.placement;
+    if (placement.currentMapClears >= 2 || score >= placement.mapGradeThresholds[3]) return "S";
+    if (score >= placement.mapGradeThresholds[2]) return "A";
+    if (score >= placement.mapGradeThresholds[1]) return "B";
+    if (score >= placement.mapGradeThresholds[0]) return "C";
+    return "D";
+}
+
 double RankedRuntime::localDisplayScore(double progressPercent, std::optional<double> qualifyingPercentOverride) const {
     if (isSpectating() || m_spectatorLocalTransportOwner != nullptr) progressPercent = -1.0;
     if (isPlacement()) {
-        // The score may preview a server-calculated Top 2 replacement while the
-        // authoritative Grade remains frozen until Attempt End.
-        return static_cast<double>(m_view.placement.provisionalMapScore);
+        auto const& placement = m_view.placement;
+        auto score = std::max(placement.currentMapScore, placement.provisionalMapScore);
+        if (progressPercent >= 0 && hasLocalOpenAttempt() && m_view.match.currentMap) {
+            auto const qualifying = qualifyingPercentOverride.value_or(m_view.match.currentMap->qualifyingPercent);
+            if (std::isfinite(qualifying) && qualifying >= 0 && qualifying <= 100) {
+                double bestCompleted = 0;
+                for (auto const& attempt : placement.currentMapTopAttempts)
+                    bestCompleted = std::max(bestCompleted, attempt.awardedScore);
+                score = std::max(score, bestCompleted + calculateAttemptScore(progressPercent, false, qualifying));
+            }
+        }
+        return std::clamp(score, 0.0, 500.0);
     }
     auto const ownIsA = m_view.match.side == "A";
     if (m_view.match.deathmatchSequence > 0) {
@@ -2973,7 +3132,7 @@ bool RankedRuntime::canFinishTrackedLevel(int levelId) const {
 bool RankedRuntime::attemptStartWindowOpen() const {
     auto const& state = m_view.match.state;
     if (isPlacement()) {
-        if (state != "MAP_PLAYING") return false;
+        if (state != "MAP_PLAYING" || placementMapSkipPending()) return false;
         auto const signedRemaining = signedDeadlineMillis();
         return !signedRemaining || *signedRemaining > -10'000;
     }
@@ -3045,6 +3204,7 @@ std::string RankedRuntime::newEventId(std::string_view kind) {
 
 bool RankedRuntime::reportAttemptStart(int levelId) {
     if (spectatorAttemptTransportBlocked(isSpectating(), m_spectatorLocalTransportOwner != nullptr)) return false;
+    if (isPlacement() && placementMapSkipPending()) return false;
     auto const armedSceneStart =
         m_gameplayStartEligible && m_gameplayMap &&
         m_gameplayMatchId == m_view.match.matchId &&
@@ -3700,6 +3860,7 @@ void RankedRuntime::tick() {
     updateSessionHeartbeat();
     if (m_sessionRejected) return;
     flushGameplayControls();
+    flushPlacementMapSkip();
     SpectatorLiveRuntime::get().tickTerminal();
     auto const now = std::chrono::steady_clock::now();
     if ((m_view.stage == RuntimeStage::Ready || m_view.stage == RuntimeStage::Queued) && now >= m_nextStandingAt) fetchStanding();

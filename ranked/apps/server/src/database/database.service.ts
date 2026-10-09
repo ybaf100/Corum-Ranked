@@ -33,6 +33,7 @@ const REQUIRED_MIGRATIONS = [
   "0014_forum_records.sql",
   "0015_forum_refresh_cooldown.sql",
   "0016_admin_history_reset.sql",
+  "0017_placement_rating_policy.sql",
 ] as const;
 
 export interface RankedSchemaStatus {
@@ -65,6 +66,9 @@ type SchemaProbeRow = QueryResultRow & {
   deathmatch_attempt_played_level_id: boolean;
   placement_prepare_deadline_at: boolean;
   placement_completion_kind: boolean;
+  placement_rating_policy_version: boolean;
+  placement_skip_event: boolean;
+  placement_skipped_at: boolean;
   profile_total_ap: boolean;
   profile_equipped_achievement: boolean;
   profile_equipped_achievement_level: boolean;
@@ -197,6 +201,10 @@ export class DatabaseService implements DatabasePort, OnModuleInit, OnApplicatio
           ) AS placement_completion_kind,
           EXISTS (
             SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = 'ranked_placement_runs' AND column_name = 'rating_policy_version'
+          ) AS placement_rating_policy_version,
+          EXISTS (
+            SELECT 1 FROM information_schema.columns
             WHERE table_schema = 'public' AND table_name = 'ranked_profiles' AND column_name = 'total_ap'
           ) AS profile_total_ap,
           EXISTS (
@@ -214,7 +222,15 @@ export class DatabaseService implements DatabasePort, OnModuleInit, OnApplicatio
           EXISTS (
             SELECT 1 FROM information_schema.columns
             WHERE table_schema = 'public' AND table_name = 'ranked_matches' AND column_name = 'entry_state'
-          ) AS match_entry_state
+          ) AS match_entry_state,
+          EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = 'ranked_placement_maps' AND column_name = 'skip_client_event_id'
+          ) AS placement_skip_event,
+          EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = 'ranked_placement_maps' AND column_name = 'skipped_at'
+          ) AS placement_skipped_at
       `);
       const row = result.rows[0];
       if (!row) return { ready: false, missing: ["schema probe returned no row"] };
@@ -244,6 +260,9 @@ export class DatabaseService implements DatabasePort, OnModuleInit, OnApplicatio
         ["deathmatch_attempt_played_level_id", "ranked_deathmatch_attempts.played_level_id"],
         ["placement_prepare_deadline_at", "ranked_placement_maps.prepare_deadline_at"],
         ["placement_completion_kind", "ranked_placement_runs.completion_kind"],
+        ["placement_rating_policy_version", "ranked_placement_runs.rating_policy_version"],
+        ["placement_skip_event", "ranked_placement_maps.skip_client_event_id"],
+        ["placement_skipped_at", "ranked_placement_maps.skipped_at"],
         ["profile_total_ap", "ranked_profiles.total_ap"],
         ["profile_equipped_achievement", "ranked_profiles.equipped_achievement_id"],
         ["profile_equipped_achievement_level", "ranked_profiles.equipped_achievement_level"],

@@ -78,8 +78,18 @@ struct CCLayerColor : CCNode {
 };
 struct CCDrawNode : CCNode {
     CCPoint from{},to{}; float radius=0; ccColor4F segmentColor{}; int segments=0;
+    std::vector<CCPoint> polygon;
     static CCDrawNode* create() { return new CCDrawNode; }
-    void clear() { segments=0; }
+    void clear() { segments=0; polygon.clear(); }
+    bool drawPolygon(CCPoint* vertices,unsigned int count,ccColor4F const& color,float,ccColor4F const&) {
+        assert(count>=3); polygon.assign(vertices,vertices+count); segmentColor=color; ++segments;
+        for(unsigned int i=0;i<count;++i) {
+            auto const& a=vertices[i];auto const& b=vertices[(i+1)%count];
+            assert(std::isfinite(a.x)&&std::isfinite(a.y));
+            assert(a.x!=b.x||a.y!=b.y); // native tessellation needs nonzero edges
+        }
+        return true;
+    }
     bool drawSegment(CCPoint const& a,CCPoint const& b,float r,ccColor4F const& c) {
         from=a;to=b;radius=r;segmentColor=c;++segments;return true;
     }

@@ -48,8 +48,8 @@ export class AdminService {
         await tx.query("DELETE FROM ranked_players WHERE id=ANY($1::uuid[])",[ids]);
         return {ok:true,count:ids.length,message:`Deleted ${ids.length} bot profiles and their match records.`};
       }
-      const target = await tx.query<{id:string;gd_username:string}>(
-        "SELECT id,gd_username FROM ranked_players WHERE lower(gd_username)=lower($1) AND is_bot=FALSE ORDER BY id FOR UPDATE",
+      const target = await tx.query<{id:string;gd_username:string;gd_account_id:string}>(
+        "SELECT id,gd_username,gd_account_id FROM ranked_players WHERE lower(gd_username)=lower($1) AND is_bot=FALSE ORDER BY id FOR UPDATE",
         [body.username ?? session.gdUsername]);
       if (!target.rows.length) throw new NotFoundException("Player not found");
       if (target.rows.length !== 1) throw new ConflictException("The nickname matches multiple players");
@@ -60,7 +60,7 @@ export class AdminService {
       const active=await tx.query<{id:string}>(`SELECT id FROM ranked_matches WHERE (player_a_id=$1 OR player_b_id=$1)
         AND state NOT IN ('MATCH_RESULT','CANCELLED') LIMIT 1`,[player.id]);
       if (active.rows.length) throw new ConflictException("Finish the player's current match first");
-      if (body.action !== "UNLOCK_ALL" && body.action !== "RESET_HISTORY") {
+      if (body.action !== "UNLOCK_ALL") {
         const placement=await tx.query<{id:string}>(`SELECT id FROM ranked_placement_runs WHERE player_id=$1
           AND state NOT IN ('PLACEMENT_RESULT','CANCELLED') LIMIT 1`,[player.id]);
         if (placement.rows.length) throw new ConflictException("Finish the player's current Placement first");
@@ -69,8 +69,26 @@ export class AdminService {
         const visible=await tx.query<{count:string}>(`SELECT COUNT(*) AS count FROM ranked_matches m JOIN ranked_profiles p ON p.player_id=$1
           WHERE (m.player_a_id=$1 OR m.player_b_id=$1) AND m.state='MATCH_RESULT' AND m.finished_at>p.history_visible_since`,[player.id]);
         const count=Number(visible.rows[0]?.count ?? 0);
-        await tx.query("UPDATE ranked_profiles SET history_visible_since=$2 WHERE player_id=$1",[player.id,now.toISOString()]);
-        return {ok:true,count,message:`Cleared ${count} match records for ${player.gd_username}. Profile and achievements retained.`};
+        // Keep shared match evidence for the other participant, but start this
+        // player's entire Ranked profile over. New columns inherit fresh-player
+        // defaults rather than silently retaining statistics from the old run.
+        await tx.query("DELETE FROM ranked_placement_runs WHERE player_id=$1",[player.id]);
+        await tx.query("DELETE FROM ranked_achievement_unlocks WHERE player_id=$1",[player.id]);
+        await tx.query("DELETE FROM ranked_achievement_events WHERE player_id=$1",[player.id]);
+        await tx.query("DELETE FROM ranked_ap_ledger WHERE player_id=$1",[player.id]);
+        await tx.query("DELETE FROM ranked_achievement_metrics WHERE player_id=$1",[player.id]);
+        await tx.query("DELETE FROM ranked_profiles WHERE player_id=$1",[player.id]);
+        await tx.query("INSERT INTO ranked_profiles (player_id,history_visible_since) VALUES ($1,$2)",[player.id,now.toISOString()]);
+        // Do not restore the erased achievements from the retained shared
+        // matches on the next state request. New results still count normally.
+        await tx.query("INSERT INTO ranked_achievement_metrics (player_id,backfilled_at) VALUES ($1,$2)",[player.id,now.toISOString()]);
+        await tx.query("DELETE FROM ranked_queue_entries WHERE player_id=$1",[player.id]);
+        await tx.query("DELETE FROM ranked_match_tokens WHERE player_id=$1",[player.id]);
+        await tx.query("UPDATE ranked_sessions SET revoked_at=$2 WHERE player_id=$1 AND revoked_at IS NULL",[player.id,now.toISOString()]);
+        await tx.query("DELETE FROM ranked_forum_records WHERE gd_account_id=$1",[player.gd_account_id]);
+        await tx.query("DELETE FROM ranked_forum_refresh_cooldowns WHERE gd_account_id=$1",[player.gd_account_id]);
+        return {ok:true,count,resetPlayer:true,own:player.id===session.playerId,
+          message:`Reset all Ranked data for ${player.gd_username}: LP, MMR, tier, Placement, statistics, achievements, AP, title and history. Sign in again to begin Placement.`};
       }
       if (body.action === "UNLOCK_ALL") {
         let count=0;const source=`ADMIN_UNLOCK_ALL:${randomUUID()}`;

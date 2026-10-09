@@ -388,6 +388,34 @@ class $modify(CorumRankedGameplayUx, PlayLayer) {
     void updateNormalScoreDelta() {
         auto& runtime = corum::ranked::RankedRuntime::get();
         auto const& match = runtime.view().match;
+        if (runtime.isPlacement() && !runtime.isSpectating() && m_fields->scoreDelta.foreground &&
+            (match.state == "MAP_PLAYING" || match.state == "MAP_SETTLING")) {
+            auto const score = runtime.localDisplayScore(m_isPracticeMode ? -1.0 : currentProgress(this));
+            auto const grade = runtime.placementDisplayGrade(score);
+            setShadowText(m_fields->scoreDelta, formatNumber(score));
+            auto const color = grade == "D" ? ccc3(92, 92, 98) : grade == "C" ? ccc3(205, 127, 50) :
+                grade == "B" ? ccc3(205, 218, 234) : grade == "A" ? ccc3(255, 211, 70) : ccc3(255, 255, 255);
+            setShadowColor(m_fields->scoreDelta, color);
+            if (grade == "S") {
+                // BMFont glyphs retain native rendering and the black shadow.
+                // Spread the rainbow across the score, with no new image pack.
+                constexpr std::array<ccColor3B, 6> rainbow {{{255, 89, 111}, {255, 177, 67},
+                    {255, 229, 79}, {78, 234, 145}, {79, 191, 255}, {189, 116, 255}}};
+                auto* foreground = m_fields->scoreDelta.foreground;
+                auto const width = std::max(1.0f, foreground->getContentSize().width);
+                for (auto* child : foreground->getChildrenExt()) {
+                    auto* glyph = typeinfo_cast<CCSprite*>(child); if (!glyph) continue;
+                    auto const position = std::clamp(glyph->getPositionX() / width, 0.0f, 1.0f) * 5;
+                    auto const index = std::min(4, static_cast<int>(position));
+                    auto const fraction = position - index;
+                    auto const& a = rainbow[index]; auto const& b = rainbow[index + 1];
+                    glyph->setColor(ccc3(static_cast<GLubyte>(a.r + (b.r - a.r) * fraction),
+                        static_cast<GLubyte>(a.g + (b.g - a.g) * fraction),
+                        static_cast<GLubyte>(a.b + (b.b - a.b) * fraction)));
+                }
+            }
+            positionNormalTimerPair(); setShadowVisible(m_fields->scoreDelta, true); return;
+        }
         auto const normalState =
             match.state == "ROUND_PLAYING" ||
             match.state == "FINAL_ATTEMPT_WINDOW" ||

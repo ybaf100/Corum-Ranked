@@ -11,6 +11,7 @@
 #include <Geode/utils/web.hpp>
 
 #include <chrono>
+#include <array>
 #include <cstdint>
 #include <deque>
 #include <optional>
@@ -172,6 +173,7 @@ struct RankedProfileView {
     int placementGamesRequired = 0;
     std::vector<std::string> placementResults;
     int resultStreak = 0;
+    int wins = 0, losses = 0;
     PromotionSeriesView promotion;
     bool demotionWarning = false;
     AchievementTitleView equippedTitle;
@@ -226,6 +228,7 @@ struct PlacementView {
     double currentMapScore = 0.0;
     double provisionalMapScore = 0.0;
     std::string currentMapGrade = "D";
+    std::array<double, 4> mapGradeThresholds {150, 250, 350, 425};
     std::vector<double> currentStageMapScores;
     std::vector<std::string> currentStageMapGrades;
     int currentMapClears = 0;
@@ -402,6 +405,7 @@ struct RuntimeView {
     bool accountActiveElsewhere = false;
     std::string profileTier;
     int profileScore = 0;
+    int profileWins = 0, profileLosses = 0;
     StandingView standing;
     bool profileScoreVisible = false;
     int placementGames = 0;
@@ -444,6 +448,11 @@ public:
     void reportMapDownloadFailure();
     enum class SurrenderStatus { Idle, WaitingAttempt, Sending, Retrying, Accepted, Rejected };
     void surrenderCurrentMatch(bool wholeMatch);
+    void skipPlacementMap(int levelId, double progressPercent);
+    [[nodiscard]] bool placementMapSkipPending() const { return m_pendingPlacementMapSkip.has_value(); }
+    [[nodiscard]] SurrenderStatus placementMapSkipStatus() const { return m_placementMapSkipStatus; }
+    [[nodiscard]] bool placementMapSkipped(std::string const& runId, int stageIndex, int mapIndex) const;
+    [[nodiscard]] std::string placementDisplayGrade(double score) const;
     [[nodiscard]] bool surrenderPending() const { return m_pendingSurrender.has_value(); }
     [[nodiscard]] SurrenderStatus surrenderStatus() const { return m_surrenderStatus; }
     [[nodiscard]] bool gameplayConceded(int round, int deathmatch) const;
@@ -643,6 +652,15 @@ private:
     std::uint64_t m_surrenderRequestGeneration = 0;
     SurrenderStatus m_surrenderStatus = SurrenderStatus::Idle;
     bool m_surrenderBusy = false;
+    std::optional<matjson::Value> m_pendingPlacementMapSkip;
+    std::string m_placementMapSkipRunId;
+    std::unordered_set<std::string> m_skippedPlacementMaps;
+    std::uint64_t m_placementMapSkipGeneration = 0;
+    bool m_placementMapSkipBusy = false;
+    SurrenderStatus m_placementMapSkipStatus = SurrenderStatus::Idle;
+    std::chrono::steady_clock::time_point m_nextPlacementMapSkipAt {};
+    void flushPlacementMapSkip();
+    void resetPlacementMapSkip();
     GameplayConcessionJournal m_concessions;
     void observeGameplayConcession(std::string const& scope, int round, int deathmatch, std::string const& side);
     void flushGameplayControls();
@@ -661,6 +679,7 @@ private:
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_progressRequest;
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_presenceRequest;
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_pauseRequest, m_surrenderRequest;
+    geode::async::TaskHolder<geode::utils::web::WebResponse> m_placementMapSkipRequest;
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_playerInfoRequest, m_forumRecordsRequest;
     std::uint64_t m_playerInfoGeneration = 0, m_forumRecordsGeneration = 0;
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_standingRequest;

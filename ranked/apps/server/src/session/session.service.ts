@@ -30,6 +30,8 @@ interface ExistingProfileRow {
   visible_ranked_score: number | null;
   placement_results?: unknown;
   result_streak?: number;
+  wins?: number;
+  losses?: number;
   promotion_source_tier?: string | null;
   promotion_target_tier?: string | null;
   promotion_cutoff?: number | null;
@@ -58,6 +60,8 @@ export interface SessionCreationResult {
     readonly visibleRankedScore: number | null;
     readonly placementResults: readonly ("WIN" | "LOSS")[];
     readonly resultStreak: number;
+    readonly wins: number;
+    readonly losses: number;
     readonly promotion: {
       readonly sourceTier: string;
       readonly targetTier: string;
@@ -214,6 +218,8 @@ export class SessionService {
           : Number(profile.visible_ranked_score ?? 0),
         placementResults: this.ratingMarks(profile.placement_results),
         resultStreak: Number(profile.result_streak ?? 0),
+        wins: Number(profile.wins ?? 0),
+        losses: Number(profile.losses ?? 0),
         promotion: profile.promotion_source_tier && profile.promotion_target_tier &&
           profile.promotion_cutoff !== null && profile.promotion_cutoff !== undefined &&
           profile.promotion_games_required !== null && profile.promotion_games_required !== undefined &&

@@ -23,6 +23,7 @@ const migrationNames = [
     "0014_forum_records.sql",
     "0015_forum_refresh_cooldown.sql",
     "0016_admin_history_reset.sql",
+    "0017_placement_rating_policy.sql",
 ] as const;
 
 const migrationSql = async (migrationName: string): Promise<string> => {

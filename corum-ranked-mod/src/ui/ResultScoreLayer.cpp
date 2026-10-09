@@ -7,6 +7,10 @@
 #include "ResultBackdropBlur.hpp"
 #include "StandingVisuals.hpp"
 
+#include <array>
+#include <cmath>
+#include <numbers>
+
 using namespace geode::prelude;
 
 namespace corum::ranked::ui {
@@ -21,7 +25,9 @@ std::string targetKey(ScoreProgressSample const& sample) {
     if (sample.tier != "GOLD") return sample.nextTier;
     if (sample.goldLeader) return "gold-self";
     auto const& target = sample.standing.target;
-    return target ? fmt::format("gold:{}:{}:{}", target->accountId, target->rank, target->score) : "gold-unknown";
+    // Rank/LP can change while the same rival moves. They must not retire and
+    // recreate the avatar on every frame of that score adjustment.
+    return target ? fmt::format("gold:{}:{}", target->accountId, target->bot) : "gold-unknown";
 }
 
 ccColor3B trackColor(std::vector<TierCutoffView> const& bands, std::string const& tier) {
@@ -37,8 +43,32 @@ void drawRoundedBar(CCDrawNode* node, float width, ccColor3B color, GLubyte opac
     if (width <= 0) return;
     auto const radius = std::min(height / 2,width / 2);
     ccColor4F const fill {color.r / 255.0f,color.g / 255.0f,color.b / 255.0f,opacity / 255.0f};
-    if (width <= height) node->drawDot({width / 2,height / 2},radius,fill);
-    else node->drawSegment({radius,height / 2},{width - radius,height / 2},radius,fill);
+    if (width < 0.001f) {
+        // Sub-pixel widths have no visible corner. Keep four distinct edges
+        // rather than degenerating the native polygon into one or two points.
+        CCPoint vertices[] {{0,0},{width,0},{width,height},{0,height}};
+        node->drawPolygon(vertices,4,fill,0,{0,0,0,0}); return;
+    }
+    // A short fill still occupies the full bar height. A dot shrinks both
+    // dimensions, and GD's segment shader does not reliably round the caps.
+    constexpr unsigned int steps = 8;
+    std::array<CCPoint,4 * (steps + 1)> vertices;
+    unsigned int count = 0;
+    std::array<CCPoint,4> const centers {{{width - radius,radius},
+        {width - radius,height - radius},{radius,height - radius},{radius,radius}}};
+    for (unsigned int corner = 0; corner < centers.size(); ++corner) {
+        for (unsigned int step = 0; step <= steps; ++step) {
+            auto const angle = (-1.0f + corner + static_cast<float>(step) / steps) * std::numbers::pi_v<float> / 2;
+            CCPoint const point {centers[corner].x + radius * std::cos(angle),
+                centers[corner].y + radius * std::sin(angle)};
+            // Capsule corners meet when width or height equals the diameter.
+            // Avoid zero-length polygon edges in the native tessellator.
+            if (count && std::hypot(point.x - vertices[count - 1].x,point.y - vertices[count - 1].y) < 0.00001f) continue;
+            vertices[count++] = point;
+        }
+    }
+    if (count > 1 && std::hypot(vertices[0].x - vertices[count - 1].x,vertices[0].y - vertices[count - 1].y) < 0.00001f) --count;
+    node->drawPolygon(vertices.data(),count,fill,0,{0,0,0,0});
 }
 } // namespace
 
@@ -102,7 +132,7 @@ void ResultScoreLayer::onEnter() {
     if (!m_closed) {
         setKeypadEnabled(true);
         if (m_menu) { cancelMenuTouch(m_menu); m_menu->setTouchEnabled(true); }
-        if (!m_readyToClose || m_trackChanging) scheduleUpdate();
+        if (!m_readyToClose || m_trackChanging || m_goldTargetChanging) scheduleUpdate();
     }
 }
 
@@ -115,13 +145,14 @@ void ResultScoreLayer::onExit() {
 void ResultScoreLayer::update(float dt) {
     if (m_closed) return;
     auto const step = std::max(0.0f,dt); m_clock += step;
+    m_goldTargetElapsed += step;
     if (!m_complete) {
         m_elapsed = std::min(m_input.duration(),m_elapsed + step);
-        auto const sample = sampleScoreProgress(m_input,m_elapsed); applySample(sample);
-        if (sample.complete) { m_complete = true; showNotices(); }
     }
+    auto const sample = sampleScoreProgress(m_input,m_elapsed); applySample(sample);
+    if (!m_complete && sample.complete) { m_complete = true; showNotices(); }
     updateTrack(step); updateContinueButton();
-    if (m_readyToClose && !m_trackChanging) unscheduleUpdate();
+    if (m_readyToClose && !m_trackChanging && !m_goldTargetChanging) unscheduleUpdate();
 }
 
 void ResultScoreLayer::updateTrack(float dt) {
@@ -145,6 +176,7 @@ void ResultScoreLayer::settlePresentation() {
     // Skip may arrive during part assembly or while the old tier is falling.
     // Replace that presentation with fully assembled final endpoint icons.
     m_icons->removeAllChildrenWithCleanup(true);
+    m_badgeParts.clear(); m_goldGoalKey.clear(); m_goldTargetChanging = false;
     m_leftIcon = m_rightIcon = nullptr; m_tier.clear(); m_targetKey.clear();
     m_elapsed = m_input.duration(); applySample(sampleScoreProgress(m_input,m_elapsed),false);
     m_complete = true; showNotices();
@@ -158,6 +190,10 @@ void ResultScoreLayer::settlePresentation() {
 CCLayerColor* ResultScoreLayer::tierIcon(std::string const& tier, CCPoint position, bool assemble) {
     auto const badgeSize = std::min(78.0f,getContentSize().height * 0.245f);
     auto assembly = createRankBadgeAssembly(tier,badgeSize);
+    auto& ownedParts = m_badgeParts[assembly.root];
+    for (auto const& part : assembly.baseParts) ownedParts.push_back(part.sprite);
+    for (auto const& part : assembly.ornaments) ownedParts.push_back(part.sprite);
+    for (auto const& part : assembly.fragments) ownedParts.push_back(part.sprite);
     assembly.root->addChild(createRankBadgeBackdrop(tier,{badgeSize,badgeSize},RankBadgeDisplay::Large),-10);
     assembly.root->setPosition(position); m_icons->addChild(assembly.root,5);
     if (assemble && m_input.motion() == ScoreMotion::Promotion) {
@@ -199,15 +235,19 @@ CCLayerColor* ResultScoreLayer::targetIcon(ScoreProgressSample const& sample, bo
     return root;
 }
 
-void ResultScoreLayer::retireIcon(CCLayerColor* icon, bool demotion) {
+void ResultScoreLayer::retireIcon(CCLayerColor* icon, bool demotion, bool fly) {
     if (!icon) return;
+    [[maybe_unused]] auto const keepAlive = Ref<CCLayerColor>(icon);
     icon->stopAllActions();
-    if (demotion) {
+    if (fly) {
+        icon->runAction(CCSequence::create(CCSpawn::create(CCEaseSineIn::create(CCMoveBy::create(0.45f,{65,100})),
+            CCRotateBy::create(0.45f,55),CCFadeOut::create(0.45f),nullptr),CCRemoveSelf::create(),nullptr));
+    } else if (demotion) {
         // Tier parts separate and fall as in the existing full-screen demotion.
         int index = 0;
-        for (auto* part : icon->getChildrenExt()) {
-            // The persistent halo fades with the root; only badge parts fall.
-            if (!geode::cast::typeinfo_cast<CCSprite*>(part)) continue;
+        // Use the exact typed sprites returned by our assembly. The halo and
+        // custom avatar nodes are not badge parts and need no RTTI traversal.
+        for (auto* part : m_badgeParts[icon]) {
             auto const horizontal = (index % 2 ? -1 : 1) * (12 + index * 2);
             ++index;
             part->stopAllActions();
@@ -220,6 +260,7 @@ void ResultScoreLayer::retireIcon(CCLayerColor* icon, bool demotion) {
         icon->runAction(CCSequence::create(CCSpawn::create(CCScaleTo::create(0.25f,0.05f),
             CCFadeOut::create(0.25f),nullptr),CCRemoveSelf::create(),nullptr));
     }
+    m_badgeParts.erase(icon);
 }
 
 void ResultScoreLayer::replaceTierIcons(ScoreProgressSample const& sample, bool animate) {
@@ -227,22 +268,17 @@ void ResultScoreLayer::replaceTierIcons(ScoreProgressSample const& sample, bool 
     auto const changedTarget = m_targetKey != targetKey(sample);
     auto const demotion = m_input.motion() == ScoreMotion::Demotion;
     if (changedTier) {
+        if (!m_tier.empty()) log::info("[RankedResult] score tier change match={} {} -> {}",m_input.matchId,m_tier,sample.tier);
         retireIcon(m_leftIcon,animate && demotion);
         m_leftIcon = tierIcon(sample.tier,{m_barLeft,m_iconY},animate);
         m_tier = sample.tier;
     }
     if (changedTier || changedTarget) {
-        retireIcon(m_rightIcon,animate && demotion);
+        auto const fly = animate && !changedTier && sample.tier == "GOLD" && sample.goldOvertake && !m_goldOvertakeShown;
+        retireIcon(m_rightIcon,animate && demotion,fly);
+        if (fly) m_goldOvertakeShown = true;
         m_rightIcon = targetIcon(sample,animate);
         m_targetKey = targetKey(sample);
-        if (m_rightRank) { m_rightRank->removeFromParentAndCleanup(true); m_rightRank = nullptr; }
-        if (sample.tier == "GOLD") {
-            auto const rank = sample.goldLeader ? sample.standing.rank
-                : sample.standing.target ? std::optional<int>(sample.standing.target->rank) : std::nullopt;
-            m_rightRank = standingNumber(rank,0.50f);
-            m_rightRank->setAnchorPoint({0,0.5f}); m_rightRank->setPosition({m_barLeft + m_barWidth + 10,m_barY + 8});
-            addChild(m_rightRank,22);
-        }
     }
 }
 
@@ -253,13 +289,46 @@ void ResultScoreLayer::applySample(ScoreProgressSample const& sample, bool anima
         else { m_trackChanging = true; m_trackElapsed = 0; }
     }
     replaceTierIcons(sample,animateIcons && m_elapsed > 0);
+    auto display = sample;
+    if (sample.tier == "GOLD") {
+        auto const key = targetKey(sample);
+        if (m_goldGoalKey.empty() || !animateIcons) {
+            m_goldVisualTarget = sample.target; m_goldTargetChanging = false;
+        } else if (key != m_goldGoalKey) {
+            m_goldTargetFrom = m_goldVisualTarget; m_goldTargetElapsed = 0; m_goldTargetChanging = true;
+        }
+        m_goldGoalKey = key;
+        auto const t = std::clamp(m_goldTargetElapsed / 0.45,0.0,1.0);
+        m_goldVisualTarget = m_goldTargetChanging ? m_goldTargetFrom + (sample.target - m_goldTargetFrom) * t * t * (3 - 2 * t) : sample.target;
+        if (t >= 1) m_goldTargetChanging = false;
+        auto const fraction = std::clamp(m_elapsed / m_input.duration(),0.0,1.0);
+        auto const lp = m_input.before + (static_cast<double>(m_input.after) - m_input.before) * fraction * fraction * (3 - 2 * fraction);
+        auto const span = m_goldVisualTarget - sample.minimum;
+        display.fill = sample.goldLeader ? 1.0 : span > 0 ? std::clamp((lp - sample.minimum) / span,0.0,1.0) : 0.0;
+        display.target = static_cast<int>(std::lround(m_goldVisualTarget));
+    } else { m_goldGoalKey.clear(); m_goldTargetChanging = false; }
+    auto const rightRank = sample.tier == "GOLD" ? (sample.goldLeader ? sample.standing.rank.value_or(0)
+        : sample.standing.target ? sample.standing.target->rank : 0) : -1;
+    auto const ownRank = sample.tier == "GOLD" ? sample.standing.rank.value_or(0) : -1;
+    auto updateRank = [&](CCNode*& node, int& previous, int rank, CCPoint position, float scale) {
+        if (previous == rank) return;
+        previous = rank;
+        if (node) { node->removeFromParentAndCleanup(true); node = nullptr; }
+        if (rank < 0) return;
+        node = standingNumber(rank > 0 ? std::optional<int>(rank) : std::nullopt,scale);
+        node->setPosition(position); addChild(node,22);
+    };
+    updateRank(m_rightRank,m_rightRankValue,rightRank,{m_barLeft + m_barWidth + 10,m_barY + 8},0.50f);
+    if (m_rightRank) m_rightRank->setAnchorPoint({0,0.5f});
+    updateRank(m_ownRank,m_ownRankValue,ownRank,{getContentSize().width / 2,m_barY - 43},0.48f);
+    if (m_ownRank) m_ownRank->setID("ranked-result-current-rank"_spr);
     auto const color = tierColor(sample.tier);
-    drawRoundedBar(m_fill,m_barWidth * static_cast<float>(sample.fill),color);
+    drawRoundedBar(m_fill,m_barWidth * static_cast<float>(display.fill),color);
     m_leftTier->setString(sample.tier.c_str()); m_leftTier->setColor(color);
     m_rightTier->setString(sample.nextTier.c_str());
     if (!sample.nextTier.empty()) m_rightTier->setColor(tierColor(sample.nextTier));
     m_leftCutoff->setString(fmt::format("{} LP",sample.minimum).c_str());
-    m_rightCutoff->setString(fmt::format("{} LP",sample.target).c_str());
+    m_rightCutoff->setString(fmt::format("{} LP",display.target).c_str());
     auto const labelWidth = std::clamp(m_barWidth * 0.26f,75.0f,132.0f);
     for (auto* label : {m_leftTier,m_rightTier}) fitMenuLabelWidth(label,m_barLeft - 20,0.44f,0.30f);
     for (auto* label : {m_leftCutoff,m_rightCutoff}) fitMenuLabelWidth(label,labelWidth,0.40f,0.28f);
@@ -267,7 +336,7 @@ void ResultScoreLayer::applySample(ScoreProgressSample const& sample, bool anima
     fitMenuLabelWidth(m_score,140,0.64f,0.46f);
     auto const scoreWidth = m_score->getContentSize().width * m_score->getScaleX();
     auto const deltaWidth = m_delta->getContentSize().width * m_delta->getScaleX();
-    auto const end = m_barLeft + m_barWidth * static_cast<float>(sample.fill);
+    auto const end = m_barLeft + m_barWidth * static_cast<float>(display.fill);
     // Center the score alone on the actual fill end. Delta is an independent
     // suffix, moved to the left near the viewport edge without shifting LP.
     m_score->setPosition({end,m_barY + 44});

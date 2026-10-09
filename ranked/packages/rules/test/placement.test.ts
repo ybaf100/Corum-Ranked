@@ -6,6 +6,7 @@ import {
   calculatePlacementRating,
   calculatePlacementStageScore,
   capPlacementRatingForStageCount,
+  normalizePlacementRating,
   finalizePlacementScore,
   placementGradeForMapScore,
   scorePlacementAttempt,
@@ -18,6 +19,40 @@ import {
 import { allPoolMaps, tierBandsFixture } from "./fixtures.js";
 
 const policy = DEFAULT_PLACEMENT_POLICY;
+
+describe("normalized Placement rating", () => {
+  it.each([
+    [-750, 200, 250], [0, 242, 310], [1000, 298, 390], [2000, 354, 470],
+    [3000, 410, 550], [4000, 466, 630], [5000, 522, 710], [5500, 550, 750],
+  ])("converts raw rating %s proportionally for both stage counts", (raw, three, five) => {
+    expect(normalizePlacementRating(raw, 3, policy)).toBe(three);
+    expect(normalizePlacementRating(raw, 5, policy)).toBe(five);
+  });
+
+  it("clamps out-of-range evidence without flattening the high-pool range", () => {
+    expect(normalizePlacementRating(-10000, 3, policy)).toBe(200);
+    expect(normalizePlacementRating(10000, 5, policy)).toBe(750);
+    const highPool = [4000, 4500, 5000, 5500].map(value => normalizePlacementRating(value, 5, policy));
+    expect(new Set(highPool).size).toBe(4);
+  });
+
+  it("derives the raw range from the run policy anchors, center and coefficient", () => {
+    const custom = { ...policy, poolRatingAnchors: [100, 300, 500, 700, 900, 1100] as const,
+      mapScoreCenter: 250, ratingPerMapScorePoint: 4 };
+    expect(normalizePlacementRating(-900, 3, custom)).toBe(200);
+    expect(normalizePlacementRating(2100, 5, custom)).toBe(750);
+    expect(normalizePlacementRating(600, 3, custom)).toBe(375);
+    expect(normalizePlacementRating(600, 5, custom)).toBe(500);
+  });
+
+  it("rejects invalid ratings, factors and stage counts", () => {
+    for (const raw of [NaN, Infinity, -Infinity]) expect(() => normalizePlacementRating(raw, 3, policy)).toThrow();
+    for (const factor of [0, -1, NaN]) {
+      expect(() => normalizePlacementRating(0, 3, { ...policy, ratingPerMapScorePoint: factor })).toThrow();
+    }
+    expect(() => normalizePlacementRating(0, 4 as 3, policy)).toThrow();
+  });
+});
 
 const attempt = (
   attemptId: string,

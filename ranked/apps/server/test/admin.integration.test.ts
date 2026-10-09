@@ -105,15 +105,50 @@ describe('Admin authenticated mutations',()=>{
  expect((await achievements.claim(id(1),'ranked_wins')).claimedRewards).toBe(5);
  expect((await db.query('SELECT * FROM ranked_outbox_events')).rows).toHaveLength(0);
  });
- it('returns latest 30 and hides only the target history, preserving shared records/profile/achievements',async()=>{
+ it('resets the whole target profile without deleting the opponent history or restoring erased achievements',async()=>{
  for(let n=200;n<235;++n)await match(n,1,2,'MATCH_RESULT',new Date(now.getTime()-(235-n)*1000));
  expect((await history(1)).matches).toHaveLength(30);expect((await history(1)).matches[0]?.matchId).toBe(id(234));
  await service.execute(context,body('UNLOCK_ALL',{username:'Target'}));
- expect(await service.execute(context,body('RESET_HISTORY',{username:'Target'}))).toMatchObject({count:35});
+ await service.execute(context,body('UNLOCK_ALL'));
+ const achievements=new AchievementService(db,clock,{next:()=>randomUUID()});
+ await achievements.equipTitle(id(2),'ranked_wins',5);await achievements.claim(id(2),'ranked_wins');
+ await db.query(`UPDATE ranked_profiles SET displayed_tier='GOLD',visible_ranked_score=2000,hidden_mmr=2400,
+   wins=8,losses=2,match_draws=1,result_streak=8,demotion_warning=TRUE,placement_results='["WIN"]' WHERE player_id=$1`,[id(2)]);
+ await db.query("UPDATE ranked_matches SET result_applied_at=$1,match_type='RANKED_PVP',winner_id=$2",[now,id(2)]);
+ await db.query(`INSERT INTO ranked_placement_runs(id,player_id,config_snapshot_id,config_generation,state,starting_pool,last_heartbeat_at,
+   finalized_at,placement_rating,final_hidden_mmr,final_visible_ranked_score,final_displayed_tier,completion_kind)
+   VALUES ($1,$2,$3,'test','PLACEMENT_RESULT',6,$4,$4,5000,5000,1500,'GOLD','COMPLETED')`,[id(401),id(2),id(90),now]);
+ await db.query(`INSERT INTO ranked_placement_maps(id,run_id,stage_index,map_index,level_id,canonical_level_id,playable_level_id,title,creator,difficulty,pool,qualifying_percent,state)
+   VALUES($1,$2,1,1,'123','123','123','Map','Creator','Extreme Demon',6,50,'MAP_RESULT')`,[id(402),id(401)]);
+ await db.query(`INSERT INTO ranked_placement_attempts(id,run_id,map_id,player_id,attempt_sequence,domain_attempt_id,client_start_event_id,played_level_id,server_accepted_start_at,ended_at)
+   VALUES($1,$2,$3,$4,1,'attempt','start','123',$5,$5)`,[id(403),id(401),id(402),id(2),now]);
+ await db.query("INSERT INTO ranked_match_tokens(match_id,player_id,token_hash,expires_at) VALUES($1,$2,'target-match-token',$3)",[id(234),id(2),new Date(now.getTime()+3600000)]);
+ expect(await service.execute(context,body('RESET_HISTORY',{username:'Target'}))).toMatchObject({count:35,resetPlayer:true,own:false});
  expect((await history(2)).matches).toHaveLength(0);expect((await history(1)).matches).toHaveLength(30);
- expect((await profile(2)).visible_ranked_score).toBe(100);
- expect((await db.query('SELECT * FROM ranked_achievement_unlocks WHERE player_id=$1',[id(2)])).rows.length).toBeGreaterThan(0);
+ expect(await profile(2)).toMatchObject({displayed_tier:'UNRANKED',visible_ranked_score:null,hidden_mmr:null,placement_games:0,
+   wins:0,losses:0,match_draws:0,result_streak:0,demotion_warning:false,total_ap:0,equipped_achievement_id:null,
+   promotion_target_tier:null,initial_seed_mmr:null,seed_applied_at:null,placement_results:[],promotion_results:[]});
+ for(const table of['ranked_placement_runs','ranked_placement_attempts','ranked_achievement_unlocks','ranked_achievement_events','ranked_ap_ledger','ranked_match_tokens']) {
+   expect((await db.query(`SELECT * FROM ${table} WHERE player_id=$1`,[id(2)])).rows).toHaveLength(0);
+ }
+ expect((await db.query('SELECT * FROM ranked_placement_maps WHERE run_id=$1',[id(401)])).rows).toHaveLength(0);
+ const resetState=await achievements.state(id(2));
+ expect(resetState).toMatchObject({totalAp:0,unclaimedRewardCount:0,equippedTitle:null});
+ expect(resetState.achievements.every(a=>a.claimableRewards===0)).toBe(true);
+ expect((await achievements.state(id(1))).unclaimedRewardCount).toBeGreaterThan(0);
+ expect((await profile(1)).visible_ranked_score).toBe(100);
+ expect((await post(body('SET_LP',{lp:300}),'session-2')).status).toBe(401);
  await match(236,1,2,'MATCH_RESULT',new Date(now.getTime()+1000));expect((await history(2)).matches).toHaveLength(1);
+ });
+ it('blocks a whole-player reset while an active match or Placement could still write results',async()=>{
+ await match(300,1,2,'ROUND_PLAYING');
+ await expect(service.execute(context,body('RESET_HISTORY',{username:'Target'}))).rejects.toMatchObject({status:409});
+ await db.query("UPDATE ranked_matches SET state='MATCH_RESULT' WHERE id=$1",[id(300)]);
+ await db.query(`INSERT INTO ranked_placement_runs(id,player_id,config_snapshot_id,config_generation,state,starting_pool,last_heartbeat_at)
+   VALUES($1,$2,$3,'test','MAP_PREPARE',1,$4)`,[id(401),id(2),id(90),now]);
+ await expect(service.execute(context,body('RESET_HISTORY',{username:'Target'}))).rejects.toMatchObject({status:409});
+ expect((await profile(2)).visible_ranked_score).toBe(100);
+ expect((await db.query('SELECT * FROM ranked_sessions WHERE player_id=$1 AND revoked_at IS NULL',[id(2)])).rows).toHaveLength(1);
  });
  it('blocks a rating edit while a match is active',async()=>{
  await match(300,1,2,'ROUND_PLAYING');await expect(service.execute(context,body('SET_LP',{lp:999}))).rejects.toMatchObject({status:409});

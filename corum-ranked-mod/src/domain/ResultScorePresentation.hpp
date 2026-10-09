@@ -32,9 +32,26 @@ struct ScoreSeriesView {
     std::vector<std::string> results;
 };
 
+struct GoldScoreGroup {
+    int score = 0, count = 0;
+    StandingTargetView target;
+    bool preferMoving = false;
+};
+struct GoldMovingRival {
+    std::optional<int> before, after;
+    StandingTargetView target;
+};
+struct GoldScoreTimeline {
+    bool available = false;
+    int fixedTotal = 0, higherFixed = 0;
+    std::vector<GoldScoreGroup> groups;
+    std::optional<GoldMovingRival> moving;
+};
+
 struct ResultScorePlayerView {
     StandingView before, after;
     ScoreSeriesView promotion;
+    GoldScoreTimeline goldTimeline;
 };
 
 struct ResultScoreView {
@@ -54,6 +71,7 @@ struct ScoreAnimationInput {
     std::vector<TierCutoffView> bands;
     StandingView standingBefore, standingAfter;
     ScoreSeriesView promotion;
+    GoldScoreTimeline goldTimeline;
 
     ScoreMotion motion() const {
         return promoted ? ScoreMotion::Promotion : demoted ? ScoreMotion::Demotion : ScoreMotion::Normal;
@@ -76,7 +94,61 @@ struct ScoreProgressSample {
     double fill = 0.0;
     bool complete = false, goldLeader = false;
     StandingView standing;
+    bool goldOvertake = false;
 };
+
+inline void sampleGoldTimeline(ScoreAnimationInput const& input, double fraction, ScoreProgressSample& sample) {
+    auto const& timeline = input.goldTimeline;
+    if (!timeline.available) return;
+    std::optional<StandingTargetView> moving;
+    if (timeline.moving) {
+        auto const& rival = *timeline.moving;
+        auto const present = fraction >= 1 ? rival.after.has_value() : rival.before.has_value();
+        if (present) {
+            moving = rival.target;
+            auto const before = rival.before.value_or(rival.after.value_or(0));
+            auto const after = rival.after.value_or(before);
+            moving->score = static_cast<int>(std::lround(before + (static_cast<double>(after) - before) * fraction));
+        }
+    }
+    auto const rankAt = [&](int score) {
+        auto count = timeline.higherFixed;
+        for (auto const& group : timeline.groups) if (group.score > score) count += group.count;
+        if (moving && moving->score > score) ++count;
+        return count + 1;
+    };
+    sample.standing.rank = rankAt(sample.score);
+    sample.standing.total = timeline.fixedTotal + 1 + static_cast<int>(moving.has_value());
+    sample.standing.topPercent = 100.0 * *sample.standing.rank / sample.standing.total;
+    std::optional<StandingTargetView> nearest, hero;
+    bool allPassed = true;
+    int heroBefore = -1;
+    for (auto const& group : timeline.groups) {
+        if (group.score > sample.score && (!nearest || group.score < nearest->score)) nearest = group.target;
+        if (input.after > input.before && group.score > input.before && group.score < input.after) {
+            allPassed = allPassed && sample.score > group.score;
+            if (group.score > heroBefore) { hero = group.target; heroBefore = group.score; }
+        }
+    }
+    if (moving) {
+        auto prefer = false;
+        for (auto const& group : timeline.groups) if (group.score == moving->score) prefer = group.preferMoving;
+        if (moving->score > sample.score && (!nearest || moving->score < nearest->score || (moving->score == nearest->score && prefer))) nearest = moving;
+        auto const& rival = *timeline.moving;
+        if (input.after > input.before && rival.before && rival.after && *rival.before > input.before && *rival.after < input.after) {
+            allPassed = allPassed && sample.score > moving->score;
+            if (*rival.before > heroBefore || (*rival.before == heroBefore && prefer)) hero = moving;
+        }
+    }
+    // One overtake animation: keep the highest-ranked crossed rival until all
+    // crossed scores have been reached, then reveal the next actual target.
+    sample.goldOvertake = hero.has_value() && allPassed;
+    sample.standing.target = hero && !allPassed ? hero : nearest;
+    if (sample.standing.target) sample.standing.target->rank = rankAt(sample.standing.target->score) + (sample.score > sample.standing.target->score ? 1 : 0);
+    if (fraction >= 1 && input.standingAfter.rank) {
+        sample.standing = input.standingAfter;
+    }
+}
 
 /** Presentation only: interpolate the exact server values, never calculate LP. */
 inline ScoreProgressSample sampleScoreProgress(ScoreAnimationInput const& input, double elapsed) {
@@ -95,10 +167,11 @@ inline ScoreProgressSample sampleScoreProgress(ScoreAnimationInput const& input,
         if (sample.complete || (input.promoted && afterBand != input.bands.end() && interpolated >= afterBand->minimum) ||
             (input.demoted && beforeBand != input.bands.end() && interpolated < beforeBand->minimum)) sample.tier = input.afterTier;
     }
-    // GOLD uses the result's fixed target for the entire score reveal. Moving
-    // to a newly polled ladder/target on its last frame would jump the bar.
+    // Older results retain their fixed target. New GOLD timelines retarget
+    // within this immutable result, without consulting a newly polled ladder.
     sample.standing = sample.tier == "GOLD" || sample.complete || sample.tier != input.beforeTier
         ? input.standingAfter : input.standingBefore;
+    if (sample.tier == "GOLD") sampleGoldTimeline(input,eased,sample);
     auto const band = std::find_if(input.bands.begin(), input.bands.end(), [&](auto const& b) { return b.tier == sample.tier; });
     if (band == input.bands.end()) return sample;
     sample.minimum = band->minimum;

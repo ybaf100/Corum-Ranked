@@ -32,7 +32,7 @@ class RankedPlayerInfoPopup final : public Popup, public UserInfoDelegate {
         if (view.stage != RuntimeStage::Matched || view.match.state == "ROUND_ENTERING" ||
             view.match.state == "DEATHMATCH_ENTERING" || view.match.state == "ROUND_PLAYING" ||
             view.match.state == "DEATHMATCH_PLAYING") return false;
-        if (!Popup::init(300, 252)) return false;
+        if (!Popup::init(300, 272)) return false;
         m_bgSprite->setVisible(false); m_closeBtn->setVisible(false);
         setID("ranked-player-info-popup"_spr);
         m_side = std::move(side); m_matchId = RankedRuntime::get().view().match.matchId;
@@ -40,7 +40,7 @@ class RankedPlayerInfoPopup final : public Popup, public UserInfoDelegate {
         m_accountId = RankedRuntime::get().view().playerInfo.accountId;
         if (m_accountId <= 0) return false;
         m_lookupDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(25);
-        m_panel = surface({300, 252}, {150, 126}, Cyan, Surface, 255, true);
+        m_panel = surface({300, 272}, {150, 136}, Cyan, Surface, 255, true);
         m_mainLayer->addChild(m_panel, 10);
         auto* menu = CCMenu::create(); menu->setPosition(CCPointZero); m_panel->addChild(menu, 30);
         auto* face = surface({120, 26}, {}, Blue, SurfaceRaised, 250, true);
@@ -87,17 +87,21 @@ class RankedPlayerInfoPopup final : public Popup, public UserInfoDelegate {
         if (m_contents) m_contents->removeFromParentAndCleanup(true);
         m_contents = CCNode::create(); m_panel->addChild(m_contents, 10);
         auto const& info = RankedRuntime::get().view().playerInfo;
-        auto* title = menuLabel(i18n::text("player-info", "PLAYER INFO"), 0.50f, {150, 226}, Text, FontWeight::Black);
+        auto* title = menuLabel(i18n::text("player-info", "PLAYER INFO"), 0.50f, {150, 246}, Text, FontWeight::Black);
         fitMenuLabelWidth(title, 268, 0.50f, 0.34f); m_contents->addChild(title);
         auto const& match = RankedRuntime::get().view().match;
-        auto const& tier = (m_side == "A" ? match.playerAProfile : match.playerBProfile).displayedTier;
+        auto const& profile = m_side == "A" ? match.playerAProfile : match.playerBProfile;
+        auto const& tier = profile.displayedTier;
         if (hasPersistentRankAmbient(tier)) {
             auto* badge = createAnimatedRankBadge(tier,{24,24},RankBadgeDisplay::Compact);
-            badge->setPosition({274,227}); m_contents->addChild(badge,5);
-            title->setPosition({137,226}); fitMenuLabelWidth(title,230,0.50f,0.34f);
+            badge->setPosition({274,247}); m_contents->addChild(badge,5);
+            title->setPosition({137,246}); fitMenuLabelWidth(title,230,0.50f,0.34f);
         }
-        auto* name = menuLabel(info.username, 0.42f, {150, 203}, Gold, FontWeight::ExtraBold);
+        auto* name = menuLabel(info.username, 0.42f, {150, 223}, Gold, FontWeight::ExtraBold);
         fitMenuLabelWidth(name, 264, 0.42f, 0.30f); m_contents->addChild(name);
+        auto* record = menuLabel(matchRecordText(profile.wins,profile.losses,i18n::isKorean()),
+            0.38f,{150,201},Text,FontWeight::ExtraBold);
+        fitMenuLabelWidth(record,264,0.38f,0.28f); record->setID("ranked-player-info-record"_spr); m_contents->addChild(record);
         float y = 181;
         if (m_statistics && m_statistics->globalRank > 0) {
             row("GD Global Rank", fmt::format("#{}", m_statistics->globalRank), y, Gold); y -= 20;

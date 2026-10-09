@@ -119,6 +119,14 @@ const buildService = (source: FakeCsmpSource, clock = new FixedClock(), records?
 };
 
 describe("Ranked session/profile creation", () => {
+  it("returns the saved Ranked win/loss record without seeding or resetting it on login", async () => {
+    const service = buildService(new FakeCsmpSource());
+    const first = await service.create(cleanDto("7001"));
+    expect(first.player).toMatchObject({wins:0,losses:0});
+    await database.query("UPDATE ranked_profiles SET wins=8,losses=2 WHERE player_id=$1",[(await contextFor(first.sessionToken)).playerId]);
+    const next = await service.create(cleanDto("7001"));
+    expect(next.player).toMatchObject({wins:8,losses:2});
+  });
   it("queues the first forum fetch only after the profile/session transaction commits", async () => {
     let inTransaction = false;
     const original = database.transaction.bind(database);

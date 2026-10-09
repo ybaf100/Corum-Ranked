@@ -1,10 +1,22 @@
 #pragma once
 #include <array>
+#include <algorithm>
+#include <cmath>
 #include <charconv>
 #include <optional>
 #include <string_view>
+#include <string>
 
 namespace corum::ranked {
+inline std::string matchRecordText(int wins, int losses, bool korean) {
+    wins = std::max(0,wins); losses = std::max(0,losses);
+    auto const games = static_cast<double>(wins) + losses;
+    auto const tenths = games > 0 ? static_cast<int>(std::lround(wins * 1000.0 / games)) : 0;
+    auto const percent = std::to_string(tenths / 10) + (tenths % 10 ? "." + std::to_string(tenths % 10) : "");
+    return std::to_string(wins) + (korean ? "승 / " : "W / ") + std::to_string(losses) +
+        (korean ? "패 (" : "L (") + percent + "%)";
+}
+
 // GD's DemonInfoPopup has five classic and five platformer difficulty
 // counters, followed by weekly and gauntlet counts. Do not count those twice.
 inline std::optional<int> extremeDemonCount(std::string_view text) {

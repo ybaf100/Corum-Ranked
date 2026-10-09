@@ -12,6 +12,27 @@ import type {
 } from "./types.js";
 
 export const PLACEMENT_MAP_SCORE_MAXIMUM = 500;
+export const NORMALIZED_PLACEMENT_RATING_POLICY = "NORMALIZED_V1";
+
+/** Convert the existing weighted rating into the new LP/MMR scale. */
+export const normalizePlacementRating = (
+  rating: number,
+  stageCount: 3 | 5,
+  policy: PlacementPolicy,
+): number => {
+  const factor = policy.ratingPerMapScorePoint;
+  const rawMin = policy.poolRatingAnchors[0] - policy.mapScoreCenter * factor;
+  const rawMax = policy.poolRatingAnchors[5] +
+    (PLACEMENT_MAP_SCORE_MAXIMUM - policy.mapScoreCenter) * factor;
+  if (!Number.isFinite(rating) || !Number.isFinite(rawMin) || !Number.isFinite(rawMax) ||
+      !Number.isFinite(factor) || factor <= 0 || rawMax <= rawMin ||
+      (stageCount !== 3 && stageCount !== 5)) {
+    throw new RankedDomainError("INVALID_CONFIG", "Invalid Placement rating range");
+  }
+  const t = Math.max(0, Math.min(1, (rating - rawMin) / (rawMax - rawMin)));
+  const [minimum, maximum] = stageCount === 3 ? [200, 550] as const : [250, 750] as const;
+  return Math.round(minimum + t * (maximum - minimum));
+};
 
 export const DEFAULT_PLACEMENT_POLICY: PlacementPolicy = Object.freeze({
   stageCount: 5,
@@ -263,6 +284,8 @@ export const selectPlacementReferenceMaps = (
 };
 
 /**
+ * Legacy runs retain their original three-stage cap. New runs normalize the
+ * full raw rating instead; this helper remains only for already-started runs.
  * Three-stage Placement intentionally trades certainty for speed. Its result
  * can never seed the player above the highest score that Placement may assign
  * to AQUA. The -16 offset preserves the global inclusive +/-15 cutoff

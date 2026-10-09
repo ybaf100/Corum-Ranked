@@ -221,6 +221,7 @@ public:
         corum::ranked::CorumSpectatorCamera spectatorCamera;
         corum::ranked::SpectatorWorldDriver spectatorWorldDriver;
         corum::ranked::SpectatorSceneContext sceneContext;
+        int placementMapIndex = 0;
         bool spectatorScenePrepared = false;
         bool spectatorPresentationRetired = false;
         std::optional<corum::ranked::SpectatorRemoteFrame> spectatorRenderedFrame;
@@ -382,6 +383,7 @@ public:
             runtime.isGameplayLevel(m_fields->levelId);
         m_fields->nativeEntryHeld = m_fields->rankedLevel && runtime.canEnterNativeRoundScene();
         m_fields->sceneContext = currentSpectatorSceneContext();
+        m_fields->placementMapIndex = runtime.isPlacement() ? runtime.view().placement.currentMapIndex : 0;
         // Establish authority BEFORE vanilla init's reset/attempt callbacks.
         syncSpectatorLocalSafety();
         ScopedPersistenceOwner persistence(this);
@@ -985,7 +987,10 @@ public:
     bool finishConcededGameplayHandoff() {
         auto& controls = corum::ranked::RankedRuntime::get();
         if (m_fields->rankedLevel && m_fields->sceneContext.matchId == controls.view().match.matchId &&
-            controls.gameplayConceded(m_fields->sceneContext.roundNumber, m_fields->sceneContext.deathmatchSequence)) {
+            (m_fields->placementMapIndex > 0
+                ? controls.placementMapSkipped(m_fields->sceneContext.matchId,
+                    m_fields->sceneContext.roundNumber, m_fields->placementMapIndex)
+                : controls.gameplayConceded(m_fields->sceneContext.roundNumber, m_fields->sceneContext.deathmatchSequence))) {
             if (m_fields->autoExitRequested) return true;
             m_fields->autoExitRequested = true; m_fields->attemptEndReported = true;
             log::info("[RankedSurrender] scene return queued level={} round={} deathmatch={}",

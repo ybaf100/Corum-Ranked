@@ -226,6 +226,120 @@ ${strip(read('src/ui/ResultScoreLayer.hpp')).replace('private:','public:')}
 ${strip(read('src/ui/ResultScoreLayer.cpp'))}
 `;
 
+const goldModel=`
+ScoreAnimationInput gold() {
+    auto i=ordinary();i.beforeTier=i.afterTier="GOLD";i.before=1300;i.after=1400;
+    i.standingBefore.rank=6;i.standingBefore.total=6;
+    i.standingBefore.target=StandingTargetView{32,"nearest",false,5,1320};
+    i.standingAfter.rank=2;i.standingAfter.total=6;
+    i.standingAfter.target=StandingTargetView{50,"leader",false,1,1500};
+    i.goldTimeline={true,5,0,{
+        {1500,1,{50,"leader",false,1,1500},false},
+        {1390,1,{39,"highest crossed",false,2,1390},false},
+        {1350,2,{35,"tied bot",true,3,1350},false},
+        {1320,1,{32,"nearest",false,5,1320},false}},std::nullopt};
+    return i;
+}
+`;
+
+test('GOLD snapshot follows shared ranks, the highest overtake, moving rivals and losses without resetting the floor',()=>{
+    run(model+goldModel+`
+int main() {
+    auto i=gold();auto s=sampleScoreProgress(i,0);
+    assert(s.standing.rank==6&&s.standing.total==6&&s.standing.target->accountId==39&&!s.goldOvertake);
+    s=sampleScoreProgress(i,1);assert(s.score==1350&&s.standing.rank==3&&s.standing.target->accountId==39);
+    s=sampleScoreProgress(i,1.7);assert(s.standing.rank==2&&s.standing.target->accountId==50&&s.goldOvertake);
+    s=sampleScoreProgress(i,2);assert(s.standing.rank==2&&s.target==1500&&s.fill>0.66&&s.fill<0.67);
+    // A tied LP is a shared rank, not an overtake of that tied target.
+    i.after=1390;i.standingAfter.target=StandingTargetView{50,"leader",false,1,1500};
+    s=sampleScoreProgress(i,2);assert(s.goldOvertake&&s.standing.rank==2);
+    i=gold();i.before=1380;i.after=1390;
+    s=sampleScoreProgress(i,2);assert(!s.goldOvertake);
+    i=gold();i.before=1400;i.after=1300;i.won=false;
+    i.standingAfter.rank=6;i.standingAfter.target=StandingTargetView{32,"nearest",false,5,1320};
+    int previous=0;bool changed=false;
+    for(int frame=0;frame<=120;++frame) {
+        s=sampleScoreProgress(i,frame/60.0);assert(s.minimum==1200&&s.fill>0&&!s.goldOvertake);
+        if(previous&&s.standing.target->accountId!=previous)changed=true;
+        previous=s.standing.target->accountId;
+    }
+    assert(changed&&s.standing.rank==6&&s.fill>0.83&&s.fill<0.84);
+    i=gold();i.goldTimeline.moving=GoldMovingRival{1420,1380,{42,"moving",false,2,1420}};
+    i.standingAfter.total=7;
+    s=sampleScoreProgress(i,0);assert(s.standing.rank==7&&s.standing.target->accountId==42);
+    s=sampleScoreProgress(i,1);assert(s.standing.rank==4&&s.standing.target->accountId==42&&s.target==1400);
+    s=sampleScoreProgress(i,2);assert(s.goldOvertake&&s.standing.rank==2&&s.standing.total==7&&s.standing.target->accountId==50);
+    i=gold();i.before=1200;i.after=1220;
+    assert(sampleScoreProgress(i,0).fill==0&&sampleScoreProgress(i,0.01).fill>0);
+    i.before=1400;i.after=1510;i.standingAfter.rank=1;i.standingAfter.target.reset();
+    s=sampleScoreProgress(i,2);assert(s.goldLeader&&s.fill==1&&s.standing.rank==1);
+}
+`);
+});
+
+test('whole GOLD layer flies one crossed avatar, shrinks loss targets, shows own rank and eases bar retargeting',()=>{
+    run(scoreNative+goldModel+`
+using namespace corum::ranked::ui;
+bool containsAction(CCAction* a,std::string const& type) {
+    if(!a)return false;
+    if(a->type==type)return true;
+    for(auto* child:a->children)if(containsAction(child,type))return true;
+    return false;
+}
+int main() {
+    CCNode screen;auto i=gold();
+    auto* layer=ResultScoreLayer::create(i,&screen,[]{});screen.addChild(layer);layer->onEnter();
+    auto* highest=layer->m_rightIcon;assert(PlayerIcon::accounts.back()==39&&layer->m_ownRankValue==6);
+    layer->update(1);assert(layer->m_rightIcon==highest&&layer->m_ownRankValue==3);
+    bool exchanged=false;
+    for(int frame=0;frame<60;++frame) {
+        layer->update(1.0f/60);
+        assert(layer->m_fill->size.height==16&&layer->m_fill->size.width>0);
+        if(!exchanged&&layer->m_rightIcon!=highest) {
+            exchanged=true;assert(layer->m_goldOvertakeShown&&layer->m_goldTargetChanging);
+            assert(containsAction(highest->actions.back(),"CCMoveBy")&&!containsAction(highest->actions.back(),"CCScaleTo"));
+            assert(layer->m_goldVisualTarget<1500&&layer->m_goldVisualTarget>=1390);
+            assert(PlayerIcon::accounts.back()==50&&!layer->m_rightIcon->actions.empty());
+        }
+    }
+    assert(exchanged&&layer->m_ownRankValue==2&&layer->m_ownRank->id=="ranked-result-current-rank");
+    layer->update(.5f);assert(!layer->m_goldTargetChanging&&layer->m_rightCutoff->text=="1500 LP");
+    assert(std::abs(layer->m_fill->size.width/layer->m_barWidth-2.0f/3)<.0001f);
+    layer->onSkip(nullptr);drainMainQueue();
+    i=gold();i.before=1400;i.after=1300;i.won=false;i.standingAfter.rank=6;
+    i.standingAfter.target=StandingTargetView{32,"nearest",false,5,1320};
+    layer=ResultScoreLayer::create(i,&screen,[]{});screen.addChild(layer);layer->onEnter();
+    auto* old=layer->m_rightIcon;bool shrunk=false;
+    for(int frame=0;frame<150;++frame) {
+        layer->update(1.0f/60);assert(layer->m_fill->size.width>0&&layer->m_fill->size.height==16);
+        if(layer->m_rightIcon!=old) {
+            assert(containsAction(old->actions.back(),"CCScaleTo")&&!containsAction(old->actions.back(),"CCMoveBy"));
+            shrunk=true;old=layer->m_rightIcon;
+        }
+    }
+    assert(shrunk&&!layer->m_goldOvertakeShown&&layer->m_ownRankValue==6&&layer->m_rightCutoff->text=="1320 LP");
+    assert(layer->m_fill->size.width/layer->m_barWidth>.83f);
+    layer->onSkip(nullptr);drainMainQueue();
+}
+`);
+});
+
+test('actual rounded bar preserves full height at sub-pixel widths and has distinct finite polygon edges',()=>{
+    run(scoreNative+`
+int main() {
+    using namespace corum::ranked::ui;CCDrawNode node;
+    for(float width:{1e-9f,.0001f,.001f,.1f,1.0f,8.0f,16.0f,300.0f}) {
+        drawRoundedBar(&node,width,{255,100,50});assert(node.size.height==16&&node.size.width==width);
+        float minX=width,maxX=0,minY=16,maxY=0;
+        for(auto const& p:node.polygon) {minX=std::min(minX,p.x);maxX=std::max(maxX,p.x);minY=std::min(minY,p.y);maxY=std::max(maxY,p.y);}
+        assert(std::abs(minX)<.00001f&&std::abs(maxX-width)<.00001f&&std::abs(minY)<.00001f&&std::abs(maxY-16)<.00001f);
+        if(width>=.001f)assert(node.polygon.size()>16);
+    }
+    drawRoundedBar(&node,0,{255,100,50});assert(node.polygon.empty());
+}
+`);
+});
+
 test('whole Corum score layer holds final state, excludes premature notices and retires before restoring input',()=>{
     run(scoreNative+`
 using namespace corum::ranked::ui;
@@ -299,7 +413,7 @@ int main() {
     i.standingAfter.rank=5; i.standingAfter.total=10; i.standingAfter.topPercent=50;
     i.standingAfter.target=StandingTargetView{123,"bot",true,4,1275};
     auto* gold=ResultScoreLayer::create(i,&screen,[]{}); screen.addChild(gold);
-    assert(PlayerIcon::accounts.back()==0&&gold->m_targetKey=="gold:123:4:1275");
+    assert(PlayerIcon::accounts.back()==0&&gold->m_targetKey=="gold:123:1");
     gold->update(2); assert(PlayerIcon::accounts.back()==0&&gold->m_rightCutoff->text=="1275 LP");
     gold->onSkip(nullptr);gold->onSkip(nullptr);drainMainQueue();
     i.standingAfter.rank=1; i.standingAfter.target.reset();
@@ -339,9 +453,12 @@ int main() {
         assert(layer->m_leftIcon->position.x==left.x&&layer->m_rightIcon->position.x==right.x);
         assert(layer->m_leftCutoff->position.x==layer->m_barLeft);
         assert(layer->m_rightCutoff->position.x==layer->m_barLeft+layer->m_barWidth);
-        auto* fill=layer->m_fill;assert(fill->segments==1&&fill->radius>0&&fill->radius<=8);
-        assert(std::abs(fill->from.x-fill->radius)<0.0001f);
-        assert(std::abs(fill->to.x+fill->radius-fill->size.width)<0.0001f);
+        auto* fill=layer->m_fill;assert(fill->segments==1&&fill->polygon.size()>16);
+        float minX=fill->size.width,minY=16,maxX=0,maxY=0;
+        for(auto const& p:fill->polygon){minX=std::min(minX,p.x);minY=std::min(minY,p.y);maxX=std::max(maxX,p.x);maxY=std::max(maxY,p.y);}
+        assert(std::abs(minX)<0.0001f&&std::abs(maxX-fill->size.width)<0.0001f);
+        assert(std::abs(minY)<0.0001f&&std::abs(maxY-16)<0.0001f);
+        assert(fill->polygon.front().y<0.0001f&&fill->polygon.front().x>0&&fill->polygon.front().x<fill->size.width);
         assert(layer->m_delta->position.x!=layer->m_score->position.x);
     }
     layer->onSkip(nullptr);layer->onSkip(nullptr);drainMainQueue();
@@ -350,7 +467,7 @@ int main() {
     empty->onSkip(nullptr);empty->onSkip(nullptr);drainMainQueue();
     i.beforeTier=i.afterTier="GOLD";i.before=1200;i.after=1500;i.standingAfter.rank=1;
     auto* full=ResultScoreLayer::create(i,&screen,[]{});screen.addChild(full);
-    assert(full->m_fill->radius==8&&full->m_score->position.x==full->m_barLeft+full->m_barWidth);
+    assert(full->m_fill->polygon.size()>16&&full->m_score->position.x==full->m_barLeft+full->m_barWidth);
     assert(full->m_delta->position.x+full->m_delta->size.width*full->m_delta->scaleX/2<=full->size.width-12); // delta fits; LP stays anchored
     full->onSkip(nullptr);full->onSkip(nullptr);drainMainQueue();
 }
@@ -366,7 +483,7 @@ void assertTrack(ResultScoreLayer* layer, std::string const& tier) {
     auto const expected=band==bands.begin()?ccc3(100,108,124):tierColor(std::prev(band)->tier);
     auto const actual=layer->m_track->segmentColor;
     assert(actual.r==expected.r/255.0f&&actual.g==expected.g/255.0f&&actual.b==expected.b/255.0f);
-    assert(actual.a==1.0f&&layer->m_track->size.width==layer->m_barWidth&&layer->m_track->radius==8);
+    assert(actual.a==1.0f&&layer->m_track->size.width==layer->m_barWidth&&layer->m_track->polygon.size()>16);
     auto const foreground=tierColor(tier);
     if(layer->m_fill->size.width>0)assert(layer->m_fill->segmentColor.r==foreground.r/255.0f);
     assert(layer->m_score->color==foreground&&layer->m_tier==tier);
@@ -470,7 +587,7 @@ template<class T>matjson::Result<T>numFromString(std::string const& text) {
     return parsed.ec==std::errc{}&&parsed.ptr==text.data()+text.size()?matjson::Result<T>{value}:matjson::Result<T>{};
 }
 ${['std::vector<std::string> parseRatingMarks(','corum::ranked::StandingView parseStanding(',
-    'corum::ranked::ScoreSeriesView parseScoreSeries(','corum::ranked::ResultScoreView parseResultScore(']
+    'corum::ranked::ScoreSeriesView parseScoreSeries(','corum::ranked::GoldScoreTimeline parseGoldTimeline(','corum::ranked::ResultScoreView parseResultScore(']
     .map(name=>method(runtimeSource,name)).join('\n')}
 namespace corum::ranked {
 RankedRuntime& RankedRuntime::get(){static RankedRuntime r;return r;}
@@ -481,6 +598,39 @@ web::WebRequest baseRequest(std::string const&){return {};}
 ${method(runtimeSource,'void RankedRuntime::fetchStanding()')}
 }
 `;
+
+test('actual status helper shows YOUR RANK only in the lobby and keeps card streak/promotion warnings',()=>{
+    run(scoreNative+runtimeDouble+`
+namespace corum::ranked::i18n {
+std::string streak(int,bool){return "2 WINS";}
+std::string promotionMatch(int){return "PROMOTION MATCH";}
+}
+using corum::ranked::RankedProfileView;
+struct StatusFixture {
+    CCNode root;CCNode* m_root=&root;
+    ccColor3B kCyan{0,255,255},kGold{255,255,0},kRed{255,0,0};
+    std::string tr(char const*,char const* english){return english;}
+    CCLabelBMFont* makeLabel(std::string const& text,float,CCPoint,ccColor3B,char const*) {
+        auto* label=new CCLabelBMFont;label->setString(text.c_str());return label;
+    }
+    ${method(popupSource,'void addRankStatus(')}
+};
+int main() {
+    StatusFixture f;RankedProfileView profile;
+    f.addRankStatus(profile,{},.26f,170);assert(f.root.children.empty());
+    f.addRankStatus(profile,{},.26f,170,true);
+    assert(f.root.children.size()==1&&static_cast<CCLabelBMFont*>(f.root.children.back())->text=="YOUR RANK");
+    profile.resultStreak=2;profile.demotionWarning=true;
+    f.addRankStatus(profile,{},.26f,170);
+    assert(static_cast<CCLabelBMFont*>(f.root.children.back())->text=="2 WINS · DEMOTION WARNING");
+    profile.resultStreak=0;profile.demotionWarning=false;profile.promotion.active=true;
+    f.addRankStatus(profile,{},.26f,170);
+    assert(static_cast<CCLabelBMFont*>(f.root.children.back())->text=="PROMOTION MATCH");
+}
+`);
+    assert.match(method(popupSource,'void renderMain('),/addRankStatus\(profile,[^;]+,true\)/);
+    assert.doesNotMatch(method(popupSource,'void addPlayerCard('),/addRankStatus\(profile,[^;]+,true\)/);
+});
 
 test('actual decoders and standings request reject stale sessions and validate result metadata',()=>{
     run(scoreNative+runtimeDouble+`
@@ -498,6 +648,19 @@ int main() {
     for(auto const& band:ordinary().bands){V item;item["tier"]=band.tier;item["minInclusive"]=band.minimum;bands.push_back(item);}
     score["tierBands"]=bands;score["players"]["A"]["before"]=standing;score["players"]["A"]["after"]=standing;
     score["players"]["B"]["before"]=standing;score["players"]["B"]["after"]=standing;
+    V timeline;timeline["fixedTotal"]=3;timeline["higherFixed"]=0;
+    V group;group["score"]=1325;group["count"]=2;group["target"]=standing["target"];group["target"]["rank"]=1;
+    timeline["groups"]=V::Array{group};
+    timeline["moving"]["beforeScore"]=1400;timeline["moving"]["afterScore"]=1300;
+    timeline["moving"]["target"]=group["target"];
+    auto gold=parseGoldTimeline(timeline);assert(gold.available&&gold.groups.size()==1&&gold.groups[0].count==2&&gold.moving->after==1300);
+    score["players"]["A"]["goldTimeline"]=timeline;
+    assert(parseResultScore(score).playerA.goldTimeline.available&&!parseResultScore(score).playerB.goldTimeline.available);
+    auto invalid=timeline;invalid["higherFixed"]=4;assert(!parseGoldTimeline(invalid).available);
+    invalid=timeline;group["count"]=0;invalid["groups"]=V::Array{group};assert(!parseGoldTimeline(invalid).available);
+    auto const originalGroup=timeline["groups"].asArray().unwrap().front();
+    invalid=timeline;invalid["groups"]=V::Array{originalGroup,originalGroup};assert(!parseGoldTimeline(invalid).available);
+    invalid=timeline;invalid["moving"]["beforeScore"]=-1;invalid["moving"]["afterScore"]=-1;assert(!parseGoldTimeline(invalid).available);
     assert(parseResultScore(score).available);score["version"]=2;assert(!parseResultScore(score).available);
     score["version"]=1;bands[2]["minInclusive"]=300;score["tierBands"]=bands;assert(!parseResultScore(score).available);
     auto& r=RankedRuntime::get();r.m_rankedOpen=true;r.m_sessionToken="first";

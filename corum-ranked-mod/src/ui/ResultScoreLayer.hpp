@@ -6,6 +6,7 @@
 #include <Geode/Geode.hpp>
 #include <Geode/cocos/draw_nodes/CCDrawNode.h>
 #include <functional>
+#include <unordered_map>
 
 namespace corum::ranked::ui {
 
@@ -27,7 +28,7 @@ private:
     void updateContinueButton();
     void updateTrack(float dt);
     void replaceTierIcons(ScoreProgressSample const& sample, bool animate);
-    void retireIcon(cocos2d::CCLayerColor* icon, bool demotion);
+    void retireIcon(cocos2d::CCLayerColor* icon, bool demotion, bool fly = false);
     cocos2d::CCLayerColor* tierIcon(std::string const& tier, cocos2d::CCPoint position, bool assemble);
     cocos2d::CCLayerColor* targetIcon(ScoreProgressSample const& sample, bool assemble);
     void showSeries(bool entering);
@@ -50,6 +51,9 @@ private:
     cocos2d::CCLabelBMFont* m_leftCutoff = nullptr;
     cocos2d::CCLabelBMFont* m_rightCutoff = nullptr;
     cocos2d::CCNode* m_rightRank = nullptr;
+    cocos2d::CCNode* m_ownRank = nullptr;
+    int m_rightRankValue = -1, m_ownRankValue = -1;
+    std::unordered_map<cocos2d::CCLayerColor*,std::vector<cocos2d::CCSprite*>> m_badgeParts;
     cocos2d::CCNode* m_seriesRoot = nullptr;
     cocos2d::CCLabelBMFont* m_skipCaption = nullptr;
     std::vector<std::pair<cocos2d::CCNode*,float>> m_stamps;
@@ -59,6 +63,9 @@ private:
     double m_elapsed = 0, m_clock = 0, m_noticesReadyAt = 0, m_trackElapsed = 0;
     bool m_complete = false, m_closed = false, m_seriesShown = false;
     bool m_noticesShown = false, m_readyToClose = false, m_trackChanging = false;
+    std::string m_goldGoalKey;
+    double m_goldVisualTarget = 0, m_goldTargetFrom = 0, m_goldTargetElapsed = 0;
+    bool m_goldTargetChanging = false, m_goldOvertakeShown = false;
 };
 
 } // namespace corum::ranked::ui

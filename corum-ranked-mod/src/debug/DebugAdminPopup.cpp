@@ -44,7 +44,7 @@ class DebugAdminPopup final : public Popup, public FLAlertLayerProtocol {
         m_mmr=field(panel,"MMR",{285,196}); m_mmr->setFilter("0123456789-");
         m_actions=CCMenu::create(); m_actions->setPosition(CCPointZero); panel->addChild(m_actions,30);
         constexpr char const* keys[]={"admin-unlock","admin-lp","admin-mmr","admin-both","admin-delete-bots","admin-history","admin-reset"};
-        constexpr char const* labels[]={"Unlock all achievements","Set LP + tier","Set MMR","Set LP + MMR + tier","Delete all bots","Reset player history","Reset ranked database"};
+        constexpr char const* labels[]={"Unlock all achievements","Set LP + tier","Set MMR","Set LP + MMR + tier","Delete all bots","Reset player data","Reset ranked database"};
         for (int i=0;i<7;++i) {
             auto const danger=i==4 || i==5 || i==6;
             auto* face=ui::surface({170,30},{},danger?ui::Red:ui::Blue,ui::SurfaceRaised,255,true);

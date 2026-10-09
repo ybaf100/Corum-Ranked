@@ -139,6 +139,50 @@ describe("client standings SQL", () => {
     expect((await readStandings(database, [id(1)])).get("current")!.get(id(1)))
       .toEqual({ rank: null, total: 0, topPercent: null, target: null });
   });
+
+  it("captures compact GOLD score groups and the moving opponent in the same immutable result", async () => {
+    await add(1, 1400, 1800, "GOLD"); await add(2, 1380, 1700, "GOLD");
+    await add(3, 1700, 1700, "GOLD"); await add(4, 1500, 1500, "GOLD");
+    await add(5, 1390, 1390, "GOLD"); await add(6, 1350, 1200, "GOLD");
+    await add(7, 1350, 1600, "GOLD", true); await add(8, 1320, 1320, "GOLD");
+    await add(9, 1250, 1250, "GOLD"); await add(10, 150, 150);
+    await add(11, 2000, 2000, "UNRANKED");
+    const subjects = {
+      A: { playerId: id(1), before: profile(1300,{displayedTier:"GOLD"}), after: profile(1400,{displayedTier:"GOLD"}) },
+      B: { playerId: id(2), before: profile(1420,{displayedTier:"GOLD"}), after: profile(1380,{displayedTier:"GOLD"}) },
+    };
+    let reads = 0;
+    const snapshot = await buildScorePresentation({query: async (...args) => {++reads; return database.query(...args);}}, bands, subjects, "A");
+    expect(reads).toBe(1);
+    expect(snapshot.players.A.before).toMatchObject({rank:8,total:10});
+    expect(snapshot.players.A.after).toMatchObject({rank:3,total:10,target:{gdAccountId:"4",visibleRankedScore:1500}});
+    const timeline = snapshot.players.A.goldTimeline!;
+    expect(timeline).toMatchObject({fixedTotal:8,higherFixed:1,
+      moving:{beforeScore:1420,afterScore:1380,target:{gdAccountId:"2"}}});
+    expect(timeline.groups.map((g) => [g.score,g.count])).toEqual([[1500,1],[1390,1],[1350,2],[1320,1]]);
+    expect(timeline.groups[2]!.target).toMatchObject({gdAccountId:"-7",isBot:true});
+    expect(snapshot.players.B.goldTimeline).not.toBeNull();
+    expect(snapshot.players.A.before).not.toHaveProperty("goldTimeline");
+    expect(snapshot.players.A.after).not.toHaveProperty("goldTimeline");
+    const serialized = JSON.stringify(snapshot);
+    expect(serialized).not.toMatch(/hiddenMmr|hidden_mmr|player_id|preferMovingMmr/);
+    await database.query("UPDATE ranked_profiles SET visible_ranked_score=9000");
+    expect(JSON.stringify(snapshot)).toBe(serialized);
+  });
+
+  it("keeps a stable maximum-MMR icon per shared LP and handles unranked moving participants", async () => {
+    await add(1, 1320, 1000, "GOLD"); await add(2, null, 1000, "UNRANKED");
+    await add(3, 1300, 900, "GOLD"); await add(4, 1300, 1100, "GOLD");
+    await add(5, 1400, 1000, "GOLD");
+    const snapshot = await buildScorePresentation(database, bands, {
+      A:{playerId:id(1),before:profile(1250,{displayedTier:"GOLD"}),after:profile(1320,{displayedTier:"GOLD"})},
+      B:{playerId:id(2),before:profile(0,{displayedTier:"UNRANKED"}),after:profile(0,{displayedTier:"UNRANKED"})},
+    },"A");
+    expect(snapshot.players.A.goldTimeline).toMatchObject({fixedTotal:3,higherFixed:0,moving:null});
+    expect(snapshot.players.A.goldTimeline!.groups.map((g) => g.target.gdAccountId)).toEqual(["5","4"]);
+    expect(snapshot.players.B.goldTimeline).toBeNull();
+    expect(snapshot.players.A.after).toMatchObject({rank:2,total:4,target:{gdAccountId:"5"}});
+  });
 });
 
 it("retains the last WIN/LOSS after a series succeeds/fails and does not duplicate ongoing marks", () => {

@@ -29,13 +29,15 @@ export async function buildScorePresentation(
   // A single statement projects both participants' before/after profiles over
   // the same ladder snapshot. A concurrent match cannot change only one phase.
   const standings = await readStandings(database, Object.values(subjects).map((p) => p.playerId),
-    ["before", "after"], overrides);
+    ["before", "after"], overrides, undefined, true);
   const player = (side: PlayerSide) => {
     const subject = subjects[side];
+    const {goldTimeline,...before} = standings.get("before")?.get(subject.playerId) ?? unrankedStanding();
     return {
-      before: standings.get("before")?.get(subject.playerId) ?? unrankedStanding(),
+      before,
       after: standings.get("after")?.get(subject.playerId) ?? unrankedStanding(),
       promotion: resultPromotionSeries(subject.before, subject.after, side, winner),
+      goldTimeline:goldTimeline ?? null,
     };
   };
   return { version: 1,

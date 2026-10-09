@@ -45,6 +45,16 @@ bool ownsRankedPlayerPause() {
         ranked.view().stage == corum::ranked::RuntimeStage::Matched &&
         ranked.isGameplayLevel(static_cast<int>(layer->m_level->m_levelID));
 }
+bool ownsPlacementPlayerPause() {
+    auto* layer = PlayLayer::get(); auto const& ranked = RankedRuntime::get();
+    auto const& state = ranked.view().placement.state;
+    return layer && layer->m_level && !layer->m_isPracticeMode && !layer->m_isTestMode &&
+        ranked.isPlacement() && !ranked.isSpectating() &&
+        ranked.view().stage == corum::ranked::RuntimeStage::Matched &&
+        (state == "MAP_PLAYING" || state == "MAP_SETTLING") &&
+        ranked.isGameplayLevel(static_cast<int>(layer->m_level->m_levelID));
+}
+bool ownsManagedRankedPause() { return ownsRankedPlayerPause() || ownsPlacementPlayerPause(); }
 }
 
 class $modify(CorumRankedPauseLayer, PauseLayer) {
@@ -52,6 +62,8 @@ public:
     struct Fields {
         std::string leaseId, matchId;
         int round = 0, deathmatch = 0;
+        int placementMapIndex = 0;
+        bool placement = false;
         CCLabelBMFont* budget = nullptr;
         CCMenuItemSpriteExtra* surrender = nullptr;
         std::optional<WeakRef<ui::RankedSurrenderPopup>> popup;
@@ -68,11 +80,14 @@ public:
     };
     void customSetup() {
         PauseLayer::customSetup();
-        if (!ownsRankedPlayerPause()) return;
+        if (!ownsManagedRankedPause()) return;
         auto& ranked = RankedRuntime::get(); auto* layer = PlayLayer::get();
         m_fields->owner.emplace(layer);
         activeRankedPause.emplace(this);
-        m_fields->leaseId = ranked.beginMatchGameplayPause(static_cast<int>(layer->m_level->m_levelID));
+        m_fields->placement = ranked.isPlacement();
+        m_fields->placementMapIndex = m_fields->placement ? ranked.view().placement.currentMapIndex : 0;
+        if (!m_fields->placement)
+            m_fields->leaseId = ranked.beginMatchGameplayPause(static_cast<int>(layer->m_level->m_levelID));
         log::info("[RankedPause] opened level={} round={} lease={}",
             static_cast<int>(layer->m_level->m_levelID), ranked.view().match.roundNumber,
             !m_fields->leaseId.empty());
@@ -83,7 +98,7 @@ public:
             center = typeinfo_cast<CCMenu*>(play->getParent());
         auto* exit = typeinfo_cast<CCMenuItemSpriteExtra*>(getChildByIDRecursive("exit-button"));
         if (!exit && center) exit = typeinfo_cast<CCMenuItemSpriteExtra*>(getChildBySpriteFrameName(center, "GJ_menuBtn_001.png"));
-        if (exit) {
+        if (exit && !m_fields->placement) {
             exit->setEnabled(false); exit->setOpacity(75);
             exit->setTarget(this, menu_selector(CorumRankedPauseLayer::onBlockedQuit));
         }
@@ -97,6 +112,13 @@ public:
         m_fields->surrender = CCMenuItemSpriteExtra::create(button, this, menu_selector(CorumRankedPauseLayer::onSurrender));
         m_fields->surrender->setID("ranked-surrender-button"_spr);
         center->addChild(m_fields->surrender, -1); center->sortAllChildren(); center->updateLayout();
+        if (m_fields->placement) {
+            auto* caption = ui::label(i18n::text("placement-skip-map", "SKIP MAP"), 0.22f,
+                {button->getContentSize().width / 2, -10}, ui::Gold, ui::FontWeight::ExtraBold);
+            button->addChild(caption);
+            schedule(schedule_selector(CorumRankedPauseLayer::watchBudget), 0.05f); watchBudget(0);
+            return;
+        }
         auto const plateWidth = std::min(300.0f, size.width * 0.56f);
         auto* budgetPlate = CCLayerColor::create({0, 0, 0, 215}, plateWidth, 48);
         budgetPlate->setPosition({8, size.height - 56}); addChild(budgetPlate, 1000);
@@ -113,6 +135,17 @@ public:
     void watchBudget(float) {
         auto& ranked = RankedRuntime::get(); ranked.tick();
         if (m_fields->matchId.empty() || !getParent()) return;
+        if (m_fields->placement) {
+            if (hasAcknowledgedGameplayExit()) {
+                auto owner = m_fields->owner ? m_fields->owner->lock() : Ref<PlayLayer>();
+                if (owner) corum::ranked::requestConcededGameplayReturn(owner.data());
+            } else if (!ranked.isPlacement() || ranked.view().placement.runId != m_fields->matchId ||
+                ranked.view().placement.currentStageIndex != m_fields->round ||
+                ranked.view().placement.currentMapIndex != m_fields->placementMapIndex) {
+                resumeRankedPause(nullptr);
+            }
+            return;
+        }
         auto const remaining = ranked.matchPauseRemainingMs();
         auto const text = fmt::format("{}: {:.1f} / 30{}", i18n::text("match-pause", "MATCH PAUSE"),
             std::ceil(remaining / 100) / 10, i18n::isKorean() ? "초" : "s");
@@ -181,13 +214,19 @@ public:
         PauseLayer::onResume(sender);
     }
     void onBlockedQuit(CCObject*) {}
+    bool hasAcknowledgedGameplayExit() {
+        auto const& ranked = RankedRuntime::get();
+        return ranked.view().match.matchId == m_fields->matchId && (m_fields->placement
+            ? ranked.placementMapSkipped(m_fields->matchId, m_fields->round, m_fields->placementMapIndex)
+            : ranked.gameplayConceded(m_fields->round, m_fields->deathmatch));
+    }
     void onQuit(CCObject* sender) {
         // The Windows confirmation crash reaches this hook's Fields lookup.
         // Do not trust the native callback's incoming receiver for Fields;
         // the tracked WeakRef is the only Ranked Pause authority.
         auto pause = activeRankedPause ? activeRankedPause->lock() : Ref<PauseLayer>();
         if (!pause) {
-            if (!ownsRankedPlayerPause()) PauseLayer::onQuit(sender);
+            if (!ownsManagedRankedPause()) PauseLayer::onQuit(sender);
             return;
         }
         auto* rankedPause = static_cast<CorumRankedPauseLayer*>(pause.data());
@@ -195,23 +234,22 @@ public:
         auto owner = fields->owner ? fields->owner->lock() : Ref<PlayLayer>();
         auto& ranked = RankedRuntime::get();
         auto const authenticatedConcession = fields->concessionQuit && owner &&
-            owner.data() == PlayLayer::get() && ranked.view().match.matchId == fields->matchId &&
-            ranked.gameplayConceded(fields->round, fields->deathmatch);
-        if (!authenticatedConcession && !ownsRankedPlayerPause()) { PauseLayer::onQuit(sender); return; }
+            owner.data() == PlayLayer::get() && rankedPause->hasAcknowledgedGameplayExit();
+        if (!authenticatedConcession && !ownsManagedRankedPause()) { PauseLayer::onQuit(sender); return; }
         if (!owner || owner.data() != PlayLayer::get() || !pause->getParent() ||
             ranked.view().match.matchId != fields->matchId) return;
-        if (!authenticatedConcession) { rankedPause->confirmRankedExit(); return; }
+        if (!authenticatedConcession && !fields->placement) { rankedPause->confirmRankedExit(); return; }
         // The nested PlayLayer quit may resume/remove this Pause before the
         // vanilla Pause quit caller finishes returning.
         [[maybe_unused]] Ref<PauseLayer> keepAlive(pause.data());
-        if (authenticatedConcession) {
+        if (authenticatedConcession || fields->placement) {
             rankedPause->retireRankedPause();
             fields->nativeQuitInProgress = true;
             fields->nativeQuitReachedPlay = false;
             // Restore this exact PlayLayer through its native Resume binding.
             // Keep Pause attached for its original Quit handler to close; never
             // invoke that handler on a window we already removed via onResume.
-            owner->resume();
+            if (authenticatedConcession) owner->resume();
             geode::log::info("[RankedPause] concession resume paused={} appPaused={} attached={}",
                 owner->m_isPaused, AppDelegate::get()->m_gamePaused, pause->getParent() != nullptr);
         }
@@ -219,7 +257,7 @@ public:
         // resolve a different PlayLayer after that callback has returned.
         if (!authenticatedConcession || owner.data() == PlayLayer::get())
             PauseLayer::onQuit(sender);
-        if (authenticatedConcession) {
+        if (authenticatedConcession || fields->placement) {
             fields->nativeQuitInProgress = false;
             fields->concessionQuit = false;
             geode::log::info("[RankedPause] native concession quit reachedPlay={} paused={} appPaused={}",
@@ -241,14 +279,15 @@ public:
         if (dialog) { m_fields->exitConfirmation.emplace(dialog); addChild(dialog); dialog->show(); }
     }
     void onSurrender(CCObject*) {
-        if (m_fields->leaseId.empty()) return;
+        if (!m_fields->placement && m_fields->leaseId.empty()) return;
         if (m_fields->popup) {
             auto dialog = m_fields->popup->lock();
             if (dialog && dialog->getParent()) return;
             m_fields->popup.reset();
         }
         log::info("[RankedSurrender] pause button round={}", m_fields->round);
-        auto* popup = ui::RankedSurrenderPopup::create(this, m_fields->matchId, m_fields->round, m_fields->deathmatch);
+        auto* popup = ui::RankedSurrenderPopup::create(this, m_fields->matchId, m_fields->round,
+            m_fields->deathmatch, m_fields->placement, m_fields->placementMapIndex);
         if (popup) { m_fields->popup.emplace(popup); popup->show(); }
     }
 };
@@ -262,7 +301,7 @@ bool quitRankedPauseForConcession(PlayLayer* layer) {
     auto owner = rankedPause->m_fields->owner ? rankedPause->m_fields->owner->lock() : Ref<PlayLayer>();
     auto const& ranked = RankedRuntime::get();
     if (!owner || owner.data() != layer || ranked.view().match.matchId != rankedPause->m_fields->matchId ||
-        !ranked.gameplayConceded(rankedPause->m_fields->round, rankedPause->m_fields->deathmatch)) return false;
+        !rankedPause->hasAcknowledgedGameplayExit()) return false;
     rankedPause->m_fields->concessionQuit = true;
     // Public binding entry, with the installed native Pause quit hooks. The
     // Corum hook's qualified call below it advances to next-original once.

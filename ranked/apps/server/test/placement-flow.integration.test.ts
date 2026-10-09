@@ -33,6 +33,7 @@ beforeAll(async () => {
     "0008_placement_beta9.sql",
     "0009_placement_stage_count.sql",
     "0010_achievements_v1.sql",
+    "0017_placement_rating_policy.sql",
   ]) {
     const migrationPath = fileURLToPath(
       new URL(`../../../migrations/${migrationName}`, import.meta.url),

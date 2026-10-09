@@ -74,7 +74,7 @@ struct RankedRuntime {
  std::string endpoint(std::string path){return path;}
  void setTransientError(std::string){++errors;}void parseMatchState(matjson::Value const&){++parsed;}
  std::string beginMatchGameplayPause(int);void endMatchGameplayPause(std::string const&);
- double matchPauseRemainingMs()const;void flushGameplayControls();void resetGameplayControls();
+ double matchPauseRemainingMs()const;void flushGameplayControls();void resetGameplayControls();void resetPlacementMapSkip(){}
  void surrenderCurrentMatch(bool);bool gameplayConceded(int,int)const;
  void observeGameplayConcession(std::string const&,int,int,std::string const&);bool opponentConceded(int,int)const;
 };

@@ -8,6 +8,7 @@ import {
   PlacementAttemptStartDto,
   ReadyPlacementMapDto,
   SkipPlacementDto,
+  SkipPlacementMapDto,
   StartPlacementDto,
 } from "./placement.dto.js";
 import { PlacementService } from "./placement.service.js";
@@ -80,6 +81,15 @@ export class PlacementController {
     @Body() body: PlacementAttemptEndDto,
   ) {
     return this.placement.endAttempt(runId, session, body);
+  }
+
+  @Post(":id/map/skip")
+  public skipMap(
+    @Param("id") runId: string,
+    @CurrentSession() session: RankedSessionContext,
+    @Body() body: SkipPlacementMapDto,
+  ) {
+    return this.placement.skipMap(runId, session, body);
   }
 
   @Post(":id/continue")

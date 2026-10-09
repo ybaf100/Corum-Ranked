@@ -23,7 +23,7 @@ test('authenticated concession closes native Pause and permits its Quit with int
 #include <utility>
 struct CCObject {int refs=1;bool alive=true;void retain(){assert(alive);++refs;}void release(){assert(alive&&refs>0);if(--refs==0)alive=false;}};
 struct Level {int m_levelID=123;};
-struct PlayLayer:CCObject {inline static PlayLayer* current=nullptr;Level level;Level* m_level=&level;bool m_isPaused=true,refuseResume=false;PlayLayer* replacement=nullptr;int quits=0,resumes=0;static PlayLayer* get(){return current;}void onQuit();void resume();};
+struct PlayLayer:CCObject {inline static PlayLayer* current=nullptr;Level level;Level* m_level=&level;bool m_isPracticeMode=false,m_isTestMode=false;bool m_isPaused=true,refuseResume=false;PlayLayer* replacement=nullptr;int quits=0,resumes=0;static PlayLayer* get(){return current;}void onQuit();void resume();};
 struct AppDelegate {bool m_gamePaused=true;static AppDelegate* get(){static AppDelegate a;return &a;}};
 template<class T>struct Ref {T* p=nullptr;Ref()=default;explicit Ref(T* v):p(v){if(p)p->retain();}Ref(Ref const& v):Ref(v.p){}Ref(Ref&& v):p(std::exchange(v.p,nullptr)){}~Ref(){if(p)p->release();}T* data()const{return p;}T* operator->()const{assert(p&&p->alive);return p;}explicit operator bool()const{return p;}};
 template<class T>struct WeakRef {T* p;explicit WeakRef(T* v):p(v){}Ref<T> lock()const{return Ref<T>(p&&p->alive?p:nullptr);}};
@@ -35,11 +35,11 @@ namespace corum::ranked {
 enum class RuntimeStage{Idle,Matched};
 struct RankedRuntime {
     struct Match{std::string matchId="m";int roundNumber=1,deathmatchSequence=0;};
-    struct View{RuntimeStage stage=RuntimeStage::Matched;Match match;}v;
+    struct Placement{std::string runId="m",state="MAP_PREPARE";int currentStageIndex=1,currentMapIndex=1;};struct View{Placement placement;RuntimeStage stage=RuntimeStage::Matched;Match match;}v;
     bool conceded=false,placement=false,spectator=false;int ends=0;
     static RankedRuntime& get(){static RankedRuntime r;return r;}
     auto const& view()const{return v;}
-    bool isPlacement()const{return placement;}bool isSpectating()const{return spectator;}bool isGameplayLevel(int id)const{return id==123;}
+    bool isPlacement()const{return placement;}bool placementMapSkipped(std::string const& id,int stage,int map)const{return skipped&&id==skippedRunId&&stage==skippedStage&&map==skippedMap;}bool skipped=false;std::string skippedRunId="m";int skippedStage=1,skippedMap=1;bool isSpectating()const{return spectator;}bool isGameplayLevel(int id)const{return id==123;}
     bool gameplayConceded(int round,int death)const{return conceded&&round==v.match.roundNumber&&death==v.match.deathmatchSequence;}
     void endMatchGameplayPause(std::string const& lease){if(!lease.empty()){++ends;events.push_back("lease-ended");}}
 };
@@ -48,16 +48,19 @@ using corum::ranked::RankedRuntime;
 std::optional<WeakRef<PauseLayer>> activeRankedPause;
 #define schedule_selector(x) 0
 ${body(pause,'bool ownsRankedPlayerPause()')}
+${body(pause,'bool ownsPlacementPlayerPause()')}
+${body(pause,'bool ownsManagedRankedPause()')}
 void dismissNativeRankedExitConfirmation(PauseLayer*){};
 struct CorumRankedPauseLayer:PauseLayer {
-    struct Fields{std::optional<WeakRef<Popup>> popup,exitConfirmation;std::optional<WeakRef<PlayLayer>> owner;std::string leaseId="lease",matchId="m";int round=1,deathmatch=0;bool concessionQuit=false,nativeQuitInProgress=false,nativeQuitReachedPlay=false;}f;
+    struct Fields{std::optional<WeakRef<Popup>> popup,exitConfirmation;std::optional<WeakRef<PlayLayer>> owner;std::string leaseId="lease",matchId="m";int round=1,deathmatch=0;int placementMapIndex=1;bool placement=false;bool concessionQuit=false,nativeQuitInProgress=false,nativeQuitReachedPlay=false;}f;
     struct CheckedFields{Fields* p;CCObject* owner;Fields* operator->(){assert(owner->alive);return p;}}m_fields{&f,this};
     int exitWarnings=0;void confirmRankedExit(){++exitWarnings;}
     void unschedule(int){}
     ${body(pause,'void retireRankedPause()')}
     ${body(pause,'void releaseRankedPauseOwnership()')}
     ${body(pause,'void onResume(CCObject* sender)')}
-    ${body(pause,'void onQuit(CCObject* sender)')}
+    ${body(pause,'bool hasAcknowledgedGameplayExit()')}
+${body(pause,'void onQuit(CCObject* sender)')}
 };
 namespace corum::ranked {
 ${body(pause,'bool resumeRankedPauseBeforeQuit(PlayLayer* layer)')}
@@ -131,6 +134,21 @@ int main(){using namespace corum::ranked;auto& r=RankedRuntime::get();PlayLayer 
      CorumRankedPauseLayer next;PlayLayer::current=&b;r.v.match.roundNumber=round;next.f.round=round;
      if(round==1){r.v.match.matchId="next";}next.f.matchId=r.v.match.matchId;next.f.owner.emplace(&b);activeRankedPause.emplace(&next);
      assert(quitRankedPauseForConcession(&b)&&next.nativeQuits==1&&!activeRankedPause&&!next.parent&&!AppDelegate::get()->m_gamePaused);
+    }
+    // Placement uses the same attached native Quit transaction, without a
+    // PvP lease. Its acknowledgement belongs to one map, not the whole stage.
+    r.placement=true;r.v.match.matchId="placement";r.v.match.roundNumber=1;
+    r.v.placement={"placement","MAP_PLAYING",1,1};r.skippedRunId="placement";
+    {CorumRankedPauseLayer p;p.f.placement=true;p.f.placementMapIndex=1;p.f.matchId="placement";p.f.round=1;p.f.leaseId.clear();
+     p.f.owner.emplace(&b);activeRankedPause.emplace(&p);b.m_isPaused=true;AppDelegate::get()->m_gamePaused=true;
+     auto before=b.quits;assert(!quitRankedPauseForConcession(&b));r.skipped=true;
+     assert(quitRankedPauseForConcession(&b)&&b.quits==before+1&&!activeRankedPause&&!AppDelegate::get()->m_gamePaused);
+    }
+    {CorumRankedPauseLayer p;r.v.placement.currentMapIndex=2;p.f.placement=true;p.f.placementMapIndex=2;p.f.matchId="placement";p.f.round=1;p.f.leaseId.clear();
+     p.f.owner.emplace(&b);activeRankedPause.emplace(&p);b.m_isPaused=true;AppDelegate::get()->m_gamePaused=true;
+     auto before=b.quits;assert(!quitRankedPauseForConcession(&b)&&b.quits==before); // old map ACK cannot exit map 2
+     static_cast<PauseLayer*>(&p)->onQuit(nullptr); // ordinary Placement exit still uses vanilla Pause Quit
+     assert(b.quits==before+1&&!activeRankedPause&&!AppDelegate::get()->m_gamePaused);
     }
 }
 `;

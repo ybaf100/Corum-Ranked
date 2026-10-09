@@ -18,6 +18,13 @@ export class StartPlacementDto extends EnvironmentRecheckDto {
 
 export class ReadyPlacementMapDto extends EnvironmentRecheckDto {}
 export class SkipPlacementDto extends EnvironmentRecheckDto {}
+export class SkipPlacementMapDto extends AttemptStartDto {
+  @IsInt() @Min(1) @Max(5)
+  public stageIndex!: number;
+
+  @IsInt() @Min(1) @Max(2)
+  public mapIndex!: number;
+}
 export class PlacementAttemptStartDto extends AttemptStartDto {}
 export class PlacementAttemptEndDto extends AttemptEndDto {}
 export class PlacementAttemptProgressDto extends AttemptProgressDto {}

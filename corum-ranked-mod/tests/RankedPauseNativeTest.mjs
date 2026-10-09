@@ -48,6 +48,7 @@ test('actual pause/modal callbacks preserve native cleanup and surrender the who
     const modalMethods=['bool sameRound() const','void onRound(','void onMatch(','void onConfirm(','void onCancel(','void watchContext(','void dismiss()'].map(n=>body(popup,n)).join('\n');
     const cpp=`
 #include <cassert>
+#include <algorithm>
 #include <optional>
 #include <string>
 #include <cmath>
@@ -60,7 +61,7 @@ struct Node { bool parent=true;void* getParent()const{return parent?(void*)this:
 struct Label {std::string text;ccColor3B color{};void setString(char const* s){text=s;}void setColor(ccColor3B c){color=c;}void limitLabelWidth(float,float,float){};char const* getFntFile()const{return "CorumSansBold.fnt";}};
 struct PauseLayer:Node {int quits=0,resumes=0;bool dispatching=false;void onQuit(CCObject*){++quits;}void onResume(CCObject*);};
 struct Level{int m_levelID=123;};
-struct PlayLayer{Level* m_level=nullptr;inline static PlayLayer* active=nullptr;bool m_isPaused=false;int quits=0;static PlayLayer* get(){return active;}void onQuit(){++quits;}void resume(){m_isPaused=false;AppDelegate::get()->m_gamePaused=false;}};
+struct PlayLayer{Level* m_level=nullptr;inline static PlayLayer* active=nullptr;bool m_isPracticeMode=false,m_isTestMode=false;bool m_isPaused=false;int quits=0;static PlayLayer* get(){return active;}void onQuit(){++quits;}double getCurrentPercent()const{return 75;}int getCurrentPercentInt()const{return 75;}void resume(){m_isPaused=false;AppDelegate::get()->m_gamePaused=false;}};
 template<class T>struct Ref {T* p=nullptr;Ref()=default;explicit Ref(T* v):p(v){}T* data()const{return p;}T* operator->()const{return p;}explicit operator bool()const{return p;}};
  template<class T>struct WeakRef{T* value=nullptr;explicit WeakRef(T* p):value(p){}Ref<T> lock()const{return Ref<T>(value);}};
  namespace geode {template<class T>using WeakRef=::WeakRef<T>;}
@@ -73,13 +74,13 @@ enum class RuntimeStage{Idle,Matched};
 struct RankedRuntime {
  enum class SurrenderStatus{Idle,WaitingAttempt,Sending,Retrying,Accepted,Rejected};
  struct Match{std::string matchId="m";int roundNumber=1,deathmatchSequence=0;};
- struct View{RuntimeStage stage=RuntimeStage::Idle;Match match;}v;
+ struct Placement{std::string runId="m",state="MAP_PREPARE";int currentStageIndex=1,currentMapIndex=1;};struct View{Placement placement;RuntimeStage stage=RuntimeStage::Idle;Match match;}v;
  bool placement=false,spectator=false,conceded=false,whole=false;int sends=0,ends=0;double remaining=30000;
  SurrenderStatus status=SurrenderStatus::Idle;
  static RankedRuntime& get(){static RankedRuntime r;return r;}
- void tick(){}auto const& view()const{return v;}bool isPlacement()const{return placement;}bool isSpectating()const{return spectator;}
+ void tick(){}auto const& view()const{return v;}bool isPlacement()const{return placement;}bool placementMapSkipped(std::string const& id,int stage,int map)const{return skipped&&id==v.placement.runId&&stage==v.placement.currentStageIndex&&map==v.placement.currentMapIndex;}bool skipped=false;bool isSpectating()const{return spectator;}
  bool isGameplayLevel(int id)const{return id==123;}double matchPauseRemainingMs()const{return remaining;}
- bool gameplayConceded(int,int)const{return conceded;}SurrenderStatus surrenderStatus()const{return status;}
+ bool gameplayConceded(int,int)const{return conceded;}SurrenderStatus surrenderStatus()const{return status;}SurrenderStatus placementMapSkipStatus()const{return skipStatus;}SurrenderStatus skipStatus=SurrenderStatus::Idle;int skips=0;double skippedProgress=0;void skipPlacementMap(int,double progress){++skips;skippedProgress=progress;skipStatus=SurrenderStatus::Sending;}
  bool surrenderPending()const{return status==SurrenderStatus::Sending||status==SurrenderStatus::WaitingAttempt||status==SurrenderStatus::Retrying;}
  void surrenderCurrentMatch(bool value){whole=value;++sends;status=SurrenderStatus::Sending;}
  void endMatchGameplayPause(std::string const&){++ends;}
@@ -92,7 +93,7 @@ using CCLabelBMFont=Label;
 ${body(visuals,'inline float fontScale(')}
 ${body(visuals,'inline void fitLabelWidth(')}
 struct RankedSurrenderPopup:Popup {
- std::optional<WeakRef<PauseLayer>> m_owner;std::string m_matchId="m";int m_round=1,m_deathmatch=0;
+ bool m_placement=false;int m_placementMapIndex=1;std::optional<WeakRef<PlayLayer>> m_playOwner;std::optional<WeakRef<PauseLayer>> m_owner;std::string m_matchId="m";int m_round=1,m_deathmatch=0;
  bool m_wholeMatch=false,m_confirmation=false,m_submitted=false,m_closed=false,m_showSubmissionStatus=false;Label label;Label* m_status=&label;int renders=0;
  void render(){++renders;}void unschedule(int){}
  ${modalMethods}
@@ -103,13 +104,16 @@ using corum::ranked::RankedRuntime;
 namespace ui=corum::ranked::ui;
 namespace i18n=corum::ranked::i18n;
 ${body(pause,'bool ownsRankedPlayerPause()')}
+${body(pause,'bool ownsPlacementPlayerPause()')}
+${body(pause,'bool ownsManagedRankedPause()')}
 void dismissNativeRankedExitConfirmation(PauseLayer*){};
 struct CorumRankedPauseLayer:PauseLayer {
  struct Button {bool enabled=true;void setEnabled(bool v){enabled=v;}} button;Label clock;
- struct Fields{std::optional<WeakRef<ui::RankedSurrenderPopup>> popup;std::string leaseId="lease",matchId="m";int round=1,deathmatch=0;Label* budget;Button* surrender;std::optional<WeakRef<PlayLayer>> owner;bool concessionQuit=false,nativeQuitInProgress=false,nativeQuitReachedPlay=false,timeoutSurrenderRequested=false;std::optional<WeakRef<ui::RankedSurrenderPopup>> exitConfirmation{};}f{{},"lease","m",1,0,&clock,&button,{}};Fields* m_fields=&f;
+ struct Fields{std::optional<WeakRef<ui::RankedSurrenderPopup>> popup;std::string leaseId="lease",matchId="m";int round=1,deathmatch=0;Label* budget;Button* surrender;std::optional<WeakRef<PlayLayer>> owner;int placementMapIndex=1;bool placement=false;bool concessionQuit=false,nativeQuitInProgress=false,nativeQuitReachedPlay=false,timeoutSurrenderRequested=false;std::optional<WeakRef<ui::RankedSurrenderPopup>> exitConfirmation{};}f{{},"lease","m",1,0,&clock,&button,{}};Fields* m_fields=&f;
  int exitWarnings=0;void confirmRankedExit(){++exitWarnings;}
  void unschedule(int){}
- ${body(pause,'void onQuit(CCObject* sender)')}
+ ${body(pause,'bool hasAcknowledgedGameplayExit()')}
+${body(pause,'void onQuit(CCObject* sender)')}
  ${body(pause,'void watchBudget(float)')}
  ${body(pause,'void retireRankedPause()')}
  ${body(pause,'void releaseRankedPauseOwnership()')}
@@ -160,6 +164,15 @@ int main(){using namespace corum::ranked;
  r.status=RankedRuntime::SurrenderStatus::Rejected;pending.watchBudget(0);assert(pending.f.timeoutSurrenderRequested&&r.sends==4&&r.whole);
  // A stale scene/context must clean up normally, never concede a new match.
  r.v.match.matchId="new-match";pending.watchBudget(0);assert(pending.resumes==1&&r.sends==4);
+    // Placement Map Skip is independent of the exhausted PvP pause budget.
+    r.placement=true;r.v.placement.state="MAP_PLAYING";r.v.placement.currentMapIndex=1;r.v.match.roundNumber=1;
+    ui::RankedSurrenderPopup skip;skip.m_placement=true;skip.m_playOwner.emplace(&play);skip.m_owner.emplace(&p);
+    skip.onConfirm(nullptr);assert(r.skips==1&&r.skippedProgress==75&&r.sends==4);
+    assert(skip.label.text=="ko:placement-skip-sending"&&skip.closes==0);
+    skip.onConfirm(nullptr);assert(r.skips==1);
+    r.v.placement.currentMapIndex=2;skip.watchContext(0);assert(skip.closes==1&&!skip.m_playOwner);
+    ui::RankedSurrenderPopup stale;stale.m_placement=true;stale.m_playOwner.emplace(&play);stale.m_owner.emplace(&p);
+    stale.onConfirm(nullptr);assert(r.skips==1); // cannot skip map 2 with the map 1 modal
 }
 `;
     const dir=mkdtempSync(join(tmpdir(),'corum-pause-native-'));
@@ -173,6 +186,7 @@ test('closed retained surrender modal releases force priority before the next ro
     const exit=body(popup,'void onExit() override');
     const cpp=`
 #include <cassert>
+#include <algorithm>
 #include <optional>
 #include <set>
 struct CCObject {virtual ~CCObject()=default;};
@@ -188,7 +202,7 @@ struct Popup:CCObject {
  virtual void onExit(){parent=false;++exits;}
 };
 #define schedule_selector(x) 0
-struct RankedSurrenderPopup:Popup {bool m_closed=false;std::optional<int> m_owner{1};void unschedule(int){} ${exit}};
+struct RankedSurrenderPopup:Popup {bool m_closed=false;std::optional<int> m_owner{1},m_playOwner{2};void unschedule(int){} ${exit}};
 int main(){auto* d=CCTouchDispatcher::get();Popup external;
  for(int round=1;round<=3;++round){
    Popup old;old.onExit();assert(d->forceOwners.contains(&old)); // old lifecycle leak until destruction

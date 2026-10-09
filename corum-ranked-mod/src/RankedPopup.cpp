@@ -26,6 +26,7 @@
 #include "ui/RankedSettingsPopup.hpp"
 #include "ui/RankedJukeboxPopup.hpp"
 #include "ui/RankedPlayerInfoPopup.hpp"
+#include "domain/PlayerInfoPresentation.hpp"
 #include "ui/RankedSessionConflictPopup.hpp"
 #include "ui/MapDifficultyBadge.hpp"
 
@@ -497,6 +498,7 @@ class CorumRankedLayer final : public CCLayerColor {
     CCLabelBMFont* m_matchFoundCountdownLabel = nullptr;
     CCLabelBMFont* m_banTimerLabel = nullptr;
     CCLabelBMFont* m_prepareFooterLabel = nullptr;
+    CCLabelBMFont* m_placementPrepareTimerLabel = nullptr;
     CCLabelBMFont* m_prepareLoadStageLabel = nullptr;
     CCLabelBMFont* m_prepareLoadPercentLabel = nullptr;
     CCLayerColor* m_prepareLoadFill = nullptr;
@@ -1032,6 +1034,7 @@ class CorumRankedLayer final : public CCLayerColor {
         m_matchFoundCountdownLabel = nullptr;
         m_banTimerLabel = nullptr;
         m_prepareFooterLabel = nullptr;
+        m_placementPrepareTimerLabel = nullptr;
         m_prepareLoadStageLabel = nullptr;
         m_prepareLoadPercentLabel = nullptr;
         m_prepareLoadFill = nullptr;
@@ -1081,6 +1084,13 @@ class CorumRankedLayer final : public CCLayerColor {
         }
         auto const& runtime = RankedRuntime::get();
         auto const& noticeMatch = runtime.view().match;
+        if (m_placementPrepareTimerLabel) {
+            auto const remaining = runtime.deadlineSeconds();
+            m_placementPrepareTimerLabel->setString(remaining
+                ? fmt::format("{} {}s", tr("starts-in", "STARTS IN"), *remaining).c_str()
+                : tr("starting", "STARTING...").c_str());
+            m_placementPrepareTimerLabel->setColor(remaining && *remaining <= 3 ? kRed : kGold);
+        }
         auto const opponentSurrender = m_page == Page::Live && runtime.view().stage == RuntimeStage::Matched &&
             !runtime.view().environmentWarning.active && !showResourceGate() &&
             runtime.opponentConceded(noticeMatch.roundNumber, noticeMatch.deathmatchSequence);
@@ -1557,7 +1567,7 @@ class CorumRankedLayer final : public CCLayerColor {
         }
     }
 
-    void addRankStatus(RankedProfileView const& profile, CCPoint position, float scale, float width) {
+    void addRankStatus(RankedProfileView const& profile, CCPoint position, float scale, float width, bool lobbyFallback = false) {
         std::string text;
         auto color = kCyan;
         if (std::abs(profile.resultStreak) >= 2) {
@@ -1572,7 +1582,10 @@ class CorumRankedLayer final : public CCLayerColor {
             state = tr("demotion-warning","DEMOTION WARNING"); color = kRed;
         }
         if (!state.empty()) text += (text.empty() ? "" : " · ") + state;
-        if (text.empty()) text = tr("your-rank","YOUR RANK");
+        if (text.empty()) {
+            if (!lobbyFallback) return;
+            text = tr("your-rank","YOUR RANK");
+        }
         auto* label = makeLabel(text,scale,position,color,"semibold");
         corum::ranked::ui::fitMenuLabelWidth(label,width,scale,0.17f);
         label->setID("ranked-profile-status-line"_spr); m_root->addChild(label,8);
@@ -2052,7 +2065,7 @@ class CorumRankedLayer final : public CCLayerColor {
         );
         emblem->setPosition({leftCenter.x, leftCenter.y + 18.0f});
         m_root->addChild(emblem, 4);
-        addRankStatus(profile,{leftCenter.x,leftCenter.y + 91.0f},0.26f,174.0f);
+        addRankStatus(profile,{leftCenter.x,leftCenter.y + 91.0f},0.26f,174.0f,true);
         auto* tier = makeLabel(upper(view.profileTier), 0.54f, {leftCenter.x, leftCenter.y - 25.0f}, tierColor(upper(view.profileTier)), "black");
         corum::ranked::ui::fitMenuLabelWidth(tier, 150.0f, 0.54f, 0.32f);
         m_root->addChild(tier, 4);
@@ -2091,6 +2104,12 @@ class CorumRankedLayer final : public CCLayerColor {
             equippedTitle->setID("ranked-profile-equipped-title"_spr);
             m_root->addChild(equippedTitle, 4);
         }
+
+        auto* record = makeLabel(corum::ranked::matchRecordText(view.profileWins,view.profileLosses,
+            corum::ranked::i18n::isKorean()),0.26f,{leftCenter.x,leftCenter.y - 92.0f},
+            corum::ranked::ui::TextMuted,"semibold");
+        corum::ranked::ui::fitMenuLabelWidth(record,170,0.26f,0.20f);
+        record->setID("ranked-profile-record"_spr); m_root->addChild(record,8);
 
         auto* actionPanel = makeNeonPanel({188.0f, 196.0f}, rightCenter, kBlue, kDeepPanel, 246);
         m_root->addChild(actionPanel, 1);
@@ -2184,6 +2203,12 @@ class CorumRankedLayer final : public CCLayerColor {
         auto const size = CCDirector::sharedDirector()->getWinSize();
         auto const& placement = view.placement;
         auto const& match = view.match;
+        if (match.state == "MAP_PREPARE") {
+            m_placementPrepareTimerLabel = makeLabel("", 0.27f, {size.width - 16, size.height - 16}, kGold, "extrabold");
+            m_placementPrepareTimerLabel->setAnchorPoint({1, 1});
+            m_placementPrepareTimerLabel->setID("ranked-placement-prepare-timer"_spr);
+            m_root->addChild(m_placementPrepareTimerLabel, 20);
+        }
         auto const pool = !placement.stagePools.empty()
             ? placement.stagePools.back()
             : placement.startingPool;
@@ -3214,7 +3239,7 @@ class CorumRankedLayer final : public CCLayerColor {
         input.promotionFailed = event.promotionFailed; input.demoted = event.demoted;
         input.demotionWarning = after.demotionWarning; input.previousMarks = static_cast<int>(before.promotion.results.size());
         input.bands = match.scorePresentation.bands; input.standingBefore = player.before;
-        input.standingAfter = player.after; input.promotion = player.promotion;
+        input.standingAfter = player.after; input.promotion = player.promotion; input.goldTimeline = player.goldTimeline;
         return input;
     }
 

@@ -715,6 +715,12 @@ describe("two-client authoritative match flow", () => {
     state = (await matches.state(matchId, statusA.matchToken, playerA)) as Record<string, any>;
     expect(state.state).toBe("MATCH_RESULT");
     expect(state.result.winnerSide).toBe("A");
+    expect(state.result.profileBefore.A).toMatchObject({wins:0,losses:0});
+    expect(state.result.profileBefore.B).toMatchObject({wins:0,losses:0});
+    expect(state.result.profileAfter.A).toMatchObject({wins:1,losses:0});
+    expect(state.result.profileAfter.B).toMatchObject({wins:0,losses:1});
+    expect(state.players.A).toMatchObject({wins:1,losses:0});
+    expect(state.players.B).toMatchObject({wins:0,losses:1});
     expect(state.result.scorePresentation.version).toBe(1);
     expect(state.result.scorePresentation.tierBands).toEqual([...document.operational.tierBands]
       .sort((a,b) => a.minInclusive - b.minInclusive).map(({tier,minInclusive}) => ({tier,minInclusive})));

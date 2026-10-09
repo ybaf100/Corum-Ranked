@@ -84,7 +84,7 @@ struct RankedRuntime {
     bool blocked=false; int ticks=0,levelId=123;
     static RankedRuntime& get(){static RankedRuntime r;return r;}
     View const& view()const{return data;}
-    bool conceded=false;bool gameplayConceded(int,int)const{return conceded;}
+    bool conceded=false;bool gameplayConceded(int,int)const{return conceded;}bool mapSkipped=false;bool placementMapSkipped(std::string const& run,int stage,int map)const{return mapSkipped&&run=="match"&&stage==1&&map==1;}
     bool isSpectating()const{return serverSpectator&&!ownAlive&&!placement;}
     bool isPlacement()const{return placement;}
     bool hasLocalGameplayAuthority()const{return ownAlive;}
@@ -137,7 +137,7 @@ struct CorumRankedPlayLayer: PlayLayer {
         int levelId=123,renderedRevision=0;
         std::chrono::steady_clock::time_point nextHudRefreshAt{},spectatorHandoffReadyAt{};
         corum::ranked::SpectatorLocalSafety localSafety;
-        corum::ranked::SpectatorSceneContext sceneContext{"match",1,0,123};
+        corum::ranked::SpectatorSceneContext sceneContext{"match",1,0,123};int placementMapIndex=0;
         corum::ranked::FakeRemote remotePlayer;
         corum::ranked::FakeCamera spectatorCamera;
         std::optional<corum::ranked::SpectatorRemoteFrame> spectatorRenderedFrame;std::optional<unsigned> spectatorCameraFrameNumber,spectatorPresentationFrameNumber,spectatorWorldFrameNumber;
@@ -172,6 +172,12 @@ int main(){
     {CorumRankedPlayLayer old;runtime.conceded=true;old.finishConcededGameplayHandoff();
      CorumRankedPlayLayer newer;pendingSceneReturns.front()();pendingSceneReturns.clear();
      assert(old.quits==0&&newer.quits==0);runtime.conceded=false;}
+    {CorumRankedPlayLayer skipped;skipped.m_fields->placementMapIndex=1;runtime.mapSkipped=true;
+     assert(skipped.finishConcededGameplayHandoff());pendingSceneReturns.front()();pendingSceneReturns.clear();
+     assert(skipped.quits==1);
+     CorumRankedPlayLayer second;second.m_fields->placementMapIndex=2;
+     assert(!second.finishConcededGameplayHandoff()&&pendingSceneReturns.empty()&&second.quits==0);
+     runtime.mapSkipped=false;}
     CorumRankedPlayLayer scene; PlayerObject local; scene.m_player1=&local;
     runtime.serverSpectator=true; scene.spectatorFrame(0.01f);
     assert(!scene.m_fields->spectatorMode && scene.cameras==0 && local.visible);
