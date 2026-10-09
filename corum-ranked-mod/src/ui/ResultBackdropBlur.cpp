@@ -67,25 +67,26 @@ CCSprite* captureBlurredResult(CCNode* source, CCSize size) {
     auto* capture = CCRenderTexture::create(static_cast<int>(std::ceil(size.width)), static_cast<int>(std::ceil(size.height)));
     if (!capture) return nullptr;
     capture->beginWithClear(0, 0, 0, 1); source->visit(); capture->end();
-    auto const small = CCSize {std::ceil(size.width / 2), std::ceil(size.height / 2)};
-    auto* horizontal = CCRenderTexture::create(static_cast<int>(small.width), static_cast<int>(small.height));
-    auto* vertical = CCRenderTexture::create(static_cast<int>(small.width), static_cast<int>(small.height));
+    // Windows rpcndr.h defines `small` as a macro; keep this identifier distinct.
+    auto const blurSize = CCSize {std::ceil(size.width / 2), std::ceil(size.height / 2)};
+    auto* horizontal = CCRenderTexture::create(static_cast<int>(blurSize.width), static_cast<int>(blurSize.height));
+    auto* vertical = CCRenderTexture::create(static_cast<int>(blurSize.width), static_cast<int>(blurSize.height));
     if (!horizontal || !vertical) return nullptr;
     auto* first = renderSprite(capture);
     auto* hProgram = blurProgram(6.0f / capture->getSprite()->getTexture()->getPixelsWide(), 0);
     if (!first || !hProgram) return nullptr;
     first->setShaderProgram(hProgram);
-    first->setScaleX(small.width / size.width); first->setScaleY(small.height / size.height);
-    first->setPosition({small.width / 2, small.height / 2});
+    first->setScaleX(blurSize.width / size.width); first->setScaleY(blurSize.height / size.height);
+    first->setPosition({blurSize.width / 2, blurSize.height / 2});
     horizontal->beginWithClear(0,0,0,1); first->visit(); horizontal->end();
     auto* second = renderSprite(horizontal);
     auto* vProgram = blurProgram(0, 3.0f / horizontal->getSprite()->getTexture()->getPixelsHigh());
     if (!second || !vProgram) return nullptr;
-    second->setShaderProgram(vProgram); second->setPosition({small.width / 2, small.height / 2});
+    second->setShaderProgram(vProgram); second->setPosition({blurSize.width / 2, blurSize.height / 2});
     vertical->beginWithClear(0,0,0,1); second->visit(); vertical->end();
     auto* result = renderSprite(vertical);
     if (!result) return nullptr;
-    result->setScaleX(size.width / small.width); result->setScaleY(size.height / small.height);
+    result->setScaleX(size.width / blurSize.width); result->setScaleY(size.height / blurSize.height);
     result->setPosition({size.width / 2, size.height / 2});
     return result;
 }

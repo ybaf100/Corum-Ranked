@@ -26,6 +26,49 @@ function run(cpp) {
         execFileSync(binary,[],{stdio:'pipe'});
     } finally { rmSync(dir,{recursive:true,force:true}); }
 }
+
+test('actual blur translation unit compiles with the Windows RPC small macro',()=>{
+    const dir=mkdtempSync(join(tmpdir(),'corum-blur-windows-'));
+    try {
+        const source=join(dir,'blur.cpp');
+        // Renderer boundaries are declarations only. The actual Corum source
+        // must compile while the rpcndr.h macro seen in the Windows CI is active.
+        writeFileSync(source,`
+#include <cmath>
+namespace cocos2d {
+struct CCSize { float width, height; CCSize(float w,float h):width(w),height(h){} };
+struct CCPoint { float x,y; };
+struct CCRect {};
+struct CCTexture2D { unsigned int getPixelsWide(); unsigned int getPixelsHigh(); };
+struct CCGLProgram {
+    bool initWithVertexShaderByteArray(char const*,char const*);
+    void addAttribute(char const*,unsigned int);
+    bool link(); void updateUniforms(); void use(); void autorelease();
+    int getUniformLocationForName(char const*);
+    void setUniformLocationWith2f(int,float,float);
+};
+struct CCNode { void visit(); };
+struct CCSprite : CCNode {
+    static CCSprite* createWithTexture(CCTexture2D*,CCRect const&);
+    CCTexture2D* getTexture(); CCRect const& getTextureRect();
+    bool isFlipY(); void setFlipY(bool); void setShaderProgram(CCGLProgram*);
+    void setScaleX(float); void setScaleY(float); void setPosition(CCPoint const&);
+};
+struct CCRenderTexture {
+    static CCRenderTexture* create(int,int); CCSprite* getSprite();
+    void beginWithClear(float,float,float,float); void end();
+};
+inline constexpr char kCCAttributeNamePosition[]="a_position",kCCAttributeNameColor[]="a_color",kCCAttributeNameTexCoord[]="a_texCoord";
+inline constexpr unsigned int kCCVertexAttrib_Position=0,kCCVertexAttrib_Color=1,kCCVertexAttrib_TexCoords=2;
+}
+namespace geode::prelude { using namespace cocos2d; }
+#define small char
+${strip(read('src/ui/ResultBackdropBlur.cpp'))}
+`);
+        execFileSync('g++',['-std=c++23','-Wall','-Wextra','-Wpedantic','-Werror','-fsyntax-only',source],{stdio:'pipe'});
+    } finally { rmSync(dir,{recursive:true,force:true}); }
+});
+
 const model=`
 #include "${join(root,'src/domain/ResultScorePresentation.hpp')}"
 #include <cassert>
