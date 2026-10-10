@@ -202,49 +202,91 @@ describe("development-only Bot Match using the production Ranked engine", () => 
     };
   };
 
-  it("triggers Death Match through three actual draws even when the native client starts first", async () => {
-    const player = await contextFor("9344");
+  it.each(["RANDOM", "NO_BAN"] as const)("starts Death Match directly without bans/rounds (%s) and waits for client preparation", async (botBan) => {
+    const player = await contextFor(botBan === "RANDOM" ? "9344" : "9345");
     const created = await debug.create(player, { password: "2008", difficulty: "NORMAL", scenario: "TRIGGER_DEATHMATCH",
-      botBan: "NO_BAN", sendDiscordEvents: false, installedMods: structuredClone(cleanMods) });
-    await matches.ready(created.matchId, created.matchToken, player, { installedMods: structuredClone(cleanMods) });
-    await debug.tickOnce();
-    await matches.submitBan(created.matchId, created.matchToken, player, { canonicalLevelId: null });
-    await debug.tickOnce();
-    for (let round = 1; round <= 3; round += 1) {
-      await debug.tickOnce();
-      let state = await matches.state(created.matchId, created.matchToken, player) as Record<string, any>;
-      expect(state.state).toBe('ROUND_ENTERING');
-      const entry = state.entry;
-      await matches.entered(created.matchId, created.matchToken, player, {
-        roundNumber: entry.roundNumber, deathmatchSequence: entry.deathmatchSequence, playableLevelId: entry.playableLevelId });
-      clock.advance(3000);
-      const start = await matches.startAttempt(created.matchId, created.matchToken, player,
-        { levelId: entry.playableLevelId, clientEventId: `native-client-R${round}` });
-      expect(start.accepted).toBe(true);
-      await debug.tickOnce();
-      state = await matches.state(created.matchId, created.matchToken, player) as Record<string, any>;
-      expect(state.state).toBe(round === 3 ? 'DEATHMATCH_PREPARE' : 'ROUND_RESULT');
-      expect(state.rounds.find((summary: Record<string, unknown>) => summary.roundNumber === round))
-        .toMatchObject({ clearsA: 3, clearsB: 3, result: 'DRAW' });
-      await debug.tickOnce();
-      await debug.tickOnce();
-    }
-    await debug.tickOnce();
+      botBan, sendDiscordEvents: false, installedMods: structuredClone(cleanMods) });
     let state = await matches.state(created.matchId, created.matchToken, player) as Record<string, any>;
+    expect(state.state).toBe('DEATHMATCH_PREPARE');
+    expect(state.currentRound).toBeNull();
+    expect(state.rounds).toEqual([]);
+    expect(state.series).toMatchObject({ phase: 'DEATHMATCH_REQUIRED', roundResults: [], roundWins: { A: 0, B: 0 } });
+    expect(state.deathmatch.sequence).toBe(1);
+    const initialMap = state.deathmatch.map.playableLevelId;
+    const initial = await database.query<{ ready_a_at: unknown; ready_b_at: unknown; ban_a_confirmed_at: unknown; ban_b_confirmed_at: unknown }>(
+      'SELECT ready_a_at, ready_b_at, ban_a_confirmed_at, ban_b_confirmed_at FROM ranked_matches WHERE id = $1', [created.matchId]);
+    expect(initial.rows[0]).toMatchObject({ ready_a_at: null, ban_a_confirmed_at: null, ban_b_confirmed_at: null });
+    expect(initial.rows[0]!.ready_b_at).not.toBeNull();
+
+    // No synthetic human READY may bypass the menu's ten-second resource gate,
+    // including after the driver is recovered without its in-memory state.
+    clock.advance(9900);
+    (debug as any).drivers.clear();
+    await debug.tickOnce();
+    state = await matches.state(created.matchId, created.matchToken, player) as Record<string, any>;
+    expect(state.state).toBe('DEATHMATCH_PREPARE');
+    expect(state.deathmatch.map.playableLevelId).toBe(initialMap);
+    clock.advance(100);
+    await matches.ready(created.matchId, created.matchToken, player, { installedMods: structuredClone(cleanMods) });
+    state = await matches.state(created.matchId, created.matchToken, player) as Record<string, any>;
     expect(state.state).toBe('DEATHMATCH_ENTERING');
-    expect(state.rounds.map((round: Record<string, unknown>) => round.result)).toEqual(['DRAW', 'DRAW', 'DRAW']);
+    expect(state.rounds).toEqual([]);
+    expect(state.entry).toMatchObject({ roundNumber: 0, deathmatchSequence: 1, playableLevelId: initialMap });
+    await Promise.all([matches.forceDebugDeathmatch(created.matchId), matches.forceDebugDeathmatch(created.matchId)]);
+    const counts = await database.query<{ rounds: number; deathmatches: number }>(
+      `SELECT (SELECT COUNT(*) FROM ranked_rounds WHERE match_id = $1)::int AS rounds,
+              (SELECT COUNT(*) FROM ranked_deathmatches WHERE match_id = $1)::int AS deathmatches`, [created.matchId]);
+    expect(counts.rows[0]).toEqual({ rounds: 0, deathmatches: 1 });
     const body = { roundNumber: state.entry.roundNumber, deathmatchSequence: state.entry.deathmatchSequence,
       playableLevelId: state.entry.playableLevelId };
     expect((await matches.startAttempt(created.matchId, created.matchToken, player,
       { levelId: body.playableLevelId, clientEventId: 'before-native-deathmatch-entry' })).accepted).toBe(false);
     await matches.entered(created.matchId, created.matchToken, player, body);
-    clock.advance(3000); await debug.tickOnce();
+    clock.advance(3000);
     state = await matches.state(created.matchId, created.matchToken, player) as Record<string, any>;
     expect(state.state).toBe('DEATHMATCH_PLAYING');
+    expect((await matches.startAttempt(created.matchId, created.matchToken, player,
+      { levelId: body.playableLevelId, clientEventId: 'native-client-deathmatch-first' })).accepted).toBe(true);
+    await debug.tickOnce();
     const driver = (debug as any).drivers.get(created.matchId);
     expect(driver.attemptId).toBeTruthy();
     for (let tick = 0; tick < 20 && driver.attemptProgress === 0; tick += 1) { clock.advance(125); await debug.tickOnce(); }
     expect(driver.attemptProgress).toBeGreaterThan(0);
+    await matches.surrender(created.matchId, created.matchToken, player,
+      { scope: 'ROUND', roundNumber: 0, deathmatchSequence: 1, clientEventId: 'direct-deathmatch-surrender' });
+    state = await matches.state(created.matchId, created.matchToken, player) as Record<string, any>;
+    expect(state.state).toBe('MATCH_RESULT');
+    expect(state.series).toMatchObject({ phase: 'MATCH_RESULT', winner: 'B', roundResults: [] });
+    expect(state.rounds).toEqual([]);
+  });
+
+  it("recovers a Death Match creation interrupted before its first driver transition", async () => {
+    const player = await contextFor('9360');
+    const creation = await queue.createDebugBotMatch(player, { installedMods: structuredClone(cleanMods) },
+      { difficulty: 'NORMAL', scenario: 'TRIGGER_DEATHMATCH', botBan: 'RANDOM', sendDiscordEvents: false, mmrOffset: 0 });
+    expect((await matches.state(creation.matchId, creation.playerMatchToken, player)).state).toBe('MATCHED');
+    (debug as any).drivers.clear();
+    await debug.tickOnce();
+    const state = await matches.state(creation.matchId, creation.playerMatchToken, player) as Record<string, any>;
+    expect(state.state).toBe('DEATHMATCH_PREPARE');
+    expect(state.rounds).toEqual([]);
+    expect(state.deathmatch.sequence).toBe(1);
+  });
+
+  it("refuses direct Death Match entry for other debug scenarios and real PvP", async () => {
+    const player = await contextFor('9361');
+    const normal = await debug.create(player, { password: '2008', difficulty: 'NORMAL', scenario: 'NORMAL_MATCH',
+      botBan: 'NO_BAN', sendDiscordEvents: false, installedMods: structuredClone(cleanMods) });
+    await expect(matches.forceDebugDeathmatch(normal.matchId)).rejects.toThrow('Debug Bot Death Match scenario');
+    expect((await matches.state(normal.matchId, normal.matchToken, player)).state).toBe('MATCHED');
+    const a = await contextFor('9362');
+    const b = await contextFor('9363');
+    await queue.join(a, { installedMods: structuredClone(cleanMods) });
+    await queue.join(b, { installedMods: structuredClone(cleanMods) });
+    const pvp = await database.query<{ id: string }>(
+      "SELECT id FROM ranked_matches WHERE match_type = 'RANKED_PVP' AND (player_a_id = $1 OR player_b_id = $1)", [a.playerId]);
+    expect(pvp.rows).toHaveLength(1);
+    await expect(matches.forceDebugDeathmatch(pvp.rows[0]!.id)).rejects.toThrow('Debug Bot Death Match scenario');
   });
 
   it("retires the surrendered round's Bot context and starts/progresses a new R2 Attempt", async () => {

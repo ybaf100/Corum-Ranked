@@ -211,6 +211,10 @@ void context(int id,std::string match="match"){auto& r=RankedRuntime::get();r.st
 int main(){
     assert(roundReadyDue("ROUND_PREPARE",false,10,true));
     assert(!roundReadyDue("ROUND_PREPARE",false,9.9,true));
+    assert(roundReadyDue("DEATHMATCH_PREPARE",false,10,true));
+    assert(!roundReadyDue("DEATHMATCH_PREPARE",false,9.9,true));
+    assert(!roundReadyDue("DEATHMATCH_PREPARE",false,10,false));
+    assert(!roundReadyDue("DEATHMATCH_ENTERING",false,99,true));
     assert(roundReadyDue("MAP_PREPARE",true,5,true));
     assert(!roundReadyDue("MAP_PREPARE",true,4.9,true));
     assert(!roundReadyDue("ROUND_PLAYING",false,99,true));
@@ -261,6 +265,14 @@ int main(){
     runtime.state.match.placement=true;runtime.state.match.state="MAP_PREPARE";
     automation.elapsed=4.9;automation.updateAutomation();assert(runtime.readyRequests==2);
     automation.elapsed=5;automation.updateAutomation();assert(runtime.readyRequests==3);
+    // Direct Force Death Match starts at this resource gate: the actual popup
+    // sends READY at ten seconds, without any synthetic player READY or click.
+    runtime.state.match.placement=false;runtime.state.match.state="DEATHMATCH_PREPARE";
+    RoundAutomation deathmatch;
+    deathmatch.elapsed=9.9;deathmatch.updateAutomation();assert(runtime.readyRequests==3);
+    deathmatch.elapsed=10;deathmatch.updateAutomation();assert(runtime.readyRequests==4);
+    runtime.state.match.state="DEATHMATCH_ENTERING";
+    deathmatch.elapsed=99;deathmatch.updateAutomation();assert(runtime.readyRequests==4);
     runtime.state.match.placement=false;runtime.state.match.state="ROUND_PREPARE";
     CCScene origin;origin.running=true;auto* director=CCDirector::sharedDirector();director->stack={&origin};
     assert(!p.launch(&origin)&&PlayLayer::constructions==0&&runtime.arms==0); // READY is not PLAYING

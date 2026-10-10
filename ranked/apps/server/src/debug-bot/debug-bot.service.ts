@@ -239,11 +239,19 @@ export class DebugBotService implements OnModuleInit, OnApplicationShutdown {
     if (!driver || driver.busy) return;
     driver.busy = true;
     try {
-      const state = await this.matches.state(
+      let state = await this.matches.state(
         matchId,
         driver.creation.botMatchToken,
         driver.creation.botContext,
       ) as Record<string, any>;
+      if (state.state === "MATCHED" && driver.creation.settings.scenario === "TRIGGER_DEATHMATCH") {
+        await this.matches.forceDebugDeathmatch(matchId);
+        state = await this.matches.state(
+          matchId,
+          driver.creation.botMatchToken,
+          driver.creation.botContext,
+        ) as Record<string, any>;
+      }
       this.synchronizeAttemptContext(driver, state);
       if (state.state === "MATCH_RESULT" || state.state === "CANCELLED") {
         this.drivers.delete(matchId);
@@ -373,7 +381,7 @@ export class DebugBotService implements OnModuleInit, OnApplicationShutdown {
   }
 
   private autoDrivesPlayer(scenario: DebugBotScenario): boolean {
-    return scenario === "TRIGGER_ROUND_3" || scenario === "TRIGGER_DEATHMATCH";
+    return scenario === "TRIGGER_ROUND_3";
   }
 
   private async seedScenarioRound(
@@ -397,8 +405,6 @@ export class DebugBotService implements OnModuleInit, OnApplicationShutdown {
     } else if (scenario === "TRIGGER_ROUND_3") {
       if (roundNumber === 1) steps = [true, true, true];
       else if (roundNumber === 2) steps = [false, false, false];
-    } else if (scenario === "TRIGGER_DEATHMATCH") {
-      steps = [false, true, true, true, false, false];
     }
     const targets = { A: 0, B: 0 };
     let current = state;

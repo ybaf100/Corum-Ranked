@@ -1994,7 +1994,7 @@ class CorumRankedLayer final : public CCLayerColor {
         auto const size = CCDirector::sharedDirector()->getWinSize();
         addTopBack(true);
         addLanguageSelector();
-        addScreenHeader("CORUM RANKED", tr("competitive-ladder", "COMPETITIVE 1V1 LADDER"), kGold, kCyan);
+        addScreenHeader("Ranked", tr("competitive-ladder", "COMPETITIVE 1V1 LADDER"), kGold, kCyan);
 
         auto* historyVisual = makeActionButtonVisual(tr("history", "HISTORY"));
         historyVisual->setScale(0.66f);

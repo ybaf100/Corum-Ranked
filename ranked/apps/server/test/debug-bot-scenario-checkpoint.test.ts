@@ -26,7 +26,7 @@ describe('Debug scenario durable checkpoints', () => {
       {} as any, { now: () => new Date() }, { next: () => .5 } as any, {} as any,
       matches as any, {} as any, {} as any);
     const creation = { matchId: 'm', playerMatchToken: 'a', botMatchToken: 'b',
-      playerContext: { playerId: 'A' }, botContext: { playerId: 'B' }, settings: { scenario: 'TRIGGER_DEATHMATCH' } };
+      playerContext: { playerId: 'A' }, botContext: { playerId: 'B' }, settings: { scenario: 'TRIGGER_ROUND_DRAW' } };
     const driver = (service as any).newDriver(creation);
     await expect((service as any).seedScenarioRound(driver, state(), state().currentRound)).rejects.toThrow('acknowledgement');
     expect(clears).toEqual({ A: 0, B: 1 }); expect(driver.seededRounds.has(1)).toBe(false);
@@ -46,7 +46,7 @@ describe('Debug scenario durable checkpoints', () => {
       {} as any, { now: () => new Date() }, { next: () => .5 } as any, {} as any,
       matches as any, {} as any, {} as any);
     const driver = (service as any).newDriver({ matchId: 'm', playerMatchToken: 'a', botMatchToken: 'b',
-      playerContext: { playerId: 'A' }, botContext: { playerId: 'B' }, settings: { scenario: 'TRIGGER_DEATHMATCH' } });
+      playerContext: { playerId: 'A' }, botContext: { playerId: 'B' }, settings: { scenario: 'TRIGGER_ROUND_DRAW' } });
     await (service as any).seedScenarioRound(driver, state, state.currentRound);
     expect(driver.seededRounds.has(1)).toBe(false); expect(matches.endAttempt).not.toHaveBeenCalled();
   });

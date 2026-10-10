@@ -463,6 +463,40 @@ export class MatchService {
     });
   }
 
+  /** Start the Death Match debug scenario without fabricated Round 1-3 results.
+   * Keep resource READY and native scene-entry authority on the normal path.
+   * The locked transition is retry-safe if creation or a driver ACK is lost.
+   */
+  public async forceDebugDeathmatch(matchId: string): Promise<void> {
+    await this.database.transaction(async (transaction) => {
+      const match = await this.lockMatch(transaction, matchId);
+      const settings = match.debug_config
+        ? parseJson<{ scenario?: string }>(match.debug_config)
+        : null;
+      if (match.match_type !== "DEBUG_BOT" || settings?.scenario !== "TRIGGER_DEATHMATCH") {
+        throw new ConflictException("Direct Death Match entry requires the Debug Bot Death Match scenario");
+      }
+      if (match.current_deathmatch_id || match.state === "MATCH_RESULT") return;
+      if (match.state !== "MATCHED" || match.current_round_number !== null) {
+        throw new ConflictException("Direct Death Match entry requires a new Debug Bot match");
+      }
+      const now = this.clock.now();
+      const series: MatchSeriesState = {
+        roundResults: [],
+        roundWins: { A: 0, B: 0 },
+        phase: "DEATHMATCH_REQUIRED",
+        winner: null,
+      };
+      await transaction.query(
+        `UPDATE ranked_matches
+         SET series_state = $2::jsonb, started_at = COALESCE(started_at, $3)
+         WHERE id = $1`,
+        [match.id, JSON.stringify(series), now.toISOString()],
+      );
+      await this.prepareDeathmatch(transaction, match, now);
+    });
+  }
+
   public async history(session: RankedSessionContext) {
     const now = this.clock.now();
     const matches = await this.database.query<HistoryMatchRow>(
