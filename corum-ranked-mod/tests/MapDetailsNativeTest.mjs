@@ -173,7 +173,23 @@ test('actual difficulty badge draws stars in a circle, white GDDL digits on a co
 #include <vector>
 using GLubyte=unsigned char;
 namespace cocos2d {
-struct CCPoint{float x=0,y=0;};struct CCSize{float width=20,height=20;};
+// Geode 5.10.1 CCGeometry.h supports assignment from BOTH CCPoint and CCSize.
+// An aggregate-only point double would incorrectly accept ambiguous {x,y} assignments.
+struct CCSize;
+struct CCPoint{
+float x=0,y=0;
+constexpr CCPoint()=default;
+constexpr CCPoint(float x,float y):x(x),y(y){}
+constexpr CCPoint(CCPoint const&)=default;
+constexpr CCPoint&operator=(CCPoint const&)=default;
+constexpr CCPoint&operator=(CCSize const&);
+};
+struct CCSize{
+float width=20,height=20;
+constexpr CCSize()=default;
+constexpr CCSize(float width,float height):width(width),height(height){}
+};
+constexpr CCPoint&CCPoint::operator=(CCSize const&s){x=s.width;y=s.height;return *this;}
 struct ccColor3B{GLubyte r,g,b;bool operator==(ccColor3B const&)const=default;};
 struct ccColor4F{float r,g,b,a;};
 ccColor3B ccc3(GLubyte r,GLubyte g,GLubyte b){return{r,g,b};}

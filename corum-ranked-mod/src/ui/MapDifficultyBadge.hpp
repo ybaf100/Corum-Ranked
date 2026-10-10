@@ -33,10 +33,13 @@ inline cocos2d::CCNode* mapDifficultyBadge(int levelId, MapMetadata metadata, fl
     auto* shape = CCDrawNode::create(); row->addChild(shape);
     std::array<CCPoint,48> polygon;
     if (demon) {
-        polygon[0]={1,1};polygon[1]={extent+1,1};polygon[2]={extent+1,extent+1};polygon[3]={1,extent+1};
+        polygon[0]=CCPoint{1,1};
+        polygon[1]=CCPoint{extent+1,1};
+        polygon[2]=CCPoint{extent+1,extent+1};
+        polygon[3]=CCPoint{1,extent+1};
     } else for (std::size_t i=0;i<polygon.size();++i) {
         auto const angle = static_cast<float>(i)*6.28318530718f/polygon.size();
-        polygon[i]={1+extent/2+extent/2*std::cos(angle),1+extent/2+extent/2*std::sin(angle)};
+        polygon[i]=CCPoint{1+extent/2+extent/2*std::cos(angle),1+extent/2+extent/2*std::sin(angle)};
     }
     auto const rgba = [](ccColor3B c) { return ccc4f(c.r/255.f,c.g/255.f,c.b/255.f,1); };
     shape->drawPolygon(polygon.data(),demon ? 4 : polygon.size(),rgba(fill),0.7f,rgba(TextMuted));

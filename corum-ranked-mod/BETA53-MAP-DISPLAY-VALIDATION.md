@@ -52,3 +52,17 @@ Replace Apps Script `RankedConfig.gs` and update the existing web-app deployment
 to a new version while retaining its deployment ID/URL. This is required for
 four-column sheets; a repository push does not deploy Apps Script. See
 [`apps-script/README.md`](../apps-script/README.md).
+
+## Follow-up: native compile failure
+
+- Debug run `38064709039`, attempt 2, failed in all five native configurations
+  (Windows, Android32/64, iOS Debug ON/OFF) at `MapDifficultyBadge.hpp`.
+  Brace-list assignment to a polygon point was ambiguous: Geode 5.10.1
+  `CCPoint` accepts assignment from both `CCPoint` and `CCSize`.
+- Polygon vertices now construct `CCPoint` explicitly. The badge fixture now
+  includes both assignment overloads: it reproduces the original five compile
+  errors and passes with the fix. All four map-details tests pass.
+- The actual SDK `CCPoint`/`CCSize` declarations, read from Geode v5.10.1,
+  also compile the production polygon code with strict warnings. Circle radius
+  and square corners remain unchanged. This is a type/geometry compile check,
+  not a full platform build or device validation.
