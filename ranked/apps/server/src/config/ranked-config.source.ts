@@ -1,4 +1,6 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable, Optional } from "@nestjs/common";
+import { DATABASE, type SqlExecutor } from "../database/database.port.js";
+import { RankedMapMetadataResolver } from "./map-metadata.js";
 import {
   SERVER_ENVIRONMENT,
   type ServerEnvironment,
@@ -16,9 +18,11 @@ export interface RankedConfigSource {
 
 @Injectable()
 export class AppsScriptRankedConfigSource implements RankedConfigSource {
+  private readonly metadata: RankedMapMetadataResolver;
   public constructor(
     @Inject(SERVER_ENVIRONMENT) private readonly environment: ServerEnvironment,
-  ) {}
+    @Optional() @Inject(DATABASE) database?: SqlExecutor,
+  ) { this.metadata = new RankedMapMetadataResolver(fetch, database); }
 
   public async fetchConfig(): Promise<RankedConfigDocument> {
     const url = new URL(this.environment.rankedConfigUrl);
@@ -35,6 +39,6 @@ export class AppsScriptRankedConfigSource implements RankedConfigSource {
     if (!body.ok || body.action !== "ranked_config" || !body.data) {
       throw new Error(body.error || "Ranked config source returned an invalid envelope");
     }
-    return body.data;
+    return this.metadata.enrich(body.data);
   }
 }

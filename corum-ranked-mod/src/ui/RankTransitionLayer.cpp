@@ -233,7 +233,8 @@ void RankTransitionLayer::createBackground() {
     }
 
     auto const glowSize = std::min(size.width, size.height) * 0.98f;
-    auto* radial = addFxSprite(
+    auto const noHalo=m_type==RankTransitionType::Demotion && m_oldRank=="GOLD" && m_newRank=="SILVER";
+    auto* radial = noHalo ? nullptr : addFxSprite(
         m_backgroundRoot, "fx-rank-radial-glow-white.png",
         {size.width / 2.0f, size.height / 2.0f + 14.0f},
         {glowSize, glowSize}, 3, m_newRank == "GOLD" ? 105 : 72, &profile.color
@@ -629,9 +630,9 @@ void RankTransitionLayer::revealFinalState(bool skipped) {
     auto const center = ccp(size.width / 2.0f, size.height / 2.0f + 26.0f);
     auto const target = rankTierProfile(m_newRank);
     auto const badgeSize = m_newRank == "GOLD" ? 138.0f : 126.0f;
-    auto* finalBadge = createAnimatedRankBadge(
-        m_newRank, {badgeSize, badgeSize}, RankBadgeDisplay::Hero
-    );
+    auto const noHalo=m_type==RankTransitionType::Demotion && m_oldRank=="GOLD" && m_newRank=="SILVER";
+    CCNode* finalBadge = noHalo ? createRankBadgeAssembly(m_newRank,badgeSize).root
+        : createAnimatedRankBadge(m_newRank, {badgeSize,badgeSize},RankBadgeDisplay::Hero);
     finalBadge->setPosition(center);
     finalBadge->setScale(skipped ? 1.0f : 0.82f);
     m_animationRoot->addChild(finalBadge, 20);

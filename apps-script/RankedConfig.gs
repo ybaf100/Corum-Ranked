@@ -571,7 +571,9 @@ function ensureRankedMapColumns_() {
   var width = Math.max(1, sheet.getLastColumn());
   var headers = sheet.getRange(1, 1, 1, width).getDisplayValues()[0];
   var missing = CORUM_RANKED_MAP_HEADERS.filter(function (header) {
-    return findOptionalHeaderIndex_(headers, [header]) === -1;
+    var aliases = header === "Ranked Pool (1~6)"
+      ? [header, "Tier Pool", "tier pool", "Pool"] : [header, "qualifying %"];
+    return findOptionalHeaderIndex_(headers, aliases) === -1;
   });
   if (missing.length > 0) {
     sheet.getRange(1, headers.length + 1, 1, missing.length).setValues([missing]);
@@ -586,8 +588,8 @@ function applyRankedMapValidation_(sheet) {
   var maximumRows = typeof sheet.getMaxRows === "function" ? sheet.getMaxRows() : sheet.getLastRow();
   if (maximumRows < 2) return;
   [
-    { aliases: ["Ranked Pool (1~6)"], minimum: 1, maximum: 6 },
-    { aliases: ["Qualifying %"], minimum: 0, maximum: 100 },
+    { aliases: ["Ranked Pool (1~6)", "Tier Pool", "tier pool", "Pool"], minimum: 1, maximum: 6 },
+    { aliases: ["Qualifying %", "qualifying %"], minimum: 0, maximum: 100 },
   ].forEach(function (rule) {
     var column = findOptionalHeaderIndex_(headers, rule.aliases);
     if (column === -1) return;
@@ -616,14 +618,14 @@ function readRankedMapsFromCorumSheet_() {
       "Alt Level ID",
       "alternateLevelId",
     ]),
-    title: findOptionalHeaderIndex_(header, ["맵 제목", "맵제목", "제목", "Title"]),
+    title: findOptionalHeaderIndex_(header, ["맵 제목", "맵제목", "맵 이름", "맵이름", "제목", "Title", "Map Name", "Name"]),
     creator: findOptionalHeaderIndex_(header, ["제작자", "Creator"]),
     difficulty: findOptionalHeaderIndex_(header, ["난이도", "Difficulty", "Rating", "레이팅"]),
     length: findOptionalHeaderIndex_(header, ["맵 길이", "맵길이", "길이", "Length"]),
-    pool: findOptionalHeaderIndex_(header, ["Ranked Pool (1~6)"]),
-    qualifyingPercent: findOptionalHeaderIndex_(header, ["Qualifying %"]),
+    pool: findOptionalHeaderIndex_(header, ["Ranked Pool (1~6)", "Tier Pool", "tier pool", "Pool"]),
+    qualifyingPercent: findOptionalHeaderIndex_(header, ["Qualifying %", "qualifying %"]),
   };
-  if ([columns.canonicalLevelId, columns.title, columns.creator, columns.difficulty, columns.pool,
+  if ([columns.alternateLevelId, columns.title, columns.pool,
     columns.qualifyingPercent].some(function (column) { return column === -1; })) return [];
 
   var result = [];
@@ -632,8 +634,6 @@ function readRankedMapsFromCorumSheet_() {
     var displayRow = displayValues[rowIndex];
     var pool = rankedNumber_(row[columns.pool]);
     if (pool === null) continue;
-    var canonicalLevelId = rankedText_(displayRow[columns.canonicalLevelId]);
-    if (!/^\d+$/.test(canonicalLevelId) || /^0+$/.test(canonicalLevelId)) continue;
     // Ranked gameplay uses the explicit value in "대체 맵 코드" as the
     // playable Geometry Dash Level ID. Do not call normalizeAlternateLevelId_
     // here because that shared helper intentionally collapses an alternate ID
@@ -641,14 +641,20 @@ function readRankedMapsFromCorumSheet_() {
     var alternateLevelId = columns.alternateLevelId === -1
       ? ""
       : rankedText_(displayRow[columns.alternateLevelId]);
+    var canonicalLevelId = columns.canonicalLevelId === -1
+      ? "" : rankedText_(displayRow[columns.canonicalLevelId]);
+    // The column called "alternate" is the actual playable map code. Only
+    // the four operator fields are required; retain an explicit legacy ID.
+    canonicalLevelId = canonicalLevelId || alternateLevelId;
+    if (!/^[1-9]\d*$/.test(canonicalLevelId)) continue;
     result.push({
       levelId: alternateLevelId,
       canonicalLevelId: canonicalLevelId,
       alternateLevelId: alternateLevelId || null,
       playableLevelId: alternateLevelId,
       title: rankedText_(row[columns.title]),
-      creator: rankedText_(row[columns.creator]),
-      difficulty: rankedText_(row[columns.difficulty]),
+      creator: columns.creator === -1 ? "" : rankedText_(row[columns.creator]),
+      difficulty: columns.difficulty === -1 ? "" : rankedText_(row[columns.difficulty]),
       length: columns.length === -1 ? "" : rankedText_(row[columns.length]),
       pool: pool,
       qualifyingPercent: rankedPercent_(row[columns.qualifyingPercent], displayRow[columns.qualifyingPercent]),

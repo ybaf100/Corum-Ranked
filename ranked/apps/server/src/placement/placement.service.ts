@@ -13,6 +13,7 @@ import {
   NORMALIZED_PLACEMENT_RATING_POLICY,
   calculatePlacementStageScore,
   finalizePlacementScore,
+  mapPresentationFields,
   scoreAttempt,
   placementGradeForMapScore,
   selectPlacementReferenceMaps,
@@ -1124,6 +1125,7 @@ export class PlacementService {
         state: map.state,
       })),
       currentMap: currentMap ? {
+        ...mapPresentationFields(snapshot.maps, currentMap.playable_level_id),
         id: currentMap.id,
         levelId: currentMap.level_id,
         canonicalLevelId: currentMap.canonical_level_id,

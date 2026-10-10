@@ -16,9 +16,17 @@ void RankedMapDetails::remember(GJGameLevel* level) {
     auto const id = static_cast<int>(level->m_levelID);
     auto const value = mapDifficulty(level->m_autoLevel, static_cast<int>(level->m_demon) != 0,
         level->m_demonDifficulty, level->getAverageDifficulty());
+    MapMetadata metadata;
+    auto const demon = static_cast<int>(level->m_demon) != 0;
+    metadata.kind = demon ? "DEMON" : "NORMAL";
+    auto const stars = static_cast<int>(level->m_stars);
+    if (!demon && stars >= 0 && stars <= 10) metadata.stars = stars;
+    auto const ticks = static_cast<double>(level->m_timestamp);
+    if (ticks > 0 && std::isfinite(ticks)) metadata.durationSeconds = ticks / 240;
     auto const previous = m_cache.find(id);
-    if (previous == m_cache.end() || previous->second.difficulty != value) ++m_revision;
-    m_cache[id] = {value, std::chrono::steady_clock::now()};
+    if (!metadata.durationSeconds && previous != m_cache.end()) metadata.durationSeconds = previous->second.metadata.durationSeconds;
+    if (previous == m_cache.end() || previous->second.difficulty != value || previous->second.metadata != metadata) ++m_revision;
+    m_cache[id] = {value, std::chrono::steady_clock::now(),metadata};
     // The lifetime cache only serves UI; bound it rather than retain every map visited.
     if (m_cache.size() > 256) {
         auto oldest = std::min_element(m_cache.begin(), m_cache.end(), [](auto const& a, auto const& b) {
@@ -30,6 +38,10 @@ void RankedMapDetails::remember(GJGameLevel* level) {
 MapDifficulty RankedMapDetails::difficulty(int id) const {
     auto const it = m_cache.find(id);
     return it == m_cache.end() ? MapDifficulty{} : it->second.difficulty;
+}
+MapMetadata RankedMapDetails::metadata(int id) const {
+    auto const it = m_cache.find(id);
+    return it == m_cache.end() ? MapMetadata{} : it->second.metadata;
 }
 void RankedMapDetails::request(std::vector<int> ids) {
     m_wanted.clear();

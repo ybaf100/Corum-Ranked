@@ -37,6 +37,7 @@ struct RankBadgeAssembly {
 
 enum class RankBadgeDisplay {
     Compact,
+    Matched,
     Large,
     Hero,
 };

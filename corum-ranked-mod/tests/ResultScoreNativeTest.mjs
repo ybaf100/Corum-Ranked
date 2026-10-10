@@ -210,7 +210,9 @@ CCNode* createRankBadgeBackdrop(std::string const& tier,CCSize,RankBadgeDisplay)
     auto* halo=CCLayerColor::create({0,0,0,0});halo->id="halo:"+tier;return halo;
 }
 RankTierProfile rankTierProfile(std::string const& tier) { RankTierProfile p;p.color=tierColor(tier);return p; }
+inline std::vector<std::string> animatedBadgeRequests;
 CCNode* createAnimatedRankBadge(std::string const& tier,CCSize size,RankBadgeDisplay) {
+    animatedBadgeRequests.push_back(tier);
     return createRankBadgeAssembly(tier,size.width).root;
 }
 void fitRankSprite(CCSprite* sprite,CCSize size) { sprite->setScale(std::min(size.width/sprite->size.width,size.height/sprite->size.height)); }
@@ -277,7 +279,7 @@ int main() {
 `);
 });
 
-test('whole GOLD layer flies one crossed avatar, shrinks loss targets, shows own rank and eases bar retargeting',()=>{
+test('whole GOLD layer flies selected crossed avatars, shrinks loss targets and places own rank between LP and bar',()=>{
     run(scoreNative+goldModel+`
 using namespace corum::ranked::ui;
 bool containsAction(CCAction* a,std::string const& type) {
@@ -289,27 +291,28 @@ bool containsAction(CCAction* a,std::string const& type) {
 int main() {
     CCNode screen;auto i=gold();
     auto* layer=ResultScoreLayer::create(i,&screen,[]{});screen.addChild(layer);layer->onEnter();
-    auto* highest=layer->m_rightIcon;assert(PlayerIcon::accounts.back()==39&&layer->m_ownRankValue==6);
-    layer->update(1);assert(layer->m_rightIcon==highest&&layer->m_ownRankValue==3);
-    bool exchanged=false;
-    for(int frame=0;frame<60;++frame) {
+    auto* old=layer->m_rightIcon;assert(PlayerIcon::accounts.back()==32&&layer->m_ownRankValue==6);
+    int exchanged=0;
+    for(int frame=0;frame<150;++frame) {
         layer->update(1.0f/60);
         assert(layer->m_fill->size.height==16&&layer->m_fill->size.width>0);
-        if(!exchanged&&layer->m_rightIcon!=highest) {
-            exchanged=true;assert(layer->m_goldOvertakeShown&&layer->m_goldTargetChanging);
-            assert(containsAction(highest->actions.back(),"CCMoveBy")&&!containsAction(highest->actions.back(),"CCScaleTo"));
-            assert(layer->m_goldVisualTarget<1500&&layer->m_goldVisualTarget>=1390);
-            assert(PlayerIcon::accounts.back()==50&&!layer->m_rightIcon->actions.empty());
+        assert(layer->m_ownRank->position.y>layer->m_barY+16&&layer->m_ownRank->position.y<layer->m_score->position.y);
+        assert(std::abs(layer->m_ownRank->position.x-layer->m_score->position.x)<.001f);
+        if(layer->m_rightIcon!=old) {
+            ++exchanged;assert(layer->m_goldOvertakeShown);
+            assert(containsAction(old->actions.back(),"CCMoveBy")&&!containsAction(old->actions.back(),"CCScaleTo"));
+            assert(!layer->m_rightIcon->actions.empty()); old=layer->m_rightIcon;
         }
     }
-    assert(exchanged&&layer->m_ownRankValue==2&&layer->m_ownRank->id=="ranked-result-current-rank");
+    assert(exchanged==3&&layer->m_goldOvertakesShown==3&&PlayerIcon::accounts.back()==50);
+    assert(layer->m_ownRankValue==2&&layer->m_ownRank->id=="ranked-result-current-rank");
     layer->update(.5f);assert(!layer->m_goldTargetChanging&&layer->m_rightCutoff->text=="1500 LP");
     assert(std::abs(layer->m_fill->size.width/layer->m_barWidth-2.0f/3)<.0001f);
     layer->onSkip(nullptr);drainMainQueue();
     i=gold();i.before=1400;i.after=1300;i.won=false;i.standingAfter.rank=6;
     i.standingAfter.target=StandingTargetView{32,"nearest",false,5,1320};
     layer=ResultScoreLayer::create(i,&screen,[]{});screen.addChild(layer);layer->onEnter();
-    auto* old=layer->m_rightIcon;bool shrunk=false;
+    old=layer->m_rightIcon;bool shrunk=false;
     for(int frame=0;frame<150;++frame) {
         layer->update(1.0f/60);assert(layer->m_fill->size.width>0&&layer->m_fill->size.height==16);
         if(layer->m_rightIcon!=old) {
@@ -320,6 +323,37 @@ int main() {
     assert(shrunk&&!layer->m_goldOvertakeShown&&layer->m_ownRankValue==6&&layer->m_rightCutoff->text=="1320 LP");
     assert(layer->m_fill->size.width/layer->m_barWidth>.83f);
     layer->onSkip(nullptr);drainMainQueue();
+}
+`);
+});
+
+test('GOLD caps individual overtakes at the highest five, serializes stalled frames and skips cleanly',()=>{
+    run(scoreNative+goldModel+`
+using namespace corum::ranked::ui;
+int main() {
+    CCNode screen;auto i=gold();
+    i.goldTimeline.overtakes={
+      {107,"highest",false,2,1390},{106,"six",false,3,1380},
+      {-105,"bot",true,4,1370},{104,"four",false,5,1360},
+      {103,"three",false,6,1350},{102,"two",false,7,1330},{101,"one",false,8,1320}};
+    auto const targets=goldOvertakeTargets(i.goldTimeline,i.before,i.after);
+    assert(targets.size()==5&&targets.front().accountId==103&&targets.back().accountId==107);
+    assert(goldOvertakeTargets(i.goldTimeline,1400,1300).empty());
+    auto* layer=ResultScoreLayer::create(i,&screen,[]{});screen.addChild(layer);layer->onEnter();
+    assert(PlayerIcon::accounts.back()==103);
+    layer->update(3);assert(layer->m_goldOvertakesShown==1&&!layer->m_complete);
+    layer->update(.1f);assert(layer->m_goldOvertakesShown==1); // each avatar gets time
+    for(int n=2;n<=5;++n) {layer->update(.29f);assert(layer->m_goldOvertakesShown==static_cast<std::size_t>(n));}
+    assert(layer->m_complete&&layer->m_goldOvertakesShown==5);
+    assert(PlayerIcon::accounts.back()==50);
+    layer->update(1);assert(layer->m_goldOvertakesShown==5);
+    layer->onSkip(nullptr);drainMainQueue();
+    layer=ResultScoreLayer::create(i,&screen,[]{});screen.addChild(layer);layer->onEnter();
+    layer->onSkip(nullptr);assert(layer->m_goldOvertakesShown==5&&layer->m_complete);
+    layer->update(.4f);assert(PlayerIcon::accounts.back()==50);
+    layer->onSkip(nullptr);drainMainQueue();
+    i.before=1380;i.after=1390;i.goldTimeline.overtakes.clear();
+    assert(goldOvertakeTargets(i.goldTimeline,i.before,i.after).empty()); // a final tie never flies
 }
 `);
 });
@@ -586,7 +620,7 @@ template<class T>matjson::Result<T>numFromString(std::string const& text) {
     T value{};auto parsed=std::from_chars(text.data(),text.data()+text.size(),value);
     return parsed.ec==std::errc{}&&parsed.ptr==text.data()+text.size()?matjson::Result<T>{value}:matjson::Result<T>{};
 }
-${['std::vector<std::string> parseRatingMarks(','corum::ranked::StandingView parseStanding(',
+${['corum::ranked::MapMetadata parseMapMetadata(','std::vector<std::string> parseRatingMarks(','corum::ranked::StandingView parseStanding(',
     'corum::ranked::ScoreSeriesView parseScoreSeries(','corum::ranked::GoldScoreTimeline parseGoldTimeline(','corum::ranked::ResultScoreView parseResultScore(']
     .map(name=>method(runtimeSource,name)).join('\n')}
 namespace corum::ranked {
@@ -635,7 +669,15 @@ int main() {
 test('actual decoders and standings request reject stale sessions and validate result metadata',()=>{
     run(scoreNative+runtimeDouble+`
 int main() {
-    using V=matjson::Value;V standing;standing["rank"]=2;standing["total"]=100;standing["topPercent"]=99;
+    using V=matjson::Value;
+    V metadata;metadata["kind"]="DEMON";metadata["stars"]=10;metadata["gddlTier"]=16;
+    metadata["gddlColor"]="#da4534";metadata["durationSeconds"]=90.5;metadata["officialLevelId"]=14;
+    auto mapInfo=parseMapMetadata(metadata);
+    assert(mapInfo.kind=="DEMON"&&mapInfo.gddlTier==16&&mapInfo.gddlColor=="#da4534"&&mapInfo.durationSeconds==90.5);
+    assert(parseMapMetadata(V{}).kind=="UNKNOWN");
+    metadata["gddlTier"]=41;metadata["stars"]=100;metadata["gddlColor"]="#zzzzzz";metadata["durationSeconds"]=-1;
+    mapInfo=parseMapMetadata(metadata);assert(!mapInfo.gddlTier&&!mapInfo.stars&&mapInfo.gddlColor.empty()&&!mapInfo.durationSeconds);
+    V standing;standing["rank"]=2;standing["total"]=100;standing["topPercent"]=99;
     standing["target"]["gdAccountId"]="123";standing["target"]["player"]="target";
     standing["target"]["rank"]=1;standing["target"]["visibleRankedScore"]=1325;standing["target"]["isBot"]=true;
     auto decoded=parseStanding(standing);assert(decoded.rank==2&&decoded.topPercent==2&&decoded.target->bot);
@@ -654,6 +696,13 @@ int main() {
     timeline["moving"]["beforeScore"]=1400;timeline["moving"]["afterScore"]=1300;
     timeline["moving"]["target"]=group["target"];
     auto gold=parseGoldTimeline(timeline);assert(gold.available&&gold.groups.size()==1&&gold.groups[0].count==2&&gold.moving->after==1300);
+    auto withOvertakes=timeline;
+    withOvertakes["overtakes"]=V::Array{group["target"]};
+    assert(parseGoldTimeline(withOvertakes).overtakes.size()==1);
+    withOvertakes["overtakes"]=V::Array{group["target"],group["target"]};
+    assert(!parseGoldTimeline(withOvertakes).available); // duplicate avatar cannot fly twice
+    withOvertakes["overtakes"]=V::Array(6,group["target"]);
+    assert(!parseGoldTimeline(withOvertakes).available);
     score["players"]["A"]["goldTimeline"]=timeline;
     assert(parseResultScore(score).playerA.goldTimeline.available&&!parseResultScore(score).playerB.goldTimeline.available);
     auto invalid=timeline;invalid["higherFixed"]=4;assert(!parseGoldTimeline(invalid).available);
@@ -687,16 +736,18 @@ namespace corum::ranked::ui {
 enum class RankTransitionType {Placement,Promotion,Demotion};
 struct RankTransitionLayer : CCLayerColor {
     bool m_finished=false,m_chainToResult=false,m_skipAllowed=false,m_finalShown=false;
+    RankTransitionType m_type=RankTransitionType::Promotion;
     CCMenu controls;CCMenu* m_controlMenu=&controls;std::function<void()>m_completion;
-    std::string m_newRank="AQUA",m_eventText="PROMOTED!";
+    std::string m_oldRank="RED",m_newRank="AQUA",m_eventText="PROMOTED!";
     CCNode* m_animationRoot=CCNode::create();
     CCMenuItemSpriteExtra skip,continuation;
     CCMenuItemSpriteExtra* m_skipItem=&skip;CCMenuItemSpriteExtra* m_continueItem=&continuation;
     void addFlash(ccColor3B,GLubyte,float){}
     void addParticles(std::string const&,int,float,float,float,bool,bool){}
-    static RankTransitionLayer* create(std::string,std::string,RankTransitionType type,std::string,std::string,std::string,
+    static RankTransitionLayer* create(std::string oldRank,std::string newRank,RankTransitionType type,std::string,std::string,std::string,
         std::function<void()>callback,bool chain) {
         auto* layer=new RankTransitionLayer;layer->m_completion=std::move(callback);
+        layer->m_type=type;layer->m_oldRank=std::move(oldRank);layer->m_newRank=std::move(newRank);
         layer->m_chainToResult=chain&&type!=RankTransitionType::Placement;layer->m_skipAllowed=layer->m_chainToResult;return layer;
     }
     ${method(transition,'void RankTransitionLayer::revealFinalState(').replace('RankTransitionLayer::','')}
@@ -773,6 +824,14 @@ int main() {
     owner.m_resultScoreLayer->onSkip(nullptr);owner.m_resultScoreLayer->onSkip(nullptr);drainMainQueue();drainMainQueue();
     RankTransitionLayer placed;placed.m_chainToResult=false;placed.keyBackClicked();assert(!placed.m_finalShown&&!placed.m_finished);
     placed.m_skipAllowed=true;placed.keyBackClicked();assert(placed.m_finalShown&&!placed.m_finished);
+    // Only GOLD -> SILVER full-screen demotion removes the final halo.
+    auto const haloRequests=corum::ranked::ui::animatedBadgeRequests.size();
+    RankTransitionLayer goldDemotion;goldDemotion.m_type=RankTransitionType::Demotion;
+    goldDemotion.m_oldRank="GOLD";goldDemotion.m_newRank="SILVER";goldDemotion.revealFinalState(false);
+    assert(corum::ranked::ui::animatedBadgeRequests.size()==haloRequests);
+    RankTransitionLayer silverPromotion;silverPromotion.m_type=RankTransitionType::Promotion;
+    silverPromotion.m_oldRank="BRONZE";silverPromotion.m_newRank="SILVER";silverPromotion.revealFinalState(false);
+    assert(corum::ranked::ui::animatedBadgeRequests.size()==haloRequests+1);
     // A retained but retired owner must not render or open another foreground.
     match=settled("retired");owner.beginResultScore(match,*owner.resultScoreInput(match));drainMainQueue();
     auto rendered=owner.rendered;owner.m_resultScoreLayer->onSkip(nullptr);owner.m_resultScoreLayer->onSkip(nullptr);owner.running=false;

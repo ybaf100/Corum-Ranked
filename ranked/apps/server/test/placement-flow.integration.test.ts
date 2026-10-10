@@ -100,7 +100,9 @@ const cleanMods: CreateSessionDto["installedMods"] = [
 
 describe("server-authoritative solo Stage Placement", () => {
   it("resumes every persisted boundary and finalizes ten Maps exactly once", async () => {
-    const document = configDocumentFixture("placement-flow");
+    const baseDocument = configDocumentFixture("placement-flow");
+    const document = {...baseDocument,maps:baseDocument.maps.map(map=>({...map,
+      metadata:{kind:"DEMON" as const,stars:null,gddlTier:16,gddlColor:"#da4534",durationSeconds:90,officialLevelId:null} }))};
     const snapshot = { ...structuredClone(document), fetchedAt: "2026-08-30T00:00:00.000Z" };
     const config = { getSnapshot: () => structuredClone(snapshot) } as unknown as RankedConfigService;
     const ids = new SequenceIds();
@@ -162,6 +164,7 @@ describe("server-authoritative solo Stage Placement", () => {
     expect(available.referenceMaps).toHaveLength(6);
     expect(available.referenceMaps.map((map: Record<string, any>) => map.pool))
       .toEqual([1, 2, 3, 4, 5, 6]);
+    expect(available.referenceMaps[0].metadata).toMatchObject({kind:"DEMON",gddlTier:16,durationSeconds:90});
 
     let state = await placement.start(session, {
       startingPool: 3,
@@ -170,6 +173,7 @@ describe("server-authoritative solo Stage Placement", () => {
     }) as Record<string, any>;
     const runId = state.runId as string;
     expect(state).toMatchObject({ state: "MAP_PREPARE", currentStageIndex: 1, currentMapIndex: 1, totalStages: 5 });
+    expect(state.currentMap.metadata).toMatchObject({kind:"DEMON",gddlTier:16,gddlColor:"#da4534",durationSeconds:90});
     const immutable = await placement.start(session, {
       startingPool: 6,
       stageCount: 3,

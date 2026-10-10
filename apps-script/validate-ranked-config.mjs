@@ -442,6 +442,23 @@ mapSheet.rows[2][poolColumn] = "";
 const excluded = responseJson();
 assert.equal(excluded.data.maps.length, 29);
 
+// Four input columns suffice; the "alternate" column IS the playable map ID.
+// Setup must respect the operator's Tier Pool alias, not append a blank shadow.
+const fullMapRows = mapSheet.rows;
+mapSheet.rows = [
+  ["맵 이름", "대체 맵 코드", "qualifying %", "Tier Pool"],
+  ["xStep", 77238470, "20%", 2],
+  ["Clubstep", 77238488, 25, 3],
+];
+context.ensureRankedMapColumns_();
+assert.equal(mapSheet.getLastColumn(), 4);
+const minimalMaps = JSON.parse(JSON.stringify(context.readRankedMapsFromCorumSheet_()));
+assert.equal(minimalMaps.length, 2);
+assert.deepEqual(minimalMaps[0], {levelId:"77238470",canonicalLevelId:"77238470",alternateLevelId:"77238470",
+  playableLevelId:"77238470",title:"xStep",creator:"",difficulty:"",length:"",pool:2,qualifyingPercent:20,active:true});
+assert.equal(minimalMaps[1].qualifyingPercent, 25);
+mapSheet.rows = fullMapRows;
+
 const health = JSON.parse(context.doGet({ parameter: { action: "health" } }).text);
 assert.equal(health.service, "Corum Integration API");
 assert.equal(health.version, context.CORUM_API_VERSION);

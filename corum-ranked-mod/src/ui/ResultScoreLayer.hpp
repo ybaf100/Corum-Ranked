@@ -66,6 +66,9 @@ private:
     std::string m_goldGoalKey;
     double m_goldVisualTarget = 0, m_goldTargetFrom = 0, m_goldTargetElapsed = 0;
     bool m_goldTargetChanging = false, m_goldOvertakeShown = false;
+    std::vector<StandingTargetView> m_goldOvertakes;
+    std::size_t m_goldOvertakesShown = 0;
+    double m_nextGoldOvertakeAt = 0;
 };
 
 } // namespace corum::ranked::ui

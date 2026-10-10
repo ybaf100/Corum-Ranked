@@ -107,6 +107,27 @@ void writeSetting(matjson::Value& target, std::string const& key, corum::ranked:
     std::visit([&](auto const& item) { target[key] = item; }, value);
 }
 
+corum::ranked::MapMetadata parseMapMetadata(matjson::Value const& value) {
+    corum::ranked::MapMetadata info;
+    if (!value.isObject()) return info;
+    auto const kind = value["kind"].asString().unwrapOr("UNKNOWN");
+    if (kind == "NORMAL" || kind == "DEMON") info.kind = kind;
+    auto const bounded = [&](char const* name, int min, int max) -> std::optional<int> {
+        auto const raw = value[name].asInt();
+        if (!raw.isOk() || raw.unwrap() < min || raw.unwrap() > max) return std::nullopt;
+        return static_cast<int>(raw.unwrap());
+    };
+    info.stars = bounded("stars",0,10); info.gddlTier = bounded("gddlTier",1,40);
+    info.officialLevelId = bounded("officialLevelId",1,22);
+    auto const color = value["gddlColor"].asString().unwrapOr("");
+    if (color.size() == 7 && color.front() == '#' && std::all_of(color.begin()+1,color.end(),[](unsigned char c) {
+        return std::isxdigit(c) != 0;
+    })) info.gddlColor = color;
+    auto const seconds = value["durationSeconds"].asDouble().unwrapOr(0);
+    if (std::isfinite(seconds) && seconds > 0 && seconds <= 3600*24*30) info.durationSeconds = seconds;
+    return info;
+}
+
 std::optional<corum::ranked::RankedMapView> parseMap(matjson::Value const& value) {
     if (!value.isObject()) return std::nullopt;
     auto const playableText = value["playableLevelId"].asString().unwrapOr(
@@ -129,6 +150,7 @@ std::optional<corum::ranked::RankedMapView> parseMap(matjson::Value const& value
         .difficulty = value["difficulty"].asString().unwrapOr(""),
         .pool = static_cast<int>(value["pool"].asInt().unwrapOr(0)),
         .qualifyingPercent = value["qualifyingPercent"].asDouble().unwrapOr(100.0),
+        .metadata = parseMapMetadata(value["metadata"]),
     };
 }
 
@@ -266,6 +288,17 @@ corum::ranked::GoldScoreTimeline parseGoldTimeline(matjson::Value const& value) 
         auto before = integer(moving["beforeScore"]), after = integer(moving["afterScore"]);
         if (!avatar || (!before && !after)) return {};
         view.moving = corum::ranked::GoldMovingRival {before,after,*avatar};
+    }
+    auto const overtakes=value["overtakes"].asArray();
+    if (overtakes.isOk()) {
+        if (overtakes.unwrap().size()>5) return {};
+        for (auto const& item:overtakes.unwrap()) {
+            auto avatar=target(item); if (!avatar) return {};
+            if (std::any_of(view.overtakes.begin(),view.overtakes.end(),[&](auto const& previous) {
+                return previous.accountId==avatar->accountId && previous.bot==avatar->bot;
+            })) return {};
+            view.overtakes.push_back(*avatar);
+        }
     }
     view.available = true; return view;
 }

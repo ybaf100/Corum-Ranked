@@ -33,9 +33,25 @@ Integration은 계속 `sheet1`(또는 `MAPS_SHEET_NAME`)을 사용하지만 Rank
 | `Ranked Pool (1~6)` | 1~6 정수. 비워 두면 해당 맵은 Ranked 후보에서 제외 |
 | `Qualifying %` | 0~100 숫자 또는 Sheets 퍼센트 표시 |
 
-맵 제목·대표 `맵 코드`·`대체 맵 코드`·제작자·Rating은 같은 행의 기존 값을 사용한다.
-유효한 대체 맵 코드가 있으면 서버가 이를 `playableLevelId`로 snapshot하고, 대표 맵
-코드는 `canonicalLevelId`로 유지한다. 진행 중 경기는 이후 시트 변경의 영향을 받지 않는다.
+beta53부터 Ranked 맵 행의 필수 입력은 **맵 이름, 대체 맵 코드, Qualifying %, Tier Pool** 네 개다.
+`Tier Pool`은 기존 `Ranked Pool (1~6)`과 같은 열로 처리한다. `대체 맵 코드`라는 이름은
+그대로 유지하지만, 값은 **실제로 플레이할 GD 맵 ID**다. 맵 이름으로 다른 원본 ID를 검색하지 않는다.
+기존 `맵 코드`가 있으면 canonical ID로 보존하고, 없거나 빈 셀이면 플레이할 ID를 그대로 사용한다.
+제작자·Rating·길이는 생략할 수 있으며 진행 중 경기는 시작 당시 설정을 유지한다.
+
+Ranked 서버가 GD의 별 개수와 GDDL의 Demon Tier/티어색/길이를 조회하여 DB에 캐시한다.
+일반 난이도는 원 안의 별 숫자, 데몬은 티어색 네모와 흰색 GDDL 숫자로 표시한다.
+공식 본편 22개 맵은 이름으로 공식맵 표시 규칙을 적용한다. 예를 들어 xStep은 보상 별 개수 대신
+Insane 난이도에 해당하는 8성이다. 공식 데몬은 GDDL의 공식 엔트리를 조회하며 실제 플레이할
+복사본 ID는 바꾸지 않는다. 숫자는 현재 GDDL 응답의 Rating을 반올림하고 없으면 DefaultRating을 쓴다.
+
+길이는 `1m 35s` 형태다. GDDL seconds 또는 GD 240Hz 검증 시간을 사용하며, 정확한 시간이 없는
+구형 맵은 `?m ?s`로 표시한다. Long/XL 분류나 에디터 작업 시간을 초 단위 길이로 사용하지 않는다.
+필요하면 선택 사항인 `맵 길이` 열에 `1m 35s` 또는 `95s`를 입력해 정확한 길이를 지정할 수 있다.
+조회 실패는 플레이할 ID·Pool·Qualifying %를 바꾸지 않으며 마지막 캐시를 사용한다.
+
+네 열 입력을 사용하려면 Apps Script의 **RankedConfig.gs를 교체한 후 기존 웹 앱 배포를 새 버전으로
+수정**해야 한다. 배포 ID/웹 앱 URL은 유지한다. GitHub에 푸시하는 것만으로 Apps Script가 배포되지는 않는다.
 
 함수 실행 후 생성되는 별도 운영 탭은 `Ranked Tiers`, `Ranked CSMP Seed`,
 `Ranked Allowed Mods`, `Ranked Config` 네 개다. `Ranked Tiers`에는 각 티어의 LP 경계와

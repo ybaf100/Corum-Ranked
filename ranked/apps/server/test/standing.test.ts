@@ -161,6 +161,7 @@ describe("client standings SQL", () => {
       moving:{beforeScore:1420,afterScore:1380,target:{gdAccountId:"2"}}});
     expect(timeline.groups.map((g) => [g.score,g.count])).toEqual([[1500,1],[1390,1],[1350,2],[1320,1]]);
     expect(timeline.groups[2]!.target).toMatchObject({gdAccountId:"-7",isBot:true});
+    expect(timeline.overtakes?.map(t=>t.gdAccountId)).toEqual(["8","6","-7","5","2"]);
     expect(snapshot.players.B.goldTimeline).not.toBeNull();
     expect(snapshot.players.A.before).not.toHaveProperty("goldTimeline");
     expect(snapshot.players.A.after).not.toHaveProperty("goldTimeline");
@@ -182,6 +183,25 @@ describe("client standings SQL", () => {
     expect(snapshot.players.A.goldTimeline!.groups.map((g) => g.target.gdAccountId)).toEqual(["5","4"]);
     expect(snapshot.players.B.goldTimeline).toBeNull();
     expect(snapshot.players.A.after).toMatchObject({rank:2,total:4,target:{gdAccountId:"5"}});
+  });
+
+  it("selects only the highest-ranked five passed players, including separate tied bots, and excludes final LP ties", async () => {
+    await add(1,1490,1000,"GOLD"); await add(2,1600,1000,"GOLD");
+    for (let n=3;n<=10;++n) await add(n,1500-n*10,1000+n,"GOLD",n===4||n===5);
+    await add(11,1460,3000,"GOLD",true);
+    await add(12,1490,2000,"GOLD"); // final tie: joint rank, not passed
+    await add(13,1450,4000,"UNRANKED");
+    const result=await buildScorePresentation(database,bands,{
+      A:{playerId:id(1),before:profile(1200,{displayedTier:"GOLD"}),after:profile(1490,{displayedTier:"GOLD"})},
+      B:{playerId:id(2),before:profile(1600,{displayedTier:"GOLD"}),after:profile(1600,{displayedTier:"GOLD"})},
+    },"A");
+    const selected=result.players.A.goldTimeline!.overtakes!;
+    expect(selected.map(t=>t.gdAccountId)).toEqual(["6","-5","-4","-11","3"]);
+    expect(selected.map(t=>t.visibleRankedScore)).toEqual([1440,1450,1460,1460,1470]);
+    expect(selected.filter(t=>t.isBot)).toHaveLength(3);
+    expect(selected).toHaveLength(5);
+    expect(result.players.B.goldTimeline!.overtakes).toEqual([]);
+    expect(JSON.stringify(selected)).not.toMatch(/mmr|player_id/);
   });
 });
 

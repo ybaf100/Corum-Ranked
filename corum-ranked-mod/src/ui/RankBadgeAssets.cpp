@@ -214,31 +214,32 @@ CCNode* createRankAmbientFx(
     if (!hasPersistentRankAmbient(rank)) return ambient;
 
     auto const longest = std::max(maxSize.width, maxSize.height);
-    auto const compact = display == RankBadgeDisplay::Compact;
+    auto const matched = display == RankBadgeDisplay::Matched;
+    auto const compact = display == RankBadgeDisplay::Compact || matched;
     auto const hero = display == RankBadgeDisplay::Hero;
     if (rank == "SILVER") {
         auto* halo = ambientSprite(
             ambient,
             "fx-silver-halo.png",
-            {longest * (compact ? 1.28f : 1.65f), longest * (compact ? 1.28f : 1.65f)},
+            {longest * (matched ? 1.55f : compact ? 1.28f : 1.65f), longest * (matched ? 1.55f : compact ? 1.28f : 1.65f)},
             1,
-            compact ? 46 : 108
+            matched ? 200 : compact ? 46 : 108
         );
         auto* orbit = ambientSprite(
             ambient,
             "fx-silver-orbit.png",
             {longest * (compact ? 1.18f : 1.46f), longest * (compact ? 1.18f : 1.46f)},
             4,
-            compact ? 55 : 122
+            matched ? 210 : compact ? 55 : 122
         );
         auto* sheen = ambientSprite(
             ambient,
             "fx-silver-crystal-sheen.png",
             {longest * (compact ? 1.16f : 1.36f), longest * (compact ? 1.16f : 1.36f)},
             6,
-            compact ? 42 : 68
+            matched ? 160 : compact ? 42 : 68
         );
-        pulseOpacity(halo, compact ? 34 : 70, compact ? 62 : 132, 1.20f);
+        pulseOpacity(halo, matched ? 170 : compact ? 34 : 70, matched ? 240 : compact ? 62 : 132, 1.20f);
         if (orbit) {
             orbit->runAction(CCRepeatForever::create(
                 CCRotateBy::create(compact ? 8.5f : 6.8f, 360.0f)
@@ -246,8 +247,8 @@ CCNode* createRankAmbientFx(
         }
         if (sheen) {
             sheen->runAction(CCRepeatForever::create(CCSequence::create(
-                CCFadeTo::create(1.25f, compact ? 78 : 118),
-                CCFadeTo::create(1.55f, compact ? 24 : 35),
+                CCFadeTo::create(1.25f, matched ? 210 : compact ? 78 : 118),
+                CCFadeTo::create(1.55f, matched ? 110 : compact ? 24 : 35),
                 nullptr
             )));
         }
@@ -255,34 +256,34 @@ CCNode* createRankAmbientFx(
         auto* outer = ambientSprite(
             ambient,
             "fx-gold-halo-outer.png",
-            {longest * (compact ? 1.36f : 1.82f), longest * (compact ? 1.36f : 1.82f)},
+            {longest * (matched ? 1.62f : compact ? 1.36f : 1.82f), longest * (matched ? 1.62f : compact ? 1.36f : 1.82f)},
             1,
-            compact ? 52 : 118
+            matched ? 205 : compact ? 52 : 118
         );
         auto* rays = ambientSprite(
             ambient,
             "fx-gold-radial-rays.png",
             {longest * (compact ? 1.30f : 1.72f), longest * (compact ? 1.30f : 1.72f)},
             2,
-            compact ? 44 : (hero ? 126 : 92)
+            matched ? 190 : compact ? 44 : (hero ? 126 : 92)
         );
         auto* inner = ambientSprite(
             ambient,
             "fx-gold-halo-inner.png",
             {longest * (compact ? 1.20f : 1.48f), longest * (compact ? 1.20f : 1.48f)},
             4,
-            compact ? 66 : 145
+            matched ? 220 : compact ? 66 : 145
         );
         auto* aura = ambientSprite(
             ambient,
             "fx-gold-crown-aura.png",
             {longest * (compact ? 1.10f : 1.38f), longest * (compact ? 1.10f : 1.38f)},
             6,
-            compact ? 52 : 132
+            matched ? 180 : compact ? 52 : 132
         );
-        pulseOpacity(outer, compact ? 36 : 76, compact ? 70 : 142, 1.15f);
-        pulseOpacity(inner, compact ? 48 : 94, compact ? 82 : 168, 0.92f);
-        pulseOpacity(aura, compact ? 36 : 74, compact ? 68 : 154, 0.78f);
+        pulseOpacity(outer, matched ? 170 : compact ? 36 : 76, matched ? 245 : compact ? 70 : 142, 1.15f);
+        pulseOpacity(inner, matched ? 180 : compact ? 48 : 94, matched ? 250 : compact ? 82 : 168, 0.92f);
+        pulseOpacity(aura, matched ? 140 : compact ? 36 : 74, matched ? 230 : compact ? 68 : 154, 0.78f);
         if (rays) {
             rays->runAction(CCRepeatForever::create(
                 CCRotateBy::create(compact ? 17.0f : 14.0f, 360.0f)

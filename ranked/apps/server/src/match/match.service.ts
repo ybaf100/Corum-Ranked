@@ -14,6 +14,7 @@ import {
   evaluateDeathmatch,
   endRoundAttempt,
   perfectThreeClearWinner,
+  mapPresentationFields,
   resolveBans,
   selectDeathmatchMap,
   scoreAttempt,
@@ -3331,6 +3332,7 @@ export class MatchService {
           banner: bannerForRound(round.round_number),
           phase: round.phase,
           map: {
+            ...mapPresentationFields(config.maps, round.playable_level_id),
             levelId: round.level_id,
             canonicalLevelId: round.canonical_level_id,
             alternateLevelId: round.alternate_level_id,

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "domain/MapDifficulty.hpp"
+#include "domain/MapMetadata.hpp"
 #include <Geode/Geode.hpp>
 #include <Geode/binding/LevelManagerDelegate.hpp>
 #include <chrono>
@@ -16,6 +17,7 @@ public:
     void request(std::vector<int> ids);
     void remember(GJGameLevel* level);
     MapDifficulty difficulty(int levelId) const;
+    MapMetadata metadata(int levelId) const;
     std::uint64_t revision() const { return m_revision; }
     std::uint64_t requestGeneration(char const* key) const;
     void responseCompleted(char const* key, std::uint64_t generation);
@@ -25,7 +27,7 @@ public:
     void loadLevelsFailed(char const* key, int) override;
     void setupPageInfo(gd::string, char const*) override {}
 private:
-    struct Cached { MapDifficulty difficulty; std::chrono::steady_clock::time_point fetchedAt; };
+    struct Cached { MapDifficulty difficulty; std::chrono::steady_clock::time_point fetchedAt; MapMetadata metadata {}; };
     std::map<int, Cached> m_cache;
     std::set<int> m_wanted, m_pending;
     std::string m_key;

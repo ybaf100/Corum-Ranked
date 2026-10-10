@@ -65,9 +65,13 @@ describe("Ranked client version gate", () => {
     ).toBe(true);
   });
 
+  it("rejects beta52 after the map metadata and multiple GOLD overtakes update", () => {
+    expect(evaluateRankedClientVersion("v0.5.0-beta.52", [clientMod("v0.5.0-beta.52")]).allowed).toBe(false);
+  });
+
   it("accepts the same current version with or without a leading v", () => {
     expect(
-      evaluateRankedClientVersion("0.5.0-beta.52", [clientMod("0.5.0-beta.52")]).allowed,
+      evaluateRankedClientVersion("0.5.0-beta.53", [clientMod("0.5.0-beta.53")]).allowed,
     ).toBe(true);
   });
 
@@ -77,7 +81,7 @@ describe("Ranked client version gate", () => {
     ]);
     expect(result).toMatchObject({
       allowed: false,
-      requiredVersion: "v0.5.0-beta.52",
+      requiredVersion: "v0.5.0-beta.53",
       clientVersion: "v0.5.0-beta.8",
     });
   });

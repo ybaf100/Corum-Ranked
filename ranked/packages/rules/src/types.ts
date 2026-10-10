@@ -49,6 +49,16 @@ export interface PlacementPolicy {
   readonly overallRatingWeight: number;
 }
 
+/** Display metadata from GD/GDDL. Never used to calculate score or choose a pool. */
+export interface RankedMapMetadata {
+  readonly kind: "NORMAL" | "DEMON" | "UNKNOWN";
+  readonly stars: number | null;
+  readonly gddlTier: number | null;
+  readonly gddlColor: string | null;
+  readonly durationSeconds: number | null;
+  readonly officialLevelId: number | null;
+}
+
 export interface RankedMap {
   /** @deprecated Use playableLevelId. Kept in the config contract during alpha migration. */
   readonly levelId: string;
@@ -60,6 +70,7 @@ export interface RankedMap {
   readonly difficulty: string;
   /** Optional source-map length metadata used by server-side simulation/debug tooling. */
   readonly length?: string;
+  readonly metadata?: RankedMapMetadata;
   readonly pool: PoolNumber;
   readonly qualifyingPercent: number;
   readonly active: boolean;
@@ -74,6 +85,8 @@ export interface RankedMapSnapshot {
   readonly title: string;
   readonly creator: string;
   readonly difficulty: string;
+  readonly length?: string;
+  readonly metadata?: RankedMapMetadata;
   readonly pool: PoolNumber;
   readonly qualifyingPercent: number;
 }

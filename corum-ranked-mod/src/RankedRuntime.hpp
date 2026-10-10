@@ -6,6 +6,7 @@
 #include "domain/GameplayConcession.hpp"
 #include "domain/RankAssetPolicy.hpp"
 #include "domain/ResultScorePresentation.hpp"
+#include "domain/MapMetadata.hpp"
 
 #include <Geode/Geode.hpp>
 #include <Geode/utils/web.hpp>
@@ -43,6 +44,7 @@ struct RankedMapView {
     std::string difficulty;
     int pool = 0;
     double qualifyingPercent = 100.0;
+    MapMetadata metadata {};
 };
 
 struct RoundSummaryView {

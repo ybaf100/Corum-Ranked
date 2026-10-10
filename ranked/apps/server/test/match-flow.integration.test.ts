@@ -165,7 +165,8 @@ describe("two-client authoritative match flow", () => {
       // Keep decimal qualifying in the match snapshot even though Clear is now
       // a fixed 200 points and 70-99% receives the x1.5 multiplier.
       // for the client instead of silently truncating to an integer.
-      maps: baseDocument.maps.map((map) => ({ ...map, qualifyingPercent: 20.1 })),
+      maps: baseDocument.maps.map((map) => ({ ...map, qualifyingPercent: 20.1,
+        metadata: { kind:"NORMAL" as const,stars:8,gddlTier:null,gddlColor:null,durationSeconds:84,officialLevelId:null } })),
       operational: {
         ...baseDocument.operational,
         timeouts: {
@@ -264,6 +265,7 @@ describe("two-client authoritative match flow", () => {
     expect(state.currentRound.roundNumber).toBe(1);
     expect(state.currentRound.map).toBeTruthy();
     expect(state.currentRound.map.canonicalLevelId).not.toBe(sharedBan);
+    expect(state.currentRound.map.metadata).toMatchObject({kind:"NORMAL",stars:8,durationSeconds:84});
     expect(state.bans).toEqual({ A: sharedBan, B: sharedBan });
     expect(state.selectedRoundMaps).toBeUndefined();
     expect(state.candidateMaps).toBeNull();
@@ -465,13 +467,15 @@ describe("two-client authoritative match flow", () => {
     const roundTwoLevelId = roundTwoPlaying.currentRound.map.playableLevelId as string;
     liveDocument = {
       ...document,
-      maps: document.maps.map((map) => ({ ...map, qualifyingPercent: 99 })),
+      maps: document.maps.map((map) => ({ ...map, qualifyingPercent: 99,
+        metadata: {...map.metadata,stars:6,durationSeconds:999} })),
       operational: { ...document.operational, tierBands: document.operational.tierBands.map((band) => ({
         ...band, minInclusive: band.tier === "RED" ? band.minInclusive : band.minInclusive + 10,
       })) },
     };
     state = (await matches.state(matchId, statusA.matchToken, playerA)) as Record<string, any>;
     expect(state.currentRound.map.qualifyingPercent).toBe(snapshottedQualifying);
+    expect(state.currentRound.map.metadata).toMatchObject({stars:8,durationSeconds:84});
 
     clock.advanceSeconds(1);
     const b1 = await matches.startAttempt(matchId, statusB.matchToken, playerB, {

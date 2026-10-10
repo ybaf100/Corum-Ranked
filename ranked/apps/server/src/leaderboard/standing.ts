@@ -23,6 +23,7 @@ export interface GoldScoreTimeline {
   readonly higherFixed: number;
   readonly groups: readonly { score: number; count: number; target: StandingTarget; preferMoving: boolean }[];
   readonly moving: { beforeScore: number | null; afterScore: number | null; target: StandingTarget } | null;
+  readonly overtakes?: readonly StandingTarget[];
 }
 
 export const unrankedStanding = (): PlayerStanding => ({ rank: null, total: 0, topPercent: null, target: null });
@@ -92,6 +93,14 @@ export async function readStandings(
        THEN jsonb_build_object(
          'fixedTotal',(SELECT COUNT(*)::int FROM fixed),
          'higherFixed',(SELECT COUNT(*)::int FROM fixed WHERE score>COALESCE(above_range.score,GREATEST(old_own.score,new_own.score,moving_before.score,moving_after.score))),
+         'overtakes',COALESCE((SELECT jsonb_agg(jsonb_build_object('gdAccountId',c.gd_account_id::text,
+           'player',c.gd_username,'isBot',c.is_bot,'rank',c.rank,'visibleRankedScore',c.score)
+           ORDER BY c.score ASC,c.mmr ASC,md5(c.id::text || $4::text)) FROM (
+             SELECT c.* FROM ranked c JOIN ranked destination ON destination.phase='after' AND destination.id=c.id
+             WHERE c.phase='before' AND c.id<>requested.player_id
+               AND new_own.score>old_own.score AND c.score>old_own.score AND destination.score<new_own.score
+             ORDER BY c.score DESC,c.mmr DESC,md5(c.id::text || $4::text) LIMIT 5
+           ) c),'[]'::jsonb),
          'groups',COALESCE((SELECT jsonb_agg(jsonb_build_object('score',g.score,'count',g.amount,
            'preferMoving', COALESCE(moving_after.mmr>g.mmr OR (moving_after.mmr=g.mmr AND md5(moving_after.id::text || $4::text)<md5(g.id::text || $4::text)),FALSE),
            'target',jsonb_build_object('gdAccountId',g.gd_account_id::text,'player',g.gd_username,'isBot',g.is_bot,'rank',g.rank,'visibleRankedScore',g.score)) ORDER BY g.score DESC)

@@ -122,9 +122,22 @@ export const snapshotMap = (map: RankedMap): RankedMapSnapshot =>
     title: map.title,
     creator: map.creator,
     difficulty: map.difficulty,
+    ...(map.length !== undefined ? { length: map.length } : {}),
+    ...(map.metadata ? { metadata: Object.freeze({ ...map.metadata }) } : {}),
     pool: map.pool,
     qualifyingPercent: map.qualifyingPercent,
   });
+
+/** Reattach optional display fields from the match/run's pinned catalog. */
+export const mapPresentationFields = (
+  maps: readonly RankedMap[], playableLevelId: string,
+): Pick<RankedMapSnapshot, "metadata" | "length"> => {
+  const map = maps.find(candidate => candidate.playableLevelId === playableLevelId);
+  return {
+    ...(map?.length !== undefined ? { length: map.length } : {}),
+    ...(map?.metadata ? { metadata: { ...map.metadata } } : {}),
+  };
+};
 
 export const selectCandidateMaps = (
   tier: RankedTier,

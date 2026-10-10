@@ -50,6 +50,7 @@ test('actual appearance resolver serializes lookups, survives A→B, restores fo
     const route=extract(read('src/RankedLevelPreparation.cpp'), 'void onGetOnlineLevelsCompleted(gd::string response');
     run(`
 #include "${join(root,'src/domain/MapDifficulty.hpp')}"
+#include "${join(root,'src/domain/MapMetadata.hpp')}"
 #include <algorithm>
 #include <cassert>
 #include <chrono>
@@ -59,7 +60,7 @@ test('actual appearance resolver serializes lookups, survives A→B, restores fo
 #include <string>
 #include <vector>
 namespace gd {using string=std::string;}
-struct GJGameLevel {int m_levelID=0,m_demon=0,m_demonDifficulty=0,average=0;bool m_autoLevel=false;
+struct GJGameLevel {int m_levelID=0,m_demon=0,m_demonDifficulty=0,average=0,m_stars=0,m_timestamp=0;bool m_autoLevel=false;
 int getAverageDifficulty(){return average;}};
 namespace cocos2d {struct CCArray {std::vector<GJGameLevel*> values;};}
 using cocos2d::CCArray;
@@ -99,13 +100,19 @@ manager.m_levelManagerDelegate=&foreign;auto& details=RankedMapDetails::get();
 details.request({11,12});assert(manager.queries==1&&manager.m_levelManagerDelegate==&foreign);
 auto keyA=manager.lastKey;auto genA=details.requestGeneration(keyA.c_str());assert(genA);
 details.request({99});assert(manager.queries==1); // no overlap while old request is in flight
-GJGameLevel easy;easy.m_levelID=11;easy.average=1;GJGameLevel demon;demon.m_levelID=12;demon.m_demon=1;demon.m_demonDifficulty=3;
+GJGameLevel easy;easy.m_levelID=11;easy.average=1;easy.m_stars=2;easy.m_timestamp=22560;
+GJGameLevel demon;demon.m_levelID=12;demon.m_demon=1;demon.m_demonDifficulty=3;demon.m_stars=10;
 GJGameLevel unrelated;unrelated.m_levelID=88;unrelated.average=5;
 manager.result.values={&easy,&demon,&unrelated};manager.onGetOnlineLevelsCompleted("ok",keyA);
 assert(manager.m_levelManagerDelegate==&foreign&&foreign.callbacks==0);
 assert(details.difficulty(11).label=="Easy"&&details.difficulty(12).label=="Easy Demon");
+assert(details.metadata(11).stars==2&&details.metadata(11).durationSeconds==94);
+assert(details.metadata(12).kind=="DEMON"&&!details.metadata(12).stars);
+assert(mapLengthText(details.metadata(11).durationSeconds)=="1m 34s");
+assert(mapLengthText(details.metadata(12).durationSeconds)=="?m ?s");
 assert(details.difficulty(88).label=="N/A");assert(!details.requestGeneration(keyA.c_str()));
 auto revision=details.revision();details.remember(&easy);assert(details.revision()==revision);
+easy.m_timestamp=0;details.remember(&easy);assert(details.revision()==revision&&details.metadata(11).durationSeconds==94);
 details.m_retryAt={};details.request({99});assert(manager.queries==2&&manager.lastKey=="99,99&gameVersion=22");
 auto keyB=manager.lastKey;details.responseCompleted(keyA.c_str(),genA);assert(details.requestGeneration(keyB.c_str()));
 details.loadLevelsFailed(keyB.c_str());assert(!details.requestGeneration(keyB.c_str()));
@@ -150,4 +157,85 @@ item.enabled=true;widget.m_songInfoObject=nullptr;assert(!rankedJukeboxOpener(&w
     assert.match(screen,/tr\("jukebox-required",/);
     assert.match(screen,/m_jukebox\.reset\(\)/);
     assert.match(read('src/RankedRoundPreparation.cpp'),/roundModalOpen\(origin\)/);
+});
+
+test('actual difficulty badge draws stars in a circle, white GDDL digits on a colored square and keeps exact length',()=>{
+    const badge=read('src/ui/MapDifficultyBadge.hpp').replace(/^#include.*$|^#pragma once$/gm,'');
+    run(`
+#include "${join(root,'src/domain/MapDifficulty.hpp')}"
+#include "${join(root,'src/domain/MapMetadata.hpp')}"
+#include <algorithm>
+#include <array>
+#include <cassert>
+#include <charconv>
+#include <string_view>
+#include <utility>
+#include <vector>
+using GLubyte=unsigned char;
+namespace cocos2d {
+struct CCPoint{float x=0,y=0;};struct CCSize{float width=20,height=20;};
+struct ccColor3B{GLubyte r,g,b;bool operator==(ccColor3B const&)const=default;};
+struct ccColor4F{float r,g,b,a;};
+ccColor3B ccc3(GLubyte r,GLubyte g,GLubyte b){return{r,g,b};}
+ccColor4F ccc4f(float r,float g,float b,float a){return{r,g,b,a};}
+struct CCNode{
+std::vector<CCNode*>children;CCSize size;CCPoint position;float scale=1;std::string id;
+static CCNode*create(){return new CCNode;}
+void setContentSize(CCSize s){size=s;}CCSize getContentSize(){return size;}
+void addChild(CCNode*n,int=0){children.push_back(n);}void setPosition(CCPoint p){position=p;}
+void setScale(float v){scale=v;}void setID(std::string v){id=std::move(v);}
+};
+struct CCDrawNode:CCNode{
+std::vector<CCPoint>polygon;ccColor4F fill;
+static CCDrawNode*create(){return new CCDrawNode;}
+bool drawPolygon(CCPoint*p,unsigned int n,ccColor4F const&c,float,ccColor4F const&){polygon.assign(p,p+n);fill=c;return true;}
+};
+struct CCLabelBMFont:CCNode{
+std::string text;ccColor3B color{};
+static CCLabelBMFont*create(char const*s,char const*){auto*l=new CCLabelBMFont;l->text=s;return l;}
+void setColor(ccColor3B c){color=c;}
+};
+struct CCSprite:CCNode{std::string frame;
+static CCSprite*createWithSpriteFrameName(char const*s){auto*p=new CCSprite;p->frame=s;return p;}};
+}
+namespace geode::utils {
+template<class N>struct Result{N value{};bool ok=false;bool isOk()const{return ok;}N unwrap()const{return value;}};
+template<class N>Result<N>numFromString(std::string_view s,int base=10){Result<N>r;auto c=std::from_chars(s.data(),s.data()+s.size(),r.value,base);r.ok=c.ec==std::errc{}&&c.ptr==s.data()+s.size();return r;}
+}
+namespace geode::prelude {using namespace cocos2d;}
+std::string operator""_spr(char const*s,std::size_t n){return std::string(s,n);}
+namespace corum::ranked {
+struct RankedMapDetails{
+MapMetadata local;MapDifficulty face;
+static RankedMapDetails&get(){static RankedMapDetails d;return d;}
+MapMetadata metadata(int){return local;}MapDifficulty difficulty(int){return face;}
+};
+namespace ui{
+inline constexpr cocos2d::ccColor3B TextMuted{147,155,172},Text{230,235,244};
+enum class FontWeight{SemiBold};
+cocos2d::CCLabelBMFont*menuLabel(std::string s,float,cocos2d::CCPoint p,cocos2d::ccColor3B c,FontWeight){
+auto*l=cocos2d::CCLabelBMFont::create(s.c_str(),"bigFont.fnt");l->setColor(c);l->setPosition(p);return l;}
+void fitMenuLabelWidth(cocos2d::CCLabelBMFont*,float,float,float){}
+}}
+${badge}
+int main(){using namespace corum::ranked;using namespace ui;using namespace cocos2d;
+MapMetadata info;info.kind="NORMAL";info.stars=8;info.officialLevelId=10;info.durationSeconds=84;
+auto*row=mapDifficultyBadge(42,info,135);
+auto*shape=static_cast<CCDrawNode*>(row->children[0]);auto*number=static_cast<CCLabelBMFont*>(row->children[1]);
+assert(shape->polygon.size()==48&&number->text=="8"&&number->color==(ccColor3B{255,255,255}));
+assert(static_cast<CCSprite*>(row->children[2])->frame=="diffIcon_05_btn_001.png");
+assert(mapLengthText(displayedMapMetadata(42,info).durationSeconds)=="1m 24s");
+info.kind="DEMON";info.stars.reset();info.gddlTier=13;info.gddlColor="#dd5a5a";
+row=mapDifficultyBadge(42,info,135);shape=static_cast<CCDrawNode*>(row->children[0]);number=static_cast<CCLabelBMFont*>(row->children[1]);
+assert(shape->polygon.size()==4&&number->text=="13"&&number->color==(ccColor3B{255,255,255}));
+assert(std::abs(shape->fill.r-221/255.f)<.001f&&std::abs(shape->fill.g-90/255.f)<.001f);
+info.gddlTier.reset();info.gddlColor="wrong";row=mapDifficultyBadge(42,info,135);
+assert(static_cast<CCLabelBMFont*>(row->children[1])->text=="?");
+auto&native=RankedMapDetails::get().local;native.kind="NORMAL";native.stars=6;native.durationSeconds=80;
+info={};info.durationSeconds=95;auto fallback=displayedMapMetadata(42,info);
+assert(fallback.stars==6&&fallback.durationSeconds==95);info={};assert(displayedMapMetadata(42,info).durationSeconds==80);
+assert(mapLengthText(std::nullopt)=="?m ?s"&&mapLengthText(-1)=="?m ?s");
+assert(mapLengthText(59.8)=="1m 0s");
+}
+`);
 });

@@ -122,6 +122,7 @@ bool ResultScoreLayer::init(ScoreAnimationInput input, CCNode* resultScreen, std
     fitMenuLabelWidth(m_skipCaption,100,0.44f,0.34f); face->addChild(m_skipCaption,5);
     auto* skip = CCMenuItemSpriteExtra::create(face,this,menu_selector(ResultScoreLayer::onSkip));
     skip->setID("ranked-result-score-skip"_spr); skip->setPosition({size.width / 2,26}); m_menu->addChild(skip);
+    m_goldOvertakes=goldOvertakeTargets(m_input.goldTimeline,m_input.before,m_input.after);
     applySample(sampleScoreProgress(m_input,0));
     if (m_input.promotionInProgress) showSeries(false);
     return true;
@@ -150,7 +151,7 @@ void ResultScoreLayer::update(float dt) {
         m_elapsed = std::min(m_input.duration(),m_elapsed + step);
     }
     auto const sample = sampleScoreProgress(m_input,m_elapsed); applySample(sample);
-    if (!m_complete && sample.complete) { m_complete = true; showNotices(); }
+    if (!m_complete && sample.complete && m_goldOvertakesShown>=m_goldOvertakes.size()) { m_complete = true; showNotices(); }
     updateTrack(step); updateContinueButton();
     if (m_readyToClose && !m_trackChanging && !m_goldTargetChanging) unscheduleUpdate();
 }
@@ -178,6 +179,7 @@ void ResultScoreLayer::settlePresentation() {
     m_icons->removeAllChildrenWithCleanup(true);
     m_badgeParts.clear(); m_goldGoalKey.clear(); m_goldTargetChanging = false;
     m_leftIcon = m_rightIcon = nullptr; m_tier.clear(); m_targetKey.clear();
+    m_goldOvertakesShown=m_goldOvertakes.size();
     m_elapsed = m_input.duration(); applySample(sampleScoreProgress(m_input,m_elapsed),false);
     m_complete = true; showNotices();
     for (auto const& [node,scale] : m_stamps) {
@@ -274,7 +276,7 @@ void ResultScoreLayer::replaceTierIcons(ScoreProgressSample const& sample, bool 
         m_tier = sample.tier;
     }
     if (changedTier || changedTarget) {
-        auto const fly = animate && !changedTier && sample.tier == "GOLD" && sample.goldOvertake && !m_goldOvertakeShown;
+        auto const fly = animate && !changedTier && sample.tier == "GOLD" && sample.goldOvertake;
         retireIcon(m_rightIcon,animate && demotion,fly);
         if (fly) m_goldOvertakeShown = true;
         m_rightIcon = targetIcon(sample,animate);
@@ -282,7 +284,24 @@ void ResultScoreLayer::replaceTierIcons(ScoreProgressSample const& sample, bool 
     }
 }
 
-void ResultScoreLayer::applySample(ScoreProgressSample const& sample, bool animateIcons) {
+void ResultScoreLayer::applySample(ScoreProgressSample const& actual, bool animateIcons) {
+    auto sample=actual;
+    sample.goldOvertake=false;
+    if (sample.tier=="GOLD" && animateIcons && m_goldOvertakesShown<m_goldOvertakes.size()) {
+        auto const fraction=std::clamp(m_elapsed/m_input.duration(),0.0,1.0);
+        auto const eased=fraction*fraction*(3-2*fraction);
+        auto target=goldOvertakeAt(m_input.goldTimeline,m_goldOvertakes[m_goldOvertakesShown],eased);
+        // Serialize every selected overtake, even if a stalled frame crosses
+        // several players. Keep LP/rank authoritative and give each avatar time.
+        if (sample.score>target.score && m_clock>=m_nextGoldOvertakeAt) {
+            ++m_goldOvertakesShown; m_nextGoldOvertakeAt=m_clock+0.28;
+            sample.goldOvertake=true;
+        }
+        if (m_goldOvertakesShown<m_goldOvertakes.size()) {
+            sample.standing.target=goldOvertakeAt(m_input.goldTimeline,m_goldOvertakes[m_goldOvertakesShown],eased);
+            sample.goldLeader=false;sample.target=sample.standing.target->score;
+        }
+    } else if (sample.tier!="GOLD" && m_input.afterTier!="GOLD") m_goldOvertakesShown=m_goldOvertakes.size();
     if (m_tier != sample.tier) {
         m_trackColor = trackColor(m_input.bands,sample.tier);
         if (m_tier.empty() || !animateIcons) drawRoundedBar(m_track,m_barWidth,m_trackColor);
@@ -320,7 +339,7 @@ void ResultScoreLayer::applySample(ScoreProgressSample const& sample, bool anima
     };
     updateRank(m_rightRank,m_rightRankValue,rightRank,{m_barLeft + m_barWidth + 10,m_barY + 8},0.50f);
     if (m_rightRank) m_rightRank->setAnchorPoint({0,0.5f});
-    updateRank(m_ownRank,m_ownRankValue,ownRank,{getContentSize().width / 2,m_barY - 43},0.48f);
+    updateRank(m_ownRank,m_ownRankValue,ownRank,{getContentSize().width / 2,m_barY + 24},0.44f);
     if (m_ownRank) m_ownRank->setID("ranked-result-current-rank"_spr);
     auto const color = tierColor(sample.tier);
     drawRoundedBar(m_fill,m_barWidth * static_cast<float>(display.fill),color);
@@ -337,6 +356,7 @@ void ResultScoreLayer::applySample(ScoreProgressSample const& sample, bool anima
     auto const scoreWidth = m_score->getContentSize().width * m_score->getScaleX();
     auto const deltaWidth = m_delta->getContentSize().width * m_delta->getScaleX();
     auto const end = m_barLeft + m_barWidth * static_cast<float>(display.fill);
+    if (m_ownRank) m_ownRank->setPosition({end,m_barY+24});
     // Center the score alone on the actual fill end. Delta is an independent
     // suffix, moved to the left near the viewport edge without shifting LP.
     m_score->setPosition({end,m_barY + 44});

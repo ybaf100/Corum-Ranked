@@ -46,7 +46,35 @@ struct GoldScoreTimeline {
     int fixedTotal = 0, higherFixed = 0;
     std::vector<GoldScoreGroup> groups;
     std::optional<GoldMovingRival> moving;
+    std::vector<StandingTargetView> overtakes {};
 };
+
+// The server selects individual avatars, including LP ties and historical bots.
+// Legacy results only carry one representative per group. Keep that fallback
+// bounded as well; never duplicate an avatar to stand in for an unknown player.
+inline std::vector<StandingTargetView> goldOvertakeTargets(GoldScoreTimeline const& timeline, int before, int after) {
+    if (after <= before || !timeline.available) return {};
+    auto selected = timeline.overtakes;
+    if (selected.empty()) {
+        for (auto const& group : timeline.groups)
+            if (group.score > before && group.score < after) selected.push_back(group.target);
+        if (timeline.moving && timeline.moving->before && timeline.moving->after &&
+            *timeline.moving->before > before && *timeline.moving->after < after) selected.push_back(timeline.moving->target);
+    }
+    std::stable_sort(selected.begin(),selected.end(),[](auto const& a,auto const& b) { return a.rank < b.rank; });
+    if (selected.size() > 5) selected.resize(5);
+    std::reverse(selected.begin(),selected.end());
+    return selected;
+}
+
+inline StandingTargetView goldOvertakeAt(GoldScoreTimeline const& timeline, StandingTargetView target, double fraction) {
+    if (timeline.moving && timeline.moving->target.accountId == target.accountId && timeline.moving->target.bot == target.bot) {
+        auto const& moving=*timeline.moving;
+        auto const before=moving.before.value_or(target.score),after=moving.after.value_or(before);
+        target.score=static_cast<int>(std::lround(before+(static_cast<double>(after)-before)*fraction));
+    }
+    return target;
+}
 
 struct ResultScorePlayerView {
     StandingView before, after;
