@@ -26,6 +26,7 @@ for (const debugOn of [false, true]) test(`production audio handoff + retained l
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include "${join(root, 'src/domain/RankedMode.hpp')}"
 namespace geode::log {template<class... T> void info(T...) {}}
 using namespace geode;
 namespace fmt {template<class... T> std::string format(T...) {return "key";}}
@@ -70,6 +71,7 @@ struct RankedRuntime {
  static RankedRuntime& get(){static RankedRuntime r;return r;}View const& view()const{return data;}
  void tick(){}void setSpectatorLocalTransportBlocked(void*,bool){}
 };
+using RuntimeView = RankedRuntime::View;
 }
 struct GJGameLevel{};
 struct PlayLayer {static inline bool succeeds=true;bool init(GJGameLevel*,bool,bool){return succeeds;}};
@@ -97,6 +99,10 @@ using namespace corum::ranked;
 struct CorumRankedLayer: CCLayerColor {
  enum class Page{Live,Profile};Page m_page=Page::Live;
  bool m_rankedChildScenePushed=true,m_enteringSongGate=false,m_enteringLevel=false;
+ corum::ranked::ModeLobbyTransition m_modeTransition;
+ bool m_returnToModesAfterQueue=false,m_uiFadingOut=false,m_lobbyPanel=true;
+ int modeReturns=0;
+ void animateModeLobby(corum::ranked::RankedMode,bool opening){assert(!opening);++modeReturns;m_modeTransition.finish();}
  void* m_rankTransitionLayer=nullptr;
  void* m_resultScoreLayer=nullptr;bool m_resultScorePending=false;
  std::string m_stageResultAudioPlayedKey;Menu* m_menu=nullptr;
@@ -105,6 +111,7 @@ struct CorumRankedLayer: CCLayerColor {
  bool showResourceGate()const{return false;}void syncResources(){}void syncMapDetails(){}void syncPhase(){}void updateAutomation(){}
  std::string presentationKey()const{return "lobby";}bool prepareUiTransition(std::string const&){return false;}
  void render(){}void applyFadeInIfNeeded(){}void updateDynamicUi(){}void maybeEnterLevel(){}
+ ${method(popup,'void resumeModeSelectionAfterQueue(')}
  ${method(popup,'void syncAudioMode()')}
  ${method(popup,'void refresh(float)')}
  ${method(popup,'void onEnter() override')}
@@ -118,6 +125,11 @@ int main(){
  PlayLayer::succeeds=true;assert(scene.init(&level,false,false));assert(audio.channels==0 && FMODAudioEngine::voice);
  CorumRankedLayer lobby;lobby.onEnter();assert(audio.channels==1 && audio.m_desiredMode==RankedAudioMode::Lobby);
  auto creations=audio.creations;for(int i=0;i<20;++i)lobby.refresh(0);assert(audio.creations==creations && audio.channels==1);
+ // A confirmed queue departure runs the production mode-return hook without
+ // duplicating the lobby audio channel. ModeLobbyNativeTest checks its actions.
+ lobby.m_modeTransition.recoverSolo();lobby.m_returnToModesAfterQueue=true;
+ lobby.refresh(0);assert(lobby.modeReturns==1&&!lobby.m_modeTransition.selected());
+ assert(audio.creations==creations&&audio.channels==1);
  for(int kind=0;kind<2;++kind){
   CorumRankedPlayLayer debug;debug.fields.debugRecordScene=kind==0;debug.fields.debugPlaybackScene=kind==1;
   PlayLayer::succeeds=false;assert(!debug.init(&level,false,false));assert(audio.channels==1);

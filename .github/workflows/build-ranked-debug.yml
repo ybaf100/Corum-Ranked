@@ -103,7 +103,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Compile with strict warnings and run
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - name: Compile policy domains with strict warnings and run
         run: |
           g++ -std=c++23 -Wall -Wextra -Wpedantic -Werror \
             corum-ranked-mod/tests/DomainTest.cpp \
@@ -147,58 +150,15 @@ jobs:
             corum-ranked-mod/tests/LevelPreparationTest.cpp \
             -o /tmp/corum-ranked-level-prepare-test
           /tmp/corum-ranked-level-prepare-test
-          node --test corum-ranked-mod/tests/GameplayControlsNativeTest.mjs
-          node --test corum-ranked-mod/tests/RankedPauseNativeTest.mjs
-          node --test corum-ranked-mod/tests/RankedPauseQuitNativeTest.mjs
-          node --test corum-ranked-mod/tests/RankedPauseConcessionNativeTest.mjs
-          node --test corum-ranked-mod/tests/RankedExitNativeTest.mjs
-          node --test corum-ranked-mod/tests/PlayerInfoPresentationTest.mjs
-          node --test corum-ranked-mod/tests/PlayerInfoPopupNativeTest.mjs
-          node --test corum-ranked-mod/tests/RankedPauseInputNativeTest.mjs
-          node --test corum-ranked-mod/tests/RankedVolumeNativeTest.mjs
-          node --test corum-ranked-mod/tests/RankedSettingsNativeTest.mjs
-          node --test corum-ranked-mod/tests/ResultScoreNativeTest.mjs
-          node --test corum-ranked-mod/tests/LeaderboardNativeTest.mjs
-          node --test corum-ranked-mod/tests/ModeLobbyNativeTest.mjs
-          node --test corum-ranked-mod/tests/DebugAdminNativeTest.mjs
-          node --test corum-ranked-mod/tests/MapDetailsNativeTest.mjs
-          node --test corum-ranked-mod/tests/RankAssetPackNativeTest.mjs
-          node --test corum-ranked-mod/tests/ModUpdateNativeTest.mjs
-          node --test corum-ranked-mod/tests/DeathFeedNativeTest.mjs
+      - name: Validate native client behavior (two files in parallel)
+        # Each native harness uses its own temporary directory. Bound compiler
+        # concurrency so small runners retain memory headroom; keep all tests.
+        run: node --test --test-concurrency=2 corum-ranked-mod/tests/*.mjs
+      - name: Validate release packaging and publication
+        run: |
           python3 corum-ranked-mod/tests/ModReleaseBuildTest.py
           python3 corum-ranked-mod/tests/ModReleasePublishTest.py
           python3 corum-ranked-mod/tests/AssetPackBuildTest.py
-          node --test corum-ranked-mod/tests/FontTypographyNativeTest.mjs
-          node --test corum-ranked-mod/tests/RoundPreparationNativeTest.mjs
-          node --test corum-ranked-mod/tests/NativeEntryTransportTest.mjs
-          node --test corum-ranked-mod/tests/EntryGameplayNativeTest.mjs
-          node --test corum-ranked-mod/tests/RankedInputNativeTest.mjs
-          node --test corum-ranked-mod/tests/EntryDeathmatchRuntimeNativeTest.mjs
-          node --test corum-ranked-mod/tests/LevelPreparationSourceTest.mjs
-          node --test corum-ranked-mod/tests/SpectatorCameraOwnerNativeTest.mjs
-          node --test corum-ranked-mod/tests/SpectatorWorldDriverNativeTest.mjs
-          node --test corum-ranked-mod/tests/SpectatorVisibilityNativeTest.mjs
-          node --test corum-ranked-mod/tests/AchievementSourceTest.mjs
-          node --test corum-ranked-mod/tests/SpectatorLocalSafetySourceTest.mjs
-          node --test corum-ranked-mod/tests/SpectatorNativeHookTest.mjs
-          node --test corum-ranked-mod/tests/PlacementRuntimeNativeTest.mjs
-          node --test corum-ranked-mod/tests/PlacementMapSkipNativeTest.mjs
-          node --test corum-ranked-mod/tests/SpectatorNativeInstrumentationTest.mjs
-          node --test corum-ranked-mod/tests/SpectatorViewerPollingNativeTest.mjs
-          node --test corum-ranked-mod/tests/SpectatorRemoteSourceTest.mjs
-          node --test corum-ranked-mod/tests/SpectatorRemoteNativeTest.mjs
-          node --test corum-ranked-mod/tests/SpectatorCameraSourceTest.mjs
-          node --test corum-ranked-mod/tests/SpectatorSceneNativeTest.mjs
-          node --test corum-ranked-mod/tests/SpectatorLiveViewerNativeTest.mjs
-          node --test corum-ranked-mod/tests/SpectatorPublisherNativeTest.mjs
-          node --test corum-ranked-mod/tests/SpectatorAudioNativeTest.mjs
-          node --test corum-ranked-mod/tests/AudioTransitionSourceTest.mjs
-          node --test corum-ranked-mod/tests/RankedAudioTransitionNativeTest.mjs
-          node --test corum-ranked-mod/tests/RankedAudioDownloadNativeTest.mjs
-          node --test corum-ranked-mod/tests/RankedLobbyLifecycleNativeTest.mjs
-          node --test corum-ranked-mod/tests/SpectatorCaptureNativeTest.mjs
-          node --test corum-ranked-mod/tests/DebugSpectateSourceTest.mjs
-          node --test corum-ranked-mod/tests/DebugSpectateRuntimeNativeTest.mjs
 
   build:
     name: ${{ matrix.config.name }} Debug ${{ needs.metadata.outputs.version }}

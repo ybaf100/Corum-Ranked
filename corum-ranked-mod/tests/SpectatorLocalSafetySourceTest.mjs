@@ -147,5 +147,5 @@ test('transition logs are bounded and automatic Debug CI includes both regressio
         assert.match(play, new RegExp(`if \\((?:blocked && )?!m_fields->${guard}\\)`));
     }
     assert.match(debugWorkflow, /SpectatorLocalSafetyTest\.cpp/);
-    assert.match(debugWorkflow, /SpectatorLocalSafetySourceTest\.mjs/);
+    assert.match(debugWorkflow, /node --test(?: --test-concurrency=\d+)? corum-ranked-mod\/tests\/(?:SpectatorLocalSafetySourceTest|\*)\.mjs/);
 });
