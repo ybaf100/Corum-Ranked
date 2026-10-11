@@ -2,10 +2,13 @@ import { Inject, Injectable } from "@nestjs/common";
 import type { DisplayTier } from "@corum-ranked/rules";
 import { RankedConfigService } from "../config/ranked-config.service.js";
 import { DATABASE, type DatabasePort } from "../database/database.port.js";
+import { compareLadderPosition, type LadderPosition } from "./ranking-policy.js";
 
 type RatingMark = "WIN" | "LOSS";
 
 interface LeaderboardRow {
+  gd_account_id: string;
+  is_bot: boolean;
   gd_username: string;
   displayed_tier: DisplayTier;
   hidden_mmr: number;
@@ -41,6 +44,10 @@ export type PublicPlacementProgress =
     };
 
 export interface PublicLeaderboardPlayer {
+  readonly gdAccountId: string;
+  readonly isBot: boolean;
+  readonly rank: number | null;
+  readonly topPercent: number | null;
   readonly player: string;
   readonly tier: DisplayTier;
   readonly visibleRankedScore: number | null;
@@ -67,15 +74,6 @@ interface SortableLeaderboardPlayer {
   readonly hiddenMmr: number;
 }
 
-const TIER_RANK: Readonly<Record<DisplayTier, number>> = {
-  UNRANKED: 0,
-  RED: 1,
-  AQUA: 2,
-  BRONZE: 3,
-  SILVER: 4,
-  GOLD: 5,
-};
-
 @Injectable()
 export class LeaderboardService {
   public constructor(
@@ -83,15 +81,21 @@ export class LeaderboardService {
     private readonly config: RankedConfigService,
   ) {}
 
-  public async list(): Promise<{
+  public async list(offset = 0, limit?: number): Promise<{
     serverNow: string;
     serverOpen: boolean;
     players: readonly PublicLeaderboardPlayer[];
+    total: number;
+    totalPlayers: number;
+    offset: number;
+    hasMore: boolean;
   }> {
     const snapshot = this.config.getSnapshotOrNull();
     const placementGamesRequired = snapshot?.operational.mmrPolicy?.placementGames ?? null;
     const result = await this.database.query<LeaderboardRow>(
       `SELECT
+         p.gd_account_id::text,
+         p.is_bot,
          p.gd_username,
          rp.displayed_tier,
          rp.hidden_mmr,
@@ -126,8 +130,7 @@ export class LeaderboardService {
          ORDER BY pr.created_at DESC, pr.id DESC
          LIMIT 1
        ) placement ON TRUE
-       WHERE p.is_bot = FALSE
-         AND p.gd_account_id > 0`,
+       WHERE p.is_bot = TRUE OR p.gd_account_id > 0`,
     );
 
     const sortable = result.rows.map((row): SortableLeaderboardPlayer => {
@@ -150,6 +153,10 @@ export class LeaderboardService {
       return {
         hiddenMmr: Number(row.hidden_mmr),
         player: {
+          gdAccountId: String(row.gd_account_id),
+          isBot: Boolean(row.is_bot),
+          rank: null,
+          topPercent: null,
           player: row.gd_username,
           tier: placementInProgress ? "UNRANKED" : row.displayed_tier,
           visibleRankedScore: placementInProgress ? null : Number(row.visible_ranked_score ?? 0),
@@ -173,10 +180,22 @@ export class LeaderboardService {
       .filter(({ player }) => player.tier === "UNRANKED" || player.visibleRankedScore === null)
       .sort((left, right) => this.compareUnranked(left, right));
 
+    let rank = 0;
+    const placed = ranked.map((entry, index) => {
+      if (!index || compareLadderPosition(this.position(entry), this.position(ranked[index - 1]!))) rank = index + 1;
+      return { ...entry.player, rank, topPercent: rank / ranked.length * 100 };
+    });
+    const players = [...placed, ...unranked.map(({ player }) => player)];
+    const page = limit === undefined ? players.slice(offset) : players.slice(offset, offset + limit);
+
     return {
       serverNow: new Date().toISOString(),
       serverOpen: snapshot?.operational.enabled ?? false,
-      players: [...ranked, ...unranked].map(({ player }) => player),
+      players: page,
+      total: ranked.length,
+      totalPlayers: players.length,
+      offset,
+      hasMore: offset + page.length < players.length,
     };
   }
 
@@ -197,23 +216,15 @@ export class LeaderboardService {
   }
 
   private compareRanked(left: SortableLeaderboardPlayer, right: SortableLeaderboardPlayer): number {
-    const tierDifference = TIER_RANK[right.player.tier] - TIER_RANK[left.player.tier];
-    if (tierDifference !== 0) return tierDifference;
-
-    if (left.player.promotion && right.player.promotion) {
-      const promotionWinDifference = this.promotionWins(right.player) - this.promotionWins(left.player);
-      if (promotionWinDifference !== 0) return promotionWinDifference;
-      return this.compareRateMmrName(left, right);
-    }
-
-    if (left.player.promotion || right.player.promotion) {
-      return left.player.promotion ? -1 : 1;
-    }
-
-    const scoreDifference = Number(right.player.visibleRankedScore ?? 0) -
-      Number(left.player.visibleRankedScore ?? 0);
-    if (scoreDifference !== 0) return scoreDifference;
+    const difference = compareLadderPosition(this.position(left), this.position(right));
+    if (difference) return difference;
     return this.compareRateMmrName(left, right);
+  }
+
+  private position(entry: SortableLeaderboardPlayer): LadderPosition {
+    const promotion = entry.player.promotion;
+    return { score: entry.player.visibleRankedScore ?? 0, promotion_active: promotion !== null,
+      promotion_wins: this.promotionWins(entry.player), demotion_warning: !promotion && entry.player.demotionWarning };
   }
 
   private compareUnranked(left: SortableLeaderboardPlayer, right: SortableLeaderboardPlayer): number {
@@ -225,7 +236,10 @@ export class LeaderboardService {
     if (rateDifference !== 0) return rateDifference;
     const mmrDifference = right.hiddenMmr - left.hiddenMmr;
     if (mmrDifference !== 0) return mmrDifference;
-    return left.player.player.localeCompare(right.player.player, "en", { sensitivity: "base" });
+    const name = left.player.player.toLowerCase(), other = right.player.player.toLowerCase();
+    if (name !== other) return name < other ? -1 : 1;
+    if (left.player.player !== right.player.player) return left.player.player < right.player.player ? -1 : 1;
+    return left.player.gdAccountId < right.player.gdAccountId ? -1 : left.player.gdAccountId > right.player.gdAccountId ? 1 : 0;
   }
 
   private promotionWins(player: PublicLeaderboardPlayer): number {

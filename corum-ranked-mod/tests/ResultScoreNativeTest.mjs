@@ -244,6 +244,29 @@ ScoreAnimationInput gold() {
 }
 `;
 
+test('GOLD warning and promotion tie states follow the shared server rank during bar movement',()=>{
+    run(model+goldModel+`
+int main(){
+ auto i=gold();i.before=1200;i.after=1250;
+ i.goldTimeline={true,3,0,{{1200,3,{3,"normal bot",true,1,1200},false,
+    {{1,2,{3,"normal bot",true,1,1200},false},{0,1,{4,"warning",false,3,1200},false}}}},std::nullopt};
+ i.goldTimeline.beforePriority=0;i.goldTimeline.afterPriority=1;
+ i.standingAfter.rank=1;i.standingAfter.total=4;i.standingAfter.target.reset();
+ auto s=sampleScoreProgress(i,0);assert(s.standing.rank==3&&s.standing.total==4&&s.standing.target->accountId==3&&s.standing.target->rank==1);
+ s=sampleScoreProgress(i,1);assert(s.standing.rank==1&&s.goldLeader);
+ i.after=1200;s=sampleScoreProgress(i,1);assert(s.standing.rank==3&&!s.goldLeader);
+ s=sampleScoreProgress(i,2);assert(s.standing.rank==1&&s.goldLeader);
+ i.goldTimeline.moving=GoldMovingRival{1200,1200,{2,"moving",false,1,1200},1,0};
+ s=sampleScoreProgress(i,0);assert(s.standing.rank==4&&s.standing.target->rank==1);
+ // Promotion wins split ranks even at one LP; nearest target uses the
+ // closest higher state, not the highest state of that score group.
+ i.goldTimeline.moving.reset();i.goldTimeline.beforePriority=1;
+ i.goldTimeline.groups[0].states={{3,1,{3,"two wins",false,1,1200},false},{2,1,{4,"zero wins",false,2,1200},false},{1,1,{5,"normal",false,3,1200},false}};
+ s=sampleScoreProgress(i,0);assert(s.standing.rank==3&&s.standing.target->accountId==4&&s.standing.target->rank==2);
+}
+`);
+});
+
 test('GOLD snapshot follows shared ranks, the highest overtake, moving rivals and losses without resetting the floor',()=>{
     run(model+goldModel+`
 int main() {
@@ -696,6 +719,14 @@ int main() {
     timeline["moving"]["beforeScore"]=1400;timeline["moving"]["afterScore"]=1300;
     timeline["moving"]["target"]=group["target"];
     auto gold=parseGoldTimeline(timeline);assert(gold.available&&gold.groups.size()==1&&gold.groups[0].count==2&&gold.moving->after==1300);
+    auto statesTimeline=timeline;V normal;normal["priority"]=1;normal["count"]=1;normal["target"]=group["target"];
+    V warning=normal;warning["priority"]=0;statesTimeline["beforePriority"]=0;statesTimeline["afterPriority"]=1;
+    group["states"]=V::Array{normal,warning};statesTimeline["groups"]=V::Array{group};
+    auto decodedStates=parseGoldTimeline(statesTimeline);assert(decodedStates.available&&decodedStates.beforePriority==0&&decodedStates.groups[0].states.size()==2);
+    group["states"]=V::Array{normal};statesTimeline["groups"]=V::Array{group};assert(!parseGoldTimeline(statesTimeline).available);
+    group["states"]=V::Array{normal,normal};statesTimeline["groups"]=V::Array{group};assert(!parseGoldTimeline(statesTimeline).available);
+    auto malformedState=timeline;malformedState["beforePriority"]=-1;assert(!parseGoldTimeline(malformedState).available);
+    malformedState=timeline;malformedState["moving"]["afterPriority"]=33;assert(!parseGoldTimeline(malformedState).available);
     auto withOvertakes=timeline;
     withOvertakes["overtakes"]=V::Array{group["target"]};
     assert(parseGoldTimeline(withOvertakes).overtakes.size()==1);

@@ -1,5 +1,5 @@
 import "reflect-metadata";
-import type { INestApplication } from "@nestjs/common";
+import { ValidationPipe, type INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -13,6 +13,9 @@ import { TokenService } from "../src/common/token.service.js";
 import { SessionGuard } from "../src/session/session.guard.js";
 import { REQUIRED_RANKED_CLIENT_VERSION } from "../src/session/client-version.js";
 import { StandingController } from "../src/leaderboard/standing.controller.js";
+import { LeaderboardService } from "../src/leaderboard/leaderboard.service.js";
+import { LeaderboardController } from "../src/leaderboard/leaderboard.controller.js";
+import { RankedConfigService } from "../src/config/ranked-config.service.js";
 import { environmentFixture } from "./fixtures.js";
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
@@ -28,15 +31,25 @@ beforeAll(async () => {
     gd_username text NOT NULL, is_bot boolean NOT NULL DEFAULT FALSE);
     CREATE TABLE ranked_profiles (player_id uuid PRIMARY KEY REFERENCES ranked_players(id),
       displayed_tier text NOT NULL, visible_ranked_score integer, hidden_mmr integer NOT NULL,
-      placement_games integer NOT NULL DEFAULT 5);
+      placement_games integer NOT NULL DEFAULT 5, placement_results jsonb NOT NULL DEFAULT '[]',
+      wins integer NOT NULL DEFAULT 0, losses integer NOT NULL DEFAULT 0,
+      promotion_source_tier text, promotion_target_tier text, promotion_games_required integer,
+      promotion_wins_required integer, promotion_results jsonb NOT NULL DEFAULT '[]',
+      demotion_warning boolean NOT NULL DEFAULT FALSE, updated_at timestamptz NOT NULL DEFAULT now());
+    CREATE TABLE ranked_placement_runs (id uuid PRIMARY KEY, player_id uuid, state text, stage_count int,
+      current_stage_index int, current_map_index int, stage_results jsonb DEFAULT '[]', created_at timestamptz);
+    CREATE TABLE ranked_placement_maps (run_id uuid, state text);
     CREATE TABLE ranked_sessions (id uuid PRIMARY KEY, player_id uuid REFERENCES ranked_players(id),
       token_hash text NOT NULL, client_version text NOT NULL, revoked_at timestamptz,
       environment_snapshot jsonb NOT NULL DEFAULT '{}'::jsonb,
       expires_at timestamptz NOT NULL, last_heartbeat_at timestamptz NOT NULL);`);
-  const module = await Test.createTestingModule({ controllers: [StandingController], providers: [SessionGuard,
+  const module = await Test.createTestingModule({ controllers: [StandingController,LeaderboardController], providers: [SessionGuard,LeaderboardService,
+    { provide: RankedConfigService, useValue: { getSnapshotOrNull: () => null } },
     { provide: DATABASE, useValue: database }, { provide: SERVER_CLOCK, useValue: { now: () => now } },
     { provide: TokenService, useValue: tokens }] }).compile();
-  app = module.createNestApplication(); app.useLogger(false); await app.listen(0,"127.0.0.1"); base = await app.getUrl();
+  app = module.createNestApplication(); app.useLogger(false);
+  app.useGlobalPipes(new ValidationPipe({transform:true,whitelist:true,forbidNonWhitelisted:true}));
+  await app.listen(0,"127.0.0.1"); base = await app.getUrl();
 }, 60_000);
 afterAll(async () => { await app?.close(); await client.close(); });
 beforeEach(async () => { await client.exec("DELETE FROM ranked_sessions; DELETE FROM ranked_profiles; DELETE FROM ranked_players;"); });
@@ -54,6 +67,93 @@ const bands: readonly TierBand[] = [
 ];
 
 describe("client standings SQL", () => {
+  it("selects the highest five GOLD overtakes by the shared status rank before MMR", async () => {
+    await add(1,1300,1000,"GOLD"); await add(2,null,1000,"UNRANKED");
+    for (let n=3;n<=10;++n) await add(n,1250,n>=9?9999:1000+n,"GOLD",n===6);
+    await database.query("UPDATE ranked_profiles SET demotion_warning=TRUE WHERE player_id=ANY($1::uuid[])",[[id(9),id(10)]]);
+    const result=await buildScorePresentation(database,bands,{
+      A:{playerId:id(1),before:profile(1200,{displayedTier:"GOLD"}),after:profile(1300,{displayedTier:"GOLD"})},
+      B:{playerId:id(2),before:profile(0,{displayedTier:"UNRANKED"}),after:profile(0,{displayedTier:"UNRANKED"})},
+    },"A");
+    expect(result.players.A.goldTimeline!.overtakes!.map(t=>t.gdAccountId)).toEqual(["4","5","-6","7","8"]);
+  });
+
+  it("serves bounded native pages with global ranks and validates paging input", async () => {
+    await add(1,700,1000,"BRONZE"); await add(2,700,2000,"BRONZE",true); await add(3,600,1000,"BRONZE");
+    const response = await fetch(`${base}/api/ranked/leaderboard?offset=1&limit=1`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({total:3,totalPlayers:3,offset:1,hasMore:true,
+      players:[{rank:1,topPercent:1 / 3 * 100}]});
+    expect((await fetch(`${base}/api/ranked/leaderboard`)).status).toBe(200); // Existing unpaged consumers.
+    for (const query of ["offset=-1","offset=no","offset=1.5","limit=0","limit=51","limit=2.5","extra=true"])
+      expect((await fetch(`${base}/api/ranked/leaderboard?${query}`)).status).toBe(400);
+  });
+
+  it("keeps GOLD timeline tie states and same-LP warning targets identical to the actual standings", async () => {
+    await add(1,1200,1500,"GOLD"); await add(2,1200,1600,"GOLD");
+    await add(3,1200,1700,"GOLD",true); await add(4,1200,1800,"GOLD");
+    await add(5,null,1000,"UNRANKED");
+    await database.query("UPDATE ranked_profiles SET demotion_warning=TRUE WHERE player_id=ANY($1::uuid[])",[[id(1),id(4)]]);
+    const views = await readStandings(database,[id(1),id(5)],["before","after"],[
+      {phase:"before",playerId:id(1),profile:profile(1200,{displayedTier:"GOLD",demotionWarning:true})},
+      {phase:"after",playerId:id(1),profile:profile(1250,{displayedTier:"GOLD"})},
+    ],"seed",true);
+    const before = views.get("before")!.get(id(1))!;
+    expect(before.rank).toBe(3); expect(before.target).toMatchObject({rank:1,gdAccountId:"-3",visibleRankedScore:1200});
+    expect(views.get("after")!.get(id(1))!.rank).toBe(1);
+    expect(before.goldTimeline).toMatchObject({beforePriority:0,afterPriority:1,fixedTotal:3,moving:null,
+      groups:[{score:1200,count:3,states:[{priority:1,count:2,target:{gdAccountId:"-3",rank:1}},
+        {priority:0,count:1,target:{gdAccountId:"4",rank:3}}]}]});
+  });
+
+  it("uses identical ranks for the paged ladder, bots, warning groups and promotion wins", async () => {
+    for (let n = 1; n <= 13; ++n) await add(n, n < 3 ? 1300 : n < 13 ? 900 : 850,
+      1000 + n, n < 3 ? "GOLD" : "SILVER", n === 5 || n === 11);
+    await add(14, null, 800, "UNRANKED");
+    for (const [n, results] of [[3,["WIN","WIN"]],[4,["WIN","WIN"]],
+      [5,["WIN"]],[6,["WIN"]],[7,[]]] as const) {
+      await database.query(`UPDATE ranked_profiles SET promotion_source_tier='SILVER', promotion_target_tier='GOLD',
+        promotion_games_required=5,promotion_wins_required=3,promotion_results=$2 WHERE player_id=$1`,[id(n),JSON.stringify(results)]);
+    }
+    await database.query("UPDATE ranked_profiles SET demotion_warning=TRUE WHERE player_id=ANY($1::uuid[])",[ [id(11),id(12)] ]);
+    await database.query("UPDATE ranked_profiles SET wins=9,losses=1 WHERE player_id=$1",[id(3)]);
+    await database.query("UPDATE ranked_profiles SET wins=1,losses=9 WHERE player_id=$1",[id(4)]);
+    const service = new LeaderboardService(database,{ getSnapshotOrNull: () => null } as RankedConfigService);
+    const ladder = await service.list();
+    expect(ladder.players.map(p => p.rank)).toEqual([1,1,3,3,5,5,7,8,8,8,11,11,13,null]);
+    expect(ladder.players[2]!.gdAccountId).toBe("3"); // Rate beats MMR inside shared #3.
+    expect(ladder.players.filter(p => p.isBot)).toHaveLength(2);
+    const standings = (await readStandings(database,Array.from({length:14},(_,i)=>id(i+1)))).get("current")!;
+    for (const player of ladder.players) {
+      const n = Math.abs(Number(player.gdAccountId));
+      expect(standings.get(id(n))!.rank).toBe(player.rank);
+      expect(standings.get(id(n))!.topPercent).toBe(player.topPercent);
+    }
+    const page = await service.list(3,4);
+    expect(page).toMatchObject({ total:13,totalPlayers:14,offset:3,hasMore:true });
+    expect(page.players).toEqual(ladder.players.slice(3,7)); // No rank reset at page edges.
+    expect((await service.list(13,4)).hasMore).toBe(false);
+    expect(JSON.stringify(ladder)).not.toMatch(/hiddenMmr|hidden_mmr|player_id|\"mmr\"/);
+  });
+
+  it("projects promotion wins and warnings from each result phase rather than the current DB profile", async () => {
+    await add(1,600,1000,"BRONZE"); await add(2,600,2000,"BRONZE");
+    const projected = await readStandings(database,[id(1)],["before","after"],[
+      {phase:"before",playerId:id(1),profile:profile(600,{displayedTier:"BRONZE",demotionWarning:true})},
+      {phase:"after",playerId:id(1),profile:profile(600,{displayedTier:"BRONZE"})},
+    ]);
+    expect(projected.get("before")!.get(id(1))!.rank).toBe(2);
+    expect(projected.get("after")!.get(id(1))!.rank).toBe(1);
+    const promo = { sourceTier:"BRONZE",targetTier:"SILVER",cutoff:900,gamesRequired:3,winsRequired:2,results:["WIN"] } as const;
+    await database.query(`UPDATE ranked_profiles SET visible_ranked_score=899,promotion_source_tier='BRONZE',promotion_target_tier='SILVER',
+      promotion_games_required=3,promotion_wins_required=2,promotion_results='["WIN"]' WHERE player_id=$1`,[id(2)]);
+    const stages = await readStandings(database,[id(1)],["before","after"],[
+      {phase:"before",playerId:id(1),profile:profile(899,{displayedTier:"BRONZE",promotion:{...promo,results:[]}})},
+      {phase:"after",playerId:id(1),profile:profile(899,{displayedTier:"BRONZE",promotion:promo})},
+    ]);
+    expect(stages.get("before")!.get(id(1))!.rank).toBe(2);
+    expect(stages.get("after")!.get(id(1))!.rank).toBe(1);
+  });
   it("keeps admitted old sessions usable while preserving revocation and presence gates", async () => {
     await add(1, 1500, 5000, "GOLD"); await add(2, 1300, 3000, "GOLD"); await add(3, 1300, 3500, "GOLD", true);
     await database.query(`INSERT INTO ranked_sessions (id,player_id,token_hash,client_version,revoked_at,expires_at,last_heartbeat_at) VALUES ($1,$2,$3,$4,NULL,$5,$6)`,

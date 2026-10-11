@@ -5,6 +5,8 @@ import { LeaderboardService } from "../src/leaderboard/leaderboard.service.js";
 import { configDocumentFixture } from "./fixtures.js";
 
 const row = (overrides: Record<string, unknown>) => ({
+  gd_account_id: "1",
+  is_bot: false,
   gd_username: "player",
   displayed_tier: "AQUA",
   hidden_mmr: 1_000,
@@ -168,6 +170,9 @@ describe("LeaderboardService", () => {
       promotion: null,
       demotionWarning: false,
     });
+    expect(response.total).toBe(7);
+    expect(response.players.map(player => player.rank)).toEqual([1,2,3,3,3,3,7,null,null,null,null]);
+    expect(response.players[2]!.topPercent).toBe(3 / 7 * 100);
     expect(JSON.stringify(response)).not.toMatch(/draw|hiddenMmr|hidden_mmr/i);
   });
 

@@ -1,6 +1,7 @@
 import type { DisplayTier, RankedRatingProfile } from "@corum-ranked/rules";
 import type { SqlExecutor } from "../database/database.port.js";
 import { randomUUID } from "node:crypto";
+import { activePromotionSql, ladderRankOrderSql, ladderTiePrioritySql, promotionWinsSql } from "./ranking-policy.js";
 
 export interface StandingTarget {
   readonly gdAccountId: string;
@@ -21,8 +22,12 @@ export interface PlayerStanding {
 export interface GoldScoreTimeline {
   readonly fixedTotal: number;
   readonly higherFixed: number;
-  readonly groups: readonly { score: number; count: number; target: StandingTarget; preferMoving: boolean }[];
-  readonly moving: { beforeScore: number | null; afterScore: number | null; target: StandingTarget } | null;
+  readonly beforePriority: number;
+  readonly afterPriority: number;
+  readonly groups: readonly { score: number; count: number; target: StandingTarget; preferMoving: boolean;
+    states: readonly { priority: number; count: number; target: StandingTarget; preferMoving: boolean }[] }[];
+  readonly moving: { beforeScore: number | null; afterScore: number | null; target: StandingTarget;
+    beforePriority: number; afterPriority: number } | null;
   readonly overtakes?: readonly StandingTarget[];
 }
 
@@ -31,7 +36,7 @@ export const unrankedStanding = (): PlayerStanding => ({ rank: null, total: 0, t
 export interface StandingOverride {
   readonly phase: string;
   readonly playerId: string;
-  readonly profile: Pick<RankedRatingProfile, "displayedTier" | "visibleRankedScore" | "hiddenMmr">;
+  readonly profile: Pick<RankedRatingProfile, "displayedTier" | "visibleRankedScore" | "hiddenMmr" | "promotion" | "demotionWarning">;
 }
 
 interface StandingRow {
@@ -48,7 +53,7 @@ interface StandingRow {
 }
 
 /** One SQL snapshot for all subjects/phases. Include every historical bot;
- * MMR selects an icon within the nearest higher LP tie, never a rank number.
+ * MMR selects an icon within the nearest higher shared rank, never a rank number.
  * No ladder, MMR or internal player IDs are returned to the client. */
 export async function readStandings(
   database: SqlExecutor,
@@ -63,19 +68,26 @@ export async function readStandings(
      overrides AS (
        SELECT * FROM jsonb_to_recordset($3::jsonb) AS o(
          phase text, player_id uuid, displayed_tier text,
-         visible_ranked_score integer, hidden_mmr integer)
+         visible_ranked_score integer, hidden_mmr integer,
+         promotion_active boolean, promotion_wins integer, demotion_warning boolean)
      ), profiles AS (
        SELECT phase.phase, p.id, p.gd_account_id, p.gd_username, p.is_bot,
          CASE WHEN o.player_id IS NOT NULL THEN o.displayed_tier ELSE rp.displayed_tier END AS tier,
          CASE WHEN o.player_id IS NOT NULL THEN o.visible_ranked_score ELSE rp.visible_ranked_score END AS score,
-         CASE WHEN o.player_id IS NOT NULL THEN o.hidden_mmr ELSE rp.hidden_mmr END AS mmr
+         CASE WHEN o.player_id IS NOT NULL THEN o.hidden_mmr ELSE rp.hidden_mmr END AS mmr,
+         CASE WHEN o.player_id IS NOT NULL THEN o.promotion_active ELSE ${activePromotionSql("rp")} END AS promotion_active,
+         CASE WHEN o.player_id IS NOT NULL THEN o.promotion_wins
+           WHEN ${activePromotionSql("rp")} THEN ${promotionWinsSql("rp")} ELSE 0 END AS promotion_wins,
+         CASE WHEN o.player_id IS NOT NULL THEN o.demotion_warning
+           WHEN ${activePromotionSql("rp")} THEN FALSE ELSE rp.demotion_warning END AS demotion_warning
        FROM ranked_profiles rp JOIN ranked_players p ON p.id = rp.player_id
        CROSS JOIN phases phase
        LEFT JOIN overrides o ON o.phase = phase.phase AND o.player_id = p.id
      ), eligible AS (
-       SELECT * FROM profiles WHERE tier <> 'UNRANKED' AND score IS NOT NULL
+       SELECT *, ${ladderTiePrioritySql("profiles")} AS tie_priority FROM profiles
+       WHERE tier <> 'UNRANKED' AND score IS NOT NULL AND (is_bot OR gd_account_id>0)
      ), ranked AS (
-       SELECT *, RANK() OVER (PARTITION BY phase ORDER BY score DESC)::int AS rank
+       SELECT *, RANK() OVER (PARTITION BY phase ORDER BY ${ladderRankOrderSql()})::int AS rank
        FROM eligible
      ), totals AS (
        SELECT phase, COUNT(*)::int AS total FROM eligible GROUP BY phase
@@ -83,7 +95,10 @@ export async function readStandings(
        SELECT * FROM ranked WHERE phase='before' AND NOT (id=ANY($1::uuid[]))
      ), fixed_groups AS (
        SELECT DISTINCT ON (score) *, COUNT(*) OVER (PARTITION BY score)::int AS amount
-       FROM fixed ORDER BY score, mmr DESC, md5(id::text || $4::text)
+       FROM fixed ORDER BY score, promotion_active DESC, promotion_wins DESC, demotion_warning ASC, mmr DESC, md5(id::text || $4::text)
+     ), fixed_states AS (
+       SELECT DISTINCT ON (score,tie_priority) *, COUNT(*) OVER (PARTITION BY score,tie_priority)::int AS amount
+       FROM fixed ORDER BY score,tie_priority DESC,mmr DESC,md5(id::text || $4::text)
      )
      SELECT phase.phase, requested.player_id, own.rank, COALESCE(totals.total, 0) AS total,
        target.gd_account_id::text AS target_account_id,
@@ -92,22 +107,28 @@ export async function readStandings(
        CASE WHEN $5::boolean AND phase.phase='before' AND (old_own.tier='GOLD' OR new_own.tier='GOLD')
        THEN jsonb_build_object(
          'fixedTotal',(SELECT COUNT(*)::int FROM fixed),
+         'beforePriority',${ladderTiePrioritySql("old_own")},'afterPriority',${ladderTiePrioritySql("new_own")},
          'higherFixed',(SELECT COUNT(*)::int FROM fixed WHERE score>COALESCE(above_range.score,GREATEST(old_own.score,new_own.score,moving_before.score,moving_after.score))),
          'overtakes',COALESCE((SELECT jsonb_agg(jsonb_build_object('gdAccountId',c.gd_account_id::text,
            'player',c.gd_username,'isBot',c.is_bot,'rank',c.rank,'visibleRankedScore',c.score)
-           ORDER BY c.score ASC,c.mmr ASC,md5(c.id::text || $4::text)) FROM (
+           ORDER BY c.rank DESC,c.mmr ASC,md5(c.id::text || $4::text)) FROM (
              SELECT c.* FROM ranked c JOIN ranked destination ON destination.phase='after' AND destination.id=c.id
              WHERE c.phase='before' AND c.id<>requested.player_id
                AND new_own.score>old_own.score AND c.score>old_own.score AND destination.score<new_own.score
-             ORDER BY c.score DESC,c.mmr DESC,md5(c.id::text || $4::text) LIMIT 5
+             ORDER BY c.rank ASC,c.mmr DESC,md5(c.id::text || $4::text) LIMIT 5
            ) c),'[]'::jsonb),
          'groups',COALESCE((SELECT jsonb_agg(jsonb_build_object('score',g.score,'count',g.amount,
            'preferMoving', COALESCE(moving_after.mmr>g.mmr OR (moving_after.mmr=g.mmr AND md5(moving_after.id::text || $4::text)<md5(g.id::text || $4::text)),FALSE),
-           'target',jsonb_build_object('gdAccountId',g.gd_account_id::text,'player',g.gd_username,'isBot',g.is_bot,'rank',g.rank,'visibleRankedScore',g.score)) ORDER BY g.score DESC)
+           'target',jsonb_build_object('gdAccountId',g.gd_account_id::text,'player',g.gd_username,'isBot',g.is_bot,'rank',g.rank,'visibleRankedScore',g.score),
+           'states',(SELECT jsonb_agg(jsonb_build_object('priority',s.tie_priority,'count',s.amount,
+             'preferMoving',COALESCE(moving_after.mmr>s.mmr OR (moving_after.mmr=s.mmr AND md5(moving_after.id::text || $4::text)<md5(s.id::text || $4::text)),FALSE),
+             'target',jsonb_build_object('gdAccountId',s.gd_account_id::text,'player',s.gd_username,'isBot',s.is_bot,'rank',s.rank,'visibleRankedScore',s.score)) ORDER BY s.tie_priority DESC)
+             FROM fixed_states s WHERE s.score=g.score)) ORDER BY g.score DESC)
            FROM fixed_groups g WHERE g.score BETWEEN LEAST(old_own.score,new_own.score,moving_before.score,moving_after.score) AND GREATEST(old_own.score,new_own.score,moving_before.score,moving_after.score)
              OR g.score=above_range.score),'[]'::jsonb),
          'moving',CASE WHEN moving_before.id IS NOT NULL OR moving_after.id IS NOT NULL THEN jsonb_build_object(
            'beforeScore',moving_before.score,'afterScore',moving_after.score,
+           'beforePriority',COALESCE(moving_before.tie_priority,1),'afterPriority',COALESCE(moving_after.tie_priority,1),
            'target',jsonb_build_object('gdAccountId',COALESCE(moving_after.gd_account_id,moving_before.gd_account_id)::text,
              'player',COALESCE(moving_after.gd_username,moving_before.gd_username),'isBot',COALESCE(moving_after.is_bot,moving_before.is_bot),
              'rank',COALESCE(moving_before.rank,moving_after.rank),'visibleRankedScore',COALESCE(moving_before.score,moving_after.score))) ELSE NULL END)
@@ -122,13 +143,16 @@ export async function readStandings(
      LEFT JOIN LATERAL (SELECT * FROM fixed_groups WHERE score>GREATEST(old_own.score,new_own.score,moving_before.score,moving_after.score) ORDER BY score LIMIT 1) above_range ON TRUE
      LEFT JOIN LATERAL (
        SELECT candidate.* FROM ranked candidate
-       WHERE candidate.phase = phase.phase AND candidate.score > own.score
-       ORDER BY candidate.score ASC, candidate.mmr DESC, md5(candidate.id::text || $4::text)
+       WHERE candidate.phase = phase.phase AND candidate.rank < own.rank
+       ORDER BY candidate.rank DESC, candidate.mmr DESC, md5(candidate.id::text || $4::text)
        LIMIT 1
      ) target ON TRUE`,
     [playerIds, phases, JSON.stringify(overrides.map(({ phase, playerId, profile }) => ({
       phase, player_id: playerId, displayed_tier: profile.displayedTier as DisplayTier,
       visible_ranked_score: profile.visibleRankedScore, hidden_mmr: profile.hiddenMmr,
+      promotion_active: profile.promotion !== null,
+      promotion_wins: profile.promotion?.results.filter(mark => mark === "WIN").length ?? 0,
+      demotion_warning: !profile.promotion && profile.demotionWarning,
     }))), tieSeed, includeGoldTimeline],
   );
   const views = new Map<string, Map<string, PlayerStanding>>(phases.map((phase) => [phase, new Map()]));

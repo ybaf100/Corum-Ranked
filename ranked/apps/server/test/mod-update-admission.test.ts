@@ -15,7 +15,7 @@ import { QueueController } from "../src/queue/queue.controller.js";
 import { QueueService } from "../src/queue/queue.service.js";
 import { environmentFixture } from "./fixtures.js";
 
-const version = "v0.5.0-beta.56";
+const version = "v0.5.0-beta.57";
 const mods = (v = version) => [{id:"hwanhee1.corum_ranked",version:v,enabled:true,loaded:true}];
 describe("pinned channel update configuration", () => {
   it("keeps channel versions independent and normalizes hashes", () => {
@@ -59,10 +59,10 @@ describe("HTTP admission checks before matchmaking, with uninterrupted admitted 
   });
   it("rejects a stale queue join before mutation but keeps old-session heartbeats alive", async () => {
     expect((await post("queue/join",{installedMods:mods()})).status).toBe(201);
-    environment.rankedModUpdates.debug.version="v0.5.0-beta.57";
+    environment.rankedModUpdates.debug.version="v0.5.0-beta.58";
     const stale=await post("queue/join",{installedMods:mods()});
     expect(stale.status).toBe(426);
-    expect(await stale.json()).toMatchObject({requiredVersion:"v0.5.0-beta.57"});
+    expect(await stale.json()).toMatchObject({requiredVersion:"v0.5.0-beta.58"});
     expect(join).toHaveBeenCalledTimes(1);
     expect((await post("queue/heartbeat",{})).status).toBe(201);
     expect((await post("session/heartbeat",{})).status).toBe(201);

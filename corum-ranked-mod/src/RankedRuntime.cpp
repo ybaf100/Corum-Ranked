@@ -276,6 +276,14 @@ corum::ranked::GoldScoreTimeline parseGoldTimeline(matjson::Value const& value) 
     auto groups = value["groups"].asArray();
     if (!total || !higher || *higher > *total || *total > 2147483645 || !groups.isOk() || groups.unwrap().size() > 4096) return {};
     view.fixedTotal = *total; view.higherFixed = *higher;
+    auto const priority = [&](matjson::Value const& data,char const* key) -> std::optional<int> {
+        if (!data.contains(key)) return 1; // Legacy LP-only result snapshots.
+        auto parsed = integer(data[key]);
+        return parsed && *parsed <= 32 ? parsed : std::nullopt;
+    };
+    auto beforePriority = priority(value,"beforePriority"), afterPriority = priority(value,"afterPriority");
+    if (!beforePriority || !afterPriority) return {};
+    view.beforePriority = *beforePriority; view.afterPriority = *afterPriority;
     std::int64_t represented = *higher;
     std::optional<int> previous;
     for (auto const& group : groups.unwrap()) {
@@ -283,7 +291,23 @@ corum::ranked::GoldScoreTimeline parseGoldTimeline(matjson::Value const& value) 
         auto avatar = target(group["target"]);
         if (!score || !count || *count == 0 || !avatar || avatar->score != *score || (previous && *score >= *previous)) return {};
         represented += *count; if (represented > *total) return {};
-        view.groups.push_back({*score,*count,*avatar,group["preferMoving"].asBool().unwrapOr(false)}); previous = *score;
+        corum::ranked::GoldScoreGroup parsed {*score,*count,*avatar,group["preferMoving"].asBool().unwrapOr(false)};
+        if (auto states = group["states"].asArray(); group.contains("states")) {
+            if (!states.isOk()) return {};
+            if (states.unwrap().empty() || states.unwrap().size() > 32) return {};
+            std::int64_t counted = 0; std::optional<int> previousPriority;
+            for (auto const& state : states.unwrap()) {
+                auto priority = integer(state["priority"]), amount = integer(state["count"]);
+                auto representative = target(state["target"]);
+                if (!priority || *priority > 32 || !amount || *amount == 0 || !representative ||
+                    representative->score != *score || (previousPriority && *priority >= *previousPriority)) return {};
+                counted += *amount; if (counted > *count) return {};
+                parsed.states.push_back({*priority,*amount,*representative,state["preferMoving"].asBool().unwrapOr(false)});
+                previousPriority = *priority;
+            }
+            if (counted != *count) return {};
+        }
+        view.groups.push_back(std::move(parsed)); previous = *score;
     }
     auto const moving = value["moving"];
     if (moving.isObject()) {
@@ -291,6 +315,9 @@ corum::ranked::GoldScoreTimeline parseGoldTimeline(matjson::Value const& value) 
         auto before = integer(moving["beforeScore"]), after = integer(moving["afterScore"]);
         if (!avatar || (!before && !after)) return {};
         view.moving = corum::ranked::GoldMovingRival {before,after,*avatar};
+        auto beforeState = priority(moving,"beforePriority"), afterState = priority(moving,"afterPriority");
+        if (!beforeState || !afterState) return {};
+        view.moving->beforePriority = *beforeState; view.moving->afterPriority = *afterState;
     }
     auto const overtakes=value["overtakes"].asArray();
     if (overtakes.isOk()) {
@@ -563,6 +590,10 @@ void RankedRuntime::invalidateAttemptRequest() {
 
 std::string RankedRuntime::endpoint(std::string const& path) const {
     return std::string(kDefaultRankedServerURL) + path;
+}
+
+std::string RankedRuntime::leaderboardUrl(int offset, int limit) const {
+    return endpoint(fmt::format("/api/ranked/leaderboard?offset={}&limit={}",std::max(0,offset),std::clamp(limit,1,50)));
 }
 
 void RankedRuntime::begin() {

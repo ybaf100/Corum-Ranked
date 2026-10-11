@@ -24,6 +24,14 @@ struct Translation {
 };
 
 inline constexpr std::array kKoreanTranslations {
+    Translation{"leaderboard", "리더보드"},
+    Translation{"leaderboard-player", "플레이어"},
+    Translation{"leaderboard-status", "상태"},
+    Translation{"leaderboard-tier", "티어"},
+    Translation{"leaderboard-refresh", "새로고침"},
+    Translation{"leaderboard-loading", "리더보드 불러오는 중..."},
+    Translation{"leaderboard-error", "리더보드를 불러오지 못했습니다. 새로고침을 누르세요."},
+    Translation{"leaderboard-empty", "아직 플레이어가 없습니다."},
     Translation{"mod-update", "모드 업데이트"},
     Translation{"mod-restart-ready", "업데이트 완료. 재시작을 눌러 적용하세요."},
     Translation{"mod-verifying", "모드를 다운로드하고 검증 중..."},

@@ -476,6 +476,7 @@ public:
     void queueAgain();
     void fetchHistory();
     void fetchStanding();
+    [[nodiscard]] std::string leaderboardUrl(int offset, int limit) const;
     void fetchAchievements();
     void fetchPlayerInfo(std::string const& side);
     void fetchForumRecords(bool refresh = false);

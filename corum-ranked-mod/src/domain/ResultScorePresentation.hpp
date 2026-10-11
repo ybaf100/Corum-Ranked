@@ -32,14 +32,21 @@ struct ScoreSeriesView {
     std::vector<std::string> results;
 };
 
+struct GoldTieState {
+    int priority = 1, count = 0;
+    StandingTargetView target;
+    bool preferMoving = false;
+};
 struct GoldScoreGroup {
     int score = 0, count = 0;
     StandingTargetView target;
     bool preferMoving = false;
+    std::vector<GoldTieState> states {};
 };
 struct GoldMovingRival {
     std::optional<int> before, after;
     StandingTargetView target;
+    int beforePriority = 1, afterPriority = 1;
 };
 struct GoldScoreTimeline {
     bool available = false;
@@ -47,6 +54,7 @@ struct GoldScoreTimeline {
     std::vector<GoldScoreGroup> groups;
     std::optional<GoldMovingRival> moving;
     std::vector<StandingTargetView> overtakes {};
+    int beforePriority = 1, afterPriority = 1;
 };
 
 // The server selects individual avatars, including LP ties and historical bots.
@@ -129,6 +137,8 @@ inline void sampleGoldTimeline(ScoreAnimationInput const& input, double fraction
     auto const& timeline = input.goldTimeline;
     if (!timeline.available) return;
     std::optional<StandingTargetView> moving;
+    auto const priority = sample.tier == input.beforeTier && fraction < 1 ? timeline.beforePriority : timeline.afterPriority;
+    auto const movingPriority = timeline.moving ? (fraction < 1 ? timeline.moving->beforePriority : timeline.moving->afterPriority) : 1;
     if (timeline.moving) {
         auto const& rival = *timeline.moving;
         auto const present = fraction >= 1 ? rival.after.has_value() : rival.before.has_value();
@@ -139,40 +149,63 @@ inline void sampleGoldTimeline(ScoreAnimationInput const& input, double fraction
             moving->score = static_cast<int>(std::lround(before + (static_cast<double>(after) - before) * fraction));
         }
     }
-    auto const rankAt = [&](int score) {
+    auto const ahead = [](int score, int state, int otherScore, int otherState) {
+        return score > otherScore || (score == otherScore && state > otherState);
+    };
+    auto const rankAt = [&](int score, int state) {
         auto count = timeline.higherFixed;
-        for (auto const& group : timeline.groups) if (group.score > score) count += group.count;
-        if (moving && moving->score > score) ++count;
+        for (auto const& group : timeline.groups) {
+            if (group.score > score) count += group.count;
+            else if (group.score == score) for (auto const& tie : group.states) if (tie.priority > state) count += tie.count;
+        }
+        if (moving && ahead(moving->score,movingPriority,score,state)) ++count;
         return count + 1;
     };
-    sample.standing.rank = rankAt(sample.score);
+    sample.standing.rank = rankAt(sample.score,priority);
     sample.standing.total = timeline.fixedTotal + 1 + static_cast<int>(moving.has_value());
     sample.standing.topPercent = 100.0 * *sample.standing.rank / sample.standing.total;
     std::optional<StandingTargetView> nearest, hero;
     bool allPassed = true;
     int heroBefore = -1;
+    int nearestPriority = 1, heroPriority = 1;
+    auto consider = [&](StandingTargetView const& candidate, int state, bool prefer) {
+        if (ahead(candidate.score,state,sample.score,priority) &&
+            (!nearest || candidate.score < nearest->score || (candidate.score == nearest->score &&
+                (state < nearestPriority || (state == nearestPriority && prefer))))) {
+            nearest = candidate; nearestPriority = state;
+        }
+    };
     for (auto const& group : timeline.groups) {
-        if (group.score > sample.score && (!nearest || group.score < nearest->score)) nearest = group.target;
+        if (group.states.empty()) consider(group.target,1,false);
+        else for (auto const& tie : group.states) consider(tie.target,tie.priority,false);
         if (input.after > input.before && group.score > input.before && group.score < input.after) {
             allPassed = allPassed && sample.score > group.score;
-            if (group.score > heroBefore) { hero = group.target; heroBefore = group.score; }
+            if (group.score > heroBefore) { hero = group.target; heroBefore = group.score;
+                heroPriority = group.states.empty() ? 1 : group.states.front().priority; }
         }
     }
     if (moving) {
         auto prefer = false;
-        for (auto const& group : timeline.groups) if (group.score == moving->score) prefer = group.preferMoving;
-        if (moving->score > sample.score && (!nearest || moving->score < nearest->score || (moving->score == nearest->score && prefer))) nearest = moving;
+        for (auto const& group : timeline.groups) if (group.score == moving->score) {
+            prefer = group.preferMoving;
+            for (auto const& tie : group.states) if (tie.priority == movingPriority) prefer = tie.preferMoving;
+        }
+        consider(*moving,movingPriority,prefer);
         auto const& rival = *timeline.moving;
         if (input.after > input.before && rival.before && rival.after && *rival.before > input.before && *rival.after < input.after) {
             allPassed = allPassed && sample.score > moving->score;
-            if (*rival.before > heroBefore || (*rival.before == heroBefore && prefer)) hero = moving;
+            if (*rival.before > heroBefore || (*rival.before == heroBefore && prefer)) { hero = moving; heroPriority = movingPriority; }
         }
     }
     // One overtake animation: keep the highest-ranked crossed rival until all
     // crossed scores have been reached, then reveal the next actual target.
     sample.goldOvertake = hero.has_value() && allPassed;
     sample.standing.target = hero && !allPassed ? hero : nearest;
-    if (sample.standing.target) sample.standing.target->rank = rankAt(sample.standing.target->score) + (sample.score > sample.standing.target->score ? 1 : 0);
+    if (sample.standing.target) {
+        auto const targetPriority = hero && !allPassed ? heroPriority : nearestPriority;
+        sample.standing.target->rank = rankAt(sample.standing.target->score,targetPriority) +
+            (ahead(sample.score,priority,sample.standing.target->score,targetPriority) ? 1 : 0);
+    }
     if (fraction >= 1 && input.standingAfter.rank) {
         sample.standing = input.standingAfter;
     }

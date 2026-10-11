@@ -19,6 +19,7 @@
 #include "ui/RankTransitionLayer.hpp"
 #include "ui/ResultScoreLayer.hpp"
 #include "ui/StandingVisuals.hpp"
+#include "ui/RankedLeaderboardPopup.hpp"
 #include "ui/PlacementGradeBadge.hpp"
 #include "ui/PlayerIcon.hpp"
 #include "ui/RankedTranslations.hpp"
@@ -437,6 +438,7 @@ class CorumRankedLayer final : public CCLayerColor {
     CCMenu* m_settingsMenu = nullptr;
     CCLabelBMFont* m_settingsLabel = nullptr;
     std::optional<WeakRef<corum::ranked::ui::RankedSettingsPopup>> m_settings;
+    std::optional<WeakRef<corum::ranked::ui::RankedLeaderboardPopup>> m_leaderboard;
     std::optional<WeakRef<corum::ranked::ui::RankedJukeboxPopup>> m_jukebox;
     std::optional<WeakRef<FLAlertLayer>> m_jukeboxNotice;
     std::optional<WeakRef<corum::ranked::ui::RankedPlayerInfoPopup>> m_playerInfo;
@@ -2165,7 +2167,15 @@ class CorumRankedLayer final : public CCLayerColor {
 
         auto* actionPanel = makeNeonPanel({188.0f, 196.0f}, rightCenter, kBlue, kDeepPanel, 246);
         m_root->addChild(actionPanel, 1);
-        auto* actionTitle = makeLabel(tr("matchmaking", "MATCHMAKING"), 0.34f, {rightCenter.x, rightCenter.y + 77.0f}, kCyan, "semibold");
+        auto* leaderboardFace = corum::ranked::ui::surface({30,30},{},kGold,kDeepPanel2,250,true);
+        if (auto* icon = CCSprite::createWithSpriteFrameName("GJ_highscoreBtn_001.png")) {
+            corum::ranked::ui::fitRankSprite(icon,{24,24}); icon->setPosition({15,15}); leaderboardFace->addChild(icon,5);
+        }
+        auto* leaderboard = CCMenuItemSpriteExtra::create(leaderboardFace,this,menu_selector(CorumRankedLayer::onLeaderboard));
+        leaderboard->setPosition({rightCenter.x + 73,rightCenter.y + 78});
+        leaderboard->setID("ranked-leaderboard-trophy"_spr); m_menu->addChild(leaderboard);
+        auto* actionTitle = makeLabel(tr("matchmaking", "MATCHMAKING"), 0.34f, {rightCenter.x - 16,rightCenter.y + 77.0f}, kCyan, "semibold");
+        corum::ranked::ui::fitMenuLabelWidth(actionTitle,126,0.34f,0.26f);
         m_root->addChild(actionTitle, 4);
 
         if (view.stage == RuntimeStage::Ready) {
@@ -4191,6 +4201,8 @@ class CorumRankedLayer final : public CCLayerColor {
         m_playerInfo.reset();
         if (m_settings) if (auto popup = m_settings->lock()) popup->dismiss();
         m_settings.reset();
+        if (m_leaderboard) if (auto popup = m_leaderboard->lock()) popup->dismiss();
+        m_leaderboard.reset();
         closeJukeboxNotice();
         if (!corum::ranked::RankedRoundPreparation::get().launch(CCDirector::sharedDirector()->getRunningScene())) return;
         m_enteringLevel = true;
@@ -4488,6 +4500,8 @@ class CorumRankedLayer final : public CCLayerColor {
     }
 
     void closeSettings() {
+        if (m_leaderboard) if (auto popup = m_leaderboard->lock()) popup->dismiss();
+        m_leaderboard.reset();
         if (m_sessionConflict) if (auto popup = m_sessionConflict->lock()) popup->dismiss();
         m_sessionConflict.reset();
         closeJukeboxNotice();
@@ -4500,6 +4514,13 @@ class CorumRankedLayer final : public CCLayerColor {
         if (m_settingsMenu) {
             corum::ranked::ui::cancelMenuTouch(m_settingsMenu);
             m_settingsMenu->setTouchEnabled(false);
+        }
+    }
+
+    void onLeaderboard(CCObject*) {
+        if (m_leaderboard) if (auto popup = m_leaderboard->lock(); popup && popup->getParent()) return;
+        if (auto* popup = corum::ranked::ui::RankedLeaderboardPopup::create()) {
+            m_leaderboard.emplace(popup); popup->show();
         }
     }
 
