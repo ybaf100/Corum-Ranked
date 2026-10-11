@@ -1,4 +1,5 @@
 #pragma once
+#include "domain/DeathFeed.hpp"
 
 #include "domain/EnvironmentPolicy.hpp"
 #include "domain/ServerClock.hpp"
@@ -26,6 +27,8 @@ enum class RuntimeStage {
     Idle,
     NotConfigured,
     Loading,
+    AwaitingUpdate,
+    AwaitingResources,
     Blocked,
     Ready,
     JoiningQueue,
@@ -260,6 +263,8 @@ struct HistoryMatchView {
 };
 
 struct MatchView {
+    std::vector<DeathFeedEvent> deathLog;
+    bool decisiveRoundEnded = false;
     std::string matchType;
     bool placement = false;
     std::string matchId;
@@ -435,6 +440,9 @@ public:
     static RankedRuntime& get();
 
     void begin();
+    void finishAdmission();
+    [[nodiscard]] std::int64_t serverNowMillis() const;
+    void retireDecisiveAttempt();
     void takeOverSession();
     void leaveRanked();
     void updateSessionHeartbeat();
@@ -529,7 +537,7 @@ public:
     [[nodiscard]] bool reportAttemptStart(int levelId);
     void reportPracticePresence(bool practice);
     void reportAttemptProgress(int levelId, double progressPercent);
-    [[nodiscard]] bool reportAttemptEnd(int levelId, double progressPercent, bool cleared, std::optional<double> qualifyingPercentOverride = std::nullopt);
+    [[nodiscard]] bool reportAttemptEnd(int levelId, double progressPercent, bool cleared, std::optional<double> qualifyingPercentOverride = std::nullopt, bool nativeDeath = false);
 
 private:
     void const* m_spectatorLocalTransportOwner = nullptr;
@@ -549,6 +557,7 @@ private:
         std::string contextKey;
         double optimisticScore = 0.0;
         int optimisticClear = 0;
+        bool nativeDeath = false;
     };
 
     // Visual attempts can finish faster than HTTP start/end acknowledgements.
@@ -562,6 +571,8 @@ private:
     RankedRuntime() = default;
 
     void fetchConfig();
+    void recordDeath(DeathFeedEvent event, std::string const& contextKey);
+    bool handleRequiredUpdate(geode::utils::web::WebResponse const& response);
     void createSession(bool takeOver = false);
     void fetchActivePlacement();
     void invalidatePollRequest();
@@ -619,6 +630,8 @@ private:
     std::unordered_set<std::string> m_acknowledgedPlacementEnds;
     int m_attemptLevelId = 0;
     std::string m_attemptContextKey;
+    std::string m_deathFeedContext;
+    std::string m_rejectedRequiredVersion;
     std::optional<RankedMapView> m_gameplayMap;
     std::string m_gameplayMatchId;
     std::string m_gameplayStartContextKey;

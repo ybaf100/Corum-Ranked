@@ -2,6 +2,7 @@ import { Body, Controller, Get, Post, UseGuards } from "@nestjs/common";
 import { CurrentSession } from "../session/current-session.decorator.js";
 import { EnvironmentRecheckDto } from "../session/session.dto.js";
 import { SessionGuard } from "../session/session.guard.js";
+import { AdmissionVersionGuard } from "../session/admission-version.guard.js";
 import type { RankedSessionContext } from "../session/session.types.js";
 import { QueueService } from "./queue.service.js";
 
@@ -11,6 +12,7 @@ export class QueueController {
   public constructor(private readonly queue: QueueService) {}
 
   @Post("join")
+  @UseGuards(AdmissionVersionGuard)
   public join(
     @CurrentSession() session: RankedSessionContext,
     @Body() body: EnvironmentRecheckDto,

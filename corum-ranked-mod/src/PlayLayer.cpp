@@ -43,6 +43,7 @@
 #include <chrono>
 #include <cmath>
 #include <iomanip>
+#include <iterator>
 #include <sstream>
 #include <string_view>
 #include <unordered_map>
@@ -170,6 +171,15 @@ public:
         CCLabelBMFont* opponentAttemptLabel = nullptr;
         CCLabelBMFont* qualifyingCaption = nullptr;
         CCLabelBMFont* qualifyingLabel = nullptr;
+        struct DeathRowVisual {
+            std::string id;
+            CCNode* node = nullptr;
+            CCLabelBMFont* label = nullptr;
+            float targetY = 0;
+            bool fading = false;
+        };
+        corum::ranked::DeathFeed deathFeed;
+        std::vector<DeathRowVisual> deathRows;
         corum::ranked::ui::PlacementGradeBadge* placementGrade = nullptr;
         CCNode* spectatorPanel = nullptr;
         CCLabelBMFont* spectatorNameLabel = nullptr;
@@ -1139,7 +1149,7 @@ public:
         if ((!stillPlaying || runtime.currentLevelId() != m_fields->levelId) && !m_fields->autoExitRequested) {
             auto const localAttemptStillAlive =
                 m_fields->attemptStartReported && !m_fields->attemptEndReported;
-            if (localAttemptStillAlive && matchState != "CANCELLED") {
+            if (localAttemptStillAlive && matchState != "CANCELLED" && !runtime.view().match.decisiveRoundEnded) {
                 // FINAL/LAST ATTEMPT is a start deadline, never an end deadline.
                 // Even if a stale/early server result leaks through, do not call
                 // onQuit() on a visual attempt that has not naturally died or
@@ -1154,6 +1164,7 @@ public:
                     m_fields->prematureResultLogged = true;
                 }
             } else {
+                if (runtime.view().match.decisiveRoundEnded) m_fields->attemptEndReported = true;
                 if (!m_fields->attemptEndReported && runtime.hasLocalAttemptInFlight()) {
                     auto const progress = rankedProgressPercent(this);
                     m_fields->attemptEndReported = runtime.reportAttemptEnd(
@@ -1331,7 +1342,7 @@ public:
             !m_fields->attemptEndReported && scoringEnabled()) {
             if (deathPose) corum::ranked::SpectatorLiveRuntime::get().publishTerminal(*deathPose, false);
             m_fields->attemptEndReported = runtime.reportAttemptEnd(
-                m_fields->levelId, deathProgress, false, m_fields->qualifyingPercent
+                m_fields->levelId, deathProgress, false, m_fields->qualifyingPercent, true
             );
         }
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
@@ -1817,7 +1828,7 @@ public:
             "black",
             0.714f,
             {0.0f, 0.0f},
-            {layout.bottomLeftX + 112.0f, layout.bottomY + 1.0f},
+            {m_fields->qualifyingCaption->getPositionX() + m_fields->qualifyingCaption->getScaledContentSize().width + 10.0f, layout.bottomY + 1.0f},
             corum::ranked::ui::Text
         );
         m_fields->qualifyingLabel->setID("ranked-qualifying"_spr);
@@ -2095,12 +2106,57 @@ public:
         }
     }
 
+    void updateDeathFeed() {
+        auto const& runtime = corum::ranked::RankedRuntime::get();
+        auto const& match = runtime.view().match;
+        auto const size = CCDirector::sharedDirector()->getWinSize();
+        auto const layout = corum::ranked::layoutHud(size.width, size.height);
+        auto const now = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count();
+        auto const serverNow = runtime.serverNowMillis();
+        auto const context = match.matchId + ":" + std::to_string(match.roundNumber) + ":" +
+            std::to_string(match.deathmatchSequence) + ":" + std::to_string(m_fields->levelId);
+        auto& feed = m_fields->deathFeed;
+        feed.reset(context); feed.observe(match.deathLog, now, serverNow);
+        auto& visuals = m_fields->deathRows;
+        std::erase_if(visuals, [&](auto const& visual) {
+            if (std::any_of(feed.rows().begin(), feed.rows().end(), [&](auto const& row) { return row.event.id == visual.id; })) return false;
+            m_fields->hudShadows.erase(visual.label); visual.node->removeFromParentAndCleanup(true); return true;
+        });
+        for (std::size_t index = 0; index < feed.rows().size(); ++index) {
+            auto const& row = feed.rows()[index];
+            auto found = std::find_if(visuals.begin(), visuals.end(), [&](auto const& v) { return v.id == row.event.id; });
+            auto const y = layout.bottomY + 31.0f + static_cast<float>(index) * 16.0f;
+            if (found == visuals.end()) {
+                auto* node = CCNode::create(); node->setAnchorPoint(CCPointZero);
+                node->setPosition({layout.bottomLeftX + 4.0f, y}); m_fields->hudRoot->addChild(node, 5);
+                auto const name = row.event.side == "A" ? match.playerAName : match.playerBName;
+                auto* text = addShadowedHudLabel(node, fmt::format("{} {}%", name, formatScore(row.event.progressPercent)),
+                    "black", 0.65f, CCPointZero, CCPointZero,
+                    row.event.side == match.side ? corum::ranked::ui::Red : corum::ranked::ui::Green);
+                limitHudWidth(text, std::min(220.0f, size.width * .46f), 0.65f, 0.40f);
+                visuals.push_back({row.event.id, node, text, y, false}); found = std::prev(visuals.end());
+            }
+            auto const age = now - row.createdAtMs;
+            if (age >= 5000 && !found->fading) {
+                found->fading = true; found->node->stopAllActions();
+                auto const duration = static_cast<float>(std::max(.01, (5250 - age) / 1000));
+                found->node->runAction(CCEaseSineIn::create(CCMoveBy::create(duration, {0, -8})));
+                found->label->runAction(CCFadeTo::create(duration, 0));
+                if (auto* shadow = hudShadow(found->label)) shadow->runAction(CCFadeTo::create(duration, 0));
+            } else if (!found->fading && found->targetY != y) {
+                found->targetY = y; found->node->stopAllActions();
+                found->node->runAction(CCEaseSineOut::create(CCMoveTo::create(.22f, {layout.bottomLeftX + 4.0f, y})));
+            }
+        }
+    }
+
     void updateRankedHud() {
         auto& runtime = corum::ranked::RankedRuntime::get();
         auto const& match = runtime.view().match;
         m_fields->renderedRevision = runtime.view().revision;
         if (!m_fields->hudRoot || !m_fields->fpsLabel || !m_fields->ownScoreLabel) return;
 
+        updateDeathFeed();
         auto const placement = runtime.isPlacement();
 
         auto attemptsUsedA = match.deathmatchAttemptsUsedA;

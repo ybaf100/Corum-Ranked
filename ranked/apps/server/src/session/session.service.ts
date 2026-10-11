@@ -82,7 +82,7 @@ export interface SessionCreationResult {
 export class SessionService {
   public constructor(
     @Inject(DATABASE) private readonly database: DatabasePort,
-    @Inject(CSMP_TIER_SOURCE) private readonly csmpTierSource: CsmpTierSource,
+    @Inject(CSMP_TIER_SOURCE) _unusedCsmpTierSource: CsmpTierSource,
     @Inject(SERVER_CLOCK) private readonly clock: ServerClock,
     @Inject(ID_GENERATOR) private readonly ids: IdGenerator,
     private readonly config: RankedConfigService,
@@ -115,11 +115,8 @@ export class SessionService {
     }
     this.assertEnvironment(dto.installedMods);
 
-    const existing = await this.findExistingProfile(dto.gdAccountId);
-    const needsSeed = !existing?.seed_applied_at;
-    const csmpTier = needsSeed
-      ? await this.csmpTierSource.fetchCurrentTier(dto.gdAccountId)
-      : null;
+    // Placement establishes LP and MMR. A new unplaced profile uses the NONE
+    // placeholder locally; no external CSMP request belongs on admission.
     let now = this.clock.now();
     const sessionToken = this.tokens.createSessionToken();
     let expiresAt = new Date(now.getTime() + config.operational.timeouts.sessionSeconds * 1_000);
@@ -160,7 +157,7 @@ export class SessionService {
       const seededProfile = await this.ensureSeededProfile(
         transaction,
         player.id,
-        csmpTier,
+        "NONE",
         config.operational.csmpSeeds,
         now,
       );
@@ -175,7 +172,8 @@ export class SessionService {
           player.id,
           this.tokens.hash(sessionToken),
           dto.clientVersion,
-          JSON.stringify({ installedMods: dto.installedMods, clientInstanceId: dto.clientInstanceId ?? null }),
+          JSON.stringify({ installedMods: dto.installedMods, clientInstanceId: dto.clientInstanceId ?? null,
+            clientBuildChannel: dto.clientBuildChannel ?? "release" }),
           expiresAt.toISOString(),
           now.toISOString(),
         ],
@@ -281,17 +279,6 @@ export class SessionService {
         [session.sessionId, now.toISOString()]);
     });
     return { closed: true, serverNow: now.toISOString() };
-  }
-
-  private async findExistingProfile(gdAccountId: string): Promise<ExistingProfileRow | null> {
-    const result = await this.database.query<ExistingProfileRow>(
-      `SELECT rp.*, p.id AS player_id
-       FROM ranked_players p
-       JOIN ranked_profiles rp ON rp.player_id = p.id
-       WHERE p.gd_account_id = $1`,
-      [gdAccountId],
-    );
-    return result.rows[0] ?? null;
   }
 
   private async upsertPlayer(transaction: SqlExecutor, dto: CreateSessionDto): Promise<PlayerRow> {

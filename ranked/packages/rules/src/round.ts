@@ -35,6 +35,7 @@ export interface RoundAttempt {
   awardedScore: number;
   valid: boolean;
   invalidReason: string | null;
+  nativeDeath?: boolean;
 }
 
 export interface LastAttemptWindow {
@@ -49,6 +50,7 @@ export interface RoundOutcome {
   winner: PlayerSide | null;
   reason: RoundResultReason;
   settledAtMs: number;
+  decisive?: boolean;
 }
 
 export interface RoundState {
@@ -133,6 +135,31 @@ const finishByScore = (state: RoundState, atMs: number): RoundState => {
   return finishRound(state, comparison.result, "SCORE", atMs);
 };
 
+// Apply the requested immediate-win margins to committed totals after the
+// existing ten-second window ends. Transient progress is not result evidence.
+export const decisiveRoundWinner = (state: RoundState, atMs: number): PlayerSide | null => {
+  if (state.outcome) return null;
+  if (state.lastAttemptWindow) {
+    const window = state.lastAttemptWindow;
+    return atMs >= window.endsAtMs && state.clears[window.triggerSide] >= state.rules.clearTarget &&
+      state.clears[window.targetSide] <= 1 ? window.triggerSide : null;
+  }
+  if (atMs < state.finalWindowEndAtMs || Math.abs(state.scores.A - state.scores.B) < 250) return null;
+  return state.scores.A > state.scores.B ? "A" : "B";
+};
+
+const finishDecisiveRound = (state: RoundState, winner: PlayerSide, atMs: number): RoundState => {
+  const next = cloneRound(state);
+  for (const attempt of activeAttempts(next)) {
+    attempt.endedAtMs = atMs;
+    attempt.valid = false;
+    attempt.invalidReason = "ROUND_VICTORY_DECIDED";
+  }
+  const finished = finishRound(next, winner, state.lastAttemptWindow ? "CLEAR_TARGET_LAST_ATTEMPT" : "SCORE", atMs);
+  finished.outcome!.decisive = true;
+  return finished;
+};
+
 // Voluntary concession preserves already earned scores; abandoned active runs
 // are not Clears and cannot later submit result evidence into the next round.
 export const surrenderRound = (state: RoundState, side: PlayerSide, atMs: number): RoundState => {
@@ -180,6 +207,9 @@ export const advanceRoundClock = (state: RoundState, atMs: number): RoundState =
 
   const next = cloneRound(state);
   next.lastEvaluatedAtMs = atMs;
+
+  const decisive = decisiveRoundWinner(next, atMs);
+  if (decisive) return finishDecisiveRound(next, decisive, atMs);
 
   if (next.lastAttemptWindow) {
     if (atMs < next.lastAttemptWindow.endsAtMs) {
@@ -290,11 +320,16 @@ const enterLastAttemptWindow = (
   atMs: number,
 ): RoundState => {
   const next = cloneRound(state);
+  const endsAtMs = atMs >= next.normalEndAtMs
+    ? Math.min(atMs + next.rules.lastAttemptWindowSeconds * 1_000, next.finalWindowEndAtMs)
+    : atMs + next.rules.lastAttemptWindowSeconds * 1_000;
   next.lastAttemptWindow = {
     triggerSide,
     targetSide: otherSide(triggerSide),
-    startedAtMs: atMs,
-    endsAtMs: atMs + next.rules.lastAttemptWindowSeconds * 1_000,
+    startedAtMs: Math.min(atMs, endsAtMs),
+    // The ordinary expiry window already owns its deadline. A third Clear
+    // during/after it must not add another ten seconds or revive closed starts.
+    endsAtMs,
   };
   next.phase = "LAST_ATTEMPT_WINDOW";
   next.stateVersion += 1;
@@ -476,7 +511,7 @@ export const endRoundAttempt = (
     const opponentClears = next.clears[otherSide(side)];
     if (opponentClears < next.rules.clearTarget) {
       return {
-        state: enterLastAttemptWindow(next, side, serverAcceptedAtMs),
+        state: advanceRoundClock(enterLastAttemptWindow(next, side, serverAcceptedAtMs), serverAcceptedAtMs),
         accepted: true,
         duplicate: false,
         reason: null,

@@ -60,7 +60,7 @@ struct RankedAudioManager {
  void setMode(RankedAudioMode);void fadeOutForGameplay();void restoreMenuMusic();
 };
 ${['void RankedAudioManager::setMode(', 'void RankedAudioManager::fadeOutForGameplay()', 'void RankedAudioManager::restoreMenuMusic()'].map(n => method(audio,n)).join('\n')}
-enum class RuntimeStage {Ready,Matched};
+enum class RuntimeStage { AwaitingUpdate,Ready,Matched};
 struct RankedRuntime {
  struct Result{std::string stageGrade="A";int stageIndex=0;};
  struct View{RuntimeStage stage=RuntimeStage::Ready;int client=0;

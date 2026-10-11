@@ -9,6 +9,8 @@ export interface RankedSessionContext {
   readonly displayedTier: DisplayTier;
   readonly hiddenMmr: number;
   readonly placementGames: number;
+  readonly clientVersion?: string;
+  readonly clientBuildChannel?: "debug" | "release";
 }
 
 export interface RankedRequest extends Request {

@@ -20,6 +20,7 @@ const migrationNames = [
   "0011_debug_spectate.sql",
     "0012_gameplay_controls.sql",
     "0013_native_scene_entry.sql",
+    "0020_deathmatch_native_death.sql",
     "0014_forum_records.sql",
     "0015_forum_refresh_cooldown.sql",
     "0016_admin_history_reset.sql",

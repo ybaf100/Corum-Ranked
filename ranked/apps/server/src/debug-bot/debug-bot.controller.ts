@@ -1,6 +1,7 @@
 import { Body, Controller, Post, UseGuards } from "@nestjs/common";
 import { CurrentSession } from "../session/current-session.decorator.js";
 import { SessionGuard } from "../session/session.guard.js";
+import { AdmissionVersionGuard } from "../session/admission-version.guard.js";
 import type { RankedSessionContext } from "../session/session.types.js";
 import { CreateDebugBotMatchDto } from "./debug-bot.dto.js";
 import { DebugBotService } from "./debug-bot.service.js";
@@ -11,6 +12,7 @@ export class DebugBotController {
   public constructor(private readonly debugBot: DebugBotService) {}
 
   @Post("bot-match")
+  @UseGuards(AdmissionVersionGuard)
   public create(
     @CurrentSession() session: RankedSessionContext,
     @Body() body: CreateDebugBotMatchDto,

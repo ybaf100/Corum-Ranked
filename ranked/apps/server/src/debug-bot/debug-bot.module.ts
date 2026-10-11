@@ -1,3 +1,4 @@
+import { SessionModule } from "../session/session.module.js";
 import { Module } from "@nestjs/common";
 import { MatchModule } from "../match/match.module.js";
 import { QueueModule } from "../queue/queue.module.js";
@@ -6,7 +7,7 @@ import { DebugBotController } from "./debug-bot.controller.js";
 import { DebugBotService } from "./debug-bot.service.js";
 
 @Module({
-  imports: [QueueModule, MatchModule, RankedConfigModule],
+  imports: [SessionModule, QueueModule, MatchModule, RankedConfigModule],
   controllers: [DebugBotController],
   providers: [DebugBotService],
   exports: [DebugBotService],

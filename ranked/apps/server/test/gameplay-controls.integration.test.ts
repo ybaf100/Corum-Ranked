@@ -41,6 +41,7 @@ beforeAll(async () => {
     "0010_achievements_v1.sql",
     "0012_gameplay_controls.sql",
     "0013_native_scene_entry.sql",
+    "0020_deathmatch_native_death.sql",
   ]) {
     const migrationPath = fileURLToPath(
       new URL(`../../../migrations/${migrationName}`, import.meta.url),

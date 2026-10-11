@@ -250,15 +250,12 @@ describe("Ranked session/profile creation", () => {
     const guard = new SessionGuard(database, new TokenService(environmentFixture()), clock);
     const request = { headers: { authorization: `Bearer ${first.sessionToken}` } };
     const context = { switchToHttp: () => ({ getRequest: () => request }) } as any;
-    // Service fixture uses an old version; update only this persisted row to
-    // current so the test exercises the lease rather than version admission.
-    const { REQUIRED_RANKED_CLIENT_VERSION } = await import("../src/session/client-version.js");
-    await database.query("UPDATE ranked_sessions SET client_version = $1", [REQUIRED_RANKED_CLIENT_VERSION]);
+    // An admitted old build remains valid until its lease ends during a game.
     await expect(guard.canActivate(context)).resolves.toBe(true);
     clock.advance(90000);await expect(guard.canActivate(context)).rejects.toMatchObject({ status: 401 });
     await service.create(cleanDto("7001"));await expect(guard.canActivate(context)).rejects.toMatchObject({ status: 401 });
   });
-  it("persists a CSMP seed once and never reseeds after CSMP changes", async () => {
+  it("admits a new profile without CSMP and preserves its placeholder across logins", async () => {
     const source = new FakeCsmpSource();
     const service = buildService(source);
     const first = await service.create(cleanDto("7001"));
@@ -275,11 +272,11 @@ describe("Ranked session/profile creation", () => {
        WHERE p.gd_account_id = $1`,
       ["7001"],
     );
-    expect(source.calls).toBe(1);
+    expect(source.calls).toBe(0);
     expect(profile.rows[0]).toMatchObject({
-      hidden_mmr: 2500,
-      initial_csmp_tier: "BRONZE",
-      initial_seed_mmr: 2500,
+      hidden_mmr: 500,
+      initial_csmp_tier: "NONE",
+      initial_seed_mmr: 500,
     });
     expect(first.player.displayedTier).toBe("UNRANKED");
     expect(second.sessionToken).not.toBe(first.sessionToken);

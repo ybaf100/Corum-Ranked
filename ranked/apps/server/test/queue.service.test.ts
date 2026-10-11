@@ -125,7 +125,7 @@ const contextFor = async (
   if (placed) {
     await database.query(
       `UPDATE ranked_profiles
-       SET placement_games = 5, displayed_tier = 'BRONZE', visible_ranked_score = hidden_mmr
+       SET placement_games = 5, displayed_tier = 'BRONZE', hidden_mmr = 2500, visible_ranked_score = 2500
        WHERE player_id = (
          SELECT player_id FROM ranked_sessions WHERE token_hash = $1
        )`,

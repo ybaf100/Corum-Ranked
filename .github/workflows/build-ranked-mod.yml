@@ -1,9 +1,15 @@
 name: Build Corum Ranked Mod
 
-# Release packages are intentionally manual-only. Routine development pushes use
-# Build Corum Ranked Debug so GitHub Actions minutes are not spent compiling the
-# same four native targets twice.
+# Automatic Release builds are opt-in when public distribution is configured.
+# Debug and Release publish to distinct immutable tags and filenames.
 on:
+  push:
+    branches: [main]
+    paths:
+      - "corum-ranked-mod/**"
+      - "ranked/apps/server/src/session/client-version.ts"
+      - ".github/workflows/build-ranked-mod.yml"
+      - ".github/workflows/publish-ranked-download.yml"
   workflow_dispatch:
 
 permissions:
@@ -11,6 +17,7 @@ permissions:
 
 jobs:
   metadata:
+    if: github.event_name == 'workflow_dispatch' || vars.RANKED_PUBLISH_RELEASES == 'true'
     name: Validate Ranked release manifest
     runs-on: ubuntu-latest
     outputs:
@@ -74,11 +81,13 @@ jobs:
       - metadata
       - build
     steps:
+      - uses: actions/checkout@v7
       - uses: geode-sdk/build-geode-mod/combine@main
         id: build
       - name: Normalize combined release package
         env:
           BUILD_OUTPUT: ${{ steps.build.outputs.build-output }}
+          MOD_VERSION: ${{ needs.metadata.outputs.version }}
         shell: bash
         run: |
           mkdir -p dist
@@ -88,8 +97,26 @@ jobs:
             exit 1
           fi
           cp "${PACKAGES[0]}" "dist/hwanhee1.corum_ranked.geode"
+          python3 corum-ranked-mod/tools/prepare-mod-release.py dist/hwanhee1.corum_ranked.geode release "$MOD_VERSION" dist
+          cp "dist/Corum-Ranked-$MOD_VERSION-release.geode" dist/hwanhee1.corum_ranked.geode
+          python3 corum-ranked-mod/tests/verify-visibility-package.py dist/hwanhee1.corum_ranked.geode "$MOD_VERSION"
+          python3 corum-ranked-mod/tests/verify-font-package.py dist/hwanhee1.corum_ranked.geode
+          python3 corum-ranked-mod/tests/verify-asset-package.py --mod dist/hwanhee1.corum_ranked.geode
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ needs.metadata.outputs.artifact_name }}
-          path: dist/hwanhee1.corum_ranked.geode
+          path: |
+            dist/hwanhee1.corum_ranked.geode
+            dist/release.json
           if-no-files-found: error
+
+  publish-download:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.RANKED_PUBLISH_RELEASES == 'true'
+    needs: [metadata, package]
+    uses: ./.github/workflows/publish-ranked-download.yml
+    with:
+      channel: release
+      version: ${{ needs.metadata.outputs.version }}
+      artifact: ${{ needs.metadata.outputs.artifact_name }}
+    secrets:
+      release_token: ${{ secrets.RANKED_RELEASE_TOKEN }}

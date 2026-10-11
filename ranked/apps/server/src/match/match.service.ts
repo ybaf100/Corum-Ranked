@@ -1,3 +1,4 @@
+import { recentRoundDeaths, type DeathFeedEvent } from "./death-feed.js";
 import {
   ConflictException,
   Inject,
@@ -13,6 +14,7 @@ import {
   createRound,
   evaluateDeathmatch,
   endRoundAttempt,
+  decisiveRoundWinner,
   perfectThreeClearWinner,
   mapPresentationFields,
   resolveBans,
@@ -1367,6 +1369,7 @@ export class MatchService {
           (candidate) => candidate.id === body.attemptId,
         );
         if (!attempt) throw new Error("Ended attempt is missing from domain state");
+        attempt.nativeDeath = body.nativeDeath === true && !body.cleared;
         await transaction.query(
           `UPDATE ranked_attempts
            SET ended_at = $4, client_ended_at = $5, progress_percent = $6,
@@ -1955,6 +1958,13 @@ export class MatchService {
         now,
       );
       const startDeadlineMs = withoutOrphans.lastAttemptWindow?.endsAtMs ?? withoutOrphans.finalWindowEndAtMs;
+      // A decided victory cannot be held open by an unfinished run or a delayed
+      // Start lease. Ordinary close results still retain their transport grace.
+      if (decisiveRoundWinner(withoutOrphans, now.getTime())) {
+        await this.persistRoundState(transaction, match, round,
+          advanceRoundClock(withoutOrphans, now.getTime()), now);
+        return this.lockMatch(transaction, match.id);
+      }
       const pendingStartLease = await this.hasPendingStartLease(
         transaction,
         match,
@@ -2874,7 +2884,7 @@ export class MatchService {
     await transaction.query(
       `UPDATE ranked_deathmatch_attempts
        SET ended_at = $2, progress_percent = $3, cleared = $4,
-           awarded_score = $5, client_end_event_id = $6
+           awarded_score = $5, client_end_event_id = $6, native_death = $7
        WHERE id = $1`,
       [
         attempt.id,
@@ -2883,6 +2893,7 @@ export class MatchService {
         body.cleared,
         awardedScore,
         body.clientEventId,
+        body.nativeDeath === true && !body.cleared,
       ],
     );
     this.runtimeState.endAttempt(
@@ -3262,6 +3273,7 @@ export class MatchService {
     const opponentSide: PlayerSide = viewerSide === "A" ? "B" : "A";
     const config = this.matchConfig(match);
     let currentRound: object | null = null;
+    let deathLog: readonly DeathFeedEvent[] = [];
     let opponentProgress: number | null = null;
     let opponentFinished = false;
     let opponentPractice = false;
@@ -3280,6 +3292,7 @@ export class MatchService {
       if (round) {
         ready = { A: Boolean(round.ready_a_at), B: Boolean(round.ready_b_at) };
         const domain = round.domain_state ? this.roundState(round) : null;
+        if (domain) deathLog = recentRoundDeaths(domain, now.getTime());
         const progressA = this.runtimeState.progress(match.id, round.round_number, "A");
         const progressB = this.runtimeState.progress(match.id, round.round_number, "B");
         opponentProgress = this.runtimeState.displayProgress(
@@ -3384,6 +3397,16 @@ export class MatchService {
     ) {
       const current = await this.currentDeathmatch(transaction, match);
       const live = await this.deathmatchLiveSnapshot(transaction, match, current);
+      const deaths = await transaction.query<{ client_end_event_id: string; player_id: string; progress_percent: number; ended_at: Date | string }>(
+        `SELECT client_end_event_id, player_id, progress_percent, ended_at FROM ranked_deathmatch_attempts
+         WHERE deathmatch_id = $1 AND native_death = TRUE AND valid = TRUE AND cleared = FALSE
+           AND ended_at > $2 AND ended_at <= $3 AND client_end_event_id IS NOT NULL
+         ORDER BY ended_at DESC, client_end_event_id DESC LIMIT 3`,
+        [current.id, new Date(now.getTime() - 5_000).toISOString(), now.toISOString()],
+      );
+      deathLog = [...deaths.rows].reverse().map(row => ({ id: row.client_end_event_id,
+        side: row.player_id === match.player_a_id ? "A" : "B",
+        progressPercent: Number(row.progress_percent), endedAtMs: new Date(row.ended_at).getTime() }));
       const deathmatchSlot = deathmatchRuntimeSlot(Number(current.sequence));
       opponentProgress = this.runtimeState.displayProgress(
         match.id,
@@ -3463,6 +3486,7 @@ export class MatchService {
       matchType: match.match_type,
       debug: match.match_type === "DEBUG_BOT",
       side: viewerSide,
+      deathLog,
       opponentProgress,
       opponentFinished,
       opponentPractice,

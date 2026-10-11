@@ -1,5 +1,7 @@
 #include "RankedRuntime.hpp"
 #include "RankedAudioManager.hpp"
+#include "ui/RankedModUpdateManager.hpp"
+#include "ui/RankAssetPackManager.hpp"
 #include "SpectatorLiveRuntime.hpp"
 #include "domain/SpectatorLocalSafety.hpp"
 #include "domain/AttemptScoring.hpp"
@@ -622,6 +624,7 @@ void RankedRuntime::begin() {
     m_view.placement = {};
     m_view.match = {};
     m_view.playerInfo = {};
+    m_rejectedRequiredVersion.clear();
     m_view.forumRecords = {};
     m_view.historyLoading = false; m_view.historyError.clear(); m_view.history.clear();
     fetchConfig();
@@ -748,15 +751,61 @@ void RankedRuntime::fetchConfig() {
                 }
             }
             m_environmentPolicy = std::move(policy);
+            auto const channel = rankedBuildChannel();
+            auto const update = root["modUpdates"][channel];
+            auto& updates = ui::RankedModUpdateManager::get();
+            auto const bytes = update["sizeBytes"].asInt().unwrapOr(0);
+            updates.configure({
+                .version = update["version"].asString().unwrapOr(root["requiredClientVersion"].asString().unwrapOr(Mod::get()->getVersion().toVString())),
+                .sha256 = update["sha256"].asString().unwrapOr(""),
+                .channel = channel,
+                .sizeBytes = bytes > 0 ? static_cast<std::uintmax_t>(bytes) : 0,
+            }, update.isObject());
+            if (updates.ready() && !m_rejectedRequiredVersion.empty() &&
+                m_rejectedRequiredVersion != Mod::get()->getVersion().toVString()) {
+                // A rolling deployment can return config from the old instance
+                // after the new instance rejected admission. Keep the gate
+                // closed until its pinned download metadata is available.
+                updates.configure({.version = m_rejectedRequiredVersion, .sha256 = "", .channel = channel, .sizeBytes = 0}, false);
+            }
+            if (!updates.ready()) {
+                setStage(RuntimeStage::AwaitingUpdate, "A mod update is required before entering Ranked.");
+                return;
+            }
             m_installedMods = captureInstalledMods();
             auto const decision = evaluateEnvironment(m_installedMods, m_environmentPolicy);
             if (!decision.allowed) {
                 showEnvironmentWarning(decision, true);
                 return;
             }
+            auto& audio = RankedAudioManager::get();
+            auto& assets = ui::RankAssetPackManager::get();
+            audio.configure(m_view.client);
+            assets.configure(m_view.client.assets);
+            if (audio.requiresResourceDownload() || assets.requiresDownload()) {
+                setStage(RuntimeStage::AwaitingResources, "Download the additional resources before entering Ranked.");
+                return;
+            }
             createSession();
         }
     );
+}
+
+bool RankedRuntime::handleRequiredUpdate(web::WebResponse const& response) {
+    if (response.code() != 426) return false;
+    m_rejectedRequiredVersion = response.json().unwrapOr(matjson::Value())["requiredVersion"].asString().unwrapOr("");
+    // The server rejects before creating a queue/match. Re-enter the same
+    // admission gate; do not introduce any version gate into round entry.
+    invalidatePollRequest();
+    fetchConfig();
+    return true;
+}
+
+void RankedRuntime::finishAdmission() {
+    if (!m_rankedOpen || m_view.stage != RuntimeStage::AwaitingResources || m_controlBusy ||
+        !ui::RankedModUpdateManager::get().ready() ||
+        !RankedAudioManager::get().resourcesReady() || ui::RankAssetPackManager::get().requiresDownload()) return;
+    createSession();
 }
 
 std::vector<InstalledModSnapshot> RankedRuntime::captureInstalledMods() const {
@@ -851,10 +900,11 @@ void RankedRuntime::createSession(bool takeOver) {
     body["gdAccountId"] = fmt::format("{}", accountId);
     body["gdUsername"] = username;
     body["clientVersion"] = Mod::get()->getVersion().toVString();
+    body["clientBuildChannel"] = rankedBuildChannel();
     body["installedMods"] = installedModsJson();
     body["takeOver"] = takeOver;
     auto request = baseRequest({});
-    // Initial profile creation can require a cold Apps Script CSMP lookup plus one retry.
+    // Admission no longer waits for CSMP; keep the existing cold-server allowance.
     request.timeout(std::chrono::seconds(70));
     request.bodyJSON(body);
     m_controlBusy = true;
@@ -868,6 +918,7 @@ void RankedRuntime::createSession(bool takeOver) {
             if (sessionGeneration != m_sessionGeneration || !m_rankedOpen) return;
             m_controlBusy = false;
             if (!successful(response)) {
+                if (handleRequiredUpdate(response)) return;
                 auto const error = response.json().unwrapOr(matjson::Value());
                 m_view.accountActiveElsewhere = response.code() == 409 &&
                     error["code"].asString().unwrapOr("") == "RANKED_ACCOUNT_ACTIVE";
@@ -1068,6 +1119,7 @@ void RankedRuntime::skipPlacement() {
         [this](web::WebResponse response) {
             m_controlBusy = false;
             if (!successful(response)) {
+                if (handleRequiredUpdate(response)) return;
                 setStage(RuntimeStage::Ready, "Placement skip was not applied.", responseError(response));
                 return;
             }
@@ -1102,6 +1154,7 @@ void RankedRuntime::startPlacement(int startingPool, int stageCount) {
         [this](web::WebResponse response) {
             m_controlBusy = false;
             if (!successful(response)) {
+                if (handleRequiredUpdate(response)) return;
                 setStage(RuntimeStage::Ready, "Choose a starting Pool.", responseError(response));
                 return;
             }
@@ -1167,6 +1220,7 @@ void RankedRuntime::joinQueue() {
         [this](web::WebResponse response) {
             m_controlBusy = false;
             if (!successful(response)) {
+                if (handleRequiredUpdate(response)) return;
                 setStage(RuntimeStage::Ready, "Ranked session ready.", responseError(response));
                 return;
             }
@@ -1210,6 +1264,7 @@ void RankedRuntime::startDebugBotMatch(DebugBotMatchOptions options) {
         [this](web::WebResponse response) {
             m_controlBusy = false;
             if (!successful(response)) {
+                if (handleRequiredUpdate(response)) return;
                 setStage(RuntimeStage::Ready, "Ranked session ready.", responseError(response));
                 return;
             }
@@ -1665,6 +1720,7 @@ void RankedRuntime::parseMatchState(matjson::Value const& root) {
     }
 
     auto const round = root["currentRound"];
+    m_view.match.decisiveRoundEnded = round["outcome"]["decisive"].asBool().unwrapOr(false);
     if (round.isObject()) {
         m_view.match.roundNumber = static_cast<int>(round["roundNumber"].asInt().unwrapOr(0));
         m_view.match.banner = round["banner"].asString().unwrapOr("");
@@ -1861,6 +1917,20 @@ void RankedRuntime::parseMatchState(matjson::Value const& root) {
         }
     }
 
+    if (m_deathFeedContext != currentAttemptContextKey()) {
+        m_deathFeedContext = currentAttemptContextKey(); m_view.match.deathLog.clear();
+    }
+    if (auto deaths = root["deathLog"].asArray(); deaths.isOk()) {
+        auto const context = currentAttemptContextKey();
+        for (auto const& event : deaths.unwrap()) {
+            auto const side = event["side"].asString().unwrapOr("");
+            if (side == m_view.match.side) continue; // own deaths appear immediately from native death
+            recordDeath({event["id"].asString().unwrapOr(""), side,
+                event["progressPercent"].asDouble().unwrapOr(0), event["endedAtMs"].asInt().unwrapOr(0)}, context);
+        }
+    }
+
+    if (m_view.match.decisiveRoundEnded) retireDecisiveAttempt();
     if (!stateAllowsActiveAttempt(m_view.match.state) && !nativeEntryStartGranted()) {
         m_pendingProgress.reset();
         if (hasLocalAttemptInFlight()) {
@@ -3386,7 +3456,35 @@ void RankedRuntime::reportAttemptProgress(int levelId, double progressPercent) {
     flushProgressTelemetry();
 }
 
-bool RankedRuntime::reportAttemptEnd(int levelId, double progressPercent, bool cleared, std::optional<double> qualifyingPercentOverride) {
+void RankedRuntime::recordDeath(DeathFeedEvent event, std::string const& contextKey) {
+    if (m_deathFeedContext != contextKey) {
+        m_deathFeedContext = contextKey; m_view.match.deathLog.clear();
+    }
+    if (event.id.empty() || (event.side != "A" && event.side != "B")) return;
+    auto& events = m_view.match.deathLog;
+    if (std::any_of(events.begin(), events.end(), [&event](auto const& old) { return old.id == event.id; })) return;
+    events.push_back(std::move(event));
+    std::stable_sort(events.begin(), events.end(), [](auto const& a, auto const& b) { return a.endedAtMs < b.endedAtMs; });
+    if (events.size() > 3) events.erase(events.begin(), events.end() - 3);
+}
+
+std::int64_t RankedRuntime::serverNowMillis() const {
+    return m_serverClock.serverNowMillis(localNowMillis());
+}
+
+void RankedRuntime::retireDecisiveAttempt() {
+    // The server explicitly revoked all open attempts after the decisive
+    // deadline. Retire that exact match's local journal without scoring it.
+    invalidateAttemptRequest();
+    ++m_progressRequestGeneration; m_progressRequest.cancel(); m_progressBusy = false;
+    ++m_attemptIntentRequestGeneration; m_attemptIntentRequest.cancel(); m_attemptIntentBusy = false;
+    m_attemptId.clear(); m_attemptLevelId = 0; m_attemptContextKey.clear();
+    m_pendingStart.reset(); m_pendingEnd.reset(); m_attemptBacklog.clear(); m_attemptIntentBacklog.clear();
+    m_pendingProgress.reset(); m_gameplayStartEligible = false;
+    m_nextAttemptRetryAt = {}; m_nextIntentRetryAt = {};
+}
+
+bool RankedRuntime::reportAttemptEnd(int levelId, double progressPercent, bool cleared, std::optional<double> qualifyingPercentOverride, bool nativeDeath) {
     if (spectatorAttemptTransportBlocked(isSpectating(), m_spectatorLocalTransportOwner != nullptr)) return false;
     if (!canTrackLevel(levelId) && !canFinishTrackedLevel(levelId)) return false;
 
@@ -3443,6 +3541,7 @@ bool RankedRuntime::reportAttemptEnd(int levelId, double progressPercent, bool c
         .contextKey = contextKey,
         .optimisticScore = optimisticScore,
         .optimisticClear = cleared ? 1 : 0,
+        .nativeDeath = nativeDeath && !cleared,
     };
 
     if (!m_attemptBacklog.empty()) {
@@ -3457,6 +3556,7 @@ bool RankedRuntime::reportAttemptEnd(int levelId, double progressPercent, bool c
         m_pendingEnd = end;
     }
 
+    if (end.nativeDeath) recordDeath({end.eventId, m_view.match.side, finalProgress, observedEndMillis}, contextKey);
     ++m_view.revision;
     // Do not leave a best-effort progress POST competing with the authoritative
     // End on iOS. Cancelling it is safe: End carries the exact final progress,
@@ -3709,6 +3809,7 @@ void RankedRuntime::sendAttemptEnd() {
     body["clientEventId"] = ending.eventId;
     body["progressPercent"] = ending.progressPercent;
     body["cleared"] = ending.cleared;
+    if (!isPlacement()) body["nativeDeath"] = ending.nativeDeath;
     if (!ending.clientEndedAt.empty()) body["clientEndedAt"] = ending.clientEndedAt;
     auto const placement = isPlacement();
     auto request = baseRequest(m_sessionToken, placement ? std::string() : m_matchToken);

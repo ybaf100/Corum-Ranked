@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Param, Post, UseGuards } from "@nestjs/common";
 import { CurrentSession } from "../session/current-session.decorator.js";
 import { SessionGuard } from "../session/session.guard.js";
+import { AdmissionVersionGuard } from "../session/admission-version.guard.js";
 import type { RankedSessionContext } from "../session/session.types.js";
 import {
   PlacementAttemptEndDto,
@@ -24,6 +25,7 @@ export class PlacementController {
   }
 
   @Post("start")
+  @UseGuards(AdmissionVersionGuard)
   public start(
     @CurrentSession() session: RankedSessionContext,
     @Body() body: StartPlacementDto,
@@ -32,6 +34,7 @@ export class PlacementController {
   }
 
   @Post("skip")
+  @UseGuards(AdmissionVersionGuard)
   public skip(
     @CurrentSession() session: RankedSessionContext,
     @Body() body: SkipPlacementDto,

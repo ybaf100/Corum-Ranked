@@ -1,7 +1,7 @@
 {
   "name": "corum-ranked",
   "private": true,
-  "version": "0.5.0-beta.55",
+  "version": "0.5.0-beta.56",
   "workspaces": [
     "packages/*",
     "apps/*",

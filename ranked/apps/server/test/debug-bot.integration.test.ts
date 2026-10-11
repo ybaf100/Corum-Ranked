@@ -104,6 +104,7 @@ beforeAll(async () => {
     "0010_achievements_v1.sql",
     "0012_gameplay_controls.sql",
     "0013_native_scene_entry.sql",
+    "0020_deathmatch_native_death.sql",
   ]) {
     const path = fileURLToPath(new URL(`../../../migrations/${migrationName}`, import.meta.url));
     await pglite.exec(await readFile(path, "utf8"));
@@ -168,10 +169,10 @@ describe("development-only Bot Match using the production Ranked engine", () => 
     });
     await database.query(
       `UPDATE ranked_profiles
-       SET placement_games = 5, displayed_tier = 'BRONZE', visible_ranked_score = hidden_mmr
+       SET placement_games = 5, displayed_tier = 'BRONZE', hidden_mmr = 2500, visible_ranked_score = 2500
        WHERE player_id = (
          SELECT player_id FROM ranked_sessions WHERE token_hash = $1
-       )`,
+       ) AND placement_games = 0`,
       [tokens.hash(created.sessionToken)],
     );
     const result = await database.query<{
@@ -653,8 +654,8 @@ describe("development-only Bot Match using the production Ranked engine", () => 
     expect(result.after.displayed_tier).toBe("BRONZE");
     expect(Number(result.after.wins)).toBe(1);
     expect(Number(result.after.losses)).toBe(0);
-    expect(result.after.initial_csmp_tier).toBe("BRONZE");
-    expect(Number(result.after.initial_seed_mmr)).toBe(2_500);
+    expect(result.after.initial_csmp_tier).toBe("NONE");
+    expect(Number(result.after.initial_seed_mmr)).toBe(500);
     expect(result.after.seed_applied_at).toBeTruthy();
     expect(result.match.match_type).toBe("DEBUG_BOT");
     expect(Number(result.match.mmr_delta_a)).toBe(result.expected.deltaA);

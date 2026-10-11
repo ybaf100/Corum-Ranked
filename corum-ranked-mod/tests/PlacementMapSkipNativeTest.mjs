@@ -72,7 +72,7 @@ std::string RankedRuntime::newEventId(std::string_view){return "skip-"+std::to_s
 void RankedRuntime::setTransientError(std::string s){m_view.error=s;}
 void RankedRuntime::parsePlacementState(matjson::Value const& s){++parsed;m_view.placement.state=s["state"].asString().unwrapOr(m_view.placement.state);}
 void RankedRuntime::flushAttemptEvents(){++flushes;}
-bool RankedRuntime::reportAttemptEnd(int level,double progress,bool cleared,std::optional<double>){
+bool RankedRuntime::reportAttemptEnd(int level,double progress,bool cleared,std::optional<double>,bool){
  assert(!cleared);if(refuseEnd)return false;++ends;frozenProgress=progress;
  m_pendingEnd=PendingEnd{level,progress,false,"frozen-end","","run",0,0};return true;
 }

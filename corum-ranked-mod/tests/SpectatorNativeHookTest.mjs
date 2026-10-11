@@ -130,7 +130,7 @@ struct RankedRuntime {
     void reportPracticePresence(bool){}
     bool isSpectating() { return spectatorAuthorityReady(serverSpectator, placement, ownAlive); }
     void setSpectatorLocalTransportBlocked(void const* p, bool b) { if (b) owner = p; else if (owner == p) owner = nullptr; }
-    bool reportAttemptEnd(int, double, bool clear, std::optional<double>) {
+    bool reportAttemptEnd(int, double, bool clear, std::optional<double>, bool = false) {
         if (spectatorAttemptTransportBlocked(isSpectating(), owner != nullptr)) return false;
         ++ends; clears += clear ? 1 : 0; ownAlive = false; return true;
     }

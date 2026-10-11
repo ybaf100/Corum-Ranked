@@ -316,7 +316,7 @@ void hudTests() {
     input.remainingMillis = 0;
     input.signedRemainingMillis = 0;
     hud = presentHud(input);
-    assert(hud.stateText == "FINAL ATTEMPT");
+    assert(hud.stateText.empty());
     assert(hud.timerText == "10.0");
     assert(hud.windowStateFirst);
 
@@ -327,12 +327,13 @@ void hudTests() {
     input.signedRemainingMillis = -10'100;
     hud = presentHud(input);
     assert(hud.timerText == "0.0");
+    assert(hud.stateText == "FINAL ATTEMPT");
 
     input.state = "FINAL_ATTEMPT_WINDOW";
     input.remainingMillis = 7'350;
     input.signedRemainingMillis = 7'350;
     hud = presentHud(input);
-    assert(hud.stateText == "FINAL ATTEMPT");
+    assert(hud.stateText.empty());
     assert(hud.timerText == "7.4");
     assert(hud.windowStateFirst);
 

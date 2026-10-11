@@ -3,16 +3,11 @@ import {
   ExecutionContext,
   Inject,
   Injectable,
-  HttpException,
   UnauthorizedException,
 } from "@nestjs/common";
 import type { DisplayTier } from "@corum-ranked/rules";
 import { TokenService } from "../common/token.service.js";
 import { DATABASE, type DatabasePort } from "../database/database.port.js";
-import {
-  REQUIRED_RANKED_CLIENT_VERSION,
-  normalizeRankedClientVersion,
-} from "./client-version.js";
 import type { RankedRequest, RankedSessionContext } from "./session.types.js";
 import { SERVER_CLOCK, type ServerClock } from "../common/runtime.module.js";
 import { sessionAliveSince } from "./session-presence.policy.js";
@@ -26,6 +21,7 @@ interface SessionRow {
   hidden_mmr: number;
   placement_games: number;
   client_version: string;
+  build_channel: string | null;
 }
 
 @Injectable()
@@ -47,6 +43,7 @@ export class SessionGuard implements CanActivate {
       `SELECT
          s.id AS session_id,
          s.client_version,
+         s.environment_snapshot->>'clientBuildChannel' AS build_channel,
          p.id AS player_id,
          p.gd_account_id::text AS gd_account_id,
          p.gd_username,
@@ -64,17 +61,9 @@ export class SessionGuard implements CanActivate {
     );
     const row = result.rows[0];
     if (!row || row.hidden_mmr === null) throw new UnauthorizedException("Invalid or expired session");
-    if (
-      normalizeRankedClientVersion(row.client_version) !==
-      normalizeRankedClientVersion(REQUIRED_RANKED_CLIENT_VERSION)
-    ) {
-      throw new HttpException({
-        code: "RANKED_CLIENT_UPDATE_REQUIRED",
-        message: `Corum Ranked ${REQUIRED_RANKED_CLIENT_VERSION} is required. Update the mod before entering Ranked.`,
-        requiredVersion: REQUIRED_RANKED_CLIENT_VERSION,
-        clientVersion: row.client_version,
-      }, 426);
-    }
+    // Admission already validated the version before this token was issued.
+    // A deployment must not eject players from an existing game. New lobby
+    // admissions use the current channel requirement in SessionController.
     const session: RankedSessionContext = {
       sessionId: row.session_id,
       playerId: row.player_id,
@@ -83,6 +72,8 @@ export class SessionGuard implements CanActivate {
       displayedTier: row.displayed_tier,
       hiddenMmr: Number(row.hidden_mmr),
       placementGames: Number(row.placement_games),
+      clientVersion: row.client_version,
+      clientBuildChannel: row.build_channel === "debug" ? "debug" : "release",
     };
     request.rankedSession = session;
     return true;

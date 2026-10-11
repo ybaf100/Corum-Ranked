@@ -2,6 +2,7 @@
 
 #include "RankedRuntime.hpp"
 #include "RankedAudioManager.hpp"
+#include "ui/RankedModUpdateManager.hpp"
 #include "DebugBotPopup.hpp"
 #include "debug/DebugMenuPopup.hpp"
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
@@ -659,6 +660,7 @@ class CorumRankedLayer final : public CCLayerColor {
     }
 
     void syncResources() {
+        if (RankedRuntime::get().view().stage == RuntimeStage::AwaitingUpdate) return;
         auto& audio = RankedAudioManager::get();
         auto& assets = corum::ranked::ui::RankAssetPackManager::get();
         assets.configure(RankedRuntime::get().view().client.assets);
@@ -732,6 +734,10 @@ class CorumRankedLayer final : public CCLayerColor {
         auto const& view = RankedRuntime::get().view();
         auto const detailsKey = fmt::format(":details:{}:assets:{}", corum::ranked::RankedMapDetails::get().revision(),
             corum::ranked::ui::RankAssetPackManager::get().view().activeVersion);
+        if (view.stage == RuntimeStage::AwaitingUpdate) {
+            auto const& update = corum::ranked::ui::RankedModUpdateManager::get().view();
+            return fmt::format("mod-update:{}:{}:{}", static_cast<int>(update.state), update.targetVersion, update.error);
+        }
         if (view.environmentWarning.active) {
             return fmt::format("environment-warning:{}", view.revision);
         }
@@ -883,7 +889,7 @@ class CorumRankedLayer final : public CCLayerColor {
 
     void syncAudioMode() {
         auto& audio = RankedAudioManager::get();
-        if (showResourceGate()) return;
+        if (showResourceGate() || RankedRuntime::get().view().stage == RuntimeStage::AwaitingUpdate) return;
 
         auto const& view = RankedRuntime::get().view();
         auto const lobbyMode = [&view]() {
@@ -1105,6 +1111,11 @@ class CorumRankedLayer final : public CCLayerColor {
                     m_concessionNotice->getContentSize().width - 16, 0.30f, 0.20f);
             }
         }
+        if (RankedRuntime::get().view().stage == RuntimeStage::AwaitingUpdate) {
+            if (m_resourceProgressLabel) m_resourceProgressLabel->setString(fmt::format("{}%",
+                static_cast<int>(std::round(corum::ranked::ui::RankedModUpdateManager::get().view().progress * 100))).c_str());
+            return;
+        }
         if (RankedRuntime::get().view().environmentWarning.active) return;
         if (showResourceGate()) {
             auto const [ready, total] = resourceCounts();
@@ -1245,6 +1256,10 @@ class CorumRankedLayer final : public CCLayerColor {
         if (m_resultScoreLayer || m_resultScorePending) return;
         clearUi();
         auto const& view = RankedRuntime::get().view();
+        if (view.stage == RuntimeStage::AwaitingUpdate) {
+            renderModUpdate();
+            return;
+        }
         if (view.environmentWarning.active) {
             renderEnvironmentWarning(view);
             return;
@@ -1712,6 +1727,39 @@ class CorumRankedLayer final : public CCLayerColor {
         }
     }
 
+    void renderModUpdate() {
+        using corum::ranked::ui::ModUpdateState;
+        auto const& update = corum::ranked::ui::RankedModUpdateManager::get().view();
+        auto const size = CCDirector::sharedDirector()->getWinSize();
+        auto const center = CCPoint{size.width / 2, size.height / 2};
+        addTopBack(true);
+        m_root->addChild(makeNeonPanel({std::min(390.0f, size.width - 90), 210}, center, kCyan, kDeepPanel, 248), 1);
+        auto const restart = update.state == ModUpdateState::RestartRequired;
+        auto const busy = update.state == ModUpdateState::Downloading || update.state == ModUpdateState::Verifying;
+        auto* heading = makeLabel(tr("mod-update", "MOD UPDATE"), 0.48f, {center.x, center.y + 70}, kCyan, "black");
+        m_root->addChild(heading, 4);
+        auto* versions = makeLabel(fmt::format("{} -> {} ({})", update.installedVersion, update.targetVersion,
+            corum::ranked::rankedBuildChannel()), 0.30f, {center.x, center.y + 39}, kGold, "semibold");
+        corum::ranked::ui::fitMenuLabelWidth(versions, 330, 0.30f, 0.18f); m_root->addChild(versions, 4);
+        auto const message = restart ? tr("mod-restart-ready", "Update installed. Press Restart to apply it.") :
+            !update.error.empty() ? update.error : busy ? tr("mod-verifying", "Downloading and verifying the mod...") :
+            tr("mod-update-required", "Update the mod before entering Ranked.");
+        auto* detail = makeLabel(message, 0.29f, {center.x, center.y + 7}, update.error.empty() ? kCyan : kRed, "semibold");
+        corum::ranked::ui::fitMenuLabelWidth(detail, 335, 0.29f, 0.16f); m_root->addChild(detail, 4);
+        if (busy) {
+            m_resourceProgressLabel = makeLabel(fmt::format("{}%", static_cast<int>(update.progress * 100)),
+                0.35f, {center.x, center.y - 33}, kGold, "black"); m_root->addChild(m_resourceProgressLabel, 4);
+        } else {
+            auto const canDownload = corum::ranked::ui::RankedModUpdateManager::get().canDownload();
+            addButton(restart ? tr("restart", "RESTART") : canDownload ? tr("mod-update-download", "DOWNLOAD UPDATE") : tr("retry", "RETRY"),
+                {center.x, center.y - 60}, restart ? menu_selector(CorumRankedLayer::onRestartModUpdate) :
+                canDownload ? menu_selector(CorumRankedLayer::onDownloadModUpdate) : menu_selector(CorumRankedLayer::onRetry), false, 0.70f);
+        }
+    }
+
+    void onDownloadModUpdate(CCObject*) { corum::ranked::ui::RankedModUpdateManager::get().download(); }
+    void onRestartModUpdate(CCObject*) { corum::ranked::ui::RankedModUpdateManager::get().restart(); }
+
     void renderResources() {
         auto const size = CCDirector::sharedDirector()->getWinSize();
         addTopBack(true);
@@ -1728,8 +1776,7 @@ class CorumRankedLayer final : public CCLayerColor {
         m_root->addChild(makeNeonPanel({std::min(390.0f, size.width - 90), 230}, center,
             accent, kDeepPanel, 248), 1);
         // Installation identity remains stable during verification and retry.
-        auto title = manager.required() ? (assets.update ? tr("assets-update", "IMAGE PACK UPDATE") :
-            tr("assets-new-download", "NEW IMAGE PACK DOWNLOAD")) : tr("ranked-resources", "RANKED RESOURCES");
+        auto title = tr("additional-downloads", "ADDITIONAL DOWNLOADS");
         if (complete) title = tr("all-resources-ready", "ALL RESOURCES READY");
         auto* heading = makeLabel(title, 0.48f, {center.x, center.y + 85}, accent, "black");
         corum::ranked::ui::fitMenuLabelWidth(heading, 330, 0.48f, 0.27f); m_root->addChild(heading, 4);
@@ -4194,6 +4241,7 @@ class CorumRankedLayer final : public CCLayerColor {
         m_resourceGateAcknowledged = true;
         m_resourceGateWasMissing = false;
         m_resourceGateMenuRestored = false;
+        RankedRuntime::get().finishAdmission();
         syncAudioMode();
     }
 

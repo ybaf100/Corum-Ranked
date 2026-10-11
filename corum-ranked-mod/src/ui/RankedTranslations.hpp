@@ -24,6 +24,13 @@ struct Translation {
 };
 
 inline constexpr std::array kKoreanTranslations {
+    Translation{"mod-update", "모드 업데이트"},
+    Translation{"mod-restart-ready", "업데이트 완료. 재시작을 눌러 적용하세요."},
+    Translation{"mod-verifying", "모드를 다운로드하고 검증 중..."},
+    Translation{"mod-update-required", "랭크전에 입장하려면 모드를 업데이트하세요."},
+    Translation{"mod-update-download", "업데이트 다운로드"},
+    Translation{"restart", "재시작"},
+    Translation{"additional-downloads", "추가 다운로드"},
     Translation{"session-other-device", "다른 기기에서 접속 중"},
     Translation{"session-takeover-detail", "다른 기기의 접속을 끊고 여기서 입장합니다.\n진행 중인 경기는 이어서 복구합니다."},
     Translation{"session-disconnect-other", "다른 기기 접속 끊기"},

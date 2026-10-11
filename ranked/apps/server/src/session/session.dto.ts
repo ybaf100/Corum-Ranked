@@ -4,6 +4,7 @@ import {
   IsBoolean,
   IsObject,
   IsOptional,
+  IsIn,
   IsString,
   Length,
   Matches,
@@ -37,6 +38,9 @@ export class InstalledModDto {
 }
 
 export class CreateSessionDto {
+  @IsOptional()
+  @IsIn(["debug", "release"])
+  public clientBuildChannel?: "debug" | "release";
   @IsOptional()
   @IsBoolean()
   public takeOver?: boolean;

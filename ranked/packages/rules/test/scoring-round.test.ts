@@ -142,29 +142,61 @@ describe("five minutes plus final attempt start window", () => {
     expect(state.outcome?.winner).toBe("A");
   });
 
-  it("opens a fresh LAST ATTEMPT window when the third clear finishes after five minutes", () => {
+  it("keeps the existing expiry deadline when a third clear lands during the final window", () => {
     let state = createRound(1, snapshot, DOCUMENT_RULES_V0_4, START);
-    const first = start(state, "A", 1, "late-clear-a1-start");
-    state = end(first.state, "A", first.attemptId, 2, 100, true, "late-clear-a1-end");
+    for (let n = 1; n <= 2; n++) {
+      const run = start(state, "A", n * 2 - 1, `a${n}s`);
+      state = end(run.state, "A", run.attemptId, n * 2, 100, true, `a${n}e`);
+    }
+    const target = start(state, "B", 302, "bs");
+    const third = start(target.state, "A", 304, "a3s");
+    state = end(third.state, "A", third.attemptId, 305, 100, true, "a3e");
+    expect(state.lastAttemptWindow?.endsAtMs).toBe(START + 310_000);
+    expect(advanceRoundClock(state, START + 309_999).phase).toBe("LAST_ATTEMPT_WINDOW");
+    state = advanceRoundClock(state, START + 310_000);
+    expect(state.outcome?.winner).toBe("A");
+    expect(state.attempts.B[0]?.invalidReason).toBe("ROUND_VICTORY_DECIDED");
+    expect(startRoundAttempt(state, "B", START + 311_000, "late").accepted).toBe(false);
+  });
 
-    const second = start(state, "A", 3, "late-clear-a2-start");
-    state = end(second.state, "A", second.attemptId, 4, 100, true, "late-clear-a2-end");
+  it.each([249, 250, 251])("settles only an expiry lead of at least 250 (%i)", (gap) => {
+    let state = createRound(1, snapshot, DOCUMENT_RULES_V0_4, START);
+    state = start(state, "B", 309, "active").state;
+    state.scores = { A: gap, B: 0 };
+    expect(advanceRoundClock(state, START + 309_999).outcome).toBeNull();
+    const next = advanceRoundClock(state, START + 310_000);
+    expect(next.phase).toBe(gap >= 250 ? "ROUND_RESULT" : "ROUND_SETTLING");
+    if (gap >= 250) {
+      expect(next.outcome?.winner).toBe("A");
+      expect(next.scores.A).toBe(gap);
+      expect(endRoundAttempt(next, "B", "B-1", START + 340_000, 100, true, "late-end").accepted).toBe(false);
+    }
+  });
 
-    const third = start(state, "A", 309, "late-clear-a3-start");
-    state = advanceRoundClock(third.state, START + 310_000);
+  it.each([0, 1, 2])("does not wait for an active run after 3 clears versus %i when decided", (clears) => {
+    let state = createRound(1, snapshot, DOCUMENT_RULES_V0_4, START);
+    for (let n = 1; n <= 3; n++) {
+      const run = start(state, "A", n * 2 - 1, `a${n}s`);
+      state = end(run.state, "A", run.attemptId, n * 2, 100, true, `a${n}e`);
+    }
+    state.clears.B = clears;
+    state = start(state, "B", 15, "active").state;
+    expect(advanceRoundClock(state, START + 15_999).outcome).toBeNull();
+    const next = advanceRoundClock(state, START + 16_000);
+    expect(next.phase).toBe(clears <= 1 ? "ROUND_RESULT" : "ROUND_SETTLING");
+    if (clears <= 1) expect(next.outcome?.winner).toBe("A");
+  });
+
+  it("never reopens starts when a delayed third Clear arrives after expiry", () => {
+    let state = createRound(1, snapshot, DOCUMENT_RULES_V0_4, START);
+    state.clears.A = 2; state.clears.B = 2;
+    state.scores = { A: 500, B: 500 };
+    const opponent = start(state, "B", 308, "bs");
+    const third = start(opponent.state, "A", 309, "a3s");
+    state = end(third.state, "A", third.attemptId, 340, 100, true, "a3e");
+    expect(state.lastAttemptWindow?.endsAtMs).toBe(START + 310_000);
     expect(state.phase).toBe("ROUND_SETTLING");
-
-    state = end(state, "A", third.attemptId, 340, 100, true, "late-clear-a3-end");
-    expect(state.phase).toBe("LAST_ATTEMPT_WINDOW");
-    expect(state.lastAttemptWindow).toMatchObject({
-      triggerSide: "A",
-      targetSide: "B",
-      startedAtMs: START + 340_000,
-      endsAtMs: START + 350_000,
-    });
-
-    const target = startRoundAttempt(state, "B", START + 349_000, "late-clear-b-start");
-    expect(target.accepted).toBe(true);
+    expect(startRoundAttempt(state, "B", START + 341_000, "late").accepted).toBe(false);
   });
 
   it("settles equal totals as a Draw", () => {
@@ -302,8 +334,8 @@ describe("three-clear and LAST ATTEMPT rules", () => {
     const a3 = start(state, "A", 7, "a3s");
     state = end(a3.state, "A", a3.attemptId, 8, 100, true, "a3e");
     const b2 = start(state, "B", 17, "b2s");
-    state = end(b2.state, "B", b2.attemptId, 20, 80, false, "b2e");
-    expect(state.outcome).toMatchObject({ winner: "A", reason: "LAST_ATTEMPT_EXPIRED" });
+    state = advanceRoundClock(b2.state, START + 18_000);
+    expect(state.outcome).toMatchObject({ winner: "A", reason: "CLEAR_TARGET_LAST_ATTEMPT" });
   });
 
   it("keeps LAST ATTEMPT authoritative when its window crosses the original five-minute deadline", () => {
@@ -320,10 +352,8 @@ describe("three-clear and LAST ATTEMPT rules", () => {
     state = advanceRoundClock(b.state, START + 300_000);
     expect(state.phase).toBe("LAST_ATTEMPT_WINDOW");
     state = advanceRoundClock(state, START + 305_000);
-    expect(state.phase).toBe("ROUND_SETTLING");
-
-    state = end(state, "B", b.attemptId, 320, 80, false, "cross-b-end");
     expect(state.phase).toBe("ROUND_RESULT");
-    expect(state.outcome).toMatchObject({ winner: "A", reason: "LAST_ATTEMPT_EXPIRED" });
+    expect(state.outcome).toMatchObject({ winner: "A", reason: "CLEAR_TARGET_LAST_ATTEMPT" });
+    expect(endRoundAttempt(state, "B", b.attemptId, START + 320_000, 80, false, "cross-b-end").accepted).toBe(false);
   });
 });

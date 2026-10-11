@@ -53,6 +53,8 @@ test('actual Runtime certificate GO retains Deathmatch identity, three starts, t
         'std::string RankedRuntime::newEventId(',
         'bool RankedRuntime::reportAttemptStart(int',
         'bool RankedRuntime::reportAttemptEnd(int',
+        'void RankedRuntime::recordDeath(',
+        'void RankedRuntime::retireDecisiveAttempt(',
     ].map(method).join('\n');
     const cpp = `
 #include <algorithm>
@@ -96,6 +98,7 @@ std::optional<std::int64_t> RankedRuntime::signedDeadlineMillis()const{return st
 std::optional<std::int64_t> RankedRuntime::deadlineMillis()const{return std::nullopt;}
 void RankedRuntime::sendAttemptStartIntent(PendingStart const&){++intentCalls;}
 void RankedRuntime::flushAttemptEvents(){++flushCalls;}
+void RankedRuntime::invalidateAttemptRequest(){++m_attemptRequestGeneration;m_attemptRequest.cancel();m_attemptBusy=false;}
 ${actual}
 }
 using namespace corum::ranked;
@@ -186,11 +189,22 @@ int main(){
     assert(round.reportAttemptEnd(123,100,true));
     assert(round.m_pendingEnd->optimisticScore==250.0);
 
+    // Own feed records exactly one real native death, never a Clear/duplicate,
+    // and decisive server retirement leaves no journal blocking the next round.
+    RankedRuntime died;prepare(died,false);fakeNow=3000;
+    assert(died.armCurrentLevelForGameplay()&&died.reportAttemptStart(123));
+    assert(died.reportAttemptEnd(123,42,false,std::nullopt,true));
+    assert(died.m_pendingEnd->nativeDeath&&died.m_view.match.deathLog.size()==1);
+    assert(died.m_view.match.deathLog[0].side=="A"&&died.m_view.match.deathLog[0].progressPercent==42);
+    assert(died.reportAttemptEnd(123,42,false,std::nullopt,true)&&died.m_view.match.deathLog.size()==1);
+    died.retireDecisiveAttempt();
+    assert(!died.m_pendingStart&&!died.m_pendingEnd&&died.m_attemptBacklog.empty()&&!died.m_gameplayStartEligible);
+
     // Exact scene spectator firewall still wins over the entry certificate.
     RankedRuntime blocked;prepare(blocked);int owner=0;
     blocked.m_spectatorLocalTransportOwner=&owner;
     assert(!blocked.reportAttemptStart(123)&&!blocked.m_pendingStart);
-    assert(blocked.m_localDeathmatchVisualAttempts==0&&intentCalls==1);
+    assert(blocked.m_localDeathmatchVisualAttempts==0&&intentCalls==2);
 }
 `;
     const dir = mkdtempSync(join(tmpdir(), 'corum-entry-deathmatch-'));

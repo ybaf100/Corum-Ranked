@@ -94,6 +94,9 @@ export const normalizeAttemptEndProgress = (value: unknown): number => {
 };
 
 export class AttemptEndDto {
+  @IsOptional()
+  @IsBoolean()
+  public nativeDeath?: boolean;
   @IsString()
   @Length(1, 40)
   public levelId!: string;

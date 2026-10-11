@@ -9,7 +9,6 @@ import { TokenService } from "../src/common/token.service.js";
 import type { CsmpTierSource } from "../src/config/csmp-tier.source.js";
 import type { RankedConfigService } from "../src/config/ranked-config.service.js";
 import { MatchAccessService } from "../src/match/match-access.service.js";
-import { ATTEMPT_TRANSPORT_GRACE_MS } from "../src/match/attempt-timing.js";
 import { InMemoryMatchRuntimeState } from "../src/match/match-runtime-state.js";
 import { MatchService } from "../src/match/match.service.js";
 import { QueueService } from "../src/queue/queue.service.js";
@@ -40,6 +39,7 @@ beforeAll(async () => {
     "0009_placement_stage_count.sql",
     "0010_achievements_v1.sql",
     "0013_native_scene_entry.sql",
+    "0020_deathmatch_native_death.sql",
   ]) {
     const migrationPath = fileURLToPath(
       new URL(`../../../migrations/${migrationName}`, import.meta.url),
@@ -296,6 +296,15 @@ describe("two-client authoritative match flow", () => {
       const roundStartedAtMs = clock.now().getTime();
       const levelId = playing.currentRound.map.playableLevelId as string;
       const qualifying = Number(playing.currentRound.map.qualifyingPercent);
+      // Two opponent Clears keep the committed gap below 250 while the
+      // winner's third Clear is waiting behind its pre-deadline Start lease.
+      for (let index = 0; index < 2; ++index) {
+        const b = await matches.startAttempt(matchId, statusB.matchToken, playerB,
+          { levelId, clientEventId: `r${roundNumber}-lease-b${index}-start` });
+        await matches.endAttempt(matchId, statusB.matchToken, playerB,
+          { levelId, attemptId: b.attemptId!, clientEventId: `r${roundNumber}-lease-b${index}-end`, progressPercent: 100, cleared: true });
+      }
+
 
       clock.advanceSeconds(1);
       const firstStartedAt = clock.now().toISOString();
@@ -430,17 +439,10 @@ describe("two-client authoritative match flow", () => {
 
     await winRoundWithThreeClears(1);
     state = (await matches.state(matchId, statusA.matchToken, playerA)) as Record<string, any>;
-    expect(state.state).toBe("LAST_ATTEMPT_WINDOW");
-    expect(state.currentRound.lastAttemptWindow).toMatchObject({ triggerSide: "A", targetSide: "B" });
-    expect(state.spectator).toMatchObject({ active: true });
-
-    clock.advanceSeconds(
-      document.operational.rules.lastAttemptWindowSeconds +
-        ATTEMPT_TRANSPORT_GRACE_MS / 1_000 +
-        1,
-    );
-    state = (await matches.state(matchId, statusA.matchToken, playerA)) as Record<string, any>;
+    // The third Clear arrived after the fixed final deadline: do not create
+    // another ten seconds. With no remaining opponent Attempt, settle now.
     expect(state.state).toBe("ROUND_RESULT");
+    expect(state.currentRound.lastAttemptWindow).toMatchObject({ triggerSide: "A", targetSide: "B" });
     expect(state.currentRound.outcome).toMatchObject({ winner: "A", reason: "LAST_ATTEMPT_EXPIRED" });
 
     clock.advanceSeconds(6);
@@ -782,7 +784,7 @@ describe("two-client authoritative match flow", () => {
     const attempts = await database.query<{ count: number }>(
       "SELECT COUNT(*)::int AS count FROM ranked_attempts",
     );
-    expect(attempts.rows[0]?.count).toBe(11);
+    expect(attempts.rows[0]?.count).toBe(13);
 
     const relayEvents = await database.query<{ event_type: string; count: number }>(
       `SELECT event_type, COUNT(*)::int AS count
@@ -791,7 +793,7 @@ describe("two-client authoritative match flow", () => {
        ORDER BY event_type`,
     );
     expect(relayEvents.rows).toEqual([
-      { event_type: "CLEAR_EVENT", count: 9 },
+      { event_type: "CLEAR_EVENT", count: 11 },
       { event_type: "LAST_ATTEMPT", count: 2 },
       { event_type: "MATCH_RESULT", count: 1 },
       { event_type: "ROUND_RESULT", count: 2 },

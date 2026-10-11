@@ -585,6 +585,7 @@ export class DebugBotService implements OnModuleInit, OnApplicationShutdown {
         clientEventId: `debug-bot-auto-${++driver.eventSequence}-end`,
         progressPercent: driver.attemptTarget,
         cleared: driver.attemptTarget === 100,
+        nativeDeath: driver.attemptTarget !== 100,
       },
     );
     driver.attemptId = null;

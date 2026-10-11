@@ -3,11 +3,13 @@ import { REQUIRED_RANKED_CLIENT_VERSION } from "../session/client-version.js";
 import { RankedConfigService } from "./ranked-config.service.js";
 import { DATABASE, type SqlExecutor } from "../database/database.port.js";
 import { readRankedAudioVolumes, withRankedAudioVolumes } from "./ranked-audio-volume.js";
+import { SERVER_ENVIRONMENT, type ServerEnvironment } from "./server-environment.js";
 
 @Controller("api/ranked")
 export class RankedConfigController {
   public constructor(@Inject(RankedConfigService) private readonly rankedConfig: RankedConfigService,
-    @Optional() @Inject(DATABASE) private readonly database?: SqlExecutor) {}
+    @Optional() @Inject(DATABASE) private readonly database?: SqlExecutor,
+    @Optional() @Inject(SERVER_ENVIRONMENT) private readonly environment?: ServerEnvironment) {}
 
   @Get("maps")
   @Header("Cache-Control", "public, max-age=60, stale-while-revalidate=120")
@@ -38,6 +40,7 @@ export class RankedConfigController {
       generation: snapshot.generation,
       rulesVersion: snapshot.operational.rules.rulesVersion,
       requiredClientVersion: REQUIRED_RANKED_CLIENT_VERSION,
+      modUpdates: this.environment?.rankedModUpdates ?? {},
       queueEnabled: snapshot.operational.enabled,
       rules: snapshot.operational.rules,
       cbf: snapshot.operational.cbf,

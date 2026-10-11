@@ -10,12 +10,14 @@ on:
       - "ranked/apps/server/src/session/client-version.ts"
       - ".github/workflows/build-ranked-mod.yml"
       - ".github/workflows/build-ranked-debug.yml"
+      - ".github/workflows/publish-ranked-download.yml"
   pull_request:
     paths:
       - "corum-ranked-mod/**"
       - "ranked/apps/server/src/session/client-version.ts"
       - ".github/workflows/build-ranked-mod.yml"
       - ".github/workflows/build-ranked-debug.yml"
+      - ".github/workflows/publish-ranked-download.yml"
 
 permissions:
   contents: read
@@ -159,6 +161,9 @@ jobs:
           node --test corum-ranked-mod/tests/DebugAdminNativeTest.mjs
           node --test corum-ranked-mod/tests/MapDetailsNativeTest.mjs
           node --test corum-ranked-mod/tests/RankAssetPackNativeTest.mjs
+          node --test corum-ranked-mod/tests/ModUpdateNativeTest.mjs
+          node --test corum-ranked-mod/tests/DeathFeedNativeTest.mjs
+          python3 corum-ranked-mod/tests/ModReleaseBuildTest.py
           python3 corum-ranked-mod/tests/AssetPackBuildTest.py
           node --test corum-ranked-mod/tests/FontTypographyNativeTest.mjs
           node --test corum-ranked-mod/tests/RoundPreparationNativeTest.mjs
@@ -304,6 +309,8 @@ jobs:
           if missing:
               raise SystemExit("Combined package is missing: " + ", ".join(missing))
           PY
+          python3 corum-ranked-mod/tools/prepare-mod-release.py dist/hwanhee1.corum_ranked.geode debug "$MOD_VERSION" dist
+          cp "dist/Corum-Ranked-$MOD_VERSION-debug.geode" dist/hwanhee1.corum_ranked.geode
           python3 corum-ranked-mod/tests/verify-visibility-package.py \
             dist/hwanhee1.corum_ranked.geode "$MOD_VERSION" --debug
           python3 corum-ranked-mod/tests/verify-font-package.py dist/hwanhee1.corum_ranked.geode
@@ -311,7 +318,9 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ needs.metadata.outputs.artifact_name }}
-          path: dist/hwanhee1.corum_ranked.geode
+          path: |
+            dist/hwanhee1.corum_ranked.geode
+            dist/debug.json
           if-no-files-found: error
 
       - name: Report Debug artifact filename
@@ -348,3 +357,14 @@ jobs:
           name: Corum-Ranked-Assets-${{ steps.pack.outputs.tag }}
           path: asset-pack-dist/*
           if-no-files-found: error
+
+  publish-download:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.RANKED_PUBLISH_RELEASES == 'true'
+    needs: [metadata, package]
+    uses: ./.github/workflows/publish-ranked-download.yml
+    with:
+      channel: debug
+      version: ${{ needs.metadata.outputs.version }}
+      artifact: ${{ needs.metadata.outputs.artifact_name }}
+    secrets:
+      release_token: ${{ secrets.RANKED_RELEASE_TOKEN }}

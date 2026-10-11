@@ -153,7 +153,7 @@ HudPresentation presentHud(HudInput const& input) {
         result.timerText = windowCountdown(displayRemainingMillis);
         result.windowStateFirst = true;
     } else if (displayState == "FINAL_ATTEMPT_WINDOW") {
-        result.stateText = "FINAL ATTEMPT";
+        result.stateText = nonNegative(displayRemainingMillis) > 0 ? "" : "FINAL ATTEMPT";
         result.timerText = windowCountdown(displayRemainingMillis);
         result.windowStateFirst = true;
     } else if (displayState == "ROUND_SETTLING") {

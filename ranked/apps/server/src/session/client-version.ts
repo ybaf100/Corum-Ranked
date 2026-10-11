@@ -1,4 +1,4 @@
-export const REQUIRED_RANKED_CLIENT_VERSION = "v0.5.0-beta.55";
+export const REQUIRED_RANKED_CLIENT_VERSION = "v0.5.0-beta.56";
 
 export interface RankedClientVersionMod {
   readonly id: string;
@@ -20,19 +20,20 @@ export const normalizeRankedClientVersion = (version: string): string =>
 export const evaluateRankedClientVersion = (
   clientVersion: string,
   installedMods: readonly RankedClientVersionMod[],
+  requiredVersion: string = REQUIRED_RANKED_CLIENT_VERSION,
 ): RankedClientVersionDecision => {
   const normalizedClientVersion = normalizeRankedClientVersion(clientVersion);
   const clientMod = installedMods.find(
     (mod) => mod.id === "hwanhee1.corum_ranked" && mod.enabled && mod.loaded,
   );
   const installedModVersion = clientMod?.version.trim() || null;
-  const required = normalizeRankedClientVersion(REQUIRED_RANKED_CLIENT_VERSION);
+  const required = normalizeRankedClientVersion(requiredVersion);
   return {
     allowed:
       normalizedClientVersion === required &&
       installedModVersion !== null &&
       normalizeRankedClientVersion(installedModVersion) === required,
-    requiredVersion: REQUIRED_RANKED_CLIENT_VERSION,
+    requiredVersion,
     clientVersion: clientVersion.trim(),
     installedModVersion,
   };

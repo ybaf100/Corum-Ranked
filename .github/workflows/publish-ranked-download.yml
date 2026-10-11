@@ -1,0 +1,82 @@
+name: Publish Ranked package to downloads repository
+on:
+  workflow_call:
+    inputs:
+      channel:
+        required: true
+        type: string
+      version:
+        required: true
+        type: string
+      artifact:
+        required: true
+        type: string
+    secrets:
+      release_token:
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: ranked-download-${{ inputs.channel }}-${{ inputs.version }}
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: ${{ inputs.artifact }}
+          path: downloads
+      - name: Publish complete immutable channel release
+        env:
+          GH_TOKEN: ${{ secrets.release_token }}
+          CHANNEL: ${{ inputs.channel }}
+          VERSION: ${{ inputs.version }}
+          SOURCE_COMMIT: ${{ github.sha }}
+          SOURCE_REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo=ybaf100/corum-ranked-downloads
+          tag="$CHANNEL-$VERSION"
+          package="downloads/Corum-Ranked-$VERSION-$CHANNEL.geode"
+          descriptor="downloads/$CHANNEL.json"
+          cp downloads/hwanhee1.corum_ranked.geode "$package"
+          python3 - "$package" "$descriptor" "$CHANNEL" "$VERSION" <<'PY'
+          import hashlib, json, pathlib, sys, zipfile
+          path, descriptor, channel, version = sys.argv[1:]
+          data = json.loads(pathlib.Path(descriptor).read_text())[channel]
+          payload = pathlib.Path(path).read_bytes()
+          assert data['version'] == version and data['sizeBytes'] == len(payload)
+          assert data['sha256'] == hashlib.sha256(payload).hexdigest()
+          with zipfile.ZipFile(path) as package:
+              assert json.loads(package.read('corum-build-channel.json')) == {'channel': channel, 'version': version}
+          PY
+          # Never overwrite an existing tag or package with different bytes.
+          existing=$(gh api "repos/$repo/releases/tags/$tag" --jq .id 2>/dev/null || true)
+          if [[ -n "$existing" ]]; then
+            mkdir -p existing
+            gh release download "$tag" --repo "$repo" --pattern "$(basename "$package")" --dir existing
+            cmp "$package" "existing/$(basename "$package")"
+            if gh release download "$tag" --repo "$repo" --pattern "$(basename "$descriptor")" --dir existing; then
+              cmp "$descriptor" "existing/$(basename "$descriptor")"
+            else
+              # Only a still-draft release may resume an interrupted upload.
+              [[ "$(gh api "repos/$repo/releases/tags/$tag" --jq .draft)" == true ]]
+              gh release upload "$tag" --repo "$repo" "$descriptor"
+            fi
+          else
+            python3 - <<'PY'
+          import os, pathlib
+          pathlib.Path('notes.md').write_text(
+              f"Ranked {os.environ['CHANNEL']} {os.environ['VERSION']}\n\n"
+              f"Built from {os.environ['SOURCE_REPOSITORY']} commit `{os.environ['SOURCE_COMMIT']}`.\n"
+              "Channel-specific package; the server chooses this exact tag.\n")
+          PY
+            flags=(--draft --title "Ranked $VERSION ($CHANNEL)" --notes-file notes.md)
+            if [[ "$CHANNEL" == debug ]]; then flags+=(--prerelease); fi
+            gh release create "$tag" --repo "$repo" "${flags[@]}" "$package" "$descriptor"
+          fi
+          # A failed upload remains draft and is never presented to clients.
+          gh release edit "$tag" --repo "$repo" --draft=false --latest=false
+          printf 'Published %s: https://github.com/%s/releases/tag/%s\n' "$CHANNEL" "$repo" "$tag" >> "$GITHUB_STEP_SUMMARY"

@@ -27,7 +27,7 @@ export interface PerfectWinRoundSummary {
 /**
  * A PERFECT WIN is a naturally completed match with no lost rounds and at
  * least one decisive round. Every decisive round must be a real three-Clear
- * victory (`LAST_ATTEMPT_EXPIRED`); draws are allowed. Forced wins, forfeits,
+ * victory (expiry, or a decisive three-Clear deadline); draws are allowed. Forced wins, forfeits,
  * score wins, and Death Match wins therefore do not qualify.
  */
 export const perfectThreeClearWinner = (
@@ -45,9 +45,11 @@ export const perfectThreeClearWinner = (
     if (round.result === loser || round.result === null) return null;
     if (round.result === "DRAW") continue;
     const winnerClears = winner === "A" ? round.clearsA : round.clearsB;
+    const loserClears = loser === "A" ? round.clearsA : round.clearsB;
     if (
       round.result !== winner ||
-      round.resultReason !== "LAST_ATTEMPT_EXPIRED" ||
+      !(round.resultReason === "LAST_ATTEMPT_EXPIRED" ||
+        (round.resultReason === "CLEAR_TARGET_LAST_ATTEMPT" && loserClears <= 1)) ||
       winnerClears < clearTarget
     ) {
       return null;

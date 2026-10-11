@@ -31,6 +31,7 @@ beforeAll(async () => {
       placement_games integer NOT NULL DEFAULT 5);
     CREATE TABLE ranked_sessions (id uuid PRIMARY KEY, player_id uuid REFERENCES ranked_players(id),
       token_hash text NOT NULL, client_version text NOT NULL, revoked_at timestamptz,
+      environment_snapshot jsonb NOT NULL DEFAULT '{}'::jsonb,
       expires_at timestamptz NOT NULL, last_heartbeat_at timestamptz NOT NULL);`);
   const module = await Test.createTestingModule({ controllers: [StandingController], providers: [SessionGuard,
     { provide: DATABASE, useValue: database }, { provide: SERVER_CLOCK, useValue: { now: () => now } },
@@ -53,9 +54,9 @@ const bands: readonly TierBand[] = [
 ];
 
 describe("client standings SQL", () => {
-  it("protects the standings route with the existing version, revocation and presence session gates", async () => {
+  it("keeps admitted old sessions usable while preserving revocation and presence gates", async () => {
     await add(1, 1500, 5000, "GOLD"); await add(2, 1300, 3000, "GOLD"); await add(3, 1300, 3500, "GOLD", true);
-    await database.query(`INSERT INTO ranked_sessions VALUES ($1,$2,$3,$4,NULL,$5,$6)`,
+    await database.query(`INSERT INTO ranked_sessions (id,player_id,token_hash,client_version,revoked_at,expires_at,last_heartbeat_at) VALUES ($1,$2,$3,$4,NULL,$5,$6)`,
       [id(101),id(2),tokens.hash("standing-token"),REQUIRED_RANKED_CLIENT_VERSION,
         new Date(now.getTime() + 3600_000).toISOString(),now.toISOString()]);
     const get = (token?: string) => fetch(base + "/api/ranked/session/standing", {
@@ -68,8 +69,7 @@ describe("client standings SQL", () => {
       standing: { rank: 2, total: 3, topPercent: 2 / 3 * 100, target: { gdAccountId: "1", rank: 1 } } });
     expect(JSON.stringify(body)).not.toMatch(/hiddenMmr|hidden_mmr|sessionId|player_id|token/);
     await database.query("UPDATE ranked_sessions SET client_version='v0.5.0-beta.47'");
-    const outdated = await get("standing-token"); expect(outdated.status).toBe(426);
-    expect(await outdated.json()).toMatchObject({ requiredVersion: REQUIRED_RANKED_CLIENT_VERSION });
+    const outdated = await get("standing-token"); expect(outdated.status).toBe(200);
     await database.query("UPDATE ranked_sessions SET client_version=$1,last_heartbeat_at=$2",
       [REQUIRED_RANKED_CLIENT_VERSION,new Date(now.getTime() - 91_000).toISOString()]);
     expect((await get("standing-token")).status).toBe(401);

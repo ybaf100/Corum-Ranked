@@ -4,9 +4,12 @@ import {
   HttpException,
   Post,
   UseGuards,
+  Inject,
+  Optional,
 } from "@nestjs/common";
 import { CurrentSession } from "./current-session.decorator.js";
-import { evaluateRankedClientVersion } from "./client-version.js";
+import { evaluateRankedClientVersion, REQUIRED_RANKED_CLIENT_VERSION } from "./client-version.js";
+import { SERVER_ENVIRONMENT, type ServerEnvironment } from "../config/server-environment.js";
 import { CreateSessionDto } from "./session.dto.js";
 import { SessionGuard } from "./session.guard.js";
 import { SessionService } from "./session.service.js";
@@ -14,13 +17,15 @@ import type { RankedSessionContext } from "./session.types.js";
 
 @Controller("api/ranked/session")
 export class SessionController {
-  public constructor(private readonly sessions: SessionService) {}
+  public constructor(private readonly sessions: SessionService,
+    @Optional() @Inject(SERVER_ENVIRONMENT) private readonly environment?: ServerEnvironment) {}
 
   @Post()
   public create(@Body() body: CreateSessionDto) {
     // Version compatibility is an HTTP admission rule. Reject stale clients
     // before SessionService can seed a profile or persist a session token.
-    const decision = evaluateRankedClientVersion(body.clientVersion, body.installedMods);
+    const required = this.environment?.rankedModUpdates?.[body.clientBuildChannel ?? "release"]?.version ?? REQUIRED_RANKED_CLIENT_VERSION;
+    const decision = evaluateRankedClientVersion(body.clientVersion, body.installedMods, required);
     if (!decision.allowed) {
       throw new HttpException({
         code: "RANKED_CLIENT_UPDATE_REQUIRED",
