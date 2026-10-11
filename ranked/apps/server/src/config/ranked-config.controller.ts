@@ -1,10 +1,13 @@
-import { Controller, Get, Header } from "@nestjs/common";
+import { Controller, Get, Header, Inject, Optional } from "@nestjs/common";
 import { REQUIRED_RANKED_CLIENT_VERSION } from "../session/client-version.js";
 import { RankedConfigService } from "./ranked-config.service.js";
+import { DATABASE, type SqlExecutor } from "../database/database.port.js";
+import { readRankedAudioVolumes, withRankedAudioVolumes } from "./ranked-audio-volume.js";
 
 @Controller("api/ranked")
 export class RankedConfigController {
-  public constructor(private readonly rankedConfig: RankedConfigService) {}
+  public constructor(@Inject(RankedConfigService) private readonly rankedConfig: RankedConfigService,
+    @Optional() @Inject(DATABASE) private readonly database?: SqlExecutor) {}
 
   @Get("maps")
   @Header("Cache-Control", "public, max-age=60, stale-while-revalidate=120")
@@ -26,8 +29,10 @@ export class RankedConfigController {
   }
 
   @Get("config")
-  public getClientConfig(): object {
+  @Header("Cache-Control", "no-store")
+  public async getClientConfig(): Promise<object> {
     const snapshot = this.rankedConfig.getSnapshot();
+    const volumes = await readRankedAudioVolumes(snapshot.client, this.database);
     return {
       serverNow: new Date().toISOString(),
       generation: snapshot.generation,
@@ -36,7 +41,7 @@ export class RankedConfigController {
       queueEnabled: snapshot.operational.enabled,
       rules: snapshot.operational.rules,
       cbf: snapshot.operational.cbf,
-      client: snapshot.client ?? {
+      client: withRankedAudioVolumes(snapshot.client, volumes) ?? {
         audio: { enabled: false, fadeInSeconds: 0.8, fadeOutSeconds: 0.6, resources: [] },
         ui: { fadeInSeconds: 0.24, fadeOutSeconds: 0.18 },
       },

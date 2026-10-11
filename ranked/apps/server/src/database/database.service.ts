@@ -35,6 +35,7 @@ const REQUIRED_MIGRATIONS = [
   "0016_admin_history_reset.sql",
   "0017_placement_rating_policy.sql",
   "0018_map_metadata_cache.sql",
+  "0019_ranked_audio_volumes.sql",
 ] as const;
 
 export interface RankedSchemaStatus {

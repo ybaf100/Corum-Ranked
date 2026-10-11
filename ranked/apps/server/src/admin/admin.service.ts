@@ -8,6 +8,7 @@ import type { RankedSessionContext } from "../session/session.types.js";
 import type { AdminActionDto } from "./admin.dto.js";
 import { SERVER_CLOCK, type ServerClock } from "../common/runtime.module.js";
 import { sessionAliveSince } from "../session/session-presence.policy.js";
+import { readRankedAudioVolumes } from "../config/ranked-audio-volume.js";
 
 @Injectable()
 export class AdminService {
@@ -36,6 +37,30 @@ export class AdminService {
           AND s.last_heartbeat_at>$4 AND lower(p.gd_username)='hwanhee1'
         FOR UPDATE OF s`,[session.sessionId,session.playerId,now.toISOString(),sessionAliveSince(now)]);
       if (!caller.rows.length) throw new ForbiddenException("Admin session expired");
+      if (body.action === "GET_AUDIO_VOLUMES" || body.action === "SET_AUDIO_VOLUME") {
+        const client = this.config.getSnapshot().client;
+        if (body.action === "SET_AUDIO_VOLUME") {
+          if (!Number.isInteger(body.songId) || body.songId! < 1 || body.songId! > 2147483647 ||
+              !Number.isInteger(body.volumePercent) || body.volumePercent! < 0 || body.volumePercent! > 100) {
+            throw new BadRequestException("Enter a song ID and an integer volume from 0 to 100");
+          }
+          if (!client?.audio.resources.some(resource => resource.songId === body.songId)) {
+            throw new BadRequestException("This song is no longer configured for Ranked. Reload the song list.");
+          }
+          await tx.query(`INSERT INTO ranked_audio_volumes(song_id,volume_percent,updated_by_account_id,updated_at)
+            VALUES ($1,$2,$3,$4) ON CONFLICT (song_id) DO UPDATE SET
+            volume_percent=EXCLUDED.volume_percent,updated_by_account_id=EXCLUDED.updated_by_account_id,updated_at=EXCLUDED.updated_at`,
+            [body.songId,body.volumePercent,session.gdAccountId,now.toISOString()]);
+        }
+        const audioVolumes = await readRankedAudioVolumes(client, tx);
+        const songs = audioVolumes.map(volume => {
+          const resources = client!.audio.resources.filter(resource => resource.songId === volume.songId);
+          return { ...volume, labels: [...new Set(resources.map(resource => resource.label))],
+            keys: resources.map(resource => resource.key) };
+        });
+        return { ok: true, songs, audioVolumes, message: body.action === "SET_AUDIO_VOLUME"
+          ? "Song volume saved for all Ranked players." : "Ranked song volumes loaded." };
+      }
       if (body.action === "RESET_DB") {
         await tx.query(`TRUNCATE ranked_matches, ranked_players, ranked_outbox_events,
           ranked_forum_records, ranked_forum_refresh_cooldowns, debug_spectate_recordings CASCADE`);

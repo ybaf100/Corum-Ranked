@@ -74,6 +74,7 @@ ${fields}
  void setStage(RuntimeStage value,std::string,std::string={}){stage=value;}
  std::string endpoint(std::string path)const{return path;}
  void leaveRanked();void updateSessionHeartbeat();
+ void applyAudioVolumes(matjson::Value const&){}
 };
 ${methods}
 void advance(int ms){Clock::current+=std::chrono::milliseconds(ms);}

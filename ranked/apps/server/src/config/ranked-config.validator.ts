@@ -56,6 +56,10 @@ const validateClientPresentation = (document: RankedConfigDocument): string[] =>
     if (!Number.isFinite(resource.startSeconds) || resource.startSeconds < 0) {
       errors.push(`client.audio resource ${resource.key || "<unknown>"} startSeconds must be >= 0`);
     }
+    if (resource.volumePercent !== undefined && (!Number.isInteger(resource.volumePercent) ||
+        resource.volumePercent < 0 || resource.volumePercent > 100)) {
+      errors.push(`client.audio resource ${resource.key || "<unknown>"} volumePercent must be an integer between 0 and 100`);
+    }
   }
   if (audio.enabled && (audio.resources?.length ?? 0) === 0) {
     errors.push("client.audio.resources must contain at least one resource when audio is enabled");

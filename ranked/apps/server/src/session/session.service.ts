@@ -14,6 +14,7 @@ import {
   type CsmpTierSource,
 } from "../config/csmp-tier.source.js";
 import { RankedConfigService } from "../config/ranked-config.service.js";
+import { readRankedAudioVolumes } from "../config/ranked-audio-volume.js";
 import { DATABASE, type DatabasePort, type SqlExecutor } from "../database/database.port.js";
 import type { CreateSessionDto, InstalledModDto } from "./session.dto.js";
 import type { RankedSessionContext } from "./session.types.js";
@@ -266,7 +267,8 @@ export class SessionService {
         [now.toISOString(), session.sessionId, sessionAliveSince(now), session.playerId],
       );
       if (!result.rowCount) throw new UnauthorizedException("Ranked connection expired; enter Ranked again.");
-      return { serverNow: now.toISOString(), sessionLeaseSeconds: RANKED_SESSION_LEASE_SECONDS };
+      const audioVolumes = await readRankedAudioVolumes(this.config.getSnapshot().client, transaction);
+      return { serverNow: now.toISOString(), sessionLeaseSeconds: RANKED_SESSION_LEASE_SECONDS, audioVolumes };
     });
   }
 

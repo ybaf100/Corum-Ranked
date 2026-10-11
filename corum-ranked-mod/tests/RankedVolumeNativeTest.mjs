@@ -55,6 +55,41 @@ int main(){using namespace corum::ranked;
 `);
 });
 
+test('actual common-volume decoder updates all uses of a song and ignores malformed or unrelated settings', () => {
+    const viewer = read('tests/SpectatorLiveViewerNativeTest.mjs');
+    const json = viewer.slice(viewer.indexOf('namespace matjson {'), viewer.indexOf('${readFileSync(join(root,'));
+    const source = read('src/RankedRuntime.cpp');
+    run(`#include <algorithm>
+#include <cassert>
+#include <cstdint>
+#include <optional>
+#include <map>
+#include <string>
+#include <variant>
+#include <vector>
+${json}
+namespace corum::ranked {
+struct Resource{int songId;double volume=1;};
+struct Client{struct Audio{std::vector<Resource>resources;}audio;};
+struct RankedAudioManager{int changes=0;static RankedAudioManager&get(){static RankedAudioManager a;return a;}void configure(Client const&){++changes;}};
+struct RankedRuntime{struct View{Client client;}m_view;void applyAudioVolumes(matjson::Value const&);};
+${body(source,'void RankedRuntime::applyAudioVolumes(')}
+}
+int main(){using namespace corum::ranked;RankedRuntime r;r.m_view.client.audio.resources={{123},{123},{456}};
+auto&resources=r.m_view.client.audio.resources;auto&audio=RankedAudioManager::get();
+matjson::Value item;item["songId"]=123;item["volumePercent"]=37;
+r.applyAudioVolumes(matjson::Value::Array{item});assert(resources[0].volume==.37&&resources[1].volume==.37&&resources[2].volume==1&&audio.changes==1);
+r.applyAudioVolumes(matjson::Value::Array{item});assert(audio.changes==1);
+for(auto percent:{matjson::Value(-1),matjson::Value(101),matjson::Value(1.5),matjson::Value("50")}){
+ item["volumePercent"]=percent;r.applyAudioVolumes(matjson::Value::Array{item});assert(audio.changes==1);}
+item["songId"]=999;item["volumePercent"]=0;r.applyAudioVolumes(matjson::Value::Array{item});assert(audio.changes==1);
+r.applyAudioVolumes(matjson::Value());assert(audio.changes==1);
+item["songId"]=123;r.applyAudioVolumes(matjson::Value::Array{item});assert(resources[0].volume==0&&resources[1].volume==0&&audio.changes==2);
+item["volumePercent"]=100;r.applyAudioVolumes(matjson::Value::Array{item});assert(resources[0].volume==1&&audio.changes==3);
+}
+`);
+});
+
 test('Settings uses a localized bottom-right Corum modal and limits gain to menu BGM', () => {
     assert.match(screen, /settingsButton->setPosition\(\{winSize.width - 70, 30\}\)/);
     assert.match(screen, /tr\("settings", "Settings"\)/);

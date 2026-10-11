@@ -364,6 +364,7 @@ struct RankedAudioResourceView {
     int songId = 0;
     double startSeconds = 0.0;
     bool loop = true;
+    double volume = 1.0;
 };
 
 struct RankedAudioConfigView {
@@ -470,6 +471,7 @@ public:
     void fetchAchievements();
     void fetchPlayerInfo(std::string const& side);
     void fetchForumRecords(bool refresh = false);
+    void applyAudioVolumes(matjson::Value const& volumes);
     [[nodiscard]] std::int64_t forumRefreshRemainingMs() const;
     void claimAchievement(std::string const& achievementId);
     void equipAchievementTitle(std::string const& achievementId, std::optional<int> level);

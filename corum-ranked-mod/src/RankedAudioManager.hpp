@@ -109,6 +109,7 @@ private:
     void stopOwnedAudio();
     [[nodiscard]] bool ownedChannelPlaying() const;
     [[nodiscard]] float targetRankedVolume() const;
+    [[nodiscard]] float targetRankedVolume(std::string const& key) const;
     [[nodiscard]] FMOD::ChannelGroup* ownedMusicGroup();
     void releaseMusicGroup();
     void ensureFmodOutputActive() const;
@@ -186,6 +187,7 @@ private:
     std::chrono::steady_clock::time_point m_streamStarvedAt {};
     FMOD::Channel* m_rankedChannel = nullptr;
     FMOD::Channel* m_retiringChannel = nullptr;
+    std::string m_retiringKey;
     std::chrono::steady_clock::time_point m_retiringUntil {};
     bool m_ownedDspFadeIn = false;
     unsigned long long m_ownedFadeDspStart = 0;

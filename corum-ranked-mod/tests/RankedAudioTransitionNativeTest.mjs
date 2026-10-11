@@ -18,12 +18,15 @@ function method(source, signature) {
 for (const debug of [false, true]) test(`production audio transitions, bounded failures and DSP crossfade (Debug ${debug ? 'ON' : 'OFF'})`, () => {
     const source = read('src/RankedAudioManager.cpp');
     const methods = [
+        'std::string RankedAudioManager::configSignature(',
+        'void RankedAudioManager::configure(',
         'bool RankedAudioManager::enabled()',
         'RankedAudioResourceView const* RankedAudioManager::findResource(',
         'RankedAudioResourceView const* RankedAudioManager::resourceForMode(',
         'void RankedAudioManager::setMode(',
         'bool RankedAudioManager::ownedChannelPlaying()',
         'float RankedAudioManager::targetRankedVolume()',
+        'float RankedAudioManager::targetRankedVolume(std::string const& key)',
         'void RankedAudioManager::refreshVolume()',
         'FMOD::ChannelGroup* RankedAudioManager::ownedMusicGroup()',
         'void RankedAudioManager::releaseMusicGroup()',
@@ -63,6 +66,7 @@ for (const debug of [false, true]) test(`production audio transitions, bounded f
     const header = read('src/RankedAudioManager.hpp').replace('#include "RankedRuntime.hpp"', '#include "AudioConfigDouble.hpp"').replace('private:', 'public:');
     const cpp = `
 #include <algorithm>
+#include <sstream>
 #include <cassert>
 #include <chrono>
 #include <cmath>
@@ -169,6 +173,8 @@ bool RankedAudioManager::songReady(int)const{return true;}
 std::string RankedAudioManager::readySongPath(int song)const{return std::to_string(song);}
 std::vector<int> RankedAudioManager::uniqueSongIds()const{return {224958,786863,99477};}
 void RankedAudioManager::startNextDownload(){}
+void RankedAudioManager::cancelActiveDownload(){}
+void RankedAudioManager::synchronizeSongCaches(){}
 // The actual download state machine is exercised by RankedAudioDownloadNativeTest.
 void RankedAudioManager::updateLibraryDownload(){}
 void RankedAudioManager::finishDownloadFailure(int,std::string const&){}
@@ -179,13 +185,33 @@ struct Fixture {
     FMOD::System system;RankedAudioManager audio;
     Fixture(){RankedVolumeControl::get().value=1;FMODAudioEngine::sharedEngine()->m_system=&system;audio.m_downloadState=RankedResourceDownloadState::Ready;
         audio.m_config.audio.enabled=true;audio.m_config.audio.fadeInSeconds=1.8;audio.m_config.audio.fadeOutSeconds=1.8;
-        audio.m_config.audio.resources={{"menu","",224958,2,true},{"match","",786863,26,true},{"round3_deathmatch_wait","",99477,182,true}};}
+        audio.m_config.audio.resources={{"menu","",224958,2,true},{"match","",786863,26,true},{"round3_deathmatch_wait","",99477,182,true}};
+        audio.m_configSignature=audio.configSignature(audio.m_config);}
     ~Fixture(){audio.fadeOutForGameplay();}
     FMOD::Sound* sound(int id){for(auto const& r:audio.m_config.audio.resources)if(r.songId==id)return audio.preparedSound(r);return nullptr;}
     void step(int ms){system.advance(ms);audio.tick();}
     FMOD::Channel* start(RankedAudioMode mode){audio.setMode(mode);auto* c=audio.m_rankedChannel;assert(c);step(2000);assert(near(c->audible(),0.8f));return c;}
 };
 int main(){
+    // Common gain multiplies GD and personal gain without resetting media or DSP ramps.
+    {Fixture f;f.audio.m_config.audio.resources[0].volume=.5;f.audio.m_config.audio.resources[1].volume=.25;
+        f.audio.setMode(RankedAudioMode::Lobby);auto* old=f.audio.m_rankedChannel;f.step(2000);assert(old&&near(old->volume,.4f));
+        f.audio.setMode(RankedAudioMode::Round12);auto* current=f.audio.m_rankedChannel;
+        assert(current&&near(current->volume,.2f)&&f.audio.m_retiringKey=="menu");
+        auto before=f.audio.m_config;auto const signature=f.audio.configSignature(before);
+        auto const plays=f.system.plays;auto const oldFades=old->fadePoints,newFades=current->fadePoints;
+        auto const oldSeeks=old->sound->seekCalls,newSeeks=current->sound->seekCalls;
+        auto changed=before;changed.audio.resources[0].volume=0;changed.audio.resources[1].volume=.75;
+        assert(f.audio.configSignature(changed)==signature);f.audio.configure(changed);f.step(1);
+        assert(f.audio.m_rankedChannel==current&&f.audio.m_retiringChannel==old&&old->stops==0&&current->stops==0);
+        assert(near(old->volume,0)&&near(current->volume,.6f));
+        assert(old->fadePoints==oldFades&&current->fadePoints==newFades);
+        assert(f.system.plays==plays&&old->sound->seekCalls==oldSeeks&&current->sound->seekCalls==newSeeks);
+        RankedVolumeControl::get().value=.4f;FMODAudioEngine::sharedEngine()->m_musicVolume=.5f;f.step(1);
+        assert(near(current->volume,.3f)&&near(current->group->volume,.4f));
+        changed.audio.resources[1].volume=std::numeric_limits<double>::quiet_NaN();f.audio.configure(changed);
+        assert(near(f.audio.targetRankedVolume(),.4f));FMODAudioEngine::sharedEngine()->m_musicVolume=1;
+    }
     // Only Corum-owned menu BGM joins this group. Both sides of a crossfade
     // change immediately; GD/native music and SFX remain outside its gain.
     {Fixture f;auto* old=f.start(RankedAudioMode::Lobby);

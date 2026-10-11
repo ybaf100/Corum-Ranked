@@ -10,6 +10,8 @@ export interface RankedClientAudioResource {
   readonly songId: number;
   readonly startSeconds: number;
   readonly loop: boolean;
+  /** Server-owned common gain. Missing in the sheet source means 100%. */
+  readonly volumePercent?: number;
 }
 
 export interface RankedClientAudioConfig {

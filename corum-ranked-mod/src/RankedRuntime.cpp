@@ -1,4 +1,5 @@
 #include "RankedRuntime.hpp"
+#include "RankedAudioManager.hpp"
 #include "SpectatorLiveRuntime.hpp"
 #include "domain/SpectatorLocalSafety.hpp"
 #include "domain/AttemptScoring.hpp"
@@ -679,6 +680,8 @@ void RankedRuntime::fetchConfig() {
                             resource.songId = item["songId"].asInt().unwrapOr(0);
                             resource.startSeconds = std::max(0.0, item["startSeconds"].asDouble().unwrapOr(0.0));
                             resource.loop = item["loop"].asBool().unwrapOr(true);
+                            auto const percent = item["volumePercent"].asInt().unwrapOr(100);
+                            resource.volume = percent >= 0 && percent <= 100 ? percent / 100.0 : 1.0;
                             if (!resource.key.empty() && resource.songId > 0) {
                                 clientPresentation.audio.resources.push_back(std::move(resource));
                             }
@@ -949,6 +952,7 @@ void RankedRuntime::updateSessionHeartbeat() {
             if (successful(response)) {
                 auto const root = response.json().unwrapOr(matjson::Value());
                 m_sessionLeaseDeadline = now + std::chrono::seconds(std::clamp<std::int64_t>(root["sessionLeaseSeconds"].asInt().unwrapOr(90), 5, 120));
+                applyAudioVolumes(root["audioVolumes"]);
             } else if (response.code() == 401 || response.code() == 403 || response.code() == 426) {
                 auto const error = responseError(response);
                 leaveRanked(); setStage(RuntimeStage::Error, "Ranked connection is no longer valid.", error);
@@ -956,6 +960,24 @@ void RankedRuntime::updateSessionHeartbeat() {
             // Transport/5xx errors retain the lease only until its existing
             // deadline; neither retries nor stale replies can extend it locally.
         });
+}
+
+void RankedRuntime::applyAudioVolumes(matjson::Value const& volumes) {
+    auto const array = volumes.asArray();
+    if (array.isErr()) return;
+    bool changed = false;
+    for (auto const& item : array.unwrap()) {
+        if (!item.isObject()) continue;
+        auto const id = item["songId"].asInt().unwrapOr(0);
+        auto const percent = item["volumePercent"].asInt().unwrapOr(-1);
+        if (id <= 0 || id > 2147483647 || percent < 0 || percent > 100) continue;
+        for (auto& resource : m_view.client.audio.resources) {
+            if (resource.songId != id) continue;
+            auto const volume = percent / 100.0;
+            if (resource.volume != volume) { resource.volume = volume; changed = true; }
+        }
+    }
+    if (changed) RankedAudioManager::get().configure(m_view.client);
 }
 
 void RankedRuntime::fetchActivePlacement() {

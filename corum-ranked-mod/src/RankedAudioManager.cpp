@@ -180,7 +180,9 @@ std::string RankedAudioManager::configSignature(RankedClientPresentationView con
 
 void RankedAudioManager::configure(RankedClientPresentationView const& config) {
     auto const signature = configSignature(config);
-    if (signature == m_configSignature) return;
+    // Common gain is deliberately excluded from the media identity. Updating
+    // it must preserve the playing/seeked streams and the pending DSP fades.
+    if (signature == m_configSignature) { m_config = config; return; }
 
     cancelActiveDownload();
     cancelPendingAudioStart();
@@ -595,9 +597,16 @@ bool RankedAudioManager::ownedChannelPlaying() const {
 }
 
 float RankedAudioManager::targetRankedVolume() const {
+    return targetRankedVolume(m_playingKey);
+}
+
+float RankedAudioManager::targetRankedVolume(std::string const& key) const {
     auto* engine = FMODAudioEngine::sharedEngine();
     auto const gdMusicVolume = engine ? std::clamp(engine->m_musicVolume, 0.0f, 1.0f) : 1.0f;
-    return gdMusicVolume * kRankedRelativeVolume;
+    auto const* resource = findResource(key);
+    auto const configured = resource ? resource->volume : 1.0;
+    auto const common = std::isfinite(configured) ? std::clamp(configured, 0.0, 1.0) : 1.0;
+    return gdMusicVolume * kRankedRelativeVolume * static_cast<float>(common);
 }
 
 void RankedAudioManager::refreshVolume() {
@@ -662,6 +671,7 @@ void RankedAudioManager::stopOwnedAudio() {
         m_retiringChannel = nullptr;
     }
     m_retiringUntil = {};
+    m_retiringKey.clear();
     m_retiringSound = nullptr;
     m_retiringStreamMuted = false;
     if (m_rankedChannel) {
@@ -1037,6 +1047,7 @@ void RankedAudioManager::failDesiredAudio(char const* phase, int result) {
 void RankedAudioManager::retireOwnedChannel(double seconds) {
     auto* outgoing = m_rankedChannel;
     auto* outgoingSound = m_rankedSound;
+    auto const outgoingKey = m_playingKey;
     auto const fadingIn = m_ownedDspFadeIn;
     auto const fadeStart = m_ownedFadeDspStart;
     auto const fadeEnd = m_ownedFadeDspEnd;
@@ -1063,6 +1074,7 @@ void RankedAudioManager::retireOwnedChannel(double seconds) {
             outgoing->addFadePoint(end, 0) == FMOD_OK &&
             outgoing->setDelay(0, end, true) == FMOD_OK) {
             m_retiringChannel = outgoing;
+            m_retiringKey = outgoingKey;
             m_retiringSound = outgoingSound;
             m_retiringUntil = std::chrono::steady_clock::now() +
                 std::chrono::milliseconds(static_cast<int>(seconds * 1000));
@@ -1256,7 +1268,7 @@ void RankedAudioManager::updatePendingAudioStart() {
     if (!dspFade) channel->removeFadePoints(0, std::numeric_limits<unsigned long long>::max());
     // Base music volume and the DSP fade envelope are separate multipliers.
     // A zero base volume would leave the stream silent even after its DSP fade.
-    channel->setVolume(dspFade || fadeIn <= 0 ? targetRankedVolume() : 0);
+    channel->setVolume(dspFade || fadeIn <= 0 ? targetRankedVolume(key) : 0);
     channel->setMute(false);
     auto const unpauseResult = channel->setPaused(false);
     if (unpauseResult != FMOD_OK) {
@@ -1375,12 +1387,16 @@ void RankedAudioManager::verifyDesiredAudio() {
 }
 
 void RankedAudioManager::updateOwnedFades(std::chrono::steady_clock::time_point now) {
+    // The retiring track has its own gain even while the incoming track plays.
+    // setVolume changes the base multiplier; FMOD keeps its DSP fade points.
+    if (m_retiringChannel) m_retiringChannel->setVolume(targetRankedVolume(m_retiringKey));
     if (m_retiringChannel && now >= m_retiringUntil) {
         m_retiringChannel->stop();
         m_retiringChannel = nullptr;
         m_retiringSound = nullptr;
         m_retiringStreamMuted = false;
         m_retiringUntil = {};
+        m_retiringKey.clear();
     }
     if (m_ownedFadeOutPending && m_rankedChannel) {
         auto const elapsed = std::chrono::duration<double>(now - m_ownedFadeStartedAt).count();
@@ -1402,8 +1418,9 @@ void RankedAudioManager::updateOwnedFades(std::chrono::steady_clock::time_point 
         auto const t = m_ownedFadeDurationSeconds <= 0.0
             ? 1.0
             : std::clamp(elapsed / m_ownedFadeDurationSeconds, 0.0, 1.0);
-        if (!m_ownedDspFadeIn || t >= 1.0)
-            m_rankedChannel->setVolume(targetRankedVolume() * static_cast<float>(t));
+        // DSP points already provide the ramp. Keep the per-song base gain
+        // live during that ramp; only the software fallback multiplies by t.
+        m_rankedChannel->setVolume(targetRankedVolume() * (m_ownedDspFadeIn ? 1.0f : static_cast<float>(t)));
         if (t >= 1.0) {
             m_ownedFadeInPending = false;
             m_ownedDspFadeIn = false;

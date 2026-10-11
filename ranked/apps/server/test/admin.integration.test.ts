@@ -19,11 +19,14 @@ import {REQUIRED_RANKED_CLIENT_VERSION} from '../src/session/client-version.js';
 import type {RankedSessionContext} from '../src/session/session.types.js';
 import {PgliteDatabase} from './pglite-database.js';
 import {environmentFixture,configDocumentFixture} from './fixtures.js';
-import type {RankedConfigService} from '../src/config/ranked-config.service.js';
+import {RankedConfigService} from '../src/config/ranked-config.service.js';
+import {RankedConfigController} from '../src/config/ranked-config.controller.js';
+import {SessionService} from '../src/session/session.service.js';
 const id=(n:number)=>`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
 const now=new Date('2026-10-09T15:00:00Z'),clock={now:()=>now};
 const env=environmentFixture(),debugEnv={...env,debugBot:{password:'test-debug-password'}} as typeof env;
-const tokens=new TokenService(env),config={getSnapshot:()=>configDocumentFixture()} as RankedConfigService;
+let document=configDocumentFixture();
+const tokens=new TokenService(env),config={getSnapshot:()=>structuredClone(document)} as RankedConfigService;
 let pg:PGlite,db:PgliteDatabase,service:AdminService,app:INestApplication,base:string;
 const context:RankedSessionContext={sessionId:id(101),playerId:id(1),gdAccountId:'1',gdUsername:'hwanhee1',displayedTier:'RED',hiddenMmr:500,placementGames:5};
 const body=(action:AdminActionDto['action'],values:Partial<AdminActionDto>={})=>({password:'test-debug-password',action,...values});
@@ -46,8 +49,8 @@ beforeAll(async()=>{
  pg=new PGlite();db=new PgliteDatabase(pg);const dir=new URL('../../../migrations/',import.meta.url);
  for(const f of(await readdir(dir)).filter(f=>f.endsWith('.sql')).sort())await pg.exec(await readFile(new URL(f,dir),'utf8'));
  service=new AdminService(db,debugEnv,config,clock);
- const module=await Test.createTestingModule({controllers:[AdminController],providers:[SessionGuard,
- {provide:AdminService,useValue:service},{provide:DATABASE,useValue:db},{provide:SERVER_CLOCK,useValue:clock},{provide:TokenService,useValue:tokens}]}).compile();
+ const module=await Test.createTestingModule({controllers:[AdminController,RankedConfigController],providers:[SessionGuard,
+ {provide:RankedConfigService,useValue:config},{provide:AdminService,useValue:service},{provide:DATABASE,useValue:db},{provide:SERVER_CLOCK,useValue:clock},{provide:TokenService,useValue:tokens}]}).compile();
  // Preserve the production tsc DTO metadata omitted by the test transpiler.
  Reflect.defineMetadata('design:paramtypes',[Object,AdminActionDto],AdminController.prototype,'execute');
  app=module.createNestApplication();app.useLogger(false);app.useGlobalPipes(new ValidationPipe({whitelist:true,forbidNonWhitelisted:true,transform:true}));
@@ -55,6 +58,12 @@ beforeAll(async()=>{
 },60000);
 afterAll(async()=>{await app?.close();await pg.close();});
 beforeEach(async()=>{
+ document={...configDocumentFixture(),client:{audio:{enabled:true,fadeInSeconds:.25,fadeOutSeconds:.25,resources:[
+   {key:'menu',label:'Lobby',songId:123,startSeconds:42,loop:true},
+   {key:'result_win',label:'Win',songId:123,startSeconds:3,loop:false},
+   {key:'result_lose',label:'Lose',songId:456,startSeconds:5,loop:false},
+ ]},ui:{fadeInSeconds:.24,fadeOutSeconds:.18}}};
+ await pg.exec('TRUNCATE ranked_audio_volumes');
  await pg.exec('TRUNCATE ranked_config_snapshots,ranked_players,ranked_outbox_events CASCADE');await player(1,'hwanhee1');await player(2,'Target');
  await db.query("INSERT INTO ranked_config_snapshots (id,generation,rules_version,source_payload,fetched_at) VALUES ($1,'admin','test','{}',$2)",[id(90),now]);
  for(const n of[1,2])await db.query(`INSERT INTO ranked_sessions (id,player_id,token_hash,client_version,environment_snapshot,expires_at,last_heartbeat_at)
@@ -65,6 +74,51 @@ async function post(data:unknown,token='session-1'){
  return{status:r.status,json:await r.json() as any};
 }
 describe('Admin authenticated mutations',()=>{
+ it('deduplicates shared songs and persists common gain in public server configuration without modifying the sheet snapshot',async()=>{
+ const loaded=await post(body('GET_AUDIO_VOLUMES'));
+ expect(loaded.status).toBe(201);expect(loaded.json.songs).toHaveLength(2);
+ expect(loaded.json.songs[0]).toMatchObject({songId:123,volumePercent:100,keys:['menu','result_win']});
+ const saved=await post(body('SET_AUDIO_VOLUME',{songId:123,volumePercent:37}));
+ expect(saved.status).toBe(201);expect(saved.json.audioVolumes).toContainEqual({songId:123,volumePercent:37});
+ const response=await fetch(base+'/api/ranked/config');expect(response.status).toBe(200);expect(response.headers.get('cache-control')).toBe('no-store');
+ const publicConfig=await response.json() as any;
+ expect(publicConfig.client.audio.resources.map((r:any)=>r.volumePercent)).toEqual([37,37,100]);
+ expect(publicConfig.client.audio.resources[0]).toMatchObject({songId:123,startSeconds:42,loop:true});
+ expect(document.client!.audio.resources[0]!.volumePercent).toBeUndefined();
+ expect(await profile()).toMatchObject({visible_ranked_score:100,hidden_mmr:500});
+ // A fresh reader/server instance and sheet refresh retain the same DB setting.
+ document={...document,generation:'later',client:{...document.client!,audio:{...document.client!.audio,fadeInSeconds:.1}}};
+ const reader=new RankedConfigController(config,db);
+ expect(await reader.getClientConfig()).toMatchObject({client:{audio:{fadeInSeconds:.1,resources:[
+   {key:'menu',volumePercent:37},{key:'result_win',volumePercent:37},{key:'result_lose',volumePercent:100},
+ ]}}});
+ expect((await db.query('SELECT song_id,volume_percent,updated_by_account_id FROM ranked_audio_volumes')).rows).toEqual([
+   {song_id:123,volume_percent:37,updated_by_account_id:1},
+ ]);
+ });
+ it('delivers updates and zero/default gains to both connected players through their existing session heartbeats',async()=>{
+ const sessions=new SessionService(db,{fetchCurrentTier:async()=>"BRONZE"},clock,{next:()=>randomUUID()},config,tokens);
+ await service.execute(context,body('SET_AUDIO_VOLUME',{songId:123,volumePercent:0}));
+ const other={...context,sessionId:id(102),playerId:id(2),gdAccountId:'2',gdUsername:'Target'};
+ for(const session of[context,other])expect(await sessions.heartbeat(session)).toMatchObject({sessionLeaseSeconds:90,
+   audioVolumes:[{songId:123,volumePercent:0},{songId:456,volumePercent:100}]});
+ await service.execute(context,body('SET_AUDIO_VOLUME',{songId:123,volumePercent:100}));
+ expect((await sessions.heartbeat(other)).audioVolumes[0]).toEqual({songId:123,volumePercent:100});
+ });
+ it('authorizes music reads/writes server-side and rejects unknown IDs and malformed gains without any write',async()=>{
+ for(const action of['GET_AUDIO_VOLUMES','SET_AUDIO_VOLUME'] as const){
+   expect((await post(body(action,{songId:123,volumePercent:25}),'session-2')).status).toBe(403);
+   expect((await post(body(action,{password:'wrong',songId:123,volumePercent:25}))).status).toBe(403);
+ }
+ for(const volumePercent of[-1,101,12.5,'50',undefined]){
+   expect((await post({...body('SET_AUDIO_VOLUME',{songId:123}),...(volumePercent===undefined?{}:{volumePercent})})).status).toBe(400);
+ }
+ for(const songId of[0,789,1.5,2147483648,undefined])expect((await post(body('SET_AUDIO_VOLUME',{...(songId===undefined?{}:{songId}),volumePercent:25}))).status).toBe(400);
+ expect((await db.query('SELECT * FROM ranked_audio_volumes')).rows).toHaveLength(0);
+ await db.query('UPDATE ranked_sessions SET revoked_at=$1 WHERE id=$2',[now,id(101)]);
+ await expect(service.execute(context,body('SET_AUDIO_VOLUME',{songId:123,volumePercent:25}))).rejects.toMatchObject({status:403});
+ expect((await db.query('SELECT * FROM ranked_audio_volumes')).rows).toHaveLength(0);
+ });
  it('requires the persisted caller name AND password; a target/payload cannot impersonate the caller',async()=>{
  expect((await post(body('SET_LP',{lp:300}),'session-2')).status).toBe(403);
  expect((await post(body('SET_LP',{lp:300,password:'incorrect'}))).status).toBe(403);
@@ -165,6 +219,7 @@ describe('Admin authenticated mutations',()=>{
  expect((await profile()).visible_ranked_score).toBe(100);
  });
  it('requires reset confirmation, retains configuration/runtime flags and invalidates the former session',async()=>{
+ await service.execute(context,body('SET_AUDIO_VOLUME',{songId:456,volumePercent:65}));
  await match(301);expect((await post(body('RESET_DB'))).status).toBe(400);
  expect((await db.query('SELECT * FROM ranked_players')).rows).toHaveLength(2);
  const flags=(await db.query('SELECT * FROM ranked_runtime_features')).rows;
@@ -173,6 +228,7 @@ describe('Admin authenticated mutations',()=>{
  expect((await db.query('SELECT * FROM ranked_matches')).rows).toHaveLength(0);
  expect((await db.query('SELECT * FROM ranked_config_snapshots')).rows).toHaveLength(1);
  expect((await db.query('SELECT * FROM ranked_runtime_features')).rows).toEqual(flags);
+ expect((await db.query('SELECT song_id,volume_percent FROM ranked_audio_volumes')).rows).toEqual([{song_id:456,volume_percent:65}]);
  expect((await post(body('DELETE_BOTS'))).status).toBe(401);
  });
 });
