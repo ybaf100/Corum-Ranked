@@ -28,7 +28,8 @@ int main(){using namespace corum::ranked;
  for(auto size:{std::pair{480.f,320.f},std::pair{568.f,320.f},std::pair{800.f,450.f},std::pair{430.f,300.f},std::pair{1024.f,768.f}}){
   auto l=modeLobbyLayout(size.first,size.second);assert(l.scale>0&&l.scale<=1);
   assert(l.leftX-94*l.scale>=20&&l.rightX+94*l.scale<=size.first-20);
-  assert(l.centerY-166*l.scale>=46-.001f&&l.centerY+130*l.scale<=size.second-70+.001f);
+  assert(l.centerY-105*l.scale>=44-.001f&&l.centerY+123*l.scale<=size.second-36+.001f);
+  if(size.first>=480&&size.second>=320)assert(l.scale==1);
  }
  struct Card{std::string scope;int claimableRewards;};
  std::vector<Card> cards={{"SOLO_RANKED",0},{"SHARED",1},{"SOLO_RANKED",2},{"SHARED",0}};
@@ -152,7 +153,7 @@ struct Owner:CCNode{
  corum::ranked::ModeLobbyTransition m_modeTransition;CCLayerColor survival,solo,panel,survivalControls,soloControls;
  CCLayerColor *m_lobbySurvival=&survival,*m_lobbySolo=&solo,*m_lobbyPanel=&panel;
  CCMenu survivalMenu,soloMenu,panelMenu,menu,settings;
- CCMenu toolbar;CCMenu*m_menu=&menu,*m_settingsMenu=&settings,*m_lobbyToolbar=&toolbar;bool m_uiFadingOut=false,m_returnToModesAfterQueue=false;std::string m_renderedUiKey;
+ CCMenu toolbar;CCMenu*m_menu=&menu,*m_settingsMenu=&settings,*m_lobbyToolbar=&toolbar;bool m_uiFadingOut=false,m_returnToModesAfterQueue=false,m_modeNoticeOpen=false;std::string m_renderedUiKey;
  enum class Page{Live,History};Page m_page=Page::Live;
  int headerUpdates=0;std::string presentationKey(){return "selected";}void updateModeLobbyHeader(){++headerUpdates;}
  Owner(){survivalControls.id=soloControls.id="ranked-mode-entry-controls";survivalControls.children={&survivalMenu};soloControls.children={&soloMenu};survival.children={&survivalControls};solo.children={&soloControls};panel.children={&panelMenu};}
@@ -216,9 +217,15 @@ test('mode lobby owns Cocos actions and defers full UI replacement while moving'
  assert.match(method(popup,'    void render()'),/m_modeTransition.moving\(\)/);
  assert.match(method(popup,'    void onCloseLayer('),/m_modeTransition.back\(\).*animateModeLobby\(mode,false\)/);
  const card=method(popup,'    void renderModeCard(');
- assert.match(card,/if \(!enabled\)/);assert.match(card,/enter->setEnabled\(enabled/);
- assert.match(card,/survival-entry/);assert.match(card,/solo-ranked-entry/);
+ assert.match(card,/hitArea->setContentSize\(\{188,210\}\)/);
+ assert.match(card,/select->setEnabled\(source.stage == RuntimeStage::Ready\)/);
+ assert.match(card,/survival-card-select/);assert.match(card,/solo-ranked-card-select/);
+ assert.doesNotMatch(card,/survival-entry|solo-ranked-entry|mode-browse/);
  const panel=method(popup,'    void renderModePanel(');
+ assert.match(card,/makeNeonPanel\(\{188.0f, 210.0f\}/);
+ assert.match(panel,/makeNeonPanel\(\{188.0f, 210.0f\}/);
+ assert.match(panel,/makeNeonPanel\(\{188,210\}/);
+ assert.match(panel,/rightCenter.x,rightCenter.y \+ 80.0f/);
  assert.match(panel,/rankIcon_1_001\.png/);assert.doesNotMatch(panel,/GJ_highscoreBtn_001\.png/);
  assert.match(panel,/queue->setEnabled\(false\)/);
 });

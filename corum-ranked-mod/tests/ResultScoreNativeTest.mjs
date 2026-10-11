@@ -909,7 +909,7 @@ std::string tr(char const*,char const* english){return english;}
 struct CorumRankedLayer:CCNode {
     enum class Page{Live,Achievements,HistoryList,HistoryDetail,PlacementPoolSelection,PlacementSkipConfirm};
     struct {bool moving()const{return false;}}m_modeTransition;
-    Page m_page=Page::Live;std::string m_titleSelectorAchievement;
+    Page m_page=Page::Live;std::string m_titleSelectorAchievement;bool m_modeNoticeOpen=false;
     CCNode* m_rankTransitionLayer=nullptr;CCNode* m_resultScoreLayer=nullptr;bool m_resultScorePending=false;
     CCMenu settings;CCMenu* m_settingsMenu=&settings;CCMenuItemSpriteExtra* m_jukeboxButton=nullptr;
     std::optional<WeakRef<FLAlertLayer>>m_jukeboxNotice;
@@ -931,6 +931,8 @@ int main() {
             auto allowed=page==P::Achievements||page==P::HistoryList||page==P::HistoryDetail||
                 (page==P::Live&&(stage==RuntimeStage::Ready||stage==RuntimeStage::JoiningQueue||stage==RuntimeStage::Queued));
             assert(owner.settings.visible==allowed&&owner.settings.touch==allowed);
+            owner.m_modeNoticeOpen=true;owner.settingsVisibility();assert(!owner.settings.visible&&!owner.settings.touch);
+            owner.m_modeNoticeOpen=false;
             owner.m_resultScorePending=true;owner.settingsVisibility();assert(!owner.settings.visible&&!owner.settings.touch);
             owner.m_resultScorePending=false;owner.m_rankTransitionLayer=&owner;owner.settingsVisibility();assert(!owner.settings.visible);
             owner.m_rankTransitionLayer=nullptr;owner.m_resultScoreLayer=&owner;owner.settingsVisibility();assert(!owner.settings.visible);

@@ -15,3 +15,5 @@ export * from "./scoring.js";
 export * from "./tier.js";
 export * from "./types.js";
 export * from "./survival.js";
+export * from "./survival-maps.js";
+export * from "./survival-match.js";

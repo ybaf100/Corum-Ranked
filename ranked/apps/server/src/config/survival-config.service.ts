@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger, ServiceUnavailableException, type OnApplicationBootstrap, type OnApplicationShutdown } from "@nestjs/common";
 import { validateSurvivalConfig, type SurvivalConfig } from "@corum-ranked/rules";
 import { SERVER_ENVIRONMENT, type ServerEnvironment } from "./server-environment.js";
+import { ModeAdmissionFence } from "./mode-admission.js";
 
 export interface SurvivalConfigDocument {
   readonly generation: string;
@@ -33,6 +34,8 @@ export class SurvivalConfigService implements OnApplicationBootstrap, OnApplicat
   private error: string | null = null;
   private pending: Promise<boolean> | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
+  private readonly admission = new ModeAdmissionFence();
+  public withAdmission<T>(operation: () => Promise<T>): Promise<T> { return this.admission.run(operation); }
   public constructor(@Inject(SURVIVAL_CONFIG_SOURCE) private readonly source: SurvivalConfigSource,
     @Inject(SERVER_ENVIRONMENT) private readonly environment: ServerEnvironment) {}
   public async onApplicationBootstrap(): Promise<void> {
@@ -52,10 +55,12 @@ export class SurvivalConfigService implements OnApplicationBootstrap, OnApplicat
       const errors = [...validateSurvivalConfig(document.config)];
       if (!document.generation?.trim() || !Number.isFinite(Date.parse(document.generatedAt))) errors.push("Invalid Survival document identity");
       if (errors.length) throw new Error(errors.join("; "));
-      // M1 admits no Survival queue or matches. M5 must fence its admissions and
-      // remove only its QUEUED rows here before publishing the new snapshot.
-      this.snapshot = { ...structuredClone(document), fetchedAt: new Date().toISOString() };
-      this.error = null; return true;
+      // M3 internal match admission shares this fence. Existing matches use
+      // their captured config. M5 must remove its QUEUED rows before publishing.
+      return this.withAdmission(async () => {
+        this.snapshot = { ...structuredClone(document), fetchedAt: new Date().toISOString() };
+        this.error = null; return true;
+      });
     } catch (error) {
       this.error = error instanceof Error ? error.message : "Survival config refresh failed";
       this.logger.error(this.error); return false;

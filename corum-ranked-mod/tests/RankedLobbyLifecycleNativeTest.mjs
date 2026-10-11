@@ -309,7 +309,8 @@ struct RankedRuntime {RuntimeView state;int dismissals=0,fetches=0;bool acknowle
 struct Layer {
  corum::ranked::ModeLobbyTransition m_modeTransition;
  enum class Page {Live,History};Page m_page=Page::Live;
- bool m_rankTransitionLayer=false,m_resultScoreLayer=false,m_resultScorePending=false;std::string m_localMessage;
+ bool m_rankTransitionLayer=false,m_resultScoreLayer=false,m_resultScorePending=false,m_modeNoticeOpen=false;std::string m_localMessage;
+ int noticeCloses=0,inputSyncs=0;void closeModeNotice(){m_modeNoticeOpen=false;++noticeCloses;}void syncLobbyInput(){++inputSyncs;}
  int exits=0,historyBacks=0;void onCloseLayer(CCObject*){++exits;}void onHistoryBack(CCObject*){++historyBacks;m_page=Page::Live;}
 ${method(source, '    void onResultClose(')}
 ${method(source, '    void keyBackClicked()').replace(' override', '')}
@@ -321,6 +322,7 @@ int main(){auto& runtime=RankedRuntime::get();
   layer.keyBackClicked();assert(layer.exits==0&&runtime.state.stage==RuntimeStage::Matched);runtime.acknowledgementPending=false;}
  {Layer layer;runtime.state={RuntimeStage::Matched,{"ROUND_PLAYING"}};layer.keyBackClicked();assert(layer.exits==0&&!layer.m_localMessage.empty());}
  {Layer layer;runtime.state.stage=RuntimeStage::Ready;layer.keyBackClicked();assert(layer.exits==1);}
+ {Layer layer;layer.m_modeNoticeOpen=true;layer.keyBackClicked();assert(layer.exits==0&&layer.noticeCloses==1&&layer.inputSyncs==1);}
  {Layer layer;layer.m_page=Layer::Page::History;layer.keyBackClicked();assert(layer.historyBacks==1&&layer.exits==0);}
  {Layer layer;layer.m_rankTransitionLayer=true;layer.keyBackClicked();assert(layer.exits==0);}
  {Layer layer;layer.m_resultScoreLayer=true;layer.keyBackClicked();assert(layer.exits==0);}

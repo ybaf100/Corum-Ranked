@@ -18,9 +18,9 @@ constexpr float kBorderInset = 0.375f;
 
 CCNode* modeTabFace(RankedMode mode, bool selected) {
     auto* face = surface({140,23},{},selected ? Gold : Cyan,
-        selected ? Gold : SurfaceRaised,250,true);
+        SurfaceRaised,250,true);
     auto* caption = menuLabel(mode == RankedMode::Survival ? "SURVIVAL" : "SOLO RANKED",0.28f,{70,11.5f},
-        selected ? ccc3(28,25,16) : Text);
+        selected ? Gold : Text);
     fitMenuLabelWidth(caption,130,0.28f,0.20f); face->addChild(caption,5);
     return face;
 }
@@ -220,9 +220,9 @@ void RankedLeaderboardPopup::showRows(matjson::Value const& data) {
             // perimeter directly avoids bright round blobs and cross shapes.
             auto* glow = CCDrawNode::create(); row->addChild(glow,8);
             auto const lap = 2 * (width + kRowHeight);
-            drawBorderStroke(glow,{width,kRowHeight},0,lap,color,2.3f,0.10f);
-            drawBorderStroke(glow,{width,kRowHeight},0,lap,color,1.05f,0.24f);
-            drawBorderStroke(glow,{width,kRowHeight},0,lap,Text,0.38f,0.48f);
+            drawBorderStroke(glow,{width,kRowHeight},0,lap,color,2.2f,0.10f);
+            drawBorderStroke(glow,{width,kRowHeight},0,lap,color,1.0f,0.24f);
+            drawBorderStroke(glow,{width,kRowHeight},0,lap,Text,0.36f,0.48f);
             visual.shine = CCDrawNode::create(); row->addChild(visual.shine,9);
         }
         m_rows.push_back(std::move(visual));
@@ -252,9 +252,9 @@ void RankedLeaderboardPopup::update(float dt) {
         auto const color = tierColor(row.entry.tier);
         for (auto const opposite : {0.0,0.5}) {
             auto const phase = m_elapsed / 6 + opposite;
-            drawBorderStroke(row.shine,size,phase,32,color,2.5f,0.22f);
-            drawBorderStroke(row.shine,size,phase,32,Text,1.05f,0.62f);
-            drawBorderStroke(row.shine,size,phase,32,{255,255,255},0.43f,0.96f);
+            drawBorderStroke(row.shine,size,phase,32,color,2.4f,0.22f);
+            drawBorderStroke(row.shine,size,phase,32,Text,1.0f,0.62f);
+            drawBorderStroke(row.shine,size,phase,32,{255,255,255},0.41f,0.96f);
         }
     }
 }

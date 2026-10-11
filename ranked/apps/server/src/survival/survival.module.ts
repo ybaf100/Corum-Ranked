@@ -4,6 +4,13 @@ import { RankedConfigModule } from "../config/ranked-config.module.js";
 import { SessionModule } from "../session/session.module.js";
 import { SurvivalController } from "./survival.controller.js";
 import { SurvivalService } from "./survival.service.js";
-@Module({ imports: [RankedConfigModule, SessionModule, AchievementModule], controllers: [SurvivalController],
-  providers: [SurvivalService], exports: [SurvivalService] })
+import type { RandomSource } from "@corum-ranked/rules";
+import { RANDOM_SOURCE } from "../common/runtime.module.js";
+import { SurvivalEngineService } from "./survival-engine.service.js";
+import { SurvivalEngineController } from "./survival-engine.controller.js";
+import { GdSurvivalMapProvider, SURVIVAL_MAP_PROVIDER } from "./survival-map.provider.js";
+@Module({ imports: [RankedConfigModule, SessionModule, AchievementModule], controllers: [SurvivalController,SurvivalEngineController],
+  providers: [SurvivalService,SurvivalEngineService,{provide:SURVIVAL_MAP_PROVIDER,
+    useFactory:(random:RandomSource)=>new GdSurvivalMapProvider(random),inject:[RANDOM_SOURCE]}],
+  exports: [SurvivalService,SurvivalEngineService] })
 export class SurvivalModule {}
