@@ -592,8 +592,9 @@ std::string RankedRuntime::endpoint(std::string const& path) const {
     return std::string(kDefaultRankedServerURL) + path;
 }
 
-std::string RankedRuntime::leaderboardUrl(int offset, int limit) const {
-    return endpoint(fmt::format("/api/ranked/leaderboard?offset={}&limit={}",std::max(0,offset),std::clamp(limit,1,50)));
+std::string RankedRuntime::leaderboardUrl(int offset, int limit, RankedMode mode) const {
+    auto const path = mode == RankedMode::Survival ? "/api/ranked/survival/leaderboard" : "/api/ranked/leaderboard";
+    return endpoint(fmt::format("{}?offset={}&limit={}",path,std::max(0,offset),std::clamp(limit,1,50)));
 }
 
 void RankedRuntime::begin() {
@@ -607,11 +608,14 @@ void RankedRuntime::begin() {
     ) return;
 
     ++m_sessionGeneration;
+    m_survivalProfileRequest.cancel(); m_modeConfigRequest.cancel();
+    m_survivalProfileBusy = m_modeConfigBusy = false;
+    m_nextSurvivalProfileAt = {}; m_nextModeConfigAt = {};
     // A successful Admin action reloads admission while a lobby metadata read
     // may still be pending. Retire it before fetchConfig reuses this channel.
     m_controlRequest.cancel(); m_controlBusy = false;
     ++m_standingGeneration; m_standingRequest.cancel(); m_standingBusy = false;
-    m_nextStandingAt = {}; m_view.standing = {};
+    m_nextStandingAt = {}; m_view.standing = {}; m_view.survival = {};
     m_sessionHeartbeatRequest.cancel(); m_sessionHeartbeatBusy = false;
     m_sessionLeaseDeadline = {}; m_nextSessionHeartbeatAt = {};
     resetGameplayControls();
@@ -734,10 +738,9 @@ void RankedRuntime::fetchConfig() {
             }
             m_view.client = std::move(clientPresentation);
 
-            if (!root["queueEnabled"].asBool().unwrapOr(false)) {
-                setStage(RuntimeStage::Error, "The Ranked queue is disabled by operations.");
-                return;
-            }
+            m_view.soloEnabled = root["queueEnabled"].asBool().unwrapOr(false);
+            m_view.survivalEnabled = root["modes"]["survival"]["enabled"].asBool().unwrapOr(false);
+            m_view.survivalConfigReady = root["modes"]["survival"]["ready"].asBool().unwrapOr(false);
 
             EnvironmentPolicy policy;
             auto const allowedResult = root["allowedMods"].asArray();
@@ -803,12 +806,6 @@ void RankedRuntime::fetchConfig() {
                 setStage(RuntimeStage::AwaitingUpdate, "A mod update is required before entering Ranked.");
                 return;
             }
-            m_installedMods = captureInstalledMods();
-            auto const decision = evaluateEnvironment(m_installedMods, m_environmentPolicy);
-            if (!decision.allowed) {
-                showEnvironmentWarning(decision, true);
-                return;
-            }
             auto& audio = RankedAudioManager::get();
             auto& assets = ui::RankAssetPackManager::get();
             audio.configure(m_view.client);
@@ -817,6 +814,9 @@ void RankedRuntime::fetchConfig() {
                 setStage(RuntimeStage::AwaitingResources, "Download the additional resources before entering Ranked.");
                 return;
             }
+            m_installedMods = captureInstalledMods();
+            auto const decision = evaluateEnvironment(m_installedMods, m_environmentPolicy);
+            if (!decision.allowed) { showEnvironmentWarning(decision, true); return; }
             createSession();
         }
     );
@@ -836,6 +836,9 @@ void RankedRuntime::finishAdmission() {
     if (!m_rankedOpen || m_view.stage != RuntimeStage::AwaitingResources || m_controlBusy ||
         !ui::RankedModUpdateManager::get().ready() ||
         !RankedAudioManager::get().resourcesReady() || ui::RankAssetPackManager::get().requiresDownload()) return;
+    m_installedMods = captureInstalledMods();
+    auto const decision = evaluateEnvironment(m_installedMods, m_environmentPolicy);
+    if (!decision.allowed) { showEnvironmentWarning(decision, true); return; }
     createSession();
 }
 
@@ -996,6 +999,9 @@ void RankedRuntime::createSession(bool takeOver) {
 void RankedRuntime::leaveRanked() {
     m_rankedOpen = false; m_sessionRejected = true;
     ++m_sessionGeneration;
+    m_survivalProfileRequest.cancel(); m_modeConfigRequest.cancel();
+    m_survivalProfileBusy = m_modeConfigBusy = false;
+    m_nextSurvivalProfileAt = {}; m_nextModeConfigAt = {};
     ++m_standingGeneration; m_standingRequest.cancel(); m_standingBusy = false;
     m_sessionHeartbeatRequest.cancel(); m_sessionHeartbeatBusy = false;
     m_controlRequest.cancel(); m_controlBusy = false;
@@ -1129,6 +1135,7 @@ void RankedRuntime::fetchActivePlacement() {
 }
 
 void RankedRuntime::skipPlacement() {
+    if (!m_view.soloEnabled) return;
     if (
         m_controlBusy || m_sessionToken.empty() || m_view.stage != RuntimeStage::Ready ||
         !m_view.placement.required || m_view.placement.active
@@ -1161,6 +1168,7 @@ void RankedRuntime::skipPlacement() {
 }
 
 void RankedRuntime::startPlacement(int startingPool, int stageCount) {
+    if (!m_view.soloEnabled) return;
     if (
         m_controlBusy || m_sessionToken.empty() || m_view.stage != RuntimeStage::Ready ||
         !m_view.placement.required || m_view.placement.active || startingPool < 1 || startingPool > 6 ||
@@ -1228,7 +1236,7 @@ void RankedRuntime::pausePlacement() {
 }
 
 void RankedRuntime::joinQueue() {
-    if (m_controlBusy || m_sessionToken.empty() || m_view.stage != RuntimeStage::Ready) return;
+    if (!m_view.soloEnabled || m_controlBusy || m_sessionToken.empty() || m_view.stage != RuntimeStage::Ready) return;
     m_installedMods = captureInstalledMods();
     auto const decision = evaluateEnvironment(m_installedMods, m_environmentPolicy);
     if (!decision.allowed) {
@@ -1271,7 +1279,7 @@ void RankedRuntime::startDebugBotMatch(std::string const& password, DebugBotMatc
 }
 
 void RankedRuntime::startDebugBotMatch(DebugBotMatchOptions options) {
-    if (m_controlBusy || m_sessionToken.empty() || m_view.stage != RuntimeStage::Ready) return;
+    if (!m_view.soloEnabled || m_controlBusy || m_sessionToken.empty() || m_view.stage != RuntimeStage::Ready) return;
     m_installedMods = captureInstalledMods();
     auto const decision = evaluateEnvironment(m_installedMods, m_environmentPolicy);
     if (!decision.allowed) {
@@ -2591,8 +2599,9 @@ void RankedRuntime::queueAgain() {
     joinQueue();
 }
 
-void RankedRuntime::fetchHistory() {
+void RankedRuntime::fetchHistory(RankedMode mode) {
     if (m_controlBusy || m_sessionToken.empty()) return;
+    m_view.history.clear();
     m_view.historyLoading = true;
     m_view.historyError.clear();
     ++m_view.revision;
@@ -2600,7 +2609,7 @@ void RankedRuntime::fetchHistory() {
     m_controlBusy = true;
     auto const generation = m_sessionGeneration;
     m_controlRequest.spawn(
-        request.get(endpoint("/api/ranked/matches")),
+        request.get(endpoint(mode == RankedMode::Survival ? "/api/ranked/survival/history" : "/api/ranked/matches")),
         [this, generation](web::WebResponse response) {
             if (generation != m_sessionGeneration || !m_rankedOpen) return;
             m_controlBusy = false;
@@ -2846,6 +2855,7 @@ void RankedRuntime::parseAchievementState(matjson::Value const& root) {
             AchievementCardView card;
             card.id = value["id"].asString().unwrapOr("");
             card.type = value["type"].asString().unwrapOr("");
+            card.scope = value["scope"].asString().unwrapOr("");
             card.nameKo = value["nameKo"].asString().unwrapOr("");
             card.nameEn = value["nameEn"].asString().unwrapOr("");
             card.descriptionKo = value["descriptionKo"].asString().unwrapOr("");
@@ -4043,6 +4053,49 @@ void RankedRuntime::fetchStanding() {
         });
 }
 
+void RankedRuntime::fetchModeAvailability() {
+    if (!m_rankedOpen || m_sessionToken.empty() || m_sessionRejected || m_modeConfigBusy) return;
+    m_modeConfigBusy = true;
+    m_nextModeConfigAt = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    auto const generation = m_sessionGeneration;
+    auto request = baseRequest({}); request.timeout(std::chrono::seconds(10));
+    m_modeConfigRequest.spawn(request.get(endpoint("/api/ranked/config")), [this,generation](web::WebResponse response) {
+        if (generation != m_sessionGeneration || !m_rankedOpen) return;
+        m_modeConfigBusy = false;
+        if (!successful(response)) return;
+        auto const root = response.json().unwrapOr(matjson::Value());
+        m_view.soloEnabled = root["queueEnabled"].asBool().unwrapOr(false);
+        m_view.survivalEnabled = root["modes"]["survival"]["enabled"].asBool().unwrapOr(false);
+        m_view.survivalConfigReady = root["modes"]["survival"]["ready"].asBool().unwrapOr(false);
+    });
+}
+
+void RankedRuntime::fetchSurvivalProfile() {
+    if (!m_rankedOpen || m_sessionToken.empty() || m_sessionRejected || m_survivalProfileBusy) return;
+    m_survivalProfileBusy = true; m_view.survival.loading = true; m_view.survival.error.clear();
+    m_nextSurvivalProfileAt = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+    auto const generation = m_sessionGeneration;
+    auto request = baseRequest(m_sessionToken); request.timeout(std::chrono::seconds(15));
+    m_survivalProfileRequest.spawn(request.get(endpoint("/api/ranked/survival/profile")), [this,generation](web::WebResponse response) {
+        if (generation != m_sessionGeneration || !m_rankedOpen) return;
+        m_survivalProfileBusy = false; m_view.survival.loading = false;
+        if (!successful(response)) { m_view.survival.error = responseError(response); ++m_view.revision; return; }
+        auto const root = response.json().unwrapOr(matjson::Value());
+        auto const profile = root["profile"];
+        if (!profile.isObject() || !profile["lp"].isNumber()) { m_view.survival.error = "Invalid Survival profile"; ++m_view.revision; return; }
+        auto& sur = m_view.survival;
+        sur.loaded = true;
+        sur.profile.displayedTier = profile["tier"].asString().unwrapOr("RED");
+        sur.tierId = profile["tierId"].asString().unwrapOr(sur.profile.displayedTier);
+        sur.profile.visibleRankedScore = static_cast<int>(profile["lp"].asInt().unwrapOr(0));
+        sur.profile.demotionWarning = profile["demotionWarning"].asBool().unwrapOr(false);
+        auto const recovery = profile["warningRecoveryLp"].asInt();
+        sur.warningRecoveryLp = recovery.isOk() ? std::optional<int>(static_cast<int>(recovery.unwrap())) : std::nullopt;
+        sur.standing = parseStanding(root["standing"]);
+        observeServerNow(root); ++m_view.revision;
+    });
+}
+
 void RankedRuntime::tick() {
     updateSessionHeartbeat();
     if (m_sessionRejected) return;
@@ -4050,6 +4103,8 @@ void RankedRuntime::tick() {
     flushPlacementMapSkip();
     SpectatorLiveRuntime::get().tickTerminal();
     auto const now = std::chrono::steady_clock::now();
+    if (now >= m_nextModeConfigAt) fetchModeAvailability();
+    if (m_view.survivalConfigReady && now >= m_nextSurvivalProfileAt) fetchSurvivalProfile();
     if ((m_view.stage == RuntimeStage::Ready || m_view.stage == RuntimeStage::Queued) && now >= m_nextStandingAt) fetchStanding();
     if (now >= m_nextPollAt) {
         if (m_view.stage == RuntimeStage::Queued) pollQueue();

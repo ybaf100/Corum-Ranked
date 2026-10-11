@@ -1,3 +1,10 @@
+## v0.5.0-beta.59
+
+- Added the integrated Survival / Solo Ranked lobby after version, cached resource and environment checks, with reversible eased card/menu actions and protected input ownership.
+- Added independent Survival profiles, LP/tier rules, leaderboard tabs and additive Survival Config; disabled modes retain read access and stop new admissions while Solo games finish using their snapshots.
+- Split achievements into Solo Ranked, Survival and Shared, retaining existing IDs/AP/Claims and sharing GOLD and one equipped title across modes.
+- Survival matches remain unavailable in M1. See `../ranked/docs/survival-m1.md` for deployment, validation and M3/M4/M5 extension points.
+
 ## v0.5.0-beta.50
 
 - Normalize Admin text-input strings before JSON serialization so Android32/64 builds accept their separate gd::string ABI. Exercise both string types in the native popup regression fixture.

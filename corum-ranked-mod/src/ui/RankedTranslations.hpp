@@ -24,6 +24,15 @@ struct Translation {
 };
 
 inline constexpr std::array kKoreanTranslations {
+    Translation{"choose-mode", "게임 모드 선택"},
+    Translation{"mode-enter", "입장"},
+    Translation{"mode-browse", "조회"},
+    Translation{"mode-disabled", "운영 중지"},
+    Translation{"survival-no-matches", "아직 서바이벌 경기 기록이 없습니다"},
+    Translation{"survival-coming-later", "서바이벌 경기는 개발 중입니다"},
+    Translation{"survival-no-engine", "매칭 기능은 아직 제공되지 않습니다"},
+    Translation{"survival-achievements-later", "서바이벌 도전과제는 추후 추가됩니다"},
+    Translation{"no-achievements", "이 섹션에는 도전과제가 없습니다"},
     Translation{"leaderboard", "리더보드"},
     Translation{"leaderboard-player", "플레이어"},
     Translation{"leaderboard-status", "상태"},

@@ -236,6 +236,10 @@ function doGet(event) {
       return getCorumRankedConfigResponse_();
     }
 
+    if (action === "survival_config") {
+      return getCorumSurvivalConfigResponse_();
+    }
+
     if (action === "map") {
       return getMapResponse_(event.parameter.levelId, event.parameter.gdAccountId);
     }

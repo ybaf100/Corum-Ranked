@@ -5,13 +5,15 @@ import { DATABASE, type SqlExecutor } from "../database/database.port.js";
 import { readRankedAudioVolumes, withRankedAudioVolumes } from "./ranked-audio-volume.js";
 import { SERVER_ENVIRONMENT, type ServerEnvironment } from "./server-environment.js";
 import { RankedModUpdateService } from "./ranked-mod-update.service.js";
+import { SurvivalConfigService } from "./survival-config.service.js";
 
 @Controller("api/ranked")
 export class RankedConfigController {
   public constructor(@Inject(RankedConfigService) private readonly rankedConfig: RankedConfigService,
     @Optional() @Inject(DATABASE) private readonly database?: SqlExecutor,
     @Optional() @Inject(SERVER_ENVIRONMENT) private readonly environment?: ServerEnvironment,
-    @Optional() @Inject(RankedModUpdateService) private readonly modUpdates?: RankedModUpdateService) {}
+    @Optional() @Inject(RankedModUpdateService) private readonly modUpdates?: RankedModUpdateService,
+    @Optional() @Inject(SurvivalConfigService) private readonly survival?: SurvivalConfigService) {}
 
   @Get("maps")
   @Header("Cache-Control", "public, max-age=60, stale-while-revalidate=120")
@@ -47,6 +49,8 @@ export class RankedConfigController {
       requiredClientVersion: REQUIRED_RANKED_CLIENT_VERSION,
       modUpdates,
       queueEnabled: snapshot.operational.enabled,
+      modes: { soloRanked: { ready: true, enabled: snapshot.operational.enabled },
+        survival: this.survival?.getStatus() ?? { ready: false, enabled: false } },
       rules: snapshot.operational.rules,
       cbf: snapshot.operational.cbf,
       client: withRankedAudioVolumes(snapshot.client, volumes) ?? {

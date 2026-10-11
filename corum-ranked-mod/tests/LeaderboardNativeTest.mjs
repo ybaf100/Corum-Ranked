@@ -67,6 +67,7 @@ test('whole leaderboard popup validates pages, aligns statuses and icons, lazily
     // These are renderer/network boundaries. The Corum header and complete
     // translation unit compile and execute unchanged; this is no device claim.
     let boundary=read('tests/helpers/ResultPresentationNativeDouble.hpp').replace('#pragma once','')
+        .replace('struct CCObject { virtual ~CCObject() = default; };', 'struct CCObject { virtual ~CCObject() = default; int tag=0; void setTag(int t){tag=t;} int getTag()const{return tag;} };')
         .replace('CCNode* getParent()',`CCPoint convertToWorldSpace(CCPoint p){p=p+position;return parent?parent->convertToWorldSpace(p):p;}
         CCPoint convertToNodeSpace(CCPoint p){auto o=convertToWorldSpace({});return {p.x-o.x,p.y-o.y};}
         CCNode* getParent()`)
@@ -90,6 +91,7 @@ test('whole leaderboard popup validates pages, aligns statuses and icons, lazily
 ${boundary}
 ${json}
 #include "domain/LeaderboardPresentation.hpp"
+#include "domain/RankedMode.hpp"
 inline constexpr int GL_SRC_ALPHA=1,GL_ONE=1;
 using SEL_MenuHandler=int;
 namespace cocos2d{using ::CCSize;}
@@ -108,7 +110,7 @@ namespace async{template<class T>struct TaskHolder{int cancels=0;void cancel(){+
 namespace prelude{using geode::Popup;using geode::ScrollLayer;namespace web=geode::utils::web;}
 }
 namespace corum::ranked{
-struct RankedRuntime{static RankedRuntime& get(){static RankedRuntime r;return r;}std::string leaderboardUrl(int o,int n)const{return fmt::format("/api/ranked/leaderboard?offset={}&limit={}",o,n);}};
+struct RankedRuntime{static RankedRuntime& get(){static RankedRuntime r;return r;}std::string leaderboardUrl(int o,int n,RankedMode mode)const{return fmt::format("{}?offset={}&limit={}",mode==RankedMode::Survival?"/api/ranked/survival/leaderboard":"/api/ranked/leaderboard",o,n);}};
 namespace i18n{bool isKorean(){return false;}std::string text(char const*,char const* fallback){return fallback;}}
 namespace ui{
 enum class FontWeight{ExtraBold,Black};enum class RankBadgeDisplay{Matched,Leaderboard};
@@ -142,14 +144,16 @@ int main(){using namespace corum::ranked;using namespace ui;namespace web=geode:
  web::pending[0].callback({page()});assert(p->m_busy&&p->m_rows.empty()&&!p->m_refresh->isEnabled());
  p->onRefresh(nullptr);assert(web::pending.size()==1);drainMainQueue();
  assert(p->m_rows.size()==20&&badges==20&&!p->m_busy&&p->m_next->isEnabled()&&p->m_refresh->isEnabled());
- assert(iconCreates>0&&iconCreates<=5&&p->m_rows.front().icon->local&&p->m_rows[3].icon->account==0);
+ assert(iconCreates>0&&iconCreates<=5&&p->m_rows.front().icon->local&&p->m_rows[3].entry.bot);
+ auto initialPosition=p->m_scroll->m_contentLayer->position;p->m_scroll->m_contentLayer->position.y+=80;p->update(0);
+ assert(p->m_rows[3].icon&&p->m_rows[3].icon->account==0);p->m_scroll->m_contentLayer->position=initialPosition;p->update(0);
  auto c=leaderboardColumns(p->m_rows.front().node->size.width);
  for(auto const& row:p->m_rows){for(auto* child:row.node->children){auto* label=dynamic_cast<CCLabelBMFont*>(child);if(!label)continue;
   if(label->text.starts_with("Player-"))assert(label->position.x==c.name&&label->anchor.x==0);
   if(label->text=="PROMOTION MATCH"||label->text=="DEMOTION WARNING")assert(label->position.x==c.status);
   if(label->text=="SILVER"||label->text=="GOLD")assert(label->position.x==c.tierName);
  }}
- auto* shine=p->m_rows[3].shine;assert(shine&&p->m_rows[2].shine&&!p->m_rows[0].shine);
+ auto* shine=p->m_rows[2].shine;assert(shine&&p->m_rows[2].shine&&!p->m_rows[0].shine);
  assert(shine->lines.size()==6);auto top=shine->lines[2],bottom=shine->lines[5];
  auto w=p->m_rows[3].node->size.width;
  assert(std::abs(top.from.x+bottom.from.x-w)<.001&&std::abs(top.from.y+bottom.from.y-48)<.001);
@@ -173,6 +177,12 @@ int main(){using namespace corum::ranked;using namespace ui;namespace web=geode:
  drainMainQueue();stale({page()});drainMainQueue();assert(p->m_offset==0);p->dismiss();p->onExit();assert(CCTouchDispatcher::get()->releases==1);
  auto* reopened=RankedLeaderboardPopup::create();reopened->show();auto next=web::pending.back().callback;matjson::Value empty;empty["players"]=matjson::Value::Array{};empty["total"]=0;empty["hasMore"]=false;
  next({empty});drainMainQueue();assert(reopened->m_rows.empty()&&!reopened->m_next->isEnabled()&&reopened->m_caption->text=="No players yet.");
+ reopened->onRefresh(nullptr);auto oldSolo=web::pending.back().callback;
+ reopened->onMode(reopened->m_survivalTab);assert(reopened->m_mode==corum::ranked::RankedMode::Survival&&reopened->m_offset==0&&reopened->m_busy&&reopened->m_rows.empty());
+ assert(web::pending.back().request.url.starts_with("/api/ranked/survival/leaderboard"));auto oldSur=web::pending.back().callback;
+ reopened->onMode(reopened->m_soloTab);auto newest=web::pending.back().callback;
+ oldSolo({page()});oldSur({page()});drainMainQueue();assert(reopened->m_rows.empty()&&reopened->m_busy);
+ newest({empty});drainMainQueue();assert(!reopened->m_busy&&reopened->m_mode==corum::ranked::RankedMode::SoloRanked);
  reopened->onRefresh(nullptr);auto failure=web::pending.back().callback;failure({{},false});drainMainQueue();assert(!reopened->m_busy&&reopened->m_refresh->isEnabled());reopened->dismiss();
 }`);
     const popup=read('src/RankedPopup.cpp');

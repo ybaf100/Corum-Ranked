@@ -15,6 +15,21 @@
    - 액세스 권한: 모든 사용자
 8. `/exec`로 끝나는 배포 URL을 복사한다.
 
+## Corum Survival M1 설정 추가 (v0.5.0-beta.59)
+
+기존 프로젝트의 `Code.gs`를 갱신하고 같은 프로젝트에 `SurvivalConfig.gs`를 추가한다.
+`setupCorumSurvivalConfig()`를 실행하면 `Survival Config` 탭과 누락된 기본 행만 추가된다.
+기존 값·다른 탭은 보존된다. 실행 결과의 `validation`이 정상인지 확인한 후 기존 웹 앱
+배포를 새 버전으로 수정한다. 배포 ID와 `RANKED_CONFIG_URL`은 유지한다.
+
+`/exec?action=survival_config`가 독립 설정을 반환한다. `Ranked Config.enabled`는 Solo만,
+`Survival Config.enabled`는 Survival만 제어한다. Survival의 기본값은 `FALSE`이며 M1에서는
+`TRUE`여도 조회용 메뉴만 사용할 수 있고 실제 매칭은 아직 제공하지 않는다.
+티어는 `tierBands` JSON, 순위별 LP는 `placementLp` JSON으로 관리한다. 최초 OFF 조회도
+150 LP 프로필을 생성하며 기존 프로필을 초기화하지 않는다.
+
+전체 기본값·DB 적용·운영 및 후속 구현 지점은 [Survival M1 보고서](../ranked/docs/survival-m1.md)에 정리했다.
+
 ## Corum Ranked 설정 추가 (v0.5.0-beta.4)
 
 Ranked를 처음 붙일 때 기존 Apps Script 프로젝트의 `Code.gs`를 이 폴더의 최신본으로

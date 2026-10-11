@@ -6,6 +6,7 @@
 #include <deque>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -81,6 +82,20 @@ inline std::vector<std::size_t> achievementDisplayOrder(Cards const& cards) {
     // original card tags used by Claim/Title callbacks, across pagination.
     for (std::size_t i = 0; i < cards.size(); ++i) if (cards[i].claimableRewards > 0) order.push_back(i);
     for (std::size_t i = 0; i < cards.size(); ++i) if (cards[i].claimableRewards <= 0) order.push_back(i);
+    return order;
+}
+
+inline std::string achievementScopeName(std::string_view scope, bool korean) {
+    if (scope == "SOLO_RANKED") return korean ? "솔로 랭크" : "Solo Ranked";
+    if (scope == "SURVIVAL") return korean ? "서바이벌" : "Survival";
+    if (scope == "SHARED") return korean ? "공용" : "Shared";
+    return korean ? "미분류" : "Unclassified";
+}
+
+template<class Cards>
+inline std::vector<std::size_t> achievementDisplayOrderForScope(Cards const& cards, std::string_view scope) {
+    auto order = achievementDisplayOrder(cards);
+    std::erase_if(order, [&](std::size_t index) { return cards[index].scope != scope; });
     return order;
 }
 

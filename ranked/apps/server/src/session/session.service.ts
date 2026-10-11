@@ -110,22 +110,23 @@ export class SessionService {
 
   public async create(dto: CreateSessionDto): Promise<SessionCreationResult> {
     const config = this.config.getSnapshot();
-    if (!config.operational.enabled || !config.operational.mmrPolicy || !config.operational.timeouts) {
-      throw new ServiceUnavailableException("Ranked queue is not operationally configured");
-    }
+    // This is the shared lobby connection. OFF controls new Solo matches,
+    // never authentication, read access, Survival or recovery of admitted games.
+    const sessionSeconds = config.operational.timeouts?.sessionSeconds ?? RANKED_SESSION_LEASE_SECONDS;
+    const placementGamesRequired = config.operational.mmrPolicy?.placementGames ?? 0;
     this.assertEnvironment(dto.installedMods);
 
     // Placement establishes LP and MMR. A new unplaced profile uses the NONE
     // placeholder locally; no external CSMP request belongs on admission.
     let now = this.clock.now();
     const sessionToken = this.tokens.createSessionToken();
-    let expiresAt = new Date(now.getTime() + config.operational.timeouts.sessionSeconds * 1_000);
+    let expiresAt = new Date(now.getTime() + sessionSeconds * 1_000);
     let activeMatch = false;
 
     const profile = await this.database.transaction(async (transaction) => {
       const player = await this.upsertPlayer(transaction, dto);
       now = this.clock.now();
-      expiresAt = new Date(now.getTime() + config.operational.timeouts!.sessionSeconds * 1_000);
+      expiresAt = new Date(now.getTime() + sessionSeconds * 1_000);
       // The upsert locks the unique player row until commit. Concurrent
       // admissions for the same account serialize even when no session exists.
       const active = await transaction.query<{ id: string; instance_id: string | null }>(
@@ -211,8 +212,8 @@ export class SessionService {
         gdUsername: dto.gdUsername,
         displayedTier: profile.displayed_tier,
         placementGames: Number(profile.placement_games),
-        placementGamesRequired: config.operational.mmrPolicy.placementGames,
-        visibleRankedScore: Number(profile.placement_games) < config.operational.mmrPolicy.placementGames
+        placementGamesRequired,
+        visibleRankedScore: Number(profile.placement_games) < placementGamesRequired
           ? null
           : Number(profile.visible_ranked_score ?? 0),
         placementResults: this.ratingMarks(profile.placement_results),

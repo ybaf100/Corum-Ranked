@@ -36,6 +36,7 @@ const REQUIRED_MIGRATIONS = [
   "0017_placement_rating_policy.sql",
   "0018_map_metadata_cache.sql",
   "0019_ranked_audio_volumes.sql",
+  "0021_survival_m1.sql",
 ] as const;
 
 export interface RankedSchemaStatus {
@@ -57,6 +58,8 @@ type SchemaProbeRow = QueryResultRow & {
   ranked_achievement_metrics: boolean;
   ranked_achievement_unlocks: boolean;
   ranked_ap_ledger: boolean;
+  sur_profiles: boolean;
+  sur_lp_ledger: boolean;
   ranked_forum_records: boolean;
   ranked_forum_refresh_cooldowns: boolean;
   match_type: boolean;
@@ -167,6 +170,8 @@ export class DatabaseService implements DatabasePort, OnModuleInit, OnApplicatio
           to_regclass('public.ranked_achievement_metrics') IS NOT NULL AS ranked_achievement_metrics,
           to_regclass('public.ranked_achievement_unlocks') IS NOT NULL AS ranked_achievement_unlocks,
           to_regclass('public.ranked_ap_ledger') IS NOT NULL AS ranked_ap_ledger,
+          to_regclass('public.sur_profiles') IS NOT NULL AS sur_profiles,
+          to_regclass('public.sur_lp_ledger') IS NOT NULL AS sur_lp_ledger,
           to_regclass('public.ranked_forum_records') IS NOT NULL AS ranked_forum_records,
           to_regclass('public.ranked_forum_refresh_cooldowns') IS NOT NULL AS ranked_forum_refresh_cooldowns,
           EXISTS (
@@ -251,6 +256,8 @@ export class DatabaseService implements DatabasePort, OnModuleInit, OnApplicatio
         ["ranked_achievement_metrics", "table ranked_achievement_metrics"],
         ["ranked_achievement_unlocks", "table ranked_achievement_unlocks"],
         ["ranked_ap_ledger", "table ranked_ap_ledger"],
+        ["sur_profiles", "table sur_profiles"],
+        ["sur_lp_ledger", "table sur_lp_ledger"],
         ["ranked_forum_records", "table ranked_forum_records"],
         ["ranked_forum_refresh_cooldowns", "table ranked_forum_refresh_cooldowns"],
         ["match_type", "ranked_matches.match_type"],

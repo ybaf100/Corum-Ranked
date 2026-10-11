@@ -159,6 +159,7 @@ jobs:
           node --test corum-ranked-mod/tests/RankedSettingsNativeTest.mjs
           node --test corum-ranked-mod/tests/ResultScoreNativeTest.mjs
           node --test corum-ranked-mod/tests/LeaderboardNativeTest.mjs
+          node --test corum-ranked-mod/tests/ModeLobbyNativeTest.mjs
           node --test corum-ranked-mod/tests/DebugAdminNativeTest.mjs
           node --test corum-ranked-mod/tests/MapDetailsNativeTest.mjs
           node --test corum-ranked-mod/tests/RankAssetPackNativeTest.mjs

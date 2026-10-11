@@ -18,6 +18,9 @@
 
 ## 로컬 검증
 
+Survival M1 통합 및 beta.59 적용 절차는 [Survival M1 보고서](docs/survival-m1.md)를 참고한다.
+동일 서버·DB·Geode 모드에서 동작하며 운영 설정과 LP/리더보드는 모드별로 독립적이다.
+
 Node.js 22 이상과 C++23 컴파일러가 필요합니다.
 
 ```bash
@@ -27,6 +30,7 @@ npm test --prefix ranked
 npm run build --prefix ranked
 npm run test:harness --prefix ranked
 node apps-script/validate-ranked-config.mjs
+node --test apps-script/validate-survival-config.mjs
 node apps-script/validate-record-sheet-compat.mjs
 g++ -std=c++23 -Wall -Wextra -Wpedantic -Werror \
   corum-ranked-mod/tests/DomainTest.cpp \

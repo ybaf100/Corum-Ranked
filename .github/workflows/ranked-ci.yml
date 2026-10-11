@@ -9,6 +9,8 @@ on:
       - "ranked/**"
       - "apps-script/Code.gs"
       - "apps-script/RankedConfig.gs"
+      - "apps-script/SurvivalConfig.gs"
+      - "apps-script/validate-survival-config.mjs"
       - "apps-script/validate-ranked-config.mjs"
       - ".github/workflows/ranked-ci.yml"
   pull_request:
@@ -16,6 +18,8 @@ on:
       - "ranked/**"
       - "apps-script/Code.gs"
       - "apps-script/RankedConfig.gs"
+      - "apps-script/SurvivalConfig.gs"
+      - "apps-script/validate-survival-config.mjs"
       - "apps-script/validate-ranked-config.mjs"
       - ".github/workflows/ranked-ci.yml"
 
@@ -43,5 +47,7 @@ jobs:
         run: npm run build --prefix ranked
       - name: Validate additive Apps Script Ranked API
         run: node apps-script/validate-ranked-config.mjs
+      - name: Validate independent Survival config and additive setup
+        run: node --test apps-script/validate-survival-config.mjs
       - name: Re-run existing Apps Script compatibility checks
         run: node apps-script/validate-record-sheet-compat.mjs

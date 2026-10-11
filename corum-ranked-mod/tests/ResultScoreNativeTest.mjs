@@ -685,7 +685,7 @@ int main() {
     assert(static_cast<CCLabelBMFont*>(f.root.children.back())->text=="PROMOTION MATCH");
 }
 `);
-    assert.match(method(popupSource,'void renderMain('),/addRankStatus\(profile,[^;]+,true\)/);
+    assert.match(method(popupSource,'void renderModeCard('),/addRankStatus\(profile,[^;]+,true\)/);
     assert.doesNotMatch(method(popupSource,'void addPlayerCard('),/addRankStatus\(profile,[^;]+,true\)/);
 });
 
@@ -908,6 +908,7 @@ using corum::ranked::RankedRuntime;using corum::ranked::RuntimeStage;
 std::string tr(char const*,char const* english){return english;}
 struct CorumRankedLayer:CCNode {
     enum class Page{Live,Achievements,HistoryList,HistoryDetail,PlacementPoolSelection,PlacementSkipConfirm};
+    struct {bool moving()const{return false;}}m_modeTransition;
     Page m_page=Page::Live;std::string m_titleSelectorAchievement;
     CCNode* m_rankTransitionLayer=nullptr;CCNode* m_resultScoreLayer=nullptr;bool m_resultScorePending=false;
     CCMenu settings;CCMenu* m_settingsMenu=&settings;CCMenuItemSpriteExtra* m_jukeboxButton=nullptr;
@@ -951,9 +952,9 @@ int main() {
 `);
     assert.match(method(popupSource,'void addRoundOptions('),/addJukeboxButton\(\{size.width \/ 2.0f \+ 116.0f, y\}/);
     assert.match(method(popupSource,'void addPlayerCard('),/center.x \+ \(self \? -55 : 55\)/);
-    const main=method(popupSource,'void renderMain(');
-    assert.match(main,/leftCenter.y \+ 68.0f/);
+    const main=method(popupSource,'void renderModeCard(');
+    assert.match(main,/leftCenter.y \+ 63.0f/);
     assert.match(main,/\{74.0f, 74.0f\}/);
     assert.match(main,/addRankStatus\(profile,\{leftCenter.x,leftCenter.y \+ 91.0f\}/);
-    assert(18+74/2+1.4<68-5); // common rank slot stays above every full-size structural badge
+    assert(18+74/2+1.4<63-5); // rank stays above the emblem with room for the Survival warning condition
 });

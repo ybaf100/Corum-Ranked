@@ -4,6 +4,7 @@ import {
   ONE_SHOT_ACHIEVEMENTS,
   PROGRESSIVE_ACHIEVEMENTS,
   achievementDefinition,
+  achievementScopeLabel,
   evaluateAchievementMatch,
   isReverseSweep,
   isSweepWin,
@@ -306,6 +307,19 @@ export class AchievementService {
     );
   }
 
+  /** Shared unlock hook for future Survival settlement. No Solo win/DM metrics change. */
+  public async recordSharedTierReached(
+    transaction: SqlExecutor, playerId: string, mode: "SOLO_RANKED" | "SURVIVAL",
+    group: string, sourceEventKey: string, now: Date,
+  ): Promise<readonly AchievementUnlockNotice[]> {
+    if (group !== "GOLD") return [];
+    await this.lockProfile(transaction, playerId);
+    await this.ensureBackfilled(transaction, playerId, now);
+    const eventKey = `shared:gold:${mode}:${playerId}:${sourceEventKey}`;
+    if (!await this.insertEvent(transaction, eventKey, playerId, "SHARED_TIER_REACHED", null, now)) return [];
+    return this.unlockOneShots(transaction, playerId, ["gold_reached"], eventKey, now);
+  }
+
   public titleProjection(achievementId: string | null, level: number | null) {
     if (!achievementId || level === null) return null;
     const definition = achievementDefinition(achievementId);
@@ -314,10 +328,11 @@ export class AchievementService {
       if (level !== 0) return null;
       return {
         achievementId: definition.id,
+        scope: definition.scope,
         level: null,
         displayLabel: null,
-        nameKo: definition.nameKo,
-        nameEn: definition.nameEn,
+        nameKo: `[${achievementScopeLabel(definition.scope, "ko")}] ${definition.nameKo}`,
+        nameEn: `[${achievementScopeLabel(definition.scope, "en")}] ${definition.nameEn}`,
         displayColor: null,
         rarity: definition.rarity,
       };
@@ -326,10 +341,11 @@ export class AchievementService {
     if (!stage) return null;
     return {
       achievementId: definition.id,
+        scope: definition.scope,
       level: stage.level,
       displayLabel: stage.displayLabel,
-      nameKo: definition.nameKo,
-      nameEn: definition.nameEn,
+      nameKo: `[${achievementScopeLabel(definition.scope, "ko")}] ${definition.nameKo}`,
+      nameEn: `[${achievementScopeLabel(definition.scope, "en")}] ${definition.nameEn}`,
       displayColor: stage.displayColor,
       rarity: null,
     };
@@ -598,6 +614,7 @@ export class AchievementService {
         const common = {
           id: definition.id,
           type: definition.type,
+          scope: definition.scope,
           nameKo: definition.nameKo,
           nameEn: definition.nameEn,
           descriptionKo: definition.descriptionKo,
@@ -717,7 +734,7 @@ export class AchievementService {
     transaction: SqlExecutor,
     eventKey: string,
     playerId: string,
-    sourceType: "MATCH_RESULT" | "PLACEMENT_RESULT" | "BACKFILL",
+    sourceType: "MATCH_RESULT" | "PLACEMENT_RESULT" | "BACKFILL" | "SHARED_TIER_REACHED",
     sourceId: string | null,
     now: Date,
   ): Promise<boolean> {

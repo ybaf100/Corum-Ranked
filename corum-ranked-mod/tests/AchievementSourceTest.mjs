@@ -30,7 +30,7 @@ test('Achievement cards are server-configured and all Korean UI uses Corum label
 });
 
 test('Trophy badge and Claim state remain independent and bounded', () => {
-    const main = body(popup, 'void renderMain(', 'void renderPlacementMap(');
+    const main = body(popup, 'void renderModePanel(', 'void animateModeLobby(');
     assert.match(main, /onHistory/);
     assert.match(main, /onAchievements/);
     assert.match(main, /achievementBadgeText/);
@@ -51,14 +51,15 @@ test('Trophy badge and Claim state remain independent and bounded', () => {
 test('Lobby and Achievement text keep native-readable sizing', () => {
     const actionVisual = body(popup, 'CCNode* makeActionButtonVisual(', 'std::string resourceKey(');
     const language = body(popup, 'void addLanguageSelector()', 'void addStatusPill(');
-    const main = body(popup, 'void renderMain(', 'void renderPlacementMap(');
+    const main = body(popup, 'void renderModePanel(', 'void animateModeLobby(');
     const selector = body(popup, 'void renderAchievementTitleSelector(', 'void renderAchievements(');
     const achievements = body(popup, 'void renderAchievements(', 'void renderHistoryList(');
 
     assert.match(actionVisual, /text,\s*0\.62f/);
     assert.match(actionVisual, /fitMenuLabelWidth\(caption, width - 20\.0f, 0\.62f, 0\.30f\)/);
     assert.equal((language.match(/setScale\(0\.48f\)/g) ?? []).length, 2);
-    assert.equal((main.match(/setScale\(0\.66f\)/g) ?? []).length, 2);
+    assert.match(main, /onHistory\),false,0\.66f/);
+    assert.match(main, /onAchievements\),false,0\.66f/);
 
     assert.match(selector, /static_cast<float>\(level - 1\) \* 72\.0f/);
     assert.match(selector, /onAchievementTitleLevel[\s\S]{0,120}0\.52f/);
@@ -76,7 +77,7 @@ test('Lobby and Achievement text keep native-readable sizing', () => {
 });
 
 test('Achievement selector is a true modal and the lobby badge uses stable Corum chrome', () => {
-    const main = body(popup, 'void renderMain(', 'void renderPlacementMap(');
+    const main = body(popup, 'void renderModePanel(', 'void animateModeLobby(');
     const achievements = body(popup, 'void renderAchievements(', 'void renderHistoryList(');
 
     assert.doesNotMatch(main, /GJ_button_06\.png/);

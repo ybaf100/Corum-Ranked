@@ -3,6 +3,7 @@ import {
   Injectable,
   Logger,
   ServiceUnavailableException,
+  Optional,
   type OnApplicationBootstrap,
   type OnApplicationShutdown,
 } from "@nestjs/common";
@@ -19,12 +20,16 @@ import type {
   RankedConfigStatus,
 } from "./ranked-config.document.js";
 import { validateRankedConfigDocument } from "./ranked-config.validator.js";
+import { DATABASE, type DatabasePort } from "../database/database.port.js";
+import { ModeAdmissionFence } from "./mode-admission.js";
 
 const copySnapshot = (snapshot: RankedConfigSnapshot): RankedConfigSnapshot =>
   structuredClone(snapshot);
 
 @Injectable()
 export class RankedConfigService implements OnApplicationBootstrap, OnApplicationShutdown {
+  private readonly admission = new ModeAdmissionFence();
+  public withAdmission<T>(operation: () => Promise<T>): Promise<T> { return this.admission.run(operation); }
   private readonly logger = new Logger(RankedConfigService.name);
   private snapshot: RankedConfigSnapshot | null = null;
   private lastAttemptAt: string | null = null;
@@ -35,6 +40,7 @@ export class RankedConfigService implements OnApplicationBootstrap, OnApplicatio
   public constructor(
     @Inject(RANKED_CONFIG_SOURCE) private readonly source: RankedConfigSource,
     @Inject(SERVER_ENVIRONMENT) private readonly environment: ServerEnvironment,
+    @Optional() @Inject(DATABASE) private readonly database?: DatabasePort,
   ) {}
 
   public async onApplicationBootstrap(): Promise<void> {
@@ -64,10 +70,16 @@ export class RankedConfigService implements OnApplicationBootstrap, OnApplicatio
       const document = await this.source.fetchConfig();
       const errors = validateRankedConfigDocument(document);
       if (errors.length > 0) throw new Error(`Invalid Ranked config: ${errors.join("; ")}`);
-      this.snapshot = {
-        ...structuredClone(document),
-        fetchedAt: new Date().toISOString(),
-      };
+      await this.withAdmission(async () => {
+        if (!document.operational.enabled && this.database) {
+          // Leave MATCHED rows and their admitted games untouched. Publishing
+          // OFF happens only after queue cleanup commits; admissions share this fence.
+          await this.database.transaction(async transaction => {
+            await transaction.query("UPDATE ranked_queue_entries SET status = 'LEFT' WHERE status = 'QUEUED'");
+          });
+        }
+        this.snapshot = { ...structuredClone(document), fetchedAt: new Date().toISOString() };
+      });
       this.lastError = null;
       return true;
     } catch (error) {

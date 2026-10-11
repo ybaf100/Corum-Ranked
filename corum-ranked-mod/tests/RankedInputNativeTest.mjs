@@ -111,6 +111,8 @@ struct CCLayerColor {
 struct Root { CCMenu* menu; void removeAllChildrenWithCleanup(bool){assert(menu->m_eState==kCCMenuStateWaiting);menu->item=nullptr;} };
 struct Menu : CCMenu {void removeAllChildrenWithCleanup(bool){assert(m_eState==kCCMenuStateWaiting && !m_pSelectedItem);item=nullptr;}};
 struct CorumRankedLayer : CCLayerColor {
+    void* m_lobbySurvival=nullptr;void* m_lobbySolo=nullptr;void* m_lobbyPanel=nullptr;
+    void setLobbyNodeInput(void*,bool){}
     Menu* m_menu=nullptr; Root* m_root=nullptr; void* m_rankTransitionLayer=nullptr;
     void* m_resultScoreLayer=nullptr;bool m_resultScorePending=false;
     CCMenu* m_settingsMenu=nullptr;unsigned long m_volumeSession=0;void closeSettings(){}

@@ -7,7 +7,7 @@ import { SeededRandom, scoreAttempt, type CsmpTier } from "@corum-ranked/rules";
 import type { IdGenerator, ServerClock } from "../src/common/runtime.module.js";
 import { TokenService } from "../src/common/token.service.js";
 import type { CsmpTierSource } from "../src/config/csmp-tier.source.js";
-import type { RankedConfigService } from "../src/config/ranked-config.service.js";
+import { RankedConfigService } from "../src/config/ranked-config.service.js";
 import { MatchAccessService } from "../src/match/match-access.service.js";
 import { InMemoryMatchRuntimeState } from "../src/match/match-runtime-state.js";
 import { MatchService } from "../src/match/match.service.js";
@@ -176,13 +176,8 @@ describe("two-client authoritative match flow", () => {
       },
     };
     let liveDocument = document;
-    // RankedConfigService is a concrete Nest service with private runtime state.
-    // This integration test intentionally supplies only the getSnapshot contract,
-    // so cross the structural-typing boundary explicitly instead of relying on an
-    // unsafe direct class assertion that TypeScript 5.9 rejects.
-    const config = {
-      getSnapshot: () => ({ ...structuredClone(liveDocument), fetchedAt: "2026-08-20T02:00:00Z" }),
-    } as unknown as RankedConfigService;
+    const config = new RankedConfigService({ fetchConfig: async () => structuredClone(liveDocument) }, environmentFixture(), database);
+    expect(await config.refresh()).toBe(true);
     const ids = new SequenceIds();
     const clock = new MutableClock();
     const tokens = new TokenService(environmentFixture());
@@ -224,6 +219,13 @@ describe("two-client authoritative match flow", () => {
       side: "B";
     };
     expect(statusA.matchId).toBe(statusB.matchId);
+    // Operations may close Solo after assignment. The admitted snapshot must
+    // still run both rounds, settle LP/MMR and preserve its achievement results.
+    liveDocument = { ...document, operational: { ...document.operational, enabled: false } };
+    expect(await config.refresh()).toBe(true);
+    expect(config.getStatus().queueEnabled).toBe(false);
+    await expect(queue.join(playerA, { installedMods: structuredClone(cleanMods) })).rejects.toThrow("not operationally configured");
+
     const matchId = statusA.matchId;
 
     let state = (await matches.ready(matchId, statusA.matchToken, playerA, {
@@ -471,10 +473,12 @@ describe("two-client authoritative match flow", () => {
       ...document,
       maps: document.maps.map((map) => ({ ...map, qualifyingPercent: 99,
         metadata: {...map.metadata,stars:6,durationSeconds:999} })),
-      operational: { ...document.operational, tierBands: document.operational.tierBands.map((band) => ({
+      operational: { ...document.operational, enabled: false, tierBands: document.operational.tierBands.map((band) => ({
         ...band, minInclusive: band.tier === "RED" ? band.minInclusive : band.minInclusive + 10,
+        maxExclusive: band.maxExclusive === null ? null : band.maxExclusive + 10,
       })) },
     };
+    expect(await config.refresh()).toBe(true);
     state = (await matches.state(matchId, statusA.matchToken, playerA)) as Record<string, any>;
     expect(state.currentRound.map.qualifyingPercent).toBe(snapshottedQualifying);
     expect(state.currentRound.map.metadata).toMatchObject({stars:8,durationSeconds:84});

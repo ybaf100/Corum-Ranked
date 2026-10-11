@@ -121,7 +121,8 @@ describe("development-only Bot Match using the production Ranked engine", () => 
   const random = new SeededRandom(20260820);
   const document = configDocumentFixture("debug-bot");
   const snapshot = { ...document, fetchedAt: "2026-08-20T04:00:00.000Z" };
-  const config = { getSnapshot: () => structuredClone(snapshot) } as RankedConfigService;
+  const config = { withAdmission: async <T>(operation: () => Promise<T>): Promise<T> => operation(),
+      getSnapshot: () => structuredClone(snapshot) } as RankedConfigService;
   const environment: ServerEnvironment = {
     ...environmentFixture(),
     debugBot: {

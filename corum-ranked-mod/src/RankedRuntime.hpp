@@ -1,5 +1,6 @@
 #pragma once
 #include "domain/DeathFeed.hpp"
+#include "domain/RankedMode.hpp"
 
 #include "domain/EnvironmentPolicy.hpp"
 #include "domain/ServerClock.hpp"
@@ -121,6 +122,7 @@ struct AchievementRewardView {
 };
 
 struct AchievementCardView {
+    std::string scope;
     std::string id;
     std::string type;
     std::string nameKo;
@@ -406,7 +408,17 @@ struct EnvironmentWarningView {
     std::vector<std::string> cbfIssues;
 };
 
+struct SurvivalView {
+    bool loaded = false, loading = false;
+    std::string error, tierId;
+    RankedProfileView profile;
+    StandingView standing;
+    std::optional<int> warningRecoveryLp;
+};
+
 struct RuntimeView {
+    bool soloEnabled = false, survivalEnabled = false, survivalConfigReady = false;
+    SurvivalView survival;
     RuntimeStage stage = RuntimeStage::Idle;
     std::string status;
     std::string error;
@@ -474,9 +486,11 @@ public:
     [[nodiscard]] double matchPauseRemainingMs() const;
     void dismissMatch();
     void queueAgain();
-    void fetchHistory();
+    void fetchHistory(RankedMode mode = RankedMode::SoloRanked);
+    void fetchSurvivalProfile();
+    void fetchModeAvailability();
     void fetchStanding();
-    [[nodiscard]] std::string leaderboardUrl(int offset, int limit) const;
+    [[nodiscard]] std::string leaderboardUrl(int offset, int limit, RankedMode mode = RankedMode::SoloRanked) const;
     void fetchAchievements();
     void fetchPlayerInfo(std::string const& side);
     void fetchForumRecords(bool refresh = false);
@@ -618,6 +632,9 @@ private:
     bool m_nativeEntryBusy = false;
     std::chrono::steady_clock::time_point m_nextNativeEntryAt {};
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_nativeEntryRequest;
+    geode::async::TaskHolder<geode::utils::web::WebResponse> m_survivalProfileRequest, m_modeConfigRequest;
+    bool m_survivalProfileBusy = false, m_modeConfigBusy = false;
+    std::chrono::steady_clock::time_point m_nextSurvivalProfileAt {}, m_nextModeConfigAt {};
     std::string m_sessionToken;
     std::string m_clientInstanceId;
     bool m_rankedOpen = false, m_sessionRejected = false, m_sessionHeartbeatBusy = false;

@@ -85,7 +85,9 @@ CCNode*makeNeonPanel(CCSize s,CCPoint p,int,int,int){auto*n=new CCNode;n->size=s
 CCNode*makeLabel(std::string,float,CCPoint p,int,std::string=""){auto*n=new CCNode;n->size={120,12};n->position=p;return n;}
 CCNode*makeActionButtonVisual(std::string){auto*n=new CCNode;n->size={104,34};return n;}
 namespace corum::ranked::ui {void fitMenuLabelWidth(CCNode*,float,float,float){}}
+#include "${root}/src/domain/RankedMode.hpp"
 struct CorumRankedLayer {
+ corum::ranked::ModeLobbyTransition m_modeTransition;
  enum class Page {HistoryList,HistoryDetail};Page m_page=Page::HistoryList;std::size_t m_historyIndex=0;CCNode*m_root=new CCNode;
  ~CorumRankedLayer(){delete m_root;}
  std::string tr(char const*,char const*english){return english;}
@@ -127,7 +129,7 @@ int main(){
 
 test('actual session pulse bounds retries, closes the exact token and rejects retired replies', () => {
     const source = read('src/RankedRuntime.cpp'), header = read('src/RankedRuntime.hpp');
-    const fields = header.slice(header.indexOf('    std::string m_sessionToken;'), header.indexOf('    std::string m_matchToken;'));
+    const fields = header.slice(header.indexOf('    geode::async::TaskHolder<geode::utils::web::WebResponse> m_survivalProfileRequest'), header.indexOf('    std::string m_matchToken;'));
     const methods = ['void RankedRuntime::leaveRanked()', 'void RankedRuntime::updateSessionHeartbeat()']
         .map(n => method(source, n)).join('\n').replaceAll('std::chrono::steady_clock::now()', 'Clock::now()');
     runCpp(`
@@ -302,7 +304,9 @@ struct RuntimeView {RuntimeStage stage=RuntimeStage::Matched;struct Match {std::
 struct RankedRuntime {RuntimeView state;int dismissals=0,fetches=0;bool acknowledgementPending=false;
  static RankedRuntime& get(){static RankedRuntime r;return r;}RuntimeView const& view()const{return state;}
  void dismissMatch(){++dismissals;if(!acknowledgementPending)state.stage=RuntimeStage::Ready;}void fetchAchievements(){++fetches;}};
+#include "${root}/src/domain/RankedMode.hpp"
 struct Layer {
+ corum::ranked::ModeLobbyTransition m_modeTransition;
  enum class Page {Live,History};Page m_page=Page::Live;
  bool m_rankTransitionLayer=false,m_resultScoreLayer=false,m_resultScorePending=false;std::string m_localMessage;
  int exits=0,historyBacks=0;void onCloseLayer(CCObject*){++exits;}void onHistoryBack(CCObject*){++historyBacks;m_page=Page::Live;}

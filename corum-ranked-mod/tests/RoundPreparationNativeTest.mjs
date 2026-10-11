@@ -385,7 +385,7 @@ test('round preparation is passive and automatic with native user options, serve
 
 test('equipped title stays separate from the shared streak/promotion/warning status row', () => {
     const popup = read('src/RankedPopup.cpp');
-    const lobby = popup.slice(popup.indexOf('    void renderMain('), popup.indexOf('    void renderPlacementMap('));
+    const lobby = popup.slice(popup.indexOf('    void renderModeCard('), popup.indexOf('    void renderModePanel('));
     const status = popup.slice(popup.indexOf('    void addRankStatus('), popup.indexOf('    struct PlayerCardRefs'));
     assert.match(status, /profile.promotion.active/);
     assert.match(status, /i18n::promotionMatch/);

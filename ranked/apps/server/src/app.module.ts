@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { SurvivalModule } from "./survival/survival.module.js";
 import { RankedConfigModule } from "./config/ranked-config.module.js";
 import { ServerEnvironmentModule } from "./config/server-environment.module.js";
 import { DatabaseModule } from "./database/database.module.js";
@@ -17,6 +18,7 @@ import { AdminModule } from "./admin/admin.module.js";
 
 @Module({
   imports: [
+    SurvivalModule,
     ServerEnvironmentModule,
     RuntimeModule,
     SecurityModule,

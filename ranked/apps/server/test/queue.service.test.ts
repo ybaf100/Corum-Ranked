@@ -168,6 +168,7 @@ describe("transactional matchmaking queue", () => {
   it("blocks public Queue and Debug Bot until Stage Placement is complete", async () => {
     const document = configDocumentFixture("placement-gate-test");
     const config = {
+      withAdmission: async <T>(operation: () => Promise<T>): Promise<T> => operation(),
       getSnapshot: () => ({ ...structuredClone(document), fetchedAt: "2026-08-20T01:00:00Z" }),
     } as RankedConfigService;
     const source = new MutableCsmpSource();
@@ -204,6 +205,7 @@ describe("transactional matchmaking queue", () => {
   it("atomically pairs compatible players and snapshots candidates/config", async () => {
     const document = configDocumentFixture("queue-test");
     const config = {
+      withAdmission: async <T>(operation: () => Promise<T>): Promise<T> => operation(),
       getSnapshot: () => ({ ...structuredClone(document), fetchedAt: "2026-08-20T01:00:00Z" }),
     } as RankedConfigService;
     const source = new MutableCsmpSource();
@@ -272,6 +274,7 @@ describe("transactional matchmaking queue", () => {
   it("expires a silent queue entry before it can be matched", async () => {
     const document = configDocumentFixture("queue-expiry-test");
     const config = {
+      withAdmission: async <T>(operation: () => Promise<T>): Promise<T> => operation(),
       getSnapshot: () => ({ ...structuredClone(document), fetchedAt: "2026-08-20T01:00:00Z" }),
     } as RankedConfigService;
     const source = new MutableCsmpSource();

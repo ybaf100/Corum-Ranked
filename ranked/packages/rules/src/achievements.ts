@@ -8,6 +8,8 @@ export const ACHIEVEMENT_GRADES = [
 
 export type AchievementGrade = (typeof ACHIEVEMENT_GRADES)[number];
 export type AchievementLevel = 1 | 2 | 3 | 4 | 5;
+export type AchievementScope = "SOLO_RANKED" | "SURVIVAL" | "SHARED";
+
 export type AchievementRarity = "COMMON" | "RARE" | "EPIC" | "LEGENDARY";
 
 export interface AchievementLevelDefinition {
@@ -22,6 +24,7 @@ export interface AchievementLevelDefinition {
 export interface ProgressiveAchievementDefinition {
   readonly id: ProgressiveAchievementId;
   readonly type: "PROGRESSIVE";
+  readonly scope: AchievementScope;
   readonly metric: ProgressiveAchievementId;
   readonly nameKo: string;
   readonly nameEn: string;
@@ -34,6 +37,7 @@ export interface ProgressiveAchievementDefinition {
 export interface OneShotAchievementDefinition {
   readonly id: OneShotAchievementId;
   readonly type: "ONE_SHOT";
+  readonly scope: AchievementScope;
   readonly condition: OneShotAchievementId;
   readonly nameKo: string;
   readonly nameEn: string;
@@ -91,79 +95,79 @@ const levels = (thresholds: readonly [number, number, number, number, number]) =
 
 export const PROGRESSIVE_ACHIEVEMENTS: readonly ProgressiveAchievementDefinition[] = [
   {
-    id: "ranked_wins", type: "PROGRESSIVE", metric: "ranked_wins",
+    id: "ranked_wins", type: "PROGRESSIVE", scope: "SOLO_RANKED", metric: "ranked_wins",
     nameKo: "승리자", nameEn: "Winner",
-    descriptionKo: "Ranked 경기에서 승리하세요.", descriptionEn: "Win Ranked matches.",
+    descriptionKo: "Solo Ranked에서 승리하세요.", descriptionEn: "In Solo Ranked: Win matches.",
     titleEnabled: true, levels: levels([1, 10, 50, 100, 500]),
   },
   {
-    id: "ranked_matches", type: "PROGRESSIVE", metric: "ranked_matches",
+    id: "ranked_matches", type: "PROGRESSIVE", scope: "SOLO_RANKED", metric: "ranked_matches",
     nameKo: "경쟁자", nameEn: "Competitor",
-    descriptionKo: "Ranked 경기를 완료하세요.", descriptionEn: "Complete Ranked matches.",
+    descriptionKo: "Solo Ranked에서 경기를 완료하세요.", descriptionEn: "In Solo Ranked: Complete matches.",
     titleEnabled: true, levels: levels([10, 50, 100, 500, 1_000]),
   },
   {
-    id: "ranked_clears", type: "PROGRESSIVE", metric: "ranked_clears",
+    id: "ranked_clears", type: "PROGRESSIVE", scope: "SOLO_RANKED", metric: "ranked_clears",
     nameKo: "클리어러", nameEn: "Clearer",
-    descriptionKo: "Ranked에서 맵을 Clear하세요.", descriptionEn: "Clear maps in Ranked.",
+    descriptionKo: "Solo Ranked에서 맵을 Clear하세요.", descriptionEn: "In Solo Ranked: Clear maps.",
     titleEnabled: true, levels: levels([1, 10, 100, 500, 1_000]),
   },
   {
-    id: "perfect_wins", type: "PROGRESSIVE", metric: "perfect_wins",
+    id: "perfect_wins", type: "PROGRESSIVE", scope: "SOLO_RANKED", metric: "perfect_wins",
     nameKo: "완벽주의자", nameEn: "Perfectionist",
-    descriptionKo: "PERFECT WIN을 달성하세요.", descriptionEn: "Earn PERFECT WINs.",
+    descriptionKo: "Solo Ranked에서 PERFECT WIN을 달성하세요.", descriptionEn: "In Solo Ranked: Earn PERFECT WINs.",
     titleEnabled: true, levels: levels([1, 5, 10, 25, 50]),
   },
   {
-    id: "win_streak", type: "PROGRESSIVE", metric: "win_streak",
+    id: "win_streak", type: "PROGRESSIVE", scope: "SOLO_RANKED", metric: "win_streak",
     nameKo: "연승", nameEn: "Win Streak",
-    descriptionKo: "Ranked 최고 연승 기록을 높이세요.", descriptionEn: "Raise your best Ranked win streak.",
+    descriptionKo: "Solo Ranked에서 최고 연승 기록을 높이세요.", descriptionEn: "In Solo Ranked: Raise your best win streak.",
     titleEnabled: true, levels: levels([3, 5, 10, 15, 20]),
   },
   {
-    id: "deathmatch_wins", type: "PROGRESSIVE", metric: "deathmatch_wins",
+    id: "deathmatch_wins", type: "PROGRESSIVE", scope: "SOLO_RANKED", metric: "deathmatch_wins",
     nameKo: "결투사", nameEn: "Duelist",
-    descriptionKo: "Death Match에서 승리하세요.", descriptionEn: "Win Death Matches.",
+    descriptionKo: "Solo Ranked에서 Death Match에서 승리하세요.", descriptionEn: "In Solo Ranked: Win Death Matches.",
     titleEnabled: true, levels: levels([1, 5, 10, 25, 50]),
   },
   {
-    id: "last_attempt_clears", type: "PROGRESSIVE", metric: "last_attempt_clears",
+    id: "last_attempt_clears", type: "PROGRESSIVE", scope: "SOLO_RANKED", metric: "last_attempt_clears",
     nameKo: "마지막 기회", nameEn: "Last Chance",
-    descriptionKo: "LAST ATTEMPT에서 Clear하세요.", descriptionEn: "Clear during LAST ATTEMPT.",
+    descriptionKo: "Solo Ranked에서 LAST ATTEMPT에서 Clear하세요.", descriptionEn: "In Solo Ranked: Clear during LAST ATTEMPT.",
     titleEnabled: true, levels: levels([1, 3, 10, 25, 50]),
   },
   {
-    id: "reverse_sweeps", type: "PROGRESSIVE", metric: "reverse_sweeps",
+    id: "reverse_sweeps", type: "PROGRESSIVE", scope: "SOLO_RANKED", metric: "reverse_sweeps",
     nameKo: "역전승", nameEn: "Reverse Sweep",
-    descriptionKo: "0:1에서 2:1로 역전승하세요.", descriptionEn: "Come back from 0-1 to win 2-1.",
+    descriptionKo: "Solo Ranked에서 0:1에서 2:1로 역전승하세요.", descriptionEn: "In Solo Ranked: Come back from 0-1 to win 2-1.",
     titleEnabled: true, levels: levels([1, 3, 10, 25, 50]),
   },
   {
-    id: "sweep_wins", type: "PROGRESSIVE", metric: "sweep_wins",
+    id: "sweep_wins", type: "PROGRESSIVE", scope: "SOLO_RANKED", metric: "sweep_wins",
     nameKo: "완승", nameEn: "Sweep",
-    descriptionKo: "Ranked Match를 2:0으로 승리하세요.", descriptionEn: "Win Ranked matches 2-0.",
+    descriptionKo: "Solo Ranked에서 경기를 2:0으로 승리하세요.", descriptionEn: "In Solo Ranked: Win matches 2-0.",
     titleEnabled: true, levels: levels([1, 5, 20, 50, 100]),
   },
   {
-    id: "promotion_wins", type: "PROGRESSIVE", metric: "promotion_wins",
+    id: "promotion_wins", type: "PROGRESSIVE", scope: "SOLO_RANKED", metric: "promotion_wins",
     nameKo: "승격", nameEn: "Promotion",
-    descriptionKo: "Promotion에 성공하세요.", descriptionEn: "Succeed in Promotion series.",
+    descriptionKo: "Solo Ranked에서 Promotion에 성공하세요.", descriptionEn: "In Solo Ranked: Succeed in Promotion series.",
     titleEnabled: true, levels: levels([1, 2, 3, 5, 10]),
   },
 ];
 
 export const ONE_SHOT_ACHIEVEMENTS: readonly OneShotAchievementDefinition[] = [
-  { id: "reverse_sweep_first", type: "ONE_SHOT", condition: "reverse_sweep_first", nameKo: "뒤집었다", nameEn: "Turned It Around", descriptionKo: "0:1에서 2:1로 첫 역전승을 달성하세요.", descriptionEn: "Win 2-1 after falling behind 0-1.", titleEnabled: true, ap: 25, rarity: "RARE" },
-  { id: "last_attempt_match_win", type: "ONE_SHOT", condition: "last_attempt_match_win", nameKo: "아직 끝나지 않았다", nameEn: "It Is Not Over", descriptionKo: "LAST ATTEMPT에서 Clear한 뒤 Match에서 승리하세요.", descriptionEn: "Clear on LAST ATTEMPT, then win the match.", titleEnabled: true, ap: 25, rarity: "RARE" },
-  { id: "deathmatch_tie", type: "ONE_SHOT", condition: "deathmatch_tie", nameKo: "다시 한 번", nameEn: "Once More", descriptionKo: "Death Match 동점으로 새 맵을 맞이하세요.", descriptionEn: "Tie a Death Match and force a new map.", titleEnabled: true, ap: 25, rarity: "RARE" },
-  { id: "deathmatch_close_win", type: "ONE_SHOT", condition: "deathmatch_close_win", nameKo: "간발의 차", nameEn: "By a Hair", descriptionKo: "1%p 미만 차이로 Death Match에서 승리하세요.", descriptionEn: "Win a Death Match by less than 1 percentage point.", titleEnabled: true, ap: 25, rarity: "RARE" },
-  { id: "deathmatch_pixel_win", type: "ONE_SHOT", condition: "deathmatch_pixel_win", nameKo: "한 끗 차이", nameEn: "Pixel Perfect", descriptionKo: "0.1%p 미만 차이로 Death Match에서 승리하세요.", descriptionEn: "Win a Death Match by less than 0.1 percentage point.", titleEnabled: true, ap: 50, rarity: "EPIC" },
-  { id: "deathmatch_domination", type: "ONE_SHOT", condition: "deathmatch_domination", nameKo: "압도적", nameEn: "Dominating", descriptionKo: "50%p 이상 차이로 Death Match에서 승리하세요.", descriptionEn: "Win a Death Match by at least 50 percentage points.", titleEnabled: true, ap: 25, rarity: "RARE" },
-  { id: "deathmatch_hundred_win", type: "ONE_SHOT", condition: "deathmatch_hundred_win", nameKo: "완벽한 결투", nameEn: "Perfect Duel", descriptionKo: "Death Match에서 100%를 기록하고 승리하세요.", descriptionEn: "Record 100% and win a Death Match.", titleEnabled: true, ap: 50, rarity: "EPIC" },
-  { id: "deathmatch_double_hundred", type: "ONE_SHOT", condition: "deathmatch_double_hundred", nameKo: "양보는 없다", nameEn: "No Concessions", descriptionKo: "양쪽 모두 100%로 Death Match에서 비기세요.", descriptionEn: "Tie a Death Match with both sides at 100%.", titleEnabled: true, ap: 100, rarity: "LEGENDARY" },
-  { id: "gold_reached", type: "ONE_SHOT", condition: "gold_reached", nameKo: "정상", nameEn: "The Summit", descriptionKo: "GOLD tier에 처음 도달하세요.", descriptionEn: "Reach GOLD tier for the first time.", titleEnabled: true, ap: 50, rarity: "EPIC" },
-  { id: "perfect_win_streak_3", type: "ONE_SHOT", condition: "perfect_win_streak_3", nameKo: "무결점", nameEn: "Flawless", descriptionKo: "PERFECT WIN을 3경기 연속 달성하세요.", descriptionEn: "Earn three consecutive PERFECT WINs.", titleEnabled: true, ap: 100, rarity: "LEGENDARY" },
-  { id: "placement_complete", type: "ONE_SHOT", condition: "placement_complete", nameKo: "첫 걸음", nameEn: "First Step", descriptionKo: "정상 Placement를 완료하세요.", descriptionEn: "Complete Placement normally.", titleEnabled: true, ap: 10, rarity: "COMMON" },
+  { id: "reverse_sweep_first", type: "ONE_SHOT", scope: "SOLO_RANKED", condition: "reverse_sweep_first", nameKo: "뒤집었다", nameEn: "Turned It Around", descriptionKo: "Solo Ranked에서 0:1에서 2:1로 첫 역전승을 달성하세요.", descriptionEn: "In Solo Ranked: Win 2-1 after falling behind 0-1.", titleEnabled: true, ap: 25, rarity: "RARE" },
+  { id: "last_attempt_match_win", type: "ONE_SHOT", scope: "SOLO_RANKED", condition: "last_attempt_match_win", nameKo: "아직 끝나지 않았다", nameEn: "It Is Not Over", descriptionKo: "Solo Ranked에서 LAST ATTEMPT에서 Clear한 뒤 Match에서 승리하세요.", descriptionEn: "In Solo Ranked: Clear on LAST ATTEMPT, then win the match.", titleEnabled: true, ap: 25, rarity: "RARE" },
+  { id: "deathmatch_tie", type: "ONE_SHOT", scope: "SOLO_RANKED", condition: "deathmatch_tie", nameKo: "다시 한 번", nameEn: "Once More", descriptionKo: "Solo Ranked에서 Death Match 동점으로 새 맵을 맞이하세요.", descriptionEn: "In Solo Ranked: Tie a Death Match and force a new map.", titleEnabled: true, ap: 25, rarity: "RARE" },
+  { id: "deathmatch_close_win", type: "ONE_SHOT", scope: "SOLO_RANKED", condition: "deathmatch_close_win", nameKo: "간발의 차", nameEn: "By a Hair", descriptionKo: "Solo Ranked에서 1%p 미만 차이로 Death Match에서 승리하세요.", descriptionEn: "In Solo Ranked: Win a Death Match by less than 1 percentage point.", titleEnabled: true, ap: 25, rarity: "RARE" },
+  { id: "deathmatch_pixel_win", type: "ONE_SHOT", scope: "SOLO_RANKED", condition: "deathmatch_pixel_win", nameKo: "한 끗 차이", nameEn: "Pixel Perfect", descriptionKo: "Solo Ranked에서 0.1%p 미만 차이로 Death Match에서 승리하세요.", descriptionEn: "In Solo Ranked: Win a Death Match by less than 0.1 percentage point.", titleEnabled: true, ap: 50, rarity: "EPIC" },
+  { id: "deathmatch_domination", type: "ONE_SHOT", scope: "SOLO_RANKED", condition: "deathmatch_domination", nameKo: "압도적", nameEn: "Dominating", descriptionKo: "Solo Ranked에서 50%p 이상 차이로 Death Match에서 승리하세요.", descriptionEn: "In Solo Ranked: Win a Death Match by at least 50 percentage points.", titleEnabled: true, ap: 25, rarity: "RARE" },
+  { id: "deathmatch_hundred_win", type: "ONE_SHOT", scope: "SOLO_RANKED", condition: "deathmatch_hundred_win", nameKo: "완벽한 결투", nameEn: "Perfect Duel", descriptionKo: "Solo Ranked에서 Death Match에서 100%를 기록하고 승리하세요.", descriptionEn: "In Solo Ranked: Record 100% and win a Death Match.", titleEnabled: true, ap: 50, rarity: "EPIC" },
+  { id: "deathmatch_double_hundred", type: "ONE_SHOT", scope: "SOLO_RANKED", condition: "deathmatch_double_hundred", nameKo: "양보는 없다", nameEn: "No Concessions", descriptionKo: "Solo Ranked에서 양쪽 모두 100%로 Death Match에서 비기세요.", descriptionEn: "In Solo Ranked: Tie a Death Match with both sides at 100%.", titleEnabled: true, ap: 100, rarity: "LEGENDARY" },
+  { id: "gold_reached", type: "ONE_SHOT", scope: "SHARED", condition: "gold_reached", nameKo: "정상", nameEn: "The Summit", descriptionKo: "Solo Ranked 또는 Survival에서 GOLD 티어에 처음 도달하세요.", descriptionEn: "Reach GOLD in Solo Ranked or Survival for the first time.", titleEnabled: true, ap: 50, rarity: "EPIC" },
+  { id: "perfect_win_streak_3", type: "ONE_SHOT", scope: "SOLO_RANKED", condition: "perfect_win_streak_3", nameKo: "무결점", nameEn: "Flawless", descriptionKo: "Solo Ranked에서 PERFECT WIN을 3경기 연속 달성하세요.", descriptionEn: "In Solo Ranked: Earn three consecutive PERFECT WINs.", titleEnabled: true, ap: 100, rarity: "LEGENDARY" },
+  { id: "placement_complete", type: "ONE_SHOT", scope: "SOLO_RANKED", condition: "placement_complete", nameKo: "첫 걸음", nameEn: "First Step", descriptionKo: "Solo Ranked에서 정상 Placement를 완료하세요.", descriptionEn: "In Solo Ranked: Complete Placement normally.", titleEnabled: true, ap: 10, rarity: "COMMON" },
 ];
 
 export type AchievementDefinition =
@@ -340,4 +344,9 @@ export const evaluateAchievementMatch = (
     if (own === 100) oneShots.add("deathmatch_hundred_win");
   }
   return { metrics, oneShots: [...oneShots] };
+};
+
+export const achievementScopeLabel = (scope: AchievementScope, language: "ko" | "en"): string => {
+  const labels = { SOLO_RANKED: { ko: "솔로 랭크", en: "Solo Ranked" }, SURVIVAL: { ko: "서바이벌", en: "Survival" }, SHARED: { ko: "공용", en: "Shared" } };
+  return labels[scope][language];
 };

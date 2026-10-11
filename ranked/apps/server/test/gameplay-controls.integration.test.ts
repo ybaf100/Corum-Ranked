@@ -276,7 +276,8 @@ const playingMatch = async (enterScene = true, reconnectGraceSeconds = 10_000) =
   const document = { ...base, operational: { ...base.operational,
     failurePolicy: { ...base.operational.failurePolicy!, restartRecoveryAction: "RESUME" as const },
     timeouts: { ...base.operational.timeouts!, reconnectGraceSeconds } } };
-  const config = { getSnapshot: () => ({ ...structuredClone(document), fetchedAt: clock.now().toISOString() }) } as unknown as RankedConfigService;
+  const config = { withAdmission: async <T>(operation: () => Promise<T>): Promise<T> => operation(),
+      getSnapshot: () => ({ ...structuredClone(document), fetchedAt: clock.now().toISOString() }) } as unknown as RankedConfigService;
   const tokens = new TokenService(environmentFixture());
   const sessions = new SessionService(database, new FixedCsmpSource(), clock, ids, config, tokens);
   const makeService = () => new MatchService(database, clock, ids, new SeededRandom(456),

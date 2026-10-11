@@ -114,6 +114,10 @@ export class QueueService {
   ) {}
 
   public async join(session: RankedSessionContext, body: EnvironmentRecheckDto) {
+    return this.config.withAdmission(() => this.joinAdmitted(session, body));
+  }
+
+  private async joinAdmitted(session: RankedSessionContext, body: EnvironmentRecheckDto) {
     this.sessions.assertEnvironment(body.installedMods);
     const config = this.config.getSnapshot();
     if (!config.operational.enabled || !config.operational.matchmaking ||
@@ -187,6 +191,12 @@ export class QueueService {
     session: RankedSessionContext,
     body: EnvironmentRecheckDto,
     settings: DebugBotMatchSettings,
+  ): Promise<DebugBotMatchCreation> {
+    return this.config.withAdmission(() => this.createDebugBotMatchAdmitted(session, body, settings));
+  }
+
+  private async createDebugBotMatchAdmitted(
+    session: RankedSessionContext, body: EnvironmentRecheckDto, settings: DebugBotMatchSettings,
   ): Promise<DebugBotMatchCreation> {
     this.sessions.assertEnvironment(body.installedMods);
     const config = this.config.getSnapshot();

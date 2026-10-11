@@ -146,3 +146,21 @@ body에만 보냅니다.
 `matchId`, `matchToken`, `side`를 일반 Match API에 그대로 사용합니다. state에는
 `matchType: "DEBUG_BOT"`, `debug: true`가 표시됩니다. Bot Match도 일반 rating transaction을
 사용하므로 MMR, visible Ranked Score, Placement, W/L, tier, history에 반영됩니다.
+# Survival M1 additions (beta.59)
+
+`GET /api/ranked/config` retains `queueEnabled` as the Solo switch and adds
+`modes.soloRanked.{ready,enabled}` and `modes.survival.{ready,enabled,generation,fetchedAt,error}`.
+Common session creation and read endpoints remain available when either/both modes are OFF.
+
+| Endpoint | Authentication | M1 behavior |
+| --- | --- | --- |
+| `GET /api/ranked/survival/profile` | Existing Ranked session | Initialize once, including OFF browse; real LP, explicit tier ID/group, warning/recovery threshold and standing |
+| `GET /api/ranked/survival/leaderboard?offset=0&limit=20` | Public | Survival-only LP, competition ranks and earliest arrival at current LP first within ties |
+| `GET /api/ranked/survival/history` | Existing Ranked session | Empty played-match list; existing LP audit events separately under `lpEvents` |
+| `POST /api/ranked/survival/queue/join` | Existing Ranked session | OFF: 503 `SURVIVAL_DISABLED`; ON: 501 `SURVIVAL_MATCH_NOT_IMPLEMENTED` |
+| `POST /api/ranked/survival/debug-bot/match` | Existing Ranked session | Same honest rejection; no bots/matches created |
+
+Achievement definitions/state add explicit `scope`: `SOLO_RANKED`, `SURVIVAL`, or `SHARED`.
+`gold_reached` is shared; existing achievement IDs, Claim/equip/unequip endpoints and AP uniqueness remain.
+Title projections include the scope prefix in `nameKo`/`nameEn`; progressive stage labels remain separate.
+Survival LP settlement and shared GOLD hooks are internal services only, without public settlement routes.

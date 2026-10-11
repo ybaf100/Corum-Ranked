@@ -43,8 +43,9 @@ void leftCaption(CCNode* node, std::string const& text, CCPoint position, float 
 }
 }
 
-RankedLeaderboardPopup* RankedLeaderboardPopup::create() {
+RankedLeaderboardPopup* RankedLeaderboardPopup::create(RankedMode mode) {
     auto* popup = new RankedLeaderboardPopup;
+    popup->m_mode = mode;
     if (popup->init()) { popup->autorelease(); return popup; }
     delete popup; return nullptr;
 }
@@ -59,15 +60,15 @@ bool RankedLeaderboardPopup::init() {
     m_mainLayer->addChild(panel,10);
     panel->addChild(menuLabel(i18n::text("leaderboard","LEADERBOARD"),0.51f,
         {size.width / 2,size.height - 20},Gold,FontWeight::Black),5);
-    m_caption = menuLabel("",0.26f,{size.width / 2,size.height - 42},TextMuted);
+    m_caption = menuLabel("",0.26f,{size.width / 2,size.height - 68},TextMuted);
     panel->addChild(m_caption,5);
-    auto const viewport = CCSize{size.width - 24,size.height - 109};
+    auto const viewport = CCSize{size.width - 24,size.height - 134};
     auto const columns = leaderboardColumns(viewport.width - 8);
-    leftCaption(panel,"#",{20 + columns.rank - 6,size.height - 63},30,0.23f,TextMuted);
-    leftCaption(panel,i18n::text("leaderboard-player","PLAYER"),{16 + columns.name,size.height - 63},columns.nameWidth,0.23f,TextMuted);
-    leftCaption(panel,i18n::text("leaderboard-status","STATUS"),{16 + columns.status,size.height - 63},columns.statusWidth,0.23f,TextMuted);
-    leftCaption(panel,i18n::text("leaderboard-tier","TIER"),{16 + columns.tierName,size.height - 63},columns.tierWidth,0.23f,TextMuted);
-    leftCaption(panel,"LP / O X",{16 + columns.value,size.height - 63},columns.valueWidth,0.23f,TextMuted);
+    leftCaption(panel,"#",{20 + columns.rank - 6,size.height - 88},30,0.23f,TextMuted);
+    leftCaption(panel,i18n::text("leaderboard-player","PLAYER"),{16 + columns.name,size.height - 88},columns.nameWidth,0.23f,TextMuted);
+    leftCaption(panel,i18n::text("leaderboard-status","STATUS"),{16 + columns.status,size.height - 88},columns.statusWidth,0.23f,TextMuted);
+    leftCaption(panel,i18n::text("leaderboard-tier","TIER"),{16 + columns.tierName,size.height - 88},columns.tierWidth,0.23f,TextMuted);
+    leftCaption(panel,"LP / O X",{16 + columns.value,size.height - 88},columns.valueWidth,0.23f,TextMuted);
     m_scroll = ScrollLayer::create(viewport); m_scroll->setPosition({12,35});
     m_scroll->setID("ranked-leaderboard-scroll"_spr); panel->addChild(m_scroll,5);
     auto* menu = CCMenu::create(); menu->setPosition(CCPointZero); panel->addChild(menu,20);
@@ -78,6 +79,14 @@ bool RankedLeaderboardPopup::init() {
         auto* item = CCMenuItemSpriteExtra::create(face,this,callback); item->setPosition({x,17});
         menu->addChild(item); return item;
     };
+    auto tab = [&](std::string const& text, float x, RankedMode mode) {
+        auto* face = surface({140,23},{},Cyan,SurfaceRaised,250,true);
+        auto* caption = menuLabel(text,0.28f,{70,11.5f}); fitMenuLabelWidth(caption,130,0.28f,0.20f); face->addChild(caption,5);
+        auto* item = CCMenuItemSpriteExtra::create(face,this,menu_selector(RankedLeaderboardPopup::onMode));
+        item->setTag(static_cast<int>(mode)); item->setPosition({x,size.height-45}); menu->addChild(item); return item;
+    };
+    m_survivalTab = tab("SURVIVAL",size.width/2-76,RankedMode::Survival);
+    m_soloTab = tab("SOLO RANKED",size.width/2+76,RankedMode::SoloRanked);
     m_previous = button("<",48,menu_selector(RankedLeaderboardPopup::onPrevious));
     m_next = button(">",size.width - 48,menu_selector(RankedLeaderboardPopup::onNext));
     button(i18n::text("close","CLOSE"),size.width / 2,menu_selector(RankedLeaderboardPopup::onClose));
@@ -87,6 +96,9 @@ bool RankedLeaderboardPopup::init() {
 }
 
 void RankedLeaderboardPopup::updateButtons() {
+    m_survivalTab->setEnabled(!m_closed && m_mode != RankedMode::Survival);
+    m_soloTab->setEnabled(!m_closed && m_mode != RankedMode::SoloRanked);
+    for (auto* tab : {m_survivalTab,m_soloTab}) { tab->setCascadeOpacityEnabled(true); tab->setOpacity(tab->isEnabled() ? 180 : 255); }
     m_previous->setEnabled(!m_busy && m_offset > 0);
     m_next->setEnabled(!m_busy && m_hasMore);
     m_refresh->setEnabled(!m_busy && !m_closed);
@@ -103,14 +115,15 @@ void RankedLeaderboardPopup::fetch(int offset) {
     fitMenuLabelWidth(m_caption,m_scroll->getContentSize().width,0.26f,0.22f);
     m_caption->setColor(TextMuted);
     auto const generation = ++m_generation;
+    auto const mode = m_mode;
     web::WebRequest request; request.timeout(std::chrono::seconds(20));
-    m_request.spawn(request.get(RankedRuntime::get().leaderboardUrl(offset,kPageSize)),
-        [weak = WeakRef(this),generation,offset](web::WebResponse response) {
+    m_request.spawn(request.get(RankedRuntime::get().leaderboardUrl(offset,kPageSize,mode)),
+        [weak = WeakRef(this),generation,offset,mode](web::WebResponse response) {
             // Retire/rebuild rows outside the request callback and keep the
             // single-flight lock until the entire list replacement is done.
-            queueInMainThread([weak,generation,offset,response = std::move(response)] {
+            queueInMainThread([weak,generation,offset,mode,response = std::move(response)] {
                 auto self = weak.lock();
-                if (!self || self->m_closed || generation != self->m_generation) return;
+                if (!self || self->m_closed || generation != self->m_generation || mode != self->m_mode) return;
                 ++self->m_generation; // Consume this response exactly once.
                 auto const data = response.json().unwrapOr(matjson::Value());
                 if (!response.ok() || !data["players"].isArray() || data["players"].asArray().unwrap().size() > kPageSize) {
@@ -123,6 +136,16 @@ void RankedLeaderboardPopup::fetch(int offset) {
                 self->updateButtons();
             });
         });
+}
+
+void RankedLeaderboardPopup::onMode(CCObject* sender) {
+    if (m_closed || !sender) return;
+    auto const mode = sender->getTag() == 0 ? RankedMode::Survival : RankedMode::SoloRanked;
+    if (mode == m_mode) return;
+    ++m_generation; m_request.cancel(); m_busy = false;
+    m_mode = mode; m_offset = 0; m_hasMore = false;
+    m_rows.clear(); m_scroll->m_contentLayer->removeAllChildrenWithCleanup(true);
+    m_pageLabel->setString("..."); fetch(0);
 }
 
 void RankedLeaderboardPopup::showError() {

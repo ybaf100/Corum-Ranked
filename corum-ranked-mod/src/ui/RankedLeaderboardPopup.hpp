@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../domain/LeaderboardPresentation.hpp"
+#include "../domain/RankedMode.hpp"
 #include <Geode/Geode.hpp>
 #include <Geode/ui/Popup.hpp>
 #include <Geode/ui/ScrollLayer.hpp>
@@ -12,7 +13,7 @@ class PlayerIcon;
 
 class RankedLeaderboardPopup final : public geode::Popup {
 public:
-    static RankedLeaderboardPopup* create();
+    static RankedLeaderboardPopup* create(RankedMode mode = RankedMode::SoloRanked);
     void dismiss();
     void onClose(cocos2d::CCObject*) override;
     void onExit() override;
@@ -33,6 +34,10 @@ private:
     void onNext(cocos2d::CCObject*);
     void onRefresh(cocos2d::CCObject*);
     void updateButtons();
+    void onMode(cocos2d::CCObject*);
+    RankedMode m_mode = RankedMode::SoloRanked;
+    CCMenuItemSpriteExtra* m_survivalTab = nullptr;
+    CCMenuItemSpriteExtra* m_soloTab = nullptr;
     geode::ScrollLayer* m_scroll = nullptr;
     cocos2d::CCLabelBMFont* m_caption = nullptr;
     cocos2d::CCLabelBMFont* m_pageLabel = nullptr;
