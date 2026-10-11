@@ -88,7 +88,7 @@ inline std::vector<std::size_t> achievementDisplayOrder(Cards const& cards) {
 inline std::string achievementScopeName(std::string_view scope, bool korean) {
     if (scope == "SOLO_RANKED") return korean ? "솔로 랭크" : "Solo Ranked";
     if (scope == "SURVIVAL") return korean ? "서바이벌" : "Survival";
-    if (scope == "SHARED") return korean ? "공용" : "Shared";
+    if (scope == "SHARED") return korean ? "공통" : "Shared";
     return korean ? "미분류" : "Unclassified";
 }
 

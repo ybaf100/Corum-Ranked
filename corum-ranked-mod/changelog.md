@@ -1,3 +1,12 @@
+## v0.5.0-beta.60
+
+- Restore the original compact player cards and matchmaking panel, with Enter below the cards, persistent top History/Achievement buttons and the bottom message/Debug strip. Align both matchmaking panels and highlight Solo History in gold.
+- Reveal Survival's menu from behind its stationary card. Cross the two cards for Solo entry and blend the outgoing Survival card into its matchmaking panel at the midpoint; Back follows the same eased path in reverse with input locked until completion.
+- Fix cascading transparent badge containers that hid structural tier sprites when mode cards faded. Keep badge and halo actions alive throughout transitions.
+- Mark the selected leaderboard mode with a yellow background and reduce only the promotion/GOLD border radii by about 4–5%, preserving their brightness and motion.
+- Open contextual achievement/history tabs from the lobby, add one authenticated Survival/Solo/All history API and ignore cancelled or stale history replies. Rename Korean Shared tabs and title prefixes to 공통 without changing IDs, unlocks or AP.
+- Keep Survival matchmaking blocked at M1. This UI update adds no database migration or Apps Script deployment; client and server exact versions must be upgraded together. See `../ranked/docs/survival-m1-ui-beta60.md`.
+
 ## v0.5.0-beta.59
 
 - Added the integrated Survival / Solo Ranked lobby after version, cached resource and environment checks, with reversible eased card/menu actions and protected input ownership.

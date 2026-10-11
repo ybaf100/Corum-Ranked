@@ -58,8 +58,8 @@ test('Lobby and Achievement text keep native-readable sizing', () => {
     assert.match(actionVisual, /text,\s*0\.62f/);
     assert.match(actionVisual, /fitMenuLabelWidth\(caption, width - 20\.0f, 0\.62f, 0\.30f\)/);
     assert.equal((language.match(/setScale\(0\.48f\)/g) ?? []).length, 2);
-    assert.match(main, /onHistory\),false,0\.66f/);
-    assert.match(main, /onAchievements\),false,0\.66f/);
+    assert.match(main, /historyVisual->setScale\(0\.66f\)/);
+    assert.match(main, /trophyVisual->setScale\(0\.66f\)/);
 
     assert.match(selector, /static_cast<float>\(level - 1\) \* 72\.0f/);
     assert.match(selector, /onAchievementTitleLevel[\s\S]{0,120}0\.52f/);

@@ -1,5 +1,7 @@
 # Corum Survival M1 — beta.59
 
+beta.59 이후 UI 보완 사항과 통합 기록 API는 [beta.60 UI 문서](survival-m1-ui-beta60.md)를 참고한다.
+
 기준 remote main은 `2f8db8d7fe11f86940b699d496a680ad95e74053`이다.
 작업 브랜치는 `feat/survival-m1-integration`, 클라이언트/서버 exact version은
 `v0.5.0-beta.59`다. 기존 Corum-Ranked Geode 모드, NestJS 서버, PostgreSQL,

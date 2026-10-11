@@ -347,6 +347,6 @@ export const evaluateAchievementMatch = (
 };
 
 export const achievementScopeLabel = (scope: AchievementScope, language: "ko" | "en"): string => {
-  const labels = { SOLO_RANKED: { ko: "솔로 랭크", en: "Solo Ranked" }, SURVIVAL: { ko: "서바이벌", en: "Survival" }, SHARED: { ko: "공용", en: "Shared" } };
+  const labels = { SOLO_RANKED: { ko: "솔로 랭크", en: "Solo Ranked" }, SURVIVAL: { ko: "서바이벌", en: "Survival" }, SHARED: { ko: "공통", en: "Shared" } };
   return labels[scope][language];
 };

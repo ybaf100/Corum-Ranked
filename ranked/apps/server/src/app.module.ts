@@ -15,6 +15,7 @@ import { LeaderboardModule } from "./leaderboard/leaderboard.module.js";
 import { PlacementModule } from "./placement/placement.module.js";
 import { AchievementModule } from "./achievement/achievement.module.js";
 import { AdminModule } from "./admin/admin.module.js";
+import { HistoryModule } from "./history/history.module.js";
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { AdminModule } from "./admin/admin.module.js";
     PlacementModule,
     AchievementModule,
     AdminModule,
+    HistoryModule,
   ],
   controllers: [HealthController],
 })

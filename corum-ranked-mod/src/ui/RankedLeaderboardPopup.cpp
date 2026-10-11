@@ -16,6 +16,15 @@ constexpr int kPageSize = 20;
 constexpr float kRowHeight = 48, kRowGap = 7;
 constexpr float kBorderInset = 0.375f;
 
+CCNode* modeTabFace(RankedMode mode, bool selected) {
+    auto* face = surface({140,23},{},selected ? Gold : Cyan,
+        selected ? Gold : SurfaceRaised,250,true);
+    auto* caption = menuLabel(mode == RankedMode::Survival ? "SURVIVAL" : "SOLO RANKED",0.28f,{70,11.5f},
+        selected ? ccc3(28,25,16) : Text);
+    fitMenuLabelWidth(caption,130,0.28f,0.20f); face->addChild(caption,5);
+    return face;
+}
+
 void drawBorderStroke(CCDrawNode* node, CCSize size, double phase, float length,
     ccColor3B color, float radius, float opacity) {
     auto const stroke = clockwiseBorderStroke(size.width - 2 * kBorderInset,
@@ -79,14 +88,13 @@ bool RankedLeaderboardPopup::init() {
         auto* item = CCMenuItemSpriteExtra::create(face,this,callback); item->setPosition({x,17});
         menu->addChild(item); return item;
     };
-    auto tab = [&](std::string const& text, float x, RankedMode mode) {
-        auto* face = surface({140,23},{},Cyan,SurfaceRaised,250,true);
-        auto* caption = menuLabel(text,0.28f,{70,11.5f}); fitMenuLabelWidth(caption,130,0.28f,0.20f); face->addChild(caption,5);
+    auto tab = [&](float x, RankedMode mode) {
+        auto* face = modeTabFace(mode,m_mode == mode);
         auto* item = CCMenuItemSpriteExtra::create(face,this,menu_selector(RankedLeaderboardPopup::onMode));
         item->setTag(static_cast<int>(mode)); item->setPosition({x,size.height-45}); menu->addChild(item); return item;
     };
-    m_survivalTab = tab("SURVIVAL",size.width/2-76,RankedMode::Survival);
-    m_soloTab = tab("SOLO RANKED",size.width/2+76,RankedMode::SoloRanked);
+    m_survivalTab = tab(size.width/2-76,RankedMode::Survival);
+    m_soloTab = tab(size.width/2+76,RankedMode::SoloRanked);
     m_previous = button("<",48,menu_selector(RankedLeaderboardPopup::onPrevious));
     m_next = button(">",size.width - 48,menu_selector(RankedLeaderboardPopup::onNext));
     button(i18n::text("close","CLOSE"),size.width / 2,menu_selector(RankedLeaderboardPopup::onClose));
@@ -144,6 +152,8 @@ void RankedLeaderboardPopup::onMode(CCObject* sender) {
     if (mode == m_mode) return;
     ++m_generation; m_request.cancel(); m_busy = false;
     m_mode = mode; m_offset = 0; m_hasMore = false;
+    m_survivalTab->setNormalImage(modeTabFace(RankedMode::Survival,m_mode == RankedMode::Survival));
+    m_soloTab->setNormalImage(modeTabFace(RankedMode::SoloRanked,m_mode == RankedMode::SoloRanked));
     m_rows.clear(); m_scroll->m_contentLayer->removeAllChildrenWithCleanup(true);
     m_pageLabel->setString("..."); fetch(0);
 }
@@ -210,9 +220,9 @@ void RankedLeaderboardPopup::showRows(matjson::Value const& data) {
             // perimeter directly avoids bright round blobs and cross shapes.
             auto* glow = CCDrawNode::create(); row->addChild(glow,8);
             auto const lap = 2 * (width + kRowHeight);
-            drawBorderStroke(glow,{width,kRowHeight},0,lap,color,2.4f,0.10f);
-            drawBorderStroke(glow,{width,kRowHeight},0,lap,color,1.1f,0.24f);
-            drawBorderStroke(glow,{width,kRowHeight},0,lap,Text,0.4f,0.48f);
+            drawBorderStroke(glow,{width,kRowHeight},0,lap,color,2.3f,0.10f);
+            drawBorderStroke(glow,{width,kRowHeight},0,lap,color,1.05f,0.24f);
+            drawBorderStroke(glow,{width,kRowHeight},0,lap,Text,0.38f,0.48f);
             visual.shine = CCDrawNode::create(); row->addChild(visual.shine,9);
         }
         m_rows.push_back(std::move(visual));
@@ -242,9 +252,9 @@ void RankedLeaderboardPopup::update(float dt) {
         auto const color = tierColor(row.entry.tier);
         for (auto const opposite : {0.0,0.5}) {
             auto const phase = m_elapsed / 6 + opposite;
-            drawBorderStroke(row.shine,size,phase,32,color,2.6f,0.22f);
-            drawBorderStroke(row.shine,size,phase,32,Text,1.1f,0.62f);
-            drawBorderStroke(row.shine,size,phase,32,{255,255,255},0.45f,0.96f);
+            drawBorderStroke(row.shine,size,phase,32,color,2.5f,0.22f);
+            drawBorderStroke(row.shine,size,phase,32,Text,1.05f,0.62f);
+            drawBorderStroke(row.shine,size,phase,32,{255,255,255},0.43f,0.96f);
         }
     }
 }

@@ -71,7 +71,10 @@ std::vector<PartSpec> partsFor(std::string const& rank) {
 }
 
 CCLayerColor* centeredRoot() {
-    auto* root = CCLayerColor::create({0, 0, 0, 0});
+    // Zero-sized geometry is invisible. RGBA must stay neutral: a transparent
+    // cascading container erases its badge when a parent card fades, and a
+    // black container can tint the structural sprite black on cascade updates.
+    auto* root = CCLayerColor::create({255, 255, 255, 255});
     root->setContentSize(CCSizeZero);
     root->setCascadeColorEnabled(true);
     root->setCascadeOpacityEnabled(true);

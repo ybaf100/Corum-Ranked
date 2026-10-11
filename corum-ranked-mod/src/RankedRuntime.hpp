@@ -250,6 +250,7 @@ struct PlacementView {
 };
 
 struct HistoryMatchView {
+    RankedMode mode = RankedMode::SoloRanked;
     std::string matchId;
     std::string finishedAt;
     std::string side;
@@ -440,6 +441,8 @@ struct RuntimeView {
     PlacementView placement;
     MatchView match;
     bool historyLoading = false;
+    HistoryScope historyScope = HistoryScope::All;
+    std::uint64_t historyRevision = 0;
     std::string historyError;
     std::vector<HistoryMatchView> history;
     AchievementView achievements;
@@ -487,6 +490,7 @@ public:
     void dismissMatch();
     void queueAgain();
     void fetchHistory(RankedMode mode = RankedMode::SoloRanked);
+    void fetchHistoryScope(HistoryScope scope);
     void fetchSurvivalProfile();
     void fetchModeAvailability();
     void fetchStanding();
@@ -708,6 +712,8 @@ private:
     bool m_songBypassAllowed = false;
     bool m_placementResultAcknowledged = false;
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_controlRequest;
+    geode::async::TaskHolder<geode::utils::web::WebResponse> m_historyRequest;
+    std::uint64_t m_historyGeneration = 0;
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_pollRequest;
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_attemptRequest;
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_attemptIntentRequest;

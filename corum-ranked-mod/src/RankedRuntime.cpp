@@ -614,6 +614,7 @@ void RankedRuntime::begin() {
     // A successful Admin action reloads admission while a lobby metadata read
     // may still be pending. Retire it before fetchConfig reuses this channel.
     m_controlRequest.cancel(); m_controlBusy = false;
+    ++m_historyGeneration; m_historyRequest.cancel(); m_view.historyLoading = false;
     ++m_standingGeneration; m_standingRequest.cancel(); m_standingBusy = false;
     m_nextStandingAt = {}; m_view.standing = {}; m_view.survival = {};
     m_sessionHeartbeatRequest.cancel(); m_sessionHeartbeatBusy = false;
@@ -1005,6 +1006,7 @@ void RankedRuntime::leaveRanked() {
     ++m_standingGeneration; m_standingRequest.cancel(); m_standingBusy = false;
     m_sessionHeartbeatRequest.cancel(); m_sessionHeartbeatBusy = false;
     m_controlRequest.cancel(); m_controlBusy = false;
+    ++m_historyGeneration; m_historyRequest.cancel(); m_view.historyLoading = false;
     ++m_playerInfoGeneration; ++m_forumRecordsGeneration;
     m_playerInfoRequest.cancel(); m_forumRecordsRequest.cancel();
     m_view.playerInfo.forum.loading = m_view.forumRecords.loading = false;
@@ -2600,26 +2602,38 @@ void RankedRuntime::queueAgain() {
 }
 
 void RankedRuntime::fetchHistory(RankedMode mode) {
-    if (m_controlBusy || m_sessionToken.empty()) return;
+    fetchHistoryScope(mode == RankedMode::Survival ? HistoryScope::Survival : HistoryScope::SoloRanked);
+}
+
+void RankedRuntime::fetchHistoryScope(HistoryScope scope) {
+    if (m_sessionToken.empty() || !m_rankedOpen) return;
+    auto const historyGeneration = ++m_historyGeneration;
+    m_historyRequest.cancel();
+    m_view.historyScope = scope;
+    ++m_view.historyRevision;
     m_view.history.clear();
     m_view.historyLoading = true;
     m_view.historyError.clear();
     ++m_view.revision;
     auto request = baseRequest(m_sessionToken);
-    m_controlBusy = true;
     auto const generation = m_sessionGeneration;
-    m_controlRequest.spawn(
-        request.get(endpoint(mode == RankedMode::Survival ? "/api/ranked/survival/history" : "/api/ranked/matches")),
-        [this, generation](web::WebResponse response) {
-            if (generation != m_sessionGeneration || !m_rankedOpen) return;
-            m_controlBusy = false;
+    m_historyRequest.spawn(
+        request.get(endpoint(fmt::format("/api/ranked/history?scope={}",historyScopeKey(scope)))),
+        [this, generation, historyGeneration, scope](web::WebResponse response) {
+            if (generation != m_sessionGeneration || historyGeneration != m_historyGeneration || !m_rankedOpen) return;
             m_view.historyLoading = false;
+            ++m_view.historyRevision;
             if (!successful(response)) {
                 m_view.historyError = responseError(response);
                 ++m_view.revision;
                 return;
             }
             auto const root = response.json().unwrapOr(matjson::Value());
+            if (root["scope"].asString().unwrapOr("") != historyScopeKey(scope) || !root["matches"].isArray()) {
+                m_view.historyError = "Invalid match history response";
+                ++m_view.revision;
+                return;
+            }
             observeServerNow(root);
             m_view.history.clear();
             auto const matches = root["matches"].asArray();
@@ -2627,6 +2641,7 @@ void RankedRuntime::fetchHistory(RankedMode mode) {
                 for (auto const& item : matches.unwrap()) {
                     if (!item.isObject()) continue;
                     HistoryMatchView history;
+                    history.mode = item["mode"].asString().unwrapOr("SOLO_RANKED") == "SURVIVAL" ? RankedMode::Survival : RankedMode::SoloRanked;
                     history.matchId = item["matchId"].asString().unwrapOr("");
                     history.finishedAt = item["finishedAt"].asString().unwrapOr("");
                     history.side = item["side"].asString().unwrapOr("");

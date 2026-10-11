@@ -128,7 +128,7 @@ describe("Survival M1 independent profiles and LP",()=>{
     expect(state.achievements.find(card=>card.id==="gold_reached")?.unlocks).toHaveLength(1);
     const claims=await Promise.all([achievements.claim(player.playerId,"gold_reached"),achievements.claim(player.playerId,"gold_reached")]);
     expect(claims.reduce((sum,claim)=>sum+claim.claimedAmount,0)).toBe(50);
-    expect((await achievements.equipTitle(player.playerId,"gold_reached")).equippedTitle).toMatchObject({scope:"SHARED",nameKo:"[공용] 정상",level:null,displayLabel:null});
+    expect((await achievements.equipTitle(player.playerId,"gold_reached")).equippedTitle).toMatchObject({scope:"SHARED",nameKo:"[공통] 정상",level:null,displayLabel:null});
     expect((await achievements.state(player.playerId)).equippedTitle?.nameEn).toBe("[Shared] The Summit");
     expect((await database.query("SELECT COUNT(*)::int AS count FROM ranked_ap_ledger WHERE achievement_id='gold_reached'")).rows).toEqual([{count:1}]);
   });

@@ -75,7 +75,7 @@ test('whole leaderboard popup validates pages, aligns statuses and icons, lazily
         .replace('segments=0; polygon.clear();','segments=0; polygon.clear(); lines.clear();')
         .replace('from=a;to=b;radius=r;segmentColor=c;++segments;return true;',`assert(a.x!=b.x||a.y!=b.y);assert(std::abs(a.x-b.x)<.001||std::abs(a.y-b.y)<.001);
         lines.push_back({a,b,r});from=a;to=b;radius=r;segmentColor=c;++segments;return true;`)
-        .replace('bool enabled=true; void setEnabled','bool enabled=true; bool isEnabled()const{return enabled;} void setEnabled')
+        .replace('bool enabled=true; void setEnabled','void setNormalImage(CCNode*face){removeAllChildrenWithCleanup(true);addChild(face);} bool enabled=true; bool isEnabled()const{return enabled;} void setEnabled')
         .replace('static CCLayerColor* create(ccColor4B c)',`static CCLayerColor* create(ccColor4B c,float w,float h){auto* n=create(c);n->size={w,h};return n;}
         static CCLayerColor* create(ccColor4B c)`);
     const viewer=read('tests/SpectatorLiveViewerNativeTest.mjs');
@@ -117,7 +117,7 @@ enum class FontWeight{ExtraBold,Black};enum class RankBadgeDisplay{Matched,Leade
 constexpr ccColor3B Text{242,247,255},TextMuted{164,181,205},Gold{255,207,74},Blue{77,135,255},Red{255,91,111},Green{90,238,151},Cyan{64,224,255},Surface{},SurfaceSoft{},SurfaceRaised{};
 CCLabelBMFont* menuLabel(std::string const& t,float s,CCPoint p,ccColor3B c=Text,FontWeight=FontWeight::ExtraBold){auto* n=new CCLabelBMFont;n->setString(t.c_str());n->setScale(s);n->setPosition(p);n->setColor(c);return n;}
 void fitMenuLabelWidth(CCLabelBMFont* n,float w,float s,float){n->setScale(std::min(s,w/n->size.width));}
-CCNode* surface(CCSize s,CCPoint p,ccColor3B,ccColor3B,int,bool){auto* n=CCNode::create();n->size=s;n->position=p;return n;}
+CCNode* surface(CCSize s,CCPoint p,ccColor3B,ccColor3B fill,int,bool){auto* n=CCNode::create();n->size=s;n->position=p;n->color=fill;return n;}
 ccColor3B tierColor(std::string const& t){return t=="GOLD"?Gold:Blue;}
 CCNode* standingNumber(std::optional<int> rank,float s){return menuLabel(rank?fmt::format("#{}",*rank):"#—",s,{});}
 CCSprite* rankResourceSprite(char const*){return CCSprite::createWithSpriteFrameName("existing-glow");}
@@ -155,6 +155,7 @@ int main(){using namespace corum::ranked;using namespace ui;namespace web=geode:
  }}
  auto* shine=p->m_rows[2].shine;assert(shine&&p->m_rows[2].shine&&!p->m_rows[0].shine);
  assert(shine->lines.size()==6);auto top=shine->lines[2],bottom=shine->lines[5];
+ for(auto const& line:shine->lines)assert(line.radius<=2.5f);
  auto w=p->m_rows[3].node->size.width;
  assert(std::abs(top.from.x+bottom.from.x-w)<.001&&std::abs(top.from.y+bottom.from.y-48)<.001);
  assert(top.from.y==top.to.y&&bottom.from.y==bottom.to.y);
@@ -179,8 +180,10 @@ int main(){using namespace corum::ranked;using namespace ui;namespace web=geode:
  next({empty});drainMainQueue();assert(reopened->m_rows.empty()&&!reopened->m_next->isEnabled()&&reopened->m_caption->text=="No players yet.");
  reopened->onRefresh(nullptr);auto oldSolo=web::pending.back().callback;
  reopened->onMode(reopened->m_survivalTab);assert(reopened->m_mode==corum::ranked::RankedMode::Survival&&reopened->m_offset==0&&reopened->m_busy&&reopened->m_rows.empty());
+ assert(reopened->m_survivalTab->getNormalImage()->color==Gold&&reopened->m_soloTab->getNormalImage()->color!=Gold);
  assert(web::pending.back().request.url.starts_with("/api/ranked/survival/leaderboard"));auto oldSur=web::pending.back().callback;
  reopened->onMode(reopened->m_soloTab);auto newest=web::pending.back().callback;
+ assert(reopened->m_soloTab->getNormalImage()->color==Gold&&reopened->m_survivalTab->getNormalImage()->color!=Gold);
  oldSolo({page()});oldSur({page()});drainMainQueue();assert(reopened->m_rows.empty()&&reopened->m_busy);
  newest({empty});drainMainQueue();assert(!reopened->m_busy&&reopened->m_mode==corum::ranked::RankedMode::SoloRanked);
  reopened->onRefresh(nullptr);auto failure=web::pending.back().callback;failure({{},false});drainMainQueue();assert(!reopened->m_busy&&reopened->m_refresh->isEnabled());reopened->dismiss();

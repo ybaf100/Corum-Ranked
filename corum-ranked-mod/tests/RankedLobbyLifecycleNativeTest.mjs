@@ -74,8 +74,9 @@ struct ScrollLayer:CCNode {
   }
  }
 };
+#include "${root}/src/domain/RankedMode.hpp"
 struct Stage {int stageIndex=1;std::vector<std::string>mapGrades;std::string stageGrade="A";double stageScore=300;};
-struct History {std::string side="A",winnerSide="A",opponentName="a long player name";std::optional<int>ownRankedScoreDelta=10;};
+struct History {corum::ranked::RankedMode mode=corum::ranked::RankedMode::SoloRanked;std::string side="A",winnerSide="A",opponentName="a long player name";std::optional<int>ownRankedScoreDelta=10;};
 struct RuntimeView {bool historyLoading=false;std::string historyError;struct{std::vector<Stage>stageResults;}placement;std::vector<History>history;};
 namespace fmt {template<class...T>std::string format(std::string s,T const&...){return s;}}
 constexpr int kGold=1,kCyan=2,kRed=3,kGreen=4,kDeepPanel2=5;
@@ -87,7 +88,7 @@ CCNode*makeActionButtonVisual(std::string){auto*n=new CCNode;n->size={104,34};re
 namespace corum::ranked::ui {void fitMenuLabelWidth(CCNode*,float,float,float){}}
 #include "${root}/src/domain/RankedMode.hpp"
 struct CorumRankedLayer {
- corum::ranked::ModeLobbyTransition m_modeTransition;
+ corum::ranked::ModeLobbyTransition m_modeTransition;corum::ranked::HistoryScope m_historyScope=corum::ranked::HistoryScope::All;void renderHistoryTabs(){}
  enum class Page {HistoryList,HistoryDetail};Page m_page=Page::HistoryList;std::size_t m_historyIndex=0;CCNode*m_root=new CCNode;
  ~CorumRankedLayer(){delete m_root;}
  std::string tr(char const*,char const*english){return english;}
@@ -167,12 +168,12 @@ std::string responseError(web::WebResponse const&){return "expired";}
 enum class RuntimeStage {Idle,Error};
 struct RankedRuntime {
 ${fields}
- bool m_controlBusy=true;geode::async::TaskHolder<web::WebResponse> m_controlRequest;int pollRetirements=0;
+ bool m_controlBusy=true;geode::async::TaskHolder<web::WebResponse> m_controlRequest,m_historyRequest;std::uint64_t m_historyGeneration=0;int pollRetirements=0;
  std::uint64_t m_playerInfoGeneration=0,m_forumRecordsGeneration=0;
  geode::async::TaskHolder<web::WebResponse> m_playerInfoRequest,m_forumRecordsRequest;
  std::uint64_t m_standingGeneration=0;bool m_standingBusy=false;
  geode::async::TaskHolder<web::WebResponse> m_standingRequest;
- struct {struct {struct {bool loading=true;}forum;}playerInfo;struct {bool loading=true;}forumRecords;}m_view;
+ struct {bool historyLoading=true;struct {struct {bool loading=true;}forum;}playerInfo;struct {bool loading=true;}forumRecords;}m_view;
  RuntimeStage stage=RuntimeStage::Idle;
  void invalidatePollRequest(){++pollRetirements;}
  void setStage(RuntimeStage value,std::string,std::string={}){stage=value;}
