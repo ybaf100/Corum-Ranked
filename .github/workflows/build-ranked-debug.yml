@@ -165,6 +165,7 @@ jobs:
           node --test corum-ranked-mod/tests/ModUpdateNativeTest.mjs
           node --test corum-ranked-mod/tests/DeathFeedNativeTest.mjs
           python3 corum-ranked-mod/tests/ModReleaseBuildTest.py
+          python3 corum-ranked-mod/tests/ModReleasePublishTest.py
           python3 corum-ranked-mod/tests/AssetPackBuildTest.py
           node --test corum-ranked-mod/tests/FontTypographyNativeTest.mjs
           node --test corum-ranked-mod/tests/RoundPreparationNativeTest.mjs

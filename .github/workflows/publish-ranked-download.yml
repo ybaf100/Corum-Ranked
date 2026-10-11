@@ -52,19 +52,37 @@ jobs:
           with zipfile.ZipFile(path) as package:
               assert json.loads(package.read('corum-build-channel.json')) == {'channel': channel, 'version': version}
           PY
+          # Listing includes drafts and succeeds with an empty list on first
+          # publication. A failed gh api call writes an error JSON to stdout;
+          # never mistake that body for an existing release ID.
+          if ! existing=$(gh api "repos/$repo/releases?per_page=100" --paginate \
+            --jq ".[] | select(.tag_name == \"$tag\") | .id"); then
+            printf '::error::Cannot list releases in %s. Check RANKED_RELEASE_TOKEN repository access and Contents read/write permission.\n' "$repo" >&2
+            exit 1
+          fi
           # Never overwrite an existing tag or package with different bytes.
-          existing=$(gh api "repos/$repo/releases/tags/$tag" --jq .id 2>/dev/null || true)
           if [[ -n "$existing" ]]; then
-            mkdir -p existing
-            gh release download "$tag" --repo "$repo" --pattern "$(basename "$package")" --dir existing
-            cmp "$package" "existing/$(basename "$package")"
-            if gh release download "$tag" --repo "$repo" --pattern "$(basename "$descriptor")" --dir existing; then
-              cmp "$descriptor" "existing/$(basename "$descriptor")"
-            else
-              # Only a still-draft release may resume an interrupted upload.
-              [[ "$(gh api "repos/$repo/releases/tags/$tag" --jq .draft)" == true ]]
-              gh release upload "$tag" --repo "$repo" "$descriptor"
+            if [[ ! "$existing" =~ ^[0-9]+$ ]]; then
+              printf '::error::Expected one numeric release ID for %s.\n' "$tag" >&2
+              exit 1
             fi
+            draft=$(gh api "repos/$repo/releases/$existing" --jq .draft)
+            mkdir -p existing
+            for file in "$package" "$descriptor"; do
+              if gh release download "$tag" --repo "$repo" --pattern "$(basename "$file")" --dir existing; then
+                if ! cmp "$file" "existing/$(basename "$file")"; then
+                  printf '::error::Immutable release %s has different bytes for %s. Use a new version.\n' "$tag" "$(basename "$file")" >&2
+                  exit 1
+                fi
+              else
+                # Resume either missing file only while the release is draft.
+                if [[ "$draft" != true ]]; then
+                  printf '::error::Published release %s is missing %s; it cannot be replaced.\n' "$tag" "$(basename "$file")" >&2
+                  exit 1
+                fi
+                gh release upload "$tag" --repo "$repo" "$file"
+              fi
+            done
           else
             python3 - <<'PY'
           import os, pathlib
