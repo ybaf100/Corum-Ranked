@@ -5,6 +5,7 @@
 #include <Geode/ui/Popup.hpp>
 #include <Geode/ui/ScrollLayer.hpp>
 #include <Geode/utils/web.hpp>
+#include <Geode/cocos/draw_nodes/CCDrawNode.h>
 
 namespace corum::ranked::ui {
 class PlayerIcon;
@@ -21,8 +22,7 @@ private:
     struct Row {
         cocos2d::CCNode* node = nullptr;
         PlayerIcon* icon = nullptr;
-        std::vector<cocos2d::CCSprite*> trail;
-        cocos2d::CCNode* shine = nullptr;
+        cocos2d::CCDrawNode* shine = nullptr;
         LeaderboardEntry entry;
     };
     bool init();
@@ -38,6 +38,7 @@ private:
     cocos2d::CCLabelBMFont* m_pageLabel = nullptr;
     CCMenuItemSpriteExtra* m_previous = nullptr;
     CCMenuItemSpriteExtra* m_next = nullptr;
+    CCMenuItemSpriteExtra* m_refresh = nullptr;
     std::vector<Row> m_rows;
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_request;
     std::uint64_t m_generation = 0;

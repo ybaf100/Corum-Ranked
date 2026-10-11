@@ -14,6 +14,19 @@ namespace corum::ranked::ui {
 namespace {
 constexpr int kPageSize = 20;
 constexpr float kRowHeight = 48, kRowGap = 7;
+constexpr float kBorderInset = 0.375f;
+
+void drawBorderStroke(CCDrawNode* node, CCSize size, double phase, float length,
+    ccColor3B color, float radius, float opacity) {
+    auto const stroke = clockwiseBorderStroke(size.width - 2 * kBorderInset,
+        size.height - 2 * kBorderInset,phase,length);
+    for (std::size_t index = 0; index < stroke.count; ++index) {
+        auto const& segment = stroke.segments[index];
+        node->drawSegment({segment.from.x + kBorderInset,segment.from.y + kBorderInset},
+            {segment.to.x + kBorderInset,segment.to.y + kBorderInset},radius,
+            {color.r / 255.0f,color.g / 255.0f,color.b / 255.0f,opacity});
+    }
+}
 
 int accountId(matjson::Value const& value) {
     auto const text = value.asString().unwrapOr("");
@@ -68,7 +81,7 @@ bool RankedLeaderboardPopup::init() {
     m_previous = button("<",48,menu_selector(RankedLeaderboardPopup::onPrevious));
     m_next = button(">",size.width - 48,menu_selector(RankedLeaderboardPopup::onNext));
     button(i18n::text("close","CLOSE"),size.width / 2,menu_selector(RankedLeaderboardPopup::onClose));
-    button(i18n::text("leaderboard-refresh","REFRESH"),size.width / 2 + 80,menu_selector(RankedLeaderboardPopup::onRefresh));
+    m_refresh = button(i18n::text("leaderboard-refresh","REFRESH"),size.width / 2 + 80,menu_selector(RankedLeaderboardPopup::onRefresh));
     m_pageLabel = menuLabel("",0.26f,{size.width / 2 - 80,17},TextMuted); panel->addChild(m_pageLabel,5);
     scheduleUpdate(); fetch(0); return true;
 }
@@ -76,9 +89,11 @@ bool RankedLeaderboardPopup::init() {
 void RankedLeaderboardPopup::updateButtons() {
     m_previous->setEnabled(!m_busy && m_offset > 0);
     m_next->setEnabled(!m_busy && m_hasMore);
-    m_previous->setCascadeOpacityEnabled(true); m_next->setCascadeOpacityEnabled(true);
-    m_previous->setOpacity(m_previous->isEnabled() ? 255 : 100);
-    m_next->setOpacity(m_next->isEnabled() ? 255 : 100);
+    m_refresh->setEnabled(!m_busy && !m_closed);
+    for (auto* button : {m_previous,m_next,m_refresh}) {
+        button->setCascadeOpacityEnabled(true);
+        button->setOpacity(button->isEnabled() ? 255 : 100);
+    }
 }
 
 void RankedLeaderboardPopup::fetch(int offset) {
@@ -91,14 +106,22 @@ void RankedLeaderboardPopup::fetch(int offset) {
     web::WebRequest request; request.timeout(std::chrono::seconds(20));
     m_request.spawn(request.get(RankedRuntime::get().leaderboardUrl(offset,kPageSize)),
         [weak = WeakRef(this),generation,offset](web::WebResponse response) {
-            auto self = weak.lock();
-            if (!self || self->m_closed || generation != self->m_generation) return;
-            self->m_busy = false;
-            auto const data = response.json().unwrapOr(matjson::Value());
-            if (!response.ok() || !data["players"].isArray() || data["players"].asArray().unwrap().size() > kPageSize) {
-                self->showError(); self->updateButtons(); return;
-            }
-            self->m_offset = offset; self->showRows(data); self->updateButtons();
+            // Retire/rebuild rows outside the request callback and keep the
+            // single-flight lock until the entire list replacement is done.
+            queueInMainThread([weak,generation,offset,response = std::move(response)] {
+                auto self = weak.lock();
+                if (!self || self->m_closed || generation != self->m_generation) return;
+                ++self->m_generation; // Consume this response exactly once.
+                auto const data = response.json().unwrapOr(matjson::Value());
+                if (!response.ok() || !data["players"].isArray() || data["players"].asArray().unwrap().size() > kPageSize) {
+                    self->showError();
+                } else {
+                    self->m_offset = offset; self->showRows(data);
+                }
+                if (self->m_closed) return;
+                self->m_busy = false;
+                self->updateButtons();
+            });
         });
 }
 
@@ -146,7 +169,7 @@ void RankedLeaderboardPopup::showRows(matjson::Value const& data) {
         if (entry.promotion || entry.warning) leftCaption(row,
             entry.promotion ? i18n::text("promotion-match","PROMOTION MATCH") : i18n::text("demotion-warning","DEMOTION WARNING"),
             {columns.status,24},columns.statusWidth,0.26f,entry.promotion ? Green : Red);
-        auto* badge = createAnimatedRankBadge(entry.tier,{27,27},RankBadgeDisplay::Matched);
+        auto* badge = createAnimatedRankBadge(entry.tier,{27,27},RankBadgeDisplay::Leaderboard);
         badge->setPosition({columns.tierIcon,24}); row->addChild(badge,4);
         leftCaption(row,entry.tier,{columns.tierName,24},columns.tierWidth,0.31f,color);
         if (entry.promotion) {
@@ -160,16 +183,14 @@ void RankedLeaderboardPopup::showRows(matjson::Value const& data) {
         } else leftCaption(row,leaderboardValue(entry),{columns.value,24},columns.valueWidth,0.32f);
         Row visual; visual.node = row; visual.entry = std::move(entry);
         if (visual.entry.tier == "GOLD" || visual.entry.promotion) {
-            // Reuse existing image-pack glow; no new downloadable art.
-            for (int trail = 0; trail < 5; ++trail) if (auto* glow = rankResourceSprite("fx-rank-radial-glow-white.png")) {
-                fitRankSprite(glow,{18,18}); glow->setColor(color); glow->setOpacity(static_cast<GLubyte>(180 - trail * 28));
-                glow->setBlendFunc({GL_SRC_ALPHA,GL_ONE}); row->addChild(glow,8); visual.trail.push_back(glow);
-            }
-            auto* shine = CCNode::create(); row->addChild(shine,9); visual.shine = shine;
-            for (auto const size : {CCSize{9,1},CCSize{1,9},CCSize{2,2}}) {
-                auto* light = CCLayerColor::create({255,255,255,220},size.width,size.height);
-                light->setPosition({-size.width / 2,-size.height / 2}); shine->addChild(light);
-            }
+            // A soft continuous frame plus two short highlights. Drawing the
+            // perimeter directly avoids bright round blobs and cross shapes.
+            auto* glow = CCDrawNode::create(); row->addChild(glow,8);
+            auto const lap = 2 * (width + kRowHeight);
+            drawBorderStroke(glow,{width,kRowHeight},0,lap,color,2.4f,0.10f);
+            drawBorderStroke(glow,{width,kRowHeight},0,lap,color,1.1f,0.24f);
+            drawBorderStroke(glow,{width,kRowHeight},0,lap,Text,0.4f,0.48f);
+            visual.shine = CCDrawNode::create(); row->addChild(visual.shine,9);
         }
         m_rows.push_back(std::move(visual));
     }
@@ -194,12 +215,14 @@ void RankedLeaderboardPopup::update(float dt) {
         } else if (!visible && row.icon) { row.icon->removeFromParentAndCleanup(true); row.icon = nullptr; }
         if (!visible || !row.shine) continue;
         auto const size = row.node->getContentSize();
-        for (std::size_t index = 0; index < row.trail.size(); ++index) {
-            auto const point = clockwiseBorderPoint(size.width,size.height,m_elapsed / 6 - index * 0.004);
-            row.trail[index]->setPosition({point.x,point.y});
+        row.shine->clear();
+        auto const color = tierColor(row.entry.tier);
+        for (auto const opposite : {0.0,0.5}) {
+            auto const phase = m_elapsed / 6 + opposite;
+            drawBorderStroke(row.shine,size,phase,32,color,2.6f,0.22f);
+            drawBorderStroke(row.shine,size,phase,32,Text,1.1f,0.62f);
+            drawBorderStroke(row.shine,size,phase,32,{255,255,255},0.45f,0.96f);
         }
-        auto const point = clockwiseBorderPoint(size.width,size.height,m_elapsed / 6);
-        row.shine->setPosition({point.x,point.y});
     }
 }
 

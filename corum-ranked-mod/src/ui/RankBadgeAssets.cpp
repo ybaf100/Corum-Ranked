@@ -214,7 +214,8 @@ CCNode* createRankAmbientFx(
     if (!hasPersistentRankAmbient(rank)) return ambient;
 
     auto const longest = std::max(maxSize.width, maxSize.height);
-    auto const matched = display == RankBadgeDisplay::Matched;
+    auto const leaderboard = display == RankBadgeDisplay::Leaderboard;
+    auto const matched = display == RankBadgeDisplay::Matched || leaderboard;
     auto const compact = display == RankBadgeDisplay::Compact || matched;
     auto const hero = display == RankBadgeDisplay::Hero;
     if (rank == "SILVER") {
@@ -223,7 +224,7 @@ CCNode* createRankAmbientFx(
             "fx-silver-halo.png",
             {longest * (matched ? 1.55f : compact ? 1.28f : 1.65f), longest * (matched ? 1.55f : compact ? 1.28f : 1.65f)},
             1,
-            matched ? 200 : compact ? 46 : 108
+            leaderboard ? 46 : matched ? 200 : compact ? 46 : 108
         );
         auto* orbit = ambientSprite(
             ambient,
@@ -239,7 +240,10 @@ CCNode* createRankAmbientFx(
             6,
             matched ? 160 : compact ? 42 : 68
         );
-        pulseOpacity(halo, matched ? 170 : compact ? 34 : 70, matched ? 240 : compact ? 62 : 132, 1.20f);
+        // Only the circular halo is dimmed for the dense leaderboard rows.
+        // Matched cards keep their brighter halo, orbit and crystal sheen.
+        pulseOpacity(halo, leaderboard ? 34 : matched ? 170 : compact ? 34 : 70,
+            leaderboard ? 62 : matched ? 240 : compact ? 62 : 132, 1.20f);
         if (orbit) {
             orbit->runAction(CCRepeatForever::create(
                 CCRotateBy::create(compact ? 8.5f : 6.8f, 360.0f)

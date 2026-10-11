@@ -40,6 +40,7 @@ enum class RankBadgeDisplay {
     Matched,
     Large,
     Hero,
+    Leaderboard,
 };
 
 std::string normalizeRankName(std::string rank);

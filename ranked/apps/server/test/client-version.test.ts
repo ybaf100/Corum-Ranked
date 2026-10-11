@@ -12,6 +12,9 @@ const clientMod = (version: string) => ({
 });
 
 describe("Ranked client version gate", () => {
+  it("rejects beta57 before safe leaderboard refresh and revised border highlights", () => {
+    expect(evaluateRankedClientVersion("v0.5.0-beta.57", [clientMod("v0.5.0-beta.57")]).allowed).toBe(false);
+  });
   it("rejects beta51 before direct Force Death Match preparation", () => {
     expect(evaluateRankedClientVersion("v0.5.0-beta.51", [clientMod("v0.5.0-beta.51")]).allowed).toBe(false);
   });
@@ -71,7 +74,7 @@ describe("Ranked client version gate", () => {
 
   it("accepts the same current version with or without a leading v", () => {
     expect(
-      evaluateRankedClientVersion("0.5.0-beta.57", [clientMod("0.5.0-beta.57")]).allowed,
+      evaluateRankedClientVersion("0.5.0-beta.58", [clientMod("0.5.0-beta.58")]).allowed,
     ).toBe(true);
   });
 
@@ -81,7 +84,7 @@ describe("Ranked client version gate", () => {
     ]);
     expect(result).toMatchObject({
       allowed: false,
-      requiredVersion: "v0.5.0-beta.57",
+      requiredVersion: "v0.5.0-beta.58",
       clientVersion: "v0.5.0-beta.8",
     });
   });
