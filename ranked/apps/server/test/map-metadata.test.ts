@@ -32,12 +32,57 @@ describe("map display metadata", () => {
   });
 
   it("rounds GDDL ratings, falls back to DefaultRating and uses the Integration palette", () => {
-    expect(parseGddl({ID:42,Rating:12.6,Meta:{seconds:93.2}},42)).toEqual({tier:13,seconds:93.2});
-    expect(parseGddl({ID:42,Rating:null,DefaultRating:5,Meta:{}},42)).toEqual({tier:5,seconds:null});
+    expect(parseGddl({ID:42,Rating:12.6,Meta:{seconds:93.2}},42)).toEqual({tier:13,seconds:93.2,difficulty:"",creator:""});
+    expect(parseGddl({ID:42,Rating:null,DefaultRating:5,Meta:{}},42)).toEqual({tier:5,seconds:null,difficulty:"",creator:""});
     expect(parseGddl({ID:41,Rating:20},42)).toBeNull();
-    expect(parseGddl({ID:42,Rating:500,Meta:{seconds:-5}},42)).toEqual({tier:null,seconds:null});
+    expect(parseGddl({ID:42,Rating:500,Meta:{seconds:-5}},42)).toEqual({tier:null,seconds:null,difficulty:"",creator:""});
     expect(gddlColor(1)).toBe("#dddfee"); expect(gddlColor(13)).toBe("#dd5a5a");
     for (const invalid of [0,-1,41,1.5]) expect(gddlColor(invalid)).toBeNull();
+  });
+
+  it("recovers GDDL tier, duration and original difficulty when GD catalog lookup fails", async () => {
+    const requests: string[]=[];
+    const fetcher: typeof fetch=async input=>{
+      const url=String(input);requests.push(url);
+      if(url.includes("boomlings")) return new Response("-1");
+      return json({ID:56427638,Rating:4.7,Meta:{seconds:116.2,Difficulty:"Easy",Publisher:{name:"Stinger613"}}});
+    };
+    const source=document(map(56427638,"Light it up"));
+    const resolver=new RankedMapMetadataResolver(fetcher);
+    const result=await resolver.enrich(source);
+    expect(result.maps[0]).toMatchObject({creator:"Stinger613",difficulty:"Easy Demon",
+      metadata:{kind:"DEMON",gddlTier:5,gddlColor:"#d4bbe2",durationSeconds:116.2}});
+    expect(result.maps[0]!.playableLevelId).toBe("56427638");
+    expect(requests).toEqual(["https://www.boomlings.com/database/getGJLevels21.php","https://gdladder.com/api/levels/56427638"]);
+    await resolver.enrich(source);expect(requests).toHaveLength(2);
+  });
+
+  it("does not erase a cached demon tier during an incomplete GDDL refresh", async () => {
+    const client=new PGlite(),database=new PgliteDatabase(client);
+    try {
+      await client.exec(await readFile(new URL("../../../migrations/0018_map_metadata_cache.sql",import.meta.url),"utf8"));
+      const source=document(map(56427638,"Light it up"));
+      const fetcher: typeof fetch=async input=>String(input).includes("boomlings") ? new Response("-1") :
+        json({ID:56427638,Rating:4.7,Meta:{seconds:116.2,Difficulty:"Easy",Publisher:{name:"Stinger613"}}});
+      const first=await new RankedMapMetadataResolver(fetcher,database).enrich(source);
+      await database.query("UPDATE ranked_map_metadata_cache SET fetched_at=CURRENT_TIMESTAMP-INTERVAL '2 days'");
+      const incomplete: typeof fetch=async input=>String(input).includes("boomlings") ? new Response("-1") : json({ID:56427638,Rating:null});
+      const refreshed=await new RankedMapMetadataResolver(incomplete,database).enrich(source);
+      expect(refreshed.maps).toEqual(first.maps);
+    } finally {await client.close();}
+  },30_000);
+
+  it("stops failed GD batching so a large catalog retains time for independent GDDL recovery", async () => {
+    let gdCalls=0,gddlCalls=0;
+    const fetcher: typeof fetch=async input=>{
+      const url=String(input);
+      if(url.includes("boomlings")){++gdCalls;return new Response("-1");}
+      ++gddlCalls;const id=Number(url.split("/").at(-1));
+      return json({ID:id,Rating:3.4,Meta:{Difficulty:"Easy",seconds:80}});
+    };
+    const result=await new RankedMapMetadataResolver(fetcher).enrich(document(...Array.from({length:120},(_,i)=>map(1_000+i))));
+    expect(gdCalls).toBe(1);expect(gddlCalls).toBe(120);
+    expect(result.maps.every(m=>m.metadata?.kind==="DEMON"&&m.metadata.gddlTier===3)).toBe(true);
   });
 
   it("uses official difficulty stars and official GDDL IDs without changing playable copy IDs", async () => {

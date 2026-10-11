@@ -23,6 +23,108 @@ function runCpp(code) {
     finally {rmSync(dir, {recursive:true, force:true});}
 }
 
+test('actual history rows keep Details visible and correctly indexed across 30-record scrolling', () => {
+    const source=read('src/RankedPopup.cpp');
+    const callbacks=['    void renderHistoryList(', '    void onHistoryDetail('].map(s=>method(source,s)).join('\n');
+    runCpp(`
+#include <algorithm>
+#include <cassert>
+#include <optional>
+#include <string>
+#include <utility>
+#include <vector>
+struct CCPoint{float x=0,y=0;};struct CCSize{float width=0,height=0;};
+inline constexpr CCPoint CCPointZero{};
+struct CCNode {
+ virtual ~CCNode(){for(auto*child:children)delete child;}
+ CCPoint position{},anchor{.5f,.5f};CCSize size{};float scale=1;bool visible=true,ignoreAnchor=false;int tag=-1;
+ std::string id;std::vector<CCNode*>children;
+ static CCNode*create(){return new CCNode;}
+ void setPosition(CCPoint p){position=p;}void setAnchorPoint(CCPoint p){anchor=p;}
+ void setContentSize(CCSize s){size=s;}CCSize getContentSize()const{return size;}
+ void setScale(float s){scale=s;}void setID(std::string s){id=std::move(s);}
+ void setTag(int t){tag=t;}int getTag()const{return tag;}
+ void addChild(CCNode*n,int=0){children.push_back(n);}
+};
+using CCObject=CCNode;
+struct CCDirector {
+ CCSize window{568,320};static CCDirector*sharedDirector(){static CCDirector d;return &d;}
+ CCSize getWinSize()const{return window;}
+};
+struct CCMenu:CCNode {
+ static CCMenu*create(){auto*m=new CCMenu;m->size=CCDirector::sharedDirector()->window;m->ignoreAnchor=true;return m;}
+};
+struct CCMenuItemSpriteExtra:CCNode {
+ static CCMenuItemSpriteExtra*create(CCNode*face,void*,int){auto*b=new CCMenuItemSpriteExtra;b->size=face->size;b->addChild(face);return b;}
+};
+struct LoadingSpinner:CCNode {static LoadingSpinner*create(int){return new LoadingSpinner;}};
+struct ScrollLayer:CCNode {
+ CCNode*m_contentLayer=nullptr;static ScrollLayer*create(CCSize s){auto*l=new ScrollLayer;l->size=s;
+  l->m_contentLayer=new CCNode;l->m_contentLayer->anchor=CCPointZero;l->addChild(l->m_contentLayer);return l;}
+ void scrollToTop(){scrollTo(size.height-m_contentLayer->size.height);}
+ void scrollTo(float offset){
+  m_contentLayer->position.y=offset;
+  // Geode v5.10.1 GenericContentLayer bounds/culling, sha 5a05bbad7d8719f26be49c9a13f9905f9111a35f:
+  // loader/src/ui/nodes/ScrollLayer.cpp. This models SDK visibility, not device rendering.
+  for(auto*n:m_contentLayer->children){auto y=offset+n->position.y;
+   auto anchor=n->ignoreAnchor?CCPointZero:n->anchor;
+   auto top=n->scale*(y+(1-anchor.y)*n->size.height*n->scale);
+   auto bottom=n->scale*(y-n->anchor.y*n->size.height*n->scale);
+   n->visible=top>0&&bottom<size.height;
+  }
+ }
+};
+struct Stage {int stageIndex=1;std::vector<std::string>mapGrades;std::string stageGrade="A";double stageScore=300;};
+struct History {std::string side="A",winnerSide="A",opponentName="a long player name";std::optional<int>ownRankedScoreDelta=10;};
+struct RuntimeView {bool historyLoading=false;std::string historyError;struct{std::vector<Stage>stageResults;}placement;std::vector<History>history;};
+namespace fmt {template<class...T>std::string format(std::string s,T const&...){return s;}}
+constexpr int kGold=1,kCyan=2,kRed=3,kGreen=4,kDeepPanel2=5;
+std::string operator""_spr(char const*s,std::size_t n){return {s,n};}
+#define menu_selector(...) 0
+CCNode*makeNeonPanel(CCSize s,CCPoint p,int,int,int){auto*n=new CCNode;n->size=s;n->position=p;return n;}
+CCNode*makeLabel(std::string,float,CCPoint p,int,std::string=""){auto*n=new CCNode;n->size={120,12};n->position=p;return n;}
+CCNode*makeActionButtonVisual(std::string){auto*n=new CCNode;n->size={104,34};return n;}
+namespace corum::ranked::ui {void fitMenuLabelWidth(CCNode*,float,float,float){}}
+struct CorumRankedLayer {
+ enum class Page {HistoryList,HistoryDetail};Page m_page=Page::HistoryList;std::size_t m_historyIndex=0;CCNode*m_root=new CCNode;
+ ~CorumRankedLayer(){delete m_root;}
+ std::string tr(char const*,char const*english){return english;}
+ void addTopBack(bool){}void addScreenHeader(std::string,std::string,int,int){}
+ void addButton(std::string,CCPoint,int,bool,float){}
+ ${callbacks}
+};
+CCMenu*menuFor(ScrollLayer*l,int tag){
+ for(auto*n:l->m_contentLayer->children){
+  if(auto*m=dynamic_cast<CCMenu*>(n)){for(auto*b:m->children){if(b->tag==tag)return m;}}
+ }
+ return nullptr;
+}
+int main(){
+ for(auto window:{CCSize{568,320},CCSize{480,320},CCSize{800,450}})for(int stages:{0,5}){
+  CCDirector::sharedDirector()->window=window;CorumRankedLayer layer;RuntimeView view;
+  view.history.resize(32);view.placement.stageResults.resize(stages);layer.renderHistoryList(view);
+  ScrollLayer*scroll=nullptr;for(auto*n:layer.m_root->children)if(auto*s=dynamic_cast<ScrollLayer*>(n))scroll=s;
+  assert(scroll&&scroll->id=="ranked-history-matches-scroll");
+  assert(menuFor(scroll,0)&&menuFor(scroll,29)&&!menuFor(scroll,30));
+  // Stage rows can precede the first match: scroll to that exact row and retain its own tag.
+  for(int index:{0,14,29}){
+   auto*menu=menuFor(scroll,index);assert(menu->size.height==29);
+   scroll->scrollTo(scroll->size.height/2-menu->position.y);
+   assert(menu->visible&&menu->children.size()==1);
+   auto*b=menu->children.front();assert(b->position.y==14.5f);
+   assert(menu->position.y+b->position.y==scroll->m_contentLayer->size.height-22-(stages+index)*36);
+   layer.onHistoryDetail(b);assert(layer.m_page==CorumRankedLayer::Page::HistoryDetail&&layer.m_historyIndex==std::size_t(index));
+  }
+  scroll->scrollToTop();if(stages==0)assert(menuFor(scroll,0)->visible);
+  scroll->scrollTo(0);assert(menuFor(scroll,29)->visible&&!menuFor(scroll,0)->visible);
+  // The old single screen-sized menu at y=0 is culled at the same long-list top.
+  auto offset=scroll->size.height-scroll->m_contentLayer->size.height;
+  assert(offset+window.height<0);
+ }
+}
+`);
+});
+
 test('actual session pulse bounds retries, closes the exact token and rejects retired replies', () => {
     const source = read('src/RankedRuntime.cpp'), header = read('src/RankedRuntime.hpp');
     const fields = header.slice(header.indexOf('    std::string m_sessionToken;'), header.indexOf('    std::string m_matchToken;'));

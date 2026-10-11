@@ -3883,7 +3883,6 @@ class CorumRankedLayer final : public CCLayerColor {
         auto* content = scroll->m_contentLayer;
         auto const height = std::max(viewport.height,static_cast<float>((placements + matches) * 36 + 12));
         content->setContentSize({viewport.width,height});
-        auto* menu = CCMenu::create(); menu->setPosition(CCPointZero); content->addChild(menu,10);
         float y = height - 22;
         for (std::size_t i = 0; i < placements; ++i,y -= 36) {
             auto const& stage = view.placement.stageResults[i];
@@ -3902,8 +3901,14 @@ class CorumRankedLayer final : public CCLayerColor {
                 0.29f,{(viewport.width - 68) / 2,y},won ? kGreen : kRed,"semibold");
             corum::ranked::ui::fitMenuLabelWidth(row,viewport.width - 92,0.29f,0.20f); content->addChild(row,3);
             auto* face = makeActionButtonVisual(tr("detail","DETAIL")); face->setScale(0.48f);
+            // GenericContentLayer culls direct children by their own bounds.
+            // A screen-sized menu at y=0 disappears at the top of a long list,
+            // taking every Details button with it. Give each row its own bounds.
+            auto* menu = CCMenu::create(); menu->setAnchorPoint(CCPointZero);
+            menu->setContentSize({viewport.width,29}); menu->setPosition({0,y - 14.5f});
+            content->addChild(menu,10);
             auto* button = CCMenuItemSpriteExtra::create(face,this,menu_selector(CorumRankedLayer::onHistoryDetail));
-            button->setPosition({viewport.width - 34,y}); button->setTag(static_cast<int>(i)); menu->addChild(button);
+            button->setPosition({viewport.width - 34,14.5f}); button->setTag(static_cast<int>(i)); menu->addChild(button);
         }
         scroll->scrollToTop();
     }

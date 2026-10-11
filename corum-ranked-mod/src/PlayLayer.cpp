@@ -152,6 +152,7 @@ bool spectatorTransitionState(std::string const& state) {
 class $modify(CorumRankedPlayLayer, PlayLayer) {
 public:
     struct Fields {
+        bool nativeCompletionStarted = false;
         CCNode* hudRoot = nullptr;
         CCLabelBMFont* fpsLabel = nullptr;
         CCLabelBMFont* ownNameLabel = nullptr;
@@ -1217,6 +1218,7 @@ public:
             // exactly one Ranked Start. Real early deaths/Clears have already set
             // attemptEndReported through their dedicated hooks and do not enter here.
             PlayLayer::resetLevel();
+            m_fields->nativeCompletionStarted = false;
             return;
         }
         auto const resetActions = corum::ranked::rankedResetActions(
@@ -1230,11 +1232,12 @@ public:
             // A manual restart/reset can bypass destroyPlayer(), so close it here
             // before creating the next visual attempt. This guarantees exactly one
             // end event for every start even when the user restarts while alive.
-            auto const progress = rankedProgressPercent(this);
+            auto const cleared = m_hasCompletedLevel;
+            auto const progress = cleared ? 100.0 : rankedProgressPercent(this);
             m_fields->attemptEndReported = runtime.reportAttemptEnd(
                 m_fields->levelId,
                 progress,
-                false,
+                cleared,
                 m_fields->qualifyingPercent
             );
         }
@@ -1266,6 +1269,7 @@ public:
             return;
         }
         PlayLayer::resetLevel();
+        m_fields->nativeCompletionStarted = false;
         if (!resetActions.startFreshAttempt) return;
         corum::ranked::SpectatorLiveRuntime::get().localAttemptStarted();
         m_fields->spectatorPending = false;
@@ -1287,10 +1291,6 @@ public:
             }
             return;
         }
-        ScopedRealGameplayEnd finishing(
-            m_fields->vanillaGameplayEndInProgress,
-            scoringEnabled() && !m_fields->attemptEndReported
-        );
         // Geometry Dash deliberately calls destroyPlayer() for its internal
         // anti-cheat verification spike and then returns without killing the
         // player. Treating that callback as a real death closes the Ranked
@@ -1305,17 +1305,19 @@ public:
             return;
         }
 
-        if (scoringEnabled() && !m_fields->attemptEndReported) {
-            if (m_player1) corum::ranked::SpectatorLiveRuntime::get().publishTerminal(
-                observedSpectatorPose(true, false), false);
-            auto const progress = rankedProgressPercent(this);
-            m_fields->attemptEndReported = runtime.reportAttemptEnd(
-                m_fields->levelId,
-                progress,
-                false,
-                m_fields->qualifyingPercent
-            );
-        }
+        // A native callback is not proof that a player died. GD can refuse a
+        // collision or run cleanup after completion. The supplied BLOZ log
+        // closed three ~99.1% finishes as non-clears before completion. Do not
+        // let an unconfirmed callback make the per-attempt guard discard a clear.
+        auto const exactPlayer = player && (player == m_player1 ||
+            (m_gameState.m_isDualMode && player == m_player2));
+        auto const deathEligible = exactPlayer && !player->m_isDead && !m_hasCompletedLevel &&
+            !m_fields->nativeCompletionStarted &&
+            scoringEnabled() && !m_fields->attemptEndReported;
+        auto const deathProgress = deathEligible ? rankedProgressPercent(this) : 0.0;
+        auto const deathPose = deathEligible && m_player1
+            ? std::optional(observedSpectatorPose(true, false)) : std::nullopt;
+        ScopedRealGameplayEnd finishing(m_fields->vanillaGameplayEndInProgress, deathEligible);
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         // Death effects may mutate native presentation. Record the real contact
         // pose captured before vanilla, but commit it only after confirmed death.
@@ -1323,6 +1325,15 @@ public:
             ? std::optional(observedSpectatorPose(true, false)) : std::nullopt;
 #endif
         PlayLayer::destroyPlayer(player, object);
+        // Keep the pre-effect progress/pose, but publish only a confirmed native
+        // death. Nested reset/completion paths may already have ended the Attempt.
+        if (deathEligible && player->m_isDead && !m_hasCompletedLevel && !m_fields->nativeCompletionStarted &&
+            !m_fields->attemptEndReported && scoringEnabled()) {
+            if (deathPose) corum::ranked::SpectatorLiveRuntime::get().publishTerminal(*deathPose, false);
+            m_fields->attemptEndReported = runtime.reportAttemptEnd(
+                m_fields->levelId, deathProgress, false, m_fields->qualifyingPercent
+            );
+        }
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         if (debugTerminal && player && player->m_isDead) {
             corum::ranked::debug::DebugSpectateRuntime::get().recordPose(*debugTerminal, true);
@@ -1417,11 +1428,12 @@ public:
             !m_fields->attemptEndReported && !m_fields->autoExitRequested &&
             !m_fields->spectatorMode && !m_fields->spectatorPending
         ) {
-            auto const progress = rankedProgressPercent(this);
+            auto const cleared = m_hasCompletedLevel;
+            auto const progress = cleared ? 100.0 : rankedProgressPercent(this);
             m_fields->attemptEndReported = corum::ranked::RankedRuntime::get().reportAttemptEnd(
                 m_fields->levelId,
                 progress,
-                false,
+                cleared,
                 m_fields->qualifyingPercent
             );
         }
@@ -1465,16 +1477,34 @@ public:
 
     void playEndAnimationToPos(CCPoint position) {
         if (suppressLocalCompletion()) return;
+        // End animation may retire a dual avatar before levelComplete sets its
+        // native flag. Preserve the current Attempt until the real clear, even
+        // if the round clock expires while the completion animation is running.
+        if (m_player1 && !m_player1->m_isDead && scoringEnabled() && !m_fields->attemptEndReported)
+            m_fields->nativeCompletionStarted = true;
         PlayLayer::playEndAnimationToPos(position);
     }
 
     void playPlatformerEndAnimationToPos(CCPoint position, bool instant) {
         if (suppressLocalCompletion()) return;
+        if (m_player1 && !m_player1->m_isDead && scoringEnabled() && !m_fields->attemptEndReported)
+            m_fields->nativeCompletionStarted = true;
         PlayLayer::playPlatformerEndAnimationToPos(position, instant);
     }
 
     void showEndLayer() {
         if (suppressLocalCompletion()) return;
+        // Back up the two completion callbacks using native state, never a
+        // rounded progress percentage. Custom-end maps may finish below 100%.
+        ScopedRealGameplayEnd finishing(m_fields->vanillaGameplayEndInProgress,
+            m_hasCompletedLevel && scoringEnabled() && !m_fields->attemptEndReported);
+        if (m_hasCompletedLevel && scoringEnabled() && !m_fields->attemptEndReported) {
+            if (m_player1) corum::ranked::SpectatorLiveRuntime::get().publishTerminal(
+                observedSpectatorPose(false, true), false);
+            m_fields->attemptEndReported = corum::ranked::RankedRuntime::get().reportAttemptEnd(
+                m_fields->levelId, 100.0, true, m_fields->qualifyingPercent
+            );
+        }
         PlayLayer::showEndLayer();
     }
 

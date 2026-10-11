@@ -86,13 +86,19 @@ export const parseGdMaps = (body: string): GdMapDetails[] => {
   return result;
 };
 
-export const parseGddl = (body: unknown, expectedId: number): { tier: number | null; seconds: number | null } | null => {
+export const parseGddl = (body: unknown, expectedId: number): {
+  tier: number | null; seconds: number | null; difficulty: string; creator: string;
+} | null => {
   if (!body || typeof body !== "object") return null;
-  const row = body as { ID?: unknown; Rating?: unknown; DefaultRating?: unknown; Meta?: { seconds?: unknown } };
+  const row = body as { ID?: unknown; Rating?: unknown; DefaultRating?: unknown;
+    Meta?: { seconds?: unknown; Difficulty?: unknown; Publisher?: { name?: unknown } } };
   if (row.ID !== expectedId) return null;
   const raw = positive(row.Rating) ?? positive(row.DefaultRating), rounded = raw !== null ? Math.round(raw) : null;
+  const difficulties = new Map(["Easy", "Medium", "Hard", "Insane", "Extreme"].map(name => [name, `${name} Demon`]));
   return { tier: rounded !== null && rounded >= 1 && rounded < tierColors.length ? rounded : null,
-    seconds: positive(row.Meta?.seconds) };
+    seconds: positive(row.Meta?.seconds),
+    difficulty: typeof row.Meta?.Difficulty === "string" ? difficulties.get(row.Meta.Difficulty) ?? "" : "",
+    creator: typeof row.Meta?.Publisher?.name === "string" ? row.Meta.Publisher.name : "" };
 };
 
 type Resolved = { metadata: RankedMapMetadata; creator: string; difficulty: string };
@@ -141,9 +147,13 @@ export class RankedMapMetadataResolver {
       const online = [...new Set(pending.filter(m => !officialMap(m.title)).map(m => m.playableLevelId))];
       for (let offset = 0; offset < online.length && !controller.signal.aborted; offset += 50) {
         const ids = online.slice(offset, offset + 50);
-        try { for (const map of parseGdMaps(await (await gdRequest("getGJLevels21.php", { type: "19", str: ids.join(",") })).text())) {
-          if (ids.includes(map.id)) gd.set(map.id, map);
-        } } catch { /* The last known metadata remains usable. */ }
+        try {
+          const rows = parseGdMaps(await (await gdRequest("getGJLevels21.php", { type: "19", str: ids.join(",") })).text());
+          // Do not spend the entire shared budget repeating an unavailable GD
+          // endpoint: leave time for independent GDDL recovery of UNKNOWN IDs.
+          if (!rows.length) break;
+          for (const map of rows) if (ids.includes(map.id)) gd.set(map.id, map);
+        } catch { break; /* The last known metadata remains usable. */ }
       }
       let next = 0;
       const worker = async (): Promise<void> => {
@@ -155,15 +165,28 @@ export class RankedMapMetadataResolver {
           else if (native) metadata = { ...metadata, kind: native.demon ? "DEMON" : "NORMAL", stars: native.demon ? null : native.stars,
             durationSeconds: native.verificationSeconds ?? metadata.durationSeconds };
           const resolved: Resolved = { metadata, creator: official ? "RobTop" : native?.creator ?? results.get(key(map))?.creator ?? "",
-            difficulty: official ? official.gddlId ? "Demon" : official.stars === 8 ? "Insane" : official.stars === 6 ? "Harder" : official.stars === 4 ? "Hard" : official.stars === 3 ? "Normal" : "Easy" : native?.difficulty ?? "" };
+            difficulty: official ? official.gddlId ? "Demon" : official.stars === 8 ? "Insane" : official.stars === 6 ? "Harder" : official.stars === 4 ? "Hard" : official.stars === 3 ? "Normal" : "Easy" : native?.difficulty ?? results.get(key(map))?.difficulty ?? "" };
           results.set(key(map), resolved);
           try {
-            if (metadata.kind === "DEMON") {
+            // A failed GD catalog lookup leaves UNKNOWN, not a normal level.
+            // GDDL can still supply its own exact ID, tier and original demon
+            // difficulty; do not gate that recovery on a successful GD request.
+            if (metadata.kind === "DEMON" || metadata.kind === "UNKNOWN") {
               const id = official?.gddlId ?? Number(map.playableLevelId);
               const rating = parseGddl(await (await request(`https://gdladder.com/api/levels/${id}`)).json(), id);
-              if (rating) { metadata = { ...metadata, gddlTier: rating.tier, gddlColor: rating.tier ? gddlColor(rating.tier) : null,
-                durationSeconds: rating.seconds ?? metadata.durationSeconds }; resolved.metadata = metadata; }
+              if (rating) {
+                metadata = { ...metadata,
+                  kind: rating.tier !== null || rating.difficulty ? "DEMON" : metadata.kind,
+                  gddlTier: rating.tier ?? metadata.gddlTier,
+                  gddlColor: rating.tier ? gddlColor(rating.tier) : metadata.gddlColor,
+                  durationSeconds: rating.seconds ?? metadata.durationSeconds };
+                resolved.metadata = metadata;
+                if (!resolved.difficulty || resolved.difficulty === "Demon") resolved.difficulty = rating.difficulty || resolved.difficulty;
+                if (!resolved.creator) resolved.creator = rating.creator;
+              }
             }
+          } catch { /* Retain known metadata when GDDL is unavailable. */ }
+          try {
             if (!official && metadata.durationSeconds === null && !controller.signal.aborted) {
               const download = parseGdMaps(await (await gdRequest("downloadGJLevel22.php", { levelID: map.playableLevelId })).text());
               const duration = download.find(m => m.id === map.playableLevelId)?.verificationSeconds;

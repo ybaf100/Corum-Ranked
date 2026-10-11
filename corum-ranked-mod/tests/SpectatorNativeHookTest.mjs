@@ -45,6 +45,7 @@ test('production native safety hook bodies execute through death/completion/save
 #include "${join(root, 'src/spectator/ScopedSpectatorPersistenceMode.hpp')}"
 #include <algorithm>
 #include <cassert>
+#include <functional>
 #include "${join(root, 'src/domain/SpectatorNativeProbe.hpp')}"
 #include <memory>
 #include <optional>
@@ -69,17 +70,28 @@ void persist(GJGameLevel*, int);
 struct PlayLayer {
     struct {bool m_isDualMode=false;} m_gameState;
     PlayerObject* m_player1 = nullptr;
+    PlayerObject* m_player2 = nullptr;
     GJGameLevel* m_level = nullptr;
     GameObject* m_anticheatSpike = nullptr;
-    bool m_isTestMode = false, m_isPracticeMode = false;
+    bool m_isTestMode = false, m_isPracticeMode = false, m_hasCompletedLevel = false;
+    bool ignoreNativeDeath = false, completeDuringNativeDeath = false;
+    std::function<void()> completionCleanup;
+    std::function<void()> beforeNativeDeath;
     int deaths = 0, completions = 0, checks = 0, texts = 0, animations = 0, endLayers = 0, newBest = 0;
     double percent = 0;
-    void destroyPlayer(PlayerObject* player, GameObject*) { ++deaths; if(player)player->m_isDead=true; persist(m_level, int(percent)); }
-    void levelComplete() { ++completions; persist(m_level, 100); }
+    void destroyPlayer(PlayerObject* player, GameObject*) {
+        ++deaths;
+        if(beforeNativeDeath)beforeNativeDeath();
+        if (completeDuringNativeDeath) {m_hasCompletedLevel=true; return;}
+        if (ignoreNativeDeath || m_hasCompletedLevel) return;
+        if(player)player->m_isDead=true;
+        persist(m_level, int(percent));
+    }
+    void levelComplete() { ++completions; m_hasCompletedLevel=true; persist(m_level, 100); }
     void showCompleteText() { ++texts; }
     void checkForEnd() { ++checks; }
-    void playEndAnimationToPos(CCPoint) { ++animations; }
-    void playPlatformerEndAnimationToPos(CCPoint, bool) { ++animations; }
+    void playEndAnimationToPos(CCPoint) { ++animations; if(completionCleanup)completionCleanup(); }
+    void playPlatformerEndAnimationToPos(CCPoint, bool) { ++animations; if(completionCleanup)completionCleanup(); }
     void showEndLayer() { ++endLayers; }
     void showNewBest(bool, int, int, bool, bool, bool) { ++newBest; }
     int attempts=0;void updateAttempts(){++attempts;}
@@ -136,6 +148,7 @@ struct CorumRankedPlayLayer : PlayLayer {
     bool observesSpectatorPlayer(PlayerObject*) {return false;}
     void observeSpectatorNativeSnap(PlayerObject*,corum::ranked::SpectatorDiscontinuity,corum::ranked::SpectatorGhostPose const&) {}
     struct Fields {
+        bool nativeCompletionStarted = false;
         EntryOverlay* entryOverlay = nullptr;
         bool nativeEntryHeld = false;
         bool spectatorPresentationRetired=false,spectatorScenePrepared=false,autoExitRequested=false;
@@ -177,6 +190,66 @@ int main() {
     using corum::ranked::RankedRuntime;
     using namespace corum::ranked;
     auto& runtime = RankedRuntime::get();
+    {
+        runtime={};PlayerHook first;SaveHook localLevel;CorumRankedPlayLayer real;
+        currentLayer=&real;real.m_player1=&first;real.m_level=&localLevel;real.percent=99.12;
+        real.beforeNativeDeath=[&]{real.playEndAnimationToPos({100,0});};
+        real.destroyPlayer(&first,nullptr);
+        assert(first.m_isDead && runtime.ends==0 && real.m_fields->nativeCompletionStarted);
+        real.levelComplete();assert(runtime.ends==1&&runtime.clears==1);
+    }
+    // Native end animations can dispose of the dual avatar before the finish
+    // flag is set. That accepted cleanup death must not beat the genuine clear.
+    for(bool platformer:{false,true}) {
+        runtime={};PlayerHook first,second;SaveHook localLevel;CorumRankedPlayLayer real;
+        currentLayer=&real;real.m_player1=&first;real.m_player2=&second;real.m_level=&localLevel;
+        real.percent=99.12;real.m_gameState.m_isDualMode=true;
+        real.completionCleanup=[&]{real.destroyPlayer(&second,nullptr);};
+        if(platformer)real.playPlatformerEndAnimationToPos({100,0},true);
+        else real.playEndAnimationToPos({100,0});
+        assert(real.m_fields->nativeCompletionStarted && runtime.ends==0 && second.m_isDead);
+        real.levelComplete();real.showCompleteText();real.showEndLayer();
+        assert(runtime.ends==1 && runtime.clears==1);
+    }
+    runtime={};
+    for(int clear=1;clear<=3;++clear) {
+        runtime.ownAlive=true;runtime.serverSpectator=clear==3;
+        PlayerHook first,second;SaveHook localLevel;CorumRankedPlayLayer real;
+        currentLayer=&real;real.m_player1=&first;real.m_player2=&second;real.m_level=&localLevel;
+        real.percent=99.12;real.m_gameState.m_isDualMode=true;
+        real.playEndAnimationToPos({100,0});real.destroyPlayer(&second,nullptr);
+        assert(runtime.clears==clear-1 && runtime.ownAlive);
+        // Final/expired clock permission cannot preempt this already-started
+        // Attempt while it is completing. Genuine native saves still finish.
+        real.levelComplete();real.showCompleteText();
+        assert(runtime.ends==clear && runtime.clears==clear && localLevel.best==100);
+    }
+    // A callback is not a confirmed death. Native completion cleanup / ignored
+    // collisions cannot close the journal at BLOZ's real ~99.1% finish point.
+    for (int outcome=0;outcome<3;++outcome) {
+        runtime={};PlayerHook localPlayer;SaveHook localLevel;CorumRankedPlayLayer real;
+        currentLayer=&real;real.m_player1=&localPlayer;real.m_level=&localLevel;real.percent=99.12;
+        real.ignoreNativeDeath=outcome==0;
+        real.m_hasCompletedLevel=outcome==1;
+        real.completeDuringNativeDeath=outcome==2;
+        real.destroyPlayer(&localPlayer,nullptr);
+        assert(runtime.ends==0 && !real.m_fields->attemptEndReported);
+        if(outcome==0) real.levelComplete();
+        else real.showEndLayer(); // native completion flag backs up omitted callbacks
+        real.showCompleteText();real.showEndLayer();
+        assert(runtime.ends==1 && runtime.clears==1);
+    }
+    // A genuine death at the very same percentage remains a non-clear. Inactive
+    // second players and foreign players cannot end the local scoring Attempt.
+    for(int mode=0;mode<4;++mode) {
+        runtime={};PlayerHook first,second,foreign;SaveHook localLevel;CorumRankedPlayLayer real;
+        currentLayer=&real;real.m_player1=&first;real.m_player2=&second;real.m_level=&localLevel;
+        real.percent=99.12;real.m_gameState.m_isDualMode=mode==2;
+        auto* target=mode==0 ? &first : mode==3 ? &foreign : &second;
+        real.destroyPlayer(target,nullptr);real.destroyPlayer(target,nullptr);
+        assert(runtime.ends==((mode==0||mode==2)?1:0) && runtime.clears==0);
+    }
+    runtime={};
     PlayerHook local, other;
     SaveHook level, unrelated;
     CorumRankedPlayLayer scene;

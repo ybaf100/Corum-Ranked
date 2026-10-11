@@ -242,8 +242,11 @@ assert(shape->polygon.size()==48&&number->text=="8"&&number->color==(ccColor3B{2
 assert(static_cast<CCSprite*>(row->children[2])->frame=="diffIcon_05_btn_001.png");
 assert(mapLengthText(displayedMapMetadata(42,info).durationSeconds)=="1m 24s");
 info.kind="DEMON";info.stars.reset();info.gddlTier=13;info.gddlColor="#dd5a5a";
+info.officialLevelId.reset();RankedMapDetails::get().face=mapDifficulty(false,true,3,0);
 row=mapDifficultyBadge(42,info,135);shape=static_cast<CCDrawNode*>(row->children[0]);number=static_cast<CCLabelBMFont*>(row->children[1]);
 assert(shape->polygon.size()==4&&number->text=="13"&&number->color==(ccColor3B{255,255,255}));
+assert(static_cast<CCLabelBMFont*>(row->children[3])->text=="Easy Demon");
+assert(static_cast<CCSprite*>(row->children[2])->frame=="diffIcon_07_btn_001.png");
 assert(std::abs(shape->fill.r-221/255.f)<.001f&&std::abs(shape->fill.g-90/255.f)<.001f);
 info.gddlTier.reset();info.gddlColor="wrong";row=mapDifficultyBadge(42,info,135);
 assert(static_cast<CCLabelBMFont*>(row->children[1])->text=="?");

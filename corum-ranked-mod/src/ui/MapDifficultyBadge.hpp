@@ -63,7 +63,7 @@ inline cocos2d::CCNode* mapDifficultyBadge(int levelId, MapMetadata metadata, fl
         face->setPosition({faceX,height/2});row->addChild(face);
     }
     auto const textLeft=extent*2+8;
-    auto* text=menuLabel(demon ? "GDDL" : std::string(value.label),0.23f,{(width+textLeft)/2,height/2},Text,FontWeight::SemiBold);
+    auto* text=menuLabel(std::string(value.label),0.23f,{(width+textLeft)/2,height/2},Text,FontWeight::SemiBold);
     fitMenuLabelWidth(text,std::max(10.0f,width-textLeft),0.23f,0.14f);row->addChild(text);
     row->setID("ranked-map-difficulty"_spr); return row;
 }
