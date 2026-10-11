@@ -4,12 +4,14 @@ import { RankedConfigService } from "./ranked-config.service.js";
 import { DATABASE, type SqlExecutor } from "../database/database.port.js";
 import { readRankedAudioVolumes, withRankedAudioVolumes } from "./ranked-audio-volume.js";
 import { SERVER_ENVIRONMENT, type ServerEnvironment } from "./server-environment.js";
+import { RankedModUpdateService } from "./ranked-mod-update.service.js";
 
 @Controller("api/ranked")
 export class RankedConfigController {
   public constructor(@Inject(RankedConfigService) private readonly rankedConfig: RankedConfigService,
     @Optional() @Inject(DATABASE) private readonly database?: SqlExecutor,
-    @Optional() @Inject(SERVER_ENVIRONMENT) private readonly environment?: ServerEnvironment) {}
+    @Optional() @Inject(SERVER_ENVIRONMENT) private readonly environment?: ServerEnvironment,
+    @Optional() @Inject(RankedModUpdateService) private readonly modUpdates?: RankedModUpdateService) {}
 
   @Get("maps")
   @Header("Cache-Control", "public, max-age=60, stale-while-revalidate=120")
@@ -34,13 +36,16 @@ export class RankedConfigController {
   @Header("Cache-Control", "no-store")
   public async getClientConfig(): Promise<object> {
     const snapshot = this.rankedConfig.getSnapshot();
-    const volumes = await readRankedAudioVolumes(snapshot.client, this.database);
+    const [volumes, modUpdates] = await Promise.all([
+      readRankedAudioVolumes(snapshot.client, this.database),
+      this.modUpdates?.getClientUpdates() ?? this.environment?.rankedModUpdates ?? {},
+    ]);
     return {
       serverNow: new Date().toISOString(),
       generation: snapshot.generation,
       rulesVersion: snapshot.operational.rules.rulesVersion,
       requiredClientVersion: REQUIRED_RANKED_CLIENT_VERSION,
-      modUpdates: this.environment?.rankedModUpdates ?? {},
+      modUpdates,
       queueEnabled: snapshot.operational.enabled,
       rules: snapshot.operational.rules,
       cbf: snapshot.operational.cbf,

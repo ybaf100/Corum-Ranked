@@ -1,0 +1,135 @@
+import "reflect-metadata";
+import { Logger } from "@nestjs/common";
+import { Test } from "@nestjs/testing";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { RankedConfigController } from "../src/config/ranked-config.controller.js";
+import { RankedConfigService } from "../src/config/ranked-config.service.js";
+import { RankedModUpdateService, RANKED_MOD_UPDATE_FETCH } from "../src/config/ranked-mod-update.service.js";
+import { SERVER_ENVIRONMENT } from "../src/config/server-environment.js";
+import type { RankedBuildChannel } from "../src/config/ranked-mod-updates.js";
+import { REQUIRED_RANKED_CLIENT_VERSION } from "../src/session/client-version.js";
+import { configDocumentFixture, environmentFixture } from "./fixtures.js";
+
+const version = REQUIRED_RANKED_CLIENT_VERSION;
+const descriptor = (channel: RankedBuildChannel, target = version) => ({
+  [channel]: { version: target, sha256: (channel === "debug" ? "a" : "b").repeat(64), sizeBytes: 12345 },
+});
+const validFetch = () => vi.fn<typeof fetch>().mockImplementation(async (url) =>
+  Response.json(descriptor(String(url).includes("/debug-") ? "debug" : "release")));
+
+beforeEach(() => vi.spyOn(Logger.prototype, "warn").mockImplementation(() => {}));
+afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
+
+describe("server-selected mod update descriptors", () => {
+  it("automatically resolves both exact channel releases without manual JSON configuration", async () => {
+    const fetchRemote = validFetch();
+    const service = new RankedModUpdateService(environmentFixture(), fetchRemote);
+    expect(await service.getClientUpdates()).toEqual({ ...descriptor("debug"), ...descriptor("release") });
+    expect(fetchRemote.mock.calls.map(([url]) => String(url))).toEqual([
+      `https://github.com/ybaf100/corum-ranked-downloads/releases/download/debug-${version}/debug.json`,
+      `https://github.com/ybaf100/corum-ranked-downloads/releases/download/release-${version}/release.json`,
+    ]);
+    for (const [, options] of fetchRemote.mock.calls) {
+      expect(options?.signal).toBeInstanceOf(AbortSignal);
+      expect(options?.headers).toEqual({ accept: "application/json" });
+    }
+  });
+
+  it("keeps explicit channel pins authoritative and resolves only an unspecified channel", async () => {
+    const explicit = descriptor("debug", "v0.5.0-beta.56");
+    const fetchRemote = validFetch();
+    const service = new RankedModUpdateService({ ...environmentFixture(), rankedModUpdates: explicit }, fetchRemote);
+    expect(await service.getClientUpdates()).toEqual({ ...explicit, ...descriptor("release") });
+    expect(fetchRemote).toHaveBeenCalledTimes(1);
+    expect(String(fetchRemote.mock.calls[0]![0])).toContain(`/release-${version}/release.json`);
+  });
+
+  it("does no network lookup when both channels are explicitly configured", async () => {
+    const pins = { ...descriptor("debug", "v0.5.0-beta.56"), ...descriptor("release", "v0.5.0-beta.55") };
+    const fetchRemote = validFetch();
+    const service = new RankedModUpdateService({ ...environmentFixture(), rankedModUpdates: pins }, fetchRemote);
+    expect(await service.getClientUpdates()).toEqual(pins);
+    expect(fetchRemote).not.toHaveBeenCalled();
+  });
+
+  it("warms the cache without delaying startup and shares concurrent lookups", async () => {
+    let finish!: () => void;
+    const gate = new Promise<void>((resolve) => { finish = resolve; });
+    const fetchRemote = vi.fn<typeof fetch>().mockImplementation(async (url) => {
+      await gate;
+      return Response.json(descriptor(String(url).includes("/debug-") ? "debug" : "release"));
+    });
+    const service = new RankedModUpdateService(environmentFixture(), fetchRemote);
+    expect(service.onApplicationBootstrap()).toBeUndefined();
+    const first = service.getClientUpdates(), second = service.getClientUpdates();
+    expect(fetchRemote).toHaveBeenCalledTimes(2);
+    finish();
+    expect(await first).toEqual(await second);
+    const isolated = await service.getClientUpdates();
+    (isolated.debug as { version: string }).version = "modified by a caller";
+    expect(await service.getClientUpdates()).toEqual({ ...descriptor("debug"), ...descriptor("release") });
+    expect(fetchRemote).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries unpublished releases after 20 seconds and keeps a valid channel available", async () => {
+    vi.useFakeTimers(); vi.setSystemTime(0);
+    const fetchRemote = validFetch();
+    fetchRemote.mockImplementationOnce(async () => new Response("Not Found", { status: 404 }));
+    const service = new RankedModUpdateService(environmentFixture(), fetchRemote);
+    expect(await service.getClientUpdates()).toEqual(descriptor("release"));
+    expect(await service.getClientUpdates()).toEqual(descriptor("release"));
+    expect(fetchRemote).toHaveBeenCalledTimes(2);
+    vi.setSystemTime(20_000);
+    expect(await service.getClientUpdates()).toEqual({ ...descriptor("debug"), ...descriptor("release") });
+    expect(fetchRemote).toHaveBeenCalledTimes(3);
+  });
+
+  it.each([
+    ["wrong version", () => Response.json(descriptor("debug", "v0.5.0-beta.999"))],
+    ["wrong channel", () => Response.json(descriptor("release"))],
+    ["mixed channels", () => Response.json({ ...descriptor("debug"), ...descriptor("release") })],
+    ["invalid digest", () => Response.json({ debug: { version, sha256: "bad", sizeBytes: 12345 } })],
+    ["invalid size", () => Response.json({ debug: { version, sha256: "a".repeat(64), sizeBytes: 0 } })],
+    ["invalid JSON", () => new Response("<html>not a descriptor</html>")],
+    ["oversized header", () => new Response("{}", { headers: { "content-length": "4097" } })],
+    ["oversized body", () => new Response(" ".repeat(4097))],
+  ] as const)("omits an invalid %s descriptor without blocking the other channel", async (_label, response) => {
+    const fetchRemote = validFetch();
+    fetchRemote.mockImplementationOnce(async () => response());
+    const service = new RankedModUpdateService(environmentFixture(), fetchRemote);
+    expect(await service.getClientUpdates()).toEqual(descriptor("release"));
+    expect(fetchRemote).toHaveBeenCalledTimes(2);
+  });
+
+  it("handles network/timeout errors without rejecting public configuration", async () => {
+    const fetchRemote = vi.fn<typeof fetch>().mockRejectedValue(new Error("request aborted"));
+    const service = new RankedModUpdateService(environmentFixture(), fetchRemote);
+    expect(await service.getClientUpdates()).toEqual({});
+    expect(await service.getClientUpdates()).toEqual({});
+    expect(fetchRemote).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns resolved descriptors through the actual public config HTTP endpoint", async () => {
+    const document = configDocumentFixture();
+    const module = await Test.createTestingModule({
+      controllers: [RankedConfigController],
+      providers: [
+        RankedModUpdateService,
+        { provide: RankedConfigService, useValue: { getSnapshot: () => ({ ...document, fetchedAt: new Date().toISOString() }) } },
+        { provide: SERVER_ENVIRONMENT, useValue: environmentFixture() },
+        { provide: RANKED_MOD_UPDATE_FETCH, useValue: validFetch() },
+      ],
+    }).compile();
+    const app = module.createNestApplication(); app.useLogger(false);
+    try {
+      await app.listen(0, "127.0.0.1");
+      const response = await fetch(`${await app.getUrl()}/api/ranked/config`);
+      expect(response.ok).toBe(true);
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      expect(await response.json()).toMatchObject({
+        requiredClientVersion: version,
+        modUpdates: { ...descriptor("debug"), ...descriptor("release") },
+      });
+    } finally { await app.close(); }
+  });
+});

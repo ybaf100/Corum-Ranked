@@ -31,13 +31,28 @@ PAT/Actions 설정 및 실제 Release 발행을 수행하지 않는다.
 - Release는 draft로 파일을 모두 업로드한 뒤 공개된다. 진행 중인 draft는 서버에 지정하지 않는다.
 - 사용자용 CI artifact ZIP에서는 기존 `hwanhee1.corum_ranked.geode`를 설치한다.
   배포용 개별 파일과 내용·SHA-256은 같다. artifact ZIP 자체를 업데이트 대상으로 올리지 않는다.
+- 배포 파일명에 버전·채널을 붙이는 이유는 Debug와 Release의 수동 다운로드도 구분하기 위해서다.
+  자동 업데이트는 이 이름을 설치 파일명으로 쓰지 않고, 현재 모드의 `getPackagePath()`를
+  교체하므로 기존 `hwanhee1.corum_ranked.geode` 파일명과 설치 위치를 유지한다.
 - 이미지팩은 PNG·팩 명세·라이선스·팩 생성기가 바뀌었을 때만 다시 패키지한다.
 
 ## 서버에 받을 버전 지정
 
-**먼저 공개 Release와 파일이 존재하는지 확인한 뒤** 서버 환경변수
-`RANKED_MOD_UPDATES_JSON`을 설정한다. 발행된 `debug.json`과 `release.json`을
-하나의 객체로 합쳐 넣으면 된다. 예시에서 SHA·크기는 실제 JSON 값으로 바꾼다.
+환경변수를 설정하지 않은 채널은 서버 코드의 `REQUIRED_RANKED_CLIENT_VERSION`을
+대상으로 사용한다. `/api/ranked/config`가 해당 버전의 공개 릴리즈에서 `debug.json`과
+`release.json`을 자동으로 읽어 다운로드 명세를 제공한다. 예를 들어 서버가 beta57을
+요구하면 `debug-v0.5.0-beta.57/debug.json`과 `release-v0.5.0-beta.57/release.json`만
+조회한다. `latest`나 다른 버전·채널로 넘어가지 않는다.
+
+서버 시작 때 비동기로 조회를 준비하고, 성공한 명세는 프로세스 동안 캐시한다.
+릴리즈가 아직 없거나 조회가 실패하면 해당 채널을 생략하고 20초 이후 다시 조회할 수
+있다. 각 요청의 동시 조회를 합치고 타임아웃을 적용한다. 모드가 RETRY로 config를
+다시 받으면 공개된 명세가 반영된다. 경기 heartbeat와 다음 라운드는 이 조회를 하지 않는다.
+
+채널별로 별도 버전을 고정하려면 **먼저 공개 Release와 파일이 존재하는지 확인한 뒤**
+선택적으로 서버 환경변수 `RANKED_MOD_UPDATES_JSON`을 설정한다. 명시한 채널의
+설정은 자동 조회보다 우선하며 서버가 다른 버전으로 바꾸지 않는다. 발행된 `debug.json`과
+`release.json`을 하나의 객체로 합쳐 넣으면 된다. 예시의 SHA·크기는 실제 JSON 값으로 바꾼다.
 
 ```json
 {
@@ -46,9 +61,9 @@ PAT/Actions 설정 및 실제 Release 발행을 수행하지 않는다.
 }
 ```
 
-두 채널의 버전을 다르게 지정할 수도 있다. `latest`는 사용하지 않는다.
-미설정 채널은 서버 코드의 exact client version gate를 사용한다. 그 채널에
-업데이트가 필요하면 유효한 다운로드 명세도 설정해야 자동 다운로드가 가능하다.
+두 채널의 버전을 다르게 지정할 수도 있다. 미설정 채널은 서버 코드의 exact client
+version gate와 해당 릴리즈의 명세를 사용하므로 버전마다 SHA·크기를 환경변수에 복사할
+필요는 없다. 대상 릴리즈의 두 파일을 모두 업로드한 뒤 공개해야 한다.
 
 모드 버전을 바꿀 때는 mod.json, npm 패키지·lockfile, 서버 fallback gate를 함께
 올린다. 이미 진행 중인 경기의 heartbeat·attempt·다음 라운드에는 새 버전 검사를

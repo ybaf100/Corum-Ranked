@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { RankedConfigController } from "./ranked-config.controller.js";
 import { RankedConfigService } from "./ranked-config.service.js";
+import { RankedModUpdateService } from "./ranked-mod-update.service.js";
 import {
   AppsScriptRankedConfigSource,
   RANKED_CONFIG_SOURCE,
@@ -14,6 +15,7 @@ import {
   controllers: [RankedConfigController],
   providers: [
     RankedConfigService,
+    RankedModUpdateService,
     AppsScriptRankedConfigSource,
     AppsScriptCsmpTierSource,
     {
