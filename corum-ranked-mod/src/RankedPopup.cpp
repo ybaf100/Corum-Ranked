@@ -37,6 +37,7 @@
 #include "ui/RankedModeDisabledPopup.hpp"
 #include "ui/MapDifficultyBadge.hpp"
 #include "ui/RankedMapHeading.hpp"
+#include "domain/ScoreDisplay.hpp"
 
 #include <Geode/Geode.hpp>
 #include <Geode/binding/GameLevelManager.hpp>
@@ -139,13 +140,8 @@ std::string displayBanner(std::string value) {
     return value;
 }
 
-std::string formatScore(double value) {
-    if (std::abs(value - std::round(value)) < 0.0005) {
-        return std::to_string(static_cast<long long>(std::llround(value)));
-    }
-    std::ostringstream stream;
-    stream << std::fixed << std::setprecision(1) << value;
-    return stream.str();
+std::string formatScore(double value,bool deathmatch=false) {
+    return corum::ranked::rankedScoreText(value,deathmatch);
 }
 
 std::string formatPlacementScore(double value) {
@@ -211,20 +207,20 @@ std::string cbfSettingsText(std::vector<std::string> const& issues) {
     return result;
 }
 
-std::string scoreComparison(double ownScore, double opponentScore) {
+std::string scoreComparison(double ownScore, double opponentScore,bool deathmatch=false) {
     if (!corum::ranked::i18n::isKorean()) {
         return fmt::format(
             "YOUR SCORE  {}     OPPONENT  {}",
-            formatScore(ownScore),
-            formatScore(opponentScore)
+            formatScore(ownScore,deathmatch),
+            formatScore(opponentScore,deathmatch)
         );
     }
     return fmt::format(
         "내 {}  {}     {}  {}",
         tr("score", "SCORE"),
-        formatScore(ownScore),
+        formatScore(ownScore,deathmatch),
         tr("opponent", "OPPONENT"),
-        formatScore(opponentScore)
+        formatScore(opponentScore,deathmatch)
     );
 }
 
@@ -1284,7 +1280,7 @@ class CorumRankedLayer final : public CCLayerColor {
             );
             if (m_spectatorScoreLabel) {
                 m_spectatorScoreLabel->setString(
-                    scoreComparison(ownScore, opponentScore).c_str()
+                    scoreComparison(ownScore, opponentScore,match.deathmatchSequence>0).c_str()
                 );
             }
             if (m_spectatorHintLabel) {
@@ -3389,7 +3385,7 @@ class CorumRankedLayer final : public CCLayerColor {
         m_spectatorProgressLabel = pct;
         m_root->addChild(pct, 5);
         auto* score = makeLabel(
-            scoreComparison(ownScore, opponentScore),
+            scoreComparison(ownScore, opponentScore,match.deathmatchSequence>0),
             0.22f,
             {size.width / 2.0f, size.height / 2.0f - 53.0f},
             ccc3(218, 228, 244),
@@ -3843,7 +3839,7 @@ class CorumRankedLayer final : public CCLayerColor {
 
         float y = summaryTop - 17.0f;
         for (auto const& round : match.rounds) {
-            auto* row = makeLabel(fmt::format("ROUND {}   {} : {}", round.roundNumber, round.scoreA, round.scoreB), 0.31f, {size.width / 2.0f, y}, corum::ranked::ui::Text, "semibold");
+            auto* row = makeLabel(fmt::format("ROUND {}   {} : {}", round.roundNumber, formatScore(round.scoreA), formatScore(round.scoreB)), 0.31f, {size.width / 2.0f, y}, corum::ranked::ui::Text, "semibold");
             m_root->addChild(row, 4);
             addClearChecks(round.clearsA, {size.width / 2.0f - 50.0f, y - 10.0f});
             addClearChecks(round.clearsB, {size.width / 2.0f + 50.0f, y - 10.0f}, true);
@@ -4369,7 +4365,7 @@ class CorumRankedLayer final : public CCLayerColor {
             auto* row = makeLabel(round.mapTitle, 0.31f, {viewport.width / 2, y}, corum::ranked::ui::Text, "semibold");
             corum::ranked::ui::fitFullMenuLabel(row, viewport.width - 12, 27, 0.31f);
             content->addChild(row, 3);
-            auto* score = makeLabel(fmt::format("ROUND {}   {} : {}", round.roundNumber, round.scoreA, round.scoreB),
+            auto* score = makeLabel(fmt::format("ROUND {}   {} : {}", round.roundNumber, formatScore(round.scoreA), formatScore(round.scoreB)),
                 0.25f, {viewport.width / 2, y - 23}, corum::ranked::ui::TextMuted, "semibold");
             content->addChild(score, 3);
             addClearChecks(round.clearsA, {viewport.width / 2 - 48, y - 37}, false, content);
@@ -4397,7 +4393,7 @@ class CorumRankedLayer final : public CCLayerColor {
         for(auto const& round:record["snapshot"]["rounds"].asArray().unwrapOr(std::vector<matjson::Value>{})) {
             lines.push_back(fmt::format("{} · GD #{}",round["phase"].asString().unwrapOr(""),round["map"]["levelId"].asInt().unwrapOr(0)));
             for(auto const& p:round["players"].asArray().unwrapOr(std::vector<matjson::Value>{}))if(p["participantId"].asString().unwrapOr("")=="human")
-                lines.push_back(fmt::format("{} {:.3f}% · {} Attempts",tr("you","YOU"),p["highestProgress"].asDouble().unwrapOr(0),p["attempts"].asArray().unwrapOr(std::vector<matjson::Value>{}).size()));
+                lines.push_back(fmt::format("{} {}% · {} Attempts",tr("you","YOU"),corum::ranked::rankedScoreText(p["highestProgress"].asDouble().unwrapOr(0),round["phase"].asString().unwrapOr("")=="TIEBREAK"),p["attempts"].asArray().unwrapOr(std::vector<matjson::Value>{}).size()));
         }
         for(auto const& p:record["result"]["standings"].asArray().unwrapOr(std::vector<matjson::Value>{}))
             lines.push_back(fmt::format("{}  {}  {:+} LP",corum::ranked::survivalOrdinal(static_cast<int>(p["rank"].asInt().unwrapOr(0))),p["name"].asString().unwrapOr(""),p["delta"].asInt().unwrapOr(0)));

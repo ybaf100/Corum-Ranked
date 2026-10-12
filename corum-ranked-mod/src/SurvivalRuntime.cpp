@@ -112,7 +112,8 @@ void SurvivalRuntime::observe(matjson::Value const& root) {
         auto info=std::find_if(participants.begin(),participants.end(),[&](auto const& v){return v["participantId"].asString().unwrapOr("")==pid;});
         m_view.standings.push_back({pid,info==participants.end()?pid:(*info)["name"].asString().unwrapOr(pid),
             static_cast<int>(p["rank"].asInt().unwrapOr(0)),static_cast<int>(p["attemptsUsed"].asInt().unwrapOr(0)),static_cast<int>(p["attemptsFinished"].asInt().unwrapOr(0)),
-            p["score"].asDouble().unwrapOr(0),p["passing"].asBool().unwrapOr(false),info!=participants.end()&&(*info)["kind"].asString().unwrapOr("")=="BOT",p["waitingForOthers"].asBool().unwrapOr(false)});
+            p["score"].asDouble().unwrapOr(0),p["passing"].asBool().unwrapOr(false),info!=participants.end()&&(*info)["kind"].asString().unwrapOr("")=="BOT",p["waitingForOthers"].asBool().unwrapOr(false),
+            info!=participants.end()?(*info)["displayedTier"].asString().unwrapOr("UNRANKED"):"UNRANKED"});
     }
     m_view.ownAssetsReady=m_view.ownEntered=false;
     for(auto const& p:root["preparation"].asArray().unwrapOr(std::vector<matjson::Value>{}))if(p["participantId"].asString().unwrapOr("")==m_view.ownId) {

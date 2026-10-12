@@ -31,6 +31,13 @@ class Rig {
   final(scores=[100,100,97]){for(let i=0;i<3;i++){this.play();this.next();}this.play(scores);if(this.match.state==="ROUND_RESULT")this.next();}
 }
 describe("Survival round engine",()=>{
+  it("projects captured human tiers and subdivided tier groups separately from virtual matchmaking LP",()=>{
+    const r=new Rig();r.match.config={...r.match.config,tierBands:r.match.config.tierBands.map(b=>b.tier==="SILVER"?{...b,tier:"SILVER_I"}:b)};
+    r.match.players[0]!.displayedTier="SILVER_I";
+    expect(survivalLiveView(r.match,r.now).participants[0]?.displayedTier).toBe("SILVER");
+    expect(survivalLiveView(r.match,r.now).participants[1]?.displayedTier).toBe("RED");
+    r.play();expect(survivalLiveView(r.match,r.now).completedRound?.players[0]?.displayedTier).toBe("SILVER");
+  });
   it("keeps controlled roster/result barriers separate from play timers and rejects stale or non-owner acknowledgements",()=>{
     const r=new Rig();r.match.players[0]!.kind="HUMAN";r.match.players[0]!.playerId="human";
     r.match.presentationControlled=true;r.match.presentationGate="INTRO";
@@ -42,7 +49,7 @@ describe("Survival round engine",()=>{
     r.send(acknowledge());r.play();expect(r.match.presentationGate).toBe("ROUND_RESULT");
     expect(r.round.endsAt!-r.round.startsAt!).toBe(180000);
     const completed=survivalLiveView(r.match,r.now).completedRound;
-    r.now+=3049;r.next();expect(r.match.rounds).toHaveLength(1);
+    r.now+=4999;r.next();expect(r.match.rounds).toHaveLength(1);
     expect(()=>r.send(acknowledge())).toThrow("not complete");
     r.now++;r.next();expect(r.match.rounds).toHaveLength(1);
     const old=acknowledge();r.send(old);r.next();r.next();expect(r.match.rounds).toHaveLength(2);

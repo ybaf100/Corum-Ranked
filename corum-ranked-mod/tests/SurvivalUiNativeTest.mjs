@@ -90,3 +90,19 @@ int main(){
  delete seq->animation;delete seq->done;delete seq;delete shine;
 }`);
 });
+
+test('Survival keeps surrender in native Pause and uses the shared clock pair with compact unbacked rows',()=>{
+    const play=read('src/PlayLayer.cpp'),hud=read('src/ui/SurvivalHud.cpp'),pause=read('src/RankedPauseLayer.cpp');
+    assert.doesNotMatch(method(play,'void addSurvivalHud()'),/CCMenuItem|surrender|Force n/);
+    assert.match(pause,/menu_selector\(CorumRankedPauseLayer::onSurrender\)/);
+    assert.match(pause,/GJ_closeBtn_001\.png/);
+    assert.match(hud,/FontWeight::ExtraBold,CompetitiveClockScale/);
+    assert.match(hud,/competitiveClockPair\(/);
+    assert.doesNotMatch(hud,/CCLayerColor::create|From Cutoff|m_differenceCaption/);
+    assert.match(hud,/row\.name\.position\(\{rankWidth\+4/);
+    assert.match(hud,/CCEaseBackOut::create/);
+    const roster=read('src/ui/SurvivalGameLayer.cpp');
+    assert.match(roster,/createAnimatedRankBadge\(value\.tier/);
+    assert.match(roster,/RankBadgeDisplay::Leaderboard/);
+    assert.match(roster,/milliseconds\(SurvivalRosterMilliseconds\)/);
+});

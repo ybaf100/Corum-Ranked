@@ -9,6 +9,7 @@ struct RankedHudLabel {
     cocos2d::CCLabelBMFont* shadow=nullptr;
     void text(std::string const& value) const {foreground->setString(value.c_str());shadow->setString(value.c_str());}
     void color(cocos2d::ccColor3B value) const {foreground->setColor(value);}
+    void position(cocos2d::CCPoint value) const {foreground->setPosition(value);shadow->setPosition({value.x+.75f,value.y-.75f});}
     void fit(float width,float maximum,float minimum) const {fitLabelWidth(foreground,width,maximum,minimum);shadow->setScale(foreground->getScale());}
     void opacity(GLubyte value) const {foreground->setOpacity(value);shadow->setOpacity(static_cast<GLubyte>(205*value/255));}
 };

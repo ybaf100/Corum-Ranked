@@ -15,7 +15,7 @@ private:
     bool init() override;
     std::unordered_map<std::string,Row> m_rows;
     std::string m_context;
-    RankedHudLabel m_round,m_timer,m_difference,m_differenceCaption,m_rank,m_waiting;
+    RankedHudLabel m_round,m_timer,m_difference,m_rank,m_waiting;
     int m_lastRank=0;
 };
 }

@@ -1,6 +1,6 @@
 import { bestPercentOfThree } from "./deathmatch.js";
 import { RankedDomainError } from "./errors.js";
-import { survivalPlacementLp, type SurvivalConfig } from "./survival.js";
+import { survivalPlacementLp, survivalTierForLp, type SurvivalConfig } from "./survival.js";
 import { survivalDifficultyForAverage, survivalMapAllowed, validateSurvivalEngineConfig,
   type SurvivalDifficultyGroup, type SurvivalMapPhase, type SurvivalVerifiedMap } from "./survival-maps.js";
 
@@ -12,6 +12,8 @@ export interface SurvivalEntrant {
   name: string;
   kind: "HUMAN" | "BOT";
   lp: number;
+  /** Real human tier at admission; bots derive their icon from the LP snapshot. */
+  displayedTier?: string;
 }
 export interface SurvivalMatchPlayer extends SurvivalEntrant {
   eliminationStage: number | null;
@@ -256,8 +258,8 @@ export function reduceSurvivalMatch(before: SurvivalMatch, command: SurvivalComm
     if(command.type==="PRESENTATION_COMPLETE") {
       if(!match.presentationControlled || !match.players.some(p=>p.participantId===command.participantId && p.kind==="HUMAN" && p.eliminationStage===null))
         conflict("Invalid presentation owner");
-      if(match.presentationGate==="INTRO" && match.state==="MAP_SELECTION")match.presentationGate=null;
-      else if(match.presentationGate==="ROUND_RESULT" && match.state==="ROUND_RESULT" && round.finishedAt!==null && now>=round.finishedAt+3_050)
+      if(match.presentationGate==="INTRO" && match.state==="MAP_SELECTION" && now>=match.createdAt+5_000)match.presentationGate=null;
+      else if(match.presentationGate==="ROUND_RESULT" && match.state==="ROUND_RESULT" && round.finishedAt!==null && now>=round.finishedAt+5_000)
         match.presentationGate=null;
       else conflict("Presentation barrier is not complete");
     } else if (command.type === "MAP_SELECTED") {
@@ -368,7 +370,8 @@ export function survivalLiveView(match: SurvivalMatch, now: number, participantI
     mapGeneration:completed.mapGeneration,finishedAt:new Date(completed.finishedAt!).toISOString(),
     players:completed.players.map(p=>{
       const entrant=match.players.find(v=>v.participantId===p.participantId)!;
-      return {participantId:p.participantId,name:entrant.name,kind:entrant.kind,rank:p.rank??entrant.finalRank,
+      return {participantId:p.participantId,name:entrant.name,kind:entrant.kind,
+        displayedTier:match.config.tierBands.find(b=>b.tier===entrant.displayedTier)?.group??entrant.displayedTier??survivalTierForLp(entrant.lp,match.config.tierBands).group,rank:p.rank??entrant.finalRank,
         score:completed.phase==="TIEBREAK"?roundScore(completed,p)/1000:roundScore(completed,p),
         qualified:p.qualified&&!p.forfeited,forfeited:p.forfeited};
     })}:null;
@@ -396,6 +399,7 @@ export function survivalLiveView(match: SurvivalMatch, now: number, participantI
     preparation:round.players.map(p => ({participantId:p.participantId,assetsReady:p.assetsReadyAt !== null,
       entered:p.enteredAt !== null,failed:p.preparationFailure,forfeited:p.forfeited})),
     participants:match.players.map(p => ({participantId:p.participantId,name:p.name,kind:p.kind,lpSnapshot:p.lp,
+      displayedTier:match.config.tierBands.find(b=>b.tier===p.displayedTier)?.group??p.displayedTier??survivalTierForLp(p.lp,match.config.tierBands).group,
       eliminationStage:p.eliminationStage,finalRank:p.finalRank,forfeitReason:p.forfeitReason})),
     winnerId:match.winnerId,winnerIds:match.winnerIds??(match.winnerId?[match.winnerId]:[]),cancellationReason:match.cancellationReason,settlementInputs:survivalSettlementInputs(match)};
 }

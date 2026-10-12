@@ -1,8 +1,22 @@
 #include "../src/domain/SurvivalHudPresentation.hpp"
 #include "../src/domain/Sha256.hpp"
+#include "../src/domain/CompetitiveHudLayout.hpp"
+#include "../src/domain/ScoreDisplay.hpp"
 #include <cassert>
 using namespace corum::ranked;
 int main() {
+    assert(rankedScoreText(59.46)=="59" && rankedScoreText(99.999)=="99");
+    assert(rankedScoreText(94.3705,true)=="94.371" && rankedScoreText(94.370,true)=="94.370");
+    assert(rankedScoreText(-.4,false,true)=="0" && rankedScoreText(-.0004,true,true)=="0.000");
+    assert(rankedScoreText(8,false,true)=="+8" && rankedScoreText(-8,false,true)=="-8");
+    for(auto width:{430.0f,568.0f,800.0f}){
+        auto pair=competitiveClockPair(width/2,100,60);
+        assert(pair.clockX==width/2-45 && pair.deltaX==width/2+45);
+        assert((pair.deltaX-30)-(pair.clockX+50)==10);
+    }
+    assert(competitiveClockPair(284,10,10).clockX==250);
+    assert(std::abs(CompetitiveClockScale-1.02f)<.0001f);
+    assert(SurvivalBeforeEliminationMilliseconds+SurvivalEliminationMilliseconds+SurvivalAfterEliminationMilliseconds==5000);
     std::vector<SurvivalStanding> players;
     for(int i=1;i<=16;i++)players.push_back({std::to_string(i),"Bot "+std::to_string(i),i,0,0,100.0-i,i<=10,true,false});
     auto own=survivalHudRows(players,"15",false);assert(own.size()==4&&own.back().id=="15"&&own.back().rank==15);

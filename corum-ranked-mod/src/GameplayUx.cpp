@@ -1,5 +1,7 @@
 #include "RankedRuntime.hpp"
 #include "domain/HudPresentation.hpp"
+#include "domain/CompetitiveHudLayout.hpp"
+#include "domain/ScoreDisplay.hpp"
 #include "ui/PlayerIcon.hpp"
 #include "ui/RankedTranslations.hpp"
 #include "ui/RankedVisuals.hpp"
@@ -20,7 +22,6 @@ namespace {
 
 constexpr float kDeltaEpsilon = 0.0005f;
 constexpr float kNormalDeltaPairMinOffset = 34.0f;
-constexpr float kNormalDeltaMinGap = 10.0f;
 constexpr float kHudShadowOffsetX = 0.75f;
 constexpr float kHudShadowOffsetY = -0.75f;
 constexpr ccColor3B kPositiveDeltaLight = {184, 246, 207};
@@ -42,15 +43,7 @@ double currentProgress(PlayLayer* layer) {
 }
 
 std::string formatNumber(double value) {
-    if (std::abs(value - std::round(value)) < 0.0005) {
-        return std::to_string(static_cast<long long>(std::llround(value)));
-    }
-    std::ostringstream stream;
-    stream << std::fixed << std::setprecision(3) << value;
-    auto text = stream.str();
-    while (!text.empty() && text.back() == '0') text.pop_back();
-    if (!text.empty() && text.back() == '.') text.pop_back();
-    return text;
+    return corum::ranked::rankedScoreText(value);
 }
 
 std::string formatDeathmatchDelta(double value) {
@@ -99,10 +92,7 @@ ccColor3B deltaColor(double value, double fullColorAt) {
 }
 
 std::string signedValue(double value, std::string const& suffix) {
-    auto const normalized = std::abs(value) < 0.0005 ? 0.0 : value;
-    auto text = formatNumber(normalized);
-    if (normalized > 0.0) text.insert(text.begin(), '+');
-    return text + suffix;
+    return corum::ranked::rankedScoreText(value,false,true)+suffix;
 }
 
 float renderedWidth(CCLabelBMFont* label) {
@@ -282,7 +272,7 @@ class $modify(CorumRankedGameplayUx, PlayLayer) {
             m_fields->scoreDelta = createShadowLabel(
                 timer->getParent(),
                 "0",
-                0.60f * 1.70f,
+                corum::ranked::CompetitiveClockScale,
                 {0.5f, 1.0f},
                 {size.width / 2.0f + kNormalDeltaPairMinOffset, timer->getPositionY()},
                 corum::ranked::ui::TextMuted,
@@ -371,17 +361,14 @@ class $modify(CorumRankedGameplayUx, PlayLayer) {
         if (!timer || !m_fields->scoreDelta.foreground) return;
         auto const size = CCDirector::sharedDirector()->getWinSize();
         auto const y = timer->getPositionY();
-        auto const requiredOffset =
-            (renderedWidth(timer) + renderedWidth(m_fields->scoreDelta.foreground)) * 0.25f +
-            kNormalDeltaMinGap * 0.5f;
-        auto const offset = std::max(kNormalDeltaPairMinOffset, requiredOffset);
+        auto const pair=corum::ranked::competitiveClockPair(size.width/2,renderedWidth(timer),renderedWidth(m_fields->scoreDelta.foreground));
         setExternalShadowedPosition(
             timer,
-            {size.width / 2.0f - offset, y}
+            {pair.clockX, y}
         );
         setShadowPosition(
             m_fields->scoreDelta,
-            {size.width / 2.0f + offset, y}
+            {pair.deltaX, y}
         );
     }
 
@@ -439,7 +426,7 @@ class $modify(CorumRankedGameplayUx, PlayLayer) {
                 : std::nullopt;
             ownScore = runtime.localDisplayScore(currentProgress(this), qualifying);
         }
-        auto const difference = ownScore - opponentScore;
+        auto const difference = std::trunc(ownScore) - std::trunc(opponentScore);
         setShadowText(m_fields->scoreDelta, signedValue(difference, ""));
         setShadowColor(m_fields->scoreDelta, deltaColor(difference, 200.0));
         positionNormalTimerPair();

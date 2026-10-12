@@ -271,15 +271,15 @@ void hudTests() {
     assert(hud.opponentProgressText == "0%");
     input.opponentPractice = false;
 
-    // Ranked score transport must preserve fractional totals produced by the
-    // 70-99% x1.5 multiplier.
+    // Normal HUD displays whole numbers without changing fractional transport.
     input.scoreA = 118.5;
     input.scoreB = 73.0;
     input.qualifyingPercent = 20.1;
     hud = presentHud(input);
-    assert(hud.ownScoreText == "Score : 118.5");
+    assert(hud.ownScoreText == "Score : 118");
     assert(hud.opponentScoreText == "Score : 73");
-    assert(hud.qualifyingText == "Qualifying : 20.1%");
+    assert(hud.qualifyingText == "Qualifying : 20%");
+    assert(input.scoreA==118.5 && input.qualifyingPercent==20.1);
     input.scoreA = 382;
     input.scoreB = 417;
     input.qualifyingPercent = 35;

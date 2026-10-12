@@ -53,6 +53,8 @@ Survival beta64의 맵 검색·대기 연출 및 R2 업데이트 설정은 [설�
 
 Survival beta65의 Solo UI 재사용, 라운드 참가자·탈락 연출, 다음 맵 선택 대기 및 일시정지/항복 수정은 [진행 안내](docs/survival-beta65-ui-flow.md)를 참고하세요.
 
+Survival beta66의 Solo 타이머·점수차 배치, 정수 점수 표시, 5초 참가자 화면 및 티어 후광은 [HUD 안내](docs/survival-beta66-hud-roster.md)를 참고하세요.
+
 명시적인 긴급 핫픽스를 제외한 모든 패치는 `v0.5.0-beta.N`의 `N`을 1 올립니다. 버전을 올릴 때는 모드 manifest, 서버의 정확한 클라이언트 게이트, npm workspace/package-lock, 테스트 fixture, changelog와 release notes를 같은 beta 번호로 함께 갱신합니다. 긴급 핫픽스만 현재 beta 번호를 유지할 수 있습니다.
 
 플레이 HUD는 화면 코너에 anchor되어 실제 frame update cadence FPS, viewer 기준 양쪽 authoritative Score, 서버 승인 Clear 체크 3개, snapshot Qualifying %, 현재 Round/Death Match와 server deadline 보간 타이머를 표시합니다. 배경 카드와 사각 스크림 없이 글자에만 검은 그림자를 적용하며, 일반 문구는 Paperlogy SemiBold, Score·타이머·Qualifying 값은 Paperlogy Black으로 표시합니다. 상대 현재 progress는 3-Clear 성공자가 상대의 LAST ATTEMPT를 기다리는 동안에만 서버가 허용하며, 이 telemetry는 영구 저장 및 판정에서 분리됩니다.

@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Inject, Inj
   type OnApplicationBootstrap, type OnApplicationShutdown } from "@nestjs/common";
 import { timingSafeEqual } from "node:crypto";
 import { forceSurvivalDebugRank, finishSurvivalDebugOnElimination, reduceSurvivalMatch, survivalBotPlan, survivalBotTiebreak, survivalCurrentRound,
-  survivalDebugLp, survivalLiveView, survivalSettlementInputs, type RandomSource, type SurvivalCommand,
+  survivalDebugLp, survivalLiveView, survivalSettlementInputs, survivalTierForLp, type RandomSource, type SurvivalCommand,
   type SurvivalMatch, type SurvivalRatingProfile } from "@corum-ranked/rules";
 import { DATABASE, type DatabasePort, type SqlExecutor } from "../database/database.port.js";
 import { RANDOM_SOURCE, SERVER_CLOCK, type ServerClock } from "../common/runtime.module.js";
@@ -23,7 +23,7 @@ export interface SurvivalDebugResult {
   matchId:string; debug:true; rank:number; tiedPlayers:number; requestedDelta:number; actualDelta:number;
   profileBefore:SurvivalRatingProfile; profileAfter:SurvivalRatingProfile;
   promoted:boolean; demoted:boolean; protected:boolean; warningRecoveryLp:number|null;
-  bands:{tier:string;minimum:number}[]; standings:(ReturnType<typeof survivalSettlementInputs>[number] & {name:string;kind:string})[];
+  bands:{tier:string;minimum:number}[]; standings:(ReturnType<typeof survivalSettlementInputs>[number] & {name:string;kind:string;displayedTier:string})[];
   completedAt:string; completionKind:string;
 }
 const terminal=(m:SurvivalMatch)=>["FINAL_RESULT","CANCELLED"].includes(m.state);
@@ -223,7 +223,8 @@ export class SurvivalDebugService implements OnApplicationBootstrap,OnApplicatio
       actualDelta:rating.actualDelta,profileBefore:{lp:Number(ledger.lp_before),tier:ledger.tier_before,demotionWarning:ledger.warning_before},
       profileAfter:rating.profile,promoted:rating.promoted,demoted:rating.demoted,protected:rating.protected,
       warningRecoveryLp:rating.warningRecoveryLp,bands,standings:inputs.map(p=>{const participant=match.players.find(v=>v.participantId===p.participantId)!;
-        return {...p,name:participant.name,kind:participant.kind};}),completedAt:new Date(match.finishedAt!).toISOString(),completionKind:match.completionKind??"NORMAL"};
+        const tier=p.playerId===row.human_player_id?rating.profile.tier:participant.displayedTier??survivalTierForLp(participant.lp,match.config.tierBands).group;
+        return {...p,name:participant.name,kind:participant.kind,displayedTier:match.config.tierBands.find(b=>b.tier===tier)?.group??tier};}),completedAt:new Date(match.finishedAt!).toISOString(),completionKind:match.completionKind??"NORMAL"};
     await this.db.transaction(async tx=>{
       // The ledger's unique key closes a crash between payment and this result
       // projection. Replaying settlement restores the same rating/result.

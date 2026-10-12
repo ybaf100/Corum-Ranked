@@ -1,3 +1,11 @@
+## v0.5.0-beta.66
+
+- Share Solo GameplayUx's actual timer/delta font sizes, weights and text-width pair positioning with Survival. Keep round text above the pair and remove the extra delta caption. Increase the lower-left rank and pop it on every authoritative rank change.
+- Remove in-game rank-row backgrounds and size rank/name/score gaps from the rendered text. Display ordinary scores/progress as integers across HUDs, roster and history, retaining Death Match precision and existing server comparisons. Keep surrender exclusively in the native pause menu, with the existing confirmation.
+- Hold the initial participant roster and every completed-round roster for five seconds. Keep elimination motion and the two-second post-motion wait inside that interval, enforce the minimum in server acknowledgements, and retain replay/recovery safety.
+- Show a small existing animated tier badge/halo next to each roster avatar. Use server-provided current human tier snapshots and bot LP tier groups; virtual LP affects map difficulty without replacing the human's real tier icon. Support explicit tier-band group mapping for subdivided tiers.
+- Synchronize beta66 client/server/package versions. Reuse unchanged font assets/charsets and keep the existing 96 MiB atlas limit. No new DB migration or Apps Script setup. See [beta66 notes](../ranked/docs/survival-beta66-hud-roster.md).
+
 ## v0.5.0-beta.65
 
 - Fix the Debug/Release package font budget failure: reuse existing glyphs for the new roster/rules/pause captions and restore the established character sets, preserving all five font weights, raster sizes, Korean support and the 96 MiB RGBA limit. Validate actual generated SD/HD/UHD font resources without compiling a platform client.

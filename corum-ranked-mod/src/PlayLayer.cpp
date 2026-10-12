@@ -4,7 +4,8 @@
 #include "RankedLevelPreparation.hpp"
 #include "ui/SurvivalHud.hpp"
 #include "ui/RankedHudLabel.hpp"
-#include "ui/RankedConfirmPopup.hpp"
+#include "domain/ScoreDisplay.hpp"
+#include "domain/CompetitiveHudLayout.hpp"
 #include "RankedAudioManager.hpp"
 #include "SpectatorLiveRuntime.hpp"
 #include "domain/SpectatorCapturePolicy.hpp"
@@ -124,16 +125,8 @@ void applyCheck(CCSprite* icon, corum::ranked::ClearCheckColor color) {
         : kPendingCheck);
 }
 
-std::string formatScore(double value) {
-    if (std::abs(value - std::round(value)) < 0.0005) {
-        return std::to_string(static_cast<long long>(std::llround(value)));
-    }
-    std::ostringstream stream;
-    stream << std::fixed << std::setprecision(3) << value;
-    auto text = stream.str();
-    while (!text.empty() && text.back() == '0') text.pop_back();
-    if (!text.empty() && text.back() == '.') text.pop_back();
-    return text;
+std::string formatScore(double value,bool deathmatch=false) {
+    return corum::ranked::rankedScoreText(value,deathmatch);
 }
 
 
@@ -211,7 +204,6 @@ public:
         corum::ranked::LevelPreparationContext survivalContext;
         corum::ranked::ui::SurvivalHud* survivalHud = nullptr;
         bool survivalWaiting = false;
-        std::optional<WeakRef<corum::ranked::ui::RankedConfirmPopup>> survivalSurrender;
         bool rankedInitialized = false;
         bool nativeEntryHeld = false;
         bool entryNativeCompletionInProgress = false;
@@ -648,30 +640,6 @@ public:
         m_fields->survivalHud=corum::ranked::ui::SurvivalHud::create();
         if(m_fields->survivalHud)m_fields->hudRoot->addChild(m_fields->survivalHud);
         addChild(m_fields->hudRoot,1000);
-        auto* menu=CCMenu::create();menu->setPosition(CCPointZero);m_fields->hudRoot->addChild(menu,30);
-        auto* face=corum::ranked::ui::surface({82,26},{},corum::ranked::ui::Red,corum::ranked::ui::SurfaceRaised,220,true);
-        face->addChild(corum::ranked::ui::menuLabel(corum::ranked::i18n::text("surrender","SURRENDER"),.26f,{41,13},corum::ranked::ui::Text,corum::ranked::ui::FontWeight::SemiBold),5);
-        auto* surrender=CCMenuItemSpriteExtra::create(face,this,menu_selector(CorumRankedPlayLayer::onSurvivalSurrender));
-        surrender->setID("survival-surrender-button"_spr);surrender->setPosition({size.width-49,21});menu->addChild(surrender);
-    }
-
-    void onSurvivalSurrender(CCObject*) {
-        auto& runtime=corum::ranked::SurvivalRuntime::get();
-        if(!m_fields->survivalLevel || !runtime.canPlay() || m_fields->survivalSurrender)return;
-        auto const id=runtime.view().id,round=runtime.view().roundKey;auto const generation=runtime.view().mapGeneration;
-        // Use the native pause overlay rather than leave gameplay running under
-        // a modal confirmation. The Survival server clock continues normally.
-        pauseGame(true);
-        auto* popup=corum::ranked::ui::RankedConfirmPopup::create(corum::ranked::i18n::text("surrender-confirm","CONFIRM SURRENDER"),
-            corum::ranked::i18n::text("survival-surrender-warning","End this match using this round's recorded ranking?"),
-            [weak=WeakRef(this),id,round,generation](bool accepted){
-                auto owner=weak.lock();if(!owner)return;owner->m_fields->survivalSurrender.reset();
-                auto& current=corum::ranked::SurvivalRuntime::get();
-                if(accepted && current.view().id==id && current.view().roundKey==round && current.view().mapGeneration==generation && current.canPlay()) {
-                    current.endAttempt(owner->m_hasCompletedLevel?100.0:rankedProgressPercent(owner.data()));current.surrender();
-                }
-            });
-        if(popup){m_fields->survivalSurrender.emplace(popup);popup->show();}
     }
 
     void resume() {
@@ -1317,7 +1285,6 @@ public:
             return;
         }
         if(m_fields->survivalLevel) {
-            if(m_fields->survivalSurrender){if(auto popup=m_fields->survivalSurrender->lock())popup->cancel();m_fields->survivalSurrender.reset();}
             if(m_fields->rankedInitialized && !m_fields->nativeEntryHeld) {
                 auto& survival=corum::ranked::SurvivalRuntime::get();
                 if(!m_fields->attemptEndReported)survival.endAttempt(m_hasCompletedLevel?100.0:rankedProgressPercent(this));
@@ -1545,7 +1512,6 @@ public:
 
     void onQuit() {
         if(m_fields->survivalLevel) {
-            if(m_fields->survivalSurrender){if(auto popup=m_fields->survivalSurrender->lock())popup->cancel();m_fields->survivalSurrender.reset();}
             if(!corum::ranked::resumeRankedPauseBeforeQuit(this))return;
             unschedule(schedule_selector(CorumRankedPlayLayer::survivalFrame));
             if(!m_fields->autoExitRequested && !m_isPracticeMode)corum::ranked::SurvivalRuntime::get().endAttempt(m_hasCompletedLevel?100.0:rankedProgressPercent(this));
@@ -1599,7 +1565,6 @@ public:
     }
 
     void onExit() {
-        if(m_fields->survivalSurrender){if(auto popup=m_fields->survivalSurrender->lock())popup->cancel();m_fields->survivalSurrender.reset();}
         unschedule(schedule_selector(CorumRankedPlayLayer::survivalFrame));
         if (m_fields->entryOverlay) {
             m_fields->entryOverlay->dismiss();
@@ -1893,7 +1858,7 @@ public:
             m_fields->hudRoot,
             "",
             "black",
-            0.60f * 1.70f,
+            corum::ranked::CompetitiveClockScale,
             {0.5f, 1.0f},
             {size.width / 2.0f, top - 18.0f},
             corum::ranked::ui::Text
@@ -2370,10 +2335,10 @@ public:
             m_fields->qualifyingPercent
         );
         if (placement) updatePlacementTopHud(liveProgress);
-        setHudText(m_fields->ownScoreLabel, formatScore(ownLiveScore));
+        setHudText(m_fields->ownScoreLabel, formatScore(ownLiveScore,match.deathmatchSequence>0));
         limitHudWidth(m_fields->ownScoreLabel, 76.0f, 0.714f, 0.26f);
         auto const opponentScore = ownIsA ? match.scoreB : match.scoreA;
-        setHudText(m_fields->opponentScoreLabel, formatScore(opponentScore));
+        setHudText(m_fields->opponentScoreLabel, formatScore(opponentScore,match.deathmatchSequence>0));
         limitHudWidth(m_fields->opponentScoreLabel, 76.0f, 0.714f, 0.26f);
         auto ownChecks = presentation.ownChecks;
         if (!presentation.deathmatch) ownChecks = corum::ranked::clearChecks(runtime.localDisplayClears());

@@ -1,0 +1,19 @@
+# Survival beta66 HUD and roster
+
+Base main: `be793438e0ae754e63bf62677c9d995f30415869`.
+
+The Survival clock and score difference now use the real Solo `GameplayUx` layout: clock Black, delta ExtraBold, both at `0.60 * 1.70` authored scale and the same vertical position. Their centers move symmetrically using the existing 34-unit minimum offset and 10-unit minimum text gap. `domain/CompetitiveHudLayout.hpp` holds that shared calculation for both modes. The extra cutoff caption is removed. The lower-left rank uses a 1.68 base scale and briefly enlarges to 2.10 on each server rank change.
+
+HUD leaderboard rows retain participant identity and position/score animations. They have no rectangular backing. Rank, nickname and score sit four units apart according to their rendered widths. FPS positioning and its original font remain unchanged. The gameplay surrender overlay is removed; native Pause retains the Solo-style X surrender button and Survival confirmation/context checks.
+
+`domain/ScoreDisplay.hpp` formats ordinary visible scores/progress as whole numbers, using GD's truncation convention. HUD, roster, ordinary history and Solo score labels share it. Ordinary displayed differences compare those displayed whole scores; Death Match scores retain 0.001% precision. This is a presentation change: stored progress, authoritative comparison/cutoff rules, actual LP and match outcomes keep their existing precision and rules. LP leaderboards already use integer LP.
+
+The initial 16-player roster stays visible for five seconds before map selection. Once that interval completes, the roster hides and a centered loading spinner represents the actual server map search. Between rounds the five-second roster interval consists of 1.95 seconds for viewing participants, 1.05 seconds for elimination presentation and two seconds after the animation. The existing durable `PRESENTATION_COMPLETE` gate now rejects acknowledgements before five seconds from match creation or round completion. Playing remains 180 seconds; these roster intervals do not consume play or asset-preparation time. A recovering client can replay a held roster without creating duplicate rounds or results.
+
+The engine captures the real human `displayed_tier` at admission, independently of debug virtual LP. Live participants, completed-round participants and results expose `displayedTier`, mapping configured tier IDs to their icon group. Bots derive the icon group from their LP snapshot and captured tier bands. The coordinator reuses `createAnimatedRankBadge(..., RankBadgeDisplay::Leaderboard)` beside each avatar, preserving the existing tier halo. Fields reside in existing JSON snapshots; no migration is required.
+
+Client/server/workspaces are `v0.5.0-beta.66`. Existing R2 publication and GD relay configuration apply. Font source files, raster sizes and charsets are unchanged from the beta65 font fix (95.90 MiB at UHD, below the unchanged 96 MiB limit).
+
+Validation uses local TypeScript checks, rules/server tests, strict C++ domains, native API doubles and actual previously generated font resources with the unchanged font definitions. No complete Geode/platform build or device test is performed. Windows/mobile geometry, visible halo/rank motion and physical pause-menu operation remain device checks for the user. New GitHub Actions results are not awaited.
+
+Local results: TypeScript source/test checks passed; all 195 rules tests passed; 63 selected Survival/admission integration tests passed, with the 16 debug cases rerun after tier-group projection changes; 22 relevant native checks passed; all ten strict domain programs passed (the new float-scale assertion was corrected to use tolerance and rerun); 16 packaging/publication policy tests passed; all 18 unchanged SD/HD/UHD font resources passed glyph and atlas verification at 95.90 MiB UHD. No complete server regression suite was run.

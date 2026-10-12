@@ -71,6 +71,7 @@ beforeEach(async()=>{
 });
 async function create(){
   const m=await engine.get((await debug.create(session,body())).matchId);
+  now+=5000;
   await send(m,"PRESENTATION_COMPLETE");return engine.get(m.id);
 }
 async function send(m:SurvivalMatch,type:SurvivalDebugEventDto["type"],fields:Partial<SurvivalDebugEventDto>={}) {
@@ -80,7 +81,7 @@ async function send(m:SurvivalMatch,type:SurvivalDebugEventDto["type"],fields:Pa
 }
 async function prepare(m:SurvivalMatch) {
   if(m.presentationGate==="ROUND_RESULT") {
-    now=Math.max(now,survivalCurrentRound(m).finishedAt!+3050);
+    now=Math.max(now,survivalCurrentRound(m).finishedAt!+5000);
     await send(m,"PRESENTATION_COMPLETE");m=await engine.get(m.id);
   }
   await engine.selectMap(m.id);m=await engine.get(m.id);
@@ -99,12 +100,13 @@ describe("Survival M4 persistent debug game",()=>{
     await engine.selectMap(m.id);await debug.tickOnce();
     expect(survivalCurrentRound(await engine.get(m.id)).map).toBeNull();
     expect(survivalCurrentRound(await engine.get(m.id)).preparationStartedAt).toBeNull();
-    await send(m,"PRESENTATION_COMPLETE");m=await prepare(await engine.get(m.id));
+    now+=4999;await expect(send(m,"PRESENTATION_COMPLETE")).rejects.toThrow("not complete");
+    now+=1;await send(m,"PRESENTATION_COMPLETE");m=await prepare(await engine.get(m.id));
     await record(m,100);now=survivalCurrentRound(m).endsAt!;await debug.tickOnce();m=await engine.get(m.id);
     expect(m.state).toBe("ROUND_RESULT");expect(m.presentationGate).toBe("ROUND_RESULT");
     const completed=(await debug.view(m.id,session)).completedRound!;
     expect(completed.players).toHaveLength(16);
-    now+=3049;await expect(send(m,"PRESENTATION_COMPLETE")).rejects.toThrow("not complete");
+    now+=4999;await expect(send(m,"PRESENTATION_COMPLETE")).rejects.toThrow("not complete");
     now+=1;
     // A new process reads the same SQL snapshot; background ticks alone cannot
     // consume the roster/animation barrier even after its minimum duration.
@@ -197,6 +199,8 @@ describe("Survival M4 persistent debug game",()=>{
     const view=await debug.create(session,body(undefined,"SILVER"));
     expect(view.averageLp).toBeGreaterThanOrEqual(900);expect(view.averageLp).toBeLessThan(1200);
     expect((await db.query("SELECT * FROM sur_profiles")).rows).toEqual(before);
+    expect(view.participants.find(p=>p.participantId==="human")?.displayedTier).toBe("GOLD");
+    expect(view.participants.filter(p=>p.kind==="BOT").every(p=>["RED","AQUA","BRONZE","SILVER","GOLD"].includes(p.displayedTier))).toBe(true);
     expect((await db.query<{virtual_human_lp:boolean}>("SELECT virtual_human_lp FROM sur_debug_matches")).rows[0]!.virtual_human_lp).toBe(true);
   });
   it("runs normal rounds then immediate bot Death Match attempts and ends when the human completes three",async()=>{
@@ -205,7 +209,7 @@ describe("Survival M4 persistent debug game",()=>{
     for(let phase=0;phase<4;phase++) {
       m=await prepare(m);await record(m,100);now=survivalCurrentRound(m).endsAt!;await debug.tickOnce();
       m=await engine.get(m.id);if(m.state==="FINAL_RESULT")break;
-      now+=3050;await send(m,"PRESENTATION_COMPLETE");m=await engine.get(m.id);
+      now+=5000;await send(m,"PRESENTATION_COMPLETE");m=await engine.get(m.id);
     }
     expect(m.state).not.toBe("FINAL_RESULT");
     {

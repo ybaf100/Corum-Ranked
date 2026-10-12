@@ -1,4 +1,5 @@
 #include "HudPresentation.hpp"
+#include "ScoreDisplay.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -7,16 +8,8 @@
 
 namespace {
 
-std::string formatNumber(double value) {
-    if (std::abs(value - std::round(value)) < 0.0005) {
-        return std::to_string(static_cast<long long>(std::llround(value)));
-    }
-    std::ostringstream stream;
-    stream << std::fixed << std::setprecision(3) << value;
-    auto text = stream.str();
-    while (!text.empty() && text.back() == '0') text.pop_back();
-    if (!text.empty() && text.back() == '.') text.pop_back();
-    return text;
+std::string formatNumber(double value,bool deathmatch=false) {
+    return corum::ranked::rankedScoreText(value,deathmatch);
 }
 
 std::int64_t nonNegative(std::optional<std::int64_t> value) {
@@ -120,8 +113,8 @@ HudPresentation presentHud(HudInput const& input) {
     result.fpsText = input.renderFps && std::isfinite(*input.renderFps) && *input.renderFps > 0.0
         ? "FPS : " + std::to_string(static_cast<int>(std::lround(*input.renderFps)))
         : "FPS : -";
-    result.ownScoreText = "Score : " + formatNumber(ownScore);
-    result.opponentScoreText = "Score : " + formatNumber(opponentScore);
+    result.ownScoreText = "Score : " + formatNumber(ownScore,input.deathmatch);
+    result.opponentScoreText = "Score : " + formatNumber(opponentScore,input.deathmatch);
     result.ownChecks = clearChecks(ownClears);
     result.opponentChecks = clearChecks(opponentClears);
     result.deathmatch = input.deathmatch;

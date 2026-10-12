@@ -72,14 +72,14 @@ export class SurvivalEngineService implements OnApplicationBootstrap, OnApplicat
       if(existing){if(existing.request_hash!==requestHash)throw new ConflictException("Survival creation key changed");return existing.snapshot;}
       if(!captured.config.enabled)throw new ServiceUnavailableException({code:"SURVIVAL_DISABLED",message:"Survival is disabled"});
       const humans=players.filter((p):p is Extract<SurvivalAdmissionPlayer,{kind:"HUMAN"}>=>p.kind==="HUMAN");
-      const profiles=await tx.query<{player_id:string;lp:number;gd_username:string}>(
-        `SELECT sp.player_id,sp.lp,p.gd_username FROM sur_profiles sp JOIN ranked_players p ON p.id=sp.player_id
+      const profiles=await tx.query<{player_id:string;lp:number;displayed_tier:string;gd_username:string}>(
+        `SELECT sp.player_id,sp.lp,sp.displayed_tier,p.gd_username FROM sur_profiles sp JOIN ranked_players p ON p.id=sp.player_id
          WHERE sp.player_id=ANY($1::uuid[]) ORDER BY sp.player_id FOR UPDATE OF sp`,[humans.map(p=>p.playerId)]);
       const entrants:SurvivalEntrant[]=players.map(p=>{
         if(p.kind==="BOT")return{...p,playerId:null};
         const profile=profiles.rows.find(row=>row.player_id===p.playerId);
         if(!profile)throw new BadRequestException("Enter Survival before match admission");
-        return {...p,name:profile.gd_username,lp:humanLpSnapshot??Number(profile.lp)};
+        return {...p,name:profile.gd_username,lp:humanLpSnapshot??Number(profile.lp),displayedTier:profile.displayed_tier};
       });
       const match=createSurvivalMatch(this.ids.next(),entrants,captured.config,captured.generation,this.clock.now().getTime());
       if(presentationControlled){match.presentationControlled=true;match.presentationGate="INTRO";}
