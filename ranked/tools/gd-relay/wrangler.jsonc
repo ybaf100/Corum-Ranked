@@ -1,0 +1,6 @@
+{
+  "name": "corum-ranked-gd-relay",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-04-01",
+  "workers_dev": true
+}

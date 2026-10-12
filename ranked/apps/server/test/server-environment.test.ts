@@ -12,6 +12,23 @@ const validEnvironment = (): NodeJS.ProcessEnv => ({
 });
 
 describe("server environment", () => {
+  it("omits unconfigured GD relay and normalizes a paired origin/token without publishing defaults",()=>{
+    expect(loadServerEnvironment(validEnvironment())).not.toHaveProperty("survivalGdRelay");
+    const token="fixture_"+"a".repeat(48);
+    expect(loadServerEnvironment({...validEnvironment(),SURVIVAL_GD_RELAY_ORIGIN:" https://relay.example/ ",SURVIVAL_GD_RELAY_TOKEN:token}).survivalGdRelay)
+      .toEqual({origin:"https://relay.example",token});
+  });
+  it.each(["http://relay.example","https://user:password@relay.example","https://relay.example/gd",
+    "https://relay.example?token=bad","https://relay.example#bad","not-a-url"])("rejects unsafe GD relay origin %s",origin=>{
+    expect(()=>loadServerEnvironment({...validEnvironment(),SURVIVAL_GD_RELAY_ORIGIN:origin,SURVIVAL_GD_RELAY_TOKEN:"a".repeat(64)}))
+      .toThrow("SURVIVAL_GD_RELAY_ORIGIN");
+  });
+  it("rejects missing or malformed relay credentials with configuration names instead of secret values",()=>{
+    for(const config of [{SURVIVAL_GD_RELAY_ORIGIN:"https://relay.example"},{SURVIVAL_GD_RELAY_TOKEN:"a".repeat(64)},
+      {SURVIVAL_GD_RELAY_ORIGIN:"https://relay.example",SURVIVAL_GD_RELAY_TOKEN:"short"},
+      {SURVIVAL_GD_RELAY_ORIGIN:"https://relay.example",SURVIVAL_GD_RELAY_TOKEN:"a".repeat(32)+"\nsecret"}])
+      expect(()=>loadServerEnvironment({...validEnvironment(),...config})).toThrow("SURVIVAL_GD_RELAY_");
+  });
   it("normalizes an optional public R2 bucket origin",()=>{
     expect(loadServerEnvironment({...validEnvironment(),RANKED_DOWNLOAD_BASE_URL:" https://downloads.example.org/ "}).rankedDownloadBaseUrl)
       .toBe("https://downloads.example.org");

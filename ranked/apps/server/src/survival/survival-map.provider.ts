@@ -5,6 +5,7 @@ import { survivalDemonFromNativeCode, survivalMapAllowed, survivalMapRange, shuf
   type RandomSource, type SurvivalDifficultyGroup, type SurvivalMapPhase,
   type SurvivalMapMetadata, type SurvivalVerifiedMap } from "@corum-ranked/rules";
 import { RANDOM_SOURCE } from "../common/runtime.module.js";
+import { SurvivalGdRelayError } from "./survival-gd-transport.js";
 
 export const SURVIVAL_MAP_PROVIDER = Symbol("SURVIVAL_MAP_PROVIDER");
 export interface SurvivalMapRequest {
@@ -185,7 +186,13 @@ export class GdSurvivalMapProvider implements SurvivalMapProvider {
       headers:{"content-type":"application/x-www-form-urlencoded","accept":"*/*","user-agent":""},
       body:new URLSearchParams({gameVersion:"22",binaryVersion:"45",secret:"Wmfd2893gb7",...extra}).toString(),
       signal:AbortSignal.any([signal,AbortSignal.timeout(8_000)])});}
-    catch {throw new SurvivalMapError("API_ERROR",`GD ${path} connection failed or timed out`);}
+    catch(error) {
+      if(error instanceof SurvivalGdRelayError) {
+        const failure=new SurvivalMapError("API_ERROR",error.message,[],null,HTTP_BLOCK_RETRY_MS);
+        this.blocked={until:Date.now()+HTTP_BLOCK_RETRY_MS,error:failure};throw failure;
+      }
+      throw new SurvivalMapError("API_ERROR",`GD ${path} connection failed or timed out`);
+    }
     if (!response.ok || !response.body) {
       const http=await gdHttpDiagnostics(path,response),retryAfterMs=gdRetryDelay(response);
       const error=new SurvivalMapError("API_ERROR",`GD ${path} HTTP ${response.status}; http=${JSON.stringify(http)}`,

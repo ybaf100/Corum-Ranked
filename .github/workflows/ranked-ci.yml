@@ -41,6 +41,8 @@ jobs:
         run: npm ci --prefix ranked
       - name: Type-check every Ranked workspace
         run: npm run typecheck --prefix ranked
+      - name: Validate authenticated GD relay Worker
+        run: node --test ranked/tools/gd-relay/worker.test.mjs
       - name: Run rules and PostgreSQL integration tests
         run: npm test --prefix ranked
       - name: Build server and shared rules

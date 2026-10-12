@@ -2,9 +2,10 @@ import "reflect-metadata";
 import { readFile,readdir } from "node:fs/promises";
 import { Test } from "@nestjs/testing";
 import { fileURLToPath } from "node:url";
+import { gzipSync } from "node:zlib";
 import { PGlite } from "@electric-sql/pglite";
 import { afterAll,beforeAll,beforeEach,describe,expect,it,vi } from "vitest";
-import { DEFAULT_SURVIVAL_CONFIG,survivalCurrentRound,survivalMapRange,survivalSettlementInputs,
+import { DEFAULT_SURVIVAL_CONFIG,SeededRandom,survivalCurrentRound,survivalMapRange,survivalSettlementInputs,
   type SurvivalCommand,type SurvivalMatch,type SurvivalVerifiedMap } from "@corum-ranked/rules";
 import { SurvivalConfigService,type SurvivalConfigDocument } from "../src/config/survival-config.service.js";
 import { SurvivalEngineService,type SurvivalAdmissionPlayer } from "../src/survival/survival-engine.service.js";
@@ -14,7 +15,9 @@ import { TokenService } from "../src/common/token.service.js";
 import { SERVER_CLOCK } from "../src/common/runtime.module.js";
 import { DATABASE } from "../src/database/database.port.js";
 import { REQUIRED_RANKED_CLIENT_VERSION } from "../src/session/client-version.js";
-import { SurvivalMapError,type SurvivalMapProvider,type SurvivalMapRequest } from "../src/survival/survival-map.provider.js";
+import { GdSurvivalMapProvider,SurvivalMapError,type SurvivalMapProvider,type SurvivalMapRequest } from "../src/survival/survival-map.provider.js";
+import { createSurvivalGdFetch } from "../src/survival/survival-gd-transport.js";
+import { createGdRelayWorker } from "../../../tools/gd-relay/worker.mjs";
 import { PgliteDatabase } from "./pglite-database.js";
 import { environmentFixture } from "./fixtures.js";
 
@@ -67,6 +70,29 @@ async function play(match:SurvivalMatch,scores?:number[]){
   now=survivalCurrentRound(match).endsAt!;return engine.tick(match.id);
 }
 describe("durable Survival M3 engine",()=>{
+  it("keeps a relay-auth failure before the timer and recovers the same match through verified GD data without changing profiles",async()=>{
+    const beforeSolo=(await database.query("SELECT * FROM ranked_profiles ORDER BY player_id")).rows;
+    const beforeSurvival=(await database.query("SELECT * FROM sur_profiles ORDER BY player_id")).rows;
+    const token="fixture_"+"a".repeat(48),geometry="kS38,1;1,1,2,30,3,10;";
+    const record="1:40000000:18:4:17::43:0:25::15:2:8:10:9:30";
+    const worker=createGdRelayWorker(async input=>String(input).endsWith("getGJLevels21.php")?
+      new Response(`${record}###1:0:10#hash`):new Response(`${record}:5:1:4:${gzipSync(geometry).toString("base64url")}#hash`));
+    const transport:typeof fetch=async(input,init)=>worker.fetch(new Request(input,init),{GD_RELAY_TOKEN:token});
+    const makeEngine=(key:string)=>new SurvivalEngineService(database,clock,ids,config,new GdSurvivalMapProvider(new SeededRandom(1),
+      createSurvivalGdFetch({origin:"https://relay.example",token:key},transport)));
+    const broken=makeEngine("b".repeat(56)),match=await broken.create("relay-recovery",entrants);
+    await broken.selectMap(match.id);
+    expect((await broken.mapSelectionStatus(match.id)).errorMessage).toContain("UNAUTHORIZED");
+    expect(survivalCurrentRound(await broken.get(match.id)).startsAt).toBeNull();
+    now+=30000;
+    const restored=makeEngine(token);await restored.selectMap(match.id);
+    const saved=await restored.get(match.id);
+    expect(saved.state).toBe("PREPARING");expect(survivalCurrentRound(saved).startsAt).toBeNull();
+    expect(survivalCurrentRound(saved).map).toMatchObject({levelId:40000000,geometryBytes:Buffer.byteLength(geometry)});
+    expect((await restored.mapSelectionStatus(match.id)).errorMessage).toBeNull();
+    expect((await database.query("SELECT * FROM ranked_profiles ORDER BY player_id")).rows).toEqual(beforeSolo);
+    expect((await database.query("SELECT * FROM sur_profiles ORDER BY player_id")).rows).toEqual(beforeSurvival);
+  });
   it("serves authenticated participant HUD state over real HTTP while keeping public mutation routes closed",async()=>{
     const match=await engine.create("http",entrants);
     const tokens=new TokenService(environmentFixture()),token="survival-fixture-session";

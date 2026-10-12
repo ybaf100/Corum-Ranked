@@ -111,3 +111,9 @@ Render의 `Survival map selection …` 경고에 기존 오류 코드뿐 아니�
 개발 환경의 읽기 전용 비교에서는 기존 빈 User-Agent가 정상 GD 목록을 반환했지만 `Corum-Ranked/0.5` 및 Node 기본 User-Agent는 Cloudflare HTML 403을 반환했다. 이 환경은 관리형 프록시를 사용하며 Render와 Node 버전·발신 경로도 다르다. 따라서 헤더 교체를 해결책으로 배포하지 않고 기존 요청을 유지한다. 브라우저 challenge 우회, 새 프록시 배포 또는 운영 서버 환경 변경은 수행하지 않았다. 이 후속 패치 역시 운영 접근 거절의 해결을 주장하지 않는다.
 
 로컬 검증: 전체 workspace 소스·테스트 타입검사 통과, 맵 제공자와 PGlite 경기 통합 테스트 **45개 통과**. 추가 검사는 텍스트 코드 추출·본문 길이 제한·HTML/challenge/관련 없는 본문 제외 및 DB 재시도 복구 시 진단 보존을 포함한다. 서버 전용 beta64 핫픽스로 클라이언트 재설치·R2 패키지 재게시·DB 마이그레이션·Apps Script 작업은 필요 없다. 전체 Geode 빌드, 실기기 및 배포 후 Render의 정상 맵 선정은 검증하지 않았다.
+
+## Render ASN 차단 대응: 인증된 GD 중계
+
+후속 운영 로그에서 실제 `edgeErrorCode=1005`를 확인했다. 사용자 승인에 따라 GD 검색·다운로드 두 요청을 사용자 소유 Cloudflare Worker로 전달할 수 있는 설정을 추가했다. 후보 선정·다운로드 검증·경기 권한은 NestJS 서버에 남고, 중계 인증키는 GD에 전달하지 않는다. 설정되지 않으면 기존 직접 조회를 사용한다.
+
+Worker 이름은 `corum-ranked-gd-relay`, Worker Secret은 `GD_RELAY_TOKEN`, Render 변수는 `SURVIVAL_GD_RELAY_ORIGIN`·`SURVIVAL_GD_RELAY_TOKEN`이다. 실제 계정에서 Worker와 Render 설정을 적용해야 중계가 활성화된다. 전체 설치·점검 방법은 [Survival GD 중계 설정](survival-gd-relay.md)을 따른다. 이 변경은 서버 전용 beta64 패치이며 운영 배포나 실기기 접속 성공을 주장하지 않는다.

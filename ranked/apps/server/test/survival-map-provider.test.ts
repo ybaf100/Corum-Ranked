@@ -83,7 +83,7 @@ describe("actual GD Survival search/download protocol",()=>{
       .rejects.toMatchObject({code:"API_ERROR",message:expect.stringContaining("GD getGJLevels21.php HTTP 403"),http:{status:403}});
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
-  it.each(["1006","1010","1015","1020"])("records Cloudflare plaintext error %s without assuming a challenge or changing agents",async(code)=>{
+  it.each(["1005","1006","1010","1015","1020"])("records Cloudflare plaintext error %s without assuming a challenge or changing agents",async(code)=>{
     const fetcher=vi.fn(async(_url:string|URL|Request,init?:RequestInit)=>{
       expect(new Headers(init?.headers).get("user-agent")).toBe("");
       return new Response(`error code: ${code}\r\n`,{status:403,headers:{server:"cloudflare",
