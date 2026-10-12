@@ -1,5 +1,5 @@
 import { gzipSync } from "node:zlib";
-import { describe,expect,it,vi } from "vitest";
+import { afterEach,describe,expect,it,vi } from "vitest";
 import { SeededRandom } from "@corum-ranked/rules";
 import { GdSurvivalMapProvider,parseSurvivalMetadata,parseSurvivalSearch,validSurvivalGeometry,
   verifySurvivalDownload,type SurvivalMapRequest } from "../src/survival/survival-map.provider.js";
@@ -9,6 +9,7 @@ const record=(id=40000000,extra="")=>`1:${id}:18:4:17::43:0:25::15:2:8:10:9:30${
 const geometry="kS38,1;1,1,2,30,3,10;";
 const download=(id=40000000,data=geometry)=>`${record(id)}:5:1:4:${gzipSync(data).toString("base64url")}#hash#hash`;
 const page=(ids:number[],total=ids.length,offset=0,size=10)=>`${ids.map(id=>record(id)).join("|")}#creators#songs#${total}:${offset}:${size}#hash`;
+afterEach(()=>vi.useRealTimers());
 describe("actual GD Survival search/download protocol",()=>{
   it("parses native zero/empty fields and distinguishes Demon subtype codes",()=>{
     expect(parseSurvivalMetadata(record())).toMatchObject({levelId:40000000,demon:false,automatic:false,platformer:false});
@@ -79,7 +80,47 @@ describe("actual GD Survival search/download protocol",()=>{
   it("retains API status in diagnostic errors and leaves timers to the engine",async()=>{
     const fetcher=vi.fn(async()=>new Response("unavailable",{status:403})) as unknown as typeof fetch;
     await expect(new GdSurvivalMapProvider(new SeededRandom(1),fetcher).select(request))
-      .rejects.toMatchObject({code:"API_ERROR",message:"GD getGJLevels21.php HTTP 403"});
+      .rejects.toMatchObject({code:"API_ERROR",message:expect.stringContaining("GD getGJLevels21.php HTTP 403"),http:{status:403}});
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+  it("captures challenge diagnostics, suppresses all selections during cooldown and recovers afterward",async()=>{
+    vi.useFakeTimers();vi.setSystemTime(0);let searches=0;
+    const fetcher=vi.fn(async(url:string|URL|Request)=>{
+      if(String(url).endsWith("getGJLevels21.php")) {
+        searches++;
+        if(searches===1)return new Response('<html><title>Just a moment...</title>private-response-body</html>',{
+          status:403,headers:{server:"cloudflare","content-type":"text/html","cf-ray":"fixture-ray","cf-mitigated":"challenge",
+            "set-cookie":"private-cookie","authorization":"private-header"}});
+        return new Response(page([40000000]));
+      }
+      return new Response(download());
+    }) as unknown as typeof fetch;
+    const provider=new GdSurvivalMapProvider(new SeededRandom(1),fetcher);
+    await expect(provider.select(request)).rejects.toMatchObject({code:"API_ERROR",retryAfterMs:30000,
+      http:{status:403,cfRay:"fixture-ray",cfMitigated:"challenge",title:"Just a moment...",bodyKind:"CLOUDFLARE_CHALLENGE"}});
+    for(const group of ["RED_BRONZE","SILVER","GOLD"] as const)
+      await expect(provider.select({...request,group})).rejects.toThrow("fixture-ray");
+    expect(searches).toBe(1);
+    vi.setSystemTime(29999);await expect(provider.select(request)).rejects.toThrow("HTTP 403");expect(searches).toBe(1);
+    vi.setSystemTime(30000);expect((await provider.select(request)).levelId).toBe(40000000);expect(searches).toBe(2);
+  });
+  it("bounds error-body reads and excludes raw bodies and private response headers",async()=>{
+    let cancelled=false;
+    const body=new ReadableStream<Uint8Array>({start(controller){
+      controller.enqueue(Buffer.from("x".repeat(4096)+"<title>private-body-secret</title>"));
+    },cancel(){cancelled=true;}});
+    const fetcher=vi.fn(async()=>new Response(body,{status:403,headers:{"content-type":"text/html","set-cookie":"private-cookie-secret"}})) as unknown as typeof fetch;
+    let failure:unknown;
+    try{await new GdSurvivalMapProvider(new SeededRandom(1),fetcher).select(request);}catch(error){failure=error;}
+    expect(failure).toMatchObject({http:{title:null,bodyKind:"HTML"}});
+    expect(JSON.stringify(failure)).not.toContain("private-body-secret");expect(JSON.stringify(failure)).not.toContain("private-cookie-secret");
+    expect(cancelled).toBe(true);expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+  it.each([["90",90000],["999999999",120000],["invalid",30000]])("honors bounded Retry-After %s without exhausting map filters",async(value,delay)=>{
+    const fetcher=vi.fn(async()=>new Response("rate limited",{status:429,headers:{"retry-after":value}})) as unknown as typeof fetch;
+    await expect(new GdSurvivalMapProvider(new SeededRandom(1),fetcher).select(request))
+      .rejects.toMatchObject({retryAfterMs:delay,http:{status:429,retryAfter:value}});
+    expect(fetcher).toHaveBeenCalledTimes(1);
   });
   it("retries API failure and invalid downloads while retaining exact constraints",async()=>{
     let searches=0,downloads=0;

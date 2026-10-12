@@ -185,6 +185,24 @@ describe("durable Survival M3 engine",()=>{
     await engine.selectMap(match.id);expect(provider.select).toHaveBeenCalledTimes(1);now+=2000;await engine.selectMap(match.id);
     saved=await engine.get(match.id);expect(saved.state).toBe("PREPARING");expect(provider.select).toHaveBeenCalledTimes(2);
   });
+  it("persists upstream denial diagnostics and retry deadlines across recovery without starting a round",async()=>{
+    const match=await engine.create("http-denial",entrants);
+    const http={endpoint:"getGJLevels21.php",status:403,server:"cloudflare",contentType:"text/html",cfRay:"fixture-ray",
+      cfMitigated:"challenge",retryAfter:null,title:"Just a moment...",bodyKind:"CLOUDFLARE_CHALLENGE" as const};
+    vi.mocked(provider.select).mockRejectedValueOnce(new SurvivalMapError("API_ERROR",
+      `GD getGJLevels21.php HTTP 403; http=${JSON.stringify(http)}`,[],http,30000));
+    await engine.selectMap(match.id);
+    const status=await engine.mapSelectionStatus(match.id);
+    expect(status.httpDiagnostics).toEqual(http);expect(status.errorMessage).toContain("fixture-ray");
+    expect(Date.parse(status.retryAt!)-now).toBe(30000);
+    const saved=await engine.get(match.id);expect(saved.state).toBe("MAP_SELECTION");
+    expect(survivalCurrentRound(saved).startsAt).toBeNull();expect(survivalCurrentRound(saved).map).toBeNull();
+    const recovered=new SurvivalEngineService(database,clock,ids,config,provider);
+    now+=29999;await recovered.selectMap(match.id);expect(provider.select).toHaveBeenCalledTimes(1);
+    now++;await recovered.selectMap(match.id);expect(provider.select).toHaveBeenCalledTimes(2);
+    expect((await recovered.get(match.id)).state).toBe("PREPARING");
+    expect((await recovered.mapSelectionStatus(match.id)).httpDiagnostics).toBeNull();
+  });
   it("fences overlapping provider jobs and rejects replies from expired leases",async()=>{
     const match=await engine.create("lease",entrants);let resolve!:(map:SurvivalVerifiedMap)=>void;
     vi.mocked(provider.select).mockImplementationOnce(()=>new Promise(r=>{resolve=r;}));

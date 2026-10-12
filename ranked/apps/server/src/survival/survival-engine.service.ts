@@ -6,7 +6,7 @@ import { createSurvivalMatch, reduceSurvivalMatch, survivalCurrentRound, surviva
 import { ID_GENERATOR, SERVER_CLOCK, type IdGenerator, type ServerClock } from "../common/runtime.module.js";
 import { SurvivalConfigService, type SurvivalConfigDocument } from "../config/survival-config.service.js";
 import { DATABASE, type DatabasePort, type SqlExecutor } from "../database/database.port.js";
-import { SURVIVAL_MAP_PROVIDER, SurvivalMapError, type SurvivalMapProvider } from "./survival-map.provider.js";
+import { SURVIVAL_MAP_PROVIDER, SurvivalMapError, type SurvivalMapProvider, type SurvivalMapHttpDiagnostics } from "./survival-map.provider.js";
 import type { RankedSessionContext } from "../session/session.types.js";
 import { sessionAliveSince } from "../session/session-presence.policy.js";
 
@@ -166,10 +166,11 @@ export class SurvivalEngineService implements OnApplicationBootstrap, OnApplicat
         await tx.query("UPDATE sur_matches SET map_job_token=NULL,map_job_deadline_at=NULL,map_retry_at=NULL,map_error=NULL WHERE id=$1",[matchId]);
       });
     } catch(e) {
-      const error=e instanceof SurvivalMapError ? {code:e.code,message:e.message,failures:e.failures} : {code:"API_ERROR",message:e instanceof Error?e.message:String(e)};
+      const error=e instanceof SurvivalMapError ? {code:e.code,message:e.message,failures:e.failures,http:e.http} : {code:"API_ERROR",message:e instanceof Error?e.message:String(e)};
+      const retryMs=e instanceof SurvivalMapError?Math.min(120_000,Math.max(2_000,e.retryAfterMs)):2_000;
       await this.database.query(`UPDATE sur_matches SET map_job_token=NULL,map_job_deadline_at=NULL,map_retry_at=$3,map_error=$4::jsonb
-        WHERE id=$1 AND map_job_token=$2`,[matchId,job.token,iso(this.clock.now().getTime()+2_000),JSON.stringify(error)]);
-      this.logger.warn(`Survival map selection ${matchId}: ${error.code}`);
+        WHERE id=$1 AND map_job_token=$2`,[matchId,job.token,iso(this.clock.now().getTime()+retryMs),JSON.stringify(error)]);
+      this.logger.warn(`Survival map selection ${matchId}: ${error.code}; retryMs=${retryMs}; ${error.message}`);
     }
   }
   public ensureMapSelection(match:SurvivalMatch):void {
@@ -178,9 +179,9 @@ export class SurvivalEngineService implements OnApplicationBootstrap, OnApplicat
     this.mapJobs.set(match.id,job);
   }
   public async mapSelectionStatus(id:string) {
-    const row=(await this.database.query<{map_error:{code:string;message?:string}|null;map_retry_at:Date|string|null;map_job_deadline_at:Date|string|null}>(
+    const row=(await this.database.query<{map_error:{code:string;message?:string;http?:SurvivalMapHttpDiagnostics|null}|null;map_retry_at:Date|string|null;map_job_deadline_at:Date|string|null}>(
       "SELECT map_error,map_retry_at,map_job_deadline_at FROM sur_matches WHERE id=$1",[id])).rows[0];
-    return {errorCode:row?.map_error?.code??null,errorMessage:row?.map_error?.message??null,
+    return {errorCode:row?.map_error?.code??null,errorMessage:row?.map_error?.message??null,httpDiagnostics:row?.map_error?.http??null,
       retryAt:row?.map_retry_at?new Date(row.map_retry_at).toISOString():null,
       selecting:!!row?.map_job_deadline_at && new Date(row.map_job_deadline_at).getTime()>this.clock.now().getTime()};
   }

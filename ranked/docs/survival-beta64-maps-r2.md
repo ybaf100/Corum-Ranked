@@ -83,3 +83,19 @@ ranked/release-v0.5.0-beta.64/release.json
 - R2 게시 fixture: 9개 통과.
 
 위 결과는 로컬 validate 결과다. 전체 Geode 플랫폼 빌드·실기기 검사·운영 R2 업로드·새 GitHub Actions 결과를 확인한 것으로 보고하지 않는다.
+
+## Render의 GD HTTP 403 진단 패치
+
+후속 Geode 로그는 `getGJLevels21.php HTTP 403`을 기록했고, Render 로그는 서비스가 정상 시작한 뒤 같은 경기의 `API_ERROR`를 약 2초마다 반복했다. 개발 환경에서 같은 GD URL·본문·헤더는 HTTP 200으로 레벨 목록을 반환했고, 운영 Ranked의 공개 설정 API도 beta64로 정상 응답했다. Render에서 GD로 보내는 요청이 거절되는 것은 확인했지만 발신 IP·TLS/요청 특성·보안 challenge 중 어느 조건인지는 이 기록만으로 확정할 수 없었다.
+
+서버는 실패 응답의 처음 4 KiB만 읽고 아래 항목만 기록한다. 원문 HTML, Cookie, Authorization 및 세션 토큰은 저장하지 않는다.
+
+- GD endpoint, HTTP status, Server, Content-Type
+- `cf-ray`, `cf-mitigated`, `Retry-After`
+- 최대 160자의 HTML title와 challenge/block/HTML/text 분류
+
+Render의 `Survival map selection …` 경고에 기존 오류 코드뿐 아니라 실패 이유와 `http={…}`가 포함된다. 정보는 `sur_matches.map_error`에도 저장되며, 읽기 응답의 `mapSelection.httpDiagnostics`와 `errorMessage`로 조회할 수 있다. 기존 beta64 클라이언트는 상세 `errorMessage`를 `[SurvivalMap]` 로그에 남기므로 클라이언트 재설치는 필요 없다. Shell을 사용할 수 없어도 다음 실패 시 Render 경고 한 줄로 추가 진단 정보를 얻는다.
+
+403·429는 다른 난이도/후보로 즉시 반복하지 않고 기본 30초 기다린다. 유효한 `Retry-After`는 2초~120초 범위에서 반영한다. 한 서버 프로세스의 Survival 제공자가 대기 상태를 공유하고 DB에도 경기별 재시도 시각을 저장하므로 여러 경기·서비스 복구가 같은 차단 경로를 반복 호출하는 것을 줄인다. 일반적인 검색 실패의 기존 2초 재시도는 유지한다. 맵 조건, GD endpoint/요청 헤더, 경기 규칙, 시작된 라운드 타이머, LP 정산 및 Solo 기능은 바꾸지 않는다.
+
+전체 workspace 소스/테스트 타입검사와 맵 제공자·경기 DB 통합 검사 39개를 통과했다. 검사는 오류 응답 크기 제한·민감 헤더 제외·403/429 대기·대기 후 회복·DB 재시도 복구 및 대기 중 타이머 미시작을 포함한다. 이 패치는 차단 원인을 드러내고 과도한 재요청을 줄인다. 운영 Render→GD의 접근 거절이 해소된 것으로 보고하지 않으며, 배포 후 실제 `http={…}` 로그로 다음 조치를 판단해야 한다. 클라이언트 패키지 재게시·새 마이그레이션·Apps Script 변경은 없다.

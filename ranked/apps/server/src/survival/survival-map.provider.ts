@@ -18,9 +18,58 @@ export interface SurvivalMapProvider {
 }
 export type SurvivalMapErrorCode = "API_ERROR" | "EMPTY_SEARCH" | "INVALID_METADATA" |
   "DOWNLOAD_FAILED" | "INVALID_DATA" | "DUPLICATE_CANDIDATES" | "NO_ELIGIBLE_MAP";
+export interface SurvivalMapHttpDiagnostics {
+  endpoint:string;
+  status:number;
+  server:string|null;
+  contentType:string|null;
+  cfRay:string|null;
+  cfMitigated:string|null;
+  retryAfter:string|null;
+  title:string|null;
+  bodyKind:"CLOUDFLARE_CHALLENGE"|"CLOUDFLARE_BLOCK"|"HTML"|"TEXT"|"EMPTY";
+}
 export class SurvivalMapError extends Error {
   public constructor(public readonly code: SurvivalMapErrorCode, message: string,
-    public readonly failures: readonly SurvivalMapErrorCode[] = []) {super(message); this.name="SurvivalMapError";}
+    public readonly failures: readonly SurvivalMapErrorCode[] = [],
+    public readonly http:SurvivalMapHttpDiagnostics|null=null,
+    public readonly retryAfterMs=2_000) {super(message); this.name="SurvivalMapError";}
+}
+const HTTP_BLOCK_RETRY_MS=30_000,MAX_HTTP_RETRY_MS=120_000;
+function gdRetryDelay(response:Response):number {
+  const value=response.headers.get("retry-after");
+  if(value) {
+    const delay=/^\d+$/.test(value)?Number(value)*1000:Date.parse(value)-Date.now();
+    if(Number.isFinite(delay))return Math.min(MAX_HTTP_RETRY_MS,Math.max(2_000,delay));
+  }
+  return response.status===403 || response.status===429?HTTP_BLOCK_RETRY_MS:2_000;
+}
+async function gdHttpDiagnostics(endpoint:string,response:Response):Promise<SurvivalMapHttpDiagnostics> {
+  // Read only a small error-page prefix, and publish only an allowlist of
+  // transport fields/title. Never retain cookies, authorization or raw bodies.
+  let sample="";
+  const reader=response.body?.getReader();
+  if(reader) {
+    const parts:Uint8Array[]=[];let size=0;
+    try {
+      while(size<4_096) {
+        const {value,done}=await reader.read();if(done)break;
+        const part=value.subarray(0,4_096-size);parts.push(part);size+=part.length;
+      }
+    }catch{}finally{await reader.cancel().catch(()=>{});}
+    sample=Buffer.concat(parts).toString("utf8");
+  }
+  const clean=(value:string)=>value.replace(/<[^>]*>/g,"").replace(/[\u0000-\u001f\u007f]/g," ").replace(/\s+/g," ").trim().slice(0,160);
+  const header=(name:string)=>{const value=response.headers.get(name);return value?clean(value):null;};
+  const cfMitigated=header("cf-mitigated");
+  const contentType=header("content-type");
+  const title=sample.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1];
+  const challenge=cfMitigated==="challenge" || /\/cdn-cgi\/challenge-platform\//i.test(sample);
+  const blocked=/cloudflare/i.test(sample) && /attention required|access denied|sorry, you have been blocked|error\s*1020/i.test(sample);
+  const html=(contentType?.includes("html")??false) || /<(?:!doctype|html|title)\b/i.test(sample);
+  return {endpoint,status:response.status,server:header("server"),contentType,
+    cfRay:header("cf-ray"),cfMitigated,retryAfter:header("retry-after"),title:title?clean(title):null,
+    bodyKind:challenge?"CLOUDFLARE_CHALLENGE":blocked?"CLOUDFLARE_BLOCK":html?"HTML":sample?"TEXT":"EMPTY"};
 }
 function fields(record: string): Map<string,string> {
   const entries=record.split(":"), result=new Map<string,string>();
@@ -119,16 +168,25 @@ export class GdSurvivalMapProvider implements SurvivalMapProvider {
   private readonly catalogs=new Map<string,RecentCatalog>();
   private readonly catalogJobs=new Map<string,Promise<RecentCatalog>>();
   private readonly badCandidates=new Map<number,number>();
+  private blocked:{until:number;error:SurvivalMapError}|null=null;
   public constructor(@Inject(RANDOM_SOURCE) private readonly random: RandomSource,
     fetcher: typeof fetch = fetch) {this.fetcher=fetcher;}
   private async post(path: string, extra: Record<string,string>, signal: AbortSignal, maxBytes: number): Promise<string> {
+    this.checkHttpCooldown();
     let response: Response;
     try {response=await this.fetcher(`https://www.boomlings.com/database/${path}`,{method:"POST",
       headers:{"content-type":"application/x-www-form-urlencoded","accept":"*/*","user-agent":""},
       body:new URLSearchParams({gameVersion:"22",binaryVersion:"45",secret:"Wmfd2893gb7",...extra}).toString(),
       signal:AbortSignal.any([signal,AbortSignal.timeout(8_000)])});}
     catch {throw new SurvivalMapError("API_ERROR",`GD ${path} connection failed or timed out`);}
-    if (!response.ok || !response.body) throw new SurvivalMapError("API_ERROR",`GD ${path} HTTP ${response.status}`);
+    if (!response.ok || !response.body) {
+      const http=await gdHttpDiagnostics(path,response),retryAfterMs=gdRetryDelay(response);
+      const error=new SurvivalMapError("API_ERROR",`GD ${path} HTTP ${response.status}; http=${JSON.stringify(http)}`,
+        [],http,retryAfterMs);
+      if(response.status===403 || response.status===429 || retryAfterMs>2_000)
+        this.blocked={until:Date.now()+retryAfterMs,error};
+      throw error;
+    }
     const reader=response.body.getReader(), parts:Uint8Array[]=[]; let size=0;
     try {
       for (;;) {const {value,done}=await reader.read(); if (done) break;
@@ -138,6 +196,13 @@ export class GdSurvivalMapProvider implements SurvivalMapProvider {
       }
     } catch (e) {if (e instanceof SurvivalMapError) throw e; throw new SurvivalMapError("API_ERROR","GD body download failed");}
     return Buffer.concat(parts).toString("utf8");
+  }
+  private checkHttpCooldown():void {
+    if(!this.blocked)return;
+    const remaining=this.blocked.until-Date.now();
+    if(remaining<=0){this.blocked=null;return;}
+    const error=this.blocked.error;
+    throw new SurvivalMapError(error.code,error.message,error.failures,error.http,Math.max(2_000,remaining));
   }
   private catalogKey(filter:Record<string,string>):string {return `${filter.diff}:${filter.demonFilter??""}`;}
   private async search(filter:Record<string,string>,page:number,signal:AbortSignal) {
@@ -171,6 +236,7 @@ export class GdSurvivalMapProvider implements SurvivalMapProvider {
     catch(e){catalog.visited.delete(page);throw e;}
   }
   public async select(request: SurvivalMapRequest): Promise<SurvivalVerifiedMap> {
+    this.checkHttpCooldown();
     const allowed=survivalMapRange(request.group,request.phase), filters:Record<string,string>[]=[];
     if (allowed.minimumStars!==null && allowed.maximumStars!==null) {
       const categories=new Set<number>();
@@ -181,9 +247,14 @@ export class GdSurvivalMapProvider implements SurvivalMapProvider {
     for (const demon of allowed.demons) filters.push({diff:"-2",demonFilter:demonFilters[demon]});
     const signal=AbortSignal.timeout(30_000), excluded=new Set(request.excludedLevelIds), seen=new Set<number>();
     const failures:SurvivalMapErrorCode[]=[];let lastDetail="No eligible recent rated GD candidates",downloads=0;
+    let lastHttp:SurvivalMapHttpDiagnostics|null=null;
     const failed=(e:unknown,fallback:SurvivalMapErrorCode="API_ERROR")=>{
+      // Forbidden/throttled responses apply to the upstream route, not one
+      // candidate. Stop this selection rather than retrying every filter/page.
+      if(e instanceof SurvivalMapError && (e.http?.status===403 || e.http?.status===429 || e.retryAfterMs>2_000))throw e;
       failures.push(e instanceof SurvivalMapError?e.code:fallback);
       lastDetail=e instanceof Error?e.message:"GD lookup failed";
+      lastHttp=e instanceof SurvivalMapError?e.http:null;
     };
     for(const [id,until]of this.badCandidates)if(until<=Date.now())this.badCandidates.delete(id);
     for(let pass=0;pass<3 && !signal.aborted && downloads<12;pass++)for(const filter of shuffle(filters,this.random)) {
@@ -207,6 +278,6 @@ export class GdSurvivalMapProvider implements SurvivalMapProvider {
         }
       }
     }
-    throw new SurvivalMapError(failures.at(-1)??"NO_ELIGIBLE_MAP",lastDetail,failures);
+    throw new SurvivalMapError(failures.at(-1)??"NO_ELIGIBLE_MAP",lastDetail,failures,lastHttp);
   }
 }
