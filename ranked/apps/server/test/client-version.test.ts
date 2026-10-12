@@ -74,7 +74,7 @@ describe("Ranked client version gate", () => {
 
   it("accepts the same current version with or without a leading v", () => {
     expect(
-      evaluateRankedClientVersion("0.5.0-beta.66", [clientMod("0.5.0-beta.66")]).allowed,
+      evaluateRankedClientVersion("0.5.0-beta.67", [clientMod("0.5.0-beta.67")]).allowed,
     ).toBe(true);
   });
 
@@ -84,7 +84,7 @@ describe("Ranked client version gate", () => {
     ]);
     expect(result).toMatchObject({
       allowed: false,
-      requiredVersion: "v0.5.0-beta.66",
+      requiredVersion: "v0.5.0-beta.67",
       clientVersion: "v0.5.0-beta.8",
     });
   });

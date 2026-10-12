@@ -27,7 +27,14 @@ bool SurvivalHud::init() {
     m_difference=rankedHudLabel(this,"0",FontWeight::ExtraBold,CompetitiveClockScale,{.5f,1},{size.width/2+34,top-18},Text);
     m_rank=rankedHudLabel(this,"",FontWeight::Black,1.68f,{0,0},{12,12},Text);
     m_waiting=rankedHudLabel(this,"",FontWeight::SemiBold,.30f,{.5f,0},{size.width/2,14},TextMuted);
+    m_cutoffLine=CCDrawNode::create();addChild(m_cutoffLine,6);
     scheduleUpdate();return true;
+}
+void SurvivalHud::attachProgressBar(CCSprite* bar,CCSprite* fill,float width,float height) {
+    if(!bar || !fill || width<=0 || height<=0)return;
+    m_progressBar=WeakRef(bar);m_progressFill=WeakRef(fill);m_progressWidth=width;m_progressHeight=height;
+    auto* lines=CCDrawNode::create();lines->setID("survival-progress-markers"_spr);bar->addChild(lines,50);
+    m_progressLines=WeakRef(lines);
 }
 void SurvivalHud::update(float dt) {
     // Native Pause/Resume may replace PlayLayer's selectors. The HUD owns its
@@ -39,8 +46,9 @@ void SurvivalHud::present(SurvivalMatchView const& view,std::int64_t remainingMs
     auto const size=CCDirector::sharedDirector()->getWinSize();
     auto const context=view.id+":"+view.roundKey+":"+std::to_string(view.mapGeneration);
     if(m_context!=context){for(auto& [id,row]:m_rows)row.node->removeFromParentAndCleanup(true);m_rows.clear();m_context=context;m_lastRank=0;}
-    bool const deathmatch=view.phase=="TIEBREAK",full=view.roundNumber>=3;
-    auto const rows=survivalHudRows(view.standings,view.ownId,full);
+    bool const deathmatch=view.phase=="TIEBREAK";
+    auto const rows=survivalHudRows(view.standings,view.ownId,view.targetQualifiers);
+    bool const separateOwn=rows.size()>survivalHudLeaderCount(view.standings,view.targetQualifiers);
     auto const gap=std::clamp((size.height*.60f)/std::max<std::size_t>(1,rows.size()),12.0f,20.0f);
     auto const width=std::min(168.0f,size.width*.36f),scale=std::min(.36f,gap/50.0f);
     auto const top=layoutHud(size.width,size.height).topY-28;
@@ -61,7 +69,7 @@ void SurvivalHud::present(SurvivalMatchView const& view,std::int64_t remainingMs
         if(row.visible!=visible){row.visible=visible;row.node->setVisible(visible);for(auto const& label:{row.rank,row.name,row.score})fade(label,visible);}
     }
     for(std::size_t i=0;i<rows.size();++i) {
-        auto const& value=rows[i];auto& row=m_rows.at(value.id);auto const y=top-static_cast<float>(i)*gap-(i==3&&!full?7:0);
+        auto const& value=rows[i];auto& row=m_rows.at(value.id);auto const y=top-static_cast<float>(i)*gap-(separateOwn && i+1==rows.size()?7:0);
         if(row.targetY!=y){row.targetY=y;row.node->stopActionByTag(7414);auto* move=CCEaseSineOut::create(CCMoveTo::create(.30f,{8,y}));move->setTag(7414);row.node->runAction(move);}
         auto const name=value.id==view.ownId?i18n::text("you","YOU"):value.name;
         row.rank.text(survivalOrdinal(value.rank));row.name.text(name);row.score.text(rankedScoreText(row.tween.displayed,deathmatch)+"%");
@@ -73,6 +81,12 @@ void SurvivalHud::present(SurvivalMatchView const& view,std::int64_t remainingMs
         auto const nameWidth=row.name.foreground->getContentSize().width*row.name.foreground->getScale();
         row.rank.position({0,-1});row.name.position({rankWidth+4,-1});row.score.position({rankWidth+4+nameWidth+4,-1});
     }
+    m_cutoffLine->clear();auto const boundary=survivalHudCutoffBoundary(rows);
+    if(boundary>0) {
+        auto const y=top-static_cast<float>(boundary)*gap+gap*.15f;
+        m_cutoffLine->drawSegment({8,y},{8+width,y},.65f,{1,.32f,.41f,.95f});
+    }
+    presentProgressMarkers(view);
     auto own=std::find_if(view.standings.begin(),view.standings.end(),[&](auto const& p){return p.id==view.ownId;});
     if(own!=view.standings.end()) {
         m_rank.text(survivalOrdinal(own->rank));m_rank.color(color(*own));
@@ -92,5 +106,21 @@ void SurvivalHud::present(SurvivalMatchView const& view,std::int64_t remainingMs
     auto const pair=competitiveClockPair(size.width/2,clockWidth,deltaWidth);
     m_timer.position({pair.clockX,layoutHud(size.width,size.height).topY-18});
     m_difference.position({pair.deltaX,layoutHud(size.width,size.height).topY-18});
+}
+void SurvivalHud::presentProgressMarkers(SurvivalMatchView const& view) {
+    auto bar=m_progressBar.lock();auto fill=m_progressFill.lock();auto lines=m_progressLines.lock();
+    if(!lines)return;
+    lines->clear();lines->setVisible(bar && fill && bar->isVisible() && fill->isVisible());
+    if(!bar || !fill)return;
+    auto const anchor=fill->getAnchorPoint();auto const origin=fill->getAnchorPointInPoints();
+    auto draw=[&](double score,float radius,ccColor4F tint) {
+        auto const x=origin.x+survivalProgressMarkerX(score,m_progressWidth)-anchor.x*m_progressWidth;
+        auto const y=origin.y-anchor.y*m_progressHeight;
+        auto const lower=bar->convertToNodeSpace(fill->convertToWorldSpace({x,y-1}));
+        auto const upper=bar->convertToNodeSpace(fill->convertToWorldSpace({x,y+m_progressHeight+1}));
+        lines->drawSegment(lower,upper,radius,tint);
+    };
+    if(view.cutoff)draw(*view.cutoff,.95f,{1,.32f,.41f,1});
+    if(!view.standings.empty())draw(view.standings.front().score,.5f,{1,.83f,.31f,1});
 }
 } // namespace corum::ranked::ui

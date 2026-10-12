@@ -1,3 +1,11 @@
+## v0.5.0-beta.67
+
+- Defer Survival native scene construction outside the roster scheduler callback. Recheck exact round/map/scene/modal eligibility; guard concurrent setup and pending native quits. Retain the saved level, origin scene and native texture-cache owner at the entry/return boundary, with setup diagnostics for the reported iOS Round 2 crash.
+- Show the current passing/cutoff leaders up to ten, with a separate own row when outside that list. Add a red cutoff separator. Keep retained row animation, Solo fonts and ordinary integer score display.
+- Add real-time red cutoff and gold first-place markers to GD's existing progress bar, without enabling it for users who disabled it. Use authoritative scores and native bar/fill transforms.
+- Nerf normal-round bots to independent normal progress candidates (mean 50%, standard deviation 20%), integer 0–100%, at 20/50/80/110/140 seconds with a 40% draw chance. Preserve best records, seeded replay and persisted event cursors; Death Match remains three immediate attempts.
+- Synchronize beta67 client/server/package versions. No migration, Apps Script or R2 configuration change. See [beta67 notes](../ranked/docs/survival-beta67-round-entry.md).
+
 ## v0.5.0-beta.66
 
 - Share Solo GameplayUx's actual timer/delta font sizes, weights and text-width pair positioning with Survival. Keep round text above the pair and remove the extra delta caption. Increase the lower-left rank and pop it on every authoritative rank change.

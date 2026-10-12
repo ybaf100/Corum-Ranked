@@ -83,6 +83,7 @@ void SurvivalRuntime::observe(matjson::Value const& root) {
     m_view.group=root["difficultyGroup"].asString().unwrapOr("");m_view.ownId=root["myParticipantId"].asString().unwrapOr("human");
     m_view.debug=root["debug"].asBool().unwrapOr(false);m_view.mapGeneration=static_cast<int>(root["mapGeneration"].asInt().unwrapOr(0));
     m_view.roundNumber=m_view.phase=="ROUND_1"?1:m_view.phase=="ROUND_2"?2:m_view.phase=="ROUND_3"?3:4;
+    m_view.targetQualifiers=static_cast<int>(root["targetQualifiers"].asInt().unwrapOr(0));
     m_view.startsAt=root["startsAt"].asString().unwrapOr("");m_view.endsAt=root["endsAt"].asString().unwrapOr("");
     m_view.certificate=root["map"];m_view.result=root["result"];
     m_view.completedRound=root["completedRound"];

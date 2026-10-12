@@ -77,7 +77,10 @@ private:
     geode::WeakRef<PlayLayer> m_play;
     geode::WeakRef<cocos2d::CCScene> m_origin;
     geode::Ref<GJGameLevel> m_launchedLevel;
-    bool m_quitting = false, m_returnQueued = false;
+    // GD's native AudioEffectsLayer uses the shared texture cache during setup.
+    // Keep its owner alive across native quit and the retained round UI.
+    geode::Ref<cocos2d::CCTextureCache> m_nativeTextureCache;
+    bool m_quitting = false, m_returnQueued = false, m_launching = false;
     std::uint64_t m_launchGeneration = 0;
     double m_nextLaunchAt = 0;
     float m_timer = 0;

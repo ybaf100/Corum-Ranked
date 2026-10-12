@@ -130,7 +130,11 @@ void RankedRoundPreparation::pump() {
             m_view.error = "CONTENT URL REQUEST STILL ACTIVE - WAITING";
         }
     }
-    if (!context.valid()) return;
+    if (!context.valid()) {
+        if(!SurvivalRuntime::get().active() && runtime.view().stage!=RuntimeStage::Matched &&
+            !m_returnQueued && !m_quitting && !m_launching && !m_play.lock())m_nativeTextureCache=nullptr;
+        return;
+    }
     auto& metadata = RankedLevelPreparation::get();
     metadata.poll();
     metadata.adoptVerifiedSavedLevel(context);
@@ -330,6 +334,7 @@ void RankedRoundPreparation::setLowDetail(bool enabled) {
 }
 
 bool RankedRoundPreparation::launch(CCScene* origin) {
+    if(m_launching || m_quitting || m_returnQueued)return false;
     pump();
     if (clockSeconds() < m_nextLaunchAt) return false;
     auto& runtime = RankedRuntime::get();
@@ -353,7 +358,23 @@ bool RankedRoundPreparation::launch(CCScene* origin) {
     for (int id : songs) if (!resourceReady({RoundResourceKind::Song, id})) return false;
     for (int id : sfx) if (!resourceReady({RoundResourceKind::Sfx, id})) return false;
     if(survival && !SurvivalRuntime::get().validateNative(level))return false;
+    if(m_quitting || m_returnQueued)return false;
     if (auto current = m_play.lock(); current && current->isRunning()) return false;
+    if(auto* current=PlayLayer::get();current && current->isRunning())return false;
+    // Hold both the saved level and GD's shared texture-cache owner throughout
+    // native setup. A context poll or callback cannot retire the object being
+    // initialized. The cache guard spans the inter-round native quit boundary.
+    geode::Ref<GJGameLevel> launchLevel(level);
+    geode::Ref<CCScene> launchOrigin(origin);
+    struct NativeSetupScope {
+        bool& flag;
+        explicit NativeSetupScope(bool& value):flag(value){flag=true;}
+        ~NativeSetupScope(){flag=false;}
+    } setup(m_launching);
+    if(!m_nativeTextureCache)m_nativeTextureCache=CCTextureCache::sharedTextureCache();
+    log::info("[RankedEntry] native setup context={} textureCache={} retainedCache={} previousPlay={}",
+        preparationContextText(m_context),static_cast<void*>(CCTextureCache::sharedTextureCache()),
+        static_cast<void*>(m_nativeTextureCache.data()),static_cast<void*>(PlayLayer::get()));
     // Preserve exact server start eligibility/time and all existing PlayLayer
     // journal/ACK gates. A viewer never arms a local attempt.
     if (!survival && !spectator && !entering && !runtime.armCurrentLevelForGameplay()) return false;
@@ -361,6 +382,8 @@ bool RankedRoundPreparation::launch(CCScene* origin) {
     if(survival && !SurvivalRuntime::get().armNative(level))return false;
     auto* scene = PlayLayer::scene(level, false, false);
     auto* play = PlayLayer::get();
+    log::info("[RankedEntry] native setup completed context={} scene={} play={}",
+        preparationContextText(m_context),static_cast<void*>(scene),static_cast<void*>(play));
     if (!scene || !play || play->m_level != level || !roundSceneContains(scene, play) ||
         m_context != currentPreparationContext()) {
         m_view.error = "NATIVE GAMEPLAY LOAD FAILED - RETRYING";

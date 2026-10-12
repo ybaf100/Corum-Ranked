@@ -49,8 +49,10 @@ namespace cocos2d { using ::CCNode; using ::CCScene; }
 template<class T> T typeinfo_cast(CCNode* n){return dynamic_cast<T>(n);}
 namespace geode {
 template<class T> struct Ref {
-    T* ptr=nullptr; Ref()=default; Ref(T* p):ptr(p){}
-    Ref& operator=(T* p){ptr=p;return *this;}
+    T* ptr=nullptr; Ref()=default; Ref(T* p):ptr(p){if constexpr(requires(T* v){v->retain();})if(ptr)ptr->retain();}
+    Ref(Ref const& other):Ref(other.ptr){}Ref(Ref&& other):ptr(std::exchange(other.ptr,nullptr)){}
+    ~Ref(){if constexpr(requires(T* v){v->retain();})if(ptr)ptr->release();}
+    Ref& operator=(T* p){if(ptr==p)return *this;if constexpr(requires(T* v){v->retain();}){if(p)p->retain();if(ptr)ptr->release();}ptr=p;return *this;}
     T* data()const{return ptr;} T* operator->()const{return ptr;}
     explicit operator bool()const{return ptr;}
 };
@@ -64,6 +66,11 @@ template<class T> struct WeakRef {
 namespace log {template<class... T>void info(T...){}template<class... T>void warn(T...){} }
 namespace prelude { using geode::Ref; using geode::WeakRef; namespace log=geode::log; }
 }
+struct CCTextureCache {
+    int references=1;void retain(){++references;}void release(){assert(references>0);--references;}
+    static CCTextureCache* sharedTextureCache(){static CCTextureCache cache;return &cache;}
+};
+namespace cocos2d {using ::CCTextureCache;}
 namespace fmt {template<class... T>std::string format(std::string s,T const&...){return s;}}
 std::vector<std::function<void()>> queued;
 void queueInMainThread(std::function<void()> f){queued.push_back(std::move(f));}
@@ -293,6 +300,7 @@ int main(){
     options.m_enteringLevel=true;options.onLowDetail(nullptr);assert(downloaded.m_lowDetailModeToggled&&options.renders==2);
     assert(meta.authorizes(&downloaded,currentPreparationContext())); // options do not alter metadata proof
     assert(p.launch(&origin));assert(runtime.arms==1&&PlayLayer::active->m_level==&downloaded);
+    assert(CCTextureCache::sharedTextureCache()->references==2);
     assert(PlayLayer::active->m_level->m_lowDetailModeToggled&&PlayLayer::active->m_level->m_disableShakeToggled);
     assert(!p.launch(&origin)&&PlayLayer::constructions==1&&director->pushes==1);
     CorumRankedRoundReturn navigation;GJGameLevel unrelated;
@@ -300,8 +308,10 @@ int main(){
     {ScopedRankedRoundQuit quit(PlayLayer::get());navigation.returnToLastScene(&downloaded);
         navigation.returnToLastScene(&downloaded); // duplicate return is consumed, no second scene operation
         assert(queued.size()==1&&director->pops==0&&navigation.vanillaReturns==1);}
+    assert(!p.launch(director->getRunningScene())); // pending native return cannot create R2
     PlayLayer::active->running=false;PlayLayer::active->live=false;PlayLayer::active=nullptr;
     auto tasks=std::exchange(queued,{});for(auto& t:tasks)t();assert(director->getRunningScene()==&origin&&director->pops==1);
+    assert(CCTextureCache::sharedTextureCache()->references==2); // retained between rounds
     runtime.viewer=true;assert(p.launch(&origin));assert(runtime.arms==1); // spectator never arms
     {ScopedRankedRoundQuit quit(PlayLayer::get());navigation.returnToLastScene(&downloaded);}
     PlayLayer::active->running=false;PlayLayer::active->live=false;PlayLayer::active=nullptr;

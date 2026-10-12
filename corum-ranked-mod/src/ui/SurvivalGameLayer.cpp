@@ -37,7 +37,7 @@ class SurvivalGameLayer final : public CCLayerColor {
     std::optional<WeakRef<ui::RankedConfirmPopup>> m_confirmation;
     std::optional<WeakRef<ui::RankedJukeboxPopup>> m_jukebox;
     std::string m_launchedContext,m_resultMotion,m_optionsContext,m_gridContext,m_confirmationContext;
-    std::string m_eliminationKey;
+    std::string m_eliminationKey,m_pendingLaunch;
     std::string m_previewKey;
     std::chrono::steady_clock::time_point m_eliminationUntil{};
     std::chrono::steady_clock::time_point m_nextMapAt{},m_introUntil{},m_mapShownAt{};
@@ -90,7 +90,7 @@ class SurvivalGameLayer final : public CCLayerColor {
         if(m_closed || m_motion || std::chrono::steady_clock::now()<m_eliminationUntil)return;
         auto* item=typeinfo_cast<CCMenuItemSpriteExtra*>(object);if(!item)return;
         auto& runtime=SurvivalRuntime::get();auto* level=RankedLevelPreparation::get().level();
-        if(item->getTag()==0) {if(runtime.canEnter() && RankedRoundPreparation::get().launch(CCDirector::sharedDirector()->getRunningScene()))m_launchedContext=preparationContextText(runtime.preparationContext());}
+        if(item->getTag()==0)queueNativeLaunch();
         if(item->getTag()==1)runtime.acknowledge();
         if(item->getTag()==2)confirmSurrender();
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
@@ -105,6 +105,22 @@ class SurvivalGameLayer final : public CCLayerColor {
                 if(auto* popup=ui::RankedJukeboxPopup::create(level)){m_jukebox.emplace(popup);popup->show();}
             }
         }
+    }
+    void queueNativeLaunch() {
+        auto& runtime=SurvivalRuntime::get();auto const context=runtime.preparationContext();
+        if(m_closed || !m_pendingLaunch.empty() || !runtime.canEnter())return;
+        m_pendingLaunch=preparationContextText(context);
+        // Native object setup/texture loading must run outside the coordinator's
+        // scheduler callback. Recheck scene, generation and modal ownership after
+        // the previous PlayLayer's deferred teardown/autoreleases have drained.
+        queueInMainThread([weak=WeakRef(this),context] {
+            auto owner=weak.lock();if(!owner)return;owner->m_pendingLaunch.clear();
+            auto* scene=CCDirector::sharedDirector()->getRunningScene();
+            auto& runtime=SurvivalRuntime::get();
+            if(owner->m_closed || !owner->isRunning() || owner->getParent()!=scene || owner->m_motion ||
+                owner->m_confirmation || context!=runtime.preparationContext() || !runtime.canEnter())return;
+            if(RankedRoundPreparation::get().launch(scene))owner->m_launchedContext=preparationContextText(context);
+        });
     }
     void showParticipants(SurvivalMatchView const& view,bool result) {
         auto const gridContext=view.id+":"+view.roundKey+":"+std::to_string(view.mapGeneration)+(result?":result":":live");
@@ -298,7 +314,7 @@ public:
         if(intro && now>=m_introUntil && !m_confirmation && !debugPopup)runtime.presentationComplete();
         if(!m_motion && !elimination && !m_confirmation && !jukeboxOpen && !debugPopup && !runtime.creating() &&
             mapWindow && m_mapShownAt!=std::chrono::steady_clock::time_point{} && now>=m_mapShownAt+std::chrono::milliseconds(650) &&
-            runtime.canEnter() && m_launchedContext!=context && RankedRoundPreparation::get().launch(CCDirector::sharedDirector()->getRunningScene()))m_launchedContext=context;
+            runtime.canEnter() && m_launchedContext!=context)queueNativeLaunch();
         if(result && !elimination)beginResultMotion();
     }
     void onEnter() override {

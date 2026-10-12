@@ -12,7 +12,7 @@ namespace corum::ranked {
 struct SurvivalMatchView {
     std::uint64_t revision=0;
     std::string id,state,phase,roundKey,group,ownId="human",error,startsAt,endsAt,mapError,presentationGate;
-    int mapGeneration=0,roundNumber=0;
+    int mapGeneration=0,roundNumber=0,targetQualifiers=0;
     SurvivalMapMetadata map;
     matjson::Value certificate,result,completedRound;
     std::vector<SurvivalStanding> standings;

@@ -30,16 +30,29 @@ inline std::string survivalOrdinal(int rank) {
     auto const tail=rank%100;
     return std::to_string(rank)+(tail>=11 && tail<=13 ? "th" : rank%10==1 ? "st" : rank%10==2 ? "nd" : rank%10==3 ? "rd" : "th");
 }
+inline std::size_t survivalHudLeaderCount(std::vector<SurvivalStanding> const& standings,int targetQualifiers) {
+    // Include cutoff ties where space permits. Ten leading participants is the
+    // display cap, independent of the authoritative number that qualifies.
+    auto const passing=std::count_if(standings.begin(),standings.end(),[](auto const& p){return p.passing;});
+    return std::min<std::size_t>(standings.size(),std::clamp(std::max(targetQualifiers,static_cast<int>(passing)),0,10));
+}
 inline std::vector<SurvivalStanding> survivalHudRows(std::vector<SurvivalStanding> const& standings,
-    std::string const& ownId, bool full) {
-    if (full) return standings;
-    auto rows=std::vector<SurvivalStanding>(standings.begin(),standings.begin()+std::min<std::size_t>(3,standings.size()));
+    std::string const& ownId, int targetQualifiers) {
+    auto const count=survivalHudLeaderCount(standings,targetQualifiers);
+    auto rows=std::vector<SurvivalStanding>(standings.begin(),standings.begin()+count);
     auto own=std::find_if(standings.begin(),standings.end(),[&](auto const& p){return p.id==ownId;});
     if (own!=standings.end() && std::none_of(rows.begin(),rows.end(),[&](auto const& p){return p.id==ownId;})) {
-        if(own->rank<=3 && !rows.empty())rows.back()=*own;
-        else rows.push_back(*own);
+        rows.push_back(*own);
     }
     return rows;
+}
+inline std::size_t survivalHudCutoffBoundary(std::vector<SurvivalStanding> const& rows) {
+    auto const firstOut=std::find_if(rows.begin(),rows.end(),[](auto const& p){return !p.passing;});
+    return static_cast<std::size_t>(firstOut-rows.begin());
+}
+// Position within the full native fill, never its shrinking texture rectangle.
+inline float survivalProgressMarkerX(double score,float width) {
+    return static_cast<float>(std::clamp(std::isfinite(score)?score:0.0,0.0,100.0)/100.0)*width;
 }
 // A presentation-only filter; ranks and cutoff always use authoritative scores.
 struct SurvivalScoreTween {

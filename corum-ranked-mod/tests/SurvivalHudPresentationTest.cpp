@@ -19,11 +19,29 @@ int main() {
     assert(SurvivalBeforeEliminationMilliseconds+SurvivalEliminationMilliseconds+SurvivalAfterEliminationMilliseconds==5000);
     std::vector<SurvivalStanding> players;
     for(int i=1;i<=16;i++)players.push_back({std::to_string(i),"Bot "+std::to_string(i),i,0,0,100.0-i,i<=10,true,false});
-    auto own=survivalHudRows(players,"15",false);assert(own.size()==4&&own.back().id=="15"&&own.back().rank==15);
-    assert(survivalHudRows(players,"2",false).size()==3);
-    assert(survivalHudRows(players,"15",true).size()==16);
-    players[3].rank=3;players[3].passing=true;
-    assert(survivalHudRows(players,"4",false).size()==3&&survivalHudRows(players,"4",false).back().id=="4");
+    auto own=survivalHudRows(players,"15",10);assert(own.size()==11&&own.back().id=="15"&&own.back().rank==15);
+    assert(survivalHudRows(players,"2",10).size()==10);
+    assert(survivalHudCutoffBoundary(own)==10);
+    for(auto target:{6,3,1}){
+        for(auto& p:players)p.passing=p.rank<=target;
+        auto rows=survivalHudRows(players,"15",target);
+        assert(rows.size()==static_cast<std::size_t>(target+1)&&rows.back().id=="15");
+        assert(survivalHudCutoffBoundary(rows)==static_cast<std::size_t>(target));
+        assert(survivalHudRows(players,"1",target).size()==static_cast<std::size_t>(target));
+    }
+    // Cutoff ties are passing, remain normal-colored, and expand the visible
+    // leader list only up to ten; my own row does not duplicate an existing ID.
+    for(auto& p:players)p.passing=p.rank<=6;
+    players[6].rank=6;players[6].passing=true;
+    auto tied=survivalHudRows(players,"7",6);assert(tied.size()==7&&tied.back().id=="7");
+    assert(survivalHudCutoffBoundary(tied)==7);
+    for(auto& p:players){p.rank=1;p.passing=true;}
+    assert(survivalHudRows(players,"15",3).size()==11);
+    assert(survivalHudRows(players,"2",3).size()==10);
+    assert(survivalHudRows({},"missing",10).empty());
+    assert(survivalProgressMarkerX(0,200)==0&&survivalProgressMarkerX(50,200)==100);
+    assert(survivalProgressMarkerX(100,200)==200&&survivalProgressMarkerX(101,200)==200);
+    assert(survivalProgressMarkerX(-1,200)==0&&survivalProgressMarkerX(NAN,200)==0);
     assert((survivalRankColor(1,true)==SurvivalHudColor{255,211,78}));
     assert((survivalRankColor(4,false)==SurvivalHudColor{255,82,105}));
     assert(survivalRankColor(4,true)!=survivalRankColor(4,false));

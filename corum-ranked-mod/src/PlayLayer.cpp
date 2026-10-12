@@ -638,7 +638,10 @@ public:
         m_fields->hudRoot=CCNode::create();m_fields->hudRoot->setContentSize(size);
         addFpsHud(m_fields->hudRoot,corum::ranked::layoutHud(size.width,size.height).topY);
         m_fields->survivalHud=corum::ranked::ui::SurvivalHud::create();
-        if(m_fields->survivalHud)m_fields->hudRoot->addChild(m_fields->survivalHud);
+        if(m_fields->survivalHud){
+            m_fields->hudRoot->addChild(m_fields->survivalHud);
+            m_fields->survivalHud->attachProgressBar(m_progressBar,m_progressFill,m_progressWidth,m_progressHeight);
+        }
         addChild(m_fields->hudRoot,1000);
     }
 

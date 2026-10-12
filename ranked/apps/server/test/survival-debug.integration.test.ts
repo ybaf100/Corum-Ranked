@@ -149,9 +149,9 @@ describe("Survival M4 persistent debug game",()=>{
     m=await prepare(m);expect(m.state).toBe("PLAYING");
     expect(survivalCurrentRound(m).endsAt!-survivalCurrentRound(m).startsAt!).toBe(180000);
   });
-  it("persists initial/four monotone updates and does not redraw on duplicate ticks or restart",async()=>{
+  it("persists initial/five monotone updates and does not redraw on duplicate ticks or restart",async()=>{
     const m=await prepare(await create()),r=survivalCurrentRound(m);
-    for(const t of [0,45000,95000,125000,155000]) {
+    for(const t of [0,19999,20000,49999,50000,80000,110000,140000]) {
       now=r.startsAt!+t;await debug.tickOnce();
       const current=await engine.get(m.id);
       current.players.filter(p=>p.kind==="BOT").forEach((p,i)=>{
@@ -161,7 +161,7 @@ describe("Survival M4 persistent debug game",()=>{
       const revision=current.revision;await Promise.all([debug.tickOnce(),debug.tickOnce()]);expect((await engine.get(m.id)).revision).toBe(revision);
     }
     expect((await db.query<{driver_state:Record<string,number>}>("SELECT driver_state FROM sur_debug_matches")).rows[0]!.driver_state).toEqual(
-      Object.fromEntries(Array.from({length:15},(_,i)=>[`${r.key}:${r.mapGeneration}:bot-${String(i+1).padStart(2,"0")}`,4])));
+      Object.fromEntries(Array.from({length:15},(_,i)=>[`${r.key}:${r.mapGeneration}:bot-${String(i+1).padStart(2,"0")}`,5])));
   });
   it("ends when the human is eliminated and settles the recorded rank once without running bot-only rounds",async()=>{
     const soloBefore=(await db.query("SELECT * FROM ranked_profiles")).rows;
@@ -205,7 +205,8 @@ describe("Survival M4 persistent debug game",()=>{
   });
   it("runs normal rounds then immediate bot Death Match attempts and ends when the human completes three",async()=>{
     let m=await create();
-    await db.query("UPDATE sur_debug_matches SET seed=3 WHERE match_id=$1",[m.id]);
+    // Seed 57 produces a legitimate 100% bot finalist under the nerfed normal plan.
+    await db.query("UPDATE sur_debug_matches SET seed=57 WHERE match_id=$1",[m.id]);
     for(let phase=0;phase<4;phase++) {
       m=await prepare(m);await record(m,100);now=survivalCurrentRound(m).endsAt!;await debug.tickOnce();
       m=await engine.get(m.id);if(m.state==="FINAL_RESULT")break;
