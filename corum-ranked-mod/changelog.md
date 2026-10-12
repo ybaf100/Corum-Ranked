@@ -1,5 +1,6 @@
 ## v0.5.0-beta.63
 
+- Match Survival participant tiles to `surface()`'s actual `CCNode*` return type, fixing the release/debug platform compile failure without a downcast or changing tile rendering/actions.
 - Correct the official-map enum to GD's actual `GJLevelType::Main` on every platform. Mirror the native enum in the metadata fixture and cover official Demon versus community Demon subtype presentation.
 - Fix beta63 validation blockers: preserve Solo result structures, retire legacy entry controls after card motion, align native test boundaries with hover/footer/history changes, and keep full achievement-description assertions. Use a supported Korean nickname prompt. Report searches containing only ineligible maps as exhaustion rather than duplicates.
 - Preserve the latest main Debug-button change. Keep Debug and Settings inside the lobby message strip, and add lobby-only hover/press pulses plus a single clockwise card highlight without changing frame thickness.
