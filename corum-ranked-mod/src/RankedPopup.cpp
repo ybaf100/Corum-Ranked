@@ -2488,6 +2488,8 @@ class CorumRankedLayer final : public CCLayerColor {
                 owner->m_modeTransition.finish();owner->syncLobbyInput();owner->refreshLobbyHover();}};
             if(opening) {
                 auto* hidden=mode==corum::ranked::RankedMode::Survival?self->m_lobbySolo:self->m_lobbySurvival;hidden->setVisible(false);
+                auto* card=mode==corum::ranked::RankedMode::Survival?self->m_lobbySurvival:self->m_lobbySolo;
+                if(auto* controls=card->getChildByID("ranked-mode-entry-controls"_spr))controls->setVisible(false);
                 if(self->m_lobbyContents)self->m_lobbyContents->runAction(CCSequence::create(
                     CCEaseSineOut::create(corum::ranked::ui::ModeLobbyFade::create(.18f,255)),CallFuncExt::create(finish),nullptr));
                 else finish();

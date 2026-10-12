@@ -68,7 +68,9 @@ test('Lobby and Achievement text keep native-readable sizing', () => {
 
     assert.match(achievements, /constexpr float cardHeight = 88\.0f/);
     assert.match(achievements, /title,\s*0\.40f/);
-    assert.match(achievements, /shorten\(description[\s\S]{0,120}0\.25f/);
+    assert.match(achievements, /description,\s*0\.25f/);
+    assert.doesNotMatch(achievements, /shorten\(description/);
+    assert.match(achievements, /fitFullMenuLabel\(descriptionLabel, cardWidth - 90\.0f, 26\.0f, 0\.25f\)/);
     assert.match(achievements, /progressText,\s*0\.30f/);
     assert.match(achievements, /onAchievementClaim[\s\S]{0,120}0\.50f/);
     assert.match(achievements, /onAchievementTitle\)[\s\S]{0,120}0\.50f/);

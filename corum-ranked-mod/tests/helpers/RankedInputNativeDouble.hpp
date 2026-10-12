@@ -5,6 +5,7 @@
 #include <functional>
 #include <memory>
 #include <set>
+#include <string>
 #include <vector>
 
 // Cocos 2.x public touch semantics: lower priorities run first, equal-priority
@@ -21,12 +22,19 @@ struct CCEvent {};
 struct CCObject { virtual ~CCObject() = default; };
 struct CCNode : CCObject {
     CCNode* parent = nullptr;
+    std::string id;
+    std::vector<CCNode*> children;
     bool visible = true;
     CCPoint origin;
     CCSize size;
     bool isVisible() const {return visible;}
     void setVisible(bool v) {visible=v;}
     CCSize getContentSize() const {return size;}
+    void setPosition(CCPoint p) {origin=p;}
+    CCNode* getChildByID(std::string const& value) const {
+        for(auto* child:children)if(child->id==value)return child;
+        return nullptr;
+    }
     CCPoint convertToNodeSpace(CCPoint p) const {return {p.x-origin.x,p.y-origin.y};}
     CCNode* getParent() { return parent; }
 };
@@ -97,6 +105,7 @@ struct CCDirector {
     CCNode* runningScene = nullptr;
     static CCDirector* sharedDirector() { static CCDirector director; return &director; }
     CCTouchDispatcher* getTouchDispatcher() { return &dispatcher; }
+    CCSize getWinSize() const {return {568,320};}
     CCNode* getRunningScene() { return runningScene; }
 };
 struct CCLayer : CCNode, CCTouchDelegate {

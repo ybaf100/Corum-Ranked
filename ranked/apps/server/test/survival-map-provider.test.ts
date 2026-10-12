@@ -20,7 +20,7 @@ describe("actual GD Survival search/download protocol",()=>{
     expect(()=>parseSurvivalSearch(body,0)).toThrow();
   });
   it("keeps eligible records on sparse pages and filters stale metadata independently",()=>{
-    const body=`${record()}|${record(40000001).replace("18:4","18:0")}###10:0:10#hash`;
+    const body=`${record()}|${record(40000001).replace("18:4","18:invalid")}###10:0:10#hash`;
     expect(parseSurvivalSearch(body,0).levels.map(level=>level.levelId)).toEqual([40000000]);
     expect(parseSurvivalSearch(page([40000000],2),0).levels).toHaveLength(1);
   });

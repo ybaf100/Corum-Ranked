@@ -53,7 +53,7 @@ inline constexpr std::array kKoreanTranslations {
     Translation{"leaderboard-find", "찾기"},
     Translation{"leaderboard-searching", "플레이어를 찾는 중..."},
     Translation{"leaderboard-not-found", "이 리더보드에서 플레이어를 찾을 수 없습니다."},
-    Translation{"leaderboard-enter-name", "플레이어 이름을 입력하세요."},
+    Translation{"leaderboard-enter-name", "플레이어 닉네임을 입력하세요."},
     Translation{"survival-from-first", "1위와 차이"},
     Translation{"survival-from-cutoff", "통과 점수와 차이"},
     Translation{"survival-attempts-finished", "시도 완료 · 결과 대기 중"},

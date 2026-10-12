@@ -1,5 +1,6 @@
 ## v0.5.0-beta.63
 
+- Fix beta63 validation blockers: preserve Solo result structures, retire legacy entry controls after card motion, align native test boundaries with hover/footer/history changes, and keep full achievement-description assertions. Use a supported Korean nickname prompt. Report searches containing only ineligible maps as exhaustion rather than duplicates.
 - Preserve the latest main Debug-button change. Keep Debug and Settings inside the lobby message strip, and add lobby-only hover/press pulses plus a single clockwise card highlight without changing frame thickness.
 - Reveal matchmaking content only after the card crossing finishes; fade it out before reversing. Add player-name searches that jump to and highlight the matching leaderboard row while retaining mode/request isolation.
 - Display Survival result ranks with podium colors and a red override for actual LP loss. Remove overlapping Solo labels from Survival history. Show Survival wins/losses/win rate using actual LP changes: an increase wins; unchanged or decreased LP loses. Remove the slash between card rank and Top percentage.

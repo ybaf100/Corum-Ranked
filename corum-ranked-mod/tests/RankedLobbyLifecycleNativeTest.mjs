@@ -80,6 +80,8 @@ struct Stage {int stageIndex=1;std::vector<std::string>mapGrades;std::string sta
 struct History {int survivalRank=0;corum::ranked::RankedMode mode=corum::ranked::RankedMode::SoloRanked;std::string side="A",winnerSide="A",opponentName="a long player name";std::optional<int>ownRankedScoreDelta=10;};
 struct RuntimeView {bool historyLoading=false;std::string historyError;struct{std::vector<Stage>stageResults;}placement;std::vector<History>history;};
 namespace fmt {template<class...T>std::string format(std::string s,T const&...){return s;}}
+namespace corum::ranked::i18n {bool isKorean(){return false;}}
+constexpr int ccc3(unsigned char r,unsigned char g,unsigned char b){return (r<<16)|(g<<8)|b;}
 constexpr int kGold=1,kCyan=2,kRed=3,kGreen=4,kDeepPanel2=5;
 std::string operator""_spr(char const*s,std::size_t n){return {s,n};}
 #define menu_selector(...) 0

@@ -44,6 +44,7 @@ ${strip(read('src/ui/RankedModeDisabledPopup.hpp')).replace('class RankedModeDis
 enum class RuntimeStage{Ready,Matched,Loading};struct RuntimeView{RuntimeStage stage=RuntimeStage::Ready;bool survivalEnabled=false,soloEnabled=false;struct{bool loaded=false;}survival;};
 struct RankedRuntime{RuntimeView v;int fetches=0;static RankedRuntime&get(){static RankedRuntime r;return r;}RuntimeView const&view()const{return v;}void fetchSurvivalProfile(){++fetches;}};
 struct Owner:CCNode{
+ struct Hover{void press(CCMenuItemSpriteExtra*){}};Hover*m_lobbyHover=nullptr;
  enum class Page{Live,History};Page m_page=Page::Live;bool m_uiFadingOut=false,m_modeNoticeOpen=false;unsigned m_modeNoticeGeneration=0;
  corum::ranked::ModeLobbyTransition m_modeTransition;std::optional<WeakRef<corum::ranked::ui::RankedModeDisabledPopup>>m_modeNotice;
  CCLayerColor a,b,c;CCLayerColor*m_lobbySurvival=&a,*m_lobbySolo=&b,*m_lobbyPanel=&c;

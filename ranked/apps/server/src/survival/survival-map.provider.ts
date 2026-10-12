@@ -143,9 +143,11 @@ export class GdSurvivalMapProvider implements SurvivalMapProvider {
     const failures:SurvivalMapErrorCode[]=[];
     const inspect=async(levels:readonly SurvivalMapMetadata[]):Promise<SurvivalVerifiedMap|null> => {
       for (const level of shuffle(levels,this.random)) {
+        // Ineligible maps never enter the duplicate-candidate pool: repeated
+        // old IDs or wrong difficulties mean exhaustion, not a reuse failure.
+        if (!survivalMapAllowed(level,request.group,request.phase,request.minimumLevelId)) continue;
         if (excluded.has(level.levelId) || seen.has(level.levelId)) {failures.push("DUPLICATE_CANDIDATES"); continue;}
         seen.add(level.levelId);
-        if (!survivalMapAllowed(level,request.group,request.phase,request.minimumLevelId)) continue;
         try {return verifySurvivalDownload(await this.post("downloadGJLevel22.php",{levelID:String(level.levelId)},signal,24*1024*1024),level,request);}
         catch (e) {failures.push(e instanceof SurvivalMapError ? e.code : "DOWNLOAD_FAILED");}
         if (signal.aborted) return null;

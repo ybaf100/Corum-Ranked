@@ -96,6 +96,7 @@ test('actual retained Ranked callbacks restore menu registration before onEnter,
 using namespace cocos2d;
 namespace geode::log { template<class... T> void info(T...) {} }
 using namespace geode;
+std::string operator""_spr(char const*s,std::size_t n){return {s,n};}
 namespace corum::ranked {
 struct RankedVolumeControl {int begins=0;static RankedVolumeControl& get(){static RankedVolumeControl c;return c;}unsigned long beginSession(){++begins;return 1;}};
 struct Runtime {struct View{struct{std::string state="ROUND_PLAYING";}match;}data;auto const& view(){return data;}};
@@ -111,6 +112,7 @@ struct CCLayerColor {
 struct Root { CCMenu* menu; void removeAllChildrenWithCleanup(bool){assert(menu->m_eState==kCCMenuStateWaiting);menu->item=nullptr;} };
 struct Menu : CCMenu {void removeAllChildrenWithCleanup(bool){assert(m_eState==kCCMenuStateWaiting && !m_pSelectedItem);item=nullptr;}};
 struct CorumRankedLayer : CCLayerColor {
+    struct Hover{void detach(){}};Hover*m_lobbyHover=nullptr;void*m_lobbyContents=nullptr;
     void* m_lobbySurvival=nullptr;void* m_lobbySolo=nullptr;void* m_lobbyPanel=nullptr;void* m_lobbyToolbar=nullptr;
     void setLobbyNodeInput(void*,bool){}
     Menu* m_menu=nullptr; Root* m_root=nullptr; void* m_rankTransitionLayer=nullptr;

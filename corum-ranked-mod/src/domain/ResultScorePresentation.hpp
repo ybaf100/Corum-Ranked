@@ -88,7 +88,6 @@ struct ResultScorePlayerView {
     StandingView before, after;
     ScoreSeriesView promotion;
     GoldScoreTimeline goldTimeline;
-    std::optional<int> survivalRank;
 };
 
 struct ResultScoreView {
