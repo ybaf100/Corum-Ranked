@@ -69,3 +69,17 @@ ranked/release-v0.5.0-beta.64/release.json
 기존 맵 제공자, 업데이트, 준비/경기 규칙 및 UI fixture에 후보 풀·메타데이터 최신화·완료 라운드 요약·R2 URL·조건부 게시·테두리 fade 관련 회귀 검사를 추가/갱신했다. 사용자 요청에 따라 이번 작업에서 로컬 테스트·빌드, Android 패키지 검사, 실기기 검사 또는 새 GitHub Actions 결과 확인은 실행하지 않았다. 코드 diff를 검토한 뒤 main에 push한다.
 
 새 DB 마이그레이션과 Apps Script setup/재배포는 필요 없다. 운영 DB, Apps Script, R2 계정·버킷 및 서버 환경은 이 코드 작업에서 직접 변경하지 않았다. M5의 공개 다인원 매칭과 온라인 세션 연동은 기존 후속 범위로 남아 있다.
+
+## Render 서버 빌드 핫픽스
+
+`1daedb1878019cf36e0d9800361e4a50716477ae`의 서버 빌드는 `exactOptionalPropertyTypes`에서 `rankedDownloadBaseUrl?: string`에 명시적 `undefined`를 반환해 TS2375로 실패했다. R2 주소를 한 번 정규화한 뒤, 설정되지 않은 경우 반환 객체에서 해당 속성을 생략하도록 수정했다. 주소가 설정된 경우의 동작과 beta64 버전은 유지한다. 이 핫픽스는 서버 설정·회귀 검사·문서만 변경하며 기존 R2 클라이언트 패키지를 다시 게시하지 않는다.
+
+이후 사용자 요청에 따라 로컬의 빠른 validate를 직접 실행했다.
+
+- npm 전체 workspace 타입검사: 통과. rules/server 소스와 테스트의 strict TypeScript 검사를 포함한다.
+- 서버 환경·업데이트 descriptor·맵 제공자·버전 진입 검사: 4파일, 70개 통과.
+- Survival 경기 규칙 검사: 52개 통과.
+- 로비 이동/테두리 fade 및 클라이언트 업데이트 native fixture: 9개 통과.
+- R2 게시 fixture: 9개 통과.
+
+위 결과는 로컬 validate 결과다. 전체 Geode 플랫폼 빌드·실기기 검사·운영 R2 업로드·새 GitHub Actions 결과를 확인한 것으로 보고하지 않는다.

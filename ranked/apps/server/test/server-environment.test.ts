@@ -15,7 +15,7 @@ describe("server environment", () => {
   it("normalizes an optional public R2 bucket origin",()=>{
     expect(loadServerEnvironment({...validEnvironment(),RANKED_DOWNLOAD_BASE_URL:" https://downloads.example.org/ "}).rankedDownloadBaseUrl)
       .toBe("https://downloads.example.org");
-    expect(loadServerEnvironment(validEnvironment()).rankedDownloadBaseUrl).toBeUndefined();
+    expect(loadServerEnvironment(validEnvironment())).not.toHaveProperty("rankedDownloadBaseUrl");
   });
   it.each(["http://downloads.example.org","https://user:password@example.org","https://downloads.example.org/path",
     "https://downloads.example.org?token=1","https://downloads.example.org#fragment"])("rejects unsafe R2 origin %s",base=>{

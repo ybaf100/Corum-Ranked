@@ -278,9 +278,10 @@ export const loadServerEnvironment = (
     };
   }
 
+  const rankedDownloadBaseUrl = normalizeRankedDownloadBaseUrl(environment.RANKED_DOWNLOAD_BASE_URL);
   return {
     rankedModUpdates: parseRankedModUpdates(environment.RANKED_MOD_UPDATES_JSON),
-    rankedDownloadBaseUrl: normalizeRankedDownloadBaseUrl(environment.RANKED_DOWNLOAD_BASE_URL),
+    ...(rankedDownloadBaseUrl === undefined ? {} : { rankedDownloadBaseUrl }),
     nodeEnv,
     port,
     databaseUrl,
