@@ -408,6 +408,9 @@ export class QueueService {
       AND revoked_at IS NULL AND expires_at>$3 AND last_heartbeat_at>$4`,
       [session.sessionId,session.playerId,now.toISOString(),sessionAliveSince(now)]);
     if (!current.rows.length) throw new UnauthorizedException("Ranked connection expired; enter Ranked again.");
+    const survival=await transaction.query(`SELECT 1 FROM sur_match_players p JOIN sur_matches m ON m.id=p.match_id
+      WHERE p.player_id=$1 AND m.state NOT IN ('FINAL_RESULT','CANCELLED') LIMIT 1`,[session.playerId]);
+    if(survival.rows.length)throw new ConflictException("Finish or recover the current Survival game first");
   }
 
   private async lockProfile(transaction: SqlExecutor, playerId: string): Promise<ProfileRow> {

@@ -38,6 +38,7 @@ const REQUIRED_MIGRATIONS = [
   "0019_ranked_audio_volumes.sql",
   "0021_survival_m1.sql",
   "0022_survival_m3_engine.sql",
+  "0023_survival_m4_debug.sql",
 ] as const;
 
 export interface RankedSchemaStatus {
@@ -69,6 +70,7 @@ type SchemaProbeRow = QueryResultRow & {
   sur_tiebreak_attempts: boolean;
   sur_match_commands: boolean;
   sur_lp_ledger: boolean;
+  sur_debug_matches: boolean;
   ranked_forum_records: boolean;
   ranked_forum_refresh_cooldowns: boolean;
   match_type: boolean;
@@ -189,6 +191,7 @@ export class DatabaseService implements DatabasePort, OnModuleInit, OnApplicatio
           to_regclass('public.sur_tiebreak_attempts') IS NOT NULL AS sur_tiebreak_attempts,
           to_regclass('public.sur_match_commands') IS NOT NULL AS sur_match_commands,
           to_regclass('public.sur_lp_ledger') IS NOT NULL AS sur_lp_ledger,
+          to_regclass('public.sur_debug_matches') IS NOT NULL AS sur_debug_matches,
           to_regclass('public.ranked_forum_records') IS NOT NULL AS ranked_forum_records,
           to_regclass('public.ranked_forum_refresh_cooldowns') IS NOT NULL AS ranked_forum_refresh_cooldowns,
           EXISTS (
@@ -283,6 +286,7 @@ export class DatabaseService implements DatabasePort, OnModuleInit, OnApplicatio
         ["sur_tiebreak_attempts", "table sur_tiebreak_attempts"],
         ["sur_match_commands", "table sur_match_commands"],
         ["sur_lp_ledger", "table sur_lp_ledger"],
+        ["sur_debug_matches", "table sur_debug_matches"],
         ["ranked_forum_records", "table ranked_forum_records"],
         ["ranked_forum_refresh_cooldowns", "table ranked_forum_refresh_cooldowns"],
         ["match_type", "ranked_matches.match_type"],

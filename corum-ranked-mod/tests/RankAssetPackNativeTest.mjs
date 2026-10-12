@@ -115,7 +115,7 @@ namespace corum::ranked::ui {
 using namespace geode::prelude;
 constexpr auto kDownloadTimeout=std::chrono::seconds(120);
 ${body(source,'std::string lower(')}
-${body(source,'class Sha256 final')};
+${body(read('src/domain/Sha256.hpp'),'class Sha256 final')};
 RankAssetPackManager::RankAssetPackManager(){}
 bool RankAssetPackManager::verifyDirectory(std::filesystem::path const&,std::string const&){return true;}
 void RankAssetPackManager::activateDownloadedPack(std::filesystem::path const& temp,
@@ -216,7 +216,7 @@ ${header}
 namespace corum::ranked::ui {
 using namespace geode::prelude;
 ${body(source,'std::string lower(')}
-${body(source,'class Sha256 final')} ;
+${body(read('src/domain/Sha256.hpp'),'class Sha256 final')} ;
 RankAssetPackManager::RankAssetPackManager() {}
 int networkRequests=0;
 void RankAssetPackManager::downloadConfiguredPack(){if(m_view.state==RankAssetPackState::Downloading||!m_metadata.configured())return;

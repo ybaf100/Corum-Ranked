@@ -66,7 +66,9 @@ export interface SurvivalMatch {
   updatedAt: number;
   finishedAt: number | null;
   winnerId: string | null;
+  winnerIds?: string[];
   cancellationReason: string | null;
+  completionKind?: "DEBUG_FORCE" | "DEBUG_HUMAN_ELIMINATION";
   players: SurvivalMatchPlayer[];
   rounds: SurvivalRound[];
   transitions: { sequence: number; state: SurvivalMatchState; roundKey: string; at: number; reason: string }[];
@@ -369,5 +371,5 @@ export function survivalLiveView(match: SurvivalMatch, now: number, participantI
       entered:p.enteredAt !== null,failed:p.preparationFailure,forfeited:p.forfeited})),
     participants:match.players.map(p => ({participantId:p.participantId,name:p.name,kind:p.kind,lpSnapshot:p.lp,
       eliminationStage:p.eliminationStage,finalRank:p.finalRank,forfeitReason:p.forfeitReason})),
-    winnerId:match.winnerId,cancellationReason:match.cancellationReason,settlementInputs:survivalSettlementInputs(match)};
+    winnerId:match.winnerId,winnerIds:match.winnerIds??(match.winnerId?[match.winnerId]:[]),cancellationReason:match.cancellationReason,settlementInputs:survivalSettlementInputs(match)};
 }

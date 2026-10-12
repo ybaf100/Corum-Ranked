@@ -1,6 +1,7 @@
-import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, Optional } from "@nestjs/common";
 import { randomUUID, timingSafeEqual } from "node:crypto";
-import { PROGRESSIVE_ACHIEVEMENTS, ONE_SHOT_ACHIEVEMENTS } from "@corum-ranked/rules";
+import { PROGRESSIVE_ACHIEVEMENTS, ONE_SHOT_ACHIEVEMENTS, survivalTierForLp } from "@corum-ranked/rules";
+import { SurvivalConfigService } from "../config/survival-config.service.js";
 import { DATABASE, type DatabasePort, type SqlExecutor } from "../database/database.port.js";
 import { SERVER_ENVIRONMENT, type ServerEnvironment } from "../config/server-environment.js";
 import { RankedConfigService } from "../config/ranked-config.service.js";
@@ -14,7 +15,8 @@ import { readRankedAudioVolumes } from "../config/ranked-audio-volume.js";
 export class AdminService {
   public constructor(@Inject(DATABASE) private readonly db: DatabasePort,
     @Inject(SERVER_ENVIRONMENT) private readonly env: ServerEnvironment, @Inject(RankedConfigService) private readonly config: RankedConfigService,
-    @Inject(SERVER_CLOCK) private readonly clock: ServerClock) {}
+    @Inject(SERVER_CLOCK) private readonly clock: ServerClock,
+    @Optional() private readonly survivalConfig?:SurvivalConfigService) {}
 
   public async execute(session: RankedSessionContext, body: AdminActionDto) {
     // The standard SessionGuard supplies this DB-backed identity. Client button
@@ -27,6 +29,11 @@ export class AdminService {
       throw new ForbiddenException("Admin requires hwanhee1 and the debug password");
     }
     if (body.action === "RESET_DB" && body.confirmation !== "RESET") throw new BadRequestException("Confirm database reset first");
+    const common=["UNLOCK_ALL","GET_AUDIO_VOLUMES","SET_AUDIO_VOLUME"].includes(body.action);
+    const scope=body.scope??(common?"COMMON":"SOLO_RANKED");
+    if(["RESET_DB","RESET_HISTORY"].includes(body.action) && !body.scope)throw new BadRequestException("Choose the reset scope explicitly");
+    if(common && scope!=="COMMON")throw new BadRequestException("Achievements and audio belong to COMMON");
+    if(scope==="COMMON" && ["SET_LP","SET_MMR","SET_BOTH","DELETE_BOTS"].includes(body.action))throw new BadRequestException("Choose a rating mode");
     return this.db.transaction(async tx => {
       await tx.query("SELECT id FROM ranked_players WHERE id=$1 FOR UPDATE",[session.playerId]);
       const now=this.clock.now();
@@ -37,6 +44,7 @@ export class AdminService {
           AND s.last_heartbeat_at>$4 AND lower(p.gd_username)='hwanhee1'
         FOR UPDATE OF s`,[session.sessionId,session.playerId,now.toISOString(),sessionAliveSince(now)]);
       if (!caller.rows.length) throw new ForbiddenException("Admin session expired");
+      if(scope==="SURVIVAL")return this.survivalAction(tx,session,body,now);
       if (body.action === "GET_AUDIO_VOLUMES" || body.action === "SET_AUDIO_VOLUME") {
         const client = this.config.getSnapshot().client;
         if (body.action === "SET_AUDIO_VOLUME") {
@@ -62,9 +70,21 @@ export class AdminService {
           ? "Song volume saved for all Ranked players." : "Ranked song volumes loaded." };
       }
       if (body.action === "RESET_DB") {
-        await tx.query(`TRUNCATE ranked_matches, ranked_players, ranked_outbox_events,
-          ranked_forum_records, ranked_forum_refresh_cooldowns, debug_spectate_recordings CASCADE`);
-        return { ok:true, reset:true, message:"Ranked player, match and session data reset. Operational configuration retained." };
+        await tx.query("SELECT id FROM ranked_players ORDER BY id FOR UPDATE");
+        if(scope==="COMMON") {
+          await this.resetCommon(tx,null,now);
+          return {ok:true,reset:true,scope,message:"Common achievements, AP and titles reset. Mode ratings, accounts and sessions retained."};
+        }
+        const active=await tx.query(`SELECT 1 FROM ranked_matches WHERE state NOT IN ('MATCH_RESULT','CANCELLED')
+          UNION ALL SELECT 1 FROM ranked_placement_runs WHERE state NOT IN ('PLACEMENT_RESULT','CANCELLED')
+          UNION ALL SELECT 1 FROM ranked_queue_entries WHERE status='QUEUED' LIMIT 1`);
+        if(active.rows.length)throw new ConflictException("Finish Solo games and leave Solo queues before resetting Solo");
+        await tx.query("DELETE FROM ranked_queue_entries");await tx.query("DELETE FROM ranked_match_tokens");
+        await tx.query("DELETE FROM ranked_outbox_events WHERE aggregate_id IN (SELECT id FROM ranked_matches)");
+        await tx.query("DELETE FROM ranked_matches");await tx.query("DELETE FROM ranked_placement_runs");
+        const players=(await tx.query<{player_id:string}>("SELECT player_id FROM ranked_profiles ORDER BY player_id")).rows;
+        for(const player of players)await this.resetSolo(tx,player.player_id,now);
+        return {ok:true,reset:true,scope,message:"Solo ratings, Placement and match records reset. Survival and common data retained."};
       }
       if (body.action === "DELETE_BOTS") {
         const bots = await tx.query<{id:string}>("SELECT id FROM ranked_players WHERE is_bot=TRUE ORDER BY id FOR UPDATE");
@@ -79,6 +99,10 @@ export class AdminService {
       if (!target.rows.length) throw new NotFoundException("Player not found");
       if (target.rows.length !== 1) throw new ConflictException("The nickname matches multiple players");
       const player=target.rows[0]!;
+      if(scope==="COMMON" && body.action==="RESET_HISTORY") {
+        await this.resetCommon(tx,player.id,now);
+        return {ok:true,resetPlayer:true,own:player.id===session.playerId,scope,message:`Reset common achievements, AP and title for ${player.gd_username}. Mode data retained.`};
+      }
       const queued=await tx.query<{status:string}>("SELECT status FROM ranked_queue_entries WHERE player_id=$1 FOR UPDATE",[player.id]);
       if (queued.rows[0]?.status === "QUEUED") throw new ConflictException("Leave the player's matchmaking queue first");
       await tx.query("SELECT player_id FROM ranked_profiles WHERE player_id=$1 FOR UPDATE",[player.id]);
@@ -94,26 +118,12 @@ export class AdminService {
         const visible=await tx.query<{count:string}>(`SELECT COUNT(*) AS count FROM ranked_matches m JOIN ranked_profiles p ON p.player_id=$1
           WHERE (m.player_a_id=$1 OR m.player_b_id=$1) AND m.state='MATCH_RESULT' AND m.finished_at>p.history_visible_since`,[player.id]);
         const count=Number(visible.rows[0]?.count ?? 0);
-        // Keep shared match evidence for the other participant, but start this
-        // player's entire Ranked profile over. New columns inherit fresh-player
-        // defaults rather than silently retaining statistics from the old run.
         await tx.query("DELETE FROM ranked_placement_runs WHERE player_id=$1",[player.id]);
-        await tx.query("DELETE FROM ranked_achievement_unlocks WHERE player_id=$1",[player.id]);
-        await tx.query("DELETE FROM ranked_achievement_events WHERE player_id=$1",[player.id]);
-        await tx.query("DELETE FROM ranked_ap_ledger WHERE player_id=$1",[player.id]);
-        await tx.query("DELETE FROM ranked_achievement_metrics WHERE player_id=$1",[player.id]);
-        await tx.query("DELETE FROM ranked_profiles WHERE player_id=$1",[player.id]);
-        await tx.query("INSERT INTO ranked_profiles (player_id,history_visible_since) VALUES ($1,$2)",[player.id,now.toISOString()]);
-        // Do not restore the erased achievements from the retained shared
-        // matches on the next state request. New results still count normally.
-        await tx.query("INSERT INTO ranked_achievement_metrics (player_id,backfilled_at) VALUES ($1,$2)",[player.id,now.toISOString()]);
+        await this.resetSolo(tx,player.id,now);
         await tx.query("DELETE FROM ranked_queue_entries WHERE player_id=$1",[player.id]);
         await tx.query("DELETE FROM ranked_match_tokens WHERE player_id=$1",[player.id]);
-        await tx.query("UPDATE ranked_sessions SET revoked_at=$2 WHERE player_id=$1 AND revoked_at IS NULL",[player.id,now.toISOString()]);
-        await tx.query("DELETE FROM ranked_forum_records WHERE gd_account_id=$1",[player.gd_account_id]);
-        await tx.query("DELETE FROM ranked_forum_refresh_cooldowns WHERE gd_account_id=$1",[player.gd_account_id]);
         return {ok:true,count,resetPlayer:true,own:player.id===session.playerId,
-          message:`Reset all Ranked data for ${player.gd_username}: LP, MMR, tier, Placement, statistics, achievements, AP, title and history. Sign in again to begin Placement.`};
+          scope,message:`Reset Solo LP, MMR, tier, Placement, statistics and visible history for ${player.gd_username}. Survival, achievements, AP, title and session retained.`};
       }
       if (body.action === "UNLOCK_ALL") {
         let count=0;const source=`ADMIN_UNLOCK_ALL:${randomUUID()}`;
@@ -150,6 +160,55 @@ export class AdminService {
       return {ok:true,own:player.id===session.playerId,profile:row ? {displayedTier:row.displayed_tier,
         visibleRankedScore:row.visible_ranked_score,placementGames:row.placement_games} : null,message:`Updated ${player.gd_username}.`};
     });
+  }
+
+  private async resetSolo(tx:SqlExecutor,playerId:string,now:Date):Promise<void> {
+    const common=(await tx.query<{total_ap:number;equipped_achievement_id:string|null;equipped_achievement_level:number|null}>(
+      "SELECT total_ap,equipped_achievement_id,equipped_achievement_level FROM ranked_profiles WHERE player_id=$1 FOR UPDATE",[playerId])).rows[0];
+    await tx.query("DELETE FROM ranked_profiles WHERE player_id=$1",[playerId]);
+    await tx.query(`INSERT INTO ranked_profiles(player_id,history_visible_since,total_ap,equipped_achievement_id,equipped_achievement_level)
+      VALUES($1,$2,$3,$4,$5)`,[playerId,now.toISOString(),common?.total_ap??0,common?.equipped_achievement_id??null,common?.equipped_achievement_level??null]);
+  }
+  private async resetCommon(tx:SqlExecutor,playerId:string|null,now:Date):Promise<void> {
+    const players=playerId?[playerId]:(await tx.query<{player_id:string}>("SELECT player_id FROM ranked_profiles ORDER BY player_id FOR UPDATE")).rows.map(p=>p.player_id);
+    await tx.query("SELECT player_id FROM ranked_profiles WHERE player_id=ANY($1::uuid[]) ORDER BY player_id FOR UPDATE",[players]);
+    for(const table of ["ranked_achievement_unlocks","ranked_achievement_events","ranked_ap_ledger","ranked_achievement_metrics"])
+      await tx.query(`DELETE FROM ${table} WHERE player_id=ANY($1::uuid[])`,[players]);
+    await tx.query("UPDATE ranked_profiles SET total_ap=0,equipped_achievement_id=NULL,equipped_achievement_level=NULL WHERE player_id=ANY($1::uuid[])",[players]);
+    for(const id of players)await tx.query("INSERT INTO ranked_achievement_metrics(player_id,backfilled_at) VALUES($1,$2)",[id,now.toISOString()]);
+  }
+  private async survivalAction(tx:SqlExecutor,session:RankedSessionContext,body:AdminActionDto,now:Date) {
+    if(!this.survivalConfig)throw new BadRequestException("Survival configuration unavailable");
+    const captured=this.survivalConfig.getSnapshot(),initial=captured.config.initialLp;
+    if(["SET_MMR","SET_BOTH","UNLOCK_ALL","GET_AUDIO_VOLUMES","SET_AUDIO_VOLUME"].includes(body.action))
+      throw new BadRequestException("This action does not belong to Survival");
+    if(body.action==="DELETE_BOTS")return {ok:true,count:0,scope:"SURVIVAL",message:"Survival bots belong to matches and have no account profiles. Use Survival history/database reset."};
+    let players:string[];
+    if(body.action==="RESET_DB")players=(await tx.query<{id:string}>("SELECT id FROM ranked_players ORDER BY id FOR UPDATE")).rows.map(p=>p.id);
+    else {
+      const found=(await tx.query<{id:string}>("SELECT id FROM ranked_players WHERE lower(gd_username)=lower($1) AND is_bot=FALSE ORDER BY id FOR UPDATE",[body.username??session.gdUsername])).rows;
+      if(!found.length)throw new NotFoundException("Player not found");if(found.length!==1)throw new ConflictException("The nickname matches multiple players");
+      players=found.map(p=>p.id);
+    }
+    const active=await tx.query(`SELECT 1 FROM sur_match_players p JOIN sur_matches m ON m.id=p.match_id WHERE p.player_id=ANY($1::uuid[])
+      AND (m.state NOT IN ('FINAL_RESULT','CANCELLED') OR EXISTS(SELECT 1 FROM sur_debug_matches d WHERE d.match_id=m.id AND d.settled_at IS NULL AND m.state='FINAL_RESULT')) LIMIT 1`,[players]);
+    if(active.rows.length)throw new ConflictException("Finish and settle Survival games first");
+    await tx.query("SELECT player_id FROM sur_profiles WHERE player_id=ANY($1::uuid[]) ORDER BY player_id FOR UPDATE",[players]);
+    if(body.action==="SET_LP") {
+      if(!Number.isInteger(body.lp) || body.lp!<0 || body.lp!>2147483647)throw new BadRequestException("Enter valid Survival LP");
+      const tier=survivalTierForLp(body.lp!,captured.config.tierBands);
+      await tx.query(`INSERT INTO sur_profiles(player_id,lp,displayed_tier,lp_reached_at) VALUES($1,$2,$3,$4)
+        ON CONFLICT(player_id) DO UPDATE SET lp=EXCLUDED.lp,displayed_tier=EXCLUDED.displayed_tier,demotion_warning=FALSE,lp_reached_at=EXCLUDED.lp_reached_at,updated_at=EXCLUDED.lp_reached_at`,[players[0],body.lp,tier.tier,now.toISOString()]);
+      return {ok:true,scope:"SURVIVAL",own:players[0]===session.playerId,message:"Survival LP and tier updated."};
+    }
+    if(!["RESET_HISTORY","RESET_DB"].includes(body.action))throw new BadRequestException("Unsupported Survival Admin action");
+    const tier=survivalTierForLp(initial,captured.config.tierBands);
+    await tx.query("DELETE FROM sur_lp_ledger WHERE player_id=ANY($1::uuid[])",[players]);
+    if(body.action==="RESET_DB")await tx.query("DELETE FROM sur_matches");
+    await tx.query(`UPDATE sur_profiles SET lp=$2,displayed_tier=$3,demotion_warning=FALSE,lp_reached_at=$4,updated_at=$4,history_visible_since=$4
+      WHERE player_id=ANY($1::uuid[])`,[players,initial,tier.tier,now.toISOString()]);
+    return {ok:true,scope:"SURVIVAL",reset:body.action==="RESET_DB",resetPlayer:body.action==="RESET_HISTORY",own:players.includes(session.playerId),
+      message:"Survival profile and visible history reset. Solo, accounts, sessions, achievements, AP and title retained."};
   }
 
   private async deleteHistory(tx: SqlExecutor, players: readonly string[]) {

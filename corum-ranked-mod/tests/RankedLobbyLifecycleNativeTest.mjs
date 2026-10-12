@@ -27,6 +27,7 @@ test('actual history rows keep Details visible and correctly indexed across 30-r
     const source=read('src/RankedPopup.cpp');
     const callbacks=['    void renderHistoryList(', '    void onHistoryDetail('].map(s=>method(source,s)).join('\n');
     runCpp(`
+#include "${join(root,'src/domain/SurvivalHudPresentation.hpp')}"
 #include <algorithm>
 #include <cassert>
 #include <optional>
@@ -40,7 +41,7 @@ struct CCNode {
  CCPoint position{},anchor{.5f,.5f};CCSize size{};float scale=1;bool visible=true,ignoreAnchor=false;int tag=-1;
  std::string id;std::vector<CCNode*>children;
  static CCNode*create(){return new CCNode;}
- void setPosition(CCPoint p){position=p;}void setAnchorPoint(CCPoint p){anchor=p;}
+ void setVisible(bool v){visible=v;}void setPosition(CCPoint p){position=p;}void setAnchorPoint(CCPoint p){anchor=p;}
  void setContentSize(CCSize s){size=s;}CCSize getContentSize()const{return size;}
  void setScale(float s){scale=s;}void setID(std::string s){id=std::move(s);}
  void setTag(int t){tag=t;}int getTag()const{return tag;}
@@ -76,7 +77,7 @@ struct ScrollLayer:CCNode {
 };
 #include "${root}/src/domain/RankedMode.hpp"
 struct Stage {int stageIndex=1;std::vector<std::string>mapGrades;std::string stageGrade="A";double stageScore=300;};
-struct History {corum::ranked::RankedMode mode=corum::ranked::RankedMode::SoloRanked;std::string side="A",winnerSide="A",opponentName="a long player name";std::optional<int>ownRankedScoreDelta=10;};
+struct History {int survivalRank=0;corum::ranked::RankedMode mode=corum::ranked::RankedMode::SoloRanked;std::string side="A",winnerSide="A",opponentName="a long player name";std::optional<int>ownRankedScoreDelta=10;};
 struct RuntimeView {bool historyLoading=false;std::string historyError;struct{std::vector<Stage>stageResults;}placement;std::vector<History>history;};
 namespace fmt {template<class...T>std::string format(std::string s,T const&...){return s;}}
 constexpr int kGold=1,kCyan=2,kRed=3,kGreen=4,kDeepPanel2=5;

@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, Inject, Injectable, NotImplementedException, ServiceUnavailableException } from "@nestjs/common";
-import { survivalTierForLp, updateSurvivalRating, type SurvivalConfig } from "@corum-ranked/rules";
+import { survivalTierForLp, updateSurvivalRating, type SurvivalConfig, type SurvivalRatingUpdate } from "@corum-ranked/rules";
+import type { SurvivalConfigDocument } from "../config/survival-config.service.js";
 import { AchievementService } from "../achievement/achievement.service.js";
 import { ID_GENERATOR, SERVER_CLOCK, type IdGenerator, type ServerClock } from "../common/runtime.module.js";
 import { SurvivalConfigService } from "../config/survival-config.service.js";
@@ -26,8 +27,12 @@ export class SurvivalService {
     });
     const row = (await this.database.query<ProfileRow>("SELECT * FROM sur_profiles WHERE player_id = $1", [playerId])).rows[0]!;
     const standing = await this.standing(playerId);
+    const record=(await this.database.query<{count:number;best:number|null}>(`SELECT COUNT(*)::int AS count,MIN(p.final_rank)::int AS best
+      FROM sur_match_players p JOIN sur_matches m ON m.id=p.match_id JOIN sur_profiles sp ON sp.player_id=p.player_id
+      LEFT JOIN sur_debug_matches d ON d.match_id=m.id WHERE p.player_id=$1 AND m.state='FINAL_RESULT'
+      AND m.finished_at>sp.history_visible_since AND (d.match_id IS NULL OR d.settled_at IS NOT NULL)`,[playerId])).rows[0];
     return { serverNow: now.toISOString(), enabled: snapshot.config.enabled,
-      profile: this.project(row, snapshot.config), standing };
+      profile: this.project(row, snapshot.config), standing,recordSummary:{completedMatches:Number(record?.count??0),bestRank:record?.best??null} };
   }
 
   private async ensureProfile(transaction: SqlExecutor, playerId: string, config: SurvivalConfig, now: Date): Promise<void> {
@@ -76,10 +81,15 @@ export class SurvivalService {
   }
 
   public async history(playerId: string) {
+    const matches=await this.database.query<{id:string;finished_at:Date|string;snapshot:unknown;result:unknown}>(
+      `SELECT m.id,m.finished_at,m.snapshot,d.result FROM sur_matches m JOIN sur_match_players p ON p.match_id=m.id
+       JOIN sur_profiles sp ON sp.player_id=p.player_id LEFT JOIN sur_debug_matches d ON d.match_id=m.id
+       WHERE p.player_id=$1 AND m.state='FINAL_RESULT' AND m.finished_at>sp.history_visible_since
+       AND (d.match_id IS NULL OR d.settled_at IS NOT NULL) ORDER BY m.finished_at DESC,m.id LIMIT 30`,[playerId]);
     const events = await this.database.query(`SELECT event_key,actual_delta,lp_after,tier_after,awarded_at
       FROM sur_lp_ledger WHERE player_id=$1 ORDER BY awarded_at DESC,id DESC LIMIT 30`, [playerId]);
-    // No Survival engine exists in M1. Never label audit entries as played matches.
-    return { mode: "SURVIVAL", serverNow: this.clock.now().toISOString(), matches: [], lpEvents: events.rows };
+    return { mode: "SURVIVAL", serverNow: this.clock.now().toISOString(),
+      matches:matches.rows.map(row=>({matchId:row.id,mode:"SURVIVAL",finishedAt:new Date(row.finished_at).toISOString(),snapshot:row.snapshot,result:row.result})),lpEvents: events.rows };
   }
 
   public rejectNewMatch(): never {
@@ -92,7 +102,7 @@ export class SurvivalService {
    * A transaction updates protected LP and its warning together with the ledger.
    */
   public async settleLp(playerId: string, eventKey: string, delta: number,
-    captured = this.config.getSnapshot()) {
+    captured:Pick<SurvivalConfigDocument,"generation"|"config"> = this.config.getSnapshot()):Promise<SurvivalRatingUpdate & {eventKey:string;serverNow:string}> {
     if (!eventKey.trim() || eventKey.length > 200 || !Number.isSafeInteger(delta)) throw new BadRequestException("Invalid Survival settlement");
     return this.database.transaction(async transaction => {
       // Shared achievement operations lock the Solo profile before metrics.
@@ -100,7 +110,7 @@ export class SurvivalService {
       await transaction.query("SELECT player_id FROM ranked_profiles WHERE player_id=$1 FOR UPDATE", [playerId]);
       const row = (await transaction.query<ProfileRow>("SELECT * FROM sur_profiles WHERE player_id=$1 FOR UPDATE", [playerId])).rows[0];
       if (!row) throw new ConflictException("Enter Survival before settling its LP");
-      const existing = (await transaction.query<{ requested_delta: number; result: object }>(
+      const existing = (await transaction.query<{ requested_delta: number; result: SurvivalRatingUpdate & {eventKey:string;serverNow:string} }>(
         "SELECT requested_delta,result FROM sur_lp_ledger WHERE player_id=$1 AND event_key=$2", [playerId,eventKey])).rows[0];
       if (existing) {
         if (Number(existing.requested_delta) !== delta) throw new ConflictException("A Survival event cannot change its LP award");

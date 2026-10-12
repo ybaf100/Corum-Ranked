@@ -14,7 +14,9 @@ const body=(source,name)=>{const at=source.indexOf(name);assert(at>=0,name);cons
 
 test('packaged Corum font charsets cover Korean countdown, pause and surrender labels',()=>{
     const fonts=JSON.parse(read('mod.json')).resources.fonts;
-    const captions=read('src/ui/RankedTranslations.hpp')+read('src/ui/RankedEntryOverlay.cpp')+pause;
+    const used=read('src/ui/RankedEntryOverlay.cpp')+pause;
+    const keys=new Set([...used.matchAll(/"([^"\n]+)"/g)].map(m=>m[1]));
+    const captions=used+[...read('src/ui/RankedTranslations.hpp').matchAll(/Translation\{"([^"]+)", "([^"]*)"\}/g)].filter(m=>keys.has(m[1])).map(m=>m[2]).join('');
     const glyphs=new Set([...captions].map(c=>c.codePointAt(0)).filter(n=>n>=0xac00&&n<=0xd7a3));
     for(const weight of ['CorumSansMedium','CorumSansSemiBold','CorumSansBold','CorumSansBlack']){
         const available=new Set();

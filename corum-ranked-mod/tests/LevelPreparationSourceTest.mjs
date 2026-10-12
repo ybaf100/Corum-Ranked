@@ -150,7 +150,7 @@ test('spectator reconnect reuses attested native round entry without arming an A
     assert.doesNotMatch(popupEntry, /LevelInfoLayer::scene/);
     const round = read('../src/RankedRoundPreparation.cpp');
     assert.match(round, /preparation.authorizes\(level, m_context\)/);
-    assert.match(round, /if \(!spectator && !entering && !runtime.armCurrentLevelForGameplay\(\)\)/);
+    assert.match(round, /if \(!survival && !spectator && !entering && !runtime.armCurrentLevelForGameplay\(\)\)/);
     assert.match(round, /PlayLayer::scene\(level, false, false\)/);
     assert.match(levelLaunch, /rankedLevelEntryAllowed\(runtime\)/);
     assert.match(activate, /auto const spectatorLaunch = runtime\.canEnterCurrentLevelAsSpectator\(\)/);

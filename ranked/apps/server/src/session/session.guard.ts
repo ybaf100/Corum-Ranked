@@ -60,7 +60,10 @@ export class SessionGuard implements CanActivate {
       [tokenHash, now.toISOString(), sessionAliveSince(now)],
     );
     const row = result.rows[0];
-    if (!row || row.hidden_mmr === null) throw new UnauthorizedException("Invalid or expired session");
+    if (!row) throw new UnauthorizedException("Invalid or expired session");
+    // Authentication is shared by both modes. A Solo-only Admin reset may
+    // legitimately clear its MMR while a Survival game/session remains active.
+    // Solo admission still checks its locked profile and Placement separately.
     // Admission already validated the version before this token was issued.
     // A deployment must not eject players from an existing game. New lobby
     // admissions use the current channel requirement in SessionController.
