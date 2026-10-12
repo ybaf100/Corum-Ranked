@@ -2421,7 +2421,7 @@ class CorumRankedLayer final : public CCLayerColor {
                     trophy->setPosition({size.width - 28 - historyWidth - trophy->getContentSize().width / 2,size.height - 28});
             }
             if (auto* debug = m_lobbyToolbar->getChildByID("ranked-lobby-debug"_spr))
-                debug->setVisible(selected == corum::ranked::RankedMode::SoloRanked);
+                debug->setVisible(selected.has_value());
         }
         auto* label = typeinfo_cast<CCLabelBMFont*>(m_root->getChildByID("ranked-screen-eyebrow"_spr));
         if (!label) return;
