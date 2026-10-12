@@ -83,6 +83,44 @@ describe("actual GD Survival search/download protocol",()=>{
       .rejects.toMatchObject({code:"API_ERROR",message:expect.stringContaining("GD getGJLevels21.php HTTP 403"),http:{status:403}});
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
+  it.each(["1006","1010","1015","1020"])("records Cloudflare plaintext error %s without assuming a challenge or changing agents",async(code)=>{
+    const fetcher=vi.fn(async(_url:string|URL|Request,init?:RequestInit)=>{
+      expect(new Headers(init?.headers).get("user-agent")).toBe("");
+      return new Response(`error code: ${code}\r\n`,{status:403,headers:{server:"cloudflare",
+        "content-type":"text/plain; charset=UTF-8","cf-ray":"fixture-SIN"}});
+    }) as unknown as typeof fetch;
+    const provider=new GdSurvivalMapProvider(new SeededRandom(1),fetcher);
+    await expect(provider.select(request)).rejects.toMatchObject({code:"API_ERROR",retryAfterMs:30000,
+      http:{edgeErrorCode:code,textSummary:`error code: ${code}`,bodyKind:"CLOUDFLARE_BLOCK",cfMitigated:null,title:null},
+      message:expect.stringContaining(`\"edgeErrorCode\":\"${code}\"`)});
+    await expect(provider.select({...request,group:"GOLD"})).rejects.toMatchObject({http:{edgeErrorCode:code}});
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+  it("keeps unknown Cloudflare plaintext errors visible but bounds their summaries",async()=>{
+    const fetcher=vi.fn(async()=>new Response("Forbidden\n"+"x".repeat(200)+"private-outside-summary",{
+      status:403,headers:{server:"cloudflare","content-type":"text/plain","set-cookie":"private-cookie"}})) as unknown as typeof fetch;
+    let failure:unknown;
+    try{await new GdSurvivalMapProvider(new SeededRandom(1),fetcher).select(request);}catch(error){failure=error;}
+    expect(failure).toMatchObject({http:{edgeErrorCode:null,textSummary:"Forbidden "+"x".repeat(150),bodyKind:"TEXT"}});
+    expect(JSON.stringify(failure)).not.toContain("private-outside-summary");
+    expect(JSON.stringify(failure)).not.toContain("private-cookie");expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+  it("does not copy unrelated plaintext or full HTML denial bodies into diagnostics",async()=>{
+    for(const [body,headers,expected] of [
+      ["error code: 1010 private-origin-body",{server:"origin","content-type":"text/plain"},{edgeErrorCode:null,bodyKind:"TEXT"}],
+      ["<html><title>Access denied</title>Cloudflare error code: 1020 private-html-body</html>",
+        {server:"cloudflare","content-type":"text/html"},{edgeErrorCode:"1020",bodyKind:"CLOUDFLARE_BLOCK"}],
+      ["error code: 1010 private-challenge-body",{server:"cloudflare","content-type":"text/plain","cf-mitigated":"challenge"},
+        {edgeErrorCode:"1010",bodyKind:"CLOUDFLARE_CHALLENGE"}],
+    ] as const) {
+      const fetcher=vi.fn(async()=>new Response(body,{status:403,headers})) as unknown as typeof fetch;
+      let failure:unknown;
+      try{await new GdSurvivalMapProvider(new SeededRandom(1),fetcher).select(request);}catch(error){failure=error;}
+      expect(failure).toMatchObject({http:{...expected,textSummary:null}});
+      expect(JSON.stringify(failure)).not.toMatch(/private-(?:origin|html|challenge)-body/);
+      expect(fetcher).toHaveBeenCalledTimes(1);
+    }
+  });
   it("captures challenge diagnostics, suppresses all selections during cooldown and recovers afterward",async()=>{
     vi.useFakeTimers();vi.setSystemTime(0);let searches=0;
     const fetcher=vi.fn(async(url:string|URL|Request)=>{

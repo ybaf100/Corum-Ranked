@@ -27,6 +27,8 @@ export interface SurvivalMapHttpDiagnostics {
   cfMitigated:string|null;
   retryAfter:string|null;
   title:string|null;
+  edgeErrorCode:string|null;
+  textSummary:string|null;
   bodyKind:"CLOUDFLARE_CHALLENGE"|"CLOUDFLARE_BLOCK"|"HTML"|"TEXT"|"EMPTY";
 }
 export class SurvivalMapError extends Error {
@@ -46,7 +48,8 @@ function gdRetryDelay(response:Response):number {
 }
 async function gdHttpDiagnostics(endpoint:string,response:Response):Promise<SurvivalMapHttpDiagnostics> {
   // Read only a small error-page prefix, and publish only an allowlist of
-  // transport fields/title. Never retain cookies, authorization or raw bodies.
+  // transport fields/title and a short public Cloudflare plaintext error.
+  // Never retain cookies, authorization or full error pages.
   let sample="";
   const reader=response.body?.getReader();
   if(reader) {
@@ -63,12 +66,16 @@ async function gdHttpDiagnostics(endpoint:string,response:Response):Promise<Surv
   const header=(name:string)=>{const value=response.headers.get(name);return value?clean(value):null;};
   const cfMitigated=header("cf-mitigated");
   const contentType=header("content-type");
+  const server=header("server");
   const title=sample.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1];
   const challenge=cfMitigated==="challenge" || /\/cdn-cgi\/challenge-platform\//i.test(sample);
-  const blocked=/cloudflare/i.test(sample) && /attention required|access denied|sorry, you have been blocked|error\s*1020/i.test(sample);
+  const cloudflare=server?.toLowerCase()==="cloudflare" || /cloudflare/i.test(sample);
+  const edgeErrorCode=cloudflare?(sample.match(/\berror(?:\s+code)?\s*:?\s*(1\d{3})\b/i)?.[1]??null):null;
+  const blocked=cloudflare && (edgeErrorCode!==null || /attention required|access denied|sorry, you have been blocked/i.test(sample));
   const html=(contentType?.includes("html")??false) || /<(?:!doctype|html|title)\b/i.test(sample);
-  return {endpoint,status:response.status,server:header("server"),contentType,
+  return {endpoint,status:response.status,server,contentType,
     cfRay:header("cf-ray"),cfMitigated,retryAfter:header("retry-after"),title:title?clean(title):null,
+    edgeErrorCode,textSummary:cloudflare && !html && !challenge && sample?clean(sample):null,
     bodyKind:challenge?"CLOUDFLARE_CHALLENGE":blocked?"CLOUDFLARE_BLOCK":html?"HTML":sample?"TEXT":"EMPTY"};
 }
 function fields(record: string): Map<string,string> {

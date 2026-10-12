@@ -187,8 +187,9 @@ describe("durable Survival M3 engine",()=>{
   });
   it("persists upstream denial diagnostics and retry deadlines across recovery without starting a round",async()=>{
     const match=await engine.create("http-denial",entrants);
-    const http={endpoint:"getGJLevels21.php",status:403,server:"cloudflare",contentType:"text/html",cfRay:"fixture-ray",
-      cfMitigated:"challenge",retryAfter:null,title:"Just a moment...",bodyKind:"CLOUDFLARE_CHALLENGE" as const};
+    const http={endpoint:"getGJLevels21.php",status:403,server:"cloudflare",contentType:"text/plain",cfRay:"fixture-ray",
+      cfMitigated:null,retryAfter:null,title:null,edgeErrorCode:"1006",textSummary:"error code: 1006",
+      bodyKind:"CLOUDFLARE_BLOCK" as const};
     vi.mocked(provider.select).mockRejectedValueOnce(new SurvivalMapError("API_ERROR",
       `GD getGJLevels21.php HTTP 403; http=${JSON.stringify(http)}`,[],http,30000));
     await engine.selectMap(match.id);
