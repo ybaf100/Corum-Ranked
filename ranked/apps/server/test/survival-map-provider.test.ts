@@ -28,6 +28,10 @@ describe("actual GD Survival search/download protocol",()=>{
     const valid=verifySurvivalDownload(download(),parseSurvivalMetadata(record()),request);
     expect(valid.levelId).toBe(40000000);expect(valid.geometryBytes).toBe(Buffer.byteLength(geometry));expect(valid.geometrySha256).toMatch(/^[a-f0-9]{64}$/);
   });
+  it("uses current download metadata when catalog stars changed within the exact allowed range",()=>{
+    const valid=verifySurvivalDownload(download().replace("18:4","18:5"),parseSurvivalMetadata(record()),request);
+    expect(valid.stars).toBe(5);
+  });
   it.each(["", "header", "kS38,1;", "kS38,1;1,0;", "kS38,1;1,1,2,NaN;", "kS38,1;1,1,2;", "kS38,1;1,1;\0"])("rejects invalid geometry %s",bad=>{
     expect(validSurvivalGeometry(bad)).toBe(false);expect(()=>verifySurvivalDownload(download(40000000,bad),parseSurvivalMetadata(record()),request)).toThrow();
   });
@@ -42,7 +46,7 @@ describe("actual GD Survival search/download protocol",()=>{
     const fetcher=vi.fn(async(url:string|URL|Request,init?:RequestInit)=>{
       const body=new URLSearchParams(String(init?.body));paths.push(String(url));
       const demon=record().replace("18:4","18:10").replace("17::43:0","17:1:43:5");
-      if(String(url).endsWith("getGJLevels21.php")){expect(body.get("diff")).toBe("-2");expect(body.get("demonFilter")).toBe("4");return new Response(`${demon}###1:0:10#hash`);}
+      if(String(url).endsWith("getGJLevels21.php")){expect(body.get("type")).toBe("4");expect(body.get("star")).toBe("1");expect(body.get("diff")).toBe("-2");expect(body.get("demonFilter")).toBe("4");return new Response(`${demon}###1:0:10#hash`);}
       return new Response(`${demon}:5:1:4:${gzipSync(geometry).toString("base64url")}#hash#hash`);
     }) as unknown as typeof fetch;
     const map=await new GdSurvivalMapProvider(new SeededRandom(1),fetcher).select({...request,group:"GOLD",phase:"TIEBREAK"});
@@ -56,7 +60,26 @@ describe("actual GD Survival search/download protocol",()=>{
       downloadRequests++;return new Response(download(Number(body.get("levelID"))));
     }) as unknown as typeof fetch;
     const map=await new GdSurvivalMapProvider(new SeededRandom(1),fetcher).select({...request,excludedLevelIds:[40000000,40000001]});
-    expect(map.levelId).toBe(40000002);expect(pages).toEqual([0,0,1]);expect(downloadRequests).toBe(1);
+    expect(map.levelId).toBe(40000002);expect(pages).toEqual([0,1]);expect(downloadRequests).toBe(1);
+  });
+  it("shares a recent candidate pool but revalidates every selected download and match exclusion",async()=>{
+    let searches=0,downloads=0;
+    const fetcher=vi.fn(async(url:string|URL|Request,init?:RequestInit)=>{
+      if(String(url).endsWith("getGJLevels21.php")){searches++;return new Response(page([40000000,40000001]));}
+      downloads++;return new Response(download(Number(new URLSearchParams(String(init?.body)).get("levelID"))));
+    }) as unknown as typeof fetch;
+    const provider=new GdSurvivalMapProvider(new SeededRandom(1),fetcher);
+    const first=await provider.select(request);
+    const second=await provider.select({...request,excludedLevelIds:[first.levelId]});
+    expect(second.levelId).not.toBe(first.levelId);expect(downloads).toBe(2);
+    // ROUND_1 searches normal categories 3 and 4; each pool is bootstrapped
+    // at most once, not re-fetched for every round or concurrent match.
+    expect(searches).toBeLessThanOrEqual(2);
+  });
+  it("retains API status in diagnostic errors and leaves timers to the engine",async()=>{
+    const fetcher=vi.fn(async()=>new Response("unavailable",{status:403})) as unknown as typeof fetch;
+    await expect(new GdSurvivalMapProvider(new SeededRandom(1),fetcher).select(request))
+      .rejects.toMatchObject({code:"API_ERROR",message:"GD getGJLevels21.php HTTP 403"});
   });
   it("retries API failure and invalid downloads while retaining exact constraints",async()=>{
     let searches=0,downloads=0;

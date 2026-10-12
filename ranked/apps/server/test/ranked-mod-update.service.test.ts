@@ -6,13 +6,16 @@ import { RankedConfigController } from "../src/config/ranked-config.controller.j
 import { RankedConfigService } from "../src/config/ranked-config.service.js";
 import { RankedModUpdateService, RANKED_MOD_UPDATE_FETCH } from "../src/config/ranked-mod-update.service.js";
 import { SERVER_ENVIRONMENT } from "../src/config/server-environment.js";
-import type { RankedBuildChannel } from "../src/config/ranked-mod-updates.js";
+import { rankedModDownloadUrl, type RankedBuildChannel } from "../src/config/ranked-mod-updates.js";
 import { REQUIRED_RANKED_CLIENT_VERSION } from "../src/session/client-version.js";
-import { configDocumentFixture, environmentFixture } from "./fixtures.js";
+import { configDocumentFixture, environmentFixture as baseEnvironmentFixture } from "./fixtures.js";
 
 const version = REQUIRED_RANKED_CLIENT_VERSION;
+const base="https://downloads.example.org";
+const environmentFixture=()=>({...baseEnvironmentFixture(),rankedDownloadBaseUrl:base});
 const descriptor = (channel: RankedBuildChannel, target = version) => ({
-  [channel]: { version: target, sha256: (channel === "debug" ? "a" : "b").repeat(64), sizeBytes: 12345 },
+  [channel]: { version: target, sha256: (channel === "debug" ? "a" : "b").repeat(64), sizeBytes: 12345,
+    downloadUrl:rankedModDownloadUrl(base,channel,target) },
 });
 const validFetch = () => vi.fn<typeof fetch>().mockImplementation(async (url) =>
   Response.json(descriptor(String(url).includes("/debug-") ? "debug" : "release")));
@@ -21,18 +24,32 @@ beforeEach(() => vi.spyOn(Logger.prototype, "warn").mockImplementation(() => {})
 afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
 
 describe("server-selected mod update descriptors", () => {
-  it("automatically resolves both exact channel releases without manual JSON configuration", async () => {
+  it("automatically resolves both exact R2 channel packages without manual JSON configuration", async () => {
     const fetchRemote = validFetch();
     const service = new RankedModUpdateService(environmentFixture(), fetchRemote);
     expect(await service.getClientUpdates()).toEqual({ ...descriptor("debug"), ...descriptor("release") });
     expect(fetchRemote.mock.calls.map(([url]) => String(url))).toEqual([
-      `https://github.com/ybaf100/corum-ranked-downloads/releases/download/debug-${version}/debug.json`,
-      `https://github.com/ybaf100/corum-ranked-downloads/releases/download/release-${version}/release.json`,
+      `${base}/ranked/debug-${version}/debug.json`,
+      `${base}/ranked/release-${version}/release.json`,
     ]);
     for (const [, options] of fetchRemote.mock.calls) {
       expect(options?.signal).toBeInstanceOf(AbortSignal);
       expect(options?.headers).toEqual({ accept: "application/json" });
     }
+  });
+
+  it("does not fall back to GitHub Releases before the R2 origin is configured",async()=>{
+    const fetchRemote=validFetch();
+    const service=new RankedModUpdateService(baseEnvironmentFixture(),fetchRemote);
+    expect(await service.getClientUpdates()).toEqual({});expect(fetchRemote).not.toHaveBeenCalled();
+  });
+
+  it("adds the configured R2 package URL to legacy manual pins",async()=>{
+    const pin={version:"v0.5.0-beta.56",sha256:"a".repeat(64),sizeBytes:12345};
+    const fetchRemote=validFetch();
+    const service=new RankedModUpdateService({...environmentFixture(),rankedModUpdates:{debug:pin}},fetchRemote);
+    expect((await service.getClientUpdates()).debug).toEqual({...pin,
+      downloadUrl:rankedModDownloadUrl(base,"debug",pin.version)});
   });
 
   it("keeps explicit channel pins authoritative and resolves only an unspecified channel", async () => {
@@ -90,6 +107,10 @@ describe("server-selected mod update descriptors", () => {
     ["mixed channels", () => Response.json({ ...descriptor("debug"), ...descriptor("release") })],
     ["invalid digest", () => Response.json({ debug: { version, sha256: "bad", sizeBytes: 12345 } })],
     ["invalid size", () => Response.json({ debug: { version, sha256: "a".repeat(64), sizeBytes: 0 } })],
+    ["wrong package origin", () => Response.json({debug:{...descriptor("debug").debug,
+      downloadUrl:"https://another.example.org/not-this-package.geode"}})],
+    ["wrong package channel", () => Response.json({debug:{...descriptor("debug").debug,
+      downloadUrl:rankedModDownloadUrl(base,"release",version)}})],
     ["invalid JSON", () => new Response("<html>not a descriptor</html>")],
     ["oversized header", () => new Response("{}", { headers: { "content-length": "4097" } })],
     ["oversized body", () => new Response(" ".repeat(4097))],

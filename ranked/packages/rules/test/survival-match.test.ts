@@ -64,6 +64,17 @@ describe("Survival round engine",()=>{
     const p=r.round.players[0]!;expect(p.highestProgress).toBe(94.37051);
     expect(survivalLiveView(r.match,r.now,"p01").standings[0]?.score).toBe(94.37051);
   });
+  it("retains a completed round's eliminated identities after advancing to the next map",()=>{
+    const r=new Rig();expect(survivalLiveView(r.match,r.now).completedRound).toBeNull();
+    r.play();const completed=survivalLiveView(r.match,r.now).completedRound!;
+    expect(completed.players.filter(p=>!p.qualified).map(p=>p.participantId))
+      .toEqual(["p11","p12","p13","p14","p15","p16"]);
+    expect(completed.players.find(p=>p.participantId==="p16")).toMatchObject({rank:16,score:85});
+    r.next();expect(survivalLiveView(r.match,r.now).completedRound).toEqual(completed);
+    expect(r.round.players.some(p=>p.participantId==="p16")).toBe(false);
+    r.select();expect(survivalLiveView(r.match,r.now).completedRound).toEqual(completed);
+    expect(r.round.startsAt).toBeNull();
+  });
   it("does not finish at 179.999s and commits cutoff at 180s before a late packet",()=>{
     const r=new Rig();r.prepare();r.attempt("p16",5,"late",false);const context=r.context;
     r.now=r.round.endsAt!-1;r.send({type:"TICK"});expect(r.match.state).toBe("PLAYING");

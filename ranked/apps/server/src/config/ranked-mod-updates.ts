@@ -5,10 +5,22 @@ export interface RankedModUpdate {
   readonly version: string;
   readonly sha256: string;
   readonly sizeBytes: number;
+  readonly downloadUrl?: string;
 }
 export type RankedModUpdates = Readonly<Partial<Record<RankedBuildChannel, RankedModUpdate>>>;
 
-// Operator-selected immutable releases, never GitHub's moving `latest` alias.
+export const normalizeRankedDownloadBaseUrl=(text:string|undefined):string|undefined=>{
+  if(!text?.trim())return undefined;
+  let url:URL;
+  try {url=new URL(text.trim());}catch {throw new RankedDomainError("INVALID_CONFIG","Invalid RANKED_DOWNLOAD_BASE_URL");}
+  if(url.protocol!=="https:" || url.username || url.password || url.search || url.hash || url.pathname!=="/")
+    throw new RankedDomainError("INVALID_CONFIG","RANKED_DOWNLOAD_BASE_URL must be a public HTTPS bucket origin");
+  return url.origin;
+};
+export const rankedModDownloadUrl=(base:string,channel:RankedBuildChannel,version:string):string=>
+  `${base}/ranked/${channel}-${version}/Corum-Ranked-${version}-${channel}.geode`;
+
+// Operator-selected immutable packages, never a moving latest-version alias.
 export const parseRankedModUpdates = (text: string | undefined): RankedModUpdates => {
   if (!text?.trim()) return {};
   let root: unknown;
@@ -31,7 +43,17 @@ export const parseRankedModUpdates = (text: string | undefined): RankedModUpdate
       !Number.isSafeInteger(metadata.sizeBytes) || Number(metadata.sizeBytes) < 1 || Number(metadata.sizeBytes) > 128 * 1024 * 1024) {
       throw new RankedDomainError("INVALID_CONFIG", `Invalid Ranked ${channel} update descriptor`);
     }
-    result[channel] = { version: metadata.version, sha256: metadata.sha256.toLowerCase(), sizeBytes: Number(metadata.sizeBytes) };
+    let downloadUrl:string|undefined;
+    if(metadata.downloadUrl!==undefined) {
+      try {
+        if(typeof metadata.downloadUrl!=="string" || metadata.downloadUrl.length>2048)throw new Error();
+        const url=new URL(metadata.downloadUrl);
+        if(url.protocol!=="https:" || url.username || url.password || url.hash)throw new Error();
+        downloadUrl=url.href;
+      }catch {throw new RankedDomainError("INVALID_CONFIG",`Invalid Ranked ${channel} download URL`);}
+    }
+    result[channel] = { version: metadata.version, sha256: metadata.sha256.toLowerCase(), sizeBytes: Number(metadata.sizeBytes),
+      ...(downloadUrl?{downloadUrl}:{}) };
   }
   return result;
 };

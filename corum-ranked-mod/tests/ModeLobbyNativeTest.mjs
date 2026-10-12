@@ -148,7 +148,7 @@ using CCAction=CCActionInterval;using CCEaseSineIn=CCEaseSineInOut;using CCEaseS
 namespace geode{template<class T>struct Ref{T*ptr=nullptr;Ref()=default;explicit Ref(T*p):ptr(p){}Ref&operator=(T*p){ptr=p;return *this;}T*data()const{return ptr;}T*operator->()const{return ptr;}explicit operator bool()const{return ptr!=nullptr;}};}
 namespace geode::cocos{template<class T>auto const&CCArrayExt(std::vector<CCNode*>*v){return *v;}}
 using geode::Ref;
-namespace corum::ranked::ui{void cancelMenuTouch(CCMenu*m){++m->cancels;}struct LobbyHover{void setActive(bool){}};}
+namespace corum::ranked::ui{void cancelMenuTouch(CCMenu*m){++m->cancels;}void fadeModeLobbySurfaces(CCNode*,float,bool){}struct LobbyHover{void setActive(bool){}};}
 ${strip(read('src/ui/ModeLobbyMotion.hpp'))}
 enum class RuntimeStage{Ready,Queued,Matched};struct RuntimeView{RuntimeStage stage;};
 struct Owner:CCNode{
@@ -232,3 +232,43 @@ test('mode lobby owns Cocos actions and defers full UI replacement while moving'
  assert.match(panel,/rankIcon_1_001\.png/);assert.doesNotMatch(panel,/GJ_highscoreBtn_001\.png/);
  assert.match(panel,/queue->setEnabled\(false\)/);
 });
+
+test('surface chrome fades its own GD opacity through plain node containers',()=>run(`
+#include <cassert>
+#include <cmath>
+#include <vector>
+using GLubyte=unsigned char;
+namespace cocos2d {
+struct CCNode;
+struct CCActionInterval{CCNode*target=nullptr;virtual ~CCActionInterval()=default;virtual void start(CCNode*t){target=t;}virtual void update(float)=0;};
+struct CCSize{float width=0,height=0;};
+struct CCNode{virtual ~CCNode()=default;CCSize size;std::vector<CCNode*>children;std::vector<CCActionInterval*>actions;
+ auto*getChildren(){return &children;}CCSize getContentSize(){return size;}
+ void runAction(CCActionInterval*a){actions.push_back(a);a->start(this);}
+ void step(float t){for(auto*a:actions)a->update(t);if(t==1){for(auto*a:actions)delete a;actions.clear();}}};
+struct CCLayerColor:CCNode{GLubyte opacity=255;GLubyte getOpacity(){return opacity;}void setOpacity(GLubyte a){opacity=a;}};
+struct CCFadeTo:CCActionInterval{int from=0,to=0;static auto*create(float,GLubyte alpha){auto*a=new CCFadeTo;a->to=alpha;return a;}
+ void start(CCNode*t)override{CCActionInterval::start(t);from=dynamic_cast<CCLayerColor*>(t)->getOpacity();}
+ void update(float t)override{dynamic_cast<CCLayerColor*>(target)->setOpacity(static_cast<GLubyte>(std::lround(from+(to-from)*t)));}};
+struct CCEaseSineOut:CCActionInterval{CCActionInterval*inner=nullptr;~CCEaseSineOut(){delete inner;}
+ static auto*create(CCActionInterval*i){auto*a=new CCEaseSineOut;a->inner=i;return a;}void start(CCNode*t)override{inner->start(t);}
+ void update(float t)override{inner->update(std::sin(t*1.57079632679f));}};
+struct CCEaseSineIn:CCActionInterval{CCActionInterval*inner=nullptr;~CCEaseSineIn(){delete inner;}
+ static auto*create(CCActionInterval*i){auto*a=new CCEaseSineIn;a->inner=i;return a;}void start(CCNode*t)override{inner->start(t);}
+ void update(float t)override{inner->update(1-std::cos(t*1.57079632679f));}};
+}
+namespace geode::cocos{template<class T>auto const&CCArrayExt(std::vector<cocos2d::CCNode*>*v){return *v;}}
+${strip(read('src/ui/ModeLobbySurfaceFade.hpp'))}
+int main(){using namespace cocos2d;
+ CCLayerColor group,fill,frame;CCNode surface,menu,button;group.opacity=0;
+ fill.size={86,86};fill.opacity=190;frame.size={30,1};frame.opacity=250;
+ group.children={&surface,&menu};surface.children={&fill};menu.children={&button};button.children={&frame};
+ corum::ranked::ui::fadeModeLobbySurfaces(&group,.18f,true);
+ assert(group.opacity==0 && group.actions.empty());assert(fill.opacity==0 && frame.opacity==0);
+ fill.step(.5f);frame.step(.5f);assert(fill.opacity>0 && fill.opacity<190 && frame.opacity>0 && frame.opacity<250);
+ fill.step(1);frame.step(1);assert(fill.opacity==190 && frame.opacity==250);
+ corum::ranked::ui::fadeModeLobbySurfaces(&group,.18f,false);
+ fill.step(.5f);frame.step(.5f);assert(fill.opacity>0 && fill.opacity<190 && frame.opacity>0 && frame.opacity<250);
+ fill.step(1);frame.step(1);assert(fill.opacity==0 && frame.opacity==0);
+}
+`));

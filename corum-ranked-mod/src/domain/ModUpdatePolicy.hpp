@@ -17,6 +17,7 @@ inline std::string rankedBuildChannel() {
 struct ModUpdateMetadata {
     std::string version, sha256, channel;
     std::uintmax_t sizeBytes = 0;
+    std::string url{};
     bool operator==(ModUpdateMetadata const&) const = default;
     bool valid() const {
         return (channel == "debug" || channel == "release") &&
@@ -25,12 +26,19 @@ struct ModUpdateMetadata {
                 return std::isalnum(c) || c == '.' || c == '-';
             }) && sha256.size() == 64 &&
             std::all_of(sha256.begin(), sha256.end(), [](unsigned char c) { return std::isxdigit(c); }) &&
-            sizeBytes > 0 && sizeBytes <= kMaxModUpdateBytes;
+            sizeBytes > 0 && sizeBytes <= kMaxModUpdateBytes && (url.empty() || validUrl(url));
     }
     std::string tag() const { return channel + "-" + version; }
     std::string filename() const { return "Corum-Ranked-" + version + "-" + channel + ".geode"; }
     std::string downloadUrl() const {
+        if(!url.empty())return url;
         return "https://github.com/ybaf100/corum-ranked-downloads/releases/download/" + tag() + "/" + filename();
+    }
+    static bool validUrl(std::string_view value) {
+        if(value.size()>2048 || !value.starts_with("https://") || value.find('#')!=std::string_view::npos ||
+            value.find('\\')!=std::string_view::npos || std::any_of(value.begin(),value.end(),[](unsigned char c){return c<=32 || c>=127;}))return false;
+        auto const end=value.find_first_of("/?",8);auto const authority=value.substr(8,end==std::string_view::npos?value.size()-8:end-8);
+        return !authority.empty() && authority.find('@')==std::string_view::npos;
     }
 };
 } // namespace corum::ranked

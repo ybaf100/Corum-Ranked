@@ -20,6 +20,10 @@ for(const debug of [false,true])test(`channel pin and immutable package URL (${d
 int main(){using namespace corum::ranked;assert(rankedBuildChannel()=="${debug?'debug':'release'}");
  ModUpdateMetadata m{"v0.5.0-beta.56",std::string(64,'a'),rankedBuildChannel(),100};assert(m.valid());
  assert(m.downloadUrl()=="https://github.com/ybaf100/corum-ranked-downloads/releases/download/${debug?'debug':'release'}-v0.5.0-beta.56/Corum-Ranked-v0.5.0-beta.56-${debug?'debug':'release'}.geode");
+ m.url="https://downloads.example.org/ranked/${debug?'debug':'release'}-v0.5.0-beta.56/Corum-Ranked-v0.5.0-beta.56-${debug?'debug':'release'}.geode";
+ assert(m.valid() && m.downloadUrl()==m.url);
+ for(auto bad:{"http://downloads.example.org/mod.geode","https://user:password@example.org/mod.geode","https://example.org/mod.geode#fragment","https://example.org/mod.geode\\n"}){m.url=bad;assert(!m.valid());}
+ m.url.clear();
  for(auto bad:{"../bad","v0.5.0?other","v0.5.0/x"}){m.version=bad;assert(!m.valid());}
  m.version="v0.5.0-beta.56";m.sha256="wrong";assert(!m.valid());m.sha256=std::string(64,'a');
  m.sizeBytes=0;assert(!m.valid());m.sizeBytes=kMaxModUpdateBytes+1;assert(!m.valid());

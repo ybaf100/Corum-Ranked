@@ -88,8 +88,7 @@ export function validSurvivalGeometry(geometry: string): boolean {
 export function verifySurvivalDownload(body: string, expected: SurvivalMapMetadata, request: SurvivalMapRequest): SurvivalVerifiedMap {
   if (body.trim()==="-1") throw new SurvivalMapError("DOWNLOAD_FAILED","GD download returned -1");
   const record=body.split("#")[0]!, row=fields(record), metadata=parseSurvivalMetadata(record);
-  if (metadata.levelId!==expected.levelId || !survivalMapAllowed(metadata,request.group,request.phase,request.minimumLevelId) ||
-    Object.keys(expected).some(key=>expected[key as keyof SurvivalMapMetadata]!==metadata[key as keyof SurvivalMapMetadata])) {
+  if (metadata.levelId!==expected.levelId || !survivalMapAllowed(metadata,request.group,request.phase,request.minimumLevelId)) {
     throw new SurvivalMapError("INVALID_METADATA","Downloaded map differs from validated catalog");
   }
   const encoded=row.get("4") ?? "", version=integer(row,"5",true);
@@ -103,23 +102,33 @@ export function verifySurvivalDownload(body: string, expected: SurvivalMapMetada
     geometryBytes:geometry.length,verifiedAt:new Date().toISOString()};
 }
 
-/** Real GD provider. Search narrows native categories, while the range predicate
- * remains authoritative (e.g. GOLD R3 admits 8/9 stars and Easy Demon only).
- * Bootstrap establishes pagination; random unvisited pages prevent a fixed pool.
- * Bounded failure returns control to the engine's durable retry scheduler. */
+interface RecentCatalog {
+  expiresAt:number;
+  pageCount:number;
+  visited:Set<number>;
+  levels:Map<number,SurvivalMapMetadata>;
+}
+const CATALOG_TTL_MS=10*60_000,MAX_CATALOG_LEVELS=256,RECENT_PAGE_WINDOW=256;
+
+/** Server-owned candidate catalogs, replenished from recent rated GD pages.
+ * Search metadata is provisional; the downloaded map supplies the final
+ * certificate. The exact Survival predicate and match exclusions always apply. */
 @Injectable()
 export class GdSurvivalMapProvider implements SurvivalMapProvider {
   private readonly fetcher: typeof fetch;
+  private readonly catalogs=new Map<string,RecentCatalog>();
+  private readonly catalogJobs=new Map<string,Promise<RecentCatalog>>();
+  private readonly badCandidates=new Map<number,number>();
   public constructor(@Inject(RANDOM_SOURCE) private readonly random: RandomSource,
     fetcher: typeof fetch = fetch) {this.fetcher=fetcher;}
   private async post(path: string, extra: Record<string,string>, signal: AbortSignal, maxBytes: number): Promise<string> {
     let response: Response;
     try {response=await this.fetcher(`https://www.boomlings.com/database/${path}`,{method:"POST",
-      headers:{"content-type":"application/x-www-form-urlencoded","user-agent":""},
+      headers:{"content-type":"application/x-www-form-urlencoded","accept":"*/*","user-agent":""},
       body:new URLSearchParams({gameVersion:"22",binaryVersion:"45",secret:"Wmfd2893gb7",...extra}).toString(),
       signal:AbortSignal.any([signal,AbortSignal.timeout(8_000)])});}
-    catch {throw new SurvivalMapError("API_ERROR","GD request failed");}
-    if (!response.ok || !response.body) throw new SurvivalMapError("API_ERROR",`GD HTTP ${response.status}`);
+    catch {throw new SurvivalMapError("API_ERROR",`GD ${path} connection failed or timed out`);}
+    if (!response.ok || !response.body) throw new SurvivalMapError("API_ERROR",`GD ${path} HTTP ${response.status}`);
     const reader=response.body.getReader(), parts:Uint8Array[]=[]; let size=0;
     try {
       for (;;) {const {value,done}=await reader.read(); if (done) break;
@@ -129,6 +138,37 @@ export class GdSurvivalMapProvider implements SurvivalMapProvider {
       }
     } catch (e) {if (e instanceof SurvivalMapError) throw e; throw new SurvivalMapError("API_ERROR","GD body download failed");}
     return Buffer.concat(parts).toString("utf8");
+  }
+  private catalogKey(filter:Record<string,string>):string {return `${filter.diff}:${filter.demonFilter??""}`;}
+  private async search(filter:Record<string,string>,page:number,signal:AbortSignal) {
+    return parseSurvivalSearch(await this.post("getGJLevels21.php",{
+      type:"4",str:"",star:"1",len:"0,1,2,3,4",page:String(page),...filter,
+    },signal,2*1024*1024),page);
+  }
+  private addCandidates(catalog:RecentCatalog,levels:readonly SurvivalMapMetadata[]):void {
+    for(const level of levels)catalog.levels.set(level.levelId,level);
+    while(catalog.levels.size>MAX_CATALOG_LEVELS)catalog.levels.delete(catalog.levels.keys().next().value!);
+  }
+  private async catalog(filter:Record<string,string>,signal:AbortSignal):Promise<RecentCatalog> {
+    const key=this.catalogKey(filter),existing=this.catalogs.get(key);
+    if(existing && existing.expiresAt>Date.now())return existing;
+    const active=this.catalogJobs.get(key);if(active)return active;
+    const job=(async()=>{
+      const initial=await this.search(filter,0,signal);
+      if(!initial.total)throw new SurvivalMapError("EMPTY_SEARCH","No recent rated GD catalog candidates");
+      const fresh:RecentCatalog={expiresAt:Date.now()+CATALOG_TTL_MS,
+        pageCount:Math.min(RECENT_PAGE_WINDOW,Math.ceil(initial.total/initial.pageSize)),visited:new Set([0]),levels:new Map()};
+      this.addCandidates(fresh,initial.levels);this.catalogs.set(key,fresh);return fresh;
+    })().finally(()=>this.catalogJobs.delete(key));
+    this.catalogJobs.set(key,job);return job;
+  }
+  private async replenish(catalog:RecentCatalog,filter:Record<string,string>,signal:AbortSignal):Promise<void> {
+    if(catalog.visited.size>=catalog.pageCount)return;
+    let page=Math.floor(this.random.next()*catalog.pageCount);
+    while(catalog.visited.has(page))page=(page+1)%catalog.pageCount;
+    catalog.visited.add(page);
+    try {this.addCandidates(catalog,(await this.search(filter,page,signal)).levels);}
+    catch(e){catalog.visited.delete(page);throw e;}
   }
   public async select(request: SurvivalMapRequest): Promise<SurvivalVerifiedMap> {
     const allowed=survivalMapRange(request.group,request.phase), filters:Record<string,string>[]=[];
@@ -140,49 +180,33 @@ export class GdSurvivalMapProvider implements SurvivalMapProvider {
     const demonFilters={EASY:"1",MEDIUM:"2",HARD:"3",INSANE:"4",EXTREME:"5"};
     for (const demon of allowed.demons) filters.push({diff:"-2",demonFilter:demonFilters[demon]});
     const signal=AbortSignal.timeout(30_000), excluded=new Set(request.excludedLevelIds), seen=new Set<number>();
-    const failures:SurvivalMapErrorCode[]=[];
-    const inspect=async(levels:readonly SurvivalMapMetadata[]):Promise<SurvivalVerifiedMap|null> => {
-      for (const level of shuffle(levels,this.random)) {
-        // Ineligible maps never enter the duplicate-candidate pool: repeated
-        // old IDs or wrong difficulties mean exhaustion, not a reuse failure.
-        if (!survivalMapAllowed(level,request.group,request.phase,request.minimumLevelId)) continue;
-        if (excluded.has(level.levelId) || seen.has(level.levelId)) {failures.push("DUPLICATE_CANDIDATES"); continue;}
-        seen.add(level.levelId);
-        try {return verifySurvivalDownload(await this.post("downloadGJLevel22.php",{levelID:String(level.levelId)},signal,24*1024*1024),level,request);}
-        catch (e) {failures.push(e instanceof SurvivalMapError ? e.code : "DOWNLOAD_FAILED");}
-        if (signal.aborted) return null;
-      }
-      return null;
+    const failures:SurvivalMapErrorCode[]=[];let lastDetail="No eligible recent rated GD candidates",downloads=0;
+    const failed=(e:unknown,fallback:SurvivalMapErrorCode="API_ERROR")=>{
+      failures.push(e instanceof SurvivalMapError?e.code:fallback);
+      lastDetail=e instanceof Error?e.message:"GD lookup failed";
     };
-    // Follow GD native searches (and Versus): one difficulty per query and a
-    // bounded catalog window. Deep advertised pages can be unavailable even
-    // when page zero reports a much larger total.
-    const groups:{filter:Record<string,string>;initial:ReturnType<typeof parseSurvivalSearch>;visited:Set<number>;pageCount:number;failed:boolean}[]=[];
-    const search=async(filter:Record<string,string>,page:number)=>parseSurvivalSearch(await this.post("getGJLevels21.php",
-      {type:"2",str:"",star:"1",len:"0,1,2,3,4",page:String(page),...filter},signal,2*1024*1024),page);
-    for(const filter of shuffle(filters,this.random)) {
-      if(signal.aborted)break;
-      try {
-        const initial=await search(filter,0);
-        if(!initial.total)throw new SurvivalMapError("EMPTY_SEARCH","No rated catalog candidates");
-        groups.push({filter,initial,visited:new Set([0]),pageCount:Math.ceil(Math.min(initial.total,10_000)/initial.pageSize),failed:false});
-      }catch(e){failures.push(e instanceof SurvivalMapError?e.code:"API_ERROR");}
+    for(const [id,until]of this.badCandidates)if(until<=Date.now())this.badCandidates.delete(id);
+    for(let pass=0;pass<3 && !signal.aborted && downloads<12;pass++)for(const filter of shuffle(filters,this.random)) {
+      if(signal.aborted || downloads>=12)break;
+      let catalog:RecentCatalog;
+      try {catalog=await this.catalog(filter,signal);}catch(e){failed(e);continue;}
+      try {await this.replenish(catalog,filter,signal);}catch(e){failed(e);}
+      for(const level of shuffle([...catalog.levels.values()],this.random)) {
+        if(signal.aborted || downloads>=12)break;
+        if(!survivalMapAllowed(level,request.group,request.phase,request.minimumLevelId))continue;
+        if(excluded.has(level.levelId)){if(!failures.includes("DUPLICATE_CANDIDATES"))failures.push("DUPLICATE_CANDIDATES");continue;}
+        if(seen.has(level.levelId) || this.badCandidates.has(level.levelId))continue;
+        seen.add(level.levelId);downloads++;
+        try {
+          return verifySurvivalDownload(await this.post("downloadGJLevel22.php",{levelID:String(level.levelId)},signal,24*1024*1024),level,request);
+        }catch(e){
+          failed(e,"DOWNLOAD_FAILED");
+          if(e instanceof SurvivalMapError && ["INVALID_DATA","INVALID_METADATA"].includes(e.code)) {
+            this.badCandidates.set(level.levelId,Date.now()+120_000);catalog.levels.delete(level.levelId);
+          }
+        }
+      }
     }
-    // Give every eligible difficulty a turn instead of exhausting one category
-    // before another Demon tier or normal-star category can be searched.
-    for(let scan=0;scan<3 && !signal.aborted;scan++)for(const group of groups) {
-      if(signal.aborted || group.failed || group.visited.size>=group.pageCount)continue;
-      let page=Math.floor(this.random.next()*group.pageCount);
-      while(group.visited.has(page))page=(page+1)%group.pageCount;
-      group.visited.add(page);
-      try {
-        const next=await search(group.filter,page);
-        const map=await inspect(next.levels);if(map)return map;
-      }catch(e){failures.push(e instanceof SurvivalMapError?e.code:"API_ERROR");group.failed=true;}
-    }
-    // Retain a validated first-page fallback, without making popular maps the
-    // fixed operating pool. Never relax ID, stars/Demon, data or reuse filters.
-    for(const group of groups) {if(signal.aborted)break;const map=await inspect(group.initial.levels);if(map)return map;}
-    throw new SurvivalMapError(failures.at(-1) ?? "NO_ELIGIBLE_MAP","No verified eligible Survival map in this search budget",failures);
+    throw new SurvivalMapError(failures.at(-1)??"NO_ELIGIBLE_MAP",lastDetail,failures);
   }
 }

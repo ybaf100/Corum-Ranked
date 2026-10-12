@@ -1,11 +1,12 @@
 import { RankedDomainError } from "@corum-ranked/rules";
 import { DEBUG_BOT_DIFFICULTY_PROFILES } from "../debug-bot/debug-bot.config.js";
-import { parseRankedModUpdates, type RankedModUpdates } from "./ranked-mod-updates.js";
+import { normalizeRankedDownloadBaseUrl,parseRankedModUpdates, type RankedModUpdates } from "./ranked-mod-updates.js";
 
 export const SERVER_ENVIRONMENT = Symbol("SERVER_ENVIRONMENT");
 
 export interface ServerEnvironment {
   readonly rankedModUpdates?: RankedModUpdates;
+  readonly rankedDownloadBaseUrl?: string;
   readonly nodeEnv: "development" | "test" | "production";
   readonly port: number;
   readonly databaseUrl: string;
@@ -279,6 +280,7 @@ export const loadServerEnvironment = (
 
   return {
     rankedModUpdates: parseRankedModUpdates(environment.RANKED_MOD_UPDATES_JSON),
+    rankedDownloadBaseUrl: normalizeRankedDownloadBaseUrl(environment.RANKED_DOWNLOAD_BASE_URL),
     nodeEnv,
     port,
     databaseUrl,

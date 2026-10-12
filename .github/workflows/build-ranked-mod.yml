@@ -1,7 +1,7 @@
 name: Build Corum Ranked Mod
 
 # Automatic Release builds are opt-in when public distribution is configured.
-# Debug and Release publish to distinct immutable tags and filenames.
+# Debug and Release publish to distinct immutable R2 paths and filenames.
 on:
   push:
     branches: [main]
@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   metadata:
-    if: github.event_name == 'workflow_dispatch' || vars.RANKED_PUBLISH_RELEASES == 'true'
+    if: github.event_name == 'workflow_dispatch' || vars.RANKED_PUBLISH_R2 == 'true'
     name: Validate Ranked release manifest
     runs-on: ubuntu-latest
     outputs:
@@ -88,6 +88,7 @@ jobs:
         env:
           BUILD_OUTPUT: ${{ steps.build.outputs.build-output }}
           MOD_VERSION: ${{ needs.metadata.outputs.version }}
+          RANKED_DOWNLOAD_BASE_URL: ${{ vars.RANKED_DOWNLOAD_BASE_URL }}
         shell: bash
         run: |
           mkdir -p dist
@@ -111,7 +112,7 @@ jobs:
           if-no-files-found: error
 
   publish-download:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.RANKED_PUBLISH_RELEASES == 'true'
+    if: github.ref == 'refs/heads/main' && vars.RANKED_PUBLISH_R2 == 'true' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     needs: [metadata, package]
     uses: ./.github/workflows/publish-ranked-download.yml
     with:
@@ -119,4 +120,5 @@ jobs:
       version: ${{ needs.metadata.outputs.version }}
       artifact: ${{ needs.metadata.outputs.artifact_name }}
     secrets:
-      release_token: ${{ secrets.RANKED_RELEASE_TOKEN }}
+      r2_access_key_id: ${{ secrets.RANKED_R2_ACCESS_KEY_ID }}
+      r2_secret_access_key: ${{ secrets.RANKED_R2_SECRET_ACCESS_KEY }}

@@ -84,7 +84,15 @@ void SurvivalRuntime::observe(matjson::Value const& root) {
     m_view.roundNumber=m_view.phase=="ROUND_1"?1:m_view.phase=="ROUND_2"?2:m_view.phase=="ROUND_3"?3:4;
     m_view.startsAt=root["startsAt"].asString().unwrapOr("");m_view.endsAt=root["endsAt"].asString().unwrapOr("");
     m_view.certificate=root["map"];m_view.result=root["result"];
+    m_view.completedRound=root["completedRound"];
     m_view.mapError=root["mapSelection"]["errorCode"].asString().unwrapOr("");
+    auto const diagnostic=m_view.id+":"+m_view.roundKey+":"+std::to_string(m_view.mapGeneration)+":"+m_view.mapError+
+        ":"+root["mapSelection"]["errorMessage"].asString().unwrapOr("");
+    if(!m_view.mapError.empty() && diagnostic!=m_lastMapDiagnostic) {
+        m_lastMapDiagnostic=diagnostic;
+        log::warn("[SurvivalMap] match={} round={} generation={} error={} detail={}",m_view.id,m_view.roundKey,m_view.mapGeneration,
+            m_view.mapError,root["mapSelection"]["errorMessage"].asString().unwrapOr(""));
+    }
     auto const& map=root["map"];m_view.map={static_cast<int>(map["levelId"].asInt().unwrapOr(0)),static_cast<int>(map["stars"].asInt().unwrapOr(0)),
         static_cast<int>(map["levelVersion"].asInt().unwrapOr(0)),map["demon"].asBool().unwrapOr(false)?demon(map["demonDifficulty"].asString().unwrapOr("")):SurvivalDemon::None,
         map["automatic"].asBool().unwrapOr(true),map["platformer"].asBool().unwrapOr(true)};

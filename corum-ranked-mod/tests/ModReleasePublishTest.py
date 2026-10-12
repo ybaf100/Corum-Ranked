@@ -1,241 +1,176 @@
 #!/usr/bin/env python3
-"""Run the actual publisher shell; GitHub requests use a local CLI double."""
+"""Exercise the production R2 publisher with an in-memory S3 boundary."""
 import hashlib
+import importlib.util
 import json
-import os
 from pathlib import Path
-import shutil
-import subprocess
 import tempfile
-import textwrap
 import unittest
 import zipfile
 
-WORKFLOW = Path(__file__).resolve().parents[2] / ".github/workflows/publish-ranked-download.yml"
+ROOT = Path(__file__).resolve().parents[1]
+WORKFLOW = ROOT.parent / '.github/workflows/publish-ranked-download.yml'
+spec = importlib.util.spec_from_file_location('publish_mod_r2', ROOT / 'tools/publish-mod-r2.py')
+publisher = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(publisher)
+BASE = 'https://downloads.example.org'
 
 
-def publisher_script():
-    block = WORKFLOW.read_text().split("        run: |\n", 1)[1]
-    return textwrap.dedent(block)
+class MemoryR2(publisher.R2Client):
+    def __init__(self):
+        self.objects, self.calls, self.fail_key = {}, [], None
 
-
-# Model gh's error JSON on stdout even when --jq was requested. This is
-# important: non-empty command output is not evidence that the API succeeded.
-CLI = r'''#!/usr/bin/env python3
-import json, os, pathlib, shutil, sys
-root = pathlib.Path(os.environ['PUBLISH_FIXTURE'])
-state_path = root / 'state.json'
-state = json.loads(state_path.read_text())
-args = sys.argv[1:]
-with (root / 'calls.jsonl').open('a') as calls:
-    calls.write(json.dumps(args) + '\n')
-def fail(message, code):
-    print(json.dumps({'message': message, 'status': str(code)}))
-    print(f'gh: {message} (HTTP {code})', file=sys.stderr)
-    sys.exit(1)
-def save():
-    state_path.write_text(json.dumps(state))
-if args[0] == 'api':
-    endpoint = args[1]
-    if state.get('api_error'):
-        fail('Fixture API failure', state['api_error'])
-    if '/releases/tags/' in endpoint:
-        if not state['exists']:
-            fail('Not Found', 404)
-        print('42')
-    elif endpoint.endswith('/releases?per_page=100'):
-        assert '--paginate' in args
-        if state['exists']:
-            print('42')
-    else:
-        assert endpoint.endswith('/releases/42') and state['exists']
-        assert args[-1] == '.draft'
-        print(str(state['draft']).lower())
-elif args[:2] == ['release', 'create']:
-    assert not state['exists'] and '--draft' in args
-    assert ('--prerelease' in args) == (os.environ['CHANNEL'] == 'debug')
-    state.update(exists=True, draft=True)
-    save()
-    for file in args[-2:]:
-        source = pathlib.Path(file)
-        shutil.copyfile(source, root / 'server' / source.name)
-        if state.get('interrupt_create'):
-            sys.exit(1)
-elif args[:2] == ['release', 'download']:
-    if not state['exists']:
-        print('release not found', file=sys.stderr)
-        sys.exit(1)
-    name = args[args.index('--pattern') + 1]
-    source = root / 'server' / name
-    if not source.exists():
-        print('no assets match the file pattern', file=sys.stderr)
-        sys.exit(1)
-    shutil.copyfile(source, pathlib.Path(args[args.index('--dir') + 1]) / name)
-elif args[:2] == ['release', 'upload']:
-    assert state['exists'] and state['draft'] and '--clobber' not in args
-    source = pathlib.Path(args[-1])
-    destination = root / 'server' / source.name
-    assert not destination.exists()
-    shutil.copyfile(source, destination)
-elif args[:2] == ['release', 'edit']:
-    assert state['exists'] and '--draft=false' in args and '--latest=false' in args
-    assert len(list((root / 'server').iterdir())) == 2
-    state['draft'] = False
-    save()
-else:
-    raise AssertionError(args)
-'''
+    def send(self, method, key, payload=b'', headers=None, max_bytes=4096):
+        self.calls.append((method, key, headers))
+        if key == self.fail_key:
+            raise publisher.PublishError('R2 upload failed', 503)
+        if method == 'PUT':
+            if headers.get('if-none-match') != '*':
+                raise AssertionError('Every write must be conditional')
+            if headers.get('x-amz-meta-sha256') != hashlib.sha256(payload).hexdigest():
+                raise AssertionError('Object digest does not match')
+            if key in self.objects:
+                raise publisher.PublishError('Already present', 412)
+            self.objects[key] = payload
+            return b''
+        if method != 'GET' or key not in self.objects:
+            raise publisher.PublishError('Not found', 404)
+        if len(self.objects[key]) > max_bytes:
+            raise publisher.PublishError('Existing R2 object exceeds the expected size')
+        return self.objects[key]
 
 
 class ModReleasePublishTest(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)
-        self.downloads = self.root / 'downloads'
-        self.downloads.mkdir()
-        (self.root / 'server').mkdir()
-        (self.root / 'gh').write_text(CLI)
-        (self.root / 'gh').chmod(0o700)
-        self.state = {'exists': False, 'draft': False}
+        self.directory = Path(self.temp.name)
+        self.client = MemoryR2()
+        self.channel, self.version = 'debug', 'v0.5.0-beta.64'
+        self.source = self.directory / (publisher.MOD_ID + '.geode')
 
-    def prepare(self, channel='debug'):
+    def prepare(self, channel='debug', marker=None, omit=None):
         self.channel = channel
-        self.version = 'v0.5.0-beta.57'
-        self.package = self.downloads / f'Corum-Ranked-{self.version}-{channel}.geode'
-        source = self.downloads / 'hwanhee1.corum_ranked.geode'
-        with zipfile.ZipFile(source, 'w') as archive:
-            archive.writestr('corum-build-channel.json', json.dumps({
-                'channel': channel, 'version': self.version,
-            }))
-            archive.writestr('native-fixture', b'not-a-device-build')
-        payload = source.read_bytes()
-        self.descriptor = self.downloads / f'{channel}.json'
-        self.descriptor.write_text(json.dumps({channel: {
-            'version': self.version, 'sizeBytes': len(payload),
-            'sha256': hashlib.sha256(payload).hexdigest(),
+        with zipfile.ZipFile(self.source, 'w') as archive:
+            archive.writestr('mod.json', json.dumps({'id': publisher.MOD_ID, 'version': self.version}))
+            archive.writestr('corum-build-channel.json', json.dumps(
+                marker or {'channel': channel, 'version': self.version}))
+            for binary in sorted(publisher.NATIVE_BINARIES - {omit}):
+                archive.writestr(binary, b'fixture-not-a-device-build')
+        self.descriptor = self.directory / (channel + '.json')
+        self.refresh_descriptor()
+
+    def refresh_descriptor(self):
+        payload = self.source.read_bytes()
+        self.descriptor.write_text(json.dumps({self.channel: {
+            'version': self.version, 'sha256': hashlib.sha256(payload).hexdigest(),
+            'sizeBytes': len(payload),
         }}))
 
     def execute(self):
-        (self.root / 'state.json').write_text(json.dumps(self.state))
-        # A workflow retry starts with a fresh runner working directory.
-        shutil.rmtree(self.root / 'existing', ignore_errors=True)
-        env = dict(os.environ, PATH=f'{self.root}{os.pathsep}{os.environ["PATH"]}',
-                   PUBLISH_FIXTURE=str(self.root), CHANNEL=self.channel,
-                   VERSION=self.version, SOURCE_COMMIT='fixture',
-                   SOURCE_REPOSITORY='ybaf100/Corum-Ranked',
-                   GITHUB_STEP_SUMMARY=str(self.root / 'summary'))
-        # The double never reads a real token or makes network requests.
-        env.pop('GH_TOKEN', None)
-        env.pop('GITHUB_TOKEN', None)
-        result = subprocess.run(['bash', '-c', publisher_script()], cwd=self.root,
-                                env=env, capture_output=True, text=True, timeout=15)
-        self.state = json.loads((self.root / 'state.json').read_text())
-        return result
+        return publisher.publish(self.directory, self.channel, self.version, BASE, self.client)
 
-    def commands(self, name):
-        path = self.root / 'calls.jsonl'
-        calls = [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
-        return [call for call in calls if call[:2] == ['release', name]]
+    def keys(self):
+        prefix = 'ranked/' + self.channel + '-' + self.version
+        return (prefix + '/Corum-Ranked-' + self.version + '-' + self.channel + '.geode',
+                prefix + '/' + self.channel + '.json')
 
-    def existing_release(self, draft=False, files=True):
-        self.state.update(exists=True, draft=draft)
-        if files:
-            shutil.copyfile(self.downloads / 'hwanhee1.corum_ranked.geode', self.root / 'server' / self.package.name)
-            shutil.copyfile(self.descriptor, self.root / 'server' / self.descriptor.name)
-
-    def test_first_release_is_created_for_each_channel(self):
+    def test_first_publication_validates_both_channels_and_commits_descriptor_last(self):
         for channel in ('debug', 'release'):
             with self.subTest(channel=channel):
                 self.prepare(channel)
-                result = self.execute()
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertEqual(self.state, {'exists': True, 'draft': False})
-                self.assertEqual((self.root / 'server' / self.package.name).read_bytes(),
-                                 self.package.read_bytes())
-                self.assertEqual((self.root / 'server' / self.descriptor.name).read_bytes(),
-                                 self.descriptor.read_bytes())
-                self.state = {'exists': False, 'draft': False}
-                for file in (self.root / 'server').iterdir():
-                    file.unlink()
-        self.assertEqual(len(self.commands('create')), 2)
-        self.assertEqual(len(self.commands('edit')), 2)
+                package, descriptor = self.keys()
+                url = self.execute()
+                self.assertEqual(url, BASE + '/' + package)
+                self.assertEqual(self.client.objects[package], self.source.read_bytes())
+                data = json.loads(self.client.objects[descriptor])[channel]
+                self.assertEqual(data['downloadUrl'], url)
+                self.assertEqual(data['sha256'], hashlib.sha256(self.source.read_bytes()).hexdigest())
+                self.assertEqual([key for method, key, _ in self.client.calls if method == 'PUT'][-2:],
+                                 [package, descriptor])
 
-    def test_query_errors_cannot_be_mistaken_for_an_existing_release(self):
+    def test_identical_retry_is_idempotent(self):
         self.prepare()
-        for status in (401, 403, 404, 500):
-            with self.subTest(status=status):
-                self.state['api_error'] = status
-                result = self.execute()
-                self.assertNotEqual(result.returncode, 0)
-                self.assertIn('Cannot list releases', result.stderr)
-                self.assertFalse(self.state['exists'])
-        for command in ('create', 'download', 'upload', 'edit'):
-            self.assertFalse(self.commands(command))
+        self.execute()
+        original = dict(self.client.objects)
+        self.execute()
+        self.assertEqual(self.client.objects, original)
+        self.assertEqual(sum(method == 'GET' for method, _, _ in self.client.calls), 4)
 
-    def test_published_identical_release_is_idempotent(self):
+    def test_different_package_bytes_are_never_overwritten(self):
         self.prepare()
-        self.existing_release()
-        result = self.execute()
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(len(self.commands('download')), 2)
-        self.assertFalse(self.commands('create'))
-        self.assertFalse(self.commands('upload'))
+        self.execute()
+        original = dict(self.client.objects)
+        with zipfile.ZipFile(self.source, 'a') as archive:
+            archive.writestr('different-content', b'different')
+        self.refresh_descriptor()
+        with self.assertRaises(publisher.PublishError):
+            self.execute()
+        self.assertEqual(self.client.objects, original)
 
-    def test_different_published_bytes_are_never_overwritten(self):
+    def test_different_descriptor_is_never_overwritten(self):
         self.prepare()
-        self.existing_release()
-        for path in (self.package, self.descriptor):
-            with self.subTest(file=path.name):
-                self.existing_release()
-                remote = self.root / 'server' / path.name
-                remote.write_bytes(b'different published bytes')
-                result = self.execute()
-                self.assertNotEqual(result.returncode, 0)
-                self.assertEqual(remote.read_bytes(), b'different published bytes')
-        self.assertFalse(self.commands('upload'))
-        self.assertFalse(self.commands('edit'))
+        self.execute()
+        _, descriptor = self.keys()
+        self.client.objects[descriptor] = b'previous published descriptor'
+        original = dict(self.client.objects)
+        with self.assertRaises(publisher.PublishError):
+            self.execute()
+        self.assertEqual(self.client.objects, original)
 
-    def test_incomplete_published_release_is_not_modified(self):
+    def test_partial_upload_can_resume_without_advertising_a_missing_package(self):
         self.prepare()
-        self.existing_release(files=False)
-        result = self.execute()
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn('cannot be replaced', result.stderr)
-        self.assertFalse(self.commands('upload'))
-        self.assertFalse(self.commands('edit'))
+        package, descriptor = self.keys()
+        self.client.fail_key = package
+        with self.assertRaises(publisher.PublishError):
+            self.execute()
+        self.assertEqual(self.client.objects, {})
+        self.client.fail_key = descriptor
+        with self.assertRaises(publisher.PublishError):
+            self.execute()
+        self.assertEqual(set(self.client.objects), {package})
+        self.client.fail_key = None
+        self.execute()
+        self.assertEqual(set(self.client.objects), {package, descriptor})
 
-    def test_empty_draft_resumes_both_files_before_publication(self):
-        self.prepare()
-        self.existing_release(draft=True, files=False)
-        result = self.execute()
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(len(self.commands('upload')), 2)
-        self.assertFalse(self.commands('create'))
-        self.assertFalse(self.state['draft'])
+    def test_bad_digest_size_or_download_path_stops_before_any_r2_write(self):
+        for key, value in [('sha256', '0' * 64), ('sizeBytes', 0),
+                           ('downloadUrl', 'https://another.example.org/mod.geode')]:
+            with self.subTest(key=key):
+                self.prepare()
+                data = json.loads(self.descriptor.read_text())
+                data[self.channel][key] = value
+                self.descriptor.write_text(json.dumps(data))
+                with self.assertRaises(publisher.PublishError):
+                    self.execute()
+                self.assertEqual(self.client.calls, [])
 
-    def test_interrupted_first_upload_can_resume_without_overwriting(self):
-        self.prepare()
-        self.state['interrupt_create'] = True
-        result = self.execute()
-        self.assertNotEqual(result.returncode, 0)
-        self.assertTrue(self.state['draft'])
-        self.assertEqual(len(list((self.root / 'server').iterdir())), 1)
-        self.state.pop('interrupt_create')
-        result = self.execute()
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(len(self.commands('create')), 1)
-        self.assertEqual(len(self.commands('upload')), 1)
-        self.assertFalse(self.state['draft'])
+    def test_wrong_channel_or_missing_platform_stops_before_any_r2_write(self):
+        for options in ({'marker': {'channel': 'release', 'version': self.version}},
+                        {'omit': publisher.MOD_ID + '.android64.so'}):
+            with self.subTest(options=options):
+                self.prepare(**options)
+                with self.assertRaises(publisher.PublishError):
+                    self.execute()
+                self.assertEqual(self.client.calls, [])
 
-    def test_bad_artifact_digest_stops_before_any_release_request(self):
-        self.prepare()
-        metadata = json.loads(self.descriptor.read_text())
-        metadata[self.channel]['sha256'] = '0' * 64
-        self.descriptor.write_text(json.dumps(metadata))
-        result = self.execute()
-        self.assertNotEqual(result.returncode, 0)
-        self.assertFalse((self.root / 'calls.jsonl').exists())
+    def test_public_origin_rejects_credentials_and_non_https_urls(self):
+        self.assertEqual(publisher.public_base(BASE + '/'), BASE)
+        for base in ('http://downloads.example.org', 'https://user:pass@example.org',
+                     BASE + '/path', BASE + '?query=1', BASE + '#fragment', ''):
+            with self.subTest(base=base), self.assertRaises(publisher.PublishError):
+                publisher.public_base(base)
+
+    def test_ranked_publication_uses_r2_without_github_release_commands(self):
+        workflow = WORKFLOW.read_text()
+        self.assertIn('publish-mod-r2.py', workflow)
+        self.assertNotIn('gh release', workflow)
+        self.assertNotIn('RANKED_RELEASE_TOKEN', workflow)
+        for name in ('build-ranked-debug.yml', 'build-ranked-mod.yml'):
+            caller = (WORKFLOW.parent / name).read_text()
+            self.assertIn("vars.RANKED_PUBLISH_R2 == 'true'", caller)
+            self.assertIn("github.ref == 'refs/heads/main'", caller)
+            self.assertNotIn('RANKED_PUBLISH_RELEASES', caller)
 
 
 if __name__ == '__main__':

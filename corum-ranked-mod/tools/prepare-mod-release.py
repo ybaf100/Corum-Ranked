@@ -3,9 +3,11 @@
 import argparse
 import hashlib
 import json
+import os
 import re
 import zipfile
 from pathlib import Path
+from urllib.parse import urlsplit
 
 MOD_ID = "hwanhee1.corum_ranked"
 BINARIES = {MOD_ID + extension for extension in (".dll", ".ios.dylib", ".android32.so", ".android64.so")}
@@ -38,6 +40,12 @@ def prepare(package: Path, channel: str, version: str, output: Path):
     if not 0 < size <= 128 * 1024 * 1024:
         raise ValueError("Mod update exceeds the client download limit")
     descriptor = {"version": version, "sha256": hashlib.sha256(destination.read_bytes()).hexdigest(), "sizeBytes": size}
+    base = os.environ.get("RANKED_DOWNLOAD_BASE_URL", "").strip().rstrip("/")
+    if base:
+        parsed = urlsplit(base)
+        if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password or parsed.path or parsed.query or parsed.fragment:
+            raise ValueError("RANKED_DOWNLOAD_BASE_URL must be a public HTTPS bucket origin")
+        descriptor["downloadUrl"] = f"{base}/ranked/{channel}-{version}/{filename}"
     (output / f"{channel}.json").write_text(json.dumps({channel: descriptor}, indent=2) + "\n")
     return destination
 

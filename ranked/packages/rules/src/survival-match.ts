@@ -347,6 +347,17 @@ export function survivalSettlementInputs(match: SurvivalMatch) {
 }
 export function survivalLiveView(match: SurvivalMatch, now: number, participantId: string | null = null) {
   const round=survivalCurrentRound(match);
+  const completed=match.rounds.slice().reverse().find(r=>r.finishedAt!==null);
+  // Survives the next tick/round, so a client missing the brief ROUND_RESULT
+  // state can still present the authoritative eliminations exactly once.
+  const completedRound=completed?{key:completed.key,ordinal:completed.ordinal,phase:completed.phase,
+    mapGeneration:completed.mapGeneration,finishedAt:new Date(completed.finishedAt!).toISOString(),
+    players:completed.players.map(p=>{
+      const entrant=match.players.find(v=>v.participantId===p.participantId)!;
+      return {participantId:p.participantId,name:entrant.name,kind:entrant.kind,rank:p.rank??entrant.finalRank,
+        score:completed.phase==="TIEBREAK"?roundScore(completed,p)/1000:roundScore(completed,p),
+        qualified:p.qualified&&!p.forfeited,forfeited:p.forfeited};
+    })}:null;
   const ranked=survivalRankScores(activePlayers(round).map(p => ({participantId:p.participantId,
     score:roundScore(round,p),highestProgress:p.highestProgress,
     attemptsUsed:p.attempts.length,attemptsFinished:p.attempts.filter(a => a.endedAt !== null).length,
@@ -364,7 +375,7 @@ export function survivalLiveView(match: SurvivalMatch, now: number, participantI
     startsAt:round.startsAt === null ? null : new Date(round.startsAt).toISOString(),
     endsAt:round.endsAt === null ? null : new Date(round.endsAt).toISOString(),
     remainingSeconds:match.state === "PLAYING" && round.endsAt !== null ? Math.max(0,(round.endsAt-now)/1000) : 0,
-    standings,top3:standings.slice(0,3),myRank:standings.find(p => p.participantId === participantId)?.rank ?? null,
+    standings,completedRound,top3:standings.slice(0,3),myRank:standings.find(p => p.participantId === participantId)?.rank ?? null,
     cutoffScore:round.phase === "TIEBREAK" && cutoff !== null ? cutoff/1000 : cutoff,
     targetQualifiers:Math.min(round.target,standings.length),finalFirstScore:["FINAL","TIEBREAK"].includes(round.phase) ? standings[0]?.score ?? null : null,
     preparation:round.players.map(p => ({participantId:p.participantId,assetsReady:p.assetsReadyAt !== null,

@@ -14,7 +14,7 @@ struct SurvivalMatchView {
     std::string id,state,phase,roundKey,group,ownId="human",error,startsAt,endsAt,mapError;
     int mapGeneration=0,roundNumber=0;
     SurvivalMapMetadata map;
-    matjson::Value certificate,result;
+    matjson::Value certificate,result,completedRound;
     std::vector<SurvivalStanding> standings;
     std::vector<std::string> aliveIds;
     std::optional<double> cutoff,first;
@@ -68,7 +68,7 @@ private:
     ServerClock m_clock;
     LevelPreparationContext m_prepared;
     geode::Ref<GJGameLevel> m_launchLevel;
-    std::string m_session,m_attempt,m_attemptContext,m_enteredContext,m_readyContext;
+    std::string m_session,m_attempt,m_attemptContext,m_enteredContext,m_readyContext,m_lastMapDiagnostic;
     double m_attemptBest=0,m_lastProgress=-1;
     int m_localAttempts=0;
     float m_tick=0;

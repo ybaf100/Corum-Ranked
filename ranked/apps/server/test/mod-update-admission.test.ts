@@ -29,6 +29,15 @@ describe("pinned channel update configuration", () => {
   it.each(["null", "[]", '{"latest":{}}', '{"debug":{"version":"../bad"}}',
     JSON.stringify({release:{version,sha256:"a".repeat(64),sizeBytes:128*1024*1024+1}})])
     ("rejects unsafe update metadata: %s", text => { expect(() => parseRankedModUpdates(text)).toThrow(); });
+  it("keeps the server-selected HTTPS package URL in the channel descriptor",()=>{
+    const downloadUrl=`https://downloads.example.org/ranked/debug-${version}/Corum-Ranked-${version}-debug.geode`;
+    expect(parseRankedModUpdates(JSON.stringify({debug:{version,sha256:"a".repeat(64),sizeBytes:100,downloadUrl}})).debug?.downloadUrl)
+      .toBe(downloadUrl);
+  });
+  it.each(["http://example.org/mod.geode","https://user:password@example.org/mod.geode","https://example.org/mod.geode#fragment"])
+    ("rejects unsafe package URL %s",downloadUrl=>{
+      expect(()=>parseRankedModUpdates(JSON.stringify({debug:{version,sha256:"a".repeat(64),sizeBytes:100,downloadUrl}}))).toThrow();
+    });
 });
 
 describe("HTTP admission checks before matchmaking, with uninterrupted admitted sessions", () => {

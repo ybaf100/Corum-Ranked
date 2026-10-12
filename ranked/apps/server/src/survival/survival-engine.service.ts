@@ -178,9 +178,10 @@ export class SurvivalEngineService implements OnApplicationBootstrap, OnApplicat
     this.mapJobs.set(match.id,job);
   }
   public async mapSelectionStatus(id:string) {
-    const row=(await this.database.query<{map_error:{code:string}|null;map_retry_at:Date|string|null;map_job_deadline_at:Date|string|null}>(
+    const row=(await this.database.query<{map_error:{code:string;message?:string}|null;map_retry_at:Date|string|null;map_job_deadline_at:Date|string|null}>(
       "SELECT map_error,map_retry_at,map_job_deadline_at FROM sur_matches WHERE id=$1",[id])).rows[0];
-    return {errorCode:row?.map_error?.code??null,retryAt:row?.map_retry_at?new Date(row.map_retry_at).toISOString():null,
+    return {errorCode:row?.map_error?.code??null,errorMessage:row?.map_error?.message??null,
+      retryAt:row?.map_retry_at?new Date(row.map_retry_at).toISOString():null,
       selecting:!!row?.map_job_deadline_at && new Date(row.map_job_deadline_at).getTime()>this.clock.now().getTime()};
   }
   public recoverActiveMatches():Promise<void> {

@@ -795,6 +795,7 @@ void RankedRuntime::fetchConfig() {
                 .sha256 = update["sha256"].asString().unwrapOr(""),
                 .channel = channel,
                 .sizeBytes = bytes > 0 ? static_cast<std::uintmax_t>(bytes) : 0,
+                .url = update["downloadUrl"].asString().unwrapOr(""),
             }, update.isObject());
             if (updates.ready() && !m_rejectedRequiredVersion.empty() &&
                 m_rejectedRequiredVersion != Mod::get()->getVersion().toVString()) {

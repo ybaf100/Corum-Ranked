@@ -12,6 +12,15 @@ const validEnvironment = (): NodeJS.ProcessEnv => ({
 });
 
 describe("server environment", () => {
+  it("normalizes an optional public R2 bucket origin",()=>{
+    expect(loadServerEnvironment({...validEnvironment(),RANKED_DOWNLOAD_BASE_URL:" https://downloads.example.org/ "}).rankedDownloadBaseUrl)
+      .toBe("https://downloads.example.org");
+    expect(loadServerEnvironment(validEnvironment()).rankedDownloadBaseUrl).toBeUndefined();
+  });
+  it.each(["http://downloads.example.org","https://user:password@example.org","https://downloads.example.org/path",
+    "https://downloads.example.org?token=1","https://downloads.example.org#fragment"])("rejects unsafe R2 origin %s",base=>{
+    expect(()=>loadServerEnvironment({...validEnvironment(),RANKED_DOWNLOAD_BASE_URL:base})).toThrow("RANKED_DOWNLOAD_BASE_URL");
+  });
   it("loads explicitly provided non-secret and secret settings", () => {
     expect(loadServerEnvironment(validEnvironment())).toMatchObject({
       port: 3000,

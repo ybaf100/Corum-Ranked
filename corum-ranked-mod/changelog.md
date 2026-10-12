@@ -1,3 +1,11 @@
+## v0.5.0-beta.64
+
+- Build server-owned candidate pools from recent Rated GD pages, with independent difficulty/Demon filters, exact match exclusions, download-time metadata/geometry attestation and bounded invalid-candidate quarantine. Keep durable selection retries and log concrete failures in Geode.
+- Reuse Solo waiting music for Survival rounds, Round 3 music for Final/Death Match and result music for eliminated users. Retain completed round summaries across ticks; tint eliminated tiles red and animate icons away before entering the next map or showing result motion.
+- Keep chooser cards enlarged while hovered and slow their single clockwise light pass. Disable rank-card hover/press responses inside channels. Hide all matchmaking contents, including inner button frames, until card motion completes, then fade their GD surface opacity with the icons/text.
+- Publish immutable Debug/Release packages and descriptors to a configurable public R2 bucket instead of Ranked GitHub Releases. Retain exact version/channel/hash/size checks, fail safely on changed published bytes and support interrupted publication retries. Add operator setup instructions for `corum-ranked-download` and the initial manual beta64 installation.
+- Synchronize beta64 client/server versions. Add no DB migration or Apps Script change. Per request, local builds/tests, device/package checks and new GitHub Actions results were not run. See [beta64 notes](../ranked/docs/survival-beta64-maps-r2.md).
+
 ## v0.5.0-beta.63
 
 - Match Survival participant tiles to `surface()`'s actual `CCNode*` return type, fixing the release/debug platform compile failure without a downcast or changing tile rendering/actions.

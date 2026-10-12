@@ -3,6 +3,7 @@ import { REQUIRED_RANKED_CLIENT_VERSION } from "../session/client-version.js";
 import { SERVER_ENVIRONMENT, type ServerEnvironment } from "./server-environment.js";
 import {
   parseRankedModUpdates,
+  rankedModDownloadUrl,
   type RankedBuildChannel,
   type RankedModUpdate,
   type RankedModUpdates,
@@ -18,7 +19,7 @@ interface CachedDescriptor {
   readonly retryAt: number;
 }
 
-/** Resolve the server's exact version, never GitHub latest or another channel.
+/** Resolve the server's exact immutable R2 version and build channel.
  * This only serves lobby configuration; session/round admission stays local. */
 @Injectable()
 export class RankedModUpdateService implements OnApplicationBootstrap {
@@ -42,12 +43,18 @@ export class RankedModUpdateService implements OnApplicationBootstrap {
     await Promise.all((["debug", "release"] as const).map(async (channel) => {
       const explicit = configured[channel];
       const metadata = explicit ?? await this.resolve(channel, REQUIRED_RANKED_CLIENT_VERSION);
-      if (metadata) result[channel] = { ...metadata };
+      if (metadata) {
+        const base=this.environment?.rankedDownloadBaseUrl;
+        result[channel] = { ...metadata,...(base && !metadata.downloadUrl?{
+          downloadUrl:rankedModDownloadUrl(base,channel,metadata.version),
+        }:{}) };
+      }
     }));
     return result;
   }
 
   private async resolve(channel: RankedBuildChannel, version: string): Promise<RankedModUpdate | undefined> {
+    if(!this.environment?.rankedDownloadBaseUrl)return undefined;
     const key = `${channel}-${version}`;
     const cached = this.cache.get(key);
     if (cached?.metadata) return cached.metadata;
@@ -62,7 +69,8 @@ export class RankedModUpdateService implements OnApplicationBootstrap {
   private async fetchDescriptor(channel: RankedBuildChannel, version: string): Promise<RankedModUpdate | undefined> {
     const key = `${channel}-${version}`;
     try {
-      const url = `https://github.com/ybaf100/corum-ranked-downloads/releases/download/${key}/${channel}.json`;
+      const base=this.environment!.rankedDownloadBaseUrl!;
+      const url = `${base}/ranked/${key}/${channel}.json`;
       const response = await this.fetchRemote(url, {
         method: "GET",
         headers: { accept: "application/json" },
@@ -80,7 +88,9 @@ export class RankedModUpdateService implements OnApplicationBootstrap {
       if (Object.keys(updates).length !== 1 || !metadata || metadata.version !== version) {
         throw new Error("Update descriptor channel/version does not match the server requirement");
       }
-      // Published tags are immutable; keep successful lookups for this process.
+      if(metadata.downloadUrl && metadata.downloadUrl!==rankedModDownloadUrl(base,channel,version))
+        throw new Error("Update package URL does not match this immutable R2 descriptor");
+      // Published object paths are immutable; keep successful lookups for this process.
       this.cache.set(key, { metadata, retryAt: 0 });
       return metadata;
     } catch (error) {

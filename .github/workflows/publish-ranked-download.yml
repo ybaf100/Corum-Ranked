@@ -1,4 +1,4 @@
-name: Publish Ranked package to downloads repository
+name: Publish Ranked package to R2
 on:
   workflow_call:
     inputs:
@@ -12,89 +12,32 @@ on:
         required: true
         type: string
     secrets:
-      release_token:
+      r2_access_key_id:
+        required: true
+      r2_secret_access_key:
         required: true
 permissions:
   contents: read
 concurrency:
-  group: ranked-download-${{ inputs.channel }}-${{ inputs.version }}
+  group: ranked-r2-${{ inputs.channel }}-${{ inputs.version }}
   cancel-in-progress: false
 jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v7
       - uses: actions/download-artifact@v7
         with:
           name: ${{ inputs.artifact }}
           path: downloads
-      - name: Publish complete immutable channel release
+      - name: Publish immutable package and descriptor to R2
         env:
-          GH_TOKEN: ${{ secrets.release_token }}
           CHANNEL: ${{ inputs.channel }}
           VERSION: ${{ inputs.version }}
-          SOURCE_COMMIT: ${{ github.sha }}
-          SOURCE_REPOSITORY: ${{ github.repository }}
+          RANKED_R2_ACCOUNT_ID: ${{ vars.RANKED_R2_ACCOUNT_ID }}
+          RANKED_R2_BUCKET: ${{ vars.RANKED_R2_BUCKET || 'corum-ranked-download' }}
+          RANKED_DOWNLOAD_BASE_URL: ${{ vars.RANKED_DOWNLOAD_BASE_URL }}
+          RANKED_R2_ACCESS_KEY_ID: ${{ secrets.r2_access_key_id }}
+          RANKED_R2_SECRET_ACCESS_KEY: ${{ secrets.r2_secret_access_key }}
         shell: bash
-        run: |
-          set -euo pipefail
-          repo=ybaf100/corum-ranked-downloads
-          tag="$CHANNEL-$VERSION"
-          package="downloads/Corum-Ranked-$VERSION-$CHANNEL.geode"
-          descriptor="downloads/$CHANNEL.json"
-          cp downloads/hwanhee1.corum_ranked.geode "$package"
-          python3 - "$package" "$descriptor" "$CHANNEL" "$VERSION" <<'PY'
-          import hashlib, json, pathlib, sys, zipfile
-          path, descriptor, channel, version = sys.argv[1:]
-          data = json.loads(pathlib.Path(descriptor).read_text())[channel]
-          payload = pathlib.Path(path).read_bytes()
-          assert data['version'] == version and data['sizeBytes'] == len(payload)
-          assert data['sha256'] == hashlib.sha256(payload).hexdigest()
-          with zipfile.ZipFile(path) as package:
-              assert json.loads(package.read('corum-build-channel.json')) == {'channel': channel, 'version': version}
-          PY
-          # Listing includes drafts and succeeds with an empty list on first
-          # publication. A failed gh api call writes an error JSON to stdout;
-          # never mistake that body for an existing release ID.
-          if ! existing=$(gh api "repos/$repo/releases?per_page=100" --paginate \
-            --jq ".[] | select(.tag_name == \"$tag\") | .id"); then
-            printf '::error::Cannot list releases in %s. Check RANKED_RELEASE_TOKEN repository access and Contents read/write permission.\n' "$repo" >&2
-            exit 1
-          fi
-          # Never overwrite an existing tag or package with different bytes.
-          if [[ -n "$existing" ]]; then
-            if [[ ! "$existing" =~ ^[0-9]+$ ]]; then
-              printf '::error::Expected one numeric release ID for %s.\n' "$tag" >&2
-              exit 1
-            fi
-            draft=$(gh api "repos/$repo/releases/$existing" --jq .draft)
-            mkdir -p existing
-            for file in "$package" "$descriptor"; do
-              if gh release download "$tag" --repo "$repo" --pattern "$(basename "$file")" --dir existing; then
-                if ! cmp "$file" "existing/$(basename "$file")"; then
-                  printf '::error::Immutable release %s has different bytes for %s. Use a new version.\n' "$tag" "$(basename "$file")" >&2
-                  exit 1
-                fi
-              else
-                # Resume either missing file only while the release is draft.
-                if [[ "$draft" != true ]]; then
-                  printf '::error::Published release %s is missing %s; it cannot be replaced.\n' "$tag" "$(basename "$file")" >&2
-                  exit 1
-                fi
-                gh release upload "$tag" --repo "$repo" "$file"
-              fi
-            done
-          else
-            python3 - <<'PY'
-          import os, pathlib
-          pathlib.Path('notes.md').write_text(
-              f"Ranked {os.environ['CHANNEL']} {os.environ['VERSION']}\n\n"
-              f"Built from {os.environ['SOURCE_REPOSITORY']} commit `{os.environ['SOURCE_COMMIT']}`.\n"
-              "Channel-specific package; the server chooses this exact tag.\n")
-          PY
-            flags=(--draft --title "Ranked $VERSION ($CHANNEL)" --notes-file notes.md)
-            if [[ "$CHANNEL" == debug ]]; then flags+=(--prerelease); fi
-            gh release create "$tag" --repo "$repo" "${flags[@]}" "$package" "$descriptor"
-          fi
-          # A failed upload remains draft and is never presented to clients.
-          gh release edit "$tag" --repo "$repo" --draft=false --latest=false
-          printf 'Published %s: https://github.com/%s/releases/tag/%s\n' "$CHANNEL" "$repo" "$tag" >> "$GITHUB_STEP_SUMMARY"
+        run: python3 corum-ranked-mod/tools/publish-mod-r2.py downloads "$CHANNEL" "$VERSION"

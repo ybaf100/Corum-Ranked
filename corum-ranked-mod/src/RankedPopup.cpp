@@ -1,5 +1,6 @@
 #include "RankedPopup.hpp"
 #include "ui/ModeLobbyMotion.hpp"
+#include "ui/ModeLobbySurfaceFade.hpp"
 #include "ui/LobbyHover.hpp"
 
 #include "RankedRuntime.hpp"
@@ -2465,7 +2466,10 @@ class CorumRankedLayer final : public CCLayerColor {
         auto const layout = corum::ranked::modeLobbyLayout(CCDirector::sharedDirector()->getWinSize().width,CCDirector::sharedDirector()->getWinSize().height);
         constexpr float duration = 0.48f;
         if(m_lobbyHover)m_lobbyHover->setActive(false);
-        if(opening && m_lobbyContents)corum::ranked::ui::setModeLobbyOpacity(m_lobbyContents,0);
+        if(opening && m_lobbyContents) {
+            corum::ranked::ui::setModeLobbyOpacity(m_lobbyContents,0);
+            m_lobbyContents->setVisible(false);
+        }
         auto* other = mode == corum::ranked::RankedMode::Survival ? m_lobbySolo : m_lobbySurvival;
         auto* selectedCard = mode == corum::ranked::RankedMode::Survival ? m_lobbySurvival : m_lobbySolo;
         auto* entryControls = typeinfo_cast<CCLayerColor*>(selectedCard->getChildByID("ranked-mode-entry-controls"_spr));
@@ -2490,21 +2494,28 @@ class CorumRankedLayer final : public CCLayerColor {
                 auto* hidden=mode==corum::ranked::RankedMode::Survival?self->m_lobbySolo:self->m_lobbySurvival;hidden->setVisible(false);
                 auto* card=mode==corum::ranked::RankedMode::Survival?self->m_lobbySurvival:self->m_lobbySolo;
                 if(auto* controls=card->getChildByID("ranked-mode-entry-controls"_spr))controls->setVisible(false);
-                if(self->m_lobbyContents)self->m_lobbyContents->runAction(CCSequence::create(
-                    CCEaseSineOut::create(corum::ranked::ui::ModeLobbyFade::create(.18f,255)),CallFuncExt::create(finish),nullptr));
+                if(self->m_lobbyContents) {
+                    corum::ranked::ui::fadeModeLobbySurfaces(self->m_lobbyContents,.18f,true);
+                    self->m_lobbyContents->setVisible(true);
+                    self->m_lobbyContents->runAction(CCSequence::create(
+                        CCEaseSineOut::create(corum::ranked::ui::ModeLobbyFade::create(.18f,255)),CallFuncExt::create(finish),nullptr));
+                }
                 else finish();
             } else {self->m_lobbyPanel->setVisible(false);finish();}
         }),nullptr);
         if(!opening && m_lobbyContents) {
+            corum::ranked::ui::fadeModeLobbySurfaces(m_lobbyContents,.18f,false);
             auto keep=Ref<CCAction>(sequence);
             m_lobbyContents->runAction(CCSequence::create(CCEaseSineIn::create(corum::ranked::ui::ModeLobbyFade::create(.18f,0)),
-                CallFuncExt::create([weak=WeakRef(this),keep]{if(auto self=weak.lock();self && self->m_lobbyPanel)self->m_lobbyPanel->runAction(keep.data());}),nullptr));
+                CallFuncExt::create([weak=WeakRef(this),keep]{if(auto self=weak.lock();self && self->m_lobbyPanel){
+                    if(self->m_lobbyContents)self->m_lobbyContents->setVisible(false);
+                    self->m_lobbyPanel->runAction(keep.data());}}),nullptr));
         } else m_lobbyPanel->runAction(sequence);
     }
 
     void refreshLobbyHover() {
         if(m_lobbyHover){m_lobbyHover->detach();m_lobbyHover->removeFromParentAndCleanup(true);m_lobbyHover=nullptr;}
-        m_lobbyHover=corum::ranked::ui::LobbyHover::create(m_root,m_settingsMenu);
+        m_lobbyHover=corum::ranked::ui::LobbyHover::create(m_root,m_settingsMenu,!m_modeTransition.selected());
         if(m_lobbyHover)m_root->addChild(m_lobbyHover,100);
     }
 
