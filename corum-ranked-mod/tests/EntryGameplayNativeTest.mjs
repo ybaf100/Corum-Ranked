@@ -186,7 +186,7 @@ struct RankedRuntime {
 }
 struct CorumRankedPlayLayer:PlayLayer {
     struct Fields {
-        bool nativeEntryHeld=true,autoExitRequested=false,entryWasPaused=false,entryNativeCompletionInProgress=false;
+        bool survivalLevel=false;bool nativeEntryHeld=true,autoExitRequested=false,entryWasPaused=false,entryNativeCompletionInProgress=false;
         bool entryTouchEnabled=true,entryKeyboardEnabled=true;
         bool entryUIKeyboardEnabled=false,entryUIKeypadEnabled=false,entryUIPauseEnabled=false;
         bool entryAttemptCountDeferred=false;
@@ -198,6 +198,8 @@ struct CorumRankedPlayLayer:PlayLayer {
     Fields* m_fields=&fields;
     void onQuit(){++quitCalls;}
     bool blocksLocalEvidence(){return false;}
+    bool blockSurvivalEntry(){return false;}
+    ${method(play, '    void releaseEntryControls()')}
     void initializeEntryInputHold(){${inputHold}}
     ${entryExit}
     ${countAttempt}

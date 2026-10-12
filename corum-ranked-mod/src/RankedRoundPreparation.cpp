@@ -1,5 +1,6 @@
 #include "RankedRoundPreparation.hpp"
 #include "RankedRuntime.hpp"
+#include "SurvivalRuntime.hpp"
 #include <Geode/binding/FMODAudioEngine.hpp>
 #include <Geode/binding/GameLevelManager.hpp>
 #include <Geode/binding/MusicDownloadManager.hpp>
@@ -77,10 +78,11 @@ void RankedRoundPreparation::pump() {
     if (now < m_nextPumpAt) return;
     m_nextPumpAt = now + 0.2;
     auto const& runtime = RankedRuntime::get();
-    auto context = runtime.view().stage == RuntimeStage::Matched &&
+    auto const survival=SurvivalRuntime::get().acquiring();
+    auto context = survival ? currentPreparationContext() : runtime.view().stage == RuntimeStage::Matched &&
         roundAcquireState(runtime.view().match.state) ? currentPreparationContext() : LevelPreparationContext{};
     // The Debug RECORD/TEST harness keeps its independent native LevelInfo path.
-    if (context.matchId != runtime.view().match.matchId) context = {};
+    if (!survival && context.matchId != runtime.view().match.matchId) context = {};
     if (m_context != context) {
         m_context = context;
         m_lowDetail = false;
@@ -143,7 +145,8 @@ void RankedRoundPreparation::pump() {
         if (!metadata.error().empty()) m_view.error = metadata.error();
         if (now - m_contextBegan >= 30 && !m_mapTimeoutReported) {
             m_mapTimeoutReported = true;
-            RankedRuntime::get().reportMapDownloadFailure();
+            if(survival)SurvivalRuntime::get().preparationFailed("NATIVE_DOWNLOAD_TIMEOUT");
+            else RankedRuntime::get().reportMapDownloadFailure();
         }
         if (!level || m_pendingMap || !m_mapRetry.available(now)) return;
         auto* manager = GameLevelManager::sharedState();
@@ -334,7 +337,8 @@ bool RankedRoundPreparation::launch(CCScene* origin) {
     auto* level = preparation.level();
     bool const spectator = runtime.canEnterCurrentLevelAsSpectator();
     bool const entering = runtime.canEnterNativeRoundScene();
-    bool const allowed = runtime.canEnterCurrentLevel() || entering || spectator;
+    bool const survival=SurvivalRuntime::get().active();
+    bool const allowed = survival ? SurvivalRuntime::get().canEnter() : runtime.canEnterCurrentLevel() || entering || spectator;
     if (roundPrepareState(runtime.view().match.state) || !allowed || !ready() ||
         !origin || origin != CCDirector::sharedDirector()->getRunningScene() ||
         roundModalOpen(origin) || !preparation.authorizes(level, m_context)) return false;
@@ -348,11 +352,13 @@ bool RankedRoundPreparation::launch(CCScene* origin) {
         !appendRoundResourceIds(sfx, std::string_view(level->m_sfxIDs.c_str()))) return false;
     for (int id : songs) if (!resourceReady({RoundResourceKind::Song, id})) return false;
     for (int id : sfx) if (!resourceReady({RoundResourceKind::Sfx, id})) return false;
+    if(survival && !SurvivalRuntime::get().validateNative(level))return false;
     if (auto current = m_play.lock(); current && current->isRunning()) return false;
     // Preserve exact server start eligibility/time and all existing PlayLayer
     // journal/ACK gates. A viewer never arms a local attempt.
-    if (!spectator && !entering && !runtime.armCurrentLevelForGameplay()) return false;
+    if (!survival && !spectator && !entering && !runtime.armCurrentLevelForGameplay()) return false;
     tracePreparedLevel("round-native-launch", level, nullptr, this);
+    if(survival && !SurvivalRuntime::get().armNative(level))return false;
     auto* scene = PlayLayer::scene(level, false, false);
     auto* play = PlayLayer::get();
     if (!scene || !play || play->m_level != level || !roundSceneContains(scene, play) ||

@@ -1,3 +1,12 @@
+## v0.5.0-beta.62
+
+- Connect Survival Debug Bot Match to real native GD map/resource preparation, server countdowns, round Attempts and the M3 engine, using one human and 15 deterministic server bots. Preserve the existing password and independent mode admission settings.
+- Add three average-tier choices with generated bot LP snapshots, four staggered monotone 50% updates, immediate three-attempt bot Death Matches, durable recovery and password-protected Force 1–16 result controls.
+- Add the Survival PlayLayer HUD below the existing FPS display, persistent moving rank rows, interpolated bot scores, cutoff/first-place differences and the large colored current rank. Keep Solo HUD and spectator protections intact.
+- Pay actual Survival LP exactly once to the human, reuse promotion/demotion/LP result animations, retain bot joint winners when the human is eliminated and record bot rewards only in the result. Share GOLD/Claims without triggering Solo achievements.
+- Scope Admin actions and resets to Solo, Survival or Common. Preserve unrelated mode data and shared accounts/sessions; keep Common achievement/AP/title resets explicit. Add migration 0023 and actual Survival history/card summaries.
+- Synchronize the beta62 exact version gate and workspaces. See [Survival M4 documentation](../ranked/docs/survival-m4.md) for interfaces, operation and validation limits.
+
 ## v0.5.0-beta.61
 
 - Implement the durable 16-player Survival engine, 180-second rounds, cutoff ties, final rankings and repeat three-attempt Death Matches. Capture Survival LP/config once and use server receipt deadlines with idempotent transitions.

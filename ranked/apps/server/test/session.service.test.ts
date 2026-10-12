@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -21,7 +21,7 @@ let database: PgliteDatabase;
 beforeAll(async () => {
   pglite = new PGlite();
   database = new PgliteDatabase(pglite);
-  for (const migrationName of ["0001_initial_ranked.sql", "0002_attempt_start_leases.sql"]) {
+  for (const migrationName of (await readdir(new URL("../../../migrations/", import.meta.url))).filter(n => n.endsWith(".sql")).sort()) {
     const migrationPath = fileURLToPath(
       new URL(`../../../migrations/${migrationName}`, import.meta.url),
     );

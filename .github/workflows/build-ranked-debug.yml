@@ -150,6 +150,10 @@ jobs:
             corum-ranked-mod/tests/LevelPreparationTest.cpp \
             -o /tmp/corum-ranked-level-prepare-test
           /tmp/corum-ranked-level-prepare-test
+          g++ -std=c++23 -Wall -Wextra -Wpedantic -Werror \
+            corum-ranked-mod/tests/SurvivalHudPresentationTest.cpp \
+            -o /tmp/corum-ranked-survival-hud-test
+          /tmp/corum-ranked-survival-hud-test
       - name: Validate native client behavior (two files in parallel)
         # Each native harness uses its own temporary directory. Bound compiler
         # concurrency so small runners retain memory headroom; keep all tests.

@@ -1326,7 +1326,21 @@ void RankedRuntime::startDebugBotMatch(DebugBotMatchOptions options) {
         }
     );
 }
+
+bool RankedRuntime::prepareSurvivalDebugAdmission(matjson::Value& body) {
+    if (!m_view.survivalEnabled || m_controlBusy || m_sessionToken.empty() || m_view.stage != RuntimeStage::Ready) return false;
+    return prepareSurvivalEnvironment(body);
+}
+bool RankedRuntime::handleSurvivalAdmissionError(web::WebResponse const& response) { return handleRequiredUpdate(response); }
 #endif
+
+bool RankedRuntime::prepareSurvivalEnvironment(matjson::Value& body) {
+    m_installedMods = captureInstalledMods();
+    auto const decision = evaluateEnvironment(m_installedMods, m_environmentPolicy);
+    if (!decision.allowed) { showEnvironmentWarning(decision, true); return false; }
+    body["installedMods"] = installedModsJson();
+    return true;
+}
 
 void RankedRuntime::leaveQueue() {
     if (m_controlBusy || m_sessionToken.empty() || m_view.stage != RuntimeStage::Queued) return;
@@ -2644,6 +2658,12 @@ void RankedRuntime::fetchHistoryScope(HistoryScope scope) {
                     history.mode = item["mode"].asString().unwrapOr("SOLO_RANKED") == "SURVIVAL" ? RankedMode::Survival : RankedMode::SoloRanked;
                     history.matchId = item["matchId"].asString().unwrapOr("");
                     history.finishedAt = item["finishedAt"].asString().unwrapOr("");
+                    if(history.mode==RankedMode::Survival) {
+                        history.survivalRecord=item;
+                        history.survivalRank=static_cast<int>(item["result"]["rank"].asInt().unwrapOr(0));
+                        history.ownRankedScoreDelta=static_cast<int>(item["result"]["actualDelta"].asInt().unwrapOr(0));
+                        history.ownRankedScoreAfter=static_cast<int>(item["result"]["profileAfter"]["lp"].asInt().unwrapOr(0));
+                    }
                     history.side = item["side"].asString().unwrapOr("");
                     history.opponentName = item["opponentName"].asString().unwrapOr("Opponent");
                     history.effectiveTier = item["effectiveTier"].asString().unwrapOr("");
@@ -4099,6 +4119,8 @@ void RankedRuntime::fetchSurvivalProfile() {
         auto const profile = root["profile"];
         if (!profile.isObject() || !profile["lp"].isNumber()) { m_view.survival.error = "Invalid Survival profile"; ++m_view.revision; return; }
         auto& sur = m_view.survival;
+        sur.completedMatches=static_cast<int>(root["recordSummary"]["completedMatches"].asInt().unwrapOr(0));
+        sur.bestRank=root["recordSummary"]["bestRank"].isNumber()?std::optional<int>(static_cast<int>(root["recordSummary"]["bestRank"].asInt().unwrapOr(0))):std::nullopt;
         sur.loaded = true;
         sur.profile.displayedTier = profile["tier"].asString().unwrapOr("RED");
         sur.tierId = profile["tierId"].asString().unwrapOr(sur.profile.displayedTier);
@@ -4109,6 +4131,26 @@ void RankedRuntime::fetchSurvivalProfile() {
         sur.standing = parseStanding(root["standing"]);
         observeServerNow(root); ++m_view.revision;
     });
+}
+
+void RankedRuntime::applyAdminProjection(matjson::Value const& result,std::string const& scope) {
+    if(scope=="SOLO_RANKED" && (result["own"].asBool().unwrapOr(false) || result["reset"].asBool().unwrapOr(false))) {
+        auto const profile=result["profile"];
+        if(profile.isObject()) {
+            m_view.profileTier=profile["displayedTier"].asString().unwrapOr(m_view.profileTier);
+            m_view.profileScoreVisible=profile["visibleRankedScore"].isNumber();
+            m_view.profileScore=static_cast<int>(profile["visibleRankedScore"].asInt().unwrapOr(0));
+            m_view.placementGames=static_cast<int>(profile["placementGames"].asInt().unwrapOr(m_view.placementGames));
+        }
+        if(result["resetPlayer"].asBool().unwrapOr(false) || result["reset"].asBool().unwrapOr(false)) {
+            m_view.profileTier="UNRANKED";m_view.profileScoreVisible=false;m_view.profileScore=0;m_view.placementGames=0;
+            m_view.profileWins=m_view.profileLosses=m_view.resultStreak=0;m_view.placementResults.clear();m_view.placement={};
+        }
+        m_view.promotion={};m_view.demotionWarning=false;
+        m_view.placement.required=m_view.profileTier=="UNRANKED" || m_view.placementGames<m_view.placementGamesRequired;
+        ++m_view.revision;
+    }
+    fetchStanding();fetchSurvivalProfile();fetchAchievements();
 }
 
 void RankedRuntime::tick() {

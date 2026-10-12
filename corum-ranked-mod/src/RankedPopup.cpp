@@ -11,6 +11,7 @@
 #endif
 #include "RankedSongGate.hpp"
 #include "RankedLevelPreparation.hpp"
+#include "SurvivalRuntime.hpp"
 #include "RankedMapDetails.hpp"
 #include "RankedRoundPreparation.hpp"
 #include "domain/PlacementStageMerge.hpp"
@@ -2191,7 +2192,8 @@ class CorumRankedLayer final : public CCLayerColor {
             m_root->addChild(equippedTitle, 4);
         }
 
-        auto* record = makeLabel(survival ? tr("survival-no-matches", "NO SURVIVAL MATCHES YET") : corum::ranked::matchRecordText(view.profileWins,view.profileLosses,
+        auto const survivalRecord=source.survival.completedMatches>0?(corum::ranked::i18n::isKorean()?fmt::format("총 {}경기 · 최고 {}위",source.survival.completedMatches,source.survival.bestRank.value_or(0)):fmt::format("{} MATCHES · BEST #{}",source.survival.completedMatches,source.survival.bestRank.value_or(0))):tr("survival-no-matches", "NO SURVIVAL MATCHES YET");
+        auto* record = makeLabel(survival ? survivalRecord : corum::ranked::matchRecordText(view.profileWins,view.profileLosses,
             corum::ranked::i18n::isKorean()),0.26f,{leftCenter.x,leftCenter.y - 92.0f},
             corum::ranked::ui::TextMuted,"semibold");
         corum::ranked::ui::fitMenuLabelWidth(record,170,0.26f,0.20f);
@@ -2335,6 +2337,7 @@ class CorumRankedLayer final : public CCLayerColor {
     }
 
     std::string lobbyMessage(RuntimeView const& view) const {
+        if(m_modeTransition.selected()==corum::ranked::RankedMode::Survival && !corum::ranked::SurvivalRuntime::get().view().error.empty())return corum::ranked::i18n::text(corum::ranked::SurvivalRuntime::get().view().error,corum::ranked::SurvivalRuntime::get().view().error);
         if (!m_localMessage.empty()) return corum::ranked::i18n::text(m_localMessage,m_localMessage);
         if (!view.error.empty()) return corum::ranked::i18n::text(view.error,view.error);
         auto const selected = m_modeTransition.selected();
@@ -2374,10 +2377,10 @@ class CorumRankedLayer final : public CCLayerColor {
             badge->setID("ranked-achievement-notification-badge"_spr); trophyVisual->addChild(badge,10);
         }
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH) || defined(CORUM_RANKED_DEBUG_SPECTATE)
-        if (view.stage == RuntimeStage::Ready && view.soloEnabled) {
+        if (view.stage == RuntimeStage::Ready) {
             auto* debug = addButton(tr("debug","DEBUG"),{96,30},menu_selector(CorumRankedLayer::onDebugMenu),true,0.54f);
             debug->setID("ranked-lobby-debug"_spr);
-            debug->setVisible(m_modeTransition.selected() == corum::ranked::RankedMode::SoloRanked);
+            debug->setVisible(m_modeTransition.selected().has_value());
         }
 #endif
         m_lobbyToolbar->setVisible(true);
@@ -4257,9 +4260,14 @@ class CorumRankedLayer final : public CCLayerColor {
             auto* panel = makeNeonPanel({viewport.width - 4,29},{viewport.width / 2,y},won ? kGreen : kRed,kDeepPanel2,232); content->addChild(panel,1);
             auto const delta = item.ownRankedScoreDelta ? fmt::format("{:+d} LP",*item.ownRankedScoreDelta) : tr("placement","PLACEMENT");
             auto const modeName = item.mode == corum::ranked::RankedMode::Survival ? tr("survival", "SURVIVAL") : tr("solo-ranked", "SOLO RANKED");
+            if(item.mode==corum::ranked::RankedMode::Survival) {
+                auto* row=makeLabel(fmt::format("{}{}   {}",m_historyScope==corum::ranked::HistoryScope::All?"["+modeName+"] ":"",
+                    corum::ranked::survivalOrdinal(item.survivalRank),delta),.29f,{(viewport.width-68)/2,y},kCyan,"semibold");
+                corum::ranked::ui::fitMenuLabelWidth(row,viewport.width-92,.29f,.20f);content->addChild(row,3);
+            }
             auto* row = makeLabel(fmt::format("{}{}   VS {}   {}",m_historyScope == corum::ranked::HistoryScope::All ? "[" + modeName + "] " : "",won ? tr("win","WIN") : tr("loss","LOSS"),item.opponentName,delta),
                 0.29f,{(viewport.width - 68) / 2,y},won ? kGreen : kRed,"semibold");
-            corum::ranked::ui::fitMenuLabelWidth(row,viewport.width - 92,0.29f,0.20f); content->addChild(row,3);
+            corum::ranked::ui::fitMenuLabelWidth(row,viewport.width - 92,0.29f,0.20f);row->setVisible(item.mode!=corum::ranked::RankedMode::Survival); content->addChild(row,3);
             auto* face = makeActionButtonVisual(tr("detail","DETAIL")); face->setScale(0.48f);
             // GenericContentLayer culls direct children by their own bounds.
             // A screen-sized menu at y=0 disappears at the top of a long list,
@@ -4282,6 +4290,7 @@ class CorumRankedLayer final : public CCLayerColor {
             return;
         }
         auto const& item = view.history[m_historyIndex];
+        if(item.mode==corum::ranked::RankedMode::Survival) {renderSurvivalHistory(item);return;}
         auto const won = item.side == item.winnerSide;
         addScreenHeader(
             won ? tr("victory", "VICTORY") : tr("defeat", "DEFEAT"),
@@ -4324,6 +4333,29 @@ class CorumRankedLayer final : public CCLayerColor {
             auto* row = makeLabel(fmt::format("{} {}  {} : {}", tr("death-match", "DEATH MATCH"), deathmatch.sequence, deathmatch.scoreA, deathmatch.scoreB), 0.25f, {viewport.width / 2, y - 23}, kRed, "semibold");
             corum::ranked::ui::fitMenuLabelWidth(row, viewport.width - 12, 0.25f, 0.17f); content->addChild(row, 3);
             y -= 54.0f;
+        }
+        scroll->scrollToTop();
+    }
+
+    void renderSurvivalHistory(HistoryMatchView const& item) {
+        auto const size=CCDirector::sharedDirector()->getWinSize();
+        addScreenHeader(tr("survival","SURVIVAL"),corum::ranked::survivalOrdinal(item.survivalRank),kCyan,kCyan);
+        auto const width=std::min(344.0f,size.width-76),height=size.height-102;
+        auto* panel=makeNeonPanel({width,height},{size.width/2,size.height/2-25},kBlue,kDeepPanel,224);m_root->addChild(panel,1);
+        auto* scroll=ScrollLayer::create({width-16,height-16});scroll->setPosition({(size.width-width+16)/2,26});m_root->addChild(scroll,5);
+        auto const& record=item.survivalRecord;std::vector<std::string> lines;
+        lines.push_back(fmt::format("{}  {:+} LP",corum::ranked::survivalOrdinal(item.survivalRank),item.ownRankedScoreDelta.value_or(0)));
+        for(auto const& round:record["snapshot"]["rounds"].asArray().unwrapOr(std::vector<matjson::Value>{})) {
+            lines.push_back(fmt::format("{} · GD #{}",round["phase"].asString().unwrapOr(""),round["map"]["levelId"].asInt().unwrapOr(0)));
+            for(auto const& p:round["players"].asArray().unwrapOr(std::vector<matjson::Value>{}))if(p["participantId"].asString().unwrapOr("")=="human")
+                lines.push_back(fmt::format("{} {:.3f}% · {} Attempts",tr("you","YOU"),p["highestProgress"].asDouble().unwrapOr(0),p["attempts"].asArray().unwrapOr(std::vector<matjson::Value>{}).size()));
+        }
+        for(auto const& p:record["result"]["standings"].asArray().unwrapOr(std::vector<matjson::Value>{}))
+            lines.push_back(fmt::format("{}  {}  {:+} LP",corum::ranked::survivalOrdinal(static_cast<int>(p["rank"].asInt().unwrapOr(0))),p["name"].asString().unwrapOr(""),p["delta"].asInt().unwrapOr(0)));
+        auto* content=scroll->m_contentLayer;auto const contentHeight=std::max(height-16,static_cast<float>(lines.size()*26+12));content->setContentSize({width-16,contentHeight});
+        float y=contentHeight-16;for(auto const& line:lines) {
+            auto* label=makeLabel(line,.25f,{(width-16)/2,y},corum::ranked::ui::Text,"semibold");
+            corum::ranked::ui::fitMenuLabelWidth(label,width-30,.25f,.18f);content->addChild(label,3);y-=26;
         }
         scroll->scrollToTop();
     }
@@ -4658,7 +4690,7 @@ class CorumRankedLayer final : public CCLayerColor {
 
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH) || defined(CORUM_RANKED_DEBUG_SPECTATE)
     void onDebugMenu(CCObject*) {
-        corum::ranked::debug::showDebugMenuPopup();
+        corum::ranked::debug::showDebugMenuPopup(m_modeTransition.selected().value_or(corum::ranked::RankedMode::SoloRanked));
     }
 #endif
 

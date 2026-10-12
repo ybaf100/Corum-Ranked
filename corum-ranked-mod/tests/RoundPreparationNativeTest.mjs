@@ -153,6 +153,11 @@ struct GameManager {int vanillaReturns=0;void returnToLastScene(GJGameLevel*){++
 struct PlatformToolbox {static inline int cursorRestores=0;
     static void toggleLockCursor(bool lock){assert(!lock);}static void showCursor(){++cursorRestores;}};
 namespace corum::ranked {
+struct SurvivalRuntime {static SurvivalRuntime&get(){static SurvivalRuntime r;return r;}
+ bool acquiring()const{return false;}bool active()const{return false;}bool canEnter()const{return false;}
+ bool validateNative(GJGameLevel*)const{return false;}bool armNative(GJGameLevel*)const{return false;}
+ void preparationFailed(std::string const&){} };
+
 enum class RuntimeStage {Ready,Matched};
 struct RuntimeView {RuntimeStage stage=RuntimeStage::Ready;struct Match {std::string matchId,state,side="A";bool readyA=false,readyB=false,placement=false;}match;};
 struct RankedRuntime {

@@ -4,9 +4,11 @@ import { BadRequestException, ConflictException, ForbiddenException, Inject, Inj
 import { createSurvivalMatch, reduceSurvivalMatch, survivalCurrentRound, survivalLiveView, survivalMilliPercent,
   type SurvivalCommand, type SurvivalEntrant, type SurvivalMatch } from "@corum-ranked/rules";
 import { ID_GENERATOR, SERVER_CLOCK, type IdGenerator, type ServerClock } from "../common/runtime.module.js";
-import { SurvivalConfigService } from "../config/survival-config.service.js";
+import { SurvivalConfigService, type SurvivalConfigDocument } from "../config/survival-config.service.js";
 import { DATABASE, type DatabasePort, type SqlExecutor } from "../database/database.port.js";
 import { SURVIVAL_MAP_PROVIDER, SurvivalMapError, type SurvivalMapProvider } from "./survival-map.provider.js";
+import type { RankedSessionContext } from "../session/session.types.js";
+import { sessionAliveSince } from "../session/session-presence.policy.js";
 
 export type SurvivalAdmissionPlayer =
   | {participantId:string;kind:"HUMAN";playerId:string}
@@ -16,6 +18,7 @@ interface MatchRow { snapshot:SurvivalMatch; request_hash:string; map_job_token:
 const hash = (value:unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const iso = (milliseconds:number|null) => milliseconds===null ? null : new Date(milliseconds).toISOString();
 const changed = (a:unknown,b:unknown) => JSON.stringify(a)!==JSON.stringify(b);
+export type SurvivalMatchAdapter = (tx:SqlExecutor,match:SurvivalMatch,now:number)=>Promise<SurvivalMatch>;
 
 /** Trusted application port for M4 bots and M5 synchronized participants.
  * There is no public create, progress, result or map-adoption HTTP endpoint in M3.
@@ -27,6 +30,12 @@ export class SurvivalEngineService implements OnApplicationBootstrap, OnApplicat
   private pending:Promise<void>|null=null;
   private stopping=false;
   private readonly mapJobs=new Map<string,Promise<void>>();
+  private readonly adapters:SurvivalMatchAdapter[]=[];
+  public registerAdapter(adapter:SurvivalMatchAdapter):void { this.adapters.push(adapter); }
+  private async adapt(tx:SqlExecutor,match:SurvivalMatch,now:number):Promise<SurvivalMatch> {
+    for(const adapter of this.adapters)match=await adapter(tx,match,now);
+    return match;
+  }
   public constructor(@Inject(DATABASE) private readonly database:DatabasePort,
     @Inject(SERVER_CLOCK) private readonly clock:ServerClock,
     @Inject(ID_GENERATOR) private readonly ids:IdGenerator,
@@ -46,13 +55,21 @@ export class SurvivalEngineService implements OnApplicationBootstrap, OnApplicat
   public async create(creationKey:string, players:readonly SurvivalAdmissionPlayer[]):Promise<SurvivalMatch> {
     if (!creationKey.trim() || creationKey.length>200 || players.length!==16 || new Set(players.map(p=>p.participantId)).size!==16)
       throw new BadRequestException("M3 accepts exactly 16 distinct entrants");
-    const requestHash=hash(players);
     return this.config.withAdmission(()=>this.database.transaction(async tx=>{
+      return this.createWithin(tx,creationKey,players,this.config.getSnapshot());
+    }));
+  }
+  /** Trusted admission adapter only. Caller owns the mode admission fence and
+   * account/session lock. Virtual LP changes this match snapshot, never a profile. */
+  public async createWithin(tx:SqlExecutor,creationKey:string,players:readonly SurvivalAdmissionPlayer[],
+    captured:SurvivalConfigDocument, humanLpSnapshot?:number):Promise<SurvivalMatch> {
+    if(!creationKey.trim() || creationKey.length>200 || players.length!==16 || new Set(players.map(p=>p.participantId)).size!==16)
+      throw new BadRequestException("M3 accepts exactly 16 distinct entrants");
+    const requestHash=humanLpSnapshot===undefined?hash(players):hash({players,humanLpSnapshot});
       // Serialize even two first uses of the same key before its row exists.
       await tx.query("SELECT pg_advisory_xact_lock(hashtext($1))",[`survival-create:${creationKey}`]);
       const existing=(await tx.query<MatchRow>("SELECT * FROM sur_matches WHERE creation_key=$1",[creationKey])).rows[0];
       if(existing){if(existing.request_hash!==requestHash)throw new ConflictException("Survival creation key changed");return existing.snapshot;}
-      const captured=this.config.getSnapshot();
       if(!captured.config.enabled)throw new ServiceUnavailableException({code:"SURVIVAL_DISABLED",message:"Survival is disabled"});
       const humans=players.filter((p):p is Extract<SurvivalAdmissionPlayer,{kind:"HUMAN"}>=>p.kind==="HUMAN");
       const profiles=await tx.query<{player_id:string;lp:number;gd_username:string}>(
@@ -62,7 +79,7 @@ export class SurvivalEngineService implements OnApplicationBootstrap, OnApplicat
         if(p.kind==="BOT")return{...p,playerId:null};
         const profile=profiles.rows.find(row=>row.player_id===p.playerId);
         if(!profile)throw new BadRequestException("Enter Survival before match admission");
-        return {...p,name:profile.gd_username,lp:Number(profile.lp)};
+        return {...p,name:profile.gd_username,lp:humanLpSnapshot??Number(profile.lp)};
       });
       const match=createSurvivalMatch(this.ids.next(),entrants,captured.config,captured.generation,this.clock.now().getTime());
       await tx.query(`INSERT INTO sur_matches(id,creation_key,request_hash,state,revision,config_generation,config_snapshot,
@@ -72,7 +89,6 @@ export class SurvivalEngineService implements OnApplicationBootstrap, OnApplicat
         match.averageLp,match.difficultyGroup,survivalCurrentRound(match).key,JSON.stringify(match),iso(match.createdAt)]);
       await this.project(tx,null,match);
       return match;
-    }));
   }
   public async get(matchId:string):Promise<SurvivalMatch> {
     const row=(await this.database.query<MatchRow>("SELECT * FROM sur_matches WHERE id=$1",[matchId])).rows[0];
@@ -85,14 +101,27 @@ export class SurvivalEngineService implements OnApplicationBootstrap, OnApplicat
   /** Receipt time is sampled while holding the authoritative match lock. A
    * packet that waits past endsAt is late; client timestamps never extend play.
    * Changed duplicate payloads conflict; exact retries return current state. */
-  public async dispatch(matchId:string,eventKey:string,command:SurvivalCommand):Promise<SurvivalMatch> {
+  public async dispatch(matchId:string,eventKey:string,command:SurvivalCommand,actor?:RankedSessionContext):Promise<SurvivalMatch> {
     if(!eventKey.trim() || eventKey.length>200)throw new BadRequestException("Invalid Survival event key");
     return this.database.transaction(async tx=>{
+      if(actor) {
+        await tx.query("SELECT id FROM ranked_players WHERE id=$1 FOR UPDATE",[actor.playerId]);
+        const now=this.clock.now();
+        const live=await tx.query(`SELECT id FROM ranked_sessions WHERE id=$1 AND player_id=$2 AND revoked_at IS NULL
+          AND expires_at>$3 AND last_heartbeat_at>$4`,[actor.sessionId,actor.playerId,now.toISOString(),sessionAliveSince(now)]);
+        if(!live.rows.length)throw new ForbiddenException("Survival session expired");
+      }
       const row=await this.lock(tx,matchId), fingerprint=hash(command);
+      if(actor && !row.snapshot.players.some(p=>p.playerId===actor.playerId &&
+        (("participantId" in command && p.participantId===command.participantId) ||
+         (command.type==="FORFEIT" && command.participantIds.length===1 && command.participantIds[0]===p.participantId))))
+        throw new ForbiddenException("Not the Survival participant");
       const previous=(await tx.query<{request_hash:string}>("SELECT request_hash FROM sur_match_commands WHERE match_id=$1 AND event_key=$2",[matchId,eventKey])).rows[0];
       if(previous){if(previous.request_hash!==fingerprint)throw new ConflictException("Survival event payload changed");return row.snapshot;}
       const now=this.clock.now().getTime();
-      const match=reduceSurvivalMatch(row.snapshot,command,now);
+      let match=await this.adapt(tx,row.snapshot,now);
+      match=reduceSurvivalMatch(match,command,now);
+      match=await this.adapt(tx,match,now);
       await this.persist(tx,row.snapshot,match);
       await tx.query(`INSERT INTO sur_match_commands(match_id,event_key,request_hash,command,applied_revision,received_at)
         VALUES($1,$2,$3,$4::jsonb,$5,$6)`,[matchId,eventKey,fingerprint,JSON.stringify(command),match.revision,iso(now)]);
@@ -101,7 +130,10 @@ export class SurvivalEngineService implements OnApplicationBootstrap, OnApplicat
   }
   public async tick(matchId:string):Promise<SurvivalMatch> {
     return this.database.transaction(async tx=>{
-      const row=await this.lock(tx,matchId),match=reduceSurvivalMatch(row.snapshot,{type:"TICK"},this.clock.now().getTime());
+      const row=await this.lock(tx,matchId),now=this.clock.now().getTime();
+      let match=await this.adapt(tx,row.snapshot,now);
+      match=reduceSurvivalMatch(match,{type:"TICK"},now);
+      match=await this.adapt(tx,match,now);
       await this.persist(tx,row.snapshot,match);return match;
     });
   }

@@ -177,3 +177,21 @@ retain access when Survival is disabled.
 Creation, telemetry, forfeit and map adoption are trusted `SurvivalEngineService` ports;
 there are no public mutation routes in M3. The M1 Queue/Debug endpoints stay blocked.
 See [Survival M3](survival-m3.md) for command context, idempotency, map provider and M4/M5 contracts.
+
+# Survival M4 additions (beta.62)
+
+The debug client uses the authenticated `/api/ranked/survival/debug` routes:
+`POST /matches`, `GET /active`, `GET /matches/:id`, `POST /matches/:id/events`,
+`POST /matches/:id/force-rank` and `POST /matches/:id/acknowledge`.
+Admission requires the existing debug password, a current live session, current client version,
+valid installed mods and Survival ON. Solo ON is independent. Ongoing games remain readable
+and finish after OFF. The legacy public queue/debug placeholder routes remain blocked.
+
+Only the real participant may submit resource/entry/Attempt records. The server generates
+the 15 bots, maps, ranking and final LP reward. Progress is not accepted after its server
+deadline; the client cannot submit reward LP or another participant's identity. Real LP is
+paid once only to the human. Force rank requires the password and rank 1–16.
+
+Admin actions accept `scope: SOLO_RANKED | SURVIVAL | COMMON`; RESET_HISTORY/RESET_DB require
+an explicit scope and preserve other modes and shared identity/session data.
+See [Survival M4](survival-m4.md) for bodies, preparation proof, recovery and deployment.

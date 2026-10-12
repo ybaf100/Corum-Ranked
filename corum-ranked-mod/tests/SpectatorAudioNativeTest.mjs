@@ -78,7 +78,7 @@ struct PlayLayer {static inline bool succeeds=true;bool init(GJGameLevel*,bool,b
 struct ScopedPersistenceOwner {explicit ScopedPersistenceOwner(void*){}};
 struct DebugRuntime{void exitScene(){}};
 struct CorumRankedPlayLayer: PlayLayer {
- struct Fields{bool rankedLevel=false,rankedInitialized=false,debugRecordScene=false,debugPlaybackScene=false;int levelId=88350599;}fields;
+ struct Fields{bool survivalLevel=false;bool rankedLevel=false,rankedInitialized=false,debugRecordScene=false,debugPlaybackScene=false;int levelId=88350599;}fields;
  Fields* m_fields=&fields;void syncSpectatorLocalSafety(){}
  ${method(play,'void acquireGameplayAudio()')}
  bool init(GJGameLevel* level,bool useReplay,bool dontCreateObjects){

@@ -9,7 +9,7 @@ const strip=s=>s.replace(/^#include .*?$|^#pragma once$/gm,'');
 const viewer=read('SpectatorLiveViewerNativeTest.mjs');
 const json=viewer.slice(viewer.indexOf('namespace matjson {'),viewer.indexOf('${readFileSync(join(root,')).replace('bool isErr()const{return !value;}','bool isErr()const{return !value;}bool isOk()const{return bool(value);}');
 const fixture=`
-${read('helpers/ResultPresentationNativeDouble.hpp').replace(/^#pragma once$/gm,'').replace('struct CCMenuItemSpriteExtra : CCNode {','struct CCMenuItem : CCNode {bool enabled=true;void setEnabled(bool value){enabled=value;}};\nstruct CCMenuItemSpriteExtra : CCMenuItem {').replace('bool enabled=true; void setEnabled(bool value)', 'void setEnabled(bool value)').replace('std::string id; float','int tag=0;void setTag(int value){tag=value;}int getTag()const{return tag;}\n    auto* getChildren(){return &children;}void schedule(int,float){scheduled=true;}void unschedule(int){scheduled=false;}\n    std::string id; float')}
+${read('helpers/ResultPresentationNativeDouble.hpp').replace(/^#pragma once$/gm,'').replace('struct CCMenuItemSpriteExtra : CCNode {','struct CCMenuItem : CCNode {bool enabled=true;void setEnabled(bool value){enabled=value;}};\nstruct CCMenuItemSpriteExtra : CCMenuItem {void setNormalImage(CCNode*n){children.clear();addChild(n);}void updateSprite(){}').replace('bool enabled=true; void setEnabled(bool value)', 'void setEnabled(bool value)').replace('std::string id; float','int tag=0;void setTag(int value){tag=value;}int getTag()const{return tag;}\n    auto* getChildren(){return &children;}void schedule(int,float){scheduled=true;}void unschedule(int){scheduled=false;}\n    std::string id; float')}
 #include <chrono>
 #include <cmath>
 #include <memory>
@@ -65,10 +65,11 @@ namespace web=geode::utils::web;
 namespace geode::async{template<class T>struct TaskHolder{std::shared_ptr<web::Job> job;
  void cancel(){if(job)job->cancelled=true;}template<class F>void spawn(web::Operation op,F f){job=std::make_shared<web::Job>(web::Job{op,f,false});web::jobs.push_back(job);}};}
 namespace async=geode::async;
+${strip(read('../src/domain/RankedMode.hpp'))}
 namespace corum::ranked{enum class RuntimeStage{Ready,Matched,Error};
-struct RankedRuntime{struct View{RuntimeStage stage=RuntimeStage::Ready;bool accountActiveElsewhere=true;}v;std::string token="session";int reloads=0,takeovers=0,volumeUpdates=0;
+struct RankedRuntime{struct View{RuntimeStage stage=RuntimeStage::Ready;bool soloEnabled=true,survivalEnabled=true;bool accountActiveElsewhere=true;}v;std::string token="session";int reloads=0,takeovers=0,volumeUpdates=0;
  static RankedRuntime& get(){static RankedRuntime r;return r;}auto const& view()const{return v;}std::string spectatorLiveSessionToken()const{return token;}
- void applyAudioVolumes(matjson::Value const&){++volumeUpdates;}void begin(){++reloads;}void takeOverSession(){++takeovers;v.accountActiveElsewhere=false;}};
+ void applyAudioVolumes(matjson::Value const&){++volumeUpdates;}void applyAdminProjection(matjson::Value const&,std::string const&){++reloads;}void begin(){++reloads;}void takeOverSession(){++takeovers;v.accountActiveElsewhere=false;}};
 inline int bots=0;void showDebugBotPasswordPopup(){++bots;}
 namespace i18n{std::string text(char const*,char const* english){return english;}}
 namespace ui{inline constexpr ccColor3B Red{255,60,60},Blue{80,120,220},Cyan{64,224,255},Gold{255,205,65},Surface{8,15,25},SurfaceRaised{18,25,40},Text{230,235,244},TextMuted{150,150,150};
@@ -77,14 +78,15 @@ namespace ui{inline constexpr ccColor3B Red{255,60,60},Blue{80,120,220},Cyan{64,
  void fitMenuLabelWidth(CCLabelBMFont*,float,float,float){}void fitFullMenuLabel(CCLabelBMFont*,float,float,float){}
  void grayButtonVisual(CCNode* node){node->color={100,100,100};}void cancelMenuTouch(CCMenu* menu){++menu->cancellations;}
 }
-namespace debug{inline int spectates=0;void showDebugSpectatePopup(){++spectates;}void showDebugAdminPopup();}
+struct SurvivalRuntime{static SurvivalRuntime&get(){static SurvivalRuntime r;return r;}bool active()const{return false;}};void showSurvivalDebugPopup(){}
+namespace debug{inline int spectates=0;void showDebugSpectatePopup(){++spectates;}void showDebugAdminPopup(RankedMode mode);}
 }
 `;
 function run(code,flags=[]){const dir=mkdtempSync(join(tmpdir(),'corum-admin-native-'));try{writeFileSync(join(dir,'test.cpp'),code);execFileSync('g++',['-std=c++23','-Wall','-Wextra','-Wpedantic','-Werror',...flags,join(dir,'test.cpp'),'-o',join(dir,'test')],{stdio:'pipe'});execFileSync(join(dir,'test'),[],{stdio:'pipe'});}catch(e){throw new Error(e.stderr?.toString()||e.message);}finally{rmSync(dir,{recursive:true,force:true});}}
 for (const androidString of [false,true]) test(`whole debug/Admin popups compile ON/OFF with ${androidString?'Android gd::string':'std::string'} and guard names, inputs, confirmation, late callbacks and batch summary`,()=>{
- const source=strip(read('../src/debug/DebugAdminPopup.cpp')).replace('class DebugAdminPopup final : public Popup, public FLAlertLayerProtocol {','class DebugAdminPopup final : public Popup, public FLAlertLayerProtocol { public:').replace('class DebugAudioVolumePopup final : public Popup {','class DebugAudioVolumePopup final : public Popup { public:');
+ const source=strip(read('../src/debug/DebugAdminPopup.cpp')).replace('class DebugAdminPopup final : public Popup {','class DebugAdminPopup final : public Popup { public:').replace('class DebugAudioVolumePopup final : public Popup {','class DebugAudioVolumePopup final : public Popup { public:');
  const menu=strip(read('../src/debug/DebugMenuPopup.cpp')).replace('class DebugMenuPopup final : public Popup {','class DebugMenuPopup final : public Popup { public:');
- run(fixture+source+menu+`
+ run(fixture+strip(read('../src/ui/RankedConfirmPopup.hpp')).replace('class RankedConfirmPopup final : public Popup {','class RankedConfirmPopup final : public Popup { public:')+source+menu+`
 using namespace corum::ranked;using namespace corum::ranked::debug;
 int main(){
  auto& runtime=RankedRuntime::get();auto* account=GJAccountManager::get();
@@ -100,8 +102,8 @@ int main(){
  assert(job->op.body["action"].asString().unwrapOr("")=="SET_BOTH"&&job->op.body["lp"].asInt().unwrapOr(0)==300);
  matjson::Value fail;fail["message"]="Forbidden";job->callback({fail,403});assert(!admin->m_busy&&admin->m_status->text=="Forbidden");
  admin->execute(6,false);assert(web::jobs.size()==1);CCMenuItemSpriteExtra reset;reset.setTag(6);admin->onAction(&reset);
- assert(FLAlertLayer::confirmations==1&&web::jobs.size()==1);admin->FLAlert_Clicked(nullptr,false);assert(web::jobs.size()==1);
- admin->onAction(&reset);admin->FLAlert_Clicked(nullptr,true);assert(web::jobs.size()==2);
+ assert(admin->m_confirm&&web::jobs.size()==1);admin->m_confirm->lock()->finish(false);drainMainQueue();assert(web::jobs.size()==1);
+ admin->onAction(&reset);admin->m_confirm->lock()->finish(true);drainMainQueue();assert(web::jobs.size()==2);
  assert(web::jobs.back()->op.body["confirmation"].asString().unwrapOr("")=="RESET");
  matjson::Value good;good["message"]="Changes saved.";web::jobs.back()->callback({good,201});
  assert(admin->m_closed&&admin->parent&&runtime.reloads==0&&FLAlertLayer::summaries==0);drainMainQueue();
@@ -114,7 +116,7 @@ int main(){
  auto* debug=DebugMenuPopup::create();debug->show();CCMenuItemSpriteExtra first;first.setTag(0);debug->onSelect(&first);
  assert(bots==0&&debug->parent);drainMainQueue();assert(bots==1&&!debug->parent);
  // The music entry retires the Admin owner before opening its own authenticated modal.
- auto* owner=DebugAdminPopup::create();owner->show();CCMenuItemSpriteExtra music;music.setTag(7);
+ auto* owner=DebugAdminPopup::create();owner->m_scope=2;owner->refreshScope();owner->show();CCMenuItemSpriteExtra music;music.setTag(7);
  owner->onAction(&music);assert(!owner->m_closed);owner->m_password->setString("password");
  auto const countBefore=web::jobs.size();owner->onAction(&music);owner->onAction(&music);
  assert(web::jobs.size()==countBefore&&mainQueue.size()==1);drainMainQueue();

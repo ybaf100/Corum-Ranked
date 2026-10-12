@@ -32,6 +32,7 @@ namespace geode {struct Mod {
 ${strip(read('src/ui/RankedTranslations.hpp'))}
 std::string tr(std::string_view k,std::string_view e){return corum::ranked::i18n::text(k,e);}
 constexpr ccColor3B kGold{255,207,74},kRed{255,91,111},kCyan{64,224,255};
+namespace corum::ranked {struct SurvivalRuntime {struct View{std::string error;}v;static SurvivalRuntime&get(){static SurvivalRuntime r;return r;}View const&view()const{return v;}};}
 namespace corum::ranked::ui {
  constexpr ccColor3B SurfaceRaised{16,27,49},Text{242,247,255};
  CCNode*surface(CCSize s,CCPoint p,ccColor3B accent,ccColor3B fill,int,bool){auto*n=CCNode::create();n->size=s;n->position=p;n->color=fill;auto*f=CCNode::create();f->id="frame";f->color=accent;n->addChild(f);return n;}

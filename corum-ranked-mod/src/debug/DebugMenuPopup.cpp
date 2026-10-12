@@ -3,6 +3,7 @@
 #include "../DebugBotPopup.hpp"
 #include "DebugSpectateRuntime.hpp"
 #include "../RankedRuntime.hpp"
+#include "../SurvivalRuntime.hpp"
 #include "../ui/RankedTranslations.hpp"
 #include "../ui/RankedVisuals.hpp"
 #include "../ui/RankedInput.hpp"
@@ -13,7 +14,9 @@ namespace corum::ranked::debug {
 namespace {
 class DebugMenuPopup final : public Popup {
     bool m_closed = false, m_exited = false;
-    bool init() override {
+    RankedMode m_mode=RankedMode::SoloRanked;
+    bool init(RankedMode mode) {
+        m_mode=mode;
         if (!Popup::init(300,220)) return false;
         m_bgSprite->setVisible(false); setID("ranked-debug-menu"_spr);
         auto* panel = ui::surface({300,220},{150,110},ui::Cyan,ui::Surface,255,true);
@@ -31,6 +34,9 @@ class DebugMenuPopup final : public Popup {
             auto* button = CCMenuItemSpriteExtra::create(face,this,menu_selector(DebugMenuPopup::onSelect));
             button->setTag(i); button->setPosition({150,151 - i * 49.0f}); menu->addChild(button);
             bool enabled = i != 2 || admin;
+            auto const& view=RankedRuntime::get().view();
+            if(i==0)enabled=mode==RankedMode::Survival?(view.survivalEnabled||SurvivalRuntime::get().active()):view.soloEnabled;
+            if(i==1 && mode==RankedMode::Survival){enabled=false;button->setVisible(false);}
 #if !defined(CORUM_RANKED_DEBUG_BOT_MATCH)
             if (i == 0) enabled = false;
 #endif
@@ -45,23 +51,23 @@ class DebugMenuPopup final : public Popup {
         if (m_closed) return;
         auto* item = typeinfo_cast<CCMenuItemSpriteExtra*>(sender); if (!item) return;
         auto const choice = item->getTag(); m_closed = true;
-        auto const keep = Ref<DebugMenuPopup>(this);
-        queueInMainThread([keep,choice] {
+        auto const keep = Ref<DebugMenuPopup>(this);auto const mode=m_mode;
+        queueInMainThread([keep,choice,mode] {
             if (!keep->isRunning()) return;
             keep->Popup::onClose(nullptr);
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
-            if (choice == 0) corum::ranked::showDebugBotPasswordPopup();
+            if (choice == 0) {if(mode==RankedMode::Survival)showSurvivalDebugPopup();else corum::ranked::showDebugBotPasswordPopup();}
 #endif
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
             if (choice == 1) showDebugSpectatePopup();
 #endif
-            if (choice == 2) showDebugAdminPopup();
+            if (choice == 2) showDebugAdminPopup(mode);
         });
     }
 public:
-    static DebugMenuPopup* create() {
+    static DebugMenuPopup* create(RankedMode mode=RankedMode::SoloRanked) {
         auto* popup = new DebugMenuPopup;
-        if (popup->init()) { popup->autorelease(); return popup; }
+        if (popup->init(mode)) { popup->autorelease(); return popup; }
         delete popup; return nullptr;
     }
     void onExit() override {
@@ -71,6 +77,6 @@ public:
     }
 };
 }
-void showDebugMenuPopup() { if (auto* popup = DebugMenuPopup::create()) popup->show(); }
+void showDebugMenuPopup(RankedMode mode) { if (auto* popup = DebugMenuPopup::create(mode)) popup->show(); }
 }
 #endif

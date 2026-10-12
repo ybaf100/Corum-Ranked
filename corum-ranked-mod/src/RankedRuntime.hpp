@@ -250,6 +250,8 @@ struct PlacementView {
 };
 
 struct HistoryMatchView {
+    int survivalRank=0;
+    matjson::Value survivalRecord;
     RankedMode mode = RankedMode::SoloRanked;
     std::string matchId;
     std::string finishedAt;
@@ -410,6 +412,8 @@ struct EnvironmentWarningView {
 };
 
 struct SurvivalView {
+    int completedMatches=0;
+    std::optional<int> bestRank;
     bool loaded = false, loading = false;
     std::string error, tierId;
     RankedProfileView profile;
@@ -499,12 +503,16 @@ public:
     void fetchPlayerInfo(std::string const& side);
     void fetchForumRecords(bool refresh = false);
     void applyAudioVolumes(matjson::Value const& volumes);
+    void applyAdminProjection(matjson::Value const& result,std::string const& scope);
     [[nodiscard]] std::int64_t forumRefreshRemainingMs() const;
     void claimAchievement(std::string const& achievementId);
     void equipAchievementTitle(std::string const& achievementId, std::optional<int> level);
     void clearAchievementTitle();
+    bool prepareSurvivalEnvironment(matjson::Value& body);
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
     // Primary API: password travels inside the options object.
+    bool prepareSurvivalDebugAdmission(matjson::Value& body);
+    bool handleSurvivalAdmissionError(geode::utils::web::WebResponse const& response);
     void startDebugBotMatch(DebugBotMatchOptions options);
     // Compatibility overload for alpha.4 callers that still pass password separately.
     // Keep this through alpha.5 so stale DebugBotPopup layouts compile on every target.

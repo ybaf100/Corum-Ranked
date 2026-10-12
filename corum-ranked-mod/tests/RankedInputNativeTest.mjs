@@ -177,7 +177,7 @@ int main(){
     menu.onExit();assert(d.handlers.empty());
 }
 `);
-    assert.match(body(play, 'bool blockEntryGameplayUpdate()'), /entryOverlay->releaseToGameplay\(this\)/);
+    assert.match(body(play, 'bool blockEntryGameplayUpdate()')+body(play,'void releaseEntryControls()'), /entryOverlay->releaseToGameplay\(this\)/);
     assert.match(body(play, 'void onExit()'), /entryOverlay->dismiss\(\)/);
     assert.doesNotMatch(read('src/ui/RankedInput.hpp')+overlay, /\$modify|incrementForcePrio|registerForcePrio/);
 });

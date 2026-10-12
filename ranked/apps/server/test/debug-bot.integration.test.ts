@@ -1,5 +1,5 @@
 import { enterPreparedMatch } from "./native-entry-helper.js";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -90,22 +90,7 @@ const cleanMods: CreateSessionDto["installedMods"] = [
 beforeAll(async () => {
   pglite = new PGlite();
   database = new PgliteDatabase(pglite);
-  for (const migrationName of [
-    "0001_initial_ranked.sql",
-    "0002_attempt_start_leases.sql",
-    "0002_debug_bot_match.sql",
-    "0003_debug_rating_playable_maps.sql",
-    "0004_alpha37_schema_hardening.sql",
-    "0005_v050_rating_system.sql",
-    "0006_v050_dynamic_csmp_tiers.sql",
-    "0007_solo_stage_placement.sql",
-    "0008_placement_beta9.sql",
-    "0009_placement_stage_count.sql",
-    "0010_achievements_v1.sql",
-    "0012_gameplay_controls.sql",
-    "0013_native_scene_entry.sql",
-    "0020_deathmatch_native_death.sql",
-  ]) {
+  for (const migrationName of (await readdir(new URL("../../../migrations/", import.meta.url))).filter(n => n.endsWith(".sql")).sort()) {
     const path = fileURLToPath(new URL(`../../../migrations/${migrationName}`, import.meta.url));
     await pglite.exec(await readFile(path, "utf8"));
   }

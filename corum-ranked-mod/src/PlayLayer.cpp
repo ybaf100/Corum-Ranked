@@ -1,5 +1,8 @@
 #include "RankedRuntime.hpp"
 #include "RankedRoundPreparation.hpp"
+#include "SurvivalRuntime.hpp"
+#include "RankedLevelPreparation.hpp"
+#include "ui/SurvivalHud.hpp"
 #include "RankedAudioManager.hpp"
 #include "SpectatorLiveRuntime.hpp"
 #include "domain/SpectatorCapturePolicy.hpp"
@@ -202,6 +205,10 @@ public:
         int levelId = 0;
         double qualifyingPercent = -1.0;
         bool rankedLevel = false;
+        bool survivalLevel = false;
+        corum::ranked::LevelPreparationContext survivalContext;
+        corum::ranked::ui::SurvivalHud* survivalHud = nullptr;
+        bool survivalWaiting = false;
         bool rankedInitialized = false;
         bool nativeEntryHeld = false;
         bool entryNativeCompletionInProgress = false;
@@ -380,6 +387,8 @@ public:
     bool init(GJGameLevel* level, bool useReplay, bool dontCreateObjects) {
         auto& runtime = corum::ranked::RankedRuntime::get();
         m_fields->levelId = level ? static_cast<int>(level->m_levelID) : 0;
+        m_fields->survivalLevel=corum::ranked::SurvivalRuntime::get().consumeNativeLaunch(level);
+        if(m_fields->survivalLevel)m_fields->survivalContext=corum::ranked::SurvivalRuntime::get().preparationContext();
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         auto& debug = corum::ranked::debug::DebugSpectateRuntime::get();
         if (debug.preparedLevel(m_fields->levelId) &&
@@ -392,7 +401,7 @@ public:
         m_fields->rankedLevel =
             runtime.view().stage == corum::ranked::RuntimeStage::Matched &&
             runtime.isGameplayLevel(m_fields->levelId);
-        m_fields->nativeEntryHeld = m_fields->rankedLevel && runtime.canEnterNativeRoundScene();
+        m_fields->nativeEntryHeld = m_fields->survivalLevel || (m_fields->rankedLevel && runtime.canEnterNativeRoundScene());
         m_fields->sceneContext = currentSpectatorSceneContext();
         m_fields->placementMapIndex = runtime.isPlacement() ? runtime.view().placement.currentMapIndex : 0;
         // Establish authority BEFORE vanilla init's reset/attempt callbacks.
@@ -440,7 +449,7 @@ public:
             return true;
         }
 #endif
-        if (!m_fields->rankedLevel || m_isTestMode) return true;
+        if ((!m_fields->rankedLevel && !m_fields->survivalLevel) || m_isTestMode) return true;
 
         // Latch read-only authority during init, before any postUpdate/onQuit
         // callback can observe the new scene. A reconnecting spectator must not
@@ -449,7 +458,7 @@ public:
         m_fields->rankedPractice = !m_fields->spectatorMode && m_isPracticeMode;
         if (m_fields->spectatorMode && m_player1) m_player1->setVisible(false);
         if (m_fields->rankedPractice) runtime.reportPracticePresence(true);
-        addRankedHud();
+        if(m_fields->survivalLevel)addSurvivalHud();else addRankedHud();
         m_fields->gameplayFrameObserved = false;
         m_fields->attemptJournalReadyAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
         m_fields->attemptStartReported = false;
@@ -457,6 +466,7 @@ public:
         // Scene-owned presentation heartbeat also runs after vanilla completion
         // has stopped gameplay postUpdate. It cannot create gameplay evidence.
         schedule(schedule_selector(CorumRankedPlayLayer::spectatorFrame));
+        if(m_fields->survivalLevel)schedule(schedule_selector(CorumRankedPlayLayer::survivalFrame));
         if (m_fields->nativeEntryHeld) {
             m_fields->entryWasPaused = m_isPaused;
             m_fields->entryTouchEnabled = isTouchEnabled();
@@ -507,6 +517,7 @@ public:
     }
 
     bool blockEntryGameplayUpdate() {
+        if(m_fields->survivalLevel)return blockSurvivalEntry();
         if (!m_fields->nativeEntryHeld) return false;
         if (m_fields->entryNativeCompletionInProgress || m_fields->autoExitRequested) return true;
         // Scene-entry actions can enable the native menu after init. Keep our
@@ -574,6 +585,79 @@ public:
             queueHeldEntryExit();
             return true;
         }
+        releaseEntryControls();
+        log::info("[RankedEntry] shared countdown complete; gameplay released level={} paused={} appPaused={} pauseBeforeHold={} pauseEnabled={}",
+            m_fields->levelId, m_isPaused, app && app->m_gamePaused, m_fields->entryUIPauseEnabled,
+            m_uiLayer && m_uiLayer->m_pauseBtn && m_uiLayer->m_pauseBtn->isEnabled());
+        if (m_uiLayer && m_uiLayer->m_pauseBtn) {
+            auto* menu = typeinfo_cast<CCMenu*>(m_uiLayer->m_pauseBtn->getParent());
+            auto* dispatcher = CCDirector::sharedDirector()->getTouchDispatcher();
+            auto* inputHandler = dispatcher->findHandler(m_uiLayer);
+            auto* menuHandler = menu ? dispatcher->findHandler(menu) : nullptr;
+            log::info("[RankedInput] GO level={} uiTouch={} menuTouch={} menuEnabled={} uiPriority={} menuPriority={}",
+                m_fields->levelId, m_uiLayer->isTouchEnabled(), menu && menu->isTouchEnabled(),
+                menu && menu->isEnabled(), inputHandler ? inputHandler->m_nPriority : 0,
+                menuHandler ? menuHandler->m_nPriority : 0);
+        }
+        return false;
+    }
+
+    bool blockSurvivalEntry() {
+        if(!m_fields->rankedInitialized || m_fields->entryNativeCompletionInProgress)return m_fields->nativeEntryHeld;
+        if(m_fields->autoExitRequested)return true;
+        auto& runtime=corum::ranked::SurvivalRuntime::get();runtime.tick();
+        if(runtime.preparationContext()!=m_fields->survivalContext || runtime.view().state=="ROUND_RESULT" ||
+            runtime.view().state=="FINAL_RESULT" || runtime.view().state=="CANCELLED") {queueHeldEntryExit();return true;}
+        if(!m_fields->nativeEntryHeld)return m_fields->survivalWaiting;
+        if(isRunning())runtime.sceneEntered(m_fields->levelId);
+        auto remaining=runtime.countdownMs();
+        if(m_fields->entryOverlay)m_fields->entryOverlay->present(runtime.view().ownEntered,remaining);
+        m_queuedButtons.clear();FMODAudioEngine::sharedEngine()->pauseAllMusic(true);
+        if(!runtime.canPlay() || !runtime.view().ownEntered || !remaining || *remaining>0 || !isRunning() ||
+            !getParent() || getParent()!=CCDirector::sharedDirector()->getRunningScene())return true;
+        m_isPaused=m_fields->entryWasPaused;
+        auto* app=AppDelegate::get();
+        if(!m_fields->entryWasPaused && app && app->m_gamePaused) {
+            m_fields->entryNativeCompletionInProgress=true;
+            static_cast<PlayLayer*>(this)->onEnterTransitionDidFinish();
+            m_fields->entryNativeCompletionInProgress=false;
+        }
+        if(!runtime.canPlay() || runtime.preparationContext()!=m_fields->survivalContext ||
+            (!m_fields->entryWasPaused && (!AppDelegate::get() || AppDelegate::get()->m_gamePaused || m_isPaused))) {
+            m_isPaused=true;queueHeldEntryExit();return true;
+        }
+        releaseEntryControls();return false;
+    }
+
+    void survivalFrame(float dt) {
+        if(!m_fields->survivalLevel || !m_fields->rankedInitialized || m_fields->safetyRetired)return;
+        auto& runtime=corum::ranked::SurvivalRuntime::get();runtime.tick();
+        if(m_fields->survivalHud)m_fields->survivalHud->present(runtime.view(),runtime.remainingMs(),dt);
+        if(m_fields->fpsLabel)setHudText(m_fields->fpsLabel,corum::ranked::presentHud({.renderFps=m_fields->fpsMeter.fps()}).fpsText);
+        if(blockSurvivalEntry())return;
+        if(!runtime.canPlay() && runtime.view().state=="PLAYING") {m_fields->survivalWaiting=true;m_isPaused=true;}
+    }
+
+    void addSurvivalHud() {
+        auto const size=CCDirector::sharedDirector()->getWinSize();
+        m_fields->hudRoot=CCNode::create();m_fields->hudRoot->setContentSize(size);
+        addFpsHud(m_fields->hudRoot,corum::ranked::layoutHud(size.width,size.height).topY);
+        m_fields->survivalHud=corum::ranked::ui::SurvivalHud::create();
+        if(m_fields->survivalHud)m_fields->hudRoot->addChild(m_fields->survivalHud);
+        addChild(m_fields->hudRoot,1000);
+#if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
+        auto* menu=CCMenu::create();menu->setPosition(CCPointZero);m_fields->hudRoot->addChild(menu,30);
+        auto* face=corum::ranked::ui::surface({72,24},{},corum::ranked::ui::Red,corum::ranked::ui::SurfaceRaised,180,true);
+        face->addChild(corum::ranked::ui::label("Force n",.22f,{36,12},corum::ranked::ui::Text,corum::ranked::ui::FontWeight::SemiBold),5);
+        auto* force=CCMenuItemSpriteExtra::create(face,this,menu_selector(CorumRankedPlayLayer::onSurvivalForceRank));force->setPosition({size.width-44,18});menu->addChild(force);
+#endif
+    }
+
+#if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
+    void onSurvivalForceRank(CCObject*) {if(m_fields->survivalLevel)corum::ranked::showSurvivalForceRankPopup();}
+#endif
+
+    void releaseEntryControls() {
         m_fields->nativeEntryHeld = false;
         setTouchEnabled(m_fields->entryTouchEnabled);
         setKeyboardEnabled(m_fields->entryKeyboardEnabled);
@@ -604,24 +688,10 @@ public:
             FMODAudioEngine::sharedEngine()->resumeAllMusic();
             PlayLayer::startMusic();
         }
-        log::info("[RankedEntry] shared countdown complete; gameplay released level={} paused={} appPaused={} pauseBeforeHold={} pauseEnabled={}",
-            m_fields->levelId, m_isPaused, app && app->m_gamePaused, m_fields->entryUIPauseEnabled,
-            m_uiLayer && m_uiLayer->m_pauseBtn && m_uiLayer->m_pauseBtn->isEnabled());
-        if (m_uiLayer && m_uiLayer->m_pauseBtn) {
-            auto* menu = typeinfo_cast<CCMenu*>(m_uiLayer->m_pauseBtn->getParent());
-            auto* dispatcher = CCDirector::sharedDirector()->getTouchDispatcher();
-            auto* inputHandler = dispatcher->findHandler(m_uiLayer);
-            auto* menuHandler = menu ? dispatcher->findHandler(menu) : nullptr;
-            log::info("[RankedInput] GO level={} uiTouch={} menuTouch={} menuEnabled={} uiPriority={} menuPriority={}",
-                m_fields->levelId, m_uiLayer->isTouchEnabled(), menu && menu->isTouchEnabled(),
-                menu && menu->isEnabled(), inputHandler ? inputHandler->m_nPriority : 0,
-                menuHandler ? menuHandler->m_nPriority : 0);
-        }
-        return false;
     }
 
     void acquireGameplayAudio() {
-        auto const corumGameplayScene = m_fields->rankedLevel
+        auto const corumGameplayScene = m_fields->rankedLevel || m_fields->survivalLevel
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
             || m_fields->debugRecordScene || m_fields->debugPlaybackScene
 #endif
@@ -1051,6 +1121,14 @@ public:
         syncSpectatorLocalSafety();
         ScopedPersistenceOwner persistence(this);
         PlayLayer::postUpdate(dt);
+        if(m_fields->survivalLevel && m_fields->rankedInitialized && !m_isTestMode) {
+            auto& survival=corum::ranked::SurvivalRuntime::get();m_fields->fpsMeter.observeFrame(steadyNowMicros());
+            if(!m_isPracticeMode && !m_isPaused && m_player1 && !m_player1->m_isDead && !m_hasCompletedLevel && survival.canPlay()) {
+                if(!m_fields->attemptStartReported)m_fields->attemptStartReported=survival.beginAttempt();
+                if(m_fields->attemptStartReported && !m_fields->attemptEndReported)survival.progress(rankedProgressPercent(this));
+            }
+            return;
+        }
         reconcileSpectatorWorldDriver();
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         if (m_fields->debugRecordScene) {
@@ -1214,6 +1292,15 @@ public:
             if (m_player1) m_player1->setVisible(false);
             return;
         }
+        if(m_fields->survivalLevel) {
+            if(m_fields->rankedInitialized && !m_fields->nativeEntryHeld) {
+                auto& survival=corum::ranked::SurvivalRuntime::get();
+                if(!m_fields->attemptEndReported)survival.endAttempt(m_hasCompletedLevel?100.0:rankedProgressPercent(this));
+                if(survival.attemptLimitReached() || !survival.canPlay()) {m_fields->survivalWaiting=true;m_isPaused=true;return;}
+                m_fields->attemptStartReported=m_fields->attemptEndReported=false;
+            }
+            PlayLayer::resetLevel();return;
+        }
         if (
             scoringEnabled() &&
             (
@@ -1292,6 +1379,7 @@ public:
     }
 
     void destroyPlayer(PlayerObject* player, GameObject* object) {
+
         auto& runtime = corum::ranked::RankedRuntime::get();
         syncSpectatorLocalSafety();
         ScopedPersistenceOwner persistence(this);
@@ -1299,6 +1387,17 @@ public:
             if (!m_fields->suppressedDeathLogged) {
                 log::info("Local death suppressed for spectator: level={}", m_fields->levelId);
                 m_fields->suppressedDeathLogged = true;
+            }
+            return;
+        }
+        if(m_fields->survivalLevel) {
+            auto const anticheat=object&&m_anticheatSpike&&object->m_uniqueID==m_anticheatSpike->m_uniqueID;
+            auto const eligible=m_fields->rankedInitialized && !m_fields->nativeEntryHeld && !m_isPracticeMode && !anticheat &&
+                player && (player==m_player1 || (m_gameState.m_isDualMode&&player==m_player2)) && !player->m_isDead && !m_hasCompletedLevel;
+            auto const progress=eligible?rankedProgressPercent(this):0.0;
+            PlayLayer::destroyPlayer(player,object);
+            if(eligible && player->m_isDead && !m_hasCompletedLevel && !m_fields->attemptEndReported) {
+                corum::ranked::SurvivalRuntime::get().endAttempt(progress);m_fields->attemptEndReported=true;
             }
             return;
         }
@@ -1353,8 +1452,15 @@ public:
     }
 
     void levelComplete() {
+
         auto& runtime = corum::ranked::RankedRuntime::get();
         if (suppressLocalCompletion()) return;
+        if(m_fields->survivalLevel) {
+            if(m_fields->rankedInitialized && !m_isPracticeMode && !m_fields->attemptEndReported) {
+                corum::ranked::SurvivalRuntime::get().endAttempt(100);m_fields->attemptEndReported=true;
+            }
+            PlayLayer::levelComplete();return;
+        }
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         if (m_fields->debugRecordScene && m_player1) {
             corum::ranked::debug::DebugSpectateRuntime::get().recordPose(observedSpectatorPose(false, true), true);
@@ -1378,8 +1484,15 @@ public:
     }
 
     void showCompleteText() {
+
         auto& runtime = corum::ranked::RankedRuntime::get();
         if (suppressLocalCompletion()) return;
+        if(m_fields->survivalLevel) {
+            if(m_fields->rankedInitialized && !m_isPracticeMode && !m_fields->attemptEndReported) {
+                corum::ranked::SurvivalRuntime::get().endAttempt(100);m_fields->attemptEndReported=true;
+            }
+            PlayLayer::showCompleteText();return;
+        }
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         if (m_fields->debugRecordScene && m_player1) {
             corum::ranked::debug::DebugSpectateRuntime::get().recordPose(observedSpectatorPose(false, true), true);
@@ -1406,6 +1519,12 @@ public:
     }
 
     void onQuit() {
+        if(m_fields->survivalLevel) {
+            if(!corum::ranked::resumeRankedPauseBeforeQuit(this))return;
+            unschedule(schedule_selector(CorumRankedPlayLayer::survivalFrame));
+            if(!m_fields->autoExitRequested && !m_isPracticeMode)corum::ranked::SurvivalRuntime::get().endAttempt(m_hasCompletedLevel?100.0:rankedProgressPercent(this));
+        }
+
         if (m_fields->rankedLevel && !corum::ranked::resumeRankedPauseBeforeQuit(this)) {
             if (!m_fields->pauseQuitBlockedLogged) {
                 m_fields->pauseQuitBlockedLogged = true;
@@ -1454,6 +1573,7 @@ public:
     }
 
     void onExit() {
+        unschedule(schedule_selector(CorumRankedPlayLayer::survivalFrame));
         if (m_fields->entryOverlay) {
             m_fields->entryOverlay->dismiss();
             m_fields->entryOverlay = nullptr;
@@ -1534,6 +1654,10 @@ public:
     }
 
     void togglePracticeMode(bool practiceMode) {
+        if(m_fields->survivalLevel) {
+            if(practiceMode && !m_isPracticeMode)corum::ranked::SurvivalRuntime::get().endAttempt(rankedProgressPercent(this));
+            m_fields->attemptStartReported=m_fields->attemptEndReported=false;PlayLayer::togglePracticeMode(practiceMode);return;
+        }
         auto& runtime = corum::ranked::RankedRuntime::get();
         if (blocksLocalEvidence()) {
             // Spectator scenes are read-only. Practice cannot alter the remote
@@ -1661,6 +1785,19 @@ public:
         }
     }
 
+    void addFpsHud(CCNode* root,float top) {
+        m_fields->fpsLabel = addShadowedHudLabel(
+            root,
+            "FPS : -",
+            "bigFont.fnt",
+            0.51f,
+            {0.0f, 1.0f},
+            {7.0f, top - 0.5f},
+            corum::ranked::ui::Text
+        );
+        m_fields->fpsLabel->setID("ranked-fps"_spr);
+    }
+
     void addRankedHud() {
         auto const size = CCDirector::sharedDirector()->getWinSize();
         auto const layout = corum::ranked::layoutHud(size.width, size.height);
@@ -1677,16 +1814,7 @@ public:
         // Gameplay stays visually open: no cards or rectangular washes. A tight
         // one-pixel text shadow gives Paperlogy enough contrast over bright maps
         // without covering hazards or level art.
-        m_fields->fpsLabel = addShadowedHudLabel(
-            m_fields->hudRoot,
-            "FPS : -",
-            "bigFont.fnt",
-            0.51f,
-            {0.0f, 1.0f},
-            {7.0f, top - 0.5f},
-            corum::ranked::ui::Text
-        );
-        m_fields->fpsLabel->setID("ranked-fps"_spr);
+        addFpsHud(m_fields->hudRoot,top);
 
         m_fields->ownNameLabel = addShadowedHudLabel(
             m_fields->hudRoot,
