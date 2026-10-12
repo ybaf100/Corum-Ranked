@@ -1,3 +1,12 @@
+## v0.5.0-beta.61
+
+- Implement the durable 16-player Survival engine, 180-second rounds, cutoff ties, final rankings and repeat three-attempt Death Matches. Capture Survival LP/config once and use server receipt deadlines with idempotent transitions.
+- Select and download real rated GD maps on the server with the exact per-round star/Demon predicates, 40-million ID floor, data verification, durable selection leases and retries. Add native client metadata validation for M4 preparation.
+- Persist Survival matches, entrants, rounds, attempts, tiebreaks and commands in migration 0022. Expose authenticated participant HUD state and trusted M4/M5 application ports; keep public Survival matching and online LP settlement closed.
+- Restore full-size clickable player cards and equally sized matching panels. Fix history button replacement geometry/spacing, center matching labels, localize lobby messages and use dark gold-accented selected tabs/Solo history buttons. Slightly thin GOLD/promotion leaderboard frames.
+- Show a localized Corum-font notice before entering a disabled channel's view-only lobby. Confirm opens the channel; Cancel/Back keeps the chooser, with repeated and obsolete callbacks retired safely.
+- Synchronize the beta61 exact version gate and workspaces. See [Survival M3 documentation](../ranked/docs/survival-m3.md) for deployment, rules, integration and validation limits.
+
 ## v0.5.0-beta.60
 
 - Restore the original compact player cards and matchmaking panel, with Enter below the cards, persistent top History/Achievement buttons and the bottom message/Debug strip. Align both matchmaking panels and highlight Solo History in gold.

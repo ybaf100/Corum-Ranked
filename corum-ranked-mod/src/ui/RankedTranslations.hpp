@@ -10,9 +10,8 @@ namespace corum::ranked::i18n {
 
 // Edit Korean wording in this file. CORUM RANKED, ROUND labels, Qualifying,
 // tier names, LP, player names, map names, and literal POOL 1..6 labels intentionally remain English.
-// If a newly edited Korean sentence introduces a Hangul syllable not already
-// used below, add its Unicode code point to the CorumSansMedium,
-// CorumSansSemiBold, CorumSansBold, and CorumSansBlack charsets in mod.json.
+// New Korean wording must be covered by the charset of each font weight that
+// renders it in mod.json. Validate the generated SD/HD/UHD atlas budget too.
 enum class Language {
     English,
     Korean,
@@ -24,7 +23,65 @@ struct Translation {
 };
 
 inline constexpr std::array kKoreanTranslations {
+    Translation{"A logged-in Geometry Dash account is required.", "로그인된 Geometry Dash 계정이 필요합니다."},
+    Translation{"A mod update is required before entering Ranked.", "랭크에 입장하려면 모드를 업데이트하세요."},
+    Translation{"Could not create a Ranked session.", "랭크 세션을 준비하지 못했습니다."},
+    Translation{"Could not load Ranked configuration.", "랭크 설정을 불러오지 못했습니다."},
+    Translation{"Could not recover Placement.", "배치 경기를 복구하지 못했습니다."},
+    Translation{"Download the additional resources before entering Ranked.", "랭크에 입장하려면 추가 리소스를 다운로드하세요."},
+    Translation{"Finalizing skipped Placement...", "배치 결과를 확정하는 중..."},
+    Translation{"Placement resumed. Preparing the next Map.", "배치 경기를 재개했습니다. 다음 맵을 준비하는 중..."},
+    Translation{"Placement skip was not applied.", "배치 건너뛰기가 적용되지 않았습니다."},
+    Translation{"Placement skipped. Showing the server result.", "배치를 건너뛰었습니다. 서버 결과를 확인하세요."},
+    Translation{"Placement started. Preparing Stage 1 Map 1.", "배치를 시작했습니다. 첫 단계의 첫 맵을 준비하는 중..."},
+    Translation{"Ranked cannot start until the mod environment is corrected.", "모드 설정을 수정한 뒤 랭크를 시작하세요."},
+    Translation{"Ranked configuration is invalid.", "랭크 설정이 유효하지 않습니다."},
+    Translation{"Ranked connection is no longer valid.", "랭크 연결이 유효하지 않습니다. 다시 입장하세요."},
+    Translation{"Starting server-authoritative Placement...", "서버 배치 경기를 시작하는 중..."},
+    Translation{"The debug server returned an incomplete match assignment.", "디버그 서버의 경기 정보가 불완전합니다."},
+    Translation{"The server returned an incomplete match assignment.", "서버의 경기 정보가 불완전합니다."},
+    Translation{"This client does not understand the current CBF policy.", "현재 CBF 설정을 처리할 수 없습니다. 모드를 업데이트하세요."},
+    Translation{"Ranked is active. Finish the match before leaving this screen.", "진행 중인 경기를 종료한 뒤 화면을 나가세요."},
     Translation{"choose-mode", "게임 모드 선택"},
+    Translation{"click-mode", "입장할 모드를 선택하세요"},
+    Translation{"mode-off-browse", "운영 중지 상태입니다. 기록, 리더보드, 도전과제를 조회할 수 있습니다."},
+    Translation{"mode-disabled-notice", "이 모드는 운영 중지 상태입니다.\n확인을 누르면 조회 화면으로 이동합니다."},
+    Translation{"Ranked session ready. Join the queue when prepared.", "준비되면 매칭을 시작하세요."},
+    Translation{"Ranked session ready.", "랭크 로비에 입장했습니다."},
+    Translation{"Left the queue.", "매칭 대기를 취소했습니다."},
+    Translation{"Searching for an opponent...", "상대를 찾고 있습니다..."},
+    Translation{"Joining the Ranked queue...", "매칭 대기에 참가하는 중..."},
+    Translation{"Leaving the Ranked queue...", "매칭 대기를 취소하는 중..."},
+    Translation{"Creating DEBUG BOT MATCH...", "디버그 봇 경기를 준비하는 중..."},
+    Translation{"DEBUG BOT MATCH created. Confirm Ready.", "디버그 봇 경기가 준비되었습니다. 준비를 확인하세요."},
+    Translation{"Loading authoritative Ranked configuration...", "서버 랭크 설정을 불러오는 중..."},
+    Translation{"Creating a server session...", "서버 세션을 준비하는 중..."},
+    Translation{"Recovering the existing match...", "진행 중인 경기를 복구하는 중..."},
+    Translation{"Checking for an active Placement run...", "진행 중인 배치 경기를 확인하는 중..."},
+    Translation{"Ranked disconnected.", "랭크 연결을 종료했습니다."},
+    Translation{"Ranked connection expired. Enter Ranked again.", "랭크 연결이 만료되었습니다. 다시 입장하세요."},
+    Translation{"Placement Stage saved. Continue whenever you're ready.", "배치 단계가 저장되었습니다. 준비되면 계속하세요."},
+    Translation{"Placement recovered. Continue from the saved Stage and Map.", "배치 경기를 복구했습니다. 저장된 단계의 맵에서 계속하세요."},
+    Translation{"Choose a starting Pool.", "시작할 POOL을 선택하세요."},
+    Translation{"Match complete: Victory", "경기 종료: 승리"},
+    Translation{"Match complete: Defeat", "경기 종료: 패배"},
+    Translation{"Match cancelled by the server.", "서버에서 경기가 취소되었습니다."},
+    Translation{"LAST ATTEMPT - starts must be accepted before the deadline.", "마지막 시도 시작은 제한 시간 전에 접수가 필요합니다."},
+    Translation{"LAST ATTEMPT - an accepted attempt is still in progress.", "접수된 마지막 시도가 진행 중입니다."},
+    Translation{"Final start window - active attempts remain valid.", "마지막 시작 시간입니다. 진행 중인 시도는 유효합니다."},
+    Translation{"Deathmatch: exactly three attempts per player.", "데스매치: 플레이어는 세 번 시도할 수 있습니다."},
+    Translation{"Choose one private ban. The opponent's choice stays hidden.", "맵 하나를 금지하세요. 상대의 선택은 공개되지 않습니다."},
+    Translation{"Match found. Preparing ban phase...", "상대를 찾았습니다. 맵 금지를 준비하는 중..."},
+    Translation{"Current map revealed. Preparing downloads...", "현재 맵이 공개되었습니다. 다운로드를 준비하는 중..."},
+    Translation{"Round live. Only attempts on the revealed map are reported.", "라운드가 진행 중입니다. 공개된 맵의 시도만 기록됩니다."},
+    Translation{"Round result locked by the server.", "서버에서 라운드 결과를 확정했습니다."},
+    Translation{"Placement complete. Your initial Tier is ready.", "배치가 완료되었습니다. 초기 티어가 확정되었습니다."},
+    Translation{"Stage complete. Review the combined Grade.", "단계가 완료되었습니다. 최종 등급을 확인하세요."},
+    Translation{"Map Grade locked by the server.", "서버에서 맵 등급을 확정했습니다."},
+    Translation{"Final accepted Attempt is still in progress.", "접수된 마지막 시도가 진행 중입니다."},
+    Translation{"Placement Map live. Score and Grade update from the active Top 2 evidence.", "배치 맵이 진행 중입니다. 최고 두 기록으로 점수 및 등급을 갱신합니다."},
+    Translation{"Placement Map revealed. Preparing the exact GD level.", "배치 맵이 공개되었습니다. 지정된 레벨을 준비하는 중..."},
+    Translation{"Placement cancelled by the server.", "서버에서 배치 경기가 취소되었습니다."},
     Translation{"mode-enter", "입장"},
     Translation{"mode-browse", "조회"},
     Translation{"survival", "서바이벌"},
@@ -353,6 +410,16 @@ inline std::string text(std::string_view key, std::string_view english) {
         if (translation.key == key) return std::string(translation.korean);
     }
     return std::string(english);
+}
+
+inline std::string runtimeStatus(std::string const& status) {
+    auto const prefix = std::string_view("Searching for an opponent (rating range +/-");
+    auto const suffix = std::string_view(")...");
+    if (isKorean() && status.starts_with(prefix) && status.ends_with(suffix)) {
+        auto const range = status.substr(prefix.size(),status.size() - prefix.size() - suffix.size());
+        return "상대를 찾고 있습니다 (점수 범위 +/-" + range + ")...";
+    }
+    return text(status,status);
 }
 
 inline std::string streak(int count, bool winning) {

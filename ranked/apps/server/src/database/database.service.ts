@@ -37,6 +37,7 @@ const REQUIRED_MIGRATIONS = [
   "0018_map_metadata_cache.sql",
   "0019_ranked_audio_volumes.sql",
   "0021_survival_m1.sql",
+  "0022_survival_m3_engine.sql",
 ] as const;
 
 export interface RankedSchemaStatus {
@@ -59,6 +60,14 @@ type SchemaProbeRow = QueryResultRow & {
   ranked_achievement_unlocks: boolean;
   ranked_ap_ledger: boolean;
   sur_profiles: boolean;
+  sur_matches: boolean;
+  sur_match_players: boolean;
+  sur_rounds: boolean;
+  sur_round_players: boolean;
+  sur_attempts: boolean;
+  sur_tiebreaks: boolean;
+  sur_tiebreak_attempts: boolean;
+  sur_match_commands: boolean;
   sur_lp_ledger: boolean;
   ranked_forum_records: boolean;
   ranked_forum_refresh_cooldowns: boolean;
@@ -171,6 +180,14 @@ export class DatabaseService implements DatabasePort, OnModuleInit, OnApplicatio
           to_regclass('public.ranked_achievement_unlocks') IS NOT NULL AS ranked_achievement_unlocks,
           to_regclass('public.ranked_ap_ledger') IS NOT NULL AS ranked_ap_ledger,
           to_regclass('public.sur_profiles') IS NOT NULL AS sur_profiles,
+          to_regclass('public.sur_matches') IS NOT NULL AS sur_matches,
+          to_regclass('public.sur_match_players') IS NOT NULL AS sur_match_players,
+          to_regclass('public.sur_rounds') IS NOT NULL AS sur_rounds,
+          to_regclass('public.sur_round_players') IS NOT NULL AS sur_round_players,
+          to_regclass('public.sur_attempts') IS NOT NULL AS sur_attempts,
+          to_regclass('public.sur_tiebreaks') IS NOT NULL AS sur_tiebreaks,
+          to_regclass('public.sur_tiebreak_attempts') IS NOT NULL AS sur_tiebreak_attempts,
+          to_regclass('public.sur_match_commands') IS NOT NULL AS sur_match_commands,
           to_regclass('public.sur_lp_ledger') IS NOT NULL AS sur_lp_ledger,
           to_regclass('public.ranked_forum_records') IS NOT NULL AS ranked_forum_records,
           to_regclass('public.ranked_forum_refresh_cooldowns') IS NOT NULL AS ranked_forum_refresh_cooldowns,
@@ -257,6 +274,14 @@ export class DatabaseService implements DatabasePort, OnModuleInit, OnApplicatio
         ["ranked_achievement_unlocks", "table ranked_achievement_unlocks"],
         ["ranked_ap_ledger", "table ranked_ap_ledger"],
         ["sur_profiles", "table sur_profiles"],
+        ["sur_matches", "table sur_matches"],
+        ["sur_match_players", "table sur_match_players"],
+        ["sur_rounds", "table sur_rounds"],
+        ["sur_round_players", "table sur_round_players"],
+        ["sur_attempts", "table sur_attempts"],
+        ["sur_tiebreaks", "table sur_tiebreaks"],
+        ["sur_tiebreak_attempts", "table sur_tiebreak_attempts"],
+        ["sur_match_commands", "table sur_match_commands"],
         ["sur_lp_ledger", "table sur_lp_ledger"],
         ["ranked_forum_records", "table ranked_forum_records"],
         ["ranked_forum_refresh_cooldowns", "table ranked_forum_refresh_cooldowns"],

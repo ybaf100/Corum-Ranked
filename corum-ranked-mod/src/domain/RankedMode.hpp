@@ -35,10 +35,10 @@ private:
 
 struct ModeLobbyLayout { float scale, leftX, rightX, centerY; };
 inline ModeLobbyLayout modeLobbyLayout(float width, float height) {
-    // Preserve the original 188x210 profile / 188x196 menu proportions. The
-    // external mode caption and entry controls also fit above the footer.
-    auto const scale = std::clamp(std::min({1.0f, (width - 48.0f) / 424.0f, (height - 116.0f) / 296.0f}), 0.1f, 1.0f);
-    auto const centerY = (height - 70.0f + 46.0f) / 2.0f + 18.0f * scale;
+    // All three panels use the original 188x210 card. Whole-card selection
+    // removes the external Enter/Browse rows and restores full size at 320px.
+    auto const scale = std::clamp(std::min({1.0f, (width - 48.0f) / 424.0f, (height - 88.0f) / 232.0f}), 0.1f, 1.0f);
+    auto const centerY = height / 2.0f - 9.0f;
     return {scale, width / 2 - 118 * scale, width / 2 + 118 * scale, centerY};
 }
 

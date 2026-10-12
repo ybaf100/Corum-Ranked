@@ -14,7 +14,9 @@ export interface DeathmatchResult {
   readonly repeatRequired: boolean;
 }
 
-const bestPercentOfThree = (
+// Shared comparison primitive. Solo keeps its existing raw-percent semantics;
+// Survival normalizes its own inputs before calling this function.
+export const bestPercentOfThree = (
   attempts: readonly DeathmatchAttemptInput[],
 ): number => {
   if (attempts.length !== 3) {

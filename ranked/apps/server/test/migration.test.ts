@@ -28,6 +28,7 @@ const migrationNames = [
     "0018_map_metadata_cache.sql",
     "0019_ranked_audio_volumes.sql",
     "0021_survival_m1.sql",
+    "0022_survival_m3_engine.sql",
 ] as const;
 
 const migrationSql = async (migrationName: string): Promise<string> => {
@@ -82,8 +83,16 @@ describe("PostgreSQL migration", () => {
       "ranked_rounds",
       "ranked_runtime_features",
       "ranked_sessions",
+      "sur_attempts",
       "sur_lp_ledger",
+      "sur_match_commands",
+      "sur_match_players",
+      "sur_matches",
       "sur_profiles",
+      "sur_round_players",
+      "sur_rounds",
+      "sur_tiebreak_attempts",
+      "sur_tiebreaks",
     ]);
   });
 

@@ -164,3 +164,16 @@ Achievement definitions/state add explicit `scope`: `SOLO_RANKED`, `SURVIVAL`, o
 `gold_reached` is shared; existing achievement IDs, Claim/equip/unequip endpoints and AP uniqueness remain.
 Title projections include the scope prefix in `nameKo`/`nameEn`; progressive stage labels remain separate.
 Survival LP settlement and shared GOLD hooks are internal services only, without public settlement routes.
+
+# Survival M3 additions (beta.61)
+
+`GET /api/ranked/survival/matches/:matchId` requires an existing Ranked Session and membership
+in that Survival match. It returns `Cache-Control: no-store` and authoritative phase, revision,
+map/generation, preparation/entry/countdown/play deadlines, standings/top3/myRank/cutoff,
+attempt/waiting status, participants, winner and settlement inputs. Invalid UUIDs return 400,
+missing sessions 401, foreign participants 403, missing matches 404. Existing participants
+retain access when Survival is disabled.
+
+Creation, telemetry, forfeit and map adoption are trusted `SurvivalEngineService` ports;
+there are no public mutation routes in M3. The M1 Queue/Debug endpoints stay blocked.
+See [Survival M3](survival-m3.md) for command context, idempotency, map provider and M4/M5 contracts.
