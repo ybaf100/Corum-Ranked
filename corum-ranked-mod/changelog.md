@@ -1,5 +1,6 @@
 ## v0.5.0-beta.63
 
+- Correct the official-map enum to GD's actual `GJLevelType::Main` on every platform. Mirror the native enum in the metadata fixture and cover official Demon versus community Demon subtype presentation.
 - Fix beta63 validation blockers: preserve Solo result structures, retire legacy entry controls after card motion, align native test boundaries with hover/footer/history changes, and keep full achievement-description assertions. Use a supported Korean nickname prompt. Report searches containing only ineligible maps as exhaustion rather than duplicates.
 - Preserve the latest main Debug-button change. Keep Debug and Settings inside the lobby message strip, and add lobby-only hover/press pulses plus a single clockwise card highlight without changing frame thickness.
 - Reveal matchmaking content only after the card crossing finishes; fade it out before reversing. Add player-name searches that jump to and highlight the matching leaderboard row while retaining mode/request isolation.

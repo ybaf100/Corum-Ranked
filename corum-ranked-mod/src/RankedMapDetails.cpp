@@ -14,7 +14,7 @@ RankedMapDetails& RankedMapDetails::get() {
 void RankedMapDetails::remember(GJGameLevel* level) {
     if (!level || static_cast<int>(level->m_levelID) <= 0) return;
     auto const id = static_cast<int>(level->m_levelID);
-    auto const value = (level->m_levelType==GJLevelType::Local && static_cast<int>(level->m_demon)!=0)
+    auto const value = (level->m_levelType==GJLevelType::Main && static_cast<int>(level->m_demon)!=0)
         ? MapDifficulty{"Demon","diffIcon_06_btn_001.png"} : mapDifficulty(level->m_autoLevel, static_cast<int>(level->m_demon) != 0,
         level->m_demonDifficulty, level->getAverageDifficulty());
     MapMetadata metadata;

@@ -60,7 +60,7 @@ test('actual appearance resolver serializes lookups, survives A→B, restores fo
 #include <string>
 #include <vector>
 namespace gd {using string=std::string;}
-enum class GJLevelType{Local,Saved,SearchResult};
+enum class GJLevelType{Default=0,Main=1,Editor=2,Saved=3,SearchResult=4};
 struct GJGameLevel {GJLevelType m_levelType=GJLevelType::Saved;int m_levelID=0,m_demon=0,m_demonDifficulty=0,average=0,m_stars=0,m_timestamp=0;bool m_autoLevel=false;
 int getAverageDifficulty(){return average;}};
 namespace cocos2d {struct CCArray {std::vector<GJGameLevel*> values;};}
@@ -107,6 +107,9 @@ GJGameLevel unrelated;unrelated.m_levelID=88;unrelated.average=5;
 manager.result.values={&easy,&demon,&unrelated};manager.onGetOnlineLevelsCompleted("ok",keyA);
 assert(manager.m_levelManagerDelegate==&foreign&&foreign.callbacks==0);
 assert(details.difficulty(11).label=="Easy"&&details.difficulty(12).label=="Easy Demon");
+GJGameLevel official=demon;official.m_levelID=14;official.m_levelType=GJLevelType::Main;
+details.remember(&official);assert(details.difficulty(14).label=="Demon");
+assert(details.difficulty(12).label=="Easy Demon"); // community subtype is preserved
 assert(details.metadata(11).stars==2&&details.metadata(11).durationSeconds==94);
 assert(details.metadata(12).kind=="DEMON"&&!details.metadata(12).stars);
 assert(mapLengthText(details.metadata(11).durationSeconds)=="1m 34s");
