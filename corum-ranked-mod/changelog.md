@@ -1,3 +1,11 @@
+## v0.5.0-beta.65
+
+- Share Solo's original shadowed HUD labels and Placement map heading/difficulty/duration components with Survival. Keep the FPS display unchanged and use larger, separately aligned rank/name/score columns with dark backing and retained row motion.
+- Present all 16 entrants before map selection, show the selected native map's Solo-style information and resource readiness, then enter automatically. Persist a server presentation barrier so completed-round participant tiles and elimination motion finish, followed by a two-second wait, before selecting the next map; reconnects preserve the barrier.
+- Restore Survival's clock after native Pause/Resume. Add confirmed surrender in both gameplay and the native pause menu, keep the server's 180-second deadline running, and return an expired paused round to its participant/result screen once. Restrict Force n to the matching screen.
+- Reclaim waiting/result audio after native gameplay teardown and prevent the retained Solo lobby from replacing Survival result music. Add a single clockwise chooser-card shine on mobile tap and desktop click that survives the channel slide, while retaining chooser-only hover behavior.
+- Synchronize beta65 admission/package versions and add Korean font glyphs. No DB migration, Apps Script change or new GD relay configuration. See [beta65 flow notes](../ranked/docs/survival-beta65-ui-flow.md) for interfaces and validation limits.
+
 ## v0.5.0-beta.64
 
 - Build server-owned candidate pools from recent Rated GD pages, with independent difficulty/Demon filters, exact match exclusions, download-time metadata/geometry attestation and bounded invalid-candidate quarantine. Keep durable selection retries and log concrete failures in Geode.

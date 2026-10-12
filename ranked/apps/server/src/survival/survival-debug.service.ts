@@ -87,7 +87,7 @@ export class SurvivalDebugService implements OnApplicationBootstrap,OnApplicatio
       const lp=survivalDebugLp(seed,Number(profile.lp),body.averageGroup,captured.config);
       const players:SurvivalAdmissionPlayer[]=[{participantId:"human",kind:"HUMAN",playerId:session.playerId},
         ...lp.bots.map((value,i)=>({participantId:`bot-${String(i+1).padStart(2,"0")}`,kind:"BOT" as const,name:`Bot ${i+1}`,lp:value}))];
-      const created=await this.engine.createWithin(tx,creationKey,players,captured,lp.humanSnapshotLp);
+      const created=await this.engine.createWithin(tx,creationKey,players,captured,lp.humanSnapshotLp,true);
       await tx.query(`INSERT INTO sur_debug_matches(match_id,human_player_id,admission_session_id,seed,average_group,
         virtual_human_lp,human_actual_lp,force_rank,last_seen_at,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$9)`,
         [created.id,session.playerId,session.sessionId,seed,body.averageGroup,lp.virtualHuman,profile.lp,body.forceRank??null,now.toISOString()]);
@@ -170,7 +170,8 @@ export class SurvivalDebugService implements OnApplicationBootstrap,OnApplicatio
     if(["ASSETS_READY","ENTERED","ATTEMPT_START"].includes(body.type))this.sessions.assertEnvironment(body.installedMods??[]);
     const context={roundKey:body.roundKey,mapGeneration:body.mapGeneration,levelId:body.levelId,participantId:"human"};
     let command:SurvivalCommand;
-    if(body.type==="ASSETS_READY") {if(!body.certificate)throw new BadRequestException("Map certificate required");command={type:body.type,...context,certificate:body.certificate};}
+    if(body.type==="PRESENTATION_COMPLETE")command={type:body.type,roundKey:body.roundKey,mapGeneration:body.mapGeneration,participantId:"human"};
+    else if(body.type==="ASSETS_READY") {if(!body.certificate)throw new BadRequestException("Map certificate required");command={type:body.type,...context,certificate:body.certificate};}
     else if(body.type==="PREPARATION_FAILED")command={type:body.type,...context,reason:body.reason??"NATIVE_PREPARATION_FAILED"};
     else if(body.type==="ENTERED")command={type:body.type,...context};
     else if(body.type==="FORFEIT")command={type:body.type,roundKey:body.roundKey,mapGeneration:body.mapGeneration,participantIds:["human"],reason:"DEBUG_HUMAN_SURRENDER"};

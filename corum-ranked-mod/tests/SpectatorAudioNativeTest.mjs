@@ -92,7 +92,9 @@ struct Menu{int m_eState=0;bool touch=true;void setTouchEnabled(bool value){touc
 namespace corum::ranked::ui {void cancelMenuTouch(Menu*){}}
 struct Handler{int m_nPriority=0;};
 struct Dispatcher{Handler* findHandler(Menu*){return nullptr;}};
-struct CCDirector{Dispatcher d;static CCDirector* sharedDirector(){static CCDirector c;return &c;}Dispatcher* getTouchDispatcher(){return &d;}};
+std::string operator""_spr(char const* s,std::size_t n){return std::string(s,n);}
+struct Scene{bool survival=false;void* getChildByIDRecursive(std::string const&){return survival?this:nullptr;}};
+struct CCDirector{Scene scene;Scene* getRunningScene(){return &scene;}Dispatcher d;static CCDirector* sharedDirector(){static CCDirector c;return &c;}Dispatcher* getTouchDispatcher(){return &d;}};
 struct CCLayerColor{virtual ~CCLayerColor()=default;virtual void onEnter(){}};
 #define schedule_selector(x) 0
 using namespace corum::ranked;
@@ -123,7 +125,11 @@ int main(){
  CorumRankedPlayLayer scene;scene.fields.rankedLevel=true;
  PlayLayer::succeeds=false;assert(!scene.init(&level,false,false));assert(audio.channels==1 && FMODAudioEngine::stops==0);
  PlayLayer::succeeds=true;assert(scene.init(&level,false,false));assert(audio.channels==0 && FMODAudioEngine::voice);
- CorumRankedLayer lobby;lobby.onEnter();assert(audio.channels==1 && audio.m_desiredMode==RankedAudioMode::Lobby);
+ CorumRankedLayer lobby;
+ // An uncovered retained Solo lobby cannot replace Survival result music.
+ CCDirector::sharedDirector()->scene.survival=true;audio.setMode(RankedAudioMode::ResultLose);auto const resultCreations=audio.creations;
+ lobby.syncAudioMode();assert(audio.m_requestedMode==RankedAudioMode::ResultLose&&audio.creations==resultCreations);
+ CCDirector::sharedDirector()->scene.survival=false;lobby.onEnter();assert(audio.channels==1 && audio.m_desiredMode==RankedAudioMode::Lobby);
  auto creations=audio.creations;for(int i=0;i<20;++i)lobby.refresh(0);assert(audio.creations==creations && audio.channels==1);
  // A confirmed queue departure runs the production mode-return hook without
  // duplicating the lobby audio channel. ModeLobbyNativeTest checks its actions.

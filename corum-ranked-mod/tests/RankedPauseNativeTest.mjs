@@ -63,13 +63,14 @@ struct Node { bool parent=true;void* getParent()const{return parent?(void*)this:
 struct Label {std::string text;ccColor3B color{};void setString(char const* s){text=s;}void setColor(ccColor3B c){color=c;}void limitLabelWidth(float,float,float){};char const* getFntFile()const{return "CorumSansBold.fnt";}};
 struct PauseLayer:Node {int quits=0,resumes=0;bool dispatching=false;void onQuit(CCObject*){++quits;}void onResume(CCObject*);};
 struct Level{int m_levelID=123;};
-struct PlayLayer{Level* m_level=nullptr;inline static PlayLayer* active=nullptr;bool m_isPracticeMode=false,m_isTestMode=false;bool m_isPaused=false;int quits=0;static PlayLayer* get(){return active;}void onQuit(){++quits;}double getCurrentPercent()const{return 75;}int getCurrentPercentInt()const{return 75;}void resume(){m_isPaused=false;AppDelegate::get()->m_gamePaused=false;}};
+struct PlayLayer{Level* m_level=nullptr;inline static PlayLayer* active=nullptr;bool m_isPracticeMode=false,m_isTestMode=false;bool m_isPaused=false;bool isRunning()const{return true;}int quits=0;static PlayLayer* get(){return active;}void onQuit(){++quits;}double getCurrentPercent()const{return 75;}int getCurrentPercentInt()const{return 75;}void resume(){m_isPaused=false;AppDelegate::get()->m_gamePaused=false;}};
 template<class T>struct Ref {T* p=nullptr;Ref()=default;explicit Ref(T* v):p(v){}T* data()const{return p;}T* operator->()const{return p;}explicit operator bool()const{return p;}};
  template<class T>struct WeakRef{T* value=nullptr;explicit WeakRef(T* p):value(p){}Ref<T> lock()const{return Ref<T>(value);}};
  namespace geode {template<class T>using WeakRef=::WeakRef<T>;}
  std::optional<geode::WeakRef<PauseLayer>> activeRankedPause;
  namespace fmt {template<class...T>std::string format(char const*,T...){return "budget";}}
-struct Popup{int closes=0;void onClose(CCObject*){++closes;}};
+int queued=0;template<class F>void queueInMainThread(F task){++queued;task();}
+struct Popup{void cancel(){onClose(nullptr);}int closes=0;void onClose(CCObject*){++closes;}};
 #define schedule_selector(x) 0
 namespace corum::ranked {
 enum class RuntimeStage{Idle,Matched};
@@ -87,6 +88,11 @@ struct RankedRuntime {
  void surrenderCurrentMatch(bool value){whole=value;++sends;status=SurrenderStatus::Sending;}
  void endMatchGameplayPause(std::string const&){++ends;}
 };
+struct SurvivalRuntime{
+ struct View{std::string id="s",roundKey="round-1",state="PLAYING";int mapGeneration=1;}v;
+ bool owned=false;long remaining=100000;static SurvivalRuntime& get(){static SurvivalRuntime s;return s;}
+ bool gameplayLevel(int id)const{return owned&&id==123;}void tick(){}auto const& view()const{return v;}bool canPlay()const{return v.state=="PLAYING";}long remainingMs()const{return remaining;}
+};
 int returnRequests=0;bool requestConcededGameplayReturn(PlayLayer*){++returnRequests;return true;}
  namespace i18n {inline bool korean=false;bool isKorean(){return korean;}std::string text(char const* key,char const* fallback){return korean?std::string("ko:")+key:fallback;}}
 namespace ui {
@@ -102,16 +108,17 @@ struct RankedSurrenderPopup:Popup {
 };
 }
 }
-using corum::ranked::RankedRuntime;
+using corum::ranked::RankedRuntime;using corum::ranked::SurvivalRuntime;
 namespace ui=corum::ranked::ui;
 namespace i18n=corum::ranked::i18n;
 ${body(pause,'bool ownsRankedPlayerPause()')}
 ${body(pause,'bool ownsPlacementPlayerPause()')}
+${body(pause,'bool ownsSurvivalPlayerPause()')}
 ${body(pause,'bool ownsManagedRankedPause()')}
 void dismissNativeRankedExitConfirmation(PauseLayer*){};
 struct CorumRankedPauseLayer:PauseLayer {
  struct Button {bool enabled=true;void setEnabled(bool v){enabled=v;}} button;Label clock;
- struct Fields{std::optional<WeakRef<ui::RankedSurrenderPopup>> popup;std::string leaseId="lease",matchId="m";int round=1,deathmatch=0;Label* budget;Button* surrender;std::optional<WeakRef<PlayLayer>> owner;int placementMapIndex=1;bool placement=false;bool concessionQuit=false,nativeQuitInProgress=false,nativeQuitReachedPlay=false,timeoutSurrenderRequested=false;std::optional<WeakRef<ui::RankedSurrenderPopup>> exitConfirmation{};}f{{},"lease","m",1,0,&clock,&button,{}};Fields* m_fields=&f;
+ struct Fields{std::optional<WeakRef<ui::RankedSurrenderPopup>> popup;std::string leaseId="lease",matchId="m";int round=1,deathmatch=0;Label* budget;Button* surrender;std::optional<WeakRef<PlayLayer>> owner;int placementMapIndex=1;bool placement=false;bool concessionQuit=false,nativeQuitInProgress=false,nativeQuitReachedPlay=false,timeoutSurrenderRequested=false;std::optional<WeakRef<ui::RankedSurrenderPopup>> exitConfirmation{};bool survival=false,survivalExitQueued=false;std::string survivalRoundKey="round-1";int survivalMapGeneration=1;std::optional<WeakRef<Popup>> survivalConfirmation{};}f{{},"lease","m",1,0,&clock,&button,{}};Fields* m_fields=&f;
  int exitWarnings=0;void confirmRankedExit(){++exitWarnings;}
  void unschedule(int){}
  ${body(pause,'bool hasAcknowledgedGameplayExit()')}
@@ -175,6 +182,13 @@ int main(){using namespace corum::ranked;
     r.v.placement.currentMapIndex=2;skip.watchContext(0);assert(skip.closes==1&&!skip.m_playOwner);
     ui::RankedSurrenderPopup stale;stale.m_placement=true;stale.m_playOwner.emplace(&play);stale.m_owner.emplace(&p);
     stale.onConfirm(nullptr);assert(r.skips==1); // cannot skip map 2 with the map 1 modal
+    // Survival uses its own live server clock, no Solo pause lease or timeout.
+    auto& survival=SurvivalRuntime::get();survival.owned=true;r.placement=false;
+    CorumRankedPauseLayer sp;sp.f.survival=true;sp.f.matchId="s";sp.f.leaseId.clear();sp.f.owner.emplace(&play);
+    auto const soloSends=r.sends,quitBefore=play.quits;sp.watchBudget(0);assert(sp.button.enabled&&r.sends==soloSends);
+    survival.remaining=90000;sp.watchBudget(0);assert(sp.button.enabled&&queued==0);
+    survival.v.state="ROUND_RESULT";sp.watchBudget(0);sp.watchBudget(0);
+    assert(queued==1&&play.quits==quitBefore+1&&!sp.button.enabled&&r.sends==soloSends);
 }
 `;
     const dir=mkdtempSync(join(tmpdir(),'corum-pause-native-'));

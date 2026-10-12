@@ -1,4 +1,6 @@
 #include "RankedRuntime.hpp"
+#include "SurvivalRuntime.hpp"
+#include "ui/RankedConfirmPopup.hpp"
 #include "ui/RankedSurrenderPopup.hpp"
 #include "ui/RankedExitConfirmation.hpp"
 #include "spectator/SpectatorSceneBridge.hpp"
@@ -12,6 +14,7 @@ using namespace geode::prelude;
 
 namespace {
 using corum::ranked::RankedRuntime;
+using corum::ranked::SurvivalRuntime;
 namespace ui = corum::ranked::ui;
 namespace i18n = corum::ranked::i18n;
 std::optional<WeakRef<PauseLayer>> activeRankedPause;
@@ -54,7 +57,10 @@ bool ownsPlacementPlayerPause() {
         (state == "MAP_PLAYING" || state == "MAP_SETTLING") &&
         ranked.isGameplayLevel(static_cast<int>(layer->m_level->m_levelID));
 }
-bool ownsManagedRankedPause() { return ownsRankedPlayerPause() || ownsPlacementPlayerPause(); }
+bool ownsSurvivalPlayerPause() {
+    auto* layer=PlayLayer::get();return layer && layer->m_level && SurvivalRuntime::get().gameplayLevel(static_cast<int>(layer->m_level->m_levelID));
+}
+bool ownsManagedRankedPause() { return ownsRankedPlayerPause() || ownsPlacementPlayerPause() || ownsSurvivalPlayerPause(); }
 }
 
 class $modify(CorumRankedPauseLayer, PauseLayer) {
@@ -64,14 +70,20 @@ public:
         int round = 0, deathmatch = 0;
         int placementMapIndex = 0;
         bool placement = false;
+        bool survival = false;
+        bool survivalExitQueued = false;
+        std::string survivalRoundKey;
+        int survivalMapGeneration = 0;
         CCLabelBMFont* budget = nullptr;
         CCMenuItemSpriteExtra* surrender = nullptr;
         std::optional<WeakRef<ui::RankedSurrenderPopup>> popup;
         std::optional<WeakRef<ui::RankedExitConfirmation>> exitConfirmation;
+        std::optional<WeakRef<ui::RankedConfirmPopup>> survivalConfirmation;
         std::optional<WeakRef<PlayLayer>> owner;
         bool concessionQuit = false, nativeQuitInProgress = false, nativeQuitReachedPlay = false;
         bool timeoutSurrenderRequested = false;
         ~Fields() {
+            if(survivalConfirmation)if(auto dialog=survivalConfirmation->lock())dialog->cancel();
             if (popup) if (auto dialog = popup->lock()) dialog->dismiss();
             if (exitConfirmation) if (auto dialog = exitConfirmation->lock()) dialog->dismiss();
             popup.reset();
@@ -84,21 +96,24 @@ public:
         auto& ranked = RankedRuntime::get(); auto* layer = PlayLayer::get();
         m_fields->owner.emplace(layer);
         activeRankedPause.emplace(this);
-        m_fields->placement = ranked.isPlacement();
+        m_fields->survival=ownsSurvivalPlayerPause();
+        m_fields->placement = !m_fields->survival && ranked.isPlacement();
         m_fields->placementMapIndex = m_fields->placement ? ranked.view().placement.currentMapIndex : 0;
-        if (!m_fields->placement)
+        if (!m_fields->placement && !m_fields->survival)
             m_fields->leaseId = ranked.beginMatchGameplayPause(static_cast<int>(layer->m_level->m_levelID));
         log::info("[RankedPause] opened level={} round={} lease={}",
             static_cast<int>(layer->m_level->m_levelID), ranked.view().match.roundNumber,
             !m_fields->leaseId.empty());
         auto const& match = ranked.view().match;
         m_fields->matchId = match.matchId; m_fields->round = match.roundNumber; m_fields->deathmatch = match.deathmatchSequence;
+        if(m_fields->survival){auto const& survival=corum::ranked::SurvivalRuntime::get().view();
+            m_fields->matchId=survival.id;m_fields->survivalRoundKey=survival.roundKey;m_fields->survivalMapGeneration=survival.mapGeneration;}
         auto* center = typeinfo_cast<CCMenu*>(getChildByIDRecursive("center-button-menu"));
         if (!center) if (auto* play = getChildBySpriteFrameName(this, "GJ_playBtn2_001.png"))
             center = typeinfo_cast<CCMenu*>(play->getParent());
         auto* exit = typeinfo_cast<CCMenuItemSpriteExtra*>(getChildByIDRecursive("exit-button"));
         if (!exit && center) exit = typeinfo_cast<CCMenuItemSpriteExtra*>(getChildBySpriteFrameName(center, "GJ_menuBtn_001.png"));
-        if (exit && !m_fields->placement) {
+        if (exit && !m_fields->placement && !m_fields->survival) {
             exit->setEnabled(false); exit->setOpacity(75);
             exit->setTarget(this, menu_selector(CorumRankedPauseLayer::onBlockedQuit));
         }
@@ -112,6 +127,8 @@ public:
         m_fields->surrender = CCMenuItemSpriteExtra::create(button, this, menu_selector(CorumRankedPauseLayer::onSurrender));
         m_fields->surrender->setID("ranked-surrender-button"_spr);
         center->addChild(m_fields->surrender, -1); center->sortAllChildren(); center->updateLayout();
+        if(m_fields->survival){button->addChild(ui::label(i18n::text("surrender","SURRENDER"),.26f,
+            {button->getContentSize().width/2,-10},ui::Red,ui::FontWeight::ExtraBold));}
         if (m_fields->placement) {
             auto* caption = ui::label(i18n::text("placement-skip-map", "SKIP MAP"), 0.22f,
                 {button->getContentSize().width / 2, -10}, ui::Gold, ui::FontWeight::ExtraBold);
@@ -125,7 +142,8 @@ public:
         m_fields->budget = ui::label("", 0.31f, {8, 42}, ui::Gold, ui::FontWeight::ExtraBold);
         m_fields->budget->setAnchorPoint({0, 1});
         m_fields->budget->setID("ranked-pause-budget"_spr); budgetPlate->addChild(m_fields->budget, 1);
-        auto* warning = ui::label(i18n::text("pause-timeout-warning", "At 0s, you forfeit the entire match."),
+        auto* warning = ui::label(m_fields->survival?i18n::text("survival-pause-clock","The server round timer continues while paused."):
+            i18n::text("pause-timeout-warning", "At 0s, you forfeit the entire match."),
             0.26f, {8, 18}, ui::TextMuted, ui::FontWeight::SemiBold);
         warning->setAnchorPoint({0, 1});
         ui::fitLabelWidth(warning, plateWidth - 16, 0.26f, 0.22f);
@@ -133,6 +151,18 @@ public:
         schedule(schedule_selector(CorumRankedPauseLayer::watchBudget), 0.05f); watchBudget(0);
     }
     void watchBudget(float) {
+        if(m_fields->survival){
+            auto& runtime=corum::ranked::SurvivalRuntime::get();runtime.tick();auto const& view=runtime.view();
+            auto const seconds=(runtime.remainingMs()+999)/1000;
+            m_fields->budget->setString(fmt::format("{} · {:02}:{:02}",i18n::text("round","ROUND"),seconds/60,seconds%60).c_str());
+            m_fields->surrender->setEnabled(runtime.canPlay());
+            if(!m_fields->survivalExitQueued && (view.id!=m_fields->matchId || view.roundKey!=m_fields->survivalRoundKey || view.mapGeneration!=m_fields->survivalMapGeneration ||
+                view.state=="ROUND_RESULT" || view.state=="FINAL_RESULT" || view.state=="CANCELLED")) {
+                m_fields->survivalExitQueued=true;
+                auto const weak=m_fields->owner;
+                queueInMainThread([weak]{if(weak)if(auto owner=weak->lock();owner && owner.data()==PlayLayer::get() && owner->isRunning())owner->onQuit();});
+            }return;
+        }
         auto& ranked = RankedRuntime::get(); ranked.tick();
         if (m_fields->matchId.empty() || !getParent()) return;
         if (m_fields->placement) {
@@ -177,6 +207,7 @@ public:
         }
     }
     void retireRankedPause() {
+        if(m_fields->survivalConfirmation){if(auto dialog=m_fields->survivalConfirmation->lock())dialog->cancel();m_fields->survivalConfirmation.reset();}
         if (m_fields->owner) dismissNativeRankedExitConfirmation(this);
         if (m_fields->exitConfirmation) if (auto dialog = m_fields->exitConfirmation->lock()) dialog->dismiss();
         m_fields->exitConfirmation.reset();
@@ -232,6 +263,12 @@ public:
         auto* rankedPause = static_cast<CorumRankedPauseLayer*>(pause.data());
         auto& fields = rankedPause->m_fields;
         auto owner = fields->owner ? fields->owner->lock() : Ref<PlayLayer>();
+        if(fields->survival){
+            [[maybe_unused]] Ref<PauseLayer> keepAlive(pause.data());
+            rankedPause->retireRankedPause();fields->nativeQuitInProgress=true;
+            if(owner && owner.data()==PlayLayer::get())owner->resume();
+            PauseLayer::onQuit(sender);fields->nativeQuitInProgress=false;rankedPause->releaseRankedPauseOwnership();return;
+        }
         auto& ranked = RankedRuntime::get();
         auto const authenticatedConcession = fields->concessionQuit && owner &&
             owner.data() == PlayLayer::get() && rankedPause->hasAcknowledgedGameplayExit();
@@ -279,6 +316,20 @@ public:
         if (dialog) { m_fields->exitConfirmation.emplace(dialog); addChild(dialog); dialog->show(); }
     }
     void onSurrender(CCObject*) {
+        if(m_fields->survival){
+            auto& runtime=corum::ranked::SurvivalRuntime::get();
+            if(!runtime.canPlay() || m_fields->survivalConfirmation)return;
+            auto const id=m_fields->matchId,key=m_fields->survivalRoundKey;auto const generation=m_fields->survivalMapGeneration;
+            auto* popup=ui::RankedConfirmPopup::create(i18n::text("surrender-confirm","CONFIRM SURRENDER"),
+                i18n::text("survival-surrender-warning","End this match using this round's recorded ranking?"),
+                [weak=WeakRef(this),id,key,generation](bool accepted){
+                    auto owner=weak.lock();if(!owner)return;owner->m_fields->survivalConfirmation.reset();
+                    auto& current=corum::ranked::SurvivalRuntime::get();
+                    if(accepted && current.canPlay() && current.view().id==id && current.view().roundKey==key && current.view().mapGeneration==generation){
+                        current.endAttempt(current.view().activeAttemptProgress);current.surrender();}
+                });
+            if(popup){m_fields->survivalConfirmation.emplace(popup);popup->show();}return;
+        }
         if (!m_fields->placement && m_fields->leaseId.empty()) return;
         if (m_fields->popup) {
             auto dialog = m_fields->popup->lock();

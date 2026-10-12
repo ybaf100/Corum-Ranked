@@ -6,6 +6,34 @@
 namespace corum::ranked::ui {
 using namespace geode::prelude;
 
+inline CCPoint lobbyCardPerimeter(float distance) {
+    constexpr float w=188,h=210,length=2*(w+h);
+    auto d=std::fmod(distance+length,length);
+    if(d<w)return {-94+d,105};
+    d-=w;
+    if(d<h)return {94,105-d};
+    d-=h;
+    if(d<w)return {94-d,-105};
+    d-=w;
+    return {-94,-105+d};
+}
+inline void drawLobbyCardShine(CCDrawNode* node,float elapsed) {
+    node->clear();if(elapsed>=.76f)return;
+    auto const head=std::min(1.0f,elapsed/.66f)*796;
+    auto const fade=std::clamp((.76f-elapsed)/.10f,0.0f,1.0f);
+    for(int i=0;i<22;i++)node->drawSegment(lobbyCardPerimeter(head-i*3.0f),lobbyCardPerimeter(head-i*3.0f+2.5f),
+        .45f,{1,.90f,.45f,fade*(1-i/22.0f)});
+}
+// Tap feedback owns a card action, not the hover controller's input lifetime:
+// it finishes once even when the card immediately begins its channel slide.
+class LobbyCardShine final : public CCActionInterval {
+    CCDrawNode* m_node=nullptr;
+public:
+    static LobbyCardShine* create(){auto* action=new LobbyCardShine;if(!action->initWithDuration(.76f)){delete action;return nullptr;}action->autorelease();return action;}
+    void startWithTarget(CCNode* target) override {CCActionInterval::startWithTarget(target);m_node=dynamic_cast<CCDrawNode*>(target);}
+    void update(float progress) override {if(m_node)drawLobbyCardShine(m_node,.76f*std::clamp(progress,0.0f,1.0f));}
+};
+
 // Owned by this lobby render only. No native button detours or global hover
 // behavior; weak identities retire with the corresponding menu/card nodes.
 class LobbyHover final : public CCNode {
@@ -24,17 +52,6 @@ class LobbyHover final : public CCNode {
     static bool visible(CCNode* node) {
         for(auto* p=node;p;p=p->getParent())if(!p->isVisible())return false;
         return node && node->isRunning();
-    }
-    static CCPoint perimeterPoint(float distance) {
-        constexpr float w=188,h=210,length=2*(w+h);
-        auto d=std::fmod(distance+length,length);
-        if(d<w)return {-94+d,105};
-        d-=w;
-        if(d<h)return {94,105-d};
-        d-=h;
-        if(d<w)return {94-d,-105};
-        d-=w;
-        return {-94,-105+d};
     }
     void pulse(Target& target, bool hold=false) {
         auto node=target.node.lock();if(!node)return;
@@ -79,7 +96,16 @@ public:
         }
     }
     void press(CCMenuItemSpriteExtra* item) {
-        for(auto& target:m_targets)if(auto owner=target.item.lock();owner && owner.data()==item && target.card){pulse(target);break;}
+        if(!m_active || !m_cardsSelectable)return;
+        for(auto& target:m_targets)if(auto owner=target.item.lock();owner && owner.data()==item && target.card){
+            auto node=target.node.lock();if(!node)break;pulse(target,target.inside);
+            if(target.shine)target.shine->clear();
+            target.shineTime=1;
+            auto* shine=CCDrawNode::create();node->addChild(shine,51);drawLobbyCardShine(shine,0);
+            shine->runAction(CCSequence::create(LobbyCardShine::create(),CallFuncExt::create([weak=WeakRef(shine)]{
+                if(auto node=weak.lock())node->removeFromParentAndCleanup(true);
+            }),nullptr));break;
+        }
     }
     void detach() {
         for(auto& target:m_targets){
@@ -102,18 +128,10 @@ public:
             target.inside=inside;
 #endif
             if(!target.shine || target.shineTime>=.76f)continue;
-            target.shineTime+=std::max(0.0f,dt);target.shine->clear();
-            if(target.shineTime>=.76f)continue;
-            constexpr float length=796;
-            auto const head=std::min(1.0f,target.shineTime/.66f)*length;
-            auto const fade=std::clamp((.76f-target.shineTime)/.10f,0.0f,1.0f);
+            target.shineTime+=std::max(0.0f,dt);
             // Small pieces follow corners; the existing frame's thickness is
             // unchanged, with one quick clockwise highlight and no looping.
-            for(int i=0;i<22;i++) {
-                auto const d=head-i*3.0f;
-                auto const a=perimeterPoint(d),b=perimeterPoint(d+2.5f);
-                target.shine->drawSegment(a,b,.45f,{1,.90f,.45f,fade*(1-i/22.0f)});
-            }
+            drawLobbyCardShine(target.shine,target.shineTime);
         }
     }
 private:

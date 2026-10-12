@@ -79,6 +79,7 @@ void SurvivalRuntime::observe(matjson::Value const& root) {
     auto const oldContext=preparationContext();
     m_view.id=id;m_view.revision=static_cast<std::uint64_t>(revision);m_view.state=root["state"].asString().unwrapOr("");
     m_view.phase=root["phase"].asString().unwrapOr("");m_view.roundKey=root["roundKey"].asString().unwrapOr("");
+    m_view.presentationGate=root["presentationGate"].asString().unwrapOr("");
     m_view.group=root["difficultyGroup"].asString().unwrapOr("");m_view.ownId=root["myParticipantId"].asString().unwrapOr("human");
     m_view.debug=root["debug"].asBool().unwrapOr(false);m_view.mapGeneration=static_cast<int>(root["mapGeneration"].asInt().unwrapOr(0));
     m_view.roundNumber=m_view.phase=="ROUND_1"?1:m_view.phase=="ROUND_2"?2:m_view.phase=="ROUND_3"?3:4;
@@ -192,11 +193,13 @@ void SurvivalRuntime::pumpEvents() {
     if(m_eventBusy || m_events.empty() || m_session.empty() || std::chrono::steady_clock::now()<m_retryAt)return;
     m_eventBusy=true;auto const body=m_events.front();auto http=request(m_session);http.bodyJSON(body);
     auto const generation=m_generation;auto const session=m_session;auto const id=m_view.id;auto const eventId=body["eventId"].asString().unwrapOr("");
-    m_eventRequest.spawn(http.post(endpoint("/matches/"+id+"/events")),[this,generation,session,id,eventId](web::WebResponse response) {
+    auto const eventType=body["type"].asString().unwrapOr("");
+    m_eventRequest.spawn(http.post(endpoint("/matches/"+id+"/events")),[this,generation,session,id,eventId,eventType](web::WebResponse response) {
         if(!current(generation,session) || m_view.id!=id)return;m_eventBusy=false;
         if(response.code()>=200 && response.code()<300) {
             if(!m_events.empty() && m_events.front()["eventId"].asString().unwrapOr("")==eventId)m_events.pop_front();observe(response.json().unwrapOr(matjson::Value()));m_retryAt={};
         } else if(response.code()==409 || response.code()==400) {
+            if(eventType=="PRESENTATION_COMPLETE")m_presentationContext.clear();
             if(!m_events.empty() && m_events.front()["eventId"].asString().unwrapOr("")==eventId)m_events.pop_front();m_nextPoll={};m_view.error="Survival state changed. Synchronizing...";
         } else {m_retryAt=std::chrono::steady_clock::now()+std::chrono::milliseconds(500);m_view.error="Survival server connection failed. Retrying...";}
     });
@@ -245,6 +248,11 @@ void SurvivalRuntime::endAttempt(double value) {
     auto body=event("ATTEMPT_END");body["attemptId"]=std::exchange(m_attempt,{});body["progress"]=m_attemptBest;enqueue(std::move(body));
 }
 void SurvivalRuntime::surrender() { if(active() && m_view.state!="FINAL_RESULT" && m_view.state!="CANCELLED")enqueue(event("FORFEIT")); }
+void SurvivalRuntime::presentationComplete() {
+    if(!active() || m_view.presentationGate.empty() || m_view.result.isObject())return;
+    auto const key=m_view.id+":"+m_view.roundKey+":"+std::to_string(m_view.mapGeneration)+":"+m_view.presentationGate;
+    if(m_presentationContext==key)return;m_presentationContext=key;enqueue(event("PRESENTATION_COMPLETE"));
+}
 void SurvivalRuntime::acknowledge() {
     if(!m_view.result.isObject() || m_creating)return;m_creating=true;auto const generation=m_generation;auto const session=m_session;auto const id=m_view.id;
     m_controlRequest.spawn(request(session).post(endpoint("/matches/"+id+"/acknowledge")),[this,generation,session,id](web::WebResponse response) {

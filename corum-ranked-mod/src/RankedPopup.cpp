@@ -36,6 +36,7 @@
 #include "ui/RankedSessionConflictPopup.hpp"
 #include "ui/RankedModeDisabledPopup.hpp"
 #include "ui/MapDifficultyBadge.hpp"
+#include "ui/RankedMapHeading.hpp"
 
 #include <Geode/Geode.hpp>
 #include <Geode/binding/GameLevelManager.hpp>
@@ -917,6 +918,8 @@ class CorumRankedLayer final : public CCLayerColor {
 
     void syncAudioMode() {
         auto& audio = RankedAudioManager::get();
+        auto* scene=CCDirector::sharedDirector()->getRunningScene();
+        if(scene && scene->getChildByIDRecursive("survival-game-coordinator"_spr))return;
         if (showResourceGate() || RankedRuntime::get().view().stage == RuntimeStage::AwaitingUpdate) return;
 
         auto const& view = RankedRuntime::get().view();
@@ -2623,24 +2626,8 @@ class CorumRankedLayer final : public CCLayerColor {
         m_root->addChild(panel, 1);
 
         if (match.currentMap) {
-            auto* map = makeLabel(
-                upper(match.currentMap->title),
-                0.42f,
-                {size.width / 2.0f, size.height / 2.0f + 58.0f},
-                corum::ranked::ui::Text,
-                "black"
-            );
-            corum::ranked::ui::fitMenuLabelWidth(map, 278.0f, 0.42f, 0.25f);
-            m_root->addChild(map, 5);
-            addMapDifficulty(*match.currentMap, {size.width / 2.0f - 38, size.height / 2.0f + 35}, 135);
-            auto* difficulty = makeLabel(
-                corum::ranked::mapLengthText(corum::ranked::ui::displayedMapMetadata(match.currentMap->levelId,match.currentMap->metadata).durationSeconds),
-                0.29f,
-                {size.width / 2.0f + 73, size.height / 2.0f + 35.0f},
-                difficultyColor(match.currentMap->difficulty),
-                "semibold"
-            );
-            m_root->addChild(difficulty, 5);
+            corum::ranked::ui::addRankedMapHeading(m_root,match.currentMap->levelId,match.currentMap->title,match.currentMap->metadata,
+                {size.width/2,size.height/2+58},difficultyColor(match.currentMap->difficulty));
         }
 
         auto* grade = corum::ranked::ui::PlacementGradeBadge::create(48.0f);

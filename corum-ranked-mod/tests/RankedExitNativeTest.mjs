@@ -45,7 +45,7 @@ namespace corum::ranked{struct RankedRuntime{struct Match{std::string matchId="m
 using corum::ranked::RankedRuntime;
 bool owned=true;bool ownsRankedPlayerPause(){return owned;}bool ownsManagedRankedPause(){return ownsRankedPlayerPause();}
 std::optional<WeakRef<PauseLayer>> activeRankedPause;
-struct CorumRankedPauseLayer:PauseLayer{struct Fields{std::optional<WeakRef<PlayLayer>> owner;int placementMapIndex=1;bool placement=false;bool concessionQuit=false,nativeQuitInProgress=false,nativeQuitReachedPlay=false;std::string matchId="m";int round=1,deathmatch=0;}f;Fields* m_fields=&f;${body(pause,'bool hasAcknowledgedGameplayExit()')} int warnings=0;void confirmRankedExit(){++warnings;}void retireRankedPause(){}void releaseRankedPauseOwnership(){activeRankedPause.reset();}};
+struct CorumRankedPauseLayer:PauseLayer{struct Fields{std::optional<WeakRef<PlayLayer>> owner;int placementMapIndex=1;bool placement=false,survival=false;bool concessionQuit=false,nativeQuitInProgress=false,nativeQuitReachedPlay=false;std::string matchId="m";int round=1,deathmatch=0;}f;Fields* m_fields=&f;${body(pause,'bool hasAcknowledgedGameplayExit()')} int warnings=0;void confirmRankedExit(){++warnings;}void retireRankedPause(){}void releaseRankedPauseOwnership(){activeRankedPause.reset();}};
 int originals=0;void nativeOriginal(CCObject*){++originals;}
 ${adapter}
 int main(){PlayLayer play;PlayLayer::current=&play;CorumRankedPauseLayer p;p.f.owner.emplace(&play);activeRankedPause.emplace(&p);

@@ -11,7 +11,7 @@
 namespace corum::ranked {
 struct SurvivalMatchView {
     std::uint64_t revision=0;
-    std::string id,state,phase,roundKey,group,ownId="human",error,startsAt,endsAt,mapError;
+    std::string id,state,phase,roundKey,group,ownId="human",error,startsAt,endsAt,mapError,presentationGate;
     int mapGeneration=0,roundNumber=0;
     SurvivalMapMetadata map;
     matjson::Value certificate,result,completedRound;
@@ -51,6 +51,7 @@ public:
     void progress(double value);
     void endAttempt(double value);
     void surrender();
+    void presentationComplete();
     void acknowledge();
     std::optional<ScoreAnimationInput> scoreAnimation() const;
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
@@ -68,7 +69,7 @@ private:
     ServerClock m_clock;
     LevelPreparationContext m_prepared;
     geode::Ref<GJGameLevel> m_launchLevel;
-    std::string m_session,m_attempt,m_attemptContext,m_enteredContext,m_readyContext,m_lastMapDiagnostic;
+    std::string m_session,m_attempt,m_attemptContext,m_enteredContext,m_readyContext,m_lastMapDiagnostic,m_presentationContext;
     double m_attemptBest=0,m_lastProgress=-1;
     int m_localAttempts=0;
     float m_tick=0;

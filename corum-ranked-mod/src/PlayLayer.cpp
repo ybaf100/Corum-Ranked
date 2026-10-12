@@ -3,6 +3,8 @@
 #include "SurvivalRuntime.hpp"
 #include "RankedLevelPreparation.hpp"
 #include "ui/SurvivalHud.hpp"
+#include "ui/RankedHudLabel.hpp"
+#include "ui/RankedConfirmPopup.hpp"
 #include "RankedAudioManager.hpp"
 #include "SpectatorLiveRuntime.hpp"
 #include "domain/SpectatorCapturePolicy.hpp"
@@ -209,6 +211,7 @@ public:
         corum::ranked::LevelPreparationContext survivalContext;
         corum::ranked::ui::SurvivalHud* survivalHud = nullptr;
         bool survivalWaiting = false;
+        std::optional<WeakRef<corum::ranked::ui::RankedConfirmPopup>> survivalSurrender;
         bool rankedInitialized = false;
         bool nativeEntryHeld = false;
         bool entryNativeCompletionInProgress = false;
@@ -632,7 +635,7 @@ public:
     void survivalFrame(float dt) {
         if(!m_fields->survivalLevel || !m_fields->rankedInitialized || m_fields->safetyRetired)return;
         auto& runtime=corum::ranked::SurvivalRuntime::get();runtime.tick();
-        if(m_fields->survivalHud)m_fields->survivalHud->present(runtime.view(),runtime.remainingMs(),dt);
+        (void)dt; // SurvivalHud owns its clock/render update independently of native gameplay pause.
         if(m_fields->fpsLabel)setHudText(m_fields->fpsLabel,corum::ranked::presentHud({.renderFps=m_fields->fpsMeter.fps()}).fpsText);
         if(blockSurvivalEntry())return;
         if(!runtime.canPlay() && runtime.view().state=="PLAYING") {m_fields->survivalWaiting=true;m_isPaused=true;}
@@ -645,17 +648,38 @@ public:
         m_fields->survivalHud=corum::ranked::ui::SurvivalHud::create();
         if(m_fields->survivalHud)m_fields->hudRoot->addChild(m_fields->survivalHud);
         addChild(m_fields->hudRoot,1000);
-#if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
         auto* menu=CCMenu::create();menu->setPosition(CCPointZero);m_fields->hudRoot->addChild(menu,30);
-        auto* face=corum::ranked::ui::surface({72,24},{},corum::ranked::ui::Red,corum::ranked::ui::SurfaceRaised,180,true);
-        face->addChild(corum::ranked::ui::label("Force n",.22f,{36,12},corum::ranked::ui::Text,corum::ranked::ui::FontWeight::SemiBold),5);
-        auto* force=CCMenuItemSpriteExtra::create(face,this,menu_selector(CorumRankedPlayLayer::onSurvivalForceRank));force->setPosition({size.width-44,18});menu->addChild(force);
-#endif
+        auto* face=corum::ranked::ui::surface({82,26},{},corum::ranked::ui::Red,corum::ranked::ui::SurfaceRaised,220,true);
+        face->addChild(corum::ranked::ui::menuLabel(corum::ranked::i18n::text("surrender","SURRENDER"),.26f,{41,13},corum::ranked::ui::Text,corum::ranked::ui::FontWeight::SemiBold),5);
+        auto* surrender=CCMenuItemSpriteExtra::create(face,this,menu_selector(CorumRankedPlayLayer::onSurvivalSurrender));
+        surrender->setID("survival-surrender-button"_spr);surrender->setPosition({size.width-49,21});menu->addChild(surrender);
     }
 
-#if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
-    void onSurvivalForceRank(CCObject*) {if(m_fields->survivalLevel)corum::ranked::showSurvivalForceRankPopup();}
-#endif
+    void onSurvivalSurrender(CCObject*) {
+        auto& runtime=corum::ranked::SurvivalRuntime::get();
+        if(!m_fields->survivalLevel || !runtime.canPlay() || m_fields->survivalSurrender)return;
+        auto const id=runtime.view().id,round=runtime.view().roundKey;auto const generation=runtime.view().mapGeneration;
+        // Use the native pause overlay rather than leave gameplay running under
+        // a modal confirmation. The Survival server clock continues normally.
+        pauseGame(true);
+        auto* popup=corum::ranked::ui::RankedConfirmPopup::create(corum::ranked::i18n::text("surrender-confirm","CONFIRM SURRENDER"),
+            corum::ranked::i18n::text("survival-surrender-warning","End this match using this round's recorded ranking?"),
+            [weak=WeakRef(this),id,round,generation](bool accepted){
+                auto owner=weak.lock();if(!owner)return;owner->m_fields->survivalSurrender.reset();
+                auto& current=corum::ranked::SurvivalRuntime::get();
+                if(accepted && current.view().id==id && current.view().roundKey==round && current.view().mapGeneration==generation && current.canPlay()) {
+                    current.endAttempt(owner->m_hasCompletedLevel?100.0:rankedProgressPercent(owner.data()));current.surrender();
+                }
+            });
+        if(popup){m_fields->survivalSurrender.emplace(popup);popup->show();}
+    }
+
+    void resume() {
+        PlayLayer::resume();
+        if(m_fields->survivalLevel && m_fields->rankedInitialized && !m_fields->safetyRetired && !m_fields->autoExitRequested) {
+            resumeSchedulerAndActions();schedule(schedule_selector(CorumRankedPlayLayer::survivalFrame));survivalFrame(0);
+        }
+    }
 
     void releaseEntryControls() {
         m_fields->nativeEntryHeld = false;
@@ -1293,6 +1317,7 @@ public:
             return;
         }
         if(m_fields->survivalLevel) {
+            if(m_fields->survivalSurrender){if(auto popup=m_fields->survivalSurrender->lock())popup->cancel();m_fields->survivalSurrender.reset();}
             if(m_fields->rankedInitialized && !m_fields->nativeEntryHeld) {
                 auto& survival=corum::ranked::SurvivalRuntime::get();
                 if(!m_fields->attemptEndReported)survival.endAttempt(m_hasCompletedLevel?100.0:rankedProgressPercent(this));
@@ -1520,6 +1545,7 @@ public:
 
     void onQuit() {
         if(m_fields->survivalLevel) {
+            if(m_fields->survivalSurrender){if(auto popup=m_fields->survivalSurrender->lock())popup->cancel();m_fields->survivalSurrender.reset();}
             if(!corum::ranked::resumeRankedPauseBeforeQuit(this))return;
             unschedule(schedule_selector(CorumRankedPlayLayer::survivalFrame));
             if(!m_fields->autoExitRequested && !m_isPracticeMode)corum::ranked::SurvivalRuntime::get().endAttempt(m_hasCompletedLevel?100.0:rankedProgressPercent(this));
@@ -1573,6 +1599,7 @@ public:
     }
 
     void onExit() {
+        if(m_fields->survivalSurrender){if(auto popup=m_fields->survivalSurrender->lock())popup->cancel();m_fields->survivalSurrender.reset();}
         unschedule(schedule_selector(CorumRankedPlayLayer::survivalFrame));
         if (m_fields->entryOverlay) {
             m_fields->entryOverlay->dismiss();
@@ -1732,23 +1759,11 @@ public:
         ccColor3B color,
         int zOrder = 3
     ) {
-        auto const kShadowOffset = CCPoint{0.75f, -0.75f};
-        auto* shadow = label(
-            text,
-            fontRole,
-            scale,
-            anchor,
-            {position.x + kShadowOffset.x, position.y + kShadowOffset.y}
-        );
-        shadow->setColor({0, 0, 0});
-        shadow->setOpacity(205);
-        parent->addChild(shadow, zOrder - 1);
-
-        auto* foreground = label(text, fontRole, scale, anchor, position);
-        foreground->setColor(color);
-        parent->addChild(foreground, zOrder);
-        m_fields->hudShadows.emplace(foreground, shadow);
-        return foreground;
+        auto const weight=std::string_view(fontRole)=="black"?corum::ranked::ui::FontWeight::Black:
+            std::string_view(fontRole)=="goldFont.fnt"?corum::ranked::ui::FontWeight::ExtraBold:
+            std::string_view(fontRole)=="medium"?corum::ranked::ui::FontWeight::Medium:corum::ranked::ui::FontWeight::SemiBold;
+        auto const pair=corum::ranked::ui::rankedHudLabel(parent,text,weight,scale,anchor,position,color,zOrder);
+        m_fields->hudShadows.emplace(pair.foreground,pair.shadow);return pair.foreground;
     }
 
     CCLabelBMFont* hudShadow(CCLabelBMFont* foreground) {

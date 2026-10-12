@@ -36,12 +36,12 @@ struct PlayLayer {inline static PlayLayer* current=nullptr;bool m_isPaused=true;
 template<class T>struct Ref{T* p=nullptr;T* data()const{return p;}T* operator->()const{return p;}explicit operator bool()const{return p;}};
 template<class T>struct WeakRef{T* p;explicit WeakRef(T* v):p(v){}Ref<T> lock()const{return {p};}};
 struct PauseLayer{bool parent=true,refuseResume=false,dispatching=false;int resumes=0,hookEntries=0;void* getParent(){return parent?this:nullptr;}void onResume(CCObject*);void nativeResume(){++resumes;if(!refuseResume){PlayLayer::get()->m_isPaused=false;AppDelegate::get()->m_gamePaused=false;parent=false;}}};
-struct Popup{int dismisses=0;void dismiss(){++dismisses;}};
+struct Popup{int dismisses=0;void cancel(){dismiss();}void dismiss(){++dismisses;}};
 struct RankedRuntime{int ends=0;static RankedRuntime& get(){static RankedRuntime r;return r;}void endMatchGameplayPause(std::string const& lease){ends+=!lease.empty();}};
 std::optional<WeakRef<PauseLayer>> activeRankedPause;
 #define schedule_selector(x) 0
 void dismissNativeRankedExitConfirmation(PauseLayer*){};
-struct CorumRankedPauseLayer:PauseLayer {struct Fields{std::optional<WeakRef<Popup>> popup,exitConfirmation;std::optional<WeakRef<PlayLayer>> owner;std::string leaseId="lease";bool nativeQuitInProgress=false,nativeQuitReachedPlay=false;}fields;Fields* m_fields=&fields;void unschedule(int){}
+struct CorumRankedPauseLayer:PauseLayer {struct Fields{std::optional<WeakRef<Popup>> popup,exitConfirmation,survivalConfirmation;std::optional<WeakRef<PlayLayer>> owner;std::string leaseId="lease";bool nativeQuitInProgress=false,nativeQuitReachedPlay=false;}fields;Fields* m_fields=&fields;void unschedule(int){}
 ${body('void retireRankedPause()')}
 ${body('void releaseRankedPauseOwnership()')}
 ${body('void onResume(CCObject* sender)')}
@@ -97,13 +97,13 @@ struct PlayLayer:Object {bool m_isPaused=true;inline static PlayLayer* current=n
 template<class T>struct Ref{T* p=nullptr;Ref()=default;explicit Ref(T* v):p(v){if(p)p->retain();}Ref(Ref const& v):Ref(v.p){}Ref(Ref&& v):p(std::exchange(v.p,nullptr)){}~Ref(){if(p)p->release();}T* data()const{return p;}T* operator->()const{assert(p&&p->alive);return p;}explicit operator bool()const{return p;}};
 template<class T>struct WeakRef {T* p;explicit WeakRef(T* v):p(v){p->retain();}~WeakRef(){p->release();}Ref<T> lock()const{return Ref<T>(p);}};
 struct PauseLayer:Object {void onResume(CCObject*){PlayLayer::get()->m_isPaused=false;release();}};
-struct Popup:Object{void dismiss(){}};
+struct Popup:Object{void cancel(){dismiss();}void dismiss(){}};
 struct RankedRuntime{static RankedRuntime& get(){static RankedRuntime r;return r;}void endMatchGameplayPause(std::string const&) {}};
 std::optional<WeakRef<PauseLayer>> activeRankedPause;
 #define schedule_selector(x) 0
 void dismissNativeRankedExitConfirmation(PauseLayer*){};
 struct CorumRankedPauseLayer:PauseLayer {
- struct Fields{std::optional<WeakRef<Popup>> popup,exitConfirmation;std::optional<WeakRef<PlayLayer>> owner;std::string leaseId="lease";bool nativeQuitInProgress=false;}fields;
+ struct Fields{std::optional<WeakRef<Popup>> popup,exitConfirmation,survivalConfirmation;std::optional<WeakRef<PlayLayer>> owner;std::string leaseId="lease";bool nativeQuitInProgress=false;}fields;
  struct CheckedFields {Fields* p;PauseLayer* owner;Fields* operator->(){assert(owner->alive);return p;}}m_fields{&fields,this};
  void unschedule(int){}
  ${body('void retireRankedPause()')}

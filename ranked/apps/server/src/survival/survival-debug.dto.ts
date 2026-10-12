@@ -11,11 +11,11 @@ export class CreateSurvivalDebugDto extends EnvironmentRecheckDto {
 }
 export class SurvivalDebugEventDto {
   @IsUUID() public eventId!:string;
-  @IsIn(["ASSETS_READY","PREPARATION_FAILED","ENTERED","ATTEMPT_START","PROGRESS","ATTEMPT_END","FORFEIT"])
-  public type!:"ASSETS_READY"|"PREPARATION_FAILED"|"ENTERED"|"ATTEMPT_START"|"PROGRESS"|"ATTEMPT_END"|"FORFEIT";
+  @IsIn(["ASSETS_READY","PREPARATION_FAILED","ENTERED","ATTEMPT_START","PROGRESS","ATTEMPT_END","FORFEIT","PRESENTATION_COMPLETE"])
+  public type!:"ASSETS_READY"|"PREPARATION_FAILED"|"ENTERED"|"ATTEMPT_START"|"PROGRESS"|"ATTEMPT_END"|"FORFEIT"|"PRESENTATION_COMPLETE";
   @IsString() @Length(1,80) public roundKey!:string;
   @IsInt() @Min(1) public mapGeneration!:number;
-  @ValidateIf((event:SurvivalDebugEventDto)=>event.type!=="FORFEIT") @IsInt() @Min(40000000) public levelId!:number;
+  @ValidateIf((event:SurvivalDebugEventDto)=>!["FORFEIT","PRESENTATION_COMPLETE"].includes(event.type)) @IsInt() @Min(40000000) public levelId!:number;
   @ValidateIf((event:SurvivalDebugEventDto)=>["ASSETS_READY","ENTERED","ATTEMPT_START"].includes(event.type))
   @IsArray() @ValidateNested({each:true}) @Type(()=>InstalledModDto) public installedMods?:InstalledModDto[];
   @IsOptional() @IsUUID() public attemptId?:string;

@@ -69,13 +69,20 @@ beforeEach(async()=>{
   await db.query(`INSERT INTO ranked_sessions(id,player_id,token_hash,client_version,environment_snapshot,expires_at,last_heartbeat_at)
     VALUES($1,$2,$3,$4,'{"clientBuildChannel":"debug"}',$5,$6)`,[session.sessionId,session.playerId,tokens.hash("fixture-token"),REQUIRED_RANKED_CLIENT_VERSION,new Date(now+86400000),clock.now()]);
 });
-async function create(){return engine.get((await debug.create(session,body())).matchId);}
+async function create(){
+  const m=await engine.get((await debug.create(session,body())).matchId);
+  await send(m,"PRESENTATION_COMPLETE");return engine.get(m.id);
+}
 async function send(m:SurvivalMatch,type:SurvivalDebugEventDto["type"],fields:Partial<SurvivalDebugEventDto>={}) {
   await db.query("UPDATE ranked_sessions SET last_heartbeat_at=$2 WHERE id=$1",[session.sessionId,clock.now().toISOString()]);
   const r=survivalCurrentRound(m);
   return debug.event(m.id,session,{eventId:ids.next(),type,roundKey:r.key,mapGeneration:r.mapGeneration,levelId:r.map?.levelId??0,installedMods:mods,...fields});
 }
 async function prepare(m:SurvivalMatch) {
+  if(m.presentationGate==="ROUND_RESULT") {
+    now=Math.max(now,survivalCurrentRound(m).finishedAt!+3050);
+    await send(m,"PRESENTATION_COMPLETE");m=await engine.get(m.id);
+  }
   await engine.selectMap(m.id);m=await engine.get(m.id);
   await send(m,"ASSETS_READY",{certificate:survivalCurrentRound(m).map!});m=await engine.get(m.id);
   expect(m.state).toBe("ENTERING");
@@ -86,6 +93,31 @@ async function record(m:SurvivalMatch,progress:number) {
   const attemptId=ids.next();await send(m,"ATTEMPT_START",{attemptId});return send(m,"ATTEMPT_END",{attemptId,progress});
 }
 describe("Survival M4 persistent debug game",()=>{
+  it("holds map selection behind the initial roster and durably waits for round presentation before selecting again",async()=>{
+    let m=await engine.get((await debug.create(session,body())).matchId);
+    expect(m.presentationGate).toBe("INTRO");
+    await engine.selectMap(m.id);await debug.tickOnce();
+    expect(survivalCurrentRound(await engine.get(m.id)).map).toBeNull();
+    expect(survivalCurrentRound(await engine.get(m.id)).preparationStartedAt).toBeNull();
+    await send(m,"PRESENTATION_COMPLETE");m=await prepare(await engine.get(m.id));
+    await record(m,100);now=survivalCurrentRound(m).endsAt!;await debug.tickOnce();m=await engine.get(m.id);
+    expect(m.state).toBe("ROUND_RESULT");expect(m.presentationGate).toBe("ROUND_RESULT");
+    const completed=(await debug.view(m.id,session)).completedRound!;
+    expect(completed.players).toHaveLength(16);
+    now+=3049;await expect(send(m,"PRESENTATION_COMPLETE")).rejects.toThrow("not complete");
+    now+=1;
+    // A new process reads the same SQL snapshot; background ticks alone cannot
+    // consume the roster/animation barrier even after its minimum duration.
+    const restarted=new SurvivalEngineService(db,clock,ids,config,{select:async()=>{throw new Error("Unexpected map request");}});
+    expect((await restarted.tick(m.id)).presentationGate).toBe("ROUND_RESULT");
+    const event={eventId:ids.next(),type:"PRESENTATION_COMPLETE" as const,roundKey:survivalCurrentRound(m).key,mapGeneration:1,levelId:0};
+    await debug.event(m.id,session,event);
+    await debug.event(m.id,session,event);
+    m=await engine.get(m.id);expect(m.rounds).toHaveLength(2);expect(m.state).toBe("MAP_SELECTION");
+    expect(m.presentationGate).toBeNull();expect(survivalCurrentRound(m).map).toBeNull();
+    expect((await debug.view(m.id,session)).completedRound).toEqual(completed);
+    expect((await db.query("SELECT * FROM sur_lp_ledger")).rows).toHaveLength(0);
+  });
   it("admits one human + 15 distinct bot participants while Solo is OFF and never creates bot accounts",async()=>{
     const m=await create();expect(m.players).toHaveLength(16);expect(m.players.filter(p=>p.kind==="BOT")).toHaveLength(15);
     expect(new Set(m.players.map(p=>p.participantId)).size).toBe(16);
@@ -133,7 +165,7 @@ describe("Survival M4 persistent debug game",()=>{
     const soloBefore=(await db.query("SELECT * FROM ranked_profiles")).rows;
     const m=await prepare(await create());await record(m,0);now=survivalCurrentRound(m).endsAt!;
     await debug.tickOnce();const result=await debug.view(m.id,session);
-    expect(result.state).toBe("FINAL_RESULT");expect(result.result!.rank).toBeGreaterThan(10);
+    expect(result.state).toBe("FINAL_RESULT");expect(result.presentationGate).toBeNull();expect(result.result!.rank).toBeGreaterThan(10);
     expect((await engine.get(m.id)).rounds).toHaveLength(1);
     await Promise.all([debug.view(m.id,session),debug.view(m.id,session),debug.tickOnce()]);
     expect((await db.query("SELECT * FROM sur_lp_ledger")).rows).toHaveLength(1);
@@ -152,6 +184,7 @@ describe("Survival M4 persistent debug game",()=>{
     const deltas=[50,40,30,25,20,15,10,8,5,2,-10,-20,-30,-40,-50,-55];
     for(let rank=1;rank<=16;rank++) {
       const view=await debug.create(session,body(rank));expect(view.state).toBe("FINAL_RESULT");
+      expect(view.presentationGate).toBeNull();
       expect(view.result).toMatchObject({rank,requestedDelta:deltas[rank-1],completionKind:"DEBUG_FORCE"});
       await debug.acknowledge(view.matchId,session);
     }
@@ -172,14 +205,14 @@ describe("Survival M4 persistent debug game",()=>{
     for(let phase=0;phase<4;phase++) {
       m=await prepare(m);await record(m,100);now=survivalCurrentRound(m).endsAt!;await debug.tickOnce();
       m=await engine.get(m.id);if(m.state==="FINAL_RESULT")break;
-      await debug.tickOnce();m=await engine.get(m.id);
+      now+=3050;await send(m,"PRESENTATION_COMPLETE");m=await engine.get(m.id);
     }
     expect(m.state).not.toBe("FINAL_RESULT");
     {
       expect(survivalCurrentRound(m).phase).toBe("TIEBREAK");m=await prepare(m);
       expect(survivalCurrentRound(m).players.filter(p=>p.participantId!=="human").every(p=>p.attempts.length===3 && p.attempts.every(a=>a.endedAt!==null))).toBe(true);
       for(let i=0;i<3;i++)await record(m,100);
-      const end=await debug.view(m.id,session);expect(end.state).toBe("FINAL_RESULT");expect(end.result!.rank).toBe(1);
+      const end=await debug.view(m.id,session);expect(end.state).toBe("FINAL_RESULT");expect(end.presentationGate).toBeNull();expect(end.result!.rank).toBe(1);
     }
     expect((await debug.view(m.id,session)).result!.rank).toBe(1);
   });

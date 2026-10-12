@@ -62,10 +62,10 @@ export class SurvivalEngineService implements OnApplicationBootstrap, OnApplicat
   /** Trusted admission adapter only. Caller owns the mode admission fence and
    * account/session lock. Virtual LP changes this match snapshot, never a profile. */
   public async createWithin(tx:SqlExecutor,creationKey:string,players:readonly SurvivalAdmissionPlayer[],
-    captured:SurvivalConfigDocument, humanLpSnapshot?:number):Promise<SurvivalMatch> {
+    captured:SurvivalConfigDocument, humanLpSnapshot?:number,presentationControlled=false):Promise<SurvivalMatch> {
     if(!creationKey.trim() || creationKey.length>200 || players.length!==16 || new Set(players.map(p=>p.participantId)).size!==16)
       throw new BadRequestException("M3 accepts exactly 16 distinct entrants");
-    const requestHash=humanLpSnapshot===undefined?hash(players):hash({players,humanLpSnapshot});
+    const requestHash=presentationControlled?hash({players,humanLpSnapshot,presentationControlled}):humanLpSnapshot===undefined?hash(players):hash({players,humanLpSnapshot});
       // Serialize even two first uses of the same key before its row exists.
       await tx.query("SELECT pg_advisory_xact_lock(hashtext($1))",[`survival-create:${creationKey}`]);
       const existing=(await tx.query<MatchRow>("SELECT * FROM sur_matches WHERE creation_key=$1",[creationKey])).rows[0];
@@ -82,6 +82,7 @@ export class SurvivalEngineService implements OnApplicationBootstrap, OnApplicat
         return {...p,name:profile.gd_username,lp:humanLpSnapshot??Number(profile.lp)};
       });
       const match=createSurvivalMatch(this.ids.next(),entrants,captured.config,captured.generation,this.clock.now().getTime());
+      if(presentationControlled){match.presentationControlled=true;match.presentationGate="INTRO";}
       await tx.query(`INSERT INTO sur_matches(id,creation_key,request_hash,state,revision,config_generation,config_snapshot,
         average_lp,difficulty_group,current_round_key,snapshot,created_at,updated_at)
         VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11::jsonb,$12,$12)`,
@@ -147,7 +148,7 @@ export class SurvivalEngineService implements OnApplicationBootstrap, OnApplicat
   public async selectMap(matchId:string):Promise<void> {
     const job=await this.database.transaction(async tx=>{
       const row=await this.lock(tx,matchId),now=this.clock.now().getTime();
-      if(row.snapshot.state!=="MAP_SELECTION" || (row.map_retry_at && new Date(row.map_retry_at).getTime()>now) ||
+      if(row.snapshot.state!=="MAP_SELECTION" || row.snapshot.presentationGate==="INTRO" || (row.map_retry_at && new Date(row.map_retry_at).getTime()>now) ||
         (row.map_job_token && row.map_job_deadline_at && new Date(row.map_job_deadline_at).getTime()>now))return null;
       const token=this.ids.next(),round=survivalCurrentRound(row.snapshot);
       await tx.query("UPDATE sur_matches SET map_job_token=$2,map_job_deadline_at=$3 WHERE id=$1",[matchId,token,iso(now+40_000)]);

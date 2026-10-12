@@ -31,6 +31,25 @@ class Rig {
   final(scores=[100,100,97]){for(let i=0;i<3;i++){this.play();this.next();}this.play(scores);if(this.match.state==="ROUND_RESULT")this.next();}
 }
 describe("Survival round engine",()=>{
+  it("keeps controlled roster/result barriers separate from play timers and rejects stale or non-owner acknowledgements",()=>{
+    const r=new Rig();r.match.players[0]!.kind="HUMAN";r.match.players[0]!.playerId="human";
+    r.match.presentationControlled=true;r.match.presentationGate="INTRO";
+    const acknowledge=()=>({type:"PRESENTATION_COMPLETE" as const,roundKey:r.round.key,mapGeneration:r.round.mapGeneration,participantId:"p01"});
+    expect(()=>r.select()).toThrow("presentation is pending");
+    expect(()=>r.send({...acknowledge(),participantId:"p02"})).toThrow("owner");
+    expect(()=>r.send({...acknowledge(),mapGeneration:2})).toThrow("CONTEXT_CHANGED");
+    r.now+=5000;r.next();expect(r.round.startsAt).toBeNull();
+    r.send(acknowledge());r.play();expect(r.match.presentationGate).toBe("ROUND_RESULT");
+    expect(r.round.endsAt!-r.round.startsAt!).toBe(180000);
+    const completed=survivalLiveView(r.match,r.now).completedRound;
+    r.now+=3049;r.next();expect(r.match.rounds).toHaveLength(1);
+    expect(()=>r.send(acknowledge())).toThrow("not complete");
+    r.now++;r.next();expect(r.match.rounds).toHaveLength(1);
+    const old=acknowledge();r.send(old);r.next();r.next();expect(r.match.rounds).toHaveLength(2);
+    expect(r.round.players).toHaveLength(10);expect(r.round.startsAt).toBeNull();
+    expect(survivalLiveView(r.match,r.now).completedRound).toEqual(completed);
+    expect(()=>r.send(old)).toThrow("CONTEXT_CHANGED");
+  });
   it("records simultaneous trusted forfeits atomically, with one survivor winning and zero survivors cancelling",()=>{
     for(const left of [0,1]) {
       const r=new Rig();const ids=r.round.players.slice(left).map(p=>p.participantId);

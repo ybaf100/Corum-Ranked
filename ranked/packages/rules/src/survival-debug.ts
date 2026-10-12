@@ -75,6 +75,7 @@ export function forceSurvivalDebugRank(before: SurvivalMatch, humanId: string, r
     p.finalRank=index+1; p.eliminationStage=index ? round.ordinal : null; });
   match.winnerId=order[0]!; match.finishedAt=now; match.updatedAt=now; match.revision++;
   match.state="FINAL_RESULT"; match.completionKind="DEBUG_FORCE"; round.finishedAt=now;
+  if(match.presentationControlled)match.presentationGate=null;
   for (const p of round.players) {
     p.rank=match.players.find(v => v.participantId===p.participantId)!.finalRank;
     p.qualified=p.participantId===match.winnerId;
@@ -108,6 +109,7 @@ export function finishSurvivalDebugOnElimination(before:SurvivalMatch,humanId:st
   match.winnerIds=ordered.filter(p=>p.finalRank===1).map(p=>p.participantId);
   match.winnerId=match.winnerIds[0]!;
   match.state="FINAL_RESULT";match.completionKind="DEBUG_HUMAN_ELIMINATION";
+  if(match.presentationControlled)match.presentationGate=null;
   match.finishedAt=now;match.updatedAt=now;match.revision++;round.finishedAt??=now;
   match.transitions.push({sequence:match.transitions.length+1,state:match.state,roundKey:round.key,at:now,reason:human.forfeitReason??"DEBUG_HUMAN_ELIMINATED"});
   return match;

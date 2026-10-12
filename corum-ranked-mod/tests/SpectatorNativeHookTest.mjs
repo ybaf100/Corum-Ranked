@@ -50,6 +50,7 @@ test('production native safety hook bodies execute through death/completion/save
 #include <memory>
 #include <optional>
 #include <string>
+struct SurvivalDialog {void cancel(){}};struct SurvivalDialogRef{SurvivalDialog* lock(){return nullptr;}};
 namespace gd { using string = std::string; }
 namespace geode::log { template<class... T> void info(T...) {} template<class... T> void error(T...) {} }
 using namespace geode;
@@ -147,7 +148,7 @@ struct CorumRankedPlayLayer : PlayLayer {
     void observeSpectatorNativeUpdate(PlayerObject*) {}
     bool observesSpectatorPlayer(PlayerObject*) {return false;}
     void observeSpectatorNativeSnap(PlayerObject*,corum::ranked::SpectatorDiscontinuity,corum::ranked::SpectatorGhostPose const&) {}
-    struct Fields {bool survivalLevel=false,survivalWaiting=false;
+    struct Fields {std::optional<SurvivalDialogRef> survivalSurrender;bool survivalLevel=false,survivalWaiting=false;
         bool nativeCompletionStarted = false;
         EntryOverlay* entryOverlay = nullptr;
         bool nativeEntryHeld = false;

@@ -30,7 +30,7 @@ template<class T>struct WeakRef {T* p;explicit WeakRef(T* v):p(v){}Ref<T> lock()
 namespace geode::log {template<class...T>void info(T...) {}}
 std::vector<std::string> events;
 struct PauseLayer:CCObject {bool parent=true,dispatchingQuit=false,dispatchingResume=false,refuseResume=false,refuseQuit=false,closeViaResume=false;int nativeQuits=0,resumes=0;void* getParent(){return parent?this:nullptr;}void onQuit(CCObject*);void onResume(CCObject*);void nativeQuit();void nativeResume();};
-struct Popup:CCObject {int closes=0;void dismiss(){++closes;events.push_back("dialog-closed");}};
+struct Popup:CCObject {int closes=0;void cancel(){dismiss();}void dismiss(){++closes;events.push_back("dialog-closed");}};
 namespace corum::ranked {
 enum class RuntimeStage{Idle,Matched};
 struct RankedRuntime {
@@ -49,10 +49,11 @@ std::optional<WeakRef<PauseLayer>> activeRankedPause;
 #define schedule_selector(x) 0
 ${body(pause,'bool ownsRankedPlayerPause()')}
 ${body(pause,'bool ownsPlacementPlayerPause()')}
+bool ownsSurvivalPlayerPause(){return false;}
 ${body(pause,'bool ownsManagedRankedPause()')}
 void dismissNativeRankedExitConfirmation(PauseLayer*){};
 struct CorumRankedPauseLayer:PauseLayer {
-    struct Fields{std::optional<WeakRef<Popup>> popup,exitConfirmation;std::optional<WeakRef<PlayLayer>> owner;std::string leaseId="lease",matchId="m";int round=1,deathmatch=0;int placementMapIndex=1;bool placement=false;bool concessionQuit=false,nativeQuitInProgress=false,nativeQuitReachedPlay=false;}f;
+    struct Fields{std::optional<WeakRef<Popup>> popup,exitConfirmation,survivalConfirmation;std::optional<WeakRef<PlayLayer>> owner;std::string leaseId="lease",matchId="m";int round=1,deathmatch=0;int placementMapIndex=1;bool placement=false,survival=false;bool concessionQuit=false,nativeQuitInProgress=false,nativeQuitReachedPlay=false;}f;
     struct CheckedFields{Fields* p;CCObject* owner;Fields* operator->(){assert(owner->alive);return p;}}m_fields{&f,this};
     int exitWarnings=0;void confirmRankedExit(){++exitWarnings;}
     void unschedule(int){}
