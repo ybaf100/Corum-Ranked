@@ -20,6 +20,11 @@ inline SurvivalHudColor survivalRankColor(int rank, bool passing) {
     if (rank == 4 || rank == 5) return {79,230,250};
     return {160,172,190};
 }
+inline SurvivalHudColor survivalResultRankColor(int rank, int lpDelta) {
+    if (lpDelta < 0) return {255,82,105};
+    if (rank >= 1 && rank <= 3) return survivalRankColor(rank,true);
+    return lpDelta > 0 ? SurvivalHudColor{90,239,133} : SurvivalHudColor{160,172,190};
+}
 inline std::string survivalOrdinal(int rank) {
     auto const tail=rank%100;
     return std::to_string(rank)+(tail>=11 && tail<=13 ? "th" : rank%10==1 ? "st" : rank%10==2 ? "nd" : rank%10==3 ? "rd" : "th");

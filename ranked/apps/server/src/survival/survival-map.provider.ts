@@ -55,8 +55,13 @@ export function parseSurvivalSearch(body: string, page: number) {
   if (!Number.isSafeInteger(total) || total>2_000_000 || pageSize<1 || pageSize>100 || offset!==page*pageSize ||
     (total ? offset>=total : offset!==0)) throw new SurvivalMapError("INVALID_METADATA","Out-of-range GD page");
   const records=sections[0] ? sections[0].split("|") : [];
-  if (records.length!==Math.min(pageSize,total-offset)) throw new SurvivalMapError("INVALID_METADATA","Incomplete GD page");
-  return {total,offset,pageSize,levels:records.map(parseSurvivalMetadata)};
+  if (records.length>pageSize) throw new SurvivalMapError("INVALID_METADATA","Oversized GD page");
+  // Native search enumerates and filters candidates independently. A stale or
+  // unrated entry must not discard every valid rated map on the same page.
+  const levels:SurvivalMapMetadata[]=[];
+  for(const record of records)try{levels.push(parseSurvivalMetadata(record));}catch{}
+  if(records.length && !levels.length)throw new SurvivalMapError("INVALID_METADATA","No valid metadata on the GD page");
+  return {total,offset,pageSize,levels};
 }
 /** Native GD geometry format, bounded before decompression and before objects
  * are examined. Encoded or downloaded-empty data is never deemed playable. */
@@ -130,7 +135,7 @@ export class GdSurvivalMapProvider implements SurvivalMapProvider {
     if (allowed.minimumStars!==null && allowed.maximumStars!==null) {
       const categories=new Set<number>();
       for (let stars=allowed.minimumStars;stars<=allowed.maximumStars;stars++) categories.add(stars<=5 ? 3 : stars<=7 ? 4 : 5);
-      filters.push({diff:[...categories].join(",")});
+      for(const category of categories)filters.push({diff:String(category)});
     }
     const demonFilters={EASY:"1",MEDIUM:"2",HARD:"3",INSANE:"4",EXTREME:"5"};
     for (const demon of allowed.demons) filters.push({diff:"-2",demonFilter:demonFilters[demon]});
@@ -147,27 +152,35 @@ export class GdSurvivalMapProvider implements SurvivalMapProvider {
       }
       return null;
     };
-    for (const filter of shuffle(filters,this.random)) {
-      // Retry catalog failures without permitting different IDs/difficulties.
-      for (let retry=0;retry<2 && !signal.aborted;retry++) {
-        try {
-          const search=async(page:number) => parseSurvivalSearch(await this.post("getGJLevels21.php",
-            {type:"2",str:"",star:"1",len:"0,1,2,3,4",page:String(page),...filter},signal,2*1024*1024),page);
-          const initial=await search(0), pageCount=Math.ceil(initial.total/initial.pageSize);
-          if (!pageCount) throw new SurvivalMapError("EMPTY_SEARCH","No rated catalog candidates");
-          const visited=new Set([0]);
-          for (let scan=0;scan<5 && visited.size<pageCount && !signal.aborted;scan++) {
-            let page=Math.floor(this.random.next()*pageCount);
-            while (visited.has(page)) page=(page+1)%pageCount;
-            visited.add(page); const next=await search(page);
-            if (next.total!==initial.total || next.pageSize!==initial.pageSize) throw new SurvivalMapError("INVALID_METADATA","GD catalog changed during search");
-            const map=await inspect(next.levels); if (map) return map;
-          }
-          const fallback=await inspect(initial.levels); if (fallback) return fallback;
-          break;
-        } catch (e) {failures.push(e instanceof SurvivalMapError ? e.code : "API_ERROR");}
-      }
+    // Follow GD native searches (and Versus): one difficulty per query and a
+    // bounded catalog window. Deep advertised pages can be unavailable even
+    // when page zero reports a much larger total.
+    const groups:{filter:Record<string,string>;initial:ReturnType<typeof parseSurvivalSearch>;visited:Set<number>;pageCount:number;failed:boolean}[]=[];
+    const search=async(filter:Record<string,string>,page:number)=>parseSurvivalSearch(await this.post("getGJLevels21.php",
+      {type:"2",str:"",star:"1",len:"0,1,2,3,4",page:String(page),...filter},signal,2*1024*1024),page);
+    for(const filter of shuffle(filters,this.random)) {
+      if(signal.aborted)break;
+      try {
+        const initial=await search(filter,0);
+        if(!initial.total)throw new SurvivalMapError("EMPTY_SEARCH","No rated catalog candidates");
+        groups.push({filter,initial,visited:new Set([0]),pageCount:Math.ceil(Math.min(initial.total,10_000)/initial.pageSize),failed:false});
+      }catch(e){failures.push(e instanceof SurvivalMapError?e.code:"API_ERROR");}
     }
+    // Give every eligible difficulty a turn instead of exhausting one category
+    // before another Demon tier or normal-star category can be searched.
+    for(let scan=0;scan<3 && !signal.aborted;scan++)for(const group of groups) {
+      if(signal.aborted || group.failed || group.visited.size>=group.pageCount)continue;
+      let page=Math.floor(this.random.next()*group.pageCount);
+      while(group.visited.has(page))page=(page+1)%group.pageCount;
+      group.visited.add(page);
+      try {
+        const next=await search(group.filter,page);
+        const map=await inspect(next.levels);if(map)return map;
+      }catch(e){failures.push(e instanceof SurvivalMapError?e.code:"API_ERROR");group.failed=true;}
+    }
+    // Retain a validated first-page fallback, without making popular maps the
+    // fixed operating pool. Never relax ID, stars/Demon, data or reuse filters.
+    for(const group of groups) {if(signal.aborted)break;const map=await inspect(group.initial.levels);if(map)return map;}
     throw new SurvivalMapError(failures.at(-1) ?? "NO_ELIGIBLE_MAP","No verified eligible Survival map in this search budget",failures);
   }
 }

@@ -1,4 +1,5 @@
 #include "ResultScoreLayer.hpp"
+#include "../domain/SurvivalHudPresentation.hpp"
 
 #include "PlayerIcon.hpp"
 #include "RankedTranslations.hpp"
@@ -101,8 +102,14 @@ bool ResultScoreLayer::init(ScoreAnimationInput input, CCNode* resultScreen, std
     m_fill = CCDrawNode::create(); m_fill->setPosition({m_barLeft,m_barY});
     m_fill->setID("ranked-result-score-fill"_spr); addChild(m_fill, 12);
 
-    auto* outcome = menuLabel(m_input.won ? i18n::text("win","WIN") : i18n::text("lose","LOSE"),
-        1.05f, {size.width / 2, size.height * 0.80f}, m_input.won ? ccc3(90,239,133) : ccc3(255,93,113), FontWeight::Black);
+    auto outcomeText = m_input.won ? i18n::text("win","WIN") : i18n::text("lose","LOSE");
+    auto outcomeColor = m_input.won ? ccc3(90,239,133) : ccc3(255,93,113);
+    if (m_input.survivalRank) {
+        outcomeText = i18n::isKorean() ? fmt::format("{}위",*m_input.survivalRank) : survivalOrdinal(*m_input.survivalRank);
+        auto const color = survivalResultRankColor(*m_input.survivalRank,m_input.after-m_input.before);
+        outcomeColor=ccc3(color.r,color.g,color.b);
+    }
+    auto* outcome = menuLabel(outcomeText,1.05f,{size.width / 2,size.height * 0.80f},outcomeColor,FontWeight::Black);
     fitMenuLabelWidth(outcome, size.width * 0.48f, 1.05f, 0.68f); addChild(outcome, 20);
     m_score = menuLabel("",0.64f,{},Text,FontWeight::Black); addChild(m_score, 20);
     m_delta = menuLabel(fmt::format("{:+d} LP", m_input.after - m_input.before), 0.44f, {},

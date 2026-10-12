@@ -27,12 +27,17 @@ export class SurvivalService {
     });
     const row = (await this.database.query<ProfileRow>("SELECT * FROM sur_profiles WHERE player_id = $1", [playerId])).rows[0]!;
     const standing = await this.standing(playerId);
-    const record=(await this.database.query<{count:number;best:number|null}>(`SELECT COUNT(*)::int AS count,MIN(p.final_rank)::int AS best
+    const record=(await this.database.query<{count:number;best:number|null;wins:number;losses:number}>(`SELECT COUNT(*)::int AS count,MIN(p.final_rank)::int AS best,
+      COUNT(*) FILTER (WHERE COALESCE(l.actual_delta,(d.result->>'actualDelta')::int,0)>0)::int AS wins,
+      COUNT(*) FILTER (WHERE COALESCE(l.actual_delta,(d.result->>'actualDelta')::int,0)<=0)::int AS losses
       FROM sur_match_players p JOIN sur_matches m ON m.id=p.match_id JOIN sur_profiles sp ON sp.player_id=p.player_id
-      LEFT JOIN sur_debug_matches d ON d.match_id=m.id WHERE p.player_id=$1 AND m.state='FINAL_RESULT'
+      LEFT JOIN sur_debug_matches d ON d.match_id=m.id
+      LEFT JOIN sur_lp_ledger l ON l.player_id=p.player_id AND l.event_key='survival:'||m.id::text||':result:'||p.participant_id
+      WHERE p.player_id=$1 AND m.state='FINAL_RESULT'
       AND m.finished_at>sp.history_visible_since AND (d.match_id IS NULL OR d.settled_at IS NOT NULL)`,[playerId])).rows[0];
     return { serverNow: now.toISOString(), enabled: snapshot.config.enabled,
-      profile: this.project(row, snapshot.config), standing,recordSummary:{completedMatches:Number(record?.count??0),bestRank:record?.best??null} };
+      profile: this.project(row, snapshot.config), standing,recordSummary:{completedMatches:Number(record?.count??0),bestRank:record?.best??null,
+        wins:Number(record?.wins??0),losses:Number(record?.losses??0)} };
   }
 
   private async ensureProfile(transaction: SqlExecutor, playerId: string, config: SurvivalConfig, now: Date): Promise<void> {
@@ -60,7 +65,17 @@ export class SurvivalService {
       topPercent: row ? Math.ceil(Number(row.rank) / Number(row.total) * 1000) / 10 : null };
   }
 
-  public async leaderboard(offset = 0, limit = 20) {
+  public async leaderboard(offset = 0, limit = 20, search?:string) {
+    const query=search?.trim();let located:{position:number;gd_account_id:string}|undefined;
+    if(query) {
+      located=(await this.database.query<{position:number;gd_account_id:string}>(`WITH ladder AS (
+        SELECT p.gd_username,p.gd_account_id::text,
+          (ROW_NUMBER() OVER(ORDER BY sp.lp DESC,sp.lp_reached_at,sp.player_id)-1)::int AS position
+        FROM sur_profiles sp JOIN ranked_players p ON p.id=sp.player_id WHERE p.gd_account_id>0 AND NOT p.is_bot
+      ) SELECT position,gd_account_id FROM ladder WHERE POSITION(LOWER($1) IN LOWER(gd_username))>0
+        ORDER BY (LOWER(gd_username)=LOWER($1)) DESC,position LIMIT 1`,[query])).rows[0];
+      if(located)offset=Math.floor(Number(located.position)/limit)*limit;
+    }
     const result = await this.database.query<LadderRow>(`WITH ladder AS (
       SELECT sp.*,p.gd_account_id::text,p.gd_username,
         RANK() OVER (ORDER BY sp.lp DESC)::int AS rank, COUNT(*) OVER ()::int AS total
@@ -77,7 +92,8 @@ export class SurvivalService {
         tierId: row.displayed_tier, visibleRankedScore: Number(row.lp), promotion: null,
         placement: null, placementGames: 0, placementGamesRequired: 0, placementResults: [],
         demotionWarning: row.demotion_warning, wins: 0, losses: 0, updatedAt: new Date(row.lp_reached_at).toISOString() })),
-      total, totalPlayers: total, offset, hasMore: offset + result.rows.length < total };
+      total, totalPlayers: total, offset, hasMore: offset + result.rows.length < total,
+      ...(query?{search:{query,found:!!located,gdAccountId:located?.gd_account_id??null}}:{}) };
   }
 
   public async history(playerId: string) {

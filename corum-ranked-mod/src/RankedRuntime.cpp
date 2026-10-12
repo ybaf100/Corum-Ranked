@@ -4120,6 +4120,8 @@ void RankedRuntime::fetchSurvivalProfile() {
         if (!profile.isObject() || !profile["lp"].isNumber()) { m_view.survival.error = "Invalid Survival profile"; ++m_view.revision; return; }
         auto& sur = m_view.survival;
         sur.completedMatches=static_cast<int>(root["recordSummary"]["completedMatches"].asInt().unwrapOr(0));
+        sur.wins=static_cast<int>(root["recordSummary"]["wins"].asInt().unwrapOr(0));
+        sur.losses=static_cast<int>(root["recordSummary"]["losses"].asInt().unwrapOr(0));
         sur.bestRank=root["recordSummary"]["bestRank"].isNumber()?std::optional<int>(static_cast<int>(root["recordSummary"]["bestRank"].asInt().unwrapOr(0))):std::nullopt;
         sur.loaded = true;
         sur.profile.displayedTier = profile["tier"].asString().unwrapOr("RED");

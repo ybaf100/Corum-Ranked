@@ -88,6 +88,7 @@ struct ResultScorePlayerView {
     StandingView before, after;
     ScoreSeriesView promotion;
     GoldScoreTimeline goldTimeline;
+    std::optional<int> survivalRank;
 };
 
 struct ResultScoreView {
@@ -108,6 +109,7 @@ struct ScoreAnimationInput {
     StandingView standingBefore, standingAfter;
     ScoreSeriesView promotion;
     GoldScoreTimeline goldTimeline;
+    std::optional<int> survivalRank;
 
     ScoreMotion motion() const {
         return promoted ? ScoreMotion::Promotion : demoted ? ScoreMotion::Demotion : ScoreMotion::Normal;

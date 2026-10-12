@@ -99,6 +99,8 @@ namespace cocos2d{using ::CCSize;}
 struct CCTouchDispatcher{int releases=0;static CCTouchDispatcher* get(){static CCTouchDispatcher d;return &d;}void unregisterForcePrio(CCNode*){++releases;}};
 struct GJAccountManager{int m_accountID=1;static GJAccountManager* sharedState(){static GJAccountManager m;return &m;}};
 namespace geode{
+enum class CommonFilter{Name};
+struct TextInput:CCNode{std::string value;static TextInput*create(float width,char const*){auto*n=new TextInput;n->size={width,25};return n;}void setCommonFilter(CommonFilter){}void setMaxCharCount(int){}void setEnabled(bool){}std::string getString()const{return value;}void setString(std::string text){value=std::move(text);}};
 struct Popup:CCNode{CCNode* m_bgSprite=new CCNode;CCMenuItemSpriteExtra* m_closeBtn=new CCMenuItemSpriteExtra;CCNode* m_mainLayer=new CCNode;
  bool init(float,float){addChild(m_mainLayer);return true;}virtual void onClose(CCObject*){removeFromParentAndCleanup(true);}void show(){static CCNode scene;scene.addChild(this);}};
 struct ScrollLayer:CCNode{CCNode* m_contentLayer=new CCNode;static ScrollLayer* create(CCSize s){auto* n=new ScrollLayer;n->size=s;n->addChild(n->m_contentLayer);return n;}void scrollToTop(){m_contentLayer->position={0,size.height-m_contentLayer->size.height};}};
@@ -108,13 +110,13 @@ struct Operation{std::string url;};struct WebRequest{void timeout(std::chrono::s
 struct Pending{Operation request;std::function<void(WebResponse)> callback;};inline std::vector<Pending> pending;
 }
 namespace async{template<class T>struct TaskHolder{int cancels=0;void cancel(){++cancels;}void spawn(utils::web::Operation req,std::function<void(T)> cb){utils::web::pending.push_back({req,std::move(cb)});}};}
-namespace prelude{using geode::Popup;using geode::ScrollLayer;namespace web=geode::utils::web;}
+namespace prelude{using geode::Popup;using geode::ScrollLayer;using geode::TextInput;using geode::CommonFilter;namespace web=geode::utils::web;}
 }
 namespace corum::ranked{
 struct RankedRuntime{static RankedRuntime& get(){static RankedRuntime r;return r;}std::string leaderboardUrl(int o,int n,RankedMode mode)const{return fmt::format("{}?offset={}&limit={}",mode==RankedMode::Survival?"/api/ranked/survival/leaderboard":"/api/ranked/leaderboard",o,n);}};
 namespace i18n{bool isKorean(){return false;}std::string text(char const*,char const* fallback){return fallback;}}
 namespace ui{
-enum class FontWeight{ExtraBold,Black};enum class RankBadgeDisplay{Matched,Leaderboard};
+enum class FontWeight{SemiBold,ExtraBold,Black};enum class RankBadgeDisplay{Matched,Leaderboard};
 constexpr ccColor3B Text{242,247,255},TextMuted{164,181,205},Gold{255,207,74},Blue{77,135,255},Red{255,91,111},Green{90,238,151},Cyan{64,224,255},Surface{},SurfaceSoft{},SurfaceRaised{};
 CCLabelBMFont* menuLabel(std::string const& t,float s,CCPoint p,ccColor3B c=Text,FontWeight=FontWeight::ExtraBold){auto* n=new CCLabelBMFont;n->setString(t.c_str());n->setScale(s);n->setPosition(p);n->setColor(c);return n;}
 void fitMenuLabelWidth(CCLabelBMFont* n,float w,float s,float){n->setScale(std::min(s,w/n->size.width));}

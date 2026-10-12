@@ -43,7 +43,7 @@ ${method(popup,'CCNode* makeActionButtonVisual(')}
 enum class RuntimeStage{Ready,Queued};struct RuntimeView{RuntimeStage stage=RuntimeStage::Ready;bool soloEnabled=true,survivalEnabled=true;std::string error,status="Ranked session ready. Join the queue when prepared.";struct{bool active=false;}placement;};
 template<class T>T typeinfo_cast(CCNode*n){return dynamic_cast<T>(n);}
 struct Owner{
- corum::ranked::ModeLobbyTransition m_modeTransition;CCMenu*m_lobbyToolbar=CCMenu::create();CCNode*m_root=CCNode::create();std::string m_localMessage;
+ corum::ranked::ModeLobbyTransition m_modeTransition;CCMenu*m_lobbyToolbar=CCMenu::create();CCNode*m_root=CCNode::create();CCLabelBMFont*m_mainStatusLabel=nullptr;std::string m_localMessage;
  ${method(popup,'    void updateModeLobbyHeader(')}
  ${method(popup,'    std::string lobbyMessage(')}
 };

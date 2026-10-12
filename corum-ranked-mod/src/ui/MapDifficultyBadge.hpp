@@ -49,7 +49,7 @@ inline cocos2d::CCNode* mapDifficultyBadge(int levelId, MapMetadata metadata, fl
     numeric->setPosition({extent/2+1,height/2});numeric->setColor(ccc3(255,255,255));row->addChild(numeric,3);
     auto value = RankedMapDetails::get().difficulty(levelId);
     if (info.officialLevelId || value.label == "N/A") {
-        if (demon) value=mapDifficulty(false,true,0,0);
+        if (demon) value=info.officialLevelId ? MapDifficulty{"Demon","diffIcon_06_btn_001.png"} : mapDifficulty(false,true,0,0);
         else if (info.stars) {
             auto const stars=*info.stars;
             auto const average=stars>=8 ? 5 : stars>=6 ? 4 : stars>=4 ? 3 : stars==3 ? 2 : stars==2 ? 1 : 0;

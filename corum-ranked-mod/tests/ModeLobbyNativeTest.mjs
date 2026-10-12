@@ -144,14 +144,17 @@ struct CCDirector{CCSize size;static auto*sharedDirector(){static CCDirector d;r
 using namespace cocos2d;
 std::string operator""_spr(char const*s,std::size_t n){return {s,n};}
 template<class T>auto const&CCArrayExt(std::vector<CCNode*>*v){return *v;}template<class T>T typeinfo_cast(CCNode*n){return dynamic_cast<T>(n);}template<class T>struct WeakRef{T*ptr;WeakRef(T*p):ptr(p){}T*lock()const{return ptr;}};
-namespace geode{template<class T>struct Ref{T*ptr=nullptr;Ref&operator=(T*p){ptr=p;return *this;}T*data()const{return ptr;}T*operator->()const{return ptr;}explicit operator bool()const{return ptr!=nullptr;}};}
+using CCAction=CCActionInterval;using CCEaseSineIn=CCEaseSineInOut;using CCEaseSineOut=CCEaseSineInOut;
+namespace geode{template<class T>struct Ref{T*ptr=nullptr;Ref()=default;explicit Ref(T*p):ptr(p){}Ref&operator=(T*p){ptr=p;return *this;}T*data()const{return ptr;}T*operator->()const{return ptr;}explicit operator bool()const{return ptr!=nullptr;}};}
 namespace geode::cocos{template<class T>auto const&CCArrayExt(std::vector<CCNode*>*v){return *v;}}
-namespace corum::ranked::ui{void cancelMenuTouch(CCMenu*m){++m->cancels;}}
+using geode::Ref;
+namespace corum::ranked::ui{void cancelMenuTouch(CCMenu*m){++m->cancels;}struct LobbyHover{void setActive(bool){}};}
 ${strip(read('src/ui/ModeLobbyMotion.hpp'))}
 enum class RuntimeStage{Ready,Queued,Matched};struct RuntimeView{RuntimeStage stage;};
 struct Owner:CCNode{
  corum::ranked::ModeLobbyTransition m_modeTransition;CCLayerColor survival,solo,panel,survivalControls,soloControls;
- CCLayerColor *m_lobbySurvival=&survival,*m_lobbySolo=&solo,*m_lobbyPanel=&panel;
+ CCLayerColor *m_lobbySurvival=&survival,*m_lobbySolo=&solo,*m_lobbyPanel=&panel,*m_lobbyContents=nullptr;
+ corum::ranked::ui::LobbyHover*m_lobbyHover=nullptr;void refreshLobbyHover(){}
  CCMenu survivalMenu,soloMenu,panelMenu,menu,settings;
  CCMenu toolbar;CCMenu*m_menu=&menu,*m_settingsMenu=&settings,*m_lobbyToolbar=&toolbar;bool m_uiFadingOut=false,m_returnToModesAfterQueue=false,m_modeNoticeOpen=false;std::string m_renderedUiKey;
  enum class Page{Live,History};Page m_page=Page::Live;

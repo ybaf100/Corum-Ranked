@@ -16,8 +16,13 @@ describe("actual GD Survival search/download protocol",()=>{
     expect(parseSurvivalMetadata(demon)).toMatchObject({demon:true,demonDifficulty:"MEDIUM"});
     expect(parseSurvivalMetadata(record().replace("15:2","15:5")).platformer).toBe(true);
   });
-  it.each(["-1","html",page([40000000],2),page([40000000],1,10),record()+":18:4"])("rejects malformed catalog %s",body=>{
+  it.each(["-1","html",page([40000000],1,10),record()+":18:4"])("rejects malformed catalog %s",body=>{
     expect(()=>parseSurvivalSearch(body,0)).toThrow();
+  });
+  it("keeps eligible records on sparse pages and filters stale metadata independently",()=>{
+    const body=`${record()}|${record(40000001).replace("18:4","18:0")}###10:0:10#hash`;
+    expect(parseSurvivalSearch(body,0).levels.map(level=>level.levelId)).toEqual([40000000]);
+    expect(parseSurvivalSearch(page([40000000],2),0).levels).toHaveLength(1);
   });
   it("accepts a rated 40-million map only after real geometry download validation",()=>{
     const valid=verifySurvivalDownload(download(),parseSurvivalMetadata(record()),request);
@@ -51,7 +56,7 @@ describe("actual GD Survival search/download protocol",()=>{
       downloadRequests++;return new Response(download(Number(body.get("levelID"))));
     }) as unknown as typeof fetch;
     const map=await new GdSurvivalMapProvider(new SeededRandom(1),fetcher).select({...request,excludedLevelIds:[40000000,40000001]});
-    expect(map.levelId).toBe(40000002);expect(pages).toEqual([0,1]);expect(downloadRequests).toBe(1);
+    expect(map.levelId).toBe(40000002);expect(pages).toEqual([0,0,1]);expect(downloadRequests).toBe(1);
   });
   it("retries API failure and invalid downloads while retaining exact constraints",async()=>{
     let searches=0,downloads=0;

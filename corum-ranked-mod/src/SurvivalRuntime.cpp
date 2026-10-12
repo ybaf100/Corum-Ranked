@@ -84,6 +84,7 @@ void SurvivalRuntime::observe(matjson::Value const& root) {
     m_view.roundNumber=m_view.phase=="ROUND_1"?1:m_view.phase=="ROUND_2"?2:m_view.phase=="ROUND_3"?3:4;
     m_view.startsAt=root["startsAt"].asString().unwrapOr("");m_view.endsAt=root["endsAt"].asString().unwrapOr("");
     m_view.certificate=root["map"];m_view.result=root["result"];
+    m_view.mapError=root["mapSelection"]["errorCode"].asString().unwrapOr("");
     auto const& map=root["map"];m_view.map={static_cast<int>(map["levelId"].asInt().unwrapOr(0)),static_cast<int>(map["stars"].asInt().unwrapOr(0)),
         static_cast<int>(map["levelVersion"].asInt().unwrapOr(0)),map["demon"].asBool().unwrapOr(false)?demon(map["demonDifficulty"].asString().unwrapOr("")):SurvivalDemon::None,
         map["automatic"].asBool().unwrapOr(true),map["platformer"].asBool().unwrapOr(true)};
@@ -91,7 +92,12 @@ void SurvivalRuntime::observe(matjson::Value const& root) {
     m_view.cutoff=root["cutoffScore"].isNumber()?std::optional(root["cutoffScore"].asDouble().unwrapOr(0)):std::nullopt;
     m_view.first=root["finalFirstScore"].isNumber()?std::optional(root["finalFirstScore"].asDouble().unwrapOr(0)):std::nullopt;
     m_view.standings.clear();auto participants=root["participants"].asArray().unwrapOr(std::vector<matjson::Value>{});
-    for(auto const& p:participants)if(p["participantId"].asString().unwrapOr("")==m_view.ownId)m_view.ownEliminated=!p["eliminationStage"].isNull();
+    m_view.aliveIds.clear();
+    for(auto const& p:participants) {
+        auto const pid=p["participantId"].asString().unwrapOr("");
+        if(p["eliminationStage"].isNull())m_view.aliveIds.push_back(pid);
+        if(pid==m_view.ownId)m_view.ownEliminated=!p["eliminationStage"].isNull();
+    }
     for(auto const& p:root["standings"].asArray().unwrapOr(std::vector<matjson::Value>{})) {
         auto const pid=p["participantId"].asString().unwrapOr("");
         auto info=std::find_if(participants.begin(),participants.end(),[&](auto const& v){return v["participantId"].asString().unwrapOr("")==pid;});
@@ -245,7 +251,8 @@ std::optional<ScoreAnimationInput> SurvivalRuntime::scoreAnimation() const {
     ScoreAnimationInput input;input.matchId=m_view.id;input.before=static_cast<int>(result["profileBefore"]["lp"].asInt().unwrapOr(0));
     input.after=static_cast<int>(result["profileAfter"]["lp"].asInt().unwrapOr(0));input.beforeTier=result["profileBefore"]["tier"].asString().unwrapOr("");
     input.afterTier=result["profileAfter"]["tier"].asString().unwrapOr("");input.promoted=result["promoted"].asBool().unwrapOr(false);input.demoted=result["demoted"].asBool().unwrapOr(false);
-    input.won=result["rank"].asInt().unwrapOr(16)==1;input.demotionWarning=result["profileAfter"]["demotionWarning"].asBool().unwrapOr(false);
+    input.survivalRank=static_cast<int>(result["rank"].asInt().unwrapOr(16));
+    input.won=input.after>input.before;input.demotionWarning=result["profileAfter"]["demotionWarning"].asBool().unwrapOr(false);
     for(auto const& b:result["bands"].asArray().unwrapOr(std::vector<matjson::Value>{}))input.bands.push_back({b["tier"].asString().unwrapOr(""),static_cast<int>(b["minimum"].asInt().unwrapOr(0))});
     if(!validScoreBands(input.bands))return std::nullopt;return input;
 }

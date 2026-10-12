@@ -413,6 +413,7 @@ struct EnvironmentWarningView {
 
 struct SurvivalView {
     int completedMatches=0;
+    int wins=0, losses=0;
     std::optional<int> bestRank;
     bool loaded = false, loading = false;
     std::string error, tierId;

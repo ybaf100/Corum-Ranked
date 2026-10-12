@@ -5,6 +5,7 @@
 #include <Geode/Geode.hpp>
 #include <Geode/ui/Popup.hpp>
 #include <Geode/ui/ScrollLayer.hpp>
+#include <Geode/ui/TextInput.hpp>
 #include <Geode/utils/web.hpp>
 #include <Geode/cocos/draw_nodes/CCDrawNode.h>
 
@@ -35,6 +36,7 @@ private:
     void onRefresh(cocos2d::CCObject*);
     void updateButtons();
     void onMode(cocos2d::CCObject*);
+    void onSearch(cocos2d::CCObject*);
     RankedMode m_mode = RankedMode::SoloRanked;
     CCMenuItemSpriteExtra* m_survivalTab = nullptr;
     CCMenuItemSpriteExtra* m_soloTab = nullptr;
@@ -44,6 +46,10 @@ private:
     CCMenuItemSpriteExtra* m_previous = nullptr;
     CCMenuItemSpriteExtra* m_next = nullptr;
     CCMenuItemSpriteExtra* m_refresh = nullptr;
+    CCMenuItemSpriteExtra* m_searchButton = nullptr;
+    geode::TextInput* m_searchInput = nullptr;
+    std::string m_searchQuery;
+    int m_searchAccount = 0;
     std::vector<Row> m_rows;
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_request;
     std::uint64_t m_generation = 0;

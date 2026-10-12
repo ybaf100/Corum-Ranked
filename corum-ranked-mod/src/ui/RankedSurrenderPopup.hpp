@@ -26,8 +26,8 @@ class RankedSurrenderPopup final : public Popup {
     void action(CCMenu* menu, std::string const& caption, CCPoint position,
         ccColor3B accent, SEL_MenuHandler callback, float width = 130) {
         auto* face = surface({width, 35}, {}, accent, SurfaceRaised, 250, true);
-        auto* text = label(caption, 0.31f, {width / 2, 17.5f}, Text, FontWeight::ExtraBold);
-        corum::ranked::ui::fitLabelWidth(text, width - 14, 0.31f, 0.18f); face->addChild(text, 5);
+        auto* text = menuLabel(caption, 0.42f, {width / 2, 17.5f}, Text, FontWeight::ExtraBold);
+        corum::ranked::ui::fitMenuLabelWidth(text, width - 14, 0.42f, 0.30f); face->addChild(text, 5);
         auto* item = CCMenuItemSpriteExtra::create(face, this, callback);
         item->setPosition(position); menu->addChild(item);
     }
@@ -47,18 +47,18 @@ class RankedSurrenderPopup final : public Popup {
         m_mainLayer->addChild(m_contents, 10);
         auto title = m_placement ? i18n::text("placement-skip-map", "SKIP MAP") : i18n::text(m_confirmation ? "surrender-confirm" : "surrender",
             m_confirmation ? "CONFIRM SURRENDER" : "SURRENDER");
-        auto* header = label(title, 0.55f, {185, 202}, Text, FontWeight::Black);
-        corum::ranked::ui::fitLabelWidth(header, 330, 0.55f, 0.32f); m_contents->addChild(header, 10);
+        auto* header = menuLabel(title, 0.62f, {185, 202}, Text, FontWeight::Black);
+        corum::ranked::ui::fitMenuLabelWidth(header, 330, 0.62f, 0.45f); m_contents->addChild(header, 10);
         auto const warning = m_placement ? i18n::text("placement-skip-map-warning", "Finish only this map with the score earned so far?") : m_confirmation
             ? i18n::text(m_wholeMatch || m_deathmatch > 0 ? "surrender-match-warning" : "surrender-round-warning",
                 m_wholeMatch || m_deathmatch > 0 ? "End this match as a defeat?" : "Concede this round?")
             : i18n::text("surrender-choice", "Concede this round or the entire match.");
-        auto* detail = label(warning, 0.27f, {185, 157}, Text);
-        corum::ranked::ui::fitLabelWidth(detail, 332, 0.27f, 0.16f); m_contents->addChild(detail, 10);
-        auto* kept = label(i18n::text("surrender-score-kept", "Already earned scores are kept."),
-            0.23f, {185, 133}, TextMuted); corum::ranked::ui::fitLabelWidth(kept, 332, 0.23f, 0.16f);
+        auto* detail = menuLabel(warning, 0.36f, {185, 157}, Text);
+        corum::ranked::ui::fitFullMenuLabel(detail, 332, 42, 0.36f); m_contents->addChild(detail, 10);
+        auto* kept = menuLabel(i18n::text("surrender-score-kept", "Already earned scores are kept."),
+            0.30f, {185, 125}, TextMuted); corum::ranked::ui::fitMenuLabelWidth(kept, 332, 0.30f, 0.26f);
         m_contents->addChild(kept, 10);
-        m_status = label("", 0.25f, {185, 108}, Gold); m_contents->addChild(m_status, 10);
+        m_status = menuLabel("", 0.30f, {185, 108}, Gold); m_contents->addChild(m_status, 10);
         auto* menu = CCMenu::create(); menu->setPosition(CCPointZero); m_contents->addChild(menu, 20);
         if (m_confirmation) {
             action(menu, m_placement ? i18n::text("placement-skip-map", "SKIP MAP") : i18n::text("surrender", "SURRENDER"), {185, 72}, Red,

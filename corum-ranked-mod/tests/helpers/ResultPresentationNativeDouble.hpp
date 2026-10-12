@@ -59,7 +59,7 @@ struct CCNode : CCObject {
     CCNode* getParent() { return parent; }
     auto const& getChildrenExt() { return children; }
     void setContentSize(CCSize v) { size=v; } CCSize getContentSize() const { return size; }
-    void setPosition(CCPoint v) { position=v; } void setAnchorPoint(CCPoint v) { anchor=v; }
+    void setPosition(CCPoint v) { position=v; } void setPositionY(float v) { position.y=v; } float getPositionY() const { return position.y; } void setAnchorPoint(CCPoint v) { anchor=v; }
     void ignoreAnchorPointForPosition(bool) {} void setCascadeOpacityEnabled(bool) {}
     void setScale(float v) { scaleX=scaleY=v; } float getScale() const { return scaleX; }
     float getScaleX() const { return scaleX; } float getScaleY() const { return scaleY; }

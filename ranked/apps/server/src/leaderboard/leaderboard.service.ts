@@ -81,7 +81,7 @@ export class LeaderboardService {
     private readonly config: RankedConfigService,
   ) {}
 
-  public async list(offset = 0, limit?: number): Promise<{
+  public async list(offset = 0, limit?: number, search?:string): Promise<{
     serverNow: string;
     serverOpen: boolean;
     players: readonly PublicLeaderboardPlayer[];
@@ -89,6 +89,7 @@ export class LeaderboardService {
     totalPlayers: number;
     offset: number;
     hasMore: boolean;
+    search?:{query:string;found:boolean;gdAccountId:string|null};
   }> {
     const snapshot = this.config.getSnapshotOrNull();
     const placementGamesRequired = snapshot?.operational.mmrPolicy?.placementGames ?? null;
@@ -186,6 +187,10 @@ export class LeaderboardService {
       return { ...entry.player, rank, topPercent: rank / ranked.length * 100 };
     });
     const players = [...placed, ...unranked.map(({ player }) => player)];
+    const query=search?.trim().toLowerCase();
+    let located=-1;
+    if(query){located=players.findIndex(p=>p.player.toLowerCase()===query);if(located<0)located=players.findIndex(p=>p.player.toLowerCase().includes(query));}
+    if(located>=0)offset=Math.floor(located/(limit??20))*(limit??20);
     const page = limit === undefined ? players.slice(offset) : players.slice(offset, offset + limit);
 
     return {
@@ -196,6 +201,7 @@ export class LeaderboardService {
       totalPlayers: players.length,
       offset,
       hasMore: offset + page.length < players.length,
+      ...(query?{search:{query:search!.trim(),found:located>=0,gdAccountId:located>=0?players[located]!.gdAccountId:null}}:{}),
     };
   }
 

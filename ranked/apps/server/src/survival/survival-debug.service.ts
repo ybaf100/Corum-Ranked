@@ -151,10 +151,12 @@ export class SurvivalDebugService implements OnApplicationBootstrap,OnApplicatio
     await this.owned(id,session);
     await this.db.query("UPDATE sur_debug_matches SET last_seen_at=$2 WHERE match_id=$1",[id,this.clock.now().toISOString()]);
     const match=await this.engine.tick(id);
+    this.engine.ensureMapSelection(match);
+    const mapSelection=match.state==="MAP_SELECTION"?await this.engine.mapSelectionStatus(id):null;
     const result=await this.settle(match);
     const own=survivalCurrentRound(match).players.find(p=>p.participantId==="human");
     const active=own?.attempts.find(a=>a.endedAt===null);
-    return {...survivalLiveView(match,this.clock.now().getTime(),"human"),debug:true,myParticipantId:"human",
+    return {...survivalLiveView(match,this.clock.now().getTime(),"human"),debug:true,myParticipantId:"human",mapSelection,
       myActiveAttemptId:active?.id??null,myActiveAttemptProgress:active?.highestProgress??0,result};
   }
   public async active(session:RankedSessionContext) {

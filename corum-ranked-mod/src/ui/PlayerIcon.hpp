@@ -13,6 +13,7 @@ namespace corum::ranked::ui {
 class PlayerIcon final : public cocos2d::CCNode, public UserInfoDelegate {
 public:
     static PlayerIcon* createLocal();
+    static PlayerIcon* createBot(int index);
     static PlayerIcon* createRemote(int accountId);
 
     ~PlayerIcon() override;

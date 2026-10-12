@@ -2258,10 +2258,12 @@ public:
                 auto* node = CCNode::create(); node->setAnchorPoint(CCPointZero);
                 node->setPosition({layout.bottomLeftX + 4.0f, y}); m_fields->hudRoot->addChild(node, 5);
                 auto const name = row.event.side == "A" ? match.playerAName : match.playerBName;
-                auto* text = addShadowedHudLabel(node, fmt::format("{} {}%", name, formatScore(row.event.progressPercent)),
+                auto* text = addShadowedHudLabel(node, fmt::format("{} {}%", name, static_cast<int>(std::floor(std::clamp(static_cast<double>(row.event.progressPercent),0.0,100.0)))),
                     "black", 0.65f, CCPointZero, CCPointZero,
                     row.event.side == match.side ? corum::ranked::ui::Red : corum::ranked::ui::Green);
                 limitHudWidth(text, std::min(220.0f, size.width * .46f), 0.65f, 0.40f);
+                text->setOpacity(0);text->runAction(CCFadeIn::create(.18f));
+                if(auto* shadow=hudShadow(text)){auto const opacity=shadow->getOpacity();shadow->setOpacity(0);shadow->runAction(CCFadeTo::create(.18f,opacity));}
                 visuals.push_back({row.event.id, node, text, y, false}); found = std::prev(visuals.end());
             }
             auto const age = now - row.createdAtMs;

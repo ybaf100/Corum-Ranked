@@ -1,3 +1,12 @@
+## v0.5.0-beta.63
+
+- Preserve the latest main Debug-button change. Keep Debug and Settings inside the lobby message strip, and add lobby-only hover/press pulses plus a single clockwise card highlight without changing frame thickness.
+- Reveal matchmaking content only after the card crossing finishes; fade it out before reversing. Add player-name searches that jump to and highlight the matching leaderboard row while retaining mode/request isolation.
+- Display Survival result ranks with podium colors and a red override for actual LP loss. Remove overlapping Solo labels from Survival history. Show Survival wins/losses/win rate using actual LP changes: an increase wins; unchanged or decreased LP loses. Remove the slash between card rank and Top percentage.
+- Keep complete achievement descriptions with wrapping instead of ellipses. Enlarge Solo surrender text using Corum menu fonts, confirm Survival surrender, display official Demon maps as Demon, and fade in integer-only death-log percentages.
+- Improve GD map selection with separate difficulty searches, bounded random pages, independent candidate validation and durable selection/retry status. Arrange alive players' native icons, names and records in the Survival waiting screen. Automatically enter ready rounds; show Re-enter only for a previously entered round. Retain LDM, Disable Shake and Jukebox options.
+- Synchronize beta63 client/server versions. No new DB migration or Apps Script change. Per request, builds, tests, device/package checks and GitHub Actions inspection were not performed for this patch. See [beta63 notes](../ranked/docs/survival-beta63-fixes.md).
+
 ## v0.5.0-beta.62
 
 - Connect Survival Debug Bot Match to real native GD map/resource preparation, server countdowns, round Attempts and the M3 engine, using one human and 15 deterministic server bots. Preserve the existing password and independent mode admission settings.

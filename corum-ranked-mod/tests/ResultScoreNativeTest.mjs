@@ -139,6 +139,7 @@ int main(){
 
 const model=`
 #include "${join(root,'src/domain/ResultScorePresentation.hpp')}"
+#include "${join(root,'src/domain/SurvivalHudPresentation.hpp')}"
 #include <cassert>
 using namespace corum::ranked;
 ScoreAnimationInput ordinary() {

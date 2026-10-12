@@ -54,6 +54,9 @@ beforeEach(async()=>{
     return {levelId:mapId++,levelVersion:1,stars:range.minimumStars??10,demon:range.minimumStars===null,
       demonDifficulty:range.minimumStars===null?range.demons[0]!:null,automatic:false,platformer:false,geometrySha256:"a".repeat(64),geometryBytes:64,verifiedAt:clock.now().toISOString()};
   }});
+  // The fixture explicitly advances map selection; do not start a concurrent
+  // production background job while constructing its deterministic stages.
+  vi.spyOn(engine,"ensureMapSelection").mockImplementation(()=>{});
   achievements=new AchievementService(db,clock,ids);
   survival=new SurvivalService(db,clock,ids,config,achievements);
   sessions=new SessionService(db,{fetchCurrentTier:async()=>"NONE"},clock,ids,solo,tokens);

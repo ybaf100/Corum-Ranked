@@ -9,7 +9,7 @@ import { SurvivalService } from "./survival.service.js";
 export class SurvivalController {
   public constructor(private readonly survival: SurvivalService) {}
   @Get("leaderboard") @Header("Cache-Control", "no-store")
-  public leaderboard(@Query() query: LeaderboardPageDto) { return this.survival.leaderboard(query.offset ?? 0, query.limit); }
+  public leaderboard(@Query() query: LeaderboardPageDto) { return this.survival.leaderboard(query.offset ?? 0, query.limit,query.search); }
   @Get("profile") @UseGuards(SessionGuard) @Header("Cache-Control", "no-store")
   public profile(@CurrentSession() session: RankedSessionContext) { return this.survival.profile(session.playerId); }
   @Get("history") @UseGuards(SessionGuard) @Header("Cache-Control", "no-store")

@@ -172,6 +172,17 @@ export class SurvivalEngineService implements OnApplicationBootstrap, OnApplicat
       this.logger.warn(`Survival map selection ${matchId}: ${error.code}`);
     }
   }
+  public ensureMapSelection(match:SurvivalMatch):void {
+    if(this.stopping || match.state!=="MAP_SELECTION" || this.mapJobs.has(match.id) || this.mapJobs.size>=4)return;
+    const job=this.selectMap(match.id).catch(e=>this.logger.error(String(e))).finally(()=>{this.mapJobs.delete(match.id);});
+    this.mapJobs.set(match.id,job);
+  }
+  public async mapSelectionStatus(id:string) {
+    const row=(await this.database.query<{map_error:{code:string}|null;map_retry_at:Date|string|null;map_job_deadline_at:Date|string|null}>(
+      "SELECT map_error,map_retry_at,map_job_deadline_at FROM sur_matches WHERE id=$1",[id])).rows[0];
+    return {errorCode:row?.map_error?.code??null,retryAt:row?.map_retry_at?new Date(row.map_retry_at).toISOString():null,
+      selecting:!!row?.map_job_deadline_at && new Date(row.map_job_deadline_at).getTime()>this.clock.now().getTime()};
+  }
   public recoverActiveMatches():Promise<void> {
     if(this.stopping)return Promise.resolve();
     if(this.pending)return this.pending;
@@ -187,10 +198,7 @@ export class SurvivalEngineService implements OnApplicationBootstrap, OnApplicat
           (sur_matches.state='PLAYING' AND r.ends_at <= $1)))) ORDER BY updated_at,id`,[this.clock.now().toISOString()]);
     for(const row of rows.rows){
       try{const match=await this.tick(row.id);
-        if(!this.stopping && match.state==="MAP_SELECTION" && !this.mapJobs.has(row.id) && this.mapJobs.size<4) {
-          const job=this.selectMap(row.id).catch(e=>this.logger.error(String(e))).finally(()=>{this.mapJobs.delete(row.id);});
-          this.mapJobs.set(row.id,job);
-        }
+        this.ensureMapSelection(match);
       }
       catch(e){this.logger.error(`Survival recovery ${row.id}: ${String(e)}`);}
     }

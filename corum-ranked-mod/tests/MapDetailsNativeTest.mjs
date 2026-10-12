@@ -60,7 +60,8 @@ test('actual appearance resolver serializes lookups, survives A→B, restores fo
 #include <string>
 #include <vector>
 namespace gd {using string=std::string;}
-struct GJGameLevel {int m_levelID=0,m_demon=0,m_demonDifficulty=0,average=0,m_stars=0,m_timestamp=0;bool m_autoLevel=false;
+enum class GJLevelType{Local,Saved,SearchResult};
+struct GJGameLevel {GJLevelType m_levelType=GJLevelType::Saved;int m_levelID=0,m_demon=0,m_demonDifficulty=0,average=0,m_stars=0,m_timestamp=0;bool m_autoLevel=false;
 int getAverageDifficulty(){return average;}};
 namespace cocos2d {struct CCArray {std::vector<GJGameLevel*> values;};}
 using cocos2d::CCArray;
