@@ -154,7 +154,7 @@ class SurvivalGameLayer final : public CCLayerColor {
             auto* creator=ui::menuLabel(native?fmt::format("{} · GD #{}",std::string(level->m_creatorName),view.map.levelId):fmt::format("GD #{}",view.map.levelId),
                 .25f,{width/2,107},ui::TextMuted,ui::FontWeight::SemiBold);ui::fitMenuLabelWidth(creator,width-30,.25f,.19f);m_mapPanel->addChild(creator,5);
             m_mapPanel->addChild(ui::menuLabel("03:00",.62f,{width/2,74},ui::Text,ui::FontWeight::Black),5);
-            m_mapPanel->addChild(ui::menuLabel(text("survival-map-rules","180s · BEST PROGRESS ×1"),.27f,{width/2,46},ui::Cyan,ui::FontWeight::SemiBold),5);
+            m_mapPanel->addChild(ui::menuLabel(text("survival-map-rules","180s · BEST PROGRESS x1"),.27f,{width/2,46},ui::Cyan,ui::FontWeight::SemiBold),5);
             m_mapReady=ui::menuLabel("",.25f,{width/2-80,19},ui::TextMuted,ui::FontWeight::SemiBold);m_mapPanel->addChild(m_mapReady,5);
             m_audioReady=ui::menuLabel("",.25f,{width/2+80,19},ui::TextMuted,ui::FontWeight::SemiBold);m_mapPanel->addChild(m_audioReady,5);
             m_mapShownAt=native?std::chrono::steady_clock::now():std::chrono::steady_clock::time_point{};
