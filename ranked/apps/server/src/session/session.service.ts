@@ -188,7 +188,7 @@ export class SessionService {
       );
       if(activeSurvivalQueue || activeSurvivalMatch)await transaction.query(`UPDATE sur_queue_entries SET session_id=$2,last_heartbeat_at=$3 WHERE player_id=$1`,[player.id,sessionId,now.toISOString()]);
       else await transaction.query("UPDATE sur_queue_entries SET status='EXPIRED' WHERE player_id=$1 AND status='QUEUED'",[player.id]);
-      if(activeSurvivalMatch)await transaction.query("UPDATE sur_online_players SET admission_session_id=$2 WHERE player_id=$1 AND acknowledged_at IS NULL",[player.id,sessionId]);
+      if(activeSurvivalMatch)await transaction.query("UPDATE sur_online_players SET admission_session_id=$2,recovering=TRUE WHERE player_id=$1 AND acknowledged_at IS NULL",[player.id,sessionId]);
       if (matchId) {
         // Move the existing assignment, not the match itself. Both explicit
         // takeover and a retry from the same process get a new scoped token;

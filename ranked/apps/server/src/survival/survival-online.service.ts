@@ -14,7 +14,7 @@ import { driveSurvivalBots } from "./survival-bot-driver.js";
 import type { SurvivalOnlineEventDto } from "./survival-online.dto.js";
 
 interface OnlineRow {match_id:string;bot_filled:boolean;seed:number|string;driver_state:Record<string,number>;}
-interface PresenceRow {participant_id:string;last_seen_at:Date|string;observed_round_key:string|null;observed_map_generation:number|null;}
+interface PresenceRow {participant_id:string;last_seen_at:Date|string;observed_round_key:string|null;observed_map_generation:number|null;recovering:boolean;}
 interface ResultRow {participant_id:string;player_id:string;result:SurvivalOnlineResult|null;}
 export interface SurvivalOnlineResult {
   matchId:string;debug:false;botFilled:boolean;rank:number;tiedPlayers:number;requestedDelta:number;actualDelta:number;
@@ -61,12 +61,13 @@ export class SurvivalOnlineService implements OnApplicationBootstrap,OnApplicati
     round=survivalCurrentRound(match);
     const deadline=match.state==="PREPARING" && round.preparationStartedAt!==null?round.preparationStartedAt+15000:
       match.state==="ENTERING" && round.entryRequestedAt!==null?(round.firstEnteredAt===null?round.entryRequestedAt+5000:round.firstEnteredAt+10000):null;
-    if(deadline!==null && now>=deadline){
-      const presence=(await tx.query<PresenceRow>("SELECT participant_id,last_seen_at,observed_round_key,observed_map_generation FROM sur_online_players WHERE match_id=$1",[match.id])).rows;
+    if(deadline!==null){
+      const presence=(await tx.query<PresenceRow>("SELECT participant_id,last_seen_at,observed_round_key,observed_map_generation,recovering FROM sur_online_players WHERE match_id=$1",[match.id])).rows;
       const absent=round.players.filter(p=>!p.forfeited && !p.absent && match.players.some(e=>e.participantId===p.participantId&&e.kind==="HUMAN") &&
         (match.state==="PREPARING"?p.assetsReadyAt===null:p.enteredAt===null)).filter(p=>{
         const seen=presence.find(v=>v.participant_id===p.participantId);
-        return !seen || seen.observed_round_key!==round.key || seen.observed_map_generation!==round.mapGeneration || now-new Date(seen.last_seen_at).getTime()>10000;
+        return !!seen?.recovering || !seen || now-new Date(seen.last_seen_at).getTime()>10000 ||
+          (now>=deadline && (seen.observed_round_key!==round.key || seen.observed_map_generation!==round.mapGeneration));
       }).map(p=>p.participantId);
       if(absent.length)match=survivalMarkAbsent(match,absent,now);
     }
@@ -119,8 +120,12 @@ export class SurvivalOnlineService implements OnApplicationBootstrap,OnApplicati
       if(body.type==="ATTEMPT_START")command={type:body.type,...context,attemptId:body.attemptId};
       else {if(body.progress===undefined)throw new BadRequestException("Progress required");command={type:body.type,...context,attemptId:body.attemptId,progress:body.progress};}
     }
-    try{await this.engine.dispatch(id,`${own.participant_id}:${body.eventId}`,command,session);}
+    let applied:SurvivalMatch;
+    try{applied=await this.engine.dispatch(id,`${own.participant_id}:${body.eventId}`,command,session);}
     catch(error){if(error instanceof RankedDomainError)throw new ConflictException({code:error.code,message:error.message});throw error;}
+    const round=survivalCurrentRound(applied),participant=round.players.find(p=>p.participantId===own.participant_id);
+    if(["ENTERED","ATTEMPT_START"].includes(body.type) && round.key===body.roundKey && round.mapGeneration===body.mapGeneration && participant && participant.enteredAt!==null)
+      await this.db.query("UPDATE sur_online_players SET recovering=FALSE WHERE match_id=$1 AND player_id=$2 AND admission_session_id=$3",[id,session.playerId,session.sessionId]);
     return this.view(id,session,body.roundKey,body.mapGeneration);
   }
   public async acknowledge(id:string,session:RankedSessionContext){

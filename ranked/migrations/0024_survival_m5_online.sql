@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS sur_online_players (
   participant_id TEXT NOT NULL,
   admission_session_id UUID NOT NULL REFERENCES ranked_sessions(id),
   last_seen_at TIMESTAMPTZ NOT NULL,
+  recovering BOOLEAN NOT NULL DEFAULT FALSE,
   observed_round_key TEXT,
   observed_map_generation INTEGER,
   result JSONB,
@@ -43,6 +44,7 @@ CREATE TABLE IF NOT EXISTS sur_online_players (
   FOREIGN KEY(match_id,participant_id) REFERENCES sur_match_players(match_id,participant_id) ON DELETE CASCADE,
   CHECK ((result IS NULL) = (settled_at IS NULL))
 );
+ALTER TABLE sur_online_players ADD COLUMN IF NOT EXISTS recovering BOOLEAN NOT NULL DEFAULT FALSE;
 CREATE INDEX IF NOT EXISTS sur_online_recovery_idx ON sur_online_players(player_id,last_seen_at DESC) WHERE acknowledged_at IS NULL;
 CREATE INDEX IF NOT EXISTS sur_online_pending_result_idx ON sur_online_players(match_id,player_id) WHERE settled_at IS NULL;
 CREATE TABLE IF NOT EXISTS sur_queue_fill_requests (

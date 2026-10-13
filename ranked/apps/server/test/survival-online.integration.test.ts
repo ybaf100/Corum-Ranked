@@ -294,4 +294,16 @@ describe("Survival M5 public HTTP and persistent online game",()=>{
    expect((await api(c,"/queue/heartbeat",{})).status).toBe(429);
  });
 
+ it("accepts an app restart just before preparation closes, even when the first fresh poll renews presence",async()=>{
+   const {group,id}=await game(8),old=group[0]!,peers=group.slice(1);now+=5000;await touch();await online.tickOnce();await engine.selectMap(id);let m=await engine.get(id);
+   for(const c of peers)await event(c,m,"ASSETS_READY",{certificate:survivalCurrentRound(m).map});
+   now=survivalCurrentRound(m).preparationStartedAt!+13000;await touch(peers);const fresh=await client(old.channel,old.account,true);
+   const view=(await api(fresh,"/online/active")).body.match;expect(view.state).toBe("ENTERING");m=await engine.get(id);
+   expect(survivalCurrentRound(m).players[0]).toMatchObject({absent:true,assetsReadyAt:null,enteredAt:null});
+   for(const c of peers)await event(c,m,"ENTERED");now+=13000;await touch(peers);await online.tickOnce();m=await engine.get(id);expect(m.state).toBe("PLAYING");
+   await event(fresh,m,"ASSETS_READY",{certificate:survivalCurrentRound(m).map});await event(fresh,m,"ENTERED");await record(fresh,m,81);
+   expect(survivalCurrentRound(await engine.get(id)).players[0]).toMatchObject({absent:false,highestProgress:81});
+   expect((await db.query<{recovering:boolean}>("SELECT recovering FROM sur_online_players WHERE match_id=$1 AND player_id=$2",[id,fresh.session.playerId])).rows[0]!.recovering).toBe(false);
+ });
+
 });

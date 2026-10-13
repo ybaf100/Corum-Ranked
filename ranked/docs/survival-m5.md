@@ -77,6 +77,7 @@ beta67 봇 규칙을 유지한다: 초기/후보 N(50,20²), 정수 0~100%, 20/5
 최초 실제 입장 후 10초 책임 판정, 실제 참가자 공통 3초 COUNTDOWN이다. 정상 참가자에게 다른 참가자의 준비 실패를 전가하지 않는다.
 
 접속 종료자는 준비 마감/입장 마감 전에 최근 presence와 관찰한 round/map generation으로 구분한다.
+세션 교체는 DB `recovering` 상태로 남겨 마감 직전 복귀를 준비 지연자로 오인하지 않는다. 새 native 진입/Attempt 확인 후 해제한다.
 `absent`는 준비 barrier에서만 제외한다. native `assetsReadyAt`/`enteredAt`을 서버가 대신 만들어 주지 않는다.
 Absent 참가자도 다음 라운드에 0%로 남고, 돌아오면 certificate → 실제 native 진입 → Attempt 순서로 즉시 기록을 올릴 수 있다.
 서버 시계는 정지하지 않는다. 이미 탈락하면 PlayLayer로 보내지 않고 개인 결과를 복구한다. 항복은 되돌릴 수 없다.
@@ -139,8 +140,8 @@ CI는 같은 HTTP suite를 별도의 PostgreSQL 16 서비스에서도 실행한�
 
 로컬 검증 결과:
 
-- 공통 규칙 218개, 서버 전체 회귀 466개 (온라인 HTTP 31개 포함).
-- 동일 온라인 HTTP 31개를 PostgreSQL 16의 별도 schema / 24개 연결 pool에서도 실행한다.
+- 공통 규칙 218개, 서버 전체 회귀 466개 (온라인 HTTP 31개 포함); 준비 마감 직전 앱 복귀 경계를 추가 검사한다.
+- 온라인 HTTP 31개를 PostgreSQL 16의 별도 schema / 24개 연결 pool에서도 실행한다.
 - 기존 native client 검사 175개와 신규 공개 전송 Release/Debug 검사 2개, 10개 C++ domain 실행 파일.
 - Android64 Debug / Release C++ 컴파일, 서버 빌드, 전체 workspace 타입검사.
 - 기존 GD Relay / Apps Script / 패키지 게시 정책 검사. 폰트/charset/에셋 예산은 변경하지 않는다.

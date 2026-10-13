@@ -257,6 +257,12 @@ function finishRound(match: SurvivalMatch, round: SurvivalRound, at: number): vo
  * packets and duplicate reports. >= deadline is closed; preparation is not play time. */
 function advanceTimers(match: SurvivalMatch, now: number): void {
   const round=survivalCurrentRound(match);
+  if(match.online && match.state==="PREPARING" && entryPlayers(round).length>0 && entryPlayers(round).every(p=>p.assetsReadyAt!==null)){
+    round.entryRequestedAt=now;transition(match,"ENTERING",now,"PRESENT_ASSETS_BARRIER_COMPLETE");
+  }
+  if(match.online && match.state==="ENTERING" && entryPlayers(round).length>0 && entryPlayers(round).every(p=>p.enteredAt!==null)){
+    round.startsAt=now+3000;round.endsAt=round.startsAt+180000;transition(match,"COUNTDOWN",now,"PRESENT_ENTRY_BARRIER_COMPLETE");
+  }
   if (match.state === "PREPARING" && round.preparationStartedAt !== null && now >= round.preparationStartedAt + 15_000) {
     const ready=entryPlayers(round).filter(p => p.assetsReadyAt !== null);
     if (!ready.length && entryPlayers(round).length) {reroll(match,round,now,"NO_ASSETS_READY"); return;}
