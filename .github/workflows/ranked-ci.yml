@@ -30,6 +30,18 @@ jobs:
   test:
     name: Rules, server, database, and Apps Script
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: corum_m5_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: local-test-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d corum_m5_test"
+          --health-interval 5s --health-timeout 5s --health-retries 12
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -45,6 +57,10 @@ jobs:
         run: node --test ranked/tools/gd-relay/worker.test.mjs
       - name: Run rules and PostgreSQL integration tests
         run: npm test --prefix ranked
+      - name: Run Survival HTTP concurrency and recovery on PostgreSQL 16
+        env:
+          SURVIVAL_TEST_DATABASE_URL: postgres://postgres:local-test-only@127.0.0.1:5432/corum_m5_test
+        run: npm --prefix ranked run test --workspace @corum-ranked/server -- test/survival-online.integration.test.ts
       - name: Build server and shared rules
         run: npm run build --prefix ranked
       - name: Validate additive Apps Script Ranked API

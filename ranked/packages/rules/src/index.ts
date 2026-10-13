@@ -18,3 +18,4 @@ export * from "./survival.js";
 export * from "./survival-maps.js";
 export * from "./survival-match.js";
 export * from "./survival-debug.js";
+export * from "./survival-online.js";

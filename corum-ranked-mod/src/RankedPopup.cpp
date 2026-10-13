@@ -2335,13 +2335,14 @@ class CorumRankedLayer final : public CCLayerColor {
             leaderboard->setPosition({167,78}); leaderboard->setID("survival-leaderboard-trophy"_spr); m_menu->addChild(leaderboard);
             m_root->addChild(makeNeonPanel({86,86},{94,18},kCyan,{7,20,40},248),2);
             auto* playCircle = CCSprite::createWithSpriteFrameName("GJ_playBtn_001.png"); playCircle->setScale(0.70f);
-            corum::ranked::ui::grayButtonVisual(playCircle);
-            auto* queue = CCMenuItemSpriteExtra::create(playCircle,this,menu_selector(CorumRankedLayer::onSurvivalUnavailable));
+            auto const online=view.survivalEnabled && view.survival.onlineAvailable && view.stage==RuntimeStage::Ready;
+            if(!online)corum::ranked::ui::grayButtonVisual(playCircle);
+            auto* queue = CCMenuItemSpriteExtra::create(playCircle,this,menu_selector(CorumRankedLayer::onSurvivalQueue));
             queue->setPosition({94,18}); m_menu->addChild(queue);
-            queue->setEnabled(false); queue->setCascadeOpacityEnabled(true); queue->setOpacity(100);
-            auto* hint = makeLabel(tr("start-queue", "START QUEUE"),0.44f,{94,-40},corum::ranked::ui::TextMuted,"black");
+            queue->setEnabled(online); queue->setCascadeOpacityEnabled(true); queue->setOpacity(online?255:100);
+            auto* hint = makeLabel(tr("start-queue", "START QUEUE"),0.44f,{94,-40},online?kCyan:corum::ranked::ui::TextMuted,"black");
             corum::ranked::ui::fitMenuLabelWidth(hint,170,0.44f,0.26f); m_root->addChild(hint,5);
-            auto* details = makeLabel(tr("survival-coming-later","SURVIVAL MATCHES ARE IN DEVELOPMENT"),0.27f,{94,-68},corum::ranked::ui::TextMuted,"semibold");
+            auto* details = makeLabel(online?tr("survival-online-ready","2-16 PLAYERS · UP TO 180s"):tr("mode-disabled","MODE DISABLED"),0.27f,{94,-68},corum::ranked::ui::TextMuted,"semibold");
             corum::ranked::ui::fitMenuLabelWidth(details,170,0.27f,0.19f); m_root->addChild(details,5);
             if (!view.survival.loaded || !view.survival.error.empty()) {
                 addButton(tr("retry","RETRY"),{94,-88},menu_selector(CorumRankedLayer::onRetrySurvival),false,0.44f);
@@ -2363,7 +2364,7 @@ class CorumRankedLayer final : public CCLayerColor {
                 return hint;
             }
             if (*selected == corum::ranked::RankedMode::Survival)
-                return view.survivalEnabled ? tr("survival-coming-later","SURVIVAL MATCHES ARE IN DEVELOPMENT") : tr("mode-off-browse","MODE DISABLED. HISTORY, LEADERBOARD AND ACHIEVEMENTS ARE AVAILABLE.");
+                return view.survivalEnabled && view.survival.onlineAvailable ? tr("survival-online-ready","2-16 PLAYERS · UP TO 180s") : tr("mode-off-browse","MODE DISABLED. HISTORY, LEADERBOARD AND ACHIEVEMENTS ARE AVAILABLE.");
             if (!view.soloEnabled) return tr("mode-off-browse","MODE DISABLED. HISTORY, LEADERBOARD AND ACHIEVEMENTS ARE AVAILABLE.");
         }
         return corum::ranked::i18n::runtimeStatus(view.status);
@@ -2561,7 +2562,7 @@ class CorumRankedLayer final : public CCLayerColor {
     }
 
     void onRetrySurvival(CCObject*) { RankedRuntime::get().fetchSurvivalProfile(); }
-    void onSurvivalUnavailable(CCObject*) { m_localMessage = tr("survival-coming-later","SURVIVAL MATCHES ARE IN DEVELOPMENT"); }
+    void onSurvivalQueue(CCObject*) { corum::ranked::SurvivalRuntime::get().joinQueue(); }
 
     void renderMain(RuntimeView const& view) {
         auto const size = CCDirector::sharedDirector()->getWinSize();
@@ -4392,11 +4393,14 @@ class CorumRankedLayer final : public CCLayerColor {
         lines.push_back(fmt::format("{}  {:+} LP",corum::ranked::survivalOrdinal(item.survivalRank),item.ownRankedScoreDelta.value_or(0)));
         for(auto const& round:record["snapshot"]["rounds"].asArray().unwrapOr(std::vector<matjson::Value>{})) {
             lines.push_back(fmt::format("{} · GD #{}",round["phase"].asString().unwrapOr(""),round["map"]["levelId"].asInt().unwrapOr(0)));
-            for(auto const& p:round["players"].asArray().unwrapOr(std::vector<matjson::Value>{}))if(p["participantId"].asString().unwrapOr("")=="human")
+            for(auto const& p:round["players"].asArray().unwrapOr(std::vector<matjson::Value>{}))if(p["participantId"].asString().unwrapOr("")==record["myParticipantId"].asString().unwrapOr("human"))
                 lines.push_back(fmt::format("{} {}% · {} Attempts",tr("you","YOU"),corum::ranked::rankedScoreText(p["highestProgress"].asDouble().unwrapOr(0),round["phase"].asString().unwrapOr("")=="TIEBREAK"),p["attempts"].asArray().unwrapOr(std::vector<matjson::Value>{}).size()));
         }
-        for(auto const& p:record["result"]["standings"].asArray().unwrapOr(std::vector<matjson::Value>{}))
-            lines.push_back(fmt::format("{}  {}  {:+} LP",corum::ranked::survivalOrdinal(static_cast<int>(p["rank"].asInt().unwrapOr(0))),p["name"].asString().unwrapOr(""),p["delta"].asInt().unwrapOr(0)));
+        for(auto const& p:record["result"]["standings"].asArray().unwrapOr(std::vector<matjson::Value>{})){
+            auto const rank=p["rank"].asInt().unwrapOr(0);
+            lines.push_back(rank>0?fmt::format("{}  {}  {:+} LP",corum::ranked::survivalOrdinal(static_cast<int>(rank)),p["name"].asString().unwrapOr(""),p["delta"].asInt().unwrapOr(0)):
+                fmt::format("-  {}  {}",p["name"].asString().unwrapOr(""),tr("waiting","WAITING")));
+        }
         auto* content=scroll->m_contentLayer;auto const contentHeight=std::max(height-16,static_cast<float>(lines.size()*26+12));content->setContentSize({width-16,contentHeight});
         float y=contentHeight-16;for(auto const& line:lines) {
             auto* label=makeLabel(line,.25f,{(width-16)/2,y},corum::ranked::ui::Text,"semibold");

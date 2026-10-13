@@ -1296,7 +1296,8 @@ export class PlacementService {
 
   private async assertNoPvPActivity(transaction: SqlExecutor, playerId: string): Promise<void> {
     const survival=await transaction.query(`SELECT 1 FROM sur_match_players p JOIN sur_matches m ON m.id=p.match_id
-      WHERE p.player_id=$1 AND m.state NOT IN ('FINAL_RESULT','CANCELLED') LIMIT 1`,[playerId]);
+      WHERE p.player_id=$1 AND m.state NOT IN ('FINAL_RESULT','CANCELLED') AND (p.status='ACTIVE' OR EXISTS(SELECT 1 FROM sur_online_players o WHERE o.match_id=m.id AND o.player_id=$1 AND o.result IS NULL))
+      UNION ALL SELECT 1 FROM sur_queue_entries WHERE player_id=$1 AND status='QUEUED' LIMIT 1`,[playerId]);
     if(survival.rows.length)throw new ConflictException("Finish or recover the current Survival game first");
     const match = await transaction.query<{ id: string }>(
       `SELECT id FROM ranked_matches

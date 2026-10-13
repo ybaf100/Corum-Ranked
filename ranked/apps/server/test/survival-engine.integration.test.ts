@@ -9,6 +9,7 @@ import { DEFAULT_SURVIVAL_CONFIG,SeededRandom,survivalCurrentRound,survivalMapRa
   type SurvivalCommand,type SurvivalMatch,type SurvivalVerifiedMap } from "@corum-ranked/rules";
 import { SurvivalConfigService,type SurvivalConfigDocument } from "../src/config/survival-config.service.js";
 import { SurvivalEngineService,type SurvivalAdmissionPlayer } from "../src/survival/survival-engine.service.js";
+import { SurvivalRateService } from "../src/survival/survival-rate.service.js";
 import { SurvivalEngineController } from "../src/survival/survival-engine.controller.js";
 import { SessionGuard } from "../src/session/session.guard.js";
 import { TokenService } from "../src/common/token.service.js";
@@ -100,7 +101,7 @@ describe("durable Survival M3 engine",()=>{
     await database.query(`INSERT INTO ranked_sessions(id,player_id,token_hash,client_version,environment_snapshot,expires_at,last_heartbeat_at)
       VALUES($1,$2,$3,$4,'{}',$5,$6)`,[ids.next(),participant.playerId,tokens.hash(token),REQUIRED_RANKED_CLIENT_VERSION,new Date(now+3600000),clock.now()]);
     vi.spyOn(engine,"onApplicationBootstrap").mockImplementation(()=>{});
-    const module=await Test.createTestingModule({controllers:[SurvivalEngineController],providers:[SessionGuard,
+    const module=await Test.createTestingModule({controllers:[SurvivalEngineController],providers:[SessionGuard,SurvivalRateService,
       {provide:SurvivalEngineService,useValue:engine},{provide:DATABASE,useValue:database},
       {provide:TokenService,useValue:tokens},{provide:SERVER_CLOCK,useValue:clock}]}).compile();
     const app=module.createNestApplication();app.useLogger(false);await app.listen(0,"127.0.0.1");

@@ -21,6 +21,7 @@
 Survival M1 통합 및 beta.59 적용 절차는 [Survival M1 보고서](docs/survival-m1.md)를 참고한다.
 Survival M3 beta.61의 경기 엔진, 랜덤 맵, DB/API 및 M4/M5 연결은 [Survival M3 문서](docs/survival-m3.md)를 참고한다.
 Survival M4 beta.62의 실제 디버그 봇 경기, HUD, LP 정산 및 모드별 Admin은 [Survival M4 문서](docs/survival-m4.md)를 참고한다.
+Survival M5 beta.68의 공개/축소 매칭, 디버그 봇 충원, 재접속, 개인 정산 및 운영 반영 순서는 [Survival M5 문서](docs/survival-m5.md)를 참고한다.
 동일 서버·DB·Geode 모드에서 동작하며 운영 설정과 LP/리더보드는 모드별로 독립적이다.
 
 Node.js 22 이상과 C++23 컴파일러가 필요합니다.

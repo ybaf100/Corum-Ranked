@@ -1329,12 +1329,15 @@ void RankedRuntime::startDebugBotMatch(DebugBotMatchOptions options) {
 }
 
 bool RankedRuntime::prepareSurvivalDebugAdmission(matjson::Value& body) {
+    return prepareSurvivalAdmission(body);
+}
+#endif
+
+bool RankedRuntime::handleSurvivalAdmissionError(web::WebResponse const& response) { return handleRequiredUpdate(response); }
+bool RankedRuntime::prepareSurvivalAdmission(matjson::Value& body) {
     if (!m_view.survivalEnabled || m_controlBusy || m_sessionToken.empty() || m_view.stage != RuntimeStage::Ready) return false;
     return prepareSurvivalEnvironment(body);
 }
-bool RankedRuntime::handleSurvivalAdmissionError(web::WebResponse const& response) { return handleRequiredUpdate(response); }
-#endif
-
 bool RankedRuntime::prepareSurvivalEnvironment(matjson::Value& body) {
     m_installedMods = captureInstalledMods();
     auto const decision = evaluateEnvironment(m_installedMods, m_environmentPolicy);
@@ -4124,7 +4127,7 @@ void RankedRuntime::fetchSurvivalProfile() {
         sur.wins=static_cast<int>(root["recordSummary"]["wins"].asInt().unwrapOr(0));
         sur.losses=static_cast<int>(root["recordSummary"]["losses"].asInt().unwrapOr(0));
         sur.bestRank=root["recordSummary"]["bestRank"].isNumber()?std::optional<int>(static_cast<int>(root["recordSummary"]["bestRank"].asInt().unwrapOr(0))):std::nullopt;
-        sur.loaded = true;
+        sur.loaded = true;sur.onlineAvailable=root["onlineAvailable"].asBool().unwrapOr(false);
         sur.profile.displayedTier = profile["tier"].asString().unwrapOr("RED");
         sur.tierId = profile["tierId"].asString().unwrapOr(sur.profile.displayedTier);
         sur.profile.visibleRankedScore = static_cast<int>(profile["lp"].asInt().unwrapOr(0));

@@ -1,3 +1,4 @@
+import { survivalOnlineTargets,survivalOnlineRewardRank } from "./survival-online.js";
 import { bestPercentOfThree } from "./deathmatch.js";
 import { RankedDomainError } from "./errors.js";
 import { survivalPlacementLp, survivalTierForLp, type SurvivalConfig } from "./survival.js";
@@ -14,12 +15,14 @@ export interface SurvivalEntrant {
   lp: number;
   /** Real human tier at admission; bots derive their icon from the LP snapshot. */
   displayedTier?: string;
+  gdAccountId?: string;
 }
 export interface SurvivalMatchPlayer extends SurvivalEntrant {
   eliminationStage: number | null;
   eliminationScore: number;
   forfeitReason: string | null;
   finalRank: number | null;
+  fixedRewardRank?:number;
 }
 export interface SurvivalAttempt {
   id: string;
@@ -38,6 +41,8 @@ export interface SurvivalRoundPlayer {
   rank: number | null;
   qualified: boolean;
   forfeited: boolean;
+  /** Absent online participants keep 0%, may return, and do not block native readiness. */
+  absent?:boolean;
 }
 export interface SurvivalRound {
   key: string;
@@ -58,6 +63,7 @@ export interface SurvivalRound {
 }
 export interface SurvivalMatch {
   id: string;
+  online?:boolean;
   revision: number;
   state: SurvivalMatchState;
   configGeneration: string;
@@ -70,7 +76,7 @@ export interface SurvivalMatch {
   winnerId: string | null;
   winnerIds?: string[];
   cancellationReason: string | null;
-  completionKind?: "DEBUG_FORCE" | "DEBUG_HUMAN_ELIMINATION";
+  completionKind?: "DEBUG_FORCE" | "DEBUG_HUMAN_ELIMINATION" | "BOTS_ONLY_RESULT";
   /** Debug adapter's durable presentation barrier; ordinary M3 matches remain automatic. */
   presentationControlled?: boolean;
   presentationGate?: "INTRO" | "ROUND_RESULT" | null;
@@ -81,6 +87,7 @@ export interface SurvivalMatch {
 export interface SurvivalRoundContext { roundKey: string; mapGeneration: number; levelId: number; }
 export type SurvivalCommand =
   | { type: "TICK" }
+  | {type:"ABSENT";roundKey:string;mapGeneration:number;participantIds:readonly string[]}
   | { type:"PRESENTATION_COMPLETE";roundKey:string;mapGeneration:number;participantId:string }
   | { type: "MAP_SELECTED"; roundKey: string; mapGeneration: number; map: SurvivalVerifiedMap }
   | ({ type: "ASSETS_READY"; participantId: string; certificate: SurvivalVerifiedMap } & SurvivalRoundContext)
@@ -98,6 +105,7 @@ function conflict(message: string): never { throw new RankedDomainError("INVALID
 export const survivalCurrentRound = (match: SurvivalMatch): SurvivalRound => match.rounds[match.rounds.length - 1]!;
 const terminal = (match: SurvivalMatch): boolean => match.state === "FINAL_RESULT" || match.state === "CANCELLED";
 const activePlayers = (round: SurvivalRound) => round.players.filter(player => !player.forfeited);
+const entryPlayers = (round: SurvivalRound) => activePlayers(round).filter(player=>!player.absent);
 
 /** Raw percentages for normal rounds; fixed integer milli-percent for Death Match.
  * Decimal shifting avoids the 1.005-style binary multiplication rounding error. */
@@ -127,8 +135,8 @@ function transition(match: SurvivalMatch, state: SurvivalMatchState, at: number,
 }
 function addRound(match: SurvivalMatch, phase: SurvivalMapPhase, participants: readonly string[], at: number): void {
   const ordinal = match.rounds.length + 1;
-  const target = phase === "ROUND_1" ? match.config.round1Qualifiers : phase === "ROUND_2" ? match.config.round2Qualifiers :
-    phase === "ROUND_3" ? match.config.round3Qualifiers : 1;
+  const targets=match.online?survivalOnlineTargets(match.players.length):[match.config.round1Qualifiers,match.config.round2Qualifiers,match.config.round3Qualifiers];
+  const target=phase==="ROUND_1"?targets[0]!:phase==="ROUND_2"?targets[1]!:phase==="ROUND_3"?targets[2]!:1;
   match.rounds.push({ key: `stage-${ordinal}`, ordinal, phase, target, mapGeneration:1, map:null, selectedMaps:[],
     preparationStartedAt:null, entryRequestedAt:null, firstEnteredAt:null, startsAt:null, endsAt:null, finishedAt:null,
     cutoffScore:null, players:participants.map(participantId => ({participantId,assetsReadyAt:null,
@@ -136,10 +144,10 @@ function addRound(match: SurvivalMatch, phase: SurvivalMapPhase, participants: r
   transition(match,"MAP_SELECTION",at,"NEW_ROUND");
 }
 export function createSurvivalMatch(id: string, entrants: readonly SurvivalEntrant[], config: SurvivalConfig,
-  configGeneration: string, now: number): SurvivalMatch {
+  configGeneration: string, now: number,online=false): SurvivalMatch {
   const errors = validateSurvivalEngineConfig(config);
   if (errors.length) throw new RankedDomainError("INVALID_CONFIG",errors.join("; "));
-  if (entrants.length !== 16 || new Set(entrants.map(p => p.participantId)).size !== 16 ||
+  if ((!online && entrants.length!==16) || (online && (entrants.length<2||entrants.length>16)) || new Set(entrants.map(p => p.participantId)).size !== entrants.length ||
     entrants.some(p => !p.participantId || p.participantId.length > 80 || !Number.isSafeInteger(p.lp) || p.lp < 0 ||
       !["HUMAN","BOT"].includes(p.kind) || (p.kind === "HUMAN" && !p.playerId)) ||
     new Set(entrants.filter(p => p.playerId).map(p => p.playerId)).size !== entrants.filter(p => p.playerId).length ||
@@ -149,7 +157,8 @@ export function createSurvivalMatch(id: string, entrants: readonly SurvivalEntra
     difficultyGroup:survivalDifficultyForAverage(averageLp,config.tierBands),createdAt:now,updatedAt:now,finishedAt:null,
     winnerId:null,cancellationReason:null,players:entrants.map(p => ({...p,eliminationStage:null,eliminationScore:0,
       forfeitReason:null,finalRank:null})),rounds:[],transitions:[] };
-  addRound(match,"ROUND_1",entrants.map(p => p.participantId),now);
+  if(online)match.online=true;
+  addRound(match,online && entrants.length<=3?"FINAL":online && entrants.length<8?"ROUND_3":"ROUND_1",entrants.map(p => p.participantId),now);
   return match;
 }
 function eliminate(match: SurvivalMatch, round: SurvivalRound, player: SurvivalRoundPlayer, score: number, reason: string | null): void {
@@ -159,6 +168,31 @@ function eliminate(match: SurvivalMatch, round: SurvivalRound, player: SurvivalR
   entrant.eliminationScore = round.phase === "TIEBREAK" ? score / 1000 : score;
   entrant.forfeitReason = reason;
   player.qualified = false;
+}
+/** Trusted presence adapter only: absence is not native entry/asset evidence. */
+export function survivalMarkAbsent(before:SurvivalMatch,ids:readonly string[],now:number):SurvivalMatch {
+  if(!before.online || !["PREPARING","ENTERING"].includes(before.state))return before;
+  const match=structuredClone(before),round=survivalCurrentRound(match);let changed=false;
+  for(const id of ids){const p=round.players.find(p=>p.participantId===id);if(p&&!p.forfeited&&!p.absent){p.absent=true;changed=true;}}
+  if(!Number.isFinite(now)||now<before.updatedAt)conflict("Invalid presence clock");
+  if(!changed)return before;match.revision++;return match;
+}
+/** Immediate surrender has the fixed floor of its round. Other elimination
+ * ranks become immutable once the round closes, regardless of later winners. */
+export function survivalStabilizeOnlineRanks(match:SurvivalMatch):void {
+  if(!match.online)return;
+  const alive=match.players.filter(p=>p.eliminationStage===null).length;
+  const ordered=match.players.filter(p=>p.eliminationStage!==null).sort((a,b)=>
+    b.eliminationStage!-a.eliminationStage! || Number(!!a.fixedRewardRank)-Number(!!b.fixedRewardRank) ||
+    b.eliminationScore-a.eliminationScore || a.participantId.localeCompare(b.participantId));
+  let rank=alive;
+  ordered.forEach((p,i)=>{
+    const previous=ordered[i-1];
+    if(!i || p.eliminationStage!==previous!.eliminationStage || p.eliminationScore!==previous!.eliminationScore || !!p.fixedRewardRank!==!!previous!.fixedRewardRank)rank=alive+i+1;
+    const round=match.rounds.find(r=>r.ordinal===p.eliminationStage)!;
+    if(p.fixedRewardRank)p.finalRank=p.fixedRewardRank;
+    else if(round.finishedAt!==null || match.state==="FINAL_RESULT")p.finalRank=rank;
+  });
 }
 function finishMatch(match: SurvivalMatch, winnerId: string | null, at: number, reason: string): void {
   match.winnerId = winnerId; match.finishedAt = at;
@@ -178,6 +212,7 @@ function finishMatch(match: SurvivalMatch, winnerId: string | null, at: number, 
     player.finalRank=rank;
   }
   transition(match,"FINAL_RESULT",at,reason);
+  if(match.online){survivalStabilizeOnlineRanks(match);match.players.find(p=>p.participantId===winnerId)!.finalRank=1;}
 }
 function survivorsOrEnd(match: SurvivalMatch, round: SurvivalRound, at: number): boolean {
   const remaining=activePlayers(round);
@@ -189,7 +224,7 @@ function survivorsOrEnd(match: SurvivalMatch, round: SurvivalRound, at: number):
 }
 function forfeitUnready(match: SurvivalMatch, round: SurvivalRound, ready: (p: SurvivalRoundPlayer) => boolean,
   at: number, reason: string): void {
-  for (const player of activePlayers(round).filter(p => !ready(p))) {
+  for (const player of entryPlayers(round).filter(p => !ready(p))) {
     player.forfeited=true; eliminate(match,round,player,roundScore(round,player),reason);
   }
   survivorsOrEnd(match,round,at);
@@ -214,6 +249,7 @@ function finishRound(match: SurvivalMatch, round: SurvivalRound, at: number): vo
   const qualified=round.players.filter(p => p.qualified && !p.forfeited);
   if (qualified.length === 1) { finishMatch(match,qualified[0]!.participantId,at,"SINGLE_WINNER"); return; }
   if (!qualified.length) { finishMatch(match,null,at,"NO_SURVIVORS"); return; }
+  survivalStabilizeOnlineRanks(match);
   transition(match,"ROUND_RESULT",at,"CUTOFF_TIES_ADVANCE");
   if(match.presentationControlled)match.presentationGate="ROUND_RESULT";
 }
@@ -222,10 +258,13 @@ function finishRound(match: SurvivalMatch, round: SurvivalRound, at: number): vo
 function advanceTimers(match: SurvivalMatch, now: number): void {
   const round=survivalCurrentRound(match);
   if (match.state === "PREPARING" && round.preparationStartedAt !== null && now >= round.preparationStartedAt + 15_000) {
-    const ready=activePlayers(round).filter(p => p.assetsReadyAt !== null);
-    if (!ready.length) {reroll(match,round,now,"NO_ASSETS_READY"); return;}
+    const ready=entryPlayers(round).filter(p => p.assetsReadyAt !== null);
+    if (!ready.length && entryPlayers(round).length) {reroll(match,round,now,"NO_ASSETS_READY"); return;}
     forfeitUnready(match,round,p => p.assetsReadyAt !== null,now,"ASSET_PREPARATION_TIMEOUT");
     if (!terminal(match)) {round.entryRequestedAt=now; transition(match,"ENTERING",now,"ASSETS_BARRIER_COMPLETE");}
+  }
+  if(match.online && match.state==="ENTERING" && entryPlayers(round).length===0){
+    round.startsAt=now+3000;round.endsAt=round.startsAt+180000;transition(match,"COUNTDOWN",now,"ABSENT_PLAYERS_SCORE_ZERO");
   }
   if (match.state === "ENTERING" && round.entryRequestedAt !== null) {
     if (round.firstEnteredAt === null && now >= round.entryRequestedAt+5_000) {reroll(match,round,now,"NO_NATIVE_ENTRY"); return;}
@@ -255,13 +294,16 @@ export function reduceSurvivalMatch(before: SurvivalMatch, command: SurvivalComm
     }
   } else if (!terminal(match) && (match.state === enteredState || (enteredState === "COUNTDOWN" && match.state === "PLAYING"))) {
     if (command.roundKey !== round.key || command.mapGeneration !== round.mapGeneration) conflict("SURVIVAL_CONTEXT_CHANGED");
-    if(command.type==="PRESENTATION_COMPLETE") {
+    if(command.type==="ABSENT") {
+      if(!match.online || !["PREPARING","ENTERING"].includes(match.state))conflict("Invalid absence phase");
+      for(const id of command.participantIds){const p=round.players.find(p=>p.participantId===id);if(!p||p.forfeited)conflict("Invalid absent participant");p.absent=true;}
+    } else if(command.type==="PRESENTATION_COMPLETE") {
       if(!match.presentationControlled || !match.players.some(p=>p.participantId===command.participantId && p.kind==="HUMAN" && p.eliminationStage===null))
         conflict("Invalid presentation owner");
       if(match.presentationGate==="INTRO" && match.state==="MAP_SELECTION" && now>=match.createdAt+5_000)match.presentationGate=null;
       else if(match.presentationGate==="ROUND_RESULT" && match.state==="ROUND_RESULT" && round.finishedAt!==null && now>=round.finishedAt+5_000)
         match.presentationGate=null;
-      else conflict("Presentation barrier is not complete");
+      else if(!(match.online && match.presentationGate===null))conflict("Presentation barrier is not complete");
     } else if (command.type === "MAP_SELECTED") {
       if (match.state !== "MAP_SELECTION") conflict("Map has already been selected");
       if(match.presentationGate==="INTRO")conflict("Match presentation is pending");
@@ -284,6 +326,10 @@ export function reduceSurvivalMatch(before: SurvivalMatch, command: SurvivalComm
         player!.forfeited=true;
         for(const attempt of player!.attempts)if(attempt.endedAt===null)attempt.endedAt=now;
         eliminate(match,round,player!,roundScore(round,player!),command.reason);
+        if(match.online && command.reason==="ONLINE_SURRENDER"){
+          const entrant=match.players.find(p=>p.participantId===player!.participantId)!;
+          entrant.fixedRewardRank=round.players.length;entrant.finalRank=round.players.length;
+        }
       }
       if (!survivorsOrEnd(match,round,now)) {
         const remaining=activePlayers(round);
@@ -301,12 +347,13 @@ export function reduceSurvivalMatch(before: SurvivalMatch, command: SurvivalComm
       switch (command.type) {
         case "ASSETS_READY": {
           if (player.assetsReadyAt !== null) break;
-          if (match.state !== "PREPARING") conflict("Assets are not being prepared");
+          const late=match.online && player.absent && ["ENTERING","COUNTDOWN","PLAYING"].includes(match.state);
+          if (match.state !== "PREPARING" && !late) conflict("Assets are not being prepared");
           const {verifiedAt: _receivedAt,...certificate}=command.certificate;
           const {verifiedAt: _verifiedAt,...expected}=round.map;
           if (Object.keys(expected).some(key => certificate[key as keyof typeof certificate] !== expected[key as keyof typeof expected])) conflict("Client map certificate mismatch");
           player.assetsReadyAt=now; player.preparationFailure=null;
-          if (activePlayers(round).every(p => p.assetsReadyAt !== null)) {
+          if (match.state==="PREPARING" && entryPlayers(round).every(p => p.assetsReadyAt !== null)) {
             round.entryRequestedAt=now; transition(match,"ENTERING",now,"ASSETS_BARRIER_COMPLETE");
           }
           break;
@@ -318,16 +365,16 @@ export function reduceSurvivalMatch(before: SurvivalMatch, command: SurvivalComm
           break;
         case "ENTERED":
           if (player.enteredAt !== null) break;
-          if (match.state !== "ENTERING" || player.assetsReadyAt === null) conflict("Native entry is not invited");
-          player.enteredAt=now; round.firstEnteredAt ??= now;
-          if (activePlayers(round).every(p => p.enteredAt !== null)) {
+          if ((match.state !== "ENTERING" && !(match.online && player.absent && ["COUNTDOWN","PLAYING"].includes(match.state))) || player.assetsReadyAt === null) conflict("Native entry is not invited");
+          player.enteredAt=now;player.absent=false; round.firstEnteredAt ??= now;
+          if (match.state==="ENTERING" && entryPlayers(round).every(p => p.enteredAt !== null)) {
             round.startsAt=now+3_000; round.endsAt=round.startsAt+180_000;
             transition(match,"COUNTDOWN",now,"ALL_NATIVE_SCENES_ENTERED");
           }
           break;
         case "ATTEMPT_START":
           if (player.attempts.some(a => a.id === command.attemptId)) break;
-          if (match.state !== "PLAYING" || !command.attemptId || command.attemptId.length > 80 ||
+          if (match.state !== "PLAYING" || (match.online && (player.absent || player.assetsReadyAt===null || player.enteredAt===null)) || !command.attemptId || command.attemptId.length > 80 ||
             player.attempts.some(a => a.endedAt === null) || (round.phase === "TIEBREAK" && player.attempts.length >= 3)) conflict("Attempt cannot start");
           player.attempts.push({id:command.attemptId,sequence:player.attempts.length+1,startedAt:now,endedAt:null,highestProgress:0});
           break;
@@ -352,12 +399,14 @@ export function reduceSurvivalMatch(before: SurvivalMatch, command: SurvivalComm
 }
 
 export function survivalSettlementInputs(match: SurvivalMatch) {
-  if (match.state !== "FINAL_RESULT") return [];
-  return match.players.map(player => {
+  if (!match.online && match.state !== "FINAL_RESULT") return [];
+  return match.players.filter(p=>p.finalRank!==null && (match.state!=="CANCELLED" || p.fixedRewardRank!==undefined)).map(player => {
     const rank=player.finalRank!;
     const tiedPlayers=match.players.filter(p => p.finalRank === rank).length;
+    const last=player.fixedRewardRank??Math.min(match.players.length,rank+tiedPlayers-1);
+    const rewardRank=match.online?survivalOnlineRewardRank(last,match.players.length):last;
     return {participantId:player.participantId,playerId:player.playerId,rank,tiedPlayers,
-      occupiedLastRank:rank+tiedPlayers-1,delta:survivalPlacementLp(rank,tiedPlayers,match.config.placementLp),
+      occupiedLastRank:last,delta:survivalPlacementLp(rewardRank,1,match.config.placementLp),
       eventKey:`survival:${match.id}:result:${player.participantId}`,configGeneration:match.configGeneration};
   }).sort((a,b) => a.rank-b.rank || a.participantId.localeCompare(b.participantId));
 }
@@ -370,7 +419,7 @@ export function survivalLiveView(match: SurvivalMatch, now: number, participantI
     mapGeneration:completed.mapGeneration,finishedAt:new Date(completed.finishedAt!).toISOString(),
     players:completed.players.map(p=>{
       const entrant=match.players.find(v=>v.participantId===p.participantId)!;
-      return {participantId:p.participantId,name:entrant.name,kind:entrant.kind,
+      return {participantId:p.participantId,name:entrant.name,kind:entrant.kind,gdAccountId:entrant.gdAccountId??null,
         displayedTier:match.config.tierBands.find(b=>b.tier===entrant.displayedTier)?.group??entrant.displayedTier??survivalTierForLp(entrant.lp,match.config.tierBands).group,rank:p.rank??entrant.finalRank,
         score:completed.phase==="TIEBREAK"?roundScore(completed,p)/1000:roundScore(completed,p),
         qualified:p.qualified&&!p.forfeited,forfeited:p.forfeited};
@@ -383,7 +432,7 @@ export function survivalLiveView(match: SurvivalMatch, now: number, participantI
   const standings=ranked.map(p => ({...p,score:round.phase === "TIEBREAK" ? p.score/1000 : p.score,
     passing:cutoff !== null && p.score >= cutoff}));
   return {matchId:match.id,revision:match.revision,state:match.state,phase:round.phase,roundKey:round.key,
-    presentationGate:match.presentationGate??null,
+    presentationGate:match.presentationGate??null,online:match.online??false,roundNumber:round.phase==="TIEBREAK"?4:round.ordinal,playerCount:match.players.length,roundPlayerCount:round.players.length,
     mapGeneration:round.mapGeneration,map:round.map,averageLp:match.averageLp,difficultyGroup:match.difficultyGroup,
     configGeneration:match.configGeneration,serverNow:new Date(now).toISOString(),
     preparationWarningAt:round.preparationStartedAt === null ? null : new Date(round.preparationStartedAt+10_000).toISOString(),
@@ -397,8 +446,8 @@ export function survivalLiveView(match: SurvivalMatch, now: number, participantI
     cutoffScore:round.phase === "TIEBREAK" && cutoff !== null ? cutoff/1000 : cutoff,
     targetQualifiers:Math.min(round.target,standings.length),finalFirstScore:["FINAL","TIEBREAK"].includes(round.phase) ? standings[0]?.score ?? null : null,
     preparation:round.players.map(p => ({participantId:p.participantId,assetsReady:p.assetsReadyAt !== null,
-      entered:p.enteredAt !== null,failed:p.preparationFailure,forfeited:p.forfeited})),
-    participants:match.players.map(p => ({participantId:p.participantId,name:p.name,kind:p.kind,lpSnapshot:p.lp,
+      entered:p.enteredAt !== null,absent:p.absent??false,failed:p.preparationFailure,forfeited:p.forfeited})),
+    participants:match.players.map(p => ({participantId:p.participantId,name:p.name,kind:p.kind,gdAccountId:p.gdAccountId??null,lpSnapshot:p.lp,
       displayedTier:match.config.tierBands.find(b=>b.tier===p.displayedTier)?.group??p.displayedTier??survivalTierForLp(p.lp,match.config.tierBands).group,
       eliminationStage:p.eliminationStage,finalRank:p.finalRank,forfeitReason:p.forfeitReason})),
     winnerId:match.winnerId,winnerIds:match.winnerIds??(match.winnerId?[match.winnerId]:[]),cancellationReason:match.cancellationReason,settlementInputs:survivalSettlementInputs(match)};

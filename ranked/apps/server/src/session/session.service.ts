@@ -52,6 +52,8 @@ export interface SessionCreationResult {
   readonly sessionLeaseSeconds: number;
   readonly sessionHeartbeatSeconds: number;
   readonly activeMatch: boolean;
+  readonly activeSurvivalMatch:boolean;
+  readonly activeSurvivalQueue:boolean;
   readonly player: {
     readonly gdAccountId: string;
     readonly gdUsername: string;
@@ -121,7 +123,7 @@ export class SessionService {
     let now = this.clock.now();
     const sessionToken = this.tokens.createSessionToken();
     let expiresAt = new Date(now.getTime() + sessionSeconds * 1_000);
-    let activeMatch = false;
+    let activeMatch = false;let activeSurvivalMatch=false,activeSurvivalQueue=false;
 
     const profile = await this.database.transaction(async (transaction) => {
       const player = await this.upsertPlayer(transaction, dto);
@@ -147,7 +149,12 @@ export class SessionService {
       // Matchmaking locks queue rows before renewing session rows. Use that
       // same order so admission/Close cannot deadlock a concurrent matchmaker.
       await transaction.query("SELECT player_id FROM ranked_queue_entries WHERE player_id = $1 FOR UPDATE", [player.id]);
-      const ongoing = await transaction.query<{ id: string }>(
+      await transaction.query("SELECT player_id FROM sur_queue_entries WHERE player_id=$1 FOR UPDATE",[player.id]);
+      const survivalAssignment=(await transaction.query<{match_id:string}>("SELECT match_id FROM sur_online_players WHERE player_id=$1 AND acknowledged_at IS NULL ORDER BY last_seen_at DESC LIMIT 1",[player.id])).rows[0];
+      const survivalQueue=(await transaction.query<{status:string;last_heartbeat_at:Date|string}>("SELECT status,last_heartbeat_at FROM sur_queue_entries WHERE player_id=$1",[player.id])).rows[0];
+      activeSurvivalMatch=!!survivalAssignment;
+      activeSurvivalQueue=survivalQueue?.status==="QUEUED"&&new Date(survivalQueue.last_heartbeat_at).getTime()>new Date(sessionAliveSince(now)).getTime();
+      const ongoing = await transaction.query<{ id: string }> (
         `SELECT id FROM ranked_matches WHERE (player_a_id=$1 OR player_b_id=$1)
          AND state NOT IN ('MATCH_RESULT','CANCELLED') ORDER BY created_at DESC LIMIT 1`, [player.id]);
       const matchId = ongoing.rows[0]?.id;
@@ -179,6 +186,9 @@ export class SessionService {
           now.toISOString(),
         ],
       );
+      if(activeSurvivalQueue || activeSurvivalMatch)await transaction.query(`UPDATE sur_queue_entries SET session_id=$2,last_heartbeat_at=$3 WHERE player_id=$1`,[player.id,sessionId,now.toISOString()]);
+      else await transaction.query("UPDATE sur_queue_entries SET status='EXPIRED' WHERE player_id=$1 AND status='QUEUED'",[player.id]);
+      if(activeSurvivalMatch)await transaction.query("UPDATE sur_online_players SET admission_session_id=$2 WHERE player_id=$1 AND acknowledged_at IS NULL",[player.id,sessionId]);
       if (matchId) {
         // Move the existing assignment, not the match itself. Both explicit
         // takeover and a retry from the same process get a new scoped token;
@@ -206,7 +216,7 @@ export class SessionService {
       expiresAt: expiresAt.toISOString(),
       sessionLeaseSeconds: RANKED_SESSION_LEASE_SECONDS,
       sessionHeartbeatSeconds: RANKED_SESSION_HEARTBEAT_SECONDS,
-      activeMatch,
+      activeMatch,activeSurvivalMatch,activeSurvivalQueue,
       player: {
         gdAccountId: dto.gdAccountId,
         gdUsername: dto.gdUsername,
@@ -276,6 +286,7 @@ export class SessionService {
     await this.database.transaction(async (transaction) => {
       await transaction.query("SELECT id FROM ranked_players WHERE id = $1 FOR UPDATE", [session.playerId]);
       await transaction.query("DELETE FROM ranked_queue_entries WHERE session_id = $1", [session.sessionId]);
+      await transaction.query("UPDATE sur_queue_entries SET status='LEFT' WHERE session_id=$1 AND status='QUEUED'",[session.sessionId]);
       await transaction.query("UPDATE ranked_sessions SET revoked_at = $2 WHERE id = $1 AND revoked_at IS NULL",
         [session.sessionId, now.toISOString()]);
     });

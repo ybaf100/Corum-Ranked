@@ -39,6 +39,7 @@ const REQUIRED_MIGRATIONS = [
   "0021_survival_m1.sql",
   "0022_survival_m3_engine.sql",
   "0023_survival_m4_debug.sql",
+  "0024_survival_m5_online.sql",
 ] as const;
 
 export interface RankedSchemaStatus {
@@ -71,6 +72,13 @@ type SchemaProbeRow = QueryResultRow & {
   sur_match_commands: boolean;
   sur_lp_ledger: boolean;
   sur_debug_matches: boolean;
+  sur_mode_state: boolean;
+  sur_queue_entries: boolean;
+  sur_online_matches: boolean;
+  sur_online_players: boolean;
+  sur_queue_fill_requests: boolean;
+  sur_request_rates: boolean;
+
   ranked_forum_records: boolean;
   ranked_forum_refresh_cooldowns: boolean;
   match_type: boolean;
@@ -192,6 +200,13 @@ export class DatabaseService implements DatabasePort, OnModuleInit, OnApplicatio
           to_regclass('public.sur_match_commands') IS NOT NULL AS sur_match_commands,
           to_regclass('public.sur_lp_ledger') IS NOT NULL AS sur_lp_ledger,
           to_regclass('public.sur_debug_matches') IS NOT NULL AS sur_debug_matches,
+          to_regclass('public.sur_mode_state') IS NOT NULL AS sur_mode_state,
+          to_regclass('public.sur_queue_entries') IS NOT NULL AS sur_queue_entries,
+          to_regclass('public.sur_online_matches') IS NOT NULL AS sur_online_matches,
+          to_regclass('public.sur_online_players') IS NOT NULL AS sur_online_players,
+          to_regclass('public.sur_queue_fill_requests') IS NOT NULL AS sur_queue_fill_requests,
+          to_regclass('public.sur_request_rates') IS NOT NULL AS sur_request_rates,
+
           to_regclass('public.ranked_forum_records') IS NOT NULL AS ranked_forum_records,
           to_regclass('public.ranked_forum_refresh_cooldowns') IS NOT NULL AS ranked_forum_refresh_cooldowns,
           EXISTS (
@@ -287,6 +302,13 @@ export class DatabaseService implements DatabasePort, OnModuleInit, OnApplicatio
         ["sur_match_commands", "table sur_match_commands"],
         ["sur_lp_ledger", "table sur_lp_ledger"],
         ["sur_debug_matches", "table sur_debug_matches"],
+        ["sur_mode_state", "table sur_mode_state"],
+        ["sur_queue_entries", "table sur_queue_entries"],
+        ["sur_online_matches", "table sur_online_matches"],
+        ["sur_online_players", "table sur_online_players"],
+        ["sur_queue_fill_requests", "table sur_queue_fill_requests"],
+        ["sur_request_rates", "table sur_request_rates"],
+
         ["ranked_forum_records", "table ranked_forum_records"],
         ["ranked_forum_refresh_cooldowns", "table ranked_forum_refresh_cooldowns"],
         ["match_type", "ranked_matches.match_type"],

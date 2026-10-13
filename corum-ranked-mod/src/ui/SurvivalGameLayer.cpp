@@ -40,7 +40,7 @@ class SurvivalGameLayer final : public CCLayerColor {
     std::string m_eliminationKey,m_pendingLaunch;
     std::string m_previewKey;
     std::chrono::steady_clock::time_point m_eliminationUntil{};
-    std::chrono::steady_clock::time_point m_nextMapAt{},m_introUntil{},m_mapShownAt{};
+    std::chrono::steady_clock::time_point m_nextMapAt{},m_introUntil{},m_mapShownAt{},m_returnAt{};
     bool m_closed=false,m_motion=false,m_lowDetail=false,m_disableShake=false;
     static std::string text(char const* key,char const* fallback) {return i18n::text(key,fallback);}
     CCMenuItemSpriteExtra* button(CCMenu* menu,std::string const& caption,CCPoint position,float width,int tag,ccColor3B color=ui::Blue,CCLabelBMFont** saved=nullptr) {
@@ -77,7 +77,7 @@ class SurvivalGameLayer final : public CCLayerColor {
         if(m_confirmation)return;
         auto const& view=SurvivalRuntime::get().view();m_confirmationContext=view.id+":"+view.roundKey+":"+std::to_string(view.mapGeneration);auto const id=view.id,round=view.roundKey;auto const generation=view.mapGeneration;
         auto* popup=ui::RankedConfirmPopup::create(text("surrender-confirm","CONFIRM SURRENDER"),
-            text("survival-surrender-warning","End this match using this round's recorded ranking?"),
+            SurvivalRuntime::get().surrenderMessage(),
             [weak=WeakRef(this),id,round,generation](bool accepted){
                 auto owner=weak.lock();if(!owner || !owner->getParent())return;owner->m_confirmation.reset();
                 auto const& current=SurvivalRuntime::get().view();
@@ -128,7 +128,7 @@ class SurvivalGameLayer final : public CCLayerColor {
         std::vector<SurvivalStanding> players=view.standings;
         if(!result)std::erase_if(players,[&](auto const& player){return std::find(view.aliveIds.begin(),view.aliveIds.end(),player.id)==view.aliveIds.end();});
         if(result){players.clear();for(auto const& p:view.result["standings"].asArray().unwrapOr(std::vector<matjson::Value>{}))
-            players.push_back({p["participantId"].asString().unwrapOr(""),p["name"].asString().unwrapOr(""),static_cast<int>(p["rank"].asInt().unwrapOr(0)),0,0,0,true,p["kind"].asString().unwrapOr("")=="BOT",false,p["displayedTier"].asString().unwrapOr("UNRANKED")});}
+            players.push_back({p["participantId"].asString().unwrapOr(""),p["name"].asString().unwrapOr(""),static_cast<int>(p["rank"].asInt().unwrapOr(0)),0,0,0,true,p["kind"].asString().unwrapOr("")=="BOT",false,p["displayedTier"].asString().unwrapOr("UNRANKED"),numFromString<int>(p["gdAccountId"].asString().unwrapOr("0")).unwrapOr(0)});}
         auto const size=getContentSize();auto const columns=std::min<std::size_t>(4,std::max<std::size_t>(1,players.size()));
         auto const rows=(players.size()+columns-1)/columns;auto const width=std::min(size.width-36,480.0f)/columns;
         auto const height=std::min(66.0f,std::max(36.0f,(size.height-163)/std::max<std::size_t>(1,rows)));
@@ -143,7 +143,7 @@ class SurvivalGameLayer final : public CCLayerColor {
                 ui::fitMenuLabelWidth(nickname,width-20,.25f,.20f);root->addChild(nickname,5);
                 int index=1;auto dash=value.id.rfind('-');if(dash!=std::string::npos)index=numFromString<int>(value.id.substr(dash+1)).unwrapOr(1);
                 auto* avatarSlot=CCNode::create();avatarSlot->setPosition({(width-8)/2,(height-4)/2});root->addChild(avatarSlot,5);
-                auto* icon=value.id==view.ownId?ui::PlayerIcon::createLocal():ui::PlayerIcon::createBot(index);
+                auto* icon=value.id==view.ownId?ui::PlayerIcon::createLocal():value.bot?ui::PlayerIcon::createBot(index):ui::PlayerIcon::createRemote(value.accountId);
                 if(icon){icon->setScale(std::clamp((height-27)/48.0f,.26f,.65f));icon->setPosition({-10,0});avatarSlot->addChild(icon,5);}
                 auto* record=ui::menuLabel("",.23f,{(width-8)/2,7},ui::TextMuted,ui::FontWeight::ExtraBold);root->addChild(record,5);
                 found=m_tiles.emplace(value.id,Tile{root,nickname,record,destination,avatarSlot}).first;
@@ -156,11 +156,11 @@ class SurvivalGameLayer final : public CCLayerColor {
                 tile.tierBadge->setPosition({12,0});tile.icon->addChild(tile.tierBadge,5);
             }
             if(tile.destination!=destination){tile.destination=destination;tile.root->stopActionByTag(7465);auto* move=CCEaseSineOut::create(CCMoveTo::create(.25f,destination));move->setTag(7465);tile.root->runAction(move);}
-            auto rank=i18n::isKorean()?fmt::format("{}위",value.rank):survivalOrdinal(value.rank);
+            auto rank=value.rank>0?(i18n::isKorean()?fmt::format("{}위",value.rank):survivalOrdinal(value.rank)):std::string("-");
             std::string record;auto color=survivalRankColor(value.rank,value.passing);
             if(result){int delta=0;for(auto const& p:view.result["standings"].asArray().unwrapOr(std::vector<matjson::Value>{}))if(p["participantId"].asString().unwrapOr("")==value.id)delta=static_cast<int>(p["delta"].asInt().unwrapOr(0));
                 if(value.id==view.ownId)delta=static_cast<int>(view.result["actualDelta"].asInt().unwrapOr(delta));
-                record=fmt::format("{} · {:+} LP",rank,delta);color=survivalResultRankColor(value.rank,delta);
+                record=value.rank>0?fmt::format("{} · {:+} LP",rank,delta):text("waiting","WAITING");color=value.rank>0?survivalResultRankColor(value.rank,delta):survivalRankColor(10,true);
             }else record=fmt::format("{} · {}%",rank,rankedScoreText(value.score,view.phase=="TIEBREAK"));
             tile.record->setString(record.c_str());tile.record->setColor(ccc3(color.r,color.g,color.b));ui::fitMenuLabelWidth(tile.record,width-20,.23f,.18f);
         }
@@ -222,7 +222,7 @@ class SurvivalGameLayer final : public CCLayerColor {
         for(auto const& p:completed["players"].asArray().unwrapOr(std::vector<matjson::Value>{})) {
             auto const id=p["participantId"].asString().unwrapOr("");auto const passing=p["qualified"].asBool().unwrapOr(false);
             preview.aliveIds.push_back(id);preview.standings.push_back({id,p["name"].asString().unwrapOr(id),
-                static_cast<int>(p["rank"].asInt().unwrapOr(0)),0,0,p["score"].asDouble().unwrapOr(0),passing,p["kind"].asString().unwrapOr("")=="BOT",false,p["displayedTier"].asString().unwrapOr("UNRANKED")});
+                static_cast<int>(p["rank"].asInt().unwrapOr(0)),0,0,p["score"].asDouble().unwrapOr(0),passing,p["kind"].asString().unwrapOr("")=="BOT",false,p["displayedTier"].asString().unwrapOr("UNRANKED"),numFromString<int>(p["gdAccountId"].asString().unwrapOr("0")).unwrapOr(0)});
         }
         std::stable_sort(preview.standings.begin(),preview.standings.end(),[](auto const& a,auto const& b){return a.rank<b.rank;});
         showParticipants(preview,false);
@@ -285,22 +285,23 @@ public:
         m_grid->setVisible(!mapWindow && !searching);if(m_mapPanel)m_mapPanel->setVisible(mapWindow);
         m_spinner->setVisible(searching);m_spinner->setPosition({getContentSize().width/2,getContentSize().height/2});m_spinner->setScale(2);
         auto const context=preparationContextText(runtime.preparationContext());auto* level=RankedLevelPreparation::get().level();
-        m_resume->setVisible(!result && m_launchedContext==context && runtime.canEnter());m_resume->setEnabled(!m_motion && !elimination);
-        m_continue->setVisible(result);m_continue->setEnabled(!m_motion && !elimination && !runtime.creating());m_surrender->setVisible(!result);m_surrender->setEnabled(!elimination && !m_motion);
-        if(m_force){m_force->setVisible(!result && !mapWindow);m_force->setEnabled(!m_motion && now>=m_eliminationUntil && !runtime.creating());}
+        m_resume->setVisible(!result && m_launchedContext==context && !view.ownEliminated && runtime.canEnter());m_resume->setEnabled(!m_motion && !elimination);
+        m_continue->setVisible(result);m_continue->setEnabled(!m_motion && !elimination && !runtime.creating());m_surrender->setVisible(!result && !view.ownEliminated);m_surrender->setEnabled(!elimination && !m_motion);
+        if(m_force){m_force->setVisible(view.debug && !view.online && !result && !mapWindow);m_force->setEnabled(!m_motion && now>=m_eliminationUntil && !runtime.creating());}
         for(auto* option:{m_ldm,m_shake,m_jukeboxButton}){option->setVisible(mapWindow);option->setEnabled(!m_motion && !elimination && level && static_cast<int>(level->m_levelID)==view.map.levelId);}
         if(level && m_optionsContext!=context){m_optionsContext=context;RankedRoundPreparation::get().setLowDetail(m_lowDetail);level->m_disableShakeToggled=m_disableShake;}
         m_ldmLabel->setString(fmt::format("LDM: {}",m_lowDetail?"ON":"OFF").c_str());m_shakeLabel->setString(fmt::format("{}: {}",text("disable-shake","Disable Shake"),m_disableShake?"ON":"OFF").c_str());
         ui::fitMenuLabelWidth(m_shakeLabel,m_shake->getContentSize().width-12,.29f,.20f);
         if(!elimination)m_heading->setString(result?fmt::format("SURVIVAL · {}",i18n::isKorean()?fmt::format("{}위",view.result["rank"].asInt().unwrapOr(0)):survivalOrdinal(static_cast<int>(view.result["rank"].asInt().unwrapOr(0)))).c_str():
-            (intro?fmt::format("SURVIVAL · {}",text("survival-match-roster","16 PLAYERS")):
+            (intro?fmt::format("SURVIVAL · {} {}",view.playerCount,i18n::isKorean()?"명":"PLAYERS"):
             fmt::format("SURVIVAL · {}",view.phase=="TIEBREAK"?"DEATH MATCH":view.phase=="FINAL"?"FINAL":("ROUND "+std::to_string(view.roundNumber)))).c_str());
         auto const group=view.group=="RED_BRONZE"?std::string("RED-BRONZE"):view.group;
         m_map->setString((view.map.levelId>0?fmt::format("{} · GD #{}",group,view.map.levelId):group).c_str());
         std::string status;
         if(!view.error.empty())status=i18n::text(view.error,view.error);
         else if(result)status=fmt::format("{:+} LP · {} LP",view.result["actualDelta"].asInt().unwrapOr(0),view.result["profileAfter"]["lp"].asInt().unwrapOr(0));
-        else if(intro)status=text("survival-match-intro","ALL 16 PARTICIPANTS HAVE JOINED");
+        else if(intro)status=fmt::format("{} · {} / {}",text("matchmaking","MATCHMAKING"),view.playerCount,view.playerCount);
+        else if(view.resultPending)status=text("survival-result-pending","RANK FIXED · SETTLING LP...");
         else if(view.state=="MAP_SELECTION")status=view.mapError.empty()?text("survival-selecting-map","SELECTING A SERVER MAP..."):text("survival-map-retry","MAP SEARCH FAILED · RETRYING...");
         else if(!preparation.mapReady)status=text("downloading-map","DOWNLOADING MAP...");
         else if(!preparation.audioReady)status=text("downloading-audio","DOWNLOADING AUDIO...");
@@ -309,13 +310,18 @@ public:
         m_status->setString(status.c_str());ui::fitMenuLabelWidth(m_status,getContentSize().width-24,.28f,.20f);
         if(!elimination){if(mapWindow)showMapInformation(view);else showParticipants(view,result);}
         if(m_confirmation && (result || view.state=="CANCELLED" || m_confirmationContext!=view.id+":"+view.roundKey+":"+std::to_string(view.mapGeneration))){if(auto popup=m_confirmation->lock())popup->cancel();m_confirmation.reset();}
-        if(view.state=="PREPARING" && RankedRoundPreparation::get().ready())runtime.assetsReady(level);
+        if(!view.ownAssetsReady && RankedRoundPreparation::get().ready())runtime.assetsReady(level);
         auto const jukeboxOpen=m_jukebox && m_jukebox->lock() && m_jukebox->lock()->getParent();
         if(intro && now>=m_introUntil && !m_confirmation && !debugPopup)runtime.presentationComplete();
         if(!m_motion && !elimination && !m_confirmation && !jukeboxOpen && !debugPopup && !runtime.creating() &&
             mapWindow && m_mapShownAt!=std::chrono::steady_clock::time_point{} && now>=m_mapShownAt+std::chrono::milliseconds(650) &&
             runtime.canEnter() && m_launchedContext!=context)queueNativeLaunch();
         if(result && !elimination)beginResultMotion();
+        if(view.online && result && !m_motion && !elimination){
+            if(m_returnAt==std::chrono::steady_clock::time_point{})m_returnAt=now+std::chrono::seconds(3);
+            if(now>=m_returnAt && !runtime.creating())runtime.acknowledge();
+        }
+        if(view.state=="CANCELLED" && !result && !runtime.creating())runtime.acknowledge();
     }
     void onEnter() override {
         CCLayerColor::onEnter();

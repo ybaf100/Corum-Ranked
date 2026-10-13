@@ -3,6 +3,7 @@
 #include "RankedLevelPreparation.hpp"
 #include "RankedRoundPreparation.hpp"
 #include "SurvivalMapValidation.hpp"
+#include "ui/RankedTranslations.hpp"
 #include "domain/Sha256.hpp"
 #include "domain/ModUpdatePolicy.hpp"
 #include <Geode/utils/random.hpp>
@@ -11,19 +12,18 @@
 using namespace geode::prelude;
 namespace corum::ranked {
 namespace {
-constexpr bool debugTransport =
-#if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
-    true;
-#else
-    false;
-#endif
 std::int64_t localNow() { return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count(); }
-std::string endpoint(std::string const& path) {
+std::string onlineEndpoint(std::string const& path) { return "https://corum-ranked.onrender.com/api/ranked/survival/online"+path; }
+std::string queueEndpoint(std::string const& path) { return "https://corum-ranked.onrender.com/api/ranked/survival/queue"+path; }
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
-    return "https://corum-ranked.onrender.com/api/ranked/survival/debug"+path;
-#else
-    (void)path;return {};
+std::string debugEndpoint(std::string const& path) { return "https://corum-ranked.onrender.com/api/ranked/survival/debug"+path; }
 #endif
+void openRecoveredGame() {
+    queueInMainThread([] {
+        auto* scene=CCDirector::sharedDirector()->getRunningScene();
+        if(scene && scene->getChildByID("survival-online-queue"_spr))return;
+        if(RankedRuntime::get().view().stage==RuntimeStage::Ready && SurvivalRuntime::get().active())showSurvivalGame();
+    });
 }
 web::WebRequest request(std::string const& session) {
     web::WebRequest http;http.header("Authorization","Bearer "+session);http.followRedirects(false);http.timeout(std::chrono::seconds(10));return http;
@@ -44,45 +44,136 @@ SurvivalRuntime& SurvivalRuntime::get() {
 bool SurvivalRuntime::current(std::uint64_t generation,std::string const& session) const {
     return generation==m_generation && session==m_session && session==RankedRuntime::get().spectatorLiveSessionToken();
 }
-void SurvivalRuntime::update(float dt) { m_tick-=dt;if(m_tick>0)return;m_tick=.1f;tick(); }
+void SurvivalRuntime::update(float dt) { m_tick-=dt;if(m_tick>0)return;
+m_tick=.1f;tick(); }
 void SurvivalRuntime::tick() {
     auto const token=RankedRuntime::get().spectatorLiveSessionToken();
     if(token!=m_session) {
-        ++m_generation;m_controlRequest.cancel();m_pollRequest.cancel();m_eventRequest.cancel();m_recoverRequest.cancel();
-        m_session=token;m_creating=m_pollBusy=m_eventBusy=m_recoverBusy=false;m_view={};m_prepared={};m_events.clear();m_attempt.clear();
+        ++m_generation;m_controlRequest.cancel();m_pollRequest.cancel();m_eventRequest.cancel();m_recoverRequest.cancel();m_queueRequest.cancel();
+        m_lastServerNow=0;m_session=token;m_creating=m_pollBusy=m_eventBusy=m_recoverBusy=m_queuePollBusy=false;m_view={};m_queue={};++m_queueGeneration;m_prepared={};m_events.clear();m_attempt.clear();
         m_attemptContext=m_enteredContext=m_readyContext="";m_nextPoll={};
-        m_needRecovery=debugTransport && !token.empty() && rankedBuildChannel()=="debug";m_recoverRetryAt={};
+        m_needRecovery=!token.empty();m_recoverRetryAt={};m_ackRetryAt={};
         if(m_needRecovery)recover();
     }
     if(token.empty())return;
     RankedRuntime::get().updateSessionHeartbeat();
-    if(!active()) {if(m_needRecovery && std::chrono::steady_clock::now()>=m_recoverRetryAt)recover();return;}
+    if(!active()) {
+        if(m_queue.status=="MATCHED" && !m_queue.matchId.empty())loadOnlineMatch(m_queue.matchId);
+        else if(queueing() && std::chrono::steady_clock::now()>=m_nextQueuePoll)pollQueue();
+        else if(m_needRecovery && std::chrono::steady_clock::now()>=m_recoverRetryAt)recover();
+        return;
+    }
     if(acquiring())RankedRoundPreparation::get().pump();
     pumpEvents();
     if(std::chrono::steady_clock::now()>=m_nextPoll)poll();
 }
+std::string SurvivalRuntime::matchEndpoint(std::string const& path) const {
+#if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
+    if(m_view.debug && !m_view.online)return debugEndpoint(path);
+#endif
+    return onlineEndpoint(path);
+}
 void SurvivalRuntime::recover() {
-    if(!debugTransport || m_recoverBusy || m_creating || m_session.empty() || rankedBuildChannel()!="debug")return;
+    if(m_recoverBusy || m_creating || m_session.empty())return;
     m_needRecovery=true;m_recoverBusy=true;auto const generation=m_generation;auto const session=m_session;
-    m_recoverRequest.spawn(request(session).get(endpoint("/active")),[this,generation,session](web::WebResponse response) {
-        if(!current(generation,session))return;m_recoverBusy=false;
+    m_recoverRequest.spawn(request(session).get(onlineEndpoint("/active")),[this,generation,session](web::WebResponse response) {
+        if(!current(generation,session))return;
+        m_recoverBusy=false;
         if(response.code()<200 || response.code()>=300){m_recoverRetryAt=std::chrono::steady_clock::now()+std::chrono::seconds(2);return;}
-        m_needRecovery=false;
-        auto const root=response.json().unwrapOr(matjson::Value());if(root["match"].isObject()) {
-            observe(root["match"]);queueInMainThread([] {if(RankedRuntime::get().view().stage==RuntimeStage::Ready && SurvivalRuntime::get().active())showSurvivalGame();});
-        }
+        m_needRecovery=false;auto const root=response.json().unwrapOr(matjson::Value());
+        if(root["match"].isObject()){observe(root["match"]);openRecoveredGame();return;}
+        observeQueue(root["queue"]);
+        if(queueing()){queueInMainThread([]{if(SurvivalRuntime::get().queueing() && RankedRuntime::get().view().stage==RuntimeStage::Ready)showSurvivalQueue();});return;}
+        recoverLegacyDebug();
     });
+}
+void SurvivalRuntime::recoverLegacyDebug() {
+#if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
+    if(rankedBuildChannel()!="debug" || m_recoverBusy || m_creating || m_session.empty() || active() || queueing())return;
+    m_recoverBusy=true;auto const generation=m_generation;auto const session=m_session;
+    m_recoverRequest.spawn(request(session).get(debugEndpoint("/active")),[this,generation,session](web::WebResponse response) {
+        if(!current(generation,session))return;
+        m_recoverBusy=false;
+        if(response.code()<200 || response.code()>=300){m_needRecovery=true;m_recoverRetryAt=std::chrono::steady_clock::now()+std::chrono::seconds(2);return;}
+        auto const root=response.json().unwrapOr(matjson::Value());if(root["match"].isObject()){observe(root["match"]);openRecoveredGame();}
+    });
+#endif
+}
+int SurvivalRuntime::queueWaitingSeconds() const {
+    auto const start=parseIso8601Millis(m_queue.waitingSince);
+    return queueing() && start ? static_cast<int>(std::max<std::int64_t>(0,m_clock.serverNowMillis(localNow())-*start)/1000):0;
+}
+void SurvivalRuntime::observeQueue(matjson::Value const& root) {
+    if(!root.isObject() || !root["status"].isString())return;
+    m_queue.status=root["status"].asString().unwrapOr("LEFT");m_queue.matchId=root["matchId"].asString().unwrapOr("");
+    m_queue.players=static_cast<int>(root["players"].asInt().unwrapOr(m_queue.players));
+    m_queue.minimumPlayers=static_cast<int>(root["minimumPlayers"].asInt().unwrapOr(8));m_queue.maximumPlayers=static_cast<int>(root["maximumPlayers"].asInt().unwrapOr(16));
+    m_queue.waitingSince=root["waitingSince"].asString().unwrapOr(m_queue.waitingSince);m_queue.enabled=root["enabled"].asBool().unwrapOr(m_queue.enabled);
+    m_clock.observe(root["serverNow"].asString().unwrapOr(""),localNow());m_queue.error.clear();
+    if(m_queue.status=="MATCHED" && !m_queue.matchId.empty())loadOnlineMatch(m_queue.matchId);
+}
+void SurvivalRuntime::loadOnlineMatch(std::string const& id) {
+    if(active() || m_pollBusy || m_session.empty() || std::chrono::steady_clock::now()<m_nextPoll)return;
+    m_pollBusy=true;auto const generation=m_generation;auto const session=m_session;
+    m_pollRequest.spawn(request(session).get(onlineEndpoint("/matches/"+id)),[this,generation,session,id](web::WebResponse response) {
+        if(!current(generation,session) || m_queue.matchId!=id)return;
+        m_pollBusy=false;
+        if(response.code()>=200&&response.code()<300){observe(response.json().unwrapOr(matjson::Value()));openRecoveredGame();}
+        else {m_queue.error="Survival server connection failed. Retrying...";m_nextPoll=std::chrono::steady_clock::now()+std::chrono::seconds(2);}
+    });
+}
+void SurvivalRuntime::pollQueue() {
+    if(m_queuePollBusy || m_creating || m_session.empty() || !queueing())return;
+    m_queuePollBusy=true;auto const generation=m_generation,epoch=m_queueGeneration;auto const session=m_session;
+    m_queueRequest.spawn(request(session).post(queueEndpoint("/heartbeat")),[this,generation,epoch,session](web::WebResponse response){
+        if(!current(generation,session) || epoch!=m_queueGeneration)return;
+        m_queuePollBusy=false;
+        m_nextQueuePoll=std::chrono::steady_clock::now()+std::chrono::seconds(2);
+        if(response.code()>=200&&response.code()<300)observeQueue(response.json().unwrapOr(matjson::Value()));
+        else {m_queue.error="Survival server connection failed. Retrying...";m_nextQueuePoll=std::chrono::steady_clock::now()+std::chrono::seconds(2);}
+    });
+}
+void SurvivalRuntime::queueAction(std::string const& path,matjson::Value body) {
+    if(m_creating || m_session.empty() || active())return;
+    ++m_queueGeneration;m_queueRequest.cancel();m_queuePollBusy=false;m_creating=true;m_recoverRequest.cancel();m_recoverBusy=false;m_needRecovery=false;
+    auto http=request(m_session);http.bodyJSON(body);auto const generation=m_generation,epoch=m_queueGeneration;auto const session=m_session;
+    m_controlRequest.spawn(http.post(queueEndpoint(path)),[this,generation,epoch,session,path](web::WebResponse response){
+        if(!current(generation,session) || epoch!=m_queueGeneration)return;
+        m_creating=false;
+        auto const root=response.json().unwrapOr(matjson::Value());
+        if(response.code()>=200&&response.code()<300){observeQueue(root);return;}
+        if(RankedRuntime::get().handleSurvivalAdmissionError(response))return;
+        m_queue.error=root["message"].asString().unwrapOr("Survival server connection failed. Retrying...");
+        if(path=="/join")m_queue.status="LEFT";
+        m_needRecovery=response.code()==0 || response.code()>=500 || response.code()==409;m_recoverRetryAt={};m_nextQueuePoll={};
+    });
+}
+void SurvivalRuntime::joinQueue() {
+    tick();if(active()){showSurvivalGame();return;}if(queueing()){showSurvivalQueue();return;}
+    matjson::Value body;if(m_creating || !RankedRuntime::get().view().survival.onlineAvailable || !RankedRuntime::get().prepareSurvivalAdmission(body))return;
+    m_queue.status="JOINING";m_queue.error.clear();queueAction("/join",std::move(body));showSurvivalQueue();
+}
+void SurvivalRuntime::leaveQueue() { if(queueing() && !m_creating)queueAction("/leave",matjson::Value()); }
+std::string SurvivalRuntime::surrenderMessage() const {
+    if(!m_view.online)return i18n::text("survival-surrender-warning","End this match using this round's recorded ranking?");
+    return fmt::format(fmt::runtime(i18n::text("survival-online-surrender","End as {} in this round, settle LP and return to the lobby?")),
+        i18n::isKorean()?fmt::format("{}위",m_view.roundPlayerCount):survivalOrdinal(m_view.roundPlayerCount));
 }
 void SurvivalRuntime::observe(matjson::Value const& root) {
     auto const id=root["matchId"].asString().unwrapOr("");auto const revision=root["revision"].asInt().unwrapOr(0);
+    auto const serverTime=parseIso8601Millis(root["serverNow"].asString().unwrapOr(""));
+    if(id==m_view.id && revision==static_cast<std::int64_t>(m_view.revision) && serverTime && *serverTime<m_lastServerNow)return;
     if(id.empty() || revision<1 || (!m_view.id.empty() && id!=m_view.id) || (id==m_view.id && revision<static_cast<std::int64_t>(m_view.revision)))return;
+    if(m_view.id.empty())m_lastServerNow=0;
     auto const oldContext=preparationContext();
     m_view.id=id;m_view.revision=static_cast<std::uint64_t>(revision);m_view.state=root["state"].asString().unwrapOr("");
     m_view.phase=root["phase"].asString().unwrapOr("");m_view.roundKey=root["roundKey"].asString().unwrapOr("");
     m_view.presentationGate=root["presentationGate"].asString().unwrapOr("");
     m_view.group=root["difficultyGroup"].asString().unwrapOr("");m_view.ownId=root["myParticipantId"].asString().unwrapOr("human");
+    m_view.online=root["online"].asBool().unwrapOr(false);m_view.resultPending=root["myResultPending"].asBool().unwrapOr(false);
     m_view.debug=root["debug"].asBool().unwrapOr(false);m_view.mapGeneration=static_cast<int>(root["mapGeneration"].asInt().unwrapOr(0));
-    m_view.roundNumber=m_view.phase=="ROUND_1"?1:m_view.phase=="ROUND_2"?2:m_view.phase=="ROUND_3"?3:4;
+    m_view.roundNumber=static_cast<int>(root["roundNumber"].asInt().unwrapOr(m_view.phase=="ROUND_1"?1:m_view.phase=="ROUND_2"?2:m_view.phase=="ROUND_3"?3:4));
+    m_view.playerCount=static_cast<int>(root["playerCount"].asInt().unwrapOr(16));m_view.roundPlayerCount=static_cast<int>(root["roundPlayerCount"].asInt().unwrapOr(16));
     m_view.targetQualifiers=static_cast<int>(root["targetQualifiers"].asInt().unwrapOr(0));
     m_view.startsAt=root["startsAt"].asString().unwrapOr("");m_view.endsAt=root["endsAt"].asString().unwrapOr("");
     m_view.certificate=root["map"];m_view.result=root["result"];
@@ -98,7 +189,7 @@ void SurvivalRuntime::observe(matjson::Value const& root) {
     auto const& map=root["map"];m_view.map={static_cast<int>(map["levelId"].asInt().unwrapOr(0)),static_cast<int>(map["stars"].asInt().unwrapOr(0)),
         static_cast<int>(map["levelVersion"].asInt().unwrapOr(0)),map["demon"].asBool().unwrapOr(false)?demon(map["demonDifficulty"].asString().unwrapOr("")):SurvivalDemon::None,
         map["automatic"].asBool().unwrapOr(true),map["platformer"].asBool().unwrapOr(true)};
-    m_clock.observe(root["serverNow"].asString().unwrapOr(""),localNow());
+    if(serverTime && *serverTime>=m_lastServerNow){m_lastServerNow=*serverTime;m_clock.observe(root["serverNow"].asString().unwrapOr(""),localNow());}
     m_view.cutoff=root["cutoffScore"].isNumber()?std::optional(root["cutoffScore"].asDouble().unwrapOr(0)):std::nullopt;
     m_view.first=root["finalFirstScore"].isNumber()?std::optional(root["finalFirstScore"].asDouble().unwrapOr(0)):std::nullopt;
     m_view.standings.clear();auto participants=root["participants"].asArray().unwrapOr(std::vector<matjson::Value>{});
@@ -114,11 +205,12 @@ void SurvivalRuntime::observe(matjson::Value const& root) {
         m_view.standings.push_back({pid,info==participants.end()?pid:(*info)["name"].asString().unwrapOr(pid),
             static_cast<int>(p["rank"].asInt().unwrapOr(0)),static_cast<int>(p["attemptsUsed"].asInt().unwrapOr(0)),static_cast<int>(p["attemptsFinished"].asInt().unwrapOr(0)),
             p["score"].asDouble().unwrapOr(0),p["passing"].asBool().unwrapOr(false),info!=participants.end()&&(*info)["kind"].asString().unwrapOr("")=="BOT",p["waitingForOthers"].asBool().unwrapOr(false),
-            info!=participants.end()?(*info)["displayedTier"].asString().unwrapOr("UNRANKED"):"UNRANKED"});
+            info!=participants.end()?(*info)["displayedTier"].asString().unwrapOr("UNRANKED"):"UNRANKED",
+            info!=participants.end()?numFromString<int>((*info)["gdAccountId"].asString().unwrapOr("0")).unwrapOr(0):0});
     }
-    m_view.ownAssetsReady=m_view.ownEntered=false;
+    m_view.ownAssetsReady=m_view.ownEntered=m_view.ownAbsent=false;
     for(auto const& p:root["preparation"].asArray().unwrapOr(std::vector<matjson::Value>{}))if(p["participantId"].asString().unwrapOr("")==m_view.ownId) {
-        m_view.ownAssetsReady=p["assetsReady"].asBool().unwrapOr(false);m_view.ownEntered=p["entered"].asBool().unwrapOr(false);
+        m_view.ownAssetsReady=p["assetsReady"].asBool().unwrapOr(false);m_view.ownEntered=p["entered"].asBool().unwrapOr(false);m_view.ownAbsent=p["absent"].asBool().unwrapOr(false);
     }
     m_view.activeAttemptId=root["myActiveAttemptId"].asString().unwrapOr("");m_view.activeAttemptProgress=root["myActiveAttemptProgress"].asDouble().unwrapOr(0);
     if(oldContext!=preparationContext()) {
@@ -128,12 +220,20 @@ void SurvivalRuntime::observe(matjson::Value const& root) {
     m_view.error.clear();Mod::get()->setSavedValue("survival-debug-match",id);
 }
 void SurvivalRuntime::poll() {
-    if(m_pollBusy || !active() || m_session.empty())return;m_pollBusy=true;
+    if(m_pollBusy || !active() || m_session.empty())return;
+    m_pollBusy=true;
     auto const generation=m_generation;auto const session=m_session;auto const id=m_view.id;
-    m_pollRequest.spawn(request(session).get(endpoint("/matches/"+id)),[this,generation,session,id](web::WebResponse response) {
-        if(!current(generation,session) || m_view.id!=id)return;m_pollBusy=false;m_nextPoll=std::chrono::steady_clock::now()+std::chrono::milliseconds(250);
+    m_pollRequest.spawn(request(session).get(matchEndpoint("/matches/"+id)+(m_view.online?"?roundKey="+m_view.roundKey+"&mapGeneration="+std::to_string(m_view.mapGeneration):"")),[this,generation,session,id](web::WebResponse response) {
+        if(!current(generation,session) || m_view.id!=id)return;
+        m_pollBusy=false;m_nextPoll=std::chrono::steady_clock::now()+std::chrono::milliseconds(m_view.online?500:250);
         if(response.code()>=200&&response.code()<300)observe(response.json().unwrapOr(matjson::Value()));
-        else m_view.error="Survival server connection failed. Retrying...";
+        else {
+            auto const message=response.json().unwrapOr(matjson::Value())["message"].asString().unwrapOr("");
+            if(m_view.online && response.code()==403 && message=="Not the online Survival participant"){
+                ++m_generation;m_eventRequest.cancel();m_controlRequest.cancel();m_eventBusy=m_creating=false;
+                m_view={};m_queue={};m_prepared={};m_events.clear();m_needRecovery=true;m_recoverRetryAt={};
+            }else m_view.error="Survival server connection failed. Retrying...";
+        }
     });
 }
 LevelPreparationContext SurvivalRuntime::preparationContext() const {
@@ -167,13 +267,14 @@ bool SurvivalRuntime::consumeNativeLaunch(GJGameLevel* level) {
 }
 bool SurvivalRuntime::canEnter() const {
     if(!m_prepared.valid() || m_prepared!=preparationContext() || m_session.empty())return false;
-    auto own=std::find_if(m_view.standings.begin(),m_view.standings.end(),[&](auto const& p){return p.id==m_view.ownId;});
+    if(m_view.online && !m_view.ownAssetsReady)return false;
     if(attemptLimitReached())return false;
-    return m_view.state=="ENTERING" || m_view.state=="COUNTDOWN" || canPlay();
+    return !m_view.ownEliminated && (m_view.state=="ENTERING" || m_view.state=="COUNTDOWN" || m_view.state=="PLAYING");
 }
 bool SurvivalRuntime::canPlay() const {
     return m_view.state=="PLAYING" && !m_view.ownEliminated && !m_session.empty() &&
-        m_session==RankedRuntime::get().spectatorLiveSessionToken() && remainingMs()>0;
+        m_session==RankedRuntime::get().spectatorLiveSessionToken() && remainingMs()>0 &&
+        (!m_view.online || (m_view.ownAssetsReady && m_view.ownEntered && !m_view.ownAbsent));
 }
 bool SurvivalRuntime::attemptLimitReached() const {
     if(m_view.phase!="TIEBREAK")return false;
@@ -196,8 +297,9 @@ void SurvivalRuntime::pumpEvents() {
     m_eventBusy=true;auto const body=m_events.front();auto http=request(m_session);http.bodyJSON(body);
     auto const generation=m_generation;auto const session=m_session;auto const id=m_view.id;auto const eventId=body["eventId"].asString().unwrapOr("");
     auto const eventType=body["type"].asString().unwrapOr("");
-    m_eventRequest.spawn(http.post(endpoint("/matches/"+id+"/events")),[this,generation,session,id,eventId,eventType](web::WebResponse response) {
-        if(!current(generation,session) || m_view.id!=id)return;m_eventBusy=false;
+    m_eventRequest.spawn(http.post(matchEndpoint("/matches/"+id+"/events")),[this,generation,session,id,eventId,eventType](web::WebResponse response) {
+        if(!current(generation,session) || m_view.id!=id)return;
+        m_eventBusy=false;
         if(response.code()>=200 && response.code()<300) {
             if(!m_events.empty() && m_events.front()["eventId"].asString().unwrapOr("")==eventId)m_events.pop_front();observe(response.json().unwrapOr(matjson::Value()));m_retryAt={};
         } else if(response.code()==409 || response.code()==400) {
@@ -208,8 +310,9 @@ void SurvivalRuntime::pumpEvents() {
 }
 void SurvivalRuntime::assetsReady(GJGameLevel* level) {
     auto const key=preparationContextText(preparationContext());
-    if(m_view.state!="PREPARING" || m_readyContext==key || !RankedRoundPreparation::get().ready() || !validateNative(level))return;
-    auto body=event("ASSETS_READY");if(!RankedRuntime::get().prepareSurvivalEnvironment(body))return;body["certificate"]=m_view.certificate;m_readyContext=key;enqueue(std::move(body));
+    if((m_view.state!="PREPARING" && !(m_view.online && !m_view.ownAssetsReady && (m_view.state=="ENTERING" || m_view.state=="COUNTDOWN" || m_view.state=="PLAYING"))) || m_readyContext==key || !RankedRoundPreparation::get().ready() || !validateNative(level))return;
+    auto body=event("ASSETS_READY");if(!RankedRuntime::get().prepareSurvivalEnvironment(body))return;
+    body["certificate"]=m_view.certificate;m_readyContext=key;enqueue(std::move(body));
 }
 void SurvivalRuntime::preparationFailed(std::string const& reason) {
     if(m_view.state!="PREPARING" || !m_readyContext.empty())return;
@@ -218,7 +321,8 @@ void SurvivalRuntime::preparationFailed(std::string const& reason) {
 void SurvivalRuntime::sceneEntered(int levelId) {
     auto const key=preparationContextText(preparationContext());
     if(!gameplayLevel(levelId) || m_enteredContext==key)return;
-    if(m_view.state=="ENTERING") {auto body=event("ENTERED");if(!RankedRuntime::get().prepareSurvivalEnvironment(body))return;enqueue(std::move(body));}
+    if(m_view.state=="ENTERING" || (m_view.online && !m_view.ownEntered && (m_view.state=="COUNTDOWN" || m_view.state=="PLAYING"))) {auto body=event("ENTERED");if(!RankedRuntime::get().prepareSurvivalEnvironment(body))return;
+    enqueue(std::move(body));}
     m_enteredContext=key;
     // A killed process leaves a durable open attempt. Close its accepted record
     // before the fresh native scene can start another one, including in DM.
@@ -238,7 +342,8 @@ bool SurvivalRuntime::beginAttempt() {
 void SurvivalRuntime::progress(double value) {
     if(!canPlay() || m_attempt.empty() || !std::isfinite(value) || value<0 || value>100)return;
     m_attemptBest=std::max(m_attemptBest,value);auto const now=std::chrono::steady_clock::now();
-    if(now<m_nextProgress || m_attemptBest<=m_lastProgress)return;m_nextProgress=now+std::chrono::milliseconds(250);m_lastProgress=m_attemptBest;
+    if(now<m_nextProgress || m_attemptBest<=m_lastProgress)return;
+    m_nextProgress=now+std::chrono::milliseconds(250);m_lastProgress=m_attemptBest;
     if(m_events.size()>1 && m_events.back()["type"].asString().unwrapOr("")=="PROGRESS" && m_events.back()["attemptId"].asString().unwrapOr("")==m_attempt) {
         m_events.back()["progress"]=m_attemptBest;return;
     }
@@ -251,16 +356,23 @@ void SurvivalRuntime::endAttempt(double value) {
 }
 void SurvivalRuntime::surrender() { if(active() && m_view.state!="FINAL_RESULT" && m_view.state!="CANCELLED")enqueue(event("FORFEIT")); }
 void SurvivalRuntime::presentationComplete() {
-    if(!active() || m_view.presentationGate.empty() || m_view.result.isObject())return;
+    if(m_view.online || !active() || m_view.presentationGate.empty() || m_view.result.isObject())return;
     auto const key=m_view.id+":"+m_view.roundKey+":"+std::to_string(m_view.mapGeneration)+":"+m_view.presentationGate;
-    if(m_presentationContext==key)return;m_presentationContext=key;enqueue(event("PRESENTATION_COMPLETE"));
+    if(m_presentationContext==key)return;
+    m_presentationContext=key;enqueue(event("PRESENTATION_COMPLETE"));
 }
 void SurvivalRuntime::acknowledge() {
-    if(!m_view.result.isObject() || m_creating)return;m_creating=true;auto const generation=m_generation;auto const session=m_session;auto const id=m_view.id;
-    m_controlRequest.spawn(request(session).post(endpoint("/matches/"+id+"/acknowledge")),[this,generation,session,id](web::WebResponse response) {
-        if(!current(generation,session) || m_view.id!=id)return;m_creating=false;
-        if(response.code()<200 || response.code()>=300){m_view.error="Survival server connection failed. Retrying...";return;}
-        ++m_generation;m_pollRequest.cancel();m_eventRequest.cancel();m_pollBusy=m_eventBusy=false;m_view={};m_events.clear();m_prepared={};
+    if((!m_view.result.isObject() && m_view.state!="CANCELLED") || m_creating || std::chrono::steady_clock::now()<m_ackRetryAt)return;
+    m_creating=true;auto const generation=m_generation;auto const session=m_session;auto const id=m_view.id;
+    m_controlRequest.spawn(request(session).post(matchEndpoint("/matches/"+id+"/acknowledge")),[this,generation,session,id](web::WebResponse response) {
+        if(!current(generation,session) || m_view.id!=id)return;
+        m_creating=false;
+        if(response.code()<200 || response.code()>=300){
+            m_view.error="Survival server connection failed. Retrying...";
+            auto const wait=response.json().unwrapOr(matjson::Value())["retryAfterSeconds"].asInt().unwrapOr(2);
+            m_ackRetryAt=std::chrono::steady_clock::now()+std::chrono::seconds(std::clamp<std::int64_t>(wait,2,60));return;
+        }
+        ++m_generation;m_pollRequest.cancel();m_eventRequest.cancel();m_pollBusy=m_eventBusy=false;m_view={};m_queue={};m_events.clear();m_prepared={};
         Mod::get()->setSavedValue("survival-debug-match",std::string{});RankedRuntime::get().fetchSurvivalProfile();RankedRuntime::get().fetchAchievements();
     });
 }
@@ -276,13 +388,14 @@ std::optional<ScoreAnimationInput> SurvivalRuntime::scoreAnimation() const {
 }
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
 void SurvivalRuntime::start(std::string password,std::string group,int forceRank) {
-    tick();if(active()){showSurvivalGame();return;}if(m_creating || m_session.empty())return;
+    tick();if(active()){showSurvivalGame();return;}if(queueing()){showSurvivalQueue();return;}if(m_creating || m_session.empty())return;
     matjson::Value body;if(!RankedRuntime::get().prepareSurvivalDebugAdmission(body))return;
     body["password"]=std::move(password);body["requestId"]=utils::random::generateUUID();body["averageGroup"]=std::move(group);if(forceRank>0)body["forceRank"]=forceRank;
     auto http=request(m_session);http.timeout(std::chrono::seconds(70));http.bodyJSON(body);m_creating=true;
     auto const generation=m_generation;auto const session=m_session;
-    m_controlRequest.spawn(http.post(endpoint("/matches")),[this,generation,session](web::WebResponse response) {
-        if(!current(generation,session))return;m_creating=false;
+    m_controlRequest.spawn(http.post(debugEndpoint("/matches")),[this,generation,session](web::WebResponse response) {
+        if(!current(generation,session))return;
+        m_creating=false;
         auto const root=response.json().unwrapOr(matjson::Value());
         if(response.code()<200 || response.code()>=300){
             if(RankedRuntime::get().handleSurvivalAdmissionError(response))return;
@@ -294,13 +407,20 @@ void SurvivalRuntime::start(std::string password,std::string group,int forceRank
     });
 }
 void SurvivalRuntime::forceRank(std::string password,int rank) {
-    if(!active() || m_creating || rank<1 || rank>16)return;matjson::Value body;body["password"]=std::move(password);body["rank"]=rank;
+    if(!active() || !m_view.debug || m_view.online || m_creating || rank<1 || rank>16)return;
+    matjson::Value body;body["password"]=std::move(password);body["rank"]=rank;
     auto http=request(m_session);http.bodyJSON(body);m_creating=true;auto const generation=m_generation;auto const session=m_session;auto const id=m_view.id;
-    m_controlRequest.spawn(http.post(endpoint("/matches/"+id+"/force-rank")),[this,generation,session,id](web::WebResponse response) {
-        if(!current(generation,session) || m_view.id!=id)return;m_creating=false;
+    m_controlRequest.spawn(http.post(debugEndpoint("/matches/"+id+"/force-rank")),[this,generation,session,id](web::WebResponse response) {
+        if(!current(generation,session) || m_view.id!=id)return;
+        m_creating=false;
         if(response.code()>=200 && response.code()<300)observe(response.json().unwrapOr(matjson::Value()));
         else m_view.error="Survival debug rank could not be forced.";
     });
+}
+void SurvivalRuntime::fillBots(std::string password) {
+    if(m_creating || m_queue.status!="QUEUED" || active())return;
+    matjson::Value body;if(!RankedRuntime::get().prepareSurvivalAdmission(body))return;
+    body["password"]=std::move(password);body["requestId"]=utils::random::generateUUID();queueAction("/fill-bots",std::move(body));
 }
 #endif
 }

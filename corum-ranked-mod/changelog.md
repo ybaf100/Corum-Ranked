@@ -1,3 +1,12 @@
+## v0.5.0-beta.68
+
+- Complete public Survival matchmaking with durable, independent queue/status/heartbeat/leave/recovery APIs. Match 16 immediately, or 2–15 after 180 seconds; repeat one-person waits. Preserve admission fencing and cancel waiting entries on Survival OFF while started matches continue.
+- Support confirmed reduced-size targets and reward mapping, plus Final-only 2–3 player games and Round 3 → Final 4–7 player games. Keep 180-second rounds, cutoff ties and repeated .001% three-attempt finals.
+- Fill the public queue to 16 with existing seeded beta67 bots after requester Debug-build/password authorization. Release peers join the same authoritative game. Pay real humans only; continue while any human survives and conclude bot-only games by current-stage records.
+- Connect Release/Debug clients to public queue and native map/audio/SFX preparation, common entry/countdown, actual attempts, retained HUD and result motions. Restore active queue/matches after app restart and session rotation; absent entrants score zero and may return mid-round without pausing server time.
+- Settle each player's immutable elimination rank exactly once. Explicit surrender fixes that round's lowest rank and pays immediately; confirmation names the rank and lobby return. Refresh full final standings in already-paid records without paying again. Preserve Solo LP/MMR, shared AP/GOLD and independent history.
+- Add additive migration 0024, PostgreSQL 16 multi-connection HTTP regression coverage, capability-gated lobby entry and beta68 version synchronization. Reuse unchanged fonts, GD relay, R2 immutable version paths and infrastructure. See [M5 notes](../ranked/docs/survival-m5.md) for rules, API and deployment/verification limits.
+
 ## v0.5.0-beta.67
 
 - Defer Survival native scene construction outside the roster scheduler callback. Recheck exact round/map/scene/modal eligibility; guard concurrent setup and pending native quits. Retain the saved level, origin scene and native texture-cache owner at the entry/return boundary, with setup diagnostics for the reported iOS Round 2 crash.
