@@ -14,8 +14,6 @@ export class SurvivalController {
   public profile(@CurrentSession() session: RankedSessionContext) { return this.survival.profile(session.playerId); }
   @Get("history") @UseGuards(SessionGuard) @Header("Cache-Control", "no-store")
   public history(@CurrentSession() session: RankedSessionContext) { return this.survival.history(session.playerId); }
-  @Post("queue/join") @UseGuards(SessionGuard)
-  public join() { return this.survival.rejectNewMatch(); }
   @Post("debug-bot/match") @UseGuards(SessionGuard)
   public debugMatch() { return this.survival.rejectNewMatch(); }
 }

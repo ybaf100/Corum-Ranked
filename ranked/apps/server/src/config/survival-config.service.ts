@@ -1,6 +1,8 @@
-import { Inject, Injectable, Logger, ServiceUnavailableException, type OnApplicationBootstrap, type OnApplicationShutdown } from "@nestjs/common";
+import { Inject, Injectable, Logger, ServiceUnavailableException,Optional, type OnApplicationBootstrap, type OnApplicationShutdown } from "@nestjs/common";
 import { validateSurvivalConfig, type SurvivalConfig } from "@corum-ranked/rules";
 import { SERVER_ENVIRONMENT, type ServerEnvironment } from "./server-environment.js";
+import { DATABASE,type DatabasePort } from "../database/database.port.js";
+import { lockSurvivalAdmission } from "../survival/survival-admission.js";
 import { ModeAdmissionFence } from "./mode-admission.js";
 
 export interface SurvivalConfigDocument {
@@ -37,7 +39,8 @@ export class SurvivalConfigService implements OnApplicationBootstrap, OnApplicat
   private readonly admission = new ModeAdmissionFence();
   public withAdmission<T>(operation: () => Promise<T>): Promise<T> { return this.admission.run(operation); }
   public constructor(@Inject(SURVIVAL_CONFIG_SOURCE) private readonly source: SurvivalConfigSource,
-    @Inject(SERVER_ENVIRONMENT) private readonly environment: ServerEnvironment) {}
+    @Inject(SERVER_ENVIRONMENT) private readonly environment: ServerEnvironment,
+    @Optional() @Inject(DATABASE)private readonly database?:DatabasePort) {}
   public async onApplicationBootstrap(): Promise<void> {
     await this.refresh();
     this.timer = setInterval(() => { void this.refresh(); }, this.environment.rankedConfigRefreshMs);
@@ -58,6 +61,15 @@ export class SurvivalConfigService implements OnApplicationBootstrap, OnApplicat
       // M3 internal match admission shares this fence. Existing matches use
       // their captured config. M5 must remove its QUEUED rows before publishing.
       return this.withAdmission(async () => {
+        if(this.database)await this.database.transaction(async tx=>{
+          await lockSurvivalAdmission(tx);
+          const current=(await tx.query<{generated_at:Date|string}>("SELECT generated_at FROM sur_mode_state WHERE singleton=TRUE")).rows[0];
+          if(current && new Date(current.generated_at).getTime()>Date.parse(document.generatedAt))throw new Error("Stale Survival configuration generation");
+          await tx.query(`INSERT INTO sur_mode_state(singleton,enabled,generation,generated_at) VALUES(TRUE,$1,$2,$3)
+            ON CONFLICT(singleton) DO UPDATE SET enabled=EXCLUDED.enabled,generation=EXCLUDED.generation,generated_at=EXCLUDED.generated_at`,
+            [document.config.enabled,document.generation,document.generatedAt]);
+          if(!document.config.enabled)await tx.query("UPDATE sur_queue_entries SET status='DISABLED' WHERE status='QUEUED'");
+        });
         this.snapshot = { ...structuredClone(document), fetchedAt: new Date().toISOString() };
         this.error = null; return true;
       });

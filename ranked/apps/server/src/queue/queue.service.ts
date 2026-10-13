@@ -409,7 +409,8 @@ export class QueueService {
       [session.sessionId,session.playerId,now.toISOString(),sessionAliveSince(now)]);
     if (!current.rows.length) throw new UnauthorizedException("Ranked connection expired; enter Ranked again.");
     const survival=await transaction.query(`SELECT 1 FROM sur_match_players p JOIN sur_matches m ON m.id=p.match_id
-      WHERE p.player_id=$1 AND m.state NOT IN ('FINAL_RESULT','CANCELLED') LIMIT 1`,[session.playerId]);
+      WHERE p.player_id=$1 AND m.state NOT IN ('FINAL_RESULT','CANCELLED') AND (p.status='ACTIVE' OR EXISTS(SELECT 1 FROM sur_online_players o WHERE o.match_id=m.id AND o.player_id=$1 AND o.result IS NULL))
+      UNION ALL SELECT 1 FROM sur_queue_entries WHERE player_id=$1 AND status='QUEUED' LIMIT 1`,[session.playerId]);
     if(survival.rows.length)throw new ConflictException("Finish or recover the current Survival game first");
   }
 

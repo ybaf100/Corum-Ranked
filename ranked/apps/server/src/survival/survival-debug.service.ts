@@ -1,9 +1,11 @@
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, Logger, NotFoundException,
   type OnApplicationBootstrap, type OnApplicationShutdown } from "@nestjs/common";
 import { timingSafeEqual } from "node:crypto";
-import { forceSurvivalDebugRank, finishSurvivalDebugOnElimination, reduceSurvivalMatch, survivalBotPlan, survivalBotTiebreak, survivalCurrentRound,
+import { forceSurvivalDebugRank, finishSurvivalDebugOnElimination, survivalCurrentRound,
   survivalDebugLp, survivalLiveView, survivalSettlementInputs, survivalTierForLp, type RandomSource, type SurvivalCommand,
   type SurvivalMatch, type SurvivalRatingProfile } from "@corum-ranked/rules";
+import { driveSurvivalBots } from "./survival-bot-driver.js";
+import { lockSurvivalAdmission } from "./survival-admission.js";
 import { DATABASE, type DatabasePort, type SqlExecutor } from "../database/database.port.js";
 import { RANDOM_SOURCE, SERVER_CLOCK, type ServerClock } from "../common/runtime.module.js";
 import { SERVER_ENVIRONMENT, type ServerEnvironment } from "../config/server-environment.js";
@@ -66,6 +68,7 @@ export class SurvivalDebugService implements OnApplicationBootstrap,OnApplicatio
     await this.survival.profile(session.playerId);
     const creationKey=`sur-debug:${session.playerId}:${body.requestId}`;
     const match=await this.config.withAdmission(()=>this.db.transaction(async tx=>{
+      await lockSurvivalAdmission(tx);
       await tx.query("SELECT id FROM ranked_players WHERE id=$1 FOR UPDATE",[session.playerId]);
       const now=this.clock.now();
       const live=await tx.query(`SELECT id FROM ranked_sessions WHERE id=$1 AND player_id=$2 AND revoked_at IS NULL
@@ -80,7 +83,8 @@ export class SurvivalDebugService implements OnApplicationBootstrap,OnApplicatio
       const busy=await tx.query(`SELECT 1 FROM ranked_queue_entries WHERE player_id=$1 AND status='QUEUED'
         UNION ALL SELECT 1 FROM ranked_matches WHERE (player_a_id=$1 OR player_b_id=$1) AND state NOT IN ('MATCH_RESULT','CANCELLED')
         UNION ALL SELECT 1 FROM ranked_placement_runs WHERE player_id=$1 AND state NOT IN ('PLACEMENT_RESULT','CANCELLED')
-        UNION ALL SELECT 1 FROM sur_match_players WHERE player_id=$1 AND status='ACTIVE' LIMIT 1`,[session.playerId]);
+        UNION ALL SELECT 1 FROM sur_match_players p JOIN sur_matches m ON m.id=p.match_id WHERE p.player_id=$1 AND m.state NOT IN ('FINAL_RESULT','CANCELLED') AND (p.status='ACTIVE' OR EXISTS(SELECT 1 FROM sur_online_players o WHERE o.match_id=m.id AND o.player_id=$1 AND o.result IS NULL))
+        UNION ALL SELECT 1 FROM sur_queue_entries WHERE player_id=$1 AND status='QUEUED' LIMIT 1`,[session.playerId]);
       if(busy.rows.length)throw new ConflictException("Finish or recover the current game first");
       const profile=(await tx.query<{lp:number}>("SELECT lp FROM sur_profiles WHERE player_id=$1 FOR UPDATE",[session.playerId])).rows[0]!;
       const seed=Math.floor(this.random.next()*0x100000000),captured=this.config.getSnapshot();
@@ -103,49 +107,9 @@ export class SurvivalDebugService implements OnApplicationBootstrap,OnApplicatio
     const human=match.players.find(p=>p.playerId===row.human_player_id)!;
     if(row.force_rank!==null)return forceSurvivalDebugRank(match,human.participantId,row.force_rank,now);
     if(human.eliminationStage!==null)return finishSurvivalDebugOnElimination(match,human.participantId,now);
-    const round=survivalCurrentRound(match),own=round.players.find(p=>p.participantId===human.participantId);
-    const bots=match.players.filter(p=>p.kind==="BOT");
-    const active=bots.filter(p=>round.players.some(r=>r.participantId===p.participantId && !r.forfeited));
-    const context={roundKey:round.key,mapGeneration:round.mapGeneration,levelId:round.map?.levelId??0};
-    const apply=(command:SurvivalCommand,at=now)=>{match=reduceSurvivalMatch(match,command,Math.max(match.updatedAt,at));};
-    // Simulated participants certify resources/entry only after the actual human
-    // does. They cannot start the 5s/10s clock ahead of the real native scene or
-    // turn a failed human-only download into a misleading ready participant.
-    if(match.state==="PREPARING" && own?.preparationFailure && own.assetsReadyAt===null) {
-      for(const p of active)apply({type:"PREPARATION_FAILED",...context,participantId:p.participantId,reason:own.preparationFailure});
-    } else if(match.state==="PREPARING" && own?.assetsReadyAt!==null && own?.assetsReadyAt!==undefined) {
-      for(const p of active)apply({type:"ASSETS_READY",...context,participantId:p.participantId,certificate:round.map!});
-    }
-    if(match.state==="ENTERING" && own?.enteredAt!==null && own?.enteredAt!==undefined) {
-      for(const p of active)apply({type:"ENTERED",...context,participantId:p.participantId});
-    }
-    const cursor={...row.driver_state};
-    if(match.state==="PLAYING" && round.startsAt!==null && round.endsAt!==null) {
-      const at=Math.min(now,round.endsAt-1);
-      for(const p of active) {
-        const index=bots.findIndex(b=>b.participantId===p.participantId),key=`${round.key}:${round.mapGeneration}:${p.participantId}`;
-        const used=cursor[key]??-1;
-        if(round.phase==="TIEBREAK") {
-          if(used>=2)continue;
-          for(const [attemptIndex,progress] of survivalBotTiebreak(Number(row.seed),`${round.key}:${round.mapGeneration}`,index).entries()) {
-            if(attemptIndex<=used)continue;
-            const attemptId=`bot-dm-${attemptIndex+1}`;
-            apply({type:"ATTEMPT_START",...context,participantId:p.participantId,attemptId},at);
-            apply({type:"ATTEMPT_END",...context,participantId:p.participantId,attemptId,progress},at);
-            cursor[key]=attemptIndex;
-          }
-        } else {
-          const events=survivalBotPlan(Number(row.seed),`${round.key}:${round.mapGeneration}`,index).filter(e=>e.offsetMs<=now-round.startsAt! && e.index>used);
-          for(const event of events) {
-            if(used<0 && event.index===0)apply({type:"ATTEMPT_START",...context,participantId:p.participantId,attemptId:"bot-normal"},at);
-            apply({type:"PROGRESS",...context,participantId:p.participantId,attemptId:"bot-normal",progress:event.best},at);
-            cursor[key]=event.index;
-          }
-        }
-      }
-    }
-    if(JSON.stringify(cursor)!==JSON.stringify(row.driver_state))await tx.query("UPDATE sur_debug_matches SET driver_state=$2::jsonb WHERE match_id=$1",[match.id,JSON.stringify(cursor)]);
-    return match;
+    const driven=driveSurvivalBots(match,Number(row.seed),row.driver_state,now);
+    if(JSON.stringify(driven.cursor)!==JSON.stringify(row.driver_state))await tx.query("UPDATE sur_debug_matches SET driver_state=$2::jsonb WHERE match_id=$1",[match.id,JSON.stringify(driven.cursor)]);
+    return driven.match;
   }
   public async view(id:string,session:RankedSessionContext) {
     await this.owned(id,session);

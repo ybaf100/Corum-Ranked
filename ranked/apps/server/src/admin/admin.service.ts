@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, Optional } from "@nestjs/common";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { PROGRESSIVE_ACHIEVEMENTS, ONE_SHOT_ACHIEVEMENTS, survivalTierForLp } from "@corum-ranked/rules";
+import { lockSurvivalAdmission } from "../survival/survival-admission.js";
 import { SurvivalConfigService } from "../config/survival-config.service.js";
 import { DATABASE, type DatabasePort, type SqlExecutor } from "../database/database.port.js";
 import { SERVER_ENVIRONMENT, type ServerEnvironment } from "../config/server-environment.js";
@@ -35,6 +36,7 @@ export class AdminService {
     if(common && scope!=="COMMON")throw new BadRequestException("Achievements and audio belong to COMMON");
     if(scope==="COMMON" && ["SET_LP","SET_MMR","SET_BOTH","DELETE_BOTS"].includes(body.action))throw new BadRequestException("Choose a rating mode");
     return this.db.transaction(async tx => {
+      if(scope==="SURVIVAL")await lockSurvivalAdmission(tx);
       await tx.query("SELECT id FROM ranked_players WHERE id=$1 FOR UPDATE",[session.playerId]);
       const now=this.clock.now();
       // Recheck admission inside the mutation transaction: a stale/revoked
@@ -191,7 +193,7 @@ export class AdminService {
       players=found.map(p=>p.id);
     }
     const active=await tx.query(`SELECT 1 FROM sur_match_players p JOIN sur_matches m ON m.id=p.match_id WHERE p.player_id=ANY($1::uuid[])
-      AND (m.state NOT IN ('FINAL_RESULT','CANCELLED') OR EXISTS(SELECT 1 FROM sur_debug_matches d WHERE d.match_id=m.id AND d.settled_at IS NULL AND m.state='FINAL_RESULT')) LIMIT 1`,[players]);
+      AND (m.state NOT IN ('FINAL_RESULT','CANCELLED') OR EXISTS(SELECT 1 FROM sur_debug_matches d WHERE d.match_id=m.id AND d.settled_at IS NULL AND m.state='FINAL_RESULT') OR EXISTS(SELECT 1 FROM sur_online_players o WHERE o.match_id=m.id AND o.player_id=p.player_id AND o.result IS NULL)) LIMIT 1`,[players]);
     if(active.rows.length)throw new ConflictException("Finish and settle Survival games first");
     await tx.query("SELECT player_id FROM sur_profiles WHERE player_id=ANY($1::uuid[]) ORDER BY player_id FOR UPDATE",[players]);
     if(body.action==="SET_LP") {
@@ -204,7 +206,10 @@ export class AdminService {
     if(!["RESET_HISTORY","RESET_DB"].includes(body.action))throw new BadRequestException("Unsupported Survival Admin action");
     const tier=survivalTierForLp(initial,captured.config.tierBands);
     await tx.query("DELETE FROM sur_lp_ledger WHERE player_id=ANY($1::uuid[])",[players]);
-    if(body.action==="RESET_DB")await tx.query("DELETE FROM sur_matches");
+    if(body.action==="RESET_DB"){
+      await tx.query("UPDATE sur_queue_entries SET status='LEFT',matched_match_id=NULL WHERE status IN ('QUEUED','MATCHED')");
+      await tx.query("DELETE FROM sur_matches");
+    }
     await tx.query(`UPDATE sur_profiles SET lp=$2,displayed_tier=$3,demotion_warning=FALSE,lp_reached_at=$4,updated_at=$4,history_visible_since=$4
       WHERE player_id=ANY($1::uuid[])`,[players,initial,tier.tier,now.toISOString()]);
     return {ok:true,scope:"SURVIVAL",reset:body.action==="RESET_DB",resetPlayer:body.action==="RESET_HISTORY",own:players.includes(session.playerId),

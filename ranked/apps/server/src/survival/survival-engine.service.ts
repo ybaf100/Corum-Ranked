@@ -1,6 +1,7 @@
+import { lockSurvivalAdmission,assertSurvivalAdmission } from "./survival-admission.js";
 import { createHash } from "node:crypto";
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, Logger,
-  NotFoundException, ServiceUnavailableException, type OnApplicationBootstrap, type OnApplicationShutdown } from "@nestjs/common";
+  NotFoundException, type OnApplicationBootstrap, type OnApplicationShutdown } from "@nestjs/common";
 import { createSurvivalMatch, reduceSurvivalMatch, survivalCurrentRound, survivalLiveView, survivalMilliPercent,
   type SurvivalCommand, type SurvivalEntrant, type SurvivalMatch } from "@corum-ranked/rules";
 import { ID_GENERATOR, SERVER_CLOCK, type IdGenerator, type ServerClock } from "../common/runtime.module.js";
@@ -62,26 +63,27 @@ export class SurvivalEngineService implements OnApplicationBootstrap, OnApplicat
   /** Trusted admission adapter only. Caller owns the mode admission fence and
    * account/session lock. Virtual LP changes this match snapshot, never a profile. */
   public async createWithin(tx:SqlExecutor,creationKey:string,players:readonly SurvivalAdmissionPlayer[],
-    captured:SurvivalConfigDocument, humanLpSnapshot?:number,presentationControlled=false):Promise<SurvivalMatch> {
-    if(!creationKey.trim() || creationKey.length>200 || players.length!==16 || new Set(players.map(p=>p.participantId)).size!==16)
+    captured:SurvivalConfigDocument, humanLpSnapshot?:number,presentationControlled=false,online=false):Promise<SurvivalMatch> {
+    if(!creationKey.trim() || creationKey.length>200 || (!online && players.length!==16) || (online && (players.length<2||players.length>16)) || new Set(players.map(p=>p.participantId)).size!==players.length)
       throw new BadRequestException("M3 accepts exactly 16 distinct entrants");
-    const requestHash=presentationControlled?hash({players,humanLpSnapshot,presentationControlled}):humanLpSnapshot===undefined?hash(players):hash({players,humanLpSnapshot});
+    await lockSurvivalAdmission(tx);
+    const requestHash=online?hash({players,presentationControlled,online}):presentationControlled?hash({players,humanLpSnapshot,presentationControlled}):humanLpSnapshot===undefined?hash(players):hash({players,humanLpSnapshot});
       // Serialize even two first uses of the same key before its row exists.
       await tx.query("SELECT pg_advisory_xact_lock(hashtext($1))",[`survival-create:${creationKey}`]);
       const existing=(await tx.query<MatchRow>("SELECT * FROM sur_matches WHERE creation_key=$1",[creationKey])).rows[0];
       if(existing){if(existing.request_hash!==requestHash)throw new ConflictException("Survival creation key changed");return existing.snapshot;}
-      if(!captured.config.enabled)throw new ServiceUnavailableException({code:"SURVIVAL_DISABLED",message:"Survival is disabled"});
+      await assertSurvivalAdmission(tx,captured);
       const humans=players.filter((p):p is Extract<SurvivalAdmissionPlayer,{kind:"HUMAN"}>=>p.kind==="HUMAN");
-      const profiles=await tx.query<{player_id:string;lp:number;displayed_tier:string;gd_username:string}>(
-        `SELECT sp.player_id,sp.lp,sp.displayed_tier,p.gd_username FROM sur_profiles sp JOIN ranked_players p ON p.id=sp.player_id
+      const profiles=await tx.query<{player_id:string;lp:number;displayed_tier:string;gd_username:string;gd_account_id:string}>(
+        `SELECT sp.player_id,sp.lp,sp.displayed_tier,p.gd_username,p.gd_account_id::text FROM sur_profiles sp JOIN ranked_players p ON p.id=sp.player_id
          WHERE sp.player_id=ANY($1::uuid[]) ORDER BY sp.player_id FOR UPDATE OF sp`,[humans.map(p=>p.playerId)]);
       const entrants:SurvivalEntrant[]=players.map(p=>{
         if(p.kind==="BOT")return{...p,playerId:null};
         const profile=profiles.rows.find(row=>row.player_id===p.playerId);
         if(!profile)throw new BadRequestException("Enter Survival before match admission");
-        return {...p,name:profile.gd_username,lp:humanLpSnapshot??Number(profile.lp),displayedTier:profile.displayed_tier};
+        return {...p,name:profile.gd_username,lp:humanLpSnapshot??Number(profile.lp),displayedTier:profile.displayed_tier,gdAccountId:profile.gd_account_id};
       });
-      const match=createSurvivalMatch(this.ids.next(),entrants,captured.config,captured.generation,this.clock.now().getTime());
+      const match=createSurvivalMatch(this.ids.next(),entrants,captured.config,captured.generation,this.clock.now().getTime(),online);
       if(presentationControlled){match.presentationControlled=true;match.presentationGate="INTRO";}
       await tx.query(`INSERT INTO sur_matches(id,creation_key,request_hash,state,revision,config_generation,config_snapshot,
         average_lp,difficulty_group,current_round_key,snapshot,created_at,updated_at)
@@ -119,6 +121,9 @@ export class SurvivalEngineService implements OnApplicationBootstrap, OnApplicat
         throw new ForbiddenException("Not the Survival participant");
       const previous=(await tx.query<{request_hash:string}>("SELECT request_hash FROM sur_match_commands WHERE match_id=$1 AND event_key=$2",[matchId,eventKey])).rows[0];
       if(previous){if(previous.request_hash!==fingerprint)throw new ConflictException("Survival event payload changed");return row.snapshot;}
+      if(actor && row.snapshot.online && (["FINAL_RESULT","CANCELLED"].includes(row.snapshot.state) ||
+        row.snapshot.players.find(p=>p.playerId===actor.playerId)?.eliminationStage!==null))
+        throw new ConflictException("Your Survival participation has ended");
       const now=this.clock.now().getTime();
       let match=await this.adapt(tx,row.snapshot,now);
       match=reduceSurvivalMatch(match,command,now);

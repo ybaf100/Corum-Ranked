@@ -415,7 +415,7 @@ struct SurvivalView {
     int completedMatches=0;
     int wins=0, losses=0;
     std::optional<int> bestRank;
-    bool loaded = false, loading = false;
+    bool loaded = false, loading = false, onlineAvailable = false;
     std::string error, tierId;
     RankedProfileView profile;
     StandingView standing;
@@ -510,10 +510,11 @@ public:
     void equipAchievementTitle(std::string const& achievementId, std::optional<int> level);
     void clearAchievementTitle();
     bool prepareSurvivalEnvironment(matjson::Value& body);
+    bool prepareSurvivalAdmission(matjson::Value& body);
+    bool handleSurvivalAdmissionError(geode::utils::web::WebResponse const& response);
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
     // Primary API: password travels inside the options object.
     bool prepareSurvivalDebugAdmission(matjson::Value& body);
-    bool handleSurvivalAdmissionError(geode::utils::web::WebResponse const& response);
     void startDebugBotMatch(DebugBotMatchOptions options);
     // Compatibility overload for alpha.4 callers that still pass password separately.
     // Keep this through alpha.5 so stale DebugBotPopup layouts compile on every target.

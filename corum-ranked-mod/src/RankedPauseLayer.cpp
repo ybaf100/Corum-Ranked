@@ -321,7 +321,7 @@ public:
             if(!runtime.canPlay() || m_fields->survivalConfirmation)return;
             auto const id=m_fields->matchId,key=m_fields->survivalRoundKey;auto const generation=m_fields->survivalMapGeneration;
             auto* popup=ui::RankedConfirmPopup::create(i18n::text("surrender-confirm","CONFIRM SURRENDER"),
-                i18n::text("survival-surrender-warning","End this match using this round's recorded ranking?"),
+                runtime.surrenderMessage(),
                 [weak=WeakRef(this),id,key,generation](bool accepted){
                     auto owner=weak.lock();if(!owner)return;owner->m_fields->survivalConfirmation.reset();
                     auto& current=corum::ranked::SurvivalRuntime::get();

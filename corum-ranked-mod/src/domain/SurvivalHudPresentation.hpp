@@ -11,6 +11,7 @@ struct SurvivalStanding {
     double score = 0;
     bool passing = false, bot = false, waiting = false;
     std::string tier="UNRANKED";
+    int accountId=0;
 };
 struct SurvivalHudColor { unsigned char r,g,b; bool operator==(SurvivalHudColor const&) const = default; };
 inline SurvivalHudColor survivalRankColor(int rank, bool passing) {
