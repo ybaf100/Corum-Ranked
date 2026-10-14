@@ -85,10 +85,10 @@ describe("Survival round engine",()=>{
     expect(survivalSettlementInputs(r.match).map(p=>p.delta)).toEqual(DEFAULT_SURVIVAL_CONFIG.placementLp);
     expect(r.match.rounds.every(round=>round.endsAt! - round.startsAt! === 180_000)).toBe(true);
   });
-  it("retains raw normal progress, ×1 highest score, and ignores reset/death regression",()=>{
+  it("retains attempt precision but adjudicates normal scores as integers without reset regression",()=>{
     const r=new Rig();r.prepare();r.attempt("p01",94.37051,"a1");r.attempt("p01",2,"a2");
     const p=r.round.players[0]!;expect(p.highestProgress).toBe(94.37051);
-    expect(survivalLiveView(r.match,r.now,"p01").standings[0]?.score).toBe(94.37051);
+    expect(survivalLiveView(r.match,r.now,"p01").standings[0]?.score).toBe(94);
   });
   it("retains a completed round's eliminated identities after advancing to the next map",()=>{
     const r=new Rig();expect(survivalLiveView(r.match,r.now).completedRound).toBeNull();
@@ -234,4 +234,12 @@ describe("Survival map ranges and groups",()=>{
     const config=structuredClone(DEFAULT_SURVIVAL_CONFIG);const r=new Rig();const match=createSurvivalMatch("snapshot",r.match.players,config,"old",r.now);
     (config as {roundSeconds:number}).roundSeconds=1;expect(match.config.roundSeconds).toBe(180);
   });
+});
+
+describe("integer normal-round adjudication",()=>{
+ it("gives equal visible integer records the same rank and retains cutoff ties",()=>{
+  const r=new Rig();r.prepare();r.attempt("p01",50.9999,"a");r.attempt("p02",50.001,"b");
+  const rows=survivalLiveView(r.match,r.now,"p01").standings;
+  expect(rows[0]?.score).toBe(50);expect(rows[1]?.score).toBe(50);expect(rows[0]?.rank).toBe(rows[1]?.rank);
+ });
 });

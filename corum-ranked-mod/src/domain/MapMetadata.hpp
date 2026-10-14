@@ -9,6 +9,7 @@ struct MapMetadata {
     std::optional<int> stars, gddlTier, officialLevelId;
     std::string gddlColor;
     std::optional<double> durationSeconds;
+    std::optional<int> featureScore,epic;
     bool operator==(MapMetadata const&) const = default;
 };
 inline std::string mapLengthText(std::optional<double> seconds) {

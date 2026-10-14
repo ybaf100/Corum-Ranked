@@ -35,7 +35,7 @@ test("rejects account fields, duplicate fields and out-of-scope search filters",
   const forms = [
     { ...search, url: "https://other.example" }, { ...search, accountID: "123" }, { ...search, type: "0" },
     { ...search, star: "0" }, { ...search, len: "5" }, { ...search, str: "chosen-map" },
-    { ...search, page: "256" }, { ...search, page: "-1" }, { ...search, diff: "2" },
+    { ...search, page: "200000" }, { ...search, page: "-1" }, { ...search, diff: "2" },
     { ...search, diff: "-2" }, { ...search, diff: "-2", demonFilter: "6" }, { ...search, demonFilter: "1" },
     { ...search, secret: "wrong" }, { ...search, binaryVersion: "1" },
   ].map(form => new URLSearchParams(form).toString());

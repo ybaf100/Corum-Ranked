@@ -1,3 +1,5 @@
+import { appendFileSync } from "node:fs";
+import { countSql,failSqlOnce } from "./sql-counter.js";
 import "reflect-metadata";
 import { readdir,readFile } from "node:fs/promises";
 import { PGlite } from "@electric-sql/pglite";
@@ -56,12 +58,12 @@ beforeEach(async()=>{
   }});
   // The fixture explicitly advances map selection; do not start a concurrent
   // production background job while constructing its deterministic stages.
-  vi.spyOn(engine,"ensureMapSelection").mockImplementation(()=>{});
+  vi.spyOn(engine,"ensureMapSelection").mockImplementation(async()=>{});
   achievements=new AchievementService(db,clock,ids);
   survival=new SurvivalService(db,clock,ids,config,achievements);
   sessions=new SessionService(db,{fetchCurrentTier:async()=>"NONE"},clock,ids,solo,tokens);
   // CBF settings are tested by the existing environment integration suite.
-  vi.spyOn(sessions,"assertEnvironment").mockImplementation(()=>{});
+  vi.spyOn(sessions,"assertEnvironment").mockImplementation(async()=>{});
   debug=new SurvivalDebugService(db,env,clock,{next:()=>42/0x100000000},config,sessions,engine,survival);
   await db.query("INSERT INTO ranked_players(id,gd_account_id,gd_username) VALUES($1,100,'Human')",[session.playerId]);
   await db.query(`INSERT INTO ranked_profiles(player_id,hidden_mmr,visible_ranked_score,displayed_tier,placement_games,initial_csmp_tier,initial_seed_mmr,seed_applied_at)
@@ -271,7 +273,7 @@ describe("Survival M4 persistent debug game",()=>{
       {provide:SurvivalDebugService,useValue:debug},{provide:DATABASE,useValue:db},{provide:TokenService,useValue:tokens},{provide:SERVER_CLOCK,useValue:clock}]}).compile();
     for(const [name,dto] of [["create",CreateSurvivalDebugDto],["event",SurvivalDebugEventDto],["force",ForceSurvivalDebugDto]] as const)
       Reflect.defineMetadata("design:paramtypes",name==="create"?[Object,dto]:[String,Object,dto],SurvivalDebugController.prototype,name);
-    vi.spyOn(debug,"onApplicationBootstrap").mockImplementation(()=>{});
+    vi.spyOn(debug,"onApplicationBootstrap").mockImplementation(async()=>{});
     app=module.createNestApplication();app.useLogger(false);app.useGlobalPipes(new ValidationPipe({whitelist:true,forbidNonWhitelisted:true,transform:true}));
     await app.listen(0,"127.0.0.1");const url=await app.getUrl(),headers={Authorization:"Bearer fixture-token","Content-Type":"application/json"};
     try {
@@ -283,4 +285,108 @@ describe("Survival M4 persistent debug game",()=>{
       const event=await fetch(`${url}/api/ranked/survival/debug/matches/${view.matchId}/events`,{method:"POST",headers,body:JSON.stringify({eventId:ids.next(),type:"PROGRESS",roundKey:"stage-1",mapGeneration:1,levelId:40000000,participantId:"bot-01",rank:1,progress:99})});expect(event.status).toBe(400);
     } finally {await app.close();}
   });
+});
+
+describe("chosen debug bot count",()=>{
+ it.each([1,2,3,6,7,14,15])("creates exactly %i bots and settles scaled last-place LP once",async botCount=>{
+  const admission={...body(),botCount,forceRank:botCount+1};const started=await debug.create(session,admission);
+  const match=await engine.get(started.matchId);expect(match.players.filter(p=>p.kind==="BOT")).toHaveLength(botCount);
+  expect(started.result?.rank).toBe(botCount+1);expect(started.result?.requestedDelta).toBe(-55);
+  expect((await debug.create(session,admission)).result).toEqual(started.result);
+  expect((await db.query("SELECT * FROM sur_lp_ledger")).rows).toHaveLength(1);
+  expect((await db.query("SELECT visible_ranked_score FROM ranked_profiles")).rows[0]).toMatchObject({visible_ranked_score:1100});
+  await expect(debug.force(match.id,session,{password:"fixture-password",rank:botCount+2})).rejects.toThrow("Force rank");
+ });
+ it.each([1,2,3,6,7,15])("starts %i bots in the correct phase without an online queue",async botCount=>{
+  const view=await debug.create(session,{...body(),botCount});const m=await engine.get(view.matchId);
+  expect(survivalCurrentRound(m).phase).toBe(botCount+1<=3?"FINAL":botCount+1<8?"ROUND_3":"ROUND_1");
+  expect(m.online).not.toBe(true);expect((await db.query("SELECT * FROM sur_queue_entries")).rows).toHaveLength(0);
+ });
+});
+
+it.each([0,1,3])("measures real Survival SQL at %i unsettled games with 250ms ticks",async count=>{
+ const reports:Record<string,{queries:number;discovery:number;failures:number}>={};
+ if(count>0)await debug.create(session,body());
+ // Produce additional trusted engine games with distinct humans only for this SQL benchmark.
+ for(let i=1;i<count;i++){
+  const player=id(9000+i),sid=id(9500+i);
+  await db.query("INSERT INTO ranked_players(id,gd_account_id,gd_username) VALUES($1,$2,$3)",[player,9000+i,`Benchmark${i}`]);
+  await db.query("INSERT INTO ranked_profiles(player_id) VALUES($1)",[player]);
+  await db.query("INSERT INTO ranked_sessions(id,player_id,token_hash,client_version,environment_snapshot,expires_at,last_heartbeat_at) VALUES($1,$2,$3,$4,'{\"clientBuildChannel\":\"debug\"}',$5,$6)",[sid,player,`b-${i}`,REQUIRED_RANKED_CLIENT_VERSION,new Date(now+86400000),clock.now()]);
+  await debug.create({...session,sessionId:sid,playerId:player},body());
+ }
+
+ for(const mode of ["before","after"]){
+  (debug as any).activeMatches.clear();(debug as any).nextDiscoveryAt=-Infinity;
+  await debug.tickOnce();
+  const counter=countSql(db,sql=>sql.includes("WHERE d.settled_at IS NULL AND m.state<>"));
+  try{for(let i=0;i<16;i++){now+=250;if(mode==="before")(debug as any).nextDiscoveryAt=-Infinity;await debug.tickOnce();}reports[mode]={...counter.metrics};}
+  finally{counter.stop();}
+ }
+ expect(reports.before!.discovery).toBe(16);expect(reports.after!.discovery).toBe(2);
+ expect(reports.after!.queries).toBe(reports.before!.queries-14);
+ console.log("SURVIVAL_SQL_METRIC",JSON.stringify({active:count,seconds:4,...reports,botTickMs:250}));
+ if(process.env.DEBUG_SQL_METRICS_FILE)appendFileSync(process.env.DEBUG_SQL_METRICS_FILE,JSON.stringify({mode:"Survival",active:count,seconds:4,...reports,botTickMs:250})+"\n");
+},30_000);
+
+describe("debug discovery recovery and prompt settlement",()=>{
+ it("registers a new game before the next search and keeps every 250ms engine tick",async()=>{
+  (debug as any).nextDiscoveryAt=now+2000;
+  const started=performance.now(),view=await debug.create(session,body()),creationMs=performance.now()-started;
+  expect((debug as any).activeMatches.has(view.matchId)).toBe(true);
+  const tick=vi.spyOn(engine,"tick");
+  const counter=countSql(db,sql=>sql.includes("WHERE d.settled_at IS NULL AND m.state<>"));
+  try{for(let i=0;i<4;i++){now+=250;await debug.tickOnce();}
+   expect(counter.metrics.discovery).toBe(0);expect(tick).toHaveBeenCalledTimes(4);
+  }finally{counter.stop();tick.mockRestore();}
+  console.log("SURVIVAL_START_LATENCY",JSON.stringify({creationMs,registrationClockDelayMs:0,botTickMs:250}));
+    if(process.env.DEBUG_SQL_METRICS_FILE)appendFileSync(process.env.DEBUG_SQL_METRICS_FILE,JSON.stringify({kind:"startLatency",mode:"Survival",creationMs,registrationClockDelayMs:0,botTickMs:250})+"\n");
+ });
+ it("recovers games before starting its unchanged interval and retains them after discovery fails",async()=>{
+  const view=await debug.create(session,body());
+  const restartedEngine=new SurvivalEngineService(db,clock,ids,config,{select:async()=>{throw new Error("Unexpected map search");}});
+  const restarted=new SurvivalDebugService(db,env,clock,{next:()=>.5},config,sessions,restartedEngine,survival);
+  const interval=vi.spyOn(globalThis,"setInterval");await restarted.onApplicationBootstrap();
+  try{
+   expect(interval).toHaveBeenLastCalledWith(expect.any(Function),250);
+   expect((restarted as any).activeMatches.has(view.matchId)).toBe(true);
+   (restarted as any).nextDiscoveryAt=-Infinity;
+   const fault=failSqlOnce(db,sql=>sql.includes("WHERE d.settled_at IS NULL AND m.state<>"));
+   try{await restarted.tickOnce();expect(fault.failed).toBe(true);expect((restarted as any).activeMatches.has(view.matchId)).toBe(true);}
+   finally{fault.stop();}
+   now+=2000;await restarted.tickOnce();expect((restarted as any).activeMatches.has(view.matchId)).toBe(true);
+  }finally{await restarted.onApplicationShutdown();interval.mockRestore();}
+ });
+ it("retries a crash after LP payment without removing the match or double paying",async()=>{
+  const view=await debug.create(session,body());
+  await db.query("UPDATE sur_debug_matches SET force_rank=1 WHERE match_id=$1",[view.matchId]);
+  const fault=failSqlOnce(db,sql=>sql.startsWith("UPDATE sur_debug_matches SET result="));
+  try{await debug.tickOnce();expect(fault.failed).toBe(true);}
+  finally{fault.stop();}
+  expect((await db.query("SELECT * FROM sur_lp_ledger")).rows).toHaveLength(1);
+  expect((await db.query("SELECT result,settled_at FROM sur_debug_matches")).rows[0]).toEqual({result:null,settled_at:null});
+  expect((debug as any).activeMatches.has(view.matchId)).toBe(true);
+  const restartedEngine=new SurvivalEngineService(db,clock,ids,config,{select:async()=>{throw new Error("Unexpected map search");}});
+  const restarted=new SurvivalDebugService(db,env,clock,{next:()=>.5},config,sessions,restartedEngine,survival);
+  const terminalAt=now;now+=250;const started=performance.now();await restarted.tickOnce();const settlementMs=performance.now()-started;
+  expect((restarted as any).activeMatches.has(view.matchId)).toBe(false);
+  await debug.tickOnce(); // Another process observes confirmed payment and retires its cache too.
+  expect((await db.query("SELECT * FROM sur_lp_ledger")).rows).toHaveLength(1);
+  expect((await db.query<{settled_at:Date|null}>("SELECT settled_at FROM sur_debug_matches")).rows[0]?.settled_at).not.toBeNull();
+  expect((debug as any).activeMatches.has(view.matchId)).toBe(false);
+  expect((await debug.view(view.matchId,session)).result).toMatchObject({won:true,rank:1,actualDelta:50});
+  now+=2000;await debug.tickOnce();expect((debug as any).activeMatches.size).toBe(0);
+  console.log("SURVIVAL_SETTLEMENT_RETRY_LATENCY",JSON.stringify({wallMs:settlementMs,serverClockDelayMs:250,terminalAt,ledgerPayments:1}));
+  if(process.env.DEBUG_SQL_METRICS_FILE)appendFileSync(process.env.DEBUG_SQL_METRICS_FILE,JSON.stringify({kind:"settlementRetryLatency",mode:"Survival",wallMs:settlementMs,serverClockDelayMs:250,ledgerPayments:1})+"\n");
+ });
+ it("plays a four-player short semifinal and final through the real reducer and LP ledger",async()=>{
+  const view=await debug.create(session,{...body(),botCount:3});let m=await engine.get(view.matchId);
+  now+=5000;await send(m,"PRESENTATION_COMPLETE");m=await engine.get(m.id);
+  for(let i=0;i<2;i++){
+   m=await prepare(m);expect(survivalCurrentRound(m).phase).toBe(i===0?"ROUND_3":"FINAL");
+   await record(m,100);now=survivalCurrentRound(m).endsAt!;await debug.tickOnce();m=await engine.get(m.id);
+  }
+  const result=await debug.view(m.id,session);expect(result.result).toMatchObject({rank:1,won:true,requestedDelta:50});
+  expect(m.rounds).toHaveLength(2);expect((await db.query("SELECT * FROM sur_lp_ledger")).rows).toHaveLength(1);
+ });
 });

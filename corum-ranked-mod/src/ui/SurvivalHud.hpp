@@ -23,5 +23,6 @@ private:
     geode::WeakRef<cocos2d::CCDrawNode> m_progressLines;
     float m_progressWidth=0,m_progressHeight=0;
     int m_lastRank=0;
+    SurvivalScoreTween m_personalBest;
 };
 }

@@ -38,9 +38,10 @@ class SurvivalGameLayer final : public CCLayerColor {
     std::optional<WeakRef<ui::RankedJukeboxPopup>> m_jukebox;
     std::string m_launchedContext,m_resultMotion,m_optionsContext,m_gridContext,m_confirmationContext;
     std::string m_eliminationKey,m_pendingLaunch;
-    std::string m_previewKey;
+    std::string m_previewKey,m_jukeboxContext;
     std::chrono::steady_clock::time_point m_eliminationUntil{};
     std::chrono::steady_clock::time_point m_nextMapAt{},m_introUntil{},m_mapShownAt{},m_returnAt{};
+    std::optional<RankedAudioMode> m_audioMode;
     bool m_closed=false,m_motion=false,m_lowDetail=false,m_disableShake=false;
     static std::string text(char const* key,char const* fallback) {return i18n::text(key,fallback);}
     CCMenuItemSpriteExtra* button(CCMenu* menu,std::string const& caption,CCPoint position,float width,int tag,ccColor3B color=ui::Blue,CCLabelBMFont** saved=nullptr) {
@@ -102,7 +103,7 @@ class SurvivalGameLayer final : public CCLayerColor {
             if(!ui::rankedJukeboxLoaded()) {
                 if(auto* popup=ui::RankedConfirmPopup::create("Jukebox",text("jukebox-required","The Jukebox mod is required!"),[](bool){}))popup->show();
             } else if(!m_jukebox || !m_jukebox->lock() || !m_jukebox->lock()->getParent()) {
-                if(auto* popup=ui::RankedJukeboxPopup::create(level)){m_jukebox.emplace(popup);popup->show();}
+                if(auto* popup=ui::RankedJukeboxPopup::create(level)){m_jukeboxContext=runtime.view().id+":"+runtime.view().roundKey+":"+std::to_string(runtime.view().mapGeneration);m_jukebox.emplace(popup);popup->show();popup->openWhenReady();}
             }
         }
     }
@@ -117,7 +118,8 @@ class SurvivalGameLayer final : public CCLayerColor {
             auto owner=weak.lock();if(!owner)return;owner->m_pendingLaunch.clear();
             auto* scene=CCDirector::sharedDirector()->getRunningScene();
             auto& runtime=SurvivalRuntime::get();
-            if(owner->m_closed || !owner->isRunning() || owner->getParent()!=scene || owner->m_motion ||
+            auto const jukeboxOpen=owner->m_jukebox && owner->m_jukebox->lock() && owner->m_jukebox->lock()->getParent();
+            if(jukeboxOpen || owner->m_closed || !owner->isRunning() || owner->getParent()!=scene || owner->m_motion ||
                 owner->m_confirmation || context!=runtime.preparationContext() || !runtime.canEnter())return;
             if(RankedRoundPreparation::get().launch(scene))owner->m_launchedContext=preparationContextText(context);
         });
@@ -168,7 +170,7 @@ class SurvivalGameLayer final : public CCLayerColor {
     void showMapInformation(SurvivalMatchView const& view) {
         auto const size=getContentSize();auto* level=RankedLevelPreparation::get().level();
         auto const native=level && static_cast<int>(level->m_levelID)==view.map.levelId;
-        auto const key=view.id+":"+view.roundKey+":"+std::to_string(view.mapGeneration)+(native?":native":":loading");
+        auto const key=view.id+":"+view.roundKey+":"+std::to_string(view.mapGeneration)+(native?":native":":loading")+":"+std::to_string(RankedMapDetails::get().revision());
         if(m_previewKey!=key){
             m_previewKey=key;if(m_mapPanel)m_mapPanel->removeFromParentAndCleanup(true);
             auto const width=std::min(388.0f,size.width-74.0f);
@@ -176,6 +178,8 @@ class SurvivalGameLayer final : public CCLayerColor {
             if(native)RankedMapDetails::get().remember(level);
             auto metadata=RankedMapDetails::get().metadata(view.map.levelId);
             if(metadata.kind=="UNKNOWN"){metadata.kind=view.map.demon==SurvivalDemon::None?"NORMAL":"DEMON";metadata.stars=view.map.stars;}
+            if(!metadata.featureScore)metadata.featureScore=static_cast<int>(view.certificate["featureScore"].asInt().unwrapOr(0));
+            if(!metadata.epic)metadata.epic=static_cast<int>(view.certificate["epic"].asInt().unwrapOr(0));
             ui::addRankedMapHeading(m_mapPanel,view.map.levelId,native?std::string(level->m_levelName):text("downloading-map","DOWNLOADING MAP..."),metadata,{width/2,150});
             auto* creator=ui::menuLabel(native?fmt::format("{} · GD #{}",std::string(level->m_creatorName),view.map.levelId):fmt::format("GD #{}",view.map.levelId),
                 .25f,{width/2,107},ui::TextMuted,ui::FontWeight::SemiBold);ui::fitMenuLabelWidth(creator,width-30,.25f,.19f);m_mapPanel->addChild(creator,5);
@@ -193,11 +197,11 @@ class SurvivalGameLayer final : public CCLayerColor {
         m_mapReady->setColor(prep.mapReady?ui::Green:ui::Cyan);m_audioReady->setColor(prep.audioReady?ui::Green:ui::Cyan);
         m_mapPanel->setVisible(true);
     }
-    void syncAudio(SurvivalMatchView const& view) {
+    void syncAudio(SurvivalMatchView const& view,bool elimination=false) {
         auto& audio=RankedAudioManager::get();
-        if(view.result.isObject())audio.setMode(view.result["actualDelta"].asInt().unwrapOr(0)>0?RankedAudioMode::ResultWin:RankedAudioMode::ResultLose);
-        else if(view.ownEliminated)audio.setMode(RankedAudioMode::ResultLose);
-        else audio.setMode(view.phase=="FINAL" || view.phase=="TIEBREAK"?RankedAudioMode::Round3DeathmatchWait:RankedAudioMode::Round12);
+        auto const desired=view.result.isObject()?(view.result["won"].asBool().unwrapOr(view.result["rank"].asInt().unwrapOr(0)==1)?RankedAudioMode::ResultWin:RankedAudioMode::ResultLose):
+            elimination || view.ownEliminated?RankedAudioMode::ResultLose:RankedAudioMode::Round12;
+        if(m_audioMode!=desired){m_audioMode=desired;audio.setMode(desired);}
         audio.tick();
     }
     bool presentEliminations(SurvivalMatchView const& view) {
@@ -277,8 +281,8 @@ public:
         if(m_closed)return;auto& runtime=SurvivalRuntime::get();runtime.tick();
         if(!runtime.active() && !runtime.creating()){m_closed=true;queueInMainThread([]{CCDirector::sharedDirector()->popScene();});return;}
         auto const& view=runtime.view();auto const& preparation=RankedRoundPreparation::get().view();auto const result=view.result.isObject();
-        syncAudio(view);
         auto const elimination=presentEliminations(view);
+        syncAudio(view,elimination);
         auto const intro=view.presentationGate=="INTRO";
         auto const mapWindow=!result && !elimination && !intro && view.map.levelId>0 && view.state!="ROUND_RESULT";
         auto const searching=!result && !elimination && !intro && view.state=="MAP_SELECTION";
@@ -313,6 +317,7 @@ public:
         if(!elimination){if(mapWindow)showMapInformation(view);else showParticipants(view,result);}
         if(m_confirmation && (result || view.state=="CANCELLED" || m_confirmationContext!=view.id+":"+view.roundKey+":"+std::to_string(view.mapGeneration))){if(auto popup=m_confirmation->lock())popup->cancel();m_confirmation.reset();}
         if(!view.ownAssetsReady && RankedRoundPreparation::get().ready())runtime.assetsReady(level);
+        if(m_jukebox && m_jukeboxContext!=view.id+":"+view.roundKey+":"+std::to_string(view.mapGeneration)){if(auto popup=m_jukebox->lock())popup->dismiss();m_jukebox.reset();}
         auto const jukeboxOpen=m_jukebox && m_jukebox->lock() && m_jukebox->lock()->getParent();
         if(intro && now>=m_introUntil && !m_confirmation && !debugPopup)runtime.presentationComplete();
         if(!m_motion && !elimination && !m_confirmation && !jukeboxOpen && !debugPopup && !runtime.creating() &&
@@ -329,7 +334,7 @@ public:
         CCLayerColor::onEnter();
         // Native Quit/Resume may have paused the FMOD output while this retained
         // scene was covered. Reclaim menu/result audio after native teardown.
-        RankedAudioManager::get().onApplicationResume();syncAudio(SurvivalRuntime::get().view());
+        m_audioMode.reset();RankedAudioManager::get().onApplicationResume();syncAudio(SurvivalRuntime::get().view());
     }
     void keyBackClicked() override {
         if(m_closed || m_motion || std::chrono::steady_clock::now()<m_eliminationUntil)return;

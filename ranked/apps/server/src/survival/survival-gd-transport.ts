@@ -40,6 +40,13 @@ export function createSurvivalGdFetch(relay:SurvivalGdRelayEnvironment|undefined
       method:"POST",redirect:"manual",headers:{"content-type":"application/x-www-form-urlencoded",accept:"*/*",
         authorization:`Bearer ${relay.token}`},body:init.body,...(init.signal?{signal:init.signal}:{}),
     });}catch{throw new SurvivalGdRelayError("GD relay connection failed or timed out");}
+    let legacySearch=false;
+    if(url.pathname.endsWith("getGJLevels21.php") && response.headers.get("x-corum-gd-relay-error")==="INVALID_REQUEST") {
+      await response.body?.cancel().catch(()=>{});
+      const form=new URLSearchParams(init.body);form.set("type","4");form.set("len","0,1,2,3,4");form.set("page",String(Math.min(255,Number(form.get("page")??0))));
+      response=await fetcher(`${relay.origin}/getGJLevels21.php`,{method:"POST",redirect:"manual",headers:{"content-type":"application/x-www-form-urlencoded",accept:"*/*",authorization:`Bearer ${relay.token}`},body:form.toString(),...(init.signal?{signal:init.signal}:{})});
+      legacySearch=true;
+    }
     const marker=response.headers.get("x-corum-gd-relay");
     const relayError=response.headers.get("x-corum-gd-relay-error");
     if(marker!=="v1" || relayError || response.headers.get("x-corum-gd-upstream-status")!==String(response.status)) {
@@ -56,6 +63,7 @@ export function createSurvivalGdFetch(relay:SurvivalGdRelayEnvironment|undefined
       const value=response.headers.get(`x-corum-gd-upstream-${name}`);
       if(value!==null)headers.set(name,value);
     }
+    if(legacySearch)headers.set("x-corum-gd-legacy-search","1");
     return new Response(response.body,{status:response.status,headers});
   };
 }

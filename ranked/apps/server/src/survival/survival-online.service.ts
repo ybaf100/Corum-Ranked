@@ -17,7 +17,7 @@ interface OnlineRow {match_id:string;bot_filled:boolean;seed:number|string;drive
 interface PresenceRow {participant_id:string;last_seen_at:Date|string;observed_round_key:string|null;observed_map_generation:number|null;recovering:boolean;}
 interface ResultRow {participant_id:string;player_id:string;result:SurvivalOnlineResult|null;}
 export interface SurvivalOnlineResult {
-  matchId:string;debug:false;botFilled:boolean;rank:number;tiedPlayers:number;requestedDelta:number;actualDelta:number;
+  matchId:string;debug:false;botFilled:boolean;rank:number;tiedPlayers:number;won?:boolean;requestedDelta:number;actualDelta:number;
   profileBefore:SurvivalRatingProfile;profileAfter:SurvivalRatingProfile;
   promoted:boolean;demoted:boolean;protected:boolean;warningRecoveryLp:number|null;
   bands:{tier:string;minimum:number}[];
@@ -154,7 +154,7 @@ export class SurvivalOnlineService implements OnApplicationBootstrap,OnApplicati
       const rating=await this.survival.settleLp(row.player_id,input.eventKey,input.delta,{generation:match.configGeneration,config:match.config});
       const ledger=(await this.db.query<{lp_before:number;tier_before:string;warning_before:boolean}>("SELECT lp_before,tier_before,warning_before FROM sur_lp_ledger WHERE player_id=$1 AND event_key=$2",[row.player_id,input.eventKey])).rows[0]!;
       const groups=new Set<string>();const bands=match.config.tierBands.filter(b=>{if(groups.has(b.group))return false;groups.add(b.group);return true;}).map(b=>({tier:b.group,minimum:b.minimumLp}));
-      const result:SurvivalOnlineResult={matchId:match.id,debug:false,botFilled:match.players.some(p=>p.kind==="BOT"),rank:input.rank,tiedPlayers:input.tiedPlayers,
+      const result:SurvivalOnlineResult={matchId:match.id,debug:false,botFilled:match.players.some(p=>p.kind==="BOT"),won:(match.winnerIds??[match.winnerId]).includes(row.participant_id),rank:input.rank,tiedPlayers:input.tiedPlayers,
         requestedDelta:input.delta,actualDelta:rating.actualDelta,profileBefore:{lp:Number(ledger.lp_before),tier:ledger.tier_before,demotionWarning:ledger.warning_before},
         profileAfter:rating.profile,promoted:rating.promoted,demoted:rating.demoted,protected:rating.protected,warningRecoveryLp:rating.warningRecoveryLp,bands,
         standings:match.players.map(p=>({participantId:p.participantId,playerId:p.playerId,rank:p.finalRank,name:p.name,kind:p.kind,gdAccountId:p.gdAccountId??null,

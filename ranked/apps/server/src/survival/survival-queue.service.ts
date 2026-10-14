@@ -1,4 +1,4 @@
-import { ConflictException,ForbiddenException,Inject,Injectable,NotFoundException,Logger,type OnApplicationBootstrap,type OnApplicationShutdown } from "@nestjs/common";
+import { BadRequestException, ConflictException,ForbiddenException,Inject,Injectable,NotFoundException,Logger,type OnApplicationBootstrap,type OnApplicationShutdown } from "@nestjs/common";
 import { createHash,timingSafeEqual } from "node:crypto";
 import { survivalOnlineBotLp,type RandomSource } from "@corum-ranked/rules";
 import { DATABASE,type DatabasePort,type SqlExecutor } from "../database/database.port.js";
@@ -82,7 +82,7 @@ export class SurvivalQueueService implements OnApplicationBootstrap,OnApplicatio
       [sessionAliveSince(now),now.toISOString(),REQUIRED_RANKED_CLIENT_VERSION]);
     return [...(await tx.query<QueueRow>("SELECT * FROM sur_queue_entries WHERE status='QUEUED' ORDER BY joined_at,player_id LIMIT 16")).rows];
   }
-  private async createFrom(tx:SqlExecutor,rows:readonly QueueRow[],fill:boolean){
+  private async createFrom(tx:SqlExecutor,rows:readonly QueueRow[],fill:boolean,botCount?:number){
     // Lock accounts before queue/session/profile rows, matching session rotation.
     // Never hold one joiner's account while acquiring a second account.
     for(const id of rows.map(q=>q.player_id).sort())await tx.query("SELECT id FROM ranked_players WHERE id=$1 FOR UPDATE",[id]);
@@ -94,14 +94,16 @@ export class SurvivalQueueService implements OnApplicationBootstrap,OnApplicatio
       if(!live.rows.length || await this.busy(tx,row.player_id))continue;valid.push(current);
     }
     if((!fill && valid.length<2)||(!valid.length))return null;
+    if(fill && botCount!==undefined && (!Number.isInteger(botCount)||botCount<0||botCount>15||valid.length+botCount<2||valid.length+botCount>16))
+      throw new BadRequestException("Requested Bot Count requires 2–16 total participants");
     if(!fill && valid.length<16 && this.clock.now().getTime()-new Date(valid[0]!.wait_started_at).getTime()<180000)return null;
     const captured=this.config.getSnapshot();await assertSurvivalAdmission(tx,captured);
     const seed=Math.floor(this.random.next()*0x100000000);
     const profiles=(await tx.query<{player_id:string;lp:number}>("SELECT player_id,lp FROM sur_profiles WHERE player_id=ANY($1::uuid[]) ORDER BY player_id FOR UPDATE",[valid.map(q=>q.player_id)])).rows;
-    const botLp=fill?survivalOnlineBotLp(seed,valid.map(q=>Number(profiles.find(p=>p.player_id===q.player_id)!.lp)),captured.config):[];
+    const botLp=fill?survivalOnlineBotLp(seed,valid.map(q=>Number(profiles.find(p=>p.player_id===q.player_id)!.lp)),captured.config,botCount):[];
     const entrants:SurvivalAdmissionPlayer[]=[...valid.map(q=>({participantId:q.player_id,kind:"HUMAN" as const,playerId:q.player_id})),
       ...botLp.map((lp,i)=>({participantId:`bot-${String(i+1).padStart(2,"0")}`,kind:"BOT" as const,name:`Bot ${i+1}`,lp}))];
-    const key="sur-online:"+createHash("sha256").update(JSON.stringify({entries:valid.map(q=>q.entry_id),fill})).digest("hex");
+    const key="sur-online:"+createHash("sha256").update(JSON.stringify({entries:valid.map(q=>q.entry_id),fill,botCount:botLp.length})).digest("hex");
     const match=await this.engine.createWithin(tx,key,entrants,captured,undefined,true,true);
     const now=this.clock.now().toISOString();
     await tx.query("INSERT INTO sur_online_matches(match_id,bot_filled,seed,created_at) VALUES($1,$2,$3,$4)",[match.id,fill&&botLp.length>0,seed,now]);
@@ -120,16 +122,16 @@ export class SurvivalQueueService implements OnApplicationBootstrap,OnApplicatio
     this.password(session,body.password);this.sessions.assertEnvironment(body.installedMods);
     return this.config.withAdmission(()=>this.db.transaction(async tx=>{
       await lockSurvivalAdmission(tx);await this.actor(tx,session);
-      const prior=(await tx.query<{match_id:string}>("SELECT match_id FROM sur_queue_fill_requests WHERE player_id=$1 AND request_id=$2",[session.playerId,body.requestId])).rows[0];
-      if(prior)return {status:"MATCHED",matchId:prior.match_id};
+      const prior=(await tx.query<{match_id:string;bot_count:number|null}>("SELECT match_id,bot_count FROM sur_queue_fill_requests WHERE player_id=$1 AND request_id=$2",[session.playerId,body.requestId])).rows[0];
+      if(prior){if(prior.bot_count!==(body.botCount??null))throw new ConflictException("Bot fill payload changed");return {status:"MATCHED",matchId:prior.match_id};}
       const own=(await tx.query<QueueRow>("SELECT * FROM sur_queue_entries WHERE player_id=$1",[session.playerId])).rows[0];
       if(own?.status==="MATCHED")return {status:"MATCHED",matchId:own.matched_match_id};
       await assertSurvivalAdmission(tx,this.config.getSnapshot());
       if(!own||own.status!=="QUEUED"||own.session_id!==session.sessionId)throw new ConflictException("Join the Survival queue before filling bots");
       const rows=await this.candidates(tx);
       if(!rows.some(q=>q.player_id===session.playerId))throw new ConflictException("Your queue batch is not at the front yet");
-      const match=await this.createFrom(tx,rows,true);if(!match)throw new ConflictException("Survival queue changed; retry");
-      await tx.query("INSERT INTO sur_queue_fill_requests(player_id,request_id,match_id,created_at) VALUES($1,$2,$3,$4)",[session.playerId,body.requestId,match.id,this.clock.now().toISOString()]);
+      const match=await this.createFrom(tx,rows,true,body.botCount);if(!match)throw new ConflictException("Survival queue changed; retry");
+      await tx.query("INSERT INTO sur_queue_fill_requests(player_id,request_id,match_id,created_at,bot_count) VALUES($1,$2,$3,$4,$5)",[session.playerId,body.requestId,match.id,this.clock.now().toISOString(),body.botCount??null]);
       return {status:"MATCHED",matchId:match.id};
     }));
   }

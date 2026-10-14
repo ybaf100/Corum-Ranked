@@ -21,12 +21,13 @@ struct SurvivalMapMetadata {
     int levelId = 0, stars = 0, version = 0;
     SurvivalDemon demon = SurvivalDemon::None;
     bool automatic = false, platformer = false;
+    int length=-1;
     bool operator==(SurvivalMapMetadata const&) const = default;
 };
 inline bool survivalMapAllowed(SurvivalMapMetadata const& map, SurvivalDifficultyGroup group,
     SurvivalMapPhase phase, int minimumLevelId = 40000000) {
     if(map.levelId < std::max(40000000,minimumLevelId) || map.version < 1 ||
-        map.automatic || map.platformer || map.stars < 1 || map.stars > 10) return false;
+        map.automatic || map.platformer || map.length>3 || map.length<-1 || map.stars < 1 || map.stars > 10) return false;
     auto const offset = static_cast<int>(group);
     if(phase == SurvivalMapPhase::Tiebreak)
         return map.stars == 10 && static_cast<int>(map.demon) == static_cast<int>(SurvivalDemon::Medium)+offset;

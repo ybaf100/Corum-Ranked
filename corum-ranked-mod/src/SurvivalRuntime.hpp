@@ -66,9 +66,9 @@ public:
     void acknowledge();
     std::optional<ScoreAnimationInput> scoreAnimation() const;
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
-    void start(std::string password,std::string group,int forceRank=0);
+    void start(std::string password,std::string group,int forceRank=0,int botCount=15);
     void forceRank(std::string password,int rank);
-    void fillBots(std::string password);
+    void fillBots(std::string password,int botCount=-1);
 #endif
 private:
     void observe(matjson::Value const& root);

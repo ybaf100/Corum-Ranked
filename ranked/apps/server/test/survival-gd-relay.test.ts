@@ -34,6 +34,21 @@ describe("Survival authenticated relay and real GD validation pipeline",()=>{
     expect(second.levelId).not.toBe(first.levelId);expect(second.stars).toBe(4);
     expect(upstream).toHaveBeenCalled();
   });
+  it("keeps an older type-4 relay playable while rejecting XL locally",async()=>{
+    const worker=createGdRelayWorker(async(input,init)=>String(input).endsWith("getGJLevels21.php")?
+      new Response(`${record(40000000).replace("15:2","15:4")}|${record(40000001)}###2:0:10#hash`):
+      new Response(`${record(Number(new URLSearchParams(String(init?.body)).get("levelID")))}:5:1:4:${gzipSync(geometry).toString("base64url")}#hash`));
+    let rejected=0;
+    const legacy=vi.fn(async(input:string|URL|Request,init?:RequestInit)=>{
+      const form=new URLSearchParams(String(init?.body));
+      if(String(input).endsWith("getGJLevels21.php") && (form.get("type")!=="4" || form.get("len")!=="0,1,2,3,4" || Number(form.get("page"))>255)){
+        rejected++;return new Response("legacy filter",{status:400,headers:{"x-corum-gd-relay-error":"INVALID_REQUEST"}});
+      }
+      return worker.fetch(new Request(input,init),{GD_RELAY_TOKEN:token});
+    }) as unknown as typeof fetch;
+    const provider=new GdSurvivalMapProvider(new SeededRandom(1),createSurvivalGdFetch(relay,legacy));
+    expect((await provider.select(request)).levelId).toBe(40000001);expect(rejected).toBe(1);
+  });
   it("retains the actual GD 1005/Ray instead of Cloudflare's outer Worker headers and honors cooldown",async()=>{
     const transport=serverFetch(createGdRelayWorker(async()=>new Response("error code: 1005",{status:403,
       headers:{server:"cloudflare","cf-ray":"GD-SIN","content-type":"text/plain"}})));

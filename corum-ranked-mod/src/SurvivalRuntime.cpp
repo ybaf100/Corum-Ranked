@@ -188,7 +188,7 @@ void SurvivalRuntime::observe(matjson::Value const& root) {
     }
     auto const& map=root["map"];m_view.map={static_cast<int>(map["levelId"].asInt().unwrapOr(0)),static_cast<int>(map["stars"].asInt().unwrapOr(0)),
         static_cast<int>(map["levelVersion"].asInt().unwrapOr(0)),map["demon"].asBool().unwrapOr(false)?demon(map["demonDifficulty"].asString().unwrapOr("")):SurvivalDemon::None,
-        map["automatic"].asBool().unwrapOr(true),map["platformer"].asBool().unwrapOr(true)};
+        map["automatic"].asBool().unwrapOr(true),map["platformer"].asBool().unwrapOr(true),static_cast<int>(map["length"].asInt().unwrapOr(-1))};
     if(serverTime && *serverTime>=m_lastServerNow){m_lastServerNow=*serverTime;m_clock.observe(root["serverNow"].asString().unwrapOr(""),localNow());}
     m_view.cutoff=root["cutoffScore"].isNumber()?std::optional(root["cutoffScore"].asDouble().unwrapOr(0)):std::nullopt;
     m_view.first=root["finalFirstScore"].isNumber()?std::optional(root["finalFirstScore"].asDouble().unwrapOr(0)):std::nullopt;
@@ -387,10 +387,10 @@ std::optional<ScoreAnimationInput> SurvivalRuntime::scoreAnimation() const {
     if(!validScoreBands(input.bands))return std::nullopt;return input;
 }
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
-void SurvivalRuntime::start(std::string password,std::string group,int forceRank) {
+void SurvivalRuntime::start(std::string password,std::string group,int forceRank,int botCount) {
     tick();if(active()){showSurvivalGame();return;}if(queueing()){showSurvivalQueue();return;}if(m_creating || m_session.empty())return;
     matjson::Value body;if(!RankedRuntime::get().prepareSurvivalDebugAdmission(body))return;
-    body["password"]=std::move(password);body["requestId"]=utils::random::generateUUID();body["averageGroup"]=std::move(group);if(forceRank>0)body["forceRank"]=forceRank;
+    body["password"]=std::move(password);body["requestId"]=utils::random::generateUUID();body["averageGroup"]=std::move(group);body["botCount"]=botCount;if(forceRank>0)body["forceRank"]=forceRank;
     auto http=request(m_session);http.timeout(std::chrono::seconds(70));http.bodyJSON(body);m_creating=true;
     auto const generation=m_generation;auto const session=m_session;
     m_controlRequest.spawn(http.post(debugEndpoint("/matches")),[this,generation,session](web::WebResponse response) {
@@ -407,7 +407,7 @@ void SurvivalRuntime::start(std::string password,std::string group,int forceRank
     });
 }
 void SurvivalRuntime::forceRank(std::string password,int rank) {
-    if(!active() || !m_view.debug || m_view.online || m_creating || rank<1 || rank>16)return;
+    if(!active() || !m_view.debug || m_view.online || m_creating || rank<1 || rank>m_view.playerCount)return;
     matjson::Value body;body["password"]=std::move(password);body["rank"]=rank;
     auto http=request(m_session);http.bodyJSON(body);m_creating=true;auto const generation=m_generation;auto const session=m_session;auto const id=m_view.id;
     m_controlRequest.spawn(http.post(debugEndpoint("/matches/"+id+"/force-rank")),[this,generation,session,id](web::WebResponse response) {
@@ -417,10 +417,10 @@ void SurvivalRuntime::forceRank(std::string password,int rank) {
         else m_view.error="Survival debug rank could not be forced.";
     });
 }
-void SurvivalRuntime::fillBots(std::string password) {
+void SurvivalRuntime::fillBots(std::string password,int botCount) {
     if(m_creating || m_queue.status!="QUEUED" || active())return;
     matjson::Value body;if(!RankedRuntime::get().prepareSurvivalAdmission(body))return;
-    body["password"]=std::move(password);body["requestId"]=utils::random::generateUUID();queueAction("/fill-bots",std::move(body));
+    body["password"]=std::move(password);body["requestId"]=utils::random::generateUUID();if(botCount>=0)body["botCount"]=botCount;queueAction("/fill-bots",std::move(body));
 }
 #endif
 }

@@ -62,6 +62,8 @@ inline char const* font(FontWeight weight) {
         case FontWeight::SemiBold: return "CorumSansSemiBold.fnt"_spr;
         case FontWeight::ExtraBold: return "CorumSansBold.fnt"_spr;
         case FontWeight::Black: return "CorumSansBlack.fnt"_spr;
+        // Regular is reserved for Latin/symbol text; current UI uses the other
+        // four weights for bilingual captions. See the font coverage regression.
         case FontWeight::Regular: return "CorumSans.fnt"_spr;
     }
     return "CorumSans.fnt"_spr;

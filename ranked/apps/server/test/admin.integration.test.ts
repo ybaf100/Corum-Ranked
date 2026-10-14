@@ -247,6 +247,8 @@ describe('Admin authenticated mutations',()=>{
  expect((await post(unscoped)).status).toBe(400);
  expect((await post(body('RESET_DB',{scope:'COMMON',confirmation:'RESET'}))).status).toBe(201);
  expect((await db.query('SELECT * FROM ranked_players')).rows).toHaveLength(2);
- expect((await db.query('SELECT * FROM ranked_matches')).rows).toHaveLength(1);
+ expect((await db.query('SELECT * FROM ranked_matches')).rows).toHaveLength(0);
+ expect((await db.query('SELECT displayed_tier FROM ranked_profiles')).rows.every((p:any)=>p.displayed_tier==='UNRANKED')).toBe(true);
+ expect((await db.query('SELECT lp FROM sur_profiles')).rows).toEqual([{lp:150}]);
  });
 });

@@ -1,0 +1,168 @@
+{
+  "generator": "Geode CLI 3.9.0",
+  "budgetRgbaMiB": 96,
+  "verification": "Before failure reproduced, after 18 actual generated SD/HD/UHD bundles pass; active UI/countdown files are byte-identical",
+  "unchangedActiveFiles": 30,
+  "before": {
+    "dimensions": {
+      "CorumSansBold-hd": {
+        "width": 1054,
+        "height": 1339
+      },
+      "CorumSansMedium-hd": {
+        "width": 1028,
+        "height": 1344
+      },
+      "CorumSansBlack-hd": {
+        "width": 1059,
+        "height": 1366
+      },
+      "CorumSansBlack": {
+        "width": 563,
+        "height": 739
+      },
+      "CorumSansSemiBold-uhd": {
+        "width": 2017,
+        "height": 2497
+      },
+      "CorumSansBlack-uhd": {
+        "width": 2060,
+        "height": 2589
+      },
+      "CorumSansBold-uhd": {
+        "width": 2047,
+        "height": 2574
+      },
+      "CorumSansSemiBold": {
+        "width": 548,
+        "height": 725
+      },
+      "CorumSansCountdown-hd": {
+        "width": 309,
+        "height": 456
+      },
+      "CorumSans-hd": {
+        "width": 1005,
+        "height": 1292
+      },
+      "CorumSansMedium": {
+        "width": 544,
+        "height": 725
+      },
+      "CorumSans": {
+        "width": 532,
+        "height": 732
+      },
+      "CorumSansMedium-uhd": {
+        "width": 1999,
+        "height": 2499
+      },
+      "CorumSansSemiBold-hd": {
+        "width": 1034,
+        "height": 1326
+      },
+      "CorumSansCountdown-uhd": {
+        "width": 571,
+        "height": 863
+      },
+      "CorumSansBold": {
+        "width": 561,
+        "height": 742
+      },
+      "CorumSansCountdown": {
+        "width": 179,
+        "height": 250
+      },
+      "CorumSans-uhd": {
+        "width": 1950,
+        "height": 2443
+      }
+    },
+    "rgbaMiBByQuality": {
+      "sd": 7.851383209228516,
+      "-hd": 26.893539428710938,
+      "-uhd": 98.76591110229492
+    }
+  },
+  "after": {
+    "dimensions": {
+      "CorumSansBold-hd": {
+        "width": 1054,
+        "height": 1339
+      },
+      "CorumSansMedium-hd": {
+        "width": 1028,
+        "height": 1344
+      },
+      "CorumSansBlack-hd": {
+        "width": 1059,
+        "height": 1366
+      },
+      "CorumSansBlack": {
+        "width": 563,
+        "height": 739
+      },
+      "CorumSansSemiBold-uhd": {
+        "width": 2017,
+        "height": 2497
+      },
+      "CorumSansBlack-uhd": {
+        "width": 2060,
+        "height": 2589
+      },
+      "CorumSansBold-uhd": {
+        "width": 2047,
+        "height": 2574
+      },
+      "CorumSansSemiBold": {
+        "width": 548,
+        "height": 725
+      },
+      "CorumSansCountdown-hd": {
+        "width": 309,
+        "height": 456
+      },
+      "CorumSans-hd": {
+        "width": 423,
+        "height": 579
+      },
+      "CorumSansMedium": {
+        "width": 544,
+        "height": 725
+      },
+      "CorumSans": {
+        "width": 234,
+        "height": 331
+      },
+      "CorumSansMedium-uhd": {
+        "width": 1999,
+        "height": 2499
+      },
+      "CorumSansSemiBold-hd": {
+        "width": 1034,
+        "height": 1326
+      },
+      "CorumSansCountdown-uhd": {
+        "width": 571,
+        "height": 863
+      },
+      "CorumSansBold": {
+        "width": 561,
+        "height": 742
+      },
+      "CorumSansCountdown": {
+        "width": 179,
+        "height": 250
+      },
+      "CorumSans-uhd": {
+        "width": 798,
+        "height": 1066
+      }
+    },
+    "rgbaMiBByQuality": {
+      "sd": 6.661312103271484,
+      "-hd": 22.874591827392578,
+      "-uhd": 83.83830642700195
+    }
+  }
+}

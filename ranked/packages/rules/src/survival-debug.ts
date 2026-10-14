@@ -38,7 +38,9 @@ export function survivalBotTiebreak(seed: number, roundKey: string, botIndex: nu
 }
 
 export function survivalDebugLp(seed: number, humanLp: number, group: SurvivalDifficultyGroup,
-  config: SurvivalConfig) {
+  config: SurvivalConfig,botCount=15) {
+  if(!Number.isInteger(botCount)||botCount<1||botCount>15)throw new RankedDomainError("INVALID_CONFIG","Debug requires 1–15 bots");
+  const playerCount=botCount+1;
   if (!Number.isSafeInteger(humanLp) || humanLp < 0)
     throw new RankedDomainError("INVALID_CONFIG", "Invalid human Survival LP");
   const lower = group === "RED_BRONZE" ? 0 : config.tierBands.find(b => b.group === group)?.minimumLp;
@@ -47,17 +49,17 @@ export function survivalDebugLp(seed: number, humanLp: number, group: SurvivalDi
   if (lower === undefined || upper === undefined || (upper !== null && upper <= lower))
     throw new RankedDomainError("INVALID_CONFIG", "Missing Survival difficulty boundaries");
   const target = upper === null ? lower + 150 : Math.floor((lower + upper) / 2);
-  const virtualHuman = upper !== null && humanLp > upper * 16 - 1;
+  const virtualHuman = upper !== null && humanLp > upper * playerCount - 1;
   const humanSnapshotLp = virtualHuman ? target : humanLp;
-  const total = Math.max(target * 16, humanSnapshotLp);
+  const total = Math.max(target * playerCount, humanSnapshotLp);
   const budget = total - humanSnapshotLp;
   const random = new SeededRandom(survivalDebugSeed(seed, "bot-lp"));
-  const weights = Array.from({ length: 15 }, () => 0.25 + random.next());
+  const weights = Array.from({ length: botCount }, () => 0.25 + random.next());
   const sum = weights.reduce((a, b) => a + b, 0);
   const bots = weights.map(w => Math.floor(budget * w / sum));
   let remainder = budget - bots.reduce((a, b) => a + b, 0);
-  for (let i = 0; remainder > 0; i++, remainder--) bots[i % 15]!++;
-  const averageLp = (humanSnapshotLp + bots.reduce((a, b) => a + b, 0)) / 16;
+  for (let i = 0; remainder > 0; i++, remainder--) bots[i % botCount]!++;
+  const averageLp = (humanSnapshotLp + bots.reduce((a, b) => a + b, 0)) / playerCount;
   if (survivalDifficultyForAverage(averageLp, config.tierBands) !== group)
     throw new RankedDomainError("INVALID_CONFIG", "Could not construct the requested debug average tier");
   return { humanSnapshotLp, virtualHuman, bots, averageLp };
@@ -66,7 +68,7 @@ export function survivalDebugLp(seed: number, humanLp: number, group: SurvivalDi
 /** Explicit password-protected development operation. It never changes the
  * public engine's round adjudication or accepts a client-supplied LP delta. */
 export function forceSurvivalDebugRank(before: SurvivalMatch, humanId: string, rank: number, now: number): SurvivalMatch {
-  if (!Number.isInteger(rank) || rank < 1 || rank > 16 || before.players.length !== 16 ||
+  if (!Number.isInteger(rank) || rank < 1 || rank > before.players.length || before.players.length<2 || before.players.length>16 ||
       !before.players.some(p => p.participantId === humanId && p.kind === "HUMAN"))
     throw new RankedDomainError("INVALID_MATCH_TRANSITION", "Invalid Force rank");
   if (["FINAL_RESULT", "CANCELLED"].includes(before.state)) return before;
@@ -99,7 +101,7 @@ export function finishSurvivalDebugOnElimination(before:SurvivalMatch,humanId:st
   for(const p of round.players) {
     const entrant=match.players.find(v=>v.participantId===p.participantId)!;
     entrant.eliminationStage=round.ordinal;
-    entrant.eliminationScore=round.phase==="TIEBREAK"?survivalMilliPercent(p.highestProgress)/1000:p.highestProgress;
+    entrant.eliminationScore=round.phase==="TIEBREAK"?survivalMilliPercent(p.highestProgress)/1000:Math.trunc(p.highestProgress);
     for(const a of p.attempts)a.endedAt??=now;
   }
   const ordered=[...match.players].sort((a,b)=>(b.eliminationStage??0)-(a.eliminationStage??0) ||

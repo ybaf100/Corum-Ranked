@@ -12,6 +12,9 @@ export interface SurvivalMapMetadata {
   readonly demonDifficulty: SurvivalDemonDifficulty | null;
   readonly automatic: boolean;
   readonly platformer: boolean;
+  readonly length?:number;
+  readonly featureScore?:number;
+  readonly epic?:number;
 }
 export interface SurvivalVerifiedMap extends SurvivalMapMetadata {
   readonly levelVersion: number;
@@ -55,7 +58,7 @@ export function survivalMapAllowed(map: SurvivalMapMetadata, group: SurvivalDiff
   phase: SurvivalMapPhase, minimumLevelId = 40_000_000): boolean {
   if (!Number.isSafeInteger(map.levelId) || map.levelId < Math.max(40_000_000,minimumLevelId) ||
       !Number.isInteger(map.stars) || map.stars < 1 || map.stars > 10 ||
-      map.automatic || map.platformer) return false;
+      map.automatic || map.platformer || (map.length!==undefined && (!Number.isInteger(map.length) || map.length<0 || map.length>3))) return false;
   const allowed = RANGES[group][phase];
   if (map.demon) return map.stars === 10 && map.demonDifficulty !== null && allowed.demons.includes(map.demonDifficulty);
   return map.demonDifficulty === null && allowed.minimumStars !== null && allowed.maximumStars !== null &&
