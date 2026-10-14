@@ -23,7 +23,7 @@ bool SurvivalHud::init() {
     if(!CCNode::init())return false;setID("survival-play-hud"_spr);
     auto const size=CCDirector::sharedDirector()->getWinSize();setContentSize(size);
     auto const top=layoutHud(size.width,size.height).topY;
-    m_round=rankedHudLabel(this,"",FontWeight::SemiBold,.527f,{.5f,1},{size.width/2,top-1},Gold);
+    m_round=rankedHudLabel(this,"",FontWeight::SemiBold,.527f,{.5f,1},{size.width/2,top-5},Gold);
     m_timer=rankedHudLabel(this,"03:00",FontWeight::Black,CompetitiveClockScale,{.5f,1},{size.width/2,top-18},Text);
     m_difference=rankedHudLabel(this,"0",FontWeight::ExtraBold,CompetitiveClockScale,{.5f,1},{size.width/2+34,top-18},Text);
     m_rank=rankedHudLabel(this,"",FontWeight::Black,1.68f,{0,0},{12,12},Text);
