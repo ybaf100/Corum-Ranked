@@ -22,7 +22,7 @@ interface DebugRow {
   driver_state:Record<string,number>; result:SurvivalDebugResult|null; acknowledged_at:Date|string|null;
 }
 export interface SurvivalDebugResult {
-  matchId:string; debug:true; rank:number; tiedPlayers:number; requestedDelta:number; actualDelta:number;
+  matchId:string; debug:true; won:boolean; rank:number; tiedPlayers:number; requestedDelta:number; actualDelta:number;
   profileBefore:SurvivalRatingProfile; profileAfter:SurvivalRatingProfile;
   promoted:boolean; demoted:boolean; protected:boolean; warningRecoveryLp:number|null;
   bands:{tier:string;minimum:number}[]; standings:(ReturnType<typeof survivalSettlementInputs>[number] & {name:string;kind:string;displayedTier:string})[];
@@ -35,6 +35,9 @@ export class SurvivalDebugService implements OnApplicationBootstrap,OnApplicatio
   private readonly logger=new Logger(SurvivalDebugService.name);
   private timer:ReturnType<typeof setInterval>|null=null;
   private pending:Promise<void>|null=null;
+  private readonly activeMatches=new Set<string>();
+  private discovery:Promise<void>|null=null;
+  private nextDiscoveryAt=-Infinity;
   public constructor(@Inject(DATABASE) private readonly db:DatabasePort,
     @Inject(SERVER_ENVIRONMENT) private readonly env:ServerEnvironment,
     @Inject(SERVER_CLOCK) private readonly clock:ServerClock,
@@ -43,7 +46,8 @@ export class SurvivalDebugService implements OnApplicationBootstrap,OnApplicatio
     private readonly engine:SurvivalEngineService, private readonly survival:SurvivalService) {
     engine.registerAdapter((tx,match,now)=>this.drive(tx,match,now));
   }
-  public onApplicationBootstrap():void {
+  public async onApplicationBootstrap():Promise<void> {
+    await this.discover(true).catch(e=>this.logger.error(String(e)));
     // Existing games survive operational OFF and a process restart; the seed and
     // event cursors live in PostgreSQL, never just in this interval's memory.
     this.timer=setInterval(()=>{void this.tickOnce().catch(e=>this.logger.error(String(e)));},250);
@@ -65,6 +69,8 @@ export class SurvivalDebugService implements OnApplicationBootstrap,OnApplicatio
   }
   public async create(session:RankedSessionContext,body:CreateSurvivalDebugDto) {
     this.password(session,body.password);this.sessions.assertEnvironment(body.installedMods);
+    const botCount=body.botCount??15;
+    if(!Number.isInteger(botCount)||botCount<1||botCount>15 || (body.forceRank!==undefined && body.forceRank>botCount+1))throw new BadRequestException("Invalid bot count or Force rank");
     await this.survival.profile(session.playerId);
     const creationKey=`sur-debug:${session.playerId}:${body.requestId}`;
     const match=await this.config.withAdmission(()=>this.db.transaction(async tx=>{
@@ -77,7 +83,7 @@ export class SurvivalDebugService implements OnApplicationBootstrap,OnApplicatio
       const previous=(await tx.query<{snapshot:SurvivalMatch;average_group:string;force_rank:number|null}>(
         `SELECT m.snapshot,d.average_group,d.force_rank FROM sur_matches m JOIN sur_debug_matches d ON d.match_id=m.id WHERE m.creation_key=$1`,[creationKey])).rows[0];
       if(previous) {
-        if(previous.average_group!==body.averageGroup || previous.force_rank!==(body.forceRank??null))throw new ConflictException("Debug creation payload changed");
+        if(previous.snapshot.players.filter(p=>p.kind==="BOT").length!==botCount || previous.average_group!==body.averageGroup || previous.force_rank!==(body.forceRank??null))throw new ConflictException("Debug creation payload changed");
         return previous.snapshot;
       }
       const busy=await tx.query(`SELECT 1 FROM ranked_queue_entries WHERE player_id=$1 AND status='QUEUED'
@@ -88,15 +94,16 @@ export class SurvivalDebugService implements OnApplicationBootstrap,OnApplicatio
       if(busy.rows.length)throw new ConflictException("Finish or recover the current game first");
       const profile=(await tx.query<{lp:number}>("SELECT lp FROM sur_profiles WHERE player_id=$1 FOR UPDATE",[session.playerId])).rows[0]!;
       const seed=Math.floor(this.random.next()*0x100000000),captured=this.config.getSnapshot();
-      const lp=survivalDebugLp(seed,Number(profile.lp),body.averageGroup,captured.config);
+      const lp=survivalDebugLp(seed,Number(profile.lp),body.averageGroup,captured.config,botCount);
       const players:SurvivalAdmissionPlayer[]=[{participantId:"human",kind:"HUMAN",playerId:session.playerId},
         ...lp.bots.map((value,i)=>({participantId:`bot-${String(i+1).padStart(2,"0")}`,kind:"BOT" as const,name:`Bot ${i+1}`,lp:value}))];
-      const created=await this.engine.createWithin(tx,creationKey,players,captured,lp.humanSnapshotLp,true);
+      const created=await this.engine.createWithin(tx,creationKey,players,captured,lp.humanSnapshotLp,true,false,botCount!==15);
       await tx.query(`INSERT INTO sur_debug_matches(match_id,human_player_id,admission_session_id,seed,average_group,
         virtual_human_lp,human_actual_lp,force_rank,last_seen_at,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$9)`,
         [created.id,session.playerId,session.sessionId,seed,body.averageGroup,lp.virtualHuman,profile.lp,body.forceRank??null,now.toISOString()]);
       return created;
     }));
+    this.activeMatches.add(match.id);
     return this.view(match.id,session);
   }
   private async drive(tx:SqlExecutor,before:SurvivalMatch,now:number):Promise<SurvivalMatch> {
@@ -149,7 +156,8 @@ export class SurvivalDebugService implements OnApplicationBootstrap,OnApplicatio
   }
   public async force(id:string,session:RankedSessionContext,body:ForceSurvivalDebugDto) {
     this.password(session,body.password);await this.owned(id,session);
-    if(!Number.isInteger(body.rank)||body.rank<1||body.rank>16)throw new BadRequestException("Force rank must be 1..16");
+    const match=await this.engine.get(id);
+    if(!Number.isInteger(body.rank)||body.rank<1||body.rank>match.players.length)throw new BadRequestException(`Force rank must be 1..${match.players.length}`);
     await this.db.transaction(async tx=>{
       await tx.query("SELECT id FROM ranked_players WHERE id=$1 FOR UPDATE",[session.playerId]);
       const now=this.clock.now();
@@ -169,9 +177,28 @@ export class SurvivalDebugService implements OnApplicationBootstrap,OnApplicatio
   public tickOnce():Promise<void> {
     if(this.pending)return this.pending;
     this.pending=(async()=>{
-      const rows=await this.db.query<{match_id:string}>("SELECT match_id FROM sur_debug_matches WHERE settled_at IS NULL ORDER BY created_at");
-      for(const row of rows.rows)try {await this.settle(await this.engine.tick(row.match_id));}catch(e){this.logger.error(`Survival debug ${row.match_id}: ${String(e)}`);}
+      await this.discover().catch(e=>this.logger.error(String(e)));
+      for(const id of [...this.activeMatches])try {
+        const match=await this.engine.tick(id);await this.settle(match);
+        if(match.state==="CANCELLED")this.activeMatches.delete(id);
+        else if(match.state==="FINAL_RESULT") {
+          const stored=(await this.db.query<{settled_at:Date|string|null}>("SELECT settled_at FROM sur_debug_matches WHERE match_id=$1",[id])).rows[0];
+          if(stored?.settled_at)this.activeMatches.delete(id);
+        }
+      }catch(e){this.logger.error(`Survival debug ${id}: ${String(e)}`);}
     })().finally(()=>{this.pending=null;});return this.pending;
+  }
+  private discover(force=false):Promise<void> {
+    if(this.discovery)return this.discovery;
+    const now=this.clock.now().getTime();if(!force && now<this.nextDiscoveryAt)return Promise.resolve();
+    this.nextDiscoveryAt=now+2000;const known=[...this.activeMatches];
+    this.discovery=(async()=>{
+      const rows=(await this.db.query<{match_id:string}>(`SELECT d.match_id FROM sur_debug_matches d JOIN sur_matches m ON m.id=d.match_id
+        WHERE d.settled_at IS NULL AND m.state<>'CANCELLED' ORDER BY d.created_at`)).rows;
+      const live=new Set(rows.map(row=>row.match_id));
+      for(const id of known)if(!live.has(id))this.activeMatches.delete(id);
+      for(const id of live)this.activeMatches.add(id);
+    })().finally(()=>{this.discovery=null;});return this.discovery;
   }
   private async settle(match:SurvivalMatch):Promise<SurvivalDebugResult|null> {
     if(match.state!=="FINAL_RESULT")return null;
@@ -183,7 +210,7 @@ export class SurvivalDebugService implements OnApplicationBootstrap,OnApplicatio
       "SELECT lp_before,tier_before,warning_before FROM sur_lp_ledger WHERE player_id=$1 AND event_key=$2",[row.human_player_id,human.eventKey])).rows[0]!;
     const groups=new Set<string>();
     const bands=match.config.tierBands.filter(b=>{if(groups.has(b.group))return false;groups.add(b.group);return true;}).map(b=>({tier:b.group,minimum:b.minimumLp}));
-    const result:SurvivalDebugResult={matchId:match.id,debug:true,rank:human.rank,tiedPlayers:human.tiedPlayers,requestedDelta:human.delta,
+    const result:SurvivalDebugResult={matchId:match.id,debug:true,won:(match.winnerIds??[match.winnerId]).includes("human"),rank:human.rank,tiedPlayers:human.tiedPlayers,requestedDelta:human.delta,
       actualDelta:rating.actualDelta,profileBefore:{lp:Number(ledger.lp_before),tier:ledger.tier_before,demotionWarning:ledger.warning_before},
       profileAfter:rating.profile,promoted:rating.promoted,demoted:rating.demoted,protected:rating.protected,
       warningRecoveryLp:rating.warningRecoveryLp,bands,standings:inputs.map(p=>{const participant=match.players.find(v=>v.participantId===p.participantId)!;

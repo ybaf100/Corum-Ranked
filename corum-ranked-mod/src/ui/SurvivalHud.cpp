@@ -1,4 +1,5 @@
 #include "SurvivalHud.hpp"
+#include <Geode/binding/GameManager.hpp>
 #include "RankedTranslations.hpp"
 #include "../domain/HudPresentation.hpp"
 #include "../domain/CompetitiveHudLayout.hpp"
@@ -45,7 +46,7 @@ void SurvivalHud::update(float dt) {
 void SurvivalHud::present(SurvivalMatchView const& view,std::int64_t remainingMs,float dt) {
     auto const size=CCDirector::sharedDirector()->getWinSize();
     auto const context=view.id+":"+view.roundKey+":"+std::to_string(view.mapGeneration);
-    if(m_context!=context){for(auto& [id,row]:m_rows)row.node->removeFromParentAndCleanup(true);m_rows.clear();m_context=context;m_lastRank=0;}
+    if(m_context!=context){for(auto& [id,row]:m_rows)row.node->removeFromParentAndCleanup(true);m_rows.clear();m_context=context;m_lastRank=0;m_personalBest={};}
     bool const deathmatch=view.phase=="TIEBREAK";
     auto const rows=survivalHudRows(view.standings,view.ownId,view.targetQualifiers);
     bool const separateOwn=rows.size()>survivalHudLeaderCount(view.standings,view.targetQualifiers);
@@ -88,6 +89,9 @@ void SurvivalHud::present(SurvivalMatchView const& view,std::int64_t remainingMs
         auto const y=top-static_cast<float>(boundary)*gap+gap*.15f;
         m_cutoffLine->drawSegment({8,y},{8+textWidth+3,y},.65f,{1,.32f,.41f,.95f});
     }
+    auto personal=std::find_if(view.standings.begin(),view.standings.end(),[&](auto const& p){return p.id==view.ownId;});
+    if(personal!=view.standings.end())m_personalBest.observe(personal->score);
+    m_personalBest.advance(dt);
     presentProgressMarkers(view);
     auto own=std::find_if(view.standings.begin(),view.standings.end(),[&](auto const& p){return p.id==view.ownId;});
     if(own!=view.standings.end()) {
@@ -115,14 +119,31 @@ void SurvivalHud::presentProgressMarkers(SurvivalMatchView const& view) {
     lines->clear();lines->setVisible(bar && fill && bar->isVisible() && fill->isVisible());
     if(!bar || !fill)return;
     auto const anchor=fill->getAnchorPoint();auto const origin=fill->getAnchorPointInPoints();
-    auto draw=[&](double score,float radius,ccColor4F tint) {
+    auto draw=[&](double score,float radius,ccColor4F tint,float capDepth) {
         auto const x=origin.x+survivalProgressMarkerX(score,m_progressWidth)-anchor.x*m_progressWidth;
         auto const y=origin.y-anchor.y*m_progressHeight;
         auto const lower=bar->convertToNodeSpace(fill->convertToWorldSpace({x,y-1}));
         auto const upper=bar->convertToNodeSpace(fill->convertToWorldSpace({x,y+m_progressHeight+1}));
         lines->drawSegment(lower,upper,radius,tint);
+        // Separate lower caps keep cutoff and leader readable at the same score.
+        auto const left=bar->convertToNodeSpace(fill->convertToWorldSpace({x-2,y-capDepth}));
+        auto const right=bar->convertToNodeSpace(fill->convertToWorldSpace({x+2,y-capDepth}));
+        lines->drawSegment(left,right,.65f,tint);
     };
-    if(view.cutoff)draw(*view.cutoff,.95f,{1,.32f,.41f,1});
-    if(!view.standings.empty())draw(view.standings.front().score,.5f,{1,.83f,.31f,1});
+    if(view.cutoff)draw(*view.cutoff,.95f,{1,.32f,.41f,1},2);
+    if(!view.standings.empty())draw(view.standings.front().score,.5f,{1,.83f,.31f,1},4);
+    auto const hasOwn=std::any_of(view.standings.begin(),view.standings.end(),[&](auto const& row){return row.id==view.ownId;});
+    if(auto* game=GameManager::sharedState();game && hasOwn) {
+        auto const tint=game->colorForIdx(game->getPlayerColor());
+        auto const x=origin.x+survivalProgressMarkerX(m_personalBest.displayed,m_progressWidth)-anchor.x*m_progressWidth;
+        auto const y=origin.y-anchor.y*m_progressHeight;
+        auto lower=bar->convertToNodeSpace(fill->convertToWorldSpace({x,y-3}));
+        auto upper=bar->convertToNodeSpace(fill->convertToWorldSpace({x,y+m_progressHeight+3}));
+        lines->drawSegment(lower,upper,.8f,{0,0,0,1});
+        lines->drawSegment(lower,upper,.55f,{tint.r/255.f,tint.g/255.f,tint.b/255.f,1});
+        auto capLeft=bar->convertToNodeSpace(fill->convertToWorldSpace({x-2,y+m_progressHeight+3}));
+        auto capRight=bar->convertToNodeSpace(fill->convertToWorldSpace({x+2,y+m_progressHeight+3}));
+        lines->drawSegment(capLeft,capRight,.65f,{tint.r/255.f,tint.g/255.f,tint.b/255.f,1});
+    }
 }
 } // namespace corum::ranked::ui

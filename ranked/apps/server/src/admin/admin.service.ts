@@ -36,7 +36,7 @@ export class AdminService {
     if(common && scope!=="COMMON")throw new BadRequestException("Achievements and audio belong to COMMON");
     if(scope==="COMMON" && ["SET_LP","SET_MMR","SET_BOTH","DELETE_BOTS"].includes(body.action))throw new BadRequestException("Choose a rating mode");
     return this.db.transaction(async tx => {
-      if(scope==="SURVIVAL")await lockSurvivalAdmission(tx);
+      if(scope==="SURVIVAL" || (scope==="COMMON" && body.action==="RESET_DB"))await lockSurvivalAdmission(tx);
       await tx.query("SELECT id FROM ranked_players WHERE id=$1 FOR UPDATE",[session.playerId]);
       const now=this.clock.now();
       // Recheck admission inside the mutation transaction: a stale/revoked
@@ -73,20 +73,20 @@ export class AdminService {
       }
       if (body.action === "RESET_DB") {
         await tx.query("SELECT id FROM ranked_players ORDER BY id FOR UPDATE");
-        if(scope==="COMMON") {
-          await this.resetCommon(tx,null,now);
-          return {ok:true,reset:true,scope,message:"Common achievements, AP and titles reset. Mode ratings, accounts and sessions retained."};
-        }
         const active=await tx.query(`SELECT 1 FROM ranked_matches WHERE state NOT IN ('MATCH_RESULT','CANCELLED')
           UNION ALL SELECT 1 FROM ranked_placement_runs WHERE state NOT IN ('PLACEMENT_RESULT','CANCELLED')
           UNION ALL SELECT 1 FROM ranked_queue_entries WHERE status='QUEUED' LIMIT 1`);
         if(active.rows.length)throw new ConflictException("Finish Solo games and leave Solo queues before resetting Solo");
+        if(scope==="COMMON") {
+          await this.survivalAction(tx,session,{...body,scope:"SURVIVAL"},now);
+          await this.resetCommon(tx,null,now);
+        }
         await tx.query("DELETE FROM ranked_queue_entries");await tx.query("DELETE FROM ranked_match_tokens");
         await tx.query("DELETE FROM ranked_outbox_events WHERE aggregate_id IN (SELECT id FROM ranked_matches)");
         await tx.query("DELETE FROM ranked_matches");await tx.query("DELETE FROM ranked_placement_runs");
         const players=(await tx.query<{player_id:string}>("SELECT player_id FROM ranked_profiles ORDER BY player_id")).rows;
         for(const player of players)await this.resetSolo(tx,player.player_id,now);
-        return {ok:true,reset:true,scope,message:"Solo ratings, Placement and match records reset. Survival and common data retained."};
+        return {ok:true,reset:true,scope,message:scope==="COMMON"?"Solo, Survival and common achievements/AP/titles reset. Accounts and sessions retained.":"Solo ratings, Placement and match records reset. Survival and common data retained."};
       }
       if (body.action === "DELETE_BOTS") {
         const bots = await tx.query<{id:string}>("SELECT id FROM ranked_players WHERE is_bot=TRUE ORDER BY id FOR UPDATE");
@@ -209,6 +209,8 @@ export class AdminService {
     if(body.action==="RESET_DB"){
       await tx.query("UPDATE sur_queue_entries SET status='LEFT',matched_match_id=NULL WHERE status IN ('QUEUED','MATCHED')");
       await tx.query("DELETE FROM sur_matches");
+      await tx.query("DELETE FROM sur_map_selection_history");
+      await tx.query("DELETE FROM sur_queue_fill_requests");
     }
     await tx.query(`UPDATE sur_profiles SET lp=$2,displayed_tier=$3,demotion_warning=FALSE,lp_reached_at=$4,updated_at=$4,history_visible_since=$4
       WHERE player_id=ANY($1::uuid[])`,[players,initial,tier.tier,now.toISOString()]);

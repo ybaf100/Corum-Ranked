@@ -64,6 +64,7 @@ export interface SurvivalRound {
 export interface SurvivalMatch {
   id: string;
   online?:boolean;
+  variableSize?:boolean;
   revision: number;
   state: SurvivalMatchState;
   configGeneration: string;
@@ -123,7 +124,7 @@ export function survivalRankScores<T extends { participantId: string; score: num
   });
 }
 function roundScore(round: SurvivalRound, player: SurvivalRoundPlayer): number {
-  if (round.phase !== "TIEBREAK") return player.highestProgress;
+  if (round.phase !== "TIEBREAK") return Math.trunc(player.highestProgress);
   const inputs = Array.from({length:3}, (_,i) => ({ progressPercent:
     survivalMilliPercent(player.attempts[i]?.highestProgress ?? 0) / 1000, cleared:false }));
   return survivalMilliPercent(bestPercentOfThree(inputs));
@@ -135,7 +136,7 @@ function transition(match: SurvivalMatch, state: SurvivalMatchState, at: number,
 }
 function addRound(match: SurvivalMatch, phase: SurvivalMapPhase, participants: readonly string[], at: number): void {
   const ordinal = match.rounds.length + 1;
-  const targets=match.online?survivalOnlineTargets(match.players.length):[match.config.round1Qualifiers,match.config.round2Qualifiers,match.config.round3Qualifiers];
+  const targets=(match.online || match.variableSize)?survivalOnlineTargets(match.players.length):[match.config.round1Qualifiers,match.config.round2Qualifiers,match.config.round3Qualifiers];
   const target=phase==="ROUND_1"?targets[0]!:phase==="ROUND_2"?targets[1]!:phase==="ROUND_3"?targets[2]!:1;
   match.rounds.push({ key: `stage-${ordinal}`, ordinal, phase, target, mapGeneration:1, map:null, selectedMaps:[],
     preparationStartedAt:null, entryRequestedAt:null, firstEnteredAt:null, startsAt:null, endsAt:null, finishedAt:null,
@@ -144,10 +145,10 @@ function addRound(match: SurvivalMatch, phase: SurvivalMapPhase, participants: r
   transition(match,"MAP_SELECTION",at,"NEW_ROUND");
 }
 export function createSurvivalMatch(id: string, entrants: readonly SurvivalEntrant[], config: SurvivalConfig,
-  configGeneration: string, now: number,online=false): SurvivalMatch {
+  configGeneration: string, now: number,online=false,variableSize=false): SurvivalMatch {
   const errors = validateSurvivalEngineConfig(config);
   if (errors.length) throw new RankedDomainError("INVALID_CONFIG",errors.join("; "));
-  if ((!online && entrants.length!==16) || (online && (entrants.length<2||entrants.length>16)) || new Set(entrants.map(p => p.participantId)).size !== entrants.length ||
+  if ((!online && !variableSize && entrants.length!==16) || ((online || variableSize) && (entrants.length<2||entrants.length>16)) || new Set(entrants.map(p => p.participantId)).size !== entrants.length ||
     entrants.some(p => !p.participantId || p.participantId.length > 80 || !Number.isSafeInteger(p.lp) || p.lp < 0 ||
       !["HUMAN","BOT"].includes(p.kind) || (p.kind === "HUMAN" && !p.playerId)) ||
     new Set(entrants.filter(p => p.playerId).map(p => p.playerId)).size !== entrants.filter(p => p.playerId).length ||
@@ -158,7 +159,8 @@ export function createSurvivalMatch(id: string, entrants: readonly SurvivalEntra
     winnerId:null,cancellationReason:null,players:entrants.map(p => ({...p,eliminationStage:null,eliminationScore:0,
       forfeitReason:null,finalRank:null})),rounds:[],transitions:[] };
   if(online)match.online=true;
-  addRound(match,online && entrants.length<=3?"FINAL":online && entrants.length<8?"ROUND_3":"ROUND_1",entrants.map(p => p.participantId),now);
+  if(variableSize)match.variableSize=true;
+  addRound(match,(online || variableSize) && entrants.length<=3?"FINAL":(online || variableSize) && entrants.length<8?"ROUND_3":"ROUND_1",entrants.map(p => p.participantId),now);
   return match;
 }
 function eliminate(match: SurvivalMatch, round: SurvivalRound, player: SurvivalRoundPlayer, score: number, reason: string | null): void {
@@ -410,7 +412,7 @@ export function survivalSettlementInputs(match: SurvivalMatch) {
     const rank=player.finalRank!;
     const tiedPlayers=match.players.filter(p => p.finalRank === rank).length;
     const last=player.fixedRewardRank??Math.min(match.players.length,rank+tiedPlayers-1);
-    const rewardRank=match.online?survivalOnlineRewardRank(last,match.players.length):last;
+    const rewardRank=(match.online || match.variableSize)?survivalOnlineRewardRank(last,match.players.length):last;
     return {participantId:player.participantId,playerId:player.playerId,rank,tiedPlayers,
       occupiedLastRank:last,delta:survivalPlacementLp(rewardRank,1,match.config.placementLp),
       eventKey:`survival:${match.id}:result:${player.participantId}`,configGeneration:match.configGeneration};

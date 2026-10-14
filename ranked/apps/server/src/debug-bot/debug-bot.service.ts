@@ -75,6 +75,8 @@ export class DebugBotService implements OnModuleInit, OnApplicationShutdown {
   private readonly configuration: DebugBotEnvironment | null;
   private readonly drivers = new Map<string, BotDriver>();
   private interval: ReturnType<typeof setInterval> | null = null;
+  private discovery:Promise<void>|null=null;
+  private nextDiscoveryAt=-Infinity;
 
   public constructor(
     @Inject(SERVER_ENVIRONMENT) environment: ServerEnvironment,
@@ -89,8 +91,9 @@ export class DebugBotService implements OnModuleInit, OnApplicationShutdown {
     this.configuration = environment.debugBot;
   }
 
-  public onModuleInit(): void {
+  public async onModuleInit(): Promise<void> {
     if (!this.configuration) return;
+    await this.hydrateDrivers(true).catch(()=>{});
     this.interval = setInterval(() => void this.tickOnce(), this.configuration.tickMs);
     this.interval.unref?.();
   }
@@ -140,7 +143,7 @@ export class DebugBotService implements OnModuleInit, OnApplicationShutdown {
 
   public async tickOnce(): Promise<void> {
     if (!this.configuration) return;
-    await this.hydrateDrivers();
+    await this.hydrateDrivers().catch(()=>{});
     await Promise.all([...this.drivers.keys()].map(async (matchId) => {
       try {
         await this.drive(matchId);
@@ -174,7 +177,16 @@ export class DebugBotService implements OnModuleInit, OnApplicationShutdown {
     };
   }
 
-  private async hydrateDrivers(): Promise<void> {
+  private hydrateDrivers(force=false):Promise<void> {
+    if(this.discovery)return this.discovery;
+    const now=this.clock.now().getTime();
+    if(!force && now<this.nextDiscoveryAt)return Promise.resolve();
+    this.nextDiscoveryAt=now+2000;
+    this.discovery=this.loadDrivers().finally(()=>{this.discovery=null;});
+    return this.discovery;
+  }
+  private async loadDrivers(): Promise<void> {
+    const known=[...this.drivers.keys()];
     const result = await this.database.query<ActiveDebugMatchRow>(
       `SELECT m.id, m.debug_config, m.player_a_id, m.player_b_id,
               pa.gd_account_id::text AS player_a_account_id,
@@ -192,6 +204,8 @@ export class DebugBotService implements OnModuleInit, OnApplicationShutdown {
        WHERE m.match_type = 'DEBUG_BOT'
          AND m.state NOT IN ('MATCH_RESULT', 'CANCELLED')`,
     );
+    const live=new Set(result.rows.map(row=>row.id));
+    for(const id of known)if(!live.has(id) && !this.drivers.get(id)?.busy)this.drivers.delete(id);
     for (const row of result.rows) {
       if (this.drivers.has(row.id)) continue;
       const stored = parseObject(row.debug_config);

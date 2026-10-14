@@ -1,8 +1,10 @@
+import { appendFileSync } from "node:fs";
+import { countSql,failSqlOnce } from "./sql-counter.js";
 import { enterPreparedMatch } from "./native-entry-helper.js";
 import { readFile, readdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { PGlite } from "@electric-sql/pglite";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   SeededRandom,
   calculateMmrUpdate,
@@ -209,6 +211,7 @@ describe("development-only Bot Match using the production Ranked engine", () => 
     // including after the driver is recovered without its in-memory state.
     clock.advance(9900);
     (debug as any).drivers.clear();
+    (debug as any).nextDiscoveryAt=-Infinity; // A restarted service has no discovery deadline.
     await debug.tickOnce();
     state = await matches.state(created.matchId, created.matchToken, player) as Record<string, any>;
     expect(state.state).toBe('DEATHMATCH_PREPARE');
@@ -253,6 +256,7 @@ describe("development-only Bot Match using the production Ranked engine", () => 
       { difficulty: 'NORMAL', scenario: 'TRIGGER_DEATHMATCH', botBan: 'RANDOM', sendDiscordEvents: false, mmrOffset: 0 });
     expect((await matches.state(creation.matchId, creation.playerMatchToken, player)).state).toBe('MATCHED');
     (debug as any).drivers.clear();
+    (debug as any).nextDiscoveryAt=-Infinity; // A restarted service has no discovery deadline.
     await debug.tickOnce();
     const state = await matches.state(creation.matchId, creation.playerMatchToken, player) as Record<string, any>;
     expect(state.state).toBe('DEATHMATCH_PREPARE');
@@ -773,6 +777,56 @@ describe("development-only Bot Match using the production Ranked engine", () => 
       [created.matchId],
     );
     expect(Number(orphanedBotAttempt.rows[0]?.count ?? 0)).toBe(0);
+  });
+
+  it.each([0,1,3])("measures real Solo SQL at %i active games while keeping 125ms execution",async count=>{
+    const reports:Record<string,{queries:number;discovery:number;failures:number}>={};
+    for(const mode of ["before","after"]){
+      await database.query("DELETE FROM ranked_queue_entries");await database.query("DELETE FROM ranked_match_tokens");await database.query("DELETE FROM ranked_matches");
+      (debug as any).drivers.clear();(debug as any).nextDiscoveryAt=-Infinity;
+      for(let i=0;i<count;i++){
+        const player=await contextFor(String(990000+(mode==="after"?10000:0)+count*10+i));
+        await debug.create(player,{password:"2008",difficulty:"NORMAL",scenario:"NORMAL_MATCH",botBan:"NO_BAN",sendDiscordEvents:false,installedMods:structuredClone(cleanMods)});
+      }
+      await debug.tickOnce();
+      const counter=countSql(database,sql=>sql.includes("WHERE m.match_type = 'DEBUG_BOT'"));
+      try{
+        for(let tick=0;tick<32;tick++){
+          clock.advance(125);if(mode==="before")(debug as any).nextDiscoveryAt=-Infinity;
+          await debug.tickOnce();
+        }
+        reports[mode]={...counter.metrics};
+      }finally{counter.stop();}
+      expect((debug as any).drivers.size).toBe(count);
+    }
+    expect(reports.before!.discovery).toBe(32);expect(reports.after!.discovery).toBe(2);
+    expect(reports.after!.queries).toBe(reports.before!.queries-30);
+    console.log("SOLO_SQL_METRIC",JSON.stringify({active:count,seconds:4,...reports,botTickMs:125}));
+    if(process.env.DEBUG_SQL_METRICS_FILE)appendFileSync(process.env.DEBUG_SQL_METRICS_FILE,JSON.stringify({mode:"Solo",active:count,seconds:4,...reports,botTickMs:125})+"\n");
+  },30_000);
+
+  it("registers before discovery, preserves 125ms execution, and recovers after a failed search",async()=>{
+    await database.query("DELETE FROM ranked_match_tokens");await database.query("DELETE FROM ranked_matches");
+    (debug as any).drivers.clear();(debug as any).nextDiscoveryAt=clock.now().getTime()+2000;
+    const player=await contextFor("998899");const started=performance.now();
+    const view=await debug.create(player,{password:"2008",difficulty:"NORMAL",scenario:"NORMAL_MATCH",botBan:"NO_BAN",sendDiscordEvents:false,installedMods:structuredClone(cleanMods)});
+    const creationMs=performance.now()-started;expect((debug as any).drivers.has(view.matchId)).toBe(true);
+    const run=vi.spyOn(debug as any,"drive"),counter=countSql(database,sql=>sql.includes("WHERE m.match_type = 'DEBUG_BOT'"));
+    try{for(let i=0;i<4;i++){clock.advance(125);await debug.tickOnce();}
+      expect(counter.metrics.discovery).toBe(0);expect(run).toHaveBeenCalledTimes(4);
+    }finally{counter.stop();run.mockRestore();}
+    (debug as any).nextDiscoveryAt=-Infinity;
+    const fault=failSqlOnce(database,sql=>sql.includes("WHERE m.match_type = 'DEBUG_BOT'"));
+    try{await debug.tickOnce();expect(fault.failed).toBe(true);expect((debug as any).drivers.has(view.matchId)).toBe(true);}
+    finally{fault.stop();}
+    clock.advance(2000);await debug.tickOnce();expect((debug as any).drivers.has(view.matchId)).toBe(true);
+    const restarted=new DebugBotService(environment,database,clock,random,queue,matches,config,tokens);
+    const interval=vi.spyOn(globalThis,"setInterval");await restarted.onModuleInit();
+    try{expect(interval).toHaveBeenLastCalledWith(expect.any(Function),125);expect((restarted as any).drivers.has(view.matchId)).toBe(true);}
+    finally{restarted.onApplicationShutdown();interval.mockRestore();}
+    await matches.forceDebugResult(view.matchId,"A");await debug.tickOnce();expect((debug as any).drivers.has(view.matchId)).toBe(false);
+    console.log("SOLO_START_LATENCY",JSON.stringify({creationMs,registrationClockDelayMs:0,botTickMs:125}));
+    if(process.env.DEBUG_SQL_METRICS_FILE)appendFileSync(process.env.DEBUG_SQL_METRICS_FILE,JSON.stringify({kind:"startLatency",mode:"Solo",creationMs,registrationClockDelayMs:0,botTickMs:125})+"\n");
   });
 
 });

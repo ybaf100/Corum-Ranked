@@ -1,3 +1,16 @@
+# v0.5.0-beta.70
+
+- Use integer highest-progress scores for general Survival ranking and cutoffs; retain raw Attempt evidence and .001% Death Match adjudication.
+- Broaden Rated catalogs with liked/recent/awarded searches and full reported pagination. Exclude XL at search, predicate, download and native entry; persist the last 30 confirmed selections across all Survival games with atomic conflict checks and history-only relaxation.
+- Open the shared Jukebox dialog, defer native entry while it is attached, and retire old-round dialogs. Render Featured/Epic/Legendary/Mythic through native GD difficulty sprites, including delayed metadata.
+- Use Round12 BGM for every preparation phase, hold elimination/result audio through presentation, and select final result music from server winner IDs. Add a smooth personal-best progress marker in Player Color 1 alongside distinct cutoff/leader markers.
+- Add exact Bot Count to queue fill (0–15) and dedicated debug games (1–15), start immediately, and reuse short finals, scaled LP rewards and actual participant-count Force bounds.
+- Keep Solo 125ms and Survival 250ms execution while discovering active debug games every 2s; register creations and recover at startup immediately. Retain failed discoveries and unsettled finals for safe payment retries.
+- Scope Admin DB reset to Solo, Survival, or both plus shared achievements/AP/titles for Common. Accounts and sessions remain available.
+- Add migration 0026 and additive API fields. See [implementation, SQL measurements and validation](../ranked/docs/survival-beta70-improvements.md). Existing R2 publication paths remain unchanged.
+
+- Fix the packaging font budget overflow by reducing the reserved, unused Regular atlas. Keep active bilingual UI/countdown bundles unchanged; actual generated UHD fonts shrink from 98.77 to 83.84 MiB and pass the existing 96 MiB limit.
+
 # v0.5.0-beta.69
 
 - Split Solo RED, AQUA, BRONZE and SILVER into III / II / I divisions with editable LP cuts and per-division map pools. Series and demotion protection remain at base-tier boundaries.

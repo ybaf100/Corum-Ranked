@@ -307,3 +307,40 @@ describe("Survival M5 public HTTP and persistent online game",()=>{
  });
 
 });
+
+describe("exact requested queue bot counts",()=>{
+ it.each([[1,1],[1,3],[1,7],[1,15],[3,5],[5,0]])("starts %i humans with exactly %i bots immediately",async(humans,bots)=>{
+  const group:Client[]=[];for(let i=0;i<humans;i++)group.push(await client(i===0?"debug":"release"));
+  for(const c of group)await join(c);
+  const admission={password:"fixture-password",requestId:ids.next(),installedMods:mods,botCount:bots};
+  const started=await api(group[0]!,"/queue/fill-bots",admission);expect(started.status).toBe(201);
+  const m=await engine.get(started.body.matchId);expect(m.players.filter(p=>p.kind==="BOT")).toHaveLength(bots);
+  expect(m.players).toHaveLength(humans+bots);expect(now-m.createdAt).toBe(0);
+  expect(survivalCurrentRound(m).phase).toBe(humans+bots<=3?"FINAL":humans+bots<8?"ROUND_3":"ROUND_1");
+  expect((await api(group[0]!,"/queue/fill-bots",admission)).body.matchId).toBe(m.id);
+  expect((await api(group[0]!,"/queue/fill-bots",{...admission,botCount:bots===0?1:bots-1})).status).toBe(409);
+ });
+ it("refuses too few or too many participants without adjusting the requested bots",async()=>{
+  const c=await client("debug");await join(c);
+  expect((await api(c,"/queue/fill-bots",{password:"fixture-password",requestId:ids.next(),installedMods:mods,botCount:0})).status).toBe(400);
+  expect((await db.query("SELECT id FROM sur_matches")).rows).toHaveLength(0);
+ });
+});
+
+
+it("commits global map history once under simultaneous selections on independent DB transactions",async()=>{
+ let arrived=0,release!:()=>void;const both=new Promise<void>(resolve=>{release=resolve;});
+ const selector=vi.fn(async(request:{excludedLevelIds:readonly number[]})=>{
+  let id=40000000;while(request.excludedLevelIds.includes(id))id++;
+  if(id===40000000){if(++arrived===2)release();await both;}
+  return {levelId:id,levelVersion:1,length:2,stars:4,demon:false,demonDifficulty:null,automatic:false,platformer:false,
+   geometrySha256:"a".repeat(64),geometryBytes:64,verifiedAt:new Date(now).toISOString()};
+ });
+ const selecting=new SurvivalEngineService(db,clock,ids,config,{select:selector});
+ const bots=Array.from({length:16},(_,i)=>({participantId:`history-bot-${i}`,kind:"BOT" as const,name:`Bot ${i}`,lp:150}));
+ const a=await selecting.create("history-one",bots),b=await selecting.create("history-two",bots);
+ await Promise.all([selecting.selectMap(a.id),selecting.selectMap(b.id)]);
+ const history=(await db.query<{level_id:string;history_window:number}>("SELECT level_id,history_window FROM sur_map_selection_history ORDER BY id")).rows;
+ expect(history.map(row=>Number(row.level_id)).sort()).toEqual([40000000,40000001]);
+ expect(history.every(row=>row.history_window===30)).toBe(true);expect(selector).toHaveBeenCalledTimes(3);
+});

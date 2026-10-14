@@ -247,3 +247,42 @@ describe("durable Survival M3 engine",()=>{
     expect((await database.query("SELECT * FROM ranked_players ORDER BY id")).rows).toEqual(before);
   });
 });
+
+describe("global durable map selection history",()=>{
+ const bots:SurvivalAdmissionPlayer[]=Array.from({length:16},(_,i)=>({participantId:`history-bot-${i}`,kind:"BOT",name:`History ${i}`,lp:150}));
+ it("keeps the last thirty confirmed selections across matches and a fresh service",async()=>{
+  for(let i=0;i<32;i++){const m=await engine.create(`history-${i}`,bots);await engine.selectMap(m.id);}
+  const history=(await database.query<{level_id:string}>("SELECT level_id FROM sur_map_selection_history ORDER BY id DESC")).rows;
+  expect(history).toHaveLength(32);expect(new Set(history.map(r=>r.level_id)).size).toBe(32);
+  const restored=new SurvivalEngineService(database,clock,ids,config,provider);
+  const next=await restored.create("history-restart",bots);await restored.selectMap(next.id);
+  const request=vi.mocked(provider.select).mock.calls.at(-1)![0];
+  expect(request.excludedLevelIds).toEqual(expect.arrayContaining(history.slice(0,30).map(r=>Number(r.level_id))));
+  expect(request.excludedLevelIds).not.toContain(Number(history[31]!.level_id));
+ });
+ it("serializes confirmation of concurrent candidates and records no failed candidate",async()=>{
+  const original=vi.mocked(provider.select).getMockImplementation()!;
+  vi.mocked(provider.select).mockImplementation(async request=>{
+   const map=await original(request);return {...map,levelId:request.excludedLevelIds.includes(40000000)?40000001:40000000};
+  });
+  const a=await engine.create("collision-a",entrants),b=await engine.create("collision-b",bots);
+  await Promise.all([engine.selectMap(a.id),engine.selectMap(b.id)]);
+  const history=(await database.query<{level_id:string;history_window:number}>("SELECT level_id,history_window FROM sur_map_selection_history")).rows;
+  expect(history).toHaveLength(2);expect(new Set(history.map(r=>r.level_id)).size).toBe(2);
+  expect(history.every(r=>r.history_window===30)).toBe(true);
+  vi.mocked(provider.select).mockImplementation(original);
+ });
+ it("relaxes only the global window when the verified pool is exhausted",async()=>{
+  const a=await engine.create("scarce-a",entrants);await engine.selectMap(a.id);
+  const selected=survivalCurrentRound(await engine.get(a.id)).map!;
+  const original=vi.mocked(provider.select).getMockImplementation()!;
+  vi.mocked(provider.select).mockImplementation(async request=>{
+   if(request.excludedLevelIds.includes(selected.levelId))throw new SurvivalMapError("NO_ELIGIBLE_MAP","Only one eligible map in this fixture");
+   return selected;
+  });
+  const b=await engine.create("scarce-b",bots);await engine.selectMap(b.id);
+  expect((await database.query<{history_window:number}>("SELECT history_window FROM sur_map_selection_history WHERE match_id=$1",[b.id])).rows[0]?.history_window).toBe(0);
+  expect(survivalCurrentRound(await engine.get(b.id)).map?.levelId).toBe(selected.levelId);
+  vi.mocked(provider.select).mockImplementation(original);
+ });
+});

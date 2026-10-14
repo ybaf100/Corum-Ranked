@@ -39,7 +39,7 @@ describe("actual GD Survival search/download protocol",()=>{
   it("rejects wrong ID, unrated, Auto, Platformer, changed stars and broken compressed data",()=>{
     const expected=parseSurvivalMetadata(record());
     for(const body of [download(39999999),download().replace("18:4","18:0"),download().replace("25::","25:1:"),
-      download().replace("15:2","15:5"),download().replace("18:4","18:9"),`${record()}:5:1:4:not-valid-base64`])
+      download().replace("15:2","15:4"),download().replace("15:2","15:5"),download().replace("18:4","18:9"),`${record()}:5:1:4:not-valid-base64`])
       expect(()=>verifySurvivalDownload(body,expected,request)).toThrow();
   });
   it("uses native Demon filtering, never confuses search filter with metadata code",async()=>{
@@ -47,7 +47,7 @@ describe("actual GD Survival search/download protocol",()=>{
     const fetcher=vi.fn(async(url:string|URL|Request,init?:RequestInit)=>{
       const body=new URLSearchParams(String(init?.body));paths.push(String(url));
       const demon=record().replace("18:4","18:10").replace("17::43:0","17:1:43:5");
-      if(String(url).endsWith("getGJLevels21.php")){expect(body.get("type")).toBe("4");expect(body.get("star")).toBe("1");expect(body.get("diff")).toBe("-2");expect(body.get("demonFilter")).toBe("4");return new Response(`${demon}###1:0:10#hash`);}
+      if(String(url).endsWith("getGJLevels21.php")){expect(["2","4","11"]).toContain(body.get("type"));expect(body.get("star")).toBe("1");expect(body.get("diff")).toBe("-2");expect(body.get("demonFilter")).toBe("4");return new Response(`${demon}###1:0:10#hash`);}
       return new Response(`${demon}:5:1:4:${gzipSync(geometry).toString("base64url")}#hash#hash`);
     }) as unknown as typeof fetch;
     const map=await new GdSurvivalMapProvider(new SeededRandom(1),fetcher).select({...request,group:"GOLD",phase:"TIEBREAK"});
@@ -76,6 +76,39 @@ describe("actual GD Survival search/download protocol",()=>{
     // ROUND_1 searches normal categories 3 and 4; each pool is bootstrapped
     // at most once, not re-fetched for every round or concurrent match.
     expect(searches).toBeLessThanOrEqual(2);
+  });
+  it.each([[0,0],[12,0],[0,1],[4,2],[1,3]])("keeps GD feature %i / epic %i through verified metadata",async(featureScore,epic)=>{
+    const quality=record()+`:19:${featureScore}:42:${epic}`;
+    expect(parseSurvivalMetadata(quality)).toMatchObject({length:2,featureScore,epic});
+    expect(verifySurvivalDownload(`${quality}:5:1:4:${gzipSync(geometry).toString("base64url")}#hash`,parseSurvivalMetadata(quality),request))
+      .toMatchObject({featureScore,epic});
+  });
+  it("samples catalogs past the former page 255 boundary without a release-date filter",async()=>{
+    const pages:number[]=[];
+    const fetcher=vi.fn(async(url:string|URL|Request,init?:RequestInit)=>{
+      const form=new URLSearchParams(String(init?.body));
+      if(String(url).endsWith("getGJLevels21.php")){
+        expect(form.get("len")).toBe("0,1,2,3");
+        const index=Number(form.get("page"));pages.push(index);
+        return new Response(index===0?page([39999999],20000):page([40000001],20000,index*10));
+      }
+      return new Response(download(Number(form.get("levelID"))));
+    }) as unknown as typeof fetch;
+    const provider=new GdSurvivalMapProvider({next:()=>.8},fetcher);
+    expect((await provider.select(request)).levelId).toBe(40000001);
+    expect(pages).toEqual([0,1600]);
+  });
+  it("expands liked, recent and awarded catalogs and rejects XL before any download",async()=>{
+    const types=new Set<string>();let downloads=0;
+    const fetcher=vi.fn(async(url:string|URL|Request,init?:RequestInit)=>{
+      if(String(url).endsWith("getGJLevels21.php")){
+        const form=new URLSearchParams(String(init?.body));types.add(form.get("type")!);
+        return new Response(`${record().replace("15:2","15:4")}###1:0:10#hash`);
+      }
+      downloads++;return new Response(download());
+    }) as unknown as typeof fetch;
+    await expect(new GdSurvivalMapProvider(new SeededRandom(1),fetcher).select(request)).rejects.toMatchObject({code:"NO_ELIGIBLE_MAP"});
+    expect([...types].sort()).toEqual(["11","2","4"]);expect(downloads).toBe(0);
   });
   it("retains API status in diagnostic errors and leaves timers to the engine",async()=>{
     const fetcher=vi.fn(async()=>new Response("unavailable",{status:403})) as unknown as typeof fetch;

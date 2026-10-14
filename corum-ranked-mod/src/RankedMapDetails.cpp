@@ -15,11 +15,12 @@ void RankedMapDetails::remember(GJGameLevel* level) {
     if (!level || static_cast<int>(level->m_levelID) <= 0) return;
     auto const id = static_cast<int>(level->m_levelID);
     auto const value = (level->m_levelType==GJLevelType::Main && static_cast<int>(level->m_demon)!=0)
-        ? MapDifficulty{"Demon","diffIcon_06_btn_001.png"} : mapDifficulty(level->m_autoLevel, static_cast<int>(level->m_demon) != 0,
+        ? MapDifficulty{"Demon","diffIcon_06_btn_001.png",6} : mapDifficulty(level->m_autoLevel, static_cast<int>(level->m_demon) != 0,
         level->m_demonDifficulty, level->getAverageDifficulty());
     MapMetadata metadata;
     auto const demon = static_cast<int>(level->m_demon) != 0;
     metadata.kind = demon ? "DEMON" : "NORMAL";
+    metadata.featureScore=std::max(0,level->m_featured);metadata.epic=std::clamp(level->m_isEpic,0,3);
     auto const stars = static_cast<int>(level->m_stars);
     if (!demon && stars >= 0 && stars <= 10) metadata.stars = stars;
     auto const ticks = static_cast<double>(level->m_timestamp);

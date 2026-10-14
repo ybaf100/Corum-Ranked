@@ -61,7 +61,7 @@ test('actual appearance resolver serializes lookups, survives A→B, restores fo
 #include <vector>
 namespace gd {using string=std::string;}
 enum class GJLevelType{Default=0,Main=1,Editor=2,Saved=3,SearchResult=4};
-struct GJGameLevel {GJLevelType m_levelType=GJLevelType::Saved;int m_levelID=0,m_demon=0,m_demonDifficulty=0,average=0,m_stars=0,m_timestamp=0;bool m_autoLevel=false;
+struct GJGameLevel {GJLevelType m_levelType=GJLevelType::Saved;int m_levelID=0,m_demon=0,m_demonDifficulty=0,average=0,m_stars=0,m_timestamp=0,m_featured=0,m_isEpic=0;bool m_autoLevel=false;
 int getAverageDifficulty(){return average;}};
 namespace cocos2d {struct CCArray {std::vector<GJGameLevel*> values;};}
 using cocos2d::CCArray;
@@ -218,6 +218,12 @@ void setColor(ccColor3B c){color=c;}
 struct CCSprite:CCNode{std::string frame;
 static CCSprite*createWithSpriteFrameName(char const*s){auto*p=new CCSprite;p->frame=s;return p;}};
 }
+enum class GJDifficultyName{Short};enum class GJFeatureState{None,Featured,Epic,Legendary,Mythic};
+struct GJDifficultySprite:cocos2d::CCSprite{
+ GJFeatureState state=GJFeatureState::None;
+ static GJDifficultySprite*create(int n,GJDifficultyName){auto*s=new GJDifficultySprite;s->frame="diffIcon_"+(n<10?std::string("0"):std::string())+std::to_string(n)+"_btn_001.png";return s;}
+ void updateFeatureState(GJFeatureState s){state=s;}
+};
 namespace geode::utils {
 template<class N>struct Result{N value{};bool ok=false;bool isOk()const{return ok;}N unwrap()const{return value;}};
 template<class N>Result<N>numFromString(std::string_view s,int base=10){Result<N>r;auto c=std::from_chars(s.data(),s.data()+s.size(),r.value,base);r.ok=c.ec==std::errc{}&&c.ptr==s.data()+s.size();return r;}
@@ -242,6 +248,8 @@ int main(){using namespace corum::ranked;using namespace ui;using namespace coco
 MapMetadata info;info.kind="NORMAL";info.stars=8;info.officialLevelId=10;info.durationSeconds=84;
 auto*row=mapDifficultyBadge(42,info,135);
 auto*shape=static_cast<CCDrawNode*>(row->children[0]);auto*number=static_cast<CCLabelBMFont*>(row->children[1]);
+assert(static_cast<GJDifficultySprite*>(row->children[2])->state==GJFeatureState::None);
+for(int epic=0;epic<=3;epic++){info.epic=epic;info.featureScore=1;auto*rated=mapDifficultyBadge(42,info,135);assert(static_cast<GJDifficultySprite*>(rated->children[2])->state==static_cast<GJFeatureState>(epic?epic+1:1));}
 assert(shape->polygon.size()==48&&number->text=="8"&&number->color==(ccColor3B{255,255,255}));
 assert(static_cast<CCSprite*>(row->children[2])->frame=="diffIcon_05_btn_001.png");
 assert(mapLengthText(displayedMapMetadata(42,info).durationSeconds)=="1m 24s");

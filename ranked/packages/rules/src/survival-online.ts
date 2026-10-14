@@ -13,11 +13,12 @@ export function survivalOnlineRewardRank(rank:number,count:number):number {
   return 1+Math.round((rank-1)*15/(count-1));
 }
 /** Preserve the actual humans' difficulty average/group; bots have no accounts. */
-export function survivalOnlineBotLp(seed:number,humanLp:readonly number[],config:SurvivalConfig):readonly number[] {
+export function survivalOnlineBotLp(seed:number,humanLp:readonly number[],config:SurvivalConfig,botCount=16-humanLp.length):readonly number[] {
   if(!humanLp.length||humanLp.length>16||humanLp.some(n=>!Number.isInteger(n)||n<0||n>2147483647))
     throw new RankedDomainError("INVALID_CONFIG","Invalid human LP snapshots");
-  const count=16-humanLp.length;if(!count)return [];
-  const sum=humanLp.reduce((a,b)=>a+b,0),budget=Math.floor(sum*16/humanLp.length)-sum;
+  if(!Number.isInteger(botCount)||botCount<0||botCount>15||humanLp.length+botCount<2||humanLp.length+botCount>16)throw new RankedDomainError("INVALID_CONFIG","Invalid bot count");
+  const count=botCount,total=humanLp.length+count;if(!count)return [];
+  const sum=humanLp.reduce((a,b)=>a+b,0),budget=Math.floor(sum*total/humanLp.length)-sum;
   const base=Math.floor(budget/count),remainder=budget%count;
   const bots=Array.from({length:count},(_,i)=>base+(i<remainder?1:0));
   const random=new SeededRandom(seed),order=shuffle(Array.from({length:count},(_,i)=>i),random);
@@ -28,7 +29,7 @@ export function survivalOnlineBotLp(seed:number,humanLp:readonly number[],config
   // The floor changes mean by less than 1/16 LP and cannot cross an integer
   // tier boundary downward unless the original mean was already below it.
   if(survivalDifficultyForAverage(sum/humanLp.length,config.tierBands)!==
-    survivalDifficultyForAverage((sum+bots.reduce((a,b)=>a+b,0))/16,config.tierBands))
+    survivalDifficultyForAverage((sum+bots.reduce((a,b)=>a+b,0))/total,config.tierBands))
     throw new RankedDomainError("INVALID_CONFIG","Bot LP changed the configured difficulty group");
   return bots;
 }

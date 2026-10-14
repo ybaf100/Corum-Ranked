@@ -41,6 +41,7 @@ const REQUIRED_MIGRATIONS = [
   "0023_survival_m4_debug.sql",
   "0024_survival_m5_online.sql",
   "0025_solo_tier_divisions.sql",
+  "0026_survival_catalog_bot_count.sql",
 ] as const;
 
 export interface RankedSchemaStatus {

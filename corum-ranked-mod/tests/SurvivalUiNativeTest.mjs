@@ -116,6 +116,7 @@ test('deferred Survival launch rechecks round, scene and confirmation and never 
 #include <string>
 #include <vector>
 #include <utility>
+#include <optional>
 #include "${join(root,'src/domain/LevelPreparationPolicy.hpp')}"
 using corum::ranked::LevelPreparationContext;
 struct CCScene{};
@@ -128,22 +129,24 @@ bool inUpdate=false;
 struct RankedRoundPreparation{int launches=0;bool success=true;static RankedRoundPreparation& get(){static RankedRoundPreparation p;return p;}bool launch(CCScene*){assert(!inUpdate);++launches;return success;}};
 struct SurvivalRuntime{bool enter=true;LevelPreparationContext context{"match",40000000,1,0,false,0,0};static SurvivalRuntime& get(){static SurvivalRuntime r;return r;}auto preparationContext(){return context;}bool canEnter(){return enter;}};
 template<class T>struct WeakRef{T* pointer;explicit WeakRef(T* p):pointer(p){}struct Locked{T* ptr;explicit operator bool()const{return ptr&&ptr->alive;}T* operator->(){return ptr;}T* data(){return ptr;}};auto lock()const{return Locked{pointer};}};
-struct Coordinator{bool alive=true,running=true,m_closed=false,m_motion=false,m_confirmation=false;std::string m_pendingLaunch,m_launchedContext;CCScene* parent=nullptr;bool isRunning(){return running;}CCScene* getParent(){return parent;}
+struct Dialog{bool alive=true;CCScene* parent=nullptr;CCScene* getParent(){return parent;}};
+struct Coordinator{std::optional<WeakRef<Dialog>> m_jukebox;bool alive=true,running=true,m_closed=false,m_motion=false,m_confirmation=false;std::string m_pendingLaunch,m_launchedContext;CCScene* parent=nullptr;bool isRunning(){return running;}CCScene* getParent(){return parent;}
 ${launch}
 };
 int main(){CCScene origin,other;auto* director=CCDirector::sharedDirector();director->scene=&origin;
  auto& runtime=SurvivalRuntime::get();auto& preparation=RankedRoundPreparation::get();Coordinator owner;owner.parent=&origin;
  inUpdate=true;owner.queueNativeLaunch();owner.queueNativeLaunch();assert(work.size()==1&&preparation.launches==0);inUpdate=false;
  drain();assert(preparation.launches==1&&!owner.m_launchedContext.empty()&&owner.m_pendingLaunch.empty());
- for(int changed=0;changed<6;++changed){owner.m_launchedContext.clear();owner.queueNativeLaunch();
+ for(int changed=0;changed<7;++changed){owner.m_launchedContext.clear();owner.queueNativeLaunch();
   if(changed==0){++runtime.context.round;}
   if(changed==1){director->scene=&other;}
   if(changed==2){owner.m_closed=true;}
   if(changed==3){owner.m_confirmation=true;}
   if(changed==4){owner.running=false;}
   if(changed==5){runtime.enter=false;}
+  Dialog dialog;dialog.parent=&origin;if(changed==6)owner.m_jukebox=WeakRef(&dialog);
   drain();assert(preparation.launches==1&&owner.m_launchedContext.empty()&&owner.m_pendingLaunch.empty());
-  owner.m_closed=false;owner.m_confirmation=false;owner.running=true;runtime.enter=true;director->scene=&origin;
+  owner.m_jukebox.reset();owner.m_closed=false;owner.m_confirmation=false;owner.running=true;runtime.enter=true;director->scene=&origin;
  }
  preparation.success=false;owner.queueNativeLaunch();drain();assert(preparation.launches==2&&owner.m_launchedContext.empty());
  preparation.success=true;owner.queueNativeLaunch();drain();assert(preparation.launches==3&&!owner.m_launchedContext.empty());
@@ -161,6 +164,7 @@ test('actual Survival progress markers follow server records and native transfor
 #include <vector>
 #include "${join(root,'src/domain/SurvivalHudPresentation.hpp')}"
 struct CCPoint{float x=0,y=0;};struct ccColor4F{float r,g,b,a;};
+struct GameManager{struct Color{unsigned char r=10,g=120,b=230;};static GameManager*sharedState(){static GameManager m;return &m;}int getPlayerColor(){return 0;}Color colorForIdx(int){return {};}};
 constexpr char const* operator""_spr(char const* s,std::size_t){return s;}
 struct CCNode{bool alive=true,visible=true;void setVisible(bool v){visible=v;}bool isVisible(){return visible;}};
 struct CCDrawNode:CCNode{struct Segment{CCPoint a,b;float radius;ccColor4F tint;};std::vector<Segment> segments;
@@ -172,27 +176,65 @@ struct CCSprite:CCNode{CCPoint anchor{0,.5f},size{58,8},world{0,0};float scale=2
  CCPoint convertToNodeSpace(CCPoint p){auto a=getAnchorPointInPoints();return {(p.x-world.x)/scale+a.x,(p.y-world.y)/scale+a.y};}
 };
 template<class T>struct WeakRef{T* pointer=nullptr;WeakRef()=default;explicit WeakRef(T* p):pointer(p){}struct Locked{T* ptr;explicit operator bool()const{return ptr&&ptr->alive;}T* operator->(){return ptr;}T* data(){return ptr;}};auto lock()const{return Locked{pointer};}};
-namespace corum::ranked {struct SurvivalMatchView{std::optional<double> cutoff;std::vector<SurvivalStanding> standings;};}
-namespace corum::ranked::ui {struct SurvivalHud{WeakRef<CCSprite> m_progressBar,m_progressFill;WeakRef<CCDrawNode> m_progressLines;float m_progressWidth=0,m_progressHeight=0;
+namespace corum::ranked {struct SurvivalMatchView{std::string ownId;std::optional<double> cutoff;std::vector<SurvivalStanding> standings;};}
+namespace corum::ranked::ui {struct SurvivalHud{WeakRef<CCSprite> m_progressBar,m_progressFill;WeakRef<CCDrawNode> m_progressLines;float m_progressWidth=0,m_progressHeight=0;SurvivalScoreTween m_personalBest;
  void attachProgressBar(CCSprite*,CCSprite*,float,float);void presentProgressMarkers(SurvivalMatchView const&);};
 ${method(source,'void SurvivalHud::attachProgressBar(')}
 ${method(source,'void SurvivalHud::presentProgressMarkers(')}
 }
 int main(){using namespace corum::ranked;using corum::ranked::ui::SurvivalHud;
- SurvivalHud hud;SurvivalMatchView view;view.cutoff=75.5;view.standings.push_back({"winner","Bot",1,0,0,93.2,true,true,false});
+ SurvivalHud hud;SurvivalMatchView view;view.ownId="winner";view.cutoff=75.5;view.standings.push_back({"winner","Bot",1,0,0,93.2,true,true,false});
  hud.attachProgressBar(nullptr,nullptr,200,8);hud.presentProgressMarkers(view);assert(!hud.m_progressLines.lock());
  CCSprite bar,fill;bar.anchor={0,0};bar.size={210,12};bar.world={100,200};fill.world={110,212};
  hud.attachProgressBar(&bar,&fill,200,8);hud.presentProgressMarkers(view);
- auto* lines=bar.children.at(0);assert(lines->segments.size()==2&&lines->visible);
- assert(std::abs(lines->segments[0].a.x-156)<.001f&&std::abs(lines->segments[1].a.x-191.4f)<.001f);
- assert(lines->segments[0].tint.r==1&&lines->segments[0].tint.g<.4f&&lines->segments[1].tint.g>.8f);
+ auto* lines=bar.children.at(0);assert(lines->segments.size()==7&&lines->visible);
+ assert(std::abs(lines->segments[0].a.x-156)<.001f&&std::abs(lines->segments[2].a.x-191.4f)<.001f);
+ assert(lines->segments[0].tint.r==1&&lines->segments[0].tint.g<.4f&&lines->segments[2].tint.g>.8f);
  fill.size.x=198;hud.presentProgressMarkers(view);assert(std::abs(lines->segments[0].a.x-156)<.001f);
  bar.visible=false;hud.presentProgressMarkers(view);assert(!bar.visible&&!lines->visible);
  bar.visible=true;fill.visible=false;hud.presentProgressMarkers(view);assert(!fill.visible&&!lines->visible);
  fill.visible=true;view.cutoff=0;view.standings[0].score=100;hud.presentProgressMarkers(view);
- assert(lines->segments[0].a.x==5&&lines->segments[1].a.x==205);
+ assert(lines->segments[0].a.x==5&&lines->segments[2].a.x==205);
+ hud.m_personalBest.observe(100);for(int i=0;i<9;i++)hud.m_personalBest.advance(.25);hud.presentProgressMarkers(view);
+ assert(lines->segments[5].a.x==205);
+ assert(std::abs(lines->segments[5].tint.r-10.f/255)<.001f);
+ view.cutoff=100;hud.presentProgressMarkers(view);
+ assert(lines->segments[0].a.x==lines->segments[2].a.x&&lines->segments[2].a.x==lines->segments[5].a.x);
+ assert(lines->segments[1].a.y!=lines->segments[3].a.y&&lines->segments[3].a.y!=lines->segments[6].a.y);
  view.cutoff.reset();view.standings.clear();hud.presentProgressMarkers(view);assert(lines->segments.empty());
  fill.alive=false;hud.presentProgressMarkers(view);assert(!lines->visible&&lines->segments.empty());
  delete lines;
 }`);
+});
+
+test('actual Survival audio policy holds elimination music, uses every preparation phase and only restarts on mode changes',()=>{
+ const sync=method(read('src/ui/SurvivalGameLayer.cpp'),'    void syncAudio(');
+ run(`
+#include <cassert>
+#include <cstdint>
+#include <optional>
+#include <string>
+template<class T>struct Optional{std::optional<T> value;T unwrapOr(T fallback){return value.value_or(fallback);}};
+struct Scalar{std::optional<bool> boolean;std::optional<int64_t> integer;auto asBool(){return Optional<bool>{boolean};}auto asInt(){return Optional<int64_t>{integer};}};
+struct Result{bool object=false;int rank=0;std::optional<bool> won;bool isObject()const{return object;}Scalar operator[](std::string const& key)const{return key=="won"?Scalar{won,{}}:Scalar{{},rank};}};
+struct SurvivalMatchView{Result result;std::string phase;bool ownEliminated=false;};
+enum class RankedAudioMode{Round12,Round3,ResultWin,ResultLose};
+struct RankedAudioManager{int changes=0,ticks=0;RankedAudioMode mode=RankedAudioMode::Round3;static auto& get(){static RankedAudioManager a;return a;}void setMode(RankedAudioMode m){mode=m;changes++;}void tick(){ticks++;}};
+struct Coordinator{std::optional<RankedAudioMode> m_audioMode;
+${sync}
+};
+int main(){Coordinator layer;auto& audio=RankedAudioManager::get();SurvivalMatchView view;
+ for(auto const* phase:{"ROUND_1","ROUND_2","ROUND_3","FINAL","TIEBREAK"}){view.phase=phase;layer.syncAudio(view);assert(audio.mode==RankedAudioMode::Round12);}
+ assert(audio.changes==1&&audio.ticks==5);
+ layer.syncAudio(view,true);assert(audio.mode==RankedAudioMode::ResultLose);auto changes=audio.changes;
+ layer.syncAudio(view,true);assert(audio.changes==changes);
+ layer.syncAudio(view);assert(audio.mode==RankedAudioMode::Round12);
+ view.ownEliminated=true;layer.syncAudio(view);assert(audio.mode==RankedAudioMode::ResultLose);
+ view.result={true,2,false};view.ownEliminated=false;layer.syncAudio(view);assert(audio.mode==RankedAudioMode::ResultLose);
+ view.result={true,1,true};layer.syncAudio(view);assert(audio.mode==RankedAudioMode::ResultWin);
+ changes=audio.changes;layer.syncAudio(view);assert(audio.changes==changes);
+ view.result={true,1,false};layer.syncAudio(view);assert(audio.mode==RankedAudioMode::ResultLose);
+ changes=audio.changes;layer.m_audioMode.reset();layer.syncAudio(view);assert(audio.changes==changes+1);
+}
+`);
 });

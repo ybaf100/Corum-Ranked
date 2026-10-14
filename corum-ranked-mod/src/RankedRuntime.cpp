@@ -4162,7 +4162,7 @@ void RankedRuntime::fetchSurvivalProfile() {
 }
 
 void RankedRuntime::applyAdminProjection(matjson::Value const& result,std::string const& scope) {
-    if(scope=="SOLO_RANKED" && (result["own"].asBool().unwrapOr(false) || result["reset"].asBool().unwrapOr(false))) {
+    if((scope=="SOLO_RANKED" || (scope=="COMMON" && result["reset"].asBool().unwrapOr(false))) && (result["own"].asBool().unwrapOr(false) || result["reset"].asBool().unwrapOr(false))) {
         auto const profile=result["profile"];
         if(profile.isObject()) {
             m_view.profileTier=profile["displayedTier"].asString().unwrapOr(m_view.profileTier);

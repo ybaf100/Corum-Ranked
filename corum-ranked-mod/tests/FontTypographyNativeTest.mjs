@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {readFileSync, writeFileSync, mkdtempSync, rmSync} from 'node:fs';
+import {readFileSync, writeFileSync, mkdtempSync, rmSync, readdirSync} from 'node:fs';
 import {execFileSync} from 'node:child_process';
 import {join, resolve} from 'node:path';
 import {tmpdir} from 'node:os';
@@ -34,6 +34,20 @@ test('source font generation keeps all weights and isolates large countdown digi
     const overlay = read('src/ui/RankedEntryOverlay.cpp');
     assert.match(overlay, /FontWeight::Black, countdownFont\(\)/);
     assert.match(overlay, /setLabelScale\(m_digit, 1\.7f \* frame.scale\)/);
+});
+
+test('reserved Regular atlas avoids unused Korean duplicates while bilingual UI keeps its active weights',()=>{
+    function sources(directory){return readdirSync(directory,{withFileTypes:true}).flatMap(entry=>entry.isDirectory()?sources(join(directory,entry.name)):[join(directory,entry.name)]);}
+    for(const file of sources(join(root,'src')).filter(name=>/\.(?:hpp|cpp)$/.test(name)&&!name.endsWith('RankedVisuals.hpp'))){
+        const source=readFileSync(file,'utf8');
+        assert.doesNotMatch(source,/FontWeight::Regular|CorumSans\.fnt/,`Regular is reserved; add caption glyphs and validate the atlas budget before using it: ${file}`);
+    }
+    const charset=spec=>new Set(spec.split(',').flatMap(part=>{const[a,b=a]=part.split('-').map(Number);return Array.from({length:b-a+1},(_,i)=>a+i);}));
+    assert.equal([...charset(fonts.CorumSans.charset)].some(n=>n>=0xac00&&n<=0xd7a3),false);
+    for(const weight of ['CorumSansMedium','CorumSansSemiBold','CorumSansBold','CorumSansBlack']){
+        const glyphs=charset(fonts[weight].charset);
+        for(const letter of '승급 승격 강등 기록 서바이벌 솔로 랭크 봇 수 설정 항복')assert(glyphs.has(letter.codePointAt(0)), `${weight} missing ${letter}`);
+    }
 });
 
 test('production label helpers preserve geometry, width floors, animation scales and native fallback', () => {

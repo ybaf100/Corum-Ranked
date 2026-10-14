@@ -97,12 +97,12 @@ function integer(values: Map<string,string>, key: string, required=false): numbe
 }
 export function parseSurvivalMetadata(record: string): SurvivalMapMetadata {
   const row=fields(record), demon=integer(row,"17"), automatic=integer(row,"25"), length=integer(row,"15");
-  if (demon>1 || automatic>1 || length>5) throw new SurvivalMapError("INVALID_METADATA","Invalid GD booleans or length");
+  if (demon>1 || automatic>1 || length>5 || integer(row,"42")>3) throw new SurvivalMapError("INVALID_METADATA","Invalid GD booleans or length");
   const denominator=integer(row,"8"), numerator=integer(row,"9");
   if (!demon && (!denominator || !numerator)) throw new SurvivalMapError("INVALID_METADATA","Unrated native difficulty");
   return {levelId:integer(row,"1",true),stars:integer(row,"18",true),demon:demon===1,
     demonDifficulty:demon ? survivalDemonFromNativeCode(integer(row,"43")) : null,
-    automatic:automatic===1,platformer:length===5};
+    automatic:automatic===1,platformer:length===5,length,featureScore:integer(row,"19"),epic:integer(row,"42")};
 }
 export function parseSurvivalSearch(body: string, page: number) {
   if (body.trim()==="-1") throw new SurvivalMapError("EMPTY_SEARCH","GD returned no levels");
@@ -165,9 +165,9 @@ interface RecentCatalog {
   visited:Set<number>;
   levels:Map<number,SurvivalMapMetadata>;
 }
-const CATALOG_TTL_MS=10*60_000,MAX_CATALOG_LEVELS=256,RECENT_PAGE_WINDOW=256;
+const CATALOG_TTL_MS=10*60_000,MAX_CATALOG_LEVELS=512;
 
-/** Server-owned candidate catalogs, replenished from recent rated GD pages.
+/** Server-owned candidate catalogs, replenished from rated GD pages.
  * Search metadata is provisional; the downloaded map supplies the final
  * certificate. The exact Survival predicate and match exclusions always apply. */
 @Injectable()
@@ -176,6 +176,7 @@ export class GdSurvivalMapProvider implements SurvivalMapProvider {
   private readonly catalogs=new Map<string,RecentCatalog>();
   private readonly catalogJobs=new Map<string,Promise<RecentCatalog>>();
   private readonly badCandidates=new Map<number,number>();
+  private legacyRelay=false;
   private blocked:{until:number;error:SurvivalMapError}|null=null;
   public constructor(@Inject(RANDOM_SOURCE) private readonly random: RandomSource,
     fetcher: typeof fetch = fetch) {this.fetcher=fetcher;}
@@ -201,6 +202,7 @@ export class GdSurvivalMapProvider implements SurvivalMapProvider {
         this.blocked={until:Date.now()+retryAfterMs,error};
       throw error;
     }
+    if(response.headers.get("x-corum-gd-legacy-search")==="1")this.legacyRelay=true;
     const reader=response.body.getReader(), parts:Uint8Array[]=[]; let size=0;
     try {
       for (;;) {const {value,done}=await reader.read(); if (done) break;
@@ -218,11 +220,12 @@ export class GdSurvivalMapProvider implements SurvivalMapProvider {
     const error=this.blocked.error;
     throw new SurvivalMapError(error.code,error.message,error.failures,error.http,Math.max(2_000,remaining));
   }
-  private catalogKey(filter:Record<string,string>):string {return `${filter.diff}:${filter.demonFilter??""}`;}
+  private catalogKey(filter:Record<string,string>):string {return `${this.legacyRelay?"4":filter.type??"4"}:${filter.diff}:${filter.demonFilter??""}`;}
   private async search(filter:Record<string,string>,page:number,signal:AbortSignal) {
+    const actualPage=this.legacyRelay?Math.min(255,page):page;
     return parseSurvivalSearch(await this.post("getGJLevels21.php",{
-      type:"4",str:"",star:"1",len:"0,1,2,3,4",page:String(page),...filter,
-    },signal,2*1024*1024),page);
+      type:"4",str:"",star:"1",len:"0,1,2,3",page:String(actualPage),...filter,...(this.legacyRelay?{type:"4"}:{}),
+    },signal,2*1024*1024),this.legacyRelay?Math.min(255,actualPage):actualPage);
   }
   private addCandidates(catalog:RecentCatalog,levels:readonly SurvivalMapMetadata[]):void {
     for(const level of levels)catalog.levels.set(level.levelId,level);
@@ -234,9 +237,9 @@ export class GdSurvivalMapProvider implements SurvivalMapProvider {
     const active=this.catalogJobs.get(key);if(active)return active;
     const job=(async()=>{
       const initial=await this.search(filter,0,signal);
-      if(!initial.total)throw new SurvivalMapError("EMPTY_SEARCH","No recent rated GD catalog candidates");
+      if(!initial.total)throw new SurvivalMapError("EMPTY_SEARCH","No rated GD catalog candidates");
       const fresh:RecentCatalog={expiresAt:Date.now()+CATALOG_TTL_MS,
-        pageCount:Math.min(RECENT_PAGE_WINDOW,Math.ceil(initial.total/initial.pageSize)),visited:new Set([0]),levels:new Map()};
+        pageCount:Math.min(this.legacyRelay?256:200000,Math.ceil(initial.total/initial.pageSize)),visited:new Set([0]),levels:new Map()};
       this.addCandidates(fresh,initial.levels);this.catalogs.set(key,fresh);return fresh;
     })().finally(()=>this.catalogJobs.delete(key));
     this.catalogJobs.set(key,job);return job;
@@ -259,8 +262,9 @@ export class GdSurvivalMapProvider implements SurvivalMapProvider {
     }
     const demonFilters={EASY:"1",MEDIUM:"2",HARD:"3",INSANE:"4",EXTREME:"5"};
     for (const demon of allowed.demons) filters.push({diff:"-2",demonFilter:demonFilters[demon]});
+    const searchFilters=filters.flatMap(filter=>["2","4","11"].map(type=>({...filter,type})));
     const signal=AbortSignal.timeout(30_000), excluded=new Set(request.excludedLevelIds), seen=new Set<number>();
-    const failures:SurvivalMapErrorCode[]=[];let lastDetail="No eligible recent rated GD candidates",downloads=0;
+    const failures:SurvivalMapErrorCode[]=[];let lastDetail="No eligible rated GD candidates",downloads=0;
     let lastHttp:SurvivalMapHttpDiagnostics|null=null;
     const failed=(e:unknown,fallback:SurvivalMapErrorCode="API_ERROR")=>{
       // Forbidden/throttled responses apply to the upstream route, not one
@@ -271,7 +275,7 @@ export class GdSurvivalMapProvider implements SurvivalMapProvider {
       lastHttp=e instanceof SurvivalMapError?e.http:null;
     };
     for(const [id,until]of this.badCandidates)if(until<=Date.now())this.badCandidates.delete(id);
-    for(let pass=0;pass<3 && !signal.aborted && downloads<12;pass++)for(const filter of shuffle(filters,this.random)) {
+    for(let pass=0;pass<3 && !signal.aborted && downloads<12;pass++)for(const filter of shuffle(searchFilters,this.random)) {
       if(signal.aborted || downloads>=12)break;
       let catalog:RecentCatalog;
       try {catalog=await this.catalog(filter,signal);}catch(e){failed(e);continue;}

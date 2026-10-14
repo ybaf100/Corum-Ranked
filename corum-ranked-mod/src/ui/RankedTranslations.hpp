@@ -45,6 +45,7 @@ inline constexpr std::array kKoreanTranslations {
     Translation{"choose-mode", "게임 모드 선택"},
     Translation{"click-mode", "입장할 모드를 선택하세요"},
     Translation{"admin-scope-common", "공통"},
+    Translation{"admin-reset-all", "솔로 랭크, 서바이벌과 공통 도전과제 / AP / 칭호를 모두 초기화합니다. 계정은 유지됩니다."},
     Translation{"admin-reset-scope", "선택한 범위의 기록을 초기화합니다.\n다른 모드의 기록과 계정은 유지됩니다."},
     Translation{"Invalid debug password", "디버그 비밀번호를 확인하세요."},
     Translation{"Bot fill requires a debug client", "디버그 모드에서만 사용할 수 있습니다."},

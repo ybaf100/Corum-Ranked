@@ -17,7 +17,7 @@ test('Survival native download attestation enforces the exact server ID, version
 enum class DemonDifficultyType{HardDemon=0,EasyDemon=3,MediumDemon=4,InsaneDemon=5,ExtremeDemon=6};
 enum class GJLevelType{Saved,SearchResult,Main,Editor};
 struct Value{int number;int value()const{return number;}};
-struct GJGameLevel{Value m_levelID{40000000},m_stars{4},m_demon{0};int m_levelVersion=1,m_demonDifficulty=0;
+struct GJGameLevel{Value m_levelID{40000000},m_stars{4},m_demon{0};int m_levelVersion=1,m_demonDifficulty=0,m_levelLength=2;
  bool m_autoLevel=false,m_platformer=false,m_levelNotDownloaded=false;GJLevelType m_levelType=GJLevelType::Saved;
  std::string m_levelString="native-downloaded-data";bool isPlatformer(){return m_platformer;}};
 ${adapter}
@@ -37,6 +37,8 @@ int main(){using namespace corum::ranked;
  level.m_levelID.number=39999999;assert(!matches());level.m_levelID.number=40000001;assert(!matches());level.m_levelID.number=40000000;
  level.m_levelVersion=2;assert(!matches());level.m_levelVersion=1;
  level.m_stars.number=0;assert(!matches());level.m_stars.number=4;
+ for(int length=0;length<4;length++){level.m_levelLength=length;assert(matches());}
+ for(int length:{4,5,-1}){level.m_levelLength=length;assert(!matches());}level.m_levelLength=2;
  level.m_autoLevel=true;assert(!matches());level.m_autoLevel=false;level.m_platformer=true;assert(!matches());level.m_platformer=false;
  level.m_levelNotDownloaded=true;assert(!matches());level.m_levelNotDownloaded=false;
  for(auto type:{GJLevelType::SearchResult,GJLevelType::Main,GJLevelType::Editor}){level.m_levelType=type;assert(!matches());}level.m_levelType=GJLevelType::Saved;

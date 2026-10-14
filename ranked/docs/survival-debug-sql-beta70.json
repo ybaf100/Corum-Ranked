@@ -1,0 +1,125 @@
+{
+  "measuredAt": "2026-10-14",
+  "backend": "PGlite: real SQL executor, deterministic server clock",
+  "scope": "Application SQL in Debug services and drivers, including transaction queries; excludes BEGIN/COMMIT, HTTP requests, shared recovery loops and production network latency",
+  "baseline": "Pre-optimization discovery frequency replayed using the same SQL executor and engine",
+  "records": [
+    {
+      "mode": "Solo",
+      "active": 0,
+      "seconds": 4,
+      "before": {
+        "queries": 32,
+        "discovery": 32,
+        "failures": 0
+      },
+      "after": {
+        "queries": 2,
+        "discovery": 2,
+        "failures": 0
+      },
+      "botTickMs": 125
+    },
+    {
+      "mode": "Solo",
+      "active": 1,
+      "seconds": 4,
+      "before": {
+        "queries": 672,
+        "discovery": 32,
+        "failures": 0
+      },
+      "after": {
+        "queries": 642,
+        "discovery": 2,
+        "failures": 0
+      },
+      "botTickMs": 125
+    },
+    {
+      "mode": "Solo",
+      "active": 3,
+      "seconds": 4,
+      "before": {
+        "queries": 1952,
+        "discovery": 32,
+        "failures": 0
+      },
+      "after": {
+        "queries": 1922,
+        "discovery": 2,
+        "failures": 0
+      },
+      "botTickMs": 125
+    },
+    {
+      "kind": "startLatency",
+      "mode": "Solo",
+      "creationMs": 86.58987799999886,
+      "registrationClockDelayMs": 0,
+      "botTickMs": 125
+    },
+    {
+      "mode": "Survival",
+      "active": 0,
+      "seconds": 4,
+      "before": {
+        "queries": 16,
+        "discovery": 16,
+        "failures": 0
+      },
+      "after": {
+        "queries": 2,
+        "discovery": 2,
+        "failures": 0
+      },
+      "botTickMs": 250
+    },
+    {
+      "mode": "Survival",
+      "active": 1,
+      "seconds": 4,
+      "before": {
+        "queries": 64,
+        "discovery": 16,
+        "failures": 0
+      },
+      "after": {
+        "queries": 50,
+        "discovery": 2,
+        "failures": 0
+      },
+      "botTickMs": 250
+    },
+    {
+      "mode": "Survival",
+      "active": 3,
+      "seconds": 4,
+      "before": {
+        "queries": 160,
+        "discovery": 16,
+        "failures": 0
+      },
+      "after": {
+        "queries": 146,
+        "discovery": 2,
+        "failures": 0
+      },
+      "botTickMs": 250
+    },
+    {
+      "kind": "startLatency",
+      "mode": "Survival",
+      "creationMs": 65.4932579999986,
+      "registrationClockDelayMs": 0,
+      "botTickMs": 250
+    },
+    {
+      "kind": "settlementRetryLatency",
+      "mode": "Survival",
+      "wallMs": 15.044792000000143,
+      "serverClockDelayMs": 250,
+      "ledgerPayments": 1
+    }
+  ]
+}

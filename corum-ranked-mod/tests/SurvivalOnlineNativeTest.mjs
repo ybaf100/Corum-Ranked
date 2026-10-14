@@ -67,7 +67,7 @@ struct SurvivalRuntime{
  void observeQueue(matjson::Value const&);
  void pollQueue();void queueAction(std::string const&,matjson::Value);
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
- void fillBots(std::string);
+ void fillBots(std::string,int=-1);
 #endif
 };
 ${['bool SurvivalRuntime::current(', 'std::string SurvivalRuntime::matchEndpoint(', 'int SurvivalRuntime::queueWaitingSeconds()', 'void SurvivalRuntime::observeQueue(', 'void SurvivalRuntime::pollQueue()', 'void SurvivalRuntime::queueAction('].map(method).join('\n')}

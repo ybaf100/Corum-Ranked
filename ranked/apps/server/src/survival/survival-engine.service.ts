@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, Logger,
   NotFoundException, type OnApplicationBootstrap, type OnApplicationShutdown } from "@nestjs/common";
 import { createSurvivalMatch, reduceSurvivalMatch, survivalCurrentRound, survivalLiveView, survivalMilliPercent,
-  type SurvivalCommand, type SurvivalEntrant, type SurvivalMatch } from "@corum-ranked/rules";
+  type SurvivalVerifiedMap, type SurvivalCommand, type SurvivalEntrant, type SurvivalMatch } from "@corum-ranked/rules";
 import { ID_GENERATOR, SERVER_CLOCK, type IdGenerator, type ServerClock } from "../common/runtime.module.js";
 import { SurvivalConfigService, type SurvivalConfigDocument } from "../config/survival-config.service.js";
 import { DATABASE, type DatabasePort, type SqlExecutor } from "../database/database.port.js";
@@ -63,11 +63,11 @@ export class SurvivalEngineService implements OnApplicationBootstrap, OnApplicat
   /** Trusted admission adapter only. Caller owns the mode admission fence and
    * account/session lock. Virtual LP changes this match snapshot, never a profile. */
   public async createWithin(tx:SqlExecutor,creationKey:string,players:readonly SurvivalAdmissionPlayer[],
-    captured:SurvivalConfigDocument, humanLpSnapshot?:number,presentationControlled=false,online=false):Promise<SurvivalMatch> {
-    if(!creationKey.trim() || creationKey.length>200 || (!online && players.length!==16) || (online && (players.length<2||players.length>16)) || new Set(players.map(p=>p.participantId)).size!==players.length)
+    captured:SurvivalConfigDocument, humanLpSnapshot?:number,presentationControlled=false,online=false,variableSize=false):Promise<SurvivalMatch> {
+    if(!creationKey.trim() || creationKey.length>200 || (!online && !variableSize && players.length!==16) || ((online || variableSize) && (players.length<2||players.length>16)) || new Set(players.map(p=>p.participantId)).size!==players.length)
       throw new BadRequestException("M3 accepts exactly 16 distinct entrants");
     await lockSurvivalAdmission(tx);
-    const requestHash=online?hash({players,presentationControlled,online}):presentationControlled?hash({players,humanLpSnapshot,presentationControlled}):humanLpSnapshot===undefined?hash(players):hash({players,humanLpSnapshot});
+    const requestHash=variableSize?hash({players,humanLpSnapshot,presentationControlled,variableSize}):online?hash({players,presentationControlled,online}):presentationControlled?hash({players,humanLpSnapshot,presentationControlled}):humanLpSnapshot===undefined?hash(players):hash({players,humanLpSnapshot});
       // Serialize even two first uses of the same key before its row exists.
       await tx.query("SELECT pg_advisory_xact_lock(hashtext($1))",[`survival-create:${creationKey}`]);
       const existing=(await tx.query<MatchRow>("SELECT * FROM sur_matches WHERE creation_key=$1",[creationKey])).rows[0];
@@ -83,7 +83,7 @@ export class SurvivalEngineService implements OnApplicationBootstrap, OnApplicat
         if(!profile)throw new BadRequestException("Enter Survival before match admission");
         return {...p,name:profile.gd_username,lp:humanLpSnapshot??Number(profile.lp),displayedTier:profile.displayed_tier,gdAccountId:profile.gd_account_id};
       });
-      const match=createSurvivalMatch(this.ids.next(),entrants,captured.config,captured.generation,this.clock.now().getTime(),online);
+      const match=createSurvivalMatch(this.ids.next(),entrants,captured.config,captured.generation,this.clock.now().getTime(),online,variableSize);
       if(presentationControlled){match.presentationControlled=true;match.presentationGate="INTRO";}
       await tx.query(`INSERT INTO sur_matches(id,creation_key,request_hash,state,revision,config_generation,config_snapshot,
         average_lp,difficulty_group,current_round_key,snapshot,created_at,updated_at)
@@ -163,14 +163,36 @@ export class SurvivalEngineService implements OnApplicationBootstrap, OnApplicat
     });
     if(!job)return;
     try {
-      const map=await this.maps.select(job.request);
-      await this.database.transaction(async tx=>{
-        const row=await this.lock(tx,matchId),round=survivalCurrentRound(row.snapshot);
-        if(row.map_job_token!==job.token || row.snapshot.state!=="MAP_SELECTION" || round.key!==job.roundKey || round.mapGeneration!==job.mapGeneration)return;
-        const match=reduceSurvivalMatch(row.snapshot,{type:"MAP_SELECTED",roundKey:job.roundKey,mapGeneration:job.mapGeneration,map},this.clock.now().getTime());
-        await this.persist(tx,row.snapshot,match);
-        await tx.query("UPDATE sur_matches SET map_job_token=NULL,map_job_deadline_at=NULL,map_retry_at=NULL,map_error=NULL WHERE id=$1",[matchId]);
-      });
+      let window=30;
+      for(let attempt=0;attempt<8;attempt++) {
+        const recent=(await this.database.query<{level_id:string}>("SELECT level_id FROM sur_map_selection_history ORDER BY id DESC LIMIT $1",[window])).rows.map(r=>Number(r.level_id));
+        let map:SurvivalVerifiedMap;
+        try {
+          map=await this.maps.select({...job.request,excludedLevelIds:[...job.request.excludedLevelIds,...recent]});
+          if(recent.includes(map.levelId))throw new SurvivalMapError("DUPLICATE_CANDIDATES","Provider returned a recently selected map");
+        } catch(error) {
+          if(window>0 && recent.length>0 && error instanceof SurvivalMapError && ["DUPLICATE_CANDIDATES","NO_ELIGIBLE_MAP","EMPTY_SEARCH"].includes(error.code) &&
+            !error.failures.some(code=>["API_ERROR","DOWNLOAD_FAILED"].includes(code))) {
+            window-=10;await this.database.query("UPDATE sur_matches SET map_job_deadline_at=$3 WHERE id=$1 AND map_job_token=$2",[matchId,job.token,iso(this.clock.now().getTime()+40000)]);continue;
+          }
+          throw error;
+        }
+        const accepted=await this.database.transaction(async tx=>{
+          const row=await this.lock(tx,matchId),round=survivalCurrentRound(row.snapshot);
+          if(row.map_job_token!==job.token || row.snapshot.state!=="MAP_SELECTION" || round.key!==job.roundKey || round.mapGeneration!==job.mapGeneration)return true;
+          // External downloads finished before this short global confirmation lock.
+          await tx.query("SELECT pg_advisory_xact_lock(hashtext('survival-map-history-v1'))");
+          const latest=(await tx.query<{level_id:string}>("SELECT level_id FROM sur_map_selection_history ORDER BY id DESC LIMIT $1",[window])).rows;
+          if(latest.some(r=>Number(r.level_id)===map.levelId))return false;
+          const match=reduceSurvivalMatch(row.snapshot,{type:"MAP_SELECTED",roundKey:job.roundKey,mapGeneration:job.mapGeneration,map},this.clock.now().getTime());
+          await this.persist(tx,row.snapshot,match);
+          await tx.query("INSERT INTO sur_map_selection_history(match_id,round_key,map_generation,level_id,history_window,selected_at) VALUES($1,$2,$3,$4,$5,$6)",[matchId,round.key,round.mapGeneration,map.levelId,window,this.clock.now().toISOString()]);
+          await tx.query("UPDATE sur_matches SET map_job_token=NULL,map_job_deadline_at=NULL,map_retry_at=NULL,map_error=NULL WHERE id=$1",[matchId]);
+          return true;
+        });
+        if(accepted)return;
+      }
+      throw new SurvivalMapError("DUPLICATE_CANDIDATES","Concurrent Survival selections exhausted candidate retries");
     } catch(e) {
       const error=e instanceof SurvivalMapError ? {code:e.code,message:e.message,failures:e.failures,http:e.http} : {code:"API_ERROR",message:e instanceof Error?e.message:String(e)};
       const retryMs=e instanceof SurvivalMapError?Math.min(120_000,Math.max(2_000,e.retryAfterMs)):2_000;

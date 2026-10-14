@@ -40,8 +40,8 @@ function validateForm(path, text) {
   for (const [key] of fields) { if (!allowed.has(key) || seen.has(key)) return null; seen.add(key); }
   if (fields.get("gameVersion") !== "22" || fields.get("binaryVersion") !== "45" || fields.get("secret") !== "Wmfd2893gb7") return null;
   if (path === SEARCH) {
-    if (fields.get("type") !== "4" || fields.get("str") !== "" || fields.get("star") !== "1" || fields.get("len") !== "0,1,2,3,4" ||
-      !/^(?:0|[1-9]\d{0,2})$/.test(fields.get("page") ?? "") || Number(fields.get("page")) > 255) return null;
+    if (!["2","4","11"].includes(fields.get("type")) || fields.get("str") !== "" || fields.get("star") !== "1" || !["0,1,2,3","0,1,2,3,4"].includes(fields.get("len")) ||
+      !/^(?:0|[1-9]\d{0,5})$/.test(fields.get("page") ?? "") || Number(fields.get("page")) > 199999) return null;
     const diff = fields.get("diff");
     if (diff === "-2" ? !/^[1-5]$/.test(fields.get("demonFilter") ?? "") : !/^[345]$/.test(diff ?? "") || fields.has("demonFilter")) return null;
   } else {
