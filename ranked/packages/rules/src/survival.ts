@@ -1,5 +1,5 @@
 import { RankedDomainError } from "./errors.js";
-import type { RankedTier } from "./types.js";
+import type { BaseRankedTier as RankedTier } from "./types.js";
 
 export interface SurvivalTierBand {
   readonly tier: string;

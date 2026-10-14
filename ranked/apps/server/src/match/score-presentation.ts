@@ -6,6 +6,8 @@ interface ScoreSubject {
   readonly playerId: string;
   readonly before: RankedRatingProfile;
   readonly after: RankedRatingProfile;
+  readonly beforeWins?:number;
+  readonly beforeLosses?:number;
 }
 
 /** Ended series disappear from profileAfter; retain the final mark for the UI. */
@@ -22,9 +24,13 @@ export async function buildScorePresentation(
   subjects: Readonly<Record<PlayerSide, ScoreSubject>>, winner: PlayerSide,
 ) {
   const overrides: StandingOverride[] = [];
-  for (const subject of Object.values(subjects)) {
-    overrides.push({ phase: "before", playerId: subject.playerId, profile: subject.before },
-      { phase: "after", playerId: subject.playerId, profile: subject.after });
+  for (const [side,subject] of Object.entries(subjects)) {
+    const stats=subject.beforeWins!==undefined && subject.beforeLosses!==undefined?
+      {wins:subject.beforeWins,losses:subject.beforeLosses}:{};
+    const afterStats=subject.beforeWins!==undefined && subject.beforeLosses!==undefined?
+      {wins:subject.beforeWins+(winner===side?1:0),losses:subject.beforeLosses+(winner!==side?1:0)}:{};
+    overrides.push({ phase: "before", playerId: subject.playerId, profile: subject.before,...stats },
+      { phase: "after", playerId: subject.playerId, profile: subject.after,...afterStats });
   }
   // A single statement projects both participants' before/after profiles over
   // the same ladder snapshot. A concurrent match cannot change only one phase.

@@ -3,9 +3,11 @@
 #include <algorithm>
 #include <cmath>
 #include <iterator>
+#include <limits>
 #include <optional>
 #include <string>
 #include <vector>
+#include "RankTierPresentation.hpp"
 
 namespace corum::ranked {
 
@@ -21,6 +23,9 @@ struct StandingView {
     int total = 0;
     std::optional<double> topPercent;
     std::optional<StandingTargetView> target;
+    std::string displayTier = {}, nextTier = {};
+    int goldPosition = 0, goldTotal = 0;
+    std::optional<int> nextTierCutoff = {}, championCutoff = {}, masterCutoff = {};
 };
 
 struct TierCutoffView { std::string tier; int minimum = 0; };
@@ -111,14 +116,18 @@ struct ScoreAnimationInput {
     std::optional<int> survivalRank;
 
     ScoreMotion motion() const {
-        return promoted ? ScoreMotion::Promotion : demoted ? ScoreMotion::Demotion : ScoreMotion::Normal;
+        if(promoted && (survivalRank || goldRankTier(afterTier)))return ScoreMotion::Promotion;
+        if(demoted && (survivalRank || goldRankTier(beforeTier) || rankTierBase(beforeTier)!=rankTierBase(afterTier)))return ScoreMotion::Demotion;
+        return ScoreMotion::Normal;
     }
     double duration() const { return motion() == ScoreMotion::Normal ? 2.0 : 4.0; }
 };
 
 inline bool validScoreBands(std::vector<TierCutoffView> const& bands) {
-    if (bands.size() != 5) return false;
-    static std::vector<std::string> const tiers {"RED", "AQUA", "BRONZE", "SILVER", "GOLD"};
+    if (bands.size() != 5 && bands.size()!=13) return false;
+    std::vector<std::string> const tiers = bands.size()==13?
+        std::vector<std::string>{"RED3","RED2","RED1","AQUA3","AQUA2","AQUA1","BRONZE3","BRONZE2","BRONZE1","SILVER3","SILVER2","SILVER1","GOLD"}:
+        std::vector<std::string>{"RED", "AQUA", "BRONZE", "SILVER", "GOLD"};
     for (std::size_t i = 0; i < tiers.size(); ++i) {
         if (bands[i].tier != tiers[i] || (i && bands[i].minimum <= bands[i - 1].minimum)) return false;
     }
@@ -231,14 +240,18 @@ inline ScoreProgressSample sampleScoreProgress(ScoreAnimationInput const& input,
     }
     // Older results retain their fixed target. New GOLD timelines retarget
     // within this immutable result, without consulting a newly polled ladder.
-    sample.standing = sample.tier == "GOLD" || sample.complete || sample.tier != input.beforeTier
-        ? input.standingAfter : input.standingBefore;
-    if (sample.tier == "GOLD") sampleGoldTimeline(input,eased,sample);
-    auto const band = std::find_if(input.bands.begin(), input.bands.end(), [&](auto const& b) { return b.tier == sample.tier; });
+    sample.standing = sample.complete || sample.tier != input.beforeTier ? input.standingAfter : input.standingBefore;
+    auto const legacyGold=sample.tier=="GOLD" && sample.standing.displayTier.empty();
+    if(legacyGold)sample.standing=input.standingAfter;
+    if (legacyGold || sample.tier=="CHAMPION") sampleGoldTimeline(input,eased,sample);
+    auto const band = std::find_if(input.bands.begin(), input.bands.end(), [&](auto const& b) { return b.tier == sample.tier || (goldRankTier(sample.tier) && b.tier=="GOLD"); });
     if (band == input.bands.end()) return sample;
     sample.minimum = band->minimum;
     if (std::next(band) != input.bands.end()) {
         sample.target = std::next(band)->minimum; sample.nextTier = std::next(band)->tier;
+    } else if(goldRankTier(sample.tier) && sample.tier!="CHAMPION" && !legacyGold && sample.standing.nextTierCutoff) {
+        sample.nextTier=sample.standing.nextTier;
+        sample.target=*sample.standing.nextTierCutoff==std::numeric_limits<int>::max()?*sample.standing.nextTierCutoff:*sample.standing.nextTierCutoff+1;
     } else {
         sample.goldLeader = sample.standing.rank == 1;
         sample.target = sample.standing.target ? sample.standing.target->score : sample.score;

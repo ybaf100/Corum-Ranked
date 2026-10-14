@@ -15,6 +15,10 @@ export class LeaderboardPageDto {
 export class LeaderboardController {
   public constructor(private readonly leaderboard: LeaderboardService) {}
 
+  @Get("tiers")
+  @Header("Cache-Control", "no-store")
+  public tiers() { return this.leaderboard.tierGuide(); }
+
   @Get()
   @Header("Cache-Control", "public, max-age=15, stale-while-revalidate=45")
   public list(@Query() query: LeaderboardPageDto) {

@@ -31,6 +31,7 @@ const migrationNames = [
     "0022_survival_m3_engine.sql",
     "0023_survival_m4_debug.sql",
     "0024_survival_m5_online.sql",
+    "0025_solo_tier_divisions.sql",
 ] as const;
 
 const migrationSql = async (migrationName: string): Promise<string> => {

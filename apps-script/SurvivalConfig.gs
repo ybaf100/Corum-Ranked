@@ -77,6 +77,15 @@ function readCorumSurvivalConfig_() {
     try { config[key] = JSON.parse(rankedText_(raw[key])); }
     catch (error) { config[key] = []; errors.push(key + " must be valid JSON"); }
   });
+  // Survival remains unsplit. Its five boundaries follow Solo's III divisions.
+  var soloSheet = getSpreadsheet_().getSheetByName(CORUM_RANKED_SHEETS.tiers);
+  var soloBands = readRankedTierBands_(soloSheet);
+  ["RED", "AQUA", "BRONZE", "SILVER", "GOLD"].forEach(function (base) {
+    var boundary = soloBands.filter(function (band) { return band.tier === (base === "GOLD" ? base : base + "3") || band.tier === base; })[0];
+    if (boundary && Number.isSafeInteger(boundary.minInclusive)) {
+      config.tierBands.forEach(function (band) { if (band.group === base) band.minimumLp = boundary.minInclusive; });
+    }
+  });
   // A duplicate key must be fixed by the operator rather than silently winning.
   if (sheet && sheet.getLastRow() > 1) {
     var values = sheet.getDataRange().getValues();

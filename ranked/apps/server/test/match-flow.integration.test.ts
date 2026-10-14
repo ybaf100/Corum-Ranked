@@ -3,7 +3,7 @@ import { readFile, readdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { SeededRandom, scoreAttempt, type CsmpTier } from "@corum-ranked/rules";
+import { SeededRandom, scoreAttempt, expandSoloTierBands, type CsmpTier } from "@corum-ranked/rules";
 import type { IdGenerator, ServerClock } from "../src/common/runtime.module.js";
 import { TokenService } from "../src/common/token.service.js";
 import type { CsmpTierSource } from "../src/config/csmp-tier.source.js";
@@ -718,7 +718,7 @@ describe("two-client authoritative match flow", () => {
     expect(state.players.A).toMatchObject({wins:1,losses:0});
     expect(state.players.B).toMatchObject({wins:0,losses:1});
     expect(state.result.scorePresentation.version).toBe(1);
-    expect(state.result.scorePresentation.tierBands).toEqual([...document.operational.tierBands]
+    expect(state.result.scorePresentation.tierBands).toEqual([...expandSoloTierBands(document.operational.tierBands)]
       .sort((a,b) => a.minInclusive - b.minInclusive).map(({tier,minInclusive}) => ({tier,minInclusive})));
     const resultScoreSnapshot = structuredClone(state.result.scorePresentation);
     // The persisted result must keep its ladder/target snapshot even after the

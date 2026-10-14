@@ -1,5 +1,5 @@
 import { Inject, Injectable } from "@nestjs/common";
-import type { DisplayTier } from "@corum-ranked/rules";
+import { baseRankedTier, goldTierForPosition, goldTierSlots, rankedTierLabel, type DisplayTier } from "@corum-ranked/rules";
 import { RankedConfigService } from "../config/ranked-config.service.js";
 import { DATABASE, type DatabasePort } from "../database/database.port.js";
 import { compareLadderPosition, type LadderPosition } from "./ranking-policy.js";
@@ -182,9 +182,13 @@ export class LeaderboardService {
       .sort((left, right) => this.compareUnranked(left, right));
 
     let rank = 0;
+    const goldTotal=ranked.filter(entry=>baseRankedTier(entry.player.tier)==="GOLD").length;
+    let goldPosition=0;
     const placed = ranked.map((entry, index) => {
       if (!index || compareLadderPosition(this.position(entry), this.position(ranked[index - 1]!))) rank = index + 1;
-      return { ...entry.player, rank, topPercent: rank / ranked.length * 100 };
+      const tier=baseRankedTier(entry.player.tier)==="GOLD"?goldTierForPosition(++goldPosition,goldTotal):entry.player.tier;
+      const displayRank=baseRankedTier(tier)==="GOLD"?goldPosition:rank;
+      return { ...entry.player, tier, rank:displayRank, topPercent: displayRank / ranked.length * 100 };
     });
     const players = [...placed, ...unranked.map(({ player }) => player)];
     const query=search?.trim().toLowerCase();
@@ -203,6 +207,25 @@ export class LeaderboardService {
       hasMore: offset + page.length < players.length,
       ...(query?{search:{query:search!.trim(),found:located>=0,gdAccountId:located>=0?players[located]!.gdAccountId:null}}:{}),
     };
+  }
+
+  public async tierGuide() {
+    const snapshot=this.config.getSnapshot();
+    const ladder=await this.list();
+    const gold=ladder.players.filter(p=>baseRankedTier(p.tier)==="GOLD");
+    const slots=goldTierSlots(gold.length);
+    const cutoff=(tier:DisplayTier)=>{
+      const players=gold.filter(p=>p.tier===tier);
+      return players.length?Math.min(...players.map(p=>p.visibleRankedScore!)):null;
+    };
+    return {serverNow:ladder.serverNow,mode:"SOLO_RANKED",generation:snapshot.generation,
+      tiers:[...snapshot.operational.tierBands].sort((a,b)=>a.minInclusive-b.minInclusive).map(b=>({
+        ...b,label:rankedTierLabel(b.tier),promotionRequired:b.promotionGames>0,
+        demotionProtection:!/[12]$/.test(b.tier)})),
+      gold:{total:gold.length,championSlots:slots.champion,masterSlots:slots.master,goldSlots:slots.gold,
+        championCutoffLp:cutoff("CHAMPION"),masterCutoffLp:cutoff("MASTER"),
+        nextTierFromGold:slots.master>0?"MASTER":"CHAMPION",includesBots:true},
+      tieBreak:["LP","PROMOTION_STATUS","PROMOTION_WINS","DEMOTION_WARNING","WIN_RATE","HIDDEN_MMR","USERNAME","GD_ACCOUNT_ID"]};
   }
 
   private placementProgress(row: LeaderboardRow): PublicPlacementProgress | null {

@@ -22,8 +22,10 @@ CCLayerColor* iconRoot(CCPoint position) {
     root->setCascadeOpacityEnabled(true); return root;
 }
 
+bool playerRankTarget(ScoreProgressSample const& sample) { return goldRankTier(sample.tier) && sample.nextTier.empty(); }
+
 std::string targetKey(ScoreProgressSample const& sample) {
-    if (sample.tier != "GOLD") return sample.nextTier;
+    if (!playerRankTarget(sample)) return sample.nextTier;
     if (sample.goldLeader) return "gold-self";
     auto const& target = sample.standing.target;
     // Rank/LP can change while the same rival moves. They must not retire and
@@ -129,7 +131,8 @@ bool ResultScoreLayer::init(ScoreAnimationInput input, CCNode* resultScreen, std
     fitMenuLabelWidth(m_skipCaption,100,0.44f,0.34f); face->addChild(m_skipCaption,5);
     auto* skip = CCMenuItemSpriteExtra::create(face,this,menu_selector(ResultScoreLayer::onSkip));
     skip->setID("ranked-result-score-skip"_spr); skip->setPosition({size.width / 2,26}); m_menu->addChild(skip);
-    m_goldOvertakes=goldOvertakeTargets(m_input.goldTimeline,m_input.before,m_input.after);
+    if(m_input.beforeTier=="CHAMPION" || (m_input.beforeTier=="GOLD" && m_input.standingBefore.displayTier.empty()))
+        m_goldOvertakes=goldOvertakeTargets(m_input.goldTimeline,m_input.before,m_input.after);
     applySample(sampleScoreProgress(m_input,0));
     if (m_input.promotionInProgress) showSeries(false);
     return true;
@@ -232,7 +235,7 @@ CCLayerColor* ResultScoreLayer::tierIcon(std::string const& tier, CCPoint positi
 
 CCLayerColor* ResultScoreLayer::targetIcon(ScoreProgressSample const& sample, bool assemble) {
     auto const position = ccp(m_barLeft + m_barWidth,m_iconY);
-    if (sample.tier != "GOLD") return tierIcon(sample.nextTier,position,assemble);
+    if (!playerRankTarget(sample)) return tierIcon(sample.nextTier,position,assemble);
     auto* root = iconRoot(position); m_icons->addChild(root,5);
     auto* icon = sample.goldLeader ? PlayerIcon::createLocal()
         : PlayerIcon::createRemote(sample.standing.target && !sample.standing.target->bot ? sample.standing.target->accountId : 0);
@@ -279,11 +282,11 @@ void ResultScoreLayer::replaceTierIcons(ScoreProgressSample const& sample, bool 
     if (changedTier) {
         if (!m_tier.empty()) log::info("[RankedResult] score tier change match={} {} -> {}",m_input.matchId,m_tier,sample.tier);
         retireIcon(m_leftIcon,animate && demotion);
-        m_leftIcon = tierIcon(sample.tier,{m_barLeft,m_iconY},animate);
+        m_leftIcon = tierIcon(sample.tier,{m_barLeft,m_iconY},animate && m_input.motion()!=ScoreMotion::Normal);
         m_tier = sample.tier;
     }
     if (changedTier || changedTarget) {
-        auto const fly = animate && !changedTier && sample.tier == "GOLD" && sample.goldOvertake;
+        auto const fly = animate && !changedTier && playerRankTarget(sample) && sample.goldOvertake;
         retireIcon(m_rightIcon,animate && demotion,fly);
         if (fly) m_goldOvertakeShown = true;
         m_rightIcon = targetIcon(sample,animate);
@@ -294,7 +297,7 @@ void ResultScoreLayer::replaceTierIcons(ScoreProgressSample const& sample, bool 
 void ResultScoreLayer::applySample(ScoreProgressSample const& actual, bool animateIcons) {
     auto sample=actual;
     sample.goldOvertake=false;
-    if (sample.tier=="GOLD" && animateIcons && m_goldOvertakesShown<m_goldOvertakes.size()) {
+    if (playerRankTarget(sample) && animateIcons && m_goldOvertakesShown<m_goldOvertakes.size()) {
         auto const fraction=std::clamp(m_elapsed/m_input.duration(),0.0,1.0);
         auto const eased=fraction*fraction*(3-2*fraction);
         auto target=goldOvertakeAt(m_input.goldTimeline,m_goldOvertakes[m_goldOvertakesShown],eased);
@@ -308,7 +311,7 @@ void ResultScoreLayer::applySample(ScoreProgressSample const& actual, bool anima
             sample.standing.target=goldOvertakeAt(m_input.goldTimeline,m_goldOvertakes[m_goldOvertakesShown],eased);
             sample.goldLeader=false;sample.target=sample.standing.target->score;
         }
-    } else if (sample.tier!="GOLD" && m_input.afterTier!="GOLD") m_goldOvertakesShown=m_goldOvertakes.size();
+    } else if (!playerRankTarget(sample)) m_goldOvertakesShown=m_goldOvertakes.size();
     if (m_tier != sample.tier) {
         m_trackColor = trackColor(m_input.bands,sample.tier);
         if (m_tier.empty() || !animateIcons) drawRoundedBar(m_track,m_barWidth,m_trackColor);
@@ -316,7 +319,7 @@ void ResultScoreLayer::applySample(ScoreProgressSample const& actual, bool anima
     }
     replaceTierIcons(sample,animateIcons && m_elapsed > 0);
     auto display = sample;
-    if (sample.tier == "GOLD") {
+    if (goldRankTier(sample.tier)) {
         auto const key = targetKey(sample);
         if (m_goldGoalKey.empty() || !animateIcons) {
             m_goldVisualTarget = sample.target; m_goldTargetChanging = false;
@@ -333,9 +336,9 @@ void ResultScoreLayer::applySample(ScoreProgressSample const& actual, bool anima
         display.fill = sample.goldLeader ? 1.0 : span > 0 ? std::clamp((lp - sample.minimum) / span,0.0,1.0) : 0.0;
         display.target = static_cast<int>(std::lround(m_goldVisualTarget));
     } else { m_goldGoalKey.clear(); m_goldTargetChanging = false; }
-    auto const rightRank = sample.tier == "GOLD" ? (sample.goldLeader ? sample.standing.rank.value_or(0)
+    auto const rightRank = playerRankTarget(sample) ? (sample.goldLeader ? sample.standing.rank.value_or(0)
         : sample.standing.target ? sample.standing.target->rank : 0) : -1;
-    auto const ownRank = sample.tier == "GOLD" ? sample.standing.rank.value_or(0) : -1;
+    auto const ownRank = goldRankTier(sample.tier) ? sample.standing.rank.value_or(0) : -1;
     auto updateRank = [&](CCNode*& node, int& previous, int rank, CCPoint position, float scale) {
         if (previous == rank) return;
         previous = rank;
@@ -350,8 +353,8 @@ void ResultScoreLayer::applySample(ScoreProgressSample const& actual, bool anima
     if (m_ownRank) m_ownRank->setID("ranked-result-current-rank"_spr);
     auto const color = tierColor(sample.tier);
     drawRoundedBar(m_fill,m_barWidth * static_cast<float>(display.fill),color);
-    m_leftTier->setString(sample.tier.c_str()); m_leftTier->setColor(color);
-    m_rightTier->setString(sample.nextTier.c_str());
+    m_leftTier->setString(rankTierDisplay(sample.tier).c_str()); m_leftTier->setColor(color);
+    m_rightTier->setString(rankTierDisplay(sample.nextTier).c_str());
     if (!sample.nextTier.empty()) m_rightTier->setColor(tierColor(sample.nextTier));
     m_leftCutoff->setString(fmt::format("{} LP",sample.minimum).c_str());
     m_rightCutoff->setString(fmt::format("{} LP",display.target).c_str());
@@ -392,8 +395,8 @@ void ResultScoreLayer::showSeries(bool entering) {
     auto* title = menuLabel(text,0.47f,{0,39},m_input.promotionFailed ? ccc3(255,93,113) : Gold,FontWeight::Black);
     fitMenuLabelWidth(title,getContentSize().width * 0.56f,0.47f,0.34f); m_seriesRoot->addChild(title,5);
     if (m_input.promoted) {
-        auto* detail = menuLabel(i18n::isKorean() ? fmt::format("{} 티어로 승급했습니다!",m_input.afterTier)
-            : fmt::format("Promoted to {}!",m_input.afterTier),0.30f,{0,22},tierColor(m_input.afterTier),FontWeight::ExtraBold);
+        auto* detail = menuLabel(i18n::isKorean() ? fmt::format("{} {}",rankTierDisplay(m_input.afterTier),goldRankTier(m_input.afterTier)?"승격":"승급")
+            : fmt::format("Promoted to {}!",rankTierDisplay(m_input.afterTier)),0.30f,{0,22},tierColor(m_input.afterTier),FontWeight::ExtraBold);
         fitMenuLabelWidth(detail,getContentSize().width * 0.55f,0.30f,0.24f); m_seriesRoot->addChild(detail,5);
     }
     // Wrap longer server-configured series instead of assuming three games or
@@ -438,6 +441,15 @@ void ResultScoreLayer::showSeries(bool entering) {
 void ResultScoreLayer::showNotices() {
     if (m_noticesShown) return;
     m_noticesShown = true;
+    if(!m_input.survivalRank && !m_seriesShown && !m_input.promotionStarted && m_input.beforeTier!=m_input.afterTier) {
+        auto const up=rankTierOrder(m_input.afterTier)>rankTierOrder(m_input.beforeTier);
+        auto const text=i18n::isKorean()?(up?(goldRankTier(m_input.afterTier)?"승격":"승급"):"강등"):
+            (up?(goldRankTier(m_input.afterTier)?"PROMOTED":"DIVISION UP"):"DEMOTED");
+        auto* notice=menuLabel(text,.49f,{0,19},up?Gold:Red,FontWeight::Black);
+        m_seriesRoot->addChild(notice,5);stamp(notice,0);
+        auto* tier=menuLabel(rankTierDisplay(m_input.afterTier),.32f,{0,-3},tierColor(m_input.afterTier),FontWeight::ExtraBold);
+        m_seriesRoot->addChild(tier,5);
+    }
     if (m_input.promotionStarted) showSeries(true);
     if (m_input.demotionWarning) {
         auto* warning = menuLabel(i18n::text("demotion-warning","DEMOTION WARNING"),0.49f,{0,19},ccc3(255,93,113),FontWeight::Black);

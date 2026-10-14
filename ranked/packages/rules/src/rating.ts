@@ -1,6 +1,7 @@
 import { RankedDomainError } from "./errors.js";
 import { expectedScoreAgainst } from "./mmr.js";
 import { tierForRating } from "./tier.js";
+import { baseRankedTier, soloTierOrder } from "./solo-tiers.js";
 import type { DisplayTier, MmrPolicy, PlayerSide, RankedTier, RoundResult, TierBand } from "./types.js";
 
 export type PromotionMark = "WIN" | "LOSS";
@@ -66,7 +67,7 @@ export const finalizePlacementScore = (
   const ordered = sortedBands(bands);
   const rawScore = Math.max(ordered[0]!.minInclusive, Math.round(hiddenMmr));
   const visibleRankedScore = ordered.reduce((score, band, index) => {
-    if (index === 0 || Math.abs(score - band.minInclusive) > 15) return score;
+    if (index === 0 || baseRankedTier(band.tier) === baseRankedTier(ordered[index - 1]!.tier) || Math.abs(score - band.minInclusive) > 15) return score;
     return Math.min(score, band.minInclusive - 16);
   }, rawScore);
   return { visibleRankedScore, displayedTier: tierForRating(visibleRankedScore, bands) };
@@ -184,7 +185,7 @@ export const updateRankedRatingProfile = (
           visibleRankedScore: score,
           placementGames,
           placementResults,
-          displayedTier: promotion.targetTier,
+          displayedTier: tierForRating(score, bands),
           resultStreak,
           promotion: null,
           demotionWarning: false,
@@ -200,7 +201,7 @@ export const updateRankedRatingProfile = (
     const impossible = losses > promotion.gamesRequired - promotion.winsRequired ||
       promotion.results.length >= promotion.gamesRequired;
     if (impossible) {
-      const source = ordered.find((band) => band.tier === promotion.sourceTier);
+      const source = ordered.find((band) => baseRankedTier(band.tier) === baseRankedTier(promotion.sourceTier));
       if (!source) throw new RankedDomainError("INVALID_CONFIG", "Promotion source tier is missing");
       const score = Math.max(source.minInclusive, promotion.cutoff - policy.promotionFailurePenalty);
       return {
@@ -210,7 +211,7 @@ export const updateRankedRatingProfile = (
           visibleRankedScore: score,
           placementGames,
           placementResults,
-          displayedTier: promotion.sourceTier,
+          displayedTier: tierForRating(score, bands),
           resultStreak,
           promotion: null,
           demotionWarning: false,
@@ -282,21 +283,23 @@ export const updateRankedRatingProfile = (
     policy.visibleScoreBaseChange * movementFactor,
   ));
   const projected = before.visibleRankedScore + (won ? magnitude : -magnitude);
-  const currentIndex = ordered.findIndex((band) => band.tier === before.displayedTier);
+  const currentIndex = ordered.findIndex((band) => band.tier === before.displayedTier || band.tier === `${before.displayedTier}3`);
   if (currentIndex < 0) {
     throw new RankedDomainError("INVALID_CONFIG", `Unknown displayed tier ${before.displayedTier}`);
   }
-  const currentBand = ordered[currentIndex]!;
-  const nextBand = ordered[currentIndex + 1];
+  const currentGroup = ordered.filter(band => baseRankedTier(band.tier) === baseRankedTier(before.displayedTier));
+  const currentBand = currentGroup[0]!;
+  const currentTop = currentGroup.at(-1)!;
+  const nextBand = ordered[ordered.indexOf(currentTop) + 1];
 
   if (won && nextBand && projected >= nextBand.minInclusive) {
     const score = nextBand.minInclusive - 1;
     const promotion: PromotionSeriesState = {
-      sourceTier: currentBand.tier,
+      sourceTier: currentTop.tier,
       targetTier: nextBand.tier,
       cutoff: nextBand.minInclusive,
-      gamesRequired: currentBand.promotionGames,
-      winsRequired: currentBand.promotionWinsRequired,
+      gamesRequired: currentTop.promotionGames,
+      winsRequired: currentTop.promotionWinsRequired,
       results: [],
     };
     return {
@@ -304,6 +307,7 @@ export const updateRankedRatingProfile = (
         ...before,
         hiddenMmr: hiddenMmrAfter,
         visibleRankedScore: score,
+        displayedTier: currentTop.tier,
         placementGames,
         placementResults,
         resultStreak,
@@ -320,12 +324,13 @@ export const updateRankedRatingProfile = (
   }
 
   if (lost && projected <= currentBand.minInclusive) {
-    if (currentIndex === 0 || hiddenMmrAfter >= currentBand.minInclusive) {
+    if (ordered.indexOf(currentBand) === 0 || hiddenMmrAfter >= currentBand.minInclusive) {
       return {
         profile: {
           ...before,
           hiddenMmr: hiddenMmrAfter,
           visibleRankedScore: currentBand.minInclusive,
+          displayedTier: currentBand.tier,
           placementGames,
           placementResults,
           resultStreak,
@@ -366,6 +371,7 @@ export const updateRankedRatingProfile = (
         ...before,
         hiddenMmr: hiddenMmrAfter,
         visibleRankedScore: currentBand.minInclusive,
+        displayedTier: currentBand.tier,
         placementGames,
         placementResults,
         resultStreak,
@@ -388,7 +394,7 @@ export const updateRankedRatingProfile = (
       visibleRankedScore: score,
       placementGames,
       placementResults,
-      displayedTier: before.displayedTier,
+      displayedTier: tierForRating(score, bands),
       resultStreak,
       promotion: null,
       demotionWarning: won ? false : before.demotionWarning,
@@ -398,6 +404,6 @@ export const updateRankedRatingProfile = (
     promotionStarted: false,
     promotionSucceeded: false,
     promotionFailed: false,
-    demoted: false,
+    demoted: soloTierOrder(tierForRating(score, bands)) < soloTierOrder(before.displayedTier),
   };
 };

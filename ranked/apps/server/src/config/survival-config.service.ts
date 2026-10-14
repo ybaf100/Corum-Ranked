@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger, ServiceUnavailableException,Optional, type OnApplicationBootstrap, type OnApplicationShutdown } from "@nestjs/common";
-import { validateSurvivalConfig, type SurvivalConfig } from "@corum-ranked/rules";
+import { validateSurvivalConfig, soloBaseTierBands, type SurvivalConfig } from "@corum-ranked/rules";
+import { RankedConfigService } from "./ranked-config.service.js";
 import { SERVER_ENVIRONMENT, type ServerEnvironment } from "./server-environment.js";
 import { DATABASE,type DatabasePort } from "../database/database.port.js";
 import { lockSurvivalAdmission } from "../survival/survival-admission.js";
@@ -40,7 +41,8 @@ export class SurvivalConfigService implements OnApplicationBootstrap, OnApplicat
   public withAdmission<T>(operation: () => Promise<T>): Promise<T> { return this.admission.run(operation); }
   public constructor(@Inject(SURVIVAL_CONFIG_SOURCE) private readonly source: SurvivalConfigSource,
     @Inject(SERVER_ENVIRONMENT) private readonly environment: ServerEnvironment,
-    @Optional() @Inject(DATABASE)private readonly database?:DatabasePort) {}
+    @Optional() @Inject(DATABASE)private readonly database?:DatabasePort,
+    @Optional() private readonly rankedConfig?:RankedConfigService) {}
   public async onApplicationBootstrap(): Promise<void> {
     await this.refresh();
     this.timer = setInterval(() => { void this.refresh(); }, this.environment.rankedConfigRefreshMs);
@@ -80,7 +82,19 @@ export class SurvivalConfigService implements OnApplicationBootstrap, OnApplicat
   }
   public getSnapshot() {
     if (!this.snapshot) throw new ServiceUnavailableException("Survival configuration is unavailable; run setupCorumSurvivalConfig");
-    return structuredClone(this.snapshot);
+    const snapshot=structuredClone(this.snapshot);
+    let config=snapshot.config;
+    const solo=this.rankedConfig?.getSnapshotOrNull();
+    if(solo){
+      const bands=soloBaseTierBands(solo.operational.tierBands);
+      config={...snapshot.config,tierBands:snapshot.config.tierBands.map(band=>{
+        const boundary=bands.find(b=>b.tier===band.group);
+        return boundary?{...band,minimumLp:boundary.minInclusive}:band;
+      })};
+      const errors=validateSurvivalConfig(config);
+      if(errors.length)throw new ServiceUnavailableException(`Invalid shared Survival tier boundaries: ${errors.join("; ")}`);
+    }
+    return {...snapshot,config};
   }
   public getStatus() { return { ready: this.snapshot !== null, enabled: this.snapshot?.config.enabled ?? false,
     generation: this.snapshot?.generation ?? null, fetchedAt: this.snapshot?.fetchedAt ?? null, error: this.error }; }

@@ -2,6 +2,7 @@
 
 #include "RankAssetPackManager.hpp"
 #include "../domain/FontMetrics.hpp"
+#include "../domain/RankTierPresentation.hpp"
 
 #include <Geode/Geode.hpp>
 
@@ -95,6 +96,7 @@ inline void fitLabelWidth(CCLabelBMFont* caption, float width, float maximumScal
 }
 
 inline ccColor3B tierColor(std::string tier) {
+    tier=rankTierBase(tier);
     std::transform(tier.begin(), tier.end(), tier.begin(), [](unsigned char ch) {
         return static_cast<char>(std::toupper(ch));
     });
@@ -311,6 +313,7 @@ inline void addBackdrop(CCNode* parent, CCSize const& size) {
 }
 
 inline std::string trophyFilename(std::string tier) {
+    tier=rankTierBase(tier);
     std::transform(tier.begin(), tier.end(), tier.begin(), [](unsigned char ch) {
         return static_cast<char>(std::tolower(ch));
     });

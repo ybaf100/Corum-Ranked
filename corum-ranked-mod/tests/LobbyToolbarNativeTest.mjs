@@ -76,7 +76,7 @@ int main(){using namespace corum::ranked;using namespace corum::ranked::ui;
   view.survivalEnabled=false;assert(o.lobbyMessage(view).find(tr("mode-disabled","MODE DISABLED"))!=std::string::npos);
   assert(o.m_modeTransition.select(RankedMode::Survival));o.m_modeTransition.finish();
   assert(o.lobbyMessage(view)==tr("mode-off-browse","MODE DISABLED. HISTORY, LEADERBOARD AND ACHIEVEMENTS ARE AVAILABLE."));
-  view.survivalEnabled=true;view.survival.onlineAvailable=true;assert(o.lobbyMessage(view)==tr("survival-online-ready","2-16 PLAYERS · UP TO 180s"));
+  view.survivalEnabled=true;view.survival.onlineAvailable=true;assert(o.lobbyMessage(view)==tr("Ranked session ready. Join the queue when prepared.","Ranked session ready. Join the queue when prepared."));
   view.survival.onlineAvailable=false;assert(o.lobbyMessage(view)==tr("mode-off-browse","MODE DISABLED. HISTORY, LEADERBOARD AND ACHIEVEMENTS ARE AVAILABLE."));
   view.stage=RuntimeStage::Queued;view.status="Searching for an opponent...";
   assert(o.lobbyMessage(view)==(language==i18n::Language::Korean?"상대를 찾고 있습니다...":"Searching for an opponent..."));

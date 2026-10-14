@@ -233,15 +233,15 @@ void RankTransitionLayer::createBackground() {
     }
 
     auto const glowSize = std::min(size.width, size.height) * 0.98f;
-    auto const noHalo=m_type==RankTransitionType::Demotion && m_oldRank=="GOLD" && m_newRank=="SILVER";
+    auto const noHalo=m_type==RankTransitionType::Demotion && goldRankTier(m_oldRank) && m_newRank=="SILVER";
     auto* radial = noHalo ? nullptr : addFxSprite(
         m_backgroundRoot, "fx-rank-radial-glow-white.png",
         {size.width / 2.0f, size.height / 2.0f + 14.0f},
-        {glowSize, glowSize}, 3, m_newRank == "GOLD" ? 105 : 72, &profile.color
+        {glowSize, glowSize}, 3, goldRankTier(m_newRank) ? 105 : 72, &profile.color
     );
     if (radial) radial->runAction(CCRepeatForever::create(CCSequence::create(
-        CCFadeTo::create(1.2f, m_newRank == "GOLD" ? 128 : 92),
-        CCFadeTo::create(1.2f, m_newRank == "GOLD" ? 76 : 48), nullptr
+        CCFadeTo::create(1.2f, goldRankTier(m_newRank) ? 128 : 92),
+        CCFadeTo::create(1.2f, goldRankTier(m_newRank) ? 76 : 48), nullptr
     )));
 
     auto* topLine = CCLayerColor::create({profile.color.r, profile.color.g, profile.color.b, 170});
@@ -442,7 +442,7 @@ void RankTransitionLayer::playPlacement() {
     }
     addParticles("UNRANKED", 13, 30.0f, 58.0f, 1.72f, false, false);
 
-    auto targetAssembly = createRankBadgeAssembly(m_newRank, m_newRank == "GOLD" ? 128.0f : 118.0f);
+    auto targetAssembly = createRankBadgeAssembly(m_newRank, goldRankTier(m_newRank) ? 128.0f : 118.0f);
     targetAssembly.root->setPosition(center);
     m_animationRoot->addChild(targetAssembly.root, 40);
     for (auto const& part : targetAssembly.baseParts) {
@@ -457,13 +457,13 @@ void RankTransitionLayer::playPlacement() {
         auto const& part = targetAssembly.ornaments[index];
         auto const delay = 2.54f + static_cast<float>(index) * 0.22f + partDelayBias(part.role);
         animatePartAssembly(
-            part, delay, assemblyOffset(part.role, m_newRank == "GOLD" ? 108.0f : 86.0f),
+            part, delay, assemblyOffset(part.role, goldRankTier(m_newRank) ? 108.0f : 86.0f),
             index % 2 == 0 ? -8.0f : 8.0f
         );
     }
 
     auto const completeAt = 3.12f + static_cast<float>(targetAssembly.ornaments.size()) * 0.22f +
-        (m_newRank == "GOLD" ? 0.48f : 0.0f);
+        (goldRankTier(m_newRank) ? 0.48f : 0.0f);
     if (target.stage >= 4) addLightSweep(target.color, completeAt - 0.20f);
     addShockwave(target.color, completeAt, target.stage >= 3);
     addFlash(target.color, target.flashOpacity, completeAt + 0.08f);
@@ -476,7 +476,7 @@ void RankTransitionLayer::playPromotion() {
     auto const size = getContentSize();
     auto const center = ccp(size.width / 2.0f, size.height / 2.0f + 15.0f);
     auto const target = rankTierProfile(m_newRank);
-    auto const gold = m_newRank == "GOLD";
+    auto const gold = goldRankTier(m_newRank);
 
     auto oldAssembly = createRankBadgeAssembly(m_oldRank, 114.0f);
     oldAssembly.root->setPosition(center);
@@ -540,7 +540,7 @@ void RankTransitionLayer::playDemotion() {
     auto const center = ccp(size.width / 2.0f, size.height / 2.0f + 15.0f);
     auto const oldProfile = rankTierProfile(m_oldRank);
 
-    auto oldAssembly = createRankBadgeAssembly(m_oldRank, m_oldRank == "GOLD" ? 128.0f : 118.0f);
+    auto oldAssembly = createRankBadgeAssembly(m_oldRank, goldRankTier(m_oldRank) ? 128.0f : 118.0f);
     oldAssembly.root->setPosition(center);
     oldAssembly.root->setOpacity(0);
     m_animationRoot->addChild(oldAssembly.root, 24);
@@ -602,7 +602,7 @@ void RankTransitionLayer::playDemotion() {
         CCEaseBackOut::create(CCScaleTo::create(0.22f, 1.0f)), nullptr
     ));
     addParticles(m_newRank, 7, 8.0f, 36.0f, 2.35f, false, true);
-    scheduleFinalReveal(m_oldRank == "GOLD" ? 5.25f : 4.55f);
+    scheduleFinalReveal(goldRankTier(m_oldRank) ? 5.25f : 4.55f);
 }
 
 void RankTransitionLayer::unlockSkip() {
@@ -629,8 +629,8 @@ void RankTransitionLayer::revealFinalState(bool skipped) {
     auto const size = getContentSize();
     auto const center = ccp(size.width / 2.0f, size.height / 2.0f + 26.0f);
     auto const target = rankTierProfile(m_newRank);
-    auto const badgeSize = m_newRank == "GOLD" ? 138.0f : 126.0f;
-    auto const noHalo=m_type==RankTransitionType::Demotion && m_oldRank=="GOLD" && m_newRank=="SILVER";
+    auto const badgeSize = goldRankTier(m_newRank) ? 138.0f : 126.0f;
+    auto const noHalo=m_type==RankTransitionType::Demotion && goldRankTier(m_oldRank) && m_newRank=="SILVER";
     CCNode* finalBadge = noHalo ? createRankBadgeAssembly(m_newRank,badgeSize).root
         : createAnimatedRankBadge(m_newRank, {badgeSize,badgeSize},RankBadgeDisplay::Hero);
     finalBadge->setPosition(center);
@@ -650,9 +650,9 @@ void RankTransitionLayer::revealFinalState(bool skipped) {
     eventLabel->setOpacity(0);
     m_animationRoot->addChild(eventLabel, 30);
     auto* tierLabel = menuLabel(
-        m_newRank, m_newRank == "GOLD" ? 0.78f : 0.68f,
+        rankTierDisplay(m_newRank), goldRankTier(m_newRank) ? 0.78f : 0.68f,
         {size.width / 2.0f, size.height / 2.0f - 92.0f},
-        m_newRank == "GOLD" ? Gold : Text, FontWeight::Black
+        goldRankTier(m_newRank) ? Gold : Text, FontWeight::Black
     );
     tierLabel->setOpacity(0);
     m_animationRoot->addChild(tierLabel, 31);

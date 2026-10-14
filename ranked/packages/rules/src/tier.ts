@@ -1,6 +1,7 @@
 import { RankedDomainError } from "./errors.js";
 import { validateTierBands } from "./config.js";
 import type { RankedTier, TierBand } from "./types.js";
+import { soloBaseTierBands } from "./solo-tiers.js";
 
 export const tierForRating = (rating: number, bands: readonly TierBand[]): RankedTier => {
   if (!Number.isFinite(rating)) {
@@ -77,7 +78,7 @@ export const tierBandFor = (tier: RankedTier, bands: readonly TierBand[]): TierB
   if (errors.length > 0) {
     throw new RankedDomainError("INVALID_CONFIG", "Tier boundaries are invalid", { errors });
   }
-  const band = bands.find((candidate) => candidate.tier === tier);
+  const band = bands.find((candidate) => candidate.tier === tier) ?? soloBaseTierBands(bands).find(candidate => candidate.tier === tier);
   if (!band) {
     throw new RankedDomainError("INVALID_CONFIG", `Missing tier band for ${tier}`);
   }

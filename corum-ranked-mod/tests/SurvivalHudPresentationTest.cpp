@@ -25,15 +25,15 @@ int main() {
     for(auto target:{6,3,1}){
         for(auto& p:players)p.passing=p.rank<=target;
         auto rows=survivalHudRows(players,"15",target);
-        assert(rows.size()==static_cast<std::size_t>(target+1)&&rows.back().id=="15");
+        assert(rows.size()==11&&rows.back().id=="15");
         assert(survivalHudCutoffBoundary(rows)==static_cast<std::size_t>(target));
-        assert(survivalHudRows(players,"1",target).size()==static_cast<std::size_t>(target));
+        assert(survivalHudRows(players,"1",target).size()==10);
     }
     // Cutoff ties are passing, remain normal-colored, and expand the visible
     // leader list only up to ten; my own row does not duplicate an existing ID.
     for(auto& p:players)p.passing=p.rank<=6;
     players[6].rank=6;players[6].passing=true;
-    auto tied=survivalHudRows(players,"7",6);assert(tied.size()==7&&tied.back().id=="7");
+    auto tied=survivalHudRows(players,"7",6);assert(tied.size()==10&&tied[6].id=="7");
     assert(survivalHudCutoffBoundary(tied)==7);
     for(auto& p:players){p.rank=1;p.passing=true;}
     assert(survivalHudRows(players,"15",3).size()==11);

@@ -1,9 +1,7 @@
 import {
-  RANKED_TIERS,
   SeededRandom,
   canonicalActiveMaps,
   selectCandidateMaps,
-  tierBandFor,
   validateOperationalConfig,
 } from "@corum-ranked/rules";
 import type { RankedConfigDocument } from "./ranked-config.document.js";
@@ -85,9 +83,8 @@ export const validateRankedConfigDocument = (document: RankedConfigDocument): re
         errors.push(`Placement Pool ${pool} requires at least two active canonical maps`);
       }
     }
-    for (const [index, tier] of RANKED_TIERS.entries()) {
-      const band = tierBandFor(tier, document.operational.tierBands);
-      selectCandidateMaps(tier, band.mainPool, document.maps, new SeededRandom(index + 1));
+    for (const [index, band] of document.operational.tierBands.entries()) {
+      selectCandidateMaps(band.tier, band.mainPool, document.maps, new SeededRandom(index + 1));
     }
   } catch (error) {
     errors.push(error instanceof Error ? error.message : "Ranked map pool is invalid");

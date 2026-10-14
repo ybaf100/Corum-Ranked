@@ -30,7 +30,7 @@ class SurvivalGameLayer final : public CCLayerColor {
     CCNode* m_grid=nullptr;
     CCNode* m_mapPanel=nullptr;
     LoadingSpinner* m_spinner=nullptr;
-    CCLabelBMFont *m_mapReady=nullptr,*m_audioReady=nullptr;
+    CCLabelBMFont *m_mapReady=nullptr,*m_audioReady=nullptr,*m_mapTimer=nullptr;
     CCLabelBMFont *m_heading=nullptr,*m_status=nullptr,*m_map=nullptr,*m_ldmLabel=nullptr,*m_shakeLabel=nullptr;
     CCMenuItemSpriteExtra *m_resume=nullptr,*m_continue=nullptr,*m_surrender=nullptr,*m_ldm=nullptr,*m_shake=nullptr,*m_jukeboxButton=nullptr;
     CCMenuItemSpriteExtra* m_force=nullptr;
@@ -179,12 +179,14 @@ class SurvivalGameLayer final : public CCLayerColor {
             ui::addRankedMapHeading(m_mapPanel,view.map.levelId,native?std::string(level->m_levelName):text("downloading-map","DOWNLOADING MAP..."),metadata,{width/2,150});
             auto* creator=ui::menuLabel(native?fmt::format("{} · GD #{}",std::string(level->m_creatorName),view.map.levelId):fmt::format("GD #{}",view.map.levelId),
                 .25f,{width/2,107},ui::TextMuted,ui::FontWeight::SemiBold);ui::fitMenuLabelWidth(creator,width-30,.25f,.19f);m_mapPanel->addChild(creator,5);
-            m_mapPanel->addChild(ui::menuLabel("03:00",.62f,{width/2,74},ui::Text,ui::FontWeight::Black),5);
+            m_mapTimer=ui::menuLabel("",.62f,{width/2,74},ui::Text,ui::FontWeight::Black);m_mapPanel->addChild(m_mapTimer,5);
             m_mapPanel->addChild(ui::menuLabel(text("survival-map-rules","180s · BEST PROGRESS x1"),.27f,{width/2,46},ui::Cyan,ui::FontWeight::SemiBold),5);
             m_mapReady=ui::menuLabel("",.25f,{width/2-80,19},ui::TextMuted,ui::FontWeight::SemiBold);m_mapPanel->addChild(m_mapReady,5);
             m_audioReady=ui::menuLabel("",.25f,{width/2+80,19},ui::TextMuted,ui::FontWeight::SemiBold);m_mapPanel->addChild(m_audioReady,5);
             m_mapShownAt=native?std::chrono::steady_clock::now():std::chrono::steady_clock::time_point{};
         }
+        auto const seconds=view.endsAt.empty()?180:(std::max<std::int64_t>(0,SurvivalRuntime::get().remainingMs())+999)/1000;
+        m_mapTimer->setString((view.phase=="TIEBREAK"?text("deathmatch","DEATH MATCH"):fmt::format("{:02}:{:02}",seconds/60,seconds%60)).c_str());
         auto const& prep=RankedRoundPreparation::get().view();
         m_mapReady->setString(fmt::format("{}: {}",text("map","MAP"),text(prep.mapReady?"ready":"loading",prep.mapReady?"READY":"LOADING")).c_str());
         m_audioReady->setString(fmt::format("{}: {}",text("audio","AUDIO"),text(prep.audioReady?"ready":"loading",prep.audioReady?"READY":"LOADING")).c_str());

@@ -188,7 +188,7 @@ describe("Independent operational mode switches",()=>{
     survivalDocument={...survivalDocument,config:{...survivalDocument.config,minimumPlayers:7}};
     expect(await survivalConfig.refresh()).toBe(false);
     expect(survivalConfig.getStatus()).toMatchObject({ready:true,enabled:true,error:expect.stringContaining("player counts")});
-    expect(soloConfig.getSnapshot().operational.tierBands[1]!.minInclusive).toBe(1000);
+    expect(soloConfig.getSnapshot().operational.tierBands.find(b=>b.tier==="AQUA3")!.minInclusive).toBe(1000);
     expect(soloConfig.getStatus().queueEnabled).toBe(true);
   });
 });

@@ -1,10 +1,12 @@
 import { RankedDomainError } from "./errors.js";
 import {
   RANKED_TIERS,
+  SOLO_DIVISION_TIERS,
   type RankedOperationalConfig,
   type RankedRulesConfig,
   type TierBand,
 } from "./types.js";
+import { baseRankedTier } from "./solo-tiers.js";
 
 export const DOCUMENT_RULES_V0_5: RankedRulesConfig = Object.freeze({
   rulesVersion: "corum-ranked-v0.5",
@@ -45,16 +47,17 @@ const validateDocumentRules = (rules: RankedRulesConfig, errors: string[]): void
 export const validateTierBands = (bands: readonly TierBand[]): readonly string[] => {
   const errors: string[] = [];
   const byTier = new Map(bands.map((band) => [band.tier, band]));
-
-  for (const tier of RANKED_TIERS) {
-    if (!byTier.has(tier)) errors.push(`tierBands is missing ${tier}`);
+  const expected: readonly string[] = bands.some(b => /[123]$/.test(b.tier)) ? SOLO_DIVISION_TIERS : RANKED_TIERS;
+  for (const tier of expected) {
+    if (!bands.some(b => b.tier === tier)) errors.push(`tierBands is missing ${tier}`);
   }
-  if (byTier.size !== RANKED_TIERS.length || bands.length !== RANKED_TIERS.length) {
+  if (byTier.size !== expected.length || bands.length !== expected.length) {
     errors.push("tierBands must contain each ranked tier exactly once");
   }
 
   const sorted = [...bands].sort((left, right) => left.minInclusive - right.minInclusive);
   for (const [index, band] of sorted.entries()) {
+    if (band.tier !== expected[index]) errors.push("tierBands must follow RED3 → SILVER1 → GOLD order (or the legacy five-tier order)");
     if (!Number.isFinite(band.minInclusive)) {
       errors.push(`${band.tier}.minInclusive must be finite`);
     }
@@ -76,15 +79,16 @@ export const validateTierBands = (bands: readonly TierBand[]): readonly string[]
   }
   for (const [index, band] of sorted.entries()) {
     const highest = index === sorted.length - 1;
+    const internal = !highest && baseRankedTier(band.tier) === baseRankedTier(sorted[index + 1]!.tier);
     if (!Number.isInteger(band.promotionGames) || band.promotionGames < 0) {
       errors.push(`${band.tier}.promotionGames must be a non-negative integer`);
     }
     if (!Number.isInteger(band.promotionWinsRequired) || band.promotionWinsRequired < 0) {
       errors.push(`${band.tier}.promotionWinsRequired must be a non-negative integer`);
     }
-    if (highest) {
+    if (highest || internal) {
       if (band.promotionGames !== 0 || band.promotionWinsRequired !== 0) {
-        errors.push(`${band.tier} is the highest tier and cannot configure a promotion series`);
+        errors.push(`${band.tier} cannot configure a promotion series within a division or above GOLD`);
       }
     } else if (
       band.promotionGames < 1 ||

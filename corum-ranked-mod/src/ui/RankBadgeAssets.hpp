@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Geode/Geode.hpp>
+#include "../domain/RankTierPresentation.hpp"
 
 #include <string>
 #include <vector>

@@ -99,7 +99,7 @@ describe("client standings SQL", () => {
       {phase:"after",playerId:id(1),profile:profile(1250,{displayedTier:"GOLD"})},
     ],"seed",true);
     const before = views.get("before")!.get(id(1))!;
-    expect(before.rank).toBe(3); expect(before.target).toMatchObject({rank:1,gdAccountId:"-3",visibleRankedScore:1200});
+    expect(before.rank).toBe(4); expect(before.target).toMatchObject({rank:3,gdAccountId:"4",visibleRankedScore:1200});
     expect(views.get("after")!.get(id(1))!.rank).toBe(1);
     expect(before.goldTimeline).toMatchObject({beforePriority:0,afterPriority:1,fixedTotal:3,moving:null,
       groups:[{score:1200,count:3,states:[{priority:1,count:2,target:{gdAccountId:"-3",rank:1}},
@@ -120,7 +120,7 @@ describe("client standings SQL", () => {
     await database.query("UPDATE ranked_profiles SET wins=1,losses=9 WHERE player_id=$1",[id(4)]);
     const service = new LeaderboardService(database,{ getSnapshotOrNull: () => null } as RankedConfigService);
     const ladder = await service.list();
-    expect(ladder.players.map(p => p.rank)).toEqual([1,1,3,3,5,5,7,8,8,8,11,11,13,null]);
+    expect(ladder.players.map(p => p.rank)).toEqual([1,2,3,3,5,5,7,8,8,8,11,11,13,null]);
     expect(ladder.players[2]!.gdAccountId).toBe("3"); // Rate beats MMR inside shared #3.
     expect(ladder.players.filter(p => p.isBot)).toHaveLength(2);
     const standings = (await readStandings(database,Array.from({length:14},(_,i)=>id(i+1)))).get("current")!;
@@ -166,7 +166,7 @@ describe("client standings SQL", () => {
     const valid = await get("standing-token"); expect(valid.status).toBe(200);
     expect(valid.headers.get("cache-control")).toBe("no-store");
     const body = await valid.json(); expect(body).toMatchObject({ serverNow: now.toISOString(),
-      standing: { rank: 2, total: 3, topPercent: 2 / 3 * 100, target: { gdAccountId: "1", rank: 1 } } });
+      standing: { rank: 3, total: 3, topPercent: 100, target: { gdAccountId: "-3", rank: 2 } } });
     expect(JSON.stringify(body)).not.toMatch(/hiddenMmr|hidden_mmr|sessionId|player_id|token/);
     await database.query("UPDATE ranked_sessions SET client_version='v0.5.0-beta.47'");
     const outdated = await get("standing-token"); expect(outdated.status).toBe(200);
@@ -314,4 +314,33 @@ it("retains the last WIN/LOSS after a series succeeds/fails and does not duplica
   const ongoing = profile(299, { promotion: { ...promotion, results: ["WIN"] } });
   expect(resultPromotionSeries(profile(299, { promotion: { ...promotion, results: [] } }), ongoing, "A", "A")!.results).toEqual(["WIN"]);
   expect(before.promotion!.results).toEqual(["LOSS","LOSS"]);
+});
+
+describe("exact Gold title slots",()=>{
+  it.each([1,3,4,6,7,9,16])("assigns %i tied players including bots deterministically",async total=>{
+    for(let n=1;n<=total;n++)await add(n,1400,1000,"GOLD",n%2===0);
+    const service=new LeaderboardService(database,{getSnapshotOrNull:()=>null} as RankedConfigService);
+    const ladder=(await service.list()).players;
+    expect(ladder.filter(p=>p.tier==="CHAMPION")).toHaveLength(Math.min(total,3));
+    expect(ladder.filter(p=>p.tier==="MASTER")).toHaveLength(total>6?Math.ceil(total/2)-3:0);
+    expect(ladder.map(p=>p.rank)).toEqual(Array.from({length:total},(_,i)=>i+1));
+    const snapshots=(await readStandings(database,Array.from({length:total},(_,i)=>id(i+1)))).get("current")!;
+    for(const player of ladder){
+      const standing=snapshots.get(id(Math.abs(Number(player.gdAccountId))))!;
+      expect(standing.displayTier).toBe(player.tier);expect(standing.rank).toBe(player.rank);
+      if(player.tier==="GOLD")expect(standing.goldTier).toMatchObject({nextTier:total>6?"MASTER":"CHAMPION",nextCutoffLp:1400});
+      if(player.tier==="CHAMPION")expect(standing.goldTier?.nextTier).toBeNull();
+    }
+    expect((await service.list()).players).toEqual(ladder);
+  });
+  it("reclassifies every affected player immediately after an LP change",async()=>{
+    for(let n=1;n<=8;n++)await add(n,1500-n*10,1000,"GOLD",n===8);
+    const service=new LeaderboardService(database,{getSnapshotOrNull:()=>null} as RankedConfigService);
+    expect((await service.list()).players.find(p=>p.gdAccountId==="4")?.tier).toBe("MASTER");
+    await database.query("UPDATE ranked_profiles SET visible_ranked_score=1600 WHERE player_id=$1",[id(8)]);
+    const ladder=(await service.list()).players;
+    expect(ladder.find(p=>p.gdAccountId==="-8")?.tier).toBe("CHAMPION");
+    expect(ladder.find(p=>p.gdAccountId==="3")?.tier).toBe("MASTER");
+    expect(ladder.find(p=>p.gdAccountId==="4")?.tier).toBe("GOLD");
+  });
 });

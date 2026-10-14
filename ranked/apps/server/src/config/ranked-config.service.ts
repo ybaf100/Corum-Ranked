@@ -22,6 +22,7 @@ import type {
 import { validateRankedConfigDocument } from "./ranked-config.validator.js";
 import { DATABASE, type DatabasePort } from "../database/database.port.js";
 import { ModeAdmissionFence } from "./mode-admission.js";
+import { expandSoloTierBands } from "@corum-ranked/rules";
 
 const copySnapshot = (snapshot: RankedConfigSnapshot): RankedConfigSnapshot =>
   structuredClone(snapshot);
@@ -67,7 +68,9 @@ export class RankedConfigService implements OnApplicationBootstrap, OnApplicatio
   private async performRefresh(): Promise<boolean> {
     this.lastAttemptAt = new Date().toISOString();
     try {
-      const document = await this.source.fetchConfig();
+      const sourceDocument = await this.source.fetchConfig();
+      const document = { ...sourceDocument, operational: { ...sourceDocument.operational,
+        tierBands: expandSoloTierBands(sourceDocument.operational.tierBands) } };
       const errors = validateRankedConfigDocument(document);
       if (errors.length > 0) throw new Error(`Invalid Ranked config: ${errors.join("; ")}`);
       await this.withAdmission(async () => {

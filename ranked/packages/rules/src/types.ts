@@ -1,8 +1,11 @@
 export const RANKED_TIERS = ["RED", "AQUA", "BRONZE", "SILVER", "GOLD"] as const;
-export const DISPLAY_TIERS = ["UNRANKED", ...RANKED_TIERS] as const;
+export const SOLO_DIVISION_TIERS = ["RED3", "RED2", "RED1", "AQUA3", "AQUA2", "AQUA1", "BRONZE3", "BRONZE2", "BRONZE1", "SILVER3", "SILVER2", "SILVER1", "GOLD"] as const;
+export const DISPLAY_TIERS = ["UNRANKED", ...RANKED_TIERS, ...SOLO_DIVISION_TIERS, "MASTER", "CHAMPION"] as const;
 export const PLAYER_SIDES = ["A", "B"] as const;
 
-export type RankedTier = (typeof RANKED_TIERS)[number];
+export type BaseRankedTier = (typeof RANKED_TIERS)[number];
+export type SoloDivisionTier = (typeof SOLO_DIVISION_TIERS)[number];
+export type RankedTier = BaseRankedTier | SoloDivisionTier;
 export type DisplayTier = (typeof DISPLAY_TIERS)[number];
 // CSMP progression tiers are operator-defined in the CSMP Tiers and Ranked
 // CSMP Seed sheets. They deliberately do not share the fixed Ranked display

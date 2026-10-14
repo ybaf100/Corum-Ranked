@@ -1,7 +1,7 @@
 import type { DisplayTier, RankedRatingProfile } from "@corum-ranked/rules";
 import type { SqlExecutor } from "../database/database.port.js";
 import { randomUUID } from "node:crypto";
-import { activePromotionSql, ladderRankOrderSql, ladderTiePrioritySql, promotionWinsSql } from "./ranking-policy.js";
+import { activePromotionSql, goldTitleOrderSql, ladderRankOrderSql, ladderTiePrioritySql, promotionWinsSql } from "./ranking-policy.js";
 
 export interface StandingTarget {
   readonly gdAccountId: string;
@@ -17,6 +17,10 @@ export interface PlayerStanding {
   readonly topPercent: number | null;
   readonly target: StandingTarget | null;
   readonly goldTimeline?: GoldScoreTimeline;
+  readonly displayTier?: DisplayTier;
+  readonly goldTier?: {readonly position:number;readonly total:number;readonly title:DisplayTier;
+    readonly nextTier:"MASTER"|"CHAMPION"|null;readonly nextCutoffLp:number|null;
+    readonly championCutoffLp:number|null;readonly masterCutoffLp:number|null;};
 }
 
 export interface GoldScoreTimeline {
@@ -37,6 +41,8 @@ export interface StandingOverride {
   readonly phase: string;
   readonly playerId: string;
   readonly profile: Pick<RankedRatingProfile, "displayedTier" | "visibleRankedScore" | "hiddenMmr" | "promotion" | "demotionWarning">;
+  readonly wins?:number;
+  readonly losses?:number;
 }
 
 interface StandingRow {
@@ -50,6 +56,8 @@ interface StandingRow {
   target_rank: number | null;
   target_score: number | null;
   gold_timeline: GoldScoreTimeline | null;
+  display_tier: DisplayTier | null;
+  gold_tier: PlayerStanding["goldTier"] | null;
 }
 
 /** One SQL snapshot for all subjects/phases. Include every historical bot;
@@ -69,9 +77,9 @@ export async function readStandings(
        SELECT * FROM jsonb_to_recordset($3::jsonb) AS o(
          phase text, player_id uuid, displayed_tier text,
          visible_ranked_score integer, hidden_mmr integer,
-         promotion_active boolean, promotion_wins integer, demotion_warning boolean)
+         promotion_active boolean, promotion_wins integer, demotion_warning boolean,wins integer,losses integer)
      ), profiles AS (
-       SELECT phase.phase, p.id, p.gd_account_id, p.gd_username, p.is_bot,
+       SELECT phase.phase, p.id, p.gd_account_id, p.gd_username, p.is_bot,COALESCE(o.wins,rp.wins) AS wins,COALESCE(o.losses,rp.losses) AS losses,
          CASE WHEN o.player_id IS NOT NULL THEN o.displayed_tier ELSE rp.displayed_tier END AS tier,
          CASE WHEN o.player_id IS NOT NULL THEN o.visible_ranked_score ELSE rp.visible_ranked_score END AS score,
          CASE WHEN o.player_id IS NOT NULL THEN o.hidden_mmr ELSE rp.hidden_mmr END AS mmr,
@@ -86,9 +94,21 @@ export async function readStandings(
      ), eligible AS (
        SELECT *, ${ladderTiePrioritySql("profiles")} AS tie_priority FROM profiles
        WHERE tier <> 'UNRANKED' AND score IS NOT NULL AND (is_bot OR gd_account_id>0)
+     ), gold_ranked AS (
+       SELECT *,ROW_NUMBER() OVER(PARTITION BY phase ORDER BY ${goldTitleOrderSql("eligible")})::int AS gold_position,
+         COUNT(*) OVER(PARTITION BY phase)::int AS gold_total
+       FROM eligible WHERE tier IN ('GOLD','MASTER','CHAMPION')
+     ), gold_stats AS (
+       SELECT phase,MIN(score) FILTER(WHERE gold_position<=3) AS champion_cutoff,
+         MIN(score) FILTER(WHERE gold_total>6 AND gold_position>3 AND gold_position<=CEIL(gold_total/2.0)) AS master_cutoff
+       FROM gold_ranked GROUP BY phase
      ), ranked AS (
-       SELECT *, RANK() OVER (PARTITION BY phase ORDER BY ${ladderRankOrderSql()})::int AS rank
-       FROM eligible
+       SELECT e.*,g.gold_position,g.gold_total,
+         CASE WHEN g.gold_position<=3 THEN 'CHAMPION'
+           WHEN g.gold_total>6 AND g.gold_position<=CEIL(g.gold_total/2.0) THEN 'MASTER'
+           ELSE e.tier END AS display_tier,
+         COALESCE(g.gold_position,RANK() OVER (PARTITION BY e.phase ORDER BY ${ladderRankOrderSql("e")})::int) AS rank
+       FROM eligible e LEFT JOIN gold_ranked g ON g.phase=e.phase AND g.id=e.id
      ), totals AS (
        SELECT phase, COUNT(*)::int AS total FROM eligible GROUP BY phase
      ), fixed AS (
@@ -100,7 +120,13 @@ export async function readStandings(
        SELECT DISTINCT ON (score,tie_priority) *, COUNT(*) OVER (PARTITION BY score,tie_priority)::int AS amount
        FROM fixed ORDER BY score,tie_priority DESC,mmr DESC,md5(id::text || $4::text)
      )
-     SELECT phase.phase, requested.player_id, own.rank, COALESCE(totals.total, 0) AS total,
+     SELECT phase.phase, requested.player_id, own.rank, COALESCE(totals.total, 0) AS total,own.display_tier,
+       CASE WHEN own.gold_position IS NOT NULL THEN jsonb_build_object(
+         'position',own.gold_position,'total',own.gold_total,'title',own.display_tier,
+         'championCutoffLp',gold_stats.champion_cutoff,'masterCutoffLp',gold_stats.master_cutoff,
+         'nextTier',CASE WHEN own.display_tier='CHAMPION' THEN NULL WHEN gold_stats.master_cutoff IS NOT NULL AND own.display_tier='GOLD' THEN 'MASTER' ELSE 'CHAMPION' END,
+         'nextCutoffLp',CASE WHEN own.display_tier='CHAMPION' THEN NULL WHEN gold_stats.master_cutoff IS NOT NULL AND own.display_tier='GOLD' THEN gold_stats.master_cutoff ELSE gold_stats.champion_cutoff END)
+       ELSE NULL END AS gold_tier,
        target.gd_account_id::text AS target_account_id,
        target.gd_username AS target_name, target.is_bot AS target_is_bot,
        target.rank AS target_rank, target.score AS target_score,
@@ -136,6 +162,7 @@ export async function readStandings(
      FROM phases phase CROSS JOIN unnest($1::uuid[]) AS requested(player_id)
      LEFT JOIN ranked own ON own.phase = phase.phase AND own.id = requested.player_id
      LEFT JOIN totals ON totals.phase = phase.phase
+     LEFT JOIN gold_stats ON gold_stats.phase=phase.phase
      LEFT JOIN profiles old_own ON old_own.phase='before' AND old_own.id=requested.player_id
      LEFT JOIN profiles new_own ON new_own.phase='after' AND new_own.id=requested.player_id
      LEFT JOIN ranked moving_before ON $5::boolean AND moving_before.phase='before' AND moving_before.id<>requested.player_id AND moving_before.id=ANY($1::uuid[])
@@ -147,12 +174,13 @@ export async function readStandings(
        ORDER BY candidate.rank DESC, candidate.mmr DESC, md5(candidate.id::text || $4::text)
        LIMIT 1
      ) target ON TRUE`,
-    [playerIds, phases, JSON.stringify(overrides.map(({ phase, playerId, profile }) => ({
+    [playerIds, phases, JSON.stringify(overrides.map(({ phase, playerId, profile,wins,losses }) => ({
       phase, player_id: playerId, displayed_tier: profile.displayedTier as DisplayTier,
       visible_ranked_score: profile.visibleRankedScore, hidden_mmr: profile.hiddenMmr,
       promotion_active: profile.promotion !== null,
       promotion_wins: profile.promotion?.results.filter(mark => mark === "WIN").length ?? 0,
       demotion_warning: !profile.promotion && profile.demotionWarning,
+      wins:wins??null,losses:losses??null,
     }))), tieSeed, includeGoldTimeline],
   );
   const views = new Map<string, Map<string, PlayerStanding>>(phases.map((phase) => [phase, new Map()]));
@@ -167,6 +195,8 @@ export async function readStandings(
             visibleRankedScore: Number(row.target_score) }
         : null,
       ...(row.gold_timeline ? {goldTimeline:row.gold_timeline} : {}),
+      ...(row.display_tier?{displayTier:row.display_tier}:{}),
+      ...(row.gold_tier?{goldTier:row.gold_tier}:{}),
     });
   }
   return views;

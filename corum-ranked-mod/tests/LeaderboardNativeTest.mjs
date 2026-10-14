@@ -85,6 +85,7 @@ test('whole leaderboard popup validates pages, aligns statuses and icons, lazily
         .replace('bool isObject()const','bool isArray()const{return std::holds_alternative<Array>(data);} bool isObject()const');
     const header=strip(read('src/ui/RankedLeaderboardPopup.hpp')).replace('private:','public:');
     run(`
+#include "domain/RankTierPresentation.hpp"
 #include <chrono>
 #include <cstdint>
 #include <map>
@@ -203,6 +204,7 @@ test('leaderboard dims only the SILVER circular halo and preserves matched-card 
     const ambient=badges.slice(badges.indexOf('bool hasPersistentRankAmbient('),badges.indexOf('CCNode* createRankBadgeBackdrop('));
     const display=read('src/ui/RankBadgeAssets.hpp').match(/enum class RankBadgeDisplay\s*\{[^}]+\};/)[0];
     run(`
+#include "domain/RankTierPresentation.hpp"
 #include <array>
 #include <map>
 ${read('tests/helpers/ResultPresentationNativeDouble.hpp').replace('#pragma once','')}

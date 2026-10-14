@@ -46,7 +46,7 @@ class ModReleasePublishTest(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.directory = Path(self.temp.name)
         self.client = MemoryR2()
-        self.channel, self.version = 'debug', 'v0.5.0-beta.68'
+        self.channel, self.version = 'debug', 'v0.5.0-beta.69'
         self.source = self.directory / (publisher.MOD_ID + '.geode')
 
     def prepare(self, channel='debug', marker=None, omit=None):

@@ -156,9 +156,9 @@ int main() {
     assert(sampleScoreProgress(i,-1).score==100&&sampleScoreProgress(i,99).score==125);
     i.before=i.after=0; s=sampleScoreProgress(i,2); assert(s.score==0&&s.fill==0&&s.complete);
     i.before=299; i.after=350; i.afterTier="AQUA"; i.promoted=true;
-    assert(i.duration()==4&&i.after-i.before==51);
+    assert(i.duration()==2&&i.after-i.before==51);
     assert(sampleScoreProgress(i,0).tier=="RED");
-    s=sampleScoreProgress(i,2); assert(s.tier=="AQUA"&&s.minimum==300&&s.target==600&&s.score==325);
+    s=sampleScoreProgress(i,1); assert(s.tier=="AQUA"&&s.minimum==300&&s.target==600&&s.score==325);
     i=ordinary(); i.beforeTier="BRONZE"; i.afterTier="AQUA"; i.before=600; i.after=550; i.demoted=true;
     assert(i.duration()==4&&sampleScoreProgress(i,0).tier=="BRONZE");
     s=sampleScoreProgress(i,2); assert(s.tier=="AQUA"&&s.score==575&&s.fill>0.9);
@@ -185,7 +185,7 @@ ${model}
 namespace cocos2d { using ::CCSize; using ::ccColor3B; }
 ${strip(read('src/ui/RankBadgeAssets.hpp'))}
 namespace corum::ranked::ui {
-inline constexpr ccColor3B Text{230,235,244},TextMuted{147,155,172},Gold{255,207,74},SurfaceRaised{16,28,45};
+inline constexpr ccColor3B Text{230,235,244},TextMuted{147,155,172},Gold{255,207,74},Red{255,93,113},SurfaceRaised{16,28,45};
 enum class FontWeight {Regular,Medium,SemiBold,ExtraBold,Black};
 CCLabelBMFont* menuLabel(std::string text,float scale,CCPoint position,ccColor3B color,FontWeight) {
     auto* label=new CCLabelBMFont; label->setString(text.c_str()); label->setScale(scale+0.18f);
@@ -457,7 +457,7 @@ int main() {
     assert(promotion->m_tier=="AQUA"&&promotion->m_targetKey=="BRONZE");
     assert(promotion->m_leftIcon!=oldLeft&&promotion->m_rightIcon!=oldRight);
     assert(oldLeft->actions.size()==1&&oldRight->actions.size()==1);
-    assert(promotion->m_leftIcon->children[0]->opacity==0); // Placed-style part assembly
+    assert(promotion->m_leftIcon->children[0]->opacity==255); // Lower tiers reveal without promotion assembly
     assert(promotion->m_fill->segmentColor.r==tierColor("AQUA").r/255.0f);
     assert(promotion->m_leftIcon->children.back()->id=="halo:AQUA");
     promotion->onSkip(nullptr);promotion->onSkip(nullptr);drainMainQueue();
@@ -827,8 +827,8 @@ int main() {
     drainMainQueue();assert(!owner.m_resultScoreLayer&&!owner.keypad&&!owner.menu.touch&&owner.rendered==1);
     drainMainQueue();assert(owner.keypad&&owner.menu.touch&&owner.toasts==1);
     owner.beginResultScore(match,*input);assert(mainQueue.empty()&&!owner.m_resultScoreLayer);
-    match=settled("promotion");match.profileBeforeA.visibleRankedScore=299;match.profileAfterA.visibleRankedScore=350;
-    match.profileAfterA.displayedTier="AQUA";match.ratingEventA.promotionSucceeded=true;
+    match=settled("promotion");match.profileBeforeA.displayedTier="SILVER1";match.profileBeforeA.visibleRankedScore=1199;match.profileAfterA.visibleRankedScore=1250;
+    match.profileAfterA.displayedTier="GOLD";match.ratingEventA.promotionSucceeded=true;
     owner.beginResultScore(match,*owner.resultScoreInput(match));
     auto* rank=owner.m_rankTransitionLayer;assert(rank&&!owner.m_resultScorePending&&!owner.keypad);
     Ref keepRank(rank);rank->revealFinalState(false);
@@ -843,7 +843,7 @@ int main() {
     assert(!owner.m_resultScoreLayer&&!owner.keypad);
     drainMainQueue();score=owner.m_resultScoreLayer;assert(score);score->onSkip(nullptr);score->onSkip(nullptr);
     drainMainQueue();assert(!owner.keypad);drainMainQueue();assert(owner.keypad&&owner.menu.touch);
-    match=settled("promotion-skip");match.profileAfterA.displayedTier="AQUA";match.ratingEventA.promotionSucceeded=true;
+    match=settled("promotion-skip");match.profileBeforeA.displayedTier="SILVER1";match.profileAfterA.displayedTier="GOLD";match.ratingEventA.promotionSucceeded=true;
     owner.beginResultScore(match,*owner.resultScoreInput(match));rank=owner.m_rankTransitionLayer;
     rank->onSkip(nullptr);assert(rank->m_finished&&!rank->m_finalShown&&owner.m_rankTransitionLayer==rank);
     drainMainQueue();assert(owner.m_resultScorePending);drainMainQueue();assert(owner.m_resultScoreLayer);
@@ -868,7 +868,7 @@ int main() {
     match=settled("retired");owner.beginResultScore(match,*owner.resultScoreInput(match));drainMainQueue();
     auto rendered=owner.rendered;owner.m_resultScoreLayer->onSkip(nullptr);owner.m_resultScoreLayer->onSkip(nullptr);owner.running=false;
     drainMainQueue();assert(!owner.m_resultScoreLayer&&owner.rendered==rendered&&mainQueue.empty());owner.running=true;
-    match=settled("retired-rank");match.profileAfterA.displayedTier="AQUA";match.ratingEventA.promotionSucceeded=true;
+    match=settled("retired-rank");match.profileBeforeA.displayedTier="SILVER1";match.profileAfterA.displayedTier="GOLD";match.ratingEventA.promotionSucceeded=true;
     owner.beginResultScore(match,*owner.resultScoreInput(match));owner.m_rankTransitionLayer->keyBackClicked();owner.running=false;
     drainMainQueue();assert(!owner.m_rankTransitionLayer&&!owner.m_resultScorePending&&mainQueue.empty());owner.running=true;
     match=settled("covered");owner.beginResultScore(match,*owner.resultScoreInput(match));owner.running=false;
@@ -960,4 +960,29 @@ int main() {
     assert.match(main,/\{74.0f, 74.0f\}/);
     assert.match(main,/addRankStatus\(profile,\{leftCenter.x,leftCenter.y \+ 91.0f\}/);
     assert(18+74/2+1.4<68-5); // rank stays above the emblem with room for the Survival warning condition
+});
+
+test('division grades skip promotion assembly; Gold goals use title cutoffs and Champion uses rank',()=>{
+ run(model+`
+int main(){
+  assert(rankTierDisplay("RED3")=="RED III"&&rankTierDisplay("AQUA2")=="AQUA II"&&rankTierDisplay("SILVER1")=="SILVER I");
+  assert(silverHaloLevel("SILVER3")==0&&silverHaloLevel("SILVER2")==1&&silverHaloLevel("SILVER1")==2);
+  auto i=ordinary();i.bands={{"RED3",0},{"RED2",100},{"RED1",200},{"AQUA3",300},{"AQUA2",400},{"AQUA1",500},{"BRONZE3",600},{"BRONZE2",700},{"BRONZE1",800},{"SILVER3",900},{"SILVER2",1000},{"SILVER1",1100},{"GOLD",1200}};
+  assert(validScoreBands(i.bands));
+  i.beforeTier="RED3";i.afterTier="RED2";i.before=99;i.after=125;i.promoted=true;assert(i.motion()==ScoreMotion::Normal);
+  auto s=sampleScoreProgress(i,2);assert(s.tier=="RED2"&&s.minimum==100&&s.target==200);
+  i.beforeTier="SILVER1";i.afterTier="GOLD";assert(i.motion()==ScoreMotion::Promotion);
+  i.beforeTier=i.afterTier="GOLD";i.before=1300;i.after=1350;i.promoted=false;
+  i.standingBefore.displayTier=i.standingAfter.displayTier="GOLD";
+  i.standingBefore.nextTier=i.standingAfter.nextTier="MASTER";
+  i.standingBefore.nextTierCutoff=i.standingAfter.nextTierCutoff=1500;
+  s=sampleScoreProgress(i,2);assert(s.nextTier=="MASTER"&&s.target==1501&&!s.goldLeader);
+  i.standingAfter.nextTier="CHAMPION";i.standingAfter.nextTierCutoff=1600;
+  s=sampleScoreProgress(i,2);assert(s.nextTier=="CHAMPION"&&s.target==1601);
+  i.afterTier="MASTER";i.promoted=true;assert(i.motion()==ScoreMotion::Promotion);
+  i.beforeTier=i.afterTier="CHAMPION";i.promoted=false;i.standingBefore.displayTier=i.standingAfter.displayTier="CHAMPION";
+  i.standingAfter.rank=2;i.standingAfter.target=StandingTargetView{9,"leader",false,1,1700};
+  s=sampleScoreProgress(i,2);assert(s.nextTier.empty()&&s.target==1700);
+}
+ `);
 });

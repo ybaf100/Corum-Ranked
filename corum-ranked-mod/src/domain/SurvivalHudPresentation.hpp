@@ -32,10 +32,9 @@ inline std::string survivalOrdinal(int rank) {
     return std::to_string(rank)+(tail>=11 && tail<=13 ? "th" : rank%10==1 ? "st" : rank%10==2 ? "nd" : rank%10==3 ? "rd" : "th");
 }
 inline std::size_t survivalHudLeaderCount(std::vector<SurvivalStanding> const& standings,int targetQualifiers) {
-    // Include cutoff ties where space permits. Ten leading participants is the
-    // display cap, independent of the authoritative number that qualifies.
-    auto const passing=std::count_if(standings.begin(),standings.end(),[](auto const& p){return p.passing;});
-    return std::min<std::size_t>(standings.size(),std::clamp(std::max(targetQualifiers,static_cast<int>(passing)),0,10));
+    // Qualification only controls the cutoff marker, never the number of rows.
+    (void)targetQualifiers;
+    return std::min<std::size_t>(standings.size(),10);
 }
 inline std::vector<SurvivalStanding> survivalHudRows(std::vector<SurvivalStanding> const& standings,
     std::string const& ownId, int targetQualifiers) {

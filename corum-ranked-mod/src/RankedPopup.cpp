@@ -24,6 +24,7 @@
 #include "ui/ResultScoreLayer.hpp"
 #include "ui/StandingVisuals.hpp"
 #include "ui/RankedLeaderboardPopup.hpp"
+#include "ui/RankedTierGuidePopup.hpp"
 #include "ui/PlacementGradeBadge.hpp"
 #include "ui/PlayerIcon.hpp"
 #include "ui/RankedTranslations.hpp"
@@ -243,10 +244,10 @@ std::optional<RankTransitionType> authoritativeTransitionType(
     if (event.placementCompleted && oldTier == "UNRANKED" && newTier != "UNRANKED") {
         return RankTransitionType::Placement;
     }
-    if (event.promotionSucceeded && oldTier != "UNRANKED" && newTier != "UNRANKED") {
+    if (corum::ranked::goldRankTier(newTier) && corum::ranked::rankTierOrder(newTier)>corum::ranked::rankTierOrder(oldTier) && oldTier != "UNRANKED") {
         return RankTransitionType::Promotion;
     }
-    if (event.demoted && oldTier != "UNRANKED" && oldTier != "RED" && newTier != "UNRANKED") {
+    if (event.demoted && (corum::ranked::goldRankTier(oldTier) || corum::ranked::rankTierBase(oldTier)!=corum::ranked::rankTierBase(newTier)) && oldTier != "UNRANKED" && newTier != "UNRANKED") {
         return RankTransitionType::Demotion;
     }
     return std::nullopt;
@@ -1750,7 +1751,7 @@ class CorumRankedLayer final : public CCLayerColor {
         } else {
             auto* lpLabel = makeLabel(
                 combineTierAndScore
-                    ? fmt::format("{} - {} LP", upper(tier), profile.visibleRankedScore.value_or(0))
+                    ? fmt::format("{} - {} LP", corum::ranked::rankTierDisplay(upper(tier)), profile.visibleRankedScore.value_or(0))
                     : fmt::format("{} LP", profile.visibleRankedScore.value_or(0)),
                 0.35f,
                 {center.x, valueY},
@@ -1762,7 +1763,7 @@ class CorumRankedLayer final : public CCLayerColor {
             if (outRefs) outRefs->scoreLabel = lpLabel;
         }
 
-        auto* tierPlate = makeTextPlate(upper(tier), {96.0f, 24.0f}, {center.x, center.y - 74.0f}, accent, 0.28f, accent, "black");
+        auto* tierPlate = makeTextPlate(corum::ranked::rankTierDisplay(upper(tier)), {96.0f, 24.0f}, {center.x, center.y - 74.0f}, accent, 0.28f, accent, "black");
         m_root->addChild(tierPlate, 3);
         auto* tierTrophy = corum::ranked::ui::createAnimatedRankBadge(
             tier,
@@ -2163,7 +2164,7 @@ class CorumRankedLayer final : public CCLayerColor {
         emblem->setPosition({leftCenter.x, leftCenter.y + 18.0f});
         m_root->addChild(emblem, 4);
         addRankStatus(profile,{leftCenter.x,leftCenter.y + 91.0f},0.26f,174.0f,true);
-        auto* tier = makeLabel(upper(view.profileTier), 0.54f, {leftCenter.x, leftCenter.y - 25.0f}, tierColor(upper(view.profileTier)), "black");
+        auto* tier = makeLabel(corum::ranked::rankTierDisplay(upper(view.profileTier)), 0.54f, {leftCenter.x, leftCenter.y - 25.0f}, tierColor(upper(view.profileTier)), "black");
         corum::ranked::ui::fitMenuLabelWidth(tier, 150.0f, 0.54f, 0.32f);
         m_root->addChild(tier, 4);
         auto const placement = profile.placementGames < profile.placementGamesRequired;
@@ -2250,8 +2251,13 @@ class CorumRankedLayer final : public CCLayerColor {
         auto* leaderboard = CCMenuItemSpriteExtra::create(leaderboardFace,this,menu_selector(CorumRankedLayer::onLeaderboard));
         leaderboard->setPosition({rightCenter.x + 73,rightCenter.y + 78});
         leaderboard->setID("ranked-leaderboard-trophy"_spr); m_menu->addChild(leaderboard);
+        auto* guideFace=corum::ranked::ui::surface({30,30},{},kGold,kDeepPanel2,250,true);
+        auto* guideBadge=corum::ranked::ui::createAnimatedRankBadge("GOLD",{25,25},corum::ranked::ui::RankBadgeDisplay::Matched);
+        guideBadge->setPosition({15,15});guideFace->addChild(guideBadge,5);
+        auto* guide=CCMenuItemSpriteExtra::create(guideFace,this,menu_selector(CorumRankedLayer::onTierGuide));
+        guide->setPosition({rightCenter.x-73,rightCenter.y+78});guide->setID("ranked-tier-guide-gold"_spr);m_menu->addChild(guide);
         auto* actionTitle = makeLabel(tr("matchmaking", "MATCHMAKING"), 0.34f, {rightCenter.x,rightCenter.y + 80.0f}, kCyan, "semibold");
-        corum::ranked::ui::fitMenuLabelWidth(actionTitle,116,0.34f,0.24f);
+        corum::ranked::ui::fitMenuLabelWidth(actionTitle,96,0.34f,0.24f);
         m_root->addChild(actionTitle, 4);
 
         if (view.stage == RuntimeStage::Ready) {
@@ -2364,7 +2370,7 @@ class CorumRankedLayer final : public CCLayerColor {
                 return hint;
             }
             if (*selected == corum::ranked::RankedMode::Survival)
-                return view.survivalEnabled && view.survival.onlineAvailable ? tr("survival-online-ready","2-16 PLAYERS · UP TO 180s") : tr("mode-off-browse","MODE DISABLED. HISTORY, LEADERBOARD AND ACHIEVEMENTS ARE AVAILABLE.");
+                return view.survivalEnabled && view.survival.onlineAvailable ? tr("Ranked session ready. Join the queue when prepared.","Ranked session ready. Join the queue when prepared.") : tr("mode-off-browse","MODE DISABLED. HISTORY, LEADERBOARD AND ACHIEVEMENTS ARE AVAILABLE.");
             if (!view.soloEnabled) return tr("mode-off-browse","MODE DISABLED. HISTORY, LEADERBOARD AND ACHIEVEMENTS ARE AVAILABLE.");
         }
         return corum::ranked::i18n::runtimeStatus(view.status);
@@ -2938,7 +2944,7 @@ class CorumRankedLayer final : public CCLayerColor {
             m_root->addChild(badge, 5);
         }
         auto* tier = makeLabel(
-            fmt::format("{} - {} LP", upper(finalResult.displayedTier), finalResult.visibleRankedScore),
+            fmt::format("{} - {} LP", corum::ranked::rankTierDisplay(upper(finalResult.displayedTier)), finalResult.visibleRankedScore),
             0.55f,
             {size.width / 2.0f, size.height / 2.0f - 49.0f},
             tierColor(finalResult.displayedTier),
@@ -3455,7 +3461,7 @@ class CorumRankedLayer final : public CCLayerColor {
         // Show the authoritative pre-match LP first. The delta rises from below,
         // overlaps it, and the post-match value fades in at the same position.
         auto* previousScore = makeLabel(
-            fmt::format("{} - {} LP", upper(before.displayedTier), *before.visibleRankedScore),
+            fmt::format("{} - {} LP", corum::ranked::rankTierDisplay(upper(before.displayedTier)), *before.visibleRankedScore),
             0.27f,
             {centerX, finalY},
             ccc3(240, 244, 250),
@@ -3515,7 +3521,7 @@ class CorumRankedLayer final : public CCLayerColor {
         ));
 
         auto* prior = makeLabel(
-            fmt::format("{} - {} LP", upper(before.displayedTier), *before.visibleRankedScore),
+            fmt::format("{} - {} LP", corum::ranked::rankTierDisplay(upper(before.displayedTier)), *before.visibleRankedScore),
             0.27f,
             {centerX, finalY},
             ccc3(240, 244, 250),
@@ -3620,6 +3626,10 @@ class CorumRankedLayer final : public CCLayerColor {
         input.demotionWarning = after.demotionWarning; input.previousMarks = static_cast<int>(before.promotion.results.size());
         input.bands = match.scorePresentation.bands; input.standingBefore = player.before;
         input.standingAfter = player.after; input.promotion = player.promotion; input.goldTimeline = player.goldTimeline;
+        if(!player.before.displayTier.empty())input.beforeTier=player.before.displayTier;
+        if(!player.after.displayTier.empty())input.afterTier=player.after.displayTier;
+        input.promoted=input.promoted || corum::ranked::rankTierOrder(input.afterTier)>corum::ranked::rankTierOrder(input.beforeTier);
+        input.demoted=input.demoted || corum::ranked::rankTierOrder(input.afterTier)<corum::ranked::rankTierOrder(input.beforeTier);
         return input;
     }
 
@@ -4939,6 +4949,11 @@ class CorumRankedLayer final : public CCLayerColor {
         if (auto* popup = corum::ranked::ui::RankedLeaderboardPopup::create(m_modeTransition.selected().value_or(corum::ranked::RankedMode::SoloRanked))) {
             m_leaderboard.emplace(popup); popup->show();
         }
+    }
+
+    void onTierGuide(CCObject*) {
+        if(m_modeTransition.moving() || m_modeTransition.selected()!=corum::ranked::RankedMode::SoloRanked)return;
+        if(auto* popup=corum::ranked::ui::RankedTierGuidePopup::create())popup->show();
     }
 
     void onCloseLayer(CCObject*) {

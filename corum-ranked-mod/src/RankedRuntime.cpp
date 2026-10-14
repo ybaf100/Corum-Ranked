@@ -222,6 +222,16 @@ corum::ranked::AchievementUnlockNoticeView parseAchievementNotice(matjson::Value
 corum::ranked::StandingView parseStanding(matjson::Value const& value) {
     corum::ranked::StandingView view;
     if (!value.isObject()) return view;
+    view.displayTier=value["displayTier"].asString().unwrapOr("");
+    auto const gold=value["goldTier"];
+    if(gold.isObject()) {
+        view.goldPosition=static_cast<int>(gold["position"].asInt().unwrapOr(0));
+        view.goldTotal=static_cast<int>(gold["total"].asInt().unwrapOr(0));
+        view.nextTier=gold["nextTier"].asString().unwrapOr("");
+        if(auto cut=gold["nextCutoffLp"].asInt();cut.isOk())view.nextTierCutoff=static_cast<int>(cut.unwrap());
+        if(auto cut=gold["championCutoffLp"].asInt();cut.isOk())view.championCutoff=static_cast<int>(cut.unwrap());
+        if(auto cut=gold["masterCutoffLp"].asInt();cut.isOk())view.masterCutoff=static_cast<int>(cut.unwrap());
+    }
     auto const rank = value["rank"].asInt();
     view.total = static_cast<int>(value["total"].asInt().unwrapOr(0));
     if (rank.isOk() && rank.unwrap() > 0 && rank.unwrap() <= view.total) {
@@ -596,6 +606,8 @@ std::string RankedRuntime::leaderboardUrl(int offset, int limit, RankedMode mode
     auto const path = mode == RankedMode::Survival ? "/api/ranked/survival/leaderboard" : "/api/ranked/leaderboard";
     return endpoint(fmt::format("{}?offset={}&limit={}",path,std::max(0,offset),std::clamp(limit,1,50)));
 }
+
+std::string RankedRuntime::tierGuideUrl() const { return endpoint("/api/ranked/leaderboard/tiers"); }
 
 void RankedRuntime::begin() {
     m_rankedOpen = true;
@@ -1956,6 +1968,13 @@ void RankedRuntime::parseMatchState(matjson::Value const& root) {
         m_view.match.ratingEventA = parseRatingEvent(result["events"]["A"]);
         m_view.match.ratingEventB = parseRatingEvent(result["events"]["B"]);
         m_view.match.scorePresentation = parseResultScore(result["scorePresentation"]);
+        auto applyTier=[](RankedProfileView& profile,std::string& tier,StandingView const& standing) {
+            if(!standing.displayTier.empty()){profile.displayedTier=standing.displayTier;tier=standing.displayTier;}
+        };
+        applyTier(m_view.match.profileBeforeA,m_view.match.profileBeforeTierA,m_view.match.scorePresentation.playerA.before);
+        applyTier(m_view.match.profileBeforeB,m_view.match.profileBeforeTierB,m_view.match.scorePresentation.playerB.before);
+        applyTier(m_view.match.profileAfterA,m_view.match.profileAfterTierA,m_view.match.scorePresentation.playerA.after);
+        applyTier(m_view.match.profileAfterB,m_view.match.profileAfterTierB,m_view.match.scorePresentation.playerB.after);
         if (auto const unlocks = result["achievementUnlocks"][m_view.match.side].asArray(); unlocks.isOk()) {
             for (auto const& item : unlocks.unwrap()) {
                 auto notice = parseAchievementNotice(item);
@@ -4088,6 +4107,9 @@ void RankedRuntime::fetchStanding() {
             m_standingBusy = false;
             if (!successful(response)) return;
             m_view.standing = parseStanding(response.json().unwrapOr(matjson::Value())["standing"]);
+            if(!m_view.standing.displayTier.empty()) {
+                m_view.profileTier=m_view.standing.displayTier;
+            }
             ++m_view.revision;
         });
 }

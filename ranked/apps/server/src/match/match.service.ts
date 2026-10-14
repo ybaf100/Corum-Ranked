@@ -1,3 +1,4 @@
+import { readStandings } from "../leaderboard/standing.js";
 import { recentRoundDeaths, type DeathFeedEvent } from "./death-feed.js";
 import {
   ConflictException,
@@ -2576,8 +2577,8 @@ export class MatchService {
     const placementGamesRequired = config.operational.mmrPolicy.placementGames;
     const ratingPresentation = {
       scorePresentation: await buildScorePresentation(transaction, config.operational.tierBands, {
-        A: { playerId: current.player_a_id, before: beforeA, after: ratingA.profile },
-        B: { playerId: current.player_b_id, before: beforeB, after: ratingB.profile },
+        A: { playerId: current.player_a_id, before: beforeA, after: ratingA.profile,beforeWins:Number(profileA.wins??0),beforeLosses:Number(profileA.losses??0) },
+        B: { playerId: current.player_b_id, before: beforeB, after: ratingB.profile,beforeWins:Number(profileB.wins??0),beforeLosses:Number(profileB.losses??0) },
       }, winner),
       perfectWinSide,
       rankedScoreDelta: { A: ratingA.visibleScoreDelta, B: ratingB.visibleScoreDelta },
@@ -2630,6 +2631,11 @@ export class MatchService {
         },
       },
     };
+    for(const side of ["A","B"] as const) {
+      const standing=ratingPresentation.scorePresentation.players[side];
+      ratingPresentation.profileBefore[side].displayedTier=standing.before.displayTier??ratingPresentation.profileBefore[side].displayedTier;
+      ratingPresentation.profileAfter[side].displayedTier=standing.after.displayTier??ratingPresentation.profileAfter[side].displayedTier;
+    }
     const winnerId = winner === "A" ? current.player_a_id : current.player_b_id;
     await transaction.query(
       `UPDATE ranked_matches
@@ -3269,6 +3275,9 @@ export class MatchService {
     );
     const playerA = players.rows.find((player) => player.id === match.player_a_id);
     const playerB = players.rows.find((player) => player.id === match.player_b_id);
+    const goldIds=players.rows.filter(player=>player.displayed_tier==="GOLD").map(player=>player.id);
+    const goldStandings=goldIds.length?(await readStandings(transaction,goldIds)).get("current"):undefined;
+    const displayTier=(player:PlayerStateRow)=>goldStandings?.get(player.id)?.displayTier??player.displayed_tier;
     const viewerSide: PlayerSide = viewerPlayerId === match.player_a_id ? "A" : "B";
     const opponentSide: PlayerSide = viewerSide === "A" ? "B" : "A";
     const config = this.matchConfig(match);
@@ -3460,12 +3469,14 @@ export class MatchService {
             profileAfter: {
               A: playerA ? {
                 ...publicRatingProfile(ratingProfileFromRow(playerA), placementGamesRequired, playerA),
+              displayedTier:displayTier(playerA),
                 equippedTitle: this.achievements.titleProjection(
                   playerA.equipped_achievement_id, playerA.equipped_achievement_level,
                 ),
               } : null,
               B: playerB ? {
                 ...publicRatingProfile(ratingProfileFromRow(playerB), placementGamesRequired, playerB),
+              displayedTier:displayTier(playerB),
                 equippedTitle: this.achievements.titleProjection(
                   playerB.equipped_achievement_id, playerB.equipped_achievement_level,
                 ),
@@ -3502,6 +3513,7 @@ export class MatchService {
               gdAccountId: playerA.gd_account_id,
               gdUsername: playerA.gd_username,
               ...publicRatingProfile(ratingProfileFromRow(playerA), placementGamesRequired, playerA),
+              displayedTier:displayTier(playerA),
               equippedTitle: this.achievements.titleProjection(
                 playerA.equipped_achievement_id, playerA.equipped_achievement_level,
               ),
@@ -3512,6 +3524,7 @@ export class MatchService {
               gdAccountId: playerB.gd_account_id,
               gdUsername: playerB.gd_username,
               ...publicRatingProfile(ratingProfileFromRow(playerB), placementGamesRequired, playerB),
+              displayedTier:displayTier(playerB),
               equippedTitle: this.achievements.titleProjection(
                 playerB.equipped_achievement_id, playerB.equipped_achievement_level,
               ),

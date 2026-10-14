@@ -68,6 +68,7 @@ void SurvivalHud::present(SurvivalMatchView const& view,std::int64_t remainingMs
         auto const visible=std::any_of(rows.begin(),rows.end(),[&](auto const& value){return value.id==id;});
         if(row.visible!=visible){row.visible=visible;row.node->setVisible(visible);for(auto const& label:{row.rank,row.name,row.score})fade(label,visible);}
     }
+    float textWidth=0;
     for(std::size_t i=0;i<rows.size();++i) {
         auto const& value=rows[i];auto& row=m_rows.at(value.id);auto const y=top-static_cast<float>(i)*gap-(separateOwn && i+1==rows.size()?7:0);
         if(row.targetY!=y){row.targetY=y;row.node->stopActionByTag(7414);auto* move=CCEaseSineOut::create(CCMoveTo::create(.30f,{8,y}));move->setTag(7414);row.node->runAction(move);}
@@ -79,12 +80,13 @@ void SurvivalHud::present(SurvivalMatchView const& view,std::int64_t remainingMs
         auto const scoreWidth=row.score.foreground->getContentSize().width*row.score.foreground->getScale();
         row.name.fit(std::max(32.0f,width-rankWidth-scoreWidth-8),scale,scale*.7f);
         auto const nameWidth=row.name.foreground->getContentSize().width*row.name.foreground->getScale();
+        textWidth=std::max(textWidth,rankWidth+nameWidth+scoreWidth+8);
         row.rank.position({0,-1});row.name.position({rankWidth+4,-1});row.score.position({rankWidth+4+nameWidth+4,-1});
     }
     m_cutoffLine->clear();auto const boundary=survivalHudCutoffBoundary(rows);
     if(boundary>0) {
         auto const y=top-static_cast<float>(boundary)*gap+gap*.15f;
-        m_cutoffLine->drawSegment({8,y},{8+width,y},.65f,{1,.32f,.41f,.95f});
+        m_cutoffLine->drawSegment({8,y},{8+textWidth+3,y},.65f,{1,.32f,.41f,.95f});
     }
     presentProgressMarkers(view);
     auto own=std::find_if(view.standings.begin(),view.standings.end(),[&](auto const& p){return p.id==view.ownId;});

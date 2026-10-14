@@ -500,6 +500,7 @@ public:
     void fetchModeAvailability();
     void fetchStanding();
     [[nodiscard]] std::string leaderboardUrl(int offset, int limit, RankedMode mode = RankedMode::SoloRanked) const;
+    [[nodiscard]] std::string tierGuideUrl() const;
     void fetchAchievements();
     void fetchPlayerInfo(std::string const& side);
     void fetchForumRecords(bool refresh = false);

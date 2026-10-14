@@ -51,11 +51,19 @@ var CORUM_RANKED_CONFIG_HEADERS = Object.freeze([
 ]);
 
 var CORUM_RANKED_TIER_DEFAULTS = Object.freeze([
-  Object.freeze(["RED", "", "", 2, 2, 3, 2]),
-  Object.freeze(["AQUA", "", "", 3, 3, 3, 2]),
-  Object.freeze(["BRONZE", "", "", 4, 4, 5, 3]),
-  Object.freeze(["SILVER", "", "", 5, 5, 5, 3]),
-  Object.freeze(["GOLD", "", "", 6, 6, 0, 0]),
+  Object.freeze(["RED3", 0, 100, 2, 2, 0, 0]),
+  Object.freeze(["RED2", 100, 200, 2, 2, 0, 0]),
+  Object.freeze(["RED1", 200, 300, 2, 2, 3, 2]),
+  Object.freeze(["AQUA3", 300, 400, 3, 3, 0, 0]),
+  Object.freeze(["AQUA2", 400, 500, 3, 3, 0, 0]),
+  Object.freeze(["AQUA1", 500, 600, 3, 3, 3, 2]),
+  Object.freeze(["BRONZE3", 600, 700, 4, 4, 0, 0]),
+  Object.freeze(["BRONZE2", 700, 800, 4, 4, 0, 0]),
+  Object.freeze(["BRONZE1", 800, 900, 4, 4, 5, 3]),
+  Object.freeze(["SILVER3", 900, 1000, 5, 5, 0, 0]),
+  Object.freeze(["SILVER2", 1000, 1100, 5, 5, 0, 0]),
+  Object.freeze(["SILVER1", 1100, 1200, 5, 5, 5, 3]),
+  Object.freeze(["GOLD", 1200, "", 6, 6, 0, 0]),
 ]);
 
 var CORUM_RANKED_SEED_DEFAULTS = Object.freeze([
@@ -177,8 +185,8 @@ var CORUM_RANKED_CONFIG_DEFAULTS = Object.freeze([
   Object.freeze(["rankedAudioMenuStartSeconds", 0, "일반 로비 BGM 시작 지점(초)"]),
   Object.freeze(["rankedAudioDemotionWarningLobbySongId", "", "강등 경고 상태 로비 BGM Song ID (비어 있으면 일반 로비 사용)"]),
   Object.freeze(["rankedAudioDemotionWarningLobbyStartSeconds", 0, "강등 경고 로비 BGM 시작 지점(초)"]),
-  Object.freeze(["rankedAudioPromotionLobbySongId", "", "승급전 상태 로비 BGM Song ID (비어 있으면 일반 로비 사용)"]),
-  Object.freeze(["rankedAudioPromotionLobbyStartSeconds", 0, "승급전 로비 BGM 시작 지점(초)"]),
+  Object.freeze(["rankedAudioPromotionLobbySongId", "", "승격전 상태 로비 BGM Song ID (비어 있으면 일반 로비 사용)"]),
+  Object.freeze(["rankedAudioPromotionLobbyStartSeconds", 0, "승격전 로비 BGM 시작 지점(초)"]),
   Object.freeze(["rankedAudioMatchSongId", "", "1·2라운드 / Match Found / Ban / 준비 대기 BGM Song ID"]),
   Object.freeze(["rankedAudioMatchStartSeconds", 0, "1·2라운드 대기 BGM 시작 지점(초)"]),
   Object.freeze(["rankedAudioRound3DeathmatchWaitSongId", "", "3라운드 및 Death Match 대기 BGM Song ID (비어 있으면 1·2라운드 BGM 사용)"]),
@@ -233,6 +241,7 @@ function setupCorumRankedConfig() {
     CORUM_RANKED_CONFIG_HEADERS,
   );
 
+  migrateRankedTierDivisions_(spreadsheet, tiersSheet);
   appendMissingRankedRows_(tiersSheet, CORUM_RANKED_TIER_DEFAULTS);
   appendMissingRankedRows_(seedsSheet, CORUM_RANKED_SEED_DEFAULTS);
   appendMissingRankedCsmpSeedRows_(seedsSheet, csmpTiersSheet);
@@ -248,6 +257,39 @@ function setupCorumRankedConfig() {
 
   console.log("Corum Ranked 설정 준비 완료 (맵 데이터: " + mapsSheet.getName() + ")");
   console.log("미확정 Seed/MMR/timeout 값을 입력하고 검증한 뒤 enabled를 TRUE로 바꾸세요.");
+}
+
+/** Preserve all operator boundaries, pools and series tuning when upgrading the
+ * old five-row sheet. The original cells are kept in a separate backup sheet. */
+function migrateRankedTierDivisions_(spreadsheet, sheet) {
+  var bands = readRankedTierBands_(sheet);
+  var bases = ["RED", "AQUA", "BRONZE", "SILVER", "GOLD"];
+  if (bands.length !== 5 || !bases.every(function (base) { return bands.some(function (b) { return b.tier === base; }); })) return;
+  if (!bands.every(function (b) { return Number.isSafeInteger(b.minInclusive) && (b.tier === "GOLD" || Number.isSafeInteger(b.maxExclusive) && b.maxExclusive - b.minInclusive >= 3); })) {
+    throw new Error("기존 Ranked Tiers의 최소/최대 점수를 먼저 입력하세요.");
+  }
+  var values = sheet.getDataRange().getValues(), header = values[0];
+  var backupName = "Ranked Tiers before beta69";
+  if (!spreadsheet.getSheetByName(backupName)) {
+    var backup = getOrCreateSheet_(spreadsheet, backupName, header);
+    backup.getRange(1, 1, values.length, header.length).setValues(values);
+  }
+  var columns = CORUM_RANKED_TIER_HEADERS.map(function (name) { return findOptionalHeaderIndex_(header, [name]); });
+  var rows = [];
+  bases.forEach(function (base) {
+    var b = bands.filter(function (band) { return band.tier === base; })[0];
+    var cuts = base === "GOLD" ? [b.minInclusive, ""] : [b.minInclusive,
+      Math.ceil(b.minInclusive + (b.maxExclusive - b.minInclusive) / 3),
+      Math.ceil(b.minInclusive + 2 * (b.maxExclusive - b.minInclusive) / 3), b.maxExclusive];
+    (base === "GOLD" ? [0] : [3,2,1]).forEach(function (division, index) {
+      var cells = [base + (division || ""), cuts[index], cuts[index + 1], b.mainPool, b.deathmatchPool,
+        division === 1 ? b.promotionGames : 0, division === 1 ? b.promotionWinsRequired : 0];
+      var row = Array(header.length).fill("");
+      cells.forEach(function (value, col) { row[columns[col]] = value; });
+      rows.push(row);
+    });
+  });
+  sheet.getRange(2, 1, rows.length, header.length).setValues(rows);
 }
 
 function appendMissingRankedCsmpSeedRows_(seedsSheet, csmpTiersSheet) {
@@ -334,6 +376,7 @@ function migrateRankedTierPromotionDefaults_(sheet) {
   var defaults = {
     RED: [3, 2], AQUA: [3, 2], BRONZE: [5, 3], SILVER: [5, 3], GOLD: [0, 0],
   };
+  CORUM_RANKED_TIER_DEFAULTS.forEach(function (row) { defaults[row[0]] = [row[5], row[6]]; });
   var changed = false;
   for (var rowIndex = 1; rowIndex < values.length; rowIndex += 1) {
     var tier = rankedText_(values[rowIndex][tierColumn]).toUpperCase();
@@ -1176,7 +1219,8 @@ function validateRankedClientPresentation_(client, errors) {
 }
 
 function validateRankedTiers_(tierBands, errors) {
-  var expected = ["RED", "AQUA", "BRONZE", "SILVER", "GOLD"];
+  var expected = tierBands.some(function (b) { return /[123]$/.test(b.tier); })
+    ? CORUM_RANKED_TIER_DEFAULTS.map(function (row) { return row[0]; }) : ["RED", "AQUA", "BRONZE", "SILVER", "GOLD"];
   var byTier = {};
   tierBands.forEach(function (band) {
     if (byTier[band.tier]) errors.push("Ranked Tiers에 " + band.tier + "가 중복되어 있습니다.");
@@ -1186,13 +1230,14 @@ function validateRankedTiers_(tierBands, errors) {
     if (!byTier[tier]) errors.push("Ranked Tiers에 " + tier + "가 필요합니다.");
   });
   if (tierBands.length !== expected.length) {
-    errors.push("Ranked Tiers에는 5개 표시 티어를 각각 한 번만 입력해야 합니다.");
+    errors.push("Ranked Tiers에는 RED3~SILVER1 및 GOLD를 각각 한 번만 입력해야 합니다.");
   }
 
   var sorted = tierBands.slice().sort(function (left, right) {
     return Number(left.minInclusive) - Number(right.minInclusive);
   });
   sorted.forEach(function (band, index) {
+    if (band.tier !== expected[index]) errors.push("Ranked Tiers 급간 순서가 올바르지 않습니다.");
     if (!Number.isFinite(band.minInclusive)) {
       errors.push(band.tier + " 최소 점수를 입력해야 합니다.");
     }
@@ -1215,14 +1260,15 @@ function validateRankedTiers_(tierBands, errors) {
       errors.push(band.tier + " Deathmatch Pool은 1~6 정수여야 합니다.");
     }
     var highest = index === sorted.length - 1;
+    var internal = !highest && band.tier.replace(/[123]$/, "") === sorted[index + 1].tier.replace(/[123]$/, "");
     if (!Number.isInteger(band.promotionGames) || band.promotionGames < 0 ||
       !Number.isInteger(band.promotionWinsRequired) || band.promotionWinsRequired < 0) {
-      errors.push(band.tier + " 승급전 판수/필요 승수는 0 이상의 정수여야 합니다.");
-    } else if (highest && (band.promotionGames !== 0 || band.promotionWinsRequired !== 0)) {
-      errors.push(band.tier + "는 최상위 티어이므로 승급전 설정이 0/0이어야 합니다.");
-    } else if (!highest && (band.promotionGames < 1 || band.promotionWinsRequired < 1 ||
+      errors.push(band.tier + " 승격전 판수/필요 승수는 0 이상의 정수여야 합니다.");
+    } else if ((highest || internal) && (band.promotionGames !== 0 || band.promotionWinsRequired !== 0)) {
+      errors.push(band.tier + "는 최상위 티어이므로 승격전 설정이 0/0이어야 합니다.");
+    } else if (!highest && !internal && (band.promotionGames < 1 || band.promotionWinsRequired < 1 ||
       band.promotionWinsRequired > band.promotionGames)) {
-      errors.push(band.tier + " 승급전 필요 승수는 전체 판수 이하여야 합니다.");
+      errors.push(band.tier + " 승격전 필요 승수는 전체 판수 이하여야 합니다.");
     }
   });
   if (sorted.length > 0 && sorted[sorted.length - 1].maxExclusive !== null) {

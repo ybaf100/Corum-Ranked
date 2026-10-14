@@ -124,7 +124,7 @@ std::string normalizeRankName(std::string rank) {
 }
 
 int rankStageFor(std::string const& input) {
-    auto const rank = normalizeRankName(input);
+    auto const rank = rankTierBase(normalizeRankName(input));
     if (rank == "RED") return 1;
     if (rank == "AQUA") return 2;
     if (rank == "BRONZE") return 3;
@@ -139,7 +139,7 @@ bool isKnownRankName(std::string const& input) {
 }
 
 RankTierProfile rankTierProfile(std::string const& input) {
-    auto const rank = normalizeRankName(input);
+    auto const rank = rankTierBase(normalizeRankName(input));
     if (rank == "RED") return {{244, 76, 91}, {255, 128, 91}, 1, 13, 94, 1.4f};
     if (rank == "AQUA") return {{55, 220, 234}, {91, 154, 255}, 2, 15, 104, 1.6f};
     if (rank == "BRONZE") return {{208, 137, 70}, {255, 174, 78}, 3, 17, 110, 2.5f};
@@ -178,7 +178,7 @@ void coverRankSprite(CCSprite* sprite, CCSize size) {
 RankBadgeAssembly createRankBadgeAssembly(std::string const& input, float badgeSize) {
     RankBadgeAssembly assembly;
     assembly.root = centeredRoot();
-    auto const rank = normalizeRankName(input);
+    auto const rank = rankTierBase(normalizeRankName(input));
 
     for (auto const& spec : partsFor(rank)) {
         auto* sprite = rankResourceSprite(spec.filename);
@@ -204,7 +204,7 @@ RankBadgeAssembly createRankBadgeAssembly(std::string const& input, float badgeS
 
 bool hasPersistentRankAmbient(std::string const& input) {
     auto const rank = normalizeRankName(input);
-    return rank == "SILVER" || rank == "GOLD";
+    return silverHaloLevel(rank)>0 || goldRankTier(rank);
 }
 
 CCNode* createRankAmbientFx(
@@ -213,8 +213,9 @@ CCNode* createRankAmbientFx(
     RankBadgeDisplay display
 ) {
     auto* ambient = centeredRoot();
-    auto const rank = normalizeRankName(input);
-    if (!hasPersistentRankAmbient(rank)) return ambient;
+    auto const canonical = normalizeRankName(input);
+    auto const rank=rankTierBase(canonical);
+    if (!hasPersistentRankAmbient(canonical)) return ambient;
 
     auto const longest = std::max(maxSize.width, maxSize.height);
     auto const leaderboard = display == RankBadgeDisplay::Leaderboard;
@@ -229,6 +230,11 @@ CCNode* createRankAmbientFx(
             1,
             leaderboard ? 46 : matched ? 200 : compact ? 46 : 108
         );
+        if(silverHaloLevel(canonical)==1) {
+            pulseOpacity(halo,leaderboard?34:matched?170:compact?34:70,
+                leaderboard?62:matched?240:compact?62:132,1.20f);
+            return ambient;
+        }
         auto* orbit = ambientSprite(
             ambient,
             "fx-silver-orbit.png",
@@ -317,12 +323,12 @@ CCNode* createRankBadgeBackdrop(
         "fx-rank-radial-glow-white.png",
         {genericExtent, genericExtent},
         0,
-        compact ? 28 : static_cast<GLubyte>(rank == "GOLD" ? 96 : 62),
+        compact ? 28 : static_cast<GLubyte>(goldRankTier(rank) ? 96 : 62),
         &profile.color
     );
     pulseOpacity(genericGlow, compact ? 20 : 42, compact ? 42 : 86, compact ? 1.25f : 1.05f);
 
-    if (rank == "AQUA" && !compact) {
+    if (rankTierBase(rank) == "AQUA" && !compact) {
         auto* orbit = ambientSprite(ambient, "fx-rank-broken-ring-white.png", {longest * 1.32f, longest * 1.32f}, 3, 72, &profile.color);
         if (orbit) orbit->runAction(CCRepeatForever::create(CCRotateBy::create(6.2f, 360.0f)));
     }

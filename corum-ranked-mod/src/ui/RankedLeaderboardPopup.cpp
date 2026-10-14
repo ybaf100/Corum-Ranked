@@ -228,7 +228,7 @@ void RankedLeaderboardPopup::showRows(matjson::Value const& data) {
             {columns.status,24},columns.statusWidth,0.26f,entry.promotion ? Green : Red);
         auto* badge = createAnimatedRankBadge(entry.tier,{27,27},RankBadgeDisplay::Leaderboard);
         badge->setPosition({columns.tierIcon,24}); row->addChild(badge,4);
-        leftCaption(row,entry.tier,{columns.tierName,24},columns.tierWidth,0.31f,color);
+        leftCaption(row,rankTierDisplay(entry.tier),{columns.tierName,24},columns.tierWidth,0.31f,color);
         if (entry.promotion) {
             auto const count = std::clamp(entry.promotionGames,1,8);
             for (int mark = 0; mark < count; ++mark) {
@@ -239,7 +239,7 @@ void RankedLeaderboardPopup::showRows(matjson::Value const& data) {
             }
         } else leftCaption(row,leaderboardValue(entry),{columns.value,24},columns.valueWidth,0.32f);
         Row visual; visual.node = row; visual.entry = std::move(entry);
-        if (visual.entry.tier == "GOLD" || visual.entry.promotion) {
+        if (goldRankTier(visual.entry.tier) || visual.entry.promotion) {
             // A soft continuous frame plus two short highlights. Drawing the
             // perimeter directly avoids bright round blobs and cross shapes.
             auto* glow = CCDrawNode::create(); row->addChild(glow,8);

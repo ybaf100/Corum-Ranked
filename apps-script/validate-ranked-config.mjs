@@ -242,8 +242,11 @@ const tierRanges = {
   GOLD: [4000, ""],
 };
 for (const row of tierRows.slice(1)) {
-  row[1] = tierRanges[row[0]][0];
-  row[2] = tierRanges[row[0]][1];
+  const base = row[0].replace(/[123]$/, "");
+  const [min,max] = tierRanges[base];
+  const index = base === "GOLD" ? 0 : 3-Number(row[0].slice(-1));
+  row[1] = base === "GOLD" ? min : Math.ceil(min+(max-min)*index/3);
+  row[2] = base === "GOLD" ? "" : Math.ceil(min+(max-min)*(index+1)/3);
 }
 
 const seedRows = spreadsheet.getSheetByName("Ranked CSMP Seed").rows;
@@ -335,11 +338,11 @@ assert.equal(insufficientPlacementPool.data.validation.valid, false);
 assert.ok(insufficientPlacementPool.data.validation.errors.some((error) =>
   error.includes("Placement Pool 1"),
 ));
-const redTierRow = tierRows.find((row) => row[0] === "RED");
+const redTierRow = tierRows.find((row) => row[0] === "RED3");
 redTierRow[3] = 1;
 const shiftedMainPool = responseJson();
 assert.equal(shiftedMainPool.data.validation.valid, false);
-assert.ok(shiftedMainPool.data.validation.errors.some((error) => error.includes("RED Main Pool 1")));
+assert.ok(shiftedMainPool.data.validation.errors.some((error) => error.includes("RED3 Main Pool 1")));
 redTierRow[3] = 2;
 for (let index = 2; index <= 5; index += 1) {
   mapSheet.rows[index][poolColumn] = removedPoolOneValues[index - 2];
@@ -462,6 +465,23 @@ mapSheet.rows = fullMapRows;
 const health = JSON.parse(context.doGet({ parameter: { action: "health" } }).text);
 assert.equal(health.service, "Corum Integration API");
 assert.equal(health.version, context.CORUM_API_VERSION);
+
+
+const divisionValues=structuredClone(tierRows);
+const legacyRows=[[...context.CORUM_RANKED_TIER_HEADERS],
+ ['RED',0,300,2,3,3,1],['AQUA',300,600,3,4,3,2],
+ ['BRONZE',600,900,4,5,5,3],['SILVER',900,1200,5,6,5,3],['GOLD',1200,'',6,6,0,0]];
+spreadsheet.getSheetByName('Ranked Tiers').rows=structuredClone(legacyRows);
+context.migrateRankedTierDivisions_(spreadsheet,spreadsheet.getSheetByName('Ranked Tiers'));
+const upgraded=JSON.parse(JSON.stringify(context.readRankedTierBands_(spreadsheet.getSheetByName('Ranked Tiers'))));
+assert.equal(upgraded.length,13);
+assert.deepEqual(upgraded.slice(0,3).map(b=>[b.tier,b.minInclusive,b.maxExclusive,b.mainPool,b.deathmatchPool,b.promotionGames,b.promotionWinsRequired]),
+ [['RED3',0,100,2,3,0,0],['RED2',100,200,2,3,0,0],['RED1',200,300,2,3,3,1]]);
+assert.deepEqual(JSON.parse(JSON.stringify(spreadsheet.getSheetByName('Ranked Tiers before beta69').rows)),legacyRows);
+const preserved=structuredClone(spreadsheet.getSheetByName('Ranked Tiers').rows);
+context.migrateRankedTierDivisions_(spreadsheet,spreadsheet.getSheetByName('Ranked Tiers'));
+assert.deepEqual(spreadsheet.getSheetByName('Ranked Tiers').rows,preserved);
+spreadsheet.getSheetByName('Ranked Tiers').rows=divisionValues;
 
 console.log("Ranked sheet2 routing, dynamic Main Pool/CSMP seeds, alternate IDs, fail-closed config, and legacy health routing passed.");
 

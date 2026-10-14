@@ -1,3 +1,11 @@
+# v0.5.0-beta.69
+
+- Split Solo RED, AQUA, BRONZE and SILVER into III / II / I divisions with editable LP cuts and per-division map pools. Series and demotion protection remain at base-tier boundaries.
+- Allocate exact CHAMPION and MASTER slots among GOLD players, including bots. Use the existing deterministic ladder order for ties and freeze both title-cut targets in each match result.
+- Reuse GOLD badges for MASTER/CHAMPION, vary SILVER halos by division, keep lower promotions to text, and add a GOLD-button tier guide to the Solo matching card.
+- Show up to ten Survival leaderboard rows in every round, shorten the cutoff line to content width, show live time in the re-entry screen, and unify the ready hint. Remove “(1배)” from Korean rules.
+- Add migration 0025 and an explicit operator Solo-only reset script. Preserve Survival, shared achievements/AP/titles and accounts. See [beta69 configuration notes](../ranked/docs/solo-beta69-divisions.md).
+
 ## v0.5.0-beta.68
 
 - Complete public Survival matchmaking with durable, independent queue/status/heartbeat/leave/recovery APIs. Match 16 immediately, or 2–15 after 180 seconds; repeat one-person waits. Preserve admission fencing and cancel waiting entries on Survival OFF while started matches continue.
