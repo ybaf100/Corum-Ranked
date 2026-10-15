@@ -76,6 +76,19 @@ async function post(data:unknown,token='session-1'){
  return{status:r.status,json:await r.json() as any};
 }
 describe('Admin authenticated mutations',()=>{
+ it('Common DB reset removes every application table including accounts and sessions, but preserves schema history and rejects the old login',async()=>{
+ await match(301);await service.execute(context,body('UNLOCK_ALL'));
+ await service.execute(context,body('SET_AUDIO_VOLUME',{songId:123,volumePercent:0}));
+ await db.query("INSERT INTO sur_profiles(player_id,lp,displayed_tier) VALUES($1,1250,'GOLD')",[id(1)]);
+ await db.query("CREATE TABLE IF NOT EXISTS ranked_schema_migrations(filename TEXT PRIMARY KEY)");
+ await db.query("INSERT INTO ranked_schema_migrations(filename) VALUES('fixture-existing-schema') ON CONFLICT DO NOTHING");
+ const response=await post(body('RESET_DB',{scope:'COMMON',confirmation:'RESET'}));
+ expect(response.status).toBe(201);expect(response.json).toMatchObject({reset:true,scope:'COMMON',accountsDeleted:true});
+ const tables=(await db.query<{tablename:string}>("SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname=current_schema() AND tablename<>'ranked_schema_migrations'")).rows;
+ for(const table of tables)expect((await db.query(`SELECT COUNT(*) AS n FROM "${table.tablename.replaceAll('"','""')}"`)).rows[0]).toEqual({n:0});
+ expect((await db.query("SELECT filename FROM ranked_schema_migrations")).rows).toEqual([{filename:'fixture-existing-schema'}]);
+ expect((await post(body('GET_AUDIO_VOLUMES'))).status).toBe(401);
+ });
  it('deduplicates shared songs and persists common gain in public server configuration without modifying the sheet snapshot',async()=>{
  const loaded=await post(body('GET_AUDIO_VOLUMES'));
  expect(loaded.status).toBe(201);expect(loaded.json.songs).toHaveLength(2);
@@ -246,9 +259,11 @@ describe('Admin authenticated mutations',()=>{
  const unscoped={...body('RESET_DB',{confirmation:'RESET'}),scope:undefined};
  expect((await post(unscoped)).status).toBe(400);
  expect((await post(body('RESET_DB',{scope:'COMMON',confirmation:'RESET'}))).status).toBe(201);
- expect((await db.query('SELECT * FROM ranked_players')).rows).toHaveLength(2);
+ expect((await db.query('SELECT * FROM ranked_players')).rows).toHaveLength(0);
  expect((await db.query('SELECT * FROM ranked_matches')).rows).toHaveLength(0);
- expect((await db.query('SELECT displayed_tier FROM ranked_profiles')).rows.every((p:any)=>p.displayed_tier==='UNRANKED')).toBe(true);
- expect((await db.query('SELECT lp FROM sur_profiles')).rows).toEqual([{lp:150}]);
+ expect((await db.query('SELECT * FROM ranked_profiles')).rows).toHaveLength(0);
+ expect((await db.query('SELECT * FROM sur_profiles')).rows).toHaveLength(0);
+ expect((await db.query('SELECT * FROM ranked_sessions')).rows).toHaveLength(0);
+ expect((await post(body('GET_AUDIO_VOLUMES'))).status).toBe(401);
  });
 });

@@ -269,7 +269,7 @@ class DebugAdminPopup final : public Popup {
         if (choice==6) {
             auto const weak=WeakRef<DebugAdminPopup>(this);
             auto* alert=ui::RankedConfirmPopup::create(scope()+" · "+i18n::text("admin-reset","RESET DATABASE"),
-                scope()=="COMMON"?i18n::text("admin-reset-all","Reset Solo, Survival and common achievements/AP/titles? Accounts are retained."):i18n::text("admin-reset-scope","Reset the selected scope? Other mode data and accounts are retained."),[weak](bool confirmed) {
+                scope()=="COMMON"?i18n::text("admin-reset-all","Delete ALL Ranked data, including every account, session, record, LP, AP, title and audio override? Everyone must sign in again."):i18n::text("admin-reset-scope","Reset the selected scope? Other mode data and accounts are retained."),[weak](bool confirmed) {
                     if(auto owner=weak.lock()){owner->m_confirm.reset();if(confirmed&&!owner->m_closed)owner->execute(6,true);}
                 });
             if(alert){m_confirm.emplace(alert);alert->show();}return;

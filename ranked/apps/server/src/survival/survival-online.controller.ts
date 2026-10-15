@@ -1,4 +1,4 @@
-import { Body,Controller,Get,Header,Inject,Param,ParseUUIDPipe,Post,Query,UseGuards } from "@nestjs/common";
+import { Body,Controller,Get,Header,Inject,Param,ParseUUIDPipe,Post,Query,UseGuards,UseFilters } from "@nestjs/common";
 import { IsInt,IsOptional,IsString,Length,Min } from "class-validator";
 import { Type } from "class-transformer";
 import { SessionGuard } from "../session/session.guard.js";
@@ -7,11 +7,13 @@ import type { RankedSessionContext } from "../session/session.types.js";
 import { SurvivalOnlineEventDto } from "./survival-online.dto.js";
 import { SurvivalOnlineService } from "./survival-online.service.js";
 import { SurvivalRateService } from "./survival-rate.service.js";
+import { SurvivalDomainFilter } from "./survival-domain.filter.js";
 export class SurvivalObservedRoundDto {
   @IsOptional() @IsString() @Length(1,80) public roundKey?:string;
   @IsOptional() @Type(()=>Number) @IsInt() @Min(1) public mapGeneration?:number;
 }
 @Controller("api/ranked/survival/online") @UseGuards(SessionGuard)
+@UseFilters(SurvivalDomainFilter)
 export class SurvivalOnlineController {
   public constructor(@Inject(SurvivalOnlineService)private readonly online:SurvivalOnlineService,@Inject(SurvivalRateService)private readonly rates:SurvivalRateService){}
   @Get("active") @Header("Cache-Control","no-store")

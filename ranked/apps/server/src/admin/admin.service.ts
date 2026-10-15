@@ -46,6 +46,7 @@ export class AdminService {
           AND s.last_heartbeat_at>$4 AND lower(p.gd_username)='hwanhee1'
         FOR UPDATE OF s`,[session.sessionId,session.playerId,now.toISOString(),sessionAliveSince(now)]);
       if (!caller.rows.length) throw new ForbiddenException("Admin session expired");
+      if(scope==="COMMON" && body.action==="RESET_DB")return this.resetAll(tx);
       if(scope==="SURVIVAL")return this.survivalAction(tx,session,body,now);
       if (body.action === "GET_AUDIO_VOLUMES" || body.action === "SET_AUDIO_VOLUME") {
         const client = this.config.getSnapshot().client;
@@ -77,16 +78,12 @@ export class AdminService {
           UNION ALL SELECT 1 FROM ranked_placement_runs WHERE state NOT IN ('PLACEMENT_RESULT','CANCELLED')
           UNION ALL SELECT 1 FROM ranked_queue_entries WHERE status='QUEUED' LIMIT 1`);
         if(active.rows.length)throw new ConflictException("Finish Solo games and leave Solo queues before resetting Solo");
-        if(scope==="COMMON") {
-          await this.survivalAction(tx,session,{...body,scope:"SURVIVAL"},now);
-          await this.resetCommon(tx,null,now);
-        }
         await tx.query("DELETE FROM ranked_queue_entries");await tx.query("DELETE FROM ranked_match_tokens");
         await tx.query("DELETE FROM ranked_outbox_events WHERE aggregate_id IN (SELECT id FROM ranked_matches)");
         await tx.query("DELETE FROM ranked_matches");await tx.query("DELETE FROM ranked_placement_runs");
         const players=(await tx.query<{player_id:string}>("SELECT player_id FROM ranked_profiles ORDER BY player_id")).rows;
         for(const player of players)await this.resetSolo(tx,player.player_id,now);
-        return {ok:true,reset:true,scope,message:scope==="COMMON"?"Solo, Survival and common achievements/AP/titles reset. Accounts and sessions retained.":"Solo ratings, Placement and match records reset. Survival and common data retained."};
+        return {ok:true,reset:true,scope,message:"Solo ratings, Placement and match records reset. Survival and common data retained."};
       }
       if (body.action === "DELETE_BOTS") {
         const bots = await tx.query<{id:string}>("SELECT id FROM ranked_players WHERE is_bot=TRUE ORDER BY id FOR UPDATE");
@@ -218,6 +215,28 @@ export class AdminService {
       message:"Survival profile and visible history reset. Solo, accounts, sessions, achievements, AP and title retained."};
   }
 
+  private async resetAll(tx:SqlExecutor) {
+    await tx.query("SELECT id FROM ranked_players ORDER BY id FOR UPDATE");
+    // Preserve the existing no-active-game/no-unsettled-LP reset fence.
+    const active=await tx.query(`SELECT 1 FROM ranked_matches WHERE state NOT IN ('MATCH_RESULT','CANCELLED')
+      UNION ALL SELECT 1 FROM ranked_placement_runs WHERE state NOT IN ('PLACEMENT_RESULT','CANCELLED')
+      UNION ALL SELECT 1 FROM ranked_queue_entries WHERE status='QUEUED'
+      UNION ALL SELECT 1 FROM sur_queue_entries WHERE status='QUEUED'
+      UNION ALL SELECT 1 FROM sur_matches m WHERE m.state NOT IN ('FINAL_RESULT','CANCELLED')
+        OR EXISTS(SELECT 1 FROM sur_debug_matches d WHERE d.match_id=m.id AND m.state='FINAL_RESULT' AND d.settled_at IS NULL)
+        OR EXISTS(SELECT 1 FROM sur_online_players p WHERE p.match_id=m.id AND p.result IS NULL AND m.state='FINAL_RESULT') LIMIT 1`);
+    if(active.rows.length)throw new ConflictException("Finish and settle all games and leave queues before resetting all data");
+    const tables=(await tx.query<{tablename:string}>(`SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname=current_schema()
+      AND (tablename LIKE 'ranked\\_%' ESCAPE '\\' OR tablename LIKE 'sur\\_%' ESCAPE '\\' OR tablename LIKE 'debug\\_spectate\\_%' ESCAPE '\\')
+      AND tablename<>'ranked_schema_migrations' ORDER BY tablename`)).rows;
+    // Table identifiers come only from PostgreSQL, never from an Admin payload.
+    // All application tables participate in one truncate, preserving FK safety;
+    // schema/migration history stays installed and unrelated schemas stay intact.
+    const names=tables.map(row=>'"'+row.tablename.replaceAll('"','""')+'"');
+    if(names.length)await tx.query(`TRUNCATE TABLE ${names.join(',')} RESTART IDENTITY`);
+    return {ok:true,reset:true,scope:"COMMON",accountsDeleted:true,
+      message:"All Ranked database data deleted, including accounts, sessions, both modes, records, AP, titles, caches and audio overrides. Sign in again."};
+  }
   private async deleteHistory(tx: SqlExecutor, players: readonly string[]) {
     const matches=await tx.query<{id:string}>("SELECT id FROM ranked_matches WHERE player_a_id=ANY($1::uuid[]) OR player_b_id=ANY($1::uuid[]) FOR UPDATE",[players]);
     const ids=matches.rows.map(row=>row.id);

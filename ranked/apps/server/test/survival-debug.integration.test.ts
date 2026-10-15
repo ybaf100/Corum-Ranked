@@ -96,6 +96,35 @@ async function record(m:SurvivalMatch,progress:number) {
   const attemptId=ids.next();await send(m,"ATTEMPT_START",{attemptId});return send(m,"ATTEMPT_END",{attemptId,progress});
 }
 describe("Survival M4 persistent debug game",()=>{
+  it("returns 409 for late Debug telemetry, preserves the timeout and accepts the presentation ACK instead of returning retryable 500",async()=>{
+    let m=await prepare(await create());await record(m,100);m=await engine.get(m.id);const r=survivalCurrentRound(m);
+    now=r.endsAt!;await db.query("UPDATE ranked_sessions SET last_heartbeat_at=$2 WHERE id=$1",[session.sessionId,clock.now().toISOString()]);
+    await debug.tickOnce();expect((await engine.get(m.id)).state).toBe("ROUND_RESULT");
+    const module=await Test.createTestingModule({controllers:[SurvivalDebugController],providers:[SessionGuard,AdmissionVersionGuard,
+      {provide:SurvivalDebugService,useValue:debug},{provide:DATABASE,useValue:db},{provide:TokenService,useValue:tokens},{provide:SERVER_CLOCK,useValue:clock}]}).compile();
+    Reflect.defineMetadata("design:paramtypes",[String,Object,SurvivalDebugEventDto],SurvivalDebugController.prototype,"event");
+    vi.spyOn(debug,"onApplicationBootstrap").mockImplementation(async()=>{});
+    const app=module.createNestApplication();app.useLogger(false);app.useGlobalPipes(new ValidationPipe({whitelist:true,forbidNonWhitelisted:true,transform:true}));
+    await app.listen(0,"127.0.0.1");
+    const origin=await app.getUrl();
+    const event=(body:unknown)=>fetch(`${origin}/api/ranked/survival/debug/matches/${m.id}/events`,{method:"POST",headers:{Authorization:"Bearer fixture-token","Content-Type":"application/json"},body:JSON.stringify(body)});
+    const context={roundKey:r.key,mapGeneration:r.mapGeneration,levelId:r.map!.levelId};
+    try {
+      for(const type of ["PROGRESS","ATTEMPT_END"]){
+        const response=await event({eventId:ids.next(),type,...context,attemptId:r.players[0]!.attempts[0]!.id,progress:99});
+        expect(response.status).toBe(409);expect(await response.json()).toMatchObject({code:"INVALID_MATCH_TRANSITION"});
+      }
+      const stale=await event({eventId:ids.next(),type:"PROGRESS",...context,mapGeneration:2,attemptId:ids.next(),progress:99});
+      expect(stale.status).toBe(409);expect(await stale.json()).toMatchObject({message:"SURVIVAL_CONTEXT_CHANGED"});
+      expect(survivalCurrentRound(await engine.get(m.id)).players[0]!.highestProgress).toBe(100);
+      now+=5000;
+      const ack={eventId:ids.next(),type:"PRESENTATION_COMPLETE",...context};
+      expect((await event(ack)).status).toBe(201);expect((await event(ack)).status).toBe(201);
+      expect((await engine.get(m.id)).rounds).toHaveLength(2);
+      vi.spyOn(engine,"dispatch").mockRejectedValueOnce(new Error("fixture database failure"));
+      expect((await event({...ack,eventId:ids.next()})).status).toBe(500);
+    } finally {await app.close();}
+  });
   it("holds map selection behind the initial roster and durably waits for round presentation before selecting again",async()=>{
     let m=await engine.get((await debug.create(session,body())).matchId);
     expect(m.presentationGate).toBe("INTRO");

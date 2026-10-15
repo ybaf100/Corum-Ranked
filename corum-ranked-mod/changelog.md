@@ -1,3 +1,11 @@
+# v0.5.0-beta.71
+
+- Return Survival protocol conflicts as HTTP 409, retire obsolete progress after server round completion, and reject delayed canceled-request callbacks so presentation completion cannot remain behind endless progress retries. Keep valid Attempt End retries, round timers, scores and LP unchanged.
+- Select Survival music from the local player's server outcome: keep normal music for survivors, use the existing Final/Death Match preparation track, and use server winner IDs/result flags for final audio. Preserve fades, native GD music and configured volumes.
+- Prevent NEXT MAP SOON/preparation controls after final results, elimination, settlement pending or cancellation. Preserve the user's round HUD label position from bd92313e9.
+- Make Common Admin DB reset delete all Ranked application data, including accounts, sessions, both modes' records, AP/titles, caches and audio overrides; preserve schema/migration history and require fresh login. Keep Solo/Survival reset scopes independent.
+- Synchronize beta.71 package/server versions. No DB migration or R2/production deployment. See [round handoff validation](../ranked/docs/survival-beta71-round-handoff.md) and [Common reset behavior](../ranked/docs/admin-beta71-common-reset.md).
+
 # v0.5.0-beta.70
 
 - Use integer highest-progress scores for general Survival ranking and cutoffs; retain raw Attempt evidence and .001% Death Match adjudication.

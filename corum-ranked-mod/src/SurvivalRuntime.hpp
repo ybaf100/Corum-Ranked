@@ -24,6 +24,7 @@ struct SurvivalMatchView {
     std::vector<std::string> aliveIds;
     std::optional<double> cutoff,first;
     bool ownEntered=false,ownAssetsReady=false,ownEliminated=false,ownAbsent=false,resultPending=false,debug=false,online=false;
+    bool ownWinner=false;
     std::string activeAttemptId;
     double activeAttemptProgress=0;
 };
@@ -81,6 +82,7 @@ private:
     matjson::Value event(std::string const& type) const;
     void enqueue(matjson::Value body);
     void pumpEvents();
+    void discardObsoleteEvents();
     void poll();
     bool current(std::uint64_t generation,std::string const& session) const;
     SurvivalMatchView m_view;
@@ -93,7 +95,7 @@ private:
     int m_localAttempts=0;
     float m_tick=0;
     bool m_creating=false,m_pollBusy=false,m_eventBusy=false,m_recoverBusy=false,m_needRecovery=false,m_queuePollBusy=false;
-    std::uint64_t m_generation=0,m_queueGeneration=0;
+    std::uint64_t m_generation=0,m_queueGeneration=0,m_eventGeneration=0;
     std::int64_t m_lastServerNow=0;
     std::deque<matjson::Value> m_events;
     std::chrono::steady_clock::time_point m_nextPoll{},m_nextProgress{},m_retryAt{},m_recoverRetryAt{},m_nextQueuePoll{},m_ackRetryAt{};
