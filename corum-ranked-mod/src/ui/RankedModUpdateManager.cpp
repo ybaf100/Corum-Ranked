@@ -4,6 +4,7 @@
 #include <Geode/utils/general.hpp>
 #include <Geode/loader/ModMetadata.hpp>
 #include <thread>
+#include <atomic>
 
 using namespace geode::prelude;
 namespace corum::ranked::ui {
@@ -44,32 +45,53 @@ void RankedModUpdateManager::download() {
     if (ec) { fail("Cannot create update staging directory"); return; }
     auto const file = directory / fmt::format("{}.{}.tmp", m_metadata.filename(), generation);
     m_view.state = ModUpdateState::Downloading; m_view.progress = 0; m_view.error.clear();
+    m_downloadStarted=std::chrono::steady_clock::now();
     web::WebRequest request; request.timeout(std::chrono::seconds(180)); request.followRedirects(true);
     auto const size = m_metadata.sizeBytes;
-    request.onProgress([this, generation, size](web::WebProgress const& progress) {
+    auto nextProgress=std::make_shared<std::atomic<std::int64_t>>(0);
+    auto firstByte=std::make_shared<std::atomic<std::int64_t>>(0);
+    request.onProgress([this, generation, size, nextProgress,firstByte](web::WebProgress const& progress) {
+        auto const now=std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+        std::int64_t unseen=0;if(progress.downloaded()>0)firstByte->compare_exchange_strong(unseen,now);
+        auto next=nextProgress->load();
+        if(progress.downloaded()<size && (now<next || !nextProgress->compare_exchange_strong(next,now+100)))return;
         auto const value = std::clamp(static_cast<float>(progress.downloaded()) / static_cast<float>(size), 0.0f, 0.95f);
         Loader::get()->queueInMainThread([this, generation, value] {
             if (generation == m_generation && m_view.state == ModUpdateState::Downloading) m_view.progress = value;
         });
     });
-    m_request.spawn(request.get(m_metadata.downloadUrl()), [this, generation, file](web::WebResponse response) {
+    m_request.spawn(request.get(m_metadata.downloadUrl()), [this, generation, file,firstByte](web::WebResponse response) {
         if (generation != m_generation) return;
+        auto const seconds=std::chrono::duration<double>(std::chrono::steady_clock::now()-m_downloadStarted).count();
+        auto header=[&](char const* name){auto value=response.header(name);return value?std::string(*value):std::string("-");};
+        auto const url=m_metadata.downloadUrl();auto const origin=url.substr(0,url.find('/',8));
+        auto const startMillis=std::chrono::duration_cast<std::chrono::milliseconds>(m_downloadStarted.time_since_epoch()).count();
+        log::info("[RankedModUpdate] origin={} version={} channel={} status={} bytes={} transferSeconds={:.3f} MBps={:.3f} firstProgressByteSeconds={:.3f} contentLength={} cache={} age={} cfRay={}",
+            origin,m_metadata.version,m_metadata.channel,response.code(),response.data().size(),seconds,
+            seconds>0?response.data().size()/seconds/1e6:0,firstByte->load()>0?(firstByte->load()-startMillis)/1000.0:-1,
+            header("content-length"),header("cf-cache-status"),header("age"),header("cf-ray"));
         if (!response.ok()) { fail(fmt::format("Mod update HTTP {}", response.code())); return; }
-        if (response.into(file).isErr()) { fail("Cannot save mod update"); return; }
         m_view.state = ModUpdateState::Verifying; m_view.progress = 0.95f;
-        verifyAndInstall(file, generation);
+        verifyAndInstall(file, generation,std::move(response));
     });
 }
-void RankedModUpdateManager::verifyAndInstall(std::filesystem::path const& file, std::uint64_t generation) {
+void RankedModUpdateManager::verifyAndInstall(std::filesystem::path const& file, std::uint64_t generation,web::WebResponse response) {
     auto const metadata = m_metadata;
     auto const binary = std::string(Mod::get()->getID()) + GEODE_PLATFORM_EXTENSION;
-    std::thread([this, file, generation, metadata, binary] {
+    std::thread([this, file, generation, metadata, binary,response=std::move(response)] {
         std::string error;
         std::error_code ec;
-        if (std::filesystem::file_size(file, ec) != metadata.sizeBytes || ec ||
-            !RankAssetPackManager::hasZipSignature(file) || RankAssetPackManager::sha256File(file) != metadata.sha256) {
+        auto const saveStarted=std::chrono::steady_clock::now();
+        if(response.into(file).isErr())error="Cannot save mod update";
+        auto const hashStarted=std::chrono::steady_clock::now();
+        std::string digest;
+        if(error.empty() && std::filesystem::file_size(file,ec)==metadata.sizeBytes && !ec && RankAssetPackManager::hasZipSignature(file))
+            digest=RankAssetPackManager::sha256File(file);
+        auto const hashEnded=std::chrono::steady_clock::now();
+        if(error.empty() && digest!=metadata.sha256) {
             error = "Downloaded mod size/signature/SHA-256 mismatch";
-        } else {
+        }
+        if(error.empty()) {
             auto opened = geode::utils::file::Unzip::create(file);
             if (opened.isErr()) error = "Invalid mod package";
             else {
@@ -85,7 +107,13 @@ void RankedModUpdateManager::verifyAndInstall(std::filesystem::path const& file,
                 if (!zip.hasEntry(binary)) error = "Package has no binary for this platform";
             }
         }
+        auto const verifyEnded=std::chrono::steady_clock::now();
+        log::info("[RankedModUpdate] saveMs={:.3f} sha256Ms={:.3f} verifyMs={:.3f} version={} valid={}",
+            std::chrono::duration<double,std::milli>(hashStarted-saveStarted).count(),
+            std::chrono::duration<double,std::milli>(hashEnded-hashStarted).count(),
+            std::chrono::duration<double,std::milli>(verifyEnded-hashStarted).count(),metadata.version,error.empty());
         Loader::get()->queueInMainThread([this, file, generation, metadata, error = std::move(error)] {
+            auto const installStarted=std::chrono::steady_clock::now();
             std::error_code ec;
             if (generation != m_generation) { std::filesystem::remove(file, ec); return; }
             if (!error.empty()) { std::filesystem::remove(file, ec); fail(error); return; }
@@ -112,6 +140,8 @@ void RankedModUpdateManager::verifyAndInstall(std::filesystem::path const& file,
             }
             std::filesystem::remove(file, ec);
             m_view.state = ModUpdateState::RestartRequired; m_view.progress = 1;
+            log::info("[RankedModUpdate] installMs={:.3f} version={} restartRequired=true",
+                std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-installStarted).count(),metadata.version);
             // Deliberately no restart callback here. Only the player's button
             // invokes restart(), and Ranked remains gated until the new binary loads.
         });

@@ -21,11 +21,12 @@ public:
     bool canDownload() const { return m_downloadAllowed; }
 private:
     void fail(std::string error);
-    void verifyAndInstall(std::filesystem::path const& file, std::uint64_t generation);
+    void verifyAndInstall(std::filesystem::path const& file, std::uint64_t generation, geode::utils::web::WebResponse response);
     ModUpdateMetadata m_metadata;
     ModUpdateView m_view;
     std::uint64_t m_generation = 0;
     bool m_downloadAllowed = false;
+    std::chrono::steady_clock::time_point m_downloadStarted{};
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_request;
 };
 }

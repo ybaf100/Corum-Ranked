@@ -45,6 +45,8 @@ test('actual updater rejects wrong packages/stale callbacks, preserves rollback,
 #include <optional>
 #include <sstream>
 #include <thread>
+#include <atomic>
+#include <memory>
 #include <vector>
 template<class T>struct Result{std::optional<T> value;bool isErr()const{return !value;}T&unwrap(){return *value;}
  T unwrapOr(T fallback)const{return value?*value:fallback;}};
@@ -68,6 +70,7 @@ namespace fmt{template<class...T>std::string format(std::string s,T const&...val
  (put(values),...);return s;}}
 namespace geode::utils::web{
 struct WebResponse{int status=200;std::string bytes="PKgood";bool ok()const{return status==200;}int code()const{return status;}
+ std::optional<std::string>header(char const*)const{return std::nullopt;}std::string const&data()const{return bytes;}
  Result<int>into(std::filesystem::path const&p)const{std::ofstream(p,std::ios::binary)<<bytes;return {1};}};
 struct WebProgress{std::size_t downloaded()const{return 1;}};
 struct Request{std::string url;};struct WebRequest{void timeout(std::chrono::seconds){}void followRedirects(bool){}
@@ -77,6 +80,7 @@ struct Pending{Request request;std::function<void(WebResponse)>callback;};std::v
 namespace geode::async{template<class T>struct TaskHolder{void cancel(){}
  void spawn(geode::utils::web::Request r,std::function<void(T)>cb){geode::utils::web::pending.push_back({r,cb});}};}
 namespace geode{
+namespace log{template<class...T>void info(T const&...) {}}
 std::mutex mutex;std::condition_variable queued;std::vector<std::function<void()>>callbacks;
 struct Loader{static Loader*get(){static Loader l;return &l;}void queueInMainThread(std::function<void()>cb){
  {std::lock_guard lock(mutex);callbacks.push_back(std::move(cb));}queued.notify_one();}};
@@ -86,7 +90,7 @@ namespace utils::file{struct Archive{Result<std::vector<unsigned char>>extract(s
  bool hasEntry(std::filesystem::path const&){return hasBinary;}};
 struct Unzip{static Result<Archive>create(std::filesystem::path const&){return {Archive{}};}};}
 namespace utils::game{int restarts=0;void restart(bool save){assert(save);++restarts;}}
-namespace prelude{using ::Mod;using ::ModMetadata;using ::VersionInfo;using geode::Loader;namespace web=geode::utils::web;}
+namespace prelude{using ::Mod;using ::ModMetadata;using ::VersionInfo;using geode::Loader;namespace web=geode::utils::web;namespace log=geode::log;}
 }
 namespace corum::ranked::ui{struct RankAssetPackManager{static bool hasZipSignature(std::filesystem::path const&p){
  std::ifstream f(p);std::string s;f>>s;return s.starts_with("PK");}

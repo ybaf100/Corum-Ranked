@@ -8,6 +8,7 @@ export const SERVER_ENVIRONMENT = Symbol("SERVER_ENVIRONMENT");
 export interface ServerEnvironment {
   readonly rankedModUpdates?: RankedModUpdates;
   readonly rankedDownloadBaseUrl?: string;
+  readonly rankedDownloadCdnBaseUrl?: string;
   readonly survivalGdRelay?: SurvivalGdRelayEnvironment;
   readonly nodeEnv: "development" | "test" | "production";
   readonly port: number;
@@ -281,10 +282,12 @@ export const loadServerEnvironment = (
   }
 
   const rankedDownloadBaseUrl = normalizeRankedDownloadBaseUrl(environment.RANKED_DOWNLOAD_BASE_URL);
+  const rankedDownloadCdnBaseUrl = normalizeRankedDownloadBaseUrl(environment.RANKED_DOWNLOAD_CDN_BASE_URL,"RANKED_DOWNLOAD_CDN_BASE_URL");
   const survivalGdRelay=loadSurvivalGdRelayEnvironment(environment);
   return {
     rankedModUpdates: parseRankedModUpdates(environment.RANKED_MOD_UPDATES_JSON),
     ...(rankedDownloadBaseUrl === undefined ? {} : { rankedDownloadBaseUrl }),
+    ...(rankedDownloadCdnBaseUrl === undefined ? {} : { rankedDownloadCdnBaseUrl }),
     ...(survivalGdRelay === undefined ? {} : { survivalGdRelay }),
     nodeEnv,
     port,
