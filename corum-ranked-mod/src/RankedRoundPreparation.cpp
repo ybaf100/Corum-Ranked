@@ -439,6 +439,7 @@ bool RankedRoundPreparation::returnFromNativeQuit(GJGameLevel* level) {
 
 class $modify(CorumRankedRoundReturn, GameManager) {
     void returnToLastScene(GJGameLevel* level) {
+        if(corum::ranked::SurvivalRuntime::get().interceptFreePlayNativeQuit(level))return;
         if (corum::ranked::RankedRoundPreparation::get().returnFromNativeQuit(level)) return;
         GameManager::returnToLastScene(level);
     }

@@ -21,10 +21,17 @@ export class SurvivalDebugEventDto {
   @IsArray() @ValidateNested({each:true}) @Type(()=>InstalledModDto) public installedMods?:InstalledModDto[];
   @IsOptional() @IsUUID() public attemptId?:string;
   @IsOptional() @IsNumber({allowInfinity:false,allowNaN:false}) @Min(0) @Max(100) public progress?:number;
+  @IsOptional() @IsNumber({allowInfinity:false,allowNaN:false}) @Min(0) @Max(100) public currentProgress?:number;
   @IsOptional() @IsObject() public certificate?:SurvivalVerifiedMap;
   @IsOptional() @IsString() @Length(1,160) public reason?:string;
 }
 export class ForceSurvivalDebugDto {
   @IsString() @Length(1,128) public password!:string;
   @IsInt() @Min(1) @Max(16) public rank!:number;
+}
+export class ClearSurvivalDebugDto {
+  @IsUUID() public requestId!:string;
+  @IsString() @Length(1,80) public roundKey!:string;
+  @IsInt() @Min(1) public mapGeneration!:number;
+  @IsInt() @Min(40000000) public levelId!:number;
 }

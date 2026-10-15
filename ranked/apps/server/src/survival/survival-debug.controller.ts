@@ -4,7 +4,7 @@ import { AdmissionVersionGuard } from "../session/admission-version.guard.js";
 import { CurrentSession } from "../session/current-session.decorator.js";
 import type { RankedSessionContext } from "../session/session.types.js";
 import { SurvivalDebugService } from "./survival-debug.service.js";
-import { CreateSurvivalDebugDto, ForceSurvivalDebugDto, SurvivalDebugEventDto } from "./survival-debug.dto.js";
+import { ClearSurvivalDebugDto, CreateSurvivalDebugDto, ForceSurvivalDebugDto, SurvivalDebugEventDto } from "./survival-debug.dto.js";
 import { SurvivalDomainFilter } from "./survival-domain.filter.js";
 
 @Controller("api/ranked/survival/debug") @UseGuards(SessionGuard)
@@ -24,6 +24,10 @@ export class SurvivalDebugController {
   @Post("matches/:id/force-rank")
   public force(@Param("id",new ParseUUIDPipe()) id:string,@CurrentSession() session:RankedSessionContext,@Body() body:ForceSurvivalDebugDto) {
     return this.debug.force(id,session,body);
+  }
+  @Post("matches/:id/force-clear")
+  public clear(@Param("id",new ParseUUIDPipe()) id:string,@CurrentSession() session:RankedSessionContext,@Body() body:ClearSurvivalDebugDto) {
+    return this.debug.forceClear(id,session,body);
   }
   @Post("matches/:id/acknowledge")
   public acknowledge(@Param("id",new ParseUUIDPipe()) id:string,@CurrentSession() session:RankedSessionContext) { return this.debug.acknowledge(id,session); }

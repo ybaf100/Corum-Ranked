@@ -118,7 +118,7 @@ export class SurvivalOnlineService implements OnApplicationBootstrap,OnApplicati
     else {
       if(!body.attemptId)throw new BadRequestException("Attempt ID required");
       if(body.type==="ATTEMPT_START")command={type:body.type,...context,attemptId:body.attemptId};
-      else {if(body.progress===undefined)throw new BadRequestException("Progress required");command={type:body.type,...context,attemptId:body.attemptId,progress:body.progress};}
+      else {if(body.progress===undefined)throw new BadRequestException("Progress required");command={type:body.type,...context,attemptId:body.attemptId,progress:body.progress,...(body.currentProgress===undefined?{}:{currentProgress:body.currentProgress})};}
     }
     let applied:SurvivalMatch;
     try{applied=await this.engine.dispatch(id,`${own.participant_id}:${body.eventId}`,command,session);}

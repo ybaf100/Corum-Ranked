@@ -1,4 +1,6 @@
 #include "RankedRuntime.hpp"
+#include "SurvivalRuntime.hpp"
+#include "SurvivalSceneBridge.hpp"
 #include "spectator/SpectatorSceneBridge.hpp"
 
 #include <Geode/Geode.hpp>
@@ -9,6 +11,7 @@ using namespace geode::prelude;
 namespace {
 
 WeakRef<EndLevelLayer> rankedCompletionOverlay;
+WeakRef<EndLevelLayer> survivalCompletionOverlay;
 
 bool authoritativeExitState(std::string const& state) {
     return
@@ -27,6 +30,7 @@ class $modify(CorumRankedEndLevelLayer, EndLevelLayer) {
     struct Fields {
         bool rankedLevel = false;
         bool rankedExitRequested = false;
+        bool survivalLevel = false;
     };
 
     void customSetup() {
@@ -36,6 +40,12 @@ class $modify(CorumRankedEndLevelLayer, EndLevelLayer) {
         // Geode deliberately rejects hooks for it on those targets. By the
         // time customSetup() runs, init has already assigned m_playLayer.
         auto* playLayer = m_playLayer;
+        m_fields->survivalLevel=corum::ranked::isOfficialSurvivalPlayLayer(playLayer);
+        if(m_fields->survivalLevel || (playLayer && corum::ranked::SurvivalRuntime::get().freePlaying() &&
+            playLayer->getChildByIDRecursive("survival-play-hud"_spr))){
+            survivalCompletionOverlay=WeakRef<EndLevelLayer>(this);
+            if(m_fields->survivalLevel)schedule(schedule_selector(CorumRankedEndLevelLayer::watchSurvivalExit),.1f);
+        }
 
         auto& runtime = corum::ranked::RankedRuntime::get();
         auto const levelId =
@@ -101,8 +111,20 @@ class $modify(CorumRankedEndLevelLayer, EndLevelLayer) {
         // overlay whose Replay/Menu buttons no longer receive input.
         EndLevelLayer::onMenu(nullptr);
     }
+    void watchSurvivalExit(float) {
+        auto& runtime=corum::ranked::SurvivalRuntime::get();runtime.tick();
+        if(runtime.normalRoundCleared() || runtime.view().state=="ROUND_RESULT" || runtime.view().state=="FINAL_RESULT" || runtime.view().state=="CANCELLED")
+            corum::ranked::requestSurvivalGameplayReturn(m_playLayer);
+    }
 
     void onReplay(CCObject* sender) {
+        if(m_fields->survivalLevel && corum::ranked::SurvivalRuntime::get().view().phase!="TIEBREAK"){
+            // Keep the native completion visible until the terminal event ACK;
+            // replay must not reopen a normal-round 100% attempt in that gap.
+            if(!corum::ranked::SurvivalRuntime::get().normalRoundCleared())return;
+            corum::ranked::requestSurvivalGameplayReturn(m_playLayer);
+            return;
+        }
         if (m_fields->rankedLevel) {
             auto& runtime = corum::ranked::RankedRuntime::get();
             if (runtime.isSpectating() && runtime.view().match.spectatorLiveEnabled) {
@@ -138,4 +160,9 @@ bool corum::ranked::quitThroughRankedCompletionOverlay(PlayLayer* layer) {
     if (!overlay || !overlay->getParent() || overlay->m_playLayer != layer) return false;
     overlay->onMenu(nullptr);
     return true;
+}
+bool corum::ranked::quitThroughSurvivalCompletionOverlay(PlayLayer* layer) {
+    auto overlay=survivalCompletionOverlay.lock();
+    if(!overlay || !overlay->getParent() || overlay->m_playLayer!=layer)return false;
+    overlay->onMenu(nullptr);return true;
 }

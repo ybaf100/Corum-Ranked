@@ -95,6 +95,22 @@ async function prepare(id:string,group:Client[]){let m=await engine.get(id);now+
 async function record(c:Client,m:SurvivalMatch,progress:number){const attemptId=ids.next();await event(c,m,"ATTEMPT_START",{attemptId});await event(c,m,"ATTEMPT_END",{attemptId,progress});}
 
 describe("Survival M5 public HTTP and persistent online game",()=>{
+ it.each([2,16])("projects BEST/NOW and terminal 100%% over HTTP for %i players without paying or advancing the round",async count=>{
+  const {group,id}=await game(count),m=await prepare(id,group),owner=group[0]!,attemptId=ids.next();
+  await record(owner,m,87.9);await event(owner,m,"ATTEMPT_START",{attemptId});
+  await event(owner,m,"PROGRESS",{attemptId,progress:63.9,currentProgress:40.2});
+  const response=await api(group[1]!,`/online/matches/${id}`);
+  expect(response.status).toBe(200);expect(response.body.roundPlayers).toHaveLength(count);
+  expect(response.body.roundPlayers.find((p:any)=>p.participantId===owner.session.playerId)).toMatchObject({bestProgress:87,currentProgress:40,attemptActive:true,cleared:false});
+  await event(owner,m,"ATTEMPT_END",{attemptId,progress:100});
+  const cleared=await api(group[1]!,`/online/matches/${id}`);
+  expect(cleared.body.state).toBe("PLAYING");
+  expect(cleared.body.roundPlayers.find((p:any)=>p.participantId===owner.session.playerId)).toMatchObject({bestProgress:100,currentProgress:0,attemptActive:false,cleared:true});
+  expect((await db.query("SELECT * FROM sur_lp_ledger")).rows).toHaveLength(0);
+  const restarted=new SurvivalEngineService(db,clock,ids,config,{select:async()=>{throw new Error("No replacement map expected");}});
+  const restored=survivalCurrentRound(await restarted.get(id)).players.find(p=>p.participantId===owner.session.playerId)!;
+  expect(restored.attempts).toHaveLength(2);expect(restored.highestProgress).toBe(100);expect(restored.attempts.every(a=>a.endedAt!==null)).toBe(true);
+ });
  it("Online late progress and end return conflicts without changing frozen scores or preventing the next round",async()=>{
   const {group,id}=await game(8);let m=await prepare(id,group);const owner=group[0]!,r=survivalCurrentRound(m);
   await record(owner,m,100);const open=ids.next();await event(owner,m,"ATTEMPT_START",{attemptId:open});

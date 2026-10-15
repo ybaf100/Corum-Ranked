@@ -1,5 +1,6 @@
 #include "RankedRuntime.hpp"
 #include "SurvivalRuntime.hpp"
+#include "SurvivalSceneBridge.hpp"
 #include "ui/RankedConfirmPopup.hpp"
 #include "ui/RankedSurrenderPopup.hpp"
 #include "ui/RankedExitConfirmation.hpp"
@@ -58,7 +59,7 @@ bool ownsPlacementPlayerPause() {
         ranked.isGameplayLevel(static_cast<int>(layer->m_level->m_levelID));
 }
 bool ownsSurvivalPlayerPause() {
-    auto* layer=PlayLayer::get();return layer && layer->m_level && SurvivalRuntime::get().gameplayLevel(static_cast<int>(layer->m_level->m_levelID));
+    return corum::ranked::isOfficialSurvivalPlayLayer(PlayLayer::get());
 }
 bool ownsManagedRankedPause() { return ownsRankedPlayerPause() || ownsPlacementPlayerPause() || ownsSurvivalPlayerPause(); }
 }
@@ -76,6 +77,9 @@ public:
         int survivalMapGeneration = 0;
         CCLabelBMFont* budget = nullptr;
         CCMenuItemSpriteExtra* surrender = nullptr;
+#if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
+        CCMenuItemSpriteExtra* forceClear = nullptr;
+#endif
         std::optional<WeakRef<ui::RankedSurrenderPopup>> popup;
         std::optional<WeakRef<ui::RankedExitConfirmation>> exitConfirmation;
         std::optional<WeakRef<ui::RankedConfirmPopup>> survivalConfirmation;
@@ -129,6 +133,15 @@ public:
         center->addChild(m_fields->surrender, -1); center->sortAllChildren(); center->updateLayout();
         if(m_fields->survival){button->addChild(ui::label(i18n::text("surrender","SURRENDER"),.26f,
             {button->getContentSize().width/2,-10},ui::Red,ui::FontWeight::ExtraBold));}
+#if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
+        if(m_fields->survival && SurvivalRuntime::get().canForceClear()){
+            auto* face=ui::surface({112,30},{},ui::Gold,ui::SurfaceRaised,255,true);
+            face->addChild(ui::menuLabel(i18n::text("survival-force-clear","FORCE CLEAR"),.28f,{56,15},ui::Gold,ui::FontWeight::ExtraBold),5);
+            m_fields->forceClear=CCMenuItemSpriteExtra::create(face,this,menu_selector(CorumRankedPauseLayer::onForceClear));
+            m_fields->forceClear->setID("survival-force-clear-button"_spr);
+            center->addChild(m_fields->forceClear);center->sortAllChildren();center->updateLayout();
+        }
+#endif
         if (m_fields->placement) {
             auto* caption = ui::label(i18n::text("placement-skip-map", "SKIP MAP"), 0.22f,
                 {button->getContentSize().width / 2, -10}, ui::Gold, ui::FontWeight::ExtraBold);
@@ -156,8 +169,12 @@ public:
             auto const seconds=(runtime.remainingMs()+999)/1000;
             m_fields->budget->setString(fmt::format("{} · {:02}:{:02}",i18n::text("round","ROUND"),seconds/60,seconds%60).c_str());
             m_fields->surrender->setEnabled(runtime.canPlay());
+#if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
+            if(m_fields->forceClear){m_fields->forceClear->setVisible(runtime.canForceClear());m_fields->forceClear->setEnabled(!runtime.forceClearPending() && !m_fields->survivalConfirmation);}
+#endif
+            if(!view.error.empty())m_fields->budget->setString(i18n::text(view.error,view.error).c_str());
             if(!m_fields->survivalExitQueued && (view.id!=m_fields->matchId || view.roundKey!=m_fields->survivalRoundKey || view.mapGeneration!=m_fields->survivalMapGeneration ||
-                view.state=="ROUND_RESULT" || view.state=="FINAL_RESULT" || view.state=="CANCELLED")) {
+                runtime.normalRoundCleared() || view.state=="ROUND_RESULT" || view.state=="FINAL_RESULT" || view.state=="CANCELLED")) {
                 m_fields->survivalExitQueued=true;
                 auto const weak=m_fields->owner;
                 queueInMainThread([weak]{if(weak)if(auto owner=weak->lock();owner && owner.data()==PlayLayer::get() && owner->isRunning())owner->onQuit();});
@@ -341,9 +358,39 @@ public:
             m_fields->deathmatch, m_fields->placement, m_fields->placementMapIndex);
         if (popup) { m_fields->popup.emplace(popup); popup->show(); }
     }
+#if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
+    void onForceClear(CCObject*) {
+        auto& runtime=SurvivalRuntime::get();
+        if(!m_fields->survival || !runtime.canForceClear() || runtime.forceClearPending() || m_fields->survivalConfirmation)return;
+        auto const id=m_fields->matchId,key=m_fields->survivalRoundKey;auto const generation=m_fields->survivalMapGeneration;
+        auto* popup=ui::RankedConfirmPopup::create(i18n::text("survival-force-clear","FORCE CLEAR"),
+            i18n::text("survival-force-clear-confirm","Mark the current Survival round\nas 100% completed?"),
+            [weak=WeakRef(this),id,key,generation](bool accepted){
+                auto owner=weak.lock();if(!owner || !owner->getParent())return;owner->m_fields->survivalConfirmation.reset();
+                auto& current=SurvivalRuntime::get();
+                if(accepted && current.canForceClear() && current.view().id==id && current.view().roundKey==key && current.view().mapGeneration==generation)current.forceClear();
+            },i18n::text("survival-force-clear","FORCE CLEAR"));
+        if(popup){m_fields->survivalConfirmation.emplace(popup);popup->show();}
+    }
+#endif
 };
 
 namespace corum::ranked {
+bool resumeSurvivalFreePlayPauseBeforeQuit(PlayLayer* layer) {
+    auto* scene=CCDirector::sharedDirector()->getRunningScene();
+    if(!layer || layer!=PlayLayer::get() || !scene || layer->getParent()!=scene)return false;
+    std::vector<Ref<CCNode>> pending{Ref<CCNode>(scene)};
+    Ref<PauseLayer> pause;
+    while(!pending.empty()){
+        auto node=std::move(pending.back());pending.pop_back();
+        if(auto* native=typeinfo_cast<PauseLayer*>(node.data())){pause=native;break;}
+        for(auto* child:node->getChildrenExt())pending.emplace_back(child);
+    }
+    if(pause && pause->getParent()){
+        dismissNativeRankedExitConfirmation(pause.data());pause->onResume(nullptr);
+    }
+    return layer==PlayLayer::get() && layer->getParent()==scene && !layer->m_isPaused && !AppDelegate::get()->m_gamePaused;
+}
 bool quitRankedPauseForConcession(PlayLayer* layer) {
     if (!layer || layer != PlayLayer::get()) return false;
     auto pause = activeRankedPause ? activeRankedPause->lock() : Ref<PauseLayer>();

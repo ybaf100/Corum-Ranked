@@ -102,7 +102,7 @@ struct FMODAudioEngine {
 struct PlayLayer {
     static inline PlayLayer* current=nullptr;
     std::shared_ptr<int> life=std::make_shared<int>(0);
-    bool m_isPaused=true,running=true,touch=false,keyboard=false;
+    bool m_isPaused=true,running=true,touch=false,keyboard=false,m_hasCompletedLevel=false;
     SceneParent parent;bool attached=true,alive=true,refuseCompletion=false;
     int refs=1,completions=0,onEnters=0,nativePauseOpens=0;
     GJGameLevel level;
@@ -184,9 +184,10 @@ struct RankedRuntime {
     bool armCurrentLevelForGameplay(){++arms;return armAllowed;}
 };
 }
+namespace corum::ranked {inline bool quitThroughSurvivalCompletionOverlay(PlayLayer*){return false;}}
 struct CorumRankedPlayLayer:PlayLayer {
     struct Fields {
-        bool survivalLevel=false;bool nativeEntryHeld=true,autoExitRequested=false,entryWasPaused=false,entryNativeCompletionInProgress=false;
+        bool survivalLevel=false,survivalNativeClearFinished=false;bool nativeEntryHeld=true,autoExitRequested=false,entryWasPaused=false,entryNativeCompletionInProgress=false;
         bool entryTouchEnabled=true,entryKeyboardEnabled=true;
         bool entryUIKeyboardEnabled=false,entryUIKeypadEnabled=false,entryUIPauseEnabled=false;
         bool entryAttemptCountDeferred=false;
@@ -207,6 +208,11 @@ struct CorumRankedPlayLayer:PlayLayer {
 };
 int main(){
     using namespace corum::ranked;
+    {
+        CorumRankedPlayLayer clearing;clearing.fields.survivalLevel=true;clearing.m_hasCompletedLevel=true;
+        clearing.queueHeldEntryExit();assert(!clearing.fields.autoExitRequested&&deferred.empty());
+        clearing.fields.survivalNativeClearFinished=true;clearing.queueHeldEntryExit();drain();assert(clearing.quitCalls==1);
+    }
     auto& runtime=RankedRuntime::get();auto& audio=*FMODAudioEngine::sharedEngine();
     CorumRankedPlayLayer scene;UILayer uiLayer;PlayerObject player1,player2;
     scene.m_uiLayer=&uiLayer;scene.m_player1=&player1;scene.m_player2=&player2;

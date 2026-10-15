@@ -106,7 +106,7 @@ struct CCDirector {
     static CCDirector* sharedDirector() { static CCDirector director; return &director; }
     CCTouchDispatcher* getTouchDispatcher() { return &dispatcher; }
     CCSize getWinSize() const {return {568,320};}
-    CCNode* getRunningScene() { return runningScene; }
+    CCNode* getNextScene(){return nullptr;}CCNode* getRunningScene() { return runningScene; }
 };
 struct CCLayer : CCNode, CCTouchDelegate {
     bool touch = true, running = false;

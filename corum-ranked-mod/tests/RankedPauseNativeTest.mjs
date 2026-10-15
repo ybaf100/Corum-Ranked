@@ -89,12 +89,13 @@ struct RankedRuntime {
  void endMatchGameplayPause(std::string const&){++ends;}
 };
 struct SurvivalRuntime{
- struct View{std::string id="s",roundKey="round-1",state="PLAYING";int mapGeneration=1;}v;
+ struct View{std::string id="s",roundKey="round-1",state="PLAYING",error;int mapGeneration=1;}v;
  bool owned=false;long remaining=100000;static SurvivalRuntime& get(){static SurvivalRuntime s;return s;}
- bool gameplayLevel(int id)const{return owned&&id==123;}void tick(){}auto const& view()const{return v;}bool canPlay()const{return v.state=="PLAYING";}long remainingMs()const{return remaining;}
+ bool normalRoundCleared()const{return false;}bool gameplayLevel(int id)const{return owned&&id==123;}void tick(){}auto const& view()const{return v;}bool canPlay()const{return v.state=="PLAYING";}long remainingMs()const{return remaining;}
 };
+bool isOfficialSurvivalPlayLayer(PlayLayer* layer){return layer && layer->m_level && SurvivalRuntime::get().gameplayLevel(layer->m_level->m_levelID);}
 int returnRequests=0;bool requestConcededGameplayReturn(PlayLayer*){++returnRequests;return true;}
- namespace i18n {inline bool korean=false;bool isKorean(){return korean;}std::string text(char const* key,char const* fallback){return korean?std::string("ko:")+key:fallback;}}
+ namespace i18n {std::string text(std::string const& key,std::string const&){return key;}inline bool korean=false;bool isKorean(){return korean;}std::string text(char const* key,char const* fallback){return korean?std::string("ko:")+key:fallback;}}
 namespace ui {
 inline constexpr ccColor3B Red={255,91,111},Gold={255,207,74};
 using CCLabelBMFont=Label;

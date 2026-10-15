@@ -10,7 +10,7 @@ using namespace geode::prelude;
 class RankedConfirmPopup final : public Popup {
     std::function<void(bool)> m_done;
     bool m_closed=false,m_exited=false;
-    bool init(std::string const& title,std::string const& message,std::function<void(bool)> done) {
+    bool init(std::string const& title,std::string const& message,std::function<void(bool)> done,std::string const& confirm) {
         if(!Popup::init(340,190)) { return false; }
         m_done=std::move(done);m_bgSprite->setVisible(false);m_closeBtn->setVisible(false);
         auto* panel=surface({340,190},{170,95},Gold,Surface,255,true);m_mainLayer->addChild(panel);
@@ -19,7 +19,7 @@ class RankedConfirmPopup final : public Popup {
         auto* menu=CCMenu::create();menu->setPosition(CCPointZero);panel->addChild(menu,20);
         for(int i=0;i<2;i++) {
             auto* face=surface({140,32},{},i?Gold:Blue,SurfaceRaised,255,true);
-            face->addChild(menuLabel(i18n::text(i?"confirm":"cancel",i?"CONFIRM":"CANCEL"),.30f,{70,16},i?Gold:Text,FontWeight::SemiBold),5);
+            face->addChild(menuLabel(i && !confirm.empty()?confirm:i18n::text(i?"confirm":"cancel",i?"CONFIRM":"CANCEL"),.30f,{70,16},i?Gold:Text,FontWeight::SemiBold),5);
             auto* item=CCMenuItemSpriteExtra::create(face,this,menu_selector(RankedConfirmPopup::onChoice));item->setTag(i);item->setPosition({i?248.0f:92.0f,38});menu->addChild(item);
         }
         return true;
@@ -31,8 +31,8 @@ class RankedConfirmPopup final : public Popup {
         queueInMainThread([keep,done=std::move(done),accepted] {if(!keep->isRunning())return;keep->Popup::onClose(nullptr);if(done)done(accepted);});
     }
 public:
-    static RankedConfirmPopup* create(std::string const& title,std::string const& message,std::function<void(bool)> done) {
-        auto* popup=new RankedConfirmPopup;if(popup->init(title,message,std::move(done))){popup->autorelease();return popup;}delete popup;return nullptr;
+    static RankedConfirmPopup* create(std::string const& title,std::string const& message,std::function<void(bool)> done,std::string const& confirm="") {
+        auto* popup=new RankedConfirmPopup;if(popup->init(title,message,std::move(done),confirm)){popup->autorelease();return popup;}delete popup;return nullptr;
     }
     void cancel() {m_done={};finish(false);}
     void onClose(CCObject*) override {finish(false);}
