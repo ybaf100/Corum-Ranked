@@ -31,6 +31,39 @@ class Rig {
   final(scores=[100,100,97]){for(let i=0;i<3;i++){this.play();this.next();}this.play(scores);if(this.match.state==="ROUND_RESULT")this.next();}
 }
 describe("Survival round engine",()=>{
+  it("separates accepted BEST, active NOW and ended clears without altering integer ranks",()=>{
+    const r=new Rig();r.prepare();r.attempt("p01",87.8,"first");r.attempt("p01",63.9,"second",false);
+    const live=()=>survivalLiveView(r.match,r.now,"p01");
+    expect(live().standings.find(p=>p.participantId==="p01")).toMatchObject({score:87,bestProgress:87,currentProgress:63,attemptActive:true,cleared:false});
+    r.send({type:"PROGRESS",...r.context,participantId:"p01",attemptId:"second",progress:63.9,currentProgress:40.2});
+    expect(live().standings.find(p=>p.participantId==="p01")).toMatchObject({bestProgress:87,currentProgress:40});
+    r.send({type:"ATTEMPT_END",...r.context,participantId:"p01",attemptId:"second",progress:64});
+    expect(live().standings.find(p=>p.participantId==="p01")).toMatchObject({bestProgress:87,currentProgress:0,attemptActive:false,cleared:false});
+    r.attempt("p01",100,"clear",false);
+    expect(live().standings.find(p=>p.participantId==="p01")?.cleared).toBe(false);
+    r.send({type:"ATTEMPT_END",...r.context,participantId:"p01",attemptId:"clear",progress:100});
+    expect(live().standings.find(p=>p.participantId==="p01")).toMatchObject({bestProgress:100,currentProgress:0,attemptActive:false,cleared:true});
+    r.send({type:"FORFEIT",roundKey:r.round.key,mapGeneration:r.round.mapGeneration,participantIds:["p02"],reason:"EXPLICIT_SURRENDER"});
+    expect(live().standings.some(p=>p.participantId==="p02")).toBe(false);
+    expect(live().roundPlayers.find(p=>p.participantId==="p02")).toMatchObject({eliminated:true,qualified:false,currentProgress:0,attemptActive:false});
+  });
+  it("Force Clear uses the same accepted attempt path, preserves every other score and does not change Death Match",()=>{
+    const r=new Rig();r.match.presentationControlled=true;r.match.players[0]!.kind="HUMAN";r.match.players[0]!.playerId="human";r.prepare();
+    r.attempt("p01",37.8,"open",false);r.attempt("p02",45,"other");
+    const before=structuredClone(r.round.players.slice(1));
+    const clear={type:"DEBUG_FORCE_CLEAR" as const,...r.context,participantId:"p01",attemptId:"force"};
+    r.send(clear);
+    expect(r.round.players[0]!.attempts).toHaveLength(1);expect(r.round.players[0]!.attempts[0]).toMatchObject({id:"open",highestProgress:100,endedAt:r.now});
+    expect(r.round.players.slice(1)).toEqual(before);expect(r.match.state).toBe("PLAYING");expect(r.match.winnerId).toBeNull();
+    expect(()=>r.send({...clear,attemptId:"another"})).toThrow("already cleared");
+    const blocked=new Rig();blocked.prepare();expect(()=>blocked.send({...clear,...blocked.context})).toThrow("not allowed");
+    blocked.match.online=true;blocked.match.presentationControlled=true;blocked.match.players[0]!.kind="HUMAN";
+    expect(()=>blocked.send({...clear,...blocked.context})).toThrow("not allowed");
+    const dm=new Rig();dm.final();dm.match.presentationControlled=true;dm.match.players[0]!.kind="HUMAN";dm.prepare();
+    expect(()=>dm.send({...clear,...dm.context})).toThrow("not allowed");
+    dm.attempt("p01",100,"dm1");dm.attempt("p01",94.1234,"dm2",false);
+    expect(survivalLiveView(dm.match,dm.now,"p01").standings.find(p=>p.participantId==="p01")).toMatchObject({score:100,currentProgress:94.123,attemptActive:true,attemptsUsed:2});
+  });
   it("projects captured human tiers and subdivided tier groups separately from virtual matchmaking LP",()=>{
     const r=new Rig();r.match.config={...r.match.config,tierBands:r.match.config.tierBands.map(b=>b.tier==="SILVER"?{...b,tier:"SILVER_I"}:b)};
     r.match.players[0]!.displayedTier="SILVER_I";

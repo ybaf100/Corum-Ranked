@@ -1,6 +1,7 @@
 #include "RankedRuntime.hpp"
 #include "RankedRoundPreparation.hpp"
 #include "SurvivalRuntime.hpp"
+#include "SurvivalSceneBridge.hpp"
 #include "RankedLevelPreparation.hpp"
 #include "ui/SurvivalHud.hpp"
 #include "ui/RankedHudLabel.hpp"
@@ -201,6 +202,8 @@ public:
         double qualifyingPercent = -1.0;
         bool rankedLevel = false;
         bool survivalLevel = false;
+        bool survivalFreePlayHud = false;
+        bool survivalNativeClearFinished = false;
         corum::ranked::LevelPreparationContext survivalContext;
         corum::ranked::ui::SurvivalHud* survivalHud = nullptr;
         bool survivalWaiting = false;
@@ -383,6 +386,7 @@ public:
         auto& runtime = corum::ranked::RankedRuntime::get();
         m_fields->levelId = level ? static_cast<int>(level->m_levelID) : 0;
         m_fields->survivalLevel=corum::ranked::SurvivalRuntime::get().consumeNativeLaunch(level);
+        m_fields->survivalFreePlayHud=!m_fields->survivalLevel && corum::ranked::SurvivalRuntime::get().freePlaying();
         if(m_fields->survivalLevel)m_fields->survivalContext=corum::ranked::SurvivalRuntime::get().preparationContext();
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         auto& debug = corum::ranked::debug::DebugSpectateRuntime::get();
@@ -444,6 +448,9 @@ public:
             return true;
         }
 #endif
+        if(m_fields->survivalFreePlayHud){
+            addSurvivalHud();schedule(schedule_selector(CorumRankedPlayLayer::survivalFrame));return true;
+        }
         if ((!m_fields->rankedLevel && !m_fields->survivalLevel) || m_isTestMode) return true;
 
         // Latch read-only authority during init, before any postUpdate/onQuit
@@ -501,13 +508,22 @@ public:
     // button commands, evidence and its audio clock are held at the initial pose.
     void queueHeldEntryExit() {
         if (m_fields->autoExitRequested) return;
+        // A round boundary can race the genuine native clear animation.
+        // Let its completion setup finish before retiring this official scene.
+        if(m_fields->survivalLevel && m_hasCompletedLevel && !m_fields->survivalNativeClearFinished)return;
+        if(m_fields->survivalLevel){auto* director=CCDirector::sharedDirector();
+            if(director->getNextScene() || getParent()!=director->getRunningScene())return;}
         m_fields->autoExitRequested = true;
         // Leave the native update/lifecycle stack before retiring this scene.
         auto scene = geode::WeakRef<PlayLayer>(this);
-        queueInMainThread([scene] {
+        auto const survival=m_fields->survivalLevel;
+        queueInMainThread([scene,survival] {
             if (auto layer = scene.lock(); layer && layer.data() == PlayLayer::get() &&
                 layer->getParent() && layer->getParent()->isRunning() &&
-                layer->getParent() == CCDirector::sharedDirector()->getRunningScene()) layer->onQuit();
+                layer->getParent() == CCDirector::sharedDirector()->getRunningScene()) {
+                if(survival && corum::ranked::quitThroughSurvivalCompletionOverlay(layer.data()))return;
+                layer->onQuit();
+            }
         });
     }
 
@@ -625,12 +641,43 @@ public:
     }
 
     void survivalFrame(float dt) {
-        if(!m_fields->survivalLevel || !m_fields->rankedInitialized || m_fields->safetyRetired)return;
+        if((!m_fields->survivalLevel && !m_fields->survivalFreePlayHud) || !m_fields->rankedInitialized || m_fields->safetyRetired)return;
         auto& runtime=corum::ranked::SurvivalRuntime::get();runtime.tick();
         (void)dt; // SurvivalHud owns its clock/render update independently of native gameplay pause.
         if(m_fields->fpsLabel)setHudText(m_fields->fpsLabel,corum::ranked::presentHud({.renderFps=m_fields->fpsMeter.fps()}).fpsText);
+        if(m_fields->survivalFreePlayHud){
+            if(runtime.freePlayReturnPending())queueSurvivalGameplayReturn();return;
+        }
+        if(runtime.normalRoundCleared() && (!m_hasCompletedLevel || m_fields->survivalNativeClearFinished)){
+            queueSurvivalGameplayReturn();return;
+        }
         if(blockSurvivalEntry())return;
-        if(!runtime.canPlay() && runtime.view().state=="PLAYING") {m_fields->survivalWaiting=true;m_isPaused=true;}
+        if(!runtime.canPlay() && runtime.view().state=="PLAYING" && !m_hasCompletedLevel) {m_fields->survivalWaiting=true;m_isPaused=true;}
+    }
+
+    void queueSurvivalGameplayReturn() {
+        if(m_fields->autoExitRequested || m_fields->safetyRetired || !m_fields->rankedInitialized)return;
+        if(m_fields->survivalLevel && m_hasCompletedLevel && !m_fields->survivalNativeClearFinished)return;
+        auto* director=CCDirector::sharedDirector();
+        if(director->getNextScene() || !isRunning() || getParent()!=director->getRunningScene() ||
+            typeinfo_cast<CCTransitionScene*>(director->getRunningScene()))return;
+        m_fields->autoExitRequested=true;
+        setTouchEnabled(false);setKeyboardEnabled(false);m_queuedButtons.clear();
+        if(m_uiLayer)m_uiLayer->disableMenu();
+        queueInMainThread([weak=WeakRef<PlayLayer>(this)]{
+            auto owner=weak.lock();auto* director=CCDirector::sharedDirector();
+            if(!owner || owner.data()!=PlayLayer::get() || !owner->isRunning() || owner->getParent()!=director->getRunningScene())return;
+            auto* managed=static_cast<CorumRankedPlayLayer*>(owner.data());
+            if(director->getNextScene()) {managed->m_fields->autoExitRequested=false;return;}
+            if(corum::ranked::quitThroughSurvivalCompletionOverlay(owner.data()))return;
+            if(managed->m_fields->survivalFreePlayHud && !corum::ranked::resumeSurvivalFreePlayPauseBeforeQuit(owner.data())){
+                managed->m_fields->autoExitRequested=false;return;
+            }
+            owner->onQuit();
+            // If a native Resume hook refused teardown, retry on the next
+            // heartbeat instead of treating a requested Quit as completed.
+            if(owner.data()==PlayLayer::get() && owner->isRunning())managed->m_fields->autoExitRequested=false;
+        });
     }
 
     void addSurvivalHud() {
@@ -647,7 +694,7 @@ public:
 
     void resume() {
         PlayLayer::resume();
-        if(m_fields->survivalLevel && m_fields->rankedInitialized && !m_fields->safetyRetired && !m_fields->autoExitRequested) {
+        if((m_fields->survivalLevel || m_fields->survivalFreePlayHud) && m_fields->rankedInitialized && !m_fields->safetyRetired && !m_fields->autoExitRequested) {
             resumeSchedulerAndActions();schedule(schedule_selector(CorumRankedPlayLayer::survivalFrame));survivalFrame(0);
         }
     }
@@ -686,7 +733,7 @@ public:
     }
 
     void acquireGameplayAudio() {
-        auto const corumGameplayScene = m_fields->rankedLevel || m_fields->survivalLevel
+        auto const corumGameplayScene = m_fields->rankedLevel || m_fields->survivalLevel || m_fields->survivalFreePlayHud
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
             || m_fields->debugRecordScene || m_fields->debugPlaybackScene
 #endif
@@ -1116,6 +1163,7 @@ public:
         syncSpectatorLocalSafety();
         ScopedPersistenceOwner persistence(this);
         PlayLayer::postUpdate(dt);
+        if(m_fields->survivalFreePlayHud)m_fields->fpsMeter.observeFrame(steadyNowMicros());
         if(m_fields->survivalLevel && m_fields->rankedInitialized && !m_isTestMode) {
             auto& survival=corum::ranked::SurvivalRuntime::get();m_fields->fpsMeter.observeFrame(steadyNowMicros());
             if(!m_isPracticeMode && !m_isPaused && m_player1 && !m_player1->m_isDead && !m_hasCompletedLevel && survival.canPlay()) {
@@ -1514,6 +1562,10 @@ public:
     }
 
     void onQuit() {
+        auto& survival=corum::ranked::SurvivalRuntime::get();
+        auto const freePlayReturn=m_fields->survivalFreePlayHud && survival.freePlayReturnPending();
+        if(freePlayReturn && !corum::ranked::resumeSurvivalFreePlayPauseBeforeQuit(this))return;
+        if(freePlayReturn)survival.beginFreePlayNativeQuit(m_level);
         if(m_fields->survivalLevel) {
             if(!corum::ranked::resumeRankedPauseBeforeQuit(this))return;
             unschedule(schedule_selector(CorumRankedPlayLayer::survivalFrame));
@@ -1565,6 +1617,7 @@ public:
         corum::ranked::ScopedRankedRoundQuit roundQuit(this);
         corum::ranked::ScopedSpectatorPersistenceMode noSave(m_isTestMode, blocksLevelPersistence(m_level));
         PlayLayer::onQuit();
+        if(freePlayReturn)survival.finishFreePlayNativeQuit();
     }
 
     void onExit() {
@@ -1632,6 +1685,7 @@ public:
             );
         }
         PlayLayer::showEndLayer();
+        if(m_fields->survivalLevel && !m_isPracticeMode && m_hasCompletedLevel)m_fields->survivalNativeClearFinished=true;
     }
 
     void showNewBest(bool newReward, int orbs, int diamonds, bool demonKey, bool noRetry, bool noTitle) {
@@ -2446,6 +2500,15 @@ public:
 bool corum::ranked::prepareSpectatorScene(PlayLayer* layer) {
     if (!layer || layer != PlayLayer::get()) return false;
     return static_cast<CorumRankedPlayLayer*>(layer)->prepareSpectatorScene();
+}
+bool corum::ranked::isOfficialSurvivalPlayLayer(PlayLayer* layer) {
+    return layer && layer==PlayLayer::get() && static_cast<CorumRankedPlayLayer*>(layer)->m_fields->survivalLevel;
+}
+bool corum::ranked::requestSurvivalGameplayReturn(PlayLayer* layer) {
+    if(!layer || layer!=PlayLayer::get())return false;
+    auto* managed=static_cast<CorumRankedPlayLayer*>(layer);
+    if(!managed->m_fields->survivalLevel && !managed->m_fields->survivalFreePlayHud)return false;
+    managed->queueSurvivalGameplayReturn();return true;
 }
 
 bool corum::ranked::requestConcededGameplayReturn(PlayLayer* layer) {

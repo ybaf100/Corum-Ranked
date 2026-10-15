@@ -1,3 +1,13 @@
+# v0.5.0-beta.72
+
+- Return normal Survival 100% clears to the live dashboard after the server's terminal Attempt ACK and native completion setup. Keep Death Match Attempts and score precision unchanged.
+- Show server BEST/NOW, cleared and eliminated status on retained participant cards. Retarget the existing movement from the current position and update elimination backgrounds independently.
+- Add FREE PLAY after acknowledged normal clears. Keep polling and attach the same unchanged SurvivalHud to ordinary GD levels; preserve vanilla progress/Practice/records and return safely at the authoritative round boundary.
+- Add Debug-only Pause Force Clear with the Corum confirmation, dedicated authenticated server route, exact context checks and persistent request idempotency. Never grant native GD completion rewards.
+- Retain beta.71 round-handoff/BGM/final-result fixes and the user's round HUD position. Synchronize server/client versions without a migration.
+- Instrument R2 transfer/save/hash/install timing, coalesce update progress callbacks and save downloads on the verification worker while preserving validation/rollback. Add an optional Custom Domain origin override and a public download probe; the reported slow transfer was not reproduced and no production domain/cache setting was changed. See [measured R2 diagnostics](../ranked/docs/r2-beta72-download-diagnostics.md).
+- See [implementation and device checks](../ranked/docs/survival-beta72-free-play.md).
+
 # v0.5.0-beta.71
 
 - Return Survival protocol conflicts as HTTP 409, retire obsolete progress after server round completion, and reject delayed canceled-request callbacks so presentation completion cannot remain behind endless progress retries. Keep valid Attempt End retries, round timers, scores and LP unchanged.

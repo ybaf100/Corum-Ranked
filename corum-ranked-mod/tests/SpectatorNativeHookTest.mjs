@@ -99,7 +99,8 @@ struct PlayLayer {
     int quits=0,exits=0,resets=0;
     bool m_isPaused=false;void onQuit();void onExit();void resetLevel();
 };
-namespace corum::ranked {struct SurvivalRuntime {static SurvivalRuntime&get(){static SurvivalRuntime r;return r;}void endAttempt(double){}bool attemptLimitReached(){return false;}bool canPlay(){return false;}};
+namespace corum::ranked {struct SurvivalRuntime {static SurvivalRuntime&get(){static SurvivalRuntime r;return r;}bool freePlayReturnPending()const{return false;}void beginFreePlayNativeQuit(GJGameLevel*){}void finishFreePlayNativeQuit(){}void endAttempt(double){}bool attemptLimitReached(){return false;}bool canPlay(){return false;}};
+inline bool resumeSurvivalFreePlayPauseBeforeQuit(PlayLayer*){return true;}
 inline bool resumeRankedPauseBeforeQuit(PlayLayer*) { return true; } // tested by RankedPauseQuitNativeTest
 inline SpectatorGhostPose captureSpectatorPose(PlayerObject* p,bool dead=false,bool finished=false,bool dual=false){
     auto xy=p->getPosition(); SpectatorGhostPose pose{xy.x,xy.y,p->getRotation(),dead,finished};pose.dual=dual;return pose;
@@ -148,7 +149,7 @@ struct CorumRankedPlayLayer : PlayLayer {
     void observeSpectatorNativeUpdate(PlayerObject*) {}
     bool observesSpectatorPlayer(PlayerObject*) {return false;}
     void observeSpectatorNativeSnap(PlayerObject*,corum::ranked::SpectatorDiscontinuity,corum::ranked::SpectatorGhostPose const&) {}
-    struct Fields {std::optional<SurvivalDialogRef> survivalSurrender;bool survivalLevel=false,survivalWaiting=false;
+    struct Fields {std::optional<SurvivalDialogRef> survivalSurrender;bool survivalLevel=false,survivalWaiting=false,survivalFreePlayHud=false,survivalNativeClearFinished=false;
         bool nativeCompletionStarted = false;
         EntryOverlay* entryOverlay = nullptr;
         bool nativeEntryHeld = false;

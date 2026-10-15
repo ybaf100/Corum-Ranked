@@ -24,6 +24,21 @@ beforeEach(() => vi.spyOn(Logger.prototype, "warn").mockImplementation(() => {})
 afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
 
 describe("server-selected mod update descriptors", () => {
+  it("serves the identical verified bytes through a configured CDN origin for both channels without rewriting immutable descriptors",async()=>{
+    const cdn="https://cdn.example.org",fetchRemote=validFetch();
+    const service=new RankedModUpdateService({...environmentFixture(),rankedDownloadCdnBaseUrl:cdn},fetchRemote);
+    const updates=await service.getClientUpdates();
+    for(const channel of ["debug","release"] as const){
+      expect(updates[channel]).toEqual({...descriptor(channel)[channel],downloadUrl:rankedModDownloadUrl(cdn,channel,version)});
+    }
+    expect(fetchRemote.mock.calls.every(([url])=>String(url).startsWith(base+"/"))).toBe(true);
+  });
+  it("a CDN alias cannot make a wrong-origin or wrong-channel remote descriptor acceptable",async()=>{
+    const fetchRemote=validFetch();
+    fetchRemote.mockImplementationOnce(async()=>Response.json({debug:{...descriptor("debug").debug,downloadUrl:"https://untrusted.example.org/wrong.geode"}}));
+    const service=new RankedModUpdateService({...environmentFixture(),rankedDownloadCdnBaseUrl:"https://cdn.example.org"},fetchRemote);
+    expect(await service.getClientUpdates()).not.toHaveProperty("debug");
+  });
   it("automatically resolves both exact R2 channel packages without manual JSON configuration", async () => {
     const fetchRemote = validFetch();
     const service = new RankedModUpdateService(environmentFixture(), fetchRemote);

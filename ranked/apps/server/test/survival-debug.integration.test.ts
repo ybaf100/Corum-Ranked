@@ -26,6 +26,9 @@ import { SERVER_CLOCK } from "../src/common/runtime.module.js";
 import { DATABASE } from "../src/database/database.port.js";
 import type { RankedConfigService } from "../src/config/ranked-config.service.js";
 
+// Persistent full games and all 16 Force ranks exceed a unit-test budget on
+// constrained runners; this matches the online PostgreSQL suite's wall budget.
+vi.setConfig({testTimeout:30000});
 const id=(n:number)=>`00000000-0000-4000-8000-${String(n).padStart(12,"0")}`;
 let pg:PGlite,db:PgliteDatabase,engine:SurvivalEngineService,debug:SurvivalDebugService,survival:SurvivalService;
 let sessions:SessionService,achievements:AchievementService;
@@ -124,6 +127,40 @@ describe("Survival M4 persistent debug game",()=>{
       vi.spyOn(engine,"dispatch").mockRejectedValueOnce(new Error("fixture database failure"));
       expect((await event({...ack,eventId:ids.next()})).status).toBe(500);
     } finally {await app.close();}
+  });
+  it("authenticates Force Clear, closes one real attempt, recovers exact retries and leaves LP/other participants untouched",async()=>{
+    let m=await prepare(await create());const r=survivalCurrentRound(m),attemptId=ids.next();
+    await send(m,"ATTEMPT_START",{attemptId});await send(m,"PROGRESS",{attemptId,progress:36.9});
+    m=await engine.get(m.id);const others=structuredClone(survivalCurrentRound(m).players.slice(1));
+    const clear={requestId:ids.next(),roundKey:r.key,mapGeneration:r.mapGeneration,levelId:r.map!.levelId};
+    await expect(debug.forceClear(m.id,{...session,clientBuildChannel:"release"},clear)).rejects.toMatchObject({status:403});
+    await expect(debug.forceClear(m.id,{...session,playerId:id(99)},clear)).rejects.toMatchObject({status:403});
+    await expect(debug.forceClear(m.id,session,{...clear,mapGeneration:2})).rejects.toMatchObject({status:409});
+    const result=await debug.forceClear(m.id,session,clear);
+    expect(result.standings.find(p=>p.participantId==="human")).toMatchObject({bestProgress:100,currentProgress:0,attemptActive:false,cleared:true});
+    expect((await debug.forceClear(m.id,session,clear)).revision).toBe(result.revision);
+    const stored=await engine.get(m.id);expect(survivalCurrentRound(stored).players[0]!.attempts).toHaveLength(1);
+    expect(survivalCurrentRound(stored).players[0]!.attempts[0]).toMatchObject({id:attemptId,highestProgress:100,endedAt:now});
+    expect(survivalCurrentRound(stored).players.slice(1)).toEqual(others);
+    expect((await db.query("SELECT * FROM sur_lp_ledger")).rows).toHaveLength(0);
+    expect((await db.query("SELECT visible_ranked_score,hidden_mmr FROM ranked_profiles")).rows[0]).toEqual({visible_ranked_score:1100,hidden_mmr:1234});
+    expect((await db.query("SELECT * FROM sur_match_commands WHERE event_key=$1",[`force-clear:${clear.requestId}`])).rows).toHaveLength(1);
+    await expect(debug.forceClear(m.id,session,{...clear,levelId:clear.levelId+1})).rejects.toMatchObject({status:409});
+    now=r.endsAt!;
+    await db.query("UPDATE ranked_sessions SET last_heartbeat_at=$2 WHERE id=$1",[session.sessionId,clock.now().toISOString()]);
+    await expect(debug.forceClear(m.id,session,{...clear,requestId:ids.next()})).rejects.toMatchObject({status:409});
+  });
+  it("Force Clear recovers a new process, validates current context, and cannot run with debug server configuration disabled",async()=>{
+    const m=await prepare(await create()),r=survivalCurrentRound(m);
+    const clear={requestId:ids.next(),roundKey:r.key,mapGeneration:r.mapGeneration,levelId:r.map!.levelId};
+    const disabled=new SurvivalDebugService(db,{...env,debugBot:null},clock,{next:()=>0},config,sessions,engine,survival);
+    await expect(disabled.forceClear(m.id,session,clear)).rejects.toMatchObject({status:404});
+    await debug.forceClear(m.id,session,clear);
+    const restartedEngine=new SurvivalEngineService(db,clock,ids,config,{select:async()=>{throw new Error("Unexpected map selection");}});
+    const restarted=new SurvivalDebugService(db,env,clock,{next:()=>0},config,sessions,restartedEngine,survival);
+    const recovered=await restarted.forceClear(m.id,session,clear);
+    expect(recovered.standings.find(p=>p.participantId==="human")).toMatchObject({bestProgress:100,cleared:true});
+    expect(survivalCurrentRound(await engine.get(m.id)).players[0]!.attempts).toHaveLength(1);
   });
   it("holds map selection behind the initial roster and durably waits for round presentation before selecting again",async()=>{
     let m=await engine.get((await debug.create(session,body())).matchId);

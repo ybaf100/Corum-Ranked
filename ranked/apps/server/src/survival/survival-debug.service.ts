@@ -15,7 +15,7 @@ import { sessionAliveSince } from "../session/session-presence.policy.js";
 import type { RankedSessionContext } from "../session/session.types.js";
 import { SurvivalEngineService, type SurvivalAdmissionPlayer } from "./survival-engine.service.js";
 import { SurvivalService } from "./survival.service.js";
-import type { CreateSurvivalDebugDto, ForceSurvivalDebugDto, SurvivalDebugEventDto } from "./survival-debug.dto.js";
+import type { ClearSurvivalDebugDto, CreateSurvivalDebugDto, ForceSurvivalDebugDto, SurvivalDebugEventDto } from "./survival-debug.dto.js";
 
 interface DebugRow {
   match_id:string; human_player_id:string; seed:number|string; average_group:string; force_rank:number|null;
@@ -149,7 +149,7 @@ export class SurvivalDebugService implements OnApplicationBootstrap,OnApplicatio
     else {
       if(!body.attemptId)throw new BadRequestException("Attempt ID required");
       if(body.type==="ATTEMPT_START")command={type:body.type,...context,attemptId:body.attemptId};
-      else {if(body.progress===undefined)throw new BadRequestException("Progress required");command={type:body.type,...context,attemptId:body.attemptId,progress:body.progress};}
+      else {if(body.progress===undefined)throw new BadRequestException("Progress required");command={type:body.type,...context,attemptId:body.attemptId,progress:body.progress,...(body.currentProgress===undefined?{}:{currentProgress:body.currentProgress})};}
     }
     await this.engine.dispatch(id,`human:${body.eventId}`,command,session);
     return this.view(id,session);
@@ -167,6 +167,28 @@ export class SurvivalDebugService implements OnApplicationBootstrap,OnApplicatio
       const match=(await tx.query<{state:string}>("SELECT state FROM sur_matches WHERE id=$1 FOR UPDATE",[id])).rows[0];
       if(match && !["FINAL_RESULT","CANCELLED"].includes(match.state))await tx.query(`UPDATE sur_debug_matches SET force_rank=$2 WHERE match_id=$1 AND result IS NULL`,[id,body.rank]);
     });
+    return this.view(id,session);
+  }
+  public async forceClear(id:string,session:RankedSessionContext,body:ClearSurvivalDebugDto) {
+    // Admission already verified the shared debug password. The dedicated
+    // persisted ownership row and a live debug session are still required here.
+    if(!this.env.debugBot?.password)throw new NotFoundException("Debug Bot Match is disabled");
+    await this.owned(id,session);
+    const before=await this.engine.get(id),current=survivalCurrentRound(before);
+    const retry=(await this.db.query("SELECT event_key FROM sur_match_commands WHERE match_id=$1 AND event_key=$2",[id,`force-clear:${body.requestId}`])).rows.length>0;
+    if(!retry && (before.state!=="PLAYING" || current.phase==="TIEBREAK" || current.key!==body.roundKey || current.mapGeneration!==body.mapGeneration ||
+      current.map?.levelId!==body.levelId || current.endsAt===null || this.clock.now().getTime()>=current.endsAt ||
+      current.players.find(p=>p.participantId==="human")?.attempts.some(a=>a.endedAt!==null&&a.highestProgress===100))){
+      await this.engine.tick(id);throw new ConflictException("Survival round changed before Force Clear");
+    }
+    const match=await this.engine.dispatch(id,`force-clear:${body.requestId}`,{type:"DEBUG_FORCE_CLEAR",participantId:"human",
+      attemptId:body.requestId,roundKey:body.roundKey,mapGeneration:body.mapGeneration,levelId:body.levelId},session);
+    // dispatch durably advances an elapsed server timer even when an arriving
+    // command becomes read-only. Such a packet must not be reported as a clear.
+    const round=match.rounds.find(r=>r.key===body.roundKey && r.mapGeneration===body.mapGeneration && r.map?.levelId===body.levelId);
+    if(!round?.players.find(p=>p.participantId==="human")?.attempts.some(a=>a.endedAt!==null && a.highestProgress===100))
+      throw new ConflictException("Survival round changed before Force Clear");
+    this.logger.log(`Survival Debug Force Clear match=${id} round=${body.roundKey} generation=${body.mapGeneration} request=${body.requestId}`);
     return this.view(id,session);
   }
   public async acknowledge(id:string,session:RankedSessionContext) {

@@ -9,12 +9,12 @@ export interface RankedModUpdate {
 }
 export type RankedModUpdates = Readonly<Partial<Record<RankedBuildChannel, RankedModUpdate>>>;
 
-export const normalizeRankedDownloadBaseUrl=(text:string|undefined):string|undefined=>{
+export const normalizeRankedDownloadBaseUrl=(text:string|undefined,setting="RANKED_DOWNLOAD_BASE_URL"):string|undefined=>{
   if(!text?.trim())return undefined;
   let url:URL;
-  try {url=new URL(text.trim());}catch {throw new RankedDomainError("INVALID_CONFIG","Invalid RANKED_DOWNLOAD_BASE_URL");}
+  try {url=new URL(text.trim());}catch {throw new RankedDomainError("INVALID_CONFIG",`Invalid ${setting}`);}
   if(url.protocol!=="https:" || url.username || url.password || url.search || url.hash || url.pathname!=="/")
-    throw new RankedDomainError("INVALID_CONFIG","RANKED_DOWNLOAD_BASE_URL must be a public HTTPS bucket origin");
+    throw new RankedDomainError("INVALID_CONFIG",`${setting} must be a public HTTPS bucket origin`);
   return url.origin;
 };
 export const rankedModDownloadUrl=(base:string,channel:RankedBuildChannel,version:string):string=>

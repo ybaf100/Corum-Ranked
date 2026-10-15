@@ -33,10 +33,13 @@ describe("server environment", () => {
     expect(loadServerEnvironment({...validEnvironment(),RANKED_DOWNLOAD_BASE_URL:" https://downloads.example.org/ "}).rankedDownloadBaseUrl)
       .toBe("https://downloads.example.org");
     expect(loadServerEnvironment(validEnvironment())).not.toHaveProperty("rankedDownloadBaseUrl");
+    expect(loadServerEnvironment(validEnvironment())).not.toHaveProperty("rankedDownloadCdnBaseUrl");
+    expect(loadServerEnvironment({...validEnvironment(),RANKED_DOWNLOAD_CDN_BASE_URL:" https://cdn.example.org/ "}).rankedDownloadCdnBaseUrl).toBe("https://cdn.example.org");
   });
   it.each(["http://downloads.example.org","https://user:password@example.org","https://downloads.example.org/path",
     "https://downloads.example.org?token=1","https://downloads.example.org#fragment"])("rejects unsafe R2 origin %s",base=>{
     expect(()=>loadServerEnvironment({...validEnvironment(),RANKED_DOWNLOAD_BASE_URL:base})).toThrow("RANKED_DOWNLOAD_BASE_URL");
+    expect(()=>loadServerEnvironment({...validEnvironment(),RANKED_DOWNLOAD_CDN_BASE_URL:base})).toThrow("RANKED_DOWNLOAD_CDN_BASE_URL");
   });
   it("loads explicitly provided non-secret and secret settings", () => {
     expect(loadServerEnvironment(validEnvironment())).toMatchObject({

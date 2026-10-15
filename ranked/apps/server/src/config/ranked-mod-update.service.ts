@@ -45,8 +45,12 @@ export class RankedModUpdateService implements OnApplicationBootstrap {
       const metadata = explicit ?? await this.resolve(channel, REQUIRED_RANKED_CLIENT_VERSION);
       if (metadata) {
         const base=this.environment?.rankedDownloadBaseUrl;
-        result[channel] = { ...metadata,...(base && !metadata.downloadUrl?{
-          downloadUrl:rankedModDownloadUrl(base,channel,metadata.version),
+        // An operator-configured Custom Domain can serve the same immutable
+        // bucket objects without rewriting existing descriptors or their hashes.
+        // Remote descriptor URLs are still validated against the original base.
+        const cdn=this.environment?.rankedDownloadCdnBaseUrl;
+        result[channel] = { ...metadata,...(cdn || (base && !metadata.downloadUrl)?{
+          downloadUrl:rankedModDownloadUrl(cdn??base!,channel,metadata.version),
         }:{}) };
       }
     }));

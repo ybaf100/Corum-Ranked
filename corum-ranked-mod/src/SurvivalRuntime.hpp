@@ -3,6 +3,7 @@
 #include "domain/ServerClock.hpp"
 #include "domain/SurvivalMapPolicy.hpp"
 #include "domain/SurvivalHudPresentation.hpp"
+#include "domain/SurvivalFreePlayPolicy.hpp"
 #include "domain/ResultScorePresentation.hpp"
 #include <Geode/Geode.hpp>
 #include <Geode/utils/web.hpp>
@@ -21,6 +22,7 @@ struct SurvivalMatchView {
     SurvivalMapMetadata map;
     matjson::Value certificate,result,completedRound;
     std::vector<SurvivalStanding> standings;
+    std::vector<SurvivalStanding> roundPlayers;
     std::vector<std::string> aliveIds;
     std::optional<double> cutoff,first;
     bool ownEntered=false,ownAssetsReady=false,ownEliminated=false,ownAbsent=false,resultPending=false,debug=false,online=false;
@@ -62,6 +64,14 @@ public:
     bool beginAttempt();
     void progress(double value);
     void endAttempt(double value);
+    bool normalRoundCleared() const;
+    bool canFreePlay() const;
+    bool beginFreePlay();
+    bool freePlaying() const {return m_freePlay.active;}
+    bool freePlayReturnPending() const;
+    bool beginFreePlayNativeQuit(GJGameLevel* level);
+    bool interceptFreePlayNativeQuit(GJGameLevel* level) const;
+    void finishFreePlayNativeQuit();
     void surrender();
     void presentationComplete();
     void acknowledge();
@@ -70,8 +80,23 @@ public:
     void start(std::string password,std::string group,int forceRank=0,int botCount=15);
     void forceRank(std::string password,int rank);
     void fillBots(std::string password,int botCount=-1);
+    bool canForceClear() const;
+    bool forceClearPending() const {return m_forceClearBody.isObject();}
+    void forceClear();
 #endif
 private:
+    void pumpFreePlayReturn();
+#if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
+    void pumpForceClear();
+    matjson::Value m_forceClearBody;
+    std::chrono::steady_clock::time_point m_forceClearRetryAt{};
+    bool m_forceClearBusy=false;
+    geode::async::TaskHolder<geode::utils::web::WebResponse> m_forceClearRequest;
+#endif
+    SurvivalFreePlayState m_freePlay;
+    std::optional<geode::WeakRef<cocos2d::CCScene>> m_freePlayOrigin,m_freePlayQuitScene;
+    geode::Ref<GJGameLevel> m_freePlayQuitLevel;
+    bool m_freePlayReturnQueued=false,m_freePlayNativeQuitFinished=false;
     void observe(matjson::Value const& root);
     void observeQueue(matjson::Value const& root);
     void pollQueue();

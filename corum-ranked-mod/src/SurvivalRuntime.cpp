@@ -1,8 +1,12 @@
 #include "SurvivalRuntime.hpp"
 #include "RankedRuntime.hpp"
+#include "RankedAudioManager.hpp"
 #include "RankedLevelPreparation.hpp"
 #include "RankedRoundPreparation.hpp"
 #include "SurvivalMapValidation.hpp"
+#include "SurvivalSceneBridge.hpp"
+#include <Geode/binding/MenuLayer.hpp>
+#include <Geode/binding/PlayLayer.hpp>
 #include "ui/RankedTranslations.hpp"
 #include "domain/Sha256.hpp"
 #include "domain/ModUpdatePolicy.hpp"
@@ -53,8 +57,12 @@ void SurvivalRuntime::tick() {
         m_lastServerNow=0;m_session=token;m_creating=m_pollBusy=m_eventBusy=m_recoverBusy=m_queuePollBusy=false;m_view={};m_queue={};++m_queueGeneration;m_prepared={};m_events.clear();m_attempt.clear();
         m_attemptContext=m_enteredContext=m_readyContext="";m_nextPoll={};
         m_needRecovery=!token.empty();m_recoverRetryAt={};m_ackRetryAt={};
+#if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
+        m_forceClearRequest.cancel();m_forceClearBody={};m_forceClearBusy=false;
+#endif
         if(m_needRecovery)recover();
     }
+    pumpFreePlayReturn();
     if(token.empty())return;
     RankedRuntime::get().updateSessionHeartbeat();
     if(!active()) {
@@ -65,6 +73,9 @@ void SurvivalRuntime::tick() {
     }
     if(acquiring())RankedRoundPreparation::get().pump();
     pumpEvents();
+#if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
+    pumpForceClear();
+#endif
     if(std::chrono::steady_clock::now()>=m_nextPoll)poll();
 }
 std::string SurvivalRuntime::matchEndpoint(std::string const& path) const {
@@ -209,6 +220,26 @@ void SurvivalRuntime::observe(matjson::Value const& root) {
             p["score"].asDouble().unwrapOr(0),p["passing"].asBool().unwrapOr(false),info!=participants.end()&&(*info)["kind"].asString().unwrapOr("")=="BOT",p["waitingForOthers"].asBool().unwrapOr(false),
             info!=participants.end()?(*info)["displayedTier"].asString().unwrapOr("UNRANKED"):"UNRANKED",
             info!=participants.end()?numFromString<int>((*info)["gdAccountId"].asString().unwrapOr("0")).unwrapOr(0):0});
+        auto& row=m_view.standings.back();row.bestProgress=p["bestProgress"].asDouble().unwrapOr(row.score);
+        row.currentProgress=p["currentProgress"].asDouble().unwrapOr(0);row.attemptActive=p["attemptActive"].asBool().unwrapOr(false);
+        row.cleared=p["cleared"].asBool().unwrapOr(false);row.eliminated=p["eliminated"].asBool().unwrapOr(false);row.qualified=p["qualified"].asBool().unwrapOr(false);
+    }
+    m_view.roundPlayers=m_view.standings;
+    if(root["roundPlayers"].isArray()){
+        m_view.roundPlayers.clear();
+        for(auto const& p:root["roundPlayers"].asArray().unwrapOr(std::vector<matjson::Value>{})){
+            auto const pid=p["participantId"].asString().unwrapOr("");
+            auto existing=std::find_if(m_view.standings.begin(),m_view.standings.end(),[&](auto const& v){return v.id==pid;});
+            SurvivalStanding row=existing==m_view.standings.end()?SurvivalStanding{}:*existing;
+            auto info=std::find_if(participants.begin(),participants.end(),[&](auto const& v){return v["participantId"].asString().unwrapOr("")==pid;});
+            row.id=pid;row.rank=static_cast<int>(p["rank"].asInt().unwrapOr(0));row.score=p["score"].asDouble().unwrapOr(0);
+            row.bestProgress=p["bestProgress"].asDouble().unwrapOr(row.score);row.currentProgress=p["currentProgress"].asDouble().unwrapOr(0);
+            row.attemptActive=p["attemptActive"].asBool().unwrapOr(false);row.cleared=p["cleared"].asBool().unwrapOr(false);
+            row.eliminated=p["eliminated"].asBool().unwrapOr(false);row.qualified=p["qualified"].asBool().unwrapOr(false);
+            if(info!=participants.end()){row.name=(*info)["name"].asString().unwrapOr(pid);row.bot=(*info)["kind"].asString().unwrapOr("")=="BOT";
+                row.tier=(*info)["displayedTier"].asString().unwrapOr("UNRANKED");row.accountId=numFromString<int>((*info)["gdAccountId"].asString().unwrapOr("0")).unwrapOr(0);}
+            m_view.roundPlayers.push_back(std::move(row));
+        }
     }
     m_view.ownAssetsReady=m_view.ownEntered=m_view.ownAbsent=false;
     for(auto const& p:root["preparation"].asArray().unwrapOr(std::vector<matjson::Value>{}))if(p["participantId"].asString().unwrapOr("")==m_view.ownId) {
@@ -268,13 +299,14 @@ bool SurvivalRuntime::consumeNativeLaunch(GJGameLevel* level) {
     m_launchLevel=nullptr;return true;
 }
 bool SurvivalRuntime::canEnter() const {
+    if(normalRoundCleared() || freePlaying())return false;
     if(!m_prepared.valid() || m_prepared!=preparationContext() || m_session.empty())return false;
     if(m_view.online && !m_view.ownAssetsReady)return false;
     if(attemptLimitReached())return false;
     return !m_view.ownEliminated && (m_view.state=="ENTERING" || m_view.state=="COUNTDOWN" || m_view.state=="PLAYING");
 }
 bool SurvivalRuntime::canPlay() const {
-    return m_view.state=="PLAYING" && !m_view.ownEliminated && !m_session.empty() &&
+    return !normalRoundCleared() && !freePlaying() && m_view.state=="PLAYING" && !m_view.ownEliminated && !m_session.empty() &&
         m_session==RankedRuntime::get().spectatorLiveSessionToken() && remainingMs()>0 &&
         (!m_view.online || (m_view.ownAssetsReady && m_view.ownEntered && !m_view.ownAbsent));
 }
@@ -361,17 +393,73 @@ bool SurvivalRuntime::beginAttempt() {
 void SurvivalRuntime::progress(double value) {
     if(!canPlay() || m_attempt.empty() || !std::isfinite(value) || value<0 || value>100)return;
     m_attemptBest=std::max(m_attemptBest,value);auto const now=std::chrono::steady_clock::now();
-    if(now<m_nextProgress || m_attemptBest<=m_lastProgress)return;
-    m_nextProgress=now+std::chrono::milliseconds(250);m_lastProgress=m_attemptBest;
+    if(now<m_nextProgress || value==m_lastProgress)return;
+    m_nextProgress=now+std::chrono::milliseconds(250);m_lastProgress=value;
     if(m_events.size()>1 && m_events.back()["type"].asString().unwrapOr("")=="PROGRESS" && m_events.back()["attemptId"].asString().unwrapOr("")==m_attempt) {
-        m_events.back()["progress"]=m_attemptBest;return;
+        m_events.back()["progress"]=m_attemptBest;m_events.back()["currentProgress"]=value;return;
     }
-    auto body=event("PROGRESS");body["attemptId"]=m_attempt;body["progress"]=m_attemptBest;enqueue(std::move(body));
+    auto body=event("PROGRESS");body["attemptId"]=m_attempt;body["progress"]=m_attemptBest;body["currentProgress"]=value;enqueue(std::move(body));
 }
 void SurvivalRuntime::endAttempt(double value) {
     if(m_attempt.empty() || m_attemptContext!=preparationContextText(preparationContext()))return;
     if(std::isfinite(value) && value>=0 && value<=100)m_attemptBest=std::max(m_attemptBest,value);
     auto body=event("ATTEMPT_END");body["attemptId"]=std::exchange(m_attempt,{});body["progress"]=m_attemptBest;enqueue(std::move(body));
+}
+bool SurvivalRuntime::normalRoundCleared() const {
+    if(m_view.phase=="TIEBREAK")return false;
+    auto own=std::find_if(m_view.standings.begin(),m_view.standings.end(),[&](auto const& p){return p.id==m_view.ownId;});
+    return own!=m_view.standings.end() && own->cleared && own->bestProgress==100 && !own->attemptActive && m_view.activeAttemptId.empty();
+}
+bool SurvivalRuntime::canFreePlay() const {
+    return active() && !freePlaying() && normalRoundCleared() && m_view.state=="PLAYING" && !m_view.ownEliminated &&
+        m_session==RankedRuntime::get().spectatorLiveSessionToken() && !m_session.empty();
+}
+bool SurvivalRuntime::beginFreePlay() {
+    auto* director=CCDirector::sharedDirector();auto* scene=director->getRunningScene();
+    if(!canFreePlay() || !scene || !scene->getChildByID("survival-game-coordinator"_spr) || director->getNextScene())return false;
+    m_freePlay.begin({m_view.id,m_view.roundKey,m_view.mapGeneration},m_view.completedRound["key"].asString().unwrapOr(""));
+    m_freePlayOrigin.emplace(scene);m_freePlayNativeQuitFinished=false;m_freePlayQuitLevel=nullptr;m_freePlayQuitScene.reset();
+    queueInMainThread([this,weak=WeakRef(scene)]{
+        auto origin=weak.lock();auto* director=CCDirector::sharedDirector();
+        if(!origin || director->getRunningScene()!=origin.data() || director->getNextScene() || freePlayReturnPending()){
+            if(!freePlayReturnPending()){m_freePlay.finish();m_freePlayOrigin.reset();}return;
+        }
+        RankedAudioManager::get().restoreMenuMusic();
+        director->pushScene(MenuLayer::scene(false));
+    });return true;
+}
+bool SurvivalRuntime::freePlayReturnPending() const {
+    return m_freePlay.needsReturn({m_view.id,m_view.roundKey,m_view.mapGeneration},m_view.state,
+        m_view.completedRound["key"].asString().unwrapOr(""),m_view.ownEliminated);
+}
+bool SurvivalRuntime::beginFreePlayNativeQuit(GJGameLevel* level) {
+    if(!freePlayReturnPending() || !level)return false;
+    m_freePlayQuitLevel=level;m_freePlayQuitScene.emplace(CCDirector::sharedDirector()->getRunningScene());return true;
+}
+bool SurvivalRuntime::interceptFreePlayNativeQuit(GJGameLevel* level) const {
+    return freePlayReturnPending() && m_freePlayQuitLevel && m_freePlayQuitLevel.data()==level;
+}
+void SurvivalRuntime::finishFreePlayNativeQuit() {m_freePlayNativeQuitFinished=true;pumpFreePlayReturn();}
+void SurvivalRuntime::pumpFreePlayReturn() {
+    if(!freePlayReturnPending() || m_freePlayReturnQueued)return;
+    auto* director=CCDirector::sharedDirector();auto* scene=director->getRunningScene();
+    if(!scene || director->getNextScene() || typeinfo_cast<CCTransitionScene*>(scene))return;
+    m_freePlayReturnQueued=true;
+    queueInMainThread([this,weak=WeakRef(scene)]{
+        m_freePlayReturnQueued=false;auto scene=weak.lock();auto* director=CCDirector::sharedDirector();
+        if(!scene || director->getRunningScene()!=scene.data() || director->getNextScene() || !freePlayReturnPending())return;
+        auto quitScene=m_freePlayQuitScene?m_freePlayQuitScene->lock():Ref<CCScene>();
+        auto* play=PlayLayer::get();
+        if(!(m_freePlayNativeQuitFinished && quitScene.data()==scene.data()) && play && play->isRunning() && play->getParent()==scene.data()){
+            requestSurvivalGameplayReturn(play);return;
+        }
+        auto origin=m_freePlayOrigin?m_freePlayOrigin->lock():Ref<CCScene>();
+        m_freePlay.finish();m_freePlayQuitLevel=nullptr;m_freePlayQuitScene.reset();m_freePlayNativeQuitFinished=false;
+        m_freePlayOrigin.reset();
+        if(origin && director->levelForSceneInStack(origin.data())>=0){
+            if(origin.data()!=scene.data())director->popToSceneInStack(origin.data());
+        }else showSurvivalGame();
+    });
 }
 void SurvivalRuntime::surrender() { if(active() && m_view.state!="FINAL_RESULT" && m_view.state!="CANCELLED")enqueue(event("FORFEIT")); }
 void SurvivalRuntime::presentationComplete() {
@@ -406,6 +494,43 @@ std::optional<ScoreAnimationInput> SurvivalRuntime::scoreAnimation() const {
     if(!validScoreBands(input.bands))return std::nullopt;return input;
 }
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
+bool SurvivalRuntime::canForceClear() const {
+    return m_view.debug && !m_view.online && !m_view.ownEliminated && !normalRoundCleared() &&
+        m_view.phase!="TIEBREAK" && m_view.ownAssetsReady && m_view.ownEntered && canPlay();
+}
+void SurvivalRuntime::forceClear() {
+    if(!canForceClear() || forceClearPending())return;
+    m_forceClearBody=event("FORCE_CLEAR");m_forceClearBody["requestId"]=utils::random::generateUUID();
+    m_forceClearBody.erase("type");m_forceClearBody.erase("eventId");m_forceClearRetryAt={};pumpForceClear();
+}
+void SurvivalRuntime::pumpForceClear() {
+    if(!forceClearPending())return;
+    if(m_forceClearBody["roundKey"].asString().unwrapOr("")!=m_view.roundKey ||
+        m_forceClearBody["mapGeneration"].asInt().unwrapOr(0)!=m_view.mapGeneration || !active() ||
+        m_view.state!="PLAYING" || m_view.ownEliminated){
+        m_forceClearRequest.cancel();m_forceClearBusy=false;m_forceClearBody={};m_view.error="Survival state changed. Synchronizing...";return;
+    }
+    // Poll recovers a committed request whose HTTP response was lost.
+    if(normalRoundCleared()){
+        m_forceClearRequest.cancel();m_forceClearBusy=false;m_forceClearBody={};m_attempt.clear();return;
+    }
+    if(m_forceClearBusy || m_eventBusy || !m_events.empty() || std::chrono::steady_clock::now()<m_forceClearRetryAt)return;
+    m_forceClearBusy=true;auto http=request(m_session);http.bodyJSON(m_forceClearBody);
+    auto const generation=m_generation;auto const session=m_session,id=m_view.id,roundKey=m_view.roundKey;auto const mapGeneration=m_view.mapGeneration;
+    auto const requestId=m_forceClearBody["requestId"].asString().unwrapOr("");
+    m_forceClearRequest.spawn(http.post(debugEndpoint("/matches/"+id+"/force-clear")),[this,generation,session,id,roundKey,mapGeneration,requestId](web::WebResponse response){
+        if(!current(generation,session) || id!=m_view.id || roundKey!=m_view.roundKey || mapGeneration!=m_view.mapGeneration || m_forceClearBody["requestId"].asString().unwrapOr("")!=requestId)return;
+        m_forceClearBusy=false;
+        if(response.code()>=200 && response.code()<300){
+            observe(response.json().unwrapOr(matjson::Value()));m_nextPoll={};
+            if(normalRoundCleared()){m_forceClearBody={};m_attempt.clear();}
+            else m_forceClearRetryAt=std::chrono::steady_clock::now()+std::chrono::seconds(1);
+        }else if(response.code()==0 || response.code()==408 || response.code()==429 || response.code()>=500){
+            m_forceClearRetryAt=std::chrono::steady_clock::now()+std::chrono::seconds(1);m_nextPoll={};
+            m_view.error="Survival server connection failed. Retrying...";
+        }else {m_forceClearBody={};m_nextPoll={};m_view.error="survival-force-clear-rejected";}
+    });
+}
 void SurvivalRuntime::start(std::string password,std::string group,int forceRank,int botCount) {
     tick();if(active()){showSurvivalGame();return;}if(queueing()){showSurvivalQueue();return;}if(m_creating || m_session.empty())return;
     matjson::Value body;if(!RankedRuntime::get().prepareSurvivalDebugAdmission(body))return;
