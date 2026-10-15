@@ -207,33 +207,39 @@ int main(){using namespace corum::ranked;using corum::ranked::ui::SurvivalHud;
 }`);
 });
 
-test('actual Survival audio policy holds elimination music, uses every preparation phase and only restarts on mode changes',()=>{
+test('actual Survival audio policy keeps survivor music, uses Final preparation, and only restarts on mode changes',()=>{
  const sync=method(read('src/ui/SurvivalGameLayer.cpp'),'    void syncAudio(');
+ const viewer=read('tests/SpectatorLiveViewerNativeTest.mjs');
+ const json=viewer.slice(viewer.indexOf('namespace matjson {'),viewer.indexOf('${readFileSync(join(root,'));
  run(`
 #include <cassert>
 #include <cstdint>
 #include <optional>
 #include <string>
-template<class T>struct Optional{std::optional<T> value;T unwrapOr(T fallback){return value.value_or(fallback);}};
-struct Scalar{std::optional<bool> boolean;std::optional<int64_t> integer;auto asBool(){return Optional<bool>{boolean};}auto asInt(){return Optional<int64_t>{integer};}};
-struct Result{bool object=false;int rank=0;std::optional<bool> won;bool isObject()const{return object;}Scalar operator[](std::string const& key)const{return key=="won"?Scalar{won,{}}:Scalar{{},rank};}};
-struct SurvivalMatchView{Result result;std::string phase;bool ownEliminated=false;};
-enum class RankedAudioMode{Round12,Round3,ResultWin,ResultLose};
+#include <map>
+#include <variant>
+#include <vector>
+#include "domain/SurvivalRoundMenuPolicy.hpp"
+using namespace corum::ranked;
+${json}
+struct SurvivalMatchView{matjson::Value result,completedRound;std::string phase,state="MAP_SELECTION",roundKey="r1",ownId="human";bool ownWinner=false,ownEliminated=false;};
+enum class RankedAudioMode{Round12,Round3,Round3DeathmatchWait,ResultWin,ResultLose};
 struct RankedAudioManager{int changes=0,ticks=0;RankedAudioMode mode=RankedAudioMode::Round3;static auto& get(){static RankedAudioManager a;return a;}void setMode(RankedAudioMode m){mode=m;changes++;}void tick(){ticks++;}};
 struct Coordinator{std::optional<RankedAudioMode> m_audioMode;
 ${sync}
 };
 int main(){Coordinator layer;auto& audio=RankedAudioManager::get();SurvivalMatchView view;
- for(auto const* phase:{"ROUND_1","ROUND_2","ROUND_3","FINAL","TIEBREAK"}){view.phase=phase;layer.syncAudio(view);assert(audio.mode==RankedAudioMode::Round12);}
- assert(audio.changes==1&&audio.ticks==5);
- layer.syncAudio(view,true);assert(audio.mode==RankedAudioMode::ResultLose);auto changes=audio.changes;
+ for(auto const* phase:{"ROUND_1","ROUND_2","ROUND_3"}){view.phase=phase;layer.syncAudio(view);assert(audio.mode==RankedAudioMode::Round12);}
+ assert(audio.changes==1&&audio.ticks==3);
+ for(auto const* phase:{"FINAL","TIEBREAK"}){view.phase=phase;layer.syncAudio(view);assert(audio.mode==RankedAudioMode::Round3DeathmatchWait);}
+ layer.syncAudio(view,true);assert(audio.mode==RankedAudioMode::Round3DeathmatchWait);auto changes=audio.changes;
  layer.syncAudio(view,true);assert(audio.changes==changes);
- layer.syncAudio(view);assert(audio.mode==RankedAudioMode::Round12);
+ layer.syncAudio(view);assert(audio.mode==RankedAudioMode::Round3DeathmatchWait);
  view.ownEliminated=true;layer.syncAudio(view);assert(audio.mode==RankedAudioMode::ResultLose);
- view.result={true,2,false};view.ownEliminated=false;layer.syncAudio(view);assert(audio.mode==RankedAudioMode::ResultLose);
- view.result={true,1,true};layer.syncAudio(view);assert(audio.mode==RankedAudioMode::ResultWin);
+ view.result["rank"]=2;view.result["won"]=false;view.ownEliminated=false;layer.syncAudio(view);assert(audio.mode==RankedAudioMode::ResultLose);
+ view.result["rank"]=1;view.result["won"]=true;layer.syncAudio(view);assert(audio.mode==RankedAudioMode::ResultWin);
  changes=audio.changes;layer.syncAudio(view);assert(audio.changes==changes);
- view.result={true,1,false};layer.syncAudio(view);assert(audio.mode==RankedAudioMode::ResultLose);
+ view.result["rank"]=1;view.result["won"]=false;layer.syncAudio(view);assert(audio.mode==RankedAudioMode::ResultLose);
  changes=audio.changes;layer.m_audioMode.reset();layer.syncAudio(view);assert(audio.changes==changes+1);
 }
 `);

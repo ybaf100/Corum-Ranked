@@ -4162,6 +4162,9 @@ void RankedRuntime::fetchSurvivalProfile() {
 }
 
 void RankedRuntime::applyAdminProjection(matjson::Value const& result,std::string const& scope) {
+    if(scope=="COMMON" && result["accountsDeleted"].asBool().unwrapOr(false)){
+        leaveRanked();return;
+    }
     if((scope=="SOLO_RANKED" || (scope=="COMMON" && result["reset"].asBool().unwrapOr(false))) && (result["own"].asBool().unwrapOr(false) || result["reset"].asBool().unwrapOr(false))) {
         auto const profile=result["profile"];
         if(profile.isObject()) {

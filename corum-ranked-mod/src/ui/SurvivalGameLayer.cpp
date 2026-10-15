@@ -15,6 +15,7 @@
 #include "RankBadgeAssets.hpp"
 #include "../domain/CompetitiveHudLayout.hpp"
 #include "../domain/ScoreDisplay.hpp"
+#include "../domain/SurvivalRoundMenuPolicy.hpp"
 #include "../RankedMapDetails.hpp"
 #include <Geode/binding/PlayLayer.hpp>
 #include <Geode/ui/LoadingSpinner.hpp>
@@ -199,8 +200,16 @@ class SurvivalGameLayer final : public CCLayerColor {
     }
     void syncAudio(SurvivalMatchView const& view,bool elimination=false) {
         auto& audio=RankedAudioManager::get();
-        auto const desired=view.result.isObject()?(view.result["won"].asBool().unwrapOr(view.result["rank"].asInt().unwrapOr(0)==1)?RankedAudioMode::ResultWin:RankedAudioMode::ResultLose):
-            elimination || view.ownEliminated?RankedAudioMode::ResultLose:RankedAudioMode::Round12;
+        bool ownCompleted=false,qualified=false;
+        for(auto const& player:view.completedRound["players"].asArray().unwrapOr(std::vector<matjson::Value>{}))if(player["participantId"].asString().unwrapOr("")==view.ownId){
+            ownCompleted=true;qualified=player["qualified"].asBool().unwrapOr(false) && !player["forfeited"].asBool().unwrapOr(false);break;
+        }
+        auto const presenting=elimination || (view.state=="ROUND_RESULT" && view.completedRound["key"].asString().unwrapOr("")==view.roundKey);
+        auto const music=survivalMenuMusic(view.phase,view.result.isObject() || view.state=="FINAL_RESULT",
+            view.result["won"].asBool().unwrapOr(view.ownWinner),view.ownEliminated,presenting,
+            view.completedRound["phase"].asString().unwrapOr(""),ownCompleted,qualified);
+        auto const desired=music==SurvivalMenuMusic::Win?RankedAudioMode::ResultWin:music==SurvivalMenuMusic::Lose?RankedAudioMode::ResultLose:
+            music==SurvivalMenuMusic::Final?RankedAudioMode::Round3DeathmatchWait:RankedAudioMode::Round12;
         if(m_audioMode!=desired){m_audioMode=desired;audio.setMode(desired);}
         audio.tick();
     }
@@ -284,16 +293,17 @@ public:
         auto const elimination=presentEliminations(view);
         syncAudio(view,elimination);
         auto const intro=view.presentationGate=="INTRO";
-        auto const mapWindow=!result && !elimination && !intro && view.map.levelId>0 && view.state!="ROUND_RESULT";
-        auto const searching=!result && !elimination && !intro && view.state=="MAP_SELECTION";
+        auto const nextRound=survivalCanPrepareNext(view.state,view.ownEliminated,view.resultPending,result);
+        auto const mapWindow=nextRound && !elimination && !intro && view.map.levelId>0 && view.state!="ROUND_RESULT";
+        auto const searching=nextRound && !elimination && !intro && view.state=="MAP_SELECTION";
         auto const now=std::chrono::steady_clock::now();
         auto const debugPopup=CCDirector::sharedDirector()->getRunningScene()->getChildByIDRecursive("survival-debug-config"_spr)!=nullptr;
         m_grid->setVisible(!mapWindow && !searching);if(m_mapPanel)m_mapPanel->setVisible(mapWindow);
         m_spinner->setVisible(searching);m_spinner->setPosition({getContentSize().width/2,getContentSize().height/2});m_spinner->setScale(2);
         auto const context=preparationContextText(runtime.preparationContext());auto* level=RankedLevelPreparation::get().level();
         m_resume->setVisible(!result && m_launchedContext==context && !view.ownEliminated && runtime.canEnter());m_resume->setEnabled(!m_motion && !elimination);
-        m_continue->setVisible(result);m_continue->setEnabled(!m_motion && !elimination && !runtime.creating());m_surrender->setVisible(!result && !view.ownEliminated);m_surrender->setEnabled(!elimination && !m_motion);
-        if(m_force){m_force->setVisible(view.debug && !view.online && !result && !mapWindow);m_force->setEnabled(!m_motion && now>=m_eliminationUntil && !runtime.creating());}
+        m_continue->setVisible(result);m_continue->setEnabled(!m_motion && !elimination && !runtime.creating());m_surrender->setVisible(nextRound);m_surrender->setEnabled(!elimination && !m_motion);
+        if(m_force){m_force->setVisible(view.debug && !view.online && nextRound && !mapWindow);m_force->setEnabled(!m_motion && now>=m_eliminationUntil && !runtime.creating());}
         for(auto* option:{m_ldm,m_shake,m_jukeboxButton}){option->setVisible(mapWindow);option->setEnabled(!m_motion && !elimination && level && static_cast<int>(level->m_levelID)==view.map.levelId);}
         if(level && m_optionsContext!=context){m_optionsContext=context;RankedRoundPreparation::get().setLowDetail(m_lowDetail);level->m_disableShakeToggled=m_disableShake;}
         m_ldmLabel->setString(fmt::format("LDM: {}",m_lowDetail?"ON":"OFF").c_str());m_shakeLabel->setString(fmt::format("{}: {}",text("disable-shake","Disable Shake"),m_disableShake?"ON":"OFF").c_str());
@@ -305,14 +315,18 @@ public:
         m_map->setString((view.map.levelId>0?fmt::format("{} · GD #{}",group,view.map.levelId):group).c_str());
         std::string status;
         if(!view.error.empty())status=i18n::text(view.error,view.error);
+        else if(view.state=="CANCELLED")status=text("survival-cancelled","MATCH CANCELLED");
         else if(result)status=fmt::format("{:+} LP · {} LP",view.result["actualDelta"].asInt().unwrapOr(0),view.result["profileAfter"]["lp"].asInt().unwrapOr(0));
         else if(intro)status=fmt::format("{} · {} / {}",text("matchmaking","MATCHMAKING"),view.playerCount,view.playerCount);
-        else if(view.resultPending)status=text("survival-result-pending","RANK FIXED · SETTLING LP...");
+        else if(view.resultPending || view.state=="FINAL_RESULT" || view.ownEliminated)status=text("survival-result-pending","RANK FIXED · SETTLING LP...");
         else if(view.state=="MAP_SELECTION")status=view.mapError.empty()?text("survival-selecting-map","SELECTING A SERVER MAP..."):text("survival-map-retry","MAP SEARCH FAILED · RETRYING...");
         else if(!preparation.mapReady)status=text("downloading-map","DOWNLOADING MAP...");
         else if(!preparation.audioReady)status=text("downloading-audio","DOWNLOADING AUDIO...");
         else status=m_launchedContext==context?text("survival-game-running","THE SERVER TIMER CONTINUES. YOU CAN RE-ENTER."):text("survival-auto-entry","READY · ENTERING AUTOMATICALLY...");
-        if(elimination)status=now<m_eliminationUntil?text("result","RESULT"):text("survival-next-map-wait","NEXT MAP SOON...");
+        if(elimination && view.state!="CANCELLED"){
+            if(now<m_eliminationUntil)status=text("result","RESULT");
+            else if(nextRound)status=text("survival-next-map-wait","NEXT MAP SOON...");
+        }
         m_status->setString(status.c_str());ui::fitMenuLabelWidth(m_status,getContentSize().width-24,.28f,.20f);
         if(!elimination){if(mapWindow)showMapInformation(view);else showParticipants(view,result);}
         if(m_confirmation && (result || view.state=="CANCELLED" || m_confirmationContext!=view.id+":"+view.roundKey+":"+std::to_string(view.mapGeneration))){if(auto popup=m_confirmation->lock())popup->cancel();m_confirmation.reset();}

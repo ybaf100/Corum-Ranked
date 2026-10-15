@@ -95,6 +95,32 @@ async function prepare(id:string,group:Client[]){let m=await engine.get(id);now+
 async function record(c:Client,m:SurvivalMatch,progress:number){const attemptId=ids.next();await event(c,m,"ATTEMPT_START",{attemptId});await event(c,m,"ATTEMPT_END",{attemptId,progress});}
 
 describe("Survival M5 public HTTP and persistent online game",()=>{
+ it("Online late progress and end return conflicts without changing frozen scores or preventing the next round",async()=>{
+  const {group,id}=await game(8);let m=await prepare(id,group);const owner=group[0]!,r=survivalCurrentRound(m);
+  await record(owner,m,100);const open=ids.next();await event(owner,m,"ATTEMPT_START",{attemptId:open});
+  await event(owner,m,"PROGRESS",{attemptId:open,progress:37});now=r.endsAt!;await touch(group);await online.tickOnce();
+  m=await engine.get(id);expect(m.state).toBe("ROUND_RESULT");
+  for(const type of ["PROGRESS","ATTEMPT_END"]){
+   const response=await api(owner,`/online/matches/${id}/events`,{eventId:ids.next(),type,roundKey:r.key,mapGeneration:r.mapGeneration,levelId:r.map!.levelId,attemptId:open,progress:100});
+   expect(response.status).toBe(409);expect(response.body.code).toBe("INVALID_MATCH_TRANSITION");
+  }
+  expect(survivalCurrentRound(await engine.get(id)).players.find(p=>p.participantId===owner.session.playerId)!.attempts.find(a=>a.id===open)!.highestProgress).toBe(37);
+  now+=5000;await touch(group);await online.tickOnce();m=await engine.get(id);expect(m.state).toBe("MAP_SELECTION");
+  expect(m.rounds).toHaveLength(2);expect(m.rounds[0]!.players.find(p=>p.participantId===owner.session.playerId)!.highestProgress).toBe(100);
+ });
+ it("Common Admin reset clears a finished online match, every mode profile/session and allows a genuinely fresh login",async()=>{
+  const {group,id}=await game(2);const m=await prepare(id,group);await record(group[0]!,m,90);await record(group[1]!,m,20);
+  now=survivalCurrentRound(m).endsAt!;await touch(group);await online.tickOnce();expect((await engine.get(id)).state).toBe("FINAL_RESULT");
+  await db.query("UPDATE ranked_players SET gd_username='hwanhee1' WHERE id=$1",[group[0]!.session.playerId]);
+  const admin=new AdminService(db,env,{getSnapshot:()=>configDocumentFixture()} as RankedConfigService,clock,config);
+  const wiped=await admin.execute({...group[0]!.session,gdUsername:'hwanhee1'},{password:'fixture-password',action:'RESET_DB',scope:'COMMON',confirmation:'RESET'});
+  expect(wiped).toMatchObject({reset:true,accountsDeleted:true});
+  for(const table of ['ranked_players','ranked_sessions','ranked_profiles','sur_profiles','sur_matches','sur_lp_ledger','sur_online_players'])
+   expect((await db.query(`SELECT * FROM ${table}`)).rows).toHaveLength(0);
+  expect((await api(group[0]!,"/online/active")).status).toBe(401);
+  const fresh=await client('release',group[0]!.account);expect(fresh.session.playerId).not.toBe(group[0]!.session.playerId);
+  expect((await api(fresh,"/queue/status")).status).toBe(200);
+ });
  it.each([8,12,15,16])("matches %i actual sessions, same assignment, and independent Solo OFF admission",async n=>{
   const {group,id}=await game(n);const m=await engine.get(id);expect(m.players).toHaveLength(n);expect(m.online).toBe(true);
   const states=await Promise.all(group.map(c=>api(c,"/queue/status")));expect(states.every(s=>s.body.matchId===id)).toBe(true);
