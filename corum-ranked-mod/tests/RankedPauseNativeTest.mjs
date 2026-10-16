@@ -57,6 +57,7 @@ test('actual pause/modal callbacks preserve native cleanup and surrender the who
 #include "${join(root, 'src/domain/FontMetrics.hpp')}"
 struct CCObject {};
 struct ccColor3B {unsigned char r,g,b;bool operator==(ccColor3B const&)const=default;};
+struct CCDirector{struct Size{float width=568;};static CCDirector* sharedDirector(){static CCDirector d;return &d;}Size getWinSize()const{return {};}};
 struct AppDelegate {bool m_gamePaused=false;static AppDelegate* get(){static AppDelegate app;return &app;}};
 namespace geode::log {template<class...T>void info(T...) {}}
 struct Node { bool parent=true;void* getParent()const{return parent?(void*)this:nullptr;} };
@@ -89,11 +90,12 @@ struct RankedRuntime {
  void endMatchGameplayPause(std::string const&){++ends;}
 };
 struct SurvivalRuntime{
- struct View{std::string id="s",roundKey="round-1",state="PLAYING",error;int mapGeneration=1;}v;
+ struct View{std::string id="s",roundKey="round-1",state="PLAYING",error,phase="ROUND_1";bool ownEliminated=false;int mapGeneration=1;}v;
  bool owned=false;long remaining=100000;static SurvivalRuntime& get(){static SurvivalRuntime s;return s;}
- bool normalRoundCleared()const{return false;}bool gameplayLevel(int id)const{return owned&&id==123;}void tick(){}auto const& view()const{return v;}bool canPlay()const{return v.state=="PLAYING";}long remainingMs()const{return remaining;}
+ bool surrenderPending()const{return false;}std::optional<long> roundRemainingMs()const{return remaining;}bool normalRoundCleared()const{return false;}bool gameplayLevel(int id)const{return owned&&id==123;}void tick(){}auto const& view()const{return v;}bool canPlay()const{return v.state=="PLAYING";}long remainingMs()const{return remaining;}
 };
 bool isOfficialSurvivalPlayLayer(PlayLayer* layer){return layer && layer->m_level && SurvivalRuntime::get().gameplayLevel(layer->m_level->m_levelID);}
+int survivalReturns=0;bool requestSurvivalGameplayReturn(PlayLayer* layer){if(!survivalReturns++)queueInMainThread([layer]{layer->onQuit();});return true;}
 int returnRequests=0;bool requestConcededGameplayReturn(PlayLayer*){++returnRequests;return true;}
  namespace i18n {std::string text(std::string const& key,std::string const&){return key;}inline bool korean=false;bool isKorean(){return korean;}std::string text(char const* key,char const* fallback){return korean?std::string("ko:")+key:fallback;}}
 namespace ui {
@@ -119,7 +121,7 @@ ${body(pause,'bool ownsManagedRankedPause()')}
 void dismissNativeRankedExitConfirmation(PauseLayer*){};
 struct CorumRankedPauseLayer:PauseLayer {
  struct Button {bool enabled=true;void setEnabled(bool v){enabled=v;}} button;Label clock;
- struct Fields{std::optional<WeakRef<ui::RankedSurrenderPopup>> popup;std::string leaseId="lease",matchId="m";int round=1,deathmatch=0;Label* budget;Button* surrender;std::optional<WeakRef<PlayLayer>> owner;int placementMapIndex=1;bool placement=false;bool concessionQuit=false,nativeQuitInProgress=false,nativeQuitReachedPlay=false,timeoutSurrenderRequested=false;std::optional<WeakRef<ui::RankedSurrenderPopup>> exitConfirmation{};bool survival=false,survivalExitQueued=false;std::string survivalRoundKey="round-1";int survivalMapGeneration=1;std::optional<WeakRef<Popup>> survivalConfirmation{};}f{{},"lease","m",1,0,&clock,&button,{}};Fields* m_fields=&f;
+ struct Fields{std::optional<WeakRef<ui::RankedSurrenderPopup>> popup;std::string leaseId="lease",matchId="m";int round=1,deathmatch=0;Label* budget;Button* surrender;std::optional<WeakRef<PlayLayer>> owner;int placementMapIndex=1;bool placement=false;bool concessionQuit=false,nativeQuitInProgress=false,nativeQuitReachedPlay=false,timeoutSurrenderRequested=false;std::optional<WeakRef<ui::RankedSurrenderPopup>> exitConfirmation{};Label* survivalStatus=nullptr;bool survival=false,survivalExitQueued=false;std::string survivalRoundKey="round-1";int survivalMapGeneration=1;std::optional<WeakRef<Popup>> survivalConfirmation{};}f{{},"lease","m",1,0,&clock,&button,{}};Fields* m_fields=&f;
  int exitWarnings=0;void confirmRankedExit(){++exitWarnings;}
  void unschedule(int){}
  ${body(pause,'bool hasAcknowledgedGameplayExit()')}

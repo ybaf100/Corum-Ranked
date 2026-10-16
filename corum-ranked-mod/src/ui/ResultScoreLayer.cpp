@@ -33,11 +33,9 @@ std::string targetKey(ScoreProgressSample const& sample) {
     return target ? fmt::format("gold:{}:{}", target->accountId, target->bot) : "gold-unknown";
 }
 
-ccColor3B trackColor(std::vector<TierCutoffView> const& bands, std::string const& tier) {
-    auto const band = std::find_if(bands.begin(),bands.end(),[&](auto const& b) { return b.tier == tier; });
-    // The track represents the immediately lower display tier, rather than
-    // the player's tier before this match. RED has no lower tier.
-    return band == bands.begin() || band == bands.end() ? ccc3(100,108,124) : tierColor(std::prev(band)->tier);
+ccColor3B trackColor(std::string const& tier) {
+    auto const base=rankTierTrackBase(tier);
+    return base.empty()?ccc3(100,108,124):tierColor(base);
 }
 
 void drawRoundedBar(CCDrawNode* node, float width, ccColor3B color, GLubyte opacity = 255) {
@@ -312,8 +310,8 @@ void ResultScoreLayer::applySample(ScoreProgressSample const& actual, bool anima
             sample.goldLeader=false;sample.target=sample.standing.target->score;
         }
     } else if (!playerRankTarget(sample)) m_goldOvertakesShown=m_goldOvertakes.size();
-    if (m_tier != sample.tier) {
-        m_trackColor = trackColor(m_input.bands,sample.tier);
+    if (rankTierBase(m_tier) != rankTierBase(sample.tier) || !animateIcons) {
+        m_trackColor = trackColor(sample.tier);
         if (m_tier.empty() || !animateIcons) drawRoundedBar(m_track,m_barWidth,m_trackColor);
         else { m_trackChanging = true; m_trackElapsed = 0; }
     }

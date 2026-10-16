@@ -45,6 +45,7 @@ struct Request{int cancellations=0;void cancel(){++cancellations;}void spawn(web
 namespace corum::ranked {
 struct SurvivalRuntime{
  struct View{std::string id="match",state="PLAYING",roundKey="r1",error,presentationGate;int mapGeneration=1;struct Map{int levelId=40000000;}map;bool online=false;matjson::Value result;}m_view;
+ std::string m_surrenderEventId;bool m_surrenderAccepted=false;void resetSurrender(){m_surrenderEventId.clear();}void pumpSurrenderReturn(){}bool surrenderPending()const{return !m_surrenderEventId.empty()&&!m_surrenderAccepted;}
  bool m_eventBusy=false;std::uint64_t m_generation=1,m_eventGeneration=0;std::string m_session="session",m_presentationContext;
  std::deque<matjson::Value>m_events;std::chrono::steady_clock::time_point m_retryAt{},m_nextPoll{};Request m_eventRequest;int observations=0;
  bool active()const{return !m_view.id.empty();}bool current(std::uint64_t gen,std::string const& session)const{return gen==m_generation&&session==m_session;}

@@ -1,3 +1,10 @@
+# v0.5.0-beta.73
+
+- Keep the Survival Pause countdown tied to the last valid server clock; show transient status separately.
+- Move Debug FORCE CLEAR out of the native icon row and align its registered touch priority with Pause.
+- Return from Survival gameplay through the deferred scene handoff as soon as the server accepts surrender, including while paused.
+- Use the previous major tier for the Solo Ranked score track across all divisions; preserve foreground, LP and rank effects.
+
 # v0.5.0-beta.72
 
 - Return normal Survival 100% clears to the live dashboard after the server's terminal Attempt ACK and native completion setup. Keep Death Match Attempts and score precision unchanged.

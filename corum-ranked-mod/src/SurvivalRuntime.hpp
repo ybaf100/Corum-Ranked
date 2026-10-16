@@ -9,6 +9,7 @@
 #include <Geode/utils/web.hpp>
 #include <deque>
 
+class PlayLayer;
 namespace corum::ranked {
 struct SurvivalQueueView {
     std::string status="LEFT",matchId,error,waitingSince;
@@ -57,6 +58,7 @@ public:
     bool canPlay() const;
     bool attemptLimitReached() const;
     std::optional<std::int64_t> countdownMs() const;
+    std::optional<std::int64_t> roundRemainingMs() const;
     std::int64_t remainingMs() const;
     void assetsReady(GJGameLevel* level);
     void preparationFailed(std::string const& reason);
@@ -73,6 +75,7 @@ public:
     bool interceptFreePlayNativeQuit(GJGameLevel* level) const;
     void finishFreePlayNativeQuit();
     void surrender();
+    bool surrenderPending() const {return !m_surrenderEventId.empty() && !m_surrenderAccepted;}
     void presentationComplete();
     void acknowledge();
     std::optional<ScoreAnimationInput> scoreAnimation() const;
@@ -85,6 +88,12 @@ public:
     void forceClear();
 #endif
 private:
+    void pumpSurrenderReturn();
+    void resetSurrender();
+    std::string m_surrenderEventId,m_surrenderMatchId;
+    bool m_surrenderAccepted=false;
+    std::optional<geode::WeakRef<PlayLayer>> m_surrenderOwner;
+    std::optional<geode::WeakRef<cocos2d::CCScene>> m_surrenderScene;
     void pumpFreePlayReturn();
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
     void pumpForceClear();

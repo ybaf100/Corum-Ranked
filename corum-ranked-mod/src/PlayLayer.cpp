@@ -619,6 +619,7 @@ public:
         auto& runtime=corum::ranked::SurvivalRuntime::get();runtime.tick();
         if(runtime.preparationContext()!=m_fields->survivalContext || runtime.view().state=="ROUND_RESULT" ||
             runtime.view().state=="FINAL_RESULT" || runtime.view().state=="CANCELLED") {queueHeldEntryExit();return true;}
+        if(runtime.surrenderPending()){m_queuedButtons.clear();return true;}
         if(!m_fields->nativeEntryHeld)return m_fields->survivalWaiting;
         if(isRunning())runtime.sceneEntered(m_fields->levelId);
         auto remaining=runtime.countdownMs();

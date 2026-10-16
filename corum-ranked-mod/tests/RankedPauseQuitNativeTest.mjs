@@ -30,6 +30,7 @@ test('actual quit preparation resumes only the owned Pause and rejects failed na
 #include <optional>
 #include <string>
 struct CCObject{};
+struct SurvivalRuntime {static SurvivalRuntime& get(){static SurvivalRuntime r;return r;}bool surrenderPending()const{return false;}};
 struct AppDelegate {bool m_gamePaused=false;static AppDelegate* get(){static AppDelegate a;return &a;}};
 namespace geode::log {template<class... T>void info(T...) {}}
 struct PlayLayer {inline static PlayLayer* current=nullptr;bool m_isPaused=true;static PlayLayer* get(){return current;}};
@@ -41,7 +42,7 @@ struct RankedRuntime{int ends=0;static RankedRuntime& get(){static RankedRuntime
 std::optional<WeakRef<PauseLayer>> activeRankedPause;
 #define schedule_selector(x) 0
 void dismissNativeRankedExitConfirmation(PauseLayer*){};
-struct CorumRankedPauseLayer:PauseLayer {struct Fields{std::optional<WeakRef<Popup>> popup,exitConfirmation,survivalConfirmation;std::optional<WeakRef<PlayLayer>> owner;std::string leaseId="lease";bool nativeQuitInProgress=false,nativeQuitReachedPlay=false;}fields;Fields* m_fields=&fields;void unschedule(int){}
+struct CorumRankedPauseLayer:PauseLayer {struct Fields{std::optional<WeakRef<Popup>> popup,exitConfirmation,survivalConfirmation;std::optional<WeakRef<PlayLayer>> owner;std::string leaseId="lease";bool survival=false,nativeQuitInProgress=false,nativeQuitReachedPlay=false;}fields;Fields* m_fields=&fields;void unschedule(int){}
 ${body('void retireRankedPause()')}
 ${body('void releaseRankedPauseOwnership()')}
 ${body('void onResume(CCObject* sender)')}
@@ -91,6 +92,7 @@ test('actual Resume callback keeps the removed Pause alive until ownership clean
 #include <string>
 #include <utility>
 struct CCObject{};
+struct SurvivalRuntime {static SurvivalRuntime& get(){static SurvivalRuntime r;return r;}bool surrenderPending()const{return false;}};
 struct AppDelegate {bool m_gamePaused=false;static AppDelegate* get(){static AppDelegate a;return &a;}};
 struct Object {int refs=1;bool alive=true;void retain(){assert(alive);++refs;}void release(){assert(alive&&refs>0);if(--refs==0)alive=false;}};
 struct PlayLayer:Object {bool m_isPaused=true;inline static PlayLayer* current=nullptr;static PlayLayer* get(){return current;}};
@@ -103,7 +105,7 @@ std::optional<WeakRef<PauseLayer>> activeRankedPause;
 #define schedule_selector(x) 0
 void dismissNativeRankedExitConfirmation(PauseLayer*){};
 struct CorumRankedPauseLayer:PauseLayer {
- struct Fields{std::optional<WeakRef<Popup>> popup,exitConfirmation,survivalConfirmation;std::optional<WeakRef<PlayLayer>> owner;std::string leaseId="lease";bool nativeQuitInProgress=false;}fields;
+ struct Fields{std::optional<WeakRef<Popup>> popup,exitConfirmation,survivalConfirmation;std::optional<WeakRef<PlayLayer>> owner;std::string leaseId="lease";bool survival=false,nativeQuitInProgress=false;}fields;
  struct CheckedFields {Fields* p;PauseLayer* owner;Fields* operator->(){assert(owner->alive);return p;}}m_fields{&fields,this};
  void unschedule(int){}
  ${body('void retireRankedPause()')}

@@ -94,6 +94,7 @@ inline constexpr std::array kKoreanTranslations {
     Translation{"survival-game-running", "서버 시간은 계속 진행됩니다. 경기에 다시 입장할 수 있습니다."},
     Translation{"survival-debug-rating", "디버그 경기 결과로 서바이벌 LP가 변경됩니다."},
     Translation{"Survival server connection failed. Retrying...", "서바이벌 서버 연결에 실패했습니다. 다시 시도합니다..."},
+    Translation{"Survival surrender was rejected. Synchronizing...", "항복 요청이 거절되었습니다. 경기 상태를 다시 확인합니다."},
     Translation{"Survival state changed. Synchronizing...", "서바이벌 경기 상태를 불러오는 중..."},
     Translation{"Native Survival map data does not match the server.", "맵 데이터가 서버 기록과 다릅니다."},
     Translation{"Survival telemetry is pending. Reconnect to recover the game.", "기록 전송을 기다리고 있습니다. 다시 입장하세요."},

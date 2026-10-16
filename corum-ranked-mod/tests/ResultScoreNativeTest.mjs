@@ -532,13 +532,13 @@ int main() {
 `);
 });
 
-test('actual score track uses the immediately lower tier and follows promotion/demotion crossings',()=>{
+test('actual score track uses the lower major tier and follows promotion/demotion crossings',()=>{
     run(scoreNative+`
 using namespace corum::ranked::ui;
 void assertTrack(ResultScoreLayer* layer, std::string const& tier) {
-    auto const& bands=layer->m_input.bands;
-    auto const band=std::find_if(bands.begin(),bands.end(),[&](auto const& b){return b.tier==tier;});
-    auto const expected=band==bands.begin()?ccc3(100,108,124):tierColor(std::prev(band)->tier);
+    auto const base=rankTierBase(tier);
+    auto const expected=base=="AQUA"?tierColor("RED"):base=="BRONZE"?tierColor("AQUA"):
+        base=="SILVER"?tierColor("BRONZE"):base=="GOLD"?tierColor("SILVER"):ccc3(100,108,124);
     auto const actual=layer->m_track->segmentColor;
     assert(actual.r==expected.r/255.0f&&actual.g==expected.g/255.0f&&actual.b==expected.b/255.0f);
     assert(actual.a==1.0f&&layer->m_track->size.width==layer->m_barWidth&&layer->m_track->polygon.size()>16);
@@ -566,6 +566,51 @@ int main() {
         assertTrack(demotion,higher.tier);demotion->update(2);assertTrack(demotion,lower.tier);
         demotion->update(2);assertTrack(demotion,lower.tier);demotion->onSkip(nullptr);demotion->onSkip(nullptr);drainMainQueue();
     }
+}
+`);
+});
+
+test('all 13 divisions keep the previous major color on gains, losses, every crossing and Skip; legacy and Gold titles remain supported',()=>{
+ run(scoreNative+`
+using namespace corum::ranked::ui;
+ccColor3B expected(std::string const& tier){
+ auto base=rankTierBase(tier);
+ return base=="AQUA"?tierColor("RED"):base=="BRONZE"?tierColor("AQUA"):base=="SILVER"?tierColor("BRONZE"):base=="GOLD"?tierColor("SILVER"):ccc3(100,108,124);
+}
+void check(ResultScoreLayer* layer,std::string const& tier){
+ auto c=expected(tier);auto actual=layer->m_trackChanging?layer->m_trackColor:ccc3(
+ static_cast<unsigned char>(std::lround(layer->m_track->segmentColor.r*255)),
+ static_cast<unsigned char>(std::lround(layer->m_track->segmentColor.g*255)),
+ static_cast<unsigned char>(std::lround(layer->m_track->segmentColor.b*255)));
+ assert(actual==c);assert(layer->m_score->color==tierColor(tier));
+}
+int main(){CCNode screen;auto initial=ordinary();
+ initial.bands={{"RED3",0},{"RED2",100},{"RED1",200},{"AQUA3",300},{"AQUA2",400},{"AQUA1",500},{"BRONZE3",600},{"BRONZE2",700},{"BRONZE1",800},{"SILVER3",900},{"SILVER2",1000},{"SILVER1",1100},{"GOLD",1200}};
+ for(auto const& band:initial.bands)for(int delta:{-13,13}){
+  auto i=initial;i.beforeTier=i.afterTier=band.tier;i.before=band.minimum+30;i.after=i.before+delta;
+  auto* layer=ResultScoreLayer::create(i,&screen,[]{});screen.addChild(layer);check(layer,band.tier);
+  layer->update(1);check(layer,band.tier);layer->onSkip(nullptr);check(layer,band.tier);
+  assert(layer->m_score->text==std::to_string(i.after)+" LP");layer->onSkip(nullptr);drainMainQueue();
+ }
+ for(std::size_t n=1;n<initial.bands.size();++n)for(bool up:{true,false}){
+  auto i=initial;auto low=i.bands[n-1],high=i.bands[n];i.beforeTier=up?low.tier:high.tier;i.afterTier=up?high.tier:low.tier;
+  i.before=high.minimum+(up?-1:1);i.after=high.minimum+(up?40:-40);i.promoted=up;i.demoted=!up;
+  auto* layer=ResultScoreLayer::create(i,&screen,[]{});screen.addChild(layer);check(layer,i.beforeTier);
+  bool same=rankTierBase(low.tier)==rankTierBase(high.tier);
+  for(int frame=0;frame<500;++frame){layer->update(.01f);if(same)assert(!layer->m_trackChanging);}
+  check(layer,i.afterTier);layer->onSkip(nullptr);check(layer,i.afterTier);assert(!layer->m_trackChanging);
+  layer->onSkip(nullptr);drainMainQueue();
+  // Skip while the score still displays the old division/major tier.
+  layer=ResultScoreLayer::create(i,&screen,[]{});screen.addChild(layer);layer->onSkip(nullptr);check(layer,i.afterTier);
+  assert(!layer->m_trackChanging);layer->onSkip(nullptr);drainMainQueue();
+ }
+ for(auto title:{"GOLD","MASTER","CHAMPION"}){
+  auto i=initial;i.beforeTier=i.afterTier=title;i.before=1300;i.after=1350;
+  i.standingBefore.displayTier=i.standingAfter.displayTier=title;i.standingAfter.rank=2;
+  i.standingAfter.target=StandingTargetView{8,"leader",false,1,1700};
+  auto* layer=ResultScoreLayer::create(i,&screen,[]{});screen.addChild(layer);layer->onSkip(nullptr);check(layer,title);
+  assert(sampleScoreProgress(i,2).score==1350);layer->onSkip(nullptr);drainMainQueue();
+ }
 }
 `);
 });

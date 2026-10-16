@@ -24,6 +24,7 @@ test('authenticated concession closes native Pause and permits its Quit with int
 struct CCObject {int refs=1;bool alive=true;void retain(){assert(alive);++refs;}void release(){assert(alive&&refs>0);if(--refs==0)alive=false;}};
 struct Level {int m_levelID=123;};
 struct PlayLayer:CCObject {inline static PlayLayer* current=nullptr;Level level;Level* m_level=&level;bool m_isPracticeMode=false,m_isTestMode=false;bool m_isPaused=true,refuseResume=false;PlayLayer* replacement=nullptr;int quits=0,resumes=0;static PlayLayer* get(){return current;}void onQuit();void resume();};
+struct SurvivalRuntime {static SurvivalRuntime& get(){static SurvivalRuntime r;return r;}bool surrenderPending()const{return false;}};
 struct AppDelegate {bool m_gamePaused=true;static AppDelegate* get(){static AppDelegate a;return &a;}};
 template<class T>struct Ref {T* p=nullptr;Ref()=default;explicit Ref(T* v):p(v){if(p)p->retain();}Ref(Ref const& v):Ref(v.p){}Ref(Ref&& v):p(std::exchange(v.p,nullptr)){}~Ref(){if(p)p->release();}T* data()const{return p;}T* operator->()const{assert(p&&p->alive);return p;}explicit operator bool()const{return p;}};
 template<class T>struct WeakRef {T* p;explicit WeakRef(T* v):p(v){}Ref<T> lock()const{return Ref<T>(p&&p->alive?p:nullptr);}};
