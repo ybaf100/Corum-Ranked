@@ -38,6 +38,8 @@ public:
     void update(float dt) override;
     void tick();
     void recover();
+    void refreshRound() { m_nextPoll={}; poll(); }
+    std::int64_t serverSyncMillis() const { return m_lastServerNow; }
     bool active() const { return !m_view.id.empty(); }
     bool creating() const { return m_creating; }
     bool queueing() const { return m_queue.status=="QUEUED" || m_queue.status=="JOINING"; }

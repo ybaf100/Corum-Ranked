@@ -155,14 +155,14 @@ void drain(){auto work=std::move(deferred);deferred.clear();for(auto& callback:w
 // the unidentified GD 2.2081 iOS writer, its guard or disassembly.
 namespace teardown_double {
 using CCScene=SceneParent;
-struct CCDirector {int pops=0;std::function<void()> retire;
+struct CCDirector {int pops=0;CCScene* current=nullptr;CCScene* next=nullptr;CCScene* getRunningScene(){return current;}CCScene* getNextScene(){return next;}std::function<void()> retire;
     static CCDirector* sharedDirector(){static CCDirector d;return &d;}
     void popScene(){++pops;if(retire)retire();}};
 struct RankedRoundPreparation {
     geode::WeakRef<PlayLayer> m_play;geode::WeakRef<CCScene> m_origin;
     geode::Ref<GJGameLevel> m_launchedLevel;
     bool m_quitting=true,m_returnQueued=false;std::uint64_t m_launchGeneration=1;
-    RankedRoundPreparation(PlayLayer* p,CCScene* origin):m_play(p),m_origin(origin),m_launchedLevel(&p->level){}
+    RankedRoundPreparation(PlayLayer* p,CCScene* origin):m_play(p),m_origin(origin),m_launchedLevel(&p->level){CCDirector::sharedDirector()->current=&p->parent;}
     bool returnFromNativeQuit(GJGameLevel*);
 };
 ${nativeReturn}
@@ -212,6 +212,19 @@ int main(){
         CorumRankedPlayLayer clearing;clearing.fields.survivalLevel=true;clearing.m_hasCompletedLevel=true;
         clearing.queueHeldEntryExit();assert(!clearing.fields.autoExitRequested&&deferred.empty());
         clearing.fields.survivalNativeClearFinished=true;clearing.queueHeldEntryExit();drain();assert(clearing.quitCalls==1);
+    }
+    // A retained callback must never pop another scene or a transition that
+    // took ownership while native Quit was unwinding.
+    for(int changed=0;changed<4;++changed){
+        CorumRankedPlayLayer play;SceneParent origin,other;
+        teardown_double::RankedRoundPreparation handoff(&play,&origin);
+        auto* d=teardown_double::CCDirector::sharedDirector();d->next=nullptr;d->retire={};auto before=d->pops;
+        assert(handoff.returnFromNativeQuit(&play.level));
+        if(changed==0)d->current=&other;
+        if(changed==1)d->next=&other;
+        if(changed==2)d->current=&origin;
+        if(changed==3)play.parent.life.reset();
+        drain();assert(d->pops==before&&!handoff.m_returnQueued&&!handoff.m_play.pointer);d->next=nullptr;
     }
     auto& runtime=RankedRuntime::get();auto& audio=*FMODAudioEngine::sharedEngine();
     CorumRankedPlayLayer scene;UILayer uiLayer;PlayerObject player1,player2;

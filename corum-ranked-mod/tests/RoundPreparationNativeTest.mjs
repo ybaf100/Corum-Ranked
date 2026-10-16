@@ -23,6 +23,7 @@ test('actual round preparation executes native download/resource/delegate/launch
     const cpp = String.raw`
 #include "${join(root, 'src/domain/LevelPreparationPolicy.hpp')}"
 #include "${join(root, 'src/domain/RoundResourcePolicy.hpp')}"
+#include "${join(root, 'src/domain/SurvivalNativeOptions.hpp')}"
 #include <cassert>
 #include <chrono>
 #include <filesystem>
@@ -58,6 +59,7 @@ template<class T> struct Ref {
 };
 template<class T> struct WeakRef {
     T* ptr=nullptr;WeakRef()=default;explicit WeakRef(T* p):ptr(p){}
+    WeakRef(WeakRef const&)=default;
     WeakRef(WeakRef&& other):ptr(std::exchange(other.ptr,nullptr)){}
     WeakRef& operator=(WeakRef&& other){ptr=std::exchange(other.ptr,nullptr);return *this;}
     WeakRef& operator=(T* p){ptr=p;return *this;}
@@ -80,15 +82,17 @@ struct CCDirector {
     static CCDirector* sharedDirector(){static CCDirector d;return &d;}
     Scheduler* getScheduler(){return &scheduler;}
     CCScene* getRunningScene(){return stack.empty()?nullptr:stack.back();}
+    CCScene* getNextScene(){return nullptr;}
     void pushScene(CCScene* scene){++pushes;if(!stack.empty())stack.back()->running=false;stack.push_back(scene);scene->running=true;}
     void popScene(){assert(stack.size()>1);++pops;stack.back()->running=false;stack.pop_back();stack.back()->running=true;}
 };
 enum class GJLevelType {Main,Editor,Saved,SearchResult};
+struct Mod {static Mod* get(){static Mod m;return &m;}template<class T>T getSavedValue(char const*,T fallback){return fallback;}};
 struct GJGameLevel {
     int m_levelID=1,m_songID=42,m_audioTrack=0,m_levelVersion=1,m_userID=2,m_accountID=3;
     std::string m_levelName="Canonical",m_creatorName="Creator",m_levelString,m_songIDs,m_sfxIDs;
     GJLevelType m_levelType=GJLevelType::SearchResult;
-    bool m_levelNotDownloaded=true,m_lowDetailModeToggled=false,m_disableShakeToggled=false;
+    bool m_lowDetailMode=true,m_levelNotDownloaded=true,m_lowDetailModeToggled=false,m_disableShakeToggled=false;
 };
 enum class GJSongError {Failed};
 struct SongInfoObject {int m_songID=0;bool m_unloaded=false;std::string m_songUrl;};

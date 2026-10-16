@@ -18,10 +18,10 @@ const gd = (id: number, stars: number, demon = false, ticks = 0) =>
 const json = (body: unknown) => new Response(JSON.stringify(body), {headers: {"content-type":"application/json"}});
 
 describe("map display metadata", () => {
-  it("uses real star counts and verification seconds, never length categories or editor time", () => {
+  it("uses real stars but never converts verification ticks or length categories to seconds", () => {
     const rows = parseGdMaps(`${gd(42,8,false,22800)}|${gd(43,10,true)}#55:creator:1`);
     expect(rows).toEqual([
-      {id:"42", creator:"creator", difficulty:"Insane", demon:false, stars:8, verificationSeconds:95},
+      {id:"42", creator:"creator", difficulty:"Insane", demon:false, stars:8, verificationSeconds:null},
       {id:"43", creator:"creator", difficulty:"Easy Demon", demon:true, stars:10, verificationSeconds:null},
     ]);
     expect(parseGdMaps("-1")).toEqual([]);
@@ -108,7 +108,7 @@ describe("map display metadata", () => {
     expect(officialMap("unknown")).toBeUndefined();
   });
 
-  it("enriches ordinary/demon IDs, uses an exact download duration and leaves unresolved durations unknown", async () => {
+  it("enriches ordinary/demon IDs, keeps explicit durations and leaves unresolved durations unknown", async () => {
     const requests: string[] = [];
     const fetcher: typeof fetch = async (input, init) => {
       const url=String(input); requests.push(url);
@@ -124,11 +124,11 @@ describe("map display metadata", () => {
     const source=document(map(42),map(43),map(44));
     const resolver=new RankedMapMetadataResolver(fetcher);
     const enriched=await resolver.enrich(source);
-    expect(enriched.maps[0]).toMatchObject({creator:"creator",metadata:{kind:"NORMAL",stars:8,durationSeconds:95}});
+    expect(enriched.maps[0]).toMatchObject({creator:"creator",metadata:{kind:"NORMAL",stars:8,durationSeconds:null}});
     expect(enriched.maps[1]!.metadata).toMatchObject({kind:"DEMON",stars:null,gddlTier:16,gddlColor:"#da4534",durationSeconds:90.5});
     expect(enriched.maps[2]!.metadata?.durationSeconds).toBeNull();
-    expect(requests).toHaveLength(3);
-    await resolver.enrich(source); expect(requests).toHaveLength(3);
+    expect(requests).toHaveLength(2);
+    await resolver.enrich(source); expect(requests).toHaveLength(2);
     const snap=snapshotMap(enriched.maps[1]!);
     expect(snap.metadata).toEqual(enriched.maps[1]!.metadata);
     expect(snap.metadata).not.toBe(enriched.maps[1]!.metadata);
@@ -141,12 +141,12 @@ describe("map display metadata", () => {
       .toEqual(source.maps.map(m=>[m.playableLevelId,m.pool,m.qualifyingPercent]));
   });
 
-  it("recovers exact verification duration from a download and honors optional exact length overrides", async () => {
+  it("ignores verification timestamps and honors exact operator length overrides", async () => {
     const fetcher: typeof fetch = async input => new Response(String(input).includes("getGJLevels")
       ? gd(42,7) : gd(42,7,false,22320));
     const resolver=new RankedMapMetadataResolver(fetcher);
     const first=await resolver.enrich(document(map(42)));
-    expect(first.maps[0]!.metadata?.durationSeconds).toBe(93);
+    expect(first.maps[0]!.metadata?.durationSeconds).toBeNull();
     expect((await resolver.enrich(document(map(42)))).generation).toBe(first.generation);
     const override=await resolver.enrich(document({...map(42),length:"1m 35s"}));
     expect(override.maps[0]!.metadata?.durationSeconds).toBe(95);

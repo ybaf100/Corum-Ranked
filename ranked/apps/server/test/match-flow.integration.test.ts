@@ -192,8 +192,13 @@ describe("two-client authoritative match flow", () => {
     );
     const playerA = await createContext("9101", sessions, tokens);
     const playerB = await createContext("9102", sessions, tokens);
-    await queue.join(playerA, { installedMods: structuredClone(cleanMods) });
-    await queue.join(playerB, { installedMods: structuredClone(cleanMods) });
+    const unrestrictedMods=[cleanMods[0]!,{id:"other.mod",version:"1",enabled:true,loaded:true,internal:false,system:false}];
+    await expect(queue.join(playerA,{installedMods:unrestrictedMods})).rejects.toMatchObject({status:403});
+    Object.assign(liveDocument.operational,{modRestrictionEnabled:false});expect(await config.refresh()).toBe(true);
+    await queue.join(playerA, { installedMods: unrestrictedMods });
+    await queue.join(playerB, { installedMods: unrestrictedMods });
+    Object.assign(liveDocument.operational,{modRestrictionEnabled:true});expect(await config.refresh()).toBe(true);
+    await expect(queue.join(playerA,{installedMods:unrestrictedMods})).rejects.toMatchObject({status:403});
     const statusA = (await queue.status(playerA)) as {
       matchId: string;
       matchToken: string;

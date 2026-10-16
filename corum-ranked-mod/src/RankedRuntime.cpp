@@ -570,6 +570,9 @@ void RankedRuntime::showEnvironmentWarning(
 }
 
 void RankedRuntime::recheckEnvironment() {
+    // An admission blocked before session creation must reread the server's
+    // current switch, rather than keep evaluating a permanently cached TRUE.
+    if(m_view.stage==RuntimeStage::Blocked && m_sessionToken.empty()) {fetchConfig();return;}
     m_installedMods = captureInstalledMods();
     auto const decision = evaluateEnvironment(m_installedMods, m_environmentPolicy);
     if (!decision.allowed) {
@@ -577,11 +580,12 @@ void RankedRuntime::recheckEnvironment() {
         return;
     }
 
-    auto const restartSession = m_view.stage == RuntimeStage::Blocked;
+    auto const wasBlocked = m_view.stage == RuntimeStage::Blocked;
     m_view.environmentWarning = {};
     m_view.error.clear();
     ++m_view.revision;
-    if (restartSession) begin();
+    if (wasBlocked) setStage(m_view.match.matchId.empty()?RuntimeStage::Ready:RuntimeStage::Matched,
+        "Ranked mod environment is ready.");
 }
 
 void RankedRuntime::invalidatePollRequest() {
@@ -756,6 +760,11 @@ void RankedRuntime::fetchConfig() {
             m_view.survivalConfigReady = root["modes"]["survival"]["ready"].asBool().unwrapOr(false);
 
             EnvironmentPolicy policy;
+            if (root.contains("modRestrictionEnabled") && !root["modRestrictionEnabled"].isBool()) {
+                setStage(RuntimeStage::Error, "Ranked configuration is invalid.", "modRestrictionEnabled must be boolean");
+                return;
+            }
+            policy.modRestrictionEnabled = root["modRestrictionEnabled"].asBool().unwrapOr(true);
             auto const allowedResult = root["allowedMods"].asArray();
             if (allowedResult.isErr()) {
                 setStage(RuntimeStage::Error, "Ranked configuration is invalid.", "allowedMods is missing");
@@ -4125,6 +4134,21 @@ void RankedRuntime::fetchModeAvailability() {
         m_modeConfigBusy = false;
         if (!successful(response)) return;
         auto const root = response.json().unwrapOr(matjson::Value());
+        auto const restrictionEnabled = root["modRestrictionEnabled"].asBool().unwrapOr(true);
+        if (m_environmentPolicy.modRestrictionEnabled != restrictionEnabled) {
+            m_environmentPolicy.modRestrictionEnabled = restrictionEnabled;
+            m_installedMods = captureInstalledMods();
+            auto const decision = evaluateEnvironment(m_installedMods,m_environmentPolicy);
+            // A live policy refresh updates admission warnings without resetting
+            // sessions, attempts or an already running match.
+            if (!decision.allowed) showEnvironmentWarning(decision,false);
+            else {
+                m_view.environmentWarning = {};
+                if(m_view.stage==RuntimeStage::Blocked)setStage(m_view.match.matchId.empty()?RuntimeStage::Ready:RuntimeStage::Matched,
+                    "Ranked mod environment is ready.");
+            }
+            ++m_view.revision;
+        }
         m_view.soloEnabled = root["queueEnabled"].asBool().unwrapOr(false);
         m_view.survivalEnabled = root["modes"]["survival"]["enabled"].asBool().unwrapOr(false);
         m_view.survivalConfigReady = root["modes"]["survival"]["ready"].asBool().unwrapOr(false);

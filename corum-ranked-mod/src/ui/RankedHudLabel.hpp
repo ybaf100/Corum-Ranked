@@ -20,4 +20,12 @@ inline RankedHudLabel rankedHudLabel(cocos2d::CCNode* parent,std::string const& 
     auto* foreground=label(text,scale,position,color,weight);foreground->setAnchorPoint(anchor);parent->addChild(foreground,z);
     return {foreground,shadow};
 }
+inline RankedHudLabel rankedHudPlayerName(cocos2d::CCNode* parent,std::string const& text,FontWeight weight,
+    float scale,cocos2d::CCPoint anchor,cocos2d::CCPoint position,cocos2d::ccColor3B color,int z=3) {
+    auto* shadow=playerNameLabel(text,scale,{position.x+.75f,position.y-.75f},{0,0,0},weight);
+    shadow->setAnchorPoint(anchor);shadow->setOpacity(205);parent->addChild(shadow,z-1);
+    auto* foreground=playerNameLabel(text,scale,position,color,weight);
+    foreground->setAnchorPoint(anchor);parent->addChild(foreground,z);
+    return {foreground,shadow};
+}
 } // namespace corum::ranked::ui

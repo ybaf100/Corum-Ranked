@@ -58,7 +58,7 @@ void SurvivalHud::present(SurvivalMatchView const& view,std::int64_t remainingMs
         if(found==m_rows.end()) {
             Row row;row.node=CCNode::create();row.targetY=top-static_cast<float>(i)*gap;row.node->setPosition({8,row.targetY});
             row.rank=rankedHudLabel(row.node,"",FontWeight::Black,scale,{0,1},{0,-1},Text);
-            row.name=rankedHudLabel(row.node,"",FontWeight::Black,scale,{0,1},{0,-1},Text);
+            row.name=rankedHudPlayerName(row.node,"",FontWeight::Black,scale,{0,1},{0,-1},Text);
             row.score=rankedHudLabel(row.node,"",FontWeight::Black,scale,{0,1},{0,-1},Text);
             for(auto const& label:{row.rank,row.name,row.score})label.opacity(0);
             row.node->setVisible(false);addChild(row.node,5);found=m_rows.emplace(value.id,std::move(row)).first;
@@ -73,7 +73,7 @@ void SurvivalHud::present(SurvivalMatchView const& view,std::int64_t remainingMs
     for(std::size_t i=0;i<rows.size();++i) {
         auto const& value=rows[i];auto& row=m_rows.at(value.id);auto const y=top-static_cast<float>(i)*gap-(separateOwn && i+1==rows.size()?7:0);
         if(row.targetY!=y){row.targetY=y;row.node->stopActionByTag(7414);auto* move=CCEaseSineOut::create(CCMoveTo::create(.30f,{8,y}));move->setTag(7414);row.node->runAction(move);}
-        auto const name=value.id==view.ownId?i18n::text("you","YOU"):value.name;
+        auto const& name=value.name;
         row.rank.text(survivalOrdinal(value.rank));row.name.text(name);row.score.text(rankedScoreText(row.tween.displayed,deathmatch)+"%");
         for(auto const& label:{row.rank,row.name,row.score})label.color(color(value));
         row.rank.fit(31,scale,scale*.8f);row.score.fit(deathmatch?58:42,scale,scale*.8f);

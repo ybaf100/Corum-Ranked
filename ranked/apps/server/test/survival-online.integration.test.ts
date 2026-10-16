@@ -41,6 +41,7 @@ const mods=[{id:"hwanhee1.corum_ranked",version:REQUIRED_RANKED_CLIENT_VERSION,e
  {id:"syzzi.click_between_frames",version:"v1.5.0",enabled:true,loaded:true,internal:false,system:false,settings:{"soft-toggle":false,"click-on-steps":false,"physics-bypass":false}}];
 interface Client {session:RankedSessionContext;token:string;account:string;channel:"release"|"debug";}
 const clients:Client[]=[];
+let soloDoc:ReturnType<typeof configDocumentFixture>;
 beforeAll(async()=>{
  if(process.env["SURVIVAL_TEST_DATABASE_URL"]){
   pool=new Pool({connectionString:process.env["SURVIVAL_TEST_DATABASE_URL"],max:24,options:"-c search_path="+testSchema});
@@ -56,7 +57,7 @@ beforeEach(async()=>{
  await db.query("TRUNCATE ranked_players,sur_matches,sur_mode_state CASCADE");now=Date.parse("2026-10-13T00:00:00Z");sequence=1000;mapId=40000000;clients.length=0;
  document={generation:"online-1",generatedAt:new Date(now).toISOString(),config:{...DEFAULT_SURVIVAL_CONFIG,enabled:true}};
  config=new SurvivalConfigService({fetchConfig:async()=>document},env,db);await config.refresh();
- const soloDoc=configDocumentFixture();const solo={getSnapshot:()=>({...soloDoc,operational:{...soloDoc.operational,enabled:false}})} as RankedConfigService;
+ soloDoc=configDocumentFixture();const solo={getSnapshot:()=>({...soloDoc,operational:{...soloDoc.operational,enabled:false}})} as RankedConfigService;
  engine=new SurvivalEngineService(db,clock,ids,config,{select:async(request)=>{const range=survivalMapRange(request.group,request.phase);
   return {levelId:mapId++,levelVersion:1,stars:range.minimumStars??10,demon:range.minimumStars===null,demonDifficulty:range.minimumStars===null?(range.demons[0]??null):null,
     automatic:false,platformer:false,geometrySha256:"a".repeat(64),geometryBytes:64,verifiedAt:new Date(now).toISOString()};}});
@@ -95,6 +96,17 @@ async function prepare(id:string,group:Client[]){let m=await engine.get(id);now+
 async function record(c:Client,m:SurvivalMatch,progress:number){const attemptId=ids.next();await event(c,m,"ATTEMPT_START",{attemptId});await event(c,m,"ATTEMPT_END",{attemptId,progress});}
 
 describe("Survival M5 public HTTP and persistent online game",()=>{
+ it("switches generic mod checks over HTTP without disconnecting the queued player",async()=>{
+  const c=await client();const installedMods=[mods[0]!,{id:"other.mod",version:"1",enabled:true,loaded:true,internal:false,system:false}];
+  expect((await api(c,"/queue/join",{installedMods})).status).toBe(403);
+  Object.assign(soloDoc.operational,{modRestrictionEnabled:false});
+  expect((await api(c,"/queue/join",{installedMods})).status).toBe(201);
+  Object.assign(soloDoc.operational,{modRestrictionEnabled:true});
+  expect((await api(c,"/queue/join",{installedMods})).status).toBe(403);
+  expect((await api(c,"/queue/status")).body.status).toBe("QUEUED");
+  Object.assign(soloDoc.operational,{modRestrictionEnabled:false});
+  expect((await api(c,"/queue/join",{installedMods})).status).toBe(201);
+ });
  it.each([2,16])("projects BEST/NOW and terminal 100%% over HTTP for %i players without paying or advancing the round",async count=>{
   const {group,id}=await game(count),m=await prepare(id,group),owner=group[0]!,attemptId=ids.next();
   await record(owner,m,87.9);await event(owner,m,"ATTEMPT_START",{attemptId});

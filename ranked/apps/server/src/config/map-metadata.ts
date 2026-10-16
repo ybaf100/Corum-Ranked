@@ -81,7 +81,8 @@ export const parseGdMaps = (body: string): GdMapDetails[] => {
     result.push({ id, creator: creators.get(data.get("6") ?? "") ?? "",
       demon, stars: Number.isInteger(stars) && stars >= 0 && stars <= 10 ? stars : null,
       difficulty: demon ? demonLabels[data.get("43") ?? ""] ?? "Hard Demon" : data.get("25") === "1" ? "Auto" : labels[average] ?? "N/A",
-      verificationSeconds: positive(Number(data.get("57"))) !== null ? Number(data.get("57")) / 240 : null });
+      // GD verification ticks are not authored duration. Use explicit time sources only.
+      verificationSeconds: null });
   }
   return result;
 };
@@ -114,7 +115,7 @@ export class RankedMapMetadataResolver {
     private readonly budgetMs = 8_000) {}
 
   public async enrich(document: RankedConfigDocument): Promise<RankedConfigDocument> {
-    const key = (map: RankedMap): string => `${map.playableLevelId}:${officialMap(map.title)?.id ?? 0}`;
+    const key = (map: RankedMap): string => `length-v2:${map.playableLevelId}:${officialMap(map.title)?.id ?? 0}`;
     if (this.database) {
       const rows = await this.database.query<{ cache_key: string; data: Resolved; fetched_at: Date | string }>(
         "SELECT cache_key,data,fetched_at FROM ranked_map_metadata_cache WHERE cache_key=ANY($1::text[])",
@@ -186,13 +187,6 @@ export class RankedMapMetadataResolver {
               }
             }
           } catch { /* Retain known metadata when GDDL is unavailable. */ }
-          try {
-            if (!official && metadata.durationSeconds === null && !controller.signal.aborted) {
-              const download = parseGdMaps(await (await gdRequest("downloadGJLevel22.php", { levelID: map.playableLevelId })).text());
-              const duration = download.find(m => m.id === map.playableLevelId)?.verificationSeconds;
-              if (duration) resolved.metadata = { ...resolved.metadata, durationSeconds: duration };
-            }
-          } catch { /* Never invent a Tier or exact duration from a length category. */ }
           this.cache.set(key(map), { value: structuredClone(resolved), fetchedAt: now });
           if (this.cache.size > 1024) this.cache.delete(this.cache.keys().next().value!);
           if (this.database && resolved.metadata.kind !== "UNKNOWN") await this.database.query(

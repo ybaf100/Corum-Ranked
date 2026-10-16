@@ -70,7 +70,8 @@ export class RankedConfigService implements OnApplicationBootstrap, OnApplicatio
     try {
       const sourceDocument = await this.source.fetchConfig();
       const document = { ...sourceDocument, operational: { ...sourceDocument.operational,
-        tierBands: expandSoloTierBands(sourceDocument.operational.tierBands) } };
+        tierBands: expandSoloTierBands(sourceDocument.operational.tierBands),
+        modRestrictionEnabled: sourceDocument.operational.modRestrictionEnabled === undefined ? true : sourceDocument.operational.modRestrictionEnabled } };
       const errors = validateRankedConfigDocument(document);
       if (errors.length > 0) throw new Error(`Invalid Ranked config: ${errors.join("; ")}`);
       await this.withAdmission(async () => {

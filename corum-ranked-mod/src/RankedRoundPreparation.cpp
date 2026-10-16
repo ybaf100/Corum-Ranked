@@ -1,6 +1,7 @@
 #include "RankedRoundPreparation.hpp"
 #include "RankedRuntime.hpp"
 #include "SurvivalRuntime.hpp"
+#include "domain/SurvivalNativeOptions.hpp"
 #include <Geode/binding/FMODAudioEngine.hpp>
 #include <Geode/binding/GameLevelManager.hpp>
 #include <Geode/binding/MusicDownloadManager.hpp>
@@ -142,7 +143,9 @@ void RankedRoundPreparation::pump() {
     // Saved GD objects may carry a prior ordinary-play or Ranked LDM choice.
     // Ranked owns a fresh OFF default per exact round, and reapplies only this
     // round's explicit choice if native metadata/download replaces the object.
-    if (level) level->m_lowDetailModeToggled = m_lowDetail;
+    if(survival)applySurvivalNativeOptions(level,Mod::get()->getSavedValue<bool>("survival-low-detail",false),
+        Mod::get()->getSavedValue<bool>("survival-disable-shake",false));
+    else if(level)level->m_lowDetailModeToggled=m_lowDetail;
     m_view.mapReady = level && level->m_levelType == GJLevelType::Saved &&
         !level->m_levelString.empty() && !level->m_levelNotDownloaded;
     if (!m_view.mapReady) {
@@ -380,6 +383,14 @@ bool RankedRoundPreparation::launch(CCScene* origin) {
     if (!survival && !spectator && !entering && !runtime.armCurrentLevelForGameplay()) return false;
     tracePreparedLevel("round-native-launch", level, nullptr, this);
     if(survival && !SurvivalRuntime::get().armNative(level))return false;
+    if(survival){
+        applySurvivalNativeOptions(level,Mod::get()->getSavedValue<bool>("survival-low-detail",false),
+            Mod::get()->getSavedValue<bool>("survival-disable-shake",false));
+#if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
+        log::info("[SurvivalOptions] before native init context={} supportsLDM={} LDM={} disableShake={}",
+            preparationContextText(m_context),level->m_lowDetailMode,level->m_lowDetailModeToggled,level->m_disableShakeToggled);
+#endif
+    }
     auto* scene = PlayLayer::scene(level, false, false);
     auto* play = PlayLayer::get();
     log::info("[RankedEntry] native setup completed context={} scene={} play={}",
@@ -422,15 +433,19 @@ bool RankedRoundPreparation::returnFromNativeQuit(GJGameLevel* level) {
     m_returnQueued = true;
     auto const generation = m_launchGeneration;
     // Never construct the next PlayLayer inside the departing onQuit call stack.
-    queueInMainThread([this, generation] {
+    queueInMainThread([this, generation, departing=geode::WeakRef<CCScene>(CCDirector::sharedDirector()->getRunningScene())] {
         auto origin = m_origin.lock();
         if (generation != m_launchGeneration || !m_returnQueued || !origin) return;
+        auto scene=departing.lock();
+        auto* director=CCDirector::sharedDirector();
+        auto const ownsScene=scene && director->getRunningScene()==scene.data() &&
+            scene.data()!=origin.data() && !director->getNextScene();
         // Geode 5.10.1 WeakRef pointer assignment to nullptr drops the
         // controller without running its native-owner release check.
         { [[maybe_unused]] auto departedPlay = std::move(m_play); [[maybe_unused]] auto retainedOrigin = std::move(m_origin); }
         m_launchedLevel = nullptr;
         m_returnQueued = false;
-        CCDirector::sharedDirector()->popScene();
+        if(ownsScene)director->popScene();
     });
     return true;
 }

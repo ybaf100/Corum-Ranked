@@ -102,8 +102,7 @@ const cleanDto = (accountId: string): CreateSessionDto => ({
   ],
 });
 
-const buildService = (source: FakeCsmpSource, clock = new FixedClock(), records?: ForumRecordsService) => {
-  const document = configDocumentFixture();
+const buildService = (source: FakeCsmpSource, clock = new FixedClock(), records?: ForumRecordsService, document = configDocumentFixture()) => {
   const config = {
     getSnapshot: () => ({ ...structuredClone(document), fetchedAt: "2026-08-20T00:00:00Z" }),
   } as RankedConfigService;
@@ -301,4 +300,28 @@ describe("Ranked session/profile creation", () => {
     );
     expect(players.rows[0]?.count).toBe(1);
   });
+  it.each(["HwanHee","hwanhee","HWANHEE"])("stores original GD username %s without changing account identity", async gdUsername => {
+    const service=buildService(new FakeCsmpSource());
+    await service.create({...cleanDto("7001"),gdUsername});
+    const rows=await database.query<{gd_username:string;gd_account_id:string}>("SELECT gd_username,gd_account_id::text FROM ranked_players WHERE gd_account_id=7001");
+    expect(rows.rows).toEqual([{gd_username:gdUsername,gd_account_id:"7001"}]);
+  });
+  it("applies dynamic mod policy without deleting an admitted session or its profile", async () => {
+    const document=configDocumentFixture();
+    const service=buildService(new FakeCsmpSource(),new FixedClock(),undefined,document);
+    const dto=cleanDto("7001");dto.installedMods.splice(1); // missing Node IDs / CBF
+    dto.installedMods.push({id:"other.mod",version:"1",enabled:true,loaded:true,internal:false,system:false});
+    await expect(service.create(dto)).rejects.toMatchObject({status:403});
+    Object.assign(document.operational,{modRestrictionEnabled:false});
+    const created=await service.create(dto),context=await contextFor(created.sessionToken);
+    expect(()=>service.assertEnvironment(dto.installedMods)).not.toThrow();
+    Object.assign(document.operational,{modRestrictionEnabled:true});
+    expect(()=>service.assertEnvironment(dto.installedMods)).toThrow();
+    await expect(service.heartbeat(context)).resolves.toBeDefined();
+    Object.assign(document.operational,{modRestrictionEnabled:false});
+    expect(()=>service.assertEnvironment([])).not.toThrow();
+    await expect(service.heartbeat(context)).resolves.toBeDefined();
+    expect((await database.query<{count:number}>("SELECT COUNT(*)::int AS count FROM ranked_players")).rows[0]!.count).toBe(1);
+  });
+
 });

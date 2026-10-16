@@ -135,6 +135,15 @@ inline Frame contentFrame(CCSize const& size) {
     };
 }
 
+// Player data keeps its original casing even if a generated font failed to
+// load. Native gold/big fonts may substitute uppercase for missing lowercase.
+inline CCLabelBMFont* playerNameLabel(std::string const& text,float scale,CCPoint position,
+    ccColor3B color,FontWeight weight) {
+    auto* result=CCLabelBMFont::create(text.c_str(),font(weight));
+    if(!result)result=CCLabelBMFont::create(text.c_str(),"chatFont.fnt");
+    setLabelScale(result,scale);result->setColor(color);result->setPosition(position);
+    return result;
+}
 inline CCLabelBMFont* label(
     std::string const& text,
     float scale,

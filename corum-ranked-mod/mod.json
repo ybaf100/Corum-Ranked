@@ -8,12 +8,12 @@
   },
   "id": "hwanhee1.corum_ranked",
   "name": "Corum Ranked",
-  "version": "v0.5.0-beta.73",
+  "version": "v0.5.0-beta.74",
   "developer": "hwanhee1",
   "description": "A separate server-authoritative Corum Ranked client. It does not share runtime state or UI with Corum Integration.",
   "dependencies": {
-    "syzzi.click_between_frames": ">=v1.5.0",
-    "geode.node-ids": ">=v1.23.3"
+    "syzzi.click_between_frames": {"version": ">=v1.5.0", "required": false},
+    "geode.node-ids": {"version": ">=v1.23.3", "required": false}
   },
   "tags": [
     "online",

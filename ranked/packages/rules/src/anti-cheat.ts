@@ -18,6 +18,7 @@ export interface AllowedModRule {
 }
 
 export interface ClientEnvironmentPolicy {
+  readonly modRestrictionEnabled?: boolean;
   readonly allowedMods: readonly AllowedModRule[];
   readonly cbf: {
     readonly modId: string;
@@ -81,6 +82,10 @@ export const evaluateClientEnvironment = (
   policy: ClientEnvironmentPolicy,
 ): ClientEnvironmentDecision => {
   const rules = policy.allowedMods.filter((rule) => rule.enabled);
+  if (policy.modRestrictionEnabled === false) return {
+    allowed: true, allowedModIds: rules.map(rule => rule.id).sort(),
+    unauthorizedModIds: [], missingRequiredModIds: [], versionViolations: [], cbfIssues: [],
+  };
   const allowedById = new Map(rules.map((rule) => [rule.id, rule]));
   const userMods = installedMods.filter((mod) => !mod.internal && !mod.system);
   const userById = new Map(userMods.map((mod) => [mod.id, mod]));

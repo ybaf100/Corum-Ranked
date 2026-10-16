@@ -52,6 +52,7 @@ export class RankedConfigController {
       modes: { soloRanked: { ready: true, enabled: snapshot.operational.enabled },
         survival: this.survival?.getStatus() ?? { ready: false, enabled: false } },
       rules: snapshot.operational.rules,
+      modRestrictionEnabled: snapshot.operational.modRestrictionEnabled ?? true,
       cbf: snapshot.operational.cbf,
       client: withRankedAudioVolumes(snapshot.client, volumes) ?? {
         audio: { enabled: false, fadeInSeconds: 0.8, fadeOutSeconds: 0.6, resources: [] },

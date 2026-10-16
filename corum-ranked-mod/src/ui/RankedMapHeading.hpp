@@ -11,7 +11,7 @@ inline void addRankedMapHeading(cocos2d::CCNode* parent,int levelId,std::string 
     fitMenuLabelWidth(name,278,.42f,.25f);parent->addChild(name,5);
     auto* badge=mapDifficultyBadge(levelId,metadata,135);
     badge->setAnchorPoint({.5f,.5f});badge->setPosition({titlePosition.x-38,titlePosition.y-23});parent->addChild(badge,5);
-    auto* length=menuLabel(mapLengthText(displayedMapMetadata(levelId,metadata).durationSeconds),.29f,
+    auto* length=menuLabel(mapLengthText(displayedMapMetadata(levelId,metadata)),.29f,
         {titlePosition.x+73,titlePosition.y-23},durationColor,FontWeight::SemiBold);
     parent->addChild(length,5);
 }

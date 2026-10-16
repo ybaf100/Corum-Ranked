@@ -23,10 +23,10 @@ void RankedMapDetails::remember(GJGameLevel* level) {
     metadata.featureScore=std::max(0,level->m_featured);metadata.epic=std::clamp(level->m_isEpic,0,3);
     auto const stars = static_cast<int>(level->m_stars);
     if (!demon && stars >= 0 && stars <= 10) metadata.stars = stars;
-    auto const ticks = static_cast<double>(level->m_timestamp);
-    if (ticks > 0 && std::isfinite(ticks)) metadata.durationSeconds = ticks / 240;
+    // Verification/replay ticks are not a trustworthy authored playback time.
+    // Actual seconds come from explicit server metadata; native gives a grade.
+    if(level->m_levelLength>=0 && level->m_levelLength<=4)metadata.lengthCategory=level->m_levelLength;
     auto const previous = m_cache.find(id);
-    if (!metadata.durationSeconds && previous != m_cache.end()) metadata.durationSeconds = previous->second.metadata.durationSeconds;
     if (previous == m_cache.end() || previous->second.difficulty != value || previous->second.metadata != metadata) ++m_revision;
     m_cache[id] = {value, std::chrono::steady_clock::now(),metadata};
     // The lifetime cache only serves UI; bound it rather than retain every map visited.

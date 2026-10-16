@@ -49,6 +49,7 @@ test('actual Debug gate executes native item selector, one-shot onPlay, vanilla 
     const debugPlayInit = playInit.slice(playInit.indexOf('m_fields->levelId ='));
     const cpp = `
 #include "${join(root, 'src/debug/DebugSpectatePolicy.hpp')}"
+#include "${join(root, 'src/domain/SurvivalNativeOptions.hpp')}"
 #include <cassert>
 #include <algorithm>
 #include <chrono>
@@ -58,10 +59,11 @@ test('actual Debug gate executes native item selector, one-shot onPlay, vanilla 
 #include <sstream>
 #include <string>
 #include <vector>
+struct Mod {static Mod* get(){static Mod m;return &m;}template<class T>T getSavedValue(char const*,T fallback){return fallback;}};
 struct GJGameLevel {
     int m_levelID=88350599,m_songID=42;
     std::string m_levelString,m_songIDs;
-    bool m_levelNotDownloaded=true;
+    bool m_levelNotDownloaded=true,m_lowDetailMode=true,m_lowDetailModeToggled=false,m_disableShakeToggled=false;
     int m_levelType=3;
 };
 struct Button {int requests=0;void activate(){++requests;}};
