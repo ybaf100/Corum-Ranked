@@ -37,6 +37,7 @@ test('native confirmation boundary obtains Fields only from the tracked Pause, i
 struct CCObject{};
 template<class T>struct Ref{T* p=nullptr;Ref()=default;explicit Ref(T* v):p(v){}T* data()const{return p;}T* operator->()const{return p;}explicit operator bool()const{return p;}};
 template<class T>struct WeakRef{T* p;explicit WeakRef(T* v):p(v){}Ref<T> lock()const{return Ref<T>(p);}};
+struct SurvivalRuntime {static SurvivalRuntime& get(){static SurvivalRuntime r;return r;}bool surrenderPending()const{return false;}};
 struct AppDelegate{bool m_gamePaused=true;static AppDelegate* get(){static AppDelegate a;return &a;}};
 struct PlayLayer{inline static PlayLayer* current=nullptr;bool m_isPaused=true;static PlayLayer* get(){return current;}void resume(){m_isPaused=false;AppDelegate::get()->m_gamePaused=false;}};
 struct PauseLayer{bool parent=true;void* getParent(){return parent?this:nullptr;}};

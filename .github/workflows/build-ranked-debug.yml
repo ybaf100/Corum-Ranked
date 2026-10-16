@@ -229,6 +229,33 @@ jobs:
           path: ${{ steps.build.outputs.build-output }}/*.geode
           if-no-files-found: error
 
+  additional-debug-off:
+    name: Validate ${{ matrix.config.name }} Debug OFF ${{ needs.metadata.outputs.version }}
+    needs: [metadata, tests]
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - {name: Windows, os: windows-latest, target: Win64}
+          - {name: Android32, os: ubuntu-latest, target: Android32}
+          - {name: Android64, os: ubuntu-latest, target: Android64}
+    runs-on: ${{ matrix.config.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Compile official configuration
+        id: build
+        uses: geode-sdk/build-geode-mod@main
+        with:
+          path: corum-ranked-mod
+          target: ${{ matrix.config.target }}
+          combine: false
+          configure-args: -DCORUM_RANKED_DEBUG_BOT_MATCH=OFF -DCORUM_RANKED_DEBUG_SPECTATE=OFF
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Corum-Ranked-${{ needs.metadata.outputs.version }}-${{ matrix.config.name }}-Debug-OFF
+          path: ${{ steps.build.outputs.build-output }}/*.geode
+          if-no-files-found: error
+
   package:
     name: Package Debug ${{ needs.metadata.outputs.version }}
     runs-on: ubuntu-latest

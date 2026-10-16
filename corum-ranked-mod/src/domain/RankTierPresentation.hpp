@@ -12,6 +12,10 @@ inline std::string rankTierBase(std::string tier) {
     return tier;
 }
 inline bool goldRankTier(std::string const& tier){return rankTierBase(tier)=="GOLD";}
+inline std::string rankTierTrackBase(std::string const& tier) {
+    auto const base=rankTierBase(tier);
+    return base=="AQUA"?"RED":base=="BRONZE"?"AQUA":base=="SILVER"?"BRONZE":base=="GOLD"?"SILVER":"";
+}
 inline int rankTierOrder(std::string const& tier) {
     static std::array<std::string,15> const order {"RED3","RED2","RED1","AQUA3","AQUA2","AQUA1","BRONZE3","BRONZE2","BRONZE1","SILVER3","SILVER2","SILVER1","GOLD","MASTER","CHAMPION"};
     auto const found=std::find(order.begin(),order.end(),tier);

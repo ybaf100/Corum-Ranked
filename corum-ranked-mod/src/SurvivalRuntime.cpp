@@ -56,6 +56,7 @@ void SurvivalRuntime::tick() {
         ++m_generation;m_controlRequest.cancel();m_pollRequest.cancel();m_eventRequest.cancel();m_recoverRequest.cancel();m_queueRequest.cancel();
         m_lastServerNow=0;m_session=token;m_creating=m_pollBusy=m_eventBusy=m_recoverBusy=m_queuePollBusy=false;m_view={};m_queue={};++m_queueGeneration;m_prepared={};m_events.clear();m_attempt.clear();
         m_attemptContext=m_enteredContext=m_readyContext="";m_nextPoll={};
+        m_clock={};resetSurrender();
         m_needRecovery=!token.empty();m_recoverRetryAt={};m_ackRetryAt={};
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
         m_forceClearRequest.cancel();m_forceClearBody={};m_forceClearBusy=false;
@@ -63,6 +64,7 @@ void SurvivalRuntime::tick() {
         if(m_needRecovery)recover();
     }
     pumpFreePlayReturn();
+    pumpSurrenderReturn();
     if(token.empty())return;
     RankedRuntime::get().updateSessionHeartbeat();
     if(!active()) {
@@ -175,7 +177,7 @@ void SurvivalRuntime::observe(matjson::Value const& root) {
     auto const serverTime=parseIso8601Millis(root["serverNow"].asString().unwrapOr(""));
     if(id==m_view.id && revision==static_cast<std::int64_t>(m_view.revision) && serverTime && *serverTime<m_lastServerNow)return;
     if(id.empty() || revision<1 || (!m_view.id.empty() && id!=m_view.id) || (id==m_view.id && revision<static_cast<std::int64_t>(m_view.revision)))return;
-    if(m_view.id.empty())m_lastServerNow=0;
+    if(m_view.id.empty()){m_lastServerNow=0;m_clock={};}
     auto const oldContext=preparationContext();
     m_view.id=id;m_view.revision=static_cast<std::uint64_t>(revision);m_view.state=root["state"].asString().unwrapOr("");
     m_view.phase=root["phase"].asString().unwrapOr("");m_view.roundKey=root["roundKey"].asString().unwrapOr("");
@@ -249,6 +251,7 @@ void SurvivalRuntime::observe(matjson::Value const& root) {
     if(oldContext!=preparationContext()) {
         m_prepared={};m_attempt.clear();m_attemptContext=m_enteredContext=m_readyContext="";m_lastProgress=-1;m_localAttempts=0;
     }
+    pumpSurrenderReturn();
     discardObsoleteEvents();
     m_view.error.clear();Mod::get()->setSavedValue("survival-debug-match",id);
 }
@@ -265,6 +268,7 @@ void SurvivalRuntime::poll() {
             if(m_view.online && response.code()==403 && message=="Not the online Survival participant"){
                 ++m_generation;m_eventRequest.cancel();m_controlRequest.cancel();m_eventBusy=m_creating=false;
                 m_view={};m_queue={};m_prepared={};m_events.clear();m_needRecovery=true;m_recoverRetryAt={};
+                resetSurrender();m_clock={};m_lastServerNow=0;
             }else m_view.error="Survival server connection failed. Retrying...";
         }
     });
@@ -299,14 +303,14 @@ bool SurvivalRuntime::consumeNativeLaunch(GJGameLevel* level) {
     m_launchLevel=nullptr;return true;
 }
 bool SurvivalRuntime::canEnter() const {
-    if(normalRoundCleared() || freePlaying())return false;
+    if(surrenderPending() || normalRoundCleared() || freePlaying())return false;
     if(!m_prepared.valid() || m_prepared!=preparationContext() || m_session.empty())return false;
     if(m_view.online && !m_view.ownAssetsReady)return false;
     if(attemptLimitReached())return false;
     return !m_view.ownEliminated && (m_view.state=="ENTERING" || m_view.state=="COUNTDOWN" || m_view.state=="PLAYING");
 }
 bool SurvivalRuntime::canPlay() const {
-    return !normalRoundCleared() && !freePlaying() && m_view.state=="PLAYING" && !m_view.ownEliminated && !m_session.empty() &&
+    return !surrenderPending() && !normalRoundCleared() && !freePlaying() && m_view.state=="PLAYING" && !m_view.ownEliminated && !m_session.empty() &&
         m_session==RankedRuntime::get().spectatorLiveSessionToken() && remainingMs()>0 &&
         (!m_view.online || (m_view.ownAssetsReady && m_view.ownEntered && !m_view.ownAbsent));
 }
@@ -316,7 +320,8 @@ bool SurvivalRuntime::attemptLimitReached() const {
     return std::max(m_localAttempts,own==m_view.standings.end()?0:own->attemptsUsed)>=3;
 }
 std::optional<std::int64_t> SurvivalRuntime::countdownMs() const { return m_clock.signedRemainingMillis(m_view.startsAt,localNow()); }
-std::int64_t SurvivalRuntime::remainingMs() const { return m_clock.remainingMillis(m_view.endsAt,localNow()).value_or(0); }
+std::optional<std::int64_t> SurvivalRuntime::roundRemainingMs() const { return m_clock.remainingMillis(m_view.endsAt,localNow()); }
+std::int64_t SurvivalRuntime::remainingMs() const { return roundRemainingMs().value_or(0); }
 matjson::Value SurvivalRuntime::event(std::string const& type) const {
     matjson::Value body;body["eventId"]=utils::random::generateUUID();body["type"]=type;body["roundKey"]=m_view.roundKey;
     body["mapGeneration"]=m_view.mapGeneration;body["levelId"]=m_view.map.levelId;return body;
@@ -337,18 +342,30 @@ void SurvivalRuntime::pumpEvents() {
         if(!current(generation,session) || m_view.id!=id || eventGeneration!=m_eventGeneration)return;
         m_eventBusy=false;
         if(response.code()>=200 && response.code()<300) {
+            observe(response.json().unwrapOr(matjson::Value()));pumpSurrenderReturn();
+            if(eventType=="FORFEIT" && eventId==m_surrenderEventId && !m_surrenderAccepted){
+                m_retryAt=std::chrono::steady_clock::now()+std::chrono::milliseconds(500);m_nextPoll={};return;
+            }
             if(!m_events.empty() && m_events.front()["eventId"].asString().unwrapOr("")==eventId)m_events.pop_front();
-            observe(response.json().unwrapOr(matjson::Value()));m_retryAt={};
+            m_retryAt={};
         } else if(response.code()==409 || response.code()==400) {
+            if(eventId==m_surrenderEventId)resetSurrender();
             if(eventType=="PRESENTATION_COMPLETE")m_presentationContext.clear();
             if(!m_events.empty() && m_events.front()["eventId"].asString().unwrapOr("")==eventId)m_events.pop_front();
             m_nextPoll={};m_view.error="Survival state changed. Synchronizing...";
+        } else if((eventType=="FORFEIT" || surrenderPending()) && response.code()>=400 && response.code()<500 && response.code()!=408 && response.code()!=429) {
+            if(!m_events.empty() && m_events.front()["eventId"].asString().unwrapOr("")==eventId)m_events.pop_front();
+            auto const surrenderId=m_surrenderEventId;
+            std::erase_if(m_events,[&](auto const& body){return body["eventId"].asString().unwrapOr("")==surrenderId;});
+            resetSurrender();
+            m_nextPoll={};m_view.error="Survival surrender was rejected. Synchronizing...";
         } else {m_retryAt=std::chrono::steady_clock::now()+std::chrono::milliseconds(500);m_view.error="Survival server connection failed. Retrying...";}
     });
 }
 void SurvivalRuntime::discardObsoleteEvents() {
     auto obsolete=[&](matjson::Value const& body){
         auto const otherRound=body["roundKey"].asString().unwrapOr("")!=m_view.roundKey || body["mapGeneration"].asInt().unwrapOr(0)!=m_view.mapGeneration;
+        if(otherRound && body["eventId"].asString().unwrapOr("")==m_surrenderEventId && !m_surrenderAccepted)resetSurrender();
         return otherRound || (body["type"].asString().unwrapOr("")=="PROGRESS" && m_view.state!="PLAYING");
     };
     // Cancel only an obsolete packet. A real Start/End for the current playing
@@ -461,7 +478,33 @@ void SurvivalRuntime::pumpFreePlayReturn() {
         }else showSurvivalGame();
     });
 }
-void SurvivalRuntime::surrender() { if(active() && m_view.state!="FINAL_RESULT" && m_view.state!="CANCELLED")enqueue(event("FORFEIT")); }
+void SurvivalRuntime::resetSurrender() {
+    m_surrenderEventId.clear();m_surrenderMatchId.clear();m_surrenderAccepted=false;
+    m_surrenderOwner.reset();m_surrenderScene.reset();
+}
+void SurvivalRuntime::surrender() {
+    if(!active() || m_session.empty() || !m_surrenderEventId.empty() || m_view.ownEliminated ||
+        m_view.state=="FINAL_RESULT" || m_view.state=="CANCELLED" || m_events.size()>254)return;
+#if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
+    if(forceClearPending())return;
+#endif
+    auto body=event("FORFEIT");m_surrenderEventId=body["eventId"].asString().unwrapOr("");m_surrenderMatchId=m_view.id;
+    auto* play=PlayLayer::get();auto* scene=CCDirector::sharedDirector()->getRunningScene();
+    if(isOfficialSurvivalPlayLayer(play) && scene && play->getParent()==scene){m_surrenderOwner.emplace(play);m_surrenderScene.emplace(scene);}
+    endAttempt(m_view.activeAttemptProgress);enqueue(std::move(body));
+}
+void SurvivalRuntime::pumpSurrenderReturn() {
+    if(m_surrenderEventId.empty() || m_view.id!=m_surrenderMatchId || !m_view.ownEliminated)return;
+    // A successful event response (or recovery poll) must contain the server's
+    // elimination before any scene exit. Online matches may still be PLAYING.
+    m_surrenderAccepted=true;
+    auto owner=m_surrenderOwner?m_surrenderOwner->lock():Ref<PlayLayer>();
+    auto scene=m_surrenderScene?m_surrenderScene->lock():Ref<CCScene>();
+    auto* director=CCDirector::sharedDirector();
+    if(!owner || !scene || owner.data()!=PlayLayer::get() || !owner->isRunning() ||
+        owner->getParent()!=scene.data() || director->getRunningScene()!=scene.data() || director->getNextScene())return;
+    requestSurvivalGameplayReturn(owner.data());
+}
 void SurvivalRuntime::presentationComplete() {
     if(m_view.online || !active() || m_view.presentationGate.empty() || m_view.result.isObject())return;
     auto const key=m_view.id+":"+m_view.roundKey+":"+std::to_string(m_view.mapGeneration)+":"+m_view.presentationGate;
@@ -480,6 +523,7 @@ void SurvivalRuntime::acknowledge() {
             m_ackRetryAt=std::chrono::steady_clock::now()+std::chrono::seconds(std::clamp<std::int64_t>(wait,2,60));return;
         }
         ++m_generation;m_pollRequest.cancel();m_eventRequest.cancel();m_pollBusy=m_eventBusy=false;m_view={};m_queue={};m_events.clear();m_prepared={};
+        resetSurrender();m_clock={};m_lastServerNow=0;
         Mod::get()->setSavedValue("survival-debug-match",std::string{});RankedRuntime::get().fetchSurvivalProfile();RankedRuntime::get().fetchAchievements();
     });
 }
