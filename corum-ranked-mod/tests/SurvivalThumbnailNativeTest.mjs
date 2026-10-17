@@ -42,7 +42,7 @@ int main(){assert(survivalWebpSize(webp())==std::pair(640U,360U));assert(surviva
  b=webp();for(std::size_t n=0;n<b.size();n++)assert(!survivalWebpSize(std::span(b).first(n)));
 }`));
 
-test('actual provider bounds anonymous requests, cancels obsolete replies, handles 302/404/retry/cache and decodes away from GL thread',()=>{
+function runProvider(windowsRpcMacro=false,debug=false){
  const provider=noIncludes(read('src/SurvivalThumbnailProvider.cpp')).replace(/std::int64_t SurvivalThumbnailProvider::now\(\)\{[^\n]+\}/,'std::int64_t SurvivalThumbnailProvider::now(){return fakeNow;}');
  run(String.raw`
 #include "domain/SurvivalMapSelection.hpp"
@@ -103,7 +103,10 @@ struct Scheduler {void scheduleUpdateForTarget(cocos2d::CCNode*,int,bool){} };
 struct CCDirector {static CCDirector* sharedDirector(){static CCDirector d;return &d;}Scheduler* getScheduler(){static Scheduler s;return &s;}};
 namespace prelude {using namespace cocos2d;using geode::Ref;using geode::Loader;using geode::Mod;using geode::CCDirector;namespace web=geode::utils::web;namespace log=geode::log;}
 }
-`+noIncludes(read('src/SurvivalThumbnailProvider.hpp'))+provider+fixture+String.raw`
+`+noIncludes(read('src/SurvivalThumbnailProvider.hpp'))+
+// Windows RPC headers define this macro through the native SDK's PCH.
+(windowsRpcMacro?'\n#define small char\n':'')+
+(debug?'\n#define CORUM_RANKED_DEBUG_BOT_MATCH 1\n':'')+provider+fixture+String.raw`
 using namespace geode;using namespace geode::prelude;
 void pump(SurvivalThumbnailProvider& p,int count=40){for(int i=0;i<count;i++){p.update(0);std::this_thread::sleep_for(std::chrono::milliseconds(1));}}
 void reply(std::size_t i,int code,std::vector<std::uint8_t> bytes={},std::map<std::string,std::string> headers={}){auto callback=flights.at(i).callback;flights[i].done=true;callback({code,std::move(bytes),std::move(headers)});}
@@ -138,4 +141,8 @@ int main(int argc,char**argv){assert(argc==2);saveRoot=argv[1];auto dir=saveRoot
  auto uploads=CCTexture2D::uploads;reply(inFlight,200,webp(),{{"Content-Type","image/webp"}});pump(p);assert(CCTexture2D::uploads==uploads&&!p.selected());
  auto e=d;e.sceneGeneration=5;p.activate(e);pump(p);auto live=active();p.release(d);assert(active()==live);p.release(e);assert(active()==0);
 }`);
+}
+test('actual provider bounds anonymous requests, cancels obsolete replies, handles 302/404/retry/cache and decodes away from GL thread',()=>runProvider());
+test('actual provider compiles and runs with the Windows RPC small macro in Debug ON and OFF',()=>{
+ for(const debug of [false,true])runProvider(true,debug);
 });

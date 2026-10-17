@@ -171,11 +171,11 @@ void SurvivalThumbnailProvider::update(float){
         auto job=slot.job;++slot.ticket;slot.request.cancel();slot.busy=false;failed(job,408);
     }
     decodeNext();
-    auto small=std::count_if(m_cache.begin(),m_cache.end(),[](auto const& e){return !e.second.medium;});
+    auto const smallThumbnailCount=std::count_if(m_cache.begin(),m_cache.end(),[](auto const& e){return !e.second.medium;});
     auto const outstanding=std::count_if(m_jobs.begin(),m_jobs.end(),[](auto const& j){return !j.medium;})+
         std::count_if(m_slots.begin(),m_slots.end(),[](auto const& slot){return slot.busy&&!slot.job.medium;})+
         static_cast<int>(m_encoded.size())+static_cast<int>(m_decode.has_value());
-    if(small+outstanding<7 && m_randomRequests<14 && m_httpRequests<24 && m_jobs.size()<3)enqueue({0,false,true});
+    if(smallThumbnailCount+outstanding<7 && m_randomRequests<14 && m_httpRequests<24 && m_jobs.size()<3)enqueue({0,false,true});
     auto selectedDisk=[&](Job const& job){return !job.random && !job.network && job.id==m_selected;};
     auto const awaitingSelectedDisk=std::any_of(m_jobs.begin(),m_jobs.end(),selectedDisk) ||
         std::any_of(m_encoded.begin(),m_encoded.end(),[&](auto const& e){return selectedDisk(e.job);}) ||
