@@ -9,7 +9,7 @@ namespace corum::ranked::ui {
 using namespace geode::prelude;
 class RankedConfirmPopup final : public Popup {
     std::function<void(bool)> m_done;
-    bool m_closed=false;
+    bool m_closed=false,m_exited=false;
     bool init(std::string const& title,std::string const& message,std::function<void(bool)> done,std::string const& confirm) {
         if(!Popup::init(340,190)) { return false; }
         m_done=std::move(done);m_bgSprite->setVisible(false);m_closeBtn->setVisible(false);
@@ -38,6 +38,12 @@ public:
     }
     void cancel() {m_done={};finish(false);}
     void onClose(CCObject*) override {finish(false);}
-    void onExit() override {m_closed=true;m_done={};Popup::onExit();}
+    void onExit() override {
+        m_closed=true;m_done={};
+        // WeakRefPool can retain a closed popup. Its invisible modal must stop
+        // affecting Pause and waiting-room input at exit, not at destruction.
+        if(!m_exited){m_exited=true;CCTouchDispatcher::get()->unregisterForcePrio(this);}
+        Popup::onExit();
+    }
 };
 }

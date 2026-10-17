@@ -51,6 +51,8 @@ public:
     bool busy() const { return m_eventBusy; }
     SurvivalMatchView const& view() const { return m_view; }
     LevelPreparationContext preparationContext() const;
+    std::string optionsContext() const {return active()?m_view.id+":"+m_view.roundKey+":"+std::to_string(m_view.mapGeneration):std::string{};}
+
     bool acquiring() const;
     bool validateNative(GJGameLevel* level);
     bool canEnter() const;
