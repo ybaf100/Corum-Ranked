@@ -1,0 +1,45 @@
+name: Verify Ranked Platforms
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "corum-ranked-mod/**"
+      - ".github/workflows/verify-ranked-platforms.yml"
+
+permissions:
+  contents: read
+
+# Builds upload GitHub Actions artifacts only. No production publishing job,
+# reusable publishing workflow, deployment environment, or publishing secrets.
+jobs:
+  build:
+    name: ${{ matrix.config.name }} Debug ${{ matrix.debug }}
+    runs-on: ${{ matrix.config.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        debug: ["ON", "OFF"]
+        config:
+          - {name: Windows, os: windows-latest, target: Win64}
+          - {name: Android64, os: ubuntu-latest, target: Android64}
+          - {name: Android32, os: ubuntu-latest, target: Android32}
+          - {name: iOS, os: macos-latest, target: iOS}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build and package native client
+        id: build
+        uses: geode-sdk/build-geode-mod@main
+        with:
+          path: corum-ranked-mod
+          target: ${{ matrix.config.target }}
+          combine: false
+          configure-args: -DCORUM_RANKED_DEBUG_BOT_MATCH=${{ matrix.debug }} -DCORUM_RANKED_DEBUG_SPECTATE=${{ matrix.debug }}
+      - name: Retain verification package
+        uses: actions/upload-artifact@v7
+        with:
+          name: Ranked-Verify-${{ matrix.config.name }}-Debug-${{ matrix.debug }}
+          path: ${{ steps.build.outputs.build-output }}/*.geode
+          if-no-files-found: error
