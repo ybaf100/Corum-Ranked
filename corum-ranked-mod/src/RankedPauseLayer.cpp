@@ -130,18 +130,26 @@ public:
         }
         auto* button = CCSprite::createWithSpriteFrameName("GJ_closeBtn_001.png");
         button->setScale(0.95f);
-        m_fields->surrender = CCMenuItemSpriteExtra::create(button, this, menu_selector(CorumRankedPauseLayer::onSurrender));
+        CCNode* surrenderFace=button;
+        if(m_fields->survival){
+            surrenderFace=ui::surface({96,36},{},ui::Red,ui::SurfaceRaised,255,true);
+            auto* caption=ui::menuLabel(i18n::text("surrender","SURRENDER"),.26f,{48,18},ui::Red,ui::FontWeight::ExtraBold);
+            ui::fitFullMenuLabel(caption,84,24,.26f);surrenderFace->addChild(caption,5);
+        }
+        m_fields->surrender = CCMenuItemSpriteExtra::create(surrenderFace, this, menu_selector(CorumRankedPauseLayer::onSurrender));
         m_fields->surrender->setID("ranked-surrender-button"_spr);
         if(m_fields->survival){
-            // Keep Survival actions outside the native icon row's layout and
-            // touch bounds. Registration is synchronized by watchBudget below.
-            auto* actions=CCMenu::create();actions->setPosition(CCPointZero);
-            actions->setID("survival-pause-actions"_spr);addChild(actions,1100);
-            m_fields->survivalActions=actions;
-            m_fields->surrender->setPosition({size.width-76,48});actions->addChild(m_fields->surrender);
-        }else{center->addChild(m_fields->surrender,-1);center->sortAllChildren();center->updateLayout();}
-        if(m_fields->survival){button->addChild(ui::label(i18n::text("surrender","SURRENDER"),.26f,
-            {button->getContentSize().width/2,-10},ui::Red,ui::FontWeight::ExtraBold));}
+            // beta.72's native menu owns the working Pause input route. Keep
+            // the caption INSIDE its item's hit rectangle, not below an X in
+            // a separate bottom-corner menu. Node IDs is optional.
+            m_fields->survivalActions=center;
+            if(!center->getLayout()){
+                center->setContentSize({std::min(size.width-32,410.f),74});
+                center->setPosition({size.width/2,size.height/2});
+                center->setLayout(RowLayout::create()->setGap(14)->setAutoScale(true)->setAxisAlignment(AxisAlignment::Center));
+            }
+        }
+        center->addChild(m_fields->surrender,-1);center->sortAllChildren();center->updateLayout();
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
         setupSurvivalForceClear(size);
 #endif
@@ -192,15 +200,20 @@ public:
         }
         auto* dispatcher=CCDirector::sharedDirector()->getTouchDispatcher();
         auto* pauseHandler=dispatcher->findHandler(this);
+        auto* nativeHandler=m_fields->survivalActions?dispatcher->findHandler(m_fields->survivalActions):nullptr;
         for(auto* menu:{m_fields->survivalActions
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
             ,m_fields->forceClearMenu
 #endif
         }){
             auto* own=menu?dispatcher->findHandler(menu):nullptr;
-            if(own && pauseHandler && pauseHandler->m_nPriority>std::numeric_limits<int>::min() &&
-                own->m_nPriority>=pauseHandler->m_nPriority)
-                dispatcher->setPriority(pauseHandler->m_nPriority-1,menu);
+            if(!own)continue;
+            auto priority=own->m_nPriority;
+            if(pauseHandler && pauseHandler->m_nPriority>std::numeric_limits<int>::min())priority=std::min(priority,pauseHandler->m_nPriority-1);
+            // Pause itself need not have a touch handler on every platform.
+            // Force Clear must also inherit the actual native menu's priority.
+            if(nativeHandler)priority=std::min(priority,nativeHandler->m_nPriority);
+            if(priority<own->m_nPriority)dispatcher->setPriority(priority,menu);
         }
     }
     void watchBudget(float) {
@@ -223,7 +236,7 @@ public:
             if(runtime.forceClearPending())m_fields->surrender->setEnabled(false);
 #endif
             if(m_fields->survivalStatus){
-                auto const status=!view.error.empty()?i18n::text(view.error,view.error):
+                auto const status=runtime.surrenderPending()?i18n::text("survival-surrender-pending","Surrender submitted · waiting for server"):!view.error.empty()?i18n::text(view.error,view.error):
                     i18n::text("survival-pause-clock","The server round timer continues while paused.");
                 m_fields->survivalStatus->setString(status.c_str());
                 ui::fitLabelWidth(m_fields->survivalStatus,std::min(300.0f,CCDirector::sharedDirector()->getWinSize().width*.56f)-16,.26f,.18f);

@@ -1,3 +1,12 @@
+# v0.5.0-beta.76
+
+- Add a shared four-second server-map reveal: optional public Level Thumbnails carousel or one horizontal row of vertical ID reels, with safe numeric fallback and server-start skips.
+- Replace the Survival map panel with responsive image/numeric layouts, native map metadata, separate readiness status, round switches and a server-authorized yellow READY button.
+- Add saved Survival defaults to Ranked Settings; migrate prior preferences once and keep same-round overrides across native object replacement and re-entry.
+- Bound anonymous thumbnail requests, WebP validation/decode, cancellation, disk and texture caches. Preserve server selection, ranking, FREE PLAY and Jukebox ownership.
+- Put the Survival surrender action back in the native Pause menu with its full caption inside the touch target; release closed confirmation input priority immediately. Allow waiting-room MAP_SELECTION surrender with server acknowledgement and idempotent settlement.
+- See [implementation, validation and device limits](../ranked/docs/survival-beta76-map-selection.md).
+
 # v0.5.0-beta.75
 
 - Restore Survival Pause action touch handling and deferred surrender confirmation.

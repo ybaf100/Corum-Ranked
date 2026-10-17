@@ -2,6 +2,7 @@
 #include "RankedRoundPreparation.hpp"
 #include "SurvivalRuntime.hpp"
 #include "domain/SurvivalNativeOptions.hpp"
+#include "SurvivalOptionsPreferences.hpp"
 #include "SurvivalSceneBridge.hpp"
 #include "RankedLevelPreparation.hpp"
 #include "ui/SurvivalHud.hpp"
@@ -390,8 +391,7 @@ public:
         m_fields->survivalFreePlayHud=!m_fields->survivalLevel && corum::ranked::SurvivalRuntime::get().freePlaying();
         if(m_fields->survivalLevel){
             m_fields->survivalContext=corum::ranked::SurvivalRuntime::get().preparationContext();
-            corum::ranked::applySurvivalNativeOptions(level,Mod::get()->getSavedValue<bool>("survival-low-detail",false),
-                Mod::get()->getSavedValue<bool>("survival-disable-shake",false));
+            corum::ranked::SurvivalOptionsPreferences::get().apply(level,corum::ranked::SurvivalRuntime::get().optionsContext());
         }
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         auto& debug = corum::ranked::debug::DebugSpectateRuntime::get();

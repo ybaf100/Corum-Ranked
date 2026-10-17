@@ -2,6 +2,7 @@
 #include "RankedRuntime.hpp"
 #include "SurvivalRuntime.hpp"
 #include "domain/SurvivalNativeOptions.hpp"
+#include "SurvivalOptionsPreferences.hpp"
 #include <Geode/binding/FMODAudioEngine.hpp>
 #include <Geode/binding/GameLevelManager.hpp>
 #include <Geode/binding/MusicDownloadManager.hpp>
@@ -141,10 +142,9 @@ void RankedRoundPreparation::pump() {
     metadata.adoptVerifiedSavedLevel(context);
     auto* level = metadata.level();
     // Saved GD objects may carry a prior ordinary-play or Ranked LDM choice.
-    // Ranked owns a fresh OFF default per exact round, and reapplies only this
-    // round's explicit choice if native metadata/download replaces the object.
-    if(survival)applySurvivalNativeOptions(level,Mod::get()->getSavedValue<bool>("survival-low-detail",false),
-        Mod::get()->getSavedValue<bool>("survival-disable-shake",false));
+    // Solo starts OFF. Survival inherits its global defaults once per round,
+    // then reapplies that round's override when native metadata is replaced.
+    if(survival)corum::ranked::SurvivalOptionsPreferences::get().apply(level,corum::ranked::SurvivalRuntime::get().optionsContext());
     else if(level)level->m_lowDetailModeToggled=m_lowDetail;
     m_view.mapReady = level && level->m_levelType == GJLevelType::Saved &&
         !level->m_levelString.empty() && !level->m_levelNotDownloaded;
@@ -387,8 +387,7 @@ bool RankedRoundPreparation::launch(CCScene* origin) {
     tracePreparedLevel("round-native-launch", level, nullptr, this);
     if(survival && !SurvivalRuntime::get().armNative(level))return false;
     if(survival){
-        applySurvivalNativeOptions(level,Mod::get()->getSavedValue<bool>("survival-low-detail",false),
-            Mod::get()->getSavedValue<bool>("survival-disable-shake",false));
+        corum::ranked::SurvivalOptionsPreferences::get().apply(level,corum::ranked::SurvivalRuntime::get().optionsContext());
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
         log::info("[SurvivalOptions] before native init context={} supportsLDM={} LDM={} disableShake={}",
             preparationContextText(m_context),level->m_lowDetailMode,level->m_lowDetailModeToggled,level->m_disableShakeToggled);

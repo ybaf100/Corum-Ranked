@@ -131,17 +131,19 @@ void drain(){auto queued=std::exchange(work,{});for(auto& f:queued)f();}
 std::string preparationContextText(LevelPreparationContext const& c){return c.matchId+":"+std::to_string(c.levelId)+":"+std::to_string(c.round);}
 bool inUpdate=false;
 struct RankedRoundPreparation{int launches=0;bool success=true;static RankedRoundPreparation& get(){static RankedRoundPreparation p;return p;}bool launch(CCScene*){assert(!inUpdate);++launches;return success;}};
-struct SurvivalRuntime{std::int64_t sync=1;std::int64_t serverSyncMillis(){return sync;}bool enter=true;LevelPreparationContext context{"match",40000000,1,0,false,0,0};static SurvivalRuntime& get(){static SurvivalRuntime r;return r;}auto preparationContext(){return context;}bool canEnter(){return enter;}};
+struct SurvivalRuntime{std::int64_t sync=1;std::int64_t serverSyncMillis(){return sync;}bool enter=true,pending=false;bool surrenderPending()const{return pending;}LevelPreparationContext context{"match",40000000,1,0,false,0,0};static SurvivalRuntime& get(){static SurvivalRuntime r;return r;}auto preparationContext(){return context;}bool canEnter(){return enter;}};
 template<class T>struct WeakRef{T* pointer;explicit WeakRef(T* p):pointer(p){}struct Locked{T* ptr;explicit operator bool()const{return ptr&&ptr->alive;}T* operator->(){return ptr;}T* data(){return ptr;}};auto lock()const{return Locked{pointer};}};
 struct Dialog{bool alive=true;CCScene* parent=nullptr;CCScene* getParent(){return parent;}};
-struct Coordinator{std::optional<WeakRef<Dialog>> m_jukebox;bool alive=true,running=true,m_closed=false,m_motion=false,m_confirmation=false,m_browsingBoard=false;std::optional<std::int64_t> m_entrySyncAfter;std::string m_pendingLaunch,m_launchedContext;CCScene* parent=nullptr;bool isRunning(){return running;}CCScene* getParent(){return parent;}
+struct Selection{bool complete=true;bool settled()const{return complete;}};
+struct Coordinator{Selection selection;Selection* m_selection=&selection;std::optional<WeakRef<Dialog>> m_jukebox;bool alive=true,running=true,m_closed=false,m_motion=false,m_confirmation=false,m_browsingBoard=false;std::optional<std::int64_t> m_entrySyncAfter;std::string m_pendingLaunch,m_launchedContext;CCScene* parent=nullptr;bool isRunning(){return running;}CCScene* getParent(){return parent;}
 ${launch}
 };
 int main(){CCScene origin,other;auto* director=CCDirector::sharedDirector();director->scene=&origin;
  auto& runtime=SurvivalRuntime::get();auto& preparation=RankedRoundPreparation::get();Coordinator owner;owner.parent=&origin;
+ owner.selection.complete=false;owner.queueNativeLaunch();assert(work.empty());owner.selection.complete=true;runtime.pending=true;owner.queueNativeLaunch();assert(work.empty());runtime.pending=false;
  inUpdate=true;owner.queueNativeLaunch();owner.queueNativeLaunch();assert(work.size()==1&&preparation.launches==0);inUpdate=false;
  drain();assert(preparation.launches==1&&!owner.m_launchedContext.empty()&&owner.m_pendingLaunch.empty());
- for(int changed=0;changed<10;++changed){owner.m_launchedContext.clear();owner.queueNativeLaunch();
+ for(int changed=0;changed<12;++changed){owner.m_launchedContext.clear();owner.queueNativeLaunch();
   if(changed==0){++runtime.context.round;}
   if(changed==1){director->scene=&other;}
   if(changed==2){owner.m_closed=true;}
@@ -152,8 +154,10 @@ int main(){CCScene origin,other;auto* director=CCDirector::sharedDirector();dire
   if(changed==7)owner.m_browsingBoard=true;
   if(changed==8)owner.m_entrySyncAfter=runtime.sync;
   if(changed==9)director->next=&other;
+  if(changed==10)owner.selection.complete=false;
+  if(changed==11)runtime.pending=true;
   drain();assert(preparation.launches==1&&owner.m_launchedContext.empty()&&owner.m_pendingLaunch.empty());
-  owner.m_jukebox.reset();owner.m_entrySyncAfter.reset();owner.m_browsingBoard=false;owner.m_closed=false;owner.m_confirmation=false;owner.running=true;runtime.enter=true;director->scene=&origin;director->next=nullptr;
+  owner.m_jukebox.reset();owner.m_entrySyncAfter.reset();owner.m_browsingBoard=false;owner.m_closed=false;owner.m_confirmation=false;owner.running=true;owner.selection.complete=true;runtime.pending=false;runtime.enter=true;director->scene=&origin;director->next=nullptr;
  }
  preparation.success=false;owner.queueNativeLaunch();drain();assert(preparation.launches==2&&owner.m_launchedContext.empty());
  preparation.success=true;owner.queueNativeLaunch();drain();assert(preparation.launches==3&&!owner.m_launchedContext.empty());

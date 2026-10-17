@@ -23,6 +23,15 @@ struct Translation {
 };
 
 inline constexpr std::array kKoreanTranslations {
+    Translation{"survival-default-options", "서바이벌 기본 설정"},
+    Translation{"survival-surrender-pending", "항복 처리 중 · 서버 응답 대기"},
+    Translation{"map-stars", "별"},
+    Translation{"survival-default-ldm", "기본 LDM"},
+    Translation{"survival-selected-map", "선정된 맵"},
+    Translation{"survival-map-data-pending", "맵 정보 확인 중"},
+    Translation{"survival-prep-retry", "준비 실패 · 다시 시도"},
+    Translation{"survival-thumbnail-unavailable", "썸네일을 불러올 수 없어 서버 맵 ID를 표시합니다."},
+    Translation{"survival-thumbnail-hint", "(i) Level Thumbnails 모드를 설치하면 맵 썸네일과 더 화려한 선정 연출을 볼 수 있습니다."},
     Translation{"survival-back-map", "맵으로 돌아가기"},
     Translation{"survival-view-board", "현황판 보기"},
     Translation{"survival-preparing", "준비 중"},

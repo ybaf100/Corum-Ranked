@@ -180,6 +180,19 @@ describe("Survival M5 public HTTP and persistent online game",()=>{
    expect(responses.every(r=>r.status===201)).toBe(true);expect(new Set(responses.map(r=>r.body.matchId)).size).toBe(1);
    expect((await db.query("SELECT id FROM sur_matches")).rows).toHaveLength(1);expect((await api(owner,"/queue/fill-bots",request)).body.matchId).toBe(responses[0]!.body.matchId);
  });
+ it("accepts waiting-room surrender before map selection, settles once and lets the player acknowledge",async()=>{
+   const {group,id}=await game(8),owner=group[0]!;const m=await engine.get(id),round=survivalCurrentRound(m);
+   expect(m.state).toBe("MAP_SELECTION");expect(round.map).toBeNull();
+   const solo=(await db.query("SELECT * FROM ranked_profiles ORDER BY player_id")).rows;
+   const body={eventId:ids.next(),type:"FORFEIT",roundKey:round.key,mapGeneration:round.mapGeneration,levelId:0};
+   const accepted=await api(owner,`/online/matches/${id}/events`,body);
+   expect(accepted.status).toBe(201);expect(accepted.body.result).toMatchObject({rank:8,requestedDelta:-55});
+   const duplicate=await api(owner,`/online/matches/${id}/events`,body);expect(duplicate.status).toBe(201);
+   expect((await db.query("SELECT * FROM sur_lp_ledger")).rows).toHaveLength(1);
+   expect((await db.query("SELECT * FROM ranked_profiles ORDER BY player_id")).rows).toEqual(solo);
+   expect((await api(owner,`/online/matches/${id}/acknowledge`,{})).status).toBe(201);
+   expect((await engine.get(id)).players.find(p=>p.playerId===owner.session.playerId)?.eliminationStage).not.toBeNull();
+ });
  it("immediately settles multiple surrenderers at the fixed round floor, lets peers continue and never pays twice",async()=>{
    const {group,id}=await game(8);let m=await prepare(id,group);const solo=(await db.query("SELECT * FROM ranked_profiles ORDER BY player_id")).rows;
    for(const c of group.slice(0,2)){const result=await event(c,m,"FORFEIT");expect(result.result).toMatchObject({rank:8,requestedDelta:-55});await api(c,`/online/matches/${id}/acknowledge`,{});}

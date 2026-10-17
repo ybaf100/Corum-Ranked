@@ -167,8 +167,10 @@ struct PlatformToolbox {static inline int cursorRestores=0;
 namespace corum::ranked {
 struct SurvivalRuntime {static SurvivalRuntime&get(){static SurvivalRuntime r;return r;}
  bool interceptFreePlayNativeQuit(GJGameLevel*)const{return false;}bool acquiring()const{return false;}bool active()const{return false;}bool canEnter()const{return false;}
- bool validateNative(GJGameLevel*)const{return false;}bool armNative(GJGameLevel*)const{return false;}
+ std::string optionsContext()const{return {};}bool validateNative(GJGameLevel*)const{return false;}bool armNative(GJGameLevel*)const{return false;}
  void preparationFailed(std::string const&){} };
+
+struct SurvivalOptionsPreferences {static SurvivalOptionsPreferences&get(){static SurvivalOptionsPreferences p;return p;}void apply(GJGameLevel* level,std::string const&){applySurvivalNativeOptions(level,false,false);}};
 
 enum class RuntimeStage {Ready,Matched};
 struct RuntimeView {RuntimeStage stage=RuntimeStage::Ready;struct Match {std::string matchId,state,side="A";bool readyA=false,readyB=false,placement=false;}match;};

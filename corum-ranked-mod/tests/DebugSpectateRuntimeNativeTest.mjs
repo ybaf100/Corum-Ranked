@@ -181,7 +181,7 @@ struct CorumRankedLevelInfoLayer:LevelInfoLayer {
     void onEnterTransitionDidFinish(){${debugPart('void onEnterTransitionDidFinish()')}}
 };
 struct PlayLayer {static inline int creations=0;bool init(GJGameLevel*,bool,bool){++creations;return true;}};
-namespace corum::ranked {struct SurvivalRuntime {static SurvivalRuntime&get(){static SurvivalRuntime r;return r;}bool freePlaying()const{return false;}bool consumeNativeLaunch(GJGameLevel*){return false;}int preparationContext()const{return 0;}};}
+namespace corum::ranked {struct SurvivalRuntime {static SurvivalRuntime&get(){static SurvivalRuntime r;return r;}bool freePlaying()const{return false;}bool consumeNativeLaunch(GJGameLevel*){return false;}int preparationContext()const{return 0;}std::string optionsContext()const{return {};}};struct SurvivalOptionsPreferences {static SurvivalOptionsPreferences&get(){static SurvivalOptionsPreferences p;return p;}void apply(GJGameLevel*,std::string const&){} };}
 struct CorumRankedPlayLayer:PlayLayer {
     struct Fields {bool survivalLevel=false,survivalFreePlayHud=false;int survivalContext=0;int levelId=0;bool debugRecordScene=false,debugPlaybackScene=false;} fields;
     Fields* m_fields=&fields;

@@ -486,7 +486,7 @@ void SurvivalRuntime::resetSurrender() {
 bool SurvivalRuntime::canSurrender() const {
     return active() && !m_session.empty() && m_session==RankedRuntime::get().spectatorLiveSessionToken() &&
         !surrenderPending() && !normalRoundCleared() && !freePlaying() && !m_view.ownEliminated &&
-        (m_view.state=="PREPARING" || m_view.state=="ENTERING" || m_view.state=="COUNTDOWN" || m_view.state=="PLAYING");
+        (m_view.state=="MAP_SELECTION" || m_view.state=="PREPARING" || m_view.state=="ENTERING" || m_view.state=="COUNTDOWN" || m_view.state=="PLAYING");
 }
 void SurvivalRuntime::surrender() {
     if(!active() || m_session.empty() || !m_surrenderEventId.empty() || m_view.ownEliminated ||
