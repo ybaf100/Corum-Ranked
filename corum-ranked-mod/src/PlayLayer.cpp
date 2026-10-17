@@ -1,6 +1,7 @@
 #include "RankedRuntime.hpp"
 #include "RankedRoundPreparation.hpp"
 #include "SurvivalRuntime.hpp"
+#include "domain/SurvivalNativeOptions.hpp"
 #include "SurvivalSceneBridge.hpp"
 #include "RankedLevelPreparation.hpp"
 #include "ui/SurvivalHud.hpp"
@@ -387,7 +388,11 @@ public:
         m_fields->levelId = level ? static_cast<int>(level->m_levelID) : 0;
         m_fields->survivalLevel=corum::ranked::SurvivalRuntime::get().consumeNativeLaunch(level);
         m_fields->survivalFreePlayHud=!m_fields->survivalLevel && corum::ranked::SurvivalRuntime::get().freePlaying();
-        if(m_fields->survivalLevel)m_fields->survivalContext=corum::ranked::SurvivalRuntime::get().preparationContext();
+        if(m_fields->survivalLevel){
+            m_fields->survivalContext=corum::ranked::SurvivalRuntime::get().preparationContext();
+            corum::ranked::applySurvivalNativeOptions(level,Mod::get()->getSavedValue<bool>("survival-low-detail",false),
+                Mod::get()->getSavedValue<bool>("survival-disable-shake",false));
+        }
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         auto& debug = corum::ranked::debug::DebugSpectateRuntime::get();
         if (debug.preparedLevel(m_fields->levelId) &&
@@ -460,7 +465,16 @@ public:
         m_fields->rankedPractice = !m_fields->spectatorMode && m_isPracticeMode;
         if (m_fields->spectatorMode && m_player1) m_player1->setVisible(false);
         if (m_fields->rankedPractice) runtime.reportPracticePresence(true);
-        if(m_fields->survivalLevel)addSurvivalHud();else addRankedHud();
+        if(m_fields->survivalLevel){
+            // Native camera shake suppression, scoped to this official game.
+            // Preserve any author/native disable flag when the preference is OFF.
+            m_skipCameraShake=m_skipCameraShake || level->m_disableShakeToggled;
+#if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
+            log::info("[SurvivalOptions] after native init level={} LDM={} skipCameraShake={} disableShake={}",
+                m_fields->levelId,m_lowDetailMode,m_skipCameraShake,level->m_disableShakeToggled);
+#endif
+            addSurvivalHud();
+        }else addRankedHud();
         m_fields->gameplayFrameObserved = false;
         m_fields->attemptJournalReadyAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
         m_fields->attemptStartReported = false;

@@ -311,6 +311,28 @@ assert.equal(complete.data.client.audio.fadeOutSeconds, 0);
 assert.equal(complete.data.client.ui.fadeInSeconds, 0.24);
 assert.equal(complete.data.client.ui.fadeOutSeconds, 0.18);
 
+// Toggle only the generic environment policy, preserve its rules, change the
+// immutable generation, and fail closed on an ambiguous Sheets value.
+assert.equal(complete.data.operational.modRestrictionEnabled,true);
+setConfig("modRestrictionEnabled",false);
+const unrestricted=responseJson();
+assert.equal(unrestricted.data.operational.modRestrictionEnabled,false);
+assert.deepEqual(unrestricted.data.allowedMods,complete.data.allowedMods);
+assert.deepEqual(unrestricted.data.operational.cbf,complete.data.operational.cbf);
+assert.notEqual(unrestricted.data.generation,complete.data.generation);
+setConfig("modRestrictionEnabled",true);
+assert.equal(responseJson().data.generation,complete.data.generation);
+setConfig("modRestrictionEnabled","invalid");
+assert.equal(responseJson().ok,false);
+setConfig("modRestrictionEnabled","");
+assert.equal(responseJson().data.operational.modRestrictionEnabled,true);
+const configRows=spreadsheet.getSheetByName("Ranked Config").rows;
+const restrictionRow=configRows.findIndex(row=>row[0]==="modRestrictionEnabled");
+configRows.splice(restrictionRow,1);
+assert.equal(responseJson().data.operational.modRestrictionEnabled,true);
+context.setupCorumRankedConfig();
+assert.equal(spreadsheet.getSheetByName("Ranked Config").rows.find(row=>row[0]==="modRestrictionEnabled")[1],true);
+
 setConfig("mmrOpponentStrengthWeight", 2.01);
 const invalidMmrOpponentWeight = responseJson();
 assert.equal(invalidMmrOpponentWeight.data.validation.valid, false);

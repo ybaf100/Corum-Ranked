@@ -38,7 +38,8 @@ const env={...environmentFixture(),debugBot:{password:"fixture-password"}} as Re
 const tokens=new TokenService(env);
 const session:RankedSessionContext={sessionId:id(2),playerId:id(1),gdAccountId:"100",gdUsername:"Human",displayedTier:"SILVER",
   hiddenMmr:1234,placementGames:5,clientVersion:REQUIRED_RANKED_CLIENT_VERSION,clientBuildChannel:"debug"};
-const solo={getSnapshot:()=>({...configDocumentFixture(),operational:{...configDocumentFixture().operational,enabled:false}})} as RankedConfigService;
+let modRestrictionEnabled=true;
+const solo={getSnapshot:()=>({...configDocumentFixture(),operational:{...configDocumentFixture().operational,enabled:false,modRestrictionEnabled}})} as RankedConfigService;
 const mods=[
   {id:"hwanhee1.corum_ranked",version:REQUIRED_RANKED_CLIENT_VERSION,enabled:true,loaded:true,internal:false,system:false},
   {id:"geode.node-ids",version:"v1.23.3",enabled:true,loaded:true,internal:false,system:false},
@@ -51,6 +52,7 @@ beforeAll(async()=>{pg=new PGlite();db=new PgliteDatabase(pg);
 },60000);
 afterAll(async()=>{await pg.close();});
 beforeEach(async()=>{
+  modRestrictionEnabled=true;
   await pg.exec("TRUNCATE ranked_players,sur_matches CASCADE");now=Date.parse("2026-10-11T12:00:00Z");sequence=100;mapId=40000000;
   document={generation:"m4",generatedAt:clock.now().toISOString(),config:{...DEFAULT_SURVIVAL_CONFIG,enabled:true}};
   config=new SurvivalConfigService({fetchConfig:async()=>structuredClone(document)},env);await config.refresh();
@@ -99,6 +101,18 @@ async function record(m:SurvivalMatch,progress:number) {
   const attemptId=ids.next();await send(m,"ATTEMPT_START",{attemptId});return send(m,"ATTEMPT_END",{attemptId,progress});
 }
 describe("Survival M4 persistent debug game",()=>{
+  it("uses the real generic policy switch while preserving debug ownership and password",async()=>{
+    vi.mocked(sessions.assertEnvironment).mockRestore();
+    const installedMods=[mods[0]!,{id:"other.mod",version:"1",enabled:true,loaded:true,internal:false,system:false}];
+    await expect(debug.create(session,{...body(),installedMods})).rejects.toMatchObject({status:403});
+    modRestrictionEnabled=false;
+    await expect(debug.create(session,{...body(),password:"wrong",installedMods})).rejects.toMatchObject({status:403});
+    const created=await debug.create(session,{...body(),installedMods});
+    expect(created.matchId).toBeTruthy();
+    modRestrictionEnabled=true;
+    await expect(debug.create(session,{...body(),installedMods})).rejects.toMatchObject({status:403});
+    expect((await engine.get(created.matchId)).state).not.toBe("CANCELLED");
+  });
   it("returns 409 for late Debug telemetry, preserves the timeout and accepts the presentation ACK instead of returning retryable 500",async()=>{
     let m=await prepare(await create());await record(m,100);m=await engine.get(m.id);const r=survivalCurrentRound(m);
     now=r.endsAt!;await db.query("UPDATE ranked_sessions SET last_heartbeat_at=$2 WHERE id=$1",[session.sessionId,clock.now().toISOString()]);

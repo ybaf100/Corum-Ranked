@@ -140,6 +140,11 @@ EnvironmentDecision evaluateEnvironment(
         allowedById[rule.id] = &rule;
         decision.allowedModIds.push_back(rule.id);
     }
+    if (!policy.modRestrictionEnabled) {
+        decision.allowed = true;
+        sortAndUnique(decision.allowedModIds);
+        return decision;
+    }
     for (auto const& mod : installedMods) {
         if (mod.internal || mod.system || mod.id.empty()) continue;
         userById[mod.id] = &mod;

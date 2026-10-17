@@ -34,6 +34,7 @@ struct EnvironmentPolicy {
     std::vector<AllowedModRule> allowedMods;
     std::string cbfModId;
     std::map<std::string, SettingValue> cbfRequiredSettings;
+    bool modRestrictionEnabled = true;
 };
 
 struct EnvironmentDecision {

@@ -111,6 +111,7 @@ var CORUM_RANKED_ALLOWED_MOD_DEFAULTS = Object.freeze([
 ]);
 
 var CORUM_RANKED_CONFIG_DEFAULTS = Object.freeze([
+  Object.freeze(["modRestrictionEnabled", true, "TRUE: 기존 허용/필수 모드·CBF 정책 적용; FALSE: 일반 모드 제한만 해제"]),
   Object.freeze(["enabled", false, "모든 필수 운영값 입력·검증 후 TRUE"]),
   Object.freeze(["ruleVersion", "corum-ranked-v0.5", "명세/규칙 버전"]),
   Object.freeze(["roundSeconds", 300, "일반 Round 시간"]),
@@ -441,6 +442,7 @@ function readCorumRankedConfig_() {
   );
   var operational = {
     enabled: rankedBoolean_(rawConfig.enabled),
+    modRestrictionEnabled: rankedRestrictionEnabled_(rawConfig.modRestrictionEnabled),
     generation: "",
     rules: rules,
     tierBands: tierBands,
@@ -470,6 +472,7 @@ function readCorumRankedConfig_() {
   var client = readRankedClientPresentation_(rawConfig);
 
   var generationInput = {
+    modRestrictionEnabled: operational.modRestrictionEnabled,
     rules: rules,
     tierBands: tierBands,
     csmpTierNames: csmpTierNames,
@@ -1384,3 +1387,11 @@ function rankedStableHash_(text) {
   return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
+// Missing legacy rows retain the original policy; malformed values never disable it.
+function rankedRestrictionEnabled_(value) {
+  if (value === undefined || value === null || String(value).trim() === "") return true;
+  var text = String(value).trim().toUpperCase();
+  if (text === "TRUE") return true;
+  if (text === "FALSE") return false;
+  throw new Error("modRestrictionEnabled must be TRUE or FALSE");
+}

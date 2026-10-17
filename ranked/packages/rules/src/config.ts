@@ -105,6 +105,8 @@ export const validateOperationalConfig = (
   config: RankedOperationalConfig,
 ): ConfigValidationResult => {
   const errors: string[] = [];
+  if (config.modRestrictionEnabled !== undefined && typeof config.modRestrictionEnabled !== "boolean")
+    errors.push("modRestrictionEnabled must be boolean");
   if (!config.generation.trim()) errors.push("generation is required");
   validateDocumentRules(config.rules, errors);
   errors.push(...validateTierBands(config.tierBands));

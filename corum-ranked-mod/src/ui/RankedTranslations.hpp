@@ -23,6 +23,12 @@ struct Translation {
 };
 
 inline constexpr std::array kKoreanTranslations {
+    Translation{"survival-back-map", "맵으로 돌아가기"},
+    Translation{"survival-view-board", "현황판 보기"},
+    Translation{"survival-preparing", "준비 중"},
+    Translation{"SELECTING MAP", "맵 선정 중"},
+    Translation{"PREPARING", "준비 중"},
+    Translation{"WAITING FOR PLAYERS", "참가자 입장 대기"},
     Translation{"A logged-in Geometry Dash account is required.", "로그인된 Geometry Dash 계정이 필요합니다."},
     Translation{"A mod update is required before entering Ranked.", "랭크에 입장하려면 모드를 업데이트하세요."},
     Translation{"Could not create a Ranked session.", "랭크 세션을 준비하지 못했습니다."},

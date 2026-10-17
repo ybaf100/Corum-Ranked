@@ -129,10 +129,12 @@ test('live cards retain identity, retarget from the current position and recolor
  const source=read('src/ui/SurvivalGameLayer.cpp');
  run(preamble+`
 #include <cmath>
+#include <array>
 #include <unordered_map>
+#include "domain/SurvivalBoardPresentation.hpp"
 #include "domain/SurvivalHudPresentation.hpp"
 #include "domain/ScoreDisplay.hpp"
-struct CCPoint{float x=0,y=0;bool operator==(CCPoint const&)const=default;};struct CCSize{float width,height;};struct Color{unsigned char r,g,b;};Color ccc3(unsigned char r,unsigned char g,unsigned char b){return {r,g,b};}
+struct CCPoint{float x=0,y=0;bool operator==(CCPoint const&)const=default;};struct CCSize{float width,height;};struct Color{unsigned char r,g,b;};using ccColor3B=Color;Color ccc3(unsigned char r,unsigned char g,unsigned char b){return {r,g,b};}
 struct CCAction{CCPoint from,to;int tag=0;void setTag(int n){tag=n;}};
 struct CCMoveTo{static CCAction* create(float,CCPoint point){auto* a=new CCAction;a->to=point;return a;}};struct CCEaseSineOut{static CCAction* create(CCAction* a){return a;}};
 struct CCNode{CCPoint pos;CCSize size{100,50};bool visible=true;CCAction* action=nullptr;int moves=0,stops=0;std::vector<CCNode*>children;virtual ~CCNode()=default;static CCNode* create(){return new CCNode;}void setPosition(CCPoint p){pos=p;}CCPoint getPosition()const{return pos;}void setScale(float){}void setVisible(bool b){visible=b;}void addChild(CCNode* c,int=0){children.push_back(c);}void removeFromParentAndCleanup(bool){}void removeAllChildrenWithCleanup(bool){children.clear();}void stopActionByTag(int){action=nullptr;++stops;}void runAction(CCAction* a){a->from=pos;action=a;++moves;}void advance(float t){assert(action);pos={action->from.x+(action->to.x-action->from.x)*t,action->from.y+(action->to.y-action->from.y)*t};}};
@@ -140,28 +142,40 @@ struct CCLabelBMFont:CCNode{std::string text;int writes=0;void setString(char co
 namespace fmt{template<class...T>std::string format(std::string text,T const&...values){auto put=[&](auto const& v){std::ostringstream out;out<<v;auto at=text.find('{');if(at!=std::string::npos){auto end=text.find('}',at);text.replace(at,end-at+1,out.str());}};(put(values),...);return text;}}
 template<class T>struct Number{T unwrapOr(T v){return v;}};template<class T>Number<T>numFromString(std::string const&){return {};}
 namespace corum::ranked{
+float rankedMenuTextScale(float scale){return scale;}
 namespace i18n{bool isKorean(){return false;}}std::string text(char const*,char const* s){return s;}
-namespace ui{inline constexpr Color Blue{0,0,255},SurfaceRaised{0,0,0},Cyan{0,255,255},Text{255,255,255},TextMuted{160,160,160},Red{255,0,0};enum class FontWeight{Black,ExtraBold};enum class RankBadgeDisplay{Leaderboard};
+namespace ui{inline constexpr Color Gold{255,195,55},Blue{0,0,255},SurfaceRaised{0,0,0},Cyan{0,255,255},Text{255,255,255},TextMuted{160,160,160},Red{255,0,0};enum class FontWeight{Black,ExtraBold};enum class RankBadgeDisplay{Leaderboard};
  CCNode* surface(CCSize size,CCPoint pos,Color,Color,unsigned char,bool){auto* node=new CCNode;node->size=size;node->pos=pos;return node;}
- CCLabelBMFont* menuLabel(std::string const& text,float,CCPoint pos,Color,FontWeight){auto* label=new CCLabelBMFont;label->text=text;label->pos=pos;return label;}void fitMenuLabelWidth(CCLabelBMFont*,float,float,float){}
+ CCLabelBMFont* menuLabel(std::string const& text,float,CCPoint pos,Color,FontWeight){auto* label=new CCLabelBMFont;label->text=text;label->pos=pos;return label;}CCLabelBMFont* playerNameLabel(std::string const& text,float scale,CCPoint pos,Color color,FontWeight weight){return menuLabel(text,scale,pos,color,weight);}void fitMenuLabelWidth(CCLabelBMFont*,float,float,float){}
  struct PlayerIcon{static CCNode* createLocal(){return CCNode::create();}static CCNode* createBot(int){return CCNode::create();}static CCNode* createRemote(int){return CCNode::create();}};
  CCNode* createAnimatedRankBadge(std::string const&,CCSize,RankBadgeDisplay){return CCNode::create();}
 }
 struct SurvivalMatchView{std::string id="m",roundKey="r1",ownId="a",phase="ROUND_1";int mapGeneration=1;std::vector<SurvivalStanding>standings,roundPlayers;matjson::Value result;};
 struct Coordinator{
- struct Tile{CCNode* root=nullptr;CCLabelBMFont* name=nullptr;CCLabelBMFont* record=nullptr;CCPoint destination;CCNode* icon=nullptr;CCNode* tierBadge=nullptr;std::string tier="";CCNode* eliminatedBackground=nullptr;std::string titleText={},recordText={};};
+ struct Tile{CCNode* root=nullptr;CCLabelBMFont* name=nullptr;CCLabelBMFont* record=nullptr;CCPoint destination;CCNode* icon=nullptr;CCNode* tierBadge=nullptr;std::string tier="";CCNode* eliminatedBackground=nullptr;std::string titleText={},recordText={};std::array<CCNode*,3>medals{};};
  std::string m_gridContext;CCNode grid;CCNode* m_grid=&grid;std::unordered_map<std::string,Tile>m_tiles;CCSize getContentSize()const{return {568,320};}
  ${method(source,'void showParticipants(')}
 };
 }
 int main(){using namespace corum::ranked;SurvivalMatchView view;SurvivalStanding a,b;a.id="a";a.name="Alice";a.rank=1;a.score=80;a.passing=true;b.id="b";b.name="Bob";b.rank=2;b.score=60;b.passing=true;view.standings={a,b};Coordinator ui;ui.showParticipants(view,false);
  auto* alice=ui.m_tiles.at("a").root;auto* name=ui.m_tiles.at("a").name;auto* icon=ui.m_tiles.at("a").icon;auto initial=alice->pos;
+ assert(ui.m_tiles.at("a").medals[0]->visible&&ui.m_tiles.at("b").medals[1]->visible);
+ for(int rank:{0,4,3,2,1}){view.standings[0].rank=rank;ui.showParticipants(view,false);auto const& tile=ui.m_tiles.at("a");
+  for(int n=1;n<=3;n++)assert(tile.medals[n-1]->visible==(n==rank));
+ }
+ view.standings[0].rank=1;
  view.standings[0].score=81;ui.showParticipants(view,false);assert(alice->moves==0&&name==ui.m_tiles.at("a").name&&icon==ui.m_tiles.at("a").icon);
  std::swap(view.standings[0],view.standings[1]);view.standings[0].rank=1;view.standings[1].rank=2;ui.showParticipants(view,false);assert(alice->moves==1);alice->advance(.5f);auto halfway=alice->pos;assert(halfway!=initial);
  std::swap(view.standings[0],view.standings[1]);view.standings[0].rank=1;view.standings[1].rank=2;view.standings[0].eliminated=true;ui.showParticipants(view,false);
- assert(alice==ui.m_tiles.at("a").root&&alice->moves==2&&alice->stops==2&&alice->pos==halfway&&alice->action->from==halfway&&alice->action->to==initial);assert(ui.m_tiles.at("a").eliminatedBackground->visible);
+ assert(alice==ui.m_tiles.at("a").root&&alice->moves==2&&alice->stops==2&&alice->pos==halfway&&alice->action->from==halfway&&alice->action->to==initial);assert(ui.m_tiles.at("a").eliminatedBackground->visible);for(auto* medal:ui.m_tiles.at("a").medals)assert(!medal->visible);
  auto moves=alice->moves;view.standings[0].currentProgress=41;view.standings[0].attemptActive=true;ui.showParticipants(view,false);assert(alice->moves==moves);assert(ui.m_tiles.at("a").record->text.find("ELIMINATED")!=std::string::npos);
- view.roundKey="r2";view.standings={b};ui.showParticipants(view,false);assert(ui.m_tiles.size()==1&&!ui.m_tiles.contains("a"));
+ view.standings[0].eliminated=false;view.standings[0].rank=3;view.standings[1].rank=3;ui.showParticipants(view,false);
+ assert(ui.m_tiles.at("a").medals[2]->visible&&ui.m_tiles.at("b").medals[2]->visible);
+ assert(!ui.m_tiles.at("a").eliminatedBackground->visible);
+ matjson::Value::Array podium;for(int rank=1;rank<=3;++rank){matjson::Value p;p["participantId"]=std::string("final-")+std::to_string(rank);p["name"]="HwanHee";p["rank"]=rank;p["delta"]=50;podium.push_back(p);}
+ view.result["standings"]=podium;ui.showParticipants(view,true);assert(ui.m_tiles.size()==3);
+ for(int rank=1;rank<=3;++rank){auto const& t=ui.m_tiles.at(std::string("final-")+std::to_string(rank));assert(t.medals[rank-1]->visible&&t.name->text=="HwanHee");}
+ view.result={};view.roundKey="r2";view.standings={b};ui.showParticipants(view,false);assert(ui.m_tiles.size()==1&&!ui.m_tiles.contains("a"));
 }
 `);
 });

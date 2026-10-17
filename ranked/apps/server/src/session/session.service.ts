@@ -95,6 +95,7 @@ export class SessionService {
   public assertEnvironment(installedMods: readonly InstalledModDto[]): void {
     const snapshot = this.config.getSnapshot();
     const decision = evaluateClientEnvironment(installedMods, {
+      modRestrictionEnabled: snapshot.operational.modRestrictionEnabled ?? true,
       allowedMods: snapshot.allowedMods,
       cbf: snapshot.operational.cbf,
     });

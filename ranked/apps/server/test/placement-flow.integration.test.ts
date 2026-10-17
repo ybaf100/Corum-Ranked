@@ -153,11 +153,16 @@ describe("server-authoritative solo Stage Placement", () => {
       .toEqual([1, 2, 3, 4, 5, 6]);
     expect(available.referenceMaps[0].metadata).toMatchObject({kind:"DEMON",gddlTier:16,durationSeconds:90});
 
+    const unrestrictedMods=[cleanMods[0]!,{id:"other.mod",version:"1",enabled:true,loaded:true,internal:false,system:false}];
+    await expect(placement.start(session,{startingPool:3,stageCount:5,installedMods:unrestrictedMods})).rejects.toMatchObject({status:403});
+    Object.assign(snapshot.operational,{modRestrictionEnabled:false});
     let state = await placement.start(session, {
       startingPool: 3,
       stageCount: 5,
-      installedMods: structuredClone(cleanMods),
+      installedMods: unrestrictedMods,
     }) as Record<string, any>;
+    Object.assign(snapshot.operational,{modRestrictionEnabled:true});
+    await expect(placement.ready(state.runId,session,{installedMods:unrestrictedMods})).rejects.toMatchObject({status:403});
     const runId = state.runId as string;
     expect(state).toMatchObject({ state: "MAP_PREPARE", currentStageIndex: 1, currentMapIndex: 1, totalStages: 5 });
     expect(state.currentMap.metadata).toMatchObject({kind:"DEMON",gddlTier:16,gddlColor:"#da4534",durationSeconds:90});

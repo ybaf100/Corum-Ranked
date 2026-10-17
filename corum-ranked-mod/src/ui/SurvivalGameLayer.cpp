@@ -17,6 +17,9 @@
 #include "../domain/CompetitiveHudLayout.hpp"
 #include "../domain/ScoreDisplay.hpp"
 #include "../domain/SurvivalRoundMenuPolicy.hpp"
+#include "../domain/SurvivalBoardPresentation.hpp"
+#include "../domain/SurvivalNativeOptions.hpp"
+#include <array>
 #include "../RankedMapDetails.hpp"
 #include <Geode/binding/PlayLayer.hpp>
 #include <Geode/ui/LoadingSpinner.hpp>
@@ -27,19 +30,24 @@ using namespace geode::prelude;
 namespace corum::ranked {
 namespace {
 class SurvivalGameLayer final : public CCLayerColor {
-    struct Tile {CCNode* root=nullptr;CCLabelBMFont* name=nullptr;CCLabelBMFont* record=nullptr;CCPoint destination;CCNode* icon=nullptr;CCNode* tierBadge=nullptr;std::string tier="";CCNode* eliminatedBackground=nullptr;std::string titleText,recordText;};
+    struct Tile {CCNode* root=nullptr;CCLabelBMFont* name=nullptr;CCLabelBMFont* record=nullptr;CCPoint destination;CCNode* icon=nullptr;CCNode* tierBadge=nullptr;std::string tier="";CCNode* eliminatedBackground=nullptr;std::string titleText,recordText;std::array<CCNode*,3> medals{};};
     std::unordered_map<std::string,Tile> m_tiles;
     CCNode* m_grid=nullptr;
     CCNode* m_mapPanel=nullptr;
     LoadingSpinner* m_spinner=nullptr;
     CCLabelBMFont *m_mapReady=nullptr,*m_audioReady=nullptr,*m_mapTimer=nullptr;
+    CCLabelBMFont* m_boardClock=nullptr;
+    CCMenuItemSpriteExtra *m_backToMap=nullptr,*m_viewBoard=nullptr;
+    std::string m_navigationContext;
+    std::optional<std::int64_t> m_entrySyncAfter;
+    bool m_browsingBoard=false,m_manualMap=false;
     CCLabelBMFont *m_heading=nullptr,*m_status=nullptr,*m_map=nullptr,*m_ldmLabel=nullptr,*m_shakeLabel=nullptr;
     CCMenuItemSpriteExtra *m_resume=nullptr,*m_continue=nullptr,*m_surrender=nullptr,*m_ldm=nullptr,*m_shake=nullptr,*m_jukeboxButton=nullptr;
     CCMenuItemSpriteExtra* m_force=nullptr;
     CCMenuItemSpriteExtra* m_freePlay=nullptr;
     std::optional<WeakRef<ui::RankedConfirmPopup>> m_confirmation;
     std::optional<WeakRef<ui::RankedJukeboxPopup>> m_jukebox;
-    std::string m_launchedContext,m_resultMotion,m_optionsContext,m_gridContext,m_confirmationContext;
+    std::string m_launchedContext,m_resultMotion,m_gridContext,m_confirmationContext;
     std::string m_eliminationKey,m_pendingLaunch;
     std::string m_previewKey,m_jukeboxContext;
     std::chrono::steady_clock::time_point m_eliminationUntil{};
@@ -58,7 +66,9 @@ class SurvivalGameLayer final : public CCLayerColor {
         auto const size=CCDirector::sharedDirector()->getWinSize();setContentSize(size);
         m_lowDetail=Mod::get()->getSavedValue<bool>("survival-low-detail",false);
         m_disableShake=Mod::get()->getSavedValue<bool>("survival-disable-shake",false);
-        m_heading=ui::menuLabel("SURVIVAL",.60f,{size.width/2,size.height-23},ui::Cyan,ui::FontWeight::Black);addChild(m_heading);
+        m_heading=ui::menuLabel("SURVIVAL",.60f,{(size.width-156)/2+8,size.height-23},ui::Cyan,ui::FontWeight::Black);addChild(m_heading);
+        m_boardClock=ui::menuLabel("",.28f,{size.width-12,size.height-22},ui::Cyan,ui::FontWeight::ExtraBold);
+        m_boardClock->setAnchorPoint({1,.5f});m_boardClock->setID("survival-board-clock"_spr);addChild(m_boardClock,10);
         m_map=ui::menuLabel("",.27f,{size.width/2,size.height-49},ui::TextMuted,ui::FontWeight::SemiBold);addChild(m_map);
         m_status=ui::menuLabel("",.28f,{size.width/2,80},ui::TextMuted,ui::FontWeight::SemiBold);addChild(m_status);
         m_grid=CCNode::create();addChild(m_grid,5);
@@ -70,6 +80,8 @@ class SurvivalGameLayer final : public CCLayerColor {
         m_surrender=button(menu,text("surrender","SURRENDER"),{size.width-68,22},116,2,ui::Red);
         m_freePlay=button(menu,text("survival-free-play","FREE PLAY"),{68,22},116,7,ui::Green);
         m_freePlay->setVisible(false);
+        m_backToMap=button(menu,text("survival-back-map","BACK TO MAP"),{size.width/2,22},132,8,ui::Cyan);
+        m_viewBoard=button(menu,text("survival-view-board","VIEW STATUS"),{68,22},116,9,ui::Blue);
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
         m_force=button(menu,"Force n",{68,22},116,3,ui::Red);
 #endif
@@ -80,7 +92,7 @@ class SurvivalGameLayer final : public CCLayerColor {
         scheduleUpdate();return true;
     }
     void confirmSurrender() {
-        if(m_confirmation)return;
+        if(m_confirmation || SurvivalRuntime::get().surrenderPending())return;
         auto const& view=SurvivalRuntime::get().view();m_confirmationContext=view.id+":"+view.roundKey+":"+std::to_string(view.mapGeneration);auto const id=view.id,round=view.roundKey;auto const generation=view.mapGeneration;
         auto* popup=ui::RankedConfirmPopup::create(text("surrender-confirm","CONFIRM SURRENDER"),
             SurvivalRuntime::get().surrenderMessage(),
@@ -100,10 +112,12 @@ class SurvivalGameLayer final : public CCLayerColor {
         if(item->getTag()==1)runtime.acknowledge();
         if(item->getTag()==2)confirmSurrender();
         if(item->getTag()==7)runtime.beginFreePlay();
+        if(item->getTag()==8){m_browsingBoard=false;m_manualMap=true;m_entrySyncAfter=runtime.serverSyncMillis();runtime.refreshRound();}
+        if(item->getTag()==9){m_browsingBoard=true;m_manualMap=true;}
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
         if(item->getTag()==3)showSurvivalForceRankPopup();
 #endif
-        if(item->getTag()==4 && level){m_lowDetail=!m_lowDetail;Mod::get()->setSavedValue("survival-low-detail",m_lowDetail);RankedRoundPreparation::get().setLowDetail(m_lowDetail);}
+        if(item->getTag()==4 && level && level->m_lowDetailMode){m_lowDetail=!m_lowDetail;Mod::get()->setSavedValue("survival-low-detail",m_lowDetail);RankedRoundPreparation::get().setLowDetail(m_lowDetail);}
         if(item->getTag()==5 && level){m_disableShake=!m_disableShake;Mod::get()->setSavedValue("survival-disable-shake",m_disableShake);level->m_disableShakeToggled=m_disableShake;}
         if(item->getTag()==6 && level){
             if(!ui::rankedJukeboxLoaded()) {
@@ -115,7 +129,8 @@ class SurvivalGameLayer final : public CCLayerColor {
     }
     void queueNativeLaunch() {
         auto& runtime=SurvivalRuntime::get();auto const context=runtime.preparationContext();
-        if(m_closed || !m_pendingLaunch.empty() || !runtime.canEnter())return;
+        if(m_closed || !m_pendingLaunch.empty() || !runtime.canEnter() ||
+            (m_entrySyncAfter && runtime.serverSyncMillis()<=*m_entrySyncAfter))return;
         m_pendingLaunch=preparationContextText(context);
         // Native object setup/texture loading must run outside the coordinator's
         // scheduler callback. Recheck scene, generation and modal ownership after
@@ -126,7 +141,8 @@ class SurvivalGameLayer final : public CCLayerColor {
             auto& runtime=SurvivalRuntime::get();
             auto const jukeboxOpen=owner->m_jukebox && owner->m_jukebox->lock() && owner->m_jukebox->lock()->getParent();
             if(jukeboxOpen || owner->m_closed || !owner->isRunning() || owner->getParent()!=scene || owner->m_motion ||
-                owner->m_confirmation || context!=runtime.preparationContext() || !runtime.canEnter())return;
+                owner->m_confirmation || owner->m_browsingBoard || context!=runtime.preparationContext() || !runtime.canEnter() ||
+                (owner->m_entrySyncAfter && runtime.serverSyncMillis()<=*owner->m_entrySyncAfter))return;
             if(RankedRoundPreparation::get().launch(scene))owner->m_launchedContext=preparationContextText(context);
         });
     }
@@ -146,7 +162,7 @@ class SurvivalGameLayer final : public CCLayerColor {
             auto const destination=CCPoint{left+(i%columns)*width,top-(i/columns)*height};
             if(found==m_tiles.end()){
                 auto* root=ui::surface({width-8,height-4},{},ui::Blue,ui::SurfaceRaised,230,true);root->setPosition(destination);m_grid->addChild(root);
-                auto* nickname=ui::menuLabel(value.name,.25f,{(width-8)/2,height-10},value.id==view.ownId?ui::Cyan:ui::Text,ui::FontWeight::Black);
+                auto* nickname=ui::playerNameLabel(value.name,rankedMenuTextScale(.25f),{(width-8)/2,height-10},value.id==view.ownId?ui::Cyan:ui::Text,ui::FontWeight::Black);
                 ui::fitMenuLabelWidth(nickname,width-20,.25f,.20f);root->addChild(nickname,5);
                 int index=1;auto dash=value.id.rfind('-');if(dash!=std::string::npos)index=numFromString<int>(value.id.substr(dash+1)).unwrapOr(1);
                 auto* avatarSlot=CCNode::create();avatarSlot->setPosition({(width-8)/2,(height-4)/2});root->addChild(avatarSlot,5);
@@ -155,6 +171,11 @@ class SurvivalGameLayer final : public CCLayerColor {
                 auto* record=ui::menuLabel("",.23f,{(width-8)/2,7},ui::TextMuted,ui::FontWeight::ExtraBold);root->addChild(record,5);
                 found=m_tiles.emplace(value.id,Tile{root,nickname,record,destination,avatarSlot}).first;
                 auto& tile=found->second;
+                std::array<ccColor3B,3> const accents{ui::Gold,ccc3(201,215,235),ccc3(208,137,70)};
+                for(std::size_t medal=0;medal<accents.size();++medal){
+                    tile.medals[medal]=ui::surface({width-8,height-4},{(width-8)/2,(height-4)/2},accents[medal],ui::SurfaceRaised,245,true);
+                    tile.medals[medal]->setVisible(false);root->addChild(tile.medals[medal],3);
+                }
                 tile.eliminatedBackground=ui::surface({width-8,height-4},{(width-8)/2,(height-4)/2},ui::Red,{42,13,28},250,true);
                 tile.eliminatedBackground->setVisible(false);root->addChild(tile.eliminatedBackground,4);
             }
@@ -179,7 +200,9 @@ class SurvivalGameLayer final : public CCLayerColor {
                 if(tile.titleText!=title){tile.titleText=title;tile.name->setString(title.c_str());ui::fitMenuLabelWidth(tile.name,width-20,.25f,.18f);}
                 tile.name->setColor(value.eliminated?ui::Red:value.id==view.ownId?ui::Cyan:ui::Text);
             }
-            tile.eliminatedBackground->setVisible(!result && value.eliminated);
+            auto const medal=survivalCardMedal(value.rank,value.eliminated);
+            for(std::size_t n=0;n<tile.medals.size();++n)tile.medals[n]->setVisible(medal==static_cast<int>(n+1));
+            tile.eliminatedBackground->setVisible(value.eliminated);
             if(tile.recordText!=record){tile.recordText=record;tile.record->setString(record.c_str());ui::fitMenuLabelWidth(tile.record,width-14,.21f,.16f);}
             tile.record->setColor(ccc3(color.r,color.g,color.b));
         }
@@ -196,6 +219,7 @@ class SurvivalGameLayer final : public CCLayerColor {
             auto metadata=RankedMapDetails::get().metadata(view.map.levelId);
             if(metadata.kind=="UNKNOWN"){metadata.kind=view.map.demon==SurvivalDemon::None?"NORMAL":"DEMON";metadata.stars=view.map.stars;}
             if(!metadata.featureScore)metadata.featureScore=static_cast<int>(view.certificate["featureScore"].asInt().unwrapOr(0));
+            if(!metadata.lengthCategory && view.map.length>=0 && view.map.length<=4)metadata.lengthCategory=view.map.length;
             if(!metadata.epic)metadata.epic=static_cast<int>(view.certificate["epic"].asInt().unwrapOr(0));
             ui::addRankedMapHeading(m_mapPanel,view.map.levelId,native?std::string(level->m_levelName):text("downloading-map","DOWNLOADING MAP..."),metadata,{width/2,150});
             auto* creator=ui::menuLabel(native?fmt::format("{} · GD #{}",std::string(level->m_creatorName),view.map.levelId):fmt::format("GD #{}",view.map.levelId),
@@ -206,8 +230,10 @@ class SurvivalGameLayer final : public CCLayerColor {
             m_audioReady=ui::menuLabel("",.25f,{width/2+80,19},ui::TextMuted,ui::FontWeight::SemiBold);m_mapPanel->addChild(m_audioReady,5);
             m_mapShownAt=native?std::chrono::steady_clock::now():std::chrono::steady_clock::time_point{};
         }
-        auto const seconds=view.endsAt.empty()?180:(std::max<std::int64_t>(0,SurvivalRuntime::get().remainingMs())+999)/1000;
-        m_mapTimer->setString((view.phase=="TIEBREAK"?text("deathmatch","DEATH MATCH"):fmt::format("{:02}:{:02}",seconds/60,seconds%60)).c_str());
+        auto& runtime=SurvivalRuntime::get();
+        auto const timer=view.state=="COUNTDOWN"?survivalBoardClock(view.state,runtime.countdownMs(),runtime.roundRemainingMs()):
+            view.state=="PLAYING"?survivalClockText(runtime.roundRemainingMs()):view.phase=="TIEBREAK"?text("deathmatch","DEATH MATCH"):text("survival-preparing","PREPARING");
+        m_mapTimer->setString(timer.c_str());
         auto const& prep=RankedRoundPreparation::get().view();
         m_mapReady->setString(fmt::format("{}: {}",text("map","MAP"),text(prep.mapReady?"ready":"loading",prep.mapReady?"READY":"LOADING")).c_str());
         m_audioReady->setString(fmt::format("{}: {}",text("audio","AUDIO"),text(prep.audioReady?"ready":"loading",prep.audioReady?"READY":"LOADING")).c_str());
@@ -310,7 +336,12 @@ public:
         syncAudio(view,elimination);
         auto const intro=view.presentationGate=="INTRO";
         auto const nextRound=survivalCanPrepareNext(view.state,view.ownEliminated,view.resultPending,result);
-        auto const liveBoard=runtime.normalRoundCleared() && view.state=="PLAYING" && !result && !elimination;
+        auto const navigationContext=view.id+":"+view.roundKey+":"+std::to_string(view.mapGeneration);
+        if(m_navigationContext!=navigationContext){m_navigationContext=navigationContext;m_browsingBoard=false;m_manualMap=false;m_entrySyncAfter.reset();}
+        auto const liveBoard=(m_browsingBoard || (runtime.normalRoundCleared() && !m_manualMap)) && !result && !elimination;
+        auto const clock=survivalBoardClock(view.state,runtime.countdownMs(),runtime.roundRemainingMs());
+        m_boardClock->setString(i18n::text(clock,clock).c_str());m_boardClock->setVisible(!result && !clock.empty());
+        ui::fitMenuLabelWidth(m_boardClock,140,.28f,.18f);
         auto const mapWindow=nextRound && !elimination && !intro && !liveBoard && view.map.levelId>0 && view.state!="ROUND_RESULT";
         auto const searching=nextRound && !elimination && !intro && view.state=="MAP_SELECTION";
         auto const now=std::chrono::steady_clock::now();
@@ -318,12 +349,18 @@ public:
         m_grid->setVisible(!mapWindow && !searching);if(m_mapPanel)m_mapPanel->setVisible(mapWindow);
         m_spinner->setVisible(searching);m_spinner->setPosition({getContentSize().width/2,getContentSize().height/2});m_spinner->setScale(2);
         auto const context=preparationContextText(runtime.preparationContext());auto* level=RankedLevelPreparation::get().level();
-        m_resume->setVisible(!result && m_launchedContext==context && !view.ownEliminated && runtime.canEnter());m_resume->setEnabled(!m_motion && !elimination);
-        m_continue->setVisible(result);m_continue->setEnabled(!m_motion && !elimination && !runtime.creating());m_surrender->setVisible(nextRound);m_surrender->setEnabled(!elimination && !m_motion);
+        m_resume->setVisible(mapWindow && !result && !view.ownEliminated && runtime.canEnter());m_resume->setEnabled(!m_motion && !elimination && (!m_entrySyncAfter || runtime.serverSyncMillis()>*m_entrySyncAfter));
+        m_continue->setVisible(result);m_continue->setEnabled(!m_motion && !elimination && !runtime.creating());m_surrender->setVisible(nextRound);m_surrender->setEnabled(!elimination && !m_motion && !runtime.surrenderPending());
+        m_backToMap->setVisible(liveBoard && nextRound);m_backToMap->setEnabled(!m_motion && !elimination && !runtime.surrenderPending());
+        m_viewBoard->setVisible(mapWindow);m_viewBoard->setEnabled(!m_motion && !elimination);
         m_freePlay->setVisible(liveBoard && runtime.canFreePlay());m_freePlay->setEnabled(!m_motion && !m_confirmation);
         if(m_force){m_force->setVisible(view.debug && !view.online && nextRound && !mapWindow && !liveBoard);m_force->setEnabled(!m_motion && now>=m_eliminationUntil && !runtime.creating());}
         for(auto* option:{m_ldm,m_shake,m_jukeboxButton}){option->setVisible(mapWindow);option->setEnabled(!m_motion && !elimination && level && static_cast<int>(level->m_levelID)==view.map.levelId);}
-        if(level && m_optionsContext!=context){m_optionsContext=context;RankedRoundPreparation::get().setLowDetail(m_lowDetail);level->m_disableShakeToggled=m_disableShake;}
+        auto const supportsLDM=survivalSupportsLowDetail(level,view.map.levelId,preparation.mapReady);
+        m_ldm->setVisible(mapWindow && supportsLDM);
+        auto const optionWidth=std::min(130.0f,(getContentSize().width-44)/3);
+        m_shake->setPosition({getContentSize().width/2-(supportsLDM?0:optionWidth/2+4),55});
+        m_jukeboxButton->setPosition({getContentSize().width/2+(supportsLDM?optionWidth+8:optionWidth/2+4),55});
         m_ldmLabel->setString(fmt::format("LDM: {}",m_lowDetail?"ON":"OFF").c_str());m_shakeLabel->setString(fmt::format("{}: {}",text("disable-shake","Disable Shake"),m_disableShake?"ON":"OFF").c_str());
         ui::fitMenuLabelWidth(m_shakeLabel,m_shake->getContentSize().width-12,.29f,.20f);
         if(!elimination)m_heading->setString(result?fmt::format("SURVIVAL · {}",i18n::isKorean()?fmt::format("{}위",view.result["rank"].asInt().unwrapOr(0)):survivalOrdinal(static_cast<int>(view.result["rank"].asInt().unwrapOr(0)))).c_str():
@@ -337,11 +374,11 @@ public:
         else if(result)status=fmt::format("{:+} LP · {} LP",view.result["actualDelta"].asInt().unwrapOr(0),view.result["profileAfter"]["lp"].asInt().unwrapOr(0));
         else if(intro)status=fmt::format("{} · {} / {}",text("matchmaking","MATCHMAKING"),view.playerCount,view.playerCount);
         else if(view.resultPending || view.state=="FINAL_RESULT" || view.ownEliminated)status=text("survival-result-pending","RANK FIXED · SETTLING LP...");
-        else if(liveBoard){auto const seconds=(runtime.remainingMs()+999)/1000;status=fmt::format("{} · {:02}:{:02}",text("survival-live-board","LIVE ROUND STATUS"),seconds/60,seconds%60);}
+        else if(liveBoard)status=text("survival-live-board","LIVE ROUND STATUS");
         else if(view.state=="MAP_SELECTION")status=view.mapError.empty()?text("survival-selecting-map","SELECTING A SERVER MAP..."):text("survival-map-retry","MAP SEARCH FAILED · RETRYING...");
         else if(!preparation.mapReady)status=text("downloading-map","DOWNLOADING MAP...");
         else if(!preparation.audioReady)status=text("downloading-audio","DOWNLOADING AUDIO...");
-        else status=m_launchedContext==context?text("survival-game-running","THE SERVER TIMER CONTINUES. YOU CAN RE-ENTER."):text("survival-auto-entry","READY · ENTERING AUTOMATICALLY...");
+        else status=(m_manualMap || m_launchedContext==context)?text("survival-game-running","THE SERVER TIMER CONTINUES. YOU CAN RE-ENTER."):text("survival-auto-entry","READY · ENTERING AUTOMATICALLY...");
         if(elimination && view.state!="CANCELLED"){
             if(now<m_eliminationUntil)status=text("result","RESULT");
             else if(nextRound)status=text("survival-next-map-wait","NEXT MAP SOON...");
@@ -354,7 +391,7 @@ public:
         auto const jukeboxOpen=m_jukebox && m_jukebox->lock() && m_jukebox->lock()->getParent();
         if(intro && now>=m_introUntil && !m_confirmation && !debugPopup)runtime.presentationComplete();
         if(!m_motion && !elimination && !m_confirmation && !jukeboxOpen && !debugPopup && !runtime.creating() &&
-            mapWindow && m_mapShownAt!=std::chrono::steady_clock::time_point{} && now>=m_mapShownAt+std::chrono::milliseconds(650) &&
+            mapWindow && !m_manualMap && m_mapShownAt!=std::chrono::steady_clock::time_point{} && now>=m_mapShownAt+std::chrono::milliseconds(650) &&
             runtime.canEnter() && m_launchedContext!=context)queueNativeLaunch();
         if(result && !elimination)beginResultMotion();
         if(view.online && result && !m_motion && !elimination){
@@ -372,7 +409,12 @@ public:
     void keyBackClicked() override {
         if(m_closed || m_motion || std::chrono::steady_clock::now()<m_eliminationUntil)return;
         if(SurvivalRuntime::get().view().result.isObject()){SurvivalRuntime::get().acknowledge();return;}
-        m_closed=true;queueInMainThread([]{CCDirector::sharedDirector()->popScene();});
+        // Both gameplay exit and this first Back are navigation only. The
+        // retained coordinator owns the match/polling and never pops here.
+        if(!m_browsingBoard && !(SurvivalRuntime::get().normalRoundCleared() && !m_manualMap)){
+            m_browsingBoard=true;m_manualMap=true;return;
+        }
+        if(!SurvivalRuntime::get().view().ownEliminated)confirmSurrender();
     }
     void onExit() override {
         if(m_confirmation){if(auto popup=m_confirmation->lock())popup->cancel();m_confirmation.reset();}

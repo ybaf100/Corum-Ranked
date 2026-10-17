@@ -304,6 +304,7 @@ bool SurvivalRuntime::consumeNativeLaunch(GJGameLevel* level) {
 }
 bool SurvivalRuntime::canEnter() const {
     if(surrenderPending() || normalRoundCleared() || freePlaying())return false;
+    if(m_view.state=="PLAYING" && remainingMs()<=0)return false;
     if(!m_prepared.valid() || m_prepared!=preparationContext() || m_session.empty())return false;
     if(m_view.online && !m_view.ownAssetsReady)return false;
     if(attemptLimitReached())return false;

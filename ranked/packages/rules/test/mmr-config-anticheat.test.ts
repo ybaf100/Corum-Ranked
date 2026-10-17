@@ -267,3 +267,29 @@ describe("allowlist and CBF gate", () => {
     expect(decision.missingRequiredModIds).toContain("geode.node-ids");
   });
 });
+
+
+describe("operator mod restriction switch", () => {
+  it.each([true, undefined])("keeps default restrictions for %s", modRestrictionEnabled => {
+    const policy={...clientPolicyFixture(),...(modRestrictionEnabled===undefined?{}:{modRestrictionEnabled})};
+    expect(evaluateClientEnvironment([],policy).allowed).toBe(false);
+    expect(evaluateClientEnvironment([{id:"other.mod",version:"1",enabled:true,loaded:true,internal:false,system:false}],policy).allowed).toBe(false);
+  });
+  it("bypasses only general checks and restores the intact policy when enabled again", () => {
+    const policy={...clientPolicyFixture(),modRestrictionEnabled:false};
+    const mods=[{id:"other.mod",version:"1",enabled:true,loaded:true,internal:false,system:false}];
+    const saved=structuredClone(policy);
+    const off=evaluateClientEnvironment(mods,policy);
+    expect(off).toMatchObject({allowed:true,unauthorizedModIds:[],missingRequiredModIds:[],versionViolations:[],cbfIssues:[]});
+    expect(policy).toEqual(saved);
+    expect(evaluateClientEnvironment(mods,{...policy,modRestrictionEnabled:true}).allowed).toBe(false);
+    expect(evaluateClientEnvironment(mods,policy)).toEqual(off);
+  });
+  it.each([false,true,undefined])("validates a compatible boolean %s", modRestrictionEnabled => {
+    expect(validateOperationalConfig({...completeOperationalConfig(),...(modRestrictionEnabled===undefined?{}:{modRestrictionEnabled})}).valid).toBe(true);
+  });
+  it.each(["FALSE",0,null])("rejects non-boolean %s", modRestrictionEnabled => {
+    const invalid=Object.assign(completeOperationalConfig(),{modRestrictionEnabled});
+    expect(validateOperationalConfig(invalid).valid).toBe(false);
+  });
+});

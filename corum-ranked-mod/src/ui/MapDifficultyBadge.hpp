@@ -14,6 +14,7 @@ inline MapMetadata displayedMapMetadata(int levelId, MapMetadata info) {
         if (duration) info.durationSeconds = duration;
     }
     if (!info.durationSeconds) info.durationSeconds = native.durationSeconds;
+    if(!info.lengthCategory)info.lengthCategory=native.lengthCategory;
     if(native.featureScore)info.featureScore=native.featureScore;
     if(native.epic)info.epic=native.epic;
     return info;

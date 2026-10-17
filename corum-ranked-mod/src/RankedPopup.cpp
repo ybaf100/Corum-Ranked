@@ -2005,8 +2005,8 @@ class CorumRankedLayer final : public CCLayerColor {
             m_root->addChild(referenceLabel, 5);
             if (reference != view.placement.referenceMaps.end()) {
                 addMapDifficulty(*reference,{x,y-28},107,14);
-                auto const seconds=corum::ranked::ui::displayedMapMetadata(reference->levelId,reference->metadata).durationSeconds;
-                auto* length=makeLabel(corum::ranked::mapLengthText(seconds),0.14f,{x,y-40},corum::ranked::ui::TextMuted,"semibold");
+                auto const lengthMetadata=corum::ranked::ui::displayedMapMetadata(reference->levelId,reference->metadata);
+                auto* length=makeLabel(corum::ranked::mapLengthText(lengthMetadata),0.14f,{x,y-40},corum::ranked::ui::TextMuted,"semibold");
                 m_root->addChild(length,5);
             }
         }
@@ -3154,8 +3154,8 @@ class CorumRankedLayer final : public CCLayerColor {
             auto* difficultyPlate = makeNeonPanel({cardWidth - 22.0f, 38.0f}, {x, centerY - 20.0f}, diffColor, {11, 20, 36}, 245);
             m_root->addChild(difficultyPlate, 2);
             addMapDifficulty(candidate, {x, centerY - 12}, cardWidth - 28, 18);
-            auto const seconds=corum::ranked::ui::displayedMapMetadata(candidate.levelId,candidate.metadata).durationSeconds;
-            auto* diff = makeLabel(corum::ranked::mapLengthText(seconds), 0.25f, {x, centerY - 27.0f}, corum::ranked::ui::Text, "semibold");
+            auto const lengthMetadata=corum::ranked::ui::displayedMapMetadata(candidate.levelId,candidate.metadata);
+            auto* diff = makeLabel(corum::ranked::mapLengthText(lengthMetadata), 0.25f, {x, centerY - 27.0f}, corum::ranked::ui::Text, "semibold");
             corum::ranked::ui::fitMenuLabelWidth(diff, cardWidth - 28.0f, 0.25f, 0.19f);
             m_root->addChild(diff, 4);
 
@@ -3264,8 +3264,8 @@ class CorumRankedLayer final : public CCLayerColor {
             auto* diffPlate = makeNeonPanel({146.0f, 36.0f}, {size.width / 2.0f, mapY - 27.0f}, diffColor, {12, 17, 27}, 246);
             m_root->addChild(diffPlate, 2);
             addMapDifficulty(*match.currentMap, {size.width / 2.0f, mapY - 19}, 125, 17);
-            auto const seconds=corum::ranked::ui::displayedMapMetadata(match.currentMap->levelId,match.currentMap->metadata).durationSeconds;
-            auto* difficulty = makeLabel(corum::ranked::mapLengthText(seconds), 0.30f, {size.width / 2.0f, mapY - 35.0f}, corum::ranked::ui::Text, "semibold");
+            auto const lengthMetadata=corum::ranked::ui::displayedMapMetadata(match.currentMap->levelId,match.currentMap->metadata);
+            auto* difficulty = makeLabel(corum::ranked::mapLengthText(lengthMetadata), 0.30f, {size.width / 2.0f, mapY - 35.0f}, corum::ranked::ui::Text, "semibold");
             corum::ranked::ui::fitMenuLabelWidth(difficulty, 124.0f, 0.30f, 0.20f);
             m_root->addChild(difficulty, 6);
         }

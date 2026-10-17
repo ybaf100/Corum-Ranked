@@ -36,7 +36,7 @@ using namespace cocos2d;
 constexpr char const* operator""_spr(char const* s,std::size_t){return s;}
 namespace corum::ranked::ui {
 enum class FontWeight{Regular,Medium,SemiBold,ExtraBold,Black};
-${['inline char const* font(','inline float fontScale(','inline void setLabelScale(','inline void fitLabelWidth(','inline CCLabelBMFont* label('].map(n=>method(visuals,n)).join('\n')}
+${['inline char const* font(','inline float fontScale(','inline void setLabelScale(','inline void fitLabelWidth(','inline CCLabelBMFont* playerNameLabel(','inline CCLabelBMFont* label('].map(n=>method(visuals,n)).join('\n')}
 }
 ${read('src/ui/RankedHudLabel.hpp').replace(/^#pragma once\s*|^#include .*$/gm,'')}
 int main(){using namespace corum::ranked::ui;
@@ -48,6 +48,10 @@ int main(){using namespace corum::ranked::ui;
  h.fit(70,.36f,.20f);assert(h.foreground->scale==h.shadow->scale);h.opacity(128);assert(h.foreground->alpha==128&&h.shadow->alpha==102);
  CCLabelBMFont::fallback=true;auto fallback=rankedHudLabel(&root,"한글",FontWeight::Black,.36f,{0,1},{8,270},{255,255,255});
  assert(fallback.foreground->resource=="goldFont.fnt"&&fallback.foreground->scale==.36f);
+ for(auto const* name:{"HwanHee","hwanhee","HWANHEE"}){
+  auto n=rankedHudPlayerName(&root,name,FontWeight::Black,.36f,{0,1},{8,270},{255,255,255});
+  assert(n.foreground->resource=="chatFont.fnt"&&n.foreground->value==name&&n.shadow->value==name);
+ }
  for(auto* child:root.children)delete child;
 }`);
 });
@@ -127,17 +131,17 @@ void drain(){auto queued=std::exchange(work,{});for(auto& f:queued)f();}
 std::string preparationContextText(LevelPreparationContext const& c){return c.matchId+":"+std::to_string(c.levelId)+":"+std::to_string(c.round);}
 bool inUpdate=false;
 struct RankedRoundPreparation{int launches=0;bool success=true;static RankedRoundPreparation& get(){static RankedRoundPreparation p;return p;}bool launch(CCScene*){assert(!inUpdate);++launches;return success;}};
-struct SurvivalRuntime{bool enter=true;LevelPreparationContext context{"match",40000000,1,0,false,0,0};static SurvivalRuntime& get(){static SurvivalRuntime r;return r;}auto preparationContext(){return context;}bool canEnter(){return enter;}};
+struct SurvivalRuntime{std::int64_t sync=1;std::int64_t serverSyncMillis(){return sync;}bool enter=true;LevelPreparationContext context{"match",40000000,1,0,false,0,0};static SurvivalRuntime& get(){static SurvivalRuntime r;return r;}auto preparationContext(){return context;}bool canEnter(){return enter;}};
 template<class T>struct WeakRef{T* pointer;explicit WeakRef(T* p):pointer(p){}struct Locked{T* ptr;explicit operator bool()const{return ptr&&ptr->alive;}T* operator->(){return ptr;}T* data(){return ptr;}};auto lock()const{return Locked{pointer};}};
 struct Dialog{bool alive=true;CCScene* parent=nullptr;CCScene* getParent(){return parent;}};
-struct Coordinator{std::optional<WeakRef<Dialog>> m_jukebox;bool alive=true,running=true,m_closed=false,m_motion=false,m_confirmation=false;std::string m_pendingLaunch,m_launchedContext;CCScene* parent=nullptr;bool isRunning(){return running;}CCScene* getParent(){return parent;}
+struct Coordinator{std::optional<WeakRef<Dialog>> m_jukebox;bool alive=true,running=true,m_closed=false,m_motion=false,m_confirmation=false,m_browsingBoard=false;std::optional<std::int64_t> m_entrySyncAfter;std::string m_pendingLaunch,m_launchedContext;CCScene* parent=nullptr;bool isRunning(){return running;}CCScene* getParent(){return parent;}
 ${launch}
 };
 int main(){CCScene origin,other;auto* director=CCDirector::sharedDirector();director->scene=&origin;
  auto& runtime=SurvivalRuntime::get();auto& preparation=RankedRoundPreparation::get();Coordinator owner;owner.parent=&origin;
  inUpdate=true;owner.queueNativeLaunch();owner.queueNativeLaunch();assert(work.size()==1&&preparation.launches==0);inUpdate=false;
  drain();assert(preparation.launches==1&&!owner.m_launchedContext.empty()&&owner.m_pendingLaunch.empty());
- for(int changed=0;changed<7;++changed){owner.m_launchedContext.clear();owner.queueNativeLaunch();
+ for(int changed=0;changed<9;++changed){owner.m_launchedContext.clear();owner.queueNativeLaunch();
   if(changed==0){++runtime.context.round;}
   if(changed==1){director->scene=&other;}
   if(changed==2){owner.m_closed=true;}
@@ -145,8 +149,10 @@ int main(){CCScene origin,other;auto* director=CCDirector::sharedDirector();dire
   if(changed==4){owner.running=false;}
   if(changed==5){runtime.enter=false;}
   Dialog dialog;dialog.parent=&origin;if(changed==6)owner.m_jukebox=WeakRef(&dialog);
+  if(changed==7)owner.m_browsingBoard=true;
+  if(changed==8)owner.m_entrySyncAfter=runtime.sync;
   drain();assert(preparation.launches==1&&owner.m_launchedContext.empty()&&owner.m_pendingLaunch.empty());
-  owner.m_jukebox.reset();owner.m_closed=false;owner.m_confirmation=false;owner.running=true;runtime.enter=true;director->scene=&origin;
+  owner.m_jukebox.reset();owner.m_entrySyncAfter.reset();owner.m_browsingBoard=false;owner.m_closed=false;owner.m_confirmation=false;owner.running=true;runtime.enter=true;director->scene=&origin;
  }
  preparation.success=false;owner.queueNativeLaunch();drain();assert(preparation.launches==2&&owner.m_launchedContext.empty());
  preparation.success=true;owner.queueNativeLaunch();drain();assert(preparation.launches==3&&!owner.m_launchedContext.empty());

@@ -61,7 +61,7 @@ test('actual appearance resolver serializes lookups, survives A→B, restores fo
 #include <vector>
 namespace gd {using string=std::string;}
 enum class GJLevelType{Default=0,Main=1,Editor=2,Saved=3,SearchResult=4};
-struct GJGameLevel {GJLevelType m_levelType=GJLevelType::Saved;int m_levelID=0,m_demon=0,m_demonDifficulty=0,average=0,m_stars=0,m_timestamp=0,m_featured=0,m_isEpic=0;bool m_autoLevel=false;
+struct GJGameLevel {GJLevelType m_levelType=GJLevelType::Saved;int m_levelID=0,m_demon=0,m_demonDifficulty=0,average=0,m_stars=0,m_timestamp=0,m_levelLength=3,m_featured=0,m_isEpic=0;bool m_autoLevel=false;
 int getAverageDifficulty(){return average;}};
 namespace cocos2d {struct CCArray {std::vector<GJGameLevel*> values;};}
 using cocos2d::CCArray;
@@ -110,13 +110,13 @@ assert(details.difficulty(11).label=="Easy"&&details.difficulty(12).label=="Easy
 GJGameLevel official=demon;official.m_levelID=14;official.m_levelType=GJLevelType::Main;
 details.remember(&official);assert(details.difficulty(14).label=="Demon");
 assert(details.difficulty(12).label=="Easy Demon"); // community subtype is preserved
-assert(details.metadata(11).stars==2&&details.metadata(11).durationSeconds==94);
+assert(details.metadata(11).stars==2&&!details.metadata(11).durationSeconds&&details.metadata(11).lengthCategory==3);
 assert(details.metadata(12).kind=="DEMON"&&!details.metadata(12).stars);
-assert(mapLengthText(details.metadata(11).durationSeconds)=="1m 34s");
-assert(mapLengthText(details.metadata(12).durationSeconds)=="?m ?s");
+assert(mapLengthText(details.metadata(11))=="LONG");
+assert(mapLengthText(details.metadata(12))=="LONG");
 assert(details.difficulty(88).label=="N/A");assert(!details.requestGeneration(keyA.c_str()));
 auto revision=details.revision();details.remember(&easy);assert(details.revision()==revision);
-easy.m_timestamp=0;details.remember(&easy);assert(details.revision()==revision&&details.metadata(11).durationSeconds==94);
+easy.m_timestamp=0;details.remember(&easy);assert(details.revision()==revision&&!details.metadata(11).durationSeconds&&details.metadata(11).lengthCategory==3);
 details.m_retryAt={};details.request({99});assert(manager.queries==2&&manager.lastKey=="99,99&gameVersion=22");
 auto keyB=manager.lastKey;details.responseCompleted(keyA.c_str(),genA);assert(details.requestGeneration(keyB.c_str()));
 details.loadLevelsFailed(keyB.c_str());assert(!details.requestGeneration(keyB.c_str()));
@@ -265,7 +265,7 @@ assert(static_cast<CCLabelBMFont*>(row->children[1])->text=="?");
 auto&native=RankedMapDetails::get().local;native.kind="NORMAL";native.stars=6;native.durationSeconds=80;
 info={};info.durationSeconds=95;auto fallback=displayedMapMetadata(42,info);
 assert(fallback.stars==6&&fallback.durationSeconds==95);info={};assert(displayedMapMetadata(42,info).durationSeconds==80);
-assert(mapLengthText(std::nullopt)=="?m ?s"&&mapLengthText(-1)=="?m ?s");
+assert(mapLengthText(std::nullopt)=="UNKNOWN LENGTH"&&mapLengthText(-1)=="UNKNOWN LENGTH");
 assert(mapLengthText(59.8)=="1m 0s");
 }
 `);

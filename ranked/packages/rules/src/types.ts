@@ -169,6 +169,8 @@ export interface CbfPolicy {
 
 export interface RankedOperationalConfig {
   readonly enabled: boolean;
+  /** Missing in older documents means the existing restrictions remain enabled. */
+  readonly modRestrictionEnabled?: boolean;
   readonly generation: string;
   readonly rules: RankedRulesConfig;
   readonly tierBands: readonly TierBand[];

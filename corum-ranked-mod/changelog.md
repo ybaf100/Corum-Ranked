@@ -1,3 +1,13 @@
+# v0.5.0-beta.74
+
+- Keep a server-synchronized round/start clock on the Survival board and distinguish preparation states without invented deadlines.
+- Let unfinished players return from gameplay to map preparation, then browse the retained board and return to the same map without surrendering; revalidate the server before re-entry.
+- Preserve original player-name casing, including a lowercase-capable fallback font. Color retained cards by elimination first, then the server's podium rank.
+- Display reliable map seconds, native length categories, or UNKNOWN LENGTH; stop interpreting verification timestamps as map duration and invalidate the old display cache namespace.
+- Reapply saved Survival LDM/Disable Shake options after native level replacement and immediately before native launch/init. Hide unsupported/unknown LDM and reflow the remaining controls.
+- Add default-TRUE modRestrictionEnabled across Sheets, snapshots, public config and native/server admission. Optional loader dependencies permit FALSE; TRUE still enforces existing required rules. Version, authentication, HAC and gameplay validation remain independent.
+- See [implementation, validation limits and operations steps](../ranked/docs/survival-beta74-board-settings.md).
+
 # v0.5.0-beta.73
 
 - Keep the Survival Pause countdown tied to the last valid server clock; show transient status separately.
