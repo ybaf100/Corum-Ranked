@@ -77,6 +77,7 @@ public:
         CCLabelBMFont* budget = nullptr;
         CCLabelBMFont* survivalStatus = nullptr;
         CCMenuItemSpriteExtra* surrender = nullptr;
+        CCMenu* survivalActions = nullptr;
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
         CCMenuItemSpriteExtra* forceClear = nullptr;
         CCMenu* forceClearMenu = nullptr;
@@ -131,7 +132,14 @@ public:
         button->setScale(0.95f);
         m_fields->surrender = CCMenuItemSpriteExtra::create(button, this, menu_selector(CorumRankedPauseLayer::onSurrender));
         m_fields->surrender->setID("ranked-surrender-button"_spr);
-        center->addChild(m_fields->surrender, -1); center->sortAllChildren(); center->updateLayout();
+        if(m_fields->survival){
+            // Keep Survival actions outside the native icon row's layout and
+            // touch bounds. Registration is synchronized by watchBudget below.
+            auto* actions=CCMenu::create();actions->setPosition(CCPointZero);
+            actions->setID("survival-pause-actions"_spr);addChild(actions,1100);
+            m_fields->survivalActions=actions;
+            m_fields->surrender->setPosition({size.width-76,48});actions->addChild(m_fields->surrender);
+        }else{center->addChild(m_fields->surrender,-1);center->sortAllChildren();center->updateLayout();}
         if(m_fields->survival){button->addChild(ui::label(i18n::text("surrender","SURRENDER"),.26f,
             {button->getContentSize().width/2,-10},ui::Red,ui::FontWeight::ExtraBold));}
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
@@ -161,7 +169,8 @@ public:
     }
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
     void setupSurvivalForceClear(CCSize size) {
-        if(m_fields->survival && SurvivalRuntime::get().canForceClear()){
+        auto const& view=SurvivalRuntime::get().view();
+        if(!m_fields->forceClear && m_fields->survival && view.debug && !view.online && view.phase!="TIEBREAK"){
             auto* face=ui::surface({112,30},{},ui::Gold,ui::SurfaceRaised,255,true);
             face->addChild(ui::menuLabel(i18n::text("survival-force-clear","FORCE CLEAR"),.28f,{56,15},ui::Gold,ui::FontWeight::ExtraBold),5);
             m_fields->forceClear=CCMenuItemSpriteExtra::create(face,this,menu_selector(CorumRankedPauseLayer::onForceClear));
@@ -176,36 +185,41 @@ public:
             addChild(m_fields->forceClearMenu,1100);
         }
     }
-    void onEnter() {
-        PauseLayer::onEnter();
-        // Native Pause may register a swallowing delegate before a new menu.
-        // Match its actual priority after registration, including later rounds
-        // and iPadOS; leave modal force-priority ownership to Popup.
-        auto* menu=m_fields->forceClearMenu;
-        auto* center=typeinfo_cast<CCMenu*>(getChildByIDRecursive("center-button-menu"));
+#endif
+    void synchronizeSurvivalPauseInput() {
+        if(m_fields->survivalConfirmation){
+            if(auto modal=m_fields->survivalConfirmation->lock();modal && modal->getParent())return;
+        }
         auto* dispatcher=CCDirector::sharedDirector()->getTouchDispatcher();
-        auto* native=center?dispatcher->findHandler(center):nullptr;
         auto* pauseHandler=dispatcher->findHandler(this);
-        auto* own=menu?dispatcher->findHandler(menu):nullptr;
-        if(own && (native || pauseHandler)){
-            auto const priority=std::min(native?native->m_nPriority:own->m_nPriority,
-                pauseHandler?pauseHandler->m_nPriority:own->m_nPriority);
-            if(priority>std::numeric_limits<int>::min() && own->m_nPriority>=priority)
-                dispatcher->setPriority(priority-1,menu);
+        for(auto* menu:{m_fields->survivalActions
+#if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
+            ,m_fields->forceClearMenu
+#endif
+        }){
+            auto* own=menu?dispatcher->findHandler(menu):nullptr;
+            if(own && pauseHandler && pauseHandler->m_nPriority>std::numeric_limits<int>::min() &&
+                own->m_nPriority>=pauseHandler->m_nPriority)
+                dispatcher->setPriority(pauseHandler->m_nPriority-1,menu);
         }
     }
-#endif
     void watchBudget(float) {
         if(m_fields->survival){
             auto& runtime=corum::ranked::SurvivalRuntime::get();runtime.tick();auto const& view=runtime.view();
+            if(m_fields->survivalConfirmation){
+                auto dialog=m_fields->survivalConfirmation->lock();
+                if(!dialog || !dialog->getParent())m_fields->survivalConfirmation.reset();
+            }
+            synchronizeSurvivalPauseInput();
             auto const remaining=runtime.roundRemainingMs();
             auto const round=view.phase=="ROUND_1"?"R1":view.phase=="ROUND_2"?"R2":view.phase=="ROUND_3"?"R3":
                 view.phase=="FINAL"?"FINAL":view.phase=="TIEBREAK"?"DEATH MATCH":"ROUND";
             auto const seconds=(remaining.value_or(0)+999)/1000;
             m_fields->budget->setString((remaining?fmt::format("{} · {:02}:{:02}",round,seconds/60,seconds%60):fmt::format("{} · --:--",round)).c_str());
-            m_fields->surrender->setEnabled(runtime.canPlay() && !m_fields->survivalConfirmation);
+            m_fields->surrender->setEnabled(runtime.canSurrender() && !m_fields->survivalConfirmation);
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
-            if(m_fields->forceClear){m_fields->forceClear->setVisible(runtime.canForceClear());m_fields->forceClear->setEnabled(runtime.canForceClear() && !runtime.forceClearPending() && !m_fields->survivalConfirmation);}
+            setupSurvivalForceClear(CCDirector::sharedDirector()->getWinSize());
+            if(m_fields->forceClear){m_fields->forceClear->setVisible(view.debug && !view.online && view.phase!="TIEBREAK" && !runtime.normalRoundCleared() && !view.ownEliminated);m_fields->forceClear->setEnabled(runtime.canForceClear() && !runtime.forceClearPending() && !m_fields->survivalConfirmation);}
             if(runtime.forceClearPending())m_fields->surrender->setEnabled(false);
 #endif
             if(m_fields->survivalStatus){
@@ -377,7 +391,13 @@ public:
     void onSurrender(CCObject*) {
         if(m_fields->survival){
             auto& runtime=corum::ranked::SurvivalRuntime::get();
-            if(!runtime.canPlay() || m_fields->survivalConfirmation)return;
+            if(m_fields->survivalConfirmation){
+                auto dialog=m_fields->survivalConfirmation->lock();
+                if(dialog && dialog->getParent())return;
+                m_fields->survivalConfirmation.reset();
+            }
+            if(!runtime.canSurrender())return;
+            log::info("[SurvivalPause] surrender confirmation match={} round={}",m_fields->matchId,m_fields->survivalRoundKey);
             auto const id=m_fields->matchId,key=m_fields->survivalRoundKey;auto const generation=m_fields->survivalMapGeneration;
             auto* popup=ui::RankedConfirmPopup::create(i18n::text("surrender-confirm","CONFIRM SURRENDER"),
                 runtime.surrenderMessage(),
@@ -386,7 +406,7 @@ public:
                     auto play=owner->m_fields->owner?owner->m_fields->owner->lock():Ref<PlayLayer>();
                     if(!play || play.data()!=PlayLayer::get() || !play->isRunning() || play->getParent()!=CCDirector::sharedDirector()->getRunningScene())return;
                     auto& current=corum::ranked::SurvivalRuntime::get();
-                    if(accepted && current.canPlay() && current.view().id==id && current.view().roundKey==key && current.view().mapGeneration==generation){
+                    if(accepted && current.canSurrender() && current.view().id==id && current.view().roundKey==key && current.view().mapGeneration==generation){
                         current.surrender();}
                 });
             if(popup){m_fields->survivalConfirmation.emplace(popup);popup->show();}return;

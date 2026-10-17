@@ -124,7 +124,7 @@ test('deferred Survival launch rechecks round, scene and confirmation and never 
 #include "${join(root,'src/domain/LevelPreparationPolicy.hpp')}"
 using corum::ranked::LevelPreparationContext;
 struct CCScene{};
-struct CCDirector{CCScene* scene=nullptr;static CCDirector* sharedDirector(){static CCDirector d;return &d;}CCScene* getRunningScene(){return scene;}};
+struct CCDirector{CCScene* scene=nullptr;CCScene* next=nullptr;static CCDirector* sharedDirector(){static CCDirector d;return &d;}CCScene* getRunningScene(){return scene;}CCScene* getNextScene(){return next;}};
 std::vector<std::function<void()>> work;
 void queueInMainThread(std::function<void()> f){work.push_back(std::move(f));}
 void drain(){auto queued=std::exchange(work,{});for(auto& f:queued)f();}
@@ -141,7 +141,7 @@ int main(){CCScene origin,other;auto* director=CCDirector::sharedDirector();dire
  auto& runtime=SurvivalRuntime::get();auto& preparation=RankedRoundPreparation::get();Coordinator owner;owner.parent=&origin;
  inUpdate=true;owner.queueNativeLaunch();owner.queueNativeLaunch();assert(work.size()==1&&preparation.launches==0);inUpdate=false;
  drain();assert(preparation.launches==1&&!owner.m_launchedContext.empty()&&owner.m_pendingLaunch.empty());
- for(int changed=0;changed<9;++changed){owner.m_launchedContext.clear();owner.queueNativeLaunch();
+ for(int changed=0;changed<10;++changed){owner.m_launchedContext.clear();owner.queueNativeLaunch();
   if(changed==0){++runtime.context.round;}
   if(changed==1){director->scene=&other;}
   if(changed==2){owner.m_closed=true;}
@@ -151,8 +151,9 @@ int main(){CCScene origin,other;auto* director=CCDirector::sharedDirector();dire
   Dialog dialog;dialog.parent=&origin;if(changed==6)owner.m_jukebox=WeakRef(&dialog);
   if(changed==7)owner.m_browsingBoard=true;
   if(changed==8)owner.m_entrySyncAfter=runtime.sync;
+  if(changed==9)director->next=&other;
   drain();assert(preparation.launches==1&&owner.m_launchedContext.empty()&&owner.m_pendingLaunch.empty());
-  owner.m_jukebox.reset();owner.m_entrySyncAfter.reset();owner.m_browsingBoard=false;owner.m_closed=false;owner.m_confirmation=false;owner.running=true;runtime.enter=true;director->scene=&origin;
+  owner.m_jukebox.reset();owner.m_entrySyncAfter.reset();owner.m_browsingBoard=false;owner.m_closed=false;owner.m_confirmation=false;owner.running=true;runtime.enter=true;director->scene=&origin;director->next=nullptr;
  }
  preparation.success=false;owner.queueNativeLaunch();drain();assert(preparation.launches==2&&owner.m_launchedContext.empty());
  preparation.success=true;owner.queueNativeLaunch();drain();assert(preparation.launches==3&&!owner.m_launchedContext.empty());

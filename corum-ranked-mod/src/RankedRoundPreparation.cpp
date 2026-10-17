@@ -337,7 +337,7 @@ void RankedRoundPreparation::setLowDetail(bool enabled) {
 }
 
 bool RankedRoundPreparation::launch(CCScene* origin) {
-    if(m_launching || m_quitting || m_returnQueued)return false;
+    if(m_launching || m_quitting || m_returnQueued || CCDirector::sharedDirector()->getNextScene())return false;
     pump();
     if (clockSeconds() < m_nextLaunchAt) return false;
     auto& runtime = RankedRuntime::get();
@@ -363,7 +363,8 @@ bool RankedRoundPreparation::launch(CCScene* origin) {
     if(survival && !SurvivalRuntime::get().validateNative(level))return false;
     if(m_quitting || m_returnQueued)return false;
     if (auto current = m_play.lock(); current && current->isRunning()) return false;
-    if(auto* current=PlayLayer::get();current && current->isRunning())return false;
+    // Even a non-running native owner may still be inside scene teardown.
+    if(PlayLayer::get())return false;
     // Hold both the saved level and GD's shared texture-cache owner throughout
     // native setup. A context poll or callback cannot retire the object being
     // initialized. The cache guard spans the inter-round native quit boundary.
@@ -374,7 +375,9 @@ bool RankedRoundPreparation::launch(CCScene* origin) {
         explicit NativeSetupScope(bool& value):flag(value){flag=true;}
         ~NativeSetupScope(){flag=false;}
     } setup(m_launching);
-    if(!m_nativeTextureCache)m_nativeTextureCache=CCTextureCache::sharedTextureCache();
+    // GD can replace its singleton when textures are reloaded. Retaining an
+    // earlier cache does not protect AudioEffectsLayer's current native cache.
+    m_nativeTextureCache=CCTextureCache::sharedTextureCache();
     log::info("[RankedEntry] native setup context={} textureCache={} retainedCache={} previousPlay={}",
         preparationContextText(m_context),static_cast<void*>(CCTextureCache::sharedTextureCache()),
         static_cast<void*>(m_nativeTextureCache.data()),static_cast<void*>(PlayLayer::get()));

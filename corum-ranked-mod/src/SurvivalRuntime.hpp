@@ -76,6 +76,7 @@ public:
     bool beginFreePlayNativeQuit(GJGameLevel* level);
     bool interceptFreePlayNativeQuit(GJGameLevel* level) const;
     void finishFreePlayNativeQuit();
+    bool canSurrender() const;
     void surrender();
     bool surrenderPending() const {return !m_surrenderEventId.empty() && !m_surrenderAccepted;}
     void presentationComplete();

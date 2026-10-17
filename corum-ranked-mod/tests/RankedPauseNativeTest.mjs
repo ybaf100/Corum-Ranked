@@ -71,7 +71,7 @@ template<class T>struct Ref {T* p=nullptr;Ref()=default;explicit Ref(T* v):p(v){
  std::optional<geode::WeakRef<PauseLayer>> activeRankedPause;
  namespace fmt {template<class...T>std::string format(char const*,T...){return "budget";}}
 int queued=0;template<class F>void queueInMainThread(F task){++queued;task();}
-struct Popup{void cancel(){onClose(nullptr);}int closes=0;void onClose(CCObject*){++closes;}};
+struct Popup:Node{void cancel(){onClose(nullptr);}int closes=0;void onClose(CCObject*){++closes;}};
 #define schedule_selector(x) 0
 namespace corum::ranked {
 enum class RuntimeStage{Idle,Matched};
@@ -92,7 +92,7 @@ struct RankedRuntime {
 struct SurvivalRuntime{
  struct View{std::string id="s",roundKey="round-1",state="PLAYING",error,phase="ROUND_1";bool ownEliminated=false;int mapGeneration=1;}v;
  bool owned=false;long remaining=100000;static SurvivalRuntime& get(){static SurvivalRuntime s;return s;}
- bool surrenderPending()const{return false;}std::optional<long> roundRemainingMs()const{return remaining;}bool normalRoundCleared()const{return false;}bool gameplayLevel(int id)const{return owned&&id==123;}void tick(){}auto const& view()const{return v;}bool canPlay()const{return v.state=="PLAYING";}long remainingMs()const{return remaining;}
+ bool surrenderPending()const{return false;}std::optional<long> roundRemainingMs()const{return remaining;}bool normalRoundCleared()const{return false;}bool gameplayLevel(int id)const{return owned&&id==123;}void tick(){}auto const& view()const{return v;}bool canPlay()const{return v.state=="PLAYING";}bool canSurrender()const{return v.state=="PLAYING";}long remainingMs()const{return remaining;}
 };
 bool isOfficialSurvivalPlayLayer(PlayLayer* layer){return layer && layer->m_level && SurvivalRuntime::get().gameplayLevel(layer->m_level->m_levelID);}
 int survivalReturns=0;bool requestSurvivalGameplayReturn(PlayLayer* layer){if(!survivalReturns++)queueInMainThread([layer]{layer->onQuit();});return true;}
@@ -122,6 +122,7 @@ void dismissNativeRankedExitConfirmation(PauseLayer*){};
 struct CorumRankedPauseLayer:PauseLayer {
  struct Button {bool enabled=true;void setEnabled(bool v){enabled=v;}} button;Label clock;
  struct Fields{std::optional<WeakRef<ui::RankedSurrenderPopup>> popup;std::string leaseId="lease",matchId="m";int round=1,deathmatch=0;Label* budget;Button* surrender;std::optional<WeakRef<PlayLayer>> owner;int placementMapIndex=1;bool placement=false;bool concessionQuit=false,nativeQuitInProgress=false,nativeQuitReachedPlay=false,timeoutSurrenderRequested=false;std::optional<WeakRef<ui::RankedSurrenderPopup>> exitConfirmation{};Label* survivalStatus=nullptr;bool survival=false,survivalExitQueued=false;std::string survivalRoundKey="round-1";int survivalMapGeneration=1;std::optional<WeakRef<Popup>> survivalConfirmation{};}f{{},"lease","m",1,0,&clock,&button,{}};Fields* m_fields=&f;
+ void synchronizeSurvivalPauseInput(){}
  int exitWarnings=0;void confirmRankedExit(){++exitWarnings;}
  void unschedule(int){}
  ${body(pause,'bool hasAcknowledgedGameplayExit()')}
@@ -195,7 +196,7 @@ int main(){using namespace corum::ranked;
 }
 `;
     const dir=mkdtempSync(join(tmpdir(),'corum-pause-native-'));
-    try{writeFileSync(join(dir,'test.cpp'),cpp);execFileSync('g++',['-std=c++23','-Wall','-Wextra','-Wpedantic','-Werror',join(dir,'test.cpp'),'-o',join(dir,'test')],{stdio:'pipe'});execFileSync(join(dir,'test'),[],{stdio:'pipe'});}finally{rmSync(dir,{recursive:true,force:true});}
+    try{writeFileSync(join(dir,'test.cpp'),cpp);execFileSync('g++',['-std=c++23','-Wall','-Wextra','-Wpedantic','-Werror',join(dir,'test.cpp'),'-o',join(dir,'test')],{stdio:'pipe'});execFileSync(join(dir,'test'),[],{stdio:'pipe'});}catch(error){throw new Error(error.stderr?.toString()||error.message);}finally{rmSync(dir,{recursive:true,force:true});}
 });
 
 // Geode 5.10.1 Popup::init registers force-priority, but Popup::~Popup is its

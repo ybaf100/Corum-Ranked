@@ -40,7 +40,7 @@ namespace cocos2d{using ::CCSize;using ::ccColor3B;}
 template<class T>T typeinfo_cast(CCObject* n){return dynamic_cast<T>(n);}
 template<class T>struct CCArrayExt{std::vector<CCNode*>* nodes;explicit CCArrayExt(std::vector<CCNode*>*n):nodes(n){}auto begin(){return nodes->begin();}auto end(){return nodes->end();}};
 struct CCTouchDispatcher{int releases=0;static CCTouchDispatcher* get(){static CCTouchDispatcher d;return &d;}void unregisterForcePrio(CCNode*){++releases;}};
-struct Popup:CCNode{CCNode* m_bgSprite=new CCNode;CCNode* m_closeBtn=new CCNode;CCNode* m_mainLayer=new CCNode;
+struct Popup:CCNode{CCNode* m_bgSprite=new CCNode;CCNode* m_closeBtn=new CCNode;CCNode* m_mainLayer=new CCNode;CCMenu* m_buttonMenu=new CCMenu;
  inline static std::vector<Popup*> opened;virtual bool init(){return true;}bool init(float,float){return true;}
  virtual void onClose(CCObject*){removeFromParentAndCleanup(true);}void show(){static CCNode scene;scene.addChild(this);opened.push_back(this);}};
 struct TextInput:CCNode{std::string value;static TextInput* create(float,char const*){return new TextInput;}

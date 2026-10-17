@@ -55,7 +55,7 @@ namespace corum::ranked {
 struct SurvivalRuntime{
  struct View{std::string id="m",roundKey="r1",state="PLAYING",phase="ROUND_1",error,endsAt="2026-10-16T00:03:00Z";int mapGeneration=1;bool ownEliminated=false;}v;
  ServerClock m_clock;struct{std::string endsAt="2026-10-16T00:03:00Z";}m_view;
- static SurvivalRuntime&get(){static SurvivalRuntime r;return r;}void tick(){}auto const&view()const{return v;}bool canPlay()const{return !v.ownEliminated;}bool normalRoundCleared()const{return false;}
+ static SurvivalRuntime&get(){static SurvivalRuntime r;return r;}void tick(){}auto const&view()const{return v;}bool canPlay()const{return !v.ownEliminated;}bool canSurrender()const{return !v.ownEliminated;}bool normalRoundCleared()const{return false;}
  std::optional<std::int64_t> roundRemainingMs()const;
 };
 ${method(runtime,'std::optional<std::int64_t> SurvivalRuntime::roundRemainingMs()')}
@@ -67,6 +67,7 @@ struct Label{std::string value;void setString(char const* s){value=s;}};
 namespace ui{void fitLabelWidth(Label*,float,float,float){}}
 struct Button{bool enabled=true;void setEnabled(bool b){enabled=b;}};
 struct Pause{Label clock,status;Button button;struct Fields{bool survival=true;Label*budget;Label*survivalStatus;Button*surrender;std::optional<WeakRef<PlayLayer>>owner;std::optional<WeakRef<CCNode>>survivalConfirmation;std::string matchId="m",survivalRoundKey="r1";int survivalMapGeneration=1;}fields{true,&clock,&status,&button,{},{},"m","r1",1};Fields*m_fields=&fields;
+ void synchronizeSurvivalPauseInput(){}
  ${survival}
 };
 int main(){auto&r=SurvivalRuntime::get();Pause p;PlayLayer play;p.fields.owner.emplace(&play);
@@ -85,6 +86,9 @@ int main(){auto&r=SurvivalRuntime::get();Pause p;PlayLayer play;p.fields.owner.e
  localMillis+=999999;p.watchBudget(0);assert(p.clock.value=="FINAL · 00:00"&&corum::ranked::exits==0);
  r.m_view.endsAt="invalid";p.watchBudget(0);assert(p.clock.value=="FINAL · --:--");
  r.m_clock={};r.m_view.endsAt="2026-10-16T00:03:00Z";p.watchBudget(0);assert(p.clock.value=="FINAL · --:--");
+ CCNode detached;detached.parent=&play;p.fields.survivalConfirmation.emplace(&detached);
+ p.watchBudget(0);assert(!p.button.enabled);detached.parent=nullptr;p.watchBudget(0);
+ assert(p.button.enabled&&!p.fields.survivalConfirmation);
  r.v.ownEliminated=true;p.watchBudget(0);assert(corum::ranked::exits==1);
 }
 `);
@@ -166,6 +170,8 @@ int main(){using namespace corum::ranked;CCScene scene,other;auto*d=CCDirector::
 
 test('Force Clear hit target bypasses native Pause swallowing priorities and real ConfirmPopup cancels, confirms once and rejects retired contexts',()=>{
  const strip=s=>s.replace(/^#include .*?$|^#pragma once$/gm,'');
+ const surrender=method(pause,'void onSurrender(CCObject*)');
+ const survivalSurrender=surrender.slice(0,surrender.indexOf('        if (!m_fields->placement'))+'}';
  run(common+`
 struct CCObject{virtual ~CCObject()=default;};
 struct CCPoint{float x=0,y=0;};struct CCSize{float width,height;};constexpr CCPoint CCPointZero{};
@@ -178,16 +184,16 @@ struct CCTouchDispatcher{std::map<CCNode*,Handler>handlers;int releases=0;static
 struct CCMenu:Node{static CCMenu*create(){return new CCMenu;}};
 struct CCMenuItemSpriteExtra:Node{bool enabled=true;static CCMenuItemSpriteExtra*create(Node*face,CCNode*,int){auto*n=new CCMenuItemSpriteExtra;n->size=face->size;n->addChild(face);return n;}void setEnabled(bool b){enabled=b;}};
 struct Label:Node{};
-struct Popup:Node{Node*m_bgSprite=new Node;Node*m_closeBtn=new Node;Node*m_mainLayer=new Node;static inline Popup*last=nullptr;static inline int opens=0;bool init(float,float){return true;}virtual void onClose(CCObject*){removeFromParentAndCleanup(true);onExit();}void show(){static Node scene;scene.addChild(this);last=this;++opens;}};
+struct Popup:Node{~Popup(){CCTouchDispatcher::get()->unregisterForcePrio(this);}Node*m_bgSprite=new Node;Node*m_closeBtn=new Node;Node*m_mainLayer=new Node;CCMenu*m_buttonMenu=new CCMenu;static inline Popup*last=nullptr;static inline int opens=0;bool init(float,float){return true;}virtual void onClose(CCObject*){removeFromParentAndCleanup(true);onExit();}void show(){static Node scene;scene.addChild(this);last=this;++opens;}};
 std::string operator""_spr(char const*s,std::size_t n){return std::string(s,n);}
 #define menu_selector(x) 0
 namespace geode::prelude{}
-namespace geode::log{template<class...T>void debug(T const&...){}}
+namespace geode::log{template<class...T>void debug(T const&...){}template<class...T>void info(T const&...){}}
 namespace corum::ranked{
 namespace i18n{std::string text(char const*,char const*fallback){return fallback;}}
 namespace ui{constexpr int Gold=1,Surface=2,SurfaceRaised=3,Text=4,Blue=5;enum class FontWeight{ExtraBold,SemiBold};Node*surface(CCSize s,CCPoint p,int,int,int,bool){auto*n=new Node;n->size=s;n->pos=p;return n;}Label*menuLabel(std::string,float,CCPoint,int,FontWeight){return new Label;}void fitMenuLabelWidth(Label*,float,float,float){}void fitFullMenuLabel(Label*,float,float,float){}
 }
-struct SurvivalRuntime{struct View{std::string id="m",roundKey="r1",phase="ROUND_1";int mapGeneration=1;bool debug=true,online=false,ownEliminated=false,ownAssetsReady=true,ownEntered=true;}m_view;bool playable=true,pending=false,cleared=false;int submissions=0;static SurvivalRuntime&get(){static SurvivalRuntime r;return r;}auto const&view()const{return m_view;}bool canPlay()const{return playable;}bool normalRoundCleared()const{return cleared;}bool forceClearPending()const{return pending;}bool canForceClear()const;void forceClear(){if(canForceClear()&&!pending){++submissions;pending=true;}}};
+struct SurvivalRuntime{struct View{std::string id="m",roundKey="r1",phase="ROUND_1";int mapGeneration=1;bool debug=true,online=false,ownEliminated=false,ownAssetsReady=true,ownEntered=true;}m_view;bool playable=true,pending=false,cleared=false,surrenderable=true;int submissions=0,surrenders=0;static SurvivalRuntime&get(){static SurvivalRuntime r;return r;}auto const&view()const{return m_view;}bool canPlay()const{return playable;}bool canSurrender()const{return surrenderable;}std::string surrenderMessage()const{return "Forfeit?";}void surrender(){++surrenders;surrenderable=false;}bool normalRoundCleared()const{return cleared;}bool forceClearPending()const{return pending;}bool canForceClear()const;void forceClear(){if(canForceClear()&&!pending){++submissions;pending=true;}}};
 ${method(runtime,'bool SurvivalRuntime::canForceClear()')}
 }
 using corum::ranked::SurvivalRuntime;namespace ui=corum::ranked::ui;namespace i18n=corum::ranked::i18n;
@@ -196,15 +202,18 @@ struct PauseLayer:Node{virtual void onEnter(){}}
 ;
 struct CorumRankedPauseLayer:PauseLayer{
  CCMenu center;
- struct Fields{bool survival=true;CCMenuItemSpriteExtra*forceClear=nullptr;CCMenu*forceClearMenu=nullptr;std::optional<WeakRef<ui::RankedConfirmPopup>>survivalConfirmation;std::optional<WeakRef<PlayLayer>>owner;std::string matchId="m",survivalRoundKey="r1";int survivalMapGeneration=1;}fields;Fields*m_fields=&fields;
+ struct Fields{bool survival=true;CCMenu*survivalActions=nullptr;CCMenuItemSpriteExtra*forceClear=nullptr;CCMenu*forceClearMenu=nullptr;std::optional<WeakRef<ui::RankedConfirmPopup>>survivalConfirmation;std::optional<WeakRef<PlayLayer>>owner;std::string matchId="m",survivalRoundKey="r1";int survivalMapGeneration=1;}fields;Fields*m_fields=&fields;
  CCNode*getChildByIDRecursive(char const*){return &center;}
  ${method(pause,'void setupSurvivalForceClear(')}
- ${method(pause,'void onEnter()')}
+ ${method(pause,'void synchronizeSurvivalPauseInput()')}
  ${method(pause,'void onForceClear(')}
+ ${survivalSurrender}
 };
 int main(){CCScene scene;PlayLayer play;play.parent=&scene;PlayLayer::current=&play;CCDirector::sharedDirector()->scene=&scene;auto&r=SurvivalRuntime::get();
  for(int native:{-128,-502,-1502}){
-  CorumRankedPauseLayer p;p.parent=&scene;p.fields.owner.emplace(&play);p.setupSurvivalForceClear({568,320});auto*button=p.fields.forceClear;auto*menu=p.fields.forceClearMenu;assert(button&&menu&&button->parent==menu&&menu->parent==&p);
+  CorumRankedPauseLayer p;p.parent=&scene;p.fields.owner.emplace(&play);r.m_view.ownEntered=false;
+  p.setupSurvivalForceClear({568,320});assert(p.fields.forceClear&&!r.canForceClear());
+  p.onForceClear(nullptr);r.m_view.ownEntered=true;p.setupSurvivalForceClear({568,320});auto*button=p.fields.forceClear;auto*menu=p.fields.forceClearMenu;assert(button&&menu&&button->parent==menu&&menu->parent==&p);
   assert(button->size.width==112&&button->size.height==30&&button->pos.x==492&&button->pos.y==282);
   // The action is beyond the native center row and to the right of the clock.
   assert(button->pos.y-button->size.height/2>160+81.5/2);assert(button->pos.x-button->size.width/2>308);
@@ -220,22 +229,63 @@ int main(){CCScene scene;PlayLayer play;play.parent=&scene;PlayLayer::current=&p
    for(auto const&handler:handlers)if(handler.second())break;
   };
   auto beforeTap=Popup::opens;tap(button->pos.x,button->pos.y);assert(Popup::opens==beforeTap);
-  p.onEnter();assert(d->handlers[menu].m_nPriority<d->handlers[&p].m_nPriority&&d->handlers[menu].m_nPriority<d->handlers[&p.center].m_nPriority);
+  p.synchronizeSurvivalPauseInput();assert(d->handlers[menu].m_nPriority<d->handlers[&p].m_nPriority&&d->handlers[menu].m_nPriority<d->handlers[&p.center].m_nPriority);
   auto opened=Popup::opens;tap(10,10);assert(Popup::opens==opened);tap(button->pos.x,button->pos.y);tap(button->pos.x,button->pos.y);assert(Popup::opens==opened+1&&r.submissions==0);
-  auto*dialog=static_cast<ui::RankedConfirmPopup*>(Popup::last);auto*panel=dialog->m_mainLayer->children[0];auto*choices=static_cast<CCMenu*>(panel->children.back());auto*cancel=choices->children[0];
+  auto*dialog=static_cast<ui::RankedConfirmPopup*>(Popup::last);
+  d->handlers[menu].m_nPriority=1;p.synchronizeSurvivalPauseInput();assert(d->handlers[menu].m_nPriority==1);
+  auto*choices=dialog->m_buttonMenu;auto*cancel=choices->children[0];
+  auto released=d->releases;
   dialog->onChoice(reinterpret_cast<CCObject*>(cancel));drain();assert(!p.fields.survivalConfirmation&&r.submissions==0);
-  p.onForceClear(nullptr);dialog=static_cast<ui::RankedConfirmPopup*>(Popup::last);panel=dialog->m_mainLayer->children[0];choices=static_cast<CCMenu*>(panel->children.back());auto*confirm=choices->children[1];
+  assert(d->releases==released);delete dialog;assert(d->releases==released+1);
+  p.onForceClear(nullptr);dialog=static_cast<ui::RankedConfirmPopup*>(Popup::last);choices=dialog->m_buttonMenu;auto*confirm=choices->children[1];
   // onChoice uses typeinfo_cast at the native CCObject boundary below.
   dialog->onChoice(static_cast<CCObject*>(confirm));dialog->onChoice(static_cast<CCObject*>(confirm));drain();assert(r.submissions==1&&r.pending&&!p.fields.survivalConfirmation);(void)confirm;
   p.onForceClear(nullptr);assert(Popup::opens==opened+2);r.pending=false;r.submissions=0;
   p.onForceClear(nullptr);dialog=static_cast<ui::RankedConfirmPopup*>(Popup::last);++r.m_view.mapGeneration;dialog->finish(true);drain();assert(r.submissions==0);--r.m_view.mapGeneration;
+ }
+ // The same production confirmation path is reachable when gameplay's
+ // clock/attempt gate is false. Confirm once, cancel, and reject stale scenes.
+ {CorumRankedPauseLayer p;p.parent=&scene;p.fields.owner.emplace(&play);r.playable=false;
+  auto before=Popup::opens;p.onSurrender(nullptr);p.onSurrender(nullptr);assert(Popup::opens==before+1&&r.surrenders==0);
+  auto*dialog=static_cast<ui::RankedConfirmPopup*>(Popup::last);dialog->finish(false);drain();assert(r.surrenders==0&&!p.fields.survivalConfirmation);
+  p.onSurrender(nullptr);dialog=static_cast<ui::RankedConfirmPopup*>(Popup::last);dialog->finish(true);dialog->finish(true);drain();assert(r.surrenders==1&&!p.fields.survivalConfirmation);
+  p.onSurrender(nullptr);assert(Popup::opens==before+2);r.surrenderable=true;
+  p.onSurrender(nullptr);dialog=static_cast<ui::RankedConfirmPopup*>(Popup::last);play.running=false;dialog->finish(true);drain();assert(r.surrenders==1);play.running=true;
  }
  r.m_view.online=true;assert(!r.canForceClear());r.m_view.online=false;r.m_view.debug=false;assert(!r.canForceClear());r.m_view.debug=true;r.m_view.phase="TIEBREAK";assert(!r.canForceClear());
 }
 ` .replace('struct CCObject{virtual ~CCObject()=default;};','using CCObject=CCNode;')
  .replace('CCDirector::sharedDirector()->getTouchDispatcher()', 'CCTouchDispatcher::get()')
  .replace('log::debug', 'geode::log::debug')
+ .replace('log::info', 'geode::log::info')
  .replace('private:', 'public:')
  .replace('class RankedConfirmPopup final : public Popup {','class RankedConfirmPopup final : public Popup { public:')
  .replace('reinterpret_cast<CCObject*>(cancel)', 'static_cast<CCObject*>(cancel)'),['-DCORUM_RANKED_DEBUG_BOT_MATCH=1']);
+});
+
+
+test('surrender remains available without a countdown sample and rejects inactive, foreign and terminal sessions',()=>{
+ run(common+`
+namespace corum::ranked {
+struct RankedRuntime{std::string session="live";static RankedRuntime&get(){static RankedRuntime r;return r;}std::string spectatorLiveSessionToken()const{return session;}};
+struct SurvivalRuntime{
+ struct{std::string state="PLAYING";bool ownEliminated=false;}m_view;
+ std::string m_session="live";bool exists=true,pending=false,cleared=false,free=false;
+ bool active()const{return exists;}bool surrenderPending()const{return pending;}
+ bool normalRoundCleared()const{return cleared;}bool freePlaying()const{return free;}
+ bool canSurrender()const;
+};
+${method(runtime,'bool SurvivalRuntime::canSurrender()')}
+}
+int main(){using namespace corum::ranked;SurvivalRuntime r;
+ for(auto* state:{"PREPARING","ENTERING","COUNTDOWN","PLAYING"}){r.m_view.state=state;assert(r.canSurrender());}
+ for(auto* state:{"ROUND_RESULT","FINAL_RESULT","CANCELLED","MAP_SELECTION",""}){r.m_view.state=state;assert(!r.canSurrender());}
+ r.m_view.state="PLAYING";r.pending=true;assert(!r.canSurrender());r.pending=false;
+ r.cleared=true;assert(!r.canSurrender());r.cleared=false;r.free=true;assert(!r.canSurrender());r.free=false;
+ r.m_session="old";assert(!r.canSurrender());r.m_session.clear();assert(!r.canSurrender());r.m_session="live";
+ r.m_view.ownEliminated=true;assert(!r.canSurrender());r.m_view.ownEliminated=false;r.exists=false;assert(!r.canSurrender());
+}
+`);
+ assert.doesNotMatch(pause,/void onEnter\(\)/); // inherited onEnter has no PauseLayer modify binding
+ assert.match(method(pause,'void watchBudget(float)'),/synchronizeSurvivalPauseInput\(\)/);
 });

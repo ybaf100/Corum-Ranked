@@ -70,7 +70,8 @@ namespace prelude { using geode::Ref; using geode::WeakRef; namespace log=geode:
 }
 struct CCTextureCache {
     int references=1;void retain(){++references;}void release(){assert(references>0);--references;}
-    static CCTextureCache* sharedTextureCache(){static CCTextureCache cache;return &cache;}
+    static inline CCTextureCache* replacement=nullptr;
+    static CCTextureCache* sharedTextureCache(){static CCTextureCache cache;return replacement?replacement:&cache;}
 };
 namespace cocos2d {using ::CCTextureCache;}
 namespace fmt {template<class... T>std::string format(std::string s,T const&...){return s;}}
@@ -78,11 +79,11 @@ std::vector<std::function<void()>> queued;
 void queueInMainThread(std::function<void()> f){queued.push_back(std::move(f));}
 struct Scheduler {int registrations=0;void scheduleUpdateForTarget(CCNode*,int,bool){++registrations;}};
 struct CCDirector {
-    Scheduler scheduler; std::vector<CCScene*> stack; int pushes=0,pops=0;
+    Scheduler scheduler; std::vector<CCScene*> stack; int pushes=0,pops=0;CCScene* next=nullptr;
     static CCDirector* sharedDirector(){static CCDirector d;return &d;}
     Scheduler* getScheduler(){return &scheduler;}
     CCScene* getRunningScene(){return stack.empty()?nullptr:stack.back();}
-    CCScene* getNextScene(){return nullptr;}
+    CCScene* getNextScene(){return next;}
     void pushScene(CCScene* scene){++pushes;if(!stack.empty())stack.back()->running=false;stack.push_back(scene);scene->running=true;}
     void popScene(){assert(stack.size()>1);++pops;stack.back()->running=false;stack.pop_back();stack.back()->running=true;}
 };
@@ -303,6 +304,11 @@ int main(){
     ticks(p);assert(downloaded.m_lowDetailModeToggled); // explicit choice survives pumps
     options.m_enteringLevel=true;options.onLowDetail(nullptr);assert(downloaded.m_lowDetailModeToggled&&options.renders==2);
     assert(meta.authorizes(&downloaded,currentPreparationContext())); // options do not alter metadata proof
+    CCScene transition;director->next=&transition;
+    assert(!p.launch(&origin)&&PlayLayer::constructions==0&&runtime.arms==0);
+    director->next=nullptr;PlayLayer departing;departing.running=false;PlayLayer::active=&departing;
+    assert(!p.launch(&origin)&&PlayLayer::constructions==0&&runtime.arms==0);
+    PlayLayer::active=nullptr;
     assert(p.launch(&origin));assert(runtime.arms==1&&PlayLayer::active->m_level==&downloaded);
     assert(CCTextureCache::sharedTextureCache()->references==2);
     assert(PlayLayer::active->m_level->m_lowDetailModeToggled&&PlayLayer::active->m_level->m_disableShakeToggled);
@@ -316,7 +322,10 @@ int main(){
     PlayLayer::active->running=false;PlayLayer::active->live=false;PlayLayer::active=nullptr;
     auto tasks=std::exchange(queued,{});for(auto& t:tasks)t();assert(director->getRunningScene()==&origin&&director->pops==1);
     assert(CCTextureCache::sharedTextureCache()->references==2); // retained between rounds
-    runtime.viewer=true;assert(p.launch(&origin));assert(runtime.arms==1); // spectator never arms
+    auto* priorCache=CCTextureCache::sharedTextureCache();static CCTextureCache reloaded;
+    CCTextureCache::replacement=&reloaded;
+    runtime.viewer=true;assert(p.launch(&origin));assert(runtime.arms==1);
+    assert(reloaded.references==2&&priorCache->references==1); // spectator never arms
     {ScopedRankedRoundQuit quit(PlayLayer::get());navigation.returnToLastScene(&downloaded);}
     PlayLayer::active->running=false;PlayLayer::active->live=false;PlayLayer::active=nullptr;
     tasks=std::exchange(queued,{});for(auto& t:tasks)t();runtime.viewer=false;

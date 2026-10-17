@@ -21,6 +21,16 @@ inline std::string survivalBoardClock(std::string const& state,
     if(state=="ENTERING")return "WAITING FOR PLAYERS";
     return "";
 }
+// Local card coordinates reserve separate title, avatar and score rows.
+struct SurvivalCardLayout {
+    float width,height,titleY,avatarY,recordY,titleHeight,recordHeight,avatarSize;
+};
+inline SurvivalCardLayout survivalCardLayout(float cellWidth,float cellHeight) {
+    float const width=cellWidth-8,height=cellHeight-4;
+    float const textHeight=std::clamp(height*.23f,7.0f,12.0f);
+    return {width,height,height-4-textHeight/2,height/2,4+textHeight/2,
+        textHeight,textHeight,std::max(6.0f,height-2*textHeight-12)};
+}
 // Explicit server elimination always outranks the live podium. Unknown rank
 // gets no medal; final standings provide their own authoritative ranks.
 inline int survivalCardMedal(int rank,bool eliminated) {

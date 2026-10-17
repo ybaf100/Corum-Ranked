@@ -45,7 +45,7 @@ int main(){ServerClock clock;auto now=0LL;
  const ui=read('src/ui/SurvivalGameLayer.cpp');
  assert.equal((ui.match(/m_boardClock=ui::menuLabel/g)||[]).length,1);
  assert.match(ui,/survivalBoardClock\(view.state,runtime.countdownMs\(\),runtime.roundRemainingMs\(\)\)/);
- assert.match(ui,/m_boardClock->setVisible\(!result && !clock.empty\(\)\)/);
+ assert.match(ui,/m_boardClock->setVisible\(!result && !elimination && !clock.empty\(\)\)/);
 });
 
 test('Back from map navigates to the retained board without forfeiting; another Back requires confirmation',()=>{
@@ -205,4 +205,20 @@ int main(){RankedRuntime r;
  r.m_sessionToken.clear();r.m_view.stage=RuntimeStage::Blocked;r.recheckEnvironment();assert(r.configLoads==1&&r.m_view.match.matchId=="retained");
  r.m_sessionToken="token";r.fetchModeAvailability();auto stale=pending.back();++r.m_sessionGeneration;matjson::Value root;root["modRestrictionEnabled"]=true;stale({root});assert(!r.m_environmentPolicy.modRestrictionEnabled);
 }`,['src/domain/EnvironmentPolicy.cpp']);
+});
+
+
+test('dense board card rows stay inside their borders with a separate avatar slot',()=>{
+ run(`#include "domain/SurvivalBoardPresentation.hpp"
+#include <cassert>
+using namespace corum::ranked;
+int main(){
+ for(float width:{85.f,110.f,120.f,150.f})for(float height:{36.f,42.f,48.f,66.f}){
+  auto c=survivalCardLayout(width,height);
+  assert(c.titleY+c.titleHeight/2<=c.height-4+.001f);
+  assert(c.recordY-c.recordHeight/2>=4-.001f);
+  assert(c.avatarY+c.avatarSize/2<c.titleY-c.titleHeight/2);
+  assert(c.avatarY-c.avatarSize/2>c.recordY+c.recordHeight/2);
+ }
+}`);
 });

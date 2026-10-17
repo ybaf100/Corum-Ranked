@@ -146,7 +146,7 @@ float rankedMenuTextScale(float scale){return scale;}
 namespace i18n{bool isKorean(){return false;}}std::string text(char const*,char const* s){return s;}
 namespace ui{inline constexpr Color Gold{255,195,55},Blue{0,0,255},SurfaceRaised{0,0,0},Cyan{0,255,255},Text{255,255,255},TextMuted{160,160,160},Red{255,0,0};enum class FontWeight{Black,ExtraBold};enum class RankBadgeDisplay{Leaderboard};
  CCNode* surface(CCSize size,CCPoint pos,Color,Color,unsigned char,bool){auto* node=new CCNode;node->size=size;node->pos=pos;return node;}
- CCLabelBMFont* menuLabel(std::string const& text,float,CCPoint pos,Color,FontWeight){auto* label=new CCLabelBMFont;label->text=text;label->pos=pos;return label;}CCLabelBMFont* playerNameLabel(std::string const& text,float scale,CCPoint pos,Color color,FontWeight weight){return menuLabel(text,scale,pos,color,weight);}void fitMenuLabelWidth(CCLabelBMFont*,float,float,float){}
+ CCLabelBMFont* menuLabel(std::string const& text,float,CCPoint pos,Color,FontWeight){auto* label=new CCLabelBMFont;label->text=text;label->pos=pos;return label;}CCLabelBMFont* playerNameLabel(std::string const& text,float scale,CCPoint pos,Color color,FontWeight weight){return menuLabel(text,scale,pos,color,weight);}void fitMenuLabelWidth(CCLabelBMFont*,float,float,float){}void fitFullMenuLabel(CCLabelBMFont*,float,float,float){}
  struct PlayerIcon{static CCNode* createLocal(){return CCNode::create();}static CCNode* createBot(int){return CCNode::create();}static CCNode* createRemote(int){return CCNode::create();}};
  CCNode* createAnimatedRankBadge(std::string const&,CCSize,RankBadgeDisplay){return CCNode::create();}
 }

@@ -1,3 +1,10 @@
+# v0.5.0-beta.75
+
+- Restore Survival Pause action touch handling and deferred surrender confirmation.
+- Keep Debug Force Clear visible while entry acknowledgement is pending; retain server permission checks.
+- Fit Survival result headings and card text within their reserved bounds.
+- Block native gameplay construction while another scene transition or native PlayLayer owner remains.
+
 # v0.5.0-beta.74
 
 - Keep a server-synchronized round/start clock on the Survival board and distinguish preparation states without invented deadlines.

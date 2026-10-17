@@ -483,6 +483,11 @@ void SurvivalRuntime::resetSurrender() {
     m_surrenderEventId.clear();m_surrenderMatchId.clear();m_surrenderAccepted=false;
     m_surrenderOwner.reset();m_surrenderScene.reset();
 }
+bool SurvivalRuntime::canSurrender() const {
+    return active() && !m_session.empty() && m_session==RankedRuntime::get().spectatorLiveSessionToken() &&
+        !surrenderPending() && !normalRoundCleared() && !freePlaying() && !m_view.ownEliminated &&
+        (m_view.state=="PREPARING" || m_view.state=="ENTERING" || m_view.state=="COUNTDOWN" || m_view.state=="PLAYING");
+}
 void SurvivalRuntime::surrender() {
     if(!active() || m_session.empty() || !m_surrenderEventId.empty() || m_view.ownEliminated ||
         m_view.state=="FINAL_RESULT" || m_view.state=="CANCELLED" || m_events.size()>254)return;
