@@ -1,6 +1,6 @@
 name: Build Corum Ranked Mod
 
-# Automatic Release builds are opt-in when public distribution is configured.
+# Build Release on main; publication remains opt-in and supports build-only pushes.
 # Debug and Release publish to distinct immutable R2 paths and filenames.
 on:
   push:
@@ -17,7 +17,6 @@ permissions:
 
 jobs:
   metadata:
-    if: github.event_name == 'workflow_dispatch' || vars.RANKED_PUBLISH_R2 == 'true'
     name: Validate Ranked release manifest
     runs-on: ubuntu-latest
     outputs:
@@ -112,7 +111,7 @@ jobs:
           if-no-files-found: error
 
   publish-download:
-    if: github.ref == 'refs/heads/main' && vars.RANKED_PUBLISH_R2 == 'true' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    if: github.ref == 'refs/heads/main' && vars.RANKED_PUBLISH_R2 == 'true' && !contains(github.event.head_commit.message, '[build only]') && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     needs: [metadata, package]
     uses: ./.github/workflows/publish-ranked-download.yml
     with:
