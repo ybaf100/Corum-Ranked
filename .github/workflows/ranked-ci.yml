@@ -7,6 +7,7 @@ on:
       - "**"
     paths:
       - "ranked/**"
+      - "corum-ranked-mod/**"
       - "apps-script/Code.gs"
       - "apps-script/RankedConfig.gs"
       - "apps-script/SurvivalConfig.gs"
@@ -16,6 +17,7 @@ on:
   pull_request:
     paths:
       - "ranked/**"
+      - "corum-ranked-mod/**"
       - "apps-script/Code.gs"
       - "apps-script/RankedConfig.gs"
       - "apps-script/SurvivalConfig.gs"
@@ -69,3 +71,20 @@ jobs:
         run: node --test apps-script/validate-survival-config.mjs
       - name: Re-run existing Apps Script compatibility checks
         run: node apps-script/validate-record-sheet-compat.mjs
+
+  native:
+    name: Native client and packaging regressions
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - name: Run native client regression harnesses
+        run: node --test --test-concurrency=2 corum-ranked-mod/tests/*.mjs
+      - name: Validate package construction and publication policy
+        run: |
+          python3 corum-ranked-mod/tests/ModReleaseBuildTest.py
+          python3 corum-ranked-mod/tests/ModReleasePublishTest.py
+          python3 corum-ranked-mod/tests/AssetPackBuildTest.py
