@@ -50,13 +50,26 @@ changing test assertions or production timeouts.
 | Platform | Debug ON/OFF local build attempt |
 | --- | --- |
 | Windows | Both blocked during CMake compiler/linker checks: no Windows toolchain (`--major-image-version` unsupported by host linker). |
-| Android64 | Both blocked during configuration: Android NDK absent. |
-| Android32 | Both blocked during configuration: Android NDK absent. |
+| Android64 | Debug ON and OFF native compilation/link succeeded with Geode 5.8.2 and NDK r29. |
+| Android32 | Debug ON and OFF native compilation/link succeeded with Geode 5.8.2 and NDK r29. |
 | iOS | Both blocked during configuration: no Apple `iphoneos` SDK on the Linux host. |
 
-No platform binary or successful platform build is claimed. Existing CI covers
-all eight platform/Debug configurations without requiring publication. Hosted
-runner outcomes are checked after push and reported separately.
+The Android builds use the manifest's Geode 5.8.2 SDK, GD 2.2081 bindings,
+NDK `29.0.14206865`, Release optimization and both Debug feature flags ON/OFF.
+All four produce the correct ARM/AArch64 ELF shared libraries. Debug OFF
+binaries exclude the Force Clear dialog and SurvivalOptions diagnostics.
+
+These are native compilation/link checks with `GEODE_DISABLE_CLI_CALLS=ON`
+and the mod ID explicitly defined. Geode CLI resource/font generation,
+`.geode` packaging and GD device execution remain unverified. Native binary
+hashes are retained with the local validation artifacts; no binary is published.
+
+Hosted [Ranked checks](https://github.com/ybaf100/Corum-Ranked/actions/runs/38921332527)
+and [platform CI](https://github.com/ybaf100/Corum-Ranked/actions/runs/38921332681)
+failed before runner allocation (`runner_id: 0`, zero executed steps); downstream
+platform jobs were skipped. Log retrieval returned `BlobNotFound`. The precise
+hosted startup cause is unavailable; this is not a passing CI result. No
+workflow, publication or deployment was manually dispatched.
 
 Required GD device checks remain: supported/unsupported LDM maps and real LDM
 object filtering; Shake Trigger with ON/OFF; pointer replacement, re-entry and
