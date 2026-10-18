@@ -1,12 +1,11 @@
 #pragma once
 
 #include "../SurvivalRuntime.hpp"
+#include "../domain/ScoreDisplay.hpp"
 #include "RankedTranslations.hpp"
 #include "RankedVisuals.hpp"
 #include "RankBadgeAssets.hpp"
 #include <Geode/ui/Popup.hpp>
-#include <Geode/binding/GameLevelManager.hpp>
-#include <Geode/binding/GJUserScore.hpp>
 
 namespace corum::ranked::ui {
 using namespace geode::prelude;
