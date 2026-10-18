@@ -63,7 +63,7 @@ void SurvivalHud::present(SurvivalMatchView const& view,std::int64_t remainingMs
             for(auto const& label:{row.rank,row.name,row.score})label.opacity(0);
             row.node->setVisible(false);addChild(row.node,5);found=m_rows.emplace(value.id,std::move(row)).first;
         }
-        found->second.value=value;found->second.tween.observe(value.score);found->second.tween.advance(dt);
+        found->second.value=value;found->second.tween.observe(value.bestProgress);found->second.tween.advance(dt);
     }
     for(auto& [id,row]:m_rows) {
         auto const visible=std::any_of(rows.begin(),rows.end(),[&](auto const& value){return value.id==id;});

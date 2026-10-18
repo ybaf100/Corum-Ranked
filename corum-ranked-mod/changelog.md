@@ -1,3 +1,14 @@
+# v0.5.0-beta.84
+
+- Keep the latest Railway production endpoints and direct Neon migration-lock fix from main; synchronize required-client and workspace versions to beta.84.
+- Advance Solo and Survival entry from the process heartbeat even when held scene callbacks stop. Acknowledge only the exact active scene, show the server's 3/2/1 countdown, and preserve all server start, native lifecycle, input, audio and attempt gates. Do not mark GD paused during native initialization.
+- Return immediately after an accepted Survival surrender through the owned native Pause/Quit path, with deferred scene teardown and duplicate protection.
+- Keep NEXT UP status text above the reel. Carry the winning thumbnail through continuous braking, center stop and shrink into the selected-map panel; preserve late-ID and recreated-scene continuity. Keep metadata on complete fitted lines.
+- Read Survival lobby leaderboard totals from the server's totalPlayers field so valid rank and Top percentages render.
+- Replace instant bot scores with deterministic Adaptive NORMAL attempts: 500 ms server simulation, gradual NOW/BEST, deaths/retries, bounded human-skill adaptation, 3/8/4 strength cohorts for 15 bots, and at most three timed Death Match attempts. Batch changed database projections and persist simulation state with the existing authoritative snapshot.
+- Smooth only confirmed NOW/BEST samples in the board/HUD; retain authoritative ranks, cutoff, human scores, LP/MMR settlement, Debug Force Clear/Force Rank, FREE PLAY and native game records.
+- Add executable failure reproductions, restart/database regressions and a reproducible 1,050-match distribution plus ten-hour virtual-time probe. Physical iPadOS acceptance remains a separate device check.
+
 # v0.5.0-beta.83
 
 - Fix a Solo Ranked native round that stays black/frozen in ROUND_ENTERING: the process-owned preparation heartbeat now advances the existing guarded native scene entry and server-ACK/countdown gate when PlayLayer postUpdate and its scheduled callbacks stop during the entry hold.

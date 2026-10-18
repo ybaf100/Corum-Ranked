@@ -3,7 +3,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Inject, Inj
 import { timingSafeEqual } from "node:crypto";
 import { forceSurvivalDebugRank, finishSurvivalDebugOnElimination, survivalCurrentRound,
   survivalDebugLp, survivalLiveView, survivalSettlementInputs, survivalTierForLp, type RandomSource, type SurvivalCommand,
-  type SurvivalMatch, type SurvivalRatingProfile } from "@corum-ranked/rules";
+  type SurvivalBotDriverState,type SurvivalMatch, type SurvivalRatingProfile } from "@corum-ranked/rules";
 import { driveSurvivalBots } from "./survival-bot-driver.js";
 import { lockSurvivalAdmission } from "./survival-admission.js";
 import { DATABASE, type DatabasePort, type SqlExecutor } from "../database/database.port.js";
@@ -18,8 +18,8 @@ import { SurvivalService } from "./survival.service.js";
 import type { ClearSurvivalDebugDto, CreateSurvivalDebugDto, ForceSurvivalDebugDto, SurvivalDebugEventDto } from "./survival-debug.dto.js";
 
 interface DebugRow {
-  match_id:string; human_player_id:string; seed:number|string; average_group:string; force_rank:number|null;
-  driver_state:Record<string,number>; result:SurvivalDebugResult|null; acknowledged_at:Date|string|null;
+  match_id:string; human_player_id:string; seed:number|string; human_actual_lp:number; average_group:string; force_rank:number|null;
+  driver_state:SurvivalBotDriverState; result:SurvivalDebugResult|null; acknowledged_at:Date|string|null;
 }
 export interface SurvivalDebugResult {
   matchId:string; debug:true; won:boolean; rank:number; tiedPlayers:number; requestedDelta:number; actualDelta:number;
@@ -50,7 +50,7 @@ export class SurvivalDebugService implements OnApplicationBootstrap,OnApplicatio
     await this.discover(true).catch(e=>this.logger.error(String(e)));
     // Existing games survive operational OFF and a process restart; the seed and
     // event cursors live in PostgreSQL, never just in this interval's memory.
-    this.timer=setInterval(()=>{void this.tickOnce().catch(e=>this.logger.error(String(e)));},250);
+    this.timer=setInterval(()=>{void this.tickOnce().catch(e=>this.logger.error(String(e)));},500);
     this.timer.unref();
   }
   public async onApplicationShutdown():Promise<void> { if(this.timer)clearInterval(this.timer);this.timer=null;await this.pending; }
@@ -114,7 +114,7 @@ export class SurvivalDebugService implements OnApplicationBootstrap,OnApplicatio
     const human=match.players.find(p=>p.playerId===row.human_player_id)!;
     if(row.force_rank!==null)return forceSurvivalDebugRank(match,human.participantId,row.force_rank,now);
     if(human.eliminationStage!==null)return finishSurvivalDebugOnElimination(match,human.participantId,now);
-    const driven=driveSurvivalBots(match,Number(row.seed),row.driver_state,now);
+    const driven=driveSurvivalBots(match,Number(row.seed),row.driver_state,now,[Number(row.human_actual_lp)]);
     if(JSON.stringify(driven.cursor)!==JSON.stringify(row.driver_state))await tx.query("UPDATE sur_debug_matches SET driver_state=$2::jsonb WHERE match_id=$1",[match.id,JSON.stringify(driven.cursor)]);
     return driven.match;
   }

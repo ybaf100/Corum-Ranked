@@ -139,7 +139,7 @@ describe("Survival M5 public HTTP and persistent online game",()=>{
   await event(owner,m,"PROGRESS",{attemptId,progress:63.9,currentProgress:40.2});
   const response=await api(group[1]!,`/online/matches/${id}`);
   expect(response.status).toBe(200);expect(response.body.roundPlayers).toHaveLength(count);
-  expect(response.body.roundPlayers.find((p:any)=>p.participantId===owner.session.playerId)).toMatchObject({bestProgress:87,currentProgress:40,attemptActive:true,cleared:false});
+  expect(response.body.roundPlayers.find((p:any)=>p.participantId===owner.session.playerId)).toMatchObject({bestProgress:87.9,currentProgress:40.2,attemptActive:true,cleared:false});
   await event(owner,m,"ATTEMPT_END",{attemptId,progress:100});
   const cleared=await api(group[1]!,`/online/matches/${id}`);
   expect(cleared.body.state).toBe("PLAYING");

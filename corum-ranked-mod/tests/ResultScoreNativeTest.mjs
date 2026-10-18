@@ -752,6 +752,9 @@ int main() {
     auto decoded=parseStanding(standing);assert(decoded.rank==2&&decoded.topPercent==2&&decoded.target->bot);
     standing["target"]["rank"]=2;assert(!parseStanding(standing).target);
     standing["rank"]=101;assert(!parseStanding(standing).rank);standing["rank"]=2;
+    V survivalStanding;survivalStanding["rank"]=3;survivalStanding["totalPlayers"]=12;survivalStanding["topPercent"]=25;
+    auto survivalDecoded=parseStanding(survivalStanding);assert(survivalDecoded.rank==3&&survivalDecoded.total==12&&survivalDecoded.topPercent==25);
+    survivalStanding["rank"]=13;assert(!parseStanding(survivalStanding).rank);
     V promotion;promotion["gamesRequired"]=10;promotion["winsRequired"]=5;
     promotion["results"]=V::Array{"WIN","LOSS"};assert(parseScoreSeries(promotion).active);
     promotion["winsRequired"]=11;assert(!parseScoreSeries(promotion).active);

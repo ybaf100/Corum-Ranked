@@ -233,7 +233,7 @@ corum::ranked::StandingView parseStanding(matjson::Value const& value) {
         if(auto cut=gold["masterCutoffLp"].asInt();cut.isOk())view.masterCutoff=static_cast<int>(cut.unwrap());
     }
     auto const rank = value["rank"].asInt();
-    view.total = static_cast<int>(value["total"].asInt().unwrapOr(0));
+    view.total = static_cast<int>(value["total"].asInt().unwrapOr(value["totalPlayers"].asInt().unwrapOr(0)));
     if (rank.isOk() && rank.unwrap() > 0 && rank.unwrap() <= view.total) {
         view.rank = static_cast<int>(rank.unwrap());
         // Derive only the display percentage from the authoritative rank/count.

@@ -6,7 +6,7 @@ import { PGlite } from "@electric-sql/pglite";
 import { Test } from "@nestjs/testing";
 import { ForbiddenException, ValidationPipe, type INestApplication } from "@nestjs/common";
 import { beforeAll,beforeEach,afterAll,describe,it,expect,vi } from "vitest";
-import { DEFAULT_SURVIVAL_CONFIG,survivalBotPlan,survivalCurrentRound,survivalMapRange,type SurvivalMatch } from "@corum-ranked/rules";
+import { DEFAULT_SURVIVAL_CONFIG,survivalCurrentRound,survivalMapRange,type SurvivalMatch } from "@corum-ranked/rules";
 import { PgliteDatabase } from "./pglite-database.js";
 import { environmentFixture,configDocumentFixture } from "./fixtures.js";
 import { SurvivalConfigService,type SurvivalConfigDocument } from "../src/config/survival-config.service.js";
@@ -231,19 +231,50 @@ describe("Survival M4 persistent debug game",()=>{
     m=await prepare(m);expect(m.state).toBe("PLAYING");
     expect(survivalCurrentRound(m).endsAt!-survivalCurrentRound(m).startsAt!).toBe(180000);
   });
-  it("persists initial/five monotone updates and does not redraw on duplicate ticks or restart",async()=>{
-    const m=await prepare(await create()),r=survivalCurrentRound(m);
-    for(const t of [0,19999,20000,49999,50000,80000,110000,140000]) {
-      now=r.startsAt!+t;await debug.tickOnce();
-      const current=await engine.get(m.id);
-      current.players.filter(p=>p.kind==="BOT").forEach((p,i)=>{
-        const expected=survivalBotPlan(42,`${r.key}:${r.mapGeneration}`,i).filter(e=>e.offsetMs<=t).at(-1)!.best;
-        expect(survivalCurrentRound(current).players.find(v=>v.participantId===p.participantId)!.highestProgress).toBe(expected);
-      });
-      const revision=current.revision;await Promise.all([debug.tickOnce(),debug.tickOnce()]);expect((await engine.get(m.id)).revision).toBe(revision);
+  it("persists smooth attempts and resumes the saved simulation without duplicate updates",async()=>{
+    const m=await prepare(await create()),r=survivalCurrentRound(m);let before=await engine.get(m.id);
+    expect(survivalCurrentRound(before).players.slice(1).every(p=>p.highestProgress===0)).toBe(true);
+    for(const t of [500,1000,10000,20000,50000,80000,110000,140000]) {
+      now=r.startsAt!+t;await debug.tickOnce();const current=await engine.get(m.id);
+      for(const p of survivalCurrentRound(current).players.filter(p=>p.participantId!=="human")){
+        const old=survivalCurrentRound(before).players.find(v=>v.participantId===p.participantId)!;
+        expect(p.highestProgress).toBeGreaterThanOrEqual(old.highestProgress);
+        if(t<=1000)expect(p.highestProgress).toBeLessThan(1);
+      }
+      const revision=current.revision,stored=(await db.query("SELECT driver_state FROM sur_debug_matches WHERE match_id=$1",[m.id])).rows;
+      await Promise.all([debug.tickOnce(),debug.tickOnce()]);expect((await engine.get(m.id)).revision).toBe(revision);
+      expect((await db.query("SELECT driver_state FROM sur_debug_matches WHERE match_id=$1",[m.id])).rows).toEqual(stored);before=current;
     }
-    expect((await db.query<{driver_state:Record<string,number>}>("SELECT driver_state FROM sur_debug_matches")).rows[0]!.driver_state).toEqual(
-      Object.fromEntries(Array.from({length:15},(_,i)=>[`${r.key}:${r.mapGeneration}:bot-${String(i+1).padStart(2,"0")}`,5])));
+    const state=(await db.query<{driver_state:{version:number;bots:Record<string,{sequence:number}>}}>("SELECT driver_state FROM sur_debug_matches")).rows[0]!.driver_state;
+    expect(state.version).toBe(1);expect(Object.keys(state.bots)).toHaveLength(15);
+    expect(Object.values(state.bots).some(b=>b.sequence>1)).toBe(true);
+    const recoveredEngine=new SurvivalEngineService(db,clock,ids,config,{select:async()=>{throw new Error("Unexpected map selection during restart");}});
+    const restarted=new SurvivalDebugService(db,env,clock,{next:()=>.5},config,sessions,recoveredEngine,survival);
+    const revision=before.revision;await restarted.tickOnce();expect((await engine.get(m.id)).revision).toBe(revision);
+  });
+  it("batches fifteen bots with bounded SQL and atomically rolls back driver state on persistence failure",async()=>{
+    const m=await prepare(await create());now=survivalCurrentRound(m).startsAt!+10000;await debug.tickOnce();
+    const counter=countSql(db,sql=>/SELECT.*sur_matches/.test(sql));now+=500;const began=performance.now();await engine.tick(m.id);
+    if(process.env.DEBUG_SQL_METRICS_FILE)appendFileSync(process.env.DEBUG_SQL_METRICS_FILE,JSON.stringify({kind:"adaptiveBotTick",bots:15,tickMs:500,wallMs:performance.now()-began,...counter.metrics})+"\n");
+    expect(counter.metrics.queries).toBeLessThanOrEqual(8);counter.stop();
+    const before=await engine.get(m.id),state=(await db.query("SELECT driver_state FROM sur_debug_matches WHERE match_id=$1",[m.id])).rows;
+    now+=500;const failure=failSqlOnce(db,sql=>sql.includes("INSERT INTO sur_attempts"));
+    await expect(engine.tick(m.id)).rejects.toThrow("Injected");failure.stop();
+    expect(await engine.get(m.id)).toEqual(before);
+    expect((await db.query("SELECT driver_state FROM sur_debug_matches WHERE match_id=$1",[m.id])).rows).toEqual(state);
+    await engine.tick(m.id);expect((await engine.get(m.id)).revision).toBeGreaterThan(before.revision);
+  });
+  it("runs fifteen bots for a virtual minute with bounded batched writes and no duplicate same-time writes",async()=>{
+    const m=await prepare(await create()),counter=countSql(db,()=>false),began=performance.now();
+    try{
+      for(let i=0;i<120;i++){now+=500;await engine.tick(m.id);}
+      expect(counter.metrics.queries).toBeLessThanOrEqual(120*8);
+      const state=(await db.query("SELECT driver_state FROM sur_debug_matches WHERE match_id=$1",[m.id])).rows[0];
+      const revision=(await engine.get(m.id)).revision;await engine.tick(m.id);
+      expect((await engine.get(m.id)).revision).toBe(revision);
+      expect((await db.query("SELECT driver_state FROM sur_debug_matches WHERE match_id=$1",[m.id])).rows[0]).toEqual(state);
+      if(process.env.DEBUG_SQL_METRICS_FILE)appendFileSync(process.env.DEBUG_SQL_METRICS_FILE,JSON.stringify({kind:"adaptiveBotSoak",bots:15,virtualSeconds:60,ticks:120,wallMs:performance.now()-began,...counter.metrics,stateBytes:JSON.stringify(state).length})+"\n");
+    }finally{counter.stop();}
   });
   it("ends when the human is eliminated and settles the recorded rank once without running bot-only rounds",async()=>{
     const soloBefore=(await db.query("SELECT * FROM ranked_profiles")).rows;
@@ -285,22 +316,28 @@ describe("Survival M4 persistent debug game",()=>{
     expect(view.participants.filter(p=>p.kind==="BOT").every(p=>["RED","AQUA","BRONZE","SILVER","GOLD"].includes(p.displayedTier))).toBe(true);
     expect((await db.query<{virtual_human_lp:boolean}>("SELECT virtual_human_lp FROM sur_debug_matches")).rows[0]!.virtual_human_lp).toBe(true);
   });
-  it("runs normal rounds then immediate bot Death Match attempts and ends when the human completes three",async()=>{
+  it("runs normal rounds and a tied FINAL, then times all three bot Death Match attempts",async()=>{
     let m=await create();
-    // Seed 57 produces a legitimate 100% bot finalist under the nerfed normal plan.
-    await db.query("UPDATE sur_debug_matches SET seed=57 WHERE match_id=$1",[m.id]);
     for(let phase=0;phase<4;phase++) {
-      m=await prepare(m);await record(m,100);now=survivalCurrentRound(m).endsAt!;await debug.tickOnce();
-      m=await engine.get(m.id);if(m.state==="FINAL_RESULT")break;
-      now+=5000;await send(m,"PRESENTATION_COMPLETE");m=await engine.get(m.id);
+      m=await prepare(m);await record(m,100);
+      if(phase===3){
+        // A legal final tie is explicit, rather than relying on a rare bot clear.
+        const round=survivalCurrentRound(m),bot=round.players.find(p=>p.participantId!=="human")!;
+        const context={roundKey:round.key,mapGeneration:round.mapGeneration,levelId:round.map!.levelId,participantId:bot.participantId,attemptId:"tie-fixture"};
+        await engine.dispatch(m.id,"tie-start",{type:"ATTEMPT_START",...context});
+        await engine.dispatch(m.id,"tie-end",{type:"ATTEMPT_END",...context,progress:100});
+      }
+      now=survivalCurrentRound(m).endsAt!;await debug.tickOnce();m=await engine.get(m.id);
+      expect(m.state).toBe("ROUND_RESULT");now+=5000;await send(m,"PRESENTATION_COMPLETE");m=await engine.get(m.id);
     }
-    expect(m.state).not.toBe("FINAL_RESULT");
-    {
-      expect(survivalCurrentRound(m).phase).toBe("TIEBREAK");m=await prepare(m);
-      expect(survivalCurrentRound(m).players.filter(p=>p.participantId!=="human").every(p=>p.attempts.length===3 && p.attempts.every(a=>a.endedAt!==null))).toBe(true);
-      for(let i=0;i<3;i++)await record(m,100);
-      const end=await debug.view(m.id,session);expect(end.state).toBe("FINAL_RESULT");expect(end.presentationGate).toBeNull();expect(end.result!.rank).toBe(1);
-    }
+    expect(survivalCurrentRound(m).phase).toBe("TIEBREAK");m=await prepare(m);
+    expect(survivalCurrentRound(m).players.filter(p=>p.participantId!=="human").every(p=>p.attempts.length===0)).toBe(true);
+    for(let i=0;i<3;i++)await record(m,100);
+    expect((await debug.view(m.id,session)).state).toBe("PLAYING");
+    now=survivalCurrentRound(m).endsAt!-1;await debug.tickOnce();
+    const end=await debug.view(m.id,session);expect(end.state).toBe("FINAL_RESULT");expect(end.result!.rank).toBe(1);
+    const attempts=survivalCurrentRound(await engine.get(m.id)).players.filter(p=>p.participantId!=="human").flatMap(p=>p.attempts);
+    expect(attempts.every(a=>a.endedAt!==null&&a.endedAt>a.startedAt)).toBe(true);
     expect((await debug.view(m.id,session)).result!.rank).toBe(1);
   });
   it("keeps bot joint winners on early elimination without bot accounts or official LP",async()=>{
@@ -405,8 +442,8 @@ it.each([0,1,3])("measures real Survival SQL at %i unsettled games with 250ms ti
  }
  expect(reports.before!.discovery).toBe(16);expect(reports.after!.discovery).toBe(2);
  expect(reports.after!.queries).toBe(reports.before!.queries-14);
- console.log("SURVIVAL_SQL_METRIC",JSON.stringify({active:count,seconds:4,...reports,botTickMs:250}));
- if(process.env.DEBUG_SQL_METRICS_FILE)appendFileSync(process.env.DEBUG_SQL_METRICS_FILE,JSON.stringify({mode:"Survival",active:count,seconds:4,...reports,botTickMs:250})+"\n");
+ console.log("SURVIVAL_SQL_METRIC",JSON.stringify({active:count,seconds:4,...reports,botTickMs:500}));
+ if(process.env.DEBUG_SQL_METRICS_FILE)appendFileSync(process.env.DEBUG_SQL_METRICS_FILE,JSON.stringify({mode:"Survival",active:count,seconds:4,...reports,botTickMs:500})+"\n");
 },30_000);
 
 describe("debug discovery recovery and prompt settlement",()=>{
@@ -419,16 +456,16 @@ describe("debug discovery recovery and prompt settlement",()=>{
   try{for(let i=0;i<4;i++){now+=250;await debug.tickOnce();}
    expect(counter.metrics.discovery).toBe(0);expect(tick).toHaveBeenCalledTimes(4);
   }finally{counter.stop();tick.mockRestore();}
-  console.log("SURVIVAL_START_LATENCY",JSON.stringify({creationMs,registrationClockDelayMs:0,botTickMs:250}));
-    if(process.env.DEBUG_SQL_METRICS_FILE)appendFileSync(process.env.DEBUG_SQL_METRICS_FILE,JSON.stringify({kind:"startLatency",mode:"Survival",creationMs,registrationClockDelayMs:0,botTickMs:250})+"\n");
+  console.log("SURVIVAL_START_LATENCY",JSON.stringify({creationMs,registrationClockDelayMs:0,botTickMs:500}));
+    if(process.env.DEBUG_SQL_METRICS_FILE)appendFileSync(process.env.DEBUG_SQL_METRICS_FILE,JSON.stringify({kind:"startLatency",mode:"Survival",creationMs,registrationClockDelayMs:0,botTickMs:500})+"\n");
  });
- it("recovers games before starting its unchanged interval and retains them after discovery fails",async()=>{
+ it("recovers games before starting its 500ms interval and retains them after discovery fails",async()=>{
   const view=await debug.create(session,body());
   const restartedEngine=new SurvivalEngineService(db,clock,ids,config,{select:async()=>{throw new Error("Unexpected map search");}});
   const restarted=new SurvivalDebugService(db,env,clock,{next:()=>.5},config,sessions,restartedEngine,survival);
   const interval=vi.spyOn(globalThis,"setInterval");await restarted.onApplicationBootstrap();
   try{
-   expect(interval).toHaveBeenLastCalledWith(expect.any(Function),250);
+   expect(interval).toHaveBeenLastCalledWith(expect.any(Function),500);
    expect((restarted as any).activeMatches.has(view.matchId)).toBe(true);
    (restarted as any).nextDiscoveryAt=-Infinity;
    const fault=failSqlOnce(db,sql=>sql.includes("WHERE d.settled_at IS NULL AND m.state<>"));

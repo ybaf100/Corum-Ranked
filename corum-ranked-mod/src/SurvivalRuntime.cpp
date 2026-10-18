@@ -242,6 +242,7 @@ void SurvivalRuntime::observe(matjson::Value const& root) {
             info!=participants.end()?numFromString<int>((*info)["gdAccountId"].asString().unwrapOr("0")).unwrapOr(0):0});
         auto& row=m_view.standings.back();row.bestProgress=p["bestProgress"].asDouble().unwrapOr(row.score);
         row.currentProgress=p["currentProgress"].asDouble().unwrapOr(0);row.attemptActive=p["attemptActive"].asBool().unwrapOr(false);
+        row.attemptId=p["attemptId"].asString().unwrapOr("");
         row.cleared=p["cleared"].asBool().unwrapOr(false);row.eliminated=p["eliminated"].asBool().unwrapOr(false);row.qualified=p["qualified"].asBool().unwrapOr(false);
     }
     m_view.roundPlayers=m_view.standings;
@@ -254,7 +255,8 @@ void SurvivalRuntime::observe(matjson::Value const& root) {
             auto info=std::find_if(participants.begin(),participants.end(),[&](auto const& v){return v["participantId"].asString().unwrapOr("")==pid;});
             row.id=pid;row.rank=static_cast<int>(p["rank"].asInt().unwrapOr(0));row.score=p["score"].asDouble().unwrapOr(0);
             row.bestProgress=p["bestProgress"].asDouble().unwrapOr(row.score);row.currentProgress=p["currentProgress"].asDouble().unwrapOr(0);
-            row.attemptActive=p["attemptActive"].asBool().unwrapOr(false);row.cleared=p["cleared"].asBool().unwrapOr(false);
+            row.attemptActive=p["attemptActive"].asBool().unwrapOr(false);row.attemptId=p["attemptId"].asString().unwrapOr("");
+            row.cleared=p["cleared"].asBool().unwrapOr(false);
             row.eliminated=p["eliminated"].asBool().unwrapOr(false);row.qualified=p["qualified"].asBool().unwrapOr(false);
             if(info!=participants.end()){row.name=(*info)["name"].asString().unwrapOr(pid);row.bot=(*info)["kind"].asString().unwrapOr("")=="BOT";
                 row.tier=(*info)["displayedTier"].asString().unwrapOr("UNRANKED");row.accountId=numFromString<int>((*info)["gdAccountId"].asString().unwrapOr("0")).unwrapOr(0);}
@@ -280,7 +282,7 @@ void SurvivalRuntime::poll() {
     auto const session=m_session;auto const id=m_view.id;
     m_pollRequest.spawn(request(session).get(matchEndpoint("/matches/"+id)+(m_view.online?"?roundKey="+m_view.roundKey+"&mapGeneration="+std::to_string(m_view.mapGeneration):"")),[this,generation,pollGeneration,session,id](web::WebResponse response) {
         if(!current(generation,session) || m_view.id!=id || pollGeneration!=m_pollGeneration)return;
-        m_pollBusy=false;m_nextPoll=std::chrono::steady_clock::now()+std::chrono::milliseconds(m_view.online?500:250);
+        m_pollBusy=false;m_nextPoll=std::chrono::steady_clock::now()+std::chrono::milliseconds(500);
         if(response.code()>=200&&response.code()<300)observe(response.json().unwrapOr(matjson::Value()));
         else {
             auto const message=response.json().unwrapOr(matjson::Value())["message"].asString().unwrapOr("");

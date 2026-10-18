@@ -440,6 +440,26 @@ export function reduceSurvivalMatch(before: SurvivalMatch, command: SurvivalComm
   return match;
 }
 
+export interface SurvivalBotFrame {participantId:string;attemptId:string;kind:"START"|"PROGRESS"|"END";at:number;progress:number;}
+/** Trusted server simulation port, deliberately absent from HTTP event DTOs.
+ * Clone once for the whole field and use the same attempt/scoring functions as
+ * humans. No simulator may edit another entrant or bypass the round context. */
+export function applySurvivalBotFrames(before:SurvivalMatch,context:SurvivalRoundContext,frames:readonly SurvivalBotFrame[],sampledAt:number):SurvivalMatch {
+  const round=survivalCurrentRound(before);
+  if(before.state!=="PLAYING"||context.roundKey!==round.key||context.mapGeneration!==round.mapGeneration||context.levelId!==round.map?.levelId)return before;
+  const match=structuredClone(before),current=survivalCurrentRound(match);
+  for(const f of frames){
+    if(match.state!=="PLAYING")break;
+    const player=current.players.find(p=>p.participantId===f.participantId);
+    if(!player||player.forfeited||!match.players.some(p=>p.participantId===f.participantId&&p.kind==="BOT")||
+      f.at<current.startsAt!||f.at>=current.endsAt!||f.at>sampledAt||!Number.isFinite(f.at))conflict("Invalid bot simulation frame");
+    if(f.kind==="START")startAttempt(match,current,player,f.attemptId,f.at);
+    else recordAttempt(match,current,player,f.attemptId,f.progress,f.kind==="END",f.at,f.progress);
+  }
+  if(JSON.stringify(match)===JSON.stringify(before))return before;
+  match.revision++;match.updatedAt=Math.max(before.updatedAt,sampledAt);return match;
+}
+
 export function survivalSettlementInputs(match: SurvivalMatch) {
   if (!match.online && match.state !== "FINAL_RESULT") return [];
   return match.players.filter(p=>p.finalRank!==null && (match.state!=="CANCELLED" || p.fixedRewardRank!==undefined)).map(player => {
@@ -475,8 +495,9 @@ export function survivalLiveView(match: SurvivalMatch, now: number, participantI
     const player=round.players.find(v=>v.participantId===p.participantId)!;
     const active=player.attempts.find(a=>a.endedAt===null);
     const score=round.phase === "TIEBREAK" ? p.score/1000 : p.score;
-    return {...p,score,bestProgress:score,
-      currentProgress:active?(round.phase==="TIEBREAK"?survivalMilliPercent(active.currentProgress??active.highestProgress)/1000:Math.trunc(active.currentProgress??active.highestProgress)):0,
+    return {...p,score,bestProgress:round.phase==="TIEBREAK"?score:player.highestProgress,
+      currentProgress:active?survivalMilliPercent(active.currentProgress??active.highestProgress)/1000:0,
+      attemptId:active?.id??null,
       attemptActive:active!==undefined,
       cleared:player.attempts.some(a=>a.endedAt!==null && a.highestProgress===100),
       eliminated:match.players.find(v=>v.participantId===p.participantId)!.eliminationStage!==null,

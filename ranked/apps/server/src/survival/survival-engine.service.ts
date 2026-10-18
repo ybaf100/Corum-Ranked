@@ -254,41 +254,54 @@ export class SurvivalEngineService implements OnApplicationBootstrap, OnApplicat
     for(const r of match.rounds){
       const old=before?.rounds.find(round=>round.key===r.key);
       if(!changed(old,r))continue;
-      await tx.query(`INSERT INTO sur_rounds(match_id,round_key,ordinal,phase,target_qualifiers,map_generation,level_id,map_snapshot,
-        selected_maps,preparation_started_at,entry_requested_at,first_entered_at,starts_at,ends_at,finished_at,cutoff_score)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10,$11,$12,$13,$14,$15,$16)
-        ON CONFLICT(match_id,round_key) DO UPDATE SET map_generation=EXCLUDED.map_generation,level_id=EXCLUDED.level_id,
-        map_snapshot=EXCLUDED.map_snapshot,selected_maps=EXCLUDED.selected_maps,preparation_started_at=EXCLUDED.preparation_started_at,
-        entry_requested_at=EXCLUDED.entry_requested_at,first_entered_at=EXCLUDED.first_entered_at,starts_at=EXCLUDED.starts_at,
-        ends_at=EXCLUDED.ends_at,finished_at=EXCLUDED.finished_at,cutoff_score=EXCLUDED.cutoff_score`,
-      [match.id,r.key,r.ordinal,r.phase,r.target,r.mapGeneration,r.map?.levelId??null,r.map?JSON.stringify(r.map):null,
-        JSON.stringify(r.selectedMaps),iso(r.preparationStartedAt),iso(r.entryRequestedAt),iso(r.firstEnteredAt),iso(r.startsAt),iso(r.endsAt),iso(r.finishedAt),r.cutoffScore]);
-      if(r.phase==="TIEBREAK")await tx.query(`INSERT INTO sur_tiebreaks(match_id,round_key,sequence,final_round_key,result) VALUES($1,$2,$3,$4,$5::jsonb)
-        ON CONFLICT(match_id,round_key) DO UPDATE SET result=EXCLUDED.result`,[match.id,r.key,
-        match.rounds.filter(round=>round.phase==="TIEBREAK" && round.ordinal<=r.ordinal).length,
-        match.rounds.find(round=>round.phase==="FINAL")!.key,r.finishedAt===null?null:JSON.stringify(r.players.map(p=>({participantId:p.participantId,rank:p.rank,qualified:p.qualified})))]);
+      if(changed(old?{...old,players:undefined}:null,{...r,players:undefined})){
+        await tx.query(`INSERT INTO sur_rounds(match_id,round_key,ordinal,phase,target_qualifiers,map_generation,level_id,map_snapshot,
+          selected_maps,preparation_started_at,entry_requested_at,first_entered_at,starts_at,ends_at,finished_at,cutoff_score)
+          VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10,$11,$12,$13,$14,$15,$16)
+          ON CONFLICT(match_id,round_key) DO UPDATE SET map_generation=EXCLUDED.map_generation,level_id=EXCLUDED.level_id,
+          map_snapshot=EXCLUDED.map_snapshot,selected_maps=EXCLUDED.selected_maps,preparation_started_at=EXCLUDED.preparation_started_at,
+          entry_requested_at=EXCLUDED.entry_requested_at,first_entered_at=EXCLUDED.first_entered_at,starts_at=EXCLUDED.starts_at,
+          ends_at=EXCLUDED.ends_at,finished_at=EXCLUDED.finished_at,cutoff_score=EXCLUDED.cutoff_score`,
+        [match.id,r.key,r.ordinal,r.phase,r.target,r.mapGeneration,r.map?.levelId??null,r.map?JSON.stringify(r.map):null,
+          JSON.stringify(r.selectedMaps),iso(r.preparationStartedAt),iso(r.entryRequestedAt),iso(r.firstEnteredAt),iso(r.startsAt),iso(r.endsAt),iso(r.finishedAt),r.cutoffScore]);
+        if(r.phase==="TIEBREAK")await tx.query(`INSERT INTO sur_tiebreaks(match_id,round_key,sequence,final_round_key,result) VALUES($1,$2,$3,$4,$5::jsonb)
+          ON CONFLICT(match_id,round_key) DO UPDATE SET result=EXCLUDED.result`,[match.id,r.key,
+          match.rounds.filter(round=>round.phase==="TIEBREAK" && round.ordinal<=r.ordinal).length,
+          match.rounds.find(round=>round.phase==="FINAL")!.key,r.finishedAt===null?null:JSON.stringify(r.players.map(p=>({participantId:p.participantId,rank:p.rank,qualified:p.qualified})))]);
+      }
+      const rows:unknown[]=[],attempts:unknown[]=[],closed:unknown[]=[];
       for(const p of r.players){
         const previous=old?.players.find(player=>player.participantId===p.participantId);
-        if(!changed(previous,p))continue;
-        await tx.query(`INSERT INTO sur_round_players(match_id,round_key,participant_id,assets_ready_at,preparation_failure,
-          entered_at,highest_progress,round_rank,qualified,forfeited) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-          ON CONFLICT(match_id,round_key,participant_id) DO UPDATE SET assets_ready_at=EXCLUDED.assets_ready_at,
-          preparation_failure=EXCLUDED.preparation_failure,entered_at=EXCLUDED.entered_at,highest_progress=EXCLUDED.highest_progress,
-          round_rank=EXCLUDED.round_rank,qualified=EXCLUDED.qualified,forfeited=EXCLUDED.forfeited`,
-        [match.id,r.key,p.participantId,iso(p.assetsReadyAt),p.preparationFailure,iso(p.enteredAt),p.highestProgress,p.rank,p.qualified,p.forfeited]);
+        const projection=(v:typeof p)=>({participant_id:v.participantId,assets_ready_at:iso(v.assetsReadyAt),preparation_failure:v.preparationFailure,
+          entered_at:iso(v.enteredAt),highest_progress:v.highestProgress,round_rank:v.rank,qualified:v.qualified,forfeited:v.forfeited});
+        if(changed(previous?projection(previous):null,projection(p)))rows.push(projection(p));
         for(const a of p.attempts){
-          if(!changed(previous?.attempts.find(attempt=>attempt.id===a.id),a))continue;
-          if(r.phase==="TIEBREAK")await tx.query(`INSERT INTO sur_tiebreak_attempts(match_id,round_key,participant_id,attempt_id,sequence,
-            highest_progress,started_at,ended_at,score_millipercent) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
-            ON CONFLICT(match_id,round_key,participant_id,attempt_id) DO UPDATE SET highest_progress=EXCLUDED.highest_progress,
-            ended_at=EXCLUDED.ended_at,score_millipercent=EXCLUDED.score_millipercent`,
-          [match.id,r.key,p.participantId,a.id,a.sequence,a.highestProgress,iso(a.startedAt),iso(a.endedAt),survivalMilliPercent(a.highestProgress)]);
-          else await tx.query(`INSERT INTO sur_attempts(match_id,round_key,participant_id,attempt_id,sequence,highest_progress,started_at,ended_at)
-            VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(match_id,round_key,participant_id,attempt_id)
-            DO UPDATE SET highest_progress=EXCLUDED.highest_progress,ended_at=EXCLUDED.ended_at`,
-          [match.id,r.key,p.participantId,a.id,a.sequence,a.highestProgress,iso(a.startedAt),iso(a.endedAt)]);
+          const prior=previous?.attempts.find(attempt=>attempt.id===a.id);
+          if(!changed(prior,a))continue;
+          const value={participant_id:p.participantId,attempt_id:a.id,sequence:a.sequence,highest_progress:a.highestProgress,
+            started_at:iso(a.startedAt),ended_at:iso(a.endedAt),score_millipercent:survivalMilliPercent(a.highestProgress)};
+          if(prior?.endedAt===null && a.endedAt!==null)closed.push(value);else attempts.push(value);
         }
       }
+      if(rows.length)await tx.query(`INSERT INTO sur_round_players(match_id,round_key,participant_id,assets_ready_at,preparation_failure,
+        entered_at,highest_progress,round_rank,qualified,forfeited)
+        SELECT $1,$2,x.* FROM jsonb_to_recordset($3::jsonb) AS x(participant_id text,assets_ready_at timestamptz,preparation_failure text,
+          entered_at timestamptz,highest_progress double precision,round_rank integer,qualified boolean,forfeited boolean)
+        ON CONFLICT(match_id,round_key,participant_id) DO UPDATE SET assets_ready_at=EXCLUDED.assets_ready_at,
+          preparation_failure=EXCLUDED.preparation_failure,entered_at=EXCLUDED.entered_at,highest_progress=EXCLUDED.highest_progress,
+          round_rank=EXCLUDED.round_rank,qualified=EXCLUDED.qualified,forfeited=EXCLUDED.forfeited`,[match.id,r.key,JSON.stringify(rows)]);
+      const table=r.phase==="TIEBREAK"?"sur_tiebreak_attempts":"sur_attempts";
+      // Close prior active attempts first: the partial unique active index must
+      // be released before a replacement attempt is inserted in the same batch.
+      if(closed.length)await tx.query(`UPDATE ${table} a SET highest_progress=x.highest_progress,ended_at=x.ended_at${r.phase==="TIEBREAK"?",score_millipercent=x.score_millipercent":""}
+        FROM jsonb_to_recordset($3::jsonb) AS x(participant_id text,attempt_id text,highest_progress double precision,ended_at timestamptz,score_millipercent integer)
+        WHERE a.match_id=$1 AND a.round_key=$2 AND a.participant_id=x.participant_id AND a.attempt_id=x.attempt_id`,[match.id,r.key,JSON.stringify(closed)]);
+      if(attempts.length)await tx.query(`INSERT INTO ${table}(match_id,round_key,participant_id,attempt_id,sequence,highest_progress,started_at,ended_at${r.phase==="TIEBREAK"?",score_millipercent":""})
+        SELECT $1,$2,x.participant_id,x.attempt_id,x.sequence,x.highest_progress,x.started_at,x.ended_at${r.phase==="TIEBREAK"?",x.score_millipercent":""}
+        FROM jsonb_to_recordset($3::jsonb) AS x(participant_id text,attempt_id text,sequence integer,highest_progress double precision,started_at timestamptz,ended_at timestamptz,score_millipercent integer)
+        ORDER BY x.participant_id,x.sequence
+        ON CONFLICT(match_id,round_key,participant_id,attempt_id) DO UPDATE SET highest_progress=EXCLUDED.highest_progress,
+          ended_at=EXCLUDED.ended_at${r.phase==="TIEBREAK"?",score_millipercent=EXCLUDED.score_millipercent":""}`,[match.id,r.key,JSON.stringify(attempts)]);
     }
   }
 }

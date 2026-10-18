@@ -11,32 +11,6 @@ export function survivalDebugSeed(seed: number, key: string): number {
   for (const character of key) value = Math.imul(value ^ character.charCodeAt(0), 16777619);
   return value >>> 0;
 }
-export interface SurvivalBotEvent { index: number; offsetMs: number; best: number; changed: boolean; }
-// Box–Muller draws an independent N(50, 20²) candidate. Clamping happens
-// before integer rounding; a new candidate never replaces a better record.
-function normalBotProgress(random: SeededRandom): number {
-  const u = 1 - random.next(), v = random.next();
-  const normal = Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
-  return Math.round(Math.max(0, Math.min(100, 50 + 20 * normal)));
-}
-export function survivalBotPlan(seed: number, roundKey: string, botIndex: number): readonly SurvivalBotEvent[] {
-  if (!Number.isInteger(botIndex) || botIndex < 0 || botIndex >= 15)
-    throw new RankedDomainError("INVALID_CONFIG", "Survival has exactly 15 simulated bots");
-  const random = new SeededRandom(survivalDebugSeed(seed, `${roundKey}:score:${botIndex}`));
-  let best = normalBotProgress(random);
-  const events: SurvivalBotEvent[] = [{ index: 0, offsetMs: 0, best, changed: true }];
-  for (const [index, seconds] of [20, 50, 80, 110, 140].entries()) {
-    const changed = random.next() < 0.4;
-    if (changed) best = Math.max(best, normalBotProgress(random));
-    events.push({ index: index + 1, offsetMs: seconds * 1000, best, changed });
-  }
-  return events;
-}
-export function survivalBotTiebreak(seed: number, roundKey: string, botIndex: number): readonly number[] {
-  const random = new SeededRandom(survivalDebugSeed(seed, `${roundKey}:deathmatch:${botIndex}`));
-  return Array.from({ length: 3 }, () => Math.floor(random.next() * 100001) / 1000);
-}
-
 export function survivalDebugLp(seed: number, humanLp: number, group: SurvivalDifficultyGroup,
   config: SurvivalConfig,botCount=15) {
   if(!Number.isInteger(botCount)||botCount<1||botCount>15)throw new RankedDomainError("INVALID_CONFIG","Debug requires 1–15 bots");

@@ -10,7 +10,7 @@ struct SurvivalRect {
     bool overlaps(SurvivalRect const& b)const{return x<b.right()-.01f&&right()>b.x+.01f&&y<b.top()-.01f&&top()>b.y+.01f;}
 };
 struct SurvivalSelectionLayout {
-    SurvivalRect safe, header, subtitle, carousel, numberFinal, panel, thumbnail, title, creator, difficulty, metadata, ldm, shake, jukebox, ready, readiness, hint;
+    SurvivalRect safe, header, subtitle, pending, carousel, numberFinal, panel, thumbnail, title, creator, difficulty, metadata, ldm, shake, jukebox, ready, readiness, hint;
     bool compact=false;float scale=1;
 };
 struct SurvivalNumberLayout {SurvivalRect ribbon;std::vector<SurvivalRect> columns;float lineStep=0;};
@@ -32,7 +32,9 @@ inline SurvivalSelectionLayout survivalSelectionLayout(float width,float height,
     r.safe={margin,margin,width-2*margin,height-2*margin};
     r.header={margin,height-43,width-2*margin,30};r.subtitle={margin,height-62,width-2*margin,13};
     auto const carouselHeight=std::min(208.f,height-124.f);
-    r.carousel={margin,(height-carouselHeight)/2,width-2*margin,carouselHeight};
+    auto const carouselTop=std::min((height+carouselHeight)/2,r.subtitle.y-22);
+    r.carousel={margin,carouselTop-carouselHeight,width-2*margin,carouselHeight};
+    r.pending={margin,carouselTop+4,width-2*margin,14};
     r.numberFinal={margin,height-98,width-2*margin,32};
     float const panelWidth=std::min(660.f,width-2*margin),left=(width-panelWidth)/2;
     float const top=height-(thumbnail?76.f:110.f),bottom=thumbnail?52.f:58.f;
@@ -72,7 +74,7 @@ inline SurvivalSelectionLayout survivalSelectionLayout(float width,float height,
     r.jukebox={controlsLeft+toggleWidth+8+(middle-jukeboxWidth)/2,y+18,jukeboxWidth,34};
     r.readiness={left+12,r.panel.y+3,panelWidth-24,12};
     r.hint={left,37,panelWidth,16};
-    for(auto* box:{&r.safe,&r.header,&r.subtitle,&r.carousel,&r.numberFinal,&r.panel,&r.thumbnail,&r.title,&r.creator,&r.difficulty,&r.metadata,&r.ldm,&r.shake,&r.jukebox,&r.ready,&r.readiness,&r.hint}){
+    for(auto* box:{&r.safe,&r.header,&r.subtitle,&r.pending,&r.carousel,&r.numberFinal,&r.panel,&r.thumbnail,&r.title,&r.creator,&r.difficulty,&r.metadata,&r.ldm,&r.shake,&r.jukebox,&r.ready,&r.readiness,&r.hint}){
         box->x*=r.scale;box->y*=r.scale;box->w*=r.scale;box->h*=r.scale;
     }
     return r;
