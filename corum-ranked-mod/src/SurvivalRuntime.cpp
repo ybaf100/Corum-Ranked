@@ -78,7 +78,16 @@ void SurvivalRuntime::tick() {
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
     pumpForceClear();
 #endif
-    if(std::chrono::steady_clock::now()>=m_nextPoll)poll();
+    auto const now=std::chrono::steady_clock::now();
+    if(m_pollBusy && now-m_pollStartedAt>std::chrono::seconds(8)){
+        // A dropped HTTP completion must not hold the read-only match poll
+        // indefinitely. Invalidate any late callback before retrying.
+        log::warn("[SurvivalPoll] timed out; retrying match status");
+        ++m_pollGeneration;m_pollRequest.cancel();m_pollBusy=false;
+        m_nextPoll=now+std::chrono::milliseconds(500);
+        m_view.error="Survival connection stalled. Retrying...";
+    }
+    if(now>=m_nextPoll)poll();
 }
 std::string SurvivalRuntime::matchEndpoint(std::string const& path) const {
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
@@ -266,10 +275,11 @@ void SurvivalRuntime::observe(matjson::Value const& root) {
 }
 void SurvivalRuntime::poll() {
     if(m_pollBusy || !active() || m_session.empty())return;
-    m_pollBusy=true;
-    auto const generation=m_generation;auto const session=m_session;auto const id=m_view.id;
-    m_pollRequest.spawn(request(session).get(matchEndpoint("/matches/"+id)+(m_view.online?"?roundKey="+m_view.roundKey+"&mapGeneration="+std::to_string(m_view.mapGeneration):"")),[this,generation,session,id](web::WebResponse response) {
-        if(!current(generation,session) || m_view.id!=id)return;
+    m_pollBusy=true;m_pollStartedAt=std::chrono::steady_clock::now();
+    auto const generation=m_generation, pollGeneration=++m_pollGeneration;
+    auto const session=m_session;auto const id=m_view.id;
+    m_pollRequest.spawn(request(session).get(matchEndpoint("/matches/"+id)+(m_view.online?"?roundKey="+m_view.roundKey+"&mapGeneration="+std::to_string(m_view.mapGeneration):"")),[this,generation,pollGeneration,session,id](web::WebResponse response) {
+        if(!current(generation,session) || m_view.id!=id || pollGeneration!=m_pollGeneration)return;
         m_pollBusy=false;m_nextPoll=std::chrono::steady_clock::now()+std::chrono::milliseconds(m_view.online?500:250);
         if(response.code()>=200&&response.code()<300)observe(response.json().unwrapOr(matjson::Value()));
         else {
