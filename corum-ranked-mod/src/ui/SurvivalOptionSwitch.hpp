@@ -1,6 +1,12 @@
 #pragma once
 #include "RankedVisuals.hpp"
+#include "RankedTranslations.hpp"
 namespace corum::ranked::ui {
+inline CCNode* survivalUnavailableLdmFace(CCSize size){
+    auto* face=surface(size,{},TextMuted,SurfaceRaised,250,false);
+    auto* label=menuLabel(i18n::text("survival-no-ldm","NO LDM"),.23f,{size.width/2,size.height/2},TextMuted,FontWeight::SemiBold);
+    fitFullMenuLabel(label,size.width-12,size.height-8,.23f);face->addChild(label,5);return face;
+}
 inline void fitSurvivalSingleLine(CCLabelBMFont* label,float width,float height,float maximum){
     if(!label || width<=0 || height<=0)return;
     label->setWidth(-1);setLabelScale(label,rankedMenuTextScale(maximum));

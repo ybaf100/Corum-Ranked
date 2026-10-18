@@ -24,6 +24,7 @@ inline SurvivalNumberLayout survivalNumberLayout(float width,float height,std::s
     return r;
 }
 inline SurvivalSelectionLayout survivalSelectionLayout(float width,float height,bool thumbnail,bool ldmSupported) {
+    (void)ldmSupported; // Unsupported maps retain a disabled NO LDM control.
     SurvivalSelectionLayout r;
     r.scale=std::min({1.f,width/400.f,height/320.f});
     width/=r.scale;height/=r.scale;
@@ -57,7 +58,6 @@ inline SurvivalSelectionLayout survivalSelectionLayout(float width,float height,
     float const toggleWidth=std::min(140.f,controlsWidth*.44f),readyWidth=std::min(104.f,controlsWidth*.29f);
     float const y=r.panel.y+19;
     r.ldm={controlsLeft,y+36,toggleWidth,32};r.shake={controlsLeft,y,toggleWidth,32};
-    if(!ldmSupported)r.shake.y=y+18;
     r.ready={controlsLeft+controlsWidth-readyWidth,y+18,readyWidth,34};
     auto const middle=controlsWidth-toggleWidth-readyWidth-16;
     auto const jukeboxWidth=std::min(96.f,middle);

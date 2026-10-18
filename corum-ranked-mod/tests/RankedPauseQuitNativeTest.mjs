@@ -42,7 +42,7 @@ struct RankedRuntime{int ends=0;static RankedRuntime& get(){static RankedRuntime
 std::optional<WeakRef<PauseLayer>> activeRankedPause;
 #define schedule_selector(x) 0
 void dismissNativeRankedExitConfirmation(PauseLayer*){};
-struct CorumRankedPauseLayer:PauseLayer {struct Fields{std::optional<WeakRef<Popup>> popup,exitConfirmation,survivalConfirmation;std::optional<WeakRef<PlayLayer>> owner;std::string leaseId="lease";bool survival=false,nativeQuitInProgress=false,nativeQuitReachedPlay=false;}fields;Fields* m_fields=&fields;void unschedule(int){}
+struct CorumRankedPauseLayer:PauseLayer {struct Fields{struct ActionInput{void suspend(){}};ActionInput* survivalInput=nullptr;std::optional<WeakRef<Popup>> popup,exitConfirmation,survivalConfirmation;std::optional<WeakRef<PlayLayer>> owner;std::string leaseId="lease";bool survival=false,nativeQuitInProgress=false,nativeQuitReachedPlay=false;}fields;Fields* m_fields=&fields;void unschedule(int){}
 ${body('void retireRankedPause()')}
 ${body('void releaseRankedPauseOwnership()')}
 ${body('void onResume(CCObject* sender)')}
@@ -105,7 +105,7 @@ std::optional<WeakRef<PauseLayer>> activeRankedPause;
 #define schedule_selector(x) 0
 void dismissNativeRankedExitConfirmation(PauseLayer*){};
 struct CorumRankedPauseLayer:PauseLayer {
- struct Fields{std::optional<WeakRef<Popup>> popup,exitConfirmation,survivalConfirmation;std::optional<WeakRef<PlayLayer>> owner;std::string leaseId="lease";bool survival=false,nativeQuitInProgress=false;}fields;
+ struct Fields{struct ActionInput{void suspend(){}};ActionInput* survivalInput=nullptr;std::optional<WeakRef<Popup>> popup,exitConfirmation,survivalConfirmation;std::optional<WeakRef<PlayLayer>> owner;std::string leaseId="lease";bool survival=false,nativeQuitInProgress=false;}fields;
  struct CheckedFields {Fields* p;PauseLayer* owner;Fields* operator->(){assert(owner->alive);return p;}}m_fields{&fields,this};
  void unschedule(int){}
  ${body('void retireRankedPause()')}

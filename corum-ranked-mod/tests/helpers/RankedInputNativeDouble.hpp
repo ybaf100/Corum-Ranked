@@ -21,12 +21,19 @@ struct CCTouch { int id; CCPoint point{110,110}; int getID() const {return id;}
 struct CCEvent {};
 struct CCObject { virtual ~CCObject() = default; };
 struct CCNode : CCObject {
+    std::shared_ptr<int> life=std::make_shared<int>(0);
     CCNode* parent = nullptr;
     std::string id;
     std::vector<CCNode*> children;
     bool visible = true;
     CCPoint origin;
     CCSize size;
+    float scale=1;
+    virtual bool isRunning() const {return true;}
+    void setID(std::string value){id=std::move(value);}
+    void autorelease(){}
+    auto const& getChildrenExt()const{return children;}
+    void addChild(CCNode* child){children.push_back(child);child->parent=this;}
     bool isVisible() const {return visible;}
     void setVisible(bool v) {visible=v;}
     CCSize getContentSize() const {return size;}
@@ -35,13 +42,18 @@ struct CCNode : CCObject {
         for(auto* child:children)if(child->id==value)return child;
         return nullptr;
     }
-    CCPoint convertToNodeSpace(CCPoint p) const {return {p.x-origin.x,p.y-origin.y};}
+    CCPoint convertToNodeSpace(CCPoint p) const {
+        if(parent)p=parent->convertToNodeSpace(p);
+        return {(p.x-origin.x)/scale,(p.y-origin.y)/scale};
+    }
     CCNode* getParent() { return parent; }
 };
 struct CCTouchDelegate {
     virtual ~CCTouchDelegate() = default;
     virtual bool ccTouchBegan(CCTouch*, CCEvent*) { return false; }
     virtual void ccTouchEnded(CCTouch*, CCEvent*) {}
+    virtual void ccTouchMoved(CCTouch*, CCEvent*) {}
+    virtual void ccTouchCancelled(CCTouch*, CCEvent*) {}
 };
 struct CCSet {
     std::set<int> ids;
@@ -99,18 +111,25 @@ struct CCTouchDispatcher {
             if (h->swallow) break;
         }
     }
+    void moved(int id,CCPoint point){CCTouch touch{id,point};for(auto& h:handlers)if(h->claimed.ids.contains(id))h->delegate->ccTouchMoved(&touch,nullptr);}
+    void cancelled(int id){CCTouch touch{id};for(auto& h:handlers)if(h->claimed.ids.erase(id))h->delegate->ccTouchCancelled(&touch,nullptr);}
 };
 struct CCDirector {
     CCTouchDispatcher dispatcher;
     CCNode* runningScene = nullptr;
+    CCNode* nextScene = nullptr;
     static CCDirector* sharedDirector() { static CCDirector director; return &director; }
     CCTouchDispatcher* getTouchDispatcher() { return &dispatcher; }
     CCSize getWinSize() const {return {568,320};}
-    CCNode* getNextScene(){return nullptr;}CCNode* getRunningScene() { return runningScene; }
+    CCNode* getNextScene(){return nextScene;}CCNode* getRunningScene() { return runningScene; }
 };
 struct CCLayer : CCNode, CCTouchDelegate {
     bool touch = true, running = false;
     int touchWrites = 0;
+    bool isRunning()const override{return running;}
+    bool init(){return true;}
+    void scheduleUpdate(){}
+    virtual void update(float){}
     virtual void registerWithTouchDispatcher() {
         CCDirector::sharedDirector()->dispatcher.addTargetedDelegate(this, -128, true);
     }

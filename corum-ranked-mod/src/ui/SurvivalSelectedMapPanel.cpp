@@ -42,7 +42,7 @@ void SurvivalSelectedMapPanel::build(CCSize size,bool thumbnail,bool ldm){
     auto item=[&](SurvivalRect rect,CCNode* face,int tag,char const* id){
         auto* b=CCMenuItemSpriteExtra::create(face,this,menu_selector(SurvivalSelectedMapPanel::onAction));b->setPosition(center(rect));b->setTag(tag);b->setID(id);menu->addChild(b);return b;
     };
-    m_ldm=item(r.ldm,survivalOptionFace({r.ldm.w,r.ldm.h},"LDM",m_options.lowDetail),4,"survival-round-ldm");m_ldm->setVisible(ldm);
+    m_ldm=item(r.ldm,ldm?survivalOptionFace({r.ldm.w,r.ldm.h},"LDM",m_options.lowDetail):survivalUnavailableLdmFace({r.ldm.w,r.ldm.h}),4,"survival-round-ldm");
     m_shake=item(r.shake,survivalOptionFace({r.shake.w,r.shake.h},i18n::text("disable-shake","Disable Shake"),m_options.disableShake),5,"survival-round-shake");
     auto* jukebox=surface({r.jukebox.w,r.jukebox.h},{},Blue,SurfaceRaised,255,false);
     // The existing public native widget opens Jukebox's real song selector.
@@ -61,7 +61,7 @@ void SurvivalSelectedMapPanel::present(CCSize size,bool thumbnail,SurvivalMatchV
     SurvivalNativeOptions options,bool supportsLdm,bool actionsEnabled,bool canEnter,double appearance){
     if(!m_built || thumbnail!=m_thumbnail || supportsLdm!=m_ldmSupported){m_options=options;build(size,thumbnail,supportsLdm);}
     auto const& r=m_layout;
-    if(m_options.lowDetail!=options.lowDetail)m_ldm->setNormalImage(survivalOptionFace({r.ldm.w,r.ldm.h},"LDM",options.lowDetail));
+    if(supportsLdm && m_options.lowDetail!=options.lowDetail)m_ldm->setNormalImage(survivalOptionFace({r.ldm.w,r.ldm.h},"LDM",options.lowDetail));
     if(m_options.disableShake!=options.disableShake)m_shake->setNormalImage(survivalOptionFace({r.shake.w,r.shake.h},i18n::text("disable-shake","Disable Shake"),options.disableShake));
     m_options=options;auto const interactive=appearance>=1. && actionsEnabled;
     auto* level=RankedLevelPreparation::get().level();auto const native=level && static_cast<int>(level->m_levelID)==view.map.levelId;
@@ -92,6 +92,8 @@ void SurvivalSelectedMapPanel::present(CCSize size,bool thumbnail,SurvivalMatchV
     if(SurvivalRuntime::get().surrenderPending())status=i18n::text("survival-surrender-pending","Surrender submitted · waiting for server");
     else if(!view.error.empty())status=i18n::text(view.error,view.error);
     else if(!prep.error.empty())status=i18n::text("survival-prep-retry","Preparation failed · RETRY")+": "+i18n::text(prep.error,prep.error);
+    else if(auto wait=SurvivalRuntime::get().entryWaitMs();view.state=="ENTERING" && wait && *wait>0)
+        status=fmt::format(fmt::runtime(i18n::text("survival-entry-wait","ALL READY · ENTERING IN {}s")),(*wait+999)/1000);
     else status=fmt::format("{} {}   /   {} {}",i18n::text("map","MAP"),i18n::text(prep.mapReady?"ready":"loading",prep.mapReady?"READY":"LOADING"),
         i18n::text("audio","AUDIO"),i18n::text(prep.audioReady?"ready":"loading",prep.audioReady?"READY":"LOADING"));
     if(status!=m_statusText){m_statusText=status;line(m_readiness,status,r.readiness,.19f,true);}m_readiness->setColor(!prep.error.empty()?Red:prep.mapReady && prep.audioReady?Green:TextMuted);

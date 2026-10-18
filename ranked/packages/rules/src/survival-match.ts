@@ -87,6 +87,16 @@ export interface SurvivalMatch {
   transitions: { sequence: number; state: SurvivalMatchState; roundKey: string; at: number; reason: string }[];
 }
 export interface SurvivalRoundContext { roundKey: string; mapGeneration: number; levelId: number; }
+
+/** All ready clients stay in the selection room before native entry opens. */
+export const SURVIVAL_READY_HOLD_MS = 3_000;
+export function survivalEntryOpensAt(round: SurvivalRound): number | null {
+  return round.entryRequestedAt === null ? null : round.entryRequestedAt + SURVIVAL_READY_HOLD_MS;
+}
+export function survivalEntryDeadlineAt(round: SurvivalRound): number | null {
+  const opens = survivalEntryOpensAt(round);
+  return opens === null ? null : round.firstEnteredAt === null ? opens + 5_000 : round.firstEnteredAt + 10_000;
+}
 export type SurvivalCommand =
   | { type: "TICK" }
   | {type:"ABSENT";roundKey:string;mapGeneration:number;participantIds:readonly string[]}
@@ -298,7 +308,7 @@ function advanceTimers(match: SurvivalMatch, now: number): void {
     round.startsAt=now+3000;round.endsAt=round.startsAt+180000;transition(match,"COUNTDOWN",now,"ABSENT_PLAYERS_SCORE_ZERO");
   }
   if (match.state === "ENTERING" && round.entryRequestedAt !== null) {
-    if (round.firstEnteredAt === null && now >= round.entryRequestedAt+5_000) {reroll(match,round,now,"NO_NATIVE_ENTRY"); return;}
+    if (round.firstEnteredAt === null && now >= survivalEntryDeadlineAt(round)!) {reroll(match,round,now,"NO_NATIVE_ENTRY"); return;}
     if (round.firstEnteredAt !== null && now >= round.firstEnteredAt+10_000) {
       forfeitUnready(match,round,p => p.enteredAt !== null,now,"NATIVE_ENTRY_TIMEOUT");
       if (!terminal(match)) {round.startsAt=now+3_000; round.endsAt=round.startsAt+180_000;
@@ -397,6 +407,7 @@ export function reduceSurvivalMatch(before: SurvivalMatch, command: SurvivalComm
         case "ENTERED":
           if (player.enteredAt !== null) break;
           if ((match.state !== "ENTERING" && !(match.online && player.absent && ["COUNTDOWN","PLAYING"].includes(match.state))) || player.assetsReadyAt === null) conflict("Native entry is not invited");
+          if (match.state === "ENTERING" && (survivalEntryOpensAt(round) === null || now < survivalEntryOpensAt(round)!)) conflict("Native entry is waiting for the ready countdown");
           player.enteredAt=now;player.absent=false; round.firstEnteredAt ??= now;
           if (match.state==="ENTERING" && entryPlayers(round).every(p => p.enteredAt !== null)) {
             round.startsAt=now+3_000; round.endsAt=round.startsAt+180_000;
@@ -490,7 +501,8 @@ export function survivalLiveView(match: SurvivalMatch, now: number, participantI
     preparationWarningAt:round.preparationStartedAt === null ? null : new Date(round.preparationStartedAt+10_000).toISOString(),
     preparationDeadlineAt:round.preparationStartedAt === null ? null : new Date(round.preparationStartedAt+15_000).toISOString(),
     entryRequestedAt:round.entryRequestedAt === null ? null : new Date(round.entryRequestedAt).toISOString(),
-    entryDeadlineAt:round.entryRequestedAt === null ? null : new Date(round.firstEnteredAt === null ? round.entryRequestedAt+5_000 : round.firstEnteredAt+10_000).toISOString(),
+    entryOpensAt:survivalEntryOpensAt(round) === null ? null : new Date(survivalEntryOpensAt(round)!).toISOString(),
+    entryDeadlineAt:survivalEntryDeadlineAt(round) === null ? null : new Date(survivalEntryDeadlineAt(round)!).toISOString(),
     startsAt:round.startsAt === null ? null : new Date(round.startsAt).toISOString(),
     endsAt:round.endsAt === null ? null : new Date(round.endsAt).toISOString(),
     remainingSeconds:match.state === "PLAYING" && round.endsAt !== null ? Math.max(0,(round.endsAt-now)/1000) : 0,

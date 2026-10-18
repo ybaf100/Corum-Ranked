@@ -191,6 +191,7 @@ void SurvivalRuntime::observe(matjson::Value const& root) {
     m_view.playerCount=static_cast<int>(root["playerCount"].asInt().unwrapOr(16));m_view.roundPlayerCount=static_cast<int>(root["roundPlayerCount"].asInt().unwrapOr(16));
     m_view.targetQualifiers=static_cast<int>(root["targetQualifiers"].asInt().unwrapOr(0));
     m_view.startsAt=root["startsAt"].asString().unwrapOr("");m_view.endsAt=root["endsAt"].asString().unwrapOr("");
+    m_view.entryOpensAt=root["entryOpensAt"].asString().unwrapOr("");
     m_view.certificate=root["map"];m_view.result=root["result"];
     m_view.completedRound=root["completedRound"];
     m_view.mapError=root["mapSelection"]["errorCode"].asString().unwrapOr("");
@@ -304,6 +305,7 @@ bool SurvivalRuntime::consumeNativeLaunch(GJGameLevel* level) {
 }
 bool SurvivalRuntime::canEnter() const {
     if(surrenderPending() || normalRoundCleared() || freePlaying())return false;
+    if(m_view.state=="ENTERING"){auto const wait=entryWaitMs();if(!wait || *wait>0)return false;}
     if(m_view.state=="PLAYING" && remainingMs()<=0)return false;
     if(!m_prepared.valid() || m_prepared!=preparationContext() || m_session.empty())return false;
     if(m_view.online && !m_view.ownAssetsReady)return false;
@@ -321,6 +323,7 @@ bool SurvivalRuntime::attemptLimitReached() const {
     return std::max(m_localAttempts,own==m_view.standings.end()?0:own->attemptsUsed)>=3;
 }
 std::optional<std::int64_t> SurvivalRuntime::countdownMs() const { return m_clock.signedRemainingMillis(m_view.startsAt,localNow()); }
+std::optional<std::int64_t> SurvivalRuntime::entryWaitMs() const { return m_clock.signedRemainingMillis(m_view.entryOpensAt,localNow()); }
 std::optional<std::int64_t> SurvivalRuntime::roundRemainingMs() const { return m_clock.remainingMillis(m_view.endsAt,localNow()); }
 std::int64_t SurvivalRuntime::remainingMs() const { return roundRemainingMs().value_or(0); }
 matjson::Value SurvivalRuntime::event(std::string const& type) const {

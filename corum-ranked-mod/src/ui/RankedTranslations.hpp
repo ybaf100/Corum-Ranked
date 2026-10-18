@@ -27,6 +27,8 @@ inline constexpr std::array kKoreanTranslations {
     Translation{"survival-surrender-pending", "항복 처리 중 · 서버 응답 대기"},
     Translation{"map-stars", "별"},
     Translation{"survival-default-ldm", "기본 LDM"},
+    Translation{"survival-no-ldm", "LDM 없음"},
+    Translation{"survival-entry-wait", "모두 준비 완료 · {}초 후 입장"},
     Translation{"survival-selected-map", "선정된 맵"},
     Translation{"survival-map-data-pending", "맵 정보 확인 중"},
     Translation{"survival-prep-retry", "준비 실패 · 다시 시도"},

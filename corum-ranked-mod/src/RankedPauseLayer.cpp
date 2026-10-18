@@ -2,6 +2,7 @@
 #include "SurvivalRuntime.hpp"
 #include "SurvivalSceneBridge.hpp"
 #include "ui/RankedConfirmPopup.hpp"
+#include "ui/SurvivalPauseActionInput.hpp"
 #include "ui/RankedSurrenderPopup.hpp"
 #include "ui/RankedExitConfirmation.hpp"
 #include "spectator/SpectatorSceneBridge.hpp"
@@ -78,6 +79,7 @@ public:
         CCLabelBMFont* survivalStatus = nullptr;
         CCMenuItemSpriteExtra* surrender = nullptr;
         CCMenu* survivalActions = nullptr;
+        ui::SurvivalPauseActionInput* survivalInput = nullptr;
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
         CCMenuItemSpriteExtra* forceClear = nullptr;
         CCMenu* forceClearMenu = nullptr;
@@ -115,8 +117,12 @@ public:
         if(m_fields->survival){auto const& survival=corum::ranked::SurvivalRuntime::get().view();
             m_fields->matchId=survival.id;m_fields->survivalRoundKey=survival.roundKey;m_fields->survivalMapGeneration=survival.mapGeneration;}
         auto* center = typeinfo_cast<CCMenu*>(getChildByIDRecursive("center-button-menu"));
-        if (!center) if (auto* play = getChildBySpriteFrameName(this, "GJ_playBtn2_001.png"))
-            center = typeinfo_cast<CCMenu*>(play->getParent());
+        if (!center) for(auto* child:getChildrenExt()){
+            auto* menu=typeinfo_cast<CCMenu*>(child);
+            // getChildBySpriteFrameName is not recursive. Search menu items,
+            // not the Pause's direct children, before Node IDs has run.
+            if(menu && getChildBySpriteFrameName(menu,"GJ_playBtn2_001.png")){center=menu;break;}
+        }
         auto* exit = typeinfo_cast<CCMenuItemSpriteExtra*>(getChildByIDRecursive("exit-button"));
         if (!exit && center) exit = typeinfo_cast<CCMenuItemSpriteExtra*>(getChildBySpriteFrameName(center, "GJ_menuBtn_001.png"));
         if (exit && !m_fields->placement && !m_fields->survival) {
@@ -153,6 +159,25 @@ public:
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
         setupSurvivalForceClear(size);
 #endif
+        if(m_fields->survival){
+            log::info("[SurvivalPauseInput] permissions state={} surrender={} assets={} entered={} eliminated={} cleared={}",
+                SurvivalRuntime::get().view().state,SurvivalRuntime::get().canSurrender(),SurvivalRuntime::get().view().ownAssetsReady,
+                SurvivalRuntime::get().view().ownEntered,SurvivalRuntime::get().view().ownEliminated,SurvivalRuntime::get().normalRoundCleared());
+            auto weak=WeakRef(this);
+            auto* input=ui::SurvivalPauseActionInput::create(this,layer,[weak]{
+                auto pause=weak.lock();if(!pause || !pause->getParent())return false;
+                auto const& fields=*pause->m_fields.self();auto const& runtime=SurvivalRuntime::get();auto const& view=runtime.view();
+                return fields.survival && !fields.survivalConfirmation && !runtime.surrenderPending() &&
+                    fields.matchId==view.id && fields.survivalRoundKey==view.roundKey && fields.survivalMapGeneration==view.mapGeneration;
+            });
+            if(input){
+                input->bind(m_fields->surrender,[weak]{if(auto pause=weak.lock())pause->onSurrender(nullptr);});
+#if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
+                input->bind(m_fields->forceClear,[weak]{if(auto pause=weak.lock())pause->onForceClear(nullptr);});
+#endif
+                m_fields->survivalInput=input;addChild(input,1200);
+            }
+        }
         if (m_fields->placement) {
             auto* caption = ui::label(i18n::text("placement-skip-map", "SKIP MAP"), 0.22f,
                 {button->getContentSize().width / 2, -10}, ui::Gold, ui::FontWeight::ExtraBold);
@@ -291,6 +316,7 @@ public:
         }
     }
     void retireRankedPause() {
+        if(m_fields->survivalInput)m_fields->survivalInput->suspend();
         if(m_fields->survivalConfirmation){if(auto dialog=m_fields->survivalConfirmation->lock())dialog->cancel();m_fields->survivalConfirmation.reset();}
         if (m_fields->owner) dismissNativeRankedExitConfirmation(this);
         if (m_fields->exitConfirmation) if (auto dialog = m_fields->exitConfirmation->lock()) dialog->dismiss();

@@ -54,7 +54,7 @@ bool ownsSurvivalPlayerPause(){return false;}
 ${body(pause,'bool ownsManagedRankedPause()')}
 void dismissNativeRankedExitConfirmation(PauseLayer*){};
 struct CorumRankedPauseLayer:PauseLayer {
-    struct Fields{std::optional<WeakRef<Popup>> popup,exitConfirmation,survivalConfirmation;std::optional<WeakRef<PlayLayer>> owner;std::string leaseId="lease",matchId="m";int round=1,deathmatch=0;int placementMapIndex=1;bool placement=false,survival=false;bool concessionQuit=false,nativeQuitInProgress=false,nativeQuitReachedPlay=false;}f;
+    struct Fields{struct ActionInput{void suspend(){}};ActionInput* survivalInput=nullptr;std::optional<WeakRef<Popup>> popup,exitConfirmation,survivalConfirmation;std::optional<WeakRef<PlayLayer>> owner;std::string leaseId="lease",matchId="m";int round=1,deathmatch=0;int placementMapIndex=1;bool placement=false,survival=false;bool concessionQuit=false,nativeQuitInProgress=false,nativeQuitReachedPlay=false;}f;
     struct CheckedFields{Fields* p;CCObject* owner;Fields* operator->(){assert(owner->alive);return p;}}m_fields{&f,this};
     int exitWarnings=0;void confirmRankedExit(){++exitWarnings;}
     void unschedule(int){}

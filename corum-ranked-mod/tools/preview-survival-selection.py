@@ -69,6 +69,9 @@ def render(layout,w,h,thumbnail,ldm,korean,image=None):
     label('GD FACE / EXTREME',layout['difficulty'],TEXT,22)
     label('GD #2147483647\n10 stars · LONG',layout['metadata'],CYAN,22)
     if ldm:switch('LDM',layout['ldm'],False)
+    else:
+        box(layout['ldm'],accent=MUTED)
+        label('LDM 없음' if korean else 'NO LDM',layout['ldm'],MUTED,maximum=24,single=True)
     switch('화면 흔들림 끄기' if korean else 'Disable Shake',layout['shake'],True)
     box(layout['jukebox']);label('Jukebox',layout['jukebox'],TEXT,24,single=True)
     box(layout['ready'],GOLD,(255,237,139));label('준비' if korean else 'READY',layout['ready'],INK,34,single=True)

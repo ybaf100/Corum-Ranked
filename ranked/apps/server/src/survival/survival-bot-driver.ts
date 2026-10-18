@@ -1,4 +1,4 @@
-import { reduceSurvivalMatch,survivalBotPlan,survivalBotTiebreak,survivalCurrentRound,type SurvivalCommand,type SurvivalMatch } from "@corum-ranked/rules";
+import { reduceSurvivalMatch,survivalBotPlan,survivalBotTiebreak,survivalCurrentRound,survivalEntryOpensAt,survivalEntryDeadlineAt,type SurvivalCommand,type SurvivalMatch } from "@corum-ranked/rules";
 
 /** Same reducer, seeded records and durable caller-owned cursors for M4 and M5. */
 export function driveSurvivalBots(before:SurvivalMatch,seed:number,previous:Record<string,number>,now:number) {
@@ -10,14 +10,14 @@ export function driveSurvivalBots(before:SurvivalMatch,seed:number,previous:Reco
   // Native readiness never comes from bots. Their own simulated resources can
   // be certified before a due timer is adjudicated after a delayed worker tick.
   const resourceAt=match.state==="PREPARING"&&round.preparationStartedAt!==null?Math.min(now,round.preparationStartedAt+14999):
-    match.state==="ENTERING"&&round.entryRequestedAt!==null?Math.min(now,round.firstEnteredAt===null?round.entryRequestedAt+4999:round.firstEnteredAt+9999):now;
+    match.state==="ENTERING"&&round.entryRequestedAt!==null?Math.min(now,survivalEntryDeadlineAt(round)!-1):now;
   const apply=(command:SurvivalCommand,at=now)=>{match=reduceSurvivalMatch(match,command,Math.max(match.updatedAt,at));};
   if(humans.length && match.state==="PREPARING" && humans.every(p=>p.preparationFailure!==null && p.assetsReadyAt===null)) {
     for(const p of active)apply({type:"PREPARATION_FAILED",...context,participantId:p.participantId,reason:"HUMAN_PREPARATION_FAILED"},resourceAt);
   } else if(match.state==="PREPARING" && (match.online || humans.some(p=>p.assetsReadyAt!==null))) {
     for(const p of active)apply({type:"ASSETS_READY",...context,participantId:p.participantId,certificate:round.map!},resourceAt);
   }
-  if(match.state==="ENTERING" && (humans.some(p=>p.enteredAt!==null) || (match.online && !humans.length))) {
+  if(match.state==="ENTERING" && now>=(survivalEntryOpensAt(survivalCurrentRound(match))??Infinity) && (humans.some(p=>p.enteredAt!==null) || (match.online && !humans.length))) {
     for(const p of active)apply({type:"ENTERED",...context,participantId:p.participantId},resourceAt);
   }
   const cursor={...previous};
