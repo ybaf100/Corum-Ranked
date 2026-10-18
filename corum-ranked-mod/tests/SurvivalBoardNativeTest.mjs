@@ -53,8 +53,21 @@ test('Back from map navigates to the retained board without forfeiting; another 
  run(`#include <cassert>
 #include <chrono>
 struct Result{bool exists=false;bool isObject()const{return exists;}};
-struct SurvivalRuntime{struct View{Result result;bool ownEliminated=false;}v;bool cleared=false;int acknowledgments=0;
- static SurvivalRuntime&get(){static SurvivalRuntime r;return r;}auto const&view(){return v;}bool normalRoundCleared(){return cleared;}void acknowledge(){++acknowledgments;}};
+enum class SurvivalFlowStage{Active,EliminatedChoice,PersonalResult,Ceremony};
+enum class SurvivalOutcomeChoice{Observe,PersonalResult};
+struct SurvivalRuntime{
+ struct View{Result result;bool ownEliminated=false;}v;
+ bool cleared=false,observe=false;int acknowledgments=0,choices=0;
+ SurvivalFlowStage stage=SurvivalFlowStage::Active;
+ SurvivalOutcomeChoice lastChoice=SurvivalOutcomeChoice::Observe;
+ static SurvivalRuntime&get(){static SurvivalRuntime r;return r;}
+ auto const&view(){return v;}
+ bool normalRoundCleared(){return cleared;}
+ void acknowledge(){++acknowledgments;}
+ SurvivalFlowStage flowStage()const{return stage;}
+ bool observing()const{return observe;}
+ void chooseOutcome(SurvivalOutcomeChoice choice){++choices;lastChoice=choice;}
+};
 struct Coordinator{bool m_closed=false,m_motion=false,m_browsingBoard=false,m_manualMap=false;std::chrono::steady_clock::time_point m_eliminationUntil{};int confirmations=0;void confirmSurrender(){++confirmations;}
  ${back}
 };
@@ -64,6 +77,16 @@ int main(){Coordinator c;auto&r=SurvivalRuntime::get();c.keyBackClicked();assert
  c.m_manualMap=true;c.keyBackClicked();assert(c.m_browsingBoard&&c.confirmations==2);
  c.m_motion=true;c.keyBackClicked();assert(c.confirmations==2);c.m_motion=false;
  r.v.result.exists=true;c.keyBackClicked();assert(r.acknowledgments==1&&!c.m_closed);
+ // Eliminated choice and local observation always route to the personal
+ // result rather than sending a second surrender/forfeit or acknowledging
+ // the shared match result.
+ r.v.result.exists=false;r.stage=SurvivalFlowStage::EliminatedChoice;
+ const beforeConfirm=c.confirmations;
+ c.keyBackClicked();assert(r.choices==1&&r.lastChoice==SurvivalOutcomeChoice::PersonalResult);
+ assert(c.confirmations==beforeConfirm&&r.acknowledgments==1);
+ r.stage=SurvivalFlowStage::Active;r.observe=true;
+ c.keyBackClicked();assert(r.choices==2&&r.lastChoice==SurvivalOutcomeChoice::PersonalResult);
+ assert(c.confirmations==beforeConfirm&&r.acknowledgments==1);
 }`);
  const ui=read('src/ui/SurvivalGameLayer.cpp');
  assert.match(ui,/m_entrySyncAfter=runtime.serverSyncMillis\(\);runtime.refreshRound\(\)/);
