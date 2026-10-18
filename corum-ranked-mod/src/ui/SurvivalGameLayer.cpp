@@ -67,10 +67,10 @@ class SurvivalGameLayer final : public CCLayerColor {
     bool init() override {
         if(!CCLayerColor::initWithColor({0,0,0,255}))return false;setID("survival-game-coordinator"_spr);setKeypadEnabled(true);
         auto const size=CCDirector::sharedDirector()->getWinSize();setContentSize(size);
-        m_heading=ui::menuLabel("SURVIVAL",.60f,{(size.width-156)/2+8,size.height-23},ui::Cyan,ui::FontWeight::Black);addChild(m_heading);
+        m_heading=ui::menuLabel("SURVIVAL",.60f,{(size.width-156)/2+8,size.height-29},ui::Cyan,ui::FontWeight::Black);addChild(m_heading);
         m_boardClock=ui::menuLabel("",.28f,{size.width-12,size.height-22},ui::Cyan,ui::FontWeight::ExtraBold);
         m_boardClock->setAnchorPoint({1,.5f});m_boardClock->setID("survival-board-clock"_spr);addChild(m_boardClock,10);
-        m_map=ui::menuLabel("",.27f,{size.width/2,size.height-49},ui::TextMuted,ui::FontWeight::SemiBold);addChild(m_map);
+        m_map=ui::menuLabel("",.27f,{size.width/2,size.height-48},ui::TextMuted,ui::FontWeight::SemiBold);addChild(m_map);
         m_status=ui::menuLabel("",.28f,{size.width/2,80},ui::TextMuted,ui::FontWeight::SemiBold);addChild(m_status);
         m_grid=CCNode::create();addChild(m_grid,5);
         m_spinner=LoadingSpinner::create(20);m_spinner->setPosition({size.width/2-113,size.height-49});m_spinner->setVisible(false);addChild(m_spinner,8);
@@ -328,7 +328,7 @@ public:
         auto const clock=survivalBoardClock(view.state,runtime.countdownMs(),runtime.roundRemainingMs());
         m_boardClock->setString(i18n::text(clock,clock).c_str());m_boardClock->setVisible(!result && !elimination && !clock.empty());
         auto const headingWidth=getContentSize().width-24-(m_boardClock->isVisible()?156:0);
-        m_heading->setPosition({12+headingWidth/2,getContentSize().height-23});
+        m_heading->setPosition({12+headingWidth/2,getContentSize().height-29});
         ui::fitMenuLabelWidth(m_boardClock,140,.28f,.18f);
         auto const mapWindow=nextRound && !elimination && !intro && !liveBoard && view.map.levelId>0 && view.state!="ROUND_RESULT";
         auto const searching=nextRound && !elimination && !intro && !liveBoard && view.state=="MAP_SELECTION";
