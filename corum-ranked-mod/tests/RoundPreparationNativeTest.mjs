@@ -169,7 +169,7 @@ struct PlatformToolbox {static inline int cursorRestores=0;
     static void toggleLockCursor(bool lock){assert(!lock);}static void showCursor(){++cursorRestores;}};
 namespace corum::ranked {
 struct SurvivalRuntime {static SurvivalRuntime&get(){static SurvivalRuntime r;return r;}
- bool interceptFreePlayNativeQuit(GJGameLevel*)const{return false;}bool acquiring()const{return false;}bool active()const{return false;}bool canEnter()const{return false;}
+ bool interceptFreePlayNativeQuit(GJGameLevel*)const{return false;}bool acquiring()const{return false;}bool active()const{return false;}bool canEnter()const{return false;}void noteNativeLaunch(){}bool canEnterObserver()const{return false;}bool observing()const{return false;}bool armObserver(GJGameLevel*,CCScene*)const{return false;}
  std::string optionsContext()const{return {};}bool validateNative(GJGameLevel*)const{return false;}bool armNative(GJGameLevel*)const{return false;}
  void preparationFailed(std::string const&){} };
 

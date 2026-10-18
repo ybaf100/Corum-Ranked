@@ -78,7 +78,7 @@ beforeEach(async()=>{
 });
 async function create(){
   const m=await engine.get((await debug.create(session,body())).matchId);
-  now+=5000;
+  now+=6000;
   await send(m,"PRESENTATION_COMPLETE");return engine.get(m.id);
 }
 async function send(m:SurvivalMatch,type:SurvivalDebugEventDto["type"],fields:Partial<SurvivalDebugEventDto>={}) {
@@ -176,13 +176,13 @@ describe("Survival M4 persistent debug game",()=>{
     expect(recovered.standings.find(p=>p.participantId==="human")).toMatchObject({bestProgress:100,cleared:true});
     expect(survivalCurrentRound(await engine.get(m.id)).players[0]!.attempts).toHaveLength(1);
   });
-  it("holds map selection behind the initial roster and durably waits for round presentation before selecting again",async()=>{
+  it("prefetches during the six-second roster and advances the durable result gate on the server clock",async()=>{
     let m=await engine.get((await debug.create(session,body())).matchId);
     expect(m.presentationGate).toBe("INTRO");
     await engine.selectMap(m.id);await debug.tickOnce();
-    expect(survivalCurrentRound(await engine.get(m.id)).map).toBeNull();
+    expect(survivalCurrentRound(await engine.get(m.id)).map).not.toBeNull();
     expect(survivalCurrentRound(await engine.get(m.id)).preparationStartedAt).toBeNull();
-    now+=4999;await expect(send(m,"PRESENTATION_COMPLETE")).rejects.toThrow("not complete");
+    now+=5999;await expect(send(m,"PRESENTATION_COMPLETE")).rejects.toThrow("not complete");
     now+=1;await send(m,"PRESENTATION_COMPLETE");m=await prepare(await engine.get(m.id));
     await record(m,100);now=survivalCurrentRound(m).endsAt!;await debug.tickOnce();m=await engine.get(m.id);
     expect(m.state).toBe("ROUND_RESULT");expect(m.presentationGate).toBe("ROUND_RESULT");
@@ -193,8 +193,8 @@ describe("Survival M4 persistent debug game",()=>{
     // A new process reads the same SQL snapshot; background ticks alone cannot
     // consume the roster/animation barrier even after its minimum duration.
     const restarted=new SurvivalEngineService(db,clock,ids,config,{select:async()=>{throw new Error("Unexpected map request");}});
-    expect((await restarted.tick(m.id)).presentationGate).toBe("ROUND_RESULT");
-    const event={eventId:ids.next(),type:"PRESENTATION_COMPLETE" as const,roundKey:survivalCurrentRound(m).key,mapGeneration:1,levelId:0};
+    expect((await restarted.tick(m.id)).presentationGate).toBeNull();
+    m=await engine.get(m.id);const event={eventId:ids.next(),type:"PRESENTATION_COMPLETE" as const,roundKey:survivalCurrentRound(m).key,mapGeneration:1,levelId:0};
     await debug.event(m.id,session,event);
     await debug.event(m.id,session,event);
     m=await engine.get(m.id);expect(m.rounds).toHaveLength(2);expect(m.state).toBe("MAP_SELECTION");
@@ -276,11 +276,11 @@ describe("Survival M4 persistent debug game",()=>{
       if(process.env.DEBUG_SQL_METRICS_FILE)appendFileSync(process.env.DEBUG_SQL_METRICS_FILE,JSON.stringify({kind:"adaptiveBotSoak",bots:15,virtualSeconds:60,ticks:120,wallMs:performance.now()-began,...counter.metrics,stateBytes:JSON.stringify(state).length})+"\n");
     }finally{counter.stop();}
   });
-  it("ends when the human is eliminated and settles the recorded rank once without running bot-only rounds",async()=>{
+  it("settles an eliminated human exactly once while bots continue for the local observer",async()=>{
     const soloBefore=(await db.query("SELECT * FROM ranked_profiles")).rows;
     const m=await prepare(await create());await record(m,0);now=survivalCurrentRound(m).endsAt!;
     await debug.tickOnce();const result=await debug.view(m.id,session);
-    expect(result.state).toBe("FINAL_RESULT");expect(result.presentationGate).toBeNull();expect(result.result!.rank).toBeGreaterThan(10);
+    expect(result.state).toBe("ROUND_RESULT");expect(result.presentationGate).toBe("ROUND_RESULT");expect(result.result!.rank).toBeGreaterThan(10);
     expect((await engine.get(m.id)).rounds).toHaveLength(1);
     await Promise.all([debug.view(m.id,session),debug.view(m.id,session),debug.tickOnce()]);
     expect((await db.query("SELECT * FROM sur_lp_ledger")).rows).toHaveLength(1);
@@ -291,7 +291,7 @@ describe("Survival M4 persistent debug game",()=>{
   it("surrenders using current-stage records and allows a new session to recover a running game",async()=>{
     const m=await prepare(await create());await record(m,35);
     const recovered=await debug.active(session);expect(recovered.match!.matchId).toBe(m.id);
-    const result=await send(m,"FORFEIT");expect(result.state).toBe("FINAL_RESULT");
+    const result=await send(m,"FORFEIT");expect(result.state).toBe("PLAYING");
     expect((await engine.get(m.id)).players.find(p=>p.playerId===session.playerId)!.forfeitReason).toBe("DEBUG_HUMAN_SURRENDER");
     expect(result.result!.rank).toBeGreaterThanOrEqual(1);
   });
@@ -347,13 +347,13 @@ describe("Survival M4 persistent debug game",()=>{
     await db.query("UPDATE sur_matches SET snapshot=$2::jsonb WHERE id=$1",[m.id,JSON.stringify(snapshot)]);
     const result=await send(m,"FORFEIT");
     expect(result.result).toMatchObject({rank:16,requestedDelta:-55});
-    expect(result.result!.standings.filter(p=>p.kind==="BOT").every(p=>p.rank===1 && p.tiedPlayers===15 && p.delta===-50)).toBe(true);
-    expect((await engine.get(m.id)).winnerIds).toHaveLength(15);
+    expect(result.result!.standings.filter(p=>p.kind==="BOT").every(p=>p.rank===null && p.tiedPlayers===null && p.delta===null)).toBe(true);
+    expect((await engine.get(m.id)).winnerIds??[]).toHaveLength(0);
     expect((await db.query("SELECT * FROM sur_profiles")).rows).toHaveLength(1);
   });
   it("accepts surrender before map selection using its zero-record competitive rank",async()=>{
     const m=await create();const result=await send(m,"FORFEIT");
-    expect(result.state).toBe("FINAL_RESULT");expect(result.result).toMatchObject({rank:1,tiedPlayers:16,requestedDelta:-55});
+    expect(result.state).toBe("MAP_SELECTION");expect(result.result).toMatchObject({rank:16,tiedPlayers:1,requestedDelta:-55});
   });
   it("rechecks environment at resource, entry and Attempt boundaries independently of Solo OFF",async()=>{
     let m=await create();await engine.selectMap(m.id);m=await engine.get(m.id);
@@ -436,12 +436,13 @@ it.each([0,1,3])("measures real Survival SQL at %i unsettled games with 250ms ti
  for(const mode of ["before","after"]){
   (debug as any).activeMatches.clear();(debug as any).nextDiscoveryAt=-Infinity;
   await debug.tickOnce();
-  const counter=countSql(db,sql=>sql.includes("WHERE d.settled_at IS NULL AND m.state<>"));
+  const counter=countSql(db,sql=>sql.includes("WHERE (d.settled_at IS NULL OR m.state NOT IN"));
   try{for(let i=0;i<16;i++){now+=250;if(mode==="before")(debug as any).nextDiscoveryAt=-Infinity;await debug.tickOnce();}reports[mode]={...counter.metrics};}
   finally{counter.stop();}
  }
  expect(reports.before!.discovery).toBe(16);expect(reports.after!.discovery).toBe(2);
- expect(reports.after!.queries).toBe(reports.before!.queries-14);
+ expect(reports.after!.queries).toBeGreaterThanOrEqual(reports.before!.queries-14);
+ expect(reports.after!.queries).toBeLessThanOrEqual(reports.before!.queries-14+count); // crossing the 6s gate adds one snapshot write/game
  console.log("SURVIVAL_SQL_METRIC",JSON.stringify({active:count,seconds:4,...reports,botTickMs:500}));
  if(process.env.DEBUG_SQL_METRICS_FILE)appendFileSync(process.env.DEBUG_SQL_METRICS_FILE,JSON.stringify({mode:"Survival",active:count,seconds:4,...reports,botTickMs:500})+"\n");
 },30_000);
@@ -452,7 +453,7 @@ describe("debug discovery recovery and prompt settlement",()=>{
   const started=performance.now(),view=await debug.create(session,body()),creationMs=performance.now()-started;
   expect((debug as any).activeMatches.has(view.matchId)).toBe(true);
   const tick=vi.spyOn(engine,"tick");
-  const counter=countSql(db,sql=>sql.includes("WHERE d.settled_at IS NULL AND m.state<>"));
+  const counter=countSql(db,sql=>sql.includes("WHERE (d.settled_at IS NULL OR m.state NOT IN"));
   try{for(let i=0;i<4;i++){now+=250;await debug.tickOnce();}
    expect(counter.metrics.discovery).toBe(0);expect(tick).toHaveBeenCalledTimes(4);
   }finally{counter.stop();tick.mockRestore();}
@@ -468,7 +469,7 @@ describe("debug discovery recovery and prompt settlement",()=>{
    expect(interval).toHaveBeenLastCalledWith(expect.any(Function),500);
    expect((restarted as any).activeMatches.has(view.matchId)).toBe(true);
    (restarted as any).nextDiscoveryAt=-Infinity;
-   const fault=failSqlOnce(db,sql=>sql.includes("WHERE d.settled_at IS NULL AND m.state<>"));
+   const fault=failSqlOnce(db,sql=>sql.includes("WHERE (d.settled_at IS NULL OR m.state NOT IN"));
    try{await restarted.tickOnce();expect(fault.failed).toBe(true);expect((restarted as any).activeMatches.has(view.matchId)).toBe(true);}
    finally{fault.stop();}
    now+=2000;await restarted.tickOnce();expect((restarted as any).activeMatches.has(view.matchId)).toBe(true);
@@ -498,7 +499,7 @@ describe("debug discovery recovery and prompt settlement",()=>{
  });
  it("plays a four-player short semifinal and final through the real reducer and LP ledger",async()=>{
   const view=await debug.create(session,{...body(),botCount:3});let m=await engine.get(view.matchId);
-  now+=5000;await send(m,"PRESENTATION_COMPLETE");m=await engine.get(m.id);
+  now+=6000;await send(m,"PRESENTATION_COMPLETE");m=await engine.get(m.id);
   for(let i=0;i<2;i++){
    m=await prepare(m);expect(survivalCurrentRound(m).phase).toBe(i===0?"ROUND_3":"FINAL");
    await record(m,100);now=survivalCurrentRound(m).endsAt!;await debug.tickOnce();m=await engine.get(m.id);

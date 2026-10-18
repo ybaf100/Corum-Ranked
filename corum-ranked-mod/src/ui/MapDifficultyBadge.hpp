@@ -27,7 +27,7 @@ inline cocos2d::ccColor3B mapTierColor(std::string const& text) {
     return {static_cast<GLubyte>((color>>16)&255),static_cast<GLubyte>((color>>8)&255),static_cast<GLubyte>(color&255)};
 }
 // GD face, numeric circle/square and label share one baseline. No GDDL mod dependency.
-inline cocos2d::CCNode* mapDifficultyBadge(int levelId, MapMetadata metadata, float width, float height = 21) {
+inline cocos2d::CCNode* mapDifficultyBadge(int levelId, MapMetadata metadata, float width, float height = 21, bool nativeName = true) {
     using namespace geode::prelude;
     auto const info = displayedMapMetadata(levelId,std::move(metadata));
     auto* row = CCNode::create(); row->setContentSize({width,height});
@@ -60,11 +60,14 @@ inline cocos2d::CCNode* mapDifficultyBadge(int levelId, MapMetadata metadata, fl
             value=mapDifficulty(stars==1,false,0,average);
         }
     }
-    auto* face = GJDifficultySprite::create(value.nativeCode,GJDifficultyName::Short);
-    if(face) {
+    // Native Short/Long faces include a word below the expression. The GD
+    // button frame contains just the expression and leaves global assets intact.
+    auto* face = nativeName?static_cast<CCSprite*>(GJDifficultySprite::create(value.nativeCode,GJDifficultyName::Short)):
+        CCSprite::createWithSpriteFrameName(std::string(value.frame).c_str());
+    if(face && nativeName) {
         auto const epic=std::clamp(info.epic.value_or(0),0,3);
         auto const state=epic>0?epic+1:info.featureScore.value_or(0)>0?1:0;
-        face->updateFeatureState(static_cast<GJFeatureState>(state));
+        static_cast<GJDifficultySprite*>(face)->updateFeatureState(static_cast<GJFeatureState>(state));
     }
     auto const faceX=extent*1.5f+5;
     if (face && face->getContentSize().width>0 && face->getContentSize().height>0) {

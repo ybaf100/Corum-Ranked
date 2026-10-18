@@ -1,8 +1,9 @@
+import {survivalResultRoster} from "./survival-result-roster.js";
 import { SurvivalConfigService } from "../config/survival-config.service.js";
 import { survivalQueueView } from "./survival-queue.view.js";
 import { BadRequestException,ConflictException,ForbiddenException,Inject,Injectable,Logger,type OnApplicationBootstrap,type OnApplicationShutdown } from "@nestjs/common";
 import { reduceSurvivalMatch,survivalCurrentRound,survivalLiveView,survivalMarkAbsent,survivalSettlementInputs,survivalEntryDeadlineAt,
-  survivalStabilizeOnlineRanks,finishSurvivalDebugOnElimination,survivalTierForLp,RankedDomainError,type SurvivalBotDriverState,type SurvivalMatch,type SurvivalCommand,type SurvivalRatingProfile } from "@corum-ranked/rules";
+  RankedDomainError,type SurvivalBotDriverState,type SurvivalMatch,type SurvivalCommand,type SurvivalRatingProfile } from "@corum-ranked/rules";
 import { DATABASE,type DatabasePort,type SqlExecutor } from "../database/database.port.js";
 import { SERVER_CLOCK,type ServerClock } from "../common/runtime.module.js";
 import { SessionService } from "../session/session.service.js";
@@ -21,7 +22,7 @@ export interface SurvivalOnlineResult {
   profileBefore:SurvivalRatingProfile;profileAfter:SurvivalRatingProfile;
   promoted:boolean;demoted:boolean;protected:boolean;warningRecoveryLp:number|null;
   bands:{tier:string;minimum:number}[];
-  standings:{participantId:string;playerId:string|null;rank:number|null;name:string;kind:string;gdAccountId:string|null;displayedTier:string;delta:number|null}[];
+  standings:ReturnType<typeof survivalResultRoster>;
   completedAt:string;completionKind:string;finalStandings?:boolean;
 }
 const terminal=(m:SurvivalMatch)=>["FINAL_RESULT","CANCELLED"].includes(m.state);
@@ -54,7 +55,7 @@ export class SurvivalOnlineService implements OnApplicationBootstrap,OnApplicati
     // Five-second rosters belong to the shared server clock; a disconnected or
     // eliminated client cannot hold all other players at a presentation barrier.
     const barrierStart=match.presentationGate==="INTRO"?match.createdAt:round.finishedAt;
-    if(match.presentationGate && barrierStart!==null && now>=barrierStart+5000){
+    if(match.presentationGate && barrierStart!==null && now>=barrierStart+(match.presentationGate==="INTRO"?6000:5000)){
       const owner=match.players.find(p=>p.kind==="HUMAN"&&p.eliminationStage===null);
       if(owner)match=reduceSurvivalMatch(match,{type:"PRESENTATION_COMPLETE",roundKey:round.key,mapGeneration:round.mapGeneration,participantId:owner.participantId},now);
     }
@@ -73,12 +74,6 @@ export class SurvivalOnlineService implements OnApplicationBootstrap,OnApplicati
     }
     const driven=driveSurvivalBots(match,Number(row.seed),row.driver_state,now);match=driven.match;
     if(JSON.stringify(driven.cursor)!==JSON.stringify(row.driver_state))await tx.query("UPDATE sur_online_matches SET driver_state=$2::jsonb WHERE match_id=$1",[match.id,JSON.stringify(driven.cursor)]);
-    if(row.bot_filled && !terminal(match) && !match.players.some(p=>p.kind==="HUMAN"&&p.eliminationStage===null)){
-      const human=match.players.find(p=>p.kind==="HUMAN")!;
-      match=finishSurvivalDebugOnElimination(match,human.participantId,now);
-      match.completionKind="BOTS_ONLY_RESULT";survivalStabilizeOnlineRanks(match);
-      match.winnerIds=match.players.filter(p=>p.kind==="BOT"&&p.finalRank===1).map(p=>p.participantId);match.winnerId=match.winnerIds[0]??null;
-    }
     return match;
   }
   public async view(id:string,session:RankedSessionContext,observedRound?:string,observedGeneration?:number){
@@ -157,9 +152,8 @@ export class SurvivalOnlineService implements OnApplicationBootstrap,OnApplicati
       const result:SurvivalOnlineResult={matchId:match.id,debug:false,botFilled:match.players.some(p=>p.kind==="BOT"),won:(match.winnerIds??[match.winnerId]).includes(row.participant_id),rank:input.rank,tiedPlayers:input.tiedPlayers,
         requestedDelta:input.delta,actualDelta:rating.actualDelta,profileBefore:{lp:Number(ledger.lp_before),tier:ledger.tier_before,demotionWarning:ledger.warning_before},
         profileAfter:rating.profile,promoted:rating.promoted,demoted:rating.demoted,protected:rating.protected,warningRecoveryLp:rating.warningRecoveryLp,bands,
-        standings:match.players.map(p=>({participantId:p.participantId,playerId:p.playerId,rank:p.finalRank,name:p.name,kind:p.kind,gdAccountId:p.gdAccountId??null,
-          displayedTier:p.playerId===row.player_id?rating.profile.tier:p.displayedTier??survivalTierForLp(p.lp,match.config.tierBands).group,
-          delta:inputs.find(v=>v.participantId===p.participantId)?.delta??null})),completedAt:new Date(match.finishedAt??this.clock.now().getTime()).toISOString(),completionKind:match.completionKind??"NORMAL"};
+        standings:survivalResultRoster(match,new Map([[row.player_id,{profileAfter:rating.profile,actualDelta:rating.actualDelta}]])),
+        completedAt:new Date(match.finishedAt??this.clock.now().getTime()).toISOString(),completionKind:match.completionKind??"NORMAL"};
       await this.db.transaction(async tx=>{
         await tx.query("UPDATE sur_online_players SET result=$3::jsonb,settled_at=$4 WHERE match_id=$1 AND player_id=$2 AND result IS NULL",[match.id,row.player_id,JSON.stringify(result),this.clock.now().toISOString()]);
         await tx.query("UPDATE sur_match_players SET result_lp_delta=$3 WHERE match_id=$1 AND participant_id=$2",[match.id,row.participant_id,input.delta]);
@@ -169,11 +163,11 @@ export class SurvivalOnlineService implements OnApplicationBootstrap,OnApplicati
     // roster in those already-paid records without applying their LP again.
     if(terminal(match)){
       const paid=(await this.db.query<ResultRow>("SELECT player_id,participant_id,result FROM sur_online_players WHERE match_id=$1 AND result IS NOT NULL AND COALESCE((result->>'finalStandings')::boolean,FALSE)=FALSE",[match.id])).rows;
+      const allPaid=(await this.db.query<ResultRow>("SELECT player_id,participant_id,result FROM sur_online_players WHERE match_id=$1 AND result IS NOT NULL",[match.id])).rows;
+      const accepted=new Map(allPaid.filter(r=>r.result).map(r=>[r.player_id,r.result!]));
+      const standings=survivalResultRoster(match,accepted);
       for(const row of paid){
-        const result={...row.result!,tiedPlayers:inputs.find(p=>p.participantId===row.participant_id)?.tiedPlayers??row.result!.tiedPlayers,finalStandings:true,
-          standings:match.players.map(p=>({participantId:p.participantId,playerId:p.playerId,rank:p.finalRank,name:p.name,kind:p.kind,gdAccountId:p.gdAccountId??null,
-            displayedTier:p.playerId===row.player_id?row.result!.profileAfter.tier:p.displayedTier??survivalTierForLp(p.lp,match.config.tierBands).group,
-            delta:inputs.find(v=>v.participantId===p.participantId)?.delta??null}))};
+        const result={...row.result!,tiedPlayers:inputs.find(p=>p.participantId===row.participant_id)?.tiedPlayers??row.result!.tiedPlayers,finalStandings:true,standings};
         await this.db.query("UPDATE sur_online_players SET result=$3::jsonb WHERE match_id=$1 AND player_id=$2",[match.id,row.player_id,JSON.stringify(result)]);
       }
     }

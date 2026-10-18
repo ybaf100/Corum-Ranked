@@ -10,7 +10,7 @@
 #include "RankedConfirmPopup.hpp"
 #include "RankedJukeboxPopup.hpp"
 #include "PlayerIcon.hpp"
-#include "SurvivalPlayerInfoPopup.hpp"
+#include "SurvivalOutcomePanel.hpp"
 #include "ModeLobbyMotion.hpp"
 #include "ModeLobbySurfaceFade.hpp"
 #include "RankBadgeAssets.hpp"
@@ -38,6 +38,7 @@ class SurvivalGameLayer final : public CCLayerColor {
     int m_nextInfoTag=1000;
     CCNode* m_grid=nullptr;
     ui::SurvivalMapSelectionLayer* m_selection=nullptr;
+    ui::SurvivalOutcomePanel* m_outcome=nullptr;
     LoadingSpinner* m_spinner=nullptr;
     CCLabelBMFont* m_boardClock=nullptr;
     CCMenuItemSpriteExtra *m_backToMap=nullptr,*m_viewBoard=nullptr;
@@ -88,6 +89,8 @@ class SurvivalGameLayer final : public CCLayerColor {
 #endif
         m_selection=ui::SurvivalMapSelectionLayer::create([weak=WeakRef(this)](int tag){if(auto owner=weak.lock())owner->handleAction(tag);});
         if(!m_selection)return false;m_selection->setVisible(false);addChild(m_selection,15);
+        m_outcome=ui::SurvivalOutcomePanel::create([weak=WeakRef(this)](int tag){if(auto owner=weak.lock())owner->handleAction(tag);});
+        if(!m_outcome)return false;m_outcome->setVisible(false);addChild(m_outcome,50);
         scheduleUpdate();return true;
     }
     void confirmSurrender() {
@@ -111,12 +114,16 @@ class SurvivalGameLayer final : public CCLayerColor {
         if(found==m_infoByTag.end())return;
         auto const& runtime=SurvivalRuntime::get();
         if(!runtime.active())return;
-        if(auto* popup=ui::SurvivalPlayerInfoPopup::create(found->second,runtime.view().id))popup->show();
+        ui::openSurvivalProfile(this,found->second);
     }
     void handleAction(int tag) {
-        if(m_closed || m_motion || std::chrono::steady_clock::now()<m_eliminationUntil)return;
+        if(m_closed || m_motion || (tag<11 && std::chrono::steady_clock::now()<m_eliminationUntil))return;
         auto& runtime=SurvivalRuntime::get();auto* level=RankedLevelPreparation::get().level();
         if((tag==0 || tag==4 || tag==5 || tag==6 || tag==10) && (m_confirmation || runtime.surrenderPending()))return;
+        if(tag==13){runtime.chooseOutcome(SurvivalOutcomeChoice::Observe);m_launchedContext.clear();m_manualMap=false;m_browsingBoard=false;return;}
+        if(tag==14){runtime.chooseOutcome(SurvivalOutcomeChoice::PersonalResult);return;}
+        if(tag==12){beginResultMotion();return;}
+        if(tag==11){ui::showSurvivalStandings();return;}
         if(tag==10)RankedRoundPreparation::get().retry();
         if(tag==0)queueNativeLaunch();
         if(tag==1)runtime.acknowledge();
@@ -142,7 +149,7 @@ class SurvivalGameLayer final : public CCLayerColor {
     }
     void queueNativeLaunch() {
         auto& runtime=SurvivalRuntime::get();auto const context=runtime.preparationContext();
-        if(m_closed || !m_pendingLaunch.empty() || !m_selection->settled() || runtime.surrenderPending() || !runtime.canEnter() ||
+        if(m_closed || !m_pendingLaunch.empty() || !m_selection->settled() || runtime.surrenderPending() || !(runtime.canEnter() || runtime.canEnterObserver()) ||
             (m_entrySyncAfter && runtime.serverSyncMillis()<=*m_entrySyncAfter))return;
         m_pendingLaunch=preparationContextText(context);
         // Native object setup/texture loading must run outside the coordinator's
@@ -154,7 +161,7 @@ class SurvivalGameLayer final : public CCLayerColor {
             auto& runtime=SurvivalRuntime::get();
             auto const jukeboxOpen=owner->m_jukebox && owner->m_jukebox->lock() && owner->m_jukebox->lock()->getParent();
             if(CCDirector::sharedDirector()->getNextScene() || jukeboxOpen || owner->m_closed || !owner->isRunning() || owner->getParent()!=scene || owner->m_motion ||
-                owner->m_confirmation || owner->m_browsingBoard || !owner->m_selection->settled() || runtime.surrenderPending() || context!=runtime.preparationContext() || !runtime.canEnter() ||
+                owner->m_confirmation || owner->m_browsingBoard || !owner->m_selection->settled() || runtime.surrenderPending() || context!=runtime.preparationContext() || !(runtime.canEnter() || runtime.canEnterObserver()) ||
                 (owner->m_entrySyncAfter && runtime.serverSyncMillis()<=*owner->m_entrySyncAfter))return;
             if(RankedRoundPreparation::get().launch(scene))owner->m_launchedContext=preparationContextText(context);
         });
@@ -196,6 +203,11 @@ class SurvivalGameLayer final : public CCLayerColor {
                 }
                 tile.eliminatedBackground=ui::surface({width-8,height-4},{(width-8)/2,(height-4)/2},ui::Red,{42,13,28},250,true);
                 tile.eliminatedBackground->setVisible(false);root->addChild(tile.eliminatedBackground,4);
+                iconButton->setEnabled(false);
+                auto* cardMenu=CCMenu::create();cardMenu->setPosition(CCPointZero);root->addChild(cardMenu,12);
+                auto* hit=CCNode::create();hit->setContentSize({width-8,height-4});
+                auto* cardButton=CCMenuItemSpriteExtra::create(hit,this,menu_selector(SurvivalGameLayer::onPlayerInfo));
+                cardButton->setTag(tile.infoTag);cardButton->setPosition({(width-8)/2,(height-4)/2});cardMenu->addChild(cardButton);
             }
             auto& tile=found->second;tile.root->setVisible(true);m_infoByTag[tile.infoTag]=value;
             tile.progress.observe(view.revision,value.attemptId,value.attemptActive,value.bestProgress,value.currentProgress);tile.progress.advance(m_frameDelta);
@@ -229,6 +241,10 @@ class SurvivalGameLayer final : public CCLayerColor {
     }
     void syncAudio(SurvivalMatchView const& view,bool elimination=false) {
         auto& audio=RankedAudioManager::get();
+        if(SurvivalRuntime::get().observing() && view.state!="FINAL_RESULT" && view.state!="CANCELLED"){
+            auto const desired=(view.phase=="FINAL" || view.phase=="TIEBREAK")?RankedAudioMode::Round3DeathmatchWait:RankedAudioMode::Round12;
+            if(m_audioMode!=desired){m_audioMode=desired;audio.setMode(desired);}audio.tick();return;
+        }
         bool ownCompleted=false,qualified=false;
         for(auto const& player:view.completedRound["players"].asArray().unwrapOr(std::vector<matjson::Value>{}))if(player["participantId"].asString().unwrapOr("")==view.ownId){
             ownCompleted=true;qualified=player["qualified"].asBool().unwrapOr(false) && !player["forfeited"].asBool().unwrapOr(false);break;
@@ -321,11 +337,19 @@ public:
         if(m_closed)return;auto& runtime=SurvivalRuntime::get();runtime.tick();
         if(m_confirmation){auto dialog=m_confirmation->lock();if(!dialog || !dialog->getParent())m_confirmation.reset();}
         if(!runtime.active() && !runtime.creating()){m_closed=true;queueInMainThread([]{CCDirector::sharedDirector()->popScene();});return;}
-        auto const& view=runtime.view();auto const& preparation=RankedRoundPreparation::get().view();auto const result=view.result.isObject();
-        auto const elimination=presentEliminations(view);
+        auto const& view=runtime.view();auto const& preparation=RankedRoundPreparation::get().view();auto const result=view.result.isObject() && !runtime.observing();
+        auto const stage=runtime.flowStage();auto const outcome=stage==SurvivalFlowStage::EliminatedChoice || stage==SurvivalFlowStage::PersonalResult || stage==SurvivalFlowStage::Ceremony;
+        if(outcome){
+            syncAudio(view);if(m_selection->isVisible())m_selection->hideSelection();if(view.nextMap["map"].isObject())m_selection->prepareServerMap(runtime.preparationView());m_grid->setVisible(false);m_heading->setVisible(false);m_map->setVisible(false);m_status->setVisible(false);m_boardClock->setVisible(false);m_spinner->setVisible(false);
+            for(auto* button:{m_resume,m_continue,m_surrender,m_freePlay,m_backToMap,m_viewBoard,m_force})if(button)button->setVisible(false);
+            m_outcome->setVisible(!m_motion);if(!m_motion)m_outcome->present(view,stage,dt);
+            return;
+        }
+        m_outcome->setVisible(false);
+        auto const elimination=!runtime.observing() && presentEliminations(view);
         syncAudio(view,elimination);
         auto const intro=view.presentationGate=="INTRO";
-        auto const nextRound=survivalCanPrepareNext(view.state,view.ownEliminated,view.resultPending,result);
+        auto const nextRound=runtime.observing() || survivalCanPrepareNext(view.state,view.ownEliminated,view.resultPending,result);
         auto const navigationContext=view.id+":"+view.roundKey+":"+std::to_string(view.mapGeneration);
         if(m_navigationContext!=navigationContext){m_navigationContext=navigationContext;m_browsingBoard=false;m_manualMap=false;m_entrySyncAfter.reset();}
         auto const liveBoard=(m_browsingBoard || (runtime.normalRoundCleared() && !m_manualMap)) && !result && !elimination;
@@ -342,6 +366,7 @@ public:
         m_grid->setVisible(!selectionWindow);
         m_heading->setVisible(!selectionWindow);m_map->setVisible(!selectionWindow);m_status->setVisible(!selectionWindow);
         if(selectionWindow)m_boardClock->setVisible(false);
+        else if(view.nextMap["map"].isObject())m_selection->prepareServerMap(runtime.preparationView());
         else if(intro && nextRound && !elimination)m_selection->prepareServerMap(view);
         else m_selection->hideSelection();
         m_spinner->setVisible(false);m_spinner->setPosition({getContentSize().width/2,getContentSize().height/2});m_spinner->setScale(2);
@@ -360,7 +385,7 @@ public:
         m_map->setString((view.map.levelId>0?fmt::format("{} · GD #{}",group,view.map.levelId):group).c_str());
         std::string status;
         if(view.state=="CANCELLED")status=text("survival-cancelled","MATCH CANCELLED");
-        else if(result)status=fmt::format("{:+} LP · {} LP",view.result["actualDelta"].asInt().unwrapOr(0),view.result["profileAfter"]["lp"].asInt().unwrapOr(0));
+        else if(result)status="";
         else if(intro)status=fmt::format("{} · {} / {}",text("matchmaking","MATCHMAKING"),view.playerCount,view.playerCount);
         else if(view.resultPending || view.state=="FINAL_RESULT" || view.ownEliminated)status=text("survival-result-pending","RANK FIXED · SETTLING LP...");
         else if(!view.error.empty())status=i18n::text(view.error,view.error);
@@ -378,33 +403,35 @@ public:
             auto const interactive=!m_motion && !elimination && !runtime.surrenderPending() && !m_confirmation;
             m_selection->present(view,preparation,SurvivalOptionsPreferences::get().current(runtime.optionsContext()),
                 survivalSupportsLowDetail(level,view.map.levelId,preparation.mapReady),interactive,
-                runtime.canEnter() && interactive && (!m_entrySyncAfter || runtime.serverSyncMillis()>*m_entrySyncAfter),runtime.countdownMs(),runtime.roundRemainingMs());
+                (runtime.canEnter() || runtime.canEnterObserver()) && interactive && (!m_entrySyncAfter || runtime.serverSyncMillis()>*m_entrySyncAfter),runtime.countdownMs(),runtime.roundRemainingMs());
         }else if(!elimination)showParticipants(view,result);
         if(m_confirmation && (result || view.state=="CANCELLED" || m_confirmationContext!=view.id+":"+view.roundKey+":"+std::to_string(view.mapGeneration))){if(auto popup=m_confirmation->lock())popup->cancel();m_confirmation.reset();}
-        if(!view.ownAssetsReady && RankedRoundPreparation::get().ready())runtime.assetsReady(level);
+        if(RankedRoundPreparation::get().ready()){
+            if(runtime.observing())runtime.validateNative(level);
+            else if(!view.ownAssetsReady)runtime.assetsReady(level);
+        }
         if(m_jukebox && m_jukeboxContext!=view.id+":"+view.roundKey+":"+std::to_string(view.mapGeneration)){if(auto popup=m_jukebox->lock())popup->dismiss();m_jukebox.reset();}
         auto const jukeboxOpen=m_jukebox && m_jukebox->lock() && m_jukebox->lock()->getParent();
         if(jukeboxOpen)if(auto popup=m_jukebox->lock())popup->setCountdown(i18n::text(clock,clock));
-        if(intro && now>=m_introUntil && !m_confirmation && !debugPopup)runtime.presentationComplete();
+        // INTRO and round-result gates advance on the authoritative server clock.
         if(!m_motion && !elimination && !m_confirmation && !jukeboxOpen && !debugPopup && !runtime.creating() &&
             mapWindow && !m_manualMap && m_selection->settled() && !runtime.surrenderPending() &&
-            runtime.canEnter() && m_launchedContext!=context)queueNativeLaunch();
-        if(result && !elimination)beginResultMotion();
-        if(view.online && result && !m_motion && !elimination){
-            if(m_returnAt==std::chrono::steady_clock::time_point{})m_returnAt=now+std::chrono::seconds(3);
-            if(now>=m_returnAt && !runtime.creating())runtime.acknowledge();
-        }
+            (runtime.canEnter() || runtime.canEnterObserver()) && m_launchedContext!=context)queueNativeLaunch();
         if(view.state=="CANCELLED" && !result && !runtime.creating())runtime.acknowledge();
     }
     void onEnter() override {
-        CCLayerColor::onEnter();
+        CCLayerColor::onEnter();SurvivalRuntime::get().observerReturned();
         // Native Quit/Resume may have paused the FMOD output while this retained
         // scene was covered. Reclaim menu/result audio after native teardown.
         m_audioMode.reset();RankedAudioManager::get().onApplicationResume();syncAudio(SurvivalRuntime::get().view());
     }
     void keyBackClicked() override {
         if(m_closed || m_motion || std::chrono::steady_clock::now()<m_eliminationUntil)return;
-        if(SurvivalRuntime::get().view().result.isObject()){SurvivalRuntime::get().acknowledge();return;}
+        auto& runtime=SurvivalRuntime::get();
+        if(runtime.flowStage()==SurvivalFlowStage::EliminatedChoice || runtime.observing()){
+            runtime.chooseOutcome(SurvivalOutcomeChoice::PersonalResult);return;
+        }
+        if(runtime.view().result.isObject()){runtime.acknowledge();return;}
         // Both gameplay exit and this first Back are navigation only. The
         // retained coordinator owns the match/polling and never pops here.
         if(!m_browsingBoard && !(SurvivalRuntime::get().normalRoundCleared() && !m_manualMap)){

@@ -2,7 +2,7 @@ import { lockSurvivalAdmission,assertSurvivalAdmission } from "./survival-admiss
 import { createHash } from "node:crypto";
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, Logger,
   NotFoundException, type OnApplicationBootstrap, type OnApplicationShutdown } from "@nestjs/common";
-import { createSurvivalMatch, reduceSurvivalMatch, survivalCurrentRound, survivalLiveView, survivalMilliPercent,
+import { createSurvivalMatch, reduceSurvivalMatch, survivalMapSelectionTarget, survivalCurrentRound, survivalLiveView, survivalMilliPercent,
   type SurvivalVerifiedMap, type SurvivalCommand, type SurvivalEntrant, type SurvivalMatch } from "@corum-ranked/rules";
 import { ID_GENERATOR, SERVER_CLOCK, type IdGenerator, type ServerClock } from "../common/runtime.module.js";
 import { SurvivalConfigService, type SurvivalConfigDocument } from "../config/survival-config.service.js";
@@ -153,12 +153,13 @@ export class SurvivalEngineService implements OnApplicationBootstrap, OnApplicat
   public async selectMap(matchId:string):Promise<void> {
     const job=await this.database.transaction(async tx=>{
       const row=await this.lock(tx,matchId),now=this.clock.now().getTime();
-      if(row.snapshot.state!=="MAP_SELECTION" || row.snapshot.presentationGate==="INTRO" || (row.map_retry_at && new Date(row.map_retry_at).getTime()>now) ||
+      const target=survivalMapSelectionTarget(row.snapshot);
+      if(!target || (row.map_retry_at && new Date(row.map_retry_at).getTime()>now) ||
         (row.map_job_token && row.map_job_deadline_at && new Date(row.map_job_deadline_at).getTime()>now))return null;
-      const token=this.ids.next(),round=survivalCurrentRound(row.snapshot);
+      const token=this.ids.next();
       await tx.query("UPDATE sur_matches SET map_job_token=$2,map_job_deadline_at=$3 WHERE id=$1",[matchId,token,iso(now+40_000)]);
-      return {token,roundKey:round.key,mapGeneration:round.mapGeneration,request:{group:row.snapshot.difficultyGroup,
-        phase:round.phase,minimumLevelId:row.snapshot.config.minimumLevelId,
+      return {token,roundKey:target.roundKey,mapGeneration:target.mapGeneration,request:{group:row.snapshot.difficultyGroup,
+        phase:target.phase,minimumLevelId:row.snapshot.config.minimumLevelId,
         excludedLevelIds:row.snapshot.rounds.flatMap(r=>r.selectedMaps.map(m=>m.levelId))}};
     });
     if(!job)return;
@@ -178,15 +179,15 @@ export class SurvivalEngineService implements OnApplicationBootstrap, OnApplicat
           throw error;
         }
         const accepted=await this.database.transaction(async tx=>{
-          const row=await this.lock(tx,matchId),round=survivalCurrentRound(row.snapshot);
-          if(row.map_job_token!==job.token || row.snapshot.state!=="MAP_SELECTION" || round.key!==job.roundKey || round.mapGeneration!==job.mapGeneration)return true;
+          const row=await this.lock(tx,matchId),round=survivalCurrentRound(row.snapshot),target=survivalMapSelectionTarget(row.snapshot);
+          if(row.map_job_token!==job.token || !target || target.roundKey!==job.roundKey || target.mapGeneration!==job.mapGeneration || target.phase!==job.request.phase)return true;
           // External downloads finished before this short global confirmation lock.
           await tx.query("SELECT pg_advisory_xact_lock(hashtext('survival-map-history-v1'))");
           const latest=(await tx.query<{level_id:string}>("SELECT level_id FROM sur_map_selection_history ORDER BY id DESC LIMIT $1",[window])).rows;
           if(latest.some(r=>Number(r.level_id)===map.levelId))return false;
-          const match=reduceSurvivalMatch(row.snapshot,{type:"MAP_SELECTED",roundKey:job.roundKey,mapGeneration:job.mapGeneration,map},this.clock.now().getTime());
+          const match=reduceSurvivalMatch(row.snapshot,{type:target.prefetch?"NEXT_MAP_SELECTED":"MAP_SELECTED",roundKey:round.key,mapGeneration:round.mapGeneration,map},this.clock.now().getTime());
           await this.persist(tx,row.snapshot,match);
-          await tx.query("INSERT INTO sur_map_selection_history(match_id,round_key,map_generation,level_id,history_window,selected_at) VALUES($1,$2,$3,$4,$5,$6)",[matchId,round.key,round.mapGeneration,map.levelId,window,this.clock.now().toISOString()]);
+          await tx.query("INSERT INTO sur_map_selection_history(match_id,round_key,map_generation,level_id,history_window,selected_at) VALUES($1,$2,$3,$4,$5,$6)",[matchId,job.roundKey,job.mapGeneration,map.levelId,window,this.clock.now().toISOString()]);
           await tx.query("UPDATE sur_matches SET map_job_token=NULL,map_job_deadline_at=NULL,map_retry_at=NULL,map_error=NULL WHERE id=$1",[matchId]);
           return true;
         });
@@ -202,7 +203,7 @@ export class SurvivalEngineService implements OnApplicationBootstrap, OnApplicat
     }
   }
   public ensureMapSelection(match:SurvivalMatch):void {
-    if(this.stopping || match.state!=="MAP_SELECTION" || this.mapJobs.has(match.id) || this.mapJobs.size>=4)return;
+    if(this.stopping || !survivalMapSelectionTarget(match) || this.mapJobs.has(match.id) || this.mapJobs.size>=4)return;
     const job=this.selectMap(match.id).catch(e=>this.logger.error(String(e))).finally(()=>{this.mapJobs.delete(match.id);});
     this.mapJobs.set(match.id,job);
   }

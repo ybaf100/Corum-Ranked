@@ -142,7 +142,7 @@ struct CCNode{CCPoint pos;CCSize size{100,50};bool visible=true;CCAction* action
 using CCObject=CCNode;
 const CCPoint CCPointZero{0,0};
 struct CCMenu:CCNode{static CCMenu* create(){return new CCMenu;}};
-struct CCMenuItemSpriteExtra:CCNode{int tag=0;static CCMenuItemSpriteExtra* create(CCNode*,CCObject*,int){return new CCMenuItemSpriteExtra;}void setTag(int n){tag=n;}int getTag()const{return tag;}};
+struct CCMenuItemSpriteExtra:CCNode{int tag=0;bool enabled=true;void setEnabled(bool value){enabled=value;}static CCMenuItemSpriteExtra* create(CCNode*,CCObject*,int){return new CCMenuItemSpriteExtra;}void setTag(int n){tag=n;}int getTag()const{return tag;}};
 #define menu_selector(...) 0
 struct CCLabelBMFont:CCNode{std::string text;int writes=0;void setString(char const* s){text=s;++writes;}void setColor(Color){}};
 namespace fmt{template<class...T>std::string format(std::string text,T const&...values){auto put=[&](auto const& v){std::ostringstream out;out<<v;auto at=text.find('{');if(at!=std::string::npos){auto end=text.find('}',at);text.replace(at,end-at+1,out.str());}};(put(values),...);return text;}}
