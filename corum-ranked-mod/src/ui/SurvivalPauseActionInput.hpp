@@ -13,6 +13,8 @@ class SurvivalPauseActionInput final : public cocos2d::CCLayer {
     geode::WeakRef<cocos2d::CCNode> m_pause,m_scene;
     geode::WeakRef<PlayLayer> m_play;
     std::vector<Action> m_actions;
+    // Alerts already present before this Pause are not new modal blockers.
+    std::vector<geode::WeakRef<cocos2d::CCNode>> m_preexistingAlerts;
     std::function<bool()> m_allowed;
     int m_touch=-1,m_pressed=-1;
     unsigned m_epoch=0,m_diagnostics=0;

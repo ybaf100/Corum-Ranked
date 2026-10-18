@@ -373,6 +373,7 @@ inline constexpr std::array kKoreanTranslations {
     Translation{"resources-failed", "일부 리소스 다운로드 실패"},
     Translation{"retry-before-continuing", "계속하기 전에 실패한 다운로드를 다시 시도하세요."},
     Translation{"ready", "준비"},
+    Translation{"start", "시작"},
     Translation{"continue", "계속"},
     Translation{"tap-to-skip", "건너뛰기"},
     Translation{"retry-failed", "실패 항목 재시도"},

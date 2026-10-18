@@ -41,9 +41,9 @@ struct Blocker:CCLayer{int began=0;bool ccTouchBegan(CCTouch*,CCEvent*)override{
 int main(){
  auto* director=CCDirector::sharedDirector();auto& d=director->dispatcher;
  for(int priority:{-128,-502,-1502}){
-  CCNode scene;PlayLayer play;UILayer ui;Blocker pause;CCMenu menu;CCMenuItemSpriteExtra surrender,force;
+  CCNode scene;PlayLayer play;UILayer ui;Blocker pause;CCMenu menu;CCMenuItemSpriteExtra surrender,force;Popup preexisting;
   director->runningScene=&scene;PlayLayer::current=&play;play.m_uiLayer=&ui;
-  scene.addChild(&play);scene.addChild(&pause);play.addChild(&ui);pause.addChild(&menu);
+  scene.addChild(&play);scene.addChild(&pause);scene.addChild(&preexisting);play.addChild(&ui);pause.addChild(&menu);
   // World-space rectangles include both parent translation and scaling.
   pause.origin={30,20};pause.scale=1.5f;menu.origin={20,10};menu.scale=.8f;
   menu.addChild(&surrender);surrender.origin={10,20};surrender.size={96,36};
@@ -90,7 +90,10 @@ int main(){
   d.began(12,surrenderPoint);d.ended(12,surrenderPoint);director->nextScene=&scene;drain();assert(surrendered==3);director->nextScene=nullptr;
   d.began(13,surrenderPoint);d.ended(13,surrenderPoint);PlayLayer::current=nullptr;drain();assert(surrendered==3);PlayLayer::current=&play;
   d.began(14,surrenderPoint);d.ended(14,surrenderPoint);pause.parent=nullptr;drain();assert(surrendered==3);pause.parent=&scene;
-  d.began(15,surrenderPoint);d.ended(15,surrenderPoint);input->suspend();drain();assert(surrendered==3);
+  // A native pause can stop the owning PlayLayer's running flag without
+   // transferring input authority to a different scene.
+   play.running=false;tap(16);assert(surrendered==4);play.running=true;
+   d.began(15,surrenderPoint);d.ended(15,surrenderPoint);input->suspend();drain();assert(surrendered==4);
   input->onExit();delete input;menu.onExit();pause.onExit();ui.onExit();play.onExit();drain();assert(d.handlers.empty());
  }
  // A scene can be retired before its onEnter synchronization callback runs.

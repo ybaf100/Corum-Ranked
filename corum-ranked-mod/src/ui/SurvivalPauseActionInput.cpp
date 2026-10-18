@@ -10,12 +10,25 @@ SurvivalPauseActionInput* SurvivalPauseActionInput::create(CCNode* pause,PlayLay
     auto* input=new SurvivalPauseActionInput;
     if(!input->init()){delete input;return nullptr;}
     input->m_pause=WeakRef(pause);input->m_play=WeakRef(play);input->m_scene=WeakRef(play->getParent());input->m_allowed=std::move(allowed);
+    // Another mod may retain a visible FLAlertLayer from an earlier scene.
+    // The former global modal veto made every Pause action permanently invalid.
+    std::vector<CCNode*> nodes{play->getParent()};
+    while(!nodes.empty()){
+        auto* node=nodes.back();nodes.pop_back();
+        if(node!=pause && typeinfo_cast<FLAlertLayer*>(node) && node->isVisible())
+            input->m_preexistingAlerts.emplace_back(node);
+        if(node==play){if(play->m_uiLayer)nodes.push_back(play->m_uiLayer);continue;}
+        for(auto* child:node->getChildrenExt())nodes.push_back(child);
+    }
     input->setTouchEnabled(true);input->setID("survival-pause-action-input"_spr);input->scheduleUpdate();input->autorelease();return input;
 }
 void SurvivalPauseActionInput::bind(CCMenuItemSpriteExtra* item,std::function<void()> invoke){if(item)m_actions.push_back({WeakRef(item),std::move(invoke)});}
 bool SurvivalPauseActionInput::valid()const{
     auto pause=m_pause.lock();auto play=m_play.lock();auto scene=m_scene.lock();auto* director=CCDirector::sharedDirector();
-    if(!pause || !play || !scene || !pause->isRunning() || !play->isRunning() || play.data()!=PlayLayer::get() ||
+    // Pausing native PlayLayer can temporarily stop its scheduled/running state
+    // on iPadOS even though its Pause window and scene remain authoritative.
+    // Bind input to scene ownership, not the paused node's update lifecycle.
+    if(!pause || !play || !scene || !pause->isVisible() || !scene->isRunning() || play.data()!=PlayLayer::get() ||
         play->getParent()!=scene.data() || director->getRunningScene()!=scene.data() || director->getNextScene() || !m_allowed || !m_allowed())return false;
     bool attached=false;for(auto* p=pause.data();p;p=p->getParent())if(p==scene.data()){attached=true;break;}
     if(!attached)return false;
@@ -24,7 +37,12 @@ bool SurvivalPauseActionInput::valid()const{
     std::vector<CCNode*> pending{scene.data()};
     while(!pending.empty()){
         auto* node=pending.back();pending.pop_back();if(!node->isVisible())continue;
-        if(node!=pause.data() && typeinfo_cast<FLAlertLayer*>(node))return false;
+        if(node!=pause.data() && typeinfo_cast<FLAlertLayer*>(node)){
+            bool const preexisting=std::any_of(m_preexistingAlerts.begin(),m_preexistingAlerts.end(),[node](auto const& weak){
+                auto alert=weak.lock();return alert && alert.data()==node;
+            });
+            if(!preexisting)return false;
+        }
         // Do not walk the level's thousands of gameplay objects every paused
         // frame. Native/Geode dialogs live in the scene, Pause or UI layer.
         if(node==play.data()){if(play->m_uiLayer)pending.push_back(play->m_uiLayer);continue;}
@@ -81,9 +99,12 @@ void SurvivalPauseActionInput::synchronize(){
         cancelTouch();
         if(m_syncWarnings++<3){
             auto pause=m_pause.lock();auto play=m_play.lock();auto scene=m_scene.lock();
-            log::info("[SurvivalPauseInput] registered but inactive pause={} play={} scene={} allowed={} running={}",
+            log::info("[SurvivalPauseInput] inactive pause={} play={} scene={} pauseRunning={} playRunning={} samePlay={} sceneRunning={} sceneMatches={} playParent={} nextScene={} allowed={} actionAllowed={}",
                 static_cast<bool>(pause),static_cast<bool>(play),static_cast<bool>(scene),
-                static_cast<bool>(m_allowed),isRunning());
+                pause && pause->isRunning(),play && play->isRunning(),play && play.data()==PlayLayer::get(),
+                scene && scene->isRunning(),scene && CCDirector::sharedDirector()->getRunningScene()==scene.data(),
+                play && scene && play->getParent()==scene.data(),CCDirector::sharedDirector()->getNextScene()!=nullptr,
+                static_cast<bool>(m_allowed),m_allowed && m_allowed());
         }
         return;
     }

@@ -67,7 +67,7 @@ class SurvivalGameLayer final : public CCLayerColor {
     bool init() override {
         if(!CCLayerColor::initWithColor({0,0,0,255}))return false;setID("survival-game-coordinator"_spr);setKeypadEnabled(true);
         auto const size=CCDirector::sharedDirector()->getWinSize();setContentSize(size);
-        m_heading=ui::menuLabel("SURVIVAL",.60f,{(size.width-156)/2+8,size.height-29},ui::Cyan,ui::FontWeight::Black);addChild(m_heading);
+        m_heading=ui::menuLabel("SURVIVAL",.60f,{size.width/2,size.height-29},ui::Cyan,ui::FontWeight::Black);addChild(m_heading);
         m_boardClock=ui::menuLabel("",.28f,{size.width-12,size.height-22},ui::Cyan,ui::FontWeight::ExtraBold);
         m_boardClock->setAnchorPoint({1,.5f});m_boardClock->setID("survival-board-clock"_spr);addChild(m_boardClock,10);
         m_map=ui::menuLabel("",.27f,{size.width/2,size.height-48},ui::TextMuted,ui::FontWeight::SemiBold);addChild(m_map);
@@ -220,7 +220,7 @@ class SurvivalGameLayer final : public CCLayerColor {
             }
             auto const medal=survivalCardMedal(value.rank,value.eliminated);
             for(std::size_t n=0;n<tile.medals.size();++n)tile.medals[n]->setVisible(medal==static_cast<int>(n+1));
-            tile.eliminatedBackground->setVisible(value.eliminated);
+            tile.eliminatedBackground->setVisible(value.eliminated || (!result && value.rank>0 && !value.passing));
             if(tile.recordText!=record){tile.recordText=record;tile.record->setString(record.c_str());ui::fitFullMenuLabel(tile.record,card.width-10,card.recordHeight,.21f);}
             tile.record->setColor(ccc3(color.r,color.g,color.b));
         }
@@ -327,8 +327,8 @@ public:
         auto const liveBoard=(m_browsingBoard || (runtime.normalRoundCleared() && !m_manualMap)) && !result && !elimination;
         auto const clock=survivalBoardClock(view.state,runtime.countdownMs(),runtime.roundRemainingMs());
         m_boardClock->setString(i18n::text(clock,clock).c_str());m_boardClock->setVisible(!result && !elimination && !clock.empty());
-        auto const headingWidth=getContentSize().width-24-(m_boardClock->isVisible()?156:0);
-        m_heading->setPosition({12+headingWidth/2,getContentSize().height-29});
+        auto const headingWidth=std::max(80.f,getContentSize().width-24-(m_boardClock->isVisible()?2*144.f:0.f));
+        m_heading->setPosition({getContentSize().width/2,getContentSize().height-29});
         ui::fitMenuLabelWidth(m_boardClock,140,.28f,.18f);
         auto const mapWindow=nextRound && !elimination && !intro && !liveBoard && view.map.levelId>0 && view.state!="ROUND_RESULT";
         auto const searching=nextRound && !elimination && !intro && !liveBoard && view.state=="MAP_SELECTION";

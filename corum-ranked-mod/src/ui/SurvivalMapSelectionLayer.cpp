@@ -52,7 +52,7 @@ struct SurvivalMapSelectionLayer::Visuals {
     std::vector<std::pair<std::uint64_t,Ref<CCTexture2D>>> previews;
     Ref<CCTexture2D> finalTexture;
     float reelHeight=54,reelY=0,cardWidth=164;
-    bool cardsBuilt=false;
+    bool cardsBuilt=false,previewsFrozen=false;
 };
 SurvivalMapSelectionLayer::SurvivalMapSelectionLayer()=default;
 SurvivalMapSelectionLayer::~SurvivalMapSelectionLayer()=default;
@@ -126,26 +126,39 @@ void SurvivalMapSelectionLayer::numberFrame(SurvivalRevealFrame const& frame,Sur
 }
 void SurvivalMapSelectionLayer::thumbnailFrame(SurvivalRevealFrame const& frame,SurvivalSelectionLayout const& r){
     auto& v=*m_visuals;auto const size=getContentSize();
-    if(!v.cardsBuilt){v.cardWidth=std::min(176.f*r.scale,size.width*.29f);v.carousel=clip({size.width-28*r.scale,r.carousel.h+12*r.scale});v.carousel->setPosition({14*r.scale,r.carousel.cy()-(r.carousel.h+12*r.scale)/2});addChild(v.carousel,8);
+    if(!v.cardsBuilt){v.cardWidth=std::min(205.f*r.scale,size.width*.33f);v.carousel=clip({size.width-28*r.scale,r.carousel.h+12*r.scale});v.carousel->setPosition({14*r.scale,r.carousel.cy()-(r.carousel.h+12*r.scale)/2});addChild(v.carousel,8);
         for(auto& card:v.cards)card.make(v.carousel,v.cardWidth);v.selected.make(this,v.cardWidth);v.selected.root->setZOrder(12);v.cardsBuilt=true;
     }
     auto const provider=SurvivalThumbnailProvider::get().previews();
-    for(auto const& p:provider)if(std::none_of(v.previews.begin(),v.previews.end(),[&](auto const& cached){return cached.first==p.first;}))v.previews.push_back(p);
+    // A carousel must use a fixed ordered reel throughout the four-second
+    // reveal. Changing modulo with each newly downloaded image made cards jump.
+    if(!v.previewsFrozen && !provider.empty()){
+        for(auto const& p:provider)
+            if(std::none_of(v.previews.begin(),v.previews.end(),[&](auto const& cached){return cached.first==p.first;}))
+                v.previews.push_back(p);
+        v.previewsFrozen=true;
+    }
     if(v.previews.size()>8)v.previews.erase(v.previews.begin(),v.previews.end()-8);
     if(auto preferred=SurvivalThumbnailProvider::get().selected();preferred && preferred.data()!=v.finalTexture.data())v.finalTexture=preferred;
-    double phase=frame.elapsed/.17;
-    if(frame.elapsed>=2.15){auto const p=std::clamp((frame.elapsed-2.15)/.60,0.,1.);phase=2.15/.17+(1-std::pow(1-p,3))*1.5;}
+    // Maintain position and velocity at the deceleration boundary. The old
+    // cubic easing jumped in speed and then nearly froze half-way through.
+    constexpr double glideStart=1.95,glideDuration=.80,cyclesPerSecond=1./.14;
+    double phase=frame.elapsed*cyclesPerSecond;
+    if(frame.elapsed>=glideStart){
+        auto const p=std::clamp((frame.elapsed-glideStart)/glideDuration,0.,1.);
+        phase=glideStart*cyclesPerSecond+glideDuration*cyclesPerSecond*(p-.5*p*p);
+    }
     auto const base=static_cast<std::size_t>(std::floor(phase));auto const fraction=phase-std::floor(phase);
     auto const central=frame.elapsed>=2.15 && m_timeline.context().levelId>0;
     v.carousel->setVisible(frame.elapsed<3.10);
     for(std::size_t i=0;i<v.cards.size();++i){auto& card=v.cards[i];auto const relative=static_cast<float>(i)-2-static_cast<float>(fraction);
-        card.set(v.previews.empty() || (v.previews.size()==1 && i!=2)?nullptr:v.previews[(base+i)%v.previews.size()].second.data());
+        card.set(v.previews.empty()?nullptr:v.previews[(base+i)%v.previews.size()].second.data());
         auto const emphasis=std::max(0.f,1-std::abs(relative)*.19f);card.root->setPosition({v.carousel->getContentSize().width/2+relative*v.cardWidth*.84f,v.carousel->getContentSize().height/2});
         card.root->setScale(.63f+.37f*emphasis);card.root->setZOrder(static_cast<int>(10-std::abs(relative)*2));card.trim->setVisible(false);card.shade->setOpacity(static_cast<GLubyte>(90+75*(1-emphasis)));
         setModeLobbyOpacity(card.root,static_cast<GLubyte>((1-std::clamp((frame.elapsed-2.75)/.30,0.,1.))*255));
         if(central && std::abs(relative)<.9f)card.root->setVisible(false);else card.root->setVisible(true);
     }
-    auto& selected=v.selected;selected.root->setVisible(central);if(central){selected.set(v.finalTexture.data());selected.shade->setOpacity(0);selected.trim->setVisible(true);
+    auto& selected=v.selected;selected.root->setVisible(central);if(central){selected.set(v.finalTexture ? v.finalTexture.data() : v.previews.empty() ? nullptr : v.previews.front().second.data());selected.shade->setOpacity(0);selected.trim->setVisible(true);
         // Thumbnail landing starts at 2.75s; numeric landing starts at 2.70s.
         auto const p=survivalEase((frame.elapsed-2.75)/.45);auto const start=CCPoint{size.width/2,r.carousel.cy()};
         auto const arrival=1-survivalEase((frame.elapsed-2.15)/.60);
@@ -192,7 +205,9 @@ void SurvivalMapSelectionLayer::present(SurvivalMatchView const& view,RoundPrepa
     m_fallback=!m_thumbnail && Loader::get()->isModLoaded("cdc.level_thumbnails");
     m_timeline.followServer(view.state,countdown,now);
     auto const frame=m_timeline.frame(now);if(frame.stage==SurvivalRevealStage::Cancelled){hideSelection();return;}
-    if(m_thumbnail && (!supported || (frame.elapsed>=2.15 && context.levelId && !SurvivalThumbnailProvider::get().selected()))){
+    // An asynchronously arriving winner image must not switch the reel to a
+    // numeric mode in the middle of its landing animation.
+    if(m_thumbnail && !supported){
         record.mode.fallback();m_thumbnail=false;m_fallback=true;resetVisuals();
     }
     auto const r=survivalSelectionLayout(size.width,size.height,m_thumbnail,supportsLdm);
@@ -209,7 +224,7 @@ void SurvivalMapSelectionLayer::present(SurvivalMatchView const& view,RoundPrepa
     if(!clock.empty()){
         auto const phase=view.phase=="TIEBREAK"?std::string("DEATH MATCH"):view.phase=="FINAL"?std::string("FINAL"):fmt::format("ROUND {}",view.roundNumber);
         auto const clockText=phase+"\n"+i18n::text(clock,clock);if(clockText!=m_clock->getString())m_clock->setString(clockText.c_str());m_clock->setAnchorPoint({1,.5f});m_clock->setPosition({r.header.right(),r.header.cy()});fitFullMenuLabel(m_clock,142*r.scale,34*r.scale,.27f);
-        m_header->setPositionX(r.header.x+(r.header.w-152*r.scale)/2);fitFullMenuLabel(m_header,r.header.w-152*r.scale,r.header.h,finalHeader?.48f:.83f);
+        m_header->setPosition({r.header.cx(),r.header.cy()});fitFullMenuLabel(m_header,std::max(80.f,r.header.w-304*r.scale),r.header.h,finalHeader?.48f:.83f);
     }m_clock->setVisible(!clock.empty());
     auto const subtitle=finalHeader?std::string("SURVIVAL"):context.levelId==0 && !view.mapError.empty()?i18n::text("survival-map-retry","MAP SEARCH FAILED · RETRYING..."):std::string("MAP SELECTION");if(subtitle!=m_subtitle->getString())m_subtitle->setString(subtitle.c_str());m_subtitle->setPosition({r.subtitle.cx(),r.subtitle.cy()});fitFullMenuLabel(m_subtitle,r.subtitle.w,r.subtitle.h,.20f);
     auto hint=m_fallback?i18n::text("survival-thumbnail-unavailable","Thumbnail unavailable; showing the server level ID."):

@@ -368,12 +368,24 @@ bool RankedRoundPreparation::launch(CCScene* origin) {
     // retain a detached non-running layer, which must not block re-entry
     // forever. The quit/return flags and next-scene gate above remain strict.
     if(auto* previous=PlayLayer::get()){
-        if(previous->isRunning() || previous->getParent()){
-            log::info("[RankedEntry] waiting for prior PlayLayer teardown running={} attached={}",
-                previous->isRunning(),previous->getParent()!=nullptr);
+        auto* parent=previous->getParent();
+        auto* running=CCDirector::sharedDirector()->getRunningScene();
+        if(!previous->isRunning() && parent && parent!=running && !parent->isRunning()){
+            // iPadOS may retain the popped scene's child even after native Quit.
+            // Detach ONLY a stopped PlayLayer from a stopped, non-current scene.
+            // Keep the owner alive until Cocos finishes the removal callbacks.
+            log::info("[RankedEntry] retiring orphan PlayLayer from stopped scene");
+            {
+                geode::Ref<PlayLayer> retiring(previous);
+                previous->removeFromParentAndCleanup(true);
+            }
+        }
+        // Requery the GD singleton; the orphan can be destroyed above.
+        if(auto* current=PlayLayer::get();current && (current->isRunning() || current->getParent())){
+            log::info("[RankedEntry] waiting for prior PlayLayer teardown running={} attached={} currentScene={}",
+                current->isRunning(),current->getParent()!=nullptr,current->getParent()==running);
             return false;
         }
-        log::info("[RankedEntry] ignoring detached and stopped prior PlayLayer singleton");
     }
     // Hold both the saved level and GD's shared texture-cache owner throughout
     // native setup. A context poll or callback cannot retire the object being
@@ -457,6 +469,7 @@ bool RankedRoundPreparation::returnFromNativeQuit(GJGameLevel* level) {
         { [[maybe_unused]] auto departedPlay = std::move(m_play); [[maybe_unused]] auto retainedOrigin = std::move(m_origin); }
         m_launchedLevel = nullptr;
         m_returnQueued = false;
+        log::info("[RankedEntry] native return ownsScene={} queuedScene={} departingAlive={}",ownsScene,director->getNextScene()!=nullptr,static_cast<bool>(scene));
         if(ownsScene)director->popScene();
     });
     return true;

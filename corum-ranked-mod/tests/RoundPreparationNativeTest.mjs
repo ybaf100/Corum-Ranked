@@ -40,7 +40,7 @@ struct CCNode {
     virtual ~CCNode()=default; bool live=true, running=false, visible=true; CCNode* parent=nullptr;
     std::vector<CCNode*> children;
     bool init(){return true;} void release(){} virtual void update(float){}
-    bool isRunning()const{return running;} bool isVisible()const{return visible;} CCNode* getParent()const{return parent;}
+    bool isRunning()const{return running;} bool isVisible()const{return visible;} CCNode* getParent()const{return parent;} void removeFromParentAndCleanup(bool){parent=nullptr;}
     auto const& getChildrenExt()const{return children;}
 };
 struct CCScene:CCNode {};
@@ -309,9 +309,9 @@ int main(){
     CCScene transition;director->next=&transition;
     assert(!p.launch(&origin)&&PlayLayer::constructions==0&&runtime.arms==0);
     director->next=nullptr;PlayLayer departing;departing.running=false;departing.parent=&origin;PlayLayer::active=&departing;
-    assert(!p.launch(&origin)&&PlayLayer::constructions==0&&runtime.arms==0); // teardown still owns the scene
-    departing.parent=nullptr; // native return has detached the stopped singleton
-    assert(p.launch(&origin));assert(runtime.arms==1&&PlayLayer::active->m_level==&downloaded);
+    assert(!p.launch(&origin)&&PlayLayer::constructions==0&&runtime.arms==0); // current scene still owns it
+    CCScene orphan;departing.parent=&orphan;orphan.running=false;
+    assert(p.launch(&origin));assert(departing.parent==nullptr); // stale popped scene is safely detachedassert(runtime.arms==1&&PlayLayer::active->m_level==&downloaded);
     assert(CCTextureCache::sharedTextureCache()->references==2);
     assert(PlayLayer::active->m_level->m_lowDetailModeToggled&&PlayLayer::active->m_level->m_disableShakeToggled);
     assert(!p.launch(&origin)&&PlayLayer::constructions==1&&director->pushes==1);

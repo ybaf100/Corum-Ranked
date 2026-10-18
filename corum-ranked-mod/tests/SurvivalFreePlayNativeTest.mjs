@@ -168,7 +168,11 @@ int main(){using namespace corum::ranked;SurvivalMatchView view;SurvivalStanding
  for(int rank:{0,4,3,2,1}){view.standings[0].rank=rank;ui.showParticipants(view,false);auto const& tile=ui.m_tiles.at("a");
   for(int n=1;n<=3;n++)assert(tile.medals[n-1]->visible==(n==rank));
  }
- view.standings[0].rank=1;
+ // Predicted elimination before the round ends must already be red.
+ view.standings[0].rank=4;view.standings[0].passing=false;ui.showParticipants(view,false);
+ assert(ui.m_tiles.at("a").eliminatedBackground->visible);
+ view.standings[0].rank=1;view.standings[0].passing=true;ui.showParticipants(view,false);
+ assert(!ui.m_tiles.at("a").eliminatedBackground->visible);
  view.standings[0].score=81;ui.showParticipants(view,false);assert(alice->moves==0&&name==ui.m_tiles.at("a").name&&icon==ui.m_tiles.at("a").icon);
  std::swap(view.standings[0],view.standings[1]);view.standings[0].rank=1;view.standings[1].rank=2;ui.showParticipants(view,false);assert(alice->moves==1);alice->advance(.5f);auto halfway=alice->pos;assert(halfway!=initial);
  std::swap(view.standings[0],view.standings[1]);view.standings[0].rank=1;view.standings[1].rank=2;view.standings[0].eliminated=true;ui.showParticipants(view,false);
