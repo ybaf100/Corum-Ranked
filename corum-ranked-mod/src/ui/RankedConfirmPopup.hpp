@@ -21,7 +21,8 @@ class RankedConfirmTouchProxy final : public cocos2d::CCLayer {
         if(!item || !item->isVisible() || !item->isEnabled())return false;
         for(auto* n=static_cast<cocos2d::CCNode*>(item.data());n;n=n->getParent())
             if(!n->isVisible())return false;
-        auto const local=item->convertToNodeSpace(touch->getLocation()),size=item->getContentSize();
+        auto const local=item->convertToNodeSpace(touch->getLocation());
+        auto const size=item->getContentSize();
         return size.width>0 && size.height>0 &&
             cocos2d::CCRect(0,0,size.width,size.height).containsPoint(local);
     }
