@@ -156,7 +156,7 @@ namespace ui{inline constexpr Color Gold{255,195,55},Blue{0,0,255},SurfaceRaised
  CCNode* createAnimatedRankBadge(std::string const&,CCSize,RankBadgeDisplay){return CCNode::create();}
 }
 struct SurvivalMatchView{std::string id="m",roundKey="r1",ownId="a",phase="ROUND_1";int mapGeneration=1;std::vector<SurvivalStanding>standings,roundPlayers;matjson::Value result;};
-struct Coordinator{
+struct Coordinator:CCNode{
  struct Tile{CCNode* root=nullptr;CCLabelBMFont* name=nullptr;CCLabelBMFont* record=nullptr;CCPoint destination;CCNode* icon=nullptr;CCNode* tierBadge=nullptr;std::string tier="";CCNode* eliminatedBackground=nullptr;std::string titleText={},recordText={};std::array<CCNode*,3>medals{};int infoTag=0;};
  std::string m_gridContext;CCNode grid;CCNode* m_grid=&grid;std::unordered_map<std::string,Tile>m_tiles;std::unordered_map<int,SurvivalStanding>m_infoByTag;int m_nextInfoTag=1000;void onPlayerInfo(CCObject*){}CCSize getContentSize()const{return {568,320};}
  ${method(source,'void showParticipants(')}
