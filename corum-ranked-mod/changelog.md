@@ -1,3 +1,13 @@
+# v0.5.0-beta.78
+
+- Wait five server-authoritative seconds after all players confirm assets ready, then preserve the existing five-second native-entry allowance and three-second gameplay countdown after everybody enters.
+- Diagnose and repair a missing Survival Pause touch delegate after event dispatch; retain native modal, authentication, scene-owner and ACK protections for surrender/Debug Force Clear.
+- Restore the Survival coordinator when an old native scene is already retired; avoid stale queue-match polling and skip only a detached, stopped PlayLayer singleton in the native-entry gate.
+- Add selectable Survival roster avatars that open a match-scoped player information panel (rank, best/now progress, attempts, tier and GD account or bot indicator).
+- Tighten Survival top-header spacing; preserve the already-implemented red elimination cards.
+- Regression checks updated for five-second ready room and missing touch-handler registration. CI, Windows/iOS builds and device interaction were not run; real-device verification is still required.
+- Version metadata and server required-client gate updated to beta.78. Matching server deployment is required; no Render/R2/Sheets publication was performed.
+
 # v0.5.0-beta.77
 
 - Route Survival Pause surrender and Debug Force Clear taps through their exact visible bounds before native Pause blockers; respect confirmations, retired scenes and server acknowledgement.
