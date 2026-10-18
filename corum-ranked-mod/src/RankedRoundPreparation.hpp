@@ -11,6 +11,10 @@ class SongInfoObject;
 
 namespace corum::ranked {
 
+// Drives only an exact running Solo Ranked native entry while its scene-local
+// update callbacks are suspended. Authorization remains in the PlayLayer gate.
+void pumpHeldRankedEntry(PlayLayer* layer);
+
 struct RoundPreparationView {
     bool mapReady = false;
     bool audioReady = false;

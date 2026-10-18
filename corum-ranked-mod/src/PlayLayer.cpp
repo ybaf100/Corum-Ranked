@@ -211,6 +211,8 @@ public:
         bool survivalWaiting = false;
         bool rankedInitialized = false;
         bool nativeEntryHeld = false;
+        // Process-owned fallback is independent of the paused native PlayLayer scheduler.
+        std::chrono::steady_clock::time_point nextIndependentEntryPulseAt {};
         bool entryNativeCompletionInProgress = false;
         bool entryAttemptCountDeferred = false;
         bool entryWasPaused = false, entryTouchEnabled = false, entryKeyboardEnabled = false;
@@ -2512,6 +2514,27 @@ public:
         }
     }
 };
+
+// The native PlayLayer may stop receiving postUpdate/scheduled callbacks while
+// its exact server-authorized entry remains held. The process-owned preparation
+// heartbeat drives this same gate without unpausing physics or inventing entry
+// acknowledgement, start certificates, or client-side countdown deadlines.
+void corum::ranked::pumpHeldRankedEntry(PlayLayer* layer) {
+    if (!layer || layer != PlayLayer::get()) return;
+    auto* managed = static_cast<CorumRankedPlayLayer*>(layer);
+    auto* director = CCDirector::sharedDirector();
+    if (!managed->m_fields->rankedInitialized || !managed->m_fields->rankedLevel ||
+        !managed->m_fields->nativeEntryHeld ||
+        managed->m_fields->entryNativeCompletionInProgress ||
+        managed->m_fields->autoExitRequested || managed->m_fields->safetyRetired ||
+        !layer->isRunning() || !layer->getParent() ||
+        layer->getParent() != director->getRunningScene() ||
+        director->getNextScene()) return;
+    auto const now = std::chrono::steady_clock::now();
+    if (now < managed->m_fields->nextIndependentEntryPulseAt) return;
+    managed->m_fields->nextIndependentEntryPulseAt = now + std::chrono::milliseconds(100);
+    managed->blockEntryGameplayUpdate();
+}
 
 bool corum::ranked::prepareSpectatorScene(PlayLayer* layer) {
     if (!layer || layer != PlayLayer::get()) return false;

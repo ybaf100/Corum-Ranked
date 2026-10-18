@@ -1,3 +1,10 @@
+# v0.5.0-beta.83
+
+- Fix a Solo Ranked native round that stays black/frozen in ROUND_ENTERING: the process-owned preparation heartbeat now advances the existing guarded native scene entry and server-ACK/countdown gate when PlayLayer postUpdate and its scheduled callbacks stop during the entry hold.
+- Keep the authoritative /entered API, both-player acknowledgement, server startsAt, scene identity, input/music gating and attempt journaling unchanged. Do not release ordinary, spectator, Survival, detached or exiting scenes.
+- Add a regression test for the independent 100 ms entry pulse, retaining all existing native entry and pause tests. Device verification is required to confirm the iPadOS failure is resolved.
+- Synchronize the client manifest, npm workspace and lockfile, and server required-client version to v0.5.0-beta.83; publish new immutable Debug/Release packages via CI.
+
 # v0.5.0-beta.82
 
 - Migrate the Corum Ranked production client endpoints from Render to Railway, including Solo Ranked, Survival, spectator, and debug APIs.
