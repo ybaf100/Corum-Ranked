@@ -93,7 +93,7 @@ async function prepare(m:SurvivalMatch) {
   }
   await engine.selectMap(m.id);m=await engine.get(m.id);
   await send(m,"ASSETS_READY",{certificate:survivalCurrentRound(m).map!});m=await engine.get(m.id);
-  expect(m.state).toBe("ENTERING");now=survivalCurrentRound(m).entryRequestedAt!+3000;
+  expect(m.state).toBe("ENTERING");now=survivalCurrentRound(m).entryRequestedAt!+5000;
   await send(m,"ENTERED");m=await engine.get(m.id);expect(m.state).toBe("COUNTDOWN");
   now=survivalCurrentRound(m).startsAt!;await debug.tickOnce();return engine.get(m.id);
 }
@@ -227,7 +227,7 @@ describe("Survival M4 persistent debug game",()=>{
     now+=15000;await debug.tickOnce();m=await engine.get(m.id);expect(m.state).toBe("MAP_SELECTION");
     await engine.selectMap(m.id);m=await engine.get(m.id);expect(survivalCurrentRound(m).map!.levelId).not.toBe(first);
     await send(m,"ASSETS_READY",{certificate:survivalCurrentRound(m).map!});m=await engine.get(m.id);
-    now+=8000;await debug.tickOnce();m=await engine.get(m.id);expect(m.state).toBe("MAP_SELECTION");
+    now+=10000;await debug.tickOnce();m=await engine.get(m.id);expect(m.state).toBe("MAP_SELECTION");
     m=await prepare(m);expect(m.state).toBe("PLAYING");
     expect(survivalCurrentRound(m).endsAt!-survivalCurrentRound(m).startsAt!).toBe(180000);
   });
