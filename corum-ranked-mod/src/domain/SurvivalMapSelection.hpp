@@ -21,7 +21,10 @@ class SurvivalRevealModeChoice {
     enum class Mode { Undecided, Thumbnail, Numeric } m_mode=Mode::Undecided;
 public:
     bool choose(bool supported,bool previewsReady){
-        if(m_mode==Mode::Undecided)m_mode=supported && previewsReady?Mode::Thumbnail:Mode::Numeric;
+        // Network images are asynchronous. Never irrevocably select numeric at the
+        // first frame solely because the cache is still empty.
+        (void)previewsReady;
+        if(m_mode==Mode::Undecided)m_mode=supported?Mode::Thumbnail:Mode::Numeric;
         return m_mode==Mode::Thumbnail;
     }
     void fallback(){m_mode=Mode::Numeric;}
