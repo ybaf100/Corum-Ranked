@@ -86,7 +86,7 @@ function run(code,flags=[]){const dir=mkdtempSync(join(tmpdir(),'corum-admin-nat
 for (const androidString of [false,true]) test(`whole debug/Admin popups compile ON/OFF with ${androidString?'Android gd::string':'std::string'} and guard names, inputs, confirmation, late callbacks and batch summary`,()=>{
  const source=strip(read('../src/debug/DebugAdminPopup.cpp')).replace('class DebugAdminPopup final : public Popup {','class DebugAdminPopup final : public Popup { public:').replace('class DebugAudioVolumePopup final : public Popup {','class DebugAudioVolumePopup final : public Popup { public:');
  const menu=strip(read('../src/debug/DebugMenuPopup.cpp')).replace('class DebugMenuPopup final : public Popup {','class DebugMenuPopup final : public Popup { public:');
- run(fixture+strip(read('../src/ui/RankedConfirmPopup.hpp')).replace('#if !defined(CORUM_RANKED_NATIVE_TEST)', '#if 0').replace('class RankedConfirmPopup final : public Popup {','class RankedConfirmPopup final : public Popup { public:')+source+menu+`
+ run(fixture+'#define CORUM_RANKED_NATIVE_TEST 1\n'+strip(read('../src/ui/RankedConfirmPopup.hpp')).replace('#if !defined(CORUM_RANKED_NATIVE_TEST)', '#if 0').replace('class RankedConfirmPopup final : public Popup {','class RankedConfirmPopup final : public Popup { public:')+source+menu+`
 using namespace corum::ranked;using namespace corum::ranked::debug;
 int main(){
  auto& runtime=RankedRuntime::get();auto* account=GJAccountManager::get();
