@@ -12,7 +12,7 @@ function map(m:SurvivalMatch,time:number){const r=survivalCurrentRound(m),range=
  automatic:false,platformer:false,geometryBytes:1,geometrySha256:"a".repeat(64),verifiedAt:new Date(time).toISOString()}},time);}
 function ready(m:SurvivalMatch,time:number){m=map(m,time);const r=survivalCurrentRound(m);
  for(const p of r.players)m=command(m,{type:"ASSETS_READY",...context(m),participantId:p.participantId,certificate:r.map!},time+1);
- for(const p of r.players)m=command(m,{type:"ENTERED",...context(m),participantId:p.participantId},time+3001);
+ for(const p of r.players)m=command(m,{type:"ENTERED",...context(m),participantId:p.participantId},time+5001);
  return command(m,{type:"TICK"},survivalCurrentRound(m).startsAt!);}
 function record(m:SurvivalMatch,id:string,value:number,time:number){m=command(m,{type:"ATTEMPT_START",...context(m),participantId:id,attemptId:id+"-attempt"},time);
  return command(m,{type:"PROGRESS",...context(m),participantId:id,attemptId:id+"-attempt",progress:value},time);}
@@ -53,7 +53,7 @@ describe("Survival M5 confirmed online policies",()=>{
  it("counts every absent entrant as zero without faking native evidence, permits mid-round recovery",()=>{
    let m=map(make(8),1);m=survivalMarkAbsent(m,["p0"],15001);
    for(let i=1;i<8;i++)m=command(m,{type:"ASSETS_READY",...context(m),participantId:`p${i}`,certificate:survivalCurrentRound(m).map!},2);
-   for(let i=1;i<8;i++)m=command(m,{type:"ENTERED",...context(m),participantId:`p${i}`},survivalCurrentRound(m).entryRequestedAt!+3000);
+   for(let i=1;i<8;i++)m=command(m,{type:"ENTERED",...context(m),participantId:`p${i}`},survivalCurrentRound(m).entryRequestedAt!+5000);
    m=command(m,{type:"TICK"},survivalCurrentRound(m).startsAt!);const end=survivalCurrentRound(m).endsAt!;
    expect(survivalCurrentRound(m).players[0]).toMatchObject({highestProgress:0,assetsReadyAt:null,enteredAt:null,absent:true});
    const at=m.updatedAt+1;m=command(m,{type:"ASSETS_READY",...context(m),participantId:"p0",certificate:survivalCurrentRound(m).map!},at);
