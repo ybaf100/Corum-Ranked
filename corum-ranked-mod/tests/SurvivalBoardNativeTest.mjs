@@ -81,7 +81,7 @@ int main(){Coordinator c;auto&r=SurvivalRuntime::get();c.keyBackClicked();assert
  // result rather than sending a second surrender/forfeit or acknowledging
  // the shared match result.
  r.v.result.exists=false;r.stage=SurvivalFlowStage::EliminatedChoice;
- const beforeConfirm=c.confirmations;
+ const auto beforeConfirm=c.confirmations;
  c.keyBackClicked();assert(r.choices==1&&r.lastChoice==SurvivalOutcomeChoice::PersonalResult);
  assert(c.confirmations==beforeConfirm&&r.acknowledgments==1);
  r.stage=SurvivalFlowStage::Active;r.observe=true;
