@@ -72,7 +72,7 @@ void SurvivalPauseActionInput::registerWithTouchDispatcher(){
     // -500. This is a non-consuming observer outside its two actual buttons.
     constexpr int kActionPriority=-50000;
     log::info("[SurvivalPauseInput] registering targeted touch delegate priority={}",kActionPriority);
-    CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this,kActionPriority,true);
+    CCDirector::sharedDirector()->getTouchDispatcher()->addPrioTargetedDelegate(this,kActionPriority,true);
 }
 void SurvivalPauseActionInput::synchronize(){
     if(!isRunning())return;
