@@ -4,6 +4,7 @@
 #include "RankedInput.hpp"
 #include <Geode/ui/Popup.hpp>
 #include <functional>
+#include <array>
 
 namespace corum::ranked::ui {
 using namespace geode::prelude;
@@ -34,7 +35,7 @@ public:
         input->setTouchEnabled(true);input->autorelease();return input;
     }
     void registerWithTouchDispatcher() override {
-        cocos2d::CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this,-65000,true);
+        cocos2d::CCDirector::sharedDirector()->getTouchDispatcher()->addPrioTargetedDelegate(this,-65000,true);
     }
     bool ccTouchBegan(cocos2d::CCTouch* touch,cocos2d::CCEvent*) override {
         if(m_touch!=-1)return false;
