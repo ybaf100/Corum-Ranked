@@ -418,7 +418,12 @@ public:
 void showSurvivalGame() {
     auto* director=CCDirector::sharedDirector();auto* current=director->getRunningScene();
     if(!SurvivalRuntime::get().active() || (current && current->getChildByID("survival-game-coordinator"_spr)))return;
-    if(isOfficialSurvivalPlayLayer(PlayLayer::get()))return;
+    // A retired native PlayLayer may still be the GD singleton for a frame
+    // after its scene has been popped. Only a *running* official game in the
+    // active scene should prevent restoring this match's coordinator.
+    auto* currentPlay=PlayLayer::get();
+    if(currentPlay && currentPlay->isRunning() &&
+        currentPlay->getParent()==current && isOfficialSurvivalPlayLayer(currentPlay))return;
     auto* layer=SurvivalGameLayer::create();if(!layer)return;auto* scene=CCScene::create();scene->addChild(layer);director->pushScene(scene);
 }
 }
