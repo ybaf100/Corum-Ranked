@@ -126,15 +126,23 @@ void SurvivalMapSelectionLayer::numberFrame(SurvivalRevealFrame const& frame,Sur
 }
 void SurvivalMapSelectionLayer::thumbnailFrame(SurvivalRevealFrame const& frame,SurvivalSelectionLayout const& r){
     auto& v=*m_visuals;auto const size=getContentSize();
-    if(!v.cardsBuilt){v.cardWidth=std::min(176.f*r.scale,size.width*.29f);v.carousel=clip({size.width-28*r.scale,r.carousel.h+12*r.scale});v.carousel->setPosition({14*r.scale,r.carousel.cy()-(r.carousel.h+12*r.scale)/2});addChild(v.carousel,8);
+    if(!v.cardsBuilt){v.cardWidth=std::min(205.f*r.scale,size.width*.33f);v.carousel=clip({size.width-28*r.scale,r.carousel.h+12*r.scale});v.carousel->setPosition({14*r.scale,r.carousel.cy()-(r.carousel.h+12*r.scale)/2});addChild(v.carousel,8);
         for(auto& card:v.cards)card.make(v.carousel,v.cardWidth);v.selected.make(this,v.cardWidth);v.selected.root->setZOrder(12);v.cardsBuilt=true;
     }
     auto const provider=SurvivalThumbnailProvider::get().previews();
-    for(auto const& p:provider)if(std::none_of(v.previews.begin(),v.previews.end(),[&](auto const& cached){return cached.first==p.first;}))v.previews.push_back(p);
+    if(frame.elapsed<.2)for(auto const& p:provider)
+        if(std::none_of(v.previews.begin(),v.previews.end(),[&](auto const& cached){return cached.first==p.first;}))
+            v.previews.push_back(p);
     if(v.previews.size()>8)v.previews.erase(v.previews.begin(),v.previews.end()-8);
     if(auto preferred=SurvivalThumbnailProvider::get().selected();preferred && preferred.data()!=v.finalTexture.data())v.finalTexture=preferred;
-    double phase=frame.elapsed/.17;
-    if(frame.elapsed>=2.15){auto const p=std::clamp((frame.elapsed-2.15)/.60,0.,1.);phase=2.15/.17+(1-std::pow(1-p,3))*1.5;}
+    // Maintain position and velocity at the deceleration boundary. The old
+    // cubic easing jumped in speed and then nearly froze half-way through.
+    constexpr double glideStart=1.95,glideDuration=.80,cyclesPerSecond=1./.14;
+    double phase=frame.elapsed*cyclesPerSecond;
+    if(frame.elapsed>=glideStart){
+        auto const p=std::clamp((frame.elapsed-glideStart)/glideDuration,0.,1.);
+        phase=glideStart*cyclesPerSecond+glideDuration*cyclesPerSecond*(p-.5*p*p);
+    }
     auto const base=static_cast<std::size_t>(std::floor(phase));auto const fraction=phase-std::floor(phase);
     auto const central=frame.elapsed>=2.15 && m_timeline.context().levelId>0;
     v.carousel->setVisible(frame.elapsed<3.10);
