@@ -4,6 +4,7 @@
 #include "domain/SurvivalMapPolicy.hpp"
 #include "domain/SurvivalHudPresentation.hpp"
 #include "domain/SurvivalFreePlayPolicy.hpp"
+#include "domain/SurvivalFlowPolicy.hpp"
 #include "domain/ResultScorePresentation.hpp"
 #include <Geode/Geode.hpp>
 #include <Geode/utils/web.hpp>
@@ -18,10 +19,10 @@ struct SurvivalQueueView {
 };
 struct SurvivalMatchView {
     std::uint64_t revision=0;
-    std::string id,state,phase,roundKey,group,ownId="human",error,startsAt,endsAt,entryOpensAt,mapError,presentationGate;
+    std::string id,state,phase,roundKey,group,ownId="human",error,startsAt,endsAt,entryOpensAt,mapError,presentationGate,selectionOpensAt,eliminatedAt;
     int mapGeneration=0,roundNumber=0,targetQualifiers=0,playerCount=0,roundPlayerCount=0;
     SurvivalMapMetadata map;
-    matjson::Value certificate=nullptr,result=nullptr,completedRound=nullptr;
+    matjson::Value certificate=nullptr,result=nullptr,completedRound=nullptr,nextMap=nullptr,participants=nullptr;
     std::vector<SurvivalStanding> standings;
     std::vector<SurvivalStanding> roundPlayers;
     std::vector<std::string> aliveIds;
@@ -53,6 +54,17 @@ public:
     LevelPreparationContext preparationContext() const;
     std::string optionsContext() const {return active()?m_view.id+":"+m_view.roundKey+":"+std::to_string(m_view.mapGeneration):std::string{};}
 
+    SurvivalMatchView preparationView() const;
+    SurvivalOutcomeChoice outcomeChoice() const;
+    SurvivalFlowStage flowStage() const{return survivalFlowStage(m_view.state,m_view.presentationGate,m_view.ownEliminated,outcomeChoice());}
+    void chooseOutcome(SurvivalOutcomeChoice);
+    bool observing() const{return m_view.ownEliminated && outcomeChoice()==SurvivalOutcomeChoice::Observe;}
+    int watchLockSeconds() const;
+    bool canEnterObserver() const;
+    bool armObserver(GJGameLevel*,cocos2d::CCScene*);
+    bool previouslyEntered() const;
+    void noteNativeLaunch();
+    void observerReturned();
     bool acquiring() const;
     bool validateNative(GJGameLevel* level);
     bool canEnter() const;

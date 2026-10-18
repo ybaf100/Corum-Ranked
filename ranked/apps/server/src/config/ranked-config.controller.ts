@@ -40,13 +40,13 @@ export class RankedConfigController {
     const snapshot = this.rankedConfig.getSnapshot();
     const [volumes, modUpdates] = await Promise.all([
       readRankedAudioVolumes(snapshot.client, this.database),
-      this.modUpdates?.getClientUpdates() ?? this.environment?.rankedModUpdates ?? {},
+      this.modUpdates?.getPublishedClientUpdates() ?? this.environment?.rankedModUpdates ?? {},
     ]);
     return {
       serverNow: new Date().toISOString(),
       generation: snapshot.generation,
       rulesVersion: snapshot.operational.rules.rulesVersion,
-      requiredClientVersion: REQUIRED_RANKED_CLIENT_VERSION,
+      requiredClientVersion: this.modUpdates?.currentRequiredVersion() ?? REQUIRED_RANKED_CLIENT_VERSION,
       modUpdates,
       queueEnabled: snapshot.operational.enabled,
       modes: { soloRanked: { ready: true, enabled: snapshot.operational.enabled },

@@ -210,7 +210,8 @@ void SurvivalRuntime::observe(matjson::Value const& root) {
     m_view.startsAt=root["startsAt"].asString().unwrapOr("");m_view.endsAt=root["endsAt"].asString().unwrapOr("");
     m_view.entryOpensAt=root["entryOpensAt"].asString().unwrapOr("");
     m_view.certificate=root["map"];m_view.result=root["result"];
-    m_view.completedRound=root["completedRound"];
+    m_view.completedRound=root["completedRound"];m_view.nextMap=root["nextMap"];m_view.participants=root["participants"];
+    m_view.selectionOpensAt=root["selectionOpensAt"].asString().unwrapOr("");
     m_view.mapError=root["mapSelection"]["errorCode"].asString().unwrapOr("");
     auto const diagnostic=m_view.id+":"+m_view.roundKey+":"+std::to_string(m_view.mapGeneration)+":"+m_view.mapError+
         ":"+root["mapSelection"]["errorMessage"].asString().unwrapOr("");
@@ -230,7 +231,12 @@ void SurvivalRuntime::observe(matjson::Value const& root) {
     for(auto const& p:participants) {
         auto const pid=p["participantId"].asString().unwrapOr("");
         if(p["eliminationStage"].isNull())m_view.aliveIds.push_back(pid);
-        if(pid==m_view.ownId)m_view.ownEliminated=!p["eliminationStage"].isNull();
+        if(pid==m_view.ownId){m_view.ownEliminated=!p["eliminationStage"].isNull();m_view.eliminatedAt=p["eliminatedAt"].asString().unwrapOr("");
+            if(m_view.ownEliminated && m_view.eliminatedAt.empty()){
+                auto const key="survival-elimination-time-"+id;
+                if(!Mod::get()->getSavedValue<std::int64_t>(key,0))Mod::get()->setSavedValue(key,m_lastServerNow);
+            }
+        }
     }
     for(auto const& p:root["standings"].asArray().unwrapOr(std::vector<matjson::Value>{})) {
         auto const pid=p["participantId"].asString().unwrapOr("");
@@ -294,18 +300,57 @@ void SurvivalRuntime::poll() {
         }
     });
 }
-LevelPreparationContext SurvivalRuntime::preparationContext() const {
-    if(!active() || !m_view.map.levelId || m_view.ownEliminated || m_view.state=="FINAL_RESULT" || m_view.state=="CANCELLED")return {};
-    return {m_view.id,m_view.map.levelId,m_view.roundNumber,m_view.phase=="TIEBREAK"?1:0,false,0,m_view.mapGeneration};
+SurvivalOutcomeChoice SurvivalRuntime::outcomeChoice() const {
+    if(Mod::get()->getSavedValue<std::string>("survival-outcome-match")!=m_view.id)return SurvivalOutcomeChoice::Undecided;
+    auto const choice=Mod::get()->getSavedValue<int>("survival-outcome-choice",0);
+    return choice==1?SurvivalOutcomeChoice::Observe:choice==2?SurvivalOutcomeChoice::PersonalResult:SurvivalOutcomeChoice::Undecided;
 }
-bool SurvivalRuntime::acquiring() const { return preparationContext().valid() && m_view.state!="ROUND_RESULT"; }
+void SurvivalRuntime::chooseOutcome(SurvivalOutcomeChoice choice){
+    if(choice==outcomeChoice() || !active() || !m_view.ownEliminated || (choice==SurvivalOutcomeChoice::Observe && watchLockSeconds()>0))return;
+    Mod::get()->setSavedValue("survival-outcome-match",m_view.id);Mod::get()->setSavedValue("survival-outcome-choice",static_cast<int>(choice));
+    (void)Mod::get()->saveData();
+}
+int SurvivalRuntime::watchLockSeconds() const {
+    if(!m_clock.synchronized())return 5;
+    auto const at=parseIso8601Millis(m_view.eliminatedAt).value_or(Mod::get()->getSavedValue<std::int64_t>("survival-elimination-time-"+m_view.id,0));
+    return at>0?survivalWatchLock(m_clock.serverNowMillis(localNow()),at):5;
+}
+void SurvivalRuntime::observerReturned(){
+    if(!m_freePlay.active || !m_freePlay.observer)return;
+    auto origin=m_freePlayOrigin?m_freePlayOrigin->lock():Ref<CCScene>();
+    if(origin && CCDirector::sharedDirector()->getRunningScene()==origin.data()){
+        m_freePlay.finish();m_freePlayOrigin.reset();m_freePlayQuitLevel=nullptr;m_freePlayQuitScene.reset();m_freePlayNativeQuitFinished=false;
+    }
+}
+void SurvivalRuntime::noteNativeLaunch(){Mod::get()->setSavedValue("survival-native-entered",optionsContext());}
+bool SurvivalRuntime::previouslyEntered() const {
+    return m_view.ownEntered || Mod::get()->getSavedValue<std::string>("survival-native-entered")==optionsContext();
+}
+SurvivalMatchView SurvivalRuntime::preparationView() const {
+    auto view=m_view;
+    if(view.state=="ROUND_RESULT" && view.nextMap["map"].isObject()){
+        auto const& map=view.nextMap["map"];view.certificate=map;
+        view.roundKey=view.nextMap["roundKey"].asString().unwrapOr("");view.phase=view.nextMap["phase"].asString().unwrapOr("");
+        view.mapGeneration=static_cast<int>(view.nextMap["mapGeneration"].asInt().unwrapOr(0));++view.roundNumber;
+        view.map={static_cast<int>(map["levelId"].asInt().unwrapOr(0)),static_cast<int>(map["stars"].asInt().unwrapOr(0)),
+            static_cast<int>(map["levelVersion"].asInt().unwrapOr(0)),map["demon"].asBool().unwrapOr(false)?demon(map["demonDifficulty"].asString().unwrapOr("")):SurvivalDemon::None,
+            map["automatic"].asBool().unwrapOr(true),map["platformer"].asBool().unwrapOr(true),static_cast<int>(map["length"].asInt().unwrapOr(-1))};
+    }
+    return view;
+}
+LevelPreparationContext SurvivalRuntime::preparationContext() const {
+    auto const view=preparationView();
+    if(!active() || !view.map.levelId || (view.ownEliminated && !observing()) || view.state=="FINAL_RESULT" || view.state=="CANCELLED")return {};
+    return {view.id,view.map.levelId,view.roundNumber,view.phase=="TIEBREAK"?1:0,false,0,view.mapGeneration};
+}
+bool SurvivalRuntime::acquiring() const { return preparationContext().valid(); }
 bool SurvivalRuntime::validateNative(GJGameLevel* level) {
     auto const group=m_view.group=="RED_BRONZE"?SurvivalDifficultyGroup::RedBronze:m_view.group=="SILVER"?SurvivalDifficultyGroup::Silver:SurvivalDifficultyGroup::Gold;
-    auto const context=preparationContext();
+    auto const context=preparationContext();auto const preparedView=preparationView();
     if(!context.valid() || !RankedLevelPreparation::get().authorizes(level,context) ||
-        !survivalNativeMapMatches(level,m_view.map,group,mapPhase(m_view.phase)))return false;
-    auto const expected=m_view.certificate["geometrySha256"].asString().unwrapOr("");
-    auto const bytes=m_view.certificate["geometryBytes"].asInt().unwrapOr(0);
+        !survivalNativeMapMatches(level,preparedView.map,group,mapPhase(preparedView.phase)))return false;
+    auto const expected=preparedView.certificate["geometrySha256"].asString().unwrapOr("");
+    auto const bytes=preparedView.certificate["geometryBytes"].asInt().unwrapOr(0);
     if(expected.size()!=64 || bytes<1 || bytes>32*1024*1024 || level->m_levelString.size()>44*1024*1024)return false;
     std::string data(level->m_levelString.c_str());
     auto matches=[&](std::string const& value){return value.size()==static_cast<std::size_t>(bytes)&&sha256Text(value)==expected;};
@@ -403,21 +448,24 @@ void SurvivalRuntime::discardObsoleteEvents() {
     if(m_events.size()!=before)m_retryAt={};
 }
 void SurvivalRuntime::assetsReady(GJGameLevel* level) {
+    if(m_view.ownEliminated || observing() || freePlaying())return;
     auto const key=preparationContextText(preparationContext());
     if((m_view.state!="PREPARING" && !(m_view.online && !m_view.ownAssetsReady && (m_view.state=="ENTERING" || m_view.state=="COUNTDOWN" || m_view.state=="PLAYING"))) || m_readyContext==key || !RankedRoundPreparation::get().ready() || !validateNative(level))return;
     auto body=event("ASSETS_READY");if(!RankedRuntime::get().prepareSurvivalEnvironment(body))return;
     body["certificate"]=m_view.certificate;m_readyContext=key;enqueue(std::move(body));
 }
 void SurvivalRuntime::preparationFailed(std::string const& reason) {
+    if(m_view.ownEliminated || observing() || freePlaying())return;
     if(m_view.state!="PREPARING" || !m_readyContext.empty())return;
     auto body=event("PREPARATION_FAILED");body["reason"]=reason;m_readyContext=preparationContextText(preparationContext());enqueue(std::move(body));
 }
 void SurvivalRuntime::sceneEntered(int levelId) {
+    if(m_view.ownEliminated || observing() || freePlaying())return;
     auto const key=preparationContextText(preparationContext());
     if(!gameplayLevel(levelId) || m_enteredContext==key)return;
     if(m_view.state=="ENTERING" || (m_view.online && !m_view.ownEntered && (m_view.state=="COUNTDOWN" || m_view.state=="PLAYING"))) {auto body=event("ENTERED");if(!RankedRuntime::get().prepareSurvivalEnvironment(body))return;
     enqueue(std::move(body));}
-    m_enteredContext=key;
+    m_enteredContext=key;Mod::get()->setSavedValue("survival-native-entered",optionsContext());
     // A killed process leaves a durable open attempt. Close its accepted record
     // before the fresh native scene can start another one, including in DM.
     if(!m_view.activeAttemptId.empty() && m_attempt.empty()) {
@@ -444,6 +492,7 @@ void SurvivalRuntime::progress(double value) {
     auto body=event("PROGRESS");body["attemptId"]=m_attempt;body["progress"]=m_attemptBest;body["currentProgress"]=value;enqueue(std::move(body));
 }
 void SurvivalRuntime::endAttempt(double value) {
+    if(freePlaying() || observing())return;
     if(m_attempt.empty() || m_attemptContext!=preparationContextText(preparationContext()))return;
     if(std::isfinite(value) && value>=0 && value<=100)m_attemptBest=std::max(m_attemptBest,value);
     auto body=event("ATTEMPT_END");body["attemptId"]=std::exchange(m_attempt,{});body["progress"]=m_attemptBest;enqueue(std::move(body));
@@ -456,6 +505,16 @@ bool SurvivalRuntime::normalRoundCleared() const {
 bool SurvivalRuntime::canFreePlay() const {
     return active() && !freePlaying() && normalRoundCleared() && m_view.state=="PLAYING" && !m_view.ownEliminated &&
         m_session==RankedRuntime::get().spectatorLiveSessionToken() && !m_session.empty();
+}
+bool SurvivalRuntime::canEnterObserver() const {
+    return observing() && watchLockSeconds()==0 && !freePlaying() && m_view.state=="PLAYING" && remainingMs()>0 &&
+        m_prepared.valid() && m_prepared==preparationContext() && !m_session.empty() && m_session==RankedRuntime::get().spectatorLiveSessionToken();
+}
+bool SurvivalRuntime::armObserver(GJGameLevel* level,CCScene* origin){
+    if(!canEnterObserver() || !validateNative(level) || !origin || origin!=CCDirector::sharedDirector()->getRunningScene())return false;
+    m_freePlay.begin({m_view.id,m_view.roundKey,m_view.mapGeneration},m_view.completedRound["key"].asString().unwrapOr(""),true);
+    m_freePlayOrigin.emplace(origin);m_freePlayNativeQuitFinished=false;m_freePlayQuitLevel=nullptr;m_freePlayQuitScene.reset();
+    log::info("[SurvivalObserver] local-only launch match={} round={} level={}",m_view.id,m_view.roundKey,m_view.map.levelId);return true;
 }
 bool SurvivalRuntime::beginFreePlay() {
     auto* director=CCDirector::sharedDirector();auto* scene=director->getRunningScene();
@@ -532,7 +591,7 @@ void SurvivalRuntime::pumpSurrenderReturn() {
     if(m_surrenderEventId.empty() || m_view.id!=m_surrenderMatchId || !m_view.ownEliminated)return;
     // A successful event response (or recovery poll) must contain the server's
     // elimination before any scene exit. Online matches may still be PLAYING.
-    m_surrenderAccepted=true;
+    if(!m_surrenderAccepted){m_surrenderAccepted=true;chooseOutcome(SurvivalOutcomeChoice::PersonalResult);}
     auto owner=m_surrenderOwner?m_surrenderOwner->lock():Ref<PlayLayer>();
     auto scene=m_surrenderScene?m_surrenderScene->lock():Ref<CCScene>();
     auto* director=CCDirector::sharedDirector();

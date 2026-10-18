@@ -368,7 +368,7 @@ bool RankedRoundPreparation::launch(CCScene* origin) {
     bool const spectator = runtime.canEnterCurrentLevelAsSpectator();
     bool const entering = runtime.canEnterNativeRoundScene();
     bool const survival=SurvivalRuntime::get().active();
-    bool const allowed = survival ? SurvivalRuntime::get().canEnter() : runtime.canEnterCurrentLevel() || entering || spectator;
+    bool const allowed = survival ? (SurvivalRuntime::get().canEnter() || SurvivalRuntime::get().canEnterObserver()) : runtime.canEnterCurrentLevel() || entering || spectator;
     if (roundPrepareState(runtime.view().match.state) || !allowed || !ready() ||
         !origin || origin != CCDirector::sharedDirector()->getRunningScene() ||
         roundModalOpen(origin) || !preparation.authorizes(level, m_context)) return false;
@@ -408,7 +408,7 @@ bool RankedRoundPreparation::launch(CCScene* origin) {
     // journal/ACK gates. A viewer never arms a local attempt.
     if (!survival && !spectator && !entering && !runtime.armCurrentLevelForGameplay()) return false;
     tracePreparedLevel("round-native-launch", level, nullptr, this);
-    if(survival && !SurvivalRuntime::get().armNative(level))return false;
+    if(survival && !(SurvivalRuntime::get().observing()?SurvivalRuntime::get().armObserver(level,origin):SurvivalRuntime::get().armNative(level)))return false;
     if(survival){
         corum::ranked::SurvivalOptionsPreferences::get().apply(level,corum::ranked::SurvivalRuntime::get().optionsContext());
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
@@ -431,6 +431,7 @@ bool RankedRoundPreparation::launch(CCScene* origin) {
     m_origin = geode::WeakRef<CCScene>(origin);
     m_launchedLevel = level;
     m_returnQueued = m_quitting = m_returnPopped = false;
+    if(survival)SurvivalRuntime::get().noteNativeLaunch();
     CCDirector::sharedDirector()->pushScene(scene);
     // pushScene schedules the transition. The process heartbeat ACKs only once
     // this exact game is attached to the active scene with no pending transition.
@@ -498,8 +499,11 @@ bool RankedRoundPreparation::nativeReturnPending(PlayLayer* play)const{
 
 class $modify(CorumRankedRoundReturn, GameManager) {
     void returnToLastScene(GJGameLevel* level) {
-        if(corum::ranked::SurvivalRuntime::get().interceptFreePlayNativeQuit(level))return;
+        // An observer uses a coordinator-owned native scene. Retire that exact
+        // native return transaction before the unowned Free Play menu fallback,
+        // otherwise the weak owner can retain a stale GD singleton on re-entry.
         if (corum::ranked::RankedRoundPreparation::get().returnFromNativeQuit(level)) return;
+        if(corum::ranked::SurvivalRuntime::get().interceptFreePlayNativeQuit(level))return;
         GameManager::returnToLastScene(level);
     }
 };

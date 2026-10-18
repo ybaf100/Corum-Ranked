@@ -31,6 +31,6 @@ import {
       useExisting: AppsScriptCsmpTierSource,
     },
   ],
-  exports: [RankedConfigService, SurvivalConfigService, CSMP_TIER_SOURCE],
+  exports: [RankedModUpdateService,RankedConfigService, SurvivalConfigService, CSMP_TIER_SOURCE],
 })
 export class RankedConfigModule {}

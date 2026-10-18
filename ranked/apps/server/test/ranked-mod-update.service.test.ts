@@ -17,8 +17,8 @@ const descriptor = (channel: RankedBuildChannel, target = version) => ({
   [channel]: { version: target, sha256: (channel === "debug" ? "a" : "b").repeat(64), sizeBytes: 12345,
     downloadUrl:rankedModDownloadUrl(base,channel,target) },
 });
-const validFetch = () => vi.fn<typeof fetch>().mockImplementation(async (url) =>
-  Response.json(descriptor(String(url).includes("/debug-") ? "debug" : "release")));
+const validFetch = () => vi.fn<typeof fetch>().mockImplementation(async (url,options) =>
+  options?.method==="HEAD"?new Response(null,{headers:{"content-length":"12345"}}):Response.json(descriptor(String(url).includes("/debug-") ? "debug" : "release")));
 
 beforeEach(() => vi.spyOn(Logger.prototype, "warn").mockImplementation(() => {}));
 afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });

@@ -99,6 +99,7 @@ int main(){auto&r=SurvivalRuntime::get();Pause p;PlayLayer play;p.fields.owner.e
 
 test('Surrender serializes End before one stable FORFEIT, waits for server evidence, returns directly on ACK and rejects errors/stale scene owners',()=>{
  run(common+`
+#include "domain/SurvivalFlowPolicy.hpp"
 namespace utils::random{std::string generateUUID(){static int n=0;return "event-"+std::to_string(++n);}}
 namespace web{struct WebResponse{int status;matjson::Value root;int code()const{return status;}matjson::Result<matjson::Value>json()const{return {root};}};struct Operation{matjson::Value body;};struct WebRequest{matjson::Value body;void bodyJSON(matjson::Value v){body=v;}Operation post(std::string const&){return {body};}};struct Pending{Operation op;std::function<void(WebResponse)>done;};std::vector<Pending>pending;}
 web::WebRequest request(std::string const&){return {};}
@@ -112,6 +113,7 @@ struct SurvivalRuntime{
  std::optional<WeakRef<PlayLayer>>m_surrenderOwner;std::optional<WeakRef<CCScene>>m_surrenderScene;
  std::uint64_t m_generation=1,m_eventGeneration=0;double m_attemptBest=77;std::deque<matjson::Value>m_events;Request m_eventRequest;std::chrono::steady_clock::time_point m_retryAt{},m_nextPoll{};
  bool active()const{return !m_view.id.empty();}bool current(std::uint64_t g,std::string const&s)const{return g==m_generation&&s==m_session;}
+ bool freePlaying()const{return false;}bool observing()const{return false;}void chooseOutcome(SurvivalOutcomeChoice value){assert(m_view.ownEliminated);assert(value==SurvivalOutcomeChoice::PersonalResult);}
  bool surrenderPending()const{return !m_surrenderEventId.empty()&&!m_surrenderAccepted;}
  std::string preparationContext()const{return m_view.roundKey;}std::string matchEndpoint(std::string const&p)const{return p;}
  void observe(matjson::Value const&v){if(v.contains("eliminated"))m_view.ownEliminated=v["eliminated"].asBool().unwrapOr(false);}

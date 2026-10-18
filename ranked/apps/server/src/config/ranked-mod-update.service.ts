@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger, Optional, type OnApplicationBootstrap } from "@nestjs/common";
-import { REQUIRED_RANKED_CLIENT_VERSION } from "../session/client-version.js";
+import { REQUIRED_RANKED_CLIENT_VERSION, PREVIOUS_RANKED_CLIENT_VERSION, normalizeRankedClientVersion } from "../session/client-version.js";
 import { SERVER_ENVIRONMENT, type ServerEnvironment } from "./server-environment.js";
 import {
   parseRankedModUpdates,
@@ -37,12 +37,45 @@ export class RankedModUpdateService implements OnApplicationBootstrap {
     void this.getClientUpdates();
   }
 
-  public async getClientUpdates(): Promise<RankedModUpdates> {
+  private published=false;
+  private rolloutCheck:Promise<void>|undefined;
+  private rolloutRetryAt=0;
+  public currentRequiredVersion(channel:RankedBuildChannel="release"):string {
+    return this.environment?.rankedModUpdates?.[channel]?.version ??
+      (!this.environment?.rankedDownloadBaseUrl || this.published?REQUIRED_RANKED_CLIENT_VERSION:PREVIOUS_RANKED_CLIENT_VERSION);
+  }
+  public admissionVersion(client:string,channel:RankedBuildChannel):string {
+    if(!this.environment?.rankedModUpdates?.[channel] && !this.published && normalizeRankedClientVersion(client)===normalizeRankedClientVersion(REQUIRED_RANKED_CLIENT_VERSION))return REQUIRED_RANKED_CLIENT_VERSION;
+    return this.currentRequiredVersion(channel);
+  }
+  /** Switch admission only after BOTH immutable packages are publicly readable.
+   * In-flight sessions retain their admitted version independently of this gate. */
+  public async getPublishedClientUpdates():Promise<RankedModUpdates>{
+    if(!this.published && this.environment?.rankedDownloadBaseUrl && Date.now()>=this.rolloutRetryAt){
+      this.rolloutCheck??=this.checkRollout().finally(()=>{this.rolloutCheck=undefined;});await this.rolloutCheck;
+    }
+    return this.updatesFor(this.published?REQUIRED_RANKED_CLIENT_VERSION:PREVIOUS_RANKED_CLIENT_VERSION);
+  }
+  private async checkRollout():Promise<void>{
+    this.rolloutRetryAt=Date.now()+FAILED_LOOKUP_RETRY_MS;
+    const updates=await this.getClientUpdates();
+    const ready=await Promise.all((["debug","release"] as const).map(async channel=>{
+      if(this.environment?.rankedModUpdates?.[channel])return true; // explicit operator pins remain authoritative
+      const metadata=updates[channel];if(!metadata)return false;
+      const base=this.environment!.rankedDownloadCdnBaseUrl??this.environment!.rankedDownloadBaseUrl!;
+      try{const response=await this.fetchRemote(rankedModDownloadUrl(base,channel,metadata.version),{method:"HEAD",signal:AbortSignal.timeout(FETCH_TIMEOUT_MS)});
+        return response.ok && Number(response.headers.get("content-length"))===metadata.sizeBytes;
+      }catch{return false;}
+    }));
+    if(ready.every(Boolean)){this.published=true;this.logger.log(`Both Ranked packages are public; admission advanced to ${REQUIRED_RANKED_CLIENT_VERSION}`);}
+  }
+  public getClientUpdates():Promise<RankedModUpdates>{return this.updatesFor(REQUIRED_RANKED_CLIENT_VERSION);}
+  private async updatesFor(version:string): Promise<RankedModUpdates> {
     const configured = this.environment?.rankedModUpdates ?? {};
     const result: Partial<Record<RankedBuildChannel, RankedModUpdate>> = {};
     await Promise.all((["debug", "release"] as const).map(async (channel) => {
       const explicit = configured[channel];
-      const metadata = explicit ?? await this.resolve(channel, REQUIRED_RANKED_CLIENT_VERSION);
+      const metadata = explicit ?? await this.resolve(channel, version);
       if (metadata) {
         const base=this.environment?.rankedDownloadBaseUrl;
         // An operator-configured Custom Domain can serve the same immutable

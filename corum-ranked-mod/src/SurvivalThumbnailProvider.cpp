@@ -1,4 +1,5 @@
 #include "SurvivalThumbnailProvider.hpp"
+#include "SurvivalOptionsPreferences.hpp"
 #include "domain/SurvivalThumbnailPolicy.hpp"
 #include <fstream>
 #include <iterator>
@@ -28,7 +29,7 @@ bool SurvivalThumbnailProvider::supported(){
     auto* loader=Loader::get();
     // ImagePlus declares the public CCImage format extension used by the
     // official thumbnail client. No internal manager, symbol or ABI is called.
-    return loader && loader->isModLoaded("cdc.level_thumbnails") && loader->isModLoaded("prevter.imageplus");
+    return SurvivalOptionsPreferences::get().thumbnails() && loader && loader->isModLoaded("cdc.level_thumbnails") && loader->isModLoaded("prevter.imageplus");
 }
 SurvivalThumbnailProvider& SurvivalThumbnailProvider::get(){
     static auto* owner=[](){auto* p=new SurvivalThumbnailProvider;p->init();liveProvider=p;
@@ -42,11 +43,26 @@ void SurvivalThumbnailProvider::activate(SurvivalSelectionContext const& context
     // its textures only when a visible UI frame next activates this provider.
     if(m_invalidTextureCache){m_cache.clear();m_invalidTextureCache=false;}
     auto const enabled=supported();auto const identity=context.key()+":"+std::to_string(context.sceneGeneration);
-    if(identity==m_context && enabled==m_enabled)return;
+    if(enabled==m_enabled && context.revealKey()==m_reveal && !m_context.empty() && (!m_selected || !context.levelId || m_selected==context.levelId)){
+        m_context=identity;
+        if(context.levelId && m_selected!=context.levelId){m_selected=context.levelId;enqueue({m_selected,false});enqueue({m_selected,true},true);}
+        return;
+    }
+    if(context.revealKey()!=m_reveal){
+        for(auto id:m_candidates)m_recent.push_back(id);
+        while(m_recent.size()>28)m_recent.pop_front();
+        m_candidates.clear();m_reveal=context.revealKey();
+    }
     deactivate();m_context=identity;m_selected=context.levelId;m_enabled=enabled;m_randomRequests=0;m_httpRequests=0;
     m_liveness=std::make_shared<std::atomic_bool>(enabled);
     if(!enabled)return;
+    for(auto id:m_candidates)enqueue({id,false});
     if(m_selected){enqueue({m_selected,false});enqueue({m_selected,true},true);}
+}
+void SurvivalThumbnailProvider::candidate(std::uint64_t id){
+    if(!id || id==m_selected || m_candidates.size()>=7 || std::find(m_candidates.begin(),m_candidates.end(),id)!=m_candidates.end())return;
+    if(m_randomRequests<12 && std::find(m_recent.begin(),m_recent.end(),id)!=m_recent.end())return;
+    m_candidates.push_back(id);
 }
 void SurvivalThumbnailProvider::deactivate(){
     if(m_liveness)m_liveness->store(false);
@@ -89,7 +105,7 @@ void SurvivalThumbnailProvider::response(std::size_t index,std::uint64_t generat
     auto const code=response.code();
     if(job.random && code==302){
         auto location=thumbnailHeader(response,"Location");auto id=location?survivalThumbnailRedirect(std::string_view(*location)):std::nullopt;
-        if(id && !m_cache.contains(key({*id,false})))enqueue({*id,false},false);
+        if(id){candidate(*id);if(!m_cache.contains(key({*id,false})))enqueue({*id,false},false);}
         return;
     }
     if(code!=200 || slot.exceeded->load() || response.data().size()>SurvivalThumbnailMaxBytes){failed(job,code);return;}
@@ -183,7 +199,7 @@ void SurvivalThumbnailProvider::update(float){
         auto job=slot.job;++slot.ticket;slot.request.cancel();slot.busy=false;failed(job,408);
     }
     decodeNext();
-    auto const smallThumbnailCount=std::count_if(m_cache.begin(),m_cache.end(),[](auto const& e){return !e.second.medium;});
+    auto const smallThumbnailCount=m_candidates.size();
     auto const outstanding=std::count_if(m_jobs.begin(),m_jobs.end(),[](auto const& j){return !j.medium;})+
         std::count_if(m_slots.begin(),m_slots.end(),[](auto const& slot){return slot.busy&&!slot.job.medium;})+
         static_cast<int>(m_encoded.size())+static_cast<int>(m_decode.has_value());
@@ -211,7 +227,7 @@ Ref<CCTexture2D> SurvivalThumbnailProvider::selected(){
 std::vector<std::pair<std::uint64_t,Ref<CCTexture2D>>> SurvivalThumbnailProvider::previews(){
     std::vector<std::pair<std::uint64_t,Ref<CCTexture2D>>> result;std::set<std::uint64_t> ids;
     if(m_invalidTextureCache)return result;
-    for(auto& [k,e]:m_cache)if(!e.medium && ids.insert(e.id).second){e.used=now();result.emplace_back(e.id,e.texture);}
+    for(auto id:m_candidates){auto it=m_cache.find(key({id,false}));if(it!=m_cache.end() && ids.insert(id).second){it->second.used=now();result.emplace_back(id,it->second.texture);}}
     return result;
 }
 }

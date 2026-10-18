@@ -1,4 +1,5 @@
 #include "SurvivalMapSelectionLayer.hpp"
+#include "../SurvivalOptionsPreferences.hpp"
 #include "../SurvivalThumbnailProvider.hpp"
 #include "../RankedVolumeControl.hpp"
 #include "../domain/SurvivalBoardPresentation.hpp"
@@ -205,6 +206,7 @@ void SurvivalMapSelectionLayer::present(SurvivalMatchView const& view,RoundPrepa
     m_thumbnail=record.mode.choose(supported,previewsReady);
     if(changed)log::info("[SurvivalReveal] mode level={} supported={} previewsReady={} thumbnail={}",context.levelId,supported,previewsReady,m_thumbnail);
     m_fallback=!m_thumbnail && Loader::get()->isModLoaded("cdc.level_thumbnails");
+    if(context.levelId && !SurvivalOptionsPreferences::get().selectionMotion())m_timeline.skip();
     m_timeline.followServer(view.state,countdown,now);
     auto const frame=m_timeline.frame(now);if(frame.stage==SurvivalRevealStage::Cancelled){hideSelection();return;}
     // An asynchronously arriving winner image must not switch the reel to a

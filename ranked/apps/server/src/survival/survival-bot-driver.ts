@@ -14,10 +14,10 @@ export function driveSurvivalBots(before:SurvivalMatch,seed:number,previous:Surv
   const apply=(command:SurvivalCommand,at=now)=>{match=reduceSurvivalMatch(match,command,Math.max(match.updatedAt,at));};
   if(humans.length && match.state==="PREPARING" && humans.every(p=>p.preparationFailure!==null && p.assetsReadyAt===null)) {
     for(const p of active)apply({type:"PREPARATION_FAILED",...context,participantId:p.participantId,reason:"HUMAN_PREPARATION_FAILED"},resourceAt);
-  } else if(match.state==="PREPARING" && (match.online || humans.some(p=>p.assetsReadyAt!==null))) {
+  } else if(match.state==="PREPARING" && (!humans.length || match.online || humans.some(p=>p.assetsReadyAt!==null))) {
     for(const p of active)apply({type:"ASSETS_READY",...context,participantId:p.participantId,certificate:round.map!},resourceAt);
   }
-  if(match.state==="ENTERING" && now>=(survivalEntryOpensAt(survivalCurrentRound(match))??Infinity) && (humans.some(p=>p.enteredAt!==null) || (match.online && !humans.length))) {
+  if(match.state==="ENTERING" && now>=(survivalEntryOpensAt(survivalCurrentRound(match))??Infinity) && (humans.some(p=>p.enteredAt!==null) || !humans.length)) {
     for(const p of active)apply({type:"ENTERED",...context,participantId:p.participantId},resourceAt);
   }
   // Catch up before the engine adjudicates the authoritative deadline.

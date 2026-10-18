@@ -1,8 +1,9 @@
+import {survivalResultRoster} from "./survival-result-roster.js";
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, Logger, NotFoundException,
   type OnApplicationBootstrap, type OnApplicationShutdown } from "@nestjs/common";
 import { timingSafeEqual } from "node:crypto";
-import { forceSurvivalDebugRank, finishSurvivalDebugOnElimination, survivalCurrentRound,
-  survivalDebugLp, survivalLiveView, survivalSettlementInputs, survivalTierForLp, type RandomSource, type SurvivalCommand,
+import { forceSurvivalDebugRank,  survivalCurrentRound,
+  survivalDebugLp, survivalLiveView, survivalSettlementInputs,  type RandomSource, type SurvivalCommand,
   type SurvivalBotDriverState,type SurvivalMatch, type SurvivalRatingProfile } from "@corum-ranked/rules";
 import { driveSurvivalBots } from "./survival-bot-driver.js";
 import { lockSurvivalAdmission } from "./survival-admission.js";
@@ -25,7 +26,7 @@ export interface SurvivalDebugResult {
   matchId:string; debug:true; won:boolean; rank:number; tiedPlayers:number; requestedDelta:number; actualDelta:number;
   profileBefore:SurvivalRatingProfile; profileAfter:SurvivalRatingProfile;
   promoted:boolean; demoted:boolean; protected:boolean; warningRecoveryLp:number|null;
-  bands:{tier:string;minimum:number}[]; standings:(ReturnType<typeof survivalSettlementInputs>[number] & {name:string;kind:string;displayedTier:string})[];
+  bands:{tier:string;minimum:number}[]; standings:ReturnType<typeof survivalResultRoster>;finalStandings?:boolean;
   completedAt:string; completionKind:string;
 }
 const terminal=(m:SurvivalMatch)=>["FINAL_RESULT","CANCELLED"].includes(m.state);
@@ -113,7 +114,8 @@ export class SurvivalDebugService implements OnApplicationBootstrap,OnApplicatio
     let match=before;
     const human=match.players.find(p=>p.playerId===row.human_player_id)!;
     if(row.force_rank!==null)return forceSurvivalDebugRank(match,human.participantId,row.force_rank,now);
-    if(human.eliminationStage!==null)return finishSurvivalDebugOnElimination(match,human.participantId,now);
+    // Eliminated humans may keep observing the bot tournament. The explicit
+    // FORCE RANK branch above retains its immediate debug result behavior.
     const driven=driveSurvivalBots(match,Number(row.seed),row.driver_state,now,[Number(row.human_actual_lp)]);
     if(JSON.stringify(driven.cursor)!==JSON.stringify(row.driver_state))await tx.query("UPDATE sur_debug_matches SET driver_state=$2::jsonb WHERE match_id=$1",[match.id,JSON.stringify(driven.cursor)]);
     return driven.match;
@@ -216,17 +218,22 @@ export class SurvivalDebugService implements OnApplicationBootstrap,OnApplicatio
     this.nextDiscoveryAt=now+2000;const known=[...this.activeMatches];
     this.discovery=(async()=>{
       const rows=(await this.db.query<{match_id:string}>(`SELECT d.match_id FROM sur_debug_matches d JOIN sur_matches m ON m.id=d.match_id
-        WHERE d.settled_at IS NULL AND m.state<>'CANCELLED' ORDER BY d.created_at`)).rows;
+        WHERE (d.settled_at IS NULL OR m.state NOT IN ('FINAL_RESULT','CANCELLED')) AND m.state<>'CANCELLED' ORDER BY d.created_at`)).rows;
       const live=new Set(rows.map(row=>row.match_id));
       for(const id of known)if(!live.has(id))this.activeMatches.delete(id);
       for(const id of live)this.activeMatches.add(id);
     })().finally(()=>{this.discovery=null;});return this.discovery;
   }
   private async settle(match:SurvivalMatch):Promise<SurvivalDebugResult|null> {
-    if(match.state!=="FINAL_RESULT")return null;
     const row=(await this.db.query<DebugRow>("SELECT * FROM sur_debug_matches WHERE match_id=$1",[match.id])).rows[0];
-    if(!row)return null;if(row.result)return row.result;
-    const inputs=survivalSettlementInputs(match),human=inputs.find(p=>p.playerId===row.human_player_id)!;
+    if(!row)return null;
+    if(row.result){
+      if(terminal(match) && !row.result.finalStandings){
+        const result={...row.result,finalStandings:true,standings:survivalResultRoster(match,new Map([[row.human_player_id,row.result]]))};
+        await this.db.query("UPDATE sur_debug_matches SET result=$2::jsonb WHERE match_id=$1",[match.id,JSON.stringify(result)]);return result;
+      }return row.result;
+    }
+    const inputs=survivalSettlementInputs(match),human=inputs.find(p=>p.playerId===row.human_player_id);if(!human)return null;
     const rating=await this.survival.settleLp(row.human_player_id,human.eventKey,human.delta,{generation:match.configGeneration,config:match.config});
     const ledger=(await this.db.query<{lp_before:number;tier_before:string;warning_before:boolean}>(
       "SELECT lp_before,tier_before,warning_before FROM sur_lp_ledger WHERE player_id=$1 AND event_key=$2",[row.human_player_id,human.eventKey])).rows[0]!;
@@ -235,9 +242,8 @@ export class SurvivalDebugService implements OnApplicationBootstrap,OnApplicatio
     const result:SurvivalDebugResult={matchId:match.id,debug:true,won:(match.winnerIds??[match.winnerId]).includes("human"),rank:human.rank,tiedPlayers:human.tiedPlayers,requestedDelta:human.delta,
       actualDelta:rating.actualDelta,profileBefore:{lp:Number(ledger.lp_before),tier:ledger.tier_before,demotionWarning:ledger.warning_before},
       profileAfter:rating.profile,promoted:rating.promoted,demoted:rating.demoted,protected:rating.protected,
-      warningRecoveryLp:rating.warningRecoveryLp,bands,standings:inputs.map(p=>{const participant=match.players.find(v=>v.participantId===p.participantId)!;
-        const tier=p.playerId===row.human_player_id?rating.profile.tier:participant.displayedTier??survivalTierForLp(participant.lp,match.config.tierBands).group;
-        return {...p,name:participant.name,kind:participant.kind,displayedTier:match.config.tierBands.find(b=>b.tier===tier)?.group??tier};}),completedAt:new Date(match.finishedAt!).toISOString(),completionKind:match.completionKind??"NORMAL"};
+      warningRecoveryLp:rating.warningRecoveryLp,bands,standings:survivalResultRoster(match,new Map([[row.human_player_id,{profileAfter:rating.profile,actualDelta:rating.actualDelta}]])),
+      completedAt:new Date(match.finishedAt??this.clock.now().getTime()).toISOString(),completionKind:match.completionKind??"NORMAL",finalStandings:terminal(match)};
     await this.db.transaction(async tx=>{
       // The ledger's unique key closes a crash between payment and this result
       // projection. Replaying settlement restores the same rating/result.

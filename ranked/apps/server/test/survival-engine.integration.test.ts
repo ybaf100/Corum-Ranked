@@ -32,6 +32,7 @@ const provider:SurvivalMapProvider={select:vi.fn(async(request:SurvivalMapReques
     demonDifficulty:range.minimumStars===null?range.demons[0]!:null,automatic:false,platformer:false,
     levelVersion:1,geometrySha256:"a".repeat(64),geometryBytes:64,verifiedAt:clock.now().toISOString()};
 })};
+const defaultSelection=vi.mocked(provider.select).getMockImplementation()!;
 beforeAll(async()=>{
   pg=new PGlite();database=new PgliteDatabase(pg);
   const directory=fileURLToPath(new URL("../../../migrations/",import.meta.url));
@@ -40,7 +41,7 @@ beforeAll(async()=>{
 afterAll(async()=>{await pg.close();});
 beforeEach(async()=>{
   await database.query("TRUNCATE sur_matches,ranked_players CASCADE");now=Date.parse("2026-10-11T10:00:00Z");sequence=100;events=0;levelId=40000000;
-  vi.mocked(provider.select).mockClear();
+  vi.mocked(provider.select).mockReset().mockImplementation(defaultSelection);
   document={generation:"engine-v1",generatedAt:clock.now().toISOString(),config:{...DEFAULT_SURVIVAL_CONFIG,enabled:true}};
   config=new SurvivalConfigService({fetchConfig:async()=>structuredClone(document)},environmentFixture());await config.refresh();
   engine=new SurvivalEngineService(database,clock,ids,config,provider);
@@ -129,7 +130,8 @@ describe("durable Survival M3 engine",()=>{
     const playing=await prepare(await engine.create("playing",entrants));
     const bots:SurvivalAdmissionPlayer[]=Array.from({length:16},(_,i)=>({participantId:`other-${i}`,kind:"BOT",name:`Fixture ${i}`,lp:150}));
     const selecting=await engine.create("slow-map",bots);let resolve!:(map:SurvivalVerifiedMap)=>void;
-    vi.mocked(provider.select).mockImplementationOnce(()=>new Promise(r=>{resolve=r;}));
+    const fast=vi.mocked(provider.select).getMockImplementation()!;
+    vi.mocked(provider.select).mockImplementation(request=>request.phase==="ROUND_1"?new Promise(r=>{resolve=r;}):fast(request));
     now=survivalCurrentRound(playing).endsAt!;
     await engine.recoverActiveMatches();
     while(!resolve)await new Promise(r=>setTimeout(r,0));
@@ -286,4 +288,23 @@ describe("global durable map selection history",()=>{
   expect(survivalCurrentRound(await engine.get(b.id)).map?.levelId).toBe(selected.levelId);
   vi.mocked(provider.select).mockImplementation(original);
  });
+});
+
+it("durably preselects the next official map during results and adopts it after a process restart without rerolling",async()=>{
+ let m=await database.transaction(tx=>engine.createWithin(tx,"controlled-prefetch",entrants,document,undefined,true));
+ await engine.selectMap(m.id);m=await engine.get(m.id);expect(survivalCurrentRound(m).map).not.toBeNull();
+ expect(m.state).toBe("MAP_SELECTION");now+=6000;await engine.tick(m.id);
+ m=await prepare(await engine.get(m.id));
+ for(const [i,p] of survivalCurrentRound(m).players.entries()){
+  const attemptId=ids.next();m=await send(m,{type:"ATTEMPT_START",...context(m),participantId:p.participantId,attemptId});
+  m=await send(m,{type:"ATTEMPT_END",...context(m),participantId:p.participantId,attemptId,progress:100-i});
+ }
+ now=survivalCurrentRound(m).endsAt!;m=await engine.tick(m.id);expect(m.state).toBe("ROUND_RESULT");
+ await engine.selectMap(m.id);m=await engine.get(m.id);const next=structuredClone(m.nextMap);expect(next?.map.levelId).toBeGreaterThan(0);
+ const history=(await database.query("SELECT * FROM sur_map_selection_history WHERE match_id=$1",[m.id])).rows;
+ await engine.selectMap(m.id);expect((await database.query("SELECT * FROM sur_map_selection_history WHERE match_id=$1",[m.id])).rows).toEqual(history);
+ const select=vi.fn(async()=>{throw new Error("must reuse the durable next map");});
+ const restarted=new SurvivalEngineService(database,clock,ids,config,{select});
+ now+=5000;m=await restarted.tick(m.id);expect(m.state).toBe("PREPARING");expect(survivalCurrentRound(m).map).toEqual(next!.map);
+ await restarted.selectMap(m.id);expect(select).not.toHaveBeenCalled();
 });

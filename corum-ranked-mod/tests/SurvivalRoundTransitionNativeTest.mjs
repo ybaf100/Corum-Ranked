@@ -89,6 +89,7 @@ namespace corum::ranked {
 enum class RankedAudioMode{Round12,Round3DeathmatchWait,ResultWin,ResultLose};
 struct RankedAudioManager{RankedAudioMode mode=RankedAudioMode::Round12;int changes=0,ticks=0;static RankedAudioManager&get(){static RankedAudioManager a;return a;}void setMode(RankedAudioMode m){mode=m;++changes;}void tick(){++ticks;}};
 struct SurvivalMatchView{std::string phase="ROUND_1",state="ROUND_RESULT",roundKey="r1",ownId="human";bool ownWinner=false,ownEliminated=false;matjson::Value result,completedRound;};
+struct SurvivalRuntime{bool observer=false;static auto& get(){static SurvivalRuntime r;return r;}bool observing()const{return observer;}};
 struct Coordinator{std::optional<RankedAudioMode>m_audioMode;${method(source,'void syncAudio(')}};
 }
 int main(){using namespace corum::ranked;Coordinator coordinator;SurvivalMatchView view;

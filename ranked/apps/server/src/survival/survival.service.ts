@@ -34,8 +34,8 @@ export class SurvivalService {
       LEFT JOIN sur_debug_matches d ON d.match_id=m.id
       LEFT JOIN sur_online_players o ON o.match_id=m.id AND o.player_id=p.player_id
       LEFT JOIN sur_lp_ledger l ON l.player_id=p.player_id AND l.event_key='survival:'||m.id::text||':result:'||p.participant_id
-      WHERE p.player_id=$1 AND ((o.player_id IS NULL AND m.state='FINAL_RESULT') OR o.settled_at IS NOT NULL)
-      AND COALESCE(o.settled_at,m.finished_at)>sp.history_visible_since AND (d.match_id IS NULL OR d.settled_at IS NOT NULL)`,[playerId])).rows[0];
+      WHERE p.player_id=$1 AND ((o.player_id IS NULL AND m.state='FINAL_RESULT') OR o.settled_at IS NOT NULL OR d.settled_at IS NOT NULL)
+      AND COALESCE(o.settled_at,d.settled_at,m.finished_at)>sp.history_visible_since AND (d.match_id IS NULL OR d.settled_at IS NOT NULL)`,[playerId])).rows[0];
     return { onlineAvailable:true, serverNow: now.toISOString(), enabled: snapshot.config.enabled,
       profile: this.project(row, snapshot.config), standing,recordSummary:{completedMatches:Number(record?.count??0),bestRank:record?.best??null,
         wins:Number(record?.wins??0),losses:Number(record?.losses??0)} };
@@ -99,11 +99,11 @@ export class SurvivalService {
 
   public async history(playerId: string) {
     const matches=await this.database.query<{id:string;finished_at:Date|string;snapshot:unknown;result:unknown;participant_id:string}>(
-      `SELECT m.id,p.participant_id,COALESCE(o.settled_at,m.finished_at) AS finished_at,m.snapshot,COALESCE(o.result,d.result) AS result FROM sur_matches m JOIN sur_match_players p ON p.match_id=m.id
+      `SELECT m.id,p.participant_id,COALESCE(o.settled_at,d.settled_at,m.finished_at) AS finished_at,m.snapshot,COALESCE(o.result,d.result) AS result FROM sur_matches m JOIN sur_match_players p ON p.match_id=m.id
        JOIN sur_profiles sp ON sp.player_id=p.player_id LEFT JOIN sur_debug_matches d ON d.match_id=m.id
        LEFT JOIN sur_online_players o ON o.match_id=m.id AND o.player_id=p.player_id
-       WHERE p.player_id=$1 AND ((o.player_id IS NULL AND m.state='FINAL_RESULT') OR o.settled_at IS NOT NULL) AND COALESCE(o.settled_at,m.finished_at)>sp.history_visible_since
-       AND (d.match_id IS NULL OR d.settled_at IS NOT NULL) ORDER BY COALESCE(o.settled_at,m.finished_at) DESC,m.id LIMIT 30`,[playerId]);
+       WHERE p.player_id=$1 AND ((o.player_id IS NULL AND m.state='FINAL_RESULT') OR o.settled_at IS NOT NULL OR d.settled_at IS NOT NULL) AND COALESCE(o.settled_at,d.settled_at,m.finished_at)>sp.history_visible_since
+       AND (d.match_id IS NULL OR d.settled_at IS NOT NULL) ORDER BY COALESCE(o.settled_at,d.settled_at,m.finished_at) DESC,m.id LIMIT 30`,[playerId]);
     const events = await this.database.query(`SELECT event_key,actual_delta,lp_after,tier_after,awarded_at
       FROM sur_lp_ledger WHERE player_id=$1 ORDER BY awarded_at DESC,id DESC LIMIT 30`, [playerId]);
     return { mode: "SURVIVAL", serverNow: this.clock.now().toISOString(),

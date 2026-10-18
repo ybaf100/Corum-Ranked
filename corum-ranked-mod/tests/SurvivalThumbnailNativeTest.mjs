@@ -14,6 +14,7 @@ function run(body){const dir=mkdtempSync(join(tmpdir(),'survival-thumbnails-'));
 }catch(e){throw new Error(e.stderr?.toString()||e.message);}finally{rmSync(dir,{recursive:true,force:true});}}
 const fixture=String.raw`
 #include "domain/SurvivalThumbnailPolicy.hpp"
+
 #include <vector>
 #include <cassert>
 using namespace corum::ranked;
@@ -47,6 +48,7 @@ function runProvider(windowsRpcMacro=false,debug=false){
  run(String.raw`
 #include "domain/SurvivalMapSelection.hpp"
 #include "domain/SurvivalThumbnailPolicy.hpp"
+
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -104,6 +106,7 @@ struct Scheduler {void scheduleUpdateForTarget(cocos2d::CCNode*,int,bool){} };
 struct CCDirector {static CCDirector* sharedDirector(){static CCDirector d;return &d;}Scheduler* getScheduler(){static Scheduler s;return &s;}};
 namespace prelude {using namespace cocos2d;using geode::Ref;using geode::Loader;using geode::Mod;using geode::CCDirector;namespace web=geode::utils::web;namespace log=geode::log;}
 }
+namespace corum::ranked{struct SurvivalOptionsPreferences{static auto& get(){static SurvivalOptionsPreferences p;return p;}bool thumbnails()const{return true;}};}
 `+noIncludes(read('src/SurvivalThumbnailProvider.hpp'))+
 // Windows RPC headers define this macro through the native SDK's PCH.
 (windowsRpcMacro?'\n#define small char\n':'')+
@@ -119,7 +122,8 @@ int main(int argc,char**argv){assert(argc==2);saveRoot=argv[1];auto dir=saveRoot
  Loader::get()->thumbnails=true;p.activate(a);pump(p);assert(flights.empty()); // dependency absent/disabled
  Loader::get()->imageplus=true;p.activate(a);pump(p);assert(active()==2);
  for(auto const& f:flights){assert(!f.ticket.redirect&&f.ticket.tls&&f.ticket.timeout==4);assert(f.ticket.agent=="CorumRanked-SurvivalThumbnails/1");assert(f.ticket.url.starts_with(SurvivalThumbnailOrigin));}
- auto old=flights.size()-1;auto b=a;b.levelId=200;b.sceneGeneration=2;p.activate(b);assert(flights[old].cancelled);
+ auto old=flights.size()-1;auto recreated=a;recreated.sceneGeneration=2;p.activate(recreated);assert(!flights[old].cancelled);
+ auto b=a;b.levelId=200;b.sceneGeneration=2;p.activate(b);assert(flights[old].cancelled);
  reply(old,200,webp(),{{"Content-Type","image/webp"}});pump(p);assert(!p.selected());assert(p.previews().empty());assert(active()<=2);
  // Current authoritative medium succeeds; a missing small is normal negative cache.
  bool medium=false;for(std::size_t i=0;i<flights.size();i++)if(!flights[i].cancelled&&!flights[i].done){if(flights[i].ticket.url.ends_with("/200/medium")){reply(i,200,webp(1280,720),{{"content-type","image/webp"}});medium=true;}else reply(i,404);}
@@ -141,6 +145,11 @@ int main(int argc,char**argv){assert(argc==2);saveRoot=argv[1];auto dir=saveRoot
  auto epoch=SurvivalThumbnailProvider::applicationEpoch();SurvivalThumbnailProvider::onApplicationPause();assert(SurvivalThumbnailProvider::applicationEpoch()==epoch+1);
  auto uploads=CCTexture2D::uploads;reply(inFlight,200,webp(),{{"Content-Type","image/webp"}});pump(p);assert(CCTexture2D::uploads==uploads&&!p.selected());
  auto e=d;e.sceneGeneration=5;p.activate(e);pump(p);auto live=active();p.release(d);assert(active()==live);p.release(e);assert(active()==0);
+ // Resolving an unknown ID keeps the active candidate request and its slots.
+ auto unknown=e;unknown.roundKey="R2";unknown.levelId=0;unknown.sceneGeneration=6;p.activate(unknown);pump(p);
+ auto candidateTicket=flights.size()-1;assert(!flights[candidateTicket].cancelled);
+ auto resolved=unknown;resolved.levelId=400;resolved.sceneGeneration=7;p.activate(resolved);assert(!flights[candidateTicket].cancelled);
+ p.release(resolved);assert(active()==0);
 }`);
 }
 test('actual provider bounds anonymous requests, cancels obsolete replies, handles 302/404/retry/cache and decodes away from GL thread',()=>runProvider());

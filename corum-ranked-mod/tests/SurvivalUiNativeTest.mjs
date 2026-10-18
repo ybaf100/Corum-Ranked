@@ -131,7 +131,7 @@ void drain(){auto queued=std::exchange(work,{});for(auto& f:queued)f();}
 std::string preparationContextText(LevelPreparationContext const& c){return c.matchId+":"+std::to_string(c.levelId)+":"+std::to_string(c.round);}
 bool inUpdate=false;
 struct RankedRoundPreparation{int launches=0;bool success=true;static RankedRoundPreparation& get(){static RankedRoundPreparation p;return p;}bool launch(CCScene*){assert(!inUpdate);++launches;return success;}};
-struct SurvivalRuntime{std::int64_t sync=1;std::int64_t serverSyncMillis(){return sync;}bool enter=true,pending=false;bool surrenderPending()const{return pending;}LevelPreparationContext context{"match",40000000,1,0,false,0,0};static SurvivalRuntime& get(){static SurvivalRuntime r;return r;}auto preparationContext(){return context;}bool canEnter(){return enter;}};
+struct SurvivalRuntime{std::int64_t sync=1;std::int64_t serverSyncMillis(){return sync;}bool enter=true,pending=false;bool surrenderPending()const{return pending;}LevelPreparationContext context{"match",40000000,1,0,false,0,0};static SurvivalRuntime& get(){static SurvivalRuntime r;return r;}auto preparationContext(){return context;}bool canEnter(){return enter;}bool canEnterObserver(){return false;}};
 template<class T>struct WeakRef{T* pointer;explicit WeakRef(T* p):pointer(p){}struct Locked{T* ptr;explicit operator bool()const{return ptr&&ptr->alive;}T* operator->(){return ptr;}T* data(){return ptr;}};auto lock()const{return Locked{pointer};}};
 struct Dialog{bool alive=true;CCScene* parent=nullptr;CCScene* getParent(){return parent;}};
 struct Selection{bool complete=true;bool settled()const{return complete;}};
@@ -187,7 +187,7 @@ struct CCSprite:CCNode{CCPoint anchor{0,.5f},size{58,8},world{0,0};float scale=2
  CCPoint convertToNodeSpace(CCPoint p){auto a=getAnchorPointInPoints();return {(p.x-world.x)/scale+a.x,(p.y-world.y)/scale+a.y};}
 };
 template<class T>struct WeakRef{T* pointer=nullptr;WeakRef()=default;explicit WeakRef(T* p):pointer(p){}struct Locked{T* ptr;explicit operator bool()const{return ptr&&ptr->alive;}T* operator->(){return ptr;}T* data(){return ptr;}};auto lock()const{return Locked{pointer};}};
-namespace corum::ranked {struct SurvivalMatchView{std::string ownId;std::optional<double> cutoff;std::vector<SurvivalStanding> standings;};}
+namespace corum::ranked {struct SurvivalRuntime{static auto& get(){static SurvivalRuntime r;return r;}bool observing()const{return false;}};struct SurvivalMatchView{std::string ownId;std::optional<double> cutoff;std::vector<SurvivalStanding> standings;};}
 namespace corum::ranked::ui {struct SurvivalHud{WeakRef<CCSprite> m_progressBar,m_progressFill;WeakRef<CCDrawNode> m_progressLines;float m_progressWidth=0,m_progressHeight=0;SurvivalScoreTween m_personalBest;
  void attachProgressBar(CCSprite*,CCSprite*,float,float);void presentProgressMarkers(SurvivalMatchView const&);};
 ${method(source,'void SurvivalHud::attachProgressBar(')}
@@ -236,6 +236,7 @@ ${json}
 struct SurvivalMatchView{matjson::Value result,completedRound;std::string phase,state="MAP_SELECTION",roundKey="r1",ownId="human";bool ownWinner=false,ownEliminated=false;};
 enum class RankedAudioMode{Round12,Round3,Round3DeathmatchWait,ResultWin,ResultLose};
 struct RankedAudioManager{int changes=0,ticks=0;RankedAudioMode mode=RankedAudioMode::Round3;static auto& get(){static RankedAudioManager a;return a;}void setMode(RankedAudioMode m){mode=m;changes++;}void tick(){ticks++;}};
+struct SurvivalRuntime{bool observer=false;static auto& get(){static SurvivalRuntime r;return r;}bool observing()const{return observer;}};
 struct Coordinator{std::optional<RankedAudioMode> m_audioMode;
 ${sync}
 };

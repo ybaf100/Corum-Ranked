@@ -19,6 +19,7 @@ export interface SurvivalEntrant {
 }
 export interface SurvivalMatchPlayer extends SurvivalEntrant {
   eliminationStage: number | null;
+  eliminatedAt?: number;
   eliminationScore: number;
   forfeitReason: string | null;
   finalRank: number | null;
@@ -84,12 +85,16 @@ export interface SurvivalMatch {
   presentationGate?: "INTRO" | "ROUND_RESULT" | null;
   players: SurvivalMatchPlayer[];
   rounds: SurvivalRound[];
+  nextMap?: {roundKey:string;phase:SurvivalMapPhase;mapGeneration:number;map:SurvivalVerifiedMap};
   transitions: { sequence: number; state: SurvivalMatchState; roundKey: string; at: number; reason: string }[];
 }
 export interface SurvivalRoundContext { roundKey: string; mapGeneration: number; levelId: number; }
 
 /** All ready clients stay in the selection room before native entry opens. */
 export const SURVIVAL_READY_HOLD_MS = 5_000;
+export const SURVIVAL_INTRO_MS = 6_000;
+export const SURVIVAL_RESULT_MS = 5_000;
+export const survivalNextPhase=(phase:SurvivalMapPhase):SurvivalMapPhase=>phase==="ROUND_1"?"ROUND_2":phase==="ROUND_2"?"ROUND_3":phase==="ROUND_3"?"FINAL":"TIEBREAK";
 export function survivalEntryOpensAt(round: SurvivalRound): number | null {
   return round.entryRequestedAt === null ? null : round.entryRequestedAt + SURVIVAL_READY_HOLD_MS;
 }
@@ -101,6 +106,7 @@ export type SurvivalCommand =
   | { type: "TICK" }
   | {type:"ABSENT";roundKey:string;mapGeneration:number;participantIds:readonly string[]}
   | { type:"PRESENTATION_COMPLETE";roundKey:string;mapGeneration:number;participantId:string }
+  | { type: "NEXT_MAP_SELECTED"; roundKey:string;mapGeneration:number;map:SurvivalVerifiedMap }
   | { type: "MAP_SELECTED"; roundKey: string; mapGeneration: number; map: SurvivalVerifiedMap }
   | ({ type: "ASSETS_READY"; participantId: string; certificate: SurvivalVerifiedMap } & SurvivalRoundContext)
   | ({ type: "PREPARATION_FAILED"; participantId: string; reason: string } & SurvivalRoundContext)
@@ -162,6 +168,20 @@ function recordAttempt(match: SurvivalMatch, round: SurvivalRound, player: Survi
   if (round.phase === "TIEBREAK" && activePlayers(round).every(p => p.attempts.length === 3 && p.attempts.every(a => a.endedAt !== null)))
     finishRound(match, round, now);
 }
+function assertSelectedMap(match:SurvivalMatch,phase:SurvivalMapPhase,map:SurvivalVerifiedMap):void {
+  if(!survivalMapAllowed(map,match.difficultyGroup,phase,match.config.minimumLevelId) ||
+    !/^[a-f0-9]{64}$/.test(map.geometrySha256) || map.geometryBytes<1 ||
+    !Number.isSafeInteger(map.levelVersion) || map.levelVersion<1 || !Number.isFinite(Date.parse(map.verifiedAt)) ||
+    match.rounds.some(r=>r.selectedMaps.some(m=>m.levelId===map.levelId)))conflict("Unverified, ineligible or reused Survival map");
+}
+/** Only the server provider uses this target. Visual candidates never enter it. */
+export function survivalMapSelectionTarget(match:SurvivalMatch){
+  const round=survivalCurrentRound(match);
+  if(match.state==="MAP_SELECTION" && !round.map)return {roundKey:round.key,mapGeneration:round.mapGeneration,phase:round.phase,prefetch:false};
+  if(match.state==="ROUND_RESULT" && !match.nextMap && round.finishedAt!==null && round.players.filter(p=>p.qualified&&!p.forfeited).length>1)
+    return {roundKey:`stage-${round.ordinal+1}`,mapGeneration:1,phase:survivalNextPhase(round.phase),prefetch:true};
+  return null;
+}
 function transition(match: SurvivalMatch, state: SurvivalMatchState, at: number, reason: string): void {
   match.state = state;
   match.transitions.push({sequence:match.transitions.length + 1, state,
@@ -176,6 +196,11 @@ function addRound(match: SurvivalMatch, phase: SurvivalMapPhase, participants: r
     cutoffScore:null, players:participants.map(participantId => ({participantId,assetsReadyAt:null,
       preparationFailure:null,enteredAt:null,highestProgress:0,attempts:[],rank:null,qualified:false,forfeited:false})) });
   transition(match,"MAP_SELECTION",at,"NEW_ROUND");
+  const selected=match.nextMap,current=survivalCurrentRound(match);
+  if(selected && selected.roundKey===current.key && selected.phase===phase && selected.mapGeneration===current.mapGeneration){
+    current.map=structuredClone(selected.map);current.selectedMaps.push(structuredClone(selected.map));
+    current.preparationStartedAt=at;delete match.nextMap;transition(match,"PREPARING",at,"PREFETCHED_MAP_ADOPTED");
+  }
 }
 export function createSurvivalMatch(id: string, entrants: readonly SurvivalEntrant[], config: SurvivalConfig,
   configGeneration: string, now: number,online=false,variableSize=false): SurvivalMatch {
@@ -196,10 +221,11 @@ export function createSurvivalMatch(id: string, entrants: readonly SurvivalEntra
   addRound(match,(online || variableSize) && entrants.length<=3?"FINAL":(online || variableSize) && entrants.length<8?"ROUND_3":"ROUND_1",entrants.map(p => p.participantId),now);
   return match;
 }
-function eliminate(match: SurvivalMatch, round: SurvivalRound, player: SurvivalRoundPlayer, score: number, reason: string | null): void {
+function eliminate(match: SurvivalMatch, round: SurvivalRound, player: SurvivalRoundPlayer, score: number, reason: string | null, at:number): void {
   const entrant = match.players.find(p => p.participantId === player.participantId)!;
   if (entrant.eliminationStage !== null) return;
   entrant.eliminationStage = round.ordinal;
+  entrant.eliminatedAt=at;
   entrant.eliminationScore = round.phase === "TIEBREAK" ? score / 1000 : score;
   entrant.forfeitReason = reason;
   player.qualified = false;
@@ -215,7 +241,7 @@ export function survivalMarkAbsent(before:SurvivalMatch,ids:readonly string[],no
 /** Immediate surrender has the fixed floor of its round. Other elimination
  * ranks become immutable once the round closes, regardless of later winners. */
 export function survivalStabilizeOnlineRanks(match:SurvivalMatch):void {
-  if(!match.online)return;
+  if(!match.online && !match.presentationControlled)return;
   const alive=match.players.filter(p=>p.eliminationStage===null).length;
   const ordered=match.players.filter(p=>p.eliminationStage!==null).sort((a,b)=>
     b.eliminationStage!-a.eliminationStage! || Number(!!a.fixedRewardRank)-Number(!!b.fixedRewardRank) ||
@@ -260,7 +286,7 @@ function survivorsOrEnd(match: SurvivalMatch, round: SurvivalRound, at: number):
 function forfeitUnready(match: SurvivalMatch, round: SurvivalRound, ready: (p: SurvivalRoundPlayer) => boolean,
   at: number, reason: string): void {
   for (const player of entryPlayers(round).filter(p => !ready(p))) {
-    player.forfeited=true; eliminate(match,round,player,roundScore(round,player),reason);
+    player.forfeited=true; eliminate(match,round,player,roundScore(round,player),reason,at);
   }
   survivorsOrEnd(match,round,at);
 }
@@ -279,7 +305,7 @@ function finishRound(match: SurvivalMatch, round: SurvivalRound, at: number): vo
   for (const item of ranked) {
     const player=round.players.find(p => p.participantId === item.participantId)!;
     player.rank=item.rank; player.qualified=cutoff !== null && item.score >= cutoff;
-    if (!player.qualified) eliminate(match,round,player,item.score,null);
+    if (!player.qualified) eliminate(match,round,player,item.score,null,at);
   }
   const qualified=round.players.filter(p => p.qualified && !p.forfeited);
   if (qualified.length === 1) { finishMatch(match,qualified[0]!.participantId,at,"SINGLE_WINNER"); return; }
@@ -292,6 +318,11 @@ function finishRound(match: SurvivalMatch, round: SurvivalRound, at: number): vo
  * packets and duplicate reports. >= deadline is closed; preparation is not play time. */
 function advanceTimers(match: SurvivalMatch, now: number): void {
   const round=survivalCurrentRound(match);
+  if(match.presentationGate==="INTRO" && now>=match.createdAt+SURVIVAL_INTRO_MS)match.presentationGate=null;
+  if(match.presentationGate==="ROUND_RESULT" && round.finishedAt!==null && now>=round.finishedAt+SURVIVAL_RESULT_MS)match.presentationGate=null;
+  if(match.state==="MAP_SELECTION" && round.map && match.presentationGate!=="INTRO"){
+    round.preparationStartedAt=now;transition(match,"PREPARING",now,"PREFETCHED_INTRO_MAP_READY");
+  }
   if(match.online && match.state==="PREPARING" && entryPlayers(round).length>0 && entryPlayers(round).every(p=>p.assetsReadyAt!==null)){
     round.entryRequestedAt=now;transition(match,"ENTERING",now,"PRESENT_ASSETS_BARRIER_COMPLETE");
   }
@@ -335,26 +366,27 @@ export function reduceSurvivalMatch(before: SurvivalMatch, command: SurvivalComm
     }
   } else if (!terminal(match) && (match.state === enteredState || (enteredState === "COUNTDOWN" && match.state === "PLAYING"))) {
     if (command.roundKey !== round.key || command.mapGeneration !== round.mapGeneration) conflict("SURVIVAL_CONTEXT_CHANGED");
-    if(command.type==="ABSENT") {
+    if(command.type==="NEXT_MAP_SELECTED") {
+      const phase=survivalNextPhase(round.phase);
+      if(match.state!=="ROUND_RESULT" || round.finishedAt===null || match.nextMap || round.players.filter(p=>p.qualified&&!p.forfeited).length<2)
+        conflict("No confirmed next Survival round");
+      assertSelectedMap(match,phase,command.map);
+      match.nextMap={roundKey:`stage-${round.ordinal+1}`,phase,mapGeneration:1,map:structuredClone(command.map)};
+    } else if(command.type==="ABSENT") {
       if(!match.online || !["PREPARING","ENTERING"].includes(match.state))conflict("Invalid absence phase");
       for(const id of command.participantIds){const p=round.players.find(p=>p.participantId===id);if(!p||p.forfeited)conflict("Invalid absent participant");p.absent=true;}
     } else if(command.type==="PRESENTATION_COMPLETE") {
       if(!match.presentationControlled || !match.players.some(p=>p.participantId===command.participantId && p.kind==="HUMAN" && p.eliminationStage===null))
         conflict("Invalid presentation owner");
-      if(match.presentationGate==="INTRO" && match.state==="MAP_SELECTION" && now>=match.createdAt+5_000)match.presentationGate=null;
-      else if(match.presentationGate==="ROUND_RESULT" && match.state==="ROUND_RESULT" && round.finishedAt!==null && now>=round.finishedAt+5_000)
+      if(match.presentationGate==="INTRO" && match.state==="MAP_SELECTION" && now>=match.createdAt+SURVIVAL_INTRO_MS)match.presentationGate=null;
+      else if(match.presentationGate==="ROUND_RESULT" && match.state==="ROUND_RESULT" && round.finishedAt!==null && now>=round.finishedAt+SURVIVAL_RESULT_MS)
         match.presentationGate=null;
-      else if(!(match.online && match.presentationGate===null))conflict("Presentation barrier is not complete");
+      else if(match.presentationGate!==null)conflict("Presentation barrier is not complete");
     } else if (command.type === "MAP_SELECTED") {
-      if (match.state !== "MAP_SELECTION") conflict("Map has already been selected");
-      if(match.presentationGate==="INTRO")conflict("Match presentation is pending");
-      if (!survivalMapAllowed(command.map,match.difficultyGroup,round.phase,match.config.minimumLevelId) ||
-        !/^[a-f0-9]{64}$/.test(command.map.geometrySha256) || command.map.geometryBytes < 1 ||
-        !Number.isSafeInteger(command.map.levelVersion) || command.map.levelVersion < 1 ||
-        !Number.isFinite(Date.parse(command.map.verifiedAt)) ||
-        match.rounds.some(r => r.selectedMaps.some(m => m.levelId === command.map.levelId))) conflict("Unverified, ineligible or reused Survival map");
+      if (match.state !== "MAP_SELECTION" || round.map) conflict("Map has already been selected");
+      assertSelectedMap(match,round.phase,command.map);
       round.map=structuredClone(command.map); round.selectedMaps.push(structuredClone(command.map));
-      round.preparationStartedAt=now; transition(match,"PREPARING",now,"VERIFIED_MAP_SELECTED");
+      if(match.presentationGate!=="INTRO"){round.preparationStartedAt=now; transition(match,"PREPARING",now,"VERIFIED_MAP_SELECTED");}
     } else if (command.type === "MAP_INVALIDATED") {
       if (!["PREPARING","ENTERING"].includes(match.state)) conflict("Started rounds cannot change map");
       reroll(match,round,now,command.reason);
@@ -366,8 +398,8 @@ export function reduceSurvivalMatch(before: SurvivalMatch, command: SurvivalComm
       for(const player of players) {
         player!.forfeited=true;
         for(const attempt of player!.attempts)if(attempt.endedAt===null)attempt.endedAt=now;
-        eliminate(match,round,player!,roundScore(round,player!),command.reason);
-        if(match.online && command.reason==="ONLINE_SURRENDER"){
+        eliminate(match,round,player!,roundScore(round,player!),command.reason,now);
+        if((match.online && command.reason==="ONLINE_SURRENDER") || (match.presentationControlled && command.reason==="DEBUG_HUMAN_SURRENDER")){
           const entrant=match.players.find(p=>p.participantId===player!.participantId)!;
           entrant.fixedRewardRank=round.players.length;entrant.finalRank=round.players.length;
         }
@@ -461,7 +493,7 @@ export function applySurvivalBotFrames(before:SurvivalMatch,context:SurvivalRoun
 }
 
 export function survivalSettlementInputs(match: SurvivalMatch) {
-  if (!match.online && match.state !== "FINAL_RESULT") return [];
+  if (!match.online && !match.presentationControlled && match.state !== "FINAL_RESULT") return [];
   return match.players.filter(p=>p.finalRank!==null && (match.state!=="CANCELLED" || p.fixedRewardRank!==undefined)).map(player => {
     const rank=player.finalRank!;
     const tiedPlayers=match.players.filter(p => p.finalRank === rank).length;
@@ -516,6 +548,7 @@ export function survivalLiveView(match: SurvivalMatch, now: number, participantI
       waitingForOthers:false,passing:false};
   }).sort((a,b)=>a.rank-b.rank||a.participantId.localeCompare(b.participantId));
   return {matchId:match.id,revision:match.revision,state:match.state,phase:round.phase,roundKey:round.key,
+    selectionOpensAt:new Date(match.createdAt+SURVIVAL_INTRO_MS).toISOString(),nextMap:match.nextMap??null,
     presentationGate:match.presentationGate??null,online:match.online??false,roundNumber:round.phase==="TIEBREAK"?4:round.ordinal,playerCount:match.players.length,roundPlayerCount:round.players.length,
     mapGeneration:round.mapGeneration,map:round.map,averageLp:match.averageLp,difficultyGroup:match.difficultyGroup,
     configGeneration:match.configGeneration,serverNow:new Date(now).toISOString(),
@@ -534,6 +567,6 @@ export function survivalLiveView(match: SurvivalMatch, now: number, participantI
       entered:p.enteredAt !== null,absent:p.absent??false,failed:p.preparationFailure,forfeited:p.forfeited})),
     participants:match.players.map(p => ({participantId:p.participantId,name:p.name,kind:p.kind,gdAccountId:p.gdAccountId??null,lpSnapshot:p.lp,
       displayedTier:match.config.tierBands.find(b=>b.tier===p.displayedTier)?.group??p.displayedTier??survivalTierForLp(p.lp,match.config.tierBands).group,
-      eliminationStage:p.eliminationStage,finalRank:p.finalRank,forfeitReason:p.forfeitReason})),
+      eliminationStage:p.eliminationStage,eliminatedAt:p.eliminatedAt===undefined?null:new Date(p.eliminatedAt).toISOString(),finalRank:p.finalRank,forfeitReason:p.forfeitReason})),
     winnerId:match.winnerId,winnerIds:match.winnerIds??(match.winnerId?[match.winnerId]:[]),cancellationReason:match.cancellationReason,settlementInputs:survivalSettlementInputs(match)};
 }

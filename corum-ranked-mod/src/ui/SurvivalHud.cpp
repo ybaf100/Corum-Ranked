@@ -1,4 +1,5 @@
 #include "SurvivalHud.hpp"
+#include "SurvivalOutcomePanel.hpp"
 #include <Geode/binding/GameManager.hpp>
 #include "RankedTranslations.hpp"
 #include "../domain/HudPresentation.hpp"
@@ -26,11 +27,16 @@ bool SurvivalHud::init() {
     m_round=rankedHudLabel(this,"",FontWeight::SemiBold,.527f,{.5f,1},{size.width/2,top-5},Gold);
     m_timer=rankedHudLabel(this,"03:00",FontWeight::Black,CompetitiveClockScale,{.5f,1},{size.width/2,top-18},Text);
     m_difference=rankedHudLabel(this,"0",FontWeight::ExtraBold,CompetitiveClockScale,{.5f,1},{size.width/2+34,top-18},Text);
+    m_rankHalo=CCDrawNode::create();m_rankHalo->setID("survival-current-first-halo"_spr);addChild(m_rankHalo,0);
     m_rank=rankedHudLabel(this,"",FontWeight::Black,1.68f,{0,0},{12,12},Text);
     m_waiting=rankedHudLabel(this,"",FontWeight::SemiBold,.30f,{.5f,0},{size.width/2,14},TextMuted);
     m_cutoffLine=CCDrawNode::create();addChild(m_cutoffLine,6);
+    auto* menu=CCMenu::create();menu->setPosition(CCPointZero);addChild(menu,20);
+    auto* face=surface({92,24},{},Blue,SurfaceRaised,225,true);auto* label=menuLabel(i18n::text("survival-view-board","VIEW STATUS"),.20f,{46,12},Text,FontWeight::ExtraBold);fitFullMenuLabel(label,82,17,.20f);face->addChild(label,5);
+    auto* item=CCMenuItemSpriteExtra::create(face,this,menu_selector(SurvivalHud::onBoard));item->setPosition({size.width-54,20});menu->addChild(item);
     scheduleUpdate();return true;
 }
+void SurvivalHud::onBoard(CCObject*){showSurvivalStandings();}
 void SurvivalHud::attachProgressBar(CCSprite* bar,CCSprite* fill,float width,float height) {
     if(!bar || !fill || width<=0 || height<=0)return;
     m_progressBar=WeakRef(bar);m_progressFill=WeakRef(fill);m_progressWidth=width;m_progressHeight=height;
@@ -46,7 +52,7 @@ void SurvivalHud::update(float dt) {
 void SurvivalHud::present(SurvivalMatchView const& view,std::int64_t remainingMs,float dt) {
     auto const size=CCDirector::sharedDirector()->getWinSize();
     auto const context=view.id+":"+view.roundKey+":"+std::to_string(view.mapGeneration);
-    if(m_context!=context){for(auto& [id,row]:m_rows)row.node->removeFromParentAndCleanup(true);m_rows.clear();m_context=context;m_lastRank=0;m_personalBest={};}
+    if(m_context!=context){for(auto& [id,row]:m_rows)row.node->removeFromParentAndCleanup(true);m_rows.clear();m_context=context;m_lastRank=0;m_personalBest={};m_haloOpacity=m_haloAge=0;}
     bool const deathmatch=view.phase=="TIEBREAK";
     auto const rows=survivalHudRows(view.standings,view.ownId,view.targetQualifiers);
     bool const separateOwn=rows.size()>survivalHudLeaderCount(view.standings,view.targetQualifiers);
@@ -94,7 +100,22 @@ void SurvivalHud::present(SurvivalMatchView const& view,std::int64_t remainingMs
     m_personalBest.advance(dt);
     presentProgressMarkers(view);
     auto own=std::find_if(view.standings.begin(),view.standings.end(),[&](auto const& p){return p.id==view.ownId;});
-    if(own!=view.standings.end()) {
+    auto const observer=SurvivalRuntime::get().observing();
+    auto const rankVisible=!observer && !view.ownEliminated && view.state=="PLAYING" && own!=view.standings.end();
+    m_rank.foreground->setVisible(rankVisible);m_rank.shadow->setVisible(rankVisible);
+    auto const halo=survivalRankHaloEligible(view.state,view.ownEliminated,observer,own==view.standings.end()?0:own->rank);
+    m_haloAge+=std::max(0.f,dt);m_haloOpacity+=(static_cast<double>(halo)-m_haloOpacity)*(1-std::exp(-std::max(0.f,dt)*8));
+    m_rankHalo->clear();
+    if(rankVisible && m_haloOpacity>.001){
+        auto const w=std::min(88.f,m_rank.foreground->getContentSize().width*m_rank.foreground->getScale()+12);
+        auto const h=std::min(54.f,m_rank.foreground->getContentSize().height*m_rank.foreground->getScale()+10);
+        for(int ring=12;ring>0;--ring){std::array<CCPoint,32> vertices;auto const t=ring/12.f;
+            for(std::size_t n=0;n<vertices.size();++n){auto const a=n*6.2831853f/vertices.size();vertices[n]=CCPoint{14+w/2+std::cos(a)*w/2*t,14+h/2+std::sin(a)*h/2*t};}
+            m_rankHalo->drawPolygon(vertices.data(),vertices.size(),{1,.76f,.08f,static_cast<float>(.022*m_haloOpacity*(.90+.10*std::sin(m_haloAge*2.2)))},0,{0,0,0,0});
+        }
+    }
+    if(observer){m_waiting.text("");m_difference.text(view.cutoff?rankedScoreText(*view.cutoff,deathmatch)+"%":"--%");m_difference.color(Cyan);}
+    if(own!=view.standings.end() && !observer) {
         m_rank.text(survivalOrdinal(own->rank));m_rank.color(color(*own));
         if(m_lastRank!=own->rank){m_lastRank=own->rank;for(auto* label:{m_rank.foreground,m_rank.shadow}) {
             label->stopAllActions();label->runAction(CCSequence::create(
@@ -133,7 +154,7 @@ void SurvivalHud::presentProgressMarkers(SurvivalMatchView const& view) {
     if(view.cutoff)draw(*view.cutoff,.95f,{1,.32f,.41f,1},2);
     if(!view.standings.empty())draw(view.standings.front().score,.5f,{1,.83f,.31f,1},4);
     auto const hasOwn=std::any_of(view.standings.begin(),view.standings.end(),[&](auto const& row){return row.id==view.ownId;});
-    if(auto* game=GameManager::sharedState();game && hasOwn) {
+    if(auto* game=GameManager::sharedState();game && hasOwn && !SurvivalRuntime::get().observing()) {
         auto const tint=game->colorForIdx(game->getPlayerColor());
         auto const x=origin.x+survivalProgressMarkerX(m_personalBest.displayed,m_progressWidth)-anchor.x*m_progressWidth;
         auto const y=origin.y-anchor.y*m_progressHeight;

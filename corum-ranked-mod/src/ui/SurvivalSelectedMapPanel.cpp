@@ -26,8 +26,8 @@ SurvivalSelectedMapPanel* SurvivalSelectedMapPanel::create(std::function<void(in
     delete p;return nullptr;
 }
 CCNode* SurvivalSelectedMapPanel::readyFace(bool enabled,bool retry,bool start){
-    auto const& r=m_layout.ready;auto* face=surface({r.w,r.h},{},retry?Blue:ccc3(255,237,139),retry?SurfaceRaised:Gold,255,true);
-    auto* label=menuLabel(i18n::text(retry?"retry":start?"start":"ready",retry?"RETRY":start?"START":"READY"),.34f,{r.w/2,r.h/2},retry?Text:Ink,FontWeight::Black);
+    (void)start;auto const& r=m_layout.ready;auto* face=surface({r.w,r.h},{},retry?Blue:ccc3(255,237,139),retry?SurfaceRaised:Gold,255,true);
+    auto* label=menuLabel(i18n::text(retry?"retry":"survival-reenter",retry?"RETRY":"RE-ENTER"),.34f,{r.w/2,r.h/2},retry?Text:Ink,FontWeight::Black);
     fitSurvivalSingleLine(label,r.w-16,r.h-10,.34f);face->addChild(label,5);if(!enabled)grayButtonVisual(face);return face;
 }
 void SurvivalSelectedMapPanel::build(CCSize size,bool thumbnail,bool ldm){
@@ -37,6 +37,11 @@ void SurvivalSelectedMapPanel::build(CCSize size,bool thumbnail,bool ldm){
     auto caption=[&](SurvivalRect rect,ccColor3B color,FontWeight weight){auto* value=menuLabel("",.25f,center(rect),color,weight);addChild(value,5);return value;};
     m_title=caption(r.title,Text,FontWeight::Black);m_creator=caption(r.creator,TextMuted,FontWeight::SemiBold);
     m_metadata=caption(r.metadata,Cyan,FontWeight::SemiBold);m_readiness=caption(r.readiness,TextMuted,FontWeight::SemiBold);
+    m_countdown=caption(r.ready,Gold,FontWeight::Black);m_countdown->setID("survival-automatic-entry-countdown"_spr);
+    // Verified native frame used by Geode ModsLayer; never an emoji substitute.
+    m_star=CCSprite::createWithSpriteFrameName("GJ_starsIcon_001.png");
+    if(m_star){m_star->setScale(std::min(12*r.scale/m_star->getContentSize().height,12*r.scale/m_star->getContentSize().width));m_star->setPosition({r.metadata.cx()-12*r.scale,r.metadata.cy()-12*r.scale});addChild(m_star,5);}
+    m_stars=caption({r.metadata.cx()-4*r.scale,r.metadata.cy()-18*r.scale,28*r.scale,12*r.scale},Gold,FontWeight::ExtraBold);
     m_difficulty=nullptr;m_levelId=0;m_metadataRevision=0;m_mapMetadata={};m_creatorText.clear();m_statusText.clear();
     auto* menu=CCMenu::create();m_menu=menu;menu->setPosition(CCPointZero);addChild(menu,10);
     auto item=[&](SurvivalRect rect,CCNode* face,int tag,char const* id){
@@ -66,13 +71,19 @@ void SurvivalSelectedMapPanel::present(CCSize size,bool thumbnail,SurvivalMatchV
     m_options=options;auto const interactive=appearance>=1. && actionsEnabled;
     auto* level=RankedLevelPreparation::get().level();auto const native=level && static_cast<int>(level->m_levelID)==view.map.levelId;
     m_ldm->setEnabled(interactive && native && prep.mapReady && supportsLdm);m_shake->setEnabled(interactive && native && prep.mapReady);m_jukebox->setEnabled(interactive && native && prep.mapReady);
-    auto const retry=!prep.error.empty();auto const start=view.ownEntered || view.state=="PLAYING";
+    auto const retry=!prep.error.empty();auto const start=SurvivalRuntime::get().previouslyEntered();
     auto const ready=interactive && (retry || canEnter);
     if(ready!=m_readyEnabled || retry!=m_retry || start!=m_start){
         m_readyEnabled=ready;m_retry=retry;m_start=start;
         m_ready->setNormalImage(readyFace(ready,retry,start));
     }
-    m_ready->setTag(retry?10:0);m_ready->setEnabled(ready);
+    m_ready->setTag(retry?10:0);m_ready->setVisible(retry || start);m_ready->setEnabled(ready && (retry || start));
+    m_countdown->setVisible(!retry && !start);
+    auto const wait=view.state=="ENTERING" && prep.mapReady && prep.audioReady?SurvivalRuntime::get().entryWaitMs():std::nullopt;
+    auto const beat=survivalReadyFrame(wait);
+    auto const countdown=beat.digit>0?std::to_string(beat.digit):i18n::text(canEnter?"survival-auto-start":"survival-preparing",canEnter?"AUTO START":"PREPARING...");
+    line(m_countdown,countdown,r.ready,beat.digit>0?.90f:.30f);
+    m_countdown->setScale(m_countdown->getScale()*static_cast<float>(beat.scale));m_countdown->setOpacity(static_cast<GLubyte>(beat.opacity*appearance*255));
     if(native)RankedMapDetails::get().remember(level);
     auto metadata=RankedMapDetails::get().metadata(view.map.levelId);
     if(metadata.kind=="UNKNOWN"){metadata.kind=view.map.demon==SurvivalDemon::None?"NORMAL":"DEMON";metadata.stars=view.map.stars;}
@@ -88,9 +99,9 @@ void SurvivalSelectedMapPanel::present(CCSize size,bool thumbnail,SurvivalMatchV
     if(m_levelId!=view.map.levelId || m_metadataRevision!=revision || m_mapMetadata!=metadata){
         m_levelId=view.map.levelId;m_metadataRevision=revision;m_mapMetadata=metadata;
         if(m_difficulty)m_difficulty->removeFromParentAndCleanup(true);
-        m_difficulty=mapDifficultyBadge(view.map.levelId,metadata,r.difficulty.w,r.difficulty.h);m_difficulty->setPosition({r.difficulty.x,r.difficulty.y});addChild(m_difficulty,5);
-        auto const stars=metadata.stars?fmt::format("{} {} · ",*metadata.stars,i18n::text("map-stars","stars")):std::string{};
-        auto const detail=fmt::format("GD #{}\n{}{}",view.map.levelId,stars,mapLengthText(metadata));line(m_metadata,detail,r.metadata,.21f);
+        m_difficulty=mapDifficultyBadge(view.map.levelId,metadata,r.difficulty.w,r.difficulty.h,false);m_difficulty->setPosition({r.difficulty.x,r.difficulty.y});addChild(m_difficulty,5);
+        auto const detail=fmt::format("GD #{}\n{}",view.map.levelId,mapLengthText(metadata));line(m_metadata,detail,{r.metadata.x,r.metadata.y+6*r.scale,r.metadata.w,r.metadata.h},.21f);
+        m_stars->setString(metadata.stars?std::to_string(*metadata.stars).c_str():"--");fitFullMenuLabel(m_stars,28*r.scale,12*r.scale,.22f);
     }
     std::string status;
     if(SurvivalRuntime::get().surrenderPending())status=i18n::text("survival-surrender-pending","Surrender submitted · waiting for server");
@@ -104,7 +115,8 @@ void SurvivalSelectedMapPanel::present(CCSize size,bool thumbnail,SurvivalMatchV
     setPositionY(static_cast<float>((1-survivalEase(appearance))*-10*r.scale));
     setVisible(appearance>0);setModeLobbyOpacity(this,static_cast<GLubyte>(std::clamp(appearance,0.,1.)*255));
     auto reveal=[&](CCNode* node,double delay){auto const alpha=appearance>=1?1.:std::clamp((appearance*.80-delay)/.60,0.,1.);if(node)propagateModeOpacity(node,static_cast<GLubyte>(alpha*255));};
-    reveal(m_title,0);reveal(m_creator,.05);reveal(m_difficulty,.10);reveal(m_metadata,.10);
+    reveal(m_title,0);reveal(m_creator,.05);reveal(m_difficulty,.10);reveal(m_metadata,.10);reveal(m_star,.10);reveal(m_stars,.10);
     for(auto* item:{m_ldm,m_shake,m_jukebox,m_ready})reveal(item,.20);
+    m_countdown->setOpacity(static_cast<GLubyte>(beat.opacity*appearance*255));
 }
 }
