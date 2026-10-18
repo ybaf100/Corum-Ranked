@@ -12,8 +12,12 @@ import {
   type ServerEnvironment,
 } from "../config/server-environment.js";
 import type { DatabasePort, SqlExecutor, SqlResult } from "./database.port.js";
+import { migrationConnectionString } from "./migration-connection.js";
 
-const MIGRATION_LOCK_KEY = "corum-ranked-schema-migrations-v1";
+// v1 used a session lock through PgBouncer transaction pooling; its unlock
+// could run on a different backend, stranding the lock on an idle session.
+// v2 is held on a direct Neon session connection, never the pooler.
+const MIGRATION_LOCK_KEY = "corum-ranked-schema-migrations-v2";
 
 const REQUIRED_MIGRATIONS = [
   "0001_initial_ranked.sql",
@@ -105,6 +109,7 @@ type SchemaProbeRow = QueryResultRow & {
 export class DatabaseService implements DatabasePort, OnModuleInit, OnApplicationShutdown {
   private readonly logger = new Logger(DatabaseService.name);
   private readonly pool: Pool;
+  private readonly migrationPool: Pool;
 
   public constructor(
     @Inject(SERVER_ENVIRONMENT) environment: ServerEnvironment,
@@ -121,6 +126,20 @@ export class DatabaseService implements DatabasePort, OnModuleInit, OnApplicatio
     // process when Neon rotates or drops a pooled TLS connection.
     this.pool.on("error", (error) => {
       this.logger.error(`Unexpected idle PostgreSQL connection error: ${error.message}`);
+    });
+    // Session-level advisory locks require a backend-affine connection.
+    // Neon transaction poolers cannot promise the UNLOCK runs on the
+    // backend that served LOCK. Restrict this separate direct pool to the
+    // serialized bootstrap migration work; gameplay retains pooled access.
+    this.migrationPool = new Pool({
+      connectionString: migrationConnectionString(environment.databaseUrl),
+      max: 1,
+      idleTimeoutMillis: 5_000,
+      connectionTimeoutMillis: 10_000,
+      keepAlive: true,
+    });
+    this.migrationPool.on("error", (error) => {
+      this.logger.error(`Unexpected idle migration connection error: ${error.message}`);
     });
   }
 
@@ -353,7 +372,7 @@ export class DatabaseService implements DatabasePort, OnModuleInit, OnApplicatio
   }
 
   private async applyRequiredMigrations(): Promise<void> {
-    const client = await this.pool.connect();
+    const client = await this.migrationPool.connect();
     let lockHeld = false;
     try {
       // Render can briefly overlap old/new instances. A PostgreSQL advisory lock
@@ -433,7 +452,7 @@ export class DatabaseService implements DatabasePort, OnModuleInit, OnApplicatio
   }
 
   public async onApplicationShutdown(): Promise<void> {
-    await this.pool.end();
+    await Promise.all([this.pool.end(), this.migrationPool.end()]);
   }
 }
 
