@@ -8,7 +8,7 @@
 
 using namespace geode::prelude;
 namespace {
-constexpr std::string_view kServer = "https://corum-ranked.onrender.com";
+constexpr std::string_view kServer = "https://corum-ranked-production.up.railway.app";
 std::string endpoint(std::string const& path) { return std::string(kServer) + "/api/ranked/debug/spectate/" + path; }
 bool success(web::WebResponse const& response) { return response.code() >= 200 && response.code() < 300; }
 web::WebRequest request(std::string const& token = {}) {

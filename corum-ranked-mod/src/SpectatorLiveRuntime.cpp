@@ -22,7 +22,7 @@ constexpr int kProtocolVersion = corum::ranked::kSpectatorProtocolVersion;
 constexpr auto kPublishInterval = std::chrono::milliseconds(corum::ranked::kSpectatorPublishIntervalMs);
 constexpr auto kPacketTimeout = std::chrono::milliseconds(1500);
 constexpr float kPoseDiscontinuityDistance = 400.0f;
-constexpr std::string_view kDefaultRankedServerURL = "https://corum-ranked.onrender.com";
+constexpr std::string_view kDefaultRankedServerURL = "https://corum-ranked-production.up.railway.app";
 
 bool successful(web::WebResponse const& response) {
     return response.code() >= 200 && response.code() < 300;

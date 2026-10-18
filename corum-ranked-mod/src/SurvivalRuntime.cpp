@@ -17,10 +17,10 @@ using namespace geode::prelude;
 namespace corum::ranked {
 namespace {
 std::int64_t localNow() { return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count(); }
-std::string onlineEndpoint(std::string const& path) { return "https://corum-ranked.onrender.com/api/ranked/survival/online"+path; }
-std::string queueEndpoint(std::string const& path) { return "https://corum-ranked.onrender.com/api/ranked/survival/queue"+path; }
+std::string onlineEndpoint(std::string const& path) { return "https://corum-ranked-production.up.railway.app/api/ranked/survival/online"+path; }
+std::string queueEndpoint(std::string const& path) { return "https://corum-ranked-production.up.railway.app/api/ranked/survival/queue"+path; }
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
-std::string debugEndpoint(std::string const& path) { return "https://corum-ranked.onrender.com/api/ranked/survival/debug"+path; }
+std::string debugEndpoint(std::string const& path) { return "https://corum-ranked-production.up.railway.app/api/ranked/survival/debug"+path; }
 #endif
 void openRecoveredGame() {
     queueInMainThread([] {

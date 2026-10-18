@@ -12,7 +12,7 @@ During a standard Ranked round, the HUD keeps the current Round above the timer,
 
 Death Match does not use Qualifying %. Each player receives exactly three authoritative Attempts and the winner is the player with the higher best raw progress percentage across those Attempts; a Clear is 100%. Equal best percentages repeat Death Match on the existing retry flow. The ordinary timer position shows only the authoritative remaining Attempt count from 3 through 0. `Finished` stays hidden after Attempts one and two and appears only after the third Attempt is complete; if that End immediately resolves the match, the terminal result preserves the final viewer-relative lifecycle projection.
 
-The client is locked to the production Ranked server at `https://corum-ranked.onrender.com`; it is not editable in mod settings. Production credentials and webhook secrets do not belong in the mod or repository.
+The client is locked to the production Ranked server at `https://corum-ranked-production.up.railway.app`; it is not editable in mod settings. Clients built with the former Render endpoint require a new .geode package to connect to Railway. Production credentials and webhook secrets do not belong in the mod or repository.
 
 Unranked players in `v0.5.0-beta.14` complete a server-authoritative solo Placement Run:
 three or five Stages, two distinct Ranked Pool maps per Stage, three minutes and two Clears per Map,
