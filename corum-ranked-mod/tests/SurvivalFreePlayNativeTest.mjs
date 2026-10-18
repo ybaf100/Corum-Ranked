@@ -137,7 +137,12 @@ test('live cards retain identity, retarget from the current position and recolor
 struct CCPoint{float x=0,y=0;bool operator==(CCPoint const&)const=default;};struct CCSize{float width,height;};struct Color{unsigned char r,g,b;};using ccColor3B=Color;Color ccc3(unsigned char r,unsigned char g,unsigned char b){return {r,g,b};}
 struct CCAction{CCPoint from,to;int tag=0;void setTag(int n){tag=n;}};
 struct CCMoveTo{static CCAction* create(float,CCPoint point){auto* a=new CCAction;a->to=point;return a;}};struct CCEaseSineOut{static CCAction* create(CCAction* a){return a;}};
-struct CCNode{CCPoint pos;CCSize size{100,50};bool visible=true;CCAction* action=nullptr;int moves=0,stops=0;std::vector<CCNode*>children;virtual ~CCNode()=default;static CCNode* create(){return new CCNode;}void setPosition(CCPoint p){pos=p;}CCPoint getPosition()const{return pos;}void setScale(float){}void setVisible(bool b){visible=b;}void addChild(CCNode* c,int=0){children.push_back(c);}void removeFromParentAndCleanup(bool){}void removeAllChildrenWithCleanup(bool){children.clear();}void stopActionByTag(int){action=nullptr;++stops;}void runAction(CCAction* a){a->from=pos;action=a;++moves;}void advance(float t){assert(action);pos={action->from.x+(action->to.x-action->from.x)*t,action->from.y+(action->to.y-action->from.y)*t};}};
+struct CCNode{CCPoint pos;CCSize size{100,50};bool visible=true;CCAction* action=nullptr;int moves=0,stops=0;std::vector<CCNode*>children;virtual ~CCNode()=default;static CCNode* create(){return new CCNode;}void setPosition(CCPoint p){pos=p;}CCPoint getPosition()const{return pos;}void setScale(float){}void setContentSize(CCSize value){size=value;}void setVisible(bool b){visible=b;}void addChild(CCNode* c,int=0){children.push_back(c);}void removeFromParentAndCleanup(bool){}void removeAllChildrenWithCleanup(bool){children.clear();}void stopActionByTag(int){action=nullptr;++stops;}void runAction(CCAction* a){a->from=pos;action=a;++moves;}void advance(float t){assert(action);pos={action->from.x+(action->to.x-action->from.x)*t,action->from.y+(action->to.y-action->from.y)*t};}};
+using CCObject=CCNode;
+const CCPoint CCPointZero{0,0};
+struct CCMenu:CCNode{static CCMenu* create(){return new CCMenu;}};
+struct CCMenuItemSpriteExtra:CCNode{int tag=0;static CCMenuItemSpriteExtra* create(CCNode*,CCObject*,int){return new CCMenuItemSpriteExtra;}void setTag(int n){tag=n;}int getTag()const{return tag;}};
+#define menu_selector(...) 0
 struct CCLabelBMFont:CCNode{std::string text;int writes=0;void setString(char const* s){text=s;++writes;}void setColor(Color){}};
 namespace fmt{template<class...T>std::string format(std::string text,T const&...values){auto put=[&](auto const& v){std::ostringstream out;out<<v;auto at=text.find('{');if(at!=std::string::npos){auto end=text.find('}',at);text.replace(at,end-at+1,out.str());}};(put(values),...);return text;}}
 template<class T>struct Number{T unwrapOr(T v){return v;}};template<class T>Number<T>numFromString(std::string const&){return {};}
@@ -152,8 +157,8 @@ namespace ui{inline constexpr Color Gold{255,195,55},Blue{0,0,255},SurfaceRaised
 }
 struct SurvivalMatchView{std::string id="m",roundKey="r1",ownId="a",phase="ROUND_1";int mapGeneration=1;std::vector<SurvivalStanding>standings,roundPlayers;matjson::Value result;};
 struct Coordinator{
- struct Tile{CCNode* root=nullptr;CCLabelBMFont* name=nullptr;CCLabelBMFont* record=nullptr;CCPoint destination;CCNode* icon=nullptr;CCNode* tierBadge=nullptr;std::string tier="";CCNode* eliminatedBackground=nullptr;std::string titleText={},recordText={};std::array<CCNode*,3>medals{};};
- std::string m_gridContext;CCNode grid;CCNode* m_grid=&grid;std::unordered_map<std::string,Tile>m_tiles;CCSize getContentSize()const{return {568,320};}
+ struct Tile{CCNode* root=nullptr;CCLabelBMFont* name=nullptr;CCLabelBMFont* record=nullptr;CCPoint destination;CCNode* icon=nullptr;CCNode* tierBadge=nullptr;std::string tier="";CCNode* eliminatedBackground=nullptr;std::string titleText={},recordText={};std::array<CCNode*,3>medals{};int infoTag=0;};
+ std::string m_gridContext;CCNode grid;CCNode* m_grid=&grid;std::unordered_map<std::string,Tile>m_tiles;std::unordered_map<int,SurvivalStanding>m_infoByTag;int m_nextInfoTag=1000;void onPlayerInfo(CCObject*){}CCSize getContentSize()const{return {568,320};}
  ${method(source,'void showParticipants(')}
 };
 }
