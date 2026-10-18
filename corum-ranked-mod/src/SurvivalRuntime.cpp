@@ -118,7 +118,15 @@ int SurvivalRuntime::queueWaitingSeconds() const {
 }
 void SurvivalRuntime::observeQueue(matjson::Value const& root) {
     if(!root.isObject() || !root["status"].isString())return;
+    auto const previousMatchId=m_queue.matchId;
     m_queue.status=root["status"].asString().unwrapOr("LEFT");m_queue.matchId=root["matchId"].asString().unwrapOr("");
+    if(previousMatchId!=m_queue.matchId){
+        // A poll for a prior queue match must not hold m_pollBusy forever
+        // after the queue points at a replacement match.
+        m_pollRequest.cancel();
+        m_pollBusy=false;
+        m_nextPoll={};
+    }
     m_queue.players=static_cast<int>(root["players"].asInt().unwrapOr(m_queue.players));
     m_queue.minimumPlayers=static_cast<int>(root["minimumPlayers"].asInt().unwrapOr(8));m_queue.maximumPlayers=static_cast<int>(root["maximumPlayers"].asInt().unwrapOr(16));
     m_queue.waitingSince=root["waitingSince"].asString().unwrapOr(m_queue.waitingSince);m_queue.enabled=root["enabled"].asBool().unwrapOr(m_queue.enabled);
