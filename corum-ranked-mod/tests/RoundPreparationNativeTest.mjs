@@ -37,10 +37,10 @@ test('actual round preparation executes native download/resource/delegate/launch
 double fakeNow = 100;
 namespace gd { using string = std::string; }
 struct CCNode {
-    virtual ~CCNode()=default; bool live=true, running=false, visible=true;
+    virtual ~CCNode()=default; bool live=true, running=false, visible=true; CCNode* parent=nullptr;
     std::vector<CCNode*> children;
     bool init(){return true;} void release(){} virtual void update(float){}
-    bool isRunning()const{return running;} bool isVisible()const{return visible;}
+    bool isRunning()const{return running;} bool isVisible()const{return visible;} CCNode* getParent()const{return parent;}
     auto const& getChildrenExt()const{return children;}
 };
 struct CCScene:CCNode {};
@@ -308,9 +308,9 @@ int main(){
     assert(meta.authorizes(&downloaded,currentPreparationContext())); // options do not alter metadata proof
     CCScene transition;director->next=&transition;
     assert(!p.launch(&origin)&&PlayLayer::constructions==0&&runtime.arms==0);
-    director->next=nullptr;PlayLayer departing;departing.running=false;PlayLayer::active=&departing;
-    assert(!p.launch(&origin)&&PlayLayer::constructions==0&&runtime.arms==0);
-    PlayLayer::active=nullptr;
+    director->next=nullptr;PlayLayer departing;departing.running=false;departing.parent=&origin;PlayLayer::active=&departing;
+    assert(!p.launch(&origin)&&PlayLayer::constructions==0&&runtime.arms==0); // teardown still owns the scene
+    departing.parent=nullptr; // native return has detached the stopped singleton
     assert(p.launch(&origin));assert(runtime.arms==1&&PlayLayer::active->m_level==&downloaded);
     assert(CCTextureCache::sharedTextureCache()->references==2);
     assert(PlayLayer::active->m_level->m_lowDetailModeToggled&&PlayLayer::active->m_level->m_disableShakeToggled);
