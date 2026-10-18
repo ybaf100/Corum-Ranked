@@ -13,7 +13,7 @@ function method(source,name){const start=source.indexOf(name);assert(start>=0,na
 function run(code,flags=[]){const dir=mkdtempSync(join(tmpdir(),'survival-pause-'));try{
  writeFileSync(join(dir,'test.cpp'),code.replaceAll('geode::geode::log::','geode::log::'));execFileSync('g++',['-std=c++23','-Wall','-Wextra','-Wpedantic','-Werror','-I',join(root,'src'),...flags,join(dir,'test.cpp'),'-o',join(dir,'test')],{stdio:'pipe'});execFileSync(join(dir,'test'),[],{stdio:'pipe'});
 }catch(e){throw new Error(e.stderr?.toString()||e.message);}finally{rmSync(dir,{recursive:true,force:true});}}
-const runtime=read('src/SurvivalRuntime.cpp'),pause=read('src/RankedPauseLayer.cpp');
+const runtime=process.env.CORUM_RUNTIME_SOURCE?readFileSync(process.env.CORUM_RUNTIME_SOURCE,'utf8'):read('src/SurvivalRuntime.cpp'),pause=read('src/RankedPauseLayer.cpp');
 const viewer=read('tests/SpectatorLiveViewerNativeTest.mjs');
 const json=viewer.slice(viewer.indexOf('namespace matjson {'),viewer.indexOf('${readFileSync(join(root,'));
 const common=`
@@ -35,6 +35,7 @@ const common=`
 #include <variant>
 #include <vector>
 ${json}
+namespace geode::log{template<class...T>void info(T const&...){}}
 auto wall=std::chrono::steady_clock::time_point{};auto testNow(){return wall;}
 template<class T>struct Ref{T* p=nullptr;Ref()=default;Ref(T* p):p(p){}T* data()const{return p;}T* operator->()const{return p;}explicit operator bool()const{return p;}};
 template<class T>struct WeakRef{T* p;explicit WeakRef(T* p):p(p){}Ref<T> lock()const{return {p&&p->alive?p:nullptr};}};
@@ -67,8 +68,8 @@ using corum::ranked::SurvivalRuntime;
 namespace i18n{std::string text(std::string const&,std::string fallback){return fallback;}}
 struct Label{std::string value;void setString(char const* s){value=s;}};
 namespace ui{void fitLabelWidth(Label*,float,float,float){}}
-struct Button{bool enabled=true;void setEnabled(bool b){enabled=b;}};
-struct Pause{Label clock,status;Button button;struct Fields{bool survival=true;Label*budget;Label*survivalStatus;Button*surrender;std::optional<WeakRef<PlayLayer>>owner;std::optional<WeakRef<CCNode>>survivalConfirmation;std::string matchId="m",survivalRoundKey="r1";int survivalMapGeneration=1;}fields{true,&clock,&status,&button,{},{},"m","r1",1};Fields*m_fields=&fields;
+struct Button{bool enabled=true;bool isEnabled()const{return enabled;}void setEnabled(bool b){enabled=b;}};
+struct Pause{void*getParent(){return this;}Label clock,status;Button button;struct Fields{bool survival=true;Label*budget;Label*survivalStatus;Button*surrender;std::optional<WeakRef<PlayLayer>>owner;std::optional<WeakRef<CCNode>>survivalConfirmation;std::string matchId="m",survivalRoundKey="r1";int survivalMapGeneration=1;int survivalWatchLogs=0;}fields{true,&clock,&status,&button,{},{},"m","r1",1};Fields*m_fields=&fields;
  void synchronizeSurvivalPauseInput(){}
  ${survival}
 };
@@ -121,7 +122,7 @@ ${['matjson::Value SurvivalRuntime::event(', 'void SurvivalRuntime::enqueue(', '
 int main(){using namespace corum::ranked;CCScene scene,other;PlayLayer play,replacement;play.parent=&scene;replacement.parent=&scene;PlayLayer::current=&play;CCDirector::sharedDirector()->scene=&scene;
  matjson::Value accepted;accepted["eliminated"]=true;
  for(auto phase:{"ROUND_1","ROUND_2","ROUND_3","FINAL","TIEBREAK"}){
-  SurvivalRuntime r;r.m_view.phase=phase;auto start=web::pending.size();int before=returns;
+  play.running=std::string(phase)!="ROUND_1";SurvivalRuntime r;r.m_view.phase=phase;auto start=web::pending.size();int before=returns;
   r.surrender();r.surrender();assert(r.surrenderPending()&&web::pending.size()==start+1&&returns==before);
   assert(web::pending[start].op.body["type"].asString().unwrapOr("")=="ATTEMPT_END");
   assert(web::pending[start].op.body["progress"].asDouble().unwrapOr(0)==77);assert(r.m_events.size()==2);
@@ -155,6 +156,7 @@ test('production deferred Survival return queues once, respects pause refusal/co
  run(common+`
 struct UILayer{int disabled=0;void disableMenu(){++disabled;}};
 namespace corum::ranked{bool completion=false,resumable=true;int resumes=0;bool quitThroughSurvivalCompletionOverlay(PlayLayer*){return completion;}bool resumeSurvivalFreePlayPauseBeforeQuit(PlayLayer*){++resumes;return resumable;}}
+namespace corum::ranked{struct RankedRoundPreparation{static RankedRoundPreparation&get(){static RankedRoundPreparation p;return p;}bool nativeReturnPending(PlayLayer*p)const{return p&&p->quits>0;}};}
 struct CorumRankedPlayLayer:PlayLayer{
  struct Fields{bool autoExitRequested=false,safetyRetired=false,rankedInitialized=true,survivalLevel=true,survivalNativeClearFinished=false,survivalFreePlayHud=false;}fields;Fields*m_fields=&fields;
  bool m_hasCompletedLevel=false;std::vector<int>m_queuedButtons{1};UILayer ui;UILayer*m_uiLayer=&ui;bool touch=true,keyboard=true;
@@ -166,6 +168,7 @@ struct CorumRankedPlayLayer:PlayLayer{
 +`
 int main(){using namespace corum::ranked;CCScene scene,other;auto*d=CCDirector::sharedDirector();d->scene=&scene;
  {CorumRankedPlayLayer p;PlayLayer::current=&p;p.parent=&scene;p.queueSurvivalGameplayReturn();p.queueSurvivalGameplayReturn();assert(queued.size()==1&&p.quits==0&&!p.touch&&!p.keyboard&&p.m_queuedButtons.empty());drain();assert(p.quits==1);p.queueSurvivalGameplayReturn();assert(queued.empty());}
+ {CorumRankedPlayLayer p;PlayLayer::current=&p;p.parent=&scene;p.running=false;p.queueSurvivalGameplayReturn();drain();assert(p.quits==1);p.queueSurvivalGameplayReturn();assert(queued.empty());}
  {CorumRankedPlayLayer p;PlayLayer::current=&p;p.parent=&scene;resumable=false;p.queueSurvivalGameplayReturn();drain();assert(p.quits==0&&!p.fields.autoExitRequested);resumable=true;p.queueSurvivalGameplayReturn();drain();assert(p.quits==1);}
  {CorumRankedPlayLayer p;PlayLayer::current=&p;p.parent=&scene;d->next=&other;p.queueSurvivalGameplayReturn();assert(queued.empty());d->next=nullptr;p.queueSurvivalGameplayReturn();d->next=&other;drain();assert(p.quits==0&&!p.fields.autoExitRequested);d->next=nullptr;}
  {CorumRankedPlayLayer p,replacement;PlayLayer::current=&p;p.parent=&scene;p.queueSurvivalGameplayReturn();PlayLayer::current=&replacement;drain();assert(p.quits==0&&replacement.quits==0);}
@@ -195,13 +198,13 @@ struct Popup:Node{~Popup(){CCTouchDispatcher::get()->unregisterForcePrio(this);}
 std::string operator""_spr(char const*s,std::size_t n){return std::string(s,n);}
 #define menu_selector(x) 0
 namespace geode::prelude{}
-namespace geode::log{template<class...T>void debug(T const&...){}template<class...T>void info(T const&...){}}
+namespace geode::log{template<class...T>void debug(T const&...){}}
 // Extracted native methods use geode::log explicitly; avoid colliding with ::log(double).
 namespace corum::ranked{
 namespace i18n{std::string text(char const*,char const*fallback){return fallback;}}
 namespace ui{constexpr int Gold=1,Surface=2,SurfaceRaised=3,Text=4,Blue=5;enum class FontWeight{ExtraBold,SemiBold};Node*surface(CCSize s,CCPoint p,int,int,int,bool){auto*n=new Node;n->size=s;n->pos=p;return n;}Label*menuLabel(std::string,float,CCPoint,int,FontWeight){return new Label;}void fitMenuLabelWidth(Label*,float,float,float){}void fitFullMenuLabel(Label*,float,float,float){}
 }
-struct SurvivalRuntime{struct View{std::string id="m",roundKey="r1",phase="ROUND_1";int mapGeneration=1;bool debug=true,online=false,ownEliminated=false,ownAssetsReady=true,ownEntered=true;}m_view;bool playable=true,pending=false,cleared=false,surrenderable=true;int submissions=0,surrenders=0;static SurvivalRuntime&get(){static SurvivalRuntime r;return r;}auto const&view()const{return m_view;}bool canPlay()const{return playable;}bool canSurrender()const{return surrenderable;}std::string surrenderMessage()const{return "Forfeit?";}void surrender(){++surrenders;surrenderable=false;}bool normalRoundCleared()const{return cleared;}bool forceClearPending()const{return pending;}bool canForceClear()const;void forceClear(){if(canForceClear()&&!pending){++submissions;pending=true;}}};
+struct SurvivalRuntime{struct View{std::string id="m",roundKey="r1",phase="ROUND_1";int mapGeneration=1;bool debug=true,online=false,ownEliminated=false,ownAssetsReady=true,ownEntered=true;}m_view;bool playable=true,pending=false,cleared=false,surrenderable=true;int submissions=0,surrenders=0;static SurvivalRuntime&get(){static SurvivalRuntime r;return r;}auto const&view()const{return m_view;}bool canPlay()const{return playable;}bool canSurrender()const{return surrenderable;}std::string surrenderMessage()const{return "Forfeit?";}void surrender(){++surrenders;surrenderable=false;}bool normalRoundCleared()const{return cleared;}bool forceClearPending()const{return pending;}bool surrenderPending()const{return false;}bool canForceClear()const;void forceClear(){if(canForceClear()&&!pending){++submissions;pending=true;}}};
 ${method(runtime,'bool SurvivalRuntime::canForceClear()')}
 }
 using corum::ranked::SurvivalRuntime;namespace ui=corum::ranked::ui;namespace i18n=corum::ranked::i18n;
@@ -211,7 +214,7 @@ struct PauseLayer:Node{virtual void onEnter(){}}
 ;
 struct CorumRankedPauseLayer:PauseLayer{
  CCMenu center;
- struct Fields{bool survival=true;CCMenu*survivalActions=nullptr;CCMenuItemSpriteExtra*forceClear=nullptr;CCMenu*forceClearMenu=nullptr;std::optional<WeakRef<ui::RankedConfirmPopup>>survivalConfirmation;std::optional<WeakRef<PlayLayer>>owner;std::string matchId="m",survivalRoundKey="r1";int survivalMapGeneration=1;}fields;Fields*m_fields=&fields;
+ struct Fields{bool survival=true;CCMenu*survivalActions=nullptr;CCMenuItemSpriteExtra*forceClear=nullptr;CCMenu*forceClearMenu=nullptr;std::optional<WeakRef<ui::RankedConfirmPopup>>survivalConfirmation;std::optional<WeakRef<PlayLayer>>owner;std::string matchId="m",survivalRoundKey="r1";int survivalMapGeneration=1;int survivalWatchLogs=0;}fields;Fields*m_fields=&fields;
  CCNode*getChildByIDRecursive(char const*){return &center;}
  ${method(pause,'void setupSurvivalForceClear(')}
  ${method(pause,'void synchronizeSurvivalPauseInput()').replaceAll('CCDirector::sharedDirector()->getTouchDispatcher()','CCTouchDispatcher::get()')}

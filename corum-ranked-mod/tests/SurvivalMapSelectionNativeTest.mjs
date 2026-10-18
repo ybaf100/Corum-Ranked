@@ -29,8 +29,8 @@ test('four-second wall-clock reveals preserve 8/9/10 digits, left-to-right locks
 });
 test('pending server selection, fallback, background elapsed time and server entry skips cannot reselect or extend the timeline',()=>{
  run(`int main(){SurvivalMapSelectionTimeline t;SurvivalSelectionContext c{"m","R1",1,0,1};t.observe(c,0);
- assert(t.frame(9000).stage==SurvivalRevealStage::PendingSelection);c.levelId=123456789;t.observe(c,9000);assert(t.frame(9000).elapsed==0);
- auto before=t.frame(11100);t.takeLocks(before,false);auto numeric=t.frame(11200);assert(numeric.elapsed==2.2);assert(t.digits()=="123456789");
+ assert(t.frame(9000).stage==SurvivalRevealStage::PendingSelection);c.levelId=123456789;t.observe(c,9000);assert(t.frame(9000).elapsed==4&&t.frame(9000).settled);
+ auto before=t.frame(11100);t.takeLocks(before,false);auto numeric=t.frame(11200);assert(numeric.elapsed==4);assert(t.digits()=="123456789");
  assert(t.frame(13000).settled);assert(!t.observe(c,13001));assert(t.frame(13001).settled);
  c.mapGeneration++;assert(t.observe(c,14000));assert(!t.frame(15000).settled);
  t.followServer("COUNTDOWN",2000,15000);assert(t.frame(15000).skipped&&t.takeLocks(t.frame(15000),true).empty());

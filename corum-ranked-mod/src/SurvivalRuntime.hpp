@@ -21,7 +21,7 @@ struct SurvivalMatchView {
     std::string id,state,phase,roundKey,group,ownId="human",error,startsAt,endsAt,entryOpensAt,mapError,presentationGate;
     int mapGeneration=0,roundNumber=0,targetQualifiers=0,playerCount=0,roundPlayerCount=0;
     SurvivalMapMetadata map;
-    matjson::Value certificate,result,completedRound;
+    matjson::Value certificate=nullptr,result=nullptr,completedRound=nullptr;
     std::vector<SurvivalStanding> standings;
     std::vector<SurvivalStanding> roundPlayers;
     std::vector<std::string> aliveIds;
@@ -90,7 +90,7 @@ public:
     void forceRank(std::string password,int rank);
     void fillBots(std::string password,int botCount=-1);
     bool canForceClear() const;
-    bool forceClearPending() const {return m_forceClearBody.isObject();}
+    bool forceClearPending() const {return m_forceClearBody.has_value();}
     void forceClear();
 #endif
 private:
@@ -103,7 +103,9 @@ private:
     void pumpFreePlayReturn();
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
     void pumpForceClear();
-    matjson::Value m_forceClearBody;
+    // matjson::Value() is {}, not null. Request absence must be explicit;
+    // isObject() otherwise blocks both Pause actions even before submission.
+    std::optional<matjson::Value> m_forceClearBody;
     std::chrono::steady_clock::time_point m_forceClearRetryAt{};
     bool m_forceClearBusy=false;
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_forceClearRequest;

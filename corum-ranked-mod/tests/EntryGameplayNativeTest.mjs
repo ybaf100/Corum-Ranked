@@ -141,7 +141,7 @@ template<class T>struct Ref {
 };
 template<class T>struct WeakRef {
     T* pointer=nullptr;std::weak_ptr<int> life;
-    WeakRef()=default;WeakRef(WeakRef const&)=default;WeakRef(WeakRef&& other):pointer(std::exchange(other.pointer,nullptr)),life(std::move(other.life)){}
+    WeakRef()=default;WeakRef(WeakRef const&)=default;WeakRef&operator=(WeakRef const&)=default;WeakRef&operator=(WeakRef&&)=default;WeakRef(WeakRef&& other):pointer(std::exchange(other.pointer,nullptr)),life(std::move(other.life)){}
     explicit WeakRef(T* p):pointer(p),life(p->life){}
     struct Locked {T* pointer;explicit operator bool()const{return pointer!=nullptr;}T* data()const{return pointer;}T* operator->()const{return pointer;}};
     Locked lock()const{return {life.expired()?nullptr:pointer};}
@@ -159,9 +159,9 @@ struct CCDirector {int pops=0;CCScene* current=nullptr;CCScene* next=nullptr;CCS
     static CCDirector* sharedDirector(){static CCDirector d;return &d;}
     void popScene(){++pops;if(retire)retire();}};
 struct RankedRoundPreparation {
-    geode::WeakRef<PlayLayer> m_play;geode::WeakRef<CCScene> m_origin;std::optional<geode::WeakRef<CCScene>> m_nativePauseRestoreOrigin;
+    geode::WeakRef<PlayLayer> m_play;geode::WeakRef<CCScene> m_origin,m_returnScene;std::optional<geode::WeakRef<CCScene>> m_nativePauseRestoreOrigin;
     geode::Ref<GJGameLevel> m_launchedLevel;
-    bool m_quitting=true,m_returnQueued=false;std::uint64_t m_launchGeneration=1;
+    bool m_quitting=true,m_returnQueued=false,m_returnPopped=false;std::uint64_t m_launchGeneration=1;
     RankedRoundPreparation(PlayLayer* p,CCScene* origin):m_play(p),m_origin(origin),m_launchedLevel(&p->level){CCDirector::sharedDirector()->current=&p->parent;}
     bool returnFromNativeQuit(GJGameLevel*);
 };
@@ -224,7 +224,7 @@ int main(){
         if(changed==1)d->next=&other;
         if(changed==2)d->current=&origin;
         if(changed==3)play.parent.life.reset();
-        drain();assert(d->pops==before&&!handoff.m_returnQueued&&!handoff.m_play.pointer);d->next=nullptr;
+        drain();assert(d->pops==before&&handoff.m_returnQueued&&handoff.m_play.pointer);d->next=nullptr;
     }
     auto& runtime=RankedRuntime::get();auto& audio=*FMODAudioEngine::sharedEngine();
     CorumRankedPlayLayer scene;UILayer uiLayer;PlayerObject player1,player2;
@@ -352,7 +352,7 @@ int main(){
         assert(handoff.returnFromNativeQuit(&retired.level));
         assert(handoff.returnFromNativeQuit(&retired.level)&&deferred.size()==1);
         assert(!AppDelegate::get()->m_gamePaused); // pre-pop Quit log is not the final boundary
-        drain();assert(!handoff.m_returnQueued&&!handoff.m_play.pointer);
+        drain();assert(handoff.m_returnQueued&&handoff.m_play.pointer);
         director->retire={};
         CorumRankedPlayLayer next;UILayer nextUI;next.m_uiLayer=&nextUI;
         runtime.data.match.matchId=nextMatch?"next-match":"match";

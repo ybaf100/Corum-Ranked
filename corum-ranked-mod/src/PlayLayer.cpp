@@ -674,14 +674,14 @@ public:
         if(m_fields->autoExitRequested || m_fields->safetyRetired || !m_fields->rankedInitialized)return;
         if(m_fields->survivalLevel && m_hasCompletedLevel && !m_fields->survivalNativeClearFinished)return;
         auto* director=CCDirector::sharedDirector();
-        if(director->getNextScene() || !isRunning() || getParent()!=director->getRunningScene() ||
+        if(director->getNextScene() || getParent()!=director->getRunningScene() ||
             typeinfo_cast<CCTransitionScene*>(director->getRunningScene()))return;
         m_fields->autoExitRequested=true;
         setTouchEnabled(false);setKeyboardEnabled(false);m_queuedButtons.clear();
         if(m_uiLayer)m_uiLayer->disableMenu();
         queueInMainThread([weak=WeakRef<PlayLayer>(this)]{
             auto owner=weak.lock();auto* director=CCDirector::sharedDirector();
-            if(!owner || owner.data()!=PlayLayer::get() || !owner->isRunning() || owner->getParent()!=director->getRunningScene())return;
+            if(!owner || owner.data()!=PlayLayer::get() || owner->getParent()!=director->getRunningScene())return;
             auto* managed=static_cast<CorumRankedPlayLayer*>(owner.data());
             if(director->getNextScene()) {managed->m_fields->autoExitRequested=false;return;}
             if(corum::ranked::quitThroughSurvivalCompletionOverlay(owner.data()))return;
@@ -691,7 +691,8 @@ public:
             owner->onQuit();
             // If a native Resume hook refused teardown, retry on the next
             // heartbeat instead of treating a requested Quit as completed.
-            if(owner.data()==PlayLayer::get() && owner->isRunning())managed->m_fields->autoExitRequested=false;
+            if(owner.data()==PlayLayer::get() && !corum::ranked::RankedRoundPreparation::get().nativeReturnPending(owner.data()) &&
+                (owner->isRunning() || owner->getParent()==director->getRunningScene()))managed->m_fields->autoExitRequested=false;
         });
     }
 
@@ -2523,7 +2524,12 @@ bool corum::ranked::requestSurvivalGameplayReturn(PlayLayer* layer) {
     if(!layer || layer!=PlayLayer::get())return false;
     auto* managed=static_cast<CorumRankedPlayLayer*>(layer);
     if(!managed->m_fields->survivalLevel && !managed->m_fields->survivalFreePlayHud)return false;
-    managed->queueSurvivalGameplayReturn();return true;
+    auto const alreadyQueued=managed->m_fields->autoExitRequested;
+    managed->queueSurvivalGameplayReturn();
+    if(!alreadyQueued)geode::log::info("[SurvivalExit] queued={} running={} retired={} initialized={} sceneOwned={} nextScene={}",
+        managed->m_fields->autoExitRequested,layer->isRunning(),managed->m_fields->safetyRetired,managed->m_fields->rankedInitialized,
+        layer->getParent()==CCDirector::sharedDirector()->getRunningScene(),CCDirector::sharedDirector()->getNextScene()!=nullptr);
+    return managed->m_fields->autoExitRequested;
 }
 
 bool corum::ranked::requestConcededGameplayReturn(PlayLayer* layer) {

@@ -94,8 +94,21 @@ class RankedConfirmPopup final : public Popup {
     void finish(bool accepted) {
         if(m_closed) { return; }
         log::info("[RankedConfirmInput] finish accepted={}",accepted);
-        m_closed=true;auto done=std::exchange(m_done,{});auto keep=Ref<RankedConfirmPopup>(this);
-        queueInMainThread([keep,done=std::move(done),accepted] {if(!keep->isRunning())return;keep->Popup::onClose(nullptr);if(done)done(accepted);});
+        m_closed=true;auto keep=Ref<RankedConfirmPopup>(this);
+        auto parent=WeakRef<CCNode>(getParent());
+        auto scene=WeakRef<CCNode>(CCDirector::sharedDirector()->getRunningScene());
+        queueInMainThread([keep,parent,scene,accepted] {
+            auto attached=parent.lock();auto owner=scene.lock();auto* director=CCDirector::sharedDirector();
+            auto const valid=!keep->m_exited && attached && owner && keep->getParent()==attached.data() &&
+                director->getRunningScene()==owner.data() && !director->getNextScene();
+            log::info("[RankedConfirmInput] completion accepted={} attached={} sceneOwned={} callback={}",
+                accepted,static_cast<bool>(attached),valid,static_cast<bool>(keep->m_done));
+            if(!valid){keep->m_done={};return;}
+            // Keep the callback cancellable until this transaction commits.
+            // isRunning() is false for some valid paused native owners.
+            auto done=std::exchange(keep->m_done,{});
+            keep->Popup::onClose(nullptr);if(done)done(accepted);
+        });
     }
 public:
     static RankedConfirmPopup* create(std::string const& title,std::string const& message,std::function<void(bool)> done,std::string const& confirm="") {

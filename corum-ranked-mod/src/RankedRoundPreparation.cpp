@@ -89,6 +89,7 @@ void RankedRoundPreparation::retry() {
 }
 
 void RankedRoundPreparation::pump() {
+    drainNativeReturn();
     auto const now = clockSeconds();
     // Both the process heartbeat and a visible round UI may ask to pump. Count
     // quiet native frames once, never twice in the same response/render tick.
@@ -352,6 +353,7 @@ void RankedRoundPreparation::setLowDetail(bool enabled) {
 }
 
 bool RankedRoundPreparation::launch(CCScene* origin) {
+    drainNativeReturn();
     if(m_launching || m_quitting || m_returnQueued || CCDirector::sharedDirector()->getNextScene())return false;
     pump();
     if (clockSeconds() < m_nextLaunchAt) return false;
@@ -378,30 +380,9 @@ bool RankedRoundPreparation::launch(CCScene* origin) {
     if(survival && !SurvivalRuntime::get().validateNative(level))return false;
     if(m_quitting || m_returnQueued)return false;
     if (auto current = m_play.lock(); current && current->isRunning()) return false;
-    // Prevent a second live game or scene teardown from overlapping the new
-    // round. After a confirmed native return the GD singleton can briefly
-    // retain a detached non-running layer, which must not block re-entry
-    // forever. The quit/return flags and next-scene gate above remain strict.
-    if(auto* previous=PlayLayer::get()){
-        auto* parent=previous->getParent();
-        auto* running=CCDirector::sharedDirector()->getRunningScene();
-        if(!previous->isRunning() && parent && parent!=running && !parent->isRunning()){
-            // iPadOS may retain the popped scene's child even after native Quit.
-            // Detach ONLY a stopped PlayLayer from a stopped, non-current scene.
-            // Keep the owner alive until Cocos finishes the removal callbacks.
-            log::info("[RankedEntry] retiring orphan PlayLayer from stopped scene");
-            {
-                geode::Ref<PlayLayer> retiring(previous);
-                previous->removeFromParentAndCleanup(true);
-            }
-        }
-        // Requery the GD singleton; the orphan can be destroyed above.
-        if(auto* current=PlayLayer::get();current && (current->isRunning() || current->getParent())){
-            log::info("[RankedEntry] waiting for prior PlayLayer teardown running={} attached={} currentScene={}",
-                current->isRunning(),current->getParent()!=nullptr,current->getParent()==running);
-            return false;
-        }
-    }
+    // Never detach an arbitrary old PlayLayer or build over a retained GD
+    // singleton. The exact native-return transaction retires its own scene.
+    if(PlayLayer::get())return false;
     // Hold both the saved level and GD's shared texture-cache owner throughout
     // native setup. A context poll or callback cannot retire the object being
     // initialized. The cache guard spans the inter-round native quit boundary.
@@ -444,7 +425,7 @@ bool RankedRoundPreparation::launch(CCScene* origin) {
     m_play = geode::WeakRef<PlayLayer>(play);
     m_origin = geode::WeakRef<CCScene>(origin);
     m_launchedLevel = level;
-    m_returnQueued = m_quitting = false;
+    m_returnQueued = m_quitting = m_returnPopped = false;
     CCDirector::sharedDirector()->pushScene(scene);
     // pushScene schedules the transition. Actual entry is ACKed by the running
     // PlayLayer heartbeat, after onEnter rather than before the scene exists.
@@ -469,7 +450,8 @@ bool RankedRoundPreparation::returnFromNativeQuit(GJGameLevel* level) {
     auto origin = m_origin.lock();
     if (!m_quitting || !origin || !m_launchedLevel || level != m_launchedLevel.data()) return false;
     if (m_returnQueued) return true;
-    m_returnQueued = true;
+    m_returnQueued = true;m_returnPopped=false;
+    m_returnScene=geode::WeakRef<CCScene>(CCDirector::sharedDirector()->getRunningScene());
     auto const generation = m_launchGeneration;
     // Never construct the next PlayLayer inside the departing onQuit call stack.
     queueInMainThread([this, generation, departing=geode::WeakRef<CCScene>(CCDirector::sharedDirector()->getRunningScene())] {
@@ -479,11 +461,9 @@ bool RankedRoundPreparation::returnFromNativeQuit(GJGameLevel* level) {
         auto* director=CCDirector::sharedDirector();
         auto const ownsScene=scene && director->getRunningScene()==scene.data() &&
             scene.data()!=origin.data() && !director->getNextScene();
-        // Geode 5.10.1 WeakRef pointer assignment to nullptr drops the
-        // controller without running its native-owner release check.
-        { [[maybe_unused]] auto departedPlay = std::move(m_play); [[maybe_unused]] auto retainedOrigin = std::move(m_origin); }
-        m_launchedLevel = nullptr;
-        m_returnQueued = false;
+        // Probe weak owners AFTER the director has exited this scene. Dropping
+        // them here leaves Geode's pool retaining the native child indefinitely.
+        m_returnPopped=true;
         log::info("[RankedEntry] native return ownsScene={} queuedScene={} departingAlive={} appPaused={}",ownsScene,director->getNextScene()!=nullptr,static_cast<bool>(scene),
             AppDelegate::get() && AppDelegate::get()->m_gamePaused);
         if(ownsScene){
@@ -492,6 +472,20 @@ bool RankedRoundPreparation::returnFromNativeQuit(GJGameLevel* level) {
         }
     });
     return true;
+}
+
+void RankedRoundPreparation::drainNativeReturn() {
+    auto* director=CCDirector::sharedDirector();
+    if(!m_returnQueued || !m_returnPopped || m_quitting || director->getNextScene())return;
+    auto scene=m_returnScene.lock();
+    if(scene && (scene->isRunning() || director->getRunningScene()==scene.data() || director->levelForSceneInStack(scene.data())>=0))return;
+    if(m_play.lock())return;
+    {[[maybe_unused]]auto play=std::move(m_play);[[maybe_unused]]auto origin=std::move(m_origin);[[maybe_unused]]auto departed=std::move(m_returnScene);}
+    m_launchedLevel=nullptr;m_returnQueued=m_returnPopped=false;
+    log::info("[RankedEntry] exact departed scene and PlayLayer retired; entry available");
+}
+bool RankedRoundPreparation::nativeReturnPending(PlayLayer* play)const{
+    auto owner=m_play.lock();return owner && owner.data()==play && (m_quitting || m_returnQueued);
 }
 
 } // namespace corum::ranked
