@@ -444,7 +444,9 @@ public:
                 [weak=WeakRef(this),id,key,generation](bool accepted){
                     auto owner=weak.lock();if(!owner || !owner->getParent())return;owner->m_fields->survivalConfirmation.reset();
                     auto play=owner->m_fields->owner?owner->m_fields->owner->lock():Ref<PlayLayer>();
-                    if(!play || play.data()!=PlayLayer::get() || !play->isRunning() || play->getParent()!=CCDirector::sharedDirector()->getRunningScene())return;
+                    if(!play || play.data()!=PlayLayer::get() || !play->getParent() ||
+                        play->getParent()!=CCDirector::sharedDirector()->getRunningScene() ||
+                        CCDirector::sharedDirector()->getNextScene())return;
                     auto& current=corum::ranked::SurvivalRuntime::get();
                     if(accepted && current.canSurrender() && current.view().id==id && current.view().roundKey==key && current.view().mapGeneration==generation){
                         current.surrender();}
@@ -473,7 +475,9 @@ public:
             [weak=WeakRef(this),id,key,generation](bool accepted){
                 auto owner=weak.lock();if(!owner || !owner->getParent())return;owner->m_fields->survivalConfirmation.reset();
                 auto play=owner->m_fields->owner?owner->m_fields->owner->lock():Ref<PlayLayer>();
-                if(!play || play.data()!=PlayLayer::get() || !play->isRunning() || play->getParent()!=CCDirector::sharedDirector()->getRunningScene())return;
+                if(!play || play.data()!=PlayLayer::get() || !play->getParent() ||
+                        play->getParent()!=CCDirector::sharedDirector()->getRunningScene() ||
+                        CCDirector::sharedDirector()->getNextScene())return;
                 auto& current=SurvivalRuntime::get();
                 if(accepted && current.canForceClear() && current.view().id==id && current.view().roundKey==key && current.view().mapGeneration==generation)current.forceClear();
             },i18n::text("survival-force-clear","FORCE CLEAR"));
