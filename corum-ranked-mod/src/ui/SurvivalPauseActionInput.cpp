@@ -49,10 +49,44 @@ void SurvivalPauseActionInput::cancelTouch(){
     m_touch=m_pressed=-1;
 }
 void SurvivalPauseActionInput::suspend(){++m_epoch;cancelTouch();m_pending=false;m_allowed={};}
-void SurvivalPauseActionInput::registerWithTouchDispatcher(){CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this,-500,true);}
+void SurvivalPauseActionInput::registerWithTouchDispatcher(){
+    log::info("[SurvivalPauseInput] registering targeted touch delegate");
+    CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this,-500,true);
+}
 void SurvivalPauseActionInput::synchronize(){
-    if(!valid()){cancelTouch();return;}
-    auto* dispatcher=CCDirector::sharedDirector()->getTouchDispatcher();auto* own=dispatcher->findHandler(this);if(!own)return;
+    if(!isRunning())return;
+    auto* dispatcher=CCDirector::sharedDirector()->getTouchDispatcher();
+    auto* own=dispatcher->findHandler(this);
+    if(!own){
+        // Cocos may defer its onEnter registration while Pause was created
+        // inside another touch dispatcher callback. Repair only after that
+        // callback has unwound, and never register the same delegate twice.
+        if(!m_registrationQueued && !m_repairedRegistration){
+            m_registrationQueued=true;
+            queueInMainThread([weak=WeakRef(this)]{
+                auto input=weak.lock();
+                if(!input || !input->isRunning())return;
+                input->m_registrationQueued=false;
+                auto* dispatcher=CCDirector::sharedDirector()->getTouchDispatcher();
+                if(!dispatcher->findHandler(input.data())){
+                    input->m_repairedRegistration=true;
+                    input->registerWithTouchDispatcher();
+                }
+                input->synchronize();
+            });
+        }
+        return;
+    }
+    if(!valid()){
+        cancelTouch();
+        if(m_syncWarnings++<3){
+            auto pause=m_pause.lock();auto play=m_play.lock();auto scene=m_scene.lock();
+            log::info("[SurvivalPauseInput] registered but inactive pause={} play={} scene={} allowed={} running={}",
+                static_cast<bool>(pause),static_cast<bool>(play),static_cast<bool>(scene),
+                static_cast<bool>(m_allowed),isRunning());
+        }
+        return;
+    }
     auto priority=own->m_nPriority;auto pause=m_pause.lock();auto play=m_play.lock();
     std::vector<CCNode*> pending{pause.data(),play.data(),play->m_uiLayer};
     // Only the exact native owners and the Pause subtree participate. Other
@@ -66,12 +100,15 @@ void SurvivalPauseActionInput::synchronize(){
     if(!m_logged){m_logged=true;log::info("[SurvivalPauseInput] ready priority={} actions={}",priority,m_actions.size());}
 }
 void SurvivalPauseActionInput::onEnter(){
-    CCLayer::onEnter();synchronize();
+    CCLayer::onEnter();
+    log::info("[SurvivalPauseInput] onEnter registered={} actions={}",
+        CCDirector::sharedDirector()->getTouchDispatcher()->findHandler(this)!=nullptr,m_actions.size());
+    synchronize();
     // Pause can be constructed by a touch callback while registrations are
     // queued. Align after that dispatch has drained, before the next tap.
     queueInMainThread([weak=WeakRef(this)]{if(auto input=weak.lock();input && input->isRunning())input->synchronize();});
 }
-void SurvivalPauseActionInput::onExit(){++m_epoch;cancelTouch();m_pending=false;CCLayer::onExit();}
+void SurvivalPauseActionInput::onExit(){++m_epoch;cancelTouch();m_pending=false;m_registrationQueued=false;CCLayer::onExit();}
 void SurvivalPauseActionInput::update(float){synchronize();}
 bool SurvivalPauseActionInput::ccTouchBegan(CCTouch* touch,CCEvent*){
     if(m_pending || m_touch!=-1 || !valid())return false;
