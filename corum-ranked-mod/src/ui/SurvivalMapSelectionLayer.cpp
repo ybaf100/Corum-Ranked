@@ -224,7 +224,7 @@ void SurvivalMapSelectionLayer::present(SurvivalMatchView const& view,RoundPrepa
     if(!clock.empty()){
         auto const phase=view.phase=="TIEBREAK"?std::string("DEATH MATCH"):view.phase=="FINAL"?std::string("FINAL"):fmt::format("ROUND {}",view.roundNumber);
         auto const clockText=phase+"\n"+i18n::text(clock,clock);if(clockText!=m_clock->getString())m_clock->setString(clockText.c_str());m_clock->setAnchorPoint({1,.5f});m_clock->setPosition({r.header.right(),r.header.cy()});fitFullMenuLabel(m_clock,142*r.scale,34*r.scale,.27f);
-        m_header->setPositionX(r.header.x+(r.header.w-152*r.scale)/2);fitFullMenuLabel(m_header,r.header.w-152*r.scale,r.header.h,finalHeader?.48f:.83f);
+        m_header->setPosition({r.header.cx(),r.header.cy()});fitFullMenuLabel(m_header,std::max(80.f,r.header.w-304*r.scale),r.header.h,finalHeader?.48f:.83f);
     }m_clock->setVisible(!clock.empty());
     auto const subtitle=finalHeader?std::string("SURVIVAL"):context.levelId==0 && !view.mapError.empty()?i18n::text("survival-map-retry","MAP SEARCH FAILED · RETRYING..."):std::string("MAP SELECTION");if(subtitle!=m_subtitle->getString())m_subtitle->setString(subtitle.c_str());m_subtitle->setPosition({r.subtitle.cx(),r.subtitle.cy()});fitFullMenuLabel(m_subtitle,r.subtitle.w,r.subtitle.h,.20f);
     auto hint=m_fallback?i18n::text("survival-thumbnail-unavailable","Thumbnail unavailable; showing the server level ID."):
