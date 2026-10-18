@@ -1,3 +1,15 @@
+# v0.5.0-beta.79
+
+- Fix Survival Pause surrender and Debug Force Clear taps on iPadOS by validating the authoritative scene while native PlayLayer is paused, retaining modal protection for newly opened dialogs, and accepting confirmed actions from that paused owner.
+- Recover re-entry when the previously popped, stopped native PlayLayer remains attached to a stale, non-running scene. Never detach an active scene or running game.
+- Recover a stuck Survival match-state poll after eight seconds and reject late callback responses from cancelled requests.
+- Mark live players currently below the qualification cutoff with a red card background, without waiting for elimination to become final.
+- Center Survivor and Selected Map titles in the full screen independently of the top-right round timer.
+- Enlarge carousel thumbnails, use continuous velocity-matched easing, freeze thumbnail order during animation, and avoid numeric fallback if the final thumbnail is still loading.
+- Show START / 시작 instead of READY / 준비 when reopening the selected map after already entering the round; preserve the same server-authoritative entry permissions.
+- Update related native C++ test doubles and regression assertions. Device-specific behavior still needs physical validation.
+- Synchronize client and server versions to beta.79, avoiding overwrite of immutable beta.78 R2 packages.
+
 # v0.5.0-beta.78
 
 - Wait five server-authoritative seconds after all players confirm assets ready, then preserve the existing five-second native-entry allowance and three-second gameplay countdown after everybody enters.
