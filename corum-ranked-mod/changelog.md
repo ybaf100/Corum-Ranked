@@ -1,3 +1,10 @@
+# v0.5.0-beta.86
+
+- Repackage the beta.85 Survival observer/podium/automatic-map implementation with corrected native Debug policy fixture and font atlas without overwriting the immutable beta.85 R2 binaries.
+- Restore the reserved Regular font's ASCII-only atlas; preserve the Korean glyphs of actively used Medium, SemiBold, Bold and Black fonts and enforce the existing 96 MiB combined RGBA limit.
+- Test eliminated choice/observer Back navigation with an updated C++ fixture; retain the complete native Debug ON/OFF and four-platform Release package verification.
+- Coordinate the server-required version rollout with the new immutable Debug and Release beta.86 descriptors. Previously published beta.85 remains available until both beta.86 channels are verified.
+
 # v0.5.0-beta.84
 
 - Keep the latest Railway production endpoints and direct Neon migration-lock fix from main; synchronize required-client and workspace versions to beta.84.
