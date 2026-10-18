@@ -25,9 +25,9 @@ SurvivalSelectedMapPanel* SurvivalSelectedMapPanel::create(std::function<void(in
     if(p->initWithColor({0,0,0,0},0,0)){p->m_action=std::move(action);p->setCascadeOpacityEnabled(true);p->setID("survival-selected-map-panel"_spr);p->autorelease();return p;}
     delete p;return nullptr;
 }
-CCNode* SurvivalSelectedMapPanel::readyFace(bool enabled,bool retry){
+CCNode* SurvivalSelectedMapPanel::readyFace(bool enabled,bool retry,bool start){
     auto const& r=m_layout.ready;auto* face=surface({r.w,r.h},{},retry?Blue:ccc3(255,237,139),retry?SurfaceRaised:Gold,255,true);
-    auto* label=menuLabel(i18n::text(retry?"retry":"ready",retry?"RETRY":"READY"),.34f,{r.w/2,r.h/2},retry?Text:Ink,FontWeight::Black);
+    auto* label=menuLabel(i18n::text(retry?"retry":start?"start":"ready",retry?"RETRY":start?"START":"READY"),.34f,{r.w/2,r.h/2},retry?Text:Ink,FontWeight::Black);
     fitSurvivalSingleLine(label,r.w-16,r.h-10,.34f);face->addChild(label,5);if(!enabled)grayButtonVisual(face);return face;
 }
 void SurvivalSelectedMapPanel::build(CCSize size,bool thumbnail,bool ldm){
@@ -50,7 +50,7 @@ void SurvivalSelectedMapPanel::build(CCSize size,bool thumbnail,bool ldm){
     auto* jukeboxCaption=menuLabel("Jukebox",.22f,{r.jukebox.w/2,r.jukebox.h/2},Text,FontWeight::ExtraBold);
     fitSurvivalSingleLine(jukeboxCaption,r.jukebox.w-10,r.jukebox.h-8,.22f);jukebox->addChild(jukeboxCaption,5);
     m_jukebox=item(r.jukebox,jukebox,6,"survival-map-jukebox");
-    m_readyEnabled=false;m_retry=false;m_ready=item(r.ready,readyFace(false),0,"survival-map-ready");
+    m_readyEnabled=false;m_retry=false;m_start=false;m_ready=item(r.ready,readyFace(false),0,"survival-map-ready");
 }
 void SurvivalSelectedMapPanel::onAction(CCObject* sender){if(auto* b=typeinfo_cast<CCMenuItemSpriteExtra*>(sender);b && b->isEnabled() && m_action)m_action(b->getTag());}
 void SurvivalSelectedMapPanel::suspend(){
@@ -66,8 +66,12 @@ void SurvivalSelectedMapPanel::present(CCSize size,bool thumbnail,SurvivalMatchV
     m_options=options;auto const interactive=appearance>=1. && actionsEnabled;
     auto* level=RankedLevelPreparation::get().level();auto const native=level && static_cast<int>(level->m_levelID)==view.map.levelId;
     m_ldm->setEnabled(interactive && native && prep.mapReady && supportsLdm);m_shake->setEnabled(interactive && native && prep.mapReady);m_jukebox->setEnabled(interactive && native && prep.mapReady);
-    auto const retry=!prep.error.empty();auto const ready=interactive && (retry || canEnter);
-    if(ready!=m_readyEnabled || retry!=m_retry){m_readyEnabled=ready;m_retry=retry;m_ready->setNormalImage(readyFace(ready,retry));}
+    auto const retry=!prep.error.empty();auto const start=view.ownEntered || view.state=="PLAYING";
+    auto const ready=interactive && (retry || canEnter);
+    if(ready!=m_readyEnabled || retry!=m_retry || start!=m_start){
+        m_readyEnabled=ready;m_retry=retry;m_start=start;
+        m_ready->setNormalImage(readyFace(ready,retry,start));
+    }
     m_ready->setTag(retry?10:0);m_ready->setEnabled(ready);
     if(native)RankedMapDetails::get().remember(level);
     auto metadata=RankedMapDetails::get().metadata(view.map.levelId);
