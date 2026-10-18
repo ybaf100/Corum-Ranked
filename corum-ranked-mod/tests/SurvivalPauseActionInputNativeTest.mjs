@@ -83,10 +83,14 @@ int main(){
   Popup modal;scene.addChild(&modal);modal.onEnter();const int modalWrites=d.priorityWrites;
   input->update(0);tap(10);assert(surrendered==1&&d.priorityWrites==modalWrites);
   modal.visible=false;modal.onExit();tap(11);assert(surrendered==2);
-  d.began(12,surrenderPoint);d.ended(12,surrenderPoint);director->nextScene=&scene;drain();assert(surrendered==2);director->nextScene=nullptr;
-  d.began(13,surrenderPoint);d.ended(13,surrenderPoint);PlayLayer::current=nullptr;drain();assert(surrendered==2);PlayLayer::current=&play;
-  d.began(14,surrenderPoint);d.ended(14,surrenderPoint);pause.parent=nullptr;drain();assert(surrendered==2);pause.parent=&scene;
-  d.began(15,surrenderPoint);d.ended(15,surrenderPoint);input->suspend();drain();assert(surrendered==2);
+  // Simulate a missing native dispatcher registration after Pause enters:
+  // the observer restores its own targeted handler asynchronously, once.
+  d.removeDelegate(input);input->update(0);assert(!d.findHandler(input));
+  drain();assert(d.findHandler(input));tap(115);assert(surrendered==3);
+  d.began(12,surrenderPoint);d.ended(12,surrenderPoint);director->nextScene=&scene;drain();assert(surrendered==3);director->nextScene=nullptr;
+  d.began(13,surrenderPoint);d.ended(13,surrenderPoint);PlayLayer::current=nullptr;drain();assert(surrendered==3);PlayLayer::current=&play;
+  d.began(14,surrenderPoint);d.ended(14,surrenderPoint);pause.parent=nullptr;drain();assert(surrendered==3);pause.parent=&scene;
+  d.began(15,surrenderPoint);d.ended(15,surrenderPoint);input->suspend();drain();assert(surrendered==3);
   input->onExit();delete input;menu.onExit();pause.onExit();ui.onExit();play.onExit();drain();assert(d.handlers.empty());
  }
  // A scene can be retired before its onEnter synchronization callback runs.
