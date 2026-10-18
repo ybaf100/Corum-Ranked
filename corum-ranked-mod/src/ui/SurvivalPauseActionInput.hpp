@@ -17,7 +17,7 @@ class SurvivalPauseActionInput final : public cocos2d::CCLayer {
     std::vector<geode::WeakRef<cocos2d::CCNode>> m_preexistingAlerts;
     std::function<bool()> m_allowed;
     int m_touch=-1,m_pressed=-1;
-    unsigned m_epoch=0,m_diagnostics=0;
+    unsigned m_epoch=0,m_diagnostics=0,m_touchProbes=0;
     bool m_pending=false,m_logged=false,m_registrationQueued=false,m_repairedRegistration=false;
     unsigned m_syncWarnings=0;
     bool valid()const;

@@ -88,6 +88,9 @@ struct CCTouchDispatcher {
         });
         handlers.insert(it, std::move(h)); ++adds;
     }
+    // Geode force-priority-aware delegate uses the same ordered dispatcher
+    // semantics in this non-modal native fixture.
+    void addPrioTargetedDelegate(CCTouchDelegate* delegate,int priority,bool swallow){addTargetedDelegate(delegate,priority,swallow);}
     void setPriority(int priority, CCTouchDelegate* delegate) {
         auto* h = findHandler(delegate); assert(h); h->m_nPriority = priority;
         ++priorityWrites;

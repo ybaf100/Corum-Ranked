@@ -18,6 +18,7 @@ const viewer=read('tests/SpectatorLiveViewerNativeTest.mjs');
 const json=viewer.slice(viewer.indexOf('namespace matjson {'),viewer.indexOf('${readFileSync(join(root,'));
 const common=`
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <chrono>
 #include <cmath>
@@ -195,6 +196,7 @@ std::string operator""_spr(char const*s,std::size_t n){return std::string(s,n);}
 #define menu_selector(x) 0
 namespace geode::prelude{}
 namespace geode::log{template<class...T>void debug(T const&...){}template<class...T>void info(T const&...){}}
+namespace log=geode::log;
 namespace corum::ranked{
 namespace i18n{std::string text(char const*,char const*fallback){return fallback;}}
 namespace ui{constexpr int Gold=1,Surface=2,SurfaceRaised=3,Text=4,Blue=5;enum class FontWeight{ExtraBold,SemiBold};Node*surface(CCSize s,CCPoint p,int,int,int,bool){auto*n=new Node;n->size=s;n->pos=p;return n;}Label*menuLabel(std::string,float,CCPoint,int,FontWeight){return new Label;}void fitMenuLabelWidth(Label*,float,float,float){}void fitFullMenuLabel(Label*,float,float,float){}
@@ -203,6 +205,7 @@ struct SurvivalRuntime{struct View{std::string id="m",roundKey="r1",phase="ROUND
 ${method(runtime,'bool SurvivalRuntime::canForceClear()')}
 }
 using corum::ranked::SurvivalRuntime;namespace ui=corum::ranked::ui;namespace i18n=corum::ranked::i18n;
+#define CORUM_RANKED_NATIVE_TEST 1
 ${strip(read('src/ui/RankedConfirmPopup.hpp'))}
 struct PauseLayer:Node{virtual void onEnter(){}}
 ;

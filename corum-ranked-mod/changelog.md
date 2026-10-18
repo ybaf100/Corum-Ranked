@@ -1,3 +1,13 @@
+# v0.5.0-beta.80
+
+- Use Geode force-priority-aware targeted touch registration for the two in-game Survival Pause actions; record actual touch coordinates, item hit rectangles and gate outcomes for future iPad reproduction.
+- Provide a button-only targeted touch route for Survival confirmation popups, retaining normal native menu callbacks and strict once-only dismissal/ACK validation.
+- After a native round scene returns to the authoritative coordinator, clear only the stale global application pause flag retained from the departed Pause; never unpause a running native gameplay scene.
+- Keep the thumbnail reel when images are still downloading instead of permanently locking the numeric reel on the first uncached frame. Delay freezing the preview list until it has multiple images, and never display an unrelated winner image.
+- Increase the selected level thumbnail and reel cards while preserving compact layout constraints.
+- Keep the server-authoritative countdown and confirmation rules unchanged. Native fixtures cover force-aware touch registration and asynchronous thumbnail choices.
+- Synchronize the mod, rules, server and required-client metadata to beta.80. Device touch behavior still requires hands-on iPadOS verification.
+
 # v0.5.0-beta.79
 
 - Fix Survival Pause surrender and Debug Force Clear taps on iPadOS by validating the authoritative scene while native PlayLayer is paused, retaining modal protection for newly opened dialogs, and accepting confirmed actions from that paused owner.

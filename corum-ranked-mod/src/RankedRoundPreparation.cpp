@@ -53,6 +53,21 @@ RankedRoundPreparation& RankedRoundPreparation::get() {
 }
 void RankedRoundPreparation::update(float dt) {
     RankedRuntime::get().updateSessionHeartbeat();
+    // On iPadOS vanilla Pause->Quit can pop the game scene while retaining
+    // AppDelegate::m_gamePaused. Only clear it after the exact saved origin
+    // has become the active scene; never unpause an active game or another UI.
+    if(m_nativePauseRestoreOrigin){
+        auto origin=m_nativePauseRestoreOrigin->lock();
+        auto* director=CCDirector::sharedDirector();
+        if(!origin)m_nativePauseRestoreOrigin.reset();
+        else if(director->getRunningScene()==origin.data() && !director->getNextScene()){
+            if(auto* app=AppDelegate::get();app && app->m_gamePaused){
+                log::warn("[RankedEntry] restoring stale app pause flag after native scene pop");
+                app->m_gamePaused=false;
+            }
+            m_nativePauseRestoreOrigin.reset();
+        }
+    }
     m_timer -= dt;
     if (m_timer > 0) return;
     m_timer = 0.2f;
@@ -469,8 +484,12 @@ bool RankedRoundPreparation::returnFromNativeQuit(GJGameLevel* level) {
         { [[maybe_unused]] auto departedPlay = std::move(m_play); [[maybe_unused]] auto retainedOrigin = std::move(m_origin); }
         m_launchedLevel = nullptr;
         m_returnQueued = false;
-        log::info("[RankedEntry] native return ownsScene={} queuedScene={} departingAlive={}",ownsScene,director->getNextScene()!=nullptr,static_cast<bool>(scene));
-        if(ownsScene)director->popScene();
+        log::info("[RankedEntry] native return ownsScene={} queuedScene={} departingAlive={} appPaused={}",ownsScene,director->getNextScene()!=nullptr,static_cast<bool>(scene),
+            AppDelegate::get() && AppDelegate::get()->m_gamePaused);
+        if(ownsScene){
+            m_nativePauseRestoreOrigin.emplace(origin.data());
+            director->popScene();
+        }
     });
     return true;
 }

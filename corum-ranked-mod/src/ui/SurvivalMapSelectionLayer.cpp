@@ -126,7 +126,7 @@ void SurvivalMapSelectionLayer::numberFrame(SurvivalRevealFrame const& frame,Sur
 }
 void SurvivalMapSelectionLayer::thumbnailFrame(SurvivalRevealFrame const& frame,SurvivalSelectionLayout const& r){
     auto& v=*m_visuals;auto const size=getContentSize();
-    if(!v.cardsBuilt){v.cardWidth=std::min(205.f*r.scale,size.width*.33f);v.carousel=clip({size.width-28*r.scale,r.carousel.h+12*r.scale});v.carousel->setPosition({14*r.scale,r.carousel.cy()-(r.carousel.h+12*r.scale)/2});addChild(v.carousel,8);
+    if(!v.cardsBuilt){v.cardWidth=std::min(252.f*r.scale,size.width*.40f);v.carousel=clip({size.width-28*r.scale,r.carousel.h+12*r.scale});v.carousel->setPosition({14*r.scale,r.carousel.cy()-(r.carousel.h+12*r.scale)/2});addChild(v.carousel,8);
         for(auto& card:v.cards)card.make(v.carousel,v.cardWidth);v.selected.make(this,v.cardWidth);v.selected.root->setZOrder(12);v.cardsBuilt=true;
     }
     auto const provider=SurvivalThumbnailProvider::get().previews();
@@ -136,7 +136,9 @@ void SurvivalMapSelectionLayer::thumbnailFrame(SurvivalRevealFrame const& frame,
         for(auto const& p:provider)
             if(std::none_of(v.previews.begin(),v.previews.end(),[&](auto const& cached){return cached.first==p.first;}))
                 v.previews.push_back(p);
-        v.previewsFrozen=true;
+        // Wait for a useful reel instead of freezing at only the selected
+        // thumbnail and repeating that same image five times.
+        v.previewsFrozen=v.previews.size()>=4 || frame.elapsed>=2.15;
     }
     if(v.previews.size()>8)v.previews.erase(v.previews.begin(),v.previews.end()-8);
     if(auto preferred=SurvivalThumbnailProvider::get().selected();preferred && preferred.data()!=v.finalTexture.data())v.finalTexture=preferred;
@@ -158,7 +160,7 @@ void SurvivalMapSelectionLayer::thumbnailFrame(SurvivalRevealFrame const& frame,
         setModeLobbyOpacity(card.root,static_cast<GLubyte>((1-std::clamp((frame.elapsed-2.75)/.30,0.,1.))*255));
         if(central && std::abs(relative)<.9f)card.root->setVisible(false);else card.root->setVisible(true);
     }
-    auto& selected=v.selected;selected.root->setVisible(central);if(central){selected.set(v.finalTexture ? v.finalTexture.data() : v.previews.empty() ? nullptr : v.previews.front().second.data());selected.shade->setOpacity(0);selected.trim->setVisible(true);
+    auto& selected=v.selected;selected.root->setVisible(central);if(central){selected.set(v.finalTexture.data());selected.shade->setOpacity(0);selected.trim->setVisible(true);
         // Thumbnail landing starts at 2.75s; numeric landing starts at 2.70s.
         auto const p=survivalEase((frame.elapsed-2.75)/.45);auto const start=CCPoint{size.width/2,r.carousel.cy()};
         auto const arrival=1-survivalEase((frame.elapsed-2.15)/.60);
@@ -201,7 +203,8 @@ void SurvivalMapSelectionLayer::present(SurvivalMatchView const& view,RoundPrepa
     auto const supported=SurvivalThumbnailProvider::supported();bool previewsReady=false;
     if(supported){auto& provider=SurvivalThumbnailProvider::get();provider.activate(context);m_providerContext=context;previewsReady=!provider.previews().empty();}
     auto& record=reveals[context.key()];
-    m_thumbnail=context.levelId?record.mode.choose(supported,previewsReady):supported && previewsReady;
+    m_thumbnail=record.mode.choose(supported,previewsReady);
+    if(changed)log::info("[SurvivalReveal] mode level={} supported={} previewsReady={} thumbnail={}",context.levelId,supported,previewsReady,m_thumbnail);
     m_fallback=!m_thumbnail && Loader::get()->isModLoaded("cdc.level_thumbnails");
     m_timeline.followServer(view.state,countdown,now);
     auto const frame=m_timeline.frame(now);if(frame.stage==SurvivalRevealStage::Cancelled){hideSelection();return;}
