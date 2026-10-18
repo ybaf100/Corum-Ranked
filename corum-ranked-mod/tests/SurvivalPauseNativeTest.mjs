@@ -9,7 +9,7 @@ import {tmpdir} from 'node:os';
 import {fileURLToPath} from 'node:url';
 const root=resolve(fileURLToPath(new URL('..',import.meta.url)));
 const read=p=>readFileSync(join(root,p),'utf8');
-function method(source,name){const start=source.indexOf(name);assert(start>=0,name);let end=source.indexOf('{',start)+1,depth=1;while(depth){depth+=(source[end]==='{')-(source[end]==='}');end++;}return source.slice(start,end).replaceAll('std::chrono::steady_clock::now()','testNow()');}
+function method(source,name){const start=source.indexOf(name);assert(start>=0,name);let end=source.indexOf('{',start)+1,depth=1;while(depth){depth+=(source[end]==='{')-(source[end]==='}');end++;}return source.slice(start,end).replaceAll('std::chrono::steady_clock::now()','testNow()').replaceAll('log::','geode::log::');}
 function run(code,flags=[]){const dir=mkdtempSync(join(tmpdir(),'survival-pause-'));try{
  writeFileSync(join(dir,'test.cpp'),code);execFileSync('g++',['-std=c++23','-Wall','-Wextra','-Wpedantic','-Werror','-I',join(root,'src'),...flags,join(dir,'test.cpp'),'-o',join(dir,'test')],{stdio:'pipe'});execFileSync(join(dir,'test'),[],{stdio:'pipe'});
 }catch(e){throw new Error(e.stderr?.toString()||e.message);}finally{rmSync(dir,{recursive:true,force:true});}}
@@ -196,7 +196,7 @@ std::string operator""_spr(char const*s,std::size_t n){return std::string(s,n);}
 #define menu_selector(x) 0
 namespace geode::prelude{}
 namespace geode::log{template<class...T>void debug(T const&...){}template<class...T>void info(T const&...){}}
-namespace log=geode::log;
+// Extracted native methods use geode::log explicitly; avoid colliding with ::log(double).
 namespace corum::ranked{
 namespace i18n{std::string text(char const*,char const*fallback){return fallback;}}
 namespace ui{constexpr int Gold=1,Surface=2,SurfaceRaised=3,Text=4,Blue=5;enum class FontWeight{ExtraBold,SemiBold};Node*surface(CCSize s,CCPoint p,int,int,int,bool){auto*n=new Node;n->size=s;n->pos=p;return n;}Label*menuLabel(std::string,float,CCPoint,int,FontWeight){return new Label;}void fitMenuLabelWidth(Label*,float,float,float){}void fitFullMenuLabel(Label*,float,float,float){}
@@ -206,7 +206,7 @@ ${method(runtime,'bool SurvivalRuntime::canForceClear()')}
 }
 using corum::ranked::SurvivalRuntime;namespace ui=corum::ranked::ui;namespace i18n=corum::ranked::i18n;
 #define CORUM_RANKED_NATIVE_TEST 1
-${strip(read('src/ui/RankedConfirmPopup.hpp'))}
+${strip(read('src/ui/RankedConfirmPopup.hpp')).replaceAll('log::','geode::log::')}
 struct PauseLayer:Node{virtual void onEnter(){}}
 ;
 struct CorumRankedPauseLayer:PauseLayer{
@@ -214,7 +214,7 @@ struct CorumRankedPauseLayer:PauseLayer{
  struct Fields{bool survival=true;CCMenu*survivalActions=nullptr;CCMenuItemSpriteExtra*forceClear=nullptr;CCMenu*forceClearMenu=nullptr;std::optional<WeakRef<ui::RankedConfirmPopup>>survivalConfirmation;std::optional<WeakRef<PlayLayer>>owner;std::string matchId="m",survivalRoundKey="r1";int survivalMapGeneration=1;}fields;Fields*m_fields=&fields;
  CCNode*getChildByIDRecursive(char const*){return &center;}
  ${method(pause,'void setupSurvivalForceClear(')}
- ${method(pause,'void synchronizeSurvivalPauseInput()')}
+ ${method(pause,'void synchronizeSurvivalPauseInput()').replaceAll('CCDirector::sharedDirector()->getTouchDispatcher()','CCTouchDispatcher::get()')}
  ${method(pause,'void onForceClear(')}
  ${survivalSurrender}
 };

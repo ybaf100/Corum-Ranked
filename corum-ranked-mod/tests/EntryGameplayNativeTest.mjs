@@ -159,7 +159,7 @@ struct CCDirector {int pops=0;CCScene* current=nullptr;CCScene* next=nullptr;CCS
     static CCDirector* sharedDirector(){static CCDirector d;return &d;}
     void popScene(){++pops;if(retire)retire();}};
 struct RankedRoundPreparation {
-    geode::WeakRef<PlayLayer> m_play;geode::WeakRef<CCScene> m_origin;
+    geode::WeakRef<PlayLayer> m_play;geode::WeakRef<CCScene> m_origin;std::optional<geode::WeakRef<CCScene>> m_nativePauseRestoreOrigin;
     geode::Ref<GJGameLevel> m_launchedLevel;
     bool m_quitting=true,m_returnQueued=false;std::uint64_t m_launchGeneration=1;
     RankedRoundPreparation(PlayLayer* p,CCScene* origin):m_play(p),m_origin(origin),m_launchedLevel(&p->level){CCDirector::sharedDirector()->current=&p->parent;}

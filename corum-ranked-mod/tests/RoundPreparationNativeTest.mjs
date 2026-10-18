@@ -44,6 +44,8 @@ struct CCNode {
     auto const& getChildrenExt()const{return children;}
 };
 struct CCScene:CCNode {};
+// Production return-to-coordinator now inspects the native application pause latch.
+struct AppDelegate{bool m_gamePaused=false;static AppDelegate* get(){static AppDelegate a;return &a;}};
 struct FLAlertLayer:CCNode {};
 using CCObject = CCNode;
 namespace cocos2d { using ::CCNode; using ::CCScene; }

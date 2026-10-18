@@ -38,7 +38,14 @@ inline SurvivalSelectionLayout survivalSelectionLayout(float width,float height,
     r.panel={left,bottom,panelWidth,std::min(thumbnail?220.f:186.f,top-bottom)};
     // Anchor to the header on taller iPad viewports instead of stretching rows.
     r.panel.y=top-r.panel.h;
-    float const thumbWidth=(panelWidth-28)*.41f;
+    float thumbWidth=(panelWidth-28)*.41f;
+    // Compact phone layouts place the action controls under the thumbnail.
+    // Retain the larger iPad carousel/preview, but cap its height above LDM
+    // and Shake on short (320-unit) game viewports.
+    if(panelWidth-36.f-thumbWidth<300.f){
+        auto const available=r.panel.top()-12.f-(r.panel.y+89.f);
+        thumbWidth=std::min(thumbWidth,std::max(56.f,available*16.f/9.f));
+    }
     r.thumbnail={left+12,r.panel.top()-12-thumbWidth*9/16,thumbWidth,thumbWidth*9/16};
     float infoLeft=thumbnail?r.thumbnail.right()+12:left+12;
     float infoWidth=left+panelWidth-12-infoLeft;
