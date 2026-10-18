@@ -55,10 +55,10 @@ struct RankedRuntime{std::string token="session-a";bool allowed=true,updateRequi
 struct SurvivalRuntime{
  struct View{std::string id;bool debug=false,online=false;}m_view;
  struct Queue{std::string status="LEFT",matchId,error,waitingSince;int players=0,minimumPlayers=8,maximumPlayers=16;bool enabled=true;}m_queue;
- ServerClock m_clock;bool m_creating=false,m_queuePollBusy=false,m_recoverBusy=false,m_needRecovery=false;
+ ServerClock m_clock;bool m_creating=false,m_queuePollBusy=false,m_pollBusy=false,m_recoverBusy=false,m_needRecovery=false;
  std::uint64_t m_generation=1,m_queueGeneration=1;std::string m_session="session-a";
- std::chrono::steady_clock::time_point m_recoverRetryAt{},m_nextQueuePoll{};
- Request m_queueRequest,m_controlRequest,m_recoverRequest;std::vector<std::string> assigned;
+ std::chrono::steady_clock::time_point m_recoverRetryAt{},m_nextQueuePoll{},m_nextPoll{};
+ Request m_queueRequest,m_controlRequest,m_recoverRequest,m_pollRequest;std::vector<std::string> assigned;
  bool active()const{return !m_view.id.empty();}bool queueing()const{return m_queue.status=="QUEUED"||m_queue.status=="JOINING";}
  void loadOnlineMatch(std::string const& id){assigned.push_back(id);}
  bool current(std::uint64_t,std::string const&)const;
@@ -90,7 +90,10 @@ int main(){using namespace corum::ranked;SurvivalRuntime r;
  assert(r.m_needRecovery&&!r.m_creating&&r.m_queue.status=="LEFT"&&!r.m_queue.error.empty());
  r.queueAction("/join",{});auto retired=web::pending.back();RankedRuntime::get().token="replacement";
  retired.done({201,found});assert(r.assigned.empty());RankedRuntime::get().token="session-a";r.m_creating=false;
- r.observeQueue(found);assert(r.assigned.size()==1&&r.assigned[0]=="shared-game");
+ r.m_pollBusy=true;r.m_nextPoll=wall+std::chrono::seconds(30);
+  const auto previousPollCancels=r.m_pollRequest.cancelled;
+  r.observeQueue(found);assert(r.assigned.size()==1&&r.assigned[0]=="shared-game");
+  assert(!r.m_pollBusy&&r.m_pollRequest.cancelled==previousPollCancels+1);
  r.m_view.online=true;r.m_view.debug=true;assert(r.matchEndpoint("/matches/m")==onlineEndpoint("/matches/m"));
  r.m_view.online=false;
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
