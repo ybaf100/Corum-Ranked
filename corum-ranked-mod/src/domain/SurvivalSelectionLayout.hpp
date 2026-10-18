@@ -31,14 +31,14 @@ inline SurvivalSelectionLayout survivalSelectionLayout(float width,float height,
     float const margin=14;
     r.safe={margin,margin,width-2*margin,height-2*margin};
     r.header={margin,height-43,width-2*margin,30};r.subtitle={margin,height-62,width-2*margin,13};
-    r.carousel={margin,height*.5f-59,width-2*margin,118};
+    r.carousel={margin,height*.5f-65,width-2*margin,130};
     r.numberFinal={margin,height-98,width-2*margin,32};
     float const panelWidth=std::min(660.f,width-2*margin),left=(width-panelWidth)/2;
     float const top=height-(thumbnail?76.f:110.f),bottom=thumbnail?52.f:58.f;
     r.panel={left,bottom,panelWidth,std::min(thumbnail?220.f:186.f,top-bottom)};
     // Anchor to the header on taller iPad viewports instead of stretching rows.
     r.panel.y=top-r.panel.h;
-    float const thumbWidth=(panelWidth-28)*.35f;
+    float const thumbWidth=(panelWidth-28)*.41f;
     r.thumbnail={left+12,r.panel.top()-12-thumbWidth*9/16,thumbWidth,thumbWidth*9/16};
     float infoLeft=thumbnail?r.thumbnail.right()+12:left+12;
     float infoWidth=left+panelWidth-12-infoLeft;
