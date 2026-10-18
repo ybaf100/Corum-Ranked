@@ -256,7 +256,7 @@ int main(){CCScene scene;PlayLayer play;play.parent=&scene;PlayLayer::current=&p
   auto*dialog=static_cast<ui::RankedConfirmPopup*>(Popup::last);dialog->finish(false);drain();assert(r.surrenders==0&&!p.fields.survivalConfirmation);
   p.onSurrender(nullptr);dialog=static_cast<ui::RankedConfirmPopup*>(Popup::last);dialog->finish(true);dialog->finish(true);drain();assert(r.surrenders==1&&!p.fields.survivalConfirmation);
   p.onSurrender(nullptr);assert(Popup::opens==before+2);r.surrenderable=true;
-  p.onSurrender(nullptr);dialog=static_cast<ui::RankedConfirmPopup*>(Popup::last);play.running=false;dialog->finish(true);drain();assert(r.surrenders==1);play.running=true;
+  p.onSurrender(nullptr);dialog=static_cast<ui::RankedConfirmPopup*>(Popup::last);play.running=false;dialog->finish(true);drain();assert(r.surrenders==2);play.running=true; // paused native owner remains authorized
  }
  // A platform may register the native menu without a Pause-layer handler.
  {CorumRankedPauseLayer p;p.parent=&scene;p.fields.survivalActions=&p.center;p.setupSurvivalForceClear({568,320});
