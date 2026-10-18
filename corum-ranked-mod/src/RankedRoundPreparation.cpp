@@ -52,12 +52,12 @@ RankedRoundPreparation& RankedRoundPreparation::get() {
     return *instance;
 }
 void RankedRoundPreparation::update(float dt) {
+    RankedRuntime::get().updateSessionHeartbeat();
     // A held native PlayLayer can stop receiving its own scheduler callbacks.
     // Keep the same server-certified entry/GO gate progressing from the
     // process-owned heartbeat, without directly resuming native gameplay.
     if (auto current = m_play.lock(); current && current.data() == PlayLayer::get())
         pumpHeldRankedEntry(current.data());
-    RankedRuntime::get().updateSessionHeartbeat();
     // On iPadOS vanilla Pause->Quit can pop the game scene while retaining
     // AppDelegate::m_gamePaused. Only clear it after the exact saved origin
     // has become the active scene; never unpause an active game or another UI.

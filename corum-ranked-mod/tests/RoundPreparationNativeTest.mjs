@@ -210,6 +210,9 @@ struct RankedLevelPreparation {
         current=saved;return true;}
 };
 void tracePreparedLevel(char const*,GJGameLevel*,void*,void*){}
+// Fixture-only symbol for the process-owned native entry driver, which lives in
+// PlayLayer.cpp; its independent owner/gate behavior has dedicated coverage.
+void pumpHeldRankedEntry(PlayLayer*){}
 }
 ${noIncludes(read('src/RankedRoundPreparation.hpp'))}
 ${source}
