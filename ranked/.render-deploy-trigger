@@ -1,3 +1,4 @@
 beta54-admin-common-song-volumes
 beta55: confirm native death/clear before journaling; restore history Details and GDDL display recovery.
 beta74: deploy merged Survival board/settings and mod restriction configuration from main.
+beta78: verify automatic Render deployment from GitHub main; retain commit-trigger autoDeploy, no bypass token in deploy commits.
