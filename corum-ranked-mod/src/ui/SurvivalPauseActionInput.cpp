@@ -68,8 +68,11 @@ void SurvivalPauseActionInput::cancelTouch(){
 }
 void SurvivalPauseActionInput::suspend(){++m_epoch;cancelTouch();m_pending=false;m_allowed={};}
 void SurvivalPauseActionInput::registerWithTouchDispatcher(){
-    log::info("[SurvivalPauseInput] registering targeted touch delegate");
-    CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this,-500,true);
+    // A previous scene can leave a swallowing force-priority delegate above
+    // -500. This is a non-consuming observer outside its two actual buttons.
+    constexpr int kActionPriority=-50000;
+    log::info("[SurvivalPauseInput] registering targeted touch delegate priority={}",kActionPriority);
+    CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this,kActionPriority,true);
 }
 void SurvivalPauseActionInput::synchronize(){
     if(!isRunning())return;
@@ -108,7 +111,7 @@ void SurvivalPauseActionInput::synchronize(){
         }
         return;
     }
-    auto priority=own->m_nPriority;auto pause=m_pause.lock();auto play=m_play.lock();
+    auto priority=std::min(own->m_nPriority,-50000);auto pause=m_pause.lock();auto play=m_play.lock();
     std::vector<CCNode*> pending{pause.data(),play.data(),play->m_uiLayer};
     // Only the exact native owners and the Pause subtree participate. Other
     // mods' global handlers and modal registrations are never rewritten.
@@ -132,7 +135,21 @@ void SurvivalPauseActionInput::onEnter(){
 void SurvivalPauseActionInput::onExit(){++m_epoch;cancelTouch();m_pending=false;m_registrationQueued=false;CCLayer::onExit();}
 void SurvivalPauseActionInput::update(float){synchronize();}
 bool SurvivalPauseActionInput::ccTouchBegan(CCTouch* touch,CCEvent*){
-    if(m_pending || m_touch!=-1 || !valid())return false;
+    auto const authorized=valid();
+    if(m_touchProbes++<24){
+        auto const point=touch->getLocation();
+        log::info("[SurvivalPauseInput] touch probe id={} xy=({}, {}) valid={} pending={} tracking={} actions={}",
+            touch->getID(),point.x,point.y,authorized,m_pending,m_touch,m_actions.size());
+        for(std::size_t i=0;i<m_actions.size();++i){
+            if(auto item=m_actions[i].item.lock()){
+                auto const local=item->convertToNodeSpace(point);
+                auto const size=item->getContentSize();
+                log::info("[SurvivalPauseInput] touch target={} enabled={} visible={} size=({}, {}) local=({}, {}) hit={}",
+                    i,item->isEnabled(),item->isVisible(),size.width,size.height,local.x,local.y,hit(i,touch));
+            }
+        }
+    }
+    if(m_pending || m_touch!=-1 || !authorized)return false;
     for(std::size_t i=0;i<m_actions.size();++i)if(hit(i,touch)){
         m_touch=touch->getID();m_pressed=static_cast<int>(i);if(auto item=m_actions[i].item.lock())item->selected();
         if(m_diagnostics++<10)log::info("[SurvivalPauseInput] began action={} touch={}",i,m_touch);
@@ -146,7 +163,9 @@ void SurvivalPauseActionInput::ccTouchMoved(CCTouch* touch,CCEvent*){
 }
 void SurvivalPauseActionInput::ccTouchEnded(CCTouch* touch,CCEvent*){
     if(touch->getID()!=m_touch || m_pressed<0)return;
-    auto const index=static_cast<std::size_t>(m_pressed);auto const activate=valid() && hit(index,touch);cancelTouch();if(!activate)return;
+    auto const index=static_cast<std::size_t>(m_pressed);auto const activate=valid() && hit(index,touch);
+    if(m_diagnostics++<20)log::info("[SurvivalPauseInput] ended action={} activated={}",index,activate);
+    cancelTouch();if(!activate)return;
     m_pending=true;auto const epoch=m_epoch;
     queueInMainThread([weak=WeakRef(this),index,epoch]{
         auto input=weak.lock();if(!input || input->m_epoch!=epoch)return;input->m_pending=false;
