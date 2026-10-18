@@ -363,8 +363,18 @@ bool RankedRoundPreparation::launch(CCScene* origin) {
     if(survival && !SurvivalRuntime::get().validateNative(level))return false;
     if(m_quitting || m_returnQueued)return false;
     if (auto current = m_play.lock(); current && current->isRunning()) return false;
-    // Even a non-running native owner may still be inside scene teardown.
-    if(PlayLayer::get())return false;
+    // Prevent a second live game or scene teardown from overlapping the new
+    // round. After a confirmed native return the GD singleton can briefly
+    // retain a detached non-running layer, which must not block re-entry
+    // forever. The quit/return flags and next-scene gate above remain strict.
+    if(auto* previous=PlayLayer::get()){
+        if(previous->isRunning() || previous->getParent()){
+            log::info("[RankedEntry] waiting for prior PlayLayer teardown running={} attached={}",
+                previous->isRunning(),previous->getParent()!=nullptr);
+            return false;
+        }
+        log::info("[RankedEntry] ignoring detached and stopped prior PlayLayer singleton");
+    }
     // Hold both the saved level and GD's shared texture-cache owner throughout
     // native setup. A context poll or callback cannot retire the object being
     // initialized. The cache guard spans the inter-round native quit boundary.
