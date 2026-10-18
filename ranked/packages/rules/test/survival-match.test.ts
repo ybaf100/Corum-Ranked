@@ -34,11 +34,11 @@ describe("Survival round engine",()=>{
   it("separates accepted BEST, active NOW and ended clears without altering integer ranks",()=>{
     const r=new Rig();r.prepare();r.attempt("p01",87.8,"first");r.attempt("p01",63.9,"second",false);
     const live=()=>survivalLiveView(r.match,r.now,"p01");
-    expect(live().standings.find(p=>p.participantId==="p01")).toMatchObject({score:87,bestProgress:87,currentProgress:63,attemptActive:true,cleared:false});
+    expect(live().standings.find(p=>p.participantId==="p01")).toMatchObject({score:87,bestProgress:87.8,currentProgress:63.9,attemptActive:true,cleared:false});
     r.send({type:"PROGRESS",...r.context,participantId:"p01",attemptId:"second",progress:63.9,currentProgress:40.2});
-    expect(live().standings.find(p=>p.participantId==="p01")).toMatchObject({bestProgress:87,currentProgress:40});
+    expect(live().standings.find(p=>p.participantId==="p01")).toMatchObject({bestProgress:87.8,currentProgress:40.2});
     r.send({type:"ATTEMPT_END",...r.context,participantId:"p01",attemptId:"second",progress:64});
-    expect(live().standings.find(p=>p.participantId==="p01")).toMatchObject({bestProgress:87,currentProgress:0,attemptActive:false,cleared:false});
+    expect(live().standings.find(p=>p.participantId==="p01")).toMatchObject({bestProgress:87.8,currentProgress:0,attemptActive:false,cleared:false});
     r.attempt("p01",100,"clear",false);
     expect(live().standings.find(p=>p.participantId==="p01")?.cleared).toBe(false);
     r.send({type:"ATTEMPT_END",...r.context,participantId:"p01",attemptId:"clear",progress:100});

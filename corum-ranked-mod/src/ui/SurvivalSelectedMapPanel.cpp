@@ -90,7 +90,7 @@ void SurvivalSelectedMapPanel::present(CCSize size,bool thumbnail,SurvivalMatchV
         if(m_difficulty)m_difficulty->removeFromParentAndCleanup(true);
         m_difficulty=mapDifficultyBadge(view.map.levelId,metadata,r.difficulty.w,r.difficulty.h);m_difficulty->setPosition({r.difficulty.x,r.difficulty.y});addChild(m_difficulty,5);
         auto const stars=metadata.stars?fmt::format("{} {} · ",*metadata.stars,i18n::text("map-stars","stars")):std::string{};
-        auto const detail=fmt::format("GD #{}\n{}{}",view.map.levelId,stars,mapLengthText(metadata));m_metadata->setString(detail.c_str());fitFullMenuLabel(m_metadata,r.metadata.w,r.metadata.h,.21f);
+        auto const detail=fmt::format("GD #{}\n{}{}",view.map.levelId,stars,mapLengthText(metadata));line(m_metadata,detail,r.metadata,.21f);
     }
     std::string status;
     if(SurvivalRuntime::get().surrenderPending())status=i18n::text("survival-surrender-pending","Surrender submitted · waiting for server");

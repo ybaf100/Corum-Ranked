@@ -386,9 +386,12 @@ public:
         if(fields->survival){
             if(SurvivalRuntime::get().surrenderPending() || fields->nativeQuitInProgress || !owner || owner.data()!=PlayLayer::get())return;
             [[maybe_unused]] Ref<PauseLayer> keepAlive(pause.data());
-            rankedPause->retireRankedPause();fields->nativeQuitInProgress=true;
+            rankedPause->retireRankedPause();fields->nativeQuitInProgress=true;fields->nativeQuitReachedPlay=false;
             if(owner && owner.data()==PlayLayer::get())owner->resume();
-            PauseLayer::onQuit(sender);fields->nativeQuitInProgress=false;rankedPause->releaseRankedPauseOwnership();return;
+            if(owner.data()==PlayLayer::get())PauseLayer::onQuit(sender);
+            fields->nativeQuitInProgress=false;
+            if(fields->nativeQuitReachedPlay)rankedPause->releaseRankedPauseOwnership();
+            return;
         }
         auto& ranked = RankedRuntime::get();
         auto const authenticatedConcession = fields->concessionQuit && owner &&
@@ -532,6 +535,24 @@ bool quitRankedPauseForConcession(PlayLayer* layer) {
     // Invoking a native route is not success: the device log shows the old
     // Play quit guard refusing it. Allow the existing deferred fallback when
     // the native Pause route never reached the PlayLayer quit boundary.
+    return rankedPause->m_fields->nativeQuitReachedPlay;
+}
+
+bool quitSurvivalPauseForReturn(PlayLayer* layer) {
+    if(!layer || layer!=PlayLayer::get() || SurvivalRuntime::get().surrenderPending())return false;
+    auto pause=activeRankedPause?activeRankedPause->lock():Ref<PauseLayer>();
+    if(!pause || !pause->getParent())return false;
+    auto* rankedPause=static_cast<CorumRankedPauseLayer*>(pause.data());
+    auto owner=rankedPause->m_fields->owner?rankedPause->m_fields->owner->lock():Ref<PlayLayer>();
+    if(!rankedPause->m_fields->survival || !owner || owner.data()!=layer ||
+        rankedPause->m_fields->matchId!=SurvivalRuntime::get().view().id)return false;
+    // The deferred caller already checked the exact gameplay scene. Keep its
+    // native Pause attached and enter the same Resume -> Pause Quit transaction
+    // used by Solo's accepted surrender, including the Play quit acknowledgement.
+    rankedPause->m_fields->nativeQuitReachedPlay=false;
+    pause->onQuit(nullptr);
+    geode::log::info("[SurvivalExit] nativePause reachedPlay={} paused={} appPaused={}",
+        rankedPause->m_fields->nativeQuitReachedPlay,layer->m_isPaused,AppDelegate::get()->m_gamePaused);
     return rankedPause->m_fields->nativeQuitReachedPlay;
 }
 

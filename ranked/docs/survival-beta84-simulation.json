@@ -1,0 +1,188 @@
+{
+  "policy": "NORMAL",
+  "simulationTickMs": 500,
+  "map": {
+    "stars": 5,
+    "lengthCategory": 3,
+    "estimatedSeconds": 95
+  },
+  "cohorts": {
+    "strong": 3,
+    "peer": 8,
+    "weak": 4
+  },
+  "matches": 1050,
+  "groups": [
+    {
+      "humanBest": 20,
+      "matches": 350,
+      "botBest": {
+        "mean": 26.261,
+        "p10": 9.143,
+        "median": 22.671,
+        "p90": 53.149
+      },
+      "humanRank": {
+        "mean": 9.546,
+        "p10": 8,
+        "median": 10,
+        "p90": 11
+      },
+      "eliminationRate": 0.257,
+      "botClearRate": 0.002,
+      "attempts": {
+        "mean": 14.099,
+        "p10": 6,
+        "median": 12,
+        "p90": 26
+      },
+      "maxStateBytes": 3394
+    },
+    {
+      "humanBest": 50,
+      "matches": 350,
+      "botBest": {
+        "mean": 34.444,
+        "p10": 16.093,
+        "median": 31.72,
+        "p90": 61.161
+      },
+      "humanRank": {
+        "mean": 3.686,
+        "p10": 3,
+        "median": 4,
+        "p90": 4
+      },
+      "eliminationRate": 0,
+      "botClearRate": 0.002,
+      "attempts": {
+        "mean": 11.067,
+        "p10": 5,
+        "median": 10,
+        "p90": 20
+      },
+      "maxStateBytes": 3451
+    },
+    {
+      "humanBest": 80,
+      "matches": 350,
+      "botBest": {
+        "mean": 45.196,
+        "p10": 27.893,
+        "median": 42.581,
+        "p90": 70.677
+      },
+      "humanRank": {
+        "mean": 1.371,
+        "p10": 1,
+        "median": 1,
+        "p90": 2
+      },
+      "eliminationRate": 0,
+      "botClearRate": 0.01,
+      "attempts": {
+        "mean": 8.984,
+        "p10": 5,
+        "median": 8,
+        "p90": 15
+      },
+      "maxStateBytes": 3432
+    }
+  ],
+  "example": [
+    {
+      "elapsedSeconds": 0,
+      "now": 0,
+      "best": 0,
+      "attempt": null
+    },
+    {
+      "elapsedSeconds": 3,
+      "now": 2.129,
+      "best": 2.129,
+      "attempt": 1
+    },
+    {
+      "elapsedSeconds": 6,
+      "now": 5.4,
+      "best": 5.4,
+      "attempt": 1
+    },
+    {
+      "elapsedSeconds": 9,
+      "now": 8.742,
+      "best": 8.742,
+      "attempt": 1
+    },
+    {
+      "elapsedSeconds": 12,
+      "now": 12.12,
+      "best": 12.12,
+      "attempt": 1
+    },
+    {
+      "elapsedSeconds": 15,
+      "now": 15.488,
+      "best": 15.488,
+      "attempt": 1
+    },
+    {
+      "elapsedSeconds": 18,
+      "now": 0,
+      "best": 18.486,
+      "attempt": null
+    },
+    {
+      "elapsedSeconds": 21,
+      "now": 1.075,
+      "best": 18.486,
+      "attempt": 2
+    },
+    {
+      "elapsedSeconds": 24,
+      "now": 4.366,
+      "best": 18.486,
+      "attempt": 2
+    },
+    {
+      "elapsedSeconds": 27,
+      "now": 7.738,
+      "best": 18.486,
+      "attempt": 2
+    },
+    {
+      "elapsedSeconds": 30,
+      "now": 11.16,
+      "best": 18.486,
+      "attempt": 2
+    },
+    {
+      "elapsedSeconds": 30.5,
+      "now": 0,
+      "best": 18.486,
+      "attempt": null
+    },
+    {
+      "elapsedSeconds": 33,
+      "now": 0.526,
+      "best": 18.486,
+      "attempt": 3
+    }
+  ],
+  "performance": {
+    "continuousTicks": 360,
+    "tickMs": {
+      "mean": 0.409,
+      "p10": 0.235,
+      "median": 0.376,
+      "p90": 0.522
+    },
+    "p95TickMs": 0.626,
+    "maxTickMs": 2.335,
+    "wallSeconds": 8.675,
+    "virtualSoakHours": 10,
+    "heapDeltaBytes": 1200712,
+    "driverStateBytes": 3327,
+    "scope": "Node pure simulation + reducer; DB timings measured separately in integration tests"
+  }
+}

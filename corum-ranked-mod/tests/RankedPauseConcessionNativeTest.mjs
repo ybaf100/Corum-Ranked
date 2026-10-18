@@ -24,7 +24,7 @@ test('authenticated concession closes native Pause and permits its Quit with int
 struct CCObject {int refs=1;bool alive=true;void retain(){assert(alive);++refs;}void release(){assert(alive&&refs>0);if(--refs==0)alive=false;}};
 struct Level {int m_levelID=123;};
 struct PlayLayer:CCObject {inline static PlayLayer* current=nullptr;Level level;Level* m_level=&level;bool m_isPracticeMode=false,m_isTestMode=false;bool m_isPaused=true,refuseResume=false;PlayLayer* replacement=nullptr;int quits=0,resumes=0;static PlayLayer* get(){return current;}void onQuit();void resume();};
-struct SurvivalRuntime {static SurvivalRuntime& get(){static SurvivalRuntime r;return r;}bool surrenderPending()const{return false;}};
+struct SurvivalRuntime {struct View{std::string id="survival";}v;bool pending=false;static SurvivalRuntime& get(){static SurvivalRuntime r;return r;}bool surrenderPending()const{return pending;}auto const&view()const{return v;}};
 struct AppDelegate {bool m_gamePaused=true;static AppDelegate* get(){static AppDelegate a;return &a;}};
 template<class T>struct Ref {T* p=nullptr;Ref()=default;explicit Ref(T* v):p(v){if(p)p->retain();}Ref(Ref const& v):Ref(v.p){}Ref(Ref&& v):p(std::exchange(v.p,nullptr)){}~Ref(){if(p)p->release();}T* data()const{return p;}T* operator->()const{assert(p&&p->alive);return p;}explicit operator bool()const{return p;}};
 template<class T>struct WeakRef {T* p;explicit WeakRef(T* v):p(v){}Ref<T> lock()const{return Ref<T>(p&&p->alive?p:nullptr);}};
@@ -67,6 +67,7 @@ ${body(pause,'void onQuit(CCObject* sender)')}
 namespace corum::ranked {
 ${body(pause,'bool resumeRankedPauseBeforeQuit(PlayLayer* layer)')}
 ${body(pause,'bool quitRankedPauseForConcession(PlayLayer* layer)')}
+${body(pause,'bool quitSurvivalPauseForReturn(PlayLayer* layer)')}
 }
 void PlayLayer::resume(){++resumes;events.push_back("native-resume");if(refuseResume)return;m_isPaused=false;AppDelegate::get()->m_gamePaused=false;if(replacement)current=replacement;}
 void PlayLayer::onQuit(){if(!corum::ranked::resumeRankedPauseBeforeQuit(this))return;
@@ -136,6 +137,14 @@ int main(){using namespace corum::ranked;auto& r=RankedRuntime::get();PlayLayer 
      CorumRankedPauseLayer next;PlayLayer::current=&b;r.v.match.roundNumber=round;next.f.round=round;
      if(round==1){r.v.match.matchId="next";}next.f.matchId=r.v.match.matchId;next.f.owner.emplace(&b);activeRankedPause.emplace(&next);
      assert(quitRankedPauseForConcession(&b)&&next.nativeQuits==1&&!activeRankedPause&&!next.parent&&!AppDelegate::get()->m_gamePaused);
+    }
+    // Survival ACK uses the attached native Pause transaction as Solo does.
+    for(bool refusedResume:{false,true}){CorumRankedPauseLayer p;p.f.survival=true;p.f.matchId="survival";p.f.leaseId.clear();p.f.owner.emplace(&b);activeRankedPause.emplace(&p);
+     PlayLayer::current=&b;b.m_isPaused=true;AppDelegate::get()->m_gamePaused=true;b.refuseResume=refusedResume;auto before=b.quits;
+     SurvivalRuntime::get().pending=true;assert(!quitSurvivalPauseForReturn(&b)&&b.quits==before);
+     SurvivalRuntime::get().pending=false;SurvivalRuntime::get().v.id="different";assert(!quitSurvivalPauseForReturn(&b));SurvivalRuntime::get().v.id="survival";
+     assert(quitSurvivalPauseForReturn(&b)&&b.quits==before+1&&p.nativeQuits==1&&!activeRankedPause&&!AppDelegate::get()->m_gamePaused);
+     assert(!quitSurvivalPauseForReturn(&b)&&b.quits==before+1);b.refuseResume=false;
     }
     // Placement uses the same attached native Quit transaction, without a
     // PvP lease. Its acknowledgement belongs to one map, not the whole stage.

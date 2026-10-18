@@ -2,7 +2,7 @@ import { SurvivalConfigService } from "../config/survival-config.service.js";
 import { survivalQueueView } from "./survival-queue.view.js";
 import { BadRequestException,ConflictException,ForbiddenException,Inject,Injectable,Logger,type OnApplicationBootstrap,type OnApplicationShutdown } from "@nestjs/common";
 import { reduceSurvivalMatch,survivalCurrentRound,survivalLiveView,survivalMarkAbsent,survivalSettlementInputs,survivalEntryDeadlineAt,
-  survivalStabilizeOnlineRanks,finishSurvivalDebugOnElimination,survivalTierForLp,RankedDomainError,type SurvivalMatch,type SurvivalCommand,type SurvivalRatingProfile } from "@corum-ranked/rules";
+  survivalStabilizeOnlineRanks,finishSurvivalDebugOnElimination,survivalTierForLp,RankedDomainError,type SurvivalBotDriverState,type SurvivalMatch,type SurvivalCommand,type SurvivalRatingProfile } from "@corum-ranked/rules";
 import { DATABASE,type DatabasePort,type SqlExecutor } from "../database/database.port.js";
 import { SERVER_CLOCK,type ServerClock } from "../common/runtime.module.js";
 import { SessionService } from "../session/session.service.js";
@@ -13,7 +13,7 @@ import { SurvivalService } from "./survival.service.js";
 import { driveSurvivalBots } from "./survival-bot-driver.js";
 import type { SurvivalOnlineEventDto } from "./survival-online.dto.js";
 
-interface OnlineRow {match_id:string;bot_filled:boolean;seed:number|string;driver_state:Record<string,number>;}
+interface OnlineRow {match_id:string;bot_filled:boolean;seed:number|string;driver_state:SurvivalBotDriverState;}
 interface PresenceRow {participant_id:string;last_seen_at:Date|string;observed_round_key:string|null;observed_map_generation:number|null;recovering:boolean;}
 interface ResultRow {participant_id:string;player_id:string;result:SurvivalOnlineResult|null;}
 export interface SurvivalOnlineResult {

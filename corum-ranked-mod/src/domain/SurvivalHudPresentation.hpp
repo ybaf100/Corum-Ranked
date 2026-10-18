@@ -1,6 +1,7 @@
 #pragma once
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -14,6 +15,7 @@ struct SurvivalStanding {
     int accountId=0;
     double bestProgress=0,currentProgress=0;
     bool attemptActive=false,cleared=false,eliminated=false,qualified=false;
+    std::string attemptId="";
 };
 struct SurvivalHudColor { unsigned char r,g,b; bool operator==(SurvivalHudColor const&) const = default; };
 inline SurvivalHudColor survivalRankColor(int rank, bool passing) {
@@ -64,6 +66,27 @@ struct SurvivalScoreTween {
         if (!std::isfinite(dt) || dt<=0) return;
         displayed+=(target-displayed)*(1-std::exp(-std::min(dt,.25)*8));
         if(std::abs(target-displayed)<.001)displayed=target;
+    }
+};
+// Display only samples already confirmed by the server. A new attempt resets
+// NOW; BEST is monotone. No extrapolation can create an unconfirmed record.
+struct SurvivalProgressTween {
+    SurvivalScoreTween best;
+    double now=0,targetNow=0;
+    std::uint64_t revision=0;
+    std::string attempt;
+    void observe(std::uint64_t next,std::string const& id,bool active,double score,double current){
+        if(next<revision)return;
+        revision=next;best.observe(score);
+        if(!active){attempt.clear();now=targetNow=0;return;}
+        if(attempt!=id){attempt=id;now=targetNow=0;}
+        if(std::isfinite(current))targetNow=std::max(targetNow,std::clamp(current,0.,100.));
+    }
+    void advance(double dt){
+        best.advance(dt);
+        if(!std::isfinite(dt)||dt<=0)return;
+        now+=(targetNow-now)*(1-std::exp(-std::min(dt,.25)*10));
+        if(std::abs(targetNow-now)<.001)now=targetNow;
     }
 };
 }

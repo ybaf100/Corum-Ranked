@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
-const play = readFileSync(join(root, 'src/PlayLayer.cpp'), 'utf8');
+const play = readFileSync(process.env.CORUM_ENTRY_PLAY_SOURCE ?? join(root, 'src/PlayLayer.cpp'), 'utf8');
 const overlay = readFileSync(join(root, 'src/ui/RankedEntryOverlay.cpp'), 'utf8');
 const visuals = readFileSync(join(root, 'src/ui/RankedVisuals.hpp'), 'utf8');
 const preparation = readFileSync(join(root, 'src/RankedRoundPreparation.cpp'), 'utf8');
@@ -184,9 +184,23 @@ struct RankedRuntime {
     bool armCurrentLevelForGameplay(){++arms;return armAllowed;}
 };
 }
+namespace corum::ranked {
+struct SurvivalRuntime {
+    struct View {std::string state="ENTERING";bool ownEntered=false;} data;
+    int context=1,notes=0,ticks=0,posts=0;bool playable=false,pending=false,posted=false;
+    std::optional<std::int64_t> remaining;
+    static SurvivalRuntime& get(){static SurvivalRuntime r;return r;}
+    int preparationContext()const{return context;}void tick(){++ticks;}
+    View const& view()const{return data;}
+    bool surrenderPending()const{return pending;}bool canPlay()const{return playable;}
+    std::optional<std::int64_t> countdownMs()const{return remaining;}
+    void sceneEntered(int id){assert(id==123);++notes;if(!posted){posted=true;++posts;}}
+};
+}
 namespace corum::ranked {inline bool quitThroughSurvivalCompletionOverlay(PlayLayer*){return false;}}
 struct CorumRankedPlayLayer:PlayLayer {
     struct Fields {
+        bool rankedInitialized=true,survivalWaiting=false;int survivalContext=1;
         bool survivalLevel=false,survivalNativeClearFinished=false;bool nativeEntryHeld=true,autoExitRequested=false,entryWasPaused=false,entryNativeCompletionInProgress=false;
         bool entryTouchEnabled=true,entryKeyboardEnabled=true;
         bool entryUIKeyboardEnabled=false,entryUIKeypadEnabled=false,entryUIPauseEnabled=false;
@@ -199,7 +213,7 @@ struct CorumRankedPlayLayer:PlayLayer {
     Fields* m_fields=&fields;
     void onQuit(){++quitCalls;}
     bool blocksLocalEvidence(){return false;}
-    bool blockSurvivalEntry(){return false;}
+    ${method(play, 'bool blockSurvivalEntry()')}
     ${method(play, '    void releaseEntryControls()')}
     void initializeEntryInputHold(){${inputHold}}
     ${entryExit}
@@ -238,9 +252,18 @@ int main(){
     assert(uiLayer.resets==1&&player1.releases==1&&player2.releases==1&&!player1.held&&!player2.held);
     scene.running=false;scene.m_queuedButtons={1,2};
     assert(scene.blockEntryGameplayUpdate());
-    assert(runtime.nativePosts==0&&runtime.arms==0&&runtime.starts==0);
-    assert(scene.m_queuedButtons.empty()&&audio.paused&&scene.m_isPaused&&!scene.touch&&!scene.keyboard);
+    assert(runtime.nativePosts==1&&runtime.arms==0&&runtime.starts==0);
+    assert(scene.m_queuedButtons.empty()&&audio.paused&&!scene.m_isPaused&&!scene.touch&&!scene.keyboard);
     assert(overlay.heading.text=="WAITING FOR OPPONENT..."&&overlay.digit.text.empty());
+    // A paused child may ACK attachment and render server time; it may not
+    // release physics until native scene entry is actually running.
+    runtime.data.match.entry={true,true};runtime.remaining=2000;
+    assert(scene.blockEntryGameplayUpdate()&&overlay.digit.text=="2"&&runtime.arms==0);
+    runtime.remaining=0;runtime.startGranted=true;
+    assert(scene.blockEntryGameplayUpdate()&&runtime.arms==0&&scene.fields.nativeEntryHeld);
+    runtime.data.match.entry={false,false};runtime.startGranted=false;
+    // Use a fresh presentation after the isolated stopped-child scenario.
+    overlay.m_countdown={};
     scene.running=true;runtime.remaining=0;
     assert(scene.blockEntryGameplayUpdate());assert(runtime.nativePosts==1&&runtime.arms==0);
     runtime.data.match.entry.enteredA=true;
@@ -301,6 +324,45 @@ int main(){
     assert(!transient.m_isPaused&&transientUI.pause.enabled&&transientUI.menuEnables==2);
     for(int i=0;i<20;++i)assert(!transient.blockEntryGameplayUpdate());
     assert(transientUI.menuEnables==2);
+
+    // Execute the actual Survival gate for every round identity. No local
+    // timer may invent GO, and the stopped-child ACK must progress without
+    // requiring a Pause/Resume click (the beta.83 device failure).
+    for(int round=1;round<=5;++round){
+        auto& survival=SurvivalRuntime::get();survival={};audio={};
+        AppDelegate::get()->m_gamePaused=false;
+        CorumRankedPlayLayer play;play.fields.survivalLevel=true;
+        play.fields.survivalContext=round;survival.context=round;
+        play.m_isPaused=false;play.initializeEntryInputHold();play.running=false;
+        auto* entry=play.fields.entryOverlay;
+        assert(entry&&entry->heading.text=="WAITING FOR OPPONENT...");
+        assert(play.blockEntryGameplayUpdate()&&survival.posts==1&&audio.resumes==0);
+        survival.data.state="COUNTDOWN";survival.data.ownEntered=true;
+        for(auto ms:{2900,1900,900}){
+            survival.remaining=ms;assert(play.blockEntryGameplayUpdate());
+            assert(entry->digit.text==std::to_string((ms+999)/1000));
+        }
+        survival.remaining=0;survival.playable=true;survival.data.state="PLAYING";
+        assert(play.blockEntryGameplayUpdate()&&play.fields.nativeEntryHeld&&audio.resumes==0);
+        play.running=true;survival.pending=true;
+        assert(play.blockEntryGameplayUpdate()&&audio.resumes==0);
+        survival.pending=false;play.updateAttempts();
+        assert(!play.blockEntryGameplayUpdate()&&!play.fields.nativeEntryHeld);
+        assert(audio.resumes==1&&play.musicStarts==1&&play.attemptCounts==1&&survival.posts==1);
+        assert(!play.blockEntryGameplayUpdate()&&audio.resumes==1&&entry->releases==1);
+    }
+    // Detached/replaced scenes may neither ACK nor release the Survival hold.
+    for(int invalid=0;invalid<4;++invalid){
+        auto& survival=SurvivalRuntime::get();survival={};audio={};
+        CorumRankedPlayLayer other,play;play.fields.survivalLevel=true;
+        play.m_isPaused=false;play.initializeEntryInputHold();
+        if(invalid==0)play.attached=false;
+        if(invalid==1)PlayLayer::current=&other;
+        if(invalid==2)CCDirector::sharedDirector()->runningScene=&other.parent;
+        if(invalid==3)CCDirector::sharedDirector()->nextScene=&other.parent;
+        assert(play.blockEntryGameplayUpdate()&&survival.posts==0&&audio.resumes==0);
+        CCDirector::sharedDirector()->nextScene=nullptr;
+    }
 
     // An ordinary scene never acquires/releases a Ranked entry menu lock.
     {runtime={};CorumRankedPlayLayer ordinary;UILayer ordinaryUI;ordinary.m_uiLayer=&ordinaryUI;

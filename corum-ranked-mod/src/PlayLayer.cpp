@@ -213,6 +213,7 @@ public:
         bool nativeEntryHeld = false;
         // Process-owned fallback is independent of the paused native PlayLayer scheduler.
         std::chrono::steady_clock::time_point nextIndependentEntryPulseAt {};
+        int independentEntryLogCount = 0;
         bool entryNativeCompletionInProgress = false;
         bool entryAttemptCountDeferred = false;
         bool entryWasPaused = false, entryTouchEnabled = false, entryKeyboardEnabled = false;
@@ -489,7 +490,9 @@ public:
             m_fields->entryWasPaused = m_isPaused;
             m_fields->entryTouchEnabled = isTouchEnabled();
             m_fields->entryKeyboardEnabled = isKeyboardEnabled();
-            m_isPaused = true;
+            // Freeze through the existing world/evidence gate below. Setting
+            // GD's native pause flag during init can prevent normal scene entry
+            // and its scheduler from starting before ENTERED is acknowledged.
             setTouchEnabled(false);
             setKeyboardEnabled(false);
             if (m_uiLayer) {
@@ -510,7 +513,10 @@ public:
             if (m_player2) m_player2->releaseAllButtons();
             m_queuedButtons.clear();
             m_fields->entryOverlay = corum::ranked::ui::RankedEntryOverlay::create();
-            if (m_fields->entryOverlay) addChild(m_fields->entryOverlay, 10000);
+            if (m_fields->entryOverlay) {
+                addChild(m_fields->entryOverlay, 10000);
+                m_fields->entryOverlay->present(false, std::nullopt);
+            }
             FMODAudioEngine::sharedEngine()->pauseAllMusic(true);
             log::info("[RankedEntry] native hold level={} pausedBeforeHold={} pauseBeforeHold={} appPaused={}",
                 m_fields->levelId, m_fields->entryWasPaused, m_fields->entryUIPauseEnabled,
@@ -561,7 +567,12 @@ public:
             queueHeldEntryExit();
             return true;
         }
-        if (isRunning()) runtime.noteNativeRoundSceneEntered(m_fields->levelId);
+        // ACK attachment to the active scene, not a native scheduler flag that
+        // can be false while entry is held. GO still requires a running owner.
+        auto* director = CCDirector::sharedDirector();
+        bool const ownsScene = this == PlayLayer::get() && getParent() &&
+            getParent() == director->getRunningScene() && !director->getNextScene();
+        if (ownsScene) runtime.noteNativeRoundSceneEntered(m_fields->levelId);
         auto const remaining = runtime.nativeEntryCountdownMillis();
         auto const bothEntered = match.entry.enteredA && match.entry.enteredB;
         if (m_fields->entryOverlay) m_fields->entryOverlay->present(bothEntered, remaining);
@@ -569,8 +580,7 @@ public:
         FMODAudioEngine::sharedEngine()->pauseAllMusic(true);
         if (!bothEntered || !remaining || *remaining > 0 ||
             (corum::ranked::roundEnteringState(match.state) && !runtime.nativeEntryStartGranted()) ||
-            this != PlayLayer::get() || !isRunning() || !getParent() || !getParent()->isRunning() ||
-            getParent() != CCDirector::sharedDirector()->getRunningScene() ||
+            !ownsScene || !isRunning() || !getParent()->isRunning() ||
             !runtime.armCurrentLevelForGameplay()) return true;
         // Quit returning is not scene retirement: the deferred pop/onExit can
         // still change GD's process pause state. A local bit alone cannot certify
@@ -591,6 +601,7 @@ public:
         bool const sameEntry = this == PlayLayer::get() && isRunning() &&
             getParent() && getParent()->isRunning() &&
             getParent() == CCDirector::sharedDirector()->getRunningScene() &&
+            !CCDirector::sharedDirector()->getNextScene() &&
             currentMatch.matchId == m_fields->sceneContext.matchId &&
             currentMatch.roundNumber == m_fields->sceneContext.roundNumber &&
             currentMatch.deathmatchSequence == m_fields->sceneContext.deathmatchSequence &&
@@ -637,12 +648,15 @@ public:
             runtime.view().state=="FINAL_RESULT" || runtime.view().state=="CANCELLED") {queueHeldEntryExit();return true;}
         if(runtime.surrenderPending()){m_queuedButtons.clear();return true;}
         if(!m_fields->nativeEntryHeld)return m_fields->survivalWaiting;
-        if(isRunning())runtime.sceneEntered(m_fields->levelId);
+        auto* director=CCDirector::sharedDirector();
+        bool const ownsScene=this==PlayLayer::get() && getParent() &&
+            getParent()==director->getRunningScene() && !director->getNextScene();
+        if(ownsScene)runtime.sceneEntered(m_fields->levelId);
         auto remaining=runtime.countdownMs();
         if(m_fields->entryOverlay)m_fields->entryOverlay->present(runtime.view().ownEntered,remaining);
         m_queuedButtons.clear();FMODAudioEngine::sharedEngine()->pauseAllMusic(true);
-        if(!runtime.canPlay() || !runtime.view().ownEntered || !remaining || *remaining>0 || !isRunning() ||
-            !getParent() || getParent()!=CCDirector::sharedDirector()->getRunningScene())return true;
+        if(!runtime.canPlay() || !runtime.view().ownEntered || !remaining || *remaining>0 ||
+            !ownsScene || !isRunning() || !getParent()->isRunning())return true;
         m_isPaused=m_fields->entryWasPaused;
         auto* app=AppDelegate::get();
         if(!m_fields->entryWasPaused && app && app->m_gamePaused) {
@@ -650,11 +664,16 @@ public:
             static_cast<PlayLayer*>(this)->onEnterTransitionDidFinish();
             m_fields->entryNativeCompletionInProgress=false;
         }
-        if(!runtime.canPlay() || runtime.preparationContext()!=m_fields->survivalContext ||
+        if(this!=PlayLayer::get() || !isRunning() || !getParent() || !getParent()->isRunning() ||
+            getParent()!=director->getRunningScene() || director->getNextScene() ||
+            !runtime.canPlay() || runtime.preparationContext()!=m_fields->survivalContext ||
             (!m_fields->entryWasPaused && (!AppDelegate::get() || AppDelegate::get()->m_gamePaused || m_isPaused))) {
             m_isPaused=true;queueHeldEntryExit();return true;
         }
-        releaseEntryControls();return false;
+        releaseEntryControls();
+        log::info("[RankedEntry] Survival shared countdown complete; gameplay released level={} paused={} appPaused={}",
+            m_fields->levelId,m_isPaused,AppDelegate::get() && AppDelegate::get()->m_gamePaused);
+        return false;
     }
 
     void survivalFrame(float dt) {
@@ -687,6 +706,7 @@ public:
             auto* managed=static_cast<CorumRankedPlayLayer*>(owner.data());
             if(director->getNextScene()) {managed->m_fields->autoExitRequested=false;return;}
             if(corum::ranked::quitThroughSurvivalCompletionOverlay(owner.data()))return;
+            if(managed->m_fields->survivalLevel && corum::ranked::quitSurvivalPauseForReturn(owner.data()))return;
             if(managed->m_fields->survivalFreePlayHud && !corum::ranked::resumeSurvivalFreePlayPauseBeforeQuit(owner.data())){
                 managed->m_fields->autoExitRequested=false;return;
             }
@@ -2523,16 +2543,20 @@ void corum::ranked::pumpHeldRankedEntry(PlayLayer* layer) {
     if (!layer || layer != PlayLayer::get()) return;
     auto* managed = static_cast<CorumRankedPlayLayer*>(layer);
     auto* director = CCDirector::sharedDirector();
-    if (!managed->m_fields->rankedInitialized || !managed->m_fields->rankedLevel ||
+    if (!managed->m_fields->rankedInitialized ||
+        (!managed->m_fields->rankedLevel && !managed->m_fields->survivalLevel) ||
         !managed->m_fields->nativeEntryHeld ||
         managed->m_fields->entryNativeCompletionInProgress ||
         managed->m_fields->autoExitRequested || managed->m_fields->safetyRetired ||
-        !layer->isRunning() || !layer->getParent() ||
+        !layer->getParent() ||
         layer->getParent() != director->getRunningScene() ||
         director->getNextScene()) return;
     auto const now = std::chrono::steady_clock::now();
     if (now < managed->m_fields->nextIndependentEntryPulseAt) return;
     managed->m_fields->nextIndependentEntryPulseAt = now + std::chrono::milliseconds(100);
+    if (managed->m_fields->independentEntryLogCount++ < 3)
+        log::info("[RankedEntry] process pulse level={} survival={} running={} paused={}",
+            managed->m_fields->levelId,managed->m_fields->survivalLevel,layer->isRunning(),layer->m_isPaused);
     managed->blockEntryGameplayUpdate();
 }
 

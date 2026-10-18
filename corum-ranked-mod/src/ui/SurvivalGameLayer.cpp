@@ -32,7 +32,7 @@ using namespace geode::prelude;
 namespace corum::ranked {
 namespace {
 class SurvivalGameLayer final : public CCLayerColor {
-    struct Tile {CCNode* root=nullptr;CCLabelBMFont* name=nullptr;CCLabelBMFont* record=nullptr;CCPoint destination;CCNode* icon=nullptr;CCNode* tierBadge=nullptr;std::string tier="";CCNode* eliminatedBackground=nullptr;std::string titleText,recordText;std::array<CCNode*,3> medals{};int infoTag=0;};
+    struct Tile {CCNode* root=nullptr;CCLabelBMFont* name=nullptr;CCLabelBMFont* record=nullptr;CCPoint destination;CCNode* icon=nullptr;CCNode* tierBadge=nullptr;std::string tier="";CCNode* eliminatedBackground=nullptr;std::string titleText,recordText;std::array<CCNode*,3> medals{};int infoTag=0;SurvivalProgressTween progress{};};
     std::unordered_map<std::string,Tile> m_tiles;
     std::unordered_map<int,SurvivalStanding> m_infoByTag;
     int m_nextInfoTag=1000;
@@ -56,7 +56,7 @@ class SurvivalGameLayer final : public CCLayerColor {
     std::chrono::steady_clock::time_point m_eliminationUntil{};
     std::chrono::steady_clock::time_point m_nextMapAt{},m_introUntil{},m_returnAt{};
     std::optional<RankedAudioMode> m_audioMode;
-    bool m_closed=false,m_motion=false;
+    bool m_closed=false,m_motion=false;float m_frameDelta=0;
     static std::string text(char const* key,char const* fallback) {return i18n::text(key,fallback);}
     CCMenuItemSpriteExtra* button(CCMenu* menu,std::string const& caption,CCPoint position,float width,int tag,ccColor3B color=ui::Blue,CCLabelBMFont** saved=nullptr) {
         auto* face=ui::surface({width,28},{},color,ui::SurfaceRaised,255,true);
@@ -198,6 +198,8 @@ class SurvivalGameLayer final : public CCLayerColor {
                 tile.eliminatedBackground->setVisible(false);root->addChild(tile.eliminatedBackground,4);
             }
             auto& tile=found->second;tile.root->setVisible(true);m_infoByTag[tile.infoTag]=value;
+            tile.progress.observe(view.revision,value.attemptId,value.attemptActive,value.bestProgress,value.currentProgress);tile.progress.advance(m_frameDelta);
+            if(view.roundKey.ends_with(":elimination"))tile.progress.best.displayed=tile.progress.best.target;
             if(tile.tier!=value.tier){
                 tile.tier=value.tier;if(tile.tierBadge)tile.tierBadge->removeFromParentAndCleanup(true);
                 auto const badgeSize=std::min(20.0f,card.avatarSize);
@@ -212,8 +214,8 @@ class SurvivalGameLayer final : public CCLayerColor {
                 record=value.rank>0?fmt::format("{} · {:+} LP",rank,delta):text("waiting","WAITING");color=value.rank>0?survivalResultRankColor(value.rank,delta):survivalRankColor(10,true);
             }else {
                 auto const status=value.eliminated?text("survival-eliminated","ELIMINATED"):value.cleared?text("survival-cleared","CLEARED"):
-                    fmt::format("NOW {}%",rankedScoreText(value.attemptActive?value.currentProgress:0,view.phase=="TIEBREAK"));
-                record=fmt::format("BEST {}% · {}",rankedScoreText(value.score,view.phase=="TIEBREAK"),status);
+                    fmt::format("NOW {}%",rankedScoreText(tile.progress.now,view.phase=="TIEBREAK"));
+                record=fmt::format("BEST {}% · {}",rankedScoreText(tile.progress.best.displayed,view.phase=="TIEBREAK"),status);
                 auto const title=fmt::format("{} {}",rank,value.name);
                 if(tile.titleText!=title){tile.titleText=title;tile.name->setString(title.c_str());ui::fitFullMenuLabel(tile.name,card.width-12,card.titleHeight,.25f);}
                 tile.name->setColor(value.eliminated?ui::Red:value.id==view.ownId?ui::Cyan:ui::Text);
@@ -266,6 +268,7 @@ class SurvivalGameLayer final : public CCLayerColor {
             preview.aliveIds.push_back(id);preview.standings.push_back({id,p["name"].asString().unwrapOr(id),
                 static_cast<int>(p["rank"].asInt().unwrapOr(0)),0,0,p["score"].asDouble().unwrapOr(0),passing,p["kind"].asString().unwrapOr("")=="BOT",false,p["displayedTier"].asString().unwrapOr("UNRANKED"),numFromString<int>(p["gdAccountId"].asString().unwrapOr("0")).unwrapOr(0)});
         }
+        for(auto& row:preview.standings)row.bestProgress=row.score;
         std::stable_sort(preview.standings.begin(),preview.standings.end(),[](auto const& a,auto const& b){return a.rank<b.rank;});
         showParticipants(preview,false);
         auto const alreadyPresented=key==Mod::get()->getSavedValue<std::string>("survival-elimination-animation");
@@ -313,7 +316,8 @@ class SurvivalGameLayer final : public CCLayerColor {
     }
 public:
     static SurvivalGameLayer* create(){auto* layer=new SurvivalGameLayer;if(layer->init()){layer->autorelease();return layer;}delete layer;return nullptr;}
-    void update(float) override {
+    void update(float dt) override {
+        m_frameDelta=dt;
         if(m_closed)return;auto& runtime=SurvivalRuntime::get();runtime.tick();
         if(m_confirmation){auto dialog=m_confirmation->lock();if(!dialog || !dialog->getParent())m_confirmation.reset();}
         if(!runtime.active() && !runtime.creating()){m_closed=true;queueInMainThread([]{CCDirector::sharedDirector()->popScene();});return;}

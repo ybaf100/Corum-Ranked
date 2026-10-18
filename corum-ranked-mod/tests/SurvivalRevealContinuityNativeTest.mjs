@@ -14,18 +14,28 @@ int main(){SurvivalMapSelectionTimeline t;SurvivalSelectionContext c{"m","r1",1,
  assert(t.observe(c,1000));auto pending=t.frame(2500);assert(pending.elapsed==1.5);
  c.levelId=73153577;assert(!t.observe(c,3000));assert(t.frame(3000).elapsed==2.0);
  c.sceneGeneration++;assert(!t.observe(c,3500));assert(t.frame(3500).elapsed==2.5);
- assert(!t.observe(c,4000));assert(t.frame(4000).elapsed==3.0);assert(t.frame(5000).settled);
+ assert(!t.observe(c,4000));assert(t.frame(4000).elapsed==3.0);assert(t.frame(5100).settled);
  SurvivalThumbnailReel reel;auto const count=reel.slots().size();reel.observe(11);reel.observe(22);
  auto before=reel.slots();for(auto id:{33,44,11,55,66,77,88,99})reel.observe(id);
  assert(reel.slots().size()==count&&reel.slots()[0]==before[0]&&reel.slots()[1]==before[1]);
  for(auto size:{std::pair{400.f,280.f},std::pair{568.f,320.f},std::pair{568.f,426.f},std::pair{1024.f,576.f}}){
   auto layout=survivalSelectionLayout(size.first,size.second,true,true);auto w=survivalCarouselCardWidth(size.first,layout);
+  assert(!layout.pending.overlaps(layout.carousel)&&!layout.pending.overlaps(layout.subtitle));
   assert(w>std::min(252.f*layout.scale,size.first*.40f));assert(w<layout.carousel.w&&w*9/16<=layout.carousel.h);
+ }
+ // Braking preserves speed at its boundary and lands the reel winner at center.
+ for(auto brake:{1.95,4.,10.}){
+  SurvivalRevealFrame f;f.brakeAt=brake;f.stopAt=brake+.8;double last=0;
+  for(int i=0;i<=1200;++i){f.elapsed=brake-.1+i*.001;auto motion=survivalThumbnailMotion(f,true);assert(motion.phase>=last);last=motion.phase;
+   if(motion.stopped){assert(std::abs(motion.phase-std::round(motion.phase))<.00001);assert(motion.winnerIndex==static_cast<std::size_t>(motion.phase)+2);}
+  }
+  f.elapsed=brake-.00001;auto before=survivalThumbnailMotion(f,true).phase;
+  f.elapsed=brake+.00001;auto after=survivalThumbnailMotion(f,true).phase;assert(std::abs(after-before-2*.00001/.14)<.00001);
  }
  ++c.mapGeneration;c.levelId=12345678;assert(t.observe(c,6000));assert(t.frame(6000).elapsed==0);
  SurvivalMapSelectionTimeline delayed;auto unresolved=c;unresolved.levelId=0;delayed.observe(unresolved,6000);
- auto waiting=delayed.frame(16000);assert(waiting.elapsed==4&&!waiting.settled);
- delayed.observe(c,16000);auto resolved=delayed.frame(16000);assert(resolved.elapsed==waiting.elapsed&&resolved.settled);
+ auto waiting=delayed.frame(16000);assert(waiting.elapsed==10&&!waiting.settled);
+ delayed.observe(c,16000);auto resolved=delayed.frame(16000);assert(resolved.elapsed>=waiting.elapsed&&!resolved.settled);assert(delayed.frame(18100).settled);
 }
 `;
 const dir=mkdtempSync(join(tmpdir(),'survival-reveal-once-'));try{writeFileSync(join(dir,'test.cpp'),cpp);execFileSync('g++',['-std=c++23','-Wall','-Wextra','-Wpedantic','-Werror','-I',join(root,'src'),join(dir,'test.cpp'),'-o',join(dir,'test')],{stdio:'pipe'});execFileSync(join(dir,'test'),[],{stdio:'pipe'});}catch(e){throw new Error(e.stderr?.toString()||e.message);}finally{rmSync(dir,{recursive:true,force:true});}
@@ -46,7 +56,7 @@ struct Size{float width=568,height=426;};
 long clockMs=1000;auto monotonicMs(){return clockMs;}
 struct SurvivalThumbnailProvider{static unsigned applicationEpoch(){return 0;}};
 struct Mod{static Mod*get(){static Mod m;return &m;}template<class T>T getSavedValue(char const*){return {};}};
-struct RevealRecord{long began=0;std::size_t consumed=0;bool complete=false,centerPlayed=false;SurvivalRevealModeChoice mode{};SurvivalThumbnailReel reel{};};
+struct RevealRecord{long began=0;std::size_t consumed=0;bool complete=false,centerPlayed=false;SurvivalRevealModeChoice mode{};SurvivalThumbnailReel reel{};long resolvedAt=0;};
 std::map<std::string,RevealRecord>reveals;
 struct View{std::string id="match",roundKey="r1";int mapGeneration=1;struct Map{int levelId=0;}map;};
 struct Layer{SurvivalMapSelectionTimeline m_timeline;unsigned m_appEpoch=0;unsigned long m_sceneGeneration=1;bool m_needsResume=false;int resets=0;long m_lastFrameMillis=0;

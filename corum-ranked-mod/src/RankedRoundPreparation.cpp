@@ -432,8 +432,9 @@ bool RankedRoundPreparation::launch(CCScene* origin) {
     m_launchedLevel = level;
     m_returnQueued = m_quitting = m_returnPopped = false;
     CCDirector::sharedDirector()->pushScene(scene);
-    // pushScene schedules the transition. Actual entry is ACKed by the running
-    // PlayLayer heartbeat, after onEnter rather than before the scene exists.
+    // pushScene schedules the transition. The process heartbeat ACKs only once
+    // this exact game is attached to the active scene with no pending transition.
+    // Entry does not depend on held scene-local update callbacks.
     return true;
 }
 bool RankedRoundPreparation::beginNativeQuit(PlayLayer* play) {

@@ -156,14 +156,14 @@ namespace ui{inline constexpr Color Gold{255,195,55},Blue{0,0,255},SurfaceRaised
  struct PlayerIcon{static CCNode* createLocal(){return CCNode::create();}static CCNode* createBot(int){return CCNode::create();}static CCNode* createRemote(int){return CCNode::create();}};
  CCNode* createAnimatedRankBadge(std::string const&,CCSize,RankBadgeDisplay){return CCNode::create();}
 }
-struct SurvivalMatchView{std::string id="m",roundKey="r1",ownId="a",phase="ROUND_1";int mapGeneration=1;std::vector<SurvivalStanding>standings,roundPlayers;matjson::Value result;};
+struct SurvivalMatchView{std::uint64_t revision=1;std::string id="m",roundKey="r1",ownId="a",phase="ROUND_1";int mapGeneration=1;std::vector<SurvivalStanding>standings,roundPlayers;matjson::Value result;};
 struct Coordinator:CCNode{
- struct Tile{CCNode* root=nullptr;CCLabelBMFont* name=nullptr;CCLabelBMFont* record=nullptr;CCPoint destination;CCNode* icon=nullptr;CCNode* tierBadge=nullptr;std::string tier="";CCNode* eliminatedBackground=nullptr;std::string titleText={},recordText={};std::array<CCNode*,3>medals{};int infoTag=0;};
- std::string m_gridContext;CCNode grid;CCNode* m_grid=&grid;std::unordered_map<std::string,Tile>m_tiles;std::unordered_map<int,SurvivalStanding>m_infoByTag;int m_nextInfoTag=1000;void onPlayerInfo(CCObject*){}CCSize getContentSize()const{return {568,320};}
+ struct Tile{CCNode* root=nullptr;CCLabelBMFont* name=nullptr;CCLabelBMFont* record=nullptr;CCPoint destination;CCNode* icon=nullptr;CCNode* tierBadge=nullptr;std::string tier="";CCNode* eliminatedBackground=nullptr;std::string titleText={},recordText={};std::array<CCNode*,3>medals{};int infoTag=0;SurvivalProgressTween progress{};};
+ double m_frameDelta=1./60.;std::string m_gridContext;CCNode grid;CCNode* m_grid=&grid;std::unordered_map<std::string,Tile>m_tiles;std::unordered_map<int,SurvivalStanding>m_infoByTag;int m_nextInfoTag=1000;void onPlayerInfo(CCObject*){}CCSize getContentSize()const{return {568,320};}
  ${method(source,'void showParticipants(')}
 };
 }
-int main(){using namespace corum::ranked;SurvivalMatchView view;SurvivalStanding a,b;a.id="a";a.name="Alice";a.rank=1;a.score=80;a.passing=true;b.id="b";b.name="Bob";b.rank=2;b.score=60;b.passing=true;view.standings={a,b};Coordinator ui;ui.showParticipants(view,false);
+int main(){using namespace corum::ranked;SurvivalMatchView view;SurvivalStanding a,b;a.id="a";a.name="Alice";a.rank=1;a.score=a.bestProgress=80;a.passing=true;b.id="b";b.name="Bob";b.rank=2;b.score=b.bestProgress=60;b.passing=true;view.standings={a,b};Coordinator ui;ui.showParticipants(view,false);
  auto* alice=ui.m_tiles.at("a").root;auto* name=ui.m_tiles.at("a").name;auto* icon=ui.m_tiles.at("a").icon;auto initial=alice->pos;
  assert(ui.m_tiles.at("a").medals[0]->visible&&ui.m_tiles.at("b").medals[1]->visible);
  for(int rank:{0,4,3,2,1}){view.standings[0].rank=rank;ui.showParticipants(view,false);auto const& tile=ui.m_tiles.at("a");

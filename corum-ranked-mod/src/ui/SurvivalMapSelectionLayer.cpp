@@ -16,7 +16,7 @@ namespace corum::ranked::ui {
 namespace {
 std::int64_t monotonicMs(){return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();}
 std::uint64_t sceneSequence=0;
-struct RevealRecord {std::int64_t began=0;std::size_t consumed=0;bool complete=false,centerPlayed=false;SurvivalRevealModeChoice mode;SurvivalThumbnailReel reel;};
+struct RevealRecord {std::int64_t began=0;std::size_t consumed=0;bool complete=false,centerPlayed=false;SurvivalRevealModeChoice mode;SurvivalThumbnailReel reel;std::int64_t resolvedAt=0;};
 // Retained scenes normally keep the timeline. The bounded registry also covers
 // a recreated coordinator without replaying elapsed locks or a second reveal.
 std::map<std::string,RevealRecord> reveals;
@@ -84,7 +84,6 @@ void SurvivalMapSelectionLayer::prepareServerMap(SurvivalMatchView const& view){
     if(m_active)hideSelection();setVisible(false);
     if(view.roundKey.empty())return;
     SurvivalSelectionContext context{view.id,view.roundKey,view.mapGeneration,static_cast<std::uint64_t>(std::max(0,view.map.levelId)),m_sceneGeneration};
-    if(context.levelId)reveals.try_emplace(context.revealKey(),RevealRecord{monotonicMs(),0,false});
     // The roster's existing presentation time is useful prefetch time even
     // before the server has selected the real level. No reveal starts here.
     if(SurvivalThumbnailProvider::supported()){SurvivalThumbnailProvider::get().activate(context);m_providerContext=context;}
@@ -105,7 +104,7 @@ void SurvivalMapSelectionLayer::numberFrame(SurvivalRevealFrame const& frame,Sur
             reel.impact=CCLayerColor::create({Gold.r,Gold.g,Gold.b,255},width,2*r.scale);reel.impact->setPosition({0,0});viewport->addChild(reel.impact,5);v.columns.push_back(reel);
         }
     }
-    bool const final=frame.elapsed>=2.70 && !digits.empty();v.reels->setVisible(!final);m_finalId->setVisible(final);
+    bool const final=frame.elapsed>=frame.stopAt && !digits.empty();v.reels->setVisible(!final);m_finalId->setVisible(final);
     if(!final)for(std::size_t i=0;i<n;++i){auto value=survivalReel(m_timeline,frame,i);
         if(digits.empty()){auto const phase=frame.elapsed*(34.+i*3.1)+i*1.73;value.digit=static_cast<int>(phase)%10;value.offset=phase-std::floor(phase);}
         auto& col=v.columns[i];auto const width=col.root->getContentSize().width;
@@ -139,39 +138,34 @@ void SurvivalMapSelectionLayer::thumbnailFrame(SurvivalRevealFrame const& frame,
             v.previews[i].second=image->second;
     }
     if(auto preferred=SurvivalThumbnailProvider::get().selected();preferred && preferred.data()!=v.finalTexture.data())v.finalTexture=preferred;
-    // Maintain position and velocity at the deceleration boundary. The old
-    // cubic easing jumped in speed and then nearly froze half-way through.
-    constexpr double glideStart=1.95,glideDuration=.80,cyclesPerSecond=1./.14;
-    double phase=frame.elapsed*cyclesPerSecond;
-    if(frame.elapsed>=glideStart){
-        auto const p=std::clamp((frame.elapsed-glideStart)/glideDuration,0.,1.);
-        phase=glideStart*cyclesPerSecond+glideDuration*cyclesPerSecond*(p-.5*p*p);
-    }
-    auto const base=static_cast<std::size_t>(std::floor(phase));auto const fraction=phase-std::floor(phase);
-    auto const central=frame.elapsed>=2.15 && m_timeline.context().levelId>0;
-    v.carousel->setVisible(frame.elapsed<3.10);
+    auto const motion=survivalThumbnailMotion(frame,m_timeline.context().levelId>0);
+    auto const base=static_cast<std::size_t>(std::floor(motion.phase));auto const fraction=motion.phase-std::floor(motion.phase);
+    v.carousel->setVisible(frame.elapsed<frame.stopAt+.30);
     for(std::size_t i=0;i<v.cards.size();++i){auto& card=v.cards[i];auto const relative=static_cast<float>(i)-2-static_cast<float>(fraction);
-        card.set(v.previews.empty()?nullptr:v.previews[(base+i)%v.previews.size()].second.data());
-        auto const emphasis=std::max(0.f,1-std::abs(relative)*.19f);card.root->setPosition({v.carousel->getContentSize().width/2+relative*v.cardWidth*.84f,v.carousel->getContentSize().height/2});
-        card.root->setScale(.63f+.37f*emphasis);card.root->setZOrder(static_cast<int>(10-std::abs(relative)*2));card.trim->setVisible(false);card.shade->setOpacity(static_cast<GLubyte>(90+75*(1-emphasis)));
-        setModeLobbyOpacity(card.root,static_cast<GLubyte>((1-std::clamp((frame.elapsed-2.75)/.30,0.,1.))*255));
-        if(central && std::abs(relative)<.9f)card.root->setVisible(false);else card.root->setVisible(true);
+        auto const winner=m_timeline.context().levelId>0 && base+i==motion.winnerIndex;
+        card.set(winner?v.finalTexture.data():v.previews.empty()?nullptr:v.previews[(base+i)%v.previews.size()].second.data());
+        auto const emphasis=std::max(0.f,1-std::abs(relative)*.19f);
+        card.root->setPosition({v.carousel->getContentSize().width/2+relative*v.cardWidth*.84f,v.carousel->getContentSize().height/2});
+        card.root->setScale(.63f+.37f*emphasis);card.root->setZOrder(static_cast<int>(10-std::abs(relative)*2));
+        card.trim->setVisible(winner);card.shade->setOpacity(winner?0:static_cast<GLubyte>(90+75*(1-emphasis)));
+        setModeLobbyOpacity(card.root,static_cast<GLubyte>((1-std::clamp((frame.elapsed-frame.stopAt)/.30,0.,1.))*255));
+        card.root->setVisible(!(winner&&motion.stopped));
     }
-    auto& selected=v.selected;selected.root->setVisible(central);if(central){selected.set(v.finalTexture.data());selected.shade->setOpacity(0);selected.trim->setVisible(true);
-        // Thumbnail landing starts at 2.75s; numeric landing starts at 2.70s.
-        auto const p=survivalEase((frame.elapsed-2.75)/.45);auto const start=CCPoint{size.width/2,r.carousel.cy()};
-        auto const arrival=1-survivalEase((frame.elapsed-2.15)/.60);
-        selected.root->setPosition({static_cast<float>(start.x+(r.thumbnail.cx()-start.x)*p+v.cardWidth*.84*arrival),static_cast<float>(start.y+(r.thumbnail.cy()-start.y)*p)});
-        auto scale=static_cast<float>(1+(r.thumbnail.w/v.cardWidth-1)*p);
-        if(frame.elapsed>=2.75 && frame.elapsed<2.93)scale*=static_cast<float>(1+.06*std::sin((frame.elapsed-2.75)/.18*3.141592653589793));selected.root->setScale(scale);
-        setModeLobbyOpacity(selected.root,255);
+    // The same winning image first enters in the moving reel. At exact center
+    // its replacement has an identical transform, then shrinks into the panel.
+    // No off-center overlay or late-ID jump can introduce a second winner.
+    auto& selected=v.selected;selected.root->setVisible(motion.stopped);
+    if(motion.stopped){selected.set(v.finalTexture.data());selected.shade->setOpacity(0);selected.trim->setVisible(true);
+        auto const t=std::clamp((frame.elapsed-frame.stopAt)/.45,0.,1.);auto const p=t*t*(3-2*t);
+        selected.root->setPosition({static_cast<float>(size.width/2+(r.thumbnail.cx()-size.width/2)*p),static_cast<float>(r.carousel.cy()+(r.thumbnail.cy()-r.carousel.cy())*p)});
+        selected.root->setScale(static_cast<float>(1+(r.thumbnail.w/v.cardWidth-1)*p));setModeLobbyOpacity(selected.root,255);
     }
 }
 void SurvivalMapSelectionLayer::playLocks(SurvivalRevealFrame const& frame){
     auto& record=reveals[m_timeline.context().revealKey()];auto locks=m_timeline.takeLocks(frame,!m_thumbnail);
     for(auto lock:locks)if(lock>=record.consumed)m_sounds.push_back(lock);
     record.consumed=std::max(record.consumed,frame.locked);
-    if(m_thumbnail && frame.elapsed>=2.75 && !record.centerPlayed){record.centerPlayed=true;if(!frame.skipped && !m_needsResume)m_sounds.push_back(0);}
+    if(m_thumbnail && frame.elapsed>=frame.stopAt && !record.centerPlayed){record.centerPlayed=true;if(!frame.skipped && !m_needsResume)m_sounds.push_back(0);}
     auto const now=monotonicMs();if(frame.skipped || m_needsResume){m_sounds.clear();return;}
     if(!m_sounds.empty() && now-m_lastSound>=65){[[maybe_unused]] auto const column=m_sounds.front();m_sounds.pop_front();m_lastSound=now;
         auto const gain=RankedVolumeControl::get().volume();if(gain>0)if(auto* engine=FMODAudioEngine::sharedEngine())engine->playEffect("clickChange.ogg",1.f,0.f,.22f*gain);
@@ -196,7 +190,10 @@ void SurvivalMapSelectionLayer::present(SurvivalMatchView const& view,RoundPrepa
         if(reveals.size()>16)for(auto old=reveals.begin();old!=reveals.end();++old)if(old->first!=context.revealKey()){reveals.erase(old);break;}
         m_timeline.observe(context,it->second.began);
     }
-    m_timeline.observe(context,reveals[context.revealKey()].began);
+    auto& savedReveal=reveals[context.revealKey()];
+    if(context.levelId && !savedReveal.resolvedAt)savedReveal.resolvedAt=now;
+    m_timeline.observe(context,now);
+    if(savedReveal.resolvedAt)m_timeline.restoreResolutionAge(savedReveal.resolvedAt-savedReveal.began);
     if(auto& record=reveals[context.revealKey()];record.complete || Mod::get()->getSavedValue<std::string>("survival-map-reveal-complete")==context.revealKey() ||
         Mod::get()->getSavedValue<std::string>("survival-map-reveal-complete")==context.key()){
         m_timeline.skip();
@@ -216,10 +213,11 @@ void SurvivalMapSelectionLayer::present(SurvivalMatchView const& view,RoundPrepa
         record.mode.fallback();m_thumbnail=false;m_fallback=true;resetVisuals();
     }
     auto const r=survivalSelectionLayout(size.width,size.height,m_thumbnail,supportsLdm);
+    m_pendingLabel->setPosition({r.pending.cx(),r.pending.cy()});fitFullMenuLabel(m_pendingLabel,r.pending.w,r.pending.h,.23f);
     m_pendingLabel->setVisible(!context.levelId);
     if(m_thumbnail)thumbnailFrame(frame,r);else if(context.levelId)numberFrame(frame,r);
     m_panel->present(size,m_thumbnail,view,prep,options,supportsLdm,actionsEnabled,canEnter,frame.details);
-    auto const finalHeader=context.levelId>0 && (frame.elapsed>=3.2 || frame.skipped);
+    auto const finalHeader=context.levelId>0 && (frame.details>0 || frame.skipped);
     auto clock=(finalHeader || view.state=="COUNTDOWN" || view.state=="PLAYING")?survivalBoardClock(view.state,countdown,remaining):std::string{};
     if(auto wait=SurvivalRuntime::get().entryWaitMs();view.state=="ENTERING" && wait && *wait>0)
         clock=fmt::format(fmt::runtime(i18n::text("survival-entry-wait","ALL READY · ENTERING IN {}s")),(*wait+999)/1000);

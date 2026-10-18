@@ -155,7 +155,7 @@ test('production deferred Survival return queues once, respects pause refusal/co
  const playSource=read('src/PlayLayer.cpp');
  run(common+`
 struct UILayer{int disabled=0;void disableMenu(){++disabled;}};
-namespace corum::ranked{bool completion=false,resumable=true;int resumes=0;bool quitThroughSurvivalCompletionOverlay(PlayLayer*){return completion;}bool resumeSurvivalFreePlayPauseBeforeQuit(PlayLayer*){++resumes;return resumable;}}
+namespace corum::ranked{bool completion=false,resumable=true,nativePause=false;int resumes=0,pauseQuits=0;bool quitSurvivalPauseForReturn(PlayLayer* p){if(!nativePause)return false;++pauseQuits;p->onQuit();return true;}bool quitThroughSurvivalCompletionOverlay(PlayLayer*){return completion;}bool resumeSurvivalFreePlayPauseBeforeQuit(PlayLayer*){++resumes;return resumable;}}
 namespace corum::ranked{struct RankedRoundPreparation{static RankedRoundPreparation&get(){static RankedRoundPreparation p;return p;}bool nativeReturnPending(PlayLayer*p)const{return p&&p->quits>0;}};}
 struct CorumRankedPlayLayer:PlayLayer{
  struct Fields{bool autoExitRequested=false,safetyRetired=false,rankedInitialized=true,survivalLevel=true,survivalNativeClearFinished=false,survivalFreePlayHud=false;}fields;Fields*m_fields=&fields;
@@ -168,6 +168,7 @@ struct CorumRankedPlayLayer:PlayLayer{
 +`
 int main(){using namespace corum::ranked;CCScene scene,other;auto*d=CCDirector::sharedDirector();d->scene=&scene;
  {CorumRankedPlayLayer p;PlayLayer::current=&p;p.parent=&scene;p.queueSurvivalGameplayReturn();p.queueSurvivalGameplayReturn();assert(queued.size()==1&&p.quits==0&&!p.touch&&!p.keyboard&&p.m_queuedButtons.empty());drain();assert(p.quits==1);p.queueSurvivalGameplayReturn();assert(queued.empty());}
+ {CorumRankedPlayLayer p;PlayLayer::current=&p;p.parent=&scene;nativePause=true;p.queueSurvivalGameplayReturn();assert(pauseQuits==0);drain();assert(p.quits==1&&pauseQuits==1);nativePause=false;}
  {CorumRankedPlayLayer p;PlayLayer::current=&p;p.parent=&scene;p.running=false;p.queueSurvivalGameplayReturn();drain();assert(p.quits==1);p.queueSurvivalGameplayReturn();assert(queued.empty());}
  {CorumRankedPlayLayer p;PlayLayer::current=&p;p.parent=&scene;resumable=false;p.queueSurvivalGameplayReturn();drain();assert(p.quits==0&&!p.fields.autoExitRequested);resumable=true;p.queueSurvivalGameplayReturn();drain();assert(p.quits==1);}
  {CorumRankedPlayLayer p;PlayLayer::current=&p;p.parent=&scene;d->next=&other;p.queueSurvivalGameplayReturn();assert(queued.empty());d->next=nullptr;p.queueSurvivalGameplayReturn();d->next=&other;drain();assert(p.quits==0&&!p.fields.autoExitRequested);d->next=nullptr;}

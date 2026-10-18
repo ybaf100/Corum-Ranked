@@ -30,8 +30,9 @@ test("entry fallback never unpauses unknown scenes or bypasses server authority"
         "managed->m_fields->rankedLevel", "managed->m_fields->nativeEntryHeld",
         "managed->m_fields->entryNativeCompletionInProgress",
         "managed->m_fields->autoExitRequested", "managed->m_fields->safetyRetired",
-        "layer->isRunning()", "director->getRunningScene()", "director->getNextScene()",
+        "managed->m_fields->survivalLevel", "director->getRunningScene()", "director->getNextScene()",
     ]) assert.ok(pump.includes(required), `missing exact ownership gate: ${required}`);
+    assert.doesNotMatch(pump, /!layer->isRunning\(\)/);
     assert.doesNotMatch(pump, /pauseGame\(|resume\(|m_gamePaused\s*=|m_isPaused\s*=/);
     assert.doesNotMatch(pump, /armCurrentLevelForGameplay|nativeEntryStartGranted|reportAttemptStart/);
 });

@@ -1,7 +1,7 @@
-import { reduceSurvivalMatch,survivalBotPlan,survivalBotTiebreak,survivalCurrentRound,survivalEntryOpensAt,survivalEntryDeadlineAt,type SurvivalCommand,type SurvivalMatch } from "@corum-ranked/rules";
+import { reduceSurvivalMatch,simulateSurvivalBots,applySurvivalBotFrames,survivalCurrentRound,survivalEntryOpensAt,survivalEntryDeadlineAt,type SurvivalBotDriverState,type SurvivalCommand,type SurvivalMatch } from "@corum-ranked/rules";
 
-/** Same reducer, seeded records and durable caller-owned cursors for M4 and M5. */
-export function driveSurvivalBots(before:SurvivalMatch,seed:number,previous:Record<string,number>,now:number) {
+/** Shared NORMAL simulation; driver state and authoritative attempts commit atomically. */
+export function driveSurvivalBots(before:SurvivalMatch,seed:number,previous:SurvivalBotDriverState,now:number,humanLp?:readonly number[]) {
   let match=before;const round=survivalCurrentRound(match);
   const humans=round.players.filter(p=>!p.forfeited && !p.absent && match.players.some(e=>e.participantId===p.participantId && e.kind==="HUMAN"));
   const bots=match.players.filter(p=>p.kind==="BOT");
@@ -20,23 +20,13 @@ export function driveSurvivalBots(before:SurvivalMatch,seed:number,previous:Reco
   if(match.state==="ENTERING" && now>=(survivalEntryOpensAt(survivalCurrentRound(match))??Infinity) && (humans.some(p=>p.enteredAt!==null) || (match.online && !humans.length))) {
     for(const p of active)apply({type:"ENTERED",...context,participantId:p.participantId},resourceAt);
   }
-  const cursor={...previous};
-  if(match.state==="PLAYING" && round.startsAt!==null && round.endsAt!==null) {
-    const at=Math.min(now,round.endsAt-1);
-    for(const p of active){
-      const index=bots.findIndex(b=>b.participantId===p.participantId),key=`${round.key}:${round.mapGeneration}:${p.participantId}`;
-      const used=cursor[key]??-1;
-      if(round.phase==="TIEBREAK") {
-        for(const [i,progress] of survivalBotTiebreak(seed,`${round.key}:${round.mapGeneration}`,index).entries()) {
-          if(i<=used)continue;const attemptId=`bot-dm-${i+1}`;
-          apply({type:"ATTEMPT_START",...context,participantId:p.participantId,attemptId},at);
-          apply({type:"ATTEMPT_END",...context,participantId:p.participantId,attemptId,progress},at);cursor[key]=i;
-        }
-      } else for(const e of survivalBotPlan(seed,`${round.key}:${round.mapGeneration}`,index).filter(e=>e.offsetMs<=now-round.startsAt! && e.index>used)) {
-        if(used<0 && e.index===0)apply({type:"ATTEMPT_START",...context,participantId:p.participantId,attemptId:"bot-normal"},at);
-        apply({type:"PROGRESS",...context,participantId:p.participantId,attemptId:"bot-normal",progress:e.best},at);cursor[key]=e.index;
-      }
-    }
-  }
-  return {match,cursor};
+  // Catch up before the engine adjudicates the authoritative deadline.
+  const current=survivalCurrentRound(match);
+  if(match.state==="COUNTDOWN" && current.startsAt!==null && now>=current.startsAt)
+    apply({type:"TICK"},Math.min(now,current.endsAt!-1));
+  if(match.state!=="PLAYING" || current.startsAt===null || current.endsAt===null || !active.length)
+    return {match,cursor:previous};
+  const {state,frames}=simulateSurvivalBots(match,seed,previous,now,humanLp);
+  match=applySurvivalBotFrames(match,context,frames,Math.min(now,current.endsAt-1));
+  return {match,cursor:state};
 }
