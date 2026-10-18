@@ -10,7 +10,7 @@ namespace corum::ranked::ui {
 // layer so the landing card never disappears during the information fade.
 class SurvivalSelectedMapPanel final : public cocos2d::CCLayerColor {
     SurvivalSelectionLayout m_layout;
-    bool m_built=false,m_thumbnail=false,m_ldmSupported=false,m_readyEnabled=false,m_retry=false;
+    bool m_built=false,m_thumbnail=false,m_ldmSupported=false,m_readyEnabled=false,m_retry=false,m_start=false;
     SurvivalNativeOptions m_options;
     cocos2d::CCLabelBMFont *m_title=nullptr,*m_creator=nullptr,*m_metadata=nullptr,*m_readiness=nullptr;
     cocos2d::CCNode* m_difficulty=nullptr;
@@ -23,7 +23,7 @@ class SurvivalSelectedMapPanel final : public cocos2d::CCLayerColor {
     std::function<void(int)> m_action;
     void build(cocos2d::CCSize,bool,bool);
     void onAction(cocos2d::CCObject*);
-    cocos2d::CCNode* readyFace(bool,bool retry=false);
+    cocos2d::CCNode* readyFace(bool,bool retry=false,bool start=false);
 public:
     static SurvivalSelectedMapPanel* create(std::function<void(int)> action);
     void present(cocos2d::CCSize,bool thumbnail,SurvivalMatchView const&,RoundPreparationView const&,
