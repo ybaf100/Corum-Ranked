@@ -59,6 +59,7 @@ const context=(match:SurvivalMatch)=>{const r=survivalCurrentRound(match);return
 async function prepare(match:SurvivalMatch){
   await engine.selectMap(match.id);match=await engine.get(match.id);
   for(const p of survivalCurrentRound(match).players)match=await send(match,{type:"ASSETS_READY",...context(match),participantId:p.participantId,certificate:survivalCurrentRound(match).map!});
+  now=survivalCurrentRound(match).entryRequestedAt!+3000;
   for(const p of survivalCurrentRound(match).players)match=await send(match,{type:"ENTERED",...context(match),participantId:p.participantId});
   now=survivalCurrentRound(match).startsAt!;return engine.tick(match.id);
 }

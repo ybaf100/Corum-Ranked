@@ -1,3 +1,11 @@
+# v0.5.0-beta.77
+
+- Route Survival Pause surrender and Debug Force Clear taps through their exact visible bounds before native Pause blockers; respect confirmations, retired scenes and server acknowledgement.
+- Read thumbnail HTTP headers case-insensitively, warm previews during the roster and keep a round in numeric fallback once chosen.
+- Keep all ready players in map preparation for three server-timed seconds before native entry opens; retain the full native-entry timeout and existing gameplay countdown.
+- Keep the LDM control visible and disabled as NO LDM / LDM 없음 on unsupported maps, without moving the other controls or changing saved preferences.
+- See [causes, implementation and validation limits](../ranked/docs/survival-beta77-input-thumbnails-ready.md).
+
 # v0.5.0-beta.76
 
 - Add a shared four-second server-map reveal: optional public Level Thumbnails carousel or one horizontal row of vertical ID reels, with safe numeric fallback and server-start skips.

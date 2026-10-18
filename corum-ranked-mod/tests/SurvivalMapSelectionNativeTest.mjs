@@ -39,15 +39,24 @@ test('pending server selection, fallback, background elapsed time and server ent
  c.levelId=99;t.observe(c,20000);t.followServer("CANCELLED",{},20001);assert(t.frame(20002).stage==SurvivalRevealStage::Cancelled);
 }`);
 });
+test('one reveal keeps its selected mode across late images, a permanent fallback and scene recreation',()=>{
+ run(`int main(){SurvivalRevealModeChoice cold;assert(!cold.choose(true,false));
+ assert(!cold.choose(true,true));assert(!cold.choose(false,false));
+ SurvivalRevealModeChoice warm;assert(warm.choose(true,true));assert(warm.choose(true,false));
+ warm.fallback();assert(!warm.choose(true,true));auto reopened=warm;assert(!reopened.choose(true,true));
+ SurvivalRevealModeChoice nextRound;assert(nextRound.choose(true,true));
+ SurvivalRevealModeChoice disabled;assert(!disabled.choose(false,true));assert(!disabled.choose(true,true));
+}`);
+});
 test('thumbnail/numeric layouts keep all text, metadata and touch rows within their panels at phone, 4:3 and wide sizes',()=>{
  run(`int main(){for(auto viewport:{std::pair{400.f,280.f},std::pair{400.f,320.f},std::pair{512.f,384.f},std::pair{520.f,320.f},std::pair{568.f,320.f},std::pair{568.f,426.f},std::pair{640.f,360.f},std::pair{854.f,320.f},std::pair{1024.f,576.f}})for(bool thumb:{false,true})for(bool ldm:{false,true}){
  auto r=survivalSelectionLayout(viewport.first,viewport.second,thumb,ldm);
  assert(r.safe.contains(r.panel));if(thumb){assert(r.panel.contains(r.thumbnail));assert(std::abs(r.thumbnail.w/r.thumbnail.h-16.f/9)<.001f);}
- std::vector<SurvivalRect> rows{r.title,r.creator,r.difficulty,r.metadata,r.shake,r.jukebox,r.ready,r.readiness};if(ldm)rows.push_back(r.ldm);
+ std::vector<SurvivalRect> rows{r.title,r.creator,r.difficulty,r.metadata,r.ldm,r.shake,r.jukebox,r.ready,r.readiness};
  for(auto const& a:rows){assert(r.panel.contains(a));for(auto const& b:rows)if(&a!=&b)assert(!a.overlaps(b));}
  if(thumb)for(auto const& a:rows)assert(!a.overlaps(r.thumbnail));
  for(auto a:{r.shake,r.jukebox,r.ready})assert(a.h>=28&&a.w>=48);
- if(ldm)assert(r.ldm.h>=28);
+ assert(r.ldm.h>=28);
  if(!thumb){assert(!r.hint.overlaps(r.panel));assert(!r.numberFinal.overlaps(r.panel));assert(!r.numberFinal.overlaps(r.subtitle));assert(!r.numberFinal.overlaps(r.header));}
 }}`);
 });
@@ -66,4 +75,16 @@ test('global defaults and same-round overrides stay separate across object repla
  defaults={true,true};assert((r.enter("m:R1:1",defaults)==SurvivalNativeOptions{false,true}));assert(r.enter("m:R1:2",defaults)==defaults);
  assert((r.enter("m:R2:1",{false,false})==SurvivalNativeOptions{false,false}));
 }`);
+});
+test('packaged fonts cover the unavailable LDM control and all-ready countdown in Korean',()=>{
+ const captions=readFileSync(join(root,'src/ui/RankedTranslations.hpp'),'utf8');
+ const fonts=JSON.parse(readFileSync(join(root,'mod.json'),'utf8')).resources.fonts;
+ const keys=['survival-no-ldm','survival-entry-wait'];
+ for(const key of keys){
+  const caption=captions.match(new RegExp(`Translation\\{"${key}", "([^"]*)"\\}`))?.[1];assert(caption,key);
+  for(const weight of ['CorumSansMedium','CorumSansSemiBold','CorumSansBold','CorumSansBlack']){
+   const charset=new Set(fonts[weight].charset.split(',').flatMap(part=>{const [first,last=first]=part.split('-').map(Number);return Array.from({length:last-first+1},(_,i)=>first+i);}));
+   for(const glyph of caption)assert(charset.has(glyph.codePointAt(0)),`${weight} missing ${glyph}`);
+  }
+ }
 });

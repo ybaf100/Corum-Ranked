@@ -17,6 +17,15 @@ struct SurvivalSelectionContext {
     }
 };
 enum class SurvivalRevealStage { PendingSelection, Rolling, Locking, Landing, Details, Settled, Cancelled };
+class SurvivalRevealModeChoice {
+    enum class Mode { Undecided, Thumbnail, Numeric } m_mode=Mode::Undecided;
+public:
+    bool choose(bool supported,bool previewsReady){
+        if(m_mode==Mode::Undecided)m_mode=supported && previewsReady?Mode::Thumbnail:Mode::Numeric;
+        return m_mode==Mode::Thumbnail;
+    }
+    void fallback(){m_mode=Mode::Numeric;}
+};
 struct SurvivalRevealFrame {
     SurvivalRevealStage stage=SurvivalRevealStage::Cancelled;
     double elapsed=0, landing=0, details=0;

@@ -87,8 +87,9 @@ struct Mod {static Mod* get(){static Mod m;return &m;}auto getSaveDir(){return s
 namespace log {template<class...Args>void info(Args const&...){} }
 namespace utils::web {
 struct WebProgress {std::size_t count=0,total=0;auto downloaded()const{return count;}auto downloadTotal()const{return total;}};
-struct WebResponse {int status=200;std::vector<std::uint8_t> bytes;std::map<std::string,std::string> headers;
- int code()const{return status;}auto header(std::string const& key)const->std::optional<std::string>{auto it=headers.find(key);return it==headers.end()?std::nullopt:std::optional(it->second);}
+struct WebResponse {int status=200;std::vector<std::uint8_t> bytes;std::map<std::string,std::string> values;
+ int code()const{return status;}auto header(std::string const& key)const->std::optional<std::string>{auto it=values.find(key);return it==values.end()?std::nullopt:std::optional(it->second);}
+ auto headers()const{std::vector<std::string> names;for(auto const& [k,v]:values)names.push_back(k);return names;}
  auto const& data()const&{return bytes;}auto data()&&{return std::move(bytes);}};
 struct Ticket {std::string url,agent;bool redirect=true,tls=false;int timeout=0;std::function<void(WebProgress const&)> progress;};
 struct WebRequest {Ticket request;auto& userAgent(std::string value){request.agent=value;return *this;}auto& timeout(std::chrono::seconds value){request.timeout=value.count();return *this;}
@@ -121,7 +122,7 @@ int main(int argc,char**argv){assert(argc==2);saveRoot=argv[1];auto dir=saveRoot
  auto old=flights.size()-1;auto b=a;b.levelId=200;b.sceneGeneration=2;p.activate(b);assert(flights[old].cancelled);
  reply(old,200,webp(),{{"Content-Type","image/webp"}});pump(p);assert(!p.selected());assert(p.previews().empty());assert(active()<=2);
  // Current authoritative medium succeeds; a missing small is normal negative cache.
- bool medium=false;for(std::size_t i=0;i<flights.size();i++)if(!flights[i].cancelled&&!flights[i].done){if(flights[i].ticket.url.ends_with("/200/medium")){reply(i,200,webp(1280,720),{{"Content-Type","image/webp"}});medium=true;}else reply(i,404);}
+ bool medium=false;for(std::size_t i=0;i<flights.size();i++)if(!flights[i].cancelled&&!flights[i].done){if(flights[i].ticket.url.ends_with("/200/medium")){reply(i,200,webp(1280,720),{{"content-type","image/webp"}});medium=true;}else reply(i,404);}
  assert(medium);pump(p);assert(p.selected());assert(CCImage::decoded>0&&CCTexture2D::uploads==1);
  // The disk cache is reusable without a new HTTP request for the selected medium.
  auto before=flights.size();p.deactivate();auto c=b;c.sceneGeneration=3;p.activate(c);pump(p);assert(p.selected());
@@ -129,7 +130,7 @@ int main(int argc,char**argv){assert(argc==2);saveRoot=argv[1];auto dir=saveRoot
  // Foreign redirects are never followed. Valid 302s re-enter the canonical host.
  bool sentForeign=false,sentValid=false,retried=false;std::size_t transient=0;
  for(int round=0;round<55;++round){auto end=flights.size();for(std::size_t i=0;i<end;i++)if(!flights[i].done&&!flights[i].cancelled){auto url=flights[i].ticket.url;
-  if(url.ends_with("/random/small")){if(!sentForeign){reply(i,302,{},{{"Location","https://evil.test/thumbnail/500/small"}});sentForeign=true;}else{reply(i,302,{},{{"Location","/thumbnail/501/small"}});sentValid=true;}}
+  if(url.ends_with("/random/small")){if(!sentForeign){reply(i,302,{},{{"location","https://evil.test/thumbnail/500/small"}});sentForeign=true;}else{reply(i,302,{},{{"lOcAtIoN","/thumbnail/501/small"}});sentValid=true;}}
   else if(url.ends_with("/501/small")){if(!transient){transient=i+1;reply(i,503);}else{retried=true;reply(i,404);}}
   else reply(i,404);
  }fakeNow+=1001;pump(p,3);assert(active()<=2);}

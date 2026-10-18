@@ -18,7 +18,7 @@ struct SurvivalQueueView {
 };
 struct SurvivalMatchView {
     std::uint64_t revision=0;
-    std::string id,state,phase,roundKey,group,ownId="human",error,startsAt,endsAt,mapError,presentationGate;
+    std::string id,state,phase,roundKey,group,ownId="human",error,startsAt,endsAt,entryOpensAt,mapError,presentationGate;
     int mapGeneration=0,roundNumber=0,targetQualifiers=0,playerCount=0,roundPlayerCount=0;
     SurvivalMapMetadata map;
     matjson::Value certificate,result,completedRound;
@@ -62,6 +62,7 @@ public:
     bool canPlay() const;
     bool attemptLimitReached() const;
     std::optional<std::int64_t> countdownMs() const;
+    std::optional<std::int64_t> entryWaitMs() const;
     std::optional<std::int64_t> roundRemainingMs() const;
     std::int64_t remainingMs() const;
     void assetsReady(GJGameLevel* level);

@@ -1,7 +1,7 @@
 import { SurvivalConfigService } from "../config/survival-config.service.js";
 import { survivalQueueView } from "./survival-queue.view.js";
 import { BadRequestException,ConflictException,ForbiddenException,Inject,Injectable,Logger,type OnApplicationBootstrap,type OnApplicationShutdown } from "@nestjs/common";
-import { reduceSurvivalMatch,survivalCurrentRound,survivalLiveView,survivalMarkAbsent,survivalSettlementInputs,
+import { reduceSurvivalMatch,survivalCurrentRound,survivalLiveView,survivalMarkAbsent,survivalSettlementInputs,survivalEntryDeadlineAt,
   survivalStabilizeOnlineRanks,finishSurvivalDebugOnElimination,survivalTierForLp,RankedDomainError,type SurvivalMatch,type SurvivalCommand,type SurvivalRatingProfile } from "@corum-ranked/rules";
 import { DATABASE,type DatabasePort,type SqlExecutor } from "../database/database.port.js";
 import { SERVER_CLOCK,type ServerClock } from "../common/runtime.module.js";
@@ -60,7 +60,7 @@ export class SurvivalOnlineService implements OnApplicationBootstrap,OnApplicati
     }
     round=survivalCurrentRound(match);
     const deadline=match.state==="PREPARING" && round.preparationStartedAt!==null?round.preparationStartedAt+15000:
-      match.state==="ENTERING" && round.entryRequestedAt!==null?(round.firstEnteredAt===null?round.entryRequestedAt+5000:round.firstEnteredAt+10000):null;
+      match.state==="ENTERING"?survivalEntryDeadlineAt(round):null;
     if(deadline!==null){
       const presence=(await tx.query<PresenceRow>("SELECT participant_id,last_seen_at,observed_round_key,observed_map_generation,recovering FROM sur_online_players WHERE match_id=$1",[match.id])).rows;
       const absent=round.players.filter(p=>!p.forfeited && !p.absent && match.players.some(e=>e.participantId===p.participantId&&e.kind==="HUMAN") &&

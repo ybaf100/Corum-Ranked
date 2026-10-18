@@ -92,10 +92,31 @@ async function game(count:number,fill=false){const group:Client[]=[];for(let i=0
 async function event(c:Client,m:SurvivalMatch,type:string,fields:Record<string,unknown>={}){const r=survivalCurrentRound(m);const response=await api(c,`/online/matches/${m.id}/events`,{eventId:ids.next(),type,roundKey:r.key,mapGeneration:r.mapGeneration,levelId:r.map?.levelId??0,...(["ASSETS_READY","ENTERED","ATTEMPT_START"].includes(type)?{installedMods:mods}:{}),...fields});expect(response.status).toBe(201);return response.body;}
 async function prepare(id:string,group:Client[]){let m=await engine.get(id);now+=5000;await touch(group);await online.tickOnce();await engine.selectMap(id);m=await engine.get(id);
  for(const c of group)await event(c,m,"ASSETS_READY",{certificate:survivalCurrentRound(m).map});m=await engine.get(id);
+ now=survivalCurrentRound(m).entryRequestedAt!+3000;await touch(group);
  for(const c of group)await event(c,m,"ENTERED");m=await engine.get(id);now=survivalCurrentRound(m).startsAt!;await touch(group);await online.tickOnce();return engine.get(id);}
 async function record(c:Client,m:SurvivalMatch,progress:number){const attemptId=ids.next();await event(c,m,"ATTEMPT_START",{attemptId});await event(c,m,"ATTEMPT_END",{attemptId,progress});}
 
 describe("Survival M5 public HTTP and persistent online game",()=>{
+ it("holds the ready room for exactly 3s, accepts surrender during the wait and preserves its deadline",async()=>{
+  const {group,id}=await game(8),owner=group[0]!,peers=group.slice(1);
+  now+=5000;await touch(group);await online.tickOnce();await engine.selectMap(id);let m=await engine.get(id);
+  for(const c of group)await event(c,m,"ASSETS_READY",{certificate:survivalCurrentRound(m).map});
+  m=await engine.get(id);const readyAt=now,round=survivalCurrentRound(m);
+  const view=(await api(owner,`/online/matches/${id}`)).body;
+  expect(view.state).toBe("ENTERING");expect(Date.parse(view.entryOpensAt)).toBe(readyAt+3000);
+  expect(Date.parse(view.entryDeadlineAt)).toBe(readyAt+8000);expect(view.startsAt).toBeNull();
+  const early=()=>api(peers[0]!,`/online/matches/${id}/events`,{eventId:ids.next(),type:"ENTERED",roundKey:round.key,mapGeneration:round.mapGeneration,levelId:round.map!.levelId,installedMods:mods});
+  expect((await early()).status).toBe(409);
+  const surrendered=await event(owner,m,"FORFEIT");
+  expect(surrendered.result).toMatchObject({rank:8,requestedDelta:-55});
+  expect(surrendered.preparation.find((p:any)=>p.participantId===owner.session.playerId).forfeited).toBe(true);
+  expect(surrendered.entryOpensAt).toBe(view.entryOpensAt);
+  now=readyAt+2999;expect((await early()).status).toBe(409);
+  now++;await touch(peers);for(const c of peers)await event(c,m,"ENTERED");
+  m=await engine.get(id);expect(m.state).toBe("COUNTDOWN");
+  expect(survivalCurrentRound(m).startsAt).toBe(readyAt+6000);
+  expect(survivalCurrentRound(m).endsAt!-survivalCurrentRound(m).startsAt!).toBe(180000);
+ });
  it("switches generic mod checks over HTTP without disconnecting the queued player",async()=>{
   const c=await client();const installedMods=[mods[0]!,{id:"other.mod",version:"1",enabled:true,loaded:true,internal:false,system:false}];
   expect((await api(c,"/queue/join",{installedMods})).status).toBe(403);
@@ -247,6 +268,7 @@ describe("Survival M5 public HTTP and persistent online game",()=>{
    for(const c of peers)await event(c,m,"ASSETS_READY",{certificate:survivalCurrentRound(m).map});
    now=survivalCurrentRound(m).preparationStartedAt!+15000;await touch(peers);await online.tickOnce();m=await engine.get(id);
    expect(m.state).toBe("ENTERING");expect(survivalCurrentRound(m).players.find(p=>p.participantId===offline.session.playerId)).toMatchObject({absent:true,assetsReadyAt:null,enteredAt:null});
+   now=survivalCurrentRound(m).entryRequestedAt!+3000;await touch(peers);
    for(const c of peers)await event(c,m,"ENTERED");m=await engine.get(id);now=survivalCurrentRound(m).startsAt!;await touch(peers);await online.tickOnce();m=await engine.get(id);
    const end=survivalCurrentRound(m).endsAt;const fresh=await client(offline.channel,offline.account,true);
    expect((await api(fresh,"/online/active")).body.match.matchId).toBe(id);
@@ -367,6 +389,7 @@ describe("Survival M5 public HTTP and persistent online game",()=>{
    now=survivalCurrentRound(m).preparationStartedAt!+13000;await touch(peers);const fresh=await client(old.channel,old.account,true);
    const view=(await api(fresh,"/online/active")).body.match;expect(view.state).toBe("ENTERING");m=await engine.get(id);
    expect(survivalCurrentRound(m).players[0]).toMatchObject({absent:true,assetsReadyAt:null,enteredAt:null});
+   now=survivalCurrentRound(m).entryRequestedAt!+3000;await touch(peers);
    for(const c of peers)await event(c,m,"ENTERED");now+=13000;await touch(peers);await online.tickOnce();m=await engine.get(id);expect(m.state).toBe("PLAYING");
    await event(fresh,m,"ASSETS_READY",{certificate:survivalCurrentRound(m).map});await event(fresh,m,"ENTERED");await record(fresh,m,81);
    expect(survivalCurrentRound(await engine.get(id)).players[0]).toMatchObject({absent:false,highestProgress:81});

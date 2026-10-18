@@ -139,12 +139,14 @@ struct SurvivalRuntime{
  bool pending=false,cleared=false,free=false;long remaining=100;int m_localAttempts=0;std::string m_session="token";
  LevelPreparationContext current{"match",42,1,0,false,0,1},m_prepared=current;
  bool surrenderPending()const{return pending;}bool normalRoundCleared()const{return cleared;}bool freePlaying()const{return free;}
+ std::optional<std::int64_t> wait=0;auto entryWaitMs()const{return wait;}
  auto preparationContext()const{return current;}long remainingMs()const{return remaining;}
  bool attemptLimitReached()const;bool canEnter()const;
  ${method(runtime,'bool SurvivalRuntime::attemptLimitReached()').replace('bool SurvivalRuntime::','bool ')}
  ${method(runtime,'bool SurvivalRuntime::canEnter()').replace('bool SurvivalRuntime::','bool ')}
 };
 int main(){SurvivalRuntime r;
+ r.wait.reset();assert(!r.canEnter());r.wait=3000;assert(!r.canEnter());r.wait=1;assert(!r.canEnter());r.wait=0;assert(r.canEnter());r.wait=-100;assert(r.canEnter());
  for(auto const* phase:{"ROUND_1","ROUND_2","ROUND_3","FINAL","TIEBREAK"}){r.m_view.phase=phase;assert(r.canEnter());}
  r.m_view.state="PLAYING";assert(r.canEnter());r.remaining=0;assert(!r.canEnter());r.remaining=1;
  r.m_localAttempts=3;assert(!r.canEnter());r.m_view.phase="ROUND_1";assert(r.canEnter());

@@ -5,7 +5,19 @@
 #include <set>
 using namespace geode::prelude;
 namespace corum::ranked {
-namespace {SurvivalThumbnailProvider* liveProvider=nullptr;std::uint64_t appEpoch=0;}
+namespace {
+SurvivalThumbnailProvider* liveProvider=nullptr;std::uint64_t appEpoch=0;
+std::optional<std::string> thumbnailHeader(web::WebResponse const& response,std::string_view wanted){
+    // Geode preserves the wire spelling and its header() lookup is case
+    // sensitive. HTTP/2 sends lower-case names; HTTP field names are not.
+    for(auto const& name:response.headers()){
+        auto lower=[](unsigned char c){return c>='A' && c<='Z'?c+('a'-'A'):c;};
+        if(name.size()!=wanted.size() || !std::equal(name.begin(),name.end(),wanted.begin(),[&](auto a,auto b){return lower(a)==lower(b);}))continue;
+        if(auto value=response.header(name))return std::string(*value);
+    }
+    return {};
+}
+}
 std::uint64_t SurvivalThumbnailProvider::applicationEpoch(){return appEpoch;}
 void SurvivalThumbnailProvider::onApplicationPause(){
     ++appEpoch;if(liveProvider){liveProvider->deactivate();liveProvider->m_invalidTextureCache=true;}
@@ -76,12 +88,12 @@ void SurvivalThumbnailProvider::response(std::size_t index,std::uint64_t generat
     auto job=slot.job;slot.busy=false;
     auto const code=response.code();
     if(job.random && code==302){
-        auto location=response.header("Location");auto id=location?survivalThumbnailRedirect(std::string_view(*location)):std::nullopt;
+        auto location=thumbnailHeader(response,"Location");auto id=location?survivalThumbnailRedirect(std::string_view(*location)):std::nullopt;
         if(id && !m_cache.contains(key({*id,false})))enqueue({*id,false},false);
         return;
     }
     if(code!=200 || slot.exceeded->load() || response.data().size()>SurvivalThumbnailMaxBytes){failed(job,code);return;}
-    auto type=response.header("Content-Type");
+    auto type=thumbnailHeader(response,"Content-Type");
     if(!type || !std::string_view(*type).starts_with("image/webp") || !survivalWebpSize(response.data())){failed(job,422);return;}
     [[maybe_unused]] auto const received=response.data().size();
     auto bytes=std::move(response).data();

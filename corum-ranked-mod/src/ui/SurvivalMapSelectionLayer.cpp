@@ -16,7 +16,7 @@ namespace corum::ranked::ui {
 namespace {
 std::int64_t monotonicMs(){return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();}
 std::uint64_t sceneSequence=0;
-struct RevealRecord {std::int64_t began=0;std::size_t consumed=0;bool complete=false,centerPlayed=false;};
+struct RevealRecord {std::int64_t began=0;std::size_t consumed=0;bool complete=false,centerPlayed=false;SurvivalRevealModeChoice mode;};
 // Retained scenes normally keep the timeline. The bounded registry also covers
 // a recreated coordinator without replaying elapsed locks or a second reveal.
 std::map<std::string,RevealRecord> reveals;
@@ -70,6 +70,8 @@ bool SurvivalMapSelectionLayer::init(std::function<void(int)> action){
     m_clock=menuLabel("",.25f,{},Gold,FontWeight::Black);addChild(m_clock,16);
     m_hint=menuLabel("",.18f,{},TextMuted,FontWeight::SemiBold);addChild(m_hint,15);
     m_finalId=menuLabel("",.8f,{},Gold,FontWeight::Black,countdownFont());addChild(m_finalId,15);
+    m_pendingLabel=menuLabel(i18n::text("survival-selecting-map","SELECTING A SERVER MAP..."),.3f,{size.width/2,size.height/2},Cyan,FontWeight::ExtraBold);
+    fitFullMenuLabel(m_pendingLabel,size.width-48,40,.3f);m_pendingLabel->setVisible(false);addChild(m_pendingLabel,15);
     m_panel=SurvivalSelectedMapPanel::create([weak=WeakRef(this)](int tag){
         auto owner=weak.lock();if(!owner || !owner->isRunning() || !owner->m_action)return;
         auto const& c=owner->m_timeline.context();auto const& v=SurvivalRuntime::get().view();
@@ -80,14 +82,16 @@ bool SurvivalMapSelectionLayer::init(std::function<void(int)> action){
 SurvivalMapSelectionLayer* SurvivalMapSelectionLayer::create(std::function<void(int)> action){auto* p=new SurvivalMapSelectionLayer;if(p->init(std::move(action))){p->autorelease();return p;}delete p;return nullptr;}
 void SurvivalMapSelectionLayer::prepareServerMap(SurvivalMatchView const& view){
     if(m_active)hideSelection();setVisible(false);
-    if(view.map.levelId<=0 || view.roundKey.empty())return;
-    SurvivalSelectionContext context{view.id,view.roundKey,view.mapGeneration,static_cast<std::uint64_t>(view.map.levelId),m_sceneGeneration};
-    reveals.try_emplace(context.key(),RevealRecord{monotonicMs(),0,false});
+    if(view.roundKey.empty())return;
+    SurvivalSelectionContext context{view.id,view.roundKey,view.mapGeneration,static_cast<std::uint64_t>(std::max(0,view.map.levelId)),m_sceneGeneration};
+    if(context.levelId)reveals.try_emplace(context.key(),RevealRecord{monotonicMs(),0,false});
+    // The roster's existing presentation time is useful prefetch time even
+    // before the server has selected the real level. No reveal starts here.
     if(SurvivalThumbnailProvider::supported()){SurvivalThumbnailProvider::get().activate(context);m_providerContext=context;}
 }
 void SurvivalMapSelectionLayer::resetVisuals(){
     if(m_visuals){for(auto* node:{m_visuals->reels,static_cast<CCNode*>(m_visuals->carousel),static_cast<CCNode*>(m_visuals->decoration),static_cast<CCNode*>(m_visuals->selected.root)})if(node)node->removeFromParentAndCleanup(true);}
-    m_visuals=std::make_unique<Visuals>();m_sounds.clear();m_lastSound=0;m_finalId->setVisible(false);
+    m_visuals=std::make_unique<Visuals>();m_sounds.clear();m_lastSound=0;m_finalId->setVisible(false);m_pendingLabel->setVisible(false);
 }
 void SurvivalMapSelectionLayer::numberFrame(SurvivalRevealFrame const& frame,SurvivalSelectionLayout const& r){
     auto& v=*m_visuals;auto digits=m_timeline.digits();auto const n=digits.empty()?9:digits.size();auto const size=getContentSize();
@@ -175,20 +179,30 @@ void SurvivalMapSelectionLayer::present(SurvivalMatchView const& view,RoundPrepa
     if(appEpoch!=m_appEpoch){m_appEpoch=appEpoch;resetVisuals();m_needsResume=true;}
     SurvivalSelectionContext context{view.id,view.roundKey,view.mapGeneration,static_cast<std::uint64_t>(std::max(0,view.map.levelId)),m_sceneGeneration};
     bool const changed=context!=m_timeline.context();
-    if(changed){resetVisuals();m_thumbnail=SurvivalThumbnailProvider::supported();m_fallback=!m_thumbnail && Loader::get()->isModLoaded("cdc.level_thumbnails");
+    if(changed){resetVisuals();
         auto [it,added]=reveals.try_emplace(context.key(),RevealRecord{now,0,false});
         if(reveals.size()>16)for(auto old=reveals.begin();old!=reveals.end();++old)if(old->first!=context.key()){reveals.erase(old);break;}
         m_timeline.observe(context,it->second.began);if(it->second.complete || Mod::get()->getSavedValue<std::string>("survival-map-reveal-complete")==context.key())m_timeline.skip();
     }
-    m_active=true;setVisible(true);if(m_thumbnail){SurvivalThumbnailProvider::get().activate(context);m_providerContext=context;}m_timeline.followServer(view.state,countdown,now);
+    m_active=true;setVisible(true);
+    auto const supported=SurvivalThumbnailProvider::supported();bool previewsReady=false;
+    if(supported){auto& provider=SurvivalThumbnailProvider::get();provider.activate(context);m_providerContext=context;previewsReady=!provider.previews().empty();}
+    auto& record=reveals[context.key()];
+    m_thumbnail=context.levelId?record.mode.choose(supported,previewsReady):supported && previewsReady;
+    m_fallback=!m_thumbnail && Loader::get()->isModLoaded("cdc.level_thumbnails");
+    m_timeline.followServer(view.state,countdown,now);
     auto const frame=m_timeline.frame(now);if(frame.stage==SurvivalRevealStage::Cancelled){hideSelection();return;}
-    if(m_thumbnail && (!SurvivalThumbnailProvider::supported() || (frame.elapsed>=1.85 && SurvivalThumbnailProvider::get().previews().empty()) ||
-        (frame.elapsed>=2.15 && context.levelId && !SurvivalThumbnailProvider::get().selected()))){m_thumbnail=false;m_fallback=true;SurvivalThumbnailProvider::get().release(context);resetVisuals();}
+    if(m_thumbnail && (!supported || (frame.elapsed>=2.15 && context.levelId && !SurvivalThumbnailProvider::get().selected()))){
+        record.mode.fallback();m_thumbnail=false;m_fallback=true;resetVisuals();
+    }
     auto const r=survivalSelectionLayout(size.width,size.height,m_thumbnail,supportsLdm);
-    if(m_thumbnail)thumbnailFrame(frame,r);else numberFrame(frame,r);
+    m_pendingLabel->setVisible(!context.levelId && !m_thumbnail);
+    if(m_thumbnail)thumbnailFrame(frame,r);else if(context.levelId)numberFrame(frame,r);
     m_panel->present(size,m_thumbnail,view,prep,options,supportsLdm,actionsEnabled,canEnter,frame.details);
     auto const finalHeader=frame.elapsed>=3.2 || frame.skipped;
-    auto const clock=(finalHeader || view.state=="COUNTDOWN" || view.state=="PLAYING")?survivalBoardClock(view.state,countdown,remaining):std::string{};
+    auto clock=(finalHeader || view.state=="COUNTDOWN" || view.state=="PLAYING")?survivalBoardClock(view.state,countdown,remaining):std::string{};
+    if(auto wait=SurvivalRuntime::get().entryWaitMs();view.state=="ENTERING" && wait && *wait>0)
+        clock=fmt::format(fmt::runtime(i18n::text("survival-entry-wait","ALL READY · ENTERING IN {}s")),(*wait+999)/1000);
     auto const header=finalHeader?i18n::text("survival-selected-map","SELECTED MAP"):std::string("NEXT UP!");if(header!=m_header->getString())m_header->setString(header.c_str());
     m_header->setPosition({r.header.cx(),r.header.cy()});fitFullMenuLabel(m_header,r.header.w,r.header.h,finalHeader?.48f:.83f);
     m_header->setSkewX(finalHeader?0:-5);
@@ -203,7 +217,7 @@ void SurvivalMapSelectionLayer::present(SurvivalMatchView const& view,RoundPrepa
     if(hint!=m_hint->getString())m_hint->setString(hint.c_str());m_hint->setPosition({r.hint.cx(),r.hint.cy()});fitFullMenuLabel(m_hint,r.hint.w,r.hint.h,.17f);
     m_hint->setVisible(!m_thumbnail && frame.details>0);m_hint->setOpacity(static_cast<GLubyte>(frame.details*255));
     playLocks(frame);m_needsResume=false;
-    if(frame.settled){auto& record=reveals[context.key()];if(!record.complete){record.complete=true;Mod::get()->setSavedValue("survival-map-reveal-complete",context.key());
+    if(frame.settled){if(!record.complete){record.complete=true;Mod::get()->setSavedValue("survival-map-reveal-complete",context.key());
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
         log::info("[SurvivalReveal] id={} thumbnail={} elapsedMs={} skipped={}",context.levelId,m_thumbnail,now-record.began,frame.skipped);
 #endif
