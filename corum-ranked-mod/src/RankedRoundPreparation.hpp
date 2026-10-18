@@ -76,6 +76,7 @@ private:
     std::map<RoundResourceKey, RoundResourceRetry> m_retries;
     geode::WeakRef<PlayLayer> m_play;
     geode::WeakRef<cocos2d::CCScene> m_origin;
+    std::optional<geode::WeakRef<cocos2d::CCScene>> m_nativePauseRestoreOrigin;
     geode::Ref<GJGameLevel> m_launchedLevel;
     // GD's native AudioEffectsLayer uses the shared texture cache during setup.
     // Keep its owner alive across native quit and the retained round UI.
