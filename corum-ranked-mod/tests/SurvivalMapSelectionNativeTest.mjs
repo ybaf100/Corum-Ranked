@@ -40,8 +40,8 @@ test('pending server selection, fallback, background elapsed time and server ent
 }`);
 });
 test('one reveal keeps its selected mode across late images, a permanent fallback and scene recreation',()=>{
- run(`int main(){SurvivalRevealModeChoice cold;assert(!cold.choose(true,false));
- assert(!cold.choose(true,true));assert(!cold.choose(false,false));
+ run(`int main(){SurvivalRevealModeChoice cold;assert(cold.choose(true,false));
+ assert(cold.choose(true,true));assert(cold.choose(false,false));
  SurvivalRevealModeChoice warm;assert(warm.choose(true,true));assert(warm.choose(true,false));
  warm.fallback();assert(!warm.choose(true,true));auto reopened=warm;assert(!reopened.choose(true,true));
  SurvivalRevealModeChoice nextRound;assert(nextRound.choose(true,true));
