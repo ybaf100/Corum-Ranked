@@ -1,3 +1,11 @@
+# v0.5.0-beta.82
+
+- Migrate the Corum Ranked production client endpoints from Render to Railway, including Solo Ranked, Survival, spectator, and debug APIs.
+- Keep the existing Neon database, ranked rules, gameplay protocol, and Server-authoritative match behavior unchanged.
+- Synchronize the Geode manifest, npm workspaces, lockfile, and server-required client version so the server advertises v0.5.0-beta.82.
+- Publish fresh immutable Debug and Release packages to R2 through GitHub Actions when runners and R2 publishing are available. Older clients pointing to the suspended Render hostname need a working legacy update endpoint or one manual install to reach Railway.
+- Add client source endpoint regression coverage; physical device behavior and update-package publication require independent validation.
+
 # v0.5.0-beta.80
 
 - Use Geode force-priority-aware targeted touch registration for the two in-game Survival Pause actions; record actual touch coordinates, item hit rectangles and gate outcomes for future iPad reproduction.
