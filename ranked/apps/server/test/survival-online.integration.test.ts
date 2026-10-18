@@ -93,7 +93,12 @@ async function event(c:Client,m:SurvivalMatch,type:string,fields:Record<string,u
 async function prepare(id:string,group:Client[]){let m=await engine.get(id);now+=5000;await touch(group);await online.tickOnce();await engine.selectMap(id);m=await engine.get(id);
  for(const c of group)await event(c,m,"ASSETS_READY",{certificate:survivalCurrentRound(m).map});m=await engine.get(id);
  now=survivalCurrentRound(m).entryRequestedAt!+5000;await touch(group);
- for(const c of group)await event(c,m,"ENTERED");m=await engine.get(id);now=survivalCurrentRound(m).startsAt!;await touch(group);await online.tickOnce();return engine.get(id);}
+ for(const c of group)await event(c,m,"ENTERED");m=await engine.get(id);
+ // A server tick or presentation transition may already have advanced updatedAt.
+ // Never rewind the mocked authoritative clock to an earlier startsAt.
+ now=Math.max(now,survivalCurrentRound(m).startsAt!,m.updatedAt);
+ await touch(group);await online.tickOnce();m=await engine.get(id);
+ now=Math.max(now,m.updatedAt);return m;}
 async function record(c:Client,m:SurvivalMatch,progress:number){const attemptId=ids.next();await event(c,m,"ATTEMPT_START",{attemptId});await event(c,m,"ATTEMPT_END",{attemptId,progress});}
 
 describe("Survival M5 public HTTP and persistent online game",()=>{
