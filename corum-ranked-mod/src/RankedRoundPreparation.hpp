@@ -35,6 +35,8 @@ public:
     bool beginNativeQuit(PlayLayer* play);
     void endNativeQuit();
     bool returnFromNativeQuit(GJGameLevel* level);
+    void drainNativeReturn();
+    bool nativeReturnPending(PlayLayer* play)const;
 
     void levelDownloadFinished(GJGameLevel* level) override;
     void levelDownloadFailed(int response) override;
@@ -75,13 +77,13 @@ private:
     std::map<RoundResourceKey, ResourceTicket> m_tickets;
     std::map<RoundResourceKey, RoundResourceRetry> m_retries;
     geode::WeakRef<PlayLayer> m_play;
-    geode::WeakRef<cocos2d::CCScene> m_origin;
+    geode::WeakRef<cocos2d::CCScene> m_origin,m_returnScene;
     std::optional<geode::WeakRef<cocos2d::CCScene>> m_nativePauseRestoreOrigin;
     geode::Ref<GJGameLevel> m_launchedLevel;
     // GD's native AudioEffectsLayer uses the shared texture cache during setup.
     // Keep its owner alive across native quit and the retained round UI.
     geode::Ref<cocos2d::CCTextureCache> m_nativeTextureCache;
-    bool m_quitting = false, m_returnQueued = false, m_launching = false;
+    bool m_quitting = false, m_returnQueued = false, m_launching = false, m_returnPopped = false;
     std::uint64_t m_launchGeneration = 0;
     double m_nextLaunchAt = 0;
     float m_timer = 0;

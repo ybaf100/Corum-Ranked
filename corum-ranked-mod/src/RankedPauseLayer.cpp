@@ -90,6 +90,7 @@ public:
         std::optional<WeakRef<PlayLayer>> owner;
         bool concessionQuit = false, nativeQuitInProgress = false, nativeQuitReachedPlay = false;
         bool timeoutSurrenderRequested = false;
+        int survivalWatchLogs = 0;
         ~Fields() {
             if(survivalConfirmation)if(auto dialog=survivalConfirmation->lock())dialog->cancel();
             if (popup) if (auto dialog = popup->lock()) dialog->dismiss();
@@ -261,6 +262,13 @@ public:
             if(m_fields->forceClear){m_fields->forceClear->setVisible(view.debug && !view.online && view.phase!="TIEBREAK" && !runtime.normalRoundCleared() && !view.ownEliminated);m_fields->forceClear->setEnabled(runtime.canForceClear() && !runtime.forceClearPending() && !m_fields->survivalConfirmation);}
             if(runtime.forceClearPending())m_fields->surrender->setEnabled(false);
 #endif
+            if(m_fields->survivalWatchLogs++<4){
+                geode::log::info("[SurvivalPauseState] watch={} surrenderAllowed={} surrenderEnabled={} sceneAttached={}",
+                    m_fields->survivalWatchLogs,runtime.canSurrender(),m_fields->surrender->isEnabled(),getParent()!=nullptr);
+#if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
+                geode::log::info("[SurvivalPauseState] forceAllowed={} forcePending={} forceEnabled={}",runtime.canForceClear(),runtime.forceClearPending(),m_fields->forceClear && m_fields->forceClear->isEnabled());
+#endif
+            }
             if(m_fields->survivalStatus){
                 auto const status=runtime.surrenderPending()?i18n::text("survival-surrender-pending","Surrender submitted · waiting for server"):!view.error.empty()?i18n::text(view.error,view.error):
                     i18n::text("survival-pause-clock","The server round timer continues while paused.");
@@ -442,7 +450,10 @@ public:
             auto* popup=ui::RankedConfirmPopup::create(i18n::text("surrender-confirm","CONFIRM SURRENDER"),
                 runtime.surrenderMessage(),
                 [weak=WeakRef(this),id,key,generation](bool accepted){
-                    auto owner=weak.lock();if(!owner || !owner->getParent())return;owner->m_fields->survivalConfirmation.reset();
+                    auto owner=weak.lock();
+                    log::info("[SurvivalAction] source=pause action=surrender accepted={} match={} round={} generation={} owner={}",accepted,id,key,generation,static_cast<bool>(owner));
+                    if(!owner || !owner->getParent())return;
+                    owner->m_fields->survivalConfirmation.reset();
                     auto play=owner->m_fields->owner?owner->m_fields->owner->lock():Ref<PlayLayer>();
                     if(!play || play.data()!=PlayLayer::get() || !play->getParent() ||
                         play->getParent()!=CCDirector::sharedDirector()->getRunningScene() ||
@@ -473,7 +484,10 @@ public:
         auto* popup=ui::RankedConfirmPopup::create(i18n::text("survival-force-clear","FORCE CLEAR"),
             i18n::text("survival-force-clear-confirm","Mark the current Survival round\nas 100% completed?"),
             [weak=WeakRef(this),id,key,generation](bool accepted){
-                auto owner=weak.lock();if(!owner || !owner->getParent())return;owner->m_fields->survivalConfirmation.reset();
+                auto owner=weak.lock();
+                log::info("[SurvivalAction] source=pause action=force-clear accepted={} match={} round={} generation={} owner={}",accepted,id,key,generation,static_cast<bool>(owner));
+                if(!owner || !owner->getParent())return;
+                owner->m_fields->survivalConfirmation.reset();
                 auto play=owner->m_fields->owner?owner->m_fields->owner->lock():Ref<PlayLayer>();
                 if(!play || play.data()!=PlayLayer::get() || !play->getParent() ||
                         play->getParent()!=CCDirector::sharedDirector()->getRunningScene() ||

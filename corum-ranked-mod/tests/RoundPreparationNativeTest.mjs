@@ -86,6 +86,7 @@ struct CCDirector {
     Scheduler* getScheduler(){return &scheduler;}
     CCScene* getRunningScene(){return stack.empty()?nullptr:stack.back();}
     CCScene* getNextScene(){return next;}
+    int levelForSceneInStack(CCScene*s){auto it=std::find(stack.begin(),stack.end(),s);return it==stack.end()?-1:static_cast<int>(it-stack.begin());}
     void pushScene(CCScene* scene){++pushes;if(!stack.empty())stack.back()->running=false;stack.push_back(scene);scene->running=true;}
     void popScene(){assert(stack.size()>1);++pops;stack.back()->running=false;stack.pop_back();stack.back()->running=true;}
 };
@@ -313,7 +314,9 @@ int main(){
     director->next=nullptr;PlayLayer departing;departing.running=false;departing.parent=&origin;PlayLayer::active=&departing;
     assert(!p.launch(&origin)&&PlayLayer::constructions==0&&runtime.arms==0); // current scene still owns it
     CCScene orphan;departing.parent=&orphan;orphan.running=false;
-    assert(p.launch(&origin));assert(departing.parent==nullptr); // stale popped scene is safely detachedassert(runtime.arms==1&&PlayLayer::active->m_level==&downloaded);
+    assert(!p.launch(&origin)&&departing.parent==&orphan); // never detach a foreign owner
+    departing.live=false;departing.parent=nullptr;PlayLayer::active=nullptr; // native teardown boundary
+    assert(p.launch(&origin));assert(runtime.arms==1&&PlayLayer::active->m_level==&downloaded);
     assert(CCTextureCache::sharedTextureCache()->references==2);
     assert(PlayLayer::active->m_level->m_lowDetailModeToggled&&PlayLayer::active->m_level->m_disableShakeToggled);
     assert(!p.launch(&origin)&&PlayLayer::constructions==1&&director->pushes==1);

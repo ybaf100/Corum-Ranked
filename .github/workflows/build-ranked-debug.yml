@@ -154,6 +154,14 @@ jobs:
             corum-ranked-mod/tests/SurvivalHudPresentationTest.cpp \
             -o /tmp/corum-ranked-survival-hud-test
           /tmp/corum-ranked-survival-hud-test
+      - name: Prepare pinned Geode JSON regression dependency
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/corum-json" "$RUNNER_TEMP/corum-result"
+          curl --fail --location --retry 3 https://codeload.github.com/geode-sdk/json/tar.gz/6330ad4d63d168c861e0a1b9d4127cdbd6807ad9 | tar -xz --strip-components=1 -C "$RUNNER_TEMP/corum-json"
+          curl --fail --location --retry 3 https://codeload.github.com/geode-sdk/result/tar.gz/b17911426ced3ca519d9a338aea76053be6fc4f1 | tar -xz --strip-components=1 -C "$RUNNER_TEMP/corum-result"
+          echo "CORUM_MATJSON_SOURCE=$RUNNER_TEMP/corum-json" >> "$GITHUB_ENV"
+          echo "CORUM_RESULT_INCLUDE=$RUNNER_TEMP/corum-result/include" >> "$GITHUB_ENV"
       - name: Validate native client behavior (two files in parallel)
         # Each native harness uses its own temporary directory. Bound compiler
         # concurrency so small runners retain memory headroom; keep all tests.

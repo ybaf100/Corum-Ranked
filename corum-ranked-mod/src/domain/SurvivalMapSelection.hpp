@@ -1,5 +1,6 @@
 #pragma once
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <optional>
@@ -12,9 +13,24 @@ struct SurvivalSelectionContext {
     int mapGeneration=0;
     std::uint64_t levelId=0, sceneGeneration=0;
     bool operator==(SurvivalSelectionContext const&) const=default;
+    bool sameReveal(SurvivalSelectionContext const& other)const {
+        return matchId==other.matchId && roundKey==other.roundKey && mapGeneration==other.mapGeneration;
+    }
+    std::string revealKey()const{return matchId+":"+roundKey+":"+std::to_string(mapGeneration);}
     std::string key() const {
         return matchId+":"+roundKey+":"+std::to_string(mapGeneration)+":"+std::to_string(levelId);
     }
+};
+// Slot count and occupied positions stay fixed while images arrive. Filling
+// a placeholder never changes the modulo or moves an existing thumbnail.
+class SurvivalThumbnailReel {
+    std::array<std::uint64_t,8> m_ids{};
+public:
+    void observe(std::uint64_t id){
+        if(!id || std::find(m_ids.begin(),m_ids.end(),id)!=m_ids.end())return;
+        if(auto slot=std::find(m_ids.begin(),m_ids.end(),0);slot!=m_ids.end())*slot=id;
+    }
+    auto const& slots()const{return m_ids;}
 };
 enum class SurvivalRevealStage { PendingSelection, Rolling, Locking, Landing, Details, Settled, Cancelled };
 class SurvivalRevealModeChoice {
@@ -44,7 +60,12 @@ class SurvivalMapSelectionTimeline {
 public:
     static constexpr std::int64_t DurationMs=4000;
     bool observe(SurvivalSelectionContext context,std::int64_t monotonicNow) {
-        if(m_valid && context==m_context)return false;
+        if(m_valid && context.sameReveal(m_context)){
+            // Resolving the server's unknown ID and recreating UI ownership
+            // update metadata; neither begins a second logical selection.
+            if(context.levelId==0)context.levelId=m_context.levelId;
+            m_context=std::move(context);return false;
+        }
         m_context=std::move(context);m_began=monotonicNow;
         m_valid=!m_context.matchId.empty() && !m_context.roundKey.empty();
         m_skip=false;m_consumedLocks=0;return true;
@@ -66,7 +87,7 @@ public:
     }
     SurvivalRevealFrame frame(std::int64_t now)const {
         SurvivalRevealFrame f;if(!m_valid)return f;
-        if(!m_context.levelId){f.stage=SurvivalRevealStage::PendingSelection;f.elapsed=std::max<std::int64_t>(0,now-m_began)/1000.;return f;}
+        if(!m_context.levelId){f.stage=SurvivalRevealStage::PendingSelection;f.elapsed=std::clamp((now-m_began)/1000.,0.,4.);return f;}
         f.skipped=m_skip;f.elapsed=m_skip?4.:std::clamp((now-m_began)/1000.,0.,4.);
         auto const n=digits().size();for(std::size_t i=0;i<n;++i)if(f.elapsed>=lockTime(i))++f.locked;
         f.landing=survivalEase((f.elapsed-2.70)/.50);f.details=std::clamp((f.elapsed-3.20)/.80,0.,1.);

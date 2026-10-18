@@ -80,6 +80,7 @@ int main(){using namespace corum::ranked;SurvivalRuntime r;CCScene origin;origin
 test('Force Clear keeps exact retries, waits behind regular events and rejects stale round callbacks',()=>{
  const source=read('src/SurvivalRuntime.cpp');
  run(preamble+`
+namespace geode::log{template<class...T>void info(T const&...){}}
 namespace utils::random{std::string generateUUID(){static int n=0;return "request-"+std::to_string(++n);}}
 namespace web{struct WebResponse{int status;matjson::Value root;int code()const{return status;}matjson::Result<matjson::Value>json()const{return {root};}};struct Operation{matjson::Value body;};struct WebRequest{matjson::Value body;void bodyJSON(matjson::Value v){body=v;}Operation post(std::string const&){return {body};}};struct Pending{Operation op;std::function<void(WebResponse)>done;};std::vector<Pending>pending;}
 web::WebRequest request(std::string const&){return {};}
@@ -87,9 +88,9 @@ struct Request{int cancellations=0;void cancel(){++cancellations;}void spawn(web
 namespace corum::ranked{
 struct SurvivalRuntime{
  struct View{std::string id="match",roundKey="r1",state="PLAYING",phase="ROUND_1",error;int mapGeneration=1;bool debug=true,online=false,ownEliminated=false,ownAssetsReady=true,ownEntered=true;}m_view;
- bool cleared=false,m_forceClearBusy=false,m_eventBusy=false;std::uint64_t m_generation=1;std::string m_session="session",m_attempt="attempt";matjson::Value m_forceClearBody;std::deque<matjson::Value>m_events;std::chrono::steady_clock::time_point m_forceClearRetryAt{},m_nextPoll{};Request m_forceClearRequest;
+ bool cleared=false,m_forceClearBusy=false,m_eventBusy=false;std::uint64_t m_generation=1;std::string m_session="session",m_attempt="attempt";std::optional<matjson::Value> m_forceClearBody;std::deque<matjson::Value>m_events;std::chrono::steady_clock::time_point m_forceClearRetryAt{},m_nextPoll{};Request m_forceClearRequest;
  bool normalRoundCleared()const{return cleared;}bool canPlay()const{return true;}bool active()const{return !m_view.id.empty();}bool current(std::uint64_t gen,std::string const& session){return gen==m_generation&&session==m_session;}
- bool forceClearPending()const{return m_forceClearBody.isObject();}std::string debugEndpoint(std::string const& p){return p;}matjson::Value event(std::string type){matjson::Value v;v["type"]=type;v["roundKey"]=m_view.roundKey;v["mapGeneration"]=m_view.mapGeneration;return v;}void observe(matjson::Value const& v){cleared=v["cleared"].asBool().unwrapOr(false);}
+ bool forceClearPending()const{return m_forceClearBody.has_value();}bool surrenderPending()const{return false;}std::string debugEndpoint(std::string const& p){return p;}matjson::Value event(std::string type){matjson::Value v;v["type"]=type;v["roundKey"]=m_view.roundKey;v["mapGeneration"]=m_view.mapGeneration;return v;}void observe(matjson::Value const& v){cleared=v["cleared"].asBool().unwrapOr(false);}
  bool canForceClear()const;void forceClear();void pumpForceClear();
 };
 ${['bool SurvivalRuntime::canForceClear()', 'void SurvivalRuntime::forceClear()', 'void SurvivalRuntime::pumpForceClear()'].map(n=>method(source,n)).join('\n')}

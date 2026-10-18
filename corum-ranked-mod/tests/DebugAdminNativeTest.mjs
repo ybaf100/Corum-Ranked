@@ -9,7 +9,7 @@ const strip=s=>s.replace(/^#include .*?$|^#pragma once$/gm,'');
 const viewer=read('SpectatorLiveViewerNativeTest.mjs');
 const json=viewer.slice(viewer.indexOf('namespace matjson {'),viewer.indexOf('${readFileSync(join(root,')).replace('bool isErr()const{return !value;}','bool isErr()const{return !value;}bool isOk()const{return bool(value);}');
 const fixture=`
-${read('helpers/ResultPresentationNativeDouble.hpp').replace(/^#pragma once$/gm,'').replace('struct CCMenuItemSpriteExtra : CCNode {','struct CCMenuItem : CCNode {bool enabled=true;void setEnabled(bool value){enabled=value;}};\nstruct CCMenuItemSpriteExtra : CCMenuItem {void setNormalImage(CCNode*n){children.clear();addChild(n);}void updateSprite(){}').replace('bool enabled=true; void setEnabled(bool value)', 'void setEnabled(bool value)').replace('std::string id; float','int tag=0;void setTag(int value){tag=value;}int getTag()const{return tag;}\n    auto* getChildren(){return &children;}void schedule(int,float){scheduled=true;}void unschedule(int){scheduled=false;}\n    std::string id; float')}
+${read('helpers/ResultPresentationNativeDouble.hpp').replace(/^#pragma once$/gm,'').replace('struct CCMenuItemSpriteExtra : CCNode {','struct CCMenuItem : CCNode {bool enabled=true;void setEnabled(bool value){enabled=value;}};\nstruct CCMenuItemSpriteExtra : CCMenuItem {void setNormalImage(CCNode*n){children.clear();addChild(n);}void updateSprite(){}').replace('bool enabled=true; void setEnabled(bool value)', 'void setEnabled(bool value)').replace('struct CCDirector { CCSize size{568,320};', 'struct CCDirector { CCNode scene;CCNode* getRunningScene(){return &scene;}CCNode* getNextScene(){return nullptr;} CCSize size{568,320};').replace('std::string id; float','int tag=0;void setTag(int value){tag=value;}int getTag()const{return tag;}\n    auto* getChildren(){return &children;}void schedule(int,float){scheduled=true;}void unschedule(int){scheduled=false;}\n    std::string id; float')}
 #include <chrono>
 #include <cmath>
 #include <memory>
@@ -42,7 +42,7 @@ template<class T>struct CCArrayExt{std::vector<CCNode*>* nodes;explicit CCArrayE
 struct CCTouchDispatcher{int releases=0;static CCTouchDispatcher* get(){static CCTouchDispatcher d;return &d;}void unregisterForcePrio(CCNode*){++releases;}};
 struct Popup:CCNode{CCNode* m_bgSprite=new CCNode;CCNode* m_closeBtn=new CCNode;CCNode* m_mainLayer=new CCNode;CCMenu* m_buttonMenu=new CCMenu;
  inline static std::vector<Popup*> opened;virtual bool init(){return true;}bool init(float,float){return true;}
- virtual void onClose(CCObject*){removeFromParentAndCleanup(true);}void show(){static CCNode scene;scene.addChild(this);opened.push_back(this);}};
+ virtual void onClose(CCObject*){removeFromParentAndCleanup(true);}void show(){CCDirector::sharedDirector()->getRunningScene()->addChild(this);opened.push_back(this);}};
 struct TextInput:CCNode{std::string value;static TextInput* create(float,char const*){return new TextInput;}
  void setPasswordMode(bool){}void setMaxCharCount(int){}void setFilter(std::string){}gd::string getString()const{return value;}void setString(std::string s){value=std::move(s);}};
 struct Slider:CCNode{float value=1;static Slider* create(CCObject*,int,float){return new Slider;}

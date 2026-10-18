@@ -31,7 +31,8 @@ inline SurvivalSelectionLayout survivalSelectionLayout(float width,float height,
     float const margin=14;
     r.safe={margin,margin,width-2*margin,height-2*margin};
     r.header={margin,height-43,width-2*margin,30};r.subtitle={margin,height-62,width-2*margin,13};
-    r.carousel={margin,height*.5f-65,width-2*margin,130};
+    auto const carouselHeight=std::min(208.f,height-124.f);
+    r.carousel={margin,(height-carouselHeight)/2,width-2*margin,carouselHeight};
     r.numberFinal={margin,height-98,width-2*margin,32};
     float const panelWidth=std::min(660.f,width-2*margin),left=(width-panelWidth)/2;
     float const top=height-(thumbnail?76.f:110.f),bottom=thumbnail?52.f:58.f;
@@ -76,4 +77,8 @@ inline SurvivalSelectionLayout survivalSelectionLayout(float width,float height,
     }
     return r;
 }
+inline float survivalCarouselCardWidth(float width,SurvivalSelectionLayout const& layout){
+    return std::min({312.f*layout.scale,width*.52f,(layout.carousel.h-16.f*layout.scale)*16.f/9.f});
+}
+
 }

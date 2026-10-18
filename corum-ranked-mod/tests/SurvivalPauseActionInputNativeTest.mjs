@@ -12,6 +12,7 @@ for(const debug of [false,true])test(`actual Survival Pause observer delivers tr
  const code=`
 #include "${join(root,'tests/helpers/RankedInputNativeDouble.hpp')}"
 #include <limits>
+#include <cmath>
 #include <utility>
 using namespace cocos2d;
 struct UILayer:CCLayer{};
@@ -95,6 +96,17 @@ int main(){
    play.running=false;tap(16);assert(surrendered==4);play.running=true;
    d.began(15,surrenderPoint);d.ended(15,surrenderPoint);input->suspend();drain();assert(surrendered==4);
   input->onExit();delete input;menu.onExit();pause.onExit();ui.onExit();play.onExit();drain();assert(d.handlers.empty());
+ }
+ // The iPad log's exact point is inside a centered 96x36 item.
+ {CCNode scene;PlayLayer play;Blocker pause;CCMenu menu;CCMenuItemSpriteExtra button;
+  director->runningScene=&scene;PlayLayer::current=&play;scene.addChild(&play);scene.addChild(&pause);pause.addChild(&menu);menu.addChild(&button);
+  button.size={96,36};button.setAnchorPoint({.5f,.5f});button.origin={88.5f,138.f};
+  play.onEnter();pause.onEnter();menu.onEnter();play.running=false;
+  auto point=CCPoint{101.59827f,147.43843f};auto local=button.convertToNodeSpace(point);
+  assert(std::abs(local.x-61.09827f)<.001f&&std::abs(local.y-27.43843f)<.001f);
+  int invoked=0;auto* input=SurvivalPauseActionInput::create(&pause,&play,[]{return true;});pause.addChild(input);input->bind(&button,[&]{++invoked;});input->onEnter();drain();
+  d.began(44,point);d.ended(44,point);drain();assert(invoked==1);
+  input->onExit();delete input;menu.onExit();pause.onExit();play.onExit();drain();assert(d.handlers.empty());
  }
  // A scene can be retired before its onEnter synchronization callback runs.
  {CCNode scene;PlayLayer play;Blocker pause;scene.addChild(&play);scene.addChild(&pause);director->runningScene=&scene;PlayLayer::current=&play;

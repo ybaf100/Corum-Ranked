@@ -120,8 +120,8 @@ ${body(pause,'bool ownsSurvivalPlayerPause()')}
 ${body(pause,'bool ownsManagedRankedPause()')}
 void dismissNativeRankedExitConfirmation(PauseLayer*){};
 struct CorumRankedPauseLayer:PauseLayer {
- struct Button {bool enabled=true;void setEnabled(bool v){enabled=v;}} button;Label clock;
- struct Fields{std::optional<WeakRef<ui::RankedSurrenderPopup>> popup;std::string leaseId="lease",matchId="m";int round=1,deathmatch=0;Label* budget;Button* surrender;std::optional<WeakRef<PlayLayer>> owner;int placementMapIndex=1;bool placement=false;bool concessionQuit=false,nativeQuitInProgress=false,nativeQuitReachedPlay=false,timeoutSurrenderRequested=false;std::optional<WeakRef<ui::RankedSurrenderPopup>> exitConfirmation{};Label* survivalStatus=nullptr;bool survival=false,survivalExitQueued=false;std::string survivalRoundKey="round-1";int survivalMapGeneration=1;std::optional<WeakRef<Popup>> survivalConfirmation{};struct ActionInput{void suspend(){}};ActionInput* survivalInput=nullptr;}f{{},"lease","m",1,0,&clock,&button,{}};Fields* m_fields=&f;
+ struct Button {bool enabled=true;void setEnabled(bool v){enabled=v;}bool isEnabled()const{return enabled;}} button;Label clock;
+ struct Fields{std::optional<WeakRef<ui::RankedSurrenderPopup>> popup;std::string leaseId="lease",matchId="m";int round=1,deathmatch=0;Label* budget;Button* surrender;std::optional<WeakRef<PlayLayer>> owner;int placementMapIndex=1;bool placement=false;bool concessionQuit=false,nativeQuitInProgress=false,nativeQuitReachedPlay=false,timeoutSurrenderRequested=false;std::optional<WeakRef<ui::RankedSurrenderPopup>> exitConfirmation{};Label* survivalStatus=nullptr;bool survival=false,survivalExitQueued=false;std::string survivalRoundKey="round-1";int survivalMapGeneration=1;std::optional<WeakRef<Popup>> survivalConfirmation{};struct ActionInput{void suspend(){}};ActionInput* survivalInput=nullptr;int survivalWatchLogs=0;}f{{},"lease","m",1,0,&clock,&button,{}};Fields* m_fields=&f;
  void synchronizeSurvivalPauseInput(){}
  int exitWarnings=0;void confirmRankedExit(){++exitWarnings;}
  void unschedule(int){}

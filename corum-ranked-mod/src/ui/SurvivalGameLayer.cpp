@@ -96,7 +96,7 @@ class SurvivalGameLayer final : public CCLayerColor {
         auto* popup=ui::RankedConfirmPopup::create(text("surrender-confirm","CONFIRM SURRENDER"),
             SurvivalRuntime::get().surrenderMessage(),
             [weak=WeakRef(this),id,round,generation](bool accepted){
-                auto owner=weak.lock();if(!owner || !owner->getParent())return;owner->m_confirmation.reset();
+                auto owner=weak.lock();log::info("[SurvivalSurrender] board confirm accepted={} match={} round={} generation={} owner={}",accepted,id,round,generation,static_cast<bool>(owner));if(!owner || !owner->getParent())return;owner->m_confirmation.reset();
                 auto const& current=SurvivalRuntime::get().view();
                 if(accepted && current.id==id && current.roundKey==round && current.mapGeneration==generation &&
                     SurvivalRuntime::get().canSurrender())SurvivalRuntime::get().surrender();

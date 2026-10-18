@@ -26,7 +26,7 @@ struct CCNode : CCObject {
     std::string id;
     std::vector<CCNode*> children;
     bool visible = true;
-    CCPoint origin;
+    CCPoint origin,anchor;
     CCSize size;
     float scale=1;
     virtual bool isRunning() const {return true;}
@@ -38,13 +38,14 @@ struct CCNode : CCObject {
     void setVisible(bool v) {visible=v;}
     CCSize getContentSize() const {return size;}
     void setPosition(CCPoint p) {origin=p;}
+    void setAnchorPoint(CCPoint p){anchor=p;}
     CCNode* getChildByID(std::string const& value) const {
         for(auto* child:children)if(child->id==value)return child;
         return nullptr;
     }
     CCPoint convertToNodeSpace(CCPoint p) const {
         if(parent)p=parent->convertToNodeSpace(p);
-        return {(p.x-origin.x)/scale,(p.y-origin.y)/scale};
+        return {(p.x-origin.x)/scale+anchor.x*size.width,(p.y-origin.y)/scale+anchor.y*size.height};
     }
     CCNode* getParent() { return parent; }
 };

@@ -59,7 +59,7 @@ void SurvivalRuntime::tick() {
         m_clock={};resetSurrender();
         m_needRecovery=!token.empty();m_recoverRetryAt={};m_ackRetryAt={};
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
-        m_forceClearRequest.cancel();m_forceClearBody={};m_forceClearBusy=false;
+        m_forceClearRequest.cancel();m_forceClearBody.reset();m_forceClearBusy=false;
 #endif
         if(m_needRecovery)recover();
     }
@@ -363,8 +363,10 @@ void SurvivalRuntime::pumpEvents() {
     m_eventRequest.spawn(http.post(matchEndpoint("/matches/"+id+"/events")),[this,generation,eventGeneration,session,id,eventId,eventType](web::WebResponse response) {
         if(!current(generation,session) || m_view.id!=id || eventGeneration!=m_eventGeneration)return;
         m_eventBusy=false;
+        if(eventType=="FORFEIT")geode::log::info("[SurvivalSurrender] HTTP event={} match={} status={}",eventId,id,response.code());
         if(response.code()>=200 && response.code()<300) {
             observe(response.json().unwrapOr(matjson::Value()));pumpSurrenderReturn();
+            if(eventType=="FORFEIT")geode::log::info("[SurvivalSurrender] ACK event={} eliminated={} accepted={}",eventId,m_view.ownEliminated,m_surrenderAccepted);
             if(eventType=="FORFEIT" && eventId==m_surrenderEventId && !m_surrenderAccepted){
                 m_retryAt=std::chrono::steady_clock::now()+std::chrono::milliseconds(500);m_nextPoll={};return;
             }
@@ -505,6 +507,9 @@ void SurvivalRuntime::resetSurrender() {
     m_surrenderOwner.reset();m_surrenderScene.reset();
 }
 bool SurvivalRuntime::canSurrender() const {
+#if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
+    if(forceClearPending())return false;
+#endif
     return active() && !m_session.empty() && m_session==RankedRuntime::get().spectatorLiveSessionToken() &&
         !surrenderPending() && !normalRoundCleared() && !freePlaying() && !m_view.ownEliminated &&
         (m_view.state=="MAP_SELECTION" || m_view.state=="PREPARING" || m_view.state=="ENTERING" || m_view.state=="COUNTDOWN" || m_view.state=="PLAYING");
@@ -518,6 +523,7 @@ void SurvivalRuntime::surrender() {
     auto body=event("FORFEIT");m_surrenderEventId=body["eventId"].asString().unwrapOr("");m_surrenderMatchId=m_view.id;
     auto* play=PlayLayer::get();auto* scene=CCDirector::sharedDirector()->getRunningScene();
     if(isOfficialSurvivalPlayLayer(play) && scene && play->getParent()==scene){m_surrenderOwner.emplace(play);m_surrenderScene.emplace(scene);}
+    geode::log::info("[SurvivalSurrender] submit event={} match={} round={} generation={} queued={}",m_surrenderEventId,m_view.id,m_view.roundKey,m_view.mapGeneration,m_events.size());
     endAttempt(m_view.activeAttemptProgress);enqueue(std::move(body));
 }
 void SurvivalRuntime::pumpSurrenderReturn() {
@@ -528,7 +534,7 @@ void SurvivalRuntime::pumpSurrenderReturn() {
     auto owner=m_surrenderOwner?m_surrenderOwner->lock():Ref<PlayLayer>();
     auto scene=m_surrenderScene?m_surrenderScene->lock():Ref<CCScene>();
     auto* director=CCDirector::sharedDirector();
-    if(!owner || !scene || owner.data()!=PlayLayer::get() || !owner->isRunning() ||
+    if(!owner || !scene || owner.data()!=PlayLayer::get() ||
         owner->getParent()!=scene.data() || director->getRunningScene()!=scene.data() || director->getNextScene())return;
     requestSurvivalGameplayReturn(owner.data());
 }
@@ -566,40 +572,41 @@ std::optional<ScoreAnimationInput> SurvivalRuntime::scoreAnimation() const {
 }
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
 bool SurvivalRuntime::canForceClear() const {
-    return m_view.debug && !m_view.online && !m_view.ownEliminated && !normalRoundCleared() &&
+    return !forceClearPending() && !surrenderPending() && m_view.debug && !m_view.online && !m_view.ownEliminated && !normalRoundCleared() &&
         m_view.phase!="TIEBREAK" && m_view.ownAssetsReady && m_view.ownEntered && canPlay();
 }
 void SurvivalRuntime::forceClear() {
     if(!canForceClear() || forceClearPending())return;
-    m_forceClearBody=event("FORCE_CLEAR");m_forceClearBody["requestId"]=utils::random::generateUUID();
-    m_forceClearBody.erase("type");m_forceClearBody.erase("eventId");m_forceClearRetryAt={};pumpForceClear();
+    m_forceClearBody.emplace(event("FORCE_CLEAR"));(*m_forceClearBody)["requestId"]=utils::random::generateUUID();
+    m_forceClearBody->erase("type");m_forceClearBody->erase("eventId");m_forceClearRetryAt={};geode::log::info("[SurvivalForceClear] submit request={} match={} round={} generation={}",(*m_forceClearBody)["requestId"].asString().unwrapOr(""),m_view.id,m_view.roundKey,m_view.mapGeneration);pumpForceClear();
 }
 void SurvivalRuntime::pumpForceClear() {
     if(!forceClearPending())return;
-    if(m_forceClearBody["roundKey"].asString().unwrapOr("")!=m_view.roundKey ||
-        m_forceClearBody["mapGeneration"].asInt().unwrapOr(0)!=m_view.mapGeneration || !active() ||
+    if((*m_forceClearBody)["roundKey"].asString().unwrapOr("")!=m_view.roundKey ||
+        (*m_forceClearBody)["mapGeneration"].asInt().unwrapOr(0)!=m_view.mapGeneration || !active() ||
         m_view.state!="PLAYING" || m_view.ownEliminated){
-        m_forceClearRequest.cancel();m_forceClearBusy=false;m_forceClearBody={};m_view.error="Survival state changed. Synchronizing...";return;
+        m_forceClearRequest.cancel();m_forceClearBusy=false;m_forceClearBody.reset();m_view.error="Survival state changed. Synchronizing...";return;
     }
     // Poll recovers a committed request whose HTTP response was lost.
     if(normalRoundCleared()){
-        m_forceClearRequest.cancel();m_forceClearBusy=false;m_forceClearBody={};m_attempt.clear();return;
+        m_forceClearRequest.cancel();m_forceClearBusy=false;m_forceClearBody.reset();m_attempt.clear();return;
     }
     if(m_forceClearBusy || m_eventBusy || !m_events.empty() || std::chrono::steady_clock::now()<m_forceClearRetryAt)return;
-    m_forceClearBusy=true;auto http=request(m_session);http.bodyJSON(m_forceClearBody);
+    m_forceClearBusy=true;auto http=request(m_session);http.bodyJSON(*m_forceClearBody);
     auto const generation=m_generation;auto const session=m_session,id=m_view.id,roundKey=m_view.roundKey;auto const mapGeneration=m_view.mapGeneration;
-    auto const requestId=m_forceClearBody["requestId"].asString().unwrapOr("");
+    auto const requestId=(*m_forceClearBody)["requestId"].asString().unwrapOr("");
     m_forceClearRequest.spawn(http.post(debugEndpoint("/matches/"+id+"/force-clear")),[this,generation,session,id,roundKey,mapGeneration,requestId](web::WebResponse response){
-        if(!current(generation,session) || id!=m_view.id || roundKey!=m_view.roundKey || mapGeneration!=m_view.mapGeneration || m_forceClearBody["requestId"].asString().unwrapOr("")!=requestId)return;
+        if(!current(generation,session) || id!=m_view.id || roundKey!=m_view.roundKey || mapGeneration!=m_view.mapGeneration || !m_forceClearBody || (*m_forceClearBody)["requestId"].asString().unwrapOr("")!=requestId)return;
         m_forceClearBusy=false;
+        geode::log::info("[SurvivalForceClear] HTTP request={} match={} round={} status={}",requestId,id,roundKey,response.code());
         if(response.code()>=200 && response.code()<300){
             observe(response.json().unwrapOr(matjson::Value()));m_nextPoll={};
-            if(normalRoundCleared()){m_forceClearBody={};m_attempt.clear();}
+            if(normalRoundCleared()){m_forceClearBody.reset();m_attempt.clear();}
             else m_forceClearRetryAt=std::chrono::steady_clock::now()+std::chrono::seconds(1);
         }else if(response.code()==0 || response.code()==408 || response.code()==429 || response.code()>=500){
             m_forceClearRetryAt=std::chrono::steady_clock::now()+std::chrono::seconds(1);m_nextPoll={};
             m_view.error="Survival server connection failed. Retrying...";
-        }else {m_forceClearBody={};m_nextPoll={};m_view.error="survival-force-clear-rejected";}
+        }else {m_forceClearBody.reset();m_nextPoll={};m_view.error="survival-force-clear-rejected";}
     });
 }
 void SurvivalRuntime::start(std::string password,std::string group,int forceRank,int botCount) {
