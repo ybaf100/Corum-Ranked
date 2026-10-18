@@ -89,7 +89,7 @@ export interface SurvivalMatch {
 export interface SurvivalRoundContext { roundKey: string; mapGeneration: number; levelId: number; }
 
 /** All ready clients stay in the selection room before native entry opens. */
-export const SURVIVAL_READY_HOLD_MS = 3_000;
+export const SURVIVAL_READY_HOLD_MS = 5_000;
 export function survivalEntryOpensAt(round: SurvivalRound): number | null {
   return round.entryRequestedAt === null ? null : round.entryRequestedAt + SURVIVAL_READY_HOLD_MS;
 }

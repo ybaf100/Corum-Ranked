@@ -176,6 +176,7 @@ public:
                 input->bind(m_fields->forceClear,[weak]{if(auto pause=weak.lock())pause->onForceClear(nullptr);});
 #endif
                 m_fields->survivalInput=input;addChild(input,1200);
+                log::info("[SurvivalPauseInput] attached observer to Pause, actions registered");
             }
         }
         if (m_fields->placement) {

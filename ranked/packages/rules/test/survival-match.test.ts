@@ -20,7 +20,7 @@ class Rig {
       geometrySha256:"a".repeat(64),geometryBytes:100,verifiedAt:new Date(this.now).toISOString()};
     this.send({type:"MAP_SELECTED",roundKey:this.round.key,mapGeneration:this.round.mapGeneration,map});return map;}
   assets(){for(const p of [...this.round.players])this.send({type:"ASSETS_READY",...this.context,participantId:p.participantId,certificate:this.round.map!});}
-  prepare(){this.select();this.assets();this.now+=3000;for(const p of [...this.round.players])this.send({type:"ENTERED",...this.context,participantId:p.participantId});
+  prepare(){this.select();this.assets();this.now+=5000;for(const p of [...this.round.players])this.send({type:"ENTERED",...this.context,participantId:p.participantId});
     this.now=this.round.startsAt!;this.send({type:"TICK"});}
   attempt(participantId:string,progress:number,attemptId="a1",end=true){
     this.send({type:"ATTEMPT_START",...this.context,participantId,attemptId});
@@ -104,7 +104,7 @@ describe("Survival round engine",()=>{
     const r=new Rig();r.select();
     for(const p of r.round.players.slice(0,2))r.send({type:"ASSETS_READY",...r.context,participantId:p.participantId,certificate:r.round.map!});
     r.send({type:"FORFEIT",roundKey:r.round.key,mapGeneration:r.round.mapGeneration,participantIds:r.round.players.slice(2).map(p=>p.participantId),reason:"ASSET_FAILURE"});
-    expect(r.match.state).toBe("ENTERING");r.now+=3000;
+    expect(r.match.state).toBe("ENTERING");r.now+=5000;
     r.send({type:"ENTERED",...r.context,participantId:"p01"});r.send({type:"ENTERED",...r.context,participantId:"p02"});
     expect(r.match.state).toBe("COUNTDOWN");expect(r.round.startsAt).toBe(r.now+3000);
     expect(r.round.players[0]!.forfeited).toBe(false);
@@ -142,7 +142,7 @@ describe("Survival round engine",()=>{
     expect(r.round.finishedAt).toBe(r.round.endsAt);
   });
   it("accepts an attempt exactly when countdown completes, without counting preparation",()=>{
-    const r=new Rig();r.select();r.assets();r.now+=3000;for(const p of [...r.round.players])r.send({type:"ENTERED",...r.context,participantId:p.participantId});
+    const r=new Rig();r.select();r.assets();r.now+=5000;for(const p of [...r.round.players])r.send({type:"ENTERED",...r.context,participantId:p.participantId});
     const invitedAt=r.now;r.now+=2999;expect(()=>r.attempt("p01",2)).toThrow();
     r.now=invitedAt+3000;r.attempt("p01",2);expect(r.match.state).toBe("PLAYING");expect(r.round.endsAt).toBe(invitedAt+183000);
   });
@@ -175,18 +175,18 @@ describe("Survival round engine",()=>{
   });
 });
 describe("Survival preparation synchronization",()=>{
-  it("opens native entry exactly 3s after the final ready ACK in debug and online matches",()=>{
+  it("opens native entry exactly 5s after the final ready ACK in debug and online matches",()=>{
     for(const online of [false,true]){
       const r=new Rig();r.match.online=online;r.select();
       for(const p of r.round.players.slice(0,15))r.send({type:"ASSETS_READY",...r.context,participantId:p.participantId,certificate:r.round.map!});
       expect(survivalLiveView(r.match,r.now).entryOpensAt).toBeNull();
       r.now+=1234;r.send({type:"ASSETS_READY",...r.context,participantId:"p16",certificate:r.round.map!});
       const readyAt=r.now,view=survivalLiveView(r.match,r.now);
-      expect(Date.parse(view.entryOpensAt!)).toBe(readyAt+3000);
-      expect(Date.parse(view.entryDeadlineAt!)).toBe(readyAt+8000);
+      expect(Date.parse(view.entryOpensAt!)).toBe(readyAt+5000);
+      expect(Date.parse(view.entryDeadlineAt!)).toBe(readyAt+10000);
       expect(view.startsAt).toBeNull();expect(view.endsAt).toBeNull();
       const enter=()=>r.send({type:"ENTERED",...r.context,participantId:"p01"});
-      expect(enter).toThrow("ready countdown");r.now+=2999;r.send({type:"TICK"});
+      expect(enter).toThrow("ready countdown");r.now+=4999;r.send({type:"TICK"});
       expect(r.match.state).toBe("ENTERING");expect(enter).toThrow("ready countdown");
       r.now++;enter();const enteredAt=r.now;
       // Duplicate ready/entered reports do not restart either barrier.
@@ -206,19 +206,19 @@ describe("Survival preparation synchronization",()=>{
   it("forfeits only asset stragglers at 15s and continues the ready field",()=>{
     const r=new Rig();r.select();for(const p of r.round.players.slice(0,8))r.send({type:"ASSETS_READY",...r.context,participantId:p.participantId,certificate:r.round.map!});
     r.now+=15000;r.send({type:"TICK"});expect(r.match.state).toBe("ENTERING");expect(r.round.players.filter(p=>p.forfeited)).toHaveLength(8);
-    expect(r.match.players.slice(0,8).every(p=>p.forfeitReason===null)).toBe(true);r.now+=3000;
+    expect(r.match.players.slice(0,8).every(p=>p.forfeitReason===null)).toBe(true);r.now+=5000;
     for(const p of r.round.players.filter(p=>!p.forfeited))r.send({type:"ENTERED",...r.context,participantId:p.participantId});
     r.now=r.round.startsAt!;r.send({type:"TICK"});for(const p of r.round.players.filter(p=>!p.forfeited))r.attempt(p.participantId,50);
     r.now=r.round.endsAt!;r.send({type:"TICK"});r.next();expect(r.round.players).toHaveLength(8);expect(r.round.phase).toBe("ROUND_2");
   });
-  it("reserves the full 5s native-entry window after the 3s all-ready wait",()=>{
+  it("reserves the full 5s native-entry window after the 5s all-ready wait",()=>{
     const r=new Rig();r.select();r.now+=14000;r.assets();const old=r.context;
-    r.now+=7999;r.send({type:"TICK"});expect(r.match.state).toBe("ENTERING");r.now++;r.send({type:"TICK"});
+    r.now+=9999;r.send({type:"TICK"});expect(r.match.state).toBe("ENTERING");r.now++;r.send({type:"TICK"});
     expect(r.match.state).toBe("MAP_SELECTION");expect(r.round.startsAt).toBeNull();r.select();
     expect(()=>r.send({type:"ENTERED",...old,participantId:"p01"})).toThrow("CONTEXT_CHANGED");
   });
   it("starts 10s culpability at first actual entry and never blames entered players",()=>{
-    const r=new Rig();r.select();r.assets();r.now+=4000;r.send({type:"ENTERED",...r.context,participantId:"p01"});
+    const r=new Rig();r.select();r.assets();r.now+=6000;r.send({type:"ENTERED",...r.context,participantId:"p01"});
     r.now+=9999;r.send({type:"TICK"});expect(r.match.state).toBe("ENTERING");
     r.now++;r.send({type:"TICK"});expect(r.match.state).toBe("FINAL_RESULT");expect(r.match.winnerId).toBe("p01");
     expect(r.match.players[0]!.forfeitReason).toBeNull();expect(r.match.players.slice(1).every(p=>p.forfeitReason==="NATIVE_ENTRY_TIMEOUT")).toBe(true);

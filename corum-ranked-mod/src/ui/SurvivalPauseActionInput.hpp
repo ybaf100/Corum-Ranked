@@ -16,7 +16,8 @@ class SurvivalPauseActionInput final : public cocos2d::CCLayer {
     std::function<bool()> m_allowed;
     int m_touch=-1,m_pressed=-1;
     unsigned m_epoch=0,m_diagnostics=0;
-    bool m_pending=false,m_logged=false;
+    bool m_pending=false,m_logged=false,m_registrationQueued=false,m_repairedRegistration=false;
+    unsigned m_syncWarnings=0;
     bool valid()const;
     bool hit(std::size_t,cocos2d::CCTouch*)const;
     void cancelTouch();

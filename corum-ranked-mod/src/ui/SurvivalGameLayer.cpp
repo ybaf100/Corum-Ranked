@@ -10,6 +10,7 @@
 #include "RankedConfirmPopup.hpp"
 #include "RankedJukeboxPopup.hpp"
 #include "PlayerIcon.hpp"
+#include "SurvivalPlayerInfoPopup.hpp"
 #include "ModeLobbyMotion.hpp"
 #include "ModeLobbySurfaceFade.hpp"
 #include "RankBadgeAssets.hpp"
@@ -31,8 +32,10 @@ using namespace geode::prelude;
 namespace corum::ranked {
 namespace {
 class SurvivalGameLayer final : public CCLayerColor {
-    struct Tile {CCNode* root=nullptr;CCLabelBMFont* name=nullptr;CCLabelBMFont* record=nullptr;CCPoint destination;CCNode* icon=nullptr;CCNode* tierBadge=nullptr;std::string tier="";CCNode* eliminatedBackground=nullptr;std::string titleText,recordText;std::array<CCNode*,3> medals{};};
+    struct Tile {CCNode* root=nullptr;CCLabelBMFont* name=nullptr;CCLabelBMFont* record=nullptr;CCPoint destination;CCNode* icon=nullptr;CCNode* tierBadge=nullptr;std::string tier="";CCNode* eliminatedBackground=nullptr;std::string titleText,recordText;std::array<CCNode*,3> medals{};int infoTag=0;};
     std::unordered_map<std::string,Tile> m_tiles;
+    std::unordered_map<int,SurvivalStanding> m_infoByTag;
+    int m_nextInfoTag=1000;
     CCNode* m_grid=nullptr;
     ui::SurvivalMapSelectionLayer* m_selection=nullptr;
     LoadingSpinner* m_spinner=nullptr;
@@ -64,10 +67,10 @@ class SurvivalGameLayer final : public CCLayerColor {
     bool init() override {
         if(!CCLayerColor::initWithColor({0,0,0,255}))return false;setID("survival-game-coordinator"_spr);setKeypadEnabled(true);
         auto const size=CCDirector::sharedDirector()->getWinSize();setContentSize(size);
-        m_heading=ui::menuLabel("SURVIVAL",.60f,{(size.width-156)/2+8,size.height-23},ui::Cyan,ui::FontWeight::Black);addChild(m_heading);
+        m_heading=ui::menuLabel("SURVIVAL",.60f,{(size.width-156)/2+8,size.height-29},ui::Cyan,ui::FontWeight::Black);addChild(m_heading);
         m_boardClock=ui::menuLabel("",.28f,{size.width-12,size.height-22},ui::Cyan,ui::FontWeight::ExtraBold);
         m_boardClock->setAnchorPoint({1,.5f});m_boardClock->setID("survival-board-clock"_spr);addChild(m_boardClock,10);
-        m_map=ui::menuLabel("",.27f,{size.width/2,size.height-49},ui::TextMuted,ui::FontWeight::SemiBold);addChild(m_map);
+        m_map=ui::menuLabel("",.27f,{size.width/2,size.height-48},ui::TextMuted,ui::FontWeight::SemiBold);addChild(m_map);
         m_status=ui::menuLabel("",.28f,{size.width/2,80},ui::TextMuted,ui::FontWeight::SemiBold);addChild(m_status);
         m_grid=CCNode::create();addChild(m_grid,5);
         m_spinner=LoadingSpinner::create(20);m_spinner->setPosition({size.width/2-113,size.height-49});m_spinner->setVisible(false);addChild(m_spinner,8);
@@ -101,6 +104,15 @@ class SurvivalGameLayer final : public CCLayerColor {
         if(popup){m_confirmation.emplace(popup);popup->show();}
     }
     void onAction(CCObject* object) {if(auto* item=typeinfo_cast<CCMenuItemSpriteExtra*>(object))handleAction(item->getTag());}
+    void onPlayerInfo(CCObject* object) {
+        auto* item=typeinfo_cast<CCMenuItemSpriteExtra*>(object);
+        if(!item || m_closed || m_motion)return;
+        auto const found=m_infoByTag.find(item->getTag());
+        if(found==m_infoByTag.end())return;
+        auto const& runtime=SurvivalRuntime::get();
+        if(!runtime.active())return;
+        if(auto* popup=ui::SurvivalPlayerInfoPopup::create(found->second,runtime.view().id))popup->show();
+    }
     void handleAction(int tag) {
         if(m_closed || m_motion || std::chrono::steady_clock::now()<m_eliminationUntil)return;
         auto& runtime=SurvivalRuntime::get();auto* level=RankedLevelPreparation::get().level();
@@ -149,7 +161,7 @@ class SurvivalGameLayer final : public CCLayerColor {
     }
     void showParticipants(SurvivalMatchView const& view,bool result) {
         auto const gridContext=view.id+":"+view.roundKey+":"+std::to_string(view.mapGeneration)+(result?":result":":live");
-        if(m_gridContext!=gridContext){m_gridContext=gridContext;m_grid->removeAllChildrenWithCleanup(true);m_tiles.clear();}
+        if(m_gridContext!=gridContext){m_gridContext=gridContext;m_grid->removeAllChildrenWithCleanup(true);m_tiles.clear();m_infoByTag.clear();m_nextInfoTag=1000;}
         std::vector<SurvivalStanding> players=view.roundPlayers.empty()?view.standings:view.roundPlayers;
         if(result){players.clear();for(auto const& p:view.result["standings"].asArray().unwrapOr(std::vector<matjson::Value>{}))
             players.push_back({p["participantId"].asString().unwrapOr(""),p["name"].asString().unwrapOr(""),static_cast<int>(p["rank"].asInt().unwrapOr(0)),0,0,0,true,p["kind"].asString().unwrapOr("")=="BOT",false,p["displayedTier"].asString().unwrapOr("UNRANKED"),numFromString<int>(p["gdAccountId"].asString().unwrapOr("0")).unwrapOr(0)});}
@@ -168,11 +180,15 @@ class SurvivalGameLayer final : public CCLayerColor {
                 ui::fitFullMenuLabel(nickname,card.width-12,card.titleHeight,.25f);root->addChild(nickname,5);
                 int index=1;auto dash=value.id.rfind('-');if(dash!=std::string::npos)index=numFromString<int>(value.id.substr(dash+1)).unwrapOr(1);
                 auto* avatarSlot=CCNode::create();avatarSlot->setPosition({card.width/2,card.avatarY});root->addChild(avatarSlot,5);
+                auto* iconMenu=CCMenu::create();iconMenu->setPosition(CCPointZero);avatarSlot->addChild(iconMenu,8);
+                auto* iconFace=CCNode::create();iconFace->setContentSize({card.avatarSize,card.avatarSize});
                 auto* icon=value.id==view.ownId?ui::PlayerIcon::createLocal():value.bot?ui::PlayerIcon::createBot(index):ui::PlayerIcon::createRemote(value.accountId);
-                if(icon){icon->setScale(std::min(.65f,card.avatarSize/48.0f));icon->setPosition({-10,0});avatarSlot->addChild(icon,5);}
+                if(icon){icon->setScale(std::min(.65f,card.avatarSize/48.0f));icon->setPosition({card.avatarSize/2-10,card.avatarSize/2});iconFace->addChild(icon,5);}
+                auto* iconButton=CCMenuItemSpriteExtra::create(iconFace,this,menu_selector(SurvivalGameLayer::onPlayerInfo));
+                iconButton->setTag(m_nextInfoTag++);iconButton->setPosition(CCPointZero);iconMenu->addChild(iconButton);
                 auto* record=ui::menuLabel("",.23f,{card.width/2,card.recordY},ui::TextMuted,ui::FontWeight::ExtraBold);root->addChild(record,5);
                 found=m_tiles.emplace(value.id,Tile{root,nickname,record,destination,avatarSlot}).first;
-                auto& tile=found->second;
+                auto& tile=found->second;tile.infoTag=iconButton->getTag();
                 std::array<ccColor3B,3> const accents{ui::Gold,ccc3(201,215,235),ccc3(208,137,70)};
                 for(std::size_t medal=0;medal<accents.size();++medal){
                     tile.medals[medal]=ui::surface({width-8,height-4},{(width-8)/2,(height-4)/2},accents[medal],ui::SurfaceRaised,245,true);
@@ -181,7 +197,7 @@ class SurvivalGameLayer final : public CCLayerColor {
                 tile.eliminatedBackground=ui::surface({width-8,height-4},{(width-8)/2,(height-4)/2},ui::Red,{42,13,28},250,true);
                 tile.eliminatedBackground->setVisible(false);root->addChild(tile.eliminatedBackground,4);
             }
-            auto& tile=found->second;tile.root->setVisible(true);
+            auto& tile=found->second;tile.root->setVisible(true);m_infoByTag[tile.infoTag]=value;
             if(tile.tier!=value.tier){
                 tile.tier=value.tier;if(tile.tierBadge)tile.tierBadge->removeFromParentAndCleanup(true);
                 auto const badgeSize=std::min(20.0f,card.avatarSize);
@@ -312,7 +328,7 @@ public:
         auto const clock=survivalBoardClock(view.state,runtime.countdownMs(),runtime.roundRemainingMs());
         m_boardClock->setString(i18n::text(clock,clock).c_str());m_boardClock->setVisible(!result && !elimination && !clock.empty());
         auto const headingWidth=getContentSize().width-24-(m_boardClock->isVisible()?156:0);
-        m_heading->setPosition({12+headingWidth/2,getContentSize().height-23});
+        m_heading->setPosition({12+headingWidth/2,getContentSize().height-29});
         ui::fitMenuLabelWidth(m_boardClock,140,.28f,.18f);
         auto const mapWindow=nextRound && !elimination && !intro && !liveBoard && view.map.levelId>0 && view.state!="ROUND_RESULT";
         auto const searching=nextRound && !elimination && !intro && !liveBoard && view.state=="MAP_SELECTION";
@@ -402,7 +418,12 @@ public:
 void showSurvivalGame() {
     auto* director=CCDirector::sharedDirector();auto* current=director->getRunningScene();
     if(!SurvivalRuntime::get().active() || (current && current->getChildByID("survival-game-coordinator"_spr)))return;
-    if(isOfficialSurvivalPlayLayer(PlayLayer::get()))return;
+    // A retired native PlayLayer may still be the GD singleton for a frame
+    // after its scene has been popped. Only a *running* official game in the
+    // active scene should prevent restoring this match's coordinator.
+    auto* currentPlay=PlayLayer::get();
+    if(currentPlay && currentPlay->isRunning() &&
+        currentPlay->getParent()==current && isOfficialSurvivalPlayLayer(currentPlay))return;
     auto* layer=SurvivalGameLayer::create();if(!layer)return;auto* scene=CCScene::create();scene->addChild(layer);director->pushScene(scene);
 }
 }
