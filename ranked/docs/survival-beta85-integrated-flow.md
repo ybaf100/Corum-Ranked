@@ -1,5 +1,9 @@
 # Survival beta.85 integrated flow
 
+> Historical beta.85 description. The [beta.87 follow-up](survival-beta87-followup.md)
+> supersedes its in-game halo/native-profile choices and tightens the visible five-second
+> selected-panel hold; the result/observer/prefetch structure below remains intact.
+
 Base main: `49119081d99b76a0b3fad3fcb48cb5be0482900a` (beta.84).
 
 ## State and authority

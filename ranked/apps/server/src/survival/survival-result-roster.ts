@@ -11,6 +11,7 @@ export function survivalResultRoster(match:SurvivalMatch,paid:ReadonlyMap<string
   const current=match.rounds.slice().reverse().flatMap(r=>r.players.filter(v=>v.participantId===p.participantId))[0];
   const active=current?.attempts.find(a=>a.endedAt===null);
   return {participantId:p.participantId,playerId:p.playerId,rank:p.finalRank,tiedPlayers:input?.tiedPlayers??null,name:p.name,kind:p.kind,gdAccountId:p.gdAccountId??null,
+   lpAfter:settled?.profileAfter.lp??(p.kind==="BOT"&&input?Math.max(0,p.lp+input.delta):null),
    displayedTier:tierAfter??p.displayedTier??survivalTierForLp(p.lp,match.config.tierBands).group,tierAfter,
    settled:!!settled||virtualTier!==null,virtualRating:p.kind==="BOT",delta:settled?.actualDelta??input?.delta??null,
    bestProgress:current?.highestProgress??0,currentProgress:active?.currentProgress??active?.highestProgress??0,

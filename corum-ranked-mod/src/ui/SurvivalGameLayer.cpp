@@ -406,6 +406,7 @@ public:
                 (runtime.canEnter() || runtime.canEnterObserver()) && interactive && (!m_entrySyncAfter || runtime.serverSyncMillis()>*m_entrySyncAfter),runtime.countdownMs(),runtime.roundRemainingMs());
         }else if(!elimination)showParticipants(view,result);
         if(m_confirmation && (result || view.state=="CANCELLED" || m_confirmationContext!=view.id+":"+view.roundKey+":"+std::to_string(view.mapGeneration))){if(auto popup=m_confirmation->lock())popup->cancel();m_confirmation.reset();}
+        runtime.selectedPanelReady(selectionWindow && m_selection->settled() && preparation.mapReady && preparation.audioReady && preparation.error.empty());
         if(RankedRoundPreparation::get().ready()){
             if(runtime.observing())runtime.validateNative(level);
             else if(!view.ownAssetsReady)runtime.assetsReady(level);

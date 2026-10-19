@@ -209,6 +209,7 @@ void SurvivalRuntime::observe(matjson::Value const& root) {
     m_view.targetQualifiers=static_cast<int>(root["targetQualifiers"].asInt().unwrapOr(0));
     m_view.startsAt=root["startsAt"].asString().unwrapOr("");m_view.endsAt=root["endsAt"].asString().unwrapOr("");
     m_view.entryOpensAt=root["entryOpensAt"].asString().unwrapOr("");
+    m_view.entryRequestedAt=root["entryRequestedAt"].asString().unwrapOr("");
     m_view.certificate=root["map"];m_view.result=root["result"];
     m_view.completedRound=root["completedRound"];m_view.nextMap=root["nextMap"];m_view.participants=root["participants"];
     m_view.selectionOpensAt=root["selectionOpensAt"].asString().unwrapOr("");
@@ -370,7 +371,10 @@ bool SurvivalRuntime::consumeNativeLaunch(GJGameLevel* level) {
 }
 bool SurvivalRuntime::canEnter() const {
     if(surrenderPending() || normalRoundCleared() || freePlaying())return false;
-    if(m_view.state=="ENTERING"){auto const wait=entryWaitMs();if(!wait || *wait>0)return false;}
+    if(m_view.state=="ENTERING"){
+        auto const wait=entryWaitMs();if(!wait || *wait>0)return false;
+    }
+    if(!previouslyEntered()){auto const panelWait=selectedPanelWaitMs();if(!panelWait || *panelWait>0)return false;}
     if(m_view.state=="PLAYING" && remainingMs()<=0)return false;
     if(!m_prepared.valid() || m_prepared!=preparationContext() || m_session.empty())return false;
     if(m_view.online && !m_view.ownAssetsReady)return false;
@@ -389,6 +393,17 @@ bool SurvivalRuntime::attemptLimitReached() const {
 }
 std::optional<std::int64_t> SurvivalRuntime::countdownMs() const { return m_clock.signedRemainingMillis(m_view.startsAt,localNow()); }
 std::optional<std::int64_t> SurvivalRuntime::entryWaitMs() const { return m_clock.signedRemainingMillis(m_view.entryOpensAt,localNow()); }
+void SurvivalRuntime::selectedPanelReady(bool ready){
+    if(ready && !m_view.ownEliminated)m_selectedPanelContext=optionsContext();
+}
+std::optional<std::int64_t> SurvivalRuntime::selectedPanelWaitMs() const {
+    if(previouslyEntered())return entryWaitMs();
+    auto const requested=parseIso8601Millis(m_view.entryRequestedAt),opens=parseIso8601Millis(m_view.entryOpensAt);
+    auto const steady=std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    return m_entryHold.remaining(optionsContext(),requested.value_or(0),opens.value_or(0),m_clock.serverNowMillis(localNow()),
+        m_selectedPanelContext==optionsContext(),m_clock.synchronized() &&
+        (m_view.state=="ENTERING" || m_view.state=="COUNTDOWN" || m_view.state=="PLAYING") && m_view.ownAssetsReady,steady);
+}
 std::optional<std::int64_t> SurvivalRuntime::roundRemainingMs() const { return m_clock.remainingMillis(m_view.endsAt,localNow()); }
 std::int64_t SurvivalRuntime::remainingMs() const { return roundRemainingMs().value_or(0); }
 matjson::Value SurvivalRuntime::event(std::string const& type) const {
@@ -448,7 +463,7 @@ void SurvivalRuntime::discardObsoleteEvents() {
     if(m_events.size()!=before)m_retryAt={};
 }
 void SurvivalRuntime::assetsReady(GJGameLevel* level) {
-    if(m_view.ownEliminated || observing() || freePlaying())return;
+    if(m_view.ownEliminated || observing() || freePlaying() || m_selectedPanelContext!=optionsContext())return;
     auto const key=preparationContextText(preparationContext());
     if((m_view.state!="PREPARING" && !(m_view.online && !m_view.ownAssetsReady && (m_view.state=="ENTERING" || m_view.state=="COUNTDOWN" || m_view.state=="PLAYING"))) || m_readyContext==key || !RankedRoundPreparation::get().ready() || !validateNative(level))return;
     auto body=event("ASSETS_READY");if(!RankedRuntime::get().prepareSurvivalEnvironment(body))return;

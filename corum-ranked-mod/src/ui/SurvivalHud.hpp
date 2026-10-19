@@ -14,14 +14,11 @@ public:
 private:
     struct Row { cocos2d::CCNode* node=nullptr;RankedHudLabel rank,name,score;float targetY=0;SurvivalStanding value;SurvivalScoreTween tween;bool visible=false; };
     bool init() override;
-    void onBoard(cocos2d::CCObject*);
     void presentProgressMarkers(SurvivalMatchView const& view);
     std::unordered_map<std::string,Row> m_rows;
     std::string m_context;
     RankedHudLabel m_round,m_timer,m_difference,m_rank,m_waiting;
     cocos2d::CCDrawNode* m_cutoffLine=nullptr;
-    cocos2d::CCDrawNode* m_rankHalo=nullptr;
-    double m_haloOpacity=0,m_haloAge=0;
     geode::WeakRef<cocos2d::CCSprite> m_progressBar,m_progressFill;
     geode::WeakRef<cocos2d::CCDrawNode> m_progressLines;
     float m_progressWidth=0,m_progressHeight=0;

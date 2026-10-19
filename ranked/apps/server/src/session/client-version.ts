@@ -1,5 +1,5 @@
-export const PREVIOUS_RANKED_CLIENT_VERSION = "v0.5.0-beta.85";
-export const REQUIRED_RANKED_CLIENT_VERSION = "v0.5.0-beta.86";
+export const PREVIOUS_RANKED_CLIENT_VERSION = "v0.5.0-beta.86";
+export const REQUIRED_RANKED_CLIENT_VERSION = "v0.5.0-beta.87";
 
 export interface RankedClientVersionMod {
   readonly id: string;

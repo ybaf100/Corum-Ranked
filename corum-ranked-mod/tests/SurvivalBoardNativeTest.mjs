@@ -162,7 +162,7 @@ struct SurvivalRuntime{
  bool pending=false,cleared=false,free=false;long remaining=100;int m_localAttempts=0;std::string m_session="token";
  LevelPreparationContext current{"match",42,1,0,false,0,1},m_prepared=current;
  bool surrenderPending()const{return pending;}bool normalRoundCleared()const{return cleared;}bool freePlaying()const{return free;}
- std::optional<std::int64_t> wait=0;auto entryWaitMs()const{return wait;}
+ std::optional<std::int64_t> wait=0,panelWait=0;bool entered=false;auto entryWaitMs()const{return wait;}auto selectedPanelWaitMs()const{return panelWait;}bool previouslyEntered()const{return entered;}
  auto preparationContext()const{return current;}long remainingMs()const{return remaining;}
  bool attemptLimitReached()const;bool canEnter()const;
  ${method(runtime,'bool SurvivalRuntime::attemptLimitReached()').replace('bool SurvivalRuntime::','bool ')}
@@ -170,6 +170,12 @@ struct SurvivalRuntime{
 };
 int main(){SurvivalRuntime r;
  r.wait.reset();assert(!r.canEnter());r.wait=3000;assert(!r.canEnter());r.wait=1;assert(!r.canEnter());r.wait=0;assert(r.canEnter());r.wait=-100;assert(r.canEnter());
+ r.panelWait=3000;assert(!r.canEnter());r.panelWait.reset();assert(!r.canEnter());r.entered=true;assert(r.canEnter());r.entered=false;r.panelWait=0;
+ for(auto const* state:{"COUNTDOWN","PLAYING"}){
+  r.m_view.state=state;r.panelWait=1;assert(!r.canEnter()); // Faster peers cannot consume this client's full visible hold.
+  r.panelWait.reset();assert(!r.canEnter());r.panelWait=0;assert(r.canEnter());
+  r.panelWait=1;r.entered=true;assert(r.canEnter());r.entered=false;r.panelWait=0;
+ }r.m_view.state="ENTERING";
  for(auto const* phase:{"ROUND_1","ROUND_2","ROUND_3","FINAL","TIEBREAK"}){r.m_view.phase=phase;assert(r.canEnter());}
  r.m_view.state="PLAYING";assert(r.canEnter());r.remaining=0;assert(!r.canEnter());r.remaining=1;
  r.m_localAttempts=3;assert(!r.canEnter());r.m_view.phase="ROUND_1";assert(r.canEnter());

@@ -221,7 +221,7 @@ void SurvivalMapSelectionLayer::present(SurvivalMatchView const& view,RoundPrepa
     m_panel->present(size,m_thumbnail,view,prep,options,supportsLdm,actionsEnabled,canEnter,frame.details);
     auto const finalHeader=context.levelId>0 && (frame.details>0 || frame.skipped);
     auto clock=(finalHeader || view.state=="COUNTDOWN" || view.state=="PLAYING")?survivalBoardClock(view.state,countdown,remaining):std::string{};
-    if(auto wait=SurvivalRuntime::get().entryWaitMs();view.state=="ENTERING" && wait && *wait>0)
+    if(auto wait=SurvivalRuntime::get().selectedPanelWaitMs();wait && *wait>0)
         clock=fmt::format(fmt::runtime(i18n::text("survival-entry-wait","ALL READY · ENTERING IN {}s")),(*wait+999)/1000);
     auto const header=finalHeader?i18n::text("survival-selected-map","SELECTED MAP"):std::string("NEXT UP!");if(header!=m_header->getString())m_header->setString(header.c_str());
     m_header->setPosition({r.header.cx(),r.header.cy()});fitFullMenuLabel(m_header,r.header.w,r.header.h,finalHeader?.48f:.83f);

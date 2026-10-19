@@ -1,3 +1,5 @@
+import {ForumRecordsModule} from "../forum/forum-records.module.js";
+import {SurvivalPlayerInfoController} from "./survival-player-info.controller.js";
 import { Logger,Module } from "@nestjs/common";
 import { AchievementModule } from "../achievement/achievement.module.js";
 import { RankedConfigModule } from "../config/ranked-config.module.js";
@@ -18,7 +20,7 @@ import { SurvivalDebugController } from "./survival-debug.controller.js";
 import { SurvivalDebugService } from "./survival-debug.service.js";
 import { SERVER_ENVIRONMENT,type ServerEnvironment } from "../config/server-environment.js";
 import { createSurvivalGdFetch } from "./survival-gd-transport.js";
-@Module({ imports: [RankedConfigModule, SessionModule, AchievementModule], controllers: [SurvivalController,SurvivalEngineController,SurvivalDebugController,SurvivalOnlineController,SurvivalQueueController],
+@Module({ imports: [ForumRecordsModule,RankedConfigModule, SessionModule, AchievementModule], controllers: [SurvivalPlayerInfoController,SurvivalController,SurvivalEngineController,SurvivalDebugController,SurvivalOnlineController,SurvivalQueueController],
   providers: [SurvivalService,SurvivalEngineService,SurvivalDebugService,SurvivalOnlineService,SurvivalQueueService,SurvivalRateService,{provide:SURVIVAL_MAP_PROVIDER,
     useFactory:(random:RandomSource,environment:ServerEnvironment)=>{
       Logger.log(`Survival GD transport=${environment.survivalGdRelay?"relay":"direct"}`,"SurvivalGdTransport");

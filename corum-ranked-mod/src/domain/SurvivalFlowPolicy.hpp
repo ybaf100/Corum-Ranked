@@ -31,7 +31,4 @@ inline SurvivalReadyFrame survivalReadyFrame(std::optional<std::int64_t> remaini
 inline int survivalWatchLock(std::int64_t serverNow,std::int64_t eliminatedAt){
     return static_cast<int>((std::clamp<std::int64_t>(eliminatedAt+5000-serverNow,0,5000)+999)/1000);
 }
-inline bool survivalRankHaloEligible(std::string const& state,bool eliminated,bool observer,int officialRank){
-    return state=="PLAYING" && !eliminated && !observer && officialRank==1;
-}
 }

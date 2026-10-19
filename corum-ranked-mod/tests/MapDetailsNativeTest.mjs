@@ -215,7 +215,13 @@ std::string text;ccColor3B color{};
 static CCLabelBMFont*create(char const*s,char const*){auto*l=new CCLabelBMFont;l->text=s;return l;}
 void setColor(ccColor3B c){color=c;}
 };
-struct CCSprite:CCNode{std::string frame;
+struct CCSpriteFrame{std::string name;};
+struct CCSpriteFrameCache{
+ static CCSpriteFrameCache*sharedSpriteFrameCache(){static CCSpriteFrameCache c;return &c;}
+ CCSpriteFrame*spriteFrameByName(char const*s){static CCSpriteFrame f;f.name=s;return &f;}
+};
+struct CCSprite:CCNode{std::string frame;bool expressionOnly=false;
+void setDisplayFrame(CCSpriteFrame*f){frame=f->name;expressionOnly=true;}
 static CCSprite*createWithSpriteFrameName(char const*s){auto*p=new CCSprite;p->frame=s;return p;}};
 }
 enum class GJDifficultyName{Short};enum class GJFeatureState{None,Featured,Epic,Legendary,Mythic};
@@ -249,7 +255,12 @@ MapMetadata info;info.kind="NORMAL";info.stars=8;info.officialLevelId=10;info.du
 auto*row=mapDifficultyBadge(42,info,135);
 auto*shape=static_cast<CCDrawNode*>(row->children[0]);auto*number=static_cast<CCLabelBMFont*>(row->children[1]);
 assert(static_cast<GJDifficultySprite*>(row->children[2])->state==GJFeatureState::None);
-for(int epic=0;epic<=3;epic++){info.epic=epic;info.featureScore=1;auto*rated=mapDifficultyBadge(42,info,135);assert(static_cast<GJDifficultySprite*>(rated->children[2])->state==static_cast<GJFeatureState>(epic?epic+1:1));}
+for(int epic=0;epic<=3;epic++)for(bool name:{true,false}){
+ info.epic=epic;info.featureScore=1;auto*rated=mapDifficultyBadge(42,info,135,26,name);
+ auto*face=static_cast<GJDifficultySprite*>(rated->children[2]);
+ assert(face->state==static_cast<GJFeatureState>(epic?epic+1:1));
+ assert(face->expressionOnly==!name); // Selected panel keeps native ornaments, without its duplicate word.
+}
 assert(shape->polygon.size()==48&&number->text=="8"&&number->color==(ccColor3B{255,255,255}));
 assert(static_cast<CCSprite*>(row->children[2])->frame=="diffIcon_05_btn_001.png");
 assert(mapLengthText(displayedMapMetadata(42,info).durationSeconds)=="1m 24s");

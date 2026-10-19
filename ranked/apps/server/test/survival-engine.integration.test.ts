@@ -1,3 +1,5 @@
+import {SurvivalPlayerInfoController} from "../src/survival/survival-player-info.controller.js";
+import {ForumRecordsService} from "../src/forum/forum-records.service.js";
 import "reflect-metadata";
 import { readFile,readdir } from "node:fs/promises";
 import { Test } from "@nestjs/testing";
@@ -103,8 +105,8 @@ describe("durable Survival M3 engine",()=>{
     await database.query(`INSERT INTO ranked_sessions(id,player_id,token_hash,client_version,environment_snapshot,expires_at,last_heartbeat_at)
       VALUES($1,$2,$3,$4,'{}',$5,$6)`,[ids.next(),participant.playerId,tokens.hash(token),REQUIRED_RANKED_CLIENT_VERSION,new Date(now+3600000),clock.now()]);
     vi.spyOn(engine,"onApplicationBootstrap").mockImplementation(()=>{});
-    const module=await Test.createTestingModule({controllers:[SurvivalEngineController],providers:[SessionGuard,SurvivalRateService,
-      {provide:SurvivalEngineService,useValue:engine},{provide:DATABASE,useValue:database},
+    const module=await Test.createTestingModule({controllers:[SurvivalEngineController,SurvivalPlayerInfoController],providers:[SessionGuard,SurvivalRateService,
+      {provide:SurvivalEngineService,useValue:engine},{provide:ForumRecordsService,useValue:{read:async(account:string)=>({gdAccountId:account,records:[{provider:"GDKF",rank:17}]})}},{provide:DATABASE,useValue:database},
       {provide:TokenService,useValue:tokens},{provide:SERVER_CLOCK,useValue:clock}]}).compile();
     const app=module.createNestApplication();app.useLogger(false);await app.listen(0,"127.0.0.1");
     const url=await app.getUrl(),path=`${url}/api/ranked/survival/matches/${match.id}`,headers={Authorization:`Bearer ${token}`};
@@ -113,6 +115,9 @@ describe("durable Survival M3 engine",()=>{
       const response=await fetch(path,{headers});expect(response.status).toBe(200);expect(response.headers.get("cache-control")).toBe("no-store");
       const view=await response.json();expect(view).toMatchObject({matchId:match.id,phase:"ROUND_1",configGeneration:"engine-v1"});
       expect(view.participants).toHaveLength(16);
+      const info=await fetch(`${url}/api/ranked/survival/matches/${match.id}/player-info/${participant.participantId}`,{headers});
+      expect(info.status).toBe(200);expect(await info.json()).toMatchObject({gdAccountId:"10000",participantId:participant.participantId,bot:false,records:[{provider:"GDKF",rank:17}]});
+      expect((await fetch(`${url}/api/ranked/survival/matches/${match.id}/player-info/foreign`,{headers})).status).toBe(404);
       expect((await fetch(`${url}/api/ranked/survival/matches/not-a-uuid`,{headers})).status).toBe(400);
       expect((await fetch(`${url}/api/ranked/survival/matches/${ids.next()}`,{headers})).status).toBe(404);
       for(const target of [`${url}/api/ranked/survival/matches`,`${path}/progress`,`${path}/result`])expect((await fetch(target,{method:"POST",headers})).status).toBe(404);

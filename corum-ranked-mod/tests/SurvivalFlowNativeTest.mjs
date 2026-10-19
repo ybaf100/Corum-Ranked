@@ -5,7 +5,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 const root=fileURLToPath(new URL('../src',import.meta.url));
-test('Survival server-clock choice, independent result state, halo and countdown boundaries',()=>{
+test('Survival server-clock choice, independent result state, countdown boundaries',()=>{
  const dir=mkdtempSync(join(tmpdir(),'survival-flow-'));try{
  writeFileSync(join(dir,'test.cpp'),String.raw`
 #include "domain/SurvivalFlowPolicy.hpp"
@@ -17,9 +17,6 @@ int main(){using namespace corum::ranked;
  assert(survivalFlowStage("PLAYING","",true,SurvivalOutcomeChoice::Undecided)==SurvivalFlowStage::EliminatedChoice);
  assert(survivalFlowStage("FINAL_RESULT","",true,SurvivalOutcomeChoice::PersonalResult)==SurvivalFlowStage::PersonalResult);
  assert(survivalFlowStage("FINAL_RESULT","",true,SurvivalOutcomeChoice::Observe)==SurvivalFlowStage::Ceremony);
- assert(survivalRankHaloEligible("PLAYING",false,false,1));
- assert(!survivalRankHaloEligible("PLAYING",false,false,2));assert(!survivalRankHaloEligible("PLAYING",true,true,1));
- assert(!survivalRankHaloEligible("ROUND_RESULT",false,false,1));
  for(int digit=1;digit<=5;++digit){auto f=survivalReadyFrame(digit*1000-200);assert(f.digit==digit&&f.opacity>0&&f.scale>=1&&f.scale<=1.2);}
  assert(survivalReadyFrame({}).digit==0);assert(survivalReadyFrame(0).digit==0);assert(survivalReadyFrame(6000).digit==0);
  SurvivalFreePlayState observer;observer.begin({"m","r",1},"",true);

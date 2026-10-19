@@ -2,6 +2,7 @@
 #include "SurvivalOptionSwitch.hpp"
 #include "RankedTranslations.hpp"
 #include "MapDifficultyBadge.hpp"
+#include "../domain/MapFeaturePresentation.hpp"
 #include "ModeLobbyMotion.hpp"
 #include "../domain/SurvivalMapSelection.hpp"
 #include "RankedInput.hpp"
@@ -36,6 +37,7 @@ void SurvivalSelectedMapPanel::build(CCSize size,bool thumbnail,bool ldm){
     auto const& r=m_layout;auto* panel=surface({r.panel.w,r.panel.h},center(r.panel),Blue,Surface,250,true);addChild(panel,0);
     auto caption=[&](SurvivalRect rect,ccColor3B color,FontWeight weight){auto* value=menuLabel("",.25f,center(rect),color,weight);addChild(value,5);return value;};
     m_title=caption(r.title,Text,FontWeight::Black);m_creator=caption(r.creator,TextMuted,FontWeight::SemiBold);
+    m_rating=caption({r.creator.x+r.creator.w*.70f,r.creator.y,r.creator.w*.30f,r.creator.h},Gold,FontWeight::ExtraBold);m_rating->setID("survival-selected-map-rating"_spr);
     m_metadata=caption(r.metadata,Cyan,FontWeight::SemiBold);m_readiness=caption(r.readiness,TextMuted,FontWeight::SemiBold);
     m_countdown=caption(r.ready,Gold,FontWeight::Black);m_countdown->setID("survival-automatic-entry-countdown"_spr);
     // Verified native frame used by Geode ModsLayer; never an emoji substitute.
@@ -79,7 +81,7 @@ void SurvivalSelectedMapPanel::present(CCSize size,bool thumbnail,SurvivalMatchV
     }
     m_ready->setTag(retry?10:0);m_ready->setVisible(retry || start);m_ready->setEnabled(ready && (retry || start));
     m_countdown->setVisible(!retry && !start);
-    auto const wait=view.state=="ENTERING" && prep.mapReady && prep.audioReady?SurvivalRuntime::get().entryWaitMs():std::nullopt;
+    auto const wait=prep.mapReady && prep.audioReady?SurvivalRuntime::get().selectedPanelWaitMs():std::nullopt;
     auto const beat=survivalReadyFrame(wait);
     auto const countdown=beat.digit>0?std::to_string(beat.digit):i18n::text(canEnter?"survival-auto-start":"survival-preparing",canEnter?"AUTO START":"PREPARING...");
     line(m_countdown,countdown,r.ready,beat.digit>0?.90f:.30f);
@@ -94,10 +96,12 @@ void SurvivalSelectedMapPanel::present(CCSize size,bool thumbnail,SurvivalMatchV
     auto const title=native?std::string(level->m_levelName):i18n::text("downloading-map","DOWNLOADING MAP...");
     if(title!=m_title->getString()){m_title->setString(title.c_str());fitFullMenuLabel(m_title,r.title.w,r.title.h,.43f);}
     auto creator=native?"by "+std::string(level->m_creatorName):i18n::text("survival-map-data-pending","Map data pending");
-    if(creator!=m_creatorText){m_creatorText=creator;line(m_creator,creator,r.creator,.22f,true);}
+    if(creator!=m_creatorText){m_creatorText=creator;line(m_creator,creator,{r.creator.x,r.creator.y,r.creator.w*.68f,r.creator.h},.22f,true);}
     auto const revision=RankedMapDetails::get().revision();
     if(m_levelId!=view.map.levelId || m_metadataRevision!=revision || m_mapMetadata!=metadata){
         m_levelId=view.map.levelId;m_metadataRevision=revision;m_mapMetadata=metadata;
+        line(m_rating,std::string(mapFeatureGrade(metadata)),{r.creator.x+r.creator.w*.70f,r.creator.y,r.creator.w*.30f,r.creator.h},.19f);
+        m_rating->setColor(metadata.epic.value_or(0)>0?Gold:metadata.featureScore.value_or(0)>0?Cyan:TextMuted);
         if(m_difficulty)m_difficulty->removeFromParentAndCleanup(true);
         m_difficulty=mapDifficultyBadge(view.map.levelId,metadata,r.difficulty.w,r.difficulty.h,false);m_difficulty->setPosition({r.difficulty.x,r.difficulty.y});addChild(m_difficulty,5);
         auto const detail=fmt::format("GD #{}\n{}",view.map.levelId,mapLengthText(metadata));line(m_metadata,detail,{r.metadata.x,r.metadata.y+6*r.scale,r.metadata.w,r.metadata.h},.21f);
@@ -107,7 +111,7 @@ void SurvivalSelectedMapPanel::present(CCSize size,bool thumbnail,SurvivalMatchV
     if(SurvivalRuntime::get().surrenderPending())status=i18n::text("survival-surrender-pending","Surrender submitted · waiting for server");
     else if(!view.error.empty())status=i18n::text(view.error,view.error);
     else if(!prep.error.empty())status=i18n::text("survival-prep-retry","Preparation failed · RETRY")+": "+i18n::text(prep.error,prep.error);
-    else if(auto wait=SurvivalRuntime::get().entryWaitMs();view.state=="ENTERING" && wait && *wait>0)
+    else if(auto wait=SurvivalRuntime::get().selectedPanelWaitMs();wait && *wait>0)
         status=fmt::format(fmt::runtime(i18n::text("survival-entry-wait","ALL READY · ENTERING IN {}s")),(*wait+999)/1000);
     else status=fmt::format("{} {}   /   {} {}",i18n::text("map","MAP"),i18n::text(prep.mapReady?"ready":"loading",prep.mapReady?"READY":"LOADING"),
         i18n::text("audio","AUDIO"),i18n::text(prep.audioReady?"ready":"loading",prep.audioReady?"READY":"LOADING"));
@@ -115,7 +119,7 @@ void SurvivalSelectedMapPanel::present(CCSize size,bool thumbnail,SurvivalMatchV
     setPositionY(static_cast<float>((1-survivalEase(appearance))*-10*r.scale));
     setVisible(appearance>0);setModeLobbyOpacity(this,static_cast<GLubyte>(std::clamp(appearance,0.,1.)*255));
     auto reveal=[&](CCNode* node,double delay){auto const alpha=appearance>=1?1.:std::clamp((appearance*.80-delay)/.60,0.,1.);if(node)propagateModeOpacity(node,static_cast<GLubyte>(alpha*255));};
-    reveal(m_title,0);reveal(m_creator,.05);reveal(m_difficulty,.10);reveal(m_metadata,.10);reveal(m_star,.10);reveal(m_stars,.10);
+    reveal(m_title,0);reveal(m_creator,.05);reveal(m_rating,.05);reveal(m_difficulty,.10);reveal(m_metadata,.10);reveal(m_star,.10);reveal(m_stars,.10);
     for(auto* item:{m_ldm,m_shake,m_jukebox,m_ready})reveal(item,.20);
     m_countdown->setOpacity(static_cast<GLubyte>(beat.opacity*appearance*255));
 }

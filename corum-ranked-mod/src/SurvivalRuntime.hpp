@@ -5,6 +5,7 @@
 #include "domain/SurvivalHudPresentation.hpp"
 #include "domain/SurvivalFreePlayPolicy.hpp"
 #include "domain/SurvivalFlowPolicy.hpp"
+#include "domain/SurvivalEntryHold.hpp"
 #include "domain/ResultScorePresentation.hpp"
 #include <Geode/Geode.hpp>
 #include <Geode/utils/web.hpp>
@@ -19,7 +20,7 @@ struct SurvivalQueueView {
 };
 struct SurvivalMatchView {
     std::uint64_t revision=0;
-    std::string id,state,phase,roundKey,group,ownId="human",error,startsAt,endsAt,entryOpensAt,mapError,presentationGate,selectionOpensAt,eliminatedAt;
+    std::string id,state,phase,roundKey,group,ownId="human",error,startsAt,endsAt,entryOpensAt,entryRequestedAt,mapError,presentationGate,selectionOpensAt,eliminatedAt;
     int mapGeneration=0,roundNumber=0,targetQualifiers=0,playerCount=0,roundPlayerCount=0;
     SurvivalMapMetadata map;
     matjson::Value certificate=nullptr,result=nullptr,completedRound=nullptr,nextMap=nullptr,participants=nullptr;
@@ -75,6 +76,8 @@ public:
     bool attemptLimitReached() const;
     std::optional<std::int64_t> countdownMs() const;
     std::optional<std::int64_t> entryWaitMs() const;
+    void selectedPanelReady(bool ready);
+    std::optional<std::int64_t> selectedPanelWaitMs() const;
     std::optional<std::int64_t> roundRemainingMs() const;
     std::int64_t remainingMs() const;
     void assetsReady(GJGameLevel* level);
@@ -123,6 +126,8 @@ private:
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_forceClearRequest;
 #endif
     SurvivalFreePlayState m_freePlay;
+    std::string m_selectedPanelContext;
+    mutable SurvivalEntryHold m_entryHold;
     std::optional<geode::WeakRef<cocos2d::CCScene>> m_freePlayOrigin,m_freePlayQuitScene;
     geode::Ref<GJGameLevel> m_freePlayQuitLevel;
     bool m_freePlayReturnQueued=false,m_freePlayNativeQuitFinished=false;

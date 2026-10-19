@@ -60,14 +60,16 @@ inline cocos2d::CCNode* mapDifficultyBadge(int levelId, MapMetadata metadata, fl
             value=mapDifficulty(stars==1,false,0,average);
         }
     }
-    // Native Short/Long faces include a word below the expression. The GD
-    // button frame contains just the expression and leaves global assets intact.
-    auto* face = nativeName?static_cast<CCSprite*>(GJDifficultySprite::create(value.nativeCode,GJDifficultyName::Short)):
-        CCSprite::createWithSpriteFrameName(std::string(value.frame).c_str());
-    if(face && nativeName) {
+    auto* face=GJDifficultySprite::create(value.nativeCode,GJDifficultyName::Short);
+    if(face){
+        if(!nativeName){
+            // Keep GJDifficultySprite's native featured/epic ornaments, while
+            // replacing only this screen's expression texture with its label-free frame.
+            if(auto* frame=CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(std::string(value.frame).c_str()))face->setDisplayFrame(frame);
+        }
         auto const epic=std::clamp(info.epic.value_or(0),0,3);
         auto const state=epic>0?epic+1:info.featureScore.value_or(0)>0?1:0;
-        static_cast<GJDifficultySprite*>(face)->updateFeatureState(static_cast<GJFeatureState>(state));
+        face->updateFeatureState(static_cast<GJFeatureState>(state));
     }
     auto const faceX=extent*1.5f+5;
     if (face && face->getContentSize().width>0 && face->getContentSize().height>0) {
