@@ -76,3 +76,21 @@ labels, compact podium tier/LP layout and Gold ambient, and no in-game halo/butt
 Use existing `[SurvivalReveal]`, `[SurvivalObserver]` and `[RankedEntry]` logs to
 correlate selected-map completion with native entry. Do not reset production data
 or alter Railway/Neon settings to validate this patch.
+
+## CI toolchain correction
+
+After GitHub runners resumed, Validate and native regression tests passed, but
+all eight Debug ON/OFF native builds failed in generated Geode binding sources.
+Android/Windows reported incomplete `SequenceTriggerState`/`EffectManagerState`;
+iOS reported incomplete FMOD types. The workflow used the manifest SDK 5.8.2
+alongside moving bindings `main` and an independently downloaded Codegen release.
+Those three inputs were not a reproducible, compatible toolchain.
+
+Both Ranked build workflows now select `sdk: given`, pin bindings to the tested
+`70986055f526da15318779703f0e904be822f162` revision and pass
+`-DSKIP_BUILDING_CODEGEN=OFF`. Codegen is built from that exact checkout on each
+host instead of downloading a different generator. Release, Debug, iOS OFF and
+Windows/Android OFF all use the same settings. This matches the already tested
+local Android32/64 ON/OFF setup; Windows/iOS still require the actual CI outcome.
+No generated headers, native layouts, compiler errors or package guards are
+patched away. Unpublished beta.87 keeps its unused immutable package paths.

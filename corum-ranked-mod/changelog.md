@@ -1,5 +1,6 @@
 # v0.5.0-beta.87
 
+- Pin the compatible GD bindings revision and compile Codegen from those sources in every Release/Debug platform build; prevent upstream generator/header drift from breaking native CI.
 - Refine the beta.85/86 Survival flow: remove the in-game rank halo and floating board button while keeping rank text and coordinator/result boards.
 - Route every Survival player card to the Corum custom statistics popup, with Solo-style GD statistics, authenticated cached GDKF/Pointercrate records, exact account/lifetime checks and no bot lookups.
 - Restore native Featured/Epic/Legendary/Mythic ornaments and explicit grades on the selected-map panel without reintroducing difficulty-face words; preserve the real GD star sprite/count.

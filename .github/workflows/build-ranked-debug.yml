@@ -1,5 +1,7 @@
 name: Build Corum Ranked Debug
 
+# Keep bindings and Codegen on one tested revision; the moving Codegen release
+# can generate types incompatible with the manifest's Geode SDK.
 on:
   workflow_dispatch:
   push:
@@ -199,10 +201,12 @@ jobs:
       - name: Build Debug Bot package
         uses: geode-sdk/build-geode-mod@main
         with:
+          sdk: given
+          bindings-ref: 70986055f526da15318779703f0e904be822f162
           path: corum-ranked-mod
           target: ${{ matrix.config.target }}
           combine: true
-          configure-args: -DCORUM_RANKED_DEBUG_BOT_MATCH=ON -DCORUM_RANKED_DEBUG_SPECTATE=ON
+          configure-args: -DSKIP_BUILDING_CODEGEN=OFF -DCORUM_RANKED_DEBUG_BOT_MATCH=ON -DCORUM_RANKED_DEBUG_SPECTATE=ON
 
   ios-debug-off:
     name: Validate iOS Debug OFF ${{ needs.metadata.outputs.version }}
@@ -216,10 +220,12 @@ jobs:
         id: build
         uses: geode-sdk/build-geode-mod@main
         with:
+          sdk: given
+          bindings-ref: 70986055f526da15318779703f0e904be822f162
           path: corum-ranked-mod
           target: iOS
           combine: false
-          configure-args: -DCORUM_RANKED_DEBUG_BOT_MATCH=OFF -DCORUM_RANKED_DEBUG_SPECTATE=OFF
+          configure-args: -DSKIP_BUILDING_CODEGEN=OFF -DCORUM_RANKED_DEBUG_BOT_MATCH=OFF -DCORUM_RANKED_DEBUG_SPECTATE=OFF
       - name: Verify packaged iOS detours and Debug exclusion
         env:
           BUILD_OUTPUT: ${{ steps.build.outputs.build-output }}
@@ -254,10 +260,12 @@ jobs:
         id: build
         uses: geode-sdk/build-geode-mod@main
         with:
+          sdk: given
+          bindings-ref: 70986055f526da15318779703f0e904be822f162
           path: corum-ranked-mod
           target: ${{ matrix.config.target }}
           combine: false
-          configure-args: -DCORUM_RANKED_DEBUG_BOT_MATCH=OFF -DCORUM_RANKED_DEBUG_SPECTATE=OFF
+          configure-args: -DSKIP_BUILDING_CODEGEN=OFF -DCORUM_RANKED_DEBUG_BOT_MATCH=OFF -DCORUM_RANKED_DEBUG_SPECTATE=OFF
       - uses: actions/upload-artifact@v7
         with:
           name: Corum-Ranked-${{ needs.metadata.outputs.version }}-${{ matrix.config.name }}-Debug-OFF

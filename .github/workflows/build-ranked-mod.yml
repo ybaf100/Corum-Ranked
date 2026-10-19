@@ -1,5 +1,7 @@
 name: Build Corum Ranked Mod
 
+# Keep bindings and Codegen on one tested revision; the moving Codegen release
+# can generate types incompatible with the manifest's Geode SDK.
 # Build Release on main; publication remains opt-in and supports build-only pushes.
 # Debug and Release publish to distinct immutable R2 paths and filenames.
 on:
@@ -73,10 +75,12 @@ jobs:
       - name: Build isolated Ranked release package
         uses: geode-sdk/build-geode-mod@main
         with:
+          sdk: given
+          bindings-ref: 70986055f526da15318779703f0e904be822f162
           path: corum-ranked-mod
           target: ${{ matrix.config.target }}
           combine: true
-          configure-args: -DCORUM_RANKED_DEBUG_BOT_MATCH=OFF -DCORUM_RANKED_DEBUG_SPECTATE=OFF
+          configure-args: -DSKIP_BUILDING_CODEGEN=OFF -DCORUM_RANKED_DEBUG_BOT_MATCH=OFF -DCORUM_RANKED_DEBUG_SPECTATE=OFF
 
   package:
     name: Package ${{ needs.metadata.outputs.version }} Release
