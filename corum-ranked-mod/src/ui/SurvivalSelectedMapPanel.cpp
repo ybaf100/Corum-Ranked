@@ -33,6 +33,11 @@ CCNode* SurvivalSelectedMapPanel::readyFace(bool enabled,bool retry,bool start){
 }
 void SurvivalSelectedMapPanel::build(CCSize size,bool thumbnail,bool ldm){
     if(m_menu)cancelMenuTouch(m_menu);
+    // Cached values belong to the removed labels/nodes, not just the level.
+    // Rebuilding for LDM/thumbnail changes must render every field again and
+    // must never remove a difficulty node already destroyed by this cleanup.
+    m_difficulty=nullptr;m_levelId=-1;m_metadataRevision=0;m_mapMetadata={};
+    m_creatorText.clear();m_statusText.clear();
     removeAllChildrenWithCleanup(true);m_thumbnail=thumbnail;m_ldmSupported=ldm;m_layout=survivalSelectionLayout(size.width,size.height,thumbnail,ldm);m_built=true;
     auto const& r=m_layout;auto* panel=surface({r.panel.w,r.panel.h},center(r.panel),Blue,Surface,250,true);addChild(panel,0);
     auto caption=[&](SurvivalRect rect,ccColor3B color,FontWeight weight){auto* value=menuLabel("",.25f,center(rect),color,weight);addChild(value,5);return value;};

@@ -23,6 +23,10 @@ ASCII-only Regular font and 96 MiB atlas budget, Debug policies and immutable pa
   while replacing only its difficulty-face frame with the verified expression-only
   GD frame. Explicit grade text distinguishes pending/unrated/rated/featured grades
   and updates with metadata revisions. GD star sprite/count and length remain.
+  Rebuilding for a changed LDM capability or thumbnail mode invalidates the old
+  creator/grade/stars/readiness caches and retires the removed difficulty-node
+  pointer before cleanup. An unchanged metadata revision cannot leave the new
+  labels empty or access the already-destroyed node.
 - Podium rank one now uses the existing `createRankAmbientFx("GOLD", ...)` assets
   and animation. The former drawn circles are gone. Podium tier/LP show actual
   `tierAfter` and the additive `lpAfter` field. Unsettled human LP is pending;

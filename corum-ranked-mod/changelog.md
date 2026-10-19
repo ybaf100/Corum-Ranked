@@ -3,6 +3,7 @@
 - Refine the beta.85/86 Survival flow: remove the in-game rank halo and floating board button while keeping rank text and coordinator/result boards.
 - Route every Survival player card to the Corum custom statistics popup, with Solo-style GD statistics, authenticated cached GDKF/Pointercrate records, exact account/lifetime checks and no bot lookups.
 - Restore native Featured/Epic/Legendary/Mythic ornaments and explicit grades on the selected-map panel without reintroducing difficulty-face words; preserve the real GD star sprite/count.
+- Invalidate selected-panel metadata caches and retire removed difficulty nodes when LDM/thumbnail changes rebuild its controls, preventing blank fields and stale-node access.
 - Submit assets readiness only after the selected panel is fully revealed and map/audio are ready. Show a full five-second authorized entry hold before native entry, independently of the existing three-second native GO.
 - Reuse the existing GOLD rank ambient on podium rank one and show each podium participant's authoritative post-settlement tier and LP. Pending human settlement stays pending; global LP footers stay removed.
 - Preserve round-specific thumbnail candidates, observer/Free Play isolation, surrender/Force Clear, LP/MMR rules, beta.86 font/package limits and Debug ON/OFF policies. Publish new immutable beta.87 packages before promoting the required client version.
