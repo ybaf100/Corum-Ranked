@@ -7,6 +7,7 @@
 #include "RankedTranslations.hpp"
 #include "RankedVisuals.hpp"
 #include "RankedCreditsPopup.hpp"
+#include "RankedPopupLayout.hpp"
 #include <Geode/binding/Slider.hpp>
 #include <Geode/ui/Popup.hpp>
 #include <cmath>
@@ -34,23 +35,22 @@ class RankedSettingsPopup final : public Popup {
     }
 
     bool init() override {
-        if (!Popup::init(360, 354)) return false;
+        auto const layout=rankedPopupLayout({360,306},CCDirector::sharedDirector()->getWinSize());
+        if (!Popup::init(layout.size.width,layout.size.height)) return false;
+        m_noElasticity=true;
         m_bgSprite->setVisible(false);m_closeBtn->setVisible(false);setID("ranked-settings-popup"_spr);
-        auto const viewport=CCDirector::sharedDirector()->getWinSize();
-        m_mainLayer->setScale(std::min({1.f,(viewport.width-24)/360,(viewport.height-24)/354}));
-        auto* panel=surface({360,354},{180,177},Cyan,Surface,255,true);m_mainLayer->addChild(panel,0);
+        auto* content=rankedPopupContent(m_mainLayer,m_buttonMenu,layout);
+        auto* panel=surface({360,306},{180,153},Cyan,Surface,255,true);content->addChild(panel,0);
         auto add=[&](std::string const& text,CCPoint position,CCSize bounds,float scale,ccColor3B color,FontWeight weight=FontWeight::ExtraBold){
             auto* label=menuLabel(text,scale,position,color,weight);fitFullMenuLabel(label,bounds.width,bounds.height,scale);panel->addChild(label,10);return label;
         };
-        add(i18n::text("settings","Settings"),{180,331},{330,24},.5f,Text,FontWeight::Black);
-        panel->addChild(surface({160,110},{94,259},Blue,SurfaceRaised,245,false));
-        panel->addChild(surface({160,110},{266,259},Blue,SurfaceRaised,245,false));
-        add(i18n::text("ranked-volume","Ranked menu BGM"),{94,298},{146,16},.26f,Text);
+        add(i18n::text("settings","Settings"),{180,284},{330,24},.5f,Text,FontWeight::Black);
+        add(i18n::text("ranked-volume","Ranked menu BGM"),{94,264},{146,16},.26f,Text);
         m_volume=Slider::create(this,menu_selector(RankedSettingsPopup::onVolume),.55f);if(!m_volume)return false;
-        m_volume->setID("ranked-volume-slider"_spr);m_volume->setPosition({94,271});m_volume->setValue(RankedVolumeControl::get().volume());panel->addChild(m_volume,20);
-        m_percent=add("",{94,247},{146,18},.30f,Gold);updatePercent();
-        add(i18n::text("ranked-volume-scope","Lobby, matchmaking and results BGM"),{94,222},{144,26},.20f,TextMuted,FontWeight::SemiBold);
-        add(i18n::text("survival-default-options","SURVIVAL DEFAULTS"),{266,298},{146,16},.24f,Cyan);
+        m_volume->setID("ranked-volume-slider"_spr);m_volume->setPosition({94,238});m_volume->setValue(RankedVolumeControl::get().volume());panel->addChild(m_volume,20);
+        m_percent=add("",{94,214},{146,18},.30f,Gold);updatePercent();
+        add(i18n::text("ranked-volume-scope","Lobby, matchmaking and results BGM"),{94,190},{144,26},.20f,TextMuted,FontWeight::SemiBold);
+        add(i18n::text("survival-default-options","SURVIVAL DEFAULTS"),{266,264},{146,16},.24f,Cyan);
         // Use Popup's own menu: it already owns the modal input priority.
         auto* menu=m_buttonMenu;menu->setZOrder(20);
         auto const defaults=SurvivalOptionsPreferences::get().defaults();
@@ -58,23 +58,23 @@ class RankedSettingsPopup final : public Popup {
             auto* item=CCMenuItemSpriteExtra::create(survivalOptionFace({146,32},caption,value),this,menu_selector(RankedSettingsPopup::onDefaults));
             item->setPosition(at);item->setTag(tag);menu->addChild(item);return item;
         };
-        m_defaultLdm=toggle(i18n::text("survival-default-ldm","Default LDM"),defaults.lowDetail,{266,272},0);m_defaultLdm->setID("survival-default-ldm-switch"_spr);
-        m_defaultShake=toggle(i18n::text("survival-default-shake","Default Disable Shake"),defaults.disableShake,{266,232},1);m_defaultShake->setID("survival-default-shake-switch"_spr);
+        m_defaultLdm=toggle(i18n::text("survival-default-ldm","Default LDM"),defaults.lowDetail,{266,238},0);m_defaultLdm->setID("survival-default-ldm-switch"_spr);
+        m_defaultShake=toggle(i18n::text("survival-default-shake","Default Disable Shake"),defaults.disableShake,{266,202},1);m_defaultShake->setID("survival-default-shake-switch"_spr);
         auto& preferences=SurvivalOptionsPreferences::get();
-        m_thumbnails=toggle(i18n::text("survival-image-thumbnails","Level Thumbnails"),preferences.thumbnails(),{94,176},2);
+        m_thumbnails=toggle(i18n::text("survival-image-thumbnails","Level Thumbnails"),preferences.thumbnails(),{94,151},2);
         m_thumbnails->setID("survival-thumbnails-switch"_spr);
-        m_selectionMotion=toggle(i18n::text("survival-selection-motion","Level selection motion"),preferences.selectionMotion(),{266,176},3);
+        m_selectionMotion=toggle(i18n::text("survival-selection-motion","Level selection motion"),preferences.selectionMotion(),{266,151},3);
         m_selectionMotion->setID("survival-selection-motion-switch"_spr);updateMotionSetting();
         m_refreshRecords=CCMenuItemSpriteExtra::create(refreshButtonFace(false),this,menu_selector(RankedSettingsPopup::onRefreshRecords));
-        m_refreshRecords->setID("ranked-forum-refresh-button"_spr);m_refreshRecords->setPosition({180,100});menu->addChild(m_refreshRecords);
-        m_forumStatus=add("",{180,73},{320,14},.20f,TextMuted,FontWeight::SemiBold);
-        m_forumCooldown=add("",{180,54},{320,14},.23f,TextMuted);m_forumCooldown->setID("ranked-forum-refresh-cooldown"_spr);
+        m_refreshRecords->setID("ranked-forum-refresh-button"_spr);m_refreshRecords->setPosition({180,96});menu->addChild(m_refreshRecords);
+        m_forumStatus=add("",{180,66},{320,22},.20f,TextMuted,FontWeight::SemiBold);
+        m_forumCooldown=add("",{180,46},{320,12},.23f,TextMuted);m_forumCooldown->setID("ranked-forum-refresh-cooldown"_spr);
         RankedRuntime::get().fetchForumRecords();schedule(schedule_selector(RankedSettingsPopup::updateForumStatus),.15f);updateForumStatus(0);
         auto* face=surface({120,32},{},Blue,SurfaceRaised,250,true);
         auto* done=menuLabel(i18n::text("close","Close"),.32f,{60,16},Text,FontWeight::ExtraBold);fitFullMenuLabel(done,100,22,.32f);face->addChild(done,5);
-        auto* close=CCMenuItemSpriteExtra::create(face,this,menu_selector(RankedSettingsPopup::onClose));close->setPosition({266,25});menu->addChild(close);
+        auto* close=CCMenuItemSpriteExtra::create(face,this,menu_selector(RankedSettingsPopup::onClose));close->setPosition({266,22});menu->addChild(close);
         auto* creditsFace=surface({120,32},{},Cyan,SurfaceRaised,250,true);auto* creditsText=menuLabel("CREDITS",.30f,{60,16},Text,FontWeight::ExtraBold);creditsFace->addChild(creditsText,5);
-        auto* credits=CCMenuItemSpriteExtra::create(creditsFace,this,menu_selector(RankedSettingsPopup::onCredits));credits->setID("ranked-credits-button"_spr);credits->setPosition({94,25});menu->addChild(credits);
+        auto* credits=CCMenuItemSpriteExtra::create(creditsFace,this,menu_selector(RankedSettingsPopup::onCredits));credits->setID("ranked-credits-button"_spr);credits->setPosition({94,22});menu->addChild(credits);
         // Includes the one-time migration if this is the first Settings visit.
         m_dirty=true;return true;
     }
@@ -140,7 +140,7 @@ class RankedSettingsPopup final : public Popup {
             }
             if (failed) text += "\n" + i18n::text("forum-cache-kept", "API unavailable; cached records kept.");
         }
-        m_forumStatus->setString(text.c_str()); fitFullMenuLabel(m_forumStatus, 320, 14, 0.20f);
+        m_forumStatus->setString(text.c_str()); fitFullMenuLabel(m_forumStatus, 320, 22, 0.20f);
     }
 public:
     static RankedSettingsPopup* create() {

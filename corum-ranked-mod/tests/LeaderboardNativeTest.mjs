@@ -74,7 +74,7 @@ test('whole leaderboard popup validates pages, aligns statuses and icons, lazily
         CCPoint convertToWorldSpace(CCPoint p){p=p+position;return parent?parent->convertToWorldSpace(p):p;}
         CCPoint convertToNodeSpace(CCPoint p){auto o=convertToWorldSpace({});return {p.x-o.x,p.y-o.y};}
         CCNode* getParent()`)
-        .replace('struct CCMenu : CCNode {',`struct CCTouch{CCPoint p;CCPoint getLocation(){return p;}};struct CCEvent{};
+        .replace('struct CCMenu : CCNode {',`struct CCRect{float x,y,width,height;};struct CCTouch{CCPoint p;int getID(){return 1;}CCPoint getLocation(){return p;}};struct CCEvent{};
         struct CCMenu : CCNode{virtual bool ccTouchBegan(CCTouch*,CCEvent*){return true;}virtual void ccTouchMoved(CCTouch*,CCEvent*){}virtual void ccTouchEnded(CCTouch*,CCEvent*){}virtual void ccTouchCancelled(CCTouch*,CCEvent*){}`)
         .replace('CCSize getWinSize() const', 'CCNode* getRunningScene(){static CCNode s;return &s;} CCNode* getNextScene(){return nullptr;} CCSize getWinSize() const')
         .replace('int segments=0;',`int segments=0;struct Line{CCPoint from,to;float radius;};std::vector<Line> lines;`)
@@ -110,7 +110,9 @@ enum class CommonFilter{Name};
 struct TextInput:CCNode{std::string value;static TextInput*create(float width,char const*){auto*n=new TextInput;n->size={width,25};return n;}void setCommonFilter(CommonFilter){}void setMaxCharCount(int){}void setEnabled(bool){}std::string getString()const{return value;}void setString(std::string text){value=std::move(text);}};
 struct Popup:CCNode{using CCNode::init;CCNode* m_bgSprite=new CCNode;CCMenuItemSpriteExtra* m_closeBtn=new CCMenuItemSpriteExtra;CCNode* m_mainLayer=new CCNode;
  bool init(float,float){addChild(m_mainLayer);return true;}virtual void onClose(CCObject*){removeFromParentAndCleanup(true);}void show(){static CCNode scene;scene.addChild(this);}};
-struct ScrollLayer:CCNode{CCNode* m_contentLayer=new CCNode;static ScrollLayer* create(CCSize s){auto* n=new ScrollLayer;n->size=s;n->addChild(n->m_contentLayer);return n;}void scrollToTop(){m_contentLayer->position={0,size.height-m_contentLayer->size.height};}};
+struct ScrollLayer:CCNode{CCNode* m_contentLayer=new CCNode;
+ ScrollLayer(CCRect r,bool,bool){size={r.width,r.height};addChild(m_contentLayer);}virtual bool ccTouchBegan(CCTouch*,CCEvent*){return true;}virtual void ccTouchMoved(CCTouch*,CCEvent*){}virtual void ccTouchEnded(CCTouch*,CCEvent*){}virtual void ccTouchCancelled(CCTouch*,CCEvent*){}
+ static ScrollLayer* create(CCSize s){return new ScrollLayer({0,0,s.width,s.height},true,true);}void scrollToTop(){m_contentLayer->position={0,size.height-m_contentLayer->size.height};}};
 namespace utils::web{
 struct WebResponse{matjson::Value data;bool success=true;bool ok()const{return success;}matjson::Result<matjson::Value>json()const{return {data};}};
 struct Operation{std::string url;};struct WebRequest{void timeout(std::chrono::seconds){}Operation get(std::string url){return {url};}};
@@ -157,8 +159,17 @@ int main(){using namespace corum::ranked;using namespace ui;namespace web=geode:
  p->onRefresh(nullptr);assert(web::pending.size()==1);drainMainQueue();
  assert(p->m_rows.size()==20&&badges==20&&!p->m_busy&&p->m_next->isEnabled()&&p->m_refresh->isEnabled());
  CCObject foreign;p->onPlayerInfo(&foreign);assert(SurvivalPlayerInfoPopup::opened==0);
- p->onPlayerInfo(p->m_rows[1].action);assert(SurvivalPlayerInfoPopup::opened==1&&SurvivalPlayerInfoPopup::account==2&&!SurvivalPlayerInfoPopup::survival);
- p->m_busy=true;p->onPlayerInfo(p->m_rows[2].action);assert(SurvivalPlayerInfoPopup::opened==1);p->m_busy=false;
+ p->onPlayerInfo(p->m_rows[1].node);assert(SurvivalPlayerInfoPopup::opened==1&&SurvivalPlayerInfoPopup::account==2&&!SurvivalPlayerInfoPopup::survival);
+ p->m_busy=true;p->onPlayerInfo(p->m_rows[2].node);assert(SurvivalPlayerInfoPopup::opened==1);p->m_busy=false;
+ // Execute the production native scroll recognizer and deferred profile route,
+ // including a response/page generation changing before finger-up is dispatched.
+ auto* gestures=static_cast<LeaderboardScrollLayer*>(p->m_scroll);
+ CCTouch finger{p->m_rows[1].node->convertToWorldSpace({100,24})};
+ assert(gestures->ccTouchBegan(&finger,nullptr));gestures->ccTouchEnded(&finger,nullptr);
+ assert(SurvivalPlayerInfoPopup::opened==1);drainMainQueue();assert(SurvivalPlayerInfoPopup::opened==2&&SurvivalPlayerInfoPopup::account==2);
+ gestures->ccTouchEnded(&finger,nullptr);drainMainQueue();assert(SurvivalPlayerInfoPopup::opened==2);
+ assert(gestures->ccTouchBegan(&finger,nullptr));gestures->ccTouchEnded(&finger,nullptr);++p->m_generation;drainMainQueue();assert(SurvivalPlayerInfoPopup::opened==2);
+ assert(gestures->ccTouchBegan(&finger,nullptr));p->m_busy=true;p->updateButtons();gestures->ccTouchEnded(&finger,nullptr);p->m_busy=false;drainMainQueue();assert(SurvivalPlayerInfoPopup::opened==2);
  assert(iconCreates>0&&iconCreates<=5&&p->m_rows.front().icon->local&&p->m_rows[3].entry.bot);
  auto initialPosition=p->m_scroll->m_contentLayer->position;p->m_scroll->m_contentLayer->position.y+=80;p->update(0);
  assert(p->m_rows[3].icon&&p->m_rows[3].icon->account==0);p->m_scroll->m_contentLayer->position=initialPosition;p->update(0);

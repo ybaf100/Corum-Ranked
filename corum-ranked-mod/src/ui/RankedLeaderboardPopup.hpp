@@ -26,7 +26,6 @@ private:
         PlayerIcon* icon = nullptr;
         cocos2d::CCDrawNode* shine = nullptr;
         LeaderboardEntry entry;
-        CCMenuItemSpriteExtra* action=nullptr;
     };
     bool init() override;
     void fetch(int offset);

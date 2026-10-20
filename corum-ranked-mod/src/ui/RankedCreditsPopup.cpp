@@ -2,6 +2,7 @@
 #include "../RankedRuntime.hpp"
 #include "RankedVisuals.hpp"
 #include "RankedTranslations.hpp"
+#include "RankedPopupLayout.hpp"
 #include <Geode/ui/Popup.hpp>
 #include <Geode/ui/ScrollLayer.hpp>
 #include <Geode/binding/MusicDownloadManager.hpp>
@@ -14,22 +15,40 @@ class RankedCreditsPopup final:public Popup {
     struct Credit {int id=0,requests=0;std::string text;CCLabelBMFont* label=nullptr;std::chrono::steady_clock::time_point next{};};
     std::vector<Credit> m_songs;bool m_closed=false,m_exited=false;
     bool init() override{
-        if(!Popup::init(350,294))return false;
+        auto const layout=rankedPopupLayout({350,294},CCDirector::sharedDirector()->getWinSize());
+        if(!Popup::init(layout.size.width,layout.size.height))return false;
+        m_noElasticity=true;
         m_bgSprite->setVisible(false);m_closeBtn->setVisible(false);setID("ranked-credits-popup"_spr);
-        auto const win=CCDirector::sharedDirector()->getWinSize();m_mainLayer->setScale(std::min({1.f,(win.width-24)/350,(win.height-24)/294}));
-        m_mainLayer->addChild(surface({350,294},{175,147},Cyan,Surface,255,true));
-        auto add=[&](std::string text,CCPoint at,ccColor3B tint,float scale){auto* label=menuLabel(text,scale,at,tint,FontWeight::ExtraBold);fitFullMenuLabel(label,316,26,scale);m_mainLayer->addChild(label,5);};
-        add("CREDITS",{175,269},Cyan,.52f);
-        add(i18n::text("credits-planner","Planner")+" · hwanhee1",{175,236},Gold,.32f);
-        add(i18n::text("credits-music","Music"),{175,207},Text,.30f);
+        auto* content=rankedPopupContent(m_mainLayer,m_buttonMenu,layout);
+        content->addChild(surface({350,294},{175,147},Cyan,Surface,255,true));
+        auto add=[&](std::string text,CCPoint at,ccColor3B tint,float scale){auto* label=menuLabel(text,scale,at,tint,FontWeight::ExtraBold);fitFullMenuLabel(label,316,26,scale);content->addChild(label,5);};
+        add("CREDITS",{175,267},Cyan,.49f);
+        add(i18n::text("credits-intro","Planning and music behind Corum Ranked"),{175,247},TextMuted,.21f);
+        content->addChild(surface({318,34},{175,216},Blue,SurfaceRaised,250,false));
+        add(i18n::text("credits-planner","Planner"),{71,216},TextMuted,.26f);
+        add("hwanhee1",{231,216},Gold,.34f);
+        add(i18n::text("credits-music","Music"),{175,183},Text,.30f);
         std::map<int,std::set<std::string>> songs;
-        for(auto const& resource:RankedRuntime::get().view().client.audio.resources)
-            if(resource.songId>0 && songs.size()<16)songs[resource.songId].insert(resource.label.empty()?resource.key:resource.label);
-        auto* scroll=ScrollLayer::create({326,151});scroll->setPosition({12,44});m_mainLayer->addChild(scroll,10);
-        auto const h=std::max(151.f,static_cast<float>(songs.size())*61+8);scroll->m_contentLayer->setContentSize({326,h});
-        int n=0;for(auto const& [id,uses]:songs){
-            std::string scope;for(auto const& use:uses){if(!scope.empty())scope+=" / ";scope+=use;}
+        std::vector<int> order;
+        for(auto const& resource:RankedRuntime::get().view().client.audio.resources){
+            if(resource.songId<=0)continue;
+            if(!songs.contains(resource.songId)){if(songs.size()>=16)continue;order.push_back(resource.songId);}
+            auto use=resource.label.empty()?resource.key:resource.label;
+            if(resource.key=="menu")use=i18n::text("admin-audio-menu","Lobby");
+            else if(resource.key=="menu_promotion")use=i18n::text("admin-audio-promotion","Promotion lobby");
+            else if(resource.key=="menu_demotion_warning")use=i18n::text("admin-audio-warning","Demotion warning lobby");
+            else if(resource.key=="match")use=i18n::text("admin-audio-match","Rounds 1 & 2");
+            else if(resource.key=="round3_deathmatch_wait")use=i18n::text("admin-audio-deathmatch","Round 3 / Death Match wait");
+            else if(resource.key=="result_win")use=i18n::text("credits-result","Match results");
+            songs[resource.songId].insert(std::move(use));
+        }
+        auto* scroll=ScrollLayer::create({326,129});scroll->setPosition({12,44});content->addChild(scroll,10);
+        auto const h=std::max(129.f,static_cast<float>(songs.size())*61+8);scroll->m_contentLayer->setContentSize({326,h});
+        int n=0;for(auto const id:order){
+            auto const& uses=songs.at(id);
+            std::string scope;for(auto const& use:uses){if(!scope.empty())scope+=" · ";scope+=use;}
             auto const y=h-18-n++*61;
+            scroll->m_contentLayer->addChild(surface({314,55},{163,y-10},Blue,SurfaceRaised,245,false),1);
             auto* usage=menuLabel(scope,.20f,{163,y},TextMuted,FontWeight::SemiBold);fitFullMenuLabel(usage,306,22,.20f);scroll->m_contentLayer->addChild(usage,5);
             auto* title=menuLabel(i18n::text("credits-song-loading","Loading song credits..."),.29f,{163,y-25},Text,FontWeight::ExtraBold);fitFullMenuLabel(title,306,28,.29f);scroll->m_contentLayer->addChild(title,5);m_songs.push_back({id,0,"",title,{}});
         }

@@ -7,7 +7,9 @@
 #include "RankedVisuals.hpp"
 #include "StandingVisuals.hpp"
 #include "SurvivalPlayerInfoPopup.hpp"
-#include "RankedInput.hpp"
+#include <cmath>
+#include <functional>
+#include <utility>
 #include <Geode/binding/GJAccountManager.hpp>
 #include <charconv>
 
@@ -17,15 +19,44 @@ namespace {
 constexpr int kPageSize = 20;
 constexpr float kRowHeight = 48, kRowGap = 7;
 constexpr float kBorderInset = 0.375f;
-// Keep the native ScrollLayer/menu priorities. A scroll gesture cannot turn
-// into a row click even if the finger ends inside that wide row.
-class LeaderboardRowMenu final:public CCMenu {
-    CCPoint m_start;bool m_dragged=false;
+// The native ScrollLayer owns the complete gesture. A row has no swallowing
+// CCMenu: cancelling such a menu after a drag cannot restore the missing began.
+class LeaderboardScrollLayer final:public ScrollLayer {
+    std::function<void(CCPoint,CCPoint)> m_tap;
+    CCPoint m_start{};
+    float m_contentY=0;
+    int m_touch=-1;
+    bool m_candidate=false;
+    explicit LeaderboardScrollLayer(CCSize size):ScrollLayer({0,0,size.width,size.height},true,true){}
 public:
-    static LeaderboardRowMenu* create(){auto* m=new LeaderboardRowMenu;if(m->init()){m->autorelease();return m;}delete m;return nullptr;}
-    bool ccTouchBegan(CCTouch* touch,CCEvent* event)override{m_dragged=false;m_start=touch->getLocation();return CCMenu::ccTouchBegan(touch,event);}
-    void ccTouchMoved(CCTouch* touch,CCEvent* event)override{auto const at=touch->getLocation();m_dragged|=std::hypot(at.x-m_start.x,at.y-m_start.y)>8;CCMenu::ccTouchMoved(touch,event);}
-    void ccTouchEnded(CCTouch* touch,CCEvent* event)override{if(m_dragged)CCMenu::ccTouchCancelled(touch,event);else CCMenu::ccTouchEnded(touch,event);}
+    static LeaderboardScrollLayer* create(CCSize size){auto* layer=new LeaderboardScrollLayer(size);layer->autorelease();return layer;}
+    void setTapHandler(std::function<void(CCPoint,CCPoint)> tap){cancelTap();m_tap=std::move(tap);}
+    void cancelTap(){m_candidate=false;}
+    bool ccTouchBegan(CCTouch* touch,CCEvent* event)override{
+        auto const local=convertToNodeSpace(touch->getLocation());auto const size=getContentSize();
+        if(m_touch!=-1 || local.x<0 || local.y<0 || local.x>size.width || local.y>size.height ||
+            !ScrollLayer::ccTouchBegan(touch,event))return false;
+        m_touch=touch->getID();m_start=touch->getLocation();m_contentY=m_contentLayer->getPositionY();m_candidate=true;return true;
+    }
+    void ccTouchMoved(CCTouch* touch,CCEvent* event)override{
+        if(touch->getID()!=m_touch){cancelTap();return;}
+        auto const at=touch->getLocation();if(std::hypot(at.x-m_start.x,at.y-m_start.y)>8)cancelTap();
+        ScrollLayer::ccTouchMoved(touch,event);
+    }
+    void ccTouchEnded(CCTouch* touch,CCEvent* event)override{
+        if(m_touch==-1)return;
+        if(touch->getID()!=m_touch){cancelTap();return;}
+        auto const at=touch->getLocation(),start=m_start;
+        auto const candidate=std::exchange(m_candidate,false) && std::hypot(at.x-start.x,at.y-start.y)<=8;
+        m_touch=-1;ScrollLayer::ccTouchEnded(touch,event);
+        auto const local=convertToNodeSpace(at);auto const size=getContentSize();
+        if(candidate && std::abs(m_contentLayer->getPositionY()-m_contentY)<=2 &&
+            local.x>=0 && local.y>=0 && local.x<=size.width && local.y<=size.height && m_tap)m_tap(start,at);
+    }
+    void ccTouchCancelled(CCTouch* touch,CCEvent* event)override{
+        if(touch->getID()!=m_touch)return;
+        m_touch=-1;cancelTap();ScrollLayer::ccTouchCancelled(touch,event);
+    }
 };
 
 CCNode* modeTabFace(RankedMode mode, bool selected) {
@@ -90,8 +121,20 @@ bool RankedLeaderboardPopup::init() {
     leftCaption(panel,i18n::text("leaderboard-status","STATUS"),{16 + columns.status,size.height - 117},columns.statusWidth,0.23f,TextMuted);
     leftCaption(panel,i18n::text("leaderboard-tier","TIER"),{16 + columns.tierName,size.height - 117},columns.tierWidth,0.23f,TextMuted);
     leftCaption(panel,"LP / O X",{16 + columns.value,size.height - 117},columns.valueWidth,0.23f,TextMuted);
-    m_scroll = ScrollLayer::create(viewport); m_scroll->setPosition({12,35});
+    m_scroll = LeaderboardScrollLayer::create(viewport); m_scroll->setPosition({12,35});
     m_scroll->setID("ranked-leaderboard-scroll"_spr); panel->addChild(m_scroll,5);
+    static_cast<LeaderboardScrollLayer*>(m_scroll)->setTapHandler([weak=WeakRef(this)](CCPoint start,CCPoint end){
+        auto self=weak.lock();if(!self || self->m_busy || self->m_closed)return;
+        auto const inside=[](CCNode* node,CCPoint at){auto const p=node->convertToNodeSpace(at);auto const s=node->getContentSize();return p.x>=0 && p.y>=0 && p.x<=s.width && p.y<=s.height;};
+        for(auto const& row:self->m_rows)if(inside(row.node,start) && inside(row.node,end)){
+            auto const generation=self->m_generation;
+            queueInMainThread([weak,target=WeakRef(row.node),generation]{
+                auto popup=weak.lock();auto node=target.lock();
+                if(popup && node && !popup->m_closed && !popup->m_busy && generation==popup->m_generation)
+                    popup->onPlayerInfo(node.data());
+            });break;
+        }
+    });
     auto* menu = CCMenu::create(); menu->setPosition(CCPointZero); panel->addChild(menu,20);
     auto button = [&](std::string const& text, float x, SEL_MenuHandler callback) {
         auto* face = surface({68,25},{},Blue,SurfaceRaised,250,true);
@@ -124,10 +167,7 @@ bool RankedLeaderboardPopup::init() {
 }
 
 void RankedLeaderboardPopup::updateButtons() {
-    for(auto const& row:m_rows)if(row.action){
-        if(m_closed || m_busy)cancelMenuTouch(typeinfo_cast<CCMenu*>(row.action->getParent()));
-        row.action->setEnabled(!m_closed && !m_busy);
-    }
+    if(m_scroll && (m_closed || m_busy))static_cast<LeaderboardScrollLayer*>(m_scroll)->cancelTap();
     m_survivalTab->setEnabled(!m_closed && m_mode != RankedMode::Survival);
     m_soloTab->setEnabled(!m_closed && m_mode != RankedMode::SoloRanked);
     for (auto* tab : {m_survivalTab,m_soloTab}) { tab->setCascadeOpacityEnabled(true); tab->setOpacity(tab->isEnabled() ? 180 : 255); }
@@ -255,9 +295,6 @@ void RankedLeaderboardPopup::showRows(matjson::Value const& data) {
             }
         } else leftCaption(row,leaderboardValue(entry),{columns.value,24},columns.valueWidth,0.32f);
         Row visual; visual.node = row; visual.entry = std::move(entry);
-        auto* menu=LeaderboardRowMenu::create();menu->setPosition(CCPointZero);row->addChild(menu,30);
-        auto* hit=CCNode::create();hit->setContentSize({width,kRowHeight});
-        visual.action=CCMenuItemSpriteExtra::create(hit,this,menu_selector(RankedLeaderboardPopup::onPlayerInfo));visual.action->setPosition({width/2,kRowHeight/2});menu->addChild(visual.action);
         if (goldRankTier(visual.entry.tier) || visual.entry.promotion) {
             // A soft continuous frame plus two short highlights. Drawing the
             // perimeter directly avoids bright round blobs and cross shapes.
@@ -321,7 +358,7 @@ void RankedLeaderboardPopup::onPlayerInfo(CCObject* sender){
     if(m_closed || m_busy || !getParent())return;
     auto* scene=CCDirector::sharedDirector()->getRunningScene();
     if(!scene || CCDirector::sharedDirector()->getNextScene() || scene->getChildByIDRecursive("survival-player-info-popup"_spr))return;
-    auto row=std::find_if(m_rows.begin(),m_rows.end(),[&](auto const& r){return r.action==sender;});if(row==m_rows.end())return;
+    auto row=std::find_if(m_rows.begin(),m_rows.end(),[&](auto const& r){return r.node==sender;});if(row==m_rows.end())return;
     SurvivalStanding player;player.id=std::to_string(row->entry.accountId);player.name=row->entry.player;player.tier=row->entry.tier;
     player.rank=row->entry.rank.value_or(0);player.accountId=row->entry.accountId;player.bot=row->entry.bot;
     if(auto* popup=SurvivalPlayerInfoPopup::createForLeaderboard(player,this,m_mode==RankedMode::Survival))popup->show();

@@ -79,18 +79,13 @@ int main(){using namespace corum::ranked;MapMetadata meta;meta.kind="DEMON";matj
 `,true);
 });
 
-test('leaderboard production touch menu treats taps as clicks and never activates rows after a scroll drag',()=>{
- const src=read('src/ui/RankedLeaderboardPopup.cpp');const start=src.indexOf('class LeaderboardRowMenu '),end=src.indexOf('\n};',start)+3;
- run(`
-#include <cassert>
-#include <cmath>
-struct CCPoint{float x=0,y=0;};struct CCTouch{CCPoint p;CCPoint getLocation(){return p;}};struct CCEvent{};
-struct CCMenu{int clicks=0,cancels=0;virtual~CCMenu()=default;bool init(){return true;}void autorelease(){}virtual bool ccTouchBegan(CCTouch*,CCEvent*){return true;}virtual void ccTouchMoved(CCTouch*,CCEvent*){}virtual void ccTouchEnded(CCTouch*,CCEvent*){++clicks;}virtual void ccTouchCancelled(CCTouch*,CCEvent*){++cancels;}};
-${src.slice(start,end)}
-int main(){LeaderboardRowMenu m;CCTouch t{{10,10}};assert(m.ccTouchBegan(&t,nullptr));t.p={11,12};m.ccTouchMoved(&t,nullptr);m.ccTouchEnded(&t,nullptr);assert(m.clicks==1&&m.cancels==0);
- t.p={10,10};m.ccTouchBegan(&t,nullptr);t.p={10,25};m.ccTouchMoved(&t,nullptr);t.p={10,10};m.ccTouchMoved(&t,nullptr);m.ccTouchEnded(&t,nullptr);assert(m.clicks==1&&m.cancels==1);
- m.ccTouchBegan(&t,nullptr);m.ccTouchEnded(&t,nullptr);assert(m.clicks==2&&m.cancels==1);
-}`);
+test('leaderboard cards share the native scroll owner without a swallowing row menu',()=>{
+ const src=read('src/ui/RankedLeaderboardPopup.cpp');
+ assert.match(src,/class LeaderboardScrollLayer final:public ScrollLayer/);
+ assert.match(src,/ScrollLayer::ccTouchBegan/);assert.match(src,/ScrollLayer::ccTouchMoved/);
+ assert.doesNotMatch(src,/LeaderboardRowMenu/);
+ const rows=method(src,'void RankedLeaderboardPopup::showRows(');
+ assert.doesNotMatch(rows,/CCMenu::create|CCMenuItemSpriteExtra::create/);
 });
 
 test('result settlement animation starts automatically once, waits for real settlement and survives reopened result screens',()=>{
@@ -124,7 +119,7 @@ int main(){Layer l;auto&r=SurvivalRuntime::get();l.beginResultMotion();assert(l.
 test('Credits is inside Settings and reads real artist - title metadata without inventing music credits or taking a GD delegate',()=>{
  const src=read('src/ui/RankedCreditsPopup.cpp'),settings=read('src/ui/RankedSettingsPopup.hpp');
  assert.match(settings,/menu_selector\(RankedSettingsPopup::onCredits\)/);assert.match(settings,/ranked-credits-button/);
- assert.match(src,/text\("credits-planner","Planner"\)\+" · hwanhee1"/);assert.match(read('src/ui/RankedTranslations.hpp'),/Translation\{"credits-planner", "기획자"\}/);
+ assert.match(src,/text\("credits-planner","Planner"\)/);assert.match(src,/add\("hwanhee1"/);assert.match(read('src/ui/RankedTranslations.hpp'),/Translation\{"credits-planner", "기획"\}/);
  assert.doesNotMatch(src,/m_songInfoDelegate\s*=|m_songInfoObject\s*=|Developer|개발자/);
  run(`
 #include <cassert>

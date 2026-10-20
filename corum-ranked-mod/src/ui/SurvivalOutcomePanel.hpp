@@ -77,7 +77,7 @@ inline void showSurvivalStandings(){
 class SurvivalOutcomePanel final:public cocos2d::CCLayerColor {
     std::function<void(int)> m_action;CCMenu* m_menu=nullptr;CCMenuItemSpriteExtra* m_watch=nullptr;
     std::string m_key,m_identity;std::vector<SurvivalStanding> m_profiles;
-    struct Podium {CCNode* pedestal;CCMenuItemSpriteExtra* avatar;cocos2d::CCLayerColor* stamp;CCNode* place;CCNode* glow;float x,base,height;int rank;};
+    struct Podium {CCNode* pedestal;CCMenuItemSpriteExtra* avatar;CCNode* stamp;CCNode* place;CCNode* glow;float x,base,height;int rank;};
     std::vector<Podium> m_stages;double m_elapsed=0;
     CCLabelBMFont *m_watchText=nullptr,*m_detail=nullptr;
     CCNode* m_halo=nullptr;
@@ -112,7 +112,9 @@ public:
                 for(int n=0;n<3;++n){int rank=ranks[n];auto it=std::find_if(m_profiles.begin(),m_profiles.end(),[&](auto const& p){return p.rank==rank;});if(it==m_profiles.end())continue;
                     auto const h=rank==1?95.f:rank==2?70.f:51.f;auto const x=size.width/2+(n-1)*(width+8);auto const tint=rank==1?Gold:rank==2?ccc3(201,215,235):ccc3(208,137,70);
                     auto* pedestal=surface({width,h},{x,base},tint,SurfaceRaised,255,true);pedestal->setAnchorPoint({.5f,0});addChild(pedestal,5);
-                    auto* stamp=CCLayerColor::create({0,0,0,0},width,h);stamp->setAnchorPoint({.5f,.5f});stamp->setPosition({x,base+h/2});stamp->setCascadeOpacityEnabled(true);addChild(stamp,8);
+                    // A plain node has no fill and respects its anchor. A transparent CCLayerColor
+                    // ignores that anchor by default; fading its own opacity also paints a black slab.
+                    auto* stamp=CCNode::create();stamp->setContentSize({width,h});stamp->setAnchorPoint({.5f,.5f});stamp->setPosition({x,base+h/2});addChild(stamp,8);
                     std::string after;std::optional<std::int64_t> lpAfter,delta;
                     for(auto const& p:view.result["standings"].asArray().unwrapOr(std::vector<matjson::Value>{}))if(p["participantId"].asString().unwrapOr("")==it->id){
                         after=p["tierAfter"].asString().unwrapOr("");if(p["lpAfter"].isNumber())lpAfter=p["lpAfter"].asInt().unwrapOr(0);
@@ -154,7 +156,7 @@ public:
             p.pedestal->setVisible(frame.rise>0);p.pedestal->setScaleY(static_cast<float>(frame.rise));
             p.avatar->setVisible(frame.avatar);p.avatar->setEnabled(frame.interactive);
             p.avatar->setPosition({p.x,p.base+p.height+36+static_cast<float>(frame.drop*58)});
-            p.stamp->setVisible(frame.stamp>0);p.stamp->setScale(static_cast<float>(frame.stampScale));setModeLobbyOpacity(p.stamp,static_cast<GLubyte>(frame.stampOpacity*255));
+            p.stamp->setVisible(frame.stamp>0);p.stamp->setScale(static_cast<float>(frame.stampScale));propagateModeOpacity(p.stamp,static_cast<GLubyte>(frame.stampOpacity*255));
             p.place->setVisible(frame.stamp>0);if(p.glow)p.glow->setVisible(frame.interactive);
         }
         if(m_watch){auto const lock=SurvivalRuntime::get().watchLockSeconds();m_watch->setEnabled(lock==0);m_watchText->setString((i18n::text("survival-watch","WATCH")+(lock>0?fmt::format(" ({})",lock):std::string{})).c_str());m_watchText->setColor(lock>0?TextMuted:Cyan);fitFullMenuLabel(m_watchText,m_watch->getContentSize().width-12,22,.29f);}

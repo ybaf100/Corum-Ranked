@@ -1,3 +1,11 @@
+# v0.5.0-beta.89
+
+- Fix iPad podium tier/LP stamps: use a non-drawing, anchor-respecting node and preserve child alpha while fading. Keep the existing 3rd → 2nd → 1st rise/drop/stamp sequence, GOLD ambient and authoritative LP/delta.
+- Give leaderboard taps and drags one native ScrollLayer owner. Scrolling can begin on any card; only an unmoved tap opens custom player statistics, after page/owner/lifetime validation.
+- Fit Settings and Credits inside the native popup appearance layer, keeping visuals and input aligned. Compact the Settings layout and retain safe screen margins on iPad and phones.
+- Refine Credits with separate planning and music sections, localized usage labels, grouped tracks in configured order and actual artist - title metadata. Preserve all saved preferences and audio behavior.
+- Add reproductions for Cocos anchor/alpha behavior, swallowing-menu gesture loss and native popup scale reset. Preserve beta.85–88 gameplay, automatic entry, observer/replay, server scoring, packaging and immutable rollout guards.
+
 # v0.5.0-beta.88
 
 - Retry the scene-owned Survival native return after Pause declines Quit, and pump it from the process heartbeat. Accepted surrender no longer depends on another PlayLayer update or manual exit.
