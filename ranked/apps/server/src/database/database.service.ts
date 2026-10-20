@@ -45,6 +45,7 @@ const REQUIRED_MIGRATIONS = [
   "0024_survival_m5_online.sql",
   "0025_solo_tier_divisions.sql",
   "0026_survival_catalog_bot_count.sql",
+  "0027_achievements_v2.sql",
 ] as const;
 
 export interface RankedSchemaStatus {
@@ -66,6 +67,8 @@ type SchemaProbeRow = QueryResultRow & {
   ranked_achievement_metrics: boolean;
   ranked_achievement_unlocks: boolean;
   ranked_ap_ledger: boolean;
+  ranked_achievement_versions:boolean;
+  ranked_survival_achievement_facts:boolean;
   sur_profiles: boolean;
   sur_matches: boolean;
   sur_match_players: boolean;
@@ -208,6 +211,8 @@ export class DatabaseService implements DatabasePort, OnModuleInit, OnApplicatio
           to_regclass('public.ranked_achievement_metrics') IS NOT NULL AS ranked_achievement_metrics,
           to_regclass('public.ranked_achievement_unlocks') IS NOT NULL AS ranked_achievement_unlocks,
           to_regclass('public.ranked_ap_ledger') IS NOT NULL AS ranked_ap_ledger,
+          to_regclass('public.ranked_achievement_versions') IS NOT NULL AS ranked_achievement_versions,
+          to_regclass('public.ranked_survival_achievement_facts') IS NOT NULL AS ranked_survival_achievement_facts,
           to_regclass('public.sur_profiles') IS NOT NULL AS sur_profiles,
           to_regclass('public.sur_matches') IS NOT NULL AS sur_matches,
           to_regclass('public.sur_match_players') IS NOT NULL AS sur_match_players,
@@ -310,6 +315,8 @@ export class DatabaseService implements DatabasePort, OnModuleInit, OnApplicatio
         ["ranked_achievement_metrics", "table ranked_achievement_metrics"],
         ["ranked_achievement_unlocks", "table ranked_achievement_unlocks"],
         ["ranked_ap_ledger", "table ranked_ap_ledger"],
+        ["ranked_achievement_versions","table ranked_achievement_versions"],
+        ["ranked_survival_achievement_facts","table ranked_survival_achievement_facts"],
         ["sur_profiles", "table sur_profiles"],
         ["sur_matches", "table sur_matches"],
         ["sur_match_players", "table sur_match_players"],

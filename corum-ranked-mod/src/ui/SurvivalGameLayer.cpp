@@ -11,6 +11,7 @@
 #include "RankedJukeboxPopup.hpp"
 #include "PlayerIcon.hpp"
 #include "SurvivalOutcomePanel.hpp"
+#include "AchievementUnlockToast.hpp"
 #include "ModeLobbyMotion.hpp"
 #include "ModeLobbySurfaceFade.hpp"
 #include "RankBadgeAssets.hpp"
@@ -343,7 +344,9 @@ public:
             if(stage==SurvivalFlowStage::PersonalResult || stage==SurvivalFlowStage::Ceremony)beginResultMotion();
             syncAudio(view);if(m_selection->isVisible())m_selection->hideSelection();if(view.nextMap["map"].isObject())m_selection->prepareServerMap(runtime.preparationView());m_grid->setVisible(false);m_heading->setVisible(false);m_map->setVisible(false);m_status->setVisible(false);m_boardClock->setVisible(false);m_spinner->setVisible(false);
             for(auto* button:{m_resume,m_continue,m_surrender,m_freePlay,m_backToMap,m_viewBoard,m_force})if(button)button->setVisible(false);
-            m_outcome->setVisible(!m_motion);if(!m_motion)m_outcome->present(view,stage,dt);
+            m_outcome->setVisible(!m_motion);if(!m_motion){m_outcome->present(view,stage,dt);
+                ui::showAchievementUnlocks(this,view.id+":"+view.ownId,view.result["achievementUnlocks"]);
+            }
             return;
         }
         m_outcome->setVisible(false);

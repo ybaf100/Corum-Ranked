@@ -202,3 +202,28 @@ int main(){using namespace corum::ranked;SurvivalMatchView view;SurvivalStanding
 }
 `);
 });
+
+test('direct cleared replay quits release local ownership for repeat entry without ending menu Free Play',()=>{
+ const source=read('src/SurvivalRuntime.cpp');
+ run(preamble+`
+#include "domain/SurvivalFreePlayPolicy.hpp"
+struct GJGameLevel{int m_levelID=42;};struct CCScene{};
+struct PlayLayer{GJGameLevel* m_level=nullptr;CCScene* parent=nullptr;CCScene* getParent(){return parent;}static inline PlayLayer* current=nullptr;static PlayLayer*get(){return current;}};
+struct CCDirector{CCScene* current=nullptr;static auto* sharedDirector(){static CCDirector d;return &d;}CCScene* getRunningScene(){return current;}};
+namespace corum::ranked{struct SurvivalRuntime{SurvivalFreePlayState m_freePlay;void requestDirectFreePlayReturn(PlayLayer*);};
+${method(source,'void SurvivalRuntime::requestDirectFreePlayReturn(')}
+}
+int main(){using namespace corum::ranked;SurvivalRuntime r;GJGameLevel level;CCScene scene,other;PlayLayer play;play.m_level=&level;play.parent=&scene;PlayLayer::current=&play;CCDirector::sharedDirector()->current=&scene;
+ for(int repeat=0;repeat<100;++repeat){
+  r.m_freePlay.begin({"match","r1",1},"done",false,42);assert(!r.m_freePlay.returnRequested);
+  r.requestDirectFreePlayReturn(&play);assert(r.m_freePlay.returnRequested);r.m_freePlay.finish();assert(!r.m_freePlay.active);
+ }
+ r.m_freePlay.begin({"match","r1",1},"done");r.requestDirectFreePlayReturn(&play);assert(!r.m_freePlay.returnRequested);
+ r.m_freePlay.begin({"match","r1",1},"done",true,42);level.m_levelID=43;r.requestDirectFreePlayReturn(&play);assert(!r.m_freePlay.returnRequested);
+ level.m_levelID=42;play.parent=&other;r.requestDirectFreePlayReturn(&play);assert(!r.m_freePlay.returnRequested);
+ play.parent=&scene;r.requestDirectFreePlayReturn(&play);assert(r.m_freePlay.returnRequested);
+}
+`);
+ const native=read('src/PlayLayer.cpp');const quit=method(native,'    void onQuit()');
+ assert(quit.indexOf('requestDirectFreePlayReturn(this)')<quit.indexOf('freePlayReturnPending()'));
+});

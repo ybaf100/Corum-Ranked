@@ -10,7 +10,7 @@ export type AchievementGrade = (typeof ACHIEVEMENT_GRADES)[number];
 export type AchievementLevel = 1 | 2 | 3 | 4 | 5;
 export type AchievementScope = "SOLO_RANKED" | "SURVIVAL" | "SHARED";
 
-export type AchievementRarity = "COMMON" | "RARE" | "EPIC" | "LEGENDARY";
+export type AchievementRarity = "COMMON" | "RARE" | "EPIC" | "LEGENDARY" | "MYTHIC";
 
 export interface AchievementLevelDefinition {
   readonly level: AchievementLevel;
@@ -59,6 +59,17 @@ export const PROGRESSIVE_ACHIEVEMENT_IDS = [
   "reverse_sweeps",
   "sweep_wins",
   "promotion_wins",
+  "survival_matches",
+  "survival_wins",
+  "survival_podiums",
+  "survival_finals",
+  "survival_round_survives",
+  "survival_round_wins",
+  "survival_podium_streak",
+  "survival_win_streak",
+  "shared_matches",
+  "shared_wins",
+  "shared_mastery",
 ] as const;
 
 export const ONE_SHOT_ACHIEVEMENT_IDS = [
@@ -73,6 +84,20 @@ export const ONE_SHOT_ACHIEVEMENT_IDS = [
   "gold_reached",
   "perfect_win_streak_3",
   "placement_complete",
+  "survival_first_match",
+  "survival_first_podium",
+  "survival_first_win",
+  "survival_cutoff_escape",
+  "survival_final_photo_finish",
+  "survival_round_perfect",
+  "survival_clean_champion",
+  "survival_last_seed_champion",
+  "survival_final_perfect_win",
+  "survival_never_below_cutoff",
+  "dual_mode_debut",
+  "dual_mode_winner",
+  "dual_gold_reached",
+  "master_of_two_worlds",
 ] as const;
 
 export type ProgressiveAchievementId = (typeof PROGRESSIVE_ACHIEVEMENT_IDS)[number];
@@ -80,11 +105,11 @@ export type OneShotAchievementId = (typeof ONE_SHOT_ACHIEVEMENT_IDS)[number];
 export type AchievementId = ProgressiveAchievementId | OneShotAchievementId;
 
 const LEVEL_PRESENTATION = [
-  { level: 1, grade: "BRONZE", displayLabel: "I", displayColor: "#A6ACB5", ap: 5 },
-  { level: 2, grade: "SILVER", displayLabel: "II", displayColor: "#B87333", ap: 10 },
-  { level: 3, grade: "GOLD", displayLabel: "III", displayColor: "#C8D0DA", ap: 20 },
-  { level: 4, grade: "PLATINUM", displayLabel: "IV", displayColor: "#F4C542", ap: 40 },
-  { level: 5, grade: "DIAMOND", displayLabel: "V", displayColor: "#8DEBFF", ap: 75 },
+  { level: 1, grade: "BRONZE", displayLabel: "I", displayColor: "#B2BAC9", ap: 5 },
+  { level: 2, grade: "SILVER", displayLabel: "II", displayColor: "#57BBFF", ap: 10 },
+  { level: 3, grade: "GOLD", displayLabel: "III", displayColor: "#C679FF", ap: 20 },
+  { level: 4, grade: "PLATINUM", displayLabel: "IV", displayColor: "#FFB046", ap: 40 },
+  { level: 5, grade: "DIAMOND", displayLabel: "V", displayColor: "#FFB8C6", ap: 75 },
 ] as const;
 
 const levels = (thresholds: readonly [number, number, number, number, number]) =>
@@ -154,6 +179,17 @@ export const PROGRESSIVE_ACHIEVEMENTS: readonly ProgressiveAchievementDefinition
     descriptionKo: "Solo Ranked에서 Promotion에 성공하세요.", descriptionEn: "In Solo Ranked: Succeed in Promotion series.",
     titleEnabled: true, levels: levels([1, 2, 3, 5, 10]),
   },
+  { id: "survival_matches", type: "PROGRESSIVE", scope: "SURVIVAL", metric: "survival_matches", nameKo: "생존 참가자", nameEn: "Survival Competitor", descriptionKo: "서바이벌 경기를 완료하세요.", descriptionEn: "Complete Survival matches.", titleEnabled: true, levels: levels([5, 25, 100, 250, 500]) },
+  { id: "survival_wins", type: "PROGRESSIVE", scope: "SURVIVAL", metric: "survival_wins", nameKo: "최후의 1인", nameEn: "Last One Standing", descriptionKo: "서바이벌에서 우승하세요.", descriptionEn: "Win Survival matches.", titleEnabled: true, levels: levels([1, 3, 10, 25, 50]) },
+  { id: "survival_podiums", type: "PROGRESSIVE", scope: "SURVIVAL", metric: "survival_podiums", nameKo: "입상자", nameEn: "Podium Finisher", descriptionKo: "서바이벌에서 Top 3에 입상하세요.", descriptionEn: "Finish in the Survival Top 3.", titleEnabled: true, levels: levels([1, 5, 20, 50, 100]) },
+  { id: "survival_finals", type: "PROGRESSIVE", scope: "SURVIVAL", metric: "survival_finals", nameKo: "결승 진출자", nameEn: "Finalist", descriptionKo: "서바이벌 결승에 진출하세요.", descriptionEn: "Reach Survival finals.", titleEnabled: true, levels: levels([1, 5, 20, 50, 100]) },
+  { id: "survival_round_survives", type: "PROGRESSIVE", scope: "SURVIVAL", metric: "survival_round_survives", nameKo: "불사조", nameEn: "Phoenix", descriptionKo: "서바이벌 라운드를 통과하세요.", descriptionEn: "Qualify through Survival rounds.", titleEnabled: true, levels: levels([10, 50, 200, 500, 1000]) },
+  { id: "survival_round_wins", type: "PROGRESSIVE", scope: "SURVIVAL", metric: "survival_round_wins", nameKo: "라운드 지배자", nameEn: "Round Ruler", descriptionKo: "라운드에서 단독 1위를 달성하세요.", descriptionEn: "Finish Survival rounds as the sole first place.", titleEnabled: true, levels: levels([1, 10, 25, 50, 100]) },
+  { id: "survival_podium_streak", type: "PROGRESSIVE", scope: "SURVIVAL", metric: "survival_podium_streak", nameKo: "꾸준함", nameEn: "Consistency", descriptionKo: "최고 연속 Top 3 기록을 높이세요.", descriptionEn: "Raise your best consecutive Survival Top 3 finishes.", titleEnabled: true, levels: levels([2, 3, 5, 8, 12]) },
+  { id: "survival_win_streak", type: "PROGRESSIVE", scope: "SURVIVAL", metric: "survival_win_streak", nameKo: "무적 생존", nameEn: "Unbeaten Survivor", descriptionKo: "최고 연속 우승 기록을 높이세요.", descriptionEn: "Raise your best consecutive Survival wins.", titleEnabled: true, levels: levels([2, 3, 5, 7, 10]) },
+  { id: "shared_matches", type: "PROGRESSIVE", scope: "SHARED", metric: "shared_matches", nameKo: "개척자", nameEn: "Pioneer", descriptionKo: "두 모드의 완료 경기 수를 높이세요.", descriptionEn: "Complete matches across both modes.", titleEnabled: true, levels: levels([20, 100, 250, 500, 1000]) },
+  { id: "shared_wins", type: "PROGRESSIVE", scope: "SHARED", metric: "shared_wins", nameKo: "정복자", nameEn: "Conqueror", descriptionKo: "솔랭 승리와 서바이벌 우승을 기록하세요.", descriptionEn: "Win Solo Ranked and Survival matches.", titleEnabled: true, levels: levels([5, 25, 100, 250, 500]) },
+  { id: "shared_mastery", type: "PROGRESSIVE", scope: "SHARED", metric: "shared_mastery", nameKo: "돌파자", nameEn: "Trailblazer", descriptionKo: "솔랭 맵 클리어와 서바이벌 통과 라운드를 기록하세요.", descriptionEn: "Clear Solo maps and qualify through Survival rounds.", titleEnabled: true, levels: levels([25, 100, 300, 700, 1500]) },
 ];
 
 export const ONE_SHOT_ACHIEVEMENTS: readonly OneShotAchievementDefinition[] = [
@@ -164,10 +200,24 @@ export const ONE_SHOT_ACHIEVEMENTS: readonly OneShotAchievementDefinition[] = [
   { id: "deathmatch_pixel_win", type: "ONE_SHOT", scope: "SOLO_RANKED", condition: "deathmatch_pixel_win", nameKo: "한 끗 차이", nameEn: "Pixel Perfect", descriptionKo: "Solo Ranked에서 0.1%p 미만 차이로 Death Match에서 승리하세요.", descriptionEn: "In Solo Ranked: Win a Death Match by less than 0.1 percentage point.", titleEnabled: true, ap: 50, rarity: "EPIC" },
   { id: "deathmatch_domination", type: "ONE_SHOT", scope: "SOLO_RANKED", condition: "deathmatch_domination", nameKo: "압도적", nameEn: "Dominating", descriptionKo: "Solo Ranked에서 50%p 이상 차이로 Death Match에서 승리하세요.", descriptionEn: "In Solo Ranked: Win a Death Match by at least 50 percentage points.", titleEnabled: true, ap: 25, rarity: "RARE" },
   { id: "deathmatch_hundred_win", type: "ONE_SHOT", scope: "SOLO_RANKED", condition: "deathmatch_hundred_win", nameKo: "완벽한 결투", nameEn: "Perfect Duel", descriptionKo: "Solo Ranked에서 Death Match에서 100%를 기록하고 승리하세요.", descriptionEn: "In Solo Ranked: Record 100% and win a Death Match.", titleEnabled: true, ap: 50, rarity: "EPIC" },
-  { id: "deathmatch_double_hundred", type: "ONE_SHOT", scope: "SOLO_RANKED", condition: "deathmatch_double_hundred", nameKo: "양보는 없다", nameEn: "No Concessions", descriptionKo: "Solo Ranked에서 양쪽 모두 100%로 Death Match에서 비기세요.", descriptionEn: "In Solo Ranked: Tie a Death Match with both sides at 100%.", titleEnabled: true, ap: 100, rarity: "LEGENDARY" },
+  { id: "deathmatch_double_hundred", type: "ONE_SHOT", scope: "SOLO_RANKED", condition: "deathmatch_double_hundred", nameKo: "양보는 없다", nameEn: "No Concessions", descriptionKo: "Solo Ranked에서 양쪽 모두 100%로 Death Match에서 비기세요.", descriptionEn: "In Solo Ranked: Tie a Death Match with both sides at 100%.", titleEnabled: true, ap: 200, rarity: "MYTHIC" },
   { id: "gold_reached", type: "ONE_SHOT", scope: "SHARED", condition: "gold_reached", nameKo: "정상", nameEn: "The Summit", descriptionKo: "Solo Ranked 또는 Survival에서 GOLD 티어에 처음 도달하세요.", descriptionEn: "Reach GOLD in Solo Ranked or Survival for the first time.", titleEnabled: true, ap: 50, rarity: "EPIC" },
   { id: "perfect_win_streak_3", type: "ONE_SHOT", scope: "SOLO_RANKED", condition: "perfect_win_streak_3", nameKo: "무결점", nameEn: "Flawless", descriptionKo: "Solo Ranked에서 PERFECT WIN을 3경기 연속 달성하세요.", descriptionEn: "In Solo Ranked: Earn three consecutive PERFECT WINs.", titleEnabled: true, ap: 100, rarity: "LEGENDARY" },
   { id: "placement_complete", type: "ONE_SHOT", scope: "SOLO_RANKED", condition: "placement_complete", nameKo: "첫 걸음", nameEn: "First Step", descriptionKo: "Solo Ranked에서 정상 Placement를 완료하세요.", descriptionEn: "In Solo Ranked: Complete Placement normally.", titleEnabled: true, ap: 10, rarity: "COMMON" },
+  { id: "survival_first_match", type: "ONE_SHOT", scope: "SURVIVAL", condition: "survival_first_match", nameKo: "서바이벌 데뷔", nameEn: "Survival Debut", descriptionKo: "첫 서바이벌 경기를 완료하세요.", descriptionEn: "Complete your first Survival match.", titleEnabled: true, ap: 10, rarity: "COMMON" },
+  { id: "survival_first_podium", type: "ONE_SHOT", scope: "SURVIVAL", condition: "survival_first_podium", nameKo: "첫 입상", nameEn: "First Podium", descriptionKo: "서바이벌에서 처음으로 Top 3에 입상하세요.", descriptionEn: "Finish in the Survival Top 3 for the first time.", titleEnabled: true, ap: 10, rarity: "COMMON" },
+  { id: "survival_first_win", type: "ONE_SHOT", scope: "SURVIVAL", condition: "survival_first_win", nameKo: "첫 우승", nameEn: "First Champion", descriptionKo: "서바이벌에서 처음으로 우승하세요.", descriptionEn: "Win your first Survival match.", titleEnabled: true, ap: 25, rarity: "RARE" },
+  { id: "survival_cutoff_escape", type: "ONE_SHOT", scope: "SURVIVAL", condition: "survival_cutoff_escape", nameKo: "턱걸이 생존", nameEn: "Just Made It", descriptionKo: "정확히 컷오프 경계 순위로 통과하세요.", descriptionEn: "Qualify at the exact official cutoff rank.", titleEnabled: true, ap: 25, rarity: "RARE" },
+  { id: "survival_final_photo_finish", type: "ONE_SHOT", scope: "SURVIVAL", condition: "survival_final_photo_finish", nameKo: "사진 판정", nameEn: "Photo Finish", descriptionKo: "결승에서 1%p 미만 차이로 우승하세요.", descriptionEn: "Win the decisive final by more than 0 and less than 1 percentage point.", titleEnabled: true, ap: 50, rarity: "EPIC" },
+  { id: "survival_round_perfect", type: "ONE_SHOT", scope: "SURVIVAL", condition: "survival_round_perfect", nameKo: "완벽한 생존", nameEn: "Perfect Survivor", descriptionKo: "유효한 서바이벌 라운드에서 100%를 기록하세요.", descriptionEn: "Reach 100% in a valid Survival round.", titleEnabled: true, ap: 50, rarity: "EPIC" },
+  { id: "survival_clean_champion", type: "ONE_SHOT", scope: "SURVIVAL", condition: "survival_clean_champion", nameKo: "완전 우승", nameEn: "Clean Champion", descriptionKo: "모든 라운드에서 단독 1위로 우승하세요.", descriptionEn: "Win the match as the sole first place in every round.", titleEnabled: true, ap: 100, rarity: "LEGENDARY" },
+  { id: "survival_last_seed_champion", type: "ONE_SHOT", scope: "SURVIVAL", condition: "survival_last_seed_champion", nameKo: "역습의 우승자", nameEn: "Underdog Champion", descriptionKo: "결승 최하위 단독 시드에서 우승하세요.", descriptionEn: "Win from the unique last qualifying seed.", titleEnabled: true, ap: 100, rarity: "LEGENDARY" },
+  { id: "survival_final_perfect_win", type: "ONE_SHOT", scope: "SURVIVAL", condition: "survival_final_perfect_win", nameKo: "완벽한 피날레", nameEn: "Perfect Finale", descriptionKo: "결승에서 100%를 기록하고 최종 우승하세요.", descriptionEn: "Reach 100% in the decisive final and win.", titleEnabled: true, ap: 200, rarity: "MYTHIC" },
+  { id: "survival_never_below_cutoff", type: "ONE_SHOT", scope: "SURVIVAL", condition: "survival_never_below_cutoff", nameKo: "흔들리지 않는 자", nameEn: "Unshaken", descriptionKo: "모든 탈락 라운드에서 컷오프보다 높은 순위로 통과하고 우승하세요.", descriptionEn: "Win after qualifying strictly above every elimination cutoff rank.", titleEnabled: true, ap: 200, rarity: "MYTHIC" },
+  { id: "dual_mode_debut", type: "ONE_SHOT", scope: "SHARED", condition: "dual_mode_debut", nameKo: "두 세계의 시작", nameEn: "Two Worlds Begin", descriptionKo: "두 모드에서 각각 한 경기를 완료하세요.", descriptionEn: "Complete a match in each mode.", titleEnabled: true, ap: 10, rarity: "COMMON" },
+  { id: "dual_mode_winner", type: "ONE_SHOT", scope: "SHARED", condition: "dual_mode_winner", nameKo: "두 세계의 승자", nameEn: "Winner of Two Worlds", descriptionKo: "솔랭 1승과 서바이벌 1우승을 기록하세요.", descriptionEn: "Win once in Solo Ranked and once in Survival.", titleEnabled: true, ap: 25, rarity: "RARE" },
+  { id: "dual_gold_reached", type: "ONE_SHOT", scope: "SHARED", condition: "dual_gold_reached", nameKo: "양쪽의 정상", nameEn: "Twin Summits", descriptionKo: "정상 경기로 두 모드에서 모두 GOLD에 도달하세요.", descriptionEn: "Reach GOLD through valid results in both modes.", titleEnabled: true, ap: 100, rarity: "LEGENDARY" },
+  { id: "master_of_two_worlds", type: "ONE_SHOT", scope: "SHARED", condition: "master_of_two_worlds", nameKo: "두 세계의 지배자", nameEn: "Master of Two Worlds", descriptionKo: "두 모드에서 각각 성장형 V를 달성하세요.", descriptionEn: "Reach a progressive stage V in each mode.", titleEnabled: true, ap: 200, rarity: "MYTHIC" },
 ];
 
 export type AchievementDefinition =

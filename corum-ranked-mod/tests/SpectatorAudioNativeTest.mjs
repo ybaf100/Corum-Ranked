@@ -99,6 +99,8 @@ struct CCLayerColor{virtual ~CCLayerColor()=default;virtual void onEnter(){}};
 #define schedule_selector(x) 0
 using namespace corum::ranked;
 struct CorumRankedLayer: CCLayerColor {
+ void syncAchievementClaimNotice(){} // separately covered by AchievementV2NativeTest
+
  enum class Page{Live,Profile};Page m_page=Page::Live;
  bool m_rankedChildScenePushed=true,m_enteringSongGate=false,m_enteringLevel=false;
  corum::ranked::ModeLobbyTransition m_modeTransition;

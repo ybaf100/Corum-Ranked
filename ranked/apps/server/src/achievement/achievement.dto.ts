@@ -16,3 +16,9 @@ export class ClaimAchievementDto {
   @IsIn(["ALL_PENDING"])
   public scope: "ALL_PENDING" = "ALL_PENDING";
 }
+
+export class ClaimAllAchievementsDto {
+  @IsString()
+  @IsIn(["SOLO_RANKED","SURVIVAL","SHARED","ALL"])
+  public scope!: "SOLO_RANKED"|"SURVIVAL"|"SHARED"|"ALL";
+}

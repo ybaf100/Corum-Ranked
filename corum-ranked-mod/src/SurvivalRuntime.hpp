@@ -94,6 +94,7 @@ public:
     bool beginFreePlay();
     bool freePlaying() const {return m_freePlay.active;}
     bool freePlayReturnPending() const;
+    void requestDirectFreePlayReturn(PlayLayer*);
     bool beginFreePlayNativeQuit(GJGameLevel* level);
     bool interceptFreePlayNativeQuit(GJGameLevel* level) const;
     void finishFreePlayNativeQuit();

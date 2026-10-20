@@ -1,3 +1,4 @@
+import type { AchievementUnlockNotice } from "../achievement/achievement.service.js";
 import {survivalResultRoster} from "./survival-result-roster.js";
 import { SurvivalConfigService } from "../config/survival-config.service.js";
 import { survivalQueueView } from "./survival-queue.view.js";
@@ -23,7 +24,7 @@ export interface SurvivalOnlineResult {
   promoted:boolean;demoted:boolean;protected:boolean;warningRecoveryLp:number|null;
   bands:{tier:string;minimum:number}[];
   standings:ReturnType<typeof survivalResultRoster>;
-  completedAt:string;completionKind:string;finalStandings?:boolean;
+  completedAt:string;completionKind:string;finalStandings?:boolean;achievementUnlocks?:readonly AchievementUnlockNotice[];
 }
 const terminal=(m:SurvivalMatch)=>["FINAL_RESULT","CANCELLED"].includes(m.state);
 @Injectable()
@@ -168,7 +169,10 @@ export class SurvivalOnlineService implements OnApplicationBootstrap,OnApplicati
       const standings=survivalResultRoster(match,accepted);
       for(const row of paid){
         const result={...row.result!,tiedPlayers:inputs.find(p=>p.participantId===row.participant_id)?.tiedPlayers??row.result!.tiedPlayers,finalStandings:true,standings};
-        await this.db.query("UPDATE sur_online_players SET result=$3::jsonb WHERE match_id=$1 AND player_id=$2",[match.id,row.player_id,JSON.stringify(result)]);
+        await this.db.transaction(async tx=>{
+          const achievementUnlocks=match.state==="FINAL_RESULT"?await this.survival.recordAchievementsWithin(tx,match.id,row.player_id):[];
+          await tx.query("UPDATE sur_online_players SET result=$3::jsonb WHERE match_id=$1 AND player_id=$2",[match.id,row.player_id,JSON.stringify({...result,achievementUnlocks})]);
+        });
       }
     }
 

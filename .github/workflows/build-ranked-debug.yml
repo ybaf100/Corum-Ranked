@@ -168,6 +168,21 @@ jobs:
         # Each native harness uses its own temporary directory. Bound compiler
         # concurrency so small runners retain memory headroom; keep all tests.
         run: node --test --test-concurrency=2 corum-ranked-mod/tests/*.mjs
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Render Achievement v2 production shaders with software OpenGL ES
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libegl1 libgl1-mesa-dri
+          python -m pip install Pillow
+          python corum-ranked-mod/tests/render-achievement-effects.py "$RUNNER_TEMP/achievement-effects"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Achievement-v2-shader-preview
+          path: ${{ runner.temp }}/achievement-effects
       - name: Validate release packaging and publication
         run: |
           python3 corum-ranked-mod/tests/ModReleaseBuildTest.py

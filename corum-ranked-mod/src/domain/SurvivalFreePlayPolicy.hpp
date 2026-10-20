@@ -10,10 +10,11 @@ struct SurvivalRoundIdentity {
 };
 struct SurvivalFreePlayState {
     bool active=false,observer=false,returnRequested=false;
+    int directLevelId=0;
     SurvivalRoundIdentity identity;
     std::string completedKey;
-    void begin(SurvivalRoundIdentity current,std::string completed,bool observing=false) {
-        active=true;observer=observing;returnRequested=false;identity=std::move(current);completedKey=std::move(completed);
+    void begin(SurvivalRoundIdentity current,std::string completed,bool observing=false,int nativeLevelId=0) {
+        active=true;directLevelId=nativeLevelId;observer=observing;returnRequested=false;identity=std::move(current);completedKey=std::move(completed);
     }
     bool needsReturn(SurvivalRoundIdentity const& current,std::string const& state,
         std::string const& completed,bool eliminated) const {
@@ -21,6 +22,6 @@ struct SurvivalFreePlayState {
         return active && (returnRequested || current!=identity || state=="ROUND_RESULT" || state=="FINAL_RESULT" ||
             state=="CANCELLED" || (eliminated && !observer) || (!completed.empty() && completed!=completedKey));
     }
-    void finish() {active=false;observer=false;returnRequested=false;identity={};completedKey.clear();}
+    void finish() {directLevelId=0;active=false;observer=false;returnRequested=false;identity={};completedKey.clear();}
 };
 }

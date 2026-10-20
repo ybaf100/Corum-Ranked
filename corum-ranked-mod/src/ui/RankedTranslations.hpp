@@ -23,6 +23,9 @@ struct Translation {
 };
 
 inline constexpr std::array kKoreanTranslations {
+    Translation{"claim-all", "모두 받기"},
+    Translation{"claim-all-complete", "모두 받기 완료"},
+    Translation{"rewards", "보상"},
     Translation{"survival-default-options", "서바이벌 기본 설정"},
     Translation{"survival-surrender-pending", "항복 처리 중 · 서버 응답 대기"},
     Translation{"map-stars", "별"},

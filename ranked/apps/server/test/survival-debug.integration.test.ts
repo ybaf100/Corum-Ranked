@@ -399,15 +399,15 @@ describe("Survival M4 persistent debug game",()=>{
     expect((await engine.get(m.id)).state).toBe("PREPARING");
     m=await prepare(m);await record(m,50);expect(sessions.assertEnvironment).toHaveBeenCalledWith(mods);
   });
-  it("settles real GOLD promotion and grants shared GOLD and its AP claim only once",async()=>{
+  it("settles Debug LP but never grants competitive achievements or AP",async()=>{
     await survival.profile(session.playerId);await db.query("UPDATE sur_profiles SET lp=1199,displayed_tier='SILVER'");
     const first=await debug.create(session,body(1));expect(first.result).toMatchObject({promoted:true,profileAfter:{tier:"GOLD",lp:1249}});
     await debug.acknowledge(first.matchId,session);const second=await debug.create(session,body(1));
     await Promise.all([debug.view(second.matchId,session),debug.tickOnce()]);
-    expect((await db.query("SELECT * FROM ranked_achievement_unlocks WHERE achievement_id='gold_reached'")).rows).toHaveLength(1);
-    expect((await achievements.claim(session.playerId,"gold_reached")).claimedRewards).toBe(1);
+    expect((await db.query("SELECT * FROM ranked_achievement_unlocks")).rows).toHaveLength(0);
+    expect((await achievements.claim(session.playerId,"gold_reached")).claimedRewards).toBe(0);
     expect((await achievements.claim(session.playerId,"gold_reached")).duplicate).toBe(true);
-    expect((await db.query("SELECT * FROM ranked_ap_ledger WHERE achievement_id='gold_reached'")).rows).toHaveLength(1);
+    expect((await db.query("SELECT * FROM ranked_ap_ledger")).rows).toHaveLength(0);
   });
   it("recovers with a replacement session and rejects mutations from the revoked session",async()=>{
     const m=await prepare(await create());await record(m,51);

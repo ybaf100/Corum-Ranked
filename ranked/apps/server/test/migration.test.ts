@@ -33,6 +33,7 @@ const migrationNames = [
     "0024_survival_m5_online.sql",
     "0025_solo_tier_divisions.sql",
   "0026_survival_catalog_bot_count.sql",
+  "0027_achievements_v2.sql",
 ] as const;
 
 const migrationSql = async (migrationName: string): Promise<string> => {
@@ -65,6 +66,7 @@ describe("PostgreSQL migration", () => {
       "ranked_achievement_events",
       "ranked_achievement_metrics",
       "ranked_achievement_unlocks",
+      "ranked_achievement_versions",
       "ranked_ap_ledger",
       "ranked_attempt_start_leases",
       "ranked_attempts",
@@ -87,6 +89,7 @@ describe("PostgreSQL migration", () => {
       "ranked_rounds",
       "ranked_runtime_features",
       "ranked_sessions",
+      "ranked_survival_achievement_facts",
       "sur_attempts",
       "sur_debug_matches",
       "sur_lp_ledger",

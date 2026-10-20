@@ -27,16 +27,18 @@ CCClippingNode* clip(CCSize size){
 }
 CCLayerColor* group(){auto* value=CCLayerColor::create({0,0,0,0},0,0);value->setCascadeOpacityEnabled(true);return value;}
 struct ThumbnailCard {
-    CCLayerColor* root=nullptr;CCSprite* image=nullptr;CCLayerColor* shade=nullptr;CCNode* trim=nullptr;
+    CCLayerColor* root=nullptr;CCSprite* image=nullptr;CCSprite* placeholder=nullptr;CCLayerColor* shade=nullptr;CCNode* trim=nullptr;
     CCTexture2D* texture=nullptr;float width=0,height=0;
     void make(CCNode* parent,float w){width=w;height=w*9/16;root=group();parent->addChild(root);
         auto* face=surface({width,height},{},Blue,SurfaceRaised,255,true);root->addChild(face);
         auto* viewport=clip({width-4,height-4});viewport->setPosition({2,2});face->addChild(viewport,4);
         image=CCSprite::create();image->setPosition({(width-4)/2,(height-4)/2});viewport->addChild(image);
+        placeholder=CCSprite::createWithSpriteFrameName("GJ_playBtn_001.png");
+        if(placeholder){placeholder->setPosition(image->getPosition());placeholder->setScale(std::min(width*.22f/placeholder->getContentSize().width,height*.40f/placeholder->getContentSize().height));viewport->addChild(placeholder);}
         shade=CCLayerColor::create({2,7,21,160},width-4,height-4);shade->setPosition({2,2});face->addChild(shade,5);
         trim=CCLayerColor::create({Gold.r,Gold.g,Gold.b,255},width-8,2);trim->setPosition({4,height-4});face->addChild(trim,6);
     }
-    void set(CCTexture2D* next){if(texture==next)return;texture=next;image->setVisible(next!=nullptr);if(!next)return;
+    void set(CCTexture2D* next){if(placeholder)placeholder->setVisible(next==nullptr);image->setVisible(next!=nullptr);if(texture==next)return;texture=next;if(!next)return;
         image->setTexture(next);auto const size=next->getContentSize();image->setTextureRect({0,0,size.width,size.height});
         image->setScale(std::max((width-4)/size.width,(height-4)/size.height));
     }
@@ -134,7 +136,7 @@ void SurvivalMapSelectionLayer::thumbnailFrame(SurvivalRevealFrame const& frame,
     for(auto const& entry:provider)reel.observe(entry.first);
     if(v.previews.empty())v.previews.resize(reel.slots().size());
     for(std::size_t i=0;i<reel.slots().size();++i){
-        auto const id=reel.slots()[i];v.previews[i].first=id;
+        auto const id=reel.imageIdForSlot(i);v.previews[i].first=id;
         if(auto image=std::find_if(provider.begin(),provider.end(),[id](auto const& entry){return entry.first==id;});image!=provider.end())
             v.previews[i].second=image->second;
     }

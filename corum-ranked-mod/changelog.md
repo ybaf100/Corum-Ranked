@@ -1,3 +1,12 @@
+# v0.5.0-beta.90
+
+- Extend Achievements to 46 server-authoritative Solo/Survival/Shared goals with Mythic rarity, independent I–V rewards, normal-game eligibility and completion-ordered Survival streaks.
+- Start v2 fresh once as requested: reset only achievement metrics, Unlocks, AP and equipped achievement titles; preserve accounts, game history, LP and MMR. Recover only post-cutover performance.
+- Add authenticated, scope-specific Claim All with shared transactional ledger locking, retry/concurrency/rollback safety, one aggregate receipt and selectable earned title versions.
+- Render Legendary gold shimmer and a flowing seven-color pastel Mythic gradient within text; share effects across cards, titles, result notices and highest-pending-tier Claim All. Keep locked cards dark gray and fit the bilingual grid to mobile/iPad viewports.
+- Fill every fixed roulette slot from the existing cached preview pool and show a native fallback while a texture is unavailable. Release directly launched replay/observer ownership on native Quit so a cleared map can be replayed repeatedly without competitive records.
+- Preserve beta.85–89 integrated Survival flow, input, podium/settings/credits fixes, packaging and publication guards. Add server/DB/native regressions and real OpenGL ES shader rendering to CI.
+
 # v0.5.0-beta.89
 
 - Fix iPad podium tier/LP stamps: use a non-drawing, anchor-respecting node and preserve child alpha while fading. Keep the existing 3rd → 2nd → 1st rise/drop/stamp sequence, GOLD ambient and authoritative LP/delta.

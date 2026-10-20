@@ -630,8 +630,9 @@ describe("development-only Bot Match using the production Ranked engine", () => 
        FROM ranked_achievement_metrics WHERE player_id = $1`,
       [player.playerId],
     );
-    expect(Number(achievementMetrics.rows[0]?.ranked_matches)).toBe(1);
-    expect(Number(achievementMetrics.rows[0]?.ranked_wins)).toBe(expectedWins);
+    expect(Number(achievementMetrics.rows[0]?.ranked_matches ?? 0)).toBe(0);
+    expect(Number(achievementMetrics.rows[0]?.ranked_wins ?? 0)).toBe(0);
+    expect(state.result.achievementUnlocks.A).toEqual([]);
   });
 
   it("applies maximum Ranked MMR and PERFECT WIN for a natural no-loss three-Clear victory", async () => {

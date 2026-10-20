@@ -31,7 +31,7 @@ const facts = (overrides: Partial<Parameters<typeof evaluateAchievementMatch>[1]
 
 describe("achievement configuration and progression", () => {
   it("uses the exact I-V thresholds and independently configured AP", () => {
-    expect(PROGRESSIVE_ACHIEVEMENTS).toHaveLength(10);
+    expect(PROGRESSIVE_ACHIEVEMENTS.filter(d => d.scope === "SOLO_RANKED")).toHaveLength(10);
     expect(definition("ranked_wins").levels.map((level) => level.threshold)).toEqual([1, 10, 50, 100, 500]);
     expect(definition("ranked_matches").levels.map((level) => level.threshold)).toEqual([10, 50, 100, 500, 1_000]);
     expect(definition("ranked_clears").levels.map((level) => level.threshold)).toEqual([1, 10, 100, 500, 1_000]);
@@ -49,7 +49,7 @@ describe("achievement configuration and progression", () => {
   });
 
   it("defines every one-shot name, AP value, and rarity in the shared config", () => {
-    expect(ONE_SHOT_ACHIEVEMENTS.map(({ id, nameKo, ap, rarity }) => ({ id, nameKo, ap, rarity })))
+    expect(ONE_SHOT_ACHIEVEMENTS.filter(d => d.scope === "SOLO_RANKED" || d.id === "gold_reached").map(({ id, nameKo, ap, rarity }) => ({ id, nameKo, ap, rarity })))
       .toEqual([
         { id: "reverse_sweep_first", nameKo: "뒤집었다", ap: 25, rarity: "RARE" },
         { id: "last_attempt_match_win", nameKo: "아직 끝나지 않았다", ap: 25, rarity: "RARE" },
@@ -58,7 +58,7 @@ describe("achievement configuration and progression", () => {
         { id: "deathmatch_pixel_win", nameKo: "한 끗 차이", ap: 50, rarity: "EPIC" },
         { id: "deathmatch_domination", nameKo: "압도적", ap: 25, rarity: "RARE" },
         { id: "deathmatch_hundred_win", nameKo: "완벽한 결투", ap: 50, rarity: "EPIC" },
-        { id: "deathmatch_double_hundred", nameKo: "양보는 없다", ap: 100, rarity: "LEGENDARY" },
+        { id: "deathmatch_double_hundred", nameKo: "양보는 없다", ap: 200, rarity: "MYTHIC" },
         { id: "gold_reached", nameKo: "정상", ap: 50, rarity: "EPIC" },
         { id: "perfect_win_streak_3", nameKo: "무결점", ap: 100, rarity: "LEGENDARY" },
         { id: "placement_complete", nameKo: "첫 걸음", ap: 10, rarity: "COMMON" },

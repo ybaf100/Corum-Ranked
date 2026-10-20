@@ -150,6 +150,8 @@ struct AchievementView {
     bool loaded = false;
     bool loading = false;
     std::string error;
+    std::uint64_t claimNoticeSequence=0;
+    int claimedAmount=0,claimedRewards=0;
     int totalAp = 0;
     int unclaimedRewardCount = 0;
     AchievementTitleView equippedTitle;
@@ -508,6 +510,7 @@ public:
     void applyAdminProjection(matjson::Value const& result,std::string const& scope);
     [[nodiscard]] std::int64_t forumRefreshRemainingMs() const;
     void claimAchievement(std::string const& achievementId);
+    void claimAllAchievements(std::string const& scope);
     void equipAchievementTitle(std::string const& achievementId, std::optional<int> level);
     void clearAchievementTitle();
     bool prepareSurvivalEnvironment(matjson::Value& body);
@@ -653,7 +656,7 @@ private:
     std::string m_sessionToken;
     std::string m_clientInstanceId;
     bool m_rankedOpen = false, m_sessionRejected = false, m_sessionHeartbeatBusy = false;
-    std::uint64_t m_sessionGeneration = 0;
+    std::uint64_t m_sessionGeneration = 0,m_claimNoticeSequence=0;
     std::chrono::steady_clock::time_point m_nextSessionHeartbeatAt {}, m_sessionLeaseDeadline {};
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_sessionHeartbeatRequest, m_sessionCloseRequest;
     std::string m_matchToken;

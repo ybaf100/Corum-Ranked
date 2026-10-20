@@ -126,3 +126,13 @@ int main(){for(auto win:{CCSize{432,324},CCSize{480,335},CCSize{568,320},CCSize{
 ` .replace('using namespace corum::ranked::ui;',src.includes('RankedPopupLayout.hpp')?'using namespace corum::ranked::ui;':''));
  }
 });
+
+test('seven cached previews can paint all eight fixed roulette slots without a blank or new request',()=>{
+ run(`
+#include "domain/SurvivalMapSelection.hpp"
+#include <cassert>
+int main(){using namespace corum::ranked;SurvivalThumbnailReel r;for(unsigned n=1;n<=7;++n)r.observe(n);
+ for(unsigned i=0;i<8;++i)assert(r.imageIdForSlot(i)>0);
+ auto ids=r.slots();r.observe(4);assert(r.slots()==ids);
+}`);
+});

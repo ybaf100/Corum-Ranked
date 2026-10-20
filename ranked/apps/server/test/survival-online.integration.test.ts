@@ -17,6 +17,7 @@ import { SurvivalRateService } from "../src/survival/survival-rate.service.js";
 import { SurvivalService } from "../src/survival/survival.service.js";
 import { SurvivalQueueController } from "../src/survival/survival-queue.controller.js";
 import { SurvivalOnlineController } from "../src/survival/survival-online.controller.js";
+import { AchievementController } from "../src/achievement/achievement.controller.js";
 import { AchievementService } from "../src/achievement/achievement.service.js";
 import { AdminService } from "../src/admin/admin.service.js";
 import { SessionService } from "../src/session/session.service.js";
@@ -54,6 +55,7 @@ beforeAll(async()=>{
 afterAll(async()=>{if(pool){await pool.query(`DROP SCHEMA "${testSchema}" CASCADE`);await pool.end();}else await pg.close();});
 afterEach(async()=>{if(app)await app.close();});
 beforeEach(async()=>{
+ await db.query("UPDATE ranked_achievement_versions SET activated_at='2000-01-01'");
  await db.query("TRUNCATE ranked_players,sur_matches,sur_mode_state CASCADE");now=Date.parse("2026-10-13T00:00:00Z");sequence=1000;mapId=40000000;clients.length=0;
  document={generation:"online-1",generatedAt:new Date(now).toISOString(),config:{...DEFAULT_SURVIVAL_CONFIG,enabled:true}};
  config=new SurvivalConfigService({fetchConfig:async()=>document},env,db);await config.refresh();
@@ -70,9 +72,9 @@ beforeEach(async()=>{
  // Deterministic server clock tests explicitly tick production workers. This
  // leaves real HTTP handlers, auth, transactions, reducer and payment intact.
  vi.spyOn(online,"onApplicationBootstrap").mockImplementation(()=>{});vi.spyOn(queue,"onApplicationBootstrap").mockImplementation(()=>{});
- const module=await Test.createTestingModule({controllers:[SurvivalQueueController,SurvivalOnlineController],providers:[SessionGuard,AdmissionVersionGuard,
+ const module=await Test.createTestingModule({controllers:[SurvivalQueueController,SurvivalOnlineController,AchievementController],providers:[SessionGuard,AdmissionVersionGuard,
   {provide:DATABASE,useValue:db},{provide:SERVER_CLOCK,useValue:clock},{provide:TokenService,useValue:tokens},
-  {provide:SurvivalQueueService,useValue:queue},{provide:SurvivalOnlineService,useValue:online},{provide:SurvivalRateService,useValue:rates}]}).compile();
+  {provide:AchievementService,useValue:achievements},{provide:SurvivalQueueService,useValue:queue},{provide:SurvivalOnlineService,useValue:online},{provide:SurvivalRateService,useValue:rates}]}).compile();
  app=module.createNestApplication();app.useGlobalPipes(new ValidationPipe({whitelist:true,forbidNonWhitelisted:true,transform:true}));await app.listen(0,"127.0.0.1");base=await app.getUrl();
 });
 async function client(channel:Client["channel"]="release",account=String(5000+clients.length),takeOver=false){
@@ -369,8 +371,27 @@ describe("Survival M5 public HTTP and persistent online game",()=>{
    expect((await db.query("SELECT * FROM sur_lp_ledger")).rows).toHaveLength(2);
    expect((await db.query("SELECT player_id FROM ranked_achievement_unlocks WHERE achievement_id='gold_reached'")).rows).toEqual([{player_id:a.session.playerId}]);
    expect((await db.query("SELECT * FROM ranked_profiles ORDER BY player_id")).rows).toEqual(solo);
+   const metrics=(await db.query("SELECT ranked_matches,ranked_wins,survival_matches,survival_wins,survival_podiums,survival_finals,survival_round_wins FROM ranked_achievement_metrics WHERE player_id=$1",[a.session.playerId])).rows[0];
+   expect(metrics).toEqual({ranked_matches:0,ranked_wins:0,survival_matches:1,survival_wins:1,survival_podiums:1,survival_finals:1,survival_round_wins:1});
+   const saved=(await db.query<{result:Record<string,unknown>}>("SELECT result FROM sur_online_players WHERE match_id=$1 AND player_id=$2",[id,a.session.playerId])).rows[0]!.result;
+   expect(saved.achievementUnlocks).toEqual(expect.arrayContaining([expect.objectContaining({achievementId:'survival_first_match'}),expect.objectContaining({achievementId:'survival_final_perfect_win',rarity:'MYTHIC'})]));
    const achievements=new AchievementService(db,clock,ids);const claims=await Promise.all([achievements.claim(a.session.playerId,"gold_reached"),achievements.claim(a.session.playerId,"gold_reached")]);
    expect(claims.reduce((sum,claim)=>sum+claim.claimedAmount,0)).toBe(50);
+ });
+ it("authenticates Claim All, validates scope and isolates the session owner through real HTTP",async()=>{
+   const a=await client(),b=await client();const achievements=new AchievementService(db,clock,ids);await achievements.state(a.session.playerId);
+   await db.query(`INSERT INTO ranked_achievement_unlocks(player_id,achievement_id,achievement_level,reward_ap,unlocked_at,source_event_key)
+    VALUES($1,'survival_first_match',0,10,$2,'http-fixture'),($1,'dual_mode_debut',0,10,$2,'http-fixture')`,[a.session.playerId,clock.now().toISOString()]);
+   const endpoint=base+'/api/ranked/achievements/claim-all';
+   const call=async(c:Client|null,payload:unknown)=>{const r=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json',...(c?{Authorization:'Bearer '+c.token}:{})},body:JSON.stringify(payload)});return {status:r.status,body:await r.json()};};
+   expect((await call(null,{scope:'ALL'})).status).toBe(401);
+   expect((await call(a,{scope:'FORGED'})).status).toBe(400);
+   expect((await call(a,{scope:'ALL',playerId:b.session.playerId})).status).toBe(400);
+   expect((await call(b,{scope:'ALL'})).body).toMatchObject({claimedAmount:0,claimedRewards:0,totalAp:0});
+   const results=await Promise.all([call(a,{scope:'SURVIVAL'}),call(a,{scope:'ALL'}),call(a,{scope:'ALL'})]);
+   expect(results.every(r=>r.status===201)).toBe(true);
+   expect(results.reduce((sum,r)=>sum+r.body.claimedAmount,0)).toBe(20);
+   expect((await achievements.state(a.session.playerId)).totalAp).toBe(20);
  });
  it("survival Admin reset clears completed assignments/Fill receipts without deleting Solo or common data",async()=>{
    const {group,id}=await game(1,true),c=group[0]!;let m=await engine.get(id);await event(c,m,"FORFEIT");m=await engine.get(id);expect(m.players.find(p=>p.playerId===c.session.playerId)?.eliminationStage).not.toBeNull();

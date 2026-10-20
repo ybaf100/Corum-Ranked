@@ -3,7 +3,7 @@ import { CurrentSession } from "../session/current-session.decorator.js";
 import { SessionGuard } from "../session/session.guard.js";
 import type { RankedSessionContext } from "../session/session.types.js";
 import { AchievementService } from "./achievement.service.js";
-import { ClaimAchievementDto, EquipAchievementTitleDto } from "./achievement.dto.js";
+import { ClaimAchievementDto, EquipAchievementTitleDto, ClaimAllAchievementsDto } from "./achievement.dto.js";
 
 @Controller("api/ranked/achievements")
 @UseGuards(SessionGuard)
@@ -13,6 +13,11 @@ export class AchievementController {
   @Get()
   public list(@CurrentSession() session: RankedSessionContext) {
     return this.achievements.state(session.playerId);
+  }
+
+  @Post("claim-all")
+  public claimAll(@CurrentSession() session:RankedSessionContext,@Body() body:ClaimAllAchievementsDto) {
+    return this.achievements.claimAll(session.playerId,body.scope);
   }
 
   @Post(":achievementId/claim")

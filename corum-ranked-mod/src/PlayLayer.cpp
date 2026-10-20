@@ -1605,6 +1605,7 @@ public:
 
     void onQuit() {
         auto& survival=corum::ranked::SurvivalRuntime::get();
+        if(m_fields->survivalFreePlayHud)survival.requestDirectFreePlayReturn(this);
         auto const freePlayReturn=m_fields->survivalFreePlayHud && survival.freePlayReturnPending();
         if(freePlayReturn && !corum::ranked::resumeSurvivalFreePlayPauseBeforeQuit(this))return;
         if(freePlayReturn)survival.beginFreePlayNativeQuit(m_level);

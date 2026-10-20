@@ -1,7 +1,7 @@
 import { readFile, readdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { PGlite } from "@electric-sql/pglite";
-import { beforeAll, afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, afterAll, beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_SURVIVAL_CONFIG, SeededRandom } from "@corum-ranked/rules";
 import { AchievementService } from "../src/achievement/achievement.service.js";
 import { RankedConfigService } from "../src/config/ranked-config.service.js";
@@ -49,6 +49,7 @@ beforeAll(async()=>{
 afterAll(async()=>{await pg.close();});
 beforeEach(async()=>{
   await database.query("TRUNCATE ranked_players,ranked_config_snapshots CASCADE");
+  await database.query("UPDATE ranked_achievement_versions SET activated_at='2000-01-01'");
   milliseconds=Date.parse("2026-10-11T10:00:00Z"); sequence=100;
   soloDocument=configDocumentFixture("solo-m1");
   survivalDocument={generation:"sur-m1",generatedAt:clock.now().toISOString(),config:structuredClone(DEFAULT_SURVIVAL_CONFIG)};
@@ -105,17 +106,16 @@ describe("Survival M1 independent profiles and LP",()=>{
     await survival.settleLp(player.playerId,"demote",-1);
     expect((await survival.profile(player.playerId)).profile).toMatchObject({lp:850,tier:"BRONZE",demotionWarning:false});
   });
-  it("deduplicates concurrent result keys and rolls back LP plus ledger if shared unlock fails",async()=>{
+  it("deduplicates concurrent result keys without treating LP edits as played games",async()=>{
     const player=await admit(111); await survival.profile(player.playerId);
     const results=await Promise.all([survival.settleLp(player.playerId,"same",50),survival.settleLp(player.playerId,"same",50)]);
     expect(results[0]).toEqual(results[1]);
     expect((await survival.profile(player.playerId)).profile.lp).toBe(200);
     await expect(survival.settleLp(player.playerId,"same",40)).rejects.toThrow("cannot change");
-    const spy=vi.spyOn(achievements,"recordSharedTierReached").mockRejectedValueOnce(new Error("unlock write failed"));
-    await expect(survival.settleLp(player.playerId,"gold-fails",1000)).rejects.toThrow("unlock write failed");
-    spy.mockRestore();
-    expect((await survival.profile(player.playerId)).profile.lp).toBe(200);
-    expect((await database.query("SELECT COUNT(*)::int AS count FROM sur_lp_ledger")).rows).toEqual([{count:1}]);
+    // Generic/admin LP edits are not competitive achievement events.
+    await survival.settleLp(player.playerId,"admin-gold",1000);
+    expect((await achievements.state(player.playerId)).unclaimedRewardCount).toBe(0);
+    expect((await database.query("SELECT COUNT(*)::int AS count FROM sur_lp_ledger")).rows).toEqual([{count:2}]);
   });
   it("auto-promotes with excess LP and reuses GOLD unlock, Claim, AP and one shared title",async()=>{
     const player=await admit(111); await survival.profile(player.playerId);
@@ -123,7 +123,7 @@ describe("Survival M1 independent profiles and LP",()=>{
     expect((await survival.profile(player.playerId)).profile).toMatchObject({lp:1250,tier:"GOLD",demotionWarning:false});
     await database.transaction(transaction=>achievements.recordPlacementCompletion(transaction,player.playerId,ids.next(),true,clock.now()));
     const state=await achievements.state(player.playerId);
-    expect(state.achievements.filter(card=>card.scope==="SHARED").map(card=>card.id)).toEqual(["gold_reached"]);
+    expect(state.achievements.filter(card=>card.scope==="SHARED")).toHaveLength(8);
     expect(state.achievements.filter(card=>card.scope==="SOLO_RANKED")).toHaveLength(20);
     expect(state.achievements.find(card=>card.id==="gold_reached")?.unlocks).toHaveLength(1);
     const claims=await Promise.all([achievements.claim(player.playerId,"gold_reached"),achievements.claim(player.playerId,"gold_reached")]);

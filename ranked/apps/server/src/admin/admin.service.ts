@@ -171,7 +171,7 @@ export class AdminService {
   private async resetCommon(tx:SqlExecutor,playerId:string|null,now:Date):Promise<void> {
     const players=playerId?[playerId]:(await tx.query<{player_id:string}>("SELECT player_id FROM ranked_profiles ORDER BY player_id FOR UPDATE")).rows.map(p=>p.player_id);
     await tx.query("SELECT player_id FROM ranked_profiles WHERE player_id=ANY($1::uuid[]) ORDER BY player_id FOR UPDATE",[players]);
-    for(const table of ["ranked_achievement_unlocks","ranked_achievement_events","ranked_ap_ledger","ranked_achievement_metrics"])
+    for(const table of ["ranked_survival_achievement_facts","ranked_achievement_unlocks","ranked_achievement_events","ranked_ap_ledger","ranked_achievement_metrics"])
       await tx.query(`DELETE FROM ${table} WHERE player_id=ANY($1::uuid[])`,[players]);
     await tx.query("UPDATE ranked_profiles SET total_ap=0,equipped_achievement_id=NULL,equipped_achievement_level=NULL WHERE player_id=ANY($1::uuid[])",[players]);
     for(const id of players)await tx.query("INSERT INTO ranked_achievement_metrics(player_id,backfilled_at) VALUES($1,$2)",[id,now.toISOString()]);
@@ -228,7 +228,7 @@ export class AdminService {
     if(active.rows.length)throw new ConflictException("Finish and settle all games and leave queues before resetting all data");
     const tables=(await tx.query<{tablename:string}>(`SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname=current_schema()
       AND (tablename LIKE 'ranked\\_%' ESCAPE '\\' OR tablename LIKE 'sur\\_%' ESCAPE '\\' OR tablename LIKE 'debug\\_spectate\\_%' ESCAPE '\\')
-      AND tablename<>'ranked_schema_migrations' ORDER BY tablename`)).rows;
+      AND tablename NOT IN ('ranked_schema_migrations','ranked_achievement_versions') ORDER BY tablename`)).rows;
     // Table identifiers come only from PostgreSQL, never from an Admin payload.
     // All application tables participate in one truncate, preserving FK safety;
     // schema/migration history stays installed and unrelated schemas stay intact.

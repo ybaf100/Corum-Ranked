@@ -27,6 +27,7 @@ beforeAll(async () => {
     );
     await pglite.exec(await readFile(migrationPath, "utf8"));
   }
+  await database.query("UPDATE ranked_achievement_versions SET activated_at='2000-01-01'");
 }, 60_000);
 
 afterAll(async () => {

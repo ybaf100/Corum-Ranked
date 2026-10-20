@@ -110,6 +110,10 @@ export class SurvivalService {
       matches:matches.rows.map(row=>({matchId:row.id,mode:"SURVIVAL",myParticipantId:row.participant_id,finishedAt:new Date(row.finished_at).toISOString(),snapshot:row.snapshot,result:row.result})),lpEvents: events.rows };
   }
 
+  public recordAchievementsWithin(tx:SqlExecutor,matchId:string,playerId:string) {
+    return this.achievements.recordSurvivalResult(tx,matchId,playerId,this.clock.now());
+  }
+
   public rejectNewMatch(): never {
     if (!this.config.getStatus().enabled) throw new ServiceUnavailableException({ code: "SURVIVAL_DISABLED", message: "Survival is disabled by operations" });
     throw new NotImplementedException({ code: "SURVIVAL_MATCH_NOT_IMPLEMENTED", message: "Survival matches arrive in M3/M5; no queue or game has been created" });
@@ -148,8 +152,6 @@ export class SurvivalService {
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14)`,
       [this.ids.next(),playerId,eventKey,delta,update.actualDelta,Number(row.lp),update.profile.lp,row.displayed_tier,
         update.profile.tier,row.demotion_warning,update.profile.demotionWarning,captured.generation,JSON.stringify(result),now.toISOString()]);
-      const group = captured.config.tierBands.find(band => band.tier === update.profile.tier)!.group;
-      if (group === "GOLD") await this.achievements.recordSharedTierReached(transaction, playerId, "SURVIVAL", group, eventKey, now);
       return result;
     });
   }

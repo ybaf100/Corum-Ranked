@@ -31,6 +31,11 @@ public:
         if(auto slot=std::find(m_ids.begin(),m_ids.end(),0);slot!=m_ids.end())*slot=id;
     }
     auto const& slots()const{return m_ids;}
+    std::uint64_t imageIdForSlot(std::size_t slot)const{
+        if(m_ids[slot % m_ids.size()])return m_ids[slot % m_ids.size()];
+        auto first=std::find_if(m_ids.begin(),m_ids.end(),[](auto id){return id!=0;});
+        return first==m_ids.end()?0:*first;
+    }
 };
 enum class SurvivalRevealStage { PendingSelection, Rolling, Locking, Landing, Details, Settled, Cancelled };
 class SurvivalRevealModeChoice {

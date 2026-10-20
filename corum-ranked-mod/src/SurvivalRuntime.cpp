@@ -527,7 +527,7 @@ bool SurvivalRuntime::canEnterObserver() const {
 }
 bool SurvivalRuntime::armObserver(GJGameLevel* level,CCScene* origin){
     if(!canEnterObserver() || !validateNative(level) || !origin || origin!=CCDirector::sharedDirector()->getRunningScene())return false;
-    m_freePlay.begin({m_view.id,m_view.roundKey,m_view.mapGeneration},m_view.completedRound["key"].asString().unwrapOr(""),true);
+    m_freePlay.begin({m_view.id,m_view.roundKey,m_view.mapGeneration},m_view.completedRound["key"].asString().unwrapOr(""),true,m_view.map.levelId);
     m_freePlayOrigin.emplace(origin);m_freePlayNativeQuitFinished=false;m_freePlayQuitLevel=nullptr;m_freePlayQuitScene.reset();
     log::info("[SurvivalObserver] local-only launch match={} round={} level={}",m_view.id,m_view.roundKey,m_view.map.levelId);return true;
 }
@@ -536,7 +536,7 @@ bool SurvivalRuntime::canReplayCleared() const {
 }
 bool SurvivalRuntime::armClearedReplay(GJGameLevel* level,CCScene* origin){
     if(!canReplayCleared() || !validateNative(level) || !origin || origin!=CCDirector::sharedDirector()->getRunningScene())return false;
-    m_freePlay.begin({m_view.id,m_view.roundKey,m_view.mapGeneration},m_view.completedRound["key"].asString().unwrapOr(""));
+    m_freePlay.begin({m_view.id,m_view.roundKey,m_view.mapGeneration},m_view.completedRound["key"].asString().unwrapOr(""),false,m_view.map.levelId);
     m_freePlayOrigin.emplace(origin);m_freePlayNativeQuitFinished=false;m_freePlayQuitLevel=nullptr;m_freePlayQuitScene.reset();
     log::info("[SurvivalReplay] local-only cleared replay match={} round={} level={}",m_view.id,m_view.roundKey,m_view.map.levelId);return true;
 }
@@ -559,6 +559,14 @@ bool SurvivalRuntime::beginFreePlay() {
         RankedAudioManager::get().restoreMenuMusic();
         director->pushScene(MenuLayer::scene(false));
     });return true;
+}
+void SurvivalRuntime::requestDirectFreePlayReturn(PlayLayer* owner) {
+    // Only the directly launched replay/observer map belongs to this return.
+    // Ordinary menu Free Play remains open until authoritative round change.
+    if(!m_freePlay.active || m_freePlay.directLevelId<=0 || !owner || owner!=PlayLayer::get() ||
+       !owner->m_level || static_cast<int>(owner->m_level->m_levelID)!=m_freePlay.directLevelId ||
+       owner->getParent()!=CCDirector::sharedDirector()->getRunningScene())return;
+    m_freePlay.returnRequested=true;
 }
 bool SurvivalRuntime::freePlayReturnPending() const {
     return m_freePlay.needsReturn({m_view.id,m_view.roundKey,m_view.mapGeneration},m_view.state,

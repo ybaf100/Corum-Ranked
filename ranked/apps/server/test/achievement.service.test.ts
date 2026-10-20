@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -7,19 +7,7 @@ import { AchievementService } from "../src/achievement/achievement.service.js";
 import type { DatabasePort, SqlExecutor, SqlResult } from "../src/database/database.port.js";
 import { PgliteDatabase } from "./pglite-database.js";
 
-const migrations = [
-  "0001_initial_ranked.sql",
-  "0002_debug_bot_match.sql",
-  "0002_attempt_start_leases.sql",
-  "0003_debug_rating_playable_maps.sql",
-  "0004_alpha37_schema_hardening.sql",
-  "0005_v050_rating_system.sql",
-  "0006_v050_dynamic_csmp_tiers.sql",
-  "0007_solo_stage_placement.sql",
-  "0008_placement_beta9.sql",
-  "0009_placement_stage_count.sql",
-  "0010_achievements_v1.sql",
-] as const;
+const directory = new URL("../../../migrations/", import.meta.url);
 
 let pglite: PGlite;
 let database: PgliteDatabase;
@@ -81,10 +69,11 @@ const baseFacts = (overrides: Record<string, unknown> = {}) => ({
 beforeAll(async () => {
   pglite = new PGlite();
   database = new PgliteDatabase(pglite);
-  for (const migration of migrations) {
+  for (const migration of (await readdir(directory)).filter(name => name.endsWith(".sql")).sort()) {
     const path = fileURLToPath(new URL(`../../../migrations/${migration}`, import.meta.url));
     await pglite.exec(await readFile(path, "utf8"));
   }
+  await database.query("UPDATE ranked_achievement_versions SET activated_at='2000-01-01'");
   service = new AchievementService(database, new FixedClock(), new SequenceIds());
 }, 60_000);
 
@@ -129,16 +118,16 @@ describe("AchievementService", () => {
       [baseFacts({ won: true })],
       new FixedClock().now(),
     ));
-    expect(notices[playerA]?.map((notice) => notice.displayLabel)).toEqual(["I", "II", "III"]);
+    expect(notices[playerA]?.filter(notice => notice.achievementId === "ranked_wins").map((notice) => notice.displayLabel)).toEqual(["I", "II", "III"]);
 
     const pending = await service.state(playerA);
     expect(pending.totalAp).toBe(0);
-    expect(pending.unclaimedRewardCount).toBe(3);
+    expect(pending.unclaimedRewardCount).toBe(5);
     const winner = pending.achievements.find((item) => item.id === "ranked_wins");
     expect(winner).toMatchObject({ claimableRewards: 3, claimableAp: 35 });
 
     const claimed = await service.claim(playerA, "ranked_wins");
-    expect(claimed).toMatchObject({ claimedAmount: 35, claimedRewards: 3, totalAp: 35, unclaimedRewardCount: 0 });
+    expect(claimed).toMatchObject({ claimedAmount: 35, claimedRewards: 3, totalAp: 35, unclaimedRewardCount: 2 });
     const duplicate = await service.claim(playerA, "ranked_wins");
     expect(duplicate).toMatchObject({ claimedAmount: 0, claimedRewards: 0, duplicate: true, totalAp: 35 });
 
@@ -288,7 +277,7 @@ describe("AchievementService", () => {
       .toMatchObject({ unlocked: true, claimableRewards: 1 });
   });
 
-  it("backfills a pre-solo-Placement profile but never treats a persisted skip as completion", async () => {
+  it("does not fabricate pre-cutover Placement from profile counters or a persisted skip", async () => {
     await database.query(
       "INSERT INTO ranked_players (id, gd_account_id, gd_username) VALUES ($1, 3, 'Legacy Player')",
       [legacyPlayer],
@@ -302,7 +291,7 @@ describe("AchievementService", () => {
     );
     const legacy = await service.state(legacyPlayer);
     expect(legacy.achievements.find((item) => item.id === "placement_complete"))
-      .toMatchObject({ unlocked: true, claimableRewards: 1 });
+      .toMatchObject({ unlocked: false, claimableRewards: 0 });
 
     const skippedRun = "00000000-0000-4000-8000-000000000032";
     await database.query(
@@ -345,4 +334,102 @@ describe("AchievementService", () => {
       achievementId: "ranked_wins", level: 1,
     });
   });
+});
+
+const seedReward = async (id: string, level = 0, ap = 10) => database.query(
+  `INSERT INTO ranked_achievement_unlocks(player_id,achievement_id,achievement_level,reward_ap,unlocked_at,source_event_key)
+   VALUES($1,$2,$3,$4,CURRENT_TIMESTAMP,'v2-fixture')`, [playerA,id,level,ap]);
+
+describe('Achievement v2 Claim All and cutover', () => {
+  it('returns all 46 cards partitioned 20/18/8 and rejects unknown scopes', async () => {
+    const state=await service.state(playerA);
+    expect(state.achievements).toHaveLength(46);
+    expect(['SOLO_RANKED','SURVIVAL','SHARED'].map(scope=>state.achievements.filter(a=>a.scope===scope).length)).toEqual([20,18,8]);
+    await expect(service.claimAll(playerA,'FORGED' as never)).rejects.toThrow('scope');
+  });
+  it('claims only the selected scope, snapshots AP, groups levels and preserves equipped titles', async () => {
+    await service.state(playerA);
+    await seedReward('ranked_wins',1,5);await seedReward('ranked_wins',2,10);
+    await seedReward('deathmatch_double_hundred',0,200);await seedReward('survival_first_match');await seedReward('dual_mode_debut');
+    await service.equipTitle(playerA,'ranked_wins',1);
+    const result=await service.claimAll(playerA,'SOLO_RANKED');
+    expect(result).toMatchObject({claimedAmount:215,claimedRewards:3,totalAp:215,unclaimedRewardCount:2});
+    expect(result.claimedByAchievement).toContainEqual({achievementId:'ranked_wins',levels:[1,2]});
+    expect(result.claimedByAchievement).toContainEqual({achievementId:'deathmatch_double_hundred',levels:[null]});
+    expect((await service.state(playerA)).equippedTitle?.level).toBe(1);
+    expect((await service.claimAll(playerA,'SURVIVAL')).claimedAmount).toBe(10);
+    expect((await service.claimAll(playerA,'SHARED')).claimedAmount).toBe(10);
+    expect((await service.claimAll(playerA,'ALL'))).toMatchObject({claimedAmount:0,claimedRewards:0,totalAp:235,unclaimedRewardCount:0});
+  });
+  it('serializes Claim/Claim All/retries without a second ledger credit', async () => {
+    await service.state(playerA);
+    for(let level=1;level<=5;level++)await seedReward('ranked_wins',level,[5,10,20,40,75][level-1]);
+    await seedReward('survival_final_perfect_win',0,200);
+    const responses=await Promise.all([service.claim(playerA,'ranked_wins'),service.claimAll(playerA,'ALL'),service.claimAll(playerA,'SOLO_RANKED'),service.claimAll(playerA,'ALL')]);
+    expect(responses.reduce((sum,r)=>sum+r.claimedAmount,0)).toBe(350);
+    expect((await service.state(playerA)).totalAp).toBe(350);
+    expect((await database.query('SELECT amount FROM ranked_ap_ledger WHERE player_id=$1',[playerA])).rows).toHaveLength(6);
+  });
+  it('rolls back the entire claim if any ledger insertion fails, then permits an exact retry', async () => {
+    await service.state(playerA);await seedReward('ranked_wins',1,5);await seedReward('ranked_wins',2,10);
+    let writes=0;
+    const failing:DatabasePort={query:database.query.bind(database),ping:database.ping.bind(database),transaction:operation=>database.transaction(tx=>operation({query:async <R>(sql:string,values:readonly unknown[]=[])=>{
+      if(sql.includes('INSERT INTO ranked_ap_ledger')&&++writes===2)throw new Error('simulated storage failure');
+      return tx.query<R>(sql,values);
+    }}))};
+    await expect(new AchievementService(failing,new FixedClock(),new SequenceIds()).claimAll(playerA,'ALL')).rejects.toThrow('storage failure');
+    expect((await service.state(playerA))).toMatchObject({totalAp:0,unclaimedRewardCount:2});
+    expect((await database.query('SELECT * FROM ranked_ap_ledger')).rows).toHaveLength(0);
+    expect(await service.claimAll(playerA,'ALL')).toMatchObject({claimedAmount:15,claimedRewards:2,totalAp:15});
+  });
+  it('does not infer rewards from pre-cutover results, current tier, bot identity or invalid titles', async () => {
+    await service.state(playerA);
+    await database.query("UPDATE ranked_profiles SET displayed_tier='GOLD',placement_games=5 WHERE player_id=$1",[playerA]);
+    await database.transaction(tx=>service.recordMatchResult(tx,'old',[baseFacts({won:true,reachedGold:true})],new Date('1999-01-01')));
+    await database.query('UPDATE ranked_players SET is_bot=TRUE WHERE id=$1',[playerB]);
+    await database.transaction(tx=>service.recordMatchResult(tx,'debug',[baseFacts({playerId:playerB,won:true,reachedGold:true})],new FixedClock().now()));
+    expect((await service.state(playerA)).unclaimedRewardCount).toBe(0);expect((await service.state(playerB)).unclaimedRewardCount).toBe(0);
+    expect((await database.query('SELECT * FROM ranked_achievement_events')).rows).toHaveLength(0);
+    await expect(service.equipTitle(playerA,'survival_never_below_cutoff')).rejects.toThrow('locked');
+  });
+});
+
+it('resets v1 achievement data once at cutover, preserves LP/MMR/account data and never resets v2 again',async()=>{
+ await service.state(playerA);await seedReward('ranked_wins',1,5);await service.claim(playerA,'ranked_wins');await service.equipTitle(playerA,'ranked_wins',1);
+ await database.query("UPDATE ranked_achievement_metrics SET ranked_wins=300 WHERE player_id=$1",[playerA]);
+ const identity=(await database.query('SELECT * FROM ranked_players ORDER BY id')).rows;
+ const rating=(await database.query('SELECT player_id,hidden_mmr,visible_ranked_score,displayed_tier,placement_games FROM ranked_profiles ORDER BY player_id')).rows;
+ await database.query('DELETE FROM ranked_achievement_versions'); // Test an actual first deployment over populated v1 state.
+ const sql=await readFile(new URL('0027_achievements_v2.sql',directory),'utf8');await pglite.exec(sql);
+ expect((await database.query('SELECT * FROM ranked_players ORDER BY id')).rows).toEqual(identity);
+ expect((await database.query('SELECT player_id,hidden_mmr,visible_ranked_score,displayed_tier,placement_games FROM ranked_profiles ORDER BY player_id')).rows).toEqual(rating);
+ expect((await service.state(playerA))).toMatchObject({totalAp:0,unclaimedRewardCount:0,equippedTitle:null});
+ expect((await database.query('SELECT * FROM ranked_ap_ledger')).rows).toHaveLength(0);
+ expect((await database.query('SELECT ranked_wins FROM ranked_achievement_metrics WHERE player_id=$1',[playerA])).rows[0]).toEqual({ranked_wins:0});
+ await seedReward('survival_first_match');await service.claimAll(playerA,'SURVIVAL');await service.equipTitle(playerA,'survival_first_match');
+ const cutover=(await database.query('SELECT * FROM ranked_achievement_versions')).rows;
+ await pglite.exec(sql);
+ expect((await database.query('SELECT * FROM ranked_achievement_versions')).rows).toEqual(cutover);
+ expect((await service.state(playerA))).toMatchObject({totalAp:10,unclaimedRewardCount:0,equippedTitle:{achievementId:'survival_first_match'}});
+ await database.query("UPDATE ranked_achievement_versions SET activated_at='2000-01-01'");
+});
+it('derives all shared goals from separate post-cutover aggregates without merging LP/MMR',async()=>{
+ await service.state(playerA);
+ const rating=(await database.query('SELECT hidden_mmr,visible_ranked_score FROM ranked_profiles WHERE player_id=$1',[playerA])).rows;
+ // Persisted aggregates are reconstructed by the server, independently in each mode.
+ await database.query(`UPDATE ranked_achievement_metrics SET ranked_matches=20,ranked_wins=5,ranked_clears=1000,
+  survival_matches=25,survival_wins=50,survival_round_survives=100,solo_gold_reached=TRUE,survival_gold_reached=TRUE WHERE player_id=$1`,[playerA]);
+ await database.transaction(tx=>service.recordMatchResult(tx,'00000000-0000-4000-8000-000000000060',[baseFacts()],new FixedClock().now()));
+ const state=await service.state(playerA),shared=state.achievements.filter(c=>c.scope==='SHARED');
+ expect(shared.find(c=>c.id==='shared_matches')).toMatchObject({progress:{metricValue:46,level:1}});
+ expect(shared.find(c=>c.id==='shared_wins')).toMatchObject({progress:{metricValue:55,level:2}});
+ expect(shared.find(c=>c.id==='shared_mastery')).toMatchObject({progress:{metricValue:1100,level:4}});
+ for(const id of ['dual_mode_debut','dual_mode_winner','gold_reached','dual_gold_reached','master_of_two_worlds'])expect(shared.find(c=>c.id===id)).toMatchObject({unlocked:true});
+ expect((await database.query('SELECT hidden_mmr,visible_ranked_score FROM ranked_profiles WHERE player_id=$1',[playerA])).rows).toEqual(rating);
+});
+it('does not turn admin-granted V titles into dual-mode performance mastery',async()=>{
+ await service.state(playerA);await seedReward('ranked_wins',5,75);await seedReward('survival_wins',5,75);
+ await database.transaction(tx=>service.recordMatchResult(tx,'00000000-0000-4000-8000-000000000061',[baseFacts()],new FixedClock().now()));
+ expect((await service.state(playerA)).achievements.find(c=>c.id==='master_of_two_worlds')).toMatchObject({unlocked:false});
+ await expect(service.equipTitle(playerA,'survival_wins',5)).resolves.toMatchObject({equippedTitle:{level:5}});
 });

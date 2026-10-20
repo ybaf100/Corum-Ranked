@@ -2818,9 +2818,11 @@ void RankedRuntime::claimAchievement(std::string const& achievementId) {
     m_view.achievements.loading = true;
     m_view.achievements.error.clear();
     ++m_view.revision;
+    auto const generation=m_sessionGeneration;auto const session=m_sessionToken;
     m_controlRequest.spawn(
         request.post(endpoint("/api/ranked/achievements/" + achievementId + "/claim")),
-        [this](web::WebResponse response) {
+        [this,generation,session](web::WebResponse response) {
+            if(generation!=m_sessionGeneration || session!=m_sessionToken || !m_rankedOpen)return;
             m_controlBusy = false;
             m_view.achievements.loading = false;
             if (!successful(response)) {
@@ -2843,6 +2845,39 @@ void RankedRuntime::claimAchievement(std::string const& achievementId) {
     );
 }
 
+void RankedRuntime::claimAllAchievements(std::string const& scope) {
+    if(m_controlBusy || m_sessionToken.empty() || (scope!="SOLO_RANKED" && scope!="SURVIVAL" && scope!="SHARED"))return;
+    auto request=baseRequest(m_sessionToken);matjson::Value body;body["scope"]=scope;request.bodyJSON(body);
+    m_controlBusy=true;m_view.achievements.loading=true;m_view.achievements.error.clear();++m_view.revision;
+    auto const generation=m_sessionGeneration;auto const session=m_sessionToken;
+    m_controlRequest.spawn(request.post(endpoint("/api/ranked/achievements/claim-all")),[this,generation,session](web::WebResponse response){
+        if(generation!=m_sessionGeneration || session!=m_sessionToken || !m_rankedOpen)return;
+        m_controlBusy=false;m_view.achievements.loading=false;
+        if(!successful(response)){m_view.achievements.error=responseError(response);++m_view.revision;return;}
+        auto const root=response.json().unwrapOr(matjson::Value());observeServerNow(root);
+        auto& state=m_view.achievements;
+        state.totalAp=static_cast<int>(root["totalAp"].asInt().unwrapOr(state.totalAp));
+        state.unclaimedRewardCount=static_cast<int>(root["unclaimedRewardCount"].asInt().unwrapOr(state.unclaimedRewardCount));
+        state.claimedAmount=static_cast<int>(root["claimedAmount"].asInt().unwrapOr(0));
+        state.claimedRewards=static_cast<int>(root["claimedRewards"].asInt().unwrapOr(0));
+        state.claimNoticeSequence=++m_claimNoticeSequence;
+        for(auto const& group:root["claimedByAchievement"].asArray().unwrapOr(std::vector<matjson::Value>{})){
+            auto const id=group["achievementId"].asString().unwrapOr("");
+            auto card=std::find_if(state.cards.begin(),state.cards.end(),[&](auto const& value){return value.id==id;});
+            if(card==state.cards.end())continue;
+            for(auto const& level:group["levels"].asArray().unwrapOr(std::vector<matjson::Value>{}))
+                for(auto& reward:card->unlocks)if(reward.level.value_or(0)==level.asInt().unwrapOr(0))
+                    reward.claimedAt=root["serverNow"].asString().unwrapOr("claimed");
+            card->claimableAp=card->claimableRewards=0;
+            for(auto const& reward:card->unlocks)if(reward.claimedAt.empty()){card->claimableAp+=reward.rewardAp;++card->claimableRewards;}
+            if(card->type=="ONE_SHOT")card->claimed=true;
+        }
+        // Fetch every card/Unlock again. A lost response can safely retry, while
+        // claimed rewards immediately stop contributing to the next button.
+        fetchAchievements();
+    });
+}
+
 void RankedRuntime::equipAchievementTitle(
     std::string const& achievementId,
     std::optional<int> level
@@ -2857,9 +2892,11 @@ void RankedRuntime::equipAchievementTitle(
     m_view.achievements.loading = true;
     m_view.achievements.error.clear();
     ++m_view.revision;
+    auto const generation=m_sessionGeneration;auto const session=m_sessionToken;
     m_controlRequest.spawn(
         request.post(endpoint("/api/ranked/achievements/title/equip")),
-        [this](web::WebResponse response) {
+        [this,generation,session](web::WebResponse response) {
+            if(generation!=m_sessionGeneration || session!=m_sessionToken || !m_rankedOpen)return;
             m_controlBusy = false;
             m_view.achievements.loading = false;
             if (!successful(response)) {
@@ -2882,9 +2919,11 @@ void RankedRuntime::clearAchievementTitle() {
     m_view.achievements.loading = true;
     m_view.achievements.error.clear();
     ++m_view.revision;
+    auto const generation=m_sessionGeneration;auto const session=m_sessionToken;
     m_controlRequest.spawn(
         request.post(endpoint("/api/ranked/achievements/title/clear")),
-        [this](web::WebResponse response) {
+        [this,generation,session](web::WebResponse response) {
+            if(generation!=m_sessionGeneration || session!=m_sessionToken || !m_rankedOpen)return;
             m_controlBusy = false;
             m_view.achievements.loading = false;
             if (!successful(response)) {
