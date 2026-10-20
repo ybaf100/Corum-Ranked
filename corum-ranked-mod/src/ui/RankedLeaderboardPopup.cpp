@@ -33,8 +33,9 @@ public:
     void setTapHandler(std::function<void(CCPoint,CCPoint)> tap){cancelTap();m_tap=std::move(tap);}
     void cancelTap(){m_candidate=false;}
     bool ccTouchBegan(CCTouch* touch,CCEvent* event)override{
+        if(m_touch!=-1){cancelTap();return false;}
         auto const local=convertToNodeSpace(touch->getLocation());auto const size=getContentSize();
-        if(m_touch!=-1 || local.x<0 || local.y<0 || local.x>size.width || local.y>size.height ||
+        if(local.x<0 || local.y<0 || local.x>size.width || local.y>size.height ||
             !ScrollLayer::ccTouchBegan(touch,event))return false;
         m_touch=touch->getID();m_start=touch->getLocation();m_contentY=m_contentLayer->getPositionY();m_candidate=true;return true;
     }

@@ -79,7 +79,8 @@ ${fixed?`auto* scroll=LeaderboardScrollLayer::create({300,180});scroll->setTapHa
  begin();t.p={30,65};move();t.p={30,30};move();end();assert(opens==1);
  ${fixed?`begin();scroll->cancelTap();end();assert(opens==1);begin();scroll->ccTouchCancelled(&t,nullptr);end();assert(opens==1);
  begin();scroll->m_contentLayer->y+=20;end();assert(opens==1);
- begin();CCTouch other{{32,32},2};scroll->ccTouchEnded(&other,nullptr);end();assert(opens==1);
+ begin();CCTouch other{{32,32},2};assert(!scroll->ccTouchBegan(&other,nullptr));end();assert(opens==1);
+ begin();scroll->ccTouchEnded(&other,nullptr);end();assert(opens==1);
  t.p={30,-1};assert(!scroll->ccTouchBegan(&t,nullptr));t.p={301,30};assert(!scroll->ccTouchBegan(&t,nullptr));
  t.p={30,30};begin();t.p={30,181};end();assert(opens==1);delete scroll;`:''}
 }
