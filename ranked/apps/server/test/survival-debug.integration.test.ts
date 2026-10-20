@@ -52,6 +52,7 @@ beforeAll(async()=>{pg=new PGlite();db=new PgliteDatabase(pg);
 },60000);
 afterAll(async()=>{await pg.close();});
 beforeEach(async()=>{
+  await db.query("UPDATE ranked_achievement_versions SET activated_at='2000-01-01',debug_enabled_at='2000-01-01'");
   modRestrictionEnabled=true;
   await pg.exec("TRUNCATE ranked_players,sur_matches CASCADE");now=Date.parse("2026-10-11T12:00:00Z");sequence=100;mapId=40000000;
   document={generation:"m4",generatedAt:clock.now().toISOString(),config:{...DEFAULT_SURVIVAL_CONFIG,enabled:true}};
@@ -399,15 +400,21 @@ describe("Survival M4 persistent debug game",()=>{
     expect((await engine.get(m.id)).state).toBe("PREPARING");
     m=await prepare(m);await record(m,50);expect(sessions.assertEnvironment).toHaveBeenCalledWith(mods);
   });
-  it("settles Debug LP but never grants competitive achievements or AP",async()=>{
+  it("awards Debug Survival achievements and GOLD once through ordinary Claim and title validation",async()=>{
     await survival.profile(session.playerId);await db.query("UPDATE sur_profiles SET lp=1199,displayed_tier='SILVER'");
     const first=await debug.create(session,body(1));expect(first.result).toMatchObject({promoted:true,profileAfter:{tier:"GOLD",lp:1249}});
     await debug.acknowledge(first.matchId,session);const second=await debug.create(session,body(1));
     await Promise.all([debug.view(second.matchId,session),debug.tickOnce()]);
-    expect((await db.query("SELECT * FROM ranked_achievement_unlocks")).rows).toHaveLength(0);
-    expect((await achievements.claim(session.playerId,"gold_reached")).claimedRewards).toBe(0);
+    expect((await db.query("SELECT * FROM ranked_achievement_unlocks WHERE achievement_id='gold_reached'")).rows).toHaveLength(1);
+    expect((await achievements.claim(session.playerId,"gold_reached")).claimedRewards).toBe(1);
+    expect((await achievements.equipTitle(session.playerId,"survival_first_win")).equippedTitle?.achievementId).toBe("survival_first_win");
+    const metrics=(await db.query("SELECT survival_matches,survival_wins,ranked_matches FROM ranked_achievement_metrics WHERE player_id=$1",[session.playerId])).rows[0];
+    expect(metrics).toEqual({survival_matches:2,survival_wins:2,ranked_matches:0});
+    expect(first.result?.achievementUnlocks).toEqual(expect.arrayContaining([expect.objectContaining({achievementId:'survival_first_match'}),expect.objectContaining({achievementId:'survival_first_win'})]));
     expect((await achievements.claim(session.playerId,"gold_reached")).duplicate).toBe(true);
-    expect((await db.query("SELECT * FROM ranked_ap_ledger")).rows).toHaveLength(0);
+    expect((await achievements.claimAll(session.playerId,"SURVIVAL")).claimedAmount).toBeGreaterThan(0);
+    expect((await achievements.claimAll(session.playerId,"SURVIVAL")).claimedAmount).toBe(0);
+    expect((await db.query("SELECT * FROM ranked_ap_ledger WHERE achievement_id='gold_reached'")).rows).toHaveLength(1);
   });
   it("recovers with a replacement session and rejects mutations from the revoked session",async()=>{
     const m=await prepare(await create());await record(m,51);

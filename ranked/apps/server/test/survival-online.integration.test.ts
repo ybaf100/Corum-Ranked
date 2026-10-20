@@ -55,7 +55,7 @@ beforeAll(async()=>{
 afterAll(async()=>{if(pool){await pool.query(`DROP SCHEMA "${testSchema}" CASCADE`);await pool.end();}else await pg.close();});
 afterEach(async()=>{if(app)await app.close();});
 beforeEach(async()=>{
- await db.query("UPDATE ranked_achievement_versions SET activated_at='2000-01-01'");
+ await db.query("UPDATE ranked_achievement_versions SET activated_at='2000-01-01',debug_enabled_at='2000-01-01'");
  await db.query("TRUNCATE ranked_players,sur_matches,sur_mode_state CASCADE");now=Date.parse("2026-10-13T00:00:00Z");sequence=1000;mapId=40000000;clients.length=0;
  document={generation:"online-1",generatedAt:new Date(now).toISOString(),config:{...DEFAULT_SURVIVAL_CONFIG,enabled:true}};
  config=new SurvivalConfigService({fetchConfig:async()=>document},env,db);await config.refresh();

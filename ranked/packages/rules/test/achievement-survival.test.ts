@@ -23,6 +23,13 @@ describe("authoritative Survival achievement facts",()=>{
   m.rounds[0]!.players[0]!.rank=1;expect(survivalAchievementFacts(m,"p")!.oneShots).not.toContain("survival_last_seed_champion");});
  it("excludes debug, cancelled, unfinished, wrong player and bot results",()=>{for(const patch of [{online:false},{state:"CANCELLED"},{state:"PLAYING"},{completionKind:"DEBUG_FORCE"},{finishedAt:null}])expect(survivalAchievementFacts({...fixture(),...patch} as SurvivalMatch,"p")).toBeNull();
   const m=fixture();m.players[0]!.kind="BOT";expect(survivalAchievementFacts(m,"p")).toBeNull();expect(survivalAchievementFacts(fixture(),"missing")).toBeNull();});
+ it("accepts the same human Debug result only through an explicitly trusted server source",()=>{
+  const m=fixture();m.online=false;m.completionKind="DEBUG_FORCE";
+  expect(survivalAchievementFacts(m,"p")).toBeNull();
+  expect(survivalAchievementFacts(m,"p",true)).toMatchObject({won:true,podium:true});
+  m.state="CANCELLED";expect(survivalAchievementFacts(m,"p",true)).toBeNull();m.state="FINAL_RESULT";
+  m.players[0]!.kind="BOT";expect(survivalAchievementFacts(m,"p",true)).toBeNull();
+ });
  it("does not infer a perfect clear or clean champion without valid attempts and round evidence",()=>{const m=fixture();for(const r of m.rounds)r.players[0]!.attempts=[];
   expect(survivalAchievementFacts(m,"p")!.oneShots).not.toContain("survival_final_perfect_win");m.rounds=[];expect(survivalAchievementFacts(m,"p")!.oneShots).not.toContain("survival_clean_champion");});
  it("recomputes best/current streaks in completion order and deduplicates final retries",()=>{const f=survivalAchievementFacts(fixture(),"p")!;const make=(id:string,time:number,won:boolean,podium:boolean):SurvivalAchievementFacts=>({...f,matchId:id,completedAt:time,won,podium});

@@ -2514,7 +2514,7 @@ export class MatchService {
     // When explicitly enabled, it must exercise Achievement progression too so
     // Force Win/Lose and natural Bot Matches can validate the same server-side
     // metrics, unlocks, and Claim flow without changing real PvP authority.
-    if (current.match_type === "RANKED_PVP") {
+    if (current.match_type === "RANKED_PVP" || current.match_type === "DEBUG_BOT") {
       const lastAttemptClears = await transaction.query<LastAttemptClearRow>(
         `SELECT a.player_id, COUNT(*)::int AS clear_count
          FROM ranked_attempts a
@@ -2567,6 +2567,7 @@ export class MatchService {
           factsFor("B", current.player_b_id, ratingB, beforeB, Number(totals.clears_b)),
         ],
         now,
+        current.match_type,
       );
     }
     // Evaluate against the locked pre-match profiles before persisting the new

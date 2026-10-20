@@ -1,3 +1,4 @@
+import type { AchievementUnlockNotice } from "../achievement/achievement.service.js";
 import {survivalResultRoster} from "./survival-result-roster.js";
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, Logger, NotFoundException,
   type OnApplicationBootstrap, type OnApplicationShutdown } from "@nestjs/common";
@@ -27,7 +28,7 @@ export interface SurvivalDebugResult {
   profileBefore:SurvivalRatingProfile; profileAfter:SurvivalRatingProfile;
   promoted:boolean; demoted:boolean; protected:boolean; warningRecoveryLp:number|null;
   bands:{tier:string;minimum:number}[]; standings:ReturnType<typeof survivalResultRoster>;finalStandings?:boolean;
-  completedAt:string; completionKind:string;
+  completedAt:string; completionKind:string;achievementUnlocks?:readonly AchievementUnlockNotice[];
 }
 const terminal=(m:SurvivalMatch)=>["FINAL_RESULT","CANCELLED"].includes(m.state);
 
@@ -243,9 +244,12 @@ export class SurvivalDebugService implements OnApplicationBootstrap,OnApplicatio
     const row=(await this.db.query<DebugRow>("SELECT * FROM sur_debug_matches WHERE match_id=$1",[match.id])).rows[0];
     if(!row)return null;
     if(row.result){
-      if(terminal(match) && !row.result.finalStandings){
-        const result={...row.result,finalStandings:true,standings:survivalResultRoster(match,new Map([[row.human_player_id,row.result]]))};
-        await this.db.query("UPDATE sur_debug_matches SET result=$2::jsonb WHERE match_id=$1",[match.id,JSON.stringify(result)]);return result;
+      if(terminal(match) && (!row.result.finalStandings || (match.state==="FINAL_RESULT" && !Array.isArray(row.result.achievementUnlocks)))){
+        const result:SurvivalDebugResult={...row.result,finalStandings:true,standings:survivalResultRoster(match,new Map([[row.human_player_id,row.result]]))};
+        await this.db.transaction(async tx=>{
+          if(match.state==="FINAL_RESULT")result.achievementUnlocks=await this.survival.recordAchievementsWithin(tx,match.id,row.human_player_id);
+          await tx.query("UPDATE sur_debug_matches SET result=$2::jsonb WHERE match_id=$1",[match.id,JSON.stringify(result)]);
+        });return result;
       }return row.result;
     }
     const inputs=survivalSettlementInputs(match),human=inputs.find(p=>p.playerId===row.human_player_id);if(!human)return null;
@@ -264,6 +268,10 @@ export class SurvivalDebugService implements OnApplicationBootstrap,OnApplicatio
       // projection. Replaying settlement restores the same rating/result.
       await tx.query("UPDATE sur_debug_matches SET result=$2::jsonb,settled_at=$3 WHERE match_id=$1 AND result IS NULL",[match.id,JSON.stringify(result),this.clock.now().toISOString()]);
       for(const p of inputs)await tx.query("UPDATE sur_match_players SET result_lp_delta=$3 WHERE match_id=$1 AND participant_id=$2",[match.id,p.participantId,p.delta]);
+      if(match.state==="FINAL_RESULT"){
+        result.achievementUnlocks=await this.survival.recordAchievementsWithin(tx,match.id,row.human_player_id);
+        await tx.query("UPDATE sur_debug_matches SET result=$2::jsonb WHERE match_id=$1",[match.id,JSON.stringify(result)]);
+      }
     });
     return result;
   }

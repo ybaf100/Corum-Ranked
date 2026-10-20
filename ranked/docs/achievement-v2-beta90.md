@@ -1,5 +1,9 @@
 # Achievement System v2 — beta.90
 
+Later policy update: [beta.91 Debug parity](achievement-debug-beta91.md) enables
+Debug achievements like normal matches without resetting v2 data again. The
+beta.90 Debug exclusion described below is the original release boundary.
+
 ## Release and data boundary
 
 Based on main `528de46950e96ee5c8d970f9fdffea9fa594ba26` (beta.89).

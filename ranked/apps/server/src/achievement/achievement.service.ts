@@ -59,6 +59,7 @@ interface ProfileAchievementRow {
 }
 
 interface HistoricalMatchRow {
+  match_type:"RANKED_PVP"|"DEBUG_BOT";
   id: string;
   player_a_id: string;
   player_b_id: string;
@@ -247,6 +248,7 @@ export class AchievementService {
     matchId: string,
     records: readonly AchievementMatchPlayerRecord[],
     now: Date,
+    sourceType:"RANKED_PVP"|"DEBUG_BOT"="RANKED_PVP",
   ): Promise<Readonly<Record<string, readonly AchievementUnlockNotice[]>>> {
     const notices: Record<string, readonly AchievementUnlockNotice[]> = {};
     for (const record of records) {
@@ -259,6 +261,7 @@ export class AchievementService {
         matchId,
         record,
         now,
+        sourceType==="DEBUG_BOT",
       );
     }
     return notices;
@@ -375,8 +378,9 @@ export class AchievementService {
     matchId: string,
     facts: AchievementMatchFacts,
     now: Date,
+    debug=false,
   ): Promise<readonly AchievementUnlockNotice[]> {
-    if(!await this.eligible(transaction,playerId,now))return [];
+    if(!await this.eligible(transaction,playerId,now,debug))return [];
     const inserted = await this.insertEvent(
       transaction, eventKey, playerId, "MATCH_RESULT", matchId, now,
     );
@@ -394,12 +398,13 @@ export class AchievementService {
     return [...progressive, ...oneShots,...await this.refreshV2Unlocks(transaction,playerId,eventKey,now)];
   }
 
-  private async cutover(transaction:SqlExecutor):Promise<Date> {
-    const row=(await transaction.query<{activated_at:Date|string}>("SELECT activated_at FROM ranked_achievement_versions WHERE version=2")).rows[0];
-    if(!row)throw new ConflictException("Achievement v2 migration is required");return new Date(row.activated_at);
+  private async cutover(transaction:SqlExecutor,debug=false):Promise<Date> {
+    const row=(await transaction.query<{activated_at:Date|string;debug_enabled_at:Date|string|null}>("SELECT activated_at,debug_enabled_at FROM ranked_achievement_versions WHERE version=2")).rows[0];
+    if(!row || (debug && !row.debug_enabled_at))throw new ConflictException("Achievement migration is required");
+    return new Date(debug?Math.max(new Date(row.activated_at).getTime(),new Date(row.debug_enabled_at!).getTime()):row.activated_at);
   }
-  private async eligible(transaction:SqlExecutor,playerId:string,at:Date):Promise<boolean>{
-    if(!Number.isFinite(at.getTime()) || at<await this.cutover(transaction))return false;
+  private async eligible(transaction:SqlExecutor,playerId:string,at:Date,debug=false):Promise<boolean>{
+    if(at<await this.cutover(transaction,debug))return false;
     return !!(await transaction.query<{ok:boolean}>("SELECT TRUE AS ok FROM ranked_players WHERE id=$1 AND gd_account_id>0 AND NOT is_bot",[playerId])).rows[0];
   }
   private async ensureBackfilled(transaction:SqlExecutor,playerId:string,now:Date):Promise<void>{
@@ -408,19 +413,23 @@ export class AchievementService {
     const since=await this.cutover(transaction);
     // v2 starts at the explicit migration cutover, never resurrecting v1 rewards.
     if(await this.eligible(transaction,playerId,now)){
-      const matches=await transaction.query<HistoricalMatchRow>(`SELECT id,player_a_id,player_b_id,winner_id,series_state,rating_presentation,finished_at
-        FROM ranked_matches WHERE match_type='RANKED_PVP' AND state='MATCH_RESULT' AND result_applied_at IS NOT NULL
+      const matches=await transaction.query<HistoricalMatchRow>(`SELECT id,match_type,player_a_id,player_b_id,winner_id,series_state,rating_presentation,finished_at
+        FROM ranked_matches WHERE match_type IN ('RANKED_PVP','DEBUG_BOT') AND state='MATCH_RESULT' AND result_applied_at IS NOT NULL
         AND finished_at >= $2 AND (player_a_id=$1 OR player_b_id=$1) ORDER BY finished_at,id`,[playerId,since.toISOString()]);
       for(const match of matches.rows)await this.applyMatchEvent(transaction,playerId,`match:${match.id}:achievement:${playerId}`,match.id,
-        await this.historicalMatchFacts(transaction,match,playerId),new Date(match.finished_at));
+        await this.historicalMatchFacts(transaction,match,playerId),new Date(match.finished_at),match.match_type==="DEBUG_BOT");
       const placements=await transaction.query<{id:string;finalized_at:Date|string;final_displayed_tier:string}>(`SELECT id,finalized_at,final_displayed_tier FROM ranked_placement_runs
         WHERE player_id=$1 AND completion_kind='COMPLETED' AND finalized_at >= $2 ORDER BY finalized_at,id`,[playerId,since.toISOString()]);
       for(const run of placements.rows){const key=`placement:${run.id}:achievement:${playerId}`;
         if(await this.insertEvent(transaction,key,playerId,"PLACEMENT_RESULT",run.id,new Date(run.finalized_at))){
           if(run.final_displayed_tier==="GOLD")await this.markGold(transaction,playerId,"SOLO_RANKED");
           await this.unlockOneShots(transaction,playerId,["placement_complete"],key,new Date(run.finalized_at));}}
-      const matchesSurvival=await transaction.query<{match_id:string}>(`SELECT o.match_id FROM sur_online_players o JOIN sur_matches m ON m.id=o.match_id
-        WHERE o.player_id=$1 AND o.settled_at IS NOT NULL AND m.state='FINAL_RESULT' AND m.finished_at >= $2 ORDER BY m.finished_at,m.id`,[playerId,since.toISOString()]);
+      const matchesSurvival=await transaction.query<{match_id:string}>(`SELECT match_id FROM (
+        SELECT o.match_id,m.finished_at FROM sur_online_players o JOIN sur_matches m ON m.id=o.match_id
+        WHERE o.player_id=$1 AND o.settled_at IS NOT NULL AND m.state='FINAL_RESULT' AND m.finished_at >= $2
+        UNION ALL SELECT d.match_id,m.finished_at FROM sur_debug_matches d JOIN sur_matches m ON m.id=d.match_id
+        WHERE d.human_player_id=$1 AND d.settled_at IS NOT NULL AND m.state='FINAL_RESULT' AND m.finished_at >= $2
+        ) eligible_matches ORDER BY finished_at,match_id`,[playerId,since.toISOString()]);
       for(const match of matchesSurvival.rows)await this.applySurvivalEvent(transaction,match.match_id,playerId,now);
       await this.refreshV2Unlocks(transaction,playerId,`v2:sync:${playerId}`,now);
     }
@@ -453,15 +462,21 @@ export class AchievementService {
     return this.applySurvivalEvent(tx,matchId,playerId,now);
   }
   private async applySurvivalEvent(tx:SqlExecutor,matchId:string,playerId:string,now:Date):Promise<readonly AchievementUnlockNotice[]>{
-    const row=(await tx.query<{snapshot:unknown;result:unknown}>(`SELECT m.snapshot,o.result FROM sur_matches m
+    const row=(await tx.query<{snapshot:unknown;result:unknown;debug:boolean}>(`
+      SELECT m.snapshot,o.result,FALSE AS debug FROM sur_matches m
       JOIN sur_online_players o ON o.match_id=m.id JOIN ranked_players p ON p.id=o.player_id
       WHERE m.id=$1 AND o.player_id=$2 AND m.state='FINAL_RESULT' AND o.settled_at IS NOT NULL AND o.result IS NOT NULL
-      AND NOT p.is_bot AND p.gd_account_id>0 AND NOT EXISTS(SELECT 1 FROM sur_debug_matches d WHERE d.match_id=m.id)`,[matchId,playerId])).rows[0];
+      AND NOT p.is_bot AND p.gd_account_id>0 AND NOT EXISTS(SELECT 1 FROM sur_debug_matches d WHERE d.match_id=m.id)
+      UNION ALL
+      SELECT m.snapshot,d.result,TRUE AS debug FROM sur_matches m
+      JOIN sur_debug_matches d ON d.match_id=m.id JOIN ranked_players p ON p.id=d.human_player_id
+      WHERE m.id=$1 AND d.human_player_id=$2 AND m.state='FINAL_RESULT' AND d.settled_at IS NOT NULL AND d.result IS NOT NULL
+      AND NOT p.is_bot AND p.gd_account_id>0`,[matchId,playerId])).rows[0];
     if(!row)return [];
     const snapshot=parseObject(row.snapshot) as unknown as SurvivalMatch;
     if(snapshot.id!==matchId || !Array.isArray(snapshot.players)||!Array.isArray(snapshot.rounds))return [];
-    const facts=survivalAchievementFacts(snapshot,playerId);
-    if(!facts||!await this.eligible(tx,playerId,new Date(facts.completedAt)))return [];
+    const facts=survivalAchievementFacts(snapshot,playerId,row.debug);
+    if(!facts||!await this.eligible(tx,playerId,new Date(facts.completedAt),row.debug))return [];
     const key=`survival:${matchId}:achievement:${playerId}`;
     if(!await this.insertEvent(tx,key,playerId,"SURVIVAL_RESULT",matchId,new Date(facts.completedAt)))return this.noticesForSource(tx,playerId,key);
     await tx.query(`INSERT INTO ranked_survival_achievement_facts(player_id,match_id,completed_at,facts) VALUES($1,$2,$3,$4::jsonb)

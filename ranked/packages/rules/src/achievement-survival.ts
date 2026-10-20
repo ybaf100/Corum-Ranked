@@ -26,9 +26,9 @@ const perfect=(r:SurvivalRound,p:SurvivalRoundPlayer):boolean=>placed(p) && p.en
  p.attempts.some(a=>a.endedAt!==null && a.startedAt>=r.startsAt! && a.highestProgress===100);
 
 /** Input is the stored server snapshot, never UI standings, LP edits or a client event. */
-export function survivalAchievementFacts(match:SurvivalMatch,playerId:string):SurvivalAchievementFacts|null {
- if(match.online!==true || match.state!=="FINAL_RESULT" || match.finishedAt===null || !Number.isFinite(match.finishedAt) ||
-    (match.completionKind && match.completionKind!=="BOTS_ONLY_RESULT"))return null;
+export function survivalAchievementFacts(match:SurvivalMatch,playerId:string,debugSource=false):SurvivalAchievementFacts|null {
+ if((match.online!==true && !debugSource) || match.state!=="FINAL_RESULT" || match.finishedAt===null || !Number.isFinite(match.finishedAt) ||
+    (match.completionKind && match.completionKind!=="BOTS_ONLY_RESULT" && !(debugSource && ["DEBUG_FORCE","DEBUG_HUMAN_ELIMINATION"].includes(match.completionKind))))return null;
  const own=match.players.find(p=>p.playerId===playerId && p.kind==="HUMAN");
  if(!own || own.finalRank===null || !Number.isSafeInteger(own.finalRank) || own.finalRank<1)return null;
  const rounds=match.rounds.filter(validRound);

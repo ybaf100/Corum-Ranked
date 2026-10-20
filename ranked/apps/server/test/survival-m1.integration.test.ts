@@ -49,7 +49,7 @@ beforeAll(async()=>{
 afterAll(async()=>{await pg.close();});
 beforeEach(async()=>{
   await database.query("TRUNCATE ranked_players,ranked_config_snapshots CASCADE");
-  await database.query("UPDATE ranked_achievement_versions SET activated_at='2000-01-01'");
+  await database.query("UPDATE ranked_achievement_versions SET activated_at='2000-01-01',debug_enabled_at='2000-01-01'");
   milliseconds=Date.parse("2026-10-11T10:00:00Z"); sequence=100;
   soloDocument=configDocumentFixture("solo-m1");
   survivalDocument={generation:"sur-m1",generatedAt:clock.now().toISOString(),config:structuredClone(DEFAULT_SURVIVAL_CONFIG)};

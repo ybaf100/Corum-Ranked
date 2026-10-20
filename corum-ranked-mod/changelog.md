@@ -1,3 +1,9 @@
+# v0.5.0-beta.91
+
+- Solo Debug Bot and Survival Debug now unlock achievements, count progression and allow AP/title claims using the same predicates as normal matches.
+- Debug settlement emits result Unlock notices and remains idempotent through recovery, repeated views and Claim All retries.
+- Preserve v2 achievements/AP/titles; migration 0028 records the Debug eligibility activation time without repeating the v2 reset. Observer, practice and local replay remain non-scoring.
+
 # v0.5.0-beta.90
 
 - Extend Achievements to 46 server-authoritative Solo/Survival/Shared goals with Mythic rarity, independent I–V rewards, normal-game eligibility and completion-ordered Survival streaks.

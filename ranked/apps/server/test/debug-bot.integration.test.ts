@@ -96,6 +96,7 @@ beforeAll(async () => {
     const path = fileURLToPath(new URL(`../../../migrations/${migrationName}`, import.meta.url));
     await pglite.exec(await readFile(path, "utf8"));
   }
+  await database.query("UPDATE ranked_achievement_versions SET activated_at='2000-01-01',debug_enabled_at='2000-01-01'");
 }, 60_000);
 
 afterAll(async () => {
@@ -630,9 +631,8 @@ describe("development-only Bot Match using the production Ranked engine", () => 
        FROM ranked_achievement_metrics WHERE player_id = $1`,
       [player.playerId],
     );
-    expect(Number(achievementMetrics.rows[0]?.ranked_matches ?? 0)).toBe(0);
-    expect(Number(achievementMetrics.rows[0]?.ranked_wins ?? 0)).toBe(0);
-    expect(state.result.achievementUnlocks.A).toEqual([]);
+    expect(Number(achievementMetrics.rows[0]?.ranked_matches ?? 0)).toBe(1);
+    expect(Number(achievementMetrics.rows[0]?.ranked_wins ?? 0)).toBe(expectedWins);
   });
 
   it("applies maximum Ranked MMR and PERFECT WIN for a natural no-loss three-Clear victory", async () => {

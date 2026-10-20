@@ -73,7 +73,7 @@ beforeAll(async () => {
     const path = fileURLToPath(new URL(`../../../migrations/${migration}`, import.meta.url));
     await pglite.exec(await readFile(path, "utf8"));
   }
-  await database.query("UPDATE ranked_achievement_versions SET activated_at='2000-01-01'");
+  await database.query("UPDATE ranked_achievement_versions SET activated_at='2000-01-01',debug_enabled_at='2000-01-01'");
   service = new AchievementService(database, new FixedClock(), new SequenceIds());
 }, 60_000);
 
@@ -82,6 +82,7 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
+  await database.query("UPDATE ranked_achievement_versions SET activated_at='2000-01-01',debug_enabled_at='2000-01-01'");
   await pglite.exec("TRUNCATE TABLE ranked_config_snapshots, ranked_players CASCADE");
   await database.query(
     `INSERT INTO ranked_players (id, gd_account_id, gd_username) VALUES
@@ -411,7 +412,7 @@ it('resets v1 achievement data once at cutover, preserves LP/MMR/account data an
  await pglite.exec(sql);
  expect((await database.query('SELECT * FROM ranked_achievement_versions')).rows).toEqual(cutover);
  expect((await service.state(playerA))).toMatchObject({totalAp:10,unclaimedRewardCount:0,equippedTitle:{achievementId:'survival_first_match'}});
- await database.query("UPDATE ranked_achievement_versions SET activated_at='2000-01-01'");
+ await database.query("UPDATE ranked_achievement_versions SET activated_at='2000-01-01',debug_enabled_at='2000-01-01'");
 });
 it('derives all shared goals from separate post-cutover aggregates without merging LP/MMR',async()=>{
  await service.state(playerA);
@@ -432,4 +433,18 @@ it('does not turn admin-granted V titles into dual-mode performance mastery',asy
  await database.transaction(tx=>service.recordMatchResult(tx,'00000000-0000-4000-8000-000000000061',[baseFacts()],new FixedClock().now()));
  expect((await service.state(playerA)).achievements.find(c=>c.id==='master_of_two_worlds')).toMatchObject({unlocked:false});
  await expect(service.equipTitle(playerA,'survival_wins',5)).resolves.toMatchObject({equippedTitle:{level:5}});
+});
+
+it('enables Debug parity without resetting earned v2 AP/titles and excludes results before its separate activation time',async()=>{
+ await service.state(playerA);await seedReward('ranked_wins',1,5);await service.claim(playerA,'ranked_wins');await service.equipTitle(playerA,'ranked_wins',1);
+ const sql=await readFile(new URL('0028_debug_achievement_parity.sql',directory),'utf8');
+ const before=(await database.query('SELECT * FROM ranked_achievement_versions')).rows;
+ await pglite.exec(sql);await pglite.exec(sql);
+ expect((await database.query('SELECT * FROM ranked_achievement_versions')).rows).toEqual(before);
+ expect((await service.state(playerA))).toMatchObject({totalAp:5,equippedTitle:{achievementId:'ranked_wins',level:1}});
+ await database.query("UPDATE ranked_achievement_versions SET debug_enabled_at='2020-01-01'");
+ await database.transaction(tx=>service.recordMatchResult(tx,'00000000-0000-4000-8000-000000000080',[baseFacts({won:true})],new Date('2010-01-01'),'DEBUG_BOT'));
+ expect((await database.query('SELECT ranked_matches FROM ranked_achievement_metrics WHERE player_id=$1',[playerA])).rows[0]).toEqual({ranked_matches:0});
+ await database.transaction(tx=>service.recordMatchResult(tx,'00000000-0000-4000-8000-000000000081',[baseFacts({won:true})],new Date('2021-01-01'),'DEBUG_BOT'));
+ expect((await database.query('SELECT ranked_matches,ranked_wins FROM ranked_achievement_metrics WHERE player_id=$1',[playerA])).rows[0]).toEqual({ranked_matches:1,ranked_wins:1});
 });
