@@ -131,7 +131,7 @@ void drain(){auto queued=std::exchange(work,{});for(auto& f:queued)f();}
 std::string preparationContextText(LevelPreparationContext const& c){return c.matchId+":"+std::to_string(c.levelId)+":"+std::to_string(c.round);}
 bool inUpdate=false;
 struct RankedRoundPreparation{int launches=0;bool success=true;static RankedRoundPreparation& get(){static RankedRoundPreparation p;return p;}bool launch(CCScene*){assert(!inUpdate);++launches;return success;}};
-struct SurvivalRuntime{std::int64_t sync=1;std::int64_t serverSyncMillis(){return sync;}bool enter=true,pending=false;bool surrenderPending()const{return pending;}LevelPreparationContext context{"match",40000000,1,0,false,0,0};static SurvivalRuntime& get(){static SurvivalRuntime r;return r;}auto preparationContext(){return context;}bool canEnter(){return enter;}bool canEnterObserver(){return false;}};
+struct SurvivalRuntime{std::int64_t sync=1;std::int64_t serverSyncMillis(){return sync;}bool enter=true,pending=false;bool surrenderPending()const{return pending;}LevelPreparationContext context{"match",40000000,1,0,false,0,0};static SurvivalRuntime& get(){static SurvivalRuntime r;return r;}auto preparationContext(){return context;}bool canEnter(){return enter;}bool canEnterObserver(){return false;}bool canReplayCleared(){return false;}};
 template<class T>struct WeakRef{T* pointer;explicit WeakRef(T* p):pointer(p){}struct Locked{T* ptr;explicit operator bool()const{return ptr&&ptr->alive;}T* operator->(){return ptr;}T* data(){return ptr;}};auto lock()const{return Locked{pointer};}};
 struct Dialog{bool alive=true;CCScene* parent=nullptr;CCScene* getParent(){return parent;}};
 struct Selection{bool complete=true;bool settled()const{return complete;}};
@@ -187,7 +187,7 @@ struct CCSprite:CCNode{CCPoint anchor{0,.5f},size{58,8},world{0,0};float scale=2
  CCPoint convertToNodeSpace(CCPoint p){auto a=getAnchorPointInPoints();return {(p.x-world.x)/scale+a.x,(p.y-world.y)/scale+a.y};}
 };
 template<class T>struct WeakRef{T* pointer=nullptr;WeakRef()=default;explicit WeakRef(T* p):pointer(p){}struct Locked{T* ptr;explicit operator bool()const{return ptr&&ptr->alive;}T* operator->(){return ptr;}T* data(){return ptr;}};auto lock()const{return Locked{pointer};}};
-namespace corum::ranked {struct SurvivalRuntime{static auto& get(){static SurvivalRuntime r;return r;}bool observing()const{return false;}};struct SurvivalMatchView{std::string ownId;std::optional<double> cutoff;std::vector<SurvivalStanding> standings;};}
+namespace corum::ranked {struct SurvivalRuntime{static auto& get(){static SurvivalRuntime r;return r;}bool observing()const{return false;}};struct SurvivalMatchView{std::string ownId,phase="ROUND_1";std::optional<double> cutoff;std::vector<SurvivalStanding> standings;};}
 namespace corum::ranked::ui {struct SurvivalHud{WeakRef<CCSprite> m_progressBar,m_progressFill;WeakRef<CCDrawNode> m_progressLines;float m_progressWidth=0,m_progressHeight=0;SurvivalScoreTween m_personalBest;
  void attachProgressBar(CCSprite*,CCSprite*,float,float);void presentProgressMarkers(SurvivalMatchView const&);};
 ${method(source,'void SurvivalHud::attachProgressBar(')}
@@ -212,6 +212,9 @@ int main(){using namespace corum::ranked;using corum::ranked::ui::SurvivalHud;
  view.cutoff=100;hud.presentProgressMarkers(view);
  assert(lines->segments[0].a.x==lines->segments[2].a.x&&lines->segments[2].a.x==lines->segments[5].a.x);
  assert(lines->segments[1].a.y!=lines->segments[3].a.y&&lines->segments[3].a.y!=lines->segments[6].a.y);
+ for(auto const* phase:{"FINAL","TIEBREAK"}){view.phase=phase;hud.presentProgressMarkers(view);
+ assert(lines->segments.size()==2);for(auto const& segment:lines->segments)assert(segment.tint.r>.9f&&segment.tint.g>.7f);
+ }
  view.cutoff.reset();view.standings.clear();hud.presentProgressMarkers(view);assert(lines->segments.empty());
  fill.alive=false;hud.presentProgressMarkers(view);assert(!lines->visible&&lines->segments.empty());
  delete lines;

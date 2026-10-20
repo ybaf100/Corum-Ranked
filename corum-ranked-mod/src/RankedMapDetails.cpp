@@ -27,6 +27,9 @@ void RankedMapDetails::remember(GJGameLevel* level) {
     // Actual seconds come from explicit server metadata; native gives a grade.
     if(level->m_levelLength>=0 && level->m_levelLength<=4)metadata.lengthCategory=level->m_levelLength;
     auto const previous = m_cache.find(id);
+    if(previous!=m_cache.end() && demon){
+        metadata.gddlTier=previous->second.metadata.gddlTier;metadata.gddlColor=previous->second.metadata.gddlColor;
+    }
     if (previous == m_cache.end() || previous->second.difficulty != value || previous->second.metadata != metadata) ++m_revision;
     m_cache[id] = {value, std::chrono::steady_clock::now(),metadata};
     // The lifetime cache only serves UI; bound it rather than retain every map visited.

@@ -28,9 +28,8 @@ class SurvivalThumbnailProvider final : public cocos2d::CCNode {
     std::optional<Decode> m_decode;
     std::map<std::string,Entry> m_cache;
     std::map<std::string,std::int64_t> m_negative;
-    std::string m_context,m_reveal;
+    std::string m_context,m_reveal,m_poolMatch,m_poolReveal;
     std::vector<std::uint64_t> m_candidates;
-    std::deque<std::uint64_t> m_recent;
     void candidate(std::uint64_t id);
     std::uint64_t m_generation=0,m_selected=0;
     int m_randomRequests=0,m_httpRequests=0;

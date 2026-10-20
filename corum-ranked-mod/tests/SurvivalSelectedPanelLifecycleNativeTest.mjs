@@ -28,7 +28,7 @@ struct Panel{
  int m_levelId=42,m_layout=0;std::uint64_t m_metadataRevision=7;
  bool m_thumbnail=false,m_ldmSupported=false,m_built=false,removed=false;
  corum::ranked::MapMetadata m_mapMetadata;
- std::string m_creatorText="by Creator",m_statusText="MAP READY / AUDIO READY";
+ std::string m_creatorText="by Creator",m_statusText="MAP READY / AUDIO READY",m_songText="Song - Previous";
  void removeAllChildrenWithCleanup(bool){removed=true;}
  `+rebuild+String.raw`
 };
@@ -40,7 +40,7 @@ int main(){Panel p;p.m_mapMetadata.kind="NORMAL";p.m_mapMetadata.stars=5;p.m_map
   p.build({568,320},thumbnail,ldm);assert(p.removed&&p.m_built);
   assert(p.m_difficulty==nullptr); // No future removeFromParent on a destroyed node.
   assert(p.m_levelId!=42||p.m_metadataRevision!=7||p.m_mapMetadata!=metadata);
-  assert(p.m_creatorText.empty()&&p.m_statusText.empty());
+  assert(p.m_creatorText.empty()&&p.m_statusText.empty()&&p.m_songText.empty());
   assert(p.m_thumbnail==thumbnail&&p.m_ldmSupported==ldm);
  }
 }`);

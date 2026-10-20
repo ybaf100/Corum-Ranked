@@ -10,7 +10,7 @@
 using namespace geode::prelude;
 namespace corum::ranked::ui {
 namespace {
-ccColor3B color(SurvivalStanding const& row) {auto c=survivalRankColor(row.rank,row.passing);return ccc3(c.r,c.g,c.b);}
+ccColor3B color(SurvivalStanding const& row) {auto c=survivalRankColor(row.rank,row.passing && !row.eliminated);return ccc3(c.r,c.g,c.b);}
 void fade(RankedHudLabel const& label,bool visible) {
     for(auto* node:{label.foreground,label.shadow}) {
         node->stopActionByTag(7415);auto* action=CCFadeTo::create(.15f,visible?(node==label.foreground?255:205):0);
@@ -105,8 +105,8 @@ void SurvivalHud::present(SurvivalMatchView const& view,std::int64_t remainingMs
                 CCEaseBackOut::create(CCScaleTo::create(.14f,fontScale(label,2.10f))),CCEaseSineInOut::create(CCScaleTo::create(.24f,fontScale(label,1.68f))),nullptr));}}
         auto const reference=view.roundNumber>=4?view.first:view.cutoff;
         if(reference){auto const delta=deathmatch?own->score-*reference:std::trunc(own->score)-std::trunc(*reference);
-            m_difference.text(rankedScoreText(delta,deathmatch,true));m_difference.color(delta<0?Red:delta>0?Green:Text);}
-        else m_difference.text("-");
+            m_difference.text(rankedScoreText(delta,deathmatch,true));m_difference.color(color(*own));}
+        else {m_difference.text("-");m_difference.color(color(*own));}
         m_waiting.text(own->waiting?i18n::text("survival-attempts-finished","ATTEMPTS COMPLETE · WAITING FOR RESULTS"):"");
     }
     m_round.text(deathmatch?"DEATH MATCH":view.phase=="FINAL"?i18n::text("final","FINAL"):fmt::format("{} {}",i18n::text("round","ROUND"),view.roundNumber));
@@ -134,10 +134,10 @@ void SurvivalHud::presentProgressMarkers(SurvivalMatchView const& view) {
         auto const right=bar->convertToNodeSpace(fill->convertToWorldSpace({x+2,y-capDepth}));
         lines->drawSegment(left,right,.65f,tint);
     };
-    if(view.cutoff)draw(*view.cutoff,.95f,{1,.32f,.41f,1},2);
+    if(view.phase!="FINAL" && view.phase!="TIEBREAK" && view.cutoff)draw(*view.cutoff,.95f,{1,.32f,.41f,1},2);
     if(!view.standings.empty())draw(view.standings.front().score,.5f,{1,.83f,.31f,1},4);
     auto const hasOwn=std::any_of(view.standings.begin(),view.standings.end(),[&](auto const& row){return row.id==view.ownId;});
-    if(auto* game=GameManager::sharedState();game && hasOwn && !SurvivalRuntime::get().observing()) {
+    if(auto* game=GameManager::sharedState();game && hasOwn && view.phase!="FINAL" && view.phase!="TIEBREAK" && !SurvivalRuntime::get().observing()) {
         auto const tint=game->colorForIdx(game->getPlayerColor());
         auto const x=origin.x+survivalProgressMarkerX(m_personalBest.displayed,m_progressWidth)-anchor.x*m_progressWidth;
         auto const y=origin.y-anchor.y*m_progressHeight;

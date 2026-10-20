@@ -48,20 +48,18 @@ void SurvivalThumbnailProvider::activate(SurvivalSelectionContext const& context
         if(context.levelId && m_selected!=context.levelId){m_selected=context.levelId;enqueue({m_selected,false});enqueue({m_selected,true},true);}
         return;
     }
-    if(context.revealKey()!=m_reveal){
-        for(auto id:m_candidates)m_recent.push_back(id);
-        while(m_recent.size()>28)m_recent.pop_front();
-        m_candidates.clear();m_reveal=context.revealKey();
+    if(context.matchId!=m_poolMatch){
+        m_candidates.clear();m_poolMatch=context.matchId;m_poolReveal=context.revealKey();m_randomRequests=0;
     }
-    deactivate();m_context=identity;m_selected=context.levelId;m_enabled=enabled;m_randomRequests=0;m_httpRequests=0;
+    m_reveal=context.revealKey();
+    deactivate();m_context=identity;m_selected=context.levelId;m_enabled=enabled;m_httpRequests=0;
     m_liveness=std::make_shared<std::atomic_bool>(enabled);
     if(!enabled)return;
     for(auto id:m_candidates)enqueue({id,false});
     if(m_selected){enqueue({m_selected,false});enqueue({m_selected,true},true);}
 }
 void SurvivalThumbnailProvider::candidate(std::uint64_t id){
-    if(!id || id==m_selected || m_candidates.size()>=7 || std::find(m_candidates.begin(),m_candidates.end(),id)!=m_candidates.end())return;
-    if(m_randomRequests<12 && std::find(m_recent.begin(),m_recent.end(),id)!=m_recent.end())return;
+    if(!id || id==m_selected || m_candidates.size()>=10 || std::find(m_candidates.begin(),m_candidates.end(),id)!=m_candidates.end())return;
     m_candidates.push_back(id);
 }
 void SurvivalThumbnailProvider::deactivate(){
@@ -82,8 +80,8 @@ void SurvivalThumbnailProvider::enqueue(Job job,bool front){
     if(front)m_jobs.push_front(job);else m_jobs.push_back(job);
 }
 void SurvivalThumbnailProvider::begin(std::size_t index,Job job){
-    if(job.random && m_randomRequests>=14)return;
-    if(m_httpRequests>=24)return;
+    if(job.random && (m_randomRequests>=20 || m_reveal!=m_poolReveal))return;
+    if(m_httpRequests>=40)return;
     ++m_httpRequests;
     if(job.random)++m_randomRequests;
     auto& slot=m_slots[index];slot.busy=true;slot.job=job;slot.began=now();auto const ticket=++slot.ticket,generation=m_generation;
@@ -167,8 +165,11 @@ void SurvivalThumbnailProvider::cache(Decode const& work,Decoded decoded){
 void SurvivalThumbnailProvider::trim(){
     auto total=[&]{std::size_t n=0;for(auto const& [k,e]:m_cache)n+=e.bytes;return n;};
     while(m_cache.size()>12 || total()>16*1024*1024){
-        auto victim=m_cache.end();for(auto it=m_cache.begin();it!=m_cache.end();++it)
-            if(it->second.id!=m_selected && (victim==m_cache.end() || it->second.used<victim->second.used))victim=it;
+        auto victim=m_cache.end();for(auto it=m_cache.begin();it!=m_cache.end();++it){
+            auto const pooled=!it->second.medium && std::find(m_candidates.begin(),m_candidates.end(),it->second.id)!=m_candidates.end();
+            auto const victimPooled=victim!=m_cache.end() && !victim->second.medium && std::find(m_candidates.begin(),m_candidates.end(),victim->second.id)!=m_candidates.end();
+            if(it->second.id!=m_selected && (victim==m_cache.end() || (victimPooled && !pooled) || (victimPooled==pooled && it->second.used<victim->second.used)))victim=it;
+        }
         if(victim==m_cache.end())break;m_cache.erase(victim);
     }
 }
@@ -203,7 +204,9 @@ void SurvivalThumbnailProvider::update(float){
     auto const outstanding=std::count_if(m_jobs.begin(),m_jobs.end(),[](auto const& j){return !j.medium;})+
         std::count_if(m_slots.begin(),m_slots.end(),[](auto const& slot){return slot.busy&&!slot.job.medium;})+
         static_cast<int>(m_encoded.size())+static_cast<int>(m_decode.has_value());
-    if(smallThumbnailCount+outstanding<7 && m_randomRequests<14 && m_httpRequests<24 && m_jobs.size()<3)enqueue({0,false,true});
+    // Download a bounded pool during the first intro only. Later rounds rotate
+    // these cached images instead of racing a new random download against a reel.
+    if(m_reveal==m_poolReveal && smallThumbnailCount+outstanding<10 && m_randomRequests<20 && m_httpRequests<40 && m_jobs.size()<3)enqueue({0,false,true});
     auto selectedDisk=[&](Job const& job){return !job.random && !job.network && job.id==m_selected;};
     auto const awaitingSelectedDisk=std::any_of(m_jobs.begin(),m_jobs.end(),selectedDisk) ||
         std::any_of(m_encoded.begin(),m_encoded.end(),[&](auto const& e){return selectedDisk(e.job);}) ||
@@ -227,7 +230,9 @@ Ref<CCTexture2D> SurvivalThumbnailProvider::selected(){
 std::vector<std::pair<std::uint64_t,Ref<CCTexture2D>>> SurvivalThumbnailProvider::previews(){
     std::vector<std::pair<std::uint64_t,Ref<CCTexture2D>>> result;std::set<std::uint64_t> ids;
     if(m_invalidTextureCache)return result;
-    for(auto id:m_candidates){auto it=m_cache.find(key({id,false}));if(it!=m_cache.end() && ids.insert(id).second){it->second.used=now();result.emplace_back(id,it->second.texture);}}
+    // Round identity changes the order/subset, never the shared cache identity.
+    auto const offset=m_candidates.empty()?0:std::hash<std::string>{}(m_reveal)%m_candidates.size();
+    for(std::size_t n=0;n<m_candidates.size() && result.size()<7;++n){auto const id=m_candidates[(n+offset)%m_candidates.size()];if(id==m_selected)continue;auto it=m_cache.find(key({id,false}));if(it!=m_cache.end() && ids.insert(id).second){it->second.used=now();result.emplace_back(id,it->second.texture);}}
     return result;
 }
 }

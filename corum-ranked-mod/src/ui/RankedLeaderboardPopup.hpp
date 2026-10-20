@@ -26,8 +26,9 @@ private:
         PlayerIcon* icon = nullptr;
         cocos2d::CCDrawNode* shine = nullptr;
         LeaderboardEntry entry;
+        CCMenuItemSpriteExtra* action=nullptr;
     };
-    bool init();
+    bool init() override;
     void fetch(int offset);
     void showRows(matjson::Value const& data);
     void showError();
@@ -37,6 +38,7 @@ private:
     void updateButtons();
     void onMode(cocos2d::CCObject*);
     void onSearch(cocos2d::CCObject*);
+    void onPlayerInfo(cocos2d::CCObject*);
     RankedMode m_mode = RankedMode::SoloRanked;
     CCMenuItemSpriteExtra* m_survivalTab = nullptr;
     CCMenuItemSpriteExtra* m_soloTab = nullptr;

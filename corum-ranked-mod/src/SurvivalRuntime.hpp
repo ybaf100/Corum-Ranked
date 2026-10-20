@@ -63,6 +63,9 @@ public:
     int watchLockSeconds() const;
     bool canEnterObserver() const;
     bool armObserver(GJGameLevel*,cocos2d::CCScene*);
+    bool canReplayCleared() const;
+    bool armClearedReplay(GJGameLevel*,cocos2d::CCScene*);
+    void leaveObserver();
     bool previouslyEntered() const;
     void noteNativeLaunch();
     void observerReturned();
@@ -107,6 +110,8 @@ public:
     bool canForceClear() const;
     bool forceClearPending() const {return m_forceClearBody.has_value();}
     void forceClear();
+    bool canEndRound() const;
+    void endRound();
 #endif
 private:
     void pumpSurrenderReturn();

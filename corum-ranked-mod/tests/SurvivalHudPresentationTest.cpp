@@ -45,6 +45,8 @@ int main() {
     assert((survivalRankColor(1,true)==SurvivalHudColor{255,211,78}));
     assert((survivalRankColor(4,false)==SurvivalHudColor{255,82,105}));
     assert(survivalRankColor(4,true)!=survivalRankColor(4,false));
+    for(int rank=1;rank<=16;++rank)assert((survivalRankColor(rank,false)==SurvivalHudColor{255,82,105}));
+    for(int rank=6;rank<=16;++rank)assert((survivalRankColor(rank,true)==SurvivalHudColor{90,239,133}));
     assert(survivalOrdinal(1)=="1st"&&survivalOrdinal(2)=="2nd"&&survivalOrdinal(3)=="3rd");
     assert(survivalOrdinal(11)=="11th"&&survivalOrdinal(12)=="12th"&&survivalOrdinal(13)=="13th"&&survivalOrdinal(15)=="15th");
     SurvivalScoreTween score{70,70};score.observe(94);score.advance(.1);assert(score.displayed>70&&score.displayed<94);

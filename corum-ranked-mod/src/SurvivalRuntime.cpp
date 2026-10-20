@@ -317,7 +317,7 @@ int SurvivalRuntime::watchLockSeconds() const {
     return at>0?survivalWatchLock(m_clock.serverNowMillis(localNow()),at):5;
 }
 void SurvivalRuntime::observerReturned(){
-    if(!m_freePlay.active || !m_freePlay.observer)return;
+    if(!m_freePlay.active)return;
     auto origin=m_freePlayOrigin?m_freePlayOrigin->lock():Ref<CCScene>();
     if(origin && CCDirector::sharedDirector()->getRunningScene()==origin.data()){
         m_freePlay.finish();m_freePlayOrigin.reset();m_freePlayQuitLevel=nullptr;m_freePlayQuitScene.reset();m_freePlayNativeQuitFinished=false;
@@ -531,6 +531,21 @@ bool SurvivalRuntime::armObserver(GJGameLevel* level,CCScene* origin){
     m_freePlayOrigin.emplace(origin);m_freePlayNativeQuitFinished=false;m_freePlayQuitLevel=nullptr;m_freePlayQuitScene.reset();
     log::info("[SurvivalObserver] local-only launch match={} round={} level={}",m_view.id,m_view.roundKey,m_view.map.levelId);return true;
 }
+bool SurvivalRuntime::canReplayCleared() const {
+    return canFreePlay() && remainingMs()>0 && m_prepared.valid() && m_prepared==preparationContext();
+}
+bool SurvivalRuntime::armClearedReplay(GJGameLevel* level,CCScene* origin){
+    if(!canReplayCleared() || !validateNative(level) || !origin || origin!=CCDirector::sharedDirector()->getRunningScene())return false;
+    m_freePlay.begin({m_view.id,m_view.roundKey,m_view.mapGeneration},m_view.completedRound["key"].asString().unwrapOr(""));
+    m_freePlayOrigin.emplace(origin);m_freePlayNativeQuitFinished=false;m_freePlayQuitLevel=nullptr;m_freePlayQuitScene.reset();
+    log::info("[SurvivalReplay] local-only cleared replay match={} round={} level={}",m_view.id,m_view.roundKey,m_view.map.levelId);return true;
+}
+void SurvivalRuntime::leaveObserver(){
+    if(!observing())return;
+    chooseOutcome(SurvivalOutcomeChoice::PersonalResult);
+    if(m_freePlay.active && m_freePlay.observer)m_freePlay.returnRequested=true;
+    pumpFreePlayReturn();
+}
 bool SurvivalRuntime::beginFreePlay() {
     auto* director=CCDirector::sharedDirector();auto* scene=director->getRunningScene();
     if(!canFreePlay() || !scene || !scene->getChildByID("survival-game-coordinator"_spr) || director->getNextScene())return false;
@@ -567,7 +582,7 @@ void SurvivalRuntime::pumpFreePlayReturn() {
         if(!scene || director->getRunningScene()!=scene.data() || director->getNextScene() || !freePlayReturnPending())return;
         auto quitScene=m_freePlayQuitScene?m_freePlayQuitScene->lock():Ref<CCScene>();
         auto* play=PlayLayer::get();
-        if(!(m_freePlayNativeQuitFinished && quitScene.data()==scene.data()) && play && play->isRunning() && play->getParent()==scene.data()){
+        if(!(m_freePlayNativeQuitFinished && quitScene.data()==scene.data()) && play && play->getParent()==scene.data()){
             requestSurvivalGameplayReturn(play);return;
         }
         auto origin=m_freePlayOrigin?m_freePlayOrigin->lock():Ref<CCScene>();
@@ -658,32 +673,44 @@ void SurvivalRuntime::forceClear() {
 }
 void SurvivalRuntime::pumpForceClear() {
     if(!forceClearPending())return;
+    auto const ending=(*m_forceClearBody)["type"].asString().unwrapOr("")=="DEBUG_END_ROUND";
     if((*m_forceClearBody)["roundKey"].asString().unwrapOr("")!=m_view.roundKey ||
         (*m_forceClearBody)["mapGeneration"].asInt().unwrapOr(0)!=m_view.mapGeneration || !active() ||
         m_view.state!="PLAYING" || m_view.ownEliminated){
         m_forceClearRequest.cancel();m_forceClearBusy=false;m_forceClearBody.reset();m_view.error="Survival state changed. Synchronizing...";return;
     }
     // Poll recovers a committed request whose HTTP response was lost.
-    if(normalRoundCleared()){
+    if(!ending && normalRoundCleared()){
         m_forceClearRequest.cancel();m_forceClearBusy=false;m_forceClearBody.reset();m_attempt.clear();return;
     }
     if(m_forceClearBusy || m_eventBusy || !m_events.empty() || std::chrono::steady_clock::now()<m_forceClearRetryAt)return;
-    m_forceClearBusy=true;auto http=request(m_session);http.bodyJSON(*m_forceClearBody);
+    m_forceClearBusy=true;auto http=request(m_session);auto payload=*m_forceClearBody;payload.erase("type");http.bodyJSON(payload);
     auto const generation=m_generation;auto const session=m_session,id=m_view.id,roundKey=m_view.roundKey;auto const mapGeneration=m_view.mapGeneration;
     auto const requestId=(*m_forceClearBody)["requestId"].asString().unwrapOr("");
-    m_forceClearRequest.spawn(http.post(debugEndpoint("/matches/"+id+"/force-clear")),[this,generation,session,id,roundKey,mapGeneration,requestId](web::WebResponse response){
+    m_forceClearRequest.spawn(http.post(debugEndpoint("/matches/"+id+(ending?"/end-round":"/force-clear"))),[this,generation,session,id,roundKey,mapGeneration,requestId,ending](web::WebResponse response){
         if(!current(generation,session) || id!=m_view.id || roundKey!=m_view.roundKey || mapGeneration!=m_view.mapGeneration || !m_forceClearBody || (*m_forceClearBody)["requestId"].asString().unwrapOr("")!=requestId)return;
         m_forceClearBusy=false;
         geode::log::info("[SurvivalForceClear] HTTP request={} match={} round={} status={}",requestId,id,roundKey,response.code());
         if(response.code()>=200 && response.code()<300){
             observe(response.json().unwrapOr(matjson::Value()));m_nextPoll={};
-            if(normalRoundCleared()){m_forceClearBody.reset();m_attempt.clear();}
+            if((ending && m_view.state!="PLAYING") || (!ending && normalRoundCleared())){m_forceClearBody.reset();m_attempt.clear();}
             else m_forceClearRetryAt=std::chrono::steady_clock::now()+std::chrono::seconds(1);
         }else if(response.code()==0 || response.code()==408 || response.code()==429 || response.code()>=500){
             m_forceClearRetryAt=std::chrono::steady_clock::now()+std::chrono::seconds(1);m_nextPoll={};
             m_view.error="Survival server connection failed. Retrying...";
         }else {m_forceClearBody.reset();m_nextPoll={};m_view.error="survival-force-clear-rejected";}
     });
+}
+bool SurvivalRuntime::canEndRound() const {
+    return !freePlaying() && !forceClearPending() && !surrenderPending() && m_view.debug && !m_view.online && !m_view.ownEliminated &&
+        m_view.ownAssetsReady && m_view.ownEntered && m_view.state=="PLAYING" && remainingMs()>0 &&
+        !m_session.empty() && m_session==RankedRuntime::get().spectatorLiveSessionToken();
+}
+void SurvivalRuntime::endRound(){
+    if(!canEndRound())return;
+    m_forceClearBody.emplace(event("DEBUG_END_ROUND"));(*m_forceClearBody)["requestId"]=utils::random::generateUUID();m_forceClearBody->erase("eventId");
+    endAttempt(m_view.activeAttemptProgress);
+    m_forceClearRetryAt={};log::info("[SurvivalEndRound] submit match={} round={} request={}",m_view.id,m_view.roundKey,(*m_forceClearBody)["requestId"].asString().unwrapOr(""));pumpForceClear();
 }
 void SurvivalRuntime::start(std::string password,std::string group,int forceRank,int botCount) {
     tick();if(active()){showSurvivalGame();return;}if(queueing()){showSurvivalQueue();return;}if(m_creating || m_session.empty())return;

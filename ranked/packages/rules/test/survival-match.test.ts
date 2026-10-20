@@ -64,6 +64,24 @@ describe("Survival round engine",()=>{
     dm.attempt("p01",100,"dm1");dm.attempt("p01",94.1234,"dm2",false);
     expect(survivalLiveView(dm.match,dm.now,"p01").standings.find(p=>p.participantId==="p01")).toMatchObject({score:100,currentProgress:94.123,attemptActive:true,attemptsUsed:2});
   });
+  it("Debug end round preserves accepted records and applies the same round/final/Death Match policy; online and bot commands remain forbidden",()=>{
+    const end=(r:Rig)=>({type:"DEBUG_END_ROUND" as const,...r.context,participantId:"p01"});
+    for(const phase of ["ROUND_1","FINAL","TIEBREAK"]){
+      const r=new Rig();
+      if(phase==="FINAL")for(let n=0;n<3;n++){r.play();r.next();}
+      if(phase==="TIEBREAK")r.final();
+      r.match.presentationControlled=true;r.match.players[0]!.kind="HUMAN";r.match.players[0]!.playerId="human";r.prepare();expect(r.round.phase).toBe(phase);
+      r.attempt("p01",38.4321,"open",false);r.attempt("p02",20,"other");
+      const deadline=r.round.endsAt,now=r.now;r.send(end(r));
+      expect(r.round.finishedAt).toBe(now);expect(r.round.endsAt).toBe(deadline);
+      expect(r.round.players[0]!.attempts).toEqual([expect.objectContaining({id:"open",highestProgress:38.4321,endedAt:now})]);
+      expect(r.round.players.every(p=>p.attempts.every(a=>a.endedAt!==null))).toBe(true);
+      expect(r.match.state).toBe(phase==="ROUND_1"?"ROUND_RESULT":"FINAL_RESULT");
+    }
+    const blocked=new Rig();blocked.prepare();expect(()=>blocked.send(end(blocked))).toThrow("not allowed");
+    blocked.match.presentationControlled=true;expect(()=>blocked.send(end(blocked))).toThrow("not allowed");
+    blocked.match.players[0]!.kind="HUMAN";blocked.match.online=true;expect(()=>blocked.send(end(blocked))).toThrow("not allowed");
+  });
   it("projects captured human tiers and subdivided tier groups separately from virtual matchmaking LP",()=>{
     const r=new Rig();r.match.config={...r.match.config,tierBands:r.match.config.tierBands.map(b=>b.tier==="SILVER"?{...b,tier:"SILVER_I"}:b)};
     r.match.players[0]!.displayedTier="SILVER_I";

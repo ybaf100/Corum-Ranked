@@ -6,6 +6,10 @@
 #include "ModeLobbyMotion.hpp"
 #include "../domain/SurvivalMapSelection.hpp"
 #include "RankedInput.hpp"
+#include "../domain/RoundResourcePolicy.hpp"
+#include <Geode/binding/MusicDownloadManager.hpp>
+#include <Geode/binding/LevelTools.hpp>
+#include <Geode/binding/SongInfoObject.hpp>
 using namespace geode::prelude;
 namespace corum::ranked::ui {
 namespace {
@@ -37,13 +41,14 @@ void SurvivalSelectedMapPanel::build(CCSize size,bool thumbnail,bool ldm){
     // Rebuilding for LDM/thumbnail changes must render every field again and
     // must never remove a difficulty node already destroyed by this cleanup.
     m_difficulty=nullptr;m_levelId=-1;m_metadataRevision=0;m_mapMetadata={};
-    m_creatorText.clear();m_statusText.clear();
+    m_creatorText.clear();m_statusText.clear();m_songText.clear();
     removeAllChildrenWithCleanup(true);m_thumbnail=thumbnail;m_ldmSupported=ldm;m_layout=survivalSelectionLayout(size.width,size.height,thumbnail,ldm);m_built=true;
     auto const& r=m_layout;auto* panel=surface({r.panel.w,r.panel.h},center(r.panel),Blue,Surface,250,true);addChild(panel,0);
     auto caption=[&](SurvivalRect rect,ccColor3B color,FontWeight weight){auto* value=menuLabel("",.25f,center(rect),color,weight);addChild(value,5);return value;};
     m_title=caption(r.title,Text,FontWeight::Black);m_creator=caption(r.creator,TextMuted,FontWeight::SemiBold);
     m_rating=caption({r.creator.x+r.creator.w*.70f,r.creator.y,r.creator.w*.30f,r.creator.h},Gold,FontWeight::ExtraBold);m_rating->setID("survival-selected-map-rating"_spr);
     m_metadata=caption(r.metadata,Cyan,FontWeight::SemiBold);m_readiness=caption(r.readiness,TextMuted,FontWeight::SemiBold);
+    m_song=caption(r.song,TextMuted,FontWeight::SemiBold);m_song->setID("survival-selected-map-song"_spr);
     m_countdown=caption(r.ready,Gold,FontWeight::Black);m_countdown->setID("survival-automatic-entry-countdown"_spr);
     // Verified native frame used by Geode ModsLayer; never an emoji substitute.
     m_star=CCSprite::createWithSpriteFrameName("GJ_starsIcon_001.png");
@@ -78,7 +83,7 @@ void SurvivalSelectedMapPanel::present(CCSize size,bool thumbnail,SurvivalMatchV
     m_options=options;auto const interactive=appearance>=1. && actionsEnabled;
     auto* level=RankedLevelPreparation::get().level();auto const native=level && static_cast<int>(level->m_levelID)==view.map.levelId;
     m_ldm->setEnabled(interactive && native && prep.mapReady && supportsLdm);m_shake->setEnabled(interactive && native && prep.mapReady);m_jukebox->setEnabled(interactive && native && prep.mapReady);
-    auto const retry=!prep.error.empty();auto const start=SurvivalRuntime::get().previouslyEntered();
+    auto const retry=!prep.error.empty();auto const start=SurvivalRuntime::get().previouslyEntered() || SurvivalRuntime::get().observing();
     auto const ready=interactive && (retry || canEnter);
     if(ready!=m_readyEnabled || retry!=m_retry || start!=m_start){
         m_readyEnabled=ready;m_retry=retry;m_start=start;
@@ -91,7 +96,16 @@ void SurvivalSelectedMapPanel::present(CCSize size,bool thumbnail,SurvivalMatchV
     auto const countdown=beat.digit>0?std::to_string(beat.digit):i18n::text(canEnter?"survival-auto-start":"survival-preparing",canEnter?"AUTO START":"PREPARING...");
     line(m_countdown,countdown,r.ready,beat.digit>0?.90f:.30f);
     m_countdown->setScale(m_countdown->getScale()*static_cast<float>(beat.scale));m_countdown->setOpacity(static_cast<GLubyte>(beat.opacity*appearance*255));
-    if(native)RankedMapDetails::get().remember(level);
+    if(native){RankedMapDetails::get().remember(level);RankedMapDetails::get().requestDemonTier(view.map.levelId);}
+    std::string songName;
+    if(native){
+        std::vector<int> ids;if(level->m_songID>0)ids.push_back(level->m_songID);
+        appendRoundResourceIds(ids,std::string_view(level->m_songIDs.c_str()));
+        auto* info=ids.empty()?LevelTools::getSongObject(level->m_audioTrack):MusicDownloadManager::sharedState()->getSongInfoObject(ids.front());
+        if(info)songName=std::string(info->m_songName);
+    }
+    auto const song="Song - "+(songName.empty()?i18n::text("loading","LOADING"):songName);
+    if(song!=m_songText){m_songText=song;line(m_song,song,r.song,.19f,true);}
     auto metadata=RankedMapDetails::get().metadata(view.map.levelId);
     if(metadata.kind=="UNKNOWN"){metadata.kind=view.map.demon==SurvivalDemon::None?"NORMAL":"DEMON";metadata.stars=view.map.stars;}
     if(!metadata.stars && view.map.stars>0)metadata.stars=view.map.stars;
@@ -124,7 +138,7 @@ void SurvivalSelectedMapPanel::present(CCSize size,bool thumbnail,SurvivalMatchV
     setPositionY(static_cast<float>((1-survivalEase(appearance))*-10*r.scale));
     setVisible(appearance>0);setModeLobbyOpacity(this,static_cast<GLubyte>(std::clamp(appearance,0.,1.)*255));
     auto reveal=[&](CCNode* node,double delay){auto const alpha=appearance>=1?1.:std::clamp((appearance*.80-delay)/.60,0.,1.);if(node)propagateModeOpacity(node,static_cast<GLubyte>(alpha*255));};
-    reveal(m_title,0);reveal(m_creator,.05);reveal(m_rating,.05);reveal(m_difficulty,.10);reveal(m_metadata,.10);reveal(m_star,.10);reveal(m_stars,.10);
+    reveal(m_title,0);reveal(m_creator,.05);reveal(m_rating,.05);reveal(m_difficulty,.10);reveal(m_metadata,.10);reveal(m_star,.10);reveal(m_stars,.10);reveal(m_song,.15);
     for(auto* item:{m_ldm,m_shake,m_jukebox,m_ready})reveal(item,.20);
     m_countdown->setOpacity(static_cast<GLubyte>(beat.opacity*appearance*255));
 }

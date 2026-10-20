@@ -52,7 +52,7 @@ test('thumbnail/numeric layouts keep all text, metadata and touch rows within th
  run(`int main(){for(auto viewport:{std::pair{400.f,280.f},std::pair{400.f,320.f},std::pair{512.f,384.f},std::pair{520.f,320.f},std::pair{568.f,320.f},std::pair{568.f,426.f},std::pair{640.f,360.f},std::pair{854.f,320.f},std::pair{1024.f,576.f}})for(bool thumb:{false,true})for(bool ldm:{false,true}){
  auto r=survivalSelectionLayout(viewport.first,viewport.second,thumb,ldm);
  assert(r.safe.contains(r.panel));if(thumb){assert(r.panel.contains(r.thumbnail));assert(std::abs(r.thumbnail.w/r.thumbnail.h-16.f/9)<.001f);}
- std::vector<SurvivalRect> rows{r.title,r.creator,r.difficulty,r.metadata,r.ldm,r.shake,r.jukebox,r.ready,r.readiness};
+ std::vector<SurvivalRect> rows{r.title,r.creator,r.difficulty,r.metadata,r.song,r.ldm,r.shake,r.jukebox,r.ready,r.readiness};
  for(auto const& a:rows){assert(r.panel.contains(a));for(auto const& b:rows)if(&a!=&b)assert(!a.overlaps(b));}
  if(thumb)for(auto const& a:rows)assert(!a.overlaps(r.thumbnail));
  for(auto a:{r.shake,r.jukebox,r.ready})assert(a.h>=28&&a.w>=48);

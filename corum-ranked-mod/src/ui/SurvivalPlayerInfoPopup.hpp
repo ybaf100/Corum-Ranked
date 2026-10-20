@@ -16,6 +16,8 @@ using namespace geode::prelude;
 class SurvivalPlayerInfoPopup final:public Popup,public UserInfoDelegate {
     struct Statistics {int globalRank,stars,moons,demons;std::optional<int> extreme;};
     SurvivalStanding m_player;
+    std::optional<WeakRef<CCNode>> m_listOwner;
+    bool m_leaderboard=false,m_survivalLeaderboard=true;
     std::string m_matchId,m_session;
     bool m_closed=false,m_exited=false,m_inFlight=false,m_lookupFailed=false,m_forumBusy=false,m_forumFailed=false;
     int m_requests=0,m_forumReads=0;
@@ -25,8 +27,9 @@ class SurvivalPlayerInfoPopup final:public Popup,public UserInfoDelegate {
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_forumRequest;
     CCNode* m_contents=nullptr;
     bool current()const{
-        return !m_closed && SurvivalRuntime::get().active() && SurvivalRuntime::get().view().id==m_matchId &&
-            RankedRuntime::get().spectatorLiveSessionToken()==m_session;
+        if(m_closed || RankedRuntime::get().spectatorLiveSessionToken()!=m_session)return false;
+        if(m_leaderboard){if(!m_listOwner)return false;auto origin=m_listOwner->lock();return origin && origin->getParent();}
+        return SurvivalRuntime::get().active() && SurvivalRuntime::get().view().id==m_matchId;
     }
     void releaseDelegate(){
         auto* manager=GameLevelManager::sharedState();if(manager && manager->m_userInfoDelegate==this)manager->m_userInfoDelegate=nullptr;m_inFlight=false;
@@ -52,14 +55,15 @@ class SurvivalPlayerInfoPopup final:public Popup,public UserInfoDelegate {
         m_forumBusy=true;++m_forumReads;m_nextForumRead=now+std::chrono::seconds(1);
         auto request=web::WebRequest().timeout(std::chrono::seconds(8)).followRedirects(false);request.header("Authorization","Bearer "+m_session);
         // Participant IDs are server UUIDs or Debug's fixed human/bot identifiers.
-        auto const path="https://corum-ranked-production.up.railway.app/api/ranked/survival/matches/"+m_matchId+"/player-info/"+m_player.id;
+        auto const path=m_leaderboard?"https://corum-ranked-production.up.railway.app/api/ranked/leaderboard/player-info/"+std::to_string(m_player.accountId):
+            "https://corum-ranked-production.up.railway.app/api/ranked/survival/matches/"+m_matchId+"/player-info/"+m_player.id;
         m_forumRequest.spawn(request.get(path),[weak=WeakRef(this)](web::WebResponse response){
             auto owner=weak.lock();if(!owner || !owner->current() || !owner->getParent())return;
             owner->m_forumBusy=false;
             auto root=response.json().unwrapOr(matjson::Value());
             auto const account=numFromString<int>(root["gdAccountId"].asString().unwrapOr("0")).unwrapOr(0);
             if(response.code()<200 || response.code()>=300 || account!=owner->m_player.accountId ||
-                root["participantId"].asString().unwrapOr("")!=owner->m_player.id)owner->m_forumFailed=true;
+                (!owner->m_leaderboard && root["participantId"].asString().unwrapOr("")!=owner->m_player.id))owner->m_forumFailed=true;
             else owner->m_forum=std::move(root);
             owner->render();
         });
@@ -73,7 +77,7 @@ class SurvivalPlayerInfoPopup final:public Popup,public UserInfoDelegate {
         auto* title=menuLabel(i18n::text("player-info","PLAYER INFO"),.48f,{138,284},Text,FontWeight::Black);fitFullMenuLabel(title,230,24,.48f);m_contents->addChild(title,5);
         auto* badge=createAnimatedRankBadge(m_player.tier,{26,26},RankBadgeDisplay::Compact);badge->setPosition({274,284});m_contents->addChild(badge,5);
         auto* name=playerNameLabel(m_player.name,.39f,{150,258},Gold,FontWeight::ExtraBold);fitFullMenuLabel(name,264,23,.39f);m_contents->addChild(name,5);
-        row("SURVIVAL",m_player.bot?"BOT · "+m_player.tier:m_player.tier,234,Cyan);
+        row(m_leaderboard && !m_survivalLeaderboard?"SOLO RANKED":"SURVIVAL",m_player.bot?"BOT · "+m_player.tier:m_player.tier,234,Cyan);
         row(i18n::text("survival-rank","Rank"),m_player.rank>0?"#"+std::to_string(m_player.rank):i18n::text("survival-result-wait","PENDING"),213,Gold);
         float y=191;
         auto const unavailable=i18n::text("info-unavailable","Unavailable");auto const waiting=m_lookupFailed?unavailable:i18n::text("loading","Loading...");
@@ -111,6 +115,10 @@ class SurvivalPlayerInfoPopup final:public Popup,public UserInfoDelegate {
     void refresh(float){if(!current()){dismiss();return;}resolveStatistics();resolveForum();}
 public:
     static SurvivalPlayerInfoPopup* create(SurvivalStanding const& player,std::string const& match){auto* p=new SurvivalPlayerInfoPopup;if(p->init(player,match)){p->autorelease();return p;}delete p;return nullptr;}
+    static SurvivalPlayerInfoPopup* createForLeaderboard(SurvivalStanding const& player,CCNode* owner,bool survival){
+        if(!owner || !owner->getParent())return nullptr;auto* p=new SurvivalPlayerInfoPopup;p->m_leaderboard=true;p->m_survivalLeaderboard=survival;p->m_listOwner.emplace(owner);
+        if(p->init(player,"")){p->autorelease();return p;}delete p;return nullptr;
+    }
     ~SurvivalPlayerInfoPopup()override{releaseDelegate();}
     void getUserInfoFinished(GJUserScore* score)override{
         if(!current() || !score || m_player.bot || score->m_accountID!=m_player.accountId)return;

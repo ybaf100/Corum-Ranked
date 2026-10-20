@@ -203,6 +203,7 @@ std::vector<CCNode*>children;CCSize size;CCPoint position;float scale=1;std::str
 static CCNode*create(){return new CCNode;}
 void setContentSize(CCSize s){size=s;}CCSize getContentSize(){return size;}
 void addChild(CCNode*n,int=0){children.push_back(n);}void setPosition(CCPoint p){position=p;}
+auto const&getChildrenExt()const{return children;}
 void setScale(float v){scale=v;}void setID(std::string v){id=std::move(v);}
 };
 struct CCDrawNode:CCNode{
@@ -228,7 +229,7 @@ enum class GJDifficultyName{Short};enum class GJFeatureState{None,Featured,Epic,
 struct GJDifficultySprite:cocos2d::CCSprite{
  GJFeatureState state=GJFeatureState::None;
  static GJDifficultySprite*create(int n,GJDifficultyName){auto*s=new GJDifficultySprite;s->frame="diffIcon_"+(n<10?std::string("0"):std::string())+std::to_string(n)+"_btn_001.png";return s;}
- void updateFeatureState(GJFeatureState s){state=s;}
+ void updateFeatureState(GJFeatureState s){state=s;auto*n=CCNode::create();n->setPosition({10,30});addChild(n);}
 };
 namespace geode::utils {
 template<class N>struct Result{N value{};bool ok=false;bool isOk()const{return ok;}N unwrap()const{return value;}};
@@ -260,6 +261,7 @@ for(int epic=0;epic<=3;epic++)for(bool name:{true,false}){
  auto*face=static_cast<GJDifficultySprite*>(rated->children[2]);
  assert(face->state==static_cast<GJFeatureState>(epic?epic+1:1));
  assert(face->expressionOnly==!name); // Selected panel keeps native ornaments, without its duplicate word.
+ if(!name)for(auto* ornament:face->children){assert(ornament->position.x==face->size.width/2&&ornament->position.y==face->size.height/2);}
 }
 assert(shape->polygon.size()==48&&number->text=="8"&&number->color==(ccColor3B{255,255,255}));
 assert(static_cast<CCSprite*>(row->children[2])->frame=="diffIcon_05_btn_001.png");

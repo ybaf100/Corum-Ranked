@@ -82,6 +82,7 @@ public:
         ui::SurvivalPauseActionInput* survivalInput = nullptr;
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
         CCMenuItemSpriteExtra* forceClear = nullptr;
+        CCMenuItemSpriteExtra* endRound = nullptr;
         CCMenu* forceClearMenu = nullptr;
 #endif
         std::optional<WeakRef<ui::RankedSurrenderPopup>> popup;
@@ -101,6 +102,18 @@ public:
     };
     void customSetup() {
         PauseLayer::customSetup();
+        auto& survivalRuntime=SurvivalRuntime::get();auto* localPlay=PlayLayer::get();
+        if(survivalRuntime.freePlaying() && survivalRuntime.observing() && localPlay && localPlay->m_level &&
+            static_cast<int>(localPlay->m_level->m_levelID)==survivalRuntime.view().map.levelId){
+            auto const size=CCDirector::sharedDirector()->getWinSize();auto* menu=CCMenu::create();menu->setPosition(CCPointZero);addChild(menu,1100);
+            auto* face=ui::surface({148,32},{},ui::Red,ui::SurfaceRaised,255,true);
+            auto* text=ui::menuLabel(i18n::text("survival-leave-observer","LEAVE WATCH"),.28f,{74,16},ui::Text,ui::FontWeight::ExtraBold);ui::fitFullMenuLabel(text,136,24,.28f);face->addChild(text,5);
+            auto* button=CCMenuItemSpriteExtra::create(face,this,menu_selector(CorumRankedPauseLayer::onLeaveObserver));button->setPosition({size.width-86,size.height-40});menu->addChild(button);
+            auto const context=survivalRuntime.optionsContext();auto weak=WeakRef(this);
+            auto* input=ui::SurvivalPauseActionInput::create(this,localPlay,[weak,context]{auto owner=weak.lock();auto& runtime=SurvivalRuntime::get();return owner && owner->getParent() && runtime.observing() && runtime.freePlaying() && runtime.optionsContext()==context;});
+            if(input){input->bind(button,[weak]{if(auto owner=weak.lock())owner->onLeaveObserver(nullptr);});m_fields->survivalInput=input;addChild(input,1200);}
+            return;
+        }
         if (!ownsManagedRankedPause()) return;
         auto& ranked = RankedRuntime::get(); auto* layer = PlayLayer::get();
         m_fields->owner.emplace(layer);
@@ -175,6 +188,7 @@ public:
                 input->bind(m_fields->surrender,[weak]{if(auto pause=weak.lock())pause->onSurrender(nullptr);});
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
                 input->bind(m_fields->forceClear,[weak]{if(auto pause=weak.lock())pause->onForceClear(nullptr);});
+                input->bind(m_fields->endRound,[weak]{if(auto pause=weak.lock())pause->onEndRound(nullptr);});
 #endif
                 m_fields->survivalInput=input;addChild(input,1200);
                 log::info("[SurvivalPauseInput] attached observer to Pause, actions registered");
@@ -205,7 +219,7 @@ public:
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
     void setupSurvivalForceClear(CCSize size) {
         auto const& view=SurvivalRuntime::get().view();
-        if(!m_fields->forceClear && m_fields->survival && view.debug && !view.online && view.phase!="TIEBREAK"){
+        if(!m_fields->forceClear && m_fields->survival && view.debug && !view.online){
             auto* face=ui::surface({112,30},{},ui::Gold,ui::SurfaceRaised,255,true);
             face->addChild(ui::menuLabel(i18n::text("survival-force-clear","FORCE CLEAR"),.28f,{56,15},ui::Gold,ui::FontWeight::ExtraBold),5);
             m_fields->forceClear=CCMenuItemSpriteExtra::create(face,this,menu_selector(CorumRankedPauseLayer::onForceClear));
@@ -215,9 +229,12 @@ public:
             m_fields->forceClearMenu=CCMenu::create();
             m_fields->forceClearMenu->setID("survival-force-clear-menu"_spr);
             m_fields->forceClearMenu->setPosition(CCPointZero);
-            m_fields->forceClear->setPosition({size.width-76,size.height-38});
+            m_fields->forceClear->setPosition({size.width-76,size.height-88});
             m_fields->forceClearMenu->addChild(m_fields->forceClear);
             addChild(m_fields->forceClearMenu,1100);
+            auto* endFace=ui::surface({112,30},{},ui::Red,ui::SurfaceRaised,255,true);
+            auto* caption=ui::menuLabel(i18n::text("survival-end-round","END ROUND"),.25f,{56,15},ui::Red,ui::FontWeight::ExtraBold);ui::fitFullMenuLabel(caption,104,24,.25f);endFace->addChild(caption,5);
+            m_fields->endRound=CCMenuItemSpriteExtra::create(endFace,this,menu_selector(CorumRankedPauseLayer::onEndRound));m_fields->endRound->setID("survival-end-round-button"_spr);m_fields->endRound->setPosition({size.width-196,size.height-88});m_fields->forceClearMenu->addChild(m_fields->endRound);
         }
     }
 #endif
@@ -260,6 +277,7 @@ public:
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
             setupSurvivalForceClear(CCDirector::sharedDirector()->getWinSize());
             if(m_fields->forceClear){m_fields->forceClear->setVisible(view.debug && !view.online && view.phase!="TIEBREAK" && !runtime.normalRoundCleared() && !view.ownEliminated);m_fields->forceClear->setEnabled(runtime.canForceClear() && !runtime.forceClearPending() && !m_fields->survivalConfirmation);}
+            if(m_fields->endRound){m_fields->endRound->setVisible(view.debug && !view.online && !view.ownEliminated);m_fields->endRound->setEnabled(runtime.canEndRound() && !m_fields->survivalConfirmation);}
             if(runtime.forceClearPending())m_fields->surrender->setEnabled(false);
 #endif
             if(m_fields->survivalWatchLogs++<4){
@@ -365,6 +383,7 @@ public:
         PauseLayer::onResume(sender);
     }
     void onBlockedQuit(CCObject*) {}
+    void onLeaveObserver(CCObject*) {SurvivalRuntime::get().leaveObserver();}
     bool hasAcknowledgedGameplayExit() {
         auto const& ranked = RankedRuntime::get();
         return ranked.view().match.matchId == m_fields->matchId && (m_fields->placement
@@ -479,6 +498,17 @@ public:
         if (popup) { m_fields->popup.emplace(popup); popup->show(); }
     }
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
+    void onEndRound(CCObject*){
+        auto& runtime=SurvivalRuntime::get();if(!m_fields->survival || !runtime.canEndRound() || m_fields->survivalConfirmation)return;
+        auto const id=m_fields->matchId,key=m_fields->survivalRoundKey;auto const generation=m_fields->survivalMapGeneration;
+        auto* popup=ui::RankedConfirmPopup::create(i18n::text("survival-end-round","END ROUND"),i18n::text("survival-end-round-question","End this round now using its current records?"),
+            [weak=WeakRef(this),id,key,generation](bool accepted){auto owner=weak.lock();if(!owner || !owner->getParent())return;owner->m_fields->survivalConfirmation.reset();
+                auto play=owner->m_fields->owner?owner->m_fields->owner->lock():Ref<PlayLayer>();auto& current=SurvivalRuntime::get();
+                if(accepted && play && play.data()==PlayLayer::get() && play->getParent()==CCDirector::sharedDirector()->getRunningScene() && !CCDirector::sharedDirector()->getNextScene() &&
+                    current.canEndRound() && current.view().id==id && current.view().roundKey==key && current.view().mapGeneration==generation)current.endRound();
+            },i18n::text("survival-end-round","END ROUND"));
+        if(popup){m_fields->survivalConfirmation.emplace(popup);popup->show();}
+    }
     void onForceClear(CCObject*) {
         auto& runtime=SurvivalRuntime::get();
         if(!m_fields->survival || !runtime.canForceClear() || runtime.forceClearPending() || m_fields->survivalConfirmation)return;

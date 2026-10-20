@@ -64,28 +64,30 @@ struct SurvivalRuntime{
  static SurvivalRuntime&get(){static SurvivalRuntime r;return r;}void tick(){}auto const&view(){return m_view;}
  bool active()const{return true;}bool surrenderPending()const{return surrendered;}bool normalRoundCleared()const{return cleared;}bool freePlaying()const{return false;}
  bool canPlay()const{return m_view.state=="PLAYING";}
+ ${method(runtimeSource,'bool SurvivalRuntime::canEndRound()').replace('SurvivalRuntime::','')}
+ long remainingMs()const{return 180000;}
  std::optional<long>roundRemainingMs()const{return 180000;}
  ${method(runtimeSource,'bool SurvivalRuntime::canSurrender()').replace('SurvivalRuntime::','')}
  ${method(runtimeSource,'bool SurvivalRuntime::canForceClear()').replace('SurvivalRuntime::','')}
 };
 struct Pause:Node{
- struct Fields{bool survival=true;Label*budget=nullptr;Label*survivalStatus=nullptr;Button*surrender=nullptr;Button*forceClear=nullptr;
+ struct Fields{bool survival=true;Label*budget=nullptr;Label*survivalStatus=nullptr;Button*surrender=nullptr;Button*forceClear=nullptr;Button*endRound=nullptr;
  std::optional<WeakRef<Node>>survivalConfirmation;std::optional<WeakRef<PlayLayer>>owner;
  std::string matchId="m",survivalRoundKey="r1";int survivalMapGeneration=1,survivalWatchLogs=0;}f;
- Fields*m_fields=&f;Label budget;Button surrender,force;Pause(){f.budget=&budget;f.surrender=&surrender;f.forceClear=&force;}
+ Fields*m_fields=&f;Label budget;Button surrender,force,end;Pause(){f.budget=&budget;f.surrender=&surrender;f.forceClear=&force;f.endRound=&end;}
  void synchronizeSurvivalPauseInput(){}void setupSurvivalForceClear(CCDirector::Size){}
  ${survival}
 };
 }
 using namespace corum::ranked;
 int main(){auto&r=SurvivalRuntime::get();Pause pause;
- assert(r.canSurrender()&&r.canForceClear());assert(!pause.surrender.enabled&&!pause.force.enabled);
- pause.watchBudget(0);assert(pause.surrender.enabled&&pause.force.enabled);
- r.m_view.error="network delay";pause.watchBudget(0);assert(pause.surrender.enabled&&pause.force.enabled);
- r.m_forceClearBody=matjson::Value::object();assert(r.forceClearPending());pause.watchBudget(0);assert(!pause.surrender.enabled&&!pause.force.enabled);
- r=SurvivalRuntime{};pause.watchBudget(0);assert(pause.surrender.enabled&&pause.force.enabled);
- r.m_view.online=true;pause.watchBudget(0);assert(pause.surrender.enabled&&!pause.force.enabled);
- r.m_view.state="CANCELLED";pause.watchBudget(0);assert(!pause.surrender.enabled&&!pause.force.enabled);
+ assert(r.canSurrender()&&r.canForceClear());assert(!pause.surrender.enabled&&!pause.force.enabled&&!pause.end.enabled);
+ pause.watchBudget(0);assert(pause.surrender.enabled&&pause.force.enabled&&pause.end.enabled);
+ r.m_view.error="network delay";pause.watchBudget(0);assert(pause.surrender.enabled&&pause.force.enabled&&pause.end.enabled);
+ r.m_forceClearBody=matjson::Value::object();assert(r.forceClearPending());pause.watchBudget(0);assert(!pause.surrender.enabled&&!pause.force.enabled&&!pause.end.enabled);
+ r=SurvivalRuntime{};pause.watchBudget(0);assert(pause.surrender.enabled&&pause.force.enabled&&pause.end.enabled);
+ r.m_view.online=true;pause.watchBudget(0);assert(pause.surrender.enabled&&!pause.force.enabled&&!pause.end.enabled);
+ r.m_view.state="CANCELLED";pause.watchBudget(0);assert(!pause.surrender.enabled&&!pause.force.enabled&&!pause.end.enabled);
 }
 `;
  const dir=mkdtempSync(join(tmpdir(),'survival-sdk-buttons-'));try{

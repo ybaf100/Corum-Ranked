@@ -6,6 +6,8 @@
 #include "RankedTranslations.hpp"
 #include "RankedVisuals.hpp"
 #include "StandingVisuals.hpp"
+#include "SurvivalPlayerInfoPopup.hpp"
+#include "RankedInput.hpp"
 #include <Geode/binding/GJAccountManager.hpp>
 #include <charconv>
 
@@ -15,6 +17,16 @@ namespace {
 constexpr int kPageSize = 20;
 constexpr float kRowHeight = 48, kRowGap = 7;
 constexpr float kBorderInset = 0.375f;
+// Keep the native ScrollLayer/menu priorities. A scroll gesture cannot turn
+// into a row click even if the finger ends inside that wide row.
+class LeaderboardRowMenu final:public CCMenu {
+    CCPoint m_start;bool m_dragged=false;
+public:
+    static LeaderboardRowMenu* create(){auto* m=new LeaderboardRowMenu;if(m->init()){m->autorelease();return m;}delete m;return nullptr;}
+    bool ccTouchBegan(CCTouch* touch,CCEvent* event)override{m_dragged=false;m_start=touch->getLocation();return CCMenu::ccTouchBegan(touch,event);}
+    void ccTouchMoved(CCTouch* touch,CCEvent* event)override{auto const at=touch->getLocation();m_dragged|=std::hypot(at.x-m_start.x,at.y-m_start.y)>8;CCMenu::ccTouchMoved(touch,event);}
+    void ccTouchEnded(CCTouch* touch,CCEvent* event)override{if(m_dragged)CCMenu::ccTouchCancelled(touch,event);else CCMenu::ccTouchEnded(touch,event);}
+};
 
 CCNode* modeTabFace(RankedMode mode, bool selected) {
     auto* face = surface({140,23},{},selected ? Gold : Cyan,
@@ -112,6 +124,10 @@ bool RankedLeaderboardPopup::init() {
 }
 
 void RankedLeaderboardPopup::updateButtons() {
+    for(auto const& row:m_rows)if(row.action){
+        if(m_closed || m_busy)cancelMenuTouch(typeinfo_cast<CCMenu*>(row.action->getParent()));
+        row.action->setEnabled(!m_closed && !m_busy);
+    }
     m_survivalTab->setEnabled(!m_closed && m_mode != RankedMode::Survival);
     m_soloTab->setEnabled(!m_closed && m_mode != RankedMode::SoloRanked);
     for (auto* tab : {m_survivalTab,m_soloTab}) { tab->setCascadeOpacityEnabled(true); tab->setOpacity(tab->isEnabled() ? 180 : 255); }
@@ -239,6 +255,9 @@ void RankedLeaderboardPopup::showRows(matjson::Value const& data) {
             }
         } else leftCaption(row,leaderboardValue(entry),{columns.value,24},columns.valueWidth,0.32f);
         Row visual; visual.node = row; visual.entry = std::move(entry);
+        auto* menu=LeaderboardRowMenu::create();menu->setPosition(CCPointZero);row->addChild(menu,30);
+        auto* hit=CCNode::create();hit->setContentSize({width,kRowHeight});
+        visual.action=CCMenuItemSpriteExtra::create(hit,this,menu_selector(RankedLeaderboardPopup::onPlayerInfo));visual.action->setPosition({width/2,kRowHeight/2});menu->addChild(visual.action);
         if (goldRankTier(visual.entry.tier) || visual.entry.promotion) {
             // A soft continuous frame plus two short highlights. Drawing the
             // perimeter directly avoids bright round blobs and cross shapes.
@@ -298,15 +317,26 @@ void RankedLeaderboardPopup::onSearch(CCObject*) {
     m_searchQuery=query.substr(first,last-first+1);fetch(0);
 }
 void RankedLeaderboardPopup::onRefresh(CCObject*) { fetch(m_offset); }
+void RankedLeaderboardPopup::onPlayerInfo(CCObject* sender){
+    if(m_closed || m_busy || !getParent())return;
+    auto* scene=CCDirector::sharedDirector()->getRunningScene();
+    if(!scene || CCDirector::sharedDirector()->getNextScene() || scene->getChildByIDRecursive("survival-player-info-popup"_spr))return;
+    auto row=std::find_if(m_rows.begin(),m_rows.end(),[&](auto const& r){return r.action==sender;});if(row==m_rows.end())return;
+    SurvivalStanding player;player.id=std::to_string(row->entry.accountId);player.name=row->entry.player;player.tier=row->entry.tier;
+    player.rank=row->entry.rank.value_or(0);player.accountId=row->entry.accountId;player.bot=row->entry.bot;
+    if(auto* popup=SurvivalPlayerInfoPopup::createForLeaderboard(player,this,m_mode==RankedMode::Survival))popup->show();
+}
 void RankedLeaderboardPopup::onClose(CCObject*) { dismiss(); }
 void RankedLeaderboardPopup::dismiss() {
     if (m_closed) return;
     [[maybe_unused]] Ref<RankedLeaderboardPopup> keepAlive(this);
     m_closed = true; ++m_generation; m_request.cancel(); unscheduleUpdate();
+    updateButtons();
     Popup::onClose(nullptr);
 }
 void RankedLeaderboardPopup::onExit() {
     m_closed = true; ++m_generation; m_request.cancel(); unscheduleUpdate();
+    updateButtons();
     if (!m_exited) { m_exited = true; CCTouchDispatcher::get()->unregisterForcePrio(this); }
     Popup::onExit();
 }

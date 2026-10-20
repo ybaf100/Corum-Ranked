@@ -115,6 +115,7 @@ export type SurvivalCommand =
   | ({ type: "PROGRESS" | "ATTEMPT_END"; participantId: string; attemptId: string; progress: number; currentProgress?: number } & SurvivalRoundContext)
   // Dedicated, authenticated debug route only; never accepted by the public event DTO.
   | ({ type: "DEBUG_FORCE_CLEAR"; participantId: string; attemptId: string } & SurvivalRoundContext)
+  | ({ type: "DEBUG_END_ROUND"; participantId: string } & SurvivalRoundContext)
   // This command is for the verified server provider, never an untrusted client report.
   | { type: "MAP_INVALIDATED"; roundKey: string; mapGeneration: number; reason: string }
   // Future session adapters establish responsibility; the engine only records
@@ -452,6 +453,12 @@ export function reduceSurvivalMatch(before: SurvivalMatch, command: SurvivalComm
         case "PROGRESS": case "ATTEMPT_END": {
           recordAttempt(match,round,player,command.attemptId,command.progress,command.type==="ATTEMPT_END",now,command.currentProgress);
           break;
+        }
+        case "DEBUG_END_ROUND": {
+          if(match.online || !match.presentationControlled || match.state!=="PLAYING" ||
+            match.players.find(p=>p.participantId===player.participantId)?.kind!=="HUMAN" ||
+            player.assetsReadyAt===null || player.enteredAt===null)conflict("Debug round end is not allowed");
+          finishRound(match,round,now);break;
         }
         case "DEBUG_FORCE_CLEAR": {
           if (match.online || !match.presentationControlled || round.phase === "TIEBREAK" || match.state !== "PLAYING" ||

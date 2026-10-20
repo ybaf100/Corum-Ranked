@@ -193,6 +193,21 @@ export class SurvivalDebugService implements OnApplicationBootstrap,OnApplicatio
     this.logger.log(`Survival Debug Force Clear match=${id} round=${body.roundKey} generation=${body.mapGeneration} request=${body.requestId}`);
     return this.view(id,session);
   }
+  public async endRound(id:string,session:RankedSessionContext,body:ClearSurvivalDebugDto) {
+    if(!this.env.debugBot?.password)throw new NotFoundException("Debug Bot Match is disabled");
+    await this.owned(id,session);
+    const before=await this.engine.get(id),round=survivalCurrentRound(before);
+    const retry=(await this.db.query("SELECT event_key FROM sur_match_commands WHERE match_id=$1 AND event_key=$2",[id,`end-round:${body.requestId}`])).rows.length>0;
+    if(!retry && (before.state!=="PLAYING" || round.key!==body.roundKey || round.mapGeneration!==body.mapGeneration ||
+      round.map?.levelId!==body.levelId || round.endsAt===null || this.clock.now().getTime()>=round.endsAt))
+      throw new ConflictException("Survival round changed before Debug round end");
+    const match=await this.engine.dispatch(id,`end-round:${body.requestId}`,{type:"DEBUG_END_ROUND",participantId:"human",
+      roundKey:body.roundKey,mapGeneration:body.mapGeneration,levelId:body.levelId},session);
+    if(!match.rounds.some(r=>r.key===body.roundKey && r.mapGeneration===body.mapGeneration && r.map?.levelId===body.levelId && r.finishedAt!==null))
+      throw new ConflictException("Survival round changed before Debug round end");
+    this.logger.log(`Survival Debug End Round match=${id} round=${body.roundKey} request=${body.requestId}`);
+    return this.view(id,session);
+  }
   public async acknowledge(id:string,session:RankedSessionContext) {
     await this.owned(id,session);
     await this.db.query("UPDATE sur_debug_matches SET acknowledged_at=$2 WHERE match_id=$1 AND settled_at IS NOT NULL",[id,this.clock.now().toISOString()]);

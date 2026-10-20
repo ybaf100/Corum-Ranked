@@ -7,10 +7,11 @@ import { SessionService } from "./session.service.js";
 import { ForumRecordsModule } from "../forum/forum-records.module.js";
 import { ForumSessionController } from "../forum/forum-session.controller.js";
 import { StandingController } from "../leaderboard/standing.controller.js";
+import {LeaderboardPlayerInfoController} from '../forum/leaderboard-player-info.controller.js';
 
 @Module({
   imports: [RankedConfigModule, ForumRecordsModule],
-  controllers: [SessionController, ForumSessionController, StandingController],
+  controllers: [SessionController, ForumSessionController, StandingController,LeaderboardPlayerInfoController],
   providers: [SessionService, SessionGuard, AdmissionVersionGuard],
   exports: [SessionService, SessionGuard, AdmissionVersionGuard],
 })

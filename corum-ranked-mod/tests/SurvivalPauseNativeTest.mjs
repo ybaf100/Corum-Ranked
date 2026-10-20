@@ -39,6 +39,7 @@ namespace geode::log{template<class...T>void info(T const&...){}}
 auto wall=std::chrono::steady_clock::time_point{};auto testNow(){return wall;}
 template<class T>struct Ref{T* p=nullptr;Ref()=default;Ref(T* p):p(p){}T* data()const{return p;}T* operator->()const{return p;}explicit operator bool()const{return p;}};
 template<class T>struct WeakRef{T* p;explicit WeakRef(T* p):p(p){}Ref<T> lock()const{return {p&&p->alive?p:nullptr};}};
+namespace geode{template<class T>using WeakRef=::WeakRef<T>;}
 struct CCNode{virtual ~CCNode()=default;CCNode* parent=nullptr;bool alive=true,running=true;bool isRunning()const{return running;}CCNode* getParent()const{return parent;}};
 struct CCScene:CCNode{};struct CCTransitionScene:CCScene{};
 template<class T>T typeinfo_cast(CCNode* n){return dynamic_cast<T>(n);}
@@ -154,7 +155,7 @@ int main(){using namespace corum::ranked;CCScene scene,other;PlayLayer play,repl
 });
 
 test('production deferred Survival return queues once, respects pause refusal/completion and never quits a replacement scene',()=>{
- const playSource=read('src/PlayLayer.cpp');
+ const playSource=process.env.CORUM_PLAY_SOURCE?readFileSync(process.env.CORUM_PLAY_SOURCE,'utf8'):read('src/PlayLayer.cpp');
  run(common+`
 struct UILayer{int disabled=0;void disableMenu(){++disabled;}};
 namespace corum::ranked{bool completion=false,resumable=true,nativePause=false;int resumes=0,pauseQuits=0;bool quitSurvivalPauseForReturn(PlayLayer* p){if(!nativePause)return false;++pauseQuits;p->onQuit();return true;}bool quitThroughSurvivalCompletionOverlay(PlayLayer*){return completion;}bool resumeSurvivalFreePlayPauseBeforeQuit(PlayLayer*){++resumes;return resumable;}}
@@ -165,14 +166,15 @@ struct CorumRankedPlayLayer:PlayLayer{
  void setTouchEnabled(bool b){touch=b;}void setKeyboardEnabled(bool b){keyboard=b;}
  void onQuit()override{if(corum::ranked::resumable)PlayLayer::onQuit();}
  ${method(playSource,'void queueSurvivalGameplayReturn()')}
+ ${method(playSource,'void queueHeldEntryExit()')}
 };
 `
 +`
 int main(){using namespace corum::ranked;CCScene scene,other;auto*d=CCDirector::sharedDirector();d->scene=&scene;
  {CorumRankedPlayLayer p;PlayLayer::current=&p;p.parent=&scene;p.queueSurvivalGameplayReturn();p.queueSurvivalGameplayReturn();assert(queued.size()==1&&p.quits==0&&!p.touch&&!p.keyboard&&p.m_queuedButtons.empty());drain();assert(p.quits==1);p.queueSurvivalGameplayReturn();assert(queued.empty());}
  {CorumRankedPlayLayer p;PlayLayer::current=&p;p.parent=&scene;nativePause=true;p.queueSurvivalGameplayReturn();assert(pauseQuits==0);drain();assert(p.quits==1&&pauseQuits==1);nativePause=false;}
- {CorumRankedPlayLayer p;PlayLayer::current=&p;p.parent=&scene;p.running=false;p.queueSurvivalGameplayReturn();drain();assert(p.quits==1);p.queueSurvivalGameplayReturn();assert(queued.empty());}
- {CorumRankedPlayLayer p;PlayLayer::current=&p;p.parent=&scene;resumable=false;p.queueSurvivalGameplayReturn();drain();assert(p.quits==0&&!p.fields.autoExitRequested);resumable=true;p.queueSurvivalGameplayReturn();drain();assert(p.quits==1);}
+ {CorumRankedPlayLayer p;PlayLayer::current=&p;p.parent=&scene;p.running=false;p.queueHeldEntryExit();drain();assert(p.quits==1);p.queueSurvivalGameplayReturn();assert(queued.empty());}
+ {CorumRankedPlayLayer p;PlayLayer::current=&p;p.parent=&scene;resumable=false;p.queueHeldEntryExit();drain();assert(p.quits==0&&!p.fields.autoExitRequested);resumable=true;p.queueHeldEntryExit();drain();assert(p.quits==1);}
  {CorumRankedPlayLayer p;PlayLayer::current=&p;p.parent=&scene;d->next=&other;p.queueSurvivalGameplayReturn();assert(queued.empty());d->next=nullptr;p.queueSurvivalGameplayReturn();d->next=&other;drain();assert(p.quits==0&&!p.fields.autoExitRequested);d->next=nullptr;}
  {CorumRankedPlayLayer p,replacement;PlayLayer::current=&p;p.parent=&scene;p.queueSurvivalGameplayReturn();PlayLayer::current=&replacement;drain();assert(p.quits==0&&replacement.quits==0);}
  {CorumRankedPlayLayer p;PlayLayer::current=&p;p.parent=&scene;p.queueSurvivalGameplayReturn();d->scene=&other;drain();assert(p.quits==0);d->scene=&scene;}
@@ -205,7 +207,7 @@ namespace geode::log{template<class...T>void debug(T const&...){}}
 // Extracted native methods use geode::log explicitly; avoid colliding with ::log(double).
 namespace corum::ranked{
 namespace i18n{std::string text(char const*,char const*fallback){return fallback;}}
-namespace ui{constexpr int Gold=1,Surface=2,SurfaceRaised=3,Text=4,Blue=5;enum class FontWeight{ExtraBold,SemiBold};Node*surface(CCSize s,CCPoint p,int,int,int,bool){auto*n=new Node;n->size=s;n->pos=p;return n;}Label*menuLabel(std::string,float,CCPoint,int,FontWeight){return new Label;}void fitMenuLabelWidth(Label*,float,float,float){}void fitFullMenuLabel(Label*,float,float,float){}
+namespace ui{constexpr int Gold=1,Surface=2,SurfaceRaised=3,Text=4,Blue=5,Red=6;enum class FontWeight{ExtraBold,SemiBold};Node*surface(CCSize s,CCPoint p,int,int,int,bool){auto*n=new Node;n->size=s;n->pos=p;return n;}Label*menuLabel(std::string,float,CCPoint,int,FontWeight){return new Label;}void fitMenuLabelWidth(Label*,float,float,float){}void fitFullMenuLabel(Label*,float,float,float){}
 }
 struct SurvivalRuntime{struct View{std::string id="m",roundKey="r1",phase="ROUND_1";int mapGeneration=1;bool debug=true,online=false,ownEliminated=false,ownAssetsReady=true,ownEntered=true;}m_view;bool playable=true,pending=false,cleared=false,surrenderable=true;int submissions=0,surrenders=0;static SurvivalRuntime&get(){static SurvivalRuntime r;return r;}auto const&view()const{return m_view;}bool canPlay()const{return playable;}bool canSurrender()const{return surrenderable;}std::string surrenderMessage()const{return "Forfeit?";}void surrender(){++surrenders;surrenderable=false;}bool normalRoundCleared()const{return cleared;}bool forceClearPending()const{return pending;}bool surrenderPending()const{return false;}bool canForceClear()const;void forceClear(){if(canForceClear()&&!pending){++submissions;pending=true;}}};
 ${method(runtime,'bool SurvivalRuntime::canForceClear()')}
@@ -217,7 +219,7 @@ struct PauseLayer:Node{virtual void onEnter(){}}
 ;
 struct CorumRankedPauseLayer:PauseLayer{
  CCMenu center;
- struct Fields{bool survival=true;CCMenu*survivalActions=nullptr;CCMenuItemSpriteExtra*forceClear=nullptr;CCMenu*forceClearMenu=nullptr;std::optional<WeakRef<ui::RankedConfirmPopup>>survivalConfirmation;std::optional<WeakRef<PlayLayer>>owner;std::string matchId="m",survivalRoundKey="r1";int survivalMapGeneration=1;int survivalWatchLogs=0;}fields;Fields*m_fields=&fields;
+ struct Fields{bool survival=true;CCMenu*survivalActions=nullptr;CCMenuItemSpriteExtra*forceClear=nullptr,*endRound=nullptr;CCMenu*forceClearMenu=nullptr;std::optional<WeakRef<ui::RankedConfirmPopup>>survivalConfirmation;std::optional<WeakRef<PlayLayer>>owner;std::string matchId="m",survivalRoundKey="r1";int survivalMapGeneration=1;int survivalWatchLogs=0;}fields;Fields*m_fields=&fields;
  CCNode*getChildByIDRecursive(char const*){return &center;}
  ${method(pause,'void setupSurvivalForceClear(')}
  ${method(pause,'void synchronizeSurvivalPauseInput()').replaceAll('CCDirector::sharedDirector()->getTouchDispatcher()','CCTouchDispatcher::get()')}
@@ -229,7 +231,7 @@ int main(){CCScene scene;PlayLayer play;play.parent=&scene;PlayLayer::current=&p
   CorumRankedPauseLayer p;p.parent=&scene;p.fields.owner.emplace(&play);r.m_view.ownEntered=false;
   p.setupSurvivalForceClear({568,320});assert(p.fields.forceClear&&!r.canForceClear());
   p.onForceClear(nullptr);r.m_view.ownEntered=true;p.setupSurvivalForceClear({568,320});auto*button=p.fields.forceClear;auto*menu=p.fields.forceClearMenu;assert(button&&menu&&button->parent==menu&&menu->parent==&p);
-  assert(button->size.width==112&&button->size.height==30&&button->pos.x==492&&button->pos.y==282);
+  assert(button->size.width==112&&button->size.height==30&&button->pos.x==492&&button->pos.y==232);
   // The action is beyond the native center row and to the right of the clock.
   assert(button->pos.y-button->size.height/2>160+81.5/2);assert(button->pos.x-button->size.width/2>308);
   auto*d=CCTouchDispatcher::get();d->handlers.clear();d->handlers[&p]={native-1};d->handlers[&p.center]={native};d->handlers[menu]={-128};

@@ -29,6 +29,10 @@ export class SurvivalDebugController {
   public clear(@Param("id",new ParseUUIDPipe()) id:string,@CurrentSession() session:RankedSessionContext,@Body() body:ClearSurvivalDebugDto) {
     return this.debug.forceClear(id,session,body);
   }
+  @Post("matches/:id/end-round")
+  public endRound(@Param("id",new ParseUUIDPipe()) id:string,@CurrentSession() session:RankedSessionContext,@Body() body:ClearSurvivalDebugDto) {
+    return this.debug.endRound(id,session,body);
+  }
   @Post("matches/:id/acknowledge")
   public acknowledge(@Param("id",new ParseUUIDPipe()) id:string,@CurrentSession() session:RankedSessionContext) { return this.debug.acknowledge(id,session); }
 }

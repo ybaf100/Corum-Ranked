@@ -67,6 +67,7 @@ struct SurvivalRuntime{
  SurvivalFlowStage flowStage()const{return stage;}
  bool observing()const{return observe;}
  void chooseOutcome(SurvivalOutcomeChoice choice){++choices;lastChoice=choice;}
+ void leaveObserver(){observe=false;}
 };
 struct Coordinator{bool m_closed=false,m_motion=false,m_browsingBoard=false,m_manualMap=false;std::chrono::steady_clock::time_point m_eliminationUntil{};int confirmations=0;void confirmSurrender(){++confirmations;}
  ${back}

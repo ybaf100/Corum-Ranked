@@ -12,7 +12,7 @@ class SurvivalSelectedMapPanel final : public cocos2d::CCLayerColor {
     SurvivalSelectionLayout m_layout;
     bool m_built=false,m_thumbnail=false,m_ldmSupported=false,m_readyEnabled=false,m_retry=false,m_start=false;
     SurvivalNativeOptions m_options;
-    cocos2d::CCLabelBMFont *m_title=nullptr,*m_creator=nullptr,*m_metadata=nullptr,*m_readiness=nullptr,*m_countdown=nullptr,*m_stars=nullptr,*m_rating=nullptr;
+    cocos2d::CCLabelBMFont *m_title=nullptr,*m_creator=nullptr,*m_metadata=nullptr,*m_readiness=nullptr,*m_countdown=nullptr,*m_stars=nullptr,*m_rating=nullptr,*m_song=nullptr;
     cocos2d::CCSprite* m_star=nullptr;
     cocos2d::CCNode* m_difficulty=nullptr;
     CCMenuItemSpriteExtra *m_ldm=nullptr,*m_shake=nullptr,*m_jukebox=nullptr,*m_ready=nullptr;
@@ -20,7 +20,7 @@ class SurvivalSelectedMapPanel final : public cocos2d::CCLayerColor {
     std::uint64_t m_metadataRevision=0;
     int m_levelId=0;
     MapMetadata m_mapMetadata;
-    std::string m_creatorText,m_statusText;
+    std::string m_creatorText,m_statusText,m_songText;
     std::function<void(int)> m_action;
     void build(cocos2d::CCSize,bool,bool);
     void onAction(cocos2d::CCObject*);

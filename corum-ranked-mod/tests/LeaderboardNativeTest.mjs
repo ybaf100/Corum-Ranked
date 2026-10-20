@@ -67,11 +67,16 @@ test('whole leaderboard popup validates pages, aligns statuses and icons, lazily
     // These are renderer/network boundaries. The Corum header and complete
     // translation unit compile and execute unchanged; this is no device claim.
     let boundary=read('tests/helpers/ResultPresentationNativeDouble.hpp').replace('#pragma once','')
+        .replace('virtual void onEnter()', 'virtual bool init(){return true;} virtual void onEnter()')
         .replace('struct CCObject { virtual ~CCObject() = default; };', 'struct CCObject { virtual ~CCObject() = default; int tag=0; void setTag(int t){tag=t;} int getTag()const{return tag;} };')
-        .replace('CCNode* getParent()',`CCNode*getChildByID(std::string const&s){for(auto*n:children)if(n->id==s)return n;return nullptr;}
+        .replace('CCNode* getParent()',`CCNode*getChildByIDRecursive(std::string const&s){if(id==s)return this;for(auto*n:children)if(auto* found=n->getChildByIDRecursive(s))return found;return nullptr;}
+        CCNode*getChildByID(std::string const&s){for(auto*n:children)if(n->id==s)return n;return nullptr;}
         CCPoint convertToWorldSpace(CCPoint p){p=p+position;return parent?parent->convertToWorldSpace(p):p;}
         CCPoint convertToNodeSpace(CCPoint p){auto o=convertToWorldSpace({});return {p.x-o.x,p.y-o.y};}
         CCNode* getParent()`)
+        .replace('struct CCMenu : CCNode {',`struct CCTouch{CCPoint p;CCPoint getLocation(){return p;}};struct CCEvent{};
+        struct CCMenu : CCNode{virtual bool ccTouchBegan(CCTouch*,CCEvent*){return true;}virtual void ccTouchMoved(CCTouch*,CCEvent*){}virtual void ccTouchEnded(CCTouch*,CCEvent*){}virtual void ccTouchCancelled(CCTouch*,CCEvent*){}`)
+        .replace('CCSize getWinSize() const', 'CCNode* getRunningScene(){static CCNode s;return &s;} CCNode* getNextScene(){return nullptr;} CCSize getWinSize() const')
         .replace('int segments=0;',`int segments=0;struct Line{CCPoint from,to;float radius;};std::vector<Line> lines;`)
         .replace('segments=0; polygon.clear();','segments=0; polygon.clear(); lines.clear();')
         .replace('from=a;to=b;radius=r;segmentColor=c;++segments;return true;',`assert(a.x!=b.x||a.y!=b.y);assert(std::abs(a.x-b.x)<.001||std::abs(a.y-b.y)<.001);
@@ -93,6 +98,7 @@ test('whole leaderboard popup validates pages, aligns statuses and icons, lazily
 ${boundary}
 ${json}
 #include "domain/LeaderboardPresentation.hpp"
+#include "domain/SurvivalHudPresentation.hpp"
 #include "domain/RankedMode.hpp"
 inline constexpr int GL_SRC_ALPHA=1,GL_ONE=1;
 using SEL_MenuHandler=int;
@@ -102,7 +108,7 @@ struct GJAccountManager{int m_accountID=1;static GJAccountManager* sharedState()
 namespace geode{
 enum class CommonFilter{Name};
 struct TextInput:CCNode{std::string value;static TextInput*create(float width,char const*){auto*n=new TextInput;n->size={width,25};return n;}void setCommonFilter(CommonFilter){}void setMaxCharCount(int){}void setEnabled(bool){}std::string getString()const{return value;}void setString(std::string text){value=std::move(text);}};
-struct Popup:CCNode{CCNode* m_bgSprite=new CCNode;CCMenuItemSpriteExtra* m_closeBtn=new CCMenuItemSpriteExtra;CCNode* m_mainLayer=new CCNode;
+struct Popup:CCNode{using CCNode::init;CCNode* m_bgSprite=new CCNode;CCMenuItemSpriteExtra* m_closeBtn=new CCMenuItemSpriteExtra;CCNode* m_mainLayer=new CCNode;
  bool init(float,float){addChild(m_mainLayer);return true;}virtual void onClose(CCObject*){removeFromParentAndCleanup(true);}void show(){static CCNode scene;scene.addChild(this);}};
 struct ScrollLayer:CCNode{CCNode* m_contentLayer=new CCNode;static ScrollLayer* create(CCSize s){auto* n=new ScrollLayer;n->size=s;n->addChild(n->m_contentLayer);return n;}void scrollToTop(){m_contentLayer->position={0,size.height-m_contentLayer->size.height};}};
 namespace utils::web{
@@ -111,12 +117,14 @@ struct Operation{std::string url;};struct WebRequest{void timeout(std::chrono::s
 struct Pending{Operation request;std::function<void(WebResponse)> callback;};inline std::vector<Pending> pending;
 }
 namespace async{template<class T>struct TaskHolder{int cancels=0;void cancel(){++cancels;}void spawn(utils::web::Operation req,std::function<void(T)> cb){utils::web::pending.push_back({req,std::move(cb)});}};}
-namespace prelude{using geode::Popup;using geode::ScrollLayer;using geode::TextInput;using geode::CommonFilter;namespace web=geode::utils::web;}
+namespace prelude{using geode::cast::typeinfo_cast;using geode::Popup;using geode::ScrollLayer;using geode::TextInput;using geode::CommonFilter;namespace web=geode::utils::web;}
 }
 namespace corum::ranked{
 struct RankedRuntime{static RankedRuntime& get(){static RankedRuntime r;return r;}std::string leaderboardUrl(int o,int n,RankedMode mode)const{return fmt::format("{}?offset={}&limit={}",mode==RankedMode::Survival?"/api/ranked/survival/leaderboard":"/api/ranked/leaderboard",o,n);}};
 namespace i18n{bool isKorean(){return false;}std::string text(char const*,char const* fallback){return fallback;}}
 namespace ui{
+void cancelMenuTouch(CCMenu* menu){if(menu)++menu->cancellations;}
+struct SurvivalPlayerInfoPopup{static inline int opened=0,account=0;static inline bool survival=false;static SurvivalPlayerInfoPopup*createForLeaderboard(SurvivalStanding const& p,CCNode*,bool mode){account=p.accountId;survival=mode;static SurvivalPlayerInfoPopup instance;return &instance;}void show(){++opened;}};
 enum class FontWeight{SemiBold,ExtraBold,Black};enum class RankBadgeDisplay{Matched,Leaderboard};
 constexpr ccColor3B Text{242,247,255},TextMuted{164,181,205},Gold{255,207,74},Blue{77,135,255},Red{255,91,111},Green{90,238,151},Cyan{64,224,255},Surface{},SurfaceSoft{},SurfaceRaised{};
 CCLabelBMFont* menuLabel(std::string const& t,float s,CCPoint p,ccColor3B c=Text,FontWeight=FontWeight::ExtraBold){auto* n=new CCLabelBMFont;n->setString(t.c_str());n->setScale(s);n->setPosition(p);n->setColor(c);return n;}
@@ -148,6 +156,9 @@ int main(){using namespace corum::ranked;using namespace ui;namespace web=geode:
  web::pending[0].callback({page()});assert(p->m_busy&&p->m_rows.empty()&&!p->m_refresh->isEnabled());
  p->onRefresh(nullptr);assert(web::pending.size()==1);drainMainQueue();
  assert(p->m_rows.size()==20&&badges==20&&!p->m_busy&&p->m_next->isEnabled()&&p->m_refresh->isEnabled());
+ CCObject foreign;p->onPlayerInfo(&foreign);assert(SurvivalPlayerInfoPopup::opened==0);
+ p->onPlayerInfo(p->m_rows[1].action);assert(SurvivalPlayerInfoPopup::opened==1&&SurvivalPlayerInfoPopup::account==2&&!SurvivalPlayerInfoPopup::survival);
+ p->m_busy=true;p->onPlayerInfo(p->m_rows[2].action);assert(SurvivalPlayerInfoPopup::opened==1);p->m_busy=false;
  assert(iconCreates>0&&iconCreates<=5&&p->m_rows.front().icon->local&&p->m_rows[3].entry.bot);
  auto initialPosition=p->m_scroll->m_contentLayer->position;p->m_scroll->m_contentLayer->position.y+=80;p->update(0);
  assert(p->m_rows[3].icon&&p->m_rows[3].icon->account==0);p->m_scroll->m_contentLayer->position=initialPosition;p->update(0);

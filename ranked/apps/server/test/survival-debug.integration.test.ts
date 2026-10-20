@@ -14,7 +14,7 @@ import { SurvivalEngineService } from "../src/survival/survival-engine.service.j
 import { SurvivalService } from "../src/survival/survival.service.js";
 import { SurvivalDebugService } from "../src/survival/survival-debug.service.js";
 import { SurvivalDebugController } from "../src/survival/survival-debug.controller.js";
-import { CreateSurvivalDebugDto,ForceSurvivalDebugDto,SurvivalDebugEventDto } from "../src/survival/survival-debug.dto.js";
+import { ClearSurvivalDebugDto,CreateSurvivalDebugDto,ForceSurvivalDebugDto,SurvivalDebugEventDto } from "../src/survival/survival-debug.dto.js";
 import { AchievementService } from "../src/achievement/achievement.service.js";
 import { SessionService } from "../src/session/session.service.js";
 import { SessionGuard } from "../src/session/session.guard.js";
@@ -141,6 +141,43 @@ describe("Survival M4 persistent debug game",()=>{
       vi.spyOn(engine,"dispatch").mockRejectedValueOnce(new Error("fixture database failure"));
       expect((await event({...ack,eventId:ids.next()})).status).toBe(500);
     } finally {await app.close();}
+  });
+  it("ends only an owned debug round at its accepted records, closes attempts once and rejects release/stale requests",async()=>{
+    let m=await prepare(await create());const r=survivalCurrentRound(m),attemptId=ids.next();
+    await send(m,"ATTEMPT_START",{attemptId});await send(m,"PROGRESS",{attemptId,progress:36.9});m=await engine.get(m.id);
+    const body={requestId:ids.next(),roundKey:r.key,mapGeneration:r.mapGeneration,levelId:r.map!.levelId};
+    await expect(debug.endRound(m.id,{...session,clientBuildChannel:"release"},body)).rejects.toMatchObject({status:403});
+    await expect(debug.endRound(m.id,{...session,playerId:id(99)},body)).rejects.toMatchObject({status:403});
+    await expect(debug.endRound(m.id,session,{...body,mapGeneration:2})).rejects.toMatchObject({status:409});
+    const ended=await debug.endRound(m.id,session,body);expect(ended.state).toBe("ROUND_RESULT");
+    const completed=survivalCurrentRound(await engine.get(m.id));expect(completed.finishedAt).toBe(now);
+    expect(completed.players[0]!.attempts).toEqual([expect.objectContaining({id:attemptId,highestProgress:36.9,endedAt:now})]);
+    expect(completed.players.every(p=>p.attempts.every(a=>a.endedAt!==null))).toBe(true);
+    expect((await debug.endRound(m.id,session,body)).revision).toBe(ended.revision);
+    expect((await db.query("SELECT * FROM sur_match_commands WHERE event_key=$1",[`end-round:${body.requestId}`])).rows).toHaveLength(1);
+    await expect(debug.endRound(m.id,session,{...body,requestId:ids.next()})).rejects.toMatchObject({status:409});
+    await expect(debug.endRound(m.id,session,{...body,levelId:body.levelId+1})).rejects.toMatchObject({status:409});
+    const disabled=new SurvivalDebugService(db,{...env,debugBot:null},clock,{next:()=>0},config,sessions,engine,survival);
+    await expect(disabled.endRound(m.id,session,body)).rejects.toMatchObject({status:404});
+  });
+  it("exposes Debug end-round only through its authenticated context-validated HTTP endpoint",async()=>{
+    const m=await prepare(await create()),r=survivalCurrentRound(m);await record(m,31.25);
+    const module=await Test.createTestingModule({controllers:[SurvivalDebugController],providers:[SessionGuard,AdmissionVersionGuard,
+      {provide:SurvivalDebugService,useValue:debug},{provide:DATABASE,useValue:db},{provide:TokenService,useValue:tokens},{provide:SERVER_CLOCK,useValue:clock}]}).compile();
+    Reflect.defineMetadata("design:paramtypes",[String,Object,ClearSurvivalDebugDto],SurvivalDebugController.prototype,"endRound");
+    vi.spyOn(debug,"onApplicationBootstrap").mockImplementation(async()=>{});
+    const app=module.createNestApplication();app.useLogger(false);app.useGlobalPipes(new ValidationPipe({whitelist:true,forbidNonWhitelisted:true,transform:true}));await app.listen(0,"127.0.0.1");
+    const url=`${await app.getUrl()}/api/ranked/survival/debug/matches/${m.id}/end-round`;
+    const body={requestId:ids.next(),roundKey:r.key,mapGeneration:r.mapGeneration,levelId:r.map!.levelId};
+    const post=(body:unknown,token=true)=>fetch(url,{method:"POST",headers:{"Content-Type":"application/json",...(token?{Authorization:"Bearer fixture-token"}:{})},body:JSON.stringify(body)});
+    try{
+      expect((await post(body,false)).status).toBe(401);
+      expect((await post({...body,type:"FORCE_CLEAR"})).status).toBe(400);
+      expect((await post({...body,levelId:body.levelId+1})).status).toBe(409);
+      const response=await post(body);expect(response.status).toBe(201);expect(await response.json()).toMatchObject({state:"ROUND_RESULT"});
+      expect((await post(body)).status).toBe(201);
+      expect(survivalCurrentRound(await engine.get(m.id)).players[0]!.highestProgress).toBe(31.25);
+    }finally{await app.close();}
   });
   it("authenticates Force Clear, closes one real attempt, recovers exact retries and leaves LP/other participants untouched",async()=>{
     let m=await prepare(await create());const r=survivalCurrentRound(m),attemptId=ids.next();

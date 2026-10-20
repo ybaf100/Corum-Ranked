@@ -10,7 +10,7 @@ struct SurvivalRect {
     bool overlaps(SurvivalRect const& b)const{return x<b.right()-.01f&&right()>b.x+.01f&&y<b.top()-.01f&&top()>b.y+.01f;}
 };
 struct SurvivalSelectionLayout {
-    SurvivalRect safe, header, subtitle, pending, carousel, numberFinal, panel, thumbnail, title, creator, difficulty, metadata, ldm, shake, jukebox, ready, readiness, hint;
+    SurvivalRect safe, header, subtitle, pending, carousel, numberFinal, panel, thumbnail, title, creator, difficulty, metadata, song, ldm, shake, jukebox, ready, readiness, hint;
     bool compact=false;float scale=1;
 };
 struct SurvivalNumberLayout {SurvivalRect ribbon;std::vector<SurvivalRect> columns;float lineStep=0;};
@@ -59,10 +59,13 @@ inline SurvivalSelectionLayout survivalSelectionLayout(float width,float height,
     r.difficulty={infoLeft,infoTop-75,infoWidth*.57f,21};
     r.metadata={infoLeft+infoWidth*.59f,infoTop-75,infoWidth*.41f,21};
     if(!thumbnail){
-        r.title.w=infoWidth*.56f;r.creator.w=r.title.w;
+        r.title={infoLeft,infoTop-22,infoWidth*.56f,22};
+        r.creator={infoLeft,infoTop-38,r.title.w,14};
         r.difficulty={infoLeft+infoWidth*.60f,infoTop-25,infoWidth*.40f,21};
         r.metadata={r.difficulty.x,infoTop-49,r.difficulty.w,18};
     }
+    r.song=thumbnail?SurvivalRect{r.difficulty.x,r.difficulty.y-20,r.difficulty.w,16}:
+        SurvivalRect{r.title.x,r.creator.y-17,r.title.w,14};
     float controlsLeft=thumbnail&&!r.compact?infoLeft:left+12;
     float controlsWidth=thumbnail&&!r.compact?infoWidth:panelWidth-24;
     float const toggleWidth=std::min(140.f,controlsWidth*.44f),readyWidth=std::min(104.f,controlsWidth*.29f);
@@ -74,7 +77,7 @@ inline SurvivalSelectionLayout survivalSelectionLayout(float width,float height,
     r.jukebox={controlsLeft+toggleWidth+8+(middle-jukeboxWidth)/2,y+18,jukeboxWidth,34};
     r.readiness={left+12,r.panel.y+3,panelWidth-24,12};
     r.hint={left,37,panelWidth,16};
-    for(auto* box:{&r.safe,&r.header,&r.subtitle,&r.pending,&r.carousel,&r.numberFinal,&r.panel,&r.thumbnail,&r.title,&r.creator,&r.difficulty,&r.metadata,&r.ldm,&r.shake,&r.jukebox,&r.ready,&r.readiness,&r.hint}){
+    for(auto* box:{&r.safe,&r.header,&r.subtitle,&r.pending,&r.carousel,&r.numberFinal,&r.panel,&r.thumbnail,&r.title,&r.creator,&r.difficulty,&r.metadata,&r.song,&r.ldm,&r.shake,&r.jukebox,&r.ready,&r.readiness,&r.hint}){
         box->x*=r.scale;box->y*=r.scale;box->w*=r.scale;box->h*=r.scale;
     }
     return r;

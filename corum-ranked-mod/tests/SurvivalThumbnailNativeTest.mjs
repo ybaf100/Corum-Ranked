@@ -138,7 +138,7 @@ int main(int argc,char**argv){assert(argc==2);saveRoot=argv[1];auto dir=saveRoot
   else if(url.ends_with("/501/small")){if(!transient){transient=i+1;reply(i,503);}else{retried=true;reply(i,404);}}
   else reply(i,404);
  }fakeNow+=1001;pump(p,3);assert(active()<=2);}
- assert(sentForeign&&sentValid&&retried);assert(flights.size()-before<=24);
+ assert(sentForeign&&sentValid&&retried);assert(flights.size()-before<=40);
  for(auto const& f:flights)assert(f.ticket.url.starts_with("https://levelthumbs.prevter.me/thumbnail/"));
  // Late response after app pause has no texture/IO publication, and a stale scene cannot cancel its successor.
  auto d=c;d.levelId=300;d.sceneGeneration=4;p.activate(d);pump(p);auto inFlight=flights.size()-1;
@@ -146,10 +146,35 @@ int main(int argc,char**argv){assert(argc==2);saveRoot=argv[1];auto dir=saveRoot
  auto uploads=CCTexture2D::uploads;reply(inFlight,200,webp(),{{"Content-Type","image/webp"}});pump(p);assert(CCTexture2D::uploads==uploads&&!p.selected());
  auto e=d;e.sceneGeneration=5;p.activate(e);pump(p);auto live=active();p.release(d);assert(active()==live);p.release(e);assert(active()==0);
  // Resolving an unknown ID keeps the active candidate request and its slots.
- auto unknown=e;unknown.roundKey="R2";unknown.levelId=0;unknown.sceneGeneration=6;p.activate(unknown);pump(p);
+ auto unknown=e;unknown.matchId="new-unknown";unknown.roundKey="R2";unknown.levelId=0;unknown.sceneGeneration=6;p.activate(unknown);pump(p);
  auto candidateTicket=flights.size()-1;assert(!flights[candidateTicket].cancelled);
  auto resolved=unknown;resolved.levelId=400;resolved.sceneGeneration=7;p.activate(resolved);assert(!flights[candidateTicket].cancelled);
  p.release(resolved);assert(active()==0);
+ // Download a larger pool once during R1. All later rounds reuse its cached
+ // images; neither new random redirects nor new pool-image HTTP is needed.
+ auto pooled=resolved;pooled.matchId="pooled";pooled.roundKey="R1";pooled.levelId=600;pooled.sceneGeneration=20;
+ p.activate(pooled);pump(p);int nextCandidate=2000;
+ for(int round=0;round<180;round++){
+  auto end=flights.size();for(std::size_t i=0;i<end;i++)if(!flights[i].done&&!flights[i].cancelled){
+   if(flights[i].ticket.url.ends_with("/random/small"))reply(i,302,{},{{"Location","/thumbnail/"+std::to_string(nextCandidate++)+"/small"}});
+   else reply(i,200,webp(),{{"Content-Type","image/webp"}});
+  }fakeNow+=250;pump(p,3);
+ }
+ auto firstPool=p.previews();assert(firstPool.size()==7);std::set<std::uint64_t> initial;
+ for(auto const& [id,texture]:firstPool){assert(texture);initial.insert(id);}assert(initial.size()==7);
+ for(int round=2;round<=4;round++){
+  auto beforeRound=flights.size();pooled.roundKey="R"+std::to_string(round);pooled.mapGeneration=round;pooled.levelId=600+round;++pooled.sceneGeneration;
+  p.activate(pooled);auto cached=p.previews();assert(cached.size()==7);
+  for(auto const& [id,texture]:cached)assert(id>=2000&&id<2010&&texture);
+  for(int frame=0;frame<12;frame++){
+   auto end=flights.size();for(std::size_t i=beforeRound;i<end;i++)if(!flights[i].done&&!flights[i].cancelled){
+    assert(flights[i].ticket.url.find("/random/")==std::string::npos);
+    assert(flights[i].ticket.url.find("/"+std::to_string(pooled.levelId)+"/")!=std::string::npos);
+    reply(i,200,webp(),{{"Content-Type","image/webp"}});
+   }pump(p,3);
+  }
+ }
+ p.release(pooled);assert(active()==0);
 }`);
 }
 test('actual provider bounds anonymous requests, cancels obsolete replies, handles 302/404/retry/cache and decodes away from GL thread',()=>runProvider());

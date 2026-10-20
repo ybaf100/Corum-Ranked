@@ -16,6 +16,7 @@ public:
     static RankedMapDetails& get();
     void request(std::vector<int> ids);
     void remember(GJGameLevel* level);
+    void requestDemonTier(int levelId);
     MapDifficulty difficulty(int levelId) const;
     MapMetadata metadata(int levelId) const;
     std::uint64_t revision() const { return m_revision; }

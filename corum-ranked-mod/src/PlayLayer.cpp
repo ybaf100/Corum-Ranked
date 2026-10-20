@@ -529,6 +529,10 @@ public:
     // detours or remote physics. Scene/UI heartbeat continues while GD gameplay,
     // button commands, evidence and its audio clock are held at the initial pose.
     void queueHeldEntryExit() {
+        // Survival owns one retryable deferred quit path, including Pause. The
+        // old entry-only path latched autoExitRequested before onQuit could be
+        // refused by Pause; an accepted surrender then could never queue again.
+        if(m_fields->survivalLevel){queueSurvivalGameplayReturn();return;}
         if (m_fields->autoExitRequested) return;
         // A round boundary can race the genuine native clear animation.
         // Let its completion setup finish before retiring this official scene.
@@ -2577,6 +2581,17 @@ bool corum::ranked::requestSurvivalGameplayReturn(PlayLayer* layer) {
         managed->m_fields->autoExitRequested,layer->isRunning(),managed->m_fields->safetyRetired,managed->m_fields->rankedInitialized,
         layer->getParent()==CCDirector::sharedDirector()->getRunningScene(),CCDirector::sharedDirector()->getNextScene()!=nullptr);
     return managed->m_fields->autoExitRequested;
+}
+void corum::ranked::pumpSurvivalGameplayExit(PlayLayer* layer){
+    if(!layer || layer!=PlayLayer::get())return;
+    auto* managed=static_cast<CorumRankedPlayLayer*>(layer);auto& fields=*managed->m_fields.self();
+    if(fields.safetyRetired || !fields.rankedInitialized || (!fields.survivalLevel && !fields.survivalFreePlayHud))return;
+    auto& runtime=SurvivalRuntime::get();
+    bool const departing=fields.survivalFreePlayHud?runtime.freePlayReturnPending():
+        !runtime.surrenderPending() && (runtime.view().ownEliminated || runtime.normalRoundCleared() ||
+        runtime.preparationContext()!=fields.survivalContext || runtime.view().state=="ROUND_RESULT" ||
+        runtime.view().state=="FINAL_RESULT" || runtime.view().state=="CANCELLED");
+    if(departing)managed->queueSurvivalGameplayReturn();
 }
 
 bool corum::ranked::requestConcededGameplayReturn(PlayLayer* layer) {

@@ -1,6 +1,7 @@
 #include "RankedRoundPreparation.hpp"
 #include "RankedRuntime.hpp"
 #include "SurvivalRuntime.hpp"
+#include "SurvivalSceneBridge.hpp"
 #include "domain/SurvivalNativeOptions.hpp"
 #include "SurvivalOptionsPreferences.hpp"
 #include <Geode/binding/FMODAudioEngine.hpp>
@@ -53,11 +54,15 @@ RankedRoundPreparation& RankedRoundPreparation::get() {
 }
 void RankedRoundPreparation::update(float dt) {
     RankedRuntime::get().updateSessionHeartbeat();
+    // Pause can stop the PlayLayer and its local callbacks. Accepted surrender
+    // and observer returns must still advance from a process-owned heartbeat.
+    SurvivalRuntime::get().tick();
     // A held native PlayLayer can stop receiving its own scheduler callbacks.
     // Keep the same server-certified entry/GO gate progressing from the
     // process-owned heartbeat, without directly resuming native gameplay.
-    if (auto current = m_play.lock(); current && current.data() == PlayLayer::get())
-        pumpHeldRankedEntry(current.data());
+    if (auto current = m_play.lock(); current && current.data() == PlayLayer::get()){
+        pumpSurvivalGameplayExit(current.data());pumpHeldRankedEntry(current.data());
+    }
     // On iPadOS vanilla Pause->Quit can pop the game scene while retaining
     // AppDelegate::m_gamePaused. Only clear it after the exact saved origin
     // has become the active scene; never unpause an active game or another UI.
@@ -368,7 +373,7 @@ bool RankedRoundPreparation::launch(CCScene* origin) {
     bool const spectator = runtime.canEnterCurrentLevelAsSpectator();
     bool const entering = runtime.canEnterNativeRoundScene();
     bool const survival=SurvivalRuntime::get().active();
-    bool const allowed = survival ? (SurvivalRuntime::get().canEnter() || SurvivalRuntime::get().canEnterObserver()) : runtime.canEnterCurrentLevel() || entering || spectator;
+    bool const allowed = survival ? (SurvivalRuntime::get().canEnter() || SurvivalRuntime::get().canEnterObserver() || SurvivalRuntime::get().canReplayCleared()) : runtime.canEnterCurrentLevel() || entering || spectator;
     if (roundPrepareState(runtime.view().match.state) || !allowed || !ready() ||
         !origin || origin != CCDirector::sharedDirector()->getRunningScene() ||
         roundModalOpen(origin) || !preparation.authorizes(level, m_context)) return false;
@@ -408,7 +413,9 @@ bool RankedRoundPreparation::launch(CCScene* origin) {
     // journal/ACK gates. A viewer never arms a local attempt.
     if (!survival && !spectator && !entering && !runtime.armCurrentLevelForGameplay()) return false;
     tracePreparedLevel("round-native-launch", level, nullptr, this);
-    if(survival && !(SurvivalRuntime::get().observing()?SurvivalRuntime::get().armObserver(level,origin):SurvivalRuntime::get().armNative(level)))return false;
+    if(survival){auto& sur=SurvivalRuntime::get();
+        if(!(sur.observing()?sur.armObserver(level,origin):sur.normalRoundCleared()?sur.armClearedReplay(level,origin):sur.armNative(level)))return false;
+    }
     if(survival){
         corum::ranked::SurvivalOptionsPreferences::get().apply(level,corum::ranked::SurvivalRuntime::get().optionsContext());
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)

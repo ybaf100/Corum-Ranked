@@ -67,7 +67,7 @@ int main(){using namespace corum::ranked;SurvivalRuntime r;CCScene origin;origin
  r.m_view.phase="TIEBREAK";assert(!r.canFreePlay());r.m_view.phase="ROUND_1";assert(r.canFreePlay());
  assert(r.beginFreePlay());assert(!r.beginFreePlay());drain();assert(d->stack.size()==2&&RankedAudioManager::get().restored==1);
  wall+=std::chrono::hours(1);r.pumpFreePlayReturn();assert(queued.empty()&&!r.freePlayReturnPending()); // A local timeout grants no authority.
- CCScene ordinary;PlayLayer play;play.parent=&ordinary;PlayLayer::current=&play;d->stack.push_back(&ordinary);r.m_view.state="ROUND_RESULT";
+ CCScene ordinary;PlayLayer play;play.running=false;play.parent=&ordinary;PlayLayer::current=&play;d->stack.push_back(&ordinary);r.m_view.state="ROUND_RESULT";
  d->next=&ordinary;r.pumpFreePlayReturn();assert(queued.empty());d->next=nullptr;r.pumpFreePlayReturn();r.pumpFreePlayReturn();assert(queued.size()==1);drain();assert(returnRequests==1&&r.freePlaying());
  GJGameLevel level,other;assert(r.beginFreePlayNativeQuit(&level));assert(r.interceptFreePlayNativeQuit(&level)&&!r.interceptFreePlayNativeQuit(&other));r.finishFreePlayNativeQuit();drain();assert(!r.freePlaying()&&d->getRunningScene()==&origin&&d->pops==1);
  r.pumpFreePlayReturn();assert(queued.empty());PlayLayer::current=nullptr;r.m_view.state="PLAYING";assert(r.beginFreePlay());drain();r.m_view.roundKey="r2";r.m_view.mapGeneration=2;assert(r.freePlayReturnPending());r.pumpFreePlayReturn();drain();assert(d->getRunningScene()==&origin&&d->pops==2);
@@ -81,19 +81,22 @@ test('Force Clear keeps exact retries, waits behind regular events and rejects s
  const source=read('src/SurvivalRuntime.cpp');
  run(preamble+`
 namespace geode::log{template<class...T>void info(T const&...){}}
+namespace log=geode::log;
 namespace utils::random{std::string generateUUID(){static int n=0;return "request-"+std::to_string(++n);}}
-namespace web{struct WebResponse{int status;matjson::Value root;int code()const{return status;}matjson::Result<matjson::Value>json()const{return {root};}};struct Operation{matjson::Value body;};struct WebRequest{matjson::Value body;void bodyJSON(matjson::Value v){body=v;}Operation post(std::string const&){return {body};}};struct Pending{Operation op;std::function<void(WebResponse)>done;};std::vector<Pending>pending;}
+namespace web{struct WebResponse{int status;matjson::Value root;int code()const{return status;}matjson::Result<matjson::Value>json()const{return {root};}};struct Operation{matjson::Value body;std::string url;};struct WebRequest{matjson::Value body;void bodyJSON(matjson::Value v){body=v;}Operation post(std::string const& url){return {body,url};}};struct Pending{Operation op;std::function<void(WebResponse)>done;};std::vector<Pending>pending;}
 web::WebRequest request(std::string const&){return {};}
 struct Request{int cancellations=0;void cancel(){++cancellations;}void spawn(web::Operation op,std::function<void(web::WebResponse)> fn){web::pending.push_back({op,fn});}};
 namespace corum::ranked{
+struct RankedRuntime{static auto&get(){static RankedRuntime r;return r;}std::string spectatorLiveSessionToken()const{return "session";}};
 struct SurvivalRuntime{
- struct View{std::string id="match",roundKey="r1",state="PLAYING",phase="ROUND_1",error;int mapGeneration=1;bool debug=true,online=false,ownEliminated=false,ownAssetsReady=true,ownEntered=true;}m_view;
+ struct View{double activeAttemptProgress=38;std::string id="match",roundKey="r1",state="PLAYING",phase="ROUND_1",error;int mapGeneration=1;bool debug=true,online=false,ownEliminated=false,ownAssetsReady=true,ownEntered=true;}m_view;
+ bool local=false;int ends=0;long remainingMs()const{return 180000;}bool freePlaying()const{return local;}void endAttempt(double p){assert(p==38);++ends;m_events.push_back(event("ATTEMPT_END"));}
  bool cleared=false,m_forceClearBusy=false,m_eventBusy=false;std::uint64_t m_generation=1;std::string m_session="session",m_attempt="attempt";std::optional<matjson::Value> m_forceClearBody;std::deque<matjson::Value>m_events;std::chrono::steady_clock::time_point m_forceClearRetryAt{},m_nextPoll{};Request m_forceClearRequest;
  bool normalRoundCleared()const{return cleared;}bool canPlay()const{return true;}bool active()const{return !m_view.id.empty();}bool current(std::uint64_t gen,std::string const& session){return gen==m_generation&&session==m_session;}
- bool forceClearPending()const{return m_forceClearBody.has_value();}bool surrenderPending()const{return false;}std::string debugEndpoint(std::string const& p){return p;}matjson::Value event(std::string type){matjson::Value v;v["type"]=type;v["roundKey"]=m_view.roundKey;v["mapGeneration"]=m_view.mapGeneration;return v;}void observe(matjson::Value const& v){cleared=v["cleared"].asBool().unwrapOr(false);}
- bool canForceClear()const;void forceClear();void pumpForceClear();
+ bool forceClearPending()const{return m_forceClearBody.has_value();}bool surrenderPending()const{return false;}std::string debugEndpoint(std::string const& p){return p;}matjson::Value event(std::string type){matjson::Value v;v["type"]=type;v["roundKey"]=m_view.roundKey;v["mapGeneration"]=m_view.mapGeneration;return v;}void observe(matjson::Value const& v){cleared=v["cleared"].asBool().unwrapOr(false);auto state=v["state"].asString().unwrapOr("");if(!state.empty())m_view.state=state;}
+ bool canForceClear()const;void forceClear();void pumpForceClear();bool canEndRound()const;void endRound();
 };
-${['bool SurvivalRuntime::canForceClear()', 'void SurvivalRuntime::forceClear()', 'void SurvivalRuntime::pumpForceClear()'].map(n=>method(source,n)).join('\n')}
+${['bool SurvivalRuntime::canForceClear()', 'void SurvivalRuntime::forceClear()', 'void SurvivalRuntime::pumpForceClear()', 'bool SurvivalRuntime::canEndRound()', 'void SurvivalRuntime::endRound()'].map(n=>method(source,n)).join('\n')}
 }
 int main(){using namespace corum::ranked;SurvivalRuntime r;
  r.m_view.online=true;assert(!r.canForceClear());r.m_view.online=false;r.m_view.phase="TIEBREAK";assert(!r.canForceClear());r.m_view.phase="ROUND_1";
@@ -103,6 +106,16 @@ int main(){using namespace corum::ranked;SurvivalRuntime r;
  r.forceClear();web::pending.back().done({409,{}});assert(!r.forceClearPending()&&r.m_view.error=="survival-force-clear-rejected");
  r.forceClear();web::pending.back().done({201,{}});assert(!r.cleared&&r.forceClearPending()&&r.m_attempt=="new-round");wall+=std::chrono::seconds(1);r.pumpForceClear();web::pending.back().done({201,accepted});assert(r.cleared&&!r.forceClearPending()&&r.m_attempt.empty());
  r.cleared=false;r.m_attempt="a";r.forceClear();r.cleared=true;r.pumpForceClear();assert(!r.forceClearPending()&&r.m_attempt.empty()); // Poll recovers a lost success response.
+ // END ROUND shares the retry/ACK boundary but never fabricates a clear.
+ r.local=true;assert(!r.canEndRound());r.local=false;r.m_view.online=true;assert(!r.canEndRound());r.m_view.online=false;
+ r.m_view.ownAssetsReady=false;assert(!r.canEndRound());r.m_view.ownAssetsReady=true;r.m_view.phase="TIEBREAK";assert(r.canEndRound());
+ r.cleared=false;r.m_attempt="last-attempt";auto count=web::pending.size();r.endRound();r.endRound();assert(r.ends==1&&r.forceClearPending()&&r.m_events.size()==1&&web::pending.size()==count);
+ assert(r.m_events.front()["type"].asString().unwrapOr("")=="ATTEMPT_END");r.m_events.clear();r.pumpForceClear();assert(web::pending.size()==count+1);
+ assert(web::pending.back().op.url=="/matches/match/end-round");assert(web::pending.back().op.body["type"].asString().unwrapOr("").empty());
+ auto requestId=web::pending.back().op.body["requestId"].asString().unwrapOr("");web::pending.back().done({500,{}});assert(r.forceClearPending()&&r.m_attempt=="last-attempt"&&!r.cleared);
+ wall+=std::chrono::seconds(1);r.pumpForceClear();assert(web::pending.back().op.body["requestId"].asString().unwrapOr("")==requestId);
+ matjson::Value ended;ended["state"]="ROUND_RESULT";web::pending.back().done({201,ended});assert(!r.forceClearPending()&&r.m_attempt.empty()&&!r.cleared);
+
 }
 `);
 });

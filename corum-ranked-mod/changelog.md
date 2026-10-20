@@ -1,3 +1,15 @@
+# v0.5.0-beta.88
+
+- Retry the scene-owned Survival native return after Pause declines Quit, and pump it from the process heartbeat. Accepted surrender no longer depends on another PlayLayer update or manual exit.
+- Reuse a bounded initial thumbnail pool across all rounds, hide the intro map ID spoiler, rename Level Thumbnails settings, and fit the FINAL clock, song title and label-free feature ornaments to the selected-map panel.
+- Recover exact-ID GDDL tier metadata without claiming the GD search delegate or delaying official map preparation.
+- Open authoritative LP settlement automatically; animate podiums 3rd → 2nd → 1st with rise, icon drop and tier/LP stamp. Show final LP plus its delta and stronger existing GOLD ambient. Remove result/podium board buttons.
+- Add explicit local observer exit/manual re-entry and safe noncompetitive replay after a server-acknowledged 100%. Local play never submits official Attempts or changes settlement.
+- Add Debug-only END ROUND beside FORCE CLEAR, with confirmation, ownership/context checks, durable idempotent server ACK and existing scores/cutoff/final rules. No injected clears or vanilla records.
+- Color timer-adjacent score differences by official rank (nonpassing red, other passing ranks green). FINAL/Death Match native progress shows only the gold leader marker.
+- Open custom player statistics from leaderboard cards with drag/tap separation and cached exact-account forum data. Add Credits inside Settings: Planner and configured music's actual artist - song metadata.
+- Preserve beta.85/86/87 flow, five-second selected-panel hold, separate three-second native GO, toolchain pins, Debug OFF policy, font/package budgets and immutable R2 rollout guards.
+
 # v0.5.0-beta.87
 
 - Pin the compatible GD bindings revision and compile Codegen from those sources in every Release/Debug platform build; prevent upstream generator/header drift from breaking native CI.

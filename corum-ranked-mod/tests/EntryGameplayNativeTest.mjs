@@ -216,6 +216,9 @@ struct CorumRankedPlayLayer:PlayLayer {
     ${method(play, 'bool blockSurvivalEntry()')}
     ${method(play, '    void releaseEntryControls()')}
     void initializeEntryInputHold(){${inputHold}}
+    // Survival return itself is executed with real production code in
+    // SurvivalPauseNativeTest; this suite owns the shared entry-gate boundary.
+    void queueSurvivalGameplayReturn(){if(m_hasCompletedLevel&&!m_fields->survivalNativeClearFinished)return;m_fields->autoExitRequested=true;queueInMainThread([this]{onQuit();});}
     ${entryExit}
     ${countAttempt}
     ${callback}
