@@ -1,0 +1,13 @@
+# Deployment build context: ranked/
+node_modules
+**/node_modules
+**/dist
+**/coverage
+**/.turbo
+**/*.tsbuildinfo
+.env
+.env.*
+!.env.example
+.git
+.DS_Store
+*.log
