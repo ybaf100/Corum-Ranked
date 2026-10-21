@@ -314,7 +314,7 @@ public:
         }
         auto const remaining = ranked.matchPauseRemainingMs();
         auto const text = fmt::format("{}: {:.1f} / 30{}", i18n::text("match-pause", "MATCH PAUSE"),
-            std::ceil(remaining / 100) / 10, i18n::isKorean() ? "초" : "s");
+            std::ceil(remaining / 100) / 10, corum::ranked::i18n::literal("inline.s"));
         m_fields->budget->setString(text.c_str());
         m_fields->budget->setColor(remaining <= 5000 ? ui::Red : ui::Gold);
         m_fields->surrender->setEnabled(!m_fields->leaseId.empty());

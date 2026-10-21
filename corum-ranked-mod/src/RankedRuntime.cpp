@@ -2846,7 +2846,7 @@ void RankedRuntime::claimAchievement(std::string const& achievementId) {
 }
 
 void RankedRuntime::claimAllAchievements(std::string const& scope) {
-    if(m_controlBusy || m_sessionToken.empty() || (scope!="SOLO_RANKED" && scope!="SURVIVAL" && scope!="SHARED"))return;
+    if(m_controlBusy || m_sessionToken.empty() || (scope!="SOLO_RANKED" && scope!="SURVIVAL" && scope!="SHARED" && scope!="ALL"))return;
     auto request=baseRequest(m_sessionToken);matjson::Value body;body["scope"]=scope;request.bodyJSON(body);
     m_controlBusy=true;m_view.achievements.loading=true;m_view.achievements.error.clear();++m_view.revision;
     auto const generation=m_sessionGeneration;auto const session=m_sessionToken;
@@ -2858,9 +2858,6 @@ void RankedRuntime::claimAllAchievements(std::string const& scope) {
         auto& state=m_view.achievements;
         state.totalAp=static_cast<int>(root["totalAp"].asInt().unwrapOr(state.totalAp));
         state.unclaimedRewardCount=static_cast<int>(root["unclaimedRewardCount"].asInt().unwrapOr(state.unclaimedRewardCount));
-        state.claimedAmount=static_cast<int>(root["claimedAmount"].asInt().unwrapOr(0));
-        state.claimedRewards=static_cast<int>(root["claimedRewards"].asInt().unwrapOr(0));
-        state.claimNoticeSequence=++m_claimNoticeSequence;
         for(auto const& group:root["claimedByAchievement"].asArray().unwrapOr(std::vector<matjson::Value>{})){
             auto const id=group["achievementId"].asString().unwrapOr("");
             auto card=std::find_if(state.cards.begin(),state.cards.end(),[&](auto const& value){return value.id==id;});

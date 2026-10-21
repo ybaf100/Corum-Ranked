@@ -1,0 +1,2094 @@
+{
+  "A logged-in Geometry Dash account is required.": {
+    "en": "A logged-in Geometry Dash account is required.",
+    "ko": "로그인된 Geometry Dash 계정이 필요합니다."
+  },
+  "A mod update is required before entering Ranked.": {
+    "en": "A mod update is required before entering Ranked.",
+    "ko": "랭크에 입장하려면 모드를 업데이트하세요."
+  },
+  "Bot fill requires a debug client": {
+    "en": "Bot fill requires a debug client",
+    "ko": "디버그 모드에서만 사용할 수 있습니다."
+  },
+  "Checking for an active Placement run...": {
+    "en": "Checking for an active Placement run...",
+    "ko": "진행 중인 배치 경기를 확인하는 중..."
+  },
+  "Choose a starting Pool.": {
+    "en": "Choose a starting Pool.",
+    "ko": "시작할 POOL을 선택하세요."
+  },
+  "Choose one private ban. The opponent's choice stays hidden.": {
+    "en": "Choose one private ban. The opponent's choice stays hidden.",
+    "ko": "맵 하나를 금지하세요. 상대의 선택은 공개되지 않습니다."
+  },
+  "Could not create a Ranked session.": {
+    "en": "Could not create a Ranked session.",
+    "ko": "랭크 세션을 준비하지 못했습니다."
+  },
+  "Could not load Ranked configuration.": {
+    "en": "Could not load Ranked configuration.",
+    "ko": "랭크 설정을 불러오지 못했습니다."
+  },
+  "Could not recover Placement.": {
+    "en": "Could not recover Placement.",
+    "ko": "배치 경기를 복구하지 못했습니다."
+  },
+  "Creating DEBUG BOT MATCH...": {
+    "en": "Creating DEBUG BOT MATCH...",
+    "ko": "디버그 봇 경기를 준비하는 중..."
+  },
+  "Creating a server session...": {
+    "en": "Creating a server session...",
+    "ko": "서버 세션을 준비하는 중..."
+  },
+  "Current map revealed. Preparing downloads...": {
+    "en": "Current map revealed. Preparing downloads...",
+    "ko": "현재 맵이 공개되었습니다. 다운로드를 준비하는 중..."
+  },
+  "DEBUG BOT MATCH created. Confirm Ready.": {
+    "en": "DEBUG BOT MATCH created. Confirm Ready.",
+    "ko": "디버그 봇 경기가 준비되었습니다. 준비를 확인하세요."
+  },
+  "Deathmatch: exactly three attempts per player.": {
+    "en": "Deathmatch: exactly three attempts per player.",
+    "ko": "데스매치: 플레이어는 세 번 시도할 수 있습니다."
+  },
+  "Debug Bot is disabled": {
+    "en": "Debug Bot is disabled",
+    "ko": "디버그 운영 중지"
+  },
+  "Download the additional resources before entering Ranked.": {
+    "en": "Download the additional resources before entering Ranked.",
+    "ko": "랭크에 입장하려면 추가 리소스를 다운로드하세요."
+  },
+  "Final accepted Attempt is still in progress.": {
+    "en": "Final accepted Attempt is still in progress.",
+    "ko": "접수된 마지막 시도가 진행 중입니다."
+  },
+  "Final start window - active attempts remain valid.": {
+    "en": "Final start window - active attempts remain valid.",
+    "ko": "마지막 시작 시간입니다. 진행 중인 시도는 유효합니다."
+  },
+  "Finalizing skipped Placement...": {
+    "en": "Finalizing skipped Placement...",
+    "ko": "배치 결과를 확정하는 중..."
+  },
+  "Finish or recover the current game before joining Survival": {
+    "en": "Finish or recover the current game before joining Survival",
+    "ko": "진행 중인 경기를 종료하거나 다시 입장하세요."
+  },
+  "Invalid debug password": {
+    "en": "Invalid debug password",
+    "ko": "디버그 비밀번호를 확인하세요."
+  },
+  "Join the Survival queue before filling bots": {
+    "en": "Join the Survival queue before filling bots",
+    "ko": "서바이벌 매칭에 입장하세요."
+  },
+  "Joining the Ranked queue...": {
+    "en": "Joining the Ranked queue...",
+    "ko": "매칭 대기에 참가하는 중..."
+  },
+  "LAST ATTEMPT - an accepted attempt is still in progress.": {
+    "en": "LAST ATTEMPT - an accepted attempt is still in progress.",
+    "ko": "접수된 마지막 시도가 진행 중입니다."
+  },
+  "LAST ATTEMPT - starts must be accepted before the deadline.": {
+    "en": "LAST ATTEMPT - starts must be accepted before the deadline.",
+    "ko": "마지막 시도 시작은 제한 시간 전에 접수가 필요합니다."
+  },
+  "Leaving the Ranked queue...": {
+    "en": "Leaving the Ranked queue...",
+    "ko": "매칭 대기를 취소하는 중..."
+  },
+  "Left the queue.": {
+    "en": "Left the queue.",
+    "ko": "매칭 대기를 취소했습니다."
+  },
+  "Loading authoritative Ranked configuration...": {
+    "en": "Loading authoritative Ranked configuration...",
+    "ko": "서버 랭크 설정을 불러오는 중..."
+  },
+  "Map Grade locked by the server.": {
+    "en": "Map Grade locked by the server.",
+    "ko": "서버에서 맵 등급을 확정했습니다."
+  },
+  "Match cancelled by the server.": {
+    "en": "Match cancelled by the server.",
+    "ko": "서버에서 경기가 취소되었습니다."
+  },
+  "Match complete: Defeat": {
+    "en": "Match complete: Defeat",
+    "ko": "경기 종료: 패배"
+  },
+  "Match complete: Victory": {
+    "en": "Match complete: Victory",
+    "ko": "경기 종료: 승리"
+  },
+  "Match found. Preparing ban phase...": {
+    "en": "Match found. Preparing ban phase...",
+    "ko": "상대를 찾았습니다. 맵 금지를 준비하는 중..."
+  },
+  "Native Survival map data does not match the server.": {
+    "en": "Native Survival map data does not match the server.",
+    "ko": "맵 데이터가 서버 기록과 다릅니다."
+  },
+  "PREPARING": {
+    "en": "PREPARING",
+    "ko": "준비 중"
+  },
+  "Placement Map live. Score and Grade update from the active Top 2 evidence.": {
+    "en": "Placement Map live. Score and Grade update from the active Top 2 evidence.",
+    "ko": "배치 맵이 진행 중입니다. 최고 두 기록으로 점수 및 등급을 갱신합니다."
+  },
+  "Placement Map revealed. Preparing the exact GD level.": {
+    "en": "Placement Map revealed. Preparing the exact GD level.",
+    "ko": "배치 맵이 공개되었습니다. 지정된 레벨을 준비하는 중..."
+  },
+  "Placement Stage saved. Continue whenever you're ready.": {
+    "en": "Placement Stage saved. Continue whenever you're ready.",
+    "ko": "배치 단계가 저장되었습니다. 준비되면 계속하세요."
+  },
+  "Placement cancelled by the server.": {
+    "en": "Placement cancelled by the server.",
+    "ko": "서버에서 배치 경기가 취소되었습니다."
+  },
+  "Placement complete. Your initial Tier is ready.": {
+    "en": "Placement complete. Your initial Tier is ready.",
+    "ko": "배치가 완료되었습니다. 초기 티어가 확정되었습니다."
+  },
+  "Placement recovered. Continue from the saved Stage and Map.": {
+    "en": "Placement recovered. Continue from the saved Stage and Map.",
+    "ko": "배치 경기를 복구했습니다. 저장된 단계의 맵에서 계속하세요."
+  },
+  "Placement resumed. Preparing the next Map.": {
+    "en": "Placement resumed. Preparing the next Map.",
+    "ko": "배치 경기를 재개했습니다. 다음 맵을 준비하는 중..."
+  },
+  "Placement skip was not applied.": {
+    "en": "Placement skip was not applied.",
+    "ko": "배치 건너뛰기가 적용되지 않았습니다."
+  },
+  "Placement skipped. Showing the server result.": {
+    "en": "Placement skipped. Showing the server result.",
+    "ko": "배치를 건너뛰었습니다. 서버 결과를 확인하세요."
+  },
+  "Placement started. Preparing Stage 1 Map 1.": {
+    "en": "Placement started. Preparing Stage 1 Map 1.",
+    "ko": "배치를 시작했습니다. 첫 단계의 첫 맵을 준비하는 중..."
+  },
+  "Ranked cannot start until the mod environment is corrected.": {
+    "en": "Ranked cannot start until the mod environment is corrected.",
+    "ko": "모드 설정을 수정한 뒤 랭크를 시작하세요."
+  },
+  "Ranked configuration is invalid.": {
+    "en": "Ranked configuration is invalid.",
+    "ko": "랭크 설정이 유효하지 않습니다."
+  },
+  "Ranked connection expired. Enter Ranked again.": {
+    "en": "Ranked connection expired. Enter Ranked again.",
+    "ko": "랭크 연결이 만료되었습니다. 다시 입장하세요."
+  },
+  "Ranked connection is no longer valid.": {
+    "en": "Ranked connection is no longer valid.",
+    "ko": "랭크 연결이 유효하지 않습니다. 다시 입장하세요."
+  },
+  "Ranked disconnected.": {
+    "en": "Ranked disconnected.",
+    "ko": "랭크 연결을 종료했습니다."
+  },
+  "Ranked is active. Finish the match before leaving this screen.": {
+    "en": "Ranked is active. Finish the match before leaving this screen.",
+    "ko": "진행 중인 경기를 종료한 뒤 화면을 나가세요."
+  },
+  "Ranked session ready.": {
+    "en": "Ranked session ready.",
+    "ko": "랭크 로비에 입장했습니다."
+  },
+  "Ranked session ready. Join the queue when prepared.": {
+    "en": "Ranked session ready. Join the queue when prepared.",
+    "ko": "준비되면 매칭을 시작하세요."
+  },
+  "Recovering the existing match...": {
+    "en": "Recovering the existing match...",
+    "ko": "진행 중인 경기를 복구하는 중..."
+  },
+  "Round live. Only attempts on the revealed map are reported.": {
+    "en": "Round live. Only attempts on the revealed map are reported.",
+    "ko": "라운드가 진행 중입니다. 공개된 맵의 시도만 기록됩니다."
+  },
+  "Round result locked by the server.": {
+    "en": "Round result locked by the server.",
+    "ko": "서버에서 라운드 결과를 확정했습니다."
+  },
+  "SELECTING MAP": {
+    "en": "SELECTING MAP",
+    "ko": "맵 선정 중"
+  },
+  "Searching for an opponent...": {
+    "en": "Searching for an opponent...",
+    "ko": "상대를 찾고 있습니다..."
+  },
+  "Stage complete. Review the combined Grade.": {
+    "en": "Stage complete. Review the combined Grade.",
+    "ko": "단계가 완료되었습니다. 최종 등급을 확인하세요."
+  },
+  "Starting server-authoritative Placement...": {
+    "en": "Starting server-authoritative Placement...",
+    "ko": "서버 배치 경기를 시작하는 중..."
+  },
+  "Survival configuration is refreshing; retry admission": {
+    "en": "Survival configuration is refreshing; retry admission",
+    "ko": "서바이벌 설정을 불러오는 중..."
+  },
+  "Survival debug match could not start.": {
+    "en": "Survival debug match could not start.",
+    "ko": "서바이벌 디버그 경기를 시작할 수 없습니다."
+  },
+  "Survival debug rank could not be forced.": {
+    "en": "Survival debug rank could not be forced.",
+    "ko": "서바이벌 디버그 결과를 변경할 수 없습니다."
+  },
+  "Survival is disabled": {
+    "en": "Survival is disabled",
+    "ko": "서바이벌 운영 중지"
+  },
+  "Survival queue changed; retry": {
+    "en": "Survival queue changed; retry",
+    "ko": "매칭 상태가 변경되었습니다. 다시 시도하세요."
+  },
+  "Survival server connection failed. Retrying...": {
+    "en": "Survival server connection failed. Retrying...",
+    "ko": "서바이벌 서버 연결에 실패했습니다. 다시 시도합니다..."
+  },
+  "Survival state changed. Synchronizing...": {
+    "en": "Survival state changed. Synchronizing...",
+    "ko": "서바이벌 경기 상태를 불러오는 중..."
+  },
+  "Survival surrender was rejected. Synchronizing...": {
+    "en": "Survival surrender was rejected. Synchronizing...",
+    "ko": "항복 요청이 거절되었습니다. 경기 상태를 다시 확인합니다."
+  },
+  "Survival telemetry is pending. Reconnect to recover the game.": {
+    "en": "Survival telemetry is pending. Reconnect to recover the game.",
+    "ko": "기록 전송을 기다리고 있습니다. 다시 입장하세요."
+  },
+  "The debug server returned an incomplete match assignment.": {
+    "en": "The debug server returned an incomplete match assignment.",
+    "ko": "디버그 서버의 경기 정보가 불완전합니다."
+  },
+  "The server returned an incomplete match assignment.": {
+    "en": "The server returned an incomplete match assignment.",
+    "ko": "서버의 경기 정보가 불완전합니다."
+  },
+  "This client does not understand the current CBF policy.": {
+    "en": "This client does not understand the current CBF policy.",
+    "ko": "현재 CBF 설정을 처리할 수 없습니다. 모드를 업데이트하세요."
+  },
+  "Too many Survival requests": {
+    "en": "Too many Survival requests",
+    "ko": "잠시 후 다시 시도하세요."
+  },
+  "WAITING FOR PLAYERS": {
+    "en": "WAITING FOR PLAYERS",
+    "ko": "참가자 입장 대기"
+  },
+  "Your queue batch is not at the front yet": {
+    "en": "Your queue batch is not at the front yet",
+    "ko": "매칭 대기 중입니다. 잠시 후 다시 시도하세요."
+  },
+  "achievement-maxed": {
+    "en": "ACHIEVEMENT MAXED",
+    "ko": "도전과제 최고 단계"
+  },
+  "achievement-subtitle": {
+    "en": "PROGRESS · AP · TITLES",
+    "ko": "진행도 · AP · 칭호"
+  },
+  "achievement-trophy": {
+    "en": "TROPHY",
+    "ko": "도전과제"
+  },
+  "achievement-unlocked": {
+    "en": "ACHIEVEMENT UNLOCKED",
+    "ko": "도전과제 달성"
+  },
+  "achievement-upgraded": {
+    "en": "ACHIEVEMENT UPGRADED",
+    "ko": "도전과제 단계 상승"
+  },
+  "achievements": {
+    "en": "ACHIEVEMENTS",
+    "ko": "도전과제"
+  },
+  "additional-downloads": {
+    "en": "ADDITIONAL DOWNLOADS",
+    "ko": "추가 다운로드"
+  },
+  "admin-audio": {
+    "en": "COMMON SONG VOLUME",
+    "ko": "곡별 공통 볼륨"
+  },
+  "admin-audio-deathmatch": {
+    "en": "Round 3 / Death Match wait",
+    "ko": "3 라운드·데스매치 대기"
+  },
+  "admin-audio-empty": {
+    "en": "No Ranked songs configured.",
+    "ko": "설정된 랭크전 음악이 없습니다."
+  },
+  "admin-audio-failed": {
+    "en": "Could not load/save song volumes.",
+    "ko": "곡별 볼륨을 불러오거나 저장하지 못했습니다."
+  },
+  "admin-audio-lose": {
+    "en": "Lose result",
+    "ko": "패배 결과"
+  },
+  "admin-audio-match": {
+    "en": "Round 1/2",
+    "ko": "1·2 라운드"
+  },
+  "admin-audio-menu": {
+    "en": "Lobby",
+    "ko": "로비"
+  },
+  "admin-audio-promotion": {
+    "en": "Promotion lobby",
+    "ko": "승격전 로비"
+  },
+  "admin-audio-reload": {
+    "en": "Reload",
+    "ko": "다시 불러오기"
+  },
+  "admin-audio-save": {
+    "en": "Save for all players",
+    "ko": "모든 유저에게 저장"
+  },
+  "admin-audio-saved": {
+    "en": "Saved. All players receive this within 5 seconds.",
+    "ko": "저장됨. 모든 유저에게 약 5초 내 전달됩니다."
+  },
+  "admin-audio-scope": {
+    "en": "Ranked menu BGM - saved on server",
+    "ko": "랭크전 메뉴 음악 · 서버에 저장"
+  },
+  "admin-audio-title": {
+    "en": "Song volume (all players)",
+    "ko": "곡별 볼륨 (모든 유저)"
+  },
+  "admin-audio-unsaved": {
+    "en": "Press Save to apply to all players.",
+    "ko": "저장을 누르면 모든 유저에게 적용됩니다."
+  },
+  "admin-audio-warning": {
+    "en": "Demotion warning lobby",
+    "ko": "강등 경고 로비"
+  },
+  "admin-audio-win": {
+    "en": "Win result",
+    "ko": "승리 결과"
+  },
+  "admin-both": {
+    "en": "SET LP / MMR / TIER",
+    "ko": "LP · MMR · 티어 설정"
+  },
+  "admin-delete-bots": {
+    "en": "DELETE ALL BOTS",
+    "ko": "봇 전부 삭제"
+  },
+  "admin-history": {
+    "en": "RESET PLAYER RECORDS",
+    "ko": "플레이어 전체 초기화"
+  },
+  "admin-lp": {
+    "en": "SET LP / TIER",
+    "ko": "LP 및 티어 설정"
+  },
+  "admin-mmr": {
+    "en": "SET MMR",
+    "ko": "MMR 설정"
+  },
+  "admin-password-needed": {
+    "en": "Enter the debug password.",
+    "ko": "디버그 비밀번호를 입력하세요."
+  },
+  "admin-player-needed": {
+    "en": "Enter a player nickname.",
+    "ko": "플레이어 닉네임을 입력하세요."
+  },
+  "admin-reset": {
+    "en": "RESET DATABASE",
+    "ko": "랭크 DB 초기화"
+  },
+  "admin-reset-all": {
+    "en": "Delete ALL Ranked data, including every account, session, record, LP, AP, title and audio override? Everyone must sign in again.",
+    "ko": "모든 계정, 접속, 경기 기록, LP, AP, 칭호, 오디오 설정 등\n랭크드 데이터를 전부 삭제합니다.\n초기화 후 다시 로그인합니다. 계속할까요?"
+  },
+  "admin-reset-scope": {
+    "en": "Reset the selected scope? Other mode data and accounts are retained.",
+    "ko": "선택한 범위의 기록을 초기화합니다.\n다른 모드의 기록과 계정은 유지됩니다."
+  },
+  "admin-scope-common": {
+    "en": "COMMON",
+    "ko": "공통"
+  },
+  "admin-unlock": {
+    "en": "UNLOCK ALL ACHIEVEMENTS",
+    "ko": "도전과제 모두 해금"
+  },
+  "admin-working": {
+    "en": "Applying changes...",
+    "ko": "변경 사항 적용 중..."
+  },
+  "all-history": {
+    "en": "ALL",
+    "ko": "전체"
+  },
+  "all-placement-maps-complete": {
+    "en": "ALL 10 MAPS COMPLETE",
+    "ko": "전체 10개 맵 완료"
+  },
+  "all-resources-ready": {
+    "en": "ALL RESOURCES READY",
+    "ko": "모든 리소스 준비 완료"
+  },
+  "assets-basic-ui": {
+    "en": "Built-in interface",
+    "ko": "기본 화면"
+  },
+  "assets-images": {
+    "en": "Images",
+    "ko": "이미지"
+  },
+  "assets-music": {
+    "en": "Music",
+    "ko": "음악"
+  },
+  "assets-new-download": {
+    "en": "DOWNLOAD IMAGE PACK",
+    "ko": "이미지팩 신규 다운로드"
+  },
+  "assets-one-download": {
+    "en": "Download all required resources in one step.",
+    "ko": "필요한 리소스를 한 번에 다운로드하세요."
+  },
+  "assets-update": {
+    "en": "UPDATE IMAGE PACK",
+    "ko": "이미지팩 업데이트"
+  },
+  "assets-verifying": {
+    "en": "Verifying and installing image pack...",
+    "ko": "이미지팩을 확인하고 설치 중입니다..."
+  },
+  "assets-verifying-short": {
+    "en": "VERIFYING",
+    "ko": "검증 중"
+  },
+  "attempt": {
+    "en": "attempt",
+    "ko": "시도"
+  },
+  "attempt-finished": {
+    "en": "YOUR ATTEMPT IS FINISHED",
+    "ko": "내 시도가 끝났습니다"
+  },
+  "attempt-of-three": {
+    "en": "ATTEMPT  {}  OF  3",
+    "ko": "{}번째 시도 / 3"
+  },
+  "audio": {
+    "en": "AUDIO",
+    "ko": "오디오"
+  },
+  "audio-ready": {
+    "en": "AUDIO READY",
+    "ko": "오디오 준비 완료"
+  },
+  "available": {
+    "en": "AVAILABLE",
+    "ko": "수령 가능"
+  },
+  "ban": {
+    "en": "BAN",
+    "ko": "밴"
+  },
+  "ban-map": {
+    "en": "BAN MAP",
+    "ko": "맵 밴"
+  },
+  "banned": {
+    "en": "BANNED",
+    "ko": "밴 완료"
+  },
+  "banning": {
+    "en": "BANNING...",
+    "ko": "밴 처리 중..."
+  },
+  "cancel": {
+    "en": "CANCEL",
+    "ko": "취소"
+  },
+  "cbf-setting-invalid": {
+    "en": "CBF SETTINGS DO NOT MATCH RANKED REQUIREMENTS.",
+    "ko": "CBF 설정이 랭크 요구사항과 다릅니다."
+  },
+  "cbf-setting-off": {
+    "en": "TURN OFF THESE CBF SETTINGS",
+    "ko": "다음 CBF 설정을 꺼 주세요"
+  },
+  "cbf-settings-required": {
+    "en": "CBF SETTINGS REQUIRED",
+    "ko": "CBF 설정 확인"
+  },
+  "choose-first-pool": {
+    "en": "CHOOSE YOUR FIRST STAGE POOL",
+    "ko": "첫 STAGE POOL을 선택하세요"
+  },
+  "choose-map-remove": {
+    "en": "CHOOSE ONE MAP TO REMOVE",
+    "ko": "제외할 맵 하나를 선택하세요"
+  },
+  "choose-mode": {
+    "en": "CHOOSE A MODE",
+    "ko": "게임 모드 선택"
+  },
+  "claim-all": {
+    "en": "CLAIM ALL",
+    "ko": "모두 받기"
+  },
+  "claim-all-complete": {
+    "en": "CLAIM ALL COMPLETE",
+    "ko": "모두 받기 완료"
+  },
+  "claimable": {
+    "en": "CLAIMABLE",
+    "ko": "수령 가능"
+  },
+  "claimed": {
+    "en": "CLAIMED",
+    "ko": "수령 완료"
+  },
+  "clear-recorded": {
+    "en": "CLEAR RECORDED",
+    "ko": "클리어 기록 완료"
+  },
+  "clear-title": {
+    "en": "CLEAR TITLE",
+    "ko": "칭호 해제"
+  },
+  "click-mode": {
+    "en": "CLICK THE MODE YOU WANT TO ENTER",
+    "ko": "입장할 모드를 선택하세요"
+  },
+  "close": {
+    "en": "CLOSE",
+    "ko": "닫기"
+  },
+  "competitive-ladder": {
+    "en": "COMPETITIVE 1V1 LADDER",
+    "ko": "경쟁 1대1 래더"
+  },
+  "complete": {
+    "en": "COMPLETE",
+    "ko": "완료"
+  },
+  "completed": {
+    "en": "COMPLETED",
+    "ko": "달성 완료"
+  },
+  "confirm": {
+    "en": "CONFIRM",
+    "ko": "CONFIRM"
+  },
+  "confirm-skip": {
+    "en": "SKIP AND PLACE",
+    "ko": "건너뛰고 배치"
+  },
+  "connection-issue": {
+    "en": "CONNECTION ISSUE",
+    "ko": "연결 오류"
+  },
+  "continue": {
+    "en": "CONTINUE",
+    "ko": "계속"
+  },
+  "continue-placement": {
+    "en": "CONTINUE PLACEMENT",
+    "ko": "CONTINUE PLACEMENT"
+  },
+  "creator-loading": {
+    "en": "CREATOR LOADING...",
+    "ko": "CREATOR LOADING..."
+  },
+  "credits-intro": {
+    "en": "Planning and music behind Corum Ranked",
+    "ko": "Corum Ranked의 기획과 음악"
+  },
+  "credits-music": {
+    "en": "Music",
+    "ko": "음악"
+  },
+  "credits-no-music": {
+    "en": "No configured music",
+    "ko": "설정된 음악 없음"
+  },
+  "credits-planner": {
+    "en": "Planner",
+    "ko": "기획"
+  },
+  "credits-result": {
+    "en": "Match results",
+    "ko": "경기 결과"
+  },
+  "credits-rounds-one-two": {
+    "en": "Rounds 1 & 2",
+    "ko": "1·2 라운드"
+  },
+  "credits-song-loading": {
+    "en": "Loading song credits...",
+    "ko": "음악 크레딧 불러오는 중..."
+  },
+  "current": {
+    "en": "CURRENT",
+    "ko": "현재"
+  },
+  "death-match": {
+    "en": "DEATH MATCH",
+    "ko": "데스 매치"
+  },
+  "debug": {
+    "en": "DEBUG",
+    "ko": "디버그"
+  },
+  "debug-bot": {
+    "en": "BOT MATCH",
+    "ko": "봇 매치"
+  },
+  "debug-player-totals": {
+    "en": "Players: {} · Total: {}",
+    "ko": "플레이어 {}명 · 총 {}명"
+  },
+  "debug-spectate": {
+    "en": "SPECTATE",
+    "ko": "관전"
+  },
+  "defeat": {
+    "en": "DEFEAT",
+    "ko": "패배"
+  },
+  "demoted": {
+    "en": "DEMOTED",
+    "ko": "강등"
+  },
+  "demotion-next-loss": {
+    "en": "A loss may demote you in the next match.",
+    "ko": "다음 경기에서 패배하면 강등될 수 있습니다."
+  },
+  "demotion-warning": {
+    "en": "DEMOTION WARNING",
+    "ko": "강등 경고"
+  },
+  "detail": {
+    "en": "DETAIL",
+    "ko": "상세"
+  },
+  "difficulty": {
+    "en": "difficulty",
+    "ko": "난이도"
+  },
+  "disable-shake": {
+    "en": "DISABLE SHAKE",
+    "ko": "화면 흔들림 끄기"
+  },
+  "division-promoted-to": {
+    "en": "Promoted to {}!",
+    "ko": "{} 승급"
+  },
+  "division-up": {
+    "en": "DIVISION UP",
+    "ko": "승급"
+  },
+  "download-all": {
+    "en": "DOWNLOAD ALL",
+    "ko": "모두 다운로드"
+  },
+  "download-failed": {
+    "en": "DOWNLOAD FAILED",
+    "ko": "다운로드 실패"
+  },
+  "download-song": {
+    "en": "DOWNLOAD SONG",
+    "ko": "노래 다운로드"
+  },
+  "downloading": {
+    "en": "DOWNLOADING...",
+    "ko": "다운로드 중..."
+  },
+  "downloading-audio": {
+    "en": "DOWNLOADING AUDIO...",
+    "ko": "오디오 다운로드 중..."
+  },
+  "downloading-map": {
+    "en": "DOWNLOADING MAP...",
+    "ko": "맵 다운로드 중..."
+  },
+  "downloading-resources": {
+    "en": "DOWNLOADING",
+    "ko": "리소스 다운로드 중"
+  },
+  "draw": {
+    "en": "draw",
+    "ko": "무승부"
+  },
+  "environment-warning-action": {
+    "en": "FIX THE ITEMS BELOW, RESTART THE GAME, THEN CHECK AGAIN.",
+    "ko": "비허용 모드는 끄고 필수 모드는 설치·활성화한 뒤 게임을 다시 시작하세요."
+  },
+  "environment-warning-body": {
+    "en": "RANKED CANNOT BE USED WITH THE CURRENT MOD SETUP.",
+    "ko": "현재 모드 상태로는 랭크를 이용할 수 없습니다."
+  },
+  "everything-ready": {
+    "en": "Everything required for Ranked is ready.",
+    "ko": "랭크에 필요한 리소스가 모두 준비되었습니다."
+  },
+  "final": {
+    "en": "FINAL",
+    "ko": "FINAL"
+  },
+  "final-attempt-progress": {
+    "en": "FINAL ATTEMPT IN PROGRESS",
+    "ko": "마지막 시도 진행 중"
+  },
+  "final-placement": {
+    "en": "FINAL PLACEMENT",
+    "ko": "최종 배치"
+  },
+  "find-match": {
+    "en": "FIND A 1V1 MATCH",
+    "ko": "1대1 상대 찾기"
+  },
+  "forum-cache-kept": {
+    "en": "API unavailable; cached records kept.",
+    "ko": "API 연결 불가 · 저장된 기록 유지"
+  },
+  "forum-refresh": {
+    "en": "Refresh forum records",
+    "ko": "포럼 기록 갱신"
+  },
+  "forum-refresh-cooldown": {
+    "en": "Next refresh in",
+    "ko": "다음 갱신까지"
+  },
+  "forum-update-failed": {
+    "en": "Update failed. Try again.",
+    "ko": "갱신 실패. 다시 시도하세요."
+  },
+  "forum-updating": {
+    "en": "Updating forum records...",
+    "ko": "포럼 기록 갱신 중..."
+  },
+  "history": {
+    "en": "HISTORY",
+    "ko": "기록"
+  },
+  "incompatible-mod-versions": {
+    "en": "INCOMPATIBLE MOD VERSIONS",
+    "ko": "버전이 맞지 않는 모드"
+  },
+  "info": {
+    "en": "INFO",
+    "ko": "정보"
+  },
+  "info-bot-reference": {
+    "en": "Bot reference: CoJong",
+    "ko": "봇전 참고 프로필: CoJong"
+  },
+  "info-demons": {
+    "en": "Demons",
+    "ko": "데몬 개수"
+  },
+  "info-moons": {
+    "en": "Moons",
+    "ko": "달 개수"
+  },
+  "info-stars": {
+    "en": "Stars",
+    "ko": "별 개수"
+  },
+  "info-unavailable": {
+    "en": "Unavailable",
+    "ko": "조회 불가"
+  },
+  "info-unlinked": {
+    "en": "Not linked",
+    "ko": "계정 연결 안 됨"
+  },
+  "info-unranked": {
+    "en": "Not ranked",
+    "ko": "순위 없음"
+  },
+  "inline.attempts-left": {
+    "en": "ATTEMPTS LEFT : ",
+    "ko": "남은 시도 : "
+  },
+  "inline.bot-count": {
+    "en": "Bot Count",
+    "ko": "봇 수"
+  },
+  "inline.bot-count-1-15": {
+    "en": "Bot Count: 1 - 15",
+    "ko": "봇 수: 1 - 15"
+  },
+  "inline.could-not-load-press-refresh": {
+    "en": "Could not load. Press Refresh.",
+    "ko": "불러오지 못했습니다. 새로고침하세요."
+  },
+  "inline.l": {
+    "en": "L (",
+    "ko": "패 ("
+  },
+  "inline.loading": {
+    "en": "Loading...",
+    "ko": "불러오는 중..."
+  },
+  "inline.lp-rule": {
+    "en": "LP / RULE",
+    "ko": "LP / 기준"
+  },
+  "inline.map-pool": {
+    "en": "MAP POOL",
+    "ko": "맵 풀"
+  },
+  "inline.none": {
+    "en": "NONE",
+    "ko": "없음"
+  },
+  "inline.opp-attempts-left": {
+    "en": "OPP. ATTEMPTS LEFT : ",
+    "ko": "상대 남은 시도 : "
+  },
+  "inline.players": {
+    "en": "PLAYERS",
+    "ko": "명"
+  },
+  "inline.population-position": {
+    "en": "Population / position",
+    "ko": "인원 / 순위 기준"
+  },
+  "inline.s": {
+    "en": "s",
+    "ko": "초"
+  },
+  "inline.series-games-wins": {
+    "en": "Series {} games / {} wins",
+    "ko": "승격전 {}판 {}승"
+  },
+  "inline.shared": {
+    "en": "Shared",
+    "ko": "공통"
+  },
+  "inline.solo-ranked": {
+    "en": "Solo Ranked",
+    "ko": "솔로 랭크"
+  },
+  "inline.solo-ranked-gold-players": {
+    "en": "SOLO RANKED · {} Gold players",
+    "ko": "SOLO RANKED · GOLD 이상 {}명"
+  },
+  "inline.starts-in": {
+    "en": "STARTS IN...",
+    "ko": "시작까지..."
+  },
+  "inline.survival": {
+    "en": "Survival",
+    "ko": "서바이벌"
+  },
+  "inline.tier": {
+    "en": "TIER",
+    "ko": "티어"
+  },
+  "inline.tiers-cutoffs": {
+    "en": "TIERS / CUTOFFS",
+    "ko": "티어 / 커트라인"
+  },
+  "inline.ties-use-leaderboard-order-bots-included": {
+    "en": "Ties use leaderboard order · Bots included",
+    "ko": "동점은 리더보드 순서로 결정 · 봇 포함"
+  },
+  "inline.top-3": {
+    "en": "TOP 3",
+    "ko": "상위 3명"
+  },
+  "inline.total-must-be-2-16-players": {
+    "en": "Total must be 2-16 players",
+    "ko": "총 2-16명으로 설정하세요"
+  },
+  "inline.unclassified": {
+    "en": "Unclassified",
+    "ko": "미분류"
+  },
+  "inline.upper-half-players": {
+    "en": "Upper half · {} players",
+    "ko": "상위 절반 · {}명"
+  },
+  "inline.w": {
+    "en": "W / ",
+    "ko": "승 / "
+  },
+  "inline.waiting-for-opponent": {
+    "en": "WAITING FOR OPPONENT...",
+    "ko": "상대 입장 대기 중..."
+  },
+  "installed-version": {
+    "en": "INSTALLED",
+    "ko": "설치"
+  },
+  "invalid-no-rating": {
+    "en": "MATCH INVALID - NO RATING CHANGES",
+    "ko": "무효 경기 - 점수 변동 없음"
+  },
+  "irreversible-choice": {
+    "en": "IRREVERSIBLE CHOICE",
+    "ko": "되돌릴 수 없는 선택"
+  },
+  "jukebox-open": {
+    "en": "OPEN JUKEBOX",
+    "ko": "Jukebox 열기"
+  },
+  "jukebox-required": {
+    "en": "The Jukebox mod is required!",
+    "ko": "Jukebox 모드가 필요합니다!"
+  },
+  "jukebox-song-scope": {
+    "en": "Change the song used for this map",
+    "ko": "이 맵에서 사용할 곡을 변경합니다"
+  },
+  "jukebox-waiting": {
+    "en": "PREPARING JUKEBOX SONG DATA...",
+    "ko": "Jukebox 곡 정보 준비 중..."
+  },
+  "keep-open": {
+    "en": "Keep this screen open until the download is complete.",
+    "ko": "다운로드가 끝날 때까지 이 화면을 유지하세요."
+  },
+  "language-korean": {
+    "en": "한국어",
+    "ko": "한국어"
+  },
+  "last-attempt-hint": {
+    "en": "OPPONENT HAS TO START THE LAST ATTEMPT",
+    "ko": "상대의 마지막 시도 시작까지"
+  },
+  "last-attempt-seconds": {
+    "en": "OPPONENT HAS {}s TO START THE LAST ATTEMPT",
+    "ko": "상대방은 마지막 시도를 시작해야 합니다. {}초"
+  },
+  "leaderboard": {
+    "en": "LEADERBOARD",
+    "ko": "리더보드"
+  },
+  "leaderboard-empty": {
+    "en": "No players yet.",
+    "ko": "아직 플레이어가 없습니다."
+  },
+  "leaderboard-enter-name": {
+    "en": "Enter a player name.",
+    "ko": "플레이어 닉네임을 입력하세요."
+  },
+  "leaderboard-error": {
+    "en": "Could not load the leaderboard. Press Refresh.",
+    "ko": "리더보드를 불러오지 못했습니다. 새로고침을 누르세요."
+  },
+  "leaderboard-find": {
+    "en": "FIND",
+    "ko": "찾기"
+  },
+  "leaderboard-loading": {
+    "en": "Loading leaderboard...",
+    "ko": "리더보드 불러오는 중..."
+  },
+  "leaderboard-not-found": {
+    "en": "Player not found in this leaderboard.",
+    "ko": "이 리더보드에서 플레이어를 찾을 수 없습니다."
+  },
+  "leaderboard-player": {
+    "en": "PLAYER",
+    "ko": "플레이어"
+  },
+  "leaderboard-refresh": {
+    "en": "REFRESH",
+    "ko": "새로고침"
+  },
+  "leaderboard-searching": {
+    "en": "Finding player...",
+    "ko": "플레이어를 찾는 중..."
+  },
+  "leaderboard-status": {
+    "en": "STATUS",
+    "ko": "상태"
+  },
+  "leaderboard-tier": {
+    "en": "TIER",
+    "ko": "티어"
+  },
+  "leave-queue": {
+    "en": "LEAVE QUEUE",
+    "ko": "매칭 취소"
+  },
+  "live-progress": {
+    "en": "LIVE PROGRESS",
+    "ko": "실시간 진행"
+  },
+  "live-spectator": {
+    "en": "LIVE SPECTATOR",
+    "ko": "실시간 관전"
+  },
+  "loading": {
+    "en": "Loading...",
+    "ko": "준비 중"
+  },
+  "loading-uppercase": {
+    "en": "LOADING",
+    "ko": "준비 중"
+  },
+  "locked": {
+    "en": "LOCKED",
+    "ko": "잠김"
+  },
+  "lose": {
+    "en": "LOSE",
+    "ko": "패배"
+  },
+  "loss": {
+    "en": "LOSS",
+    "ko": "패배"
+  },
+  "loss-streak": {
+    "en": "LOSS STREAK",
+    "ko": "연패"
+  },
+  "low-detail": {
+    "en": "LDM",
+    "ko": "저사양"
+  },
+  "lp-warning-recovery": {
+    "en": "Clears at {} LP",
+    "ko": "{} LP 이상 회복 시 해제"
+  },
+  "map": {
+    "en": "MAP",
+    "ko": "맵"
+  },
+  "map-audio-ready": {
+    "en": "MAP + AUDIO READY",
+    "ko": "MAP + AUDIO READY"
+  },
+  "map-ban-in": {
+    "en": "MAP BAN IN",
+    "ko": "맵 밴까지"
+  },
+  "map-download-failed": {
+    "en": "MAP DOWNLOAD FAILED",
+    "ko": "맵 다운로드 실패"
+  },
+  "map-loading": {
+    "en": "LOADING MAP",
+    "ko": "맵 불러오는 중"
+  },
+  "map-payload-mismatch": {
+    "en": "MAP PAYLOAD MISMATCH - RETRYING",
+    "ko": "맵 데이터 불일치 - 재시도 중"
+  },
+  "map-ready": {
+    "en": "MAP READY",
+    "ko": "맵 준비 완료"
+  },
+  "map-score": {
+    "en": "MAP SCORE",
+    "ko": "맵 점수"
+  },
+  "map-stars": {
+    "en": "Stars",
+    "ko": "별"
+  },
+  "map-update-incomplete": {
+    "en": "MAP UPDATE INCOMPLETE - RETRYING",
+    "ko": "맵 업데이트 미완료 - 재시도 중"
+  },
+  "map-update-stalled": {
+    "en": "MAP UPDATE STALLED - RETRYING",
+    "ko": "맵 업데이트 정지 - 재시도 중"
+  },
+  "match-canceled": {
+    "en": "MATCH CANCELED",
+    "ko": "경기 취소"
+  },
+  "match-complete": {
+    "en": "MATCH COMPLETE",
+    "ko": "경기 종료"
+  },
+  "match-found": {
+    "en": "MATCH FOUND",
+    "ko": "매칭 완료"
+  },
+  "match-history": {
+    "en": "MATCH HISTORY",
+    "ko": "경기 기록"
+  },
+  "match-pause": {
+    "en": "MATCH PAUSE",
+    "ko": "경기 일시정지"
+  },
+  "matchmaking": {
+    "en": "MATCHMAKING",
+    "ko": "매칭"
+  },
+  "maximum-rating-reward": {
+    "en": "MAXIMUM RATING REWARD",
+    "ko": "최대 점수 보상"
+  },
+  "missing-required-mods": {
+    "en": "MISSING OR INACTIVE REQUIRED MODS",
+    "ko": "필수 모드가 없거나 꺼져 있음"
+  },
+  "mod-check-required": {
+    "en": "MOD CHECK REQUIRED",
+    "ko": "모드 확인 필요"
+  },
+  "mod-restart-ready": {
+    "en": "Update installed. Press Restart to apply it.",
+    "ko": "업데이트 완료. 재시작을 눌러 적용하세요."
+  },
+  "mod-update": {
+    "en": "MOD UPDATE",
+    "ko": "모드 업데이트"
+  },
+  "mod-update-download": {
+    "en": "DOWNLOAD UPDATE",
+    "ko": "업데이트 다운로드"
+  },
+  "mod-update-required": {
+    "en": "Update the mod before entering Ranked.",
+    "ko": "랭크전에 입장하려면 모드를 업데이트하세요."
+  },
+  "mod-verifying": {
+    "en": "Downloading and verifying the mod...",
+    "ko": "모드를 다운로드하고 검증 중..."
+  },
+  "mode-browse": {
+    "en": "BROWSE",
+    "ko": "조회"
+  },
+  "mode-disabled": {
+    "en": "MODE DISABLED",
+    "ko": "운영 중지"
+  },
+  "mode-disabled-notice": {
+    "en": "This mode is currently disabled.\nContinue to the view-only lobby.",
+    "ko": "이 모드는 운영 중지 상태입니다.\n확인을 누르면 조회 화면으로 이동합니다."
+  },
+  "mode-enter": {
+    "en": "ENTER",
+    "ko": "입장"
+  },
+  "mode-off-browse": {
+    "en": "MODE DISABLED. HISTORY, LEADERBOARD AND ACHIEVEMENTS ARE AVAILABLE.",
+    "ko": "운영 중지 상태입니다. 기록, 리더보드, 도전과제를 조회할 수 있습니다."
+  },
+  "next": {
+    "en": "NEXT",
+    "ko": "다음"
+  },
+  "next-map": {
+    "en": "NEXT MAP",
+    "ko": "다음 맵"
+  },
+  "next-map-preparing": {
+    "en": "NEXT MAP PREPARING...",
+    "ko": "다음 맵 준비 중..."
+  },
+  "next-stage": {
+    "en": "NEXT STAGE",
+    "ko": "다음 STAGE"
+  },
+  "no-achievements": {
+    "en": "NO ACHIEVEMENTS IN THIS SECTION",
+    "ko": "이 섹션에는 도전과제가 없습니다"
+  },
+  "no-completed-matches": {
+    "en": "NO COMPLETED MATCHES",
+    "ko": "완료된 경기가 없습니다"
+  },
+  "normal-match": {
+    "en": "NORMAL MATCH",
+    "ko": "NORMAL MATCH"
+  },
+  "of": {
+    "en": "of",
+    "ko": "중"
+  },
+  "opening-exact-level": {
+    "en": "OPENING THE EXACT GD LEVEL...",
+    "ko": "정확한 GD 레벨을 여는 중..."
+  },
+  "opponent": {
+    "en": "OPPONENT",
+    "ko": "상대"
+  },
+  "opponent-surrender-match": {
+    "en": "OPPONENT SURRENDERED THE MATCH",
+    "ko": "상대가 경기에서 항복했습니다."
+  },
+  "opponent-surrender-round": {
+    "en": "OPPONENT SURRENDERED THE ROUND",
+    "ko": "상대가 라운드에 항복했습니다."
+  },
+  "own-versus-score": {
+    "en": "YOUR SCORE  {}     OPPONENT  {}",
+    "ko": "내 점수  {}     상대  {}"
+  },
+  "pause-timeout-warning": {
+    "en": "At 0s, you forfeit the entire match.",
+    "ko": "0초가 되면 경기 전체가 항복 처리됩니다."
+  },
+  "placed": {
+    "en": "PLACED",
+    "ko": "배치 완료"
+  },
+  "placement": {
+    "en": "PLACEMENT",
+    "ko": "배치"
+  },
+  "placement-all-complete": {
+    "en": "ALL {} MAPS COMPLETE",
+    "ko": "전체 {}개 맵 완료"
+  },
+  "placement-cancelled": {
+    "en": "PLACEMENT CANCELLED",
+    "ko": "배치 취소"
+  },
+  "placement-complete": {
+    "en": "PLACEMENT COMPLETE",
+    "ko": "배치 완료"
+  },
+  "placement-count": {
+    "en": "CHOOSE PLACEMENT LENGTH",
+    "ko": "배치 경기 횟수 선택"
+  },
+  "placement-count-lock": {
+    "en": "SELECT 3 OR 5 STAGES. THIS CANNOT BE CHANGED AFTER START.",
+    "ko": "3회 또는 5회를 선택하세요. 시작 후에는 변경할 수 없습니다."
+  },
+  "placement-five-stage-info": {
+    "en": "5 STAGES · 10 MAPS · FULL PLACEMENT RANGE · CANNOT CHANGE AFTER START.",
+    "ko": "5회 · 10개 맵 · 전체 배치 범위 · 시작 후 변경할 수 없습니다."
+  },
+  "placement-map-live": {
+    "en": "MAP LIVE · SCORE + GRADE UPDATE IN REAL TIME",
+    "ko": "맵 진행 중 · 등급은 시도 종료 후 변경"
+  },
+  "placement-matches": {
+    "en": "PLACEMENT",
+    "ko": "배치 경기"
+  },
+  "placement-record-row": {
+    "en": "{} - {}% ({} pts)",
+    "ko": "{} - {}% ({}점)"
+  },
+  "placement-setup": {
+    "en": "PLACEMENT SETUP",
+    "ko": "배치 설정"
+  },
+  "placement-skip-accepted": {
+    "en": "Map skipped",
+    "ko": "맵을 건너뛰었습니다"
+  },
+  "placement-skip-map": {
+    "en": "SKIP MAP",
+    "ko": "맵 스킵"
+  },
+  "placement-skip-map-warning": {
+    "en": "Finish only this map with the score earned so far?",
+    "ko": "지금까지 획득한 점수로 이 맵만 종료할까요?"
+  },
+  "placement-skip-rejected": {
+    "en": "Map skip rejected. Check the map and retry.",
+    "ko": "맵 스킵 실패. 현재 맵을 확인하고 다시 시도하세요."
+  },
+  "placement-skip-retrying": {
+    "en": "Connection issue - retrying map skip...",
+    "ko": "연결 문제 - 맵 스킵 재시도 중..."
+  },
+  "placement-skip-sending": {
+    "en": "Skipping this map...",
+    "ko": "현재 맵 스킵 중..."
+  },
+  "placement-skip-syncing": {
+    "en": "Saving this attempt...",
+    "ko": "현재 시도 점수 저장 중..."
+  },
+  "placement-skipped": {
+    "en": "PLACEMENT SKIPPED",
+    "ko": "배치 건너뜀"
+  },
+  "placement-stage-count": {
+    "en": "{} STAGES",
+    "ko": "{}회"
+  },
+  "placement-three-stage-warning": {
+    "en": "WARNING: 3 STAGES LOWERS YOUR MAX PLACEMENT. MAX: AQUA. CANNOT CHANGE AFTER START.",
+    "ko": "경고: 3회 배치는 배치 최대점이 낮아집니다. 최대 배치는 AQUA입니다. 시작 후 변경할 수 없습니다."
+  },
+  "play-failed": {
+    "en": "PLAY FAILED - RETRYING",
+    "ko": "플레이 실패 - 재시도 중"
+  },
+  "play-later": {
+    "en": "PLAY LATER",
+    "ko": "PLAY LATER"
+  },
+  "player-info": {
+    "en": "PLAYER INFO",
+    "ko": "플레이어 정보"
+  },
+  "player-rank": {
+    "en": "{}",
+    "ko": "{}위"
+  },
+  "players-total": {
+    "en": "{} ranked players",
+    "ko": "총 {}명"
+  },
+  "players-total-suffix": {
+    "en": " ({} players)",
+    "ko": " (총 {}명)"
+  },
+  "pool-choice-explanation": {
+    "en": "This selects the starting POOL for STAGE 1 only. Your final rank uses all results.",
+    "ko": "이 선택은 STAGE 1의 시작 POOL만 정합니다. 최종 랭크는 전체 결과로 결정됩니다."
+  },
+  "preparation-ready": {
+    "en": "PREPARATION READY",
+    "ko": "준비 완료"
+  },
+  "prepare-private-ban": {
+    "en": "GET READY TO CHOOSE A PRIVATE BAN",
+    "ko": "제외할 맵을 준비하세요"
+  },
+  "preparing": {
+    "en": "PREPARING",
+    "ko": "PREPARING"
+  },
+  "preparing-map": {
+    "en": "PREPARING MAP...",
+    "ko": "PREPARING MAP..."
+  },
+  "private-ban-notice": {
+    "en": "YOUR BAN IS PRIVATE  |  REVEALED WHEN THE PHASE ENDS",
+    "ko": "내 밴은 비공개이며 단계 종료 후 공개됩니다"
+  },
+  "private-ban-phase": {
+    "en": "PRIVATE BAN PHASE",
+    "ko": "비공개 밴 단계"
+  },
+  "promoted": {
+    "en": "PROMOTED",
+    "ko": "승급"
+  },
+  "promoted-result": {
+    "en": "PROMOTED!",
+    "ko": "승급"
+  },
+  "promotion": {
+    "en": "promotion",
+    "ko": "승급"
+  },
+  "promotion-failed": {
+    "en": "PROMOTION FAILED",
+    "ko": "승급 실패"
+  },
+  "promotion-match": {
+    "en": "PROMOTION MATCH",
+    "ko": "승격전"
+  },
+  "promotion-required": {
+    "en": "PROMOTION MATCH ({} WINS)",
+    "ko": "승격전 ({}승 필요)"
+  },
+  "queue-again": {
+    "en": "QUEUE AGAIN",
+    "ko": "다시 매칭"
+  },
+  "ranked-access-blocked": {
+    "en": "RANKED ACCESS BLOCKED",
+    "ko": "랭크 이용 차단"
+  },
+  "ranked-resources": {
+    "en": "RANKED RESOURCES",
+    "ko": "랭크 리소스"
+  },
+  "ranked-volume": {
+    "en": "Ranked menu BGM",
+    "ko": "랭크전 메뉴 배경음악"
+  },
+  "ranked-volume-scope": {
+    "en": "Lobby, matchmaking and results BGM",
+    "ko": "로비·매칭·결과 화면 배경음악"
+  },
+  "rating": {
+    "en": "RATING",
+    "ko": "레이팅"
+  },
+  "ready": {
+    "en": "READY",
+    "ko": "준비"
+  },
+  "ready-to-start": {
+    "en": "READY TO START",
+    "ko": "READY TO START"
+  },
+  "recent-matches": {
+    "en": "RECENT COMPETITIVE MATCHES",
+    "ko": "최근 경쟁 경기"
+  },
+  "reference-loading": {
+    "en": "REFERENCE MAP LOADING...",
+    "ko": "기준 맵 불러오는 중..."
+  },
+  "required-version": {
+    "en": "REQUIRED",
+    "ko": "필요"
+  },
+  "resources-failed": {
+    "en": "DOWNLOAD FAILED",
+    "ko": "일부 리소스 다운로드 실패"
+  },
+  "resources-required": {
+    "en": "DOWNLOAD REQUIRED",
+    "ko": "추가 리소스가 필요합니다."
+  },
+  "restart": {
+    "en": "RESTART",
+    "ko": "재시작"
+  },
+  "result": {
+    "en": "RESULT",
+    "ko": "결과"
+  },
+  "result-sync": {
+    "en": "RESULT SYNC",
+    "ko": "결과 동기화"
+  },
+  "retry": {
+    "en": "RETRY",
+    "ko": "다시 시도"
+  },
+  "retry-before-continuing": {
+    "en": "Retry the failed download before continuing.",
+    "ko": "계속하기 전에 실패한 다운로드를 다시 시도하세요."
+  },
+  "retry-check": {
+    "en": "CHECK AGAIN",
+    "ko": "다시 검사"
+  },
+  "retry-failed": {
+    "en": "RETRY FAILED",
+    "ko": "실패 항목 재시도"
+  },
+  "retrying": {
+    "en": "RETRYING",
+    "ko": "재시도 중"
+  },
+  "rewards": {
+    "en": "rewards",
+    "ko": "보상"
+  },
+  "round": {
+    "en": "ROUND",
+    "ko": "ROUND"
+  },
+  "round-resolve-hint": {
+    "en": "THE ROUND WILL RESOLVE WHEN THE ACTIVE ATTEMPT ENDS",
+    "ko": "진행 중인 시도가 끝나면 라운드가 결정됩니다"
+  },
+  "runtime-search-range": {
+    "en": "Searching for an opponent (rating range +/-{})...",
+    "ko": "상대를 찾고 있습니다 (점수 범위 +/-{})..."
+  },
+  "score": {
+    "en": "SCORE",
+    "ko": "점수"
+  },
+  "searching": {
+    "en": "SEARCHING...",
+    "ko": "상대 검색 중..."
+  },
+  "seasonal-progress": {
+    "en": "SEASONAL LADDER PROGRESS",
+    "ko": "시즌 래더 진행도"
+  },
+  "select-placement-count-first": {
+    "en": "SELECT 3 OR 5 STAGES FIRST.",
+    "ko": "먼저 3회 또는 5회를 선택하세요."
+  },
+  "select-placement-pool-first": {
+    "en": "SELECT A STARTING POOL FIRST.",
+    "ko": "먼저 시작 POOL을 선택하세요."
+  },
+  "select-starting-pool": {
+    "en": "SELECT YOUR STARTING POOL",
+    "ko": "시작 POOL 선택"
+  },
+  "select-title-version": {
+    "en": "SELECT ACHIEVEMENT TITLE VERSION",
+    "ko": "도전과제 칭호 버전 선택"
+  },
+  "selected-map": {
+    "en": "SELECTED MAP",
+    "ko": "SELECTED MAP"
+  },
+  "sending-ready": {
+    "en": "SENDING READY...",
+    "ko": "준비 완료 전송 중..."
+  },
+  "series": {
+    "en": "SERIES",
+    "ko": "시리즈"
+  },
+  "series-score": {
+    "en": "SERIES SCORE",
+    "ko": "시리즈 점수"
+  },
+  "server-error-retrying": {
+    "en": "SERVER ERROR - RETRYING",
+    "ko": "서버 오류 - 재시도 중"
+  },
+  "server-result": {
+    "en": "SERVER RESULT",
+    "ko": "서버 결과"
+  },
+  "server-run": {
+    "en": "SERVER-AUTHORITATIVE RUN",
+    "ko": "서버 권위 RUN"
+  },
+  "session-disconnect-other": {
+    "en": "Disconnect other device",
+    "ko": "다른 기기 접속 끊기"
+  },
+  "session-other-device": {
+    "en": "Connected on another device",
+    "ko": "다른 기기에서 접속 중"
+  },
+  "session-takeover-detail": {
+    "en": "Disconnect the other device to enter here.\nAn ongoing match will be recovered.",
+    "ko": "다른 기기의 접속을 끊고 여기서 입장합니다.\n진행 중인 경기는 이어서 복구합니다."
+  },
+  "set-title": {
+    "en": "TITLE",
+    "ko": "칭호 지정"
+  },
+  "settings": {
+    "en": "Settings",
+    "ko": "설정"
+  },
+  "settlement-pending": {
+    "en": "SETTLEMENT PENDING",
+    "ko": "확정 대기"
+  },
+  "show-stage-result": {
+    "en": "SHOW STAGE RESULT",
+    "ko": "STAGE 결과 보기"
+  },
+  "skip": {
+    "en": "SKIP",
+    "ko": "SKIP"
+  },
+  "skip-animation": {
+    "en": "SKIP",
+    "ko": "건너뛰기"
+  },
+  "skip-placement": {
+    "en": "SKIP PLACEMENT",
+    "ko": "배치 건너뛰기"
+  },
+  "skip-placement-result": {
+    "en": "YOU WILL BE PLACED AT RED - 150 LP.",
+    "ko": "RED - 150 LP에 배치됩니다."
+  },
+  "skip-placement-warning": {
+    "en": "SKIPPING ENDS PLACEMENT IMMEDIATELY AND CANNOT BE UNDONE.",
+    "ko": "배치를 즉시 종료하며 되돌릴 수 없습니다."
+  },
+  "solo-placement": {
+    "en": "SOLO PLACEMENT",
+    "ko": "싱글 배치"
+  },
+  "solo-ranked": {
+    "en": "SOLO RANKED",
+    "ko": "솔로 랭크"
+  },
+  "song-download-only": {
+    "en": "ONLY SONG DOWNLOAD IS AVAILABLE",
+    "ko": "노래 다운로드만 가능합니다"
+  },
+  "song-downloaded": {
+    "en": "SONG DOWNLOADED",
+    "ko": "노래 다운로드 완료"
+  },
+  "stage-grade": {
+    "en": "STAGE GRADE",
+    "ko": "STAGE 등급"
+  },
+  "start": {
+    "en": "START",
+    "ko": "시작"
+  },
+  "start-muted": {
+    "en": "START MUTED",
+    "ko": "음소거로 시작"
+  },
+  "start-placement": {
+    "en": "START PLACEMENT",
+    "ko": "배치 시작"
+  },
+  "start-queue": {
+    "en": "START QUEUE",
+    "ko": "매칭 시작"
+  },
+  "starting": {
+    "en": "STARTING...",
+    "ko": "시작 중..."
+  },
+  "starting-without-song": {
+    "en": "SONG NOT READY - STARTING WITHOUT SONG",
+    "ko": "노래 없이 시작합니다"
+  },
+  "starts-in": {
+    "en": "STARTS IN",
+    "ko": "시작까지"
+  },
+  "streak-loss": {
+    "en": "{}x LOSS STREAK",
+    "ko": "{}연패"
+  },
+  "streak-win": {
+    "en": "{}x WIN STREAK",
+    "ko": "{}연승"
+  },
+  "surrender": {
+    "en": "SURRENDER",
+    "ko": "항복"
+  },
+  "surrender-accepted": {
+    "en": "Surrender accepted",
+    "ko": "항복 처리 완료"
+  },
+  "surrender-choice": {
+    "en": "Concede this round or the entire match.",
+    "ko": "현재 라운드 또는 전체 경기를\n항복할 수 있습니다."
+  },
+  "surrender-confirm": {
+    "en": "CONFIRM SURRENDER",
+    "ko": "항복 확인"
+  },
+  "surrender-match": {
+    "en": "MATCH",
+    "ko": "경기 항복"
+  },
+  "surrender-match-warning": {
+    "en": "This match will end as a loss. Surrender?",
+    "ko": "전체 경기를 패배로 종료합니다. 항복하시겠습니까?"
+  },
+  "surrender-rejected": {
+    "en": "Surrender rejected. Check match state and retry.",
+    "ko": "항복할 수 없습니다. 경기 상태를 확인 후 다시 시도하세요."
+  },
+  "surrender-retrying": {
+    "en": "Connection issue - retrying surrender...",
+    "ko": "연결 오류 · 항복 재전송 중..."
+  },
+  "surrender-round": {
+    "en": "ROUND",
+    "ko": "라운드 항복"
+  },
+  "surrender-round-warning": {
+    "en": "This round will end as a loss. Surrender?",
+    "ko": "현재 라운드를 패배로 종료합니다. 항복하시겠습니까?"
+  },
+  "surrender-score-kept": {
+    "en": "Already earned scores are kept.",
+    "ko": "이미 획득한 점수는 유지됩니다."
+  },
+  "surrender-sending": {
+    "en": "Sending surrender...",
+    "ko": "항복 전송 중..."
+  },
+  "surrender-waiting-attempt": {
+    "en": "Syncing attempt before surrender...",
+    "ko": "시도 결과 동기화 후 항복을 전송합니다."
+  },
+  "survival": {
+    "en": "SURVIVAL",
+    "ko": "서바이벌"
+  },
+  "survival-achievements-later": {
+    "en": "SURVIVAL ACHIEVEMENTS COMING LATER",
+    "ko": "서바이벌 도전과제는 추후 추가됩니다"
+  },
+  "survival-attempts-finished": {
+    "en": "ATTEMPTS COMPLETE · WAITING FOR RESULTS",
+    "ko": "시도 완료 · 결과 대기 중"
+  },
+  "survival-auto-entry": {
+    "en": "READY · ENTERING AUTOMATICALLY...",
+    "ko": "준비 완료 · 경기에 자동으로 입장합니다..."
+  },
+  "survival-auto-start": {
+    "en": "AUTO START",
+    "ko": "자동 시작"
+  },
+  "survival-back-map": {
+    "en": "BACK TO MAP",
+    "ko": "맵으로 돌아가기"
+  },
+  "survival-cancelled": {
+    "en": "MATCH CANCELLED",
+    "ko": "경기가 취소되었습니다."
+  },
+  "survival-cleared": {
+    "en": "CLEARED",
+    "ko": "클리어"
+  },
+  "survival-coming-later": {
+    "en": "SURVIVAL IS IN DEVELOPMENT",
+    "ko": "서바이벌 경기는 개발 중입니다"
+  },
+  "survival-debug-rating": {
+    "en": "DEBUG RESULTS AFFECT YOUR SURVIVAL LP",
+    "ko": "디버그 경기 결과로 서바이벌 LP가 변경됩니다."
+  },
+  "survival-default-ldm": {
+    "en": "Default LDM",
+    "ko": "기본 LDM"
+  },
+  "survival-default-options": {
+    "en": "SURVIVAL DEFAULTS",
+    "ko": "서바이벌 기본 설정"
+  },
+  "survival-default-shake": {
+    "en": "Default Disable Shake",
+    "ko": "기본 흔들림 끄기"
+  },
+  "survival-eliminated": {
+    "en": "ELIMINATED",
+    "ko": "탈락"
+  },
+  "survival-end-round": {
+    "en": "END ROUND",
+    "ko": "즉시 라운드 종료"
+  },
+  "survival-end-round-question": {
+    "en": "End this round now using its current records?",
+    "ko": "현재 기록으로 이 라운드를 즉시 종료할까요?"
+  },
+  "survival-entry-wait": {
+    "en": "ALL READY · ENTERING IN {}s",
+    "ko": "모두 준비 완료 · {}초 후 입장"
+  },
+  "survival-fill-bots": {
+    "en": "FILL WITH BOTS",
+    "ko": "봇 추가"
+  },
+  "survival-force-clear": {
+    "en": "FORCE CLEAR",
+    "ko": "강제 클리어"
+  },
+  "survival-force-clear-confirm": {
+    "en": "Mark the current Survival round\nas 100% completed?",
+    "ko": "현재 서바이벌 라운드의 기록을\n100%로 확정하시겠습니까?"
+  },
+  "survival-force-clear-rejected": {
+    "en": "Force Clear was rejected. Refreshing match state.",
+    "ko": "강제 클리어 요청이 거절되었습니다. 경기 상태를 다시 확인합니다."
+  },
+  "survival-free-play": {
+    "en": "FREE PLAY",
+    "ko": "자유 플레이"
+  },
+  "survival-from-cutoff": {
+    "en": "FROM CUTOFF",
+    "ko": "통과 점수와 차이"
+  },
+  "survival-from-first": {
+    "en": "FROM FIRST",
+    "ko": "1위와 차이"
+  },
+  "survival-game-running": {
+    "en": "THE SERVER TIMER CONTINUES. YOU CAN RE-ENTER.",
+    "ko": "서버 시간은 계속 진행됩니다. 경기에 다시 입장할 수 있습니다."
+  },
+  "survival-image-thumbnails": {
+    "en": "Level Thumbnails",
+    "ko": "레벨 썸네일 모드"
+  },
+  "survival-leave-observer": {
+    "en": "LEAVE WATCH",
+    "ko": "관전 나가기"
+  },
+  "survival-live-board": {
+    "en": "LIVE ROUND STATUS",
+    "ko": "실시간 라운드 현황"
+  },
+  "survival-lp-details": {
+    "en": "LP DETAILS",
+    "ko": "LP 정산 보기"
+  },
+  "survival-map-data-pending": {
+    "en": "Map data pending",
+    "ko": "맵 정보 확인 중"
+  },
+  "survival-map-retry": {
+    "en": "MAP SEARCH FAILED · RETRYING...",
+    "ko": "맵 검색에 실패하여 다시 시도합니다..."
+  },
+  "survival-map-rules": {
+    "en": "180 SECONDS · BEST PROGRESS",
+    "ko": "180초 · 최고 기록"
+  },
+  "survival-match-intro": {
+    "en": "16 PLAYERS MATCHED",
+    "ko": "16명 매칭 완료"
+  },
+  "survival-match-roster": {
+    "en": "16 PLAYERS",
+    "ko": "16명 참가"
+  },
+  "survival-next-map-wait": {
+    "en": "NEXT MAP SOON...",
+    "ko": "잠시 후 다음 맵을 선택합니다."
+  },
+  "survival-no-engine": {
+    "en": "MATCHMAKING IS NOT AVAILABLE YET",
+    "ko": "매칭 기능은 아직 제공되지 않습니다"
+  },
+  "survival-no-ldm": {
+    "en": "NO LDM",
+    "ko": "LDM 없음"
+  },
+  "survival-no-matches": {
+    "en": "NO SURVIVAL MATCHES YET",
+    "ko": "아직 서바이벌 경기 기록이 없습니다"
+  },
+  "survival-observer-description": {
+    "en": "Play the selected map locally without official records.",
+    "ko": "공식 기록 없이 현재 맵을 자유롭게 플레이합니다."
+  },
+  "survival-online-ready": {
+    "en": "2-16 PLAYERS · UP TO 180s",
+    "ko": "2~16명 경기 · 최대 180초 대기"
+  },
+  "survival-online-surrender": {
+    "en": "End as {} in this round, settle LP and return to the lobby?",
+    "ko": "현재 라운드 최저 순위 {}로 종료합니다.\nLP 적용 후 로비로 나가시겠습니까?"
+  },
+  "survival-pause-clock": {
+    "en": "The server round timer continues while paused.",
+    "ko": "일시정지 중에도 경기 시간은 계속 진행됩니다."
+  },
+  "survival-personal-result": {
+    "en": "PERSONAL RESULT",
+    "ko": "개인 결과"
+  },
+  "survival-podium": {
+    "en": "FINAL PODIUM",
+    "ko": "최종 시상식"
+  },
+  "survival-prep-retry": {
+    "en": "Preparation failed · RETRY",
+    "ko": "준비 실패 · 다시 시도"
+  },
+  "survival-preparing": {
+    "en": "PREPARING",
+    "ko": "준비 중"
+  },
+  "survival-profile-none": {
+    "en": "No GD profile",
+    "ko": "GD 프로필 없음"
+  },
+  "survival-queue-minimum": {
+    "en": "MINIMUM PLAYERS",
+    "ko": "기본 최소 참가"
+  },
+  "survival-queue-players": {
+    "en": "PLAYERS",
+    "ko": "참가자"
+  },
+  "survival-queue-short": {
+    "en": "AFTER 180s, 2-7 PLAYERS PLAY SHORT FINALS",
+    "ko": "180초 후 2~7명은 결승 경기 진행"
+  },
+  "survival-rank": {
+    "en": "Rank",
+    "ko": "Rank"
+  },
+  "survival-reenter": {
+    "en": "RE-ENTER",
+    "ko": "다시 입장"
+  },
+  "survival-result-pending": {
+    "en": "RANK FIXED · SETTLING LP...",
+    "ko": "순위 확정 · LP 적용 중..."
+  },
+  "survival-result-wait": {
+    "en": "PENDING",
+    "ko": "확정 대기"
+  },
+  "survival-selected-map": {
+    "en": "SELECTED MAP",
+    "ko": "선정된 맵"
+  },
+  "survival-selecting-map": {
+    "en": "SELECTING A SERVER MAP...",
+    "ko": "서버에서 맵을 선택하고 있습니다..."
+  },
+  "survival-selection-motion": {
+    "en": "Level selection motion",
+    "ko": "레벨 선택 모션"
+  },
+  "survival-surrender-pending": {
+    "en": "Surrender submitted · waiting for server",
+    "ko": "항복 처리 중 · 서버 응답 대기"
+  },
+  "survival-surrender-warning": {
+    "en": "End this match using this round's recorded ranking?",
+    "ko": "현재 라운드 기록으로 순위를 확정하고\n경기를 종료하시겠습니까?"
+  },
+  "survival-thumbnail-hint": {
+    "en": "(i) Install Level Thumbnails for map previews and a richer selection reveal.",
+    "ko": "(i) Level Thumbnails 모드를 설치하면 맵 썸네일과 더 화려한 선정 연출을 볼 수 있습니다."
+  },
+  "survival-thumbnail-unavailable": {
+    "en": "Thumbnail unavailable; showing the server level ID.",
+    "ko": "썸네일을 불러올 수 없어 서버 맵 ID를 표시합니다."
+  },
+  "survival-view-board": {
+    "en": "VIEW STATUS",
+    "ko": "현황판 보기"
+  },
+  "survival-view-results": {
+    "en": "VIEW RESULTS",
+    "ko": "결과 보기"
+  },
+  "survival-watch": {
+    "en": "WATCH",
+    "ko": "관전하기"
+  },
+  "syncing": {
+    "en": "SYNCING...",
+    "ko": "동기화 중..."
+  },
+  "syncing-clear": {
+    "en": "SYNCING CLEAR...",
+    "ko": "클리어 동기화 중..."
+  },
+  "tap-to-skip": {
+    "en": "TAP TO SKIP",
+    "ko": "건너뛰기"
+  },
+  "ten-maps-five-stages": {
+    "en": "10 MAPS · 5 STAGES",
+    "ko": "10개 맵 · 5개 STAGE"
+  },
+  "three-attempts": {
+    "en": "3 ATTEMPTS",
+    "ko": "3회 시도"
+  },
+  "tier-promoted-to": {
+    "en": "Promoted to {}!",
+    "ko": "{} 승격"
+  },
+  "time-left": {
+    "en": "TIME LEFT",
+    "ko": "남은 시간"
+  },
+  "unauthorized-active-mods": {
+    "en": "UNAUTHORIZED ACTIVE MODS",
+    "ko": "허용되지 않은 활성 모드"
+  },
+  "updating-map": {
+    "en": "UPDATING MAP...",
+    "ko": "맵 업데이트 중..."
+  },
+  "version-or-newer": {
+    "en": "OR NEWER",
+    "ko": "이상"
+  },
+  "version-or-older": {
+    "en": "OR OLDER",
+    "ko": "이하"
+  },
+  "victory": {
+    "en": "VICTORY",
+    "ko": "승리"
+  },
+  "waiting": {
+    "en": "WAITING",
+    "ko": "대기 중"
+  },
+  "waiting-download": {
+    "en": "WAITING FOR YOUR DOWNLOAD",
+    "ko": "내 다운로드 대기 중"
+  },
+  "waiting-download-response": {
+    "en": "WAITING FOR DOWNLOAD...",
+    "ko": "다운로드 응답 대기 중..."
+  },
+  "waiting-for-player": {
+    "en": "WAITING FOR {}",
+    "ko": "{} 대기 중"
+  },
+  "waiting-map": {
+    "en": "WAITING FOR MAP",
+    "ko": "맵 대기 중"
+  },
+  "waiting-opponent": {
+    "en": "WAITING FOR OPPONENT",
+    "ko": "상대 대기 중"
+  },
+  "waiting-player": {
+    "en": "WAITING",
+    "ko": "대기 중"
+  },
+  "waiting-song": {
+    "en": "WAITING FOR SONG...",
+    "ko": "노래 대기 중"
+  },
+  "waiting-song-short": {
+    "en": "WAITING FOR SONG",
+    "ko": "노래 대기 중"
+  },
+  "waiting-start": {
+    "en": "WAITING TO START",
+    "ko": "시작 대기 중"
+  },
+  "win": {
+    "en": "WIN",
+    "ko": "승리"
+  },
+  "win-streak": {
+    "en": "WIN STREAK",
+    "ko": "연승"
+  },
+  "you": {
+    "en": "YOU",
+    "ko": "나"
+  },
+  "your-rank": {
+    "en": "YOUR RANK",
+    "ko": "내 랭크"
+  }
+}

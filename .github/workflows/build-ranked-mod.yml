@@ -9,12 +9,16 @@ on:
     branches: [main]
     paths:
       - "corum-ranked-mod/**"
+      - "ranked/translations/**"
+      - "ranked/tools/localization/**"
       - "ranked/apps/server/src/session/client-version.ts"
       - ".github/workflows/build-ranked-mod.yml"
       - ".github/workflows/publish-ranked-download.yml"
   pull_request:
     paths:
       - "corum-ranked-mod/**"
+      - "ranked/translations/**"
+      - "ranked/tools/localization/**"
       - "ranked/apps/server/src/session/client-version.ts"
       - ".github/workflows/build-ranked-mod.yml"
   workflow_dispatch:

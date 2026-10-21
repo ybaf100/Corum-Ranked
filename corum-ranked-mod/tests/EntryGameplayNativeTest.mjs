@@ -36,6 +36,7 @@ test('actual native entry gate owns input/audio and releases once after shared s
     const cpp = `
 #include "${join(root, 'src/domain/RoundResourcePolicy.hpp')}"
 #include "${join(root, 'src/domain/EntryCountdown.hpp')}"
+#include "${join(root, 'src/domain/TranslationCatalog.hpp')}"
 #include "${join(root, 'src/domain/ServerClock.hpp')}"
 #include <cassert>
 #include <chrono>

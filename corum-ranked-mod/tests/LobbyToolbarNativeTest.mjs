@@ -29,7 +29,7 @@ namespace geode {struct Mod {
  template<class T>T getSavedValue(std::string const&,T const&)const{return saved;}
  void setSavedValue(std::string const&,std::string const& s){saved=s;}
 };}
-${strip(read('src/ui/RankedTranslations.hpp'))}
+${strip(read('src/domain/TranslationCatalog.generated.hpp'))}\n${strip(read('src/domain/TranslationCatalog.hpp'))}\n${strip(read('src/ui/RankedTranslations.hpp'))}
 std::string tr(std::string_view k,std::string_view e){return corum::ranked::i18n::text(k,e);}
 constexpr ccColor3B kGold{255,207,74},kRed{255,91,111},kCyan{64,224,255};
 namespace corum::ranked {struct SurvivalRuntime {struct View{std::string error;}v;static SurvivalRuntime&get(){static SurvivalRuntime r;return r;}View const&view()const{return v;}};}
@@ -80,7 +80,7 @@ int main(){using namespace corum::ranked;using namespace corum::ranked::ui;
   view.survival.onlineAvailable=false;assert(o.lobbyMessage(view)==tr("mode-off-browse","MODE DISABLED. HISTORY, LEADERBOARD AND ACHIEVEMENTS ARE AVAILABLE."));
   view.stage=RuntimeStage::Queued;view.status="Searching for an opponent...";
   assert(o.lobbyMessage(view)==(language==i18n::Language::Korean?"상대를 찾고 있습니다...":"Searching for an opponent..."));
-  assert(i18n::text("Ranked session ready. Join the queue when prepared.",view.status)==(language==i18n::Language::Korean?"준비되면 매칭을 시작하세요.":view.status));
+  assert(i18n::text("Ranked session ready. Join the queue when prepared.",view.status)==(language==i18n::Language::Korean?"준비되면 매칭을 시작하세요.":"Ranked session ready. Join the queue when prepared."));
  }
 }
 `);

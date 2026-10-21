@@ -220,7 +220,7 @@ class SurvivalGameLayer final : public CCLayerColor {
                 tile.tierBadge->setPosition({12,0});tile.icon->addChild(tile.tierBadge,5);
             }
             if(tile.destination!=destination){tile.destination=destination;tile.root->stopActionByTag(7465);auto* move=CCEaseSineOut::create(CCMoveTo::create(.25f,destination));move->setTag(7465);tile.root->runAction(move);}
-            auto rank=value.rank>0?(i18n::isKorean()?fmt::format("{}위",value.rank):survivalOrdinal(value.rank)):std::string("-");
+            auto rank=value.rank>0?(i18n::isKorean()?fmt::format(fmt::runtime(i18n::text("player-rank","{}")),value.rank):survivalOrdinal(value.rank)):std::string("-");
             std::string record;auto color=survivalRankColor(value.rank,value.passing);
             if(result){int delta=0;for(auto const& p:view.result["standings"].asArray().unwrapOr(std::vector<matjson::Value>{}))if(p["participantId"].asString().unwrapOr("")==value.id)delta=static_cast<int>(p["delta"].asInt().unwrapOr(0));
                 if(value.id==view.ownId)delta=static_cast<int>(view.result["actualDelta"].asInt().unwrapOr(delta));
@@ -384,8 +384,8 @@ public:
         m_viewBoard->setVisible(selectionWindow);m_viewBoard->setEnabled(!m_motion && !elimination);
         m_freePlay->setVisible(liveBoard && runtime.canFreePlay());m_freePlay->setEnabled(!m_motion && !m_confirmation);
         if(m_force){m_force->setVisible(view.debug && !view.online && nextRound && !selectionWindow && !liveBoard);m_force->setEnabled(!m_motion && now>=m_eliminationUntil && !runtime.creating());}
-        if(!elimination)m_heading->setString(result?fmt::format("SURVIVAL · {}",i18n::isKorean()?fmt::format("{}위",view.result["rank"].asInt().unwrapOr(0)):survivalOrdinal(static_cast<int>(view.result["rank"].asInt().unwrapOr(0)))).c_str():
-            (intro?fmt::format("SURVIVAL · {} {}",view.playerCount,i18n::isKorean()?"명":"PLAYERS"):
+        if(!elimination)m_heading->setString(result?fmt::format("SURVIVAL · {}",i18n::isKorean()?fmt::format(fmt::runtime(i18n::text("player-rank","{}")),view.result["rank"].asInt().unwrapOr(0)):survivalOrdinal(static_cast<int>(view.result["rank"].asInt().unwrapOr(0)))).c_str():
+            (intro?fmt::format("SURVIVAL · {} {}",view.playerCount,corum::ranked::i18n::literal("inline.players")):
             fmt::format("SURVIVAL · {}",view.phase=="TIEBREAK"?"DEATH MATCH":view.phase=="FINAL"?"FINAL":("ROUND "+std::to_string(view.roundNumber)))).c_str());
         ui::fitFullMenuLabel(m_heading,headingWidth,26,.60f);
         auto const group=view.group=="RED_BRONZE"?std::string("RED-BRONZE"):view.group;

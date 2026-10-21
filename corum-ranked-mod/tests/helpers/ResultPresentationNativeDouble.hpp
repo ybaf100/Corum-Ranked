@@ -132,6 +132,7 @@ namespace cocos2d { using ::CCObject; using ::CCNode; using ::CCLayerColor; usin
 namespace geode::prelude {}
 namespace geode::cast { template<class T> T typeinfo_cast(CCNode* node) { return dynamic_cast<T>(node); } }
 namespace fmt {
+inline std::string runtime(std::string const& pattern){return pattern;}
 template<class... T> std::string format(std::string pattern,T const&... args) {
     std::vector<std::string> parts;
     auto part=[&](auto const& v) { std::ostringstream s; if(pattern=="{:.2f}") s<<std::fixed<<std::setprecision(2); s<<v; parts.push_back(s.str()); };

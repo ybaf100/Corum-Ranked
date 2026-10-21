@@ -1,5 +1,7 @@
 # Achievement System v2 — beta.90
 
+Later presentation update: [beta.92 cards / Claim All / translation files](achievement-presentation-beta92.md).
+
 Later policy update: [beta.91 Debug parity](achievement-debug-beta91.md) enables
 Debug achievements like normal matches without resetting v2 data again. The
 beta.90 Debug exclusion described below is the original release boundary.

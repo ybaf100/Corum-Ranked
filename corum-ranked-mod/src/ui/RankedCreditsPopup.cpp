@@ -37,7 +37,7 @@ class RankedCreditsPopup final:public Popup {
             if(resource.key=="menu")use=i18n::text("admin-audio-menu","Lobby");
             else if(resource.key=="menu_promotion")use=i18n::text("admin-audio-promotion","Promotion lobby");
             else if(resource.key=="menu_demotion_warning")use=i18n::text("admin-audio-warning","Demotion warning lobby");
-            else if(resource.key=="match")use=i18n::text("admin-audio-match","Rounds 1 & 2");
+            else if(resource.key=="match")use=i18n::text("credits-rounds-one-two","Rounds 1 & 2");
             else if(resource.key=="round3_deathmatch_wait")use=i18n::text("admin-audio-deathmatch","Round 3 / Death Match wait");
             else if(resource.key=="result_win")use=i18n::text("credits-result","Match results");
             songs[resource.songId].insert(std::move(use));

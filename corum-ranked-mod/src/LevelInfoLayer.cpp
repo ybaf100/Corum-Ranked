@@ -1093,7 +1093,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
             } else if (!levelReady) {
                 m_fields->gateCountdown->setString(tr("waiting-map", "WAITING FOR MAP").c_str());
             } else if (!readyForStart) {
-                m_fields->gateCountdown->setString(tr("waiting-song", "WAITING FOR SONG").c_str());
+                m_fields->gateCountdown->setString(tr("waiting-song-short", "WAITING FOR SONG").c_str());
             } else if (rankedPlayingState(match.state)) {
                 m_fields->gateCountdown->setString(tr("starting", "STARTING...").c_str());
             } else if (rankedPrepareState(match.state) && ownReady && !opponentReady) {

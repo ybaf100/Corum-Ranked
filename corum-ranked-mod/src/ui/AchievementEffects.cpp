@@ -93,17 +93,18 @@ void attach(CCNode* node,int tier,bool solid){
 }
 }
 ccColor3B achievementColor(int tier){auto const c=achievementTierColor(tier);return {static_cast<GLubyte>(c.r),static_cast<GLubyte>(c.g),static_cast<GLubyte>(c.b)};}
-void styleAchievementText(CCLabelBMFont* text,int tier){
+void styleAchievementText(CCLabelBMFont* text,int tier,bool animated){
  if(!text)return;text->stopActionByTag(EffectTag);
  text->setShaderProgram(CCShaderCache::sharedShaderCache()->programForKey(kCCShader_PositionTextureColor));
- text->setColor(achievementColor(tier));if(tier>=4 && tier<=5){text->setColor({255,255,255});attach(text,tier,false);}
+ text->setColor(achievementColor(tier));if(animated && tier>=4 && tier<=5){text->setColor({255,255,255});attach(text,tier,false);}
 }
 void styleAchievementTree(CCNode* node,int tier){
- if(!node)return;if(auto* label=typeinfo_cast<CCLabelBMFont*>(node)){styleAchievementText(label,tier);return;}
+ if(!node)return;if(auto* label=typeinfo_cast<CCLabelBMFont*>(node)){styleAchievementText(label,tier,false);return;}
  for(auto* child:CCArrayExt<CCNode*>(node->getChildren()))styleAchievementTree(child,tier);
 }
 void styleAchievementFill(CCLayerColor* fill,int tier){
- if(!fill)return;fill->stopActionByTag(EffectTag);fill->setShaderProgram(CCShaderCache::sharedShaderCache()->programForKey(kCCShader_PositionColor));fill->setColor(achievementColor(tier));
- if(tier>=4 && tier<=5){fill->setColor({255,255,255});attach(fill,tier,true);}
+ if(!fill)return;fill->stopActionByTag(EffectTag);
+ fill->setShaderProgram(CCShaderCache::sharedShaderCache()->programForKey(kCCShader_PositionColor));
+ fill->setColor(achievementColor(tier));
 }
 }

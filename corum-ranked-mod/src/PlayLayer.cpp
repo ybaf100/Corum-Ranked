@@ -2279,7 +2279,7 @@ public:
             setHudText(
                 row,
                 fmt::format(
-                    "{} - {}% ({}점)",
+                    fmt::runtime(corum::ranked::i18n::text("placement-record-row","{} - {}% ({} pts)")),
                     ordinal,
                     formatScore(records[rank].progress),
                     formatScore(records[rank].score)

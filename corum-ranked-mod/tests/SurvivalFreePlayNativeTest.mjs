@@ -158,11 +158,11 @@ struct CCMenu:CCNode{static CCMenu* create(){return new CCMenu;}};
 struct CCMenuItemSpriteExtra:CCNode{int tag=0;bool enabled=true;void setEnabled(bool value){enabled=value;}static CCMenuItemSpriteExtra* create(CCNode*,CCObject*,int){return new CCMenuItemSpriteExtra;}void setTag(int n){tag=n;}int getTag()const{return tag;}};
 #define menu_selector(...) 0
 struct CCLabelBMFont:CCNode{std::string text;int writes=0;void setString(char const* s){text=s;++writes;}void setColor(Color){}};
-namespace fmt{template<class...T>std::string format(std::string text,T const&...values){auto put=[&](auto const& v){std::ostringstream out;out<<v;auto at=text.find('{');if(at!=std::string::npos){auto end=text.find('}',at);text.replace(at,end-at+1,out.str());}};(put(values),...);return text;}}
+namespace fmt{std::string runtime(std::string s){return s;}template<class...T>std::string format(std::string text,T const&...values){auto put=[&](auto const& v){std::ostringstream out;out<<v;auto at=text.find('{');if(at!=std::string::npos){auto end=text.find('}',at);text.replace(at,end-at+1,out.str());}};(put(values),...);return text;}}
 template<class T>struct Number{T unwrapOr(T v){return v;}};template<class T>Number<T>numFromString(std::string const&){return {};}
 namespace corum::ranked{
 float rankedMenuTextScale(float scale){return scale;}
-namespace i18n{bool isKorean(){return false;}}std::string text(char const*,char const* s){return s;}
+namespace i18n{bool isKorean(){return false;}std::string text(char const*,char const* value){return value;}}std::string text(char const*,char const* s){return s;}
 namespace ui{inline constexpr Color Gold{255,195,55},Blue{0,0,255},SurfaceRaised{0,0,0},Cyan{0,255,255},Text{255,255,255},TextMuted{160,160,160},Red{255,0,0};enum class FontWeight{Black,ExtraBold};enum class RankBadgeDisplay{Leaderboard};
  CCNode* surface(CCSize size,CCPoint pos,Color,Color,unsigned char,bool){auto* node=new CCNode;node->size=size;node->pos=pos;return node;}
  CCLabelBMFont* menuLabel(std::string const& text,float,CCPoint pos,Color,FontWeight){auto* label=new CCLabelBMFont;label->text=text;label->pos=pos;return label;}CCLabelBMFont* playerNameLabel(std::string const& text,float scale,CCPoint pos,Color color,FontWeight weight){return menuLabel(text,scale,pos,color,weight);}void fitMenuLabelWidth(CCLabelBMFont*,float,float,float){}void fitFullMenuLabel(CCLabelBMFont*,float,float,float){}

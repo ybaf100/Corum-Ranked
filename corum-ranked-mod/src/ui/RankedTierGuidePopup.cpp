@@ -33,15 +33,15 @@ bool RankedTierGuidePopup::init() {
     setID("ranked-tier-guide-popup"_spr);
     m_bgSprite->setVisible(false);m_closeBtn->setVisible(false);m_closeBtn->setEnabled(false);
     auto* panel=surface(size,{size.width/2,size.height/2},Gold,Surface,255,true);m_mainLayer->addChild(panel,1);
-    panel->addChild(menuLabel(i18n::isKorean()?"티어 / 커트라인":"TIERS / CUTOFFS",.49f,{size.width/2,size.height-22},Gold,FontWeight::Black),5);
-    m_caption=menuLabel(i18n::isKorean()?"불러오는 중...":"Loading...",.28f,{size.width/2,size.height-47},TextMuted);
+    panel->addChild(menuLabel(corum::ranked::i18n::literal("inline.tiers-cutoffs"),.49f,{size.width/2,size.height-22},Gold,FontWeight::Black),5);
+    m_caption=menuLabel(corum::ranked::i18n::literal("inline.loading"),.28f,{size.width/2,size.height-47},TextMuted);
     panel->addChild(m_caption,5);
-    caption(panel,i18n::isKorean()?"티어":"TIER",{44,size.height-67},105,.27f);
-    caption(panel,i18n::isKorean()?"LP / 기준":"LP / RULE",{size.width*.36f,size.height-67},135,.27f);
-    caption(panel,i18n::isKorean()?"맵 풀":"MAP POOL",{size.width*.74f,size.height-67},100,.27f);
+    caption(panel,corum::ranked::i18n::literal("inline.tier"),{44,size.height-67},105,.27f);
+    caption(panel,corum::ranked::i18n::literal("inline.lp-rule"),{size.width*.36f,size.height-67},135,.27f);
+    caption(panel,corum::ranked::i18n::literal("inline.map-pool"),{size.width*.74f,size.height-67},100,.27f);
     m_scroll=ScrollLayer::create({size.width-24,size.height-143});m_scroll->setPosition({12,61});
     panel->addChild(m_scroll,4);
-    auto* note=menuLabel(i18n::isKorean()?"동점은 리더보드 순서로 결정 · 봇 포함":"Ties use leaderboard order · Bots included",.22f,{size.width/2,49},TextMuted);
+    auto* note=menuLabel(corum::ranked::i18n::literal("inline.ties-use-leaderboard-order-bots-included"),.22f,{size.width/2,49},TextMuted);
     fitMenuLabelWidth(note,size.width-32,.22f,.18f);panel->addChild(note,5);
     auto* menu=CCMenu::create();menu->setPosition(CCPointZero);panel->addChild(menu,20);
     auto button=[&](std::string const& title,float x,SEL_MenuHandler callback) {
@@ -66,7 +66,7 @@ void RankedTierGuidePopup::fetch() {
             auto const data=response.json().unwrapOr(matjson::Value());
             auto const rows=data["tiers"].asArray();
             if(!response.ok() || rows.isErr() || rows.unwrap().size()>16) {
-                self->m_caption->setString(i18n::isKorean()?"불러오지 못했습니다. 새로고침하세요.":"Could not load. Press Refresh.");
+                self->m_caption->setString(corum::ranked::i18n::literal("inline.could-not-load-press-refresh"));
                 self->m_caption->setColor(Red);return;
             }
             self->showRows(data);
@@ -77,7 +77,7 @@ void RankedTierGuidePopup::fetch() {
 void RankedTierGuidePopup::showRows(matjson::Value const& data) {
     auto const tiers=data["tiers"].asArray().unwrap();auto const gold=data["gold"];
     auto const total=static_cast<int>(gold["total"].asInt().unwrapOr(0));
-    m_caption->setString(fmt::format(fmt::runtime(i18n::isKorean()?"SOLO RANKED · GOLD 이상 {}명":"SOLO RANKED · {} Gold players"),total).c_str());
+    m_caption->setString(fmt::format(fmt::runtime(corum::ranked::i18n::literal("inline.solo-ranked-gold-players")),total).c_str());
     m_caption->setColor(TextMuted);fitMenuLabelWidth(m_caption,m_scroll->getContentSize().width,.28f,.22f);
     auto* content=m_scroll->m_contentLayer;content->removeAllChildrenWithCleanup(true);
     auto const width=m_scroll->getContentSize().width;
@@ -98,16 +98,16 @@ void RankedTierGuidePopup::showRows(matjson::Value const& data) {
         auto const min=band["minInclusive"].asInt().unwrapOr(0);auto const max=band["maxExclusive"].asInt();
         auto const rule=max.isOk()?fmt::format("{} ~ {} LP",min,max.unwrap()-1):fmt::format("{}+ LP",min);
         auto const games=band["promotionGames"].asInt().unwrapOr(0),wins=band["promotionWinsRequired"].asInt().unwrapOr(0);
-        auto const detail=games>0?fmt::format(fmt::runtime(i18n::isKorean()?"승격전 {}판 {}승":"Series {} games / {} wins"),games,wins):
-            (tier=="GOLD"?(i18n::isKorean()?"인원 / 순위 기준":"Population / position"):"");
+        auto const detail=games>0?fmt::format(fmt::runtime(corum::ranked::i18n::literal("inline.series-games-wins")),games,wins):
+            (tier=="GOLD"?(corum::ranked::i18n::literal("inline.population-position")):"");
         auto const pool=fmt::format("{} / DM {}",band["mainPool"].asInt().unwrapOr(0),band["deathmatchPool"].asInt().unwrapOr(0));
         if(tier=="GOLD")goldPool=pool;
         row(tier,rule,pool,detail,index++);
     }
     auto const master=gold["masterSlots"].asInt().unwrapOr(0);
-    row("MASTER",master>0?lpCut(gold["masterCutoffLp"]):(i18n::isKorean()?"없음":"NONE"),goldPool,
-        fmt::format(fmt::runtime(i18n::isKorean()?"상위 절반 · {}명":"Upper half · {} players"),master),index++);
-    row("CHAMPION",lpCut(gold["championCutoffLp"]),goldPool,i18n::isKorean()?"상위 3명":"TOP 3",index++);
+    row("MASTER",master>0?lpCut(gold["masterCutoffLp"]):(corum::ranked::i18n::literal("inline.none")),goldPool,
+        fmt::format(fmt::runtime(corum::ranked::i18n::literal("inline.upper-half-players")),master),index++);
+    row("CHAMPION",lpCut(gold["championCutoffLp"]),goldPool,corum::ranked::i18n::literal("inline.top-3"),index++);
     m_scroll->moveToTop();
 }
 

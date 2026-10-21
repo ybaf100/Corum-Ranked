@@ -9,6 +9,8 @@ on:
       - "**"
     paths:
       - "corum-ranked-mod/**"
+      - "ranked/translations/**"
+      - "ranked/tools/localization/**"
       - "ranked/apps/server/src/session/client-version.ts"
       - ".github/workflows/build-ranked-mod.yml"
       - ".github/workflows/build-ranked-debug.yml"
@@ -16,6 +18,8 @@ on:
   pull_request:
     paths:
       - "corum-ranked-mod/**"
+      - "ranked/translations/**"
+      - "ranked/tools/localization/**"
       - "ranked/apps/server/src/session/client-version.ts"
       - ".github/workflows/build-ranked-mod.yml"
       - ".github/workflows/build-ranked-debug.yml"
@@ -164,6 +168,8 @@ jobs:
           curl --fail --location --retry 3 https://codeload.github.com/geode-sdk/result/tar.gz/b17911426ced3ca519d9a338aea76053be6fc4f1 | tar -xz --strip-components=1 -C "$RUNNER_TEMP/corum-result"
           echo "CORUM_MATJSON_SOURCE=$RUNNER_TEMP/corum-json" >> "$GITHUB_ENV"
           echo "CORUM_RESULT_INCLUDE=$RUNNER_TEMP/corum-result/include" >> "$GITHUB_ENV"
+      - name: Generate editable game translations before native validation
+        run: node ranked/tools/localization/build.mjs
       - name: Validate native client behavior (two files in parallel)
         # Each native harness uses its own temporary directory. Bound compiler
         # concurrency so small runners retain memory headroom; keep all tests.

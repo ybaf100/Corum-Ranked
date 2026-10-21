@@ -187,7 +187,7 @@ void SurvivalRuntime::leaveQueue() { if(queueing() && !m_creating)queueAction("/
 std::string SurvivalRuntime::surrenderMessage() const {
     if(!m_view.online)return i18n::text("survival-surrender-warning","End this match using this round's recorded ranking?");
     return fmt::format(fmt::runtime(i18n::text("survival-online-surrender","End as {} in this round, settle LP and return to the lobby?")),
-        i18n::isKorean()?fmt::format("{}위",m_view.roundPlayerCount):survivalOrdinal(m_view.roundPlayerCount));
+        i18n::isKorean()?fmt::format(fmt::runtime(i18n::text("player-rank","{}")),m_view.roundPlayerCount):survivalOrdinal(m_view.roundPlayerCount));
 }
 void SurvivalRuntime::observe(matjson::Value const& root) {
     auto const id=root["matchId"].asString().unwrapOr("");auto const revision=root["revision"].asInt().unwrapOr(0);

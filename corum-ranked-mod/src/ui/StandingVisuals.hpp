@@ -47,7 +47,7 @@ inline CCNode* standingNumber(std::optional<int> rank, float scale) {
 inline CCNode* standingLine(StandingView const& standing, float scale, std::optional<int> lp = std::nullopt) {
     auto* root = CCNode::create(); root->setAnchorPoint({0.5f, 0.5f});
     auto* rank = standingNumber(standing.rank, scale);
-    auto const total = i18n::isKorean() ? fmt::format(" (총 {}명)",standing.total) : fmt::format(" ({} players)",standing.total);
+    auto const total = fmt::format(fmt::runtime(i18n::text("players-total-suffix"," ({} players)")),standing.total);
     auto* text = menuLabel(lp ? fmt::format("{} LP /", *lp) : topPercentText(standing) + total,
         scale, {}, Text, FontWeight::ExtraBold);
     auto const textSize = CCSize {text->getContentSize().width * text->getScaleX(),

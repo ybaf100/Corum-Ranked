@@ -12,7 +12,7 @@ inline int achievementRarityTier(std::string_view rarity) {
  return rarity=="COMMON"?1:0;
 }
 inline AchievementRgb achievementTierColor(int tier) {
- switch(tier){case 1:return {178,186,201};case 2:return {87,187,255};case 3:return {198,121,255};case 4:return {255,176,70};case 5:return AchievementPastels[0];default:return {92,100,116};}
+ switch(tier){case 1:return {178,186,201};case 2:return {87,187,255};case 3:return {198,121,255};case 4:return {255,176,70};case 5:return {229,228,226};default:return {92,100,116};}
 }
 inline AchievementRgb achievementPastelAt(double position,double seconds) {
  auto phase=position+seconds/3.;phase-=std::floor(phase);phase*=AchievementPastels.size();
@@ -33,6 +33,12 @@ template<class Cards>AchievementPending achievementPending(Cards const& cards,st
  }return result;
 }
 template<class Card>int achievementCardTier(Card const& card){
- return card.type=="PROGRESSIVE"?std::clamp(card.currentLevel,0,5):(card.unlocked?achievementRarityTier(card.rarity):0);
+ return card.type=="PROGRESSIVE"?std::clamp(card.currentLevel,0,5):achievementRarityTier(card.rarity);
+}
+// An equipped historical stage affects only its own card; progress remains authoritative.
+template<class Card,class Title>int achievementCardTier(Card const& card,Title const& equipped){
+ auto const highest=achievementCardTier(card);
+ if(card.type=="PROGRESSIVE" && equipped.active && equipped.achievementId==card.id && equipped.level && *equipped.level>=1 && *equipped.level<=highest)return *equipped.level;
+ return highest;
 }
 }

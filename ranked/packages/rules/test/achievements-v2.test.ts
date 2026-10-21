@@ -10,7 +10,7 @@ describe("Achievement System v2 catalog",()=>{
   for(const d of PROGRESSIVE_ACHIEVEMENTS){
    expect(d.levels.map(l=>l.ap)).toEqual([5,10,20,40,75]);
    expect(d.levels.map(l=>l.grade)).toEqual(["BRONZE","SILVER","GOLD","PLATINUM","DIAMOND"]);
-   expect(d.levels.map(l=>l.displayColor)).toEqual(["#B2BAC9","#57BBFF","#C679FF","#FFB046","#FFB8C6"]);
+   expect(d.levels.map(l=>l.displayColor)).toEqual(["#B2BAC9","#57BBFF","#C679FF","#FFB046","#E5E4E2"]);
   }
  });
  it("gives new Mythic unlocks 200 AP",()=>{

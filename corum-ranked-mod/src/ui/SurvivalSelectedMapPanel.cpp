@@ -104,7 +104,7 @@ void SurvivalSelectedMapPanel::present(CCSize size,bool thumbnail,SurvivalMatchV
         auto* info=ids.empty()?LevelTools::getSongObject(level->m_audioTrack):MusicDownloadManager::sharedState()->getSongInfoObject(ids.front());
         if(info)songName=std::string(info->m_songName);
     }
-    auto const song="Song - "+(songName.empty()?i18n::text("loading","LOADING"):songName);
+    auto const song="Song - "+(songName.empty()?i18n::text("loading-uppercase","LOADING"):songName);
     if(song!=m_songText){m_songText=song;line(m_song,song,r.song,.19f,true);}
     auto metadata=RankedMapDetails::get().metadata(view.map.levelId);
     if(metadata.kind=="UNKNOWN"){metadata.kind=view.map.demon==SurvivalDemon::None?"NORMAL":"DEMON";metadata.stars=view.map.stars;}

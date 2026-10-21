@@ -1,3 +1,12 @@
+# v0.5.0-beta.92
+
+- Achievement one-shots retain rarity colors before unlock; progressive card/text/bar colors follow the equipped historical stage or highest attained stage.
+- V/Mythic card surfaces use platinum. Moving gold/pastel effects are limited to achievement names and equipped title text.
+- Claim All collects every category without a completion popup; server ledger/idempotency and individual Claim remain unchanged.
+- All existing localized UI and the 46 achievement names/descriptions are editable in ranked/translations UTF-8 JSON and applied by native/server builds, with font coverage generation.
+- First-place podium gold ambient fades in after its staged entrance without restarting on settlement refresh.
+- Preserves beta.90 cleared-map replay/thumbnail repair and beta.91 Debug achievement parity.
+
 # v0.5.0-beta.91
 
 - Solo Debug Bot and Survival Debug now unlock achievements, count progression and allow AP/title claims using the same predicates as normal matches.

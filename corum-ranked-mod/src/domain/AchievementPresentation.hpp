@@ -1,4 +1,5 @@
 #pragma once
+#include "TranslationCatalog.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -86,10 +87,10 @@ inline std::vector<std::size_t> achievementDisplayOrder(Cards const& cards) {
 }
 
 inline std::string achievementScopeName(std::string_view scope, bool korean) {
-    if (scope == "SOLO_RANKED") return korean ? "솔로 랭크" : "Solo Ranked";
-    if (scope == "SURVIVAL") return korean ? "서바이벌" : "Survival";
-    if (scope == "SHARED") return korean ? "공통" : "Shared";
-    return korean ? "미분류" : "Unclassified";
+    if (scope == "SOLO_RANKED") return corum::ranked::catalogText("inline.solo-ranked", korean, "Solo Ranked");
+    if (scope == "SURVIVAL") return corum::ranked::catalogText("inline.survival", korean, "Survival");
+    if (scope == "SHARED") return corum::ranked::catalogText("inline.shared", korean, "Shared");
+    return corum::ranked::catalogText("inline.unclassified", korean, "Unclassified");
 }
 
 template<class Cards>

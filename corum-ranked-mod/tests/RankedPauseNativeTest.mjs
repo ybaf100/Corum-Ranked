@@ -16,7 +16,7 @@ test('packaged Corum font charsets cover Korean countdown, pause and surrender l
     const fonts=JSON.parse(read('mod.json')).resources.fonts;
     const used=read('src/ui/RankedEntryOverlay.cpp')+pause;
     const keys=new Set([...used.matchAll(/"([^"\n]+)"/g)].map(m=>m[1]));
-    const captions=used+[...read('src/ui/RankedTranslations.hpp').matchAll(/Translation\{"([^"]+)", "([^"]*)"\}/g)].filter(m=>keys.has(m[1])).map(m=>m[2]).join('');
+    const captions=used+Object.entries(JSON.parse(read('../ranked/translations/ui.json'))).filter(([key])=>keys.has(key)).map(([,pair])=>pair.ko).join('');
     const glyphs=new Set([...captions].map(c=>c.codePointAt(0)).filter(n=>n>=0xac00&&n<=0xd7a3));
     for(const weight of ['CorumSansMedium','CorumSansSemiBold','CorumSansBold','CorumSansBlack']){
         const available=new Set();
@@ -50,6 +50,7 @@ test('actual pause/modal callbacks preserve native cleanup and surrender the who
     const modalMethods=['bool sameRound() const','void onRound(','void onMatch(','void onConfirm(','void onCancel(','void watchContext(','void dismiss()'].map(n=>body(popup,n)).join('\n');
     const cpp=`
 #include <cassert>
+#include "${join(root, 'src/domain/TranslationCatalog.hpp')}"
 #include <algorithm>
 #include <optional>
 #include <string>
@@ -97,7 +98,7 @@ struct SurvivalRuntime{
 bool isOfficialSurvivalPlayLayer(PlayLayer* layer){return layer && layer->m_level && SurvivalRuntime::get().gameplayLevel(layer->m_level->m_levelID);}
 int survivalReturns=0;bool requestSurvivalGameplayReturn(PlayLayer* layer){if(!survivalReturns++)queueInMainThread([layer]{layer->onQuit();});return true;}
 int returnRequests=0;bool requestConcededGameplayReturn(PlayLayer*){++returnRequests;return true;}
- namespace i18n {std::string text(std::string const& key,std::string const&){return key;}inline bool korean=false;bool isKorean(){return korean;}std::string text(char const* key,char const* fallback){return korean?std::string("ko:")+key:fallback;}}
+ namespace i18n {std::string text(std::string const& key,std::string const&){return key;}inline bool korean=false;bool isKorean(){return korean;}char const* literal(std::string_view key){return corum::ranked::catalogText(key,korean);}std::string text(char const* key,char const* fallback){return korean?std::string("ko:")+key:fallback;}}
 namespace ui {
 inline constexpr ccColor3B Red={255,91,111},Gold={255,207,74};
 using CCLabelBMFont=Label;
@@ -206,6 +207,7 @@ test('closed retained surrender modal releases force priority before the next ro
     const exit=body(popup,'void onExit() override');
     const cpp=`
 #include <cassert>
+#include "${join(root, 'src/domain/TranslationCatalog.hpp')}"
 #include <algorithm>
 #include <optional>
 #include <set>

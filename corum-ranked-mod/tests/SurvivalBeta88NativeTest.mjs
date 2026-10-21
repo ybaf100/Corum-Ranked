@@ -119,7 +119,7 @@ int main(){Layer l;auto&r=SurvivalRuntime::get();l.beginResultMotion();assert(l.
 test('Credits is inside Settings and reads real artist - title metadata without inventing music credits or taking a GD delegate',()=>{
  const src=read('src/ui/RankedCreditsPopup.cpp'),settings=read('src/ui/RankedSettingsPopup.hpp');
  assert.match(settings,/menu_selector\(RankedSettingsPopup::onCredits\)/);assert.match(settings,/ranked-credits-button/);
- assert.match(src,/text\("credits-planner","Planner"\)/);assert.match(src,/add\("hwanhee1"/);assert.match(read('src/ui/RankedTranslations.hpp'),/Translation\{"credits-planner", "기획"\}/);
+ assert.match(src,/text\("credits-planner","Planner"\)/);assert.match(src,/add\("hwanhee1"/);assert.equal(JSON.parse(read('../ranked/translations/ui.json'))['credits-planner'].ko,'기획');
  assert.doesNotMatch(src,/m_songInfoDelegate\s*=|m_songInfoObject\s*=|Developer|개발자/);
  run(`
 #include <cassert>

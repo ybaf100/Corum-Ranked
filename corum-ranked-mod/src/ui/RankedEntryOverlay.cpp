@@ -143,8 +143,8 @@ void RankedEntryOverlay::present(bool bothEntered, std::optional<std::int64_t> r
     if (m_headingState != headingState) {
         m_headingState = headingState;
         m_heading->setString(counting
-            ? (korean ? "시작까지..." : "STARTS IN...")
-            : (korean ? "상대 입장 대기 중..." : "WAITING FOR OPPONENT..."));
+            ? (corum::ranked::catalogText("inline.starts-in", korean, "STARTS IN..."))
+            : (corum::ranked::catalogText("inline.waiting-for-opponent", korean, "WAITING FOR OPPONENT...")));
     }
     if (m_presentedDigit != frame.digit) {
         m_presentedDigit = frame.digit;

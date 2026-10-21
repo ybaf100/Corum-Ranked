@@ -514,12 +514,8 @@ class $modify(CorumRankedGameplayUx, PlayLayer) {
         auto const ownAttemptsLeft = std::clamp(3 - ownCompleted, 0, 3);
         auto const opponentAttemptsLeft = std::clamp(3 - opponentCompleted, 0, 3);
 
-        auto const ownPrefix = corum::ranked::i18n::isKorean()
-            ? "남은 시도 : "
-            : "ATTEMPTS LEFT : ";
-        auto const opponentPrefix = corum::ranked::i18n::isKorean()
-            ? "상대 남은 시도 : "
-            : "OPP. ATTEMPTS LEFT : ";
+        auto const ownPrefix = corum::ranked::i18n::literal("inline.attempts-left");
+        auto const opponentPrefix = corum::ranked::i18n::literal("inline.opp-attempts-left");
         setShadowText(
             m_fields->attemptsLeft,
             ownPrefix + std::to_string(ownAttemptsLeft)

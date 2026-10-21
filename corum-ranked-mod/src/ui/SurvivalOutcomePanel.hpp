@@ -144,7 +144,7 @@ public:
                     auto const rank=it->rank>0?survivalOrdinal(it->rank):i18n::text("survival-result-wait","PENDING");
                     auto* label=menuLabel(rank,.48f,{size.width/2,size.height*.42f},Gold,FontWeight::Black);addChild(label,5);
                 }
-                auto const lp=settled?fmt::format("{:+} LP · {} LP · {}",view.result["actualDelta"].asInt().unwrapOr(0),view.result["profileAfter"]["lp"].asInt().unwrapOr(0),view.result["profileAfter"]["tier"].asString().unwrapOr("")):i18n::text("survival-result-wait","SETTLEMENT PENDING");
+                auto const lp=settled?fmt::format("{:+} LP · {} LP · {}",view.result["actualDelta"].asInt().unwrapOr(0),view.result["profileAfter"]["lp"].asInt().unwrapOr(0),view.result["profileAfter"]["tier"].asString().unwrapOr("")):i18n::text("settlement-pending","SETTLEMENT PENDING");
                 m_detail=menuLabel(lp,.30f,{size.width/2,size.height*.28f},Text,FontWeight::ExtraBold);fitFullMenuLabel(m_detail,size.width-30,24,.30f);addChild(m_detail,5);
                 if(settled){auto* badge=createAnimatedRankBadge(view.result["profileAfter"]["tier"].asString().unwrapOr("UNRANKED"),{40,40},RankBadgeDisplay::Leaderboard);badge->setPosition({size.width/2+110,size.height*.43f});addChild(badge,5);}
             }
@@ -157,7 +157,12 @@ public:
             p.avatar->setVisible(frame.avatar);p.avatar->setEnabled(frame.interactive);
             p.avatar->setPosition({p.x,p.base+p.height+36+static_cast<float>(frame.drop*58)});
             p.stamp->setVisible(frame.stamp>0);p.stamp->setScale(static_cast<float>(frame.stampScale));propagateModeOpacity(p.stamp,static_cast<GLubyte>(frame.stampOpacity*255));
-            p.place->setVisible(frame.stamp>0);if(p.glow)p.glow->setVisible(frame.interactive);
+            p.place->setVisible(frame.stamp>0);
+            if(p.glow){p.glow->setVisible(frame.glowOpacity>0);
+                // The existing zero-sized RGBA root cascades this envelope while
+                // its child sprites keep their gold ambient pulse/rotation.
+                if(auto* rgba=dynamic_cast<CCRGBAProtocol*>(p.glow))rgba->setOpacity(static_cast<GLubyte>(std::lround(frame.glowOpacity*255)));
+            }
         }
         if(m_watch){auto const lock=SurvivalRuntime::get().watchLockSeconds();m_watch->setEnabled(lock==0);m_watchText->setString((i18n::text("survival-watch","WATCH")+(lock>0?fmt::format(" ({})",lock):std::string{})).c_str());m_watchText->setColor(lock>0?TextMuted:Cyan);fitFullMenuLabel(m_watchText,m_watch->getContentSize().width-12,22,.29f);}
     }

@@ -77,11 +77,11 @@ test('global defaults and same-round overrides stay separate across object repla
 }`);
 });
 test('packaged fonts cover the unavailable LDM control and all-ready countdown in Korean',()=>{
- const captions=readFileSync(join(root,'src/ui/RankedTranslations.hpp'),'utf8');
+ const captions=JSON.parse(readFileSync(join(root,'../ranked/translations/ui.json'),'utf8'));
  const fonts=JSON.parse(readFileSync(join(root,'mod.json'),'utf8')).resources.fonts;
  const keys=['survival-no-ldm','survival-entry-wait'];
  for(const key of keys){
-  const caption=captions.match(new RegExp(`Translation\\{"${key}", "([^"]*)"\\}`))?.[1];assert(caption,key);
+  const caption=captions[key]?.ko;assert(caption,key);
   for(const weight of ['CorumSansMedium','CorumSansSemiBold','CorumSansBold','CorumSansBlack']){
    const charset=new Set(fonts[weight].charset.split(',').flatMap(part=>{const [first,last=first]=part.split('-').map(Number);return Array.from({length:last-first+1},(_,i)=>first+i);}));
    for(const glyph of caption)assert(charset.has(glyph.codePointAt(0)),`${weight} missing ${glyph}`);

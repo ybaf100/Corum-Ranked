@@ -105,7 +105,7 @@ bool ResultScoreLayer::init(ScoreAnimationInput input, CCNode* resultScreen, std
     auto outcomeText = m_input.won ? i18n::text("win","WIN") : i18n::text("lose","LOSE");
     auto outcomeColor = m_input.won ? ccc3(90,239,133) : ccc3(255,93,113);
     if (m_input.survivalRank) {
-        outcomeText = i18n::isKorean() ? fmt::format("{}위",*m_input.survivalRank) : survivalOrdinal(*m_input.survivalRank);
+        outcomeText = i18n::isKorean() ? fmt::format(fmt::runtime(i18n::text("player-rank","{}")),*m_input.survivalRank) : survivalOrdinal(*m_input.survivalRank);
         auto const color = survivalResultRankColor(*m_input.survivalRank,m_input.after-m_input.before);
         outcomeColor=ccc3(color.r,color.g,color.b);
     }
@@ -125,7 +125,7 @@ bool ResultScoreLayer::init(ScoreAnimationInput input, CCNode* resultScreen, std
 
     m_menu = CCMenu::create(); m_menu->setPosition(CCPointZero); addChild(m_menu,100);
     auto* face = surface({118,30},{},ccc3(136,147,169),SurfaceRaised,240,true);
-    m_skipCaption = menuLabel(i18n::text("tap-to-skip","SKIP"),0.44f,{59,15},Text,FontWeight::ExtraBold);
+    m_skipCaption = menuLabel(i18n::text("skip-animation","SKIP"),0.44f,{59,15},Text,FontWeight::ExtraBold);
     fitMenuLabelWidth(m_skipCaption,100,0.44f,0.34f); face->addChild(m_skipCaption,5);
     auto* skip = CCMenuItemSpriteExtra::create(face,this,menu_selector(ResultScoreLayer::onSkip));
     skip->setID("ranked-result-score-skip"_spr); skip->setPosition({size.width / 2,26}); m_menu->addChild(skip);
@@ -387,14 +387,13 @@ void ResultScoreLayer::showSeries(bool entering) {
     if (m_seriesShown || !m_input.promotion.active) return;
     m_seriesShown = true;
     auto const games = m_input.promotion.gamesRequired;
-    auto const text = m_input.promoted ? i18n::text("promoted","PROMOTED!")
+    auto const text = m_input.promoted ? i18n::text("promoted-result","PROMOTED!")
         : m_input.promotionFailed ? i18n::text("promotion-failed","PROMOTION FAILED")
         : i18n::text("promotion-match","PROMOTION MATCH");
     auto* title = menuLabel(text,0.47f,{0,39},m_input.promotionFailed ? ccc3(255,93,113) : Gold,FontWeight::Black);
     fitMenuLabelWidth(title,getContentSize().width * 0.56f,0.47f,0.34f); m_seriesRoot->addChild(title,5);
     if (m_input.promoted) {
-        auto* detail = menuLabel(i18n::isKorean() ? fmt::format("{} {}",rankTierDisplay(m_input.afterTier),goldRankTier(m_input.afterTier)?"승격":"승급")
-            : fmt::format("Promoted to {}!",rankTierDisplay(m_input.afterTier)),0.30f,{0,22},tierColor(m_input.afterTier),FontWeight::ExtraBold);
+        auto* detail = menuLabel(fmt::format(fmt::runtime(i18n::text(goldRankTier(m_input.afterTier)?"tier-promoted-to":"division-promoted-to","Promoted to {}!")),rankTierDisplay(m_input.afterTier)),0.30f,{0,22},tierColor(m_input.afterTier),FontWeight::ExtraBold);
         fitMenuLabelWidth(detail,getContentSize().width * 0.55f,0.30f,0.24f); m_seriesRoot->addChild(detail,5);
     }
     // Wrap longer server-configured series instead of assuming three games or
@@ -441,8 +440,7 @@ void ResultScoreLayer::showNotices() {
     m_noticesShown = true;
     if(!m_input.survivalRank && !m_seriesShown && !m_input.promotionStarted && m_input.beforeTier!=m_input.afterTier) {
         auto const up=rankTierOrder(m_input.afterTier)>rankTierOrder(m_input.beforeTier);
-        auto const text=i18n::isKorean()?(up?(goldRankTier(m_input.afterTier)?"승격":"승급"):"강등"):
-            (up?(goldRankTier(m_input.afterTier)?"PROMOTED":"DIVISION UP"):"DEMOTED");
+        auto const text=i18n::text(up?(goldRankTier(m_input.afterTier)?"promoted":"division-up"):"demoted",up?(goldRankTier(m_input.afterTier)?"PROMOTED":"DIVISION UP"):"DEMOTED");
         auto* notice=menuLabel(text,.49f,{0,19},up?Gold:Red,FontWeight::Black);
         m_seriesRoot->addChild(notice,5);stamp(notice,0);
         auto* tier=menuLabel(rankTierDisplay(m_input.afterTier),.32f,{0,-3},tierColor(m_input.afterTier),FontWeight::ExtraBold);

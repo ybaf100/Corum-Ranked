@@ -253,7 +253,7 @@ void RankedLeaderboardPopup::showRows(matjson::Value const& data) {
     auto const height = std::max(viewport.height,static_cast<float>(players.size()) * (kRowHeight + kRowGap) + 8);
     m_scroll->m_contentLayer->setContentSize({viewport.width,height});
     auto const total = data["total"].asInt().unwrapOr(0);
-    auto const count = i18n::isKorean() ? fmt::format("총 {}명",total) : fmt::format("{} ranked players",total);
+    auto const count = fmt::format(fmt::runtime(i18n::text("players-total","{} ranked players")),total);
     m_caption->setString(count.c_str()); m_caption->setColor(TextMuted);
     fitMenuLabelWidth(m_caption,viewport.width,0.26f,0.22f);
     m_hasMore = data["hasMore"].asBool().unwrapOr(false);

@@ -1,4 +1,5 @@
 #pragma once
+#include "TranslationCatalog.hpp"
 #include <array>
 #include <algorithm>
 #include <cmath>
@@ -13,8 +14,8 @@ inline std::string matchRecordText(int wins, int losses, bool korean) {
     auto const games = static_cast<double>(wins) + losses;
     auto const tenths = games > 0 ? static_cast<int>(std::lround(wins * 1000.0 / games)) : 0;
     auto const percent = std::to_string(tenths / 10) + (tenths % 10 ? "." + std::to_string(tenths % 10) : "");
-    return std::to_string(wins) + (korean ? "승 / " : "W / ") + std::to_string(losses) +
-        (korean ? "패 (" : "L (") + percent + "%)";
+    return std::to_string(wins) + (corum::ranked::catalogText("inline.w", korean, "W / ")) + std::to_string(losses) +
+        (corum::ranked::catalogText("inline.l", korean, "L (")) + percent + "%)";
 }
 
 // GD's DemonInfoPopup has five classic and five platformer difficulty

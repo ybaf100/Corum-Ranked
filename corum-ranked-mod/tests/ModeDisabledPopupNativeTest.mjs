@@ -24,7 +24,7 @@ test('disabled channel modal uses our bilingual font, gates entry, and retires r
 ${boundary}
 #include "domain/RankedMode.hpp"
 namespace geode{struct Mod{std::string saved="en";static Mod*get(){static Mod m;return &m;}template<class T>T getSavedValue(std::string const&,T const&)const{return saved;}void setSavedValue(std::string const&,std::string const&s){saved=s;}};}
-${strip(read('src/ui/RankedTranslations.hpp'))}
+${strip(read('src/domain/TranslationCatalog.generated.hpp'))}\n${strip(read('src/domain/TranslationCatalog.hpp'))}\n${strip(read('src/ui/RankedTranslations.hpp'))}
 std::string tr(std::string_view k,std::string_view e){return corum::ranked::i18n::text(k,e);}
 using CCMenuItem=CCMenuItemSpriteExtra;
 template<class T>T typeinfo_cast(CCObject*o){return dynamic_cast<T>(o);}
@@ -99,9 +99,9 @@ int main(){using namespace corum::ranked;using namespace corum::ranked::ui;
 test('new Korean lobby/status/popup strings fit the packaged SemiBold charset',()=>{
  const font=JSON.parse(read('mod.json')).resources.fonts.CorumSansSemiBold;
  const glyphs=new Set();for(const range of font.charset.split(',')){const[a,b=a]=range.split('-').map(Number);for(let n=a;n<=b;n++)glyphs.add(n);}
- const translations=read('src/ui/RankedTranslations.hpp').split('Translation{"mode-enter"')[0];
- for(const [,literal]of translations.matchAll(/Translation\{"[^"\n]+", "([^"\n]*)"\}/g))
-  for(const c of literal.replaceAll('\\n',''))assert(glyphs.has(c.codePointAt(0)),`Unpackaged font glyph ${c} in ${literal}`);
+ const translations=JSON.parse(read('../ranked/translations/ui.json'));
+ for(const {ko:literal} of Object.values(translations))
+  for(const c of literal.replaceAll('\\n',''))if(!['\n','\r','\t'].includes(c))assert(glyphs.has(c.codePointAt(0)),`Unpackaged font glyph ${c} in ${literal}`);
  assert.match(read('src/ui/RankedModeDisabledPopup.hpp'),/menuLabel\(i18n::text\("mode-disabled-notice"/);
  assert.match(read('src/RankedPopup.cpp'),/noticeView\.stage != RuntimeStage::Ready.*noticeView\.accountActiveElsewhere/);
 });
