@@ -1,0 +1,52 @@
+name: Deploy Corum Ranked to Lightsail (manual)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ranked-lightsail-production
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    environment: lightsail-production
+    timeout-minutes: 35
+    steps:
+      - name: Checkout authoritative main
+        uses: actions/checkout@v4
+
+      - name: Build server Docker image on GitHub runner
+        run: |
+          docker build --pull -f ranked/Dockerfile.lightsail -t "corum-ranked:${GITHUB_SHA}" ranked
+          docker save "corum-ranked:${GITHUB_SHA}" | gzip -1 > "/tmp/corum-ranked-${GITHUB_SHA}.tar.gz"
+
+      - name: Configure pinned SSH key
+        env:
+          LIGHTSAIL_SSH_PRIVATE_KEY: ${{ secrets.LIGHTSAIL_SSH_PRIVATE_KEY }}
+          LIGHTSAIL_SSH_KNOWN_HOSTS: ${{ secrets.LIGHTSAIL_SSH_KNOWN_HOSTS }}
+          LIGHTSAIL_HOST: ${{ vars.LIGHTSAIL_HOST }}
+        run: |
+          test -n "$LIGHTSAIL_SSH_PRIVATE_KEY"
+          test -n "$LIGHTSAIL_SSH_KNOWN_HOSTS"
+          test -n "$LIGHTSAIL_HOST"
+          umask 077
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$LIGHTSAIL_SSH_PRIVATE_KEY" > "$HOME/.ssh/corum-lightsail"
+          printf '%s\n' "$LIGHTSAIL_SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/corum-lightsail" "$HOME/.ssh/known_hosts"
+
+      - name: Upload immutable image and activate with rollback
+        env:
+          LIGHTSAIL_HOST: ${{ vars.LIGHTSAIL_HOST }}
+        run: |
+          ssh_opts=(-i "$HOME/.ssh/corum-lightsail" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20)
+          scp "${ssh_opts[@]}" "/tmp/corum-ranked-${GITHUB_SHA}.tar.gz" "corum-deploy@${LIGHTSAIL_HOST}:/var/lib/corum-ranked/incoming/${GITHUB_SHA}.tar.gz"
+          ssh "${ssh_opts[@]}" "corum-deploy@${LIGHTSAIL_HOST}" "sudo /usr/local/sbin/corum-ranked-activate '${GITHUB_SHA}'"
+
+      - name: Report deployment source
+        run: echo "Deployed ${GITHUB_SHA} via pinned SSH to Lightsail"
