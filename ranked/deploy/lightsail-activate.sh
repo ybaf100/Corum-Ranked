@@ -50,7 +50,7 @@ docker run -d \
   --security-opt no-new-privileges \
   --cap-drop ALL \
   --pids-limit 256 \
-  --memory 4g \
+  --memory 3g \
   --env-file "$ENV_FILE" \
   -p 127.0.0.1:3000:3000 \
   "$IMAGE" >/dev/null
