@@ -1,13 +1,13 @@
-# Corum-Ranked → AWS Lightsail Seoul 8 GB (migration runbook)
+# Corum-Ranked → AWS Lightsail Sydney 4 GB (migration runbook)
 
 **Status: infrastructure deployment files only; AWS instance NOT created and production NOT cut over.** Do not merge or dispatch before provisioning an AWS account and a secure Neon staging environment.
 
 ## Server choice / budget
 
-- AWS Region: **Asia Pacific (Seoul) — ap-northeast-2**.
-- Lightsail: **Linux/Unix with public IPv4, 8 GiB RAM, 2 vCPU, 160 GB SSD, 5 TB included data transfer, $44 USD/month standard plan** (verify the actual plan in your account before creating it).
+- AWS Region: **Asia Pacific (Sydney) — ap-southeast-2**, the selected Region of the user's new AWS experience project. New AWS experience projects restrict Regional resource creation to their assigned Region.
+- Lightsail: **Linux/Unix with public IPv4, 4 GiB RAM, 2 vCPU, 80 GB SSD, $24 USD/month standard plan**. The generic plan shows 4 TB data transfer, but **Sydney has only half: 2 TB/month**. Confirm the final bundle and project restrictions in the console.
 - Image: Ubuntu 24.04 LTS **x86_64**.
-- Two full months = **$88 in base instance fees**, excluding taxes, overages and other AWS resources.
+- Two full months = **$48 in base instance fees**, excluding taxes, overages and other AWS resources.
 - The AWS new-user $100 credit is **account-dependent and must be shown in Billing before assuming the server is covered**.
 - After use: delete the instance and inspect static IP, snapshots and other paid resources. **Stopping an instance does not stop Lightsail instance charges.**
 
@@ -21,9 +21,9 @@ GitHub Actions builds the Node 22 Docker image; SSH sends a gzip image archive t
 
 ## 1. Create Lightsail instance (AWS console)
 
-1. Visit https://lightsail.aws.amazon.com/ and choose **Seoul (ap-northeast-2)**.
-2. Create a **Linux/Unix → Ubuntu 24.04 LTS** instance. Select the **8 GB / 2 vCPU / 160 GB / $44** IPv4-capable bundle.
-3. Set name `corum-ranked-seoul`. Confirm displayed monthly rate, any AWS credits, and the intended account before clicking create.
+1. Visit https://lightsail.aws.amazon.com/ and choose **Sydney (ap-southeast-2)**. In a new AWS experience project, check the project's assigned Region in AWS Settings first.
+2. Create a **Linux/Unix → Ubuntu 24.04 LTS** instance. Select the **4 GB / 2 vCPU / 80 GB / $24** IPv4-capable bundle; in Sydney the included transfer allowance is **2 TB**, not 4 TB.
+3. Set name `corum-ranked-sydney`. Confirm displayed monthly rate, any AWS credits, and the intended AWS project before clicking create.
 4. Attach a **static public IP** in Lightsail Networking. Point your chosen DNS A record to it (example `api.yourdomain.com`).
 5. Lightsail firewall: allow **TCP 443 and 80 from the internet**, **TCP 22 from your administrative IP only** wherever feasible. **Do not open 3000**. If GitHub-hosted runners need SSH access, allow a *documented, controlled* CI SSH path instead of permanently opening port 22 to the whole internet; GitHub Actions IP addresses can vary. For a brief deployment window, a temporary controlled exception may be needed.
 6. Set a budget and usage alert in AWS Billing. Billing budgets and snapshots might add cost; review before enabling.
