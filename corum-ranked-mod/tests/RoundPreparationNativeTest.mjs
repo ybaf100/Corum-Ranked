@@ -169,8 +169,8 @@ struct PlatformToolbox {static inline int cursorRestores=0;
     static void toggleLockCursor(bool lock){assert(!lock);}static void showCursor(){++cursorRestores;}};
 namespace corum::ranked {
 void pumpSurvivalGameplayExit(PlayLayer*){}
-struct SurvivalRuntime {void tick(){}bool normalRoundCleared()const{return false;}static SurvivalRuntime&get(){static SurvivalRuntime r;return r;}
- bool interceptFreePlayNativeQuit(GJGameLevel*)const{return false;}bool acquiring()const{return false;}bool active()const{return false;}bool canEnter()const{return false;}void noteNativeLaunch(){}bool canReplayCleared()const{return false;}bool armClearedReplay(GJGameLevel*,CCScene*)const{return false;}bool canEnterObserver()const{return false;}bool observing()const{return false;}bool armObserver(GJGameLevel*,CCScene*)const{return false;}
+struct SurvivalRuntime {bool nativeActive=false;void tick(){}bool normalRoundCleared()const{return false;}static SurvivalRuntime&get(){static SurvivalRuntime r;return r;}
+ bool interceptFreePlayNativeQuit(GJGameLevel*)const{return false;}bool acquiring()const{return nativeActive;}bool active()const{return nativeActive;}bool canEnter()const{return false;}void noteNativeLaunch(){}bool canReplayCleared()const{return false;}bool armClearedReplay(GJGameLevel*,CCScene*)const{return false;}bool canEnterObserver()const{return false;}bool observing()const{return false;}bool armObserver(GJGameLevel*,CCScene*)const{return false;}
  std::string optionsContext()const{return {};}bool validateNative(GJGameLevel*)const{return false;}bool armNative(GJGameLevel*)const{return false;}
  void preparationFailed(std::string const&){} };
 
@@ -324,6 +324,13 @@ int main(){
     assert(CCTextureCache::sharedTextureCache()->references==2);
     assert(PlayLayer::active->m_level->m_lowDetailModeToggled&&PlayLayer::active->m_level->m_disableShakeToggled);
     assert(!p.launch(&origin)&&PlayLayer::constructions==1&&director->pushes==1);
+    // Regression: Survival can keep the same preparation context throughout
+    // gameplay. Do not poll native metadata/audio again after native entry.
+    auto& survival=SurvivalRuntime::get();survival.nativeActive=true;
+    int const pollsBeforeGameplay=meta.polls;
+    ticks(p,5);
+    assert(meta.polls==pollsBeforeGameplay);
+    survival.nativeActive=false;
     CorumRankedRoundReturn navigation;GJGameLevel unrelated;
     navigation.returnToLastScene(&unrelated);assert(navigation.vanillaReturns==1);
     {ScopedRankedRoundQuit quit(PlayLayer::get());navigation.returnToLastScene(&downloaded);
