@@ -47,6 +47,10 @@ jobs:
           fi
           test -n "$LIGHTSAIL_SSH_KNOWN_HOSTS"
           test -n "$LIGHTSAIL_HOST"
+          if [[ "$LIGHTSAIL_HOST" != "52.74.37.130" ]]; then
+            echo "::error::Singapore migration: configure lightsail-production LIGHTSAIL_HOST=52.74.37.130; Seoul deployment is blocked."
+            exit 1
+          fi
           umask 077
           mkdir -p "$HOME/.ssh"
           if ! printf '%s' "$LIGHTSAIL_SSH_PRIVATE_KEY_B64" | base64 --decode > "$HOME/.ssh/corum-lightsail"; then
