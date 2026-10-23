@@ -8,7 +8,7 @@ import {fileURLToPath} from 'node:url';
 const root=fileURLToPath(new URL('..',import.meta.url));
 const read=p=>readFileSync(join(root,p),'utf8');
 function run(source){const dir=mkdtempSync(join(tmpdir(),'achievement-followup-'));try{writeFileSync(join(dir,'test.cpp'),source);execFileSync('g++',['-std=c++23','-Wall','-Wextra','-Werror','-Wno-misleading-indentation','-I',join(root,'src'),join(dir,'test.cpp'),'-o',join(dir,'test')],{stdio:'pipe'});execFileSync(join(dir,'test'),[],{stdio:'pipe'});}catch(e){throw new Error(e.stderr?.toString()||e.message);}finally{rmSync(dir,{recursive:true,force:true});}}
-test('locked one-shots retain rarity, progressive cards use their own equipped stage, and V surfaces are diamond blue',()=>run(`
+test('locked one-shots retain rarity, progressive cards use their own equipped stage, and V surfaces use the original v1 bright diamond blue',()=>run(`
 #include "domain/AchievementStyle.hpp"
 #include <cassert>
 #include <optional>
@@ -23,7 +23,7 @@ int main(){Card c;Title title;assert(achievementCardTier(c,title)==5);
  title.level=0;assert(achievementCardTier(c,title)==5);title.level.reset();assert(achievementCardTier(c,title)==5);
  c.currentLevel=0;title.level=2;assert(achievementCardTier(c,title)==0);
  c.type="ONE_SHOT";for(auto const* rarity:{"COMMON","RARE","EPIC","LEGENDARY","MYTHIC"}){c.rarity=rarity;assert(achievementCardTier(c,title)==achievementRarityTier(rarity));}
- auto diamond=achievementTierColor(5);assert(diamond.r==143&&diamond.g==225&&diamond.b==255);
+ auto diamond=achievementTierColor(5);assert(diamond.r==141&&diamond.g==235&&diamond.b==255);
 }`));
 test('Claim All UI aggregates every category and does not display a completion notification',()=>{
  const popup=read('src/RankedPopup.cpp');
