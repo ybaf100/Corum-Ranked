@@ -1,0 +1,58 @@
+name: Lightsail SSH connectivity check
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/lightsail-ssh-check.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ssh-check:
+    runs-on: ubuntu-24.04
+    environment: lightsail-production
+    timeout-minutes: 5
+    steps:
+      - name: Validate configured SSH credentials
+        env:
+          LIGHTSAIL_SSH_PRIVATE_KEY: ${{ secrets.LIGHTSAIL_SSH_PRIVATE_KEY }}
+          LIGHTSAIL_SSH_KNOWN_HOSTS: ${{ secrets.LIGHTSAIL_SSH_KNOWN_HOSTS }}
+          LIGHTSAIL_HOST: ${{ vars.LIGHTSAIL_HOST }}
+        run: |
+          set -euo pipefail
+          for name in LIGHTSAIL_SSH_PRIVATE_KEY LIGHTSAIL_SSH_KNOWN_HOSTS LIGHTSAIL_HOST; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error title=Missing setting::${name} is not configured in the lightsail-production environment."
+              exit 1
+            fi
+          done
+          umask 077
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$LIGHTSAIL_SSH_PRIVATE_KEY" > "$HOME/.ssh/corum-lightsail"
+          printf '%s\n' "$LIGHTSAIL_SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/corum-lightsail" "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -P '' -f "$HOME/.ssh/corum-lightsail" > /dev/null
+          if ! ssh-keygen -F "$LIGHTSAIL_HOST" -f "$HOME/.ssh/known_hosts" > /dev/null; then
+            echo "::error title=Host key mismatch::No pinned SSH host key found for LIGHTSAIL_HOST."
+            exit 1
+          fi
+
+      - name: Verify remote deployment account without changing server
+        env:
+          LIGHTSAIL_HOST: ${{ vars.LIGHTSAIL_HOST }}
+        run: |
+          set -euo pipefail
+          actual="$(ssh -i "$HOME/.ssh/corum-lightsail" \
+            -o IdentitiesOnly=yes \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=15 \
+            -o ConnectionAttempts=1 \
+            "corum-deploy@${LIGHTSAIL_HOST}" whoami)"
+          test "$actual" = corum-deploy || {
+            echo "::error title=SSH user mismatch::Expected corum-deploy."; exit 1;
+          }
+          echo 'Lightsail SSH key, host pinning, network route, and deployment account verified.'
