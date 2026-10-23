@@ -20,8 +20,8 @@ describe("Legacy Railway upgrade-only routing", () => {
     const handler = createLegacyRailwayHandler(async () => {
       calls++;
       return new Response(JSON.stringify({
-        requiredClientVersion: "v0.5.0-beta.93",
-        modUpdates: { release: { version: "v0.5.0-beta.93" } },
+        requiredClientVersion: "v0.5.0-beta.94",
+        modUpdates: { release: { version: "v0.5.0-beta.94" } },
       }), { status: 200 });
     });
     const server = createServer(handler).listen(0, "127.0.0.1");
@@ -32,7 +32,7 @@ describe("Legacy Railway upgrade-only routing", () => {
       const base = "http://127.0.0.1:" + String(address.port);
       const response = await fetch(base + "/api/ranked/config");
       expect(response.status).toBe(200);
-      expect((await response.json()).requiredClientVersion).toBe("v0.5.0-beta.93");
+      expect((await response.json()).requiredClientVersion).toBe("v0.5.0-beta.94");
       const ready = await fetch(base + "/ready");
       expect(ready.status).toBe(200);
       const write = await fetch(base + "/api/ranked/queue/join", { method: "POST" });
