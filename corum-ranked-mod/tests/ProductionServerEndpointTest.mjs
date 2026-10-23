@@ -5,8 +5,9 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 const moduleRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const serverOrigin = "https://api.3-34-236-183.sslip.io";
+const serverOrigin = "https://api.52-74-37-130.sslip.io";
 const obsoleteOrigin = "https://corum-ranked.onrender.com";
+const obsoleteSeoulOrigin = "https://api.3-34-236-183.sslip.io";
 const obsoleteRailwayOrigin = "https://corum-ranked-production.up.railway.app";
 const targets = [
   ["src/RankedRuntime.cpp", ['kDefaultRankedServerURL = "' + serverOrigin + '"']],
@@ -25,6 +26,7 @@ for (const [file, expectedEndpoints] of targets) {
     const source = readFileSync(resolve(moduleRoot, file), "utf8");
     assert.equal(source.includes(obsoleteOrigin), false, "Render origin must not remain in active client source");
     assert.equal(source.includes(obsoleteRailwayOrigin), false, "Legacy Railway origin must not remain in active client source");
+    assert.equal(source.includes(obsoleteSeoulOrigin), false, "Retired Seoul origin must not remain in active client source");
     for (const endpoint of expectedEndpoints) {
       assert.ok(source.includes(endpoint), `missing Lightsail endpoint: ${endpoint}`);
     }

@@ -1,3 +1,8 @@
+## v0.5.0-beta.94 — Singapore infrastructure and achievement color update
+
+- Move all client endpoints to Singapore Lightsail; preserve existing Neon production data and update the read-only Railway bridge.
+- V/Mythic achievement card accents use diamond ice-blue (#8FE1FF) rather than platinum. Restore the previously used moving pastel rainbow to V/Mythic achievement progress bars only; keep Claim All, badges, and lower-tier progress bars static.
+
 # v0.5.0-beta.92
 
 - Achievement one-shots retain rarity colors before unlock; progressive card/text/bar colors follow the equipped historical stage or highest attained stage.

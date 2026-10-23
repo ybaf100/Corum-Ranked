@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 
-const LIGHTSAIL_CONFIG_URL = "https://api.3-34-236-183.sslip.io/api/ranked/config";
+const LIGHTSAIL_CONFIG_URL = "https://api.52-74-37-130.sslip.io/api/ranked/config";
 const LEGACY_PROJECT_ID = "9a50ad5f-c812-4200-b97a-0296492097cd";
 const LEGACY_SERVICE_ID = "f8f77cca-8054-47bb-b7e7-21581f394f0f";
 
@@ -61,7 +61,7 @@ export const createLegacyRailwayHandler = (fetchConfig: typeof fetch = fetch) =>
     // Old clients cannot start matches, settle scores or modify Neon through Railway.
     json(res, 426, {
       code: "RANKED_CLIENT_UPDATE_REQUIRED",
-      requiredVersion: "v0.5.0-beta.93",
+      requiredVersion: "v0.5.0-beta.94",
       message: "Update Corum Ranked to the Lightsail edition.",
     });
   };
