@@ -111,6 +111,16 @@ void RankedRoundPreparation::pump() {
         roundAcquireState(runtime.view().match.state) ? currentPreparationContext() : LevelPreparationContext{};
     // The Debug RECORD/TEST harness keeps its independent native LevelInfo path.
     if (!survival && context.matchId != runtime.view().match.matchId) context = {};
+    // A Survival match retains a valid preparation context throughout active native
+    // gameplay. Once this exact level is running, do not re-enter GD metadata,
+    // download, or audio managers from the process-owned tick: the scene has
+    // already acquired and validated its resources. Still resume preparation
+    // when the server changes the round/map context or native play has exited.
+    if (survival && context.valid() && m_context == context) {
+        auto current = m_play.lock();
+        if (current && current.data() == PlayLayer::get() &&
+            m_launchedLevel && current->m_level == m_launchedLevel.data()) return;
+    }
     if (m_context != context) {
         m_context = context;
         m_lowDetail = false;
