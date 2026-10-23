@@ -1,0 +1,75 @@
+name: Diagnose Corum Ranked queue latency
+on:
+  push:
+    branches: [diagnostics/queue-latency-20261023]
+    paths: [.github/workflows/lightsail-queue-latency.yml]
+permissions:
+  contents: read
+jobs:
+  read-only-latency:
+    runs-on: ubuntu-latest
+    environment: lightsail-production
+    timeout-minutes: 6
+    steps:
+      - name: Configure existing pinned SSH credentials
+        shell: bash
+        env:
+          KEY_B64: ${{ secrets.LIGHTSAIL_SSH_PRIVATE_KEY_B64 }}
+          KNOWN_HOSTS: ${{ secrets.LIGHTSAIL_SSH_KNOWN_HOSTS }}
+          HOST: ${{ vars.LIGHTSAIL_HOST }}
+        run: |
+          set -euo pipefail
+          test -n "$KEY_B64" && test -n "$KNOWN_HOSTS" && test -n "$HOST"
+          mkdir -p "$HOME/.ssh"
+          umask 077
+          printf '%s' "$KEY_B64" | base64 --decode > "$HOME/.ssh/corum-lightsail"
+          printf '%s\n' "$KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/corum-lightsail" "$HOME/.ssh/known_hosts"
+      - name: Measure localhost API and DB TCP timings (read-only)
+        shell: bash
+        env:
+          HOST: ${{ vars.LIGHTSAIL_HOST }}
+        run: |
+          ssh -i "$HOME/.ssh/corum-lightsail" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 "corum-deploy@$HOST" 'python3 -' <<'PY'
+          import json, socket, urllib.request, time, statistics, os, concurrent.futures
+          def bench_http(path, n=8):
+              measurements=[]
+              for _ in range(n):
+                  t=time.perf_counter()
+                  try:
+                      r=urllib.request.urlopen("http://127.0.0.1:3000"+path,timeout=9)
+                      with r: data=r.read(1024*1024); status=r.status
+                      measurements.append({"ms":round((time.perf_counter()-t)*1000,1),"http":status,"bytes":len(data)})
+                  except Exception as e:
+                      measurements.append({"error":type(e).__name__+":"+str(e)[:110]})
+              times=[x["ms"] for x in measurements if "ms" in x]
+              return {"samples":measurements,"median_ms":statistics.median(times) if times else None,"max_ms":max(times) if times else None}
+          def bench_tcp(host, n=8):
+              results=[];dns=[]
+              for _ in range(n):
+                  t=time.perf_counter()
+                  try:
+                      infos=socket.getaddrinfo(host,5432,type=socket.SOCK_STREAM)
+                      dns.append(round((time.perf_counter()-t)*1000,1))
+                      t=time.perf_counter()
+                      with socket.create_connection((infos[0][4][0],5432),timeout=4):pass
+                      results.append(round((time.perf_counter()-t)*1000,1))
+                  except Exception as e:results.append("error: "+type(e).__name__+":"+str(e)[:80])
+              nums=[x for x in results if isinstance(x,float)]
+              return {"dns_ms":dns,"tcp_connect_ms":results,"median_tcp_ms":statistics.median(nums) if nums else None}
+          mem={}
+          try:
+              for line in open("/proc/meminfo"):
+                  if line.startswith(("MemTotal:","MemAvailable:","SwapTotal:","SwapFree:")):
+                      k,v=line.split(":",1);mem[k]=v.strip()
+          except Exception as e:mem={"error":str(e)}
+          result={
+            "host_local":socket.gethostname(),"loadavg":os.getloadavg(),"memory":mem,
+            "health":bench_http("/health"),
+            "ready":bench_http("/ready"),
+            "leaderboard_db_read":bench_http("/api/ranked/leaderboard?offset=0&limit=1"),
+            "neon_direct_tcp":bench_tcp("ep-raspy-dream-az49jdlg.c-3.ap-southeast-1.aws.neon.tech"),
+            "neon_pooler_tcp":bench_tcp("ep-raspy-dream-az49jdlg-pooler.c-3.ap-southeast-1.aws.neon.tech")
+          }
+          print(json.dumps(result,ensure_ascii=False,indent=2))
+          PY
