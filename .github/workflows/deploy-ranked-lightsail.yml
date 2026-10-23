@@ -26,8 +26,8 @@ concurrency:
 
 jobs:
   build-and-deploy:
-    # Push deployment stays OFF until manually tested and LIGHTSAIL_AUTO_DEPLOY=true.
-    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || vars.LIGHTSAIL_AUTO_DEPLOY == 'true')
+    # An operator-marked [deploy-lightsail] push triggers one full deploy; ordinary pushes stay gated.
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || vars.LIGHTSAIL_AUTO_DEPLOY == 'true' || (github.event_name == 'push' && contains(github.event.head_commit.message, '[deploy-lightsail]')))
     runs-on: ubuntu-24.04
     environment: lightsail-production
     timeout-minutes: 35

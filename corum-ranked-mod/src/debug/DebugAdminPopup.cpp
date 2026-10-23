@@ -118,7 +118,7 @@ class DebugAudioVolumePopup final : public Popup {
         http.followRedirects(false); http.timeout(std::chrono::seconds(20));
         m_busy=true; controls(); status(i18n::text("admin-working","Applying changes..."));
         auto const weak=WeakRef<DebugAudioVolumePopup>(this);
-        m_request.spawn(http.post("https://corum-ranked-production.up.railway.app/api/ranked/debug/admin"),[weak,selected,save](web::WebResponse response) {
+        m_request.spawn(http.post("https://api.3-34-236-183.sslip.io/api/ranked/debug/admin"),[weak,selected,save](web::WebResponse response) {
             auto keep=weak.lock(); if (!keep || keep->m_closed || !keep->isRunning() || keep->m_session!=RankedRuntime::get().spectatorLiveSessionToken()) return;
             keep->m_busy=false; keep->controls();
             auto const root=response.json().unwrapOr(matjson::Value());
@@ -295,7 +295,7 @@ class DebugAdminPopup final : public Popup {
         http.followRedirects(false); http.timeout(std::chrono::seconds(20));
         m_busy=true; enabled(false); status(i18n::text("admin-working","Applying changes..."));
         auto const weak=WeakRef<DebugAdminPopup>(this);
-        m_request.spawn(http.post("https://corum-ranked-production.up.railway.app/api/ranked/debug/admin"),[weak](web::WebResponse response) {
+        m_request.spawn(http.post("https://api.3-34-236-183.sslip.io/api/ranked/debug/admin"),[weak](web::WebResponse response) {
             auto keep=weak.lock(); if (!keep || keep->m_closed || !keep->isRunning()) return;
             keep->m_busy=false; keep->enabled(true);
             if (keep->m_session!=RankedRuntime::get().spectatorLiveSessionToken()) return;

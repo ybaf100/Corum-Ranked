@@ -1,13 +1,14 @@
 import "reflect-metadata";
 import { Logger, ValidationPipe } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
-import { AppModule } from "./app.module.js";
+import { shouldStartLegacyRailwayBridge, startLegacyRailwayBridge } from "./legacy/railway-upgrade-bridge.js";
 import {
   SERVER_ENVIRONMENT,
   type ServerEnvironment,
 } from "./config/server-environment.js";
 
 const bootstrap = async (): Promise<void> => {
+  const { AppModule } = await import("./app.module.js");
   const app = await NestFactory.create(AppModule, { abortOnError: true });
   const environment = app.get<ServerEnvironment>(SERVER_ENVIRONMENT);
   app.enableShutdownHooks();
@@ -26,4 +27,9 @@ const bootstrap = async (): Promise<void> => {
   Logger.log(`Corum Ranked server listening on ${environment.port}`, "Bootstrap");
 };
 
-await bootstrap();
+// Legacy Railway operates as upgrade-only bridge. Never initialize Nest or Neon there.
+if (shouldStartLegacyRailwayBridge(process.env)) {
+  await startLegacyRailwayBridge();
+} else {
+  await bootstrap();
+}
