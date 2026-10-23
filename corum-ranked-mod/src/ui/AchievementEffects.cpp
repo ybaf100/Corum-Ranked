@@ -102,9 +102,12 @@ void styleAchievementTree(CCNode* node,int tier){
  if(!node)return;if(auto* label=typeinfo_cast<CCLabelBMFont*>(node)){styleAchievementText(label,tier,false);return;}
  for(auto* child:CCArrayExt<CCNode*>(node->getChildren()))styleAchievementTree(child,tier);
 }
-void styleAchievementFill(CCLayerColor* fill,int tier){
+void styleAchievementFill(CCLayerColor* fill,int tier,bool rainbowProgress){
  if(!fill)return;fill->stopActionByTag(EffectTag);
  fill->setShaderProgram(CCShaderCache::sharedShaderCache()->programForKey(kCCShader_PositionColor));
  fill->setColor(achievementColor(tier));
+ // Preserve the existing animated seven-pastel rainbow only for V/Mythic progress bars.
+ // Claim All, buttons, and lower-stage bars retain static tier colors.
+ if(rainbowProgress && tier==5){fill->setColor({255,255,255});attach(fill,tier,true);}
 }
 }

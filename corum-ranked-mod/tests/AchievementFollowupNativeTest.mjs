@@ -8,7 +8,7 @@ import {fileURLToPath} from 'node:url';
 const root=fileURLToPath(new URL('..',import.meta.url));
 const read=p=>readFileSync(join(root,p),'utf8');
 function run(source){const dir=mkdtempSync(join(tmpdir(),'achievement-followup-'));try{writeFileSync(join(dir,'test.cpp'),source);execFileSync('g++',['-std=c++23','-Wall','-Wextra','-Werror','-Wno-misleading-indentation','-I',join(root,'src'),join(dir,'test.cpp'),'-o',join(dir,'test')],{stdio:'pipe'});execFileSync(join(dir,'test'),[],{stdio:'pipe'});}catch(e){throw new Error(e.stderr?.toString()||e.message);}finally{rmSync(dir,{recursive:true,force:true});}}
-test('locked one-shots retain rarity, progressive cards use their own equipped stage, and V surfaces are platinum',()=>run(`
+test('locked one-shots retain rarity, progressive cards use their own equipped stage, and V surfaces are diamond blue',()=>run(`
 #include "domain/AchievementStyle.hpp"
 #include <cassert>
 #include <optional>
@@ -23,7 +23,7 @@ int main(){Card c;Title title;assert(achievementCardTier(c,title)==5);
  title.level=0;assert(achievementCardTier(c,title)==5);title.level.reset();assert(achievementCardTier(c,title)==5);
  c.currentLevel=0;title.level=2;assert(achievementCardTier(c,title)==0);
  c.type="ONE_SHOT";for(auto const* rarity:{"COMMON","RARE","EPIC","LEGENDARY","MYTHIC"}){c.rarity=rarity;assert(achievementCardTier(c,title)==achievementRarityTier(rarity));}
- auto platinum=achievementTierColor(5);assert(platinum.r==229&&platinum.g==228&&platinum.b==226);
+ auto diamond=achievementTierColor(5);assert(diamond.r==143&&diamond.g==225&&diamond.b==255);
 }`));
 test('Claim All UI aggregates every category and does not display a completion notification',()=>{
  const popup=read('src/RankedPopup.cpp');
@@ -31,9 +31,11 @@ test('Claim All UI aggregates every category and does not display a completion n
  assert.match(popup,/claimAllAchievements\("ALL"\)/);
  assert.doesNotMatch(popup,/syncAchievementClaimNotice|claim-all-complete|CLAIM ALL COMPLETE/);
  const effects=read('src/ui/AchievementEffects.cpp');
- assert.doesNotMatch(effects.slice(effects.indexOf('void styleAchievementFill')),/attach\(/);
+ assert.match(effects.slice(effects.indexOf('void styleAchievementFill')),/if\(rainbowProgress && tier==5\).*attach\(fill,tier,true\)/);
  const cards=popup.slice(popup.indexOf('void renderAchievements('),popup.indexOf('void renderHistoryList('));
  assert.doesNotMatch(cards,/styleAchievementText\(progressLabel|styleAchievementTree\(/);
+ assert.match(cards,/styleAchievementFill\(barFill,[^\n]+,true\)/);
+ assert.match(popup,/styleAchievementFill\(fill,tier\)/);
 });
 test('gold podium halo fades in after the first-place drop without replaying on settlement refresh',()=>run(`
 #include "domain/SurvivalPodiumMotion.hpp"

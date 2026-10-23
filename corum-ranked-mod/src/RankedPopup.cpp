@@ -4161,7 +4161,7 @@ class CorumRankedLayer final : public CCLayerColor {
             barFill->setContentSize({static_cast<float>((cardWidth - 92.0f) * progress), 7.0f*cardScale});
             barFill->setPosition(barBack->getPosition());
             m_root->addChild(barFill, 4);
-            corum::ranked::ui::styleAchievementFill(barFill,corum::ranked::achievementCardTier(card,RankedRuntime::get().view().achievements.equippedTitle));
+            corum::ranked::ui::styleAchievementFill(barFill,corum::ranked::achievementCardTier(card,view.achievements.equippedTitle),true);
 
             if (!titleSelectorOpen) {
                 auto const claimState = corum::ranked::achievementClaimState(
