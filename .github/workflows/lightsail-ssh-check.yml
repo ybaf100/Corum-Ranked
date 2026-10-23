@@ -31,7 +31,12 @@ jobs:
           done
           umask 077
           mkdir -p "$HOME/.ssh"
-          printf '%s\n' "$LIGHTSAIL_SSH_PRIVATE_KEY" > "$HOME/.ssh/corum-lightsail"
+          # Secret may be an OpenSSH private key or its single-line base64 representation.
+          if [[ "$LIGHTSAIL_SSH_PRIVATE_KEY" == '-----BEGIN OPENSSH PRIVATE KEY-----'* ]]; then
+            printf '%s\n' "$LIGHTSAIL_SSH_PRIVATE_KEY" > "$HOME/.ssh/corum-lightsail"
+          else
+            printf '%s' "$LIGHTSAIL_SSH_PRIVATE_KEY" | base64 --decode > "$HOME/.ssh/corum-lightsail"
+          fi
           printf '%s\n' "$LIGHTSAIL_SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
           chmod 600 "$HOME/.ssh/corum-lightsail" "$HOME/.ssh/known_hosts"
           ssh-keygen -y -P '' -f "$HOME/.ssh/corum-lightsail" > /dev/null
