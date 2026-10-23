@@ -12,7 +12,7 @@ inline int achievementRarityTier(std::string_view rarity) {
  return rarity=="COMMON"?1:0;
 }
 inline AchievementRgb achievementTierColor(int tier) {
- switch(tier){case 1:return {178,186,201};case 2:return {87,187,255};case 3:return {198,121,255};case 4:return {255,176,70};case 5:return {143,225,255};default:return {92,100,116};}
+ switch(tier){case 1:return {178,186,201};case 2:return {87,187,255};case 3:return {198,121,255};case 4:return {255,176,70};case 5:return {229,228,226};default:return {92,100,116};}
 }
 inline AchievementRgb achievementPastelAt(double position,double seconds) {
  auto phase=position+seconds/3.;phase-=std::floor(phase);phase*=AchievementPastels.size();
