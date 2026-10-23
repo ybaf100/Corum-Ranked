@@ -1,0 +1,6 @@
+# Replace with a DNS hostname you own, resolving to your Lightsail static IPv4.
+# Caddy automatically obtains and renews TLS certs when ports 80/443 are reachable.
+api.example.com {
+    encode zstd gzip
+    reverse_proxy 127.0.0.1:3000
+}
