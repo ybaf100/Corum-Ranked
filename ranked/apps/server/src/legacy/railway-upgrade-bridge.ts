@@ -21,7 +21,7 @@ const json = (res: ServerResponse, code: number, data: object): void => {
 export const createLegacyRailwayHandler = (fetchConfig: typeof fetch = fetch) =>
   async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const path = new URL(req.url ?? "/", "http://localhost").pathname;
-    if (req.method === "GET" && (path === "/health" || path === "/")) {
+    if (req.method === "GET" && (path === "/health" || path === "/" || path === "/ready")) {
       json(res, 200, { status: "ok", service: "corum-ranked-legacy-upgrade-bridge" });
       return;
     }

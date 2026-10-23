@@ -33,6 +33,8 @@ describe("Legacy Railway upgrade-only routing", () => {
       const response = await fetch(base + "/api/ranked/config");
       expect(response.status).toBe(200);
       expect((await response.json()).requiredClientVersion).toBe("v0.5.0-beta.93");
+      const ready = await fetch(base + "/ready");
+      expect(ready.status).toBe(200);
       const write = await fetch(base + "/api/ranked/queue/join", { method: "POST" });
       expect(write.status).toBe(426);
       expect(calls).toBe(1);
