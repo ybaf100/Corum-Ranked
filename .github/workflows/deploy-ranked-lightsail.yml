@@ -1,6 +1,11 @@
-name: Deploy Corum Ranked to Lightsail (manual)
+name: Deploy Corum Ranked to Lightsail
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'ranked/**'
+      - '.github/workflows/deploy-ranked-lightsail.yml'
   workflow_dispatch:
 
 permissions:
@@ -12,18 +17,14 @@ concurrency:
 
 jobs:
   build-and-deploy:
-    if: github.ref == 'refs/heads/main'
+    # Push deployment stays OFF until manually tested and LIGHTSAIL_AUTO_DEPLOY=true.
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || vars.LIGHTSAIL_AUTO_DEPLOY == 'true')
     runs-on: ubuntu-24.04
     environment: lightsail-production
     timeout-minutes: 35
     steps:
       - name: Checkout authoritative main
         uses: actions/checkout@v4
-
-      - name: Build server Docker image on GitHub runner
-        run: |
-          docker build --pull -f ranked/Dockerfile.lightsail -t "corum-ranked:${GITHUB_SHA}" ranked
-          docker save "corum-ranked:${GITHUB_SHA}" | gzip -1 > "/tmp/corum-ranked-${GITHUB_SHA}.tar.gz"
 
       - name: Configure pinned SSH key
         env:
@@ -39,6 +40,18 @@ jobs:
           printf '%s\n' "$LIGHTSAIL_SSH_PRIVATE_KEY" > "$HOME/.ssh/corum-lightsail"
           printf '%s\n' "$LIGHTSAIL_SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
           chmod 600 "$HOME/.ssh/corum-lightsail" "$HOME/.ssh/known_hosts"
+
+      - name: Verify deployment user SSH access (no changes)
+        env:
+          LIGHTSAIL_HOST: ${{ vars.LIGHTSAIL_HOST }}
+        run: |
+          ssh_opts=(-i "$HOME/.ssh/corum-lightsail" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20)
+          test "$(ssh "${ssh_opts[@]}" "corum-deploy@${LIGHTSAIL_HOST}" whoami)" = corum-deploy
+
+      - name: Build server Docker image on GitHub runner
+        run: |
+          docker build --pull -f ranked/Dockerfile.lightsail -t "corum-ranked:${GITHUB_SHA}" ranked
+          docker save "corum-ranked:${GITHUB_SHA}" | gzip -1 > "/tmp/corum-ranked-${GITHUB_SHA}.tar.gz"
 
       - name: Upload immutable image and activate with rollback
         env:
