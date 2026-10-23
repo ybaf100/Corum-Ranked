@@ -26,3 +26,12 @@ Release order:
 5. Only after client access and production writes are verified, delete obsolete Seoul Lightsail instance and review static IP/snapshot charges.
 
 No production DB migration or reset is part of this release. Do not print or commit secrets.
+
+## Deployment evidence (2026-10-23)
+
+- Main code merge: `eadb2ed3113fd0d3ed0b5e275ffd4c88a77ff299`.
+- Full Release four-platform build, package, and R2 publish: GitHub Actions `39965230388` success.
+- Debug four-platform build, package, and R2 publish: GitHub Actions `39965230182` success.
+- Release R2 descriptor SHA-256: `2916d8757aa3cc55cdb1986d6065a0298fa7f230356b0cf2b2b1f6a89532821c`.
+- Debug R2 descriptor SHA-256: `01c304e4613c3d46b819a5e302899accba418108bdb893257a59c69909e7bf37`.
+- Initiate protected GitHub Actions Singapore Lightsail deployment using the commit marker only after both public descriptors have been confirmed.
