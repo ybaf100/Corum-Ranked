@@ -18,12 +18,12 @@ jobs:
     steps:
       - name: Validate configured SSH credentials
         env:
-          LIGHTSAIL_SSH_PRIVATE_KEY: ${{ secrets.LIGHTSAIL_SSH_PRIVATE_KEY }}
+          LIGHTSAIL_SSH_PRIVATE_KEY_B64: ${{ secrets.LIGHTSAIL_SSH_PRIVATE_KEY_B64 }}
           LIGHTSAIL_SSH_KNOWN_HOSTS: ${{ secrets.LIGHTSAIL_SSH_KNOWN_HOSTS }}
           LIGHTSAIL_HOST: ${{ vars.LIGHTSAIL_HOST }}
         run: |
           set -euo pipefail
-          for name in LIGHTSAIL_SSH_PRIVATE_KEY LIGHTSAIL_SSH_KNOWN_HOSTS LIGHTSAIL_HOST; do
+          for name in LIGHTSAIL_SSH_PRIVATE_KEY_B64 LIGHTSAIL_SSH_KNOWN_HOSTS LIGHTSAIL_HOST; do
             if [[ -z "${!name}" ]]; then
               echo "::error title=Missing setting::${name} is not configured in the lightsail-production environment."
               exit 1
@@ -31,11 +31,9 @@ jobs:
           done
           umask 077
           mkdir -p "$HOME/.ssh"
-          # Secret may be an OpenSSH private key or its single-line base64 representation.
-          if [[ "$LIGHTSAIL_SSH_PRIVATE_KEY" == '-----BEGIN OPENSSH PRIVATE KEY-----'* ]]; then
-            printf '%s\n' "$LIGHTSAIL_SSH_PRIVATE_KEY" > "$HOME/.ssh/corum-lightsail"
-          else
-            printf '%s' "$LIGHTSAIL_SSH_PRIVATE_KEY" | base64 --decode > "$HOME/.ssh/corum-lightsail"
+          if ! printf '%s' "$LIGHTSAIL_SSH_PRIVATE_KEY_B64" | base64 --decode > "$HOME/.ssh/corum-lightsail"; then
+            echo "::error title=Invalid SSH secret::LIGHTSAIL_SSH_PRIVATE_KEY_B64 is not valid base64."
+            exit 1
           fi
           printf '%s\n' "$LIGHTSAIL_SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
           chmod 600 "$HOME/.ssh/corum-lightsail" "$HOME/.ssh/known_hosts"
