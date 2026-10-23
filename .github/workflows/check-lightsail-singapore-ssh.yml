@@ -1,0 +1,33 @@
+name: Test Singapore Lightsail SSH using pinned snapshot key
+on:
+  push:
+    branches: [feat/lightsail-singapore-beta94]
+    paths:
+      - '.github/workflows/check-lightsail-singapore-ssh.yml'
+permissions:
+  contents: read
+jobs:
+  verify-restored-identity:
+    runs-on: ubuntu-latest
+    environment: lightsail-production
+    timeout-minutes: 5
+    steps:
+      - name: Verify Singapore instance using previously pinned Seoul host key
+        shell: bash
+        env:
+          KEY_B64: ${{ secrets.LIGHTSAIL_SSH_PRIVATE_KEY_B64 }}
+          KNOWN_HOSTS: ${{ secrets.LIGHTSAIL_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.ssh"
+          umask 077
+          test -n "$KEY_B64"
+          test -n "$KNOWN_HOSTS"
+          printf '%s' "$KEY_B64" | base64 --decode > "$HOME/.ssh/corum-lightsail"
+          printf '%s\n' "$KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/"{corum-lightsail,known_hosts}
+          ssh -i "$HOME/.ssh/corum-lightsail" \
+             -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
+             -o HostKeyAlias=3.34.236.183 -o ConnectTimeout=12 \
+             corum-deploy@52.74.37.130 \
+             'printf "SSH_OK host="; hostname; printf " user="; whoami; printf " docker="; systemctl is-active docker; printf " caddy="; systemctl is-active caddy; test -e /var/lib/corum-ranked/incoming && echo "DEPLOY_PATH_OK"'
