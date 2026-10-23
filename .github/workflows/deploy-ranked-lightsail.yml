@@ -37,18 +37,28 @@ jobs:
 
       - name: Configure pinned SSH key
         env:
-          LIGHTSAIL_SSH_PRIVATE_KEY: ${{ secrets.LIGHTSAIL_SSH_PRIVATE_KEY }}
+          LIGHTSAIL_SSH_PRIVATE_KEY_B64: ${{ secrets.LIGHTSAIL_SSH_PRIVATE_KEY_B64 }}
           LIGHTSAIL_SSH_KNOWN_HOSTS: ${{ secrets.LIGHTSAIL_SSH_KNOWN_HOSTS }}
           LIGHTSAIL_HOST: ${{ vars.LIGHTSAIL_HOST }}
         run: |
-          test -n "$LIGHTSAIL_SSH_PRIVATE_KEY"
+          if [[ -z "$LIGHTSAIL_SSH_PRIVATE_KEY_B64" ]]; then
+            echo "::error::Missing LIGHTSAIL_SSH_PRIVATE_KEY_B64. Set this environment secret to the single-line base64 of the OpenSSH private key."
+            exit 1
+          fi
           test -n "$LIGHTSAIL_SSH_KNOWN_HOSTS"
           test -n "$LIGHTSAIL_HOST"
           umask 077
           mkdir -p "$HOME/.ssh"
-          printf '%s\n' "$LIGHTSAIL_SSH_PRIVATE_KEY" > "$HOME/.ssh/corum-lightsail"
+          if ! printf '%s' "$LIGHTSAIL_SSH_PRIVATE_KEY_B64" | base64 --decode > "$HOME/.ssh/corum-lightsail"; then
+            echo "::error::SSH key secret is not valid base64; recopy it as a single line without spaces."
+            exit 1
+          fi
           printf '%s\n' "$LIGHTSAIL_SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
           chmod 600 "$HOME/.ssh/corum-lightsail" "$HOME/.ssh/known_hosts"
+          if ! ssh-keygen -y -P '' -f "$HOME/.ssh/corum-lightsail" > /dev/null 2>&1; then
+            echo "::error::Decoded SSH private key is invalid or passphrase-protected. Re-encode the original key from the Lightsail server."
+            exit 1
+          fi
 
       - name: Verify deployment user SSH access (no changes)
         env:
