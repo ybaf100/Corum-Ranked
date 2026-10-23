@@ -7,6 +7,15 @@ on:
       - 'ranked/**'
       - '.github/workflows/deploy-ranked-lightsail.yml'
   workflow_dispatch:
+    inputs:
+      mode:
+        description: 'SSH connectivity check only, or actual deployment'
+        type: choice
+        required: true
+        default: check-only
+        options:
+          - check-only
+          - deploy
 
 permissions:
   contents: read
@@ -49,11 +58,13 @@ jobs:
           test "$(ssh "${ssh_opts[@]}" "corum-deploy@${LIGHTSAIL_HOST}" whoami)" = corum-deploy
 
       - name: Build server Docker image on GitHub runner
+        if: github.event_name == 'push' || inputs.mode == 'deploy'
         run: |
           docker build --pull -f ranked/Dockerfile.lightsail -t "corum-ranked:${GITHUB_SHA}" ranked
           docker save "corum-ranked:${GITHUB_SHA}" | gzip -1 > "/tmp/corum-ranked-${GITHUB_SHA}.tar.gz"
 
       - name: Upload immutable image and activate with rollback
+        if: github.event_name == 'push' || inputs.mode == 'deploy'
         env:
           LIGHTSAIL_HOST: ${{ vars.LIGHTSAIL_HOST }}
         run: |
@@ -62,4 +73,5 @@ jobs:
           ssh "${ssh_opts[@]}" "corum-deploy@${LIGHTSAIL_HOST}" "sudo /usr/local/sbin/corum-ranked-activate '${GITHUB_SHA}'"
 
       - name: Report deployment source
+        if: github.event_name == 'push' || inputs.mode == 'deploy'
         run: echo "Deployed ${GITHUB_SHA} via pinned SSH to Lightsail"
