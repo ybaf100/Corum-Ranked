@@ -33,7 +33,7 @@ double gameplayControlNowMs() {
 
 
 constexpr std::string_view kCbfId = "syzzi.click_between_frames";
-constexpr std::string_view kDefaultRankedServerURL = "https://corum-ranked-production.up.railway.app";
+constexpr std::string_view kDefaultRankedServerURL = "https://api.3-34-236-183.sslip.io";
 constexpr auto kAttemptRequestWatchdog = std::chrono::seconds(12);
 constexpr std::string_view kKnownCbfSettings[] = {
     "soft-toggle",
