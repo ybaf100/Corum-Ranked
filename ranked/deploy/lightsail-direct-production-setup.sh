@@ -48,6 +48,9 @@ trap 'rm -f "$ENV_TMP" "$CADDY_TMP"' EXIT
 chmod 0600 "$ENV_TMP"
 chown root:root "$ENV_TMP"
 printf '%s {\n    encode zstd gzip\n    reverse_proxy 127.0.0.1:3000\n}\n' "$HOST" > "$CADDY_TMP"
+# Caddy service runs as caddy; mktemp defaults to 0600 (root-only), which prevents service reload.
+chown root:root "$CADDY_TMP"
+chmod 0644 "$CADDY_TMP"
 caddy validate --config "$CADDY_TMP" --adapter caddyfile
 if [[ -f /etc/caddy/Caddyfile ]]; then cp -p /etc/caddy/Caddyfile "/etc/caddy/Caddyfile.pre-corum-$(date +%Y%m%d%H%M%S)"; fi
 if [[ -s /etc/corum-ranked/server.env ]]; then cp -p /etc/corum-ranked/server.env "/etc/corum-ranked/server.env.pre-corum-$(date +%Y%m%d%H%M%S)"; fi
