@@ -68,6 +68,14 @@ int main(){using namespace corum::ranked;using ui::SurvivalPlayerInfoPopup;auto*
  p->dismiss();auto count=CCLabelBMFont::labels.size();callback({200,forum});p->getUserInfoFinished(&score);assert(CCLabelBMFont::labels.size()==count&&manager->m_userInfoDelegate==nullptr);delete p;
  SurvivalStanding bot=human;bot.bot=true;bot.accountId=999;auto requests=manager->requests;auto reads=geode::async::paths.size();auto*b=SurvivalPlayerInfoPopup::create(bot,"match");b->refresh(0);assert(manager->requests==requests&&geode::async::paths.size()==reads&&b->m_player.accountId==0);b->dismiss();delete b;
  auto*q=SurvivalPlayerInfoPopup::create(human,"match");q->refresh(0);assert(manager->m_userInfoDelegate==q);manager->m_userInfoDelegate=&foreign;SurvivalRuntime::get().id="other";q->refresh(0);assert(q->m_closed&&manager->m_userInfoDelegate==&foreign);delete q;
+ // History popups are owned by the visible record screen, not an active game.
+ SurvivalRuntime::get().live=false;CCNode owner;
+ auto*h=SurvivalPlayerInfoPopup::createForHistory(human,&owner,"old-match",true);assert(h&&h->m_history&&h->m_historySurvival);h->refresh(0);
+ assert(!h->m_closed&&geode::async::paths.back().ends_with("/old-match/player-info/human"));
+ auto late=geode::async::callbacks.back();owner.parent=false;h->refresh(0);assert(h->m_closed);auto labels=CCLabelBMFont::labels.size();late({200,forum});assert(CCLabelBMFont::labels.size()==labels);delete h;
+ owner.parent=true;auto*solo=SurvivalPlayerInfoPopup::createForHistory(human,&owner,"solo-match",false);solo->refresh(0);
+ assert(geode::async::paths.back().ends_with("/leaderboard/player-info/123"));RankedRuntime::get().session="replacement";solo->refresh(0);assert(solo->m_closed);delete solo;
+
 }
 `;
  const dir=mkdtempSync(join(tmpdir(),'survival-player-info-'));

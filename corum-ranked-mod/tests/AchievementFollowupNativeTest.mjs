@@ -34,7 +34,7 @@ test('Claim All UI aggregates every category and does not display a completion n
  assert.match(effects.slice(effects.indexOf('void styleAchievementFill')),/if\(rainbowProgress && tier==5\).*attach\(fill,tier,true\)/);
  const cards=popup.slice(popup.indexOf('void renderAchievements('),popup.indexOf('void renderHistoryList('));
  assert.doesNotMatch(cards,/styleAchievementText\(progressLabel|styleAchievementTree\(/);
- assert.match(cards,/styleAchievementFill\(barFill,[^\n]+,true\)/);
+ assert.match(cards,/styleAchievementFill\(barFill,[^\n]+,true,/);
  assert.match(popup,/styleAchievementFill\(fill,tier\)/);
 });
 test('gold podium halo fades in after the first-place drop without replaying on settlement refresh',()=>run(`

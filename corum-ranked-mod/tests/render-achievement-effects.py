@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Compile and render production shaders through surfaceless EGL ES2 (Mesa + Pillow)."""
 import ctypes as c, re, pathlib, json, sys
-from PIL import Image,ImageDraw,ImageFont
+from PIL import Image,ImageDraw,ImageFont,ImageChops
 root=pathlib.Path(__file__).resolve().parents[2]
 source=(root/'corum-ranked-mod/src/ui/AchievementEffects.cpp').read_text()
 vertex=re.search(r'char Vertex\[\]=R"GLSL\((.*?)\)GLSL"',source,re.S)[1]
@@ -54,4 +54,19 @@ for mythic in [0,1]:
  # A transparent texel must stay transparent and outlined text must retain opaque black pixels.
  assert images[0].getpixel((511,63))[3]==0
  assert any(px[0]==px[1]==px[2]==0 and px[3]==255 for px in (images[0].get_flattened_data() if hasattr(images[0],"get_flattened_data") else images[0].getdata()))
-print(json.dumps({'renderer':'EGL surfaceless OpenGL ES 2','shaderCompile':True,'shaderLink':True,'renderedFrames':120,'glyphMaskPreserved':True,'blackOutlinePreserved':True,'artifacts':str(out)}))
+# CCLayerColor progress bars bypass glyph texture sampling. Verify both the
+# earned Legendary gold sweep and the existing Mythic rainbow on solid quads.
+u1(loc(program,b'u_solid'),1)
+bar_frames=0
+for mythic in [0,1]:
+ images=[]
+ for frame in range(60):
+  u1(loc(program,b'u_mythic'),mythic);u1(loc(program,b'u_phase'),frame/60);clear(0x4000);drawArrays(0x0005,0,4)
+  buf=(c.c_ubyte*(W*H*4))();read(0,0,W,H,0x1908,0x1401,buf)
+  image=Image.frombytes('RGBA',(W,H),bytes(buf)).transpose(Image.Transpose.FLIP_TOP_BOTTOM)
+  assert image.getextrema()[3]==(255,255)
+  images.append(image);bar_frames+=1
+ assert ImageChops.difference(images[0].convert('RGB'),images[30].convert('RGB')).getbbox()
+ images[15].save(out/('mythic-progress.png' if mythic else 'legendary-progress.png'))
+ images[0].convert('RGB').save(out/('mythic-progress.gif' if mythic else 'legendary-progress.gif'),save_all=True,append_images=[x.convert('RGB') for x in images[1:]],duration=50,loop=0)
+print(json.dumps({'renderer':'EGL surfaceless OpenGL ES 2','shaderCompile':True,'shaderLink':True,'renderedFrames':120,'solidProgressFrames':bar_frames,'glyphMaskPreserved':True,'blackOutlinePreserved':True,'artifacts':str(out)}))

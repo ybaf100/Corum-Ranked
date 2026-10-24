@@ -20,12 +20,13 @@ inline int historyLevelId(matjson::Value const& value) {
     auto n=historyNumber(value);return n && *n>0 && *n<=2147483647 && std::trunc(*n)==*n?static_cast<int>(*n):0;
 }
 struct HistoryStanding {
-    std::string id,name;int rank=0,attempts=0,tiedPlayers=0;
+    std::string id,name,tier;int rank=0,attempts=0,tiedPlayers=0,accountId=0;bool bot=false;
     double progress=0;bool own=false,qualified=false,cleared=false,forfeited=false,cutoffBoundary=false;
 };
 struct HistoryRound {
     std::string key,label,title,creator,difficulty,length,result,winnerSide,grade;
     int levelId=0,stars=0,target=0,qualifiedCount=0,nextDeathmatch=0;
+    std::optional<int> featureScore,epic;
     bool completed=false,deathmatch=false;
     std::optional<double> bestA,bestB,cutoff;
     std::optional<bool> ownQualified;
@@ -41,6 +42,8 @@ inline std::vector<HistoryRound> historyRounds(matjson::Value const& record,bool
         v.creator=map["creator"].asString().unwrapOr("");v.difficulty=map["difficulty"].asString().unwrapOr("");
         v.length=map["length"].asString().unwrapOr("");v.stars=static_cast<int>(map["stars"].asInt().unwrapOr(0));
         auto const epic=map["epic"].asInt();auto const featured=map["featureScore"].asInt();
+        if(epic.isOk())v.epic=static_cast<int>(epic.unwrap());
+        if(featured.isOk())v.featureScore=static_cast<int>(featured.unwrap());
         if(epic.isOk())v.grade=epic.unwrap()>=3?"MYTHIC":epic.unwrap()==2?"LEGENDARY":epic.unwrap()==1?"EPIC":featured.isOk()&&featured.unwrap()>0?"FEATURED":"";
         else if(featured.isOk()&&featured.unwrap()>0)v.grade="FEATURED";
         v.result=r["result"].asString().unwrapOr("");v.winnerSide=r["winnerSide"].asString().unwrapOr("");
@@ -54,6 +57,11 @@ inline std::vector<HistoryRound> historyRounds(matjson::Value const& record,bool
             // including a malformed or older server response.
             if(v.completed)for(auto const& p:historyArray(r["standings"])){
                 HistoryStanding s;s.id=p["participantId"].asString().unwrapOr("");s.name=p["name"].asString().unwrapOr("");
+                s.bot=p["isBot"].asBool().unwrapOr(false);s.tier=p["displayedTier"].asString().unwrapOr("");
+                auto account=p["gdAccountId"].asString().unwrapOr("");
+                if(!s.bot && !account.empty() && account.size()<=10 && std::all_of(account.begin(),account.end(),[](char c){return c>='0'&&c<='9';})){
+                    auto const n=std::stoll(account);if(n>0&&n<=2147483647)s.accountId=static_cast<int>(n);
+                }
                 s.rank=static_cast<int>(p["rank"].asInt().unwrapOr(0));s.attempts=static_cast<int>(p["attemptCount"].asInt().unwrapOr(0));
                 s.tiedPlayers=static_cast<int>(p["tiedPlayers"].asInt().unwrapOr(0));s.progress=historyNumber(p["highestProgress"]).value_or(0);
                 s.own=p["own"].asBool().unwrapOr(false);s.qualified=p["qualified"].asBool().unwrapOr(false);
@@ -82,6 +90,8 @@ inline std::vector<std::string> historyResultFilters(bool solo,bool survival) {
 struct HistoryLayout {
     float width=0,height=0,mapWidth=0,boardWidth=0,ownWidth=0;bool split=false;
 };
+inline bool historyReconnectNeeded(bool historyPage,bool error,bool hasSession,bool conflict) {return historyPage&&error&&!hasSession&&!conflict;}
+inline float historyMapPanelHeight(float width,bool thumbnail) {return thumbnail?(width>=300?220.f:285.f):200.f;}
 inline HistoryLayout historyLayout(float screenWidth,float screenHeight) {
     HistoryLayout v;v.width=std::max(160.f,std::min(920.f,screenWidth-48));v.height=std::max(80.f,screenHeight-132);
     v.split=v.width>=660;v.mapWidth=v.split?std::clamp(v.width*.24f,156.f,206.f):v.width;

@@ -32,13 +32,16 @@ struct SurvivalGridLayout {
     float cellWidth,cellHeight;
     bool compact;
 };
-inline SurvivalGridLayout survivalGridLayout(float width,float height,std::size_t count,int capacity) {
+inline bool survivalCompactCards(std::size_t survivors) {return survivors>16;}
+inline SurvivalGridLayout survivalGridLayout(float width,float height,std::size_t count,int survivors) {
     count=std::max<std::size_t>(1,count);
-    bool const compact=capacity==64;
+    bool const compact=survivalCompactCards(static_cast<std::size_t>(std::max(0,survivors)));
     auto const columns=std::min<std::size_t>(compact?(width<420?6:8):4,count);
     auto const totalRows=(count+columns-1)/columns;
     auto const available=std::max(24.f,height-163.f);
-    auto const rows=compact?std::min(totalRows,std::max<std::size_t>(1,static_cast<std::size_t>(available/24.f))):totalRows;
+    // Tied cutoffs and result boards can still contain more than 16 rows after
+    // the survivor count drops. Page full cards too, keeping readable heights.
+    auto const rows=std::min(totalRows,std::max<std::size_t>(1,static_cast<std::size_t>(available/(compact?24.f:36.f))));
     auto const pageSize=columns*rows;
     return {columns,rows,pageSize,(count+pageSize-1)/pageSize,
         std::max(24.f,std::min(width-36,compact?760.f:480.f))/columns,

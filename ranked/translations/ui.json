@@ -2286,5 +2286,21 @@
   "survival-online-ready-format": {
     "en": "2-{} PLAYERS",
     "ko": "2~{}명 경기"
+  },
+  "unequip-title": {
+    "en": "UNEQUIP",
+    "ko": "착용 해제"
+  },
+  "history-reconnect": {
+    "en": "RECONNECT",
+    "ko": "재접속"
+  },
+  "history-connection-expired": {
+    "en": "RANKED CONNECTION EXPIRED",
+    "ko": "랭크 연결 만료"
+  },
+  "history-connection-help": {
+    "en": "Reconnect to continue viewing your match history.",
+    "ko": "경기 기록을 계속 보려면 다시 접속하세요."
   }
 }

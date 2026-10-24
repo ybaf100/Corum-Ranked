@@ -1,6 +1,10 @@
 #pragma once
 
 #include <array>
+#include <algorithm>
+#include <cctype>
+#include <optional>
+#include <string>
 #include <string_view>
 
 namespace corum::ranked {
@@ -29,5 +33,17 @@ inline MapDifficulty mapDifficulty(bool autoLevel, bool demon, int demonDifficul
         {"Insane", "diffIcon_05_btn_001.png",5},
     }};
     return average >= 1 && average <= 5 ? ordinary[average] : ordinary[0];
+}
+// A recorded difficulty is independent of the live GD metadata cache.
+inline std::optional<MapDifficulty> recordedMapDifficulty(std::string name) {
+    std::transform(name.begin(),name.end(),name.begin(),[](unsigned char c){return c=='_'?' ':static_cast<char>(std::toupper(c));});
+    if(name=="AUTO")return mapDifficulty(true,false,0,0);
+    if(name=="EASY DEMON")return mapDifficulty(false,true,3,0);
+    if(name=="MEDIUM DEMON")return mapDifficulty(false,true,4,0);
+    if(name=="HARD DEMON"||name=="DEMON")return mapDifficulty(false,true,0,0);
+    if(name=="INSANE DEMON")return mapDifficulty(false,true,5,0);
+    if(name=="EXTREME DEMON")return mapDifficulty(false,true,6,0);
+    for(int i=1;i<=5;++i)if(name==std::array<std::string_view,5>{"EASY","NORMAL","HARD","HARDER","INSANE"}[i-1])return mapDifficulty(false,false,0,i);
+    return {};
 }
 } // namespace corum::ranked
