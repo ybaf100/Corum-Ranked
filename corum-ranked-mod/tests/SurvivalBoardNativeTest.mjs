@@ -259,6 +259,7 @@ int main(){
 test('64-player compact pages keep nickname and icon geometry inside small and wide screens',()=>{
  run(`#include "domain/SurvivalBoardPresentation.hpp"
 #include "domain/SurvivalRoundMenuPolicy.hpp"
+#include "domain/SurvivalHudPresentation.hpp"
 #include <cassert>
 using namespace corum::ranked;
 int main(){
@@ -271,6 +272,9 @@ int main(){
  }
  auto compact=survivalGridLayout(568,320,64,64);assert(compact.pages==2&&compact.pageSize==48);
  auto wide=survivalGridLayout(1024,768,64,64);assert(wide.pages==1&&wide.pageSize==64);
+ for(auto const* phase:{"ROUND_1","ROUND_2","ROUND_3","ROUND_4"})assert(survivalComparisonScore(phase,42.,99.)==42.);
+ for(auto const* phase:{"FINAL","TIEBREAK"})assert(survivalComparisonScore(phase,42.,99.)==99.);
+ assert(!survivalComparisonScore("ROUND_4",{},99.));assert(!survivalComparisonScore("FINAL",42.,{}));
  auto original=survivalGridLayout(568,320,16,16);assert(!original.compact&&original.pages==1&&original.columns==4);
  assert(survivalMenuMusic("ROUND_3",false,false,false,true,"ROUND_3",true,true,64)==SurvivalMenuMusic::Round);
  assert(survivalMenuMusic("ROUND_4",false,false,false,true,"ROUND_4",true,true,64)==SurvivalMenuMusic::Final);

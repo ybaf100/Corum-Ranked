@@ -103,7 +103,7 @@ void SurvivalHud::present(SurvivalMatchView const& view,std::int64_t remainingMs
         if(m_lastRank!=own->rank){m_lastRank=own->rank;for(auto* label:{m_rank.foreground,m_rank.shadow}) {
             label->stopAllActions();label->runAction(CCSequence::create(
                 CCEaseBackOut::create(CCScaleTo::create(.14f,fontScale(label,2.10f))),CCEaseSineInOut::create(CCScaleTo::create(.24f,fontScale(label,1.68f))),nullptr));}}
-        auto const reference=view.roundNumber>=4?view.first:view.cutoff;
+        auto const reference=survivalComparisonScore(view.phase,view.cutoff,view.first);
         if(reference){auto const delta=deathmatch?own->score-*reference:std::trunc(own->score)-std::trunc(*reference);
             m_difference.text(rankedScoreText(delta,deathmatch,true));m_difference.color(color(*own));}
         else {m_difference.text("-");m_difference.color(color(*own));}

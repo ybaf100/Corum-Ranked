@@ -2,10 +2,16 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace corum::ranked {
+inline std::optional<double> survivalComparisonScore(std::string_view phase,
+    std::optional<double> cutoff,std::optional<double> first) {
+    return phase=="FINAL" || phase=="TIEBREAK"?first:cutoff;
+}
 struct SurvivalStanding {
     std::string id, name;
     int rank = 0, attemptsUsed = 0, attemptsFinished = 0;
