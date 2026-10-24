@@ -1113,7 +1113,12 @@ class CorumRankedLayer final : public CCLayerColor {
     void updateHistoryReconnect(RuntimeView const& noticeView) {
         auto const history=m_page==Page::HistoryList||m_page==Page::HistoryDetail;
         auto const expired=corum::ranked::historyReconnectNeeded(history,noticeView.stage==RuntimeStage::Error,!RankedRuntime::get().spectatorLiveSessionToken().empty(),noticeView.accountActiveElsewhere);
-        if(!expired)m_historyReconnectShown=false;
+        if(!expired){
+            m_historyReconnectShown=false;
+            if(m_historyReconnect)if(auto popup=m_historyReconnect->lock())popup->cancel();
+            m_historyReconnect.reset();
+            return;
+        }
         if(expired && !m_historyReconnectShown){
             auto* popup=corum::ranked::ui::RankedConfirmPopup::create(tr("history-connection-expired","RANKED CONNECTION EXPIRED"),tr("history-connection-help","Reconnect to continue viewing your match history."),
                 [weak=WeakRef(this)](bool accepted){if(auto owner=weak.lock();owner && owner->isRunning()){
@@ -4454,7 +4459,7 @@ class CorumRankedLayer final : public CCLayerColor {
         auto* difficulty=ui::mapDifficultyBadge(round.levelId,metadata,60,25,false,recordedMapDifficulty(round.difficulty));difficulty->setPosition({infoLeft,infoTop-26});panel->addChild(difficulty,5);
         historyText(panel,round.difficulty.empty()?tr("history-unavailable","UNAVAILABLE"):round.difficulty,.30f,{infoLeft+64,infoTop-13},std::max(12.f,infoWidth-64),ui::Text,true,{0,.5f});
         historyText(panel,round.levelId>0?fmt::format("GD #{}",round.levelId):tr("history-level-unavailable","Map information could not be found."),.28f,{infoLeft+infoWidth/2,infoTop-41},infoWidth,kCyan,true);
-        historyText(panel,(round.length.empty()?tr("history-unavailable","UNAVAILABLE"):round.length)+(round.stars>0?fmt::format("  ·  {} ★",round.stars):""),.27f,{infoLeft+infoWidth/2,infoTop-63},infoWidth,ui::Text);
+        historyText(panel,(round.length.empty()?tr("history-unavailable","UNAVAILABLE"):round.length)+(round.stars>0?fmt::format("  ·  {}*",round.stars):""),.27f,{infoLeft+infoWidth/2,infoTop-63},infoWidth,ui::Text);
         historyText(panel,round.grade.empty()?round.label:round.grade,.25f,{infoLeft+infoWidth/2,infoTop-83},infoWidth,round.grade.empty()?ui::TextMuted:kGold,true);
         auto* button=historyButton(panel,tr("history-view-level","VIEW LEVEL"),{width/2,21},std::min(width-24,170.f),menu_selector(CorumRankedLayer::onHistoryLevel),round.levelId);
         if(round.levelId<=0)ui::grayButtonVisual(button);

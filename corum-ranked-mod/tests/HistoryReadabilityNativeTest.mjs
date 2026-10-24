@@ -133,9 +133,9 @@ enum class RuntimeStage{Ready,Loading,Error};struct RuntimeView{RuntimeStage sta
 struct RankedRuntime{std::string token;int begins=0;static auto&get(){static RankedRuntime r;return r;}std::string spectatorLiveSessionToken(){return token;}void begin(){++begins;}};
 template<class T>struct WeakRef{T*p;explicit WeakRef(T*v):p(v){}struct Locked{T*p;explicit operator bool()const{return p;}T*operator->(){return p;}};Locked lock()const{return {p};}};
 std::string operator""_spr(char const*s,std::size_t n){return {s,n};}
-namespace corum::ranked::ui{struct RankedConfirmPopup{inline static int creates=0;inline static RankedConfirmPopup*last=nullptr;std::function<void(bool)>done;bool shown=false;int z=0;
+namespace corum::ranked::ui{struct RankedConfirmPopup{inline static int creates=0;inline static RankedConfirmPopup*last=nullptr;std::function<void(bool)>done;bool shown=false;int z=0,cancellations=0;
  static auto*create(std::string,std::string,std::function<void(bool)> callback,std::string){++creates;auto*p=new RankedConfirmPopup;p->done=callback;return last=p;}
- void setID(std::string){}void show(){shown=true;}void setZOrder(int value){z=value;}};}
+ void setID(std::string){}void show(){shown=true;}void setZOrder(int value){z=value;}void cancel(){++cancellations;shown=false;}};}
 struct Layer{enum class Page{Live,HistoryList,HistoryDetail};Page m_page=Page::HistoryDetail;bool running=true,m_historyReconnectShown=false;
  std::optional<WeakRef<corum::ranked::ui::RankedConfirmPopup>>m_historyReconnect;std::string m_renderedUiKey="history";
  bool isRunning(){return running;}std::string tr(char const*,char const*fallback){return fallback;}
@@ -148,6 +148,8 @@ int main(){using Popup=corum::ranked::ui::RankedConfirmPopup;RuntimeView view;La
  Layer detached;detached.updateHistoryReconnect(view);detached.running=false;Popup::last->done(true);assert(r.begins==1&&detached.m_page==Layer::Page::HistoryDetail);
  auto count=Popup::creates;Layer valid;r.token="valid";valid.updateHistoryReconnect(view);assert(Popup::creates==count);r.token.clear();view.stage=RuntimeStage::Loading;valid.updateHistoryReconnect(view);assert(Popup::creates==count);
  view.stage=RuntimeStage::Error;view.accountActiveElsewhere=true;valid.updateHistoryReconnect(view);assert(Popup::creates==count);
+ view.accountActiveElsewhere=false;Layer recovered;recovered.updateHistoryReconnect(view);auto*stale=Popup::last;r.token="recovered";recovered.updateHistoryReconnect(view);assert(stale->cancellations==1&&!recovered.m_historyReconnect);
+ r.token.clear();recovered.updateHistoryReconnect(view);stale=Popup::last;view.accountActiveElsewhere=true;recovered.updateHistoryReconnect(view);assert(stale->cancellations==1&&!recovered.m_historyReconnect);
 }
 `);
 });
