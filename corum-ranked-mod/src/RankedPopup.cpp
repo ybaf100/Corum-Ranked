@@ -41,6 +41,7 @@
 #include "ui/RankedPlayerInfoPopup.hpp"
 #include "domain/PlayerInfoPresentation.hpp"
 #include "ui/RankedSessionConflictPopup.hpp"
+#include "ui/RankedConfirmPopup.hpp"
 #include "ui/RankedModeDisabledPopup.hpp"
 #include "ui/MapDifficultyBadge.hpp"
 #include "ui/RankedMapHeading.hpp"
