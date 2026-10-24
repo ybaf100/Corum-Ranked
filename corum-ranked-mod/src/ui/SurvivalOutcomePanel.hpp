@@ -14,7 +14,8 @@ namespace corum::ranked::ui {
 inline std::vector<SurvivalStanding> survivalRoster(SurvivalMatchView const& view){
     std::vector<SurvivalStanding> rows;
     auto const results=view.result["standings"].asArray().unwrapOr(std::vector<matjson::Value>{});
-    for(auto const& p:view.participants.asArray().unwrapOr(std::vector<matjson::Value>{})){
+    auto const participants=view.participants.asArray().unwrapOr(std::vector<matjson::Value>{});
+    for(auto const& p:participants){
         SurvivalStanding row;row.id=p["participantId"].asString().unwrapOr("");row.name=p["name"].asString().unwrapOr(row.id);
         row.bot=p["kind"].asString().unwrapOr("")=="BOT";row.accountId=geode::utils::numFromString<int>(p["gdAccountId"].asString().unwrapOr("0")).unwrapOr(0);
         row.rank=static_cast<int>(p["finalRank"].asInt().unwrapOr(0));row.tier=p["displayedTier"].asString().unwrapOr("UNRANKED");row.eliminated=!p["eliminationStage"].isNull();
