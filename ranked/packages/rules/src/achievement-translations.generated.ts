@@ -231,13 +231,13 @@ const translations = {
     }
   },
   "shared_mastery": {
-    "description": {
-      "en": "Clear Solo maps and qualify through Survival rounds.",
-      "ko": "솔랭 맵 클리어와 서바이벌 통과 라운드를 기록하세요."
-    },
     "name": {
-      "en": "Trailblazer",
-      "ko": "돌파자"
+      "ko": "돌파자",
+      "en": "Trailblazer"
+    },
+    "description": {
+      "ko": "정상적으로 진행된 솔랭과 서바이벌 라운드를 기록하세요.",
+      "en": "Play valid completed rounds across Solo Ranked and Survival."
     }
   },
   "shared_matches": {
@@ -290,24 +290,14 @@ const translations = {
       "ko": "완벽한 피날레"
     }
   },
-  "survival_final_photo_finish": {
-    "description": {
-      "en": "Win the decisive final by more than 0 and less than 1 percentage point.",
-      "ko": "결승에서 1%p 미만 차이로 우승하세요."
-    },
-    "name": {
-      "en": "Photo Finish",
-      "ko": "사진 판정"
-    }
-  },
   "survival_finals": {
-    "description": {
-      "en": "Reach Survival finals.",
-      "ko": "서바이벌 결승에 진출하세요."
-    },
     "name": {
-      "en": "Finalist",
-      "ko": "결승 진출자"
+      "ko": "파이널리스트",
+      "en": "Finalist"
+    },
+    "description": {
+      "ko": "서바이벌 결승에 진출하세요.",
+      "en": "Reach Survival finals."
     }
   },
   "survival_first_match": {
@@ -340,54 +330,34 @@ const translations = {
       "ko": "첫 우승"
     }
   },
-  "survival_last_seed_champion": {
-    "description": {
-      "en": "Win from the unique last qualifying seed.",
-      "ko": "결승 최하위 단독 시드에서 우승하세요."
-    },
-    "name": {
-      "en": "Underdog Champion",
-      "ko": "역습의 우승자"
-    }
-  },
   "survival_matches": {
-    "description": {
-      "en": "Complete Survival matches.",
-      "ko": "서바이벌 경기를 완료하세요."
-    },
     "name": {
-      "en": "Survival Competitor",
-      "ko": "생존 참가자"
-    }
-  },
-  "survival_never_below_cutoff": {
-    "description": {
-      "en": "Win after qualifying strictly above every elimination cutoff rank.",
-      "ko": "모든 탈락 라운드에서 컷오프보다 높은 순위로 통과하고 우승하세요."
+      "ko": "서바이버",
+      "en": "Survivor"
     },
-    "name": {
-      "en": "Unshaken",
-      "ko": "흔들리지 않는 자"
+    "description": {
+      "ko": "서바이벌 경기를 정상 완료하세요.",
+      "en": "Complete valid Survival matches."
     }
   },
   "survival_podium_streak": {
-    "description": {
-      "en": "Raise your best consecutive Survival Top 3 finishes.",
-      "ko": "최고 연속 Top 3 기록을 높이세요."
-    },
     "name": {
-      "en": "Consistency",
-      "ko": "꾸준함"
+      "ko": "마스터",
+      "en": "Master"
+    },
+    "description": {
+      "ko": "최고 연속 Top 3 입상 기록을 높이세요.",
+      "en": "Raise your best consecutive Survival Top 3 finishes."
     }
   },
   "survival_podiums": {
-    "description": {
-      "en": "Finish in the Survival Top 3.",
-      "ko": "서바이벌에서 Top 3에 입상하세요."
-    },
     "name": {
-      "en": "Podium Finisher",
-      "ko": "입상자"
+      "ko": "포디움",
+      "en": "Podium"
+    },
+    "description": {
+      "ko": "서바이벌 최종 Top 3에 입상하세요.",
+      "en": "Finish in the Survival Top 3."
     }
   },
   "survival_round_perfect": {
@@ -411,33 +381,23 @@ const translations = {
     }
   },
   "survival_round_wins": {
-    "description": {
-      "en": "Finish Survival rounds as the sole first place.",
-      "ko": "라운드에서 단독 1위를 달성하세요."
-    },
     "name": {
-      "en": "Round Ruler",
-      "ko": "라운드 지배자"
-    }
-  },
-  "survival_win_streak": {
-    "description": {
-      "en": "Raise your best consecutive Survival wins.",
-      "ko": "최고 연속 우승 기록을 높이세요."
+      "ko": "라운드 지배자",
+      "en": "Round Ruler"
     },
-    "name": {
-      "en": "Unbeaten Survivor",
-      "ko": "무적 생존"
+    "description": {
+      "ko": "서바이벌 라운드에서 단독 또는 공동 1위를 달성하세요.",
+      "en": "Finish Survival rounds in first place, including ties."
     }
   },
   "survival_wins": {
-    "description": {
-      "en": "Win Survival matches.",
-      "ko": "서바이벌에서 우승하세요."
-    },
     "name": {
-      "en": "Last One Standing",
-      "ko": "최후의 1인"
+      "ko": "우승",
+      "en": "Champion"
+    },
+    "description": {
+      "ko": "서바이벌에서 최종 우승하세요.",
+      "en": "Win Survival matches."
     }
   },
   "sweep_wins": {
@@ -459,9 +419,77 @@ const translations = {
       "en": "Win Streak",
       "ko": "연승"
     }
+  },
+  "survival_underdog": {
+    "name": {
+      "ko": "언더독",
+      "en": "Underdog"
+    },
+    "description": {
+      "ko": "3등으로 결승에 진출한 뒤 최종 우승하세요.",
+      "en": "Enter the final in third place, then win the match."
+    }
+  },
+  "survival_deathmatch_entry": {
+    "name": {
+      "ko": "데스매치",
+      "en": "Death Match"
+    },
+    "description": {
+      "ko": "서바이벌 결승에서 동점으로 데스매치에 진입하세요.",
+      "en": "Tie the Survival final and enter Death Match."
+    }
+  },
+  "survival_secret_1": {
+    "name": {
+      "ko": "아직 끝나지 않았다",
+      "en": "It Is Not Over"
+    },
+    "description": {
+      "ko": "종료 10초 전 탈락 예정 상태에서 벗어나 라운드를 통과하세요.",
+      "en": "Escape elimination in the last 10 seconds and qualify."
+    },
+    "hint": {
+      "ko": "일반 매치에서 달성 가능",
+      "en": "Available in a normal match"
+    }
+  },
+  "survival_true_champion": {
+    "name": {
+      "ko": "진정한 1등",
+      "en": "True Champion"
+    },
+    "description": {
+      "ko": "서바이벌에서 5경기 연속 우승하세요.",
+      "en": "Win five consecutive Survival matches."
+    }
+  },
+  "survival_secret_2": {
+    "name": {
+      "ko": "자강두천",
+      "en": "Titans Clash"
+    },
+    "description": {
+      "ko": "진행 중인 서바이벌 데스매치에서 동점을 기록하세요.",
+      "en": "Tie an ongoing Survival Death Match."
+    },
+    "hint": {
+      "ko": "데스매치에서 달성 가능",
+      "en": "Available in Death Match"
+    }
+  },
+  "shared_clears": {
+    "name": {
+      "ko": "파죽지세",
+      "en": "Unstoppable"
+    },
+    "description": {
+      "ko": "솔랭 맵 클리어와 서바이벌 100% 달성 라운드를 기록하세요.",
+      "en": "Clear Solo maps and record 100% in valid Survival rounds."
+    }
   }
 } as const;
 export function achievementText(id: keyof typeof translations) {
   const text=translations[id];
-  return {nameKo:text.name.ko,nameEn:text.name.en,descriptionKo:text.description.ko,descriptionEn:text.description.en};
+  return {nameKo:text.name.ko,nameEn:text.name.en,descriptionKo:text.description.ko,descriptionEn:text.description.en,...("hint" in text?{hintKo:text.hint.ko,hintEn:text.hint.en}:{})};
 }

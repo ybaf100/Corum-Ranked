@@ -275,7 +275,7 @@ ccColor3B rarityColor(std::string const& rarity) {
 
 std::string achievementTitleText(corum::ranked::AchievementTitleView const& title) {
     if (!title.active) return {};
-    auto const name = corum::ranked::i18n::text("achievement."+title.achievementId+".name",title.nameEn);
+    auto const name = corum::ranked::achievementScopedName(title.scope, corum::ranked::i18n::text("achievement."+title.achievementId+".name",corum::ranked::i18n::isKorean()?title.nameKo:title.nameEn), corum::ranked::i18n::isKorean());
     return title.displayLabel.empty() ? name : fmt::format("{} - {}", name, title.displayLabel);
 }
 
@@ -3678,7 +3678,7 @@ class CorumRankedLayer final : public CCLayerColor {
                 : tr("achievement-upgraded", "ACHIEVEMENT UPGRADED");
         auto* headingLabel = makeLabel(heading, 0.22f, {0.0f, 19.0f}, accent, "semibold");
         group->addChild(headingLabel, 2);
-        auto const baseName = corum::ranked::i18n::text("achievement."+notice.achievementId+".name",notice.nameEn);
+        auto const baseName = corum::ranked::achievementScopedName(notice.scope, corum::ranked::i18n::text("achievement."+notice.achievementId+".name",notice.nameEn), corum::ranked::i18n::isKorean());
         auto const displayName = notice.displayLabel.empty()
             ? baseName
             : fmt::format("{} - {}", baseName, notice.displayLabel);
@@ -4099,7 +4099,7 @@ class CorumRankedLayer final : public CCLayerColor {
             auto const accent = achievementCardAccent(card);
             auto* panel = makeNeonPanel({cardWidth, cardHeight}, center, accent, kDeepPanel, 246);
             m_root->addChild(panel, 1);
-            auto const baseName = corum::ranked::i18n::text("achievement."+card.id+".name",card.nameEn);
+            auto const baseName = corum::ranked::achievementCardName(card,corum::ranked::i18n::isKorean());
             auto const title = card.type == "PROGRESSIVE" && card.currentLevel > 0
                 ? fmt::format("{} - {}", baseName, card.displayLabel)
                 : baseName;
@@ -4115,7 +4115,7 @@ class CorumRankedLayer final : public CCLayerColor {
             corum::ranked::ui::fitFullMenuLabel(titleLabel,cardWidth-82,20*cardScale,.40f*cardScale);
             corum::ranked::ui::styleAchievementText(titleLabel,corum::ranked::achievementCardTier(card,view.achievements.equippedTitle),card.unlocked || card.currentLevel>0);
             m_root->addChild(titleLabel, 4);
-            auto const description = corum::ranked::i18n::text("achievement."+card.id+".description",card.descriptionEn);
+            auto const description = corum::ranked::achievementCardDescription(card,corum::ranked::i18n::isKorean());
             auto* descriptionLabel = makeLabel(
                 description,
                 0.25f*cardScale,

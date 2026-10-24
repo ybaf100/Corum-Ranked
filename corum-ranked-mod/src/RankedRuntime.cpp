@@ -191,6 +191,7 @@ corum::ranked::AchievementTitleView parseAchievementTitle(matjson::Value const& 
     corum::ranked::AchievementTitleView title;
     if (!value.isObject()) return title;
     title.active = true;
+    title.scope = value["scope"].asString().unwrapOr("");
     title.achievementId = value["achievementId"].asString().unwrapOr("");
     auto const level = value["level"].asInt();
     if (level.isOk()) title.level = static_cast<int>(level.unwrap());
@@ -206,6 +207,7 @@ corum::ranked::AchievementTitleView parseAchievementTitle(matjson::Value const& 
 corum::ranked::AchievementUnlockNoticeView parseAchievementNotice(matjson::Value const& value) {
     corum::ranked::AchievementUnlockNoticeView notice;
     if (!value.isObject()) return notice;
+    notice.scope = value["scope"].asString().unwrapOr("");
     notice.achievementId = value["achievementId"].asString().unwrapOr("");
     notice.type = value["type"].asString().unwrapOr("");
     auto const level = value["level"].asInt();
@@ -2966,6 +2968,8 @@ void RankedRuntime::parseAchievementState(matjson::Value const& root) {
             card.rarity = value["rarity"].asString().unwrapOr("");
             card.titleEnabled = value["titleEnabled"].asBool().unwrapOr(false);
             card.unlocked = value["unlocked"].asBool().unwrapOr(false);
+            card.hidden = value["hidden"].asBool().unwrapOr(false);
+            card.concealed = value["concealed"].asBool().unwrapOr(card.hidden && !card.unlocked);
             card.claimed = value["claimed"].asBool().unwrapOr(false);
             card.rewardAp = static_cast<int>(value["rewardAp"].asInt().unwrapOr(0));
             card.claimableRewards = static_cast<int>(value["claimableRewards"].asInt().unwrapOr(0));

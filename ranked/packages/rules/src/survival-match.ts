@@ -1,3 +1,4 @@
+import { observeSurvivalAchievementCheckpoint, observeSurvivalAchievementRecovery, type SurvivalAchievementCheckpoint } from "./survival-achievement-checkpoint.js";
 import { survivalOnlineTargets,survivalOnlineRewardRank } from "./survival-online.js";
 import { bestPercentOfThree } from "./deathmatch.js";
 import { RankedDomainError } from "./errors.js";
@@ -61,6 +62,7 @@ export interface SurvivalRound {
   endsAt: number | null;
   finishedAt: number | null;
   cutoffScore: number | null;
+  achievementCheckpoint?: SurvivalAchievementCheckpoint;
   players: SurvivalRoundPlayer[];
 }
 export interface SurvivalMatch {
@@ -352,7 +354,7 @@ function advanceTimers(match: SurvivalMatch, now: number): void {
 }
 export function reduceSurvivalMatch(before: SurvivalMatch, command: SurvivalCommand, now: number): SurvivalMatch {
   if (!Number.isFinite(now) || now < before.updatedAt) conflict("Server clock moved backwards");
-  const match=structuredClone(before);
+  const match=structuredClone(observeSurvivalAchievementCheckpoint(before,now));
   if (terminal(match)) return match;
   const enteredState=match.state;
   advanceTimers(match,now);
@@ -473,6 +475,7 @@ export function reduceSurvivalMatch(before: SurvivalMatch, command: SurvivalComm
       }
     }
   }
+  observeSurvivalAchievementRecovery(match,now);
   // A timer changing the context makes the incoming packet read-only, so the
   // authoritative timeout commits instead of rolling back behind a 409 error.
   if (JSON.stringify(match) !== JSON.stringify(before)) {match.revision++; match.updatedAt=now;}
@@ -486,7 +489,7 @@ export interface SurvivalBotFrame {participantId:string;attemptId:string;kind:"S
 export function applySurvivalBotFrames(before:SurvivalMatch,context:SurvivalRoundContext,frames:readonly SurvivalBotFrame[],sampledAt:number):SurvivalMatch {
   const round=survivalCurrentRound(before);
   if(before.state!=="PLAYING"||context.roundKey!==round.key||context.mapGeneration!==round.mapGeneration||context.levelId!==round.map?.levelId)return before;
-  const match=structuredClone(before),current=survivalCurrentRound(match);
+  const match=structuredClone(observeSurvivalAchievementCheckpoint(before,sampledAt)),current=survivalCurrentRound(match);
   for(const f of frames){
     if(match.state!=="PLAYING")break;
     const player=current.players.find(p=>p.participantId===f.participantId);
@@ -495,6 +498,7 @@ export function applySurvivalBotFrames(before:SurvivalMatch,context:SurvivalRoun
     if(f.kind==="START")startAttempt(match,current,player,f.attemptId,f.at);
     else recordAttempt(match,current,player,f.attemptId,f.progress,f.kind==="END",f.at,f.progress);
   }
+  observeSurvivalAchievementRecovery(match,sampledAt);
   if(JSON.stringify(match)===JSON.stringify(before))return before;
   match.revision++;match.updatedAt=Math.max(before.updatedAt,sampledAt);return match;
 }

@@ -29,6 +29,7 @@ interface MetricRow extends SurvivalAchievementMetrics {
   ranked_wins: number;
   ranked_matches: number;
   ranked_clears: number;
+  ranked_rounds_played: number;
   perfect_wins: number;
   current_win_streak: number;
   best_win_streak: number;
@@ -82,6 +83,7 @@ interface HistoricalDeathmatchRow {
 
 export interface AchievementUnlockNotice {
   readonly achievementId: AchievementId;
+  readonly scope: AchievementScope;
   readonly type: "PROGRESSIVE" | "ONE_SHOT";
   readonly level: AchievementLevel | null;
   readonly displayLabel: string | null;
@@ -277,6 +279,8 @@ export class AchievementService {
     await this.lockProfile(transaction, playerId);
     await this.ensureBackfilled(transaction, playerId, now);
     if (!await this.eligible(transaction,playerId,now)) return [];
+    const run=(await transaction.query<{created_at:Date|string}>("SELECT created_at FROM ranked_placement_runs WHERE id=$1 AND player_id=$2",[runId,playerId])).rows[0];
+    if(run && new Date(run.created_at)<await this.cutover(transaction))return [];
     const eventKey = `placement:${runId}:achievement:${playerId}`;
     const inserted = await this.insertEvent(
       transaction, eventKey, playerId, "PLACEMENT_RESULT", runId, now,
@@ -314,7 +318,7 @@ export class AchievementService {
     if (!stage) return null;
     return {
       achievementId: definition.id,
-        scope: definition.scope,
+      scope: definition.scope,
       level: stage.level,
       displayLabel: stage.displayLabel,
       nameKo: `[${achievementScopeLabel(definition.scope, "ko")}] ${definition.nameKo}`,
@@ -343,6 +347,7 @@ export class AchievementService {
       if (definition.type === "ONE_SHOT") {
         notices.push({
           achievementId: definition.id,
+          scope: definition.scope,
           type: "ONE_SHOT",
           level: null,
           displayLabel: null,
@@ -358,6 +363,7 @@ export class AchievementService {
       if (!level) continue;
       notices.push({
         achievementId: definition.id,
+        scope: definition.scope,
         type: "PROGRESSIVE",
         level: level.level,
         displayLabel: level.displayLabel,
@@ -381,6 +387,8 @@ export class AchievementService {
     debug=false,
   ): Promise<readonly AchievementUnlockNotice[]> {
     if(!await this.eligible(transaction,playerId,now,debug))return [];
+    const source=(await transaction.query<{created_at:Date|string}>("SELECT created_at FROM ranked_matches WHERE id=$1",[matchId])).rows[0];
+    if(source && new Date(source.created_at)<await this.cutover(transaction,debug))return [];
     const inserted = await this.insertEvent(
       transaction, eventKey, playerId, "MATCH_RESULT", matchId, now,
     );
@@ -388,6 +396,15 @@ export class AchievementService {
     const row = await this.lockMetrics(transaction, playerId);
     const evaluation = evaluateAchievementMatch(metricsFromRow(row), facts);
     await this.writeMetrics(transaction, playerId, evaluation.metrics, now);
+    // One count per official round, never per attempt. An unplayed forfeit,
+    // invalid attempt or unfinished round provides no participation evidence.
+    const rounds=await transaction.query<{count:number}>(`SELECT (
+      (SELECT COUNT(*) FROM ranked_rounds r WHERE r.match_id=$1 AND r.settled_at IS NOT NULL AND r.started_at IS NOT NULL
+       AND EXISTS(SELECT 1 FROM ranked_attempts a WHERE a.round_id=r.id AND a.player_id=$2 AND a.valid AND a.ended_at IS NOT NULL))
+      +(SELECT COUNT(*) FROM ranked_deathmatches d WHERE d.match_id=$1 AND d.finished_at IS NOT NULL AND d.started_at IS NOT NULL
+       AND EXISTS(SELECT 1 FROM ranked_deathmatch_attempts a WHERE a.deathmatch_id=d.id AND a.player_id=$2 AND a.valid AND a.ended_at IS NOT NULL))
+      )::int AS count`,[matchId,playerId]);
+    await transaction.query("UPDATE ranked_achievement_metrics SET ranked_rounds_played=ranked_rounds_played+$2 WHERE player_id=$1",[playerId,Number(rounds.rows[0]?.count??0)]);
     const progressive = await this.unlockProgressive(
       transaction, playerId, evaluation.metrics, eventKey, now,
     );
@@ -399,9 +416,9 @@ export class AchievementService {
   }
 
   private async cutover(transaction:SqlExecutor,debug=false):Promise<Date> {
-    const row=(await transaction.query<{activated_at:Date|string;debug_enabled_at:Date|string|null}>("SELECT activated_at,debug_enabled_at FROM ranked_achievement_versions WHERE version=2")).rows[0];
-    if(!row || (debug && !row.debug_enabled_at))throw new ConflictException("Achievement migration is required");
-    return new Date(debug?Math.max(new Date(row.activated_at).getTime(),new Date(row.debug_enabled_at!).getTime()):row.activated_at);
+    const row=(await transaction.query<{activated_at:Date|string;debug_enabled_at:Date|string|null;overhaul_activated_at:Date|string|null}>("SELECT activated_at,debug_enabled_at,overhaul_activated_at FROM ranked_achievement_versions WHERE version=2")).rows[0];
+    if(!row || !row.overhaul_activated_at || (debug && !row.debug_enabled_at))throw new ConflictException("Achievement migration is required");
+    return new Date(Math.max(new Date(row.activated_at).getTime(),new Date(row.overhaul_activated_at!).getTime(),debug?new Date(row.debug_enabled_at!).getTime():0));
   }
   private async eligible(transaction:SqlExecutor,playerId:string,at:Date,debug=false):Promise<boolean>{
     if(at<await this.cutover(transaction,debug))return false;
@@ -411,24 +428,24 @@ export class AchievementService {
     await transaction.query("INSERT INTO ranked_achievement_metrics(player_id) VALUES($1) ON CONFLICT(player_id) DO NOTHING",[playerId]);
     const row=await this.lockMetrics(transaction,playerId);if(row.backfilled_at)return;
     const since=await this.cutover(transaction);
-    // v2 starts at the explicit migration cutover, never resurrecting v1 rewards.
+    // Recovery is confined to the new overhaul epoch, never pre-reset history.
     if(await this.eligible(transaction,playerId,now)){
       const matches=await transaction.query<HistoricalMatchRow>(`SELECT id,match_type,player_a_id,player_b_id,winner_id,series_state,rating_presentation,finished_at
         FROM ranked_matches WHERE match_type IN ('RANKED_PVP','DEBUG_BOT') AND state='MATCH_RESULT' AND result_applied_at IS NOT NULL
-        AND finished_at >= $2 AND (player_a_id=$1 OR player_b_id=$1) ORDER BY finished_at,id`,[playerId,since.toISOString()]);
+        AND created_at >= $2 AND finished_at >= $2 AND (player_a_id=$1 OR player_b_id=$1) ORDER BY finished_at,id`,[playerId,since.toISOString()]);
       for(const match of matches.rows)await this.applyMatchEvent(transaction,playerId,`match:${match.id}:achievement:${playerId}`,match.id,
         await this.historicalMatchFacts(transaction,match,playerId),new Date(match.finished_at),match.match_type==="DEBUG_BOT");
       const placements=await transaction.query<{id:string;finalized_at:Date|string;final_displayed_tier:string}>(`SELECT id,finalized_at,final_displayed_tier FROM ranked_placement_runs
-        WHERE player_id=$1 AND completion_kind='COMPLETED' AND finalized_at >= $2 ORDER BY finalized_at,id`,[playerId,since.toISOString()]);
+        WHERE player_id=$1 AND completion_kind='COMPLETED' AND created_at >= $2 AND finalized_at >= $2 ORDER BY finalized_at,id`,[playerId,since.toISOString()]);
       for(const run of placements.rows){const key=`placement:${run.id}:achievement:${playerId}`;
         if(await this.insertEvent(transaction,key,playerId,"PLACEMENT_RESULT",run.id,new Date(run.finalized_at))){
           if(run.final_displayed_tier==="GOLD")await this.markGold(transaction,playerId,"SOLO_RANKED");
           await this.unlockOneShots(transaction,playerId,["placement_complete"],key,new Date(run.finalized_at));}}
       const matchesSurvival=await transaction.query<{match_id:string}>(`SELECT match_id FROM (
         SELECT o.match_id,m.finished_at FROM sur_online_players o JOIN sur_matches m ON m.id=o.match_id
-        WHERE o.player_id=$1 AND o.settled_at IS NOT NULL AND m.state='FINAL_RESULT' AND m.finished_at >= $2
+        WHERE o.player_id=$1 AND o.settled_at IS NOT NULL AND m.state='FINAL_RESULT' AND m.created_at >= $2 AND m.finished_at >= $2
         UNION ALL SELECT d.match_id,m.finished_at FROM sur_debug_matches d JOIN sur_matches m ON m.id=d.match_id
-        WHERE d.human_player_id=$1 AND d.settled_at IS NOT NULL AND m.state='FINAL_RESULT' AND m.finished_at >= $2
+        WHERE d.human_player_id=$1 AND d.settled_at IS NOT NULL AND m.state='FINAL_RESULT' AND m.created_at >= $2 AND m.finished_at >= $2
         ) eligible_matches ORDER BY finished_at,match_id`,[playerId,since.toISOString()]);
       for(const match of matchesSurvival.rows)await this.applySurvivalEvent(transaction,match.match_id,playerId,now);
       await this.refreshV2Unlocks(transaction,playerId,`v2:sync:${playerId}`,now);
@@ -439,9 +456,10 @@ export class AchievementService {
     const solo=metricsFromRow(row);return {...solo,
       survival_matches:Number(row.survival_matches),survival_wins:Number(row.survival_wins),survival_podiums:Number(row.survival_podiums),
       survival_finals:Number(row.survival_finals),survival_round_survives:Number(row.survival_round_survives),survival_round_wins:Number(row.survival_round_wins),
-      survival_podium_streak:Number(row.survival_podium_streak),survival_win_streak:Number(row.survival_win_streak),
+      survival_podium_streak:Number(row.survival_podium_streak),
       shared_matches:solo.ranked_matches+Number(row.survival_matches),shared_wins:solo.ranked_wins+Number(row.survival_wins),
-      shared_mastery:solo.ranked_clears+Number(row.survival_round_survives)};
+      shared_mastery:Number(row.ranked_rounds_played)+Number(row.survival_rounds_played),
+      shared_clears:solo.ranked_clears+Number(row.survival_perfect_rounds)};
   }
   private async markGold(tx:SqlExecutor,playerId:string,mode:"SOLO_RANKED"|"SURVIVAL"){
     if(mode==="SOLO_RANKED")await tx.query("UPDATE ranked_achievement_metrics SET solo_gold_reached=TRUE WHERE player_id=$1",[playerId]);
@@ -449,6 +467,7 @@ export class AchievementService {
   }
   private async refreshV2Unlocks(tx:SqlExecutor,playerId:string,key:string,now:Date):Promise<readonly AchievementUnlockNotice[]>{
     const row=await this.lockMetrics(tx,playerId),metrics=this.allMetrics(row),shots:OneShotAchievementId[]=[];
+    if(Number(row.survival_win_streak)>=5)shots.push("survival_true_champion");
     if(row.solo_gold_reached||row.survival_gold_reached)shots.push("gold_reached");
     if(row.solo_gold_reached&&row.survival_gold_reached)shots.push("dual_gold_reached");
     if(row.ranked_matches>0&&row.survival_matches>0)shots.push("dual_mode_debut");
@@ -476,7 +495,8 @@ export class AchievementService {
     const snapshot=parseObject(row.snapshot) as unknown as SurvivalMatch;
     if(snapshot.id!==matchId || !Array.isArray(snapshot.players)||!Array.isArray(snapshot.rounds))return [];
     const facts=survivalAchievementFacts(snapshot,playerId,row.debug);
-    if(!facts||!await this.eligible(tx,playerId,new Date(facts.completedAt),row.debug))return [];
+    if(!facts||!await this.eligible(tx,playerId,new Date(facts.completedAt),row.debug) ||
+       snapshot.createdAt < (await this.cutover(tx,row.debug)).getTime())return [];
     const key=`survival:${matchId}:achievement:${playerId}`;
     if(!await this.insertEvent(tx,key,playerId,"SURVIVAL_RESULT",matchId,new Date(facts.completedAt)))return this.noticesForSource(tx,playerId,key);
     await tx.query(`INSERT INTO ranked_survival_achievement_facts(player_id,match_id,completed_at,facts) VALUES($1,$2,$3,$4::jsonb)
@@ -485,9 +505,10 @@ export class AchievementService {
     const metrics=summarizeSurvivalAchievements(all.rows.map(r=>r.facts));
     await tx.query(`UPDATE ranked_achievement_metrics SET survival_matches=$2,survival_wins=$3,survival_podiums=$4,survival_finals=$5,
       survival_round_survives=$6,survival_round_wins=$7,current_survival_podium_streak=$8,survival_podium_streak=$9,
-      current_survival_win_streak=$10,survival_win_streak=$11,updated_at=$12 WHERE player_id=$1`,
+      current_survival_win_streak=$10,survival_win_streak=$11,updated_at=$12,
+      survival_rounds_played=$13,survival_perfect_rounds=$14 WHERE player_id=$1`,
       [playerId,metrics.survival_matches,metrics.survival_wins,metrics.survival_podiums,metrics.survival_finals,metrics.survival_round_survives,
-        metrics.survival_round_wins,metrics.current_survival_podium_streak,metrics.survival_podium_streak,metrics.current_survival_win_streak,metrics.survival_win_streak,now.toISOString()]);
+        metrics.survival_round_wins,metrics.current_survival_podium_streak,metrics.survival_podium_streak,metrics.current_survival_win_streak,metrics.survival_win_streak,now.toISOString(),metrics.survival_rounds_played,metrics.survival_perfect_rounds]);
     const result=parseObject(row.result),after=parseObject(result.profileAfter);
     if(["GOLD","MASTER","CHAMPION"].includes(String(after.tier)))await this.markGold(tx,playerId,"SURVIVAL");
     await this.unlockOneShots(tx,playerId,facts.oneShots,key,now);await this.refreshV2Unlocks(tx,playerId,key,now);
@@ -573,15 +594,18 @@ export class AchievementService {
       ),
       achievements: ACHIEVEMENT_DEFINITIONS.map((definition) => {
         const ownUnlocks = unlocks.rows.filter((unlock) => unlock.achievement_id === definition.id);
+        const concealed=definition.type==="ONE_SHOT" && definition.hidden===true && ownUnlocks.length===0;
         const common = {
+          hidden: definition.type==="ONE_SHOT" && definition.hidden===true,
+          concealed,
           id: definition.id,
           type: definition.type,
           scope: definition.scope,
-          nameKo: definition.nameKo,
-          nameEn: definition.nameEn,
-          descriptionKo: definition.descriptionKo,
-          descriptionEn: definition.descriptionEn,
-          titleEnabled: definition.titleEnabled,
+          nameKo: concealed ? "Hidden" : definition.nameKo,
+          nameEn: concealed ? "Hidden" : definition.nameEn,
+          descriptionKo: concealed && definition.type==="ONE_SHOT" ? definition.hintKo ?? "Hidden" : definition.descriptionKo,
+          descriptionEn: concealed && definition.type==="ONE_SHOT" ? definition.hintEn ?? "Hidden" : definition.descriptionEn,
+          titleEnabled: definition.titleEnabled && !concealed,
           unlocks: ownUnlocks.map((unlock) => ({
             level: Number(unlock.achievement_level) === 0 ? null : Number(unlock.achievement_level),
             rewardAp: Number(unlock.reward_ap),
@@ -641,6 +665,7 @@ export class AchievementService {
         if (inserted.rows[0]) {
           notices.push({
             achievementId: definition.id,
+            scope: definition.scope,
             type: "PROGRESSIVE",
             level: level.level,
             displayLabel: level.displayLabel,
@@ -678,6 +703,7 @@ export class AchievementService {
       if (inserted.rows[0]) {
         notices.push({
           achievementId: definition.id,
+          scope: definition.scope,
           type: "ONE_SHOT",
           level: null,
           displayLabel: null,

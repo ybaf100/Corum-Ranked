@@ -39,6 +39,7 @@ const REQUIRED_MIGRATIONS = [
   "0017_placement_rating_policy.sql",
   "0018_map_metadata_cache.sql",
   "0019_ranked_audio_volumes.sql",
+  "0020_deathmatch_native_death.sql",
   "0021_survival_m1.sql",
   "0022_survival_m3_engine.sql",
   "0023_survival_m4_debug.sql",
@@ -47,6 +48,7 @@ const REQUIRED_MIGRATIONS = [
   "0026_survival_catalog_bot_count.sql",
   "0027_achievements_v2.sql",
   "0028_debug_achievement_parity.sql",
+  "0029_achievement_survival_overhaul.sql",
 ] as const;
 
 export interface RankedSchemaStatus {
@@ -102,6 +104,12 @@ type SchemaProbeRow = QueryResultRow & {
   placement_rating_policy_version: boolean;
   placement_skip_event: boolean;
   placement_skipped_at: boolean;
+  deathmatch_native_death:boolean;
+  achievement_overhaul_epoch:boolean;
+  achievement_solo_rounds:boolean;
+  achievement_survival_rounds:boolean;
+  achievement_perfect_rounds:boolean;
+  achievement_checkpoint:boolean;
   profile_total_ap: boolean;
   profile_equipped_achievement: boolean;
   profile_equipped_achievement_level: boolean;
@@ -199,6 +207,12 @@ export class DatabaseService implements DatabasePort, OnModuleInit, OnApplicatio
     try {
       const result = await this.pool.query<SchemaProbeRow>(`
         SELECT
+          EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='ranked_deathmatch_attempts' AND column_name='native_death') AS deathmatch_native_death,
+          EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='ranked_achievement_versions' AND column_name='overhaul_activated_at') AS achievement_overhaul_epoch,
+          EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='ranked_achievement_metrics' AND column_name='ranked_rounds_played') AS achievement_solo_rounds,
+          EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='ranked_achievement_metrics' AND column_name='survival_rounds_played') AS achievement_survival_rounds,
+          EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='ranked_achievement_metrics' AND column_name='survival_perfect_rounds') AS achievement_perfect_rounds,
+          EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='sur_rounds' AND column_name='achievement_checkpoint') AS achievement_checkpoint,
           to_regclass('public.ranked_schema_migrations') IS NOT NULL AS ranked_schema_migrations,
           to_regclass('public.ranked_matches') IS NOT NULL AS ranked_matches,
           to_regclass('public.ranked_rounds') IS NOT NULL AS ranked_rounds,
@@ -350,6 +364,12 @@ export class DatabaseService implements DatabasePort, OnModuleInit, OnApplicatio
         ["placement_rating_policy_version", "ranked_placement_runs.rating_policy_version"],
         ["placement_skip_event", "ranked_placement_maps.skip_client_event_id"],
         ["placement_skipped_at", "ranked_placement_maps.skipped_at"],
+        ["deathmatch_native_death", "ranked_deathmatch_attempts.native_death"],
+        ["achievement_overhaul_epoch", "ranked_achievement_versions.overhaul_activated_at"],
+        ["achievement_solo_rounds", "ranked_achievement_metrics.ranked_rounds_played"],
+        ["achievement_survival_rounds", "ranked_achievement_metrics.survival_rounds_played"],
+        ["achievement_perfect_rounds", "ranked_achievement_metrics.survival_perfect_rounds"],
+        ["achievement_checkpoint", "sur_rounds.achievement_checkpoint"],
         ["profile_total_ap", "ranked_profiles.total_ap"],
         ["profile_equipped_achievement", "ranked_profiles.equipped_achievement_id"],
         ["profile_equipped_achievement_level", "ranked_profiles.equipped_achievement_level"],

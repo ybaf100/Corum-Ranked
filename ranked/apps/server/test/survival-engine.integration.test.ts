@@ -313,3 +313,46 @@ it("durably preselects the next official map during results and adopts it after 
  now+=5000;m=await restarted.tick(m.id);expect(m.state).toBe("PREPARING");expect(survivalCurrentRound(m).map).toEqual(next!.map);
  await restarted.selectMap(m.id);expect(select).not.toHaveBeenCalled();
 });
+
+it('durably observes the last-ten-second cutoff without client polling and survives concurrent reports/restart',async()=>{
+ let match=await prepare(await engine.create('achievement-boundary',entrants));
+ const r=survivalCurrentRound(match);
+ for(const [i,p] of r.players.entries()){
+  match=await send(match,{type:'ATTEMPT_START',...context(match),participantId:p.participantId,attemptId:'boundary'});
+  match=await send(match,{type:'PROGRESS',...context(match),participantId:p.participantId,attemptId:'boundary',progress:100-i});
+ }
+ now=survivalCurrentRound(match).endsAt!-10_000;
+ // Recovery selects a playing round at its checkpoint, not only at endsAt.
+ await engine.recoverActiveMatches();match=await engine.get(match.id);
+ const checkpoint=survivalCurrentRound(match).achievementCheckpoint!;
+ expect(checkpoint.status).toBe('CAPTURED');
+ const risk=checkpoint.standings.find(p=>p.atRisk)!;
+ const command={type:'PROGRESS' as const,...context(match),participantId:risk.participantId,attemptId:'boundary',progress:100};
+ const restarted=new SurvivalEngineService(database,clock,ids,config,provider);
+ now+=1000;
+ await Promise.all([restarted.dispatch(match.id,'same-report',command),engine.dispatch(match.id,'same-report',command)]);
+ const durable=(await database.query<{achievement_checkpoint:unknown}>('SELECT achievement_checkpoint FROM sur_rounds WHERE match_id=$1 AND round_key=$2',[match.id,r.key])).rows[0]!.achievement_checkpoint;
+ expect(durable).toMatchObject({at:checkpoint.at,status:'CAPTURED',standings:expect.arrayContaining([expect.objectContaining({participantId:risk.participantId,atRisk:true,rescuedAt:now})])});
+ expect((await database.query('SELECT event_key FROM sur_match_commands WHERE match_id=$1 AND event_key=$2',[match.id,'same-report'])).rows).toHaveLength(1);
+ const saved=survivalCurrentRound(await restarted.get(match.id)).achievementCheckpoint;
+ expect(saved).toEqual(durable);
+});
+
+it('preserves real Survival history and attempts while discarding only achievement-era evidence during reset',async()=>{
+ const {AchievementService}=await import('../src/achievement/achievement.service.js');
+ let match=await play(await engine.create('reset-preservation',entrants));
+ const playerId=(entrants[0] as Extract<SurvivalAdmissionPlayer,{kind:'HUMAN'}>).playerId;
+ const achievements=new AchievementService(database,clock,ids);await achievements.state(playerId);
+ await database.query(`INSERT INTO ranked_survival_achievement_facts(player_id,match_id,completed_at,facts) VALUES($1,$2,$3,'{}')`,[playerId,match.id,clock.now().toISOString()]);
+ const tables=['sur_profiles','sur_match_players','sur_round_players','sur_attempts','sur_tiebreak_attempts','sur_match_commands','sur_lp_ledger'];
+ const before=Object.fromEntries(await Promise.all(tables.map(async t=>[t,(await database.query(`SELECT to_jsonb(x) AS row FROM ${t} x ORDER BY to_jsonb(x)::text`)).rows])));
+ const snapshot=await engine.get(match.id);
+ await database.query('UPDATE ranked_achievement_versions SET overhaul_activated_at=NULL');
+ await pg.exec(await readFile(new URL('../../../migrations/0029_achievement_survival_overhaul.sql',import.meta.url),'utf8'));
+ const after=Object.fromEntries(await Promise.all(tables.map(async t=>[t,(await database.query(`SELECT to_jsonb(x) AS row FROM ${t} x ORDER BY to_jsonb(x)::text`)).rows])));
+ expect(after).toEqual(before);
+ for(const round of snapshot.rounds)delete round.achievementCheckpoint;
+ expect(await engine.get(match.id)).toEqual(snapshot);
+ expect((await database.query("SELECT achievement_checkpoint FROM sur_rounds WHERE match_id=$1",[match.id])).rows.every((r:any)=>r.achievement_checkpoint===null)).toBe(true);
+ expect((await database.query('SELECT * FROM ranked_survival_achievement_facts')).rows).toHaveLength(0);
+});

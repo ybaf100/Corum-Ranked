@@ -35,6 +35,7 @@ const migrationNames = [
   "0026_survival_catalog_bot_count.sql",
   "0027_achievements_v2.sql",
   "0028_debug_achievement_parity.sql",
+  "0029_achievement_survival_overhaul.sql",
 ] as const;
 
 const migrationSql = async (migrationName: string): Promise<string> => {
@@ -266,3 +267,14 @@ describe("PostgreSQL migration", () => {
   });
 });
 
+
+it('registers 0020 and the overhaul with readiness probes for every new column',async()=>{
+ const source=await readFile(new URL('../src/database/database.service.ts',import.meta.url),'utf8');
+ expect(source.slice(source.indexOf('const REQUIRED_MIGRATIONS'),source.indexOf('] as const'))).toContain('0020_deathmatch_native_death.sql');
+ expect(source).toContain('0029_achievement_survival_overhaul.sql');
+ const columns=await database!.query<{table_name:string;column_name:string}>(`SELECT table_name,column_name FROM information_schema.columns WHERE table_schema='public'`);
+ for(const [table,column] of [['ranked_deathmatch_attempts','native_death'],['ranked_achievement_versions','overhaul_activated_at'],['ranked_achievement_metrics','ranked_rounds_played'],['ranked_achievement_metrics','survival_rounds_played'],['ranked_achievement_metrics','survival_perfect_rounds'],['sur_rounds','achievement_checkpoint']]){
+  expect(columns.rows).toContainEqual({table_name:table,column_name:column});
+  expect(source).toContain(`${table}.${column}`);
+ }
+});

@@ -83,6 +83,7 @@ struct PromotionSeriesView {
 };
 
 struct AchievementTitleView {
+    std::string scope;
     bool active = false;
     std::string achievementId;
     std::optional<int> level;
@@ -94,6 +95,7 @@ struct AchievementTitleView {
 };
 
 struct AchievementUnlockNoticeView {
+    std::string scope;
     std::string achievementId;
     std::string type;
     std::optional<int> level;
@@ -122,6 +124,8 @@ struct AchievementRewardView {
 };
 
 struct AchievementCardView {
+    bool hidden = false;
+    bool concealed = false;
     std::string scope;
     std::string id;
     std::string type;

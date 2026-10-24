@@ -22,3 +22,5 @@ export * from "./survival-online.js";
 export * from "./survival-bot-simulation.js";
 export * from "./solo-tiers.js";
 export * from "./achievement-survival.js";
+
+export * from "./survival-achievement-checkpoint.js";

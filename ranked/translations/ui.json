@@ -2090,5 +2090,9 @@
   "your-rank": {
     "en": "YOUR RANK",
     "ko": "내 랭크"
+  },
+  "achievement-hidden": {
+    "en": "HIDDEN",
+    "ko": "Hidden"
   }
 }

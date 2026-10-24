@@ -55,7 +55,7 @@ beforeAll(async()=>{
 afterAll(async()=>{if(pool){await pool.query(`DROP SCHEMA "${testSchema}" CASCADE`);await pool.end();}else await pg.close();});
 afterEach(async()=>{if(app)await app.close();});
 beforeEach(async()=>{
- await db.query("UPDATE ranked_achievement_versions SET activated_at='2000-01-01',debug_enabled_at='2000-01-01'");
+ await db.query("UPDATE ranked_achievement_versions SET activated_at='2000-01-01',debug_enabled_at='2000-01-01',overhaul_activated_at='2000-01-01'");
  await db.query("TRUNCATE ranked_players,sur_matches,sur_mode_state CASCADE");now=Date.parse("2026-10-13T00:00:00Z");sequence=1000;mapId=40000000;clients.length=0;
  document={generation:"online-1",generatedAt:new Date(now).toISOString(),config:{...DEFAULT_SURVIVAL_CONFIG,enabled:true}};
  config=new SurvivalConfigService({fetchConfig:async()=>document},env,db);await config.refresh();
@@ -374,7 +374,7 @@ describe("Survival M5 public HTTP and persistent online game",()=>{
    const metrics=(await db.query("SELECT ranked_matches,ranked_wins,survival_matches,survival_wins,survival_podiums,survival_finals,survival_round_wins FROM ranked_achievement_metrics WHERE player_id=$1",[a.session.playerId])).rows[0];
    expect(metrics).toEqual({ranked_matches:0,ranked_wins:0,survival_matches:1,survival_wins:1,survival_podiums:1,survival_finals:1,survival_round_wins:1});
    const saved=(await db.query<{result:Record<string,unknown>}>("SELECT result FROM sur_online_players WHERE match_id=$1 AND player_id=$2",[id,a.session.playerId])).rows[0]!.result;
-   expect(saved.achievementUnlocks).toEqual(expect.arrayContaining([expect.objectContaining({achievementId:'survival_first_match'}),expect.objectContaining({achievementId:'survival_final_perfect_win',rarity:'MYTHIC'})]));
+   expect(saved.achievementUnlocks).toEqual(expect.arrayContaining([expect.objectContaining({achievementId:'survival_first_match'}),expect.objectContaining({achievementId:'survival_final_perfect_win',rarity:'LEGENDARY'})]));
    const achievements=new AchievementService(db,clock,ids);const claims=await Promise.all([achievements.claim(a.session.playerId,"gold_reached"),achievements.claim(a.session.playerId,"gold_reached")]);
    expect(claims.reduce((sum,claim)=>sum+claim.claimedAmount,0)).toBe(50);
  });
@@ -466,4 +466,31 @@ it("commits global map history once under simultaneous selections on independent
  const history=(await db.query<{level_id:string;history_window:number}>("SELECT level_id,history_window FROM sur_map_selection_history ORDER BY id")).rows;
  expect(history.map(row=>Number(row.level_id)).sort()).toEqual([40000000,40000001]);
  expect(history.every(row=>row.history_window===30)).toBe(true);expect(selector).toHaveBeenCalledTimes(3);
+});
+
+it('serializes a server cutoff observation with duplicate progress after reconnect and keeps evidence out of public HTTP',async()=>{
+ const {group,id}=await game(8);let m=await prepare(id,group);
+ const attempts=new Map<string,string>();
+ for(const [i,c] of group.entries()){
+  const attemptId=ids.next();attempts.set(c.session.playerId,attemptId);
+  await event(c,m,'ATTEMPT_START',{attemptId});await event(c,m,'PROGRESS',{attemptId,progress:90-i});
+ }
+ now=survivalCurrentRound(m).endsAt!-10_000;await touch(group);
+ await engine.recoverActiveMatches();m=await engine.get(id);
+ const r=survivalCurrentRound(m),checkpoint=r.achievementCheckpoint!;
+ expect(checkpoint.status).toBe('CAPTURED');
+ const risk=checkpoint.standings.find(p=>p.atRisk)!,owner=group.find(c=>c.session.playerId===risk.participantId)!;
+ const injected=await api(owner,`/online/matches/${id}/events`,{eventId:ids.next(),type:'PROGRESS',roundKey:r.key,mapGeneration:r.mapGeneration,levelId:r.map!.levelId,attemptId:attempts.get(owner.session.playerId),progress:95,achievementCheckpoint:{atRisk:true}});
+ expect(injected.status).toBe(400);
+ const restarted=new SurvivalEngineService(db,clock,ids,config,{select:async()=>{throw new Error('unexpected selection');}});
+ new SurvivalOnlineService(db,clock,sessions,restarted,survival,config);
+ now+=500;await touch(group);
+ const command={type:'PROGRESS' as const,roundKey:r.key,mapGeneration:r.mapGeneration,levelId:r.map!.levelId,participantId:risk.participantId,attemptId:attempts.get(owner.session.playerId)!,progress:95};
+ await Promise.all([engine.dispatch(id,'reconnected-progress',command,owner.session),restarted.dispatch(id,'reconnected-progress',command,owner.session)]);
+ const evidence=(await db.query<{achievement_checkpoint:any}>('SELECT achievement_checkpoint FROM sur_rounds WHERE match_id=$1 AND round_key=$2',[id,r.key])).rows[0]!.achievement_checkpoint;
+ expect(evidence.standings.find((p:any)=>p.participantId===risk.participantId)).toMatchObject({atRisk:true,rescuedAt:now});
+ expect((await db.query('SELECT * FROM sur_match_commands WHERE match_id=$1 AND event_key=$2',[id,'reconnected-progress'])).rows).toHaveLength(1);
+ const view=(await api(owner,`/online/matches/${id}`)).body;
+ expect(JSON.stringify(view)).not.toMatch(/achievementCheckpoint|rescuedAt|atRisk/);
+ expect(survivalCurrentRound(await restarted.get(id)).achievementCheckpoint).toEqual(evidence);
 });

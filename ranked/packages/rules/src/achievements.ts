@@ -48,6 +48,9 @@ export interface OneShotAchievementDefinition {
   readonly titleEnabled: boolean;
   readonly ap: number;
   readonly rarity: AchievementRarity;
+  readonly hidden?: boolean;
+  readonly hintKo?: string;
+  readonly hintEn?: string;
 }
 
 export const PROGRESSIVE_ACHIEVEMENT_IDS = [
@@ -68,10 +71,10 @@ export const PROGRESSIVE_ACHIEVEMENT_IDS = [
   "survival_round_survives",
   "survival_round_wins",
   "survival_podium_streak",
-  "survival_win_streak",
   "shared_matches",
   "shared_wins",
   "shared_mastery",
+  "shared_clears",
 ] as const;
 
 export const ONE_SHOT_ACHIEVEMENT_IDS = [
@@ -90,12 +93,14 @@ export const ONE_SHOT_ACHIEVEMENT_IDS = [
   "survival_first_podium",
   "survival_first_win",
   "survival_cutoff_escape",
-  "survival_final_photo_finish",
   "survival_round_perfect",
   "survival_clean_champion",
-  "survival_last_seed_champion",
   "survival_final_perfect_win",
-  "survival_never_below_cutoff",
+  "survival_underdog",
+  "survival_deathmatch_entry",
+  "survival_secret_1",
+  "survival_true_champion",
+  "survival_secret_2",
   "dual_mode_debut",
   "dual_mode_winner",
   "dual_gold_reached",
@@ -111,7 +116,7 @@ const LEVEL_PRESENTATION = [
   { level: 2, grade: "SILVER", displayLabel: "II", displayColor: "#57BBFF", ap: 10 },
   { level: 3, grade: "GOLD", displayLabel: "III", displayColor: "#C679FF", ap: 20 },
   { level: 4, grade: "PLATINUM", displayLabel: "IV", displayColor: "#FFB046", ap: 40 },
-  { level: 5, grade: "DIAMOND", displayLabel: "V", displayColor: "#E5E4E2", ap: 75 },
+  { level: 5, grade: "DIAMOND", displayLabel: "V", displayColor: "#8DEBFF", ap: 75 },
 ] as const;
 
 const levels = (thresholds: readonly [number, number, number, number, number]) =>
@@ -178,10 +183,10 @@ export const PROGRESSIVE_ACHIEVEMENTS: readonly ProgressiveAchievementDefinition
   { id: "survival_round_survives", type: "PROGRESSIVE", scope: "SURVIVAL", metric: "survival_round_survives", ...achievementText("survival_round_survives"), titleEnabled: true, levels: levels([10, 50, 200, 500, 1000]) },
   { id: "survival_round_wins", type: "PROGRESSIVE", scope: "SURVIVAL", metric: "survival_round_wins", ...achievementText("survival_round_wins"), titleEnabled: true, levels: levels([1, 10, 25, 50, 100]) },
   { id: "survival_podium_streak", type: "PROGRESSIVE", scope: "SURVIVAL", metric: "survival_podium_streak", ...achievementText("survival_podium_streak"), titleEnabled: true, levels: levels([2, 3, 5, 8, 12]) },
-  { id: "survival_win_streak", type: "PROGRESSIVE", scope: "SURVIVAL", metric: "survival_win_streak", ...achievementText("survival_win_streak"), titleEnabled: true, levels: levels([2, 3, 5, 7, 10]) },
   { id: "shared_matches", type: "PROGRESSIVE", scope: "SHARED", metric: "shared_matches", ...achievementText("shared_matches"), titleEnabled: true, levels: levels([20, 100, 250, 500, 1000]) },
   { id: "shared_wins", type: "PROGRESSIVE", scope: "SHARED", metric: "shared_wins", ...achievementText("shared_wins"), titleEnabled: true, levels: levels([5, 25, 100, 250, 500]) },
   { id: "shared_mastery", type: "PROGRESSIVE", scope: "SHARED", metric: "shared_mastery", ...achievementText("shared_mastery"), titleEnabled: true, levels: levels([25, 100, 300, 700, 1500]) },
+  { id: "shared_clears", type: "PROGRESSIVE", scope: "SHARED", metric: "shared_clears", ...achievementText("shared_clears"), titleEnabled: true, levels: levels([25, 100, 300, 700, 1500]) },
 ];
 
 export const ONE_SHOT_ACHIEVEMENTS: readonly OneShotAchievementDefinition[] = [
@@ -197,15 +202,17 @@ export const ONE_SHOT_ACHIEVEMENTS: readonly OneShotAchievementDefinition[] = [
   { id: "perfect_win_streak_3", type: "ONE_SHOT", scope: "SOLO_RANKED", condition: "perfect_win_streak_3", ...achievementText("perfect_win_streak_3"), titleEnabled: true, ap: 100, rarity: "LEGENDARY" },
   { id: "placement_complete", type: "ONE_SHOT", scope: "SOLO_RANKED", condition: "placement_complete", ...achievementText("placement_complete"), titleEnabled: true, ap: 10, rarity: "COMMON" },
   { id: "survival_first_match", type: "ONE_SHOT", scope: "SURVIVAL", condition: "survival_first_match", ...achievementText("survival_first_match"), titleEnabled: true, ap: 10, rarity: "COMMON" },
-  { id: "survival_first_podium", type: "ONE_SHOT", scope: "SURVIVAL", condition: "survival_first_podium", ...achievementText("survival_first_podium"), titleEnabled: true, ap: 10, rarity: "COMMON" },
-  { id: "survival_first_win", type: "ONE_SHOT", scope: "SURVIVAL", condition: "survival_first_win", ...achievementText("survival_first_win"), titleEnabled: true, ap: 25, rarity: "RARE" },
-  { id: "survival_cutoff_escape", type: "ONE_SHOT", scope: "SURVIVAL", condition: "survival_cutoff_escape", ...achievementText("survival_cutoff_escape"), titleEnabled: true, ap: 25, rarity: "RARE" },
-  { id: "survival_final_photo_finish", type: "ONE_SHOT", scope: "SURVIVAL", condition: "survival_final_photo_finish", ...achievementText("survival_final_photo_finish"), titleEnabled: true, ap: 50, rarity: "EPIC" },
-  { id: "survival_round_perfect", type: "ONE_SHOT", scope: "SURVIVAL", condition: "survival_round_perfect", ...achievementText("survival_round_perfect"), titleEnabled: true, ap: 50, rarity: "EPIC" },
+  { id: "survival_first_podium", type: "ONE_SHOT", scope: "SURVIVAL", condition: "survival_first_podium", ...achievementText("survival_first_podium"), titleEnabled: true, ap: 25, rarity: "RARE" },
+  { id: "survival_first_win", type: "ONE_SHOT", scope: "SURVIVAL", condition: "survival_first_win", ...achievementText("survival_first_win"), titleEnabled: true, ap: 50, rarity: "EPIC" },
+  { id: "survival_cutoff_escape", type: "ONE_SHOT", scope: "SURVIVAL", condition: "survival_cutoff_escape", ...achievementText("survival_cutoff_escape"), titleEnabled: true, ap: 10, rarity: "COMMON" },
+  { id: "survival_round_perfect", type: "ONE_SHOT", scope: "SURVIVAL", condition: "survival_round_perfect", ...achievementText("survival_round_perfect"), titleEnabled: true, ap: 25, rarity: "RARE" },
   { id: "survival_clean_champion", type: "ONE_SHOT", scope: "SURVIVAL", condition: "survival_clean_champion", ...achievementText("survival_clean_champion"), titleEnabled: true, ap: 100, rarity: "LEGENDARY" },
-  { id: "survival_last_seed_champion", type: "ONE_SHOT", scope: "SURVIVAL", condition: "survival_last_seed_champion", ...achievementText("survival_last_seed_champion"), titleEnabled: true, ap: 100, rarity: "LEGENDARY" },
-  { id: "survival_final_perfect_win", type: "ONE_SHOT", scope: "SURVIVAL", condition: "survival_final_perfect_win", ...achievementText("survival_final_perfect_win"), titleEnabled: true, ap: 200, rarity: "MYTHIC" },
-  { id: "survival_never_below_cutoff", type: "ONE_SHOT", scope: "SURVIVAL", condition: "survival_never_below_cutoff", ...achievementText("survival_never_below_cutoff"), titleEnabled: true, ap: 200, rarity: "MYTHIC" },
+  { id: "survival_final_perfect_win", type: "ONE_SHOT", scope: "SURVIVAL", condition: "survival_final_perfect_win", ...achievementText("survival_final_perfect_win"), titleEnabled: true, ap: 100, rarity: "LEGENDARY" },
+  { id: "survival_underdog", type: "ONE_SHOT", scope: "SURVIVAL", condition: "survival_underdog", ...achievementText("survival_underdog"), titleEnabled: true, ap: 50, rarity: "EPIC" },
+  { id: "survival_deathmatch_entry", type: "ONE_SHOT", scope: "SURVIVAL", condition: "survival_deathmatch_entry", ...achievementText("survival_deathmatch_entry"), titleEnabled: true, ap: 50, rarity: "EPIC" },
+  { id: "survival_secret_1", type: "ONE_SHOT", scope: "SURVIVAL", condition: "survival_secret_1", ...achievementText("survival_secret_1"), titleEnabled: true, ap: 75, rarity: "EPIC", hidden: true },
+  { id: "survival_true_champion", type: "ONE_SHOT", scope: "SURVIVAL", condition: "survival_true_champion", ...achievementText("survival_true_champion"), titleEnabled: true, ap: 200, rarity: "MYTHIC" },
+  { id: "survival_secret_2", type: "ONE_SHOT", scope: "SURVIVAL", condition: "survival_secret_2", ...achievementText("survival_secret_2"), titleEnabled: true, ap: 200, rarity: "MYTHIC", hidden: true },
   { id: "dual_mode_debut", type: "ONE_SHOT", scope: "SHARED", condition: "dual_mode_debut", ...achievementText("dual_mode_debut"), titleEnabled: true, ap: 10, rarity: "COMMON" },
   { id: "dual_mode_winner", type: "ONE_SHOT", scope: "SHARED", condition: "dual_mode_winner", ...achievementText("dual_mode_winner"), titleEnabled: true, ap: 25, rarity: "RARE" },
   { id: "dual_gold_reached", type: "ONE_SHOT", scope: "SHARED", condition: "dual_gold_reached", ...achievementText("dual_gold_reached"), titleEnabled: true, ap: 100, rarity: "LEGENDARY" },

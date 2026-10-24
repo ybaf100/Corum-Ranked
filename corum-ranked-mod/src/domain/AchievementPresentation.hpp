@@ -93,6 +93,24 @@ inline std::string achievementScopeName(std::string_view scope, bool korean) {
     return corum::ranked::catalogText("inline.unclassified", korean, "Unclassified");
 }
 
+inline std::string achievementScopedName(std::string_view scope, std::string name, bool korean) {
+    if (scope.empty()) return name;
+    auto const prefix = "[" + achievementScopeName(scope, korean) + "] ";
+    return name.starts_with(prefix) ? name : prefix + name;
+}
+
+template<class Card> inline std::string achievementCardName(Card const& card, bool korean) {
+    if (card.concealed) return catalogText("achievement-hidden", korean, "HIDDEN");
+    return achievementScopedName(card.scope, catalogText("achievement." + card.id + ".name", korean,
+        (korean ? card.nameKo : card.nameEn).c_str()), korean);
+}
+
+template<class Card> inline std::string achievementCardDescription(Card const& card, bool korean) {
+    // Never look up the real local description of an unrevealed Hidden card.
+    return catalogText("achievement." + card.id + (card.concealed ? ".hint" : ".description"), korean,
+        (korean ? card.descriptionKo : card.descriptionEn).c_str());
+}
+
 template<class Cards>
 inline std::vector<std::size_t> achievementDisplayOrderForScope(Cards const& cards, std::string_view scope) {
     auto order = achievementDisplayOrder(cards);

@@ -52,7 +52,7 @@ beforeAll(async()=>{pg=new PGlite();db=new PgliteDatabase(pg);
 },60000);
 afterAll(async()=>{await pg.close();});
 beforeEach(async()=>{
-  await db.query("UPDATE ranked_achievement_versions SET activated_at='2000-01-01',debug_enabled_at='2000-01-01'");
+  await db.query("UPDATE ranked_achievement_versions SET activated_at='2000-01-01',debug_enabled_at='2000-01-01',overhaul_activated_at='2000-01-01'");
   modRestrictionEnabled=true;
   await pg.exec("TRUNCATE ranked_players,sur_matches CASCADE");now=Date.parse("2026-10-11T12:00:00Z");sequence=100;mapId=40000000;
   document={generation:"m4",generatedAt:clock.now().toISOString(),config:{...DEFAULT_SURVIVAL_CONFIG,enabled:true}};

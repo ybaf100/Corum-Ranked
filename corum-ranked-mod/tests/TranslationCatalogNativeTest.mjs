@@ -10,7 +10,7 @@ const read=p=>readFileSync(join(root,p),'utf8');
 const ui=JSON.parse(read('ranked/translations/ui.json'));
 const achievements=JSON.parse(read('ranked/translations/achievements.json'));
 
-test('all editable en/ko keys and 46 achievement names/descriptions resolve through the actual native catalog',()=>{
+test('all editable en/ko keys and 48 achievement names/descriptions resolve through the actual native catalog',()=>{
  const dir=mkdtempSync(join(tmpdir(),'corum-translations-native-'));
  try{
   writeFileSync(join(dir,'test.cpp'),`#include "domain/TranslationCatalog.hpp"
@@ -25,7 +25,7 @@ int main(){for(auto const& entry:kTranslations){assert(catalogTranslation(entry.
   execFileSync('g++',['-std=c++23','-Wall','-Wextra','-Werror','-I',join(root,'corum-ranked-mod/src'),join(dir,'test.cpp'),'-o',join(dir,'test')],{stdio:'pipe'});
   execFileSync(join(dir,'test'),[],{stdio:'pipe'});
  }finally{rmSync(dir,{recursive:true,force:true});}
- assert.equal(Object.keys(achievements).length,46);
+ assert.equal(Object.keys(achievements).length,48);
  execFileSync('node',[join(root,'ranked/tools/localization/build.mjs'),'--check'],{stdio:'pipe'});
 });
 

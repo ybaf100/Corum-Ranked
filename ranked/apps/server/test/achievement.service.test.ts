@@ -73,7 +73,7 @@ beforeAll(async () => {
     const path = fileURLToPath(new URL(`../../../migrations/${migration}`, import.meta.url));
     await pglite.exec(await readFile(path, "utf8"));
   }
-  await database.query("UPDATE ranked_achievement_versions SET activated_at='2000-01-01',debug_enabled_at='2000-01-01'");
+  await database.query("UPDATE ranked_achievement_versions SET activated_at='2000-01-01',debug_enabled_at='2000-01-01',overhaul_activated_at='2000-01-01'");
   service = new AchievementService(database, new FixedClock(), new SequenceIds());
 }, 60_000);
 
@@ -82,7 +82,7 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await database.query("UPDATE ranked_achievement_versions SET activated_at='2000-01-01',debug_enabled_at='2000-01-01'");
+  await database.query("UPDATE ranked_achievement_versions SET activated_at='2000-01-01',debug_enabled_at='2000-01-01',overhaul_activated_at='2000-01-01'");
   await pglite.exec("TRUNCATE TABLE ranked_config_snapshots, ranked_players CASCADE");
   await database.query(
     `INSERT INTO ranked_players (id, gd_account_id, gd_username) VALUES
@@ -342,10 +342,10 @@ const seedReward = async (id: string, level = 0, ap = 10) => database.query(
    VALUES($1,$2,$3,$4,CURRENT_TIMESTAMP,'v2-fixture')`, [playerA,id,level,ap]);
 
 describe('Achievement v2 Claim All and cutover', () => {
-  it('returns all 46 cards partitioned 20/18/8 and rejects unknown scopes', async () => {
+  it('returns all 48 cards partitioned 20/19/9 and rejects unknown scopes', async () => {
     const state=await service.state(playerA);
-    expect(state.achievements).toHaveLength(46);
-    expect(['SOLO_RANKED','SURVIVAL','SHARED'].map(scope=>state.achievements.filter(a=>a.scope===scope).length)).toEqual([20,18,8]);
+    expect(state.achievements).toHaveLength(48);
+    expect(['SOLO_RANKED','SURVIVAL','SHARED'].map(scope=>state.achievements.filter(a=>a.scope===scope).length)).toEqual([20,19,9]);
     await expect(service.claimAll(playerA,'FORGED' as never)).rejects.toThrow('scope');
   });
   it('claims only the selected scope, snapshots AP, groups levels and preserves equipped titles', async () => {
@@ -391,7 +391,7 @@ describe('Achievement v2 Claim All and cutover', () => {
     await database.transaction(tx=>service.recordMatchResult(tx,'debug',[baseFacts({playerId:playerB,won:true,reachedGold:true})],new FixedClock().now()));
     expect((await service.state(playerA)).unclaimedRewardCount).toBe(0);expect((await service.state(playerB)).unclaimedRewardCount).toBe(0);
     expect((await database.query('SELECT * FROM ranked_achievement_events')).rows).toHaveLength(0);
-    await expect(service.equipTitle(playerA,'survival_never_below_cutoff')).rejects.toThrow('locked');
+    await expect(service.equipTitle(playerA,'survival_secret_2')).rejects.toThrow('locked');
   });
 });
 
@@ -402,6 +402,7 @@ it('resets v1 achievement data once at cutover, preserves LP/MMR/account data an
  const rating=(await database.query('SELECT player_id,hidden_mmr,visible_ranked_score,displayed_tier,placement_games FROM ranked_profiles ORDER BY player_id')).rows;
  await database.query('DELETE FROM ranked_achievement_versions'); // Test an actual first deployment over populated v1 state.
  const sql=await readFile(new URL('0027_achievements_v2.sql',directory),'utf8');await pglite.exec(sql);
+ await pglite.exec(await readFile(new URL('0029_achievement_survival_overhaul.sql',directory),'utf8'));
  expect((await database.query('SELECT * FROM ranked_players ORDER BY id')).rows).toEqual(identity);
  expect((await database.query('SELECT player_id,hidden_mmr,visible_ranked_score,displayed_tier,placement_games FROM ranked_profiles ORDER BY player_id')).rows).toEqual(rating);
  expect((await service.state(playerA))).toMatchObject({totalAp:0,unclaimedRewardCount:0,equippedTitle:null});
@@ -412,19 +413,20 @@ it('resets v1 achievement data once at cutover, preserves LP/MMR/account data an
  await pglite.exec(sql);
  expect((await database.query('SELECT * FROM ranked_achievement_versions')).rows).toEqual(cutover);
  expect((await service.state(playerA))).toMatchObject({totalAp:10,unclaimedRewardCount:0,equippedTitle:{achievementId:'survival_first_match'}});
- await database.query("UPDATE ranked_achievement_versions SET activated_at='2000-01-01',debug_enabled_at='2000-01-01'");
+ await database.query("UPDATE ranked_achievement_versions SET activated_at='2000-01-01',debug_enabled_at='2000-01-01',overhaul_activated_at='2000-01-01'");
 });
 it('derives all shared goals from separate post-cutover aggregates without merging LP/MMR',async()=>{
  await service.state(playerA);
  const rating=(await database.query('SELECT hidden_mmr,visible_ranked_score FROM ranked_profiles WHERE player_id=$1',[playerA])).rows;
  // Persisted aggregates are reconstructed by the server, independently in each mode.
  await database.query(`UPDATE ranked_achievement_metrics SET ranked_matches=20,ranked_wins=5,ranked_clears=1000,
-  survival_matches=25,survival_wins=50,survival_round_survives=100,solo_gold_reached=TRUE,survival_gold_reached=TRUE WHERE player_id=$1`,[playerA]);
+  survival_matches=25,survival_wins=50,survival_round_survives=100,ranked_rounds_played=1000,survival_rounds_played=100,survival_perfect_rounds=10,solo_gold_reached=TRUE,survival_gold_reached=TRUE WHERE player_id=$1`,[playerA]);
  await database.transaction(tx=>service.recordMatchResult(tx,'00000000-0000-4000-8000-000000000060',[baseFacts()],new FixedClock().now()));
  const state=await service.state(playerA),shared=state.achievements.filter(c=>c.scope==='SHARED');
  expect(shared.find(c=>c.id==='shared_matches')).toMatchObject({progress:{metricValue:46,level:1}});
  expect(shared.find(c=>c.id==='shared_wins')).toMatchObject({progress:{metricValue:55,level:2}});
  expect(shared.find(c=>c.id==='shared_mastery')).toMatchObject({progress:{metricValue:1100,level:4}});
+ expect(shared.find(c=>c.id==='shared_clears')).toMatchObject({progress:{metricValue:1010,level:4}});
  for(const id of ['dual_mode_debut','dual_mode_winner','gold_reached','dual_gold_reached','master_of_two_worlds'])expect(shared.find(c=>c.id===id)).toMatchObject({unlocked:true});
  expect((await database.query('SELECT hidden_mmr,visible_ranked_score FROM ranked_profiles WHERE player_id=$1',[playerA])).rows).toEqual(rating);
 });
@@ -447,4 +449,122 @@ it('enables Debug parity without resetting earned v2 AP/titles and excludes resu
  expect((await database.query('SELECT ranked_matches FROM ranked_achievement_metrics WHERE player_id=$1',[playerA])).rows[0]).toEqual({ranked_matches:0});
  await database.transaction(tx=>service.recordMatchResult(tx,'00000000-0000-4000-8000-000000000081',[baseFacts({won:true})],new Date('2021-01-01'),'DEBUG_BOT'));
  expect((await database.query('SELECT ranked_matches,ranked_wins FROM ranked_achievement_metrics WHERE player_id=$1',[playerA])).rows[0]).toEqual({ranked_matches:1,ranked_wins:1});
+});
+
+it('conceals Hidden names/conditions in the public state until real unlock and keeps Claim/title authority',async()=>{
+ const state=await service.state(playerA);
+ for(const [id,hint,rarity,ap] of [['survival_secret_1','일반 매치에서 달성 가능','EPIC',75],['survival_secret_2','데스매치에서 달성 가능','MYTHIC',200]] as const){
+  const card=state.achievements.find(c=>c.id===id)!;
+  expect(card).toMatchObject({hidden:true,concealed:true,nameKo:'Hidden',nameEn:'Hidden',descriptionKo:hint,titleEnabled:false,rarity,rewardAp:ap});
+  const json=JSON.stringify(card);expect(json).not.toMatch(/아직 끝나지 않았다|자강두천|10초|last 10|Titans Clash|It Is Not Over/);
+  expect(card).not.toHaveProperty('condition');
+  await expect(service.equipTitle(playerA,id)).rejects.toThrow('locked');
+  expect(await service.claim(playerA,id)).toMatchObject({claimedAmount:0,claimedRewards:0});
+ }
+ await seedReward('survival_secret_1',0,75);
+ expect((await service.state(playerA)).achievements.find(c=>c.id==='survival_secret_1')).toMatchObject({concealed:false,nameKo:'아직 끝나지 않았다',titleEnabled:true});
+ expect((await service.equipTitle(playerA,'survival_secret_1')).equippedTitle).toMatchObject({scope:'SURVIVAL',nameKo:'[서바이벌] 아직 끝나지 않았다'});
+ expect((await service.claim(playerA,'survival_secret_1')).claimedAmount).toBe(75);
+ expect((await service.claim(playerA,'survival_secret_1')).claimedAmount).toBe(0);
+ expect(service.titleProjection('last_attempt_match_win',0)).toMatchObject({scope:'SOLO_RANKED',nameKo:'[솔로 랭크] 아직 끝나지 않았다'});
+});
+
+async function seedCompletedSoloMatch(){
+ const id='00000000-0000-4000-8000-000000000200',roundId='00000000-0000-4000-8000-000000000201';
+ await database.query(`INSERT INTO ranked_matches(id,player_a_id,player_b_id,config_snapshot_id,mmr_a_before,mmr_b_before,effective_rating_average,effective_tier,candidate_maps_snapshot,series_state,state,rules_version,match_type,winner_id,result_applied_at,created_at,finished_at,rating_presentation)
+  VALUES($1,$2,$3,$4,2500,2500,2500,'RED','[]','{"roundResults":["A","A"]}','MATCH_RESULT','v1','RANKED_PVP',$2,'2026-09-13T12:00:00Z','2026-09-13T11:50:00Z','2026-09-13T12:00:00Z','{"keep":"rating","achievementUnlocks":[]}')`,[id,playerA,playerB,snapshotId]);
+ await database.query(`INSERT INTO ranked_rounds(id,match_id,round_number,level_id,canonical_level_id,playable_level_id,title,creator,difficulty,pool,qualifying_percent,phase,started_at,settled_at)
+  VALUES($1,$2,1,'40000000','40000000','40000000','fixture','fixture','NORMAL',1,50,'ROUND_RESULT','2026-09-13T11:50:00Z','2026-09-13T11:55:00Z')`,[roundId,id]);
+ for(let i=1;i<=3;i++)await database.query(`INSERT INTO ranked_attempts(id,round_id,player_id,attempt_sequence,server_accepted_start_at,ended_at,level_id,played_level_id,progress_percent,cleared,valid,domain_attempt_id,client_start_event_id)
+  VALUES($1,$2,$3,$4,'2026-09-13T11:51:00Z','2026-09-13T11:52:00Z','40000000','40000000',100,TRUE,$5,$6,$6)`,[`00000000-0000-4000-8000-${String(210+i).padStart(12,'0')}`,roundId,playerA,i,i!==3,'attempt-'+i]);
+ return {id,roundId};
+}
+it('counts an official Solo round once across many attempts and settlement/restart retries',async()=>{
+ const {id}=await seedCompletedSoloMatch();await service.state(playerA);
+ // state recovery applied this source exactly once; retries must not add rounds.
+ await database.transaction(tx=>service.recordMatchResult(tx,id,[baseFacts({won:true,rankedClears:2})],new FixedClock().now()));
+ const restarted=new AchievementService(database,new FixedClock(),new SequenceIds());
+ await database.transaction(tx=>restarted.recordMatchResult(tx,id,[baseFacts({won:true,rankedClears:2})],new FixedClock().now()));
+ const row=(await database.query('SELECT ranked_rounds_played,ranked_clears,ranked_matches FROM ranked_achievement_metrics WHERE player_id=$1',[playerA])).rows[0];
+ expect(row).toEqual({ranked_rounds_played:1,ranked_clears:2,ranked_matches:1});
+ expect((await restarted.state(playerA)).achievements.find(c=>c.id==='shared_mastery')).toMatchObject({progress:{metricValue:1}});
+ expect((await restarted.state(playerA)).achievements.find(c=>c.id==='shared_clears')).toMatchObject({progress:{metricValue:2}});
+});
+
+it('rolls back a failed overhaul, resets only achievements once, and blocks old-history resurrection',async()=>{
+ await seedCompletedSoloMatch();await service.state(playerA);await service.claimAll(playerA,'ALL');await service.equipTitle(playerA,'ranked_wins',1);
+ await database.query("INSERT INTO sur_profiles(player_id,lp,displayed_tier) VALUES($1,777,'BRONZE')",[playerA]);
+ // Full rows of every unrelated table remain identical, including accounts,
+ // actual attempts, config, LP/MMR and both mode history tables.
+ const snapshot=async()=>{
+  const tables=(await database.query<{tablename:string}>("SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename")).rows.map(t=>t.tablename)
+   .filter(t=>!t.startsWith('ranked_achievement_')&&!['ranked_ap_ledger','ranked_survival_achievement_facts'].includes(t));
+  return Object.fromEntries(await Promise.all(tables.map(async t=>{
+   const exclusions=t==='ranked_profiles'?"- 'total_ap' - 'equipped_achievement_id' - 'equipped_achievement_level'":t==='ranked_matches'?"- 'rating_presentation'":"";
+   return [t,(await database.query(`SELECT (to_jsonb(x) ${exclusions}) AS row FROM ${t} x ORDER BY (to_jsonb(x) ${exclusions})::text`)).rows];
+  })));
+ };
+ const before=await snapshot();const priorRating=(await database.query("SELECT rating_presentation-'achievementUnlocks' AS rating FROM ranked_matches")).rows;
+ await database.query('UPDATE ranked_achievement_versions SET overhaul_activated_at=NULL');
+ const achievementsBefore=(await database.query('SELECT * FROM ranked_ap_ledger')).rows;
+ const sql=await readFile(new URL('0029_achievement_survival_overhaul.sql',directory),'utf8');
+ await pglite.exec(`CREATE FUNCTION fail_reset() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.total_ap=0 THEN RAISE EXCEPTION 'injected reset failure'; END IF; RETURN NEW; END $$;
+ CREATE TRIGGER fail_reset BEFORE UPDATE ON ranked_profiles FOR EACH ROW EXECUTE FUNCTION fail_reset()`);
+ await expect(pglite.exec(sql)).rejects.toThrow('injected reset failure');await pglite.exec('ROLLBACK');
+ expect((await database.query('SELECT * FROM ranked_ap_ledger')).rows).toEqual(achievementsBefore);
+ expect((await database.query('SELECT overhaul_activated_at FROM ranked_achievement_versions')).rows[0]).toEqual({overhaul_activated_at:null});
+ await pglite.exec('DROP TRIGGER fail_reset ON ranked_profiles; DROP FUNCTION fail_reset()');
+ await pglite.exec(sql);
+ expect(await snapshot()).toEqual(before);
+ expect((await database.query("SELECT rating_presentation-'achievementUnlocks' AS rating FROM ranked_matches")).rows).toEqual(priorRating);
+ const marker=(await database.query('SELECT * FROM ranked_achievement_versions')).rows;
+ expect((await service.state(playerA))).toMatchObject({totalAp:0,unclaimedRewardCount:0,equippedTitle:null});
+ for(const table of ['ranked_ap_ledger','ranked_achievement_unlocks','ranked_achievement_events','ranked_survival_achievement_facts'])expect((await database.query(`SELECT * FROM ${table}`)).rows).toHaveLength(0);
+ // Even deleting the lazy-sync cache cannot replay pre-reset source records.
+ await database.query('DELETE FROM ranked_achievement_metrics');
+ await service.state(playerA);expect((await database.query('SELECT * FROM ranked_achievement_unlocks')).rows).toHaveLength(0);
+ await seedReward('survival_first_match');await service.claimAll(playerA,'ALL');await service.equipTitle(playerA,'survival_first_match');
+ await pglite.exec(sql);await pglite.exec(sql);
+ expect((await database.query('SELECT * FROM ranked_achievement_versions')).rows).toEqual(marker);
+ expect((await new AchievementService(database,new FixedClock(),new SequenceIds()).state(playerA))).toMatchObject({totalAp:10,equippedTitle:{achievementId:'survival_first_match'}});
+ expect(await snapshot()).toEqual(before);
+});
+
+it('persists five consecutive wins as a distinct Mythic and counts Survival perfect/played rounds once on late settlement and restart',async()=>{
+ const {createSurvivalMatch,DEFAULT_SURVIVAL_CONFIG}=await import('@corum-ranked/rules');
+ await service.state(playerA);
+ const session='00000000-0000-4000-8000-000000000300';
+ await database.query(`INSERT INTO ranked_sessions(id,player_id,token_hash,client_version,environment_snapshot,expires_at,last_heartbeat_at)
+  VALUES($1,$2,'achievement-source-fixture','v0.5.0-beta.94','{}','2030-01-01','2026-09-13')`,[session,playerA]);
+ const stored:string[]=[];
+ for(let i=1;i<=8;i++){
+  const id=`00000000-0000-4000-8000-${String(300+i).padStart(12,'0')}`,at=Date.parse('2026-09-13T11:00:00Z')+i*200_000;
+  const m=createSurvivalMatch(id,[{participantId:'human',playerId:playerA,kind:'HUMAN',name:'Human',lp:100},{participantId:'bot',playerId:null,kind:'BOT',name:'Bot',lp:100}],DEFAULT_SURVIVAL_CONFIG,'test',at,false,true);
+  const won=i!==6;m.state='FINAL_RESULT';m.finishedAt=at+180_000;m.winnerId=won?'human':'bot';m.players[0]!.finalRank=won?1:2;m.players[1]!.finalRank=won?2:1;
+  const r=m.rounds[0]!;r.startsAt=at;r.endsAt=at+180_000;r.finishedAt=r.endsAt;r.map={levelId:40_000_000} as NonNullable<typeof r.map>;
+  for(const [j,p] of r.players.entries()){
+   p.rank=j===0?(won?1:2):(won?2:1);p.qualified=p.rank===1;p.enteredAt=at;
+   p.highestProgress=j===0?(won?100:99):(won?50:100);p.attempts=[{id:'a',sequence:1,startedAt:at,endedAt:at+1000,highestProgress:p.highestProgress}];
+  }
+  await database.query(`INSERT INTO sur_matches(id,creation_key,request_hash,state,revision,config_generation,config_snapshot,average_lp,difficulty_group,current_round_key,snapshot,created_at,updated_at,finished_at)
+   VALUES($1::uuid,$1::text,'test','FINAL_RESULT',1,'test','{}',100,'RED_BRONZE','stage-1',$2::jsonb,$3,$4,$4)`,[id,JSON.stringify(m),new Date(at).toISOString(),new Date(m.finishedAt).toISOString()]);
+  await database.query(`INSERT INTO sur_debug_matches(match_id,human_player_id,admission_session_id,seed,average_group,human_actual_lp,last_seen_at,result,settled_at,created_at)
+   VALUES($1,$2,$3,1,'RED_BRONZE',100,$4,'{"profileAfter":{"tier":"BRONZE"}}',$4,$4)`,[id,playerA,session,new Date(m.finishedAt).toISOString()]);
+  stored.push(id);
+ }
+ const apply=async(id:string)=>database.transaction(tx=>service.recordSurvivalResult(tx,id,playerA,new FixedClock().now()));
+ for(const i of [3,0,4,2])await apply(stored[i]!);
+ expect((await service.state(playerA)).achievements.find(c=>c.id==='survival_true_champion')).toMatchObject({unlocked:false});
+ const notices=await apply(stored[1]!);
+ expect(notices).toEqual(expect.arrayContaining([expect.objectContaining({achievementId:'survival_true_champion',rarity:'MYTHIC',rewardAp:200,scope:'SURVIVAL'})]));
+ expect((await service.claim(playerA,'survival_true_champion')).claimedAmount).toBe(200);
+ const restarted=new AchievementService(database,new FixedClock(),new SequenceIds());
+ await database.transaction(tx=>restarted.recordSurvivalResult(tx,stored[1]!,playerA,new FixedClock().now()));
+ expect((await restarted.claim(playerA,'survival_true_champion')).claimedAmount).toBe(0);
+ for(const i of [5,6,7])await apply(stored[i]!);
+ expect((await database.query(`SELECT survival_matches,survival_wins,survival_rounds_played,survival_perfect_rounds,current_survival_win_streak,survival_win_streak,survival_podium_streak FROM ranked_achievement_metrics WHERE player_id=$1`,[playerA])).rows[0]).toEqual({survival_matches:8,survival_wins:7,survival_rounds_played:8,survival_perfect_rounds:7,current_survival_win_streak:2,survival_win_streak:5,survival_podium_streak:8});
+ const state=await service.state(playerA);
+ expect(state.achievements.find(c=>c.id==='shared_mastery')).toMatchObject({progress:{metricValue:8}});
+ expect(state.achievements.find(c=>c.id==='shared_clears')).toMatchObject({progress:{metricValue:7}});
+ expect(state.achievements.map(c=>String(c.id)).includes('survival_win_streak')).toBe(false);
 });

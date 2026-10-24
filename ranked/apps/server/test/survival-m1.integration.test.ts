@@ -49,7 +49,7 @@ beforeAll(async()=>{
 afterAll(async()=>{await pg.close();});
 beforeEach(async()=>{
   await database.query("TRUNCATE ranked_players,ranked_config_snapshots CASCADE");
-  await database.query("UPDATE ranked_achievement_versions SET activated_at='2000-01-01',debug_enabled_at='2000-01-01'");
+  await database.query("UPDATE ranked_achievement_versions SET activated_at='2000-01-01',debug_enabled_at='2000-01-01',overhaul_activated_at='2000-01-01'");
   milliseconds=Date.parse("2026-10-11T10:00:00Z"); sequence=100;
   soloDocument=configDocumentFixture("solo-m1");
   survivalDocument={generation:"sur-m1",generatedAt:clock.now().toISOString(),config:structuredClone(DEFAULT_SURVIVAL_CONFIG)};
@@ -123,7 +123,7 @@ describe("Survival M1 independent profiles and LP",()=>{
     expect((await survival.profile(player.playerId)).profile).toMatchObject({lp:1250,tier:"GOLD",demotionWarning:false});
     await database.transaction(transaction=>achievements.recordPlacementCompletion(transaction,player.playerId,ids.next(),true,clock.now()));
     const state=await achievements.state(player.playerId);
-    expect(state.achievements.filter(card=>card.scope==="SHARED")).toHaveLength(8);
+    expect(state.achievements.filter(card=>card.scope==="SHARED")).toHaveLength(9);
     expect(state.achievements.filter(card=>card.scope==="SOLO_RANKED")).toHaveLength(20);
     expect(state.achievements.find(card=>card.id==="gold_reached")?.unlocks).toHaveLength(1);
     const claims=await Promise.all([achievements.claim(player.playerId,"gold_reached"),achievements.claim(player.playerId,"gold_reached")]);

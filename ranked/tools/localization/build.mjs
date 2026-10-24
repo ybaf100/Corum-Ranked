@@ -32,7 +32,7 @@ function validate(key,pair){
  }
 }
 for(const [key,pair] of Object.entries(ui))validate(key,pair);
-for(const [id,entry] of Object.entries(achievements))for(const field of ['name','description']){
+for(const [id,entry] of Object.entries(achievements))for(const field of ['name','description',...('hint' in entry?['hint']:[])]){
  const key=`achievement.${id}.${field}`;validate(key,entry[field]);
  if(key in ui)throw new Error(`Duplicate achievement key: ${key}`);ui[key]=entry[field];
 }
@@ -80,5 +80,5 @@ if(target!=='rules')output(resolve(ranked,'../corum-ranked-mod/src/domain/Transl
  '\n};\n} // namespace corum::ranked\n');
 if(target!=='client')output(resolve(ranked,'packages/rules/src/achievement-translations.generated.ts'),
  `// ${notice}\nconst translations = ${JSON.stringify(achievements,null,2)} as const;\n`+
- 'export function achievementText(id: keyof typeof translations) {\n  const text=translations[id];\n  return {nameKo:text.name.ko,nameEn:text.name.en,descriptionKo:text.description.ko,descriptionEn:text.description.en};\n}\n');
+ 'export function achievementText(id: keyof typeof translations) {\n  const text=translations[id];\n  return {nameKo:text.name.ko,nameEn:text.name.en,descriptionKo:text.description.ko,descriptionEn:text.description.en,...("hint" in text?{hintKo:text.hint.ko,hintEn:text.hint.en}:{})};\n}\n');
 console.log(`Translations: ${Object.keys(ui).length} UI keys, ${Object.keys(achievements).length} achievements (${target}, ${check?'checked':'generated'})`);

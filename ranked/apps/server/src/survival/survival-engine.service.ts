@@ -2,7 +2,7 @@ import { lockSurvivalAdmission,assertSurvivalAdmission } from "./survival-admiss
 import { createHash } from "node:crypto";
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, Logger,
   NotFoundException, type OnApplicationBootstrap, type OnApplicationShutdown } from "@nestjs/common";
-import { createSurvivalMatch, reduceSurvivalMatch, survivalMapSelectionTarget, survivalCurrentRound, survivalLiveView, survivalMilliPercent,
+import { observeSurvivalAchievementCheckpoint, recoverSurvivalAchievementCheckpoint, createSurvivalMatch, reduceSurvivalMatch, survivalMapSelectionTarget, survivalCurrentRound, survivalLiveView, survivalMilliPercent,
   type SurvivalVerifiedMap, type SurvivalCommand, type SurvivalEntrant, type SurvivalMatch } from "@corum-ranked/rules";
 import { ID_GENERATOR, SERVER_CLOCK, type IdGenerator, type ServerClock } from "../common/runtime.module.js";
 import { SurvivalConfigService, type SurvivalConfigDocument } from "../config/survival-config.service.js";
@@ -34,7 +34,9 @@ export class SurvivalEngineService implements OnApplicationBootstrap, OnApplicat
   private readonly adapters:SurvivalMatchAdapter[]=[];
   public registerAdapter(adapter:SurvivalMatchAdapter):void { this.adapters.push(adapter); }
   private async adapt(tx:SqlExecutor,match:SurvivalMatch,now:number):Promise<SurvivalMatch> {
+    match=observeSurvivalAchievementCheckpoint(match,now);
     for(const adapter of this.adapters)match=await adapter(tx,match,now);
+    match=recoverSurvivalAchievementCheckpoint(match,now);
     return match;
   }
   public constructor(@Inject(DATABASE) private readonly database:DatabasePort,
@@ -226,7 +228,7 @@ export class SurvivalEngineService implements OnApplicationBootstrap, OnApplicat
           (sur_matches.state='PREPARING' AND r.preparation_started_at + INTERVAL '15 seconds' <= $1) OR
           (sur_matches.state='ENTERING' AND COALESCE(r.first_entered_at + INTERVAL '10 seconds',r.entry_requested_at + INTERVAL '5 seconds') <= $1) OR
           (sur_matches.state='COUNTDOWN' AND r.starts_at <= $1) OR
-          (sur_matches.state='PLAYING' AND r.ends_at <= $1)))) ORDER BY updated_at,id`,[this.clock.now().toISOString()]);
+          (sur_matches.state='PLAYING' AND (r.ends_at <= $1 OR (r.achievement_checkpoint IS NULL AND r.phase NOT IN ('FINAL','TIEBREAK') AND r.target_qualifiers < (SELECT COUNT(*) FROM sur_round_players p WHERE p.match_id=r.match_id AND p.round_key=r.round_key) AND r.ends_at - INTERVAL '10 seconds' <= $1)))))) ORDER BY updated_at,id`,[this.clock.now().toISOString()]);
     for(const row of rows.rows){
       try{const match=await this.tick(row.id);
         this.ensureMapSelection(match);
@@ -243,6 +245,11 @@ export class SurvivalEngineService implements OnApplicationBootstrap, OnApplicat
     await this.project(tx,before,match);
   }
   private async project(tx:SqlExecutor,before:SurvivalMatch|null,match:SurvivalMatch):Promise<void> {
+    for(const round of match.rounds) {
+      if(changed(before?.rounds.find(r=>r.key===round.key)?.achievementCheckpoint,round.achievementCheckpoint) && round.achievementCheckpoint) {
+        await tx.query("UPDATE sur_rounds SET achievement_checkpoint=$3::jsonb WHERE match_id=$1 AND round_key=$2",[match.id,round.key,JSON.stringify(round.achievementCheckpoint)]);
+      }
+    }
     for(const p of match.players){
       if(!changed(before?.players.find(old=>old.participantId===p.participantId),p) && before?.state===match.state)continue;
       const status=match.state==="FINAL_RESULT"?"FINISHED":match.state==="CANCELLED"?"CANCELLED":p.eliminationStage===null?"ACTIVE":"ELIMINATED";
