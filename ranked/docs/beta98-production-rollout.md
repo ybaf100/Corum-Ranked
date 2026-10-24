@@ -14,8 +14,8 @@ Source base `41fbc5f257be85de72b4705708e7492047e925fe` (PR #34); user authorized
 - [x] Release R2 publishing successful
 - [x] Debug R2 publishing successful
 - [x] Public descriptors and immutable package hashes verified
-- [ ] Singapore Lightsail server activated and healthy
-- [ ] Live version `v0.5.0-beta.98` verified
+- [x] Singapore Lightsail server activated and healthy
+- [x] Live version `v0.5.0-beta.98` verified
 
 
 ## Verified immutable package publication
@@ -34,3 +34,13 @@ Source base `41fbc5f257be85de72b4705708e7492047e925fe` (PR #34); user authorized
 - The docs-only commit carrying `[deploy-lightsail] [build only]` activates Singapore only after both R2 channels succeeded.
 - This deploy changes the server-required client version to `v0.5.0-beta.98`; no production reset or schema migrations are requested.
 - Verify actual deploy run and live public version before checking boxes above.
+
+## Verified Singapore activation — 2026-10-24
+
+- Deployment commit: `26572ba223d80eb74a1b5cdb9b3c3d0e184ca315` (documentation-only relative to release source); [Lightsail deploy workflow](https://github.com/ybaf100/Corum-Ranked/actions/runs/40109310269) **success**, including pinned SSH, Docker build, upload, activate and health check.
+- `https://api.52-74-37-130.sslip.io/health`: status `ok`.
+- `https://api.52-74-37-130.sslip.io/ready`: `ready`, `databaseConnected`, `databaseReady`, `schemaReady`, `rankedReady` are all true, missingSchema empty.
+- Public Singapore `/api/ranked/config`: `requiredClientVersion=v0.5.0-beta.98`, both `modUpdates.debug.version` and `modUpdates.release.version` are `v0.5.0-beta.98` after warm-up.
+- Legacy Railway upgrade-only bridge `/api/ranked/config`: same beta.98 required version and both channel descriptors, no gameplay/DB writer.
+- First API probe just after startup briefly returned required beta.98 with previous beta.97 `modUpdates` while descriptor readiness was being asynchronously populated; subsequent probes showed both beta.98 descriptors. Consider a separate follow-up if this transient client update mismatch affects UX.
+- No operator setting changes, database resets, or Neon endpoint changes. No physical-device test claimed. Public descriptor metadata was independently read; complete binary SHA-256 was verified by the successful packaging/publishing workflow, not independently re-downloaded in this session.
