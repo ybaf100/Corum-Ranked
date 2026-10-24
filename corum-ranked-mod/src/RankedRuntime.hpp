@@ -254,6 +254,9 @@ struct PlacementView {
 };
 
 struct HistoryMatchView {
+    matjson::Value record;
+    bool detailsLoaded=false,inProgress=false,debug=false;
+    std::string createdAt;
     int survivalRank=0;
     matjson::Value survivalRecord;
     RankedMode mode = RankedMode::SoloRanked;
@@ -450,6 +453,8 @@ struct RuntimeView {
     PlacementView placement;
     MatchView match;
     bool historyLoading = false;
+    bool historyDetailLoading = false;
+    std::string historyDetailError;
     HistoryScope historyScope = HistoryScope::All;
     std::uint64_t historyRevision = 0;
     std::string historyError;
@@ -500,6 +505,9 @@ public:
     void queueAgain();
     void fetchHistory(RankedMode mode = RankedMode::SoloRanked);
     void fetchHistoryScope(HistoryScope scope);
+    void setHistoryFilters(std::string order,std::string result);
+    void fetchHistoryDetail(RankedMode mode,std::string const& matchId,bool refresh=false);
+    void cancelHistoryReads();
     void fetchSurvivalProfile();
     void fetchModeAvailability();
     void fetchStanding();
@@ -730,6 +738,9 @@ private:
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_controlRequest;
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_historyRequest;
     std::uint64_t m_historyGeneration = 0;
+    geode::async::TaskHolder<geode::utils::web::WebResponse> m_historyDetailRequest;
+    std::uint64_t m_historyDetailGeneration=0;
+    std::string m_historyOrder="NEWEST",m_historyResult="ALL",m_historyDetailMatch;
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_pollRequest;
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_attemptRequest;
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_attemptIntentRequest;

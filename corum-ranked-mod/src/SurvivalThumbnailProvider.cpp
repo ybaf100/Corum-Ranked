@@ -7,7 +7,7 @@
 using namespace geode::prelude;
 namespace corum::ranked {
 namespace {
-SurvivalThumbnailProvider* liveProvider=nullptr;std::uint64_t appEpoch=0;
+SurvivalThumbnailProvider* liveProvider=nullptr;SurvivalThumbnailProvider* historyProvider=nullptr;std::uint64_t appEpoch=0;
 std::optional<std::string> thumbnailHeader(web::WebResponse const& response,std::string_view wanted){
     // Geode preserves the wire spelling and its header() lookup is case
     // sensitive. HTTP/2 sends lower-case names; HTTP field names are not.
@@ -22,6 +22,7 @@ std::optional<std::string> thumbnailHeader(web::WebResponse const& response,std:
 std::uint64_t SurvivalThumbnailProvider::applicationEpoch(){return appEpoch;}
 void SurvivalThumbnailProvider::onApplicationPause(){
     ++appEpoch;if(liveProvider){liveProvider->deactivate();liveProvider->m_invalidTextureCache=true;}
+    if(historyProvider){historyProvider->deactivate();historyProvider->m_invalidTextureCache=true;}
 }
 std::int64_t SurvivalThumbnailProvider::now(){return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();}
 std::string SurvivalThumbnailProvider::key(Job const& job){return std::to_string(job.id)+(job.medium?"-medium":"-small");}
@@ -35,6 +36,15 @@ SurvivalThumbnailProvider& SurvivalThumbnailProvider::get(){
     static auto* owner=[](){auto* p=new SurvivalThumbnailProvider;p->init();liveProvider=p;
         p->m_directory=Mod::get()->getSaveDir()/"survival-thumbnails-v1";
         std::error_code ec;std::filesystem::create_directories(p->m_directory,ec);p->trimDisk();
+        CCDirector::sharedDirector()->getScheduler()->scheduleUpdateForTarget(p,0,false);return p;}();
+    return *owner;
+}
+SurvivalThumbnailProvider& SurvivalThumbnailProvider::history(){
+    static auto* owner=[](){auto* p=new SurvivalThumbnailProvider;p->init();p->m_history=true;historyProvider=p;
+        // Reuse the bounded decoder, HTTP validation, negative cache and disk
+        // cache without taking the live Survival reveal's request context.
+        p->m_directory=Mod::get()->getSaveDir()/"survival-thumbnails-v1";
+        std::error_code ec;std::filesystem::create_directories(p->m_directory,ec);
         CCDirector::sharedDirector()->getScheduler()->scheduleUpdateForTarget(p,0,false);return p;}();
     return *owner;
 }
@@ -164,7 +174,7 @@ void SurvivalThumbnailProvider::cache(Decode const& work,Decoded decoded){
 }
 void SurvivalThumbnailProvider::trim(){
     auto total=[&]{std::size_t n=0;for(auto const& [k,e]:m_cache)n+=e.bytes;return n;};
-    while(m_cache.size()>12 || total()>16*1024*1024){
+    while(m_cache.size()>(m_history?4:12) || total()>(m_history?8:16)*1024*1024){
         auto victim=m_cache.end();for(auto it=m_cache.begin();it!=m_cache.end();++it){
             auto const pooled=!it->second.medium && std::find(m_candidates.begin(),m_candidates.end(),it->second.id)!=m_candidates.end();
             auto const victimPooled=victim!=m_cache.end() && !victim->second.medium && std::find(m_candidates.begin(),m_candidates.end(),victim->second.id)!=m_candidates.end();
@@ -206,7 +216,7 @@ void SurvivalThumbnailProvider::update(float){
         static_cast<int>(m_encoded.size())+static_cast<int>(m_decode.has_value());
     // Download a bounded pool during the first intro only. Later rounds rotate
     // these cached images instead of racing a new random download against a reel.
-    if(m_reveal==m_poolReveal && smallThumbnailCount+outstanding<10 && m_randomRequests<20 && m_httpRequests<40 && m_jobs.size()<3)enqueue({0,false,true});
+    if(!m_history && m_reveal==m_poolReveal && smallThumbnailCount+outstanding<10 && m_randomRequests<20 && m_httpRequests<40 && m_jobs.size()<3)enqueue({0,false,true});
     auto selectedDisk=[&](Job const& job){return !job.random && !job.network && job.id==m_selected;};
     auto const awaitingSelectedDisk=std::any_of(m_jobs.begin(),m_jobs.end(),selectedDisk) ||
         std::any_of(m_encoded.begin(),m_encoded.end(),[&](auto const& e){return selectedDisk(e.job);}) ||

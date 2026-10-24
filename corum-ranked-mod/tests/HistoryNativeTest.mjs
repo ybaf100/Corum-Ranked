@@ -63,12 +63,14 @@ ${history}
 int parseRoundSummary(matjson::Value const&){return 1;}int parseDeathmatchSummary(matjson::Value const&){return 2;}
 struct RankedRuntime {
  std::string m_sessionToken="session";bool m_rankedOpen=true,m_controlBusy=true;std::uint64_t m_sessionGeneration=1,m_historyGeneration=0;
- geode::async::TaskHolder<web::WebResponse> m_historyRequest;
- struct {bool historyLoading=false;HistoryScope historyScope=HistoryScope::All;std::string historyError;
+ geode::async::TaskHolder<web::WebResponse> m_historyRequest,m_historyDetailRequest;
+ std::uint64_t m_historyDetailGeneration=0;std::string m_historyOrder="NEWEST",m_historyResult="ALL",m_historyDetailMatch;
+ struct {bool historyDetailLoading=false;std::string historyDetailError;bool historyLoading=false;HistoryScope historyScope=HistoryScope::All;std::string historyError;
    std::uint64_t revision=0,historyRevision=0;std::vector<HistoryMatchView> history;}m_view;
  std::string endpoint(std::string url)const{return url;}void observeServerNow(matjson::Value const&){}
  void fetchHistory(RankedMode);void fetchHistoryScope(HistoryScope);
 };
+${method(runtime, 'static corum::ranked::HistoryMatchView parseHistoryMatch(')}
 ${method(runtime, 'void RankedRuntime::fetchHistory(')}
 ${method(runtime, 'void RankedRuntime::fetchHistoryScope(')}
 }
@@ -81,7 +83,7 @@ matjson::Value response(std::string scope,std::string id="match"){
 }
 int main(){using namespace corum::ranked;
  RankedRuntime r;r.fetchHistoryScope(HistoryScope::All);auto all=web::jobs.back();
- assert(all->request.url=="/api/ranked/history?scope=ALL"&&r.m_controlBusy&&r.m_view.historyLoading);
+ assert(all->request.url=="/api/ranked/history?scope=ALL&summary=true&order=NEWEST&result=ALL"&&r.m_controlBusy&&r.m_view.historyLoading);
  r.fetchHistoryScope(HistoryScope::Survival);auto sur=web::jobs.back();assert(all->cancelled);
  r.fetchHistory(RankedMode::SoloRanked);auto solo=web::jobs.back();assert(sur->cancelled);
  all->callback({200,response("ALL","stale")});sur->callback({500,{}});
@@ -108,15 +110,16 @@ test('real lobby callbacks choose contextual history/achievement tabs and preser
     run(`
 #include <cassert>
 #include <string>
+#include <optional>
 #include "domain/RankedMode.hpp"
 using namespace corum::ranked;
 struct CCObject{int tag=0;int getTag()const{return tag;}};
 struct RankedRuntime{int reads=0,achievements=0;HistoryScope scope=HistoryScope::All;
- static RankedRuntime&get(){static RankedRuntime r;return r;}void fetchHistoryScope(HistoryScope s){++reads;scope=s;}void fetchAchievements(){++achievements;}};
+ static RankedRuntime&get(){static RankedRuntime r;return r;}void setHistoryFilters(std::string,std::string){}void fetchHistoryScope(HistoryScope s){++reads;scope=s;}void fetchAchievements(){++achievements;}};
 struct Layer{
  enum class Page{Live,HistoryList,HistoryDetail,Achievements};Page m_page=Page::Live;
  ModeLobbyTransition m_modeTransition;HistoryScope m_historyScope=HistoryScope::All;std::size_t m_historyIndex=10,m_achievementPage=10;
- std::string m_achievementScope,m_titleSelectorAchievement;
+ std::string m_achievementScope,m_titleSelectorAchievement,m_historyOrder="NEWEST",m_historyResult="ALL";std::optional<float> m_historyListOffset;
  ${methods}
 };
 int main(){

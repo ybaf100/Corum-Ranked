@@ -113,7 +113,7 @@ test('Survival keeps surrender in native Pause and uses the shared clock pair wi
 
 
 test('deferred Survival launch rechecks round, scene and confirmation and never constructs inside update',()=>{
-    const launch=method(read('src/ui/SurvivalGameLayer.cpp'),'    void queueNativeLaunch()');
+    const launch=method(read('src/ui/SurvivalGameLayer.cpp'),'    void queueNativeLaunch()')+method(read('src/ui/SurvivalGameLayer.cpp'),'    void requestClearedReplay()');
     run(`
 #include <cassert>
 #include <functional>
@@ -131,11 +131,11 @@ void drain(){auto queued=std::exchange(work,{});for(auto& f:queued)f();}
 std::string preparationContextText(LevelPreparationContext const& c){return c.matchId+":"+std::to_string(c.levelId)+":"+std::to_string(c.round);}
 bool inUpdate=false;
 struct RankedRoundPreparation{int launches=0;bool success=true;static RankedRoundPreparation& get(){static RankedRoundPreparation p;return p;}bool launch(CCScene*){assert(!inUpdate);++launches;return success;}};
-struct SurvivalRuntime{std::int64_t sync=1;std::int64_t serverSyncMillis(){return sync;}bool enter=true,pending=false;bool surrenderPending()const{return pending;}LevelPreparationContext context{"match",40000000,1,0,false,0,0};static SurvivalRuntime& get(){static SurvivalRuntime r;return r;}auto preparationContext(){return context;}bool canEnter(){return enter;}bool canEnterObserver(){return false;}bool canReplayCleared(){return false;}};
+struct SurvivalRuntime{std::int64_t sync=1;std::int64_t serverSyncMillis(){return sync;}bool enter=true,pending=false;bool surrenderPending()const{return pending;}LevelPreparationContext context{"match",40000000,1,0,false,0,0};static SurvivalRuntime& get(){static SurvivalRuntime r;return r;}auto preparationContext(){return context;}bool canEnter(){return enter;}bool canEnterObserver(){return false;}bool replay=false;int refreshes=0;void refreshRound(){++refreshes;}bool canReplayCleared(){return replay;}};
 template<class T>struct WeakRef{T* pointer;explicit WeakRef(T* p):pointer(p){}struct Locked{T* ptr;explicit operator bool()const{return ptr&&ptr->alive;}T* operator->(){return ptr;}T* data(){return ptr;}};auto lock()const{return Locked{pointer};}};
 struct Dialog{bool alive=true;CCScene* parent=nullptr;CCScene* getParent(){return parent;}};
 struct Selection{bool complete=true;bool settled()const{return complete;}};
-struct Coordinator{Selection selection;Selection* m_selection=&selection;std::optional<WeakRef<Dialog>> m_jukebox;bool alive=true,running=true,m_closed=false,m_motion=false,m_confirmation=false,m_browsingBoard=false;std::optional<std::int64_t> m_entrySyncAfter;std::string m_pendingLaunch,m_launchedContext;CCScene* parent=nullptr;bool isRunning(){return running;}CCScene* getParent(){return parent;}
+struct Coordinator{Selection selection;Selection* m_selection=&selection;std::optional<WeakRef<Dialog>> m_jukebox;bool alive=true,running=true,m_closed=false,m_motion=false,m_confirmation=false,m_browsingBoard=false;std::optional<std::int64_t> m_entrySyncAfter;bool m_manualMap=false;std::string m_pendingLaunch,m_launchedContext,m_replayRequestedContext;CCScene* parent=nullptr;bool isRunning(){return running;}CCScene* getParent(){return parent;}
 ${launch}
 };
 int main(){CCScene origin,other;auto* director=CCDirector::sharedDirector();director->scene=&origin;
@@ -162,6 +162,11 @@ int main(){CCScene origin,other;auto* director=CCDirector::sharedDirector();dire
  preparation.success=false;owner.queueNativeLaunch();drain();assert(preparation.launches==2&&owner.m_launchedContext.empty());
  preparation.success=true;owner.queueNativeLaunch();drain();assert(preparation.launches==3&&!owner.m_launchedContext.empty());
  owner.queueNativeLaunch();owner.alive=false;drain();assert(preparation.launches==3);
+ Coordinator replayOwner;replayOwner.parent=&origin;replayOwner.requestClearedReplay();assert(runtime.refreshes==0);
+ runtime.enter=false;runtime.replay=true;replayOwner.m_browsingBoard=true;replayOwner.requestClearedReplay();
+ assert(runtime.refreshes==1&&!replayOwner.m_browsingBoard&&replayOwner.m_manualMap&&!replayOwner.m_replayRequestedContext.empty());
+ replayOwner.queueNativeLaunch();assert(work.empty());++runtime.sync;replayOwner.queueNativeLaunch();drain();
+ assert(preparation.launches==4&&replayOwner.m_replayRequestedContext.empty());
 }`);
 });
 

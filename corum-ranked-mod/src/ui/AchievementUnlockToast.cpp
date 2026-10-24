@@ -17,7 +17,7 @@ void showAchievementUnlocks(CCNode* owner,std::string const& resultKey,matjson::
   auto const level=static_cast<int>(value["level"].asInt().unwrapOr(0));
   auto const tier=type=="PROGRESSIVE"?level:achievementRarityTier(value["rarity"].asString().unwrapOr(""));
   auto const rawName=i18n::text("achievement."+value["achievementId"].asString().unwrapOr("")+".name",value[i18n::isKorean()?"nameKo":"nameEn"].asString().unwrapOr(""));
-  auto const name=achievementScopedName(value["scope"].asString().unwrapOr(""),rawName,i18n::isKorean());
+  auto const name=rawName;
   if(id.empty() || name.empty() || tier<1 || tier>5 || (type!="PROGRESSIVE" && type!="ONE_SHOT"))continue;
   auto const key=resultKey+":"+id+":"+std::to_string(level);if(!shown.insert(key).second)continue;
   order.push_back(key);while(order.size()>512){shown.erase(order.front());order.pop_front();}

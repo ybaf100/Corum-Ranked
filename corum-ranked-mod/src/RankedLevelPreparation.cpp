@@ -1,4 +1,5 @@
 #include "RankedLevelPreparation.hpp"
+#include "HistoryLevelLookup.hpp"
 #include "RankedRuntime.hpp"
 #include "SurvivalRuntime.hpp"
 #include "RankedMapDetails.hpp"
@@ -232,6 +233,13 @@ void RankedLevelPreparation::loadLevelsFailed(char const* key, int) { loadLevels
 
 class $modify(CorumRankedMetadataResponse, GameLevelManager) {
     void onGetOnlineLevelsCompleted(gd::string response, gd::string tag) {
+        auto& history=corum::ranked::HistoryLevelLookup::get();
+        if(history.ownsResponse(tag.c_str())){
+            auto* previous=m_levelManagerDelegate;m_levelManagerDelegate=&history;
+            GameLevelManager::onGetOnlineLevelsCompleted(response,tag);
+            if(m_levelManagerDelegate==&history || !m_levelManagerDelegate)m_levelManagerDelegate=previous;
+            history.responseCompleted(tag.c_str());return;
+        }
         auto& preparation = corum::ranked::RankedLevelPreparation::get();
         auto const generation = preparation.requestGeneration(tag.c_str());
         if (!generation) {

@@ -26,6 +26,12 @@ describe('confirmed history projection',()=>{
   expect(h).toMatchObject({completed:true,inProgress:false,finalRank:8,result:{rank:8,actualDelta:-55}});
   expect(h.rounds[0]!.cutoffScore).toBe(82.345);expect(h.rounds[0]!.standings[0]!.cutoffBoundary).toBe(true);
  });
+ it('distinguishes a finished match awaiting payout without inventing LP and keeps legacy final rosters sanitized',()=>{
+  const match=fixture();match.state='FINAL_RESULT';
+  expect(survivalHistoryProjection(match,null,'me')).toMatchObject({completed:true,inProgress:false,settlementPending:true,result:{actualDelta:null}});
+  const h=survivalHistoryProjection(match,{actualDelta:10,finalStandings:true,standings:[{participantId:'me',name:'Owner',rank:1,delta:10,password:'private'}]},'me');
+  expect(h.settlementPending).toBe(false);expect(h.result?.standings[0]).toMatchObject({name:'Owner',rank:8,delta:10});expect(JSON.stringify(h)).not.toContain('password');
+ });
  it('rejects absent, nonnumeric and unsafe level IDs without substituting another identifier',()=>{
   for(const id of [undefined,null,0,-1,'name',1.5,2147483648])expect(recordedLevelId(id)).toBeNull();
   expect(recordedLevelId('123456789')).toBe(123456789);

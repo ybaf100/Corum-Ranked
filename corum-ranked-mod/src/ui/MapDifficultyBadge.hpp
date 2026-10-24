@@ -63,18 +63,11 @@ inline cocos2d::CCNode* mapDifficultyBadge(int levelId, MapMetadata metadata, fl
     auto* face=GJDifficultySprite::create(value.nativeCode,GJDifficultyName::Short);
     if(face){
         auto const epic=std::clamp(info.epic.value_or(0),0,3);
-        auto const state=epic>0?epic+1:info.featureScore.value_or(0)>0?1:0;
-        face->updateFeatureState(static_cast<GJFeatureState>(state));
-        if(!nativeName){
-            // Native feature offsets were computed for the baked name/canvas.
-            // Replace only the expression and recenter its ornament roots on
-            // that expression's real canvas, independent of atlas density.
-            if(auto* frame=CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(std::string(value.frame).c_str())){
-                face->setDisplayFrame(frame);
-                auto const size=face->getContentSize();
-                for(auto* ornament:face->getChildrenExt())ornament->setPosition({size.width/2,size.height/2});
-            }
-        }
+        auto const state=epic==3?GJFeatureState::Mythic:epic==2?GJFeatureState::Legendary:
+            epic==1?GJFeatureState::Epic:info.featureScore.value_or(0)>0?GJFeatureState::Featured:GJFeatureState::None;
+        // Native GJDifficultySprite owns the frame canvas and feature offsets.
+        // Replacing that canvas or centering every ornament corrupts its halo.
+        face->updateFeatureState(state);
     }
     auto const faceX=extent*1.5f+5;
     if (face && face->getContentSize().width>0 && face->getContentSize().height>0) {
@@ -82,7 +75,7 @@ inline cocos2d::CCNode* mapDifficultyBadge(int levelId, MapMetadata metadata, fl
         face->setPosition({faceX,height/2});row->addChild(face);
     }
     auto const textLeft=extent*2+8;
-    auto* text=menuLabel(std::string(value.label),0.23f,{(width+textLeft)/2,height/2},Text,FontWeight::SemiBold);
+    auto* text=menuLabel(nativeName?std::string(value.label):std::string{},0.23f,{(width+textLeft)/2,height/2},Text,FontWeight::SemiBold);
     fitMenuLabelWidth(text,std::max(10.0f,width-textLeft),0.23f,0.14f);row->addChild(text);
     row->setID("ranked-map-difficulty"_spr); return row;
 }
