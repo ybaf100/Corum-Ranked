@@ -7,6 +7,12 @@ const fixture=()=>({id:'match',state:'PLAYING',online:true,createdAt:100,config:
  rounds:[{key:'stage-1',ordinal:1,phase:'ROUND_1',target:1,finishedAt:200,cutoffScore:82,achievementCheckpoint:{private:true},map:{levelId:123,name:'Exact Map',stars:7,demon:false,length:3},players:[player('me',82.9,1,true),player('other',82.1,1,true)]},
  {key:'stage-2',ordinal:2,phase:'ROUND_2',target:1,finishedAt:null,cutoffScore:40,map:{levelId:456},players:[player('other',99,1,true)]}]});
 describe('confirmed history projection',()=>{
+ it('preserves every demon subtype in history without a live GD metadata cache',()=>{
+  for(const subtype of ['EASY','MEDIUM','HARD','INSANE','EXTREME']){
+   const match=fixture();Object.assign(match.rounds[0]!.map,{stars:10,demon:true,demonDifficulty:subtype});
+   expect(survivalHistoryProjection(match,null,'me').rounds[0]!.map).toMatchObject({difficulty:subtype+' DEMON',levelId:123});
+  }
+ });
  it('uses recorded exact identities for player-info and never substitutes a real account for bots',()=>{
   const match=fixture();Object.assign(match.players[0]!,{gdAccountId:'123',displayedTier:'SILVER'});Object.assign(match.players[1]!,{kind:'BOT',gdAccountId:'999'});
   const h=survivalHistoryProjection(match,null,'me');

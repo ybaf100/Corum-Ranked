@@ -16,6 +16,7 @@ function run(source){const dir=mkdtempSync(join(tmpdir(),'history-sdk-'));try{
 test('SDK JSON history projection preserves real rounds, precision, missing data, safe navigation and responsive layout',()=>run(`
 #include "domain/HistoryPresentation.hpp"
 #include "domain/ScoreDisplay.hpp"
+#include "domain/MapDifficulty.hpp"
 #include <cassert>
 using namespace corum::ranked;
 int main(){
@@ -25,6 +26,9 @@ int main(){
  auto rounds=historyRounds(record,true);assert(rounds[0].standings[0].accountId==123&&rounds[0].standings[0].tier=="SILVER");assert(rounds[0].epic==2&&rounds[0].grade=="LEGENDARY");
  record["rounds"][0]["standings"][0]["isBot"]=true;assert(historyRounds(record,true)[0].standings[0].accountId==0);
  for(bool page:{false,true})for(bool error:{false,true})for(bool session:{false,true})for(bool conflict:{false,true})assert(historyReconnectNeeded(page,error,session,conflict)==(page&&error&&!session&&!conflict));
+ assert(recordedMapDifficulty("EASY_DEMON")->nativeCode==7);assert(recordedMapDifficulty("MEDIUM DEMON")->nativeCode==8);
+ assert(recordedMapDifficulty("HARD DEMON")->nativeCode==6);assert(recordedMapDifficulty("INSANE DEMON")->nativeCode==9);assert(recordedMapDifficulty("EXTREME DEMON")->nativeCode==10);
+ assert(recordedMapDifficulty("Auto")->nativeCode==-1);assert(!recordedMapDifficulty("unknown"));
  assert(historyMapPanelHeight(180,false)<historyMapPanelHeight(180,true));assert(historyMapPanelHeight(390,false)<historyMapPanelHeight(390,true));assert(rounds.size()==3&&rounds[0].levelId==123&&rounds[0].standings[0].progress==82.345);
  assert(rounds[0].standings[0].own&&rounds[0].standings[0].tiedPlayers==2&&rounds[0].standings[0].attempts==3);
  assert(rounds[1].label=="FINAL"&&!rounds[1].completed&&rounds[1].standings.empty());assert(rounds[2].label=="TB 1");

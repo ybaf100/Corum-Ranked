@@ -81,6 +81,7 @@ int main(){for(int tier=0;tier<=5;++tier)for(bool progress:{false,true})for(bool
 test('actual history level panel omits thumbnail nodes and context when unavailable and uses native metadata when present',()=>{
  const popup=read('src/RankedPopup.cpp');
  run(`#include "domain/MapMetadata.hpp"
+#include "domain/MapDifficulty.hpp"
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
@@ -96,7 +97,7 @@ namespace corum::ranked {
 struct HistoryRound{int levelId=123,stars=7;std::string title="Exact Level",creator="Creator",key="r1",difficulty="HARDER",length="LONG",grade="LEGENDARY",label="R1";std::optional<int> featureScore=1,epic=2;};
 struct SurvivalThumbnailProvider{static inline bool available=false;static bool supported(){return available;}};
 namespace ui{constexpr Color Text{1,2,3},TextMuted{1,2,3};inline MapMetadata seen;void grayButtonVisual(CCNode*){}
-CCNode*mapDifficultyBadge(int,MapMetadata metadata,float width,float height,bool native){seen=metadata;assert(!native);auto*p=new CCNode;p->size={width,height};return p;}}
+CCNode*mapDifficultyBadge(int,MapMetadata metadata,float width,float height,bool native,std::optional<MapDifficulty> recorded){seen=metadata;assert(!native&&recorded&&recorded->nativeCode==4);auto*p=new CCNode;p->size={width,height};return p;}}
 ${method(read('src/domain/HistoryPresentation.hpp'),'inline float historyMapPanelHeight(')}
 }
 #define menu_selector(...) 0

@@ -4349,7 +4349,7 @@ class CorumRankedLayer final : public CCLayerColor {
             auto const width=viewport.width-4;auto const color=historyColor(item);
             auto* face=makeNeonPanel({width,112},{},color,kDeepPanel2,250);
             historyText(face,historyOutcome(item),.43f,{15,91},width*.60f,color,true,{0,.5f});
-            historyText(face,historyDelta(item),.39f,{width-15,91},width*.30f,item.ownRankedScoreDelta.value_or(0)<0?kRed:kGreen,true,{1,.5f});
+            historyText(face,historyDelta(item),.39f,{width-15,91},width*.30f,!item.ownRankedScoreDelta?corum::ranked::ui::TextMuted:*item.ownRankedScoreDelta<0?kRed:kGreen,true,{1,.5f});
             std::string summary;
             if(survival){
                 auto const total=item.record["participantCount"].asInt().unwrapOr(0);
@@ -4450,7 +4450,7 @@ class CorumRankedLayer final : public CCLayerColor {
         MapMetadata metadata;metadata.kind=round.difficulty.find("DEMON")!=std::string::npos?"DEMON":round.difficulty.empty()?"UNKNOWN":"NORMAL";
         if(round.stars>0)metadata.stars=round.stars;
         metadata.featureScore=round.featureScore;metadata.epic=round.epic;
-        auto* difficulty=ui::mapDifficultyBadge(round.levelId,metadata,60,25,false);difficulty->setPosition({infoLeft,infoTop-26});panel->addChild(difficulty,5);
+        auto* difficulty=ui::mapDifficultyBadge(round.levelId,metadata,60,25,false,recordedMapDifficulty(round.difficulty));difficulty->setPosition({infoLeft,infoTop-26});panel->addChild(difficulty,5);
         historyText(panel,round.difficulty.empty()?tr("history-unavailable","UNAVAILABLE"):round.difficulty,.30f,{infoLeft+64,infoTop-13},std::max(12.f,infoWidth-64),ui::Text,true,{0,.5f});
         historyText(panel,round.levelId>0?fmt::format("GD #{}",round.levelId):tr("history-level-unavailable","Map information could not be found."),.28f,{infoLeft+infoWidth/2,infoTop-41},infoWidth,kCyan,true);
         historyText(panel,(round.length.empty()?tr("history-unavailable","UNAVAILABLE"):round.length)+(round.stars>0?fmt::format("  ·  {} ★",round.stars):""),.27f,{infoLeft+infoWidth/2,infoTop-63},infoWidth,ui::Text);

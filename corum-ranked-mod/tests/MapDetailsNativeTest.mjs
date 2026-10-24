@@ -275,6 +275,12 @@ assert(shape->polygon.size()==4&&number->text=="13"&&number->color==(ccColor3B{2
 assert(static_cast<CCLabelBMFont*>(row->children[3])->text=="Easy Demon");
 assert(static_cast<CCSprite*>(row->children[2])->frame=="diffIcon_07_btn_001.png");
 assert(std::abs(shape->fill.r-221/255.f)<.001f&&std::abs(shape->fill.g-90/255.f)<.001f);
+MapMetadata archived;archived.kind="DEMON";archived.stars=10;archived.epic=2;archived.featureScore=1;
+RankedMapDetails::get().local.epic=3;RankedMapDetails::get().face=mapDifficulty(false,true,6,0);
+auto* exact=mapDifficultyBadge(42,archived,135,26,true,recordedMapDifficulty("EASY DEMON"));
+assert(static_cast<CCSprite*>(exact->children[2])->frame=="diffIcon_07_btn_001.png");
+assert(static_cast<GJDifficultySprite*>(exact->children[2])->state==GJFeatureState::Legendary);
+RankedMapDetails::get().local={};
 info.gddlTier.reset();info.gddlColor="wrong";row=mapDifficultyBadge(42,info,135);
 assert(static_cast<CCLabelBMFont*>(row->children[1])->text=="?");
 auto&native=RankedMapDetails::get().local;native.kind="NORMAL";native.stars=6;native.durationSeconds=80;

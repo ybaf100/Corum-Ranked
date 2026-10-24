@@ -27,9 +27,9 @@ inline cocos2d::ccColor3B mapTierColor(std::string const& text) {
     return {static_cast<GLubyte>((color>>16)&255),static_cast<GLubyte>((color>>8)&255),static_cast<GLubyte>(color&255)};
 }
 // GD face, numeric circle/square and label share one baseline. No GDDL mod dependency.
-inline cocos2d::CCNode* mapDifficultyBadge(int levelId, MapMetadata metadata, float width, float height = 21, bool nativeName = true) {
+inline cocos2d::CCNode* mapDifficultyBadge(int levelId, MapMetadata metadata, float width, float height = 21, bool nativeName = true,std::optional<MapDifficulty> recorded = std::nullopt) {
     using namespace geode::prelude;
-    auto const info = displayedMapMetadata(levelId,std::move(metadata));
+    auto const info = recorded?std::move(metadata):displayedMapMetadata(levelId,std::move(metadata));
     auto* row = CCNode::create(); row->setContentSize({width,height});
     auto const demon = info.kind == "DEMON";
     auto const extent = height - 2;
@@ -51,7 +51,7 @@ inline cocos2d::CCNode* mapDifficultyBadge(int levelId, MapMetadata metadata, fl
     auto* numeric = CCLabelBMFont::create(number ? std::to_string(*number).c_str() : "?","bigFont.fnt");
     numeric->setScale(extent * 0.62f/std::max(1.0f,numeric->getContentSize().height));
     numeric->setPosition({extent/2+1,height/2});numeric->setColor(ccc3(255,255,255));row->addChild(numeric,3);
-    auto value = RankedMapDetails::get().difficulty(levelId);
+    auto value = recorded.value_or(RankedMapDetails::get().difficulty(levelId));
     if (info.officialLevelId || value.label == "N/A") {
         if (demon) value=info.officialLevelId ? MapDifficulty{"Demon","diffIcon_06_btn_001.png",6} : mapDifficulty(false,true,0,0);
         else if (info.stars) {
