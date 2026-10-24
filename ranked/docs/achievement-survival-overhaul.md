@@ -1,4 +1,4 @@
-# Survival achievement overhaul (unreleased)
+# Survival achievement overhaul (released as beta.95)
 
 Base: remote main `979ce1ee80256d1ca867c245e264d8049f605d98`. The catalog has **48 achievements**: Solo Ranked 10 progressive + 10 one-shot, Survival 7 + 12, Shared 4 + 5.
 
@@ -30,13 +30,13 @@ Original V1 diamond `#8DEBFF`, lower-tier colors, animated seven-pastel V/Mythic
 
 ## One-time reset and deployment
 
-**NOT APPLIED TO PRODUCTION NEON.** The new `0029_achievement_survival_overhaul.sql` migration runs in one transaction and guards its reset with `ranked_achievement_versions.overhaul_activated_at`. A failed migration rolls back; re-executing after success or an interrupted migration-ledger write does not reset earned new data. Existing migrations are not edited.
+**Production rollout completed 2026-10-24; see [verified rollout](achievement-beta95-production-rollout.md).** The new `0029_achievement_survival_overhaul.sql` migration runs in one transaction and guards its reset with `ranked_achievement_versions.overhaul_activated_at`. A failed migration rolls back; re-executing after success or an interrupted migration-ledger write does not reset earned new data. Existing migrations are not edited.
 
 Only achievement metrics, unlocks, events, AP ledger/total, equipped achievement titles, Survival achievement facts, checkpoint evidence and cached achievement toasts are cleared. Accounts/authentication, Solo and Survival LP/MMR/rank, match/round history, actual attempts and server/matching configuration are preserved. Non-achievement rating/result payload fields remain intact.
 
 Lazy recovery and direct settlement reject source matches/runs created before the new epoch, so clearing a cache cannot re-unlock old history; in-flight pre-cutover matches also do not count. New matches after the epoch remain recoverable. `0020_deathmatch_native_death.sql` is added to the required migration list, with readiness probes for `native_death` and all new fields.
 
-This change is staged on main with **`[no-deploy] [build only]`**. The Lightsail workflow explicitly skips such a push even if `LIGHTSAIL_AUTO_DEPLOY=true`; existing manual deployment, explicit deploy markers, pinned SSH, Singapore host check, concurrency and rollback are preserved. This commit does not publish/overwrite the immutable beta.94 packages. Package metadata remains beta.94 until a separate release version is chosen.
+The initial implementation was staged on main with **`[no-deploy] [build only]`**. The Lightsail workflow explicitly skips such a push even if `LIGHTSAIL_AUTO_DEPLOY=true`; existing manual deployment, explicit deploy markers, pinned SSH, Singapore host check, concurrency and rollback are preserved. This commit does not publish/overwrite the immutable beta.94 packages. The subsequent coordinated release synchronized package metadata to beta.95, published both channels, and activated Singapore.
 
 Before a later production rollout: preserve a verified backup/restore path, stop the old writer before migration, build a new synchronized client version, verify both immutable R2 channels before activating its exact server version, then deliberately deploy to Singapore. That later startup will execute the authorized achievement-only reset. Never deploy to retired Seoul or run the Railway bridge as a game writer. The epoch reset cannot be undone by a code-only rollback; restoring achievement data requires the prior backup.
 
