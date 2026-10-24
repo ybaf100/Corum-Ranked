@@ -276,6 +276,7 @@ interface HistoryMatchRow {
   series_state: unknown;
   finished_at: Date | string | null;
   opponent_name: string;
+  player_a_account_id?:string;player_b_account_id?:string;player_a_name?:string;player_b_name?:string;player_a_bot?:boolean;player_b_bot?:boolean;
 }
 
 
@@ -513,7 +514,8 @@ export class MatchService {
     const filter=options.result==="WIN"?"AND m.winner_id=$1":options.result==="LOSS"?"AND m.winner_id IS NOT NULL AND m.winner_id<>$1":"";
     const now = this.clock.now();
     const matches = await this.database.query<HistoryMatchRow>(
-      `SELECT m.*,cs.source_payload,
+      `SELECT m.*,cs.source_payload,pa.gd_account_id::text AS player_a_account_id,pb.gd_account_id::text AS player_b_account_id,
+              pa.gd_username AS player_a_name,pb.gd_username AS player_b_name,pa.is_bot AS player_a_bot,pb.is_bot AS player_b_bot,
               CASE WHEN m.player_a_id = $1 THEN pb.gd_username ELSE pa.gd_username END AS opponent_name
        FROM ranked_matches m
        JOIN ranked_players pa ON pa.id = m.player_a_id
@@ -549,6 +551,8 @@ export class MatchService {
         finishedAt: dateIso(match.finished_at),
         side,
         opponentName: match.opponent_name,
+        players:{A:{name:match.player_a_name??"",gdAccountId:match.player_a_bot?null:match.player_a_account_id??null,isBot:match.player_a_bot??false},
+          B:{name:match.player_b_name??"",gdAccountId:match.player_b_bot?null:match.player_b_account_id??null,isBot:match.player_b_bot??false}},
         effectiveTier: match.effective_tier,
         winnerSide,
         perfectWinSide: rating.perfectWinSide ?? null,

@@ -93,6 +93,7 @@ test('actual retained Ranked callbacks restore menu registration before onEnter,
     execute(`
 #include "${join(root, 'src/ui/RankedInput.hpp')}"
 #include <string>
+#include <optional>
 using namespace cocos2d;
 namespace geode::log { template<class... T> void info(T...) {} }
 using namespace geode;
@@ -117,6 +118,8 @@ struct CorumRankedLayer : CCLayerColor {
     void setLobbyNodeInput(void*,bool){}
     Menu* m_menu=nullptr; Root* m_root=nullptr; void* m_rankTransitionLayer=nullptr;
     void* m_resultScoreLayer=nullptr;bool m_resultScorePending=false;
+    struct Reconnect {bool attached=true;int cancellations=0;void cancel(){++cancellations;attached=false;}};
+    struct ReconnectWeak{Reconnect* p;Reconnect* lock(){return p;}};std::optional<ReconnectWeak>m_historyReconnect;
     CCMenu* m_settingsMenu=nullptr;unsigned long m_volumeSession=0;void closeSettings(){}
     bool m_rankedChildScenePushed=false,m_enteringSongGate=false,m_enteringLevel=false,keypad=true;
     int refreshed=0,scheduled=0;void suspendHistoryThumbnail(){}void resetHistoryUi(){}

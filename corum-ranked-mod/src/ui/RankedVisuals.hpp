@@ -210,6 +210,17 @@ inline void fitFullMenuLabel(CCLabelBMFont* text, float width, float height, flo
     fitFullLabel(text, width, height, rankedMenuTextScale(scale));
 }
 
+// Names stay on one line. Clear a previous wrapping width before measuring,
+// and allow any necessary shrink instead of pushing glyphs into the next card.
+inline void fitSingleLineMenuLabel(CCLabelBMFont* text,float width,float height,float maximum) {
+    if(!text || width<=0 || height<=0)return;
+    text->setWidth(-1);text->setLineBreakWithoutSpace(false);
+    setLabelScale(text,rankedMenuTextScale(maximum));
+    auto const size=text->getContentSize();
+    if(size.width>0 && size.height>0)
+        text->setScale(std::min({text->getScale(),width/size.width,height/size.height}));
+}
+
 inline CCLabelBMFont* menuLabel(std::string const& text, float scale, CCPoint position,
     ccColor3B color, FontWeight weight, char const* resource = nullptr) {
     auto* result = label(text, rankedMenuTextScale(scale), position, color, weight, resource);

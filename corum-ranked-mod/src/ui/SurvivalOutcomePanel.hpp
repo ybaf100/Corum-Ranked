@@ -7,6 +7,7 @@
 #include "../domain/ScoreDisplay.hpp"
 #include "../domain/SurvivalBoardPresentation.hpp"
 #include "../domain/SurvivalPodiumMotion.hpp"
+#include "../domain/SurvivalBoardPresentation.hpp"
 #include <Geode/ui/Popup.hpp>
 #include <functional>
 namespace corum::ranked::ui {
@@ -48,7 +49,8 @@ class SurvivalStandingsPopup final:public geode::Popup {
         auto& runtime=SurvivalRuntime::get();m_match=runtime.view().id;
         m_clock=menuLabel("SURVIVAL",.30f,{245,264},Cyan,FontWeight::Black);m_mainLayer->addChild(m_clock,5);
         auto const rows=survivalRoster(runtime.view());
-        m_compact=runtime.view().matchPlayerCount==64;m_pageSize=m_compact?32:16;m_pages=std::max<std::size_t>(1,(rows.size()+m_pageSize-1)/m_pageSize);
+        m_compact=survivalCompactCards(static_cast<std::size_t>(std::count_if(rows.begin(),rows.end(),[](auto const& row){return !row.eliminated;})));
+        m_pageSize=m_compact?32:16;m_pages=std::max<std::size_t>(1,(rows.size()+m_pageSize-1)/m_pageSize);
         for(std::size_t i=0;i<rows.size();++i){
             auto const& row=rows[i];float const height=m_compact?21.f:51.f;
             auto* face=surface({112,height},{},Blue,SurfaceRaised,250,true);
@@ -89,10 +91,10 @@ public:
         m_clock->setString(fmt::format("SURVIVAL · {} · {} · {}",v.phase,remaining?fmt::format("{:02}:{:02}",seconds/60,seconds%60):"--:--",v.cutoff?rankedScoreText(*v.cutoff,v.phase=="TIEBREAK")+"%":"--%").c_str());fitFullMenuLabel(m_clock,440,18,.30f);
         for(auto& card:m_cards){auto it=std::find_if(rows.begin(),rows.end(),[&](auto const& row){return row.id==card.row.id;});if(it==rows.end())continue;card.row=*it;
             auto const& row=card.row;
-            if(m_compact){card.title->setString(row.name.c_str());fitFullMenuLabel(card.title,80,13,.22f);}
+            if(m_compact){card.title->setString(row.name.c_str());fitSingleLineMenuLabel(card.title,80,13,.22f);}
             else {
                 card.tween.observe(v.revision,row.attemptId,row.attemptActive,row.bestProgress,row.currentProgress);card.tween.advance(dt);
-                card.title->setString(fmt::format("{} {}",row.rank>0?survivalOrdinal(row.rank):"--",row.name).c_str());fitFullMenuLabel(card.title,102,12,.22f);
+                card.title->setString(fmt::format("{} {}",row.rank>0?survivalOrdinal(row.rank):"--",row.name).c_str());fitSingleLineMenuLabel(card.title,102,12,.22f);
                 card.progress->setString(fmt::format("BEST {}% · NOW {}%",rankedScoreText(card.tween.best.displayed,false),rankedScoreText(card.tween.now,false)).c_str());fitFullMenuLabel(card.progress,104,11,.16f);
             }
             card.red->setVisible(row.eliminated || (row.rank>0 && !row.passing && v.state=="PLAYING"));

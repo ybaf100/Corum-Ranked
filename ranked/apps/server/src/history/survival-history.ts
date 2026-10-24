@@ -13,7 +13,7 @@ export function survivalHistoryProjection(value:unknown,personalResult:unknown,m
    difficulty:!Number.isFinite(r.map.stars)?null:r.map.demon?((r.map as any).demonDifficulty??'DEMON'):r.map.automatic?'AUTO':r.map.stars===2?'EASY':r.map.stars===3?'NORMAL':r.map.stars<=5?'HARD':r.map.stars<=7?'HARDER':'INSANE',stars:r.map.stars??null,length:typeof r.map.length==='number'?['TINY','SHORT','MEDIUM','LONG','XL','PLATFORMER'][r.map.length]??null:null,featureScore:r.map.featureScore??null,epic:r.map.epic??null}:null;
   const standings=confirmed&&!summary?r.players.map(p=>{
    const entrant=players.find(v=>v.participantId===p.participantId);const attempts=p.attempts.filter(a=>a.endedAt!==null);
-   return {participantId:p.participantId,name:entrant?.name??'',isBot:entrant?.kind==='BOT',rank:p.rank,
+   return {participantId:p.participantId,name:entrant?.name??'',isBot:entrant?.kind==='BOT',gdAccountId:entrant?.kind==='BOT'?null:entrant?.gdAccountId??null,displayedTier:entrant?.displayedTier??null,rank:p.rank,
     highestProgress:p.highestProgress,attemptCount:attempts.length,cleared:attempts.some(a=>a.highestProgress===100),qualified:p.qualified&&!p.forfeited,
     forfeited:p.forfeited,own:p.participantId===myParticipantId,tiedPlayers:p.rank===null?0:r.players.filter(v=>v.rank===p.rank).length,
     cutoffBoundary:p.qualified&&!p.forfeited&&r.cutoffScore!==null&&(r.phase==='TIEBREAK'?survivalMilliPercent(p.highestProgress):Math.trunc(p.highestProgress))===r.cutoffScore};

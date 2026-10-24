@@ -7,6 +7,14 @@ const fixture=()=>({id:'match',state:'PLAYING',online:true,createdAt:100,config:
  rounds:[{key:'stage-1',ordinal:1,phase:'ROUND_1',target:1,finishedAt:200,cutoffScore:82,achievementCheckpoint:{private:true},map:{levelId:123,name:'Exact Map',stars:7,demon:false,length:3},players:[player('me',82.9,1,true),player('other',82.1,1,true)]},
  {key:'stage-2',ordinal:2,phase:'ROUND_2',target:1,finishedAt:null,cutoffScore:40,map:{levelId:456},players:[player('other',99,1,true)]}]});
 describe('confirmed history projection',()=>{
+ it('uses recorded exact identities for player-info and never substitutes a real account for bots',()=>{
+  const match=fixture();Object.assign(match.players[0]!,{gdAccountId:'123',displayedTier:'SILVER'});Object.assign(match.players[1]!,{kind:'BOT',gdAccountId:'999'});
+  const h=survivalHistoryProjection(match,null,'me');
+  expect(h.rounds[0]!.standings.find(p=>p.participantId==='me')).toMatchObject({gdAccountId:'123',displayedTier:'SILVER',isBot:false});
+  expect(h.rounds[0]!.standings.find(p=>p.participantId==='other')).toMatchObject({gdAccountId:null,isBot:true});
+  expect(h.rounds[1]!.standings).toEqual([]);expect(survivalHistoryProjection(match,null,'me',true).rounds[0]!.standings).toEqual([]);
+ });
+
  it('publishes ended rounds, ties, boundary and ended attempt counts while redacting all provisional ranks and early settlement',()=>{
   const history=survivalHistoryProjection(fixture(),{rank:8,actualDelta:-55},'me');
   expect(history).toMatchObject({inProgress:true,finalRank:null,result:null});
