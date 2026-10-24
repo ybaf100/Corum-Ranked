@@ -515,3 +515,39 @@ it('serializes a server cutoff observation with duplicate progress after reconne
  expect(JSON.stringify(view)).not.toMatch(/achievementCheckpoint|rescuedAt|atRisk/);
  expect(survivalCurrentRound(await restarted.get(id)).achievementCheckpoint).toEqual(evidence);
 });
+
+
+describe("64-player public matchmaking",()=>{
+ async function adminFormat(count:16|64){
+  const c=await client("debug");await db.query("UPDATE ranked_players SET gd_username='hwanhee1' WHERE id=$1",[c.session.playerId]);c.session={...c.session,gdUsername:"hwanhee1"};
+  const admin=new AdminService(db,env,{} as RankedConfigService,clock,config);
+  await admin.execute(c.session,{password:"fixture-password",scope:"SURVIVAL",action:"SET_SURVIVAL_MODE",matchPlayerCount:count});return c;
+ }
+ it("waits at 63 authenticated humans, then admits the 64th into one captured 40-cutoff match",async()=>{
+  await adminFormat(64);const group:Client[]=[];for(let i=0;i<64;i++)group.push(await client());
+  await Promise.all(group.slice(0,63).map(join));
+  const waiting=(await api(group[0]!,"/queue/status")).body;
+  expect(waiting).toMatchObject({status:"QUEUED",players:63,maximumPlayers:64});
+  expect((await db.query("SELECT id FROM sur_matches")).rows).toHaveLength(0);
+  await join(group[63]!);const state=(await api(group[0]!,"/queue/status")).body;
+  expect(state.status).toBe("MATCHED");const match=await engine.get(state.matchId);
+  expect(match.players).toHaveLength(64);expect(match.config.matchPlayerCount).toBe(64);expect(survivalCurrentRound(match).target).toBe(40);
+  expect((await db.query("SELECT id FROM sur_matches")).rows).toHaveLength(1);
+  expect((await api(group[0]!,`/online/matches/${match.id}`)).body).toMatchObject({matchPlayerCount:64,playerCount:64,targetQualifiers:40});
+  const restart=new SurvivalEngineService(db,clock,ids,config,{select:async()=>{throw new Error("unexpected map");}});
+  expect((await restart.get(match.id)).config.matchPlayerCount).toBe(64);
+ },60000);
+ it("fills exactly 63 bots and keeps an active 64-player match intact after switching back to 16",async()=>{
+  const owner=await adminFormat(64);await join(owner);
+  const admission={password:"fixture-password",requestId:ids.next(),installedMods:mods,botCount:63};
+  const response=await api(owner,"/queue/fill-bots",admission);expect(response.status).toBe(201);
+  const match=await engine.get(response.body.matchId);expect(match.players).toHaveLength(64);expect(match.players.filter(p=>p.kind==="BOT")).toHaveLength(63);
+  const admin=new AdminService(db,env,{} as RankedConfigService,clock,config);
+  await admin.execute(owner.session,{password:"fixture-password",scope:"SURVIVAL",action:"SET_SURVIVAL_MODE",matchPlayerCount:16});
+  expect(config.getSnapshot().config.matchPlayerCount).toBe(16);expect((await engine.get(match.id)).config.matchPlayerCount).toBe(64);
+  expect((await api(owner,"/queue/fill-bots",admission)).body.matchId).toBe(match.id);
+  expect((await db.query("SELECT bot_count FROM sur_queue_fill_requests")).rows).toEqual([{bot_count:63}]);
+  const newcomer=await client("debug");await join(newcomer);
+  expect((await api(newcomer,"/queue/fill-bots",{...admission,requestId:ids.next()})).status).toBe(400);
+ });
+});

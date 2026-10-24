@@ -31,6 +31,10 @@ int main(){using namespace corum::ranked;
   for(int stars=0;stars<=10;stars++)assert(survivalMapAllowed({40000000,stars,1,SurvivalDemon::None,false,false},g,p)==(r[0]>0&&stars>=r[0]&&stars<=r[1]));
   for(int demon=1;demon<=5;demon++)assert(survivalMapAllowed({40000000,10,1,static_cast<SurvivalDemon>(demon),false,false},g,p)==(r[2]>0&&demon>=r[2]&&demon<=r[3]));
  }
+ for(int group=0;group<3;group++)for(int stars=1;stars<=10;stars++)for(int demon=0;demon<=5;demon++){
+  auto g=static_cast<SurvivalDifficultyGroup>(group);SurvivalMapMetadata metadata{40000000,stars,1,static_cast<SurvivalDemon>(demon),false,false};
+  assert(survivalMapAllowed(metadata,g,SurvivalMapPhase::Round4)==survivalMapAllowed(metadata,g,SurvivalMapPhase::Round3));
+ }
  GJGameLevel level;SurvivalMapMetadata selected{40000000,4,1,SurvivalDemon::None,false,false};
  auto matches=[&]{return survivalNativeMapMatches(&level,selected,SurvivalDifficultyGroup::RedBronze,SurvivalMapPhase::Round1,40000000);};
  assert(matches());assert(!survivalNativeMapMatches(nullptr,selected,SurvivalDifficultyGroup::RedBronze,SurvivalMapPhase::Round1,40000000));

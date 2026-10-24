@@ -3,7 +3,7 @@
 
 namespace corum::ranked {
 enum class SurvivalDifficultyGroup { RedBronze, Silver, Gold };
-enum class SurvivalMapPhase { Round1, Round2, Round3, Final, Tiebreak };
+enum class SurvivalMapPhase { Round1, Round2, Round3, Final, Tiebreak, Round4 };
 enum class SurvivalDemon { None, Easy, Medium, Hard, Insane, Extreme, Invalid };
 
 // GD 2.2081 / Geode DemonDifficultyType. Search demonFilter uses other codes.
@@ -28,6 +28,7 @@ inline bool survivalMapAllowed(SurvivalMapMetadata const& map, SurvivalDifficult
     SurvivalMapPhase phase, int minimumLevelId = 40000000) {
     if(map.levelId < std::max(40000000,minimumLevelId) || map.version < 1 ||
         map.automatic || map.platformer || map.length>3 || map.length<-1 || map.stars < 1 || map.stars > 10) return false;
+    if(phase==SurvivalMapPhase::Round4)phase=SurvivalMapPhase::Round3;
     auto const offset = static_cast<int>(group);
     if(phase == SurvivalMapPhase::Tiebreak)
         return map.stars == 10 && static_cast<int>(map.demon) == static_cast<int>(SurvivalDemon::Medium)+offset;

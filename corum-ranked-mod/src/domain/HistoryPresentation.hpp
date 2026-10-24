@@ -46,7 +46,7 @@ inline std::vector<HistoryRound> historyRounds(matjson::Value const& record,bool
         v.result=r["result"].asString().unwrapOr("");v.winnerSide=r["winnerSide"].asString().unwrapOr("");
         if(survival){
             v.key=r["key"].asString().unwrapOr("");auto const phase=r["phase"].asString().unwrapOr("");
-            auto const ordinal=static_cast<int>(r["ordinal"].asInt().unwrapOr(0));v.label=phase=="ROUND_1"?"R1":phase=="ROUND_2"?"R2":phase=="ROUND_3"?"R3":phase=="FINAL"?"FINAL":phase=="TIEBREAK"?"TB "+std::to_string(1+std::count_if(result.begin(),result.end(),[](auto const& p){return p.deathmatch;})):"R"+std::to_string(ordinal);
+            auto const ordinal=static_cast<int>(r["ordinal"].asInt().unwrapOr(0));v.label=phase=="ROUND_1"?"R1":phase=="ROUND_2"?"R2":phase=="ROUND_3"?"R3":phase=="ROUND_4"?"R4":phase=="FINAL"?"FINAL":phase=="TIEBREAK"?"TB "+std::to_string(1+std::count_if(result.begin(),result.end(),[](auto const& p){return p.deathmatch;})):"R"+std::to_string(ordinal);
             v.deathmatch=phase=="TIEBREAK";v.cutoff=historyNumber(r["cutoffScore"]);
             auto const ownQualified=r["ownQualified"].asBool();if(ownQualified.isOk())v.ownQualified=ownQualified.unwrap();
             v.target=static_cast<int>(r["target"].asInt().unwrapOr(0));v.qualifiedCount=static_cast<int>(r["qualifiedCount"].asInt().unwrapOr(0));

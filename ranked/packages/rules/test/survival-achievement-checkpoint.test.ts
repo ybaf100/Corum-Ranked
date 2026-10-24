@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { DEFAULT_SURVIVAL_CONFIG } from "../src/survival.js";
 import { observeSurvivalAchievementCheckpoint, observeSurvivalAchievementRecovery } from "../src/survival-achievement-checkpoint.js";
 import { reduceSurvivalMatch, survivalCurrentRound, type SurvivalMatch, type SurvivalRoundPlayer } from "../src/survival-match.js";
 import { survivalAchievementFacts } from "../src/achievement-survival.js";
 function fixture(): SurvivalMatch {
   const p = (id:string, score:number):SurvivalRoundPlayer => ({ participantId:id,assetsReadyAt:0,enteredAt:0,preparationFailure:null,forfeited:false,qualified:false,rank:null,highestProgress:score,
     attempts:[{id,sequence:1,startedAt:0,endedAt:null,highestProgress:score}] });
-  return {id:'m',online:true,revision:1,state:'PLAYING',createdAt:0,updatedAt:169_000,finishedAt:null,winnerId:null,
+  return {id:'m',config:DEFAULT_SURVIVAL_CONFIG,online:true,revision:1,state:'PLAYING',createdAt:0,updatedAt:169_000,finishedAt:null,winnerId:null,
     players:[{participantId:'own',playerId:'p',kind:'HUMAN',eliminationStage:null,finalRank:null},{participantId:'other',playerId:'q',kind:'HUMAN',eliminationStage:null,finalRank:null},{participantId:'third',playerId:'r',kind:'HUMAN',eliminationStage:null,finalRank:null}],
     transitions:[],rounds:[{key:'stage-1',ordinal:1,phase:'ROUND_3',target:2,mapGeneration:1,map:{levelId:40_000_000},selectedMaps:[],startsAt:0,endsAt:180_000,finishedAt:null,cutoffScore:null,
       players:[p('own',50),p('other',80),p('third',70)]}]} as unknown as SurvivalMatch;

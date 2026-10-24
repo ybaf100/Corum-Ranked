@@ -7,7 +7,8 @@ export async function survivalQueueView(db:DatabasePort,session:RankedSessionCon
   const count=(await db.query<{n:number}>(`SELECT COUNT(*)::int AS n FROM sur_queue_entries q JOIN ranked_sessions s ON s.id=q.session_id
     WHERE q.status='QUEUED' AND q.last_heartbeat_at>$1 AND s.revoked_at IS NULL AND s.expires_at>$2 AND s.last_heartbeat_at>$1`,[sessionAliveSince(now),now.toISOString()])).rows[0]!.n;
   const wait=own?.status==="QUEUED"?Math.max(0,(now.getTime()-new Date(own.wait_started_at).getTime())/1000):0;
+  const current=config.getSnapshot().config;
   return {status:own?.status??"LEFT",matchId:own?.matched_match_id??null,serverNow:now.toISOString(),enabled:config.getStatus().enabled,
-    players:Math.min(16,Number(count)),totalWaiting:Number(count),maximumPlayers:16,minimumPlayers:8,shortMinimumPlayers:2,waitingSeconds:wait,
-    waitingSince:own?.wait_started_at?new Date(own.wait_started_at).toISOString():null,remainingSeconds:Math.max(0,180-wait)};
+    players:Math.min(current.matchPlayerCount,Number(count)),totalWaiting:Number(count),maximumPlayers:current.matchPlayerCount,minimumPlayers:current.minimumPlayers,shortMinimumPlayers:2,waitingSeconds:wait,
+    waitingSince:own?.wait_started_at?new Date(own.wait_started_at).toISOString():null,maxWaitSeconds:current.matchmakingMaxWaitSeconds,remainingSeconds:Math.max(0,current.matchmakingMaxWaitSeconds-wait)};
 }

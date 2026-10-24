@@ -1,5 +1,6 @@
 #pragma once
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -24,12 +25,36 @@ inline std::string survivalBoardClock(std::string const& state,
 // Local card coordinates reserve separate title, avatar and score rows.
 struct SurvivalCardLayout {
     float width,height,titleY,avatarY,recordY,titleHeight,recordHeight,avatarSize;
+    float titleX=0,avatarX=0,titleWidth=0;
 };
-inline SurvivalCardLayout survivalCardLayout(float cellWidth,float cellHeight) {
+struct SurvivalGridLayout {
+    std::size_t columns,rows,pageSize,pages;
+    float cellWidth,cellHeight;
+    bool compact;
+};
+inline SurvivalGridLayout survivalGridLayout(float width,float height,std::size_t count,int capacity) {
+    count=std::max<std::size_t>(1,count);
+    bool const compact=capacity==64;
+    auto const columns=std::min<std::size_t>(compact?(width<420?6:8):4,count);
+    auto const totalRows=(count+columns-1)/columns;
+    auto const available=std::max(24.f,height-163.f);
+    auto const rows=compact?std::min(totalRows,std::max<std::size_t>(1,static_cast<std::size_t>(available/24.f))):totalRows;
+    auto const pageSize=columns*rows;
+    return {columns,rows,pageSize,(count+pageSize-1)/pageSize,
+        std::max(24.f,std::min(width-36,compact?760.f:480.f))/columns,
+        compact?std::min(44.f,available/rows):std::min(66.f,std::max(36.f,available/rows)),compact};
+}
+inline SurvivalCardLayout survivalCardLayout(float cellWidth,float cellHeight,bool compact=false) {
+    if(compact){
+        float const width=cellWidth-4,height=cellHeight-4;
+        float const avatar=std::clamp(height-6,6.f,26.f),textWidth=std::max(6.f,width-avatar-10);
+        return {width,height,height/2,height/2,0,std::min(12.f,height-4),0,avatar,
+            avatar+7+textWidth/2,3+avatar/2,textWidth};
+    }
     float const width=cellWidth-8,height=cellHeight-4;
     float const textHeight=std::clamp(height*.23f,7.0f,12.0f);
     return {width,height,height-4-textHeight/2,height/2,4+textHeight/2,
-        textHeight,textHeight,std::max(6.0f,height-2*textHeight-12)};
+        textHeight,textHeight,std::max(6.0f,height-2*textHeight-12),width/2,width/2,width-12};
 }
 // Explicit server elimination always outranks the live podium. Unknown rank
 // gets no medal; final standings provide their own authoritative ranks.

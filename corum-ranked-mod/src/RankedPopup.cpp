@@ -807,7 +807,7 @@ class CorumRankedLayer final : public CCLayerColor {
                 view.survival.standing.rank.value_or(0),view.survival.standing.total,
                 view.achievements.equippedTitle.achievementId,view.achievements.equippedTitle.level.value_or(0),
                 view.achievements.totalAp,view.achievements.unclaimedRewardCount,
-                CCDirector::sharedDirector()->getWinSize().width,CCDirector::sharedDirector()->getWinSize().height) + fmt::format(":sur-record:{}:{}",view.survival.wins,view.survival.losses);
+                CCDirector::sharedDirector()->getWinSize().width,CCDirector::sharedDirector()->getWinSize().height) + fmt::format(":sur-record:{}:{}:format:{}",view.survival.wins,view.survival.losses,view.survivalPlayerCount);
         }
         if (view.match.placement) {
             if (view.placement.state == "STAGE_RESULT" && !view.placement.stageResults.empty()) {
@@ -2350,7 +2350,7 @@ class CorumRankedLayer final : public CCLayerColor {
             queue->setEnabled(online); queue->setCascadeOpacityEnabled(true); queue->setOpacity(online?255:100);
             auto* hint = makeLabel(tr("start-queue", "START QUEUE"),0.44f,{94,-40},online?kCyan:corum::ranked::ui::TextMuted,"black");
             corum::ranked::ui::fitMenuLabelWidth(hint,170,0.44f,0.26f); m_root->addChild(hint,5);
-            auto* details = makeLabel(online?tr("survival-online-ready","2-16 PLAYERS · UP TO 180s"):tr("mode-disabled","MODE DISABLED"),0.27f,{94,-68},corum::ranked::ui::TextMuted,"semibold");
+            auto* details = makeLabel(online?fmt::format(fmt::runtime(tr("survival-online-ready-format","2-{} PLAYERS")),view.survivalPlayerCount):tr("mode-disabled","MODE DISABLED"),0.27f,{94,-68},corum::ranked::ui::TextMuted,"semibold");
             corum::ranked::ui::fitMenuLabelWidth(details,170,0.27f,0.19f); m_root->addChild(details,5);
             if (!view.survival.loaded || !view.survival.error.empty()) {
                 addButton(tr("retry","RETRY"),{94,-88},menu_selector(CorumRankedLayer::onRetrySurvival),false,0.44f);

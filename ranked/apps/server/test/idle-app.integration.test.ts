@@ -9,7 +9,7 @@ import { AppModule } from '../src/app.module.js';
 import { DatabaseService } from '../src/database/database.service.js';
 import { SERVER_ENVIRONMENT } from '../src/config/server-environment.js';
 import { AppsScriptRankedConfigSource,RANKED_CONFIG_SOURCE, } from '../src/config/ranked-config.source.js';
-import { SURVIVAL_CONFIG_SOURCE } from '../src/config/survival-config.service.js';
+import { SurvivalConfigService,SURVIVAL_CONFIG_SOURCE } from '../src/config/survival-config.service.js';
 import { CSMP_TIER_SOURCE } from '../src/config/csmp-tier.source.js';
 import { DISCORD_TRANSPORT } from '../src/relay/discord-transport.js';
 import { HealthController } from '../src/health.controller.js';
@@ -22,7 +22,7 @@ import { PgliteDatabase } from './pglite-database.js';
 import { configDocumentFixture,environmentFixture } from './fixtures.js';
 import { countSql } from './sql-counter.js';
 
-it('measures actual full-app SQL with no players, games, queues or relay work for six minutes',async()=>{
+it.each([16,64] as const)('measures actual full-app SQL in %i-player format with no players, games, queues or relay work for six minutes',async format=>{
  const pg=new PGlite();const db=new PgliteDatabase(pg);
  const migrations=new URL('../../../migrations/',import.meta.url);
  for(const f of (await readdir(migrations)).filter(f=>f.endsWith('.sql')).sort())await pg.exec(await readFile(new URL(f,migrations),'utf8'));
@@ -50,9 +50,12 @@ it('measures actual full-app SQL with no players, games, queues or relay work fo
   .overrideProvider(DISCORD_TRANSPORT).useValue({send:vi.fn()}).compile();
  const app=module.createNestApplication();app.useLogger(false);
  try{
-  await app.init();const startup=counter.metrics.queries;counter.reset();
+  await app.init();
+  if(format===64){const config=app.get(SurvivalConfigService);await config.withAdmission(()=>db.transaction(tx=>config.operationMode(tx,64)));config.applyOperationMode(64);}
+  expect(app.get(SurvivalConfigService).getSnapshot().config.matchPlayerCount).toBe(format);
+  const startup=counter.metrics.queries;counter.reset();
   await vi.advanceTimersByTimeAsync(360000);
-  const idle=counter.metrics.queries;if(process.env['IDLE_SQL_METRICS_FILE'])appendFileSync(process.env['IDLE_SQL_METRICS_FILE'],JSON.stringify({baseline:process.env['IDLE_BASELINE']==='true',startup,seconds:360,idle,queriesPerSecond:idle/360})+'\n');console.log('IDLE_APP_SQL',JSON.stringify({startup,seconds:360,idle,queriesPerSecond:idle/360}));
+  const idle=counter.metrics.queries;if(process.env['IDLE_SQL_METRICS_FILE'])appendFileSync(process.env['IDLE_SQL_METRICS_FILE'],JSON.stringify({baseline:process.env['IDLE_BASELINE']==='true',startup,seconds:360,idle,queriesPerSecond:idle/360})+'\n');console.log('IDLE_APP_SQL',JSON.stringify({format,startup,seconds:360,idle,queriesPerSecond:idle/360}));
   if(process.env['IDLE_BASELINE']!=='true')expect(idle).toBe(0);
   const health=app.get(HealthController);health.health();expect(counter.metrics.queries).toBe(idle);
   await health.ready();expect(counter.metrics.queries).toBeGreaterThan(idle);

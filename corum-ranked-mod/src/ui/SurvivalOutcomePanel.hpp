@@ -5,6 +5,7 @@
 #include "SurvivalProfile.hpp"
 #include "ModeLobbyMotion.hpp"
 #include "../domain/ScoreDisplay.hpp"
+#include "../domain/SurvivalBoardPresentation.hpp"
 #include "../domain/SurvivalPodiumMotion.hpp"
 #include <Geode/ui/Popup.hpp>
 #include <functional>
@@ -12,28 +13,33 @@ namespace corum::ranked::ui {
 // All result surfaces and the local observer board share the same server roster.
 inline std::vector<SurvivalStanding> survivalRoster(SurvivalMatchView const& view){
     std::vector<SurvivalStanding> rows;
-    for(auto const& p:view.participants.asArray().unwrapOr(std::vector<matjson::Value>{})){
+    auto const results=view.result["standings"].asArray().unwrapOr(std::vector<matjson::Value>{});
+    auto const participants=view.participants.asArray().unwrapOr(std::vector<matjson::Value>{});
+    for(auto const& p:participants){
         SurvivalStanding row;row.id=p["participantId"].asString().unwrapOr("");row.name=p["name"].asString().unwrapOr(row.id);
         row.bot=p["kind"].asString().unwrapOr("")=="BOT";row.accountId=geode::utils::numFromString<int>(p["gdAccountId"].asString().unwrapOr("0")).unwrapOr(0);
         row.rank=static_cast<int>(p["finalRank"].asInt().unwrapOr(0));row.tier=p["displayedTier"].asString().unwrapOr("UNRANKED");row.eliminated=!p["eliminationStage"].isNull();
         for(auto const& live:view.roundPlayers)if(live.id==row.id){auto const finalRank=row.rank;row=live;if(finalRank>0)row.rank=finalRank;break;}
-        for(auto const& result:view.result["standings"].asArray().unwrapOr(std::vector<matjson::Value>{}))if(result["participantId"].asString().unwrapOr("")==row.id){
+        for(auto const& result:results)if(result["participantId"].asString().unwrapOr("")==row.id){
             if(result["rank"].isNumber())row.rank=static_cast<int>(result["rank"].asInt().unwrapOr(0));
             if(result["tierAfter"].isString())row.tier=result["tierAfter"].asString().unwrapOr("UNRANKED");
         }
         rows.push_back(std::move(row));
     }
     std::stable_sort(rows.begin(),rows.end(),[](auto const& a,auto const& b){return (a.rank>0?a.rank:100)<(b.rank>0?b.rank:100);});
-    if(rows.size()>16)rows.resize(16);return rows;
+    auto const maximum=view.matchPlayerCount==64?64u:16u;
+    if(rows.size()>maximum)rows.resize(maximum);
+    return rows;
 }
 inline CCNode* survivalAvatar(SurvivalStanding const& row,std::string const& own,float extent){
     auto* icon=row.id==own?PlayerIcon::createLocal():row.bot?PlayerIcon::createBot(static_cast<int>(std::hash<std::string>{}(row.id)%15+1)):PlayerIcon::createRemote(row.accountId);
     if(icon)icon->setScale(extent/48.f);return icon;
 }
 class SurvivalStandingsPopup final:public geode::Popup {
-    struct Card {SurvivalStanding row;CCLabelBMFont* title=nullptr;CCLabelBMFont* progress=nullptr;CCNode* red=nullptr;SurvivalProgressTween tween;};
+    struct Card {SurvivalStanding row;CCLabelBMFont* title=nullptr;CCLabelBMFont* progress=nullptr;CCNode* red=nullptr;SurvivalProgressTween tween;CCMenuItemSpriteExtra* item=nullptr;};
     std::vector<Card> m_cards;std::string m_match;
-    CCLabelBMFont* m_clock=nullptr;
+    CCLabelBMFont *m_clock=nullptr,*m_pageLabel=nullptr;
+    bool m_compact=false;std::size_t m_page=0,m_pages=1,m_pageSize=16;
     bool init() override{
         if(!Popup::init(490,282))return false;
         m_bgSprite->setVisible(false);setID("survival-standings-popup"_spr);
@@ -42,18 +48,37 @@ class SurvivalStandingsPopup final:public geode::Popup {
         auto& runtime=SurvivalRuntime::get();m_match=runtime.view().id;
         m_clock=menuLabel("SURVIVAL",.30f,{245,264},Cyan,FontWeight::Black);m_mainLayer->addChild(m_clock,5);
         auto const rows=survivalRoster(runtime.view());
+        m_compact=runtime.view().matchPlayerCount==64;m_pageSize=m_compact?32:16;m_pages=std::max<std::size_t>(1,(rows.size()+m_pageSize-1)/m_pageSize);
         for(std::size_t i=0;i<rows.size();++i){
-            auto const& row=rows[i];auto* face=surface({112,51},{},Blue,SurfaceRaised,250,true);
-            auto* red=surface({112,51},{56,25.5f},Red,{42,13,28},255,true);face->addChild(red,1);
-            auto* name=playerNameLabel(row.name,.22f,{56,43},Text,FontWeight::Black);face->addChild(name,5);
-            if(auto* icon=survivalAvatar(row,runtime.view().ownId,15)){icon->setPosition({44,26});face->addChild(icon,5);}
-            auto* badge=createAnimatedRankBadge(row.tier,{17,17},RankBadgeDisplay::Leaderboard);badge->setPosition({68,26});face->addChild(badge,5);
-            auto* progress=menuLabel("",.16f,{56,9},TextMuted,FontWeight::ExtraBold);face->addChild(progress,5);
-            auto* item=CCMenuItemSpriteExtra::create(face,this,menu_selector(SurvivalStandingsPopup::onPlayer));item->setTag(static_cast<int>(i));item->setPosition({65.f+120*(i%4),224.f-56*(i/4)});m_buttonMenu->addChild(item);
-            m_cards.push_back({row,name,progress,red,{}});
+            auto const& row=rows[i];float const height=m_compact?21.f:51.f;
+            auto* face=surface({112,height},{},Blue,SurfaceRaised,250,true);
+            auto* red=surface({112,height},{56,height/2},Red,{42,13,28},255,true);face->addChild(red,1);
+            auto* name=playerNameLabel(row.name,.22f,m_compact?CCPoint{68,10.5f}:CCPoint{56,43},Text,FontWeight::Black);face->addChild(name,5);
+            if(auto* icon=survivalAvatar(row,runtime.view().ownId,15)){icon->setPosition(m_compact?CCPoint{13,10.5f}:CCPoint{44,26});face->addChild(icon,5);}
+            CCLabelBMFont* progress=nullptr;
+            if(!m_compact){
+                auto* badge=createAnimatedRankBadge(row.tier,{17,17},RankBadgeDisplay::Leaderboard);badge->setPosition({68,26});face->addChild(badge,5);
+                progress=menuLabel("",.16f,{56,9},TextMuted,FontWeight::ExtraBold);face->addChild(progress,5);
+            }
+            auto const cell=i%m_pageSize;
+            auto* item=CCMenuItemSpriteExtra::create(face,this,menu_selector(SurvivalStandingsPopup::onPlayer));item->setTag(static_cast<int>(i));
+            item->setPosition({65.f+120*(cell%4),m_compact?237.f-25*(cell/4):224.f-56*(cell/4)});m_buttonMenu->addChild(item);
+            m_cards.push_back({row,name,progress,red,{},item});
         }
-        scheduleUpdate();update(0);return true;
+        if(m_pages>1){
+            m_pageLabel=menuLabel("",.24f,{245,22},TextMuted);m_mainLayer->addChild(m_pageLabel,5);
+            for(int direction:{-1,1}){
+                auto* face=surface({44,24},{},Blue,SurfaceRaised,255,true);face->addChild(menuLabel(direction<0?"<":">",.28f,{22,12},Text),5);
+                auto* item=CCMenuItemSpriteExtra::create(face,this,menu_selector(SurvivalStandingsPopup::onPage));item->setTag(direction);item->setPosition({245.f+direction*64,22});m_buttonMenu->addChild(item);
+            }
+        }
+        applyPage();scheduleUpdate();update(0);return true;
     }
+    void applyPage(){
+        for(std::size_t i=0;i<m_cards.size();++i){auto const shown=i/m_pageSize==m_page;m_cards[i].item->setVisible(shown);m_cards[i].item->setEnabled(shown);}
+        if(m_pageLabel)m_pageLabel->setString(fmt::format("{} / {}",m_page+1,m_pages).c_str());
+    }
+    void onPage(CCObject* sender){if(auto* item=typeinfo_cast<CCMenuItemSpriteExtra*>(sender)){m_page=item->getTag()<0?(m_page+m_pages-1)%m_pages:(m_page+1)%m_pages;applyPage();}}
     void onPlayer(CCObject* sender){if(auto* item=typeinfo_cast<CCMenuItemSpriteExtra*>(sender);item && item->getTag()>=0 && static_cast<std::size_t>(item->getTag())<m_cards.size())openSurvivalProfile(this,m_cards[item->getTag()].row);}
 public:
     static SurvivalStandingsPopup* create(){auto* p=new SurvivalStandingsPopup;if(p->init()){p->autorelease();return p;}delete p;return nullptr;}
@@ -63,9 +88,13 @@ public:
         auto const remaining=r.roundRemainingMs();auto const seconds=remaining?(*remaining+999)/1000:0;
         m_clock->setString(fmt::format("SURVIVAL · {} · {} · {}",v.phase,remaining?fmt::format("{:02}:{:02}",seconds/60,seconds%60):"--:--",v.cutoff?rankedScoreText(*v.cutoff,v.phase=="TIEBREAK")+"%":"--%").c_str());fitFullMenuLabel(m_clock,440,18,.30f);
         for(auto& card:m_cards){auto it=std::find_if(rows.begin(),rows.end(),[&](auto const& row){return row.id==card.row.id;});if(it==rows.end())continue;card.row=*it;
-            auto const& row=card.row;card.tween.observe(v.revision,row.attemptId,row.attemptActive,row.bestProgress,row.currentProgress);card.tween.advance(dt);
-            card.title->setString(fmt::format("{} {}",row.rank>0?survivalOrdinal(row.rank):"--",row.name).c_str());fitFullMenuLabel(card.title,102,12,.22f);
-            card.progress->setString(fmt::format("BEST {}% · NOW {}%",rankedScoreText(card.tween.best.displayed,false),rankedScoreText(card.tween.now,false)).c_str());fitFullMenuLabel(card.progress,104,11,.16f);
+            auto const& row=card.row;
+            if(m_compact){card.title->setString(row.name.c_str());fitFullMenuLabel(card.title,80,13,.22f);}
+            else {
+                card.tween.observe(v.revision,row.attemptId,row.attemptActive,row.bestProgress,row.currentProgress);card.tween.advance(dt);
+                card.title->setString(fmt::format("{} {}",row.rank>0?survivalOrdinal(row.rank):"--",row.name).c_str());fitFullMenuLabel(card.title,102,12,.22f);
+                card.progress->setString(fmt::format("BEST {}% · NOW {}%",rankedScoreText(card.tween.best.displayed,false),rankedScoreText(card.tween.now,false)).c_str());fitFullMenuLabel(card.progress,104,11,.16f);
+            }
             card.red->setVisible(row.eliminated || (row.rank>0 && !row.passing && v.state=="PLAYING"));
         }
     }

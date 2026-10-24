@@ -31,7 +31,7 @@ class SurvivalDebugPopup final : public Popup {
             m_groups[i]->setTag(10+i);m_groups[i]->setPosition({66+i*104.0f,145});m_groups[i]->setVisible(!forceOnly);menu->addChild(m_groups[i]);
         }
         auto* countLabel=ui::menuLabel(corum::ranked::i18n::literal("inline.bot-count"),.27f,{106,111},ui::Text,ui::FontWeight::SemiBold);countLabel->setVisible(!forceOnly);panel->addChild(countLabel);
-        m_botCount=TextInput::create(100,"1-15");m_botCount->setFilter("0123456789");m_botCount->setMaxCharCount(2);m_botCount->setString("15");m_botCount->setPosition({220,111});m_botCount->setVisible(!forceOnly);panel->addChild(m_botCount,10);
+        m_botCount=TextInput::create(100,fmt::format("1-{}",SurvivalRuntime::get().configuredPlayerCount()-1));m_botCount->setFilter("0123456789");m_botCount->setMaxCharCount(2);m_botCount->setString(std::to_string(SurvivalRuntime::get().configuredPlayerCount()-1));m_botCount->setPosition({220,111});m_botCount->setVisible(!forceOnly);panel->addChild(m_botCount,10);
         m_forceLabel=ui::menuLabel("",.29f,{70,15},ui::Text,ui::FontWeight::SemiBold);
         auto* face=ui::surface({140,30},{},ui::Blue,ui::SurfaceRaised,255,true);face->addChild(m_forceLabel,5);
         auto* scenario=CCMenuItemSpriteExtra::create(face,this,menu_selector(SurvivalDebugPopup::onChoice));scenario->setTag(1);scenario->setPosition({120,75});menu->addChild(scenario);
@@ -60,8 +60,8 @@ class SurvivalDebugPopup final : public Popup {
         if(item->getTag()==1){if(!m_forceOnly)m_rank=m_rank?0:1;refreshLabels();return;}
         auto password=std::string(m_password->getString());
         if(password.empty()){m_status->setString(i18n::text("admin-password-needed","Enter the debug password.").c_str());return;}
-        int bots=15;
-        if(!m_forceOnly){auto value=std::string(m_botCount->getString());auto parsed=std::from_chars(value.data(),value.data()+value.size(),bots);if(parsed.ec!=std::errc{}||parsed.ptr!=value.data()+value.size()||bots<1||bots>15){m_status->setString(corum::ranked::i18n::literal("inline.bot-count-1-15"));return;}}
+        int bots=SurvivalRuntime::get().configuredPlayerCount()-1;
+        if(!m_forceOnly){auto value=std::string(m_botCount->getString());auto parsed=std::from_chars(value.data(),value.data()+value.size(),bots);if(parsed.ec!=std::errc{}||parsed.ptr!=value.data()+value.size()||bots<1||bots>SurvivalRuntime::get().configuredPlayerCount()-1){m_status->setString(fmt::format(fmt::runtime(i18n::text("survival-bot-count-range","Bot Count: 1 - {}")),SurvivalRuntime::get().configuredPlayerCount()-1).c_str());return;}}
         int rank=0;
         if(m_rank>0) {
             auto const value=std::string(m_rankInput->getString());auto parsed=std::from_chars(value.data(),value.data()+value.size(),rank);

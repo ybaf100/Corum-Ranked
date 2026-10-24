@@ -56,8 +56,8 @@ export class SurvivalEngineService implements OnApplicationBootstrap, OnApplicat
     await Promise.allSettled(this.mapJobs.values());
   }
   public async create(creationKey:string, players:readonly SurvivalAdmissionPlayer[]):Promise<SurvivalMatch> {
-    if (!creationKey.trim() || creationKey.length>200 || players.length!==16 || new Set(players.map(p=>p.participantId)).size!==16)
-      throw new BadRequestException("M3 accepts exactly 16 distinct entrants");
+    if (!creationKey.trim() || creationKey.length>200 || players.length<2 || players.length>64 || new Set(players.map(p=>p.participantId)).size!==players.length)
+      throw new BadRequestException("Survival entrants must fit the captured 16/64-player format");
     return this.config.withAdmission(()=>this.database.transaction(async tx=>{
       return this.createWithin(tx,creationKey,players,this.config.getSnapshot());
     }));
@@ -66,14 +66,16 @@ export class SurvivalEngineService implements OnApplicationBootstrap, OnApplicat
    * account/session lock. Virtual LP changes this match snapshot, never a profile. */
   public async createWithin(tx:SqlExecutor,creationKey:string,players:readonly SurvivalAdmissionPlayer[],
     captured:SurvivalConfigDocument, humanLpSnapshot?:number,presentationControlled=false,online=false,variableSize=false):Promise<SurvivalMatch> {
-    if(!creationKey.trim() || creationKey.length>200 || (!online && !variableSize && players.length!==16) || ((online || variableSize) && (players.length<2||players.length>16)) || new Set(players.map(p=>p.participantId)).size!==players.length)
-      throw new BadRequestException("M3 accepts exactly 16 distinct entrants");
+    if(!creationKey.trim() || creationKey.length>200 || (players.length<2||players.length>64) || new Set(players.map(p=>p.participantId)).size!==players.length)
+      throw new BadRequestException("Survival entrants must fit the captured 16/64-player format");
     await lockSurvivalAdmission(tx);
     const requestHash=variableSize?hash({players,humanLpSnapshot,presentationControlled,variableSize}):online?hash({players,presentationControlled,online}):presentationControlled?hash({players,humanLpSnapshot,presentationControlled}):humanLpSnapshot===undefined?hash(players):hash({players,humanLpSnapshot});
       // Serialize even two first uses of the same key before its row exists.
       await tx.query("SELECT pg_advisory_xact_lock(hashtext($1))",[`survival-create:${creationKey}`]);
       const existing=(await tx.query<MatchRow>("SELECT * FROM sur_matches WHERE creation_key=$1",[creationKey])).rows[0];
       if(existing){if(existing.request_hash!==requestHash)throw new ConflictException("Survival creation key changed");return existing.snapshot;}
+      if(!online && !variableSize && players.length!==captured.config.matchPlayerCount)throw new BadRequestException(`Survival requires exactly ${captured.config.matchPlayerCount} entrants`);
+      if(players.length>captured.config.matchPlayerCount)throw new BadRequestException("Entrants exceed the captured Survival format");
       await assertSurvivalAdmission(tx,captured);
       const humans=players.filter((p):p is Extract<SurvivalAdmissionPlayer,{kind:"HUMAN"}>=>p.kind==="HUMAN");
       const profiles=await tx.query<{player_id:string;lp:number;displayed_tier:string;gd_username:string;gd_account_id:string}>(

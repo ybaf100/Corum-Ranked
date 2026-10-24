@@ -431,6 +431,7 @@ struct SurvivalView {
 
 struct RuntimeView {
     bool soloEnabled = false, survivalEnabled = false, survivalConfigReady = false;
+    int survivalPlayerCount=16;
     SurvivalView survival;
     RuntimeStage stage = RuntimeStage::Idle;
     std::string status;

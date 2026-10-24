@@ -2254,5 +2254,37 @@
   "history-no-attempts": {
     "en": "NO RECORDED ATTEMPTS",
     "ko": "확정된 시도 기록 없음"
+  },
+  "admin-survival-format": {
+    "en": "Survival operating format",
+    "ko": "서바이벌 운영방식"
+  },
+  "survival-format-players": {
+    "en": "{} PLAYERS",
+    "ko": "{}인 모드"
+  },
+  "survival-format-new-matches": {
+    "en": "Applies to new matches. Current games keep their rules.",
+    "ko": "새 경기에 적용됩니다. 진행 중 경기는 기존 규칙을 유지합니다."
+  },
+  "survival-format-failed": {
+    "en": "Could not load/save the operating format.",
+    "ko": "운영방식을 불러오거나 저장하지 못했습니다."
+  },
+  "survival-bot-count-range": {
+    "en": "Bot Count: 1 - {}",
+    "ko": "봇 수: 1 - {}"
+  },
+  "survival-fill-player-range": {
+    "en": "Total must be 2 - {} players.",
+    "ko": "전체 참가자는 2 - {}명이어야 합니다."
+  },
+  "survival-queue-short-format": {
+    "en": "AFTER {}s, SMALLER FIELDS MAY START",
+    "ko": "{}초 후에는 적은 인원으로도 경기가 시작될 수 있습니다."
+  },
+  "survival-online-ready-format": {
+    "en": "2-{} PLAYERS",
+    "ko": "2~{}명 경기"
   }
 }

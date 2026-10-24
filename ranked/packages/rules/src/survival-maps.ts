@@ -2,7 +2,7 @@ import { RankedDomainError } from "./errors.js";
 import { validateSurvivalConfig, type SurvivalConfig, type SurvivalTierBand } from "./survival.js";
 
 export type SurvivalDifficultyGroup = "RED_BRONZE" | "SILVER" | "GOLD";
-export type SurvivalMapPhase = "ROUND_1" | "ROUND_2" | "ROUND_3" | "FINAL" | "TIEBREAK";
+export type SurvivalMapPhase = "ROUND_1" | "ROUND_2" | "ROUND_3" | "ROUND_4" | "FINAL" | "TIEBREAK";
 export type SurvivalDemonDifficulty = "EASY" | "MEDIUM" | "HARD" | "INSANE" | "EXTREME";
 
 export interface SurvivalMapMetadata {
@@ -32,11 +32,11 @@ export interface SurvivalMapRange {
 const range = (minimumStars: number | null, maximumStars: number | null,
   demons: readonly SurvivalDemonDifficulty[] = []): SurvivalMapRange => ({ minimumStars, maximumStars, demons });
 const RANGES: Record<SurvivalDifficultyGroup, Record<SurvivalMapPhase, SurvivalMapRange>> = {
-  RED_BRONZE: { ROUND_1: range(4,6), ROUND_2: range(5,7), ROUND_3: range(6,8),
+  RED_BRONZE: { ROUND_1: range(4,6), ROUND_2: range(5,7), ROUND_3: range(6,8), ROUND_4: range(6,8),
     FINAL: range(7,9,["EASY"]), TIEBREAK: range(null,null,["MEDIUM"]) },
-  SILVER: { ROUND_1: range(5,7), ROUND_2: range(6,8), ROUND_3: range(7,9),
+  SILVER: { ROUND_1: range(5,7), ROUND_2: range(6,8), ROUND_3: range(7,9), ROUND_4: range(7,9),
     FINAL: range(null,null,["EASY","MEDIUM"]), TIEBREAK: range(null,null,["HARD"]) },
-  GOLD: { ROUND_1: range(6,8), ROUND_2: range(7,9), ROUND_3: range(8,9,["EASY"]),
+  GOLD: { ROUND_1: range(6,8), ROUND_2: range(7,9), ROUND_3: range(8,9,["EASY"]), ROUND_4: range(8,9,["EASY"]),
     FINAL: range(null,null,["EASY","MEDIUM","HARD"]), TIEBREAK: range(null,null,["INSANE"]) },
 };
 export function survivalMapRange(group: SurvivalDifficultyGroup, phase: SurvivalMapPhase): SurvivalMapRange {
@@ -81,12 +81,13 @@ export function survivalDifficultyForAverage(averageLp: number, bands: readonly 
  * the M1 profile configuration model. Unsupported rules fail at admission. */
 export function validateSurvivalEngineConfig(config: SurvivalConfig): readonly string[] {
   const errors = [...validateSurvivalConfig(config)];
-  const expected = { matchPlayerCount:16, roundSeconds:180, round1Qualifiers:10,
-    round2Qualifiers:6, round3Qualifiers:3, finalWinners:1, scoreMultiplier:1,
+  const expected = { roundSeconds:180, round1Qualifiers:config.matchPlayerCount===64?40:10,
+    round2Qualifiers:config.matchPlayerCount===64?26:6, round3Qualifiers:config.matchPlayerCount===64?12:3, finalWinners:1, scoreMultiplier:1,
     tiebreakAttempts:3, tiebreakDecimals:3, allowCutoffTies:true } as const;
   for (const [key,value] of Object.entries(expected)) {
     if (config[key as keyof SurvivalConfig] !== value) errors.push(`M3 requires ${key} = ${value}`);
   }
+  if(config.matchPlayerCount===64 && config.round4Qualifiers!==5)errors.push("64-player Survival requires round4Qualifiers = 5");
   if (config.minimumLevelId < 40_000_000) errors.push("M3 requires minimumLevelId >= 40000000");
   return errors;
 }

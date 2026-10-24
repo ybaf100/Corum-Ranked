@@ -96,7 +96,7 @@ export interface SurvivalRoundContext { roundKey: string; mapGeneration: number;
 export const SURVIVAL_READY_HOLD_MS = 5_000;
 export const SURVIVAL_INTRO_MS = 6_000;
 export const SURVIVAL_RESULT_MS = 5_000;
-export const survivalNextPhase=(phase:SurvivalMapPhase):SurvivalMapPhase=>phase==="ROUND_1"?"ROUND_2":phase==="ROUND_2"?"ROUND_3":phase==="ROUND_3"?"FINAL":"TIEBREAK";
+export const survivalNextPhase=(phase:SurvivalMapPhase,capacity=16):SurvivalMapPhase=>phase==="ROUND_1"?"ROUND_2":phase==="ROUND_2"?"ROUND_3":phase==="ROUND_3"?(capacity===64?"ROUND_4":"FINAL"):phase==="ROUND_4"?"FINAL":"TIEBREAK";
 export function survivalEntryOpensAt(round: SurvivalRound): number | null {
   return round.entryRequestedAt === null ? null : round.entryRequestedAt + SURVIVAL_READY_HOLD_MS;
 }
@@ -182,7 +182,7 @@ export function survivalMapSelectionTarget(match:SurvivalMatch){
   const round=survivalCurrentRound(match);
   if(match.state==="MAP_SELECTION" && !round.map)return {roundKey:round.key,mapGeneration:round.mapGeneration,phase:round.phase,prefetch:false};
   if(match.state==="ROUND_RESULT" && !match.nextMap && round.finishedAt!==null && round.players.filter(p=>p.qualified&&!p.forfeited).length>1)
-    return {roundKey:`stage-${round.ordinal+1}`,mapGeneration:1,phase:survivalNextPhase(round.phase),prefetch:true};
+    return {roundKey:`stage-${round.ordinal+1}`,mapGeneration:1,phase:survivalNextPhase(round.phase,match.config.matchPlayerCount),prefetch:true};
   return null;
 }
 function transition(match: SurvivalMatch, state: SurvivalMatchState, at: number, reason: string): void {
@@ -192,8 +192,8 @@ function transition(match: SurvivalMatch, state: SurvivalMatchState, at: number,
 }
 function addRound(match: SurvivalMatch, phase: SurvivalMapPhase, participants: readonly string[], at: number): void {
   const ordinal = match.rounds.length + 1;
-  const targets=(match.online || match.variableSize)?survivalOnlineTargets(match.players.length):[match.config.round1Qualifiers,match.config.round2Qualifiers,match.config.round3Qualifiers];
-  const target=phase==="ROUND_1"?targets[0]!:phase==="ROUND_2"?targets[1]!:phase==="ROUND_3"?targets[2]!:1;
+  const targets=(match.online || match.variableSize)?survivalOnlineTargets(match.players.length,match.config.matchPlayerCount):[match.config.round1Qualifiers,match.config.round2Qualifiers,match.config.round3Qualifiers,match.config.round4Qualifiers??0];
+  const target=phase==="ROUND_1"?targets[0]!:phase==="ROUND_2"?targets[1]!:phase==="ROUND_3"?targets[2]!:phase==="ROUND_4"?targets[3]!:1;
   match.rounds.push({ key: `stage-${ordinal}`, ordinal, phase, target, mapGeneration:1, map:null, selectedMaps:[],
     preparationStartedAt:null, entryRequestedAt:null, firstEnteredAt:null, startsAt:null, endsAt:null, finishedAt:null,
     cutoffScore:null, players:participants.map(participantId => ({participantId,assetsReadyAt:null,
@@ -209,11 +209,11 @@ export function createSurvivalMatch(id: string, entrants: readonly SurvivalEntra
   configGeneration: string, now: number,online=false,variableSize=false): SurvivalMatch {
   const errors = validateSurvivalEngineConfig(config);
   if (errors.length) throw new RankedDomainError("INVALID_CONFIG",errors.join("; "));
-  if ((!online && !variableSize && entrants.length!==16) || ((online || variableSize) && (entrants.length<2||entrants.length>16)) || new Set(entrants.map(p => p.participantId)).size !== entrants.length ||
+  if ((!online && !variableSize && entrants.length!==config.matchPlayerCount) || ((online || variableSize) && (entrants.length<2||entrants.length>config.matchPlayerCount)) || new Set(entrants.map(p => p.participantId)).size !== entrants.length ||
     entrants.some(p => !p.participantId || p.participantId.length > 80 || !Number.isSafeInteger(p.lp) || p.lp < 0 ||
       !["HUMAN","BOT"].includes(p.kind) || (p.kind === "HUMAN" && !p.playerId)) ||
     new Set(entrants.filter(p => p.playerId).map(p => p.playerId)).size !== entrants.filter(p => p.playerId).length ||
-    !configGeneration.trim() || !Number.isFinite(now)) conflict("M3 requires exactly 16 distinct valid entrants");
+    !configGeneration.trim() || !Number.isFinite(now)) conflict("Survival requires distinct valid entrants within its captured field size");
   const averageLp = entrants.reduce((sum,p) => sum + p.lp,0) / entrants.length;
   const match: SurvivalMatch = { id,revision:1,state:"MAP_SELECTION",configGeneration,config:structuredClone(config),averageLp,
     difficultyGroup:survivalDifficultyForAverage(averageLp,config.tierBands),createdAt:now,updatedAt:now,finishedAt:null,
@@ -221,7 +221,7 @@ export function createSurvivalMatch(id: string, entrants: readonly SurvivalEntra
       forfeitReason:null,finalRank:null})),rounds:[],transitions:[] };
   if(online)match.online=true;
   if(variableSize)match.variableSize=true;
-  addRound(match,(online || variableSize) && entrants.length<=3?"FINAL":(online || variableSize) && entrants.length<8?"ROUND_3":"ROUND_1",entrants.map(p => p.participantId),now);
+  addRound(match,(online || variableSize) && entrants.length<=3?"FINAL":(online || variableSize) && entrants.length<8?(config.matchPlayerCount===64?"ROUND_4":"ROUND_3"):"ROUND_1",entrants.map(p => p.participantId),now);
   return match;
 }
 function eliminate(match: SurvivalMatch, round: SurvivalRound, player: SurvivalRoundPlayer, score: number, reason: string | null, at:number): void {
@@ -363,14 +363,13 @@ export function reduceSurvivalMatch(before: SurvivalMatch, command: SurvivalComm
     // Keep ROUND_RESULT durably visible until a subsequent tick; never create a
     // second next-round row from an old completion command.
     if (match.state === "ROUND_RESULT" && enteredState === "ROUND_RESULT" && match.presentationGate!=="ROUND_RESULT") {
-      const phase: SurvivalMapPhase = round.phase === "ROUND_1" ? "ROUND_2" : round.phase === "ROUND_2" ? "ROUND_3" :
-        round.phase === "ROUND_3" ? "FINAL" : "TIEBREAK";
+      const phase=survivalNextPhase(round.phase,match.config.matchPlayerCount);
       addRound(match,phase,round.players.filter(p => p.qualified && !p.forfeited).map(p => p.participantId),now);
     }
   } else if (!terminal(match) && (match.state === enteredState || (enteredState === "COUNTDOWN" && match.state === "PLAYING"))) {
     if (command.roundKey !== round.key || command.mapGeneration !== round.mapGeneration) conflict("SURVIVAL_CONTEXT_CHANGED");
     if(command.type==="NEXT_MAP_SELECTED") {
-      const phase=survivalNextPhase(round.phase);
+      const phase=survivalNextPhase(round.phase,match.config.matchPlayerCount);
       if(match.state!=="ROUND_RESULT" || round.finishedAt===null || match.nextMap || round.players.filter(p=>p.qualified&&!p.forfeited).length<2)
         conflict("No confirmed next Survival round");
       assertSelectedMap(match,phase,command.map);
@@ -509,7 +508,7 @@ export function survivalSettlementInputs(match: SurvivalMatch) {
     const rank=player.finalRank!;
     const tiedPlayers=match.players.filter(p => p.finalRank === rank).length;
     const last=player.fixedRewardRank??Math.min(match.players.length,rank+tiedPlayers-1);
-    const rewardRank=(match.online || match.variableSize)?survivalOnlineRewardRank(last,match.players.length):last;
+    const rewardRank=(match.online || match.variableSize || match.config.matchPlayerCount===64)?survivalOnlineRewardRank(last,match.players.length):last;
     return {participantId:player.participantId,playerId:player.playerId,rank,tiedPlayers,
       occupiedLastRank:last,delta:survivalPlacementLp(rewardRank,1,match.config.placementLp),
       eventKey:`survival:${match.id}:result:${player.participantId}`,configGeneration:match.configGeneration};
@@ -560,7 +559,7 @@ export function survivalLiveView(match: SurvivalMatch, now: number, participantI
   }).sort((a,b)=>a.rank-b.rank||a.participantId.localeCompare(b.participantId));
   return {matchId:match.id,revision:match.revision,state:match.state,phase:round.phase,roundKey:round.key,
     selectionOpensAt:new Date(match.createdAt+SURVIVAL_INTRO_MS).toISOString(),nextMap:match.nextMap??null,
-    presentationGate:match.presentationGate??null,online:match.online??false,roundNumber:round.phase==="TIEBREAK"?4:round.ordinal,playerCount:match.players.length,roundPlayerCount:round.players.length,
+    presentationGate:match.presentationGate??null,online:match.online??false,roundNumber:round.phase==="TIEBREAK"?(match.config.matchPlayerCount===64?5:4):round.ordinal,matchPlayerCount:match.config.matchPlayerCount,playerCount:match.players.length,roundPlayerCount:round.players.length,
     mapGeneration:round.mapGeneration,map:round.map,averageLp:match.averageLp,difficultyGroup:match.difficultyGroup,
     configGeneration:match.configGeneration,serverNow:new Date(now).toISOString(),
     preparationWarningAt:round.preparationStartedAt === null ? null : new Date(round.preparationStartedAt+10_000).toISOString(),
