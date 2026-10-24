@@ -35,7 +35,7 @@ R4의 맵 자격 범위는 같은 난이도 그룹의 기존 R3 범위를 재사
 
 ## 검증과 배포
 
-검증 결과와 배포 SHA·워크플로·R2 다운로드 해시는 게시 및 실제 활성화가 끝난 뒤 이 문서에 추가한다. 실기기 UI/터치/64명 부하와 실제 Neon Compute 절전은 네이티브 컴파일·격리 SQL 테스트·서버 health 확인과 구분한다.
+아래는 실제 게시·배포 확인 결과다. 실기기 UI/터치/64명 부하와 실제 Neon Compute 절전은 네이티브 컴파일·격리 SQL 테스트·서버 health 확인과 구분한다.
 
 로컬 전체 회귀에서 rules 288개, 서버 612개(실제 PostgreSQL 환경 전용 1개는 별도 실행), native 280개가 통과했다. 실제 PostgreSQL 16의 HTTP 동시성·64번째 참가자 매칭·연결 복구 53개도 통과했다. build/typecheck 및 번역 670 UI 키/48종을 확인했다. 16인과 64인 모두 가상 6분 유휴 SQL이 0개이며 대기열 활성화·종료 후 재유휴를 검증했다.
 
@@ -60,4 +60,16 @@ Descriptor: [Release](https://pub-11442f32945446a49b9da0a5e69f2451.r2.dev/ranked
 
 운영 배포 전 읽기 전용 DB 기준(13:34:02 UTC)은 계정 3개, Solo 경기 52건/Attempt 150건, Survival 경기 89건/Attempt 12395건, 해금 144행/AP ledger 144행/총 AP 5120이었다. 이는 계정별 기존 48종 카탈로그 데이터이며 신규 도전과제를 추가한 것이 아니다. 도전과제 활성화 epoch는 `2026-10-24T04:59:47.102Z`다. 0020/0029 적용을 확인했으며 활성 Survival 경기와 대기열은 0이었다.
 
-양 채널 공개 파일 검증 후 이 문서의 별도 `[deploy-lightsail]` 커밋으로 Singapore의 정상 Docker 배포·rollback 절차를 시작한다. 새 0030은 서버 startup migration으로 적용하고 기존 0029 초기화를 반복하지 않는다. 실제 배포 결과와 배포 후 읽기 전용 보존 검증은 아래에 이어서 기록한다.
+양 채널 공개 파일 검증 후 별도 `[deploy-lightsail]` 커밋으로 Singapore의 정상 Docker 배포·rollback 절차를 실행했다. 새 0030은 서버 startup migration으로 적용했으며 기존 0029 초기화를 반복하지 않았다.
+
+### Singapore 운영 활성화 확인
+
+- 배포 SHA: `12e97f78d7f3acc916b93609068f6476cb02bd54`. 패키지 기준 main과의 차이는 이 문서뿐이다.
+- [Lightsail 배포](https://github.com/ybaf100/Corum-Ranked/actions/runs/40100453209): success. 고정 SSH 호스트 검증, Docker build, immutable 이미지 업로드, rollback을 갖춘 실제 activation 단계가 모두 success다. Seoul/Railway 게임 서버 배포는 수행하지 않았다.
+- `2026-10-24T14:00:41Z` 공개 검증에서 Singapore `/health`와 `/ready`가 HTTP 200을 반환했다. ready/databaseConnected/databaseReady/schemaReady/rankedReady가 모두 true이고 missingSchema는 비었다.
+- Singapore와 Railway update-only bridge의 config가 요구 버전 beta.97과 앞서 다운로드한 양 채널 크기·SHA-256·다운로드 주소를 반환했다. Survival은 ready/enabled true, 운영방식 **16인**이다. 어드민에서 64인으로 변경할 수 있다.
+- 미인증 Survival 기록 상세는 HTTP 401이었다. 운영 계정·공식 경기·Attempt를 테스트 목적으로 생성하지 않았다.
+
+읽기 전용 배포 후 DB 확인(`2026-10-24T14:00:40.836Z`)에서 0020/0029/0030 ledger와 `native_death` 열을 확인했다. 계정/경기/Attempt/해금/AP 수치는 배포 전 기준과 전부 같고, Solo·Survival profile digest도 각각 `b6799dbb486e3ddd6f4c1bd183924322`, `2ee8e87e3a6009dae07ea6deb4bc18eb`로 같았다. AP ledger 합계와 profile AP 합계는 모두 5120이며 잘못된 LP delta와 음수 Survival LP는 0건이다. 도전과제 활성화 epoch는 정확히 `2026-10-24T04:59:47.102Z`로 보존됐다.
+
+실제 64명 접속 부하, 실기기 화면·터치·자동 복귀와 실제 Production Neon 절전/재개는 이번 배포 검증에 포함하지 않았다. 가상 6분 SQL 0개는 실제 Compute 절전 성공을 의미하지 않는다. Neon 설정이나 운영방식을 임의로 변경하지 않았고 compute를 수동 중지하지 않았다. 운영자가 64인으로 전환하면 새 대기열/경기에 적용되며 기존 생성 경기는 이전 snapshot을 유지한다.
