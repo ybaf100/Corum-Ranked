@@ -21,4 +21,17 @@ Server projection tests retain incomplete-round redaction and access/visibility 
 
 The software OpenGL ES shader check also renders 120 solid progress-bar frames in addition to the existing 120 masked text frames. It verifies that gold/rainbow bars animate and that the text mask/outline behavior is preserved. These tests and CI compilation are not physical-device visual/touch validation.
 
-Final local and CI results are recorded before main integration below.
+## Verified results
+
+Final code commit: `205e3b02dacac18dc41113fb53652c641bb70490`; all later report-only changes retain that code tree.
+
+- Local full native: **286 passed**, with subsequent recorded-difficulty/map badge/modal regression targets passing as well. Final-code native CI also passes **286 tests**.
+- Rules: **288 passed**. Server full CI: **614 passed / 1 skipped** (the environment-specific pool reconnect case); separate actual PostgreSQL online integration: **52 passed**. The skipped case is not reported as tested in this patch.
+- Build/typecheck, localization **674 UI keys / 48 achievements**, and font coverage checks passed. Software GLES compiled/linked and rendered **120 masked text + 120 solid progress frames**, retaining masks/outlines and verifying animation on gold/rainbow bars.
+- [Server/SQL CI](https://github.com/ybaf100/Corum-Ranked/actions/runs/40105366431): success.
+- [Four-platform Release builds/package](https://github.com/ybaf100/Corum-Ranked/actions/runs/40105366385): success; R2 publication skipped.
+- [Four-platform Debug ON/OFF and package](https://github.com/ybaf100/Corum-Ranked/actions/runs/40105366379): success, including all eight Debug ON/OFF configurations and packaging; R2 publication and optional external-image packaging skipped.
+
+Read-only public preflight found Singapore and the Railway update-only bridge healthy and serving beta.97, with Survival set to 64 players by the operator. This patch does not change that operating setting, publish a new package, or deploy a server. Future publication needs a new synchronized immutable client version and normal package-first activation; existing beta.97 objects must not be overwritten.
+
+Physical-device UI/touch, 64 simultaneous real players and production Neon suspension/resume were not tested. No production accounts, official attempts, data reset, or database-setting change were used for this follow-up.
