@@ -61,7 +61,7 @@ export const createLegacyRailwayHandler = (fetchConfig: typeof fetch = fetch) =>
     // Old clients cannot start matches, settle scores or modify Neon through Railway.
     json(res, 426, {
       code: "RANKED_CLIENT_UPDATE_REQUIRED",
-      requiredVersion: "v0.5.0-beta.94",
+      requiredVersion: "v0.5.0-beta.95",
       message: "Update Corum Ranked to the Lightsail edition.",
     });
   };
