@@ -42,6 +42,7 @@
 #include "domain/PlayerInfoPresentation.hpp"
 #include "ui/RankedSessionConflictPopup.hpp"
 #include "ui/RankedConfirmPopup.hpp"
+#include "ui/SurvivalPlayerInfoPopup.hpp"
 #include "ui/RankedModeDisabledPopup.hpp"
 #include "ui/MapDifficultyBadge.hpp"
 #include "ui/RankedMapHeading.hpp"
@@ -4442,7 +4443,7 @@ class CorumRankedLayer final : public CCLayerColor {
             frame->setID("ranked-history-thumbnail"_spr);panel->addChild(frame,3);
             auto* placeholder=historyText(frame,tr("loading","Loading..."),.24f,{thumbWidth/2,thumbHeight/2},thumbWidth-12,ui::TextMuted);m_historyThumbnailPlaceholder=placeholder;
             auto* sprite=CCSprite::create();sprite->setPosition({thumbWidth/2,thumbHeight/2});frame->addChild(sprite,5);m_historyThumbnail=sprite;
-            m_historyThumbnailSize={thumbWidth-4,thumbHeight-4};m_historyTexture=nullptr;
+            m_historyThumbnailSize=CCSize{thumbWidth-4,thumbHeight-4};m_historyTexture=nullptr;
             m_historyThumbnailContext={m_historySelectedId,round.key,0,static_cast<std::uint64_t>(round.levelId),++m_historyThumbnailGeneration};
         }
         float const infoLeft=horizontal?174.f:12.f,infoWidth=width-infoLeft-12;
