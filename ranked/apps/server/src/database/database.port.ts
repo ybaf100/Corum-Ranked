@@ -1,3 +1,4 @@
+import type { DatabaseWorkSignals } from "./database-work.js";
 export const DATABASE = Symbol("DATABASE");
 
 export interface SqlResult<Row> {
@@ -6,6 +7,8 @@ export interface SqlResult<Row> {
 }
 
 export interface SqlExecutor {
+  readonly workSignals?: DatabaseWorkSignals;
+  afterCommit?(callback: () => void): void;
   query<Row>(sql: string, values?: readonly unknown[]): Promise<SqlResult<Row>>;
 }
 

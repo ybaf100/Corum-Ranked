@@ -34,6 +34,7 @@ class SurvivalThumbnailProvider final : public cocos2d::CCNode {
     std::uint64_t m_generation=0,m_selected=0;
     int m_randomRequests=0,m_httpRequests=0;
     bool m_enabled=false,m_invalidTextureCache=false;
+    bool m_history=false;
     std::shared_ptr<std::atomic_bool> m_liveness;
     std::filesystem::path m_directory;
     static std::int64_t now();
@@ -48,6 +49,7 @@ class SurvivalThumbnailProvider final : public cocos2d::CCNode {
     void trimDisk();
 public:
     static SurvivalThumbnailProvider& get();
+    static SurvivalThumbnailProvider& history();
     static bool supported();
     static void onApplicationPause();
     static std::uint64_t applicationEpoch();

@@ -104,7 +104,7 @@ describe("durable Survival M3 engine",()=>{
     const participant=entrants[0] as Extract<SurvivalAdmissionPlayer,{kind:"HUMAN"}>;
     await database.query(`INSERT INTO ranked_sessions(id,player_id,token_hash,client_version,environment_snapshot,expires_at,last_heartbeat_at)
       VALUES($1,$2,$3,$4,'{}',$5,$6)`,[ids.next(),participant.playerId,tokens.hash(token),REQUIRED_RANKED_CLIENT_VERSION,new Date(now+3600000),clock.now()]);
-    vi.spyOn(engine,"onApplicationBootstrap").mockImplementation(()=>{});
+    vi.spyOn(engine,"onApplicationBootstrap").mockImplementation(async()=>{});
     const module=await Test.createTestingModule({controllers:[SurvivalEngineController,SurvivalPlayerInfoController],providers:[SessionGuard,SurvivalRateService,
       {provide:SurvivalEngineService,useValue:engine},{provide:ForumRecordsService,useValue:{read:async(account:string)=>({gdAccountId:account,records:[{provider:"GDKF",rank:17}]})}},{provide:DATABASE,useValue:database},
       {provide:TokenService,useValue:tokens},{provide:SERVER_CLOCK,useValue:clock}]}).compile();

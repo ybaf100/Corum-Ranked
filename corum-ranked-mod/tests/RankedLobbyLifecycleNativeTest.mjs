@@ -30,6 +30,8 @@ test('actual history rows keep Details visible and correctly indexed across 30-r
 #include "${join(root,'src/domain/SurvivalHudPresentation.hpp')}"
 #include <algorithm>
 #include <cassert>
+#include <functional>
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <utility>
@@ -39,13 +41,15 @@ inline constexpr CCPoint CCPointZero{};
 struct CCNode {
  virtual ~CCNode(){for(auto*child:children)delete child;}
  CCPoint position{},anchor{.5f,.5f};CCSize size{};float scale=1;bool visible=true,ignoreAnchor=false;int tag=-1;
- std::string id;std::vector<CCNode*>children;
+ std::string id;std::vector<CCNode*>children;CCNode*parent=nullptr;CCNode*getParent(){return parent;}auto const&getChildrenExt()const{return children;}bool isRunning()const{return true;}
+ CCPoint convertToNodeSpace(CCPoint p)const{for(auto*n=this;n;n=n->parent){p.x-=n->position.x-n->anchor.x*n->size.width;p.y-=n->position.y-n->anchor.y*n->size.height;}return p;}
  static CCNode*create(){return new CCNode;}
+ void setPositionY(float v){position.y=v;}float getPositionY()const{return position.y;}
  void setVisible(bool v){visible=v;}void setPosition(CCPoint p){position=p;}void setAnchorPoint(CCPoint p){anchor=p;}
  void setContentSize(CCSize s){size=s;}CCSize getContentSize()const{return size;}
  void setScale(float s){scale=s;}void setID(std::string s){id=std::move(s);}
  void setTag(int t){tag=t;}int getTag()const{return tag;}
- void addChild(CCNode*n,int=0){children.push_back(n);}
+ void addChild(CCNode*n,int=0){n->parent=this;children.push_back(n);}
 };
 using CCObject=CCNode;
 struct CCDirector {
@@ -77,8 +81,11 @@ struct ScrollLayer:CCNode {
 };
 #include "${root}/src/domain/RankedMode.hpp"
 struct Stage {int stageIndex=1;std::vector<std::string>mapGrades;std::string stageGrade="A";double stageScore=300;};
-struct History {int survivalRank=0;corum::ranked::RankedMode mode=corum::ranked::RankedMode::SoloRanked;std::string side="A",winnerSide="A",opponentName="a long player name";std::optional<int>ownRankedScoreDelta=10;};
-struct RuntimeView {bool historyLoading=false;std::string historyError;struct{std::vector<Stage>stageResults;}placement;std::vector<History>history;};
+struct Json {struct Int {long long unwrapOr(int v)const{return v;}bool isOk()const{return false;}long long unwrap()const{return 0;}};Int asInt()const{return {};}Json operator[](char const*)const{return {};}};
+namespace corum::ranked {struct HistoryRound{std::string label;bool completed=false;std::optional<bool>ownQualified;};std::vector<HistoryRound>historyRounds(Json const&,bool){return {};}}
+struct History {Json record;bool inProgress=false,debug=false;int roundWinsA=0,roundWinsB=0;std::string matchId="m",createdAt="2026-10-24",finishedAt="2026-10-24";int survivalRank=0;corum::ranked::RankedMode mode=corum::ranked::RankedMode::SoloRanked;std::string side="A",winnerSide="A",opponentName="a long player name";std::optional<int>ownRankedScoreDelta=10;};
+struct RuntimeView {std::uint64_t historyRevision=0;bool historyLoading=false;std::string historyError;struct{std::vector<Stage>stageResults;}placement;std::vector<History>history;};
+struct RankedRuntime{RuntimeView data;static RankedRuntime&get(){static RankedRuntime r;return r;}RuntimeView const&view()const{return data;}void fetchHistoryDetail(corum::ranked::RankedMode,std::string const&){} };
 namespace fmt {std::string runtime(std::string s){return s;}template<class...T>std::string format(std::string s,T const&...){return s;}}
 namespace corum::ranked::i18n {bool isKorean(){return false;}}
 constexpr int ccc3(unsigned char r,unsigned char g,unsigned char b){return (r<<16)|(g<<8)|b;}
@@ -88,41 +95,43 @@ std::string operator""_spr(char const*s,std::size_t n){return {s,n};}
 CCNode*makeNeonPanel(CCSize s,CCPoint p,int,int,int){auto*n=new CCNode;n->size=s;n->position=p;return n;}
 CCNode*makeLabel(std::string,float,CCPoint p,int,std::string=""){auto*n=new CCNode;n->size={120,12};n->position=p;return n;}
 CCNode*makeActionButtonVisual(std::string){auto*n=new CCNode;n->size={104,34};return n;}
-namespace corum::ranked::ui {void fitMenuLabelWidth(CCNode*,float,float,float){}}
+template<class T>struct WeakRef{T*p;explicit WeakRef(T*v):p(v){}struct Locked{T*p;explicit operator bool()const{return p;}T*operator->(){return p;}T*data(){return p;}};Locked lock()const{return {p};}};
+void queueInMainThread(std::function<void()> fn){fn();}
+namespace corum::ranked::ui {constexpr int TextMuted=9;ScrollLayer*createRankedTapScroll(CCSize s,std::function<void(CCPoint,CCPoint)>){return ScrollLayer::create(s);}void fitMenuLabelWidth(CCNode*,float,float,float){}}
 #include "${root}/src/domain/RankedMode.hpp"
 struct CorumRankedLayer {
  corum::ranked::ModeLobbyTransition m_modeTransition;corum::ranked::HistoryScope m_historyScope=corum::ranked::HistoryScope::All;void renderHistoryTabs(){}
+ std::string m_historyResult="ALL",m_historySelectedId,m_historyRound;int m_historyTabPage=0;std::optional<float> m_historyListOffset;ScrollLayer*m_historyListScroll=nullptr;
+ int historyColor(History const&)const{return kCyan;}std::string historyOutcome(History const&)const{return "WIN";}std::string historyDelta(History const&)const{return "LP";}
+ void historyText(CCNode*p,std::string const&t,float s,CCPoint pos,float,int color=0){p->addChild(makeLabel(t,s,pos,color));}
  enum class Page {HistoryList,HistoryDetail};Page m_page=Page::HistoryList;std::size_t m_historyIndex=0;CCNode*m_root=new CCNode;
- ~CorumRankedLayer(){delete m_root;}
+ bool isRunning()const{return true;}~CorumRankedLayer(){delete m_root;}
  std::string tr(char const*,char const*english){return english;}
  void addTopBack(bool){}void addScreenHeader(std::string,std::string,int,int){}
  void addButton(std::string,CCPoint,int,bool,float){}
  ${callbacks}
 };
-CCMenu*menuFor(ScrollLayer*l,int tag){
- for(auto*n:l->m_contentLayer->children){
-  if(auto*m=dynamic_cast<CCMenu*>(n)){for(auto*b:m->children){if(b->tag==tag)return m;}}
- }
+CCNode*menuFor(ScrollLayer*l,int tag){
+ for(auto*n:l->m_contentLayer->children)if(n->tag==tag)return n;
  return nullptr;
 }
 int main(){
  for(auto window:{CCSize{568,320},CCSize{480,320},CCSize{800,450}})for(int stages:{0,5}){
   CCDirector::sharedDirector()->window=window;CorumRankedLayer layer;RuntimeView view;
-  view.history.resize(32);view.placement.stageResults.resize(stages);layer.renderHistoryList(view);
+  view.history.resize(32);view.placement.stageResults.resize(stages);RankedRuntime::get().data=view;layer.renderHistoryList(view);
   ScrollLayer*scroll=nullptr;for(auto*n:layer.m_root->children)if(auto*s=dynamic_cast<ScrollLayer*>(n))scroll=s;
   assert(scroll&&scroll->id=="ranked-history-matches-scroll");
   assert(menuFor(scroll,0)&&menuFor(scroll,29)&&!menuFor(scroll,30));
   // Stage rows can precede the first match: scroll to that exact row and retain its own tag.
   for(int index:{0,14,29}){
-   auto*menu=menuFor(scroll,index);assert(menu->size.height==29);
+   auto*menu=menuFor(scroll,index);assert(menu->size.height==90);
    scroll->scrollTo(scroll->size.height/2-menu->position.y);
-   assert(menu->visible&&menu->children.size()==1);
-   auto*b=menu->children.front();assert(b->position.y==14.5f);
-   assert(menu->position.y+b->position.y==scroll->m_contentLayer->size.height-22-(stages+index)*36);
-   layer.onHistoryDetail(b);assert(layer.m_page==CorumRankedLayer::Page::HistoryDetail&&layer.m_historyIndex==std::size_t(index));
+   assert(menu->visible);
+   assert(menu->position.y==scroll->m_contentLayer->size.height-94-index*98);
+   layer.onHistoryDetail(menu);assert(layer.m_page==CorumRankedLayer::Page::HistoryDetail&&layer.m_historyIndex==std::size_t(index));
   }
   scroll->scrollToTop();if(stages==0)assert(menuFor(scroll,0)->visible);
-  scroll->scrollTo(0);assert(menuFor(scroll,29)->visible&&!menuFor(scroll,0)->visible);
+  scroll->scrollTo(scroll->size.height/2-menuFor(scroll,29)->position.y);assert(menuFor(scroll,29)->visible&&!menuFor(scroll,0)->visible);
   // The old single screen-sized menu at y=0 is culled at the same long-list top.
   auto offset=scroll->size.height-scroll->m_contentLayer->size.height;
   assert(offset+window.height<0);
@@ -181,7 +190,7 @@ ${fields}
  void invalidatePollRequest(){++pollRetirements;}
  void setStage(RuntimeStage value,std::string,std::string={}){stage=value;}
  std::string endpoint(std::string path)const{return path;}
- void leaveRanked();void updateSessionHeartbeat();
+ void cancelHistoryReads(){++m_historyGeneration;m_historyRequest.cancel();m_view.historyLoading=false;}void leaveRanked();void updateSessionHeartbeat();
  void applyAudioVolumes(matjson::Value const&){}
 };
 ${methods}

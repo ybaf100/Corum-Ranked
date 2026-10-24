@@ -1,3 +1,4 @@
+import { signalAfterCommit } from "../database/database-work.js";
 import { Inject, Injectable } from "@nestjs/common";
 import { ID_GENERATOR, type IdGenerator } from "../common/runtime.module.js";
 import type { SqlExecutor } from "../database/database.port.js";
@@ -39,6 +40,7 @@ export class OutboxService {
     occurredAt: Date,
   ): Promise<void> {
     if (match.discord_events_enabled === false) return;
+    signalAfterCommit(transaction,"outbox");
     const players = await transaction.query<PlayerNameRow>(
       "SELECT id, gd_username FROM ranked_players WHERE id = $1 OR id = $2",
       [match.player_a_id, match.player_b_id],

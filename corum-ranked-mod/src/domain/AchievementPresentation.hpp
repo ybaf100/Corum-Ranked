@@ -101,8 +101,8 @@ inline std::string achievementScopedName(std::string_view scope, std::string nam
 
 template<class Card> inline std::string achievementCardName(Card const& card, bool korean) {
     if (card.concealed) return catalogText("achievement-hidden", korean, "HIDDEN");
-    return achievementScopedName(card.scope, catalogText("achievement." + card.id + ".name", korean,
-        (korean ? card.nameKo : card.nameEn).c_str()), korean);
+    return catalogText("achievement." + card.id + ".name", korean,
+        (korean ? card.nameKo : card.nameEn).c_str());
 }
 
 template<class Card> inline std::string achievementCardDescription(Card const& card, bool korean) {

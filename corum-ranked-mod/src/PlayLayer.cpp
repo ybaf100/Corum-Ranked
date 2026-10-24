@@ -696,7 +696,10 @@ public:
     }
 
     void queueSurvivalGameplayReturn() {
-        if(m_fields->autoExitRequested || m_fields->safetyRetired || !m_fields->rankedInitialized)return;
+        // A stopped/covered PlayLayer can have retired its scoring presentation
+        // while still owning the active native scene (notably on iOS Pause).
+        // Retirement must never prevent that exact scene from returning.
+        if(m_fields->autoExitRequested || !m_fields->rankedInitialized)return;
         if(m_fields->survivalLevel && m_hasCompletedLevel && !m_fields->survivalNativeClearFinished)return;
         auto* director=CCDirector::sharedDirector();
         if(director->getNextScene() || getParent()!=director->getRunningScene() ||
@@ -2586,7 +2589,7 @@ bool corum::ranked::requestSurvivalGameplayReturn(PlayLayer* layer) {
 void corum::ranked::pumpSurvivalGameplayExit(PlayLayer* layer){
     if(!layer || layer!=PlayLayer::get())return;
     auto* managed=static_cast<CorumRankedPlayLayer*>(layer);auto& fields=*managed->m_fields.self();
-    if(fields.safetyRetired || !fields.rankedInitialized || (!fields.survivalLevel && !fields.survivalFreePlayHud))return;
+    if(!fields.rankedInitialized || (!fields.survivalLevel && !fields.survivalFreePlayHud))return;
     auto& runtime=SurvivalRuntime::get();
     bool const departing=fields.survivalFreePlayHud?runtime.freePlayReturnPending():
         !runtime.surrenderPending() && (runtime.view().ownEliminated || runtime.normalRoundCleared() ||

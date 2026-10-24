@@ -212,7 +212,7 @@ describe("development-only Bot Match using the production Ranked engine", () => 
     // including after the driver is recovered without its in-memory state.
     clock.advance(9900);
     (debug as any).drivers.clear();
-    (debug as any).nextDiscoveryAt=-Infinity; // A restarted service has no discovery deadline.
+    (debug as any).discoveryRequested=true; // A restarted service has no discovery deadline.
     await debug.tickOnce();
     state = await matches.state(created.matchId, created.matchToken, player) as Record<string, any>;
     expect(state.state).toBe('DEATHMATCH_PREPARE');
@@ -257,7 +257,7 @@ describe("development-only Bot Match using the production Ranked engine", () => 
       { difficulty: 'NORMAL', scenario: 'TRIGGER_DEATHMATCH', botBan: 'RANDOM', sendDiscordEvents: false, mmrOffset: 0 });
     expect((await matches.state(creation.matchId, creation.playerMatchToken, player)).state).toBe('MATCHED');
     (debug as any).drivers.clear();
-    (debug as any).nextDiscoveryAt=-Infinity; // A restarted service has no discovery deadline.
+    (debug as any).discoveryRequested=true; // A restarted service has no discovery deadline.
     await debug.tickOnce();
     const state = await matches.state(creation.matchId, creation.playerMatchToken, player) as Record<string, any>;
     expect(state.state).toBe('DEATHMATCH_PREPARE');
@@ -780,11 +780,38 @@ describe("development-only Bot Match using the production Ranked engine", () => 
     expect(Number(orphanedBotAttempt.rows[0]?.count ?? 0)).toBe(0);
   });
 
+  it("reads owned Solo rounds from valid ended attempts, preserves DM ties and filters before the 30-record limit",async()=>{
+    const player=await contextFor("970099");
+    const created=await debug.create(player,{password:"2008",difficulty:"NORMAL",scenario:"FORCE_WIN",botBan:"NO_BAN",sendDiscordEvents:false,installedMods:structuredClone(cleanMods)});
+    const match=(await database.query<{player_a_id:string;player_b_id:string}>("SELECT * FROM ranked_matches WHERE id=$1",[created.matchId])).rows[0]!;
+    const round=ids.next(),dm=ids.next(),map=document.maps[0]!;
+    await database.query(`INSERT INTO ranked_rounds(id,match_id,round_number,level_id,canonical_level_id,playable_level_id,title,creator,difficulty,pool,qualifying_percent,phase,score_a,score_b,result,settled_at)
+      VALUES($1,$2,1,$3,$3,$4,'History Map','Author','HARD',2,50,'ROUND_RESULT',273,801,'B',$5)`,[round,created.matchId,map.canonicalLevelId,map.playableLevelId,clock.now()]);
+    for(const [sequence,percent,valid,ended] of [[1,82.345,true,true],[2,99,false,true],[3,100,true,false]] as const){
+      await database.query(`INSERT INTO ranked_attempts(id,round_id,player_id,attempt_sequence,server_accepted_start_at,level_id,played_level_id,ended_at,progress_percent,cleared,valid,domain_attempt_id,client_start_event_id)
+       VALUES($1,$2,$3,$4,$5,$6,$6,$7,$8,FALSE,$9,$10,$10)`,[ids.next(),round,player.playerId,sequence,clock.now(),map.playableLevelId,ended?clock.now():null,percent,valid,`hist-${sequence}`]);
+    }
+    await database.query(`INSERT INTO ranked_deathmatches(id,match_id,sequence,map_snapshot,score_a,score_b,finished_at) VALUES($1,$2,1,$3::jsonb,82.345,82.345,$4)`,[dm,created.matchId,JSON.stringify({title:"Exact DM",playableLevelId:"123456789"}),clock.now()]);
+    await database.query(`INSERT INTO ranked_deathmatches(id,match_id,sequence,map_snapshot,score_a,score_b,finished_at,winner_id) VALUES($1,$2,2,'{}',1,0,$3,$4)`,[ids.next(),created.matchId,clock.now(),player.playerId]);
+    await database.query(`INSERT INTO ranked_deathmatch_attempts(id,deathmatch_id,player_id,attempt_sequence,server_accepted_start_at,level_id,played_level_id,ended_at,progress_percent,client_start_event_id)
+      VALUES($1,$2,$3,1,$4,'123456789','123456789',$4,82.345,'history-dm')`,[ids.next(),dm,player.playerId,clock.now()]);
+    const detail=(await matches.history(player,{matchId:created.matchId})).matches[0]!;
+    expect(detail.rounds[0]).toMatchObject({scoreA:273,bestProgressA:82.345,bestProgressB:null,clearedA:false,attemptsA:1,levelId:Number(map.playableLevelId)});
+    expect(detail.deathmatches[0]).toMatchObject({levelId:123456789,bestProgressA:82.345,winnerSide:null,nextDeathmatchSequence:2});
+    expect(detail.deathmatches[1]!.levelId).toBeNull();
+    const outsider=await contextFor("970098");expect((await matches.history(outsider,{matchId:created.matchId})).matches).toEqual([]);
+    // A unique old victory must survive filtering even with 39 newer losses.
+    await database.query("UPDATE ranked_matches SET finished_at=$2 WHERE id=$1",[created.matchId,new Date(clock.now().getTime()-100000)]);
+    for(let i=1;i<=39;i++)await database.query(`INSERT INTO ranked_matches SELECT (jsonb_populate_record(NULL::ranked_matches,to_jsonb(m)||jsonb_build_object('id',$2::text,'winner_id',$3::text,'finished_at',$4::text))).* FROM ranked_matches m WHERE id=$1`,[created.matchId,ids.next(),match.player_b_id,new Date(clock.now().getTime()-100000+i*1000).toISOString()]);
+    expect((await matches.history(player,{summary:true,result:"WIN"})).matches.map(v=>v.matchId)).toEqual([created.matchId]);
+    const oldest=await matches.history(player,{summary:true,order:"OLDEST"});expect(oldest.matches).toHaveLength(30);expect(oldest.matches[0]!.matchId).toBe(created.matchId);expect(oldest.matches[0]!.rounds).toEqual([]);
+  });
+
   it.each([0,1,3])("measures real Solo SQL at %i active games while keeping 125ms execution",async count=>{
     const reports:Record<string,{queries:number;discovery:number;failures:number}>={};
     for(const mode of ["before","after"]){
       await database.query("DELETE FROM ranked_queue_entries");await database.query("DELETE FROM ranked_match_tokens");await database.query("DELETE FROM ranked_matches");
-      (debug as any).drivers.clear();(debug as any).nextDiscoveryAt=-Infinity;
+      (debug as any).drivers.clear();(debug as any).discoveryRequested=true;
       for(let i=0;i<count;i++){
         const player=await contextFor(String(990000+(mode==="after"?10000:0)+count*10+i));
         await debug.create(player,{password:"2008",difficulty:"NORMAL",scenario:"NORMAL_MATCH",botBan:"NO_BAN",sendDiscordEvents:false,installedMods:structuredClone(cleanMods)});
@@ -793,32 +820,32 @@ describe("development-only Bot Match using the production Ranked engine", () => 
       const counter=countSql(database,sql=>sql.includes("WHERE m.match_type = 'DEBUG_BOT'"));
       try{
         for(let tick=0;tick<32;tick++){
-          clock.advance(125);if(mode==="before")(debug as any).nextDiscoveryAt=-Infinity;
+          clock.advance(125);if(mode==="before")(debug as any).discoveryRequested=true;
           await debug.tickOnce();
         }
         reports[mode]={...counter.metrics};
       }finally{counter.stop();}
       expect((debug as any).drivers.size).toBe(count);
     }
-    expect(reports.before!.discovery).toBe(32);expect(reports.after!.discovery).toBe(2);
-    expect(reports.after!.queries).toBe(reports.before!.queries-30);
+    expect(reports.before!.discovery).toBe(32);expect(reports.after!.discovery).toBe(0);
+    expect(reports.after!.queries).toBe(reports.before!.queries-32);
     console.log("SOLO_SQL_METRIC",JSON.stringify({active:count,seconds:4,...reports,botTickMs:125}));
     if(process.env.DEBUG_SQL_METRICS_FILE)appendFileSync(process.env.DEBUG_SQL_METRICS_FILE,JSON.stringify({mode:"Solo",active:count,seconds:4,...reports,botTickMs:125})+"\n");
   },30_000);
 
   it("registers before discovery, preserves 125ms execution, and recovers after a failed search",async()=>{
     await database.query("DELETE FROM ranked_match_tokens");await database.query("DELETE FROM ranked_matches");
-    (debug as any).drivers.clear();(debug as any).nextDiscoveryAt=clock.now().getTime()+2000;
+    (debug as any).drivers.clear();(debug as any).discoveryRequested=false;
     const player=await contextFor("998899");const started=performance.now();
     const view=await debug.create(player,{password:"2008",difficulty:"NORMAL",scenario:"NORMAL_MATCH",botBan:"NO_BAN",sendDiscordEvents:false,installedMods:structuredClone(cleanMods)});
     const creationMs=performance.now()-started;expect((debug as any).drivers.has(view.matchId)).toBe(true);
-    const run=vi.spyOn(debug as any,"drive"),counter=countSql(database,sql=>sql.includes("WHERE m.match_type = 'DEBUG_BOT'"));
+    await debug.tickOnce();const run=vi.spyOn(debug as any,"drive"),counter=countSql(database,sql=>sql.includes("WHERE m.match_type = 'DEBUG_BOT'"));
     try{for(let i=0;i<4;i++){clock.advance(125);await debug.tickOnce();}
       expect(counter.metrics.discovery).toBe(0);expect(run).toHaveBeenCalledTimes(4);
     }finally{counter.stop();run.mockRestore();}
-    (debug as any).nextDiscoveryAt=-Infinity;
+    (debug as any).discoveryRequested=true;
     const fault=failSqlOnce(database,sql=>sql.includes("WHERE m.match_type = 'DEBUG_BOT'"));
-    try{await debug.tickOnce();expect(fault.failed).toBe(true);expect((debug as any).drivers.has(view.matchId)).toBe(true);}
+    try{await expect(debug.tickOnce()).rejects.toThrow("Injected database failure");expect(fault.failed).toBe(true);expect((debug as any).drivers.has(view.matchId)).toBe(true);}
     finally{fault.stop();}
     clock.advance(2000);await debug.tickOnce();expect((debug as any).drivers.has(view.matchId)).toBe(true);
     const restarted=new DebugBotService(environment,database,clock,random,queue,matches,config,tokens);

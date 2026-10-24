@@ -478,26 +478,26 @@ it.each([0,1,3])("measures real Survival SQL at %i unsettled games with 250ms ti
  }
 
  for(const mode of ["before","after"]){
-  (debug as any).activeMatches.clear();(debug as any).nextDiscoveryAt=-Infinity;
+  (debug as any).activeMatches.clear();(debug as any).discoveryRequested=true;
   await debug.tickOnce();
-  const counter=countSql(db,sql=>sql.includes("WHERE (d.settled_at IS NULL OR m.state NOT IN"));
-  try{for(let i=0;i<16;i++){now+=250;if(mode==="before")(debug as any).nextDiscoveryAt=-Infinity;await debug.tickOnce();}reports[mode]={...counter.metrics};}
+  const counter=countSql(db,sql=>sql.includes("WHERE (d.settled_at IS NULL OR"));
+  try{for(let i=0;i<16;i++){now+=250;if(mode==="before")(debug as any).discoveryRequested=true;await debug.tickOnce();}reports[mode]={...counter.metrics};}
   finally{counter.stop();}
  }
- expect(reports.before!.discovery).toBe(16);expect(reports.after!.discovery).toBe(2);
- expect(reports.after!.queries).toBeGreaterThanOrEqual(reports.before!.queries-14);
- expect(reports.after!.queries).toBeLessThanOrEqual(reports.before!.queries-14+count); // crossing the 6s gate adds one snapshot write/game
+ expect(reports.before!.discovery).toBe(16);expect(reports.after!.discovery).toBe(0);
+ expect(reports.after!.queries).toBeGreaterThanOrEqual(reports.before!.queries-16);
+ expect(reports.after!.queries).toBeLessThanOrEqual(reports.before!.queries-16+count); // crossing the 6s gate adds one snapshot write/game
  console.log("SURVIVAL_SQL_METRIC",JSON.stringify({active:count,seconds:4,...reports,botTickMs:500}));
  if(process.env.DEBUG_SQL_METRICS_FILE)appendFileSync(process.env.DEBUG_SQL_METRICS_FILE,JSON.stringify({mode:"Survival",active:count,seconds:4,...reports,botTickMs:500})+"\n");
 },30_000);
 
 describe("debug discovery recovery and prompt settlement",()=>{
  it("registers a new game before the next search and keeps every 250ms engine tick",async()=>{
-  (debug as any).nextDiscoveryAt=now+2000;
+  (debug as any).discoveryRequested=false;
   const started=performance.now(),view=await debug.create(session,body()),creationMs=performance.now()-started;
   expect((debug as any).activeMatches.has(view.matchId)).toBe(true);
-  const tick=vi.spyOn(engine,"tick");
-  const counter=countSql(db,sql=>sql.includes("WHERE (d.settled_at IS NULL OR m.state NOT IN"));
+  await debug.tickOnce();const tick=vi.spyOn(engine,"tick");
+  const counter=countSql(db,sql=>sql.includes("WHERE (d.settled_at IS NULL OR"));
   try{for(let i=0;i<4;i++){now+=250;await debug.tickOnce();}
    expect(counter.metrics.discovery).toBe(0);expect(tick).toHaveBeenCalledTimes(4);
   }finally{counter.stop();tick.mockRestore();}
@@ -512,9 +512,9 @@ describe("debug discovery recovery and prompt settlement",()=>{
   try{
    expect(interval).toHaveBeenLastCalledWith(expect.any(Function),500);
    expect((restarted as any).activeMatches.has(view.matchId)).toBe(true);
-   (restarted as any).nextDiscoveryAt=-Infinity;
-   const fault=failSqlOnce(db,sql=>sql.includes("WHERE (d.settled_at IS NULL OR m.state NOT IN"));
-   try{await restarted.tickOnce();expect(fault.failed).toBe(true);expect((restarted as any).activeMatches.has(view.matchId)).toBe(true);}
+   (restarted as any).discoveryRequested=true;
+   const fault=failSqlOnce(db,sql=>sql.includes("WHERE (d.settled_at IS NULL OR"));
+   try{await expect(restarted.tickOnce()).rejects.toThrow("Injected database failure");expect(fault.failed).toBe(true);expect((restarted as any).activeMatches.has(view.matchId)).toBe(true);}
    finally{fault.stop();}
    now+=2000;await restarted.tickOnce();expect((restarted as any).activeMatches.has(view.matchId)).toBe(true);
   }finally{await restarted.onApplicationShutdown();interval.mockRestore();}

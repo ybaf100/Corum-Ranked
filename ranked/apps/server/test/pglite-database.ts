@@ -1,3 +1,4 @@
+import { DatabaseWorkSignals } from "../src/database/database-work.js";
 import { PGlite } from "@electric-sql/pglite";
 import type {
   DatabasePort,
@@ -6,6 +7,7 @@ import type {
 } from "../src/database/database.port.js";
 
 export class PgliteDatabase implements DatabasePort {
+  public readonly workSignals = new DatabaseWorkSignals();
   public constructor(public readonly client: PGlite) {}
 
   public async query<Row>(
@@ -23,12 +25,17 @@ export class PgliteDatabase implements DatabasePort {
     // PGlite has one connection. Its transaction API serializes whole callbacks;
     // issuing independent BEGIN/COMMIT calls lets concurrent requests share a
     // transaction and gives misleading row-lock/idempotence test results.
-    return this.client.transaction(async transaction => operation({
+    const committed: (()=>void)[]=[];
+    const result=await this.client.transaction(async transaction => operation({
+      workSignals:this.workSignals,
+      afterCommit:callback=>{committed.push(callback);},
       query: async <Row>(sql: string, values: readonly unknown[] = []): Promise<SqlResult<Row>> => {
         const result = await transaction.query<Row>(sql, [...values]);
         return { rows: result.rows, rowCount: result.affectedRows ?? result.rows.length };
       },
     }));
+    for(const notify of committed)notify();
+    return result;
   }
 
   public async ping(): Promise<boolean> {

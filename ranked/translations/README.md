@@ -3,7 +3,7 @@
 GitHub에서 아래 UTF-8 텍스트 파일을 수정하면 다음 빌드에 적용됩니다.
 
 - [`ui.json`](ui.json): 메뉴, 설정, Solo Ranked, Survival, HUD, Pause, 결과, 관전, 관리자/Debug 안내 등 기존 번역 문구.
-- [`achievements.json`](achievements.json): 도전과제 46종의 이름과 설명. 클라이언트와 서버가 같은 파일을 사용합니다.
+- [`achievements.json`](achievements.json): 도전과제 48종의 이름과 설명. 클라이언트와 서버가 같은 파일을 사용합니다.
 
 각 키의 `en`과 `ko`를 수정합니다. 키와 도전과제 ID는 유지하세요.
 `{}` 같은 자리표시자의 개수와 형식도 두 언어에서 유지해야 합니다. 줄바꿈은 `\n`으로 씁니다.

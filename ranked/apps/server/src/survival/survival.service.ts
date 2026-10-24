@@ -1,3 +1,5 @@
+import type { HistoryOptions } from "../history/history-options.js";
+import { survivalHistoryProjection } from "../history/survival-history.js";
 import { BadRequestException, ConflictException, Inject, Injectable, NotImplementedException, ServiceUnavailableException } from "@nestjs/common";
 import { survivalTierForLp, updateSurvivalRating, type SurvivalConfig, type SurvivalRatingUpdate } from "@corum-ranked/rules";
 import type { SurvivalConfigDocument } from "../config/survival-config.service.js";
@@ -97,17 +99,24 @@ export class SurvivalService {
       ...(query?{search:{query,found:!!located,gdAccountId:located?.gd_account_id??null}}:{}) };
   }
 
-  public async history(playerId: string) {
-    const matches=await this.database.query<{id:string;finished_at:Date|string;snapshot:unknown;result:unknown;participant_id:string}>(
-      `SELECT m.id,p.participant_id,COALESCE(o.settled_at,d.settled_at,m.finished_at) AS finished_at,m.snapshot,COALESCE(o.result,d.result) AS result FROM sur_matches m JOIN sur_match_players p ON p.match_id=m.id
-       JOIN sur_profiles sp ON sp.player_id=p.player_id LEFT JOIN sur_debug_matches d ON d.match_id=m.id
-       LEFT JOIN sur_online_players o ON o.match_id=m.id AND o.player_id=p.player_id
-       WHERE p.player_id=$1 AND ((o.player_id IS NULL AND m.state='FINAL_RESULT') OR o.settled_at IS NOT NULL OR d.settled_at IS NOT NULL) AND COALESCE(o.settled_at,d.settled_at,m.finished_at)>sp.history_visible_since
-       AND (d.match_id IS NULL OR d.settled_at IS NOT NULL) ORDER BY COALESCE(o.settled_at,d.settled_at,m.finished_at) DESC,m.id LIMIT 30`,[playerId]);
-    const events = await this.database.query(`SELECT event_key,actual_delta,lp_after,tier_after,awarded_at
+  public async history(playerId: string,options:HistoryOptions={}) {
+    const order=options.order==='OLDEST'?'ASC':'DESC';
+    const rank="COALESCE((o.result->>'rank')::int,(d.result->>'rank')::int,p.final_rank)";
+    const filters:Record<string,string>={WIN:`AND m.state='FINAL_RESULT' AND ${rank}=1`,CHAMPION:`AND m.state='FINAL_RESULT' AND ${rank}=1`,LOSS:`AND m.state='FINAL_RESULT' AND ${rank}>1`,PODIUM:`AND m.state='FINAL_RESULT' AND ${rank}<=3`,ELIMINATED:`AND m.state='FINAL_RESULT' AND ${rank}>3`,IN_PROGRESS:"AND m.state NOT IN ('FINAL_RESULT','CANCELLED')"};
+    const filter=filters[options.result??'ALL']??'';
+    const matches=await this.database.query<{id:string;created_at:Date|string;finished_at:Date|string|null;snapshot:unknown;result:unknown;participant_id:string}>(
+      `SELECT m.id,m.created_at,p.participant_id,CASE WHEN m.state='FINAL_RESULT' THEN m.finished_at ELSE NULL END AS finished_at,m.snapshot,COALESCE(o.result,d.result) AS result
+       FROM sur_matches m JOIN sur_match_players p ON p.match_id=m.id JOIN sur_profiles sp ON sp.player_id=p.player_id
+       LEFT JOIN sur_debug_matches d ON d.match_id=m.id LEFT JOIN sur_online_players o ON o.match_id=m.id AND o.player_id=p.player_id
+       WHERE p.player_id=$1 AND m.state<>'CANCELLED'
+       AND COALESCE(o.settled_at,d.settled_at,m.finished_at,m.created_at)>sp.history_visible_since
+       AND ((m.state<>'FINAL_RESULT' AND (o.player_id=$1 OR d.human_player_id=$1)) OR m.state='FINAL_RESULT')
+       ${filter} AND ($2::uuid IS NULL OR m.id=$2)
+       ORDER BY (m.state<>'FINAL_RESULT') DESC,COALESCE(m.finished_at,m.created_at) ${order},m.id LIMIT 30`,[playerId,options.matchId??null]);
+    const events = options.summary?{rows:[]}:await this.database.query(`SELECT event_key,actual_delta,lp_after,tier_after,awarded_at
       FROM sur_lp_ledger WHERE player_id=$1 ORDER BY awarded_at DESC,id DESC LIMIT 30`, [playerId]);
     return { mode: "SURVIVAL", serverNow: this.clock.now().toISOString(),
-      matches:matches.rows.map(row=>({matchId:row.id,mode:"SURVIVAL",myParticipantId:row.participant_id,finishedAt:new Date(row.finished_at).toISOString(),snapshot:row.snapshot,result:row.result})),lpEvents: events.rows };
+      matches:matches.rows.map(row=>({matchId:row.id,mode:"SURVIVAL",createdAt:new Date(row.created_at).toISOString(),finishedAt:row.finished_at?new Date(row.finished_at).toISOString():null,...survivalHistoryProjection(row.snapshot,row.result,row.participant_id,options.summary)})),lpEvents: events.rows };
   }
 
   public recordAchievementsWithin(tx:SqlExecutor,matchId:string,playerId:string) {

@@ -87,6 +87,7 @@ namespace geode::prelude {namespace log {template<class...T>void warn(T...) {}}}
 namespace corum::ranked {
 struct Context {int levelId=0;bool valid()const{return levelId>0;}} current;
 Context currentPreparationContext(){return current;}
+struct HistoryLevelLookup:LevelManagerDelegate {static HistoryLevelLookup&get(){static HistoryLevelLookup h;return h;}bool ownsResponse(char const*)const{return false;}void responseCompleted(char const*){}};
 struct RankedLevelPreparation:LevelManagerDelegate {
 bool active=false;int callbacks=0;static RankedLevelPreparation& get(){static RankedLevelPreparation p;return p;}
 bool busy(){return active;}std::uint64_t requestGeneration(char const* k){return active&&std::string(k)=="primary"?1:0;}
@@ -260,8 +261,9 @@ for(int epic=0;epic<=3;epic++)for(bool name:{true,false}){
  info.epic=epic;info.featureScore=1;auto*rated=mapDifficultyBadge(42,info,135,26,name);
  auto*face=static_cast<GJDifficultySprite*>(rated->children[2]);
  assert(face->state==static_cast<GJFeatureState>(epic?epic+1:1));
- assert(face->expressionOnly==!name); // Selected panel keeps native ornaments, without its duplicate word.
- if(!name)for(auto* ornament:face->children){assert(ornament->position.x==face->size.width/2&&ornament->position.y==face->size.height/2);}
+ assert(!face->expressionOnly); // Native canvas and its ornament offsets remain authoritative.
+ for(auto* ornament:face->children){assert(ornament->position.x==10&&ornament->position.y==30);}
+ assert(static_cast<CCLabelBMFont*>(rated->children[3])->text==(name?"Insane":""));
 }
 assert(shape->polygon.size()==48&&number->text=="8"&&number->color==(ccColor3B{255,255,255}));
 assert(static_cast<CCSprite*>(row->children[2])->frame=="diffIcon_05_btn_001.png");

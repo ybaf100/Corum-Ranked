@@ -36,12 +36,12 @@ describe("unified history", () => {
     const f = fixture();
     expect(await f.service.history(session, "SURVIVAL")).toEqual({ scope: "SURVIVAL", matches: [], serverNow: clock.now().toISOString() });
     expect(f.solo.history).not.toHaveBeenCalled();
-    expect(f.survival.history).toHaveBeenCalledWith(session.playerId);
+    expect(f.survival.history).toHaveBeenCalledWith(session.playerId,{});
   });
   it("keeps the original Solo details without reading Survival history", async () => {
     const f = fixture();
     expect((await f.service.history(session, "SOLO_RANKED")).matches).toEqual([{ ...soloMatch, mode: "SOLO_RANKED" }]);
-    expect(f.solo.history).toHaveBeenCalledWith(session);
+    expect(f.solo.history).toHaveBeenCalledWith(session,{});
     expect(f.survival.history).not.toHaveBeenCalled();
   });
   it("merges actual matches in reverse chronological order and never exposes LP audit as matches", async () => {
@@ -112,6 +112,6 @@ describe("unified history HTTP session and query validation", () => {
     }
     expect((await get("?scope=FAKE")).status).toBe(400);
     expect((await get("?playerId=someone-else")).status).toBe(400);
-    expect(f.survival.history).toHaveBeenLastCalledWith(session.playerId);
+    expect(f.survival.history).toHaveBeenLastCalledWith(session.playerId,{order:undefined,result:undefined,summary:false});
   });
 });

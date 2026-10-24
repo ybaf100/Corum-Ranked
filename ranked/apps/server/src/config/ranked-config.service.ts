@@ -75,7 +75,10 @@ export class RankedConfigService implements OnApplicationBootstrap, OnApplicatio
       const errors = validateRankedConfigDocument(document);
       if (errors.length > 0) throw new Error(`Invalid Ranked config: ${errors.join("; ")}`);
       await this.withAdmission(async () => {
-        if (!document.operational.enabled && this.database) {
+        // Startup OFF and the enabled -> OFF transition must clean QUEUED.
+        // Display metadata may change its own generation while OFF; that is
+        // not another admission change and must not repeatedly wake the DB.
+        if (!document.operational.enabled && this.snapshot?.operational.enabled!==false && this.database) {
           // Leave MATCHED rows and their admitted games untouched. Publishing
           // OFF happens only after queue cleanup commits; admissions share this fence.
           await this.database.transaction(async transaction => {

@@ -1,3 +1,4 @@
+import { DatabaseWorkSignals } from "./database-work.js";
 import {
   Inject,
   Injectable,
@@ -118,6 +119,7 @@ type SchemaProbeRow = QueryResultRow & {
 
 @Injectable()
 export class DatabaseService implements DatabasePort, OnModuleInit, OnApplicationShutdown {
+  public readonly workSignals = new DatabaseWorkSignals();
   private readonly logger = new Logger(DatabaseService.name);
   private readonly pool: Pool;
   private readonly migrationPool: Pool;
@@ -176,10 +178,14 @@ export class DatabaseService implements DatabasePort, OnModuleInit, OnApplicatio
 
   public async transaction<T>(operation: (client: SqlExecutor) => Promise<T>): Promise<T> {
     const client = await this.pool.connect();
+    const committed: (()=>void)[] = [];
+    let commitAttempted=false;
     try {
       await client.query("BEGIN");
-      const result = await operation(new PgClientAdapter(client));
+      const result = await operation(new PgClientAdapter(client, this.workSignals, committed));
+      commitAttempted=true;
       await client.query("COMMIT");
+      for (const notify of committed) { try { notify(); } catch (e) { this.logger.warn("Committed work notification failed"); } }
       return result;
     } catch (error) {
       try {
@@ -188,6 +194,10 @@ export class DatabaseService implements DatabasePort, OnModuleInit, OnApplicatio
         const message = rollbackError instanceof Error ? rollbackError.message : String(rollbackError);
         this.logger.warn(`PostgreSQL rollback failed after connection error: ${message}`);
       }
+      // A disconnected client cannot distinguish a rolled-back COMMIT from a
+      // committed transaction whose acknowledgement was lost. One business-
+      // activity reconciliation closes that window; ordinary rollbacks stay idle.
+      if(commitAttempted && committed.length)this.workSignals.reconcile();
       throw error;
     } finally {
       client.release();
@@ -483,7 +493,8 @@ export class DatabaseService implements DatabasePort, OnModuleInit, OnApplicatio
 }
 
 class PgClientAdapter implements SqlExecutor {
-  public constructor(private readonly client: PoolClient) {}
+  public constructor(private readonly client: PoolClient, public readonly workSignals: DatabaseWorkSignals, private readonly committed: (()=>void)[]) {}
+  public afterCommit(callback: () => void): void { this.committed.push(callback); }
 
   public query<Row>(sql: string, values: readonly unknown[] = []): Promise<SqlResult<Row>> {
     return this.client.query<QueryResultRow>(sql, [...values]).then((result) => ({

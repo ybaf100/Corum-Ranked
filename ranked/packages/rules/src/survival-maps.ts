@@ -6,6 +6,8 @@ export type SurvivalMapPhase = "ROUND_1" | "ROUND_2" | "ROUND_3" | "FINAL" | "TI
 export type SurvivalDemonDifficulty = "EASY" | "MEDIUM" | "HARD" | "INSANE" | "EXTREME";
 
 export interface SurvivalMapMetadata {
+  readonly name?: string;
+  readonly creator?: string;
   readonly levelId: number;
   readonly stars: number;
   readonly demon: boolean;

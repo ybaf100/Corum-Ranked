@@ -43,7 +43,7 @@ class SurvivalGameLayer final : public CCLayerColor {
     LoadingSpinner* m_spinner=nullptr;
     CCLabelBMFont* m_boardClock=nullptr;
     CCMenuItemSpriteExtra *m_backToMap=nullptr,*m_viewBoard=nullptr;
-    std::string m_navigationContext;
+    std::string m_navigationContext,m_replayRequestedContext;
     std::optional<std::int64_t> m_entrySyncAfter;
     bool m_browsingBoard=false,m_manualMap=false;
     CCLabelBMFont *m_heading=nullptr,*m_status=nullptr,*m_map=nullptr,*m_surrenderText=nullptr;
@@ -78,7 +78,7 @@ class SurvivalGameLayer final : public CCLayerColor {
         m_spinner=LoadingSpinner::create(20);m_spinner->setPosition({size.width/2-113,size.height-49});m_spinner->setVisible(false);addChild(m_spinner,8);
         m_introUntil=std::chrono::steady_clock::now()+std::chrono::milliseconds(SurvivalRosterMilliseconds);
         auto* menu=CCMenu::create();menu->setPosition(CCPointZero);addChild(menu,20);
-        m_resume=button(menu,text("survival-reenter","RE-ENTER"),{size.width/2,22},132,0,ui::Cyan);
+        m_resume=button(menu,text("survival-reenter","RE-ENTER"),{size.width/2,22},132,15,ui::Cyan);
         m_continue=button(menu,text("close","CLOSE"),{size.width/2,22},132,1);
         m_surrender=button(menu,text("surrender","SURRENDER"),{size.width-68,22},116,2,ui::Red,&m_surrenderText);
         m_freePlay=button(menu,text("survival-free-play","FREE PLAY"),{68,22},116,7,ui::Green);
@@ -127,6 +127,7 @@ class SurvivalGameLayer final : public CCLayerColor {
         if(tag==11){ui::showSurvivalStandings();return;}
         if(tag==10)RankedRoundPreparation::get().retry();
         if(tag==0)queueNativeLaunch();
+        if(tag==15)requestClearedReplay();
         if(tag==1)runtime.acknowledge();
         if(tag==2){if(runtime.observing())runtime.leaveObserver();else confirmSurrender();}
         if(tag==7)runtime.beginFreePlay();
@@ -148,6 +149,11 @@ class SurvivalGameLayer final : public CCLayerColor {
             }
         }
     }
+    void requestClearedReplay() {
+        auto& runtime=SurvivalRuntime::get();if(!runtime.canReplayCleared())return;
+        m_browsingBoard=false;m_manualMap=true;m_replayRequestedContext=preparationContextText(runtime.preparationContext());
+        m_entrySyncAfter=runtime.serverSyncMillis();runtime.refreshRound();
+    }
     void queueNativeLaunch() {
         auto& runtime=SurvivalRuntime::get();auto const context=runtime.preparationContext();
         if(m_closed || !m_pendingLaunch.empty() || !m_selection->settled() || runtime.surrenderPending() || !(runtime.canEnter() || runtime.canEnterObserver() || runtime.canReplayCleared()) ||
@@ -164,7 +170,7 @@ class SurvivalGameLayer final : public CCLayerColor {
             if(CCDirector::sharedDirector()->getNextScene() || jukeboxOpen || owner->m_closed || !owner->isRunning() || owner->getParent()!=scene || owner->m_motion ||
                 owner->m_confirmation || owner->m_browsingBoard || !owner->m_selection->settled() || runtime.surrenderPending() || context!=runtime.preparationContext() || !(runtime.canEnter() || runtime.canEnterObserver() || runtime.canReplayCleared()) ||
                 (owner->m_entrySyncAfter && runtime.serverSyncMillis()<=*owner->m_entrySyncAfter))return;
-            if(RankedRoundPreparation::get().launch(scene))owner->m_launchedContext=preparationContextText(context);
+            if(RankedRoundPreparation::get().launch(scene)){owner->m_launchedContext=preparationContextText(context);owner->m_replayRequestedContext.clear();}
         });
     }
     void showParticipants(SurvivalMatchView const& view,bool result) {
@@ -355,7 +361,7 @@ public:
         auto const intro=view.presentationGate=="INTRO";
         auto const nextRound=runtime.observing() || survivalCanPrepareNext(view.state,view.ownEliminated,view.resultPending,result);
         auto const navigationContext=view.id+":"+view.roundKey+":"+std::to_string(view.mapGeneration);
-        if(m_navigationContext!=navigationContext){m_navigationContext=navigationContext;m_browsingBoard=false;m_manualMap=false;m_entrySyncAfter.reset();}
+        if(m_navigationContext!=navigationContext){m_navigationContext=navigationContext;m_browsingBoard=false;m_manualMap=false;m_entrySyncAfter.reset();m_replayRequestedContext.clear();}
         auto const liveBoard=(m_browsingBoard || (runtime.normalRoundCleared() && !m_manualMap)) && !result && !elimination;
         auto const clock=survivalBoardClock(view.state,runtime.countdownMs(),runtime.roundRemainingMs());
         m_boardClock->setString(i18n::text(clock,clock).c_str());m_boardClock->setVisible(!result && !elimination && !clock.empty());
@@ -375,12 +381,12 @@ public:
         else m_selection->hideSelection();
         m_spinner->setVisible(false);m_spinner->setPosition({getContentSize().width/2,getContentSize().height/2});m_spinner->setScale(2);
         auto const context=preparationContextText(runtime.preparationContext());auto* level=RankedLevelPreparation::get().level();
-        m_resume->setVisible(false);m_resume->setEnabled(!m_motion && !elimination && (!m_entrySyncAfter || runtime.serverSyncMillis()>*m_entrySyncAfter));
+        m_resume->setVisible(liveBoard && runtime.canReplayCleared());m_resume->setEnabled(!m_motion && !elimination && !m_confirmation && (!m_entrySyncAfter || runtime.serverSyncMillis()>*m_entrySyncAfter));
         m_continue->setVisible(result);m_continue->setEnabled(!m_motion && !elimination && !runtime.creating());
         auto const surrenderCaption=runtime.observing()?text("survival-leave-observer","LEAVE WATCH"):text("surrender","SURRENDER");
         if(surrenderCaption!=m_surrenderText->getString()){m_surrenderText->setString(surrenderCaption.c_str());ui::fitFullMenuLabel(m_surrenderText,104,22,.29f);}
         m_surrender->setVisible(nextRound && (runtime.observing() || runtime.canSurrender() || runtime.surrenderPending()));m_surrender->setEnabled(!elimination && !m_motion && (runtime.observing() || runtime.canSurrender()));
-        m_backToMap->setVisible(liveBoard && nextRound);m_backToMap->setEnabled(!m_motion && !elimination && !runtime.surrenderPending());
+        m_backToMap->setVisible(liveBoard && nextRound && !runtime.canReplayCleared());m_backToMap->setEnabled(!m_motion && !elimination && !runtime.surrenderPending());
         m_viewBoard->setVisible(selectionWindow);m_viewBoard->setEnabled(!m_motion && !elimination);
         m_freePlay->setVisible(liveBoard && runtime.canFreePlay());m_freePlay->setEnabled(!m_motion && !m_confirmation);
         if(m_force){m_force->setVisible(view.debug && !view.online && nextRound && !selectionWindow && !liveBoard);m_force->setEnabled(!m_motion && now>=m_eliminationUntil && !runtime.creating());}
@@ -426,6 +432,7 @@ public:
         if(!m_motion && !elimination && !m_confirmation && !jukeboxOpen && !debugPopup && !runtime.creating() &&
             mapWindow && !m_manualMap && m_selection->settled() && !runtime.surrenderPending() &&
             (runtime.canEnter() || runtime.canEnterObserver()) && m_launchedContext!=context)queueNativeLaunch();
+        if(m_replayRequestedContext==context && selectionWindow && !m_motion && !m_confirmation && !m_browsingBoard && runtime.canReplayCleared())queueNativeLaunch();
         if(view.state=="CANCELLED" && !result && !runtime.creating())runtime.acknowledge();
     }
     void onEnter() override {

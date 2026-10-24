@@ -114,7 +114,7 @@ struct CorumRankedLayer: CCLayerColor {
  void setKeypadEnabled(bool){}void schedule(int,float){}
  bool showResourceGate()const{return false;}void syncResources(){}void syncMapDetails(){}void syncPhase(){}void updateAutomation(){}
  std::string presentationKey()const{return "lobby";}bool prepareUiTransition(std::string const&){return false;}
- void render(){}void applyFadeInIfNeeded(){}void updateDynamicUi(){}void maybeEnterLevel(){}
+ void render(){}void applyFadeInIfNeeded(){}void updateDynamicUi(){}void updateHistoryThumbnail(){}void maybeEnterLevel(){}
  ${method(popup,'void resumeModeSelectionAfterQueue(')}
  ${method(popup,'void syncAudioMode()')}
  ${method(popup,'void refresh(float)')}

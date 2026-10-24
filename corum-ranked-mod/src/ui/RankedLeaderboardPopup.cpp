@@ -1,4 +1,5 @@
 #include "RankedLeaderboardPopup.hpp"
+#include "RankedTapScroll.hpp"
 
 #include "../RankedRuntime.hpp"
 #include "PlayerIcon.hpp"
@@ -94,6 +95,10 @@ void leftCaption(CCNode* node, std::string const& text, CCPoint position, float 
     caption->setAnchorPoint({0,0.5f}); fitMenuLabelWidth(caption,width,scale,0.22f);
     node->addChild(caption,5);
 }
+}
+
+ScrollLayer* createRankedTapScroll(CCSize size,std::function<void(CCPoint,CCPoint)> tap){
+    auto* scroll=LeaderboardScrollLayer::create(size);scroll->setTapHandler(std::move(tap));return scroll;
 }
 
 RankedLeaderboardPopup* RankedLeaderboardPopup::create(RankedMode mode) {

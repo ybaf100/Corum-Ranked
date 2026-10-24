@@ -632,7 +632,7 @@ void RankedRuntime::begin() {
     // A successful Admin action reloads admission while a lobby metadata read
     // may still be pending. Retire it before fetchConfig reuses this channel.
     m_controlRequest.cancel(); m_controlBusy = false;
-    ++m_historyGeneration; m_historyRequest.cancel(); m_view.historyLoading = false;
+    cancelHistoryReads();
     ++m_standingGeneration; m_standingRequest.cancel(); m_standingBusy = false;
     m_nextStandingAt = {}; m_view.standing = {}; m_view.survival = {};
     m_sessionHeartbeatRequest.cancel(); m_sessionHeartbeatBusy = false;
@@ -1030,7 +1030,7 @@ void RankedRuntime::leaveRanked() {
     ++m_standingGeneration; m_standingRequest.cancel(); m_standingBusy = false;
     m_sessionHeartbeatRequest.cancel(); m_sessionHeartbeatBusy = false;
     m_controlRequest.cancel(); m_controlBusy = false;
-    ++m_historyGeneration; m_historyRequest.cancel(); m_view.historyLoading = false;
+    cancelHistoryReads();
     ++m_playerInfoGeneration; ++m_forumRecordsGeneration;
     m_playerInfoRequest.cancel(); m_forumRecordsRequest.cancel();
     m_view.playerInfo.forum.loading = m_view.forumRecords.loading = false;
@@ -2649,12 +2649,58 @@ void RankedRuntime::queueAgain() {
     joinQueue();
 }
 
+static corum::ranked::HistoryMatchView parseHistoryMatch(matjson::Value const& item) {
+    using namespace corum::ranked;
+    HistoryMatchView history;
+    history.record=item;
+    history.detailsLoaded=item["detailsLoaded"].asBool().unwrapOr(false);
+    history.inProgress=item["inProgress"].asBool().unwrapOr(false);
+    history.debug=item["debug"].asBool().unwrapOr(false);
+    history.createdAt=item["createdAt"].asString().unwrapOr("");
+    history.mode = item["mode"].asString().unwrapOr("SOLO_RANKED") == "SURVIVAL" ? RankedMode::Survival : RankedMode::SoloRanked;
+    history.matchId = item["matchId"].asString().unwrapOr("");
+    history.finishedAt = item["finishedAt"].asString().unwrapOr("");
+    if(history.mode==RankedMode::Survival) {
+        history.survivalRecord=item;
+        history.survivalRank=static_cast<int>(item["result"]["rank"].asInt().unwrapOr(0));
+        auto const delta=item["result"]["actualDelta"].asInt();
+        if(delta.isOk()&&!history.inProgress)history.ownRankedScoreDelta=static_cast<int>(delta.unwrap());
+        auto const lp=item["result"]["profileAfter"]["lp"].asInt();
+        if(lp.isOk()&&!history.inProgress)history.ownRankedScoreAfter=static_cast<int>(lp.unwrap());
+    }
+    history.side = item["side"].asString().unwrapOr("");
+    history.opponentName = item["opponentName"].asString().unwrapOr("Opponent");
+    history.effectiveTier = item["effectiveTier"].asString().unwrapOr("");
+    history.winnerSide = item["winnerSide"].asString().unwrapOr("");
+    history.roundWinsA = static_cast<int>(item["series"]["roundWins"]["A"].asInt().unwrapOr(0));
+    history.roundWinsB = static_cast<int>(item["series"]["roundWins"]["B"].asInt().unwrapOr(0));
+    auto const delta = item["rankedScoreDelta"][history.side].asInt();
+    auto const rating = item["profileAfter"][history.side]["visibleRankedScore"].asInt();
+    if (delta.isOk()) history.ownRankedScoreDelta = static_cast<int>(delta.unwrap());
+    if (rating.isOk()) history.ownRankedScoreAfter = static_cast<int>(rating.unwrap());
+    auto const rounds = item["rounds"].asArray();
+    if (rounds.isOk()) {
+        for (auto const& round : rounds.unwrap()) {
+            if (round.isObject()) history.rounds.push_back(parseRoundSummary(round));
+        }
+    }
+    auto const deathmatches = item["deathmatches"].asArray();
+    if (deathmatches.isOk()) {
+        for (auto const& deathmatch : deathmatches.unwrap()) {
+            if (deathmatch.isObject()) history.deathmatches.push_back(parseDeathmatchSummary(deathmatch));
+        }
+    }
+    return history;
+}
+
 void RankedRuntime::fetchHistory(RankedMode mode) {
     fetchHistoryScope(mode == RankedMode::Survival ? HistoryScope::Survival : HistoryScope::SoloRanked);
 }
 
 void RankedRuntime::fetchHistoryScope(HistoryScope scope) {
     if (m_sessionToken.empty() || !m_rankedOpen) return;
+    ++m_historyDetailGeneration;m_historyDetailRequest.cancel();m_historyDetailMatch.clear();
+    m_view.historyDetailLoading=false;m_view.historyDetailError.clear();
     auto const historyGeneration = ++m_historyGeneration;
     m_historyRequest.cancel();
     m_view.historyScope = scope;
@@ -2666,7 +2712,7 @@ void RankedRuntime::fetchHistoryScope(HistoryScope scope) {
     auto request = baseRequest(m_sessionToken);
     auto const generation = m_sessionGeneration;
     m_historyRequest.spawn(
-        request.get(endpoint(fmt::format("/api/ranked/history?scope={}",historyScopeKey(scope)))),
+        request.get(endpoint(std::string("/api/ranked/history?scope=")+historyScopeKey(scope)+"&summary=true&order="+m_historyOrder+"&result="+m_historyResult)),
         [this, generation, historyGeneration, scope](web::WebResponse response) {
             if (generation != m_sessionGeneration || historyGeneration != m_historyGeneration || !m_rankedOpen) return;
             m_view.historyLoading = false;
@@ -2688,44 +2734,53 @@ void RankedRuntime::fetchHistoryScope(HistoryScope scope) {
             if (matches.isOk()) {
                 for (auto const& item : matches.unwrap()) {
                     if (!item.isObject()) continue;
-                    HistoryMatchView history;
-                    history.mode = item["mode"].asString().unwrapOr("SOLO_RANKED") == "SURVIVAL" ? RankedMode::Survival : RankedMode::SoloRanked;
-                    history.matchId = item["matchId"].asString().unwrapOr("");
-                    history.finishedAt = item["finishedAt"].asString().unwrapOr("");
-                    if(history.mode==RankedMode::Survival) {
-                        history.survivalRecord=item;
-                        history.survivalRank=static_cast<int>(item["result"]["rank"].asInt().unwrapOr(0));
-                        history.ownRankedScoreDelta=static_cast<int>(item["result"]["actualDelta"].asInt().unwrapOr(0));
-                        history.ownRankedScoreAfter=static_cast<int>(item["result"]["profileAfter"]["lp"].asInt().unwrapOr(0));
-                    }
-                    history.side = item["side"].asString().unwrapOr("");
-                    history.opponentName = item["opponentName"].asString().unwrapOr("Opponent");
-                    history.effectiveTier = item["effectiveTier"].asString().unwrapOr("");
-                    history.winnerSide = item["winnerSide"].asString().unwrapOr("");
-                    history.roundWinsA = static_cast<int>(item["series"]["roundWins"]["A"].asInt().unwrapOr(0));
-                    history.roundWinsB = static_cast<int>(item["series"]["roundWins"]["B"].asInt().unwrapOr(0));
-                    auto const delta = item["rankedScoreDelta"][history.side].asInt();
-                    auto const rating = item["profileAfter"][history.side]["visibleRankedScore"].asInt();
-                    if (delta.isOk()) history.ownRankedScoreDelta = static_cast<int>(delta.unwrap());
-                    if (rating.isOk()) history.ownRankedScoreAfter = static_cast<int>(rating.unwrap());
-                    auto const rounds = item["rounds"].asArray();
-                    if (rounds.isOk()) {
-                        for (auto const& round : rounds.unwrap()) {
-                            if (round.isObject()) history.rounds.push_back(parseRoundSummary(round));
-                        }
-                    }
-                    auto const deathmatches = item["deathmatches"].asArray();
-                    if (deathmatches.isOk()) {
-                        for (auto const& deathmatch : deathmatches.unwrap()) {
-                            if (deathmatch.isObject()) history.deathmatches.push_back(parseDeathmatchSummary(deathmatch));
-                        }
-                    }
-                    m_view.history.push_back(std::move(history));
+                    m_view.history.push_back(parseHistoryMatch(item));
                 }
             }
             ++m_view.revision;
         }
     );
+}
+
+void RankedRuntime::setHistoryFilters(std::string order,std::string result) {
+    m_historyOrder=order=="OLDEST"?"OLDEST":"NEWEST";
+    // UI values are fixed keys; do not interpolate arbitrary text into a URL.
+    static std::vector<std::string> const allowed={"ALL","WIN","LOSS","CHAMPION","PODIUM","ELIMINATED","IN_PROGRESS"};
+    m_historyResult=std::find(allowed.begin(),allowed.end(),result)!=allowed.end()?std::move(result):"ALL";
+}
+
+void RankedRuntime::cancelHistoryReads() {
+    ++m_historyGeneration;++m_historyDetailGeneration;
+    m_historyRequest.cancel();m_historyDetailRequest.cancel();m_historyDetailMatch.clear();
+    m_view.historyLoading=false;m_view.historyDetailLoading=false;
+}
+
+void RankedRuntime::fetchHistoryDetail(RankedMode mode,std::string const& matchId,bool refresh) {
+    if(m_sessionToken.empty() || !m_rankedOpen || matchId.empty())return;
+    auto item=std::find_if(m_view.history.begin(),m_view.history.end(),[&](auto const& v){return v.matchId==matchId && v.mode==mode;});
+    if(item==m_view.history.end() || (item->detailsLoaded&&!refresh) || (m_view.historyDetailLoading&&m_historyDetailMatch==matchId))return;
+    m_historyDetailRequest.cancel();auto const generation=++m_historyDetailGeneration;
+    auto const session=m_sessionGeneration,list=m_historyGeneration;
+    m_historyDetailMatch=matchId;m_view.historyDetailLoading=true;m_view.historyDetailError.clear();++m_view.historyRevision;++m_view.revision;
+    auto request=baseRequest(m_sessionToken);
+    auto const modeKey=mode==RankedMode::Survival?"SURVIVAL":"SOLO_RANKED";
+    m_historyDetailRequest.spawn(request.get(endpoint(std::string("/api/ranked/history/")+modeKey+"/"+matchId)),
+        [this,generation,session,list,mode,matchId](web::WebResponse response){
+            if(!m_rankedOpen || generation!=m_historyDetailGeneration || session!=m_sessionGeneration || list!=m_historyGeneration)return;
+            m_view.historyDetailLoading=false;
+            if(!successful(response))m_view.historyDetailError=responseError(response);
+            else {
+                auto const root=response.json().unwrapOr(matjson::Value());auto const entry=root["match"];
+                auto replacement=parseHistoryMatch(entry);
+                if(replacement.matchId!=matchId || replacement.mode!=mode || !replacement.detailsLoaded)m_view.historyDetailError="Invalid match history detail";
+                else {
+                    observeServerNow(root);
+                    auto target=std::find_if(m_view.history.begin(),m_view.history.end(),[&](auto const& v){return v.matchId==matchId && v.mode==mode;});
+                    if(target!=m_view.history.end())*target=std::move(replacement);
+                }
+            }
+            ++m_view.historyRevision;++m_view.revision;
+        });
 }
 
 void RankedRuntime::fetchAchievements() {
