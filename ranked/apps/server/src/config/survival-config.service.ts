@@ -33,6 +33,7 @@ export class AppsScriptSurvivalConfigSource implements SurvivalConfigSource {
 @Injectable()
 export class SurvivalConfigService implements OnApplicationBootstrap, OnApplicationShutdown {
   private readonly logger = new Logger(SurvivalConfigService.name);
+  private persistedDocument: string | null = null;
   private snapshot: (SurvivalConfigDocument & { fetchedAt: string }) | null = null;
   private error: string | null = null;
   private pending: Promise<boolean> | null = null;
@@ -63,7 +64,10 @@ export class SurvivalConfigService implements OnApplicationBootstrap, OnApplicat
       // M3 internal match admission shares this fence. Existing matches use
       // their captured config. M5 must remove its QUEUED rows before publishing.
       return this.withAdmission(async () => {
-        if(this.database)await this.database.transaction(async tx=>{
+        // Apps Script stamps generatedAt on every read; it is not a config change.
+        const {generatedAt:_generatedAt,...content}=document;
+        const identity=JSON.stringify(content);
+        if(this.database && identity!==this.persistedDocument)await this.database.transaction(async tx=>{
           await lockSurvivalAdmission(tx);
           const current=(await tx.query<{generated_at:Date|string}>("SELECT generated_at FROM sur_mode_state WHERE singleton=TRUE")).rows[0];
           if(current && new Date(current.generated_at).getTime()>Date.parse(document.generatedAt))throw new Error("Stale Survival configuration generation");
@@ -72,6 +76,7 @@ export class SurvivalConfigService implements OnApplicationBootstrap, OnApplicat
             [document.config.enabled,document.generation,document.generatedAt]);
           if(!document.config.enabled)await tx.query("UPDATE sur_queue_entries SET status='DISABLED' WHERE status='QUEUED'");
         });
+        this.persistedDocument=identity;
         this.snapshot = { ...structuredClone(document), fetchedAt: new Date().toISOString() };
         this.error = null; return true;
       });

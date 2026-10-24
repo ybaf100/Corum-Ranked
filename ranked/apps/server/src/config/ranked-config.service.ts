@@ -32,6 +32,7 @@ export class RankedConfigService implements OnApplicationBootstrap, OnApplicatio
   private readonly admission = new ModeAdmissionFence();
   public withAdmission<T>(operation: () => Promise<T>): Promise<T> { return this.admission.run(operation); }
   private readonly logger = new Logger(RankedConfigService.name);
+  private persistedDocument: string | null = null;
   private snapshot: RankedConfigSnapshot | null = null;
   private lastAttemptAt: string | null = null;
   private lastError: string | null = null;
@@ -75,13 +76,17 @@ export class RankedConfigService implements OnApplicationBootstrap, OnApplicatio
       const errors = validateRankedConfigDocument(document);
       if (errors.length > 0) throw new Error(`Invalid Ranked config: ${errors.join("; ")}`);
       await this.withAdmission(async () => {
-        if (!document.operational.enabled && this.database) {
+        // Apps Script stamps generatedAt on every read; it is not a config change.
+        const {generatedAt:_generatedAt,...content}=document;
+        const identity=JSON.stringify(content);
+        if (identity!==this.persistedDocument && !document.operational.enabled && this.database) {
           // Leave MATCHED rows and their admitted games untouched. Publishing
           // OFF happens only after queue cleanup commits; admissions share this fence.
           await this.database.transaction(async transaction => {
             await transaction.query("UPDATE ranked_queue_entries SET status = 'LEFT' WHERE status = 'QUEUED'");
           });
         }
+        this.persistedDocument=identity;
         this.snapshot = { ...structuredClone(document), fetchedAt: new Date().toISOString() };
       });
       this.lastError = null;

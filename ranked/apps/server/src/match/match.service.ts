@@ -1,3 +1,5 @@
+import { soloHistoryDetails } from "../history/solo-history.js";
+import type { HistoryOptions } from "../history/history-options.js";
 import { readStandings } from "../leaderboard/standing.js";
 import { recentRoundDeaths, type DeathFeedEvent } from "./death-feed.js";
 import {
@@ -253,6 +255,10 @@ interface PerfectWinRoundRow {
 }
 
 interface HistoryMatchRow {
+  source_payload:unknown;
+  created_at:Date|string;
+  match_type:string;
+  selected_round_maps_snapshot:unknown;
   id: string;
   player_a_id: string;
   player_b_id: string;
@@ -501,22 +507,28 @@ export class MatchService {
     });
   }
 
-  public async history(session: RankedSessionContext) {
+  public async history(session: RankedSessionContext, options:HistoryOptions={}) {
+    if(["CHAMPION","PODIUM","ELIMINATED","IN_PROGRESS"].includes(options.result??"ALL"))return {matches:[],serverNow:this.clock.now().toISOString()};
+    const order=options.order==="OLDEST"?"ASC":"DESC";
+    const filter=options.result==="WIN"?"AND m.winner_id=$1":options.result==="LOSS"?"AND m.winner_id IS NOT NULL AND m.winner_id<>$1":"";
     const now = this.clock.now();
     const matches = await this.database.query<HistoryMatchRow>(
-      `SELECT m.*,
+      `SELECT m.*,cs.source_payload,
               CASE WHEN m.player_a_id = $1 THEN pb.gd_username ELSE pa.gd_username END AS opponent_name
        FROM ranked_matches m
        JOIN ranked_players pa ON pa.id = m.player_a_id
        JOIN ranked_players pb ON pb.id = m.player_b_id
+       JOIN ranked_config_snapshots cs ON cs.id=m.config_snapshot_id
        JOIN ranked_profiles own_profile ON own_profile.player_id = $1
        WHERE (m.player_a_id = $1 OR m.player_b_id = $1)
          AND m.state = 'MATCH_RESULT'
          AND m.finished_at > own_profile.history_visible_since
-       ORDER BY m.finished_at DESC NULLS LAST, m.created_at DESC
+       ${filter} AND ($2::uuid IS NULL OR m.id=$2)
+       ORDER BY m.finished_at ${order} NULLS LAST, m.created_at ${order},m.id
        LIMIT 30`,
-      [session.playerId],
+      [session.playerId,options.matchId??null],
     );
+    const details=options.summary?new Map():await soloHistoryDetails(this.database,matches.rows);
     const items = [];
     for (const match of matches.rows) {
       const side: PlayerSide = match.player_a_id === session.playerId ? "A" : "B";
@@ -531,6 +543,9 @@ export class MatchService {
         : {};
       items.push({
         matchId: match.id,
+        detailsLoaded:!options.summary,
+        createdAt: dateIso(match.created_at),
+        completed:true,inProgress:false,debug:match.match_type==="DEBUG_BOT",myName:session.gdUsername,
         finishedAt: dateIso(match.finished_at),
         side,
         opponentName: match.opponent_name,
@@ -546,10 +561,12 @@ export class MatchService {
           B: match.ranked_score_b_after,
         },
         profileAfter: rating.profileAfter ?? null,
+        profileBefore: rating.profileBefore ?? null,
+        bestOf: match.source_payload?parseJson<RankedConfigSnapshot>(match.source_payload).operational?.rules?.bestOf??null:null,
         ratingEvents: rating.events ?? null,
         series: parseJson<MatchSeriesState>(match.series_state),
-        rounds: await this.roundSummaries(this.database, match.id),
-        deathmatches: await this.deathmatchSummaries(this.database, match.id),
+        rounds: details.get(match.id)?.rounds??[],
+        deathmatches: details.get(match.id)?.deathmatches??[],
       });
     }
     return { matches: items, serverNow: now.toISOString() };

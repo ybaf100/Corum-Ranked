@@ -8,7 +8,7 @@ export function countSql(db:DatabasePort,isDiscovery:(sql:string)=>boolean){
   try{return await executor.query<Row>(sql,values);}catch(error){metrics.failures++;throw error;}
  };
  db.query=<Row>(sql:string,values:readonly unknown[]=[])=>query<Row>({query:originalQuery},sql,values);
- db.transaction=<T>(operation:(tx:SqlExecutor)=>Promise<T>)=>originalTransaction(tx=>operation({query:<Row>(sql:string,values:readonly unknown[]=[])=>query<Row>(tx,sql,values)}));
+ db.transaction=<T>(operation:(tx:SqlExecutor)=>Promise<T>)=>originalTransaction(tx=>operation({...(tx.workSignals?{workSignals:tx.workSignals}:{}),...(tx.afterCommit?{afterCommit:tx.afterCommit.bind(tx)}:{}),query:<Row>(sql:string,values:readonly unknown[]=[])=>query<Row>(tx,sql,values)}));
  return {metrics,reset:()=>{metrics.queries=metrics.discovery=metrics.failures=0;},stop:()=>{db.query=originalQuery;db.transaction=originalTransaction;}};
 }
 
@@ -20,6 +20,6 @@ export function failSqlOnce(db:DatabasePort,matches:(sql:string)=>boolean){
   return executor.query<Row>(sql,values);
  };
  db.query=<Row>(sql:string,values:readonly unknown[]=[])=>query<Row>({query:originalQuery},sql,values);
- db.transaction=<T>(operation:(tx:SqlExecutor)=>Promise<T>)=>originalTransaction(tx=>operation({query:<Row>(sql:string,values:readonly unknown[]=[])=>query<Row>(tx,sql,values)}));
+ db.transaction=<T>(operation:(tx:SqlExecutor)=>Promise<T>)=>originalTransaction(tx=>operation({...(tx.workSignals?{workSignals:tx.workSignals}:{}),...(tx.afterCommit?{afterCommit:tx.afterCommit.bind(tx)}:{}),query:<Row>(sql:string,values:readonly unknown[]=[])=>query<Row>(tx,sql,values)}));
  return {get failed(){return failed;},stop:()=>{db.query=originalQuery;db.transaction=originalTransaction;}};
 }

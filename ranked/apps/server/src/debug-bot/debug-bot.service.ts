@@ -1,3 +1,4 @@
+import { DemandWorker, databaseWork } from "../database/database-work.js";
 import { timingSafeEqual } from "node:crypto";
 import {
   Inject,
@@ -74,9 +75,10 @@ const parseObject = (value: unknown): Record<string, unknown> => {
 export class DebugBotService implements OnModuleInit, OnApplicationShutdown {
   private readonly configuration: DebugBotEnvironment | null;
   private readonly drivers = new Map<string, BotDriver>();
-  private interval: ReturnType<typeof setInterval> | null = null;
+  private readonly worker:DemandWorker;
+  private readonly unsubscribe:()=>void;
   private discovery:Promise<void>|null=null;
-  private nextDiscoveryAt=-Infinity;
+  private discoveryRequested=true;
 
   public constructor(
     @Inject(SERVER_ENVIRONMENT) environment: ServerEnvironment,
@@ -89,19 +91,15 @@ export class DebugBotService implements OnModuleInit, OnApplicationShutdown {
     private readonly tokens: TokenService,
   ) {
     this.configuration = environment.debugBot;
+    this.unsubscribe=databaseWork(database).subscribe("debug-bot",()=>{this.discoveryRequested=true;});
+    this.worker=new DemandWorker(database,"debug-bot",this.configuration?.tickMs??500,async()=>{await this.tickOnce();return this.drivers.size>0;},()=>{});
   }
 
   public async onModuleInit(): Promise<void> {
     if (!this.configuration) return;
-    await this.hydrateDrivers(true).catch(()=>{});
-    this.interval = setInterval(() => void this.tickOnce(), this.configuration.tickMs);
-    this.interval.unref?.();
+    await this.worker.start();
   }
-
-  public onApplicationShutdown(): void {
-    if (this.interval) clearInterval(this.interval);
-    this.interval = null;
-  }
+  public async onApplicationShutdown():Promise<void> {this.unsubscribe();await this.worker.stop();}
 
   public async create(session: RankedSessionContext, body: CreateDebugBotMatchDto) {
     const configuration = this.configuration;
@@ -143,7 +141,7 @@ export class DebugBotService implements OnModuleInit, OnApplicationShutdown {
 
   public async tickOnce(): Promise<void> {
     if (!this.configuration) return;
-    await this.hydrateDrivers().catch(()=>{});
+    await this.hydrateDrivers();
     await Promise.all([...this.drivers.keys()].map(async (matchId) => {
       try {
         await this.drive(matchId);
@@ -179,10 +177,9 @@ export class DebugBotService implements OnModuleInit, OnApplicationShutdown {
 
   private hydrateDrivers(force=false):Promise<void> {
     if(this.discovery)return this.discovery;
-    const now=this.clock.now().getTime();
-    if(!force && now<this.nextDiscoveryAt)return Promise.resolve();
-    this.nextDiscoveryAt=now+2000;
-    this.discovery=this.loadDrivers().finally(()=>{this.discovery=null;});
+    if(!force && !this.discoveryRequested)return Promise.resolve();
+    this.discoveryRequested=false;
+    this.discovery=this.loadDrivers().catch(e=>{this.discoveryRequested=true;throw e;}).finally(()=>{this.discovery=null;});
     return this.discovery;
   }
   private async loadDrivers(): Promise<void> {

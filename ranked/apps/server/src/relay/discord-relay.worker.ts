@@ -1,3 +1,4 @@
+import { DemandWorker } from "../database/database-work.js";
 import {
   Inject,
   Injectable,
@@ -27,7 +28,7 @@ interface OutboxRow {
 export class DiscordRelayWorker implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly logger = new Logger(DiscordRelayWorker.name);
   private readonly config: DiscordRelayEnvironment | null;
-  private timer: NodeJS.Timeout | null = null;
+  private readonly worker:DemandWorker;
   private running = false;
 
   public constructor(
@@ -37,23 +38,23 @@ export class DiscordRelayWorker implements OnApplicationBootstrap, OnModuleDestr
     @Inject(DISCORD_TRANSPORT) private readonly transport: DiscordTransport,
   ) {
     this.config = environment.discordRelay;
+    this.worker=new DemandWorker(database,"outbox",this.config?.pollMs??1000,async()=>{
+      await this.deliverOnce();
+      const pending=await database.query(`SELECT 1 FROM ranked_outbox_events WHERE delivered_at IS NULL AND abandoned_at IS NULL AND attempts<$1 LIMIT 1`,[this.config!.maximumAttempts]);
+      return pending.rows.length>0;
+    },e=>this.logger.error(this.errorText(e)));
   }
 
-  public onApplicationBootstrap(): void {
+  public async onApplicationBootstrap(): Promise<void> {
     if (!this.config) {
       this.logger.log("Discord Ranked relay is disabled");
       return;
     }
-    this.timer = setInterval(() => void this.deliverOnce(), this.config.pollMs);
-    this.timer.unref();
-    void this.deliverOnce();
+    await this.worker.start();
     this.logger.log("Discord Ranked relay worker started");
   }
 
-  public onModuleDestroy(): void {
-    if (this.timer) clearInterval(this.timer);
-    this.timer = null;
-  }
+  public async onModuleDestroy(): Promise<void> {await this.worker.stop();}
 
   public async deliverOnce(): Promise<void> {
     if (!this.config || this.running) return;

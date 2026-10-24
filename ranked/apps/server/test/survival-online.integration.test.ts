@@ -17,6 +17,9 @@ import { SurvivalRateService } from "../src/survival/survival-rate.service.js";
 import { SurvivalService } from "../src/survival/survival.service.js";
 import { SurvivalQueueController } from "../src/survival/survival-queue.controller.js";
 import { SurvivalOnlineController } from "../src/survival/survival-online.controller.js";
+import { HistoryController } from "../src/history/history.controller.js";
+import { HistoryService } from "../src/history/history.service.js";
+import type { MatchService } from "../src/match/match.service.js";
 import { AchievementController } from "../src/achievement/achievement.controller.js";
 import { AchievementService } from "../src/achievement/achievement.service.js";
 import { AdminService } from "../src/admin/admin.service.js";
@@ -71,9 +74,10 @@ beforeEach(async()=>{
  const rates=new SurvivalRateService(db,clock);
  // Deterministic server clock tests explicitly tick production workers. This
  // leaves real HTTP handlers, auth, transactions, reducer and payment intact.
- vi.spyOn(online,"onApplicationBootstrap").mockImplementation(()=>{});vi.spyOn(queue,"onApplicationBootstrap").mockImplementation(()=>{});
- const module=await Test.createTestingModule({controllers:[SurvivalQueueController,SurvivalOnlineController,AchievementController],providers:[SessionGuard,AdmissionVersionGuard,
+ vi.spyOn(online,"onApplicationBootstrap").mockImplementation(async()=>{});vi.spyOn(queue,"onApplicationBootstrap").mockImplementation(async()=>{});
+ const module=await Test.createTestingModule({controllers:[SurvivalQueueController,SurvivalOnlineController,AchievementController,HistoryController],providers:[SessionGuard,AdmissionVersionGuard,
   {provide:DATABASE,useValue:db},{provide:SERVER_CLOCK,useValue:clock},{provide:TokenService,useValue:tokens},
+  {provide:HistoryService,useValue:new HistoryService({history:async()=>({matches:[]})} as unknown as MatchService,survival,clock)},
   {provide:AchievementService,useValue:achievements},{provide:SurvivalQueueService,useValue:queue},{provide:SurvivalOnlineService,useValue:online},{provide:SurvivalRateService,useValue:rates}]}).compile();
  app=module.createNestApplication();app.useGlobalPipes(new ValidationPipe({whitelist:true,forbidNonWhitelisted:true,transform:true}));await app.listen(0,"127.0.0.1");base=await app.getUrl();
 });
@@ -228,7 +232,24 @@ describe("Survival M5 public HTTP and persistent online game",()=>{
    for(const c of group.slice(0,2)){const result=await event(c,m,"FORFEIT");expect(result.result).toMatchObject({rank:8,requestedDelta:-55});await api(c,`/online/matches/${id}/acknowledge`,{});}
    m=await engine.get(id);expect(m.state).toBe("PLAYING");await Promise.all([online.tickOnce(),online.tickOnce()]);
    expect((await db.query("SELECT * FROM sur_lp_ledger")).rows).toHaveLength(2);expect((await db.query("SELECT * FROM ranked_profiles ORDER BY player_id")).rows).toEqual(solo);
-   const history=await survival.history(group[0]!.session.playerId);expect(history.matches[0]?.result).toMatchObject({rank:8,requestedDelta:-55});
+   const history=await survival.history(group[0]!.session.playerId);expect(history.matches[0]).toMatchObject({inProgress:true,finalRank:null,result:null});
+ });
+ it("opens owned in-progress history after elimination with finalized ties only, and enforces detail authorization",async()=>{
+   const {group,id}=await game(8);let m=await prepare(id,group);
+   await record(group[0]!,m,82.9);await record(group[1]!,m,82.1);
+   const eliminated=group.at(-1)!;await event(eliminated,m,"FORFEIT");
+   now=survivalCurrentRound(m).endsAt!+1;await touch(group);await online.tickOnce();m=await engine.get(id);
+   expect(m.rounds[0]!.finishedAt).not.toBeNull();
+   const owner=group[0]!;const history=(await survival.history(owner.session.playerId,{summary:true})).matches[0]!;
+   expect(history.inProgress).toBe(true);expect(history.result).toBeNull();expect(history.finishedAt).toBeNull();
+   const read=(match:string,token=owner.token)=>fetch(base+"/api/ranked/history/SURVIVAL/"+match,{headers:{Authorization:"Bearer "+token}});
+   const response=await read(id);expect(response.status).toBe(200);const payload=await response.json() as any;
+   expect(payload.match.rounds[0].completed).toBe(true);expect(payload.match.rounds[0].standings.filter((p:any)=>p.rank===1)).toHaveLength(2);
+   expect(JSON.stringify(payload)).not.toContain("achievementCheckpoint");expect(JSON.stringify(payload)).not.toContain("driver_state");
+   const outsider=await client();expect((await read(id,outsider.token)).status).toBe(404);
+   expect((await read("bad-id")).status).toBe(400);expect((await read(id,"invalid-session")).status).toBe(401);
+   await online.acknowledge(id,eliminated.session);
+   expect((await survival.history(eliminated.session.playerId,{matchId:id})).matches[0]).toMatchObject({inProgress:true,result:null});
  });
  it("disabling Survival clears waiting players before publication and preserves assigned matches",async()=>{
    const {group,id}=await game(16);const waiting=await client();await join(waiting);

@@ -1,3 +1,4 @@
+import { DemandWorker, databaseWork } from "../database/database-work.js";
 import type { AchievementUnlockNotice } from "../achievement/achievement.service.js";
 import {survivalResultRoster} from "./survival-result-roster.js";
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, Logger, NotFoundException,
@@ -35,11 +36,12 @@ const terminal=(m:SurvivalMatch)=>["FINAL_RESULT","CANCELLED"].includes(m.state)
 @Injectable()
 export class SurvivalDebugService implements OnApplicationBootstrap,OnApplicationShutdown {
   private readonly logger=new Logger(SurvivalDebugService.name);
-  private timer:ReturnType<typeof setInterval>|null=null;
+  private readonly worker:DemandWorker;
+  private readonly unsubscribe:()=>void;
   private pending:Promise<void>|null=null;
   private readonly activeMatches=new Set<string>();
   private discovery:Promise<void>|null=null;
-  private nextDiscoveryAt=-Infinity;
+  private discoveryRequested=true;
   public constructor(@Inject(DATABASE) private readonly db:DatabasePort,
     @Inject(SERVER_ENVIRONMENT) private readonly env:ServerEnvironment,
     @Inject(SERVER_CLOCK) private readonly clock:ServerClock,
@@ -47,15 +49,13 @@ export class SurvivalDebugService implements OnApplicationBootstrap,OnApplicatio
     private readonly config:SurvivalConfigService, private readonly sessions:SessionService,
     private readonly engine:SurvivalEngineService, private readonly survival:SurvivalService) {
     engine.registerAdapter((tx,match,now)=>this.drive(tx,match,now));
+    this.unsubscribe=databaseWork(db).subscribe("survival",()=>{this.discoveryRequested=true;});
+    this.worker=new DemandWorker(db,"survival",500,async()=>{await this.tickOnce();return this.activeMatches.size>0;},e=>this.logger.error(String(e)));
   }
   public async onApplicationBootstrap():Promise<void> {
-    await this.discover(true).catch(e=>this.logger.error(String(e)));
-    // Existing games survive operational OFF and a process restart; the seed and
-    // event cursors live in PostgreSQL, never just in this interval's memory.
-    this.timer=setInterval(()=>{void this.tickOnce().catch(e=>this.logger.error(String(e)));},500);
-    this.timer.unref();
+    await this.worker.start();
   }
-  public async onApplicationShutdown():Promise<void> { if(this.timer)clearInterval(this.timer);this.timer=null;await this.pending; }
+  public async onApplicationShutdown():Promise<void> {this.unsubscribe();await this.worker.stop();await this.pending;}
   private password(session:RankedSessionContext,value:string):void {
     const expected=this.env.debugBot?.password;
     if(!expected)throw new NotFoundException("Debug Bot Match is disabled");
@@ -217,7 +217,7 @@ export class SurvivalDebugService implements OnApplicationBootstrap,OnApplicatio
   public tickOnce():Promise<void> {
     if(this.pending)return this.pending;
     this.pending=(async()=>{
-      await this.discover().catch(e=>this.logger.error(String(e)));
+      await this.discover();
       for(const id of [...this.activeMatches])try {
         const match=await this.engine.tick(id);await this.settle(match);
         if(match.state==="CANCELLED")this.activeMatches.delete(id);
@@ -230,15 +230,15 @@ export class SurvivalDebugService implements OnApplicationBootstrap,OnApplicatio
   }
   private discover(force=false):Promise<void> {
     if(this.discovery)return this.discovery;
-    const now=this.clock.now().getTime();if(!force && now<this.nextDiscoveryAt)return Promise.resolve();
-    this.nextDiscoveryAt=now+2000;const known=[...this.activeMatches];
+    if(!force && !this.discoveryRequested)return Promise.resolve();
+    this.discoveryRequested=false;const known=[...this.activeMatches];
     this.discovery=(async()=>{
       const rows=(await this.db.query<{match_id:string}>(`SELECT d.match_id FROM sur_debug_matches d JOIN sur_matches m ON m.id=d.match_id
-        WHERE (d.settled_at IS NULL OR m.state NOT IN ('FINAL_RESULT','CANCELLED')) AND m.state<>'CANCELLED' ORDER BY d.created_at`)).rows;
+        WHERE (d.settled_at IS NULL OR COALESCE((d.result->>'finalStandings')::boolean,FALSE)=FALSE OR m.state NOT IN ('FINAL_RESULT','CANCELLED')) AND m.state<>'CANCELLED' ORDER BY d.created_at`)).rows;
       const live=new Set(rows.map(row=>row.match_id));
       for(const id of known)if(!live.has(id))this.activeMatches.delete(id);
       for(const id of live)this.activeMatches.add(id);
-    })().finally(()=>{this.discovery=null;});return this.discovery;
+    })().catch(e=>{this.discoveryRequested=true;throw e;}).finally(()=>{this.discovery=null;});return this.discovery;
   }
   private async settle(match:SurvivalMatch):Promise<SurvivalDebugResult|null> {
     const row=(await this.db.query<DebugRow>("SELECT * FROM sur_debug_matches WHERE match_id=$1",[match.id])).rows[0];

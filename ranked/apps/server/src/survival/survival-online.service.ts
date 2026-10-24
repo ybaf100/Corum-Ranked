@@ -1,3 +1,4 @@
+import { DemandWorker } from "../database/database-work.js";
 import type { AchievementUnlockNotice } from "../achievement/achievement.service.js";
 import {survivalResultRoster} from "./survival-result-roster.js";
 import { SurvivalConfigService } from "../config/survival-config.service.js";
@@ -30,14 +31,16 @@ const terminal=(m:SurvivalMatch)=>["FINAL_RESULT","CANCELLED"].includes(m.state)
 @Injectable()
 export class SurvivalOnlineService implements OnApplicationBootstrap,OnApplicationShutdown {
   private readonly logger=new Logger(SurvivalOnlineService.name);
-  private timer:ReturnType<typeof setInterval>|null=null;
+  private readonly worker:DemandWorker;
+  private workPending=true;
   private pending:Promise<void>|null=null;
   public constructor(@Inject(DATABASE)private readonly db:DatabasePort,@Inject(SERVER_CLOCK)private readonly clock:ServerClock,
     private readonly sessions:SessionService,private readonly engine:SurvivalEngineService,private readonly survival:SurvivalService,private readonly config:SurvivalConfigService){
     engine.registerAdapter((tx,m,now)=>this.drive(tx,m,now));
+    this.worker=new DemandWorker(db,"survival",500,async()=>{await this.tickOnce();return this.workPending;},e=>this.logger.error(String(e)));
   }
-  public onApplicationBootstrap():void {this.timer=setInterval(()=>{void this.tickOnce().catch(e=>this.logger.error(String(e)));},500);this.timer.unref();}
-  public async onApplicationShutdown():Promise<void>{if(this.timer)clearInterval(this.timer);this.timer=null;await this.pending;}
+  public async onApplicationBootstrap():Promise<void> {await this.worker.start();}
+  public async onApplicationShutdown():Promise<void>{await this.worker.stop();await this.pending;}
   private async owned(id:string,session:RankedSessionContext):Promise<ResultRow>{
     const row=(await this.db.query<ResultRow>("SELECT * FROM sur_online_players WHERE match_id=$1 AND player_id=$2",[id,session.playerId])).rows[0];
     if(!row)throw new ForbiddenException("Not the online Survival participant");return row;
@@ -137,8 +140,9 @@ export class SurvivalOnlineService implements OnApplicationBootstrap,OnApplicati
     if(this.pending)return this.pending;
     this.pending=(async()=>{
       const rows=await this.db.query<{match_id:string}>(`SELECT o.match_id FROM sur_online_matches o JOIN sur_matches m ON m.id=o.match_id
-        WHERE m.state NOT IN ('FINAL_RESULT','CANCELLED') OR EXISTS(SELECT 1 FROM sur_online_players p WHERE p.match_id=o.match_id AND (p.settled_at IS NULL OR COALESCE((p.result->>'finalStandings')::boolean,FALSE)=FALSE))
-        ORDER BY o.created_at`);
+        WHERE m.state<>'CANCELLED' AND (m.state<>'FINAL_RESULT' OR EXISTS(SELECT 1 FROM sur_online_players p WHERE p.match_id=o.match_id AND (p.settled_at IS NULL OR COALESCE((p.result->>'finalStandings')::boolean,FALSE)=FALSE))
+         ) ORDER BY o.created_at`);
+      this.workPending=rows.rows.length>0;
       for(const row of rows.rows)try{const match=await this.engine.tick(row.match_id);this.engine.ensureMapSelection(match);await this.settle(match);}catch(e){this.logger.error(`Online Survival ${row.match_id}: ${String(e)}`);}
     })().finally(()=>{this.pending=null;});return this.pending;
   }

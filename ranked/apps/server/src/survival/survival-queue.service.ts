@@ -1,3 +1,4 @@
+import { DemandWorker, signalAfterCommit } from "../database/database-work.js";
 import { BadRequestException, ConflictException,ForbiddenException,Inject,Injectable,NotFoundException,Logger,type OnApplicationBootstrap,type OnApplicationShutdown } from "@nestjs/common";
 import { createHash,timingSafeEqual } from "node:crypto";
 import { survivalOnlineBotLp,type RandomSource } from "@corum-ranked/rules";
@@ -19,13 +20,16 @@ interface QueueRow {entry_id:string;player_id:string;session_id:string;status:st
 @Injectable()
 export class SurvivalQueueService implements OnApplicationBootstrap,OnApplicationShutdown {
   private readonly logger=new Logger(SurvivalQueueService.name);
-  private timer:ReturnType<typeof setInterval>|null=null;
+  private readonly worker:DemandWorker;
+  private workPending=true;
   private pending:Promise<void>|null=null;
   public constructor(@Inject(DATABASE)private readonly db:DatabasePort,@Inject(SERVER_CLOCK)private readonly clock:ServerClock,
     @Inject(RANDOM_SOURCE)private readonly random:RandomSource,@Inject(SERVER_ENVIRONMENT)private readonly env:ServerEnvironment,
-    private readonly config:SurvivalConfigService,private readonly sessions:SessionService,private readonly engine:SurvivalEngineService,private readonly survival:SurvivalService){}
-  public onApplicationBootstrap():void {this.timer=setInterval(()=>{void this.tickOnce().catch(e=>this.logger.error(String(e)));},500);this.timer.unref();}
-  public async onApplicationShutdown():Promise<void>{if(this.timer)clearInterval(this.timer);this.timer=null;await this.pending;}
+    private readonly config:SurvivalConfigService,private readonly sessions:SessionService,private readonly engine:SurvivalEngineService,private readonly survival:SurvivalService){
+    this.worker=new DemandWorker(db,"survival-queue",500,async()=>{await this.tickOnce();return this.workPending;},e=>this.logger.error(String(e)));
+  }
+  public async onApplicationBootstrap():Promise<void>{await this.worker.start();}
+  public async onApplicationShutdown():Promise<void>{await this.worker.stop();await this.pending;}
   private async actor(tx:SqlExecutor,session:RankedSessionContext):Promise<void>{
     await tx.query("SELECT id FROM ranked_players WHERE id=$1 FOR UPDATE",[session.playerId]);
     const now=this.clock.now();const rows=await tx.query(`SELECT id FROM ranked_sessions WHERE id=$1 AND player_id=$2 AND revoked_at IS NULL AND expires_at>$3 AND last_heartbeat_at>$4`,
@@ -44,6 +48,7 @@ export class SurvivalQueueService implements OnApplicationBootstrap,OnApplicatio
     this.sessions.assertEnvironment(body.installedMods);await this.survival.profile(session.playerId);
     await this.config.withAdmission(()=>this.db.transaction(async tx=>{
       await lockSurvivalAdmission(tx);await this.actor(tx,session);
+      signalAfterCommit(tx,"survival-queue");
       const own=(await tx.query<QueueRow>("SELECT * FROM sur_queue_entries WHERE player_id=$1 FOR UPDATE",[session.playerId])).rows[0];
       if(own?.status==="MATCHED")return;
       const pending=(await tx.query<{match_id:string}>("SELECT match_id FROM sur_online_players WHERE player_id=$1 AND acknowledged_at IS NULL ORDER BY last_seen_at DESC LIMIT 1",[session.playerId])).rows[0];
@@ -65,12 +70,14 @@ export class SurvivalQueueService implements OnApplicationBootstrap,OnApplicatio
   public async leave(session:RankedSessionContext){
     await this.db.transaction(async tx=>{
       await lockSurvivalAdmission(tx);await this.actor(tx,session);
+      signalAfterCommit(tx,"survival-queue");
       await tx.query("UPDATE sur_queue_entries SET status='LEFT' WHERE player_id=$1 AND session_id=$2 AND status='QUEUED'",[session.playerId,session.sessionId]);
     });return this.status(session);
   }
   public async heartbeat(session:RankedSessionContext){
     await this.db.transaction(async tx=>{
       await lockSurvivalAdmission(tx);await this.actor(tx,session);
+      signalAfterCommit(tx,"survival-queue");
       await tx.query("UPDATE sur_queue_entries SET last_heartbeat_at=$3 WHERE player_id=$1 AND session_id=$2 AND status='QUEUED'",[session.playerId,session.sessionId,this.clock.now().toISOString()]);
     });await this.tickOnce();return this.status(session);
   }
@@ -122,6 +129,7 @@ export class SurvivalQueueService implements OnApplicationBootstrap,OnApplicatio
     this.password(session,body.password);this.sessions.assertEnvironment(body.installedMods);
     return this.config.withAdmission(()=>this.db.transaction(async tx=>{
       await lockSurvivalAdmission(tx);await this.actor(tx,session);
+      signalAfterCommit(tx,"survival-queue");
       const prior=(await tx.query<{match_id:string;bot_count:number|null}>("SELECT match_id,bot_count FROM sur_queue_fill_requests WHERE player_id=$1 AND request_id=$2",[session.playerId,body.requestId])).rows[0];
       if(prior){if(prior.bot_count!==(body.botCount??null))throw new ConflictException("Bot fill payload changed");return {status:"MATCHED",matchId:prior.match_id};}
       const own=(await tx.query<QueueRow>("SELECT * FROM sur_queue_entries WHERE player_id=$1",[session.playerId])).rows[0];
@@ -139,10 +147,11 @@ export class SurvivalQueueService implements OnApplicationBootstrap,OnApplicatio
     if(this.pending)return this.pending;
     this.pending=this.config.withAdmission(()=>this.db.transaction(async tx=>{
       await lockSurvivalAdmission(tx);
+      this.workPending=false;
       if(!this.config.getStatus().enabled)return;
       await assertSurvivalAdmission(tx,this.config.getSnapshot());
       for(let batch=0;batch<4;batch++){
-        const rows=await this.candidates(tx);if(!rows.length)return;
+        const rows=await this.candidates(tx);this.workPending=rows.length>0;if(!rows.length)return;
         const expired=this.clock.now().getTime()-new Date(rows[0]!.wait_started_at).getTime()>=180000;
         if(rows.length<16 && !expired)return;
         if(rows.length===1){await tx.query("UPDATE sur_queue_entries SET wait_started_at=$2 WHERE player_id=$1 AND status='QUEUED'",[rows[0]!.player_id,this.clock.now().toISOString()]);return;}

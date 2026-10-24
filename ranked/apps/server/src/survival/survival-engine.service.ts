@@ -1,3 +1,4 @@
+import { DemandWorker, signalAfterCommit } from "../database/database-work.js";
 import { lockSurvivalAdmission,assertSurvivalAdmission } from "./survival-admission.js";
 import { createHash } from "node:crypto";
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, Logger,
@@ -27,7 +28,8 @@ export type SurvivalMatchAdapter = (tx:SqlExecutor,match:SurvivalMatch,now:numbe
 @Injectable()
 export class SurvivalEngineService implements OnApplicationBootstrap, OnApplicationShutdown {
   private readonly logger=new Logger(SurvivalEngineService.name);
-  private timer:ReturnType<typeof setInterval>|null=null;
+  private readonly worker:DemandWorker;
+  private workPending=true;
   private pending:Promise<void>|null=null;
   private stopping=false;
   private readonly mapJobs=new Map<string,Promise<void>>();
@@ -43,15 +45,13 @@ export class SurvivalEngineService implements OnApplicationBootstrap, OnApplicat
     @Inject(SERVER_CLOCK) private readonly clock:ServerClock,
     @Inject(ID_GENERATOR) private readonly ids:IdGenerator,
     private readonly config:SurvivalConfigService,
-    @Inject(SURVIVAL_MAP_PROVIDER) private readonly maps:SurvivalMapProvider) {}
-  public onApplicationBootstrap():void {
-    this.stopping=false;
-    this.timer=setInterval(()=>{void this.recoverActiveMatches().catch(e=>this.logger.error(e));},250);
-    this.timer.unref();
+    @Inject(SURVIVAL_MAP_PROVIDER) private readonly maps:SurvivalMapProvider) {
+    this.worker=new DemandWorker(database,"survival",250,async()=>{await this.recoverActiveMatches();return this.workPending;},e=>this.logger.error(String(e)));
   }
+  public async onApplicationBootstrap():Promise<void> { this.stopping=false;await this.worker.start(); }
   public async onApplicationShutdown():Promise<void> {
     this.stopping=true;
-    if(this.timer)clearInterval(this.timer);this.timer=null;
+    await this.worker.stop();
     await this.pending;
     await Promise.allSettled(this.mapJobs.values());
   }
@@ -93,6 +93,7 @@ export class SurvivalEngineService implements OnApplicationBootstrap, OnApplicat
       [match.id,creationKey,requestHash,match.state,match.revision,match.configGeneration,JSON.stringify(match.config),
         match.averageLp,match.difficultyGroup,survivalCurrentRound(match).key,JSON.stringify(match),iso(match.createdAt)]);
       await this.project(tx,null,match);
+      signalAfterCommit(tx,"survival");
       return match;
   }
   public async get(matchId:string):Promise<SurvivalMatch> {
@@ -222,14 +223,16 @@ export class SurvivalEngineService implements OnApplicationBootstrap, OnApplicat
     this.pending=this.recover().finally(()=>{this.pending=null;});return this.pending;
   }
   private async recover():Promise<void> {
-    const rows=await this.database.query<{id:string}>(`SELECT id FROM sur_matches WHERE state IN ('MAP_SELECTION','ROUND_RESULT')
+    const rows=await this.database.query<{id:string;due:boolean}>(`SELECT id, (state IN ('MAP_SELECTION','ROUND_RESULT')
       OR (state IN ('PREPARING','ENTERING','COUNTDOWN','PLAYING') AND EXISTS (
         SELECT 1 FROM sur_rounds r WHERE r.match_id=sur_matches.id AND r.round_key=sur_matches.current_round_key AND (
           (sur_matches.state='PREPARING' AND r.preparation_started_at + INTERVAL '15 seconds' <= $1) OR
           (sur_matches.state='ENTERING' AND COALESCE(r.first_entered_at + INTERVAL '10 seconds',r.entry_requested_at + INTERVAL '5 seconds') <= $1) OR
           (sur_matches.state='COUNTDOWN' AND r.starts_at <= $1) OR
-          (sur_matches.state='PLAYING' AND (r.ends_at <= $1 OR (r.achievement_checkpoint IS NULL AND r.phase NOT IN ('FINAL','TIEBREAK') AND r.target_qualifiers < (SELECT COUNT(*) FROM sur_round_players p WHERE p.match_id=r.match_id AND p.round_key=r.round_key) AND r.ends_at - INTERVAL '10 seconds' <= $1)))))) ORDER BY updated_at,id`,[this.clock.now().toISOString()]);
+          (sur_matches.state='PLAYING' AND (r.ends_at <= $1 OR (r.achievement_checkpoint IS NULL AND r.phase NOT IN ('FINAL','TIEBREAK') AND r.target_qualifiers < (SELECT COUNT(*) FROM sur_round_players p WHERE p.match_id=r.match_id AND p.round_key=r.round_key) AND r.ends_at - INTERVAL '10 seconds' <= $1))))))) AS due FROM sur_matches WHERE state NOT IN ('FINAL_RESULT','CANCELLED') ORDER BY updated_at,id`,[this.clock.now().toISOString()]);
+    this.workPending=rows.rows.length>0;
     for(const row of rows.rows){
+      if(!row.due)continue;
       try{const match=await this.tick(row.id);
         this.ensureMapSelection(match);
       }

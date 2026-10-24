@@ -100,7 +100,7 @@ export function parseSurvivalMetadata(record: string): SurvivalMapMetadata {
   if (demon>1 || automatic>1 || length>5 || integer(row,"42")>3) throw new SurvivalMapError("INVALID_METADATA","Invalid GD booleans or length");
   const denominator=integer(row,"8"), numerator=integer(row,"9");
   if (!demon && (!denominator || !numerator)) throw new SurvivalMapError("INVALID_METADATA","Unrated native difficulty");
-  return {levelId:integer(row,"1",true),stars:integer(row,"18",true),demon:demon===1,
+  return {...(row.get("2")?{name:row.get("2")!.slice(0,100)}:{}),levelId:integer(row,"1",true),stars:integer(row,"18",true),demon:demon===1,
     demonDifficulty:demon ? survivalDemonFromNativeCode(integer(row,"43")) : null,
     automatic:automatic===1,platformer:length===5,length,featureScore:integer(row,"19"),epic:integer(row,"42")};
 }
@@ -115,8 +115,9 @@ export function parseSurvivalSearch(body: string, page: number) {
   if (records.length>pageSize) throw new SurvivalMapError("INVALID_METADATA","Oversized GD page");
   // Native search enumerates and filters candidates independently. A stale or
   // unrated entry must not discard every valid rated map on the same page.
+  const users=new Map((sections[1]??"").split("|").map(row=>{const [id,name]=row.split(":");return [id,name] as const;}));
   const levels:SurvivalMapMetadata[]=[];
-  for(const record of records)try{levels.push(parseSurvivalMetadata(record));}catch{}
+  for(const record of records)try{const metadata=parseSurvivalMetadata(record),creator=users.get(fields(record).get("6"));levels.push({...metadata,...(creator?{creator:creator.slice(0,100)}:{})});}catch{}
   if(records.length && !levels.length)throw new SurvivalMapError("INVALID_METADATA","No valid metadata on the GD page");
   return {total,offset,pageSize,levels};
 }
@@ -155,7 +156,7 @@ export function verifySurvivalDownload(body: string, expected: SurvivalMapMetada
   catch {throw new SurvivalMapError("INVALID_DATA","Level decompression failed or exceeded budget");}
   const decoded=geometry.toString("utf8");
   if (!geometry.equals(Buffer.from(decoded)) || !validSurvivalGeometry(decoded)) throw new SurvivalMapError("INVALID_DATA","Malformed native level geometry");
-  return {...metadata,levelVersion:version,geometrySha256:createHash("sha256").update(geometry).digest("hex"),
+  return {...metadata,...(expected.creator?{creator:expected.creator}:{}),levelVersion:version,geometrySha256:createHash("sha256").update(geometry).digest("hex"),
     geometryBytes:geometry.length,verifiedAt:new Date().toISOString()};
 }
 

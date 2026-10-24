@@ -1,3 +1,4 @@
+import { signalAfterCommit } from "../database/database-work.js";
 import {
   ConflictException,
   Inject,
@@ -208,6 +209,7 @@ export class QueueService {
     await this.matches.settleActiveMatchesForPlayer(session.playerId);
     const now = this.clock.now();
     return this.database.transaction(async (transaction) => {
+      signalAfterCommit(transaction,"debug-bot");
       await this.lockAdmission(transaction, session);
       const profile = await this.lockProfile(transaction, session.playerId);
       await this.assertPlacementComplete(
