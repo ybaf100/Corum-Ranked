@@ -179,9 +179,11 @@ export class DatabaseService implements DatabasePort, OnModuleInit, OnApplicatio
   public async transaction<T>(operation: (client: SqlExecutor) => Promise<T>): Promise<T> {
     const client = await this.pool.connect();
     const committed: (()=>void)[] = [];
+    let commitAttempted=false;
     try {
       await client.query("BEGIN");
       const result = await operation(new PgClientAdapter(client, this.workSignals, committed));
+      commitAttempted=true;
       await client.query("COMMIT");
       for (const notify of committed) { try { notify(); } catch (e) { this.logger.warn("Committed work notification failed"); } }
       return result;
@@ -192,6 +194,10 @@ export class DatabaseService implements DatabasePort, OnModuleInit, OnApplicatio
         const message = rollbackError instanceof Error ? rollbackError.message : String(rollbackError);
         this.logger.warn(`PostgreSQL rollback failed after connection error: ${message}`);
       }
+      // A disconnected client cannot distinguish a rolled-back COMMIT from a
+      // committed transaction whose acknowledgement was lost. One business-
+      // activity reconciliation closes that window; ordinary rollbacks stay idle.
+      if(commitAttempted && committed.length)this.workSignals.reconcile();
       throw error;
     } finally {
       client.release();

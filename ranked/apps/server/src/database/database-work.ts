@@ -11,6 +11,9 @@ export class DatabaseWorkSignals {
     return () => { group.delete(callback); };
   }
   public notify(domain: WorkDomain): void { for (const callback of this.listeners.get(domain) ?? []) callback(); }
+  /** A lost COMMIT acknowledgement may still have committed durable work.
+   * Reconcile once without running transaction afterCommit side effects. */
+  public reconcile():void { for(const domain of this.listeners.keys())this.notify(domain); }
 }
 const signals = new WeakMap<SqlExecutor, DatabaseWorkSignals>();
 export function databaseWork(executor: SqlExecutor): DatabaseWorkSignals {

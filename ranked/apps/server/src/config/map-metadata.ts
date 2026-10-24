@@ -114,9 +114,9 @@ export class RankedMapMetadataResolver {
   public constructor(private readonly fetcher: typeof fetch = fetch, private readonly database?: SqlExecutor,
     private readonly budgetMs = 8_000) {}
 
-  public async enrich(document: RankedConfigDocument): Promise<RankedConfigDocument> {
+  public async enrich(document: RankedConfigDocument, persist=true): Promise<RankedConfigDocument> {
     const key = (map: RankedMap): string => `length-v2:${map.playableLevelId}:${officialMap(map.title)?.id ?? 0}`;
-    if (this.database) {
+    if (persist && this.database) {
       const rows = await this.database.query<{ cache_key: string; data: Resolved; fetched_at: Date | string }>(
         "SELECT cache_key,data,fetched_at FROM ranked_map_metadata_cache WHERE cache_key=ANY($1::text[])",
         [document.maps.map(key)]).catch(() => ({ rows: [], rowCount: 0 }));
@@ -189,7 +189,7 @@ export class RankedMapMetadataResolver {
           } catch { /* Retain known metadata when GDDL is unavailable. */ }
           this.cache.set(key(map), { value: structuredClone(resolved), fetchedAt: now });
           if (this.cache.size > 1024) this.cache.delete(this.cache.keys().next().value!);
-          if (this.database && resolved.metadata.kind !== "UNKNOWN") await this.database.query(
+          if (persist && this.database && resolved.metadata.kind !== "UNKNOWN") await this.database.query(
             "INSERT INTO ranked_map_metadata_cache(cache_key,data,fetched_at) VALUES ($1,$2::jsonb,$3) ON CONFLICT(cache_key) DO UPDATE SET data=EXCLUDED.data,fetched_at=EXCLUDED.fetched_at",
             [key(map), JSON.stringify(resolved), new Date(now).toISOString()]).catch(() => undefined);
         }

@@ -8,7 +8,7 @@ import { DEFAULT_SURVIVAL_CONFIG } from '@corum-ranked/rules';
 import { AppModule } from '../src/app.module.js';
 import { DatabaseService } from '../src/database/database.service.js';
 import { SERVER_ENVIRONMENT } from '../src/config/server-environment.js';
-import { RANKED_CONFIG_SOURCE, } from '../src/config/ranked-config.source.js';
+import { AppsScriptRankedConfigSource,RANKED_CONFIG_SOURCE, } from '../src/config/ranked-config.source.js';
 import { SURVIVAL_CONFIG_SOURCE } from '../src/config/survival-config.service.js';
 import { CSMP_TIER_SOURCE } from '../src/config/csmp-tier.source.js';
 import { DISCORD_TRANSPORT } from '../src/relay/discord-transport.js';
@@ -34,10 +34,17 @@ it('measures actual full-app SQL with no players, games, queues or relay work fo
  const counter=countSql(db,()=>false);
  // schemaStatus is kept a real SQL probe, just like production /ready.
  Object.assign(db,{schemaStatus:async()=>{await db.query('SELECT 1');return {ready:true,missing:[]};}});
- vi.useFakeTimers({toFake:['setInterval','clearInterval']});
+ vi.useFakeTimers({toFake:['Date','setInterval','clearInterval']});
+ // Mock only HTTP, not the production config source or its DB-backed metadata
+ // resolver: otherwise its once-per-refresh cache query escapes the measurement.
+ vi.stubGlobal('fetch',async(input:string|URL|Request)=>{
+  if(String(input).startsWith(env.rankedConfigUrl))return new Response(JSON.stringify({ok:true,action:'ranked_config',data:refreshed(config)}));
+  if(String(input).includes('boomlings.com'))return new Response('-1');
+  return new Response('',{status:404});
+ });
  const module=await Test.createTestingModule({imports:[AppModule]})
   .overrideProvider(DatabaseService).useValue(db).overrideProvider(SERVER_ENVIRONMENT).useValue(env)
-  .overrideProvider(RANKED_CONFIG_SOURCE).useValue({fetchConfig:async()=>refreshed(config)})
+  .overrideProvider(RANKED_CONFIG_SOURCE).useValue(new AppsScriptRankedConfigSource(env,db))
   .overrideProvider(SURVIVAL_CONFIG_SOURCE).useValue({fetchConfig:async()=>refreshed(survival)})
   .overrideProvider(CSMP_TIER_SOURCE).useValue({fetchCurrentTier:async()=> 'NONE'})
   .overrideProvider(DISCORD_TRANSPORT).useValue({send:vi.fn()}).compile();
@@ -61,5 +68,5 @@ it('measures actual full-app SQL with no players, games, queues or relay work fo
   counter.reset();await vi.advanceTimersByTimeAsync(500);expect(counter.metrics.queries).toBeGreaterThan(0);
   await queue.leave(session);await vi.advanceTimersByTimeAsync(1000);counter.reset();
   await vi.advanceTimersByTimeAsync(360000);expect(counter.metrics.queries).toBe(0);
- }finally{await app.close();vi.useRealTimers();counter.stop();await pg.close();}
+ }finally{await app.close();vi.useRealTimers();vi.unstubAllGlobals();counter.stop();await pg.close();}
 },180000);

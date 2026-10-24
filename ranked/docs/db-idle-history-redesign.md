@@ -6,7 +6,7 @@
 
 ## DB 활성화 원인과 변경
 
-조회 간격을 늘리는 대신, 작업의 커밋과 서비스 시작을 활성화 신호로 사용한다. `DemandWorker`는 시작 시 한 번 durable 상태를 조정하고, 작업이 없으면 interval을 해제한다. 신규 작업을 저장한 트랜잭션의 **COMMIT 이후**에 해당 도메인을 깨운다. ROLLBACK은 깨우지 않는다. 빈 조회 중 새 작업이 커밋되어도 generation 비교로 wakeup이 유실되지 않는다. DB 오류가 발생하면 활성 주기로 재시도하며, 성공한 빈 조회만 유휴 전환을 허용한다. 단일 authoritative writer 구조를 전제로 한다.
+조회 간격을 늘리는 대신, 작업의 커밋과 서비스 시작을 활성화 신호로 사용한다. `DemandWorker`는 시작 시 한 번 durable 상태를 조정하고, 작업이 없으면 interval을 해제한다. 신규 작업을 저장한 트랜잭션의 **COMMIT 이후**에 해당 도메인을 깨운다. COMMIT 전 ROLLBACK은 깨우지 않는다. COMMIT 응답 연결이 유실되면 실제 저장 여부가 불명확하므로 일회성 조정을 요청하며, 미확정 afterCommit 후처리 콜백은 실행하지 않는다. 빈 조회 중 새 작업이 커밋되어도 generation 비교로 wakeup이 유실되지 않는다. DB 오류가 발생하면 활성 주기로 재시도하며, 성공한 빈 조회만 유휴 전환을 허용한다. 단일 authoritative writer 구조를 전제로 한다.
 
 | 경로 | 기존 SQL/타이머 | 변경 후 |
 | --- | --- | --- |
@@ -17,24 +17,25 @@
 | DebugBotService | 설정 tick마다 driver와 약 2초 discovery | 시작/신규 Debug 경기 커밋에서만 discovery. 실제 driver가 있을 때만 설정 tick 유지 |
 | DiscordRelayWorker | 빈 outbox도 pollMs마다 claim | 시작/enqueue 커밋에서 활성화. 미전송·재시도·lease 작업이 없으면 중단 |
 | SurvivalConfigService | 설정 갱신 때 mode UPSERT/청소 반복 | 동일한 내용은 SQL 생략. OFF 전환은 대기열 청소를 커밋한 뒤 공개 |
-| RankedConfigService | OFF인 설정을 읽을 때 대기열 청소 반복 | 동일한 내용은 청소 SQL 생략. 기존 MATCHED는 유지 |
+| AppsScriptRankedConfigSource/RankedMapMetadataResolver | 매 갱신마다 DB cache SELECT, TTL 만료 시 UPSERT | 시작·실제 원본 설정 변경 시만 DB 허용. 같은 원본의 외부 HTTP TTL 갱신은 메모리만 갱신 |
+| RankedConfigService | OFF인 설정을 읽을 때 대기열 청소 반복 | 시작 OFF 또는 enabled→OFF일 때만 청소. 외관 metadata generation 변경은 청소하지 않음. 기존 MATCHED 유지 |
 | DebugSpectateService | 샘플 interval | 유휴 tick은 메모리 map만 사용. SQL 없음 |
 | SessionService/SessionGuard | 요청 시 인증·세션 SQL | 기존 요청 기반 동작 유지. 무사용 상태의 세션 감시 SQL 추가 없음 |
 | MatchRecoveryService | 서버 시작 시 Solo 복구 | 기존 시작 복구 유지. 별도 상시 DB watchdog 없음 |
 
-Apps Script는 generation이 같아도 매 응답마다 `generatedAt`을 새로 만든다. 이 필드는 내용 fingerprint에서 제외한다. generation만 비교하지 않으므로 같은 generation의 실제 OFF/내용 변경도 적용되며, 읽은 시각만 달라지는 응답은 DB를 깨우지 않는다. 설정 HTTP 갱신은 계속 수행한다.
+Apps Script는 generation이 같아도 매 응답마다 `generatedAt`을 새로 만든다. 이 필드는 내용 fingerprint에서 제외한다. generation만 비교하지 않으므로 같은 generation의 실제 OFF/내용 변경도 적용되며, 읽은 시각만 달라지는 응답은 DB를 깨우지 않는다. 설정 HTTP 갱신과 맵 metadata의 외부 HTTP TTL 갱신은 계속 수행한다. 원본 문서가 같으면 영속 metadata cache의 SELECT/UPSERT를 생략한다. 운영자가 원본 설정을 바꾸거나 프로세스가 재시작하면 DB cache를 다시 사용할 수 있다.
 
 미완료 경기, outbox lease, 정산 projection은 DB에 남아 재시작 시 복구한다. 완료 라운드·컷오프·봇·Attempt·LP 처리는 기존 엔진/정산 코드를 사용한다. 마지막 10초 체크포인트와 250ms 권위 타이머를 느리게 바꾸지 않았다. 수동 SQL로 새 업무 행을 추가하거나 다른 writer를 도입할 경우 이 프로세스의 commit 신호를 우회하므로, 별도 통합 또는 서버 재시작 복구가 필요하다.
 
 ### 실제 SQL 계측
 
-동일한 PGlite/PostgreSQL SQL executor를 쓰는 전체 Nest `AppModule` 테스트에서 모든 DB query와 transaction 내 query를 계수했다. 사용자·경기·대기열·outbox 0개이며 Debug와 relay 기능은 켜 둔다. 앱 시작 완료 후 **가상 interval 시간 360초**를 진행한다. 설정 응답은 매번 `generatedAt`만 달라지도록 하여 실제 Apps Script 동작을 모사한다. 계측을 위한 DB 조회를 추가하지 않는다.
+동일한 PGlite/PostgreSQL SQL executor를 쓰는 전체 Nest `AppModule` 테스트에서 모든 DB query와 transaction 내 query를 계수했다. 사용자·경기·대기열·outbox 0개이며 Debug와 relay 기능은 켜 둔다. 앱 시작 완료 후 **가상 서버 시계·interval 시간 360초**를 진행한다. 설정 응답은 매번 `generatedAt`만 달라지도록 하여 실제 Apps Script 동작을 모사한다. 설정 소스/메타데이터 resolver는 실제 구현이고, 외부 HTTP만 mock한다. 계측을 위한 DB 조회를 추가하지 않는다.
 
 | 구간 | 기준 main | 변경 후 |
 | --- | ---: | ---: |
-| 시작 조정 SQL 호출 | 11 | 18 |
-| 이후 유휴 360초 SQL 호출 | 5,423 | 0 |
-| 유휴 SQL/초 | 약 15.064 | 0 |
+| 시작 조정 SQL 호출 | 16 | 23 |
+| 이후 유휴 360초 SQL 호출 | 5,784 | 0 |
+| 유휴 SQL/초 | 약 16.067 | 0 |
 
 시작 시 일회성 복구를 더 명확히 기다리므로 시작 조정 건수는 증가한다. 유휴 검증은 벽시계로 운영 Neon을 6분 관측한 결과가 아니다. 기존 main에 동일한 계측 테스트를 적용한 별도 worktree와 변경 worktree에서 측정했다.
 
@@ -51,6 +52,7 @@ Neon Scale to Zero가 5분 SQL 유휴를 확보할 수 있는 코드 경로가 �
 - `/health`: SQL 없음. Lightsail Docker HEALTHCHECK 30초 주기와 activation 스크립트도 `/health`를 사용한다.
 - `/ready`: 기존 실제 DB ping + schema 검사 유지. 호출하면 DB를 깨울 수 있다.
 - Caddy 예제에는 `/ready` 주기 probe가 없다. 저장소의 상시 `/ready` 모니터 설정도 발견되지 않았다.
+- `/api/ranked/config`의 audio volume 읽기는 요청 시 SQL을 사용한다. 실제 클라이언트·외부 bridge/config 요청이 계속되면 별도 사용자/외부 트래픽으로 DB가 활성화될 수 있다. 서버 내부 주기 config HTTP 갱신 경로와 구분한다.
 - 저장소 밖의 모니터링 서비스/수동 운영 설정 전체는 확인하지 못했다. 배포 후 운영 트래픽 로그에서 `/ready` 주기 요청을 별도로 확인해야 한다.
 
 ## 마이그레이션과 도전과제 보존
@@ -113,6 +115,8 @@ Solo 매칭/경기, Survival 활성/생성/대기열/준비, Debug Spectate 활�
 
 로컬 실행 결과: rules 282개, 서버/DB 597개 전체 통과 후, settlement/legacy projection 추가 테스트 6개 통과(그중 1개 신규). 서버 build와 source/test typecheck 통과. PostgreSQL 실제 row lock suite, native_death 흐름, 마지막 10초 체크포인트·재시작·정산 중 장애 회귀를 포함한다. 전체 앱 유휴/재활성화 테스트도 통과했다.
 
+후속 COMMIT 응답 유실/일반 rollback/정상 commit 테스트 3개도 추가했다.
+
 네이티브 회귀는 SDK JSON을 링크한 history model/transport, exact-ID/delegate/Ref 수명, 카드 스크롤·요청 취소, Pause 퇴장, 100% 재입장, 기존 PR #30 계열 preparation 검증을 실행한다. 최종 CI/네 플랫폼 결과는 PR 실행 결과로 갱신한다. 로컬 Linux에는 실제 GD/Geode 기기가 없으므로 iPad/iPhone/Android/Windows의 실제 UI·터치·GPU·게임 전환을 검증 완료로 표시하지 않는다.
 
 배포 전에는 다음을 별도로 확인한다.
@@ -157,7 +161,9 @@ Solo 매칭/경기, Survival 활성/생성/대기열/준비, Debug Spectate 활�
 - `corum-ranked-mod/tests/SpectatorAudioNativeTest.mjs`
 - `corum-ranked-mod/tests/SurvivalPauseNativeTest.mjs`
 - `corum-ranked-mod/tests/SurvivalUiNativeTest.mjs`
+- `ranked/apps/server/src/config/map-metadata.ts`
 - `ranked/apps/server/src/config/ranked-config.service.ts`
+- `ranked/apps/server/src/config/ranked-config.source.ts`
 - `ranked/apps/server/src/config/survival-config.service.ts`
 - `ranked/apps/server/src/database/database-work.ts`
 - `ranked/apps/server/src/database/database.port.ts`
@@ -178,6 +184,7 @@ Solo 매칭/경기, Survival 활성/생성/대기열/준비, Debug Spectate 활�
 - `ranked/apps/server/src/survival/survival-online.service.ts`
 - `ranked/apps/server/src/survival/survival-queue.service.ts`
 - `ranked/apps/server/src/survival/survival.service.ts`
+- `ranked/apps/server/test/commit-recovery.test.ts`
 - `ranked/apps/server/test/database-work.test.ts`
 - `ranked/apps/server/test/debug-bot.integration.test.ts`
 - `ranked/apps/server/test/history-projection.test.ts`
@@ -185,6 +192,7 @@ Solo 매칭/경기, Survival 활성/생성/대기열/준비, Debug Spectate 활�
 - `ranked/apps/server/test/idle-app.integration.test.ts`
 - `ranked/apps/server/test/pglite-database.ts`
 - `ranked/apps/server/test/pool-reconnect.integration.test.ts`
+- `ranked/apps/server/test/ranked-config-idle.test.ts`
 - `ranked/apps/server/test/sql-counter.ts`
 - `ranked/apps/server/test/survival-debug.integration.test.ts`
 - `ranked/apps/server/test/survival-engine.integration.test.ts`

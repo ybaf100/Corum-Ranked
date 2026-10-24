@@ -4371,7 +4371,7 @@ class CorumRankedLayer final : public CCLayerColor {
         auto const thumbWidth=std::min(width-20,150.f);auto const thumbHeight=thumbWidth*9/16;
         auto* frame=makeNeonPanel({thumbWidth,thumbHeight},{width/2,height-54-thumbHeight/2},kBlue,kDeepPanel,230);panel->addChild(frame,3);
         auto* placeholder=makeLabel(round.levelId>0?fmt::format("GD #{}",round.levelId):"?",.27f,{thumbWidth/2,thumbHeight/2},corum::ranked::ui::TextMuted,"semibold");frame->addChild(placeholder,3);m_historyThumbnailPlaceholder=placeholder;
-        auto* sprite=CCSprite::create();sprite->setPosition({thumbWidth/2,thumbHeight/2});frame->addChild(sprite,5);m_historyThumbnail=sprite;m_historyThumbnailSize={thumbWidth-4,thumbHeight-4};m_historyTexture=nullptr;
+        auto* sprite=CCSprite::create();sprite->setPosition({thumbWidth/2,thumbHeight/2});frame->addChild(sprite,5);m_historyThumbnail=sprite;m_historyThumbnailSize=CCSize{thumbWidth-4,thumbHeight-4};m_historyTexture=nullptr;
         m_historyThumbnailContext={m_historySelectedId,round.key,0,static_cast<std::uint64_t>(round.levelId),++m_historyThumbnailGeneration};
         auto const metadata=round.difficulty+(round.stars>0?fmt::format("  {}*",round.stars):"")+(round.length.empty()?"":"  "+round.length);
         historyText(panel,metadata.empty()?tr("history-unavailable","UNAVAILABLE"):metadata,.24f,{width/2,65},width-16,corum::ranked::ui::TextMuted);

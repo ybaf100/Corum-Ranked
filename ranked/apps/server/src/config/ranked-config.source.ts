@@ -19,6 +19,7 @@ export interface RankedConfigSource {
 @Injectable()
 export class AppsScriptRankedConfigSource implements RankedConfigSource {
   private readonly metadata: RankedMapMetadataResolver;
+  private databaseIdentity:string|null=null;
   public constructor(
     @Inject(SERVER_ENVIRONMENT) private readonly environment: ServerEnvironment,
     @Optional() @Inject(DATABASE) database?: SqlExecutor,
@@ -39,6 +40,12 @@ export class AppsScriptRankedConfigSource implements RankedConfigSource {
     if (!body.ok || body.action !== "ranked_config" || !body.data) {
       throw new Error(body.error || "Ranked config source returned an invalid envelope");
     }
-    return this.metadata.enrich(body.data);
+    const {generatedAt:_generatedAt,...content}=body.data;
+    const identity=JSON.stringify(content);
+    // Keep the existing bounded HTTP enrichment/TTL refresh, but background
+    // refreshes of the same document must neither reload nor UPSERT its DB cache.
+    const enriched=await this.metadata.enrich(body.data,identity!==this.databaseIdentity);
+    this.databaseIdentity=identity;
+    return enriched;
   }
 }

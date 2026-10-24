@@ -7,6 +7,11 @@
 #include <vector>
 
 namespace corum::ranked {
+inline std::vector<matjson::Value> historyArray(matjson::Value const& value) {
+    auto const array=value.asArray();
+    if(array.isOk())return array.unwrap();
+    return {};
+}
 inline std::optional<double> historyNumber(matjson::Value const& value) {
     auto n=value.asDouble();if(n.isErr() || !std::isfinite(n.unwrap()))return {};
     return n.unwrap();
@@ -41,13 +46,13 @@ inline std::vector<HistoryRound> historyRounds(matjson::Value const& record,bool
         v.result=r["result"].asString().unwrapOr("");v.winnerSide=r["winnerSide"].asString().unwrapOr("");
         if(survival){
             v.key=r["key"].asString().unwrapOr("");auto const phase=r["phase"].asString().unwrapOr("");
-            auto const ordinal=static_cast<int>(r["ordinal"].asInt().unwrapOr(0));v.label=phase=="FINAL"?"FINAL":phase=="TIEBREAK"?"TB "+std::to_string(1+std::count_if(result.begin(),result.end(),[](auto const& p){return p.deathmatch;})):"R"+std::to_string(ordinal);
+            auto const ordinal=static_cast<int>(r["ordinal"].asInt().unwrapOr(0));v.label=phase=="ROUND_1"?"R1":phase=="ROUND_2"?"R2":phase=="ROUND_3"?"R3":phase=="FINAL"?"FINAL":phase=="TIEBREAK"?"TB "+std::to_string(1+std::count_if(result.begin(),result.end(),[](auto const& p){return p.deathmatch;})):"R"+std::to_string(ordinal);
             v.deathmatch=phase=="TIEBREAK";v.cutoff=historyNumber(r["cutoffScore"]);
             auto const ownQualified=r["ownQualified"].asBool();if(ownQualified.isOk())v.ownQualified=ownQualified.unwrap();
             v.target=static_cast<int>(r["target"].asInt().unwrapOr(0));v.qualifiedCount=static_cast<int>(r["qualifiedCount"].asInt().unwrapOr(0));
             // Unfinished rankings are never treated as historical results,
             // including a malformed or older server response.
-            if(v.completed)for(auto const& p:r["standings"].asArray().unwrapOr(std::vector<matjson::Value>{})){
+            if(v.completed)for(auto const& p:historyArray(r["standings"])){
                 HistoryStanding s;s.id=p["participantId"].asString().unwrapOr("");s.name=p["name"].asString().unwrapOr("");
                 s.rank=static_cast<int>(p["rank"].asInt().unwrapOr(0));s.attempts=static_cast<int>(p["attemptCount"].asInt().unwrapOr(0));
                 s.tiedPlayers=static_cast<int>(p["tiedPlayers"].asInt().unwrapOr(0));s.progress=historyNumber(p["highestProgress"]).value_or(0);
@@ -64,8 +69,8 @@ inline std::vector<HistoryRound> historyRounds(matjson::Value const& record,bool
         }
         result.push_back(std::move(v));
     };
-    for(auto const& r:record["rounds"].asArray().unwrapOr(std::vector<matjson::Value>{}))if(r.isObject())append(r,false);
-    if(!survival)for(auto const& r:record["deathmatches"].asArray().unwrapOr(std::vector<matjson::Value>{}))if(r.isObject())append(r,true);
+    for(auto const& r:historyArray(record["rounds"]))if(r.isObject())append(r,false);
+    if(!survival)for(auto const& r:historyArray(record["deathmatches"]))if(r.isObject())append(r,true);
     return result;
 }
 inline std::vector<std::string> historyResultFilters(bool solo,bool survival) {
