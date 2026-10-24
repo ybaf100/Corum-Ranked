@@ -23,7 +23,7 @@ PlayerIcon* PlayerIcon::createLocal() {
 
 PlayerIcon* PlayerIcon::createBot(int index) {
     auto* node=new PlayerIcon;if(!node->initFallback()){delete node;return nullptr;}
-    node->autorelease();index=std::clamp(index,1,15);
+    node->autorelease();index=1+(std::max(1,index)-1)%15;
     node->m_icon->updatePlayerFrame(index,IconType::Cube);
     constexpr ccColor3B colors[]={{79,230,250},{255,211,78},{255,112,146},{155,133,255},{100,239,156}};
     node->m_icon->setColors(colors[(index-1)%5],colors[(index+1)%5]);

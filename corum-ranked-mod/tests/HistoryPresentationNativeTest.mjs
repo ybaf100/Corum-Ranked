@@ -24,6 +24,7 @@ int main(){
  assert(rounds[0].standings[0].own&&rounds[0].standings[0].tiedPlayers==2&&rounds[0].standings[0].attempts==3);
  assert(rounds[1].label=="FINAL"&&!rounds[1].completed&&rounds[1].standings.empty());assert(rounds[2].label=="TB 1");
  record["rounds"][0]["phase"]="ROUND_3";assert(historyRounds(record,true)[0].label=="R3");
+ record["rounds"][0]["phase"]="ROUND_4";assert(historyRounds(record,true)[0].label=="R4");
  auto solo=matjson::parse(R"({"rounds":[{"roundNumber":2,"completed":true,"levelId":456,"mapTitle":"Solo","scoreA":400,"scoreB":200,"bestProgressA":82,"bestProgressB":100,"clearedB":true}],"deathmatches":[{"sequence":1,"completed":true,"levelId":789,"bestProgressA":82.345,"bestProgressB":82.345,"nextDeathmatchSequence":2},{"sequence":2,"completed":true}]})").unwrap();
  auto duel=historyRounds(solo,false);assert(duel.size()==3&&duel[0].label=="R2"&&duel[0].bestA==82&&duel[0].clearedB);
  assert(duel[1].deathmatch&&duel[1].bestA==82.345&&duel[1].nextDeathmatch==2&&rankedScoreText(*duel[1].bestA,true)=="82.345");
@@ -85,6 +86,27 @@ int main(){using namespace corum::ranked;RankedRuntime r;
  r.fetchHistoryDetail(RankedMode::Survival,"a");auto closed=web::jobs.back();r.cancelHistoryReads();body["match"]=a;closed->callback({200,body});assert(!r.m_view.historyDetailLoading&&!r.m_view.history[0].detailsLoaded);
  r.fetchHistoryDetail(RankedMode::Survival,"a");auto retired=web::jobs.back();++r.m_sessionGeneration;retired->callback({200,body});assert(!r.m_view.history[0].detailsLoaded);r.cancelHistoryReads();
  r.setHistoryFilters("OLDEST","invalid");assert(r.m_historyOrder=="OLDEST"&&r.m_historyResult=="ALL");
+}
+`);
+});
+
+
+test('the authoritative result roster keeps all 64 places including an eliminated own player at rank 64',()=>{
+ const roster=method(read('src/ui/SurvivalOutcomePanel.hpp'),'inline std::vector<SurvivalStanding> survivalRoster(');
+ run(`
+#include "domain/SurvivalHudPresentation.hpp"
+#include <matjson.hpp>
+#include <cassert>
+#include <charconv>
+namespace geode::utils {template<class T>struct Number{T value;T unwrapOr(T)const{return value;}};template<class T>Number<T> numFromString(std::string const& s){T n=0;std::from_chars(s.data(),s.data()+s.size(),n);return {n};}}
+namespace corum::ranked {
+struct SurvivalMatchView{int matchPlayerCount=64;matjson::Value participants,result;std::vector<SurvivalStanding> roundPlayers;};
+${roster}
+}
+int main(){using namespace corum::ranked;SurvivalMatchView view;std::vector<matjson::Value> participants;
+ for(int i=1;i<=64;i++){matjson::Value p;p["participantId"]="p"+std::to_string(i);p["name"]="Player "+std::to_string(i);p["kind"]="HUMAN";p["gdAccountId"]=std::to_string(i);p["finalRank"]=i;p["eliminationStage"]=i==1?matjson::Value():matjson::Value(1);participants.push_back(p);}
+ view.participants=participants;auto rows=survivalRoster(view);assert(rows.size()==64&&rows.back().rank==64&&rows.back().id=="p64"&&rows.back().eliminated);
+ view.matchPlayerCount=16;view.participants=std::vector<matjson::Value>(participants.begin(),participants.begin()+16);rows=survivalRoster(view);assert(rows.size()==16&&rows.back().rank==16);
 }
 `);
 });

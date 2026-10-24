@@ -552,3 +552,15 @@ describe("debug discovery recovery and prompt settlement",()=>{
   expect(m.rounds).toHaveLength(2);expect((await db.query("SELECT * FROM sur_lp_ledger")).rows).toHaveLength(1);
  });
 });
+
+
+it("persists 64-player Debug force ranks and pays the shared reward only once",async()=>{
+ config.applyOperationMode(64);
+ const admission={...body(64),botCount:63};const result=await debug.create(session,admission);
+ expect(result).toMatchObject({matchPlayerCount:64,playerCount:64,state:"FINAL_RESULT",result:{rank:64,requestedDelta:-55}});
+ expect((await db.query<{final_rank:number}>("SELECT final_rank FROM sur_match_players WHERE match_id=$1 ORDER BY final_rank",[result.matchId])).rows.map(p=>p.final_rank)).toEqual(Array.from({length:64},(_,i)=>i+1));
+ expect((await db.query("SELECT count(*)::int AS n FROM sur_round_players WHERE match_id=$1 AND round_rank=64",[result.matchId])).rows).toEqual([{n:1}]);
+ expect((await debug.create(session,admission)).matchId).toBe(result.matchId);await debug.force(result.matchId,session,{password:"fixture-password",rank:64});
+ expect((await db.query("SELECT * FROM sur_lp_ledger")).rows).toHaveLength(1);
+ expect((await db.query("SELECT * FROM ranked_players")).rows).toHaveLength(1);
+});

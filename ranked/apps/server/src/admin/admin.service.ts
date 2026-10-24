@@ -10,6 +10,7 @@ import type { RankedSessionContext } from "../session/session.types.js";
 import type { AdminActionDto } from "./admin.dto.js";
 import { SERVER_CLOCK, type ServerClock } from "../common/runtime.module.js";
 import { sessionAliveSince } from "../session/session-presence.policy.js";
+import { signalAfterCommit } from "../database/database-work.js";
 import { readRankedAudioVolumes } from "../config/ranked-audio-volume.js";
 
 @Injectable()
@@ -35,7 +36,10 @@ export class AdminService {
     if(["RESET_DB","RESET_HISTORY"].includes(body.action) && !body.scope)throw new BadRequestException("Choose the reset scope explicitly");
     if(common && scope!=="COMMON")throw new BadRequestException("Achievements and audio belong to COMMON");
     if(scope==="COMMON" && ["SET_LP","SET_MMR","SET_BOTH","DELETE_BOTS"].includes(body.action))throw new BadRequestException("Choose a rating mode");
-    return this.db.transaction(async tx => {
+    const modeAction=body.action==="GET_SURVIVAL_MODE" || body.action==="SET_SURVIVAL_MODE";
+    if(modeAction && (scope!=="SURVIVAL" || !this.survivalConfig))throw new BadRequestException("Choose Survival for its operating format");
+    if(body.action==="SET_SURVIVAL_MODE" && body.matchPlayerCount!==16 && body.matchPlayerCount!==64)throw new BadRequestException("Choose 16 or 64 players");
+    const operation=()=>this.db.transaction(async tx => {
       if(scope==="SURVIVAL" || (scope==="COMMON" && body.action==="RESET_DB"))await lockSurvivalAdmission(tx);
       await tx.query("SELECT id FROM ranked_players WHERE id=$1 FOR UPDATE",[session.playerId]);
       const now=this.clock.now();
@@ -46,6 +50,11 @@ export class AdminService {
           AND s.last_heartbeat_at>$4 AND lower(p.gd_username)='hwanhee1'
         FOR UPDATE OF s`,[session.sessionId,session.playerId,now.toISOString(),sessionAliveSince(now)]);
       if (!caller.rows.length) throw new ForbiddenException("Admin session expired");
+      if(modeAction){
+        const count=await this.survivalConfig!.operationMode(tx,body.action==="SET_SURVIVAL_MODE"?body.matchPlayerCount:undefined);
+        if(body.action==="SET_SURVIVAL_MODE")signalAfterCommit(tx,"survival-queue");
+        return {ok:true,scope:"SURVIVAL",matchPlayerCount:count,message:`Survival: ${count} players. Existing matches keep their captured rules.`};
+      }
       if(scope==="COMMON" && body.action==="RESET_DB")return this.resetAll(tx);
       if(scope==="SURVIVAL")return this.survivalAction(tx,session,body,now);
       if (body.action === "GET_AUDIO_VOLUMES" || body.action === "SET_AUDIO_VOLUME") {
@@ -158,6 +167,18 @@ export class AdminService {
       const row=result.rows[0];
       return {ok:true,own:player.id===session.playerId,profile:row ? {displayedTier:row.displayed_tier,
         visibleRankedScore:row.visible_ranked_score,placementGames:row.placement_games} : null,message:`Updated ${player.gd_username}.`};
+    });
+    if(!modeAction)return operation();
+    return this.survivalConfig!.withAdmission(async()=>{
+      try{
+        const result=await operation();
+        if("matchPlayerCount" in result && (result.matchPlayerCount===16 || result.matchPlayerCount===64))this.survivalConfig!.applyOperationMode(result.matchPlayerCount);
+        return result;
+      }catch(error){
+        // A lost COMMIT acknowledgment must be reconciled on the next config
+        // refresh, even if the external document itself has not changed.
+        this.survivalConfig!.invalidateOperationMode();throw error;
+      }
     });
   }
 

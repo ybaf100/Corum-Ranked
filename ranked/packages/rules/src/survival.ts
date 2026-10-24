@@ -22,6 +22,7 @@ export interface SurvivalConfig {
   readonly round1Qualifiers: number;
   readonly round2Qualifiers: number;
   readonly round3Qualifiers: number;
+  readonly round4Qualifiers?: number;
   readonly finalWinners: number;
   readonly allowCutoffTies: boolean;
   readonly lastAttemptEnabled: boolean;
@@ -69,13 +70,13 @@ export function validateSurvivalConfig(value: SurvivalConfig): readonly string[]
   if (value.placementEnabled || value.promotionSeriesEnabled || value.lastAttemptEnabled) {
     errors.push("Survival has no placement, promotion series or LAST ATTEMPT in M1");
   }
-  if (value.matchPlayerCount < 8 || value.matchPlayerCount > 16 || value.minimumPlayers < 8 ||
-      value.minimumPlayers > value.matchPlayerCount) errors.push("player counts must satisfy 8 <= minimumPlayers <= matchPlayerCount <= 16");
+  if (![16,64].includes(value.matchPlayerCount) || value.minimumPlayers < 8 ||
+      value.minimumPlayers > value.matchPlayerCount) errors.push("player counts require matchPlayerCount 16 or 64, with 8 <= minimumPlayers <= matchPlayerCount");
   if (value.matchmakingMaxWaitSeconds < 1 || value.roundSeconds < 1 || value.tiebreakAttempts < 1 ||
       value.tiebreakDecimals > 6 || value.minimumLevelId < 1) errors.push("wait, round, tiebreak and level settings are invalid");
   if (!Number.isFinite(value.scoreMultiplier) || value.scoreMultiplier <= 0) errors.push("scoreMultiplier must be positive and finite");
   if (!(value.matchPlayerCount > value.round1Qualifiers && value.round1Qualifiers > value.round2Qualifiers &&
-      value.round2Qualifiers > value.round3Qualifiers && value.round3Qualifiers > value.finalWinners && value.finalWinners > 0)) {
+      value.round2Qualifiers > value.round3Qualifiers && (value.matchPlayerCount===64 ? Number.isSafeInteger(value.round4Qualifiers) && value.round3Qualifiers > value.round4Qualifiers! && value.round4Qualifiers! > value.finalWinners : value.round3Qualifiers > value.finalWinners) && value.finalWinners > 0)) {
     errors.push("nominal round qualifiers must decrease strictly; short-field recalculation is deferred to M3/M5");
   }
   if (value.demotionTargetOffsetLp < 1) errors.push("demotionTargetOffsetLp must be positive");
@@ -97,9 +98,18 @@ export function validateSurvivalConfig(value: SurvivalConfig): readonly string[]
       }
     }
   }
-  if (!Array.isArray(value.placementLp) || value.placementLp.length !== value.matchPlayerCount ||
-      value.placementLp.some(lp => !Number.isSafeInteger(lp))) errors.push("placementLp must provide an integer award for every nominal rank");
+  if (!Array.isArray(value.placementLp) || value.placementLp.length !== 16 ||
+      value.placementLp.some(lp => !Number.isSafeInteger(lp))) errors.push("placementLp must provide the 16 canonical integer rank awards");
   return errors;
+}
+
+export type SurvivalPlayerCount = 16 | 64;
+/** One shared LP/achievement system; only the field and elimination schedule change. */
+export function survivalConfigForPlayerCount(config: SurvivalConfig, count: SurvivalPlayerCount): SurvivalConfig {
+  if(count!==16 && count!==64)throw new RankedDomainError("INVALID_CONFIG","Survival format must be 16 or 64 players");
+  return {...config,matchPlayerCount:count,minimumPlayers:Math.min(config.minimumPlayers,count),
+    round1Qualifiers:count===64?40:10,round2Qualifiers:count===64?26:6,
+    round3Qualifiers:count===64?12:3,round4Qualifiers:count===64?5:0,finalWinners:1};
 }
 
 function assertConfig(config: SurvivalConfig): void {

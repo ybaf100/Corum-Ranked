@@ -33,7 +33,7 @@ web::WebRequest request(std::string const& session) {
     web::WebRequest http;http.header("Authorization","Bearer "+session);http.followRedirects(false);http.timeout(std::chrono::seconds(10));return http;
 }
 SurvivalMapPhase mapPhase(std::string const& value) {
-    return value=="ROUND_1"?SurvivalMapPhase::Round1:value=="ROUND_2"?SurvivalMapPhase::Round2:value=="ROUND_3"?SurvivalMapPhase::Round3:
+    return value=="ROUND_1"?SurvivalMapPhase::Round1:value=="ROUND_2"?SurvivalMapPhase::Round2:value=="ROUND_3"?SurvivalMapPhase::Round3:value=="ROUND_4"?SurvivalMapPhase::Round4:
         value=="FINAL"?SurvivalMapPhase::Final:SurvivalMapPhase::Tiebreak;
 }
 SurvivalDemon demon(std::string const& value) {
@@ -41,6 +41,7 @@ SurvivalDemon demon(std::string const& value) {
         value=="INSANE"?SurvivalDemon::Insane:value=="EXTREME"?SurvivalDemon::Extreme:SurvivalDemon::None;
 }
 }
+int SurvivalRuntime::configuredPlayerCount() const {return queueing()?m_queue.maximumPlayers:RankedRuntime::get().view().survivalPlayerCount;}
 SurvivalRuntime& SurvivalRuntime::get() {
     static auto* instance=[] {auto* node=new SurvivalRuntime;node->init();
         CCDirector::sharedDirector()->getScheduler()->scheduleUpdateForTarget(node,1,false);node->release();return node;}();return *instance;
@@ -137,7 +138,7 @@ void SurvivalRuntime::observeQueue(matjson::Value const& root) {
         m_nextPoll={};
     }
     m_queue.players=static_cast<int>(root["players"].asInt().unwrapOr(m_queue.players));
-    m_queue.minimumPlayers=static_cast<int>(root["minimumPlayers"].asInt().unwrapOr(8));m_queue.maximumPlayers=static_cast<int>(root["maximumPlayers"].asInt().unwrapOr(16));
+    m_queue.minimumPlayers=static_cast<int>(root["minimumPlayers"].asInt().unwrapOr(8));m_queue.maximumPlayers=static_cast<int>(root["maximumPlayers"].asInt().unwrapOr(16));m_queue.maxWaitSeconds=static_cast<int>(root["maxWaitSeconds"].asInt().unwrapOr(180));
     m_queue.waitingSince=root["waitingSince"].asString().unwrapOr(m_queue.waitingSince);m_queue.enabled=root["enabled"].asBool().unwrapOr(m_queue.enabled);
     m_clock.observe(root["serverNow"].asString().unwrapOr(""),localNow());m_queue.error.clear();
     if(m_queue.status=="MATCHED" && !m_queue.matchId.empty())loadOnlineMatch(m_queue.matchId);
@@ -205,6 +206,7 @@ void SurvivalRuntime::observe(matjson::Value const& root) {
     m_view.online=root["online"].asBool().unwrapOr(false);m_view.resultPending=root["myResultPending"].asBool().unwrapOr(false);
     m_view.debug=root["debug"].asBool().unwrapOr(false);m_view.mapGeneration=static_cast<int>(root["mapGeneration"].asInt().unwrapOr(0));
     m_view.roundNumber=static_cast<int>(root["roundNumber"].asInt().unwrapOr(m_view.phase=="ROUND_1"?1:m_view.phase=="ROUND_2"?2:m_view.phase=="ROUND_3"?3:4));
+    m_view.matchPlayerCount=root["matchPlayerCount"].asInt().unwrapOr(16)==64?64:16;
     m_view.playerCount=static_cast<int>(root["playerCount"].asInt().unwrapOr(16));m_view.roundPlayerCount=static_cast<int>(root["roundPlayerCount"].asInt().unwrapOr(16));
     m_view.targetQualifiers=static_cast<int>(root["targetQualifiers"].asInt().unwrapOr(0));
     m_view.startsAt=root["startsAt"].asString().unwrapOr("");m_view.endsAt=root["endsAt"].asString().unwrapOr("");
@@ -723,7 +725,7 @@ void SurvivalRuntime::endRound(){
 void SurvivalRuntime::start(std::string password,std::string group,int forceRank,int botCount) {
     tick();if(active()){showSurvivalGame();return;}if(queueing()){showSurvivalQueue();return;}if(m_creating || m_session.empty())return;
     matjson::Value body;if(!RankedRuntime::get().prepareSurvivalDebugAdmission(body))return;
-    body["password"]=std::move(password);body["requestId"]=utils::random::generateUUID();body["averageGroup"]=std::move(group);body["botCount"]=botCount;if(forceRank>0)body["forceRank"]=forceRank;
+    body["password"]=std::move(password);body["requestId"]=utils::random::generateUUID();body["averageGroup"]=std::move(group);if(botCount>=0)body["botCount"]=botCount;if(forceRank>0)body["forceRank"]=forceRank;
     auto http=request(m_session);http.timeout(std::chrono::seconds(70));http.bodyJSON(body);m_creating=true;
     auto const generation=m_generation;auto const session=m_session;
     m_controlRequest.spawn(http.post(debugEndpoint("/matches")),[this,generation,session](web::WebResponse response) {

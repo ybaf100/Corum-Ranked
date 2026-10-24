@@ -7,8 +7,8 @@ export class CreateSurvivalDebugDto extends EnvironmentRecheckDto {
   @IsString() @Length(1,128) public password!:string;
   @IsUUID() public requestId!:string;
   @IsIn(["RED_BRONZE","SILVER","GOLD"]) public averageGroup!:SurvivalDifficultyGroup;
-  @IsOptional() @IsInt() @Min(1) @Max(16) public forceRank?:number;
-  @IsOptional() @IsInt() @Min(1) @Max(15) public botCount?:number;
+  @IsOptional() @IsInt() @Min(1) @Max(64) public forceRank?:number;
+  @IsOptional() @IsInt() @Min(1) @Max(63) public botCount?:number;
 }
 export class SurvivalDebugEventDto {
   @IsUUID() public eventId!:string;
@@ -27,7 +27,7 @@ export class SurvivalDebugEventDto {
 }
 export class ForceSurvivalDebugDto {
   @IsString() @Length(1,128) public password!:string;
-  @IsInt() @Min(1) @Max(16) public rank!:number;
+  @IsInt() @Min(1) @Max(64) public rank!:number;
 }
 export class ClearSurvivalDebugDto {
   @IsUUID() public requestId!:string;

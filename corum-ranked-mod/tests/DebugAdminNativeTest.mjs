@@ -84,7 +84,7 @@ namespace debug{inline int spectates=0;void showDebugSpectatePopup(){++spectates
 `;
 function run(code,flags=[]){const dir=mkdtempSync(join(tmpdir(),'corum-admin-native-'));try{writeFileSync(join(dir,'test.cpp'),code);execFileSync('g++',['-std=c++23','-Wall','-Wextra','-Wpedantic','-Werror',...flags,join(dir,'test.cpp'),'-o',join(dir,'test')],{stdio:'pipe'});execFileSync(join(dir,'test'),[],{stdio:'pipe'});}catch(e){throw new Error(e.stderr?.toString()||e.message);}finally{rmSync(dir,{recursive:true,force:true});}}
 for (const androidString of [false,true]) test(`whole debug/Admin popups compile ON/OFF with ${androidString?'Android gd::string':'std::string'} and guard names, inputs, confirmation, late callbacks and batch summary`,()=>{
- const source=strip(read('../src/debug/DebugAdminPopup.cpp')).replace('class DebugAdminPopup final : public Popup {','class DebugAdminPopup final : public Popup { public:').replace('class DebugAudioVolumePopup final : public Popup {','class DebugAudioVolumePopup final : public Popup { public:');
+ const source=strip(read('../src/debug/DebugAdminPopup.cpp')).replace('class DebugAdminPopup final : public Popup {','class DebugAdminPopup final : public Popup { public:').replace('class DebugAudioVolumePopup final : public Popup {','class DebugAudioVolumePopup final : public Popup { public:').replace('class DebugSurvivalModePopup final : public Popup {','class DebugSurvivalModePopup final : public Popup { public:');
  const menu=strip(read('../src/debug/DebugMenuPopup.cpp')).replace('class DebugMenuPopup final : public Popup {','class DebugMenuPopup final : public Popup { public:');
  run(fixture+'#define CORUM_RANKED_NATIVE_TEST 1\n'+strip(read('../src/ui/RankedConfirmPopup.hpp')).replace('#if !defined(CORUM_RANKED_NATIVE_TEST)', '#if 0').replace('class RankedConfirmPopup final : public Popup {','class RankedConfirmPopup final : public Popup { public:')+source+menu+`
 using namespace corum::ranked;using namespace corum::ranked::debug;
@@ -150,6 +150,24 @@ int main(){
  CCMenuItemSpriteExtra reload;reload.setTag(2);retry->onSelect(&reload);job=web::jobs.back();
  assert(retry->m_busy&&job->op.body["action"].asString().unwrapOr("")=="GET_AUDIO_VOLUMES");
  job->callback({loaded,201});assert(retry->m_songs.size()==2&&retry->m_save->enabled);retry->dismiss();drainMainQueue();
+ // The format modal is separate from player mutations and publishes only a confirmed server choice.
+ auto* formatOwner=DebugAdminPopup::create(RankedMode::Survival);formatOwner->show();formatOwner->m_password->setString("password");
+ CCMenuItemSpriteExtra formatButton;formatButton.setTag(8);formatOwner->onAction(&formatButton);drainMainQueue();
+ auto* format=dynamic_cast<DebugSurvivalModePopup*>(Popup::opened.back());assert(format&&format->parent&&!formatOwner->parent);
+ job=web::jobs.back();assert(job->op.body["action"].asString().unwrapOr("")=="GET_SURVIVAL_MODE"&&job->op.body["scope"].asString().unwrapOr("")=="SURVIVAL");
+ assert(!format->m_sixteen->enabled&&!format->m_sixtyFour->enabled);
+ matjson::Value formatReply;formatReply["matchPlayerCount"]=16;job->callback({formatReply,201});
+ assert(format->m_count==16&&format->m_sixtyFour->enabled&&format->m_schedule->text=="16 > 10 > 6 > 3 > 1");
+ CCMenuItemSpriteExtra sixtyFour;sixtyFour.setTag(64);auto const formatBefore=web::jobs.size();
+ format->onAction(&sixtyFour);format->onAction(&sixtyFour);assert(web::jobs.size()==formatBefore+1);
+ job=web::jobs.back();assert(job->op.body["action"].asString().unwrapOr("")=="SET_SURVIVAL_MODE"&&job->op.body["matchPlayerCount"].asInt().unwrapOr(0)==64);
+ job->callback({formatReply,500});assert(format->m_count==16&&!format->m_busy);
+ format->onAction(&sixtyFour);formatReply["matchPlayerCount"]=64;web::jobs.back()->callback({formatReply,201});
+ assert(format->m_count==64&&format->m_schedule->text=="64 > 40 > 26 > 12 > 5 > 1");
+ auto const selectedBefore=web::jobs.size();format->onAction(&sixtyFour);assert(web::jobs.size()==selectedBefore);
+ format->request(16);job=web::jobs.back();format->dismiss();drainMainQueue();assert(job->cancelled&&format->m_password.empty());
+ job->callback({formatReply,201});assert(!format->parent);
+
 }
 `,['-DCORUM_RANKED_DEBUG_BOT_MATCH=1','-DCORUM_RANKED_DEBUG_SPECTATE=1',...(androidString?['-DCORUM_TEST_ANDROID_GD_STRING=1']:[])]);
  run(strip(read('../src/debug/DebugAdminPopup.cpp'))+strip(read('../src/debug/DebugMenuPopup.cpp'))+'\nint main(){}');

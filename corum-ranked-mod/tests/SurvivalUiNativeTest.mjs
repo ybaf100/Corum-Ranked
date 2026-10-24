@@ -192,7 +192,7 @@ struct CCSprite:CCNode{CCPoint anchor{0,.5f},size{58,8},world{0,0};float scale=2
  CCPoint convertToNodeSpace(CCPoint p){auto a=getAnchorPointInPoints();return {(p.x-world.x)/scale+a.x,(p.y-world.y)/scale+a.y};}
 };
 template<class T>struct WeakRef{T* pointer=nullptr;WeakRef()=default;explicit WeakRef(T* p):pointer(p){}struct Locked{T* ptr;explicit operator bool()const{return ptr&&ptr->alive;}T* operator->(){return ptr;}T* data(){return ptr;}};auto lock()const{return Locked{pointer};}};
-namespace corum::ranked {struct SurvivalRuntime{static auto& get(){static SurvivalRuntime r;return r;}bool observing()const{return false;}};struct SurvivalMatchView{std::string ownId,phase="ROUND_1";std::optional<double> cutoff;std::vector<SurvivalStanding> standings;};}
+namespace corum::ranked {struct SurvivalRuntime{static auto& get(){static SurvivalRuntime r;return r;}bool observing()const{return false;}};struct SurvivalMatchView{int matchPlayerCount=16;std::string ownId,phase="ROUND_1";std::optional<double> cutoff;std::vector<SurvivalStanding> standings;};}
 namespace corum::ranked::ui {struct SurvivalHud{WeakRef<CCSprite> m_progressBar,m_progressFill;WeakRef<CCDrawNode> m_progressLines;float m_progressWidth=0,m_progressHeight=0;SurvivalScoreTween m_personalBest;
  void attachProgressBar(CCSprite*,CCSprite*,float,float);void presentProgressMarkers(SurvivalMatchView const&);};
 ${method(source,'void SurvivalHud::attachProgressBar(')}
@@ -241,7 +241,7 @@ test('actual Survival audio policy keeps survivor music, uses Final preparation,
 #include "domain/SurvivalRoundMenuPolicy.hpp"
 using namespace corum::ranked;
 ${json}
-struct SurvivalMatchView{matjson::Value result,completedRound;std::string phase,state="MAP_SELECTION",roundKey="r1",ownId="human";bool ownWinner=false,ownEliminated=false;};
+struct SurvivalMatchView{int matchPlayerCount=16;matjson::Value result,completedRound;std::string phase,state="MAP_SELECTION",roundKey="r1",ownId="human";bool ownWinner=false,ownEliminated=false;};
 enum class RankedAudioMode{Round12,Round3,Round3DeathmatchWait,ResultWin,ResultLose};
 struct RankedAudioManager{int changes=0,ticks=0;RankedAudioMode mode=RankedAudioMode::Round3;static auto& get(){static RankedAudioManager a;return a;}void setMode(RankedAudioMode m){mode=m;changes++;}void tick(){ticks++;}};
 struct SurvivalRuntime{bool observer=false;static auto& get(){static SurvivalRuntime r;return r;}bool observing()const{return observer;}};

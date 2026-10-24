@@ -219,7 +219,7 @@ enum class RuntimeStage{Blocked,Matched,Ready};
 struct RankedRuntime{
  bool m_rankedOpen=true,m_sessionRejected=false,m_modeConfigBusy=false;std::string m_sessionToken="token";std::uint64_t m_sessionGeneration=1;
  std::chrono::steady_clock::time_point m_nextModeConfigAt{};Request m_modeConfigRequest;EnvironmentPolicy m_environmentPolicy;std::vector<InstalledModSnapshot> m_installedMods;
- struct{RuntimeStage stage=RuntimeStage::Matched;std::string error;int revision=0;bool soloEnabled=false,survivalEnabled=false,survivalConfigReady=false;
+ struct{RuntimeStage stage=RuntimeStage::Matched;std::string error;int revision=0;bool soloEnabled=false,survivalEnabled=false,survivalConfigReady=false;int survivalPlayerCount=16;
   struct{bool active=false;}environmentWarning;struct{std::string matchId="retained";}match;}m_view;
  int configLoads=0;void fetchConfig(){++configLoads;}auto captureInstalledMods(){return std::vector<InstalledModSnapshot>{};}
  void setStage(RuntimeStage s,std::string const&){m_view.stage=s;}
@@ -253,4 +253,28 @@ int main(){
   assert(c.avatarY-c.avatarSize/2>c.recordY+c.recordHeight/2);
  }
 }`);
+});
+
+
+test('64-player compact pages keep nickname and icon geometry inside small and wide screens',()=>{
+ run(`#include "domain/SurvivalBoardPresentation.hpp"
+#include "domain/SurvivalRoundMenuPolicy.hpp"
+#include <cassert>
+using namespace corum::ranked;
+int main(){
+ for(float width:{320.f,420.f,568.f,768.f,1366.f})for(float height:{240.f,320.f,426.f,768.f})for(std::size_t count:{5u,12u,26u,40u,64u}){
+  auto g=survivalGridLayout(width,height,count,64);auto c=survivalCardLayout(g.cellWidth,g.cellHeight,true);
+  assert(g.compact&&g.pages>=1&&g.pageSize*g.pages>=count&&g.cellHeight>=24);
+  assert(g.columns*g.cellWidth<=width-36+.01f);assert(g.rows*g.cellHeight<=height-163+.01f);
+  assert(c.avatarX-c.avatarSize/2>=0&&c.avatarX+c.avatarSize/2<c.titleX-c.titleWidth/2);
+  assert(c.titleX+c.titleWidth/2<=c.width&&c.titleHeight>0&&c.recordHeight==0);
+ }
+ auto compact=survivalGridLayout(568,320,64,64);assert(compact.pages==2&&compact.pageSize==48);
+ auto wide=survivalGridLayout(1024,768,64,64);assert(wide.pages==1&&wide.pageSize==64);
+ auto original=survivalGridLayout(568,320,16,16);assert(!original.compact&&original.pages==1&&original.columns==4);
+ assert(survivalMenuMusic("ROUND_3",false,false,false,true,"ROUND_3",true,true,64)==SurvivalMenuMusic::Round);
+ assert(survivalMenuMusic("ROUND_4",false,false,false,true,"ROUND_4",true,true,64)==SurvivalMenuMusic::Final);
+ assert(survivalMenuMusic("ROUND_3",false,false,false,true,"ROUND_3",true,true,16)==SurvivalMenuMusic::Final);
+}
+`);
 });

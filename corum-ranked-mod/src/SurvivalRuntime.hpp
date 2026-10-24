@@ -15,13 +15,13 @@ class PlayLayer;
 namespace corum::ranked {
 struct SurvivalQueueView {
     std::string status="LEFT",matchId,error,waitingSince;
-    int players=0,minimumPlayers=8,maximumPlayers=16;
+    int players=0,minimumPlayers=8,maximumPlayers=16,maxWaitSeconds=180;
     bool enabled=false;
 };
 struct SurvivalMatchView {
     std::uint64_t revision=0;
     std::string id,state,phase,roundKey,group,ownId="human",error,startsAt,endsAt,entryOpensAt,entryRequestedAt,mapError,presentationGate,selectionOpensAt,eliminatedAt;
-    int mapGeneration=0,roundNumber=0,targetQualifiers=0,playerCount=0,roundPlayerCount=0;
+    int mapGeneration=0,roundNumber=0,targetQualifiers=0,playerCount=0,roundPlayerCount=0,matchPlayerCount=16;
     SurvivalMapMetadata map;
     matjson::Value certificate=nullptr,result=nullptr,completedRound=nullptr,nextMap=nullptr,participants=nullptr;
     std::vector<SurvivalStanding> standings;
@@ -47,6 +47,7 @@ public:
     bool queueing() const { return m_queue.status=="QUEUED" || m_queue.status=="JOINING"; }
     SurvivalQueueView const& queue() const { return m_queue; }
     int queueWaitingSeconds() const;
+    int configuredPlayerCount() const;
     void joinQueue();
     void leaveQueue();
     std::string surrenderMessage() const;
@@ -105,7 +106,7 @@ public:
     void acknowledge();
     std::optional<ScoreAnimationInput> scoreAnimation() const;
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
-    void start(std::string password,std::string group,int forceRank=0,int botCount=15);
+    void start(std::string password,std::string group,int forceRank=0,int botCount=-1);
     void forceRank(std::string password,int rank);
     void fillBots(std::string password,int botCount=-1);
     bool canForceClear() const;

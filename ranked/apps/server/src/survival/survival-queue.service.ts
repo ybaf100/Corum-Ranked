@@ -87,7 +87,7 @@ export class SurvivalQueueService implements OnApplicationBootstrap,OnApplicatio
     await tx.query(`UPDATE sur_queue_entries q SET status='EXPIRED' WHERE q.status='QUEUED' AND (q.last_heartbeat_at<=$1 OR
       NOT EXISTS(SELECT 1 FROM ranked_sessions s WHERE s.id=q.session_id AND s.revoked_at IS NULL AND s.expires_at>$2 AND s.last_heartbeat_at>$1 AND ltrim(s.client_version,'v')=ltrim($3,'v')))`,
       [sessionAliveSince(now),now.toISOString(),REQUIRED_RANKED_CLIENT_VERSION]);
-    return [...(await tx.query<QueueRow>("SELECT * FROM sur_queue_entries WHERE status='QUEUED' ORDER BY joined_at,player_id LIMIT 16")).rows];
+    return [...(await tx.query<QueueRow>("SELECT * FROM sur_queue_entries WHERE status='QUEUED' ORDER BY joined_at,player_id LIMIT $1",[this.config.getSnapshot().config.matchPlayerCount])).rows];
   }
   private async createFrom(tx:SqlExecutor,rows:readonly QueueRow[],fill:boolean,botCount?:number){
     // Lock accounts before queue/session/profile rows, matching session rotation.
@@ -101,16 +101,16 @@ export class SurvivalQueueService implements OnApplicationBootstrap,OnApplicatio
       if(!live.rows.length || await this.busy(tx,row.player_id))continue;valid.push(current);
     }
     if((!fill && valid.length<2)||(!valid.length))return null;
-    if(fill && botCount!==undefined && (!Number.isInteger(botCount)||botCount<0||botCount>15||valid.length+botCount<2||valid.length+botCount>16))
-      throw new BadRequestException("Requested Bot Count requires 2–16 total participants");
-    if(!fill && valid.length<16 && this.clock.now().getTime()-new Date(valid[0]!.wait_started_at).getTime()<180000)return null;
     const captured=this.config.getSnapshot();await assertSurvivalAdmission(tx,captured);
+    if(fill && botCount!==undefined && (!Number.isInteger(botCount)||botCount<0||botCount>captured.config.matchPlayerCount-1||valid.length+botCount<2||valid.length+botCount>captured.config.matchPlayerCount))
+      throw new BadRequestException(`Requested Bot Count requires 2–${captured.config.matchPlayerCount} total participants`);
+    if(!fill && valid.length<captured.config.matchPlayerCount && this.clock.now().getTime()-new Date(valid[0]!.wait_started_at).getTime()<captured.config.matchmakingMaxWaitSeconds*1000)return null;
     const seed=Math.floor(this.random.next()*0x100000000);
     const profiles=(await tx.query<{player_id:string;lp:number}>("SELECT player_id,lp FROM sur_profiles WHERE player_id=ANY($1::uuid[]) ORDER BY player_id FOR UPDATE",[valid.map(q=>q.player_id)])).rows;
     const botLp=fill?survivalOnlineBotLp(seed,valid.map(q=>Number(profiles.find(p=>p.player_id===q.player_id)!.lp)),captured.config,botCount):[];
     const entrants:SurvivalAdmissionPlayer[]=[...valid.map(q=>({participantId:q.player_id,kind:"HUMAN" as const,playerId:q.player_id})),
       ...botLp.map((lp,i)=>({participantId:`bot-${String(i+1).padStart(2,"0")}`,kind:"BOT" as const,name:`Bot ${i+1}`,lp}))];
-    const key="sur-online:"+createHash("sha256").update(JSON.stringify({entries:valid.map(q=>q.entry_id),fill,botCount:botLp.length})).digest("hex");
+    const key="sur-online:"+createHash("sha256").update(JSON.stringify({entries:valid.map(q=>q.entry_id),fill,botCount:botLp.length,matchPlayerCount:captured.config.matchPlayerCount})).digest("hex");
     const match=await this.engine.createWithin(tx,key,entrants,captured,undefined,true,true);
     const now=this.clock.now().toISOString();
     await tx.query("INSERT INTO sur_online_matches(match_id,bot_filled,seed,created_at) VALUES($1,$2,$3,$4)",[match.id,fill&&botLp.length>0,seed,now]);
@@ -149,11 +149,11 @@ export class SurvivalQueueService implements OnApplicationBootstrap,OnApplicatio
       await lockSurvivalAdmission(tx);
       this.workPending=false;
       if(!this.config.getStatus().enabled)return;
-      await assertSurvivalAdmission(tx,this.config.getSnapshot());
+      const captured=this.config.getSnapshot();await assertSurvivalAdmission(tx,captured);
       for(let batch=0;batch<4;batch++){
         const rows=await this.candidates(tx);this.workPending=rows.length>0;if(!rows.length)return;
-        const expired=this.clock.now().getTime()-new Date(rows[0]!.wait_started_at).getTime()>=180000;
-        if(rows.length<16 && !expired)return;
+        const expired=this.clock.now().getTime()-new Date(rows[0]!.wait_started_at).getTime()>=captured.config.matchmakingMaxWaitSeconds*1000;
+        if(rows.length<captured.config.matchPlayerCount && !expired)return;
         if(rows.length===1){await tx.query("UPDATE sur_queue_entries SET wait_started_at=$2 WHERE player_id=$1 AND status='QUEUED'",[rows[0]!.player_id,this.clock.now().toISOString()]);return;}
         if(!await this.createFrom(tx,rows,false))return;
       }

@@ -54,7 +54,7 @@ struct RankedRuntime{std::string token="session-a";bool allowed=true,updateRequi
 };
 struct SurvivalRuntime{
  struct View{std::string id;bool debug=false,online=false;}m_view;
- struct Queue{std::string status="LEFT",matchId,error,waitingSince;int players=0,minimumPlayers=8,maximumPlayers=16;bool enabled=true;}m_queue;
+ struct Queue{std::string status="LEFT",matchId,error,waitingSince;int players=0,minimumPlayers=8,maximumPlayers=16,maxWaitSeconds=180;bool enabled=true;}m_queue;
  ServerClock m_clock;bool m_creating=false,m_queuePollBusy=false,m_pollBusy=false,m_recoverBusy=false,m_needRecovery=false;
  std::uint64_t m_generation=1,m_queueGeneration=1;std::string m_session="session-a";
  std::chrono::steady_clock::time_point m_recoverRetryAt{},m_nextQueuePoll{},m_nextPoll{};

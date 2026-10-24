@@ -38,6 +38,8 @@ class SurvivalGameLayer final : public CCLayerColor {
     std::unordered_map<int,SurvivalStanding> m_infoByTag;
     int m_nextInfoTag=1000;
     CCNode* m_grid=nullptr;
+    CCNode* m_pager=nullptr;CCLabelBMFont* m_pageLabel=nullptr;
+    std::size_t m_cardPage=0,m_cardPages=1;
     ui::SurvivalMapSelectionLayer* m_selection=nullptr;
     ui::SurvivalOutcomePanel* m_outcome=nullptr;
     LoadingSpinner* m_spinner=nullptr;
@@ -78,6 +80,10 @@ class SurvivalGameLayer final : public CCLayerColor {
         m_spinner=LoadingSpinner::create(20);m_spinner->setPosition({size.width/2-113,size.height-49});m_spinner->setVisible(false);addChild(m_spinner,8);
         m_introUntil=std::chrono::steady_clock::now()+std::chrono::milliseconds(SurvivalRosterMilliseconds);
         auto* menu=CCMenu::create();menu->setPosition(CCPointZero);addChild(menu,20);
+        m_pager=CCNode::create();addChild(m_pager,20);m_pager->setVisible(false);
+        auto* pageMenu=CCMenu::create();pageMenu->setPosition(CCPointZero);m_pager->addChild(pageMenu);
+        button(pageMenu,"<",{size.width/2-70,58},48,16);button(pageMenu,">",{size.width/2+70,58},48,17);
+        m_pageLabel=ui::menuLabel("",.24f,{size.width/2,58},ui::TextMuted);m_pager->addChild(m_pageLabel);
         m_resume=button(menu,text("survival-reenter","RE-ENTER"),{size.width/2,22},132,15,ui::Cyan);
         m_continue=button(menu,text("close","CLOSE"),{size.width/2,22},132,1);
         m_surrender=button(menu,text("surrender","SURRENDER"),{size.width-68,22},116,2,ui::Red,&m_surrenderText);
@@ -128,6 +134,8 @@ class SurvivalGameLayer final : public CCLayerColor {
         if(tag==10)RankedRoundPreparation::get().retry();
         if(tag==0)queueNativeLaunch();
         if(tag==15)requestClearedReplay();
+        if(tag==16 && m_cardPages>1)m_cardPage=(m_cardPage+m_cardPages-1)%m_cardPages;
+        if(tag==17 && m_cardPages>1)m_cardPage=(m_cardPage+1)%m_cardPages;
         if(tag==1)runtime.acknowledge();
         if(tag==2){if(runtime.observing())runtime.leaveObserver();else confirmSurrender();}
         if(tag==7)runtime.beginFreePlay();
@@ -175,51 +183,53 @@ class SurvivalGameLayer final : public CCLayerColor {
     }
     void showParticipants(SurvivalMatchView const& view,bool result) {
         auto const gridContext=view.id+":"+view.roundKey+":"+std::to_string(view.mapGeneration)+(result?":result":":live");
-        if(m_gridContext!=gridContext){m_gridContext=gridContext;m_grid->removeAllChildrenWithCleanup(true);m_tiles.clear();m_infoByTag.clear();m_nextInfoTag=1000;}
+        if(m_gridContext!=gridContext){m_gridContext=gridContext;m_grid->removeAllChildrenWithCleanup(true);m_tiles.clear();m_infoByTag.clear();m_nextInfoTag=1000;m_cardPage=0;}
         std::vector<SurvivalStanding> players=view.roundPlayers.empty()?view.standings:view.roundPlayers;
         if(result){players.clear();for(auto const& p:view.result["standings"].asArray().unwrapOr(std::vector<matjson::Value>{}))
             players.push_back({p["participantId"].asString().unwrapOr(""),p["name"].asString().unwrapOr(""),static_cast<int>(p["rank"].asInt().unwrapOr(0)),0,0,0,true,p["kind"].asString().unwrapOr("")=="BOT",false,p["displayedTier"].asString().unwrapOr("UNRANKED"),numFromString<int>(p["gdAccountId"].asString().unwrapOr("0")).unwrapOr(0)});}
-        auto const size=getContentSize();auto const columns=std::min<std::size_t>(4,std::max<std::size_t>(1,players.size()));
-        auto const rows=(players.size()+columns-1)/columns;auto const width=std::min(size.width-36,480.0f)/columns;
-        auto const height=std::min(66.0f,std::max(36.0f,(size.height-163)/std::max<std::size_t>(1,rows)));
+        auto const size=getContentSize();auto const grid=survivalGridLayout(size.width,size.height,players.size(),view.matchPlayerCount);
+        auto const columns=grid.columns;auto const width=grid.cellWidth,height=grid.cellHeight;auto const compact=grid.compact;
+        m_cardPages=grid.pages;m_cardPage=std::min(m_cardPage,m_cardPages-1);
+        m_pageLabel->setString(fmt::format("{} / {}",m_cardPage+1,m_cardPages).c_str());m_pager->setVisible(m_cardPages>1 && m_grid->isVisible());
         auto const left=size.width/2-(columns-1)*width/2,top=size.height-65-height/2;
-        auto const card=survivalCardLayout(width,height);
-        for(auto& [id,tile]:m_tiles)tile.root->setVisible(std::any_of(players.begin(),players.end(),[&](auto const& p){return p.id==id;}));
-        for(std::size_t i=0;i<players.size();i++){
-            auto const& value=players[i];auto found=m_tiles.find(value.id);
-            auto const destination=CCPoint{left+(i%columns)*width,top-(i/columns)*height};
+        auto const card=survivalCardLayout(width,height,compact);
+        for(auto& [id,tile]:m_tiles)tile.root->setVisible(false);
+        auto const first=m_cardPage*grid.pageSize,last=std::min(players.size(),first+grid.pageSize);
+        for(std::size_t i=first;i<last;i++){
+            auto const& value=players[i];auto found=m_tiles.find(value.id);auto const cell=i-first;
+            auto const destination=CCPoint{left+(cell%columns)*width,top-(cell/columns)*height};
             if(found==m_tiles.end()){
-                auto* root=ui::surface({width-8,height-4},{},ui::Blue,ui::SurfaceRaised,230,true);root->setPosition(destination);m_grid->addChild(root);
-                auto* nickname=ui::playerNameLabel(value.name,rankedMenuTextScale(.25f),{card.width/2,card.titleY},value.id==view.ownId?ui::Cyan:ui::Text,ui::FontWeight::Black);
-                ui::fitFullMenuLabel(nickname,card.width-12,card.titleHeight,.25f);root->addChild(nickname,5);
+                auto* root=ui::surface({card.width,card.height},{},ui::Blue,ui::SurfaceRaised,230,true);root->setPosition(destination);m_grid->addChild(root);
+                auto* nickname=ui::playerNameLabel(value.name,rankedMenuTextScale(.25f),{card.titleX,card.titleY},value.id==view.ownId?ui::Cyan:ui::Text,ui::FontWeight::Black);
+                ui::fitFullMenuLabel(nickname,card.titleWidth,card.titleHeight,.25f);root->addChild(nickname,5);
                 int index=1;auto dash=value.id.rfind('-');if(dash!=std::string::npos)index=numFromString<int>(value.id.substr(dash+1)).unwrapOr(1);
-                auto* avatarSlot=CCNode::create();avatarSlot->setPosition({card.width/2,card.avatarY});root->addChild(avatarSlot,5);
+                auto* avatarSlot=CCNode::create();avatarSlot->setPosition({card.avatarX,card.avatarY});root->addChild(avatarSlot,5);
                 auto* iconMenu=CCMenu::create();iconMenu->setPosition(CCPointZero);avatarSlot->addChild(iconMenu,8);
                 auto* iconFace=CCNode::create();iconFace->setContentSize({card.avatarSize,card.avatarSize});
                 auto* icon=value.id==view.ownId?ui::PlayerIcon::createLocal():value.bot?ui::PlayerIcon::createBot(index):ui::PlayerIcon::createRemote(value.accountId);
-                if(icon){icon->setScale(std::min(.65f,card.avatarSize/48.0f));icon->setPosition({card.avatarSize/2-10,card.avatarSize/2});iconFace->addChild(icon,5);}
+                if(icon){icon->setScale(std::min(.65f,card.avatarSize/48.0f));icon->setPosition({card.avatarSize/2-(compact?0:10),card.avatarSize/2});iconFace->addChild(icon,5);}
                 auto* iconButton=CCMenuItemSpriteExtra::create(iconFace,this,menu_selector(SurvivalGameLayer::onPlayerInfo));
                 iconButton->setTag(m_nextInfoTag++);iconButton->setPosition(CCPointZero);iconMenu->addChild(iconButton);
-                auto* record=ui::menuLabel("",.23f,{card.width/2,card.recordY},ui::TextMuted,ui::FontWeight::ExtraBold);root->addChild(record,5);
+                auto* record=compact?nullptr:ui::menuLabel("",.23f,{card.width/2,card.recordY},ui::TextMuted,ui::FontWeight::ExtraBold);if(record)root->addChild(record,5);
                 found=m_tiles.emplace(value.id,Tile{root,nickname,record,destination,avatarSlot}).first;
                 auto& tile=found->second;tile.infoTag=iconButton->getTag();
                 std::array<ccColor3B,3> const accents{ui::Gold,ccc3(201,215,235),ccc3(208,137,70)};
-                for(std::size_t medal=0;medal<accents.size();++medal){
-                    tile.medals[medal]=ui::surface({width-8,height-4},{(width-8)/2,(height-4)/2},accents[medal],ui::SurfaceRaised,245,true);
+                for(std::size_t medal=0;!compact && medal<accents.size();++medal){
+                    tile.medals[medal]=ui::surface({card.width,card.height},{card.width/2,card.height/2},accents[medal],ui::SurfaceRaised,245,true);
                     tile.medals[medal]->setVisible(false);root->addChild(tile.medals[medal],3);
                 }
-                tile.eliminatedBackground=ui::surface({width-8,height-4},{(width-8)/2,(height-4)/2},ui::Red,{42,13,28},250,true);
+                tile.eliminatedBackground=ui::surface({card.width,card.height},{card.width/2,card.height/2},ui::Red,{42,13,28},250,true);
                 tile.eliminatedBackground->setVisible(false);root->addChild(tile.eliminatedBackground,4);
                 iconButton->setEnabled(false);
                 auto* cardMenu=CCMenu::create();cardMenu->setPosition(CCPointZero);root->addChild(cardMenu,12);
-                auto* hit=CCNode::create();hit->setContentSize({width-8,height-4});
+                auto* hit=CCNode::create();hit->setContentSize({card.width,card.height});
                 auto* cardButton=CCMenuItemSpriteExtra::create(hit,this,menu_selector(SurvivalGameLayer::onPlayerInfo));
-                cardButton->setTag(tile.infoTag);cardButton->setPosition({(width-8)/2,(height-4)/2});cardMenu->addChild(cardButton);
+                cardButton->setTag(tile.infoTag);cardButton->setPosition({card.width/2,card.height/2});cardMenu->addChild(cardButton);
             }
             auto& tile=found->second;tile.root->setVisible(true);m_infoByTag[tile.infoTag]=value;
-            tile.progress.observe(view.revision,value.attemptId,value.attemptActive,value.bestProgress,value.currentProgress);tile.progress.advance(m_frameDelta);
+            if(!compact){tile.progress.observe(view.revision,value.attemptId,value.attemptActive,value.bestProgress,value.currentProgress);tile.progress.advance(m_frameDelta);}
             if(view.roundKey.ends_with(":elimination"))tile.progress.best.displayed=tile.progress.best.target;
-            if(tile.tier!=value.tier){
+            if(!compact && tile.tier!=value.tier){
                 tile.tier=value.tier;if(tile.tierBadge)tile.tierBadge->removeFromParentAndCleanup(true);
                 auto const badgeSize=std::min(20.0f,card.avatarSize);
                 tile.tierBadge=ui::createAnimatedRankBadge(value.tier,{badgeSize,badgeSize},ui::RankBadgeDisplay::Leaderboard);
@@ -228,22 +238,25 @@ class SurvivalGameLayer final : public CCLayerColor {
             if(tile.destination!=destination){tile.destination=destination;tile.root->stopActionByTag(7465);auto* move=CCEaseSineOut::create(CCMoveTo::create(.25f,destination));move->setTag(7465);tile.root->runAction(move);}
             auto rank=value.rank>0?(i18n::isKorean()?fmt::format(fmt::runtime(i18n::text("player-rank","{}")),value.rank):survivalOrdinal(value.rank)):std::string("-");
             std::string record;auto color=survivalRankColor(value.rank,value.passing);
-            if(result){int delta=0;for(auto const& p:view.result["standings"].asArray().unwrapOr(std::vector<matjson::Value>{}))if(p["participantId"].asString().unwrapOr("")==value.id)delta=static_cast<int>(p["delta"].asInt().unwrapOr(0));
+            if(compact){
+                if(tile.titleText!=value.name){tile.titleText=value.name;tile.name->setString(value.name.c_str());ui::fitFullMenuLabel(tile.name,card.titleWidth,card.titleHeight,.25f);}
+                tile.name->setColor(value.eliminated?ui::Red:value.id==view.ownId?ui::Cyan:ui::Text);
+            }else if(result){int delta=0;for(auto const& p:view.result["standings"].asArray().unwrapOr(std::vector<matjson::Value>{}))if(p["participantId"].asString().unwrapOr("")==value.id)delta=static_cast<int>(p["delta"].asInt().unwrapOr(0));
                 if(value.id==view.ownId)delta=static_cast<int>(view.result["actualDelta"].asInt().unwrapOr(delta));
                 record=value.rank>0?fmt::format("{} · {:+} LP",rank,delta):text("waiting","WAITING");color=value.rank>0?survivalResultRankColor(value.rank,delta):survivalRankColor(10,true);
             }else {
                 auto const status=value.eliminated?text("survival-eliminated","ELIMINATED"):value.cleared?text("survival-cleared","CLEARED"):
                     fmt::format("NOW {}%",rankedScoreText(tile.progress.now,view.phase=="TIEBREAK"));
                 record=fmt::format("BEST {}% · {}",rankedScoreText(tile.progress.best.displayed,view.phase=="TIEBREAK"),status);
-                auto const title=fmt::format("{} {}",rank,value.name);
-                if(tile.titleText!=title){tile.titleText=title;tile.name->setString(title.c_str());ui::fitFullMenuLabel(tile.name,card.width-12,card.titleHeight,.25f);}
+                auto const title=compact?value.name:fmt::format("{} {}",rank,value.name);
+                if(tile.titleText!=title){tile.titleText=title;tile.name->setString(title.c_str());ui::fitFullMenuLabel(tile.name,card.titleWidth,card.titleHeight,.25f);}
                 tile.name->setColor(value.eliminated?ui::Red:value.id==view.ownId?ui::Cyan:ui::Text);
             }
             auto const medal=survivalCardMedal(value.rank,value.eliminated);
-            for(std::size_t n=0;n<tile.medals.size();++n)tile.medals[n]->setVisible(medal==static_cast<int>(n+1));
+            for(std::size_t n=0;n<tile.medals.size();++n)if(tile.medals[n])tile.medals[n]->setVisible(medal==static_cast<int>(n+1));
             tile.eliminatedBackground->setVisible(value.eliminated || (!result && value.rank>0 && !value.passing));
-            if(tile.recordText!=record){tile.recordText=record;tile.record->setString(record.c_str());ui::fitFullMenuLabel(tile.record,card.width-10,card.recordHeight,.21f);}
-            tile.record->setColor(ccc3(color.r,color.g,color.b));
+            if(tile.record && tile.recordText!=record){tile.recordText=record;tile.record->setString(record.c_str());ui::fitFullMenuLabel(tile.record,card.width-10,card.recordHeight,.21f);}
+            if(tile.record)tile.record->setColor(ccc3(color.r,color.g,color.b));
         }
     }
     void syncAudio(SurvivalMatchView const& view,bool elimination=false) {
@@ -259,7 +272,7 @@ class SurvivalGameLayer final : public CCLayerColor {
         auto const presenting=elimination || (view.state=="ROUND_RESULT" && view.completedRound["key"].asString().unwrapOr("")==view.roundKey);
         auto const music=survivalMenuMusic(view.phase,view.result.isObject() || view.state=="FINAL_RESULT",
             view.result["won"].asBool().unwrapOr(view.ownWinner),view.ownEliminated,presenting,
-            view.completedRound["phase"].asString().unwrapOr(""),ownCompleted,qualified);
+            view.completedRound["phase"].asString().unwrapOr(""),ownCompleted,qualified,view.matchPlayerCount);
         auto const desired=music==SurvivalMenuMusic::Win?RankedAudioMode::ResultWin:music==SurvivalMenuMusic::Lose?RankedAudioMode::ResultLose:
             music==SurvivalMenuMusic::Final?RankedAudioMode::Round3DeathmatchWait:RankedAudioMode::Round12;
         if(m_audioMode!=desired){m_audioMode=desired;audio.setMode(desired);}
@@ -348,7 +361,7 @@ public:
         auto const stage=runtime.flowStage();auto const outcome=stage==SurvivalFlowStage::EliminatedChoice || stage==SurvivalFlowStage::PersonalResult || stage==SurvivalFlowStage::Ceremony;
         if(outcome){
             if(stage==SurvivalFlowStage::PersonalResult || stage==SurvivalFlowStage::Ceremony)beginResultMotion();
-            syncAudio(view);if(m_selection->isVisible())m_selection->hideSelection();if(view.nextMap["map"].isObject())m_selection->prepareServerMap(runtime.preparationView());m_grid->setVisible(false);m_heading->setVisible(false);m_map->setVisible(false);m_status->setVisible(false);m_boardClock->setVisible(false);m_spinner->setVisible(false);
+            syncAudio(view);if(m_selection->isVisible())m_selection->hideSelection();if(view.nextMap["map"].isObject())m_selection->prepareServerMap(runtime.preparationView());m_grid->setVisible(false);m_pager->setVisible(false);m_heading->setVisible(false);m_map->setVisible(false);m_status->setVisible(false);m_boardClock->setVisible(false);m_spinner->setVisible(false);
             for(auto* button:{m_resume,m_continue,m_surrender,m_freePlay,m_backToMap,m_viewBoard,m_force})if(button)button->setVisible(false);
             m_outcome->setVisible(!m_motion);if(!m_motion){m_outcome->present(view,stage,dt);
                 ui::showAchievementUnlocks(this,view.id+":"+view.ownId,view.result["achievementUnlocks"]);
@@ -373,7 +386,7 @@ public:
         auto const selectionWindow=mapWindow || searching;
         auto const now=std::chrono::steady_clock::now();
         auto const debugPopup=CCDirector::sharedDirector()->getRunningScene()->getChildByIDRecursive("survival-debug-config"_spr)!=nullptr;
-        m_grid->setVisible(!selectionWindow);
+        m_grid->setVisible(!selectionWindow);m_pager->setVisible(!selectionWindow && m_cardPages>1);
         m_heading->setVisible(!selectionWindow);m_map->setVisible(!selectionWindow);m_status->setVisible(!selectionWindow);
         if(selectionWindow)m_boardClock->setVisible(false);
         else if(view.nextMap["map"].isObject())m_selection->prepareServerMap(runtime.preparationView());

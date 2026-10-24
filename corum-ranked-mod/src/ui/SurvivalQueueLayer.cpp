@@ -8,7 +8,7 @@ using namespace geode::prelude;
 namespace corum::ranked {
 namespace {
 class SurvivalQueueLayer final : public CCLayerColor {
-    CCLabelBMFont *m_players=nullptr,*m_wait=nullptr,*m_status=nullptr;
+    CCLabelBMFont *m_players=nullptr,*m_wait=nullptr,*m_status=nullptr,*m_minimum=nullptr;
     CCMenuItemSpriteExtra *m_leave=nullptr,*m_fill=nullptr;
     bool m_closed=false;
     CCMenuItemSpriteExtra* button(CCMenu* menu,std::string caption,CCPoint position,int tag,ccColor3B color) {
@@ -27,7 +27,7 @@ class SurvivalQueueLayer final : public CCLayerColor {
         auto* spinner=LoadingSpinner::create(30);spinner->setPosition({center.x,center.y+38});addChild(spinner,5);
         m_players=ui::menuLabel("",.40f,{center.x,center.y-5},ui::Text,ui::FontWeight::ExtraBold);addChild(m_players);
         m_wait=ui::menuLabel("",.32f,{center.x,center.y-30},ui::Gold,ui::FontWeight::SemiBold);addChild(m_wait);
-        auto* minimum=ui::menuLabel(fmt::format("{}: 8",i18n::text("survival-queue-minimum","MINIMUM PLAYERS")),.26f,{center.x,center.y-50},ui::TextMuted,ui::FontWeight::SemiBold);addChild(minimum);
+        m_minimum=ui::menuLabel(fmt::format("{}: 8",i18n::text("survival-queue-minimum","MINIMUM PLAYERS")),.26f,{center.x,center.y-50},ui::TextMuted,ui::FontWeight::SemiBold);addChild(m_minimum);
         auto* hint=ui::menuLabel(i18n::text("survival-queue-short","AFTER 180s, 2-7 PLAYERS PLAY SHORT FINALS"),.23f,{center.x,center.y-68},ui::TextMuted,ui::FontWeight::SemiBold);
         ui::fitMenuLabelWidth(hint,size.width-36,.23f,.20f);addChild(hint);m_status=hint;
         auto* menu=CCMenu::create();menu->setPosition(CCPointZero);addChild(menu,10);
@@ -58,8 +58,9 @@ public:
         }
         auto const waiting=runtime.queueWaitingSeconds();
         m_players->setString(fmt::format("{}: {} / {}",i18n::text("survival-queue-players","PLAYERS"),queue.players,queue.maximumPlayers).c_str());
+        m_minimum->setString(fmt::format("{}: {}",i18n::text("survival-queue-minimum","MINIMUM PLAYERS"),queue.minimumPlayers).c_str());
         m_wait->setString(fmt::format("{}: {:02}:{:02}",i18n::text("waiting","WAITING"),waiting/60,waiting%60).c_str());
-        m_status->setString((queue.error.empty()?i18n::text("survival-queue-short","AFTER 180s, 2-7 PLAYERS PLAY SHORT FINALS"):i18n::text(queue.error,queue.error)).c_str());m_status->setColor(queue.error.empty()?ui::TextMuted:ui::Red);ui::fitMenuLabelWidth(m_status,getContentSize().width-36,.24f,.20f);
+        m_status->setString((queue.error.empty()?fmt::format(fmt::runtime(i18n::text("survival-queue-short-format","AFTER {}s, SMALLER FIELDS MAY START")),queue.maxWaitSeconds):i18n::text(queue.error,queue.error)).c_str());m_status->setColor(queue.error.empty()?ui::TextMuted:ui::Red);ui::fitMenuLabelWidth(m_status,getContentSize().width-36,.24f,.20f);
         m_leave->setEnabled(!runtime.creating() && queue.status=="QUEUED");
         if(m_fill)m_fill->setEnabled(!runtime.creating() && queue.status=="QUEUED");
         if(queue.status!="QUEUED" && queue.status!="JOINING" && queue.status!="MATCHED" && !runtime.creating()){

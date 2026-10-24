@@ -1,5 +1,5 @@
 import { IsIn, IsInt, IsOptional, IsString, Length, Max, Min, Equals } from "class-validator";
-export const ADMIN_ACTIONS = ["UNLOCK_ALL", "SET_LP", "SET_MMR", "SET_BOTH", "DELETE_BOTS", "RESET_HISTORY", "RESET_DB", "GET_AUDIO_VOLUMES", "SET_AUDIO_VOLUME"] as const;
+export const ADMIN_ACTIONS = ["UNLOCK_ALL", "SET_LP", "SET_MMR", "SET_BOTH", "DELETE_BOTS", "RESET_HISTORY", "RESET_DB", "GET_AUDIO_VOLUMES", "SET_AUDIO_VOLUME", "GET_SURVIVAL_MODE", "SET_SURVIVAL_MODE"] as const;
 export class AdminActionDto {
   @IsOptional() @IsIn(["SOLO_RANKED","SURVIVAL","COMMON"]) public scope?:"SOLO_RANKED"|"SURVIVAL"|"COMMON";
   @IsString() @Length(1,128) public password!: string;
@@ -8,6 +8,7 @@ export class AdminActionDto {
   @IsOptional() @IsInt() @Min(0) @Max(2147483647) public lp?: number;
   @IsOptional() @IsInt() @Min(-2147483648) @Max(2147483647) public mmr?: number;
   @IsOptional() @Equals("RESET") public confirmation?: string;
+  @IsOptional() @IsInt() @IsIn([16,64]) public matchPlayerCount?:16|64;
   @IsOptional() @IsInt() @Min(1) @Max(2147483647) public songId?: number;
   @IsOptional() @IsInt() @Min(0) @Max(100) public volumePercent?: number;
 }

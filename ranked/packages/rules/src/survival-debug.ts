@@ -12,8 +12,8 @@ export function survivalDebugSeed(seed: number, key: string): number {
   return value >>> 0;
 }
 export function survivalDebugLp(seed: number, humanLp: number, group: SurvivalDifficultyGroup,
-  config: SurvivalConfig,botCount=15) {
-  if(!Number.isInteger(botCount)||botCount<1||botCount>15)throw new RankedDomainError("INVALID_CONFIG","Debug requires 1–15 bots");
+  config: SurvivalConfig,botCount=config.matchPlayerCount-1) {
+  if(!Number.isInteger(botCount)||botCount<1||botCount>config.matchPlayerCount-1)throw new RankedDomainError("INVALID_CONFIG","Debug bot count exceeds the configured field");
   const playerCount=botCount+1;
   if (!Number.isSafeInteger(humanLp) || humanLp < 0)
     throw new RankedDomainError("INVALID_CONFIG", "Invalid human Survival LP");
@@ -42,7 +42,7 @@ export function survivalDebugLp(seed: number, humanLp: number, group: SurvivalDi
 /** Explicit password-protected development operation. It never changes the
  * public engine's round adjudication or accepts a client-supplied LP delta. */
 export function forceSurvivalDebugRank(before: SurvivalMatch, humanId: string, rank: number, now: number): SurvivalMatch {
-  if (!Number.isInteger(rank) || rank < 1 || rank > before.players.length || before.players.length<2 || before.players.length>16 ||
+  if (!Number.isInteger(rank) || rank < 1 || rank > before.players.length || before.players.length<2 || before.players.length>64 ||
       !before.players.some(p => p.participantId === humanId && p.kind === "HUMAN"))
     throw new RankedDomainError("INVALID_MATCH_TRANSITION", "Invalid Force rank");
   if (["FINAL_RESULT", "CANCELLED"].includes(before.state)) return before;

@@ -71,8 +71,7 @@ export class SurvivalDebugService implements OnApplicationBootstrap,OnApplicatio
   }
   public async create(session:RankedSessionContext,body:CreateSurvivalDebugDto) {
     this.password(session,body.password);this.sessions.assertEnvironment(body.installedMods);
-    const botCount=body.botCount??15;
-    if(!Number.isInteger(botCount)||botCount<1||botCount>15 || (body.forceRank!==undefined && body.forceRank>botCount+1))throw new BadRequestException("Invalid bot count or Force rank");
+    if(body.botCount!==undefined && (!Number.isInteger(body.botCount)||body.botCount<1||body.botCount>63))throw new BadRequestException("Invalid bot count");
     await this.survival.profile(session.playerId);
     const creationKey=`sur-debug:${session.playerId}:${body.requestId}`;
     const match=await this.config.withAdmission(()=>this.db.transaction(async tx=>{
@@ -85,7 +84,7 @@ export class SurvivalDebugService implements OnApplicationBootstrap,OnApplicatio
       const previous=(await tx.query<{snapshot:SurvivalMatch;average_group:string;force_rank:number|null}>(
         `SELECT m.snapshot,d.average_group,d.force_rank FROM sur_matches m JOIN sur_debug_matches d ON d.match_id=m.id WHERE m.creation_key=$1`,[creationKey])).rows[0];
       if(previous) {
-        if(previous.snapshot.players.filter(p=>p.kind==="BOT").length!==botCount || previous.average_group!==body.averageGroup || previous.force_rank!==(body.forceRank??null))throw new ConflictException("Debug creation payload changed");
+        if(previous.snapshot.players.filter(p=>p.kind==="BOT").length!==(body.botCount??previous.snapshot.config.matchPlayerCount-1) || previous.average_group!==body.averageGroup || previous.force_rank!==(body.forceRank??null))throw new ConflictException("Debug creation payload changed");
         return previous.snapshot;
       }
       const busy=await tx.query(`SELECT 1 FROM ranked_queue_entries WHERE player_id=$1 AND status='QUEUED'
@@ -96,10 +95,12 @@ export class SurvivalDebugService implements OnApplicationBootstrap,OnApplicatio
       if(busy.rows.length)throw new ConflictException("Finish or recover the current game first");
       const profile=(await tx.query<{lp:number}>("SELECT lp FROM sur_profiles WHERE player_id=$1 FOR UPDATE",[session.playerId])).rows[0]!;
       const seed=Math.floor(this.random.next()*0x100000000),captured=this.config.getSnapshot();
+      const botCount=body.botCount??captured.config.matchPlayerCount-1;
+      if(botCount>captured.config.matchPlayerCount-1 || (body.forceRank!==undefined && body.forceRank>botCount+1))throw new BadRequestException("Bot count or Force rank exceeds the current format");
       const lp=survivalDebugLp(seed,Number(profile.lp),body.averageGroup,captured.config,botCount);
       const players:SurvivalAdmissionPlayer[]=[{participantId:"human",kind:"HUMAN",playerId:session.playerId},
         ...lp.bots.map((value,i)=>({participantId:`bot-${String(i+1).padStart(2,"0")}`,kind:"BOT" as const,name:`Bot ${i+1}`,lp:value}))];
-      const created=await this.engine.createWithin(tx,creationKey,players,captured,lp.humanSnapshotLp,true,false,botCount!==15);
+      const created=await this.engine.createWithin(tx,creationKey,players,captured,lp.humanSnapshotLp,true,false,botCount!==captured.config.matchPlayerCount-1);
       await tx.query(`INSERT INTO sur_debug_matches(match_id,human_player_id,admission_session_id,seed,average_group,
         virtual_human_lp,human_actual_lp,force_rank,last_seen_at,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$9)`,
         [created.id,session.playerId,session.sessionId,seed,body.averageGroup,lp.virtualHuman,profile.lp,body.forceRank??null,now.toISOString()]);

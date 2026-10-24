@@ -760,6 +760,7 @@ void RankedRuntime::fetchConfig() {
             m_view.soloEnabled = root["queueEnabled"].asBool().unwrapOr(false);
             m_view.survivalEnabled = root["modes"]["survival"]["enabled"].asBool().unwrapOr(false);
             m_view.survivalConfigReady = root["modes"]["survival"]["ready"].asBool().unwrapOr(false);
+        m_view.survivalPlayerCount=root["modes"]["survival"]["matchPlayerCount"].asInt().unwrapOr(16)==64?64:16;
 
             EnvironmentPolicy policy;
             if (root.contains("modRestrictionEnabled") && !root["modRestrictionEnabled"].isBool()) {
@@ -4247,6 +4248,7 @@ void RankedRuntime::fetchModeAvailability() {
         m_view.soloEnabled = root["queueEnabled"].asBool().unwrapOr(false);
         m_view.survivalEnabled = root["modes"]["survival"]["enabled"].asBool().unwrapOr(false);
         m_view.survivalConfigReady = root["modes"]["survival"]["ready"].asBool().unwrapOr(false);
+        m_view.survivalPlayerCount=root["modes"]["survival"]["matchPlayerCount"].asInt().unwrapOr(16)==64?64:16;
     });
 }
 
@@ -4281,6 +4283,7 @@ void RankedRuntime::fetchSurvivalProfile() {
 }
 
 void RankedRuntime::applyAdminProjection(matjson::Value const& result,std::string const& scope) {
+    if(scope=="SURVIVAL" && result["matchPlayerCount"].isNumber()){m_view.survivalPlayerCount=result["matchPlayerCount"].asInt().unwrapOr(16)==64?64:16;++m_view.revision;return;}
     if(scope=="COMMON" && result["accountsDeleted"].asBool().unwrapOr(false)){
         leaveRanked();return;
     }

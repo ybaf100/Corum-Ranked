@@ -167,6 +167,82 @@ public:
     }
 };
 
+class DebugSurvivalModePopup final : public Popup {
+    std::string m_password,m_session;
+    async::TaskHolder<web::WebResponse> m_request;
+    CCMenuItemSpriteExtra *m_sixteen=nullptr,*m_sixtyFour=nullptr,*m_reload=nullptr;
+    CCLabelBMFont *m_status=nullptr,*m_schedule=nullptr;
+    int m_count=0;bool m_busy=false,m_closed=false,m_exited=false;
+    bool authorized() const {
+        auto* account=GJAccountManager::get();auto const& runtime=RankedRuntime::get();
+        return account && account->m_accountID>0 && std::string(account->m_username)=="hwanhee1" &&
+            runtime.view().stage==RuntimeStage::Ready && !m_session.empty() && runtime.spectatorLiveSessionToken()==m_session;
+    }
+    CCNode* face(int count) {
+        auto const selected=count==m_count;
+        auto* node=ui::surface({140,34},{},selected?ui::Gold:ui::Blue,ui::SurfaceRaised,255,true);
+        auto* caption=ui::menuLabel(fmt::format(fmt::runtime(i18n::text("survival-format-players","{} PLAYERS")),count),.32f,{70,17},selected?ui::Gold:ui::Text,ui::FontWeight::ExtraBold);
+        ui::fitMenuLabelWidth(caption,126,.32f,.22f);node->addChild(caption,5);return node;
+    }
+    void controls() {
+        m_sixteen->setEnabled(!m_busy && m_count>0);m_sixtyFour->setEnabled(!m_busy && m_count>0);m_reload->setEnabled(!m_busy);
+        m_sixteen->setNormalImage(face(16));m_sixteen->updateSprite();m_sixtyFour->setNormalImage(face(64));m_sixtyFour->updateSprite();
+    }
+    void status(std::string const& message) {m_status->setString(message.c_str());ui::fitFullMenuLabel(m_status,324,28,.24f);}
+    bool init(std::string password) {
+        m_session=RankedRuntime::get().spectatorLiveSessionToken();
+        if(password.empty() || !authorized() || !Popup::init(360,220))return false;
+        m_password=std::move(password);m_bgSprite->setVisible(false);setID("survival-operation-format"_spr);
+        auto* panel=ui::surface({360,220},{180,110},ui::Cyan,ui::Surface,255,true);m_mainLayer->addChild(panel);
+        auto* title=ui::menuLabel(i18n::text("admin-survival-format","Survival operating format"),.40f,{180,194},ui::Cyan,ui::FontWeight::Black);
+        ui::fitMenuLabelWidth(title,324,.40f,.28f);panel->addChild(title);
+        auto* hint=ui::menuLabel(i18n::text("survival-format-new-matches","Applies to new matches. Current games keep their rules."),.24f,{180,166},ui::TextMuted);
+        ui::fitFullMenuLabel(hint,324,28,.24f);panel->addChild(hint);
+        auto* menu=CCMenu::create();menu->setPosition(CCPointZero);panel->addChild(menu,20);
+        m_sixteen=CCMenuItemSpriteExtra::create(face(16),this,menu_selector(DebugSurvivalModePopup::onAction));m_sixteen->setTag(16);m_sixteen->setPosition({98,126});menu->addChild(m_sixteen);
+        m_sixtyFour=CCMenuItemSpriteExtra::create(face(64),this,menu_selector(DebugSurvivalModePopup::onAction));m_sixtyFour->setTag(64);m_sixtyFour->setPosition({262,126});menu->addChild(m_sixtyFour);
+        m_schedule=ui::menuLabel("",.26f,{180,91},ui::Text);panel->addChild(m_schedule);
+        auto* reloadFace=ui::surface({140,28},{},ui::Blue,ui::SurfaceRaised,255,true);
+        reloadFace->addChild(ui::menuLabel(i18n::text("admin-audio-reload","Reload"),.28f,{70,14},ui::Text),5);
+        m_reload=CCMenuItemSpriteExtra::create(reloadFace,this,menu_selector(DebugSurvivalModePopup::onAction));m_reload->setTag(0);m_reload->setPosition({180,57});menu->addChild(m_reload);
+        m_status=ui::menuLabel("",.24f,{180,22},ui::TextMuted);panel->addChild(m_status);
+        controls();schedule(schedule_selector(DebugSurvivalModePopup::refresh),.1f);request(0);return true;
+    }
+    void onAction(CCObject* object) {
+        if(m_closed || m_busy || !authorized())return;
+        auto* item=typeinfo_cast<CCMenuItemSpriteExtra*>(object);if(!item)return;
+        auto const count=item->getTag();if(count!=0 && count!=16 && count!=64)return;
+        if(count && count==m_count)return;
+        request(count);
+    }
+    void request(int count) {
+        if(m_busy || m_closed || !authorized())return;
+        matjson::Value body;body["scope"]="SURVIVAL";body["password"]=m_password;
+        body["action"]=count?"SET_SURVIVAL_MODE":"GET_SURVIVAL_MODE";if(count)body["matchPlayerCount"]=count;
+        web::WebRequest http;http.header("Authorization","Bearer "+m_session);http.bodyJSON(body);http.followRedirects(false);http.timeout(std::chrono::seconds(20));
+        m_busy=true;controls();status(i18n::text("admin-working","Applying changes..."));
+        m_request.spawn(http.post("https://api.52-74-37-130.sslip.io/api/ranked/debug/admin"),[weak=WeakRef(this)](web::WebResponse response){
+            auto keep=weak.lock();if(!keep || keep->m_closed || !keep->isRunning() || !keep->authorized())return;
+            keep->m_busy=false;auto const root=response.json().unwrapOr(matjson::Value());
+            auto const count=root["matchPlayerCount"].asInt().unwrapOr(0);
+            if(response.code()<200 || response.code()>=300 || (count!=16 && count!=64)){
+                keep->controls();keep->status(root["message"].asString().unwrapOr(i18n::text("survival-format-failed","Could not load/save the operating format.")));return;
+            }
+            keep->m_count=static_cast<int>(count);keep->controls();
+            keep->m_schedule->setString(count==64?"64 > 40 > 26 > 12 > 5 > 1":"16 > 10 > 6 > 3 > 1");
+            ui::fitMenuLabelWidth(keep->m_schedule,324,.26f,.20f);
+            keep->status(i18n::text("survival-format-new-matches","Applies to new matches. Current games keep their rules."));
+            RankedRuntime::get().applyAdminProjection(root,"SURVIVAL");
+        });
+    }
+    void refresh(float) {if(!m_closed && !authorized())dismiss();}
+public:
+    static DebugSurvivalModePopup* create(std::string password){auto* popup=new DebugSurvivalModePopup;if(popup->init(std::move(password))){popup->autorelease();return popup;}delete popup;return nullptr;}
+    void dismiss(){if(m_closed)return;m_closed=true;auto const keep=Ref<DebugSurvivalModePopup>(this);queueInMainThread([keep]{if(keep->isRunning())keep->Popup::onClose(nullptr);});}
+    void onClose(CCObject*) override {dismiss();}
+    void onExit() override {m_closed=true;m_request.cancel();m_password.clear();unschedule(schedule_selector(DebugSurvivalModePopup::refresh));if(!m_exited){m_exited=true;CCTouchDispatcher::get()->unregisterForcePrio(this);}Popup::onExit();}
+};
+
 class DebugAdminPopup final : public Popup {
     TextInput *m_username=nullptr,*m_password=nullptr,*m_lp=nullptr,*m_mmr=nullptr;
     CCLabelBMFont* m_status=nullptr;
@@ -205,15 +281,15 @@ class DebugAdminPopup final : public Popup {
         m_lp=field(panel,"LP",{99,197}); m_lp->setFilter("0123456789");
         m_mmr=field(panel,"MMR",{285,197}); m_mmr->setFilter("0123456789-");
         m_actions=CCMenu::create(); m_actions->setPosition(CCPointZero); panel->addChild(m_actions,30);
-        constexpr char const* keys[]={"admin-unlock","admin-lp","admin-mmr","admin-both","admin-delete-bots","admin-history","admin-reset","admin-audio"};
-        constexpr char const* labels[]={"Unlock all achievements","Set LP + tier","Set MMR","Set LP + MMR + tier","Delete all bots","Reset player data","Reset ranked database","Song volumes (all players)"};
-        for (int i=0;i<8;++i) {
+        constexpr char const* keys[]={"admin-unlock","admin-lp","admin-mmr","admin-both","admin-delete-bots","admin-history","admin-reset","admin-audio","admin-survival-format"};
+        constexpr char const* labels[]={"Unlock all achievements","Set LP + tier","Set MMR","Set LP + MMR + tier","Delete all bots","Reset player data","Reset ranked database","Song volumes (all players)","Survival operating format"};
+        for (int i=0;i<9;++i) {
             auto const danger=i==4 || i==5 || i==6;
             auto* face=ui::surface({170,30},{},danger?ui::Red:ui::Blue,ui::SurfaceRaised,255,true);
             auto* caption=ui::menuLabel(i18n::text(keys[i],labels[i]),.32f,{85,15},danger?ui::Red:ui::Text,ui::FontWeight::ExtraBold);
             ui::fitMenuLabelWidth(caption,154,.32f,.24f); face->addChild(caption,5);
             auto* item=CCMenuItemSpriteExtra::create(face,this,menu_selector(DebugAdminPopup::onAction));
-            item->setTag(i); item->setPosition(CCPoint{99+(i%2)*186.0f,155-(i/2)*36.0f}); m_actions->addChild(item);
+            item->setTag(i); item->setPosition(i==8?CCPoint{99,155}:CCPoint{99+(i%2)*186.0f,155-(i/2)*36.0f}); m_actions->addChild(item);
         }
         m_status=ui::menuLabel("",.24f,{192,20},ui::TextMuted); panel->addChild(m_status,10);
         schedule(schedule_selector(DebugAdminPopup::refresh),.1f); refreshScope();return true;
@@ -221,7 +297,7 @@ class DebugAdminPopup final : public Popup {
     std::string scope() const {return m_scope==0?"SOLO_RANKED":m_scope==1?"SURVIVAL":"COMMON";}
     bool scopeAction(int action) const {
         if(m_scope==2)return action==0||action==5||action==6||action==7;
-        if(m_scope==1)return action==1||action==5||action==6;
+        if(m_scope==1)return action==1||action==5||action==6||action==8;
         return action>=1&&action<=6;
     }
     CCNode* scopeFace(int index) {
@@ -235,6 +311,7 @@ class DebugAdminPopup final : public Popup {
         for(auto* object:CCArrayExt<CCObject*>(m_scopes->getChildren()))if(auto* item=typeinfo_cast<CCMenuItemSpriteExtra*>(object)) {
             item->setNormalImage(scopeFace(item->getTag()-20));item->updateSprite();item->setEnabled(!m_busy);
         }
+        for(auto* object:CCArrayExt<CCObject*>(m_actions->getChildren()))if(auto* item=typeinfo_cast<CCMenuItemSpriteExtra*>(object))item->setVisible(item->getTag()==8?m_scope==1:item->getTag()!=0 || m_scope!=1);
         m_lp->setVisible(m_scope!=2);m_mmr->setVisible(m_scope==0);
         enabled(!m_busy);
     }
@@ -255,14 +332,15 @@ class DebugAdminPopup final : public Popup {
         auto const choice=item->getTag();
         if(choice>=20&&choice<=22){m_scope=choice-20;refreshScope();status("");return;}
         if(!scopeAction(choice))return;
-        if (choice==7) {
+        if (choice==7 || choice==8) {
             auto const password=std::string(m_password->getString());
             if (password.empty()) { status(i18n::text("admin-password-needed","Enter the debug password.")); return; }
             m_closed=true; auto const keep=Ref<DebugAdminPopup>(this);
-            queueInMainThread([keep,password] {
+            queueInMainThread([keep,password,choice] {
                 if (!keep->isRunning()) return;
                 keep->Popup::onClose(nullptr);
-                if (auto* popup=DebugAudioVolumePopup::create(password)) popup->show();
+                if(choice==8){if(auto* popup=DebugSurvivalModePopup::create(password))popup->show();}
+                else if (auto* popup=DebugAudioVolumePopup::create(password)) popup->show();
             });
             return;
         }

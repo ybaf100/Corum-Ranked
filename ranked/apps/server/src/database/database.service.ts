@@ -50,6 +50,7 @@ const REQUIRED_MIGRATIONS = [
   "0027_achievements_v2.sql",
   "0028_debug_achievement_parity.sql",
   "0029_achievement_survival_overhaul.sql",
+  "0030_survival_64_player_format.sql",
 ] as const;
 
 export interface RankedSchemaStatus {
@@ -106,6 +107,7 @@ type SchemaProbeRow = QueryResultRow & {
   placement_skip_event: boolean;
   placement_skipped_at: boolean;
   deathmatch_native_death:boolean;
+  survival_player_format:boolean;
   achievement_overhaul_epoch:boolean;
   achievement_solo_rounds:boolean;
   achievement_survival_rounds:boolean;
@@ -218,6 +220,7 @@ export class DatabaseService implements DatabasePort, OnModuleInit, OnApplicatio
       const result = await this.pool.query<SchemaProbeRow>(`
         SELECT
           EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='ranked_deathmatch_attempts' AND column_name='native_death') AS deathmatch_native_death,
+          EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='sur_mode_state' AND column_name='match_player_count') AS survival_player_format,
           EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='ranked_achievement_versions' AND column_name='overhaul_activated_at') AS achievement_overhaul_epoch,
           EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='ranked_achievement_metrics' AND column_name='ranked_rounds_played') AS achievement_solo_rounds,
           EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='ranked_achievement_metrics' AND column_name='survival_rounds_played') AS achievement_survival_rounds,
@@ -375,6 +378,7 @@ export class DatabaseService implements DatabasePort, OnModuleInit, OnApplicatio
         ["placement_skip_event", "ranked_placement_maps.skip_client_event_id"],
         ["placement_skipped_at", "ranked_placement_maps.skipped_at"],
         ["deathmatch_native_death", "ranked_deathmatch_attempts.native_death"],
+        ["survival_player_format", "sur_mode_state.match_player_count"],
         ["achievement_overhaul_epoch", "ranked_achievement_versions.overhaul_activated_at"],
         ["achievement_solo_rounds", "ranked_achievement_metrics.ranked_rounds_played"],
         ["achievement_survival_rounds", "ranked_achievement_metrics.survival_rounds_played"],
