@@ -205,3 +205,34 @@ activates the already tested beta.101 source after both public channels verified
 The existing Singapore host guard, pinned SSH known_hosts, StrictHostKeyChecking,
 deployment concurrency and rollback path remain intact. Actual activation and
 public API verification are appended after the workflow completes.
+
+### Completed Singapore activation and public verification
+
+- Activation main commit: `e70527ada053e4dcdedc6bea8984b2f5d08fa71e`, a normal
+  expected-head push after both packages verified. Its source differs from the
+  tested package source only in this rollout documentation.
+- [Lightsail run 40180535984](https://github.com/ybaf100/Corum-Ranked/actions/runs/40180535984)
+  **succeeded**, including pinned SSH setup/access, Docker image build, upload,
+  rollback-capable activation and the deployed-source report. The actual server
+  deployment is complete, separately from the successful package publications.
+- At `2026-10-25T09:26:57Z`, Singapore `/health` and `/ready` returned HTTP 200;
+  databaseConnected/databaseReady/schemaReady/publicDataReady were true and
+  missingSchema was empty. Solo remains intentionally OFF (`queueEnabled=false`,
+  `rankedReady=false`); Survival remains ON with 64 players and the same generation.
+- `/api/ranked/config` requires **v0.5.0-beta.101**. Both channel versions,
+  SHA-256, exact bytes and URLs match the independently verified R2 packages
+  above. Unauthenticated history detail still returns HTTP 401.
+- The read-only post-deploy comparison at `2026-10-25T09:26:58.989Z` matched every
+  baseline field other than the observation timestamp: account/match/Attempt
+  totals, all complete profile digests, 144 unlocks / 144 AP ledger rows,
+  AP totals 5120, achievement epoch, migration set/native_death and operation
+  settings. Invalid LP ledger rows remained zero. No reset or production-data
+  repair was performed.
+
+Release/Debug R2 publication, normal main reflection and Singapore production
+activation are complete in this task. Physical iPad/iPhone/Android/Windows UI,
+touch, real playback/FPS and full Geode gameplay remain unperformed device
+checks; CI/native-boundary/package/API checks do not substitute for them. The
+earlier observed beta.100 compute suspension is not claimed as a beta.101
+production suspension measurement. No Neon compute setting or manual endpoint
+suspension was used for this rollout.
