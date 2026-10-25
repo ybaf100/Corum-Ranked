@@ -27,7 +27,8 @@ inline void publicRankLine(CCNode* parent,std::string const& caption,matjson::Va
     auto value=i18n::text("info-unavailable","Unavailable");
     if(profile["promotion"].isObject()){
         value=i18n::text("promotion-match","PROMOTION MATCH");
-        for(auto const& mark:profile["promotion"]["results"].asArray().unwrapOr(std::vector<matjson::Value>{}))value+=mark.asString().unwrapOr("")=="WIN"?" O":" X";
+        auto const marks=profile["promotion"]["results"].asArray().unwrapOr(std::vector<matjson::Value>{});
+        for(auto const& mark:marks)value+=mark.asString().unwrapOr("")=="WIN"?" O":" X";
     }else if(auto lp=profile["lp"].asInt();lp.isOk())value=std::to_string(lp.unwrap())+" LP";
     auto* score=menuLabel(value,.30f,{282,y},profile["promotion"].isObject()?Green:Text,FontWeight::ExtraBold);score->setAnchorPoint({1,.5f});fitSingleLineMenuLabel(score,112,20,.30f);parent->addChild(score,5);
 }

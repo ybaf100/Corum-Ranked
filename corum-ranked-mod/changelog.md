@@ -1,4 +1,4 @@
-# v0.5.0-beta.99 (pending publication)
+# v0.5.0-beta.100 (pending publication)
 - Stop lobby BGM when opening recorded levels, restore it on return, and distinguish confirmed round outcomes with rank colors and brighter silver.
 - Add direct history filter selection, show all 64 waiting entrants, and use reduced cards with BEST/NOW progress for 17–30 survivors.
 - Unify current dual-mode ratings, animated titles and cached forum ranks across history, leaderboard and player information.

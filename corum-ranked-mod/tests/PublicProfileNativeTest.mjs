@@ -46,6 +46,7 @@ int main(){using namespace corum::ranked::ui;
  profile["lp"]=nullptr;publicRankLine(&parent,"SOLO RANKED",profile,170);assert(static_cast<CCLabelBMFont*>(parent.children.back())->text=="Unavailable");
  profile["promotion"]=matjson::parse(R"({"results":["WIN","LOSS","WIN"]})").unwrap();publicRankLine(&parent,"SOLO RANKED",profile,170);
  assert(static_cast<CCLabelBMFont*>(parent.children.back())->text=="PROMOTION MATCH O X O");
+ profile["promotion"]=matjson::Value::object();publicRankLine(&parent,"SOLO RANKED",profile,170);assert(static_cast<CCLabelBMFont*>(parent.children.back())->text=="PROMOTION MATCH");
  auto before=ambientBadges.size();publicRankLine(&parent,"SURVIVAL",matjson::Value(),140);assert(ambientBadges.size()==before&&static_cast<CCLabelBMFont*>(parent.children.back())->text=="Unavailable");
 }
 `);

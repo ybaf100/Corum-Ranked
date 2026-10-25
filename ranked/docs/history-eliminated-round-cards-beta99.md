@@ -1,4 +1,4 @@
-# beta.99 history, Survival records, public profiles and Lightsail-only patch
+# beta.99 changes / beta.100 final publication: history, Survival records and Lightsail
 
 Authoritative main base: `b65e5b5dcca3217bf6f6edf3e0e1229023f2cf28`.
 Work branch: `fix/history-eliminated-round-beta99-20261025`.
@@ -151,3 +151,21 @@ suspension. Local idle SQL/reconnect checks are separate from compute suspension
   write, reset, migration, Neon setting change or manual suspension was made.
 - R2 preflight at 02:57 UTC: both beta.99 descriptors HTTP 404; existing beta.98
   packages were not overwritten. Publication/activation outcomes follow below.
+
+### CI follow-up and immutable version separation
+
+Source commit `f127e20c7966c0c753382abdc42d79b3a324186e` was pushed normally
+to main. The previous runner scheduling blocker is gone: both metadata jobs and
+the four Release platform builds actually ran successfully. Debug native
+validation found a GCC dangling-reference diagnostic in the promotion-mark
+range expression. The code now copies the bounded mark list before iterating,
+so a missing/malformed result array cannot leave a reference to a fallback
+temporary. The actual helper test includes missing promotion results and passes
+locally together with the Debug channel callback test (2/2).
+
+The already running beta.99 Release build is separate from the corrected final
+source. **Final publication/activation is beta.100**, using new immutable Release
+and Debug object paths. The previous admitted version remains **beta.98**, since
+beta.99 has not completed both channels. No existing beta.99 object is overwritten
+and no required-version activation is performed until both beta.100 packages
+are independently verified. All six version metadata files are synchronized.
