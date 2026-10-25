@@ -1,10 +1,10 @@
+import {publicAchievementTitle} from "./public-title.js";
 import { BadRequestException, ConflictException, Inject, Injectable } from "@nestjs/common";
 import {
   ACHIEVEMENT_DEFINITIONS,
   ONE_SHOT_ACHIEVEMENTS,
   PROGRESSIVE_ACHIEVEMENTS,
   achievementDefinition,
-  achievementScopeLabel,
   survivalAchievementFacts, summarizeSurvivalAchievements,
   type SurvivalAchievementFacts, type SurvivalAchievementMetrics, type SurvivalMatch, type AchievementScope, type ProgressiveAchievementId,
   evaluateAchievementMatch,
@@ -297,36 +297,7 @@ export class AchievementService {
     return [...notices,...await this.refreshV2Unlocks(transaction,playerId,eventKey,now)];
   }
 
-  public titleProjection(achievementId: string | null, level: number | null) {
-    if (!achievementId || level === null) return null;
-    const definition = achievementDefinition(achievementId);
-    if (!definition) return null;
-    if (definition.type === "ONE_SHOT") {
-      if (level !== 0) return null;
-      return {
-        achievementId: definition.id,
-        scope: definition.scope,
-        level: null,
-        displayLabel: null,
-        nameKo: `[${achievementScopeLabel(definition.scope, "ko")}] ${definition.nameKo}`,
-        nameEn: `[${achievementScopeLabel(definition.scope, "en")}] ${definition.nameEn}`,
-        displayColor: null,
-        rarity: definition.rarity,
-      };
-    }
-    const stage = definition.levels[level - 1];
-    if (!stage) return null;
-    return {
-      achievementId: definition.id,
-      scope: definition.scope,
-      level: stage.level,
-      displayLabel: stage.displayLabel,
-      nameKo: `[${achievementScopeLabel(definition.scope, "ko")}] ${definition.nameKo}`,
-      nameEn: `[${achievementScopeLabel(definition.scope, "en")}] ${definition.nameEn}`,
-      displayColor: stage.displayColor,
-      rarity: null,
-    };
-  }
+  public titleProjection(achievementId:string|null,level:number|null){return publicAchievementTitle(achievementId,level);}
 
   public async noticesForSource(
     executor: SqlExecutor,

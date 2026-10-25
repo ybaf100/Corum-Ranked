@@ -1,3 +1,4 @@
+#include "PublicPlayerProfile.hpp"
 #include "RankedLeaderboardPopup.hpp"
 #include "RankedTapScroll.hpp"
 
@@ -284,7 +285,9 @@ void RankedLeaderboardPopup::showRows(matjson::Value const& data) {
         auto* rank = standingNumber(entry.rank,0.38f); rank->setPosition({columns.rank,24});
         if (rank->getContentSize().width > 40) rank->setScale(40 / rank->getContentSize().width);
         row->addChild(rank,5);
-        leftCaption(row,entry.player,{columns.name,24},columns.nameWidth,0.36f,mine ? Cyan : Text);
+        auto const equipped=player["equippedTitle"];
+        leftCaption(row,entry.player,{columns.name,equipped.isObject()?34.f:24.f},columns.nameWidth,0.36f,mine ? Cyan : Text);
+        if(equipped.isObject())publicPlayerTitle(row,equipped,{columns.name+columns.nameWidth/2,13},columns.nameWidth,.20f);
         if (entry.promotion || entry.warning) leftCaption(row,
             entry.promotion ? i18n::text("promotion-match","PROMOTION MATCH") : i18n::text("demotion-warning","DEMOTION WARNING"),
             {columns.status,24},columns.statusWidth,0.26f,entry.promotion ? Green : Red);

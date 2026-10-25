@@ -1,3 +1,4 @@
+import {DebugUpdateChannelController} from "./debug-update-channel.controller.js";
 import { Module } from "@nestjs/common";
 import { RankedConfigController } from "./ranked-config.controller.js";
 import { RankedConfigService } from "./ranked-config.service.js";
@@ -13,7 +14,7 @@ import {
 } from "./csmp-tier.source.js";
 
 @Module({
-  controllers: [RankedConfigController],
+  controllers: [RankedConfigController, DebugUpdateChannelController],
   providers: [
     SurvivalConfigService,
     AppsScriptSurvivalConfigSource,

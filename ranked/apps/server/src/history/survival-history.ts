@@ -20,7 +20,7 @@ export function survivalHistoryProjection(value:unknown,personalResult:unknown,m
   }).sort((a,b)=>(a.rank??999)-(b.rank??999)||a.participantId.localeCompare(b.participantId)):[];
   const cutoffScore=confirmed&&r.cutoffScore!==null?r.cutoffScore/(r.phase==='TIEBREAK'?1000:1):null;
   const own=r.players.find(p=>p.participantId===myParticipantId);
-  return {ownQualified:confirmed&&own?own.qualified&&!own.forfeited:null,key:r.key,ordinal:r.ordinal,phase:r.phase,completed:confirmed,status:confirmed?'COMPLETED':inProgress?'IN_PROGRESS':'UNFINISHED',map,
+  return {ownRank:confirmed&&own?own.rank:null,ownQualified:confirmed&&own?own.qualified&&!own.forfeited:null,key:r.key,ordinal:r.ordinal,phase:r.phase,completed:confirmed,status:confirmed?'COMPLETED':inProgress?'IN_PROGRESS':'UNFINISHED',map,
    cutoffScore,target:r.target,qualifiedCount:confirmed?r.players.filter(p=>p.qualified&&!p.forfeited).length:null,
    finishedAt:confirmed?new Date(r.finishedAt!).toISOString():null,standings};
  });

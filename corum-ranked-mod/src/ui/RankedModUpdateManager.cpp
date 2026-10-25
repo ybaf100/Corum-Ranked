@@ -23,12 +23,12 @@ void RankedModUpdateManager::configure(ModUpdateMetadata metadata, bool descript
     m_view = {};
     m_view.installedVersion = Mod::get()->getVersion().toVString();
     m_view.targetVersion = m_metadata.version;
-    if (descriptorPresent && (!m_metadata.valid() || m_metadata.channel != rankedBuildChannel())) {
+    if (descriptorPresent && (!m_metadata.valid() || m_metadata.channel != channel())) {
         fail("Invalid update metadata for this build channel"); return;
     }
     auto target = VersionInfo::parse(m_metadata.version);
     if (target.isErr()) { fail("Invalid server mod version"); return; }
-    if (target.unwrap() == Mod::get()->getVersion()) return;
+    if (target.unwrap() == Mod::get()->getVersion() && m_metadata.channel==rankedBuildChannel()) return;
     if (target.unwrap() < Mod::get()->getVersion()) {
         fail("This build is newer than the server requirement. Automatic downgrade is disabled."); return;
     }
@@ -38,7 +38,7 @@ void RankedModUpdateManager::configure(ModUpdateMetadata metadata, bool descript
 }
 void RankedModUpdateManager::download() {
     if (!m_downloadAllowed || (m_view.state != ModUpdateState::Required && m_view.state != ModUpdateState::Failed) ||
-        !m_metadata.valid() || m_metadata.channel != rankedBuildChannel()) return;
+        !m_metadata.valid() || m_metadata.channel != channel()) return;
     auto const generation = ++m_generation;
     auto const directory = Mod::get()->getSaveDir() / "mod-updates";
     std::error_code ec; std::filesystem::create_directories(directory, ec);

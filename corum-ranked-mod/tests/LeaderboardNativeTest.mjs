@@ -131,6 +131,7 @@ enum class FontWeight{SemiBold,ExtraBold,Black};enum class RankBadgeDisplay{Matc
 constexpr ccColor3B Text{242,247,255},TextMuted{164,181,205},Gold{255,207,74},Blue{77,135,255},Red{255,91,111},Green{90,238,151},Cyan{64,224,255},Surface{},SurfaceSoft{},SurfaceRaised{};
 CCLabelBMFont* menuLabel(std::string const& t,float s,CCPoint p,ccColor3B c=Text,FontWeight=FontWeight::ExtraBold){auto* n=new CCLabelBMFont;n->setString(t.c_str());n->setScale(s);n->setPosition(p);n->setColor(c);return n;}
 void fitMenuLabelWidth(CCLabelBMFont* n,float w,float s,float){n->setScale(std::min(s,w/n->size.width));}
+CCLabelBMFont*publicPlayerTitle(CCNode*,matjson::Value const&,CCPoint,float,float){return nullptr;}
 CCNode* surface(CCSize s,CCPoint p,ccColor3B accent,ccColor3B fill,int,bool){auto* n=CCNode::create();n->size=s;n->position=p;n->color=fill;auto* frame=CCNode::create();frame->color=accent;frame->id="frame";n->addChild(frame);return n;}
 ccColor3B tierColor(std::string const& t){return t=="GOLD"?Gold:Blue;}
 CCNode* standingNumber(std::optional<int> rank,float s){return menuLabel(rank?fmt::format("#{}",*rank):"#—",s,{});}

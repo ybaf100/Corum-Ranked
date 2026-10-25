@@ -11,7 +11,7 @@ describe('Leaderboard custom player information',()=>{
  }
  it('reads only cached information for the exact registered public account',async()=>{
   const r=rig();expect(await r.controller.read('123')).toMatchObject({gdAccountId:'123',gdUsername:'Player',records:[{rank:4}]});
-  expect(r.query).toHaveBeenCalledExactlyOnceWith('SELECT gd_username FROM ranked_players WHERE gd_account_id=$1',['123']);expect(r.read).toHaveBeenCalledExactlyOnceWith('123');
+  expect(r.query).toHaveBeenNthCalledWith(1,'SELECT gd_username FROM ranked_players WHERE gd_account_id=$1',['123']);expect(r.query).toHaveBeenCalledTimes(2);expect(r.read).toHaveBeenCalledExactlyOnceWith('123');
  });
  it('rejects malformed IDs and bots without a GD account before any query',async()=>{
   const r=rig();for(const id of ['0','-1','01','bot-01','123/other','2147483648','1.5'])await expect(r.controller.read(id)).rejects.toMatchObject({status:400});

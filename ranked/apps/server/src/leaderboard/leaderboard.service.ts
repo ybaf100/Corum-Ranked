@@ -1,3 +1,4 @@
+import {publicAchievementTitle} from "../achievement/public-title.js";
 import { Inject, Injectable } from "@nestjs/common";
 import { baseRankedTier, goldTierForPosition, goldTierSlots, rankedTierLabel, type DisplayTier } from "@corum-ranked/rules";
 import { RankedConfigService } from "../config/ranked-config.service.js";
@@ -7,6 +8,7 @@ import { compareLadderPosition, type LadderPosition } from "./ranking-policy.js"
 type RatingMark = "WIN" | "LOSS";
 
 interface LeaderboardRow {
+  public_title_id?:string|null;public_title_level?:number|null;
   gd_account_id: string;
   is_bot: boolean;
   gd_username: string;
@@ -44,6 +46,7 @@ export type PublicPlacementProgress =
     };
 
 export interface PublicLeaderboardPlayer {
+  readonly equippedTitle?:ReturnType<typeof publicAchievementTitle>;
   readonly gdAccountId: string;
   readonly isBot: boolean;
   readonly rank: number | null;
@@ -99,6 +102,8 @@ export class LeaderboardService {
          p.is_bot,
          p.gd_username,
          rp.displayed_tier,
+         CASE WHEN EXISTS(SELECT 1 FROM ranked_achievement_unlocks u WHERE u.player_id=p.id AND u.achievement_id=rp.equipped_achievement_id AND u.achievement_level=rp.equipped_achievement_level) THEN rp.equipped_achievement_id END AS public_title_id,
+         rp.equipped_achievement_level AS public_title_level,
          rp.hidden_mmr,
          rp.visible_ranked_score,
          rp.placement_games,
@@ -159,6 +164,7 @@ export class LeaderboardService {
           rank: null,
           topPercent: null,
           player: row.gd_username,
+          equippedTitle:publicAchievementTitle(row.public_title_id??null,row.public_title_level??null),
           tier: placementInProgress ? "UNRANKED" : row.displayed_tier,
           visibleRankedScore: placementInProgress ? null : Number(row.visible_ranked_score ?? 0),
           placementGames: Number(row.placement_games),

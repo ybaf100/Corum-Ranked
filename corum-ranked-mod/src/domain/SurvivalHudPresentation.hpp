@@ -24,10 +24,11 @@ struct SurvivalStanding {
     std::string attemptId="";
 };
 struct SurvivalHudColor { unsigned char r,g,b; bool operator==(SurvivalHudColor const&) const = default; };
+inline constexpr SurvivalHudColor SurvivalSilver{240,247,255};
 inline SurvivalHudColor survivalRankColor(int rank, bool passing) {
     if (!passing) return {255,82,105};
     if (rank == 1) return {255,211,78};
-    if (rank == 2) return {210,219,233};
+    if (rank == 2) return SurvivalSilver;
     if (rank == 3) return {218,145,83};
     if (rank == 4 || rank == 5) return {79,230,250};
     return rank>0?SurvivalHudColor{90,239,133}:SurvivalHudColor{160,172,190};

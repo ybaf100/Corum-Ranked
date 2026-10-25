@@ -1,3 +1,5 @@
+import {readSurvivalRecords} from "./survival-records.js";
+import {publicAchievementTitle} from "../achievement/public-title.js";
 import type { HistoryOptions } from "../history/history-options.js";
 import { survivalHistoryProjection } from "../history/survival-history.js";
 import { BadRequestException, ConflictException, Inject, Injectable, NotImplementedException, ServiceUnavailableException } from "@nestjs/common";
@@ -9,7 +11,7 @@ import { SurvivalConfigService } from "../config/survival-config.service.js";
 import { DATABASE, type DatabasePort, type SqlExecutor } from "../database/database.port.js";
 
 interface ProfileRow { player_id: string; lp: number; displayed_tier: string; demotion_warning: boolean; lp_reached_at: Date | string; }
-interface LadderRow extends ProfileRow { gd_account_id: string; gd_username: string; rank: number; total: number; }
+interface LadderRow extends ProfileRow { public_title_id?:string|null;public_title_level?:number|null; gd_account_id: string; gd_username: string; rank: number; total: number; }
 
 @Injectable()
 export class SurvivalService {
@@ -29,18 +31,9 @@ export class SurvivalService {
     });
     const row = (await this.database.query<ProfileRow>("SELECT * FROM sur_profiles WHERE player_id = $1", [playerId])).rows[0]!;
     const standing = await this.standing(playerId);
-    const record=(await this.database.query<{count:number;best:number|null;wins:number;losses:number}>(`SELECT COUNT(*)::int AS count,MIN(p.final_rank)::int AS best,
-      COUNT(*) FILTER (WHERE COALESCE(l.actual_delta,(d.result->>'actualDelta')::int,0)>0)::int AS wins,
-      COUNT(*) FILTER (WHERE COALESCE(l.actual_delta,(d.result->>'actualDelta')::int,0)<=0)::int AS losses
-      FROM sur_match_players p JOIN sur_matches m ON m.id=p.match_id JOIN sur_profiles sp ON sp.player_id=p.player_id
-      LEFT JOIN sur_debug_matches d ON d.match_id=m.id
-      LEFT JOIN sur_online_players o ON o.match_id=m.id AND o.player_id=p.player_id
-      LEFT JOIN sur_lp_ledger l ON l.player_id=p.player_id AND l.event_key='survival:'||m.id::text||':result:'||p.participant_id
-      WHERE p.player_id=$1 AND ((o.player_id IS NULL AND m.state='FINAL_RESULT') OR o.settled_at IS NOT NULL OR d.settled_at IS NOT NULL)
-      AND COALESCE(o.settled_at,d.settled_at,m.finished_at)>sp.history_visible_since AND (d.match_id IS NULL OR d.settled_at IS NOT NULL)`,[playerId])).rows[0];
-    return { onlineAvailable:true, serverNow: now.toISOString(), enabled: snapshot.config.enabled,
-      profile: this.project(row, snapshot.config), standing,recordSummary:{completedMatches:Number(record?.count??0),bestRank:record?.best??null,
-        wins:Number(record?.wins??0),losses:Number(record?.losses??0)} };
+    const recordSummary=(await readSurvivalRecords(this.database,[playerId]))[playerId]!;
+    return {onlineAvailable:true,serverNow:now.toISOString(),enabled:snapshot.config.enabled,
+      profile:this.project(row,snapshot.config),standing,recordSummary};
   }
 
   private async ensureProfile(transaction: SqlExecutor, playerId: string, config: SurvivalConfig, now: Date): Promise<void> {
@@ -61,7 +54,7 @@ export class SurvivalService {
   public async standing(playerId: string) {
     const result = await this.database.query<{ rank: number; total: number }>(`WITH ladder AS (
       SELECT sp.player_id, RANK() OVER (ORDER BY sp.lp DESC)::int AS rank, COUNT(*) OVER ()::int AS total
-      FROM sur_profiles sp JOIN ranked_players p ON p.id=sp.player_id WHERE p.gd_account_id > 0 AND NOT p.is_bot
+      FROM sur_profiles sp JOIN ranked_players p ON p.id=sp.player_id LEFT JOIN ranked_profiles rp ON rp.player_id=p.id WHERE p.gd_account_id > 0 AND NOT p.is_bot
     ) SELECT rank,total FROM ladder WHERE player_id=$1`, [playerId]);
     const row = result.rows[0];
     return { rank: row ? Number(row.rank) : null, totalPlayers: row ? Number(row.total) : 0,
@@ -81,20 +74,24 @@ export class SurvivalService {
     }
     const result = await this.database.query<LadderRow>(`WITH ladder AS (
       SELECT sp.*,p.gd_account_id::text,p.gd_username,
+        CASE WHEN EXISTS(SELECT 1 FROM ranked_achievement_unlocks u WHERE u.player_id=p.id AND u.achievement_id=rp.equipped_achievement_id AND u.achievement_level=rp.equipped_achievement_level) THEN rp.equipped_achievement_id END AS public_title_id,
+        rp.equipped_achievement_level AS public_title_level,
         RANK() OVER (ORDER BY sp.lp DESC)::int AS rank, COUNT(*) OVER ()::int AS total
-      FROM sur_profiles sp JOIN ranked_players p ON p.id=sp.player_id WHERE p.gd_account_id > 0 AND NOT p.is_bot
+      FROM sur_profiles sp JOIN ranked_players p ON p.id=sp.player_id LEFT JOIN ranked_profiles rp ON rp.player_id=p.id WHERE p.gd_account_id > 0 AND NOT p.is_bot
     ) SELECT * FROM ladder ORDER BY lp DESC,lp_reached_at,player_id LIMIT $1 OFFSET $2`, [limit, offset]);
     const total = Number((await this.database.query<{ total: number }>(`SELECT COUNT(*)::int AS total
       FROM sur_profiles sp JOIN ranked_players p ON p.id=sp.player_id WHERE p.gd_account_id > 0 AND NOT p.is_bot`)).rows[0]?.total ?? 0);
+    const publicRecords=await readSurvivalRecords(this.database,result.rows.map(row=>row.player_id));
     const status = this.config.getStatus();
     const bands = status.ready ? this.config.getSnapshot().config.tierBands : [];
     return { mode: "SURVIVAL", serverNow: this.clock.now().toISOString(), serverOpen: status.enabled,
       players: result.rows.map(row => ({ gdAccountId: row.gd_account_id, isBot: false, player: row.gd_username,
+        equippedTitle:publicAchievementTitle(row.public_title_id??null,row.public_title_level??null),
         rank: Number(row.rank), topPercent: Math.ceil(Number(row.rank) / Number(row.total) * 1000) / 10,
         tier: bands.find(band => band.tier === row.displayed_tier)?.group ?? row.displayed_tier,
         tierId: row.displayed_tier, visibleRankedScore: Number(row.lp), promotion: null,
         placement: null, placementGames: 0, placementGamesRequired: 0, placementResults: [],
-        demotionWarning: row.demotion_warning, wins: 0, losses: 0, updatedAt: new Date(row.lp_reached_at).toISOString() })),
+        demotionWarning: row.demotion_warning, wins: publicRecords[row.player_id]?.wins??0, losses: publicRecords[row.player_id]?.losses??0, winStreak:publicRecords[row.player_id]?.winStreak??0, updatedAt: new Date(row.lp_reached_at).toISOString() })),
       total, totalPlayers: total, offset, hasMore: offset + result.rows.length < total,
       ...(query?{search:{query,found:!!located,gdAccountId:located?.gd_account_id??null}}:{}) };
   }

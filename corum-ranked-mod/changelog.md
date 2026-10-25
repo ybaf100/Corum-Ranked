@@ -1,3 +1,11 @@
+# v0.5.0-beta.99 (pending publication)
+- Stop lobby BGM when opening recorded levels, restore it on return, and distinguish confirmed round outcomes with rank colors and brighter silver.
+- Add direct history filter selection, show all 64 waiting entrants, and use reduced cards with BEST/NOW progress for 17–30 survivors.
+- Unify current dual-mode ratings, animated titles and cached forum ranks across history, leaderboard and player information.
+- Add password-verified Debug update channel selection and sort one-shot achievements by rarity/AP.
+- Count only Survival champions as wins and winning streaks; retain historical match data.
+- Retire Railway/Render support and use Singapore Lightsail exclusively.
+
 ## v0.5.0-beta.94 — Singapore infrastructure and achievement color update
 
 - Move all client endpoints to Singapore Lightsail; preserve existing Neon production data and update the read-only Railway bridge.

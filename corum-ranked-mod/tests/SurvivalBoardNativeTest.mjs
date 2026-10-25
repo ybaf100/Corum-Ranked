@@ -256,7 +256,7 @@ int main(){
 });
 
 
-test('64-player compact pages keep nickname and icon geometry inside small and wide screens',()=>{
+test('all 64 compact waiting cards fit one screen with nickname and icon geometry bounded',()=>{
  run(`#include "domain/SurvivalBoardPresentation.hpp"
 #include "domain/SurvivalRoundMenuPolicy.hpp"
 #include "domain/SurvivalHudPresentation.hpp"
@@ -265,12 +265,12 @@ using namespace corum::ranked;
 int main(){
  for(float width:{320.f,420.f,568.f,768.f,1366.f})for(float height:{240.f,320.f,426.f,768.f})for(std::size_t count:{5u,12u,26u,40u,64u}){
   auto g=survivalGridLayout(width,height,count,64);auto c=survivalCardLayout(g.cellWidth,g.cellHeight,true);
-  assert(g.compact&&g.pages>=1&&g.pageSize*g.pages>=count&&g.cellHeight>=24);
-  assert(g.columns*g.cellWidth<=width-36+.01f);assert(g.rows*g.cellHeight<=height-163+.01f);
+  assert(g.compact&&g.pages==1&&g.pageSize>=count&&g.cellHeight>4);
+  assert(g.columns*g.cellWidth<=width-36+.01f);assert(g.rows*g.cellHeight<=height-133+.01f);
   assert(c.avatarX-c.avatarSize/2>=0&&c.avatarX+c.avatarSize/2<c.titleX-c.titleWidth/2);
   assert(c.titleX+c.titleWidth/2<=c.width&&c.titleHeight>0&&c.recordHeight==0);
  }
- auto compact=survivalGridLayout(568,320,64,64);assert(compact.pages==2&&compact.pageSize==48);
+ auto compact=survivalGridLayout(568,320,64,64);assert(compact.pages==1&&compact.pageSize==64&&compact.columns==8&&compact.rows==8);
  auto wide=survivalGridLayout(1024,768,64,64);assert(wide.pages==1&&wide.pageSize==64);
  for(auto const* phase:{"ROUND_1","ROUND_2","ROUND_3","ROUND_4"})assert(survivalComparisonScore(phase,42.,99.)==42.);
  for(auto const* phase:{"FINAL","TIEBREAK"})assert(survivalComparisonScore(phase,42.,99.)==99.);

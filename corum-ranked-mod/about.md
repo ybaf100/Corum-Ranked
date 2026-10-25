@@ -12,19 +12,4 @@ During a standard Ranked round, the HUD keeps the current Round above the timer,
 
 Death Match does not use Qualifying %. Each player receives exactly three authoritative Attempts and the winner is the player with the higher best raw progress percentage across those Attempts; a Clear is 100%. Equal best percentages repeat Death Match on the existing retry flow. The ordinary timer position shows only the authoritative remaining Attempt count from 3 through 0. `Finished` stays hidden after Attempts one and two and appears only after the third Attempt is complete; if that End immediately resolves the match, the terminal result preserves the final viewer-relative lifecycle projection.
 
-The client is locked to the production Ranked server at `https://corum-ranked-production.up.railway.app`; it is not editable in mod settings. Clients built with the former Render endpoint require a new .geode package to connect to Railway. Production credentials and webhook secrets do not belong in the mod or repository.
-
-Unranked players in `v0.5.0-beta.14` complete a server-authoritative solo Placement Run:
-three or five Stages, two distinct Ranked Pool maps per Stage, three minutes and two Clears per Map,
-and the existing Attempt score curve with the best two Attempts contributing to Map Score.
-The bottom-left Qualifying HUD is replaced only during Placement by an image-first S/A/B/C/D
-badge. A fixed upper-right Top 2 view combines completed authoritative Attempts with the active provisional Attempt without persisting provisional evidence. Provisional score and Grade can update during progress, while the persisted Map Grade is committed only at authoritative Attempt end. Missing Grade images safely fall back to text.
-
-Rank visual lookup prefers a previously verified external asset cache and always falls back to the bundled package. The beta.14 client contains the versioned Google Drive ZIP/cache/SHA-256/extraction infrastructure, but production external downloading stays disabled until authoritative asset-pack version, Drive file ID, SHA-256, and byte-size metadata are supplied. The Resource Gate exposes Rank Visuals separately from audio resources: an active external download waits at the gate, while a failed external pack stops automatic retries and continues with bundled visuals. Response-header inspection uses Geode 5.8.2's string-view API portably across supported client targets.
-
-Ranked audio streams are prepared before competitive phase transitions where possible, and beta.14 emits low-cost transition timing logs for server-state receipt, audio handoff, image decode/node construction, and the first gameplay frame. These logs diagnose transition hitching without changing the authoritative 10-second Prepare/state-machine timing.
-
-The `v0.5.0-beta.14` development build can include **DEBUG BOT MATCH** behind
-`CORUM_RANKED_DEBUG_BOT_MATCH`, including Force Win and Force Lose. The CMake option defaults
-to OFF, so official packages do not contain its UI. Placement-incomplete players cannot enter it.
-Disable the matching server environment flag for production as well.
+The client connects only to Singapore Lightsail at `https://api.52-74-37-130.sslip.io`. Railway and Render hosting, update bridges and fallbacks are retired. Older clients using those hosts require manual installation of the Lightsail package. Production credentials and webhook secrets do not belong in the mod or repository.

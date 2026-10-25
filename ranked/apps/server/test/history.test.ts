@@ -34,7 +34,7 @@ function fixture(soloMatches: unknown[] = [soloMatch], survivalMatches: unknown[
 describe("unified history", () => {
   it("keeps Solo fields and filters Survival without reading Solo history", async () => {
     const f = fixture();
-    expect(await f.service.history(session, "SURVIVAL")).toEqual({ scope: "SURVIVAL", matches: [], serverNow: clock.now().toISOString() });
+    expect(await f.service.history(session, "SURVIVAL")).toEqual({ currentPlayers:{},scope: "SURVIVAL", matches: [], serverNow: clock.now().toISOString() });
     expect(f.solo.history).not.toHaveBeenCalled();
     expect(f.survival.history).toHaveBeenCalledWith(session.playerId,{});
   });

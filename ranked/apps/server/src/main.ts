@@ -1,7 +1,7 @@
 import "reflect-metadata";
 import { Logger, ValidationPipe } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
-import { shouldStartLegacyRailwayBridge, startLegacyRailwayBridge } from "./legacy/railway-upgrade-bridge.js";
+import {assertSupportedDeployment} from "./config/deployment-target.js";
 import {
   SERVER_ENVIRONMENT,
   type ServerEnvironment,
@@ -27,9 +27,5 @@ const bootstrap = async (): Promise<void> => {
   Logger.log(`Corum Ranked server listening on ${environment.port}`, "Bootstrap");
 };
 
-// Legacy Railway operates as upgrade-only bridge. Never initialize Nest or Neon there.
-if (shouldStartLegacyRailwayBridge(process.env)) {
-  await startLegacyRailwayBridge();
-} else {
-  await bootstrap();
-}
+assertSupportedDeployment(process.env);
+await bootstrap();

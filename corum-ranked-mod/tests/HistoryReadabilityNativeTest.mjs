@@ -9,6 +9,58 @@ const read=p=>readFileSync(join(root,p),'utf8');
 function method(source,name){let a=source.indexOf(name);assert(a>=0,name);let b=source.indexOf('{',a)+1,n=1;while(n){n+=(source[b]==='{')-(source[b]==='}');++b;}return source.slice(a,b);}
 function run(source){const dir=mkdtempSync(join(tmpdir(),'history-readability-'));try{writeFileSync(join(dir,'test.cpp'),source);execFileSync('g++',['-std=c++23','-Wall','-Wextra','-Werror','-I',join(root,'src'),join(dir,'test.cpp'),'-o',join(dir,'test')],{stdio:'pipe'});execFileSync(join(dir,'test'),[],{stdio:'pipe'});}catch(e){throw new Error(e.stderr?.toString()||e.message);}finally{rmSync(dir,{recursive:true,force:true});}}
 
+test('actual history cards distinguish confirmed elimination from non-participation and retain red when selected',()=>{
+ const source=read('src/RankedPopup.cpp');
+ run(`#include <cassert>
+#include <optional>
+#include <string>
+#include <vector>
+#include "domain/SurvivalHudPresentation.hpp"
+struct ccColor3B{int r=0,g=0,b=0;bool operator==(ccColor3B const&)const=default;};
+struct ccColor4B{int r,g,b,a;};
+ccColor3B ccc3(int r,int g,int b){return {r,g,b};}
+constexpr ccColor3B kGold{255,200,1},kCyan{1,200,255},kRed{255,91,111},kGreen{1,255,150},kBlue{1,50,255},kDeepPanel2{10,19,36};
+namespace corum::ranked{struct HistoryRound{bool completed=false;std::optional<bool>ownQualified;std::optional<int>ownRank={};};
+namespace ui{constexpr ccColor3B Text{242,247,255},TextMuted{164,181,205};}}
+struct CCPoint{float x=0,y=0;};struct CCSize{float width=0,height=0;};constexpr CCPoint CCPointZero{};
+struct CCNode{ccColor3B tint;CCPoint position;CCSize size;int tag=0;std::vector<CCNode*>children;
+ virtual ~CCNode(){for(auto*c:children)delete c;}void addChild(CCNode*n,int=0){children.push_back(n);}
+ void setAnchorPoint(CCPoint){}void setPosition(CCPoint p){position=p;}void setContentSize(CCSize s){size=s;}void setTag(int n){tag=n;}};
+struct CCLayerColor:CCNode{static CCLayerColor*create(ccColor4B c){auto*p=new CCLayerColor;p->tint={c.r,c.g,c.b};return p;}};
+struct CCMenu:CCNode{static CCMenu*create(){return new CCMenu;}};
+using SEL_MenuHandler=int;
+struct CCMenuItemSpriteExtra:CCNode{static CCMenuItemSpriteExtra*create(CCNode*n,void*,SEL_MenuHandler){auto*p=new CCMenuItemSpriteExtra;p->addChild(n);return p;}};
+CCNode*makeNeonPanel(CCSize s,CCPoint p,ccColor3B c,ccColor3B,int){auto*n=new CCNode;n->size=s;n->position=p;n->tint=c;return n;}
+struct Layer{
+ void historyText(CCNode*p,std::string const&,float,CCPoint,float,ccColor3B c){auto*l=new CCNode;l->tint=c;p->addChild(l);}
+ ${method(source,'    ccColor3B historyRoundColor(')}
+ ${method(source,'    CCMenuItemSpriteExtra* historyButton(')}
+};
+int main(){Layer layer;CCNode parent;
+ for(auto state:{std::optional<bool>{},std::optional<bool>{false},std::optional<bool>{true}}){
+  corum::ranked::HistoryRound round{false,state};assert(layer.historyRoundColor(round)==kGold);
+  round.completed=true;auto color=layer.historyRoundColor(round);
+  assert(color==(state.has_value()?(*state?kGreen:kRed):corum::ranked::ui::TextMuted));
+  for(bool selected:{false,true}){
+   auto*button=layer.historyButton(&parent,"R2",{50,40},49,0,2,selected,color);
+   auto*face=button->children.at(0);assert(button->tag==2&&face->tint==color);
+   assert(face->children.at(0)->tint==(selected?kCyan:corum::ranked::ui::Text));
+   assert(face->children.size()==1);
+  }
+ }
+ for(int rank=1;rank<=6;++rank){corum::ranked::HistoryRound r{true,true,rank};auto c=corum::ranked::survivalRankColor(rank,true);assert(layer.historyRoundColor(r)==ccc3(c.r,c.g,c.b));r.ownQualified=false;assert(layer.historyRoundColor(r)==kRed);}
+ auto silver=corum::ranked::survivalRankColor(2,true);assert(silver.r>=235&&silver.g>=240&&silver.b>=250);
+ for(bool selected:{false,true}){
+  auto*button=layer.historyButton(&parent,"SOLO",{50,40},49,0,0,selected);auto*face=button->children.at(0);
+  assert(face->tint==(selected?kCyan:kBlue));assert(face->children.size()==1);
+ }
+}
+`);
+ assert.match(method(source,'    void renderHistoryList('),/auto const tint=historyRoundColor\(round\)/);
+ assert.match(method(source,'    void renderHistoryDetail('),/survival\?std::optional<ccColor3B>\{historyRoundColor\(rounds\[i\]\)\}:std::nullopt/);
+ assert.match(method(source,'    void historyOwnPanel('),/position,historyRoundColor\(round\)/);
+});
+
 test('actual single-line fitter shrinks long names, clears stale wrap, preserves casing and restores short-name size',()=>run(`
 #include "domain/FontMetrics.hpp"
 #include <cassert>
@@ -29,15 +81,17 @@ int main(){CCLabelBMFont text;auto original=text.name;for(float width:{16.f,30.f
 }
 `));
 
-test('survivor count selects full cards up to 16 and compact cards above 16 with every page bounded',()=>run(`
+test('survivor count selects full up to 16, reduced through 30 and compact above 30 with bounded geometry',()=>run(`
 #include "domain/SurvivalBoardPresentation.hpp"
 #include <cassert>
 using namespace corum::ranked;
-int main(){for(int alive:{0,1,5,12,16,17,26,40,64})for(int total:{16,26,64})for(float w:{320.f,568.f,1024.f})for(float h:{240.f,320.f,768.f}){
- auto g=survivalGridLayout(w,h,total,alive);assert(g.compact==(alive>16));assert(g.pages*g.pageSize>=static_cast<unsigned>(total));
- assert(g.columns*g.cellWidth<=w-36+.01f);assert(g.rows*g.cellHeight<=h-163+.01f);
- auto card=survivalCardLayout(g.cellWidth,g.cellHeight,g.compact);assert(card.titleWidth>0&&card.titleHeight>0);assert((card.recordHeight==0)==g.compact);
-}assert(!survivalCompactCards(16)&&survivalCompactCards(17));
+int main(){for(int alive:{0,1,5,12,16,17,26,30,31,40,64})for(int total:{16,26,64})for(float w:{320.f,568.f,1024.f})for(float h:{240.f,320.f,768.f}){
+ auto g=survivalGridLayout(w,h,total,alive);assert(g.compact==(alive>30));assert(g.reduced==(alive>16&&alive<=30));assert(g.pages*g.pageSize>=static_cast<unsigned>(total));
+ assert(g.columns*g.cellWidth<=w-36+.01f);assert(g.rows*g.cellHeight<=h-(g.compact?133:163)+.01f);
+ auto card=survivalCardLayout(g.cellWidth,g.cellHeight,g.compact,g.reduced);assert(card.titleWidth>0&&card.titleHeight>0);assert((card.recordHeight==0)==g.compact);
+ if(g.reduced){assert(card.recordY+card.recordHeight/2<=card.titleY-card.titleHeight/2+.001f);assert(card.avatarX+card.avatarSize/2<card.titleX-card.titleWidth/2);}
+}assert(!survivalCompactCards(30)&&survivalCompactCards(31));assert(survivalReducedCards(17)&&survivalReducedCards(30)&&!survivalReducedCards(16)&&!survivalReducedCards(31));
+ auto thirty=survivalGridLayout(568,320,30,30);assert(thirty.reduced&&thirty.pages==1&&thirty.pageSize==30);
  auto tied=survivalGridLayout(568,320,40,12);assert(!tied.compact&&tied.pages==3);
 }
 `));
@@ -138,6 +192,7 @@ namespace corum::ranked::ui{struct RankedConfirmPopup{inline static int creates=
  void setID(std::string){}void show(){shown=true;}void setZOrder(int value){z=value;}void cancel(){++cancellations;shown=false;}};}
 struct Layer{enum class Page{Live,HistoryList,HistoryDetail};Page m_page=Page::HistoryDetail;bool running=true,m_historyReconnectShown=false;
  std::optional<WeakRef<corum::ranked::ui::RankedConfirmPopup>>m_historyReconnect;std::string m_renderedUiKey="history";
+ void closeHistoryFilter(){}
  bool isRunning(){return running;}std::string tr(char const*,char const*fallback){return fallback;}
  ${update}
 };

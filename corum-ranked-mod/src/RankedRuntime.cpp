@@ -810,7 +810,7 @@ void RankedRuntime::fetchConfig() {
                 }
             }
             m_environmentPolicy = std::move(policy);
-            auto const channel = rankedBuildChannel();
+            auto const channel = ui::RankedModUpdateManager::get().channel();
             auto const update = root["modUpdates"][channel];
             auto& updates = ui::RankedModUpdateManager::get();
             auto const bytes = update["sizeBytes"].asInt().unwrapOr(0);
@@ -2735,7 +2735,8 @@ void RankedRuntime::fetchHistoryScope(HistoryScope scope) {
             if (matches.isOk()) {
                 for (auto const& item : matches.unwrap()) {
                     if (!item.isObject()) continue;
-                    m_view.history.push_back(parseHistoryMatch(item));
+                    auto parsed=parseHistoryMatch(item);if(parsed.record.isObject())parsed.record["currentPlayers"]=root["currentPlayers"];
+                    m_view.history.push_back(std::move(parsed));
                 }
             }
             ++m_view.revision;
@@ -2772,7 +2773,7 @@ void RankedRuntime::fetchHistoryDetail(RankedMode mode,std::string const& matchI
             if(!successful(response))m_view.historyDetailError=responseError(response);
             else {
                 auto const root=response.json().unwrapOr(matjson::Value());auto const entry=root["match"];
-                auto replacement=parseHistoryMatch(entry);
+                auto replacement=parseHistoryMatch(entry);if(replacement.record.isObject())replacement.record["currentPlayers"]=root["currentPlayers"];
                 if(replacement.matchId!=matchId || replacement.mode!=mode || !replacement.detailsLoaded)m_view.historyDetailError="Invalid match history detail";
                 else {
                     observeServerNow(root);
@@ -2835,6 +2836,7 @@ void RankedRuntime::fetchPlayerInfo(std::string const& side) {
             auto const root = response.json().unwrapOr(matjson::Value());
             auto const account = numFromString<int>(root["gdAccountId"].asString().unwrapOr("")).unwrapOr(0);
             if (account != info.accountId) { info.forum.error = "Player identity changed"; ++m_view.revision; return; }
+            info.publicProfile=root["profile"]["gdAccountId"].asString().unwrapOr("")==std::to_string(info.accountId)?root["profile"]:matjson::Value();
             info.forum = parseForumRecords(root);
             ++m_view.revision;
         });
@@ -4269,6 +4271,7 @@ void RankedRuntime::fetchSurvivalProfile() {
         sur.completedMatches=static_cast<int>(root["recordSummary"]["completedMatches"].asInt().unwrapOr(0));
         sur.wins=static_cast<int>(root["recordSummary"]["wins"].asInt().unwrapOr(0));
         sur.losses=static_cast<int>(root["recordSummary"]["losses"].asInt().unwrapOr(0));
+        sur.winStreak=static_cast<int>(root["recordSummary"]["winStreak"].asInt().unwrapOr(0));
         sur.bestRank=root["recordSummary"]["bestRank"].isNumber()?std::optional<int>(static_cast<int>(root["recordSummary"]["bestRank"].asInt().unwrapOr(0))):std::nullopt;
         sur.loaded = true;sur.onlineAvailable=root["onlineAvailable"].asBool().unwrapOr(false);
         sur.profile.displayedTier = profile["tier"].asString().unwrapOr("RED");

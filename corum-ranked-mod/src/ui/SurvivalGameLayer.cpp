@@ -188,13 +188,14 @@ class SurvivalGameLayer final : public CCLayerColor {
         auto const completed=view.roundKey.ends_with(":elimination");
         auto const survivors=result?1:std::count_if(players.begin(),players.end(),[completed](auto const& p){return completed?p.passing:!p.eliminated;});
         auto const size=getContentSize();auto const grid=survivalGridLayout(size.width,size.height,players.size(),static_cast<int>(survivors));
-        auto const gridContext=view.id+":"+view.roundKey+":"+std::to_string(view.mapGeneration)+(result?":result":":live")+(grid.compact?":compact":":full");
+        auto const gridContext=view.id+":"+view.roundKey+":"+std::to_string(view.mapGeneration)+(result?":result":":live")+(grid.compact?":compact":grid.reduced?":reduced":":full");
         if(m_gridContext!=gridContext){m_gridContext=gridContext;m_grid->removeAllChildrenWithCleanup(true);m_tiles.clear();m_infoByTag.clear();m_nextInfoTag=1000;m_cardPage=0;}
         auto const columns=grid.columns;auto const width=grid.cellWidth,height=grid.cellHeight;auto const compact=grid.compact;
+        auto const reduced=grid.reduced;m_status->setPositionY(compact?50:80);
         m_cardPages=grid.pages;m_cardPage=std::min(m_cardPage,m_cardPages-1);
         m_pageLabel->setString(fmt::format("{} / {}",m_cardPage+1,m_cardPages).c_str());m_pager->setVisible(m_cardPages>1 && m_grid->isVisible());
         auto const left=size.width/2-(columns-1)*width/2,top=size.height-65-height/2;
-        auto const card=survivalCardLayout(width,height,compact);
+        auto const card=survivalCardLayout(width,height,compact,reduced);
         for(auto& [id,tile]:m_tiles)tile.root->setVisible(false);
         auto const first=m_cardPage*grid.pageSize,last=std::min(players.size(),first+grid.pageSize);
         for(std::size_t i=first;i<last;i++){
@@ -209,13 +210,13 @@ class SurvivalGameLayer final : public CCLayerColor {
                 auto* iconMenu=CCMenu::create();iconMenu->setPosition(CCPointZero);avatarSlot->addChild(iconMenu,8);
                 auto* iconFace=CCNode::create();iconFace->setContentSize({card.avatarSize,card.avatarSize});
                 auto* icon=value.id==view.ownId?ui::PlayerIcon::createLocal():value.bot?ui::PlayerIcon::createBot(index):ui::PlayerIcon::createRemote(value.accountId);
-                if(icon){icon->setScale(std::min(.65f,card.avatarSize/48.0f));icon->setPosition({card.avatarSize/2-(compact?0:10),card.avatarSize/2});iconFace->addChild(icon,5);}
+                if(icon){icon->setScale(std::min(.65f,card.avatarSize/48.0f));icon->setPosition({card.avatarSize/2-(compact||reduced?0:10),card.avatarSize/2});iconFace->addChild(icon,5);}
                 auto* iconButton=CCMenuItemSpriteExtra::create(iconFace,this,menu_selector(SurvivalGameLayer::onPlayerInfo));
                 iconButton->setTag(m_nextInfoTag++);iconButton->setPosition(CCPointZero);iconMenu->addChild(iconButton);
                 auto* record=compact?nullptr:ui::menuLabel("",.23f,{card.width/2,card.recordY},ui::TextMuted,ui::FontWeight::ExtraBold);if(record)root->addChild(record,5);
                 found=m_tiles.emplace(value.id,Tile{root,nickname,record,destination,avatarSlot}).first;
                 auto& tile=found->second;tile.infoTag=iconButton->getTag();
-                std::array<ccColor3B,3> const accents{ui::Gold,ccc3(201,215,235),ccc3(208,137,70)};
+                std::array<ccColor3B,3> const accents{ui::Gold,ccc3(240,247,255),ccc3(208,137,70)};
                 for(std::size_t medal=0;!compact && medal<accents.size();++medal){
                     tile.medals[medal]=ui::surface({card.width,card.height},{card.width/2,card.height/2},accents[medal],ui::SurfaceRaised,245,true);
                     tile.medals[medal]->setVisible(false);root->addChild(tile.medals[medal],3);
@@ -231,7 +232,7 @@ class SurvivalGameLayer final : public CCLayerColor {
             auto& tile=found->second;tile.root->setVisible(true);m_infoByTag[tile.infoTag]=value;
             if(!compact){tile.progress.observe(view.revision,value.attemptId,value.attemptActive,value.bestProgress,value.currentProgress);tile.progress.advance(m_frameDelta);}
             if(view.roundKey.ends_with(":elimination"))tile.progress.best.displayed=tile.progress.best.target;
-            if(!compact && tile.tier!=value.tier){
+            if(!compact && !reduced && tile.tier!=value.tier){
                 tile.tier=value.tier;if(tile.tierBadge)tile.tierBadge->removeFromParentAndCleanup(true);
                 auto const badgeSize=std::min(20.0f,card.avatarSize);
                 tile.tierBadge=ui::createAnimatedRankBadge(value.tier,{badgeSize,badgeSize},ui::RankBadgeDisplay::Leaderboard);
@@ -249,7 +250,8 @@ class SurvivalGameLayer final : public CCLayerColor {
             }else {
                 auto const status=value.eliminated?text("survival-eliminated","ELIMINATED"):value.cleared?text("survival-cleared","CLEARED"):
                     fmt::format("NOW {}%",rankedScoreText(tile.progress.now,view.phase=="TIEBREAK"));
-                record=fmt::format("BEST {}% · {}",rankedScoreText(tile.progress.best.displayed,view.phase=="TIEBREAK"),status);
+                record=reduced?fmt::format("BEST {}% · NOW {}%",rankedScoreText(tile.progress.best.displayed,view.phase=="TIEBREAK"),rankedScoreText(tile.progress.now,view.phase=="TIEBREAK")):
+                    fmt::format("BEST {}% · {}",rankedScoreText(tile.progress.best.displayed,view.phase=="TIEBREAK"),status);
                 auto const title=compact?value.name:fmt::format("{} {}",rank,value.name);
                 if(tile.titleText!=title){tile.titleText=title;tile.name->setString(title.c_str());ui::fitSingleLineMenuLabel(tile.name,card.titleWidth,card.titleHeight,.25f);}
                 tile.name->setColor(value.eliminated?ui::Red:value.id==view.ownId?ui::Cyan:ui::Text);
@@ -257,7 +259,9 @@ class SurvivalGameLayer final : public CCLayerColor {
             auto const medal=survivalCardMedal(value.rank,value.eliminated);
             for(std::size_t n=0;n<tile.medals.size();++n)if(tile.medals[n])tile.medals[n]->setVisible(medal==static_cast<int>(n+1));
             tile.eliminatedBackground->setVisible(value.eliminated || (!result && value.rank>0 && !value.passing));
-            if(tile.record && tile.recordText!=record){tile.recordText=record;tile.record->setString(record.c_str());ui::fitFullMenuLabel(tile.record,card.width-10,card.recordHeight,.21f);}
+            if(tile.record && tile.recordText!=record){tile.recordText=record;tile.record->setString(record.c_str());
+                if(reduced)ui::fitSingleLineMenuLabel(tile.record,card.width-10,card.recordHeight,.21f);
+                else ui::fitFullMenuLabel(tile.record,card.width-10,card.recordHeight,.21f);}
             if(tile.record)tile.record->setColor(ccc3(color.r,color.g,color.b));
         }
     }

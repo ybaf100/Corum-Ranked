@@ -7,6 +7,22 @@ const fixture=()=>({id:'match',state:'PLAYING',online:true,createdAt:100,config:
  rounds:[{key:'stage-1',ordinal:1,phase:'ROUND_1',target:1,finishedAt:200,cutoffScore:82,achievementCheckpoint:{private:true},map:{levelId:123,name:'Exact Map',stars:7,demon:false,length:3},players:[player('me',82.9,1,true),player('other',82.1,1,true)]},
  {key:'stage-2',ordinal:2,phase:'ROUND_2',target:1,finishedAt:null,cutoffScore:40,map:{levelId:456},players:[player('other',99,1,true)]}]});
 describe('confirmed history projection',()=>{
+ it('distinguishes an eliminated round from later non-participation in summary and detail, including forfeits',()=>{
+  const match=fixture();match.rounds[0]!.players[0]!.qualified=false;
+  match.rounds[1]!.finishedAt=300;
+  for(const summary of [false,true]){
+   const history=survivalHistoryProjection(match,null,'me',summary);
+   expect(history.rounds[0]).toMatchObject({completed:true,ownQualified:false});
+   expect(history.rounds[1]).toMatchObject({completed:true,ownQualified:null});
+   match.rounds[0]!.players[0]!.qualified=true;match.rounds[0]!.players[0]!.forfeited=true;
+   expect(survivalHistoryProjection(match,null,'me',summary).rounds[0]!.ownQualified).toBe(false);
+   match.rounds[0]!.players[0]!.forfeited=false;
+   expect(survivalHistoryProjection(match,null,'me',summary).rounds[0]!.ownQualified).toBe(true);
+   match.rounds[0]!.finishedAt=null;
+   expect(survivalHistoryProjection(match,null,'me',summary).rounds[0]!.ownQualified).toBeNull();
+   match.rounds[0]!.finishedAt=200;match.rounds[0]!.players[0]!.qualified=false;
+  }
+ });
  it('preserves every demon subtype in history without a live GD metadata cache',()=>{
   for(const subtype of ['EASY','MEDIUM','HARD','INSANE','EXTREME']){
    const match=fixture();Object.assign(match.rounds[0]!.map,{stars:10,demon:true,demonDifficulty:subtype});

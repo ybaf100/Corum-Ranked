@@ -151,7 +151,7 @@ test('live cards retain identity, retarget from the current position and recolor
 struct CCPoint{float x=0,y=0;bool operator==(CCPoint const&)const=default;};struct CCSize{float width,height;};struct Color{unsigned char r,g,b;};using ccColor3B=Color;Color ccc3(unsigned char r,unsigned char g,unsigned char b){return {r,g,b};}
 struct CCAction{CCPoint from,to;int tag=0;void setTag(int n){tag=n;}};
 struct CCMoveTo{static CCAction* create(float,CCPoint point){auto* a=new CCAction;a->to=point;return a;}};struct CCEaseSineOut{static CCAction* create(CCAction* a){return a;}};
-struct CCNode{CCPoint pos;CCSize size{100,50};bool visible=true;CCAction* action=nullptr;int moves=0,stops=0;std::vector<CCNode*>children;virtual ~CCNode()=default;static CCNode* create(){return new CCNode;}void setPosition(CCPoint p){pos=p;}CCPoint getPosition()const{return pos;}void setScale(float){}void setContentSize(CCSize value){size=value;}void setVisible(bool b){visible=b;}bool isVisible()const{return visible;}void addChild(CCNode* c,int=0){children.push_back(c);}void removeFromParentAndCleanup(bool){}void removeAllChildrenWithCleanup(bool){children.clear();}void stopActionByTag(int){action=nullptr;++stops;}void runAction(CCAction* a){a->from=pos;action=a;++moves;}void advance(float t){assert(action);pos={action->from.x+(action->to.x-action->from.x)*t,action->from.y+(action->to.y-action->from.y)*t};}};
+struct CCNode{CCPoint pos;CCSize size{100,50};bool visible=true;CCAction* action=nullptr;int moves=0,stops=0;std::vector<CCNode*>children;virtual ~CCNode()=default;static CCNode* create(){return new CCNode;}void setPosition(CCPoint p){pos=p;}void setPositionY(float y){pos.y=y;}CCPoint getPosition()const{return pos;}void setScale(float){}void setContentSize(CCSize value){size=value;}void setVisible(bool b){visible=b;}bool isVisible()const{return visible;}void addChild(CCNode* c,int=0){children.push_back(c);}void removeFromParentAndCleanup(bool){}void removeAllChildrenWithCleanup(bool){children.clear();}void stopActionByTag(int){action=nullptr;++stops;}void runAction(CCAction* a){a->from=pos;action=a;++moves;}void advance(float t){assert(action);pos={action->from.x+(action->to.x-action->from.x)*t,action->from.y+(action->to.y-action->from.y)*t};}};
 using CCObject=CCNode;
 const CCPoint CCPointZero{0,0};
 struct CCMenu:CCNode{static CCMenu* create(){return new CCMenu;}};
@@ -172,6 +172,7 @@ void fitFullMenuLabel(CCLabelBMFont*,float,float,float){}
 }
 struct SurvivalMatchView{std::uint64_t revision=1;std::string id="m",roundKey="r1",ownId="a",phase="ROUND_1";int mapGeneration=1,matchPlayerCount=16;std::vector<SurvivalStanding>standings,roundPlayers;matjson::Value result;};
 struct Coordinator:CCNode{
+ CCLabelBMFont*m_status=new CCLabelBMFont;
  struct Tile{CCNode* root=nullptr;CCLabelBMFont* name=nullptr;CCLabelBMFont* record=nullptr;CCPoint destination;CCNode* icon=nullptr;CCNode* tierBadge=nullptr;std::string tier="";CCNode* eliminatedBackground=nullptr;std::string titleText={},recordText={};std::array<CCNode*,3>medals{};int infoTag=0;SurvivalProgressTween progress{};};
  double m_frameDelta=1./60.;std::string m_gridContext;CCNode grid;CCNode* m_grid=&grid;CCNode pager;CCNode* m_pager=&pager;CCLabelBMFont pageLabel;CCLabelBMFont* m_pageLabel=&pageLabel;std::size_t m_cardPage=0,m_cardPages=1;std::unordered_map<std::string,Tile>m_tiles;std::unordered_map<int,SurvivalStanding>m_infoByTag;int m_nextInfoTag=1000;void onPlayerInfo(CCObject*){}CCSize getContentSize()const{return {568,320};}
  ${method(source,'void showParticipants(')}
@@ -202,12 +203,15 @@ int main(){using namespace corum::ranked;SurvivalMatchView view;SurvivalStanding
  view.result={};view.roundKey="r2";view.standings={b};ui.showParticipants(view,false);assert(ui.m_tiles.size()==1&&!ui.m_tiles.contains("a"));
  view.id="large";view.roundKey="large-r1";view.matchPlayerCount=64;view.standings.clear();
  for(int i=0;i<64;++i){SurvivalStanding p;p.id="large-"+std::to_string(i);p.name="Nickname "+std::to_string(i);p.rank=i+1;p.bestProgress=99-i;p.bot=true;p.passing=i<40;view.standings.push_back(p);}
- ui.showParticipants(view,false);assert(ui.m_cardPages==2&&ui.m_tiles.size()==48&&ui.pager.visible&&ui.pageLabel.text=="1 / 2");
+ ui.showParticipants(view,false);assert(ui.m_cardPages==1&&ui.m_tiles.size()==64&&!ui.pager.visible&&ui.pageLabel.text=="1 / 1");
  auto* first=ui.m_tiles.at("large-0").root;
  for(auto const&[id,tile]:ui.m_tiles){assert(tile.name->text.starts_with("Nickname ")&&!tile.record&&!tile.tierBadge);for(auto* medal:tile.medals)assert(!medal);}
- ui.m_cardPage=1;ui.showParticipants(view,false);assert(ui.m_tiles.size()==64&&ui.pageLabel.text=="2 / 2");
- int visible=0;for(auto const&[id,tile]:ui.m_tiles)visible+=tile.root->visible;assert(visible==16&&!first->visible);
+ ui.m_cardPage=1;ui.showParticipants(view,false);assert(ui.m_tiles.size()==64&&ui.pageLabel.text=="1 / 1");
+ int visible=0;for(auto const&[id,tile]:ui.m_tiles)visible+=tile.root->visible;assert(visible==64&&first->visible);
  ui.m_cardPage=0;++view.revision;ui.showParticipants(view,false);assert(ui.m_tiles.at("large-0").root==first&&first->visible&&ui.m_tiles.size()==64);
+ view.standings.resize(30);ui.showParticipants(view,false);assert(ui.m_cardPages==1&&ui.m_tiles.size()==30);
+ for(auto const&[id,tile]:ui.m_tiles){assert(tile.record&&!tile.tierBadge);assert(tile.record->text.find("BEST ")!=std::string::npos&&tile.record->text.find("NOW ")!=std::string::npos);}
+ view.standings.resize(16);ui.showParticipants(view,false);for(auto const&[id,tile]:ui.m_tiles)assert(tile.tierBadge&&tile.record);
  view.roundKey="large-final";view.standings.resize(5);ui.showParticipants(view,false);assert(ui.m_tiles.size()==5&&ui.m_cardPages==1&&!ui.pager.visible);
 
 }

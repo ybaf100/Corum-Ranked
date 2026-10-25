@@ -171,6 +171,7 @@ struct ForumRecordsView {
     std::vector<ForumRankView> records;
 };
 struct PlayerInfoView {
+    matjson::Value publicProfile;
     int accountId = 0;
     std::string username, side;
     bool botReference = false;
@@ -420,7 +421,7 @@ struct EnvironmentWarningView {
 
 struct SurvivalView {
     int completedMatches=0;
-    int wins=0, losses=0;
+    int wins=0, losses=0, winStreak=0;
     std::optional<int> bestRank;
     bool loaded = false, loading = false, onlineAvailable = false;
     std::string error, tierId;

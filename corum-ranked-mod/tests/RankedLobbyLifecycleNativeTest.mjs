@@ -25,7 +25,7 @@ function runCpp(code) {
 
 test('actual history rows keep Details visible and correctly indexed across 30-record scrolling', () => {
     const source=read('src/RankedPopup.cpp');
-    const callbacks=['    void renderHistoryList(', '    void onHistoryDetail('].map(s=>method(source,s)).join('\n');
+    const callbacks=['    ccColor3B historyRoundColor(', '    void renderHistoryList(', '    void onHistoryDetail('].map(s=>method(source,s)).join('\n');
     runCpp(`
 #include "${join(root,'src/domain/SurvivalHudPresentation.hpp')}"
 #include <algorithm>
@@ -82,14 +82,14 @@ struct ScrollLayer:CCNode {
 #include "${root}/src/domain/RankedMode.hpp"
 struct Stage {int stageIndex=1;std::vector<std::string>mapGrades;std::string stageGrade="A";double stageScore=300;};
 struct Json {struct Int {long long unwrapOr(int v)const{return v;}bool isOk()const{return false;}long long unwrap()const{return 0;}};struct Bool{bool unwrapOr(bool b)const{return b;}};struct String{std::string unwrapOr(std::string s)const{return s;}};Bool asBool()const{return {};}String asString()const{return {};}Int asInt()const{return {};}Json operator[](char const*)const{return {};}};
-namespace corum::ranked {struct HistoryRound{std::string label;bool completed=false;std::optional<bool>ownQualified;};std::vector<HistoryRound>historyRounds(Json const&,bool){return {};}}
+namespace corum::ranked {struct HistoryRound{std::string label;bool completed=false;std::optional<bool>ownQualified;std::optional<int>ownRank;};std::vector<HistoryRound>historyRounds(Json const&,bool){return {};}}
 struct History {Json record;bool inProgress=false,debug=false;int roundWinsA=0,roundWinsB=0;std::string matchId="m",createdAt="2026-10-24",finishedAt="2026-10-24";int survivalRank=0;corum::ranked::RankedMode mode=corum::ranked::RankedMode::SoloRanked;std::string side="A",winnerSide="A",opponentName="a long player name";std::optional<int>ownRankedScoreDelta=10;};
 struct RuntimeView {std::uint64_t historyRevision=0;bool historyLoading=false;std::string historyError;struct{std::vector<Stage>stageResults;}placement;std::vector<History>history;};
 struct RankedRuntime{RuntimeView data;static RankedRuntime&get(){static RankedRuntime r;return r;}RuntimeView const&view()const{return data;}void fetchHistoryDetail(corum::ranked::RankedMode,std::string const&){} };
 namespace fmt {std::string runtime(std::string s){return s;}template<class...T>std::string format(std::string s,T const&...){return s;}}
 namespace corum::ranked::i18n {bool isKorean(){return false;}}
 constexpr int ccc3(unsigned char r,unsigned char g,unsigned char b){return (r<<16)|(g<<8)|b;}
-constexpr int kGold=1,kCyan=2,kRed=3,kGreen=4,kDeepPanel2=5,kDeepPanel=6;
+using ccColor3B=int;constexpr int kGold=1,kCyan=2,kRed=3,kGreen=4,kDeepPanel2=5,kDeepPanel=6;
 std::string operator""_spr(char const*s,std::size_t n){return {s,n};}
 #define menu_selector(...) 0
 CCNode*makeNeonPanel(CCSize s,CCPoint p,int,int,int){auto*n=new CCNode;n->size=s;n->position=p;return n;}

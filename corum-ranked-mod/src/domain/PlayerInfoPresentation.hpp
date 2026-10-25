@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <charconv>
+#include <cstdint>
 #include <optional>
 #include <string_view>
 #include <string>
@@ -16,6 +17,13 @@ inline std::string matchRecordText(int wins, int losses, bool korean) {
     auto const percent = std::to_string(tenths / 10) + (tenths % 10 ? "." + std::to_string(tenths % 10) : "");
     return std::to_string(wins) + (corum::ranked::catalogText("inline.w", korean, "W / ")) + std::to_string(losses) +
         (corum::ranked::catalogText("inline.l", korean, "L (")) + percent + "%)";
+}
+
+inline std::string survivalRecordText(int wins,int losses,bool korean){
+    wins=std::max(0,wins);losses=std::max(0,losses);auto const games=static_cast<std::int64_t>(wins)+losses;
+    auto const percent=games?static_cast<int>(std::lround(wins*1000./games)):0;
+    auto rate=std::to_string(percent/10)+(percent%10?"."+std::to_string(percent%10):"");
+    return std::to_string(games)+catalogText("survival-record-games",korean," MATCHES ")+std::to_string(wins)+catalogText("survival-record-wins",korean," WINS (")+rate+"%)";
 }
 
 // GD's DemonInfoPopup has five classic and five platformer difficulty

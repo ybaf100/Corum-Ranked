@@ -1,5 +1,7 @@
 import type { HistoryOptions } from "./history-options.js";
-import { Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { Inject, Injectable, NotFoundException, Optional } from "@nestjs/common";
+import {DATABASE,type DatabasePort} from '../database/database.port.js';
+import {readPublicPlayerProfiles} from '../forum/public-player-profiles.js';
 import { SERVER_CLOCK, type ServerClock } from "../common/runtime.module.js";
 import { MatchService } from "../match/match.service.js";
 import type { RankedSessionContext } from "../session/session.types.js";
@@ -19,6 +21,7 @@ export class HistoryService {
     private readonly solo: MatchService,
     private readonly survival: SurvivalService,
     @Inject(SERVER_CLOCK) private readonly clock: ServerClock,
+    @Optional() @Inject(DATABASE) private readonly database?:DatabasePort,
   ) {}
 
   public async history(session: RankedSessionContext, scope: HistoryScope, options:HistoryOptions={}) {
@@ -35,13 +38,24 @@ export class HistoryService {
     matches.sort((a,b)=>Number(Boolean(b.inProgress))-Number(Boolean(a.inProgress)) ||
       ((a.finishedAt??a.createdAt??'').localeCompare(b.finishedAt??b.createdAt??'')*(options.order==='OLDEST'?1:-1)) ||
       a.matchId.localeCompare(b.matchId)||a.mode.localeCompare(b.mode));
-    return { scope, matches: matches.slice(0, 30), serverNow: this.clock.now().toISOString() };
+    const page=matches.slice(0,30);
+    return { scope, matches:page,currentPlayers:await this.currentPlayers(page), serverNow: this.clock.now().toISOString() };
   }
   public async detail(session:RankedSessionContext,mode:Exclude<HistoryScope,'ALL'>,matchId:string){
     const result=mode==='SURVIVAL'?await this.survival.history(session.playerId,{matchId}):await this.solo.history(session,{matchId});
     const match=result.matches.find(m=>m.matchId===matchId);
     if(!match)throw new NotFoundException('Match history is unavailable');
-    return {match:{...match,mode},serverNow:this.clock.now().toISOString()};
+    return {match:{...match,mode},currentPlayers:await this.currentPlayers([match]),serverNow:this.clock.now().toISOString()};
+  }
+  private async currentPlayers(matches:readonly HistorySummary[]){
+    if(!this.database)return {};
+    const accounts:string[]=[];
+    for(const entry of matches){const record=(entry as any).record;
+      if(!record||typeof record!=='object')continue;
+      for(const player of Object.values(record.players??{}) as any[])if(typeof player?.gdAccountId==='string')accounts.push(player.gdAccountId);
+      for(const round of record.rounds??[])for(const player of round.standings??[])if(typeof player.gdAccountId==='string')accounts.push(player.gdAccountId);
+    }
+    return readPublicPlayerProfiles(this.database,accounts);
   }
 
 }

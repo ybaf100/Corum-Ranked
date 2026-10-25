@@ -106,7 +106,7 @@ Newgrounds 또는 GD Music Library의 전체 Song ID를 입력합니다. `ranked
 5. 서버 시작 전에 `0001_initial_ranked.sql` → `0002_debug_bot_match.sql` → `0002_attempt_start_leases.sql` → `0003_debug_rating_playable_maps.sql` → `0004_alpha37_schema_hardening.sql` → `0005_v050_rating_system.sql` → `0006_v050_dynamic_csmp_tiers.sql` → `0007_solo_stage_placement.sql` → `0008_placement_beta9.sql` 순서로 적용합니다. DB를 초기화하므로 과거 PvP Placement 결과를 새 Map Score로 변환하지 않습니다.
 6. `apps/server/.env.example`을 참고해 배포 환경변수를 secret manager에서 주입하고 서버를 배포합니다.
 7. `/health`, `/ready`, `/api/ranked/config`를 확인합니다.
-8. 별도 `build-ranked-mod.yml` 결과인 `hwanhee1.corum_ranked.geode`를 배포합니다. 현재 고정 production base URL은 `https://corum-ranked-production.up.railway.app`이며 모드 설정에 주소 입력란이 없습니다. Render 주소를 내장한 구버전 `.geode`는 새 빌드로 교체해야 합니다.
+8. 별도 `build-ranked-mod.yml` 결과인 `hwanhee1.corum_ranked.geode`를 배포합니다. 현재 고정 production base URL은 `https://api.52-74-37-130.sslip.io`이며 모드 설정에 주소 입력란이 없습니다. Railway/Render 주소를 내장한 구버전은 지원하지 않으며 Lightsail 버전을 수동 설치해야 합니다.
 9. 두 테스트 계정으로 전체 harness 시나리오를 staging에서 재검증한 뒤 운영 queue를 엽니다.
 
 운영 절차와 장애 시 동작은 [`docs/operations.md`](docs/operations.md), API 계약은 [`docs/api.md`](docs/api.md), 보안 경계는 [`docs/security.md`](docs/security.md)를 참고하세요.

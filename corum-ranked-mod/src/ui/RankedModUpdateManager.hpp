@@ -19,7 +19,14 @@ public:
     ModUpdateView const& view() const { return m_view; }
     bool ready() const { return m_view.state == ModUpdateState::Ready; }
     bool canDownload() const { return m_downloadAllowed; }
+    std::string const& channel()const{return m_channel;}
+    bool selectChannel(std::string channel){
+        if((channel!="release"&&channel!="debug")||m_view.state==ModUpdateState::Downloading||m_view.state==ModUpdateState::Verifying||m_view.state==ModUpdateState::RestartRequired)return false;
+        if(channel==m_channel)return false;
+        m_channel=std::move(channel);m_downloadAllowed=false;return true;
+    }
 private:
+    std::string m_channel=rankedBuildChannel();
     void fail(std::string error);
     void verifyAndInstall(std::filesystem::path const& file, std::uint64_t generation, geode::utils::web::WebResponse response);
     ModUpdateMetadata m_metadata;

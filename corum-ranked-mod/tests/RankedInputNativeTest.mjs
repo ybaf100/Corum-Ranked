@@ -122,7 +122,8 @@ struct CorumRankedLayer : CCLayerColor {
     struct ReconnectWeak{Reconnect* p;Reconnect* lock(){return p;}};std::optional<ReconnectWeak>m_historyReconnect;
     CCMenu* m_settingsMenu=nullptr;unsigned long m_volumeSession=0;void closeSettings(){}
     bool m_rankedChildScenePushed=false,m_enteringSongGate=false,m_enteringLevel=false,keypad=true;
-    int refreshed=0,scheduled=0;void suspendHistoryThumbnail(){}void resetHistoryUi(){}
+    int refreshed=0,scheduled=0;void suspendHistoryThumbnail(){}void resetHistoryUi(){}void closeHistoryFilter(){}
+    struct Channel {void dismiss(){}};struct ChannelWeak{Channel*p;Channel*lock(){return p;}};std::optional<ChannelWeak>m_updateChannelPopup;
     void setKeypadEnabled(bool v){keypad=v;}
     void schedule(int,float){++scheduled;} void unschedule(int){--scheduled;}
     void refresh(float){++refreshed;}void resetDynamicUiPointers(){}

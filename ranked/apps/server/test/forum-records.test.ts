@@ -146,7 +146,9 @@ describe('durable forum cache', () => {
     expect(await controller.read('match', 'A', 'token', session)).toMatchObject({ gdAccountId: '1234', botReference: false });
     authorize.mockRejectedValueOnce(new Error('unauthorized'));
     await expect(controller.read('match', 'B', 'bad', session)).rejects.toThrow('unauthorized');
-    expect(query).toHaveBeenCalledTimes(2); expect(read).toHaveBeenCalledTimes(2);
+    // Two authorized match reads plus the human's batched current-profile read;
+    // bots and the unauthorized request must not query a public profile.
+    expect(query).toHaveBeenCalledTimes(3); expect(read).toHaveBeenCalledTimes(2);
     await expect(controller.read('match', 'C', 'token', session)).rejects.toThrow('Invalid player side');
   });
 });

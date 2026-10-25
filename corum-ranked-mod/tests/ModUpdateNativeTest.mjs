@@ -108,6 +108,8 @@ int main(int argc,char**argv){assert(argc==2);cacheRoot=argv[1];std::filesystem:
  manager.configure({"v0.5.0-beta.54",m.sha256,"release",6},true);assert(!manager.canDownload());manager.download();assert(geode::utils::web::pending.empty());
  manager.configure(m,false);assert(!manager.canDownload()&&!manager.ready());
  auto wrong=m;wrong.channel="debug";manager.configure(wrong,true);assert(!manager.canDownload());
+ assert(!manager.selectChannel("other"));assert(manager.selectChannel("debug"));manager.configure(wrong,true);assert(manager.canDownload());
+ assert(manager.selectChannel("release"));manager.configure(m,true);
  manager.configure(m,true);manager.restart();assert(geode::utils::game::restarts==0);
  manager.download();manager.download();assert(geode::utils::web::pending.size()==1);
  assert(geode::utils::web::pending.back().request.url==m.downloadUrl());complete({404,""});assert(installed()=="OLD");

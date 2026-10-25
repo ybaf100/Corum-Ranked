@@ -1,3 +1,5 @@
+#include "PublicPlayerProfile.hpp"
+#include "RankedPopupLayout.hpp"
 #pragma once
 
 #include "../RankedRuntime.hpp"
@@ -32,7 +34,8 @@ class RankedPlayerInfoPopup final : public Popup, public UserInfoDelegate {
         if (view.stage != RuntimeStage::Matched || view.match.state == "ROUND_ENTERING" ||
             view.match.state == "DEATHMATCH_ENTERING" || view.match.state == "ROUND_PLAYING" ||
             view.match.state == "DEATHMATCH_PLAYING") return false;
-        if (!Popup::init(300, 272)) return false;
+        auto const layout=rankedPopupLayout({300,354},CCDirector::sharedDirector()->getWinSize());
+        if (!Popup::init(layout.size.width,layout.size.height)) return false;
         m_bgSprite->setVisible(false); m_closeBtn->setVisible(false);
         setID("ranked-player-info-popup"_spr);
         m_side = std::move(side); m_matchId = RankedRuntime::get().view().match.matchId;
@@ -40,9 +43,9 @@ class RankedPlayerInfoPopup final : public Popup, public UserInfoDelegate {
         m_accountId = RankedRuntime::get().view().playerInfo.accountId;
         if (m_accountId <= 0) return false;
         m_lookupDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(25);
-        m_panel = surface({300, 272}, {150, 136}, Cyan, Surface, 255, true);
-        m_mainLayer->addChild(m_panel, 10);
-        auto* menu = CCMenu::create(); menu->setPosition(CCPointZero); m_panel->addChild(menu, 30);
+        m_panel = rankedPopupContent(m_mainLayer,m_buttonMenu,layout);
+        m_panel->addChild(surface({300,354},{150,177},Cyan,Surface,255,true));
+        auto* menu=m_buttonMenu;menu->setZOrder(30);
         auto* face = surface({120, 26}, {}, Blue, SurfaceRaised, 250, true);
         auto* caption = menuLabel(i18n::text("close", "Close"), 0.36f, {60, 13}, Text, FontWeight::ExtraBold);
         fitMenuLabelWidth(caption, 100, 0.36f, 0.26f); face->addChild(caption, 5);
@@ -90,19 +93,16 @@ class RankedPlayerInfoPopup final : public Popup, public UserInfoDelegate {
         auto* title = menuLabel(i18n::text("player-info", "PLAYER INFO"), 0.50f, {150, 246}, Text, FontWeight::Black);
         fitMenuLabelWidth(title, 268, 0.50f, 0.34f); m_contents->addChild(title);
         auto const& match = RankedRuntime::get().view().match;
-        auto const& profile = m_side == "A" ? match.playerAProfile : match.playerBProfile;
-        auto const& tier = profile.displayedTier;
-        if (hasPersistentRankAmbient(tier)) {
-            auto* badge = createAnimatedRankBadge(tier,{24,24},RankBadgeDisplay::Compact);
-            badge->setPosition({274,247}); m_contents->addChild(badge,5);
-            title->setPosition({137,246}); fitMenuLabelWidth(title,230,0.50f,0.34f);
-        }
-        auto* name = menuLabel(info.username, 0.42f, {150, 223}, Gold, FontWeight::ExtraBold);
-        fitMenuLabelWidth(name, 264, 0.42f, 0.30f); m_contents->addChild(name);
-        auto* record = menuLabel(matchRecordText(profile.wins,profile.losses,i18n::isKorean()),
-            0.38f,{150,201},Text,FontWeight::ExtraBold);
-        fitMenuLabelWidth(record,264,0.38f,0.28f); record->setID("ranked-player-info-record"_spr); m_contents->addChild(record);
-        float y = 181;
+        auto const& profile=m_side=="A"?match.playerAProfile:match.playerBProfile;
+        title->setPosition({150,330});
+        auto* name=menuLabel(info.username,.42f,{150,304},Gold,FontWeight::ExtraBold);
+        fitSingleLineMenuLabel(name,264,23,.42f);m_contents->addChild(name);
+        publicPlayerTitle(m_contents,info.publicProfile["equippedTitle"],{150,281},264,.25f);
+        publicRankLine(m_contents,i18n::text("survival","SURVIVAL"),info.publicProfile["survival"],253);
+        publicRankLine(m_contents,i18n::text("solo-ranked","SOLO RANKED"),info.publicProfile["solo"],223);
+        auto* record=menuLabel(matchRecordText(profile.wins,profile.losses,i18n::isKorean()),.32f,{150,196},Text,FontWeight::ExtraBold);
+        fitSingleLineMenuLabel(record,264,18,.32f);record->setID("ranked-player-info-record"_spr);m_contents->addChild(record);
+        float y=175;
         if (m_statistics && m_statistics->globalRank > 0) {
             row("GD Global Rank", fmt::format("#{}", m_statistics->globalRank), y, Gold); y -= 20;
         }

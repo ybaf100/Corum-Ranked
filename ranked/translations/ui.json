@@ -2302,5 +2302,25 @@
   "history-connection-help": {
     "en": "Reconnect to continue viewing your match history.",
     "ko": "경기 기록을 계속 보려면 다시 접속하세요."
+  },
+  "update-channel": {
+    "en": "UPDATE CHANNEL",
+    "ko": "업데이트 브랜치"
+  },
+  "debug-password": {
+    "en": "Debug password",
+    "ko": "디버그 비밀번호"
+  },
+  "incorrect-password": {
+    "en": "Password verification failed.",
+    "ko": "비밀번호를 확인할 수 없습니다."
+  },
+  "survival-record-games": {
+    "en": " MATCHES ",
+    "ko": "전 "
+  },
+  "survival-record-wins": {
+    "en": " WINS (",
+    "ko": "승 ("
   }
 }

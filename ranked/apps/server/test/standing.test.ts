@@ -3,7 +3,7 @@ import { ValidationPipe, type INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import type { RankedRatingProfile, TierBand } from "@corum-ranked/rules";
+import { ACHIEVEMENT_DEFINITIONS, type RankedRatingProfile, type TierBand } from "@corum-ranked/rules";
 import { readStandings } from "../src/leaderboard/standing.js";
 import { buildScorePresentation, resultPromotionSeries } from "../src/match/score-presentation.js";
 import { PgliteDatabase } from "./pglite-database.js";
@@ -35,7 +35,9 @@ beforeAll(async () => {
       wins integer NOT NULL DEFAULT 0, losses integer NOT NULL DEFAULT 0,
       promotion_source_tier text, promotion_target_tier text, promotion_games_required integer,
       promotion_wins_required integer, promotion_results jsonb NOT NULL DEFAULT '[]',
-      demotion_warning boolean NOT NULL DEFAULT FALSE, updated_at timestamptz NOT NULL DEFAULT now());
+      demotion_warning boolean NOT NULL DEFAULT FALSE, updated_at timestamptz NOT NULL DEFAULT now(),
+      equipped_achievement_id text,equipped_achievement_level smallint);
+    CREATE TABLE ranked_achievement_unlocks(player_id uuid REFERENCES ranked_players(id) ON DELETE CASCADE,achievement_id text,achievement_level smallint);
     CREATE TABLE ranked_placement_runs (id uuid PRIMARY KEY, player_id uuid, state text, stage_count int,
       current_stage_index int, current_map_index int, stage_results jsonb DEFAULT '[]', created_at timestamptz);
     CREATE TABLE ranked_placement_maps (run_id uuid, state text);
@@ -67,6 +69,15 @@ const bands: readonly TierBand[] = [
 ];
 
 describe("client standings SQL", () => {
+  it("only exposes an equipped title after its exact scoped achievement/level was unlocked",async()=>{
+    await add(1,900,1000,"SILVER");
+    const achievement=ACHIEVEMENT_DEFINITIONS.find(d=>d.type==='ONE_SHOT'&&d.scope==='SURVIVAL')!;
+    await database.query('UPDATE ranked_profiles SET equipped_achievement_id=$2,equipped_achievement_level=0 WHERE player_id=$1',[id(1),achievement.id]);
+    const service=new LeaderboardService(database,{getSnapshotOrNull:()=>null} as RankedConfigService);
+    expect((await service.list()).players[0]!.equippedTitle).toBeNull();
+    await database.query('INSERT INTO ranked_achievement_unlocks VALUES($1,$2,0)',[id(1),achievement.id]);
+    expect((await service.list()).players[0]!.equippedTitle).toMatchObject({achievementId:achievement.id,scope:'SURVIVAL',level:null});
+  });
   it("selects the highest five GOLD overtakes by the shared status rank before MMR", async () => {
     await add(1,1300,1000,"GOLD"); await add(2,null,1000,"UNRANKED");
     for (let n=3;n<=10;++n) await add(n,1250,n>=9?9999:1000+n,"GOLD",n===6);

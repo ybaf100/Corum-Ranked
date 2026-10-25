@@ -115,6 +115,16 @@ template<class Cards>
 inline std::vector<std::size_t> achievementDisplayOrderForScope(Cards const& cards, std::string_view scope) {
     auto order = achievementDisplayOrder(cards);
     std::erase_if(order, [&](std::size_t index) { return cards[index].scope != scope; });
+    if constexpr(requires{cards[0].type;cards[0].rarity;cards[0].rewardAp;}){
+        std::vector<std::size_t> singles;
+        for(auto index:order)if(cards[index].type=="ONE_SHOT")singles.push_back(index);
+        auto rarity=[](std::string const& value){return value=="COMMON"?1:value=="RARE"?2:value=="EPIC"?3:value=="LEGENDARY"?4:value=="MYTHIC"?5:6;};
+        std::stable_sort(singles.begin(),singles.end(),[&](auto a,auto b){
+            auto const left=rarity(cards[a].rarity),right=rarity(cards[b].rarity);
+            return left!=right?left<right:cards[a].rewardAp<cards[b].rewardAp;
+        });
+        std::size_t next=0;for(auto& index:order)if(cards[index].type=="ONE_SHOT")index=singles[next++];
+    }
     return order;
 }
 

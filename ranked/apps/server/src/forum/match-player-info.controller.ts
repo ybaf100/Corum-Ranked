@@ -6,6 +6,7 @@ import { SessionGuard } from '../session/session.guard.js';
 import type { RankedSessionContext } from '../session/session.types.js';
 import { ForumRecordsService } from './forum-records.service.js';
 import { COJONG } from './forum-records.source.js';
+import {readPublicPlayerProfiles} from './public-player-profiles.js';
 
 @Controller('api/ranked/matches')
 @UseGuards(SessionGuard)
@@ -27,6 +28,7 @@ export class MatchPlayerInfoController {
     const botReference = row.match_type === 'DEBUG_BOT' && side === 'B';
     const accountId = botReference ? COJONG.accountId : side === 'A' ? row.account_a : row.account_b;
     const username = botReference ? COJONG.username : side === 'A' ? row.name_a : row.name_b;
-    return { ...(await this.records.read(accountId)), gdUsername: username, botReference };
+    return { ...(await this.records.read(accountId)), gdUsername: username, botReference,
+      profile:botReference?null:(await readPublicPlayerProfiles(this.database,[accountId]))[accountId]??null };
   }
 }

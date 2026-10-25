@@ -40,7 +40,7 @@ class SurvivalStandingsPopup final:public geode::Popup {
     struct Card {SurvivalStanding row;CCLabelBMFont* title=nullptr;CCLabelBMFont* progress=nullptr;CCNode* red=nullptr;SurvivalProgressTween tween;CCMenuItemSpriteExtra* item=nullptr;};
     std::vector<Card> m_cards;std::string m_match;
     CCLabelBMFont *m_clock=nullptr,*m_pageLabel=nullptr;
-    bool m_compact=false;std::size_t m_page=0,m_pages=1,m_pageSize=16;
+    bool m_compact=false,m_reduced=false;std::size_t m_page=0,m_pages=1,m_pageSize=16;
     bool init() override{
         if(!Popup::init(490,282))return false;
         m_bgSprite->setVisible(false);setID("survival-standings-popup"_spr);
@@ -49,22 +49,23 @@ class SurvivalStandingsPopup final:public geode::Popup {
         auto& runtime=SurvivalRuntime::get();m_match=runtime.view().id;
         m_clock=menuLabel("SURVIVAL",.30f,{245,264},Cyan,FontWeight::Black);m_mainLayer->addChild(m_clock,5);
         auto const rows=survivalRoster(runtime.view());
-        m_compact=survivalCompactCards(static_cast<std::size_t>(std::count_if(rows.begin(),rows.end(),[](auto const& row){return !row.eliminated;})));
-        m_pageSize=m_compact?32:16;m_pages=std::max<std::size_t>(1,(rows.size()+m_pageSize-1)/m_pageSize);
+        auto const survivors=static_cast<std::size_t>(std::count_if(rows.begin(),rows.end(),[](auto const& row){return !row.eliminated;}));
+        m_compact=survivalCompactCards(survivors);m_reduced=survivalReducedCards(survivors);
+        m_pageSize=m_compact?32:m_reduced?24:16;m_pages=std::max<std::size_t>(1,(rows.size()+m_pageSize-1)/m_pageSize);
         for(std::size_t i=0;i<rows.size();++i){
-            auto const& row=rows[i];float const height=m_compact?21.f:51.f;
+            auto const& row=rows[i];float const height=m_compact?21.f:m_reduced?32.f:51.f;
             auto* face=surface({112,height},{},Blue,SurfaceRaised,250,true);
             auto* red=surface({112,height},{56,height/2},Red,{42,13,28},255,true);face->addChild(red,1);
-            auto* name=playerNameLabel(row.name,.22f,m_compact?CCPoint{68,10.5f}:CCPoint{56,43},Text,FontWeight::Black);face->addChild(name,5);
-            if(auto* icon=survivalAvatar(row,runtime.view().ownId,15)){icon->setPosition(m_compact?CCPoint{13,10.5f}:CCPoint{44,26});face->addChild(icon,5);}
+            auto* name=playerNameLabel(row.name,.22f,m_compact?CCPoint{68,10.5f}:m_reduced?CCPoint{67,23}:CCPoint{56,43},Text,FontWeight::Black);face->addChild(name,5);
+            if(auto* icon=survivalAvatar(row,runtime.view().ownId,15)){icon->setPosition(m_compact?CCPoint{13,10.5f}:m_reduced?CCPoint{13,16}:CCPoint{44,26});face->addChild(icon,5);}
             CCLabelBMFont* progress=nullptr;
             if(!m_compact){
-                auto* badge=createAnimatedRankBadge(row.tier,{17,17},RankBadgeDisplay::Leaderboard);badge->setPosition({68,26});face->addChild(badge,5);
-                progress=menuLabel("",.16f,{56,9},TextMuted,FontWeight::ExtraBold);face->addChild(progress,5);
+                if(!m_reduced){auto* badge=createAnimatedRankBadge(row.tier,{17,17},RankBadgeDisplay::Leaderboard);badge->setPosition({68,26});face->addChild(badge,5);}
+                progress=menuLabel("",.16f,m_reduced?CCPoint{67,9}:CCPoint{56,9},TextMuted,FontWeight::ExtraBold);face->addChild(progress,5);
             }
             auto const cell=i%m_pageSize;
             auto* item=CCMenuItemSpriteExtra::create(face,this,menu_selector(SurvivalStandingsPopup::onPlayer));item->setTag(static_cast<int>(i));
-            item->setPosition({65.f+120*(cell%4),m_compact?237.f-25*(cell/4):224.f-56*(cell/4)});m_buttonMenu->addChild(item);
+            item->setPosition({65.f+120*(cell%4),m_compact?237.f-25*(cell/4):m_reduced?233.f-36*(cell/4):224.f-56*(cell/4)});m_buttonMenu->addChild(item);
             m_cards.push_back({row,name,progress,red,{},item});
         }
         if(m_pages>1){
@@ -94,8 +95,8 @@ public:
             if(m_compact){card.title->setString(row.name.c_str());fitSingleLineMenuLabel(card.title,80,13,.22f);}
             else {
                 card.tween.observe(v.revision,row.attemptId,row.attemptActive,row.bestProgress,row.currentProgress);card.tween.advance(dt);
-                card.title->setString(fmt::format("{} {}",row.rank>0?survivalOrdinal(row.rank):"--",row.name).c_str());fitSingleLineMenuLabel(card.title,102,12,.22f);
-                card.progress->setString(fmt::format("BEST {}% · NOW {}%",rankedScoreText(card.tween.best.displayed,false),rankedScoreText(card.tween.now,false)).c_str());fitFullMenuLabel(card.progress,104,11,.16f);
+                card.title->setString(fmt::format("{} {}",row.rank>0?survivalOrdinal(row.rank):"--",row.name).c_str());fitSingleLineMenuLabel(card.title,m_reduced?80:102,12,.22f);
+                card.progress->setString(fmt::format("BEST {}% · NOW {}%",rankedScoreText(card.tween.best.displayed,false),rankedScoreText(card.tween.now,false)).c_str());fitSingleLineMenuLabel(card.progress,m_reduced?80:104,11,.16f);
             }
             card.red->setVisible(row.eliminated || (row.rank>0 && !row.passing && v.state=="PLAYING"));
         }
@@ -141,7 +142,7 @@ public:
             }else if(ceremony){
                 std::array<int,3> ranks{2,1,3};auto const width=std::min(138.f,(size.width-48)/3),base=80.f;
                 for(int n=0;n<3;++n){int rank=ranks[n];auto it=std::find_if(m_profiles.begin(),m_profiles.end(),[&](auto const& p){return p.rank==rank;});if(it==m_profiles.end())continue;
-                    auto const h=rank==1?95.f:rank==2?70.f:51.f;auto const x=size.width/2+(n-1)*(width+8);auto const tint=rank==1?Gold:rank==2?ccc3(201,215,235):ccc3(208,137,70);
+                    auto const h=rank==1?95.f:rank==2?70.f:51.f;auto const x=size.width/2+(n-1)*(width+8);auto const tint=rank==1?Gold:rank==2?ccc3(240,247,255):ccc3(208,137,70);
                     auto* pedestal=surface({width,h},{x,base},tint,SurfaceRaised,255,true);pedestal->setAnchorPoint({.5f,0});addChild(pedestal,5);
                     // A plain node has no fill and respects its anchor. A transparent CCLayerColor
                     // ignores that anchor by default; fading its own opacity also paints a black slab.

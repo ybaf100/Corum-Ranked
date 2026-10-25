@@ -9,7 +9,7 @@ using namespace geode::prelude;
 
 inline ccColor3B standingColor(int rank) {
     if (rank == 1) return Gold;
-    if (rank == 2) return ccc3(210, 219, 232);
+    if (rank == 2) return ccc3(240, 247, 255);
     if (rank == 3) return ccc3(225, 144, 69);
     return rank > 3 ? ccc3(16, 20, 28) : TextMuted;
 }
