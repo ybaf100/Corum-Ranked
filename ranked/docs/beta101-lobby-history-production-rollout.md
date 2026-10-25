@@ -92,3 +92,57 @@ run (population, current profiles and client/update admission) passed **73/73**.
 The last workspace typecheck also passed. The history metadata optimization keeps
 LP/title fields but omits its unused record-summary query; popup/profile consumers
 retain record summaries. No compiler warning was disabled for the new changes.
+
+### Main publication and external Actions blocker
+
+- Source main commit: `543dfec20684512a4f75adc3c462bcdd40059ba5`, normal
+  expected-head push through the connected ybaf100 account.
+- [Release run 40169454026](https://github.com/ybaf100/Corum-Ranked/actions/runs/40169454026),
+  [Debug run 40169454013](https://github.com/ybaf100/Corum-Ranked/actions/runs/40169454013),
+  and [server CI 40169454007](https://github.com/ybaf100/Corum-Ranked/actions/runs/40169454007)
+  all stopped before any checkout/build step. Raw job metadata showed runner ID
+  zero and an empty steps array. One failed-job retry per run was accepted but
+  again ended without steps. These are not compiler/test failures and neither
+  native platform builds nor package/publish steps executed for beta.101.
+- Check runs advertise two annotations each, but the connected GitHub Fetch
+  endpoint rejects the annotations URL as unsupported. No billing/quota/account
+  cause is asserted without the actual annotation text. No further blind retries
+  or release guard bypass is used; the owner was asked for that text.
+- At 06:38:52 UTC both beta.101 R2 descriptors still returned HTTP 404.
+  New immutable objects were not published and existing beta.100 objects were
+  not overwritten. **beta.101 R2 publication and production activation remain
+  incomplete**, so these new UI changes are not yet available in a public client.
+- At 06:37:16 UTC Singapore health/ready returned HTTP 200, database/schema/public
+  readiness true, and required client version plus both hashes/sizes still
+  matched verified beta.100. Solo OFF and Survival 64-player ON were preserved.
+  There is no beta.101 deployment attempt: its source marker explicitly prevents
+  activation before verified client packages, even if ordinary auto-deploy is on.
+
+Resume after the Actions execution restriction is resolved: retry failed jobs
+in the source runs above (their push event retains `[publish-r2] [no-deploy]`),
+check all platform/Debug OFF and publication jobs, download both complete
+beta.101 packages and verify hashes/size/manifests/channel/native payloads, then
+create a documentation-only `[deploy-lightsail] [build only]` main commit or
+dispatch the existing Lightsail workflow in deploy mode. Verify the actual
+Docker/upload/rollback activation and public API version separately. The standing
+user deployment authorization remains in effect; do not ask for it again.
+
+### Final isolated PostgreSQL 16 run
+
+The final beta.101 source was tested again with a disposable local PostgreSQL 16
+service at loopback, including the optional pool reconnection/idle-retirement
+case. **All 70 server suites / 627 tests passed, zero skipped**; rules remained
+**288/288**. This fresh run includes the history query omission, current version
+admission, counters, active matching/recovery and existing achievements. The
+expected local-backend termination log belongs to that disposable recovery test,
+not Production Neon. Together with **293/293 native tests**, workspace typecheck,
+server/rules build and package/localization checks, local validation is complete.
+The Actions scheduling blocker and missing beta.101 publications remain separate
+from these passing local checks.
+
+The final read-only Neon control-plane observation also showed the currently
+deployed **beta.100** endpoint `idle`, last active `2026-10-25T06:37:15Z` and
+automatically suspended at `2026-10-25T06:42:31Z` under its unchanged 300-second
+policy. This is a real post-beta.100-deployment suspension observation; it is
+not presented as a deployed beta.101 test. No SQL was used for that observation
+and no manual endpoint suspend/setting change was performed.
