@@ -1,4 +1,5 @@
 #include "HistoryLevelLookup.hpp"
+#include "RankedAudioManager.hpp"
 #include "RankedRuntime.hpp"
 #include "SurvivalRuntime.hpp"
 #include "RankedMapDetails.hpp"
@@ -63,14 +64,22 @@ class HistoryLevelPopup final:public Popup {
     std::chrono::steady_clock::time_point m_deadline;
     void refresh(float){
         auto origin=m_origin?m_origin->lock():Ref<CCScene>{};
-        if(!origin || origin.data()!=CCDirector::sharedDirector()->getRunningScene() || !canOpenHistoryLevel()){onClose(nullptr);return;}
+        auto* director=CCDirector::sharedDirector();
+        if(!origin || origin.data()!=director->getRunningScene() || director->getNextScene() || !canOpenHistoryLevel()){onClose(nullptr);return;}
         auto& lookup=HistoryLevelLookup::get();auto level=lookup.level(m_ticket);
         if(level){
             // Keep the native object alive across removing this popup. No Ready,
             // song gate, attempt, result reporting or Play call exists here.
             auto* scene=LevelInfoLayer::scene(level.data(),false);
             if(!scene){fail();return;}
-            onClose(nullptr);CCDirector::sharedDirector()->pushScene(CCTransitionFade::create(.2f,scene));return;
+            auto* transition=CCTransitionFade::create(.2f,scene);
+            if(!transition){fail();return;}
+            // History opens ordinary GD LevelInfo/Play scenes, whose PlayLayer
+            // deliberately never acquires Ranked audio. Retire every owned
+            // lobby/crossfade channel before the native scene takes over.
+            RankedAudioManager::get().fadeOutForGameplay();
+            log::info("[RankedHistory] native level audio handoff level={}",static_cast<int>(level->m_levelID));
+            onClose(nullptr);CCDirector::sharedDirector()->pushScene(transition);return;
         }
         if(!lookup.error(m_ticket).empty() || std::chrono::steady_clock::now()>=m_deadline)fail();
     }

@@ -1429,9 +1429,9 @@ void RankedAudioManager::updateOwnedFades(std::chrono::steady_clock::time_point 
 }
 
 void RankedAudioManager::fadeOutForGameplay() {
-    // This is called only after vanilla successfully initializes PlayLayer. The
-    // Ranked layer no longer ticks in gameplay, so stop the independently-owned
-    // channel deterministically and hand audio ownership back to Geometry Dash.
+    // Native PlayLayer entry and history's successful LevelInfo transition both
+    // hand audio ownership back to Geometry Dash. Stop independently-owned
+    // channels immediately: the covered Ranked layer no longer ticks fades.
     m_desiredMode = RankedAudioMode::Silent;
     m_requestedMode = RankedAudioMode::Silent;
     m_failedPlaybackKeys.clear();

@@ -924,7 +924,12 @@ class CorumRankedLayer final : public CCLayerColor {
 
     void syncAudioMode() {
         auto& audio = RankedAudioManager::get();
-        auto* scene=CCDirector::sharedDirector()->getRunningScene();
+        auto* director=CCDirector::sharedDirector();
+        auto* scene=director->getRunningScene();
+        // An outgoing lobby can still refresh during a native scene fade.
+        // It must not restart its BGM after history has handed audio to GD.
+        // onEnter/refresh restores the selected mode when this scene returns.
+        if (!isRunning() || scene != getParent() || director->getNextScene()) return;
         if(scene && scene->getChildByIDRecursive("survival-game-coordinator"_spr))return;
         if (showResourceGate() || RankedRuntime::get().view().stage == RuntimeStage::AwaitingUpdate) return;
 

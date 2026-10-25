@@ -94,8 +94,8 @@ struct Handler{int m_nPriority=0;};
 struct Dispatcher{Handler* findHandler(Menu*){return nullptr;}};
 std::string operator""_spr(char const* s,std::size_t n){return std::string(s,n);}
 struct Scene{bool survival=false;void* getChildByIDRecursive(std::string const&){return survival?this:nullptr;}};
-struct CCDirector{Scene scene;Scene* getRunningScene(){return &scene;}Dispatcher d;static CCDirector* sharedDirector(){static CCDirector c;return &c;}Dispatcher* getTouchDispatcher(){return &d;}};
-struct CCLayerColor{virtual ~CCLayerColor()=default;virtual void onEnter(){}};
+struct CCDirector{Scene scene;Scene* getRunningScene(){return &scene;}Scene* getNextScene(){return nullptr;}Dispatcher d;static CCDirector* sharedDirector(){static CCDirector c;return &c;}Dispatcher* getTouchDispatcher(){return &d;}};
+struct CCLayerColor{virtual ~CCLayerColor()=default;virtual void onEnter(){}bool isRunning()const{return true;}Scene*getParent(){return &CCDirector::sharedDirector()->scene;}};
 #define schedule_selector(x) 0
 using namespace corum::ranked;
 struct CorumRankedLayer: CCLayerColor {
@@ -122,7 +122,7 @@ struct CorumRankedLayer: CCLayerColor {
 };
 int main(){
  auto& audio=RankedAudioManager::get();auto& runtime=RankedRuntime::get();GJGameLevel level;
- // LevelInfo preparation never calls the gameplay handoff. Failed init keeps
+ // Active-match LevelInfo preparation never calls the gameplay handoff. Failed init keeps
  // the already owned channel; only a successfully initialized Corum scene stops it.
  CorumRankedPlayLayer scene;scene.fields.rankedLevel=true;
  PlayLayer::succeeds=false;assert(!scene.init(&level,false,false));assert(audio.channels==1 && FMODAudioEngine::stops==0);

@@ -235,6 +235,24 @@ int main(){
         f.audio.setMode(RankedAudioMode::ResultWin); // no configured result: still no unrelated gain
         assert(near(music->audible(),.65f));
     }
+    // History's native LevelInfo handoff must stop the lobby, its retiring
+    // crossfade and prepared channels immediately, without touching GD audio.
+    // Background resume/ticks cannot resurrect Ranked BGM until the lobby owns
+    // its scene again and explicitly requests the current mode.
+    {Fixture f;auto* old=f.start(RankedAudioMode::Lobby);
+        f.audio.setMode(RankedAudioMode::Round12);auto* current=f.audio.m_rankedChannel;
+        FMOD::Sound nativeSound;FMOD::Channel* nativeMusic=nullptr;
+        f.system.playSound(&nativeSound,&f.system.master,false,&nativeMusic);nativeMusic->setVolume(.65f);
+        int engineStops=FMODAudioEngine::sharedEngine()->stops,menus=GameManager::sharedState()->menus;
+        f.audio.fadeOutForGameplay();
+        assert(old->stops==1&&current->stops==1&&!f.audio.m_rankedChannel&&!f.audio.m_retiringChannel);
+        assert(f.audio.m_desiredMode==RankedAudioMode::Silent&&f.audio.m_requestedMode==RankedAudioMode::Silent);
+        f.audio.onApplicationResume();for(int i=0;i<20;++i)f.step(100);
+        assert(!f.audio.m_rankedChannel&&!f.audio.m_retiringChannel&&f.audio.m_preparedChannels.empty());
+        assert(nativeMusic->stops==0&&near(nativeMusic->audible(),.65f));
+        assert(FMODAudioEngine::sharedEngine()->stops==engineStops&&GameManager::sharedState()->menus==menus);
+        f.audio.setMode(RankedAudioMode::Lobby);auto* returned=f.audio.m_rankedChannel;f.step(2000);
+        assert(returned&&returned!=old&&near(returned->audible(),.8f));}
     // All configured offsets, especially 182s, are decoded during prewarming.
     // The transition itself performs zero seeks and does not restart the old
     // stream. first-play semantics deliberately reset a reused Sound to zero.
