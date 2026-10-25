@@ -25,7 +25,8 @@ def verify_binary(binary, platform, debug):
                 "PauseLayer::customSetup",
                 "GameManager::returnToLastScene",
                 "GJBaseGameLayer::update", "GJBaseGameLayer::updateCamera",
-                "GJBaseGameLayer::teleportPlayer"}
+                "GJBaseGameLayer::teleportPlayer",
+                "GJBaseGameLayer::checkCollisions", "GJBaseGameLayer::collisionCheckObjects"}
     forbidden = {"GJGameLevel::saveNewScore", "GJGameLevel::storeNewLocalScore"}
     if not required <= targets or targets & forbidden:
         raise ValueError("missing safety/capture boundary or unsafe persistence detour")
@@ -34,8 +35,9 @@ def verify_binary(binary, platform, debug):
     if platform == "ios":
         if struct.unpack_from("<II", binary) != (0xFEEDFACF, 0x0100000C):
             raise ValueError("expected a thin iOS arm64 dylib")
-        probes = {"GJBaseGameLayer::checkCollisions", "GJBaseGameLayer::collisionCheckObjects",
-                  "GJBaseGameLayer::playerTouchedTrigger", "EffectGameObject::triggerObject"}
+        # Collision boundaries now implement the production trigger-only world
+        # path. Activation-observation detours remain strictly Debug-only.
+        probes = {"GJBaseGameLayer::playerTouchedTrigger", "EffectGameObject::triggerObject"}
         if targets & probes != (probes if debug else set()):
             raise ValueError("Debug ON/OFF native instrumentation mismatch")
     return sorted(player)

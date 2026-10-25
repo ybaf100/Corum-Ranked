@@ -177,3 +177,10 @@ also models distinct long-long revision and long JSON types so Linux compilation
 catches the same portability regression. The original full test results above
 precede this one-line correction; the handoff test and subsequent full CI/build
 outcomes verify the corrected source separately.
+
+The compiled-package contract was also updated for the actual production change:
+checkCollisions and collisionCheckObjects must exist in both Release and Debug,
+while playerTouchedTrigger / triggerObject observation probes remain Debug-only.
+Negative fixtures reject either missing production boundary in both channels,
+and still reject unsafe persistence detours and Release-only diagnostic leakage.
+The existing package guard is retained and strengthened rather than bypassed.
