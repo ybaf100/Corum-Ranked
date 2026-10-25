@@ -1,3 +1,4 @@
+import { standardSpectatorEligible } from "./spectator-live.policy.js";
 import { soloHistoryDetails } from "../history/solo-history.js";
 import type { HistoryOptions } from "../history/history-options.js";
 import { readStandings } from "../leaderboard/standing.js";
@@ -1298,10 +1299,12 @@ export class MatchService {
         roundSnapshot: {
           roundNumber: Number(round.round_number),
           phase: decision.state.phase,
+          stateVersion: decision.state.stateVersion,
           scores: decision.state.scores,
           displayScores: decision.state.scores,
           clears: decision.state.clears,
           lastAttemptWindow: decision.state.lastAttemptWindow,
+          spectatorActive: standardSpectatorEligible(decision.state, authorization.side),
         },
         serverNow: now.toISOString(),
       };
@@ -1473,10 +1476,12 @@ export class MatchService {
         roundSnapshot: {
           roundNumber: Number(round.round_number),
           phase: decision.state.phase,
+          stateVersion: decision.state.stateVersion,
           scores: decision.state.scores,
           displayScores: decision.state.scores,
           clears: decision.state.clears,
           lastAttemptWindow: decision.state.lastAttemptWindow,
+          spectatorActive: standardSpectatorEligible(decision.state, authorization.side),
         },
         serverNow: now.toISOString(),
       };
@@ -1538,6 +1543,7 @@ export class MatchService {
         roundSnapshot: {
           roundNumber: Number(round.round_number),
           phase: state.phase,
+          stateVersion: state.stateVersion,
           scores: state.scores,
           displayScores: {
             A: state.scores.A + (progressA
@@ -1549,6 +1555,7 @@ export class MatchService {
           },
           clears: state.clears,
           lastAttemptWindow: state.lastAttemptWindow,
+          spectatorActive: standardSpectatorEligible(state, authorization.side),
         },
         serverNow: now.toISOString(),
       };
@@ -3375,6 +3382,7 @@ export class MatchService {
           roundNumber: Number(round.round_number),
           banner: bannerForRound(round.round_number),
           phase: round.phase,
+          stateVersion: domain?.stateVersion ?? 0,
           map: {
             ...mapPresentationFields(config.maps, round.playable_level_id),
             levelId: round.level_id,
@@ -3394,23 +3402,8 @@ export class MatchService {
           outcome: domain?.outcome ?? null,
         };
         if (domain) {
-          const viewerProgress = viewerSide === "A" ? progressA : progressB;
           const opponentProgress = opponentSide === "A" ? progressA : progressB;
-
-          const lastAttemptSpectator =
-            (domain.phase === "LAST_ATTEMPT_WINDOW" || domain.phase === "ROUND_SETTLING") &&
-            domain.lastAttemptWindow?.triggerSide === viewerSide &&
-            domain.lastAttemptWindow.targetSide === opponentSide &&
-            domain.clears[viewerSide] === domain.rules.clearTarget &&
-            domain.clears[opponentSide] < domain.rules.clearTarget;
-
-          const finalWindowSpectator =
-            domain.phase === "ROUND_SETTLING" &&
-            domain.lastAttemptWindow === null &&
-            !viewerProgress &&
-            Boolean(opponentProgress);
-
-          if (lastAttemptSpectator || finalWindowSpectator) {
+          if (standardSpectatorEligible(domain, viewerSide)) {
             const opponent = opponentSide === "A" ? playerA : playerB;
             spectator = {
               active: true,

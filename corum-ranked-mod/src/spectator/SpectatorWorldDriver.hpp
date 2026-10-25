@@ -28,6 +28,8 @@ class SpectatorWorldDriver {
 public:
     bool apply(PlayLayer* layer, bool authorizedDummy, std::optional<SpectatorRemoteFrame> const& frame);
     void reconcile(PlayLayer* layer);
+    std::optional<float> takeNativeDeltaSeconds();
+    bool partialHistory() const{return m_partialHistory;}
     bool owns(PlayerObject const* player) const { return player && player == m_player; }
     bool contextChanged(SpectatorRemoteContext const& context) const { return m_frame && m_frame->context != context; }
     void reset();
@@ -38,5 +40,7 @@ private:
     std::optional<SpectatorRemoteFrame> m_frame;
     std::optional<SpectatorGhostPose> m_previous;
     double m_followRemainderMs = 0;
+    std::optional<float> m_nativeDeltaSeconds;
+    bool m_partialHistory=false;
 };
 } // namespace corum::ranked

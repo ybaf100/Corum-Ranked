@@ -96,6 +96,8 @@ public:
 namespace log { template<class... T> void info(T...) {} template<class... T> void warn(T...) {} template<class... T> void debug(T...) {} }
 namespace prelude { using namespace cocos2d; using geode::Ref; namespace log=geode::log; }
 }
+namespace gd {template<class T>using vector=std::vector<T>;}
+struct GameObject{bool m_isTrigger=false;};
 struct GJGameLevel { int m_levelID=123,m_timestamp=0; };
 struct PlayLayer;
 struct GJBaseGameLayer;
@@ -149,16 +151,19 @@ struct GJBaseGameLayer {
         bool m_unkBool4=false,m_unkBool5=false;
         float m_unkInt13=0;
         cocos2d::CCPoint m_cameraPosition{},m_cameraPosition2{},m_cameraStepDiff{};
-        float m_cameraZoom=1;
+        float m_cameraZoom=1;double m_levelTime=0;
         void stopTweenAction(int) {}
     } m_gameState;
-    int cameraUpdates=0,worldUpdates=0;
+    int cameraUpdates=0,worldUpdates=0,collisionQueries=0,triggerObjects=0;
+    bool damageIgnored=false;inline static gd::vector<GameObject*> nativeObjects;
+    virtual int checkCollisions(PlayerObject* p,float dt,bool ignore){++collisionQueries;damageIgnored=ignore;collisionCheckObjects(p,&nativeObjects,static_cast<int>(nativeObjects.size()),dt);return 17;}
+    virtual void collisionCheckObjects(PlayerObject*,gd::vector<GameObject*>* objects,int n,float){if(objects)triggerObjects+=n;}
     inline static void(*worldDispatch)(GJBaseGameLayer*,float)=nullptr;
     inline static void(*nativeWorldObserver)(GJBaseGameLayer*,float)=nullptr;
     bool worldDispatching=false;
     void update(float dt){
       if(worldDispatch && !worldDispatching){worldDispatching=true;try{worldDispatch(this,dt);}catch(...){worldDispatching=false;throw;}worldDispatching=false;return;}
-      ++worldUpdates;if(nativeWorldObserver)nativeWorldObserver(this,dt);else updateCamera(dt);
+      m_gameState.m_levelTime+=dt;++worldUpdates;if(nativeWorldObserver)nativeWorldObserver(this,dt);else updateCamera(dt);
     }
     void cameraMoveX(float x,float,float,bool) { m_gameState.m_unkBool4=true; m_gameState.m_cameraPosition.x=x; }
     void cameraMoveY(float y,float,float,bool) {
@@ -183,7 +188,7 @@ struct GJBaseGameLayer {
 };
 struct PlayLayer: GJBaseGameLayer {
     GJGameLevel* m_level=nullptr; float m_levelLength=1000,m_progressWidth=200,m_progressHeight=10;
-    bool m_isTestMode=false,m_isPracticeMode=false,m_decimalPercentage=false;
+    bool m_isTestMode=false,m_isPracticeMode=false,m_decimalPercentage=false,m_isPaused=false;
     int m_currentProgress=0,newBest=7,savedPercentage=7,resets=0;
     void resetLevel(){++resets;}
     cocos2d::CCSprite* m_progressFill=nullptr; cocos2d::CCLabelBMFont* m_percentageLabel=nullptr;

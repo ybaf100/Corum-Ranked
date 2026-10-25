@@ -36,9 +36,11 @@ test('actual camera owner hook ends in recorded viewport, drives once, restores 
 #include "${join(root,'src/spectator/ScopedCameraTargetOverride.hpp')}"
 #include "${join(root,'src/domain/SpectatorProgressPolicy.hpp')}"
 #include "${join(root,'src/spectator/SpectatorWorldDriver.hpp')}"
+#include "${join(root,'src/spectator/SpectatorTriggerScope.hpp')}"
 #include "${join(root, 'src/domain/SpectatorNativeProbe.hpp')}"
 #include <memory>
 #include <iostream>
+#include <source_location>
 using namespace geode::prelude;
 namespace fmt { std::string format(char const* pattern,float value){
     char buf[40];snprintf(buf,sizeof(buf),std::string(pattern).find(".2")!=std::string::npos?"%.2f%%":"%.0f%%",value);return buf;
@@ -73,8 +75,9 @@ struct CorumRankedPlayLayer: PlayLayer {
         corum::ranked::CorumSpectatorCamera spectatorCamera;
         std::optional<corum::ranked::SpectatorRemoteFrame> spectatorRenderedFrame;
         std::optional<unsigned> spectatorCameraFrameNumber,spectatorPresentationFrameNumber,spectatorWorldFrameNumber;
-        bool spectatorWorldUpdateInProgress=false,spectatorWorldResetInProgress=false;
+        bool spectatorWorldUpdateInProgress=false,spectatorWorldResetInProgress=false,spectatorCollisionChecked=false,spectatorWorldPoseApplied=false;
         corum::ranked::SpectatorWorldDriver spectatorWorldDriver;
+        corum::ranked::SpectatorSceneContext sceneContext{"debug-spectate:server",1,0,88350599};
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         corum::ranked::SpectatorNativeProbe spectatorNativeProbe;
         bool debugPlaybackScene=true,cameraForensicFrame=false;
@@ -88,8 +91,10 @@ struct CorumRankedPlayLayer: PlayLayer {
     ${methods}
     ${hook}
     ${worldHook}
+    ${method('int checkCollisions(PlayerObject* player,float dt,bool ignoreDamage)')}
+    ${method('void collisionCheckObjects(PlayerObject* player,gd::vector<GameObject*>* objects,int count,float dt)')}
 };
-void close(float a,float b){assert(std::abs(a-b)<0.001f);}
+void close(float a,float b,std::source_location loc=std::source_location::current()){if(std::abs(a-b)>=0.001f){std::cerr<<loc.line()<<": "<<a<<" != "<<b<<std::endl;std::abort();}}
 int main(){
     using namespace corum::ranked;
     {
@@ -121,7 +126,8 @@ int main(){
         scene.m_fields->spectatorCamera.attach(&scene);
         GJBaseGameLayer::cameraDispatch=[](GJBaseGameLayer* layer,float dt){static_cast<CorumRankedPlayLayer*>(layer)->cameraHook(dt);};
         GJBaseGameLayer::worldDispatch=[](GJBaseGameLayer* layer,float dt){static_cast<CorumRankedPlayLayer*>(layer)->worldHook(dt);};
-        auto frame=[](){++CCDirector::sharedDirector()->totalFrames;};
+        auto frame=[&](){++CCDirector::sharedDirector()->totalFrames;if(live.frame)live.frame->publisherElapsedMs+=16;};
+        auto seed=live.frame;seed->sequence=17;seed->publisherElapsedMs=858;scene.m_fields->spectatorWorldDriver.apply(&scene,true,seed);
         ${evidence.frames.map(f=>`
         frame();live.frame->sequence=${f.sequence};live.frame->publisherElapsedMs=${f.elapsedMs};
         live.frame->pose->x=${f.x}f;live.frame->pose->y=${f.y}f;
@@ -162,7 +168,7 @@ int main(){
         live.frame=SpectatorRemoteFrame{{"debug-spectate:server",1,0,88350599,"recording",1,1},30,SpectatorGhostPose{500,600,0,false,false},5000};
         live.frame->pose->camera=SpectatorCameraOrigin{335,500};frame();scene.ensureSpectatorCameraFrame(0.016f);scene.updateProgressbar();
         close(fill.rect.width,100);assert(label.text=="50%");assert(scene.m_currentProgress==0 && scene.newBest==7 && scene.savedPercentage==7);
-        level.m_timestamp=2400;live.frame->pose->x=100;++live.frame->sequence;frame();scene.ensureSpectatorCameraFrame(0.016f);scene.updateProgressbar();close(fill.rect.width,100);
+        level.m_timestamp=2400;live.frame->pose->x=100;++live.frame->sequence;frame();live.frame->publisherElapsedMs=5000;scene.ensureSpectatorCameraFrame(0.016f);scene.updateProgressbar();close(fill.rect.width,100);
 #if !defined(CORUM_RANKED_DEBUG_SPECTATE)
         RankedRuntime::get().data.match.opponentProgress=73;scene.updateProgressbar();close(fill.rect.width,146);
         RankedRuntime::get().data.match.opponentProgress.reset();

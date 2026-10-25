@@ -7,11 +7,11 @@ namespace corum::ranked {
 enum class SpectatorNativePath : std::size_t {
     BlockedPlayerUpdate, CheckCollisions, CollisionObjects, TouchedObject,
     TouchedTrigger, ActivationQuery, ActivationAllowed, Teleport, Spawn,
-    Commands, Follow, DynamicMove, TriggerObject, Count
+    Commands, Follow, DynamicMove, TriggerObject, PoseReceived, MissingPose, DriverApplied, ContextRejected, WorldUpdate, WorldHeld, ClockAdvanced, ClockHeld, Count
 };
 
 // Observation only. No GD calls, no trigger activation and no physics authority.
-// Hookable native paths feed this probe only during an authorized Debug TEST
+// Hookable native paths feed this probe only during an authorized Debug live/TEST
 // world frame. Inline iOS/Windows touchedObject is observed via the native
 // activated-ID map at the caller, never installed as an unsupported detour.
 struct SpectatorNativeProbe {

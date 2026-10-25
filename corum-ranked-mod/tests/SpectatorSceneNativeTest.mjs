@@ -56,6 +56,7 @@ struct PlayLayer: GJBaseGameLayer {
     void* getParent(){return CCDirector::sharedDirector()->getRunningScene();}
     void resetLevel(){++resets; m_hasCompletedLevel=false; if(m_player1)m_player1->m_isDead=false;}
 };
+struct ScopedRealGameplayEnd{bool&f;bool prev;ScopedRealGameplayEnd(bool&flag,bool v):f(flag),prev(flag){f=v;}~ScopedRealGameplayEnd(){f=prev;}};
 struct ScopedPersistenceOwner { explicit ScopedPersistenceOwner(PlayLayer*){} };
 template<class T> struct GeodeFields {
     std::unique_ptr<T> value=std::make_unique<T>();
@@ -128,7 +129,7 @@ struct CorumRankedPlayLayer: PlayLayer {
     struct Fields {
         bool safetyRetired=false,vanillaGameplayEndInProgress=false,rankedInitialized=true,rankedLevel=true;
         bool rankedPractice=false,spectatorMode=false,spectatorPending=false,spectatorScenePrepared=false;
-        bool spectatorPresentationRetired=false;
+        bool spectatorPresentationRetired=false,spectatorWorldResetInProgress=false,spectatorWorldPoseApplied=false,spectatorCollisionChecked=false;
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         bool debugRecordScene=false,debugPlaybackScene=false;
         CCLabelBMFont* debugSpectateHud=nullptr;

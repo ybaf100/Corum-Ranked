@@ -43,8 +43,11 @@ namespace fmt {template<class...T>std::string format(std::string s,T const&...){
 namespace corum::ranked {
 constexpr int kProtocolVersion=2;
 enum class SpectatorLiveStatus {Idle,Waiting,Live,Fallback};
+enum class RuntimeStage{Matched,Ready};
 struct RankedRuntime {
-struct Match{std::string matchId="match";};struct View{Match match;}data;
+bool authorized=true,ackPending=false;bool isSpectating()const{return authorized;}bool hasLocalAttemptInFlight()const{return ackPending;}
+bool isPlacement()const{return false;}
+struct Match{std::string matchId="match";bool spectatorLiveEnabled=true;};struct View{Match match;RuntimeStage stage=RuntimeStage::Matched;}data;
 static RankedRuntime& get(){static RankedRuntime r;return r;}auto const& view()const{return data;}
 std::string spectatorLiveSessionToken()const{return "session";}std::string spectatorLiveMatchToken()const{return "token";}
 };
@@ -88,6 +91,9 @@ assert(spectatorViewerPollGapMs(true,true,true,false,0,100,110,0)==150);
 // Old response callback cannot clear a new request's busy ownership.
 live.pollViewer();auto old=web::pending.back().callback;++live.m_viewRequestGeneration;
 old({{},200});assert(live.m_viewBusy);
+// A same-context response arriving after authority loss cannot revive the stream.
+live.m_viewBusy=false;live.pollViewer();RankedRuntime::get().authorized=false;auto active=web::pending.back().callback;auto generation=live.m_viewRequestGeneration;active({{},200});assert(live.m_viewRequestGeneration>generation&&!live.m_viewBusy);
+RankedRuntime::get().authorized=true;live.pollViewer();RankedRuntime::get().ackPending=true;generation=live.m_viewRequestGeneration;web::pending.back().callback({{},200});assert(live.m_viewRequestGeneration>generation);
 }
 `;
     const dir = mkdtempSync(join(tmpdir(), 'corum-viewer-poll-'));

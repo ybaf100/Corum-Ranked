@@ -204,3 +204,21 @@ export const spectatorLiveContext = (
 };
 
 export const spectatorOpponentSide = (side: PlayerSide): PlayerSide => oppositeSide(side);
+
+/** Canonical Attempt state, never the optional short-lived progress cache. */
+export const standardSpectatorEligible = (
+  round: import("@corum-ranked/rules").RoundState,
+  viewer: PlayerSide,
+): boolean => {
+  const opponent = oppositeSide(viewer);
+  if (round.attempts[viewer].some(attempt => attempt.valid && attempt.endedAtMs === null)) return false;
+  if (round.phase !== "LAST_ATTEMPT_WINDOW" && round.phase !== "ROUND_SETTLING") return false;
+  if (round.lastAttemptWindow) {
+    return round.lastAttemptWindow.triggerSide === viewer &&
+      round.lastAttemptWindow.targetSide === opponent &&
+      round.clears[viewer] === round.rules.clearTarget &&
+      round.clears[opponent] < round.rules.clearTarget;
+  }
+  return round.phase === "ROUND_SETTLING" &&
+    round.attempts[opponent].some(attempt => attempt.valid && attempt.endedAtMs === null);
+};

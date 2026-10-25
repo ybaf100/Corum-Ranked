@@ -1,6 +1,9 @@
 # Live Spectator — protocol v2 (beta32)
 
-Exact client/server gate: **v0.5.0-beta.32**. Production protocol **2** and Debug
+Protocol introduced with beta.32; the current client/server gate is defined in
+`ranked/apps/server/src/session/client-version.ts`. The beta.103 Stage-1 native
+world/authority implementation and verification limits are documented in
+[the rollout report](solo-spectator-stage1-beta103.md). Production protocol **2** and Debug
 recording format **2** require complete gameplay presentation state. V1 is rejected;
 an absent/unknown mode never silently becomes Cube. The old v1 document is historical.
 

@@ -309,6 +309,7 @@ struct MatchView {
     std::string perfectWinSide;
     std::string cancellationReason;
     std::int64_t stateVersion = 0;
+    std::int64_t roundStateVersion = 0;
     int roundNumber = 0;
     double scoreA = 0.0;
     double scoreB = 0.0;

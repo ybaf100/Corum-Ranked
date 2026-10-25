@@ -36,6 +36,7 @@ test('actual world owner synchronizes triggers, Spider and native camera before 
 #include "${join(root,'src/spectator/ScopedCameraTargetOverride.hpp')}"
 #include "${join(root,'src/domain/SpectatorProgressPolicy.hpp')}"
 #include "${join(root,'src/spectator/SpectatorWorldDriver.hpp')}"
+#include "${join(root,'src/spectator/SpectatorTriggerScope.hpp')}"
 #include "${join(root,'src/domain/SpectatorInterpolationBuffer.hpp')}"
 #include "${join(root,'src/spectator/SpectatorPlayerCapture.hpp')}"
 #include "${join(root, 'src/domain/SpectatorNativeProbe.hpp')}"
@@ -76,8 +77,9 @@ struct CorumRankedPlayLayer: PlayLayer {
         corum::ranked::CorumSpectatorCamera spectatorCamera;
         std::optional<corum::ranked::SpectatorRemoteFrame> spectatorRenderedFrame;
         std::optional<unsigned> spectatorCameraFrameNumber,spectatorPresentationFrameNumber,spectatorWorldFrameNumber;
-        bool spectatorWorldUpdateInProgress=false,spectatorWorldResetInProgress=false;
+        bool spectatorWorldUpdateInProgress=false,spectatorWorldResetInProgress=false,spectatorCollisionChecked=false,spectatorWorldPoseApplied=false;
         corum::ranked::SpectatorWorldDriver spectatorWorldDriver;
+        corum::ranked::SpectatorSceneContext sceneContext{"debug-spectate:server",1,0,88350599};
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         corum::ranked::SpectatorNativeProbe spectatorNativeProbe;
         bool debugPlaybackScene=true,cameraForensicFrame=false;
@@ -96,6 +98,8 @@ struct CorumRankedPlayLayer: PlayLayer {
     ${methods}
     ${hook}
     ${worldHook}
+    ${method('int checkCollisions(PlayerObject* player,float dt,bool ignoreDamage)')}
+    ${method('void collisionCheckObjects(PlayerObject* player,gd::vector<GameObject*>* objects,int count,float dt)')}
 };
 CorumRankedPlayLayer* localSafetyLayer(){return static_cast<CorumRankedPlayLayer*>(PlayLayer::get());}
 enum class Priority {First};
@@ -106,7 +110,7 @@ int main(){
  using namespace corum::ranked;
  {
   CorumRankedPlayLayer scene;PlayerHook dummy;PlayerObject second;PlayLayer::current=&scene;
-  scene.m_player1=&dummy;scene.m_player2=&second;dummy.m_gameLayer=&scene;dummy.m_gameLayer=&scene;
+  scene.m_isPaused=true;scene.m_player1=&dummy;scene.m_player2=&second;dummy.m_gameLayer=&scene;dummy.m_gameLayer=&scene;
   GJGameLevel level;level.m_levelID=88350599;scene.m_level=&level;
   auto* world=CCLayer::create();geode::Ref<CCLayer> root(world);scene.m_objectLayer=world;
   CCSprite fill;CCLabelBMFont label;scene.m_progressFill=&fill;scene.m_percentageLabel=&label;
@@ -126,7 +130,7 @@ int main(){
   static int* sweeps;sweeps=&sourceDestinationSweeps;static bool* spiderReady;spiderReady=&spiderReadyBeforeWorld;
   GJBaseGameLayer::nativeWorldObserver=[](GJBaseGameLayer* b,float dt){
    auto* o=static_cast<CorumRankedPlayLayer*>(b);auto* p=b->m_player1;
-   auto const& f=*o->m_fields->spectatorRenderedFrame;
+   assert(!o->m_isPaused);auto const& f=*o->m_fields->spectatorRenderedFrame;
    if(!f.pose)return;
    close(p->getPosition().x,f.pose->x);close(p->getPosition().y,f.pose->y);
    assert(!p->isVisible() && p->m_isUpsideDown==f.pose->upsideDown);
@@ -136,6 +140,7 @@ int main(){
    // Synthetic position-trigger crossing including a Follow Player target and background.
    for(int x:{110,125,140,180})if(p->m_lastPosition.x<x && p->getPosition().x>=x){events->push_back(x);if(x==110||x==180)++*bg;}
    if(std::abs(p->getPosition().y-p->m_lastPosition.y)>400)++*sweeps;
+   auto collisionCalls=b->collisionQueries;b->checkCollisions(p,dt,false);b->checkCollisions(p,dt,false);assert(b->collisionQueries==collisionCalls+1);
    p->update(dt);p->updateRotation(dt);p->spiderTestJump(false); // all local physics blocked
 #if !defined(GEODE_IS_WINDOWS)
    p->updateSpecial(dt); // native helper cannot double-write driver follow history
@@ -150,7 +155,8 @@ int main(){
    close(p->getPosition().x,f.pose->x);assert(p->m_isSpider==(f.pose->mode==SpectatorGameMode::Spider));
    p->m_isSpider=false;p->m_isUpsideDown=false; // a later native write is reconciled after world
   };
-  auto tick=[&](int sequence,double elapsed,float x,float y){
+  GameObject trigger,solid;trigger.m_isTrigger=true;GJBaseGameLayer::nativeObjects={&trigger,&solid};
+  auto tick=[&](int sequence,double elapsed,float x,float y,bool advance=true){
    ++CCDirector::sharedDirector()->totalFrames;
    live.frame->sequence=sequence;live.frame->publisherElapsedMs=elapsed;
    live.frame->pose->x=x;live.frame->pose->y=y;
@@ -158,19 +164,20 @@ int main(){
    auto reads=live.reads,cameras=scene.cameraUpdates,updates=scene.worldUpdates,bgs=scene.bgUpdates;
    scene.GJBaseGameLayer::update(1.0f/60);scene.ensureSpectatorCameraFrame(1.0f/60);
    scene.GJBaseGameLayer::update(1.0f/60);scene.GJBaseGameLayer::updateCamera(1.0f/60);
-   assert(live.reads==reads+1 && scene.worldUpdates==updates+1 && scene.cameraUpdates==cameras+1);
+   assert(live.reads==reads+1 && scene.worldUpdates==updates+(advance?1:0) && scene.cameraUpdates==cameras+(advance?1:0));
    assert(scene.bgUpdates==bgs+1); // one final viewport correction after world
    close(dummy.getPosition().x,x);close(dummy.getPosition().y,y);assert(!dummy.isVisible());
-   assert(dummy.physicsUpdates==0 && dummy.rotationUpdates==0 && dummy.spiderJumps==0);
+   assert(scene.m_isPaused);assert(dummy.physicsUpdates==0 && dummy.rotationUpdates==0 && dummy.spiderJumps==0);
    auto* remote=scene.m_fields->remotePlayer.player();assert(remote && remote!=&dummy && remote!=&second);
    close(remote->getPosition().x,x);close(remote->getPosition().y,y);
    close(scene.m_gameState.m_cameraPosition.x,x-165);close(scene.m_gameState.m_cameraPosition.y,y-100);
    close(CCPointApplyAffineTransform(remote->getPosition(),world->nodeToWorldTransform()).x,165);
   };
-  tick(0,0,100,40);auto* remote=scene.m_fields->remotePlayer.player();
+  tick(0,0,100,40,false);auto* remote=scene.m_fields->remotePlayer.player();
   tick(0,25,110,40);tick(1,50,120,40);tick(1,75,130,40);tick(2,100,140,40);tick(3,150,150,40);
   assert((triggers==std::vector<int>{110,125,140}) && background==1 && followX==150);
-  assert(dummy.m_followRelated==15); // native 10ms Follow Player Y, independent of render cadence
+  assert(dummy.m_followRelated==15);assert(scene.collisionQueries==5&&scene.triggerObjects==5&&scene.damageIgnored);
+  tick(3,150,150,40,false);assert(scene.collisionQueries==5); // native 10ms Follow Player Y, independent of render cadence
   live.frame->pose->mode=SpectatorGameMode::Spider;live.frame->pose->upsideDown=true;
   live.frame->pose->discontinuity=SpectatorSnapEvidence{SpectatorDiscontinuity::SpiderSnap,150,40,160,740};
   live.frame->pose->cameraSnap=true;live.frame->pose->rotation=270;
@@ -187,30 +194,34 @@ int main(){
   // Context reset is the only native world reset, never an ordinary relocation.
   live.frame->context.generation=2;live.frame->context.epoch=2;live.frame->context.attemptId="next";
   live.frame->pose->finished=false;live.frame->pose->mode=SpectatorGameMode::Cube;live.frame->pose->upsideDown=false;
-  auto resets=scene.resets;tick(0,0,100,40);assert(scene.resets==resets+1);
+  auto resets=scene.resets;tick(0,0,100,40,false);assert(scene.resets==resets+1);
   // Unauthenticated / unrelated / Practice scenes cannot use the local write adapter.
   SpectatorWorldDriver denied;auto writes=dummy.gameplayPositionWrites;
   assert(!denied.apply(&scene,false,live.frame));scene.m_isPracticeMode=true;assert(!denied.apply(&scene,true,live.frame));scene.m_isPracticeMode=false;
   auto bad=live.frame;bad->context.levelId=123;assert(!denied.apply(&scene,true,bad));
   assert(dummy.gameplayPositionWrites==writes);
+  auto worlds=scene.worldUpdates,resetCount=scene.resets;
+  ++CCDirector::sharedDirector()->totalFrames;live.frame->context.roundNumber=2;live.frame->publisherElapsedMs=50;
+  scene.GJBaseGameLayer::update(.016f);assert(scene.worldUpdates==worlds&&scene.resets==resetCount&&!scene.m_fields->spectatorRenderedFrame);
+  auto objects=scene.triggerObjects;scene.checkCollisions(&second,.016f,false);assert(scene.triggerObjects==objects+2&&!scene.damageIgnored);
   scene.cleanupSpectatorPresentation();
   GJBaseGameLayer::nativeWorldObserver=nullptr;GJBaseGameLayer::worldDispatch=nullptr;GJBaseGameLayer::cameraDispatch=nullptr;
   PlayLayer::current=nullptr;CCObject::drain();
  }
  // The unchanged publisher buffer drives continuous world coordinates at every render FPS.
- for(int fps:{60,120,144,240}){
+ for(int fps:{30,60,120,144,240}){
   PlayLayer scene;PlayerObject p;GJGameLevel level;scene.m_player1=&p;scene.m_level=&level;p.m_gameLayer=&scene;
   SpectatorInterpolationBuffer buffer;SpectatorWorldDriver driver;
   SpectatorRemoteContext c{"match",1,0,level.m_levelID,"attempt",1,1};
   for(int seq=0;seq<=20;++seq){SpectatorGhostPose pose{100+seq*20.0f,40+seq*2.0f,0,false,false};assert(buffer.push({seq,seq*50.0,pose},false,0));}
-  double previous=100;
+  double previous=100,nativeTime=0;
   for(int step=0;step<=fps;++step){auto sample=buffer.render(step*1000.0/fps);assert(sample);
    SpectatorRemoteFrame f{c,sample->sequence,sample->pose,sample->publisherElapsedMs};
-   assert(driver.apply(&scene,true,f));close(p.getPosition().x,f.pose->x);
+   assert(driver.apply(&scene,true,f));if(auto delta=driver.takeNativeDeltaSeconds())nativeTime+=*delta;close(p.getPosition().x,f.pose->x);
    assert(p.getPosition().x>=previous && p.getPosition().x-previous<=400.0/fps+0.001);
    previous=p.getPosition().x;
   }
-  close(p.getPosition().x,500);assert(p.m_followRelated==100 && p.physicsUpdates==0 && !p.isVisible());
+  close(p.getPosition().x,500);close(float(nativeTime),1.f);assert(p.m_followRelated==100 && p.physicsUpdates==0 && !p.isVisible());
  }
  // Repeated buffered snaps: renderer identity, driver phase and camera owner
  // survive 26 boundaries under the old 80ms + 110ms serialized HTTP cadence.
@@ -248,6 +259,21 @@ int main(){
   assert(d.apply(&s,true,SpectatorRemoteFrame{c,0,SpectatorGhostPose{100,40,0},0,0}));
   assert(d.apply(&s,true,SpectatorRemoteFrame{c,4,SpectatorGhostPose{800,740,0},200,1}));
   close(p.m_lastPosition.x,800);close(p.m_lastPosition.y,740);assert(p.m_followRelated==0);
+ }
+ {
+  PlayLayer scene;PlayerObject p;GJGameLevel level;scene.m_player1=&p;scene.m_level=&level;p.m_gameLayer=&scene;
+  SpectatorWorldDriver driver;SpectatorRemoteContext c{"m",1,0,level.m_levelID,"a",1,1};
+  int i=0;for(auto mode:{SpectatorGameMode::Cube,SpectatorGameMode::Ship,SpectatorGameMode::Ball,SpectatorGameMode::UFO,SpectatorGameMode::Wave,SpectatorGameMode::Robot,SpectatorGameMode::Spider,SpectatorGameMode::Swing}){
+   SpectatorGhostPose pose{100,40,float(i*45),false,false};pose.mode=mode;pose.mini=i%2;pose.upsideDown=i%2;pose.flipped=i%2;
+   SpectatorRemoteFrame f{c,i,pose,i*50.0};assert(driver.apply(&scene,true,f));
+   assert(p.m_isShip==(mode==SpectatorGameMode::Ship)&&p.m_isSpider==(mode==SpectatorGameMode::Spider)&&p.m_isSwing==(mode==SpectatorGameMode::Swing));
+   assert(p.m_isUpsideDown==pose.upsideDown&&p.m_vehicleSize==(pose.mini?.6f:1.f));++i;
+  }
+  auto f=*driver.frame();f.pose->dual=true;assert(!driver.apply(&scene,true,f)&&!driver.takeNativeDeltaSeconds());
+  f.pose->dual=false;--f.sequence;assert(!driver.apply(&scene,true,f));
+  f=*driver.frame();f.publisherElapsedMs+=1000;f.sequence+=20;f.pose->x=5000;assert(driver.apply(&scene,true,f));
+  assert(!driver.takeNativeDeltaSeconds()&&p.m_lastPosition.x==5000&&driver.partialHistory()); // no invented crossing/catch-up history
+  driver.reset();assert(!driver.partialHistory()&&!driver.frame()&&!driver.takeNativeDeltaSeconds()&&!driver.owns(&p));
  }
  CCObject::drain();assert(CCObject::alive==0);
  std::cout<<"world ordering/Spider/follow history/scoped writes/60-120-240Hz passed\\n";

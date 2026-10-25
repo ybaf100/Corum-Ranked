@@ -16,6 +16,7 @@
 #include "spectator/ScopedCameraTargetOverride.hpp"
 #include "spectator/SpectatorPlayerCapture.hpp"
 #include "spectator/SpectatorWorldDriver.hpp"
+#include "spectator/SpectatorTriggerScope.hpp"
 #include "spectator/ScopedSpectatorPersistenceMode.hpp"
 #include "domain/SpectatorNativeProbe.hpp"
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
@@ -249,6 +250,8 @@ public:
         std::optional<unsigned int> spectatorCameraFrameNumber;
         std::optional<unsigned int> spectatorPresentationFrameNumber, spectatorWorldFrameNumber;
         bool spectatorWorldUpdateInProgress = false;
+        bool spectatorCollisionChecked = false;
+        bool spectatorWorldPoseApplied = false;
         bool spectatorWorldResetInProgress = false;
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         bool debugRecordScene = false, debugPlaybackScene = false, debugRecordHasFrame = false;
@@ -889,10 +892,12 @@ public:
         // presentation. Waiting never follows the reset dummy or teleports to 0.
         m_fields->spectatorCamera.attach(this);
         m_fields->spectatorScenePrepared = true;
-        if (m_hasCompletedLevel || (m_player1 && m_player1->m_isDead)) {
-            m_fields->localSafety.resetDummy();
-            PlayLayer::resetLevel();
-        }
+        // A viewer must not inherit the local player's already-fired triggers.
+        // This is one no-save dummy reset after authority + End FIFO, never a new Attempt.
+        m_fields->localSafety.resetDummy();
+        { ScopedRealGameplayEnd resetting(m_fields->spectatorWorldResetInProgress,true);
+          PlayLayer::resetLevel(); }
+
         if (m_player1) {
             m_player1->stopAllActions();
             m_player1->setVisible(false);
@@ -918,6 +923,11 @@ public:
         if (m_fields->spectatorPresentationFrameNumber == frameNumber) return false;
         m_fields->spectatorPresentationFrameNumber = frameNumber;
         m_fields->spectatorRenderedFrame = corum::ranked::SpectatorLiveRuntime::get().presentationFrame();
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+        auto const poseReceived=m_fields->spectatorRenderedFrame && m_fields->spectatorRenderedFrame->pose;
+#endif
+        if(m_fields->spectatorRenderedFrame && !corum::ranked::spectatorFrameMatchesScene(m_fields->sceneContext,m_fields->spectatorRenderedFrame->context))
+            m_fields->spectatorRenderedFrame.reset();
         auto const& rendered = m_fields->spectatorRenderedFrame;
         if (rendered && rendered->pose && m_fields->spectatorWorldDriver.contextChanged(rendered->context)) {
             // Only a server stream/epoch change can reset trigger state. Manual
@@ -928,7 +938,12 @@ public:
             ScopedRealGameplayEnd resetting(m_fields->spectatorWorldResetInProgress, true);
             PlayLayer::resetLevel();
         }
-        m_fields->spectatorWorldDriver.apply(this, spectatorCameraActive(), rendered);
+        m_fields->spectatorWorldPoseApplied=m_fields->spectatorWorldDriver.apply(this, spectatorCameraActive(), rendered);
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+        auto& probe=m_fields->spectatorNativeProbe;
+        probe.note(poseReceived?corum::ranked::SpectatorNativePath::PoseReceived:corum::ranked::SpectatorNativePath::MissingPose);
+        probe.note(m_fields->spectatorWorldPoseApplied?corum::ranked::SpectatorNativePath::DriverApplied:corum::ranked::SpectatorNativePath::ContextRejected);
+#endif
         m_fields->remotePlayer.update(this, true, m_fields->spectatorRenderedFrame);
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         auto const frame = m_fields->remotePlayer.cameraFrame();
@@ -963,7 +978,7 @@ public:
     void logSpectatorWorldDriver() {
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         auto const& frame = m_fields->spectatorWorldDriver.frame();
-        if (!m_fields->debugPlaybackScene || !frame || !frame->pose || !m_player1) return;
+        if (!frame || !frame->pose || !m_player1) return;
         auto const& pose = *frame->pose;
         auto const& previous = m_fields->worldForensicPose;
         auto const transition = !previous || previous->mode != pose.mode || previous->upsideDown != pose.upsideDown;
@@ -987,19 +1002,21 @@ public:
         auto& probe = m_fields->spectatorNativeProbe;
         auto const now = std::chrono::steady_clock::now();
         auto const& frame = m_fields->spectatorRenderedFrame;
-        if (!m_fields->debugPlaybackScene || !frame || !frame->pose || !m_player1 ||
-            probe.logs >= 120 || now < m_fields->nextNativeProbeLog) return;
+        if (!m_player1 || probe.logs >= 120 || now < m_fields->nextNativeProbeLog) return;
         m_fields->nextNativeProbeLog = now + std::chrono::seconds(1);
         ++probe.logs;
         using P = corum::ranked::SpectatorNativePath;
         log::info("[DebugSpectate] native-path window={} frames={} sequence={} elapsedMs={} segment={} blockedUpdate={} checkCollisions={} collisionObjects={} touchedObject={} activatedObjectIDs={} touchedTrigger={} canActivate={} allowed={} teleport={} spawn={} commands={} follow={} dynamicMove={} triggerObject={} repeatedTriggerCalls={} lastX={} lastY={} x={} y={}",
-            probe.logs, probe.frames, frame->sequence, frame->publisherElapsedMs, frame->presentationSegment,
+            probe.logs, probe.frames, frame?frame->sequence:-1, frame?frame->publisherElapsedMs:0, frame?frame->presentationSegment:0,
             probe.count(P::BlockedPlayerUpdate), probe.count(P::CheckCollisions), probe.count(P::CollisionObjects),
             probe.count(P::TouchedObject), m_gameState.m_activatedObjectIDs.size(), probe.count(P::TouchedTrigger),
             probe.count(P::ActivationQuery), probe.count(P::ActivationAllowed), probe.count(P::Teleport),
             probe.count(P::Spawn), probe.count(P::Commands), probe.count(P::Follow), probe.count(P::DynamicMove),
             probe.count(P::TriggerObject), probe.repeatedTriggerCalls,
             m_player1->m_lastPosition.x, m_player1->m_lastPosition.y, m_player1->getPositionX(), m_player1->getPositionY());
+        log::info("[SpectatorWorld] pose={} missingPose={} driver={} rejected={} nativeWorld={} heldWorld={} clockAdvanced={} clockHeld={} partialHistory={} worldNotAdvancing={}",
+            probe.count(P::PoseReceived),probe.count(P::MissingPose),probe.count(P::DriverApplied),probe.count(P::ContextRejected),
+            probe.count(P::WorldUpdate),probe.count(P::WorldHeld),probe.count(P::ClockAdvanced),probe.count(P::ClockHeld),m_fields->spectatorWorldDriver.partialHistory(),probe.count(P::WorldUpdate)>0 && probe.count(P::ClockAdvanced)==0);
         probe.clearWindow();
 #endif
     }
@@ -1068,6 +1085,7 @@ public:
         m_fields->spectatorCamera.cleanup(this);
         m_fields->remotePlayer.cleanup();
         m_fields->spectatorWorldDriver.reset();
+        m_fields->spectatorWorldPoseApplied=false;m_fields->spectatorCollisionChecked=false;
         m_fields->spectatorRenderedFrame.reset(); m_fields->spectatorCameraFrameNumber.reset();
         m_fields->spectatorPresentationFrameNumber.reset(); m_fields->spectatorWorldFrameNumber.reset();
     }
@@ -2652,22 +2670,44 @@ class $modify(CorumRankedSpectatorCameraHook, GJBaseGameLayer) {
         auto* layer = PlayLayer::get();
         auto* owner = layer && static_cast<GJBaseGameLayer*>(layer) == this
             ? static_cast<CorumRankedPlayLayer*>(layer) : nullptr;
+        if (owner && owner->m_fields->spectatorWorldResetInProgress) return;
         if (owner && owner->blockEntryGameplayUpdate()) return;
         if (owner && owner->prepareSpectatorScene() && owner->spectatorCameraActive()) {
             if (!owner->beginSpectatorWorldFrame()) return;
+            auto const nativeDelta=owner->m_fields->spectatorWorldDriver.takeNativeDeltaSeconds();
+            if(!owner->m_fields->spectatorWorldPoseApplied || !nativeDelta){
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+                owner->m_fields->spectatorNativeProbe.note(corum::ranked::SpectatorNativePath::WorldHeld);
+                owner->logSpectatorNativeProbe();
+#endif
+                owner->m_fields->spectatorCameraFrameNumber=CCDirector::sharedDirector()->getTotalFrames();
+                owner->driveSpectatorCamera();return;
+            }
+            owner->m_fields->spectatorCollisionChecked=false;
             {
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
                 corum::ranked::ScopedSpectatorNativeProbe nativeProbe(owner->m_fields->spectatorNativeProbe,
-                    owner, m_player1, owner->m_fields->debugPlaybackScene);
+                    owner, m_player1, true);
+                owner->m_fields->spectatorNativeProbe.note(corum::ranked::SpectatorNativePath::WorldUpdate);
 #endif
                 ScopedRealGameplayEnd worldUpdate(owner->m_fields->spectatorWorldUpdateInProgress, true);
-                GJBaseGameLayer::update(dt);
+                // Only the world call borrows unpaused state. Dummy physics/input
+                // remain frozen, and the native Pause UI keeps its original flag.
+                ScopedRealGameplayEnd unpaused(owner->m_isPaused,false);
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+                auto const worldClockBefore=m_gameState.m_levelTime;
+#endif
+                GJBaseGameLayer::update(*nativeDelta);
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+                owner->m_fields->spectatorNativeProbe.note(m_gameState.m_levelTime>worldClockBefore?corum::ranked::SpectatorNativePath::ClockAdvanced:corum::ranked::SpectatorNativePath::ClockHeld);
+#endif
+                if(!owner->m_fields->spectatorCollisionChecked)checkCollisions(m_player1,*nativeDelta,true);
                 owner->logSpectatorNativeProbe();
                 owner->reconcileSpectatorWorldDriver();
                 // Some native paths omit updateCamera. Its hook still owns the
                 // one calculation, with correction deferred until world exits.
                 if (owner->m_fields->spectatorCameraFrameNumber != CCDirector::sharedDirector()->getTotalFrames())
-                    updateCamera(dt);
+                    updateCamera(*nativeDelta);
             }
             owner->driveSpectatorCamera();
             owner->logSpectatorNativeCamera("after spectator correction");
@@ -2676,6 +2716,26 @@ class $modify(CorumRankedSpectatorCameraHook, GJBaseGameLayer) {
         }
         GJBaseGameLayer::update(dt);
         if (owner) owner->sampleSpectatorPresentation();
+    }
+
+    int checkCollisions(PlayerObject* player,float dt,bool ignoreDamage){
+        auto* play=PlayLayer::get();auto* owner=play && static_cast<GJBaseGameLayer*>(play)==this?static_cast<CorumRankedPlayLayer*>(play):nullptr;
+        if(!owner || !owner->spectatorCameraActive() || player!=m_player1)return GJBaseGameLayer::checkCollisions(player,dt,ignoreDamage);
+        if(!owner->m_fields->spectatorWorldUpdateInProgress || !owner->m_fields->spectatorWorldPoseApplied || owner->m_fields->spectatorCollisionChecked)return 0;
+        owner->m_fields->spectatorCollisionChecked=true;
+        corum::ranked::ScopedSpectatorTriggerQuery triggerOnly(this,player);
+        ScopedRealGameplayEnd nativeEligibility(player->m_isHidden,false);
+        return GJBaseGameLayer::checkCollisions(player,dt,true);
+    }
+    void collisionCheckObjects(PlayerObject* player,gd::vector<GameObject*>* objects,int count,float dt){
+        if(!corum::ranked::ScopedSpectatorTriggerQuery::owns(this,player)){
+            GJBaseGameLayer::collisionCheckObjects(player,objects,count,dt);return;
+        }
+        gd::vector<GameObject*> triggers;
+        if(objects)for(int i=0;i<std::max(0,std::min(count,static_cast<int>(objects->size())));++i){
+            auto* object=(*objects)[i];if(object && object->m_isTrigger)triggers.push_back(object);
+        }
+        if(!triggers.empty())GJBaseGameLayer::collisionCheckObjects(player,&triggers,static_cast<int>(triggers.size()),dt);
     }
 
     void teleportPlayer(TeleportPortalObject* object, PlayerObject* player) {

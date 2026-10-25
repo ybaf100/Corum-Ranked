@@ -364,7 +364,7 @@ void SpectatorLiveRuntime::tickViewer() {
     auto const& match = view.match;
     bool eligible =
         view.stage == RuntimeStage::Matched && !ranked.isPlacement() &&
-        ranked.isSpectating() && match.spectatorLiveEnabled && !match.matchId.empty() &&
+        ranked.isSpectating() && !ranked.hasLocalAttemptInFlight() && match.spectatorLiveEnabled && !match.matchId.empty() &&
         !ranked.spectatorLiveSessionToken().empty() && !ranked.spectatorLiveMatchToken().empty();
     auto matchId = match.matchId;
     auto contextKey = viewerContextKey(match);
@@ -450,6 +450,13 @@ void SpectatorLiveRuntime::pollViewer() {
                 contextKey != currentContextKey
             ) return;
             m_viewBusy = false;
+            auto& authority=RankedRuntime::get();
+            bool authorized=authority.view().stage==RuntimeStage::Matched && !authority.isPlacement() &&
+                authority.isSpectating() && !authority.hasLocalAttemptInFlight() && authority.view().match.spectatorLiveEnabled;
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+            if(!m_debugContextId.empty())authorized=debug::DebugSpectateRuntime::get().playbackLevel(debug::kDebugSpectateLevelId);
+#endif
+            if(!authorized){resetViewer();return;}
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
             if (!m_debugContextId.empty() && (response.code() == 401 || response.code() == 403 || response.code() == 404)) {
                 debug::DebugSpectateRuntime::get().viewerResponse(false, true); return;
@@ -773,7 +780,7 @@ std::optional<SpectatorRemoteFrame> SpectatorLiveRuntime::presentationFrame() co
     auto& ranked = RankedRuntime::get();
     auto const& match = ranked.view().match;
     if (ranked.view().stage != RuntimeStage::Matched || ranked.isPlacement() ||
-        !ranked.isSpectating() || !match.currentMap || match.matchId.empty() ||
+        !ranked.isSpectating() || !match.spectatorLiveEnabled || ranked.hasLocalAttemptInFlight() || !match.currentMap || match.matchId.empty() ||
         m_viewMatchId != match.matchId || m_viewContextKey != viewerContextKey(match) ||
         (m_status != SpectatorLiveStatus::Waiting && m_status != SpectatorLiveStatus::Live &&
          m_status != SpectatorLiveStatus::Fallback)) {

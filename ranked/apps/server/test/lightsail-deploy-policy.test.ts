@@ -15,3 +15,17 @@ it('evaluates the real deployment gate: review-only pushes stay off even with au
  expect(run('[deploy-lightsail]','true','push','refs/heads/feature')).toBe(false);
  expect(source).toContain('StrictHostKeyChecking=yes');expect(source).toContain('52.74.37.130');
 });
+
+it('staged R2 pushes prepare Docker without production credentials or activation',()=>{
+ const source=readFileSync(new URL('../../../../.github/workflows/deploy-ranked-lightsail.yml',import.meta.url),'utf8');
+ const prepare=source.slice(source.indexOf('  prepare-image:'));
+ const expression=prepare.split('\n').find(l=>l.trimStart().startsWith('if: github.ref'))!.trim().slice(4);
+ const gate=new Function('github','contains',`return ${expression}`) as (github:unknown,contains:(a:string,b:string)=>boolean)=>boolean;
+ const run=(message:string,event='push',ref='refs/heads/main')=>gate({ref,event_name:event,event:{head_commit:{message}}},(a,b)=>a.includes(b));
+ expect(run('[publish-r2] [no-deploy]')).toBe(true);
+ for(const message of ['ordinary push','[deploy-lightsail]','[no-deploy]','[publish-r2]'])expect(run(message)).toBe(false);
+ expect(run('[publish-r2] [no-deploy]','workflow_dispatch')).toBe(false);
+ expect(run('[publish-r2] [no-deploy]','push','refs/heads/feature')).toBe(false);
+ expect(prepare).toContain('docker build --pull');
+ expect(prepare).not.toMatch(/secrets\.|ssh |scp |corum-ranked-activate|environment:/);
+});

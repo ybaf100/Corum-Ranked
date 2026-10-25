@@ -10,6 +10,7 @@ using namespace geode::prelude;
 namespace corum::ranked {
 bool SpectatorWorldDriver::apply(PlayLayer* layer, bool authorizedDummy,
                                std::optional<SpectatorRemoteFrame> const& frame) {
+    m_nativeDeltaSeconds.reset();
     if (!authorizedDummy || !layer || layer->m_isTestMode || layer->m_isPracticeMode ||
         !layer->m_level || !layer->m_player1 || layer->m_player1->m_gameLayer != layer || !frame || !frame->pose ||
         frame->context.levelId != static_cast<int>(layer->m_level->m_levelID) ||
@@ -29,13 +30,19 @@ bool SpectatorWorldDriver::apply(PlayLayer* layer, bool authorizedDummy,
     if (!sameContext && frame->sequence > 0)
         log::info("Spectator world history partial: firstSequence={} elapsedMs={} (native catch-up requires device verification)",
             frame->sequence, frame->publisherElapsedMs);
-    m_previous = sameContext && !snap ? m_frame->pose : frame->pose;
+    // Duplicate/held poses never advance native commands by renderer wall time.
+    // Large gaps are partial history, not permission to replay an unobserved path.
+    if(sameContext && deltaMs>0 && deltaMs<=250)m_nativeDeltaSeconds=static_cast<float>(deltaMs/1000.0);
+    auto const historyGap=sameContext && deltaMs>250;
+    if(!sameContext)m_partialHistory=frame->sequence>0 || frame->publisherElapsedMs>0;
+    m_partialHistory=m_partialHistory || historyGap;
+    m_previous = sameContext && !snap && !historyGap ? m_frame->pose : frame->pose;
     m_player = layer->m_player1; m_frame = frame;
-    write(layer, !sameContext || snap);
+    write(layer, !sameContext || snap || historyGap);
     // GD 2.2081 updateSpecial ONLY writes Follow Player Y's 200-entry history
     // (official inline binding). Call its native 10ms sampler, never update().
     // Drive it by publisher time, so render FPS / HTTP batches cannot change it.
-    if (sameContext && !snap && deltaMs > 0) {
+    if (sameContext && !snap && !historyGap && deltaMs > 0) {
         m_followRemainderMs += deltaMs;
         auto const steps = std::min(200, static_cast<int>((m_followRemainderMs + 0.000001) / 10));
         auto const startRemainder = m_followRemainderMs - deltaMs;
@@ -84,8 +91,9 @@ void SpectatorWorldDriver::write(PlayLayer* layer, bool resetHistory) {
     m_player->setVisible(false);
 }
 
+std::optional<float> SpectatorWorldDriver::takeNativeDeltaSeconds(){auto delta=m_nativeDeltaSeconds;m_nativeDeltaSeconds.reset();return delta;}
 void SpectatorWorldDriver::reconcile(PlayLayer* layer) { write(layer, false); }
 void SpectatorWorldDriver::reset() {
-    m_player = nullptr; m_frame.reset(); m_previous.reset(); m_followRemainderMs = 0;
+    m_player = nullptr; m_frame.reset(); m_previous.reset(); m_followRemainderMs = 0; m_nativeDeltaSeconds.reset(); m_partialHistory=false;
 }
 } // namespace corum::ranked

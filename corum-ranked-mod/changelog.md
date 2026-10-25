@@ -1,3 +1,10 @@
+# v0.5.0-beta.103
+- Drive spectator native world time from accepted remote presentation time, with one filtered trigger query and frozen local physics/input.
+- Preserve native trigger eligibility, snap boundaries and camera ownership; reset viewer world history once after the real End ACK.
+- Use committed server Attempt state for spectator authority and include that projection in ACK snapshots; reject stale round snapshots and wait for the End FIFO before native entry.
+- Fence late stream responses after authority loss and expose bounded Debug live/TEST world/trigger/clock diagnostics.
+- Keep HTTP v2, render-only Remote Player and local record protection; full dual, arbitrary world-history catch-up and advanced camera parity remain follow-up work.
+
 # v0.5.0-beta.102
 - Restore Survival first entry after viewing the board and expose immediate manual entry for already-running rounds, while preserving server start approval.
 - Return finished Solo completion screens after the final attempt ACK when another start is closed; preserve live spectator handoff.

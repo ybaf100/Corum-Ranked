@@ -99,3 +99,14 @@ jobs:
       - name: Report deployment source
         if: github.event_name == 'push' || inputs.mode == 'deploy'
         run: echo "Deployed ${GITHUB_SHA} via pinned SSH to Lightsail"
+
+  prepare-image:
+    # Staged client releases validate Docker immediately without SSH or activation.
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && contains(github.event.head_commit.message, '[publish-r2]') && contains(github.event.head_commit.message, '[no-deploy]')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout staged source
+        uses: actions/checkout@v4
+      - name: Prepare server image without production access
+        run: docker build --pull -f ranked/Dockerfile.lightsail -t "corum-ranked-preflight:${GITHUB_SHA}" ranked

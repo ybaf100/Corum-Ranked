@@ -15,6 +15,11 @@ struct SpectatorSceneContext {
     bool operator==(SpectatorSceneContext const&) const = default;
 };
 
+inline bool spectatorFrameMatchesScene(SpectatorSceneContext const& scene,SpectatorRemoteContext const& packet){
+    return scene.matchId==packet.matchId && scene.roundNumber==packet.roundNumber &&
+        scene.deathmatchSequence==packet.deathmatchSequence && scene.levelId==packet.levelId;
+}
+
 inline bool spectatorSceneWatchable(
     bool matched, SpectatorSceneContext const& scene,
     SpectatorSceneContext const& current, std::string_view state

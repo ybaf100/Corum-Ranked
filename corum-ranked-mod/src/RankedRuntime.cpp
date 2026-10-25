@@ -1,3 +1,4 @@
+#include "domain/SpectatorHandoffPolicy.hpp"
 #include "domain/LobbyPopulation.hpp"
 #include "RankedRuntime.hpp"
 #include "RankedAudioManager.hpp"
@@ -1721,6 +1722,10 @@ void RankedRuntime::parseMatchState(matjson::Value const& root) {
         root["stateVersion"].asInt().unwrapOr(0) < m_view.match.stateVersion) {
         log::debug("Ignoring older Ranked state after authoritative transition"); return;
     }
+    auto const incomingRound=root["currentRound"]["roundNumber"].asInt().unwrapOr(0);
+    auto const incomingRoundVersion=root["currentRound"]["stateVersion"].asInt().unwrapOr(0);
+    if(root["matchId"].asString().unwrapOr("")==m_view.match.matchId && incomingRound==m_view.match.roundNumber &&
+        incomingRoundVersion>0 && incomingRoundVersion<m_view.match.roundStateVersion)return;
     observeServerNow(root);
     auto const previousState = m_view.match.state;
     m_view.match.state = root["state"].asString().unwrapOr("");
@@ -1768,6 +1773,7 @@ void RankedRuntime::parseMatchState(matjson::Value const& root) {
     m_view.match.currentMap.reset();
     m_view.match.banner.clear();
     m_view.match.roundNumber = 0;
+    m_view.match.roundStateVersion = 0;
     m_view.match.deathmatchSequence = 0;
     m_view.match.deathmatchAttemptsUsedA = 0;
     m_view.match.deathmatchAttemptsUsedB = 0;
@@ -1813,6 +1819,7 @@ void RankedRuntime::parseMatchState(matjson::Value const& root) {
     m_view.match.decisiveRoundEnded = round["outcome"]["decisive"].asBool().unwrapOr(false);
     if (round.isObject()) {
         m_view.match.roundNumber = static_cast<int>(round["roundNumber"].asInt().unwrapOr(0));
+        m_view.match.roundStateVersion=round["stateVersion"].asInt().unwrapOr(0);
         m_view.match.banner = round["banner"].asString().unwrapOr("");
         auto const committedScores = round["scores"];
         auto const displayScores = round["displayScores"].isObject() ? round["displayScores"] : committedScores;
@@ -1899,26 +1906,6 @@ void RankedRuntime::parseMatchState(matjson::Value const& root) {
                 0,
                 100
             );
-        }
-    }
-
-    // The Last Attempt window itself is authoritative enough to identify its
-    // spectator: the trigger side has finished three Clears and only the target
-    // side may start. Recover that state locally if a state response races with
-    // the attempt-end acknowledgement or temporarily omits the convenience
-    // `spectator` projection. Without this fallback the popup can remain on its
-    // ordinary OPENING LEVEL / WAITING FOR MAP presentation indefinitely.
-    auto const lastAttempt = round["lastAttemptWindow"];
-    auto const inLastAttemptFlow =
-        m_view.match.state == "LAST_ATTEMPT_WINDOW" ||
-        m_view.match.state == "ROUND_SETTLING";
-    if (!m_view.match.spectatorActive && inLastAttemptFlow && lastAttempt.isObject()) {
-        auto const trigger = lastAttempt["triggerSide"].asString().unwrapOr("");
-        auto const target = lastAttempt["targetSide"].asString().unwrapOr("");
-        if (!trigger.empty() && trigger == m_view.match.side && target != m_view.match.side) {
-            m_view.match.spectatorActive = true;
-            m_view.match.spectatorOpponentName = m_view.match.opponentName;
-            m_view.match.spectatorCurrentProgress.reset();
         }
     }
 
@@ -2098,6 +2085,14 @@ void RankedRuntime::parseMatchState(matjson::Value const& root) {
 }
 
 void RankedRuntime::applyAttemptSnapshot(matjson::Value const& root) {
+    auto const ackRound=root["roundSnapshot"]["roundNumber"].asInt().unwrapOr(0);
+    auto const ackVersion=root["roundSnapshot"]["stateVersion"].asInt().unwrapOr(0);
+    if(root["roundSnapshot"].isObject()){
+        if(ackRound>0 && m_view.match.roundNumber>0 && ackRound!=m_view.match.roundNumber)return;
+        if(ackVersion>0 && ackVersion<m_view.match.roundStateVersion)return;
+        if(!acceptsRoundAckPhase(m_view.match.state,root["roundSnapshot"]["phase"].asString().unwrapOr("")))return;
+        m_view.match.roundStateVersion=std::max(m_view.match.roundStateVersion,ackVersion);
+    }
     auto const deadline = root["deadlineAt"].asString();
     if (deadline.isOk()) m_view.match.deadlineAt = deadline.unwrap();
 
@@ -2106,6 +2101,7 @@ void RankedRuntime::applyAttemptSnapshot(matjson::Value const& root) {
         auto const roundNumber = static_cast<int>(round["roundNumber"].asInt().unwrapOr(0));
         if (roundNumber == 0 || m_view.match.roundNumber == 0 || roundNumber == m_view.match.roundNumber) {
             auto const phase = round["phase"].asString().unwrapOr("");
+            if (!acceptsRoundAckPhase(m_view.match.state,phase))return;
             if (!phase.empty()) m_view.match.state = phase;
 
             auto const committed = round["scores"];
@@ -2117,29 +2113,13 @@ void RankedRuntime::applyAttemptSnapshot(matjson::Value const& root) {
             m_view.match.clearsA = static_cast<int>(round["clears"]["A"].asInt().unwrapOr(m_view.match.clearsA));
             m_view.match.clearsB = static_cast<int>(round["clears"]["B"].asInt().unwrapOr(m_view.match.clearsB));
 
-            // Attempt-end acknowledgements can move a Round directly into
-            // LAST_ATTEMPT_WINDOW / ROUND_SETTLING before the next state poll.
-            // Apply that transition immediately so a player who just reached
-            // three Clears cannot be auto-entered into an illegal extra attempt.
-            auto const lastAttempt = round["lastAttemptWindow"];
-            auto const inLastAttemptFlow =
-                phase == "LAST_ATTEMPT_WINDOW" || phase == "ROUND_SETTLING";
-            if (inLastAttemptFlow && lastAttempt.isObject()) {
-                auto const trigger = lastAttempt["triggerSide"].asString().unwrapOr("");
-                auto const target = lastAttempt["targetSide"].asString().unwrapOr("");
-                m_view.match.spectatorActive =
-                    !trigger.empty() && trigger == m_view.match.side && target != m_view.match.side;
-                if (m_view.match.spectatorActive) {
-                    m_view.match.spectatorOpponentName = m_view.match.opponentName;
-                    m_view.match.spectatorCurrentProgress.reset();
-                }
-            } else if (phase == "ROUND_RESULT") {
-                // A non-Last-Attempt ACK can be older than a state poll that has
-                // already enabled spectator mode. Do not let such an ACK clear a
-                // newer authoritative projection. Round result is the only phase
-                // in this response where spectator mode is certainly finished.
-                m_view.match.spectatorActive = false;
+            auto const projection=round["spectatorActive"].asBool();
+            if(projection.isOk()){
+                m_view.match.spectatorActive=projection.unwrap();
+                m_view.match.spectatorOpponentName=projection.unwrap()?m_view.match.opponentName:"";
                 m_view.match.spectatorCurrentProgress.reset();
+            } else if(phase=="ROUND_RESULT") {
+                m_view.match.spectatorActive=false;m_view.match.spectatorCurrentProgress.reset();
                 m_view.match.spectatorOpponentName.clear();
             }
         }
@@ -3286,7 +3266,7 @@ bool RankedRuntime::canEnterCurrentLevel() const {
 }
 
 bool RankedRuntime::canEnterCurrentLevelAsSpectator() const {
-    if (!isSpectating() || !m_view.match.spectatorLiveEnabled) return false;
+    if (!isSpectating() || !m_view.match.spectatorLiveEnabled || hasLocalAttemptInFlight()) return false;
     // A viewer may reconnect before the opponent starts their next legal
     // Attempt. Keep the exact canonical map open in that waiting state; the
     // live relay will attach only after authority publishes an active Attempt.

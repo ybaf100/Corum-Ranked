@@ -47,8 +47,9 @@ struct PlayerObject {
 };
 struct TeleportPortalObject{};
 struct GJBaseGameLayer {
- struct {bool m_isDualMode=false;CCPoint m_cameraPosition;} m_gameState;
+ struct {bool m_isDualMode=false;CCPoint m_cameraPosition;double m_levelTime=0;} m_gameState;
  PlayerObject* m_player1=nullptr;double m_attemptTime=0;bool m_inResetDelay=false,m_isPaused=false,m_started=false;
+ int checkCollisions(PlayerObject*,float,bool){return 0;}
  void updateCamera(float){}
  virtual ~GJBaseGameLayer()=default;
  virtual void update(float dt){clockMs+=std::int64_t(dt*1000);m_attemptTime+=dt;
@@ -77,8 +78,8 @@ struct DebugSpectateRuntime {
 }
 struct CorumRankedPlayLayer:PlayLayer {
  bool blockEntryGameplayUpdate(){return false;}
- struct Fields{SpectatorNativeProbe spectatorNativeProbe;bool rankedInitialized=false,rankedLevel=true,safetyRetired=false,spectatorMode=false,spectatorPending=false;
-  bool debugRecordScene=false,debugPlaybackScene=false,debugRecordHasFrame=false;SpectatorCapturePolicy spectatorCapture;bool spectatorWorldUpdateInProgress=false;std::optional<unsigned> spectatorCameraFrameNumber;}fields;
+ struct Fields{struct Driver{std::optional<float> takeNativeDeltaSeconds(){return {};}}spectatorWorldDriver;bool spectatorWorldPoseApplied=false,spectatorCollisionChecked=false;SpectatorNativeProbe spectatorNativeProbe;bool rankedInitialized=false,rankedLevel=true,safetyRetired=false,spectatorMode=false,spectatorPending=false;
+  bool debugRecordScene=false,debugPlaybackScene=false,debugRecordHasFrame=false;SpectatorCapturePolicy spectatorCapture;bool spectatorWorldUpdateInProgress=false,spectatorWorldResetInProgress=false;std::optional<unsigned> spectatorCameraFrameNumber;}fields;
  Fields* m_fields=&fields;
  bool prepareSpectatorScene(){return false;}bool spectatorCameraActive(){return false;}bool beginSpectatorWorldFrame(){return false;}
  void reconcileSpectatorWorldDriver(){}void driveSpectatorCamera(){}void logSpectatorNativeCamera(char const*){}void logSpectatorWorldDriver(){}void logSpectatorNativeProbe(){}
