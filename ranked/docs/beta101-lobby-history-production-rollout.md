@@ -93,7 +93,7 @@ The last workspace typecheck also passed. The history metadata optimization keep
 LP/title fields but omits its unused record-summary query; popup/profile consumers
 retain record summaries. No compiler warning was disabled for the new changes.
 
-### Main publication and external Actions blocker
+### Main publication and initial Actions blocker (resolved below)
 
 - Source main commit: `543dfec20684512a4f75adc3c462bcdd40059ba5`, normal
   expected-head push through the connected ybaf100 account.
@@ -120,8 +120,8 @@ retain record summaries. No compiler warning was disabled for the new changes.
   is needed. No further blind retry or publication guard bypass is used.
 - At 06:38:52 UTC both beta.101 R2 descriptors still returned HTTP 404.
   New immutable objects were not published and existing beta.100 objects were
-  not overwritten. **beta.101 R2 publication and production activation remain
-  incomplete**, so these new UI changes are not yet available in a public client.
+  not overwritten. At that observation beta.101 R2 publication and production
+  activation were incomplete; the resumed publication is recorded below.
 - At 06:37:16 UTC Singapore health/ready returned HTTP 200, database/schema/public
   readiness true, and required client version plus both hashes/sizes still
   matched verified beta.100. Solo OFF and Survival 64-player ON were preserved.
@@ -147,8 +147,8 @@ admission, counters, active matching/recovery and existing achievements. The
 expected local-backend termination log belongs to that disposable recovery test,
 not Production Neon. Together with **293/293 native tests**, workspace typecheck,
 server/rules build and package/localization checks, local validation is complete.
-The Actions scheduling blocker and missing beta.101 publications remain separate
-from these passing local checks.
+The initial Actions scheduling blocker and missing beta.101 publications were
+separate from these passing local checks; their resolution is recorded below.
 
 The final read-only Neon control-plane observation also showed the currently
 deployed **beta.100** endpoint `idle`, last active `2026-10-25T06:37:15Z` and
@@ -156,3 +156,52 @@ automatically suspended at `2026-10-25T06:42:31Z` under its unchanged 300-second
 policy. This is a real post-beta.100-deployment suspension observation; it is
 not presented as a deployed beta.101 test. No SQL was used for that observation
 and no manual endpoint suspend/setting change was performed.
+
+### Resumed CI and verified beta.101 publication
+
+After the owner resolved the GitHub account billing/spending restriction, the
+existing source runs were retried without changing source or weakening any
+release guard. **Attempt four of Release 40169454026, Debug 40169454013 and server
+CI 40169454007 all succeeded**, on the same source commit
+`543dfec20684512a4f75adc3c462bcdd40059ba5`.
+
+- Release: Windows, iOS, Android32 and Android64 native builds, combined package
+  validation and immutable R2 publication all succeeded.
+- Debug: native regressions **293/293**, policy domains, software OpenGL ES shader
+  rendering, all four platform Debug ON builds and Debug OFF compilation checks,
+  combined package validation and R2 publication succeeded. Unchanged optional
+  external images were skipped by the existing policy.
+- Server: rules **288/288**, server **626 passed / one optional local pool test
+  skipped**, PostgreSQL 16 online/concurrency/recovery **52/52**, workspace
+  typecheck/build, relay and Apps Script checks passed. The adaptive simulation
+  completed 1050 NORMAL matches and a ten-hour virtual soak. The corresponding
+  local full run had already passed all **627/627**, including the optional
+  pool reconnection/idle-retirement test.
+- Both public `.geode` files were independently downloaded completely. Exact
+  SHA-256/bytes matched their descriptors; embedded mod identity/version/channel
+  and all four native binaries were verified. Existing immutable objects were
+  not overwritten.
+
+| Channel | Bytes | SHA-256 | Descriptor |
+| --- | ---: | --- | --- |
+| Release | 8,945,049 | `323d0378408f05e13ca9a41b302fb0e09b3d605cd7e3e0ca1d170f7fb7b2a745` | [release.json](https://pub-11442f32945446a49b9da0a5e69f2451.r2.dev/ranked/release-v0.5.0-beta.101/release.json) |
+| Debug | 9,525,435 | `4e465de5d8db45fe8c3864a3dc9b6b63c3b6f90dda6b5acbf5662cc3b856e79b` | [debug.json](https://pub-11442f32945446a49b9da0a5e69f2451.r2.dev/ranked/debug-v0.5.0-beta.101/debug.json) |
+
+### Production baseline and activation
+
+The read-only baseline at `2026-10-25T09:16:40.442Z` found the unchanged achievement
+epoch `2026-10-24T04:59:47.102Z`; migrations 0020/0029/0030 applied; native_death
+present; 47 accounts including bots, 52 Solo / 99 Survival matches and 150 / 23015
+Attempts. There were 144 unlocks / 144 AP ledger rows and both AP totals were
+5120; invalid LP ledger rows were zero. Survival remained ON with 64 players and
+generation `survival-b0676719:64p`. These totals include legitimate gameplay
+since the earlier beta.100 rollout and must not be restored to older snapshots.
+
+Full Solo/Survival profile digests at this baseline were
+`aeb6398d12f3ffe8cfa307d8d2cccba7` / `70a8a98aa85ead53129d442706d71816`.
+No reset, destructive SQL, manual migration, Neon setting or manual suspension
+was performed. This documentation-only `[deploy-lightsail] [build only]` push
+activates the already tested beta.101 source after both public channels verified.
+The existing Singapore host guard, pinned SSH known_hosts, StrictHostKeyChecking,
+deployment concurrency and rollback path remain intact. Actual activation and
+public API verification are appended after the workflow completes.
