@@ -15,18 +15,20 @@ class RankedCreditsPopup final:public Popup {
     struct Credit {int id=0,requests=0;std::string text;CCLabelBMFont* label=nullptr;std::chrono::steady_clock::time_point next{};};
     std::vector<Credit> m_songs;bool m_closed=false,m_exited=false;
     bool init() override{
-        auto const layout=rankedPopupLayout({350,294},CCDirector::sharedDirector()->getWinSize());
+        auto const layout=rankedPopupLayout({350,342},CCDirector::sharedDirector()->getWinSize());
         if(!Popup::init(layout.size.width,layout.size.height))return false;
         m_noElasticity=true;
         m_bgSprite->setVisible(false);m_closeBtn->setVisible(false);setID("ranked-credits-popup"_spr);
         auto* content=rankedPopupContent(m_mainLayer,m_buttonMenu,layout);
-        content->addChild(surface({350,294},{175,147},Cyan,Surface,255,true));
+        content->addChild(surface({350,342},{175,171},Cyan,Surface,255,true));
         auto add=[&](std::string text,CCPoint at,ccColor3B tint,float scale){auto* label=menuLabel(text,scale,at,tint,FontWeight::ExtraBold);fitFullMenuLabel(label,316,26,scale);content->addChild(label,5);};
-        add("CREDITS",{175,267},Cyan,.49f);
-        add(i18n::text("credits-intro","Planning and music behind Corum Ranked"),{175,247},TextMuted,.21f);
-        content->addChild(surface({318,34},{175,216},Blue,SurfaceRaised,250,false));
-        add(i18n::text("credits-planner","Planner"),{71,216},TextMuted,.26f);
-        add("hwanhee1",{231,216},Gold,.34f);
+        add("CREDITS",{175,315},Cyan,.49f);
+        content->addChild(surface({318,103},{175,253},Blue,SurfaceRaised,250,false));
+        add("PROJECT LEAD · GAME DESIGN · DEVELOPMENT",{175,288},TextMuted,.21f);
+        add("hwanhee1",{175,265},Gold,.38f);
+        add("AI-ASSISTED IMPLEMENTATION",{175,242},TextMuted,.17f);
+        add("Codex",{175,224},Text,.21f);
+        add("Code implementation assisted by AI.",{175,206},TextMuted,.16f);
         add(i18n::text("credits-music","Music"),{175,183},Text,.30f);
         std::map<int,std::set<std::string>> songs;
         std::vector<int> order;

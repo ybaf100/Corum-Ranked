@@ -82,6 +82,8 @@ export interface SessionCreationResult {
 
 @Injectable()
 export class SessionService {
+  private populationCache:{offline:number;online:number;sampledAt:string;until:number}|undefined;
+  private populationPending:Promise<{offline:number;online:number;sampledAt:string}>|undefined;
   public constructor(
     @Inject(DATABASE) private readonly database: DatabasePort,
     @Inject(CSMP_TIER_SOURCE) _unusedCsmpTierSource: CsmpTierSource,
@@ -265,8 +267,8 @@ export class SessionService {
     return parsed.filter((mark): mark is "WIN" | "LOSS" => mark === "WIN" || mark === "LOSS");
   }
 
-  public async heartbeat(session: RankedSessionContext) {
-    return this.database.transaction(async (transaction) => {
+  public async heartbeat(session: RankedSessionContext,includePopulation=false) {
+    const heartbeat=await this.database.transaction(async (transaction) => {
       // Serialize against admission/Close, then sample the clock. A heartbeat
       // waiting on a row lock cannot use its earlier time to revive a dead lease.
       await transaction.query("SELECT id FROM ranked_players WHERE id = $1 FOR UPDATE", [session.playerId]);
@@ -280,6 +282,22 @@ export class SessionService {
       const audioVolumes = await readRankedAudioVolumes(this.config.getSnapshot().client, transaction);
       return { serverNow: now.toISOString(), sessionLeaseSeconds: RANKED_SESSION_LEASE_SECONDS, audioVolumes };
     });
+    if(includePopulation){try{return {...heartbeat,population:await this.population()};}catch{/* Optional display failures cannot expire a valid session. */}}
+    return heartbeat;
+  }
+
+  /** Requested only by an open lobby heartbeat; no timer or idle DB watcher. */
+  public async population(){
+    const now=this.clock.now();
+    if(this.populationCache&&now.getTime()<this.populationCache.until){const {until:_,...value}=this.populationCache;return value;}
+    this.populationPending??=this.database.query<{total:number;online:number}>(`SELECT COUNT(*)::int AS total,
+      COUNT(*) FILTER(WHERE EXISTS(SELECT 1 FROM ranked_sessions s WHERE s.player_id=p.id AND s.revoked_at IS NULL
+        AND s.expires_at>$1 AND s.last_heartbeat_at>$2))::int AS online
+      FROM ranked_players p WHERE p.gd_account_id>0 AND NOT p.is_bot`,[now.toISOString(),sessionAliveSince(now)])
+      .then(({rows})=>{const total=Number(rows[0]?.total??0),online=Math.min(total,Number(rows[0]?.online??0));
+        const value={offline:total-online,online,sampledAt:now.toISOString()};this.populationCache={...value,until:this.clock.now().getTime()+5000};return value;})
+      .finally(()=>{this.populationPending=undefined;});
+    return this.populationPending;
   }
 
   public async close(session: RankedSessionContext) {

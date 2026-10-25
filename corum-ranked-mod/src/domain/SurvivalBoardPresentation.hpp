@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 
 namespace corum::ranked {
 inline std::string survivalClockText(std::optional<std::int64_t> remaining) {
@@ -35,10 +36,16 @@ struct SurvivalGridLayout {
 };
 inline bool survivalCompactCards(std::size_t survivors) {return survivors>30;}
 inline bool survivalReducedCards(std::size_t survivors) {return survivors>16&&survivors<=30;}
-inline SurvivalGridLayout survivalGridLayout(float width,float height,std::size_t count,int survivors) {
+enum class SurvivalCardDensity {Full,Reduced,Compact};
+inline SurvivalCardDensity survivalPhaseCardDensity(int entrants,std::string_view phase) {
+    if(entrants!=64)return SurvivalCardDensity::Full;
+    if(phase.empty()||phase=="ROUND_1"||phase=="ROUND_2")return SurvivalCardDensity::Compact;
+    return phase=="ROUND_3"?SurvivalCardDensity::Reduced:SurvivalCardDensity::Full;
+}
+inline SurvivalGridLayout survivalGridLayout(float width,float height,std::size_t count,int survivors,std::string_view phase="",int entrants=0) {
     count=std::max<std::size_t>(1,count);
-    bool const compact=survivalCompactCards(static_cast<std::size_t>(std::max(0,survivors)));
-    bool const reduced=survivalReducedCards(static_cast<std::size_t>(std::max(0,survivors)));
+    bool const compact=entrants?survivalPhaseCardDensity(entrants,phase)==SurvivalCardDensity::Compact:survivalCompactCards(static_cast<std::size_t>(std::max(0,survivors)));
+    bool const reduced=entrants?survivalPhaseCardDensity(entrants,phase)==SurvivalCardDensity::Reduced:survivalReducedCards(static_cast<std::size_t>(std::max(0,survivors)));
     auto const columns=std::min<std::size_t>(compact?8:reduced?6:4,count);
     auto const totalRows=(count+columns-1)/columns;
     auto const available=std::max(24.f,height-(compact?133.f:163.f));

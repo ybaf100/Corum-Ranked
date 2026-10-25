@@ -168,21 +168,22 @@ namespace ui{inline constexpr Color Gold{255,195,55},Blue{0,0,255},SurfaceRaised
  CCLabelBMFont* menuLabel(std::string const& text,float,CCPoint pos,Color,FontWeight){auto* label=new CCLabelBMFont;label->text=text;label->pos=pos;return label;}CCLabelBMFont* playerNameLabel(std::string const& text,float scale,CCPoint pos,Color color,FontWeight weight){return menuLabel(text,scale,pos,color,weight);}void fitMenuLabelWidth(CCLabelBMFont*,float,float,float){}void fitSingleLineMenuLabel(CCLabelBMFont*,float,float,float){}
 void fitFullMenuLabel(CCLabelBMFont*,float,float,float){}
  struct PlayerIcon{static CCNode* createLocal(){return CCNode::create();}static CCNode* createBot(int){return CCNode::create();}static CCNode* createRemote(int){return CCNode::create();}};
+ inline int accentUpdates=0;void setSurfaceAccent(CCNode*,ccColor3B){++accentUpdates;}
  CCNode* createAnimatedRankBadge(std::string const&,CCSize,RankBadgeDisplay){return CCNode::create();}
 }
-struct SurvivalMatchView{std::uint64_t revision=1;std::string id="m",roundKey="r1",ownId="a",phase="ROUND_1";int mapGeneration=1,matchPlayerCount=16;std::vector<SurvivalStanding>standings,roundPlayers;matjson::Value result;};
+struct SurvivalMatchView{std::uint64_t revision=1;std::string id="m",roundKey="r1",ownId="a",phase="ROUND_1";std::string state="PLAYING";int mapGeneration=1,matchPlayerCount=16;std::vector<SurvivalStanding>standings,roundPlayers;matjson::Value result;};
 struct Coordinator:CCNode{
  CCLabelBMFont*m_status=new CCLabelBMFont;
- struct Tile{CCNode* root=nullptr;CCLabelBMFont* name=nullptr;CCLabelBMFont* record=nullptr;CCPoint destination;CCNode* icon=nullptr;CCNode* tierBadge=nullptr;std::string tier="";CCNode* eliminatedBackground=nullptr;std::string titleText={},recordText={};std::array<CCNode*,3>medals{};int infoTag=0;SurvivalProgressTween progress{};};
+ struct Tile{CCNode* root=nullptr;CCLabelBMFont* name=nullptr;CCLabelBMFont* record=nullptr;CCPoint destination;CCNode* icon=nullptr;CCNode* tierBadge=nullptr;std::string tier="";CCNode* eliminatedBackground=nullptr;std::string titleText={},recordText={};std::array<CCNode*,3>medals{};int infoTag=0;SurvivalProgressTween progress{};SurvivalHudColor accent{};bool hasAccent=false;};
  double m_frameDelta=1./60.;std::string m_gridContext;CCNode grid;CCNode* m_grid=&grid;CCNode pager;CCNode* m_pager=&pager;CCLabelBMFont pageLabel;CCLabelBMFont* m_pageLabel=&pageLabel;std::size_t m_cardPage=0,m_cardPages=1;std::unordered_map<std::string,Tile>m_tiles;std::unordered_map<int,SurvivalStanding>m_infoByTag;int m_nextInfoTag=1000;void onPlayerInfo(CCObject*){}CCSize getContentSize()const{return {568,320};}
  ${method(source,'void showParticipants(')}
 };
 }
 int main(){using namespace corum::ranked;SurvivalMatchView view;SurvivalStanding a,b;a.id="a";a.name="Alice";a.rank=1;a.score=a.bestProgress=80;a.passing=true;b.id="b";b.name="Bob";b.rank=2;b.score=b.bestProgress=60;b.passing=true;view.standings={a,b};Coordinator ui;ui.showParticipants(view,false);
  auto* alice=ui.m_tiles.at("a").root;auto* name=ui.m_tiles.at("a").name;auto* icon=ui.m_tiles.at("a").icon;auto initial=alice->pos;
- assert(ui.m_tiles.at("a").medals[0]->visible&&ui.m_tiles.at("b").medals[1]->visible);
+ assert(ui.m_tiles.at("a").accent==survivalRankColor(1,true)&&ui.m_tiles.at("b").accent==SurvivalSilver);
  for(int rank:{0,4,3,2,1}){view.standings[0].rank=rank;ui.showParticipants(view,false);auto const& tile=ui.m_tiles.at("a");
-  for(int n=1;n<=3;n++)assert(tile.medals[n-1]->visible==(n==rank));
+  assert(tile.accent==(rank?survivalRankColor(rank,true):SurvivalHudColor{77,135,255}));
  }
  // Predicted elimination before the round ends must already be red.
  view.standings[0].rank=4;view.standings[0].passing=false;ui.showParticipants(view,false);
@@ -192,15 +193,15 @@ int main(){using namespace corum::ranked;SurvivalMatchView view;SurvivalStanding
  view.standings[0].score=81;ui.showParticipants(view,false);assert(alice->moves==0&&name==ui.m_tiles.at("a").name&&icon==ui.m_tiles.at("a").icon);
  std::swap(view.standings[0],view.standings[1]);view.standings[0].rank=1;view.standings[1].rank=2;ui.showParticipants(view,false);assert(alice->moves==1);alice->advance(.5f);auto halfway=alice->pos;assert(halfway!=initial);
  std::swap(view.standings[0],view.standings[1]);view.standings[0].rank=1;view.standings[1].rank=2;view.standings[0].eliminated=true;ui.showParticipants(view,false);
- assert(alice==ui.m_tiles.at("a").root&&alice->moves==2&&alice->stops==2&&alice->pos==halfway&&alice->action->from==halfway&&alice->action->to==initial);assert(ui.m_tiles.at("a").eliminatedBackground->visible);for(auto* medal:ui.m_tiles.at("a").medals)assert(!medal->visible);
+ assert(alice==ui.m_tiles.at("a").root&&alice->moves==2&&alice->stops==2&&alice->pos==halfway&&alice->action->from==halfway&&alice->action->to==initial);assert(ui.m_tiles.at("a").eliminatedBackground->visible);assert(ui.m_tiles.at("a").accent==survivalRankColor(1,false));
  auto moves=alice->moves;view.standings[0].currentProgress=41;view.standings[0].attemptActive=true;ui.showParticipants(view,false);assert(alice->moves==moves);assert(ui.m_tiles.at("a").record->text.find("ELIMINATED")!=std::string::npos);
  view.standings[0].eliminated=false;view.standings[0].rank=3;view.standings[1].rank=3;ui.showParticipants(view,false);
- assert(ui.m_tiles.at("a").medals[2]->visible&&ui.m_tiles.at("b").medals[2]->visible);
+ assert(ui.m_tiles.at("a").accent==survivalRankColor(3,true)&&ui.m_tiles.at("b").accent==survivalRankColor(3,true));
  assert(!ui.m_tiles.at("a").eliminatedBackground->visible);
  matjson::Value::Array podium;for(int rank=1;rank<=3;++rank){matjson::Value p;p["participantId"]=std::string("final-")+std::to_string(rank);p["name"]="HwanHee";p["rank"]=rank;p["delta"]=50;podium.push_back(p);}
  view.result["standings"]=podium;ui.showParticipants(view,true);assert(ui.m_tiles.size()==3);
- for(int rank=1;rank<=3;++rank){auto const& t=ui.m_tiles.at(std::string("final-")+std::to_string(rank));assert(t.medals[rank-1]->visible&&t.name->text=="HwanHee");}
- view.result={};view.roundKey="r2";view.standings={b};ui.showParticipants(view,false);assert(ui.m_tiles.size()==1&&!ui.m_tiles.contains("a"));
+ for(int rank=1;rank<=3;++rank){auto const& t=ui.m_tiles.at(std::string("final-")+std::to_string(rank));assert(t.accent==survivalRankColor(rank,true)&&t.name->text=="HwanHee");}
+ view.result={};view.phase="ROUND_1";view.roundKey="r2";view.standings={b};ui.showParticipants(view,false);assert(ui.m_tiles.size()==1&&!ui.m_tiles.contains("a"));
  view.id="large";view.roundKey="large-r1";view.matchPlayerCount=64;view.standings.clear();
  for(int i=0;i<64;++i){SurvivalStanding p;p.id="large-"+std::to_string(i);p.name="Nickname "+std::to_string(i);p.rank=i+1;p.bestProgress=99-i;p.bot=true;p.passing=i<40;view.standings.push_back(p);}
  ui.showParticipants(view,false);assert(ui.m_cardPages==1&&ui.m_tiles.size()==64&&!ui.pager.visible&&ui.pageLabel.text=="1 / 1");
@@ -208,10 +209,12 @@ int main(){using namespace corum::ranked;SurvivalMatchView view;SurvivalStanding
  for(auto const&[id,tile]:ui.m_tiles){assert(tile.name->text.starts_with("Nickname ")&&!tile.record&&!tile.tierBadge);for(auto* medal:tile.medals)assert(!medal);}
  ui.m_cardPage=1;ui.showParticipants(view,false);assert(ui.m_tiles.size()==64&&ui.pageLabel.text=="1 / 1");
  int visible=0;for(auto const&[id,tile]:ui.m_tiles)visible+=tile.root->visible;assert(visible==64&&first->visible);
- ui.m_cardPage=0;++view.revision;ui.showParticipants(view,false);assert(ui.m_tiles.at("large-0").root==first&&first->visible&&ui.m_tiles.size()==64);
- view.standings.resize(30);ui.showParticipants(view,false);assert(ui.m_cardPages==1&&ui.m_tiles.size()==30);
+ ui.m_cardPage=0;++view.revision;auto updates=ui::accentUpdates;ui.showParticipants(view,false);assert(ui::accentUpdates==updates&&ui.m_tiles.at("large-0").root==first&&first->visible&&ui.m_tiles.size()==64);
+ assert(ui.m_tiles.at("large-0").accent==survivalRankColor(1,true)&&ui.m_tiles.at("large-1").accent==SurvivalSilver&&ui.m_tiles.at("large-2").accent==survivalRankColor(3,true));
+ view.phase="ROUND_2";view.roundKey="r2:elimination";ui.showParticipants(view,false);assert(!ui.m_tiles.at("large-0").record);
+ view.phase="ROUND_3";view.standings.resize(30);ui.showParticipants(view,false);assert(ui.m_cardPages==1&&ui.m_tiles.size()==30);
  for(auto const&[id,tile]:ui.m_tiles){assert(tile.record&&!tile.tierBadge);assert(tile.record->text.find("BEST ")!=std::string::npos&&tile.record->text.find("NOW ")!=std::string::npos);}
- view.standings.resize(16);ui.showParticipants(view,false);for(auto const&[id,tile]:ui.m_tiles)assert(tile.tierBadge&&tile.record);
+ view.phase="ROUND_4";view.standings.resize(16);ui.showParticipants(view,false);for(auto const&[id,tile]:ui.m_tiles)assert(tile.tierBadge&&tile.record);
  view.roundKey="large-final";view.standings.resize(5);ui.showParticipants(view,false);assert(ui.m_tiles.size()==5&&ui.m_cardPages==1&&!ui.pager.visible);
 
 }

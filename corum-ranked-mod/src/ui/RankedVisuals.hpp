@@ -260,7 +260,7 @@ inline CCNode* surface(
     auto* border = CCLayerColor::create({accent.r, accent.g, accent.b, static_cast<GLubyte>(strong ? 158 : 88)});
     border->setContentSize(size);
     border->setPosition(CCPointZero);
-    root->addChild(border, 0);
+    border->setTag(8030);root->addChild(border, 0);
 
     auto* inner = CCLayerColor::create({fill.r, fill.g, fill.b, opacity});
     inner->setContentSize({std::max(2.0f, size.width - 1.5f), std::max(2.0f, size.height - 1.5f)});
@@ -270,16 +270,22 @@ inline CCNode* surface(
     auto* highlight = CCLayerColor::create({accent.r, accent.g, accent.b, static_cast<GLubyte>(strong ? 235 : 190)});
     highlight->setContentSize({std::max(4.0f, size.width - 8.0f), strong ? 1.5f : 1.0f});
     highlight->setPosition({4.0f, size.height - 3.0f});
-    root->addChild(highlight, 3);
+    highlight->setTag(8031);root->addChild(highlight, 3);
 
     if (strong) {
         auto* leftRail = CCLayerColor::create({accent.r, accent.g, accent.b, 138});
         leftRail->setContentSize({1.5f, std::max(4.0f, size.height - 10.0f)});
         leftRail->setPosition({3.0f, 5.0f});
-        root->addChild(leftRail, 3);
+        leftRail->setTag(8032);root->addChild(leftRail, 3);
     }
 
     return root;
+}
+
+// Recolor only static border/highlight layers; keep fill, children and actions.
+inline void setSurfaceAccent(CCNode* panel,ccColor3B color) {
+    if(!panel)return;
+    for(int tag:{8030,8031,8032})if(auto* layer=typeinfo_cast<CCLayerColor*>(panel->getChildByTag(tag)))layer->setColor(color);
 }
 
 inline CCNode* pill(

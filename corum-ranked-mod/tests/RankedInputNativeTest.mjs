@@ -100,7 +100,7 @@ using namespace geode;
 std::string operator""_spr(char const*s,std::size_t n){return {s,n};}
 namespace corum::ranked {
 struct RankedVolumeControl {int begins=0;static RankedVolumeControl& get(){static RankedVolumeControl c;return c;}unsigned long beginSession(){++begins;return 1;}};
-struct Runtime {void cancelHistoryReads(){}struct View{struct{std::string state="ROUND_PLAYING";}match;}data;auto const& view(){return data;}};
+struct Runtime {void setLobbyPopulationVisible(bool){}void cancelHistoryReads(){}struct View{struct{std::string state="ROUND_PLAYING";}match;}data;auto const& view(){return data;}};
 }
 struct RankedRuntime { static corum::ranked::Runtime& get(){static corum::ranked::Runtime r;return r;} };
 #define schedule_selector(x) 0

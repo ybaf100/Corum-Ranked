@@ -431,6 +431,7 @@ struct SurvivalView {
 };
 
 struct RuntimeView {
+    int lobbyOffline=0,lobbyOnline=0;bool lobbyPopulationKnown=false;
     bool soloEnabled = false, survivalEnabled = false, survivalConfigReady = false;
     int survivalPlayerCount=16;
     SurvivalView survival;
@@ -477,6 +478,7 @@ public:
     void takeOverSession();
     void leaveRanked();
     void updateSessionHeartbeat();
+    void setLobbyPopulationVisible(bool visible){if(visible&&!m_lobbyPopulationVisible)m_nextSessionHeartbeatAt={};m_lobbyPopulationVisible=visible;}
     void recheckEnvironment();
     void tick();
     void joinQueue();
@@ -668,6 +670,8 @@ private:
     std::string m_sessionToken;
     std::string m_clientInstanceId;
     bool m_rankedOpen = false, m_sessionRejected = false, m_sessionHeartbeatBusy = false;
+    bool m_lobbyPopulationVisible=false;
+    void observeLobbyPopulation(matjson::Value const& value);
     std::uint64_t m_sessionGeneration = 0;
     std::chrono::steady_clock::time_point m_nextSessionHeartbeatAt {}, m_sessionLeaseDeadline {};
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_sessionHeartbeatRequest, m_sessionCloseRequest;

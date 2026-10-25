@@ -4,6 +4,12 @@ import {readPublicPlayerProfiles} from '../src/forum/public-player-profiles.js';
 import {publicAchievementTitle} from '../src/achievement/public-title.js';
 import type {SqlExecutor} from '../src/database/database.port.js';
 describe('read-only current public profiles',()=>{
+ it('omits unused match-record aggregation from batched history metadata',async()=>{
+  const query=vi.fn(async()=>({rows:[{player_id:'human',account:'123',gd_username:'Player',solo_tier:'GOLD',solo_lp:1200,survival_tier:'SILVER',survival_lp:900}]}));
+  const profiles=await readPublicPlayerProfiles({query} as unknown as SqlExecutor,['123'],false);
+  expect(profiles['123']).toMatchObject({solo:{tier:'GOLD',lp:1200},survival:{tier:'SILVER',lp:900}});
+  expect(profiles['123'].survival).not.toHaveProperty('recordSummary');expect(query).toHaveBeenCalledTimes(1);
+ });
  it('batches accounts, keeps both mode ratings distinct and preserves scoped title identity',async()=>{
   const definition=ACHIEVEMENT_DEFINITIONS.find(d=>d.type==='ONE_SHOT')!;
   const query=vi.fn(async(sql:string,_values?:readonly unknown[])=>({rows:sql.includes('WITH outcomes')?[{player_id:'human',count:10,best:1,wins:3,streak:2}]:[{player_id:'human',account:'123',gd_username:'Player',solo_tier:'GOLD',solo_lp:null,promotion_source_tier:'SILVER',promotion_target_tier:'GOLD',promotion_games_required:5,promotion_wins_required:3,promotion_results:['WIN'],survival_tier:'SILVER',survival_lp:900,title_id:definition.id,title_level:0}]}));

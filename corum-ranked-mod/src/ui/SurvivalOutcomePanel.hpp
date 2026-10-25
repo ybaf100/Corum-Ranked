@@ -37,7 +37,7 @@ inline CCNode* survivalAvatar(SurvivalStanding const& row,std::string const& own
     if(icon)icon->setScale(extent/48.f);return icon;
 }
 class SurvivalStandingsPopup final:public geode::Popup {
-    struct Card {SurvivalStanding row;CCLabelBMFont* title=nullptr;CCLabelBMFont* progress=nullptr;CCNode* red=nullptr;SurvivalProgressTween tween;CCMenuItemSpriteExtra* item=nullptr;};
+    struct Card {SurvivalStanding row;CCLabelBMFont* title=nullptr;CCLabelBMFont* progress=nullptr;CCNode* red=nullptr;SurvivalProgressTween tween;CCMenuItemSpriteExtra* item=nullptr;CCNode* face=nullptr;SurvivalHudColor accent{};};
     std::vector<Card> m_cards;std::string m_match;
     CCLabelBMFont *m_clock=nullptr,*m_pageLabel=nullptr;
     bool m_compact=false,m_reduced=false;std::size_t m_page=0,m_pages=1,m_pageSize=16;
@@ -49,8 +49,8 @@ class SurvivalStandingsPopup final:public geode::Popup {
         auto& runtime=SurvivalRuntime::get();m_match=runtime.view().id;
         m_clock=menuLabel("SURVIVAL",.30f,{245,264},Cyan,FontWeight::Black);m_mainLayer->addChild(m_clock,5);
         auto const rows=survivalRoster(runtime.view());
-        auto const survivors=static_cast<std::size_t>(std::count_if(rows.begin(),rows.end(),[](auto const& row){return !row.eliminated;}));
-        m_compact=survivalCompactCards(survivors);m_reduced=survivalReducedCards(survivors);
+        auto const density=survivalPhaseCardDensity(runtime.view().matchPlayerCount,runtime.view().phase);
+        m_compact=density==SurvivalCardDensity::Compact;m_reduced=density==SurvivalCardDensity::Reduced;
         m_pageSize=m_compact?32:m_reduced?24:16;m_pages=std::max<std::size_t>(1,(rows.size()+m_pageSize-1)/m_pageSize);
         for(std::size_t i=0;i<rows.size();++i){
             auto const& row=rows[i];float const height=m_compact?21.f:m_reduced?32.f:51.f;
@@ -66,7 +66,7 @@ class SurvivalStandingsPopup final:public geode::Popup {
             auto const cell=i%m_pageSize;
             auto* item=CCMenuItemSpriteExtra::create(face,this,menu_selector(SurvivalStandingsPopup::onPlayer));item->setTag(static_cast<int>(i));
             item->setPosition({65.f+120*(cell%4),m_compact?237.f-25*(cell/4):m_reduced?233.f-36*(cell/4):224.f-56*(cell/4)});m_buttonMenu->addChild(item);
-            m_cards.push_back({row,name,progress,red,{},item});
+            m_cards.push_back({row,name,progress,red,{},item,face});
         }
         if(m_pages>1){
             m_pageLabel=menuLabel("",.24f,{245,22},TextMuted);m_mainLayer->addChild(m_pageLabel,5);
@@ -98,6 +98,8 @@ public:
                 card.title->setString(fmt::format("{} {}",row.rank>0?survivalOrdinal(row.rank):"--",row.name).c_str());fitSingleLineMenuLabel(card.title,m_reduced?80:102,12,.22f);
                 card.progress->setString(fmt::format("BEST {}% · NOW {}%",rankedScoreText(card.tween.best.displayed,false),rankedScoreText(card.tween.now,false)).c_str());fitSingleLineMenuLabel(card.progress,m_reduced?80:104,11,.16f);
             }
+            auto const tint=row.eliminated?survivalRankColor(row.rank,false):row.rank>0?survivalRankColor(row.rank,row.passing):SurvivalHudColor{77,135,255};
+            if(card.accent!=tint){card.accent=tint;setSurfaceAccent(card.face,{tint.r,tint.g,tint.b});}
             card.red->setVisible(row.eliminated || (row.rank>0 && !row.passing && v.state=="PLAYING"));
         }
     }

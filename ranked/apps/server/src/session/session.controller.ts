@@ -42,8 +42,9 @@ export class SessionController {
 
   @Post("heartbeat")
   @UseGuards(SessionGuard)
-  public heartbeat(@CurrentSession() session: RankedSessionContext) {
-    return this.sessions.heartbeat(session);
+  public heartbeat(@CurrentSession() session: RankedSessionContext,@Body() body?:unknown) {
+    const includePopulation=Boolean(body&&typeof body==='object'&&'includePopulation'in body&&body.includePopulation===true);
+    return this.sessions.heartbeat(session,includePopulation);
   }
 
   @Post("close")

@@ -14,6 +14,20 @@ function run(source,units=[]){const dir=mkdtempSync(join(tmpdir(),'survival-boar
  writeFileSync(join(dir,'test.cpp'),source);execFileSync('g++',['-std=c++23','-Wall','-Wextra','-Wpedantic','-Werror','-I',join(root,'src'),join(dir,'test.cpp'),...units.map(p=>join(root,p)),'-o',join(dir,'test')],{stdio:'pipe'});execFileSync(join(dir,'test'),[],{stdio:'pipe'});
 }catch(e){throw new Error(e.stderr?.toString()||e.message);}finally{rmSync(dir,{recursive:true,force:true});}}
 
+test('64-player density follows the presented round, including the complete elimination announcement',()=>run(`
+#include "domain/SurvivalBoardPresentation.hpp"
+#include <cassert>
+using namespace corum::ranked;
+int main(){
+ for(auto phase:{"ROUND_1","ROUND_2"})for(int alive:{64,40,26,12}){
+  auto g=survivalGridLayout(568,320,64,alive,phase,64);assert(g.compact&&!g.reduced&&g.pages==1&&g.pageSize>=64);
+ }
+ for(int alive:{40,26,12,5}){auto g=survivalGridLayout(568,320,26,alive,"ROUND_3",64);assert(g.reduced&&!g.compact);}
+ for(auto phase:{"ROUND_4","FINAL","TIEBREAK"}){auto g=survivalGridLayout(568,320,12,12,phase,64);assert(!g.reduced&&!g.compact);}
+ for(auto phase:{"ROUND_1","ROUND_2","ROUND_3","FINAL"})assert(survivalPhaseCardDensity(16,phase)==SurvivalCardDensity::Full);
+}
+`));
+
 test('board uses server deadlines through clear, network gaps, countdown, background elapsed time and result',()=>{
  run(`#include "domain/SurvivalBoardPresentation.hpp"
 #include "domain/ServerClock.hpp"

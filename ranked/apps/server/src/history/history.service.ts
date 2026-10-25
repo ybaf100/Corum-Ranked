@@ -55,7 +55,7 @@ export class HistoryService {
       for(const player of Object.values(record.players??{}) as any[])if(typeof player?.gdAccountId==='string')accounts.push(player.gdAccountId);
       for(const round of record.rounds??[])for(const player of round.standings??[])if(typeof player.gdAccountId==='string')accounts.push(player.gdAccountId);
     }
-    return readPublicPlayerProfiles(this.database,accounts);
+    return readPublicPlayerProfiles(this.database,accounts,false);
   }
 
 }

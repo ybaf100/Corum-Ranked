@@ -187,3 +187,18 @@ M	ranked/package.json
 M	ranked/packages/rules/package.json
 M	ranked/translations/ui.json
 ```
+
+## Verified production completion
+
+- Activation commit `7ebd8c60143f552c5836849357d4993aa9fc42b0` and
+  [Lightsail run 40157861077](https://github.com/ybaf100/Corum-Ranked/actions/runs/40157861077)
+  succeeded, including pinned SSH, Docker build/upload and rollback-capable activation.
+- At 03:23:47 UTC, public health/ready were HTTP 200, all database/schema/public
+  readiness true, with Solo OFF and Survival 64-player ON preserved. Public
+  required version and both exact update hashes/sizes matched beta.100.
+  Unauthenticated history remained HTTP 401.
+- Post-deploy read-only preservation at 03:23:48 UTC matched both pre-deploy
+  complete profile digests and every count/achievement epoch/AP/LP invariant
+  above. No reset or manual production settings change occurred.
+- Physical-device checks and actual external Railway shutdown remain the limits
+  already described above.

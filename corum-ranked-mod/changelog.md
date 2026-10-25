@@ -1,4 +1,10 @@
-# v0.5.0-beta.100 (pending publication)
+# v0.5.0-beta.101
+- Remove repeated history tier images/ambient effects while keeping player details, LP and titles.
+- Use compact cards through Round 2, reduced BEST/NOW cards in Round 3, then full cards from Round 4 in 64-player Survival. Preserve elimination announcements and static round placement colors at every density.
+- Center offline/online human counts below RANKED, updating through the existing five-second heartbeat only while the lobby is visible.
+- Credit hwanhee1 for project leadership, game design and development, with smaller AI-assisted implementation attribution to Codex.
+
+# v0.5.0-beta.100
 - Stop lobby BGM when opening recorded levels, restore it on return, and distinguish confirmed round outcomes with rank colors and brighter silver.
 - Add direct history filter selection, show all 64 waiting entrants, and use reduced cards with BEST/NOW progress for 17–30 survivors.
 - Unify current dual-mode ratings, animated titles and cached forum ranks across history, leaderboard and player information.

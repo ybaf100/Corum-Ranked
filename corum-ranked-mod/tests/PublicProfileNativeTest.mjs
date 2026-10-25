@@ -15,6 +15,38 @@ function run(source){
   execFileSync(join(dir,'test'),[],{stdio:'pipe'});
  }catch(e){throw new Error(e.stderr?.toString()||e.message);}finally{rmSync(dir,{recursive:true,force:true});}
 }
+test('actual population view keeps red/offline and green/online centered, caches unchanged labels and rejects invalid counts',()=>{
+ const source=read('src/ui/LobbyPopulationView.hpp').replace(/^#pragma once\s*|^#include .*$/gm,'').replace('class LobbyPopulationView final:public CCNode {','class LobbyPopulationView final:public CCNode { public:');
+ run(`
+#include <matjson.hpp>
+#include "${root}/src/domain/LobbyPopulation.hpp"
+#include <algorithm>
+#include <cassert>
+#include <cmath>
+#include <string>
+#include <vector>
+struct CCPoint{float x=0,y=0;};struct CCSize{float width,height;};struct ccColor4F{float r,g,b,a;};ccColor4F ccc4f(float r,float g,float b,float a){return {r,g,b,a};}
+struct CCNode{CCPoint position;float scale=1;virtual~CCNode()=default;virtual bool init(){return true;}void addChild(CCNode*){}void autorelease(){}void setPosition(CCPoint p){position=p;}void setScale(float s){scale=s;}float getScaleX(){return scale;}};
+struct CCLabelBMFont:CCNode{std::string text;inline static int edits=0;void setAnchorPoint(CCPoint){}void setString(char const*s){text=s;++edits;}CCSize getContentSize(){return {static_cast<float>(text.size()*64),128};}};
+struct CCDrawNode:CCNode{float radius=0;ccColor4F color{};static auto*create(){return new CCDrawNode;}void drawDot(CCPoint,float r,ccColor4F c){radius=r;color=c;}};
+namespace corum::ranked::ui{enum class FontWeight{SemiBold};constexpr int Text=1;CCLabelBMFont*menuLabel(std::string s,float scale,CCPoint,int,FontWeight){auto*p=new CCLabelBMFont;p->text=s;p->scale=scale/2;return p;}}
+${source}
+int main(){using namespace corum::ranked;using ui::LobbyPopulationView;
+ for(auto s:{R"({})",R"({"offline":-1,"online":1})",R"({"offline":1,"online":2147483648})",R"({"offline":1,"online":"2"})"})assert(!parseLobbyPopulation(matjson::parse(s).unwrap()).known);
+ auto zero=parseLobbyPopulation(matjson::parse(R"({"offline":0,"online":0})").unwrap());assert(zero.known&&zero.offline==0&&zero.online==0);
+ auto*p=LobbyPopulationView::create();assert(p->m_offline->text=="--"&&p->m_red->radius==2&&p->m_green->radius==2&&p->m_red->color.r==1&&p->m_green->color.g>.9f);
+ p->setPosition({284,267});
+ for(auto count:{LobbyPopulation{100,50,true},LobbyPopulation{1,1000000,true},LobbyPopulation{2147483647,2147483647,true},zero}){
+  p->updatePopulation(count);auto const left=p->m_red->position.x-2,right=p->m_online->position.x+p->m_online->getContentSize().width*p->m_online->getScaleX();
+  assert(std::abs(left+right)<.001f&&(right-left)*p->scale<=220.001f&&p->position.x==284&&p->position.y==267);
+  auto edits=CCLabelBMFont::edits;p->updatePopulation(count);assert(edits==CCLabelBMFont::edits);
+ }
+}
+`);
+ const popup=read('src/RankedPopup.cpp');const start=popup.indexOf('    void historyPlayerName('),end=popup.indexOf('    bool onHistoryPlayerTap(',start);
+ assert.doesNotMatch(popup.slice(start,end),/createAnimatedRankBadge|createRankAmbientFx/);
+ assert.match(popup,/addScreenHeader\("RANKED",""/);
+});
 test('actual public profile helpers retain scoped titles/effects, current badges, missing LP and promotion marks',()=>{
  const source=read('src/ui/PublicPlayerProfile.hpp').replace(/^#pragma once\s*|^#include .*$/gm,'');
  run(`

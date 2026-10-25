@@ -1,3 +1,4 @@
+#include "domain/LobbyPopulation.hpp"
 #include "RankedRuntime.hpp"
 #include "RankedAudioManager.hpp"
 #include "ui/RankedModUpdateManager.hpp"
@@ -1059,6 +1060,7 @@ void RankedRuntime::updateSessionHeartbeat() {
     request.timeout(std::chrono::seconds(10));
     auto const generation = m_sessionGeneration;
     m_sessionHeartbeatBusy = true;
+    matjson::Value body;body["includePopulation"]=m_lobbyPopulationVisible;request.bodyJSON(body);
     m_nextSessionHeartbeatAt = now + std::chrono::seconds(5);
     m_sessionHeartbeatRequest.spawn(request.post(endpoint("/api/ranked/session/heartbeat")),
         [this, generation, now](web::WebResponse response) {
@@ -1068,6 +1070,7 @@ void RankedRuntime::updateSessionHeartbeat() {
                 auto const root = response.json().unwrapOr(matjson::Value());
                 m_sessionLeaseDeadline = now + std::chrono::seconds(std::clamp<std::int64_t>(root["sessionLeaseSeconds"].asInt().unwrapOr(90), 5, 120));
                 applyAudioVolumes(root["audioVolumes"]);
+                if(m_lobbyPopulationVisible)observeLobbyPopulation(root["population"]);
             } else if (response.code() == 401 || response.code() == 403 || response.code() == 426) {
                 auto const error = responseError(response);
                 leaveRanked(); setStage(RuntimeStage::Error, "Ranked connection is no longer valid.", error);
@@ -1075,6 +1078,10 @@ void RankedRuntime::updateSessionHeartbeat() {
             // Transport/5xx errors retain the lease only until its existing
             // deadline; neither retries nor stale replies can extend it locally.
         });
+}
+
+void RankedRuntime::observeLobbyPopulation(matjson::Value const& value){
+    auto const population=parseLobbyPopulation(value);if(population.known){m_view.lobbyOffline=population.offline;m_view.lobbyOnline=population.online;m_view.lobbyPopulationKnown=true;}
 }
 
 void RankedRuntime::applyAudioVolumes(matjson::Value const& volumes) {

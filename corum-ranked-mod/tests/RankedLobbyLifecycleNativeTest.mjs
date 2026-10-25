@@ -160,17 +160,17 @@ test('actual session pulse bounds retries, closes the exact token and rejects re
 #include <vector>
 struct Clock {static inline auto current=std::chrono::steady_clock::time_point(std::chrono::seconds(100));static auto now(){return current;}};
 namespace matjson {struct Value {
- std::int64_t lease=20;Value operator[](char const*)const{return *this;}
+ std::int64_t lease=20;bool requested=false;Value&operator=(bool v){requested=v;return*this;}Value&operator[](char const*){return *this;}Value operator[](char const*)const{return *this;}
  struct Int {std::int64_t value;std::int64_t unwrapOr(int)const{return value;}};
  Int asInt()const{return {lease};}
 };}
 namespace geode::utils::web {
 struct WebResponse {int status=200;std::int64_t lease=20;int code()const{return status;}
  struct Json {std::int64_t lease;matjson::Value unwrapOr(matjson::Value)const{return {lease};}};Json json()const{return {lease};}};
-struct Request {std::string token,url;};
+struct Request {std::string token,url;bool counts=false;};
 struct Job {Request request;std::function<void(WebResponse)> callback;bool cancelled=false;};
 inline std::vector<std::shared_ptr<Job>> jobs;
-struct WebRequest {std::string token;void timeout(std::chrono::seconds){}Request post(std::string url)const{return {token,url};}};
+struct WebRequest {std::string token;bool counts=false;void bodyJSON(matjson::Value const& v){counts=v.requested;}void timeout(std::chrono::seconds){}Request post(std::string url)const{return {token,url,counts};}};
 }
 namespace web=geode::utils::web;
 namespace geode::async {template<class T> struct TaskHolder {
@@ -189,7 +189,8 @@ ${fields}
  std::uint64_t m_standingGeneration=0;bool m_standingBusy=false;
  geode::async::TaskHolder<web::WebResponse> m_standingRequest;
  struct {bool historyLoading=true;struct {struct {bool loading=true;}forum;}playerInfo;struct {bool loading=true;}forumRecords;}m_view;
- RuntimeStage stage=RuntimeStage::Idle;
+ int populationReplies=0;RuntimeStage stage=RuntimeStage::Idle;
+ ${method(header,"    void setLobbyPopulationVisible(")}
  void invalidatePollRequest(){++pollRetirements;}
  void setStage(RuntimeStage value,std::string,std::string={}){stage=value;}
  std::string endpoint(std::string path)const{return path;}
@@ -197,6 +198,7 @@ ${fields}
  void applyAudioVolumes(matjson::Value const&){}
 };
 ${methods}
+void RankedRuntime::observeLobbyPopulation(matjson::Value const&){++populationReplies;}
 void advance(int ms){Clock::current+=std::chrono::milliseconds(ms);}
 RankedRuntime connected(){RankedRuntime r;r.m_rankedOpen=true;r.m_sessionToken="token-A";r.m_sessionLeaseDeadline=Clock::now()+std::chrono::seconds(20);return r;}
 int main(){
@@ -222,6 +224,12 @@ int main(){
   advance(57999);r.updateSessionHeartbeat();assert(r.m_rankedOpen);
   advance(1);r.updateSessionHeartbeat();assert(!r.m_rankedOpen&&r.stage==RuntimeStage::Error);}
  {web::jobs.clear();RankedRuntime r;r.updateSessionHeartbeat();assert(web::jobs.empty());r.leaveRanked();assert(web::jobs.empty());}
+ {web::jobs.clear();auto r=connected();r.setLobbyPopulationVisible(true);r.updateSessionHeartbeat();assert(web::jobs.size()==1&&web::jobs.back()->request.counts);
+  auto first=web::jobs.back();r.setLobbyPopulationVisible(false);first->callback({200,90});assert(r.populationReplies==0);
+  advance(5000);r.updateSessionHeartbeat();assert(!web::jobs.back()->request.counts);web::jobs.back()->callback({200,90});
+  r.setLobbyPopulationVisible(true);r.updateSessionHeartbeat();assert(web::jobs.back()->request.counts);web::jobs.back()->callback({200,90});assert(r.populationReplies==1);
+  auto n=web::jobs.size();advance(4999);r.updateSessionHeartbeat();assert(web::jobs.size()==n);advance(1);r.updateSessionHeartbeat();assert(web::jobs.size()==n+1);
+ }
 }
 `);
     assert.match(read('src/RankedRoundPreparation.cpp'), /void RankedRoundPreparation::update\(float dt\) \{\s*RankedRuntime::get\(\)\.updateSessionHeartbeat/);

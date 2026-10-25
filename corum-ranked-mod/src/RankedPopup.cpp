@@ -1,4 +1,5 @@
 #include "ui/PublicPlayerProfile.hpp"
+#include "ui/LobbyPopulationView.hpp"
 #include "RankedPopup.hpp"
 #include "domain/HistoryPresentation.hpp"
 #include "HistoryLevelLookup.hpp"
@@ -656,6 +657,7 @@ class CorumRankedLayer final : public CCLayerColor {
 
     void refresh(float) {
         auto& runtime = RankedRuntime::get();
+        syncLobbyPopulation();
         runtime.tick();
         auto& audio = RankedAudioManager::get();
         audio.configure(runtime.view().client);
@@ -677,6 +679,7 @@ class CorumRankedLayer final : public CCLayerColor {
         }
         updateDynamicUi();
         updateHistoryThumbnail();
+        syncLobbyPopulation();
         syncAudioMode();
         maybeEnterLevel();
     }
@@ -2511,11 +2514,6 @@ class CorumRankedLayer final : public CCLayerColor {
             auto const textRight=right-108;m_mainStatusLabel->setPosition({(textLeft+textRight)/2,27});
             corum::ranked::ui::fitMenuLabelWidth(m_mainStatusLabel,std::max(80.0f,textRight-textLeft),.24f,.16f);
         }
-        auto* label = typeinfo_cast<CCLabelBMFont*>(m_root->getChildByID("ranked-screen-eyebrow"_spr));
-        if (!label) return;
-        auto const text = selected ? (*selected == corum::ranked::RankedMode::Survival ? "SURVIVAL" : "SOLO RANKED") : tr("choose-mode","CHOOSE A MODE");
-        label->setString(text.c_str());
-        corum::ranked::ui::fitMenuLabelWidth(label,238,0.26f,0.18f);
     }
 
     void animateModeLobby(corum::ranked::RankedMode mode, bool opening) {
@@ -2621,10 +2619,24 @@ class CorumRankedLayer final : public CCLayerColor {
     void onRetrySurvival(CCObject*) { RankedRuntime::get().fetchSurvivalProfile(); }
     void onSurvivalQueue(CCObject*) { corum::ranked::SurvivalRuntime::get().joinQueue(); }
 
+    void syncLobbyPopulation(){
+        auto& runtime=RankedRuntime::get();auto* director=CCDirector::sharedDirector();
+        auto const stage=runtime.view().stage;
+        bool const visible=isRunning()&&m_page==Page::Live&&!director->getNextScene()&&getParent()==director->getRunningScene()&&
+            !m_rankTransitionLayer&&!m_resultScoreLayer&&!m_resultScorePending&&
+            (stage==RuntimeStage::Ready||stage==RuntimeStage::Queued||stage==RuntimeStage::JoiningQueue);
+        runtime.setLobbyPopulationVisible(visible);
+        if(visible&&m_root)if(auto* population=typeinfo_cast<corum::ranked::ui::LobbyPopulationView*>(m_root->getChildByID("ranked-lobby-population"_spr)))population->updatePopulation({runtime.view().lobbyOffline,runtime.view().lobbyOnline,runtime.view().lobbyPopulationKnown});
+    }
+
     void renderMain(RuntimeView const& view) {
         auto const size = CCDirector::sharedDirector()->getWinSize();
         addTopBack(true); addLanguageSelector();
-        addScreenHeader("Ranked",m_modeTransition.selected() ? (*m_modeTransition.selected() == corum::ranked::RankedMode::Survival ? "SURVIVAL" : "SOLO RANKED") : tr("choose-mode","CHOOSE A MODE"),kGold,kCyan);
+        addScreenHeader("RANKED","",kGold,kCyan);
+        if(auto* population=corum::ranked::ui::LobbyPopulationView::create()){
+            population->setID("ranked-lobby-population"_spr);population->setPosition({size.width/2,size.height-53});
+            population->updatePopulation({view.lobbyOffline,view.lobbyOnline,view.lobbyPopulationKnown});m_root->addChild(population,7);
+        }
         if (view.stage != RuntimeStage::Ready && view.stage != RuntimeStage::Queued && view.stage != RuntimeStage::JoiningQueue) {
             auto* message = makeLabel(lobbyMessage(view),0.30f,{size.width/2,size.height/2},kGold,"semibold");
             corum::ranked::ui::fitMenuLabelWidth(message,size.width-60,0.30f,0.17f); m_root->addChild(message,5);
@@ -4445,10 +4457,9 @@ class CorumRankedLayer final : public CCLayerColor {
         auto* name=corum::ranked::ui::playerNameLabel(player.name,.32f,{nameWidth/2,20},color,corum::ranked::ui::FontWeight::ExtraBold);
         corum::ranked::ui::fitSingleLineMenuLabel(name,nameWidth,18,.32f);hit->addChild(name,5);
         if(hasRank){
-            auto* badge=corum::ranked::ui::createAnimatedRankBadge(current["tier"].asString().unwrapOr("UNRANKED"),{18,18},corum::ranked::ui::RankBadgeDisplay::Leaderboard);badge->setPosition({nameWidth+12,20});hit->addChild(badge,5);
             auto value=current["promotion"].isObject()?tr("promotion-match","PROMOTION MATCH"):current["lp"].isNumber()?std::to_string(current["lp"].asInt().unwrapOr(0))+" LP":tr("info-unavailable","Unavailable");
             value=tr("current","CURRENT")+" "+value;
-            auto* score=corum::ranked::ui::menuLabel(value,.21f,{width-2,20},kGold,corum::ranked::ui::FontWeight::ExtraBold);score->setAnchorPoint({1,.5f});corum::ranked::ui::fitSingleLineMenuLabel(score,std::max(6.f,width-nameWidth-26),16,.21f);hit->addChild(score,5);
+            auto* score=corum::ranked::ui::menuLabel(value,.21f,{width-2,20},kGold,corum::ranked::ui::FontWeight::ExtraBold);score->setAnchorPoint({1,.5f});corum::ranked::ui::fitSingleLineMenuLabel(score,std::max(6.f,width-nameWidth-8),16,.21f);hit->addChild(score,5);
         }
         corum::ranked::ui::publicPlayerTitle(hit,profile["equippedTitle"],{width/2,5},width,.17f);
         hit->setID("ranked-history-player-name"_spr);
@@ -5224,6 +5235,7 @@ class CorumRankedLayer final : public CCLayerColor {
     }
 
     void onExit() override {
+        RankedRuntime::get().setLobbyPopulationVisible(false);
         if(m_updateChannelPopup)if(auto popup=m_updateChannelPopup->lock())popup->dismiss();
         m_updateChannelPopup.reset();
         closeHistoryFilter();

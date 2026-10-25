@@ -33,7 +33,7 @@ using namespace geode::prelude;
 namespace corum::ranked {
 namespace {
 class SurvivalGameLayer final : public CCLayerColor {
-    struct Tile {CCNode* root=nullptr;CCLabelBMFont* name=nullptr;CCLabelBMFont* record=nullptr;CCPoint destination;CCNode* icon=nullptr;CCNode* tierBadge=nullptr;std::string tier="";CCNode* eliminatedBackground=nullptr;std::string titleText,recordText;std::array<CCNode*,3> medals{};int infoTag=0;SurvivalProgressTween progress{};};
+    struct Tile {CCNode* root=nullptr;CCLabelBMFont* name=nullptr;CCLabelBMFont* record=nullptr;CCPoint destination;CCNode* icon=nullptr;CCNode* tierBadge=nullptr;std::string tier="";CCNode* eliminatedBackground=nullptr;std::string titleText,recordText;std::array<CCNode*,3> medals{};int infoTag=0;SurvivalProgressTween progress{};SurvivalHudColor accent{};bool hasAccent=false;};
     std::unordered_map<std::string,Tile> m_tiles;
     std::unordered_map<int,SurvivalStanding> m_infoByTag;
     int m_nextInfoTag=1000;
@@ -187,7 +187,7 @@ class SurvivalGameLayer final : public CCLayerColor {
             players.push_back({p["participantId"].asString().unwrapOr(""),p["name"].asString().unwrapOr(""),static_cast<int>(p["rank"].asInt().unwrapOr(0)),0,0,0,true,p["kind"].asString().unwrapOr("")=="BOT",false,p["displayedTier"].asString().unwrapOr("UNRANKED"),numFromString<int>(p["gdAccountId"].asString().unwrapOr("0")).unwrapOr(0)});}
         auto const completed=view.roundKey.ends_with(":elimination");
         auto const survivors=result?1:std::count_if(players.begin(),players.end(),[completed](auto const& p){return completed?p.passing:!p.eliminated;});
-        auto const size=getContentSize();auto const grid=survivalGridLayout(size.width,size.height,players.size(),static_cast<int>(survivors));
+        auto const size=getContentSize();auto const grid=survivalGridLayout(size.width,size.height,players.size(),static_cast<int>(survivors),view.phase,view.matchPlayerCount);
         auto const gridContext=view.id+":"+view.roundKey+":"+std::to_string(view.mapGeneration)+(result?":result":":live")+(grid.compact?":compact":grid.reduced?":reduced":":full");
         if(m_gridContext!=gridContext){m_gridContext=gridContext;m_grid->removeAllChildrenWithCleanup(true);m_tiles.clear();m_infoByTag.clear();m_nextInfoTag=1000;m_cardPage=0;}
         auto const columns=grid.columns;auto const width=grid.cellWidth,height=grid.cellHeight;auto const compact=grid.compact;
@@ -216,11 +216,6 @@ class SurvivalGameLayer final : public CCLayerColor {
                 auto* record=compact?nullptr:ui::menuLabel("",.23f,{card.width/2,card.recordY},ui::TextMuted,ui::FontWeight::ExtraBold);if(record)root->addChild(record,5);
                 found=m_tiles.emplace(value.id,Tile{root,nickname,record,destination,avatarSlot}).first;
                 auto& tile=found->second;tile.infoTag=iconButton->getTag();
-                std::array<ccColor3B,3> const accents{ui::Gold,ccc3(240,247,255),ccc3(208,137,70)};
-                for(std::size_t medal=0;!compact && medal<accents.size();++medal){
-                    tile.medals[medal]=ui::surface({card.width,card.height},{card.width/2,card.height/2},accents[medal],ui::SurfaceRaised,245,true);
-                    tile.medals[medal]->setVisible(false);root->addChild(tile.medals[medal],3);
-                }
                 tile.eliminatedBackground=ui::surface({card.width,card.height},{card.width/2,card.height/2},ui::Red,{42,13,28},250,true);
                 tile.eliminatedBackground->setVisible(false);root->addChild(tile.eliminatedBackground,4);
                 iconButton->setEnabled(false);
@@ -256,8 +251,9 @@ class SurvivalGameLayer final : public CCLayerColor {
                 if(tile.titleText!=title){tile.titleText=title;tile.name->setString(title.c_str());ui::fitSingleLineMenuLabel(tile.name,card.titleWidth,card.titleHeight,.25f);}
                 tile.name->setColor(value.eliminated?ui::Red:value.id==view.ownId?ui::Cyan:ui::Text);
             }
-            auto const medal=survivalCardMedal(value.rank,value.eliminated);
-            for(std::size_t n=0;n<tile.medals.size();++n)if(tile.medals[n])tile.medals[n]->setVisible(medal==static_cast<int>(n+1));
+            auto const tint=value.eliminated?survivalRankColor(value.rank,false):
+                (result||completed||view.state=="PLAYING")&&value.rank>0?survivalRankColor(value.rank,result||value.passing):SurvivalHudColor{77,135,255};
+            if(!tile.hasAccent||tile.accent!=tint){tile.hasAccent=true;tile.accent=tint;ui::setSurfaceAccent(tile.root,{tint.r,tint.g,tint.b});}
             tile.eliminatedBackground->setVisible(value.eliminated || (!result && value.rank>0 && !value.passing));
             if(tile.record && tile.recordText!=record){tile.recordText=record;tile.record->setString(record.c_str());
                 if(reduced)ui::fitSingleLineMenuLabel(tile.record,card.width-10,card.recordHeight,.21f);
