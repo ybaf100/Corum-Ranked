@@ -96,3 +96,87 @@ execution; a successful source push alone is not a completed release.
   `32ba2a9f12eb2e80f83ef0f9f2730150`. These are the user's current records,
   not the older beta.101 observation; no old snapshot is restored. Survival is
   still ON/64 with generation `survival-b0676719:64p`.
+
+## Actual first-build publication and production results
+
+Source/main deployment commit: `f264710dfd7446149e30a93b013fca11112cc0da`.
+All four source workflows succeeded on **attempt one**, without an intervening
+source fix, second activation push or immutable package overwrite:
+
+- [Server CI 40200044090](https://github.com/ybaf100/Corum-Ranked/actions/runs/40200044090):
+  rules 288/288; server 626 passed / one optional local pool test skipped;
+  PostgreSQL 16 online/concurrency/recovery 52/52; typecheck/build, relay and
+  Apps Script checks; 1050 adaptive NORMAL matches and ten-hour virtual soak.
+- [Release 40200044089](https://github.com/ybaf100/Corum-Ranked/actions/runs/40200044089):
+  Windows/iOS/Android32/Android64 build, combine/package validation and R2 publish.
+- [Debug 40200044140](https://github.com/ybaf100/Corum-Ranked/actions/runs/40200044140):
+  final native suite **299/299, zero skips**, policy/shader checks, all four
+  platform Debug ON and OFF builds, package and R2 publish. Unchanged optional
+  external images skipped by existing policy.
+- [Lightsail 40200044088](https://github.com/ybaf100/Corum-Ranked/actions/runs/40200044088):
+  pinned SSH, Docker image build, four barrier unit tests, both full package
+  verifications, upload and rollback-capable activation all succeeded. Its log
+  verified Release at 14:03:36Z and Debug at 14:05:28Z, before reporting the
+  actual deployed source at 14:06:10Z. This is completed server activation,
+  separately from completed client publication.
+
+Both public `.geode` files were also downloaded completely from this workspace,
+independently of CI, verifying descriptor hashes/bytes, embedded ID/version/channel
+and all four platform binaries:
+
+| Channel | Bytes | SHA-256 | Public descriptor |
+| --- | ---: | --- | --- |
+| Release | 8,949,475 | `13ef70e08d7e7d644e3501ddc683701f119f7afcc7448736842f47d52310358e` | [release.json](https://pub-11442f32945446a49b9da0a5e69f2451.r2.dev/ranked/release-v0.5.0-beta.102/release.json) |
+| Debug | 9,531,104 | `2c44bdae618947d7c4cd41b5656d7f2cc7a9fb7b231ab5281d1985113fd2d0ba` | [debug.json](https://pub-11442f32945446a49b9da0a5e69f2451.r2.dev/ranked/debug-v0.5.0-beta.102/debug.json) |
+
+At `2026-10-25T14:06:45Z`, Singapore `/health` and `/ready` returned HTTP 200;
+ready/publicDataReady/rankedReady/databaseReady/databaseConnected/schemaReady
+were all true, missingSchema empty. Required client version and both update
+channels were beta.102 with the exact hashes/sizes above. Current operator config
+reported Solo ON and Survival ON/64. Unauthenticated history detail returned 401.
+
+The post-deploy read-only comparison at `2026-10-25T14:06:46.549Z` matched **every
+baseline preservation field** except the observation timestamp, including both
+complete profile digests, epoch, migrations/native_death, all account/match/Attempt
+counts, 24 unlocks/19 AP rows, AP totals 335 and zero invalid LP ledger rows.
+No Production reset, data repair, manual migration or Neon setting change occurred.
+
+Physical iPhone/iPad/Android/Windows touch, live official/observer/replay play,
+Solo final-attempt timing, native shutdown with Pause/completion open and real
+frame timings have **not** been tested here. Items 4/5 retain the diagnostic limits
+listed above; CI success does not turn an unconfirmed action crash or performance
+cause into a verified fix. Earlier recovered return/pause/End retry behavior
+remains protected by its existing regressions.
+
+## Modified paths
+
+```text
+.github/workflows/deploy-ranked-lightsail.yml
+AGENTS.md
+corum-ranked-mod/changelog.md
+corum-ranked-mod/mod.json
+corum-ranked-mod/src/EndLevelLayer.cpp
+corum-ranked-mod/src/RankedPauseLayer.cpp
+corum-ranked-mod/src/RankedRoundPreparation.cpp
+corum-ranked-mod/src/SurvivalRuntime.cpp
+corum-ranked-mod/src/domain/TranslationCatalog.generated.hpp
+corum-ranked-mod/src/ui/RankedSettingsPopup.hpp
+corum-ranked-mod/src/ui/SurvivalGameLayer.cpp
+corum-ranked-mod/src/ui/SurvivalMapSelectionLayer.cpp
+corum-ranked-mod/src/ui/SurvivalMapSelectionLayer.hpp
+corum-ranked-mod/src/ui/SurvivalSelectedMapPanel.cpp
+corum-ranked-mod/tests/LogEvidenceRegressionNativeTest.mjs
+corum-ranked-mod/tests/SpectatorCameraSourceTest.mjs
+corum-ranked-mod/tests/SpectatorSceneNativeTest.mjs
+corum-ranked-mod/tests/SurvivalBoardNativeTest.mjs
+corum-ranked-mod/tests/SurvivalUiNativeTest.mjs
+ranked/apps/server/package.json
+ranked/apps/server/src/session/client-version.ts
+ranked/docs/beta102-log-evidence-fixes.md
+ranked/package-lock.json
+ranked/package.json
+ranked/packages/rules/package.json
+ranked/tools/tests/test_published_clients.py
+ranked/tools/verify-published-clients.py
+ranked/translations/ui.json
+```
