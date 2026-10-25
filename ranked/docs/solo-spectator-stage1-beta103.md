@@ -166,3 +166,14 @@ deployment results are appended separately after execution.
   repeated scene exits/process termination are **not device-verified** here.
   Platform/package/activation outcomes below must be based on actual Actions and
   public downloads, not these local compiler-boundary tests.
+
+### First platform-build correction
+
+The first beta.103 iOS build exposed Apple's different integer aliases in
+matjson versus int64_t at the new round-revision max operation. No client channel
+was published and no server was activated from that failed build. The operation
+now names its int64_t template type explicitly. The production-method harness
+also models distinct long-long revision and long JSON types so Linux compilation
+catches the same portability regression. The original full test results above
+precede this one-line correction; the handoff test and subsequent full CI/build
+outcomes verify the corrected source separately.

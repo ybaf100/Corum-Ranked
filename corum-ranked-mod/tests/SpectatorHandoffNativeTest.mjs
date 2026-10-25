@@ -23,7 +23,8 @@ namespace log {template<class...T>void debug(T...){}}
 enum class RuntimeStage{Matched,Ready};
 struct Runtime{
  struct Match{std::string matchId="m",state="ROUND_PLAYING",side="A",opponentName="B",spectatorOpponentName,deadlineAt="new";int roundNumber=1,deathmatchSequence=0;bool placement=false,spectatorActive=false,spectatorLiveEnabled=true;
- std::optional<int>currentMap=42,spectatorCurrentProgress;std::int64_t roundStateVersion=0,stateVersion=0;double committedScoreA=0,committedScoreB=0,scoreA=0,scoreB=0;
+ // Model Apple's int64_t (long long) versus matjson's long on this Linux runner.
+ std::optional<int>currentMap=42,spectatorCurrentProgress;long long roundStateVersion=0;std::int64_t stateVersion=0;double committedScoreA=0,committedScoreB=0,scoreA=0,scoreB=0;
  int clearsA=0,clearsB=0,deathmatchAttemptsUsedA=0,deathmatchAttemptsUsedB=0,deathmatchAttemptsCompletedA=0,deathmatchAttemptsCompletedB=0;}match;
  struct View{RuntimeStage stage=RuntimeStage::Matched;Match match;}m_view;
  int m_localDeathmatchSequence=0,m_localDeathmatchVisualAttempts=0,pollsAccepted=0;bool pending=true;

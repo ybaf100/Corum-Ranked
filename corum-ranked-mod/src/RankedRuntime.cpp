@@ -2091,7 +2091,7 @@ void RankedRuntime::applyAttemptSnapshot(matjson::Value const& root) {
         if(ackRound>0 && m_view.match.roundNumber>0 && ackRound!=m_view.match.roundNumber)return;
         if(ackVersion>0 && ackVersion<m_view.match.roundStateVersion)return;
         if(!acceptsRoundAckPhase(m_view.match.state,root["roundSnapshot"]["phase"].asString().unwrapOr("")))return;
-        m_view.match.roundStateVersion=std::max(m_view.match.roundStateVersion,ackVersion);
+        m_view.match.roundStateVersion=std::max<std::int64_t>(m_view.match.roundStateVersion,ackVersion);
     }
     auto const deadline = root["deadlineAt"].asString();
     if (deadline.isOk()) m_view.match.deadlineAt = deadline.unwrap();
