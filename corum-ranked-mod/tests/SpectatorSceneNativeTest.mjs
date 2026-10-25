@@ -348,9 +348,10 @@ namespace corum::ranked {
 struct RankedRuntime {
     struct Match {std::string state="ROUND_SETTLING";bool spectatorLiveEnabled=false;};
     struct View {Match match;} data;
-    bool inFlight=true,spectating=false;int ticks=0;
+    bool inFlight=true,spectating=false,authority=false,canEnter=true;int ticks=0;
     static RankedRuntime& get(){static RankedRuntime runtime;return runtime;}
     void tick(){++ticks;}bool hasLocalAttemptInFlight()const{return inFlight;}
+    bool hasLocalGameplayAuthority()const{return authority;}bool canEnterCurrentLevel()const{return canEnter;}
     bool isSpectating()const{return spectating;}View const& view()const{return data;}
 };
 bool prepared=false;int prepareCalls=0;
@@ -378,6 +379,11 @@ int main(){
     runtime={};runtime.data.match.state="ROUND_RESULT";
     CorumRankedEndLevelLayer result;result.watchRankedExit(0);assert(result.exits==0);
     runtime.inFlight=false;result.watchRankedExit(0);assert(result.exits==1);
+    runtime.data.match.state="ROUND_SETTLING";runtime.spectating=false;runtime.canEnter=false;
+    CorumRankedEndLevelLayer pending;runtime.inFlight=true;pending.watchRankedExit(0);assert(pending.exits==0);
+    runtime.inFlight=false;runtime.authority=true;pending.watchRankedExit(0);assert(pending.exits==0);
+    runtime.authority=false;runtime.canEnter=true;pending.watchRankedExit(0);assert(pending.exits==0);
+    runtime.canEnter=false;pending.watchRankedExit(0);pending.watchRankedExit(0);assert(pending.exits==1);
 }
 `;
     const dir = mkdtempSync(join(tmpdir(), 'corum-completion-native-'));

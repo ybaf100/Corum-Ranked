@@ -10,8 +10,10 @@ using namespace geode::prelude;
 
 namespace {
 
-WeakRef<EndLevelLayer> rankedCompletionOverlay;
-WeakRef<EndLevelLayer> survivalCompletionOverlay;
+// Deliberately process-lived slots: Cocos must never be touched by a DLL static destructor.
+// Normal onExit below releases controllers while their scene is still alive.
+auto& rankedCompletionOverlay = *new WeakRef<EndLevelLayer>;
+auto& survivalCompletionOverlay = *new WeakRef<EndLevelLayer>;
 
 bool authoritativeExitState(std::string const& state) {
     return
@@ -97,7 +99,8 @@ class $modify(CorumRankedEndLevelLayer, EndLevelLayer) {
             removeFromParentAndCleanup(true);
             return;
         }
-        if (!authoritativeExitState(state)) return;
+        if (!authoritativeExitState(state) &&
+            (runtime.hasLocalGameplayAuthority() || runtime.canEnterCurrentLevel())) return;
 
         m_fields->rankedExitRequested = true;
         unschedule(schedule_selector(CorumRankedEndLevelLayer::watchRankedExit));
@@ -144,6 +147,15 @@ class $modify(CorumRankedEndLevelLayer, EndLevelLayer) {
             }
         }
         EndLevelLayer::onReplay(sender);
+    }
+
+    void onExit() {
+        Ref<EndLevelLayer> retained(this);
+        if(auto overlay=rankedCompletionOverlay.lock();overlay && overlay.data()==this)rankedCompletionOverlay={};
+        if(auto overlay=survivalCompletionOverlay.lock();overlay && overlay.data()==this)survivalCompletionOverlay={};
+        unschedule(schedule_selector(CorumRankedEndLevelLayer::watchRankedExit));
+        unschedule(schedule_selector(CorumRankedEndLevelLayer::watchSurvivalExit));
+        EndLevelLayer::onExit();
     }
 
     void onMenu(CCObject* sender) {

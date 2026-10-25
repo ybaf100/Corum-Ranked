@@ -78,6 +78,15 @@ jobs:
           docker build --pull -f ranked/Dockerfile.lightsail -t "corum-ranked:${GITHUB_SHA}" ranked
           docker save "corum-ranked:${GITHUB_SHA}" | gzip -1 > "/tmp/corum-ranked-${GITHUB_SHA}.tar.gz"
 
+      - name: Verify published clients before required-version activation
+        if: github.event_name == 'push' || inputs.mode == 'deploy'
+        env:
+          RANKED_DOWNLOAD_BASE_URL: ${{ vars.RANKED_DOWNLOAD_BASE_URL || 'https://pub-11442f32945446a49b9da0a5e69f2451.r2.dev' }}
+        run: |
+          python3 -m unittest discover -s ranked/tools/tests -p 'test_published_clients.py'
+          version="$(python3 -c 'import json; print(json.load(open("corum-ranked-mod/mod.json"))["version"])')"
+          python3 ranked/tools/verify-published-clients.py --base "$RANKED_DOWNLOAD_BASE_URL" --version "$version"
+
       - name: Upload immutable image and activate with rollback
         if: github.event_name == 'push' || inputs.mode == 'deploy'
         env:

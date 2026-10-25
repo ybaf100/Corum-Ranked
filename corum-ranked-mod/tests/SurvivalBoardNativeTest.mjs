@@ -83,7 +83,7 @@ struct SurvivalRuntime{
  void chooseOutcome(SurvivalOutcomeChoice choice){++choices;lastChoice=choice;}
  void leaveObserver(){observe=false;}
 };
-struct Coordinator{bool m_closed=false,m_motion=false,m_browsingBoard=false,m_manualMap=false;std::chrono::steady_clock::time_point m_eliminationUntil{};int confirmations=0;void confirmSurrender(){++confirmations;}
+struct Coordinator{std::uint64_t m_boardVisit=0;bool m_closed=false,m_motion=false,m_browsingBoard=false,m_manualMap=false;std::chrono::steady_clock::time_point m_eliminationUntil{};int confirmations=0;void confirmSurrender(){++confirmations;}
  ${back}
 };
 int main(){Coordinator c;auto&r=SurvivalRuntime::get();c.keyBackClicked();assert(c.m_browsingBoard&&c.m_manualMap&&c.confirmations==0&&r.acknowledgments==0&&!c.m_closed);
@@ -187,8 +187,8 @@ int main(){SurvivalRuntime r;
  r.wait.reset();assert(!r.canEnter());r.wait=3000;assert(!r.canEnter());r.wait=1;assert(!r.canEnter());r.wait=0;assert(r.canEnter());r.wait=-100;assert(r.canEnter());
  r.panelWait=3000;assert(!r.canEnter());r.panelWait.reset();assert(!r.canEnter());r.entered=true;assert(r.canEnter());r.entered=false;r.panelWait=0;
  for(auto const* state:{"COUNTDOWN","PLAYING"}){
-  r.m_view.state=state;r.panelWait=1;assert(!r.canEnter()); // Faster peers cannot consume this client's full visible hold.
-  r.panelWait.reset();assert(!r.canEnter());r.panelWait=0;assert(r.canEnter());
+  r.m_view.state=state;r.panelWait=1;assert(r.canEnter()==(std::string(state)=="PLAYING")); // Only pre-start entry retains the visible hold.
+  r.panelWait.reset();assert(r.canEnter()==(std::string(state)=="PLAYING"));r.panelWait=0;assert(r.canEnter());
   r.panelWait=1;r.entered=true;assert(r.canEnter());r.entered=false;r.panelWait=0;
  }r.m_view.state="ENTERING";
  for(auto const* phase:{"ROUND_1","ROUND_2","ROUND_3","FINAL","TIEBREAK"}){r.m_view.phase=phase;assert(r.canEnter());}

@@ -83,7 +83,7 @@ void SurvivalSelectedMapPanel::present(CCSize size,bool thumbnail,SurvivalMatchV
     m_options=options;auto const interactive=appearance>=1. && actionsEnabled;
     auto* level=RankedLevelPreparation::get().level();auto const native=level && static_cast<int>(level->m_levelID)==view.map.levelId;
     m_ldm->setEnabled(interactive && native && prep.mapReady && supportsLdm);m_shake->setEnabled(interactive && native && prep.mapReady);m_jukebox->setEnabled(interactive && native && prep.mapReady);
-    auto const retry=!prep.error.empty();auto const start=SurvivalRuntime::get().previouslyEntered() || SurvivalRuntime::get().observing();
+    auto const retry=!prep.error.empty();auto const start=view.state=="PLAYING" || SurvivalRuntime::get().previouslyEntered() || SurvivalRuntime::get().observing();
     auto const ready=interactive && (retry || canEnter);
     if(ready!=m_readyEnabled || retry!=m_retry || start!=m_start){
         m_readyEnabled=ready;m_retry=retry;m_start=start;

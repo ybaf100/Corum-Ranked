@@ -19,7 +19,8 @@ using corum::ranked::RankedRuntime;
 using corum::ranked::SurvivalRuntime;
 namespace ui = corum::ranked::ui;
 namespace i18n = corum::ranked::i18n;
-std::optional<WeakRef<PauseLayer>> activeRankedPause;
+// Cleared by normal scene ownership release; intentionally no Cocos work at DLL shutdown.
+auto& activeRankedPause = *new std::optional<WeakRef<PauseLayer>>;
 void dismissNativeRankedExitConfirmation(PauseLayer* pause) {
     auto* scene = CCDirector::sharedDirector()->getRunningScene();
     if (!scene) return;

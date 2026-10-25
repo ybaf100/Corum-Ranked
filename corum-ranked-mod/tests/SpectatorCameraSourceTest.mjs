@@ -39,7 +39,7 @@ test('same-scene viewer heartbeat owns entry/exit independently of stopped vanil
     assert.match(play, /m_fields->spectatorScenePrepared\) return/);
     assert.match(play, /frozen \|\| \(m_fields->rankedInitialized && m_fields->localSafety.active\(\)\)/);
     assert.match(end, /Ref<EndLevelLayer> retained\(this\);\s*if \(!corum::ranked::prepareSpectatorScene\(m_playLayer\)\) return;/);
-    assert.match(end, /WeakRef<EndLevelLayer> rankedCompletionOverlay/);
+    assert.match(end, /auto& rankedCompletionOverlay = \*new WeakRef<EndLevelLayer>/);
     assert.match(end, /overlay->m_playLayer != layer/);
     assert.match(play, /if \(!corum::ranked::quitThroughRankedCompletionOverlay\(this\)\) onQuit\(\)/);
     assert.match(play, /WAITING\.\.\./);

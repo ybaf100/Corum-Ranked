@@ -1956,8 +1956,8 @@
     "ko": "서버에서 맵을 선택하고 있습니다..."
   },
   "survival-selection-motion": {
-    "en": "Level selection motion",
-    "ko": "레벨 선택 모션"
+    "en": "Fancy Level Selection Animation",
+    "ko": "화려한 레벨 선택 모션"
   },
   "survival-surrender-pending": {
     "en": "Surrender submitted · waiting for server",

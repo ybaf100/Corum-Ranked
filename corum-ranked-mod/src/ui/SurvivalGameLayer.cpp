@@ -48,6 +48,7 @@ class SurvivalGameLayer final : public CCLayerColor {
     std::string m_navigationContext,m_replayRequestedContext;
     std::optional<std::int64_t> m_entrySyncAfter;
     bool m_browsingBoard=false,m_manualMap=false;
+    std::uint64_t m_boardVisit=0;
     CCLabelBMFont *m_heading=nullptr,*m_status=nullptr,*m_map=nullptr,*m_surrenderText=nullptr;
     CCMenuItemSpriteExtra *m_resume=nullptr,*m_continue=nullptr,*m_surrender=nullptr;
     CCMenuItemSpriteExtra* m_force=nullptr;
@@ -139,8 +140,8 @@ class SurvivalGameLayer final : public CCLayerColor {
         if(tag==1)runtime.acknowledge();
         if(tag==2){if(runtime.observing())runtime.leaveObserver();else confirmSurrender();}
         if(tag==7)runtime.beginFreePlay();
-        if(tag==8){m_browsingBoard=false;m_manualMap=true;m_entrySyncAfter=runtime.serverSyncMillis();runtime.refreshRound();}
-        if(tag==9){m_browsingBoard=true;m_manualMap=true;}
+        if(tag==8){m_browsingBoard=false;m_manualMap=runtime.view().state=="PLAYING" || runtime.previouslyEntered();m_entrySyncAfter=runtime.serverSyncMillis();runtime.refreshRound();}
+        if(tag==9){++m_boardVisit;m_browsingBoard=true;m_manualMap=true;}
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
         if(tag==3)showSurvivalForceRankPopup();
 #endif
@@ -162,21 +163,22 @@ class SurvivalGameLayer final : public CCLayerColor {
         m_browsingBoard=false;m_manualMap=true;m_replayRequestedContext=preparationContextText(runtime.preparationContext());
         m_entrySyncAfter=runtime.serverSyncMillis();runtime.refreshRound();
     }
-    void queueNativeLaunch() {
+    void queueNativeLaunch(bool automatic=false) {
         auto& runtime=SurvivalRuntime::get();auto const context=runtime.preparationContext();
         if(m_closed || !m_pendingLaunch.empty() || !m_selection->settled() || runtime.surrenderPending() || !(runtime.canEnter() || runtime.canEnterObserver() || runtime.canReplayCleared()) ||
             (m_entrySyncAfter && runtime.serverSyncMillis()<=*m_entrySyncAfter))return;
         m_pendingLaunch=preparationContextText(context);
+        auto const navigation=m_boardVisit;
         // Native object setup/texture loading must run outside the coordinator's
         // scheduler callback. Recheck scene, generation and modal ownership after
         // the previous PlayLayer's deferred teardown/autoreleases have drained.
-        queueInMainThread([weak=WeakRef(this),context] {
+        queueInMainThread([weak=WeakRef(this),context,automatic,navigation] {
             auto owner=weak.lock();if(!owner)return;owner->m_pendingLaunch.clear();
             auto* scene=CCDirector::sharedDirector()->getRunningScene();
             auto& runtime=SurvivalRuntime::get();
             auto const jukeboxOpen=owner->m_jukebox && owner->m_jukebox->lock() && owner->m_jukebox->lock()->getParent();
             if(CCDirector::sharedDirector()->getNextScene() || jukeboxOpen || owner->m_closed || !owner->isRunning() || owner->getParent()!=scene || owner->m_motion ||
-                owner->m_confirmation || owner->m_browsingBoard || !owner->m_selection->settled() || runtime.surrenderPending() || context!=runtime.preparationContext() || !(runtime.canEnter() || runtime.canEnterObserver() || runtime.canReplayCleared()) ||
+                owner->m_confirmation || owner->m_browsingBoard || (automatic && (owner->m_manualMap || navigation!=owner->m_boardVisit)) || !owner->m_selection->settled() || runtime.surrenderPending() || context!=runtime.preparationContext() || !(runtime.canEnter() || runtime.canEnterObserver() || runtime.canReplayCleared()) ||
                 (owner->m_entrySyncAfter && runtime.serverSyncMillis()<=*owner->m_entrySyncAfter))return;
             if(RankedRoundPreparation::get().launch(scene)){owner->m_launchedContext=preparationContextText(context);owner->m_replayRequestedContext.clear();}
         });
@@ -356,7 +358,11 @@ public:
     static SurvivalGameLayer* create(){auto* layer=new SurvivalGameLayer;if(layer->init()){layer->autorelease();return layer;}delete layer;return nullptr;}
     void update(float dt) override {
         m_frameDelta=dt;
-        if(m_closed)return;auto& runtime=SurvivalRuntime::get();runtime.tick();
+        if(m_closed)return;auto& runtime=SurvivalRuntime::get();
+        auto const preparationBegan=std::chrono::steady_clock::now();runtime.tick();
+        auto const presentationBegan=std::chrono::steady_clock::now();
+        auto const preparationMillis=std::chrono::duration<double,std::milli>(presentationBegan-preparationBegan).count();
+        if(preparationMillis>50)log::info("[RankedEntryTiming] stage=runtime-preparation elapsedMs={}",preparationMillis);
         if(m_confirmation){auto dialog=m_confirmation->lock();if(!dialog || !dialog->getParent())m_confirmation.reset();}
         if(!runtime.active() && !runtime.creating()){m_closed=true;queueInMainThread([]{CCDirector::sharedDirector()->popScene();});return;}
         auto const& view=runtime.view();auto const& preparation=RankedRoundPreparation::get().view();auto const result=view.result.isObject() && !runtime.observing();
@@ -445,10 +451,12 @@ public:
         if(jukeboxOpen)if(auto popup=m_jukebox->lock())popup->setCountdown(i18n::text(clock,clock));
         // INTRO and round-result gates advance on the authoritative server clock.
         if(!m_motion && !elimination && !m_confirmation && !jukeboxOpen && !debugPopup && !runtime.creating() &&
-            mapWindow && !m_manualMap && m_selection->settled() && !runtime.surrenderPending() &&
-            (runtime.canEnter() || runtime.canEnterObserver()) && m_launchedContext!=context)queueNativeLaunch();
+            mapWindow && view.state!="PLAYING" && !m_manualMap && m_selection->settled() && !runtime.surrenderPending() &&
+            (runtime.canEnter() || runtime.canEnterObserver()) && m_launchedContext!=context)queueNativeLaunch(true);
         if(m_replayRequestedContext==context && selectionWindow && !m_motion && !m_confirmation && !m_browsingBoard && runtime.canReplayCleared())queueNativeLaunch();
         if(view.state=="CANCELLED" && !result && !runtime.creating())runtime.acknowledge();
+        auto const presentationMillis=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-presentationBegan).count();
+        if(presentationMillis>50)log::info("[RankedEntryTiming] stage=coordinator-presentation elapsedMs={} level={}",presentationMillis,view.map.levelId);
     }
     void onEnter() override {
         CCLayerColor::onEnter();SurvivalRuntime::get().observerReturned();
@@ -466,7 +474,7 @@ public:
         // Both gameplay exit and this first Back are navigation only. The
         // retained coordinator owns the match/polling and never pops here.
         if(!m_browsingBoard && !(SurvivalRuntime::get().normalRoundCleared() && !m_manualMap)){
-            m_browsingBoard=true;m_manualMap=true;return;
+            ++m_boardVisit;m_browsingBoard=true;m_manualMap=true;return;
         }
         if(!SurvivalRuntime::get().view().ownEliminated)confirmSurrender();
     }

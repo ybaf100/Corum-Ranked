@@ -164,6 +164,15 @@ void SurvivalMapSelectionLayer::thumbnailFrame(SurvivalRevealFrame const& frame,
         selected.root->setScale(static_cast<float>(1+(r.thumbnail.w/v.cardWidth-1)*p));setModeLobbyOpacity(selected.root,255);
     }
 }
+void SurvivalMapSelectionLayer::selectedThumbnailFrame(SurvivalRevealFrame const& frame,SurvivalSelectionLayout const& r){
+    // Numeric reels and the selected map image have independent presentation.
+    auto& v=*m_visuals;auto& selected=v.selected;
+    if(!selected.root){selected.make(this,r.thumbnail.w);selected.root->setZOrder(12);}
+    if(auto texture=SurvivalThumbnailProvider::get().selected();texture && texture.data()!=v.finalTexture.data())v.finalTexture=texture;
+    selected.set(v.finalTexture.data());selected.shade->setOpacity(0);selected.trim->setVisible(true);
+    selected.root->setPosition({r.thumbnail.cx(),r.thumbnail.cy()});selected.root->setScale(r.thumbnail.w/selected.width);
+    selected.root->setVisible(frame.details>0);setModeLobbyOpacity(selected.root,static_cast<GLubyte>(frame.details*255));
+}
 void SurvivalMapSelectionLayer::playLocks(SurvivalRevealFrame const& frame){
     auto& record=reveals[m_timeline.context().revealKey()];auto locks=m_timeline.takeLocks(frame,!m_thumbnail);
     for(auto lock:locks)if(lock>=record.consumed)m_sounds.push_back(lock);
@@ -205,10 +214,9 @@ void SurvivalMapSelectionLayer::present(SurvivalMatchView const& view,RoundPrepa
     auto const supported=SurvivalThumbnailProvider::supported();bool previewsReady=false;
     if(supported){auto& provider=SurvivalThumbnailProvider::get();provider.activate(context);m_providerContext=context;previewsReady=!provider.previews().empty();}
     auto& record=reveals[context.revealKey()];
-    m_thumbnail=record.mode.choose(supported,previewsReady);
+    m_thumbnail=record.mode.choose(supported && SurvivalOptionsPreferences::get().selectionMotion(),previewsReady);
     if(changed)log::info("[SurvivalReveal] mode level={} supported={} previewsReady={} thumbnail={}",context.levelId,supported,previewsReady,m_thumbnail);
-    m_fallback=!m_thumbnail && Loader::get()->isModLoaded("cdc.level_thumbnails");
-    if(context.levelId && !SurvivalOptionsPreferences::get().selectionMotion())m_timeline.skip();
+    m_fallback=!supported && Loader::get()->isModLoaded("cdc.level_thumbnails");
     m_timeline.followServer(view.state,countdown,now);
     auto const frame=m_timeline.frame(now);if(frame.stage==SurvivalRevealStage::Cancelled){hideSelection();return;}
     // An asynchronously arriving winner image must not switch the reel to a
@@ -216,11 +224,17 @@ void SurvivalMapSelectionLayer::present(SurvivalMatchView const& view,RoundPrepa
     if(m_thumbnail && !supported){
         record.mode.fallback();m_thumbnail=false;m_fallback=true;resetVisuals();
     }
-    auto const r=survivalSelectionLayout(size.width,size.height,m_thumbnail,supportsLdm);
+    auto const r=survivalSelectionLayout(size.width,size.height,supported,supportsLdm);
     m_pendingLabel->setPosition({r.pending.cx(),r.pending.cy()});fitFullMenuLabel(m_pendingLabel,r.pending.w,r.pending.h,.23f);
     m_pendingLabel->setVisible(!context.levelId);
-    if(m_thumbnail)thumbnailFrame(frame,r);else if(context.levelId)numberFrame(frame,r);
-    m_panel->present(size,m_thumbnail,view,prep,options,supportsLdm,actionsEnabled,canEnter,frame.details);
+    if(m_thumbnail)thumbnailFrame(frame,r);else if(context.levelId){
+        numberFrame(frame,survivalSelectionLayout(size.width,size.height,false,supportsLdm));
+        // Numeric reveal lands as usual; the independent thumbnail info card then takes over.
+        m_finalId->setOpacity(static_cast<GLubyte>((supported?1-frame.details:1)*255));
+        if(supported)selectedThumbnailFrame(frame,r);
+    }
+    if(!supported && m_visuals->selected.root)m_visuals->selected.root->setVisible(false);
+    m_panel->present(size,supported,view,prep,options,supportsLdm,actionsEnabled,canEnter,frame.details);
     auto const finalHeader=context.levelId>0 && (frame.details>0 || frame.skipped);
     auto clock=(finalHeader || view.state=="COUNTDOWN" || view.state=="PLAYING")?survivalBoardClock(view.state,countdown,remaining):std::string{};
     if(auto wait=SurvivalRuntime::get().selectedPanelWaitMs();wait && *wait>0)
@@ -240,7 +254,7 @@ void SurvivalMapSelectionLayer::present(SurvivalMatchView const& view,RoundPrepa
     auto hint=m_fallback?i18n::text("survival-thumbnail-unavailable","Thumbnail unavailable; showing the server level ID."):
         i18n::text("survival-thumbnail-hint","(i) Install Level Thumbnails for map previews and a richer selection reveal.");
     if(hint!=m_hint->getString())m_hint->setString(hint.c_str());m_hint->setPosition({r.hint.cx(),r.hint.cy()});fitFullMenuLabel(m_hint,r.hint.w,r.hint.h,.17f);
-    m_hint->setVisible(!m_thumbnail && frame.details>0);m_hint->setOpacity(static_cast<GLubyte>(frame.details*255));
+    m_hint->setVisible(!supported && frame.details>0);m_hint->setOpacity(static_cast<GLubyte>(frame.details*255));
     playLocks(frame);m_needsResume=false;
     if(frame.settled){if(!record.complete){record.complete=true;Mod::get()->setSavedValue("survival-map-reveal-complete",context.revealKey());
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)

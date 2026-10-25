@@ -376,7 +376,7 @@ bool SurvivalRuntime::canEnter() const {
     if(m_view.state=="ENTERING"){
         auto const wait=entryWaitMs();if(!wait || *wait>0)return false;
     }
-    if(!previouslyEntered()){auto const panelWait=selectedPanelWaitMs();if(!panelWait || *panelWait>0)return false;}
+    if(m_view.state!="PLAYING" && !previouslyEntered()){auto const panelWait=selectedPanelWaitMs();if(!panelWait || *panelWait>0)return false;}
     if(m_view.state=="PLAYING" && remainingMs()<=0)return false;
     if(!m_prepared.valid() || m_prepared!=preparationContext() || m_session.empty())return false;
     if(m_view.online && !m_view.ownAssetsReady)return false;
@@ -399,6 +399,8 @@ void SurvivalRuntime::selectedPanelReady(bool ready){
     if(ready && !m_view.ownEliminated)m_selectedPanelContext=optionsContext();
 }
 std::optional<std::int64_t> SurvivalRuntime::selectedPanelWaitMs() const {
+    // A local presentation hold cannot restart an authoritative live round.
+    if(m_view.state=="PLAYING")return 0;
     if(previouslyEntered())return entryWaitMs();
     auto const requested=parseIso8601Millis(m_view.entryRequestedAt),opens=parseIso8601Millis(m_view.entryOpensAt);
     auto const steady=std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();

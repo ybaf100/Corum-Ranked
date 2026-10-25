@@ -22,6 +22,7 @@ class SurvivalMapSelectionLayer final : public cocos2d::CCLayerColor {
     void resetVisuals();
     void numberFrame(SurvivalRevealFrame const&,SurvivalSelectionLayout const&);
     void thumbnailFrame(SurvivalRevealFrame const&,SurvivalSelectionLayout const&);
+    void selectedThumbnailFrame(SurvivalRevealFrame const&,SurvivalSelectionLayout const&);
     void playLocks(SurvivalRevealFrame const&);
     bool init(std::function<void(int)>);
 public:

@@ -13,3 +13,5 @@
 - Version changes must synchronize `corum-ranked-mod/mod.json`, Ranked workspace package metadata/lockfile, and `ranked/apps/server/src/session/client-version.ts`.
 - Do not describe an untested iOS/Android native change as verified. Server deploy success does not mean a compatible packaged client was published.
 - Sole supported hosting target: AWS Lightsail Singapore `https://api.52-74-37-130.sslip.io`, with Neon Singapore as its single authoritative writer. Railway and Render support, deployment targets, update bridges and client fallback URLs are retired by the user's 2026-10-25 instruction. Preserve historical rollout records as history; do not restore those platforms or deploy retired Seoul.
+
+- The Lightsail push workflow can build its Docker image concurrently with the first Release/Debug builds. Its CI-only publication barrier verifies both immutable channels (full bytes/hash, embedded identity/version/channel, all four platforms) before upload/activation. A missing channel waits within the job timeout; corrupt or incompatible packages fail closed. No second activation push is required for a `[deploy-lightsail] [publish-r2]` source push.

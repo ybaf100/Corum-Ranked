@@ -113,7 +113,7 @@ test('Survival keeps surrender in native Pause and uses the shared clock pair wi
 
 
 test('deferred Survival launch rechecks round, scene and confirmation and never constructs inside update',()=>{
-    const launch=method(read('src/ui/SurvivalGameLayer.cpp'),'    void queueNativeLaunch()')+method(read('src/ui/SurvivalGameLayer.cpp'),'    void requestClearedReplay()');
+    const launch=method(read('src/ui/SurvivalGameLayer.cpp'),'    void queueNativeLaunch(')+method(read('src/ui/SurvivalGameLayer.cpp'),'    void requestClearedReplay()');
     run(`
 #include <cassert>
 #include <functional>
@@ -135,7 +135,7 @@ struct SurvivalRuntime{std::int64_t sync=1;std::int64_t serverSyncMillis(){retur
 template<class T>struct WeakRef{T* pointer;explicit WeakRef(T* p):pointer(p){}struct Locked{T* ptr;explicit operator bool()const{return ptr&&ptr->alive;}T* operator->(){return ptr;}T* data(){return ptr;}};auto lock()const{return Locked{pointer};}};
 struct Dialog{bool alive=true;CCScene* parent=nullptr;CCScene* getParent(){return parent;}};
 struct Selection{bool complete=true;bool settled()const{return complete;}};
-struct Coordinator{Selection selection;Selection* m_selection=&selection;std::optional<WeakRef<Dialog>> m_jukebox;bool alive=true,running=true,m_closed=false,m_motion=false,m_confirmation=false,m_browsingBoard=false;std::optional<std::int64_t> m_entrySyncAfter;bool m_manualMap=false;std::string m_pendingLaunch,m_launchedContext,m_replayRequestedContext;CCScene* parent=nullptr;bool isRunning(){return running;}CCScene* getParent(){return parent;}
+struct Coordinator{std::uint64_t m_boardVisit=0;Selection selection;Selection* m_selection=&selection;std::optional<WeakRef<Dialog>> m_jukebox;bool alive=true,running=true,m_closed=false,m_motion=false,m_confirmation=false,m_browsingBoard=false;std::optional<std::int64_t> m_entrySyncAfter;bool m_manualMap=false;std::string m_pendingLaunch,m_launchedContext,m_replayRequestedContext;CCScene* parent=nullptr;bool isRunning(){return running;}CCScene* getParent(){return parent;}
 ${launch}
 };
 int main(){CCScene origin,other;auto* director=CCDirector::sharedDirector();director->scene=&origin;
@@ -167,6 +167,11 @@ int main(){CCScene origin,other;auto* director=CCDirector::sharedDirector();dire
  assert(runtime.refreshes==1&&!replayOwner.m_browsingBoard&&replayOwner.m_manualMap&&!replayOwner.m_replayRequestedContext.empty());
  replayOwner.queueNativeLaunch();assert(work.empty());++runtime.sync;replayOwner.queueNativeLaunch();drain();
  assert(preparation.launches==4&&replayOwner.m_replayRequestedContext.empty());
+ runtime.enter=true;replayOwner.m_entrySyncAfter.reset();replayOwner.m_manualMap=false;
+ replayOwner.queueNativeLaunch(true);++replayOwner.m_boardVisit;replayOwner.m_browsingBoard=true;
+ replayOwner.m_browsingBoard=false;drain();assert(preparation.launches==4); // returned before callback still cancels the old reservation
+ replayOwner.queueNativeLaunch(true);drain();assert(preparation.launches==5); // fresh pre-start auto request
+ replayOwner.m_manualMap=true;replayOwner.queueNativeLaunch(false);drain();assert(preparation.launches==6); // explicit live entry remains allowed
 }`);
 });
 

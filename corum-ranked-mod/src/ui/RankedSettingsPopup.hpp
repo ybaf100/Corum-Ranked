@@ -63,7 +63,7 @@ class RankedSettingsPopup final : public Popup {
         auto& preferences=SurvivalOptionsPreferences::get();
         m_thumbnails=toggle(i18n::text("survival-image-thumbnails","Level Thumbnails"),preferences.thumbnails(),{94,151},2);
         m_thumbnails->setID("survival-thumbnails-switch"_spr);
-        m_selectionMotion=toggle(i18n::text("survival-selection-motion","Level selection motion"),preferences.selectionMotion(),{266,151},3);
+        m_selectionMotion=toggle(i18n::text("survival-selection-motion","Fancy Level Selection Animation"),preferences.selectionMotion(),{266,151},3);
         m_selectionMotion->setID("survival-selection-motion-switch"_spr);updateMotionSetting();
         m_refreshRecords=CCMenuItemSpriteExtra::create(refreshButtonFace(false),this,menu_selector(RankedSettingsPopup::onRefreshRecords));
         m_refreshRecords->setID("ranked-forum-refresh-button"_spr);m_refreshRecords->setPosition({180,96});menu->addChild(m_refreshRecords);
@@ -84,7 +84,7 @@ class RankedSettingsPopup final : public Popup {
         if(item->getTag()==0)preferences.setDefaultLowDetail(!before.lowDetail);
         else if(item->getTag()==1)preferences.setDefaultDisableShake(!before.disableShake);
         else if(item->getTag()==2)preferences.setThumbnails(!preferences.thumbnails());
-        else if(item->getTag()==3 && preferences.thumbnails())preferences.setSelectionMotion(!preferences.selectionMotion());
+        else if(item->getTag()==3)preferences.setSelectionMotion(!preferences.selectionMotion());
         updateMotionSetting();
         auto const value=preferences.defaults();
         m_defaultLdm->setNormalImage(survivalOptionFace({146,32},i18n::text("survival-default-ldm","Default LDM"),value.lowDetail));
@@ -93,9 +93,8 @@ class RankedSettingsPopup final : public Popup {
     void updateMotionSetting(){
         auto const& p=SurvivalOptionsPreferences::get();
         m_thumbnails->setNormalImage(survivalOptionFace({146,32},i18n::text("survival-image-thumbnails","Level Thumbnails"),p.thumbnails()));
-        auto* face=survivalOptionFace({146,32},i18n::text("survival-selection-motion","Level selection motion"),p.selectionMotion());
-        if(!p.thumbnails())grayButtonVisual(face);
-        m_selectionMotion->setNormalImage(face);m_selectionMotion->setEnabled(p.thumbnails());
+        auto* face=survivalOptionFace({146,32},i18n::text("survival-selection-motion","Fancy Level Selection Animation"),p.selectionMotion());
+        m_selectionMotion->setNormalImage(face);m_selectionMotion->setEnabled(true);
     }
     void updatePercent() {
         auto const text = fmt::format("{}%", static_cast<int>(std::lround(RankedVolumeControl::get().volume() * 100)));

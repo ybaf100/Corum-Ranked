@@ -397,7 +397,9 @@ bool RankedRoundPreparation::launch(CCScene* origin) {
         !appendRoundResourceIds(sfx, std::string_view(level->m_sfxIDs.c_str()))) return false;
     for (int id : songs) if (!resourceReady({RoundResourceKind::Song, id})) return false;
     for (int id : sfx) if (!resourceReady({RoundResourceKind::Sfx, id})) return false;
+    auto const validationBegan=clockSeconds();
     if(survival && !SurvivalRuntime::get().validateNative(level))return false;
+    log::info("[RankedEntryTiming] stage=geometry-validation elapsedMs={}", (clockSeconds()-validationBegan)*1000);
     if(m_quitting || m_returnQueued)return false;
     if (auto current = m_play.lock(); current && current->isRunning()) return false;
     // Never detach an arbitrary old PlayLayer or build over a retained GD
@@ -433,7 +435,9 @@ bool RankedRoundPreparation::launch(CCScene* origin) {
             preparationContextText(m_context),level->m_lowDetailMode,level->m_lowDetailModeToggled,level->m_disableShakeToggled);
 #endif
     }
+    auto const nativeBegan=clockSeconds();
     auto* scene = PlayLayer::scene(level, false, false);
+    log::info("[RankedEntryTiming] stage=native-scene elapsedMs={}", (clockSeconds()-nativeBegan)*1000);
     auto* play = PlayLayer::get();
     log::info("[RankedEntry] native setup completed context={} scene={} play={}",
         preparationContextText(m_context),static_cast<void*>(scene),static_cast<void*>(play));

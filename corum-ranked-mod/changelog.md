@@ -1,3 +1,10 @@
+# v0.5.0-beta.102
+- Restore Survival first entry after viewing the board and expose immediate manual entry for already-running rounds, while preserving server start approval.
+- Return finished Solo completion screens after the final attempt ACK when another start is closed; preserve live spectator handoff.
+- Prevent completion/Pause weak slots from releasing native game objects during DLL shutdown; release completed overlay handles on normal scene exit.
+- Rename Fancy Level Selection Animation: OFF uses numeric reels, with selected-map thumbnails retained independently.
+- Add measured entry diagnostics; unresolved action crashes and device behavior remain separate from verified fixes.
+
 # v0.5.0-beta.101
 - Remove repeated history tier images/ambient effects while keeping player details, LP and titles.
 - Use compact cards through Round 2, reduced BEST/NOW cards in Round 3, then full cards from Round 4 in 64-player Survival. Preserve elimination announcements and static round placement colors at every density.

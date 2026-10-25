@@ -646,7 +646,7 @@ inline constexpr std::array kTranslations {
     CatalogTranslation{"survival-result-wait", "PENDING", "확정 대기"},
     CatalogTranslation{"survival-selected-map", "SELECTED MAP", "선정된 맵"},
     CatalogTranslation{"survival-selecting-map", "SELECTING A SERVER MAP...", "서버에서 맵을 선택하고 있습니다..."},
-    CatalogTranslation{"survival-selection-motion", "Level selection motion", "레벨 선택 모션"},
+    CatalogTranslation{"survival-selection-motion", "Fancy Level Selection Animation", "화려한 레벨 선택 모션"},
     CatalogTranslation{"survival-surrender-pending", "Surrender submitted · waiting for server", "항복 처리 중 · 서버 응답 대기"},
     CatalogTranslation{"survival-surrender-warning", "End this match using this round's recorded ranking?", "현재 라운드 기록으로 순위를 확정하고\n경기를 종료하시겠습니까?"},
     CatalogTranslation{"survival-thumbnail-hint", "(i) Install Level Thumbnails for map previews and a richer selection reveal.", "(i) Level Thumbnails 모드를 설치하면 맵 썸네일과 더 화려한 선정 연출을 볼 수 있습니다."},
