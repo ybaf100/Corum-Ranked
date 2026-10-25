@@ -101,13 +101,23 @@ retain record summaries. No compiler warning was disabled for the new changes.
   [Debug run 40169454013](https://github.com/ybaf100/Corum-Ranked/actions/runs/40169454013),
   and [server CI 40169454007](https://github.com/ybaf100/Corum-Ranked/actions/runs/40169454007)
   all stopped before any checkout/build step. Raw job metadata showed runner ID
-  zero and an empty steps array. One failed-job retry per run was accepted but
+  zero and an empty steps array. Two failed-job retries per run were accepted but
   again ended without steps. These are not compiler/test failures and neither
   native platform builds nor package/publish steps executed for beta.101.
-- Check runs advertise two annotations each, but the connected GitHub Fetch
-  endpoint rejects the annotations URL as unsupported. No billing/quota/account
-  cause is asserted without the actual annotation text. No further blind retries
-  or release guard bypass is used; the owner was asked for that text.
+- The connected GitHub Fetch tool does not support annotation URLs. A subsequent
+  unauthenticated read of the public GitHub REST annotations endpoint succeeded
+  and established the exact restriction on all four failed entry jobs:
+  **"The job was not started because recent account payments have failed or your
+  spending limit needs to be increased. Please check the 'Billing & plans'
+  section in your settings"**. The other annotation is an unrelated Ubuntu image
+  migration notice. This is an account billing/spending restriction, not a
+  repository compiler/test failure or an unverified runner-capacity assumption.
+  Release job `121103841227`, Debug jobs `121103842328` / `121103842424`, and
+  server job `121103845834` confirm the same message on attempt three. Changing
+  payment settings/spending limits is unavailable through the connected tools.
+  The owner must resolve that account restriction in Billing & plans before
+  these existing authorized workflows can execute; no fresh deployment approval
+  is needed. No further blind retry or publication guard bypass is used.
 - At 06:38:52 UTC both beta.101 R2 descriptors still returned HTTP 404.
   New immutable objects were not published and existing beta.100 objects were
   not overwritten. **beta.101 R2 publication and production activation remain
