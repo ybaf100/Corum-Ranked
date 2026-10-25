@@ -79,3 +79,61 @@ Actual execution/publication/deployment results are appended below when availabl
   zero skipped, 158.99 seconds. The earlier environment/test-double failures
   are resolved; no production behavior test is left failing.
 - Ranked rules/server workspace build: success.
+
+## Main push and external execution blocker — 2026-10-25
+
+- Source commit **1192527c4a45e7e22d8000c94aab54db5d19a384** was pushed
+  normally to main using the connected ybaf100 account, with the prior main SHA
+  as a lease. All three operator beta.98 commits remain ancestors. No reset or
+  force-push was used. The 13 modified/added files comprise the three audio/history
+  sources, three native test files, synchronized six version metadata files and
+  this report.
+- [Release run 40152401206](https://github.com/ybaf100/Corum-Ranked/actions/runs/40152401206):
+  failed before any job step; the manifest job has `runner_id=0`, an empty runner
+  name and `steps=[]`. Builds, packaging and publication were skipped.
+- [Debug run 40152401120](https://github.com/ybaf100/Corum-Ranked/actions/runs/40152401120):
+  both initial policy/manifest jobs failed before any steps; platform builds,
+  packaging and publication were skipped.
+- [Source CI run 40152401116](https://github.com/ybaf100/Corum-Ranked/actions/runs/40152401116):
+  failed before execution. One failed-job retry was accepted but attempt 2 again
+  ended with runner_id 0 and no steps. These are unexecuted external checks,
+  not passing CI or compiler/test failures.
+- GitHub check runs contain two error annotations each, but the connected
+  connector rejects the annotations endpoint and the job logs do not exist
+  (404 BlobNotFound). No Browser tool is available to inspect the UI. The exact
+  account/runner error text is therefore **unverified**; billing/quota must not
+  be asserted as the cause without the GitHub error message. The operator was
+  asked for the error text shown on the run page. No billing or runner settings
+  were changed, and no publication protection was bypassed.
+- [Lightsail run 40152401112](https://github.com/ybaf100/Corum-Ranked/actions/runs/40152401112)
+  was intentionally skipped by the staged publication commit. **beta.99 has not
+  been published or deployed.** Keep production on its verified beta.98 until
+  both new immutable packages exist and are independently verified.
+- Read-only DB recheck at 2026-10-25 01:57:07 UTC exactly matches the baseline
+  counts, both full profile digests, AP totals/ledger rows, activation epoch and
+  64-player operator configuration. No achievement reinitialization or reset
+  was performed.
+
+### Resume after GitHub runner execution is restored
+
+1. Fetch latest main and preserve further operator changes. Rerun failed jobs
+   on the original Release, Debug and Source CI runs above; retain the original
+   publication event and source SHA. There are no beta.99 objects to overwrite.
+2. Verify actual four-platform Release builds, all Debug ON/OFF builds, native
+   tests and both publish jobs. Independently download and SHA-256/size-check
+   both beta.99 packages, embedded version/channel manifests and platform payloads.
+3. Only after successful publication/verification, create a normal main
+   activation commit with the explicit Lightsail deployment marker and optional
+   R2 publishing suppressed. Keep pinned SSH, Singapore check and rollback.
+4. Verify the actual Docker build/upload/activation, live health/readiness,
+   required beta.99 and both update channels on Singapore and the update-only
+   Railway bridge. Repeat the read-only preservation comparison and record
+   physical-device audio testing separately.
+
+- Public recheck at 2026-10-25 01:57:09 UTC: Singapore health 200, readiness
+  database/schema/ranked flags all true; required version and both channels
+  remain beta.98 on Singapore and Railway. The operator's 64-player mode is
+  ready/enabled. Both beta.99 descriptors still return 404. GitHub's public
+  status reports all systems operational, which does not establish account
+  runner eligibility. No successful beta.99 platform build or device playback
+  is claimed.
