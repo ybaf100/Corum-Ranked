@@ -3,6 +3,7 @@
 import hashlib
 import importlib.util
 import json
+import re
 from pathlib import Path
 import tempfile
 import unittest
@@ -41,6 +42,16 @@ class MemoryR2(publisher.R2Client):
 
 
 class ModReleasePublishTest(unittest.TestCase):
+    def test_debug_publication_waits_for_every_required_off_platform(self):
+        workflow = (ROOT.parent / '.github/workflows/build-ranked-debug.yml').read_text()
+        publish = workflow.split('  publish-download:', 1)[1]
+        dependency = re.search(r'^    needs: \[([^\]]+)\]', publish, re.M)
+        self.assertIsNotNone(dependency)
+        self.assertEqual({name.strip() for name in dependency[1].split(',')},
+                         {'metadata', 'package', 'ios-debug-off', 'additional-debug-off'})
+        # Default Actions needs semantics must reject failure in any required job.
+        self.assertNotIn('always()', publish)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

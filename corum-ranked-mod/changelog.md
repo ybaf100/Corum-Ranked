@@ -1,3 +1,8 @@
+# v0.5.0-beta.104
+- Publish Solo live spectator Stage 1 from one final source revision after beta.103 immutable publication collided with an earlier concurrent build. Existing beta.103 packages are preserved.
+- Require every Debug OFF platform check before Debug R2 publication, alongside the validated Debug package.
+- Retain beta.103 source-time native world/trigger processing, server-authoritative End ACK handoff, context fences and local record protection.
+
 # v0.5.0-beta.103
 - Drive spectator native world time from accepted remote presentation time, with one filtered trigger query and frozen local physics/input.
 - Preserve native trigger eligibility, snap boundaries and camera ownership; reset viewer world history once after the real End ACK.
