@@ -138,3 +138,81 @@ are preserved. No destructive or additive database migration is needed.
   publication can create a fresh immutable version. No existing package is replaced.
 - Physical device behavior remains **not tested**. No automated boundary result
   is presented as complete native-engine checkpoint or camera-trigger parity.
+
+## Verified frozen-source publication and activation request
+
+Source main: `4715390a8d79024e9b20efe07d8a1b6c7b3dd1c2`. All four source
+workflows succeeded on their **first attempt**:
+
+| Workflow | Result | Run |
+| --- | --- | --- |
+| Release: Windows/iOS/Android32/64, package, R2 | success | [40324427419](https://github.com/ybaf100/Corum-Ranked/actions/runs/40324427419) |
+| Debug: all four ON and OFF, package, R2 | success | [40324427444](https://github.com/ybaf100/Corum-Ranked/actions/runs/40324427444) |
+| Rules/server/PostgreSQL/Apps Script | success | [40324427412](https://github.com/ybaf100/Corum-Ranked/actions/runs/40324427412) |
+| Docker preparation; production activation skipped | success | [40324427361](https://github.com/ybaf100/Corum-Ranked/actions/runs/40324427361) |
+
+CI independently repeated native **301/301**, rules **288/288**, server **642 passed
+/ 1 optional skipped**, and PostgreSQL HTTP integration **52/52**. Typecheck/build,
+1,050 simulated matches / ten-hour virtual soak, and software GLES shader compile /
+link plus 120 rendered frames passed. These are not physical Geometry Dash results.
+
+Both public immutable packages were downloaded completely and verified for
+HTTP, bytes/SHA-256, version/mod identity/channel, ZIP integrity/unique entries,
+Win64 PE32+ / thin iOS ARM64 Mach-O / Android ARM32/ARM64 ELF, Stage 2 protocol/UI
+markers, compiled safety/trigger detours, 18 font bundles and external asset
+separation. No older immutable object was changed.
+
+| Channel | Bytes | SHA-256 | Public package |
+| --- | ---: | --- | --- |
+| release | 9015116 | `8e1e6fa9fab02325a1dd5b3ed32eb42111e7d305f2b63bfebe48ee18fb44fa95` | [download](https://pub-11442f32945446a49b9da0a5e69f2451.r2.dev/ranked/release-v0.5.0-beta.105/Corum-Ranked-v0.5.0-beta.105-release.geode) |
+| debug | 9603782 | `25e28ce5a6f2ab308cb372a6d33b9e7af80becf4e147dd2278f6138f9f354172` | [download](https://pub-11442f32945446a49b9da0a5e69f2451.r2.dev/ranked/debug-v0.5.0-beta.105/Corum-Ranked-v0.5.0-beta.105-debug.geode) |
+
+The connected GitHub tools do not expose workflow_dispatch. The existing explicit
+`[deploy-lightsail]` main marker supported by AGENTS.md requests the same guarded
+build-and-deploy job after verification; `[build only]` prevents redundant client
+publication. This activation-request commit changes only this report, so runtime
+code is exactly the frozen source above. Pinned Singapore host/known_hosts, strict
+SSH, both-client barrier, concurrency, Production DB protection and rollback stay
+unchanged. Actual activation/API results are appended after the run.
+
+## Actual modified files
+
+- `corum-ranked-mod/changelog.md`
+- `corum-ranked-mod/mod.json`
+- `corum-ranked-mod/src/PlayLayer.cpp`
+- `corum-ranked-mod/src/SpectatorLiveRuntime.cpp`
+- `corum-ranked-mod/src/SpectatorLiveRuntime.hpp`
+- `corum-ranked-mod/src/domain/SpectatorCapturePolicy.hpp`
+- `corum-ranked-mod/src/domain/SpectatorInterpolationBuffer.hpp`
+- `corum-ranked-mod/src/domain/SpectatorPublishQueue.hpp`
+- `corum-ranked-mod/src/domain/SpectatorRemotePolicy.hpp`
+- `corum-ranked-mod/src/spectator/CorumSpectatorCamera.cpp`
+- `corum-ranked-mod/src/spectator/CorumSpectatorCamera.hpp`
+- `corum-ranked-mod/src/spectator/SpectatorPlayerCapture.cpp`
+- `corum-ranked-mod/src/spectator/SpectatorPlayerCapture.hpp`
+- `corum-ranked-mod/src/spectator/SpectatorPoseCodec.hpp`
+- `corum-ranked-mod/tests/DebugSpectateRuntimeNativeTest.mjs`
+- `corum-ranked-mod/tests/DebugSpectateSourceTest.mjs`
+- `corum-ranked-mod/tests/SpectatorCameraOwnerNativeTest.mjs`
+- `corum-ranked-mod/tests/SpectatorCaptureNativeTest.mjs`
+- `corum-ranked-mod/tests/SpectatorLiveViewerNativeTest.mjs`
+- `corum-ranked-mod/tests/SpectatorPublisherNativeTest.mjs`
+- `corum-ranked-mod/tests/SpectatorRemoteNativeTest.mjs`
+- `corum-ranked-mod/tests/SpectatorSceneNativeTest.mjs`
+- `corum-ranked-mod/tests/SpectatorViewerPollingNativeTest.mjs`
+- `corum-ranked-mod/tests/SpectatorWorldDriverNativeTest.mjs`
+- `corum-ranked-mod/tests/helpers/SpectatorNativeDouble.hpp`
+- `ranked/apps/server/package.json`
+- `ranked/apps/server/src/match/spectator-live.controller.ts`
+- `ranked/apps/server/src/match/spectator-live.policy.ts`
+- `ranked/apps/server/src/match/spectator-live.service.ts`
+- `ranked/apps/server/src/session/client-version.ts`
+- `ranked/apps/server/test/spectator-live.service.test.ts`
+- `ranked/docs/live-spectator-protocol-v2.md`
+- `ranked/package-lock.json`
+- `ranked/package.json`
+- `ranked/packages/rules/package.json`
+- `corum-ranked-mod/src/domain/SpectatorCameraTransform.hpp`
+- `corum-ranked-mod/src/domain/SpectatorRestoreTimeline.hpp`
+- `corum-ranked-mod/tests/SpectatorStage2NativeTest.mjs`
+- `ranked/docs/solo-spectator-stage2-beta105.md`
