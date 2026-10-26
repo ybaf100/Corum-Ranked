@@ -216,3 +216,60 @@ unchanged. Actual activation/API results are appended after the run.
 - `corum-ranked-mod/src/domain/SpectatorRestoreTimeline.hpp`
 - `corum-ranked-mod/tests/SpectatorStage2NativeTest.mjs`
 - `ranked/docs/solo-spectator-stage2-beta105.md`
+
+## Actual Singapore activation and public API verification
+
+[Deploy 40325868153](https://github.com/ybaf100/Corum-Ranked/actions/runs/40325868153)
+succeeded on the first attempt. The actual build-and-deploy job built and uploaded
+the Docker image, repeated full verification of both clients, and ran the existing
+rollback-capable activation over pinned Singapore SSH. The remote helper reported
+at 2026-10-26 12:53:29 UTC:
+
+`Deployment successful: 674ea03354fec52f6d0d8858bbc96057c8b74e86`
+
+That is the actual active image/tag SHA. Runtime source is exactly frozen client
+source 4715390a; the activation commit changes only this evidence document. A
+subsequent report-only main commit does not require another activation/publication.
+
+Public verification at **2026-10-26 12:55:27 UTC**:
+
+- Singapore /health: HTTP 200, status ok, corum-ranked-server.
+- /ready: HTTP 200; ready/publicDataReady/rankedReady/databaseReady/
+  databaseConnected/schemaReady all true, missingSchema empty.
+- /api/ranked/config: requiredClientVersion **v0.5.0-beta.105**. Both channels'
+  versions, sizes, URLs and SHA-256 match the complete public downloads above.
+- Solo ON/ready. Survival ON/ready/64, unchanged generation survival-b0676719:64p.
+- Unauthenticated history and spectator subscribe return HTTP 401.
+
+The read-only DB check at **12:55:28 UTC** matched all **16** baseline fields other
+than the timestamp: both complete profile digests, accounts/matches/Attempts,
+AP/unlocks/ledger totals, activation epoch, migrations, native_death and Survival
+operation. Inconsistent Survival LP ledger rows remain zero. This task added no
+migration and reset no data/settings, environment variable or Secret.
+
+| Stage | Actual outcome |
+| --- | --- |
+| Source main integration | complete, frozen source 4715390a |
+| Automated native/rules/server/PostgreSQL | passed; one optional pool check skipped |
+| Four Release, four Debug ON, four Debug OFF platform builds | all passed |
+| R2 Release publication and full public verification | complete |
+| R2 Debug publication and full public verification | complete |
+| Singapore image activation | complete, exact SHA above |
+| Public health/ready/version/authentication checks | passed |
+| Physical Geometry Dash | not performed, not claimed |
+
+### Explicit Stage 3 work
+
+Complete transferable engine checkpoints and exact arbitrary accumulated trigger
+state (including input/RNG/item/external-action/shader internals) are **not**
+implemented here. Native source-history replay remains explicitly PARTIAL SYNC,
+not certified full restoration. Full Dual, new Survival player-selection spectating
+and complete external avatar/effect parity were outside this task. Actual device
+Move/Spawn/Follow/Rotate/Alpha/Toggle/background/camera/HUD behavior still needs
+measurement; automated native boundaries and binary markers do not prove it.
+
+The documentation-only activation commit's full server/rules/DB/build CI also
+passed on the first attempt:
+[40325868166](https://github.com/ybaf100/Corum-Ranked/actions/runs/40325868166).
+This final evidence-only commit uses `[no-deploy] [build only] [skip ci]`; it changes
+no runtime code and does not rebuild, overwrite packages or reactivate the server.
