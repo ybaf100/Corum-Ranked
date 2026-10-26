@@ -114,3 +114,56 @@ Actual activation and public API results are recorded after the run.
 - `ranked/package-lock.json`
 - `ranked/package.json`
 - `ranked/packages/rules/package.json`
+
+## Actual Singapore activation and public verification
+
+[Deploy run 40312390815](https://github.com/ybaf100/Corum-Ranked/actions/runs/40312390815)
+succeeded on its first attempt. Its real build-and-deploy job performed pinned SSH
+authentication, Docker build/save/upload, full public verification of both channels,
+and the existing rollback-capable activation. The helper reported:
+
+`Deployment successful: 81e297bde496c4e7cb4813944c47647381e0dea1`
+
+This is the active Docker tag/SHA. Source code equals frozen client/server source
+966fd23f; the activation commit changes this rollout document only. A subsequent
+report-only commit does not request another deploy or rebuild/publish clients.
+
+Public verification on **2026-10-26 11:07:00 UTC**:
+
+- Singapore /health: HTTP 200, status ok, corum-ranked-server.
+- /ready: HTTP 200, ready/publicDataReady/rankedReady/databaseReady/
+  databaseConnected/schemaReady all true; missingSchema empty.
+- /api/ranked/config: requiredClientVersion **v0.5.0-beta.104**; both channel
+  versions, sizes and SHA-256 values exactly equal the full public downloads above.
+- Solo Ranked ON and ready. Survival ON and ready, 64 players, unchanged generation
+  survival-b0676719:64p.
+- Unauthenticated history and protocol-v2 spectator subscribe each return HTTP 401.
+
+A read-only post-activation DB check at **11:07:01 UTC** matched all **16** baseline
+fields other than checked_at, including both complete profile digests, match/Attempt
+counts, AP/unlocks/ledger, achievement epoch, migrations, native_death and Survival
+operation. No reset, schema change, data mutation or Neon setting change was made
+by this task. Invalid Survival LP ledger rows remain zero.
+
+| Requested stage | Actual outcome |
+| --- | --- |
+| Source main integration | complete, frozen source 966fd23f |
+| Automated native / server / rules / PostgreSQL | passed; one optional local pool test skipped |
+| Four platform Release, Debug ON and Debug OFF | all passed |
+| R2 Release publication and full public verification | complete |
+| R2 Debug publication and full public verification | complete |
+| Singapore production activation | complete, exact SHA above |
+| Public health/ready/version/authentication checks | passed |
+| Physical Geometry Dash devices | not performed / not claimed |
+
+Remaining Stage 2 limits are full dual, arbitrary past-world-history catch-up,
+advanced camera/platform parity and new Survival opponent spectating. Actual
+Move/Spawn/Follow/Rotate/portal/camera behavior and repeated native scene exits
+still need physical Geometry Dash validation; executable boundary tests and
+compiled hook verification do not substitute for that evidence.
+
+The documentation-only activation main commit also completed its automatic full
+server/rules/DB/build validation on the first attempt:
+[40312391217](https://github.com/ybaf100/Corum-Ranked/actions/runs/40312391217).
+The final report commit uses `[no-deploy] [build only] [skip ci]`: it changes only
+this evidence document and deliberately does not rebuild, republish or reactivate.
