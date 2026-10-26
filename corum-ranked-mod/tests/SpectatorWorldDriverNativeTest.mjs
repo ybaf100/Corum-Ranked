@@ -21,7 +21,7 @@ test('actual world owner synchronizes triggers, Spider and native camera before 
     try {
         mkdirSync(join(dir,'Geode/binding'),{recursive:true});
         writeFileSync(join(dir,'Geode/Geode.hpp'),read('tests/helpers/SpectatorNativeDouble.hpp'));
-        for(const name of ['PlayLayer','GJBaseGameLayer','PlayerObject','GJGameLevel','GhostTrailEffect','HardStreak'])
+        for(const name of ['PlayLayer','GJBaseGameLayer','PlayerObject','GJGameLevel','GhostTrailEffect','HardStreak','GameManager'])
             writeFileSync(join(dir,`Geode/binding/${name}.hpp`),'#include <Geode/Geode.hpp>\n');
         const methods=['bool spectatorCameraActive()','bool beginSpectatorPresentationFrame()', 'bool beginSpectatorWorldFrame()', 'void reconcileSpectatorWorldDriver()',
             'std::optional<CCPoint> spectatorNativeCameraTarget()','void logSpectatorNativeCamera(char const* stage)',
@@ -98,6 +98,7 @@ struct CorumRankedPlayLayer: PlayLayer {
     bool prepareSpectatorScene(){return spectatorCameraActive();}
     void sampleSpectatorPresentation(){}void logSpectatorWorldDriver(){}void logSpectatorNativeProbe(){}
     bool freezeLocalDummy(PlayerObject* p){return p==m_player1 && m_fields->localSafety.active();}
+    corum::ranked::SpectatorGhostPose observedSpectatorPlayerPose(PlayerObject* p){return corum::ranked::captureSpectatorPose(p);}
     corum::ranked::SpectatorGhostPose observedSpectatorPose(){return corum::ranked::captureSpectatorPose(m_player1);}
  bool observesSpectatorPlayer(PlayerObject*){return false;}
     void observeSpectatorNativeUpdate(PlayerObject*){}
@@ -210,7 +211,9 @@ int main(){
   auto worlds=scene.worldUpdates,resetCount=scene.resets;
   ++CCDirector::sharedDirector()->totalFrames;live.frame->context.roundNumber=2;live.frame->publisherElapsedMs=50;
   scene.GJBaseGameLayer::update(.016f);assert(scene.worldUpdates==worlds&&scene.resets==resetCount&&!scene.m_fields->spectatorRenderedFrame);
-  auto objects=scene.triggerObjects;scene.checkCollisions(&second,.016f,false);assert(scene.triggerObjects==objects+2&&!scene.damageIgnored);
+  auto objects=scene.triggerObjects;scene.checkCollisions(&second,.016f,false);assert(scene.triggerObjects==objects); // native P2 has no viewer trigger authority
+  scene.watchable=false;scene.checkCollisions(&second,.016f,false);assert(scene.triggerObjects==objects+2&&!scene.damageIgnored);
+  scene.watchable=true;
   scene.cleanupSpectatorPresentation();
   GJBaseGameLayer::nativeWorldObserver=nullptr;GJBaseGameLayer::worldDispatch=nullptr;GJBaseGameLayer::cameraDispatch=nullptr;
   PlayLayer::current=nullptr;CCObject::drain();

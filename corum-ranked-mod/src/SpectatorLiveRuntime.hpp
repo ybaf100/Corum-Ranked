@@ -41,7 +41,7 @@ public:
     void reset();
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
     // Server-approved scoped context/HTTP route only; no replay frames accepted.
-    void startDebugViewer(std::string contextId, std::string token, std::string path);
+    void startDebugViewer(std::string contextId, std::string token, std::string path,bool restoreHistory=false);
     void stopDebugViewer();
 #endif
 
@@ -78,10 +78,12 @@ private:
     std::int64_t m_publishBatchLastSequence = -1;
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
     std::string m_debugContextId, m_debugToken, m_debugPath;
+    bool m_debugRestoreHistory=false;
 #endif
     std::string m_publishAttemptId;
     std::uint64_t m_publishGeneration = 0;
     std::uint64_t m_publishSequence = 0;
+    std::uint64_t m_publishCosmeticRevision=0;
     std::chrono::steady_clock::time_point m_publishStartedAt {};
     std::chrono::steady_clock::time_point m_nextPublishAt {};
     std::uint64_t m_publishRequestGeneration = 0;
@@ -110,6 +112,8 @@ private:
     std::uint64_t m_viewPresentationEpoch = 0;
     std::int64_t m_lastViewSequence = -1;
     std::string m_opponentName;
+    std::shared_ptr<SpectatorCosmetics const> m_viewCosmetics;
+    std::uint64_t m_viewCosmeticRevision=0;
     std::string m_reason;
     SpectatorLiveStatus m_status = SpectatorLiveStatus::Idle;
     // Latest accepted pose is validation state, never the rendering timeline.

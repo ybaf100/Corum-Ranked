@@ -114,6 +114,14 @@ public:
             result.pose.y = lerp(older.pose.y, newer.pose.y);
             result.pose.rotation = static_cast<float>(older.pose.rotation +
                 std::remainder(newer.pose.rotation - older.pose.rotation, 360.0f) * t);
+            if(older.pose.dual && newer.pose.dual && older.pose.player2 && newer.pose.player2){
+                auto const& a=*older.pose.player2;auto const& b=*newer.pose.player2;
+                if(a.segment==b.segment && !b.discontinuity && std::hypot(b.x-a.x,b.y-a.y)<=400 && a.mode==b.mode && a.upsideDown==b.upsideDown){
+                    result.pose.player2->x=lerp(a.x,b.x);result.pose.player2->y=lerp(a.y,b.y);
+                    result.pose.player2->rotation=static_cast<float>(a.rotation+std::remainder(b.rotation-a.rotation,360.f)*t);
+                }
+            }
+            if(older.pose.progress && newer.pose.progress)result.pose.progress=lerp(*older.pose.progress,*newer.pose.progress);
             if (older.pose.camera && newer.pose.camera && !newer.pose.cameraSnap) {
                 result.pose.camera = SpectatorCameraOrigin{lerp(older.pose.camera->x, newer.pose.camera->x),
                     lerp(older.pose.camera->y, newer.pose.camera->y)};

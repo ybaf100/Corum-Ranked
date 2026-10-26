@@ -18,7 +18,7 @@ bool SpectatorWorldDriver::apply(PlayLayer* layer, bool authorizedDummy,
         frame->context.roundNumber <= 0 || frame->context.deathmatchSequence < 0 ||
         frame->context.generation == 0 || frame->context.epoch == 0 ||
         frame->sequence < 0 || !std::isfinite(frame->publisherElapsedMs) || frame->publisherElapsedMs < 0 ||
-        !finiteSpectatorPose(*frame->pose) || frame->pose->dual) return false;
+        !finiteSpectatorPose(*frame->pose)) return false;
     auto const sameContext = m_frame && m_frame->context == frame->context && m_player == layer->m_player1;
     if (sameContext && (frame->sequence < m_frame->sequence || frame->publisherElapsedMs < m_frame->publisherElapsedMs)) return false;
     auto const& pose = *frame->pose;
@@ -35,7 +35,9 @@ bool SpectatorWorldDriver::apply(PlayLayer* layer, bool authorizedDummy,
     if(sameContext && deltaMs>0 && deltaMs<=250)m_nativeDeltaSeconds=static_cast<float>(deltaMs/1000.0);
     auto const historyGap=sameContext && deltaMs>250;
     if(!sameContext)m_partialHistory=frame->sequence>0 || frame->publisherElapsedMs>0;
-    m_partialHistory=m_partialHistory || historyGap;
+    // Stage 3 renders a separate P2, but does not grant it native collision/
+    // trigger authority. Keep the verified P1 world path and disclose the gap.
+    m_partialHistory=m_partialHistory || historyGap || pose.dual;
     m_previous = sameContext && !snap && !historyGap ? m_frame->pose : frame->pose;
     m_player = layer->m_player1; m_frame = frame;
     write(layer, !sameContext || snap || historyGap);

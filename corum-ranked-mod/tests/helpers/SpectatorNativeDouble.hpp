@@ -5,6 +5,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+using GLubyte=unsigned char;
 namespace cocos2d {
 struct CCSize { float width=0, height=0; };
 struct CCPoint {
@@ -17,7 +18,8 @@ struct CCAffineTransform { float a=1,b=0,c=0,d=1,tx=0,ty=0; };
 inline CCPoint CCPointApplyAffineTransform(CCPoint p,CCAffineTransform t) {
  return {t.a*p.x+t.c*p.y+t.tx,t.b*p.x+t.d*p.y+t.ty};
 }
-struct Color { unsigned char r,g,b; };
+struct Color { unsigned char r=255,g=255,b=255; };
+using ccColor3B=Color;inline Color ccc3(int r,int g,int b){return {static_cast<unsigned char>(r),static_cast<unsigned char>(g),static_cast<unsigned char>(b)};}
 struct CCObject {
     inline static int alive=0;
     inline static std::vector<CCObject*> pool;
@@ -34,6 +36,9 @@ struct CCNode: CCObject {
     CCNode* parent=nullptr; std::vector<CCNode*> children;
     CCPoint position{}; float rotation=0; bool visible=true; int z=0;
     int positionWrites=0, rotationWrites=0, unschedules=0; float scaleY=1,scaleX=1; unsigned char opacity=255;
+    Color color{};
+    void setColor(Color c){color=c;}Color getColor()const{return color;}
+    void setOpacity(unsigned char c){opacity=c;}unsigned char getOpacity()const{return opacity;}
     void runAction(CCFadeOut*) { opacity=0; }
     void setScaleY(float s) { scaleY=s; } float getScaleY()const{return scaleY;}
     void setScaleX(float s) { scaleX=s; } float getScaleX()const{return scaleX;}
@@ -57,6 +62,7 @@ struct CCNode: CCObject {
     int getZOrder() const { return z; }
     float getScale() const { return scaleX; }
     void setScale(float s) { scaleX=scaleY=s; }
+    unsigned getChildrenCount()const{return static_cast<unsigned>(children.size());}
     CCNode* getParent()const{return parent;}
     float getPositionX()const{return position.x;} float getPositionY()const{return position.y;}
     CCAffineTransform nodeToParentTransform()const {
@@ -74,7 +80,19 @@ struct CCNode: CCObject {
     }
 };
 struct CCLayer: CCNode { static CCLayer* create() { auto* p=new CCLayer; p->autorelease(); return p; } };
-struct CCSprite: CCNode { CCRect rect{}; void setTextureRect(CCRect r){rect=r;} };
+struct CCSprite: CCNode {
+    CCRect rect{};void* image=nullptr;
+    static CCSprite* create(){auto* s=new CCSprite;s->autorelease();return s;}
+    void setTextureRect(CCRect r){rect=r;}void* displayFrame(){return image;}void setDisplayFrame(void* v){image=v;}
+};
+struct CCMotionStreak:CCNode {int resets=0,updates=0;void reset(){++resets;}void update(float){++updates;}};
+struct CCParticleSystemQuad:CCNode {
+    bool active=true,autoRemove=false;unsigned count=0,total=100;int updates=0,resets=0;
+    bool isActive()const{return active;}void resetSystem(){active=true;count=0;++resets;}void stopSystem(){active=false;}
+    void setAutoRemoveOnFinish(bool a){autoRemove=a;}unsigned getTotalParticles()const{return total;}unsigned getParticleCount()const{return count;}
+    void update(float){++updates;if(active)count=std::min(total,count+1);else if(count)--count;}
+};
+struct CCArray{unsigned size=0;unsigned count()const{return size;}};
 struct CCLabelBMFont: CCNode { std::string text; void setString(char const* s){text=s;} };
 struct CCDirector {
     unsigned totalFrames=0; unsigned getTotalFrames()const{return totalFrames;}
@@ -98,6 +116,17 @@ namespace log { template<class... T> void info(T...) {} template<class... T> voi
 namespace prelude { using namespace cocos2d; using geode::Ref; namespace log=geode::log; }
 }
 namespace gd {template<class T>using vector=std::vector<T>;}
+enum class IconType{Cube,Ship,Ball,Ufo,Wave,Robot,Spider,Swing,Jetpack,Special=99};
+struct GameManager{
+    static GameManager* sharedState(){static GameManager g;return &g;}int countForType(IconType)const{return 500;}
+    int getPlayerFrame(){return 17;}int getPlayerShip(){return 18;}int getPlayerBall(){return 19;}int getPlayerBird(){return 20;}
+    int getPlayerDart(){return 21;}int getPlayerRobot(){return 22;}int getPlayerSpider(){return 23;}int getPlayerSwing(){return 24;}
+    int getPlayerColor(){return 0;}int getPlayerColor2(){return 1;}int getPlayerGlowColor(){return 2;}bool getPlayerGlow(){return true;}
+    int getPlayerStreak(){return 3;}cocos2d::Color colorForIdx(int i){return cocos2d::ccc3(100+i,150,200);}
+};
+struct GhostTrailEffect:cocos2d::CCNode{};
+struct HardStreak:cocos2d::CCNode{cocos2d::CCArray points; cocos2d::CCArray* m_pointArray=&points;int updates=0;
+    void resumeStroke(){}void reset(){points.size=0;}void addPoint(cocos2d::CCPoint){++points.size;}void updateStroke(float){++updates;}};
 struct GameObject{bool m_isTrigger=false;};
 struct GJGameLevel { int m_levelID=123,m_timestamp=0; };
 struct PlayLayer;
@@ -107,6 +136,10 @@ struct PlayerObject: cocos2d::CCNode {
     bool m_playEffects=true,m_isHidden=false,m_isDead=false;
     bool m_isShip=false,m_isBall=false,m_isBird=false,m_isDart=false,m_isRobot=false,m_isSpider=false,m_isSwing=false,m_isUpsideDown=false;
     float m_vehicleSize=1; int nativeModeCalls=0,miniCalls=0,frame=0;
+    bool m_hasGlow=false,m_hasCustomGlowColor=false;int m_playerStreak=1,streakSetups=0,iconId=1,iconUpdates=0,glowUpdates=0;
+    cocos2d::Color m_playerColor1{},m_playerColor2{},m_glowColor{};cocos2d::CCSprite* m_iconSprite=nullptr;
+    void enableCustomGlowColor(cocos2d::Color c){m_glowColor=c;m_hasCustomGlowColor=true;}void updatePlayerGlow(){++glowUpdates;}void updateGlowColor(){}
+    void setupStreak(){++streakSetups;}
     cocos2d::CCNode* m_mainLayer=nullptr;
     void toggleFlyMode(bool b,bool){m_isShip=b;++nativeModeCalls;}
     void toggleRollMode(bool b,bool){m_isBall=b;++nativeModeCalls;}
@@ -117,10 +150,10 @@ struct PlayerObject: cocos2d::CCNode {
     void toggleSwingMode(bool b,bool){m_isSwing=b;++nativeModeCalls;}
     void togglePlayerScale(bool b,bool){m_vehicleSize=b?0.6f:1.0f;++miniCalls;}
     void updatePlayerScale(){}
-    void updatePlayerFrame(int){frame=0;} void updatePlayerShipFrame(int){frame=1;}
-    void updatePlayerRollFrame(int){frame=2;} void updatePlayerBirdFrame(int){frame=3;}
-    void updatePlayerDartFrame(int){frame=4;} void updatePlayerRobotFrame(int){frame=5;}
-    void updatePlayerSpiderFrame(int){frame=6;} void updatePlayerSwingFrame(int){frame=7;}
+    void updatePlayerFrame(int id){frame=0;iconId=id;++iconUpdates;} void updatePlayerShipFrame(int id){frame=1;iconId=id;++iconUpdates;}
+    void updatePlayerRollFrame(int id){frame=2;iconId=id;++iconUpdates;} void updatePlayerBirdFrame(int id){frame=3;iconId=id;++iconUpdates;}
+    void updatePlayerDartFrame(int id){frame=4;iconId=id;++iconUpdates;} void updatePlayerRobotFrame(int id){frame=5;iconId=id;++iconUpdates;}
+    void updatePlayerSpiderFrame(int id){frame=6;iconId=id;++iconUpdates;} void updatePlayerSwingFrame(int id){frame=7;iconId=id;++iconUpdates;}
     cocos2d::CCPoint m_startPosition{},m_lastPosition{};
     double m_positionX=0,m_positionY=0;
     int gameplayPositionWrites=0,physicsUpdates=0,rotationUpdates=0,spiderJumps=0;
@@ -132,8 +165,9 @@ struct PlayerObject: cocos2d::CCNode {
     virtual void setPosition(cocos2d::CCPoint const& p){++gameplayPositionWrites;cocos2d::CCNode::setPosition(p);m_positionX=p.x;m_positionY=p.y;}
     virtual void setRotation(float r){cocos2d::CCNode::setRotation(r);}
     virtual void setVisible(bool b){cocos2d::CCNode::setVisible(b);}
-    cocos2d::CCNode *m_shipStreak=nullptr,*m_regularTrail=nullptr,*m_waveTrail=nullptr,*m_ghostTrail=nullptr,
-      *m_playerGroundParticles=nullptr,*m_trailingParticles=nullptr,*m_shipClickParticles=nullptr,
+    cocos2d::CCMotionStreak *m_shipStreak=nullptr,*m_regularTrail=nullptr;
+    HardStreak* m_waveTrail=nullptr;GhostTrailEffect* m_ghostTrail=nullptr;
+    cocos2d::CCParticleSystemQuad *m_playerGroundParticles=nullptr,*m_trailingParticles=nullptr,*m_shipClickParticles=nullptr,
       *m_vehicleGroundParticles=nullptr,*m_ufoClickParticles=nullptr,*m_robotBurstParticles=nullptr,
       *m_dashParticles=nullptr,*m_swingBurstParticles1=nullptr,*m_swingBurstParticles2=nullptr,
       *m_landParticles0=nullptr,*m_landParticles1=nullptr;
@@ -141,11 +175,17 @@ struct PlayerObject: cocos2d::CCNode {
         ++creates; if(fail)return nullptr;
         auto* p=new PlayerObject; p->autorelease();
         p->m_mainLayer=cocos2d::CCNode::create(); p->addChild(p->m_mainLayer);
-        p->m_regularTrail=cocos2d::CCNode::create(); layer->addChild(p->m_regularTrail);
-        p->m_shipStreak=cocos2d::CCNode::create(); layer->addChild(p->m_shipStreak);
+        p->m_regularTrail=new cocos2d::CCMotionStreak;p->m_regularTrail->autorelease();layer->addChild(p->m_regularTrail);
+        p->m_waveTrail=new HardStreak;p->m_waveTrail->autorelease();layer->addChild(p->m_waveTrail);
+        p->m_iconSprite=cocos2d::CCSprite::create();p->addChild(p->m_iconSprite);
+        for(auto** slot:{&p->m_playerGroundParticles,&p->m_trailingParticles,&p->m_shipClickParticles,&p->m_vehicleGroundParticles,
+          &p->m_ufoClickParticles,&p->m_robotBurstParticles,&p->m_swingBurstParticles1,&p->m_swingBurstParticles2,&p->m_landParticles0,&p->m_landParticles1,&p->m_dashParticles}){
+          *slot=new cocos2d::CCParticleSystemQuad;(*slot)->autorelease();layer->addChild(*slot);
+        }
+        p->m_shipStreak=new cocos2d::CCMotionStreak;p->m_shipStreak->autorelease();layer->addChild(p->m_shipStreak);
         return p;
     }
-    void setColor(cocos2d::Color) {} void setSecondColor(cocos2d::Color) {}
+    void setColor(cocos2d::Color c){m_playerColor1=c;} void setSecondColor(cocos2d::Color c){m_playerColor2=c;}
 };
 struct GJBaseGameLayer {
     struct GameState {

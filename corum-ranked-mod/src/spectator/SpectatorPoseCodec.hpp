@@ -36,6 +36,9 @@ inline matjson::Value encodeSpectatorPose(SpectatorGhostPose const& pose) {
             value["discontinuity"]["cameraFromY"] = static_cast<double>(snap.fromCamera->y);
         }
     }
+    value["effects"]=static_cast<int>(pose.effects);
+    if(pose.progress)value["progress"]=static_cast<double>(*pose.progress);
+    if(pose.dual && pose.player2)value["player2"]=encodeSpectatorPose(spectatorSecondaryAsPose(*pose.player2));
     return value;
 }
 inline std::optional<SpectatorGhostPose> decodeSpectatorPose(matjson::Value const& value) {
@@ -57,6 +60,7 @@ inline std::optional<SpectatorGhostPose> decodeSpectatorPose(matjson::Value cons
     pose.dual = value["dual"].asBool().unwrapOr(false);
     pose.dead = value["dead"].asBool().unwrapOr(false);
     pose.finished = value["finished"].asBool().unwrapOr(false);
+    if(value.contains("visible") && value["visible"].asBool().isErr())return std::nullopt;
     pose.visible = value["visible"].asBool().unwrapOr(true);
     SpectatorCameraOrigin camera{
         static_cast<float>(value["cameraX"].asDouble().unwrapOr(nan)),
@@ -89,6 +93,37 @@ inline std::optional<SpectatorGhostPose> decodeSpectatorPose(matjson::Value cons
         if (validSpectatorCamera(sourceCamera)) snap.fromCamera = sourceCamera;
         pose.discontinuity = snap;
     } else if (evidence.asBool().unwrapOr(false) || !evidence.asString().unwrapOr("").empty()) return std::nullopt;
+    if(value.contains("effects")){
+        auto mask=value["effects"].asInt().unwrapOr(-1);if(mask<0||mask>32767)return std::nullopt;pose.effects=static_cast<unsigned>(mask);
+    }
+    if(value.contains("progress"))pose.progress=static_cast<float>(value["progress"].asDouble().unwrapOr(nan));
+    if(pose.dual){
+        auto p2=value["player2"];if(!p2.isObject() || p2["dual"].asBool().unwrapOr(true) || p2.contains("player2") || p2["visible"].asBool().isErr())return std::nullopt;
+        auto decoded=decodeSpectatorPose(p2);if(!decoded)return std::nullopt;
+        pose.player2=spectatorAsSecondary(*decoded);
+    }else if(value.contains("player2"))return std::nullopt;
     return finiteSpectatorPose(pose) ? std::optional(pose) : std::nullopt;
+}
+inline matjson::Value encodeSpectatorCosmetics(SpectatorCosmetics const& cosmetics){
+    matjson::Value v;v["revision"]=static_cast<std::int64_t>(cosmetics.revision);auto players=matjson::Value::array();
+    auto color=[](SpectatorColor const& c){auto a=matjson::Value::array();a.push(c.r);a.push(c.g);a.push(c.b);return a;};
+    for(auto const& p:cosmetics.players){matjson::Value a;auto icons=matjson::Value::array();for(auto id:p.icons)icons.push(id);a["icons"]=icons;
+        a["primary"]=color(p.primary);a["secondary"]=color(p.secondary);a["glowColor"]=color(p.glowColor);a["glow"]=p.glow;a["trail"]=p.trail;players.push(a);}
+    v["players"]=players;return v;
+}
+inline std::shared_ptr<SpectatorCosmetics const> decodeSpectatorCosmetics(matjson::Value const& v){
+    if(!v.isObject())return {};
+    SpectatorCosmetics c;auto revision=v["revision"].asInt().unwrapOr(0);if(revision<=0||revision>1000000)return {};c.revision=static_cast<std::uint64_t>(revision);
+    auto players=v["players"].asArray();if(players.isErr()||players.unwrap().size()!=2)return {};
+    auto color=[](matjson::Value const& v,SpectatorColor& c){auto a=v.asArray();if(a.isErr()||a.unwrap().size()!=3)return false;
+        std::array<int,3> bytes{};for(std::size_t i=0;i<3;++i){auto n=a.unwrap()[i].asInt().unwrapOr(-1);if(n<0||n>255)return false;bytes[i]=static_cast<int>(n);}
+        c={bytes[0],bytes[1],bytes[2]};return true;};
+    for(std::size_t i=0;i<2;++i){auto const& a=players.unwrap()[i];auto& p=c.players[i];auto icons=a["icons"].asArray();
+        if(icons.isErr()||icons.unwrap().size()!=8||a["glow"].asBool().isErr())return {};
+        for(std::size_t j=0;j<8;++j){auto id=icons.unwrap()[j].asInt().unwrapOr(0);if(id<1||id>10000)return {};p.icons[j]=static_cast<int>(id);}
+        p.glow=a["glow"].asBool().unwrapOr(false);auto trail=a["trail"].asInt().unwrapOr(0);if(trail<1||trail>1000)return {};p.trail=static_cast<int>(trail);
+        if(!color(a["primary"],p.primary)||!color(a["secondary"],p.secondary)||!color(a["glowColor"],p.glowColor))return {};
+    }
+    return validSpectatorCosmetics(c)?std::make_shared<SpectatorCosmetics const>(c):nullptr;
 }
 }

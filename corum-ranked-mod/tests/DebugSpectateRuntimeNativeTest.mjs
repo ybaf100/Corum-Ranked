@@ -110,7 +110,7 @@ struct DebugSpectateRuntime {
     DebugSpectateMode m_mode=DebugSpectateMode::None;
     std::string m_token,m_id="server-record-id",m_contextId="server-scope",m_status;
     std::chrono::steady_clock::time_point m_recordStartedAt{};
-    int cancellations=0;
+    float m_startPercent=0;int cancellations=0;
     static DebugSpectateRuntime& get(){static DebugSpectateRuntime d;return d;}
     DebugSpectateMode mode()const{return m_mode;}
     bool preparedLevel(int id)const;
@@ -135,7 +135,7 @@ void tracePreparedLevel(char const*,GJGameLevel*,CustomSongWidget*,void*){}
 struct SpectatorLiveRuntime {
     int viewerStarts=0;std::string path;
     static SpectatorLiveRuntime& get(){static SpectatorLiveRuntime r;return r;}
-    void startDebugViewer(std::string const&,std::string const&,std::string p){++viewerStarts;path=p;}
+    void startDebugViewer(std::string const&,std::string const&,std::string p,bool=false){++viewerStarts;path=p;}
 };
 }
 namespace corum::ranked::debug {
@@ -483,12 +483,13 @@ struct RankedLevelPreparation {
 };
 void tracePreparedLevel(char const*,GJGameLevel*){}
 struct SpectatorLiveRuntime {
-    std::string context,token,path;int starts=0,stops=0;
+    std::string context,token,path;int starts=0,stops=0;bool history=false;
     static SpectatorLiveRuntime& get(){static SpectatorLiveRuntime l;return l;}
-    void startDebugViewer(std::string c,std::string t,std::string p){context=c;token=t;path=p;++starts;}
+    void startDebugViewer(std::string c,std::string t,std::string p,bool restore=false){context=c;token=t;path=p;history=restore;++starts;}
     void stopDebugViewer(){++stops;context.clear();}
 };
 }
+namespace fmt{template<class...T>std::string format(std::string s,T const&...){return s;}}
 ${header}
 ${source}
 struct CCObject {};
@@ -561,6 +562,12 @@ int main(){
     runtime.viewerResponse(true,false);assert(runtime.playbackComplete());
     runtime.exitScene();assert(viewer.stops==1 && pending[0].operation.url.ends_with("/close"));
     respond(201);assert(runtime.mode()==DebugSpectateMode::None);
+    runtime.start(true,"secret",55.5f);assert(pending.size()==1);
+    assert(pending[0].operation.body["startPercent"].asDouble().unwrapOr(-1)==55.5);
+    runtime.start(false,"secret");assert(runtime.m_startPercent==55.5f); // rejected reentry cannot alter the pending request
+    respond(201,admission(true));runtime.sceneEntered(88350599);assert(viewer.history);
+    runtime.exitScene();respond(201);assert(runtime.mode()==DebugSpectateMode::None);
+    runtime.start(true,"secret",101);assert(pending.empty()&&runtime.mode()==DebugSpectateMode::None);
     runtime.start(false,"secret");respond(201,admission(false));runtime.sceneEntered(88350599);
     runtime.cancelRecording();assert(pending[0].operation.url.ends_with("/finalize"));
     assert(!pending[0].operation.body["completed"].asBool().unwrapOr(true));respond(201);

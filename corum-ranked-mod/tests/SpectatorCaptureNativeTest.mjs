@@ -13,7 +13,7 @@ function method(name,from=0){
 }
 for(const debugOn of [false,true]) test(`native update/rotation/teleport -> completed camera snapshot -> 50ms capture (Debug ${debugOn?'ON':'OFF'})`,()=>{
     const owner=['bool observesSpectatorPlayer(', 'corum::ranked::SpectatorGhostPose observedSpectatorPose(',
-        'void observeSpectatorNativeUpdate(', 'void observeSpectatorNativeSnap(', 'void sampleSpectatorPresentation()'].map(n=>method(n)).join('\n');
+        'corum::ranked::SpectatorGhostPose observedSpectatorPlayerPose(', 'void observeSpectatorNativeUpdate(', 'void observeSpectatorNativeSnap(', 'void sampleSpectatorPresentation()'].map(n=>method(n)).join('\n');
     const playerAt=source.indexOf('class $modify(CorumRankedSpectatorDummyPlayer');
     const worldAt=source.indexOf('class $modify(CorumRankedSpectatorCameraHook');
     const capture=readFileSync(join(root,'src/spectator/SpectatorPlayerCapture.cpp'),'utf8').replace(/^#include.*$/gm,'');
@@ -51,7 +51,7 @@ struct TeleportPortalObject{};
 struct GJBaseGameLayer {
  struct {bool m_isDualMode=false;CCPoint m_cameraPosition;double m_levelTime=0;float m_cameraZoom=1,m_cameraAngle=0,m_targetCameraZoom=1,m_targetCameraAngle=0;} m_gameState;
  MainLayer *m_objectLayer=nullptr,*m_inShaderObjectLayer=nullptr,*m_aboveShaderObjectLayer=nullptr;
- PlayerObject* m_player1=nullptr;double m_attemptTime=0;bool m_inResetDelay=false,m_isPaused=false,m_started=false;
+ PlayerObject *m_player1=nullptr,*m_player2=nullptr;double m_attemptTime=0;bool m_inResetDelay=false,m_isPaused=false,m_started=false;
  int checkCollisions(PlayerObject*,float,bool){return 0;}
  void updateCamera(float){}
  virtual ~GJBaseGameLayer()=default;
@@ -60,11 +60,13 @@ struct GJBaseGameLayer {
  void teleportPlayer(TeleportPortalObject*,PlayerObject* p){p->position.x+=729.7268f;p->m_wasTeleported=true;}
 };
 struct PlayLayer:GJBaseGameLayer {
- bool m_isTestMode=false,m_isPracticeMode=false,m_hasCompletedLevel=false;
+ bool m_isTestMode=false,m_isPracticeMode=false,m_hasCompletedLevel=false;float getCurrentPercent(){return 12.5f;}
  static inline PlayLayer* current=nullptr;static PlayLayer* get(){return current;}
 };
 ${capture}
 namespace corum::ranked {
+unsigned captureSpectatorEffects(PlayerObject*,SpectatorGameMode){return 0;}
+SpectatorCosmetics captureSpectatorCosmetics(PlayerObject*,PlayerObject*){return {};}
 struct RankedRuntime {bool spectator=false;static RankedRuntime& get(){static RankedRuntime r;return r;}bool isSpectating()const{return spectator;}};
 struct SpectatorLiveRuntime {
  std::vector<SpectatorRemoteFrame> takeRestorationFrames(){return {};}void restorationApplied(SpectatorRemoteFrame const&,bool,double){}void noteWorldPartial(std::string){}
@@ -84,7 +86,7 @@ struct CorumRankedPlayLayer:PlayLayer {
  bool blockEntryGameplayUpdate(){return false;}
  struct Fields{struct Driver{bool partialHistory()const{return false;}template<class...T>bool apply(T...){return false;}std::optional<float> takeNativeDeltaSeconds(){return {};}}spectatorWorldDriver;bool spectatorWorldPoseApplied=false,spectatorCollisionChecked=false;SpectatorNativeProbe spectatorNativeProbe;bool rankedInitialized=false,rankedLevel=true,safetyRetired=false,spectatorMode=false,spectatorPending=false;
   corum::ranked::SpectatorSceneContext sceneContext;std::optional<SpectatorRemoteFrame>spectatorRenderedFrame;struct Remote{template<class...T>void update(T...){}}remotePlayer;
-  bool debugRecordScene=false,debugPlaybackScene=false,debugRecordHasFrame=false;SpectatorCapturePolicy spectatorCapture;bool spectatorWorldUpdateInProgress=false,spectatorWorldResetInProgress=false;std::optional<unsigned> spectatorCameraFrameNumber;}fields;
+  bool debugRecordScene=false,debugPlaybackScene=false,debugRecordHasFrame=false;SpectatorCapturePolicy spectatorCapture;std::shared_ptr<SpectatorCosmetics const> spectatorCosmetics;std::chrono::steady_clock::time_point nextCosmeticCaptureAt{};bool spectatorWorldUpdateInProgress=false,spectatorWorldResetInProgress=false;std::optional<unsigned> spectatorCameraFrameNumber;}fields;
  Fields* m_fields=&fields;
  bool prepareSpectatorScene(){return false;}bool spectatorCameraActive(){return false;}bool beginSpectatorWorldFrame(){return false;}
  void reconcileSpectatorWorldDriver(){}void driveSpectatorCamera(){}void logSpectatorNativeCamera(char const*){}void logSpectatorWorldDriver(){}void logSpectatorNativeProbe(){}

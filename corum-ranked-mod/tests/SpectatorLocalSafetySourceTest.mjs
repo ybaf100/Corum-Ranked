@@ -34,7 +34,7 @@ test('authority activates before vanilla init; live own Attempt and user Practic
 
 test('destroyPlayer noclip is exact local dummy only; normal vanilla death still runs', () => {
     const death = body(play, 'void destroyPlayer(PlayerObject* player');
-    assert.match(death, /localSafety\.suppressDeath\(player && player == m_player1\)/);
+    assert.match(death, /localSafety\.suppressDeath\(player && \(player == m_player1 \|\| player == m_player2\)\)/);
     assert.doesNotMatch(death, /if \(runtime\.isSpectating\(\) \|\| m_fields->spectatorPending\)/);
     assert.match(death, /scoringEnabled\(\).*reportAttemptEnd/s);
     assert.match(death, /PlayLayer::destroyPlayer\(player, object\)/);
@@ -44,7 +44,8 @@ test('destroyPlayer noclip is exact local dummy only; normal vanilla death still
 test('99 safety freezes only PlayerObject update, not the PlayLayer or remote world', () => {
     const player = play.slice(play.indexOf('class $modify(CorumRankedSpectatorDummyPlayer'));
     assert.match(body(player, 'void update(float dt)'), /freezeLocalDummy\(this\)\)[\s\S]*return;[\s\S]*PlayerObject::update\(dt\)/);
-    assert.match(body(play, 'bool freezeLocalDummy('), /player != m_player1\) return false/);
+    assert.match(body(play, 'bool freezeLocalDummy('), /player != m_player1 && player != m_player2/);
+    assert.match(body(play, 'bool freezeLocalDummy('), /player==m_player2 && m_fields->localSafety.active\(\)/);
     assert.match(policy, /progress >= 99\.0/);
     assert.doesNotMatch(body(play, 'bool freezeLocalDummy('), /onQuit\(|pauseGame\(|resetLevel\(/);
     assert.match(body(play, 'void postUpdate(float dt)'), /PlayLayer::postUpdate\(dt\)/);

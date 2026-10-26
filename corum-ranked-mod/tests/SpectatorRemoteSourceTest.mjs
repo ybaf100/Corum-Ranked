@@ -43,7 +43,7 @@ test('typed live frame preserves server identity and a local reset epoch', () =>
     assert.match(frame, /ranked.isPlacement\(\)/);
     assert.match(frame, /!ranked.isSpectating\(\)/);
     assert.match(frame, /m_viewContextKey != viewerContextKey\(match\)/);
-    assert.match(live, /if \(streamChanged \|\| resetStream\) \{\s*\+\+m_viewPresentationEpoch/);
+    assert.match(live, /if \(streamChanged \|\| resetStream\) \{\s*m_viewCosmetics.reset\(\);m_viewCosmeticRevision=0;\s*\+\+m_viewPresentationEpoch/);
     assert.match(live, /m_sampleBuffer.render\(nowMs\)/);
     assert.doesNotMatch(live, /m_previousPose|m_poseReceivedAt|elapsed\) \/ 50.0f/);
 });

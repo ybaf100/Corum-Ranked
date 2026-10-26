@@ -1,3 +1,11 @@
+# v0.5.0-beta.106
+- Add atomically validated independent Dual poses, two render-only avatars, and native mode-specific icon/color/glow descriptors without repeated pose metadata.
+- Reuse bounded source-time trails, observed native particle emissions and eight pooled ghost snapshots per avatar; stop effects across snaps, held clocks, restoration and scene teardown.
+- Separate spectator percentage, stream status and round clock; add bounded Debug render/HUD/payload diagnostics.
+- Add password-scoped Debug TEST entry at recorded n% using the existing history-restoration path, without guessing progress for legacy recordings.
+- Update branch-selection text immediately and retire stale update metadata before refreshing admission.
+- Preserve Stage 2 camera/history/recovery and read-only authority. Player2-specific world triggers remain explicitly PARTIAL SYNC; complete engine checkpoints and exact external particle/shader parity are not claimed.
+
 # v0.5.0-beta.105
 - Add bounded, authenticated start-history pages and native WorldDriver catch-up for Solo spectator late joins; label incomplete/limited reconstruction as PARTIAL SYNC.
 - Capture and validate native zoom/angle plus world/shader layer transforms on the pose timeline; preserve instant camera boundaries and legacy v2 recordings.

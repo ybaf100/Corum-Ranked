@@ -10,6 +10,7 @@ inline std::optional<float> spectatorProgressPercent(
 ) {
     if (!frame.pose || !finiteSpectatorPose(*frame.pose)) return std::nullopt;
     if (frame.pose->finished) return 100.0f;
+    if(frame.pose->progress)return *frame.pose->progress;
     if (authoritativeOpponent) return static_cast<float>(std::clamp(*authoritativeOpponent, 0, 100));
     // GD 2.2 timestamp levels use native 240Hz level-time units, rather than
     // distance. Debug starts at native gameplay; elapsed is its rendered clock.

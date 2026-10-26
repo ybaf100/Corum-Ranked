@@ -16,7 +16,7 @@ class SpectatorPublishQueue {
 public:
     bool capture(std::int64_t elapsedMs, SpectatorGhostPose const& pose) {
         if (m_terminal || !finiteSpectatorPose(pose)) return false;
-        auto const urgent = pose.discontinuity.has_value() || pose.cameraSnap || pose.dead || pose.finished;
+        auto const urgent = pose.discontinuity.has_value() || (pose.player2 && pose.player2->discontinuity) || pose.cameraSnap || pose.dead || pose.finished;
         if (!urgent && elapsedMs < m_nextSampleMs) return false;
         if (m_pending.size() >= 64) return false; // bounded; caller restarts the presentation generation
         auto const time = std::max<std::int64_t>({0, elapsedMs, m_lastElapsedMs});

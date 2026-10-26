@@ -105,7 +105,7 @@ void SpectatorLiveRuntime::resetPublisher() {
     m_publishBusy = false;
     m_publishMatchId.clear();
     m_publishAttemptId.clear();
-    m_publishSequence = 0;
+    m_publishSequence = 0; m_publishCosmeticRevision=0;
     m_publishQueue = {}; m_publishBatchBody = {}; m_publishBatchLastSequence = -1;
     m_publisherPaused = false; m_publisherPausedAt = {}; m_publisherPausedMs = 0;
     m_publishStartedAt = {};
@@ -126,7 +126,7 @@ void SpectatorLiveRuntime::resetViewer() {
     m_viewBusy = false;
     m_viewMatchId.clear();
     m_viewContextKey.clear();
-    m_viewAttemptId.clear();
+    m_viewAttemptId.clear();m_viewCosmetics.reset();m_viewCosmeticRevision=0;
     m_viewTerminalAttemptId.clear();
     m_viewGeneration = 0;
     m_lastViewSequence = -1;
@@ -154,13 +154,14 @@ void SpectatorLiveRuntime::reset() {
     resetViewer();
 }
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
-void SpectatorLiveRuntime::startDebugViewer(std::string contextId, std::string token, std::string path) {
+void SpectatorLiveRuntime::startDebugViewer(std::string contextId, std::string token, std::string path,bool restoreHistory) {
+    m_debugRestoreHistory=restoreHistory;
     reset();
     m_debugContextId = std::move(contextId); m_debugToken = std::move(token); m_debugPath = std::move(path);
     m_status = SpectatorLiveStatus::Waiting;
 }
 void SpectatorLiveRuntime::stopDebugViewer() {
-    m_debugContextId.clear(); m_debugToken.clear(); m_debugPath.clear(); reset();
+    m_debugContextId.clear(); m_debugToken.clear(); m_debugPath.clear();m_debugRestoreHistory=false; reset();
 }
 #endif
 
@@ -181,7 +182,7 @@ void SpectatorLiveRuntime::startPublisherGeneration(
     m_publishDeathmatch = match.deathmatchSequence > 0 ? match.deathmatchSequence : 0;
     ++m_publishGeneration;
     if (m_publishGeneration == 0) m_publishGeneration = 1;
-    m_publishSequence = 0;
+    m_publishSequence = 0; m_publishCosmeticRevision=0;
     m_publishStartedAt = std::chrono::steady_clock::now();
     m_nextPublishAt = m_publishStartedAt;
 }
@@ -282,6 +283,9 @@ void SpectatorLiveRuntime::publishTerminal(SpectatorGhostPose const& pose, bool 
     m_terminalBody["elapsedMs"] = std::max<std::int64_t>(
         m_terminalBody["elapsedMs"].asInt().unwrapOr(0), m_publishQueue.lastElapsedMs());
     m_terminalBody["keyframe"] = encodeSpectatorPose(pose);
+    if(pose.cosmetics && validSpectatorCosmetics(*pose.cosmetics) && m_publishCosmeticRevision!=pose.cosmetics->revision){
+        m_terminalBody["cosmetics"]=encodeSpectatorCosmetics(*pose.cosmetics);
+    }
     m_terminalBody["levelId"]=m_publishLevel;
     m_terminalSessionToken = ranked.spectatorLiveSessionToken(); m_terminalMatchToken = ranked.spectatorLiveMatchToken();
     m_terminalPublishAttemptId = attempt;
@@ -347,6 +351,9 @@ void SpectatorLiveRuntime::publish(SpectatorGhostPose const&) {
             packet["sequence"] = sample.sequence; packet["elapsedMs"] = sample.elapsedMs;
             packet["keyframe"] = encodeSpectatorPose(sample.pose);
             packet["levelId"]=m_publishLevel;
+            if(sample.pose.cosmetics && validSpectatorCosmetics(*sample.pose.cosmetics) && m_publishCosmeticRevision!=sample.pose.cosmetics->revision){
+                packet["cosmetics"]=encodeSpectatorCosmetics(*sample.pose.cosmetics);m_publishCosmeticRevision=sample.pose.cosmetics->revision;
+            }
             packets.push(packet);
         }
         m_publishBatchBody = matjson::Value(); m_publishBatchBody["packets"] = packets;
@@ -377,7 +384,7 @@ void SpectatorLiveRuntime::publish(SpectatorGhostPose const&) {
             if (response.code() == 409) {
                 ++m_publishGeneration; if (!m_publishGeneration) m_publishGeneration = 1;
                 m_publishQueue = {}; m_publishBatchBody = {}; m_publishBatchLastSequence = -1;
-                m_publishSequence = 0; // The Attempt's publisher clock never rewinds on reconnect.
+                m_publishSequence = 0; m_publishCosmeticRevision=0; // The Attempt's publisher clock never rewinds on reconnect.
                 if (m_terminalPending) {
                     m_terminalBody["generation"] = static_cast<std::int64_t>(m_publishGeneration);
                     m_terminalBody["sequence"] = 0;
@@ -462,9 +469,10 @@ void SpectatorLiveRuntime::pollViewer() {
     }
 #endif
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
-    if(m_debugContextId.empty())
+    if(m_debugContextId.empty() || m_debugRestoreHistory)
 #endif
         path+="&worldHistory=1";
+    path+=fmt::format("&cosmeticRevision={}",m_viewCosmeticRevision);
     if (!m_forceRestoreRequest && !m_viewAttemptId.empty()) path += "&attemptId=" + m_viewAttemptId;
     if (!m_forceRestoreRequest && m_viewGeneration > 0) path += fmt::format("&generation={}", m_viewGeneration);
     if (!m_forceRestoreRequest && m_lastViewSequence >= 0) path += fmt::format("&afterSequence={}", m_lastViewSequence);
@@ -598,7 +606,10 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
 #else
     if(!hasRestoration)m_partialSync=true;
 #endif
-    auto const expectedLevel=authoritativeMatch.currentMap?authoritativeMatch.currentMap->levelId:0;
+    auto expectedLevel=authoritativeMatch.currentMap?authoritativeMatch.currentMap->levelId:0;
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+    if(!m_debugContextId.empty())expectedLevel=debug::kDebugSpectateLevelId;
+#endif
     auto const historyLevel=restoration["levelId"].asInt().unwrapOr(0);
     if(hasRestoration && historyLevel>0 && historyLevel!=expectedLevel){setFallback("HISTORY_LEVEL_MISMATCH");return;}
     if(hasRestoration){
@@ -615,6 +626,7 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
     // Fresh contiguous packets may recover it, through ALL the same validators.
     // Replayed sequences/empty replies cannot revive a timed-out pose.
     if (streamChanged || resetStream) {
+        m_viewCosmetics.reset();m_viewCosmeticRevision=0;
         ++m_viewPresentationEpoch;
         if (m_viewPresentationEpoch == 0) ++m_viewPresentationEpoch;
         m_viewAttemptId = attemptId;
@@ -644,6 +656,12 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
     }
     m_forceRestoreRequest=false;
     m_opponentName = stream["opponentName"].asString().unwrapOr("Opponent");
+    if(stream.contains("cosmetics")){
+        auto descriptor=decodeSpectatorCosmetics(stream["cosmetics"]);
+        if(!descriptor){setFallback("INVALID_COSMETIC_DESCRIPTOR");return;}
+        m_viewCosmeticRevision=descriptor->revision;
+        if(!m_viewCosmetics)m_viewCosmetics=std::move(descriptor);
+    }
 
     auto const packets = root["packets"].asArray();
     if (packets.isErr()) {
@@ -706,15 +724,25 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
             setFallback("MISSING_KEYFRAME");
             return;
         }
+        if(keyframe["dual"].asBool().unwrapOr(false) && !keyframe["player2"].isObject()){
+            setFallback("DUAL_UNSUPPORTED");return; // legacy stream lacks a complete second body
+        }
         auto const decoded = decodeSpectatorPose(keyframe);
         if (!decoded) { setFallback("INVALID_POSE"); return; }
-        auto const pose = *decoded;
+        auto pose = *decoded;
+        if(packet.contains("cosmetics") || keyframe.contains("cosmetics")){
+            auto descriptor=decodeSpectatorCosmetics(packet.contains("cosmetics")?packet["cosmetics"]:keyframe["cosmetics"]);
+            if(!descriptor){setFallback("INVALID_COSMETIC_DESCRIPTOR");return;}
+            m_viewCosmetics=std::move(descriptor);
+        }
+        pose.cosmetics=m_viewCosmetics;
         if(hasRestoration && (!pose.camera || !pose.camera->transform))noteWorldPartial("CAMERA_TRANSFORM_UNAVAILABLE");
-        if (pose.dual) { setFallback("DUAL_UNSUPPORTED"); return; }
+        if(pose.dual)noteWorldPartial("DUAL_PLAYER2_TRIGGERS_UNVERIFIED");
         if (m_lastAcceptedPose && (m_lastAcceptedPose->dead || m_lastAcceptedPose->finished)) {
             setFallback("TERMINAL_STREAM_CANNOT_RESUME"); return;
         }
         bool snap = false;
+        if(pose.player2)pose.player2->segment=1;
         if (m_lastAcceptedPose) {
             auto const correction = poseDistance(*m_lastAcceptedPose, pose);
             largestCorrection = std::max(largestCorrection, correction);
@@ -742,6 +770,17 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
                 );
                 setFallback("POSE_DISCONTINUITY");
                 return;
+            }
+            if(pose.dual && m_lastAcceptedPose->dual && pose.player2 && m_lastAcceptedPose->player2){
+                auto const previous=spectatorSecondaryAsPose(*m_lastAcceptedPose->player2),next=spectatorSecondaryAsPose(*pose.player2);
+                auto const distance=poseDistance(previous,next);
+                auto const secondarySnap=next.discontinuity?verifiedSpectatorSnap(previous,next):distance>kPoseDiscontinuityDistance&&spectatorPoseSnapAllowed(previous,next);
+                if((next.discontinuity&&!secondarySnap)||(distance>kPoseDiscontinuityDistance&&!secondarySnap)){
+                    setFallback("PLAYER2_POSE_DISCONTINUITY");return;
+                }
+                // P2 has its own visual boundary. Never reset P1 native trigger
+                // history merely because the other avatar snapped.
+                pose.player2->segment=m_lastAcceptedPose->player2->segment+(secondarySnap?1:0);
             }
             if (snap) {
                 log::info("[SpectatorLive] verified discontinuity type={}",
@@ -797,10 +836,10 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
     if (responseNow >= m_nextBufferMetricAt) {
         m_nextBufferMetricAt = responseNow + std::chrono::seconds(1);
-        log::info("[DebugSpectate] buffer samples={} span={}ms delay={}ms rtt={}ms arrival={}ms packetsPerResponse={} renderPublisherElapsedMs={} latestPublisherElapsedMs={} starvation={} pollGapMs={}",
+        log::info("[DebugSpectate] buffer samples={} span={}ms delay={}ms rtt={}ms arrival={}ms packetsPerResponse={} renderPublisherElapsedMs={} latestPublisherElapsedMs={} starvation={} pollGapMs={} responseBytes={} poseBytes={}",
             m_sampleBuffer.size(), m_sampleBuffer.spanMs(), m_sampleBuffer.delayMs(), m_sampleBuffer.averageRttMs(),
             m_sampleBuffer.averageArrivalMs(), m_sampleBuffer.packetsPerResponse(), m_sampleBuffer.renderTimeMs(),
-            m_sampleBuffer.latestTimeMs(), m_sampleBuffer.starvations(), m_viewerPollGapMs);
+            m_sampleBuffer.latestTimeMs(), m_sampleBuffer.starvations(), m_viewerPollGapMs,root.dump().size(),sizeof(SpectatorGhostPose));
         log::info("[SpectatorRestore] attempt={} generation={} epoch={} sequence={} queued={} applied={} syncing={} partial={} reconnects={} reason={}",
             m_viewAttemptId,m_viewGeneration,m_viewPresentationEpoch,m_lastViewSequence,m_restoreTimeline.queued(),m_restoreTimeline.appliedCount(),m_restoreTimeline.active(),m_partialSync,m_reconnections,m_reason);
     }

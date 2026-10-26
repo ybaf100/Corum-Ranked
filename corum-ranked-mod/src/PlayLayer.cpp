@@ -187,6 +187,11 @@ public:
         CCLabelBMFont* spectatorNameLabel = nullptr;
         CCLabelBMFont* spectatorProgressLabel = nullptr;
         CCLabelBMFont* spectatorTimerLabel = nullptr;
+        CCLabelBMFont* spectatorStatusLabel = nullptr;
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+        std::chrono::steady_clock::time_point nextSpectatorHudMetricAt{};
+        unsigned spectatorHudMetrics=0;
+#endif
         CCNode* opponentProgressGroup = nullptr;
         corum::ranked::ui::PlayerIcon* opponentProgressIcon = nullptr;
         CCLabelBMFont* opponentProgressLabel = nullptr;
@@ -225,6 +230,9 @@ public:
         bool pauseQuitBlockedLogged = false;
         bool gameplayFrameObserved = false;
         corum::ranked::SpectatorCapturePolicy spectatorCapture;
+        std::shared_ptr<corum::ranked::SpectatorCosmetics const> spectatorCosmetics;
+        std::chrono::steady_clock::time_point nextCosmeticCaptureAt{};
+
         bool attemptStartReported = false;
         bool attemptEndReported = false;
         bool deniedDeathmatchVisualAttempt = false;
@@ -335,8 +343,9 @@ public:
     }
 
     bool freezeLocalDummy(PlayerObject* player) {
-        if (!player || player != m_player1) return false;
+        if (!player || (player != m_player1 && player != m_player2)) return false;
         syncSpectatorLocalSafety();
+        if(player==m_player2 && m_fields->localSafety.active()){player->setVisible(false);return true;}
         auto const wasFrozen = m_fields->localSafety.frozen();
         auto const frozen = m_fields->localSafety.freezeAtCompletionBoundary(
             player && player == m_player1, rankedProgressPercent(this)
@@ -351,6 +360,7 @@ public:
     }
 
     bool blocksSpectatorNativePlayerWrite(PlayerObject* player) {
+        if(player && player==m_player2 && m_fields->localSafety.active())return true;
         return player && player == m_player1 && m_fields->localSafety.active() &&
             m_fields->spectatorWorldDriver.owns(player) &&
             !corum::ranked::ScopedSpectatorWorldDriverWrite::allows(player);
@@ -795,7 +805,7 @@ public:
     }
 
     bool observesSpectatorPlayer(PlayerObject* player) {
-        if (!m_fields->rankedInitialized || player != m_player1 || !player ||
+        if (!m_fields->rankedInitialized || (player != m_player1 && !(m_gameState.m_isDualMode && player == m_player2)) || !player ||
             m_isTestMode || m_isPracticeMode || m_fields->safetyRetired ||
             m_fields->spectatorMode || m_fields->spectatorPending) return false;
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
@@ -807,6 +817,21 @@ public:
 
     corum::ranked::SpectatorGhostPose observedSpectatorPose(bool dead = false, bool finished = false) {
         auto pose = corum::ranked::captureSpectatorPose(m_player1, dead, finished, m_gameState.m_isDualMode);
+        pose.effects=corum::ranked::captureSpectatorEffects(m_player1,pose.mode);
+        if(pose.dual && m_player2)pose.player2=corum::ranked::spectatorAsSecondary(corum::ranked::captureSpectatorPose(m_player2,dead,finished,false));
+        if(pose.player2)pose.player2->effects=corum::ranked::captureSpectatorEffects(m_player2,pose.player2->mode);
+        pose.progress=finished?100.f:std::clamp(getCurrentPercent(),0.f,100.f);
+        auto const captureNow=std::chrono::steady_clock::now();
+        if(!m_fields->spectatorCosmetics || captureNow>=m_fields->nextCosmeticCaptureAt){
+            m_fields->nextCosmeticCaptureAt=captureNow+std::chrono::seconds(1);
+            auto descriptor=corum::ranked::captureSpectatorCosmetics(m_player1,m_player2);
+            if(m_fields->spectatorCosmetics)descriptor.revision=m_fields->spectatorCosmetics->revision;
+            if(!m_fields->spectatorCosmetics || descriptor!=*m_fields->spectatorCosmetics){
+                if(m_fields->spectatorCosmetics)++descriptor.revision;
+                m_fields->spectatorCosmetics=std::make_shared<corum::ranked::SpectatorCosmetics const>(descriptor);
+            }
+        }
+        pose.cosmetics=m_fields->spectatorCosmetics;
         if(std::isfinite(m_attemptTime) && m_attemptTime>=0)pose.nativeElapsedMs=m_attemptTime*1000.0;
         auto const camera = m_gameState.m_cameraPosition;
         corum::ranked::SpectatorCameraOrigin origin{camera.x, camera.y};
@@ -816,14 +841,23 @@ public:
         return m_fields->spectatorCapture.snapshot().value_or(pose);
     }
 
+    corum::ranked::SpectatorGhostPose observedSpectatorPlayerPose(PlayerObject* player){
+        return player==m_player1?observedSpectatorPose():corum::ranked::captureSpectatorPose(player);
+    }
+
     void observeSpectatorNativeUpdate(PlayerObject* player) {
         if (observesSpectatorPlayer(player)) (void)observedSpectatorPose();
     }
 
     void observeSpectatorNativeSnap(PlayerObject* player, corum::ranked::SpectatorDiscontinuity type,
                                     corum::ranked::SpectatorGhostPose const& before) {
+        if(player==m_player2 && m_gameState.m_isDualMode && observesSpectatorPlayer(m_player1)){
+            auto const after=corum::ranked::captureSpectatorPose(player);
+            m_fields->spectatorCapture.secondaryNativeSnap(type,before,after);
+            return;
+        }
         if (!observesSpectatorPlayer(player)) return;
-        auto const after = corum::ranked::captureSpectatorPose(player, false, false, m_gameState.m_isDualMode);
+        auto const after = corum::ranked::captureSpectatorPose(player, false, false, false);
         m_fields->spectatorCapture.nativeSnap(type, before, after);
         (void)observedSpectatorPose();
     }
@@ -977,6 +1011,7 @@ public:
             // wait for a remote pose. A global PlayerObject setter detour also
             // intercepts ordinary animation/Practice and is not needed here.
             if (m_player1) m_player1->setVisible(false);
+            if (m_player2) m_player2->setVisible(false);
             m_fields->spectatorWorldDriver.reconcile(this);
         }
     }
@@ -1495,7 +1530,7 @@ public:
         auto& runtime = corum::ranked::RankedRuntime::get();
         syncSpectatorLocalSafety();
         ScopedPersistenceOwner persistence(this);
-        if (m_fields->localSafety.suppressDeath(player && player == m_player1)) {
+        if (m_fields->localSafety.suppressDeath(player && (player == m_player1 || player == m_player2))) {
             if (!m_fields->suppressedDeathLogged) {
                 log::info("Local death suppressed for spectator: level={}", m_fields->levelId);
                 m_fields->suppressedDeathLogged = true;
@@ -2165,7 +2200,7 @@ public:
         auto const width = std::min(150.0f, size.width - 40.0f);
         m_fields->spectatorPanel = CCNode::create();
         m_fields->spectatorPanel->setID("ranked-spectator-overlay"_spr);
-        m_fields->spectatorPanel->setContentSize({width, 44.0f});
+        m_fields->spectatorPanel->setContentSize({width, 62.0f});
         auto const layout = corum::ranked::layoutHud(size.width, size.height);
         m_fields->spectatorPanel->setPosition({layout.spectatorCenterX, layout.spectatorCenterY});
 
@@ -2179,6 +2214,8 @@ public:
             corum::ranked::ui::Gold,
             2
         );
+        m_fields->spectatorStatusLabel=addShadowedHudLabel(m_fields->spectatorPanel,"WAITING...","bigFont.fnt",.20f,
+            {.5f,.5f},{0,-30},corum::ranked::ui::TextMuted,2);
         m_fields->spectatorNameLabel = addShadowedHudLabel(
             m_fields->spectatorPanel,
             corum::ranked::i18n::text("opponent", "OPPONENT"),
@@ -2202,7 +2239,7 @@ public:
         );
         addShadowedHudLabel(
             m_fields->spectatorPanel,
-            "ROUND CLOCK",
+            "",
             "bigFont.fnt",
             0.20f,
             {0.5f, 0.5f},
@@ -2216,7 +2253,7 @@ public:
             "bigFont.fnt",
             0.26f,
             {0.0f, 0.5f},
-            {19.0f, -15.0f},
+            {-60.0f, -15.0f},
             corum::ranked::ui::Text,
             2
         );
@@ -2551,22 +2588,39 @@ public:
             m_fields->spectatorPanel->setVisible(false);
         }
         if (spectatorVisible) {
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+            auto const hudStarted=std::chrono::steady_clock::now();
+#endif
             setHudText(m_fields->spectatorNameLabel, presentation.spectatorOpponentText);
             auto const status = corum::ranked::SpectatorLiveRuntime::get().status();
             auto const rendered = m_fields->remotePlayer.cameraFrame();
-            setHudText(m_fields->spectatorProgressLabel,
-                rendered && rendered->pose && rendered->pose->finished ? "CLEARED" :
+            std::string state=rendered && rendered->pose && rendered->pose->finished ? "CLEARED" :
                 rendered && rendered->pose && rendered->pose->dead ? "OPPONENT DOWN" :
                 status == corum::ranked::SpectatorLiveStatus::Syncing ? "SYNCING..." :
                 status == corum::ranked::SpectatorLiveStatus::Reconnecting ? "RECONNECTING..." :
                 status == corum::ranked::SpectatorLiveStatus::PartialSync ? "PARTIAL SYNC" :
                 status == corum::ranked::SpectatorLiveStatus::Disconnected ? "DISCONNECTED" :
                 status == corum::ranked::SpectatorLiveStatus::Buffering ? "BUFFERING..." :
+                status == corum::ranked::SpectatorLiveStatus::Fallback && corum::ranked::SpectatorLiveRuntime::get().reason()=="DUAL_UNSUPPORTED" ? "DUAL UNSUPPORTED" :
                 status == corum::ranked::SpectatorLiveStatus::Fallback ? "POLLING..." :
-                m_fields->spectatorCamera.state() == corum::ranked::SpectatorCameraState::Waiting ?
-                    "WAITING..." : presentation.spectatorProgressText);
-            limitHudWidth(m_fields->spectatorProgressLabel, 72.0f, 0.34f, 0.16f);
-            setHudText(m_fields->spectatorTimerLabel, presentation.timerText);
+                m_fields->spectatorCamera.state() == corum::ranked::SpectatorCameraState::Waiting ? "WAITING..." : "LIVE";
+            if(rendered && rendered->pose && rendered->pose->dual)state+=" · DUAL";
+            setHudText(m_fields->spectatorStatusLabel,state);
+            limitHudWidth(m_fields->spectatorStatusLabel,140.f,.20f,.14f);
+            auto percent=rendered && m_level?corum::ranked::spectatorProgressPercent(*rendered,m_levelLength,m_level->m_timestamp):std::nullopt;
+            setHudText(m_fields->spectatorProgressLabel,percent?fmt::format("{:.2f}%",*percent):"--% ");
+            limitHudWidth(m_fields->spectatorProgressLabel,72.f,.34f,.16f);
+            limitHudWidth(m_fields->spectatorNameLabel,72.f,.23f,.14f);
+            setHudPosition(m_fields->spectatorPanel,{size.width/2.f,size.height*.58f});
+            setHudText(m_fields->spectatorTimerLabel,fmt::format("{} · {}",presentation.roundText,presentation.timerText));
+            limitHudWidth(m_fields->spectatorTimerLabel,120.f,.20f,.12f);
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+            if(m_fields->spectatorHudMetrics<120 && hudStarted>=m_fields->nextSpectatorHudMetricAt){
+                ++m_fields->spectatorHudMetrics;m_fields->nextSpectatorHudMetricAt=hudStarted+std::chrono::seconds(1);
+                log::info("[SpectatorHUD] updateUs={} width={} height={} state={}",
+                    std::chrono::duration<double,std::micro>(std::chrono::steady_clock::now()-hudStarted).count(),size.width,size.height,state);
+            }
+#endif
         }
     }
 };
@@ -2695,10 +2749,12 @@ class $modify(CorumRankedSpectatorCameraHook, GJBaseGameLayer) {
                 if(!owner->spectatorCameraActive() || !corum::ranked::spectatorFrameMatchesScene(owner->m_fields->sceneContext,frame.context))break;
                 owner->m_fields->spectatorRenderedFrame=frame;
                 owner->m_fields->spectatorWorldPoseApplied=owner->m_fields->spectatorWorldDriver.apply(owner,true,frame);
-                owner->m_fields->remotePlayer.update(owner,true,frame);
+                owner->m_fields->remotePlayer.update(owner,true,frame,false);
             }
             auto const nativeDelta=owner->m_fields->spectatorWorldDriver.takeNativeDeltaSeconds();
-            if(owner->m_fields->spectatorWorldDriver.partialHistory())live.noteWorldPartial("NATIVE_HISTORY_GAP");
+            if(owner->m_fields->spectatorWorldDriver.partialHistory())live.noteWorldPartial(
+                owner->m_fields->spectatorRenderedFrame && owner->m_fields->spectatorRenderedFrame->pose && owner->m_fields->spectatorRenderedFrame->pose->dual
+                    ?"DUAL_PLAYER2_TRIGGERS_UNVERIFIED":"NATIVE_HISTORY_GAP");
             if(!owner->m_fields->spectatorWorldPoseApplied || !nativeDelta){
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
                 owner->m_fields->spectatorNativeProbe.note(corum::ranked::SpectatorNativePath::WorldHeld);
@@ -2746,7 +2802,8 @@ class $modify(CorumRankedSpectatorCameraHook, GJBaseGameLayer) {
 
     int checkCollisions(PlayerObject* player,float dt,bool ignoreDamage){
         auto* play=PlayLayer::get();auto* owner=play && static_cast<GJBaseGameLayer*>(play)==this?static_cast<CorumRankedPlayLayer*>(play):nullptr;
-        if(!owner || !owner->spectatorCameraActive() || player!=m_player1)return GJBaseGameLayer::checkCollisions(player,dt,ignoreDamage);
+        if(!owner || !owner->spectatorCameraActive())return GJBaseGameLayer::checkCollisions(player,dt,ignoreDamage);
+        if(player!=m_player1)return 0; // native P2/remote visuals have no spectator trigger authority
         if(!owner->m_fields->spectatorWorldUpdateInProgress || !owner->m_fields->spectatorWorldPoseApplied || owner->m_fields->spectatorCollisionChecked)return 0;
         owner->m_fields->spectatorCollisionChecked=true;
         corum::ranked::ScopedSpectatorTriggerQuery triggerOnly(this,player);
@@ -2769,7 +2826,7 @@ class $modify(CorumRankedSpectatorCameraHook, GJBaseGameLayer) {
         auto* owner = layer && static_cast<GJBaseGameLayer*>(layer) == this
             ? static_cast<CorumRankedPlayLayer*>(layer) : nullptr;
         auto const observed = owner && object && owner->observesSpectatorPlayer(player);
-        auto const before = observed ? owner->observedSpectatorPose() : corum::ranked::SpectatorGhostPose{};
+        auto const before = observed ? owner->observedSpectatorPlayerPose(player) : corum::ranked::SpectatorGhostPose{};
         GJBaseGameLayer::teleportPlayer(object, player);
         if (observed) owner->observeSpectatorNativeSnap(player, corum::ranked::SpectatorDiscontinuity::Teleport, before);
     }
@@ -2801,7 +2858,7 @@ class $modify(CorumRankedSpectatorDummyPlayer, PlayerObject) {
         }
         auto const observed = layer && layer->observesSpectatorPlayer(this);
         auto const teleportedBefore = m_wasTeleported;
-        auto const before = observed ? layer->observedSpectatorPose() : corum::ranked::SpectatorGhostPose{};
+        auto const before = observed ? layer->observedSpectatorPlayerPose(this) : corum::ranked::SpectatorGhostPose{};
         PlayerObject::update(dt);
         // Native teleport flag also covers object-driven relocation outside the
         // portal entry callback. A position delta alone never creates evidence.
@@ -2820,7 +2877,7 @@ class $modify(CorumRankedSpectatorDummyPlayer, PlayerObject) {
         auto* layer = localSafetyLayer();
         if (layer && layer->freezeLocalDummy(this)) return;
         auto const observed = layer && m_isSpider && layer->observesSpectatorPlayer(this);
-        auto const before = observed ? layer->observedSpectatorPose() : corum::ranked::SpectatorGhostPose{};
+        auto const before = observed ? layer->observedSpectatorPlayerPose(this) : corum::ranked::SpectatorGhostPose{};
         PlayerObject::spiderTestJump(dynamic);
         if (observed && before.upsideDown != m_isUpsideDown)
             layer->observeSpectatorNativeSnap(this, corum::ranked::SpectatorDiscontinuity::SpiderSnap, before);

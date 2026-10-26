@@ -5,6 +5,8 @@
 #include <Geode/binding/GJGameLevel.hpp>
 #include <Geode/binding/GhostTrailEffect.hpp>
 #include <Geode/binding/HardStreak.hpp>
+#include <Geode/binding/GameManager.hpp>
+#include <chrono>
 
 using namespace geode::prelude;
 
@@ -39,6 +41,7 @@ void isolateNativeCompanions(PlayerObject* player, CCNode* hiddenRoot) {
         node->removeFromParentAndCleanup(false);
         hiddenRoot->addChild(node);
         node->unscheduleAllSelectors();
+        node->stopAllActions();
         node->setVisible(false);
     });
 }
@@ -67,7 +70,7 @@ bool CorumRemotePlayer::createVisual(PlayLayer* layer) {
         return false;
     }
     m_effectsRoot = effectsRoot;
-    effectsRoot->setVisible(false);
+    effectsRoot->setVisible(true);
     root->addChild(effectsRoot);
     root->setID("corum-spectator-remote-root");
     root->setAnchorPoint(CCPointZero);
@@ -100,7 +103,9 @@ bool CorumRemotePlayer::createVisual(PlayLayer* layer) {
 
 void CorumRemotePlayer::destroyVisual() {
     m_poseCurrent = false;
-    m_appliedState.reset();
+    if(m_secondary)m_secondary->cleanup();
+    resetEffects();for(auto& ghost:m_ghosts)ghost=nullptr;
+    m_cosmetics.reset();m_appliedState.reset();
     auto const hadVisual = m_player.data() != nullptr || m_root.data() != nullptr;
     if (m_player) {
         m_player->unscheduleAllSelectors();
@@ -131,6 +136,7 @@ void CorumRemotePlayer::cleanup() {
 void CorumRemotePlayer::setVisible(bool visible) {
     if (m_player) m_player->setVisible(visible);
     if (m_root) m_root->setVisible(visible);
+    if(!visible && m_secondary)m_secondary->setVisible(false);
 }
 
 void CorumRemotePlayer::applyGameplayState(SpectatorGhostPose const& pose) {
@@ -173,7 +179,106 @@ void CorumRemotePlayer::applyGameplayState(SpectatorGhostPose const& pose) {
     }
     if (player->m_mainLayer && (reconfigureMode || !m_appliedState || m_appliedState->flipped != pose.flipped))
         player->m_mainLayer->setScaleY(pose.flipped ? -1.0f : 1.0f);
+    applyCosmetics(pose,reconfigureMode);
     m_appliedState = pose;
+}
+
+void CorumRemotePlayer::applyCosmetics(SpectatorGhostPose const& pose,bool modeChanged){
+    auto const desired=pose.cosmetics && validSpectatorCosmetics(*pose.cosmetics)
+        ?pose.cosmetics->players[m_secondaryRole?1:0]:m_cosmetics.value_or(SpectatorAvatarCosmetics{});
+    auto const changed=!m_cosmetics || *m_cosmetics!=desired;
+    if(!modeChanged && !changed)return;
+    auto* player=m_player.data();auto* game=GameManager::sharedState();
+    auto id=[&](std::size_t mode){
+        // Pinned GD IconType order is Cube, Ship, Ball, UFO, Wave, Robot, Spider, Swing.
+        auto count=game?game->countForType(static_cast<IconType>(mode)):1;
+        return desired.icons[mode]>=1 && desired.icons[mode]<=count?desired.icons[mode]:1;
+    };
+    player->updatePlayerFrame(id(0));
+    switch(pose.mode){
+        case SpectatorGameMode::Cube:break;
+        case SpectatorGameMode::Ship:player->updatePlayerShipFrame(id(1));break;
+        case SpectatorGameMode::Ball:player->updatePlayerRollFrame(id(2));break;
+        case SpectatorGameMode::UFO:player->updatePlayerBirdFrame(id(3));break;
+        case SpectatorGameMode::Wave:player->updatePlayerDartFrame(id(4));break;
+        case SpectatorGameMode::Robot:player->updatePlayerRobotFrame(id(5));break;
+        case SpectatorGameMode::Spider:player->updatePlayerSpiderFrame(id(6));break;
+        case SpectatorGameMode::Swing:player->updatePlayerSwingFrame(id(7));break;
+    }
+    auto color=[](SpectatorColor c){return ccc3(c.r,c.g,c.b);};
+    player->setColor(color(desired.primary));player->setSecondColor(color(desired.secondary));
+    player->m_hasGlow=desired.glow;
+    player->enableCustomGlowColor(color(desired.glowColor));player->updatePlayerGlow();player->updateGlowColor();
+    // The remote trail resource is selected once per descriptor, never every pose.
+    if(!m_cosmetics || m_cosmetics->trail!=desired.trail){
+        player->m_playerStreak=game && desired.trail<=game->countForType(IconType::Special)?desired.trail:1;player->setupStreak();
+        isolateNativeCompanions(player,m_effectsRoot.data());
+    }
+    player->unscheduleAllSelectors();player->m_playEffects=false;
+    m_cosmetics=desired;
+}
+
+void CorumRemotePlayer::resetEffects(){
+    m_effectElapsedMs=-1;m_previousEffects=0;m_lastGhostMs=-100;m_effectSegment=0;
+    m_ghostTimes.fill(-1e9);m_ghostCursor=0;
+    for(auto& ghost:m_ghosts)if(ghost)ghost->setVisible(false);
+    if(!m_player)return;
+    auto* p=m_player.data();
+    if(p->m_regularTrail)p->m_regularTrail->reset();
+    if(p->m_shipStreak)p->m_shipStreak->reset();
+    if(p->m_waveTrail)p->m_waveTrail->reset();
+    std::array<CCParticleSystemQuad*,11> particles{p->m_playerGroundParticles,p->m_trailingParticles,p->m_shipClickParticles,p->m_vehicleGroundParticles,
+        p->m_ufoClickParticles,p->m_robotBurstParticles,p->m_swingBurstParticles1,p->m_swingBurstParticles2,p->m_landParticles0,p->m_landParticles1,p->m_dashParticles};
+    for(auto* node:particles)if(node){node->resetSystem();node->stopSystem();node->setVisible(false);}
+}
+
+void CorumRemotePlayer::updateEffects(SpectatorRemoteFrame const& frame){
+    auto const& pose=*frame.pose;auto* p=m_player.data();
+    auto const elapsed=frame.publisherElapsedMs;
+    auto const boundary=m_effectElapsedMs<0 || frame.presentationSegment!=m_effectSegment ||
+        elapsed<m_effectElapsedMs || elapsed-m_effectElapsedMs>250 || pose.dead || pose.finished;
+    auto const delta=m_effectElapsedMs>=0?elapsed-m_effectElapsedMs:0;
+    if(boundary)resetEffects();
+    m_effectSegment=frame.presentationSegment;m_effectElapsedMs=elapsed;
+    if(boundary || delta<=0 || !pose.visible)return;
+    auto const dt=static_cast<float>(delta/1000.0);auto const point=CCPoint{pose.x,pose.y};
+    auto motion=[&](CCMotionStreak* trail,bool active){if(!trail)return;trail->setVisible(active);
+        if(active){trail->setPosition(point);trail->update(dt);}else trail->reset();};
+    motion(p->m_regularTrail,pose.mode==SpectatorGameMode::Cube && (pose.effects&1));
+    motion(p->m_shipStreak,pose.mode==SpectatorGameMode::Ship && (pose.effects&2));
+    if(auto* wave=p->m_waveTrail){auto const active=pose.mode==SpectatorGameMode::Wave && (pose.effects&4);wave->setVisible(active);
+        if(active){if(!(m_previousEffects&4)){wave->resumeStroke();wave->unscheduleAllSelectors();}if(wave->m_pointArray && wave->m_pointArray->count()>128)wave->reset();wave->addPoint(point);wave->updateStroke(dt);}else wave->reset();}
+    // The native emitters are detached siblings owned by our effects root. Only
+    // observed publisher emission flags and publisher delta drive these visuals.
+    std::array<CCParticleSystemQuad*,11> particles{p->m_playerGroundParticles,p->m_trailingParticles,p->m_shipClickParticles,p->m_vehicleGroundParticles,
+        p->m_ufoClickParticles,p->m_robotBurstParticles,p->m_swingBurstParticles1,p->m_swingBurstParticles2,p->m_landParticles0,p->m_landParticles1,p->m_dashParticles};
+    for(std::size_t i=0;i<particles.size();++i)if(auto* node=particles[i]){
+        auto const bit=1u<<(i+4);auto active=(pose.effects&bit)!=0;
+        if(i==2)active=active&&pose.mode==SpectatorGameMode::Ship;
+        if(i==4)active=active&&pose.mode==SpectatorGameMode::UFO;
+        if(i==5)active=active&&pose.mode==SpectatorGameMode::Robot;
+        if(i==6||i==7)active=active&&pose.mode==SpectatorGameMode::Swing;
+        // Imported native presets have finite capacity; refuse oversized modded emitters.
+        if(node->getTotalParticles()>512){node->stopSystem();node->setVisible(false);continue;}
+        node->setAutoRemoveOnFinish(false);node->setPosition(point);
+        if(active && !(m_previousEffects&bit))node->resetSystem();
+        if(!active)node->stopSystem();
+        node->setVisible(active || node->getParticleCount()>0);node->update(dt);
+    }
+    // Eight retained native sprite snapshots, no scheduled callbacks/actions or
+    // unbounded GhostTrailEffect allocation. This intentionally omits custom shaders.
+    if((pose.effects&8) && p->m_iconSprite && elapsed-m_lastGhostMs>=100){
+        auto index=m_ghostCursor++%m_ghosts.size();auto& ghost=m_ghosts[index];
+        if(!ghost){ghost=CCSprite::create();if(ghost)m_effectsRoot->addChild(ghost.data());}
+        if(ghost){ghost->setDisplayFrame(p->m_iconSprite->displayFrame());ghost->setPosition(point);ghost->setRotation(pose.rotation);
+            ghost->setScale(pose.mini?.6f:1.f);ghost->setColor(ccc3(m_cosmetics->primary.r,m_cosmetics->primary.g,m_cosmetics->primary.b));m_ghostTimes[index]=elapsed;ghost->setVisible(true);}
+        m_lastGhostMs=elapsed;
+    }
+    for(std::size_t i=0;i<m_ghosts.size();++i)if(auto& ghost=m_ghosts[i];ghost){
+        auto const alpha=std::clamp(1.0-(elapsed-m_ghostTimes[i])/400.0,0.0,1.0);
+        ghost->setVisible(alpha>0);ghost->setOpacity(static_cast<GLubyte>(100*alpha));
+    }
+    m_previousEffects=pose.effects;
 }
 
 void CorumRemotePlayer::applyPose(SpectatorGhostPose const& pose) {
@@ -190,8 +295,11 @@ void CorumRemotePlayer::applyPose(SpectatorGhostPose const& pose) {
 
 void CorumRemotePlayer::update(
     PlayLayer* layer, bool authorizedDummy,
-    std::optional<SpectatorRemoteFrame> const& frame
+    std::optional<SpectatorRemoteFrame> const& frame, bool animateEffects
 ) {
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+    auto const workStarted=std::chrono::steady_clock::now();
+#endif
     auto const eligible = authorizedDummy && layer && layer->m_level &&
         frame && frame->context.levelId == static_cast<int>(layer->m_level->m_levelID);
     auto const action = m_policy.reconcile(
@@ -245,6 +353,30 @@ void CorumRemotePlayer::update(
     if (decision == SpectatorRemotePoseDecision::Applied) {
         m_renderedElapsedMs = frame->publisherElapsedMs;
         applyPose(*m_policy.pose());
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+        auto const effectsStarted=std::chrono::steady_clock::now();
+#endif
+        if(animateEffects)updateEffects(*frame);else if(m_effectElapsedMs>=0)resetEffects();
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+        auto const effectsUs=std::chrono::duration<double,std::micro>(std::chrono::steady_clock::now()-effectsStarted).count();
+#endif
+        if(!m_secondaryRole && frame->pose->dual && frame->pose->player2){
+            if(!m_secondary)m_secondary=std::make_unique<CorumRemotePlayer>(true);
+            auto second=*frame;second.presentationSegment=frame->pose->player2->segment;second.pose=spectatorSecondaryAsPose(*frame->pose->player2);
+            second.pose->cosmetics=frame->pose->cosmetics;
+            m_secondary->update(layer,authorizedDummy,second,animateEffects);
+        }else if(m_secondary)m_secondary->cleanup();
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+        auto const metricNow=std::chrono::steady_clock::now();
+        if(!m_secondaryRole && m_metricCount<120 && metricNow>=m_nextMetricAt){
+            m_nextMetricAt=metricNow+std::chrono::seconds(1);++m_metricCount;
+            log::info("[SpectatorRender] dual={} sequence={} publisherMs={} updateUs={} primaryEffectsUs={} players={} primaryEffectNodes={} secondaryEffectNodes={} poseBytes={} effectsAllowed={}",
+                frame->pose->dual,frame->sequence,frame->publisherElapsedMs,
+                std::chrono::duration<double,std::micro>(metricNow-workStarted).count(),effectsUs,visualCount(),
+                m_effectsRoot?m_effectsRoot->getChildrenCount():0,
+                m_secondary && m_secondary->m_effectsRoot?m_secondary->m_effectsRoot->getChildrenCount():0,sizeof(SpectatorGhostPose),animateEffects);
+        }
+#endif
         if (m_policy.state() == SpectatorRemoteState::Dead) {
             // Safe presentation fade; no native playerDestroyed/PlayLayer lifecycle.
             setVisible(true);

@@ -6,6 +6,10 @@ int main() {
     using namespace corum::ranked::debug;
     static_assert(kDebugSpectateLevelId == 88350599);
     static_assert(kSpectatorPublishIntervalMs == 50);
+    assert(debugSpectateStartPercent("")==0.f);
+    assert(debugSpectateStartPercent("0")==0.f&&debugSpectateStartPercent("100")==100.f);
+    assert(debugSpectateStartPercent("55.5")==55.5f&&debugSpectateStartPercent("99.99").has_value());
+    for(auto input:{"-1","101","nan","inf","1e2","1..2","1.",".","0.001","9999999"," 5"})assert(!debugSpectateStartPercent(input));
     DebugSpectateCapture record;
     SpectatorGhostPose pose{100,50,30,false,false};
     assert(record.capture(0,pose));

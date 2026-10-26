@@ -66,12 +66,14 @@ void DebugSpectateRuntime::toggleLiveSetting(std::string password) {
         m_status = *m_liveEnabled ? "LIVE SPECTATOR ENABLED FOR ALL MATCHES" : "LIVE SPECTATOR DISABLED - PERCENTAGE WAIT SCREEN";
     });
 }
-void DebugSpectateRuntime::start(bool playback, std::string password) {
+void DebugSpectateRuntime::start(bool playback, std::string password,float startPercent) {
+    if(!std::isfinite(startPercent)||startPercent<0||startPercent>100){m_status="ENTER A START PERCENT FROM 0 TO 100";return;}
     auto& ranked = RankedRuntime::get();
     if (m_mode != DebugSpectateMode::None || m_busy || ranked.view().stage != RuntimeStage::Ready ||
         ranked.hasLocalGameplayAuthority() || ranked.spectatorLiveSessionToken().empty()) {
         m_status = "RETURN TO RANKED LOBBY / WAIT FOR CURRENT DEBUG SESSION"; return;
     }
+    m_startPercent=playback?startPercent:0;
     installPump();
     m_mode = playback ? DebugSpectateMode::PreparingPlayback : DebugSpectateMode::PreparingRecord;
     m_status = playback ? "REQUESTING SERVER PLAYBACK..." : "CREATING SERVER RECORDING...";
@@ -84,6 +86,7 @@ void DebugSpectateRuntime::start(bool playback, std::string password) {
     m_prepareStartedAt = std::chrono::steady_clock::now();
     matjson::Value body;
     body["password"] = password; body["levelId"] = kDebugSpectateLevelId; body["formatVersion"] = kDebugSpectateFormatVersion;
+    if(playback)body["startPercent"]=static_cast<double>(m_startPercent);
     std::fill(password.begin(), password.end(), '\0');
     auto http = request(); http.header("Authorization", "Bearer " + ranked.spectatorLiveSessionToken()); http.bodyJSON(body);
     auto const generation = ++m_generation; m_busy = true;
@@ -101,7 +104,7 @@ void DebugSpectateRuntime::start(bool playback, std::string password) {
         m_contextId = playback ? root["contextId"].asString().unwrapOr("") : "debug-record:" + m_id;
         if (m_id.empty() || m_token.empty() || m_contextId.empty()) { fail("MISSING DEBUG SERVER SCOPE"); return; }
         m_expireAt = m_prepareStartedAt + std::chrono::minutes(15);
-        m_status = "PREPARING VOICE - VERIFIED GD METADATA / VANILLA DOWNLOAD";
+        m_status = playback && m_startPercent>0?fmt::format("PREPARING VOICE - JOIN AT {:.2f}%",m_startPercent):"PREPARING VOICE - VERIFIED GD METADATA / VANILLA DOWNLOAD";
         log::info("[DebugSpectate] {} created id={}", playback ? "playback" : "recording", m_id);
     });
 }
@@ -157,7 +160,7 @@ void DebugSpectateRuntime::sceneEntered(int levelId) {
     } else {
         m_mode = DebugSpectateMode::Playback; m_status = "LIVE SPECTATOR - WAITING FOR SERVER";
         SpectatorLiveRuntime::get().startDebugViewer(m_contextId, m_token,
-            "/api/ranked/debug/spectate/playbacks/" + m_id + "/spectator-live");
+            "/api/ranked/debug/spectate/playbacks/" + m_id + "/spectator-live",m_startPercent>0);
     }
 }
 bool DebugSpectateRuntime::recordPose(SpectatorGhostPose const& pose, bool terminal) {
@@ -197,7 +200,11 @@ void DebugSpectateRuntime::pumpRecording() {
         auto frames = matjson::Value::array();
         for (auto const& f : batch) {
             matjson::Value frame; frame["sequence"] = f.sequence; frame["elapsedMs"] = f.elapsedMs;
-            frame["keyframe"] = encodeSpectatorPose(f.pose); frames.push(frame);
+            frame["keyframe"] = encodeSpectatorPose(f.pose);
+            if(f.pose.cosmetics && validSpectatorCosmetics(*f.pose.cosmetics)){
+                frame["keyframe"]["cosmetics"]=encodeSpectatorCosmetics(*f.pose.cosmetics);
+            }
+            frames.push(frame);
         }
         body["frames"] = frames;
     } else body["completed"] = m_capture.completed();

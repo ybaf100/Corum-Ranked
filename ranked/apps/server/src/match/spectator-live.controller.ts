@@ -38,6 +38,7 @@ export class SpectatorLiveController {
     @Query("generation") generation?: string,
     @Query("afterSequence") afterSequence?: string,
     @Query("worldHistory") worldHistory?: string,
+    @Query("cosmeticRevision") cosmeticRevision?: string,
   ) {
     return this.spectatorLive.subscribe(
       matchId,
@@ -48,6 +49,7 @@ export class SpectatorLiveController {
       generation,
       afterSequence,
       worldHistory,
+      cosmeticRevision,
     );
   }
 }

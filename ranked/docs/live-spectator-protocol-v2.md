@@ -189,3 +189,20 @@ inventory. Absence of dual cannot be certified from it. Player2/dual presentatio
 cosmetics/full effects, advanced interpolation/jitter/reconnect, complex camera
 and platformer parity and cross-platform device E2E remain Phase 5. Phase 6 retains
 WebSocket/general performance work. Native-double/unit coverage is not device QA.
+
+## Stage 3 optional Dual and cosmetic extensions (beta.106)
+
+See [the Stage 3 implementation and verification record](solo-spectator-stage3-beta106.md).
+`keyframe.player2` is a complete independent body when `dual=true`; incomplete
+legacy fields do not grant Dual authority. Both bodies share packet identity/time.
+Optional `effects` is a 15-bit observed visual-emission mask and `progress` is
+render-only, never scoring evidence. Sparse top-level `cosmetics` descriptors
+(revision plus two fixed avatar records) are bound to the same stream, with
+`cosmeticRevision` subscriber caching. Debug format 2 stores the sparse descriptor
+in existing keyframe JSONB. Native P2-only trigger parity remains PARTIAL SYNC.
+
+Debug playback creation optionally accepts numeric `startPercent` (0..100).
+A nonzero request selects an actual stored progress threshold and retains its
+source elapsed time. Its subscriber may request the same `worldHistory=1` pages
+as the production viewer. Missing/unreached progress is rejected explicitly;
+0% remains compatible with older format-v2 recordings.

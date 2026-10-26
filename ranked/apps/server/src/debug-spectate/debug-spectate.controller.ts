@@ -35,7 +35,7 @@ export class DebugSpectateController {
   public stream(@Param("id") id: string, @Headers("x-debug-spectate-token") token?: string,
     @Headers("x-corum-debug-spectate") client?: string, @Query("protocolVersion") protocol?: string,
     @Query("attemptId") attemptId?: string, @Query("generation") generation?: string,
-    @Query("afterSequence") after?: string) { return this.debug.subscribe(id, token, client, protocol, attemptId, generation, after); }
+    @Query("afterSequence") after?: string, @Query("cosmeticRevision") cosmetics?:string, @Query("worldHistory") history?:string) { return this.debug.subscribe(id, token, client, protocol, attemptId, generation, after, cosmetics,history); }
   @Post("playbacks/:id/close")
   public close(@Param("id") id: string, @Headers("x-debug-spectate-token") token?: string,
     @Headers("x-corum-debug-spectate") client?: string) { return this.debug.closePlayback(id, token, client); }

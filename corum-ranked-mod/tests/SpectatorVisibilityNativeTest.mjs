@@ -75,7 +75,7 @@ int main(){
  auto ring=local.m_playerFollowFloats;auto index=local.m_followRelated;auto accumulator=local.m_unk838;
  local.setVisible(true);assert(local.isVisible());scene.reconcileSpectatorWorldDriver();assert(!local.isVisible());
  assert(local.m_playerFollowFloats==ring&&local.m_followRelated==index&&local.m_unk838==accumulator);
- assert(second.isVisible());
+ assert(!second.isVisible()); // actual native P2 is hidden; only the independent renderer may show a Dual avatar
  scene.fields.spectatorPresentationRetired=true;local.setVisible(true);scene.reconcileSpectatorWorldDriver();assert(local.isVisible());
  scene.fields.spectatorPresentationRetired=false;scene.fields.autoExitRequested=true;scene.reconcileSpectatorWorldDriver();assert(local.isVisible());
  assert(local.physicsUpdates==0&&local.rotationUpdates==0&&local.spiderJumps==0);

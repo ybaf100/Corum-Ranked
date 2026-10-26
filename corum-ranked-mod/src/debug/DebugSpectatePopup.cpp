@@ -7,6 +7,8 @@ using namespace geode::prelude;
 namespace {
 class DebugSpectatePopup final : public Popup {
     TextInput* m_password = nullptr;
+    TextInput* m_startPercent=nullptr;
+    bool m_inputError=false;
     CCLabelBMFont* m_status = nullptr;
     CCLabelBMFont* m_liveSetting = nullptr;
     CCMenuItemSpriteExtra* action(char const* name, SEL_MenuHandler selector) {
@@ -18,19 +20,23 @@ protected:
     bool init() override {
         if (!Popup::init(420.0f, 310.0f)) return false;
         setTitle("SERVER DEBUG SPECTATE");
-        auto* map = corum::ranked::ui::label("VOICE / LiteN1ng / EASY DEMON", 0.33f, {210, 212}, corum::ranked::ui::Text);
+        auto* map = corum::ranked::ui::label("VOICE / LiteN1ng / EASY DEMON", 0.33f, {210, 230}, corum::ranked::ui::Text);
         m_mainLayer->addChild(map);
-        auto* note = corum::ranked::ui::label("Debug storage only - NO RANKED RESULTS", 0.25f, {210, 187}, corum::ranked::ui::TextMuted);
+        auto* note = corum::ranked::ui::label("Debug storage only - NO RANKED RESULTS", 0.25f, {210, 208}, corum::ranked::ui::TextMuted);
         m_mainLayer->addChild(note);
         m_password = TextInput::create(260, "Server debug password");
-        m_password->setPasswordMode(true); m_password->setMaxCharCount(128); m_password->setPosition({210, 150});
+        m_password->setPasswordMode(true); m_password->setMaxCharCount(128); m_password->setPosition({210, 178});
         m_mainLayer->addChild(m_password);
+        auto* percentLabel=corum::ranked::ui::label("TEST START % (0-100)",.25f,{150,135},corum::ranked::ui::Text);
+        m_mainLayer->addChild(percentLabel);
+        m_startPercent=TextInput::create(90,"0");m_startPercent->setString("0");m_startPercent->setFilter("0123456789.");
+        m_startPercent->setMaxCharCount(6);m_startPercent->setPosition({300,135});m_mainLayer->addChild(m_startPercent);
         auto* menu = CCMenu::create(); menu->setPosition(CCPointZero); m_mainLayer->addChild(menu);
         auto* record = action("RECORD SPECTATE", menu_selector(DebugSpectatePopup::onRecord));
-        record->setPosition({110, 105}); menu->addChild(record);
+        record->setPosition({110, 95}); menu->addChild(record);
         auto* playback = action("TEST SPECTATE", menu_selector(DebugSpectatePopup::onTest));
-        playback->setPosition({310, 105}); menu->addChild(playback);
-        m_status = corum::ranked::ui::label("Requires ENABLE_DEBUG_SPECTATE server opt-in", 0.25f, {210, 65}, corum::ranked::ui::TextMuted);
+        playback->setPosition({310, 95}); menu->addChild(playback);
+        m_status = corum::ranked::ui::label("Requires ENABLE_DEBUG_SPECTATE server opt-in", 0.25f, {210, 60}, corum::ranked::ui::TextMuted);
         m_mainLayer->addChild(m_status);
         auto* toggle = action("SERVER LIVE SPECTATOR: LOADING...", menu_selector(DebugSpectatePopup::onToggle));
         toggle->setPosition({210, 32}); menu->addChild(toggle);
@@ -49,11 +55,14 @@ protected:
             corum::ranked::ui::fitLabelWidth(m_liveSetting, 380, 0.35f, 0.20f);
         }
         auto const& text = runtime.status();
-        if (!text.empty()) { m_status->setString(text.c_str()); corum::ranked::ui::fitLabelWidth(m_status, 380, 0.25f, 0.14f); }
+        if (!m_inputError && !text.empty()) { m_status->setString(text.c_str()); corum::ranked::ui::fitLabelWidth(m_status, 380, 0.25f, 0.14f); }
     }
     void run(bool test) {
+        auto start=corum::ranked::debug::debugSpectateStartPercent(m_startPercent->getString());
+        if(test && !start){m_inputError=true;m_status->setString("ENTER A START PERCENT FROM 0 TO 100");return;}
+        m_inputError=false;
         auto password = m_password->getString(); m_password->setString("");
-        corum::ranked::debug::DebugSpectateRuntime::get().start(test, std::move(password));
+        corum::ranked::debug::DebugSpectateRuntime::get().start(test, std::move(password),test?start.value_or(0.f):0.f);
     }
     void onRecord(CCObject*) { run(false); }
     void onTest(CCObject*) { run(true); }

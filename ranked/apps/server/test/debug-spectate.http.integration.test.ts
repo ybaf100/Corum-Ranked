@@ -298,6 +298,48 @@ describe("server-backed Debug Spectate over real HTTP and persistent PostgreSQL"
     expect((await post("live-setting", { ...createBody, liveEnabled: true })).body.liveEnabled).toBe(true);
     expect(rankedState).not.toHaveBeenCalled();
   });
+  it("starts at an exact recorded progress threshold with original source time and complete bounded restore pages", async()=>{
+    now+=1000;const before=await rankedSnapshot(),recording=await startRecord();
+    const frames=[0,25,60,100].map((progress,i)=>({...frame(i,1000+i*50,false,i===3),keyframe:{...frame(i,1000+i*50,false,i===3).keyframe,progress}}));
+    expect((await post(`recordings/${recording.recordingId}/frames`,{formatVersion:2,frames},recording.token)).status).toBe(201);
+    expect((await post(`recordings/${recording.recordingId}/finalize`,{completed:true},recording.token)).status).toBe(201);
+    for(const startPercent of [null,-1,101,"50",false])expect((await post("playbacks",{...createBody,startPercent})).status).toBe(400);
+    const playback=(await post("playbacks",{...createBody,startPercent:50})).body;
+    expect(playback).toMatchObject({startPercent:50,playbackStartSequence:2,playbackStartElapsedMs:100});
+    const first=(await poll(playback,"&worldHistory=1")).body;
+    expect(first.restoration).toMatchObject({available:true,caughtUp:true,levelId:DEBUG_SPECTATE_LEVEL_ID,headSequence:2});
+    expect(first.packets.map((p:any)=>[p.sequence,p.elapsedMs,p.keyframe.progress])).toEqual([[0,0,0],[1,50,25],[2,100,60]]);
+    expect(first.playbackComplete).toBe(false);now+=50;
+    const terminal=(await poll(playback,`&worldHistory=1&attemptId=${first.stream.attemptId}&generation=1&afterSequence=2`)).body;
+    expect(terminal.packets).toHaveLength(1);expect(terminal.packets[0]).toMatchObject({sequence:3,elapsedMs:150,keyframe:{progress:100,finished:true}});
+    expect(terminal.playbackComplete).toBe(true);await post(`playbacks/${playback.playbackId}/close`,{},playback.token);
+    const finish=(await post("playbacks",{...createBody,startPercent:100})).body;
+    expect((await poll(finish,"&worldHistory=1")).body.playbackComplete).toBe(true);await post(`playbacks/${finish.playbackId}/close`,{},finish.token);
+    expect(await rankedSnapshot()).toEqual(before);expect(rankedState).not.toHaveBeenCalled();
+  });
+  it("refuses to guess percentages for old or unreached recordings while normal 0% playback remains compatible",async()=>{
+    now+=1000;await completedRecord();
+    const old=await post("playbacks",{...createBody,startPercent:50});expect(old.status).toBe(400);expect(old.body.message).toBe("RECORDING_HAS_NO_PROGRESS_RECORD_AGAIN");
+    const normal=(await post("playbacks",createBody)).body;expect(normal.playbackStartElapsedMs).toBe(0);await post(`playbacks/${normal.playbackId}/close`,{},normal.token);
+    now+=1000;const recording=await startRecord();
+    expect((await post(`recordings/${recording.recordingId}/frames`,{formatVersion:2,frames:[{...frame(0,0),keyframe:{...frame(0,0).keyframe,progress:0}},
+      {...frame(1,50,true),keyframe:{...frame(1,50,true).keyframe,progress:40}}]},recording.token)).status).toBe(201);
+    await post(`recordings/${recording.recordingId}/finalize`,{completed:true},recording.token);
+    const unreachable=await post("playbacks",{...createBody,startPercent:80});expect(unreachable.status).toBe(400);expect(unreachable.body.message).toBe("RECORDING_DID_NOT_REACH_START_PERCENT");
+  });
+  it("retains sparse recorded cosmetics when a cursor recovery creates a new relay generation",async()=>{
+    now+=1000;const recording=await startRecord();
+    const cosmetics={revision:1,players:[0,1].map(()=>({icons:[11,12,13,14,15,16,17,18],primary:[10,20,30],secondary:[80,90,100],glowColor:[255,255,255],glow:true,trail:1}))};
+    const frames=[{...frame(0,0),keyframe:{...frame(0,0).keyframe,cosmetics}},frame(1,50),frame(2,100,false,true)];
+    expect((await post(`recordings/${recording.recordingId}/frames`,{formatVersion:2,frames},recording.token)).status).toBe(201);
+    await post(`recordings/${recording.recordingId}/finalize`,{completed:true},recording.token);
+    const playback=(await post("playbacks",createBody)).body;const first=(await poll(playback)).body;now+=100;
+    await poll(playback,`&attemptId=${first.stream.attemptId}&generation=1&afterSequence=0`);
+    expect((await poll(playback,`&attemptId=${first.stream.attemptId}&generation=1&afterSequence=999`)).body.fallback).toBe(true);
+    const recovered=(await poll(playback)).body;expect(recovered.stream.generation).toBe(2);expect(recovered.stream.cosmetics).toEqual(cosmetics);
+    expect(recovered.packets[0].cosmetics).toEqual(cosmetics);expect(recovered.packets[0].keyframe.cosmetics).toBeUndefined();
+    await post(`playbacks/${playback.playbackId}/close`,{},playback.token);
+  });
   it("OFF server rejects recording/playback even with valid authorization without creating debug data", async () => {
     await app.close(); await startApp(false);
     const before = await database.query("SELECT count(*) FROM debug_spectate_recordings");

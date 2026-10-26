@@ -15,7 +15,7 @@ public:
     }
     bool push(std::int64_t sequence,double elapsed,SpectatorGhostPose pose,bool snap){
         if(!m_active || !m_context || m_queue.size()>=kMaxSamples || sequence!=m_lastSequence+1 ||
-           !std::isfinite(elapsed) || elapsed<m_lastTime || !finiteSpectatorPose(pose) || pose.dual ||
+           !std::isfinite(elapsed) || elapsed<m_lastTime || !finiteSpectatorPose(pose) ||
            m_terminal || (m_lastSequence<0 && elapsed>250))return false;
         if(snap)++m_segment;
         m_queue.push_back({*m_context,sequence,pose,elapsed,m_segment});

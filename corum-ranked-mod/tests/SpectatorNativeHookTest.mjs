@@ -146,6 +146,7 @@ struct CorumRankedPlayLayer : PlayLayer {
     corum::ranked::SpectatorGhostPose observedSpectatorPose(bool dead=false,bool finished=false) {
         return corum::ranked::captureSpectatorPose(m_player1,dead,finished,m_gameState.m_isDualMode);
     }
+    corum::ranked::SpectatorGhostPose observedSpectatorPlayerPose(PlayerObject* p){return corum::ranked::captureSpectatorPose(p);}
     void observeSpectatorNativeUpdate(PlayerObject*) {}
     bool observesSpectatorPlayer(PlayerObject*) {return false;}
     void observeSpectatorNativeSnap(PlayerObject*,corum::ranked::SpectatorDiscontinuity,corum::ranked::SpectatorGhostPose const&) {}
@@ -268,6 +269,10 @@ int main() {
     assert(scene.deaths == 1 && runtime.ends == 1);
     scene.destroyPlayer(&other, nullptr);
     assert(scene.deaths == 2 && runtime.ends == 1);
+    PlayerHook viewerSecond;scene.m_player2=&viewerSecond;
+    auto deathsBeforeSecond=scene.deaths; // both native slots are read-only once spectator authority is active
+    scene.destroyPlayer(&viewerSecond,nullptr);assert(scene.deaths==deathsBeforeSecond&&!viewerSecond.m_isDead);
+    viewerSecond.update(.01f);assert(viewerSecond.updates==0);
     scene.percent = 10; local.update(0.01f); other.update(0.01f);
     assert(local.updates == 0 && other.updates == 1); // viewer freezes dummy immediately
     scene.percent = 99; local.update(0.01f); other.update(0.01f);

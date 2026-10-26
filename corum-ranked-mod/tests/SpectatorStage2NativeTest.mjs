@@ -81,6 +81,34 @@ matjson::Value response(int first,int count,int total,bool reset=false,std::stri
 }
 void attach(SpectatorLiveRuntime& r){r.resetViewer();r.m_viewMatchId="match";r.m_viewContextKey=viewerContextKey(RankedRuntime::get().view().match);}
 int main(){
+ // Stage 3 optional v2 Dual and cosmetics travel through the actual HTTP decoder.
+ {
+  SpectatorLiveRuntime r;attach(r);auto wire=response(0,1,1,true);
+  SpectatorGhostPose p{100,40,15};p.dual=true;p.player2=SpectatorSecondaryPose{};
+  p.player2->mode=SpectatorGameMode::Swing;p.player2->x=200;p.player2->y=700;p.player2->mini=true;
+  p.player2->upsideDown=true;p.player2->flipped=true;p.effects=1;p.progress=12.5f;
+  wire["packets"][0]["keyframe"]=encodeSpectatorPose(p);
+  SpectatorCosmetics outfit;outfit.players[1].icons[7]=17;outfit.players[1].glow=true;
+  wire["packets"][0]["cosmetics"]=encodeSpectatorCosmetics(outfit);r.applyViewerResponse(wire);
+  assert(r.m_lastAcceptedPose&&r.m_lastAcceptedPose->dual&&r.m_lastAcceptedPose->player2->y==700);
+  assert(r.m_lastAcceptedPose->cosmetics->players[1].icons[7]==17&&r.m_lastAcceptedPose->progress==12.5f);
+  auto frames=r.takeRestorationFrames();assert(frames.size()==1&&frames[0].pose->dual);
+  r.restorationApplied(frames[0],true,.1);assert(r.status()==SpectatorLiveStatus::PartialSync);
+  auto complete=encodeSpectatorPose(p);assert(decodeSpectatorPose(complete)->player2->mini);
+  auto bad=complete;bad["player2"]["visible"]="true";assert(!decodeSpectatorPose(bad));
+  bad=complete;bad["player2"]["dual"]=true;assert(!decodeSpectatorPose(bad));
+  bad=complete;bad["player2"]["x"]=std::numeric_limits<double>::infinity();assert(!decodeSpectatorPose(bad));
+  bad=complete;bad["player2"]["mode"]="UNKNOWN";assert(!decodeSpectatorPose(bad));
+  bad=complete;bad["dual"]=false;assert(!decodeSpectatorPose(bad));
+  auto colors=encodeSpectatorCosmetics(outfit);colors["players"][0]["primary"][0]=std::int64_t(4294967296LL);
+  assert(!decodeSpectatorCosmetics(colors));colors=encodeSpectatorCosmetics(outfit);colors["players"][1]["trail"]=std::int64_t(4294967297LL);assert(!decodeSpectatorCosmetics(colors));
+  // Only P2 snaps; interpolation cannot sweep it across a teleport boundary.
+  SpectatorInterpolationBuffer buffer;SpectatorGhostPose a=p,b=p;a.player2->segment=1;b.player2->segment=2;b.x=110;b.player2->x=900;
+  b.player2->discontinuity=SpectatorSnapEvidence{SpectatorDiscontinuity::Teleport,200,700,900,700};
+  assert(buffer.push({0,0,a},false,0));assert(buffer.push({1,200,b},false,0));
+  auto held=buffer.render(0);assert(held&&held->pose.player2->x==200);auto middle=buffer.render(100);assert(middle&&middle->pose.x==105&&middle->pose.player2->x==200);auto moved=buffer.render(200);
+  assert(moved&&moved->pose.player2->x==900&&moved->publisherElapsedMs==200);
+ }
  // Production decoding stages all pages on the source clock, never showing the future live pose as restored.
  for(int duration:{0,10000,60000,120000}){
   SpectatorLiveRuntime r;attach(r);int total=duration/50+1;

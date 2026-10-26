@@ -23,7 +23,10 @@ public:
     bool selectChannel(std::string channel){
         if((channel!="release"&&channel!="debug")||m_view.state==ModUpdateState::Downloading||m_view.state==ModUpdateState::Verifying||m_view.state==ModUpdateState::RestartRequired)return false;
         if(channel==m_channel)return false;
-        m_channel=std::move(channel);m_downloadAllowed=false;return true;
+        ++m_generation;m_request.cancel();
+        m_channel=std::move(channel);m_downloadAllowed=false;m_metadata={};
+        m_view.targetVersion.clear();m_view.error.clear();m_view.progress=0;
+        m_view.state=ModUpdateState::Required;return true;
     }
 private:
     std::string m_channel=rankedBuildChannel();

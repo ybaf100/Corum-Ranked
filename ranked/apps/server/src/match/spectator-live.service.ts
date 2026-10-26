@@ -7,6 +7,7 @@ import {
   Optional,
 } from "@nestjs/common";
 import { DATABASE, type DatabasePort } from "../database/database.port.js";
+import { parseSpectatorCosmetics, type SpectatorCosmetics } from "./spectator-cosmetics.js";
 import type { PlayerSide } from "@corum-ranked/rules";
 import type { RankedSessionContext } from "../session/session.types.js";
 import { MatchService } from "./match.service.js";
@@ -66,6 +67,10 @@ export interface SpectatorPoseKeyframe {
   readonly discontinuity?: SpectatorSnapEvidence;
   readonly visible?: boolean;
   readonly dual: boolean;
+  readonly player2?: SpectatorPoseKeyframe;
+  readonly effects?: number;
+  readonly progress?: number;
+  readonly cosmetics?: SpectatorCosmetics;
   readonly player2X?: number;
   readonly player2Y?: number;
   readonly player2Rotation?: number;
@@ -81,6 +86,7 @@ export interface SpectatorLivePacket {
   readonly sequence: number;
   readonly elapsedMs: number;
   readonly levelId?: number;
+  readonly cosmetics?: SpectatorCosmetics;
   readonly inputEdges: readonly SpectatorInputEdge[];
   readonly keyframe: SpectatorPoseKeyframe;
 }
@@ -105,6 +111,7 @@ export interface SpectatorLiveStreamDescriptor {
   readonly generation: number;
   readonly lastSequence: number;
   readonly opponentName: string;
+  readonly cosmetics?: SpectatorCosmetics;
 }
 
 export interface SpectatorLiveSubscribeResponse {
@@ -134,6 +141,7 @@ interface LiveStream {
   packets: BufferedPacket[];
   history?: BufferedPacket[];
   historyContinuous?: boolean;
+  cosmetics?: SpectatorCosmetics;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -225,12 +233,24 @@ export const parseSpectatorKeyframe = (value: unknown): SpectatorPoseKeyframe =>
   const dual = requiredBoolean(value.dual, "keyframe.dual");
   const dead = requiredBoolean(value.dead, "keyframe.dead");
   const finished = requiredBoolean(value.finished, "keyframe.finished");
+  let player2:SpectatorPoseKeyframe|undefined;
+  if(dual){
+    if(!isRecord(value.player2)||value.player2.dual!==false||value.player2.player2!==undefined||typeof value.player2.visible!=="boolean")
+      throw new BadRequestException("INCOMPLETE_DUAL_POSE");
+    player2=parseSpectatorKeyframe(value.player2);
+  }else if(value.player2!==undefined)throw new BadRequestException("UNEXPECTED_DUAL_POSE");
+  const effects=value.effects===undefined?undefined:integer(value.effects,"keyframe.effects",0);
+  if(effects!==undefined&&effects>32767)throw new BadRequestException("INVALID_VISUAL_MASK");
+  const progress=value.progress===undefined?undefined:finiteNumber(value.progress,"keyframe.progress");
+  if(progress!==undefined&&(progress<0||progress>100))throw new BadRequestException("INVALID_VISUAL_PROGRESS");
   if (dead && finished) throw new BadRequestException("keyframe terminal flags conflict");
   return {
     x,
     y,
     rotation,
     mode, mini, upsideDown, flipped, dual, dead, finished,
+    ...(value.cosmetics===undefined?{}:{cosmetics:parseSpectatorCosmetics(value.cosmetics)}),
+    ...(player2?{player2}:{}),...(effects===undefined?{}:{effects}),...(progress===undefined?{}:{progress}),
     ...(velocityX === undefined ? {} : { velocityX }),
     ...(velocityY === undefined ? {} : { velocityY }),
     ...(gravity === undefined ? {} : { gravity }),
@@ -288,6 +308,7 @@ const parsePacket = (value: unknown, matchId: string): SpectatorLivePacket => {
     elapsedMs: integer(value.elapsedMs, "elapsedMs", 0),
     ...(value.levelId===undefined?{}:{levelId:integer(value.levelId,"levelId",1)}),
     inputEdges: parseInputEdges(value.inputEdges),
+    ...(value.cosmetics===undefined?{}:{cosmetics:parseSpectatorCosmetics(value.cosmetics)}),
     keyframe: parseSpectatorKeyframe(value.keyframe),
   };
 };
@@ -429,6 +450,7 @@ export class SpectatorLiveService {
         if (existing.packets.at(-1)?.keyframe.dead || existing.packets.at(-1)?.keyframe.finished) throw new ConflictException("SPECTATOR_TERMINAL_STREAM");
         if (packet.sequence !== 0) throw new ConflictException("SPECTATOR_NEW_GENERATION_MUST_START_AT_SEQUENCE_ZERO");
         stream = { ...existing, generation: packet.generation, lastSequence: -1, packets: [], history:[], historyContinuous:true };
+        delete stream.cosmetics;
       } else stream = { ...existing, packets: [...existing.packets], history:[...(existing.history??[])] };
     }
     for (const item of packets) {
@@ -459,6 +481,7 @@ export class SpectatorLiveService {
     generationText?: string,
     afterSequenceText?: string,
     worldHistoryText?: string,
+    cosmeticRevisionText?: string,
   ): Promise<SpectatorLiveSubscribeResponse> {
     const state = await this.decorateConfiguredState(await this.matches.state(matchId, matchToken, session));
     if (!this.liveEnabled) throw new ForbiddenException("LIVE_SPECTATOR_DISABLED");
@@ -495,7 +518,7 @@ export class SpectatorLiveService {
       if (terminalStream && ended && ended.attemptId === terminalStream.attemptId &&
         Date.now() - ended.endedAtMs <= SPECTATOR_LIVE_TIMEOUT_MS && (terminal?.dead || terminal?.finished)) {
         return this.readStream(key, terminalStream, context.roundNumber, context.deathmatchSequence,
-          state.spectator.opponentName ?? "Opponent", attemptId, generationText, afterSequenceText, worldHistoryText==="1");
+          state.spectator.opponentName ?? "Opponent", attemptId, generationText, afterSequenceText, worldHistoryText==="1",cosmeticRevisionText);
       }
       return {
         protocolVersion: SPECTATOR_LIVE_PROTOCOL_VERSION,
@@ -533,7 +556,7 @@ export class SpectatorLiveService {
     }
 
     return { ...this.readStream(key, stream, context.roundNumber, context.deathmatchSequence,
-      state.spectator.opponentName ?? "Opponent", attemptId, generationText, afterSequenceText, worldHistoryText==="1"), paused: state.opponentPaused === true };
+      state.spectator.opponentName ?? "Opponent", attemptId, generationText, afterSequenceText, worldHistoryText==="1",cosmeticRevisionText), paused: state.opponentPaused === true };
   }
 
   // Internal authorization/context adapter for the isolated Recorded Publisher.
@@ -559,7 +582,7 @@ export class SpectatorLiveService {
   }
 
   public subscribeRecorded(contextId: string, nowMs: number, protocolVersionText?: string,
-    attemptId?: string, generationText?: string, afterSequenceText?: string): SpectatorLiveSubscribeResponse {
+    attemptId?: string, generationText?: string, afterSequenceText?: string, cosmeticRevisionText?:string, worldHistoryText?:string): SpectatorLiveSubscribeResponse {
     if (protocolVersionText !== undefined && queryInteger(protocolVersionText) !== SPECTATOR_LIVE_PROTOCOL_VERSION) {
       return this.fallback("UNSUPPORTED_PROTOCOL_VERSION");
     }
@@ -571,7 +594,7 @@ export class SpectatorLiveService {
       return this.fallback("STREAM_TIMEOUT");
     }
     return this.readStream(key, stream, 1, null, "VOICE Recorded Publisher", attemptId,
-      generationText, afterSequenceText);
+      generationText, afterSequenceText,worldHistoryText==="1",cosmeticRevisionText);
   }
 
   private appendPacket(stream: LiveStream, packet: SpectatorLivePacket, nowMs: number): void {
@@ -579,8 +602,16 @@ export class SpectatorLiveService {
     if (last?.keyframe.dead || last?.keyframe.finished) throw new ConflictException("SPECTATOR_TERMINAL_STREAM");
     if (last && packet.elapsedMs < last.elapsedMs) throw new ConflictException("SPECTATOR_REVERSE_TIMESTAMP");
     if(last && (packet.sequence!==last.sequence+1 || packet.levelId!==last.levelId || packet.elapsedMs-last.elapsedMs>250))stream.historyContinuous=false;
+    const cosmetic=packet.cosmetics??packet.keyframe.cosmetics;
+    if(cosmetic){
+      if(stream.cosmetics && (cosmetic.revision<stream.cosmetics.revision ||
+          (cosmetic.revision===stream.cosmetics.revision && JSON.stringify(cosmetic)!==JSON.stringify(stream.cosmetics))))
+        throw new ConflictException("STALE_COSMETIC_DESCRIPTOR");
+      stream.cosmetics=cosmetic;
+    }
     const buffered={...packet,receivedAtMs:nowMs};
-    stream.history=[...(stream.history??[]),buffered].slice(-SPECTATOR_HISTORY_MAX_PACKETS);
+    (stream.history??=[]).push(buffered);
+    if(stream.history.length>SPECTATOR_HISTORY_MAX_PACKETS)stream.history.splice(0,stream.history.length-SPECTATOR_HISTORY_MAX_PACKETS);
     stream.lastSequence = packet.sequence;
     stream.lastReceivedAtMs = nowMs;
     stream.packets.push(buffered);
@@ -592,7 +623,7 @@ export class SpectatorLiveService {
 
   private readStream(_key: string, stream: LiveStream, roundNumber: number, deathmatchSequence: number | null,
     opponentName: string, attemptId?: string, generationText?: string,
-    afterSequenceText?: string, worldHistory=false): SpectatorLiveSubscribeResponse {
+    afterSequenceText?: string, worldHistory=false, cosmeticRevisionText?:string): SpectatorLiveSubscribeResponse {
     const requestedGeneration = queryInteger(generationText);
     const afterSequence = queryInteger(afterSequenceText);
     const hasStreamIdentity = Boolean(attemptId) && requestedGeneration !== null;
@@ -649,6 +680,7 @@ export class SpectatorLiveService {
         generation: stream.generation,
         lastSequence: stream.lastSequence,
         opponentName,
+        ...(stream.cosmetics && (reset || queryInteger(cosmeticRevisionText)!==stream.cosmetics.revision)?{cosmetics:stream.cosmetics}:{}),
       },
       packets,
     };

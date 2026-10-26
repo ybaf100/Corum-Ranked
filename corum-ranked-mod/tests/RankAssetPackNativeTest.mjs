@@ -169,7 +169,7 @@ test('actual cache hashes catch corruption; atomic update rolls back, stale comp
     const jsonSource=read('tests/SpectatorLiveViewerNativeTest.mjs');
     let json=jsonSource.slice(jsonSource.indexOf('namespace matjson {'),jsonSource.indexOf('${readFileSync(join(root,'));
     json=json.replace('bool isErr()const','bool isOk()const{return value.has_value();} bool isErr()const');
-    json=json.replace('bool contains(std::string const& k)const',
+    json=json.replace('std::string dump()const{return "{}";}', '').replace('bool contains(std::string const& k)const',
         'std::string dump()const{if(auto p=std::get_if<std::string>(&data))return *p;if(auto p=std::get_if<Object>(&data)){std::string out;for(auto const& [k,v]:*p)out+=k+v.dump();return out;}return "fixture";} bool contains(std::string const& k)const');
     const methods=[
         'void RankAssetPackManager::configure(', 'void RankAssetPackManager::prepare()', 'void RankAssetPackManager::retry()',

@@ -61,7 +61,7 @@ test('production Remote Player + camera follow two-client presentation without l
         mkdirSync(join(dir, 'Geode/binding'), { recursive: true });
         const header = read('tests/helpers/SpectatorNativeDouble.hpp');
         writeFileSync(join(dir, 'Geode/Geode.hpp'), header);
-        for (const name of ['PlayLayer', 'GJBaseGameLayer', 'PlayerObject', 'GJGameLevel', 'GhostTrailEffect', 'HardStreak']) {
+        for (const name of ['PlayLayer', 'GJBaseGameLayer', 'PlayerObject', 'GJGameLevel', 'GhostTrailEffect', 'HardStreak', 'GameManager']) {
             writeFileSync(join(dir, `Geode/binding/${name}.hpp`), '#include <Geode/Geode.hpp>\n');
         }
         // Verify the double actually reproduces the native overload failure.
@@ -166,7 +166,7 @@ int main() {
     ${wire ? `
     // Real Nest HTTP -> PostgreSQL -> server playback clock/relay responses
     // enter the production C++ decoder, renderer and camera. No local replay clock.
-    remote.cleanup();camera.cleanup(&layer);level.m_levelID=88350599;
+    remote.cleanup();camera.cleanup(&layer);level.m_levelID=88350599;RankedRuntime::get().data.match.currentMap->levelId=88350599;
     SpectatorLiveRuntime viewer;viewer.m_viewMatchId=${JSON.stringify(wire[0].stream.matchId)};
     PlayerObject* wirePlayer=nullptr;std::uint64_t wireEpoch=0;
     ${wire.map((response,i)=>`
@@ -199,6 +199,65 @@ int main() {
     assert(PlayerObject::creates==creates && !remote.player() && world->children.empty());
     PlayerObject::fail=false; ++f.context.generation; remote.update(&layer,true,f); assert(remote.player());
     CCObject::drain();
+    {
+    // Actual descriptor capture reads source-player colors and every native mode ID.
+    local.m_playerColor1=ccc3(7,8,9);other.m_playerColor2=ccc3(40,50,60);local.m_hasGlow=true;
+    local.m_hasCustomGlowColor=true;local.m_glowColor=ccc3(1,2,3);
+    auto observedOutfit=captureSpectatorCosmetics(&local,&other);
+    assert(observedOutfit.players[0].icons[0]==17&&observedOutfit.players[0].icons[7]==24);
+    assert(observedOutfit.players[0].primary.r==7&&observedOutfit.players[1].secondary.b==60);
+    assert(observedOutfit.players[0].glow&&observedOutfit.players[0].glowColor.g==2);
+    // Stage 3: independent render-only P2, real native appearance functions,
+    // timestamp-driven effects, and repeated single/dual lifecycle boundaries.
+    ++f.context.epoch;f.sequence=0;f.publisherElapsedMs=0;
+    f.pose=SpectatorGhostPose{100,40,15};f.pose->dual=true;
+    SpectatorSecondaryPose secondPose;secondPose.x=120;secondPose.y=900;secondPose.rotation=240;
+    secondPose.mode=SpectatorGameMode::Spider;secondPose.mini=true;secondPose.upsideDown=true;secondPose.flipped=true;
+    f.pose->player2=secondPose;
+    auto outfit=std::make_shared<SpectatorCosmetics>();outfit->players[0].icons={11,12,13,14,15,16,17,18};
+    outfit->players[1].icons={21,22,23,24,25,26,27,28};outfit->players[0].glow=true;
+    outfit->players[0].primary={11,22,33};outfit->players[1].secondary={70,80,90};
+    f.pose->cosmetics=outfit;remote.update(&layer,true,f);
+    auto* p1=remote.player();auto* p2=remote.secondaryPlayer();
+    assert(p1&&p2&&p1!=p2&&p2!=&other&&remote.visualCount()==2);
+    assert(p1->iconId==11&&p2->iconId==27&&p1->m_hasGlow);
+    assert(p1->m_playerColor1.r==11&&p2->m_playerColor2.g==80);
+    assert(p2->position.y==900&&p2->rotation==240&&p2->m_isSpider&&p2->m_isUpsideDown&&p2->m_vehicleSize==.6f);
+    auto creates=PlayerObject::creates,calls=p2->nativeModeCalls,icons=p1->iconUpdates;
+    for(int i=1;i<=200;++i){++f.sequence;f.publisherElapsedMs=i*5;f.pose->player2->x+=.5f;remote.update(&layer,true,f);}
+    assert(PlayerObject::creates==creates&&p2->nativeModeCalls==calls&&p1->iconUpdates==icons);
+    // Independent P2 mode switches reuse its object, and use its descriptor.
+    int secondMode=0;
+    for(auto mode:{SpectatorGameMode::Cube,SpectatorGameMode::Ship,SpectatorGameMode::Ball,SpectatorGameMode::UFO,
+        SpectatorGameMode::Wave,SpectatorGameMode::Robot,SpectatorGameMode::Spider,SpectatorGameMode::Swing}){
+      f.pose->player2->mode=mode;++f.sequence;f.publisherElapsedMs+=50;remote.update(&layer,true,f);
+      assert(remote.secondaryPlayer()==p2&&p2->frame==secondMode&&p2->iconId==21+secondMode);++secondMode;
+    }
+    // Missing descriptors keep the last outfit; late valid changes do not reset the world/object.
+    f.pose->cosmetics.reset();++f.sequence;f.publisherElapsedMs+=50;remote.update(&layer,true,f);assert(p1->iconId==11);
+    auto late=std::make_shared<SpectatorCosmetics>(*outfit);late->revision=2;late->players[0].icons[0]=9999;
+    f.pose->cosmetics=late;++f.sequence;f.publisherElapsedMs+=50;remote.update(&layer,true,f);
+    assert(remote.player()==p1&&p1->iconId==1&&remote.secondaryPlayer()==p2); // unavailable resource fallback
+    // No emitter work at duplicate presentation time or during restoration.
+    f.pose->effects=1|8|16;f.pose->player2->effects=128|256;
+    ++f.sequence;f.publisherElapsedMs+=50;remote.update(&layer,true,f);
+    assert(p1->m_regularTrail->updates>0&&p1->m_playerGroundParticles->updates>0);
+    auto effectTicks=p1->m_playerGroundParticles->updates;
+    for(int i=0;i<200;++i)remote.update(&layer,true,f);
+    assert(p1->m_playerGroundParticles->updates==effectTicks);
+    ++f.sequence;f.publisherElapsedMs+=50;remote.update(&layer,true,f,false);
+    assert(p1->m_playerGroundParticles->updates==effectTicks&&!p1->m_playerGroundParticles->isActive());
+    // A teleport segment clears the native trail instead of drawing across it.
+    auto trailResets=p1->m_regularTrail->resets;++f.presentationSegment;++f.sequence;f.publisherElapsedMs+=50;
+    f.pose->x+=700;remote.update(&layer,true,f);assert(p1->m_regularTrail->resets>trailResets);
+    for(int i=0;i<30;++i){
+      f.pose->dual=false;f.pose->player2.reset();++f.sequence;f.publisherElapsedMs+=50;remote.update(&layer,true,f);
+      assert(!remote.secondaryPlayer()&&remote.visualCount()==1);
+      f.pose->dual=true;f.pose->player2=secondPose;++f.sequence;f.publisherElapsedMs+=50;remote.update(&layer,true,f);
+      assert(remote.secondaryPlayer()&&remote.visualCount()==2);CCObject::drain();
+    }
+    assert(local.physicsUpdates==0&&other.physicsUpdates==0&&local.nativeModeCalls==0&&other.nativeModeCalls==0);
+    }
     // Simulated parent teardown before wrapper cleanup; retained visual/root
     // ownership prevents use-after-free. Cleanup removes all owned companions.
     worldOwner=nullptr; layer.m_objectLayer=nullptr; remote.cleanup(); CCObject::drain();
@@ -210,7 +269,7 @@ int main() {
 `);
         const binary = join(dir, 'test');
         execFileSync('g++', ['-std=c++23', '-Wall', '-Wextra', '-Wpedantic', '-Werror', '-I', dir,
-            join(root, 'src/spectator/CorumRemotePlayer.cpp'), join(root, 'src/spectator/SpectatorPlayerCapture.cpp'), join(root, 'src/spectator/CorumSpectatorCamera.cpp'),
+            join(root, 'src/spectator/CorumRemotePlayer.cpp'), join(root, 'src/spectator/SpectatorPlayerCapture.cpp'), join(root,'src/spectator/SpectatorCosmeticCapture.cpp'), join(root, 'src/spectator/CorumSpectatorCamera.cpp'),
             join(dir, 'test.cpp'), '-o', binary], { stdio: 'pipe' });
         assert.match(execFileSync(binary, { encoding: 'utf8' }), /scenarios passed/);
     } finally { rmSync(dir, { recursive: true, force: true }); }

@@ -6,6 +6,7 @@ import { TokenService } from "../common/token.service.js";
 import { SERVER_ENVIRONMENT, type ServerEnvironment } from "../config/server-environment.js";
 import { DATABASE, type DatabasePort } from "../database/database.port.js";
 import { SpectatorLiveService, parseSpectatorKeyframe, type SpectatorPoseKeyframe } from "../match/spectator-live.service.js";
+import type {SpectatorCosmetics} from "../match/spectator-cosmetics.js";
 import { SPECTATOR_LIVE_PROTOCOL_VERSION } from "../match/spectator-live.policy.js";
 import type { RankedSessionContext } from "../session/session.types.js";
 import { DEBUG_SPECTATE_FORMAT_VERSION, DEBUG_SPECTATE_LEVEL_ID, DEBUG_SPECTATE_MAX_FRAMES,
@@ -24,6 +25,7 @@ interface RecordingRow {
 interface Playback {
   readonly id: string; readonly recordingId: string; readonly tokenHash: string;
   readonly expiresAtMs: number; readonly frames: readonly Frame[];
+  readonly startElapsedMs:number;lastCosmetics?:SpectatorCosmetics;
   startedAtMs: number | null; cursor: number; generation: number; sequence: number; completed: boolean;
 }
 const object = (value: unknown): Record<string, unknown> => {
@@ -203,6 +205,9 @@ export class DebugSpectateService implements OnModuleInit, OnApplicationShutdown
   }
   public async createPlayback(_session: RankedSessionContext, body: unknown, clientDebug?: string) {
     this.authorizeStart(body, clientDebug);
+    const requested=object(body).startPercent===undefined?0:object(body).startPercent;
+    if(typeof requested!=="number" || !Number.isFinite(requested) || requested<0 || requested>100)
+      throw new BadRequestException("START_PERCENT_MUST_BE_0_TO_100");
     if (this.playbacks.size + this.startingPlaybacks >= DEBUG_SPECTATE_MAX_SESSIONS) throw new ConflictException("DEBUG_PLAYBACK_CAPACITY");
     ++this.startingPlaybacks;
     try {
@@ -237,14 +242,20 @@ export class DebugSpectateService implements OnModuleInit, OnApplicationShutdown
     // Only the playback clock/relayed elapsed times lose the leading blank time.
     const leadingMs = validated[0]!.elapsedMs;
     const normalized = validated.map(frame => ({ ...frame, elapsedMs: frame.elapsedMs - leadingMs }));
+    const startIndex=requested===0?0:normalized.findIndex(frame=>frame.keyframe.progress!==undefined && frame.keyframe.progress>=requested);
+    if(startIndex<0){
+      throw new BadRequestException(normalized.some(frame=>frame.keyframe.progress!==undefined)
+        ?"RECORDING_DID_NOT_REACH_START_PERCENT":"RECORDING_HAS_NO_PROGRESS_RECORD_AGAIN");
+    }
+    const startElapsedMs=normalized[startIndex]!.elapsedMs;
     this.playbacks.set(id, { id, recordingId: row.id, tokenHash: this.tokens.hash(token),
-      expiresAtMs: expiresAt.getTime(), frames: normalized, startedAtMs: null, cursor: 0,
+      expiresAtMs: expiresAt.getTime(), frames: normalized,startElapsedMs, startedAtMs: null, cursor: 0,
       generation: 1, sequence: 0, completed: false });
     this.logger.log(`[DebugSpectate] playback created playbackId=${id} recordingId=${row.id}`);
     // NO frame file / pose injection. Server clock starts on first in-scene poll.
     return { ...this.metadata(row), playbackId: id, token, contextId: debugSpectateContextId(id),
       protocolVersion: SPECTATOR_LIVE_PROTOCOL_VERSION, playbackLeadingMs: leadingMs,
-      playbackDurationMs: terminal.elapsedMs - leadingMs, startedAt: null, expiresAt: expiresAt.toISOString() };
+      playbackDurationMs: terminal.elapsedMs - leadingMs,startPercent:requested,playbackStartElapsedMs:startElapsedMs,playbackStartSequence:startIndex, startedAt: null, expiresAt: expiresAt.toISOString() };
     } finally { --this.startingPlaybacks; }
   }
   private playback(id: string, token: string | undefined, clientDebug?: string): Playback {
@@ -255,16 +266,16 @@ export class DebugSpectateService implements OnModuleInit, OnApplicationShutdown
     return playback;
   }
   public subscribe(id: string, token: string | undefined, clientDebug?: string, protocolVersion?: string,
-    attemptId?: string, generation?: string, afterSequence?: string) {
+    attemptId?: string, generation?: string, afterSequence?: string, cosmeticRevision?:string, worldHistory?:string) {
     const playback = this.playback(id, token, clientDebug);
     const nowMs = this.clock.now().getTime();
     if (playback.startedAtMs === null) {
-      playback.startedAtMs = nowMs;
+      playback.startedAtMs = nowMs-playback.startElapsedMs;
       this.logger.log(`[DebugSpectate] playback started playbackId=${id}`);
     }
     this.advance(playback, nowMs);
     const response = this.relay.subscribeRecorded(debugSpectateContextId(id), nowMs,
-      protocolVersion, attemptId, generation, afterSequence);
+      protocolVersion, attemptId, generation, afterSequence, cosmeticRevision,worldHistory);
     if (response.reason === "SEQUENCE_GAP") {
       // Same production bounded-buffer gap. A Recorded Publisher can restart a
       // new generation at its latest reached frame; the next HTTP poll resets.
@@ -308,10 +319,14 @@ export class DebugSpectateService implements OnModuleInit, OnApplicationShutdown
     }
   }
   private emit(playback: Playback, frame: Frame, nowMs: number): void {
+    if(frame.keyframe.cosmetics)playback.lastCosmetics=frame.keyframe.cosmetics;
+    // A cursor recovery starts a fresh relay generation at the current frame.
+    // Sparse metadata may live only in an earlier frame; carry its exact value.
+    const descriptor=playback.sequence===0 && !frame.keyframe.cosmetics?playback.lastCosmetics:undefined;
     this.relay.publishRecorded({ protocolVersion: SPECTATOR_LIVE_PROTOCOL_VERSION,
       matchId: debugSpectateContextId(playback.id), roundNumber: 1, deathmatchSequence: null,
       attemptId: playback.recordingId, generation: playback.generation, sequence: playback.sequence++,
-      elapsedMs: frame.elapsedMs, inputEdges: [], keyframe: frame.keyframe }, nowMs);
+      elapsedMs: frame.elapsedMs,levelId:DEBUG_SPECTATE_LEVEL_ID,...(descriptor?{cosmetics:descriptor}:{}), inputEdges: [], keyframe: frame.keyframe }, nowMs);
     if (playback.cursor === 0 && playback.generation === 1) {
       this.logger.log(`[DebugSpectate] first normalized packet emitted playbackId=${playback.id} elapsedMs=${frame.elapsedMs}`);
     }

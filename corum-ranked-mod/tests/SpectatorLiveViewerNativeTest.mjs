@@ -27,6 +27,7 @@ test('actual viewer decoder recovers timeout only on fresh validated packets and
     const fields = header.slice(header.indexOf('    std::string m_viewMatchId;'), header.indexOf('    geode::async::TaskHolder'));
     const cpp = `
 #include "${join(root, 'src/domain/SpectatorRemotePolicy.hpp')}"
+#include "${join(root, 'src/debug/DebugSpectatePolicy.hpp')}"
 #include "${join(root, 'src/domain/SpectatorInterpolationBuffer.hpp')}"
 #include "${join(root, 'src/domain/SpectatorRestoreTimeline.hpp')}"
 #include <algorithm>
@@ -52,6 +53,8 @@ struct Value {
     Value(Array x):data(std::move(x)){} Value(Object x):data(std::move(x)){}
     bool contains(std::string const& k)const{auto p=std::get_if<Object>(&data);return p && p->contains(k);}
     bool isObject()const{return std::holds_alternative<Object>(data);}
+    std::string dump()const{return "{}";} // SDK diagnostic serialization boundary; real JSON is exercised by Stage 2 harness
+
     Value operator[](std::string const& k)const{
         if(auto p=std::get_if<Object>(&data)){auto i=p->find(k);if(i!=p->end())return i->second;}return {};
     }
@@ -210,7 +213,7 @@ int main(){
     snap.y=4000;snap.upsideDown=false;spider.applyViewerResponse(replaceKeyframe(response(4,100),snap));
     assert(spider.m_reason=="POSE_DISCONTINUITY");
     SpectatorLiveRuntime dual;dual.m_viewMatchId="match";snap.dual=true;
-    dual.applyViewerResponse(replaceKeyframe(response(0,100),snap));assert(dual.m_reason=="DUAL_UNSUPPORTED");
+    dual.applyViewerResponse(replaceKeyframe(response(0,100),snap));assert(dual.m_reason=="DUAL_UNSUPPORTED"); // incomplete legacy Player2 is rejected safely
     SpectatorLiveRuntime legacy;legacy.m_viewMatchId="match";auto v1=response(0,100);v1["protocolVersion"]=1;
     legacy.applyViewerResponse(v1);assert(legacy.m_reason=="UNSUPPORTED_PROTOCOL_VERSION");
     SpectatorLiveRuntime viewer;viewer.m_viewMatchId="match";
@@ -268,6 +271,15 @@ int main(){
     auto debugStale=debug;auto stalePackets=packets;stalePackets[0]["generation"]=0;
     debugStale["packets"]=stalePackets;viewer.applyViewerResponse(debugStale);
     assert(viewer.m_reason=="STALE_GENERATION" && viewer.interpolatedPose() && viewer.interpolatedPose()->x==120);
+    SpectatorLiveRuntime join;join.m_debugContextId="debug-spectate:late";join.m_viewMatchId=join.m_debugContextId;
+    auto history=response(0,120,"late-recording",1);history["stream"]["matchId"]=join.m_viewMatchId;
+    auto initialPackets=history["packets"].asArray().unwrap();initialPackets[0]["matchId"]=join.m_viewMatchId;
+    initialPackets[0]["levelId"]=debug::kDebugSpectateLevelId;history["packets"]=initialPackets;
+    history["restoration"]["available"]=true;history["restoration"]["caughtUp"]=true;
+    history["restoration"]["headSequence"]=0;history["restoration"]["startSequence"]=0;history["restoration"]["levelId"]=debug::kDebugSpectateLevelId;
+    join.applyViewerResponse(history);assert(join.m_restoreTimeline.active()&&join.m_restoreTimeline.queued()==1);
+    assert(join.m_restoreTimeline.frame()->context.levelId==debug::kDebugSpectateLevelId);
+
     auto gap=debug;auto gapPackets=packets;gapPackets[0]["sequence"]=3;
     gap["packets"]=gapPackets;viewer.applyViewerResponse(gap);
     assert(viewer.m_reason=="SEQUENCE_GAP");

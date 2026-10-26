@@ -770,7 +770,8 @@ class CorumRankedLayer final : public CCLayerColor {
             corum::ranked::ui::RankAssetPackManager::get().view().activeVersion);
         if (view.stage == RuntimeStage::AwaitingUpdate) {
             auto const& update = corum::ranked::ui::RankedModUpdateManager::get().view();
-            return fmt::format("mod-update:{}:{}:{}", static_cast<int>(update.state), update.targetVersion, update.error);
+            return fmt::format("mod-update:{}:{}:{}:{}", static_cast<int>(update.state), update.targetVersion, update.error,
+                corum::ranked::ui::RankedModUpdateManager::get().channel());
         }
         if (view.environmentWarning.active) {
             return fmt::format("environment-warning:{}", view.revision);
@@ -1864,7 +1865,11 @@ class CorumRankedLayer final : public CCLayerColor {
         if(m_updateChannelPopup)if(auto popup=m_updateChannelPopup->lock();popup&&popup->getParent())return;
         if(auto* popup=corum::ranked::ui::RankedUpdateChannelPopup::create([weak=WeakRef(this)](std::string channel){
             auto owner=weak.lock();if(!owner||!owner->isRunning()||RankedRuntime::get().view().stage!=RuntimeStage::AwaitingUpdate)return;
-            owner->m_updateChannelPopup.reset();if(corum::ranked::ui::RankedModUpdateManager::get().selectChannel(std::move(channel)))RankedRuntime::get().begin();
+            owner->m_updateChannelPopup.reset();
+            if(corum::ranked::ui::RankedModUpdateManager::get().selectChannel(std::move(channel))){
+                owner->render();
+                RankedRuntime::get().begin();
+            }
         })){m_updateChannelPopup.emplace(popup);popup->show();}
     }
     void onDownloadModUpdate(CCObject*) { corum::ranked::ui::RankedModUpdateManager::get().download(); }

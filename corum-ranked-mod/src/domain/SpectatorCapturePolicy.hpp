@@ -21,11 +21,12 @@ public:
                 std::abs(old.layers[i].scaleX-next.layers[i].scaleX)>.0001f || std::abs(old.layers[i].scaleY-next.layers[i].scaleY)>.0001f ||
                 std::abs(std::remainder(next.layers[i].rotation-old.layers[i].rotation,360.f))>.0001f)m_cameraSnap=true;
         }
+        m_effects|=pose.effects;if(pose.player2)m_secondaryEffects|=pose.player2->effects;
         m_latest = pose;
     }
     void nativeSnap(SpectatorDiscontinuity type, SpectatorGhostPose const& before,
                     SpectatorGhostPose const& after) {
-        if (!finiteSpectatorPose(before) || !finiteSpectatorPose(after)) return;
+        if (!finiteSpectatorBody(before) || !finiteSpectatorBody(after)) return;
         SpectatorSnapEvidence snap{type, before.x, before.y, after.x, after.y};
         if (before.camera && validSpectatorCamera(*before.camera)) snap.fromCamera = before.camera;
         if (!finiteSpectatorSnap(snap)) return;
@@ -39,6 +40,16 @@ public:
             if (!finiteSpectatorSnap(snap)) return;
         }
         m_snap = snap; m_cameraSnap = true;
+    }
+    void secondaryNativeSnap(SpectatorDiscontinuity type,SpectatorGhostPose const& before,SpectatorGhostPose const& after){
+        if(!finiteSpectatorBody(before)||!finiteSpectatorBody(after))return;
+        SpectatorSnapEvidence snap{type,before.x,before.y,after.x,after.y};
+        if(!finiteSpectatorSnap(snap))return;
+        if(m_secondarySnap){if(std::hypot(before.x-m_secondarySnap->toX,before.y-m_secondarySnap->toY)>400)return;
+            snap.fromX=m_secondarySnap->fromX;snap.fromY=m_secondarySnap->fromY;
+            if(m_secondarySnap->type==SpectatorDiscontinuity::Teleport)snap.type=SpectatorDiscontinuity::Teleport;
+            if(!finiteSpectatorSnap(snap))return;}
+        m_secondarySnap=snap;
     }
     bool stableNativeFrame(double nativeTime, bool nativeReady) {
         if (!nativeReady || !m_latest || !std::isfinite(nativeTime) || nativeTime < 0 ||
@@ -55,13 +66,17 @@ public:
     std::optional<SpectatorGhostPose> snapshot() const {
         if (!m_latest) return std::nullopt;
         auto pose = *m_latest; pose.discontinuity = m_snap; pose.cameraSnap = m_cameraSnap;
+        pose.effects|=m_effects;
+        if(pose.player2){pose.player2->discontinuity=m_secondarySnap;pose.player2->effects|=m_secondaryEffects;}
         return pose;
     }
-    void sampled() { m_snap.reset(); m_cameraSnap = false; }
+    void sampled() { m_snap.reset();m_secondarySnap.reset();m_effects=m_secondaryEffects=0; m_cameraSnap = false; }
     void reset() { m_latest.reset(); sampled(); m_nativeTime = 0; m_seeded = false; }
 private:
     std::optional<SpectatorGhostPose> m_latest;
     std::optional<SpectatorSnapEvidence> m_snap;
+    std::optional<SpectatorSnapEvidence> m_secondarySnap;
+    unsigned m_effects=0,m_secondaryEffects=0;
     double m_nativeTime = 0;
     bool m_cameraSnap = false;
     bool m_seeded = false;

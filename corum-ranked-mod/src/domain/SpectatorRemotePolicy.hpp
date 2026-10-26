@@ -1,6 +1,7 @@
 #pragma once
 #include "SpectatorGameplayState.hpp"
 #include "SpectatorCameraTransform.hpp"
+#include "SpectatorCosmetics.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -24,6 +25,16 @@ struct SpectatorSnapEvidence {
     std::optional<SpectatorCameraOrigin> fromCamera = std::nullopt;
 };
 
+// Complete independent Player2 state, atomically attached to Player1's sample.
+struct SpectatorSecondaryPose {
+    float x=0,y=0,rotation=0;
+    SpectatorGameMode mode=SpectatorGameMode::Cube;
+    bool mini=false,upsideDown=false,flipped=false,visible=true,dead=false,finished=false;
+    std::optional<SpectatorSnapEvidence> discontinuity=std::nullopt;
+    // Observed native visual emissions; never input, collision or scoring authority.
+    unsigned effects=0;
+    std::uint64_t segment=0; // local P2 presentation boundary, never a wire identity
+};
 struct SpectatorGhostPose {
     float x = 0.0f;
     float y = 0.0f;
@@ -46,6 +57,12 @@ struct SpectatorGhostPose {
     bool cameraInvalid = false;
     // Capture-only native gameplay clock; packet elapsedMs carries it. Not a wall-clock override on decode.
     std::optional<double> nativeElapsedMs=std::nullopt;
+    std::optional<SpectatorSecondaryPose> player2=std::nullopt;
+    unsigned effects=0;
+    // Shared immutable low-frequency descriptor, not encoded in each pose.
+    std::shared_ptr<SpectatorCosmetics const> cosmetics=nullptr;
+    std::optional<float> progress=std::nullopt;
+
 };
 
 struct SpectatorRemoteContext {
@@ -70,11 +87,26 @@ struct SpectatorRemoteFrame {
     std::uint64_t presentationSegment = 0;
 };
 
-inline bool finiteSpectatorPose(SpectatorGhostPose const& pose) {
+inline SpectatorGhostPose spectatorSecondaryAsPose(SpectatorSecondaryPose const& p){
+    SpectatorGhostPose r;r.x=p.x;r.y=p.y;r.rotation=p.rotation;r.mode=p.mode;
+    r.mini=p.mini;r.upsideDown=p.upsideDown;r.flipped=p.flipped;r.visible=p.visible;
+    r.dead=p.dead;r.finished=p.finished;r.discontinuity=p.discontinuity;r.effects=p.effects;return r;
+}
+inline SpectatorSecondaryPose spectatorAsSecondary(SpectatorGhostPose const& p){
+    return {p.x,p.y,p.rotation,p.mode,p.mini,p.upsideDown,p.flipped,p.visible,p.dead,p.finished,p.discontinuity,p.effects};
+}
+inline bool finiteSpectatorBody(SpectatorGhostPose const& pose) {
     return std::isfinite(pose.x) && std::isfinite(pose.y) &&
         std::isfinite(pose.rotation) && std::abs(pose.x) <= 10'000'000.0f &&
         std::abs(pose.y) <= 10'000'000.0f && std::abs(pose.rotation) <= 100'000.0f &&
         !spectatorModeName(pose.mode).empty() && !(pose.dead && pose.finished);
+}
+
+inline bool finiteSpectatorPose(SpectatorGhostPose const& pose){
+    if(!finiteSpectatorBody(pose)||pose.effects>32767 ||
+       (pose.progress && (!std::isfinite(*pose.progress)||*pose.progress<0||*pose.progress>100)))return false;
+    if(pose.dual!=pose.player2.has_value())return false;
+    return !pose.player2 || (finiteSpectatorBody(spectatorSecondaryAsPose(*pose.player2))&&pose.player2->effects<=32767);
 }
 
 inline bool finiteSpectatorSnap(SpectatorSnapEvidence const& snap) {
@@ -142,7 +174,7 @@ public:
         SpectatorGhostPose const& pose
     ) {
         if (!m_context || *m_context != context || context.attemptId.empty() ||
-            sequence < 0 || sequence < m_sequence || !finiteSpectatorPose(pose) || pose.dual) {
+            sequence < 0 || sequence < m_sequence || !finiteSpectatorPose(pose)) {
             return SpectatorRemotePoseDecision::Rejected;
         }
         // Same sequence is allowed: existing interpolation samples it each frame.

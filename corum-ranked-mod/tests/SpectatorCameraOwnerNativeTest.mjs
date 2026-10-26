@@ -21,7 +21,7 @@ test('actual camera owner hook ends in recorded viewport, drives once, restores 
     try {
         mkdirSync(join(dir,'Geode/binding'),{recursive:true});
         writeFileSync(join(dir,'Geode/Geode.hpp'),read('tests/helpers/SpectatorNativeDouble.hpp'));
-        for(const name of ['PlayLayer','GJBaseGameLayer','PlayerObject','GJGameLevel','GhostTrailEffect','HardStreak'])
+        for(const name of ['PlayLayer','GJBaseGameLayer','PlayerObject','GJGameLevel','GhostTrailEffect','HardStreak','GameManager'])
             writeFileSync(join(dir,`Geode/binding/${name}.hpp`),'#include <Geode/Geode.hpp>\n');
         const methods=['bool spectatorCameraActive()','bool beginSpectatorPresentationFrame()', 'bool beginSpectatorWorldFrame()', 'void reconcileSpectatorWorldDriver()',
             'std::optional<CCPoint> spectatorNativeCameraTarget()','void logSpectatorNativeCamera(char const* stage)',
