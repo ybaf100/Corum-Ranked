@@ -26,6 +26,7 @@ const viewerTest=read('tests/SpectatorLiveViewerNativeTest.mjs');
 const valueModel=viewerTest.slice(viewerTest.indexOf('namespace matjson {'),viewerTest.indexOf('${readFileSync(join(root,'));
 const decoderHarness=`
 #include "${join(root, 'src/domain/SpectatorInterpolationBuffer.hpp')}"
+#include "${join(root, 'src/domain/SpectatorRestoreTimeline.hpp')}"
 #include <chrono>
 #include <limits>
 #include <map>
@@ -39,16 +40,16 @@ ${method(viewerSource,'float poseDistance(')}
 namespace corum::ranked {
 namespace log=geode::log;
 struct RankedRuntime {
- struct Match{int roundNumber=1,deathmatchSequence=0;};struct View{Match match;}data;
+ struct Map{int levelId=123;};struct Match{std::optional<Map>currentMap=Map{};int roundNumber=1,deathmatchSequence=0;};struct View{Match match;}data;
  static RankedRuntime& get(){static RankedRuntime r;return r;}View const& view()const{return data;}
 };
 enum class SpectatorLiveStatus{Idle,Waiting,Live,Fallback};
 struct SpectatorLiveRuntime {
 ${viewerHeader.slice(viewerHeader.indexOf('    std::string m_viewMatchId;'),viewerHeader.indexOf('    geode::async::TaskHolder'))}
- void applyViewerResponse(matjson::Value const&);void setFallback(std::string);
+ void applyViewerResponse(matjson::Value const&);void setFallback(std::string);void noteWorldPartial(std::string);
  std::optional<SpectatorGhostPose> interpolatedPose()const;
 };
-${['void SpectatorLiveRuntime::applyViewerResponse(', 'void SpectatorLiveRuntime::setFallback(', 'std::optional<SpectatorGhostPose> SpectatorLiveRuntime::interpolatedPose()'].map(n=>method(viewerSource,n)).join('\n').replaceAll('std::chrono::steady_clock::now()','testClockNow()')}
+${['void SpectatorLiveRuntime::noteWorldPartial(', 'void SpectatorLiveRuntime::applyViewerResponse(', 'void SpectatorLiveRuntime::setFallback(', 'std::optional<SpectatorGhostPose> SpectatorLiveRuntime::interpolatedPose()'].map(n=>method(viewerSource,n)).join('\n').replaceAll('std::chrono::steady_clock::now()','testClockNow()')}
 }
 `;
 

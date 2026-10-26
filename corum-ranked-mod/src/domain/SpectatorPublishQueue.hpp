@@ -19,7 +19,7 @@ public:
         auto const urgent = pose.discontinuity.has_value() || pose.cameraSnap || pose.dead || pose.finished;
         if (!urgent && elapsedMs < m_nextSampleMs) return false;
         if (m_pending.size() >= 64) return false; // bounded; caller restarts the presentation generation
-        auto const time = std::max<std::int64_t>({0, elapsedMs, m_lastElapsedMs + 1});
+        auto const time = std::max<std::int64_t>({0, elapsedMs, m_lastElapsedMs});
         m_pending.push_back({m_sequence++, time, pose});
         m_lastElapsedMs = time; m_nextSampleMs = time + kSpectatorPublishIntervalMs;
         m_terminal = pose.dead || pose.finished;

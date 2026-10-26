@@ -13,6 +13,14 @@ public:
         if (m_latest && m_latest->camera && pose.camera &&
             std::hypot(pose.camera->x - m_latest->camera->x,
                        pose.camera->y - m_latest->camera->y) > 400.0f) m_cameraSnap = true;
+        if(m_latest && m_latest->camera && m_latest->camera->transform && pose.camera && pose.camera->transform &&
+           !pose.camera->transform->nativeTweening){
+            auto const& old=*m_latest->camera->transform;auto const& next=*pose.camera->transform;
+            if(std::abs(old.zoom-next.zoom)>.0001f || std::abs(std::remainder(next.angle-old.angle,360.f))>.0001f)m_cameraSnap=true;
+            for(std::size_t i=0;i<old.layers.size();++i)if(old.layers[i].present!=next.layers[i].present ||
+                std::abs(old.layers[i].scaleX-next.layers[i].scaleX)>.0001f || std::abs(old.layers[i].scaleY-next.layers[i].scaleY)>.0001f ||
+                std::abs(std::remainder(next.layers[i].rotation-old.layers[i].rotation,360.f))>.0001f)m_cameraSnap=true;
+        }
         m_latest = pose;
     }
     void nativeSnap(SpectatorDiscontinuity type, SpectatorGhostPose const& before,

@@ -37,6 +37,7 @@ export class SpectatorLiveController {
     @Query("attemptId") attemptId?: string,
     @Query("generation") generation?: string,
     @Query("afterSequence") afterSequence?: string,
+    @Query("worldHistory") worldHistory?: string,
   ) {
     return this.spectatorLive.subscribe(
       matchId,
@@ -46,6 +47,7 @@ export class SpectatorLiveController {
       attemptId,
       generation,
       afterSequence,
+      worldHistory,
     );
   }
 }

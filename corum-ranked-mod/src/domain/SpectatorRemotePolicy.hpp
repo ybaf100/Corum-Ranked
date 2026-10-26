@@ -1,5 +1,6 @@
 #pragma once
 #include "SpectatorGameplayState.hpp"
+#include "SpectatorCameraTransform.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -8,7 +9,7 @@
 
 namespace corum::ranked {
 
-struct SpectatorCameraOrigin { float x = 0, y = 0; };
+struct SpectatorCameraOrigin { float x = 0, y = 0; std::optional<SpectatorCameraTransform> transform=std::nullopt; };
 inline bool validSpectatorCamera(SpectatorCameraOrigin camera) {
     return std::isfinite(camera.x) && std::isfinite(camera.y) &&
         std::abs(camera.x) <= 10'000'000.0f && std::abs(camera.y) <= 10'000'000.0f;
@@ -43,6 +44,8 @@ struct SpectatorGhostPose {
     // Decoder-only distinction: malformed camera holds the prior viewport;
     // an absent camera may use the scoped native remote-target fallback.
     bool cameraInvalid = false;
+    // Capture-only native gameplay clock; packet elapsedMs carries it. Not a wall-clock override on decode.
+    std::optional<double> nativeElapsedMs=std::nullopt;
 };
 
 struct SpectatorRemoteContext {

@@ -807,8 +807,10 @@ public:
 
     corum::ranked::SpectatorGhostPose observedSpectatorPose(bool dead = false, bool finished = false) {
         auto pose = corum::ranked::captureSpectatorPose(m_player1, dead, finished, m_gameState.m_isDualMode);
+        if(std::isfinite(m_attemptTime) && m_attemptTime>=0)pose.nativeElapsedMs=m_attemptTime*1000.0;
         auto const camera = m_gameState.m_cameraPosition;
         corum::ranked::SpectatorCameraOrigin origin{camera.x, camera.y};
+        origin.transform=corum::ranked::captureSpectatorCameraTransform(this);
         if (corum::ranked::validSpectatorCamera(origin)) pose.camera = origin;
         m_fields->spectatorCapture.observe(pose);
         return m_fields->spectatorCapture.snapshot().value_or(pose);
@@ -892,6 +894,10 @@ public:
         // presentation. Waiting never follows the reset dummy or teleports to 0.
         m_fields->spectatorCamera.attach(this);
         m_fields->spectatorScenePrepared = true;
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+        if(!m_fields->debugPlaybackScene)
+#endif
+            corum::ranked::SpectatorLiveRuntime::get().requestSceneRestore();
         // A viewer must not inherit the local player's already-fired triggers.
         // This is one no-save dummy reset after authority + End FIFO, never a new Attempt.
         m_fields->localSafety.resetDummy();
@@ -2551,6 +2557,10 @@ public:
             setHudText(m_fields->spectatorProgressLabel,
                 rendered && rendered->pose && rendered->pose->finished ? "CLEARED" :
                 rendered && rendered->pose && rendered->pose->dead ? "OPPONENT DOWN" :
+                status == corum::ranked::SpectatorLiveStatus::Syncing ? "SYNCING..." :
+                status == corum::ranked::SpectatorLiveStatus::Reconnecting ? "RECONNECTING..." :
+                status == corum::ranked::SpectatorLiveStatus::PartialSync ? "PARTIAL SYNC" :
+                status == corum::ranked::SpectatorLiveStatus::Disconnected ? "DISCONNECTED" :
                 status == corum::ranked::SpectatorLiveStatus::Buffering ? "BUFFERING..." :
                 status == corum::ranked::SpectatorLiveStatus::Fallback ? "POLLING..." :
                 m_fields->spectatorCamera.state() == corum::ranked::SpectatorCameraState::Waiting ?
@@ -2674,16 +2684,32 @@ class $modify(CorumRankedSpectatorCameraHook, GJBaseGameLayer) {
         if (owner && owner->blockEntryGameplayUpdate()) return;
         if (owner && owner->prepareSpectatorScene() && owner->spectatorCameraActive()) {
             if (!owner->beginSpectatorWorldFrame()) return;
+            auto& live=corum::ranked::SpectatorLiveRuntime::get();
+            auto restorationFrames=live.takeRestorationFrames();
+            auto const restoring=!restorationFrames.empty();
+            auto const steps=restoring?restorationFrames.size():std::size_t(1);
+            for(std::size_t step=0;step<steps;++step){
+            auto const stepStarted=std::chrono::steady_clock::now();
+            if(restoring){
+                auto const& frame=restorationFrames[step];
+                if(!owner->spectatorCameraActive() || !corum::ranked::spectatorFrameMatchesScene(owner->m_fields->sceneContext,frame.context))break;
+                owner->m_fields->spectatorRenderedFrame=frame;
+                owner->m_fields->spectatorWorldPoseApplied=owner->m_fields->spectatorWorldDriver.apply(owner,true,frame);
+                owner->m_fields->remotePlayer.update(owner,true,frame);
+            }
             auto const nativeDelta=owner->m_fields->spectatorWorldDriver.takeNativeDeltaSeconds();
+            if(owner->m_fields->spectatorWorldDriver.partialHistory())live.noteWorldPartial("NATIVE_HISTORY_GAP");
             if(!owner->m_fields->spectatorWorldPoseApplied || !nativeDelta){
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
                 owner->m_fields->spectatorNativeProbe.note(corum::ranked::SpectatorNativePath::WorldHeld);
                 owner->logSpectatorNativeProbe();
 #endif
+                if(restoring){live.restorationApplied(restorationFrames[step],owner->m_fields->spectatorWorldPoseApplied,0);continue;}
                 owner->m_fields->spectatorCameraFrameNumber=CCDirector::sharedDirector()->getTotalFrames();
                 owner->driveSpectatorCamera();return;
             }
             owner->m_fields->spectatorCollisionChecked=false;
+            auto const worldClockBefore=m_gameState.m_levelTime;
             {
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
                 corum::ranked::ScopedSpectatorNativeProbe nativeProbe(owner->m_fields->spectatorNativeProbe,
@@ -2694,9 +2720,6 @@ class $modify(CorumRankedSpectatorCameraHook, GJBaseGameLayer) {
                 // Only the world call borrows unpaused state. Dummy physics/input
                 // remain frozen, and the native Pause UI keeps its original flag.
                 ScopedRealGameplayEnd unpaused(owner->m_isPaused,false);
-#if defined(CORUM_RANKED_DEBUG_SPECTATE)
-                auto const worldClockBefore=m_gameState.m_levelTime;
-#endif
                 GJBaseGameLayer::update(*nativeDelta);
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
                 owner->m_fields->spectatorNativeProbe.note(m_gameState.m_levelTime>worldClockBefore?corum::ranked::SpectatorNativePath::ClockAdvanced:corum::ranked::SpectatorNativePath::ClockHeld);
@@ -2706,8 +2729,11 @@ class $modify(CorumRankedSpectatorCameraHook, GJBaseGameLayer) {
                 owner->reconcileSpectatorWorldDriver();
                 // Some native paths omit updateCamera. Its hook still owns the
                 // one calculation, with correction deferred until world exits.
-                if (owner->m_fields->spectatorCameraFrameNumber != CCDirector::sharedDirector()->getTotalFrames())
+                if (step+1==steps && owner->m_fields->spectatorCameraFrameNumber != CCDirector::sharedDirector()->getTotalFrames())
                     updateCamera(*nativeDelta);
+            }
+            if(restoring)live.restorationApplied(restorationFrames[step],m_gameState.m_levelTime>worldClockBefore,
+                std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-stepStarted).count());
             }
             owner->driveSpectatorCamera();
             owner->logSpectatorNativeCamera("after spectator correction");

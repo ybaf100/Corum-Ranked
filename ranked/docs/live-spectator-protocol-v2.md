@@ -1,5 +1,9 @@
 # Live Spectator — protocol v2 (beta32)
 
+Stage 2 optional camera transforms and bounded `worldHistory=1` pagination are
+specified in [the beta.105 report](solo-spectator-stage2-beta105.md). Protocol and
+Debug recording version remain 2; old packets/readers retain their existing path.
+
 Protocol introduced with beta.32; the current client/server gate is defined in
 `ranked/apps/server/src/session/client-version.ts`. The beta.103 Stage-1 native
 world/authority implementation and verification limits are documented in

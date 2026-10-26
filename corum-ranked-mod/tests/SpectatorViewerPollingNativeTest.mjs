@@ -22,6 +22,7 @@ test('actual HTTP callback chooses post-decode adaptive gaps, keeps one request 
     const cpp = `
 #include "${join(root, 'src/domain/SpectatorInterpolationBuffer.hpp')}"
 #include "${join(root, 'src/domain/SpectatorViewerPollPolicy.hpp')}"
+#include "${join(root, 'src/domain/SpectatorRestoreTimeline.hpp')}"
 #include <cassert>
 #include <chrono>
 #include <functional>

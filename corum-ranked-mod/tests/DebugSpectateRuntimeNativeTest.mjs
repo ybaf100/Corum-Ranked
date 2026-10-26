@@ -414,7 +414,7 @@ test('actual Debug client builds HTTP requests, drains terminal/ACK retries, and
     // persistence/restart/playback timing is exercised by the server suite.
     const viewerFixture = read('tests/SpectatorLiveViewerNativeTest.mjs');
     const model = viewerFixture.slice(viewerFixture.indexOf('namespace matjson {'), viewerFixture.indexOf('${readFileSync(join(root,'))
-        .replace('    bool isObject()', '    static Value array(){return Value(Array{});} void push(Value x){std::get<Array>(data).push_back(std::move(x));}\n    bool isObject()');
+;
     const header = read('src/debug/DebugSpectateRuntime.hpp').replace(/^#include.*$|^#pragma once$/gm, '')
         .replace('private:', 'public: // Native-harness state fault injection only.');
     const source = read('src/debug/DebugSpectateRuntime.cpp').replace(/^#include.*$/gm, '');

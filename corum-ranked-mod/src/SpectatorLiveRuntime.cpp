@@ -78,8 +78,14 @@ SpectatorLiveRuntime& SpectatorLiveRuntime::get() {
 }
 
 SpectatorLiveStatus SpectatorLiveRuntime::status() const {
-    return m_status == SpectatorLiveStatus::Live && m_sampleBuffer.buffering()
-        ? SpectatorLiveStatus::Buffering : m_status;
+    if(m_disconnected)return SpectatorLiveStatus::Disconnected;
+    if(m_consecutiveViewerErrors>0)return SpectatorLiveStatus::Reconnecting;
+    if(m_forceRestoreRequest || m_restoreTimeline.active())return SpectatorLiveStatus::Syncing;
+    if(m_sampleBuffer.terminalRendered() && m_lastAcceptedPose && m_lastAcceptedPose->finished)return SpectatorLiveStatus::Cleared;
+    if(m_status==SpectatorLiveStatus::Waiting)return SpectatorLiveStatus::Waiting;
+    if(m_status==SpectatorLiveStatus::Live && m_sampleBuffer.buffering())return SpectatorLiveStatus::Buffering;
+    if(m_partialSync && m_lastAcceptedPose)return SpectatorLiveStatus::PartialSync;
+    return m_status;
 }
 
 std::string const& SpectatorLiveRuntime::reason() const {
@@ -104,10 +110,15 @@ void SpectatorLiveRuntime::resetPublisher() {
     m_publisherPaused = false; m_publisherPausedAt = {}; m_publisherPausedMs = 0;
     m_publishStartedAt = {};
     m_nextPublishAt = {};
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+    m_nextCameraMetricAt={};m_cameraMetricCount=0;
+#endif
 }
 
 void SpectatorLiveRuntime::resetViewer() {
     m_viewOpponentPaused = false;
+    m_restoreTimeline.reset();m_forceRestoreRequest=m_partialSync=m_disconnected=false;m_heldPresentation.reset();m_reconnections=m_restoreFailures=0;
+    m_worldRestoreReason.clear();m_restoreStepCostMs=2;
     m_viewerPollGapMs = 20;
     ++m_viewRequestGeneration;
     ++m_viewPresentationEpoch;
@@ -133,6 +144,7 @@ void SpectatorLiveRuntime::resetViewer() {
 }
 
 void SpectatorLiveRuntime::reset() {
+    m_publishBudgetAttemptId.clear();m_attemptPublishFailures=0;
     ++m_terminalRequestGeneration;
     m_terminalPending = m_terminalBusy = false;
     m_deferredTerminalPose.reset(); m_deferredMatchId.clear();
@@ -158,8 +170,11 @@ void SpectatorLiveRuntime::startPublisherGeneration(
 ) {
     m_publishMatchId = matchId;
     m_publishAttemptId = attemptId;
+    auto const budget=matchId+":"+attemptId;
+    if(budget!=m_publishBudgetAttemptId){m_publishBudgetAttemptId=budget;m_attemptPublishFailures=0;}
     auto const& match = RankedRuntime::get().view().match;
     m_publishRound = match.roundNumber;
+    m_publishLevel=match.currentMap?match.currentMap->levelId:0;
     // A server start certificate can release this Attempt before the next state
     // poll changes DEATHMATCH_ENTERING to PLAYING. Context is an exact identity,
     // not a presentation phase; retain it across that delayed state projection.
@@ -200,6 +215,7 @@ bool SpectatorLiveRuntime::tickPublisher(SpectatorGhostPose const& pose, bool pr
         !attemptId.empty() &&
         finitePose(pose);
     if (!eligible) {
+        if(!match.spectatorLiveEnabled){m_publishBudgetAttemptId.clear();m_attemptPublishFailures=0;}
         if (!m_terminalPending) resetPublisher();
         return false;
     }
@@ -208,11 +224,22 @@ bool SpectatorLiveRuntime::tickPublisher(SpectatorGhostPose const& pose, bool pr
         startPublisherGeneration(match.matchId, attemptId);
     }
     if (attemptId == m_terminalPublishAttemptId) return false;
+    if(m_attemptPublishFailures>=12)return false;
     auto const now = std::chrono::steady_clock::now();
     if (m_publishQueue.full()) {
-        resetPublisher(); startPublisherGeneration(match.matchId, attemptId);
+        if(!m_publishBusy && now>=m_nextPublishAt)publish(pose);
+        return false; // bounded backpressure; never create an overlapping POST or rewind this Attempt clock
     }
-    auto const captured = !m_publisherPaused && m_publishQueue.capture(publisherElapsedMs(), pose);
+    auto const elapsed=pose.nativeElapsedMs && std::isfinite(*pose.nativeElapsedMs) && *pose.nativeElapsedMs>=0 && *pose.nativeElapsedMs<=86400000.0
+        ? static_cast<std::int64_t>(*pose.nativeElapsedMs):publisherElapsedMs();
+    auto const captured = !m_publisherPaused && m_publishQueue.capture(elapsed, pose);
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+    if(captured && pose.camera && pose.camera->transform && m_cameraMetricCount<120 && now>=m_nextCameraMetricAt){
+        m_nextCameraMetricAt=now+std::chrono::seconds(1);++m_cameraMetricCount;auto const& c=*pose.camera;auto const& t=*c.transform;
+        log::info("[SpectatorCameraPublisher] sequence={} publisherMs={} cameraX={} cameraY={} zoom={} angle={} scaleX={} scaleY={} layerRotation={}",
+            m_publishQueue.nextSequence()-1,elapsed,c.x,c.y,t.zoom,t.angle,t.layers[0].scaleX,t.layers[0].scaleY,t.layers[0].rotation);
+    }
+#endif
     m_publishSequence = static_cast<std::uint64_t>(m_publishQueue.nextSequence());
     if (!m_publishBusy && now >= m_nextPublishAt) publish(pose);
     // Consumed native evidence is tied to capture, never to HTTP request/ACK.
@@ -250,10 +277,12 @@ void SpectatorLiveRuntime::publishTerminal(SpectatorGhostPose const& pose, bool 
     // preserve contiguous sequence delivery. It bypasses the normal 50ms delay.
     m_terminalBody["sequence"] = static_cast<std::int64_t>(m_publishQueue.nextSequence());
     m_terminalBody["elapsedMs"] = static_cast<std::int64_t>(std::max<std::int64_t>(0,
-        publisherElapsedMs()));
+        pose.nativeElapsedMs && std::isfinite(*pose.nativeElapsedMs) && *pose.nativeElapsedMs>=0 && *pose.nativeElapsedMs<=86400000.0
+            ? static_cast<std::int64_t>(*pose.nativeElapsedMs):publisherElapsedMs()));
     m_terminalBody["elapsedMs"] = std::max<std::int64_t>(
-        m_terminalBody["elapsedMs"].asInt().unwrapOr(0), m_publishQueue.lastElapsedMs() + 1);
+        m_terminalBody["elapsedMs"].asInt().unwrapOr(0), m_publishQueue.lastElapsedMs());
     m_terminalBody["keyframe"] = encodeSpectatorPose(pose);
+    m_terminalBody["levelId"]=m_publishLevel;
     m_terminalSessionToken = ranked.spectatorLiveSessionToken(); m_terminalMatchToken = ranked.spectatorLiveMatchToken();
     m_terminalPublishAttemptId = attempt;
     m_terminalDeadline = std::chrono::steady_clock::now() + kPacketTimeout;
@@ -317,6 +346,7 @@ void SpectatorLiveRuntime::publish(SpectatorGhostPose const&) {
             packet["generation"] = static_cast<std::int64_t>(m_publishGeneration);
             packet["sequence"] = sample.sequence; packet["elapsedMs"] = sample.elapsedMs;
             packet["keyframe"] = encodeSpectatorPose(sample.pose);
+            packet["levelId"]=m_publishLevel;
             packets.push(packet);
         }
         m_publishBatchBody = matjson::Value(); m_publishBatchBody["packets"] = packets;
@@ -334,18 +364,20 @@ void SpectatorLiveRuntime::publish(SpectatorGhostPose const&) {
                 attemptId != m_publishAttemptId) return;
             m_publishBusy = false;
             if (successful(response)) {
+                m_attemptPublishFailures=0;
                 m_publishQueue.acknowledge(lastSequence);
                 m_publishBatchBody = {}; m_publishBatchLastSequence = -1;
                 m_nextPublishAt = std::chrono::steady_clock::now(); // no extra ACK-bound 50ms wait
                 return;
             }
-            m_nextPublishAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(100);
+            ++m_attemptPublishFailures;
+            if(response.code()==401 || response.code()==403)m_attemptPublishFailures=12;
+            m_nextPublishAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(
+                std::min(1000,100*(1<<std::min(3,static_cast<int>(m_attemptPublishFailures)-1))));
             if (response.code() == 409) {
                 ++m_publishGeneration; if (!m_publishGeneration) m_publishGeneration = 1;
                 m_publishQueue = {}; m_publishBatchBody = {}; m_publishBatchLastSequence = -1;
-                m_publishSequence = 0; m_publishStartedAt = std::chrono::steady_clock::now();
-                m_publisherPausedMs = 0;
-                if (m_publisherPaused) m_publisherPausedAt = m_publishStartedAt;
+                m_publishSequence = 0; // The Attempt's publisher clock never rewinds on reconnect.
                 if (m_terminalPending) {
                     m_terminalBody["generation"] = static_cast<std::int64_t>(m_publishGeneration);
                     m_terminalBody["sequence"] = 0;
@@ -400,7 +432,7 @@ void SpectatorLiveRuntime::tickViewer() {
     )) {
         setFallback("STREAM_TIMEOUT");
     }
-    if (m_viewBusy || now < m_nextViewerPollAt) return;
+    if (m_disconnected || m_viewBusy || now < m_nextViewerPollAt) return;
     pollViewer();
 }
 
@@ -429,9 +461,13 @@ void SpectatorLiveRuntime::pollViewer() {
         path = m_debugPath + fmt::format("?protocolVersion={}", kProtocolVersion);
     }
 #endif
-    if (!m_viewAttemptId.empty()) path += "&attemptId=" + m_viewAttemptId;
-    if (m_viewGeneration > 0) path += fmt::format("&generation={}", m_viewGeneration);
-    if (m_lastViewSequence >= 0) path += fmt::format("&afterSequence={}", m_lastViewSequence);
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+    if(m_debugContextId.empty())
+#endif
+        path+="&worldHistory=1";
+    if (!m_forceRestoreRequest && !m_viewAttemptId.empty()) path += "&attemptId=" + m_viewAttemptId;
+    if (!m_forceRestoreRequest && m_viewGeneration > 0) path += fmt::format("&generation={}", m_viewGeneration);
+    if (!m_forceRestoreRequest && m_lastViewSequence >= 0) path += fmt::format("&afterSequence={}", m_lastViewSequence);
 
     auto const requestGeneration = ++m_viewRequestGeneration;
     auto const contextKey = m_viewContextKey;
@@ -468,7 +504,8 @@ void SpectatorLiveRuntime::pollViewer() {
             }
             if (!successful(response)) {
                 ++m_consecutiveViewerErrors;
-                if (m_consecutiveViewerErrors >= 3) setFallback("NETWORK_ERROR");
+                m_reason="NETWORK_ERROR";
+                if(m_consecutiveViewerErrors>=12){m_disconnected=true;m_reason="NETWORK_RETRY_EXHAUSTED";return;}
                 m_viewerPollGapMs = spectatorViewerPollGapMs(false, true, false, false, 0, 0, 0, m_consecutiveViewerErrors);
                 m_nextViewerPollAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(m_viewerPollGapMs);
                 return;
@@ -481,7 +518,7 @@ void SpectatorLiveRuntime::pollViewer() {
             applyViewerResponse(root);
             m_viewerPollGapMs = spectatorViewerPollGapMs(
                 m_status == SpectatorLiveStatus::Live, m_status == SpectatorLiveStatus::Fallback,
-                m_sampleBuffer.starving(), m_sampleBuffer.terminalRendered(),
+                m_sampleBuffer.starving(), m_sampleBuffer.terminalRendered() || m_viewOpponentPaused,
                 m_sampleBuffer.latestTimeMs() - m_sampleBuffer.renderTimeMs(),
                 m_sampleBuffer.delayMs(), m_lastViewerRttMs, 0);
             m_nextViewerPollAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(m_viewerPollGapMs);
@@ -528,9 +565,6 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
         m_reason = reason;
         // A transient empty relay response hides presentation without allocating
         // a new Remote Player. Only an explicit stream/context reset changes epoch.
-        m_sampleBuffer.clear();
-        m_lastAcceptedPose.reset();
-        m_lastPacketAt = {};
         return;
     }
 
@@ -557,6 +591,21 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
         setFallback("STREAM_CONTEXT_MISMATCH");
         return;
     }
+    auto const restoration=root["restoration"];
+    auto const hasRestoration=restoration.isObject();
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+    if(m_debugContextId.empty() && !hasRestoration)m_partialSync=true;
+#else
+    if(!hasRestoration)m_partialSync=true;
+#endif
+    auto const expectedLevel=authoritativeMatch.currentMap?authoritativeMatch.currentMap->levelId:0;
+    auto const historyLevel=restoration["levelId"].asInt().unwrapOr(0);
+    if(hasRestoration && historyLevel>0 && historyLevel!=expectedLevel){setFallback("HISTORY_LEVEL_MISMATCH");return;}
+    if(hasRestoration){
+        auto const head=restoration["headSequence"].asInt().unwrapOr(-1),start=restoration["startSequence"].asInt().unwrapOr(-1);
+        if(restoration["available"].asBool().isErr() || restoration["caughtUp"].asBool().isErr() || start<0 || head<start ||
+           (restoration["available"].asBool().unwrapOr(false) && (start!=0 || historyLevel<=0))){setFallback("INVALID_RESTORE_DESCRIPTOR");return;}
+    }
     auto const resetStream = root["reset"].asBool().unwrapOr(false);
     auto const streamChanged = attemptId != m_viewAttemptId || generation != m_viewGeneration;
     if (attemptId == m_viewAttemptId && generation < m_viewGeneration) {
@@ -571,6 +620,15 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
         m_viewAttemptId = attemptId;
         m_viewGeneration = generation;
         m_lastViewSequence = -1;
+        m_restoreTimeline.reset();m_heldPresentation.reset();
+        m_worldRestoreReason.clear();
+        if(hasRestoration){
+            auto const available=restoration["available"].asBool().unwrapOr(false) && historyLevel==expectedLevel && expectedLevel>0;
+            m_restoreTimeline.begin({m_viewMatchId,expectedRound,expectedDeathmatch,expectedLevel,attemptId,generation,m_viewPresentationEpoch},available);
+            // Native replay reconstructs supported position/time-driven paths,
+            // but does not prove pointer-bearing engine state/input/RNG parity.
+            m_partialSync=!available || restoration["headSequence"].asInt().unwrapOr(0)>0;
+        }
         m_lastPublisherElapsedMs = -1;
         m_sampleBuffer.clear();
         m_lastAcceptedPose.reset();
@@ -584,6 +642,7 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
             m_lastViewerRttMs
         );
     }
+    m_forceRestoreRequest=false;
     m_opponentName = stream["opponentName"].asString().unwrapOr("Opponent");
 
     auto const packets = root["packets"].asArray();
@@ -591,6 +650,7 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
         setFallback("INVALID_PACKET_ARRAY");
         return;
     }
+    if(hasRestoration && restoration["available"].asBool().unwrapOr(false) && packets.unwrap().size()>64){setFallback("RESTORE_PAGE_TOO_LARGE");return;}
     auto const responseNow = std::chrono::steady_clock::now();
     auto const presentationNowMs = std::chrono::duration<double, std::milli>(responseNow.time_since_epoch()).count();
     // A reset clears buffer-local state, including its pause flag.
@@ -626,10 +686,12 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
             setFallback("STALE_GENERATION");
             return;
         }
+        auto const packetLevel=packet["levelId"].asInt().unwrapOr(0);
+        if(packetLevel>0 && packetLevel!=expectedLevel){setFallback("PACKET_LEVEL_MISMATCH");return;}
         auto const sequence = packet["sequence"].asInt().unwrapOr(-1);
         if (sequence <= m_lastViewSequence) continue;
         if (m_viewTerminalAttemptId == attemptId) {
-            setFallback("TERMINAL_STREAM_CANNOT_RESUME"); return;
+            m_reason="TERMINAL_STREAM_CANNOT_RESUME"; return;
         }
         if (m_lastViewSequence >= 0 && sequence != m_lastViewSequence + 1) {
             setFallback("SEQUENCE_GAP");
@@ -647,6 +709,7 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
         auto const decoded = decodeSpectatorPose(keyframe);
         if (!decoded) { setFallback("INVALID_POSE"); return; }
         auto const pose = *decoded;
+        if(hasRestoration && (!pose.camera || !pose.camera->transform))noteWorldPartial("CAMERA_TRANSFORM_UNAVAILABLE");
         if (pose.dual) { setFallback("DUAL_UNSUPPORTED"); return; }
         if (m_lastAcceptedPose && (m_lastAcceptedPose->dead || m_lastAcceptedPose->finished)) {
             setFallback("TERMINAL_STREAM_CANNOT_RESUME"); return;
@@ -693,7 +756,10 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
 #endif
         m_lastAcceptedPose = pose;
         if (pose.dead || pose.finished) m_viewTerminalAttemptId = attemptId;
-        if (!m_sampleBuffer.push({sequence, static_cast<double>(elapsedMs), pose}, snap, presentationNowMs)) {
+        auto const stored=m_restoreTimeline.active()
+            ? m_restoreTimeline.push(sequence,static_cast<double>(elapsedMs),pose,snap)
+            : m_sampleBuffer.push({sequence, static_cast<double>(elapsedMs), pose}, snap, presentationNowMs);
+        if (!stored) {
             setFallback("PRESENTATION_BUFFER_OVERFLOW"); return;
         }
         m_lastPublisherElapsedMs = elapsedMs;
@@ -702,6 +768,14 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
         publisherElapsedMs = packet["elapsedMs"].asInt().unwrapOr(publisherElapsedMs);
         ++appliedPackets;
     }
+    if(hasRestoration){
+        auto const head=restoration["headSequence"].asInt().unwrapOr(-1);
+        if(m_lastViewSequence>head || restoration["caughtUp"].asBool().unwrapOr(false)!=(m_lastViewSequence>=head)){
+            setFallback("RESTORE_CURSOR_MISMATCH");return;
+        }
+        if(m_restoreTimeline.active())m_restoreTimeline.networkCaughtUp(restoration["caughtUp"].asBool().unwrapOr(false));
+    }
+    if(appliedPackets>0)m_restoreFailures=0;
     if (appliedPackets > 0 && (streamChanged || resetStream || m_status != SpectatorLiveStatus::Live)) {
         log::debug(
             "[SpectatorLive] applied match={} context={} attempt={} generation={} packets={} lastSequence={} publisherElapsedMs={} rttMs={} maxCorrection={}",
@@ -716,16 +790,19 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
             largestCorrection
         );
     }
-    if (!m_lastAcceptedPose && m_status == SpectatorLiveStatus::Fallback && !streamChanged && !resetStream) return;
+    if (appliedPackets==0 && m_status == SpectatorLiveStatus::Fallback && !streamChanged && !resetStream) return;
     m_status = m_lastAcceptedPose ? SpectatorLiveStatus::Live : SpectatorLiveStatus::Waiting;
-    m_reason = m_lastAcceptedPose ? std::string() : "STREAM_BUFFER_EMPTY";
+    m_reason = m_partialSync ? (!m_worldRestoreReason.empty()?m_worldRestoreReason:restoration["reason"].asString().unwrapOr("NATIVE_HISTORY_REPLAY_LIMITED")) :
+        m_lastAcceptedPose ? std::string() : "STREAM_BUFFER_EMPTY";
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
-    if (!m_debugContextId.empty() && responseNow >= m_nextBufferMetricAt) {
+    if (responseNow >= m_nextBufferMetricAt) {
         m_nextBufferMetricAt = responseNow + std::chrono::seconds(1);
         log::info("[DebugSpectate] buffer samples={} span={}ms delay={}ms rtt={}ms arrival={}ms packetsPerResponse={} renderPublisherElapsedMs={} latestPublisherElapsedMs={} starvation={} pollGapMs={}",
             m_sampleBuffer.size(), m_sampleBuffer.spanMs(), m_sampleBuffer.delayMs(), m_sampleBuffer.averageRttMs(),
             m_sampleBuffer.averageArrivalMs(), m_sampleBuffer.packetsPerResponse(), m_sampleBuffer.renderTimeMs(),
             m_sampleBuffer.latestTimeMs(), m_sampleBuffer.starvations(), m_viewerPollGapMs);
+        log::info("[SpectatorRestore] attempt={} generation={} epoch={} sequence={} queued={} applied={} syncing={} partial={} reconnects={} reason={}",
+            m_viewAttemptId,m_viewGeneration,m_viewPresentationEpoch,m_lastViewSequence,m_restoreTimeline.queued(),m_restoreTimeline.appliedCount(),m_restoreTimeline.active(),m_partialSync,m_reconnections,m_reason);
     }
 #endif
 }
@@ -745,8 +822,35 @@ void SpectatorLiveRuntime::setFallback(std::string reason) {
     }
     m_status = SpectatorLiveStatus::Fallback;
     m_reason = std::move(reason);
-    m_sampleBuffer.clear();
-    m_lastAcceptedPose.reset();
+    // Hold the last validated presentation. No extrapolation or origin reset.
+    if(!m_forceRestoreRequest)++m_reconnections;
+    m_forceRestoreRequest=true;
+    if(++m_restoreFailures>=12 || m_reason=="DUAL_UNSUPPORTED" || m_reason=="UNSUPPORTED_PROTOCOL_VERSION")m_disconnected=true;
+}
+
+void SpectatorLiveRuntime::requestSceneRestore(){
+    m_disconnected=false;m_consecutiveViewerErrors=0;m_restoreFailures=0;
+    m_reason="SCENE_RESTORE_REQUESTED";
+    m_forceRestoreRequest=true;m_nextViewerPollAt={};
+}
+std::vector<SpectatorRemoteFrame> SpectatorLiveRuntime::takeRestorationFrames(){
+    if(m_forceRestoreRequest || !presentationFrame())return {};
+    return m_restoreTimeline.takeBatch(static_cast<std::size_t>(std::clamp(2.0/std::max(.05,m_restoreStepCostMs),1.0,8.0)));
+}
+void SpectatorLiveRuntime::restorationApplied(SpectatorRemoteFrame const& frame,bool clockAdvanced,double workMs){
+    if(std::isfinite(workMs) && workMs>0)m_restoreStepCostMs=m_restoreStepCostMs*.75+workMs*.25;
+    auto const wasActive=m_restoreTimeline.active();
+    if(!m_restoreTimeline.applied(frame))return;
+    if(!clockAdvanced)noteWorldPartial("NATIVE_WORLD_CLOCK_HELD");
+    if(wasActive && !m_restoreTimeline.active()){
+        auto const now=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count();
+        m_sampleBuffer.clear();
+        if(frame.pose)m_sampleBuffer.push({frame.sequence,frame.publisherElapsedMs,*frame.pose,frame.presentationSegment},false,now);
+    }
+}
+
+void SpectatorLiveRuntime::noteWorldPartial(std::string reason){
+    m_partialSync=true;m_worldRestoreReason=std::move(reason);m_reason=m_worldRestoreReason;
 }
 
 std::optional<SpectatorGhostPose> SpectatorLiveRuntime::interpolatedPose() const {
@@ -786,7 +890,11 @@ std::optional<SpectatorRemoteFrame> SpectatorLiveRuntime::presentationFrame() co
          m_status != SpectatorLiveStatus::Fallback)) {
         return std::nullopt;
     }
-    return SpectatorRemoteFrame {
+    if(m_forceRestoreRequest)return m_heldPresentation;
+    if(m_restoreTimeline.active())return m_restoreTimeline.frame();
+    if(!sample && m_heldPresentation && m_heldPresentation->context.attemptId==m_viewAttemptId &&
+       m_heldPresentation->context.generation==m_viewGeneration && m_heldPresentation->context.epoch==m_viewPresentationEpoch)return m_heldPresentation;
+    auto frame=SpectatorRemoteFrame {
         .context = {
             .matchId = m_viewMatchId,
             .roundNumber = match.roundNumber,
@@ -801,6 +909,8 @@ std::optional<SpectatorRemoteFrame> SpectatorLiveRuntime::presentationFrame() co
         .publisherElapsedMs = sample ? sample->publisherElapsedMs : 0,
         .presentationSegment = sample ? sample->segment : 0,
     };
+    if(frame.pose)m_heldPresentation=frame;
+    return frame;
 }
 
 } // namespace corum::ranked

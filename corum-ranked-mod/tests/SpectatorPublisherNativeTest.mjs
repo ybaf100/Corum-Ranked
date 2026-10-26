@@ -17,7 +17,7 @@ const method = name => {
 test('actual publisher captures during 110ms ACKs, sends immutable ordered batches and drains terminal exactly once', () => {
     const viewer = read('tests/SpectatorLiveViewerNativeTest.mjs');
     const model = viewer.slice(viewer.indexOf('namespace matjson {'), viewer.indexOf('${readFileSync(join(root,'))
-        .replace('Value()=default;', 'Value()=default; static Value array(){return Value(Array{});} void push(Value v){std::get<Array>(data).push_back(std::move(v));}')
+
         // Exercise the distinct JSON/chrono 64-bit integer types seen by the
         // real iOS SDK; an untyped std::max used to compile only on the host.
         .replace('Result<std::int64_t> asInt()const{', 'Result<long long> asInt()const{');
@@ -63,7 +63,7 @@ auto testClockNow(){return publishTestClock;}
 namespace log {template<class... T> void debug(T...){} }
 enum class RuntimeStage {Ready,Matched};
 struct RankedRuntime {
-    struct Match {std::string matchId="match",state="ROUND_PLAYING";int roundNumber=1,deathmatchSequence=0;bool spectatorLiveEnabled=true;};
+    struct Map{int levelId=123;};struct Match {std::optional<Map>currentMap=Map{};std::string matchId="match",state="ROUND_PLAYING";int roundNumber=1,deathmatchSequence=0;bool spectatorLiveEnabled=true;};
     struct View {RuntimeStage stage=RuntimeStage::Matched;Match match;} state;
     bool placement=false,spectating=false,m_pendingStart=false;std::vector<int> m_attemptBacklog;std::string m_attemptId="attempt-1";
     static RankedRuntime& get(){static RankedRuntime r;return r;}
@@ -118,7 +118,7 @@ int main(){
     assert(batch[1]["keyframe"]["discontinuity"]["type"].asString().unwrapOr("")=="SPIDER_SNAP");
     web::pending[1].callback({200});live.tickTerminal();assert(web::pending.size()==3);
     assert(web::pending[2].request.body["sequence"].asInt().unwrapOr(-1)==3);
-    assert(web::pending[2].request.body["elapsedMs"].asInt().unwrapOr(-1)==61);
+    assert(web::pending[2].request.body["elapsedMs"].asInt().unwrapOr(-1)==60);
     assert(web::pending[2].request.body["keyframe"]["dead"].asBool().unwrapOr(false));
     ranked.m_attemptId.clear();ranked.spectating=true;web::pending[2].callback({500});
     live.m_nextTerminalAt={};live.tickTerminal();assert(web::pending.size()==4);
@@ -205,8 +205,26 @@ int main(){
     assert(web::pending.back().request.body["packets"].asArray().unwrap().front()["elapsedMs"].asInt().unwrapOr(-1)==50);
     web::pending.back().callback({409});publishTestClock+=std::chrono::milliseconds(100);
     assert(paused.tickPublisher(pose,false));
-    assert(web::pending.back().request.body["packets"].asArray().unwrap().front()["elapsedMs"].asInt().unwrapOr(-1)==100);
-    assert(paused.m_publishGeneration==generation+1); // old pause time cannot delay a fresh generation
+    assert(web::pending.back().request.body["packets"].asArray().unwrap().front()["elapsedMs"].asInt().unwrapOr(-1)==150);
+    assert(paused.m_publishGeneration==generation+1); // Same Attempt clock retains the prior 50ms, without adding paused wall time
+
+    // Capturing a full queue never overlaps the current POST or rewinds its generation.
+    ranked={};SpectatorLiveRuntime pressure;web::pending.clear();assert(pressure.tickPublisher(pose,false));
+    auto pressureGeneration=pressure.m_publishGeneration;
+    for(int i=0;i<100;i++){publishTestClock+=std::chrono::milliseconds(50);pressure.tickPublisher(pose,false);}
+    assert(web::pending.size()==1&&pressure.m_publishQueue.size()==64&&pressure.m_publishGeneration==pressureGeneration);
+    web::pending.front().callback({200});publishTestClock+=std::chrono::milliseconds(50);pressure.tickPublisher(pose,false);
+    assert(web::pending.size()==2&&web::pending.back().request.body["packets"].asArray().unwrap().front()["sequence"].asInt().unwrapOr(-1)==1);
+    // An unavailable relay cannot retry this Attempt forever; ordinary gameplay remains independent.
+    ranked={};SpectatorLiveRuntime offline;web::pending.clear();
+    for(int i=0;i<12;i++){publishTestClock+=std::chrono::seconds(5);offline.tickPublisher(pose,false);assert(web::pending.size()==unsigned(i+1));web::pending.back().callback({503});}
+    assert(offline.m_attemptPublishFailures==12);auto pendingCount=web::pending.size();publishTestClock+=std::chrono::seconds(10);offline.tickPublisher(pose,false);assert(web::pending.size()==pendingCount);
+    ranked.m_attemptId="next-budget";assert(offline.tickPublisher(pose,false));assert(offline.m_attemptPublishFailures==0&&web::pending.size()==pendingCount+1);
+    // Native gameplay time is authoritative even when capture/HTTP starts late.
+    ranked={};SpectatorLiveRuntime nativeClock;web::pending.clear();pose.nativeElapsedMs=60050;
+    assert(nativeClock.tickPublisher(pose,false));assert(web::pending.back().request.body["packets"].asArray().unwrap().front()["elapsedMs"].asInt().unwrapOr(-1)==60050);
+    web::pending.back().callback({409});publishTestClock+=std::chrono::milliseconds(100);pose.nativeElapsedMs=60100;
+    assert(nativeClock.tickPublisher(pose,false));assert(web::pending.back().request.body["packets"].asArray().unwrap().front()["elapsedMs"].asInt().unwrapOr(-1)==60100);
 }
 
 `;

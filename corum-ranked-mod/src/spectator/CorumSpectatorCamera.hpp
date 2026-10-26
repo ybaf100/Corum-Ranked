@@ -2,6 +2,7 @@
 
 #include "../domain/SpectatorCameraPolicy.hpp"
 #include <Geode/Geode.hpp>
+#include <chrono>
 
 class GJBaseGameLayer;
 
@@ -25,12 +26,19 @@ public:
 
 private:
     void applyViewport(GJBaseGameLayer* layer, SpectatorCameraPoint target);
+    void applyTransform(GJBaseGameLayer* layer,SpectatorCameraTransform const& transform);
     SpectatorCameraPolicy m_policy;
     bool m_attached = false;
     bool m_previousForceX = false;
     bool m_previousForceY = false;
     float m_previousTargetY = 0;
     cocos2d::CCPoint m_previousOrigin;
+    SpectatorCameraTransform m_previousTransform;
+    float m_previousTargetZoom=1,m_previousTargetAngle=0;
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+    std::chrono::steady_clock::time_point m_nextTransformLog{};
+    unsigned m_transformLogs=0;
+#endif
 };
 
 } // namespace corum::ranked

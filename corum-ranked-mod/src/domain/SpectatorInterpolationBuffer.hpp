@@ -20,7 +20,7 @@ class SpectatorInterpolationBuffer {
 public:
     static constexpr std::size_t kMaxSamples = 64;
     static constexpr double kMaxSpanMs = 2000;
-    static constexpr double kMinDelayMs = 100, kMaxDelayMs = 350;
+    static constexpr double kMinDelayMs = 100, kMaxDelayMs = 800;
     void setSourcePaused(bool paused, double nowMs) {
         if (!std::isfinite(nowMs)) return;
         if (paused != m_sourcePaused) {
@@ -117,6 +117,8 @@ public:
             if (older.pose.camera && newer.pose.camera && !newer.pose.cameraSnap) {
                 result.pose.camera = SpectatorCameraOrigin{lerp(older.pose.camera->x, newer.pose.camera->x),
                     lerp(older.pose.camera->y, newer.pose.camera->y)};
+                if(older.pose.camera->transform && newer.pose.camera->transform)
+                    result.pose.camera->transform=interpolateSpectatorCameraTransform(*older.pose.camera->transform,*newer.pose.camera->transform,t);
             }
         } else if (m_samples.size() > 1 && m_samples[1].pose.discontinuity) {
             // A native event proves its source as well as its destination. Move
@@ -133,6 +135,7 @@ public:
                 result.pose.camera = SpectatorCameraOrigin {
                     static_cast<float>(older.pose.camera->x + (snap.fromCamera->x - older.pose.camera->x) * t),
                     static_cast<float>(older.pose.camera->y + (snap.fromCamera->y - older.pose.camera->y) * t)};
+                result.pose.camera->transform=older.pose.camera->transform;
             }
             // Rotation, gravity, mode and camera remain in the source segment;
             // prune() applies the entire destination atomically at its timestamp.
@@ -162,7 +165,7 @@ public:
     [[nodiscard]] double packetsPerResponse() const { return m_responses ? static_cast<double>(m_packets) / m_responses : 0; }
 
 private:
-    void updateDelay() { m_delayMs = std::clamp(std::ceil(std::max(2 * m_sampleMs, m_arrivalMs + m_sampleMs)), kMinDelayMs, kMaxDelayMs); }
+    void updateDelay() { m_delayMs = std::clamp(std::ceil(std::max(2 * m_sampleMs, m_arrivalMs + 2*m_sampleMs)), kMinDelayMs, kMaxDelayMs); }
     void prune() {
         while (m_samples.size() > 1 && m_samples[1].publisherElapsedMs <= m_renderMs) m_samples.pop_front();
     }

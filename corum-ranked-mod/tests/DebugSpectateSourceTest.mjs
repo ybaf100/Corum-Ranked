@@ -95,7 +95,8 @@ test('server persistence and Recorded Publisher are isolated from Ranked writes 
     assert.match(service, /relay.publishRecorded/);assert.match(service, /relay.subscribeRecorded/);
     assert.doesNotMatch(service, /(?:INSERT INTO|UPDATE|DELETE FROM) ranked_|\.emitDiscord|MatchService|QueueService|PlacementService|AchievementService/);
     const relay = server('match/spectator-live.service.ts');
-    assert.match(relay, /this.appendPacket\(stream, packet, nowMs\)/);
+    assert.match(relay, /const keyframe=parseSpectatorKeyframe\(packet.keyframe\)/);
+    assert.match(relay, /this.appendPacket\(stream, \{\.\.\.packet,keyframe\}, nowMs\)/);
     assert.match(relay, /this.readStream\(key, stream, 1, null/);
     assert.match(server('config/server-environment.ts'), /ENABLE_DEBUG_SPECTATE\?\.trim/);
 });

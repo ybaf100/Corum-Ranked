@@ -36,6 +36,7 @@ struct CCNode: CCObject {
     int positionWrites=0, rotationWrites=0, unschedules=0; float scaleY=1,scaleX=1; unsigned char opacity=255;
     void runAction(CCFadeOut*) { opacity=0; }
     void setScaleY(float s) { scaleY=s; } float getScaleY()const{return scaleY;}
+    void setScaleX(float s) { scaleX=s; } float getScaleX()const{return scaleX;}
     CCPoint getPosition()const{return position;} float getRotation()const{return rotation;}
     static CCNode* create() { auto* p=new CCNode; p->autorelease(); return p; }
     ~CCNode() override { for(auto* p:children) { p->parent=nullptr; p->release(); } }
@@ -151,7 +152,7 @@ struct GJBaseGameLayer {
         bool m_unkBool4=false,m_unkBool5=false;
         float m_unkInt13=0;
         cocos2d::CCPoint m_cameraPosition{},m_cameraPosition2{},m_cameraStepDiff{};
-        float m_cameraZoom=1;double m_levelTime=0;
+        float m_cameraZoom=1,m_cameraAngle=0,m_targetCameraZoom=1,m_targetCameraAngle=0;double m_levelTime=0;
         void stopTweenAction(int) {}
     } m_gameState;
     int cameraUpdates=0,worldUpdates=0,collisionQueries=0,triggerObjects=0;

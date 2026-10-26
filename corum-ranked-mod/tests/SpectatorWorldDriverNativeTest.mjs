@@ -40,6 +40,8 @@ test('actual world owner synchronizes triggers, Spider and native camera before 
 #include "${join(root,'src/domain/SpectatorInterpolationBuffer.hpp')}"
 #include "${join(root,'src/spectator/SpectatorPlayerCapture.hpp')}"
 #include "${join(root, 'src/domain/SpectatorNativeProbe.hpp')}"
+#include "${join(root,'src/domain/SpectatorRestoreTimeline.hpp')}"
+#include <chrono>
 #include <memory>
 #include <iostream>
 #include <source_location>
@@ -57,6 +59,11 @@ struct SpectatorLiveRuntime {
     std::optional<SpectatorRemoteFrame> frame;mutable int reads=0;
     static SpectatorLiveRuntime& get(){static SpectatorLiveRuntime r;return r;}
     auto presentationFrame()const{++reads;return frame;}
+    SpectatorRestoreTimeline restore;
+    auto takeRestorationFrames(){return restore.takeBatch();}
+    void restorationApplied(SpectatorRemoteFrame const& f,bool advanced,double){assert(advanced);restore.applied(f);frame=f;}
+    void requestSceneRestore(){}void noteWorldPartial(std::string){}
+
 };
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
 namespace debug { struct DebugSpectateRuntime {
@@ -274,6 +281,40 @@ int main(){
   f=*driver.frame();f.publisherElapsedMs+=1000;f.sequence+=20;f.pose->x=5000;assert(driver.apply(&scene,true,f));
   assert(!driver.takeNativeDeltaSeconds()&&p.m_lastPosition.x==5000&&driver.partialHistory()); // no invented crossing/catch-up history
   driver.reset();assert(!driver.partialHistory()&&!driver.frame()&&!driver.takeNativeDeltaSeconds()&&!driver.owns(&p));
+ }
+
+ // Late joins execute the production WorldDriver/native owner, not just a queue policy.
+ for(int duration:{0,10000,60000,120000}){
+  CorumRankedPlayLayer scene;PlayerHook dummy;GJGameLevel level;level.m_levelID=88350599;
+  scene.m_level=&level;scene.m_player1=&dummy;dummy.m_gameLayer=&scene;PlayLayer::current=&scene;scene.m_isPaused=true;
+  auto* world=CCLayer::create();geode::Ref<CCLayer> root(world);scene.m_objectLayer=world;
+  auto& live=SpectatorLiveRuntime::get();live.restore.reset();
+  SpectatorRemoteContext c{"debug-spectate:server",1,0,level.m_levelID,"late-"+std::to_string(duration),7,7};
+  live.restore.begin(c,true);
+  for(int sequence=0;sequence<=duration/50;++sequence){
+   SpectatorGhostPose pose{100+sequence*5.f,40,0};pose.camera=SpectatorCameraOrigin{pose.x-165,pose.y-100};
+   assert(live.restore.push(sequence,sequence*50.0,pose,false));
+  }
+  live.restore.networkCaughtUp(true);live.frame=live.restore.frame();
+  GJBaseGameLayer::nativeObjects.clear();
+  GJBaseGameLayer::worldDispatch=[](GJBaseGameLayer* p,float dt){static_cast<CorumRankedPlayLayer*>(p)->worldHook(dt);};
+  GJBaseGameLayer::cameraDispatch=[](GJBaseGameLayer* p,float dt){static_cast<CorumRankedPlayLayer*>(p)->cameraHook(dt);};
+  PlayerObject* identity=nullptr;int ticks=0;
+  while(live.restore.active()){
+   auto const updates=scene.worldUpdates,camera=scene.cameraUpdates;
+   ++CCDirector::sharedDirector()->totalFrames;scene.GJBaseGameLayer::update(.016f);++ticks;
+   assert(scene.worldUpdates-updates<=8 && scene.cameraUpdates-camera<=1 && scene.m_isPaused);
+   auto* current=scene.m_fields->remotePlayer.player();if(!identity)identity=current;assert(current==identity);
+   assert(dummy.physicsUpdates==0 && dummy.spiderJumps==0 && scene.savedPercentage==7 && scene.newBest==7);
+   assert(ticks<600);
+  }
+  assert(live.restore.appliedCount()==unsigned(duration/50+1));assert(scene.worldUpdates==duration/50);
+  assert(std::abs(scene.m_gameState.m_levelTime-duration/1000.0)<.01);
+  close(dummy.getPosition().x,100+duration*.1f);close(scene.m_gameState.m_cameraPosition.x,dummy.getPosition().x-165);
+  assert(!live.restore.applied(*live.restore.frame())); // duplicate completion cannot run native work again
+  scene.cleanupSpectatorPresentation();live.restore.reset();live.frame.reset();
+  GJBaseGameLayer::worldDispatch=nullptr;GJBaseGameLayer::cameraDispatch=nullptr;PlayLayer::current=nullptr;
+  CCObject::drain();
  }
  CCObject::drain();assert(CCObject::alive==0);
  std::cout<<"world ordering/Spider/follow history/scoped writes/60-120-240Hz passed\\n";

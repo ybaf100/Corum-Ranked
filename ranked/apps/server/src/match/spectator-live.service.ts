@@ -20,6 +20,9 @@ import {
   SPECTATOR_LIVE_MAX_SEQUENCE_GAP,
   SPECTATOR_LIVE_PROTOCOL_VERSION,
   SPECTATOR_LIVE_TIMEOUT_MS,
+  SPECTATOR_HISTORY_MAX_PACKETS,
+  SPECTATOR_HISTORY_PAGE_PACKETS,
+  SPECTATOR_MAX_STREAMS,
   decorateSpectatorState,
   spectatorLiveContext,
   spectatorOpponentSide,
@@ -57,6 +60,9 @@ export interface SpectatorPoseKeyframe {
   readonly cameraX?: number;
   readonly cameraY?: number;
   readonly cameraSnap?: boolean;
+  readonly cameraZoom?: number;
+  readonly cameraAngle?: number;
+  readonly cameraLayers?: readonly {readonly present:boolean;readonly scaleX:number;readonly scaleY:number;readonly rotation:number}[];
   readonly discontinuity?: SpectatorSnapEvidence;
   readonly visible?: boolean;
   readonly dual: boolean;
@@ -74,6 +80,7 @@ export interface SpectatorLivePacket {
   readonly generation: number;
   readonly sequence: number;
   readonly elapsedMs: number;
+  readonly levelId?: number;
   readonly inputEdges: readonly SpectatorInputEdge[];
   readonly keyframe: SpectatorPoseKeyframe;
 }
@@ -112,6 +119,7 @@ export interface SpectatorLiveSubscribeResponse {
   readonly maxPackets: number;
   readonly stream: SpectatorLiveStreamDescriptor | null;
   readonly packets: readonly SpectatorLivePacket[];
+  readonly restoration?: {readonly available:boolean;readonly reason:string|null;readonly caughtUp:boolean;readonly headSequence:number;readonly startSequence:number;readonly levelId:number|null};
 }
 
 interface LiveStream {
@@ -124,6 +132,8 @@ interface LiveStream {
   lastReceivedAtMs: number;
   pausedAtMs?: number | null;
   packets: BufferedPacket[];
+  history?: BufferedPacket[];
+  historyContinuous?: boolean;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -167,6 +177,22 @@ export const parseSpectatorKeyframe = (value: unknown): SpectatorPoseKeyframe =>
   const cameraY = optionalFiniteNumber(value.cameraY);
   const validCamera = cameraX !== undefined && cameraY !== undefined &&
     Math.abs(cameraX) <= 10_000_000 && Math.abs(cameraY) <= 10_000_000;
+  let cameraTransform: Pick<SpectatorPoseKeyframe,"cameraZoom"|"cameraAngle"|"cameraLayers"> = {};
+  if(value.cameraZoom!==undefined || value.cameraAngle!==undefined || value.cameraLayers!==undefined){
+    const zoom=finiteNumber(value.cameraZoom,"cameraZoom"),angle=finiteNumber(value.cameraAngle,"cameraAngle");
+    if(!validCamera || zoom<.01 || zoom>100 || Math.abs(angle)>100000 || !Array.isArray(value.cameraLayers) || value.cameraLayers.length!==3)
+      throw new BadRequestException("Invalid camera transform");
+    const layers=value.cameraLayers.map((layer:unknown)=>{
+      if(!isRecord(layer))throw new BadRequestException("Invalid camera layer");
+      const present=requiredBoolean(layer.present,"camera layer present");
+      const scaleX=finiteNumber(layer.scaleX,"camera scaleX"),scaleY=finiteNumber(layer.scaleY,"camera scaleY"),rotation=finiteNumber(layer.rotation,"camera rotation");
+      if((present && (Math.abs(scaleX)<.001 || Math.abs(scaleY)<.001)) || Math.abs(scaleX)>100 || Math.abs(scaleY)>100 || Math.abs(rotation)>100000)
+        throw new BadRequestException("Camera layer outside bounds");
+      return {present,scaleX,scaleY,rotation};
+    });
+    if(!layers[0]!.present)throw new BadRequestException("Camera world layer missing");
+    cameraTransform={cameraZoom:zoom,cameraAngle:angle,cameraLayers:layers};
+  }
   let discontinuity: SpectatorSnapEvidence | undefined;
   if (value.discontinuity !== undefined) {
     const snap = value.discontinuity;
@@ -209,6 +235,7 @@ export const parseSpectatorKeyframe = (value: unknown): SpectatorPoseKeyframe =>
     ...(velocityY === undefined ? {} : { velocityY }),
     ...(gravity === undefined ? {} : { gravity }),
     ...(validCamera ? { cameraX, cameraY, cameraSnap: value.cameraSnap === true } : {}),
+    ...cameraTransform,
     ...(discontinuity === undefined ? {} : { discontinuity }),
     ...(value.visible === undefined ? {} : { visible: requiredBoolean(value.visible, "keyframe.visible") }),
     ...(player2X === undefined ? {} : { player2X }),
@@ -259,6 +286,7 @@ const parsePacket = (value: unknown, matchId: string): SpectatorLivePacket => {
     generation: integer(value.generation, "generation", 1),
     sequence: integer(value.sequence, "sequence", 0),
     elapsedMs: integer(value.elapsedMs, "elapsedMs", 0),
+    ...(value.levelId===undefined?{}:{levelId:integer(value.levelId,"levelId",1)}),
     inputEdges: parseInputEdges(value.inputEdges),
     keyframe: parseSpectatorKeyframe(value.keyframe),
   };
@@ -381,6 +409,13 @@ export class SpectatorLiveService {
       throw new ConflictException("SPECTATOR_ATTEMPT_MISMATCH");
     }
     const key = streamKey(matchId, context.slot, state.side), nowMs = Date.now();
+    for(const [other,stream] of this.streams)if(nowMs-stream.lastReceivedAtMs>31_500)this.streams.delete(other);
+    if(!this.streams.has(key) && this.streams.size>=SPECTATOR_MAX_STREAMS)throw new ConflictException("SPECTATOR_STREAM_LIMIT");
+    const mapValue=(context.deathmatchSequence===null?state.currentRound:state.deathmatch)?.map;
+    const map=isRecord(mapValue)?mapValue:null;
+    const expectedLevel=Number(map?.playableLevelId??map?.canonicalLevelId??map?.levelId);
+    if(packets.some(item=>item.levelId!==undefined && Number.isSafeInteger(expectedLevel) && expectedLevel>0 && item.levelId!==expectedLevel))
+      throw new ConflictException("SPECTATOR_LEVEL_MISMATCH");
     const existing = this.streams.get(key);
     let stream: LiveStream;
     if (!existing || existing.attemptId !== packet.attemptId || nowMs - existing.lastReceivedAtMs > SPECTATOR_LIVE_TIMEOUT_MS &&
@@ -393,12 +428,12 @@ export class SpectatorLiveService {
       if (packet.generation > existing.generation) {
         if (existing.packets.at(-1)?.keyframe.dead || existing.packets.at(-1)?.keyframe.finished) throw new ConflictException("SPECTATOR_TERMINAL_STREAM");
         if (packet.sequence !== 0) throw new ConflictException("SPECTATOR_NEW_GENERATION_MUST_START_AT_SEQUENCE_ZERO");
-        stream = { ...existing, generation: packet.generation, lastSequence: -1, packets: [] };
-      } else stream = { ...existing, packets: [...existing.packets] };
+        stream = { ...existing, generation: packet.generation, lastSequence: -1, packets: [], history:[], historyContinuous:true };
+      } else stream = { ...existing, packets: [...existing.packets], history:[...(existing.history??[])] };
     }
     for (const item of packets) {
       if (item.sequence <= stream.lastSequence) {
-        const prior = stream.packets.find(sample => sample.sequence === item.sequence);
+        const prior = (stream.history??stream.packets).find(sample => sample.sequence === item.sequence);
         if (!prior || JSON.stringify(publicPacket(prior)) !== JSON.stringify(item) ||
             (!batched && !(item.keyframe.dead || item.keyframe.finished))) throw new ConflictException("SPECTATOR_STALE_SEQUENCE");
         continue; // immutable batch ACK-loss retry
@@ -423,6 +458,7 @@ export class SpectatorLiveService {
     attemptId?: string,
     generationText?: string,
     afterSequenceText?: string,
+    worldHistoryText?: string,
   ): Promise<SpectatorLiveSubscribeResponse> {
     const state = await this.decorateConfiguredState(await this.matches.state(matchId, matchToken, session));
     if (!this.liveEnabled) throw new ForbiddenException("LIVE_SPECTATOR_DISABLED");
@@ -459,7 +495,7 @@ export class SpectatorLiveService {
       if (terminalStream && ended && ended.attemptId === terminalStream.attemptId &&
         Date.now() - ended.endedAtMs <= SPECTATOR_LIVE_TIMEOUT_MS && (terminal?.dead || terminal?.finished)) {
         return this.readStream(key, terminalStream, context.roundNumber, context.deathmatchSequence,
-          state.spectator.opponentName ?? "Opponent", attemptId, generationText, afterSequenceText);
+          state.spectator.opponentName ?? "Opponent", attemptId, generationText, afterSequenceText, worldHistoryText==="1");
       }
       return {
         protocolVersion: SPECTATOR_LIVE_PROTOCOL_VERSION,
@@ -497,7 +533,7 @@ export class SpectatorLiveService {
     }
 
     return { ...this.readStream(key, stream, context.roundNumber, context.deathmatchSequence,
-      state.spectator.opponentName ?? "Opponent", attemptId, generationText, afterSequenceText), paused: state.opponentPaused === true };
+      state.spectator.opponentName ?? "Opponent", attemptId, generationText, afterSequenceText, worldHistoryText==="1"), paused: state.opponentPaused === true };
   }
 
   // Internal authorization/context adapter for the isolated Recorded Publisher.
@@ -506,8 +542,10 @@ export class SpectatorLiveService {
     if (!packet.matchId.startsWith("debug-spectate:") || packet.protocolVersion !== SPECTATOR_LIVE_PROTOCOL_VERSION) {
       throw new BadRequestException("INVALID_RECORDED_CONTEXT");
     }
-    parseSpectatorKeyframe(packet.keyframe);
+    const keyframe=parseSpectatorKeyframe(packet.keyframe);
     const key = `recorded:${packet.matchId}`;
+    for(const [other,s] of this.streams)if(nowMs-s.lastReceivedAtMs>31_500)this.streams.delete(other);
+    if(!this.streams.has(key) && this.streams.size>=SPECTATOR_MAX_STREAMS)throw new ConflictException("SPECTATOR_STREAM_LIMIT");
     let stream = this.streams.get(key);
     if (!stream || stream.generation !== packet.generation || stream.attemptId !== packet.attemptId) {
       if (stream && packet.generation < stream.generation) throw new ConflictException("SPECTATOR_STALE_GENERATION");
@@ -517,7 +555,7 @@ export class SpectatorLiveService {
       this.streams.set(key, stream);
     }
     if (packet.sequence !== stream.lastSequence + 1) throw new ConflictException("SPECTATOR_SEQUENCE_GAP");
-    this.appendPacket(stream, packet, nowMs);
+    this.appendPacket(stream, {...packet,keyframe}, nowMs);
   }
 
   public subscribeRecorded(contextId: string, nowMs: number, protocolVersionText?: string,
@@ -540,18 +578,21 @@ export class SpectatorLiveService {
     const last = stream.packets.at(-1);
     if (last?.keyframe.dead || last?.keyframe.finished) throw new ConflictException("SPECTATOR_TERMINAL_STREAM");
     if (last && packet.elapsedMs < last.elapsedMs) throw new ConflictException("SPECTATOR_REVERSE_TIMESTAMP");
+    if(last && (packet.sequence!==last.sequence+1 || packet.levelId!==last.levelId || packet.elapsedMs-last.elapsedMs>250))stream.historyContinuous=false;
+    const buffered={...packet,receivedAtMs:nowMs};
+    stream.history=[...(stream.history??[]),buffered].slice(-SPECTATOR_HISTORY_MAX_PACKETS);
     stream.lastSequence = packet.sequence;
     stream.lastReceivedAtMs = nowMs;
-    stream.packets.push({ ...packet, receivedAtMs: nowMs });
+    stream.packets.push(buffered);
     stream.packets = stream.packets.filter((item) => item.receivedAtMs >= nowMs - SPECTATOR_LIVE_BUFFER_MS);
     if (stream.packets.length > SPECTATOR_LIVE_MAX_PACKETS) {
       stream.packets.splice(0, stream.packets.length - SPECTATOR_LIVE_MAX_PACKETS);
     }
   }
 
-  private readStream(key: string, stream: LiveStream, roundNumber: number, deathmatchSequence: number | null,
+  private readStream(_key: string, stream: LiveStream, roundNumber: number, deathmatchSequence: number | null,
     opponentName: string, attemptId?: string, generationText?: string,
-    afterSequenceText?: string): SpectatorLiveSubscribeResponse {
+    afterSequenceText?: string, worldHistory=false): SpectatorLiveSubscribeResponse {
     const requestedGeneration = queryInteger(generationText);
     const afterSequence = queryInteger(afterSequenceText);
     const hasStreamIdentity = Boolean(attemptId) && requestedGeneration !== null;
@@ -559,30 +600,31 @@ export class SpectatorLiveService {
     const sameGeneration = requestedGeneration === stream.generation;
     // A late join has no prior stream identity and must apply the bounded buffer
     // as a reset before switching to incremental live packets.
+    const history=stream.history??stream.packets;
+    const available=history[0]?.sequence===0 && history[0].elapsedMs<=250 && stream.historyContinuous!==false;
+    const source=worldHistory && available?history:stream.packets;
     const missedWindow = hasStreamIdentity && sameAttempt && sameGeneration && afterSequence !== null &&
-      stream.lastSequence > afterSequence && (stream.packets[0]?.sequence ?? Infinity) > afterSequence + 1;
+      stream.lastSequence > afterSequence && (source[0]?.sequence ?? Infinity) > afterSequence + 1;
     const reset = !hasStreamIdentity || !sameAttempt || !sameGeneration || missedWindow;
     const effectiveAfter = reset ? null : afterSequence;
     const latestTime = stream.packets.at(-1)?.elapsedMs ?? 0;
     // Seed close to the live edge. Replaying 1.5-3s at a 1x clock never catches
     // up, and the relay's 72 packets exceed the client's 64-sample window.
     const joinWindow = stream.packets.filter(packet => packet.elapsedMs >= latestTime - 350).slice(-16);
-    const bufferedPackets = effectiveAfter === null
-      ? joinWindow
-      : stream.packets.filter((packet) => packet.sequence > effectiveAfter);
+    const bufferedPackets = worldHistory && available
+      ? source.filter(packet=>packet.sequence>(effectiveAfter??-1)).slice(0,SPECTATOR_HISTORY_PAGE_PACKETS)
+      : effectiveAfter===null?joinWindow:source.filter(packet=>packet.sequence>effectiveAfter);
     if (
       effectiveAfter !== null &&
       stream.lastSequence > effectiveAfter &&
       (bufferedPackets.length === 0 || bufferedPackets[0]!.sequence > effectiveAfter + 1)
     ) {
-      this.streams.delete(key);
       return this.fallback("SEQUENCE_GAP");
     }
     if (
       effectiveAfter !== null &&
       effectiveAfter > stream.lastSequence
     ) {
-      this.streams.delete(key);
       return this.fallback("SEQUENCE_GAP");
     }
     const packets = bufferedPackets.map(publicPacket);
@@ -594,6 +636,9 @@ export class SpectatorLiveService {
       fallback: false,
       reason: null,
       reset,
+      ...(worldHistory?{restoration:{available,reason:available?null:stream.historyContinuous===false?"HISTORY_GAP":history[0]?.sequence!==0?"HISTORY_WINDOW_EXPIRED":"ATTEMPT_START_MISSING",
+        caughtUp:(bufferedPackets.at(-1)?.sequence??effectiveAfter??-1)>=stream.lastSequence,headSequence:stream.lastSequence,
+        startSequence:history[0]?.sequence??-1,levelId:history[0]?.levelId??null}}:{}),
       bufferWindowMs: SPECTATOR_LIVE_BUFFER_MS,
       maxPackets: SPECTATOR_LIVE_MAX_PACKETS,
       stream: {

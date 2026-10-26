@@ -38,6 +38,8 @@ test('actual camera owner hook ends in recorded viewport, drives once, restores 
 #include "${join(root,'src/spectator/SpectatorWorldDriver.hpp')}"
 #include "${join(root,'src/spectator/SpectatorTriggerScope.hpp')}"
 #include "${join(root, 'src/domain/SpectatorNativeProbe.hpp')}"
+#include "${join(root,'src/domain/SpectatorRestoreTimeline.hpp')}"
+#include <chrono>
 #include <memory>
 #include <iostream>
 #include <source_location>
@@ -55,6 +57,11 @@ struct SpectatorLiveRuntime {
     std::optional<SpectatorRemoteFrame> frame;mutable int reads=0;
     static SpectatorLiveRuntime& get(){static SpectatorLiveRuntime r;return r;}
     auto presentationFrame()const{++reads;return frame;}
+    SpectatorRestoreTimeline restore;
+    auto takeRestorationFrames(){return restore.takeBatch();}
+    void restorationApplied(SpectatorRemoteFrame const& f,bool,double){restore.applied(f);}
+    void requestSceneRestore(){}void noteWorldPartial(std::string){}
+
 };
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
 namespace debug { struct DebugSpectateRuntime {

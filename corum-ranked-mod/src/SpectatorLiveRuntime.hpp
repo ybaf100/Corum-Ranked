@@ -3,6 +3,7 @@
 
 #include "domain/SpectatorRemotePolicy.hpp"
 #include "domain/SpectatorInterpolationBuffer.hpp"
+#include "domain/SpectatorRestoreTimeline.hpp"
 
 #include <Geode/Geode.hpp>
 #include <Geode/utils/web.hpp>
@@ -20,6 +21,11 @@ enum class SpectatorLiveStatus {
     Live,
     Buffering,
     Fallback,
+    Syncing,
+    Reconnecting,
+    PartialSync,
+    Cleared,
+    Disconnected,
 };
 
 class SpectatorLiveRuntime final {
@@ -44,6 +50,10 @@ public:
     [[nodiscard]] std::string const& opponentName() const;
     [[nodiscard]] std::optional<SpectatorGhostPose> interpolatedPose() const;
     [[nodiscard]] std::optional<SpectatorRemoteFrame> presentationFrame() const;
+    void requestSceneRestore();
+    std::vector<SpectatorRemoteFrame> takeRestorationFrames();
+    void restorationApplied(SpectatorRemoteFrame const& frame,bool clockAdvanced,double workMs=0);
+    void noteWorldPartial(std::string reason);
 
 private:
     SpectatorLiveRuntime() = default;
@@ -58,7 +68,7 @@ private:
     [[nodiscard]] std::string endpoint(std::string const& path) const;
 
     std::string m_publishMatchId;
-    int m_publishRound = 0, m_publishDeathmatch = 0;
+    int m_publishRound = 0, m_publishDeathmatch = 0, m_publishLevel=0;
     SpectatorPublishQueue m_publishQueue;
     std::chrono::steady_clock::time_point m_publisherPausedAt {};
     std::int64_t m_publisherPausedMs = 0;
@@ -76,6 +86,12 @@ private:
     std::chrono::steady_clock::time_point m_nextPublishAt {};
     std::uint64_t m_publishRequestGeneration = 0;
     bool m_publishBusy = false;
+    std::string m_publishBudgetAttemptId;
+    unsigned m_attemptPublishFailures=0;
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+    std::chrono::steady_clock::time_point m_nextCameraMetricAt{};
+    unsigned m_cameraMetricCount=0;
+#endif
     matjson::Value m_terminalBody;
     std::string m_terminalSessionToken, m_terminalMatchToken, m_terminalPublishAttemptId;
     std::chrono::steady_clock::time_point m_terminalDeadline {}, m_nextTerminalAt {};
@@ -109,6 +125,13 @@ private:
     int m_viewerPollGapMs = 20;
     int m_consecutiveViewerErrors = 0;
     bool m_viewBusy = false;
+    SpectatorRestoreTimeline m_restoreTimeline;
+    bool m_forceRestoreRequest=false,m_partialSync=false,m_disconnected=false;
+    std::uint64_t m_reconnections=0;
+    unsigned m_restoreFailures=0;
+    double m_restoreStepCostMs=2;
+    std::string m_worldRestoreReason;
+    mutable std::optional<SpectatorRemoteFrame> m_heldPresentation;
 
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_publishRequest;
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_terminalRequest;

@@ -22,6 +22,7 @@ for(const debugOn of [false,true]) test(`native update/rotation/teleport -> comp
 #include "${join(root,'src/domain/SpectatorNativeProbe.hpp')}"
 #include "${join(root,'src/debug/DebugSpectatePolicy.hpp')}"
 #include "${join(root,'src/spectator/SpectatorPlayerCapture.hpp')}"
+#include "${join(root,'src/domain/SpectatorCameraPolicy.hpp')}"
 #include <cassert>
 #include <chrono>
 #include <limits>
@@ -33,7 +34,8 @@ using namespace geode;
 struct CCDirector { static CCDirector* sharedDirector(){static CCDirector d;return &d;} unsigned getTotalFrames()const{return 0;} };
 struct ScopedRealGameplayEnd { bool& flag;bool previous;ScopedRealGameplayEnd(bool& f,bool b):flag(f),previous(f){flag=b;}~ScopedRealGameplayEnd(){flag=previous;} };
 struct CCPoint{float x=0,y=0;};struct GJBaseGameLayer;
-struct MainLayer{float getScaleY()const{return 1;}};
+struct MainLayer{float getScaleY()const{return 1;}float getScaleX()const{return 1;}float getRotation()const{return 0;}};
+namespace cocos2d{using CCNode=MainLayer;}
 struct PlayerObject {
  GJBaseGameLayer* m_gameLayer=nullptr;CCPoint position{100,40};MainLayer main;MainLayer* m_mainLayer=&main;
  bool m_isShip=false,m_isBall=false,m_isBird=false,m_isDart=false,m_isRobot=false,m_isSpider=false,m_isSwing=false;
@@ -47,7 +49,8 @@ struct PlayerObject {
 };
 struct TeleportPortalObject{};
 struct GJBaseGameLayer {
- struct {bool m_isDualMode=false;CCPoint m_cameraPosition;double m_levelTime=0;} m_gameState;
+ struct {bool m_isDualMode=false;CCPoint m_cameraPosition;double m_levelTime=0;float m_cameraZoom=1,m_cameraAngle=0,m_targetCameraZoom=1,m_targetCameraAngle=0;} m_gameState;
+ MainLayer *m_objectLayer=nullptr,*m_inShaderObjectLayer=nullptr,*m_aboveShaderObjectLayer=nullptr;
  PlayerObject* m_player1=nullptr;double m_attemptTime=0;bool m_inResetDelay=false,m_isPaused=false,m_started=false;
  int checkCollisions(PlayerObject*,float,bool){return 0;}
  void updateCamera(float){}
@@ -64,6 +67,7 @@ ${capture}
 namespace corum::ranked {
 struct RankedRuntime {bool spectator=false;static RankedRuntime& get(){static RankedRuntime r;return r;}bool isSpectating()const{return spectator;}};
 struct SpectatorLiveRuntime {
+ std::vector<SpectatorRemoteFrame> takeRestorationFrames(){return {};}void restorationApplied(SpectatorRemoteFrame const&,bool,double){}void noteWorldPartial(std::string){}
  bool busy=false;std::int64_t next=0;std::vector<SpectatorGhostPose> sent;
  static SpectatorLiveRuntime& get(){static SpectatorLiveRuntime r;return r;}
  bool tickPublisher(SpectatorGhostPose const& p,bool){if(busy||clockMs<next)return false;sent.push_back(p);next=clockMs+50;return true;}
@@ -78,7 +82,8 @@ struct DebugSpectateRuntime {
 }
 struct CorumRankedPlayLayer:PlayLayer {
  bool blockEntryGameplayUpdate(){return false;}
- struct Fields{struct Driver{std::optional<float> takeNativeDeltaSeconds(){return {};}}spectatorWorldDriver;bool spectatorWorldPoseApplied=false,spectatorCollisionChecked=false;SpectatorNativeProbe spectatorNativeProbe;bool rankedInitialized=false,rankedLevel=true,safetyRetired=false,spectatorMode=false,spectatorPending=false;
+ struct Fields{struct Driver{bool partialHistory()const{return false;}template<class...T>bool apply(T...){return false;}std::optional<float> takeNativeDeltaSeconds(){return {};}}spectatorWorldDriver;bool spectatorWorldPoseApplied=false,spectatorCollisionChecked=false;SpectatorNativeProbe spectatorNativeProbe;bool rankedInitialized=false,rankedLevel=true,safetyRetired=false,spectatorMode=false,spectatorPending=false;
+  corum::ranked::SpectatorSceneContext sceneContext;std::optional<SpectatorRemoteFrame>spectatorRenderedFrame;struct Remote{template<class...T>void update(T...){}}remotePlayer;
   bool debugRecordScene=false,debugPlaybackScene=false,debugRecordHasFrame=false;SpectatorCapturePolicy spectatorCapture;bool spectatorWorldUpdateInProgress=false,spectatorWorldResetInProgress=false;std::optional<unsigned> spectatorCameraFrameNumber;}fields;
  Fields* m_fields=&fields;
  bool prepareSpectatorScene(){return false;}bool spectatorCameraActive(){return false;}bool beginSpectatorWorldFrame(){return false;}
@@ -150,6 +155,7 @@ test('actual Debug recording clock seeds at the first valid native world and pre
 #include "${join(root,'src/debug/DebugSpectatePolicy.hpp')}"
 #include "${join(root,'src/domain/SpectatorCapturePolicy.hpp')}"
 #include <chrono>
+#include "${join(root,'src/domain/SpectatorCameraPolicy.hpp')}"
 #include <cassert>
 #include <limits>
 namespace geode::log {template<class... T>void info(T...){} }

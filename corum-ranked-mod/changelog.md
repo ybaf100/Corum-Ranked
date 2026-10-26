@@ -1,3 +1,9 @@
+# v0.5.0-beta.105
+- Add bounded, authenticated start-history pages and native WorldDriver catch-up for Solo spectator late joins; label incomplete/limited reconstruction as PARTIAL SYNC.
+- Capture and validate native zoom/angle plus world/shader layer transforms on the pose timeline; preserve instant camera boundaries and legacy v2 recordings.
+- Hold the last validated world/camera during network gaps, bound recovery attempts and publisher backpressure, and preserve native gameplay time across relay generations.
+- Keep spectator authority, no-save/no-input policies and existing HTTP v2 transport. Native engine checkpoints with pointers, input/RNG-dependent state and full arbitrary-map restoration remain unsupported and are not reported as complete.
+
 # v0.5.0-beta.104
 - Publish Solo live spectator Stage 1 from one final source revision after beta.103 immutable publication collided with an earlier concurrent build. Existing beta.103 packages are preserved.
 - Require every Debug OFF platform check before Debug R2 publication, alongside the validated Debug package.

@@ -96,6 +96,8 @@ struct RankedRuntime {
     void setSpectatorLocalTransportBlocked(void const*,bool b){blocked=b;}
 };
 struct SpectatorLiveRuntime {
+void requestSceneRestore(){}
+
     std::optional<SpectatorRemoteFrame> frame;
     int viewers=0,resets=0;
     static SpectatorLiveRuntime& get(){static SpectatorLiveRuntime l;return l;}

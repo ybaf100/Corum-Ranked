@@ -22,12 +22,13 @@ const method = signature => {
 };
 
 test('actual viewer decoder recovers timeout only on fresh validated packets and keeps interpolation bounded', () => {
-    const methods = ['void SpectatorLiveRuntime::applyViewerResponse(', 'void SpectatorLiveRuntime::setFallback(',
+    const methods = ['void SpectatorLiveRuntime::noteWorldPartial(', 'void SpectatorLiveRuntime::applyViewerResponse(', 'void SpectatorLiveRuntime::setFallback(',
         'std::optional<SpectatorGhostPose> SpectatorLiveRuntime::interpolatedPose()'].map(method).join('\n').replaceAll('std::chrono::steady_clock::now()', 'testClockNow()');
     const fields = header.slice(header.indexOf('    std::string m_viewMatchId;'), header.indexOf('    geode::async::TaskHolder'));
     const cpp = `
 #include "${join(root, 'src/domain/SpectatorRemotePolicy.hpp')}"
 #include "${join(root, 'src/domain/SpectatorInterpolationBuffer.hpp')}"
+#include "${join(root, 'src/domain/SpectatorRestoreTimeline.hpp')}"
 #include <algorithm>
 #include <cassert>
 #include <chrono>
@@ -44,6 +45,7 @@ template<class T> struct Result {
 struct Value {
     using Object=std::map<std::string,Value>; using Array=std::vector<Value>;
     std::variant<std::monostate,bool,std::int64_t,double,std::string,Object,Array> data;
+    static Value array(){return Array{};}void push(Value v){if(!std::holds_alternative<Array>(data))data=Array{};std::get<Array>(data).push_back(std::move(v));}
     Value()=default; Value(bool x):data(x){} Value(int x):data(std::int64_t(x)){}
     Value(std::int64_t x):data(x){} Value(double x):data(x){}
     Value(char const* x):data(std::string(x)){} Value(std::string x):data(std::move(x)){}
@@ -77,7 +79,7 @@ ${method('bool finitePose(')}
 ${method('float poseDistance(')}
 namespace corum::ranked {
 struct RankedRuntime {
-    struct Match {int roundNumber=1,deathmatchSequence=0;}; struct View {Match match;} state;
+    struct Map{int levelId=123;};struct Match {int roundNumber=1,deathmatchSequence=0;std::optional<Map>currentMap=Map{};}; struct View {Match match;} state;
     static RankedRuntime& get(){static RankedRuntime r;return r;}
     View const& view()const{return state;}
 };
@@ -88,7 +90,7 @@ struct SpectatorLiveRuntime {
 #endif
 ${fields}
     void applyViewerResponse(matjson::Value const&);
-    void setFallback(std::string);
+    void setFallback(std::string);void noteWorldPartial(std::string);
     std::optional<SpectatorGhostPose> interpolatedPose()const;
 };
 ${methods}
@@ -216,17 +218,18 @@ int main(){
     viewer.applyViewerResponse(response(1,200));
     advance(5000);
     assert(viewer.interpolatedPose()->x==100); // Warm-up holds first pose; NO extrapolation
-    viewer.setFallback("STREAM_TIMEOUT");assert(!viewer.interpolatedPose());
+    viewer.setFallback("STREAM_TIMEOUT");assert(viewer.interpolatedPose() && viewer.interpolatedPose()->x==100);
     viewer.applyViewerResponse(response(1,200));assert(viewer.m_status==SpectatorLiveStatus::Fallback);
     auto empty=response(1,200);empty["packets"]=matjson::Value::Array{};
     viewer.applyViewerResponse(empty);assert(viewer.m_status==SpectatorLiveStatus::Fallback);
     viewer.applyViewerResponse(response(2,300));assert(viewer.m_status==SpectatorLiveStatus::Live);
-    assert(viewer.interpolatedPose()->x==300); // same-generation fresh recovery
-    auto stale=response(3,350);auto bad=stale["packets"].asArray().unwrap();bad[0]["generation"]=0;
+    assert(viewer.interpolatedPose()->x==100); // a fresh packet refills the existing publisher timeline, never teleports
+    viewer.applyViewerResponse(response(3,350));advance(150);assert(viewer.interpolatedPose()->x==350);
+    auto stale=response(4,360);auto bad=stale["packets"].asArray().unwrap();bad[0]["generation"]=0;
     stale["packets"]=bad;viewer.applyViewerResponse(stale);
-    assert(viewer.m_status==SpectatorLiveStatus::Fallback && !viewer.interpolatedPose());
-    viewer.applyViewerResponse(response(3,350));assert(viewer.m_status==SpectatorLiveStatus::Live);
-    viewer.applyViewerResponse(response(5,360));assert(viewer.m_reason=="SEQUENCE_GAP");
+    assert(viewer.m_status==SpectatorLiveStatus::Fallback && viewer.interpolatedPose() && viewer.interpolatedPose()->x==350);
+    viewer.applyViewerResponse(response(4,360));assert(viewer.m_status==SpectatorLiveStatus::Live);
+    viewer.applyViewerResponse(response(6,370));assert(viewer.m_reason=="SEQUENCE_GAP");
     auto epoch=viewer.m_viewPresentationEpoch;auto next=response(0,20,"B",2);next["reset"]=true;
     viewer.applyViewerResponse(next);assert(viewer.m_viewPresentationEpoch>epoch && viewer.interpolatedPose()->x==20);
     auto dead=response(1,30,"B",2);auto terminal=dead["packets"].asArray().unwrap();terminal[0]["keyframe"]["dead"]=true;
@@ -239,7 +242,7 @@ int main(){
     viewer.applyViewerResponse(wrongRound);assert(viewer.m_reason=="STREAM_CONTEXT_MISMATCH");
     matjson::Value waiting;waiting["protocolVersion"]=2;waiting["waiting"]=true;
     auto waitingEpoch=viewer.m_viewPresentationEpoch;
-    viewer.applyViewerResponse(waiting);assert(viewer.m_status==SpectatorLiveStatus::Waiting && !viewer.interpolatedPose());
+    viewer.applyViewerResponse(waiting);assert(viewer.m_status==SpectatorLiveStatus::Waiting && viewer.interpolatedPose() && viewer.interpolatedPose()->dead && viewer.interpolatedPose()->x==30);
     assert(viewer.m_viewAttemptId=="B" && viewer.m_viewGeneration==2 && viewer.m_viewPresentationEpoch==waitingEpoch);
     // A paused first/reset reply must preserve the buffer pause flag after
     // clear(), drain its final pose and hold without induced starvation.
@@ -264,7 +267,7 @@ int main(){
     assert(viewer.m_status==SpectatorLiveStatus::Live && viewer.interpolatedPose()->x==120);
     auto debugStale=debug;auto stalePackets=packets;stalePackets[0]["generation"]=0;
     debugStale["packets"]=stalePackets;viewer.applyViewerResponse(debugStale);
-    assert(viewer.m_reason=="STALE_GENERATION" && !viewer.interpolatedPose());
+    assert(viewer.m_reason=="STALE_GENERATION" && viewer.interpolatedPose() && viewer.interpolatedPose()->x==120);
     auto gap=debug;auto gapPackets=packets;gapPackets[0]["sequence"]=3;
     gap["packets"]=gapPackets;viewer.applyViewerResponse(gap);
     assert(viewer.m_reason=="SEQUENCE_GAP");

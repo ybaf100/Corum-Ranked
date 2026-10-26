@@ -5,6 +5,9 @@ export const SPECTATOR_LIVE_BUFFER_MS = 3_000;
 export const SPECTATOR_LIVE_MAX_PACKETS = 72;
 export const SPECTATOR_LIVE_TIMEOUT_MS = 1_500;
 export const SPECTATOR_LIVE_MAX_SEQUENCE_GAP = 8;
+export const SPECTATOR_HISTORY_MAX_PACKETS = 4096;
+export const SPECTATOR_HISTORY_PAGE_PACKETS = 64;
+export const SPECTATOR_MAX_STREAMS = 16;
 
 export interface SpectatorView {
   readonly active: boolean;
