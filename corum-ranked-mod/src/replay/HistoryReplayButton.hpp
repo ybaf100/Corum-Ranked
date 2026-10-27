@@ -5,7 +5,7 @@
 namespace corum::ranked::replay {
 class HistoryReplayButton final:public cocos2d::CCNode {
     Json m_identity;std::future<std::optional<Json>> m_check;
-    CCMenuItemSpriteExtra* m_button=nullptr;CCLabelBMFont* m_caption=nullptr;
+    CCMenuItemSpriteExtra* m_button=nullptr;cocos2d::CCLabelBMFont* m_caption=nullptr;
     void play(cocos2d::CCObject*){showReplay(m_identity);}
     bool init(Json identity,float width){
         if(!CCNode::init())return false;m_identity=std::move(identity);
