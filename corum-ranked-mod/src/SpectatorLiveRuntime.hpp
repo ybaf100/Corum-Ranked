@@ -28,9 +28,20 @@ enum class SpectatorLiveStatus {
     Disconnected,
 };
 
+// Mode-specific authority is supplied by SurvivalSpectatorRuntime, never by a fake Solo Match.
+struct SurvivalSpectatorTransportContext {
+    std::string matchId,key,session,roundKey,targetId,attemptId;
+    int round=0,level=0,mapGeneration=0;
+    bool viewer=false,publisher=false;
+};
 class SpectatorLiveRuntime final {
 public:
     static SpectatorLiveRuntime& get();
+    static SpectatorLiveRuntime& survival();
+    void configureSurvival(SurvivalSpectatorTransportContext context);
+    bool survivalViewerAuthorized()const{return m_external && m_external->viewer;}
+    void stopSurvival();
+    void pumpSurvivalPublisher(){if(m_external && m_external->publisher && std::chrono::steady_clock::now()>=m_nextPublishAt)publish({});}
 
     bool tickPublisher(SpectatorGhostPose const& pose, bool practice);
     void publisherPaused(bool paused);
@@ -57,6 +68,9 @@ public:
 
 private:
     SpectatorLiveRuntime() = default;
+    std::optional<SurvivalSpectatorTransportContext> m_external;
+    std::string publishPath()const{return m_external?"/api/ranked/survival/online/matches/"+m_publishMatchId+"/spectator-live/publish":
+        "/api/ranked/matches/"+m_publishMatchId+"/spectator-live/publish";}
 
     void resetPublisher();
     void resetViewer();
@@ -74,7 +88,7 @@ private:
     std::int64_t m_publisherPausedMs = 0;
     bool m_publisherPaused = false;
     std::int64_t publisherElapsedMs() const;
-    matjson::Value m_publishBatchBody;
+    matjson::Value m_publishBatchBody=nullptr;
     std::int64_t m_publishBatchLastSequence = -1;
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
     std::string m_debugContextId, m_debugToken, m_debugPath;

@@ -1,3 +1,5 @@
+#include "ui/SurvivalOutcomePanel.hpp"
+#include "SurvivalSpectatorRuntime.hpp"
 #include "RankedRuntime.hpp"
 #include "RankedRoundPreparation.hpp"
 #include "SurvivalRuntime.hpp"
@@ -210,6 +212,10 @@ public:
         double qualifyingPercent = -1.0;
         bool rankedLevel = false;
         bool survivalLevel = false;
+        bool survivalLiveLevel = false;
+        CCLabelBMFont* survivalLiveText=nullptr;
+        std::string survivalLiveCaption;
+        float survivalLiveHudWait=0;
         bool survivalFreePlayHud = false;
         bool survivalNativeClearFinished = false;
         corum::ranked::LevelPreparationContext survivalContext;
@@ -306,6 +312,11 @@ public:
             return;
         }
 #endif
+        if(m_fields->survivalLiveLevel){
+            if(m_fields->localSafety.activate({.rankedScene=true,.testMode=m_isTestMode,.placement=false,.userPractice=false,
+                .serverSpectator=corum::ranked::SurvivalSpectatorRuntime::get().sceneLevel(m_fields->levelId),.ownAttemptAlive=false}))m_fields->spectatorMode=true;
+            runtime.setSpectatorLocalTransportBlocked(this,true);return;
+        }
         auto const ownAttemptAlive =
             m_fields->vanillaGameplayEndInProgress ||
             (m_fields->attemptStartReported && !m_fields->attemptEndReported) ||
@@ -403,7 +414,8 @@ public:
     bool init(GJGameLevel* level, bool useReplay, bool dontCreateObjects) {
         auto& runtime = corum::ranked::RankedRuntime::get();
         m_fields->levelId = level ? static_cast<int>(level->m_levelID) : 0;
-        m_fields->survivalLevel=corum::ranked::SurvivalRuntime::get().consumeNativeLaunch(level);
+        m_fields->survivalLiveLevel=corum::ranked::SurvivalSpectatorRuntime::get().sceneLevel(m_fields->levelId);
+        m_fields->survivalLevel=!m_fields->survivalLiveLevel && corum::ranked::SurvivalRuntime::get().consumeNativeLaunch(level);
         m_fields->survivalFreePlayHud=!m_fields->survivalLevel && corum::ranked::SurvivalRuntime::get().freePlaying();
         if(m_fields->survivalLevel){
             m_fields->survivalContext=corum::ranked::SurvivalRuntime::get().preparationContext();
@@ -469,6 +481,11 @@ public:
             return true;
         }
 #endif
+        if(m_fields->survivalLiveLevel){
+            addSurvivalLiveHud();
+            schedule(schedule_selector(CorumRankedPlayLayer::spectatorFrame));
+            return true;
+        }
         if(m_fields->survivalFreePlayHud){
             addSurvivalHud();schedule(schedule_selector(CorumRankedPlayLayer::survivalFrame));return true;
         }
@@ -738,6 +755,16 @@ public:
         });
     }
 
+    void addSurvivalFreePlayNavigation(){
+        auto const size=CCDirector::sharedDirector()->getWinSize();
+        if(m_fields->survivalFreePlayHud && corum::ranked::SurvivalRuntime::get().view().ownEliminated){
+            auto* menu=CCMenu::create();menu->setPosition({0,0});addChild(menu,1001);
+            auto* face=corum::ranked::ui::surface({100,24},{},corum::ranked::ui::Blue,corum::ranked::ui::SurfaceRaised,240,true);
+            face->addChild(corum::ranked::ui::menuLabel(corum::ranked::i18n::text("survival-watch","WATCH"),.23f,{50,12},corum::ranked::ui::Cyan));
+            auto* item=CCMenuItemSpriteExtra::create(face,this,menu_selector(CorumRankedPlayLayer::onSurvivalLiveAction));item->setTag(0);item->setPosition({size.width/2,20});menu->addChild(item);
+        }
+    }
+
     void addSurvivalHud() {
         auto const size=CCDirector::sharedDirector()->getWinSize();
         m_fields->hudRoot=CCNode::create();m_fields->hudRoot->setContentSize(size);
@@ -748,8 +775,28 @@ public:
             m_fields->survivalHud->attachProgressBar(m_progressBar,m_progressFill,m_progressWidth,m_progressHeight);
         }
         addChild(m_fields->hudRoot,1000);
+        addSurvivalFreePlayNavigation();
     }
 
+    corum::ranked::SpectatorLiveRuntime& spectatorTransport(){return m_fields->survivalLiveLevel?corum::ranked::SpectatorLiveRuntime::survival():corum::ranked::SpectatorLiveRuntime::get();}
+    void onSurvivalLiveAction(CCObject* object){
+        auto* item=typeinfo_cast<CCMenuItemSpriteExtra*>(object);if(!item)return;
+        if(item->getTag()==0)corum::ranked::SurvivalSpectatorRuntime::get().openTargets();
+        if(item->getTag()==1)corum::ranked::ui::showSurvivalStandings();
+        if(item->getTag()==2)corum::ranked::SurvivalSpectatorRuntime::get().leave();
+        if(item->getTag()==3)corum::ranked::SurvivalSpectatorRuntime::get().freePlay();
+    }
+    void addSurvivalLiveHud(){
+        auto const size=CCDirector::sharedDirector()->getWinSize();
+        m_fields->survivalLiveText=label("WAITING FOR PLAYER","medium",.26f,{.5f,1},{size.width/2,size.height-12});
+        addChild(m_fields->survivalLiveText,1000);
+        auto* menu=CCMenu::create();menu->setPosition({0,0});addChild(menu,1001);
+        for(int i=0;i<4;++i){auto* face=corum::ranked::ui::surface({86,24},{},corum::ranked::ui::Blue,corum::ranked::ui::SurfaceRaised,240,true);
+            auto* caption=corum::ranked::ui::menuLabel(corum::ranked::i18n::text(i==0?"survival-other-player":i==1?"survival-view-board":i==2?"exit":"survival-free-play",i==0?"OTHER PLAYER":i==1?"VIEW STATUS":i==2?"EXIT":"FREE PLAY"),.23f,{43,12},corum::ranked::ui::Text);
+            corum::ranked::ui::fitFullMenuLabel(caption,78,18,.23f);face->addChild(caption,5);
+            auto* item=CCMenuItemSpriteExtra::create(face,this,menu_selector(CorumRankedPlayLayer::onSurvivalLiveAction));item->setTag(i);item->setPosition({size.width/2+(i-1.5f)*90,20});menu->addChild(item);
+        }
+    }
     void resume() {
         PlayLayer::resume();
         if((m_fields->survivalLevel || m_fields->survivalFreePlayHud) && m_fields->rankedInitialized && !m_fields->safetyRetired && !m_fields->autoExitRequested) {
@@ -812,6 +859,7 @@ public:
         if (m_fields->debugRecordScene) return true;
         if (m_fields->debugPlaybackScene) return false;
 #endif
+        if(m_fields->survivalLevel)return corum::ranked::SurvivalSpectatorRuntime::get().publishing();
         return m_fields->rankedLevel && !corum::ranked::RankedRuntime::get().isSpectating();
     }
 
@@ -881,11 +929,14 @@ public:
             return;
         }
 #endif
+        if(m_fields->survivalLevel){if(ready && corum::ranked::SurvivalSpectatorRuntime::get().capture(pose))m_fields->spectatorCapture.sampled();return;}
         if (ready && corum::ranked::SpectatorLiveRuntime::get().tickPublisher(pose, false))
             m_fields->spectatorCapture.sampled();
     }
 
-    corum::ranked::SpectatorSceneContext currentSpectatorSceneContext() const {
+    corum::ranked::SpectatorSceneContext survivalSpectatorSceneContext(){auto const&v=corum::ranked::SurvivalRuntime::get().view();return {v.id,v.roundNumber,0,v.map.levelId};}
+    corum::ranked::SpectatorSceneContext currentSpectatorSceneContext() {
+        if(m_fields->survivalLiveLevel)return survivalSpectatorSceneContext();
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         auto const& debug = corum::ranked::debug::DebugSpectateRuntime::get();
         if (debug.playbackLevel(corum::ranked::debug::kDebugSpectateLevelId)) {
@@ -898,6 +949,8 @@ public:
     }
 
     bool watchableSpectatorScene() {
+        if(m_fields->survivalLiveLevel)return corum::ranked::SurvivalSpectatorRuntime::get().sceneLevel(m_fields->levelId) &&
+            !corum::ranked::SurvivalSpectatorRuntime::get().exitRequested() && m_fields->sceneContext==currentSpectatorSceneContext();
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         if (m_fields->debugPlaybackScene) {
             return corum::ranked::debug::DebugSpectateRuntime::get().playbackLevel(m_fields->levelId) &&
@@ -916,6 +969,7 @@ public:
         auto& runtime = corum::ranked::RankedRuntime::get();
         if (m_fields->rankedLevel && runtime.hasLocalAttemptInFlight()) return false;
         auto spectatorAuthority = runtime.isSpectating() && runtime.view().match.spectatorLiveEnabled;
+        if(m_fields->survivalLiveLevel)spectatorAuthority=corum::ranked::SurvivalSpectatorRuntime::get().sceneLevel(m_fields->levelId);
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         if (m_fields->debugPlaybackScene) spectatorAuthority = corum::ranked::debug::DebugSpectateRuntime::get().playbackLevel(m_fields->levelId);
 #endif
@@ -931,7 +985,7 @@ public:
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         if(!m_fields->debugPlaybackScene)
 #endif
-            corum::ranked::SpectatorLiveRuntime::get().requestSceneRestore();
+            spectatorTransport().requestSceneRestore();
         // A viewer must not inherit the local player's already-fired triggers.
         // This is one no-save dummy reset after authority + End FIFO, never a new Attempt.
         m_fields->localSafety.resetDummy();
@@ -951,6 +1005,7 @@ public:
         if (!m_fields->spectatorScenePrepared || m_isTestMode || m_isPracticeMode) return false;
         auto& runtime = corum::ranked::RankedRuntime::get();
         auto spectatorAuthority = runtime.isSpectating() && runtime.view().match.spectatorLiveEnabled;
+        if(m_fields->survivalLiveLevel)spectatorAuthority=corum::ranked::SurvivalSpectatorRuntime::get().sceneLevel(m_fields->levelId);
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         if (m_fields->debugPlaybackScene) spectatorAuthority = corum::ranked::debug::DebugSpectateRuntime::get().playbackLevel(m_fields->levelId);
 #endif
@@ -962,7 +1017,7 @@ public:
         auto const frameNumber = CCDirector::sharedDirector()->getTotalFrames();
         if (m_fields->spectatorPresentationFrameNumber == frameNumber) return false;
         m_fields->spectatorPresentationFrameNumber = frameNumber;
-        m_fields->spectatorRenderedFrame = corum::ranked::SpectatorLiveRuntime::get().presentationFrame();
+        m_fields->spectatorRenderedFrame = spectatorTransport().presentationFrame();
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         auto const poseReceived=m_fields->spectatorRenderedFrame && m_fields->spectatorRenderedFrame->pose;
 #endif
@@ -1134,9 +1189,10 @@ public:
     void updateSpectatorView(float dt) {
         (void)dt;
         auto& runtime = corum::ranked::RankedRuntime::get();
-        auto& live = corum::ranked::SpectatorLiveRuntime::get();
+        auto& live = spectatorTransport();
         live.tickPublisher({}, true);
         auto spectatorAuthority = runtime.isSpectating() && runtime.view().match.spectatorLiveEnabled;
+        if(m_fields->survivalLiveLevel)spectatorAuthority=corum::ranked::SurvivalSpectatorRuntime::get().sceneLevel(m_fields->levelId);
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         if (m_fields->debugPlaybackScene) spectatorAuthority = corum::ranked::debug::DebugSpectateRuntime::get().playbackLevel(m_fields->levelId);
 #endif
@@ -1243,7 +1299,17 @@ public:
         return false;
     }
 
+    void survivalSpectatorFrame(float dt){
+            auto& live=corum::ranked::SurvivalSpectatorRuntime::get();corum::ranked::SurvivalRuntime::get().tick();
+            if(live.exitRequested()){queueSurvivalGameplayReturn();return;}
+            syncSpectatorLocalSafety();spectatorTransport().tickViewer();updateSpectatorView(dt);ensureSpectatorCameraFrame(dt);
+            m_fields->survivalLiveHudWait-=dt;
+            if(m_fields->survivalLiveHudWait<=0){m_fields->survivalLiveHudWait=.1f;auto caption=live.hudText();
+                if(caption!=m_fields->survivalLiveCaption){m_fields->survivalLiveCaption=caption;m_fields->survivalLiveText->setString(caption.c_str());limitHudWidth(m_fields->survivalLiveText,CCDirector::sharedDirector()->getWinSize().width-40,.26f,.16f);}}
+    }
+
     void spectatorFrame(float dt) {
+        if(m_fields->survivalLiveLevel){survivalSpectatorFrame(dt);return;}
         if (blockEntryGameplayUpdate() || finishConcededGameplayHandoff()) return;
         if (!m_fields->rankedInitialized || m_fields->safetyRetired ||
             m_fields->spectatorPresentationRetired || m_fields->autoExitRequested ||
@@ -1263,6 +1329,7 @@ public:
 
     void postUpdate(float dt) {
         if (blockEntryGameplayUpdate() || finishConcededGameplayHandoff()) return;
+        if(m_fields->survivalLiveLevel){syncSpectatorLocalSafety();ScopedPersistenceOwner persistence(this);PlayLayer::postUpdate(dt);return;}
         if (m_fields->rankedLevel) corum::ranked::RankedRuntime::get().syncMatchGameplayPause(m_isPaused);
         syncSpectatorLocalSafety();
         ScopedPersistenceOwner persistence(this);
@@ -1542,8 +1609,10 @@ public:
             auto const eligible=m_fields->rankedInitialized && !m_fields->nativeEntryHeld && !m_isPracticeMode && !anticheat &&
                 player && (player==m_player1 || (m_gameState.m_isDualMode&&player==m_player2)) && !player->m_isDead && !m_hasCompletedLevel;
             auto const progress=eligible?rankedProgressPercent(this):0.0;
+            auto const terminalPose=eligible?std::optional(observedSpectatorPose(true,false)):std::nullopt;
             PlayLayer::destroyPlayer(player,object);
             if(eligible && player->m_isDead && !m_hasCompletedLevel && !m_fields->attemptEndReported) {
+                if(terminalPose)corum::ranked::SurvivalSpectatorRuntime::get().terminal(*terminalPose);
                 corum::ranked::SurvivalRuntime::get().endAttempt(progress);m_fields->attemptEndReported=true;
             }
             return;
@@ -1604,6 +1673,7 @@ public:
         if (suppressLocalCompletion()) return;
         if(m_fields->survivalLevel) {
             if(m_fields->rankedInitialized && !m_isPracticeMode && !m_fields->attemptEndReported) {
+                corum::ranked::SurvivalSpectatorRuntime::get().terminal(observedSpectatorPose(false,true));
                 corum::ranked::SurvivalRuntime::get().endAttempt(100);m_fields->attemptEndReported=true;
             }
             PlayLayer::levelComplete();return;
@@ -1636,6 +1706,7 @@ public:
         if (suppressLocalCompletion()) return;
         if(m_fields->survivalLevel) {
             if(m_fields->rankedInitialized && !m_isPracticeMode && !m_fields->attemptEndReported) {
+                corum::ranked::SurvivalSpectatorRuntime::get().terminal(observedSpectatorPose(false,true));
                 corum::ranked::SurvivalRuntime::get().endAttempt(100);m_fields->attemptEndReported=true;
             }
             PlayLayer::showCompleteText();return;
@@ -1671,6 +1742,7 @@ public:
         auto const freePlayReturn=m_fields->survivalFreePlayHud && survival.freePlayReturnPending();
         if(freePlayReturn && !corum::ranked::resumeSurvivalFreePlayPauseBeforeQuit(this))return;
         if(freePlayReturn)survival.beginFreePlayNativeQuit(m_level);
+        if(m_fields->survivalLiveLevel && !corum::ranked::resumeRankedPauseBeforeQuit(this))return;
         if(m_fields->survivalLevel) {
             if(!corum::ranked::resumeRankedPauseBeforeQuit(this))return;
             unschedule(schedule_selector(CorumRankedPlayLayer::survivalFrame));
@@ -1700,7 +1772,7 @@ public:
         // leave/re-enter LevelInfoLayer while the server kept the old attempt open,
         // producing stale scores, orphan attempts, and broken Death Match counts.
         if (m_fields->spectatorMode || m_fields->spectatorPending) {
-            corum::ranked::SpectatorLiveRuntime::get().reset();
+            spectatorTransport().reset();
         }
         if (!blocksLocalEvidence() && (m_fields->rankedPractice || m_isPracticeMode)) {
             corum::ranked::RankedRuntime::get().reportPracticePresence(false);
@@ -1739,11 +1811,12 @@ public:
         if (m_fields->debugRecordScene || m_fields->debugPlaybackScene) corum::ranked::debug::DebugSpectateRuntime::get().exitScene();
 #endif
         if (m_fields->spectatorMode || m_fields->spectatorPending) {
-            corum::ranked::SpectatorLiveRuntime::get().reset();
+            spectatorTransport().reset();
         }
         corum::ranked::ScopedSpectatorPersistenceMode noSave(m_isTestMode, blocksLevelPersistence(m_level));
         bool const appPausedBefore = AppDelegate::get() && AppDelegate::get()->m_gamePaused;
         PlayLayer::onExit();
+        if(m_fields->survivalLiveLevel)corum::ranked::SurvivalSpectatorRuntime::get().sceneExited();
         if (m_fields->rankedLevel) log::info("[RankedEntry] native exit level={} appPausedBefore={} appPausedAfter={}",
             m_fields->levelId, appPausedBefore, AppDelegate::get() && AppDelegate::get()->m_gamePaused);
         corum::ranked::RankedRuntime::get().setSpectatorLocalTransportBlocked(this, false);
@@ -2660,7 +2733,7 @@ bool corum::ranked::isOfficialSurvivalPlayLayer(PlayLayer* layer) {
 bool corum::ranked::requestSurvivalGameplayReturn(PlayLayer* layer) {
     if(!layer || layer!=PlayLayer::get())return false;
     auto* managed=static_cast<CorumRankedPlayLayer*>(layer);
-    if(!managed->m_fields->survivalLevel && !managed->m_fields->survivalFreePlayHud)return false;
+    if(!managed->m_fields->survivalLiveLevel && !managed->m_fields->survivalLevel && !managed->m_fields->survivalFreePlayHud)return false;
     auto const alreadyQueued=managed->m_fields->autoExitRequested;
     managed->queueSurvivalGameplayReturn();
     if(!alreadyQueued)geode::log::info("[SurvivalExit] queued={} running={} retired={} initialized={} sceneOwned={} nextScene={}",
@@ -2671,7 +2744,7 @@ bool corum::ranked::requestSurvivalGameplayReturn(PlayLayer* layer) {
 void corum::ranked::pumpSurvivalGameplayExit(PlayLayer* layer){
     if(!layer || layer!=PlayLayer::get())return;
     auto* managed=static_cast<CorumRankedPlayLayer*>(layer);auto& fields=*managed->m_fields.self();
-    if(!fields.rankedInitialized || (!fields.survivalLevel && !fields.survivalFreePlayHud))return;
+    if(!fields.rankedInitialized || (!fields.survivalLiveLevel && !fields.survivalLevel && !fields.survivalFreePlayHud))return;
     auto& runtime=SurvivalRuntime::get();
     bool const departing=fields.survivalFreePlayHud?runtime.freePlayReturnPending():
         !runtime.surrenderPending() && (runtime.view().ownEliminated || runtime.normalRoundCleared() ||
@@ -2738,7 +2811,7 @@ class $modify(CorumRankedSpectatorCameraHook, GJBaseGameLayer) {
         if (owner && owner->blockEntryGameplayUpdate()) return;
         if (owner && owner->prepareSpectatorScene() && owner->spectatorCameraActive()) {
             if (!owner->beginSpectatorWorldFrame()) return;
-            auto& live=corum::ranked::SpectatorLiveRuntime::get();
+            auto& live=owner->spectatorTransport();
             auto restorationFrames=live.takeRestorationFrames();
             auto const restoring=!restorationFrames.empty();
             auto const steps=restoring?restorationFrames.size():std::size_t(1);

@@ -29,7 +29,7 @@ struct SurvivalMatchView {
     std::vector<std::string> aliveIds;
     std::optional<double> cutoff,first;
     bool ownEntered=false,ownAssetsReady=false,ownEliminated=false,ownAbsent=false,resultPending=false,debug=false,online=false;
-    bool ownWinner=false;
+    bool ownWinner=false,spectatorDemand=false;
     std::string activeAttemptId;
     double activeAttemptProgress=0;
 };
@@ -93,6 +93,9 @@ public:
     bool normalRoundCleared() const;
     bool canFreePlay() const;
     bool beginFreePlay();
+    std::string const& spectatorAcceptedAttempt()const{return m_spectatorAcceptedAttempt;}
+    std::string const& localAttemptId()const{return m_attempt;}
+    void returnFreePlayForSpectator(){if(m_freePlay.active)m_freePlay.returnRequested=true;}
     bool freePlaying() const {return m_freePlay.active;}
     bool freePlayReturnPending() const;
     void requestDirectFreePlayReturn(PlayLayer*);
@@ -156,6 +159,7 @@ private:
     ServerClock m_clock;
     LevelPreparationContext m_prepared;
     geode::Ref<GJGameLevel> m_launchLevel;
+    std::string m_spectatorAcceptedAttempt;
     std::string m_session,m_attempt,m_attemptContext,m_enteredContext,m_readyContext,m_lastMapDiagnostic,m_presentationContext;
     double m_attemptBest=0,m_lastProgress=-1;
     int m_localAttempts=0;

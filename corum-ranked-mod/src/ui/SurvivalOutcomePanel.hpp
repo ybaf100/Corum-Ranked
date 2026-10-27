@@ -1,3 +1,4 @@
+#include "../SurvivalSpectatorRuntime.hpp"
 #pragma once
 #include "../SurvivalRuntime.hpp"
 #include "PlayerIcon.hpp"
@@ -75,6 +76,10 @@ class SurvivalStandingsPopup final:public geode::Popup {
                 auto* item=CCMenuItemSpriteExtra::create(face,this,menu_selector(SurvivalStandingsPopup::onPage));item->setTag(direction);item->setPosition({245.f+direction*64,22});m_buttonMenu->addChild(item);
             }
         }
+        if(runtime.view().ownEliminated && runtime.watchLockSeconds()==0){
+            auto* face=surface({112,22},{},Cyan,SurfaceRaised,255,true);face->addChild(menuLabel(i18n::text("survival-watch","WATCH"),.22f,{56,11},Cyan));
+            auto* watch=CCMenuItemSpriteExtra::create(face,this,menu_selector(SurvivalStandingsPopup::onWatch));watch->setPosition({411,22});m_buttonMenu->addChild(watch);
+        }
         applyPage();scheduleUpdate();update(0);return true;
     }
     void applyPage(){
@@ -82,6 +87,7 @@ class SurvivalStandingsPopup final:public geode::Popup {
         if(m_pageLabel)m_pageLabel->setString(fmt::format("{} / {}",m_page+1,m_pages).c_str());
     }
     void onPage(CCObject* sender){if(auto* item=typeinfo_cast<CCMenuItemSpriteExtra*>(sender)){m_page=item->getTag()<0?(m_page+m_pages-1)%m_pages:(m_page+1)%m_pages;applyPage();}}
+    void onWatch(CCObject*){onClose(nullptr);SurvivalSpectatorRuntime::get().openTargets();}
     void onPlayer(CCObject* sender){if(auto* item=typeinfo_cast<CCMenuItemSpriteExtra*>(sender);item && item->getTag()>=0 && static_cast<std::size_t>(item->getTag())<m_cards.size())openSurvivalProfile(this,m_cards[item->getTag()].row);}
 public:
     static SurvivalStandingsPopup* create(){auto* p=new SurvivalStandingsPopup;if(p->init()){p->autorelease();return p;}delete p;return nullptr;}
@@ -109,7 +115,7 @@ inline void showSurvivalStandings(){
     if(auto* popup=SurvivalStandingsPopup::create())popup->show();
 }
 class SurvivalOutcomePanel final:public cocos2d::CCLayerColor {
-    std::function<void(int)> m_action;CCMenu* m_menu=nullptr;CCMenuItemSpriteExtra* m_watch=nullptr;
+    std::function<void(int)> m_action;CCMenu* m_menu=nullptr;CCMenuItemSpriteExtra* m_watch=nullptr;CCMenuItemSpriteExtra* m_freeChoice=nullptr;CCMenuItemSpriteExtra* m_resultChoice=nullptr;
     std::string m_key,m_identity;std::vector<SurvivalStanding> m_profiles;
     struct Podium {CCNode* pedestal;CCMenuItemSpriteExtra* avatar;CCNode* stamp;CCNode* place;CCNode* glow;float x,base,height;int rank;};
     std::vector<Podium> m_stages;double m_elapsed=0;
@@ -133,14 +139,15 @@ public:
         for(auto const& p:view.result["standings"].asArray().unwrapOr(std::vector<matjson::Value>{}))
             buildKey+=":"+p["participantId"].asString().unwrapOr("")+":"+p["tierAfter"].asString().unwrapOr("")+":"+(p["lpAfter"].isNumber()?std::to_string(p["lpAfter"].asInt().unwrapOr(0)):"pending")+":"+std::to_string(p["delta"].asInt().unwrapOr(0));
         auto const size=CCDirector::sharedDirector()->getWinSize();
-        if(m_key!=buildKey){auto const elapsed=m_identity==key?m_elapsed:0.;m_identity=key;m_key=buildKey;removeAllChildrenWithCleanup(true);m_profiles=survivalRoster(view);m_stages.clear();m_elapsed=elapsed;m_watch=nullptr;m_detail=m_watchText=nullptr;m_halo=nullptr;
+        if(m_key!=buildKey){auto const elapsed=m_identity==key?m_elapsed:0.;m_identity=key;m_key=buildKey;removeAllChildrenWithCleanup(true);m_profiles=survivalRoster(view);m_stages.clear();m_elapsed=elapsed;m_watch=nullptr;m_freeChoice=m_resultChoice=nullptr;m_detail=m_watchText=nullptr;m_halo=nullptr;
             m_menu=CCMenu::create();m_menu->setPosition(CCPointZero);addChild(m_menu,20);
             auto heading=menuLabel(i18n::text(choice?"survival-eliminated":ceremony?"survival-podium":"survival-personal-result",choice?"ELIMINATED":ceremony?"FINAL PODIUM":"PERSONAL RESULT"),.60f,{size.width/2,size.height-30},ceremony?Gold:Cyan,FontWeight::Black);fitFullMenuLabel(heading,size.width-30,28,.60f);addChild(heading,5);
             if(choice){
-                auto* detail=menuLabel(i18n::text("survival-observer-description","Play the selected map locally without official records."),.25f,{size.width/2,size.height*.57f},TextMuted,FontWeight::SemiBold);fitFullMenuLabel(detail,size.width-40,40,.25f);addChild(detail,5);
-                auto const width=std::min(180.f,(size.width-64)/2);
-                m_watch=button("",{size.width/2-width/2-8,size.height*.37f},width,13,Cyan);
-                button(i18n::text("survival-view-results","VIEW RESULTS"),{size.width/2+width/2+8,size.height*.37f},width,14,Gold);
+                auto* detail=menuLabel(i18n::text("survival-spectator-choices","Watch a survivor, play locally, or view your result."),.25f,{size.width/2,size.height*.57f},TextMuted,FontWeight::SemiBold);fitFullMenuLabel(detail,size.width-40,40,.25f);addChild(detail,5);
+                auto const width=std::min(150.f,(size.width-48)/3);
+                m_watch=button("",{size.width/2-width-8,size.height*.37f},width,13,Cyan);
+                m_freeChoice=button(i18n::text("survival-free-play","FREE PLAY"),{size.width/2,size.height*.37f},width,18,Green);
+                m_resultChoice=button(i18n::text("survival-view-results","VIEW RESULTS"),{size.width/2+width+8,size.height*.37f},width,14,Gold);
             }else if(ceremony){
                 std::array<int,3> ranks{2,1,3};auto const width=std::min(138.f,(size.width-48)/3),base=80.f;
                 for(int n=0;n<3;++n){int rank=ranks[n];auto it=std::find_if(m_profiles.begin(),m_profiles.end(),[&](auto const& p){return p.rank==rank;});if(it==m_profiles.end())continue;
@@ -198,7 +205,7 @@ public:
                 if(auto* rgba=dynamic_cast<CCRGBAProtocol*>(p.glow))rgba->setOpacity(static_cast<GLubyte>(std::lround(frame.glowOpacity*255)));
             }
         }
-        if(m_watch){auto const lock=SurvivalRuntime::get().watchLockSeconds();m_watch->setEnabled(lock==0);m_watchText->setString((i18n::text("survival-watch","WATCH")+(lock>0?fmt::format(" ({})",lock):std::string{})).c_str());m_watchText->setColor(lock>0?TextMuted:Cyan);fitFullMenuLabel(m_watchText,m_watch->getContentSize().width-12,22,.29f);}
+        if(m_watch){auto const lock=SurvivalRuntime::get().watchLockSeconds();m_watch->setEnabled(lock==0);if(m_freeChoice)m_freeChoice->setEnabled(lock==0);if(m_resultChoice)m_resultChoice->setEnabled(lock==0);m_watchText->setString((i18n::text("survival-watch","WATCH")+(lock>0?fmt::format(" ({})",lock):std::string{})).c_str());m_watchText->setColor(lock>0?TextMuted:Cyan);fitFullMenuLabel(m_watchText,m_watch->getContentSize().width-12,22,.29f);}
     }
 };
 }

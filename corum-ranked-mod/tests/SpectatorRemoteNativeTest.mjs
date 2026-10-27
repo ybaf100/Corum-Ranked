@@ -44,7 +44,8 @@ struct RankedRuntime {
  static RankedRuntime& get(){static RankedRuntime r;return r;}View const& view()const{return data;}
 };
 enum class SpectatorLiveStatus{Idle,Waiting,Live,Fallback};
-struct SpectatorLiveRuntime {
+${viewerHeader.slice(viewerHeader.indexOf('struct SurvivalSpectatorTransportContext'),viewerHeader.indexOf('class SpectatorLiveRuntime final'))}
+struct SpectatorLiveRuntime {std::optional<SurvivalSpectatorTransportContext> m_external;
 ${viewerHeader.slice(viewerHeader.indexOf('    std::string m_viewMatchId;'),viewerHeader.indexOf('    geode::async::TaskHolder'))}
  void applyViewerResponse(matjson::Value const&);void setFallback(std::string);void noteWorldPartial(std::string);
  std::optional<SpectatorGhostPose> interpolatedPose()const;

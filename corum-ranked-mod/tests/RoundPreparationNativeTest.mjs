@@ -25,6 +25,8 @@ test('actual round preparation executes native download/resource/delegate/launch
 #include "${join(root, 'src/domain/RoundResourcePolicy.hpp')}"
 #include "${join(root, 'src/domain/SurvivalNativeOptions.hpp')}"
 #include <cassert>
+namespace corum::ranked {struct SurvivalSpectatorRuntime {static SurvivalSpectatorRuntime& get(){static SurvivalSpectatorRuntime r;return r;}bool sceneLevel(int)const{return false;}bool publishing()const{return false;}bool launchAllowed=false;int failedExits=0;bool canLaunch()const{return launchAllowed;}template<class...T>bool arm(T...){return launchAllowed;}template<class...T>bool capture(T const&...){return false;}template<class...T>void terminal(T const&...){}void sceneExited(){launchAllowed=false;++failedExits;}bool exitRequested()const{return false;}};}
+
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -171,7 +173,7 @@ namespace corum::ranked {
 void pumpSurvivalGameplayExit(PlayLayer*){}
 struct SurvivalRuntime {bool nativeActive=false;void tick(){}bool normalRoundCleared()const{return false;}static SurvivalRuntime&get(){static SurvivalRuntime r;return r;}
  bool interceptFreePlayNativeQuit(GJGameLevel*)const{return false;}bool acquiring()const{return nativeActive;}bool active()const{return nativeActive;}bool canEnter()const{return false;}void noteNativeLaunch(){}bool canReplayCleared()const{return false;}bool armClearedReplay(GJGameLevel*,CCScene*)const{return false;}bool canEnterObserver()const{return false;}bool observing()const{return false;}bool armObserver(GJGameLevel*,CCScene*)const{return false;}
- std::string optionsContext()const{return {};}bool validateNative(GJGameLevel*)const{return false;}bool armNative(GJGameLevel*)const{return false;}
+ std::string optionsContext()const{return {};}bool validateNative(GJGameLevel*)const{return nativeActive;}bool armNative(GJGameLevel*)const{return false;}
  void preparationFailed(std::string const&){} };
 
 struct SurvivalOptionsPreferences {static SurvivalOptionsPreferences&get(){static SurvivalOptionsPreferences p;return p;}void apply(GJGameLevel* level,std::string const&){applySurvivalNativeOptions(level,false,false);}};
@@ -363,6 +365,12 @@ int main(){
     {ScopedRankedRoundQuit quit(PlayLayer::get());navigation.returnToLastScene(&track);}
     PlayLayer::active->running=false;PlayLayer::active->live=false;PlayLayer::active=nullptr;
     tasks=std::exchange(queued,{});for(auto& t:tasks)t();runtime.entryAllowed=false;
+    // A failed native Survival live init releases its armed read-only admission.
+    runtime.state.match.state="ROUND_PLAYING";ticks(p);
+    survival.nativeActive=true;auto& live=SurvivalSpectatorRuntime::get();live.launchAllowed=true;
+    PlayLayer::failLoad=true;assert(!p.launch(&origin));
+    assert(live.failedExits==1&&!live.canLaunch()&&runtime.arms==previousArms);
+    PlayLayer::failLoad=false;survival.nativeActive=false;fakeNow+=2;
     // Cancel A -> B -> A: preserve the untagged native ticket until drained.
     context(3);GJGameLevel old;old.m_levelID=3;old.m_songID=0;meta.attest(&old);ticks(p,1);int const before=maps->requests;
     context(4);ticks(p,1);context(3);ticks(p,1);assert(maps->requests==before&&maps->m_levelDownloadDelegate==&p);

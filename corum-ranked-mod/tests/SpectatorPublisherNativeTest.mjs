@@ -14,7 +14,7 @@ const method = name => {
     while (depth) { if (source[end] === '{') ++depth; if (source[end] === '}') --depth; ++end; }
     return source.slice(start, end);
 };
-test('actual publisher captures during 110ms ACKs, sends immutable ordered batches and drains terminal exactly once', () => {
+for(const actualJson of [false,true])test('actual publisher ordered ACK/terminal transport, '+(actualJson?'real Geode JSON':'JSON boundary double'), () => {
     const viewer = read('tests/SpectatorLiveViewerNativeTest.mjs');
     const model = viewer.slice(viewer.indexOf('namespace matjson {'), viewer.indexOf('${readFileSync(join(root,'))
 
@@ -41,7 +41,7 @@ test('actual publisher captures during 110ms ACKs, sends immutable ordered batch
 #include <variant>
 #include <vector>
 #include <functional>
-${model}
+${actualJson?'#include <matjson.hpp>':model}
 ${read('src/spectator/SpectatorPoseCodec.hpp').replace(/^#include.*$|^#pragma once$/gm, '')}
 namespace web {
 struct WebResponse {int status=200;int code()const{return status;}};
@@ -73,7 +73,11 @@ struct RankedRuntime {
     std::string spectatorLiveSessionToken()const{return "session";}
     std::string spectatorLiveMatchToken()const{return "match-token";}
 };
+${header.slice(header.indexOf('struct SurvivalSpectatorTransportContext'),header.indexOf('class SpectatorLiveRuntime final'))}
 struct SpectatorLiveRuntime {
+    std::optional<SurvivalSpectatorTransportContext> m_external;
+    ${header.match(/    std::string publishPath\(\)const\{[\s\S]*?\}/)[0]}
+
 ${fields}
     geode::async::TaskHolder<web::WebResponse> m_publishRequest,m_terminalRequest;
     void resetPublisher();void startPublisherGeneration(std::string const&,std::string const&);
@@ -220,6 +224,21 @@ int main(){
     for(int i=0;i<12;i++){publishTestClock+=std::chrono::seconds(5);offline.tickPublisher(pose,false);assert(web::pending.size()==unsigned(i+1));web::pending.back().callback({503});}
     assert(offline.m_attemptPublishFailures==12);auto pendingCount=web::pending.size();publishTestClock+=std::chrono::seconds(10);offline.tickPublisher(pose,false);assert(web::pending.size()==pendingCount);
     ranked.m_attemptId="next-budget";assert(offline.tickPublisher(pose,false));assert(offline.m_attemptPublishFailures==0&&web::pending.size()==pendingCount+1);
+    // Independent Survival transport cannot infer publisher authority from a local UUID.
+    ranked={};ranked.state.stage=RuntimeStage::Ready;web::pending.clear();SpectatorLiveRuntime survival;
+    survival.m_external=SurvivalSpectatorTransportContext{"survival","R1:target","survival-session","R1","human","",2,456,7,false,true};
+    pose={100,40,0,false,false};assert(!survival.tickPublisher(pose,false)&&web::pending.empty());
+    survival.m_external->attemptId="ACKed-survival-attempt";assert(survival.tickPublisher(pose,false));
+    auto survivalBody=web::pending.back().request.body;
+    assert(web::pending.back().request.url=="/api/ranked/survival/online/matches/survival/spectator-live/publish");
+    assert(web::pending.back().request.session=="survival-session");
+    assert(survivalBody["roundKey"].asString().unwrapOr("")=="R1"&&survivalBody["mapGeneration"].asInt().unwrapOr(0)==7);
+    assert(survivalBody["packets"].asArray().unwrap().front()["levelId"].asInt().unwrapOr(0)==456);
+    web::pending.back().callback({200});pose.dead=true;survival.publishTerminal(pose,false);
+    assert(web::pending.back().request.body["packets"].asArray().unwrap().back()["keyframe"]["dead"].asBool().unwrapOr(false));
+    web::pending.back().callback({200});auto oldCount=web::pending.size();survival.publishTerminal(pose,false);assert(web::pending.size()==oldCount);
+    survival.m_external->publisher=false;assert(!survival.tickPublisher(pose,false));
+    assert(ranked.m_attemptId=="attempt-1"); // no scoring-side Attempt creation/changes
     // Native gameplay time is authoritative even when capture/HTTP starts late.
     ranked={};SpectatorLiveRuntime nativeClock;web::pending.clear();pose.nativeElapsedMs=60050;
     assert(nativeClock.tickPublisher(pose,false));assert(web::pending.back().request.body["packets"].asArray().unwrap().front()["elapsedMs"].asInt().unwrapOr(-1)==60050);
@@ -231,7 +250,7 @@ int main(){
     const dir = mkdtempSync(join(tmpdir(), 'corum-publisher-native-'));
     try {
         const file = join(dir, 'publisher.cpp'), binary = join(dir, 'publisher');writeFileSync(file, cpp);
-        execFileSync('g++', ['-std=c++23', '-Wall', '-Wextra', '-Wpedantic', '-Werror', file, '-o', binary], {stdio:'pipe'});
+        execFileSync('g++', ['-std=c++23', '-Wall', '-Wextra', ...(actualJson?[]:['-Wpedantic']), '-Werror', ...(actualJson?['-isystem',process.env.CORUM_MATJSON_SOURCE+'/include','-isystem',process.env.CORUM_RESULT_INCLUDE,...['value','impl','parser','dump','external/dragonbox'].map(p=>process.env.CORUM_MATJSON_SOURCE+'/src/'+p+'.cpp')]:[]),file, '-o', binary], {stdio:'pipe'});
         execFileSync(binary, [], {stdio:'pipe'});
     } finally {rmSync(dir, {recursive:true,force:true});}
 });

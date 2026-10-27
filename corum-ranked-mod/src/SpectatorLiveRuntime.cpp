@@ -77,6 +77,13 @@ SpectatorLiveRuntime& SpectatorLiveRuntime::get() {
     return runtime;
 }
 
+SpectatorLiveRuntime& SpectatorLiveRuntime::survival(){static auto* r=new SpectatorLiveRuntime;return *r;}
+void SpectatorLiveRuntime::configureSurvival(SurvivalSpectatorTransportContext context){
+    if(!m_external || m_external->key!=context.key || m_external->session!=context.session)reset();
+    m_external=std::move(context);
+}
+void SpectatorLiveRuntime::stopSurvival(){reset();m_external.reset();}
+
 SpectatorLiveStatus SpectatorLiveRuntime::status() const {
     if(m_disconnected)return SpectatorLiveStatus::Disconnected;
     if(m_consecutiveViewerErrors>0)return SpectatorLiveStatus::Reconnecting;
@@ -106,7 +113,7 @@ void SpectatorLiveRuntime::resetPublisher() {
     m_publishMatchId.clear();
     m_publishAttemptId.clear();
     m_publishSequence = 0; m_publishCosmeticRevision=0;
-    m_publishQueue = {}; m_publishBatchBody = {}; m_publishBatchLastSequence = -1;
+    m_publishQueue = {}; m_publishBatchBody = nullptr; m_publishBatchLastSequence = -1;
     m_publisherPaused = false; m_publisherPausedAt = {}; m_publisherPausedMs = 0;
     m_publishStartedAt = {};
     m_nextPublishAt = {};
@@ -174,12 +181,12 @@ void SpectatorLiveRuntime::startPublisherGeneration(
     auto const budget=matchId+":"+attemptId;
     if(budget!=m_publishBudgetAttemptId){m_publishBudgetAttemptId=budget;m_attemptPublishFailures=0;}
     auto const& match = RankedRuntime::get().view().match;
-    m_publishRound = match.roundNumber;
-    m_publishLevel=match.currentMap?match.currentMap->levelId:0;
+    m_publishRound = m_external?m_external->round:match.roundNumber;
+    m_publishLevel=m_external?m_external->level:match.currentMap?match.currentMap->levelId:0;
     // A server start certificate can release this Attempt before the next state
     // poll changes DEATHMATCH_ENTERING to PLAYING. Context is an exact identity,
     // not a presentation phase; retain it across that delayed state projection.
-    m_publishDeathmatch = match.deathmatchSequence > 0 ? match.deathmatchSequence : 0;
+    m_publishDeathmatch = m_external?0:match.deathmatchSequence > 0 ? match.deathmatchSequence : 0;
     ++m_publishGeneration;
     if (m_publishGeneration == 0) m_publishGeneration = 1;
     m_publishSequence = 0; m_publishCosmeticRevision=0;
@@ -206,8 +213,8 @@ bool SpectatorLiveRuntime::tickPublisher(SpectatorGhostPose const& pose, bool pr
     auto& ranked = RankedRuntime::get();
     auto const& view = ranked.view();
     auto const& match = view.match;
-    auto const attemptId = ranked.spectatorLiveAttemptId();
-    auto const eligible =
+    auto const attemptId = m_external?m_external->attemptId:ranked.spectatorLiveAttemptId();
+    auto const eligible = m_external ? (m_external->publisher && !practice && !attemptId.empty() && finitePose(pose)) :
         view.stage == RuntimeStage::Matched &&
         !ranked.isPlacement() &&
         !ranked.isSpectating() && match.spectatorLiveEnabled &&
@@ -220,9 +227,10 @@ bool SpectatorLiveRuntime::tickPublisher(SpectatorGhostPose const& pose, bool pr
         if (!m_terminalPending) resetPublisher();
         return false;
     }
-    if (m_publishMatchId != match.matchId || m_publishAttemptId != attemptId) {
+    auto const publisherMatch=m_external?m_external->matchId:match.matchId;
+    if (m_publishMatchId != publisherMatch || m_publishAttemptId != attemptId) {
         resetPublisher();
-        startPublisherGeneration(match.matchId, attemptId);
+        startPublisherGeneration(publisherMatch, attemptId);
     }
     if (attemptId == m_terminalPublishAttemptId) return false;
     if(m_attemptPublishFailures>=12)return false;
@@ -248,6 +256,17 @@ bool SpectatorLiveRuntime::tickPublisher(SpectatorGhostPose const& pose, bool pr
 }
 
 void SpectatorLiveRuntime::publishTerminal(SpectatorGhostPose const& pose, bool practice) {
+    if(m_external){
+        if(practice || !m_external->publisher || m_external->attemptId.empty() || !finitePose(pose) || !(pose.dead||pose.finished))return;
+        if(m_terminalPublishAttemptId==m_external->attemptId)return;
+        if(m_publishAttemptId!=m_external->attemptId){resetPublisher();startPublisherGeneration(m_external->matchId,m_external->attemptId);}
+        auto elapsed=pose.nativeElapsedMs?static_cast<std::int64_t>(*pose.nativeElapsedMs):publisherElapsedMs();
+        if(m_publishQueue.capture(std::max(elapsed,m_publishQueue.lastElapsedMs()),pose)){
+            m_terminalPublishAttemptId=m_external->attemptId;
+            publish(pose);
+        }
+        return;
+    }
     auto& ranked = RankedRuntime::get();
     auto const& match = ranked.view().match;
     auto const attempt = ranked.spectatorLiveAttemptId();
@@ -319,7 +338,7 @@ void SpectatorLiveRuntime::tickTerminal() {
     request.bodyJSON(m_terminalBody);
     m_terminalBusy = true;
     auto const matchId = m_terminalBody["matchId"].asString().unwrapOr("");
-    m_terminalRequest.spawn(request.post(endpoint("/api/ranked/matches/" + matchId + "/spectator-live/publish")),
+    m_terminalRequest.spawn(request.post(endpoint(publishPath())),
         [this, generation](web::WebResponse response) {
             if (generation != m_terminalRequestGeneration) return;
             m_terminalBusy = false;
@@ -334,9 +353,9 @@ void SpectatorLiveRuntime::tickTerminal() {
 void SpectatorLiveRuntime::publish(SpectatorGhostPose const&) {
     auto& ranked = RankedRuntime::get();
     if (m_publishBusy || m_publishMatchId.empty() || m_publishAttemptId.empty()) return;
-    auto const session = m_terminalPending ? m_terminalSessionToken : ranked.spectatorLiveSessionToken();
+    auto const session = m_external?m_external->session:m_terminalPending ? m_terminalSessionToken : ranked.spectatorLiveSessionToken();
     auto const token = m_terminalPending ? m_terminalMatchToken : ranked.spectatorLiveMatchToken();
-    if (session.empty() || token.empty()) return;
+    if (session.empty() || (!m_external && token.empty())) return;
     if (!m_publishBatchBody.isObject()) {
         auto const batch = m_publishQueue.batch();
         if (batch.empty()) return;
@@ -359,13 +378,14 @@ void SpectatorLiveRuntime::publish(SpectatorGhostPose const&) {
         m_publishBatchBody = matjson::Value(); m_publishBatchBody["packets"] = packets;
         m_publishBatchLastSequence = batch.back().sequence;
     }
+    if(m_external){m_publishBatchBody["roundKey"]=m_external->roundKey;m_publishBatchBody["mapGeneration"]=m_external->mapGeneration;m_publishBatchBody["levelId"]=m_external->level;}
     auto request = spectatorRequest(session, token); request.bodyJSON(m_publishBatchBody);
     auto const requestGeneration = ++m_publishRequestGeneration;
     auto const matchId = m_publishMatchId, attemptId = m_publishAttemptId;
     auto const lastSequence = m_publishBatchLastSequence;
     m_publishBusy = true;
     m_publishRequest.spawn(
-        request.post(endpoint("/api/ranked/matches/" + matchId + "/spectator-live/publish")),
+        request.post(endpoint(publishPath())),
         [this, requestGeneration, matchId, attemptId, lastSequence](web::WebResponse response) {
             if (requestGeneration != m_publishRequestGeneration || matchId != m_publishMatchId ||
                 attemptId != m_publishAttemptId) return;
@@ -373,7 +393,7 @@ void SpectatorLiveRuntime::publish(SpectatorGhostPose const&) {
             if (successful(response)) {
                 m_attemptPublishFailures=0;
                 m_publishQueue.acknowledge(lastSequence);
-                m_publishBatchBody = {}; m_publishBatchLastSequence = -1;
+                m_publishBatchBody = nullptr; m_publishBatchLastSequence = -1;
                 m_nextPublishAt = std::chrono::steady_clock::now(); // no extra ACK-bound 50ms wait
                 return;
             }
@@ -383,7 +403,7 @@ void SpectatorLiveRuntime::publish(SpectatorGhostPose const&) {
                 std::min(1000,100*(1<<std::min(3,static_cast<int>(m_attemptPublishFailures)-1))));
             if (response.code() == 409) {
                 ++m_publishGeneration; if (!m_publishGeneration) m_publishGeneration = 1;
-                m_publishQueue = {}; m_publishBatchBody = {}; m_publishBatchLastSequence = -1;
+                m_publishQueue = {}; m_publishBatchBody = nullptr; m_publishBatchLastSequence = -1;
                 m_publishSequence = 0; m_publishCosmeticRevision=0; // The Attempt's publisher clock never rewinds on reconnect.
                 if (m_terminalPending) {
                     m_terminalBody["generation"] = static_cast<std::int64_t>(m_publishGeneration);
@@ -407,6 +427,7 @@ void SpectatorLiveRuntime::tickViewer() {
         !ranked.spectatorLiveSessionToken().empty() && !ranked.spectatorLiveMatchToken().empty();
     auto matchId = match.matchId;
     auto contextKey = viewerContextKey(match);
+    if(m_external){eligible=m_external->viewer;matchId=m_external->matchId;contextKey=m_external->key;}
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
     if (!m_debugContextId.empty()) {
         eligible = debug::DebugSpectateRuntime::get().playbackLevel(debug::kDebugSpectateLevelId);
@@ -446,7 +467,7 @@ void SpectatorLiveRuntime::tickViewer() {
 void SpectatorLiveRuntime::pollViewer() {
     if (m_viewBusy) return;
     auto& ranked = RankedRuntime::get();
-    auto matchId = ranked.view().match.matchId;
+    auto matchId = m_external?m_external->matchId:ranked.view().match.matchId;
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
     if (!m_debugContextId.empty()) matchId = m_debugContextId;
 #endif
@@ -472,6 +493,11 @@ void SpectatorLiveRuntime::pollViewer() {
     if(m_debugContextId.empty() || m_debugRestoreHistory)
 #endif
         path+="&worldHistory=1";
+    if(m_external){
+        request=spectatorRequest(m_external->session,{});
+        path="/api/ranked/survival/online/matches/"+matchId+"/spectator-live?protocolVersion=2&worldHistory=1&targetId="+m_external->targetId+
+            "&roundKey="+m_external->roundKey+"&mapGeneration="+std::to_string(m_external->mapGeneration)+"&levelId="+std::to_string(m_external->level);
+    }
     path+=fmt::format("&cosmeticRevision={}",m_viewCosmeticRevision);
     if (!m_forceRestoreRequest && !m_viewAttemptId.empty()) path += "&attemptId=" + m_viewAttemptId;
     if (!m_forceRestoreRequest && m_viewGeneration > 0) path += fmt::format("&generation={}", m_viewGeneration);
@@ -484,7 +510,7 @@ void SpectatorLiveRuntime::pollViewer() {
     m_viewRequest.spawn(
         request.get(endpoint(path)),
         [this, requestGeneration, matchId, contextKey, requestStartedAt](web::WebResponse response) {
-            auto currentContextKey = viewerContextKey(RankedRuntime::get().view().match);
+            auto currentContextKey = m_external?m_external->key:viewerContextKey(RankedRuntime::get().view().match);
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
             if (!m_debugContextId.empty()) currentContextKey = fmt::format("{}:R1:D0:L{}", m_debugContextId, debug::kDebugSpectateLevelId);
 #endif
@@ -500,7 +526,11 @@ void SpectatorLiveRuntime::pollViewer() {
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
             if(!m_debugContextId.empty())authorized=debug::DebugSpectateRuntime::get().playbackLevel(debug::kDebugSpectateLevelId);
 #endif
+            if(m_external)authorized=m_external->viewer;
             if(!authorized){resetViewer();return;}
+            if(m_external && (response.code()==401||response.code()==403||response.code()==409)){
+                m_external->viewer=false;resetViewer();return;
+            }
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
             if (!m_debugContextId.empty() && (response.code() == 401 || response.code() == 403 || response.code() == 404)) {
                 debug::DebugSpectateRuntime::get().viewerResponse(false, true); return;
@@ -515,7 +545,8 @@ void SpectatorLiveRuntime::pollViewer() {
                 m_reason="NETWORK_ERROR";
                 if(m_consecutiveViewerErrors>=12){m_disconnected=true;m_reason="NETWORK_RETRY_EXHAUSTED";return;}
                 m_viewerPollGapMs = spectatorViewerPollGapMs(false, true, false, false, 0, 0, 0, m_consecutiveViewerErrors);
-                m_nextViewerPollAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(m_viewerPollGapMs);
+                if(m_external)m_viewerPollGapMs=std::max(20,m_viewerPollGapMs);
+            m_nextViewerPollAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(m_viewerPollGapMs);
                 return;
             }
             m_consecutiveViewerErrors = 0;
@@ -529,6 +560,7 @@ void SpectatorLiveRuntime::pollViewer() {
                 m_sampleBuffer.starving(), m_sampleBuffer.terminalRendered() || m_viewOpponentPaused,
                 m_sampleBuffer.latestTimeMs() - m_sampleBuffer.renderTimeMs(),
                 m_sampleBuffer.delayMs(), m_lastViewerRttMs, 0);
+            if(m_external)m_viewerPollGapMs=std::max(20,m_viewerPollGapMs);
             m_nextViewerPollAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(m_viewerPollGapMs);
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
             if (!m_debugContextId.empty() && m_lastAcceptedPose &&
@@ -548,6 +580,12 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
     if (protocolVersion != kProtocolVersion) {
         setFallback("UNSUPPORTED_PROTOCOL_VERSION");
         return;
+    }
+    if(m_external && !root["fallback"].asBool().unwrapOr(false)){
+        if(root["targetId"].asString().unwrapOr("")!=m_external->targetId ||
+           root["context"]["roundKey"].asString().unwrapOr("")!=m_external->roundKey ||
+           root["context"]["mapGeneration"].asInt().unwrapOr(0)!=m_external->mapGeneration ||
+           root["context"]["levelId"].asInt().unwrapOr(0)!=m_external->level){setFallback("SURVIVAL_STREAM_CONTEXT_MISMATCH");return;}
     }
     auto const paused = root["paused"].asBool().unwrapOr(false);
     if (m_viewOpponentPaused && !paused) m_lastPacketAt = std::chrono::steady_clock::now();
@@ -585,8 +623,8 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
     auto const attemptId = stream["attemptId"].asString().unwrapOr("");
     auto const generation = static_cast<std::uint64_t>(stream["generation"].asInt().unwrapOr(0));
     auto const& authoritativeMatch = RankedRuntime::get().view().match;
-    auto expectedRound = authoritativeMatch.roundNumber;
-    auto expectedDeathmatch = authoritativeMatch.deathmatchSequence;
+    auto expectedRound = m_external?m_external->round:authoritativeMatch.roundNumber;
+    auto expectedDeathmatch = m_external?0:authoritativeMatch.deathmatchSequence;
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
     if (!m_debugContextId.empty()) { expectedRound = 1; expectedDeathmatch = 0; }
 #endif
@@ -606,7 +644,7 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
 #else
     if(!hasRestoration)m_partialSync=true;
 #endif
-    auto expectedLevel=authoritativeMatch.currentMap?authoritativeMatch.currentMap->levelId:0;
+    auto expectedLevel=m_external?m_external->level:authoritativeMatch.currentMap?authoritativeMatch.currentMap->levelId:0;
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
     if(!m_debugContextId.empty())expectedLevel=debug::kDebugSpectateLevelId;
 #endif
@@ -920,6 +958,15 @@ std::optional<SpectatorRemoteFrame> SpectatorLiveRuntime::presentationFrame() co
         };
     }
 #endif
+    if(m_external){
+        if(!m_external->viewer || m_viewContextKey!=m_external->key)return std::nullopt;
+        if(m_forceRestoreRequest)return m_heldPresentation;
+        if(m_restoreTimeline.active())return m_restoreTimeline.frame();
+        if(!sample)return m_heldPresentation;
+        auto frame=SpectatorRemoteFrame{.context={m_viewMatchId,m_external->round,0,m_external->level,m_viewAttemptId,m_viewGeneration,m_viewPresentationEpoch},
+            .sequence=sample->sequence,.pose=sample->pose,.publisherElapsedMs=sample->publisherElapsedMs,.presentationSegment=sample->segment};
+        m_heldPresentation=frame;return frame;
+    }
     auto& ranked = RankedRuntime::get();
     auto const& match = ranked.view().match;
     if (ranked.view().stage != RuntimeStage::Matched || ranked.isPlacement() ||

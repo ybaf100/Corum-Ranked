@@ -1,3 +1,5 @@
+import {Optional} from "@nestjs/common";
+import {SurvivalSpectatorLiveService} from "./survival-spectator-live.service.js";
 import { DemandWorker } from "../database/database-work.js";
 import type { AchievementUnlockNotice } from "../achievement/achievement.service.js";
 import {survivalResultRoster} from "./survival-result-roster.js";
@@ -35,7 +37,7 @@ export class SurvivalOnlineService implements OnApplicationBootstrap,OnApplicati
   private workPending=true;
   private pending:Promise<void>|null=null;
   public constructor(@Inject(DATABASE)private readonly db:DatabasePort,@Inject(SERVER_CLOCK)private readonly clock:ServerClock,
-    private readonly sessions:SessionService,private readonly engine:SurvivalEngineService,private readonly survival:SurvivalService,private readonly config:SurvivalConfigService){
+    private readonly sessions:SessionService,private readonly engine:SurvivalEngineService,private readonly survival:SurvivalService,private readonly config:SurvivalConfigService,@Optional() private readonly live?:SurvivalSpectatorLiveService){
     engine.registerAdapter((tx,m,now)=>this.drive(tx,m,now));
     this.worker=new DemandWorker(db,"survival",500,async()=>{await this.tickOnce();return this.workPending;},e=>this.logger.error(String(e)));
   }
@@ -95,7 +97,7 @@ export class SurvivalOnlineService implements OnApplicationBootstrap,OnApplicati
     const round=survivalCurrentRound(match),participant=round.players.find(p=>p.participantId===own.participant_id);
     const attempt=participant?.attempts.find(a=>a.endedAt===null);
     return {...survivalLiveView(match,this.clock.now().getTime(),own.participant_id),debug:false,botFilled:!!match.players.find(p=>p.kind==="BOT"),
-      myParticipantId:own.participant_id,myActiveAttemptId:attempt?.id??null,myActiveAttemptProgress:attempt?.highestProgress??0,
+      spectatorDemand:this.live?.demand(id,own.participant_id,round.key,round.mapGeneration)??false,myParticipantId:own.participant_id,myActiveAttemptId:attempt?.id??null,myActiveAttemptProgress:attempt?.highestProgress??0,
       myResultPending:match.players.find(p=>p.participantId===own.participant_id)!.eliminationStage!==null && !result,
       result,mapSelection:match.state==="MAP_SELECTION"?await this.engine.mapSelectionStatus(id):null};
   }

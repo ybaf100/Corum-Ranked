@@ -1,3 +1,4 @@
+#include "SurvivalSpectatorRuntime.hpp"
 #include "SurvivalRuntime.hpp"
 #include "RankedRuntime.hpp"
 #include "RankedAudioManager.hpp"
@@ -55,7 +56,7 @@ void SurvivalRuntime::tick() {
     auto const token=RankedRuntime::get().spectatorLiveSessionToken();
     if(token!=m_session) {
         ++m_generation;m_controlRequest.cancel();m_pollRequest.cancel();m_eventRequest.cancel();m_recoverRequest.cancel();m_queueRequest.cancel();
-        m_lastServerNow=0;m_session=token;m_creating=m_pollBusy=m_eventBusy=m_recoverBusy=m_queuePollBusy=false;m_view={};m_queue={};++m_queueGeneration;m_prepared={};m_events.clear();m_attempt.clear();
+        m_lastServerNow=0;m_session=token;m_creating=m_pollBusy=m_eventBusy=m_recoverBusy=m_queuePollBusy=false;m_view={};m_queue={};++m_queueGeneration;m_prepared={};m_events.clear();m_attempt.clear();m_spectatorAcceptedAttempt.clear();
         m_attemptContext=m_enteredContext=m_readyContext="";m_nextPoll={};
         m_clock={};resetSurrender();
         m_needRecovery=!token.empty();m_recoverRetryAt={};m_ackRetryAt={};
@@ -65,6 +66,7 @@ void SurvivalRuntime::tick() {
         if(m_needRecovery)recover();
     }
     pumpFreePlayReturn();
+    SurvivalSpectatorRuntime::get().tick();
     pumpSurrenderReturn();
     if(token.empty())return;
     RankedRuntime::get().updateSessionHeartbeat();
@@ -276,9 +278,10 @@ void SurvivalRuntime::observe(matjson::Value const& root) {
     for(auto const& p:root["preparation"].asArray().unwrapOr(std::vector<matjson::Value>{}))if(p["participantId"].asString().unwrapOr("")==m_view.ownId) {
         m_view.ownAssetsReady=p["assetsReady"].asBool().unwrapOr(false);m_view.ownEntered=p["entered"].asBool().unwrapOr(false);m_view.ownAbsent=p["absent"].asBool().unwrapOr(false);
     }
+    m_view.spectatorDemand=root["spectatorDemand"].asBool().unwrapOr(false);
     m_view.activeAttemptId=root["myActiveAttemptId"].asString().unwrapOr("");m_view.activeAttemptProgress=root["myActiveAttemptProgress"].asDouble().unwrapOr(0);
     if(oldContext!=preparationContext()) {
-        m_prepared={};m_attempt.clear();m_attemptContext=m_enteredContext=m_readyContext="";m_lastProgress=-1;m_localAttempts=0;
+        m_prepared={};m_attempt.clear();m_spectatorAcceptedAttempt.clear();m_attemptContext=m_enteredContext=m_readyContext="";m_lastProgress=-1;m_localAttempts=0;
     }
     pumpSurrenderReturn();
     discardObsoleteEvents();
@@ -306,10 +309,10 @@ void SurvivalRuntime::poll() {
 SurvivalOutcomeChoice SurvivalRuntime::outcomeChoice() const {
     if(Mod::get()->getSavedValue<std::string>("survival-outcome-match")!=m_view.id)return SurvivalOutcomeChoice::Undecided;
     auto const choice=Mod::get()->getSavedValue<int>("survival-outcome-choice",0);
-    return choice==1?SurvivalOutcomeChoice::Observe:choice==2?SurvivalOutcomeChoice::PersonalResult:SurvivalOutcomeChoice::Undecided;
+    return choice==1?SurvivalOutcomeChoice::Observe:choice==2?SurvivalOutcomeChoice::PersonalResult:choice==3?SurvivalOutcomeChoice::LiveSpectate:SurvivalOutcomeChoice::Undecided;
 }
 void SurvivalRuntime::chooseOutcome(SurvivalOutcomeChoice choice){
-    if(choice==outcomeChoice() || !active() || !m_view.ownEliminated || (choice==SurvivalOutcomeChoice::Observe && watchLockSeconds()>0))return;
+    if(choice==outcomeChoice() || !active() || !m_view.ownEliminated || ((choice==SurvivalOutcomeChoice::Observe || choice==SurvivalOutcomeChoice::LiveSpectate) && watchLockSeconds()>0))return;
     Mod::get()->setSavedValue("survival-outcome-match",m_view.id);Mod::get()->setSavedValue("survival-outcome-choice",static_cast<int>(choice));
     (void)Mod::get()->saveData();
 }
@@ -343,7 +346,7 @@ SurvivalMatchView SurvivalRuntime::preparationView() const {
 }
 LevelPreparationContext SurvivalRuntime::preparationContext() const {
     auto const view=preparationView();
-    if(!active() || !view.map.levelId || (view.ownEliminated && !observing()) || view.state=="FINAL_RESULT" || view.state=="CANCELLED")return {};
+    if(!active() || !view.map.levelId || (view.ownEliminated && !observing() && outcomeChoice()!=SurvivalOutcomeChoice::LiveSpectate) || view.state=="FINAL_RESULT" || view.state=="CANCELLED")return {};
     return {view.id,view.map.levelId,view.roundNumber,view.phase=="TIEBREAK"?1:0,false,0,view.mapGeneration};
 }
 bool SurvivalRuntime::acquiring() const { return preparationContext().valid(); }
@@ -425,13 +428,16 @@ void SurvivalRuntime::pumpEvents() {
     m_eventBusy=true;auto const body=m_events.front();auto http=request(m_session);http.bodyJSON(body);
     auto const generation=m_generation;auto const session=m_session;auto const id=m_view.id;auto const eventId=body["eventId"].asString().unwrapOr("");
     auto const eventType=body["type"].asString().unwrapOr("");
+    auto const attemptId=body["attemptId"].asString().unwrapOr("");
     auto const eventGeneration=++m_eventGeneration;
-    m_eventRequest.spawn(http.post(matchEndpoint("/matches/"+id+"/events")),[this,generation,eventGeneration,session,id,eventId,eventType](web::WebResponse response) {
+    m_eventRequest.spawn(http.post(matchEndpoint("/matches/"+id+"/events")),[this,generation,eventGeneration,session,id,eventId,eventType,attemptId](web::WebResponse response) {
         if(!current(generation,session) || m_view.id!=id || eventGeneration!=m_eventGeneration)return;
         m_eventBusy=false;
         if(eventType=="FORFEIT")geode::log::info("[SurvivalSurrender] HTTP event={} match={} status={}",eventId,id,response.code());
         if(response.code()>=200 && response.code()<300) {
-            observe(response.json().unwrapOr(matjson::Value()));pumpSurrenderReturn();
+            auto const accepted=response.json().unwrapOr(matjson::Value());
+            if(eventType=="ATTEMPT_START" && accepted["myActiveAttemptId"].asString().unwrapOr("")==attemptId)m_spectatorAcceptedAttempt=attemptId;
+            observe(accepted);pumpSurrenderReturn();
             if(eventType=="FORFEIT")geode::log::info("[SurvivalSurrender] ACK event={} eliminated={} accepted={}",eventId,m_view.ownEliminated,m_surrenderAccepted);
             if(eventType=="FORFEIT" && eventId==m_surrenderEventId && !m_surrenderAccepted){
                 m_retryAt=std::chrono::steady_clock::now()+std::chrono::milliseconds(500);m_nextPoll={};return;
@@ -497,7 +503,7 @@ bool SurvivalRuntime::beginAttempt() {
     if(attemptLimitReached())return false;
     auto body=event("ATTEMPT_START");if(!RankedRuntime::get().prepareSurvivalEnvironment(body))return false;
     m_localAttempts=std::max(m_localAttempts,own==m_view.standings.end()?0:own->attemptsUsed)+1;
-    m_attempt=utils::random::generateUUID();m_attemptContext=preparationContextText(preparationContext());m_attemptBest=0;m_lastProgress=-1;m_nextProgress={};
+    m_spectatorAcceptedAttempt.clear();m_attempt=utils::random::generateUUID();m_attemptContext=preparationContextText(preparationContext());m_attemptBest=0;m_lastProgress=-1;m_nextProgress={};
     body["attemptId"]=m_attempt;enqueue(std::move(body));return true;
 }
 void SurvivalRuntime::progress(double value) {

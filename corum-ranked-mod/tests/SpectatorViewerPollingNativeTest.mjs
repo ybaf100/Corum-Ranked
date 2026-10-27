@@ -55,7 +55,8 @@ std::string spectatorLiveSessionToken()const{return "session";}std::string spect
 std::string viewerContextKey(RankedRuntime::Match const&){return "context";}
 web::WebRequest spectatorRequest(std::string const&,std::string const&){return {};}
 bool successful(web::WebResponse const& r){return r.status>=200&&r.status<300;}
-struct SpectatorLiveRuntime {
+${header.slice(header.indexOf('struct SurvivalSpectatorTransportContext'),header.indexOf('class SpectatorLiveRuntime final'))}
+struct SpectatorLiveRuntime {std::optional<SurvivalSpectatorTransportContext> m_external;
 ${fields}
 geode::async::TaskHolder<web::WebResponse> m_viewRequest;
 void pollViewer();void resetViewer(){m_viewBusy=false;++m_viewRequestGeneration;}

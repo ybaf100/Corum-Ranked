@@ -56,7 +56,7 @@ test('Pause preserves a synchronized server countdown across errors, polling gap
 #include "domain/ServerClock.cpp"
 std::int64_t localMillis=0;std::int64_t localNow(){return localMillis;}
 namespace corum::ranked {
-struct SurvivalRuntime{
+struct SurvivalRuntime{std::string m_spectatorAcceptedAttempt;
  struct View{std::string id="m",roundKey="r1",state="PLAYING",phase="ROUND_1",error,endsAt="2026-10-16T00:03:00Z";int mapGeneration=1;bool ownEliminated=false;}v;
  ServerClock m_clock;struct{std::string endsAt="2026-10-16T00:03:00Z";}m_view;
  static SurvivalRuntime&get(){static SurvivalRuntime r;return r;}void tick(){}auto const&view()const{return v;}bool canPlay()const{return !v.ownEliminated;}bool canSurrender()const{return !v.ownEliminated;}bool surrenderPending()const{return false;}bool normalRoundCleared()const{return false;}
@@ -108,7 +108,7 @@ struct Request{int cancellations=0;void cancel(){++cancellations;}void spawn(web
 namespace corum::ranked{
 bool isOfficialSurvivalPlayLayer(PlayLayer*p){return p&&p==PlayLayer::get();}int returns=0;bool requestSurvivalGameplayReturn(PlayLayer*){++returns;return true;}
 std::string preparationContextText(std::string s){return s;}
-struct SurvivalRuntime{
+struct SurvivalRuntime{std::string m_spectatorAcceptedAttempt;
  struct View{std::string id="match",roundKey="r1",state="PLAYING",phase="ROUND_1",error,activeAttemptId="a";double activeAttemptProgress=45;int mapGeneration=1;bool ownEliminated=false;struct{int levelId=4;}map;}m_view;
  std::string m_surrenderEventId,m_surrenderMatchId,m_session="session",m_attempt="a",m_attemptContext="r1",m_presentationContext;bool m_surrenderAccepted=false,m_eventBusy=false;
  std::optional<WeakRef<PlayLayer>>m_surrenderOwner;std::optional<WeakRef<CCScene>>m_surrenderScene;
@@ -210,7 +210,7 @@ namespace corum::ranked{
 namespace i18n{std::string text(char const*,char const*fallback){return fallback;}}
 namespace ui{constexpr int Gold=1,Surface=2,SurfaceRaised=3,Text=4,Blue=5,Red=6;enum class FontWeight{ExtraBold,SemiBold};Node*surface(CCSize s,CCPoint p,int,int,int,bool){auto*n=new Node;n->size=s;n->pos=p;return n;}Label*menuLabel(std::string,float,CCPoint,int,FontWeight){return new Label;}void fitMenuLabelWidth(Label*,float,float,float){}void fitFullMenuLabel(Label*,float,float,float){}
 }
-struct SurvivalRuntime{struct View{std::string id="m",roundKey="r1",phase="ROUND_1";int mapGeneration=1;bool debug=true,online=false,ownEliminated=false,ownAssetsReady=true,ownEntered=true;}m_view;bool playable=true,pending=false,cleared=false,surrenderable=true;int submissions=0,surrenders=0;static SurvivalRuntime&get(){static SurvivalRuntime r;return r;}auto const&view()const{return m_view;}bool canPlay()const{return playable;}bool canSurrender()const{return surrenderable;}std::string surrenderMessage()const{return "Forfeit?";}void surrender(){++surrenders;surrenderable=false;}bool normalRoundCleared()const{return cleared;}bool forceClearPending()const{return pending;}bool surrenderPending()const{return false;}bool canForceClear()const;void forceClear(){if(canForceClear()&&!pending){++submissions;pending=true;}}};
+struct SurvivalRuntime{std::string m_spectatorAcceptedAttempt;struct View{std::string id="m",roundKey="r1",phase="ROUND_1";int mapGeneration=1;bool debug=true,online=false,ownEliminated=false,ownAssetsReady=true,ownEntered=true;}m_view;bool playable=true,pending=false,cleared=false,surrenderable=true;int submissions=0,surrenders=0;static SurvivalRuntime&get(){static SurvivalRuntime r;return r;}auto const&view()const{return m_view;}bool canPlay()const{return playable;}bool canSurrender()const{return surrenderable;}std::string surrenderMessage()const{return "Forfeit?";}void surrender(){++surrenders;surrenderable=false;}bool normalRoundCleared()const{return cleared;}bool forceClearPending()const{return pending;}bool surrenderPending()const{return false;}bool canForceClear()const;void forceClear(){if(canForceClear()&&!pending){++submissions;pending=true;}}};
 ${method(runtime,'bool SurvivalRuntime::canForceClear()')}
 }
 using corum::ranked::SurvivalRuntime;namespace ui=corum::ranked::ui;namespace i18n=corum::ranked::i18n;
@@ -312,7 +312,7 @@ test('surrender remains available without a countdown sample and rejects inactiv
  run(common+`
 namespace corum::ranked {
 struct RankedRuntime{std::string session="live";static RankedRuntime&get(){static RankedRuntime r;return r;}std::string spectatorLiveSessionToken()const{return session;}};
-struct SurvivalRuntime{
+struct SurvivalRuntime{std::string m_spectatorAcceptedAttempt;
  struct{std::string state="PLAYING";bool ownEliminated=false;}m_view;
  std::string m_session="live";bool exists=true,pending=false,cleared=false,free=false;
  bool active()const{return exists;}bool surrenderPending()const{return pending;}

@@ -40,6 +40,8 @@ test('actual camera owner hook ends in recorded viewport, drives once, restores 
 #include "${join(root, 'src/domain/SpectatorNativeProbe.hpp')}"
 #include "${join(root,'src/domain/SpectatorRestoreTimeline.hpp')}"
 #include <chrono>
+namespace corum::ranked {struct SurvivalSpectatorRuntime {static SurvivalSpectatorRuntime& get(){static SurvivalSpectatorRuntime r;return r;}bool sceneLevel(int)const{return false;}bool publishing()const{return false;}bool canLaunch()const{return false;}template<class...T>bool arm(T...){return false;}template<class...T>bool capture(T const&...){return false;}template<class...T>void terminal(T const&...){}void sceneExited(){}bool exitRequested()const{return false;}};}
+
 #include <memory>
 #include <iostream>
 #include <source_location>
@@ -74,8 +76,16 @@ struct ScopedPersistenceOwner{explicit ScopedPersistenceOwner(PlayLayer*){}};
 struct ScopedRealGameplayEnd{bool& flag;bool previous;ScopedRealGameplayEnd(bool& f,bool b):flag(f),previous(f){flag=b;}~ScopedRealGameplayEnd(){flag=previous;}};
 template<class T>struct FieldsAccess { std::unique_ptr<T> value=std::make_unique<T>();T* operator->(){return value.get();} };
 struct CorumRankedPlayLayer: PlayLayer {
+    corum::ranked::SpectatorLiveRuntime& spectatorTransport(){return corum::ranked::SpectatorLiveRuntime::get();}
+    void survivalSpectatorFrame(float){}
+    corum::ranked::SpectatorSceneContext survivalSpectatorSceneContext(){return {};}
+
  bool blockEntryGameplayUpdate(){return false;}
-    struct Fields {
+    struct Fields {bool survivalLiveLevel=false;
+#if !defined(CORUM_RANKED_DEBUG_SPECTATE)
+ int levelId=123;
+#endif
+
         bool spectatorScenePrepared=true,spectatorPresentationRetired=false,autoExitRequested=false;
         struct Safety{bool enabled=true;bool active()const{return enabled;}void resetDummy(){}}localSafety;
         corum::ranked::CorumRemotePlayer remotePlayer;

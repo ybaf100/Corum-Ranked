@@ -1836,8 +1836,8 @@
     "ko": "레벨 썸네일 모드"
   },
   "survival-leave-observer": {
-    "en": "LEAVE WATCH",
-    "ko": "관전 나가기"
+    "en": "LEAVE FREE PLAY",
+    "ko": "자유 플레이 나가기"
   },
   "survival-live-board": {
     "en": "LIVE ROUND STATUS",
@@ -1885,7 +1885,7 @@
   },
   "survival-observer-description": {
     "en": "Play the selected map locally without official records.",
-    "ko": "공식 기록 없이 현재 맵을 자유롭게 플레이합니다."
+    "ko": "공식 기록 없이 선택된 맵을 직접 플레이합니다."
   },
   "survival-online-ready": {
     "en": "2-16 PLAYERS · UP TO 180s",
@@ -2322,5 +2322,61 @@
   "survival-record-wins": {
     "en": " WINS (",
     "ko": "승 ("
+  },
+  "survival-spectator-choices": {
+    "en": "Watch a survivor, play locally, or view your result.",
+    "ko": "생존자 관전, 자유 플레이, 결과 보기를 선택하세요."
+  },
+  "survival-other-player": {
+    "en": "OTHER PLAYER",
+    "ko": "다른 플레이어"
+  },
+  "survival-no-native-stream": {
+    "en": "BOT · NOT AVAILABLE",
+    "ko": "봇 · 관전 불가"
+  },
+  "survival-waiting-player": {
+    "en": "WAITING FOR PLAYER",
+    "ko": "플레이 대기 중"
+  },
+  "survival-no-targets": {
+    "en": "NO SURVIVORS AVAILABLE",
+    "ko": "관전 가능한 생존자가 없습니다"
+  },
+  "survival-live-online-only": {
+    "en": "Live spectator requires an online human match.",
+    "ko": "실시간 관전은 온라인 실제 플레이어를 대상으로 합니다."
+  },
+  "survival-preparing-watch": {
+    "en": "PREPARING MAP / AUDIO...",
+    "ko": "맵 / 오디오 준비 중..."
+  },
+  "cleared": {
+    "en": "CLEARED",
+    "ko": "클리어"
+  },
+  "playing": {
+    "en": "PLAYING",
+    "ko": "플레이 중"
+  },
+  "survival-spectator-capacity": {
+    "en": "RELAY FULL",
+    "ko": "관전 중계 용량 초과"
+  },
+  "survival-spectator-connection": {
+    "en": "Survival spectator connection unavailable",
+    "ko": "관전 연결을 확인하고 있습니다"
+  },
+  "survival-spectator-authorizing": {
+    "en": "Authorizing spectator...",
+    "ko": "관전 권한 확인 중..."
+  },
+  "survival-spectator-unavailable": {
+    "en": "Spectator target unavailable",
+    "ko": "현재 관전할 수 없는 플레이어입니다"
+  },
+  "back": {
+    "en": "BACK",
+    "ko": "돌아가기"
   }
 }

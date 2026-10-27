@@ -68,8 +68,8 @@ test('Back from map navigates to the retained board without forfeiting; another 
 #include <chrono>
 struct Result{bool exists=false;bool isObject()const{return exists;}};
 enum class SurvivalFlowStage{Active,EliminatedChoice,PersonalResult,Ceremony};
-enum class SurvivalOutcomeChoice{Observe,PersonalResult};
-struct SurvivalRuntime{
+enum class SurvivalOutcomeChoice{LiveSpectate,Observe,PersonalResult};
+struct SurvivalRuntime{SurvivalOutcomeChoice outcomeChoice()const{return SurvivalOutcomeChoice::Observe;}
  struct View{Result result;bool ownEliminated=false;}v;
  bool cleared=false,observe=false;int acknowledgments=0,choices=0;
  SurvivalFlowStage stage=SurvivalFlowStage::Active;
@@ -105,7 +105,7 @@ int main(){Coordinator c;auto&r=SurvivalRuntime::get();c.keyBackClicked();assert
 }`);
  const ui=read('src/ui/SurvivalGameLayer.cpp');
  assert.match(ui,/m_entrySyncAfter=runtime.serverSyncMillis\(\);runtime.refreshRound\(\)/);
- assert.match(ui,/m_freePlay->setVisible\(liveBoard && runtime.canFreePlay\(\)\)/);
+ assert.match(ui,/m_freePlay->setVisible\(watching \|\| \(liveBoard && runtime.canFreePlay\(\)\)\)/);
 });
 
 test('native LDM capability and saved options survive object/map replacement without exposing unknown LDM',()=>{

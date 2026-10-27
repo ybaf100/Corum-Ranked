@@ -51,6 +51,8 @@ test('actual Debug gate executes native item selector, one-shot onPlay, vanilla 
 #include "${join(root, 'src/debug/DebugSpectatePolicy.hpp')}"
 #include "${join(root, 'src/domain/SurvivalNativeOptions.hpp')}"
 #include <cassert>
+namespace corum::ranked {struct SurvivalSpectatorRuntime {static SurvivalSpectatorRuntime& get(){static SurvivalSpectatorRuntime r;return r;}bool sceneLevel(int)const{return false;}bool publishing()const{return false;}bool canLaunch()const{return false;}template<class...T>bool arm(T...){return false;}template<class...T>bool capture(T const&...){return false;}template<class...T>void terminal(T const&...){}void sceneExited(){}bool exitRequested()const{return false;}};}
+
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
@@ -164,7 +166,7 @@ struct LevelInfoLayer:CCNode {
 };
 #define schedule_selector(x) &x
 struct CorumRankedLevelInfoLayer:LevelInfoLayer {
-    struct Fields {bool debugSpectateOwned=true,debugMapRequested=false,debugSongRequested=false,debugPlayRequested=false,debugMapReady=false,debugSongReady=false,debugVanillaPlayActivation=false,debugLevelInfoExited=false;} fields;
+    struct Fields {bool survivalLiveLevel=false;bool debugSpectateOwned=true,debugMapRequested=false,debugSongRequested=false,debugPlayRequested=false,debugMapReady=false,debugSongReady=false,debugVanillaPlayActivation=false,debugLevelInfoExited=false;} fields;
     Fields* m_fields=&fields;
     using Tick=void(CorumRankedLevelInfoLayer::*)(float);
     bool polling=false,watchdog=false;float watchdogLeft=0;
@@ -183,7 +185,7 @@ struct CorumRankedLevelInfoLayer:LevelInfoLayer {
 struct PlayLayer {static inline int creations=0;bool init(GJGameLevel*,bool,bool){++creations;return true;}};
 namespace corum::ranked {struct SurvivalRuntime {static SurvivalRuntime&get(){static SurvivalRuntime r;return r;}bool freePlaying()const{return false;}bool consumeNativeLaunch(GJGameLevel*){return false;}int preparationContext()const{return 0;}std::string optionsContext()const{return {};}};struct SurvivalOptionsPreferences {static SurvivalOptionsPreferences&get(){static SurvivalOptionsPreferences p;return p;}void apply(GJGameLevel*,std::string const&){} };}
 struct CorumRankedPlayLayer:PlayLayer {
-    struct Fields {bool survivalLevel=false,survivalFreePlayHud=false;int survivalContext=0;int levelId=0;bool debugRecordScene=false,debugPlaybackScene=false;} fields;
+    struct Fields {bool survivalLiveLevel=false;bool survivalLevel=false,survivalFreePlayHud=false;int survivalContext=0;int levelId=0;bool debugRecordScene=false,debugPlaybackScene=false;} fields;
     Fields* m_fields=&fields;
     bool init(GJGameLevel* level,bool useReplay,bool dontCreateObjects){
         ${debugPlayInit}

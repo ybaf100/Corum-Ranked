@@ -5,14 +5,15 @@
 #include <optional>
 #include <string>
 namespace corum::ranked {
-enum class SurvivalOutcomeChoice { Undecided, Observe, PersonalResult };
+enum class SurvivalOutcomeChoice { Undecided=0, EliminatedFreePlay=1, Observe=EliminatedFreePlay, PersonalResult=2, LiveSpectate=3 };
 enum class SurvivalFlowStage { Lobby, Intro, Selecting, Preparing, EntryCountdown, Playing, RoundResult,
-    EliminatedChoice, Observing, PersonalResult, Ceremony, Cancelled };
+    EliminatedChoice, Observing, PersonalResult, Ceremony, Cancelled, LiveSpectating };
 inline SurvivalFlowStage survivalFlowStage(std::string const& state,std::string const& gate,bool eliminated,SurvivalOutcomeChoice choice){
     if(state.empty())return SurvivalFlowStage::Lobby;
     if(state=="CANCELLED")return SurvivalFlowStage::Cancelled;
     if(eliminated && choice==SurvivalOutcomeChoice::PersonalResult)return SurvivalFlowStage::PersonalResult;
     if(state=="FINAL_RESULT")return SurvivalFlowStage::Ceremony;
+    if(eliminated && choice==SurvivalOutcomeChoice::LiveSpectate)return SurvivalFlowStage::LiveSpectating;
     if(eliminated)return choice==SurvivalOutcomeChoice::Observe?SurvivalFlowStage::Observing:SurvivalFlowStage::EliminatedChoice;
     if(gate=="INTRO")return SurvivalFlowStage::Intro;
     if(state=="MAP_SELECTION")return SurvivalFlowStage::Selecting;

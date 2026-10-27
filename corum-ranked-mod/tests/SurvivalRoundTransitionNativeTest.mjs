@@ -44,7 +44,7 @@ struct Pending{Operation operation;std::function<void(WebResponse)>done;};std::v
 web::WebRequest request(std::string const&){return {};}
 struct Request{int cancellations=0;void cancel(){++cancellations;}void spawn(web::Operation op,std::function<void(web::WebResponse)>fn){web::pending.push_back({op,fn});}};
 namespace corum::ranked {
-struct SurvivalRuntime{
+struct SurvivalRuntime{std::string m_spectatorAcceptedAttempt;
  struct View{std::string id="match",state="PLAYING",roundKey="r1",error,presentationGate;int mapGeneration=1;struct Map{int levelId=40000000;}map;bool online=false,ownEliminated=false;matjson::Value result;}m_view;
  std::string m_surrenderEventId;bool m_surrenderAccepted=false;void resetSurrender(){m_surrenderEventId.clear();}void pumpSurrenderReturn(){}bool surrenderPending()const{return !m_surrenderEventId.empty()&&!m_surrenderAccepted;}
  bool m_eventBusy=false;std::uint64_t m_generation=1,m_eventGeneration=0;std::string m_session="session",m_presentationContext;
@@ -89,7 +89,7 @@ namespace corum::ranked {
 enum class RankedAudioMode{Round12,Round3DeathmatchWait,ResultWin,ResultLose};
 struct RankedAudioManager{RankedAudioMode mode=RankedAudioMode::Round12;int changes=0,ticks=0;static RankedAudioManager&get(){static RankedAudioManager a;return a;}void setMode(RankedAudioMode m){mode=m;++changes;}void tick(){++ticks;}};
 struct SurvivalMatchView{int matchPlayerCount=16;std::string phase="ROUND_1",state="ROUND_RESULT",roundKey="r1",ownId="human";bool ownWinner=false,ownEliminated=false;matjson::Value result,completedRound;};
-struct SurvivalRuntime{bool observer=false;static auto& get(){static SurvivalRuntime r;return r;}bool observing()const{return observer;}};
+struct SurvivalRuntime{std::string m_spectatorAcceptedAttempt;bool observer=false;static auto& get(){static SurvivalRuntime r;return r;}bool observing()const{return observer;}};
 struct Coordinator{std::optional<RankedAudioMode>m_audioMode;${method(source,'void syncAudio(')}};
 }
 int main(){using namespace corum::ranked;Coordinator coordinator;SurvivalMatchView view;

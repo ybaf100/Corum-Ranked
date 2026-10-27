@@ -52,9 +52,11 @@ test('native visibility owner hides only an authorized dummy, including waiting;
 #include "${join(root, 'src/spectator/SpectatorWorldDriver.hpp')}"
 #include <Geode/Geode.hpp>
 #include <cassert>
+namespace corum::ranked {struct SurvivalSpectatorRuntime {static SurvivalSpectatorRuntime& get(){static SurvivalSpectatorRuntime r;return r;}bool sceneLevel(int)const{return false;}bool publishing()const{return false;}bool canLaunch()const{return false;}template<class...T>bool arm(T...){return false;}template<class...T>bool capture(T const&...){return false;}template<class...T>void terminal(T const&...){}void sceneExited(){}bool exitRequested()const{return false;}};}
+
 namespace corum::ranked {struct RankedRuntime{struct Match{bool spectatorLiveEnabled=true;};struct View{Match match;} data;View const& view()const{return data;}bool spectator=false;static RankedRuntime& get(){static RankedRuntime r;return r;}bool isSpectating(){return spectator;}};}
 struct Owner:PlayLayer {
- struct Fields{bool spectatorScenePrepared=false,spectatorPresentationRetired=false,autoExitRequested=false;struct Safety{bool enabled=false;bool active(){return enabled;}}localSafety;corum::ranked::SpectatorWorldDriver spectatorWorldDriver;} fields;
+ struct Fields{int levelId=123;bool survivalLiveLevel=false;bool spectatorScenePrepared=false,spectatorPresentationRetired=false,autoExitRequested=false;struct Safety{bool enabled=false;bool active(){return enabled;}}localSafety;corum::ranked::SpectatorWorldDriver spectatorWorldDriver;} fields;
  Fields* m_fields=&fields;bool watchable=true;bool watchableSpectatorScene(){return watchable;}
  ${block(source, 'bool spectatorCameraActive()')}
  ${block(source, 'void reconcileSpectatorWorldDriver()')}

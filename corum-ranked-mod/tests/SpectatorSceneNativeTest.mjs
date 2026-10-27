@@ -34,6 +34,8 @@ test('actual scene callbacks hand off only after End/authority, even with vanill
 #include "${join(root, 'src/domain/SpectatorCameraPolicy.hpp')}"
 #include "${join(root, 'src/domain/SpectatorLocalSafety.hpp')}"
 #include <cassert>
+namespace corum::ranked {struct SurvivalSpectatorRuntime {static SurvivalSpectatorRuntime& get(){static SurvivalSpectatorRuntime r;return r;}bool sceneLevel(int)const{return false;}bool publishing()const{return false;}bool canLaunch()const{return false;}template<class...T>bool arm(T...){return false;}template<class...T>bool capture(T const&...){return false;}template<class...T>void terminal(T const&...){}void sceneExited(){}bool exitRequested()const{return false;}};}
+
 #include <chrono>
 #include <memory>
 #include <vector>
@@ -127,8 +129,12 @@ struct FakeCamera {
 };
 }
 struct CorumRankedPlayLayer: PlayLayer {
+    corum::ranked::SpectatorLiveRuntime& spectatorTransport(){return corum::ranked::SpectatorLiveRuntime::get();}
+    void survivalSpectatorFrame(float){}
+    corum::ranked::SpectatorSceneContext survivalSpectatorSceneContext(){return {};}
+
  bool blockEntryGameplayUpdate(){return false;}
-    struct Fields {
+    struct Fields {bool survivalLiveLevel=false;
         bool safetyRetired=false,vanillaGameplayEndInProgress=false,rankedInitialized=true,rankedLevel=true;
         bool rankedPractice=false,spectatorMode=false,spectatorPending=false,spectatorScenePrepared=false;
         bool spectatorPresentationRetired=false,spectatorWorldResetInProgress=false,spectatorWorldPoseApplied=false,spectatorCollisionChecked=false;
@@ -362,7 +368,7 @@ bool prepareSpectatorScene(PlayLayer*){++prepareCalls;return prepared;}
 }
 bool authoritativeExitState(std::string const& state){return state=="ROUND_RESULT";}
 struct CorumRankedEndLevelLayer:EndLevelLayer {
-    struct Fields {bool rankedLevel=true,rankedExitRequested=false;} fields;
+    struct Fields {bool survivalLiveLevel=false;bool rankedLevel=true,rankedExitRequested=false;} fields;
     Fields* m_fields=&fields;
     ${callback}
 };

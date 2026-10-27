@@ -1,3 +1,4 @@
+#include "SurvivalSpectatorRuntime.hpp"
 #include "RankedRoundPreparation.hpp"
 #include "RankedRuntime.hpp"
 #include "SurvivalRuntime.hpp"
@@ -383,7 +384,8 @@ bool RankedRoundPreparation::launch(CCScene* origin) {
     bool const spectator = runtime.canEnterCurrentLevelAsSpectator();
     bool const entering = runtime.canEnterNativeRoundScene();
     bool const survival=SurvivalRuntime::get().active();
-    bool const allowed = survival ? (SurvivalRuntime::get().canEnter() || SurvivalRuntime::get().canEnterObserver() || SurvivalRuntime::get().canReplayCleared()) : runtime.canEnterCurrentLevel() || entering || spectator;
+    bool const survivalLive=survival && SurvivalSpectatorRuntime::get().canLaunch();
+    bool const allowed = survival ? (SurvivalSpectatorRuntime::get().canLaunch() || SurvivalRuntime::get().canEnter() || SurvivalRuntime::get().canEnterObserver() || SurvivalRuntime::get().canReplayCleared()) : runtime.canEnterCurrentLevel() || entering || spectator;
     if (roundPrepareState(runtime.view().match.state) || !allowed || !ready() ||
         !origin || origin != CCDirector::sharedDirector()->getRunningScene() ||
         roundModalOpen(origin) || !preparation.authorizes(level, m_context)) return false;
@@ -426,7 +428,7 @@ bool RankedRoundPreparation::launch(CCScene* origin) {
     if (!survival && !spectator && !entering && !runtime.armCurrentLevelForGameplay()) return false;
     tracePreparedLevel("round-native-launch", level, nullptr, this);
     if(survival){auto& sur=SurvivalRuntime::get();
-        if(!(sur.observing()?sur.armObserver(level,origin):sur.normalRoundCleared()?sur.armClearedReplay(level,origin):sur.armNative(level)))return false;
+        if(!(survivalLive?SurvivalSpectatorRuntime::get().arm(level):sur.observing()?sur.armObserver(level,origin):sur.normalRoundCleared()?sur.armClearedReplay(level,origin):sur.armNative(level)))return false;
     }
     if(survival){
         corum::ranked::SurvivalOptionsPreferences::get().apply(level,corum::ranked::SurvivalRuntime::get().optionsContext());
@@ -443,6 +445,9 @@ bool RankedRoundPreparation::launch(CCScene* origin) {
         preparationContextText(m_context),static_cast<void*>(scene),static_cast<void*>(play));
     if (!scene || !play || play->m_level != level || !roundSceneContains(scene, play) ||
         m_context != currentPreparationContext()) {
+        // Admission was armed before native init to latch read-only safety.
+        // A failed scene must not retain a phantom live PlayLayer owner.
+        if(survivalLive)SurvivalSpectatorRuntime::get().sceneExited();
         m_view.error = "NATIVE GAMEPLAY LOAD FAILED - RETRYING";
         m_nextLaunchAt = clockSeconds() + 1.0;
         return false;

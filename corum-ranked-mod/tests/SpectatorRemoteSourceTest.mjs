@@ -19,7 +19,7 @@ test('dedicated visible renderer stays separate from scoped hidden world driver'
     assert.doesNotMatch(driver, /reportAttempt|savePercentage|saveNewScore|levelComplete|spiderTestJump|PlayerObject::update\(/);
     assert.match(play, /auto spectatorAuthority = runtime.isSpectating\(\)/);
     assert.match(play, /remotePlayer.update\(this, true, m_fields->spectatorRenderedFrame\)/);
-    assert.match(play, /SpectatorLiveRuntime::get\(\).presentationFrame\(\)/);
+    assert.match(play, /spectatorTransport\(\).presentationFrame\(\)/);
 });
 test('remote renderer cannot invoke scoring, physics, death, completion or camera', () => {
     assert.doesNotMatch(remote, /(?:reportAttempt|levelComplete\(|destroyPlayer\(|resetLevel\(|onQuit\(|savePercentage\(|saveNewScore\(|updateCamera\(|PlayerObject::update\()/);

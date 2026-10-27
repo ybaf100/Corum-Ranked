@@ -1,3 +1,10 @@
+# v0.5.0-beta.107
+- Add authenticated Survival live spectator targets and shared demand-driven native streams, independent of local Free Play and personal results.
+- Require server-accepted Attempts, elimination plus a five-second lock, exact round/map/target/session authority, bounded buffers and no spectator scoring writes.
+- Reuse Solo world/history/camera/Dual/cosmetic visuals, with target changes and round-end cleanup. Unsupported world reconstruction stays PARTIAL SYNC.
+- Add separate survivor selection/profile controls, spectator HUD and explicit Free Play transitions.
+- Fix empty publisher batch presence with real Geode JSON; preserve Stage 1–3 and debug n% testing.
+
 # v0.5.0-beta.106
 - Add atomically validated independent Dual poses, two render-only avatars, and native mode-specific icon/color/glow descriptors without repeated pose metadata.
 - Reuse bounded source-time trails, observed native particle emissions and eight pooled ghost snapshots per avatar; stop effects across snaps, held clocks, restoration and scene teardown.

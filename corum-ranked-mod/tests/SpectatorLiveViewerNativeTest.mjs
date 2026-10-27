@@ -47,7 +47,7 @@ struct Value {
     using Object=std::map<std::string,Value>; using Array=std::vector<Value>;
     std::variant<std::monostate,bool,std::int64_t,double,std::string,Object,Array> data;
     static Value array(){return Array{};}void push(Value v){if(!std::holds_alternative<Array>(data))data=Array{};std::get<Array>(data).push_back(std::move(v));}
-    Value()=default; Value(bool x):data(x){} Value(int x):data(std::int64_t(x)){}
+    Value()=default; Value(std::nullptr_t):data(std::monostate{}){} Value(bool x):data(x){} Value(int x):data(std::int64_t(x)){}
     Value(std::int64_t x):data(x){} Value(double x):data(x){}
     Value(char const* x):data(std::string(x)){} Value(std::string x):data(std::move(x)){}
     Value(Array x):data(std::move(x)){} Value(Object x):data(std::move(x)){}
@@ -87,7 +87,9 @@ struct RankedRuntime {
     View const& view()const{return state;}
 };
 enum class SpectatorLiveStatus { Idle,Waiting,Live,Fallback };
+${header.slice(header.indexOf('struct SurvivalSpectatorTransportContext'),header.indexOf('class SpectatorLiveRuntime final'))}
 struct SpectatorLiveRuntime {
+std::optional<SurvivalSpectatorTransportContext> m_external;
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
     std::string m_debugContextId;
 #endif

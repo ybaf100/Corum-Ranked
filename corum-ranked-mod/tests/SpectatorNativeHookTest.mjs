@@ -45,6 +45,8 @@ test('production native safety hook bodies execute through death/completion/save
 #include "${join(root, 'src/spectator/ScopedSpectatorPersistenceMode.hpp')}"
 #include <algorithm>
 #include <cassert>
+namespace corum::ranked {struct SurvivalSpectatorRuntime {static SurvivalSpectatorRuntime& get(){static SurvivalSpectatorRuntime r;return r;}bool sceneLevel(int)const{return false;}bool publishing()const{return false;}bool canLaunch()const{return false;}template<class...T>bool arm(T...){return false;}template<class...T>bool capture(T const&...){return false;}template<class...T>void terminal(T const&...){}void sceneExited(){}bool exitRequested()const{return false;}};}
+
 #include <functional>
 #include "${join(root, 'src/domain/SpectatorNativeProbe.hpp')}"
 #include <memory>
@@ -142,6 +144,9 @@ ${source.slice(source.indexOf('thread_local PlayLayer* persistenceOwner'), sourc
 ${source.slice(source.indexOf('struct ScopedRealGameplayEnd {'), source.indexOf('std::int64_t steadyNowMicros()'))}
 double rankedProgressPercent(PlayLayer* layer) { return layer->percent; }
 struct CorumRankedPlayLayer : PlayLayer {
+    corum::ranked::SpectatorLiveRuntime& spectatorTransport(){return corum::ranked::SpectatorLiveRuntime::get();}
+    void survivalSpectatorFrame(float){}
+
     struct EntryOverlay { int dismissed=0; void dismiss(){++dismissed;} };
     corum::ranked::SpectatorGhostPose observedSpectatorPose(bool dead=false,bool finished=false) {
         return corum::ranked::captureSpectatorPose(m_player1,dead,finished,m_gameState.m_isDualMode);
@@ -150,7 +155,7 @@ struct CorumRankedPlayLayer : PlayLayer {
     void observeSpectatorNativeUpdate(PlayerObject*) {}
     bool observesSpectatorPlayer(PlayerObject*) {return false;}
     void observeSpectatorNativeSnap(PlayerObject*,corum::ranked::SpectatorDiscontinuity,corum::ranked::SpectatorGhostPose const&) {}
-    struct Fields {std::optional<SurvivalDialogRef> survivalSurrender;bool survivalLevel=false,survivalWaiting=false,survivalFreePlayHud=false,survivalNativeClearFinished=false;
+    struct Fields {bool survivalLiveLevel=false;std::optional<SurvivalDialogRef> survivalSurrender;bool survivalLevel=false,survivalWaiting=false,survivalFreePlayHud=false,survivalNativeClearFinished=false;
         bool nativeCompletionStarted = false;
         EntryOverlay* entryOverlay = nullptr;
         bool nativeEntryHeld = false;

@@ -1,3 +1,5 @@
+import {SurvivalSpectatorLiveService} from "../src/survival/survival-spectator-live.service.js";
+import {SurvivalSpectatorLiveController} from "../src/survival/survival-spectator-live.controller.js";
 import "reflect-metadata";
 import { readFile,readdir } from "node:fs/promises";
 import { Pool } from "pg";
@@ -45,6 +47,7 @@ const mods=[{id:"hwanhee1.corum_ranked",version:REQUIRED_RANKED_CLIENT_VERSION,e
  {id:"syzzi.click_between_frames",version:"v1.5.0",enabled:true,loaded:true,internal:false,system:false,settings:{"soft-toggle":false,"click-on-steps":false,"physics-bypass":false}}];
 interface Client {session:RankedSessionContext;token:string;account:string;channel:"release"|"debug";}
 const clients:Client[]=[];
+let spectator:SurvivalSpectatorLiveService;
 let soloDoc:ReturnType<typeof configDocumentFixture>;
 beforeAll(async()=>{
  if(process.env["SURVIVAL_TEST_DATABASE_URL"]){
@@ -69,14 +72,15 @@ beforeEach(async()=>{
  vi.spyOn(engine,"ensureMapSelection").mockImplementation(()=>{});
  const achievements=new AchievementService(db,clock,ids);survival=new SurvivalService(db,clock,ids,config,achievements);
  sessions=new SessionService(db,{fetchCurrentTier:async()=>"NONE"},clock,ids,solo,tokens);
- online=new SurvivalOnlineService(db,clock,sessions,engine,survival,config);
+ spectator=new SurvivalSpectatorLiveService(db,clock);
+ online=new SurvivalOnlineService(db,clock,sessions,engine,survival,config,spectator);
  queue=new SurvivalQueueService(db,clock,{next:()=>42/0x100000000},env,config,sessions,engine,survival);
  const rates=new SurvivalRateService(db,clock);
  // Deterministic server clock tests explicitly tick production workers. This
  // leaves real HTTP handlers, auth, transactions, reducer and payment intact.
  vi.spyOn(online,"onApplicationBootstrap").mockImplementation(async()=>{});vi.spyOn(queue,"onApplicationBootstrap").mockImplementation(async()=>{});
- const module=await Test.createTestingModule({controllers:[SurvivalQueueController,SurvivalOnlineController,AchievementController,HistoryController],providers:[SessionGuard,AdmissionVersionGuard,
-  {provide:DATABASE,useValue:db},{provide:SERVER_CLOCK,useValue:clock},{provide:TokenService,useValue:tokens},
+ const module=await Test.createTestingModule({controllers:[SurvivalSpectatorLiveController,SurvivalQueueController,SurvivalOnlineController,AchievementController,HistoryController],providers:[SessionGuard,AdmissionVersionGuard,
+  {provide:SurvivalSpectatorLiveService,useValue:spectator},{provide:DATABASE,useValue:db},{provide:SERVER_CLOCK,useValue:clock},{provide:TokenService,useValue:tokens},
   {provide:HistoryService,useValue:new HistoryService({history:async()=>({matches:[]})} as unknown as MatchService,survival,clock)},
   {provide:AchievementService,useValue:achievements},{provide:SurvivalQueueService,useValue:queue},{provide:SurvivalOnlineService,useValue:online},{provide:SurvivalRateService,useValue:rates}]}).compile();
  app=module.createNestApplication();app.useGlobalPipes(new ValidationPipe({whitelist:true,forbidNonWhitelisted:true,transform:true}));await app.listen(0,"127.0.0.1");base=await app.getUrl();
@@ -550,4 +554,118 @@ describe("64-player public matchmaking",()=>{
   const newcomer=await client("debug");await join(newcomer);
   expect((await api(newcomer,"/queue/fill-bots",{...admission,requestId:ids.next()})).status).toBe(400);
  });
+});
+
+
+describe('Survival live spectator authenticated production HTTP',()=>{
+ const route=(id:string)=>`/online/matches/${id}/spectator-live`;
+ const query=(m:SurvivalMatch,target:string,extra='')=>{const r=survivalCurrentRound(m);return `?protocolVersion=2&worldHistory=1&targetId=${target}&roundKey=${r.key}&mapGeneration=${r.mapGeneration}&levelId=${r.map!.levelId}${extra}`;};
+ function packet(m:SurvivalMatch,attemptId:string,sequence=0,elapsedMs=0,generation=1){const r=survivalCurrentRound(m);return {protocolVersion:2,matchId:m.id,roundNumber:r.ordinal,deathmatchSequence:null,attemptId,generation,sequence,elapsedMs,levelId:r.map!.levelId,inputEdges:[],keyframe:{x:100+sequence,y:40,rotation:0,mode:'CUBE',mini:false,upsideDown:false,flipped:false,dual:false,dead:false,finished:false,progress:20}};}
+ const body=(m:SurvivalMatch,packets:unknown[])=>{const r=survivalCurrentRound(m);return {roundKey:r.key,mapGeneration:r.mapGeneration,levelId:r.map!.levelId,packets};};
+ async function scoreState(id:string){return {match:(await engine.get(id)),attempts:(await db.query('SELECT * FROM sur_attempts WHERE match_id=$1 ORDER BY attempt_id',[id])).rows,
+  profiles:(await db.query('SELECT player_id,lp FROM sur_profiles ORDER BY player_id')).rows,ap:(await db.query('SELECT player_id,total_ap FROM ranked_profiles ORDER BY player_id')).rows};}
+ async function fixture(count=16){const {group,id}=await game(count);const m=await prepare(id,group);const viewer=group[0]!,target=group[1]!;
+  await event(viewer,m,'FORFEIT');return {group,id,m,viewer,target};}
+ it('requires authentication, membership, elimination and the full server five-second lock',async()=>{
+  const {group,id,m,viewer,target}=await fixture();
+  expect((await fetch(base+'/api/ranked/survival'+route(id)+'/targets')).status).toBe(401);
+  expect((await api(target,route(id)+'/targets')).status).toBe(403);
+  const stranger=await client();expect((await api(stranger,route(id)+'/targets')).status).toBe(403);
+  expect((await api(viewer,route(id)+'/targets')).status).toBe(403);
+  now+=4999;await touch(group);expect((await api(viewer,route(id)+'/targets')).status).toBe(403);
+  now++;const targets=await api(viewer,route(id)+'/targets');expect(targets.status).toBe(200);
+  expect(targets.body.targets).toHaveLength(15);expect(targets.body.targets.some((t:any)=>t.participantId===viewer.session.playerId)).toBe(false);
+  expect((await api(viewer,route(id)+query(m,viewer.session.playerId))).status).toBe(403);
+ });
+ it('never accepts a locally invented Attempt, publishes only on demand and never mutates scores/AP through visuals',async()=>{
+  const {group,id,m,viewer,target}=await fixture();now+=5000;await touch(group);
+  const attempt=ids.next(),p=packet(m,attempt);
+  expect((await api(target,route(id)+'/publish',body(m,[p]))).status).toBe(409);
+  expect((await api(viewer,route(id)+query(m,target.session.playerId))).body.waiting).toBe(true);
+  expect((await api(target,route(id)+'/publish',body(m,[p]))).status).toBe(409);
+  const ack=await event(target,m,'ATTEMPT_START',{attemptId:attempt});expect(ack.myActiveAttemptId).toBe(attempt);expect(ack.spectatorDemand).toBe(true);
+  const before=await scoreState(id);expect((await api(target,route(id)+'/publish',body(m,[p]))).status).toBe(201);
+  const view=await api(viewer,route(id)+query(m,target.session.playerId));expect(view.status).toBe(200);expect(view.body.packets).toHaveLength(1);
+  expect(view.body.restoration).toMatchObject({available:true,startSequence:0,levelId:p.levelId});
+  expect(await scoreState(id)).toEqual(before);
+  const duplicate=await api(target,route(id)+'/publish',body(m,[p]));expect(duplicate.status).toBe(201);
+  const changed={...p,keyframe:{...p.keyframe,x:900}};expect((await api(target,route(id)+'/publish',body(m,[changed]))).status).toBe(409);
+  const bad=packet(m,attempt,1,50);expect((await api(target,route(id)+'/publish',body(m,[{...bad,levelId:1}]))).status).toBe(409);
+  expect((await api(target,route(id)+'/publish',body(m,[{...bad,keyframe:{...bad.keyframe,dual:true}}]))).status).toBe(400);
+  expect((await api(target,route(id)+'/publish',body(m,[bad]))).status).toBe(201);
+  expect(await scoreState(id)).toEqual(before);
+ });
+ it('shares one stream between viewers, switches targets, respects terminal/next Attempt and expires demand without a DB timer',async()=>{
+  const {group,id,m,viewer,target}=await fixture();const other=group[2]!;await event(other,m,'FORFEIT');now+=5000;await touch(group);
+  const a=ids.next();await event(target,m,'ATTEMPT_START',{attemptId:a});
+  for(const c of [viewer,other])expect((await api(c,route(id)+query(m,target.session.playerId))).status).toBe(200);
+  expect((await api(target,route(id)+'/publish',body(m,[packet(m,a)]))).status).toBe(201);expect(spectator.diagnostics().streams).toBe(1);
+  const death=packet(m,a,1,50);death.keyframe.dead=true;
+  await event(target,m,'ATTEMPT_END',{attemptId:a,progress:20});expect((await api(target,route(id)+'/publish',body(m,[death]))).status).toBe(201);
+  expect((await api(viewer,route(id)+query(m,target.session.playerId))).body.packets.at(-1).keyframe.dead).toBe(true);
+  const b=ids.next();await event(target,m,'ATTEMPT_START',{attemptId:b});
+  expect((await api(viewer,route(id)+query(m,target.session.playerId))).body.waiting).toBe(true);
+  expect((await api(target,route(id)+'/publish',body(m,[packet(m,b)]))).status).toBe(201);
+  expect((await api(target,route(id)+'/publish',body(m,[packet(m,a,0,0,2)]))).status).toBe(409);
+  expect((await api(viewer,route(id)+query(m,target.session.playerId,`&attemptId=${a}&generation=1&afterSequence=1`))).body).toMatchObject({reset:true,stream:{attemptId:b}});
+  const clear=packet(m,b,1,100);clear.keyframe.finished=true;clear.keyframe.progress=100;
+  await event(target,m,'ATTEMPT_END',{attemptId:b,progress:100});expect((await api(target,route(id)+'/publish',body(m,[clear]))).status).toBe(201);
+  expect((await api(viewer,route(id)+query(m,target.session.playerId))).body.packets.at(-1).keyframe.finished).toBe(true);
+  expect((await api(viewer,route(id)+'/targets')).body.targets.find((t:any)=>t.participantId===target.session.playerId).status).toBe('CLEARED');
+  expect((await api(viewer,route(id)+query(m,group[3]!.session.playerId))).status).toBe(200);
+  await api(other,route(id)+'/leave',{});expect(spectator.diagnostics().streams).toBe(0);
+  now+=8001;expect(spectator.diagnostics()).toMatchObject({streams:0,viewers:0});
+ });
+ it('rejects revoked sessions, retired contexts, target elimination and ended rounds; a restarted relay waits for a fresh generation',async()=>{
+  const {group,id,m,viewer,target}=await fixture();now+=5000;await touch(group);
+  await api(viewer,route(id)+query(m,target.session.playerId));const a=ids.next();await event(target,m,'ATTEMPT_START',{attemptId:a});
+  await api(target,route(id)+'/publish',body(m,[packet(m,a)]));
+  const restarted=new SurvivalSpectatorLiveService(db,clock);
+  expect((await restarted.subscribe(id,viewer.session,Object.fromEntries(new URLSearchParams(query(m,target.session.playerId).slice(1))))).waiting).toBe(true);
+  await expect(restarted.publish(id,target.session,body(m,[packet(m,a,1,50)]))).rejects.toThrow('SPECTATOR_STREAM_MUST_START_AT_SEQUENCE_ZERO');
+  await expect(restarted.publish(id,target.session,body(m,[packet(m,a,0,100,2)]))).resolves.toMatchObject({accepted:true,generation:2});
+  expect((await api(viewer,route(id)+query(m,target.session.playerId).replace('mapGeneration=1','mapGeneration=999'))).status).toBe(409);
+  await event(target,m,'FORFEIT');expect((await api(viewer,route(id)+query(m,target.session.playerId))).status).toBe(403);
+  expect((await api(target,route(id)+'/publish',body(m,[packet(m,a,1,50)]))).status).toBe(403);
+  await db.query('UPDATE ranked_sessions SET revoked_at=$2 WHERE id=$1',[viewer.session.sessionId,new Date(now).toISOString()]);
+  expect((await api(viewer,route(id)+'/targets')).status).toBe(401);
+  now=survivalCurrentRound(m).endsAt!;await touch(group.slice(1));await online.tickOnce();
+  await expect(restarted.subscribe(id,group[2]!.session,Object.fromEntries(new URLSearchParams(query(m,group[3]!.session.playerId).slice(1))))).rejects.toThrow();
+ });
+ it('keeps simulated bots unavailable and 64-player multiple-subscriber state within the same finite relay budget',async()=>{
+  const adminClient=await client('debug');await db.query("UPDATE ranked_players SET gd_username='hwanhee1' WHERE id=$1",[adminClient.session.playerId]);
+  const admin=new AdminService(db,env,{} as RankedConfigService,clock,config);await admin.execute({...adminClient.session,gdUsername:'hwanhee1'},{password:'fixture-password',scope:'SURVIVAL',action:'SET_SURVIVAL_MODE',matchPlayerCount:64});
+  const {group,id}=await game(3,true);const m=await prepare(id,group);await event(group[0]!,m,'FORFEIT');now+=5000;await touch(group);
+  const targets=await api(group[0]!,route(id)+'/targets');expect(targets.body.targets).toHaveLength(63);
+  expect(targets.body.targets.filter((t:any)=>t.kind==='BOT').every((t:any)=>t.selectable===false&&t.status==='NO_NATIVE_STREAM')).toBe(true);
+  const bot=targets.body.targets.find((t:any)=>t.kind==='BOT');expect((await api(group[0]!,route(id)+query(m,bot.participantId))).status).toBe(403);
+  const target=group[1]!,a=ids.next();await event(target,m,'ATTEMPT_START',{attemptId:a});await api(group[0]!,route(id)+query(m,target.session.playerId));
+  const before=await scoreState(id),began=performance.now();
+  for(let i=0;i<10;i++){now+=1000;await api(group[0]!,route(id)+query(m,target.session.playerId));const batch=Array.from({length:16},(_,j)=>packet(m,a,i*16+j,(i*16+j)*50));expect((await api(target,route(id)+'/publish',body(m,batch))).status).toBe(201);}
+  const d=spectator.diagnostics();expect(d.streams).toBe(1);expect(d.serializedBytes).toBeLessThan(d.limits.totalBytes);expect(await scoreState(id)).toEqual(before);
+  console.info('Survival spectator 64-player isolated HTTP, 160 native-format frames, elapsedMs=',performance.now()-began,'serializedBytes=',d.serializedBytes);
+ },60000);
+});
+
+it('processes official Survival progress concurrently with shared viewer reads and native pose uploads without spectator scoring writes',async()=>{
+ const {group,id}=await game(16),m=await prepare(id,group),viewer=group[0]!,target=group[1]!,peer=group[2]!;
+ await event(viewer,m,'FORFEIT');now+=5000;await touch(group);
+ const r=survivalCurrentRound(m),targetAttempt=ids.next(),peerAttempt=ids.next();
+ await event(target,m,'ATTEMPT_START',{attemptId:targetAttempt});await event(peer,m,'ATTEMPT_START',{attemptId:peerAttempt});
+ const route=`/online/matches/${id}/spectator-live`,query=`?protocolVersion=2&worldHistory=1&targetId=${target.session.playerId}&roundKey=${r.key}&mapGeneration=${r.mapGeneration}&levelId=${r.map!.levelId}`;
+ await api(viewer,route+query);
+ const latencies:number[]=[],began=performance.now();
+ for(let i=0;i<8;++i){now+=500;await touch(group);const start=performance.now();
+  const packets=Array.from({length:10},(_,j)=>({protocolVersion:2,matchId:id,roundNumber:r.ordinal,levelId:r.map!.levelId,attemptId:targetAttempt,generation:1,sequence:i*10+j,elapsedMs:(i*10+j)*50,inputEdges:[],keyframe:{x:100+i*10+j,y:40,rotation:0,mode:'CUBE',mini:false,upsideDown:false,flipped:false,dual:false,dead:false,finished:false}}));
+  const [upload,view]=await Promise.all([api(target,route+'/publish',{roundKey:r.key,mapGeneration:r.mapGeneration,levelId:r.map!.levelId,packets}),api(viewer,route+query),event(peer,m,'PROGRESS',{attemptId:peerAttempt,progress:10+i,currentProgress:10+i})]);
+  expect(upload.status).toBe(201);expect(view.status).toBe(200);latencies.push(performance.now()-start);
+ }
+ const state=await engine.get(id),round=survivalCurrentRound(state);
+ expect(round.players.find(p=>p.participantId===viewer.session.playerId)?.attempts).toHaveLength(0);
+ expect(round.players.find(p=>p.participantId===target.session.playerId)?.attempts).toHaveLength(1);
+ expect(round.players.find(p=>p.participantId===peer.session.playerId)?.highestProgress).toBe(17);
+ expect(round.startsAt).toBe(r.startsAt);expect(round.endsAt).toBe(r.endsAt);
+ if(process.env['CORUM_SPECTATOR_LOAD_REPORT']){
+  latencies.sort((a,b)=>a-b);await (await import('node:fs/promises')).writeFile(process.env['CORUM_SPECTATOR_LOAD_REPORT'],JSON.stringify({environment:pool?'isolated PostgreSQL':'isolated PGlite',players:16,frames:80,concurrentBatches:8,totalMs:performance.now()-began,p50BatchMs:latencies[4],p95BatchMs:latencies[7],...spectator.diagnostics()},null,2));
+ }
 });

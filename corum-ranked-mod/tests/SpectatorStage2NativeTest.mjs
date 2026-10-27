@@ -81,6 +81,22 @@ matjson::Value response(int first,int count,int total,bool reset=false,std::stri
 }
 void attach(SpectatorLiveRuntime& r){r.resetViewer();r.m_viewMatchId="match";r.m_viewContextKey=viewerContextKey(RankedRuntime::get().view().match);}
 int main(){
+ // Stage 4 uses an independent authenticated Survival route/target; it never fabricates a Solo Match.
+ {
+  SpectatorLiveRuntime r;RankedRuntime::get().authority=false;
+  r.m_external=SurvivalSpectatorTransportContext{"match","survival:R1:target1","survival-session","R1","target1","",1,123,9,true,false};
+  r.tickViewer();assert(web::pending.back().op.url.find("/survival/online/matches/match/spectator-live?")!=std::string::npos);
+  assert(web::pending.back().op.url.find("targetId=target1")!=std::string::npos&&web::pending.back().op.url.find("mapGeneration=9")!=std::string::npos);
+  auto wire=response(0,2,2,true);wire["targetId"]="target1";wire["context"]["roundKey"]="R1";wire["context"]["mapGeneration"]=9;wire["context"]["levelId"]=123;
+  auto old=web::pending.back().callback;
+  web::pending.back().callback({200,wire});assert(r.m_lastAcceptedPose&&r.m_viewMatchId=="match");
+  auto epoch=r.m_viewPresentationEpoch;r.m_external->key="survival:R1:target2";r.m_external->targetId="target2";r.tickViewer();
+  assert(r.m_viewPresentationEpoch>epoch&&!r.m_lastAcceptedPose);old({200,wire});assert(!r.m_lastAcceptedPose);
+  r.applyViewerResponse(wire);assert(!r.m_lastAcceptedPose&&r.m_reason=="SURVIVAL_STREAM_CONTEXT_MISMATCH");
+  wire["targetId"]="target2";r.applyViewerResponse(wire);assert(r.m_lastAcceptedPose);
+  auto attempt=r.m_viewAttemptId;r.m_external->viewer=false;r.tickViewer();assert(r.m_viewAttemptId.empty()&&!attempt.empty());
+  RankedRuntime::get().authority=true;web::pending.clear();
+ }
  // Stage 3 optional v2 Dual and cosmetics travel through the actual HTTP decoder.
  {
   SpectatorLiveRuntime r;attach(r);auto wire=response(0,1,1,true);
