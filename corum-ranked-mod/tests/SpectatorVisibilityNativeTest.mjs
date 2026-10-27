@@ -50,13 +50,14 @@ test('native visibility owner hides only an authorized dummy, including waiting;
             writeFileSync(join(dir, `Geode/binding/${name}.hpp`), '#include <Geode/Geode.hpp>\n');
         const cpp = `
 #include "${join(root, 'src/spectator/SpectatorWorldDriver.hpp')}"
+#include "${join(root,'tests/helpers/InactiveReplayDouble.hpp')}"
 #include <Geode/Geode.hpp>
 #include <cassert>
-namespace corum::ranked {struct SurvivalSpectatorRuntime {static SurvivalSpectatorRuntime& get(){static SurvivalSpectatorRuntime r;return r;}bool sceneLevel(int)const{return false;}bool publishing()const{return false;}bool canLaunch()const{return false;}template<class...T>bool arm(T...){return false;}template<class...T>bool capture(T const&...){return false;}template<class...T>void terminal(T const&...){}void sceneExited(){}bool exitRequested()const{return false;}};}
+namespace corum::ranked {struct SurvivalSpectatorRuntime {static SurvivalSpectatorRuntime& get(){static SurvivalSpectatorRuntime r;return r;}bool sceneLevel(int)const{return false;}replay::InactiveWorld* world()const{return nullptr;}bool publishing()const{return false;}bool canLaunch()const{return false;}template<class...T>bool arm(T...){return false;}template<class...T>bool capture(T const&...){return false;}template<class...T>void terminal(T const&...){}void sceneExited(){}bool exitRequested()const{return false;}};}
 
 namespace corum::ranked {struct RankedRuntime{struct Match{bool spectatorLiveEnabled=true;};struct View{Match match;} data;View const& view()const{return data;}bool spectator=false;static RankedRuntime& get(){static RankedRuntime r;return r;}bool isSpectating(){return spectator;}};}
 struct Owner:PlayLayer {
- struct Fields{int levelId=123;bool survivalLiveLevel=false;bool spectatorScenePrepared=false,spectatorPresentationRetired=false,autoExitRequested=false;struct Safety{bool enabled=false;bool active(){return enabled;}}localSafety;corum::ranked::SpectatorWorldDriver spectatorWorldDriver;} fields;
+ struct Fields{int levelId=123;bool survivalLiveLevel=false,survivalReplayLevel=false;bool spectatorScenePrepared=false,spectatorPresentationRetired=false,autoExitRequested=false;struct Safety{bool enabled=false;bool active(){return enabled;}}localSafety;corum::ranked::SpectatorWorldDriver spectatorWorldDriver;} fields;
  Fields* m_fields=&fields;bool watchable=true;bool watchableSpectatorScene(){return watchable;}
  ${block(source, 'bool spectatorCameraActive()')}
  ${block(source, 'void reconcileSpectatorWorldDriver()')}
@@ -98,7 +99,7 @@ sys.dont_write_bytecode=True
 spec=importlib.util.spec_from_file_location('v',${JSON.stringify(join(root, 'tests/verify-visibility-package.py'))});v=importlib.util.module_from_spec(spec);spec.loader.exec_module(v)
 player={'PlayerObject::'+name for name in ('update','updateRotation','spiderTestJump','setPosition','setRotation','updateSpecial')}
 safety={'GJGameLevel::savePercentage','PlayLayer::destroyPlayer','PlayLayer::levelComplete','PlayLayer::checkForEnd','PlayLayer::showCompleteText','PlayLayer::showNewBest','PlayLayer::onQuit','PlayLayer::onExit','PlayLayer::resetLevel','PlayLayer::updateAttempts','PauseLayer::customSetup','GameManager::returnToLastScene','GJBaseGameLayer::update','GJBaseGameLayer::updateCamera','GJBaseGameLayer::teleportPlayer'}
-safety|={'GJBaseGameLayer::checkCollisions','GJBaseGameLayer::collisionCheckObjects'}
+safety|={'GJBaseGameLayer::checkCollisions','GJBaseGameLayer::collisionCheckObjects','PlayLayer::startMusic','GJBaseGameLayer::processCommands','GJBaseGameLayer::processQueuedButtons','GJBaseGameLayer::handleButton'}
 probes={'GJBaseGameLayer::playerTouchedTrigger','EffectGameObject::triggerObject'}
 def binary(targets):return struct.pack('<II',0xFEEDFACF,0x0100000C)+b''.join(('[GEODE_MODIFY_NAME] '+name+' [GEODE_MODIFY_ADDRESS] 0x0\\0').encode() for name in targets)
 assert set(v.verify_binary(binary(player|safety),'ios',False))==player

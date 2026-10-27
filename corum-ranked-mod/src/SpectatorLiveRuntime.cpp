@@ -430,9 +430,9 @@ void SpectatorLiveRuntime::tickViewer() {
     if(m_external){eligible=m_external->viewer;matchId=m_external->matchId;contextKey=m_external->key;}
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
     if (!m_debugContextId.empty()) {
-        eligible = debug::DebugSpectateRuntime::get().playbackLevel(debug::kDebugSpectateLevelId);
+        eligible = debug::DebugSpectateRuntime::get().playbackLevel(debug::DebugSpectateRuntime::get().levelId());
         matchId = m_debugContextId;
-        contextKey = fmt::format("{}:R1:D0:L{}", matchId, debug::kDebugSpectateLevelId);
+        contextKey = fmt::format("{}:R1:D0:L{}", matchId, debug::DebugSpectateRuntime::get().levelId());
     }
 #endif
     if (!eligible) {
@@ -495,7 +495,7 @@ void SpectatorLiveRuntime::pollViewer() {
         path+="&worldHistory=1";
     if(m_external){
         request=spectatorRequest(m_external->session,{});
-        path="/api/ranked/survival/online/matches/"+matchId+"/spectator-live?protocolVersion=2&worldHistory=1&targetId="+m_external->targetId+
+        path="/api/ranked/survival/online/matches/"+matchId+"/spectator-live?protocolVersion=2&targetId="+m_external->targetId+
             "&roundKey="+m_external->roundKey+"&mapGeneration="+std::to_string(m_external->mapGeneration)+"&levelId="+std::to_string(m_external->level);
     }
     path+=fmt::format("&cosmeticRevision={}",m_viewCosmeticRevision);
@@ -512,7 +512,7 @@ void SpectatorLiveRuntime::pollViewer() {
         [this, requestGeneration, matchId, contextKey, requestStartedAt](web::WebResponse response) {
             auto currentContextKey = m_external?m_external->key:viewerContextKey(RankedRuntime::get().view().match);
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
-            if (!m_debugContextId.empty()) currentContextKey = fmt::format("{}:R1:D0:L{}", m_debugContextId, debug::kDebugSpectateLevelId);
+            if (!m_debugContextId.empty()) currentContextKey = fmt::format("{}:R1:D0:L{}", m_debugContextId, debug::DebugSpectateRuntime::get().levelId());
 #endif
             if (
                 requestGeneration != m_viewRequestGeneration ||
@@ -524,7 +524,7 @@ void SpectatorLiveRuntime::pollViewer() {
             bool authorized=authority.view().stage==RuntimeStage::Matched && !authority.isPlacement() &&
                 authority.isSpectating() && !authority.hasLocalAttemptInFlight() && authority.view().match.spectatorLiveEnabled;
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
-            if(!m_debugContextId.empty())authorized=debug::DebugSpectateRuntime::get().playbackLevel(debug::kDebugSpectateLevelId);
+            if(!m_debugContextId.empty())authorized=debug::DebugSpectateRuntime::get().playbackLevel(debug::DebugSpectateRuntime::get().levelId());
 #endif
             if(m_external)authorized=m_external->viewer;
             if(!authorized){resetViewer();return;}
@@ -607,6 +607,9 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
                 m_lastViewerRttMs
             );
         }
+        if(m_restoreTimeline.active()){
+            m_heldPresentation=m_restoreTimeline.frame();m_restoreTimeline.reset();m_partialSync=true;m_forceRestoreRequest=true;
+        }
         m_status = SpectatorLiveStatus::Waiting;
         m_reason = reason;
         // A transient empty relay response hides presentation without allocating
@@ -646,7 +649,7 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
 #endif
     auto expectedLevel=m_external?m_external->level:authoritativeMatch.currentMap?authoritativeMatch.currentMap->levelId:0;
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
-    if(!m_debugContextId.empty())expectedLevel=debug::kDebugSpectateLevelId;
+    if(!m_debugContextId.empty())expectedLevel=debug::DebugSpectateRuntime::get().levelId();
 #endif
     auto const historyLevel=restoration["levelId"].asInt().unwrapOr(0);
     if(hasRestoration && historyLevel>0 && historyLevel!=expectedLevel){setFallback("HISTORY_LEVEL_MISMATCH");return;}
@@ -943,13 +946,13 @@ std::optional<SpectatorRemoteFrame> SpectatorLiveRuntime::presentationFrame() co
     auto const sample = m_sampleBuffer.render(nowMs);
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
     if (!m_debugContextId.empty()) {
-        if (!debug::DebugSpectateRuntime::get().playbackLevel(debug::kDebugSpectateLevelId) ||
+        if (!debug::DebugSpectateRuntime::get().playbackLevel(debug::DebugSpectateRuntime::get().levelId()) ||
             m_viewMatchId != m_debugContextId ||
             (m_status != SpectatorLiveStatus::Waiting && m_status != SpectatorLiveStatus::Live &&
              m_status != SpectatorLiveStatus::Fallback)) return std::nullopt;
         return SpectatorRemoteFrame {
             .context = { .matchId = m_viewMatchId, .roundNumber = 1, .deathmatchSequence = 0,
-                .levelId = debug::kDebugSpectateLevelId, .attemptId = m_viewAttemptId,
+                .levelId = debug::DebugSpectateRuntime::get().levelId(), .attemptId = m_viewAttemptId,
                 .generation = m_viewGeneration, .epoch = m_viewPresentationEpoch },
             .sequence = sample ? sample->sequence : m_lastViewSequence,
             .pose = sample ? std::optional(sample->pose) : std::nullopt,

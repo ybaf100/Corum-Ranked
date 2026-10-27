@@ -31,6 +31,7 @@ test('actual viewer decoder recovers timeout only on fresh validated packets and
 #include "${join(root, 'src/domain/SpectatorInterpolationBuffer.hpp')}"
 #include "${join(root, 'src/domain/SpectatorRestoreTimeline.hpp')}"
 #include <algorithm>
+namespace corum::ranked::debug {struct DebugSpectateRuntime{static DebugSpectateRuntime&get(){static DebugSpectateRuntime r;return r;}int levelId()const{return kDebugSpectateLevelId;}};}
 #include <cassert>
 #include <chrono>
 #include <map>

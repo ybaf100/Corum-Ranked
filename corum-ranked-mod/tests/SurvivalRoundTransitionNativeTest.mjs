@@ -17,6 +17,7 @@ const viewer=read('tests/SpectatorLiveViewerNativeTest.mjs');
 const json=viewer.slice(viewer.indexOf('namespace matjson {'),viewer.indexOf('${readFileSync(join(root,'));
 const preamble=`
 #include <algorithm>
+#include "${join(root,'tests/helpers/InactiveReplayDouble.hpp')}"
 #include <cassert>
 #include <chrono>
 #include <deque>

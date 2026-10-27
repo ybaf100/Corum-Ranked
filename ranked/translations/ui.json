@@ -2324,8 +2324,8 @@
     "ko": "승 ("
   },
   "survival-spectator-choices": {
-    "en": "Watch a survivor, play locally, or view your result.",
-    "ko": "생존자 관전, 자유 플레이, 결과 보기를 선택하세요."
+    "en": "Play locally or view your result.",
+    "ko": "자유 플레이 또는 결과 보기를 선택하세요."
   },
   "survival-other-player": {
     "en": "OTHER PLAYER",
@@ -2378,5 +2378,25 @@
   "back": {
     "en": "BACK",
     "ko": "돌아가기"
+  },
+  "replay-device-missing": {
+    "en": "No replay on this device",
+    "ko": "이 기기에 저장된 리플레이 없음"
+  },
+  "replay-damaged": {
+    "en": "Replay file damaged",
+    "ko": "리플레이 파일 손상"
+  },
+  "replay-view": {
+    "en": "VIEW REPLAY",
+    "ko": "리플레이 보기"
+  },
+  "replay-capture-error": {
+    "en": "Replay capture failed; existing best preserved",
+    "ko": "리플레이 녹화 실패 · 기존 최고기록은 보존됩니다"
+  },
+  "survival-attempts-remaining": {
+    "en": "ATTEMPTS LEFT {}/3",
+    "ko": "남은 시도 {}/3"
   }
 }

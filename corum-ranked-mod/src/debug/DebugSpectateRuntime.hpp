@@ -10,7 +10,7 @@ namespace corum::ranked::debug {
 class DebugSpectateRuntime final {
 public:
     static DebugSpectateRuntime& get();
-    void start(bool playback, std::string password,float startPercent=0);
+    void start(bool playback, std::string password,float startPercent=0,int levelId=kDebugSpectateLevelId);
     void refreshLiveSetting();
     void toggleLiveSetting(std::string password);
     std::optional<bool> liveEnabled() const { return m_liveEnabled; }
@@ -30,6 +30,7 @@ public:
     std::string const& status() const { return m_status; }
     DebugSpectateMode mode() const { return m_mode; }
     bool playbackComplete() const { return m_playbackComplete; }
+    int levelId()const{return m_levelId;}
     bool restoringHistory()const{return m_startPercent>0;}
     void viewerResponse(bool complete, bool expired);
 private:
@@ -43,7 +44,9 @@ private:
     std::optional<SpectatorGhostPose> m_previousCapturedPose;
     std::chrono::steady_clock::time_point m_recordStartedAt {}, m_nextUploadAt {}, m_expireAt {}, m_prepareStartedAt {};
     std::uint64_t m_generation = 0;
+    int m_levelId=kDebugSpectateLevelId;
     float m_startPercent=0;
+    double m_playbackStartElapsedMs=0;
     int m_errors = 0;
     bool m_busy = false, m_launched = false, m_playbackComplete = false;
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_request;

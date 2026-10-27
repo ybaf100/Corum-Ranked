@@ -13,6 +13,10 @@ test('actual Survival spectator runtime gates admission, ACK publication, mode t
  const context=read('src/SpectatorLiveRuntime.hpp').slice(read('src/SpectatorLiveRuntime.hpp').indexOf('struct SurvivalSpectatorTransportContext'),read('src/SpectatorLiveRuntime.hpp').indexOf('class SpectatorLiveRuntime final'));
  const cpp=`
 #include <matjson.hpp>
+#include <future>
+#include <memory>
+#include <iostream>
+#include "${new URL('../src/replay/SurvivalReplayPlayback.hpp',import.meta.url).pathname}"
 #include <chrono>
 #include <optional>
 #include <functional>
@@ -35,6 +39,20 @@ struct Pending{Operation op;std::function<void(WebResponse)>done;};inline std::v
 }
 namespace async{template<class T>struct TaskHolder{void cancel(){}void spawn(utils::web::Operation o,std::function<void(T)>f){utils::web::pending.push_back({o,f});}};}}
 using namespace geode::utils;
+namespace corum::ranked::replay {
+struct StorageBoundary{
+ bool available=true,damaged=false;
+ std::future<std::unique_ptr<Playback>> playback(Json){
+  std::promise<std::unique_ptr<Playback>> promise;
+  if(damaged)promise.set_exception(std::make_exception_ptr(std::runtime_error("Replay damaged")));
+  else if(!available)promise.set_value(nullptr);
+  else {Document d;d.footer=Json();d.complete=true;d.metadata["officialBestProgress"]=100.;d.metadata["mapGeometrySha256"]=std::string(64,'a');d.metadata["mapVersion"]=1;d.footer["captureCompleteness"]="COMPLETE";
+   Json i;i["kind"]="initial";d.records.push_back(i);Json f;f["kind"]="frame";f["dt"]=.01;d.records.push_back(f);promise.set_value(std::make_unique<Playback>(std::move(d)));}
+  return promise.get_future();
+ }
+};
+struct Recorder{StorageBoundary port;static Recorder&get(){static Recorder r;return r;}StorageBoundary&storage(){return port;}};
+}
 namespace corum::ranked {
 ${context}
 enum class SpectatorLiveStatus{Idle,Waiting,Live,Syncing,PartialSync,Reconnecting,Buffering,Cleared,Disconnected};
@@ -49,10 +67,11 @@ struct SpectatorLiveRuntime{
 };
 struct RankedRuntime{std::string session="session";static RankedRuntime&get(){static RankedRuntime r;return r;}std::string spectatorLiveSessionToken()const{return session;}};
 struct SurvivalRuntime{
- struct Map{int levelId=123;};struct Row{std::string id;double bestProgress=0,currentProgress=0;};
- struct View{std::string id="match",state="PLAYING",roundKey="R1";int roundNumber=1,mapGeneration=1;Map map;bool ownEliminated=true,online=true,spectatorDemand=true;std::string ownId="viewer";matjson::Value participants;std::vector<std::string>aliveIds{"target"};std::vector<Row>standings;std::optional<double>cutoff=40;}v;
- bool free=false;int lock=0,freeReturn=0;std::string accepted,attempt="native-id";SurvivalOutcomeChoice choice=SurvivalOutcomeChoice::Undecided;
+ struct Map{int levelId=123,version=1;};struct Row{std::string id;double bestProgress=0,currentProgress=0;};
+ struct View{std::string id="match",state="PLAYING",roundKey="R1";int roundNumber=1,mapGeneration=1;Map map;bool ownEliminated=false,online=true,spectatorDemand=true,debug=false;std::string ownId="viewer";matjson::Value participants,certificate;std::vector<std::string>aliveIds{"target"};std::vector<Row>standings;std::optional<double>cutoff=40;}v;
+ bool free=false,cleared=true;int lock=0,freeReturn=0,freeBegins=0;std::string accepted,attempt;SurvivalOutcomeChoice choice=SurvivalOutcomeChoice::Undecided;
  static SurvivalRuntime&get(){static SurvivalRuntime r;return r;}auto const&view()const{return v;}std::string optionsContext()const{return v.id+v.roundKey+std::to_string(v.mapGeneration);}
+ bool officialRoundCleared()const{return cleared&&!v.ownEliminated&&attempt.empty();}bool beginFreePlay(){++freeBegins;free=true;return true;}
  void chooseOutcome(SurvivalOutcomeChoice c){choice=c;}int watchLockSeconds()const{return lock;}bool freePlaying()const{return free;}
  void returnFreePlayForSpectator(){++freeReturn;}bool validateNative(GJGameLevel*)const{return !free;}bool canEnterObserver()const{return choice==SurvivalOutcomeChoice::Observe;}
  auto spectatorAcceptedAttempt()const{return accepted;}auto localAttemptId()const{return attempt;}
@@ -68,22 +87,25 @@ int main(){using namespace corum::ranked;namespace web=geode::utils::web;
  auto&r=SurvivalSpectatorRuntime::get();auto&s=SurvivalRuntime::get();auto&transport=SpectatorLiveRuntime::survival();
  r.m_targets={{"target","Human","PLAYING",123,1,50,40,true,false},{"bot","Bot","NO_NATIVE_STREAM",0,2,30,10,false,true}};
  s.v.participants=matjson::Value::array();matjson::Value target;target["participantId"]="target";target["eliminationStage"]=nullptr;s.v.participants.push(target);
- s.lock=5;r.openTargets();assert(opens==0);s.lock=0;r.openTargets();assert(opens==1&&s.choice==SurvivalOutcomeChoice::LiveSpectate&&!s.free);
+ s.v.certificate["geometrySha256"]=std::string(64,'a');s.v.ownEliminated=true;r.openTargets();assert(opens==0);s.v.ownEliminated=false;s.cleared=false;r.openTargets();assert(opens==0);s.cleared=true;r.openTargets();assert(opens==1&&s.choice==SurvivalOutcomeChoice::LiveSpectate&&!s.free);
  r.select("bot");assert(web::pending.empty()&&!r.active());
  r.select("target");auto first=web::pending.back().done;assert(!r.active()&&!r.canLaunch());
  first({403,{}});assert(!r.active()&&!r.canLaunch());
  r.select("target");auto old=web::pending.back().done;
  r.select("target");auto current=web::pending.back().done;
  matjson::Value approved;approved["targetId"]="target";approved["context"]["roundKey"]="R1";approved["context"]["mapGeneration"]=1;approved["context"]["levelId"]=123;
- old({200,approved});assert(!r.active());current({200,approved});assert(r.active()&&r.canLaunch()&&!s.free&&transport.viewer);
+ old({200,approved});assert(!r.active());current({200,approved});assert(r.active()&&!r.canLaunch()&&!s.free&&transport.viewer);r.tick();if(!r.canLaunch())std::cerr<<"replay admission: "<<r.error()<<" auth="<<r.active()<<" scope="<<r.currentScope()<<" world="<<bool(r.world())<<"\\n";assert(r.canLaunch()&&r.world());
  GJGameLevel level;assert(r.arm(&level));assert(r.sceneLevel(123));s.v.mapGeneration=2;assert(!r.sceneLevel(123));s.v.mapGeneration=1;assert(r.sceneLevel(123));PlayLayer play;PlayLayer::current=&play;
  r.select("target");assert(r.exitRequested()&&r.active()&&!s.free);r.tick();assert(returns==1);
  r.sceneExited();PlayLayer::current=nullptr;r.tick();assert(!r.active());
- web::pending.back().done({200,approved});assert(r.active());assert(r.arm(&level));PlayLayer::current=&play;
- r.freePlay();assert(r.exitRequested()&&!s.free);r.sceneExited();PlayLayer::current=nullptr;r.tick();assert(s.choice==SurvivalOutcomeChoice::Observe&&!r.active()&&!transport.viewer);
- r.m_startFreePlay=false;s.free=true;r.openTargets();assert(s.freeReturn==1&&!r.active());s.free=false;r.tick();assert(opens>=2&&!r.active());
+ web::pending.back().done({200,approved});assert(r.active());r.tick();assert(r.arm(&level));PlayLayer::current=&play;
+ r.freePlay();assert(r.exitRequested()&&!s.free);r.sceneExited();PlayLayer::current=nullptr;r.tick();assert(s.freeBegins==1&&s.free&&!r.active()&&!transport.viewer);
+ r.m_startFreePlay=false;s.free=true;r.openTargets();assert(s.freeReturn==0&&!r.active());s.free=false;r.tick();assert(!r.active());
+ // Missing or damaged clear files deny native admission after server authorization.
+ s.cleared=true;s.attempt.clear();replay::Recorder::get().port.available=false;r.select("target");web::pending.back().done({200,approved});r.tick();assert(!r.active()&&!r.canLaunch()&&!r.world());
+ replay::Recorder::get().port.available=true;replay::Recorder::get().port.damaged=true;r.select("target");web::pending.back().done({200,approved});r.tick();assert(!r.active()&&!r.canLaunch());replay::Recorder::get().port.damaged=false;
  // Publishing is gated by an acknowledged exact local Attempt, not an invented UUID.
- s.v.ownEliminated=false;s.accepted.clear();SpectatorGhostPose pose{100,40,0};assert(!r.capture(pose)&&transport.captures==0);
+ s.cleared=false;s.attempt="native-id";s.v.ownEliminated=false;s.accepted.clear();SpectatorGhostPose pose{100,40,0};assert(!r.capture(pose)&&transport.captures==0);
  s.accepted="native-id";assert(r.capture(pose)&&transport.captures==1&&!transport.viewer);
  s.free=true;assert(!r.capture(pose));s.free=false;s.v.spectatorDemand=false;assert(!r.capture(pose));s.v.spectatorDemand=true;
  pose.dead=true;r.terminal(pose);s.accepted="different-attempt";r.tick();assert(transport.terminals==0);

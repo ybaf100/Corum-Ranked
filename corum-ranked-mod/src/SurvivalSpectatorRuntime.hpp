@@ -1,4 +1,7 @@
 #pragma once
+#include "replay/SurvivalReplayPlayback.hpp"
+#include <future>
+#include <memory>
 #include "SpectatorLiveRuntime.hpp"
 #include "domain/LevelPreparationPolicy.hpp"
 namespace corum::ranked {
@@ -20,6 +23,7 @@ public:
     bool arm(GJGameLevel* level);
     void sceneExited();
     bool exitRequested()const{return m_exitRequested;}
+    replay::Playback* world(){return m_world.get();}
     bool publishing()const;
     bool capture(SpectatorGhostPose const& pose);
     void terminal(SpectatorGhostPose const& pose);
@@ -35,6 +39,8 @@ private:
     std::vector<SurvivalSpectatorTarget> m_targets;
     std::string m_error,m_target,m_targetName,m_session,m_match,m_pendingTarget,m_pendingTerminalAttempt,m_targetsContext;
     LevelPreparationContext m_context;
+    std::future<std::unique_ptr<replay::Playback>> m_worldLoading;
+    std::unique_ptr<replay::Playback> m_world;
     std::optional<SpectatorGhostPose> m_terminal;
     std::uint64_t m_generation=0;
     bool m_authorized=false,m_inScene=false,m_exitRequested=false,m_openAfterExit=false,m_selectionVisible=false,m_busy=false,m_ticking=false,m_startFreePlay=false;

@@ -18,6 +18,7 @@ const json=viewer.slice(viewer.indexOf('namespace matjson {'),viewer.indexOf('${
  .replace('bool isObject()const', 'void erase(std::string const& key){if(auto p=std::get_if<Object>(&data))p->erase(key);}bool isObject()const');
 const preamble=`
 #include <algorithm>
+#include "${join(root,'tests/helpers/InactiveReplayDouble.hpp')}"
 #include <cassert>
 #include <chrono>
 #include <deque>
@@ -55,16 +56,16 @@ struct RankedAudioManager{int restored=0;static RankedAudioManager&get(){static 
 struct RankedRuntime{std::string token="session";static RankedRuntime&get(){static RankedRuntime r;return r;}std::string spectatorLiveSessionToken()const{return token;}};
 struct SurvivalRuntime{
  struct View{std::string id="match",roundKey="r1",phase="ROUND_1",state="PLAYING",ownId="human",activeAttemptId;int mapGeneration=1;bool ownEliminated=false;std::vector<SurvivalStanding> standings;matjson::Value completedRound;}m_view;
- std::string m_session="session";SurvivalFreePlayState m_freePlay;std::optional<WeakRef<CCScene>>m_freePlayOrigin,m_freePlayQuitScene;Ref<GJGameLevel>m_freePlayQuitLevel;bool m_freePlayReturnQueued=false,m_freePlayNativeQuitFinished=false;
+ std::string m_session="session",m_attempt;SurvivalFreePlayState m_freePlay;std::optional<WeakRef<CCScene>>m_freePlayOrigin,m_freePlayQuitScene;Ref<GJGameLevel>m_freePlayQuitLevel;bool m_freePlayReturnQueued=false,m_freePlayNativeQuitFinished=false;
  bool active()const{return !m_view.id.empty();}bool freePlaying()const{return m_freePlay.active;}
- bool normalRoundCleared()const;bool canFreePlay()const;bool beginFreePlay();bool freePlayReturnPending()const;bool beginFreePlayNativeQuit(GJGameLevel*);bool interceptFreePlayNativeQuit(GJGameLevel*)const;void finishFreePlayNativeQuit();void pumpFreePlayReturn();
+ bool normalRoundCleared()const;bool officialRoundCleared()const;bool canFreePlay()const;bool beginFreePlay();bool freePlayReturnPending()const;bool beginFreePlayNativeQuit(GJGameLevel*);bool interceptFreePlayNativeQuit(GJGameLevel*)const;void finishFreePlayNativeQuit();void pumpFreePlayReturn();
 };
-${['bool SurvivalRuntime::normalRoundCleared()', 'bool SurvivalRuntime::canFreePlay()', 'bool SurvivalRuntime::beginFreePlay()', 'bool SurvivalRuntime::freePlayReturnPending()', 'bool SurvivalRuntime::beginFreePlayNativeQuit(', 'bool SurvivalRuntime::interceptFreePlayNativeQuit(', 'void SurvivalRuntime::finishFreePlayNativeQuit()', 'void SurvivalRuntime::pumpFreePlayReturn()'].map(n=>method(source,n)).join('\n')}
+${['bool SurvivalRuntime::officialRoundCleared()', 'bool SurvivalRuntime::normalRoundCleared()', 'bool SurvivalRuntime::canFreePlay()', 'bool SurvivalRuntime::beginFreePlay()', 'bool SurvivalRuntime::freePlayReturnPending()', 'bool SurvivalRuntime::beginFreePlayNativeQuit(', 'bool SurvivalRuntime::interceptFreePlayNativeQuit(', 'void SurvivalRuntime::finishFreePlayNativeQuit()', 'void SurvivalRuntime::pumpFreePlayReturn()'].map(n=>method(source,n)).join('\n')}
 }
 int main(){using namespace corum::ranked;SurvivalRuntime r;CCScene origin;origin.coordinator=true;auto* d=CCDirector::sharedDirector();d->stack={&origin};
  SurvivalStanding own;own.id="human";own.score=own.bestProgress=100;r.m_view.standings={own};assert(!r.canFreePlay());
  r.m_view.standings[0].cleared=true;r.m_view.standings[0].attemptActive=true;assert(!r.canFreePlay());r.m_view.standings[0].attemptActive=false;r.m_view.activeAttemptId="a";assert(!r.canFreePlay());r.m_view.activeAttemptId.clear();
- r.m_view.phase="TIEBREAK";assert(!r.canFreePlay());r.m_view.phase="ROUND_1";assert(r.canFreePlay());
+ r.m_view.phase="TIEBREAK";assert(!r.normalRoundCleared()&&r.canFreePlay());r.m_view.phase="ROUND_1";assert(r.canFreePlay());
  assert(r.beginFreePlay());assert(!r.beginFreePlay());drain();assert(d->stack.size()==2&&RankedAudioManager::get().restored==1);
  wall+=std::chrono::hours(1);r.pumpFreePlayReturn();assert(queued.empty()&&!r.freePlayReturnPending()); // A local timeout grants no authority.
  CCScene ordinary;PlayLayer play;play.running=false;play.parent=&ordinary;PlayLayer::current=&play;d->stack.push_back(&ordinary);r.m_view.state="ROUND_RESULT";

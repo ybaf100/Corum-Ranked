@@ -1,3 +1,4 @@
+#include "replay/HistoryReplayButton.hpp"
 #include "ui/PublicPlayerProfile.hpp"
 #include "ui/LobbyPopulationView.hpp"
 #include "RankedPopup.hpp"
@@ -464,6 +465,8 @@ class CorumRankedLayer final : public CCLayerColor {
     ScrollLayer* m_historyBoardScroll=nullptr;
     struct HistoryProfileHit {WeakRef<CCNode> node;corum::ranked::SurvivalStanding player;std::string match;bool survival;};
     std::vector<HistoryProfileHit> m_historyProfiles;
+    struct HistoryIcon {WeakRef<CCNode> holder;corum::ranked::SurvivalStanding player;};
+    std::vector<HistoryIcon> m_historyIcons;
     std::uint64_t m_historyUiGeneration=0;
     std::optional<WeakRef<corum::ranked::ui::RankedConfirmPopup>> m_historyReconnect;
     std::optional<WeakRef<corum::ranked::ui::RankedHistoryFilterPopup>> m_historyFilterPopup;
@@ -679,6 +682,7 @@ class CorumRankedLayer final : public CCLayerColor {
         }
         updateDynamicUi();
         updateHistoryThumbnail();
+        updateHistoryIcons();
         syncLobbyPopulation();
         syncAudioMode();
         maybeEnterLevel();
@@ -1106,7 +1110,7 @@ class CorumRankedLayer final : public CCLayerColor {
         if(m_historyThumbnailContext.levelId)corum::ranked::SurvivalThumbnailProvider::history().release(m_historyThumbnailContext);
     }
     void resetHistoryUi() {
-        ++m_historyUiGeneration;suspendHistoryThumbnail();m_historyThumbnail=nullptr;m_historyThumbnailPlaceholder=nullptr;m_historyTexture=nullptr;m_historyListScroll=nullptr;m_historyBoardScroll=nullptr;m_historyProfiles.clear();
+        ++m_historyUiGeneration;suspendHistoryThumbnail();m_historyThumbnail=nullptr;m_historyThumbnailPlaceholder=nullptr;m_historyTexture=nullptr;m_historyListScroll=nullptr;m_historyBoardScroll=nullptr;m_historyProfiles.clear();m_historyIcons.clear();
     }
     void clearUi() {
         resetHistoryUi();
@@ -1182,7 +1186,7 @@ class CorumRankedLayer final : public CCLayerColor {
                 view.stage == RuntimeStage::Queued || view.stage == RuntimeStage::JoiningQueue);
             auto const allowed = !m_rankTransitionLayer && !m_resultScoreLayer && !m_resultScorePending &&
                 m_titleSelectorAchievement.empty() && !m_modeTransition.moving() && !m_modeNoticeOpen && (lobby || m_page == Page::Achievements ||
-                    m_page == Page::HistoryList || m_page == Page::HistoryDetail);
+                    false);
             if (!allowed && m_settingsMenu->isVisible()) corum::ranked::ui::cancelMenuTouch(m_settingsMenu);
             m_settingsMenu->setVisible(allowed); m_settingsMenu->setTouchEnabled(allowed);
         }
@@ -4457,16 +4461,15 @@ class CorumRankedLayer final : public CCLayerColor {
         if(!player.bot&&player.accountId>0&&record!=rows.end())profile=record->record["currentPlayers"][std::to_string(player.accountId)];
         if(profile["gdAccountId"].asString().unwrapOr("")!=std::to_string(player.accountId))profile=matjson::Value();
         auto const current=profile[mode?"survival":"solo"];
-        auto const hasRank=current.isObject();auto const nameWidth=hasRank?width*.52f:width;
-        auto* hit=CCNode::create();hit->setContentSize({width,32});hit->setPosition({position.x-width/2,position.y-20});parent->addChild(hit,8);
-        auto* name=corum::ranked::ui::playerNameLabel(player.name,.32f,{nameWidth/2,20},color,corum::ranked::ui::FontWeight::ExtraBold);
-        corum::ranked::ui::fitSingleLineMenuLabel(name,nameWidth,18,.32f);hit->addChild(name,5);
+        auto const hasRank=current.isObject();
+        auto* hit=CCNode::create();hit->setContentSize({width,34});hit->setPosition({position.x-width/2,position.y-17});parent->addChild(hit,8);
+        auto* name=corum::ranked::ui::playerNameLabel(player.name,.32f,{0,25},color,corum::ranked::ui::FontWeight::ExtraBold);name->setAnchorPoint({0,.5f});
+        corum::ranked::ui::fitSingleLineMenuLabel(name,width,18,.32f);hit->addChild(name,5);
+        corum::ranked::ui::publicPlayerTitle(hit,profile["equippedTitle"],{width/2,10},width,.17f);
         if(hasRank){
-            auto value=current["promotion"].isObject()?tr("promotion-match","PROMOTION MATCH"):current["lp"].isNumber()?std::to_string(current["lp"].asInt().unwrapOr(0))+" LP":tr("info-unavailable","Unavailable");
-            value=tr("current","CURRENT")+" "+value;
-            auto* score=corum::ranked::ui::menuLabel(value,.21f,{width-2,20},kGold,corum::ranked::ui::FontWeight::ExtraBold);score->setAnchorPoint({1,.5f});corum::ranked::ui::fitSingleLineMenuLabel(score,std::max(6.f,width-nameWidth-8),16,.21f);hit->addChild(score,5);
+            auto value=current["promotion"].isObject()?tr("promotion-match","PROMOTION MATCH"):current["lp"].isNumber()?std::to_string(current["lp"].asInt().unwrapOr(0))+" LP":"";
+            historyText(hit,value,.17f,{width/2,0},width,corum::ranked::ui::TextMuted);
         }
-        corum::ranked::ui::publicPlayerTitle(hit,profile["equippedTitle"],{width/2,5},width,.17f);
         hit->setID("ranked-history-player-name"_spr);
         m_historyProfiles.push_back({WeakRef<CCNode>(hit),player,id,mode});
     }
@@ -4554,12 +4557,16 @@ class CorumRankedLayer final : public CCLayerColor {
         auto selected=std::find_if(rounds.begin(),rounds.end(),[&](auto const& r){return r.key==m_historyRound;});
         if(selected==rounds.end()){m_historyRound=rounds.front().key;selected=rounds.begin();}
         auto const& round=*selected;
+        if(survival && round.completed){
+            auto width=std::min(140.f,(size.width-120)/2);
+            if(auto* button=corum::ranked::replay::HistoryReplayButton::create(round.replayIdentity,width)){button->setPosition({width/2+8,18});m_root->addChild(button,12);}
+        }
         auto const layout=corum::ranked::historyLayout(size.width,size.height);
         auto const tabs=std::max(1,static_cast<int>((layout.width-68)/54));auto const pages=(static_cast<int>(rounds.size())+tabs-1)/tabs;m_historyTabPage=std::clamp(m_historyTabPage,0,pages-1);
         for(int i=m_historyTabPage*tabs;i<std::min(static_cast<int>(rounds.size()),(m_historyTabPage+1)*tabs);++i)
             historyButton(m_root,rounds[i].label,{(size.width-layout.width)/2+50+(i%tabs)*54.f,size.height-84},49,menu_selector(CorumRankedLayer::onHistoryRound),i,rounds[i].key==m_historyRound,survival?std::optional<ccColor3B>{historyRoundColor(rounds[i])}:std::nullopt);
         if(pages>1){historyButton(m_root,"<",{(size.width-layout.width)/2+12,size.height-84},24,menu_selector(CorumRankedLayer::onHistoryRoundPage),-1);historyButton(m_root,">",{(size.width+layout.width)/2-12,size.height-84},24,menu_selector(CorumRankedLayer::onHistoryRoundPage),1);}
-        auto const viewport=CCSize{layout.width,layout.height};auto* scroll=corum::ranked::ui::createRankedTapScroll(viewport,[weak=WeakRef(this)](CCPoint start,CCPoint end){if(auto owner=weak.lock())owner->onHistoryPlayerTap(start,end);});m_historyBoardScroll=scroll;scroll->setID("ranked-history-board-scroll"_spr);scroll->setPosition({(size.width-layout.width)/2,33});m_root->addChild(scroll,3);
+        auto const viewport=CCSize{layout.width,layout.height};auto* scroll=corum::ranked::ui::createRankedTapScroll(viewport,[weak=WeakRef(this)](CCPoint start,CCPoint end){if(auto owner=weak.lock())owner->onHistoryPlayerTap(start,end);});m_historyBoardScroll=scroll;scroll->setID("ranked-history-board-scroll"_spr);scroll->setPosition({(size.width-layout.width)/2,layout.bottom});m_root->addChild(scroll,3);
         auto* content=scroll->m_contentLayer;
         if(!round.completed){
             auto const mapWidth=std::min(layout.width,390.f),mapHeight=corum::ranked::historyMapPanelHeight(mapWidth,historyHasThumbnail(round));
@@ -4595,29 +4602,45 @@ class CorumRankedLayer final : public CCLayerColor {
             if(round.nextDeathmatch>0)historyText(panel,fmt::format("{} DM {}",tr("history-continued","CONTINUED IN"),round.nextDeathmatch),.24f,{boardWidth/2,20},boardWidth-16,corum::ranked::ui::TextMuted);
         }else{
             auto const mapWidth=layout.split?layout.mapWidth:std::min(layout.width,390.f),mapHeight=corum::ranked::historyMapPanelHeight(mapWidth,historyHasThumbnail(round));
-            auto const boardHeight=52.f+round.standings.size()*56;auto const h=std::max(viewport.height,layout.split?std::max({220.f,mapHeight,boardHeight}):mapHeight+250.f+boardHeight);content->setContentSize({layout.width,h});
+            auto const boardHeight=58.f+round.standings.size()*70;auto const h=std::max(viewport.height,layout.split?std::max({220.f,mapHeight,boardHeight}):mapHeight+250.f+boardHeight);content->setContentSize({layout.width,h});
             historyMapPanel(content,round,{layout.split?mapWidth/2:layout.width/2,h-mapHeight/2},mapWidth,mapHeight);
-            auto const boardX=layout.split?layout.mapWidth+8:0.f,boardTop=layout.split?h:h-mapHeight-12;
+            auto const boardX=layout.split?layout.mapWidth+8:0.f,boardTop=layout.split?h:h-mapHeight-244;
             auto const width=layout.boardWidth;
             auto* board=makeNeonPanel({width,boardHeight},{boardX+width/2,boardTop-boardHeight/2},kBlue,kDeepPanel2,240);content->addChild(board,2);
             auto const cutoff=round.cutoff?corum::ranked::rankedScoreText(*round.cutoff,round.deathmatch)+"%":"-";
             historyText(board,fmt::format("{} {} · {} {}/{}",tr("history-cutoff","CUTOFF"),cutoff,tr("history-qualified","QUALIFIED"),round.qualifiedCount,round.target),.23f,{width/2,boardHeight-16},width-14,kCyan);
-            float y=boardHeight-45;
+            float y=boardHeight-62;
+            auto const columns=corum::ranked::historyRosterColumns(width);
             for(auto const& p:round.standings){
-                auto const color=p.own?kCyan:p.cleared?kGold:p.qualified?kGreen:corum::ranked::ui::TextMuted;
-                if(p.own){auto* emphasis=makeNeonPanel({width-8,54},{width/2,y-4},kCyan,kDeepPanel,240);board->addChild(emphasis,2);}
-                historyText(board,p.rank>0?fmt::format("{}{}",p.tiedPlayers>1?"=":"",p.rank):"-",.27f,{20,y},32,color);
+                auto const color=p.own?kCyan:p.cleared?kGold:p.qualified?kGreen:kRed;
+                if(p.own){auto* emphasis=makeNeonPanel({width-8,60},{width/2,y-4},kCyan,kDeepPanel,240);board->addChild(emphasis,2);}
+                historyText(board,p.rank>0?fmt::format("{}{}",p.tiedPlayers>1?"=":"",p.rank):"-",.27f,{columns.rank,y},30,color);
                 auto const suffix=p.forfeited?tr("history-forfeit","FORFEIT"):p.qualified?tr("history-qualified","QUALIFIED"):tr("history-eliminated","ELIMINATED");
                 corum::ranked::SurvivalStanding player;player.id=p.id;player.name=p.name;player.rank=p.rank;player.bot=p.bot;player.accountId=p.accountId;player.tier=p.tier;
-                historyPlayerName(board,player,{width*.36f,y+12},width*.44f,color);
-                historyText(board,fmt::format("{} {} · {}",p.attempts,tr("history-attempts","ATTEMPTS"),suffix),.23f,{width*.36f,y-22},width*.44f,color);
-                historyText(board,corum::ranked::rankedScoreText(p.progress,round.deathmatch)+"%",.32f,{width*.82f,y},width*.29f,color);
-                if(p.cutoffBoundary){auto* line=CCLayerColor::create({kGold.r,kGold.g,kGold.b,220});line->setContentSize({width-16,1});line->setPosition({8,y-28});board->addChild(line,3);}
-                y-=56;
+                auto* iconHolder=CCNode::create();iconHolder->setPosition({columns.icon,y});board->addChild(iconHolder,5);m_historyIcons.push_back({WeakRef<CCNode>(iconHolder),player});
+                historyPlayerName(board,player,{columns.name+columns.nameWidth/2,y+7},columns.nameWidth,color);
+                historyText(board,fmt::format("{} {} · {}",p.attempts,tr("history-attempts","ATTEMPTS"),suffix),.21f,{columns.name,y-23},width-columns.name-12,color,false,{0,.5f});
+                historyText(board,corum::ranked::rankedScoreText(p.progress,round.deathmatch)+"%",.34f,{columns.best,y+5},columns.bestWidth,color,true);
+                if(p.cutoffBoundary){auto* line=CCLayerColor::create({kGold.r,kGold.g,kGold.b,220});line->setContentSize({width-16,1});line->setPosition({8,y-35});board->addChild(line,3);}
+                y-=70;
             }
-            historyOwnPanel(content,round,{layout.split?layout.width-layout.ownWidth/2:layout.width/2,layout.split?h-110:boardTop-boardHeight-118},layout.split?layout.ownWidth:std::min(layout.width,390.f),220);
+            historyOwnPanel(content,round,{layout.split?layout.width-layout.ownWidth/2:layout.width/2,layout.split?h-110:h-mapHeight-122},layout.split?layout.ownWidth:std::min(layout.width,390.f),220);
         }
         scroll->scrollToTop();
+    }
+    void updateHistoryIcons() {
+        auto* scroll=m_historyBoardScroll;if(!scroll)return;
+        auto const viewport=scroll->getContentSize();
+        for(auto& row:m_historyIcons){auto holder=row.holder.lock();if(!holder)continue;
+            auto const at=scroll->convertToNodeSpace(holder->convertToWorldSpace(CCPointZero));
+            auto const visible=at.y+20>=0&&at.y-20<=viewport.height;
+            auto* icon=holder->getChildByID("history-player-icon");
+            if(!visible){if(icon)icon->removeFromParentAndCleanup(true);continue;}
+            if(icon)continue;
+            auto const& p=row.player;
+            auto* value=p.bot?corum::ranked::ui::PlayerIcon::createBot(p.rank):p.accountId>0&&p.accountId==GJAccountManager::sharedState()->m_accountID?corum::ranked::ui::PlayerIcon::createLocal():corum::ranked::ui::PlayerIcon::createRemote(p.accountId);
+            if(value){value->setID("history-player-icon");value->setScale(.62f);holder->addChild(value,5);}
+        }
     }
     void updateHistoryThumbnail() {
         if(m_page!=Page::HistoryDetail || !m_historyThumbnail || !m_historyThumbnailContext.levelId)return;
@@ -5081,7 +5104,7 @@ class CorumRankedLayer final : public CCLayerColor {
         if(m_historyListScroll)m_historyListOffset=m_historyListScroll->m_contentLayer->getPositionY();
         m_historyIndex=static_cast<std::size_t>(index);m_historySelectedId=rows[m_historyIndex].matchId;
         m_historyRound.clear();m_historyTabPage=0;m_page=Page::HistoryDetail;
-        RankedRuntime::get().fetchHistoryDetail(rows[m_historyIndex].mode,m_historySelectedId);
+        RankedRuntime::get().fetchHistoryDetail(rows[m_historyIndex].mode,m_historySelectedId,true);
     }
     void onHistoryOrder(CCObject*) {m_historyOrder=m_historyOrder=="NEWEST"?"OLDEST":"NEWEST";m_historyListOffset.reset();onHistory(nullptr);}
     void onHistoryFilter(CCObject*) {

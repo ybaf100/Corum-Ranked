@@ -1,3 +1,4 @@
+#include "replay/SurvivalReplayRuntime.hpp"
 #include "RankedLevelPreparation.hpp"
 #include "HistoryLevelLookup.hpp"
 #include "RankedRuntime.hpp"
@@ -16,6 +17,7 @@ using namespace geode::prelude;
 namespace corum::ranked {
 
 LevelPreparationContext currentPreparationContext() {
+    if(auto context=replay::Runtime::get().context();context.valid())return context;
     auto const survivalContext=SurvivalRuntime::get().preparationContext();
     if(survivalContext.valid())return survivalContext;
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
@@ -136,7 +138,7 @@ void RankedLevelPreparation::poll() {
         if (!debug::DebugSpectateRuntime::get().preparationContext().valid())
 #endif
         if(SurvivalRuntime::get().preparationContext().valid())SurvivalRuntime::get().preparationFailed("NATIVE_METADATA_TIMEOUT");
-        else RankedRuntime::get().reportMapDownloadFailure();
+        else if(!replay::Runtime::get().context().valid())RankedRuntime::get().reportMapDownloadFailure();
     }
     if (m_ticket.busy()) {
         // Reissuing after a local timeout would let a late same-key callback be

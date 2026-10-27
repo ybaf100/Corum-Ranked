@@ -32,6 +32,7 @@ test('actual world owner synchronizes triggers, Spider and native camera before 
         const worldHook=method('void update(float dt)',source.indexOf('class $modify(CorumRankedSpectatorCameraHook')).replace('void update(', 'void worldHook(');
         const cpp=`
 #include "${join(root,'src/spectator/CorumRemotePlayer.hpp')}"
+#include "${join(root,'tests/helpers/InactiveReplayDouble.hpp')}"
 #include "${join(root,'src/spectator/CorumSpectatorCamera.hpp')}"
 #include "${join(root,'src/spectator/ScopedCameraTargetOverride.hpp')}"
 #include "${join(root,'src/domain/SpectatorProgressPolicy.hpp')}"
@@ -42,7 +43,7 @@ test('actual world owner synchronizes triggers, Spider and native camera before 
 #include "${join(root, 'src/domain/SpectatorNativeProbe.hpp')}"
 #include "${join(root,'src/domain/SpectatorRestoreTimeline.hpp')}"
 #include <chrono>
-namespace corum::ranked {struct SurvivalSpectatorRuntime {static SurvivalSpectatorRuntime& get(){static SurvivalSpectatorRuntime r;return r;}bool sceneLevel(int)const{return false;}bool publishing()const{return false;}bool canLaunch()const{return false;}template<class...T>bool arm(T...){return false;}template<class...T>bool capture(T const&...){return false;}template<class...T>void terminal(T const&...){}void sceneExited(){}bool exitRequested()const{return false;}};}
+namespace corum::ranked {struct SurvivalSpectatorRuntime {static SurvivalSpectatorRuntime& get(){static SurvivalSpectatorRuntime r;return r;}bool sceneLevel(int)const{return false;}replay::InactiveWorld* world()const{return nullptr;}bool publishing()const{return false;}bool canLaunch()const{return false;}template<class...T>bool arm(T...){return false;}template<class...T>bool capture(T const&...){return false;}template<class...T>void terminal(T const&...){}void sceneExited(){}bool exitRequested()const{return false;}};}
 
 #include <memory>
 #include <iostream>
@@ -69,7 +70,7 @@ struct SpectatorLiveRuntime {
 };
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
 namespace debug { struct DebugSpectateRuntime {
-    static DebugSpectateRuntime& get(){static DebugSpectateRuntime r;return r;}
+    int m_levelId=88350599;int levelId()const{return m_levelId;}static DebugSpectateRuntime& get(){static DebugSpectateRuntime r;return r;}
     bool playbackLevel(int level)const{return level==88350599;}
 }; }
 #endif
@@ -82,8 +83,9 @@ struct CorumRankedPlayLayer: PlayLayer {
     void survivalSpectatorFrame(float){}
     corum::ranked::SpectatorSceneContext survivalSpectatorSceneContext(){return {};}
 
+ void syncSpectatorAudio(){}
  bool blockEntryGameplayUpdate(){return false;}
-    struct Fields {bool survivalLiveLevel=false;
+    struct Fields {bool survivalLiveLevel=false,survivalReplayLevel=false;
 #if !defined(CORUM_RANKED_DEBUG_SPECTATE)
  int levelId=123;
 #endif

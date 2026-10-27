@@ -13,7 +13,7 @@ inline SurvivalFlowStage survivalFlowStage(std::string const& state,std::string 
     if(state=="CANCELLED")return SurvivalFlowStage::Cancelled;
     if(eliminated && choice==SurvivalOutcomeChoice::PersonalResult)return SurvivalFlowStage::PersonalResult;
     if(state=="FINAL_RESULT")return SurvivalFlowStage::Ceremony;
-    if(eliminated && choice==SurvivalOutcomeChoice::LiveSpectate)return SurvivalFlowStage::LiveSpectating;
+    if(!eliminated && choice==SurvivalOutcomeChoice::LiveSpectate)return SurvivalFlowStage::LiveSpectating;
     if(eliminated)return choice==SurvivalOutcomeChoice::Observe?SurvivalFlowStage::Observing:SurvivalFlowStage::EliminatedChoice;
     if(gate=="INTRO")return SurvivalFlowStage::Intro;
     if(state=="MAP_SELECTION")return SurvivalFlowStage::Selecting;

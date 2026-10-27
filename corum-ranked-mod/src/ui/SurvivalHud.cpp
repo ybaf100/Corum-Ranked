@@ -25,6 +25,7 @@ bool SurvivalHud::init() {
     auto const top=layoutHud(size.width,size.height).topY;
     m_round=rankedHudLabel(this,"",FontWeight::SemiBold,.527f,{.5f,1},{size.width/2,top-5},Gold);
     m_timer=rankedHudLabel(this,"03:00",FontWeight::Black,CompetitiveClockScale,{.5f,1},{size.width/2,top-18},Text);
+    m_auxTimer=rankedHudLabel(this,"",FontWeight::SemiBold,.38f,{0,1},{8,top-3},TextMuted);
     m_difference=rankedHudLabel(this,"0",FontWeight::ExtraBold,CompetitiveClockScale,{.5f,1},{size.width/2+34,top-18},Text);
     m_rank=rankedHudLabel(this,"",FontWeight::Black,1.68f,{0,0},{12,12},Text);
     m_waiting=rankedHudLabel(this,"",FontWeight::SemiBold,.30f,{.5f,0},{size.width/2,14},TextMuted);
@@ -52,7 +53,7 @@ void SurvivalHud::present(SurvivalMatchView const& view,std::int64_t remainingMs
     bool const separateOwn=rows.size()>survivalHudLeaderCount(view.standings,view.targetQualifiers);
     auto const gap=std::clamp((size.height*.60f)/std::max<std::size_t>(1,rows.size()),12.0f,20.0f);
     auto const width=std::min(168.0f,size.width*.36f),scale=std::min(.36f,gap/50.0f);
-    auto const top=layoutHud(size.width,size.height).topY-28;
+    auto const top=layoutHud(size.width,size.height).topY-(deathmatch?40:28);
     for(std::size_t i=0;i<view.standings.size();++i) {
         auto const& value=view.standings[i];auto found=m_rows.find(value.id);
         if(found==m_rows.end()) {
@@ -110,12 +111,24 @@ void SurvivalHud::present(SurvivalMatchView const& view,std::int64_t remainingMs
         m_waiting.text(own->waiting?i18n::text("survival-attempts-finished","ATTEMPTS COMPLETE · WAITING FOR RESULTS"):"");
     }
     m_round.text(deathmatch?"DEATH MATCH":view.phase=="FINAL"?i18n::text("final","FINAL"):fmt::format("{} {}",i18n::text("round","ROUND"),view.roundNumber));
-    auto const seconds=(std::max<std::int64_t>(0,remainingMs)+999)/1000;m_timer.text(fmt::format("{:02}:{:02}",seconds/60,seconds%60));
-    auto const clockWidth=m_timer.foreground->getContentSize().width*m_timer.foreground->getScale();
-    auto const deltaWidth=m_difference.foreground->getContentSize().width*m_difference.foreground->getScale();
-    auto const pair=competitiveClockPair(size.width/2,clockWidth,deltaWidth);
-    m_timer.position({pair.clockX,layoutHud(size.width,size.height).topY-18});
-    m_difference.position({pair.deltaX,layoutHud(size.width,size.height).topY-18});
+    auto const seconds=(std::max<std::int64_t>(0,remainingMs)+999)/1000;
+    auto const time=fmt::format("{:02}:{:02}",seconds/60,seconds%60);
+    auto const topY=layoutHud(size.width,size.height).topY;
+    m_auxTimer.text(deathmatch?time:"");
+    if(deathmatch){
+        auto const left=survivalRemainingAttempts(own==view.standings.end()?0:own->attemptsUsed,SurvivalRuntime::get().localAttemptsUsed());
+        m_timer.text(fmt::format(fmt::runtime(i18n::text("survival-attempts-remaining","ATTEMPTS LEFT {}/3")),left));
+        m_timer.fit(size.width*.52f,.72f,.40f);m_timer.position({size.width/2,topY-18});
+        m_difference.fit(size.width*.35f,.55f,.32f);m_difference.position({size.width/2,topY-45});
+        if(left==0 && !observer)m_waiting.text(i18n::text("survival-attempts-finished","ATTEMPTS COMPLETE · WAITING FOR RESULTS"));
+    }else{
+        m_timer.text(time);m_timer.fit(size.width*.32f,CompetitiveClockScale,CompetitiveClockScale*.7f);
+        m_difference.fit(size.width*.25f,CompetitiveClockScale,CompetitiveClockScale*.7f);
+        auto const clockWidth=m_timer.foreground->getContentSize().width*m_timer.foreground->getScale();
+        auto const deltaWidth=m_difference.foreground->getContentSize().width*m_difference.foreground->getScale();
+        auto const pair=competitiveClockPair(size.width/2,clockWidth,deltaWidth);
+        m_timer.position({pair.clockX,topY-18});m_difference.position({pair.deltaX,topY-18});
+    }
 }
 void SurvivalHud::presentProgressMarkers(SurvivalMatchView const& view) {
     auto bar=m_progressBar.lock();auto fill=m_progressFill.lock();auto lines=m_progressLines.lock();

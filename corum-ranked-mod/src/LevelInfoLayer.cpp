@@ -125,9 +125,9 @@ bool mapReady(GJGameLevel* level) {
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
     // Debug admission is deliberately not a Ranked Match. While its exact
     // server-issued preparation scope is active, reuse the native download/song
-    // checks against VOICE without fabricating RankedRuntime.currentLevelId().
+    // checks against the admitted map without fabricating RankedRuntime.currentLevelId().
     if (corum::ranked::debug::DebugSpectateRuntime::get().preparedLevel(static_cast<int>(level->m_levelID))) {
-        expectedLevelId = corum::ranked::debug::kDebugSpectateLevelId;
+        expectedLevelId = corum::ranked::debug::DebugSpectateRuntime::get().levelId();
     }
 #endif
     return expectedLevelId > 0 && expectedLevelId == static_cast<int>(level->m_levelID);
@@ -664,7 +664,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         LevelInfoLayer::onEnterTransitionDidFinish();
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         if (m_fields->debugSpectateOwned) {
-            if (corum::ranked::debug::DebugSpectateRuntime::get().preparedLevel(corum::ranked::debug::kDebugSpectateLevelId)) {
+            if (corum::ranked::debug::DebugSpectateRuntime::get().preparedLevel(corum::ranked::debug::DebugSpectateRuntime::get().levelId())) {
                 m_fields->debugLevelInfoExited = false;
                 schedule(schedule_selector(CorumRankedLevelInfoLayer::prepareDebugSpectate), 0.1f);
             }

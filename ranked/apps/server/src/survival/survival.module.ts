@@ -1,3 +1,4 @@
+import {SurvivalReplayReceiptController} from "./survival-replay-receipt.controller.js";
 import {SurvivalSpectatorLiveService} from "./survival-spectator-live.service.js";
 import {SurvivalSpectatorLiveController} from "./survival-spectator-live.controller.js";
 import {ForumRecordsModule} from "../forum/forum-records.module.js";
@@ -22,7 +23,7 @@ import { SurvivalDebugController } from "./survival-debug.controller.js";
 import { SurvivalDebugService } from "./survival-debug.service.js";
 import { SERVER_ENVIRONMENT,type ServerEnvironment } from "../config/server-environment.js";
 import { createSurvivalGdFetch } from "./survival-gd-transport.js";
-@Module({ imports: [ForumRecordsModule,RankedConfigModule, SessionModule, AchievementModule], controllers: [SurvivalSpectatorLiveController,SurvivalPlayerInfoController,SurvivalController,SurvivalEngineController,SurvivalDebugController,SurvivalOnlineController,SurvivalQueueController],
+@Module({ imports: [ForumRecordsModule,RankedConfigModule, SessionModule, AchievementModule], controllers: [SurvivalReplayReceiptController,SurvivalSpectatorLiveController,SurvivalPlayerInfoController,SurvivalController,SurvivalEngineController,SurvivalDebugController,SurvivalOnlineController,SurvivalQueueController],
   providers: [SurvivalSpectatorLiveService,SurvivalService,SurvivalEngineService,SurvivalDebugService,SurvivalOnlineService,SurvivalQueueService,SurvivalRateService,{provide:SURVIVAL_MAP_PROVIDER,
     useFactory:(random:RandomSource,environment:ServerEnvironment)=>{
       Logger.log(`Survival GD transport=${environment.survivalGdRelay?"relay":"direct"}`,"SurvivalGdTransport");

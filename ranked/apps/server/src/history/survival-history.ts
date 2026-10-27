@@ -20,7 +20,13 @@ export function survivalHistoryProjection(value:unknown,personalResult:unknown,m
   }).sort((a,b)=>(a.rank??999)-(b.rank??999)||a.participantId.localeCompare(b.participantId)):[];
   const cutoffScore=confirmed&&r.cutoffScore!==null?r.cutoffScore/(r.phase==='TIEBREAK'?1000:1):null;
   const own=r.players.find(p=>p.participantId===myParticipantId);
-  return {ownRank:confirmed&&own?own.rank:null,ownQualified:confirmed&&own?own.qualified&&!own.forfeited:null,key:r.key,ordinal:r.ordinal,phase:r.phase,completed:confirmed,status:confirmed?'COMPLETED':inProgress?'IN_PROGRESS':'UNFINISHED',map,
+  const ownAttempts=own?.attempts.filter(a=>a.endedAt!==null)??[];
+  const scored=(v:number)=>r.phase==='TIEBREAK'?survivalMilliPercent(v):Math.trunc(v);
+  const bestAttempt=ownAttempts.reduce<typeof ownAttempts[number]|undefined>((best,a)=>!best||scored(a.highestProgress)>scored(best.highestProgress)||(a.highestProgress===100&&best.highestProgress!==100)?a:best,undefined);
+  const replayIdentity=confirmed&&bestAttempt&&r.map?{matchId:match.id,roundKey:r.key,roundNumber:r.ordinal,phase:r.phase,mapGeneration:r.mapGeneration,
+   participantId:myParticipantId,attemptId:bestAttempt.id,attemptOrdinal:bestAttempt.sequence,levelId:r.map.levelId,mapVersion:r.map.levelVersion,
+   mapGeometrySha256:r.map.geometrySha256,officialBestProgress:bestAttempt.highestProgress,debug:match.online!==true}:null;
+  return {replayIdentity,ownRank:confirmed&&own?own.rank:null,ownQualified:confirmed&&own?own.qualified&&!own.forfeited:null,key:r.key,ordinal:r.ordinal,phase:r.phase,completed:confirmed,status:confirmed?'COMPLETED':inProgress?'IN_PROGRESS':'UNFINISHED',map,
    cutoffScore,target:r.target,qualifiedCount:confirmed?r.players.filter(p=>p.qualified&&!p.forfeited).length:null,
    finishedAt:confirmed?new Date(r.finishedAt!).toISOString():null,standings};
  });

@@ -23,6 +23,8 @@ public:
         std::optional<SpectatorRemoteFrame> const& frame, bool animateEffects=true
     );
     void cleanup();
+    void presentationVisible(bool visible){setVisible(visible);}
+    static void hideNativeVisuals(PlayerObject*);
     [[nodiscard]] PlayerObject* player() const { return m_player.data(); }
     [[nodiscard]] PlayerObject* secondaryPlayer()const{return m_secondary?m_secondary->player():nullptr;}
     [[nodiscard]] std::size_t visualCount()const{return (m_player?1:0)+(secondaryPlayer()?1:0);}

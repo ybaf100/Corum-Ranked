@@ -21,6 +21,10 @@ struct LeaderboardColumns {
 };
 
 inline LeaderboardColumns leaderboardColumns(float width) {
+    if(width<440){
+        auto const value=width-65,tier=value-25,nameWidth=std::max(24.f,tier-92);
+        return {20,50,74,nameWidth,74,nameWidth,tier,tier+14,0,value,57};
+    }
     return {24, 64, 90, std::max(28.0f,width - 352), width - 252, 80,
         width - 156, width - 133, 57, width - 68, 60};
 }

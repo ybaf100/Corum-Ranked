@@ -58,6 +58,12 @@ void discardNativeCompanions(PlayerObject* player) {
 namespace corum::ranked {
 
 CorumRemotePlayer::~CorumRemotePlayer() { cleanup(); }
+void CorumRemotePlayer::hideNativeVisuals(PlayerObject* player){
+    if(!player)return;
+    player->m_playEffects=false;
+    for(auto* child:player->getChildrenExt())child->setVisible(false);
+    visitNativeCompanions(player,[](auto* node){if(node)node->setVisible(false);});
+}
 
 bool CorumRemotePlayer::createVisual(PlayLayer* layer) {
     if (!layer || !layer->m_objectLayer || !layer->m_player1) return false;

@@ -66,13 +66,15 @@ void DebugSpectateRuntime::toggleLiveSetting(std::string password) {
         m_status = *m_liveEnabled ? "LIVE SPECTATOR ENABLED FOR ALL MATCHES" : "LIVE SPECTATOR DISABLED - PERCENTAGE WAIT SCREEN";
     });
 }
-void DebugSpectateRuntime::start(bool playback, std::string password,float startPercent) {
+void DebugSpectateRuntime::start(bool playback, std::string password,float startPercent,int levelId) {
     if(!std::isfinite(startPercent)||startPercent<0||startPercent>100){m_status="ENTER A START PERCENT FROM 0 TO 100";return;}
     auto& ranked = RankedRuntime::get();
     if (m_mode != DebugSpectateMode::None || m_busy || ranked.view().stage != RuntimeStage::Ready ||
         ranked.hasLocalGameplayAuthority() || ranked.spectatorLiveSessionToken().empty()) {
         m_status = "RETURN TO RANKED LOBBY / WAIT FOR CURRENT DEBUG SESSION"; return;
     }
+    if(!playback && levelId<=0){m_status="ENTER A VALID LEVEL ID";return;}
+    m_levelId=playback?0:levelId;
     m_startPercent=playback?startPercent:0;
     installPump();
     m_mode = playback ? DebugSpectateMode::PreparingPlayback : DebugSpectateMode::PreparingRecord;
@@ -85,7 +87,7 @@ void DebugSpectateRuntime::start(bool playback, std::string password,float start
     m_expireAt = {}; m_nextUploadAt = {}; m_recordStartedAt = {};
     m_prepareStartedAt = std::chrono::steady_clock::now();
     matjson::Value body;
-    body["password"] = password; body["levelId"] = kDebugSpectateLevelId; body["formatVersion"] = kDebugSpectateFormatVersion;
+    body["password"] = password; body["levelId"] = playback?kDebugSpectateLevelId:m_levelId; body["formatVersion"] = kDebugSpectateFormatVersion;
     if(playback)body["startPercent"]=static_cast<double>(m_startPercent);
     std::fill(password.begin(), password.end(), '\0');
     auto http = request(); http.header("Authorization", "Bearer " + ranked.spectatorLiveSessionToken()); http.bodyJSON(body);
@@ -97,32 +99,37 @@ void DebugSpectateRuntime::start(bool playback, std::string password,float start
         if (!success(response)) {
             fail(root["message"].asString().unwrapOr("DEBUG SPECTATE SERVER UNAVAILABLE / DISABLED")); return;
         }
-        if (root["levelId"].asInt().unwrapOr(0) != kDebugSpectateLevelId ||
+        auto admitted=root["levelId"].asInt().unwrapOr(0);
+        if (admitted<=0 || admitted>2147483647 || (!playback && admitted!=m_levelId) ||
             root["formatVersion"].asInt().unwrapOr(0) != kDebugSpectateFormatVersion) { fail("INVALID DEBUG SERVER CONTEXT"); return; }
+        m_levelId=static_cast<int>(admitted);
         m_id = root[playback ? "playbackId" : "recordingId"].asString().unwrapOr("");
         m_token = root["token"].asString().unwrapOr("");
         m_contextId = playback ? root["contextId"].asString().unwrapOr("") : "debug-record:" + m_id;
         if (m_id.empty() || m_token.empty() || m_contextId.empty()) { fail("MISSING DEBUG SERVER SCOPE"); return; }
+        m_playbackStartElapsedMs=playback?root["playbackStartElapsedMs"].asDouble().unwrapOr(0):0;
+        if(!std::isfinite(m_playbackStartElapsedMs)||m_playbackStartElapsedMs<0||m_playbackStartElapsedMs>900000){fail("INVALID SOURCE PLAYBACK TIME");return;}
+        log::info("[DebugSpectate] requestedPercent={} sourcePlaybackStartElapsedMs={} (native audio timeline comes from the recorded sample)",m_startPercent,m_playbackStartElapsedMs);
         m_expireAt = m_prepareStartedAt + std::chrono::minutes(15);
-        m_status = playback && m_startPercent>0?fmt::format("PREPARING VOICE - JOIN AT {:.2f}%",m_startPercent):"PREPARING VOICE - VERIFIED GD METADATA / VANILLA DOWNLOAD";
+        m_status = playback && m_startPercent>0?fmt::format("PREPARING RECORDED MAP - JOIN AT {:.2f}%",m_startPercent):"PREPARING MAP - VERIFIED GD METADATA / VANILLA DOWNLOAD";
         log::info("[DebugSpectate] {} created id={}", playback ? "playback" : "recording", m_id);
     });
 }
 bool DebugSpectateRuntime::preparedLevel(int levelId) const {
-    return RankedRuntime::get().view().stage == RuntimeStage::Ready && levelId == kDebugSpectateLevelId && !m_token.empty() &&
+    return RankedRuntime::get().view().stage == RuntimeStage::Ready && levelId == m_levelId && !m_token.empty() &&
         (m_mode == DebugSpectateMode::PreparingRecord || m_mode == DebugSpectateMode::PreparingPlayback);
 }
 bool DebugSpectateRuntime::recordLevel(int levelId) const {
-    return levelId == kDebugSpectateLevelId && !m_token.empty() &&
+    return levelId == m_levelId && !m_token.empty() &&
         (m_mode == DebugSpectateMode::Recording || m_mode == DebugSpectateMode::FinalizingRecord);
 }
 bool DebugSpectateRuntime::playbackLevel(int levelId) const {
-    return RankedRuntime::get().view().stage == RuntimeStage::Ready && levelId == kDebugSpectateLevelId &&
+    return RankedRuntime::get().view().stage == RuntimeStage::Ready && levelId == m_levelId &&
         !m_token.empty() && m_mode == DebugSpectateMode::Playback;
 }
 LevelPreparationContext DebugSpectateRuntime::preparationContext() const {
     if (m_token.empty() || m_contextId.empty() || m_mode == DebugSpectateMode::None) return {};
-    return {m_contextId, kDebugSpectateLevelId, 1, 0, false, 0, 0};
+    return {m_contextId, m_levelId, 1, 0, false, 0, 0};
 }
 void DebugSpectateRuntime::tick() {
     auto const now = std::chrono::steady_clock::now();
@@ -133,22 +140,22 @@ void DebugSpectateRuntime::tick() {
     if (m_mode == DebugSpectateMode::Recording || m_mode == DebugSpectateMode::FinalizingRecord) { pumpRecording(); return; }
     if (RankedRuntime::get().view().stage != RuntimeStage::Ready) { cancelPreparation("Ranked lobby authority changed"); return; }
     if (m_mode == DebugSpectateMode::Playback) return;
-    if (now - m_prepareStartedAt > std::chrono::minutes(2)) { cancelPreparation("VOICE preparation timeout"); m_status = "VOICE PREPARATION TIMEOUT"; return; }
-    if (!preparedLevel(kDebugSpectateLevelId) || m_launched || m_busy) return;
+    if (now - m_prepareStartedAt > std::chrono::minutes(2)) { cancelPreparation("map preparation timeout"); m_status = "MAP PREPARATION TIMEOUT"; return; }
+    if (!preparedLevel(m_levelId) || m_launched || m_busy) return;
     auto& preparation = RankedLevelPreparation::get(); preparation.poll();
     auto* level = preparation.level();
     if (!level || !preparation.authorizes(level, preparationContext())) return;
     log::info("[DebugSpectate] preparation metadata verified context={}", m_contextId);
     if (preparation.adoptVerifiedSavedLevel(preparationContext())) {
         level = preparation.level();
-        log::info("[DebugSpectate] using downloaded saved VOICE geometry");
+        log::info("[DebugSpectate] using downloaded saved map geometry");
         tracePreparedLevel("debug-saved-launch", level);
     }
     // Ownership passes to LevelInfo BEFORE native construction/push. A popup
     // close during scene teardown is not a user cancellation of that new owner.
     m_launched = true;
     auto* scene = LevelInfoLayer::scene(level, false);
-    if (!scene) { fail("CANNOT OPEN VERIFIED VOICE LEVELINFO"); return; }
+    if (!scene) { fail("CANNOT OPEN VERIFIED MAP LEVELINFO"); return; }
     CCDirector::sharedDirector()->pushScene(CCTransitionFade::create(0.3f, scene));
 }
 void DebugSpectateRuntime::sceneEntered(int levelId) {

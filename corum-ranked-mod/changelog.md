@@ -1,3 +1,12 @@
+# v0.5.0-beta.108
+- Record official Survival native input/tick/RNG/pose/camera timelines locally; atomically preserve the best ended Attempt only after owner-authorized server reconciliation.
+- Add device-local history replay with pause, restart, speed and bounded reset-forward seeking; protect existing best files during interruption, corrupt captures and IO failure.
+- Restrict Survival live spectators to server-approved 100% cleared players and require a matching complete local replay; separate replay world ownership from one selected remote player/camera and Free Play.
+- Repair history footer/roster layout and lazy GD icons, compact leaderboard alignment and Tiebreak remaining-attempt HUD.
+- Synchronize recorded spectator audio by its actual song clock; cancel obsolete history catch-up after terminal/Attempt changes.
+- Allow exact custom Level IDs in Debug RECORD; TEST selects the latest completed server recording across maps. Expand only the isolated debug table's Level ID constraint without resetting data.
+- Native gameplay parity, arbitrary input/time-dependent world state and physical-device UI/audio behavior still require device validation. Cross-player replay worlds remain PARTIAL SYNC; mismatched native replay anchors stop with REPLAY DESYNC.
+
 # v0.5.0-beta.107
 - Add authenticated Survival live spectator targets and shared demand-driven native streams, independent of local Free Play and personal results.
 - Require server-accepted Attempts, elimination plus a five-second lock, exact round/map/target/session authority, bounded buffers and no spectator scoring writes.

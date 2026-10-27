@@ -10,6 +10,13 @@
 
 namespace corum::ranked::debug {
 inline constexpr int kDebugSpectateLevelId = 88350599;
+inline std::optional<int> debugSpectateLevelId(std::string_view text){
+    if(text.empty())return kDebugSpectateLevelId;
+    if(text.size()>10)return std::nullopt;
+    std::uint64_t n=0;
+    for(char c:text){if(c<'0'||c>'9')return std::nullopt;n=n*10+static_cast<unsigned>(c-'0');}
+    return n>0&&n<=2147483647?std::optional(static_cast<int>(n)):std::nullopt;
+}
 inline constexpr int kDebugSpectateFormatVersion = 2;
 inline constexpr char kDebugSpectateMapName[] = "VOICE";
 inline constexpr char kDebugSpectateCreator[] = "LiteN1ng";

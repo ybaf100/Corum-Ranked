@@ -62,6 +62,7 @@ struct CCNode: CCObject {
     int getZOrder() const { return z; }
     float getScale() const { return scaleX; }
     void setScale(float s) { scaleX=scaleY=s; }
+    auto const& getChildrenExt()const{return children;}
     unsigned getChildrenCount()const{return static_cast<unsigned>(children.size());}
     CCNode* getParent()const{return parent;}
     float getPositionX()const{return position.x;} float getPositionY()const{return position.y;}

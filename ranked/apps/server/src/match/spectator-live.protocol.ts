@@ -30,6 +30,7 @@ export interface SpectatorPoseKeyframe {
   readonly upsideDown: boolean;
   readonly flipped: boolean;
   readonly gravity?: number;
+  readonly audio?: {readonly trackHash:string;readonly positionMs:number};
   readonly cameraX?: number;
   readonly cameraY?: number;
   readonly cameraSnap?: boolean;
@@ -153,6 +154,14 @@ export const parseSpectatorKeyframe = (value: unknown): SpectatorPoseKeyframe =>
   const velocityX = optionalFiniteNumber(value.velocityX);
   const velocityY = optionalFiniteNumber(value.velocityY);
   const gravity = optionalFiniteNumber(value.gravity);
+  let audio: SpectatorPoseKeyframe["audio"];
+  if(value.audio!==undefined){
+    if(!isRecord(value.audio))throw new BadRequestException("Invalid spectator audio sample");
+    const sample=value.audio;
+    const time=finiteNumber(sample.positionMs,"audio.positionMs");
+    if(typeof sample.trackHash!=="string"||!/^[a-f0-9]{64}$/.test(sample.trackHash)||time<0||time>86_400_000)throw new BadRequestException("Invalid spectator audio sample");
+    audio={trackHash:sample.trackHash,positionMs:time};
+  }
   const cameraX = optionalFiniteNumber(value.cameraX);
   const cameraY = optionalFiniteNumber(value.cameraY);
   const validCamera = cameraX !== undefined && cameraY !== undefined &&
@@ -226,6 +235,7 @@ export const parseSpectatorKeyframe = (value: unknown): SpectatorPoseKeyframe =>
     ...(velocityX === undefined ? {} : { velocityX }),
     ...(velocityY === undefined ? {} : { velocityY }),
     ...(gravity === undefined ? {} : { gravity }),
+    ...(audio ? {audio} : {}),
     ...(validCamera ? { cameraX, cameraY, cameraSnap: value.cameraSnap === true } : {}),
     ...cameraTransform,
     ...(discontinuity === undefined ? {} : { discontinuity }),

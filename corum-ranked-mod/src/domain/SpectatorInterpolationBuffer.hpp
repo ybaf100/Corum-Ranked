@@ -121,6 +121,9 @@ public:
                     result.pose.player2->rotation=static_cast<float>(a.rotation+std::remainder(b.rotation-a.rotation,360.f)*t);
                 }
             }
+            if(older.pose.audio && newer.pose.audio && older.pose.audio->trackHash==newer.pose.audio->trackHash &&
+               newer.pose.audio->positionMs>=older.pose.audio->positionMs && newer.pose.audio->positionMs-older.pose.audio->positionMs<=250)
+                result.pose.audio->positionMs=older.pose.audio->positionMs+(newer.pose.audio->positionMs-older.pose.audio->positionMs)*t;
             if(older.pose.progress && newer.pose.progress)result.pose.progress=lerp(*older.pose.progress,*newer.pose.progress);
             if (older.pose.camera && newer.pose.camera && !newer.pose.cameraSnap) {
                 result.pose.camera = SpectatorCameraOrigin{lerp(older.pose.camera->x, newer.pose.camera->x),

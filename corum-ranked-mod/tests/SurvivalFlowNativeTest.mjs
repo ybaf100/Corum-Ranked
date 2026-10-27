@@ -15,7 +15,8 @@ int main(){using namespace corum::ranked;
  assert(survivalWatchLock(1000,1000)==5);assert(survivalWatchLock(5000,1000)==1);assert(survivalWatchLock(6000,1000)==0);
  assert(survivalWatchLock(999999,1000)==0); // re-entry never restarts lock
  static_assert(int(SurvivalOutcomeChoice::Observe)==1&&int(SurvivalOutcomeChoice::PersonalResult)==2&&int(SurvivalOutcomeChoice::LiveSpectate)==3);
- assert(survivalFlowStage("PLAYING","",true,SurvivalOutcomeChoice::LiveSpectate)==SurvivalFlowStage::LiveSpectating);
+ assert(survivalFlowStage("PLAYING","",false,SurvivalOutcomeChoice::LiveSpectate)==SurvivalFlowStage::LiveSpectating);
+ assert(survivalFlowStage("PLAYING","",true,SurvivalOutcomeChoice::LiveSpectate)==SurvivalFlowStage::EliminatedChoice);
  assert(survivalFlowStage("PLAYING","",true,SurvivalOutcomeChoice::Observe)==SurvivalFlowStage::Observing);
  assert(survivalFlowStage("FINAL_RESULT","",true,SurvivalOutcomeChoice::LiveSpectate)==SurvivalFlowStage::Ceremony);
  assert(survivalFlowStage("PLAYING","",true,SurvivalOutcomeChoice::Undecided)==SurvivalFlowStage::EliminatedChoice);

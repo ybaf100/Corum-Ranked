@@ -1,3 +1,5 @@
+#include "RankedAudioManager.hpp"
+#include "replay/SurvivalReplayRuntime.hpp"
 #include "SurvivalSpectatorRuntime.hpp"
 #include "RankedRoundPreparation.hpp"
 #include "RankedRuntime.hpp"
@@ -57,6 +59,7 @@ void RankedRoundPreparation::update(float dt) {
     RankedRuntime::get().updateSessionHeartbeat();
     // Pause can stop the PlayLayer and its local callbacks. Accepted surrender
     // and observer returns must still advance from a process-owned heartbeat.
+    replay::Runtime::get().pump();
     SurvivalRuntime::get().tick();
     // A held native PlayLayer can stop receiving its own scheduler callbacks.
     // Keep the same server-certified entry/GO gate progressing from the
@@ -108,16 +111,17 @@ void RankedRoundPreparation::pump() {
     m_nextPumpAt = now + 0.2;
     auto const& runtime = RankedRuntime::get();
     auto const survival=SurvivalRuntime::get().acquiring();
-    auto context = survival ? currentPreparationContext() : runtime.view().stage == RuntimeStage::Matched &&
+    auto const replaying=replay::Runtime::get().context().valid();
+    auto context = (survival||replaying) ? currentPreparationContext() : runtime.view().stage == RuntimeStage::Matched &&
         roundAcquireState(runtime.view().match.state) ? currentPreparationContext() : LevelPreparationContext{};
     // The Debug RECORD/TEST harness keeps its independent native LevelInfo path.
-    if (!survival && context.matchId != runtime.view().match.matchId) context = {};
+    if (!survival && !replaying && context.matchId != runtime.view().match.matchId) context = {};
     // A Survival match retains a valid preparation context throughout active native
     // gameplay. Once this exact level is running, do not re-enter GD metadata,
     // download, or audio managers from the process-owned tick: the scene has
     // already acquired and validated its resources. Still resume preparation
     // when the server changes the round/map context or native play has exited.
-    if (survival && context.valid() && m_context == context) {
+    if ((survival||replaying) && context.valid() && m_context == context) {
         auto current = m_play.lock();
         if (current && current.data() == PlayLayer::get() &&
             m_launchedLevel && current->m_level == m_launchedLevel.data()) return;
@@ -190,7 +194,7 @@ void RankedRoundPreparation::pump() {
         if (now - m_contextBegan >= 30 && !m_mapTimeoutReported) {
             m_mapTimeoutReported = true;
             if(survival)SurvivalRuntime::get().preparationFailed("NATIVE_DOWNLOAD_TIMEOUT");
-            else RankedRuntime::get().reportMapDownloadFailure();
+            else if(!replaying)RankedRuntime::get().reportMapDownloadFailure();
         }
         if (!level || m_pendingMap || !m_mapRetry.available(now)) return;
         auto* manager = GameLevelManager::sharedState();
@@ -385,8 +389,9 @@ bool RankedRoundPreparation::launch(CCScene* origin) {
     bool const entering = runtime.canEnterNativeRoundScene();
     bool const survival=SurvivalRuntime::get().active();
     bool const survivalLive=survival && SurvivalSpectatorRuntime::get().canLaunch();
-    bool const allowed = survival ? (SurvivalSpectatorRuntime::get().canLaunch() || SurvivalRuntime::get().canEnter() || SurvivalRuntime::get().canEnterObserver() || SurvivalRuntime::get().canReplayCleared()) : runtime.canEnterCurrentLevel() || entering || spectator;
-    if (roundPrepareState(runtime.view().match.state) || !allowed || !ready() ||
+    bool const replaying=replay::Runtime::get().canLaunch();
+    bool const allowed = replaying || (survival ? (SurvivalSpectatorRuntime::get().canLaunch() || SurvivalRuntime::get().canEnter() || SurvivalRuntime::get().canEnterObserver() || SurvivalRuntime::get().canReplayCleared()) : runtime.canEnterCurrentLevel() || entering || spectator);
+    if ((!replaying && roundPrepareState(runtime.view().match.state)) || !allowed || !ready() ||
         !origin || origin != CCDirector::sharedDirector()->getRunningScene() ||
         roundModalOpen(origin) || !preparation.authorizes(level, m_context)) return false;
     // Recheck the live object/files at the last launch boundary, even when the
@@ -425,10 +430,13 @@ bool RankedRoundPreparation::launch(CCScene* origin) {
         static_cast<void*>(m_nativeTextureCache.data()),static_cast<void*>(PlayLayer::get()));
     // Preserve exact server start eligibility/time and all existing PlayLayer
     // journal/ACK gates. A viewer never arms a local attempt.
-    if (!survival && !spectator && !entering && !runtime.armCurrentLevelForGameplay()) return false;
+    if(!replaying){
+        if (!survival && !spectator && !entering && !runtime.armCurrentLevelForGameplay()) return false;
+    }
     tracePreparedLevel("round-native-launch", level, nullptr, this);
+    if(replaying && !replay::Runtime::get().arm(level))return false;
     if(survival){auto& sur=SurvivalRuntime::get();
-        if(!(survivalLive?SurvivalSpectatorRuntime::get().arm(level):sur.observing()?sur.armObserver(level,origin):sur.normalRoundCleared()?sur.armClearedReplay(level,origin):sur.armNative(level)))return false;
+        if(!(survivalLive?SurvivalSpectatorRuntime::get().arm(level):sur.observing()?sur.armObserver(level,origin):sur.canReplayCleared()?sur.armClearedReplay(level,origin):sur.armNative(level)))return false;
     }
     if(survival){
         corum::ranked::SurvivalOptionsPreferences::get().apply(level,corum::ranked::SurvivalRuntime::get().optionsContext());
@@ -448,6 +456,7 @@ bool RankedRoundPreparation::launch(CCScene* origin) {
         // Admission was armed before native init to latch read-only safety.
         // A failed scene must not retain a phantom live PlayLayer owner.
         if(survivalLive)SurvivalSpectatorRuntime::get().sceneExited();
+        if(replaying)replay::Runtime::get().exited();
         m_view.error = "NATIVE GAMEPLAY LOAD FAILED - RETRYING";
         m_nextLaunchAt = clockSeconds() + 1.0;
         return false;
@@ -458,6 +467,7 @@ bool RankedRoundPreparation::launch(CCScene* origin) {
     m_launchedLevel = level;
     m_returnQueued = m_quitting = m_returnPopped = false;
     if(survival)SurvivalRuntime::get().noteNativeLaunch();
+    if(replaying)RankedAudioManager::get().fadeOutForGameplay();
     CCDirector::sharedDirector()->pushScene(scene);
     // pushScene schedules the transition. The process heartbeat ACKs only once
     // this exact game is attached to the active scene with no pending transition.

@@ -96,7 +96,7 @@ describe("server-backed Debug Spectate over real HTTP and persistent PostgreSQL"
     for (const migration of ["0001_initial_ranked", "0002_attempt_start_leases", "0002_debug_bot_match",
       "0003_debug_rating_playable_maps", "0004_alpha37_schema_hardening", "0005_v050_rating_system",
       "0006_v050_dynamic_csmp_tiers", "0007_solo_stage_placement", "0008_placement_beta9",
-      "0009_placement_stage_count", "0010_achievements_v1", "0011_debug_spectate", "0012_gameplay_controls"]) {
+      "0009_placement_stage_count", "0010_achievements_v1", "0011_debug_spectate", "0012_gameplay_controls", "0031_debug_spectate_custom_maps"]) {
       await pg.exec(await readFile(fileURLToPath(new URL(`../../../migrations/${migration}.sql`, import.meta.url)), "utf8"));
     }
     const player = ids.next();
@@ -110,10 +110,10 @@ describe("server-backed Debug Spectate over real HTTP and persistent PostgreSQL"
   beforeEach(async () => { await connectedClientHeartbeat(); });
   afterAll(async () => { await app?.close(); await pg?.close(); if (dir) await rm(dir, { recursive: true, force: true }); });
 
-  it("requires server opt-in, debug header/password/session, and fixed map/format", async () => {
+  it("requires server opt-in, debug header/password/session, and valid map/format", async () => {
     expect(loadServerEnvironment({ ...process.env, NODE_ENV: "test", DATABASE_URL: "postgres://localhost/test", RANKED_CONFIG_URL: "http://localhost/config",
       RANKED_SESSION_TOKEN_SECRET: "secret", RANKED_CONFIG_REFRESH_MS: "5000", RANKED_CONFIG_FETCH_TIMEOUT_MS: "1000" }).debugSpectate).toBeNull();
-    expect((await post("recordings", { ...createBody, levelId: 123 })).status).toBe(400);
+    expect((await post("recordings", { ...createBody, levelId: 0 })).status).toBe(400);
     expect((await post("recordings", { ...createBody, password: "wrong" })).status).toBe(401);
     expect((await fetch(base + "/api/ranked/debug/spectate/recordings", { method: "POST",
       headers: { "content-type": "application/json", Authorization: headers.Authorization }, body: JSON.stringify(createBody) })).status).toBe(404);
@@ -339,6 +339,20 @@ describe("server-backed Debug Spectate over real HTTP and persistent PostgreSQL"
     const recovered=(await poll(playback)).body;expect(recovered.stream.generation).toBe(2);expect(recovered.stream.cosmetics).toEqual(cosmetics);
     expect(recovered.packets[0].cosmetics).toEqual(cosmetics);expect(recovered.packets[0].keyframe.cosmetics).toBeUndefined();
     await post(`playbacks/${playback.playbackId}/close`,{},playback.token);
+  });
+  it("records an exact custom map and TEST selects the latest completed recording across maps, ignoring unfinished data",async()=>{
+    const before=await rankedSnapshot();
+    const custom=(await post("recordings",{...createBody,levelId:123456789}));expect(custom.status).toBe(201);expect(custom.body.levelId).toBe(123456789);
+    const f=frame(0,0),end=frame(1,50,true);
+    await post(`recordings/${custom.body.recordingId}/frames`,{formatVersion:2,frames:[f,end]},custom.body.token);
+    expect((await post(`recordings/${custom.body.recordingId}/finalize`,{completed:true},custom.body.token)).status).toBe(201);
+    now+=1;const incomplete=await post("recordings",{...createBody,levelId:987654321});expect(incomplete.status).toBe(201);
+    const test=await post("playbacks",{...createBody,levelId:987654321});expect(test.status).toBe(201);expect(test.body.recordingId).toBe(custom.body.recordingId);expect(test.body.levelId).toBe(123456789);
+    const stream=await poll(test.body);expect(stream.body.packets[0].levelId).toBe(123456789);expect(stream.body.stream.attemptId).toBe(custom.body.recordingId);
+    await post(`playbacks/${test.body.playbackId}/close`,{},test.body.token);
+    for(const levelId of [0,-1,2147483648,1.5,"123"])
+      expect((await post("recordings",{...createBody,levelId})).status).toBe(400);
+    expect(await rankedSnapshot()).toEqual(before);
   });
   it("OFF server rejects recording/playback even with valid authorization without creating debug data", async () => {
     await app.close(); await startApp(false);

@@ -76,7 +76,7 @@ struct SurvivalRuntime{SurvivalOutcomeChoice outcomeChoice()const{return Surviva
  SurvivalOutcomeChoice lastChoice=SurvivalOutcomeChoice::Observe;
  static SurvivalRuntime&get(){static SurvivalRuntime r;return r;}
  auto const&view(){return v;}
- bool normalRoundCleared(){return cleared;}
+ bool officialRoundCleared()const{return cleared;}bool normalRoundCleared(){return cleared;}
  void acknowledge(){++acknowledgments;}
  SurvivalFlowStage flowStage()const{return stage;}
  bool observing()const{return observe;}
@@ -176,7 +176,7 @@ struct SurvivalRuntime{
  struct View{std::string state="ENTERING",phase="ROUND_1",ownId="a";bool online=true,ownAssetsReady=true,ownEliminated=false;std::vector<SurvivalStanding>standings;}m_view;
  bool pending=false,cleared=false,free=false;long remaining=100;int m_localAttempts=0;std::string m_session="token";
  LevelPreparationContext current{"match",42,1,0,false,0,1},m_prepared=current;
- bool surrenderPending()const{return pending;}bool normalRoundCleared()const{return cleared;}bool freePlaying()const{return free;}
+ bool surrenderPending()const{return pending;}bool officialRoundCleared()const{return cleared;}bool normalRoundCleared()const{return cleared;}bool freePlaying()const{return free;}
  std::optional<std::int64_t> wait=0,panelWait=0;bool entered=false;auto entryWaitMs()const{return wait;}auto selectedPanelWaitMs()const{return panelWait;}bool previouslyEntered()const{return entered;}
  auto preparationContext()const{return current;}long remainingMs()const{return remaining;}
  bool attemptLimitReached()const;bool canEnter()const;

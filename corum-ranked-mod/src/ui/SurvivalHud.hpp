@@ -17,7 +17,7 @@ private:
     void presentProgressMarkers(SurvivalMatchView const& view);
     std::unordered_map<std::string,Row> m_rows;
     std::string m_context;
-    RankedHudLabel m_round,m_timer,m_difference,m_rank,m_waiting;
+    RankedHudLabel m_round,m_timer,m_auxTimer,m_difference,m_rank,m_waiting;
     cocos2d::CCDrawNode* m_cutoffLine=nullptr;
     geode::WeakRef<cocos2d::CCSprite> m_progressBar,m_progressFill;
     geode::WeakRef<cocos2d::CCDrawNode> m_progressLines;

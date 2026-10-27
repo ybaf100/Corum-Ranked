@@ -51,6 +51,7 @@ const REQUIRED_MIGRATIONS = [
   "0028_debug_achievement_parity.sql",
   "0029_achievement_survival_overhaul.sql",
   "0030_survival_64_player_format.sql",
+  "0031_debug_spectate_custom_maps.sql",
 ] as const;
 
 export interface RankedSchemaStatus {

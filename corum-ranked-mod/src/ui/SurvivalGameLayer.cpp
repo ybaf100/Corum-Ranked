@@ -131,7 +131,7 @@ class SurvivalGameLayer final : public CCLayerColor {
         if(m_closed || m_motion || (tag<11 && std::chrono::steady_clock::now()<m_eliminationUntil))return;
         auto& runtime=SurvivalRuntime::get();auto* level=RankedLevelPreparation::get().level();
         if((tag==0 || tag==4 || tag==5 || tag==6 || tag==10) && (m_confirmation || runtime.surrenderPending()))return;
-        if(tag==13 || tag==19){m_browsingBoard=true;runtime.chooseOutcome(SurvivalOutcomeChoice::LiveSpectate);SurvivalSpectatorRuntime::get().openTargets();return;}
+        if(tag==13 || tag==19){m_browsingBoard=true;if(runtime.officialRoundCleared() && !runtime.freePlaying()){runtime.chooseOutcome(SurvivalOutcomeChoice::LiveSpectate);SurvivalSpectatorRuntime::get().openTargets();}return;}
         if(tag==18){runtime.chooseOutcome(SurvivalOutcomeChoice::Observe);m_launchedContext.clear();m_manualMap=false;m_browsingBoard=false;return;}
         if(tag==14){SurvivalSpectatorRuntime::get().leave();runtime.leaveObserver();runtime.chooseOutcome(SurvivalOutcomeChoice::PersonalResult);return;}
         if(tag==12){beginResultMotion();return;}
@@ -387,7 +387,7 @@ public:
         auto const nextRound=runtime.observing() || survivalCanPrepareNext(view.state,view.ownEliminated,view.resultPending,result);
         auto const navigationContext=view.id+":"+view.roundKey+":"+std::to_string(view.mapGeneration);
         if(m_navigationContext!=navigationContext){m_navigationContext=navigationContext;m_browsingBoard=false;m_manualMap=false;m_entrySyncAfter.reset();m_replayRequestedContext.clear();}
-        auto const liveBoard=(watching || m_browsingBoard || (runtime.normalRoundCleared() && !m_manualMap)) && !result && !elimination;
+        auto const liveBoard=(watching || m_browsingBoard || (runtime.officialRoundCleared() && !m_manualMap)) && !result && !elimination;
         auto const clock=survivalBoardClock(view.state,runtime.countdownMs(),runtime.roundRemainingMs());
         m_boardClock->setString(i18n::text(clock,clock).c_str());m_boardClock->setVisible(!result && !elimination && !clock.empty());
         auto const headingWidth=std::max(80.f,getContentSize().width-24-(m_boardClock->isVisible()?2*144.f:0.f));
@@ -411,7 +411,7 @@ public:
         auto const surrenderCaption=watching?text("survival-view-results","VIEW RESULTS"):runtime.observing()?text("survival-leave-observer","LEAVE FREE PLAY"):text("surrender","SURRENDER");
         if(surrenderCaption!=m_surrenderText->getString()){m_surrenderText->setString(surrenderCaption.c_str());ui::fitFullMenuLabel(m_surrenderText,104,22,.29f);}
         m_surrender->setVisible(watching || (nextRound && (runtime.observing() || runtime.canSurrender() || runtime.surrenderPending())));m_surrender->setEnabled(!elimination && !m_motion && (watching || runtime.observing() || runtime.canSurrender()));
-        m_liveWatch->setVisible(watching);
+        m_liveWatch->setVisible((watching || liveBoard) && runtime.officialRoundCleared() && !runtime.freePlaying());
         m_backToMap->setVisible(!watching && liveBoard && nextRound && !runtime.canReplayCleared());m_backToMap->setEnabled(!m_motion && !elimination && !runtime.surrenderPending());
         m_viewBoard->setVisible(selectionWindow);m_viewBoard->setEnabled(!m_motion && !elimination);
         m_freePlay->setVisible(watching || (liveBoard && runtime.canFreePlay()));m_freePlay->setEnabled(!m_motion && !m_confirmation);
@@ -478,7 +478,7 @@ public:
         if(runtime.view().result.isObject()){runtime.acknowledge();return;}
         // Both gameplay exit and this first Back are navigation only. The
         // retained coordinator owns the match/polling and never pops here.
-        if(!m_browsingBoard && !(SurvivalRuntime::get().normalRoundCleared() && !m_manualMap)){
+        if(!m_browsingBoard && !(SurvivalRuntime::get().officialRoundCleared() && !m_manualMap)){
             ++m_boardVisit;m_browsingBoard=true;m_manualMap=true;return;
         }
         if(!SurvivalRuntime::get().view().ownEliminated)confirmSurrender();

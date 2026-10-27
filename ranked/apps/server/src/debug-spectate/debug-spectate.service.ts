@@ -9,7 +9,7 @@ import { SpectatorLiveService, parseSpectatorKeyframe, type SpectatorPoseKeyfram
 import type {SpectatorCosmetics} from "../match/spectator-cosmetics.js";
 import { SPECTATOR_LIVE_PROTOCOL_VERSION } from "../match/spectator-live.policy.js";
 import type { RankedSessionContext } from "../session/session.types.js";
-import { DEBUG_SPECTATE_FORMAT_VERSION, DEBUG_SPECTATE_LEVEL_ID, DEBUG_SPECTATE_MAX_FRAMES,
+import { DEBUG_SPECTATE_FORMAT_VERSION, DEBUG_SPECTATE_MAX_FRAMES,
   DEBUG_SPECTATE_MAX_SESSIONS, DEBUG_SPECTATE_SAMPLE_MS, DEBUG_SPECTATE_TTL_MS, debugSpectateContextId } from "./debug-spectate.config.js";
 
 interface Frame { readonly sequence: number; readonly elapsedMs: number; readonly keyframe: SpectatorPoseKeyframe }
@@ -23,7 +23,7 @@ interface RecordingRow {
   token_hash: string; expires_at: Date | string;
 }
 interface Playback {
-  readonly id: string; readonly recordingId: string; readonly tokenHash: string;
+  readonly id: string; readonly recordingId: string; readonly tokenHash: string; readonly levelId:number;
   readonly expiresAtMs: number; readonly frames: readonly Frame[];
   readonly startElapsedMs:number;lastCosmetics?:SpectatorCosmetics;
   startedAtMs: number | null; cursor: number; generation: number; sequence: number; completed: boolean;
@@ -81,8 +81,8 @@ export class DebugSpectateService implements OnModuleInit, OnApplicationShutdown
     if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) {
       throw new UnauthorizedException("INVALID_DEBUG_AUTHORIZATION");
     }
-    if (value.levelId !== DEBUG_SPECTATE_LEVEL_ID || value.formatVersion !== DEBUG_SPECTATE_FORMAT_VERSION) {
-      throw new BadRequestException("DEBUG_SPECTATE_REQUIRES_FIXED_VOICE_MAP_AND_FORMAT");
+    if (typeof value.levelId!=="number" || !Number.isSafeInteger(value.levelId) || value.levelId<1 || value.levelId>2147483647 || value.formatVersion !== DEBUG_SPECTATE_FORMAT_VERSION) {
+      throw new BadRequestException("DEBUG_SPECTATE_REQUIRES_VALID_LEVEL_AND_FORMAT");
     }
     this.tick();
   }
@@ -113,11 +113,11 @@ export class DebugSpectateService implements OnModuleInit, OnApplicationShutdown
     await this.database.query(`INSERT INTO debug_spectate_recordings
       (id, level_id, format_version, sample_interval_ms, created_at, recorder_identity, token_hash, expires_at)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-    [id, DEBUG_SPECTATE_LEVEL_ID, DEBUG_SPECTATE_FORMAT_VERSION, DEBUG_SPECTATE_SAMPLE_MS,
+    [id, object(body).levelId, DEBUG_SPECTATE_FORMAT_VERSION, DEBUG_SPECTATE_SAMPLE_MS,
       now, `${session.gdAccountId}:${session.gdUsername}`, this.tokens.hash(token), expiresAt]);
     this.recordings.set(id, { id, tokenHash: this.tokens.hash(token), expiresAtMs: expiresAt.getTime(), frames: [], finalizing: null, finalizeCompleted: null });
     this.logger.log(`[DebugSpectate] record started recordingId=${id}`);
-    return { recordingId: id, token, levelId: DEBUG_SPECTATE_LEVEL_ID,
+    return { recordingId: id, token, levelId: object(body).levelId,
       formatVersion: DEBUG_SPECTATE_FORMAT_VERSION, sampleIntervalMs: DEBUG_SPECTATE_SAMPLE_MS, expiresAt: expiresAt.toISOString() };
     } finally { --this.startingRecordings; }
   }
@@ -212,10 +212,11 @@ export class DebugSpectateService implements OnModuleInit, OnApplicationShutdown
     ++this.startingPlaybacks;
     try {
     const rows = await this.database.query<RecordingRow>(`SELECT * FROM debug_spectate_recordings
-      WHERE completed AND level_id = $1 AND format_version = $2 ORDER BY created_at DESC, id DESC LIMIT 1`,
-    [DEBUG_SPECTATE_LEVEL_ID, DEBUG_SPECTATE_FORMAT_VERSION]);
+      WHERE completed AND finalized_at IS NOT NULL AND format_version = $1 ORDER BY finalized_at DESC, created_at DESC, id DESC LIMIT 1`,
+    [DEBUG_SPECTATE_FORMAT_VERSION]);
     const row = rows.rows[0];
     if (!row) throw new NotFoundException("NO RECORDED SPECTATE DATA");
+    if(!Number.isSafeInteger(Number(row.level_id))||Number(row.level_id)<1||Number(row.level_id)>2147483647)throw new ConflictException("INVALID_RECORDED_LEVEL_ID");
     const frames = await this.database.query<{ sequence: number; elapsed_ms: number; keyframe: SpectatorPoseKeyframe }>(
       "SELECT sequence, elapsed_ms, keyframe FROM debug_spectate_frames WHERE recording_id = $1 ORDER BY sequence", [row.id]);
     if (frames.rows.length !== row.frame_count || frames.rows.length === 0 || frames.rows.length > DEBUG_SPECTATE_MAX_FRAMES) {
@@ -248,7 +249,7 @@ export class DebugSpectateService implements OnModuleInit, OnApplicationShutdown
         ?"RECORDING_DID_NOT_REACH_START_PERCENT":"RECORDING_HAS_NO_PROGRESS_RECORD_AGAIN");
     }
     const startElapsedMs=normalized[startIndex]!.elapsedMs;
-    this.playbacks.set(id, { id, recordingId: row.id, tokenHash: this.tokens.hash(token),
+    this.playbacks.set(id, { id, recordingId: row.id, levelId:Number(row.level_id), tokenHash: this.tokens.hash(token),
       expiresAtMs: expiresAt.getTime(), frames: normalized,startElapsedMs, startedAtMs: null, cursor: 0,
       generation: 1, sequence: 0, completed: false });
     this.logger.log(`[DebugSpectate] playback created playbackId=${id} recordingId=${row.id}`);
@@ -326,7 +327,7 @@ export class DebugSpectateService implements OnModuleInit, OnApplicationShutdown
     this.relay.publishRecorded({ protocolVersion: SPECTATOR_LIVE_PROTOCOL_VERSION,
       matchId: debugSpectateContextId(playback.id), roundNumber: 1, deathmatchSequence: null,
       attemptId: playback.recordingId, generation: playback.generation, sequence: playback.sequence++,
-      elapsedMs: frame.elapsedMs,levelId:DEBUG_SPECTATE_LEVEL_ID,...(descriptor?{cosmetics:descriptor}:{}), inputEdges: [], keyframe: frame.keyframe }, nowMs);
+      elapsedMs: frame.elapsedMs,levelId:playback.levelId,...(descriptor?{cosmetics:descriptor}:{}), inputEdges: [], keyframe: frame.keyframe }, nowMs);
     if (playback.cursor === 0 && playback.generation === 1) {
       this.logger.log(`[DebugSpectate] first normalized packet emitted playbackId=${playback.id} elapsedMs=${frame.elapsedMs}`);
     }

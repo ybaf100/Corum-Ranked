@@ -25,7 +25,8 @@ def verify_binary(binary, platform, debug):
                 "PauseLayer::customSetup",
                 "GameManager::returnToLastScene",
                 "GJBaseGameLayer::update", "GJBaseGameLayer::updateCamera",
-                "GJBaseGameLayer::teleportPlayer",
+                "GJBaseGameLayer::teleportPlayer", "PlayLayer::startMusic",
+                "GJBaseGameLayer::processCommands", "GJBaseGameLayer::processQueuedButtons", "GJBaseGameLayer::handleButton",
                 "GJBaseGameLayer::checkCollisions", "GJBaseGameLayer::collisionCheckObjects"}
     forbidden = {"GJGameLevel::saveNewScore", "GJGameLevel::storeNewLocalScore"}
     if not required <= targets or targets & forbidden:

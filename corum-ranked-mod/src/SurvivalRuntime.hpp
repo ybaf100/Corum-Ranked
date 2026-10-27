@@ -78,6 +78,7 @@ public:
     bool consumeNativeLaunch(GJGameLevel* level);
     bool canPlay() const;
     bool attemptLimitReached() const;
+    int localAttemptsUsed()const{return m_localAttempts;}
     std::optional<std::int64_t> countdownMs() const;
     std::optional<std::int64_t> entryWaitMs() const;
     void selectedPanelReady(bool ready);
@@ -91,6 +92,7 @@ public:
     void progress(double value);
     void endAttempt(double value);
     bool normalRoundCleared() const;
+    bool officialRoundCleared() const;
     bool canFreePlay() const;
     bool beginFreePlay();
     std::string const& spectatorAcceptedAttempt()const{return m_spectatorAcceptedAttempt;}

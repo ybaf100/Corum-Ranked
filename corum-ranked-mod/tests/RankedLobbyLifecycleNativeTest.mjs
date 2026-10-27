@@ -85,7 +85,7 @@ struct Json {struct Int {long long unwrapOr(int v)const{return v;}bool isOk()con
 namespace corum::ranked {struct HistoryRound{std::string label;bool completed=false;std::optional<bool>ownQualified;std::optional<int>ownRank;};std::vector<HistoryRound>historyRounds(Json const&,bool){return {};}}
 struct History {Json record;bool inProgress=false,debug=false;int roundWinsA=0,roundWinsB=0;std::string matchId="m",createdAt="2026-10-24",finishedAt="2026-10-24";int survivalRank=0;corum::ranked::RankedMode mode=corum::ranked::RankedMode::SoloRanked;std::string side="A",winnerSide="A",opponentName="a long player name";std::optional<int>ownRankedScoreDelta=10;};
 struct RuntimeView {std::uint64_t historyRevision=0;bool historyLoading=false;std::string historyError;struct{std::vector<Stage>stageResults;}placement;std::vector<History>history;};
-struct RankedRuntime{RuntimeView data;static RankedRuntime&get(){static RankedRuntime r;return r;}RuntimeView const&view()const{return data;}void fetchHistoryDetail(corum::ranked::RankedMode,std::string const&){} };
+struct RankedRuntime{RuntimeView data;static RankedRuntime&get(){static RankedRuntime r;return r;}RuntimeView const&view()const{return data;}void fetchHistoryDetail(corum::ranked::RankedMode,std::string const&,bool=false){} };
 namespace fmt {std::string runtime(std::string s){return s;}template<class...T>std::string format(std::string s,T const&...){return s;}}
 namespace corum::ranked::i18n {bool isKorean(){return false;}}
 constexpr int ccc3(unsigned char r,unsigned char g,unsigned char b){return (r<<16)|(g<<8)|b;}

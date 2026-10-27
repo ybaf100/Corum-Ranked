@@ -40,6 +40,12 @@ int main(){
  assert(duel[2].levelId==0&&!duel[2].bestA);assert(historyRounds(matjson::Value{},false).empty());
  for(auto const& value:{matjson::Value{},matjson::Value(nullptr),matjson::Value(-1),matjson::Value(1.5),matjson::Value(2147483648.)})assert(historyLevelId(value)==0);
  for(float width:{320,480,568,800,1366})for(float height:{270,320,768}){auto l=historyLayout(width,height);assert(l.width<=width-48&&l.height<=height-132);if(l.split)assert(l.mapWidth+l.boardWidth+l.ownWidth+16<=l.width+.01f);else assert(l.boardWidth==l.width);}
+ for(auto dims:{std::pair{568.f,397.f},std::pair{480.f,320.f},std::pair{854.f,480.f},std::pair{320.f,240.f}}){
+   auto l=historyLayout(dims.first,dims.second);assert(l.bottom>=43&&l.bottom+l.height<=dims.second-100);
+   if(dims.first/dims.second<1.6)assert(!l.split);
+   auto c=historyRosterColumns(l.boardWidth);assert(c.rank+15<c.icon-12&&c.icon+12<c.name&&c.name+c.nameWidth<c.best-c.bestWidth/2&&c.best+c.bestWidth/2<l.boardWidth);
+   for(int count:{16,17,64}){auto board=58.f+count*70;assert(board-62+24<board-25);assert(board-62-(count-1)*70-35>=0);}
+ }
  assert(historyResultFilters(true,false)==std::vector<std::string>({"ALL","WIN","LOSS"}));
  for(bool soloBusy:{false,true})for(bool survivalBusy:{false,true})for(bool nativeBusy:{false,true})assert(historyLevelNavigationAllowed(soloBusy,survivalBusy,nativeBusy)==(!soloBusy&&!survivalBusy&&!nativeBusy));
 }

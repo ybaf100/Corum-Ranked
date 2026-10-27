@@ -977,7 +977,7 @@ int main() {
         runtime.m_view.stage=stage;
         for(auto page:{P::Live,P::Achievements,P::HistoryList,P::HistoryDetail,P::PlacementPoolSelection,P::PlacementSkipConfirm}) {
             owner.m_page=page;owner.settingsVisibility();
-            auto allowed=page==P::Achievements||page==P::HistoryList||page==P::HistoryDetail||
+            auto allowed=page==P::Achievements||
                 (page==P::Live&&(stage==RuntimeStage::Ready||stage==RuntimeStage::JoiningQueue||stage==RuntimeStage::Queued));
             assert(owner.settings.visible==allowed&&owner.settings.touch==allowed);
             owner.m_modeNoticeOpen=true;owner.settingsVisibility();assert(!owner.settings.visible&&!owner.settings.touch);

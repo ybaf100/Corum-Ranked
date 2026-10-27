@@ -28,11 +28,12 @@ class SurvivalSpectatorTargetPopup final:public Popup {
     }
     void onBack(CCObject* sender){onClose(sender);}
     void onPage(CCObject* object){auto* item=typeinfo_cast<CCMenuItemSpriteExtra*>(object);if(!item)return;auto n=std::max<std::size_t>(1,(SurvivalSpectatorRuntime::get().targets().size()+m_pageSize-1)/m_pageSize);m_page=item->getTag()<0?(m_page+n-1)%n:(m_page+1)%n;m_rosterKey.clear();}
-    void onWatch(CCObject* object){auto* item=typeinfo_cast<CCMenuItemSpriteExtra*>(object);if(!item||item->getTag()<0||static_cast<std::size_t>(item->getTag())>=m_cards.size())return;auto id=m_cards[item->getTag()].id;SurvivalSpectatorRuntime::get().select(std::move(id));onClose(nullptr);}
+    void onWatch(CCObject* object){auto* item=typeinfo_cast<CCMenuItemSpriteExtra*>(object);if(!item||item->getTag()<0||static_cast<std::size_t>(item->getTag())>=m_cards.size())return;auto id=m_cards[item->getTag()].id;SurvivalSpectatorRuntime::get().select(std::move(id));}
     void onInfo(CCObject* object){auto* item=typeinfo_cast<CCMenuItemSpriteExtra*>(object);if(!item||item->getTag()<0||static_cast<std::size_t>(item->getTag())>=m_cards.size())return;for(auto const& row:ui::survivalRoster(SurvivalRuntime::get().view()))if(row.id==m_cards[item->getTag()].id){ui::openSurvivalProfile(this,row);break;}}
     void onClose(CCObject* sender)override{SurvivalSpectatorRuntime::get().selectionVisible(false);Popup::onClose(sender);}
     void update(float)override{
         auto& live=SurvivalSpectatorRuntime::get();auto const& sur=SurvivalRuntime::get();auto const&v=sur.view();
+        if(live.canLaunch()){onClose(nullptr);return;}
         if(v.id!=m_identity||v.state=="FINAL_RESULT"||v.state=="CANCELLED"){onClose(nullptr);return;}
         auto const left=sur.roundRemainingMs().value_or(0)/1000;auto clock=fmt::format("ROUND {} · {:02}:{:02}",v.roundNumber,left/60,left%60);if(clock!=m_clock->getString())m_clock->setString(clock.c_str());
         auto const& targets=live.targets();bool compact=v.matchPlayerCount==64&&(v.phase=="ROUND_1"||v.phase=="ROUND_2");m_pageSize=compact?24:16;

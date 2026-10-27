@@ -7,7 +7,7 @@ function fixture(count:16|64){
  let now=6000,queries=0;const matches=new Map<string,SurvivalMatch>();
  for(let n=0;n<3;++n){const id='match'+n;const m=createSurvivalMatch(id,Array.from({length:count},(_,i)=>({participantId:'p'+i,playerId:'p'+i,name:'Human '+i,kind:'HUMAN' as const,lp:150})),survivalConfigForPlayerCount({...DEFAULT_SURVIVAL_CONFIG,enabled:true},count),'test',0,true);
  m.state='PLAYING';const r=survivalCurrentRound(m);r.startsAt=0;r.endsAt=180000;r.map={levelId:40000000+n,levelVersion:1,stars:4,demon:false,demonDifficulty:null,automatic:false,platformer:false,geometrySha256:'a'.repeat(64),geometryBytes:64,verifiedAt:new Date(0).toISOString()};
- for(let i=0;i<6;++i){m.players[i]!.eliminationStage=1;m.players[i]!.eliminatedAt=0;}
+ for(let i=0;i<6;++i){r.players[i]!.highestProgress=100;r.players[i]!.attempts=[{id:'clear'+i,sequence:1,startedAt:0,endedAt:1000,highestProgress:100}];}
  for(let i=6;i<count;++i)r.players[i]!.attempts=[{id:'a'+i,sequence:1,startedAt:0,endedAt:null,highestProgress:0}];matches.set(id,m);}
  const db={query:async(sql:string,values:unknown[])=>{expect(sql.trimStart().startsWith('SELECT')).toBe(true);++queries;return {rows:[{snapshot:matches.get(String(values[0])),participant_id:values[1],enabled:true}],rowCount:1};}} as unknown as DatabasePort;
  const live=new SurvivalSpectatorLiveService(db,{now:()=>new Date(now)});
@@ -15,7 +15,7 @@ function fixture(count:16|64){
  const query=(id:string,target:string)=>{const r=survivalCurrentRound(matches.get(id)!);return {protocolVersion:'2',targetId:target,roundKey:r.key,mapGeneration:String(r.mapGeneration),levelId:String(r.map!.levelId),worldHistory:'1'};};
  const packet=(id:string,target:number,sequence=0)=>{const r=survivalCurrentRound(matches.get(id)!);return {protocolVersion:2,matchId:id,roundNumber:r.ordinal,levelId:r.map!.levelId,attemptId:'a'+target,generation:1,sequence,elapsedMs:sequence*50,inputEdges:[],keyframe:{x:100+sequence,y:40,rotation:0,mode:'CUBE',mini:false,upsideDown:false,flipped:false,dual:false,dead:false,finished:false}};};
  const publish=(id:string,target:number,packets=[packet(id,target)])=>{const r=survivalCurrentRound(matches.get(id)!);return live.publish(id,session('p'+target),{roundKey:r.key,mapGeneration:r.mapGeneration,levelId:r.map!.levelId,packets});};
- return {live,session,query,publish,packet,advance:(ms:number)=>{now+=ms;},queries:()=>queries};
+ return {live,session,query,publish,packet,matches,advance:(ms:number)=>{now+=ms;},queries:()=>queries};
 }
 describe('production Survival relay bounded demand and storage',()=>{
  for(const count of [16,64] as const)it(`${count} players share buffers; four per match/eight total, expiry and idle perform no DB polling`,async()=>{
@@ -45,6 +45,16 @@ describe('production Survival relay bounded demand and storage',()=>{
   f.advance(4000);const response=await f.live.subscribe('match0',viewer,f.query('match0','p6'));
   expect(response.packets.at(-1)?.keyframe[flag]).toBe(true);expect(f.live.diagnostics().streams).toBe(1);
   await f.live.leave('match0',viewer);expect(f.live.diagnostics()).toMatchObject({streams:0,viewers:0,serializedBytes:0});
+ });
+ it.each(['ROUND_1','TIEBREAK'] as const)('authorizes only exact ended 100%% in %s with no active attempt',async phase=>{
+  const f=fixture(16),m=f.matches.get('match0')!,r=survivalCurrentRound(m);r.phase=phase;
+  await expect(f.live.targets('match0',f.session('p0'))).resolves.toHaveProperty('targets');
+  r.players[0]!.attempts.push({id:'new',sequence:2,startedAt:5000,endedAt:null,highestProgress:0});
+  await expect(f.live.targets('match0',f.session('p0'))).rejects.toThrow('SURVIVAL_SPECTATOR_CLEAR_REQUIRED');r.players[0]!.attempts.pop();
+  r.players[0]!.attempts[0]!.highestProgress=99.9999;
+  await expect(f.live.targets('match0',f.session('p0'))).rejects.toThrow('SURVIVAL_SPECTATOR_CLEAR_REQUIRED');
+  r.players[0]!.attempts[0]!.highestProgress=100;m.players[0]!.eliminationStage=1;
+  await expect(f.live.targets('match0',f.session('p0'))).rejects.toThrow('SURVIVAL_SPECTATOR_CLEAR_REQUIRED');
  });
  it('bounds authorization rate bookkeeping independently of stream count and retires expired buckets',async()=>{
   const f=fixture(16);

@@ -35,6 +35,7 @@ struct SpectatorSecondaryPose {
     unsigned effects=0;
     std::uint64_t segment=0; // local P2 presentation boundary, never a wire identity
 };
+struct SpectatorAudioSample {std::string trackHash;double positionMs=0;};
 struct SpectatorGhostPose {
     float x = 0.0f;
     float y = 0.0f;
@@ -62,6 +63,7 @@ struct SpectatorGhostPose {
     // Shared immutable low-frequency descriptor, not encoded in each pose.
     std::shared_ptr<SpectatorCosmetics const> cosmetics=nullptr;
     std::optional<float> progress=std::nullopt;
+    std::optional<SpectatorAudioSample> audio=std::nullopt;
 
 };
 

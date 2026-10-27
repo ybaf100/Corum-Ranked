@@ -22,10 +22,11 @@ test('actual round preparation executes native download/resource/delegate/launch
     const optionMethods = popup.slice(popup.indexOf('    void onLowDetail(CCObject*)'), popup.indexOf('    void addRoundOptions('));
     const cpp = String.raw`
 #include "${join(root, 'src/domain/LevelPreparationPolicy.hpp')}"
+#include "${join(root,'tests/helpers/InactiveReplayDouble.hpp')}"
 #include "${join(root, 'src/domain/RoundResourcePolicy.hpp')}"
 #include "${join(root, 'src/domain/SurvivalNativeOptions.hpp')}"
 #include <cassert>
-namespace corum::ranked {struct SurvivalSpectatorRuntime {static SurvivalSpectatorRuntime& get(){static SurvivalSpectatorRuntime r;return r;}bool sceneLevel(int)const{return false;}bool publishing()const{return false;}bool launchAllowed=false;int failedExits=0;bool canLaunch()const{return launchAllowed;}template<class...T>bool arm(T...){return launchAllowed;}template<class...T>bool capture(T const&...){return false;}template<class...T>void terminal(T const&...){}void sceneExited(){launchAllowed=false;++failedExits;}bool exitRequested()const{return false;}};}
+namespace corum::ranked {struct SurvivalSpectatorRuntime {static SurvivalSpectatorRuntime& get(){static SurvivalSpectatorRuntime r;return r;}bool sceneLevel(int)const{return false;}replay::InactiveWorld* world()const{return nullptr;}bool publishing()const{return false;}bool launchAllowed=false;int failedExits=0;bool canLaunch()const{return launchAllowed;}template<class...T>bool arm(T...){return launchAllowed;}template<class...T>bool capture(T const&...){return false;}template<class...T>void terminal(T const&...){}void sceneExited(){launchAllowed=false;++failedExits;}bool exitRequested()const{return false;}};}
 
 #include <chrono>
 #include <filesystem>
@@ -180,6 +181,7 @@ struct SurvivalOptionsPreferences {static SurvivalOptionsPreferences&get(){stati
 
 enum class RuntimeStage {Ready,Matched};
 struct RuntimeView {RuntimeStage stage=RuntimeStage::Ready;struct Match {std::string matchId,state,side="A";bool readyA=false,readyB=false,placement=false;}match;};
+struct RankedAudioManager{static RankedAudioManager&get(){static RankedAudioManager a;return a;}void fadeOutForGameplay(){}};
 struct RankedRuntime {
     RuntimeView state;LevelPreparationContext context;bool viewer=false,canPlay=true,entryAllowed=false;int arms=0,mapFailures=0,readyRequests=0,deadlineQueries=0,sceneEntries=0;
     static RankedRuntime& get(){static RankedRuntime r;return r;}

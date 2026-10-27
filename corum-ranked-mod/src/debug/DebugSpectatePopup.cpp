@@ -6,8 +6,10 @@
 using namespace geode::prelude;
 namespace {
 class DebugSpectatePopup final : public Popup {
+    cocos2d::CCNode* m_content=nullptr;
     TextInput* m_password = nullptr;
     TextInput* m_startPercent=nullptr;
+    TextInput* m_levelId=nullptr;
     bool m_inputError=false;
     CCLabelBMFont* m_status = nullptr;
     CCLabelBMFont* m_liveSetting = nullptr;
@@ -18,26 +20,30 @@ class DebugSpectatePopup final : public Popup {
     }
 protected:
     bool init() override {
-        if (!Popup::init(420.0f, 310.0f)) return false;
+        auto window=CCDirector::sharedDirector()->getWinSize();auto scale=std::min({1.f,(window.width-24)/420.f,(window.height-24)/310.f});
+        if (!Popup::init(420.f*scale, 310.f*scale)) return false;
+        m_content=CCNode::create();m_content->setScale(scale);m_mainLayer->addChild(m_content);
         setTitle("SERVER DEBUG SPECTATE");
-        auto* map = corum::ranked::ui::label("VOICE / LiteN1ng / EASY DEMON", 0.33f, {210, 230}, corum::ranked::ui::Text);
-        m_mainLayer->addChild(map);
-        auto* note = corum::ranked::ui::label("Debug storage only - NO RANKED RESULTS", 0.25f, {210, 208}, corum::ranked::ui::TextMuted);
-        m_mainLayer->addChild(note);
+        auto* map = corum::ranked::ui::label("RECORD LEVEL ID", 0.28f, {130, 238}, corum::ranked::ui::Text);
+        m_content->addChild(map);
+        m_levelId=TextInput::create(150,"Level ID");m_levelId->setFilter("0123456789");m_levelId->setMaxCharCount(10);
+        m_levelId->setString(std::to_string(corum::ranked::debug::kDebugSpectateLevelId));m_levelId->setPosition({290,238});m_content->addChild(m_levelId);
+        auto* note = corum::ranked::ui::label("TEST: LATEST COMPLETED RECORDING · NO RANKED RESULTS", 0.25f, {210, 208}, corum::ranked::ui::TextMuted);
+        corum::ranked::ui::fitLabelWidth(note,380,.25f,.16f);m_content->addChild(note);
         m_password = TextInput::create(260, "Server debug password");
         m_password->setPasswordMode(true); m_password->setMaxCharCount(128); m_password->setPosition({210, 178});
-        m_mainLayer->addChild(m_password);
+        m_content->addChild(m_password);
         auto* percentLabel=corum::ranked::ui::label("TEST START % (0-100)",.25f,{150,135},corum::ranked::ui::Text);
-        m_mainLayer->addChild(percentLabel);
+        m_content->addChild(percentLabel);
         m_startPercent=TextInput::create(90,"0");m_startPercent->setString("0");m_startPercent->setFilter("0123456789.");
-        m_startPercent->setMaxCharCount(6);m_startPercent->setPosition({300,135});m_mainLayer->addChild(m_startPercent);
-        auto* menu = CCMenu::create(); menu->setPosition(CCPointZero); m_mainLayer->addChild(menu);
+        m_startPercent->setMaxCharCount(6);m_startPercent->setPosition({300,135});m_content->addChild(m_startPercent);
+        auto* menu = CCMenu::create(); menu->setPosition(CCPointZero); m_content->addChild(menu);
         auto* record = action("RECORD SPECTATE", menu_selector(DebugSpectatePopup::onRecord));
         record->setPosition({110, 95}); menu->addChild(record);
         auto* playback = action("TEST SPECTATE", menu_selector(DebugSpectatePopup::onTest));
         playback->setPosition({310, 95}); menu->addChild(playback);
         m_status = corum::ranked::ui::label("Requires ENABLE_DEBUG_SPECTATE server opt-in", 0.25f, {210, 60}, corum::ranked::ui::TextMuted);
-        m_mainLayer->addChild(m_status);
+        m_content->addChild(m_status);
         auto* toggle = action("SERVER LIVE SPECTATOR: LOADING...", menu_selector(DebugSpectatePopup::onToggle));
         toggle->setPosition({210, 32}); menu->addChild(toggle);
         m_liveSetting = typeinfo_cast<CCLabelBMFont*>(toggle->getNormalImage());
@@ -60,9 +66,11 @@ protected:
     void run(bool test) {
         auto start=corum::ranked::debug::debugSpectateStartPercent(m_startPercent->getString());
         if(test && !start){m_inputError=true;m_status->setString("ENTER A START PERCENT FROM 0 TO 100");return;}
+        auto level=corum::ranked::debug::debugSpectateLevelId(m_levelId->getString());
+        if(!test&&!level){m_inputError=true;m_status->setString("ENTER A VALID LEVEL ID");return;}
         m_inputError=false;
         auto password = m_password->getString(); m_password->setString("");
-        corum::ranked::debug::DebugSpectateRuntime::get().start(test, std::move(password),test?start.value_or(0.f):0.f);
+        corum::ranked::debug::DebugSpectateRuntime::get().start(test, std::move(password),test?start.value_or(0.f):0.f,level.value_or(corum::ranked::debug::kDebugSpectateLevelId));
     }
     void onRecord(CCObject*) { run(false); }
     void onTest(CCObject*) { run(true); }

@@ -40,12 +40,13 @@ test('production native safety hook bodies execute through death/completion/save
     const dummyReset = reset.slice(reset.indexOf('if (blocksLocalEvidence())'), reset.indexOf('        if (\n            scoringEnabled()'));
     const cpp = `
 #include "${join(root, 'src/domain/SpectatorLocalSafety.hpp')}"
+#include "${join(root,'tests/helpers/InactiveReplayDouble.hpp')}"
 #include "${join(root, 'src/domain/SpectatorRemotePolicy.hpp')}"
 #include "${join(root, 'src/domain/RankedGameplayPolicy.hpp')}"
 #include "${join(root, 'src/spectator/ScopedSpectatorPersistenceMode.hpp')}"
 #include <algorithm>
 #include <cassert>
-namespace corum::ranked {struct SurvivalSpectatorRuntime {static SurvivalSpectatorRuntime& get(){static SurvivalSpectatorRuntime r;return r;}bool sceneLevel(int)const{return false;}bool publishing()const{return false;}bool canLaunch()const{return false;}template<class...T>bool arm(T...){return false;}template<class...T>bool capture(T const&...){return false;}template<class...T>void terminal(T const&...){}void sceneExited(){}bool exitRequested()const{return false;}};}
+namespace corum::ranked {struct SurvivalSpectatorRuntime {static SurvivalSpectatorRuntime& get(){static SurvivalSpectatorRuntime r;return r;}bool sceneLevel(int)const{return false;}replay::InactiveWorld* world()const{return nullptr;}bool publishing()const{return false;}bool canLaunch()const{return false;}template<class...T>bool arm(T...){return false;}template<class...T>bool capture(T const&...){return false;}template<class...T>void terminal(T const&...){}void sceneExited(){}bool exitRequested()const{return false;}};}
 
 #include <functional>
 #include "${join(root, 'src/domain/SpectatorNativeProbe.hpp')}"
@@ -117,7 +118,7 @@ struct ScopedRankedRoundQuit {explicit ScopedRankedRoundQuit(PlayLayer*){}};
 namespace debug {
 struct DebugSpectateRuntime {
     bool authorized=false;int terminals=0;
-    static DebugSpectateRuntime& get(){static DebugSpectateRuntime d;return d;}
+    int m_levelId=88350599;int levelId()const{return m_levelId;}static DebugSpectateRuntime& get(){static DebugSpectateRuntime d;return d;}
     bool playbackLevel(int id)const{return authorized && id==88350599;}
     void recordPose(SpectatorGhostPose const&,bool terminal){terminals+=terminal;}
     void exitScene(){authorized=false;}
@@ -155,7 +156,7 @@ struct CorumRankedPlayLayer : PlayLayer {
     void observeSpectatorNativeUpdate(PlayerObject*) {}
     bool observesSpectatorPlayer(PlayerObject*) {return false;}
     void observeSpectatorNativeSnap(PlayerObject*,corum::ranked::SpectatorDiscontinuity,corum::ranked::SpectatorGhostPose const&) {}
-    struct Fields {bool survivalLiveLevel=false;std::optional<SurvivalDialogRef> survivalSurrender;bool survivalLevel=false,survivalWaiting=false,survivalFreePlayHud=false,survivalNativeClearFinished=false;
+    struct Fields {bool survivalLiveLevel=false,survivalReplayLevel=false;std::optional<SurvivalDialogRef> survivalSurrender;bool survivalLevel=false,survivalWaiting=false,survivalFreePlayHud=false,survivalNativeClearFinished=false;
         bool nativeCompletionStarted = false;
         EntryOverlay* entryOverlay = nullptr;
         bool nativeEntryHeld = false;

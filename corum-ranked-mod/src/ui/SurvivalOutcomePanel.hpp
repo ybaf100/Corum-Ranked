@@ -76,7 +76,7 @@ class SurvivalStandingsPopup final:public geode::Popup {
                 auto* item=CCMenuItemSpriteExtra::create(face,this,menu_selector(SurvivalStandingsPopup::onPage));item->setTag(direction);item->setPosition({245.f+direction*64,22});m_buttonMenu->addChild(item);
             }
         }
-        if(runtime.view().ownEliminated && runtime.watchLockSeconds()==0){
+        if(runtime.officialRoundCleared() && !runtime.freePlaying()){
             auto* face=surface({112,22},{},Cyan,SurfaceRaised,255,true);face->addChild(menuLabel(i18n::text("survival-watch","WATCH"),.22f,{56,11},Cyan));
             auto* watch=CCMenuItemSpriteExtra::create(face,this,menu_selector(SurvivalStandingsPopup::onWatch));watch->setPosition({411,22});m_buttonMenu->addChild(watch);
         }
@@ -143,11 +143,10 @@ public:
             m_menu=CCMenu::create();m_menu->setPosition(CCPointZero);addChild(m_menu,20);
             auto heading=menuLabel(i18n::text(choice?"survival-eliminated":ceremony?"survival-podium":"survival-personal-result",choice?"ELIMINATED":ceremony?"FINAL PODIUM":"PERSONAL RESULT"),.60f,{size.width/2,size.height-30},ceremony?Gold:Cyan,FontWeight::Black);fitFullMenuLabel(heading,size.width-30,28,.60f);addChild(heading,5);
             if(choice){
-                auto* detail=menuLabel(i18n::text("survival-spectator-choices","Watch a survivor, play locally, or view your result."),.25f,{size.width/2,size.height*.57f},TextMuted,FontWeight::SemiBold);fitFullMenuLabel(detail,size.width-40,40,.25f);addChild(detail,5);
-                auto const width=std::min(150.f,(size.width-48)/3);
-                m_watch=button("",{size.width/2-width-8,size.height*.37f},width,13,Cyan);
-                m_freeChoice=button(i18n::text("survival-free-play","FREE PLAY"),{size.width/2,size.height*.37f},width,18,Green);
-                m_resultChoice=button(i18n::text("survival-view-results","VIEW RESULTS"),{size.width/2+width+8,size.height*.37f},width,14,Gold);
+                auto* detail=menuLabel(i18n::text("survival-spectator-choices","Play locally or view your result."),.25f,{size.width/2,size.height*.57f},TextMuted,FontWeight::SemiBold);fitFullMenuLabel(detail,size.width-40,40,.25f);addChild(detail,5);
+                auto const width=std::min(180.f,(size.width-36)/2);
+                m_freeChoice=button(i18n::text("survival-free-play","FREE PLAY"),{size.width/2-width/2-5,size.height*.37f},width,18,Green);
+                m_resultChoice=button(i18n::text("survival-view-results","VIEW RESULTS"),{size.width/2+width/2+5,size.height*.37f},width,14,Gold);
             }else if(ceremony){
                 std::array<int,3> ranks{2,1,3};auto const width=std::min(138.f,(size.width-48)/3),base=80.f;
                 for(int n=0;n<3;++n){int rank=ranks[n];auto it=std::find_if(m_profiles.begin(),m_profiles.end(),[&](auto const& p){return p.rank==rank;});if(it==m_profiles.end())continue;
@@ -205,6 +204,7 @@ public:
                 if(auto* rgba=dynamic_cast<CCRGBAProtocol*>(p.glow))rgba->setOpacity(static_cast<GLubyte>(std::lround(frame.glowOpacity*255)));
             }
         }
+        if(!m_watch){auto const lock=SurvivalRuntime::get().watchLockSeconds();if(m_freeChoice)m_freeChoice->setEnabled(lock==0);if(m_resultChoice)m_resultChoice->setEnabled(lock==0);}
         if(m_watch){auto const lock=SurvivalRuntime::get().watchLockSeconds();m_watch->setEnabled(lock==0);if(m_freeChoice)m_freeChoice->setEnabled(lock==0);if(m_resultChoice)m_resultChoice->setEnabled(lock==0);m_watchText->setString((i18n::text("survival-watch","WATCH")+(lock>0?fmt::format(" ({})",lock):std::string{})).c_str());m_watchText->setColor(lock>0?TextMuted:Cyan);fitFullMenuLabel(m_watchText,m_watch->getContentSize().width-12,22,.29f);}
     }
 };

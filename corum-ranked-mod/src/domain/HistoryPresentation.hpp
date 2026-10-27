@@ -24,6 +24,7 @@ struct HistoryStanding {
     double progress=0;bool own=false,qualified=false,cleared=false,forfeited=false,cutoffBoundary=false;
 };
 struct HistoryRound {
+    matjson::Value replayIdentity=nullptr;
     std::string key,label,title,creator,difficulty,length,result,winnerSide,grade;
     int levelId=0,stars=0,target=0,qualifiedCount=0,nextDeathmatch=0;
     std::optional<int> featureScore,epic;
@@ -37,7 +38,7 @@ struct HistoryRound {
 inline std::vector<HistoryRound> historyRounds(matjson::Value const& record,bool survival) {
     std::vector<HistoryRound> result;
     auto append=[&](matjson::Value const& r,bool dm){
-        HistoryRound v;v.deathmatch=dm;v.completed=r["completed"].asBool().unwrapOr(false);
+        HistoryRound v;v.replayIdentity=r["replayIdentity"];v.deathmatch=dm;v.completed=r["completed"].asBool().unwrapOr(false);
         auto const map=survival?r["map"]:r;
         v.levelId=historyLevelId(map["levelId"]);v.title=map[survival?"title":"mapTitle"].asString().unwrapOr("");
         v.creator=map["creator"].asString().unwrapOr("");v.difficulty=map["difficulty"].asString().unwrapOr("");
@@ -90,15 +91,22 @@ inline std::vector<std::string> historyResultFilters(bool solo,bool survival) {
     return result;
 }
 struct HistoryLayout {
-    float width=0,height=0,mapWidth=0,boardWidth=0,ownWidth=0;bool split=false;
+    float width=0,height=0,mapWidth=0,boardWidth=0,ownWidth=0,bottom=48;bool split=false;
 };
 inline bool historyReconnectNeeded(bool historyPage,bool error,bool hasSession,bool conflict) {return historyPage&&error&&!hasSession&&!conflict;}
-inline float historyMapPanelHeight(float width,bool thumbnail) {return thumbnail?(width>=300?220.f:285.f):200.f;}
+inline float historyMapPanelHeight(float width,bool thumbnail) {return thumbnail?(width>=300?224.f:300.f):204.f;}
 inline HistoryLayout historyLayout(float screenWidth,float screenHeight) {
-    HistoryLayout v;v.width=std::max(160.f,std::min(920.f,screenWidth-48));v.height=std::max(80.f,screenHeight-132);
-    v.split=v.width>=660;v.mapWidth=v.split?std::clamp(v.width*.24f,156.f,206.f):v.width;
+    HistoryLayout v;v.width=std::max(160.f,std::min(920.f,screenWidth-48));v.height=std::max(80.f,screenHeight-158);
+    v.split=v.width>=760 && screenWidth/screenHeight>=1.6f;v.mapWidth=v.split?std::clamp(v.width*.24f,156.f,206.f):v.width;
     v.ownWidth=v.split?154.f:v.width;v.boardWidth=v.split?v.width-v.mapWidth-v.ownWidth-16:v.width;
     return v;
+}
+struct HistoryRosterColumns {
+    float rank=20,icon=52,name=76,nameWidth=0,best=0,bestWidth=0;
+};
+inline HistoryRosterColumns historyRosterColumns(float width) {
+    HistoryRosterColumns c;c.bestWidth=std::clamp(width*.23f,54.f,90.f);
+    c.best=width-10-c.bestWidth/2;c.nameWidth=std::max(24.f,width-c.bestWidth-96);return c;
 }
 // Use this both before lookup and after its asynchronous response. Any queued
 // or native match context blocks navigation; no scene-owned pointer is retained.

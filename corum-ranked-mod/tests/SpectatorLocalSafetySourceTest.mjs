@@ -55,7 +55,12 @@ test('vanilla completion has independent guards before every relevant original/e
     for (const signature of ['void checkForEnd()', 'void levelComplete()', 'void showCompleteText()',
         'void playEndAnimationToPos(', 'void playPlatformerEndAnimationToPos(', 'void showEndLayer()']) {
         const callback = body(play, signature);
-        assert.match(callback, /if \(suppressLocalCompletion\(\)\) return;/);
+        if(signature.startsWith('void playEndAnimation')||signature.startsWith('void playPlatformerEndAnimation')){
+            assert.match(callback,/if \(suppressLocalCompletion\(\)\) \{/);assert.match(callback,/if\(readOnlyReplay\)/);assert.match(callback,/ScopedSpectatorPersistenceMode noSave/);
+        }else if(signature==='void checkForEnd()'){
+            assert.match(callback,/readOnlyReplay=m_fields->survivalReplayLevel/);
+            assert.match(callback,/if \(suppressLocalCompletion\(\) && !readOnlyReplay\) return;/);
+        }else assert.match(callback, /if \(suppressLocalCompletion\(\)\) return;/);
         assert(callback.indexOf('suppressLocalCompletion()') < callback.indexOf('PlayLayer::'));
         if (callback.includes('reportAttemptEnd(')) assert(callback.indexOf('suppressLocalCompletion()') < callback.indexOf('reportAttemptEnd('));
     }

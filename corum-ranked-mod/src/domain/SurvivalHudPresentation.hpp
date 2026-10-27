@@ -8,6 +8,7 @@
 #include <vector>
 
 namespace corum::ranked {
+inline int survivalRemainingAttempts(int serverUsed,int localUsed){return 3-std::clamp(std::max(serverUsed,localUsed),0,3);}
 inline std::optional<double> survivalComparisonScore(std::string_view phase,
     std::optional<double> cutoff,std::optional<double> first) {
     return phase=="FINAL" || phase=="TIEBREAK"?first:cutoff;

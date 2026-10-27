@@ -500,3 +500,24 @@ describe("Stage 2 history boundary integrity",()=>{
   expect(next.reset).toBe(true);expect(next.stream!.attemptId).toBe("next-attempt");expect(next.packets.every(p=>p.attemptId==="next-attempt")).toBe(true);
  });
 });
+
+describe("beta108 recorded audio and terminal restore boundary",()=>{
+ afterEach(()=>vi.restoreAllMocks());
+ it("keeps actual native song time distinct from percent and elapsed, rejecting malformed audio",()=>{
+  const base=packet().keyframe;
+  expect(parseSpectatorKeyframe({...base,audio:{trackHash:'a'.repeat(64),positionMs:62150}}).audio).toEqual({trackHash:'a'.repeat(64),positionMs:62150});
+  for(const audio of [null,{}, {trackHash:'../secret',positionMs:0},{trackHash:'a'.repeat(64),positionMs:NaN},{trackHash:'a'.repeat(64),positionMs:-1},{trackHash:'a'.repeat(64),positionMs:86400001}])
+   expect(()=>parseSpectatorKeyframe({...base,audio})).toThrow(BadRequestException);
+  expect(parseSpectatorKeyframe(base).audio).toBeUndefined();
+ });
+ it("abandons obsolete catch-up after death, holds terminal and uses a clean next Attempt generation",async()=>{
+  const {service,runtime,setState}=setup();runtime.beginAttempt('match-1',2,'B','attempt-b',1000);
+  for(let start=0;start<200;start+=16)await service.publish('match-1','token',session,{packets:Array.from({length:Math.min(16,200-start)},(_,i)=>packet({sequence:start+i,elapsedMs:(start+i)*50,levelId:123}))});
+  setState(standardState('A',true));const first=await service.subscribe('match-1','token',session,'2',undefined,undefined,undefined,'1');expect(first.restoration?.available).toBe(true);
+  setState(standardState('B',false));await service.publish('match-1','token',session,packet({sequence:200,elapsedMs:10000,levelId:123,keyframe:{...packet().keyframe,dead:true}}));
+  setState(standardState('A',true));const dead=await service.subscribe('match-1','token',session,'2','attempt-b','1','63','1');
+  expect(dead.reset).toBe(true);expect(dead.restoration).toMatchObject({available:false,reason:'ATTEMPT_ENDED_DURING_RESTORE'});expect(dead.packets.at(-1)?.keyframe.dead).toBe(true);expect(dead.packets[0]!.sequence).toBeGreaterThan(63);
+  runtime.beginAttempt('match-1',2,'B','new-attempt',20000);setState(standardState('B',false));await service.publish('match-1','token',session,packet({attemptId:'new-attempt',generation:2,levelId:123}));
+  setState(standardState('A',true));const next=await service.subscribe('match-1','token',session,'2','attempt-b','1','200','1');expect(next.reset).toBe(true);expect(next.stream?.attemptId).toBe('new-attempt');expect(next.packets).toHaveLength(1);
+ });
+});

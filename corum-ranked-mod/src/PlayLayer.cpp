@@ -1,3 +1,5 @@
+#include "replay/SurvivalReplayRuntime.hpp"
+#include "replay/SurvivalReplayRecorder.hpp"
 #include "ui/SurvivalOutcomePanel.hpp"
 #include "SurvivalSpectatorRuntime.hpp"
 #include "RankedRuntime.hpp"
@@ -14,6 +16,7 @@
 #include "RankedAudioManager.hpp"
 #include "SpectatorLiveRuntime.hpp"
 #include "domain/SpectatorCapturePolicy.hpp"
+#include "domain/SpectatorAudioPolicy.hpp"
 #include "domain/SpectatorProgressPolicy.hpp"
 #include "spectator/ScopedCameraTargetOverride.hpp"
 #include "spectator/SpectatorPlayerCapture.hpp"
@@ -157,6 +160,11 @@ bool spectatorTransitionState(std::string const& state) {
 class $modify(CorumRankedPlayLayer, PlayLayer) {
 public:
     struct Fields {
+        bool spectatorAudioStarted=false,spectatorAudioPaused=true;
+        std::string spectatorAudioContext;
+        double spectatorAudioElapsed=-1;
+        std::chrono::steady_clock::time_point spectatorAudioChangedAt{};
+
         bool nativeCompletionStarted = false;
         CCNode* hudRoot = nullptr;
         CCLabelBMFont* fpsLabel = nullptr;
@@ -213,6 +221,7 @@ public:
         bool rankedLevel = false;
         bool survivalLevel = false;
         bool survivalLiveLevel = false;
+        bool survivalReplayLevel=false;
         CCLabelBMFont* survivalLiveText=nullptr;
         std::string survivalLiveCaption;
         float survivalLiveHudWait=0;
@@ -340,6 +349,7 @@ public:
     }
 
     bool blocksLocalEvidence() {
+        if(m_fields->survivalReplayLevel)return true;
         syncSpectatorLocalSafety();
         return m_fields->localSafety.blocksEvidence(m_fields->spectatorPending);
     }
@@ -354,6 +364,7 @@ public:
     }
 
     bool freezeLocalDummy(PlayerObject* player) {
+        if(m_fields->survivalLiveLevel && corum::ranked::SurvivalSpectatorRuntime::get().world())return false;
         if (!player || (player != m_player1 && player != m_player2)) return false;
         syncSpectatorLocalSafety();
         if(player==m_player2 && m_fields->localSafety.active()){player->setVisible(false);return true;}
@@ -371,6 +382,7 @@ public:
     }
 
     bool blocksSpectatorNativePlayerWrite(PlayerObject* player) {
+        if(m_fields->survivalLiveLevel && corum::ranked::SurvivalSpectatorRuntime::get().world())return false;
         if(player && player==m_player2 && m_fields->localSafety.active())return true;
         return player && player == m_player1 && m_fields->localSafety.active() &&
             m_fields->spectatorWorldDriver.owns(player) &&
@@ -378,6 +390,7 @@ public:
     }
 
     bool blocksLevelPersistence(GJGameLevel* level) {
+        if(m_fields->survivalReplayLevel)return level && level==m_level;
         syncSpectatorLocalSafety();
         // The original death/Clear/manual restart must finish saving its real
         // gameplay record even if its End ACK grants spectator permission. This
@@ -414,6 +427,7 @@ public:
     bool init(GJGameLevel* level, bool useReplay, bool dontCreateObjects) {
         auto& runtime = corum::ranked::RankedRuntime::get();
         m_fields->levelId = level ? static_cast<int>(level->m_levelID) : 0;
+        m_fields->survivalReplayLevel=corum::ranked::replay::Runtime::get().owns(m_fields->levelId);
         m_fields->survivalLiveLevel=corum::ranked::SurvivalSpectatorRuntime::get().sceneLevel(m_fields->levelId);
         m_fields->survivalLevel=!m_fields->survivalLiveLevel && corum::ranked::SurvivalRuntime::get().consumeNativeLaunch(level);
         m_fields->survivalFreePlayHud=!m_fields->survivalLevel && corum::ranked::SurvivalRuntime::get().freePlaying();
@@ -481,6 +495,7 @@ public:
             return true;
         }
 #endif
+        if(m_fields->survivalReplayLevel){m_isTestMode=true;return true;}
         if(m_fields->survivalLiveLevel){
             addSurvivalLiveHud();
             schedule(schedule_selector(CorumRankedPlayLayer::spectatorFrame));
@@ -718,7 +733,7 @@ public:
         if(m_fields->survivalFreePlayHud){
             if(runtime.freePlayReturnPending())queueSurvivalGameplayReturn();return;
         }
-        if(runtime.normalRoundCleared() && (!m_hasCompletedLevel || m_fields->survivalNativeClearFinished)){
+        if(runtime.officialRoundCleared() && (!m_hasCompletedLevel || m_fields->survivalNativeClearFinished)){
             queueSurvivalGameplayReturn();return;
         }
         if(blockSurvivalEntry())return;
@@ -726,6 +741,7 @@ public:
     }
 
     void queueSurvivalGameplayReturn() {
+        if(m_fields->survivalLevel)corum::ranked::finishSurvivalReplayForReturn(this);
         // A stopped/covered PlayLayer can have retired its scoring presentation
         // while still owning the active native scene (notably on iOS Pause).
         // Retirement must never prevent that exact scene from returning.
@@ -755,15 +771,7 @@ public:
         });
     }
 
-    void addSurvivalFreePlayNavigation(){
-        auto const size=CCDirector::sharedDirector()->getWinSize();
-        if(m_fields->survivalFreePlayHud && corum::ranked::SurvivalRuntime::get().view().ownEliminated){
-            auto* menu=CCMenu::create();menu->setPosition({0,0});addChild(menu,1001);
-            auto* face=corum::ranked::ui::surface({100,24},{},corum::ranked::ui::Blue,corum::ranked::ui::SurfaceRaised,240,true);
-            face->addChild(corum::ranked::ui::menuLabel(corum::ranked::i18n::text("survival-watch","WATCH"),.23f,{50,12},corum::ranked::ui::Cyan));
-            auto* item=CCMenuItemSpriteExtra::create(face,this,menu_selector(CorumRankedPlayLayer::onSurvivalLiveAction));item->setTag(0);item->setPosition({size.width/2,20});menu->addChild(item);
-        }
-    }
+    void addSurvivalFreePlayNavigation(){}
 
     void addSurvivalHud() {
         auto const size=CCDirector::sharedDirector()->getWinSize();
@@ -837,6 +845,43 @@ public:
         }
     }
 
+    void startMusic(){
+        if(m_fields->spectatorMode || m_fields->survivalLiveLevel
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+           || m_fields->debugPlaybackScene
+#endif
+        )return;
+        PlayLayer::startMusic();
+    }
+    void syncSpectatorAudio(){
+        if(!spectatorCameraActive())return;
+        auto* audio=FMODAudioEngine::sharedEngine();auto& live=spectatorTransport();
+        auto const frame=m_fields->spectatorRenderedFrame;
+        auto const now=std::chrono::steady_clock::now();
+        bool advancing=false;
+        if(frame && frame->pose){
+            auto const context=frame->context.attemptId+":"+std::to_string(frame->context.generation)+":"+std::to_string(frame->context.epoch);
+            if(context!=m_fields->spectatorAudioContext){m_fields->spectatorAudioContext=context;m_fields->spectatorAudioElapsed=-1;m_fields->spectatorAudioChangedAt=now;m_fields->spectatorAudioPaused=true;audio->pauseMusic(0);}
+            if(frame->publisherElapsedMs>m_fields->spectatorAudioElapsed){m_fields->spectatorAudioChangedAt=now;m_fields->spectatorAudioElapsed=frame->publisherElapsedMs;}
+            advancing=now-m_fields->spectatorAudioChangedAt<std::chrono::milliseconds(250)&&!frame->pose->dead&&!frame->pose->finished;
+        }
+        auto const syncing=live.status()==corum::ranked::SpectatorLiveStatus::Syncing;
+        if(frame&&frame->pose&&!frame->pose->audio)live.noteWorldPartial("AUDIO_TIMELINE_UNAVAILABLE");
+        if(!frame||!frame->pose||!frame->pose->audio||syncing||m_isPaused||!advancing){audio->pauseMusic(0);m_fields->spectatorAudioPaused=true;return;}
+        auto const& sample=*frame->pose->audio;
+        if(!m_fields->spectatorAudioStarted){PlayLayer::startMusic();audio->pauseMusic(0);m_fields->spectatorAudioStarted=true;}
+        auto const track=std::string(audio->getActiveMusic(0));
+        if(track.empty() || corum::ranked::spectatorTrackHash(track)!=sample.trackHash){audio->pauseMusic(0);live.noteWorldPartial("AUDIO_TRACK_UNAVAILABLE");return;}
+        auto const actual=static_cast<double>(audio->getMusicTimeMS(0));
+        if(m_fields->spectatorAudioPaused || std::abs(actual-sample.positionMs)>100){
+            audio->setMusicTimeMS(static_cast<unsigned>(sample.positionMs),true,0);
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+            log::info("[SpectatorAudio] publisherMs={} sourceMusicMs={} nativeMusicMs={} syncing={} paused={}",frame->publisherElapsedMs,sample.positionMs,actual,syncing,m_fields->spectatorAudioPaused);
+#endif
+        }
+        if(m_fields->spectatorAudioPaused)audio->resumeMusic(0);
+        m_fields->spectatorAudioPaused=false;
+    }
     void acquireGameplayAudio() {
         auto const corumGameplayScene = m_fields->rankedLevel || m_fields->survivalLevel || m_fields->survivalFreePlayHud
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
@@ -880,6 +925,9 @@ public:
             }
         }
         pose.cosmetics=m_fields->spectatorCosmetics;
+        auto* audio=FMODAudioEngine::sharedEngine();
+        auto track=std::string(audio->getActiveMusic(0));
+        if(!track.empty())pose.audio=corum::ranked::SpectatorAudioSample{corum::ranked::spectatorTrackHash(track),static_cast<double>(audio->getMusicTimeMS(0))};
         if(std::isfinite(m_attemptTime) && m_attemptTime>=0)pose.nativeElapsedMs=m_attemptTime*1000.0;
         auto const camera = m_gameState.m_cameraPosition;
         corum::ranked::SpectatorCameraOrigin origin{camera.x, camera.y};
@@ -939,8 +987,8 @@ public:
         if(m_fields->survivalLiveLevel)return survivalSpectatorSceneContext();
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         auto const& debug = corum::ranked::debug::DebugSpectateRuntime::get();
-        if (debug.playbackLevel(corum::ranked::debug::kDebugSpectateLevelId)) {
-            return {debug.contextId(), 1, 0, corum::ranked::debug::kDebugSpectateLevelId};
+        if (debug.playbackLevel(corum::ranked::debug::DebugSpectateRuntime::get().levelId())) {
+            return {debug.contextId(), 1, 0, corum::ranked::debug::DebugSpectateRuntime::get().levelId()};
         }
 #endif
         auto& runtime = corum::ranked::RankedRuntime::get();
@@ -985,16 +1033,17 @@ public:
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         if(!m_fields->debugPlaybackScene)
 #endif
-            spectatorTransport().requestSceneRestore();
+            if(!m_fields->survivalLiveLevel)spectatorTransport().requestSceneRestore();
         // A viewer must not inherit the local player's already-fired triggers.
         // This is one no-save dummy reset after authority + End FIFO, never a new Attempt.
-        m_fields->localSafety.resetDummy();
-        { ScopedRealGameplayEnd resetting(m_fields->spectatorWorldResetInProgress,true);
-          PlayLayer::resetLevel(); }
+        if(!m_fields->survivalLiveLevel){
+            m_fields->localSafety.resetDummy();
+            ScopedRealGameplayEnd resetting(m_fields->spectatorWorldResetInProgress,true);
+            PlayLayer::resetLevel();
+        }
 
-        if (m_player1) {
-            m_player1->stopAllActions();
-            m_player1->setVisible(false);
+        if (m_player1 && !m_fields->survivalLiveLevel) {
+            m_player1->stopAllActions();m_player1->setVisible(false);
         }
         log::info("Spectator mode activated in existing PlayLayer: match={} level={}",
             m_fields->sceneContext.matchId, m_fields->levelId);
@@ -1024,7 +1073,7 @@ public:
         if(m_fields->spectatorRenderedFrame && !corum::ranked::spectatorFrameMatchesScene(m_fields->sceneContext,m_fields->spectatorRenderedFrame->context))
             m_fields->spectatorRenderedFrame.reset();
         auto const& rendered = m_fields->spectatorRenderedFrame;
-        if (rendered && rendered->pose && m_fields->spectatorWorldDriver.contextChanged(rendered->context)) {
+        if (!m_fields->survivalLiveLevel && rendered && rendered->pose && m_fields->spectatorWorldDriver.contextChanged(rendered->context)) {
             // Only a server stream/epoch change can reset trigger state. Manual
             // Retry remains blocked; all native reset evidence is still guarded.
             m_fields->spectatorWorldDriver.reset();
@@ -1033,13 +1082,20 @@ public:
             ScopedRealGameplayEnd resetting(m_fields->spectatorWorldResetInProgress, true);
             PlayLayer::resetLevel();
         }
-        m_fields->spectatorWorldPoseApplied=m_fields->spectatorWorldDriver.apply(this, spectatorCameraActive(), rendered);
+        m_fields->spectatorWorldPoseApplied=m_fields->survivalLiveLevel?true:m_fields->spectatorWorldDriver.apply(this, spectatorCameraActive(), rendered);
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         auto& probe=m_fields->spectatorNativeProbe;
         probe.note(poseReceived?corum::ranked::SpectatorNativePath::PoseReceived:corum::ranked::SpectatorNativePath::MissingPose);
         probe.note(m_fields->spectatorWorldPoseApplied?corum::ranked::SpectatorNativePath::DriverApplied:corum::ranked::SpectatorNativePath::ContextRejected);
 #endif
         m_fields->remotePlayer.update(this, true, m_fields->spectatorRenderedFrame);
+        if(m_fields->survivalLiveLevel){
+            auto* world=corum::ranked::SurvivalSpectatorRuntime::get().world();
+            if(world && rendered && rendered->pose && rendered->pose->progress){
+                world->followRemote(rendered->context.attemptId+":"+std::to_string(rendered->context.generation)+":"+std::to_string(rendered->context.epoch),rendered->publisherElapsedMs/1000.,*rendered->pose->progress);
+                m_fields->remotePlayer.presentationVisible(!world->seeking()&&!world->desync());
+            }
+        }
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         auto const frame = m_fields->remotePlayer.cameraFrame();
         m_fields->cameraForensicFrame = m_fields->debugPlaybackScene && frame && frame->pose &&
@@ -1061,6 +1117,7 @@ public:
     }
 
     void reconcileSpectatorWorldDriver() {
+        if(m_fields->survivalLiveLevel && corum::ranked::SurvivalSpectatorRuntime::get().world())return;
         if (spectatorCameraActive()) {
             // Own visibility at the spectator frame boundary, including the
             // wait for a remote pose. A global PlayerObject setter detour also
@@ -1162,6 +1219,7 @@ public:
     }
 
     void driveSpectatorCamera() {
+        syncSpectatorAudio();
         auto const& frame = m_fields->spectatorRenderedFrame;
         m_fields->spectatorCamera.update(this, spectatorCameraActive(),
             frame ? std::optional(frame->context) : std::nullopt,
@@ -1207,7 +1265,7 @@ public:
             return;
         }
         if (!prepareSpectatorScene()) return;
-        if (m_player1) m_player1->setVisible(false);
+        if (m_player1 && !m_fields->survivalLiveLevel) m_player1->setVisible(false);
         (void)freezeLocalDummy(m_player1);
         live.tickViewer();
         auto const now = std::chrono::steady_clock::now();
@@ -1329,6 +1387,7 @@ public:
 
     void postUpdate(float dt) {
         if (blockEntryGameplayUpdate() || finishConcededGameplayHandoff()) return;
+        if(m_fields->survivalReplayLevel){ScopedPersistenceOwner persistence(this);PlayLayer::postUpdate(dt);return;}
         if(m_fields->survivalLiveLevel){syncSpectatorLocalSafety();ScopedPersistenceOwner persistence(this);PlayLayer::postUpdate(dt);return;}
         if (m_fields->rankedLevel) corum::ranked::RankedRuntime::get().syncMatchGameplayPause(m_isPaused);
         syncSpectatorLocalSafety();
@@ -1338,7 +1397,7 @@ public:
         if(m_fields->survivalLevel && m_fields->rankedInitialized && !m_isTestMode) {
             auto& survival=corum::ranked::SurvivalRuntime::get();m_fields->fpsMeter.observeFrame(steadyNowMicros());
             if(!m_isPracticeMode && !m_isPaused && m_player1 && !m_player1->m_isDead && !m_hasCompletedLevel && survival.canPlay()) {
-                if(!m_fields->attemptStartReported)m_fields->attemptStartReported=survival.beginAttempt();
+                if(!m_fields->attemptStartReported && !survival.localAttemptId().empty())m_fields->attemptStartReported=true;
                 if(m_fields->attemptStartReported && !m_fields->attemptEndReported)survival.progress(rankedProgressPercent(this));
             }
             return;
@@ -1486,6 +1545,10 @@ public:
     }
 
     void resetLevel() {
+        if(m_fields->survivalReplayLevel || (m_fields->survivalLiveLevel && corum::ranked::SurvivalSpectatorRuntime::get().world())){
+            {corum::ranked::ScopedSpectatorPersistenceMode noSave(m_isTestMode,true);PlayLayer::resetLevel();}
+            if(m_fields->survivalReplayLevel)m_isTestMode=true;return;
+        }
         m_fields->spectatorCapture.reset();
         auto& runtime = corum::ranked::RankedRuntime::get();
         syncSpectatorLocalSafety();
@@ -1509,7 +1572,7 @@ public:
         if(m_fields->survivalLevel) {
             if(m_fields->rankedInitialized && !m_fields->nativeEntryHeld) {
                 auto& survival=corum::ranked::SurvivalRuntime::get();
-                if(!m_fields->attemptEndReported)survival.endAttempt(m_hasCompletedLevel?100.0:rankedProgressPercent(this));
+                if(!m_fields->attemptEndReported){corum::ranked::replay::Recorder::get().finish("RESET",m_hasCompletedLevel?100.0:rankedProgressPercent(this));survival.endAttempt(m_hasCompletedLevel?100.0:rankedProgressPercent(this));}
                 if(survival.attemptLimitReached() || !survival.canPlay()) {m_fields->survivalWaiting=true;m_isPaused=true;return;}
                 m_fields->attemptStartReported=m_fields->attemptEndReported=false;
             }
@@ -1593,6 +1656,7 @@ public:
     }
 
     void destroyPlayer(PlayerObject* player, GameObject* object) {
+        if(m_fields->survivalReplayLevel || (m_fields->survivalLiveLevel && corum::ranked::SurvivalSpectatorRuntime::get().world())){corum::ranked::ScopedSpectatorPersistenceMode testMode(m_isTestMode,true);ScopedPersistenceOwner persistence(this);PlayLayer::destroyPlayer(player,object);return;}
 
         auto& runtime = corum::ranked::RankedRuntime::get();
         syncSpectatorLocalSafety();
@@ -1613,6 +1677,7 @@ public:
             PlayLayer::destroyPlayer(player,object);
             if(eligible && player->m_isDead && !m_hasCompletedLevel && !m_fields->attemptEndReported) {
                 if(terminalPose)corum::ranked::SurvivalSpectatorRuntime::get().terminal(*terminalPose);
+                corum::ranked::replay::Recorder::get().finish("DEATH",progress);
                 corum::ranked::SurvivalRuntime::get().endAttempt(progress);m_fields->attemptEndReported=true;
             }
             return;
@@ -1668,6 +1733,7 @@ public:
     }
 
     void levelComplete() {
+        if(m_fields->survivalReplayLevel || (m_fields->survivalLiveLevel && corum::ranked::SurvivalSpectatorRuntime::get().world())){m_hasCompletedLevel=true;return;}
 
         auto& runtime = corum::ranked::RankedRuntime::get();
         if (suppressLocalCompletion()) return;
@@ -1737,6 +1803,7 @@ public:
     }
 
     void onQuit() {
+        if(m_fields->survivalReplayLevel && !corum::ranked::resumeRankedPauseBeforeQuit(this))return;
         auto& survival=corum::ranked::SurvivalRuntime::get();
         if(m_fields->survivalFreePlayHud)survival.requestDirectFreePlayReturn(this);
         auto const freePlayReturn=m_fields->survivalFreePlayHud && survival.freePlayReturnPending();
@@ -1817,6 +1884,7 @@ public:
         bool const appPausedBefore = AppDelegate::get() && AppDelegate::get()->m_gamePaused;
         PlayLayer::onExit();
         if(m_fields->survivalLiveLevel)corum::ranked::SurvivalSpectatorRuntime::get().sceneExited();
+        if(m_fields->survivalReplayLevel)corum::ranked::replay::Runtime::get().exited();
         if (m_fields->rankedLevel) log::info("[RankedEntry] native exit level={} appPausedBefore={} appPausedAfter={}",
             m_fields->levelId, appPausedBefore, AppDelegate::get() && AppDelegate::get()->m_gamePaused);
         corum::ranked::RankedRuntime::get().setSpectatorLocalTransportBlocked(this, false);
@@ -1828,12 +1896,17 @@ public:
     }
 
     void checkForEnd() {
-        if (suppressLocalCompletion()) return;
+        auto const readOnlyReplay=m_fields->survivalReplayLevel || (m_fields->survivalLiveLevel && corum::ranked::SurvivalSpectatorRuntime::get().world());
+        if (suppressLocalCompletion() && !readOnlyReplay) return;
         PlayLayer::checkForEnd();
     }
 
     void playEndAnimationToPos(CCPoint position) {
-        if (suppressLocalCompletion()) return;
+        auto const readOnlyReplay=m_fields->survivalReplayLevel || (m_fields->survivalLiveLevel && corum::ranked::SurvivalSpectatorRuntime::get().world());
+        if (suppressLocalCompletion()) {
+            if(readOnlyReplay){ScopedPersistenceOwner persistence(this);corum::ranked::ScopedSpectatorPersistenceMode noSave(m_isTestMode,true);PlayLayer::playEndAnimationToPos(position);}
+            return;
+        }
         // End animation may retire a dual avatar before levelComplete sets its
         // native flag. Preserve the current Attempt until the real clear, even
         // if the round clock expires while the completion animation is running.
@@ -1843,7 +1916,11 @@ public:
     }
 
     void playPlatformerEndAnimationToPos(CCPoint position, bool instant) {
-        if (suppressLocalCompletion()) return;
+        auto const readOnlyReplay=m_fields->survivalReplayLevel || (m_fields->survivalLiveLevel && corum::ranked::SurvivalSpectatorRuntime::get().world());
+        if (suppressLocalCompletion()) {
+            if(readOnlyReplay){ScopedPersistenceOwner persistence(this);corum::ranked::ScopedSpectatorPersistenceMode noSave(m_isTestMode,true);PlayLayer::playPlatformerEndAnimationToPos(position, instant);}
+            return;
+        }
         if (m_player1 && !m_player1->m_isDead && scoringEnabled() && !m_fields->attemptEndReported)
             m_fields->nativeCompletionStarted = true;
         PlayLayer::playPlatformerEndAnimationToPos(position, instant);
@@ -2780,6 +2857,7 @@ class $modify(CorumRankedSpectatorCameraHook, GJBaseGameLayer) {
         auto* layer = PlayLayer::get();
         auto* owner = layer && static_cast<GJBaseGameLayer*>(layer) == this
             ? static_cast<CorumRankedPlayLayer*>(layer) : nullptr;
+        if(owner && owner->m_fields->survivalLiveLevel && corum::ranked::SurvivalSpectatorRuntime::get().world()){GJBaseGameLayer::updateCamera(dt);return;}
         if (!owner || !owner->spectatorCameraActive()) {
             GJBaseGameLayer::updateCamera(dt); return;
         }
@@ -2807,8 +2885,9 @@ class $modify(CorumRankedSpectatorCameraHook, GJBaseGameLayer) {
         auto* layer = PlayLayer::get();
         auto* owner = layer && static_cast<GJBaseGameLayer*>(layer) == this
             ? static_cast<CorumRankedPlayLayer*>(layer) : nullptr;
-        if (owner && owner->m_fields->spectatorWorldResetInProgress) return;
         if (owner && owner->blockEntryGameplayUpdate()) return;
+        if(owner && owner->m_fields->survivalLiveLevel && corum::ranked::SurvivalSpectatorRuntime::get().world()){GJBaseGameLayer::update(dt);return;}
+        if (owner && owner->m_fields->spectatorWorldResetInProgress) return;
         if (owner && owner->prepareSpectatorScene() && owner->spectatorCameraActive()) {
             if (!owner->beginSpectatorWorldFrame()) return;
             auto& live=owner->spectatorTransport();
@@ -2875,6 +2954,7 @@ class $modify(CorumRankedSpectatorCameraHook, GJBaseGameLayer) {
 
     int checkCollisions(PlayerObject* player,float dt,bool ignoreDamage){
         auto* play=PlayLayer::get();auto* owner=play && static_cast<GJBaseGameLayer*>(play)==this?static_cast<CorumRankedPlayLayer*>(play):nullptr;
+        if(owner && owner->m_fields->survivalLiveLevel && corum::ranked::SurvivalSpectatorRuntime::get().world())return GJBaseGameLayer::checkCollisions(player,dt,ignoreDamage);
         if(!owner || !owner->spectatorCameraActive())return GJBaseGameLayer::checkCollisions(player,dt,ignoreDamage);
         if(player!=m_player1)return 0; // native P2/remote visuals have no spectator trigger authority
         if(!owner->m_fields->spectatorWorldUpdateInProgress || !owner->m_fields->spectatorWorldPoseApplied || owner->m_fields->spectatorCollisionChecked)return 0;
@@ -2900,7 +2980,9 @@ class $modify(CorumRankedSpectatorCameraHook, GJBaseGameLayer) {
             ? static_cast<CorumRankedPlayLayer*>(layer) : nullptr;
         auto const observed = owner && object && owner->observesSpectatorPlayer(player);
         auto const before = observed ? owner->observedSpectatorPlayerPose(player) : corum::ranked::SpectatorGhostPose{};
+        auto const source=player?player->getPosition():CCPoint{};
         GJBaseGameLayer::teleportPlayer(object, player);
+        if(player)corum::ranked::survivalReplayNativeSnap(player,false,source.x,source.y);
         if (observed) owner->observeSpectatorNativeSnap(player, corum::ranked::SpectatorDiscontinuity::Teleport, before);
     }
 };
@@ -2951,7 +3033,9 @@ class $modify(CorumRankedSpectatorDummyPlayer, PlayerObject) {
         if (layer && layer->freezeLocalDummy(this)) return;
         auto const observed = layer && m_isSpider && layer->observesSpectatorPlayer(this);
         auto const before = observed ? layer->observedSpectatorPlayerPose(this) : corum::ranked::SpectatorGhostPose{};
+        auto const source=getPosition();auto const gravity=m_isUpsideDown;
         PlayerObject::spiderTestJump(dynamic);
+        if(m_isSpider && gravity!=m_isUpsideDown)corum::ranked::survivalReplayNativeSnap(this,true,source.x,source.y);
         if (observed && before.upsideDown != m_isUpsideDown)
             layer->observeSpectatorNativeSnap(this, corum::ranked::SpectatorDiscontinuity::SpiderSnap, before);
     }
@@ -3005,3 +3089,21 @@ class $modify(CorumRankedSpectatorProgressSave, GJGameLevel) {
     // Spectator score writes are prevented at the scene's completion/death
     // boundaries, with scoped native no-save mode for reset/quit/exit cleanup.
 };
+
+namespace corum::ranked {
+void advanceSurvivalReplayWorld(PlayLayer* layer,float dt){
+    if(!layer||layer!=PlayLayer::get()||!std::isfinite(dt)||dt<=0)return;
+    auto* owner=static_cast<CorumRankedPlayLayer*>(layer);
+    if(!owner->m_fields->survivalReplayLevel&&!(owner->m_fields->survivalLiveLevel&&SurvivalSpectatorRuntime::get().world()))return;
+    ScopedPersistenceOwner persistence(layer);ScopedSpectatorPersistenceMode noSave(layer->m_isTestMode,true);
+    ScopedRealGameplayEnd unpaused(layer->m_isPaused,false);
+    // GJBaseGameLayer owns its virtual postUpdate dispatch. Never call it twice.
+    layer->GJBaseGameLayer::update(dt);
+}
+void presentSurvivalReplayCamera(PlayLayer* layer){
+    if(!layer||layer!=PlayLayer::get())return;
+    auto* owner=static_cast<CorumRankedPlayLayer*>(layer);
+    if(!owner->m_fields->survivalLiveLevel||!SurvivalSpectatorRuntime::get().world())return;
+    owner->m_fields->spectatorWorldFrameNumber=CCDirector::sharedDirector()->getTotalFrames();owner->driveSpectatorCamera();
+}
+}

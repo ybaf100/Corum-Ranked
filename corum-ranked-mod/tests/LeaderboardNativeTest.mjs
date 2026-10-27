@@ -140,7 +140,7 @@ void fitRankSprite(CCSprite* n,CCSize s){n->size=s;}
 inline int badges=0,iconCreates=0,iconExits=0;inline std::function<void()> duringBadge;
 CCNode* createAnimatedRankBadge(std::string const&,CCSize s,RankBadgeDisplay display){assert(display==RankBadgeDisplay::Leaderboard);++badges;
  if(auto hook=std::exchange(duringBadge,{})){hook();}auto* n=CCNode::create();n->size=s;return n;}
-class PlayerIcon:public CCNode{public:int account=0;bool local=false;static PlayerIcon* createLocal(){++iconCreates;auto* n=new PlayerIcon;n->local=true;return n;}static PlayerIcon* createRemote(int account){++iconCreates;auto* n=new PlayerIcon;n->account=account;return n;}void onExit()override{++iconExits;CCNode::onExit();}};
+class PlayerIcon:public CCNode{public:int account=0;bool local=false;static PlayerIcon* createBot(int n){return createRemote(-n);}static PlayerIcon* createLocal(){++iconCreates;auto* n=new PlayerIcon;n->local=true;return n;}static PlayerIcon* createRemote(int account){++iconCreates;auto* n=new PlayerIcon;n->account=account;return n;}void onExit()override{++iconExits;CCNode::onExit();}};
 }}
 ${header}
 ${strip(read('src/ui/RankedLeaderboardPopup.cpp'))}
@@ -173,22 +173,23 @@ int main(){using namespace corum::ranked;using namespace ui;namespace web=geode:
  assert(gestures->ccTouchBegan(&finger,nullptr));p->m_busy=true;p->updateButtons();gestures->ccTouchEnded(&finger,nullptr);p->m_busy=false;drainMainQueue();assert(SurvivalPlayerInfoPopup::opened==2);
  assert(iconCreates>0&&iconCreates<=5&&p->m_rows.front().icon->local&&p->m_rows[3].entry.bot);
  auto initialPosition=p->m_scroll->m_contentLayer->position;p->m_scroll->m_contentLayer->position.y+=80;p->update(0);
- assert(p->m_rows[3].icon&&p->m_rows[3].icon->account==0);p->m_scroll->m_contentLayer->position=initialPosition;p->update(0);
+ assert(p->m_rows[3].icon&&p->m_rows[3].icon->account==-p->m_rows[3].entry.rank.value_or(1));p->m_scroll->m_contentLayer->position=initialPosition;p->update(0);
  auto c=leaderboardColumns(p->m_rows.front().node->size.width);
  for(auto const& row:p->m_rows){for(auto* child:row.node->children){auto* label=dynamic_cast<CCLabelBMFont*>(child);if(!label)continue;
   if(label->text.starts_with("Player-"))assert(label->position.x==c.name&&label->anchor.x==0);
   if(label->text=="PROMOTION MATCH"||label->text=="DEMOTION WARNING")assert(label->position.x==c.status);
   if(label->text=="SILVER"||label->text=="GOLD")assert(label->position.x==c.tierName);
  }}
+ p->m_scroll->m_contentLayer->position.y=p->m_scroll->size.height-p->m_rows[2].node->position.y-58;p->update(0);
  auto* shine=p->m_rows[2].shine;assert(shine&&p->m_rows[2].shine&&!p->m_rows[0].shine);
  assert(shine->lines.size()==6);auto top=shine->lines[2],bottom=shine->lines[5];
  for(auto const& line:shine->lines)assert(line.radius<=2.5f);
  auto w=p->m_rows[3].node->size.width;
- assert(std::abs(top.from.x+bottom.from.x-w)<.001&&std::abs(top.from.y+bottom.from.y-48)<.001);
+ assert(std::abs(top.from.x+bottom.from.x-w)<.001&&std::abs(top.from.y+bottom.from.y-58)<.001);
  assert(top.from.y==top.to.y&&bottom.from.y==bottom.to.y);
- auto start=top.from.x;p->update(.1f);assert(shine->lines[2].from.x>start);
+ p->m_elapsed=0;p->update(0);auto start=shine->lines[2].from.x;p->update(.1f);assert(shine->lines[2].from.x>start);
  // Both highlights bend at opposite corners without cutting through the card.
- p->m_elapsed=(w-.75-8)/(2*(w+48-1.5))*6;p->update(0);assert(shine->lines.size()==12);
+ p->m_elapsed=(w-.75-8)/(2*(w+58-1.5))*6;p->update(0);assert(shine->lines.size()==12);
  for(auto const& line:shine->lines){assert(line.from.x==line.to.x||line.from.y==line.to.y);}
  // Repeated refreshes before HTTP completion and while replacement is queued
  // leave a single request and the existing rows intact.

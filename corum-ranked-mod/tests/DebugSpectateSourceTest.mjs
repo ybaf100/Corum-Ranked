@@ -12,7 +12,7 @@ const live = read('src/SpectatorLiveRuntime.cpp');
 const level = read('src/LevelInfoLayer.cpp');
 const server = p => readFileSync(new URL(`../../ranked/apps/server/src/${p}`, import.meta.url), 'utf8');
 
-test('fixed VOICE constant and production cadence are shared; native verified download and song path are retained', () => {
+test('default VOICE and production cadence are shared; admitted map IDs are scoped; native verified download and song path are retained', () => {
     assert.match(read('src/debug/DebugSpectatePolicy.hpp'), /kDebugSpectateLevelId = 88350599/);
     assert.doesNotMatch(runtime + play + level, /88350599/);
     assert.match(read('src/domain/SpectatorProtocol.hpp'), /kSpectatorPublishIntervalMs = 50/);
@@ -54,7 +54,7 @@ test('verified Saved adoption and scene handoff precede native scene creation wi
     // Effective native/Jukebox path is required even if downloaded=true is stale.
     assert.match(level, /bool debugSpectateSongFilesReady\(/);
     assert.match(level, /!songsReady\(m_level, m_songWidget\) \|\| !debugSpectateSongFilesReady/);
-    for (const transition of ['preparation metadata verified', 'using downloaded saved VOICE geometry', 'map ready',
+    for (const transition of ['preparation metadata verified', 'using downloaded saved map geometry', 'map ready',
         'song acquisition requested song=', 'song ready path=', 'activating verified native Play button',
         'native Play callback forwarded', 'LevelInfo exit accepted', 'native Play did not leave LevelInfo - retrying',
         'PlayLayer entered', 'RECORDING active']) assert((runtime + level + play).includes(transition));
@@ -90,7 +90,7 @@ test('server persistence and Recorded Publisher are isolated from Ranked writes 
     const service = server('debug-spectate/debug-spectate.service.ts');
     assert.match(service, /database.transaction/);
     assert.match(service, /jsonb_to_recordset/);
-    assert.match(service, /WHERE completed AND level_id = \$1 AND format_version = \$2/);
+    assert.match(service, /WHERE completed AND finalized_at IS NOT NULL AND format_version = \$1/);
     assert.match(service, /this.clock.now\(\).getTime\(\)/);
     assert.match(service, /relay.publishRecorded/);assert.match(service, /relay.subscribeRecorded/);
     assert.doesNotMatch(service, /(?:INSERT INTO|UPDATE|DELETE FROM) ranked_|\.emitDiscord|MatchService|QueueService|PlacementService|AchievementService/);

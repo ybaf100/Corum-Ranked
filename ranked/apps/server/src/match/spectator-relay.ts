@@ -40,11 +40,14 @@ export function readSpectatorStream(_key: string, stream: LiveStream, roundNumbe
     // A late join has no prior stream identity and must apply the bounded buffer
     // as a reset before switching to incremental live packets.
     const history=stream.history??stream.packets;
-    const available=history[0]?.sequence===0 && history[0].elapsedMs<=250 && stream.historyContinuous!==false;
+    const terminal=stream.packets.at(-1)?.keyframe;
+    const interrupted=worldHistory && Boolean(terminal?.dead || terminal?.finished) &&
+      hasStreamIdentity && sameAttempt && sameGeneration && afterSequence!==null && stream.lastSequence-afterSequence>SPECTATOR_HISTORY_PAGE_PACKETS;
+    const available=!interrupted && history[0]?.sequence===0 && history[0].elapsedMs<=250 && stream.historyContinuous!==false;
     const source=worldHistory && available?history:stream.packets;
     const missedWindow = hasStreamIdentity && sameAttempt && sameGeneration && afterSequence !== null &&
       stream.lastSequence > afterSequence && (source[0]?.sequence ?? Infinity) > afterSequence + 1;
-    const reset = !hasStreamIdentity || !sameAttempt || !sameGeneration || missedWindow;
+    const reset = interrupted || !hasStreamIdentity || !sameAttempt || !sameGeneration || missedWindow;
     const effectiveAfter = reset ? null : afterSequence;
     const latestTime = stream.packets.at(-1)?.elapsedMs ?? 0;
     // Seed close to the live edge. Replaying 1.5-3s at a 1x clock never catches
@@ -75,7 +78,7 @@ export function readSpectatorStream(_key: string, stream: LiveStream, roundNumbe
       fallback: false,
       reason: null,
       reset,
-      ...(worldHistory?{restoration:{available,reason:available?null:stream.historyContinuous===false?"HISTORY_GAP":history[0]?.sequence!==0?"HISTORY_WINDOW_EXPIRED":"ATTEMPT_START_MISSING",
+      ...(worldHistory?{restoration:{available,reason:interrupted?"ATTEMPT_ENDED_DURING_RESTORE":available?null:stream.historyContinuous===false?"HISTORY_GAP":history[0]?.sequence!==0?"HISTORY_WINDOW_EXPIRED":"ATTEMPT_START_MISSING",
         caughtUp:(bufferedPackets.at(-1)?.sequence??effectiveAfter??-1)>=stream.lastSequence,headSequence:stream.lastSequence,
         startSequence:history[0]?.sequence??-1,levelId:history[0]?.levelId??null}}:{}),
       bufferWindowMs: SPECTATOR_LIVE_BUFFER_MS,

@@ -19,7 +19,7 @@ using namespace geode::prelude;
 namespace corum::ranked::ui {
 namespace {
 constexpr int kPageSize = 20;
-constexpr float kRowHeight = 48, kRowGap = 7;
+constexpr float kRowHeight = 58, kRowGap = 7;
 constexpr float kBorderInset = 0.375f;
 // The native ScrollLayer owns the complete gesture. A row has no swallowing
 // CCMenu: cancelling such a menu after a drag cannot restore the missing began.
@@ -62,12 +62,12 @@ public:
     }
 };
 
-CCNode* modeTabFace(RankedMode mode, bool selected) {
-    auto* face = surface({140,23},{},selected ? Gold : Cyan,
+CCNode* modeTabFace(RankedMode mode, bool selected,float width=140) {
+    auto* face = surface({width,23},{},selected ? Gold : Cyan,
         SurfaceRaised,250,true);
-    auto* caption = menuLabel(mode == RankedMode::Survival ? "SURVIVAL" : "SOLO RANKED",0.28f,{70,11.5f},
+    auto* caption = menuLabel(mode == RankedMode::Survival ? "SURVIVAL" : "SOLO RANKED",0.28f,{width/2,11.5f},
         selected ? Gold : Text);
-    fitMenuLabelWidth(caption,130,0.28f,0.20f); face->addChild(caption,5);
+    fitMenuLabelWidth(caption,width-10,0.28f,0.20f); face->addChild(caption,5);
     return face;
 }
 
@@ -119,14 +119,14 @@ bool RankedLeaderboardPopup::init() {
     m_mainLayer->addChild(panel,10);
     panel->addChild(menuLabel(i18n::text("leaderboard","LEADERBOARD"),0.51f,
         {size.width / 2,size.height - 20},Gold,FontWeight::Black),5);
-    m_caption = menuLabel("",0.26f,{size.width / 2,size.height - 97},TextMuted);
+    m_caption = menuLabel("",0.26f,{size.width*.40f,size.height - 97},TextMuted);
     panel->addChild(m_caption,5);
     auto const viewport = CCSize{size.width - 24,size.height - 163};
     auto const columns = leaderboardColumns(viewport.width - 8);
     leftCaption(panel,"#",{20 + columns.rank - 6,size.height - 117},30,0.23f,TextMuted);
     leftCaption(panel,i18n::text("leaderboard-player","PLAYER"),{16 + columns.name,size.height - 117},columns.nameWidth,0.23f,TextMuted);
-    leftCaption(panel,i18n::text("leaderboard-status","STATUS"),{16 + columns.status,size.height - 117},columns.statusWidth,0.23f,TextMuted);
-    leftCaption(panel,i18n::text("leaderboard-tier","TIER"),{16 + columns.tierName,size.height - 117},columns.tierWidth,0.23f,TextMuted);
+    if(columns.tierWidth>0)leftCaption(panel,i18n::text("leaderboard-status","STATUS"),{16 + columns.status,size.height - 117},columns.statusWidth,0.23f,TextMuted);
+    if(columns.tierWidth>0)leftCaption(panel,i18n::text("leaderboard-tier","TIER"),{16 + columns.tierName,size.height - 117},columns.tierWidth,0.23f,TextMuted);
     leftCaption(panel,"LP / O X",{16 + columns.value,size.height - 117},columns.valueWidth,0.23f,TextMuted);
     m_scroll = LeaderboardScrollLayer::create(viewport); m_scroll->setPosition({12,35});
     m_scroll->setID("ranked-leaderboard-scroll"_spr); panel->addChild(m_scroll,5);
@@ -144,14 +144,14 @@ bool RankedLeaderboardPopup::init() {
     });
     auto* menu = CCMenu::create(); menu->setPosition(CCPointZero); panel->addChild(menu,20);
     auto button = [&](std::string const& text, float x, SEL_MenuHandler callback) {
-        auto* face = surface({68,25},{},Blue,SurfaceRaised,250,true);
-        auto* caption = menuLabel(text,0.30f,{34,12.5f}); fitMenuLabelWidth(caption,60,0.30f,0.23f);
+        auto* face = surface({std::min(68.f,(size.width-30)/4),25},{},Blue,SurfaceRaised,250,true);
+        auto* caption = menuLabel(text,0.30f,{std::min(68.f,(size.width-30)/4)/2,12.5f}); fitMenuLabelWidth(caption,std::min(60.f,(size.width-30)/4-8),0.30f,0.23f);
         face->addChild(caption,5);
         auto* item = CCMenuItemSpriteExtra::create(face,this,callback); item->setPosition({x,17});
         menu->addChild(item); return item;
     };
     auto tab = [&](float x, RankedMode mode) {
-        auto* face = modeTabFace(mode,m_mode == mode);
+        auto* face = modeTabFace(mode,m_mode == mode,std::min(140.f,(size.width-30)/2));
         auto* item = CCMenuItemSpriteExtra::create(face,this,menu_selector(RankedLeaderboardPopup::onMode));
         item->setTag(static_cast<int>(mode)); item->setPosition({x,size.height-45}); menu->addChild(item); return item;
     };
@@ -163,13 +163,13 @@ bool RankedLeaderboardPopup::init() {
     fitMenuLabelWidth(searchLabel,60,.30f,.23f);searchFace->addChild(searchLabel,5);
     m_searchButton=CCMenuItemSpriteExtra::create(searchFace,this,menu_selector(RankedLeaderboardPopup::onSearch));
     m_searchButton->setPosition({size.width/2+inputWidth/2+3,size.height-72});menu->addChild(m_searchButton);
-    m_survivalTab = tab(size.width/2-76,RankedMode::Survival);
-    m_soloTab = tab(size.width/2+76,RankedMode::SoloRanked);
-    m_previous = button("<",48,menu_selector(RankedLeaderboardPopup::onPrevious));
-    m_next = button(">",size.width - 48,menu_selector(RankedLeaderboardPopup::onNext));
-    button(i18n::text("close","CLOSE"),size.width / 2,menu_selector(RankedLeaderboardPopup::onClose));
-    m_refresh = button(i18n::text("leaderboard-refresh","REFRESH"),size.width / 2 + 80,menu_selector(RankedLeaderboardPopup::onRefresh));
-    m_pageLabel = menuLabel("",0.26f,{size.width / 2 - 80,17},TextMuted); panel->addChild(m_pageLabel,5);
+    m_survivalTab = tab(size.width/2-std::min(76.f,(size.width-18)/4),RankedMode::Survival);
+    m_soloTab = tab(size.width/2+std::min(76.f,(size.width-18)/4),RankedMode::SoloRanked);
+    m_previous = button("<",size.width*.125f,menu_selector(RankedLeaderboardPopup::onPrevious));
+    m_next = button(">",size.width*.875f,menu_selector(RankedLeaderboardPopup::onNext));
+    button(i18n::text("close","CLOSE"),size.width*.375f,menu_selector(RankedLeaderboardPopup::onClose));
+    m_refresh = button(i18n::text("leaderboard-refresh","REFRESH"),size.width*.625f,menu_selector(RankedLeaderboardPopup::onRefresh));
+    m_pageLabel = menuLabel("",0.26f,{size.width-30,size.height-97},TextMuted); panel->addChild(m_pageLabel,5);
     scheduleUpdate(); fetch(0); return true;
 }
 
@@ -192,7 +192,7 @@ void RankedLeaderboardPopup::fetch(int offset) {
     if (m_closed || m_busy) return;
     m_busy = true; updateButtons();
     m_caption->setString((m_searchQuery.empty()?i18n::text("leaderboard-loading","Loading leaderboard..."):i18n::text("leaderboard-searching","Finding player...")).c_str());
-    fitMenuLabelWidth(m_caption,m_scroll->getContentSize().width,0.26f,0.22f);
+    fitMenuLabelWidth(m_caption,m_scroll->getContentSize().width*.70f,0.26f,0.22f);
     m_caption->setColor(TextMuted);
     auto const generation = ++m_generation;
     auto const mode = m_mode;
@@ -238,15 +238,15 @@ void RankedLeaderboardPopup::onMode(CCObject* sender) {
     ++m_generation; m_request.cancel(); m_busy = false;
     m_mode = mode; m_offset = 0; m_hasMore = false;
     m_searchQuery.clear();m_searchAccount=0;m_searchInput->setString("");
-    m_survivalTab->setNormalImage(modeTabFace(RankedMode::Survival,m_mode == RankedMode::Survival));
-    m_soloTab->setNormalImage(modeTabFace(RankedMode::SoloRanked,m_mode == RankedMode::SoloRanked));
+    m_survivalTab->setNormalImage(modeTabFace(RankedMode::Survival,m_mode == RankedMode::Survival,std::min(140.f,(m_scroll->getContentSize().width-6)/2)));
+    m_soloTab->setNormalImage(modeTabFace(RankedMode::SoloRanked,m_mode == RankedMode::SoloRanked,std::min(140.f,(m_scroll->getContentSize().width-6)/2)));
     m_rows.clear(); m_scroll->m_contentLayer->removeAllChildrenWithCleanup(true);
     m_pageLabel->setString("..."); fetch(0);
 }
 
 void RankedLeaderboardPopup::showError() {
     m_caption->setString(i18n::text("leaderboard-error","Could not load the leaderboard. Press Refresh.").c_str());
-    fitMenuLabelWidth(m_caption,m_scroll->getContentSize().width,0.26f,0.22f);
+    fitMenuLabelWidth(m_caption,m_scroll->getContentSize().width*.70f,0.26f,0.22f);
     m_caption->setColor(Red);
 }
 
@@ -261,7 +261,7 @@ void RankedLeaderboardPopup::showRows(matjson::Value const& data) {
     auto const total = data["total"].asInt().unwrapOr(0);
     auto const count = fmt::format(fmt::runtime(i18n::text("players-total","{} ranked players")),total);
     m_caption->setString(count.c_str()); m_caption->setColor(TextMuted);
-    fitMenuLabelWidth(m_caption,viewport.width,0.26f,0.22f);
+    fitMenuLabelWidth(m_caption,viewport.width*.70f,0.26f,0.22f);
     m_hasMore = data["hasMore"].asBool().unwrapOr(false);
     m_pageLabel->setString(fmt::format("{} - {}",players.empty() ? 0 : m_offset + 1,m_offset + players.size()).c_str());
     auto const local = GJAccountManager::sharedState()->m_accountID;
@@ -286,14 +286,14 @@ void RankedLeaderboardPopup::showRows(matjson::Value const& data) {
         if (rank->getContentSize().width > 40) rank->setScale(40 / rank->getContentSize().width);
         row->addChild(rank,5);
         auto const equipped=player["equippedTitle"];
-        leftCaption(row,entry.player,{columns.name,equipped.isObject()?34.f:24.f},columns.nameWidth,0.36f,mine ? Cyan : Text);
-        if(equipped.isObject())publicPlayerTitle(row,equipped,{columns.name+columns.nameWidth/2,13},columns.nameWidth,.20f);
+        leftCaption(row,entry.player,{columns.name,equipped.isObject()?42.f:36.f},columns.nameWidth,0.36f,mine ? Cyan : Text);
+        if(equipped.isObject())publicPlayerTitle(row,equipped,{columns.name+columns.nameWidth/2,26},columns.nameWidth,.20f);
         if (entry.promotion || entry.warning) leftCaption(row,
             entry.promotion ? i18n::text("promotion-match","PROMOTION MATCH") : i18n::text("demotion-warning","DEMOTION WARNING"),
-            {columns.status,24},columns.statusWidth,0.26f,entry.promotion ? Green : Red);
+            {columns.status,columns.tierWidth>0?29.f:11.f},columns.statusWidth,0.26f,entry.promotion ? Green : Red);
         auto* badge = createAnimatedRankBadge(entry.tier,{27,27},RankBadgeDisplay::Leaderboard);
         badge->setPosition({columns.tierIcon,24}); row->addChild(badge,4);
-        leftCaption(row,rankTierDisplay(entry.tier),{columns.tierName,24},columns.tierWidth,0.31f,color);
+        if(columns.tierWidth>0)leftCaption(row,rankTierDisplay(entry.tier),{columns.tierName,24},columns.tierWidth,0.31f,color);
         if (entry.promotion) {
             auto const count = std::clamp(entry.promotionGames,1,8);
             for (int mark = 0; mark < count; ++mark) {
@@ -338,7 +338,7 @@ void RankedLeaderboardPopup::update(float dt) {
         // their exact delegate instead of starting a request for the whole page.
         if (visible && !row.icon) {
             row.icon = !row.entry.bot && row.entry.accountId > 0 && row.entry.accountId == local
-                ? PlayerIcon::createLocal() : PlayerIcon::createRemote(row.entry.bot ? 0 : row.entry.accountId);
+                ? PlayerIcon::createLocal() : row.entry.bot?PlayerIcon::createBot(row.entry.rank.value_or(1)):PlayerIcon::createRemote(row.entry.accountId);
             if (row.icon) { row.icon->setScale(0.67f); row.icon->setPosition({leaderboardColumns(row.node->getContentSize().width).icon,24}); row.node->addChild(row.icon,5); }
         } else if (!visible && row.icon) { row.icon->removeFromParentAndCleanup(true); row.icon = nullptr; }
         if (!visible || !row.shine) continue;

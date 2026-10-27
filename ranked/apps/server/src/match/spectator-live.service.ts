@@ -312,7 +312,7 @@ export class SpectatorLiveService {
     if (!terminal?.dead && !terminal?.finished && nowMs - stream.lastReceivedAtMs > SPECTATOR_LIVE_TIMEOUT_MS) {
       return this.fallback("STREAM_TIMEOUT");
     }
-    return this.readStream(key, stream, 1, null, "VOICE Recorded Publisher", attemptId,
+    return this.readStream(key, stream, 1, null, "Recorded Publisher", attemptId,
       generationText, afterSequenceText,worldHistoryText==="1",cosmeticRevisionText);
   }
 

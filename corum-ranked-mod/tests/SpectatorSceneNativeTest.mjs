@@ -70,7 +70,7 @@ namespace debug {
 constexpr int kDebugSpectateLevelId=88350599;
 struct DebugSpectateRuntime {
     bool authorized=false;
-    static DebugSpectateRuntime& get(){static DebugSpectateRuntime d;return d;}
+    int m_levelId=kDebugSpectateLevelId;int levelId()const{return m_levelId;}static DebugSpectateRuntime& get(){static DebugSpectateRuntime d;return d;}
     bool playbackLevel(int id)const{return authorized && id==kDebugSpectateLevelId;}
     std::string contextId()const{return "debug-spectate:server-approved";}
     bool playbackComplete()const{return false;}

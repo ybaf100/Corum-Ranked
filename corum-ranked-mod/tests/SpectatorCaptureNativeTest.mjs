@@ -19,12 +19,15 @@ for(const debugOn of [false,true]) test(`native update/rotation/teleport -> comp
     const capture=readFileSync(join(root,'src/spectator/SpectatorPlayerCapture.cpp'),'utf8').replace(/^#include.*$/gm,'');
     const cpp=`
 #include "${join(root,'src/domain/SpectatorCapturePolicy.hpp')}"
+#include "${join(root,'tests/helpers/InactiveReplayDouble.hpp')}"
 #include "${join(root,'src/domain/SpectatorNativeProbe.hpp')}"
 #include "${join(root,'src/debug/DebugSpectatePolicy.hpp')}"
 #include "${join(root,'src/spectator/SpectatorPlayerCapture.hpp')}"
 #include "${join(root,'src/domain/SpectatorCameraPolicy.hpp')}"
 #include <cassert>
-namespace corum::ranked {struct SurvivalSpectatorRuntime {static SurvivalSpectatorRuntime& get(){static SurvivalSpectatorRuntime r;return r;}bool sceneLevel(int)const{return false;}bool publishing()const{return false;}bool canLaunch()const{return false;}template<class...T>bool arm(T...){return false;}template<class...T>bool capture(T const&...){return false;}template<class...T>void terminal(T const&...){}void sceneExited(){}bool exitRequested()const{return false;}};}
+#include "${join(root,'src/domain/SpectatorAudioPolicy.hpp')}"
+struct FMODAudioEngine{static FMODAudioEngine*sharedEngine(){static FMODAudioEngine e;return &e;}std::string getActiveMusic(int){return "voice.mp3";}unsigned getMusicTimeMS(int){return 0;}};
+namespace corum::ranked {struct SurvivalSpectatorRuntime {static SurvivalSpectatorRuntime& get(){static SurvivalSpectatorRuntime r;return r;}bool sceneLevel(int)const{return false;}replay::InactiveWorld* world()const{return nullptr;}bool publishing()const{return false;}bool canLaunch()const{return false;}template<class...T>bool arm(T...){return false;}template<class...T>bool capture(T const&...){return false;}template<class...T>void terminal(T const&...){}void sceneExited(){}bool exitRequested()const{return false;}};}
 
 #include <chrono>
 #include <limits>
@@ -79,7 +82,7 @@ struct SpectatorLiveRuntime {
 namespace debug {
 struct DebugSpectateRuntime {
  DebugSpectateCapture capture;std::vector<SpectatorGhostPose> sent;
- static DebugSpectateRuntime& get(){static DebugSpectateRuntime d;return d;}
+ int m_levelId=kDebugSpectateLevelId;int levelId()const{return m_levelId;}static DebugSpectateRuntime& get(){static DebugSpectateRuntime d;return d;}
  bool recordPose(SpectatorGhostPose const& p){if(!capture.capture(clockMs,p))return false;sent.push_back(p);return true;}
 };
 }
@@ -87,7 +90,7 @@ struct DebugSpectateRuntime {
 struct CorumRankedPlayLayer:PlayLayer {
  corum::ranked::SpectatorLiveRuntime& spectatorTransport(){return corum::ranked::SpectatorLiveRuntime::get();}
  bool blockEntryGameplayUpdate(){return false;}
- struct Fields{bool survivalLiveLevel=false,survivalLevel=false;struct Driver{bool partialHistory()const{return false;}template<class...T>bool apply(T...){return false;}std::optional<float> takeNativeDeltaSeconds(){return {};}}spectatorWorldDriver;bool spectatorWorldPoseApplied=false,spectatorCollisionChecked=false;SpectatorNativeProbe spectatorNativeProbe;bool rankedInitialized=false,rankedLevel=true,safetyRetired=false,spectatorMode=false,spectatorPending=false;
+ struct Fields{bool survivalLiveLevel=false,survivalReplayLevel=false,survivalLevel=false;struct Driver{bool partialHistory()const{return false;}template<class...T>bool apply(T...){return false;}std::optional<float> takeNativeDeltaSeconds(){return {};}}spectatorWorldDriver;bool spectatorWorldPoseApplied=false,spectatorCollisionChecked=false;SpectatorNativeProbe spectatorNativeProbe;bool rankedInitialized=false,rankedLevel=true,safetyRetired=false,spectatorMode=false,spectatorPending=false;
   corum::ranked::SpectatorSceneContext sceneContext;std::optional<SpectatorRemoteFrame>spectatorRenderedFrame;struct Remote{template<class...T>void update(T...){}}remotePlayer;
   bool debugRecordScene=false,debugPlaybackScene=false,debugRecordHasFrame=false;SpectatorCapturePolicy spectatorCapture;std::shared_ptr<SpectatorCosmetics const> spectatorCosmetics;std::chrono::steady_clock::time_point nextCosmeticCaptureAt{};bool spectatorWorldUpdateInProgress=false,spectatorWorldResetInProgress=false;std::optional<unsigned> spectatorCameraFrameNumber;}fields;
  Fields* m_fields=&fields;

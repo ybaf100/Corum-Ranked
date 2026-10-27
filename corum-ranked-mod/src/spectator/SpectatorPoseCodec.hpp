@@ -37,6 +37,7 @@ inline matjson::Value encodeSpectatorPose(SpectatorGhostPose const& pose) {
         }
     }
     value["effects"]=static_cast<int>(pose.effects);
+    if(pose.audio){value["audio"]["trackHash"]=pose.audio->trackHash;value["audio"]["positionMs"]=pose.audio->positionMs;}
     if(pose.progress)value["progress"]=static_cast<double>(*pose.progress);
     if(pose.dual && pose.player2)value["player2"]=encodeSpectatorPose(spectatorSecondaryAsPose(*pose.player2));
     return value;
@@ -50,6 +51,11 @@ inline std::optional<SpectatorGhostPose> decodeSpectatorPose(matjson::Value cons
     if (!mode) return std::nullopt;
     auto const nan = std::numeric_limits<double>::quiet_NaN();
     SpectatorGhostPose pose;
+    if(value.contains("audio")){
+        auto const& a=value["audio"];auto hash=a["trackHash"].asString().unwrapOr("");auto time=a["positionMs"].asDouble().unwrapOr(nan);
+        if(hash.size()!=64||!std::all_of(hash.begin(),hash.end(),[](char c){return (c>='0'&&c<='9')||(c>='a'&&c<='f');})||!std::isfinite(time)||time<0||time>86400000)return std::nullopt;
+        pose.audio=SpectatorAudioSample{hash,time};
+    }
     pose.x = static_cast<float>(value["x"].asDouble().unwrapOr(nan));
     pose.y = static_cast<float>(value["y"].asDouble().unwrapOr(nan));
     pose.rotation = static_cast<float>(value["rotation"].asDouble().unwrapOr(nan));

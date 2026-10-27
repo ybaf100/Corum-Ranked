@@ -44,18 +44,23 @@ export class SurvivalSpectatorLiveService {
     if(!row||!row.enabled)throw new ForbiddenException('SURVIVAL_SPECTATOR_NOT_AUTHORIZED');
     const match=row.snapshot,round=survivalCurrentRound(match),own=match.players.find(p=>p.participantId===row.participant_id);
     if(!match.online||!own||own.kind!=='HUMAN')throw new ForbiddenException('SURVIVAL_SPECTATOR_NOT_AUTHORIZED');
-    if(role==='viewer'&&(own.eliminationStage===null||own.eliminatedAt===undefined||now<own.eliminatedAt+5000))throw new ForbiddenException('SURVIVAL_SPECTATOR_LOCKED');
+    if(role==='viewer'){
+      const participant=round.players.find(p=>p.participantId===own.participantId);
+      if(own.eliminationStage!==null||match.state!=='PLAYING'||!participant||participant.forfeited||participant.absent||
+        participant.attempts.some(a=>a.endedAt===null)||!participant.attempts.some(a=>a.endedAt!==null&&a.highestProgress===100))
+        throw new ForbiddenException('SURVIVAL_SPECTATOR_CLEAR_REQUIRED');
+    }
     if(role==='publisher'&&own.eliminationStage!==null)throw new ForbiddenException('SURVIVAL_PUBLISHER_ELIMINATED');
     return {match,round,own,context:{roundKey:round.key,mapGeneration:round.mapGeneration,levelId:round.map?.levelId??0}};
   }
   private check(context:Context,roundKey:unknown,generation:unknown,level:unknown){
     if(roundKey!==context.roundKey||Number(generation)!==context.mapGeneration||Number(level)!==context.levelId)throw new ConflictException('SURVIVAL_SPECTATOR_CONTEXT_CHANGED');}
   public async targets(id:string,session:RankedSessionContext){
-    const {match,round,context}=await this.authority(id,session,'viewer');
+    const {match,round,own,context}=await this.authority(id,session,'viewer');
     const view=survivalLiveView(match,this.now());
     const room=this.streams.size<SURVIVAL_RELAY_LIMITS.streams&&[...this.streams.values()].filter(s=>s.stream.matchId===id).length<SURVIVAL_RELAY_LIMITS.perMatch;
     return {context,matchId:id,state:match.state,roundNumber:round.ordinal,phase:round.phase,endsAt:round.endsAt,cutoff:round.cutoffScore,
-      targets:match.players.filter(p=>p.eliminationStage===null).map(p=>{
+      targets:match.players.filter(p=>p.eliminationStage===null&&p.participantId!==own.participantId).map(p=>{
         const state=view.standings.find(s=>s.participantId===p.participantId),rp=round.players.find(r=>r.participantId===p.participantId);
         const attempt=rp?.attempts.find(a=>a.endedAt===null);
         return {participantId:p.participantId,name:p.name,gdAccountId:p.gdAccountId??null,rank:state?.rank??null,

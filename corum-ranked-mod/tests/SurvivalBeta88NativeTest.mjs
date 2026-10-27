@@ -16,6 +16,7 @@ function run(cpp,json=false){const dir=mkdtempSync(join(tmpdir(),'corum-followup
 
 test('podium timeline raises 3→2→1, then drops each icon, then stamps settled labels; no early input',()=>run(`
 #include "domain/SurvivalPodiumMotion.hpp"
+#include "${join(root,'tests/helpers/InactiveReplayDouble.hpp')}"
 #include <cassert>
 using namespace corum::ranked;
 int main(){
@@ -147,6 +148,7 @@ int main(){Label label;Popup p;p.m_songs.push_back({123,0,"",&label,{}});auto*m=
 test('observer exit and cleared replay retain exact scene/context/session gates and all local play suppresses official progress',()=>{
  const src=read('src/SurvivalRuntime.cpp');run(`
 #include "domain/SurvivalFreePlayPolicy.hpp"
+#include "${join(root,'tests/helpers/InactiveReplayDouble.hpp')}"
 #include "domain/LevelPreparationPolicy.hpp"
 #include <cmath>
 #include <cassert>
@@ -170,7 +172,7 @@ struct SurvivalRuntime{
  struct View{std::string id="match",roundKey="r1",state="PLAYING";int mapGeneration=1;bool ownEliminated=false,online=false,ownAssetsReady=true,ownEntered=true,ownAbsent=false;struct Map{int levelId=40000000;}map;Value completedRound;}m_view;
  LevelPreparationContext context{"match",40000000,1,0,false,0,0},m_prepared=context;std::string m_session="session",m_attempt="official-old",m_attemptContext="exact-context";double m_attemptBest=38;bool cleared=true,watch=false,m_freePlayNativeQuitFinished=false;long remaining=180000;int returns=0,events=0;
  SurvivalFreePlayState m_freePlay;std::optional<WeakRef<CCScene>>m_freePlayOrigin,m_freePlayQuitScene;Ref<GJGameLevel>m_freePlayQuitLevel;
- bool active()const{return true;}bool freePlaying()const{return m_freePlay.active;}bool normalRoundCleared()const{return cleared;}bool surrenderPending()const{return false;}bool observing()const{return watch;}long remainingMs()const{return remaining;}
+ bool active()const{return true;}bool freePlaying()const{return m_freePlay.active;}bool normalRoundCleared()const{return cleared;}bool officialRoundCleared()const{return cleared;}bool surrenderPending()const{return false;}bool observing()const{return watch;}long remainingMs()const{return remaining;}
  LevelPreparationContext preparationContext()const{return context;}bool validateNative(GJGameLevel*l)const{return l&&l->id==context.levelId;}
  void chooseOutcome(SurvivalOutcomeChoice){watch=false;}void pumpFreePlayReturn(){++returns;}
  Value event(std::string){return {};}void enqueue(Value){++events;}
