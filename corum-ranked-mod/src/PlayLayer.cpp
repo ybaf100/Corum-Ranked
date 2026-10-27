@@ -2611,7 +2611,7 @@ public:
             setHudText(m_fields->spectatorProgressLabel,percent?fmt::format("{:.2f}%",*percent):"--% ");
             limitHudWidth(m_fields->spectatorProgressLabel,72.f,.34f,.16f);
             limitHudWidth(m_fields->spectatorNameLabel,72.f,.23f,.14f);
-            setHudPosition(m_fields->spectatorPanel,{size.width/2.f,size.height*.58f});
+            m_fields->spectatorPanel->setPosition({size.width/2.f,size.height*.58f});
             setHudText(m_fields->spectatorTimerLabel,fmt::format("{} · {}",presentation.roundText,presentation.timerText));
             limitHudWidth(m_fields->spectatorTimerLabel,120.f,.20f,.12f);
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
