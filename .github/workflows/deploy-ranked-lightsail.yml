@@ -110,3 +110,15 @@ jobs:
         uses: actions/checkout@v4
       - name: Prepare server image without production access
         run: docker build --pull -f ranked/Dockerfile.lightsail -t "corum-ranked-preflight:${GITHUB_SHA}" ranked
+
+  verify-production:
+    needs: build-and-deploy
+    if: github.event_name == 'push' || inputs.mode == 'deploy'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify public Singapore readiness, required version and both client hashes
+        env:
+          RANKED_DOWNLOAD_BASE_URL: ${{ vars.RANKED_DOWNLOAD_BASE_URL || 'https://pub-11442f32945446a49b9da0a5e69f2451.r2.dev' }}
+        run: python3 ranked/tools/verify-production-release.py

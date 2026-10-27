@@ -2,6 +2,9 @@ name: Build Corum Ranked Mod
 
 # Keep bindings and Codegen on one tested revision; the moving Codegen release
 # can generate types incompatible with the manifest's Geode SDK.
+# A [deploy-lightsail] [publish-r2] source push starts this Release run alongside
+# Validate, Debug, and Lightsail. Publish immediately after package validation;
+# Lightsail independently waits for both verified immutable channels.
 # Build Release on main; publication remains opt-in and supports build-only pushes.
 # Debug and Release publish to distinct immutable R2 paths and filenames.
 on:

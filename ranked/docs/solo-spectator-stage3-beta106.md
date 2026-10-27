@@ -1,5 +1,28 @@
 # Solo live spectator Stage 3 — beta.106
 
+## Deployment follow-up (2026-10-27)
+
+The user subsequently authorized main push and production release. Their final
+clarification preserves **four separate workflows**: Validate, Release build,
+Debug build and Lightsail deploy, started by one source push. Release/Debug each
+publish immediately after their required package/Debug-OFF checks. The existing
+Lightsail job builds Docker concurrently, then verifies both immutable public
+packages before its rollback-capable activation. Its final job additionally
+checks public health/readiness, required version and exact Release/Debug hashes.
+No manual second activation push is needed. The earlier code-only delivery notes
+below describe the 2026-10-26 handoff, not this later authorization.
+
+Follow-up baseline: `a196a1cd4df676bb747c971e64e9e43993e4d056`, freshly fetched
+on 2026-10-27; no newer main was present. beta.106 was not previously published
+(both public descriptors returned 404). Package/version bytes remain immutable;
+all accounts, scores, achievements, settings and migration history are preserved.
+No new client logic or DB migration is introduced in this deployment follow-up.
+
+Local workflow/publication policy checks: actionlint passed; public-release
+checks 3/3, published-client barrier 4/4, publisher 10/10, packager 2/2 and existing
+Lightsail policy 2/2 passed. These are local checks; actual Actions, R2 and server
+results must be reported separately after execution.
+
 Baseline: authoritative remote main `8de578ccb328621517665ad4f5c1ab589ca14177`
 (beta.105), freshly fetched on 2026-10-26. The user's beta.104 reference was
 older than the deployed Stage 2 source. Stage 2 history, camera, source clock,

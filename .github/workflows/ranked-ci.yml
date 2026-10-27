@@ -53,6 +53,8 @@ jobs:
         run: npm ci --prefix ranked
       - name: Type-check every Ranked workspace
         run: npm run typecheck --prefix ranked
+      - name: Validate public release and activation checks without production access
+        run: python3 -m unittest discover -s ranked/tools/tests -p 'test_*.py'
       - name: Validate authenticated GD relay Worker
         run: node --test ranked/tools/gd-relay/worker.test.mjs
       - name: Run rules and PostgreSQL integration tests
