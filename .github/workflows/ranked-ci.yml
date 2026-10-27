@@ -7,6 +7,7 @@ on:
       - "**"
     paths:
       - "ranked/**"
+      - "corum-ranked-mod/**"
       - "apps-script/Code.gs"
       - "apps-script/RankedConfig.gs"
       - "apps-script/SurvivalConfig.gs"
@@ -16,6 +17,7 @@ on:
   pull_request:
     paths:
       - "ranked/**"
+      - "corum-ranked-mod/**"
       - "apps-script/Code.gs"
       - "apps-script/RankedConfig.gs"
       - "apps-script/SurvivalConfig.gs"

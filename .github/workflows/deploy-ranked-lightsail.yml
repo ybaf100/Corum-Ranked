@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'ranked/**'
+      - 'corum-ranked-mod/**'
       - '.github/workflows/deploy-ranked-lightsail.yml'
   workflow_dispatch:
     inputs:
