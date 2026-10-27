@@ -22,7 +22,9 @@ export class SurvivalSpectatorLiveService {
   public constructor(@Inject(DATABASE)private readonly db:DatabasePort,@Inject(SERVER_CLOCK)private readonly clock:ServerClock){}
   private now(){return this.clock.now().getTime();}
   private prune(){const now=this.now();for(const [key,v] of this.viewers)if(v.expires<=now)this.viewers.delete(key);
-    for(const [key,s] of this.streams)if(now-s.stream.lastReceivedAtMs>10000||!this.demand(s.stream.matchId,s.targetId,s.context.roundKey,s.context.mapGeneration))this.streams.delete(key);
+    for(const [key,s] of this.streams){const terminal=s.stream.packets.at(-1)?.keyframe;
+      if(!this.demand(s.stream.matchId,s.targetId,s.context.roundKey,s.context.mapGeneration)||
+        (now-s.stream.lastReceivedAtMs>10000&&!terminal?.dead&&!terminal?.finished))this.streams.delete(key);}
     for(const [key,r] of this.rates)if(now-r.at>10000)this.rates.delete(key);}
   public demand(matchId:string,targetId:string,roundKey:string,mapGeneration:number){
     const now=this.now();return [...this.viewers.values()].some(v=>v.expires>now&&v.matchId===matchId&&v.targetId===targetId&&v.roundKey===roundKey&&v.mapGeneration===mapGeneration);}

@@ -87,6 +87,8 @@ effects, camera and Dual visuals are shared. PLAYING entry has no new readiness
 or GO countdown and does not alter the server round start/end time.
 
 Death/Clear hold their terminal display until the same target's next Attempt.
+A renewed viewer lease retains that bounded terminal stream beyond the ordinary
+nonterminal timeout; leaving or demand expiry still releases it immediately.
 Target elimination, server authorization loss, round/map change, final result or
 cancellation closes the scene. The coordinator preserves personal settlement,
 shows authoritative round/elimination/podium results and offers updated targets.

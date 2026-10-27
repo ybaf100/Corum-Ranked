@@ -37,6 +37,15 @@ describe('production Survival relay bounded demand and storage',()=>{
   expect(f.live.diagnostics().serializedBytes).toBe(before);
   await f.publish('match0',6,[f.packet('match0',6,count)]);
  });
+ it.each(['dead','finished'] as const)('holds %s terminal while a viewer remains, then releases the bounded stream on leave',async flag=>{
+  const f=fixture(16),viewer=f.session('p0');await f.live.subscribe('match0',viewer,f.query('match0','p6'));
+  await f.publish('match0',6);const terminal=f.packet('match0',6,1);terminal.keyframe[flag]=true;
+  await f.publish('match0',6,[terminal]);
+  f.advance(7000);await f.live.subscribe('match0',viewer,f.query('match0','p6'));
+  f.advance(4000);const response=await f.live.subscribe('match0',viewer,f.query('match0','p6'));
+  expect(response.packets.at(-1)?.keyframe[flag]).toBe(true);expect(f.live.diagnostics().streams).toBe(1);
+  await f.live.leave('match0',viewer);expect(f.live.diagnostics()).toMatchObject({streams:0,viewers:0,serializedBytes:0});
+ });
  it('bounds authorization rate bookkeeping independently of stream count and retires expired buckets',async()=>{
   const f=fixture(16);
   for(let i=0;i<2048;++i)await f.live.targets('match0',f.session('p0',String(i)));
