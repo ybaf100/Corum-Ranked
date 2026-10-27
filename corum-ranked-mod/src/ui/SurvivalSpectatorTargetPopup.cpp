@@ -2,6 +2,7 @@
 #include "../SurvivalRuntime.hpp"
 #include "../RankedRoundPreparation.hpp"
 #include "SurvivalOutcomePanel.hpp"
+#include "RankedPopupLayout.hpp"
 #include <Geode/ui/Popup.hpp>
 using namespace geode::prelude;
 namespace corum::ranked {
@@ -10,17 +11,19 @@ class SurvivalSpectatorTargetPopup final:public Popup {
     std::vector<Card> m_cards;std::string m_identity,m_rosterKey;std::size_t m_page=0,m_pageSize=16;
     CCLabelBMFont* m_clock=nullptr;CCLabelBMFont* m_pageLabel=nullptr;CCLabelBMFont* m_message=nullptr;CCNode* m_grid=nullptr;CCMenu* m_watchMenu=nullptr;
     bool init()override{
-        if(!Popup::init(490,302))return false;setID("survival-live-targets"_spr);m_bgSprite->setVisible(false);
-        auto const size=CCDirector::sharedDirector()->getWinSize();m_mainLayer->setScale(std::min({1.f,(size.width-12)/490,(size.height-12)/302}));
-        m_mainLayer->addChild(ui::surface({490,302},{245,151},ui::Blue,ui::Surface,255,true));
-        m_mainLayer->addChild(ui::menuLabel("SURVIVAL · LIVE SPECTATE",.36f,{245,280},ui::Cyan,ui::FontWeight::Black));
-        m_clock=ui::menuLabel("",.22f,{245,258},ui::Text);m_mainLayer->addChild(m_clock);
-        m_message=ui::menuLabel("",.18f,{245,42},ui::TextMuted);m_mainLayer->addChild(m_message);
-        m_pageLabel=ui::menuLabel("",.23f,{245,18},ui::Text);m_mainLayer->addChild(m_pageLabel);
+        auto const layout=ui::rankedPopupLayout({490,302},CCDirector::sharedDirector()->getWinSize());
+        if(!Popup::init(layout.size.width,layout.size.height))return false;
+        m_noElasticity=true;setID("survival-live-targets"_spr);m_bgSprite->setVisible(false);m_closeBtn->setVisible(false);
+        auto* content=ui::rankedPopupContent(m_mainLayer,m_buttonMenu,layout);
+        content->addChild(ui::surface({490,302},{245,151},ui::Blue,ui::Surface,255,true));
+        content->addChild(ui::menuLabel("SURVIVAL · LIVE SPECTATE",.36f,{245,280},ui::Cyan,ui::FontWeight::Black));
+        m_clock=ui::menuLabel("",.22f,{245,258},ui::Text);content->addChild(m_clock);
+        m_message=ui::menuLabel("",.18f,{245,42},ui::TextMuted);content->addChild(m_message);
+        m_pageLabel=ui::menuLabel("",.23f,{245,18},ui::Text);content->addChild(m_pageLabel);
         for(int i:{-1,1}){auto* face=ui::surface({44,24},{},ui::Blue,ui::SurfaceRaised,255,true);face->addChild(ui::menuLabel(i<0?"<":">",.26f,{22,12},ui::Text));auto* b=CCMenuItemSpriteExtra::create(face,this,menu_selector(SurvivalSpectatorTargetPopup::onPage));b->setTag(i);b->setPosition({245.f+70*i,18});m_buttonMenu->addChild(b);}
         auto* backFace=ui::surface({86,24},{},ui::Blue,ui::SurfaceRaised,255,true);backFace->addChild(ui::menuLabel(i18n::text("back","BACK"),.22f,{43,12},ui::Text));
         auto* back=CCMenuItemSpriteExtra::create(backFace,this,menu_selector(SurvivalSpectatorTargetPopup::onBack));back->setPosition({60,18});m_buttonMenu->addChild(back);
-        m_grid=CCNode::create();m_mainLayer->addChild(m_grid);m_watchMenu=CCMenu::create();m_watchMenu->setPosition({0,0});m_grid->addChild(m_watchMenu);
+        m_grid=CCNode::create();content->addChild(m_grid);m_watchMenu=CCMenu::create();m_watchMenu->setPosition({0,0});m_grid->addChild(m_watchMenu);
         m_identity=SurvivalRuntime::get().view().id;SurvivalSpectatorRuntime::get().selectionVisible(true);scheduleUpdate();update(0);return true;
     }
     void onBack(CCObject* sender){onClose(sender);}
@@ -38,7 +41,7 @@ class SurvivalSpectatorTargetPopup final:public Popup {
         if(m_rosterKey!=key){m_rosterKey=key;m_grid->removeAllChildrenWithCleanup(true);m_cards.clear();m_watchMenu=CCMenu::create();m_watchMenu->setPosition({0,0});m_grid->addChild(m_watchMenu);
             for(std::size_t i=m_page*m_pageSize;i<std::min(targets.size(),(m_page+1)*m_pageSize);++i){auto const&t=targets[i];auto const cell=i%m_pageSize;float h=compact?29:43,x=65.f+120*(cell%4),y=compact?238.f-32*(cell/4):232.f-48*(cell/4);
                 auto* face=ui::surface({82,h},{},ui::Blue,ui::SurfaceRaised,255,true);
-                auto* name=ui::playerNameLabel(t.name,.18f,{43,h-7},ui::Text);ui::fitSingleLineMenuLabel(name,62,11,.18f);face->addChild(name,5);
+                auto* name=ui::playerNameLabel(t.name,.18f,{43,h-7},ui::Text,ui::FontWeight::Black);ui::fitSingleLineMenuLabel(name,62,11,.18f);face->addChild(name,5);
                 auto* score=ui::menuLabel("",compact?.12f:.15f,{43,h-17},ui::Text);face->addChild(score,5);
                 auto* status=ui::menuLabel("",.12f,{43,compact?3.f:8.f},ui::TextMuted);face->addChild(status,5);
                 SurvivalStanding row;row.id=t.id;row.name=t.name;row.bot=t.bot;row.accountId=t.account;
