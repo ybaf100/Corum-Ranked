@@ -80,7 +80,7 @@ void DebugSpectateRuntime::start(bool playback, std::string password,float start
     m_mode = playback ? DebugSpectateMode::PreparingPlayback : DebugSpectateMode::PreparingRecord;
     m_status = playback ? "REQUESTING SERVER PLAYBACK..." : "CREATING SERVER RECORDING...";
     m_launched = false; m_playbackComplete = false; m_errors = 0; m_capture = {};
-    m_previousCapturedPose.reset();
+    m_previousCapturedPose.reset();m_nativeClockOrigin.reset();
     m_id.clear(); m_token.clear(); m_contextId.clear();
     // Admission belongs to a NEW scope. A deadline/backoff left by an expired
     // or failed scope must not cancel this request before its HTTP ACK arrives.
@@ -174,7 +174,12 @@ bool DebugSpectateRuntime::recordPose(SpectatorGhostPose const& pose, bool termi
     if (m_mode != DebugSpectateMode::Recording || m_capture.ended()) return false;
     auto const now = std::chrono::steady_clock::now();
     if (m_capture.nextSequence() == 0 && finiteSpectatorPose(pose)) m_recordStartedAt = now;
-    auto const elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_recordStartedAt).count();
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_recordStartedAt).count();
+    if(pose.nativeElapsedMs&&std::isfinite(*pose.nativeElapsedMs)&&*pose.nativeElapsedMs>=0){
+        if(!m_nativeClockOrigin)m_nativeClockOrigin=*pose.nativeElapsedMs;
+        if(*pose.nativeElapsedMs<*m_nativeClockOrigin){fail("RECORD_NATIVE_CLOCK_REVERSED");return false;}
+        elapsed=static_cast<std::int64_t>(*pose.nativeElapsedMs-*m_nativeClockOrigin);
+    }
     auto const sequence = m_capture.nextSequence();
     auto const accepted = m_capture.capture(elapsed, pose, terminal);
     if (accepted) {
@@ -199,20 +204,24 @@ void DebugSpectateRuntime::cancelRecording() {
 }
 void DebugSpectateRuntime::pumpRecording() {
     if (m_busy || std::chrono::steady_clock::now() < m_nextUploadAt || m_token.empty()) return;
-    auto const batch = m_capture.batch();
+    auto batch = m_capture.batch();
     if (batch.empty() && !m_capture.ended()) return;
     auto http = request(m_token); matjson::Value body;
     if (!batch.empty()) {
         body["formatVersion"] = kDebugSpectateFormatVersion;
         auto frames = matjson::Value::array();
+        std::size_t bytes=256, sent=0;
         for (auto const& f : batch) {
             matjson::Value frame; frame["sequence"] = f.sequence; frame["elapsedMs"] = f.elapsedMs;
             frame["keyframe"] = encodeSpectatorPose(f.pose);
             if(f.pose.cosmetics && validSpectatorCosmetics(*f.pose.cosmetics)){
                 frame["keyframe"]["cosmetics"]=encodeSpectatorCosmetics(*f.pose.cosmetics);
             }
-            frames.push(frame);
+            auto size=frame.dump().size();
+            if(bytes+size>48*1024){if(sent==0){fail("RECORD_FRAME_BYTE_LIMIT");return;}break;}
+            bytes+=size;++sent;frames.push(frame);
         }
+        batch.resize(sent); // ACK only the bounded prefix actually sent.
         body["frames"] = frames;
     } else body["completed"] = m_capture.completed();
     http.bodyJSON(body); auto const generation = m_generation; auto const id = m_id;

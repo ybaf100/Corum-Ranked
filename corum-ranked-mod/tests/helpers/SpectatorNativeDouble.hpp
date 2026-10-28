@@ -230,7 +230,7 @@ struct GJBaseGameLayer {
 };
 struct PlayLayer: GJBaseGameLayer {
     GJGameLevel* m_level=nullptr; float m_levelLength=1000,m_progressWidth=200,m_progressHeight=10;
-    bool m_isTestMode=false,m_isPracticeMode=false,m_decimalPercentage=false,m_isPaused=false;
+    bool m_isTestMode=false,m_isPracticeMode=false,m_decimalPercentage=false,m_isPaused=false,m_started=false,m_inResetDelay=true;
     int m_currentProgress=0,newBest=7,savedPercentage=7,resets=0;
     void resetLevel(){++resets;}
     cocos2d::CCSprite* m_progressFill=nullptr; cocos2d::CCLabelBMFont* m_percentageLabel=nullptr;
@@ -239,3 +239,6 @@ struct PlayLayer: GJBaseGameLayer {
     // No reset/death/completion/Attempt methods: production renderer must not
     // invoke them. An accidental gameplay dependency fails this compilation.
 };
+
+// Explicit native event boundary ports; the separate world-event tests execute their production policy.
+namespace corum::ranked {struct SpectatorRemoteFrame; inline void prepareNativeWorldEvents(::PlayLayer*,SpectatorRemoteFrame const&){} inline void applyDueNativeRandomEvents(::PlayLayer*){} }

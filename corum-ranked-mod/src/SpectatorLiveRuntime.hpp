@@ -61,6 +61,16 @@ public:
     [[nodiscard]] std::string const& opponentName() const;
     [[nodiscard]] std::optional<SpectatorGhostPose> interpolatedPose() const;
     [[nodiscard]] std::optional<SpectatorRemoteFrame> presentationFrame() const;
+    [[nodiscard]] std::optional<SpectatorRemoteFrame> worldFrame() const;
+    bool restoringWorld()const{return m_forceRestoreRequest||m_restoreTimeline.active();}
+    void audioPrepared(bool ready){m_presentationAudioReady=ready;}
+    bool presentationPending()const{return m_debugBarrierPending;}
+    char const* restorationPhase()const{
+        if(m_forceRestoreRequest||m_viewAttemptId.empty())return "PREPARING";
+        if(m_restoreTimeline.active())return m_restoreTimeline.queued()?"RESTORING WORLD":"CATCHING UP";
+        if(m_debugBarrierPending)return "READY TO PRESENT";
+        return "LIVE";
+    }
     void requestSceneRestore();
     std::vector<SpectatorRemoteFrame> takeRestorationFrames();
     void restorationApplied(SpectatorRemoteFrame const& frame,bool clockAdvanced,double workMs=0);
@@ -118,6 +128,9 @@ private:
     int m_deferredRound = 0, m_deferredDeathmatch = 0;
 
     std::string m_viewMatchId;
+    std::string m_rejectedWorldContext;
+    SpectatorRandomTimeline m_randomEvents;
+    bool m_presentationAudioReady=false,m_debugBarrierPending=false;
     bool m_viewOpponentPaused = false;
     std::string m_viewContextKey;
     std::string m_viewAttemptId;

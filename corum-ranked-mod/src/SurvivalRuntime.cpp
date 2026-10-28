@@ -313,16 +313,17 @@ void SurvivalRuntime::poll() {
     });
 }
 SurvivalOutcomeChoice SurvivalRuntime::outcomeChoice() const {
-    if(Mod::get()->getSavedValue<std::string>("survival-outcome-match")!=m_view.id)return SurvivalOutcomeChoice::Undecided;
+    if(Mod::get()->getSavedValue<std::string>("survival-outcome-context")!=optionsContext())return SurvivalOutcomeChoice::Undecided;
     auto const choice=Mod::get()->getSavedValue<int>("survival-outcome-choice",0);
-    return choice==1?SurvivalOutcomeChoice::Observe:choice==2?SurvivalOutcomeChoice::PersonalResult:choice==3&&!m_view.ownEliminated?SurvivalOutcomeChoice::LiveSpectate:SurvivalOutcomeChoice::Undecided;
+    return choice==1&&m_view.ownEliminated?SurvivalOutcomeChoice::Observe:choice==2&&m_view.state=="FINAL_RESULT"?SurvivalOutcomeChoice::PersonalResult:choice==3&&officialRoundCleared()?SurvivalOutcomeChoice::LiveSpectate:choice==4&&m_view.ownEliminated?SurvivalOutcomeChoice::Standings:SurvivalOutcomeChoice::Undecided;
 }
 void SurvivalRuntime::chooseOutcome(SurvivalOutcomeChoice choice){
     if(choice==outcomeChoice()||!active())return;
     if(choice==SurvivalOutcomeChoice::LiveSpectate){if(!officialRoundCleared()||freePlaying())return;}
-    else if(!m_view.ownEliminated){if(choice!=SurvivalOutcomeChoice::Undecided)return;}
+    else if(choice==SurvivalOutcomeChoice::PersonalResult&&m_view.state!="FINAL_RESULT")return;
+    else if(!m_view.ownEliminated){if(choice!=SurvivalOutcomeChoice::Undecided&&m_view.state!="FINAL_RESULT")return;}
     else if(choice==SurvivalOutcomeChoice::Observe&&watchLockSeconds()>0)return;
-    Mod::get()->setSavedValue("survival-outcome-match",m_view.id);Mod::get()->setSavedValue("survival-outcome-choice",static_cast<int>(choice));
+    Mod::get()->setSavedValue("survival-outcome-context",optionsContext());Mod::get()->setSavedValue("survival-outcome-choice",static_cast<int>(choice));
     (void)Mod::get()->saveData();
 }
 int SurvivalRuntime::watchLockSeconds() const {
@@ -517,7 +518,7 @@ bool SurvivalRuntime::beginAttempt() {
     auto body=event("ATTEMPT_START");if(!RankedRuntime::get().prepareSurvivalEnvironment(body))return false;
     m_localAttempts=std::max(m_localAttempts,own==m_view.standings.end()?0:own->attemptsUsed)+1;
     m_spectatorAcceptedAttempt.clear();m_attempt=utils::random::generateUUID();m_attemptContext=preparationContextText(preparationContext());m_attemptBest=0;m_lastProgress=-1;m_nextProgress={};
-    replay::Json metadata;metadata["formatVersion"]=replay::FormatVersion;metadata["gameVersion"]="2.2081";
+    replay::Json metadata;metadata["formatVersion"]=replay::FormatVersion;metadata["nativeWorldEventVersion"]=1;metadata["gameVersion"]="2.2081";
     metadata["geodeVersion"]=Loader::get()->getVersion().toVString();metadata["modVersion"]=Mod::get()->getVersion().toVString();
     metadata["matchId"]=m_view.id;metadata["roundKey"]=m_view.roundKey;metadata["roundNumber"]=m_view.roundNumber;metadata["phase"]=m_view.phase;
     metadata["mapGeneration"]=m_view.mapGeneration;metadata["levelId"]=m_view.map.levelId;metadata["mapVersion"]=m_view.map.version;
@@ -578,7 +579,7 @@ bool SurvivalRuntime::armClearedReplay(GJGameLevel* level,CCScene* origin){
 }
 void SurvivalRuntime::leaveObserver(){
     if(!observing())return;
-    chooseOutcome(SurvivalOutcomeChoice::PersonalResult);
+    chooseOutcome(SurvivalOutcomeChoice::Undecided);
     if(m_freePlay.active && m_freePlay.observer)m_freePlay.returnRequested=true;
     pumpFreePlayReturn();
 }
@@ -725,6 +726,9 @@ void SurvivalRuntime::pumpForceClear() {
     }
     // Poll recovers a committed request whose HTTP response was lost.
     if(!ending && normalRoundCleared()){
+        // Only an approved synthetic clear retires the native capture. A
+        // rejected Force Clear must not disable a still-official Attempt.
+        replay::Recorder::get().finishFromLast("DEBUG_FORCE_CLEAR");
         m_forceClearRequest.cancel();m_forceClearBusy=false;m_forceClearBody.reset();m_attempt.clear();return;
     }
     if(m_forceClearBusy || m_eventBusy || !m_events.empty() || std::chrono::steady_clock::now()<m_forceClearRetryAt)return;
@@ -737,7 +741,7 @@ void SurvivalRuntime::pumpForceClear() {
         geode::log::info("[SurvivalForceClear] HTTP request={} match={} round={} status={}",requestId,id,roundKey,response.code());
         if(response.code()>=200 && response.code()<300){
             observe(response.json().unwrapOr(matjson::Value()));m_nextPoll={};
-            if((ending && m_view.state!="PLAYING") || (!ending && normalRoundCleared())){m_forceClearBody.reset();m_attempt.clear();}
+            if((ending && m_view.state!="PLAYING") || (!ending && normalRoundCleared())){if(!ending)replay::Recorder::get().finishFromLast("DEBUG_FORCE_CLEAR");m_forceClearBody.reset();m_attempt.clear();}
             else m_forceClearRetryAt=std::chrono::steady_clock::now()+std::chrono::seconds(1);
         }else if(response.code()==0 || response.code()==408 || response.code()==429 || response.code()>=500){
             m_forceClearRetryAt=std::chrono::steady_clock::now()+std::chrono::seconds(1);m_nextPoll={};

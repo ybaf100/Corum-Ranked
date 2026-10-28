@@ -1,5 +1,6 @@
 #pragma once
 #include "../domain/SpectatorRemotePolicy.hpp"
+#include "SpectatorWorldEventsCodec.hpp"
 #include <matjson.hpp>
 #include <limits>
 
@@ -31,6 +32,7 @@ inline matjson::Value encodeSpectatorPose(SpectatorGhostPose const& pose) {
         value["discontinuity"]["fromY"] = static_cast<double>(snap.fromY);
         value["discontinuity"]["toX"] = static_cast<double>(snap.toX);
         value["discontinuity"]["toY"] = static_cast<double>(snap.toY);
+        if(!snap.nativeEvents.empty()){value["discontinuity"]["nativeEvents"]=matjson::Value::array();for(auto const& e:snap.nativeEvents){matjson::Value j;j["type"]=std::string(spectatorDiscontinuityName(e.type));j["fromX"]=e.fromX;j["fromY"]=e.fromY;j["toX"]=e.toX;j["toY"]=e.toY;j["beforeMode"]=std::string(spectatorModeName(e.beforeMode));j["afterMode"]=std::string(spectatorModeName(e.afterMode));j["beforeGravity"]=e.beforeGravity;j["afterGravity"]=e.afterGravity;value["discontinuity"]["nativeEvents"].push(j);}}
         if (snap.fromCamera && validSpectatorCamera(*snap.fromCamera)) {
             value["discontinuity"]["cameraFromX"] = static_cast<double>(snap.fromCamera->x);
             value["discontinuity"]["cameraFromY"] = static_cast<double>(snap.fromCamera->y);
@@ -38,6 +40,9 @@ inline matjson::Value encodeSpectatorPose(SpectatorGhostPose const& pose) {
     }
     value["effects"]=static_cast<int>(pose.effects);
     if(pose.audio){value["audio"]["trackHash"]=pose.audio->trackHash;value["audio"]["positionMs"]=pose.audio->positionMs;}
+    if(pose.simulation){auto const& c=*pose.simulation;value["simulation"]["elapsedMs"]=c.elapsedMs;value["simulation"]["tick"]=c.tick;value["simulation"]["started"]=c.started;value["simulation"]["resetDelay"]=c.resetDelay;}
+    if(pose.randomEvents&&!pose.randomEvents->empty()){value["randomEvents"]=matjson::Value::array();for(auto const& e:*pose.randomEvents)value["randomEvents"].push(encodeSpectatorRandomEvent(e));}
+    if(pose.followHistory){auto const& h=*pose.followHistory;value["followHistory"]["index"]=h.index;value["followHistory"]["remainder"]=h.remainder;value["followHistory"]["y"]=matjson::Value::array();for(auto y:h.y)value["followHistory"]["y"].push(y);}
     if(pose.progress)value["progress"]=static_cast<double>(*pose.progress);
     if(pose.dual && pose.player2)value["player2"]=encodeSpectatorPose(spectatorSecondaryAsPose(*pose.player2));
     return value;
@@ -51,6 +56,22 @@ inline std::optional<SpectatorGhostPose> decodeSpectatorPose(matjson::Value cons
     if (!mode) return std::nullopt;
     auto const nan = std::numeric_limits<double>::quiet_NaN();
     SpectatorGhostPose pose;
+    if(value.contains("followHistory")){
+        auto const& h=value["followHistory"];auto y=h["y"].asArray();auto data=std::make_shared<SpectatorFollowHistory>();data->index=h["index"].asInt().unwrapOr(-1);data->remainder=h["remainder"].asDouble().unwrapOr(nan);
+        if(y.isErr()||y.unwrap().size()!=200)return std::nullopt;
+        for(std::size_t i=0;i<200;++i)data->y[i]=static_cast<float>(y.unwrap()[i].asDouble().unwrapOr(nan));
+        pose.followHistory=std::move(data);
+    }
+    if(value.contains("randomEvents")){
+        auto list=value["randomEvents"].asArray();if(list.isErr()||list.unwrap().size()>16)return std::nullopt;
+        auto events=std::make_shared<std::vector<SpectatorRandomEvent>>();std::uint64_t last=0;
+        for(auto const& item:list.unwrap()){auto e=decodeSpectatorRandomEvent(item);if(!e||e->ordinal<=last)return std::nullopt;last=e->ordinal;events->push_back(std::move(*e));}pose.randomEvents=std::move(events);
+    }
+    if(value.contains("simulation")){
+        auto const& c=value["simulation"];auto time=c["elapsedMs"].asDouble().unwrapOr(nan);auto tick=c["tick"].asInt().unwrapOr(-1);
+        if(!std::isfinite(time)||time<0||time>86400000||tick<0||tick>1000000000||c["started"].asBool().isErr()||c["resetDelay"].asBool().isErr())return std::nullopt;
+        pose.simulation=SpectatorSimulationClock{time,tick,c["started"].asBool().unwrapOr(false),c["resetDelay"].asBool().unwrapOr(false)};
+    }
     if(value.contains("audio")){
         auto const& a=value["audio"];auto hash=a["trackHash"].asString().unwrapOr("");auto time=a["positionMs"].asDouble().unwrapOr(nan);
         if(hash.size()!=64||!std::all_of(hash.begin(),hash.end(),[](char c){return (c>='0'&&c<='9')||(c>='a'&&c<='f');})||!std::isfinite(time)||time<0||time>86400000)return std::nullopt;
@@ -92,6 +113,11 @@ inline std::optional<SpectatorGhostPose> decodeSpectatorPose(matjson::Value cons
             static_cast<float>(evidence["fromY"].asDouble().unwrapOr(nan)),
             static_cast<float>(evidence["toX"].asDouble().unwrapOr(nan)),
             static_cast<float>(evidence["toY"].asDouble().unwrapOr(nan))};
+        if(evidence.contains("nativeEvents")){auto events=evidence["nativeEvents"].asArray();if(events.isErr()||events.unwrap().empty()||events.unwrap().size()>8)return std::nullopt;
+            for(auto const& e:events.unwrap()){auto type=e["type"].asString().unwrapOr("");auto before=parseSpectatorMode(e["beforeMode"].asString().unwrapOr("")),after=parseSpectatorMode(e["afterMode"].asString().unwrapOr(""));if((type!="TELEPORT"&&type!="SPIDER_SNAP")||!before||!after||e["beforeGravity"].asBool().isErr()||e["afterGravity"].asBool().isErr())return std::nullopt;
+                snap.nativeEvents.push_back({type=="TELEPORT"?SpectatorDiscontinuity::Teleport:SpectatorDiscontinuity::SpiderSnap,static_cast<float>(e["fromX"].asDouble().unwrapOr(nan)),static_cast<float>(e["fromY"].asDouble().unwrapOr(nan)),static_cast<float>(e["toX"].asDouble().unwrapOr(nan)),static_cast<float>(e["toY"].asDouble().unwrapOr(nan)),*before,*after,e["beforeGravity"].asBool().unwrapOr(false),e["afterGravity"].asBool().unwrapOr(false)});
+            }
+        }
         if (!finiteSpectatorSnap(snap)) return std::nullopt;
         SpectatorCameraOrigin sourceCamera {
             static_cast<float>(evidence["cameraFromX"].asDouble().unwrapOr(nan)),

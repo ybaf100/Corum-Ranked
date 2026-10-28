@@ -26,6 +26,7 @@ def verify_binary(binary, platform, debug):
                 "GameManager::returnToLastScene",
                 "GJBaseGameLayer::update", "GJBaseGameLayer::updateCamera",
                 "GJBaseGameLayer::teleportPlayer", "PlayLayer::startMusic",
+                "RandTriggerGameObject::triggerObject", "GJBaseGameLayer::spawnGroup",
                 "GJBaseGameLayer::processCommands", "GJBaseGameLayer::processQueuedButtons", "GJBaseGameLayer::handleButton",
                 "GJBaseGameLayer::checkCollisions", "GJBaseGameLayer::collisionCheckObjects"}
     forbidden = {"GJGameLevel::saveNewScore", "GJGameLevel::storeNewLocalScore"}

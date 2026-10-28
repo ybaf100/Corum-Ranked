@@ -5,20 +5,21 @@ namespace corum::ranked::replay {
 // Drives verified native callbacks; no remote poses are used to move the local player.
 class Playback final {
 public:
-    struct Frame{double dt=0;std::vector<Json> inputs,steps,poses,anchors;};
+    struct Frame{double dt=0;std::vector<Json> inputs,steps,poses,anchors;std::vector<SpectatorRandomEvent> randoms;};
     explicit Playback(Document document):m_document(std::move(document)){
         if(!m_document.complete||m_document.records.empty()||str(m_document.records.front(),"kind")!="initial")throw std::runtime_error("Replay initial state unavailable");
         m_initial=m_document.records.front();Frame frame;
         for(auto& r:m_document.records){auto kind=str(r,"kind");
           if(kind=="frame"){if(frame.dt>0)m_frames.push_back(std::move(frame));frame={};frame.dt=number(r,"dt");}
+          else if(kind=="random"){if(auto event=decodeSpectatorRandomEvent(r["event"]))frame.randoms.push_back(std::move(*event));}
           else if(kind=="anchor")frame.anchors.push_back(std::move(r));else if(kind=="input")frame.inputs.push_back(std::move(r));else if(kind=="step")frame.steps.push_back(std::move(r));else if(kind=="pose")frame.poses.push_back(std::move(r));
         }if(frame.dt>0)m_frames.push_back(std::move(frame));if(m_frames.empty())throw std::runtime_error("Replay native timeline unavailable");
-        double time=0;for(auto const& f:m_frames){time+=f.dt;m_times.push_back(time);if(!f.poses.empty())m_anchors.push_back({number(f.poses.back(),"progress"),time});}
+        double time=0;for(auto& f:m_frames){std::sort(f.randoms.begin(),f.randoms.end(),[](auto const&a,auto const&b){return a.ordinal<b.ordinal;});time+=f.dt;m_times.push_back(time);if(!f.poses.empty())m_anchors.push_back({number(f.poses.back(),"progress"),time});}
         std::sort(m_anchors.begin(),m_anchors.end(),[](auto const&a,auto const&b){return a.progress<b.progress||(a.progress==b.progress&&a.time<b.time);});
         m_document.metadata["captureCompleteness"]=m_document.footer["captureCompleteness"];
         m_document.records.clear();m_document.records.shrink_to_fit();
     }
-    void restart(){m_index=0;m_time=0;m_budget=0;m_desync=false;m_step=m_anchor=0;m_presentedPose=nullptr;m_seeking=m_target>0;}
+    void restart(){m_index=0;m_time=0;m_budget=0;m_desync=false;m_step=m_anchor=m_random=0;m_presentedPose=nullptr;m_seeking=m_target>0;}
     void seek(double seconds){m_target=std::clamp(seconds,0.,duration());m_seeking=std::abs(m_target-m_time)>1e-6;if(m_target<m_time)m_reset=true;}
     void followRemote(std::string const& attempt,double elapsed,double progress){
         if(!std::isfinite(elapsed)||!std::isfinite(progress)||progress<0||progress>100)return;
@@ -67,8 +68,10 @@ public:
         if(expected["event"]!=actual["event"]||expected["player2"]!=actual["player2"])m_desync=true;
         for(auto key:{"fromX","fromY","toX","toY"})if(std::abs(number(expected,key)-number(actual,key))>2)m_desync=true;
     }
+    std::optional<SpectatorRandomEvent> randomEvent(int index,int id,float x,float y){auto* f=current();if(!f||m_random>=f->randoms.size()){m_desync=true;return {};}
+        auto const& e=f->randoms[m_random];if(e.objectIndex!=index||e.objectId!=id||std::hypot(e.originX-x,e.originY-y)>.1){m_desync=true;return {};}++m_random;return e;}
     void completeFrame(Json const& actual){
-        auto* f=current();if(!f)return;if(m_step!=f->steps.size()||m_anchor!=f->anchors.size())m_desync=true;
+        auto* f=current();if(!f)return;if(m_step!=f->steps.size()||m_anchor!=f->anchors.size()||m_random!=f->randoms.size())m_desync=true;
         if(!f->poses.empty()){
             auto const& expected=f->poses.back();m_presentedPose=&expected;
             auto samePose=[](Json const&a,Json const&b){
@@ -79,7 +82,7 @@ public:
             };
             if(!samePose(expected,actual)||(expected["dual"].asBool().unwrapOr(false)&&!samePose(expected["player2"],actual["player2"])))m_desync=true;
         }
-        m_time+=f->dt;m_budget=std::max(0.,m_budget-f->dt);++m_index;m_step=m_anchor=0;
+        m_time+=f->dt;m_budget=std::max(0.,m_budget-f->dt);++m_index;m_step=m_anchor=m_random=0;
         if(m_seeking&&(m_time>=m_target||ended())){m_seeking=false;m_budget=0;}
     }
 private:
@@ -87,7 +90,7 @@ private:
     struct Anchor{double progress,time;};
     std::vector<Anchor> m_anchors;
     std::vector<Frame> m_frames;std::vector<double> m_times;
-    std::size_t m_index=0,m_step=0,m_anchor=0;
+    std::size_t m_index=0,m_step=0,m_anchor=0,m_random=0;
     double m_time=0,m_budget=0,m_speed=1,m_target=0;
     bool m_paused=false,m_desync=false,m_seeking=false,m_reset=false,m_partial=false;
     std::string m_followAttempt;

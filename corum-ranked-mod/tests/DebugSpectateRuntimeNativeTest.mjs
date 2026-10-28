@@ -434,6 +434,7 @@ test('actual Debug client builds HTTP requests, drains terminal/ACK retries, and
 #include <variant>
 #include <vector>
 ${model}
+${read("src/spectator/SpectatorWorldEventsCodec.hpp").replace(/^#include.*$|^#pragma once$/gm, "")}
 ${read("src/spectator/SpectatorPoseCodec.hpp").replace(/^#include.*$|^#pragma once$/gm, "")}
 namespace geode {
 namespace log {template<class... T> void info(T...){} template<class... T> void warn(T...){} }

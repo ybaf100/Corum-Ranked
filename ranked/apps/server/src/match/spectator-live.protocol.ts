@@ -2,6 +2,7 @@
 import {BadRequestException} from "@nestjs/common";
 import {parseSpectatorCosmetics,type SpectatorCosmetics} from "./spectator-cosmetics.js";
 import type {PlayerSide} from "@corum-ranked/rules";
+import {parseSpectatorRandomEvents,type SpectatorRandomEvent} from './spectator-world-events.js';
 interface SpectatorInputEdge {
   readonly elapsedMs: number;
   readonly button: number;
@@ -15,6 +16,7 @@ export interface SpectatorSnapEvidence {
   readonly type: "TELEPORT" | "SPIDER_SNAP";
   readonly fromX: number; readonly fromY: number; readonly toX: number; readonly toY: number;
   readonly cameraFromX?: number; readonly cameraFromY?: number;
+  readonly nativeEvents?:readonly {readonly type:"TELEPORT"|"SPIDER_SNAP";readonly fromX:number;readonly fromY:number;readonly toX:number;readonly toY:number;readonly beforeMode:SpectatorGameMode;readonly afterMode:SpectatorGameMode;readonly beforeGravity:boolean;readonly afterGravity:boolean}[];
 }
 
 export interface SpectatorPoseKeyframe {
@@ -31,6 +33,9 @@ export interface SpectatorPoseKeyframe {
   readonly flipped: boolean;
   readonly gravity?: number;
   readonly audio?: {readonly trackHash:string;readonly positionMs:number};
+  readonly simulation?: {readonly elapsedMs:number;readonly tick:number;readonly started:boolean;readonly resetDelay:boolean};
+  readonly randomEvents?:readonly SpectatorRandomEvent[];
+  readonly followHistory?:{readonly index:number;readonly remainder:number;readonly y:readonly number[]};
   readonly cameraX?: number;
   readonly cameraY?: number;
   readonly cameraSnap?: boolean;
@@ -155,6 +160,22 @@ export const parseSpectatorKeyframe = (value: unknown): SpectatorPoseKeyframe =>
   const velocityY = optionalFiniteNumber(value.velocityY);
   const gravity = optionalFiniteNumber(value.gravity);
   let audio: SpectatorPoseKeyframe["audio"];
+  let simulation:SpectatorPoseKeyframe["simulation"];
+  let followHistory:SpectatorPoseKeyframe["followHistory"];
+  if(value.followHistory!==undefined){
+    if(!isRecord(value.followHistory)||!Array.isArray(value.followHistory.y)||value.followHistory.y.length!==200)throw new BadRequestException("Invalid native Follow Player Y history");
+    const h=value.followHistory,index=integer(h.index,"followHistory.index",0),remainder=finiteNumber(h.remainder,"followHistory.remainder");
+    if(index>1000000000||remainder<0||remainder>1)throw new BadRequestException("Invalid native Follow history clock");
+    const y=(h.y as unknown[]).map(v=>{const n=finiteNumber(v,"followHistory.y");if(Math.abs(n)>10000000)throw new BadRequestException("Invalid native Follow sample");return n;});followHistory={index,remainder,y};
+  }
+  const randomEvents=value.randomEvents===undefined?undefined:parseSpectatorRandomEvents(value.randomEvents);
+  if(value.simulation!==undefined){
+    if(!isRecord(value.simulation))throw new BadRequestException("Invalid native simulation clock");
+    const c=value.simulation,time=finiteNumber(c.elapsedMs,"simulation.elapsedMs"),tick=integer(c.tick,"simulation.tick",0);
+    if(time<0||time>86400000||tick>1000000000)throw new BadRequestException("Invalid native simulation clock");
+    simulation={elapsedMs:time,tick,started:requiredBoolean(c.started,"simulation.started"),resetDelay:requiredBoolean(c.resetDelay,"simulation.resetDelay")};
+  }
+  if(randomEvents?.length&&!simulation)throw new BadRequestException("Random events require a native source clock");
   if(value.audio!==undefined){
     if(!isRecord(value.audio))throw new BadRequestException("Invalid spectator audio sample");
     const sample=value.audio;
@@ -198,7 +219,19 @@ export const parseSpectatorKeyframe = (value: unknown): SpectatorPoseKeyframe =>
     const cameraFromX = optionalFiniteNumber(snap.cameraFromX), cameraFromY = optionalFiniteNumber(snap.cameraFromY);
     const sourceCamera = cameraFromX !== undefined && cameraFromY !== undefined &&
       Math.abs(cameraFromX) <= 10_000_000 && Math.abs(cameraFromY) <= 10_000_000;
-    discontinuity = { type: snap.type, fromX, fromY, toX, toY,
+    let nativeEvents:SpectatorSnapEvidence["nativeEvents"];
+    if(snap.nativeEvents!==undefined){
+      if(!Array.isArray(snap.nativeEvents)||snap.nativeEvents.length<1||snap.nativeEvents.length>8)throw new BadRequestException("Invalid native event chain");
+      nativeEvents=snap.nativeEvents.map(raw=>{if(!isRecord(raw)||(raw.type!=="TELEPORT"&&raw.type!=="SPIDER_SNAP")||!SPECTATOR_GAME_MODES.includes(raw.beforeMode as SpectatorGameMode)||!SPECTATOR_GAME_MODES.includes(raw.afterMode as SpectatorGameMode))throw new BadRequestException("Invalid native event chain");
+        const x=finiteNumber(raw.fromX,"native.fromX"),y=finiteNumber(raw.fromY,"native.fromY"),tx=finiteNumber(raw.toX,"native.toX"),ty=finiteNumber(raw.toY,"native.toY"),d=Math.hypot(tx-x,ty-y);
+        const beforeGravity=requiredBoolean(raw.beforeGravity,"native.beforeGravity"),afterGravity=requiredBoolean(raw.afterGravity,"native.afterGravity");
+        if([x,y,tx,ty].some(v=>Math.abs(v)>10000000)||d===0||(raw.type==="TELEPORT"?d>100000:Math.abs(tx-x)>400||Math.abs(ty-y)>2400)||
+           (raw.type==="SPIDER_SNAP"&&(raw.afterMode!=="SPIDER"||(raw.beforeMode===raw.afterMode&&beforeGravity===afterGravity))))throw new BadRequestException("Unverified native event chain");
+        return {type:raw.type,fromX:x,fromY:y,toX:tx,toY:ty,beforeMode:raw.beforeMode as SpectatorGameMode,afterMode:raw.afterMode as SpectatorGameMode,beforeGravity,afterGravity};
+      });
+      if(Math.hypot(nativeEvents[0]!.fromX-fromX,nativeEvents[0]!.fromY-fromY)>.1||Math.hypot(nativeEvents.at(-1)!.toX-toX,nativeEvents.at(-1)!.toY-toY)>.1||nativeEvents.some((e,i)=>i>0&&Math.hypot(e.fromX-nativeEvents![i-1]!.toX,e.fromY-nativeEvents![i-1]!.toY)>400))throw new BadRequestException("Noncontiguous native event chain");
+    }
+    discontinuity = { type: snap.type, fromX, fromY, toX, toY,...(nativeEvents?{nativeEvents}:{}),
       ...(sourceCamera ? { cameraFromX, cameraFromY } : {}) };
   }
   const player2X = optionalFiniteNumber(value.player2X);
@@ -236,6 +269,9 @@ export const parseSpectatorKeyframe = (value: unknown): SpectatorPoseKeyframe =>
     ...(velocityY === undefined ? {} : { velocityY }),
     ...(gravity === undefined ? {} : { gravity }),
     ...(audio ? {audio} : {}),
+    ...(simulation?{simulation}:{}),
+    ...(randomEvents?{randomEvents}:{}),
+    ...(followHistory?{followHistory}:{}),
     ...(validCamera ? { cameraX, cameraY, cameraSnap: value.cameraSnap === true } : {}),
     ...cameraTransform,
     ...(discontinuity === undefined ? {} : { discontinuity }),

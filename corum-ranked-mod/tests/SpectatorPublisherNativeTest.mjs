@@ -42,6 +42,7 @@ for(const actualJson of [false,true])test('actual publisher ordered ACK/terminal
 #include <vector>
 #include <functional>
 ${actualJson?'#include <matjson.hpp>':model}
+${read('src/spectator/SpectatorWorldEventsCodec.hpp').replace(/^#include.*$|^#pragma once$/gm, '')}
 ${read('src/spectator/SpectatorPoseCodec.hpp').replace(/^#include.*$|^#pragma once$/gm, '')}
 namespace web {
 struct WebResponse {int status=200;int code()const{return status;}};

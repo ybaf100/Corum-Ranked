@@ -8,6 +8,7 @@ import { DATABASE, type DatabasePort } from "../database/database.port.js";
 import { SpectatorLiveService, parseSpectatorKeyframe, type SpectatorPoseKeyframe } from "../match/spectator-live.service.js";
 import type {SpectatorCosmetics} from "../match/spectator-cosmetics.js";
 import { SPECTATOR_LIVE_PROTOCOL_VERSION } from "../match/spectator-live.policy.js";
+import {relayFallback} from "../match/spectator-relay.js";
 import type { RankedSessionContext } from "../session/session.types.js";
 import { DEBUG_SPECTATE_FORMAT_VERSION, DEBUG_SPECTATE_MAX_FRAMES,
   DEBUG_SPECTATE_MAX_SESSIONS, DEBUG_SPECTATE_SAMPLE_MS, DEBUG_SPECTATE_TTL_MS, debugSpectateContextId } from "./debug-spectate.config.js";
@@ -26,6 +27,7 @@ interface Playback {
   readonly id: string; readonly recordingId: string; readonly tokenHash: string; readonly levelId:number;
   readonly expiresAtMs: number; readonly frames: readonly Frame[];
   readonly startElapsedMs:number;lastCosmetics?:SpectatorCosmetics;
+  barrierMode:boolean;awaitingReady:boolean;heldElapsedMs:number;
   startedAtMs: number | null; cursor: number; generation: number; sequence: number; completed: boolean;
 }
 const object = (value: unknown): Record<string, unknown> => {
@@ -250,7 +252,7 @@ export class DebugSpectateService implements OnModuleInit, OnApplicationShutdown
     }
     const startElapsedMs=normalized[startIndex]!.elapsedMs;
     this.playbacks.set(id, { id, recordingId: row.id, levelId:Number(row.level_id), tokenHash: this.tokens.hash(token),
-      expiresAtMs: expiresAt.getTime(), frames: normalized,startElapsedMs, startedAtMs: null, cursor: 0,
+      expiresAtMs: expiresAt.getTime(), frames: normalized,startElapsedMs,barrierMode:false,awaitingReady:false,heldElapsedMs:startElapsedMs, startedAtMs: null, cursor: 0,
       generation: 1, sequence: 0, completed: false });
     this.logger.log(`[DebugSpectate] playback created playbackId=${id} recordingId=${row.id}`);
     // NO frame file / pose injection. Server clock starts on first in-scene poll.
@@ -267,17 +269,30 @@ export class DebugSpectateService implements OnModuleInit, OnApplicationShutdown
     return playback;
   }
   public subscribe(id: string, token: string | undefined, clientDebug?: string, protocolVersion?: string,
-    attemptId?: string, generation?: string, afterSequence?: string, cosmeticRevision?:string, worldHistory?:string) {
+    attemptId?: string, generation?: string, afterSequence?: string, cosmeticRevision?:string, worldHistory?:string,restoreBarrier?:string,readySequence?:string) {
     const playback = this.playback(id, token, clientDebug);
+    if(protocolVersion!=="2")return relayFallback("UNSUPPORTED_PROTOCOL_VERSION");
     const nowMs = this.clock.now().getTime();
-    if (playback.startedAtMs === null) {
-      playback.startedAtMs = nowMs-playback.startElapsedMs;
-      this.logger.log(`[DebugSpectate] playback started playbackId=${id}`);
+    const first=playback.startedAtMs===null;
+    if(first){
+      playback.barrierMode=restoreBarrier==="1";playback.startedAtMs=nowMs-playback.startElapsedMs;
+      this.advance(playback,nowMs);
+      if(playback.barrierMode){playback.awaitingReady=true;playback.heldElapsedMs=playback.startElapsedMs;}
+      this.logger.log(`[DebugSpectate] playback prepared playbackId=${id} sourceMs=${playback.startElapsedMs} awaitingWorld=${playback.awaitingReady}`);
+    }else if(playback.barrierMode&&worldHistory==="1"&&!attemptId&&!playback.awaitingReady){
+      this.advance(playback,nowMs);playback.heldElapsedMs=nowMs-playback.startedAtMs!;playback.awaitingReady=true;
+    }
+    if(playback.awaitingReady&&readySequence!==undefined&&attemptId===playback.recordingId&&generation===String(playback.generation)){
+      const ready=Number(readySequence);
+      if(Number.isSafeInteger(ready)&&ready===playback.cursor-1){
+        playback.startedAtMs=nowMs-playback.heldElapsedMs;playback.awaitingReady=false;
+        this.logger.log(`[DebugSpectate] world ready playbackId=${id} sequence=${ready} sourceMs=${playback.heldElapsedMs}`);
+      }
     }
     this.advance(playback, nowMs);
-    const response = this.relay.subscribeRecorded(debugSpectateContextId(id), nowMs,
+    const response = playback.barrierMode?this.readPrefix(playback,attemptId,generation,afterSequence):this.relay.subscribeRecorded(debugSpectateContextId(id), nowMs,
       protocolVersion, attemptId, generation, afterSequence, cosmeticRevision,worldHistory);
-    if (response.reason === "SEQUENCE_GAP") {
+    if (!playback.barrierMode&&response.reason === "SEQUENCE_GAP") {
       // Same production bounded-buffer gap. A Recorded Publisher can restart a
       // new generation at its latest reached frame; the next HTTP poll resets.
       ++playback.generation;
@@ -285,7 +300,18 @@ export class DebugSpectateService implements OnModuleInit, OnApplicationShutdown
       const frame = playback.frames[Math.max(0, playback.cursor - 1)];
       if (frame) this.emit(playback, frame, nowMs);
     }
-    return { ...response, playbackComplete: playback.completed };
+    return { ...response, playbackComplete: playback.completed,awaitingWorldReady:playback.awaitingReady };
+  }
+  private readPrefix(playback:Playback,attemptId?:string,generation?:string,afterText?:string){
+    const head=playback.cursor-1;
+    const same=attemptId===playback.recordingId&&generation===String(playback.generation);
+    const after=afterText===undefined?-1:Number(afterText);
+    if(same&&(!Number.isSafeInteger(after)||after<0||after>head))return {protocolVersion:2,active:true,waiting:false,fallback:true,reason:"SEQUENCE_GAP",packets:[]};
+    const reset=!same;const cursor=reset?-1:after;
+    const packets=playback.frames.slice(cursor+1,Math.min(head+1,cursor+65)).map(frame=>({protocolVersion:2,matchId:debugSpectateContextId(playback.id),roundNumber:1,deathmatchSequence:null,attemptId:playback.recordingId,generation:playback.generation,levelId:playback.levelId,sequence:frame.sequence,elapsedMs:frame.elapsedMs,inputEdges:[],keyframe:frame.keyframe}));
+    return {protocolVersion:2,active:true,waiting:false,fallback:false,reason:null,reset,bufferWindowMs:3000,maxPackets:72,
+      restoration:{available:true,reason:null,caughtUp:(packets.at(-1)?.sequence??cursor)>=head,headSequence:head,startSequence:0,levelId:playback.levelId},
+      stream:{matchId:debugSpectateContextId(playback.id),roundNumber:1,deathmatchSequence:null,attemptId:playback.recordingId,generation:playback.generation,lastSequence:head,opponentName:"Recorded Publisher",...(playback.lastCosmetics?{cosmetics:playback.lastCosmetics}:{})},packets};
   }
   public closePlayback(id: string, token: string | undefined, clientDebug?: string) {
     const playback = this.playback(id, token, clientDebug);
@@ -308,7 +334,7 @@ export class DebugSpectateService implements OnModuleInit, OnApplicationShutdown
     }
   }
   private advance(playback: Playback, nowMs: number): void {
-    if (playback.startedAtMs === null || playback.completed) return;
+    if (playback.startedAtMs === null || playback.completed || playback.awaitingReady) return;
     const elapsedMs = nowMs - playback.startedAtMs;
     while (playback.cursor < playback.frames.length && playback.frames[playback.cursor]!.elapsedMs <= elapsedMs) {
       this.emit(playback, playback.frames[playback.cursor]!, nowMs);
@@ -324,6 +350,9 @@ export class DebugSpectateService implements OnModuleInit, OnApplicationShutdown
     // A cursor recovery starts a fresh relay generation at the current frame.
     // Sparse metadata may live only in an earlier frame; carry its exact value.
     const descriptor=playback.sequence===0 && !frame.keyframe.cosmetics?playback.lastCosmetics:undefined;
+    // The validated recording is already the bounded history owner. A paused
+    // restore must not depend on a live relay entry that expires while held.
+    if(playback.barrierMode){++playback.sequence;return;}
     this.relay.publishRecorded({ protocolVersion: SPECTATOR_LIVE_PROTOCOL_VERSION,
       matchId: debugSpectateContextId(playback.id), roundNumber: 1, deathmatchSequence: null,
       attemptId: playback.recordingId, generation: playback.generation, sequence: playback.sequence++,

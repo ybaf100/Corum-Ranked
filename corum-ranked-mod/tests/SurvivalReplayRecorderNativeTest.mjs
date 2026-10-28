@@ -17,6 +17,7 @@ test('actual recorder and filesystem wait for official Start, defer terminal thr
 #include <functional>
 #include <thread>
 namespace geode {
+namespace log {template<class... T>void info(T const&...) {}}
 struct Mod{static Mod*get(){static Mod m;return &m;}std::filesystem::path getSaveDir(){return "${dir}";}};
 namespace utils::web {struct WebResponse{matjson::Value value;int status=200;int code()const{return status;}struct Result{matjson::Value value;matjson::Value unwrapOr(matjson::Value)const{return value;}};Result json()const{return {value};}};
 struct WebRequest{template<class...T>void header(T...){}template<class T>void timeout(T){}void followRedirects(bool){}int get(std::string const&){return 1;}};}
@@ -40,6 +41,32 @@ int main(){Recorder r;r.m_recovery.get();r.begin(metadata("first"));initial(r);f
  r.accepted("lost-ack",true);drain(r);assert(r.storage().reconcile(receipt("lost-ack",85)).get());
  r.begin(metadata("damaged"));initial(r);r.accepted("damaged",true);frame(r,99);Json bad;bad["kind"]="frame";bad["dt"]=-1.;r.add(bad);r.finish("DEATH",99);r.nativeFrameEnd();drain(r);
  assert(!r.error().empty());assert(!r.storage().reconcile(receipt("damaged",99)).get());assert(str(r.storage().best(metadata("x")).get()->metadata,"attemptId")=="lost-ack");
+ // A scoped preparation error is actionable and a new Attempt clears it.
+ auto invalid=metadata("bad-metadata");invalid["mapVersion"]=0;r.begin(invalid);assert(r.notice()==ReplayNotice::Preparation&&r.error().find("mapVersion")!=std::string::npos);
+ r.begin(metadata("new-good"));initial(r);assert(r.active()&&r.notice()==ReplayNotice::None&&r.error().empty());
+ // An older asynchronous filesystem error must not poison the new capture UI.
+ std::promise<void> failed;failed.set_exception(std::make_exception_ptr(std::runtime_error("disk full")));
+ r.m_writes.push_back({failed.get_future(),"STORAGE_APPEND","old-attempt","r0"});r.m_receipts.clear();r.pump();assert(r.notice()==ReplayNotice::None);
+ r.accepted("new-good",true);frame(r,90);r.finish("DEATH",90);r.nativeFrameEnd();drain(r);r.m_receipts.clear();
+ // Exercise the real request completion path for all receipt failure classes.
+ for(int code:{0,401,403,404,429,500,200}){
+   r.m_receipts.clear();r.m_deferredReceipts.clear();r.m_nextReceipt={};r.queueReceipt(metadata("new-good"));r.pump();assert(r.m_receiptBusy);
+   geode::utils::web::WebResponse reply;reply.status=code;r.m_request.reply(reply);assert(!r.m_receiptBusy&&r.notice()==ReplayNotice::Receipt);
+   assert(std::filesystem::exists("${dir}/replays/pending/"+corum::ranked::sha256Text("new-good")+".tmp"));
+   assert(str(r.storage().best(metadata("x")).get()->metadata,"attemptId")=="lost-ack");
+ }
+ // Force Clear cannot promote nonexistent 100% native inputs over a real best.
+ r.m_receipts.clear();auto forced=metadata("new-good");forced["capturedProgress"]=90.;forced["terminalReason"]="DEBUG_FORCE_CLEAR";r.m_nextReceipt={};r.queueReceipt(forced);r.pump();
+ geode::utils::web::WebResponse mismatch;mismatch.value["accepted"]=true;mismatch.value["ended"]=true;mismatch.value["progress"]=100.;r.m_request.reply(mismatch);
+ assert(r.notice()==ReplayNotice::Unsupported&&r.error()=="FORCE_CLEAR_HAS_NO_NATIVE_CLEAR_REPLAY");
+ assert(str(r.storage().best(metadata("x")).get()->metadata,"attemptId")=="lost-ack");
+ // A transient API failure retains the file and a subsequent real receipt promotes it.
+ auto retry=metadata("new-good");retry["capturedProgress"]=90.;r.m_receipts.clear();r.m_nextReceipt={};r.queueReceipt(retry);r.pump();
+ geode::utils::web::WebResponse ok;ok.value=metadata("new-good");
+ ok.value["geometryHash"]=std::string(64,'a');ok.value["accepted"]=true;ok.value["ended"]=true;ok.value["progress"]=90.;ok.value["roundBest"]=90.;ok.value["cleared"]=false;r.m_request.reply(ok);
+ assert(r.m_promotions.size()==1);assert(r.m_promotions.front().result.get());r.m_promotions.clear();
+ assert(str(r.storage().best(metadata("x")).get()->metadata,"attemptId")=="new-good");
+
 }
 `;
   writeFileSync(join(dir,'test.cpp'),cpp);execFileSync('g++',['-std=c++23','-pthread','-I',json+'/include','-I',result,join(dir,'test.cpp'),join(root,'src/replay/SurvivalReplayStorage.cpp'),...['value','impl','parser','dump','external/dragonbox'].map(p=>json+'/src/'+p+'.cpp'),'-o',join(dir,'test')],{stdio:'pipe'});execFileSync(join(dir,'test'),[],{stdio:'pipe'});

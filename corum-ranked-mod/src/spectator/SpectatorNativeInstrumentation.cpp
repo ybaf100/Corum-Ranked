@@ -1,5 +1,6 @@
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
 #include "../domain/SpectatorNativeProbe.hpp"
+#include "SpectatorNativeWorldEvents.hpp"
 #include <Geode/Geode.hpp>
 #include <Geode/modify/GJBaseGameLayer.hpp>
 #include <Geode/modify/EffectGameObject.hpp>
@@ -50,6 +51,7 @@ class $modify(CorumSpectatorNativeInteractionProbe, GJBaseGameLayer) {
     void processPlayerFollowActions(float dt) {
         noteSpectatorNativePath(this, nullptr, SpectatorNativePath::Follow);
         GJBaseGameLayer::processPlayerFollowActions(dt);
+        corum::ranked::sampleNativeFollowWorld(this,dt);
     }
     void processDynamicObjectActions(int type, float dt) {
         noteSpectatorNativePath(this, nullptr, SpectatorNativePath::DynamicMove);
@@ -61,6 +63,7 @@ class $modify(CorumSpectatorNativeTriggerProbe, EffectGameObject) {
     void triggerObject(GJBaseGameLayer* layer, int uniqueId, gd::vector<int> const* remapKeys) override {
         corum::ranked::noteSpectatorNativeTrigger(layer, m_uniqueID);
         EffectGameObject::triggerObject(layer, uniqueId, remapKeys);
+        corum::ranked::noteNativeFollowTrigger(layer,this);
     }
 };
 #endif

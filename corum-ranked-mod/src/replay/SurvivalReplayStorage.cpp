@@ -13,7 +13,10 @@
 #endif
 namespace corum::ranked::replay {
 namespace fs=std::filesystem;
-Storage::Storage(fs::path root):m_root(std::move(root)),m_worker([this]{
+// The SDK save directory is trusted, but its ancestors may be OS aliases
+// (/var -> /private/var on Apple). Resolve those before enforcing the replay
+// subtree's no-symlink policy. Never canonicalize a child supplied by a file.
+Storage::Storage(fs::path root):m_root([&]{std::error_code ec;auto parent=fs::weakly_canonical(root.parent_path(),ec);return ec?root:parent/root.filename();}()),m_worker([this]{
     for(;;){std::function<void()> task;{std::unique_lock lock(m_mutex);m_cv.wait(lock,[this]{return m_stop||!m_queue.empty();});
       if(m_stop&&m_queue.empty())return;task=std::move(m_queue.front());m_queue.pop_front();}task();}
 }){}
@@ -36,7 +39,7 @@ void Storage::durable(fs::path const& path){
     auto h=CreateFileW(path.c_str(),GENERIC_WRITE,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
     if(h==INVALID_HANDLE_VALUE)throw std::runtime_error("Replay sync failed");auto ok=FlushFileBuffers(h);CloseHandle(h);if(!ok)throw std::runtime_error("Replay sync failed");
 #else
-    auto fd=::open(path.c_str(),O_RDONLY);if(fd<0)throw std::runtime_error("Replay sync failed");auto ok=::fsync(fd);auto error=errno;::close(fd);if(ok!=0&&!(fs::is_directory(path)&&(error==EINVAL||error==ENOTSUP)))throw std::runtime_error("Replay sync failed");
+    bool directory=fs::is_directory(path);auto fd=::open(path.c_str(),directory?O_RDONLY:O_RDWR);if(fd<0)throw std::runtime_error("Replay sync failed");auto ok=::fsync(fd);auto error=errno;::close(fd);if(ok!=0&&!(directory&&(error==EINVAL||error==ENOTSUP)))throw std::runtime_error("Replay sync failed");
 #endif
 }
 void Storage::replace(fs::path const& from,fs::path const& to){

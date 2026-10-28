@@ -13,6 +13,7 @@ class DebugSpectatePopup final : public Popup {
     bool m_inputError=false;
     CCLabelBMFont* m_status = nullptr;
     CCLabelBMFont* m_liveSetting = nullptr;
+    CCLabelBMFont* m_worldTrace = nullptr;
     CCMenuItemSpriteExtra* action(char const* name, SEL_MenuHandler selector) {
         auto* text = corum::ranked::ui::label(name, 0.35f, {}, corum::ranked::ui::Text,
             corum::ranked::ui::FontWeight::ExtraBold);
@@ -20,9 +21,9 @@ class DebugSpectatePopup final : public Popup {
     }
 protected:
     bool init() override {
-        auto window=CCDirector::sharedDirector()->getWinSize();auto scale=std::min({1.f,(window.width-24)/420.f,(window.height-24)/310.f});
-        if (!Popup::init(420.f*scale, 310.f*scale)) return false;
-        m_content=CCNode::create();m_content->setScale(scale);m_mainLayer->addChild(m_content);
+        auto window=CCDirector::sharedDirector()->getWinSize();auto scale=std::min({1.f,(window.width-24)/420.f,(window.height-24)/340.f});
+        if (!Popup::init(420.f*scale, 340.f*scale)) return false;
+        m_content=CCNode::create();m_content->setScale(scale);m_content->setPosition({0,30*scale});m_mainLayer->addChild(m_content);
         setTitle("SERVER DEBUG SPECTATE");
         auto* map = corum::ranked::ui::label("RECORD LEVEL ID", 0.28f, {130, 238}, corum::ranked::ui::Text);
         m_content->addChild(map);
@@ -47,12 +48,14 @@ protected:
         auto* toggle = action("SERVER LIVE SPECTATOR: LOADING...", menu_selector(DebugSpectatePopup::onToggle));
         toggle->setPosition({210, 32}); menu->addChild(toggle);
         m_liveSetting = typeinfo_cast<CCLabelBMFont*>(toggle->getNormalImage());
+        auto* trace=action("WORLD TRACE: OFF",menu_selector(DebugSpectatePopup::onTrace));trace->setPosition({210,0});menu->addChild(trace);m_worldTrace=typeinfo_cast<CCLabelBMFont*>(trace->getNormalImage());
         corum::ranked::debug::DebugSpectateRuntime::get().refreshLiveSetting();
         schedule(schedule_selector(DebugSpectatePopup::refresh), 0.1f);
         return true;
     }
     void refresh(float) {
         auto& runtime = corum::ranked::debug::DebugSpectateRuntime::get();
+        if(m_worldTrace){m_worldTrace->setString(Mod::get()->getSavedValue<bool>("debug-spectator-world-trace",false)?"WORLD TRACE: ON":"WORLD TRACE: OFF");corum::ranked::ui::fitLabelWidth(m_worldTrace,380,.30f,.20f);}
         if (m_liveSetting) {
             auto const enabled = runtime.liveEnabled();
             m_liveSetting->setString(runtime.liveSettingBusy() ? "SERVER LIVE SPECTATOR: SYNCING..." :
@@ -73,6 +76,7 @@ protected:
         corum::ranked::debug::DebugSpectateRuntime::get().start(test, std::move(password),test?start.value_or(0.f):0.f,level.value_or(corum::ranked::debug::kDebugSpectateLevelId));
     }
     void onRecord(CCObject*) { run(false); }
+    void onTrace(CCObject*) {auto* mod=Mod::get();mod->setSavedValue("debug-spectator-world-trace",!mod->getSavedValue<bool>("debug-spectator-world-trace",false));}
     void onTest(CCObject*) { run(true); }
     void onToggle(CCObject*) {
         auto& runtime = corum::ranked::debug::DebugSpectateRuntime::get();

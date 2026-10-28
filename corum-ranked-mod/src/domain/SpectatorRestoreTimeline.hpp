@@ -21,7 +21,7 @@ public:
         m_queue.push_back({*m_context,sequence,pose,elapsed,m_segment});
         m_lastSequence=sequence;m_lastTime=elapsed;m_terminal=pose.dead || pose.finished;return true;
     }
-    void networkCaughtUp(bool ready){m_caughtUp=ready;}
+    void networkCaughtUp(bool ready){m_caughtUp=ready;finishIfCaughtUp();}
     std::vector<SpectatorRemoteFrame> takeBatch(std::size_t maxSteps=kStepsPerFrame){
         std::vector<SpectatorRemoteFrame> batch;
         if(!m_active)return batch;
@@ -33,7 +33,7 @@ public:
            frame.sequence!=static_cast<std::int64_t>(m_applied) ||
            (m_presented && frame.sequence<=m_presented->sequence))return false;
         m_presented=frame;++m_applied;
-        if(m_caughtUp && m_queue.empty() && frame.sequence==m_lastSequence)m_active=false;
+        finishIfCaughtUp();
         return true;
     }
     std::optional<SpectatorRemoteFrame> frame()const{
@@ -45,6 +45,7 @@ public:
     std::uint64_t appliedCount()const{return m_applied;}
     void reset(){m_context.reset();m_presented.reset();m_queue.clear();m_active=m_caughtUp=m_terminal=false;m_lastSequence=-1;m_lastTime=0;m_segment=m_applied=0;}
 private:
+    void finishIfCaughtUp(){if(m_caughtUp&&m_queue.empty()&&m_presented&&m_presented->sequence==m_lastSequence)m_active=false;}
     std::optional<SpectatorRemoteContext> m_context;
     std::optional<SpectatorRemoteFrame> m_presented;
     std::deque<SpectatorRemoteFrame> m_queue;

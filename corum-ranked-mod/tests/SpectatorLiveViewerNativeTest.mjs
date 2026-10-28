@@ -70,6 +70,7 @@ struct Value {
     Result<Array> asArray()const{if(auto p=std::get_if<Array>(&data))return {*p};return {};}
 };
 }
+${readFileSync(join(root, "src/spectator/SpectatorWorldEventsCodec.hpp"), "utf8").replace(/^#include.*$|^#pragma once$/gm, "")}
 ${readFileSync(join(root, "src/spectator/SpectatorPoseCodec.hpp"), "utf8").replace(/^#include.*$|^#pragma once$/gm, "")}
 namespace corum::ranked::log {template<class... T> void info(T...){} template<class... T> void warn(T...){} template<class... T> void debug(T...){} }
 auto testWall = std::chrono::steady_clock::time_point{};

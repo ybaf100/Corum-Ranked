@@ -85,6 +85,7 @@ void SpectatorLiveRuntime::configureSurvival(SurvivalSpectatorTransportContext c
 void SpectatorLiveRuntime::stopSurvival(){reset();m_external.reset();}
 
 SpectatorLiveStatus SpectatorLiveRuntime::status() const {
+    if(!m_rejectedWorldContext.empty())return SpectatorLiveStatus::Disconnected;
     if(m_disconnected)return SpectatorLiveStatus::Disconnected;
     if(m_consecutiveViewerErrors>0)return SpectatorLiveStatus::Reconnecting;
     if(m_forceRestoreRequest || m_restoreTimeline.active())return SpectatorLiveStatus::Syncing;
@@ -124,7 +125,7 @@ void SpectatorLiveRuntime::resetPublisher() {
 
 void SpectatorLiveRuntime::resetViewer() {
     m_viewOpponentPaused = false;
-    m_restoreTimeline.reset();m_forceRestoreRequest=m_partialSync=m_disconnected=false;m_heldPresentation.reset();m_reconnections=m_restoreFailures=0;
+    m_restoreTimeline.reset();m_randomEvents.reset();m_rejectedWorldContext.clear();m_presentationAudioReady=m_debugBarrierPending=false;m_forceRestoreRequest=m_partialSync=m_disconnected=false;m_heldPresentation.reset();m_reconnections=m_restoreFailures=0;
     m_worldRestoreReason.clear();m_restoreStepCostMs=2;
     m_viewerPollGapMs = 20;
     ++m_viewRequestGeneration;
@@ -163,7 +164,7 @@ void SpectatorLiveRuntime::reset() {
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
 void SpectatorLiveRuntime::startDebugViewer(std::string contextId, std::string token, std::string path,bool restoreHistory) {
     m_debugRestoreHistory=restoreHistory;
-    reset();
+    reset();m_debugBarrierPending=true;m_presentationAudioReady=false;
     m_debugContextId = std::move(contextId); m_debugToken = std::move(token); m_debugPath = std::move(path);
     m_status = SpectatorLiveStatus::Waiting;
 }
@@ -498,6 +499,12 @@ void SpectatorLiveRuntime::pollViewer() {
         path="/api/ranked/survival/online/matches/"+matchId+"/spectator-live?protocolVersion=2&targetId="+m_external->targetId+
             "&roundKey="+m_external->roundKey+"&mapGeneration="+std::to_string(m_external->mapGeneration)+"&levelId="+std::to_string(m_external->level);
     }
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+    if(!m_debugContextId.empty()){
+        path+="&restoreBarrier=1";
+        if(!restoringWorld()&&m_presentationAudioReady&&m_lastViewSequence>=0)path+=fmt::format("&readySequence={}",m_lastViewSequence);
+    }
+#endif
     path+=fmt::format("&cosmeticRevision={}",m_viewCosmeticRevision);
     if (!m_forceRestoreRequest && !m_viewAttemptId.empty()) path += "&attemptId=" + m_viewAttemptId;
     if (!m_forceRestoreRequest && m_viewGeneration > 0) path += fmt::format("&generation={}", m_viewGeneration);
@@ -561,6 +568,7 @@ void SpectatorLiveRuntime::pollViewer() {
                 m_sampleBuffer.latestTimeMs() - m_sampleBuffer.renderTimeMs(),
                 m_sampleBuffer.delayMs(), m_lastViewerRttMs, 0);
             if(m_external)m_viewerPollGapMs=std::max(20,m_viewerPollGapMs);
+            if(!m_rejectedWorldContext.empty())m_viewerPollGapMs=std::max(1000,m_viewerPollGapMs);
             m_nextViewerPollAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(m_viewerPollGapMs);
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
             if (!m_debugContextId.empty() && m_lastAcceptedPose &&
@@ -587,6 +595,7 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
            root["context"]["mapGeneration"].asInt().unwrapOr(0)!=m_external->mapGeneration ||
            root["context"]["levelId"].asInt().unwrapOr(0)!=m_external->level){setFallback("SURVIVAL_STREAM_CONTEXT_MISMATCH");return;}
     }
+    m_debugBarrierPending=root["awaitingWorldReady"].asBool().unwrapOr(false);
     auto const paused = root["paused"].asBool().unwrapOr(false);
     if (m_viewOpponentPaused && !paused) m_lastPacketAt = std::chrono::steady_clock::now();
     m_viewOpponentPaused = paused;
@@ -660,6 +669,19 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
     }
     auto const resetStream = root["reset"].asBool().unwrapOr(false);
     auto const streamChanged = attemptId != m_viewAttemptId || generation != m_viewGeneration;
+    auto const worldIdentity=attemptId+":"+std::to_string(generation);
+    if(!streamChanged&&m_rejectedWorldContext==worldIdentity)return;
+    if(!streamChanged&&hasRestoration&&restoration["reason"].asString().unwrapOr("")=="ATTEMPT_ENDED_DURING_RESTORE"){
+        auto packets=root["packets"].asArray();
+        if(!packets.isErr()&&!packets.unwrap().empty()){
+            auto const& packet=packets.unwrap().back();auto terminal=decodeSpectatorPose(packet["keyframe"]);
+            if(terminal&&(terminal->dead||terminal->finished)&&packet["protocolVersion"].asInt().unwrapOr(0)==kProtocolVersion&&packet["sequence"].asInt().unwrapOr(-1)==restoration["headSequence"].asInt().unwrapOr(-2)&&packet["deathmatchSequence"].asInt().unwrapOr(0)==expectedDeathmatch&&packet["matchId"].asString().unwrapOr("")==m_viewMatchId&&packet["roundNumber"].asInt().unwrapOr(0)==expectedRound&&packet["levelId"].asInt().unwrapOr(expectedLevel)==expectedLevel&&packet["attemptId"].asString().unwrapOr("")==attemptId&&packet["generation"].asInt().unwrapOr(0)==static_cast<std::int64_t>(generation)){
+                m_restoreTimeline.reset();m_randomEvents.reset();m_sampleBuffer.clear();m_heldPresentation.reset();m_lastAcceptedPose=*terminal;
+                m_viewTerminalAttemptId=attemptId;m_lastViewSequence=restoration["headSequence"].asInt().unwrapOr(m_lastViewSequence);m_forceRestoreRequest=false;m_partialSync=true;
+                m_status=SpectatorLiveStatus::Waiting;m_reason=terminal->finished?"CLEAR_DURING_WORLD_RESTORE":"DEATH_DURING_WORLD_RESTORE";return;
+            }
+        }
+    }
     if (attemptId == m_viewAttemptId && generation < m_viewGeneration) {
         setFallback("STALE_GENERATION"); return;
     }
@@ -667,13 +689,14 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
     // Fresh contiguous packets may recover it, through ALL the same validators.
     // Replayed sequences/empty replies cannot revive a timed-out pose.
     if (streamChanged || resetStream) {
+        m_rejectedWorldContext.clear();
         m_viewCosmetics.reset();m_viewCosmeticRevision=0;
         ++m_viewPresentationEpoch;
         if (m_viewPresentationEpoch == 0) ++m_viewPresentationEpoch;
         m_viewAttemptId = attemptId;
         m_viewGeneration = generation;
         m_lastViewSequence = -1;
-        m_restoreTimeline.reset();m_heldPresentation.reset();
+        m_restoreTimeline.reset();m_randomEvents.reset();m_presentationAudioReady=false;m_heldPresentation.reset();
         m_worldRestoreReason.clear();
         if(hasRestoration){
             auto const available=restoration["available"].asBool().unwrapOr(false) && historyLevel==expectedLevel && expectedLevel>0;
@@ -771,6 +794,7 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
         auto const decoded = decodeSpectatorPose(keyframe);
         if (!decoded) { setFallback("INVALID_POSE"); return; }
         auto pose = *decoded;
+        if(pose.randomEvents&&(!pose.simulation||!m_randomEvents.push(pose.randomEvents,pose.simulation->elapsedMs,elapsedMs))){noteWorldPartial("RANDOM_EVENT_HISTORY_INCOMPLETE");}
         if(packet.contains("cosmetics") || keyframe.contains("cosmetics")){
             auto descriptor=decodeSpectatorCosmetics(packet.contains("cosmetics")?packet["cosmetics"]:keyframe["cosmetics"]);
             if(!descriptor){setFallback("INVALID_COSMETIC_DESCRIPTOR");return;}
@@ -809,6 +833,7 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
                     sequence,
                     correction
                 );
+                log::warn("[SpectatorNativeEvent] rejected sequence={} previousMode={} nextMode={} previousGravity={} nextGravity={} type={} fromX={} fromY={} toX={} toY={} nativeEvents={} recaptureRequired=true",sequence,spectatorModeName(m_lastAcceptedPose->mode),spectatorModeName(pose.mode),m_lastAcceptedPose->upsideDown,pose.upsideDown,pose.discontinuity?spectatorDiscontinuityName(pose.discontinuity->type):"NONE",pose.discontinuity?pose.discontinuity->fromX:0,pose.discontinuity?pose.discontinuity->fromY:0,pose.discontinuity?pose.discontinuity->toX:0,pose.discontinuity?pose.discontinuity->toY:0,pose.discontinuity?pose.discontinuity->nativeEvents.size():0);
                 setFallback("POSE_DISCONTINUITY");
                 return;
             }
@@ -853,7 +878,10 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
         if(m_lastViewSequence>head || restoration["caughtUp"].asBool().unwrapOr(false)!=(m_lastViewSequence>=head)){
             setFallback("RESTORE_CURSOR_MISMATCH");return;
         }
-        if(m_restoreTimeline.active())m_restoreTimeline.networkCaughtUp(restoration["caughtUp"].asBool().unwrapOr(false));
+        if(m_restoreTimeline.active()){
+            m_restoreTimeline.networkCaughtUp(restoration["caughtUp"].asBool().unwrapOr(false));
+            if(!m_restoreTimeline.active())if(auto frame=m_restoreTimeline.frame();frame&&frame->pose){m_sampleBuffer.clear();m_sampleBuffer.push({frame->sequence,frame->publisherElapsedMs,*frame->pose,frame->presentationSegment},false,presentationNowMs);m_heldPresentation=frame;}
+        }
     }
     if(appliedPackets>0)m_restoreFailures=0;
     if (appliedPackets > 0 && (streamChanged || resetStream || m_status != SpectatorLiveStatus::Live)) {
@@ -888,6 +916,13 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
 }
 
 void SpectatorLiveRuntime::setFallback(std::string reason) {
+    if((reason=="POSE_DISCONTINUITY"||reason=="PLAYER2_POSE_DISCONTINUITY"||reason=="INVALID_POSE")&&!m_viewAttemptId.empty()){
+        // Re-fetching an immutable invalid event cannot repair its proof. Hold
+        // safely and keep checking for an authoritative NEW Attempt, without
+        // repeatedly resetting the same world/epoch back to 0%.
+        m_rejectedWorldContext=m_viewAttemptId+":"+std::to_string(m_viewGeneration);m_restoreTimeline.reset();m_randomEvents.reset();m_sampleBuffer.clear();m_heldPresentation.reset();
+        m_status=SpectatorLiveStatus::Fallback;m_reason=std::move(reason);m_forceRestoreRequest=false;return;
+    }
     if (m_status != SpectatorLiveStatus::Fallback || m_reason != reason) {
         log::warn(
             "[SpectatorLive] fallback match={} context={} attempt={} generation={} lastSequence={} reason={} rttMs={}",
@@ -941,6 +976,11 @@ std::optional<SpectatorGhostPose> SpectatorLiveRuntime::interpolatedPose() const
 }
 
 std::optional<SpectatorRemoteFrame> SpectatorLiveRuntime::presentationFrame() const {
+    auto frame=worldFrame();
+    if(frame&&restoringWorld())frame->pose.reset();
+    return frame;
+}
+std::optional<SpectatorRemoteFrame> SpectatorLiveRuntime::worldFrame() const {
     auto const nowMs = std::chrono::duration<double, std::milli>(
         std::chrono::steady_clock::now().time_since_epoch()).count();
     auto const sample = m_sampleBuffer.render(nowMs);
@@ -950,7 +990,9 @@ std::optional<SpectatorRemoteFrame> SpectatorLiveRuntime::presentationFrame() co
             m_viewMatchId != m_debugContextId ||
             (m_status != SpectatorLiveStatus::Waiting && m_status != SpectatorLiveStatus::Live &&
              m_status != SpectatorLiveStatus::Fallback)) return std::nullopt;
-        return SpectatorRemoteFrame {
+        if(m_forceRestoreRequest)return m_heldPresentation;
+        if(m_restoreTimeline.active())return m_restoreTimeline.frame();
+        auto frame=SpectatorRemoteFrame {
             .context = { .matchId = m_viewMatchId, .roundNumber = 1, .deathmatchSequence = 0,
                 .levelId = debug::DebugSpectateRuntime::get().levelId(), .attemptId = m_viewAttemptId,
                 .generation = m_viewGeneration, .epoch = m_viewPresentationEpoch },
@@ -959,6 +1001,8 @@ std::optional<SpectatorRemoteFrame> SpectatorLiveRuntime::presentationFrame() co
             .publisherElapsedMs = sample ? sample->publisherElapsedMs : 0,
             .presentationSegment = sample ? sample->segment : 0,
         };
+        if(frame.pose)frame.pose->randomEvents=m_randomEvents.through(frame.publisherElapsedMs);
+        return frame;
     }
 #endif
     if(m_external){

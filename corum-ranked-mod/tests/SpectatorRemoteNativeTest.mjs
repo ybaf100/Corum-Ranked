@@ -32,6 +32,7 @@ const decoderHarness=`
 #include <map>
 #include <variant>
 ${valueModel}
+${read('src/spectator/SpectatorWorldEventsCodec.hpp').replace(/^#include.*$|^#pragma once$/gm,'')}
 ${read('src/spectator/SpectatorPoseCodec.hpp').replace(/^#include.*$|^#pragma once$/gm,'')}
 auto wireClock=std::chrono::steady_clock::time_point{};auto testClockNow(){return wireClock;}
 constexpr auto kViewerPollInterval=std::chrono::milliseconds(80);

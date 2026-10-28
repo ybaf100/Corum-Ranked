@@ -27,6 +27,11 @@ void record(Storage& s,std::string id,double progress,std::string reason="DEATH"
  s.begin(metadata(id)).get();initial(s,id,progress);Json r;r["kind"]="terminal";r["tick"]=1;r["elapsed"]=1.;r["reason"]=reason;r["progress"]=progress;s.append(id,{r},true).get();}
 int main(){
  assert(score(1.0005,true)==1001);assert(score(99.9995,true)==100000);assert(score(1.999,false)==1);
+ // OS-owned ancestors can be symlinks; the owned replay subtree cannot.
+ std::filesystem::create_directories("${dir}/real-save");std::filesystem::create_directory_symlink("${dir}/real-save","${dir}/save-alias");
+ {Storage alias("${dir}/save-alias/replays");record(alias,"alias-capture",20);assert(alias.reconcile(receipt("alias-capture",20)).get());assert(alias.best(metadata("x")).get());}
+ std::filesystem::create_directories("${dir}/outside");std::filesystem::create_directory_symlink("${dir}/outside","${dir}/real-save/replays/unsafe");
+ bool symlinkRefused=false;try{refuseReplaySymlinks("${dir}/real-save/replays/unsafe/best.replay");}catch(...){symlinkRefused=true;}assert(symlinkRefused);
  Storage s("${dir}/replays");record(s,"first",35);auto r=receipt("first",35);r.accepted=false;assert(!s.reconcile(r).get());assert(!s.best(metadata("x")).get());r.accepted=true;assert(s.reconcile(r).get());
  record(s,"lower",20);auto lower=receipt("lower",20);lower.roundBest=35;assert(!s.reconcile(lower).get());assert(!std::filesystem::exists("${dir}/replays/pending/"+corum::ranked::sha256Text("lower")+".tmp"));assert(str(s.best(metadata("x")).get()->metadata,"attemptId")=="first");
  s.begin(metadata("higher")).get();initial(s,"higher",60);assert(str(s.best(metadata("x")).get()->metadata,"attemptId")=="first");

@@ -317,6 +317,25 @@ describe("server-backed Debug Spectate over real HTTP and persistent PostgreSQL"
     expect((await poll(finish,"&worldHistory=1")).body.playbackComplete).toBe(true);await post(`playbacks/${finish.playbackId}/close`,{},finish.token);
     expect(await rankedSnapshot()).toEqual(before);expect(rankedState).not.toHaveBeenCalled();
   });
+  it("holds every requested source point until the real viewer confirms world readiness, without generation churn",async()=>{
+    now+=1000;const recording=await startRecord();
+    const frames=[0,1,5,20,50,100].map((progress,i)=>({...frame(i,i*50,false,i===5),keyframe:{...frame(i,i*50,false,i===5).keyframe,progress}}));
+    expect((await post(`recordings/${recording.recordingId}/frames`,{formatVersion:2,frames},recording.token)).status).toBe(201);
+    expect((await post(`recordings/${recording.recordingId}/finalize`,{completed:true},recording.token)).status).toBe(201);
+    for(const [index,startPercent] of [0,1,5,20,50,100].entries()){
+      await connectedClientHeartbeat();
+      const playback=(await post("playbacks",{...createBody,startPercent})).body;
+      const first=(await poll(playback,"&worldHistory=1&restoreBarrier=1")).body;
+      expect(first.restoration).toMatchObject({available:true,caughtUp:true,headSequence:index});
+      const identity=`&worldHistory=1&restoreBarrier=1&attemptId=${first.stream.attemptId}&generation=1`;
+      now+=60000;const held=(await poll(playback,identity+`&afterSequence=${index}`)).body;
+      expect(held.stream.generation).toBe(1);expect(held.restoration.headSequence).toBe(index);expect(held.packets).toHaveLength(0);
+      const ready=(await poll(playback,identity+`&afterSequence=${index}&readySequence=${index}`)).body;expect(ready.stream.generation).toBe(1);
+      now+=50;const next=(await poll(playback,identity+`&afterSequence=${index}`)).body;
+      if(index<5)expect(next.packets[0]).toMatchObject({sequence:index+1,elapsedMs:(index+1)*50});
+      await post(`playbacks/${playback.playbackId}/close`,{},playback.token);
+    }
+  });
   it("refuses to guess percentages for old or unreached recordings while normal 0% playback remains compatible",async()=>{
     now+=1000;await completedRecord();
     const old=await post("playbacks",{...createBody,startPercent:50});expect(old.status).toBe(400);expect(old.body.message).toBe("RECORDING_HAS_NO_PROGRESS_RECORD_AGAIN");

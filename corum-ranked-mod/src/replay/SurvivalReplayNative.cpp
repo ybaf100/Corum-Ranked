@@ -8,6 +8,7 @@
 #include "../spectator/SpectatorPoseCodec.hpp"
 #include "../ui/RankedVisuals.hpp"
 #include "../domain/SpectatorAudioPolicy.hpp"
+#include "../spectator/SpectatorNativeWorldEvents.hpp"
 #include <Geode/binding/FMODAudioEngine.hpp>
 #include <Geode/modify/PlayLayer.hpp>
 #include <Geode/modify/GJBaseGameLayer.hpp>
@@ -44,10 +45,15 @@ public:
  corum::ranked::replay::Playback* worldPlayback(){return m_fields->liveWorldOwned?corum::ranked::SurvivalSpectatorRuntime::get().world():corum::ranked::replay::Runtime::get().playback();}
  void resetLevel(){if((m_fields->replayOwned||m_fields->liveWorldOwned)&&!m_fields->internalReset&&m_fields->ready)return;PlayLayer::resetLevel();}
     void showCaptureError(){
-        auto text=corum::ranked::replay::Recorder::get().error();if(text.empty()||text==m_fields->captureErrorText)return;m_fields->captureErrorText=text;
+        auto& recorder=corum::ranked::replay::Recorder::get();auto state=recorder.notice();
+        using Notice=corum::ranked::replay::ReplayNotice;
+        if(state==Notice::None){if(m_fields->captureError)m_fields->captureError->setVisible(false);m_fields->captureErrorText.clear();return;}
+        auto text=std::to_string(static_cast<int>(state))+recorder.error();if(text==m_fields->captureErrorText)return;m_fields->captureErrorText=text;
         auto size=CCDirector::sharedDirector()->getWinSize();
         if(!m_fields->captureError){m_fields->captureError=corum::ranked::ui::menuLabel("",.19f,{size.width/2,38},corum::ranked::ui::Red);addChild(m_fields->captureError,1500);}
-        auto message=corum::ranked::i18n::text("replay-capture-error","Replay capture failed; existing best preserved");m_fields->captureError->setString(message.c_str());
+        auto key=state==Notice::Preparation?"replay-preparation-failed":state==Notice::Data?"replay-data-error":state==Notice::Space?"replay-space-error":state==Notice::Receipt?"replay-receipt-pending":state==Notice::Unsupported?"replay-native-unavailable":"replay-file-error";
+        auto fallback=state==Notice::Preparation?"Replay preparation failed":state==Notice::Data?"Replay data error":state==Notice::Space?"Not enough replay storage":state==Notice::Receipt?"Awaiting official replay confirmation":state==Notice::Unsupported?"Official result has no matching native replay":"Replay file could not be saved";
+        auto message=corum::ranked::i18n::text(key,fallback);m_fields->captureError->setString(message.c_str());m_fields->captureError->setVisible(true);m_fields->captureError->setColor(state==Notice::Receipt?corum::ranked::ui::Gold:corum::ranked::ui::Red);
         corum::ranked::ui::fitFullMenuLabel(m_fields->captureError,size.width-24,22,.19f);
     }
     void saveReplayCamera(){
@@ -162,7 +168,7 @@ public:
         matjson::Value initial;initial["kind"]="initial";initial["randomSeed"]=std::to_string(m_randomSeed);initial["replayRandSeed"]=std::to_string(m_replayRandSeed);
         initial["started"]=play->m_started;initial["inResetDelay"]=play->m_inResetDelay;initial["attemptTime"]=play->m_attemptTime;initial["levelTime"]=static_cast<double>(play->m_gameState.m_levelTime);initial["nativeStep"]=m_currentStep;initial["resumeTimer"]=m_resumeTimer;initial["pose"]=replayPose(play);recorder.add(initial);
       }
-      if(recorder.active()){recorder.nativeFrameBegin();frameBegan=true;recorder.elapsed(play->m_attemptTime);matjson::Value frame;frame["kind"]="frame";frame["dt"]=static_cast<double>(dt);recorder.add(frame);}
+      if(recorder.active()){corum::ranked::beginNativeWorldEventCapture(play);recorder.nativeFrameBegin();frameBegan=true;recorder.elapsed(play->m_attemptTime);matjson::Value frame;frame["kind"]="frame";frame["dt"]=static_cast<double>(dt);recorder.add(frame);}
     }
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
     auto beforePhysics=std::chrono::steady_clock::now();
@@ -177,7 +183,7 @@ public:
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
     if(official){auto us=std::chrono::duration<double,std::micro>(beforePhysics-captureBegan+std::chrono::steady_clock::now()-afterPhysics).count();
       replay->m_fields->captureUs+=us;replay->m_fields->captureMaxUs=std::max(replay->m_fields->captureMaxUs,us);
-      if(++replay->m_fields->captureFrames==120){log::info("[SurvivalReplayCapture] boundaryMeanUs={} boundaryMaxUs={} queuedWriteOnWorker=true",replay->m_fields->captureUs/120,replay->m_fields->captureMaxUs);replay->m_fields->captureFrames=0;replay->m_fields->captureUs=replay->m_fields->captureMaxUs=0;}}
+      if(++replay->m_fields->captureFrames==120){log::info("[SurvivalReplayCapture] active={} nativeFrameCaptured={} tick={} boundaryMeanUs={} boundaryMaxUs={} writesUseWorker=true",recorder.active(),frameBegan,recorder.tick(),replay->m_fields->captureUs/120,replay->m_fields->captureMaxUs);replay->m_fields->captureFrames=0;replay->m_fields->captureUs=replay->m_fields->captureMaxUs=0;}}
 #endif
  }
     void handleButton(bool down,int button,bool player1){

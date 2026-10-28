@@ -2324,8 +2324,8 @@
     "ko": "승 ("
   },
   "survival-spectator-choices": {
-    "en": "Play locally or view your result.",
-    "ko": "자유 플레이 또는 결과 보기를 선택하세요."
+    "en": "Choose Free Play or Standings.",
+    "ko": "자유 플레이 또는 현황판을 선택하세요."
   },
   "survival-other-player": {
     "en": "OTHER PLAYER",
@@ -2398,5 +2398,29 @@
   "survival-attempts-remaining": {
     "en": "ATTEMPTS LEFT {}/3",
     "ko": "남은 시도 {}/3"
+  },
+  "replay-preparation-failed": {
+    "en": "Replay preparation failed",
+    "ko": "리플레이 녹화 준비 실패"
+  },
+  "replay-data-error": {
+    "en": "Replay data error",
+    "ko": "리플레이 데이터 오류"
+  },
+  "replay-space-error": {
+    "en": "Not enough replay storage",
+    "ko": "리플레이 저장 공간 부족"
+  },
+  "replay-receipt-pending": {
+    "en": "Awaiting official replay confirmation",
+    "ko": "서버 기록 확인 대기"
+  },
+  "replay-native-unavailable": {
+    "en": "Official result has no matching native replay",
+    "ko": "공식 기록에 해당하는 실제 리플레이 없음"
+  },
+  "replay-file-error": {
+    "en": "Replay file could not be saved",
+    "ko": "리플레이 파일 저장 실패"
   }
 }

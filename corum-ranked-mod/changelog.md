@@ -1,3 +1,11 @@
+# v0.5.0-beta.109
+- Preserve official Survival replay files through OS save-directory aliases, delayed receipts and storage failures; log the first rejected field/stage and separate capture, file and confirmation notices.
+- Scope outcome navigation to the exact round/map generation; show Standings during a match and reserve final results for FINAL_RESULT. Force Clear never fabricates native 100% input.
+- Hold Debug TEST source time while bounded native history is restored, hide incomplete presentation, and verify the actual song-channel seek before resuming source-time audio.
+- Capture native Random trigger branch outputs for local replay and Debug RECORD/TEST, plus source Follow Player Y history. Ordinary gameplay RNG and input remain pass-through.
+- Preserve multiple verified native Spider snaps between packets; quarantine unprovable legacy events instead of repeatedly resetting the world. Fence terminal/new-Attempt restoration and expose bounded opt-in world diagnostics.
+- Actual Geometry Dash object, audio and trigger parity still require physical-device validation. Legacy recordings cannot supply missing branch/history evidence; cross-player replay worlds and unsupported native behavior remain PARTIAL SYNC.
+
 # v0.5.0-beta.108
 - Record official Survival native input/tick/RNG/pose/camera timelines locally; atomically preserve the best ended Attempt only after owner-authorized server reconciliation.
 - Add device-local history replay with pause, restart, speed and bounded reset-forward seeking; protect existing best files during interruption, corrupt captures and IO failure.

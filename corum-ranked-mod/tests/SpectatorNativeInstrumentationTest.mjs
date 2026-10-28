@@ -32,6 +32,7 @@ void processCommands(float,bool,bool){++calls;}
 void processPlayerFollowActions(float){++calls;}
 void processDynamicObjectActions(int,float){++calls;}
 };
+namespace corum::ranked {void sampleNativeFollowWorld(GJBaseGameLayer*,float){}void noteNativeFollowTrigger(GJBaseGameLayer*,EffectGameObject*){}}
 struct EffectGameObject:GameObject {
 int calls=0;virtual void triggerObject(GJBaseGameLayer*,int,gd::vector<int>const*){++calls;}
 };

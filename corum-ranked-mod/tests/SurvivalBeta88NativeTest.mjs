@@ -166,7 +166,7 @@ namespace geode::log{template<class...T>void info(T...){} }
 namespace corum::ranked{
 namespace log=geode::log;
 struct RankedRuntime{std::string token="session";static auto&get(){static RankedRuntime r;return r;}std::string spectatorLiveSessionToken()const{return token;}};
-enum class SurvivalOutcomeChoice{PersonalResult};
+enum class SurvivalOutcomeChoice{PersonalResult,Undecided};
 std::string preparationContextText(LevelPreparationContext const&){return "exact-context";}
 struct SurvivalRuntime{
  struct View{std::string id="match",roundKey="r1",state="PLAYING";int mapGeneration=1;bool ownEliminated=false,online=false,ownAssetsReady=true,ownEntered=true,ownAbsent=false;struct Map{int levelId=40000000;}map;Value completedRound;}m_view;

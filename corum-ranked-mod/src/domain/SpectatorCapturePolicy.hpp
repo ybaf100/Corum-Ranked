@@ -27,6 +27,7 @@ public:
     void nativeSnap(SpectatorDiscontinuity type, SpectatorGhostPose const& before,
                     SpectatorGhostPose const& after) {
         if (!finiteSpectatorBody(before) || !finiteSpectatorBody(after)) return;
+        if(type==SpectatorDiscontinuity::SpiderSnap&&(after.mode!=SpectatorGameMode::Spider||(before.mode==after.mode&&before.upsideDown==after.upsideDown)))return;
         SpectatorSnapEvidence snap{type, before.x, before.y, after.x, after.y};
         if (before.camera && validSpectatorCamera(*before.camera)) snap.fromCamera = before.camera;
         if (!finiteSpectatorSnap(snap)) return;
@@ -37,18 +38,23 @@ public:
             snap.fromX = m_snap->fromX; snap.fromY = m_snap->fromY;
             snap.fromCamera = m_snap->fromCamera;
             if (m_snap->type == SpectatorDiscontinuity::Teleport) snap.type = m_snap->type;
-            if (!finiteSpectatorSnap(snap)) return;
+            snap.nativeEvents=m_snap->nativeEvents;
         }
+        snap.nativeEvents.push_back({type,before.x,before.y,after.x,after.y,before.mode,after.mode,before.upsideDown,after.upsideDown});
+        if (!finiteSpectatorSnap(snap)) return;
         m_snap = snap; m_cameraSnap = true;
     }
     void secondaryNativeSnap(SpectatorDiscontinuity type,SpectatorGhostPose const& before,SpectatorGhostPose const& after){
         if(!finiteSpectatorBody(before)||!finiteSpectatorBody(after))return;
+        if(type==SpectatorDiscontinuity::SpiderSnap&&(after.mode!=SpectatorGameMode::Spider||(before.mode==after.mode&&before.upsideDown==after.upsideDown)))return;
         SpectatorSnapEvidence snap{type,before.x,before.y,after.x,after.y};
         if(!finiteSpectatorSnap(snap))return;
         if(m_secondarySnap){if(std::hypot(before.x-m_secondarySnap->toX,before.y-m_secondarySnap->toY)>400)return;
             snap.fromX=m_secondarySnap->fromX;snap.fromY=m_secondarySnap->fromY;
             if(m_secondarySnap->type==SpectatorDiscontinuity::Teleport)snap.type=SpectatorDiscontinuity::Teleport;
-            if(!finiteSpectatorSnap(snap))return;}
+            snap.nativeEvents=m_secondarySnap->nativeEvents;}
+        snap.nativeEvents.push_back({type,before.x,before.y,after.x,after.y,before.mode,after.mode,before.upsideDown,after.upsideDown});
+        if(!finiteSpectatorSnap(snap))return;
         m_secondarySnap=snap;
     }
     bool stableNativeFrame(double nativeTime, bool nativeReady) {

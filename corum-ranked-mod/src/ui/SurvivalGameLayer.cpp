@@ -133,7 +133,7 @@ class SurvivalGameLayer final : public CCLayerColor {
         if((tag==0 || tag==4 || tag==5 || tag==6 || tag==10) && (m_confirmation || runtime.surrenderPending()))return;
         if(tag==13 || tag==19){m_browsingBoard=true;if(runtime.officialRoundCleared() && !runtime.freePlaying()){runtime.chooseOutcome(SurvivalOutcomeChoice::LiveSpectate);SurvivalSpectatorRuntime::get().openTargets();}return;}
         if(tag==18){runtime.chooseOutcome(SurvivalOutcomeChoice::Observe);m_launchedContext.clear();m_manualMap=false;m_browsingBoard=false;return;}
-        if(tag==14){SurvivalSpectatorRuntime::get().leave();runtime.leaveObserver();runtime.chooseOutcome(SurvivalOutcomeChoice::PersonalResult);return;}
+        if(tag==14){SurvivalSpectatorRuntime::get().leave();runtime.leaveObserver();runtime.chooseOutcome(runtime.view().ownEliminated?SurvivalOutcomeChoice::Standings:SurvivalOutcomeChoice::Undecided);m_browsingBoard=true;return;}
         if(tag==12){beginResultMotion();return;}
         if(tag==11){ui::showSurvivalStandings();return;}
         if(tag==10)RankedRoundPreparation::get().retry();
@@ -142,7 +142,7 @@ class SurvivalGameLayer final : public CCLayerColor {
         if(tag==16 && m_cardPages>1)m_cardPage=(m_cardPage+m_cardPages-1)%m_cardPages;
         if(tag==17 && m_cardPages>1)m_cardPage=(m_cardPage+1)%m_cardPages;
         if(tag==1)runtime.acknowledge();
-        if(tag==2){if(runtime.outcomeChoice()==SurvivalOutcomeChoice::LiveSpectate){SurvivalSpectatorRuntime::get().leave();runtime.chooseOutcome(SurvivalOutcomeChoice::PersonalResult);}else if(runtime.observing())runtime.leaveObserver();else confirmSurrender();}
+        if(tag==2){if(runtime.outcomeChoice()==SurvivalOutcomeChoice::LiveSpectate){SurvivalSpectatorRuntime::get().leave();runtime.chooseOutcome(SurvivalOutcomeChoice::Undecided);m_browsingBoard=true;}else if(runtime.observing()){runtime.leaveObserver();runtime.chooseOutcome(SurvivalOutcomeChoice::Standings);m_browsingBoard=true;}else confirmSurrender();}
         if(tag==7){if(runtime.view().ownEliminated){SurvivalSpectatorRuntime::get().leave();runtime.chooseOutcome(SurvivalOutcomeChoice::Observe);m_browsingBoard=false;m_manualMap=true;}else runtime.beginFreePlay();}
         if(tag==8){m_browsingBoard=false;m_manualMap=runtime.view().state=="PLAYING" || runtime.previouslyEntered();m_entrySyncAfter=runtime.serverSyncMillis();runtime.refreshRound();}
         if(tag==9){++m_boardVisit;m_browsingBoard=true;m_manualMap=true;}
@@ -369,7 +369,11 @@ public:
         if(preparationMillis>50)log::info("[RankedEntryTiming] stage=runtime-preparation elapsedMs={}",preparationMillis);
         if(m_confirmation){auto dialog=m_confirmation->lock();if(!dialog || !dialog->getParent())m_confirmation.reset();}
         if(!runtime.active() && !runtime.creating()){m_closed=true;queueInMainThread([]{CCDirector::sharedDirector()->popScene();});return;}
-        auto const& view=runtime.view();auto const& preparation=RankedRoundPreparation::get().view();auto const watching=runtime.outcomeChoice()==SurvivalOutcomeChoice::LiveSpectate;auto const result=view.result.isObject() && !runtime.observing() && !watching;
+        auto const& view=runtime.view();auto const& preparation=RankedRoundPreparation::get().view();auto const watching=runtime.outcomeChoice()==SurvivalOutcomeChoice::LiveSpectate;auto const result=view.state=="FINAL_RESULT" && view.result.isObject() && !runtime.observing() && !watching;
+        // Retire navigation before any outcome early return. Settlement/IO
+        // owners continue independently in SurvivalRuntime/Recorder.
+        auto const navigationContext=runtime.optionsContext();
+        if(m_navigationContext!=navigationContext){m_navigationContext=navigationContext;m_browsingBoard=false;m_manualMap=false;m_entrySyncAfter.reset();m_replayRequestedContext.clear();m_launchedContext.clear();++m_boardVisit;}
         auto const stage=runtime.flowStage();auto const outcome=stage==SurvivalFlowStage::EliminatedChoice || stage==SurvivalFlowStage::PersonalResult || stage==SurvivalFlowStage::Ceremony;
         if(outcome){
             if(stage==SurvivalFlowStage::PersonalResult || stage==SurvivalFlowStage::Ceremony)beginResultMotion();
@@ -385,8 +389,6 @@ public:
         syncAudio(view,elimination);
         auto const intro=view.presentationGate=="INTRO";
         auto const nextRound=runtime.observing() || survivalCanPrepareNext(view.state,view.ownEliminated,view.resultPending,result);
-        auto const navigationContext=view.id+":"+view.roundKey+":"+std::to_string(view.mapGeneration);
-        if(m_navigationContext!=navigationContext){m_navigationContext=navigationContext;m_browsingBoard=false;m_manualMap=false;m_entrySyncAfter.reset();m_replayRequestedContext.clear();}
         auto const liveBoard=(watching || m_browsingBoard || (runtime.officialRoundCleared() && !m_manualMap)) && !result && !elimination;
         auto const clock=survivalBoardClock(view.state,runtime.countdownMs(),runtime.roundRemainingMs());
         m_boardClock->setString(i18n::text(clock,clock).c_str());m_boardClock->setVisible(!result && !elimination && !clock.empty());
@@ -408,7 +410,7 @@ public:
         auto const context=preparationContextText(runtime.preparationContext());auto* level=RankedLevelPreparation::get().level();
         m_resume->setVisible(liveBoard && runtime.canReplayCleared());m_resume->setEnabled(!m_motion && !elimination && !m_confirmation && (!m_entrySyncAfter || runtime.serverSyncMillis()>*m_entrySyncAfter));
         m_continue->setVisible(result);m_continue->setEnabled(!m_motion && !elimination && !runtime.creating());
-        auto const surrenderCaption=watching?text("survival-view-results","VIEW RESULTS"):runtime.observing()?text("survival-leave-observer","LEAVE FREE PLAY"):text("surrender","SURRENDER");
+        auto const surrenderCaption=watching?text("survival-view-board","STANDINGS"):runtime.observing()?text("survival-leave-observer","LEAVE FREE PLAY"):text("surrender","SURRENDER");
         if(surrenderCaption!=m_surrenderText->getString()){m_surrenderText->setString(surrenderCaption.c_str());ui::fitFullMenuLabel(m_surrenderText,104,22,.29f);}
         m_surrender->setVisible(watching || (nextRound && (runtime.observing() || runtime.canSurrender() || runtime.surrenderPending())));m_surrender->setEnabled(!elimination && !m_motion && (watching || runtime.observing() || runtime.canSurrender()));
         m_liveWatch->setVisible((watching || liveBoard) && runtime.officialRoundCleared() && !runtime.freePlaying());

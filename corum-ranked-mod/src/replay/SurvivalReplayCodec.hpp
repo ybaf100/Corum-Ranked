@@ -22,13 +22,15 @@ struct Document {
     std::uintmax_t validBytes=0;
     bool complete=false;
 };
-inline bool metadataValid(Json const& j){
-    return integer(j,"formatVersion")==FormatVersion&&str(j,"gameVersion")=="2.2081"&&
-      str(j,"matchId").size()<=256&&str(j,"roundKey").size()<=256&&str(j,"participantId").size()<=256&&str(j,"attemptId").size()<=256&&
-      !str(j,"matchId").empty()&&!str(j,"roundKey").empty()&&!str(j,"attemptId").empty()&&
-      !str(j,"participantId").empty()&&integer(j,"mapGeneration")>0&&integer(j,"levelId")>0&&
-      integer(j,"mapVersion")>0&&hashValid(str(j,"mapGeometrySha256"));
+inline std::string metadataProblem(Json const& j){
+    if(integer(j,"formatVersion")!=FormatVersion)return "formatVersion";
+    if(str(j,"gameVersion")!="2.2081")return "gameVersion";
+    for(auto key:{"matchId","roundKey","participantId","attemptId"})if(str(j,key).empty()||str(j,key).size()>256)return key;
+    for(auto key:{"mapGeneration","levelId","mapVersion"})if(integer(j,key)<=0)return key;
+    if(!hashValid(str(j,"mapGeometrySha256")))return "mapGeometrySha256";
+    return {};
 }
+inline bool metadataValid(Json const& j){return metadataProblem(j).empty();}
 inline bool recordValid(Json const& r){
     auto kind=str(r,"kind");if(integer(r,"tick")<0||!std::isfinite(number(r,"elapsed"))||number(r,"elapsed")<0)return false;
     if(kind=="input")return integer(r,"button")>=1&&integer(r,"button")<=3&&r["down"].isBool()&&r["player2"].isBool()&&integer(r,"nativeStep")>=0&&std::isfinite(number(r,"timestamp"));
@@ -39,6 +41,7 @@ inline bool recordValid(Json const& r){
         for(auto key:{"randomSeed","replayRandSeed"}){auto text=str(r,key);std::uint64_t n=0;auto parsed=std::from_chars(text.data(),text.data()+text.size(),n);if(text.empty()||parsed.ec!=std::errc{}||parsed.ptr!=text.data()+text.size())return false;}
         return true;
     }
+    if(kind=="random")return decodeSpectatorRandomEvent(r["event"]).has_value();
     if(kind=="anchor")return (str(r,"event")=="TELEPORT"||str(r,"event")=="SPIDER_SNAP")&&r["player2"].isBool()&&
       std::isfinite(number(r,"fromX"))&&std::isfinite(number(r,"fromY"))&&std::isfinite(number(r,"toX"))&&std::isfinite(number(r,"toY"));
     if(kind=="terminal")return !str(r,"reason").empty()&&number(r,"progress")>=0&&number(r,"progress")<=100;

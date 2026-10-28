@@ -61,7 +61,7 @@ struct RankedRuntime {
 struct SpectatorLiveRuntime {
     std::optional<SpectatorRemoteFrame> frame;mutable int reads=0;
     static SpectatorLiveRuntime& get(){static SpectatorLiveRuntime r;return r;}
-    auto presentationFrame()const{++reads;return frame;}
+    auto presentationFrame()const{++reads;return frame;}auto worldFrame()const{++reads;return frame;}bool restoringWorld()const{return restore.active();}
     SpectatorRestoreTimeline restore;
     auto takeRestorationFrames(){return restore.takeBatch();}
     void restorationApplied(SpectatorRemoteFrame const& f,bool advanced,double){assert(advanced);restore.applied(f);frame=f;}
@@ -325,6 +325,11 @@ int main(){
   }
   assert(live.restore.appliedCount()==unsigned(duration/50+1));assert(scene.worldUpdates==duration/50);
   assert(std::abs(scene.m_gameState.m_levelTime-duration/1000.0)<.01);
+  assert(!scene.m_fields->remotePlayer.player()); // catch-up never exposes a ghost
+  auto completedWorldUpdates=scene.worldUpdates;++CCDirector::sharedDirector()->totalFrames;scene.GJBaseGameLayer::update(.016f);
+  assert(scene.worldUpdates==completedWorldUpdates&&scene.m_fields->remotePlayer.player());
+  auto exact=*live.frame;exact.sequence+=1;exact.publisherElapsedMs+=50;exact.pose->simulation=SpectatorSimulationClock{exact.publisherElapsedMs,123,true,false};auto history=std::make_shared<SpectatorFollowHistory>();history->index=233;history->remainder=.007;for(int i=0;i<200;++i)history->y[i]=float(i*3.5);exact.pose->followHistory=history;
+  auto oldX=dummy.getPosition().x;assert(scene.m_fields->spectatorWorldDriver.apply(&scene,true,exact));assert(scene.m_started&&!scene.m_inResetDelay);assert(dummy.m_followRelated==233&&std::abs(dummy.m_unk838-.007)<1e-6);assert(dummy.m_playerFollowFloats[33]==history->y[33]);assert(dummy.getPosition().x==oldX);
   close(dummy.getPosition().x,100+duration*.1f);close(scene.m_gameState.m_cameraPosition.x,dummy.getPosition().x-165);
   assert(!live.restore.applied(*live.restore.frame())); // duplicate completion cannot run native work again
   scene.cleanupSpectatorPresentation();live.restore.reset();live.frame.reset();

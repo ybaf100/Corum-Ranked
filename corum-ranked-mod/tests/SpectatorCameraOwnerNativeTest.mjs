@@ -59,7 +59,7 @@ struct RankedRuntime {
 struct SpectatorLiveRuntime {
     std::optional<SpectatorRemoteFrame> frame;mutable int reads=0;
     static SpectatorLiveRuntime& get(){static SpectatorLiveRuntime r;return r;}
-    auto presentationFrame()const{++reads;return frame;}
+    auto presentationFrame()const{++reads;return frame;}auto worldFrame()const{++reads;return frame;}bool restoringWorld()const{return restore.active();}
     SpectatorRestoreTimeline restore;
     auto takeRestorationFrames(){return restore.takeBatch();}
     void restorationApplied(SpectatorRemoteFrame const& f,bool,double){restore.applied(f);}

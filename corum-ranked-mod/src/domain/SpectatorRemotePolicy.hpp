@@ -2,6 +2,7 @@
 #include "SpectatorGameplayState.hpp"
 #include "SpectatorCameraTransform.hpp"
 #include "SpectatorCosmetics.hpp"
+#include "SpectatorWorldEvents.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -19,10 +20,12 @@ enum class SpectatorDiscontinuity { Teleport, SpiderSnap };
 inline std::string_view spectatorDiscontinuityName(SpectatorDiscontinuity type) {
     return type == SpectatorDiscontinuity::Teleport ? "TELEPORT" : "SPIDER_SNAP";
 }
+struct SpectatorNativeSnapEvent {SpectatorDiscontinuity type=SpectatorDiscontinuity::Teleport;float fromX=0,fromY=0,toX=0,toY=0;SpectatorGameMode beforeMode=SpectatorGameMode::Cube,afterMode=SpectatorGameMode::Cube;bool beforeGravity=false,afterGravity=false;};
 struct SpectatorSnapEvidence {
     SpectatorDiscontinuity type = SpectatorDiscontinuity::Teleport;
     float fromX = 0, fromY = 0, toX = 0, toY = 0;
     std::optional<SpectatorCameraOrigin> fromCamera = std::nullopt;
+    std::vector<SpectatorNativeSnapEvent> nativeEvents={};
 };
 
 // Complete independent Player2 state, atomically attached to Player1's sample.
@@ -36,6 +39,8 @@ struct SpectatorSecondaryPose {
     std::uint64_t segment=0; // local P2 presentation boundary, never a wire identity
 };
 struct SpectatorAudioSample {std::string trackHash;double positionMs=0;};
+struct SpectatorSimulationClock {double elapsedMs=0;std::int64_t tick=0;bool started=false,resetDelay=false;};
+struct SpectatorFollowHistory {std::int64_t index=0;double remainder=0;std::array<float,200> y{};};
 struct SpectatorGhostPose {
     float x = 0.0f;
     float y = 0.0f;
@@ -64,6 +69,9 @@ struct SpectatorGhostPose {
     std::shared_ptr<SpectatorCosmetics const> cosmetics=nullptr;
     std::optional<float> progress=std::nullopt;
     std::optional<SpectatorAudioSample> audio=std::nullopt;
+    std::optional<SpectatorSimulationClock> simulation=std::nullopt;
+    SpectatorRandomEvents randomEvents=nullptr;
+    std::shared_ptr<SpectatorFollowHistory const> followHistory=nullptr;
 
 };
 
@@ -105,6 +113,9 @@ inline bool finiteSpectatorBody(SpectatorGhostPose const& pose) {
 }
 
 inline bool finiteSpectatorPose(SpectatorGhostPose const& pose){
+    if(pose.followHistory){auto const& h=*pose.followHistory;if(h.index<0||h.index>1000000000||!std::isfinite(h.remainder)||h.remainder<0||h.remainder>1||std::any_of(h.y.begin(),h.y.end(),[](float y){return !std::isfinite(y)||std::abs(y)>10000000;}))return false;}
+    if(pose.randomEvents&&(pose.randomEvents->size()>256||!std::all_of(pose.randomEvents->begin(),pose.randomEvents->end(),validSpectatorRandomEvent)))return false;
+    if(pose.simulation&&(!std::isfinite(pose.simulation->elapsedMs)||pose.simulation->elapsedMs<0||pose.simulation->elapsedMs>86400000||pose.simulation->tick<0||pose.simulation->tick>1000000000))return false;
     if(!finiteSpectatorBody(pose)||pose.effects>32767 ||
        (pose.progress && (!std::isfinite(*pose.progress)||*pose.progress<0||*pose.progress>100)))return false;
     if(pose.dual!=pose.player2.has_value())return false;
@@ -112,6 +123,13 @@ inline bool finiteSpectatorPose(SpectatorGhostPose const& pose){
 }
 
 inline bool finiteSpectatorSnap(SpectatorSnapEvidence const& snap) {
+    if(snap.nativeEvents.size()>8)return false;
+    for(std::size_t i=0;i<snap.nativeEvents.size();++i){auto const& e=snap.nativeEvents[i];SpectatorSnapEvidence step{e.type,e.fromX,e.fromY,e.toX,e.toY};
+        if(!finiteSpectatorSnap(step)||spectatorModeName(e.beforeMode).empty()||spectatorModeName(e.afterMode).empty()||
+           (e.type==SpectatorDiscontinuity::SpiderSnap&&(e.afterMode!=SpectatorGameMode::Spider||(e.beforeMode==e.afterMode&&e.beforeGravity==e.afterGravity))))return false;
+        if(i&&std::hypot(e.fromX-snap.nativeEvents[i-1].toX,e.fromY-snap.nativeEvents[i-1].toY)>400)return false;
+    }
+    if(!snap.nativeEvents.empty()&&(std::hypot(snap.nativeEvents.front().fromX-snap.fromX,snap.nativeEvents.front().fromY-snap.fromY)>.1||std::hypot(snap.nativeEvents.back().toX-snap.toX,snap.nativeEvents.back().toY-snap.toY)>.1))return false;
     if (!validSpectatorCamera({snap.fromX, snap.fromY}) ||
         !validSpectatorCamera({snap.toX, snap.toY})) return false;
     auto const dx = snap.toX - snap.fromX, dy = snap.toY - snap.fromY;
@@ -126,7 +144,7 @@ inline bool verifiedSpectatorSnap(SpectatorGhostPose const& previous, SpectatorG
     // continuous motion still has the original 400-unit safety bound.
     if (std::hypot(snap.fromX - previous.x, snap.fromY - previous.y) > 400.0f ||
         std::hypot(next.x - snap.toX, next.y - snap.toY) > 400.0f) return false;
-    return snap.type == SpectatorDiscontinuity::Teleport ||
+    return !snap.nativeEvents.empty() || snap.type == SpectatorDiscontinuity::Teleport ||
         (next.mode == SpectatorGameMode::Spider &&
          (previous.mode != next.mode || previous.upsideDown != next.upsideDown));
 }

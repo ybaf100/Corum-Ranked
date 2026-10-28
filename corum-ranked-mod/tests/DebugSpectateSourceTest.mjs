@@ -35,7 +35,9 @@ test('TEST uses real HTTP viewer decoder/interpolation/renderer/camera; no local
     assert.match(live, /path = m_debugPath \+ fmt::format/);
     assert.match(live, /applyViewerResponse\(root\)/);
     assert.match(live, /\.pose = sample \? std::optional\(sample->pose\)/);
-    assert.match(play, /spectatorTransport\(\).presentationFrame\(\)[\s\S]*?remotePlayer.update\(this, true, m_fields->spectatorRenderedFrame\)/);
+    assert.match(play, /spectatorTransport\(\).worldFrame\(\)/);
+    assert.match(play, /if\(spectatorTransport\(\).restoringWorld\(\)\)m_fields->remotePlayer.presentationVisible\(false\)/);
+    assert.match(play, /remotePlayer.update\(this, true, m_fields->spectatorRenderedFrame\)/);
     assert.match(play, /remotePlayer.cameraFrame\(\)/);
     assert.doesNotMatch(runtime, /applyPose|applyViewerResponse|interpolatedPose|setPosition|setRotation|ifstream|readFile|recordedFrames|playbackClock/);
     assert.doesNotMatch(play, /m_player1->set(?:Position|Rotation)\(/);

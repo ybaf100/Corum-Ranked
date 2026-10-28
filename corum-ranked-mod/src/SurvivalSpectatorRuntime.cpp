@@ -104,6 +104,14 @@ std::string SurvivalSpectatorRuntime::hudText()const{
 void SurvivalSpectatorRuntime::tick(){
     if(m_ticking)return;m_ticking=true;struct Guard{bool& b;~Guard(){b=false;}}guard{m_ticking};
     auto& sur=SurvivalRuntime::get();auto const& v=sur.view();auto const now=std::chrono::steady_clock::now();
+    auto scope=sur.optionsContext();
+    if(!m_lifecycleContext.empty()&&scope!=m_lifecycleContext){
+        ++m_generation;m_request.cancel();m_busy=false;m_selectionVisible=false;m_targets.clear();m_targetsContext.clear();
+        m_pendingTarget.clear();m_openAfterExit=m_startFreePlay=false;m_terminal.reset();
+        if(m_inScene)m_exitRequested=true;
+        else {m_authorized=false;m_world.reset();m_worldLoading={};m_context={};m_target.clear();SpectatorLiveRuntime::survival().stopSurvival();}
+    }
+    m_lifecycleContext=std::move(scope);
     if(m_worldLoading.valid()&&m_worldLoading.wait_for(std::chrono::seconds(0))==std::future_status::ready){
         try{auto document=m_worldLoading.get();if(!m_authorized||!currentScope())throw std::runtime_error("Spectator round changed");
             if(!document||replay::number(document->metadata(),"officialBestProgress")!=100||replay::str(document->metadata(),"mapGeometrySha256")!=v.certificate["geometrySha256"].asString().unwrapOr("")||

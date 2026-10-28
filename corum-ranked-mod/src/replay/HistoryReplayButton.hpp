@@ -8,7 +8,7 @@ class HistoryReplayButton final:public cocos2d::CCNode {
     CCMenuItemSpriteExtra* m_button=nullptr;cocos2d::CCLabelBMFont* m_caption=nullptr;
     void play(cocos2d::CCObject*){showReplay(m_identity);}
     bool init(Json identity,float width){
-        if(!CCNode::init())return false;m_identity=std::move(identity);
+        if(!CCNode::init())return false;m_identity=std::move(identity);Recorder::get().retryPending();
         auto* menu=cocos2d::CCMenu::create();menu->setPosition({0,0});addChild(menu);
         auto* face=ui::surface({width,25},{},ui::Cyan,ui::Surface,240,true);
         m_caption=ui::menuLabel("REPLAY...",.22f,{width/2,12.5f},ui::Text);face->addChild(m_caption,5);

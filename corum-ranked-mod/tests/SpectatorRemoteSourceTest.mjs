@@ -19,7 +19,7 @@ test('dedicated visible renderer stays separate from scoped hidden world driver'
     assert.doesNotMatch(driver, /reportAttempt|savePercentage|saveNewScore|levelComplete|spiderTestJump|PlayerObject::update\(/);
     assert.match(play, /auto spectatorAuthority = runtime.isSpectating\(\)/);
     assert.match(play, /remotePlayer.update\(this, true, m_fields->spectatorRenderedFrame\)/);
-    assert.match(play, /spectatorTransport\(\).presentationFrame\(\)/);
+    assert.match(play, /spectatorTransport\(\).worldFrame\(\)/);
 });
 test('remote renderer cannot invoke scoring, physics, death, completion or camera', () => {
     assert.doesNotMatch(remote, /(?:reportAttempt|levelComplete\(|destroyPlayer\(|resetLevel\(|onQuit\(|savePercentage\(|saveNewScore\(|updateCamera\(|PlayerObject::update\()/);
@@ -43,7 +43,7 @@ test('typed live frame preserves server identity and a local reset epoch', () =>
     assert.match(frame, /ranked.isPlacement\(\)/);
     assert.match(frame, /!ranked.isSpectating\(\)/);
     assert.match(frame, /m_viewContextKey != viewerContextKey\(match\)/);
-    assert.match(live, /if \(streamChanged \|\| resetStream\) \{\s*m_viewCosmetics.reset\(\);m_viewCosmeticRevision=0;\s*\+\+m_viewPresentationEpoch/);
+    assert.match(live, /if \(streamChanged \|\| resetStream\) \{\s*m_rejectedWorldContext.clear\(\);\s*m_viewCosmetics.reset\(\);m_viewCosmeticRevision=0;\s*\+\+m_viewPresentationEpoch/);
     assert.match(live, /m_sampleBuffer.render\(nowMs\)/);
     assert.doesNotMatch(live, /m_previousPose|m_poseReceivedAt|elapsed\) \/ 50.0f/);
 });

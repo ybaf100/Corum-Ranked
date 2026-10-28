@@ -133,7 +133,7 @@ public:
     static SurvivalOutcomePanel* create(std::function<void(int)> action){auto* p=new SurvivalOutcomePanel;if(p->initWithColor({4,8,16,255})){p->m_action=std::move(action);p->setID("survival-outcome-panel"_spr);p->autorelease();return p;}delete p;return nullptr;}
     void present(SurvivalMatchView const& view,SurvivalFlowStage stage,float dt){
         auto const choice=stage==SurvivalFlowStage::EliminatedChoice,ceremony=stage==SurvivalFlowStage::Ceremony;
-        auto const key=view.id+":"+std::to_string(static_cast<int>(stage));
+        auto const key=view.id+":"+view.roundKey+":"+std::to_string(view.mapGeneration)+":"+std::to_string(static_cast<int>(stage));
         // Settlement arriving updates the labels/tiers without resetting a podium animation.
         auto const settled=view.result.isObject();std::string buildKey=key+(settled?":settled":":pending")+":"+std::to_string(view.result["actualDelta"].asInt().unwrapOr(0));
         for(auto const& p:view.result["standings"].asArray().unwrapOr(std::vector<matjson::Value>{}))
@@ -143,10 +143,10 @@ public:
             m_menu=CCMenu::create();m_menu->setPosition(CCPointZero);addChild(m_menu,20);
             auto heading=menuLabel(i18n::text(choice?"survival-eliminated":ceremony?"survival-podium":"survival-personal-result",choice?"ELIMINATED":ceremony?"FINAL PODIUM":"PERSONAL RESULT"),.60f,{size.width/2,size.height-30},ceremony?Gold:Cyan,FontWeight::Black);fitFullMenuLabel(heading,size.width-30,28,.60f);addChild(heading,5);
             if(choice){
-                auto* detail=menuLabel(i18n::text("survival-spectator-choices","Play locally or view your result."),.25f,{size.width/2,size.height*.57f},TextMuted,FontWeight::SemiBold);fitFullMenuLabel(detail,size.width-40,40,.25f);addChild(detail,5);
+                auto* detail=menuLabel(i18n::text("survival-spectator-choices","Play locally or view the standings."),.25f,{size.width/2,size.height*.57f},TextMuted,FontWeight::SemiBold);fitFullMenuLabel(detail,size.width-40,40,.25f);addChild(detail,5);
                 auto const width=std::min(180.f,(size.width-36)/2);
                 m_freeChoice=button(i18n::text("survival-free-play","FREE PLAY"),{size.width/2-width/2-5,size.height*.37f},width,18,Green);
-                m_resultChoice=button(i18n::text("survival-view-results","VIEW RESULTS"),{size.width/2+width/2+5,size.height*.37f},width,14,Gold);
+                m_resultChoice=button(i18n::text("survival-view-board","STANDINGS"),{size.width/2+width/2+5,size.height*.37f},width,14,Cyan);
             }else if(ceremony){
                 std::array<int,3> ranks{2,1,3};auto const width=std::min(138.f,(size.width-48)/3),base=80.f;
                 for(int n=0;n<3;++n){int rank=ranks[n];auto it=std::find_if(m_profiles.begin(),m_profiles.end(),[&](auto const& p){return p.rank==rank;});if(it==m_profiles.end())continue;

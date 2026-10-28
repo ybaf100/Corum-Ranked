@@ -1,4 +1,5 @@
 #include "SpectatorWorldDriver.hpp"
+#include "SpectatorNativeWorldEvents.hpp"
 #include <Geode/Geode.hpp>
 #include <Geode/binding/GJGameLevel.hpp>
 #include <Geode/binding/PlayLayer.hpp>
@@ -40,11 +41,14 @@ bool SpectatorWorldDriver::apply(PlayLayer* layer, bool authorizedDummy,
     m_partialHistory=m_partialHistory || historyGap || pose.dual;
     m_previous = sameContext && !snap && !historyGap ? m_frame->pose : frame->pose;
     m_player = layer->m_player1; m_frame = frame;
+    prepareNativeWorldEvents(layer,*frame);
     write(layer, !sameContext || snap || historyGap);
+    bool sourceHistory=newBoundary&&pose.followHistory;
+    if(sourceHistory){auto const& h=*pose.followHistory;ScopedSpectatorWorldDriverWrite scope(m_player);m_player->m_playerFollowFloats.assign(h.y.begin(),h.y.end());m_player->m_followRelated=static_cast<int>(h.index);m_player->m_unk838=static_cast<float>(h.remainder);m_followRemainderMs=0;}
     // GD 2.2081 updateSpecial ONLY writes Follow Player Y's 200-entry history
     // (official inline binding). Call its native 10ms sampler, never update().
     // Drive it by publisher time, so render FPS / HTTP batches cannot change it.
-    if (sameContext && !snap && !historyGap && deltaMs > 0) {
+    if (!sourceHistory && sameContext && !snap && !historyGap && deltaMs > 0) {
         m_followRemainderMs += deltaMs;
         auto const steps = std::min(200, static_cast<int>((m_followRemainderMs + 0.000001) / 10));
         auto const startRemainder = m_followRemainderMs - deltaMs;
@@ -65,6 +69,9 @@ void SpectatorWorldDriver::write(PlayLayer* layer, bool resetHistory) {
     if (!layer || layer->m_player1 != m_player || !m_frame || !m_frame->pose) return;
     auto const& pose = *m_frame->pose;
     ScopedSpectatorWorldDriverWrite scope(m_player);
+    // Scene initialization may still be holding the dummy's start/reset gates.
+    // Use the recorded source gates, never a local countdown or guessed percent.
+    if(pose.simulation){layer->m_started=pose.simulation->started;layer->m_inResetDelay=pose.simulation->resetDelay;}
     // Presentation flags, not portal/physics helpers. Apply discrete state
     // BEFORE the destination, particularly at a Spider gravity/snap boundary.
     m_player->m_isShip = pose.mode == SpectatorGameMode::Ship;

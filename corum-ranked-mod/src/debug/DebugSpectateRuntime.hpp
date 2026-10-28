@@ -42,6 +42,7 @@ private:
     std::string m_id, m_token, m_contextId, m_status;
     DebugSpectateCapture m_capture;
     std::optional<SpectatorGhostPose> m_previousCapturedPose;
+    std::optional<double> m_nativeClockOrigin;
     std::chrono::steady_clock::time_point m_recordStartedAt {}, m_nextUploadAt {}, m_expireAt {}, m_prepareStartedAt {};
     std::uint64_t m_generation = 0;
     int m_levelId=kDebugSpectateLevelId;

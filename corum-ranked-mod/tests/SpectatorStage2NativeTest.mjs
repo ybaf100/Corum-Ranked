@@ -21,7 +21,7 @@ test('production HTTP decoder, bounded restoration, recovery and compositor shar
   const methods=['SpectatorLiveStatus SpectatorLiveRuntime::status()', 'void SpectatorLiveRuntime::resetViewer()',
    'void SpectatorLiveRuntime::applyViewerResponse(', 'void SpectatorLiveRuntime::setFallback(',
    'void SpectatorLiveRuntime::requestSceneRestore()', 'std::vector<SpectatorRemoteFrame> SpectatorLiveRuntime::takeRestorationFrames()',
-   'void SpectatorLiveRuntime::restorationApplied(', 'void SpectatorLiveRuntime::noteWorldPartial(', 'std::optional<SpectatorRemoteFrame> SpectatorLiveRuntime::presentationFrame()',
+   'void SpectatorLiveRuntime::restorationApplied(', 'void SpectatorLiveRuntime::noteWorldPartial(', 'std::optional<SpectatorRemoteFrame> SpectatorLiveRuntime::presentationFrame()', 'std::optional<SpectatorRemoteFrame> SpectatorLiveRuntime::worldFrame()',
    'void SpectatorLiveRuntime::tickViewer()', 'void SpectatorLiveRuntime::pollViewer()'].map(method).join('\n');
   const cpp=`
 #include <Geode/Geode.hpp>
@@ -158,6 +158,18 @@ int main(){
   assert(r.presentationFrame()->pose->finished&&r.status()==SpectatorLiveStatus::Cleared);
   auto count=r.m_restoreTimeline.appliedCount();r.applyViewerResponse(response(3,1,4));
   assert(r.m_reason=="TERMINAL_STREAM_CANNOT_RESUME"&&r.presentationFrame()->pose->finished&&r.m_restoreTimeline.appliedCount()==count);}
+ // An exhausted queue can become caught-up on a later HTTP response.
+ {SpectatorRestoreTimeline t;SpectatorRemoteContext ctx{"m",1,0,123,"a",1,1};t.begin(ctx,true);assert(t.push(0,0,SpectatorGhostPose{},false));auto frames=t.takeBatch();assert(t.applied(frames[0])&&t.active());t.networkCaughtUp(true);assert(!t.active());}
+ // A death/Clear received while restoring cancels the obsolete queue, hides the incomplete world and fences a new Attempt.
+ for(bool clear:{false,true}){SpectatorLiveRuntime r;attach(r);r.applyViewerResponse(response(0,8,100,true));auto old=r.takeRestorationFrames().front();assert(!r.presentationFrame()->pose);
+  auto end=response(99,1,100);end["restoration"]["available"]=false;end["restoration"]["startSequence"]=99;end["restoration"]["reason"]="ATTEMPT_ENDED_DURING_RESTORE";end["packets"][0]["keyframe"][clear?"finished":"dead"]=true;
+  r.applyViewerResponse(end);assert(!r.m_restoreTimeline.active()&&r.m_restoreTimeline.queued()==0&&!r.presentationFrame()->pose);assert(r.m_reason==(clear?"CLEAR_DURING_WORLD_RESTORE":"DEATH_DURING_WORLD_RESTORE"));
+  r.applyViewerResponse(response(0,1,1,true,"next",2));r.restorationApplied(old,true,.1);assert(r.m_restoreTimeline.appliedCount()==0&&r.worldFrame()->context.attemptId=="next");}
+ // Invalid immutable evidence is quarantined once, rather than endlessly replaying 0% in a new epoch.
+ {SpectatorLiveRuntime r;attach(r);r.applyViewerResponse(response(0,1,1,true));auto broken=response(1,1,2);broken["packets"][0]["keyframe"]["x"]=10000.;r.applyViewerResponse(broken);assert(!r.m_rejectedWorldContext.empty());auto epoch=r.m_viewPresentationEpoch;
+  for(int i=0;i<50;i++){r.applyViewerResponse(response(0,2,2,true));}
+  assert(r.m_viewPresentationEpoch==epoch&&!r.m_restoreTimeline.active()&&r.status()==SpectatorLiveStatus::Disconnected);
+  r.applyViewerResponse(response(0,1,1,true,"good",2));assert(r.m_rejectedWorldContext.empty()&&r.m_viewAttemptId=="good");}
  // A restart with no beginning is explicitly partial; no invented fast-forward or successful checkpoint claim.
  {SpectatorLiveRuntime r;attach(r);auto p=response(1200,2,1202,true);p["restoration"]["available"]=false;p["restoration"]["reason"]="ATTEMPT_START_MISSING";
   r.applyViewerResponse(p);assert(!r.m_restoreTimeline.active()&&r.status()==SpectatorLiveStatus::PartialSync);assert(r.m_reason=="ATTEMPT_START_MISSING");}

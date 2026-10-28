@@ -1,3 +1,5 @@
+#include <Geode/fmod/fmod.hpp>
+#include "spectator/SpectatorNativeWorldEvents.hpp"
 #include "replay/SurvivalReplayRuntime.hpp"
 #include "replay/SurvivalReplayRecorder.hpp"
 #include "ui/SurvivalOutcomePanel.hpp"
@@ -863,25 +865,36 @@ public:
             auto const context=frame->context.attemptId+":"+std::to_string(frame->context.generation)+":"+std::to_string(frame->context.epoch);
             if(context!=m_fields->spectatorAudioContext){m_fields->spectatorAudioContext=context;m_fields->spectatorAudioElapsed=-1;m_fields->spectatorAudioChangedAt=now;m_fields->spectatorAudioPaused=true;audio->pauseMusic(0);}
             if(frame->publisherElapsedMs>m_fields->spectatorAudioElapsed){m_fields->spectatorAudioChangedAt=now;m_fields->spectatorAudioElapsed=frame->publisherElapsedMs;}
-            advancing=now-m_fields->spectatorAudioChangedAt<std::chrono::milliseconds(250)&&!frame->pose->dead&&!frame->pose->finished;
+            advancing=(live.presentationPending()||now-m_fields->spectatorAudioChangedAt<std::chrono::milliseconds(250))&&!frame->pose->dead&&!frame->pose->finished;
         }
         auto const syncing=live.status()==corum::ranked::SpectatorLiveStatus::Syncing;
-        if(frame&&frame->pose&&!frame->pose->audio)live.noteWorldPartial("AUDIO_TIMELINE_UNAVAILABLE");
+        // Warm native audio during restoration, while keeping the channel paused.
+        // Do not discover an asynchronous first-load failure after exposing LIVE.
+        if(frame&&frame->pose&&frame->pose->audio&&!m_fields->spectatorAudioStarted){PlayLayer::startMusic();audio->pauseMusic(0);m_fields->spectatorAudioStarted=true;}
+        if(frame&&frame->pose&&!frame->pose->audio){live.noteWorldPartial("AUDIO_TIMELINE_UNAVAILABLE");live.audioPrepared(true);}
         if(!frame||!frame->pose||!frame->pose->audio||syncing||m_isPaused||!advancing){audio->pauseMusic(0);m_fields->spectatorAudioPaused=true;return;}
         auto const& sample=*frame->pose->audio;
-        if(!m_fields->spectatorAudioStarted){PlayLayer::startMusic();audio->pauseMusic(0);m_fields->spectatorAudioStarted=true;}
         auto const track=std::string(audio->getActiveMusic(0));
-        if(track.empty() || corum::ranked::spectatorTrackHash(track)!=sample.trackHash){audio->pauseMusic(0);live.noteWorldPartial("AUDIO_TRACK_UNAVAILABLE");return;}
+        if(track.empty() || corum::ranked::spectatorTrackHash(track)!=sample.trackHash){audio->pauseMusic(0);live.noteWorldPartial("AUDIO_TRACK_UNAVAILABLE");live.audioPrepared(true);return;}
+        auto* channel=audio->getActiveMusicChannel(0);
+        if(!channel){audio->pauseMusic(0);m_fields->spectatorAudioPaused=true;live.audioPrepared(false);return;}
         auto const actual=static_cast<double>(audio->getMusicTimeMS(0));
-        if(m_fields->spectatorAudioPaused || std::abs(actual-sample.positionMs)>100){
-            audio->setMusicTimeMS(static_cast<unsigned>(sample.positionMs),true,0);
+        if(m_fields->spectatorAudioPaused || std::abs(actual-sample.positionMs)>25){
+            audio->pauseMusic(0);
+            auto requested=static_cast<unsigned>(sample.positionMs);unsigned observed=0;
+            auto seek=channel->setPosition(requested,FMOD_TIMEUNIT_MS);
+            auto read=channel->getPosition(&observed,FMOD_TIMEUNIT_MS);
+            if(seek!=FMOD_OK||read!=FMOD_OK||std::abs(static_cast<double>(observed)-sample.positionMs)>20){m_fields->spectatorAudioPaused=true;live.audioPrepared(false);return;}
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
-            log::info("[SpectatorAudio] publisherMs={} sourceMusicMs={} nativeMusicMs={} syncing={} paused={}",frame->publisherElapsedMs,sample.positionMs,actual,syncing,m_fields->spectatorAudioPaused);
+            log::info("[SpectatorAudio] stage=SEEK_APPLIED publisherMs={} sourceMusicMs={} nativeBeforeMs={} nativeAfterMs={} pendingPresentation={}",frame->publisherElapsedMs,sample.positionMs,actual,observed,live.presentationPending());
 #endif
         }
+        live.audioPrepared(true);
+        if(live.presentationPending()){audio->pauseMusic(0);m_fields->spectatorAudioPaused=true;return;}
         if(m_fields->spectatorAudioPaused)audio->resumeMusic(0);
         m_fields->spectatorAudioPaused=false;
     }
+
     void acquireGameplayAudio() {
         auto const corumGameplayScene = m_fields->rankedLevel || m_fields->survivalLevel || m_fields->survivalFreePlayHud
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
@@ -914,6 +927,12 @@ public:
         if(pose.dual && m_player2)pose.player2=corum::ranked::spectatorAsSecondary(corum::ranked::captureSpectatorPose(m_player2,dead,finished,false));
         if(pose.player2)pose.player2->effects=corum::ranked::captureSpectatorEffects(m_player2,pose.player2->mode);
         pose.progress=finished?100.f:std::clamp(getCurrentPercent(),0.f,100.f);
+        if(std::isfinite(m_gameState.m_levelTime)&&m_gameState.m_levelTime>=0){pose.nativeElapsedMs=m_gameState.m_levelTime*1000.;pose.simulation=corum::ranked::SpectatorSimulationClock{*pose.nativeElapsedMs,std::max(0,m_currentStep),m_started,m_inResetDelay};}
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+        if(m_fields->debugRecordScene){pose.randomEvents=corum::ranked::captureNativeRandomEvents(this);
+            if(m_player1->m_playerFollowFloats.size()==200){auto history=std::make_shared<corum::ranked::SpectatorFollowHistory>();history->index=m_player1->m_followRelated;history->remainder=m_player1->m_unk838;std::copy(m_player1->m_playerFollowFloats.begin(),m_player1->m_playerFollowFloats.end(),history->y.begin());pose.followHistory=std::move(history);}
+        }
+#endif
         auto const captureNow=std::chrono::steady_clock::now();
         if(!m_fields->spectatorCosmetics || captureNow>=m_fields->nextCosmeticCaptureAt){
             m_fields->nextCosmeticCaptureAt=captureNow+std::chrono::seconds(1);
@@ -968,6 +987,7 @@ public:
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         if (m_fields->debugRecordScene) {
             if (ready && corum::ranked::debug::DebugSpectateRuntime::get().recordPose(pose)) {
+                corum::ranked::commitNativeRandomEvents(this,pose.randomEvents);
                 if (!m_fields->debugRecordHasFrame)
                     log::info("[DebugSpectate] initial world seed nativeElapsedMs={} x={} y={} cameraX={} cameraY={}",
                         m_attemptTime * 1000, pose.x, pose.y, pose.camera ? pose.camera->x : 0, pose.camera ? pose.camera->y : 0);
@@ -1066,7 +1086,7 @@ public:
         auto const frameNumber = CCDirector::sharedDirector()->getTotalFrames();
         if (m_fields->spectatorPresentationFrameNumber == frameNumber) return false;
         m_fields->spectatorPresentationFrameNumber = frameNumber;
-        m_fields->spectatorRenderedFrame = spectatorTransport().presentationFrame();
+        m_fields->spectatorRenderedFrame = spectatorTransport().worldFrame();
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         auto const poseReceived=m_fields->spectatorRenderedFrame && m_fields->spectatorRenderedFrame->pose;
 #endif
@@ -1088,7 +1108,8 @@ public:
         probe.note(poseReceived?corum::ranked::SpectatorNativePath::PoseReceived:corum::ranked::SpectatorNativePath::MissingPose);
         probe.note(m_fields->spectatorWorldPoseApplied?corum::ranked::SpectatorNativePath::DriverApplied:corum::ranked::SpectatorNativePath::ContextRejected);
 #endif
-        m_fields->remotePlayer.update(this, true, m_fields->spectatorRenderedFrame);
+        if(spectatorTransport().restoringWorld())m_fields->remotePlayer.presentationVisible(false);
+        else {m_fields->remotePlayer.update(this, true, m_fields->spectatorRenderedFrame);m_fields->remotePlayer.presentationVisible(true);}
         if(m_fields->survivalLiveLevel){
             auto* world=corum::ranked::SurvivalSpectatorRuntime::get().world();
             if(world && rendered && rendered->pose && rendered->pose->progress){
@@ -1276,8 +1297,14 @@ public:
                 auto const fallback = live.status() == corum::ranked::SpectatorLiveStatus::Fallback;
                 auto const buffering = live.status() == corum::ranked::SpectatorLiveStatus::Buffering;
                 auto const complete = corum::ranked::debug::DebugSpectateRuntime::get().playbackComplete();
-                m_fields->debugSpectateHud->setString(complete ? "SERVER PLAYBACK COMPLETE" :
-                    waiting ? "LIVE SPECTATOR - WAITING FOR OPPONENT..." : buffering ? "LIVE SPECTATOR - BUFFERING..." : fallback ? "LIVE SPECTATOR - POLLING..." : "LIVE SPECTATOR - VOICE");
+                auto status=live.status();
+                auto caption=live.restoringWorld()||live.presentationPending()?std::string(live.restorationPhase()):
+                    complete?std::string("SERVER PLAYBACK COMPLETE"):
+                    !live.restoringWorld()&&status==corum::ranked::SpectatorLiveStatus::Disconnected?std::string("RECAPTURE REQUIRED / DISCONNECTED"):
+                    status==corum::ranked::SpectatorLiveStatus::Reconnecting?std::string("RECONNECTING..."):
+                    waiting?std::string("WAITING FOR OPPONENT..."):buffering?std::string("BUFFERING..."):
+                    fallback?std::string("POLLING..."):status==corum::ranked::SpectatorLiveStatus::PartialSync?std::string("PARTIAL SYNC"):std::string("LIVE SPECTATOR");
+                m_fields->debugSpectateHud->setString(caption.c_str());
             }
             return;
         }
@@ -2901,7 +2928,7 @@ class $modify(CorumRankedSpectatorCameraHook, GJBaseGameLayer) {
                 if(!owner->spectatorCameraActive() || !corum::ranked::spectatorFrameMatchesScene(owner->m_fields->sceneContext,frame.context))break;
                 owner->m_fields->spectatorRenderedFrame=frame;
                 owner->m_fields->spectatorWorldPoseApplied=owner->m_fields->spectatorWorldDriver.apply(owner,true,frame);
-                owner->m_fields->remotePlayer.update(owner,true,frame,false);
+                owner->m_fields->remotePlayer.presentationVisible(false);
             }
             auto const nativeDelta=owner->m_fields->spectatorWorldDriver.takeNativeDeltaSeconds();
             if(owner->m_fields->spectatorWorldDriver.partialHistory())live.noteWorldPartial(
@@ -2933,6 +2960,7 @@ class $modify(CorumRankedSpectatorCameraHook, GJBaseGameLayer) {
                 owner->m_fields->spectatorNativeProbe.note(m_gameState.m_levelTime>worldClockBefore?corum::ranked::SpectatorNativePath::ClockAdvanced:corum::ranked::SpectatorNativePath::ClockHeld);
 #endif
                 if(!owner->m_fields->spectatorCollisionChecked)checkCollisions(m_player1,*nativeDelta,true);
+                corum::ranked::applyDueNativeRandomEvents(owner);
                 owner->logSpectatorNativeProbe();
                 owner->reconcileSpectatorWorldDriver();
                 // Some native paths omit updateCamera. Its hook still owns the

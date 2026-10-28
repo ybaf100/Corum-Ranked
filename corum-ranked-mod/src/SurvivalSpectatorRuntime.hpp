@@ -37,7 +37,7 @@ private:
     std::string path()const;
     SurvivalSpectatorTransportContext transport(bool viewer)const;
     std::vector<SurvivalSpectatorTarget> m_targets;
-    std::string m_error,m_target,m_targetName,m_session,m_match,m_pendingTarget,m_pendingTerminalAttempt,m_targetsContext;
+    std::string m_error,m_target,m_targetName,m_session,m_match,m_pendingTarget,m_pendingTerminalAttempt,m_targetsContext,m_lifecycleContext;
     LevelPreparationContext m_context;
     std::future<std::unique_ptr<replay::Playback>> m_worldLoading;
     std::unique_ptr<replay::Playback> m_world;

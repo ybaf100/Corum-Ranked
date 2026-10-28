@@ -45,7 +45,7 @@ struct PlayerObject {
  GJBaseGameLayer* m_gameLayer=nullptr;CCPoint position{100,40};MainLayer main;MainLayer* m_mainLayer=&main;
  bool m_isShip=false,m_isBall=false,m_isBird=false,m_isDart=false,m_isRobot=false,m_isSpider=false,m_isSwing=false;
  bool m_isUpsideDown=false,m_isDead=false,m_wasTeleported=false,moving=false,nativeTeleport=false;
- float m_vehicleSize=1,rotation=0;int updates=0;
+ float m_vehicleSize=1,rotation=0;int updates=0,m_followRelated=0;float m_unk838=0;std::vector<float> m_playerFollowFloats=std::vector<float>(200,40);
  CCPoint getPosition()const{return position;}float getRotation()const{return rotation;}bool isVisible()const{return true;}
  virtual ~PlayerObject()=default;
  virtual void update(float){++updates;if(moving)position.x+=5;if(nativeTeleport){position.x+=729.7268f;m_wasTeleported=true;nativeTeleport=false;}}
@@ -57,7 +57,7 @@ struct GJBaseGameLayer {
  struct {bool m_isDualMode=false;CCPoint m_cameraPosition;double m_levelTime=0;float m_cameraZoom=1,m_cameraAngle=0,m_targetCameraZoom=1,m_targetCameraAngle=0;} m_gameState;
  MainLayer *m_objectLayer=nullptr,*m_inShaderObjectLayer=nullptr,*m_aboveShaderObjectLayer=nullptr;
  PlayerObject *m_player1=nullptr,*m_player2=nullptr;double m_attemptTime=0;bool m_inResetDelay=false,m_isPaused=false,m_started=false;
- int checkCollisions(PlayerObject*,float,bool){return 0;}
+ int m_currentStep=0;int checkCollisions(PlayerObject*,float,bool){return 0;}
  void updateCamera(float){}
  virtual ~GJBaseGameLayer()=default;
  virtual void update(float dt){clockMs+=std::int64_t(dt*1000);m_attemptTime+=dt;
@@ -70,6 +70,9 @@ struct PlayLayer:GJBaseGameLayer {
 };
 ${capture}
 namespace corum::ranked {
+void applyDueNativeRandomEvents(PlayLayer*){}
+SpectatorRandomEvents captureNativeRandomEvents(PlayLayer*){return {};}
+void commitNativeRandomEvents(PlayLayer*,SpectatorRandomEvents const&){}
 unsigned captureSpectatorEffects(PlayerObject*,SpectatorGameMode){return 0;}
 SpectatorCosmetics captureSpectatorCosmetics(PlayerObject*,PlayerObject*){return {};}
 struct RankedRuntime {bool spectator=false;static RankedRuntime& get(){static RankedRuntime r;return r;}bool isSpectating()const{return spectator;}};
@@ -91,7 +94,7 @@ struct CorumRankedPlayLayer:PlayLayer {
  corum::ranked::SpectatorLiveRuntime& spectatorTransport(){return corum::ranked::SpectatorLiveRuntime::get();}
  bool blockEntryGameplayUpdate(){return false;}
  struct Fields{bool survivalLiveLevel=false,survivalReplayLevel=false,survivalLevel=false;struct Driver{bool partialHistory()const{return false;}template<class...T>bool apply(T...){return false;}std::optional<float> takeNativeDeltaSeconds(){return {};}}spectatorWorldDriver;bool spectatorWorldPoseApplied=false,spectatorCollisionChecked=false;SpectatorNativeProbe spectatorNativeProbe;bool rankedInitialized=false,rankedLevel=true,safetyRetired=false,spectatorMode=false,spectatorPending=false;
-  corum::ranked::SpectatorSceneContext sceneContext;std::optional<SpectatorRemoteFrame>spectatorRenderedFrame;struct Remote{template<class...T>void update(T...){}}remotePlayer;
+  corum::ranked::SpectatorSceneContext sceneContext;std::optional<SpectatorRemoteFrame>spectatorRenderedFrame;struct Remote{template<class...T>void update(T...){}void presentationVisible(bool){}}remotePlayer;
   bool debugRecordScene=false,debugPlaybackScene=false,debugRecordHasFrame=false;SpectatorCapturePolicy spectatorCapture;std::shared_ptr<SpectatorCosmetics const> spectatorCosmetics;std::chrono::steady_clock::time_point nextCosmeticCaptureAt{};bool spectatorWorldUpdateInProgress=false,spectatorWorldResetInProgress=false;std::optional<unsigned> spectatorCameraFrameNumber;}fields;
  Fields* m_fields=&fields;
  bool prepareSpectatorScene(){return false;}bool spectatorCameraActive(){return false;}bool beginSpectatorWorldFrame(){return false;}
@@ -175,7 +178,7 @@ struct DebugSpectateRuntime {
  DebugSpectateMode m_mode=DebugSpectateMode::Recording;
  DebugSpectateCapture m_capture;
  std::chrono::steady_clock::time_point m_recordStartedAt{};
- std::optional<SpectatorGhostPose> m_previousCapturedPose;
+ std::optional<SpectatorGhostPose> m_previousCapturedPose;std::optional<double>m_nativeClockOrigin;std::string error;void fail(std::string value){error=value;}
  int uploads=0;void pumpRecording(){++uploads;}
  bool recordPose(SpectatorGhostPose const&,bool terminal=false);
 };
@@ -197,6 +200,12 @@ int main(){
  auto frames=record.m_capture.batch();assert(frames[1].elapsedMs==50 && frames[2].elapsedMs==100);
  wall+=std::chrono::milliseconds(17);initial.dead=true;assert(record.recordPose(initial,true));
  assert(record.m_capture.batch().back().elapsedMs==117 && record.m_capture.completed());
+ // Source gameplay time, not packet/render wall time, owns new recordings.
+ DebugSpectateRuntime nativeClock;initial.dead=false;initial.nativeElapsedMs=5000;assert(nativeClock.recordPose(initial));
+ wall+=std::chrono::seconds(7);initial.nativeElapsedMs=5050;assert(nativeClock.recordPose(initial));
+ initial.nativeElapsedMs=5117;initial.dead=true;assert(nativeClock.recordPose(initial,true));
+ assert(nativeClock.m_capture.batch()[1].elapsedMs==50&&nativeClock.m_capture.batch().back().elapsedMs==117);
+
 }
 `;
     const dir=mkdtempSync(join(tmpdir(),'corum-world-seed-'));
