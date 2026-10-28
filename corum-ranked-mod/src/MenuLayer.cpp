@@ -4,6 +4,7 @@
 #include "domain/SurvivalMenuClock.hpp"
 #include <array>
 #include "ui/RankedVisuals.hpp"
+#include "ui/RankedTranslations.hpp"
 
 #include <Geode/Geode.hpp>
 #include <Geode/modify/MenuLayer.hpp>

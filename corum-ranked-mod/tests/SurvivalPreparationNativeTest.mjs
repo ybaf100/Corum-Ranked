@@ -88,7 +88,7 @@ int main(){auto clock=[](std::string state,std::string phase,int round,long rema
 `));
 
 test('actual menu clock placement respects transformed/disabled third-party buttons, 4:3/mobile/wide windows and has no input node',()=>{
- const source=read('src/MenuLayer.cpp');run(`
+ const source=read('src/MenuLayer.cpp');assert.match(source,/#include "ui\/RankedTranslations\.hpp"/);run(`
 #include <algorithm>
 #include <array>
 #include <cassert>
