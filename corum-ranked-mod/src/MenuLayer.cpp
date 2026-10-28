@@ -1,9 +1,12 @@
 #include "RankedPopup.hpp"
 #include "RankedRuntime.hpp"
+#include "SurvivalRuntime.hpp"
 #include "ui/RankedVisuals.hpp"
 
 #include <Geode/Geode.hpp>
 #include <Geode/modify/MenuLayer.hpp>
+#include <algorithm>
+#include <cmath>
 
 using namespace geode::prelude;
 
@@ -50,6 +53,28 @@ CCNode* makeCrossedSwordsIcon() {
     root->addChild(right, 3);
 
     return root;
+}
+
+// A read-only timer must not cover native or third-party menu buttons.
+bool buttonOverlaps(CCNode* node, CCNode* ignore, CCRect const& area) {
+    if (!node || node == ignore || !node->isVisible()) return false;
+    if (auto* item = typeinfo_cast<CCMenuItem*>(node); item && item->isEnabled()) {
+        auto const size = item->getContentSize();
+        if (size.width > 0 && size.height > 0) {
+            auto const a = item->convertToWorldSpace({0, 0});
+            auto const b = item->convertToWorldSpace({size.width, size.height});
+            CCRect const rect{std::min(a.x, b.x), std::min(a.y, b.y),
+                std::abs(a.x - b.x), std::abs(a.y - b.y)};
+            if (rect.intersectsRect(area)) return true;
+        }
+    }
+    if (auto* children = node->getChildren()) {
+        for (unsigned i = 0; i < children->count(); ++i) {
+            if (auto* child = typeinfo_cast<CCNode*>(children->objectAtIndex(i));
+                child && buttonOverlaps(child, ignore, area)) return true;
+        }
+    }
+    return false;
 }
 
 } // namespace
@@ -102,6 +127,23 @@ class $modify(CorumRankedMenuLayer, MenuLayer) {
         caption->setID("corum-ranked-caption"_spr);
         addChild(caption, 20);
 
+        // This small clock belongs to MenuLayer, not PlayLayer: Free Play can
+        // display the ordinary GD menu while the Survival round keeps running.
+        auto* survivalClock = CCNode::create();
+        survivalClock->setID("survival-freeplay-menu-clock"_spr);
+        survivalClock->setContentSize({124.0f, 28.0f});
+        survivalClock->setVisible(false);
+        auto* clockFace = corum::ranked::ui::surface(
+            {124.0f, 28.0f}, {62.0f, 14.0f},
+            corum::ranked::ui::Cyan, corum::ranked::ui::Surface, 236, true);
+        survivalClock->addChild(clockFace, 0);
+        auto* clockText = corum::ranked::ui::label(
+            "ROUND 1  03:00", 0.23f, {62.0f, 14.0f},
+            corum::ranked::ui::Cyan, true);
+        clockText->setID("survival-freeplay-menu-clock-text"_spr);
+        survivalClock->addChild(clockText, 5);
+        addChild(survivalClock, 21);
+
         schedule(schedule_selector(CorumRankedMenuLayer::rankedTick), 0.25f);
         if (corum::ranked::RankedRuntime::get().view().stage == corum::ranked::RuntimeStage::Matched) {
             scheduleOnce(schedule_selector(CorumRankedMenuLayer::reopenRanked), 0.35f);
@@ -116,6 +158,56 @@ class $modify(CorumRankedMenuLayer, MenuLayer) {
 
     void rankedTick(float) {
         corum::ranked::RankedRuntime::get().tick();
+
+        auto* root = getChildByID("survival-freeplay-menu-clock"_spr);
+        if (!root) return;
+        auto& survival = corum::ranked::SurvivalRuntime::get();
+        auto const& view = survival.view();
+        auto const remaining = survival.roundRemainingMs();
+
+        // Free Play is an ordinary GD menu scene, but the server clock is still
+        // authoritative. Never synthesize another countdown or pause the round.
+        if (!survival.active() || !survival.freePlaying() ||
+            view.state != "PLAYING" || !remaining) {
+            root->setVisible(false);
+            return;
+        }
+
+        auto* text = typeinfo_cast<CCLabelBMFont*>(
+            root->getChildByID("survival-freeplay-menu-clock-text"_spr));
+        if (!text) {
+            root->setVisible(false);
+            return;
+        }
+        auto const seconds = (std::max<std::int64_t>(0, *remaining) + 999) / 1000;
+        auto const caption = fmt::format("R{}  {:02}:{:02}",
+            view.roundNumber, seconds / 60, seconds % 60);
+        if (caption != text->getString()) {
+            text->setString(caption.c_str());
+            corum::ranked::ui::fitFullMenuLabel(text, 116.0f, 24.0f, .23f);
+        }
+
+        auto const size = getContentSize();
+        auto const width = root->getContentSize().width;
+        auto const height = root->getContentSize().height;
+        // Search the upper-left safe area rather than drawing over an existing
+        // GD, Geode or other mod's clickable menu control.
+        bool placed = false;
+        for (float y = size.height - height - 10.0f;
+             y >= std::max(size.height * .58f, 0.0f); y -= 10.0f) {
+            constexpr float x = 9.0f;
+            auto const a = convertToWorldSpace({x - 3, y - 3});
+            auto const b = convertToWorldSpace({x + width + 3, y + height + 3});
+            CCRect const area{std::min(a.x, b.x), std::min(a.y, b.y),
+                std::abs(a.x - b.x), std::abs(a.y - b.y)};
+            if (buttonOverlaps(this, root, area)) continue;
+            root->setPosition({x, y});
+            placed = true;
+            break;
+        }
+        // Prefer no overlay to concealing any menu button if a modified menu
+        // has no free upper-left space.
+        root->setVisible(placed);
     }
 
     void onRanked(CCObject*) {
