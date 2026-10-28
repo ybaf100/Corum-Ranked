@@ -94,4 +94,17 @@ describe("durable verified Survival candidate pool",()=>{
    await (p as unknown as {refreshDue():Promise<void>}).refreshDue();await idle(p);
    expect(query).not.toHaveBeenCalled();query.mockRestore();
  });
+ it("quarantines only a consumed prefetch whose full match/round/generation identity changed",async()=>{
+   const p=pool();await p.onApplicationBootstrap();await idle(p);const selected=await p.select(request);
+   await db.transaction(tx=>p.confirm(tx,request,selected));
+   await db.transaction(tx=>p.discardPrefetch(tx,"00000000-0000-4000-8000-000000000099",request.reservation!.roundKey,1,selected.levelId));
+   expect(await count("CONSUMED")).toBe(1);
+   await db.transaction(tx=>p.discardPrefetch(tx,request.reservation!.matchId,request.reservation!.roundKey,2,selected.levelId));
+   expect(await count("CONSUMED")).toBe(1);
+   await db.transaction(tx=>p.discardPrefetch(tx,request.reservation!.matchId,request.reservation!.roundKey,1,selected.levelId));
+   expect(await count("CONSUMED")).toBe(0);expect(await count("COOLDOWN")).toBe(1);
+   const row=(await db.query<{invalid_reason:string;retry_after:Date;expires_at:Date}>("SELECT invalid_reason,retry_after,expires_at FROM sur_map_candidates WHERE level_id=$1",[selected.levelId])).rows[0]!;
+   expect(row.invalid_reason).toBe("PREFETCH_PHASE_CHANGED");expect(row.retry_after).toEqual(row.expires_at);
+ });
+
 });

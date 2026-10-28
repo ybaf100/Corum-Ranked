@@ -49,6 +49,7 @@ test('pause surrender uses native GD X sprite and Corum modal/font, never vanill
 test('actual pause/modal callbacks preserve native cleanup and surrender the whole match once at budget expiry',()=>{
     const modalMethods=['bool sameRound() const','void onRound(','void onMatch(','void onConfirm(','void onCancel(','void watchContext(','void dismiss()'].map(n=>body(popup,n)).join('\n');
     const cpp=`
+#include "${join(root,'src/domain/SurvivalRoundPresentation.hpp')}"
 #include <cassert>
 #include "${join(root, 'src/domain/TranslationCatalog.hpp')}"
 #include <algorithm>
@@ -91,7 +92,7 @@ struct RankedRuntime {
  void endMatchGameplayPause(std::string const&){++ends;}
 };
 struct SurvivalRuntime{
- struct View{std::string id="s",roundKey="round-1",state="PLAYING",error,phase="ROUND_1";bool ownEliminated=false;int mapGeneration=1;}v;
+ struct View{std::string id="s",roundKey="round-1",state="PLAYING",error,phase="ROUND_1";bool ownEliminated=false;int mapGeneration=1,roundNumber=1;}v;
  bool owned=false;long remaining=100000;static SurvivalRuntime& get(){static SurvivalRuntime s;return s;}
  bool surrenderPending()const{return false;}std::optional<long> roundRemainingMs()const{return remaining;}bool normalRoundCleared()const{return false;}bool gameplayLevel(int id)const{return owned&&id==123;}void tick(){}auto const& view()const{return v;}bool canPlay()const{return v.state=="PLAYING";}bool canSurrender()const{return v.state=="PLAYING";}long remainingMs()const{return remaining;}
 };
@@ -206,6 +207,7 @@ int main(){using namespace corum::ranked;
 test('closed retained surrender modal releases force priority before the next round',()=>{
     const exit=body(popup,'void onExit() override');
     const cpp=`
+#include "${join(root,'src/domain/SurvivalRoundPresentation.hpp')}"
 #include <cassert>
 #include "${join(root, 'src/domain/TranslationCatalog.hpp')}"
 #include <algorithm>

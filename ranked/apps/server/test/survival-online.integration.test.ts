@@ -9,7 +9,7 @@ import { PGlite } from "@electric-sql/pglite";
 import { Test } from "@nestjs/testing";
 import { ValidationPipe,type INestApplication } from "@nestjs/common";
 import { beforeAll,beforeEach,afterEach,afterAll,describe,it,expect,vi } from "vitest";
-import { DEFAULT_SURVIVAL_CONFIG,survivalCurrentRound,survivalMapRange,type SurvivalMatch } from "@corum-ranked/rules";
+import { DEFAULT_SURVIVAL_CONFIG,survivalInitialPhase,survivalCurrentRound,survivalMapRange,type SurvivalMatch } from "@corum-ranked/rules";
 import { PgliteDatabase } from "./pglite-database.js";
 import { configDocumentFixture,environmentFixture } from "./fixtures.js";
 import { SurvivalConfigService,type SurvivalConfigDocument } from "../src/config/survival-config.service.js";
@@ -192,7 +192,7 @@ describe("Survival M5 public HTTP and persistent online game",()=>{
   expect((await db.query("SELECT id FROM ranked_matches")).rows).toHaveLength(0);
  });
  it.each([2,3,4,7])("starts %i humans after 180 seconds with the agreed short phases",async n=>{
-   const {id}=await game(n);expect(survivalCurrentRound(await engine.get(id)).phase).toBe(n<=3?"FINAL":"ROUND_3");
+   const {id}=await game(n);expect(survivalCurrentRound(await engine.get(id)).phase).toBe(survivalInitialPhase(n));
  });
  it("restarts one player's waiting cycle instead of creating a one-person game",async()=>{
    const c=await client();await join(c);now+=180000;await touch();await queue.tickOnce();const s=await api(c,"/queue/status");
@@ -465,7 +465,7 @@ describe("exact requested queue bot counts",()=>{
   const started=await api(group[0]!,"/queue/fill-bots",admission);expect(started.status).toBe(201);
   const m=await engine.get(started.body.matchId);expect(m.players.filter(p=>p.kind==="BOT")).toHaveLength(bots);
   expect(m.players).toHaveLength(humans+bots);expect(now-m.createdAt).toBe(0);
-  expect(survivalCurrentRound(m).phase).toBe(humans+bots<=3?"FINAL":humans+bots<8?"ROUND_3":"ROUND_1");
+  expect(survivalCurrentRound(m).phase).toBe(survivalInitialPhase(humans+bots));
   expect((await api(group[0]!,"/queue/fill-bots",admission)).body.matchId).toBe(m.id);
   expect((await api(group[0]!,"/queue/fill-bots",{...admission,botCount:bots===0?1:bots-1})).status).toBe(409);
  });
@@ -542,11 +542,11 @@ describe("64-player public matchmaking",()=>{
   const restart=new SurvivalEngineService(db,clock,ids,config,{select:async()=>{throw new Error("unexpected map");}});
   expect((await restart.get(match.id)).config.matchPlayerCount).toBe(64);
  },60000);
- it("fills exactly 63 bots and keeps an active 64-player match intact after switching back to 16",async()=>{
+ it.each([false,true])("fills exactly 63 bots with force=%s and preserves an active 64-player snapshot after switching to 16",async forceDeathMatch=>{
   const owner=await adminFormat(64);await join(owner);
-  const admission={password:"fixture-password",requestId:ids.next(),installedMods:mods,botCount:63};
+  const admission={password:"fixture-password",requestId:ids.next(),installedMods:mods,botCount:63,forceDeathMatch};
   const response=await api(owner,"/queue/fill-bots",admission);expect(response.status).toBe(201);
-  const match=await engine.get(response.body.matchId);expect(match.players).toHaveLength(64);expect(match.players.filter(p=>p.kind==="BOT")).toHaveLength(63);
+  const match=await engine.get(response.body.matchId);expect(match.players).toHaveLength(64);expect(match.players.filter(p=>p.kind==="BOT")).toHaveLength(63);expect(match.forceDeathMatch).toBe(forceDeathMatch);expect(survivalCurrentRound(match)).toMatchObject({phase:forceDeathMatch?"TIEBREAK":"ROUND_1",ordinal:1});
   const admin=new AdminService(db,env,{} as RankedConfigService,clock,config);
   await admin.execute(owner.session,{password:"fixture-password",scope:"SURVIVAL",action:"SET_SURVIVAL_MODE",matchPlayerCount:16});
   expect(config.getSnapshot().config.matchPlayerCount).toBe(16);expect((await engine.get(match.id)).config.matchPlayerCount).toBe(64);
@@ -717,5 +717,22 @@ describe("authenticated audio recovery and delayed entry",()=>{
   now=survivalCurrentRound(m).entryRequestedAt!+5000;await touch(group);for(const c of group)await event(c,m,"ENTERED");m=await engine.get(id);now=survivalCurrentRound(m).startsAt!;await touch(group);m=await engine.tick(id);
   const r=survivalCurrentRound(m),response=await api(group[0]!,`/online/matches/${id}/events`,{eventId:ids.next(),type:"PREPARATION_FAILED",roundKey:r.key,mapGeneration:r.mapGeneration,levelId:r.map!.levelId,reason:"AUDIO_UNAVAILABLE_PERMANENT",audioFailure:{category:"AUDIO_UNAVAILABLE_PERMANENT",resourceKind:"SONG",resourceId:123,nativeCode:2}});
   expect(response.status).toBe(409);expect((await engine.get(id)).state).toBe("PLAYING");expect((await engine.get(id)).rounds[0]!.endsAt).toBe(r.endsAt);
+ });
+});
+
+describe("authenticated bot-fill Force Death Match HTTP contract",()=>{
+ it.each([false,true])("persists force=%s, defaults off, and rejects conflicting request identity",async force=>{
+  const c=await client("debug");await join(c);const admission={password:"fixture-password",requestId:ids.next(),installedMods:mods,botCount:7,...(force?{forceDeathMatch:true}:{})};
+  const start=await api(c,"/queue/fill-bots",admission);expect(start.status).toBe(201);const m=await engine.get(start.body.matchId);
+  expect(m.forceDeathMatch).toBe(force);expect(survivalCurrentRound(m)).toMatchObject({phase:force?"TIEBREAK":"ROUND_2",ordinal:1});
+  expect((await api(c,"/queue/fill-bots",admission)).body.matchId).toBe(m.id);
+  expect((await api(c,"/queue/fill-bots",{...admission,forceDeathMatch:!force})).status).toBe(409);
+  expect((await api(c,"/queue/fill-bots",{...admission,requestId:ids.next(),forceDeathMatch:!force})).status).toBe(409);
+ });
+ it("rejects Force Death Match on normal queue admission and on unauthenticated debug routes",async()=>{
+  const c=await client("release");const joinResponse=await api(c,"/queue/join",{installedMods:mods,forceDeathMatch:true});expect(joinResponse.status).toBe(400);
+  await join(c);expect((await api(c,"/queue/fill-bots",{password:"fixture-password",requestId:ids.next(),installedMods:mods,botCount:7,forceDeathMatch:true})).status).toBe(403);
+  const d=await client("debug");await join(d);expect((await api(d,"/queue/fill-bots",{password:"wrong",requestId:ids.next(),installedMods:mods,botCount:7,forceDeathMatch:true})).status).toBe(403);
+  expect((await db.query("SELECT id FROM sur_matches")).rows).toHaveLength(0);
  });
 });

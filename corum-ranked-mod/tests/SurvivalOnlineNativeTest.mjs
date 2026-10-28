@@ -33,7 +33,7 @@ std::int64_t localNow(){return std::chrono::duration_cast<std::chrono::milliseco
 namespace web {
 struct WebResponse{int status=200;matjson::Value root;int code()const{return status;}matjson::Result<matjson::Value> json()const{return {root};}};
 struct Operation{std::string path,session;matjson::Value body;};
-struct WebRequest{std::string session;matjson::Value body;void bodyJSON(matjson::Value v){body=v;}Operation post(std::string p){return {p,session,body};}};
+struct WebRequest{std::string session;matjson::Value body;void timeout(std::chrono::seconds){}void bodyJSON(matjson::Value v){body=v;}Operation post(std::string p){return {p,session,body};}};
 struct Pending{Operation operation;std::function<void(WebResponse)> done;};
 std::vector<Pending> pending;
 }
@@ -44,16 +44,20 @@ std::string queueEndpoint(std::string p){return "/api/ranked/survival/queue"+p;}
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
 std::string debugEndpoint(std::string p){return "/api/ranked/survival/debug"+p;}
 #endif
+template<class F>void queueInMainThread(F f){f();}
 namespace utils::random{std::string generateUUID(){return "nonce";}}
 namespace corum::ranked {
+void showSurvivalGame(){}void showSurvivalQueue(){}
 struct RankedRuntime{std::string token="session-a";bool allowed=true,updateRequired=false;
  static RankedRuntime& get(){static RankedRuntime r;return r;}
  std::string spectatorLiveSessionToken()const{return token;}
  bool handleSurvivalAdmissionError(web::WebResponse const&){return updateRequired;}
+ bool prepareSurvivalDebugAdmission(matjson::Value& body){return prepareSurvivalAdmission(body);}
  bool prepareSurvivalAdmission(matjson::Value& body){body["installedMods"]="captured";return allowed;}
 };
 struct SurvivalRuntime{
- struct View{std::string id;bool debug=false,online=false;}m_view;
+ static SurvivalRuntime& get(){static SurvivalRuntime r;return r;}
+ struct View{std::string id,error;bool debug=false,online=false;}m_view;
  struct Queue{std::string status="LEFT",matchId,error,waitingSince;int players=0,minimumPlayers=8,maximumPlayers=16,maxWaitSeconds=180;bool enabled=true;}m_queue;
  ServerClock m_clock;bool m_creating=false,m_queuePollBusy=false,m_pollBusy=false,m_recoverBusy=false,m_needRecovery=false;
  std::uint64_t m_generation=1,m_queueGeneration=1;std::string m_session="session-a";
@@ -67,12 +71,14 @@ struct SurvivalRuntime{
  void observeQueue(matjson::Value const&);
  void pollQueue();void queueAction(std::string const&,matjson::Value);
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
- void fillBots(std::string,int=-1);
+ void tick(){}void observe(matjson::Value const&){}void recover(){}
+ void start(std::string,std::string,int=0,int=-1,bool=false);void fillBots(std::string,int=-1,bool=false);
 #endif
 };
 ${['bool SurvivalRuntime::current(', 'std::string SurvivalRuntime::matchEndpoint(', 'int SurvivalRuntime::queueWaitingSeconds()', 'void SurvivalRuntime::observeQueue(', 'void SurvivalRuntime::pollQueue()', 'void SurvivalRuntime::queueAction('].map(method).join('\n')}
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
 ${method('void SurvivalRuntime::fillBots(')}
+${method('void SurvivalRuntime::start(')}
 #endif
 }
 int main(){using namespace corum::ranked;SurvivalRuntime r;
@@ -100,8 +106,16 @@ int main(){using namespace corum::ranked;SurvivalRuntime r;
  assert(r.matchEndpoint("/matches/m")==debugEndpoint("/matches/m"));
  r.m_view.debug=false;r.m_queue.status="QUEUED";r.fillBots("fixture-password");auto fill=web::pending.back();
  assert(fill.operation.path==queueEndpoint("/fill-bots"));assert(fill.operation.body["password"].asString().unwrapOr("")=="fixture-password");
+ assert(!fill.operation.body["forceDeathMatch"].asBool().unwrapOr(true));
  assert(fill.operation.body.contains("installedMods")&&!fill.operation.body.contains("bots"));
  fill.done({201,found});assert(r.assigned.size()==2);
+ r.m_queue.status="QUEUED";r.fillBots("fixture-password",7,true);auto forced=web::pending.back();
+ assert(forced.operation.body["forceDeathMatch"].asBool().unwrapOr(false));
+ assert(forced.operation.body["botCount"].asInt().unwrapOr(0)==7);
+ r.m_creating=false;r.m_queue.status="LEFT";r.start("fixture-password","GOLD",0,7,true);
+ auto created=web::pending.back();assert(created.operation.path==debugEndpoint("/matches"));
+ assert(created.operation.body["forceDeathMatch"].asBool().unwrapOr(false));assert(created.operation.body["botCount"].asInt().unwrapOr(0)==7);
+ created.done({201,{}});r.start("fixture-password","SILVER");assert(!web::pending.back().operation.body["forceDeathMatch"].asBool().unwrapOr(true));
 #else
  assert(r.matchEndpoint("/matches/m")==onlineEndpoint("/matches/m"));
 #endif

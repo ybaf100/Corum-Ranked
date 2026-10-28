@@ -79,7 +79,7 @@ test('Free Play menu clock consumes server deadlines and hides expired rounds ra
 using namespace corum::ranked;
 int main(){auto clock=[](std::string state,std::string phase,int round,long remaining,long age=100){return survivalMenuClock(true,true,state,phase,round,remaining,2500,age);};
  auto a=clock("PLAYING","ROUND_2",2,154000);assert(a.visible&&a.phase=="R2"&&a.text=="2:34");
- auto b=clock("PLAYING","ROUND_2",2,93000);assert(b.text=="1:33");assert(clock("PLAYING","FINAL",4,93000).phase=="FINAL");assert(clock("PLAYING","TIEBREAK",5,93000).phase=="DM");
+ auto b=clock("PLAYING","ROUND_2",2,93000);assert(b.text=="1:33");assert(clock("PLAYING","FINAL",4,93000).phase=="FINAL");assert(clock("PLAYING","TIEBREAK",5,93000).phase=="DEATH MATCH");
  assert(clock("COUNTDOWN","ROUND_1",1,0).text=="GO 0:03");assert(clock("PREPARING","ROUND_1",1,0).text=="PREPARING");
  for(auto state:{"ROUND_RESULT","FINAL_RESULT","CANCELLED"})assert(!clock(state,"ROUND_2",2,0).visible);
  assert(clock("PLAYING","ROUND_2",2,100000,16000).stale);assert(!survivalMenuClock(true,false,"PLAYING","ROUND_1",1,180000,{},0).visible);

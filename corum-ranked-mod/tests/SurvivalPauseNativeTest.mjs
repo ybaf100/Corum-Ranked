@@ -17,6 +17,7 @@ const runtime=process.env.CORUM_RUNTIME_SOURCE?readFileSync(process.env.CORUM_RU
 const viewer=read('tests/SpectatorLiveViewerNativeTest.mjs');
 const json=viewer.slice(viewer.indexOf('namespace matjson {'),viewer.indexOf('${readFileSync(join(root,'));
 const common=`
+#include "domain/SurvivalRoundPresentation.hpp"
 #include <algorithm>
 #include "${join(root,'tests/helpers/InactiveReplayDouble.hpp')}"
 #include <array>
@@ -58,7 +59,7 @@ test('Pause preserves a synchronized server countdown across errors, polling gap
 std::int64_t localMillis=0;std::int64_t localNow(){return localMillis;}
 namespace corum::ranked {
 struct SurvivalRuntime{std::string m_spectatorAcceptedAttempt;
- struct View{std::string id="m",roundKey="r1",state="PLAYING",phase="ROUND_1",error,endsAt="2026-10-16T00:03:00Z";int mapGeneration=1;bool ownEliminated=false;}v;
+ struct View{std::string id="m",roundKey="r1",state="PLAYING",phase="ROUND_1",error,endsAt="2026-10-16T00:03:00Z";int mapGeneration=1,roundNumber=1;bool ownEliminated=false;}v;
  ServerClock m_clock;struct{std::string endsAt="2026-10-16T00:03:00Z";}m_view;
  static SurvivalRuntime&get(){static SurvivalRuntime r;return r;}void tick(){}auto const&view()const{return v;}bool canPlay()const{return !v.ownEliminated;}bool canSurrender()const{return !v.ownEliminated;}bool surrenderPending()const{return false;}bool normalRoundCleared()const{return false;}
  std::optional<std::int64_t> roundRemainingMs()const;
@@ -110,7 +111,7 @@ namespace corum::ranked{
 bool isOfficialSurvivalPlayLayer(PlayLayer*p){return p&&p==PlayLayer::get();}int returns=0;bool requestSurvivalGameplayReturn(PlayLayer*){++returns;return true;}
 std::string preparationContextText(std::string s){return s;}
 struct SurvivalRuntime{std::string m_spectatorAcceptedAttempt;
- struct View{std::string id="match",roundKey="r1",state="PLAYING",phase="ROUND_1",error,activeAttemptId="a";double activeAttemptProgress=45;int mapGeneration=1;bool ownEliminated=false;struct{int levelId=4;}map;}m_view;
+ struct View{std::string id="match",roundKey="r1",state="PLAYING",phase="ROUND_1",error,activeAttemptId="a";double activeAttemptProgress=45;int mapGeneration=1,roundNumber=1;bool ownEliminated=false;struct{int levelId=4;}map;}m_view;
  std::string m_surrenderEventId,m_surrenderMatchId,m_session="session",m_attempt="a",m_attemptContext="r1",m_presentationContext;bool m_surrenderAccepted=false,m_eventBusy=false;
  std::optional<WeakRef<PlayLayer>>m_surrenderOwner;std::optional<WeakRef<CCScene>>m_surrenderScene;
  std::uint64_t m_generation=1,m_eventGeneration=0;double m_attemptBest=77;std::deque<matjson::Value>m_events;Request m_eventRequest;std::chrono::steady_clock::time_point m_retryAt{},m_nextPoll{};

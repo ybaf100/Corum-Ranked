@@ -625,6 +625,7 @@ inline constexpr std::array kTranslations {
     CatalogTranslation{"survival-force-clear", "FORCE CLEAR", "강제 클리어"},
     CatalogTranslation{"survival-force-clear-confirm", "Mark the current Survival round\nas 100% completed?", "현재 서바이벌 라운드의 기록을\n100%로 확정하시겠습니까?"},
     CatalogTranslation{"survival-force-clear-rejected", "Force Clear was rejected. Refreshing match state.", "강제 클리어 요청이 거절되었습니다. 경기 상태를 다시 확인합니다."},
+    CatalogTranslation{"survival-force-death-match", "Force Death Match", "데스매치로 시작"},
     CatalogTranslation{"survival-format-failed", "Could not load/save the operating format.", "운영방식을 불러오거나 저장하지 못했습니다."},
     CatalogTranslation{"survival-format-new-matches", "Applies to new matches. Current games keep their rules.", "새 경기에 적용됩니다. 진행 중 경기는 기존 규칙을 유지합니다."},
     CatalogTranslation{"survival-format-players", "{} PLAYERS", "{}인 모드"},

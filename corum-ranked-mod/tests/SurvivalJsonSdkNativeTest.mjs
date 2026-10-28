@@ -38,6 +38,7 @@ test('actual SDK JSON and production watchBudget keep allowed surrender/Force Cl
  const pending=method(header,'bool forceClearPending()');
  const watch=method(pauseSource,'void watchBudget(float)');const survival=watch.slice(0,watch.indexOf('        auto& ranked ='))+'}';
  const code=`
+${readFileSync(new URL("../src/domain/SurvivalRoundPresentation.hpp",import.meta.url),"utf8").replace("#pragma once", "")}
 #include <matjson.hpp>
 #include <algorithm>
 #include <cassert>
@@ -57,7 +58,7 @@ namespace i18n{std::string text(std::string const&,std::string const&s){return s
 namespace ui{void fitLabelWidth(Label*,float,float,float){}}
 bool requestSurvivalGameplayReturn(PlayLayer*){return true;}
 struct SurvivalRuntime{
- struct View{std::string id="m",roundKey="r1",phase="ROUND_1",state="PLAYING",error;int mapGeneration=1;bool debug=true,online=false,ownEliminated=false,ownAssetsReady=true,ownEntered=true;}m_view;
+ struct View{std::string id="m",roundKey="r1",phase="ROUND_1",state="PLAYING",error;int mapGeneration=1,roundNumber=1;bool debug=true,online=false,ownEliminated=false,ownAssetsReady=true,ownEntered=true;}m_view;
  std::string m_session="token";bool surrendered=false,cleared=false;
  ${field}
  ${pending}

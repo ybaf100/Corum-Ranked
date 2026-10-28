@@ -26,7 +26,7 @@ export function survivalHistoryProjection(value:unknown,personalResult:unknown,m
   const replayIdentity=confirmed&&bestAttempt&&r.map?{matchId:match.id,roundKey:r.key,roundNumber:r.ordinal,phase:r.phase,mapGeneration:r.mapGeneration,
    participantId:myParticipantId,attemptId:bestAttempt.id,attemptOrdinal:bestAttempt.sequence,levelId:r.map.levelId,mapVersion:r.map.levelVersion,
    mapGeometrySha256:r.map.geometrySha256,officialBestProgress:bestAttempt.highestProgress,debug:match.online!==true}:null;
-  return {replayIdentity,ownRank:confirmed&&own?own.rank:null,ownQualified:confirmed&&own?own.qualified&&!own.forfeited:null,key:r.key,ordinal:r.ordinal,phase:r.phase,completed:confirmed,status:confirmed?'COMPLETED':inProgress?'IN_PROGRESS':'UNFINISHED',map,
+  return {replayIdentity,ownRank:confirmed&&own?own.rank:null,ownQualified:confirmed&&own?own.qualified&&!own.forfeited:null,key:r.key,ordinal:r.ordinal,displayRoundNumber:r.ordinal,phase:r.phase,completed:confirmed,status:confirmed?'COMPLETED':inProgress?'IN_PROGRESS':'UNFINISHED',map,
    cutoffScore,target:r.target,qualifiedCount:confirmed?r.players.filter(p=>p.qualified&&!p.forfeited).length:null,
    finishedAt:confirmed?new Date(r.finishedAt!).toISOString():null,standings};
  });
@@ -39,8 +39,8 @@ export function survivalHistoryProjection(value:unknown,personalResult:unknown,m
   profileAfter:result.profileAfter?{lp:result.profileAfter.lp,tier:result.profileAfter.tier}:null,won:finalRank===1}:null;
  // Compatibility snapshot is sanitized too; no unfinished standings or hidden
  // achievement/bot evidence is returned even to an authenticated participant.
- const snapshot={id:match.id,matchPlayerCount:match.config.matchPlayerCount,state:match.state,createdAt:match.createdAt,players:(summary?[]:players).map(p=>({participantId:p.participantId,name:p.name,kind:p.kind,finalRank:completed?p.finalRank:null})),rounds:rounds.map(r=>({key:r.key,ordinal:r.ordinal,phase:r.phase,map:r.map,finishedAt:r.finishedAt,cutoffScore:r.cutoffScore,players:r.standings.map(p=>({participantId:p.participantId,rank:p.rank,highestProgress:p.highestProgress,qualified:p.qualified,attempts:Array.from({length:p.attemptCount},()=>({}))}))}))};
+ const snapshot={id:match.id,matchPlayerCount:match.config.matchPlayerCount,forceDeathMatch:match.forceDeathMatch??false,state:match.state,createdAt:match.createdAt,players:(summary?[]:players).map(p=>({participantId:p.participantId,name:p.name,kind:p.kind,finalRank:completed?p.finalRank:null})),rounds:rounds.map(r=>({key:r.key,ordinal:r.ordinal,displayRoundNumber:r.ordinal,phase:r.phase,map:r.map,finishedAt:r.finishedAt,cutoffScore:r.cutoffScore,players:r.standings.map(p=>({participantId:p.participantId,rank:p.rank,highestProgress:p.highestProgress,qualified:p.qualified,attempts:Array.from({length:p.attemptCount},()=>({}))}))}))};
  return {detailsLoaded:!summary,state:match.state,inProgress,completed,settlementPending,finalRank,participantCount:players.length,debug:match.online!==true,
-  matchPlayerCount:match.config.matchPlayerCount,reachedFinal:match.rounds?.some(r=>r.phase==='FINAL'&&r.players.some(p=>p.participantId===myParticipantId))??false,
+  matchPlayerCount:match.config.matchPlayerCount,reachedFinal:match.rounds?.some(r=>(r.phase==='FINAL'||r.phase==='TIEBREAK')&&r.players.some(p=>p.participantId===myParticipantId))??false,
   currentRoundKey:rounds.at(-1)?.key??null,rounds,myParticipantId,result:safeResult,snapshot};
 }

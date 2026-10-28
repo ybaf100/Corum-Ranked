@@ -1,3 +1,4 @@
+#include "domain/SurvivalRoundPresentation.hpp"
 #include "RankedRuntime.hpp"
 #include "SurvivalRuntime.hpp"
 #include "SurvivalSceneBridge.hpp"
@@ -270,8 +271,7 @@ public:
             }
             synchronizeSurvivalPauseInput();
             auto const remaining=runtime.roundRemainingMs();
-            auto const round=view.phase=="ROUND_1"?"R1":view.phase=="ROUND_2"?"R2":view.phase=="ROUND_3"?"R3":
-                view.phase=="FINAL"?"FINAL":view.phase=="TIEBREAK"?"DEATH MATCH":"ROUND";
+            auto const round=corum::ranked::survivalRoundLabel(view.phase,view.roundNumber,true);
             auto const seconds=(remaining.value_or(0)+999)/1000;
             m_fields->budget->setString((remaining?fmt::format("{} · {:02}:{:02}",round,seconds/60,seconds%60):fmt::format("{} · --:--",round)).c_str());
             m_fields->surrender->setEnabled(runtime.canSurrender() && !m_fields->survivalConfirmation);

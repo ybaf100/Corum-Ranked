@@ -1,3 +1,10 @@
+# v0.5.0-beta.111
+- Choose Survival's starting and next internal phase from actual player counts in both 16/64-player formats; retain fixed qualifier targets.
+- Number only played rounds consecutively from R1; preserve internal map difficulty and show FINAL / DEATH MATCH consistently.
+- Add an authenticated, default-off Force Death Match option to Debug and Fill With Bots, including multi-player ties and durable retries.
+- Support first-round Death Match persistence without a FINAL row; preserve attempts, LP, achievements, replays and existing results.
+- Fence next-map prefetches against population-driven phase changes and safely quarantine unused candidates.
+
 # v0.5.0-beta.110
 - Keep Survival preparation and first automatic entry running while the status board is open.
 - Show the server round clock on the Free Play main menu without covering menu controls.

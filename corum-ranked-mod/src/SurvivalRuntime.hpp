@@ -115,9 +115,9 @@ public:
     void acknowledge();
     std::optional<ScoreAnimationInput> scoreAnimation() const;
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
-    void start(std::string password,std::string group,int forceRank=0,int botCount=-1);
+    void start(std::string password,std::string group,int forceRank=0,int botCount=-1,bool forceDeathMatch=false);
     void forceRank(std::string password,int rank);
-    void fillBots(std::string password,int botCount=-1);
+    void fillBots(std::string password,int botCount=-1,bool forceDeathMatch=false);
     bool canForceClear() const;
     bool forceClearPending() const {return m_forceClearBody.has_value();}
     void forceClear();

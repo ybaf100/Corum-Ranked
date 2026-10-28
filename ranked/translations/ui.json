@@ -2450,5 +2450,9 @@
   "AUDIO_UNKNOWN_ERROR": {
     "en": "Audio preparation failed · retry available",
     "ko": "음원 준비 오류 · 재시도 가능"
+  },
+  "survival-force-death-match": {
+    "en": "Force Death Match",
+    "ko": "데스매치로 시작"
   }
 }

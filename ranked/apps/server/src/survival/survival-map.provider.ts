@@ -20,6 +20,7 @@ export interface SurvivalMapProvider {
   select(request: SurvivalMapRequest): Promise<SurvivalVerifiedMap>;
   confirm?(tx:SqlExecutor,request:SurvivalMapRequest,map:SurvivalVerifiedMap):Promise<void>;
   release?(request:SurvivalMapRequest):Promise<void>;
+  discardPrefetch?(tx:SqlExecutor,matchId:string,roundKey:string,generation:number,levelId:number):Promise<void>;
 }
 export type SurvivalMapErrorCode = "API_ERROR" | "EMPTY_SEARCH" | "INVALID_METADATA" |
   "DOWNLOAD_FAILED" | "INVALID_DATA" | "DUPLICATE_CANDIDATES" | "NO_ELIGIBLE_MAP";

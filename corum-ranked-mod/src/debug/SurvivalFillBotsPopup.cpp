@@ -12,35 +12,40 @@ namespace {
 class SurvivalFillBotsPopup final : public Popup {
     TextInput* m_password=nullptr,*m_botCount=nullptr;
     CCLabelBMFont* m_countLabel=nullptr;
-    bool m_closed=false,m_exited=false;
+    bool m_forceDeathMatch=false,m_closed=false,m_exited=false;
     bool init() {
-        if(!Popup::init(320,224))return false;
+        if(!Popup::init(320,258))return false;
         setID("survival-fill-auth"_spr);m_bgSprite->setVisible(false);
-        auto* panel=ui::surface({320,224},{160,112},ui::Blue,ui::Surface,255,true);m_mainLayer->addChild(panel);
-        panel->addChild(ui::menuLabel(i18n::text("survival-fill-bots","FILL WITH BOTS"),.44f,{160,199},ui::Cyan,ui::FontWeight::Black));
-        auto* warning=ui::menuLabel(i18n::text("survival-debug-rating","DEBUG RESULTS AFFECT YOUR SURVIVAL LP"),.23f,{160,173},ui::Red,ui::FontWeight::SemiBold);
+        auto* panel=ui::surface({320,258},{160,129},ui::Blue,ui::Surface,255,true);m_mainLayer->addChild(panel);
+        panel->addChild(ui::menuLabel(i18n::text("survival-fill-bots","FILL WITH BOTS"),.44f,{160,233},ui::Cyan,ui::FontWeight::Black));
+        auto* warning=ui::menuLabel(i18n::text("survival-debug-rating","DEBUG RESULTS AFFECT YOUR SURVIVAL LP"),.23f,{160,207},ui::Red,ui::FontWeight::SemiBold);
         ui::fitMenuLabelWidth(warning,292,.23f,.19f);panel->addChild(warning);
         m_password=TextInput::create(256,"Debug password");m_password->setPasswordMode(true);m_password->setMaxCharCount(128);m_password->setPosition({160,71});panel->addChild(m_password,10);
-        m_countLabel=ui::menuLabel("",.26f,{160,145},ui::Text,ui::FontWeight::SemiBold);panel->addChild(m_countLabel);
-        panel->addChild(ui::menuLabel(corum::ranked::i18n::literal("inline.bot-count"),.28f,{91,111},ui::Text,ui::FontWeight::SemiBold));
+        m_countLabel=ui::menuLabel("",.26f,{160,179},ui::Text,ui::FontWeight::SemiBold);panel->addChild(m_countLabel);
+        panel->addChild(ui::menuLabel(corum::ranked::i18n::literal("inline.bot-count"),.28f,{91,145},ui::Text,ui::FontWeight::SemiBold));
         m_botCount=TextInput::create(90,fmt::format("0-{}",SurvivalRuntime::get().queue().maximumPlayers-1));m_botCount->setFilter("0123456789");m_botCount->setMaxCharCount(2);
         m_botCount->setString(std::to_string(std::clamp(SurvivalRuntime::get().queue().maximumPlayers-SurvivalRuntime::get().queue().players,0,SurvivalRuntime::get().queue().maximumPlayers-1)));
-        m_botCount->setPosition({213,111});panel->addChild(m_botCount,10);scheduleUpdate();
+        m_botCount->setPosition({213,145});panel->addChild(m_botCount,10);scheduleUpdate();
         auto* menu=CCMenu::create();menu->setPosition(CCPointZero);panel->addChild(menu,15);
+        auto* deathMatch=CCMenuItemToggler::createWithStandardSprites(this,menu_selector(SurvivalFillBotsPopup::onDeathMatch),.55f);
+        deathMatch->setPosition({46,108});deathMatch->setID("force-death-match");menu->addChild(deathMatch);
+        auto* deathMatchLabel=ui::menuLabel(i18n::text("survival-force-death-match","Force Death Match"),.28f,{69,108},ui::Text,ui::FontWeight::SemiBold);
+        deathMatchLabel->setAnchorPoint({0,.5f});ui::fitMenuLabelWidth(deathMatchLabel,226,.28f,.20f);panel->addChild(deathMatchLabel);
         auto* face=ui::surface({240,32},{},ui::Cyan,ui::SurfaceRaised,255,true);
         face->addChild(ui::menuLabel(i18n::text("start","START"),.34f,{120,16},ui::Text,ui::FontWeight::SemiBold),5);
         auto* start=CCMenuItemSpriteExtra::create(face,this,menu_selector(SurvivalFillBotsPopup::onStart));start->setPosition({160,34});menu->addChild(start);return true;
     }
+    void onDeathMatch(CCObject*) {if(!m_closed)m_forceDeathMatch=!m_forceDeathMatch;}
     void onStart(CCObject*) {
         if(m_closed || SurvivalRuntime::get().creating())return;
         auto password=std::string(m_password->getString());if(password.empty())return;
         int bots=-1;auto value=std::string(m_botCount->getString());auto parsed=std::from_chars(value.data(),value.data()+value.size(),bots);
         auto const humans=SurvivalRuntime::get().queue().players;
         if(parsed.ec!=std::errc{}||parsed.ptr!=value.data()+value.size()||bots<0||bots>SurvivalRuntime::get().queue().maximumPlayers-1||humans+bots<2||humans+bots>SurvivalRuntime::get().queue().maximumPlayers){m_countLabel->setString(fmt::format(fmt::runtime(i18n::text("survival-fill-player-range","Total must be 2 - {} players.")),SurvivalRuntime::get().queue().maximumPlayers).c_str());m_countLabel->setColor(ui::Red);return;}
-        m_password->setString("");m_closed=true;auto keep=Ref<SurvivalFillBotsPopup>(this);
-        queueInMainThread([keep,password=std::move(password),bots]() mutable {
+        auto const forceDeathMatch=m_forceDeathMatch;m_password->setString("");m_closed=true;auto keep=Ref<SurvivalFillBotsPopup>(this);
+        queueInMainThread([keep,password=std::move(password),bots,forceDeathMatch]() mutable {
             if(!keep->isRunning())return;keep->Popup::onClose(nullptr);
-            SurvivalRuntime::get().fillBots(std::move(password),bots);
+            SurvivalRuntime::get().fillBots(std::move(password),bots,forceDeathMatch);
         });
     }
 public:

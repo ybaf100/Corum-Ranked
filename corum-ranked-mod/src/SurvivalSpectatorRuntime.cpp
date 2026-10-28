@@ -1,3 +1,4 @@
+#include "domain/SurvivalRoundPresentation.hpp"
 #include "replay/SurvivalReplayRecorder.hpp"
 #include "SurvivalSpectatorRuntime.hpp"
 #include "SurvivalRuntime.hpp"
@@ -99,7 +100,7 @@ std::string SurvivalSpectatorRuntime::hudText()const{
     if(m_world){if(m_world->desync())state="REPLAY DESYNC";else if(m_world->seeking())state="SYNCING";else if(state=="LIVE" || m_world->partial())state="PARTIAL SYNC";}
     if(pose&&pose->pose&&pose->pose->dead&&(!m_world||!m_world->desync()))state="PLAYER DOWN";
     double best=0,now=0;for(auto const&r:v.standings)if(r.id==m_target){best=r.bestProgress;now=r.currentProgress;}
-    return fmt::format("SPECTATING · {}\nROUND {} · {:02}:{:02} · {}\nCUTOFF {:.2f}% · BEST {:.2f}% · NOW {:.2f}%",m_targetName,v.roundNumber,left/60,left%60,state,v.cutoff.value_or(0),best,now);
+    return fmt::format("SPECTATING · {}\n{} · {:02}:{:02} · {}\nCUTOFF {:.2f}% · BEST {:.2f}% · NOW {:.2f}%",m_targetName,survivalRoundLabel(v.phase,v.roundNumber),left/60,left%60,state,v.cutoff.value_or(0),best,now);
 }
 void SurvivalSpectatorRuntime::tick(){
     if(m_ticking)return;m_ticking=true;struct Guard{bool& b;~Guard(){b=false;}}guard{m_ticking};

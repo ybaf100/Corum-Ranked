@@ -15,23 +15,27 @@ class SurvivalDebugPopup final : public Popup {
     std::array<CCMenuItemSpriteExtra*,3> m_groups{};
     CCLabelBMFont *m_forceLabel=nullptr,*m_status=nullptr;
     int m_group=0,m_rank=0;
-    bool m_forceOnly=false,m_closed=false,m_exited=false;
+    bool m_forceDeathMatch=false,m_forceOnly=false,m_closed=false,m_exited=false;
     bool init(bool forceOnly) {
-        if(!Popup::init(340,278))return false;m_forceOnly=forceOnly;
+        if(!Popup::init(340,312))return false;m_forceOnly=forceOnly;
         m_bgSprite->setVisible(false);setID("survival-debug-config"_spr);
-        auto* panel=ui::surface({340,278},{170,139},ui::Cyan,ui::Surface,255,true);m_mainLayer->addChild(panel);
-        panel->addChild(ui::menuLabel(forceOnly?"SURVIVAL · Force n":"SURVIVAL DEBUG",.46f,{170,251},ui::Cyan,ui::FontWeight::Black));
-        auto* warning=ui::menuLabel(i18n::text("survival-debug-rating","DEBUG RESULTS AFFECT YOUR SURVIVAL LP"),.23f,{170,227},ui::Red,ui::FontWeight::SemiBold);
+        auto* panel=ui::surface({340,312},{170,156},ui::Cyan,ui::Surface,255,true);m_mainLayer->addChild(panel);
+        panel->addChild(ui::menuLabel(forceOnly?"SURVIVAL · Force n":"SURVIVAL DEBUG",.46f,{170,285},ui::Cyan,ui::FontWeight::Black));
+        auto* warning=ui::menuLabel(i18n::text("survival-debug-rating","DEBUG RESULTS AFFECT YOUR SURVIVAL LP"),.23f,{170,261},ui::Red,ui::FontWeight::SemiBold);
         ui::fitMenuLabelWidth(warning,312,.23f,.18f);panel->addChild(warning);
-        m_password=TextInput::create(240,"Debug password");m_password->setPasswordMode(true);m_password->setMaxCharCount(128);m_password->setPosition({170,191});panel->addChild(m_password,10);
+        m_password=TextInput::create(240,"Debug password");m_password->setPasswordMode(true);m_password->setMaxCharCount(128);m_password->setPosition({170,225});panel->addChild(m_password,10);
         auto* menu=CCMenu::create();menu->setPosition(CCPointZero);panel->addChild(menu,20);
-        auto* average=ui::menuLabel("Average Tier",.23f,{170,166},ui::TextMuted,ui::FontWeight::SemiBold);average->setVisible(!forceOnly);panel->addChild(average);
+        auto* average=ui::menuLabel("Average Tier",.23f,{170,200},ui::TextMuted,ui::FontWeight::SemiBold);average->setVisible(!forceOnly);panel->addChild(average);
         for(int i=0;i<3;i++) {
             m_groups[i]=CCMenuItemSpriteExtra::create(groupFace(i),this,menu_selector(SurvivalDebugPopup::onChoice));
-            m_groups[i]->setTag(10+i);m_groups[i]->setPosition({66+i*104.0f,145});m_groups[i]->setVisible(!forceOnly);menu->addChild(m_groups[i]);
+            m_groups[i]->setTag(10+i);m_groups[i]->setPosition({66+i*104.0f,179});m_groups[i]->setVisible(!forceOnly);menu->addChild(m_groups[i]);
         }
-        auto* countLabel=ui::menuLabel(corum::ranked::i18n::literal("inline.bot-count"),.27f,{106,111},ui::Text,ui::FontWeight::SemiBold);countLabel->setVisible(!forceOnly);panel->addChild(countLabel);
-        m_botCount=TextInput::create(100,fmt::format("1-{}",SurvivalRuntime::get().configuredPlayerCount()-1));m_botCount->setFilter("0123456789");m_botCount->setMaxCharCount(2);m_botCount->setString(std::to_string(SurvivalRuntime::get().configuredPlayerCount()-1));m_botCount->setPosition({220,111});m_botCount->setVisible(!forceOnly);panel->addChild(m_botCount,10);
+        auto* countLabel=ui::menuLabel(corum::ranked::i18n::literal("inline.bot-count"),.27f,{106,145},ui::Text,ui::FontWeight::SemiBold);countLabel->setVisible(!forceOnly);panel->addChild(countLabel);
+        m_botCount=TextInput::create(100,fmt::format("1-{}",SurvivalRuntime::get().configuredPlayerCount()-1));m_botCount->setFilter("0123456789");m_botCount->setMaxCharCount(2);m_botCount->setString(std::to_string(SurvivalRuntime::get().configuredPlayerCount()-1));m_botCount->setPosition({220,145});m_botCount->setVisible(!forceOnly);panel->addChild(m_botCount,10);
+        auto* deathMatch=CCMenuItemToggler::createWithStandardSprites(this,menu_selector(SurvivalDebugPopup::onDeathMatch),.55f);
+        deathMatch->setPosition({60,108});deathMatch->setVisible(!forceOnly);deathMatch->setID("force-death-match");menu->addChild(deathMatch);
+        auto* deathMatchLabel=ui::menuLabel(i18n::text("survival-force-death-match","Force Death Match"),.28f,{83,108},ui::Text,ui::FontWeight::SemiBold);
+        deathMatchLabel->setAnchorPoint({0,.5f});ui::fitMenuLabelWidth(deathMatchLabel,226,.28f,.20f);deathMatchLabel->setVisible(!forceOnly);panel->addChild(deathMatchLabel);
         m_forceLabel=ui::menuLabel("",.29f,{70,15},ui::Text,ui::FontWeight::SemiBold);
         auto* face=ui::surface({140,30},{},ui::Blue,ui::SurfaceRaised,255,true);face->addChild(m_forceLabel,5);
         auto* scenario=CCMenuItemSpriteExtra::create(face,this,menu_selector(SurvivalDebugPopup::onChoice));scenario->setTag(1);scenario->setPosition({120,75});menu->addChild(scenario);
@@ -54,6 +58,7 @@ class SurvivalDebugPopup final : public Popup {
         m_forceLabel->setString(m_rank?"Force n":i18n::text("normal-match","NORMAL MATCH").c_str());
         ui::fitMenuLabelWidth(m_forceLabel,122,.29f,.20f);
     }
+    void onDeathMatch(CCObject*) {if(!m_closed&&!m_forceOnly)m_forceDeathMatch=!m_forceDeathMatch;}
     void onChoice(CCObject* sender) {
         if(m_closed)return;auto* item=typeinfo_cast<CCMenuItemSpriteExtra*>(sender);if(!item)return;
         if(item->getTag()>=10&&item->getTag()<=12){m_group=item->getTag()-10;refreshLabels();return;}
@@ -67,12 +72,12 @@ class SurvivalDebugPopup final : public Popup {
             auto const value=std::string(m_rankInput->getString());auto parsed=std::from_chars(value.data(),value.data()+value.size(),rank);
             if(parsed.ec!=std::errc{} || parsed.ptr!=value.data()+value.size() || rank<1 || rank>(m_forceOnly?SurvivalRuntime::get().view().playerCount:bots+1)) {m_status->setString(fmt::format("1 - {}",m_forceOnly?SurvivalRuntime::get().view().playerCount:bots+1).c_str());return;}
         }
-        auto const group=m_group;auto const forceOnly=m_forceOnly;
+        auto const group=m_group;auto const forceOnly=m_forceOnly;auto const forceDeathMatch=m_forceDeathMatch;
         m_closed=true;auto keep=Ref<SurvivalDebugPopup>(this);
-        queueInMainThread([keep,password=std::move(password),group,rank,forceOnly,bots]() mutable {
+        queueInMainThread([keep,password=std::move(password),group,rank,forceOnly,bots,forceDeathMatch]() mutable {
             if(!keep->isRunning())return;keep->m_password->setString("");keep->Popup::onClose(nullptr);
             if(forceOnly)SurvivalRuntime::get().forceRank(std::move(password),rank);
-            else {constexpr char const* groups[]={"RED_BRONZE","SILVER","GOLD"};SurvivalRuntime::get().start(std::move(password),groups[group],rank,bots);}
+            else {constexpr char const* groups[]={"RED_BRONZE","SILVER","GOLD"};SurvivalRuntime::get().start(std::move(password),groups[group],rank,bots,forceDeathMatch);}
         });
     }
 public:

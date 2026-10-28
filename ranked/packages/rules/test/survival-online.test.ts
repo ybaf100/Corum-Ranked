@@ -1,7 +1,7 @@
 import { describe,it,expect } from "vitest";
 import { createSurvivalMatch,reduceSurvivalMatch,survivalCurrentRound,survivalSettlementInputs,survivalOnlineTargets,
   survivalOnlineRewardRank,survivalOnlineBotLp,survivalMarkAbsent,DEFAULT_SURVIVAL_CONFIG,survivalMapRange,
-  survivalDifficultyForAverage,type SurvivalMatch,type SurvivalCommand } from "../src/index.js";
+  survivalDifficultyForAverage,survivalInitialPhase,type SurvivalMatch,type SurvivalCommand } from "../src/index.js";
 const config={...DEFAULT_SURVIVAL_CONFIG,enabled:true};
 const entrants=(n:number)=>Array.from({length:n},(_,i)=>({participantId:`p${i}`,playerId:`a${i}`,kind:"HUMAN" as const,name:`Player ${i}`,lp:150}));
 const make=(n=16)=>createSurvivalMatch("test",entrants(n),config,"g",0,true);
@@ -18,19 +18,19 @@ function record(m:SurvivalMatch,id:string,value:number,time:number){m=command(m,
  return command(m,{type:"PROGRESS",...context(m),participantId:id,attemptId:id+"-attempt",progress:value},time);}
 
 describe("Survival M5 confirmed online policies",()=>{
- it.each([8,9,10,11,12,13,14,15,16])("captures proportional fixed targets for %i humans",n=>{
-   const m=make(n);expect(survivalCurrentRound(m).target).toBe(Math.round(n*10/16));
-   expect(survivalOnlineTargets(n)).toEqual([Math.round(n*10/16),Math.round(n*6/16),Math.round(n*3/16)]);
+ it.each([8,9,10,11,12,13,14,15,16])("uses fixed phase targets for %i humans",n=>{
+   const m=make(n);expect(survivalCurrentRound(m).target).toBe(n<=10?6:10);
+   expect(survivalOnlineTargets(n)).toEqual([10,6,3]);
  });
  it.each([2,3,4,5,6,7])("uses the agreed short-match phases for %i humans",n=>{
-   let m=make(n);expect(survivalCurrentRound(m).phase).toBe(n<=3?"FINAL":"ROUND_3");
+   let m=make(n);expect(survivalCurrentRound(m).phase).toBe(survivalInitialPhase(n));
    m=ready(m,1);expect(survivalCurrentRound(m).endsAt!-survivalCurrentRound(m).startsAt!).toBe(180000);
    survivalCurrentRound(m).players.forEach((p,i)=>{m=record(m,p.participantId,100-i,survivalCurrentRound(m).startsAt!+1);});
    m=command(m,{type:"TICK"},survivalCurrentRound(m).endsAt!);
-   if(n>3){expect(survivalCurrentRound(m).players.filter(p=>p.qualified)).toHaveLength(3);m=command(m,{type:"TICK"},m.updatedAt+1);expect(survivalCurrentRound(m).phase).toBe("FINAL");}
+   if(n>3){expect(survivalCurrentRound(m).players.filter(p=>p.qualified)).toHaveLength(n===7?6:3);m=command(m,{type:"TICK"},m.updatedAt+1);expect(survivalCurrentRound(m).phase).toBe(n===7?"ROUND_3":"FINAL");}
    else expect(m.state).toBe("FINAL_RESULT");
  });
- it("keeps legacy M3/M4 creation restricted to 16",()=>{expect(()=>createSurvivalMatch("old",entrants(8),config,"g",0)).toThrow();});
+ it("applies the same shrinking policy to non-online creation",()=>{expect(survivalCurrentRound(createSurvivalMatch("old",entrants(8),config,"g",0))).toMatchObject({phase:"ROUND_2",target:6,ordinal:1});});
  it("maps 8-person rewards including ties to the agreed 16-position table",()=>{
    expect(Array.from({length:8},(_,i)=>config.placementLp[survivalOnlineRewardRank(i+1,8)-1])).toEqual([50,30,20,10,2,-20,-40,-55]);
    let m=ready(make(8),1);survivalCurrentRound(m).players.forEach((p,i)=>{m=record(m,p.participantId,i===7?0:50,survivalCurrentRound(m).startsAt!+1);});

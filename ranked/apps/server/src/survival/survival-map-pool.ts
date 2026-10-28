@@ -191,6 +191,10 @@ export class SurvivalMapPool implements SurvivalMapProvider,OnApplicationBootstr
       [survivalCandidateBucket(request),map.levelId,r.token,this.clock.now().toISOString()]);
     if(!result.rows.length)throw new SurvivalMapError("DUPLICATE_CANDIDATES","Candidate reservation expired or changed");
   }
+  public async discardPrefetch(tx:SqlExecutor,matchId:string,roundKey:string,generation:number,levelId:number):Promise<void>{
+    await tx.query(`UPDATE sur_map_candidates SET status='COOLDOWN',invalid_reason='PREFETCH_PHASE_CHANGED',retry_after=expires_at
+      WHERE match_id=$1 AND round_key=$2 AND map_generation=$3 AND level_id=$4 AND status='CONSUMED'`,[matchId,roundKey,generation,levelId]);
+  }
   public async release(request:SurvivalMapRequest):Promise<void>{
     if(!request.reservation)return;
     await this.db.transaction(async tx=>{

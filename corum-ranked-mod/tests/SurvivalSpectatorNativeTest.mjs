@@ -12,6 +12,7 @@ test('actual Survival spectator runtime gates admission, ACK publication, mode t
  const code=read('src/SurvivalSpectatorRuntime.cpp').replace(/^#include.*$/gm,'');
  const context=read('src/SpectatorLiveRuntime.hpp').slice(read('src/SpectatorLiveRuntime.hpp').indexOf('struct SurvivalSpectatorTransportContext'),read('src/SpectatorLiveRuntime.hpp').indexOf('class SpectatorLiveRuntime final'));
  const cpp=`
+#include "${new URL('../src/domain/SurvivalRoundPresentation.hpp',import.meta.url).pathname}"
 #include <matjson.hpp>
 #include <future>
 #include <memory>
@@ -68,7 +69,7 @@ struct SpectatorLiveRuntime{
 struct RankedRuntime{std::string session="session";static RankedRuntime&get(){static RankedRuntime r;return r;}std::string spectatorLiveSessionToken()const{return session;}};
 struct SurvivalRuntime{
  struct Map{int levelId=123,version=1;};struct Row{std::string id;double bestProgress=0,currentProgress=0;};
- struct View{std::string id="match",state="PLAYING",roundKey="R1";int roundNumber=1,mapGeneration=1;Map map;bool ownEliminated=false,online=true,spectatorDemand=true,debug=false;std::string ownId="viewer";matjson::Value participants,certificate;std::vector<std::string>aliveIds{"target"};std::vector<Row>standings;std::optional<double>cutoff=40;}v;
+ struct View{std::string id="match",state="PLAYING",roundKey="R1",phase="ROUND_1";int roundNumber=1,mapGeneration=1;Map map;bool ownEliminated=false,online=true,spectatorDemand=true,debug=false;std::string ownId="viewer";matjson::Value participants,certificate;std::vector<std::string>aliveIds{"target"};std::vector<Row>standings;std::optional<double>cutoff=40;}v;
  bool free=false,cleared=true;int lock=0,freeReturn=0,freeBegins=0;std::string accepted,attempt;SurvivalOutcomeChoice choice=SurvivalOutcomeChoice::Undecided;
  static SurvivalRuntime&get(){static SurvivalRuntime r;return r;}auto const&view()const{return v;}std::string optionsContext()const{return v.id+v.roundKey+std::to_string(v.mapGeneration);}
  bool officialRoundCleared()const{return cleared&&!v.ownEliminated&&attempt.empty();}bool beginFreePlay(){++freeBegins;free=true;return true;}

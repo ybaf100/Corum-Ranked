@@ -166,8 +166,9 @@ describe("durable Survival M3 engine",()=>{
     expect((await database.query("SELECT * FROM ranked_profiles ORDER BY player_id")).rows).toEqual(solo);
     expect((await database.query<{count:number}>("SELECT COUNT(*)::int AS count FROM sur_matches")).rows[0]!.count).toBe(1);
   });
-  it("rejects OFF admission, partial fields and conflicting idempotent creation",async()=>{
-    await expect(engine.create("short",entrants.slice(0,15))).rejects.toThrow("exactly 16");
+  it("accepts reduced fields and rejects OFF admission and conflicting idempotent creation",async()=>{
+    expect(survivalCurrentRound(await engine.create("short",entrants.slice(0,15).map((_,i)=>({participantId:`partial-${i}`,kind:"BOT" as const,name:`Partial ${i}`,lp:150}))))).toMatchObject({phase:"ROUND_1",ordinal:1,target:10});
+    await expect(engine.create("invalid",entrants.slice(0,1))).rejects.toThrow("entrants");
     await engine.create("once",entrants);await expect(engine.create("once",[...entrants].reverse())).rejects.toThrow("key changed");
     document={...document,config:{...document.config,enabled:false}};await config.refresh();
     await expect(engine.create("off",entrants)).rejects.toThrow("disabled");
@@ -220,7 +221,7 @@ describe("durable Survival M3 engine",()=>{
     }
     expect(match.winnerId).toBe("p00");
     expect((await database.query<{score_millipercent:number}>("SELECT score_millipercent FROM sur_tiebreak_attempts ORDER BY participant_id,sequence")).rows.map(r=>r.score_millipercent)).toEqual([94371,94371,94371,94370,94370,94370]);
-    expect((await database.query("SELECT * FROM sur_tiebreaks")).rows).toHaveLength(1);
+    const ties=(await database.query<{final_round_key:string|null}>("SELECT * FROM sur_tiebreaks")).rows;expect(ties).toHaveLength(1);expect(ties[0]!.final_round_key).toBe(match.rounds.find(r=>r.phase==="FINAL")!.key);
   },30_000);
   it("stores provider failures and retries without starting a timer",async()=>{
     const match=await engine.create("retry",entrants);

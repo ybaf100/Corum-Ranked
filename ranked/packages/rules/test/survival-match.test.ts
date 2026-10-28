@@ -190,7 +190,7 @@ describe("Survival round engine",()=>{
       levelVersion:1,geometrySha256:"a".repeat(64),geometryBytes:100,verifiedAt:new Date(m.now).toISOString()};
     expect(()=>m.send({type:"MAP_SELECTED",roundKey:m.round.key,mapGeneration:1,map:range})).toThrow();
   });
-  it.each([8,9,10,11,12,13,14,15,17])("rejects %i initial players in M3",count=>{
+  it.each([0,1,17])("rejects %i players outside the configured field",count=>{
     const r=new Rig();expect(()=>createSurvivalMatch("other",Array.from({length:count},(_,i)=>({...r.match.players[i%16]!,participantId:String(i)})),DEFAULT_SURVIVAL_CONFIG,"fixture",r.now)).toThrow();
   });
 });

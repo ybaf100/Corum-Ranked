@@ -5,8 +5,9 @@ import type { SurvivalConfig } from "./survival.js";
 
 export function survivalOnlineTargets(count:number,capacity=16):readonly number[] {
   if(!Number.isInteger(count)||count<2||count>capacity || ![16,64].includes(capacity))throw new RankedDomainError("INVALID_CONFIG","Online Survival requires 2–64 entrants within the configured field");
-  if(capacity===64)return count<8?[5,5,5,5]:[40,26,12,5].map(n=>Math.max(2,Math.round(count*n/64)));
-  return count<8?[3,3,3]:[Math.round(count*10/16),Math.round(count*6/16),Math.round(count*3/16)];
+  // Fixed internal-phase cutoffs; choose a later phase for smaller fields.
+  // Proportional cutoffs would recreate qualifiers that cannot eliminate anyone.
+  return capacity===64?[40,26,12,5]:[10,6,3];
 }
 export function survivalOnlineRewardRank(rank:number,count:number):number {
   if(!Number.isInteger(rank)||rank<1||rank>count||count<2||count>64)

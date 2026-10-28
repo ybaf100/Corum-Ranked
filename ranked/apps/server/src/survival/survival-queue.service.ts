@@ -1,3 +1,4 @@
+import type { SurvivalMatch } from "@corum-ranked/rules";
 import { DemandWorker, signalAfterCommit } from "../database/database-work.js";
 import { BadRequestException, ConflictException,ForbiddenException,Inject,Injectable,NotFoundException,Logger,type OnApplicationBootstrap,type OnApplicationShutdown } from "@nestjs/common";
 import { createHash,timingSafeEqual } from "node:crypto";
@@ -89,7 +90,8 @@ export class SurvivalQueueService implements OnApplicationBootstrap,OnApplicatio
       [sessionAliveSince(now),now.toISOString(),REQUIRED_RANKED_CLIENT_VERSION]);
     return [...(await tx.query<QueueRow>("SELECT * FROM sur_queue_entries WHERE status='QUEUED' ORDER BY joined_at,player_id LIMIT $1",[this.config.getSnapshot().config.matchPlayerCount])).rows];
   }
-  private async createFrom(tx:SqlExecutor,rows:readonly QueueRow[],fill:boolean,botCount?:number){
+  private async createFrom(tx:SqlExecutor,rows:readonly QueueRow[],fill:boolean,botCount?:number,forceDeathMatch=false){
+    if(forceDeathMatch&&!fill)throw new ForbiddenException("Forced Death Match requires authenticated bot fill");
     // Lock accounts before queue/session/profile rows, matching session rotation.
     // Never hold one joiner's account while acquiring a second account.
     for(const id of rows.map(q=>q.player_id).sort())await tx.query("SELECT id FROM ranked_players WHERE id=$1 FOR UPDATE",[id]);
@@ -110,8 +112,8 @@ export class SurvivalQueueService implements OnApplicationBootstrap,OnApplicatio
     const botLp=fill?survivalOnlineBotLp(seed,valid.map(q=>Number(profiles.find(p=>p.player_id===q.player_id)!.lp)),captured.config,botCount):[];
     const entrants:SurvivalAdmissionPlayer[]=[...valid.map(q=>({participantId:q.player_id,kind:"HUMAN" as const,playerId:q.player_id})),
       ...botLp.map((lp,i)=>({participantId:`bot-${String(i+1).padStart(2,"0")}`,kind:"BOT" as const,name:`Bot ${i+1}`,lp}))];
-    const key="sur-online:"+createHash("sha256").update(JSON.stringify({entries:valid.map(q=>q.entry_id),fill,botCount:botLp.length,matchPlayerCount:captured.config.matchPlayerCount})).digest("hex");
-    const match=await this.engine.createWithin(tx,key,entrants,captured,undefined,true,true);
+    const key="sur-online:"+createHash("sha256").update(JSON.stringify({entries:valid.map(q=>q.entry_id),fill,...(forceDeathMatch?{forceDeathMatch:true}:{}),botCount:botLp.length,matchPlayerCount:captured.config.matchPlayerCount})).digest("hex");
+    const match=await this.engine.createWithin(tx,key,entrants,captured,undefined,true,true,false,forceDeathMatch);
     const now=this.clock.now().toISOString();
     await tx.query("INSERT INTO sur_online_matches(match_id,bot_filled,seed,created_at) VALUES($1,$2,$3,$4)",[match.id,fill&&botLp.length>0,seed,now]);
     for(const q of valid){
@@ -130,16 +132,20 @@ export class SurvivalQueueService implements OnApplicationBootstrap,OnApplicatio
     return this.config.withAdmission(()=>this.db.transaction(async tx=>{
       await lockSurvivalAdmission(tx);await this.actor(tx,session);
       signalAfterCommit(tx,"survival-queue");
-      const prior=(await tx.query<{match_id:string;bot_count:number|null}>("SELECT match_id,bot_count FROM sur_queue_fill_requests WHERE player_id=$1 AND request_id=$2",[session.playerId,body.requestId])).rows[0];
-      if(prior){if(prior.bot_count!==(body.botCount??null))throw new ConflictException("Bot fill payload changed");return {status:"MATCHED",matchId:prior.match_id};}
+      const prior=(await tx.query<{match_id:string;bot_count:number|null;force_death_match:boolean}>("SELECT match_id,bot_count,force_death_match FROM sur_queue_fill_requests WHERE player_id=$1 AND request_id=$2",[session.playerId,body.requestId])).rows[0];
+      if(prior){if(prior.bot_count!==(body.botCount??null) || prior.force_death_match!==(body.forceDeathMatch??false))throw new ConflictException("Bot fill payload changed");return {status:"MATCHED",matchId:prior.match_id};}
       const own=(await tx.query<QueueRow>("SELECT * FROM sur_queue_entries WHERE player_id=$1",[session.playerId])).rows[0];
-      if(own?.status==="MATCHED")return {status:"MATCHED",matchId:own.matched_match_id};
+      if(own?.status==="MATCHED"){
+        const row=(await tx.query<{snapshot:SurvivalMatch}>("SELECT snapshot FROM sur_matches WHERE id=$1",[own.matched_match_id])).rows[0];
+        if(!row || (row.snapshot.forceDeathMatch??false)!==(body.forceDeathMatch??false))throw new ConflictException("Bot fill mode changed");
+        return {status:"MATCHED",matchId:own.matched_match_id};
+      }
       await assertSurvivalAdmission(tx,this.config.getSnapshot());
       if(!own||own.status!=="QUEUED"||own.session_id!==session.sessionId)throw new ConflictException("Join the Survival queue before filling bots");
       const rows=await this.candidates(tx);
       if(!rows.some(q=>q.player_id===session.playerId))throw new ConflictException("Your queue batch is not at the front yet");
-      const match=await this.createFrom(tx,rows,true,body.botCount);if(!match)throw new ConflictException("Survival queue changed; retry");
-      await tx.query("INSERT INTO sur_queue_fill_requests(player_id,request_id,match_id,created_at,bot_count) VALUES($1,$2,$3,$4,$5)",[session.playerId,body.requestId,match.id,this.clock.now().toISOString(),body.botCount??null]);
+      const match=await this.createFrom(tx,rows,true,body.botCount,body.forceDeathMatch??false);if(!match)throw new ConflictException("Survival queue changed; retry");
+      await tx.query("INSERT INTO sur_queue_fill_requests(player_id,request_id,match_id,created_at,bot_count,force_death_match) VALUES($1,$2,$3,$4,$5,$6)",[session.playerId,body.requestId,match.id,this.clock.now().toISOString(),body.botCount??null,body.forceDeathMatch??false]);
       return {status:"MATCHED",matchId:match.id};
     }));
   }

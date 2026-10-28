@@ -1,5 +1,6 @@
 #include "../SurvivalSpectatorRuntime.hpp"
 #pragma once
+#include "../domain/SurvivalRoundPresentation.hpp"
 #include "../SurvivalRuntime.hpp"
 #include "PlayerIcon.hpp"
 #include "RankBadgeAssets.hpp"
@@ -95,7 +96,7 @@ public:
         auto& r=SurvivalRuntime::get();r.tick();auto const& v=r.view();if(v.id!=m_match){onClose(nullptr);return;}
         auto const rows=survivalRoster(v);
         auto const remaining=r.roundRemainingMs();auto const seconds=remaining?(*remaining+999)/1000:0;
-        m_clock->setString(fmt::format("SURVIVAL · {} · {} · {}",v.phase,remaining?fmt::format("{:02}:{:02}",seconds/60,seconds%60):"--:--",v.cutoff?rankedScoreText(*v.cutoff,v.phase=="TIEBREAK")+"%":"--%").c_str());fitFullMenuLabel(m_clock,440,18,.30f);
+        m_clock->setString(fmt::format("SURVIVAL · {} · {} · {}",survivalRoundLabel(v.phase,v.roundNumber),remaining?fmt::format("{:02}:{:02}",seconds/60,seconds%60):"--:--",v.cutoff?rankedScoreText(*v.cutoff,v.phase=="TIEBREAK")+"%":"--%").c_str());fitFullMenuLabel(m_clock,440,18,.30f);
         for(auto& card:m_cards){auto it=std::find_if(rows.begin(),rows.end(),[&](auto const& row){return row.id==card.row.id;});if(it==rows.end())continue;card.row=*it;
             auto const& row=card.row;
             if(m_compact){card.title->setString(row.name.c_str());fitSingleLineMenuLabel(card.title,80,13,.22f);}

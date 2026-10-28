@@ -66,16 +66,17 @@ export class SurvivalEngineService implements OnApplicationBootstrap, OnApplicat
   /** Trusted admission adapter only. Caller owns the mode admission fence and
    * account/session lock. Virtual LP changes this match snapshot, never a profile. */
   public async createWithin(tx:SqlExecutor,creationKey:string,players:readonly SurvivalAdmissionPlayer[],
-    captured:SurvivalConfigDocument, humanLpSnapshot?:number,presentationControlled=false,online=false,variableSize=false):Promise<SurvivalMatch> {
+    captured:SurvivalConfigDocument, humanLpSnapshot?:number,presentationControlled=false,online=false,variableSize=false,forceDeathMatch=false):Promise<SurvivalMatch> {
     if(!creationKey.trim() || creationKey.length>200 || (players.length<2||players.length>64) || new Set(players.map(p=>p.participantId)).size!==players.length)
       throw new BadRequestException("Survival entrants must fit the captured 16/64-player format");
     await lockSurvivalAdmission(tx);
-    const requestHash=variableSize?hash({players,humanLpSnapshot,presentationControlled,variableSize}):online?hash({players,presentationControlled,online}):presentationControlled?hash({players,humanLpSnapshot,presentationControlled}):humanLpSnapshot===undefined?hash(players):hash({players,humanLpSnapshot});
+    if(forceDeathMatch&&!presentationControlled)throw new ForbiddenException("Forced Death Match requires a verified debug admission");
+    const baseHash=variableSize?hash({players,humanLpSnapshot,presentationControlled,variableSize}):online?hash({players,presentationControlled,online}):presentationControlled?hash({players,humanLpSnapshot,presentationControlled}):humanLpSnapshot===undefined?hash(players):hash({players,humanLpSnapshot});
+    const requestHash=forceDeathMatch?hash({baseHash,forceDeathMatch:true}):baseHash;
       // Serialize even two first uses of the same key before its row exists.
       await tx.query("SELECT pg_advisory_xact_lock(hashtext($1))",[`survival-create:${creationKey}`]);
       const existing=(await tx.query<MatchRow>("SELECT * FROM sur_matches WHERE creation_key=$1",[creationKey])).rows[0];
       if(existing){if(existing.request_hash!==requestHash)throw new ConflictException("Survival creation key changed");return existing.snapshot;}
-      if(!online && !variableSize && players.length!==captured.config.matchPlayerCount)throw new BadRequestException(`Survival requires exactly ${captured.config.matchPlayerCount} entrants`);
       if(players.length>captured.config.matchPlayerCount)throw new BadRequestException("Entrants exceed the captured Survival format");
       await assertSurvivalAdmission(tx,captured);
       const humans=players.filter((p):p is Extract<SurvivalAdmissionPlayer,{kind:"HUMAN"}>=>p.kind==="HUMAN");
@@ -88,7 +89,7 @@ export class SurvivalEngineService implements OnApplicationBootstrap, OnApplicat
         if(!profile)throw new BadRequestException("Enter Survival before match admission");
         return {...p,name:profile.gd_username,lp:humanLpSnapshot??Number(profile.lp),displayedTier:profile.displayed_tier,gdAccountId:profile.gd_account_id};
       });
-      const match=createSurvivalMatch(this.ids.next(),entrants,captured.config,captured.generation,this.clock.now().getTime(),online,variableSize);
+      const match=createSurvivalMatch(this.ids.next(),entrants,captured.config,captured.generation,this.clock.now().getTime(),online,variableSize,forceDeathMatch);
       if(presentationControlled){match.presentationControlled=true;match.presentationGate="INTRO";}
       await tx.query(`INSERT INTO sur_matches(id,creation_key,request_hash,state,revision,config_generation,config_snapshot,
         average_lp,difficulty_group,current_round_key,snapshot,created_at,updated_at)
@@ -253,6 +254,9 @@ export class SurvivalEngineService implements OnApplicationBootstrap, OnApplicat
   }
   private async persist(tx:SqlExecutor,before:SurvivalMatch,match:SurvivalMatch):Promise<void> {
     if(match.revision===before.revision)return;
+    if(before.nextMap && (!match.nextMap || match.nextMap.map.levelId!==before.nextMap.map.levelId || match.nextMap.phase!==before.nextMap.phase || match.nextMap.roundKey!==before.nextMap.roundKey || match.nextMap.mapGeneration!==before.nextMap.mapGeneration) &&
+      !match.rounds.some(r=>r.key===before.nextMap!.roundKey && r.phase===before.nextMap!.phase && r.mapGeneration===before.nextMap!.mapGeneration && r.map?.levelId===before.nextMap!.map.levelId))
+      await this.maps.discardPrefetch?.(tx,match.id,before.nextMap.roundKey,before.nextMap.mapGeneration,before.nextMap.map.levelId);
     await tx.query(`UPDATE sur_matches SET state=$2,revision=$3,current_round_key=$4,winner_id=$5,snapshot=$6::jsonb,
       updated_at=$7,finished_at=$8 WHERE id=$1`,[match.id,match.state,match.revision,survivalCurrentRound(match).key,
       match.winnerId,JSON.stringify(match),iso(match.updatedAt),iso(match.finishedAt)]);
@@ -289,7 +293,7 @@ export class SurvivalEngineService implements OnApplicationBootstrap, OnApplicat
         if(r.phase==="TIEBREAK")await tx.query(`INSERT INTO sur_tiebreaks(match_id,round_key,sequence,final_round_key,result) VALUES($1,$2,$3,$4,$5::jsonb)
           ON CONFLICT(match_id,round_key) DO UPDATE SET result=EXCLUDED.result`,[match.id,r.key,
           match.rounds.filter(round=>round.phase==="TIEBREAK" && round.ordinal<=r.ordinal).length,
-          match.rounds.find(round=>round.phase==="FINAL")!.key,r.finishedAt===null?null:JSON.stringify(r.players.map(p=>({participantId:p.participantId,rank:p.rank,qualified:p.qualified})))]);
+          match.rounds.find(round=>round.phase==="FINAL")?.key??null,r.finishedAt===null?null:JSON.stringify(r.players.map(p=>({participantId:p.participantId,rank:p.rank,qualified:p.qualified})))]);
       }
       const rows:unknown[]=[],attempts:unknown[]=[],closed:unknown[]=[];
       for(const p of r.players){

@@ -59,7 +59,7 @@ export class SurvivalSpectatorLiveService {
     const {match,round,own,context}=await this.authority(id,session,'viewer');
     const view=survivalLiveView(match,this.now());
     const room=this.streams.size<SURVIVAL_RELAY_LIMITS.streams&&[...this.streams.values()].filter(s=>s.stream.matchId===id).length<SURVIVAL_RELAY_LIMITS.perMatch;
-    return {context,matchId:id,state:match.state,roundNumber:round.ordinal,phase:round.phase,endsAt:round.endsAt,cutoff:round.cutoffScore,
+    return {context,matchId:id,state:match.state,roundNumber:round.ordinal,displayRoundNumber:round.ordinal,phase:round.phase,endsAt:round.endsAt,cutoff:round.cutoffScore,
       targets:match.players.filter(p=>p.eliminationStage===null&&p.participantId!==own.participantId).map(p=>{
         const state=view.standings.find(s=>s.participantId===p.participantId),rp=round.players.find(r=>r.participantId===p.participantId);
         const attempt=rp?.attempts.find(a=>a.endedAt===null);

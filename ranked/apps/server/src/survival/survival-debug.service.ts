@@ -84,7 +84,7 @@ export class SurvivalDebugService implements OnApplicationBootstrap,OnApplicatio
       const previous=(await tx.query<{snapshot:SurvivalMatch;average_group:string;force_rank:number|null}>(
         `SELECT m.snapshot,d.average_group,d.force_rank FROM sur_matches m JOIN sur_debug_matches d ON d.match_id=m.id WHERE m.creation_key=$1`,[creationKey])).rows[0];
       if(previous) {
-        if(previous.snapshot.players.filter(p=>p.kind==="BOT").length!==(body.botCount??previous.snapshot.config.matchPlayerCount-1) || previous.average_group!==body.averageGroup || previous.force_rank!==(body.forceRank??null))throw new ConflictException("Debug creation payload changed");
+        if((previous.snapshot.forceDeathMatch??false)!==(body.forceDeathMatch??false) || previous.snapshot.players.filter(p=>p.kind==="BOT").length!==(body.botCount??previous.snapshot.config.matchPlayerCount-1) || previous.average_group!==body.averageGroup || previous.force_rank!==(body.forceRank??null))throw new ConflictException("Debug creation payload changed");
         return previous.snapshot;
       }
       const busy=await tx.query(`SELECT 1 FROM ranked_queue_entries WHERE player_id=$1 AND status='QUEUED'
@@ -100,7 +100,7 @@ export class SurvivalDebugService implements OnApplicationBootstrap,OnApplicatio
       const lp=survivalDebugLp(seed,Number(profile.lp),body.averageGroup,captured.config,botCount);
       const players:SurvivalAdmissionPlayer[]=[{participantId:"human",kind:"HUMAN",playerId:session.playerId},
         ...lp.bots.map((value,i)=>({participantId:`bot-${String(i+1).padStart(2,"0")}`,kind:"BOT" as const,name:`Bot ${i+1}`,lp:value}))];
-      const created=await this.engine.createWithin(tx,creationKey,players,captured,lp.humanSnapshotLp,true,false,botCount!==captured.config.matchPlayerCount-1);
+      const created=await this.engine.createWithin(tx,creationKey,players,captured,lp.humanSnapshotLp,true,false,botCount!==captured.config.matchPlayerCount-1,body.forceDeathMatch??false);
       await tx.query(`INSERT INTO sur_debug_matches(match_id,human_player_id,admission_session_id,seed,average_group,
         virtual_human_lp,human_actual_lp,force_rank,last_seen_at,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$9)`,
         [created.id,session.playerId,session.sessionId,seed,body.averageGroup,lp.virtualHuman,profile.lp,body.forceRank??null,now.toISOString()]);

@@ -1,3 +1,4 @@
+#include "../domain/SurvivalRoundPresentation.hpp"
 #include "../SurvivalSpectatorRuntime.hpp"
 #include "../SurvivalRuntime.hpp"
 #include "../RankedRoundPreparation.hpp"
@@ -35,7 +36,7 @@ class SurvivalSpectatorTargetPopup final:public Popup {
         auto& live=SurvivalSpectatorRuntime::get();auto const& sur=SurvivalRuntime::get();auto const&v=sur.view();
         if(live.canLaunch()){onClose(nullptr);return;}
         if(v.id!=m_identity||v.state=="FINAL_RESULT"||v.state=="CANCELLED"){onClose(nullptr);return;}
-        auto const left=sur.roundRemainingMs().value_or(0)/1000;auto clock=fmt::format("ROUND {} · {:02}:{:02}",v.roundNumber,left/60,left%60);if(clock!=m_clock->getString())m_clock->setString(clock.c_str());
+        auto const left=sur.roundRemainingMs().value_or(0)/1000;auto clock=fmt::format("{} · {:02}:{:02}",survivalRoundLabel(v.phase,v.roundNumber),left/60,left%60);if(clock!=m_clock->getString())m_clock->setString(clock.c_str());
         auto const& targets=live.targets();bool compact=v.matchPlayerCount==64&&(v.phase=="ROUND_1"||v.phase=="ROUND_2");m_pageSize=compact?24:16;
         auto const pages=std::max<std::size_t>(1,(targets.size()+m_pageSize-1)/m_pageSize);m_page%=pages;
         std::string key=std::to_string(m_page)+":"+std::to_string(m_pageSize);for(auto const&t:targets)key+=":"+t.id+":"+t.name;

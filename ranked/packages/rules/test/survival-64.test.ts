@@ -85,7 +85,7 @@ describe("shared Survival formats",()=>{
  it("uses the configured field for bot fills, scaled short fields and explicit debug ranks",()=>{
   const config=survivalConfigForPlayerCount(DEFAULT_SURVIVAL_CONFIG,64);
   expect(validateSurvivalConfig(config)).toEqual([]);expect(validateSurvivalEngineConfig(config)).toEqual([]);
-  expect(survivalOnlineTargets(64,64)).toEqual([40,26,12,5]);expect(survivalOnlineTargets(32,64)).toEqual([20,13,6,3]);
+  expect(survivalOnlineTargets(64,64)).toEqual([40,26,12,5]);expect(survivalOnlineTargets(32,64)).toEqual([40,26,12,5]);
   expect(survivalDebugLp(7,150,"RED_BRONZE",config).bots).toHaveLength(63);
   expect(survivalOnlineBotLp(7,[150,150],config)).toHaveLength(62);
   const field=new Field();field.match=forceSurvivalDebugRank(field.match,"p1",64,field.now);

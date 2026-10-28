@@ -1,3 +1,4 @@
+#include "domain/SurvivalRoundPresentation.hpp"
 #include "replay/SurvivalReplayRecorder.hpp"
 #include "SurvivalSpectatorRuntime.hpp"
 #include "SurvivalRuntime.hpp"
@@ -211,7 +212,7 @@ void SurvivalRuntime::observe(matjson::Value const& root) {
     for(auto const& winner:root["winnerIds"].asArray().unwrapOr(std::vector<matjson::Value>{}))if(winner.asString().unwrapOr("")==m_view.ownId)m_view.ownWinner=true;
     m_view.online=root["online"].asBool().unwrapOr(false);m_view.resultPending=root["myResultPending"].asBool().unwrapOr(false);
     m_view.debug=root["debug"].asBool().unwrapOr(false);m_view.mapGeneration=static_cast<int>(root["mapGeneration"].asInt().unwrapOr(0));
-    m_view.roundNumber=static_cast<int>(root["roundNumber"].asInt().unwrapOr(m_view.phase=="ROUND_1"?1:m_view.phase=="ROUND_2"?2:m_view.phase=="ROUND_3"?3:4));
+    m_view.roundNumber=static_cast<int>(root["displayRoundNumber"].asInt().unwrapOr(root["roundNumber"].asInt().unwrapOr(0)));
     m_view.matchPlayerCount=root["matchPlayerCount"].asInt().unwrapOr(16)==64?64:16;
     m_view.playerCount=static_cast<int>(root["playerCount"].asInt().unwrapOr(16));m_view.roundPlayerCount=static_cast<int>(root["roundPlayerCount"].asInt().unwrapOr(16));
     m_view.targetQualifiers=static_cast<int>(root["targetQualifiers"].asInt().unwrapOr(0));
@@ -347,7 +348,8 @@ SurvivalMatchView SurvivalRuntime::preparationView() const {
     if(view.state=="ROUND_RESULT" && view.nextMap["map"].isObject()){
         auto const& map=view.nextMap["map"];view.certificate=map;
         view.roundKey=view.nextMap["roundKey"].asString().unwrapOr("");view.phase=view.nextMap["phase"].asString().unwrapOr("");
-        view.mapGeneration=static_cast<int>(view.nextMap["mapGeneration"].asInt().unwrapOr(0));++view.roundNumber;
+        view.mapGeneration=static_cast<int>(view.nextMap["mapGeneration"].asInt().unwrapOr(0));
+        view.roundNumber=static_cast<int>(view.nextMap["displayRoundNumber"].asInt().unwrapOr(view.roundNumber+1));
         view.map={static_cast<int>(map["levelId"].asInt().unwrapOr(0)),static_cast<int>(map["stars"].asInt().unwrapOr(0)),
             static_cast<int>(map["levelVersion"].asInt().unwrapOr(0)),map["demon"].asBool().unwrapOr(false)?demon(map["demonDifficulty"].asString().unwrapOr("")):SurvivalDemon::None,
             map["automatic"].asBool().unwrapOr(true),map["platformer"].asBool().unwrapOr(true),static_cast<int>(map["length"].asInt().unwrapOr(-1))};
@@ -778,10 +780,10 @@ void SurvivalRuntime::endRound(){
     endAttempt(m_view.activeAttemptProgress);
     m_forceClearRetryAt={};log::info("[SurvivalEndRound] submit match={} round={} request={}",m_view.id,m_view.roundKey,(*m_forceClearBody)["requestId"].asString().unwrapOr(""));pumpForceClear();
 }
-void SurvivalRuntime::start(std::string password,std::string group,int forceRank,int botCount) {
+void SurvivalRuntime::start(std::string password,std::string group,int forceRank,int botCount,bool forceDeathMatch) {
     tick();if(active()){showSurvivalGame();return;}if(queueing()){showSurvivalQueue();return;}if(m_creating || m_session.empty())return;
     matjson::Value body;if(!RankedRuntime::get().prepareSurvivalDebugAdmission(body))return;
-    body["password"]=std::move(password);body["requestId"]=utils::random::generateUUID();body["averageGroup"]=std::move(group);if(botCount>=0)body["botCount"]=botCount;if(forceRank>0)body["forceRank"]=forceRank;
+    body["password"]=std::move(password);body["requestId"]=utils::random::generateUUID();body["averageGroup"]=std::move(group);body["forceDeathMatch"]=forceDeathMatch;if(botCount>=0)body["botCount"]=botCount;if(forceRank>0)body["forceRank"]=forceRank;
     auto http=request(m_session);http.timeout(std::chrono::seconds(70));http.bodyJSON(body);m_creating=true;
     auto const generation=m_generation;auto const session=m_session;
     m_controlRequest.spawn(http.post(debugEndpoint("/matches")),[this,generation,session](web::WebResponse response) {
@@ -808,10 +810,10 @@ void SurvivalRuntime::forceRank(std::string password,int rank) {
         else m_view.error="Survival debug rank could not be forced.";
     });
 }
-void SurvivalRuntime::fillBots(std::string password,int botCount) {
+void SurvivalRuntime::fillBots(std::string password,int botCount,bool forceDeathMatch) {
     if(m_creating || m_queue.status!="QUEUED" || active())return;
     matjson::Value body;if(!RankedRuntime::get().prepareSurvivalAdmission(body))return;
-    body["password"]=std::move(password);body["requestId"]=utils::random::generateUUID();if(botCount>=0)body["botCount"]=botCount;queueAction("/fill-bots",std::move(body));
+    body["password"]=std::move(password);body["requestId"]=utils::random::generateUUID();if(botCount>=0)body["botCount"]=botCount;body["forceDeathMatch"]=forceDeathMatch;queueAction("/fill-bots",std::move(body));
 }
 #endif
 }

@@ -1,4 +1,5 @@
 #pragma once
+#include "SurvivalRoundPresentation.hpp"
 #include <algorithm>
 #include <cstdint>
 #include <optional>
@@ -15,7 +16,7 @@ inline SurvivalMenuClock survivalMenuClock(bool active,bool freePlay,std::string
     std::optional<std::int64_t> countdown,std::optional<std::int64_t> syncAge){
     SurvivalMenuClock result;
     if(!active||!freePlay||state=="ROUND_RESULT"||state=="FINAL_RESULT"||state=="CANCELLED")return result;
-    result.visible=true;result.phase=phase=="TIEBREAK"?"DM":phase=="FINAL"?"FINAL":"R"+std::to_string(round);
+    result.visible=true;result.phase=survivalRoundLabel(phase,round,true);
     result.stale=!syncAge||*syncAge>15000;
     if(result.stale){result.text="RECONNECTING";return result;}
     if(state=="PLAYING"||state=="COUNTDOWN"){

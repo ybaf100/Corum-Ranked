@@ -1,3 +1,4 @@
+import {survivalHistoryProjection} from "../src/history/survival-history.js";
 import { appendFileSync } from "node:fs";
 import { countSql,failSqlOnce } from "./sql-counter.js";
 import "reflect-metadata";
@@ -6,7 +7,7 @@ import { PGlite } from "@electric-sql/pglite";
 import { Test } from "@nestjs/testing";
 import { ForbiddenException, ValidationPipe, type INestApplication } from "@nestjs/common";
 import { beforeAll,beforeEach,afterAll,describe,it,expect,vi } from "vitest";
-import { DEFAULT_SURVIVAL_CONFIG,survivalCurrentRound,survivalMapRange,type SurvivalMatch } from "@corum-ranked/rules";
+import { DEFAULT_SURVIVAL_CONFIG,survivalInitialPhase,survivalCurrentRound,survivalMapRange,type SurvivalMatch } from "@corum-ranked/rules";
 import { PgliteDatabase } from "./pglite-database.js";
 import { environmentFixture,configDocumentFixture } from "./fixtures.js";
 import { SurvivalConfigService,type SurvivalConfigDocument } from "../src/config/survival-config.service.js";
@@ -460,7 +461,7 @@ describe("chosen debug bot count",()=>{
  });
  it.each([1,2,3,6,7,15])("starts %i bots in the correct phase without an online queue",async botCount=>{
   const view=await debug.create(session,{...body(),botCount});const m=await engine.get(view.matchId);
-  expect(survivalCurrentRound(m).phase).toBe(botCount+1<=3?"FINAL":botCount+1<8?"ROUND_3":"ROUND_1");
+  expect(survivalCurrentRound(m).phase).toBe(survivalInitialPhase(botCount+1));
   expect(m.online).not.toBe(true);expect((await db.query("SELECT * FROM sur_queue_entries")).rows).toHaveLength(0);
  });
 });
@@ -563,4 +564,31 @@ it("persists 64-player Debug force ranks and pays the shared reward only once",a
  expect((await debug.create(session,admission)).matchId).toBe(result.matchId);await debug.force(result.matchId,session,{password:"fixture-password",rank:64});
  expect((await db.query("SELECT * FROM sur_lp_ledger")).rows).toHaveLength(1);
  expect((await db.query("SELECT * FROM ranked_players")).rows).toHaveLength(1);
+});
+
+describe("forced first-round Death Match persistence",()=>{
+ it.each([2,3,4,8,16,32,64])("creates %i participants without a FINAL row, restores the mode and rejects changed retries",async count=>{
+  if(count>16)config.applyOperationMode(64);
+  const admission={...body(),botCount:count-1,forceDeathMatch:true};
+  await expect(debug.create(session,{...admission,password:"wrong"})).rejects.toMatchObject({status:403});
+  await expect(debug.create({...session,clientBuildChannel:"release"},admission)).rejects.toMatchObject({status:403});
+  const view=await debug.create(session,admission),m=await engine.get(view.matchId);
+  expect(view).toMatchObject({phase:"TIEBREAK",roundNumber:1,displayRoundNumber:1,forceDeathMatch:true});
+  expect(m.players).toHaveLength(count);expect(m.rounds).toHaveLength(1);expect(m.rounds[0]?.phase).toBe("TIEBREAK");
+  const tie=(await db.query<{final_round_key:string|null;sequence:number}>("SELECT final_round_key,sequence FROM sur_tiebreaks WHERE match_id=$1",[m.id])).rows;
+  expect(tie).toEqual([{final_round_key:null,sequence:1}]);expect((await debug.create(session,admission)).matchId).toBe(m.id);
+  await expect(debug.create(session,{...admission,forceDeathMatch:false})).rejects.toMatchObject({status:409});
+  const restored=new SurvivalEngineService(db,clock,ids,config,{select:async()=>{throw new Error("not requested");}});
+  expect(await restored.get(m.id)).toMatchObject({forceDeathMatch:true,rounds:[expect.objectContaining({phase:"TIEBREAK",ordinal:1})]});
+ });
+ it("settles and projects an actual forced Death Match once, preserving the official Attempt and history identity",async()=>{
+  const view=await debug.create(session,{...body(),botCount:2,forceDeathMatch:true});let m=await engine.get(view.matchId);
+  now+=6000;await send(m,"PRESENTATION_COMPLETE");m=await prepare(await engine.get(m.id));
+  for(let n=0;n<3;n++)await record(m,99.999);
+  m=await engine.get(m.id);now=survivalCurrentRound(m).endsAt!;await db.query("UPDATE ranked_sessions SET last_heartbeat_at=$2 WHERE id=$1",[session.sessionId,clock.now().toISOString()]);await debug.tickOnce();
+  m=await engine.get(m.id);expect(m.state).toBe("FINAL_RESULT");expect(m.winnerId).toBe("human");expect(m.rounds.some(r=>r.phase==="FINAL")).toBe(false);
+  expect((await db.query("SELECT * FROM sur_tiebreak_attempts WHERE match_id=$1 AND participant_id=$2",[m.id,"human"])).rows).toHaveLength(3);
+  const projected=survivalHistoryProjection(m,{},"human");expect(projected.rounds[0]).toMatchObject({phase:"TIEBREAK",ordinal:1,displayRoundNumber:1,replayIdentity:{phase:"TIEBREAK",roundNumber:1,attemptOrdinal:1,officialBestProgress:99.999}});
+  const ledger=(await db.query("SELECT * FROM sur_lp_ledger WHERE player_id=$1",[session.playerId])).rows;expect(ledger).toHaveLength(1);await debug.tickOnce();expect((await db.query("SELECT * FROM sur_lp_ledger WHERE player_id=$1",[session.playerId])).rows).toEqual(ledger);
+ });
 });
