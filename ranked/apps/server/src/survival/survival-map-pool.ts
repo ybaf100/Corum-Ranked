@@ -11,7 +11,7 @@ export function survivalCandidateBucket(request:SurvivalMapRequest):string {
   return JSON.stringify([Math.max(40_000_000,request.minimumLevelId),range.minimumStars,range.maximumStars,range.demons]);
 }
 interface CandidateRow {bucket_key:string;level_id:string;metadata:SurvivalVerifiedMap;expires_at:Date|string;}
-interface Bucket {request:SurvivalMapRequest;ready:number;nextAt:number;failures:number;lastError:SurvivalMapError|null;}
+interface Bucket {request:SurvivalMapRequest;ready:number;nextAt:number;failures:number;lastError:SurvivalMapError|null;diagnosticKey:string;}
 /** Durable certificates, not geometry blobs. Event-driven work has no SQL idle
  * poll. Backoff performs upstream work only; DB is written on actual progress. */
 export class SurvivalMapPool implements SurvivalMapProvider,OnApplicationBootstrap,OnApplicationShutdown {
@@ -59,7 +59,7 @@ export class SurvivalMapPool implements SurvivalMapProvider,OnApplicationBootstr
     const key=survivalCandidateBucket(request);if(this.buckets.has(key))return key;
     if(this.buckets.size>=MAX_BUCKETS)throw new SurvivalMapError("NO_ELIGIBLE_MAP","Candidate bucket budget exceeded");
     const clean={group:request.group,phase:request.phase,minimumLevelId:request.minimumLevelId,excludedLevelIds:[]};
-    this.buckets.set(key,{request:clean,ready:0,nextAt:this.now()+TTL_MS,failures:0,lastError:null});
+    this.buckets.set(key,{request:clean,ready:0,nextAt:this.now()+TTL_MS,failures:0,lastError:null,diagnosticKey:""});
     await this.db.query(`INSERT INTO sur_map_candidate_buckets(bucket_key,request) VALUES($1,$2::jsonb)
       ON CONFLICT(bucket_key) DO NOTHING`,[key,JSON.stringify(clean)]);return key;
   }
@@ -93,6 +93,7 @@ export class SurvivalMapPool implements SurvivalMapProvider,OnApplicationBootstr
             SET metadata=EXCLUDED.metadata,status='READY',verified_at=EXCLUDED.verified_at,expires_at=EXCLUDED.expires_at,
               invalid_reason=NULL,retry_after=NULL WHERE sur_map_candidates.status<>'RESERVED' RETURNING level_id`,
             [key,map.levelId,JSON.stringify(map),new Date(at).toISOString(),new Date(at+TTL_MS).toISOString()]);
+          if(bucket.diagnosticKey)await tx.query("UPDATE sur_map_candidate_buckets SET request=request-'lastFailure',updated_at=$2 WHERE bucket_key=$1",[key,this.clock.now().toISOString()]);
           return this.capacity(tx,key);});
           this.known.add(map.levelId);bucket.ready=ready;
           while(this.known.size>4096)this.known.delete(this.known.values().next().value!);
@@ -100,11 +101,22 @@ export class SurvivalMapPool implements SurvivalMapProvider,OnApplicationBootstr
           await this.db.query(`DELETE FROM sur_map_candidates WHERE bucket_key=$1 AND status IN ('CONSUMED','EXPIRED','INVALID','COOLDOWN')
             AND level_id IN(SELECT level_id FROM sur_map_candidates WHERE bucket_key=$1 AND status IN ('CONSUMED','EXPIRED','INVALID','COOLDOWN')
               ORDER BY verified_at DESC OFFSET 64)`,[key]);
-          bucket.failures=0;bucket.lastError=null;bucket.nextAt=at+TTL_MS;
+          bucket.failures=0;bucket.lastError=null;bucket.diagnosticKey="";bucket.nextAt=at+TTL_MS;
           this.logger.log(`candidate READY bucket=${key} level=${map.levelId} source=${map.sourceSearchType??"unknown"} page=${map.sourcePage??-1} band=${map.sourceIdBand??"unknown"} ready=${bucket.ready}`);
         }catch(error){
           bucket.failures++;bucket.lastError=error instanceof SurvivalMapError?error:new SurvivalMapError("API_ERROR",String(error));
           bucket.nextAt=this.now()+Math.max(error instanceof SurvivalMapError?error.retryAfterMs:2_000,Math.min(TTL_MS,30_000*2**Math.min(9,bucket.failures-1)));
+          const cause=bucket.lastError;
+          const diagnosticKey=JSON.stringify([cause.code,cause.http?.status??null,cause.http?.endpoint??null,cause.http?.edgeErrorCode??null]);
+          if(bucket.diagnosticKey!==diagnosticKey){
+            bucket.diagnosticKey=diagnosticKey;
+            // Persist an actual failure transition once, never every retry or
+            // changing retry delay. No token, full response body or GD data.
+            const failure={code:cause.code,message:cause.message.slice(0,512),http:cause.http,
+              observedAt:this.clock.now().toISOString(),retryAfter:new Date(bucket.nextAt).toISOString()};
+            await this.db.query("UPDATE sur_map_candidate_buckets SET request=jsonb_set(request,'{lastFailure}',$2::jsonb),updated_at=$3 WHERE bucket_key=$1",[key,JSON.stringify(failure),this.clock.now().toISOString()])
+              .catch(()=>this.logger.warn(`candidate failure diagnostics unavailable bucket=${key}`));
+          }
           this.logger.warn(`candidate refill deferred bucket=${key} retryMs=${bucket.nextAt-this.now()} reason=${String(error)}`);break;
         }
       }

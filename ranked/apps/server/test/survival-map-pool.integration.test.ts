@@ -88,6 +88,8 @@ describe("durable verified Survival candidate pool",()=>{
  it("bounds failure retries and does not query PostgreSQL on external backoff",async()=>{
    source.select.mockRejectedValue(new SurvivalMapError("API_ERROR","HTTP 429",[],null,120000));
    const p=pool();await p.onApplicationBootstrap();await idle(p);expect(await count("READY")).toBe(0);
+   const failures=(await db.query<{failure:{code:string}}>("SELECT request->'lastFailure' AS failure FROM sur_map_candidate_buckets")).rows;
+   expect(failures.length).toBeGreaterThan(0);expect(failures.every(r=>r.failure.code==='API_ERROR')).toBe(true);
    const query=vi.spyOn(db,"query");now+=120001;
    await (p as unknown as {refreshDue():Promise<void>}).refreshDue();await idle(p);
    expect(query).not.toHaveBeenCalled();query.mockRestore();
