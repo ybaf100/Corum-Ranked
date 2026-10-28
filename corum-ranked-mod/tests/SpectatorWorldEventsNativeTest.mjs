@@ -10,33 +10,36 @@ test('production Random native activation/output hooks record real selected grou
 #include <cassert>
 #include "${root}/src/domain/SpectatorCapturePolicy.hpp"
 #include <deque>
+#include <set>
 #include <unordered_map>
 using namespace corum::ranked;
+namespace geode::log{template<class...T>void warn(T const&...){}}
+using namespace geode;
 namespace gd{template<class T>using vector=std::vector<T>;}
 struct GameObject{virtual ~GameObject()=default;};struct GJGameLevel{int m_levelID=123;};
 struct GJBaseGameLayer{std::vector<int>groups;virtual ~GJBaseGameLayer()=default;virtual void spawnGroup(int group,bool,double,gd::vector<int>const&,int,int){groups.push_back(group);}};
 ${structs}
 struct OutputHook:GJBaseGameLayer{${method('    void spawnGroup(')}};
 struct PlayLayer:OutputHook{GJGameLevel level;GJGameLevel*m_level=&level;bool m_isTestMode=false,m_isPracticeMode=false;int m_currentStep=12;struct{double m_levelTime=.05;}m_gameState;
- struct Fields{std::unordered_map<GameObject*,ObjectIdentity>objects;bool remote=false;std::string scope;std::uint64_t ordinal=0;std::deque<SpectatorRandomEvent>expected;std::vector<SpectatorRandomEvent>captured;SpectatorRandomEvents snapshot;unsigned misses=0;}fields;Fields*m_fields=&fields;};using CorumNativeWorldEventLayer=PlayLayer;
+ struct Fields{std::unordered_map<GameObject*,ObjectIdentity>objects;bool remote=false,applyingSource=false;std::set<int>missingActivations;std::string scope;std::uint64_t ordinal=0;std::deque<SpectatorRandomEvent>expected;std::vector<SpectatorRandomEvent>captured;SpectatorRandomEvents snapshot;unsigned misses=0;}fields;Fields*m_fields=&fields;void buildObjects(){} };using CorumNativeWorldEventLayer=PlayLayer;
 static PlayLayer*current=nullptr;static replay::Playback*ownedPlayback=nullptr;
 PlayLayer*owner(GJBaseGameLayer*p){return current&&static_cast<GJBaseGameLayer*>(current)==p?current:nullptr;}
 replay::Playback*replayOwner(PlayLayer*p){return p==current?ownedPlayback:nullptr;}
 ${method('void emitSpawn(')}
 namespace corum::ranked{struct SurvivalRuntime{bool official=true;static SurvivalRuntime&get(){static SurvivalRuntime s;return s;}bool gameplayLevel(int)const{return official;}bool freePlaying()const{return false;}std::string localAttemptId()const{return "official-attempt";}};
-struct SpectatorLiveRuntime{std::string reason;static SpectatorLiveRuntime&get(){static SpectatorLiveRuntime s;return s;}void noteWorldPartial(std::string s){reason=s;}};
+struct SpectatorLiveRuntime{std::string reason;static SpectatorLiveRuntime&get(){static SpectatorLiveRuntime s;return s;}void noteWorldPartial(std::string s){reason=s;}void worldCauseRecovered(std::string const&s){if(reason==s)reason.clear();}};
 namespace replay{struct Recorder{bool enabled=true;std::vector<Json>records;static Recorder&get(){static Recorder r;return r;}bool active()const{return enabled;}bool inNativeFrame()const{return enabled;}void add(Json j){records.push_back(std::move(j));}};}}
-struct RandTriggerGameObject:GameObject{int nativeChoice=7,nativeCalls=0,m_controlID=2;virtual void triggerObject(GJBaseGameLayer*layer,int uniqueId,gd::vector<int>const*){++nativeCalls;if(nativeChoice>=0)layer->spawnGroup(nativeChoice,false,0,{},uniqueId,m_controlID);}};
+struct RandTriggerGameObject:GameObject{int m_objectID=1912,nativeChoice=7,nativeCalls=0,m_controlID=2;virtual void triggerObject(GJBaseGameLayer*layer,int uniqueId,gd::vector<int>const*){++nativeCalls;if(nativeChoice>=0)layer->spawnGroup(nativeChoice,false,0,{},uniqueId,m_controlID);}};
 struct RandomHook:RandTriggerGameObject{${method('    void triggerObject(')}};
 replay::Playback playback(matjson::Value event){replay::Document d;d.complete=true;matjson::Value initial;initial["kind"]="initial";initial["randomSeed"]="1";initial["replayRandSeed"]="2";matjson::Value frame;frame["kind"]="frame";frame["dt"]=.05;auto pose=encodeSpectatorPose(SpectatorGhostPose{});pose["kind"]="pose";pose["progress"]=20.;d.records={initial,frame,event,pose};return replay::Playback(std::move(d));}
 int main(){PlayLayer scene;current=&scene;RandomHook random;scene.fields.objects[&random]={0,1912,100,200};auto& recorder=replay::Recorder::get();
  random.triggerObject(&scene,11,nullptr);assert(scene.groups.back()==7&&random.nativeCalls==1&&recorder.records.size()==1);auto sourceEvent=recorder.records[0];assert(sourceEvent["event"]["outputs"][0]["group"].asInt().unwrap()==7);
  random.nativeChoice=42;random.triggerObject(&scene,11,nullptr);assert(scene.groups.back()==42&&random.nativeCalls==2&&recorder.records.size()==2);
- SurvivalRuntime::get().official=false;auto viewer=playback(sourceEvent);ownedPlayback=&viewer;random.nativeChoice=999;random.triggerObject(&scene,11,nullptr);assert(scene.groups.back()==7&&random.nativeCalls==3&&recorder.records.size()==2&&!viewer.desync());
- auto zeroChoice=playback(sourceEvent);ownedPlayback=&zeroChoice;random.nativeChoice=-1;random.triggerObject(&scene,11,nullptr);assert(scene.groups.back()==7&&random.nativeCalls==4&&!zeroChoice.desync());
- auto changed=sourceEvent;changed["event"]["objectId"]=999;auto wrongMap=playback(changed);ownedPlayback=&wrongMap;auto count=scene.groups.size();random.triggerObject(&scene,11,nullptr);assert(wrongMap.desync()&&scene.groups.size()==count&&random.nativeCalls==4);
+ SurvivalRuntime::get().official=false;auto viewer=playback(sourceEvent);ownedPlayback=&viewer;random.nativeChoice=999;random.triggerObject(&scene,11,nullptr);assert(scene.groups.back()==7&&random.nativeCalls==2&&recorder.records.size()==2&&!viewer.desync());
+ auto zeroChoice=playback(sourceEvent);ownedPlayback=&zeroChoice;random.nativeChoice=-1;random.triggerObject(&scene,11,nullptr);assert(scene.groups.back()==7&&random.nativeCalls==2&&!zeroChoice.desync());
+ auto changed=sourceEvent;changed["event"]["objectId"]=999;auto wrongMap=playback(changed);ownedPlayback=&wrongMap;auto count=scene.groups.size();random.triggerObject(&scene,11,nullptr);assert(wrongMap.desync()&&scene.groups.size()==count&&random.nativeCalls==2);
  RandomCall scoped;scoped.layer=&scene;{RandomScope active(scoped);OutputHook foreign;foreign.spawnGroup(77,false,0,{},0,0);assert(foreign.groups.back()==77&&scoped.event.outputs.empty());}
- ownedPlayback=nullptr;random.nativeChoice=55;random.triggerObject(&scene,11,nullptr);assert(scene.groups.back()==55&&random.nativeCalls==5&&recorder.records.size()==2); // ordinary gameplay is an exact pass-through
+ ownedPlayback=nullptr;random.nativeChoice=55;random.triggerObject(&scene,11,nullptr);assert(scene.groups.back()==55&&random.nativeCalls==3&&recorder.records.size()==2); // ordinary gameplay is an exact pass-through
  auto encoded=sourceEvent["event"];assert(decodeSpectatorRandomEvent(encoded));encoded["objectIndex"]=4294967296LL;assert(!decodeSpectatorRandomEvent(encoded));
  // Multiple verified native snaps may cancel their gravity flips before a 50ms packet.
  SpectatorGhostPose before;before.mode=SpectatorGameMode::Spider;before.x=0;before.y=100;auto middle=before;middle.x=1;middle.y=1000;middle.upsideDown=true;auto after=before;after.x=10;after.y=120;

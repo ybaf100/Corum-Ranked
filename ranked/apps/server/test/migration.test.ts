@@ -278,3 +278,13 @@ it('registers 0020 and the overhaul with readiness probes for every new column',
   expect(source).toContain(`${table}.${column}`);
  }
 });
+
+describe("Survival six-attempt projection migration",()=>{
+ it("reapplies safely without changing accounts or historical rows",async()=>{
+  const before=await database!.query("SELECT count(*)::int AS count FROM ranked_players");
+  const sql=await migrationSql("0034_survival_six_attempts.sql");await database!.exec(sql);await database!.exec(sql);
+  const constraints=await database!.query<{definition:string}>("SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint WHERE conname='sur_tiebreak_attempts_sequence_check'");
+  expect(constraints.rows[0]?.definition).toContain("6");
+  expect((await database!.query("SELECT count(*)::int AS count FROM ranked_players")).rows).toEqual(before.rows);
+ });
+});

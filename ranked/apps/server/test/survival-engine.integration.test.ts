@@ -215,12 +215,12 @@ describe("durable Survival M3 engine",()=>{
     for(let i=0;i<3;i++){match=await play(match);match=await engine.tick(match.id);}
     match=await play(match,[100,100,97]);match=await engine.tick(match.id);expect(survivalCurrentRound(match).phase).toBe("TIEBREAK");
     match=await prepare(match);
-    for(const [i,p] of survivalCurrentRound(match).players.entries())for(let a=1;a<=3;a++){
+    for(const [i,p] of survivalCurrentRound(match).players.entries())for(let a=1;a<=6;a++){
       match=await send(match,{type:"ATTEMPT_START",...context(match),participantId:p.participantId,attemptId:`a${a}`});
       match=await send(match,{type:"ATTEMPT_END",...context(match),participantId:p.participantId,attemptId:`a${a}`,progress:94.371-i*0.001});
     }
     expect(match.winnerId).toBe("p00");
-    expect((await database.query<{score_millipercent:number}>("SELECT score_millipercent FROM sur_tiebreak_attempts ORDER BY participant_id,sequence")).rows.map(r=>r.score_millipercent)).toEqual([94371,94371,94371,94370,94370,94370]);
+    expect((await database.query<{score_millipercent:number}>("SELECT score_millipercent FROM sur_tiebreak_attempts ORDER BY participant_id,sequence")).rows.map(r=>r.score_millipercent)).toEqual([...Array(6).fill(94371),...Array(6).fill(94370)]);
     const ties=(await database.query<{final_round_key:string|null}>("SELECT * FROM sur_tiebreaks")).rows;expect(ties).toHaveLength(1);expect(ties[0]!.final_round_key).toBe(match.rounds.find(r=>r.phase==="FINAL")!.key);
   },30_000);
   it("stores provider failures and retries without starting a timer",async()=>{

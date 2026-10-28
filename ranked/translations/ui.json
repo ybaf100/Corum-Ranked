@@ -2396,8 +2396,8 @@
     "ko": "리플레이 녹화 실패 · 기존 최고기록은 보존됩니다"
   },
   "survival-attempts-remaining": {
-    "en": "ATTEMPTS LEFT {}/3",
-    "ko": "남은 시도 {}/3"
+    "en": "ATTEMPTS LEFT {}/{}",
+    "ko": "남은 시도 {}/{}"
   },
   "replay-preparation-failed": {
     "en": "Replay preparation failed",
@@ -2454,5 +2454,9 @@
   "survival-force-death-match": {
     "en": "Force Death Match",
     "ko": "데스매치로 시작"
+  },
+  "survival-attempt-result-syncing": {
+    "en": "SYNCING ATTEMPT RESULT",
+    "ko": "시도 결과 동기화 중"
   }
 }

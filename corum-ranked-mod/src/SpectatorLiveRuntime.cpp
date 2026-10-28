@@ -85,9 +85,9 @@ void SpectatorLiveRuntime::configureSurvival(SurvivalSpectatorTransportContext c
 void SpectatorLiveRuntime::stopSurvival(){reset();m_external.reset();}
 
 SpectatorLiveStatus SpectatorLiveRuntime::status() const {
-    if(!m_rejectedWorldContext.empty())return SpectatorLiveStatus::Disconnected;
     if(m_disconnected)return SpectatorLiveStatus::Disconnected;
     if(m_consecutiveViewerErrors>0)return SpectatorLiveStatus::Reconnecting;
+    if(!m_rejectedWorldContext.empty())return SpectatorLiveStatus::RecaptureRequired;
     if(m_forceRestoreRequest || m_restoreTimeline.active())return SpectatorLiveStatus::Syncing;
     if(m_sampleBuffer.terminalRendered() && m_lastAcceptedPose && m_lastAcceptedPose->finished)return SpectatorLiveStatus::Cleared;
     if(m_status==SpectatorLiveStatus::Waiting)return SpectatorLiveStatus::Waiting;
@@ -125,8 +125,8 @@ void SpectatorLiveRuntime::resetPublisher() {
 
 void SpectatorLiveRuntime::resetViewer() {
     m_viewOpponentPaused = false;
-    m_restoreTimeline.reset();m_randomEvents.reset();m_rejectedWorldContext.clear();m_presentationAudioReady=m_debugBarrierPending=false;m_forceRestoreRequest=m_partialSync=m_disconnected=false;m_heldPresentation.reset();m_reconnections=m_restoreFailures=0;
-    m_worldRestoreReason.clear();m_restoreStepCostMs=2;
+    m_worldCauses.clear();m_restoreTimeline.reset();m_randomEvents.reset();m_rejectedWorldContext.clear();m_presentationAudioReady=m_debugBarrierPending=false;m_forceRestoreRequest=m_partialSync=m_disconnected=false;m_heldPresentation.reset();m_reconnections=m_restoreFailures=0;
+    m_worldRestoreReason.clear();m_worldCauses.clear();m_partialSync=false;m_restoreStepCostMs=2;
     m_viewerPollGapMs = 20;
     ++m_viewRequestGeneration;
     ++m_viewPresentationEpoch;
@@ -617,7 +617,7 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
             );
         }
         if(m_restoreTimeline.active()){
-            m_heldPresentation=m_restoreTimeline.frame();m_restoreTimeline.reset();m_partialSync=true;m_forceRestoreRequest=true;
+            m_heldPresentation=m_restoreTimeline.frame();m_restoreTimeline.reset();noteWorldPartial("RESTORE_HISTORY_GAP");m_forceRestoreRequest=true;
         }
         m_status = SpectatorLiveStatus::Waiting;
         m_reason = reason;
@@ -652,9 +652,9 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
     auto const restoration=root["restoration"];
     auto const hasRestoration=restoration.isObject();
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
-    if(m_debugContextId.empty() && !hasRestoration)m_partialSync=true;
+    if(m_debugContextId.empty() && !hasRestoration)noteWorldPartial("WORLD_HISTORY_UNAVAILABLE");
 #else
-    if(!hasRestoration)m_partialSync=true;
+    if(!hasRestoration)noteWorldPartial("WORLD_HISTORY_UNAVAILABLE");
 #endif
     auto expectedLevel=m_external?m_external->level:authoritativeMatch.currentMap?authoritativeMatch.currentMap->levelId:0;
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
@@ -677,7 +677,7 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
             auto const& packet=packets.unwrap().back();auto terminal=decodeSpectatorPose(packet["keyframe"]);
             if(terminal&&(terminal->dead||terminal->finished)&&packet["protocolVersion"].asInt().unwrapOr(0)==kProtocolVersion&&packet["sequence"].asInt().unwrapOr(-1)==restoration["headSequence"].asInt().unwrapOr(-2)&&packet["deathmatchSequence"].asInt().unwrapOr(0)==expectedDeathmatch&&packet["matchId"].asString().unwrapOr("")==m_viewMatchId&&packet["roundNumber"].asInt().unwrapOr(0)==expectedRound&&packet["levelId"].asInt().unwrapOr(expectedLevel)==expectedLevel&&packet["attemptId"].asString().unwrapOr("")==attemptId&&packet["generation"].asInt().unwrapOr(0)==static_cast<std::int64_t>(generation)){
                 m_restoreTimeline.reset();m_randomEvents.reset();m_sampleBuffer.clear();m_heldPresentation.reset();m_lastAcceptedPose=*terminal;
-                m_viewTerminalAttemptId=attemptId;m_lastViewSequence=restoration["headSequence"].asInt().unwrapOr(m_lastViewSequence);m_forceRestoreRequest=false;m_partialSync=true;
+                m_viewTerminalAttemptId=attemptId;m_lastViewSequence=restoration["headSequence"].asInt().unwrapOr(m_lastViewSequence);m_forceRestoreRequest=false;noteWorldPartial("ATTEMPT_ENDED_DURING_RESTORE");
                 m_status=SpectatorLiveStatus::Waiting;m_reason=terminal->finished?"CLEAR_DURING_WORLD_RESTORE":"DEATH_DURING_WORLD_RESTORE";return;
             }
         }
@@ -697,13 +697,14 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
         m_viewGeneration = generation;
         m_lastViewSequence = -1;
         m_restoreTimeline.reset();m_randomEvents.reset();m_presentationAudioReady=false;m_heldPresentation.reset();
-        m_worldRestoreReason.clear();
+        m_worldRestoreReason.clear();m_worldCauses.clear();m_partialSync=false;
         if(hasRestoration){
             auto const available=restoration["available"].asBool().unwrapOr(false) && historyLevel==expectedLevel && expectedLevel>0;
             m_restoreTimeline.begin({m_viewMatchId,expectedRound,expectedDeathmatch,expectedLevel,attemptId,generation,m_viewPresentationEpoch},available);
             // Native replay reconstructs supported position/time-driven paths,
             // but does not prove pointer-bearing engine state/input/RNG parity.
-            m_partialSync=!available || restoration["headSequence"].asInt().unwrapOr(0)>0;
+            if(!available)noteWorldPartial(restoration["reason"].asString().unwrapOr("WORLD_HISTORY_UNAVAILABLE"));
+            else if(restoration["headSequence"].asInt().unwrapOr(0)>0)noteWorldPartial("NATIVE_HISTORY_REPLAY_LIMITED");
         }
         m_lastPublisherElapsedMs = -1;
         m_sampleBuffer.clear();
@@ -834,6 +835,7 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
                     correction
                 );
                 log::warn("[SpectatorNativeEvent] rejected sequence={} previousMode={} nextMode={} previousGravity={} nextGravity={} type={} fromX={} fromY={} toX={} toY={} nativeEvents={} recaptureRequired=true",sequence,spectatorModeName(m_lastAcceptedPose->mode),spectatorModeName(pose.mode),m_lastAcceptedPose->upsideDown,pose.upsideDown,pose.discontinuity?spectatorDiscontinuityName(pose.discontinuity->type):"NONE",pose.discontinuity?pose.discontinuity->fromX:0,pose.discontinuity?pose.discontinuity->fromY:0,pose.discontinuity?pose.discontinuity->toX:0,pose.discontinuity?pose.discontinuity->toY:0,pose.discontinuity?pose.discontinuity->nativeEvents.size():0);
+                log::warn("[SpectatorNativeEvent] context={} epoch={} previousSequence={} nextSequence={} previousPublisherMs={} nextPublisherMs={} previousX={} previousY={} nextX={} nextY={} nativeTick={} sourceMs={} randomEvents={}",worldIdentity,m_viewPresentationEpoch,m_lastViewSequence,sequence,m_lastPublisherElapsedMs,elapsedMs,m_lastAcceptedPose->x,m_lastAcceptedPose->y,pose.x,pose.y,pose.simulation?pose.simulation->tick:-1,pose.simulation?pose.simulation->elapsedMs:-1,pose.randomEvents?pose.randomEvents->size():0);
                 setFallback("POSE_DISCONTINUITY");
                 return;
             }
@@ -920,7 +922,7 @@ void SpectatorLiveRuntime::setFallback(std::string reason) {
         // Re-fetching an immutable invalid event cannot repair its proof. Hold
         // safely and keep checking for an authoritative NEW Attempt, without
         // repeatedly resetting the same world/epoch back to 0%.
-        m_rejectedWorldContext=m_viewAttemptId+":"+std::to_string(m_viewGeneration);m_restoreTimeline.reset();m_randomEvents.reset();m_sampleBuffer.clear();m_heldPresentation.reset();
+        m_rejectedWorldContext=m_viewAttemptId+":"+std::to_string(m_viewGeneration);m_restoreTimeline.reset();m_randomEvents.reset();
         m_status=SpectatorLiveStatus::Fallback;m_reason=std::move(reason);m_forceRestoreRequest=false;return;
     }
     if (m_status != SpectatorLiveStatus::Fallback || m_reason != reason) {
@@ -940,7 +942,9 @@ void SpectatorLiveRuntime::setFallback(std::string reason) {
     // Hold the last validated presentation. No extrapolation or origin reset.
     if(!m_forceRestoreRequest)++m_reconnections;
     m_forceRestoreRequest=true;
-    if(++m_restoreFailures>=12 || m_reason=="DUAL_UNSUPPORTED" || m_reason=="UNSUPPORTED_PROTOCOL_VERSION")m_disconnected=true;
+    if(++m_restoreFailures>=12 || m_reason=="DUAL_UNSUPPORTED" || m_reason=="UNSUPPORTED_PROTOCOL_VERSION"){
+        m_rejectedWorldContext=m_viewAttemptId+":"+std::to_string(m_viewGeneration);m_forceRestoreRequest=false;m_restoreTimeline.reset();
+    }
 }
 
 void SpectatorLiveRuntime::requestSceneRestore(){
@@ -965,9 +969,18 @@ void SpectatorLiveRuntime::restorationApplied(SpectatorRemoteFrame const& frame,
 }
 
 void SpectatorLiveRuntime::noteWorldPartial(std::string reason){
+    if(m_worldCauses.insert(reason).second)log::warn("[SpectatorWorldState] attemptId={} generation={} epoch={} cause={} transition=DEGRADED",m_viewAttemptId,m_viewGeneration,m_viewPresentationEpoch,reason);
     m_partialSync=true;m_worldRestoreReason=std::move(reason);m_reason=m_worldRestoreReason;
 }
 
+void SpectatorLiveRuntime::worldCauseRecovered(std::string const& reason){
+    if(!m_worldCauses.erase(reason))return;
+    log::info("[SpectatorWorldState] attemptId={} generation={} epoch={} cause={} transition=VERIFIED",m_viewAttemptId,m_viewGeneration,m_viewPresentationEpoch,reason);
+    // History/RNG/Follow parity cannot be proved by a later valid sample.
+    // Only remove the explicit transient cause; retain preexisting history debt.
+    if(m_worldRestoreReason==reason){m_worldRestoreReason=m_worldCauses.empty()?"":*m_worldCauses.begin();m_reason=m_worldRestoreReason;}
+    m_partialSync=!m_worldCauses.empty();
+}
 std::optional<SpectatorGhostPose> SpectatorLiveRuntime::interpolatedPose() const {
     auto const nowMs = std::chrono::duration<double, std::milli>(
         std::chrono::steady_clock::now().time_since_epoch()).count();
@@ -981,6 +994,7 @@ std::optional<SpectatorRemoteFrame> SpectatorLiveRuntime::presentationFrame() co
     return frame;
 }
 std::optional<SpectatorRemoteFrame> SpectatorLiveRuntime::worldFrame() const {
+    if(!m_rejectedWorldContext.empty())return m_heldPresentation;
     auto const nowMs = std::chrono::duration<double, std::milli>(
         std::chrono::steady_clock::now().time_since_epoch()).count();
     auto const sample = m_sampleBuffer.render(nowMs);
@@ -1001,7 +1015,7 @@ std::optional<SpectatorRemoteFrame> SpectatorLiveRuntime::worldFrame() const {
             .publisherElapsedMs = sample ? sample->publisherElapsedMs : 0,
             .presentationSegment = sample ? sample->segment : 0,
         };
-        if(frame.pose)frame.pose->randomEvents=m_randomEvents.through(frame.publisherElapsedMs);
+        if(frame.pose){frame.pose->randomEvents=m_randomEvents.through(frame.publisherElapsedMs);m_heldPresentation=frame;}
         return frame;
     }
 #endif

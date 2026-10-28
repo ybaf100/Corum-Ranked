@@ -173,7 +173,7 @@ test('native re-entry rejects unknown/expired playing time, stale contexts, elim
 #include <vector>
 using namespace corum::ranked;
 struct SurvivalRuntime{
- struct View{std::string state="ENTERING",phase="ROUND_1",ownId="a";bool online=true,ownAssetsReady=true,ownEliminated=false;std::vector<SurvivalStanding>standings;}m_view;
+ struct View{int tiebreakAttempts=6;std::string state="ENTERING",phase="ROUND_1",ownId="a";bool online=true,ownAssetsReady=true,ownEliminated=false;std::vector<SurvivalStanding>standings;}m_view;
  bool pending=false,cleared=false,free=false;long remaining=100;int m_localAttempts=0;std::string m_session="token";
  LevelPreparationContext current{"match",42,1,0,false,0,1},m_prepared=current;
  bool surrenderPending()const{return pending;}bool officialRoundCleared()const{return cleared;}bool normalRoundCleared()const{return cleared;}bool freePlaying()const{return free;}
@@ -193,7 +193,7 @@ int main(){SurvivalRuntime r;
  }r.m_view.state="ENTERING";
  for(auto const* phase:{"ROUND_1","ROUND_2","ROUND_3","FINAL","TIEBREAK"}){r.m_view.phase=phase;assert(r.canEnter());}
  r.m_view.state="PLAYING";assert(r.canEnter());r.remaining=0;assert(!r.canEnter());r.remaining=1;
- r.m_localAttempts=3;assert(!r.canEnter());r.m_view.phase="ROUND_1";assert(r.canEnter());
+ r.m_localAttempts=5;assert(r.canEnter());r.m_localAttempts=6;assert(!r.canEnter());r.m_view.tiebreakAttempts=3;r.m_localAttempts=3;assert(!r.canEnter());r.m_view.phase="ROUND_1";assert(r.canEnter());
  r.pending=true;assert(!r.canEnter());r.pending=false;r.cleared=true;assert(!r.canEnter());r.cleared=false;r.free=true;assert(!r.canEnter());r.free=false;
  r.current.map++;assert(!r.canEnter());r.m_prepared=r.current;r.m_view.ownEliminated=true;assert(!r.canEnter());r.m_view.ownEliminated=false;
  for(auto const* state:{"ROUND_RESULT","MAP_SELECTION","PREPARING","FINAL_RESULT","CANCELLED"}){r.m_view.state=state;assert(!r.canEnter());}
@@ -295,4 +295,28 @@ int main(){
  assert(survivalMenuMusic("ROUND_3",false,false,false,true,"ROUND_3",true,true,16)==SurvivalMenuMusic::Final);
 }
 `);
+});
+
+test('exhausted Survival return requires terminal server evidence and a drained Attempt End; never exits a live sixth',()=>{
+ const runtime=read('src/SurvivalRuntime.cpp');
+ run(`#include "domain/SurvivalHudPresentation.hpp"
+#include <cassert>
+#include <vector>
+struct PendingEvent{std::string type;PendingEvent const&operator[](char const*)const{return *this;}PendingEvent const&asString()const{return *this;}std::string unwrapOr(char const*)const{return type;}};
+using namespace corum::ranked;
+struct SurvivalRuntime{
+ struct{std::string phase="TIEBREAK",ownId="me",activeAttemptId;int tiebreakAttempts=6;std::vector<SurvivalStanding>standings;}m_view;
+ bool free=false,observer=false;std::string m_attempt;std::vector<PendingEvent>m_events;
+ bool freePlaying()const{return free;}bool observing()const{return observer;}
+ ${method(runtime,'bool SurvivalRuntime::exhaustedAttemptsAcknowledged()').replace('bool SurvivalRuntime::','bool ')}
+};
+int main(){SurvivalRuntime r;SurvivalStanding row;row.id="me";row.attemptsUsed=6;row.attemptsFinished=5;row.attemptActive=true;r.m_view.standings={row};r.m_attempt="sixth";
+ assert(!r.exhaustedAttemptsAcknowledged());r.m_attempt.clear();assert(!r.exhaustedAttemptsAcknowledged());
+ r.m_view.standings[0].attemptActive=false;assert(!r.exhaustedAttemptsAcknowledged());r.m_view.standings[0].attemptsFinished=6;
+ r.m_events.push_back({"ATTEMPT_END"});assert(!r.exhaustedAttemptsAcknowledged());r.m_events.clear();assert(r.exhaustedAttemptsAcknowledged());
+ r.m_view.activeAttemptId="sixth";assert(!r.exhaustedAttemptsAcknowledged());r.m_view.activeAttemptId.clear();
+ for(auto phase:{"FINAL","ROUND_1"}){r.m_view.phase=phase;assert(!r.exhaustedAttemptsAcknowledged());}r.m_view.phase="TIEBREAK";
+ r.free=true;assert(!r.exhaustedAttemptsAcknowledged());r.free=false;r.observer=true;assert(!r.exhaustedAttemptsAcknowledged());r.observer=false;
+ r.m_view.standings.clear();assert(!r.exhaustedAttemptsAcknowledged());
+}`);
 });

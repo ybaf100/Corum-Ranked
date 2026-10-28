@@ -18,7 +18,7 @@ var CORUM_SURVIVAL_CONFIG_DEFAULTS = Object.freeze([
   ["allowCutoffTies", true, "커트라인 공동 순위 허용"],
   ["lastAttemptEnabled", false, "M1: LAST ATTEMPT 없음"],
   ["scoreMultiplier", 1, "점수 배율"],
-  ["tiebreakAttempts", 3, "추가 결승 attempt 수"],
+  ["tiebreakAttempts", 6, "추가 결승 attempt 수"],
   ["tiebreakDecimals", 3, "추가 결승 소수 자릿수"],
   ["minimumLevelId", 40000000, "맵 ID 하한"],
   ["demotionWarningRecoveryLp", 50, "현재 티어 하한 + 이 LP 이상 회복 시 경고 해제"],

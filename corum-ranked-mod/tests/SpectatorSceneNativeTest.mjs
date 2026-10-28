@@ -106,7 +106,7 @@ void requestSceneRestore(){}
     void tickPublisher(SpectatorGhostPose const&,bool){}
     void tickViewer(){++viewers;}
     auto presentationFrame()const{return frame;}auto worldFrame()const{return frame;}bool restoringWorld()const{return false;}bool presentationPending()const{return false;}char const*restorationPhase()const{return "LIVE";}
-    enum class Status {Waiting,Fallback,Buffering,Disconnected,Reconnecting,PartialSync};
+    enum class Status {Waiting,Fallback,Buffering,RecaptureRequired,Disconnected,Reconnecting,PartialSync};
     Status status()const{return Status::Waiting;}
     void reset(){++resets;frame.reset();}
 };

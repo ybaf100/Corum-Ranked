@@ -96,7 +96,7 @@ void SurvivalSpectatorRuntime::sceneExited(){
 std::string SurvivalSpectatorRuntime::hudText()const{
     auto const& v=SurvivalRuntime::get().view();auto const left=SurvivalRuntime::get().roundRemainingMs().value_or(0)/1000;
     auto const status=SpectatorLiveRuntime::survival().status();auto const pose=SpectatorLiveRuntime::survival().presentationFrame();
-    std::string state=status==SpectatorLiveStatus::Live?"LIVE":status==SpectatorLiveStatus::Syncing?"SYNCING":status==SpectatorLiveStatus::PartialSync?"PARTIAL SYNC":status==SpectatorLiveStatus::Reconnecting?"RECONNECTING":status==SpectatorLiveStatus::Buffering?"BUFFERING":status==SpectatorLiveStatus::Cleared?"CLEARED":status==SpectatorLiveStatus::Disconnected?"DISCONNECTED":"WAITING FOR PLAYER";
+    std::string state=status==SpectatorLiveStatus::Live?"LIVE":status==SpectatorLiveStatus::Syncing?"SYNCING":status==SpectatorLiveStatus::PartialSync?"PARTIAL SYNC":status==SpectatorLiveStatus::Reconnecting?"RECONNECTING":status==SpectatorLiveStatus::Buffering?"BUFFERING":status==SpectatorLiveStatus::Cleared?"CLEARED":status==SpectatorLiveStatus::RecaptureRequired?"RECAPTURE REQUIRED":status==SpectatorLiveStatus::Disconnected?"DISCONNECTED":"WAITING FOR PLAYER";
     if(m_world){if(m_world->desync())state="REPLAY DESYNC";else if(m_world->seeking())state="SYNCING";else if(state=="LIVE" || m_world->partial())state="PARTIAL SYNC";}
     if(pose&&pose->pose&&pose->pose->dead&&(!m_world||!m_world->desync()))state="PLAYER DOWN";
     double best=0,now=0;for(auto const&r:v.standings)if(r.id==m_target){best=r.bestProgress;now=r.currentProgress;}

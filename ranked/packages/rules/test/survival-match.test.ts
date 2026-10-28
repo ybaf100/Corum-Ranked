@@ -252,7 +252,7 @@ describe("Survival preparation synchronization",()=>{
 describe("Survival Death Match",()=>{
   it.each([2,3])("admits only %i tied finalists and resolves 0.001%% differences",tied=>{
     const r=new Rig();r.final(tied===3?[100,100,100]:[100,100,97]);expect(r.round.phase).toBe("TIEBREAK");expect(r.round.players).toHaveLength(tied);
-    r.prepare();for(const [i,p] of [...r.round.players].entries())for(let a=1;a<=3;a++)r.attempt(p.participantId,94.371-i*0.001,`a${a}`);
+    r.prepare();for(const [i,p] of [...r.round.players].entries())for(let a=1;a<=6;a++)r.attempt(p.participantId,94.371-i*0.001,`a${a}`);
     expect(r.match.state).toBe("FINAL_RESULT");expect(r.match.winnerId).toBe("p01");
     expect(r.round.finishedAt).toBeLessThan(r.round.endsAt!);
   });
@@ -262,7 +262,7 @@ describe("Survival Death Match",()=>{
     r.now=r.round.endsAt!;r.send({type:"TICK"});expect(r.match.winnerId).toBe("p01");
   });
   it("waits for everyone, preserves unfinished received records and pads unused slots with zero",()=>{
-    const r=new Rig();r.final();r.prepare();for(let i=1;i<=3;i++)r.attempt("p01",90,`a${i}`);
+    const r=new Rig();r.final();r.prepare();for(let i=1;i<=6;i++)r.attempt("p01",90,`a${i}`);
     const view=survivalLiveView(r.match,r.now);expect(view.standings.find(p=>p.participantId==="p01")?.waitingForOthers).toBe(true);
     expect(r.match.state).toBe("PLAYING");r.attempt("p02",91.123,"active",false);r.now=r.round.endsAt!;r.send({type:"TICK"});
     expect(r.match.winnerId).toBe("p02");expect(r.round.players[1]!.attempts).toHaveLength(1);
@@ -276,9 +276,9 @@ describe("Survival Death Match",()=>{
     expect(r.match.winnerId).toBe("p01");expect(new Set(r.match.rounds.map(round=>round.map!.levelId)).size).toBe(r.match.rounds.length);
     expect(r.match.players[2]!.finalRank).toBe(3);
   });
-  it("limits each Death Match player to three attempts and terminal results are immutable",()=>{
-    const r=new Rig();r.final();r.prepare();for(let a=1;a<=3;a++)r.attempt("p01",95,`a${a}`);
-    expect(()=>r.attempt("p01",100,"a4")).toThrow();for(let a=1;a<=3;a++)r.attempt("p02",94,`a${a}`);
+  it("limits each Death Match player to six attempts and terminal results are immutable",()=>{
+    const r=new Rig();r.final();r.prepare();for(let a=1;a<=6;a++)r.attempt("p01",95,`a${a}`);
+    expect(()=>r.attempt("p01",100,"a7")).toThrow();for(let a=1;a<=6;a++)r.attempt("p02",94,`a${a}`);
     const frozen=structuredClone(r.match);r.now+=180000;r.send({type:"TICK"});expect(r.match).toEqual(frozen);
   });
 });

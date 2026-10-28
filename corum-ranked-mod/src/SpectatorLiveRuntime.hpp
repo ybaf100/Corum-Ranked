@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <set>
 
 namespace corum::ranked {
 
@@ -26,6 +27,7 @@ enum class SpectatorLiveStatus {
     PartialSync,
     Cleared,
     Disconnected,
+    RecaptureRequired,
 };
 
 // Mode-specific authority is supplied by SurvivalSpectatorRuntime, never by a fake Solo Match.
@@ -75,6 +77,7 @@ public:
     std::vector<SpectatorRemoteFrame> takeRestorationFrames();
     void restorationApplied(SpectatorRemoteFrame const& frame,bool clockAdvanced,double workMs=0);
     void noteWorldPartial(std::string reason);
+    void worldCauseRecovered(std::string const& reason);
 
 private:
     SpectatorLiveRuntime() = default;
@@ -162,6 +165,7 @@ private:
     unsigned m_restoreFailures=0;
     double m_restoreStepCostMs=2;
     std::string m_worldRestoreReason;
+    std::set<std::string> m_worldCauses;
     mutable std::optional<SpectatorRemoteFrame> m_heldPresentation;
 
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_publishRequest;

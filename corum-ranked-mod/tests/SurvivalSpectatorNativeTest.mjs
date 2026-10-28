@@ -23,6 +23,7 @@ test('actual Survival spectator runtime gates admission, ACK publication, mode t
 #include <functional>
 #include <algorithm>
 #include <cassert>
+#include <set>
 #include <utility>
 #include "${new URL('../src/domain/LevelPreparationPolicy.hpp',import.meta.url).pathname}"
 #include "${new URL('../src/domain/SpectatorRemotePolicy.hpp',import.meta.url).pathname}"
@@ -56,7 +57,7 @@ struct Recorder{StorageBoundary port;static Recorder&get(){static Recorder r;ret
 }
 namespace corum::ranked {
 ${context}
-enum class SpectatorLiveStatus{Idle,Waiting,Live,Syncing,PartialSync,Reconnecting,Buffering,Cleared,Disconnected};
+enum class SpectatorLiveStatus{Idle,Waiting,Live,Syncing,PartialSync,Reconnecting,Buffering,Cleared,RecaptureRequired,Disconnected};
 struct SpectatorLiveRuntime{
  SurvivalSpectatorTransportContext context;int captures=0,terminals=0,resets=0;bool viewer=false;
  static SpectatorLiveRuntime&survival(){static SpectatorLiveRuntime r;return r;}

@@ -17,6 +17,8 @@ inline matjson::Value encodeSpectatorRandomEvent(SpectatorRandomEvent const &e) 
     for (auto const &s : e.outputs) {
         matjson::Value o;
         o["group"] = s.group;
+        if(s.triggerId)o["triggerId"]=*s.triggerId;
+        if(s.controlId)o["controlId"]=*s.controlId;
         o["ordered"] = s.ordered;
         o["delay"] = s.delay;
         o["remap"] = matjson::Value::array();
@@ -56,6 +58,10 @@ inline std::optional<SpectatorRandomEvent> decodeSpectatorRandomEvent(matjson::V
             return {};
         SpectatorRandomSpawn s;
         s.group = group;
+        for(auto key:{"triggerId","controlId"})if(o.contains(key)){
+            auto value=o[key].asInt();if(value.isErr()||value.unwrap()<std::numeric_limits<int>::min()||value.unwrap()>std::numeric_limits<int>::max())return {};
+            (std::string_view(key)=="triggerId"?s.triggerId:s.controlId)=static_cast<int>(value.unwrap());
+        }
         s.ordered = o["ordered"].asBool().unwrapOr(false);
         s.delay = o["delay"].asDouble().unwrapOr(-1);
         auto remap = o["remap"].asArray();

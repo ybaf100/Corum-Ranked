@@ -54,6 +54,7 @@ const REQUIRED_MIGRATIONS = [
   "0031_debug_spectate_custom_maps.sql",
   "0032_survival_preparation_supply.sql",
   "0033_survival_force_deathmatch.sql",
+  "0034_survival_six_attempts.sql",
 ] as const;
 
 export interface RankedSchemaStatus {
@@ -96,6 +97,7 @@ type SchemaProbeRow = QueryResultRow & {
   sur_request_rates: boolean;
   survival_map_supply: boolean;
   survival_forced_deathmatch:boolean;
+  survival_six_attempts:boolean;
 
   ranked_forum_records: boolean;
   ranked_forum_refresh_cooldowns: boolean;
@@ -265,6 +267,7 @@ export class DatabaseService implements DatabasePort, OnModuleInit, OnApplicatio
           to_regclass('public.sur_request_rates') IS NOT NULL AS sur_request_rates,
           (to_regclass('public.sur_map_candidates') IS NOT NULL AND to_regclass('public.sur_map_candidate_buckets') IS NOT NULL AND to_regclass('public.sur_audio_failure_reports') IS NOT NULL AND to_regclass('public.sur_resource_quarantine') IS NOT NULL AND EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='sur_matches' AND column_name='map_failure_count')) AS survival_map_supply,
           (EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='sur_tiebreaks' AND column_name='final_round_key' AND is_nullable='YES') AND EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='sur_queue_fill_requests' AND column_name='force_death_match')) AS survival_forced_deathmatch,
+          EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid=to_regclass('public.sur_tiebreak_attempts') AND conname='sur_tiebreak_attempts_sequence_check' AND convalidated AND pg_get_constraintdef(oid) LIKE '%6%') AS survival_six_attempts,
 
           to_regclass('public.ranked_forum_records') IS NOT NULL AS ranked_forum_records,
           to_regclass('public.ranked_forum_refresh_cooldowns') IS NOT NULL AS ranked_forum_refresh_cooldowns,
@@ -371,6 +374,7 @@ export class DatabaseService implements DatabasePort, OnModuleInit, OnApplicatio
         ["sur_request_rates", "table sur_request_rates"],
         ["survival_map_supply", "Survival candidate/audio preparation schema"],
         ["survival_forced_deathmatch", "Survival first-round Death Match schema"],
+        ["survival_six_attempts", "Survival six-attempt projection schema"],
 
         ["ranked_forum_records", "table ranked_forum_records"],
         ["ranked_forum_refresh_cooldowns", "table ranked_forum_refresh_cooldowns"],

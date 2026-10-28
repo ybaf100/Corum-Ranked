@@ -90,9 +90,10 @@ export function survivalDifficultyForAverage(averageLp: number, bands: readonly 
  * the M1 profile configuration model. Unsupported rules fail at admission. */
 export function validateSurvivalEngineConfig(config: SurvivalConfig): readonly string[] {
   const errors = [...validateSurvivalConfig(config)];
+  if (![3,6].includes(config.tiebreakAttempts)) errors.push("Supported Survival attempt limits are 3 (legacy) and 6");
   const expected = { roundSeconds:180, round1Qualifiers:config.matchPlayerCount===64?40:10,
     round2Qualifiers:config.matchPlayerCount===64?26:6, round3Qualifiers:config.matchPlayerCount===64?12:3, finalWinners:1, scoreMultiplier:1,
-    tiebreakAttempts:3, tiebreakDecimals:3, allowCutoffTies:true } as const;
+    tiebreakDecimals:3, allowCutoffTies:true } as const;
   for (const [key,value] of Object.entries(expected)) {
     if (config[key as keyof SurvivalConfig] !== value) errors.push(`M3 requires ${key} = ${value}`);
   }

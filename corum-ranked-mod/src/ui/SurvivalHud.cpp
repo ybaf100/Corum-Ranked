@@ -53,7 +53,13 @@ void SurvivalHud::present(SurvivalMatchView const& view,std::int64_t remainingMs
     bool const separateOwn=rows.size()>survivalHudLeaderCount(view.standings,view.targetQualifiers);
     auto const gap=std::clamp((size.height*.60f)/std::max<std::size_t>(1,rows.size()),12.0f,20.0f);
     auto const width=std::min(168.0f,size.width*.36f),scale=std::min(.36f,gap/50.0f);
-    auto const top=layoutHud(size.width,size.height).topY-(deathmatch?40:28);
+    auto const fps=m_fps.lock();
+    // Labels share the HUD root's coordinates. Respect rendered font bounds,
+    // including the current FPS digit count/scale, instead of anchor offsets.
+    auto const auxTop=fps?fps->boundingBox().getMinY()-4:layoutHud(size.width,size.height).topY-4;
+    m_auxTimer.position({fps?fps->boundingBox().getMinX():8,auxTop});
+    auto const auxHeight=m_auxTimer.foreground->getContentSize().height*m_auxTimer.foreground->getScale();
+    auto const top=std::min(layoutHud(size.width,size.height).topY-(deathmatch?40:28),deathmatch?auxTop-auxHeight-5:size.height);
     for(std::size_t i=0;i<view.standings.size();++i) {
         auto const& value=view.standings[i];auto found=m_rows.find(value.id);
         if(found==m_rows.end()) {
@@ -110,17 +116,19 @@ void SurvivalHud::present(SurvivalMatchView const& view,std::int64_t remainingMs
         else {m_difference.text("-");m_difference.color(color(*own));}
         m_waiting.text(own->waiting?i18n::text("survival-attempts-finished","ATTEMPTS COMPLETE · WAITING FOR RESULTS"):"");
     }
+    if(own==view.standings.end() && !observer){m_difference.text("-");m_waiting.text("");}
     m_round.text(deathmatch?"DEATH MATCH":view.phase=="FINAL"?i18n::text("final","FINAL"):fmt::format("{} {}",i18n::text("round","ROUND"),view.roundNumber));
     auto const seconds=(std::max<std::int64_t>(0,remainingMs)+999)/1000;
     auto const time=fmt::format("{:02}:{:02}",seconds/60,seconds%60);
     auto const topY=layoutHud(size.width,size.height).topY;
     m_auxTimer.text(deathmatch?time:"");
+    m_difference.foreground->setVisible(!deathmatch);m_difference.shadow->setVisible(!deathmatch);
     if(deathmatch){
-        auto const left=survivalRemainingAttempts(own==view.standings.end()?0:own->attemptsUsed,SurvivalRuntime::get().localAttemptsUsed());
-        m_timer.text(fmt::format(fmt::runtime(i18n::text("survival-attempts-remaining","ATTEMPTS LEFT {}/3")),left));
+        auto const left=survivalRemainingAttempts(own==view.standings.end()?0:own->attemptsUsed,SurvivalRuntime::get().localAttemptsUsed(),view.tiebreakAttempts);
+        auto const delta=std::string(m_difference.foreground->getString());
+        m_timer.text(observer?delta:fmt::format("{}/{} {}",left,view.tiebreakAttempts,delta));
         m_timer.fit(size.width*.52f,.72f,.40f);m_timer.position({size.width/2,topY-18});
-        m_difference.fit(size.width*.35f,.55f,.32f);m_difference.position({size.width/2,topY-45});
-        if(left==0 && !observer)m_waiting.text(i18n::text("survival-attempts-finished","ATTEMPTS COMPLETE · WAITING FOR RESULTS"));
+        if(left==0 && !observer)m_waiting.text(own!=view.standings.end()&&own->waiting?i18n::text("survival-attempts-finished","ATTEMPTS COMPLETE · WAITING FOR RESULTS"):i18n::text("survival-attempt-result-syncing","SYNCING ATTEMPT RESULT"));
     }else{
         m_timer.text(time);m_timer.fit(size.width*.32f,CompetitiveClockScale,CompetitiveClockScale*.7f);
         m_difference.fit(size.width*.25f,CompetitiveClockScale,CompetitiveClockScale*.7f);

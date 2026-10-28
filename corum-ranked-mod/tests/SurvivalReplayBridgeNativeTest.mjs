@@ -6,6 +6,7 @@ test('production native replay boundary records only consumed P1/P2 commands, bl
  const json=process.env.CORUM_MATJSON_SOURCE,result=process.env.CORUM_RESULT_INCLUDE;assert(json&&result);
  const cpp=`
 #include <matjson.hpp>
+#include "${root}/src/replay/SurvivalReplayPlayback.hpp"
 #include <algorithm>
 #include <cassert>
 #include <cmath>
@@ -20,7 +21,8 @@ struct GJBaseGameLayer{gd::vector<PlayerButtonCommand>m_queuedButtons;int m_curr
  void update(float){++nativeUpdates;assert(m_isTestMode&&!m_isPaused);}
 };
 struct PlayLayer:GJBaseGameLayer{GJGameLevel level;GJGameLevel*m_level=&level;static inline PlayLayer*current=nullptr;static PlayLayer*get(){return current;}};
-struct CorumSurvivalReplayLayer:PlayLayer{struct Fields{bool replayOwned=false,liveWorldOwned=false,replayAdvancing=false,survivalReplayLevel=false,survivalLiveLevel=false;}fields;Fields*m_fields=&fields;};using CorumRankedPlayLayer=CorumSurvivalReplayLayer;
+static corum::ranked::replay::Playback* activePlayback=nullptr;
+struct CorumSurvivalReplayLayer:PlayLayer{struct Fields{bool replayOwned=false,liveWorldOwned=false,replayAdvancing=false,survivalReplayLevel=false,survivalLiveLevel=false;}fields;Fields*m_fields=&fields;corum::ranked::replay::Playback*worldPlayback(){return activePlayback;}};using CorumRankedPlayLayer=CorumSurvivalReplayLayer;
 static PlayLayer*persistenceOwner=nullptr;struct ScopedPersistenceOwner{PlayLayer*old=persistenceOwner;ScopedPersistenceOwner(PlayLayer*p){persistenceOwner=p;}~ScopedPersistenceOwner(){persistenceOwner=old;}};
 struct ScopedRealGameplayEnd{bool&value;bool old;ScopedRealGameplayEnd(bool&v,bool n):value(v),old(v){v=n;}~ScopedRealGameplayEnd(){value=old;}};
 namespace corum::ranked{
@@ -35,13 +37,29 @@ ${method(native,'    void processQueuedButtons(')}
 };
 int main(){using namespace corum::ranked;Hook scene;PlayLayer::current=&scene;auto&r=replay::Recorder::get();
  PlayerButtonCommand first;first.m_isPush=true;first.m_isPlayer2=true;first.m_timestamp=.0025;auto future=first;future.m_step=4;scene.m_queuedButtons={first,future};scene.processQueuedButtons(.01f,false);
- assert(scene.consumed==1&&scene.m_queuedButtons.size()==1&&r.records.size()==1);assert(r.records[0]["player2"].asBool().unwrap()&&r.records[0]["down"].asBool().unwrap()&&r.records[0]["timestamp"].asDouble().unwrap()==.0025);
- scene.processQueuedButtons(.01f,false);assert(r.records.size()==1);scene.m_currentStep=4;scene.processQueuedButtons(.01f,false);assert(r.records.size()==2);
- scene.m_queuedButtons={first};SurvivalRuntime::get().free=true;scene.processQueuedButtons(.01f,false);assert(r.records.size()==2);SurvivalRuntime::get().free=false;
- scene.m_isPracticeMode=true;scene.m_queuedButtons={first};scene.processQueuedButtons(.01f,false);assert(r.records.size()==2);scene.m_isPracticeMode=false;
+ assert(scene.consumed==1&&scene.m_queuedButtons.size()==1&&r.records.size()==2);assert(r.records[1]["player2"].asBool().unwrap()&&r.records[1]["down"].asBool().unwrap()&&r.records[1]["timestamp"].asDouble().unwrap()==.0025);
+ scene.processQueuedButtons(.01f,false);assert(r.records.size()==3);scene.m_currentStep=4;scene.processQueuedButtons(.01f,false);assert(r.records.size()==5);
+ scene.m_queuedButtons={first};SurvivalRuntime::get().free=true;scene.processQueuedButtons(.01f,false);assert(r.records.size()==5);SurvivalRuntime::get().free=false;
+ scene.m_isPracticeMode=true;scene.m_queuedButtons={first};scene.processQueuedButtons(.01f,false);assert(r.records.size()==5);scene.m_isPracticeMode=false;
  scene.fields.replayOwned=true;scene.handleButton(true,1,true);assert(scene.nativeInputs==0);scene.fields.replayOwned=false;scene.fields.liveWorldOwned=true;scene.handleButton(true,1,true);assert(scene.nativeInputs==0);scene.fields.replayAdvancing=true;scene.handleButton(true,1,false);assert(scene.nativeInputs==1);scene.fields.replayAdvancing=false;scene.handleButton(false,1,false);assert(scene.nativeInputs==1);scene.fields.liveWorldOwned=false;scene.handleButton(true,1,true);assert(scene.nativeInputs==2);
  scene.m_isPaused=true;scene.fields.survivalReplayLevel=true;advanceSurvivalReplayWorld(&scene,.01f);assert(scene.nativeUpdates==1&&!scene.m_isTestMode&&scene.m_isPaused&&!persistenceOwner);
  scene.fields.survivalReplayLevel=false;advanceSurvivalReplayWorld(&scene,.01f);assert(scene.nativeUpdates==1);scene.fields.survivalLiveLevel=true;SurvivalSpectatorRuntime::get().worldOwned=true;advanceSurvivalReplayWorld(&scene,.01f);assert(scene.nativeUpdates==2&&!scene.m_isTestMode&&scene.m_isPaused);
+ // A command arriving between native substeps must not jump in the first
+ // substep of the replay frame. Includes retained future release and P2.
+ r.records.clear();scene.fields.replayOwned=false;scene.fields.liveWorldOwned=false;
+ scene.m_isPaused=false;scene.m_queuedButtons.clear();scene.m_currentStep=0;
+ scene.processQueuedButtons(.005f,false);
+ first.m_step=0;first.m_isPlayer2=false;first.m_isPush=true;first.m_timestamp=.005;
+ future=first;future.m_step=2;future.m_isPush=false;future.m_isPlayer2=true;
+ scene.m_queuedButtons={first,future};scene.m_currentStep=1;scene.processQueuedButtons(.005f,false);
+ scene.m_currentStep=2;scene.processQueuedButtons(.005f,false);
+ replay::Document doc;doc.complete=true;matjson::Value init;init["kind"]="initial";matjson::Value frame;frame["kind"]="frame";frame["dt"]=.015;
+ doc.records={init,frame};doc.records.insert(doc.records.end(),r.records.begin(),r.records.end());replay::Playback playback(std::move(doc));activePlayback=&playback;
+ scene.fields.replayOwned=true;scene.fields.replayAdvancing=true;scene.m_isTestMode=true;scene.consumed=0;scene.m_currentStep=0;
+ scene.processQueuedButtons(.005f,false);assert(scene.consumed==0);
+ scene.m_currentStep=1;scene.processQueuedButtons(.005f,false);assert(scene.consumed==1&&scene.m_queuedButtons.size()==1);
+ scene.m_currentStep=2;scene.processQueuedButtons(.005f,false);assert(scene.consumed==2&&scene.m_queuedButtons.empty());
+ playback.completeFrame(matjson::Value());assert(!playback.desync());activePlayback=nullptr;
  Hook foreign;advanceSurvivalReplayWorld(&foreign,.01f);assert(foreign.nativeUpdates==0);
 }
 `;

@@ -213,6 +213,8 @@ void SurvivalRuntime::observe(matjson::Value const& root) {
     m_view.online=root["online"].asBool().unwrapOr(false);m_view.resultPending=root["myResultPending"].asBool().unwrapOr(false);
     m_view.debug=root["debug"].asBool().unwrapOr(false);m_view.mapGeneration=static_cast<int>(root["mapGeneration"].asInt().unwrapOr(0));
     m_view.roundNumber=static_cast<int>(root["displayRoundNumber"].asInt().unwrapOr(root["roundNumber"].asInt().unwrapOr(0)));
+    m_view.tiebreakAttempts=static_cast<int>(root["tiebreakAttempts"].asInt().unwrapOr(3));
+    if(m_view.tiebreakAttempts!=3 && m_view.tiebreakAttempts!=6)m_view.tiebreakAttempts=3;
     m_view.matchPlayerCount=root["matchPlayerCount"].asInt().unwrapOr(16)==64?64:16;
     m_view.playerCount=static_cast<int>(root["playerCount"].asInt().unwrapOr(16));m_view.roundPlayerCount=static_cast<int>(root["roundPlayerCount"].asInt().unwrapOr(16));
     m_view.targetQualifiers=static_cast<int>(root["targetQualifiers"].asInt().unwrapOr(0));
@@ -406,7 +408,16 @@ bool SurvivalRuntime::canPlay() const {
 bool SurvivalRuntime::attemptLimitReached() const {
     if(m_view.phase!="TIEBREAK")return false;
     auto own=std::find_if(m_view.standings.begin(),m_view.standings.end(),[&](auto const& p){return p.id==m_view.ownId;});
-    return std::max(m_localAttempts,own==m_view.standings.end()?0:own->attemptsUsed)>=3;
+    return std::max(m_localAttempts,own==m_view.standings.end()?0:own->attemptsUsed)>=m_view.tiebreakAttempts;
+}
+bool SurvivalRuntime::exhaustedAttemptsAcknowledged() const {
+    if(m_view.phase!="TIEBREAK" || freePlaying() || observing() || !m_attempt.empty())return false;
+    auto own=std::find_if(m_view.standings.begin(),m_view.standings.end(),[&](auto const& p){return p.id==m_view.ownId;});
+    // Started is not finished. Poll/ACK authority proves every terminal event,
+    // so pending in-memory telemetry never needs to survive scene destruction.
+    return own!=m_view.standings.end() && own->attemptsFinished>=m_view.tiebreakAttempts &&
+        !own->attemptActive && m_view.activeAttemptId.empty() &&
+        std::none_of(m_events.begin(),m_events.end(),[](auto const& e){return e["type"].asString().unwrapOr("")=="ATTEMPT_END";});
 }
 std::optional<std::int64_t> SurvivalRuntime::serverSyncAgeMs()const{
     if(!m_clock.synchronized()||m_lastServerNow<=0)return {};

@@ -5,21 +5,21 @@ namespace corum::ranked::replay {
 // Drives verified native callbacks; no remote poses are used to move the local player.
 class Playback final {
 public:
-    struct Frame{double dt=0;std::vector<Json> inputs,steps,poses,anchors;std::vector<SpectatorRandomEvent> randoms;};
+    struct Frame{double dt=0;std::vector<Json> inputs,steps,poses,anchors,buttons;std::vector<SpectatorRandomEvent> randoms;};
     explicit Playback(Document document):m_document(std::move(document)){
         if(!m_document.complete||m_document.records.empty()||str(m_document.records.front(),"kind")!="initial")throw std::runtime_error("Replay initial state unavailable");
         m_initial=m_document.records.front();Frame frame;
         for(auto& r:m_document.records){auto kind=str(r,"kind");
           if(kind=="frame"){if(frame.dt>0)m_frames.push_back(std::move(frame));frame={};frame.dt=number(r,"dt");}
           else if(kind=="random"){if(auto event=decodeSpectatorRandomEvent(r["event"]))frame.randoms.push_back(std::move(*event));}
-          else if(kind=="anchor")frame.anchors.push_back(std::move(r));else if(kind=="input")frame.inputs.push_back(std::move(r));else if(kind=="step")frame.steps.push_back(std::move(r));else if(kind=="pose")frame.poses.push_back(std::move(r));
+          else if(kind=="buttons")frame.buttons.push_back(std::move(r));else if(kind=="anchor")frame.anchors.push_back(std::move(r));else if(kind=="input")frame.inputs.push_back(std::move(r));else if(kind=="step")frame.steps.push_back(std::move(r));else if(kind=="pose")frame.poses.push_back(std::move(r));
         }if(frame.dt>0)m_frames.push_back(std::move(frame));if(m_frames.empty())throw std::runtime_error("Replay native timeline unavailable");
         double time=0;for(auto& f:m_frames){std::sort(f.randoms.begin(),f.randoms.end(),[](auto const&a,auto const&b){return a.ordinal<b.ordinal;});time+=f.dt;m_times.push_back(time);if(!f.poses.empty())m_anchors.push_back({number(f.poses.back(),"progress"),time});}
         std::sort(m_anchors.begin(),m_anchors.end(),[](auto const&a,auto const&b){return a.progress<b.progress||(a.progress==b.progress&&a.time<b.time);});
         m_document.metadata["captureCompleteness"]=m_document.footer["captureCompleteness"];
         m_document.records.clear();m_document.records.shrink_to_fit();
     }
-    void restart(){m_index=0;m_time=0;m_budget=0;m_desync=false;m_step=m_anchor=m_random=0;m_presentedPose=nullptr;m_seeking=m_target>0;}
+    void restart(){m_index=0;m_time=0;m_budget=0;m_desync=false;m_failure=Json();m_recordedTick=0;m_step=m_anchor=m_random=m_buttons=m_legacyInput=0;m_presentedPose=nullptr;m_seeking=m_target>0;}
     void seek(double seconds){m_target=std::clamp(seconds,0.,duration());m_seeking=std::abs(m_target-m_time)>1e-6;if(m_target<m_time)m_reset=true;}
     void followRemote(std::string const& attempt,double elapsed,double progress){
         if(!std::isfinite(elapsed)||!std::isfinite(progress)||progress<0||progress>100)return;
@@ -49,6 +49,27 @@ public:
     double time()const{return m_time;}
     double duration()const{return m_times.empty()?0:m_times.back();}
     bool desync()const{return m_desync;}
+    Json const& failure()const{return m_failure;}
+    void reject(std::string const& reason,Json expected=Json(),Json actual=Json()){
+        if(m_desync)return;
+        m_desync=true;m_failure["reason"]=reason;m_failure["frame"]=static_cast<std::int64_t>(m_index);
+        m_failure["step"]=static_cast<std::int64_t>(m_step);m_failure["buttonDispatches"]=static_cast<std::int64_t>(m_buttons);
+        m_failure["expected"]=std::move(expected);m_failure["actual"]=std::move(actual);
+    }
+    Json const* nativeButtons(double dt,bool clear,int step){
+        auto* f=current();if(!f||f->buttons.empty())return nullptr; // legacy codec
+        if(m_buttons>=f->buttons.size()){reject("EXTRA_INPUT_DISPATCH");return nullptr;}
+        auto const& queue=f->buttons[m_buttons++];
+        if(std::abs(number(queue,"dt")-dt)>1e-6||queue["clear"].asBool().unwrapOr(!clear)!=clear||integer(queue,"nativeStep")!=step){Json actual;actual["dt"]=dt;actual["clear"]=clear;actual["nativeStep"]=step;reject("INPUT_DISPATCH_ORDER",queue,actual);return nullptr;}
+        return &queue;
+    }
+    std::vector<Json> legacyInputsForStep(){
+        std::vector<Json> due;auto* f=current();if(!f||!f->buttons.empty())return due;
+        while(m_legacyInput<f->inputs.size() && integer(f->inputs[m_legacyInput],"tick")<=m_recordedTick)due.push_back(f->inputs[m_legacyInput++]);
+        return due;
+    }
+    void nativeButtonsConsumed(Json const& expected,Json const& actual){if(expected!=actual)reject("INPUT_CONSUMPTION",expected,actual);}
+
     bool ended()const{return m_index>=m_frames.size();}
     bool seeking()const{return m_seeking;}
     Json const& initial()const{return m_initial;}
@@ -58,20 +79,20 @@ public:
     void accumulate(double dt){if(!m_paused&&!m_desync)m_budget+=std::clamp(dt,0.,.1)*m_speed;}
     bool due()const{return !m_desync&&!ended()&&(m_seeking||(!m_paused&&m_budget+1e-8>=m_frames[m_index].dt));}
     void nativeStep(double dt,bool half,bool last,int step){
-        auto* f=current();if(!f||m_step>=f->steps.size()){m_desync=true;return;}
-        auto const&r=f->steps[m_step++];
-        if(std::abs(number(r,"dt")-dt)>1e-6||r["half"].asBool().unwrapOr(!half)!=half||r["last"].asBool().unwrapOr(!last)!=last||integer(r,"nativeStep")!=step)m_desync=true;
+        auto* f=current();if(!f||m_step>=f->steps.size()){reject("UNEXPECTED_NATIVE_CALLBACK");return;}
+        auto const&r=f->steps[m_step++];m_recordedTick=integer(r,"tick");
+        if(std::abs(number(r,"dt")-dt)>1e-6||r["half"].asBool().unwrapOr(!half)!=half||r["last"].asBool().unwrapOr(!last)!=last||integer(r,"nativeStep")!=step){Json actual;actual["dt"]=dt;actual["half"]=half;actual["last"]=last;actual["nativeStep"]=step;reject("PHYSICS_STEP",r,actual);}
     }
     void nativeAnchor(Json const& actual){
-        auto* f=current();if(!f||m_anchor>=f->anchors.size()){m_desync=true;return;}
+        auto* f=current();if(!f||m_anchor>=f->anchors.size()){reject("UNEXPECTED_NATIVE_CALLBACK");return;}
         auto const& expected=f->anchors[m_anchor++];
-        if(expected["event"]!=actual["event"]||expected["player2"]!=actual["player2"])m_desync=true;
-        for(auto key:{"fromX","fromY","toX","toY"})if(std::abs(number(expected,key)-number(actual,key))>2)m_desync=true;
+        if(expected["event"]!=actual["event"]||expected["player2"]!=actual["player2"])reject("NATIVE_ANCHOR_IDENTITY",expected,actual);
+        for(auto key:{"fromX","fromY","toX","toY"})if(std::abs(number(expected,key)-number(actual,key))>2)reject("NATIVE_ANCHOR_POSITION",expected,actual);
     }
-    std::optional<SpectatorRandomEvent> randomEvent(int index,int id,float x,float y){auto* f=current();if(!f||m_random>=f->randoms.size()){m_desync=true;return {};}
-        auto const& e=f->randoms[m_random];if(e.objectIndex!=index||e.objectId!=id||std::hypot(e.originX-x,e.originY-y)>.1){m_desync=true;return {};}++m_random;return e;}
+    std::optional<SpectatorRandomEvent> randomEvent(int index,int id,float x,float y){auto* f=current();if(!f||m_random>=f->randoms.size()){reject("RANDOM_IDENTITY_OR_HISTORY");return {};}
+        auto const& e=f->randoms[m_random];if(e.objectIndex!=index||e.objectId!=id||std::hypot(e.originX-x,e.originY-y)>.1){reject("RANDOM_IDENTITY_OR_HISTORY");return {};}++m_random;return e;}
     void completeFrame(Json const& actual){
-        auto* f=current();if(!f)return;if(m_step!=f->steps.size()||m_anchor!=f->anchors.size()||m_random!=f->randoms.size())m_desync=true;
+        auto* f=current();if(!f)return;if(m_step!=f->steps.size()||m_anchor!=f->anchors.size()||m_random!=f->randoms.size()||m_buttons!=f->buttons.size())reject("UNCONSUMED_NATIVE_EVENTS");
         if(!f->poses.empty()){
             auto const& expected=f->poses.back();m_presentedPose=&expected;
             auto samePose=[](Json const&a,Json const&b){
@@ -80,17 +101,18 @@ public:
                 for(auto key:{"mode","mini","upsideDown","flipped","dual","dead","finished"})if(a[key]!=b[key])return false;
                 return true;
             };
-            if(!samePose(expected,actual)||(expected["dual"].asBool().unwrapOr(false)&&!samePose(expected["player2"],actual["player2"])))m_desync=true;
+            if(!samePose(expected,actual)||(expected["dual"].asBool().unwrapOr(false)&&!samePose(expected["player2"],actual["player2"])))reject("POSE_OR_PHYSICS_STATE",expected,actual);
         }
-        m_time+=f->dt;m_budget=std::max(0.,m_budget-f->dt);++m_index;m_step=m_anchor=m_random=0;
+        m_time+=f->dt;m_budget=std::max(0.,m_budget-f->dt);++m_index;m_step=m_anchor=m_random=m_buttons=m_legacyInput=0;
         if(m_seeking&&(m_time>=m_target||ended())){m_seeking=false;m_budget=0;}
     }
 private:
-    Document m_document;Json m_initial;Json const* m_presentedPose=nullptr;
+    Document m_document;Json m_initial,m_failure;Json const* m_presentedPose=nullptr;
     struct Anchor{double progress,time;};
     std::vector<Anchor> m_anchors;
     std::vector<Frame> m_frames;std::vector<double> m_times;
-    std::size_t m_index=0,m_step=0,m_anchor=0,m_random=0;
+    std::size_t m_index=0,m_step=0,m_anchor=0,m_random=0,m_buttons=0,m_legacyInput=0;
+    std::int64_t m_recordedTick=0;
     double m_time=0,m_budget=0,m_speed=1,m_target=0;
     bool m_paused=false,m_desync=false,m_seeking=false,m_reset=false,m_partial=false;
     std::string m_followAttempt;

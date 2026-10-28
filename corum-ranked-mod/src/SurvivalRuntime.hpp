@@ -23,7 +23,7 @@ struct SurvivalQueueView {
 struct SurvivalMatchView {
     std::uint64_t revision=0;
     std::string id,state,phase,roundKey,group,ownId="human",error,startsAt,endsAt,entryOpensAt,entryRequestedAt,mapError,presentationGate,selectionOpensAt,eliminatedAt;
-    int mapGeneration=0,roundNumber=0,targetQualifiers=0,playerCount=0,roundPlayerCount=0,matchPlayerCount=16;
+    int mapGeneration=0,roundNumber=0,targetQualifiers=0,playerCount=0,roundPlayerCount=0,matchPlayerCount=16,tiebreakAttempts=3;
     SurvivalMapMetadata map;
     matjson::Value certificate=nullptr,result=nullptr,completedRound=nullptr,nextMap=nullptr,participants=nullptr;
     std::vector<SurvivalStanding> standings;
@@ -81,6 +81,7 @@ public:
     bool consumeNativeLaunch(GJGameLevel* level);
     bool canPlay() const;
     bool attemptLimitReached() const;
+    bool exhaustedAttemptsAcknowledged() const;
     int localAttemptsUsed()const{return m_localAttempts;}
     std::optional<std::int64_t> countdownMs() const;
     std::optional<std::int64_t> entryWaitMs() const;

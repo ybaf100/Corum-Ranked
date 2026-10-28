@@ -335,15 +335,15 @@ describe("Survival M5 public HTTP and persistent online game",()=>{
    expect(view.remainingSeconds).toBe(165);await event(fresh,m,"ATTEMPT_END",{attemptId,progress:51.25});await record(fresh,m,62);
    expect(survivalCurrentRound(await engine.get(id)).players[0]!.highestProgress).toBe(62);
  });
- it("waits for three DM attempts, rounds only DM to .001%, repeats exact ties and pays a unique winner once",async()=>{
+ it("waits for six DM attempts, rounds only DM to .001%, repeats exact ties and pays a unique winner once",async()=>{
    const {group,id}=await game(2);let m=await prepare(id,group);
    for(const c of group)await record(c,m,100);now=survivalCurrentRound(m).endsAt!;await touch(group);await online.tickOnce();
    m=await prepare(id,group);expect(survivalCurrentRound(m).phase).toBe("TIEBREAK");
-   for(const c of group)for(const score of [20,30,94.3704])await record(c,m,score);
+   for(const c of group)for(const score of [20,30,40,50,60,94.3704])await record(c,m,score);
    m=await engine.get(id);expect(m.state).toBe("ROUND_RESULT");expect((await db.query("SELECT * FROM sur_lp_ledger")).rows).toHaveLength(0);
-   m=await prepare(id,group);for(const score of [20,30,94.3704])await record(group[0]!,m,score);
+   m=await prepare(id,group);for(const score of [20,30,40,50,60,94.3704])await record(group[0]!,m,score);
    expect((await engine.get(id)).state).toBe("PLAYING");
-   for(const score of [20,30,94.3714])await record(group[1]!,m,score);
+   for(const score of [20,30,40,50,60,94.3714])await record(group[1]!,m,score);
    m=await engine.get(id);expect(m.state).toBe("FINAL_RESULT");expect(m.winnerId).toBe(group[1]!.session.playerId);
    const result=(await api(group[1]!,`/online/matches/${id}`)).body.result;expect(result).toMatchObject({rank:1,requestedDelta:50});
    expect((await db.query("SELECT * FROM sur_lp_ledger")).rows).toHaveLength(2);

@@ -72,7 +72,7 @@ describe("shared Survival formats",()=>{
   expect(field.round.achievementCheckpoint).toMatchObject({status:"CAPTURED",at:field.now});
   field.now=field.round.endsAt!;field.send({type:"TICK"});field.next();
   field.play([100,100,98,97,96]);field.next();expect(field.round.phase).toBe("TIEBREAK");field.prepare();
-  for(const p of [...field.round.players])for(let i=0;i<3;i++)field.attempt(p.participantId,p.participantId==="p1"?99.123:99.122,`dm${i}`);
+  for(const p of [...field.round.players])for(let i=0;i<6;i++)field.attempt(p.participantId,p.participantId==="p1"?99.123:99.122,`dm${i}`);
   expect(field.match.state).toBe("FINAL_RESULT");expect(field.match.winnerId).toBe("p1");
  });
  it("retains an actual final for short 64-format fields",()=>{

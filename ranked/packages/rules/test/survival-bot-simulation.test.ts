@@ -87,11 +87,11 @@ describe("Survival adaptive NORMAL attempts",()=>{
     expect(survivalCurrentRound(after).players[1]!.highestProgress).toBeGreaterThanOrEqual(80);
     expect(survivalCurrentRound(after).players[1]!.attempts[0]!.id).toBe("bot-normal");
   });
-  it("uses at most three timed Death Match attempts with precise scores",()=>{
+  it("uses at most six timed Death Match attempts with precise scores",()=>{
     const {match,sim}=run(19,40,true);
     expect(sim.frames.filter(f=>f.kind==="START").some(f=>f.at>30000)).toBe(true);
     for(const p of survivalCurrentRound(match).players.slice(1)){
-      expect(p.attempts).toHaveLength(3);expect(p.attempts.every(a=>a.endedAt!==null&&a.endedAt>a.startedAt)).toBe(true);
+      expect(p.attempts.length).toBeLessThanOrEqual(6);expect(p.attempts.length).toBeGreaterThan(3);expect(p.attempts.filter(a=>a.endedAt!==null).every(a=>a.endedAt!>a.startedAt)).toBe(true);expect(p.attempts.filter(a=>a.endedAt===null).length).toBeLessThanOrEqual(1);
       expect(p.attempts.some(a=>Math.trunc(a.highestProgress)!==a.highestProgress)).toBe(true);
     }
     const later=simulateSurvivalBots(match,19,sim.state,10**12);expect(later.frames).toHaveLength(0);

@@ -33,6 +33,7 @@ test('actual viewer decoder recovers timeout only on fresh validated packets and
 #include <algorithm>
 namespace corum::ranked::debug {struct DebugSpectateRuntime{static DebugSpectateRuntime&get(){static DebugSpectateRuntime r;return r;}int levelId()const{return kDebugSpectateLevelId;}};}
 #include <cassert>
+#include <set>
 #include <chrono>
 #include <map>
 #include <variant>

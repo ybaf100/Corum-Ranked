@@ -9,6 +9,7 @@ class SurvivalHud final : public cocos2d::CCNode {
 public:
     static SurvivalHud* create();
     void present(SurvivalMatchView const& view,std::int64_t remainingMs,float dt);
+    void attachFpsLabel(cocos2d::CCLabelBMFont* label){m_fps=geode::WeakRef(label);}
     void attachProgressBar(cocos2d::CCSprite* bar,cocos2d::CCSprite* fill,float width,float height);
     void update(float dt) override;
 private:
@@ -19,6 +20,7 @@ private:
     std::string m_context;
     RankedHudLabel m_round,m_timer,m_auxTimer,m_difference,m_rank,m_waiting;
     cocos2d::CCDrawNode* m_cutoffLine=nullptr;
+    geode::WeakRef<cocos2d::CCLabelBMFont> m_fps;
     geode::WeakRef<cocos2d::CCSprite> m_progressBar,m_progressFill;
     geode::WeakRef<cocos2d::CCDrawNode> m_progressLines;
     float m_progressWidth=0,m_progressHeight=0;

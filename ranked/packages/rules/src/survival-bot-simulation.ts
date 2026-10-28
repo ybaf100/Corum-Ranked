@@ -116,7 +116,7 @@ export function simulateSurvivalBots(match:SurvivalMatch,seed:number,previous:Su
       if(!round.players.some(p=>p.participantId===id&&!p.forfeited))continue;
       const botKey=`${key}:${id}`;
       if(bot.phase==="RETRY"&&at>=bot.nextAt){
-        if(bot.sequence>=(dm?3:64)){bot.phase="DONE";continue;}
+        if(bot.sequence>=(dm?match.config.tiebreakAttempts:64)){bot.phase="DONE";continue;}
         begin(bot,seed,botKey,state.estimate,seconds,at);
         frames.push({participantId:id,attemptId:bot.attemptId,kind:"START",at,progress:0});continue;
       }

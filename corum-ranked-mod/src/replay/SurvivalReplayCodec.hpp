@@ -33,6 +33,12 @@ inline std::string metadataProblem(Json const& j){
 inline bool metadataValid(Json const& j){return metadataProblem(j).empty();}
 inline bool recordValid(Json const& r){
     auto kind=str(r,"kind");if(integer(r,"tick")<0||!std::isfinite(number(r,"elapsed"))||number(r,"elapsed")<0)return false;
+    if(kind=="buttons"){
+        if(!r["clear"].isBool()||integer(r,"nativeStep")<0||!std::isfinite(number(r,"dt"))||number(r,"dt")<0||number(r,"dt")>1)return false;
+        for(auto key:{"queued","remaining"}){auto values=r[key].asArray();if(values.isErr()||values.unwrap().size()>4096)return false;
+            for(auto input:values.unwrap()){input["kind"]="input";if(!recordValid(input))return false;}}
+        return true;
+    }
     if(kind=="input")return integer(r,"button")>=1&&integer(r,"button")<=3&&r["down"].isBool()&&r["player2"].isBool()&&integer(r,"nativeStep")>=0&&std::isfinite(number(r,"timestamp"));
     if(kind=="frame"||kind=="step")return std::isfinite(number(r,"dt"))&&(kind=="frame"?number(r,"dt")>0:number(r,"dt")>=0)&&number(r,"dt")<=1&&
       (kind=="frame"||(r["half"].isBool()&&r["last"].isBool()&&integer(r,"nativeStep")>=0));
@@ -72,7 +78,7 @@ inline Document decode(std::filesystem::path const& path,bool recover=false){
             d.footer=j;d.complete=true;
         }else{
             if(d.complete||integer(j,"sequence")!=static_cast<std::int64_t>(sequence)||str(j,"previous")!=d.chain||!j["records"].isArray()){
-                if(recover)break;throw std::runtime_error("Replay chain damaged");}
+                if(recover){break;}throw std::runtime_error("Replay chain damaged");}
             auto records=j["records"].asArray().unwrap();
             if(records.empty()||records.size()>MaxBlockRecords||d.records.size()+records.size()>MaxRecords||str(j,"sha256")!=sha256Text(d.chain+j["records"].dump(matjson::NO_INDENTATION))||
                 !std::all_of(records.begin(),records.end(),recordValid)){if(recover)break;throw std::runtime_error("Replay block damaged");}
@@ -88,7 +94,8 @@ inline Document decode(std::filesystem::path const& path,bool recover=false){
         }
         d.validBytes+=line.size()+1;
     }
-    if(first||(!recover&&!d.complete))throw std::runtime_error("Replay incomplete");return d;
+    if(first||(!recover&&!d.complete))throw std::runtime_error("Replay incomplete");
+    return d;
 }
 inline std::string roundStorageKey(Json const& metadata){
     return sha256Text(str(metadata,"matchId")+"\n"+str(metadata,"roundKey")+"\n"+std::to_string(integer(metadata,"mapGeneration"))+"\n"+str(metadata,"participantId")+"\n"+(metadata["debug"].asBool().unwrapOr(false)?"debug":"online"));

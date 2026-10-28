@@ -10,7 +10,7 @@ test('confirmed NOW interpolates inside an attempt, resets on death/retry, rejec
 #include <cassert>
 #include <limits>
 using namespace corum::ranked;
-int main(){for(int used=-1;used<8;++used)for(int local=-1;local<8;++local)assert(survivalRemainingAttempts(used,local)==3-std::clamp(std::max(used,local),0,3));assert(survivalRemainingAttempts(1,2)==1);assert(survivalRemainingAttempts(2,2)==1);SurvivalProgressTween t;
+int main(){for(int used=-1;used<8;++used)for(int local=-1;local<8;++local)assert(survivalRemainingAttempts(used,local)==6-std::clamp(std::max(used,local),0,6));assert(survivalRemainingAttempts(1,2)==4);assert(survivalRemainingAttempts(2,2)==4);SurvivalProgressTween t;
  t.observe(1,"a1",true,18.125,18.125);t.advance(.016);assert(t.now>0&&t.now<18.125&&t.best.displayed<=18.125);
  for(int i=0;i<100;++i)t.advance(.016);
  auto before=t.now;t.observe(2,"a1",true,18.125,19.5);t.advance(.016);assert(t.now>=before&&t.now<=19.5);

@@ -163,6 +163,7 @@ class $modify(CorumRankedPlayLayer, PlayLayer) {
 public:
     struct Fields {
         bool spectatorAudioStarted=false,spectatorAudioPaused=true;
+        corum::ranked::SpectatorAudioClockPolicy spectatorAudioPolicy;
         std::string spectatorAudioContext;
         double spectatorAudioElapsed=-1;
         std::chrono::steady_clock::time_point spectatorAudioChangedAt{};
@@ -735,7 +736,7 @@ public:
         if(m_fields->survivalFreePlayHud){
             if(runtime.freePlayReturnPending())queueSurvivalGameplayReturn();return;
         }
-        if(runtime.officialRoundCleared() && (!m_hasCompletedLevel || m_fields->survivalNativeClearFinished)){
+        if((runtime.officialRoundCleared() || (runtime.preparationContext()==m_fields->survivalContext && runtime.exhaustedAttemptsAcknowledged())) && (!m_hasCompletedLevel || m_fields->survivalNativeClearFinished)){
             queueSurvivalGameplayReturn();return;
         }
         if(blockSurvivalEntry())return;
@@ -782,6 +783,7 @@ public:
         m_fields->survivalHud=corum::ranked::ui::SurvivalHud::create();
         if(m_fields->survivalHud){
             m_fields->hudRoot->addChild(m_fields->survivalHud);
+            m_fields->survivalHud->attachFpsLabel(m_fields->fpsLabel);
             m_fields->survivalHud->attachProgressBar(m_progressBar,m_progressFill,m_progressWidth,m_progressHeight);
         }
         addChild(m_fields->hudRoot,1000);
@@ -860,39 +862,42 @@ public:
         auto* audio=FMODAudioEngine::sharedEngine();auto& live=spectatorTransport();
         auto const frame=m_fields->spectatorRenderedFrame;
         auto const now=std::chrono::steady_clock::now();
+        auto const nowMs=std::chrono::duration<double,std::milli>(now.time_since_epoch()).count();
+        auto& policy=m_fields->spectatorAudioPolicy;
+        auto pause=[&]{if(!m_fields->spectatorAudioPaused)audio->pauseMusic(0);m_fields->spectatorAudioPaused=true;};
         bool advancing=false;
         if(frame && frame->pose){
             auto const context=frame->context.attemptId+":"+std::to_string(frame->context.generation)+":"+std::to_string(frame->context.epoch);
-            if(context!=m_fields->spectatorAudioContext){m_fields->spectatorAudioContext=context;m_fields->spectatorAudioElapsed=-1;m_fields->spectatorAudioChangedAt=now;m_fields->spectatorAudioPaused=true;audio->pauseMusic(0);}
+            if(context!=m_fields->spectatorAudioContext){pause();policy.reset();m_fields->spectatorAudioContext=context;m_fields->spectatorAudioElapsed=-1;m_fields->spectatorAudioChangedAt=now;}
             if(frame->publisherElapsedMs>m_fields->spectatorAudioElapsed){m_fields->spectatorAudioChangedAt=now;m_fields->spectatorAudioElapsed=frame->publisherElapsedMs;}
             advancing=(live.presentationPending()||now-m_fields->spectatorAudioChangedAt<std::chrono::milliseconds(250))&&!frame->pose->dead&&!frame->pose->finished;
         }
         auto const syncing=live.status()==corum::ranked::SpectatorLiveStatus::Syncing;
-        // Warm native audio during restoration, while keeping the channel paused.
-        // Do not discover an asynchronous first-load failure after exposing LIVE.
-        if(frame&&frame->pose&&frame->pose->audio&&!m_fields->spectatorAudioStarted){PlayLayer::startMusic();audio->pauseMusic(0);m_fields->spectatorAudioStarted=true;}
+        if(frame&&frame->pose&&frame->pose->audio&&!m_fields->spectatorAudioStarted){PlayLayer::startMusic();audio->pauseMusic(0);m_fields->spectatorAudioPaused=true;m_fields->spectatorAudioStarted=true;}
         if(frame&&frame->pose&&!frame->pose->audio){live.noteWorldPartial("AUDIO_TIMELINE_UNAVAILABLE");live.audioPrepared(true);}
-        if(!frame||!frame->pose||!frame->pose->audio||syncing||m_isPaused||!advancing){audio->pauseMusic(0);m_fields->spectatorAudioPaused=true;return;}
+        if(!frame||!frame->pose||!frame->pose->audio||syncing||m_isPaused||!advancing){
+            pause();policy.state=frame&&frame->pose&&(frame->pose->dead||frame->pose->finished)?corum::ranked::SpectatorAudioState::Terminal:corum::ranked::SpectatorAudioState::PausedForBuffering;return;
+        }
         auto const& sample=*frame->pose->audio;
         auto const track=std::string(audio->getActiveMusic(0));
-        if(track.empty() || corum::ranked::spectatorTrackHash(track)!=sample.trackHash){audio->pauseMusic(0);live.noteWorldPartial("AUDIO_TRACK_UNAVAILABLE");live.audioPrepared(true);return;}
+        if(track.empty() || corum::ranked::spectatorTrackHash(track)!=sample.trackHash){pause();live.noteWorldPartial("AUDIO_TRACK_UNAVAILABLE");live.audioPrepared(false);return;}
         auto* channel=audio->getActiveMusicChannel(0);
-        if(!channel){audio->pauseMusic(0);m_fields->spectatorAudioPaused=true;live.audioPrepared(false);return;}
+        if(!channel){pause();policy.state=corum::ranked::SpectatorAudioState::WaitingForAudio;live.audioPrepared(false);return;}
         auto const actual=static_cast<double>(audio->getMusicTimeMS(0));
-        if(m_fields->spectatorAudioPaused || std::abs(actual-sample.positionMs)>25){
-            audio->pauseMusic(0);
-            auto requested=static_cast<unsigned>(sample.positionMs);unsigned observed=0;
-            auto seek=channel->setPosition(requested,FMOD_TIMEUNIT_MS);
+        if(policy.needsSeek(sample.trackHash,sample.positionMs,actual,frame->publisherElapsedMs,nowMs)){
+            pause();unsigned observed=0;
+            auto seek=channel->setPosition(static_cast<unsigned>(sample.positionMs),FMOD_TIMEUNIT_MS);
             auto read=channel->getPosition(&observed,FMOD_TIMEUNIT_MS);
-            if(seek!=FMOD_OK||read!=FMOD_OK||std::abs(static_cast<double>(observed)-sample.positionMs)>20){m_fields->spectatorAudioPaused=true;live.audioPrepared(false);return;}
-#if defined(CORUM_RANKED_DEBUG_SPECTATE)
-            log::info("[SpectatorAudio] stage=SEEK_APPLIED publisherMs={} sourceMusicMs={} nativeBeforeMs={} nativeAfterMs={} pendingPresentation={}",frame->publisherElapsedMs,sample.positionMs,actual,observed,live.presentationPending());
-#endif
+            auto const success=seek==FMOD_OK&&read==FMOD_OK&&std::abs(static_cast<double>(observed)-sample.positionMs)<=20;
+            policy.sought(nowMs,success);
+            log::info("[SpectatorAudio] attemptId={} trackHash={} state={} sourceMusicMs={} presentationMusicMs={} nativeMusicMs={} driftMs={} seekResult={} seeks={}",frame->context.attemptId,sample.trackHash,static_cast<int>(policy.state),sample.positionMs,sample.positionMs,actual,actual-sample.positionMs,success,policy.seeks);
+            if(!success){live.audioPrepared(false);return;}
         }
-        live.audioPrepared(true);
-        if(live.presentationPending()){audio->pauseMusic(0);m_fields->spectatorAudioPaused=true;return;}
+        if(!policy.aligned){pause();live.audioPrepared(false);return;}
+        live.worldCauseRecovered("AUDIO_TIMELINE_UNAVAILABLE");live.worldCauseRecovered("AUDIO_TRACK_UNAVAILABLE");live.audioPrepared(true);
+        if(live.presentationPending()){pause();return;}
         if(m_fields->spectatorAudioPaused)audio->resumeMusic(0);
-        m_fields->spectatorAudioPaused=false;
+        m_fields->spectatorAudioPaused=false;policy.state=corum::ranked::SpectatorAudioState::Playing;
     }
 
     void acquireGameplayAudio() {
@@ -1300,7 +1305,8 @@ public:
                 auto status=live.status();
                 auto caption=live.restoringWorld()||live.presentationPending()?std::string(live.restorationPhase()):
                     complete?std::string("SERVER PLAYBACK COMPLETE"):
-                    !live.restoringWorld()&&status==corum::ranked::SpectatorLiveStatus::Disconnected?std::string("RECAPTURE REQUIRED / DISCONNECTED"):
+                    !live.restoringWorld()&&status==corum::ranked::SpectatorLiveStatus::RecaptureRequired?std::string("RECAPTURE REQUIRED"):
+                    !live.restoringWorld()&&status==corum::ranked::SpectatorLiveStatus::Disconnected?std::string("DISCONNECTED"):
                     status==corum::ranked::SpectatorLiveStatus::Reconnecting?std::string("RECONNECTING..."):
                     waiting?std::string("WAITING FOR OPPONENT..."):buffering?std::string("BUFFERING..."):
                     fallback?std::string("POLLING..."):status==corum::ranked::SpectatorLiveStatus::PartialSync?std::string("PARTIAL SYNC"):std::string("LIVE SPECTATOR");
@@ -2776,6 +2782,7 @@ public:
                 status == corum::ranked::SpectatorLiveStatus::Syncing ? "SYNCING..." :
                 status == corum::ranked::SpectatorLiveStatus::Reconnecting ? "RECONNECTING..." :
                 status == corum::ranked::SpectatorLiveStatus::PartialSync ? "PARTIAL SYNC" :
+                status == corum::ranked::SpectatorLiveStatus::RecaptureRequired ? "RECAPTURE REQUIRED" :
                 status == corum::ranked::SpectatorLiveStatus::Disconnected ? "DISCONNECTED" :
                 status == corum::ranked::SpectatorLiveStatus::Buffering ? "BUFFERING..." :
                 status == corum::ranked::SpectatorLiveStatus::Fallback && corum::ranked::SpectatorLiveRuntime::get().reason()=="DUAL_UNSUPPORTED" ? "DUAL UNSUPPORTED" :

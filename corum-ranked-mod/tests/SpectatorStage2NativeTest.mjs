@@ -21,7 +21,7 @@ test('production HTTP decoder, bounded restoration, recovery and compositor shar
   const methods=['SpectatorLiveStatus SpectatorLiveRuntime::status()', 'void SpectatorLiveRuntime::resetViewer()',
    'void SpectatorLiveRuntime::applyViewerResponse(', 'void SpectatorLiveRuntime::setFallback(',
    'void SpectatorLiveRuntime::requestSceneRestore()', 'std::vector<SpectatorRemoteFrame> SpectatorLiveRuntime::takeRestorationFrames()',
-   'void SpectatorLiveRuntime::restorationApplied(', 'void SpectatorLiveRuntime::noteWorldPartial(', 'std::optional<SpectatorRemoteFrame> SpectatorLiveRuntime::presentationFrame()', 'std::optional<SpectatorRemoteFrame> SpectatorLiveRuntime::worldFrame()',
+   'void SpectatorLiveRuntime::restorationApplied(', 'void SpectatorLiveRuntime::noteWorldPartial(', 'void SpectatorLiveRuntime::worldCauseRecovered(', 'std::optional<SpectatorRemoteFrame> SpectatorLiveRuntime::presentationFrame()', 'std::optional<SpectatorRemoteFrame> SpectatorLiveRuntime::worldFrame()',
    'void SpectatorLiveRuntime::tickViewer()', 'void SpectatorLiveRuntime::pollViewer()'].map(method).join('\n');
   const cpp=`
 #include <Geode/Geode.hpp>
@@ -81,6 +81,8 @@ matjson::Value response(int first,int count,int total,bool reset=false,std::stri
 }
 void attach(SpectatorLiveRuntime& r){r.resetViewer();r.m_viewMatchId="match";r.m_viewContextKey=viewerContextKey(RankedRuntime::get().view().match);}
 int main(){
+ {SpectatorLiveRuntime r;r.noteWorldPartial("AUDIO_TRACK_UNAVAILABLE");assert(r.m_partialSync);r.worldCauseRecovered("AUDIO_TRACK_UNAVAILABLE");assert(!r.m_partialSync);r.noteWorldPartial("RANDOM_EVENT_HISTORY_INCOMPLETE");r.noteWorldPartial("AUDIO_TRACK_UNAVAILABLE");r.worldCauseRecovered("AUDIO_TRACK_UNAVAILABLE");assert(r.m_partialSync&&r.m_worldCauses.size()==1);r.resetViewer();assert(r.m_worldCauses.empty()&&!r.m_partialSync);}
+
  // Stage 4 uses an independent authenticated Survival route/target; it never fabricates a Solo Match.
  {
   SpectatorLiveRuntime r;RankedRuntime::get().authority=false;
@@ -168,7 +170,7 @@ int main(){
  // Invalid immutable evidence is quarantined once, rather than endlessly replaying 0% in a new epoch.
  {SpectatorLiveRuntime r;attach(r);r.applyViewerResponse(response(0,1,1,true));auto broken=response(1,1,2);broken["packets"][0]["keyframe"]["x"]=10000.;r.applyViewerResponse(broken);assert(!r.m_rejectedWorldContext.empty());auto epoch=r.m_viewPresentationEpoch;
   for(int i=0;i<50;i++){r.applyViewerResponse(response(0,2,2,true));}
-  assert(r.m_viewPresentationEpoch==epoch&&!r.m_restoreTimeline.active()&&r.status()==SpectatorLiveStatus::Disconnected);
+  assert(r.m_viewPresentationEpoch==epoch&&!r.m_restoreTimeline.active()&&r.status()==SpectatorLiveStatus::RecaptureRequired);
   r.applyViewerResponse(response(0,1,1,true,"good",2));assert(r.m_rejectedWorldContext.empty()&&r.m_viewAttemptId=="good");}
  // A restart with no beginning is explicitly partial; no invented fast-forward or successful checkpoint claim.
  {SpectatorLiveRuntime r;attach(r);auto p=response(1200,2,1202,true);p["restoration"]["available"]=false;p["restoration"]["reason"]="ATTEMPT_START_MISSING";

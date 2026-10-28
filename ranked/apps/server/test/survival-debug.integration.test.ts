@@ -355,7 +355,7 @@ describe("Survival M4 persistent debug game",()=>{
     expect(view.participants.filter(p=>p.kind==="BOT").every(p=>["RED","AQUA","BRONZE","SILVER","GOLD"].includes(p.displayedTier))).toBe(true);
     expect((await db.query<{virtual_human_lp:boolean}>("SELECT virtual_human_lp FROM sur_debug_matches")).rows[0]!.virtual_human_lp).toBe(true);
   });
-  it("runs normal rounds and a tied FINAL, then times all three bot Death Match attempts",async()=>{
+  it("runs normal rounds and a tied FINAL, then times up to six bot Death Match attempts",async()=>{
     let m=await create();
     for(let phase=0;phase<4;phase++) {
       m=await prepare(m);await record(m,100);
@@ -371,12 +371,13 @@ describe("Survival M4 persistent debug game",()=>{
     }
     expect(survivalCurrentRound(m).phase).toBe("TIEBREAK");m=await prepare(m);
     expect(survivalCurrentRound(m).players.filter(p=>p.participantId!=="human").every(p=>p.attempts.length===0)).toBe(true);
-    for(let i=0;i<3;i++)await record(m,100);
+    for(let i=0;i<6;i++)await record(m,100);
     expect((await debug.view(m.id,session)).state).toBe("PLAYING");
     now=survivalCurrentRound(m).endsAt!-1;await debug.tickOnce();
     const end=await debug.view(m.id,session);expect(end.state).toBe("FINAL_RESULT");expect(end.result!.rank).toBe(1);
     const attempts=survivalCurrentRound(await engine.get(m.id)).players.filter(p=>p.participantId!=="human").flatMap(p=>p.attempts);
-    expect(attempts.every(a=>a.endedAt!==null&&a.endedAt>a.startedAt)).toBe(true);
+    expect(attempts.every(a=>a.endedAt===null||a.endedAt>a.startedAt)).toBe(true);
+    for(const p of survivalCurrentRound(await engine.get(m.id)).players)expect(p.attempts.length).toBeLessThanOrEqual(6);
     expect((await debug.view(m.id,session)).result!.rank).toBe(1);
   });
   it("keeps bot joint winners on early elimination without bot accounts or official LP",async()=>{
@@ -584,10 +585,10 @@ describe("forced first-round Death Match persistence",()=>{
  it("settles and projects an actual forced Death Match once, preserving the official Attempt and history identity",async()=>{
   const view=await debug.create(session,{...body(),botCount:2,forceDeathMatch:true});let m=await engine.get(view.matchId);
   now+=6000;await send(m,"PRESENTATION_COMPLETE");m=await prepare(await engine.get(m.id));
-  for(let n=0;n<3;n++)await record(m,99.999);
+  for(let n=0;n<6;n++)await record(m,99.999);
   m=await engine.get(m.id);now=survivalCurrentRound(m).endsAt!;await db.query("UPDATE ranked_sessions SET last_heartbeat_at=$2 WHERE id=$1",[session.sessionId,clock.now().toISOString()]);await debug.tickOnce();
   m=await engine.get(m.id);expect(m.state).toBe("FINAL_RESULT");expect(m.winnerId).toBe("human");expect(m.rounds.some(r=>r.phase==="FINAL")).toBe(false);
-  expect((await db.query("SELECT * FROM sur_tiebreak_attempts WHERE match_id=$1 AND participant_id=$2",[m.id,"human"])).rows).toHaveLength(3);
+  expect((await db.query("SELECT * FROM sur_tiebreak_attempts WHERE match_id=$1 AND participant_id=$2",[m.id,"human"])).rows).toHaveLength(6);
   const projected=survivalHistoryProjection(m,{},"human");expect(projected.rounds[0]).toMatchObject({phase:"TIEBREAK",ordinal:1,displayRoundNumber:1,replayIdentity:{phase:"TIEBREAK",roundNumber:1,attemptOrdinal:1,officialBestProgress:99.999}});
   const ledger=(await db.query("SELECT * FROM sur_lp_ledger WHERE player_id=$1",[session.playerId])).rows;expect(ledger).toHaveLength(1);await debug.tickOnce();expect((await db.query("SELECT * FROM sur_lp_ledger WHERE player_id=$1",[session.playerId])).rows).toEqual(ledger);
  });

@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <vector>
 namespace corum::ranked {
 struct SpectatorRandomSpawn {
@@ -10,6 +11,7 @@ struct SpectatorRandomSpawn {
     bool ordered = false;
     double delay = 0;
     std::vector<int> remap;
+    std::optional<int> triggerId={},controlId={};
 };
 struct SpectatorRandomEvent {
     std::uint64_t ordinal = 0;

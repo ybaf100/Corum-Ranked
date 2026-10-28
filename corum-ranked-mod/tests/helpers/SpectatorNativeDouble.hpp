@@ -1,6 +1,7 @@
 #pragma once
 #include <algorithm>
 #include <cassert>
+#include <set>
 #include <cmath>
 #include <stdexcept>
 #include <string>

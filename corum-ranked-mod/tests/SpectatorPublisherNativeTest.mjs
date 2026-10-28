@@ -36,6 +36,7 @@ for(const actualJson of [false,true])test('actual publisher ordered ACK/terminal
 #include "${join(root, 'src/domain/SpectatorPublishQueue.hpp')}"
 #include <algorithm>
 #include <cassert>
+#include <set>
 #include <chrono>
 #include <map>
 #include <variant>

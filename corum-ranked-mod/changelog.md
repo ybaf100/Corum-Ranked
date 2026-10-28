@@ -1,3 +1,12 @@
+# v0.5.0-beta.112
+
+- Survival Death Match uses six attempts for new matches; legacy snapshots retain their captured limit. Return after terminal server confirmation, preserving the final replay.
+- Combine remaining attempts and leader difference on one HUD line; position the round clock below the rendered FPS label.
+- Record native button-dispatch queues and their consumed state at each physics boundary; retain legacy replay reading and report the first desync with expected/actual evidence.
+- Avoid repeated paused-channel music seeks; align presentation audio once and require persistent drift before limited resynchronization.
+- Separate world recapture from network disconnection, track partial causes, retain verified poses, and rebuild Random capture identities on first activation.
+- Native device gameplay, exact entropie group reproduction and audible FMOD quality still require GD 2.2081 verification. See the beta.112 diagnosis for confirmed evidence and remaining limitations.
+
 # v0.5.0-beta.111
 - Choose Survival's starting and next internal phase from actual player counts in both 16/64-player formats; retain fixed qualifier targets.
 - Number only played rounds consecutively from R1; preserve internal map difficulty and show FINAL / DEATH MATCH consistently.

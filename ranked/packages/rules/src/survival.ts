@@ -43,7 +43,7 @@ export const DEFAULT_SURVIVAL_CONFIG: SurvivalConfig = Object.freeze({
   tierMatchingEnabled: false, roundSeconds: 180,
   round1Qualifiers: 10, round2Qualifiers: 6, round3Qualifiers: 3, finalWinners: 1,
   allowCutoffTies: true, lastAttemptEnabled: false, scoreMultiplier: 1,
-  tiebreakAttempts: 3, tiebreakDecimals: 3, minimumLevelId: 40_000_000,
+  tiebreakAttempts: 6, tiebreakDecimals: 3, minimumLevelId: 40_000_000,
   demotionWarningRecoveryLp: 50, demotionTargetOffsetLp: 50,
   tierBands: Object.freeze([
     { tier: "RED", group: "RED", minimumLp: 0 },

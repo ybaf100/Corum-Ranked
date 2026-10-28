@@ -30,7 +30,7 @@ matjson::Value replayPose(PlayLayer* layer){
 class $modify(CorumSurvivalReplayLayer,PlayLayer){
 public:
  struct ReplayCamera {CCPoint origin,second,diff;float zoom=1,angle=0;struct Layer{CCPoint pos;float x=1,y=1,angle=0;};std::array<Layer,3> layers;};
- struct Fields {std::optional<ReplayCamera> nativeCamera;bool ready=false,replayOwned=false,liveWorldOwned=false,replayAdvancing=false,internalReset=false;CCLabelBMFont* replayText=nullptr;CCLabelBMFont* captureError=nullptr;std::string captureErrorText;Slider* replaySlider=nullptr;float replayHudWait=0;unsigned lastRenderFrame=0;
+ struct Fields {std::optional<ReplayCamera> nativeCamera;bool ready=false,replayOwned=false,liveWorldOwned=false,replayAdvancing=false,internalReset=false,desyncReported=false;CCLabelBMFont* replayText=nullptr;CCLabelBMFont* captureError=nullptr;std::string captureErrorText;Slider* replaySlider=nullptr;float replayHudWait=0;unsigned lastRenderFrame=0;
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
  double captureUs=0,captureMaxUs=0;unsigned captureFrames=0;
 #endif
@@ -80,7 +80,8 @@ public:
         m_currentStep=static_cast<int>(initial["nativeStep"].asInt().unwrapOr(0));m_resumeTimer=static_cast<int>(initial["resumeTimer"].asInt().unwrapOr(0));
         if(initial["started"].isBool())m_started=initial["started"].asBool().unwrapOr(false);if(initial["inResetDelay"].isBool())m_inResetDelay=initial["inResetDelay"].asBool().unwrapOr(false);
         m_attemptTime=static_cast<float>(std::max(0.,corum::ranked::replay::number(initial,"attemptTime")));m_gameState.m_levelTime=std::max(0.,corum::ranked::replay::number(initial,"levelTime"));
-        m_queuedButtons.clear();saveReplayCamera();
+        if(initial["extraDelta"].isNumber())m_extraDelta=corum::ranked::replay::number(initial,"extraDelta");
+        m_queuedButtons.clear();m_fields->desyncReported=false;saveReplayCamera();
     }
     void onReplayControl(CCObject* sender){
         auto* replay=worldPlayback();if(!replay||!sender)return;
@@ -116,12 +117,11 @@ public:
         if(replay->takeReset()){m_fields->internalReset=true;PlayLayer::resetLevel();m_fields->internalReset=false;m_isTestMode=m_fields->replayOwned;resetReplayInitial();replay->restart();}
         auto began=std::chrono::steady_clock::now();
         for(std::size_t n=0;n<corum::ranked::replay::SeekPolicy::MaxFramesPerPump&&replay->due();++n){
-            auto const* frame=replay->current();m_queuedButtons.clear();
-            for(auto const& input:frame->inputs){PlayerButtonCommand command;command.m_button=static_cast<PlayerButton>(input["button"].asInt().unwrapOr(1));command.m_isPush=input["down"].asBool().unwrapOr(false);
-              command.m_isPlayer2=input["player2"].asBool().unwrapOr(false);command.m_step=static_cast<int>(input["nativeStep"].asInt().unwrapOr(0));command.m_timestamp=input["timestamp"].asDouble().unwrapOr(0);m_queuedButtons.push_back(command);}
+            auto const* frame=replay->current();
             if(m_fields->liveWorldOwned)restoreReplayCamera();
             {m_fields->replayAdvancing=true;corum::ranked::advanceSurvivalReplayWorld(this,static_cast<float>(frame->dt));m_fields->replayAdvancing=false;}
             replay->completeFrame(replayPose(this));
+            if(replay->desync()&&!m_fields->desyncReported){m_fields->desyncReported=true;log::warn("[SurvivalReplayDesync] attemptId={} initial={} failure={}",corum::ranked::replay::str(replay->metadata(),"attemptId"),replay->initial().dump(matjson::NO_INDENTATION),replay->failure().dump(matjson::NO_INDENTATION));}
             if(m_fields->liveWorldOwned)saveReplayCamera();
             if(std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-began).count()>=corum::ranked::replay::SeekPolicy::MaxPumpMillis)break;
         }
@@ -166,7 +166,7 @@ public:
     if(official&&std::isfinite(dt)&&dt>0&&dt<=1&&!recorder.inNativeFrame()&&!play->m_isPaused&&play->m_player1&&!play->m_player1->m_isDead&&!play->m_hasCompletedLevel){
       if(survival.localAttemptId().empty()&&survival.beginAttempt()){
         matjson::Value initial;initial["kind"]="initial";initial["randomSeed"]=std::to_string(m_randomSeed);initial["replayRandSeed"]=std::to_string(m_replayRandSeed);
-        initial["started"]=play->m_started;initial["inResetDelay"]=play->m_inResetDelay;initial["attemptTime"]=play->m_attemptTime;initial["levelTime"]=static_cast<double>(play->m_gameState.m_levelTime);initial["nativeStep"]=m_currentStep;initial["resumeTimer"]=m_resumeTimer;initial["pose"]=replayPose(play);recorder.add(initial);
+        initial["started"]=play->m_started;initial["inResetDelay"]=play->m_inResetDelay;initial["attemptTime"]=play->m_attemptTime;initial["levelTime"]=static_cast<double>(play->m_gameState.m_levelTime);initial["extraDelta"]=m_extraDelta;initial["nativeStep"]=m_currentStep;initial["resumeTimer"]=m_resumeTimer;initial["pose"]=replayPose(play);recorder.add(initial);
       }
       if(recorder.active()){corum::ranked::beginNativeWorldEventCapture(play);recorder.nativeFrameBegin();frameBegan=true;recorder.elapsed(play->m_attemptTime);matjson::Value frame;frame["kind"]="frame";frame["dt"]=static_cast<double>(dt);recorder.add(frame);}
     }
@@ -203,9 +203,22 @@ public:
     void processQueuedButtons(float dt,bool clear){
         auto* play=PlayLayer::get();auto* owner=play&&static_cast<GJBaseGameLayer*>(play)==this?static_cast<CorumSurvivalReplayLayer*>(play):nullptr;
         auto recording=owner&&corum::ranked::SurvivalRuntime::get().gameplayLevel(static_cast<int>(play->m_level->m_levelID)) && !corum::ranked::SurvivalRuntime::get().freePlaying() && !play->m_isPracticeMode && !play->m_isTestMode&&corum::ranked::replay::Recorder::get().active()&&corum::ranked::replay::Recorder::get().inNativeFrame();
+        auto encodeQueue=[](auto const& commands){auto values=matjson::Value::array();for(auto const& c:commands){matjson::Value v;v["button"]=static_cast<int>(c.m_button);v["down"]=c.m_isPush;v["player2"]=c.m_isPlayer2;v["nativeStep"]=c.m_step;v["timestamp"]=c.m_timestamp;values.push(v);}return values;};
+        auto* playback=owner&&owner->m_fields->replayAdvancing?owner->worldPlayback():nullptr;
+        // Old files retain consumed input tick/step/timestamp information.
+        // Dispatch it at that physics boundary, never at render-frame start.
+        if(playback)for(auto const& input:playback->legacyInputsForStep()){
+            PlayerButtonCommand c;c.m_button=static_cast<PlayerButton>(input["button"].asInt().unwrapOr(1));c.m_isPush=input["down"].asBool().unwrapOr(false);c.m_isPlayer2=input["player2"].asBool().unwrapOr(false);c.m_step=static_cast<int>(input["nativeStep"].asInt().unwrapOr(0));c.m_timestamp=input["timestamp"].asDouble().unwrapOr(0);m_queuedButtons.push_back(c);
+        }
+        auto const* expected=playback?playback->nativeButtons(dt,clear,m_currentStep):nullptr;
+        if(expected){m_queuedButtons.clear();for(auto const& input:(*expected)["queued"].asArray().unwrapOr(std::vector<matjson::Value>{})){
+            PlayerButtonCommand c;c.m_button=static_cast<PlayerButton>(input["button"].asInt().unwrapOr(1));c.m_isPush=input["down"].asBool().unwrapOr(false);c.m_isPlayer2=input["player2"].asBool().unwrapOr(false);c.m_step=static_cast<int>(input["nativeStep"].asInt().unwrapOr(0));c.m_timestamp=input["timestamp"].asDouble().unwrapOr(0);m_queuedButtons.push_back(c);
+        }}
         auto before=recording?m_queuedButtons:gd::vector<PlayerButtonCommand>{};
         GJBaseGameLayer::processQueuedButtons(dt,clear);
+        if(expected)playback->nativeButtonsConsumed((*expected)["remaining"],encodeQueue(m_queuedButtons));
         if(recording){
+            matjson::Value queue;queue["kind"]="buttons";queue["dt"]=static_cast<double>(dt);queue["clear"]=clear;queue["nativeStep"]=m_currentStep;queue["queued"]=encodeQueue(before);queue["remaining"]=encodeQueue(m_queuedButtons);corum::ranked::replay::Recorder::get().add(queue);
             auto remaining=m_queuedButtons;
             for(auto const& command:before){
                 auto retained=std::find_if(remaining.begin(),remaining.end(),[&](auto const& other){return other.m_step==command.m_step&&other.m_timestamp==command.m_timestamp&&other.m_button==command.m_button&&other.m_isPush==command.m_isPush&&other.m_isPlayer2==command.m_isPlayer2;});

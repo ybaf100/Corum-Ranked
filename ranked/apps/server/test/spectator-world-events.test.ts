@@ -1,7 +1,7 @@
 import {describe,it,expect} from 'vitest';
 import {parseSpectatorKeyframe} from '../src/match/spectator-live.protocol.js';
 const pose={x:10,y:120,rotation:0,mode:'SPIDER',mini:false,upsideDown:false,flipped:false,dual:false,dead:false,finished:false};
-const event={ordinal:1,objectIndex:3,objectId:1912,originX:100,originY:200,tick:12,elapsedMs:50,outputs:[{group:7,ordered:false,delay:0,remap:[1,2]}]};
+const event={ordinal:1,objectIndex:3,objectId:1912,originX:100,originY:200,tick:12,elapsedMs:50,outputs:[{group:7,triggerId:17,controlId:23,ordered:false,delay:0,remap:[1,2]}]};
 const simulation={elapsedMs:50,tick:12,started:true,resetDelay:false};
 describe('production native world-event wire validation',()=>{
  it('preserves selected native Random output, source clock and the exact Follow Y ring independently of percentage',()=>{

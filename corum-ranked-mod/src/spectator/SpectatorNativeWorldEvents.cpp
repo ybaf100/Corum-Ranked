@@ -12,6 +12,7 @@
 #include <Geode/modify/PlayLayer.hpp>
 #include <Geode/modify/RandTriggerGameObject.hpp>
 #include <deque>
+#include <set>
 #include <unordered_map>
 using namespace geode::prelude;
 using namespace corum::ranked;
@@ -59,7 +60,8 @@ class $modify(CorumNativeWorldEventLayer, PlayLayer) {
         std::string scope;
         std::uint64_t ordinal = 0, seen = 0;
         std::optional<SpectatorRemoteContext> context;
-        bool remote = false;
+        bool remote = false, applyingSource = false;
+        std::set<int> missingActivations;
         unsigned misses = 0;
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         bool trace = false;
@@ -104,7 +106,7 @@ class $modify(CorumNativeWorldEventLayer, PlayLayer) {
         m_fields->expected.clear();
         m_fields->context.reset();
         m_fields->ordinal = m_fields->seen = 0;
-        m_fields->remote = false;
+        m_fields->remote = false;m_fields->applyingSource=false;m_fields->missingActivations.clear();
     }
 };
 namespace {
@@ -118,7 +120,7 @@ void emitSpawn(GJBaseGameLayer *layer, SpectatorRandomSpawn const &s, int trigge
     gd::vector<int> remap;
     for (auto n : s.remap)
         remap.push_back(n);
-    layer->spawnGroup(s.group, s.ordered, s.delay, remap, trigger, control);
+    layer->spawnGroup(s.group, s.ordered, s.delay, remap, s.triggerId.value_or(trigger), s.controlId.value_or(control));
 }
 } // namespace
 class $modify(CorumNativeRandomBranch, RandTriggerGameObject) {
@@ -149,12 +151,22 @@ class $modify(CorumNativeRandomBranch, RandTriggerGameObject) {
             RandTriggerGameObject::triggerObject(layer, uniqueId, remapKeys);
             return;
         }
+        // The prepared-level predicate may be false during nested init/reset.
+        // Build identities at the first real capture activation as well.
+        if((recording||debugRecord) && scope!=play->m_fields->scope){
+            play->buildObjects();play->m_fields->scope=scope;play->m_fields->ordinal=0;
+            play->m_fields->captured.clear();play->m_fields->snapshot.reset();
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+            log::info("[SpectatorRandom] phase=CAPTURE_READY attemptId={} objects={}",scope,play->m_fields->objects.size());
+#endif
+        }
         auto found = play->m_fields->objects.find(this);
         if (found == play->m_fields->objects.end()) {
             if (playback || remote) {
                 SpectatorLiveRuntime::get().noteWorldPartial("RANDOM_OBJECT_IDENTITY_MISSING");
                 return;
             }
+            log::warn("[SpectatorRandom] phase=REJECTED reason=SOURCE_OBJECT_IDENTITY_MISSING scope={} objectId={}",scope,m_objectID);
             RandTriggerGameObject::triggerObject(layer, uniqueId, remapKeys);
             return;
         }
@@ -168,20 +180,20 @@ class $modify(CorumNativeRandomBranch, RandTriggerGameObject) {
             call.event = *event;
             call.replay = true;
         } else if (remote) {
-            if (play->m_fields->expected.empty() ||
-                play->m_fields->expected.front().objectIndex != identity.index) {
-                if (play->m_fields->misses++ < 4)
-                    SpectatorLiveRuntime::get().noteWorldPartial("RANDOM_SOURCE_ACTIVATION_MISSING");
-                return;
+            // Native collision/spawn may run ahead of the presented source
+            // clock. Only the due-event drain may dispatch authoritative outputs.
+            if(!play->m_fields->applyingSource){
+                play->m_fields->missingActivations.insert(identity.index);
+                SpectatorLiveRuntime::get().noteWorldPartial("RANDOM_SOURCE_ACTIVATION_MISSING");return;
             }
-            call.event = std::move(play->m_fields->expected.front());
-            play->m_fields->expected.pop_front();
-            if (call.event.objectId != identity.id ||
-                std::hypot(call.event.originX - identity.x, call.event.originY - identity.y) > .1) {
-                SpectatorLiveRuntime::get().noteWorldPartial("RANDOM_MAP_IDENTITY_MISMATCH");
-                return;
+            if(play->m_fields->expected.empty())return;
+            auto const& expected=play->m_fields->expected.front();
+            if(expected.objectIndex!=identity.index || expected.objectId!=identity.id ||
+                std::hypot(expected.originX-identity.x,expected.originY-identity.y)>.1){
+                SpectatorLiveRuntime::get().noteWorldPartial("RANDOM_MAP_IDENTITY_MISMATCH");return;
             }
-            call.replay = true;
+            call.event=expected;play->m_fields->expected.pop_front();
+            call.replay=true;
         } else {
             if (scope != play->m_fields->scope) {
                 play->m_fields->scope = scope;
@@ -197,22 +209,20 @@ class $modify(CorumNativeRandomBranch, RandTriggerGameObject) {
             call.event.tick = std::max(0, play->m_currentStep);
             call.event.elapsedMs = std::max(0., play->m_gameState.m_levelTime * 1000.);
         }
-        {
-            RandomScope active(call);
-            RandTriggerGameObject::triggerObject(layer, uniqueId, remapKeys);
-        }
-        // If the local RNG chose the zero-output branch, replay the source's
-        // remaining verified native outputs. Never synthesize a random choice.
-        if (call.replay) {
-            RandomScope active(call);
-            while (call.applied < call.event.outputs.size()) {
-                auto index = call.applied;
-                emitSpawn(layer, call.event.outputs[index], uniqueId, m_controlID);
-                if (index == call.applied)
-                    break;
+        if(call.replay){
+            // Reapply actual recorded outputs once. Calling the Random trigger
+            // here would draw a fresh branch and mutate unrelated native RNG.
+            for(auto const& output:call.event.outputs)emitSpawn(layer,output,uniqueId,m_controlID);
+            if(remote){
+                play->m_fields->missingActivations.erase(identity.index);
+                if(play->m_fields->missingActivations.empty())SpectatorLiveRuntime::get().worldCauseRecovered("RANDOM_SOURCE_ACTIVATION_MISSING");
             }
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+            log::info("[SpectatorRandom] phase=APPLIED triggerId={} activation={} nativeTick={} outputs={}",identity.index,call.event.ordinal,call.event.tick,call.event.outputs.size());
+#endif
             return;
         }
+        {RandomScope active(call);RandTriggerGameObject::triggerObject(layer,uniqueId,remapKeys);}
         if (!validSpectatorRandomEvent(call.event)) {
             if (recording) {
                 replay::Json bad;
@@ -227,7 +237,9 @@ class $modify(CorumNativeRandomBranch, RandTriggerGameObject) {
             record["event"] = encodeSpectatorRandomEvent(call.event);
             replay::Recorder::get().add(record);
         }
-        if (debugRecord && play->m_fields->captured.size() < 16) {
+        if (debugRecord && play->m_fields->captured.size() >= 256)
+            SpectatorLiveRuntime::get().noteWorldPartial("RANDOM_CAPTURE_CAPACITY");
+        if (debugRecord && play->m_fields->captured.size() < 256) {
             play->m_fields->captured.push_back(call.event);
             play->m_fields->snapshot.reset();
         }
@@ -262,7 +274,7 @@ class $modify(CorumNativeRandomOutput, GJBaseGameLayer) {
             return;
         }
         SpectatorRandomSpawn out;
-        out.group = group;
+        out.group = group;out.triggerId=triggerId;out.controlId=controlId;
         out.ordered = ordered;
         out.delay = delay;
         for (auto n : remap)
@@ -283,6 +295,7 @@ SpectatorRandomEvents captureNativeRandomEvents(PlayLayer *layer) {
         return {};
     if (!play->m_fields->snapshot) {
         auto events = play->m_fields->captured;
+        if(events.size()>16)events.resize(16); // packet limit, not capture limit
         std::sort(events.begin(), events.end(),
                   [](auto const &a, auto const &b) { return a.ordinal < b.ordinal; });
         play->m_fields->snapshot =
@@ -308,7 +321,7 @@ void prepareNativeWorldEvents(PlayLayer *layer, SpectatorRemoteFrame const &fram
         play->m_fields->context = frame.context;
         play->m_fields->expected.clear();
         play->m_fields->seen = 0;
-        play->m_fields->misses = 0;
+        play->m_fields->misses = 0;play->m_fields->missingActivations.clear();
     }
     play->m_fields->remote = true;
     if (frame.pose->randomEvents)
@@ -334,7 +347,9 @@ void applyDueNativeRandomEvents(PlayLayer *layer) {
         if (!object)
             break;
         auto count = play->m_fields->expected.size();
+        play->m_fields->applyingSource=true;
         object->triggerObject(play, object->m_uniqueID, nullptr);
+        play->m_fields->applyingSource=false;
         if (play->m_fields->expected.size() >= count)
             break;
     }

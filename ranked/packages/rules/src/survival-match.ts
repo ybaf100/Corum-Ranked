@@ -1,6 +1,5 @@
 import { observeSurvivalAchievementCheckpoint, observeSurvivalAchievementRecovery, type SurvivalAchievementCheckpoint } from "./survival-achievement-checkpoint.js";
 import { survivalOnlineTargets,survivalOnlineRewardRank } from "./survival-online.js";
-import { bestPercentOfThree } from "./deathmatch.js";
 import { RankedDomainError } from "./errors.js";
 import { survivalPlacementLp, survivalTierForLp, type SurvivalConfig } from "./survival.js";
 import { survivalDifficultyForAverage, survivalMapAllowed, validateSurvivalEngineConfig,
@@ -168,17 +167,16 @@ export function survivalRankScores<T extends { participantId: string; score: num
     return { ...item, rank };
   });
 }
-function roundScore(round: SurvivalRound, player: SurvivalRoundPlayer): number {
+function roundScore(match: SurvivalMatch, round: SurvivalRound, player: SurvivalRoundPlayer): number {
   if (round.phase !== "TIEBREAK") return Math.trunc(player.highestProgress);
-  const inputs = Array.from({length:3}, (_,i) => ({ progressPercent:
-    survivalMilliPercent(player.attempts[i]?.highestProgress ?? 0) / 1000, cleared:false }));
-  return survivalMilliPercent(bestPercentOfThree(inputs));
+  return Math.max(0,...player.attempts.slice(0,match.config.tiebreakAttempts)
+    .map(attempt => survivalMilliPercent(attempt.highestProgress)));
 }
 function startAttempt(match: SurvivalMatch, round: SurvivalRound, player: SurvivalRoundPlayer, id: string, now: number): void {
   if (player.attempts.some(a => a.id === id)) return;
   if (match.state !== "PLAYING" || (match.online && (player.absent || player.entryDeferred || player.assetsReadyAt === null || player.enteredAt === null)) ||
     !id || id.length > 80 || player.attempts.some(a => a.endedAt === null) ||
-    (round.phase === "TIEBREAK" && player.attempts.length >= 3)) conflict("Attempt cannot start");
+    (round.phase === "TIEBREAK" && player.attempts.length >= match.config.tiebreakAttempts)) conflict("Attempt cannot start");
   player.attempts.push({id,sequence:player.attempts.length+1,startedAt:now,endedAt:null,highestProgress:0});
 }
 function recordAttempt(match: SurvivalMatch, round: SurvivalRound, player: SurvivalRoundPlayer,
@@ -191,7 +189,7 @@ function recordAttempt(match: SurvivalMatch, round: SurvivalRound, player: Survi
   attempt.highestProgress = Math.max(attempt.highestProgress, progress);
   player.highestProgress = Math.max(player.highestProgress, attempt.highestProgress);
   if (ended) attempt.endedAt = now;
-  if (round.phase === "TIEBREAK" && activePlayers(round).every(p => p.attempts.length === 3 && p.attempts.every(a => a.endedAt !== null)))
+  if (round.phase === "TIEBREAK" && activePlayers(round).every(p => p.attempts.length >= match.config.tiebreakAttempts && p.attempts.every(a => a.endedAt !== null)))
     finishRound(match, round, now);
 }
 function assertSelectedMap(match:SurvivalMatch,phase:SurvivalMapPhase,map:SurvivalVerifiedMap):void {
@@ -242,7 +240,7 @@ export function createSurvivalMatch(id: string, entrants: readonly SurvivalEntra
     new Set(entrants.filter(p => p.playerId).map(p => p.playerId)).size !== entrants.filter(p => p.playerId).length ||
     !configGeneration.trim() || !Number.isFinite(now)) conflict("Survival requires distinct valid entrants within its captured field size");
   const averageLp = entrants.reduce((sum,p) => sum + p.lp,0) / entrants.length;
-  const match: SurvivalMatch = { id,revision:1,state:"MAP_SELECTION",configGeneration,config:structuredClone(config),averageLp,
+  const match: SurvivalMatch = { id,revision:1,state:"MAP_SELECTION",configGeneration,config:{...structuredClone(config),tiebreakAttempts:6},averageLp,
     difficultyGroup:survivalDifficultyForAverage(averageLp,config.tierBands),createdAt:now,updatedAt:now,finishedAt:null,
     winnerId:null,cancellationReason:null,forceDeathMatch,players:entrants.map(p => ({...p,eliminationStage:null,eliminationScore:0,
       forfeitReason:null,finalRank:null})),rounds:[],transitions:[] };
@@ -322,7 +320,7 @@ function forfeitUnready(match: SurvivalMatch, round: SurvivalRound, ready: (p: S
     return;
   }
   for (const player of entryPlayers(round).filter(p => !ready(p))) {
-    player.forfeited=true; eliminate(match,round,player,roundScore(round,player),reason,at);
+    player.forfeited=true; eliminate(match,round,player,roundScore(match,round,player),reason,at);
   }
   survivorsOrEnd(match,round,at);
 }
@@ -337,7 +335,7 @@ function reroll(match: SurvivalMatch, round: SurvivalRound, at: number, reason: 
 function finishRound(match: SurvivalMatch, round: SurvivalRound, at: number): void {
   if (round.finishedAt !== null) return;
   for (const player of round.players) for (const attempt of player.attempts) if (attempt.endedAt === null) attempt.endedAt=at;
-  const ranked = survivalRankScores(activePlayers(round).map(p => ({participantId:p.participantId,score:roundScore(round,p)})));
+  const ranked = survivalRankScores(activePlayers(round).map(p => ({participantId:p.participantId,score:roundScore(match,round,p)})));
   const cutoff = ranked[Math.min(round.target,ranked.length)-1]?.score ?? null;
   round.cutoffScore=cutoff; round.finishedAt=at;
   for (const item of ranked) {
@@ -448,7 +446,7 @@ export function reduceSurvivalMatch(before: SurvivalMatch, command: SurvivalComm
       for(const player of players) {
         player!.forfeited=true;
         for(const attempt of player!.attempts)if(attempt.endedAt===null)attempt.endedAt=now;
-        eliminate(match,round,player!,roundScore(round,player!),command.reason,now);
+        eliminate(match,round,player!,roundScore(match,round,player!),command.reason,now);
         if((match.online && command.reason==="ONLINE_SURRENDER") || (match.presentationControlled && command.reason==="DEBUG_HUMAN_SURRENDER")){
           const entrant=match.players.find(p=>p.participantId===player!.participantId)!;
           entrant.fixedRewardRank=round.players.length;entrant.finalRank=round.players.length;
@@ -461,7 +459,7 @@ export function reduceSurvivalMatch(before: SurvivalMatch, command: SurvivalComm
         } else if(match.state==="ENTERING" && remaining.every(p => p.enteredAt!==null)) {
           round.startsAt=now+3_000;round.endsAt=round.startsAt+180_000;
           transition(match,"COUNTDOWN",now,"ENTRY_BARRIER_COMPLETE");
-        } else if(match.state==="PLAYING" && round.phase==="TIEBREAK" && remaining.every(p => p.attempts.length===3 && p.attempts.every(a => a.endedAt!==null))) finishRound(match,round,now);
+        } else if(match.state==="PLAYING" && round.phase==="TIEBREAK" && remaining.every(p => p.attempts.length>=match.config.tiebreakAttempts && p.attempts.every(a => a.endedAt!==null))) finishRound(match,round,now);
       }
     } else {
       if (!round.map || command.levelId !== round.map.levelId) conflict("SURVIVAL_MAP_CHANGED");
@@ -573,13 +571,13 @@ export function survivalLiveView(match: SurvivalMatch, now: number, participantI
       const entrant=match.players.find(v=>v.participantId===p.participantId)!;
       return {participantId:p.participantId,name:entrant.name,kind:entrant.kind,gdAccountId:entrant.gdAccountId??null,
         displayedTier:match.config.tierBands.find(b=>b.tier===entrant.displayedTier)?.group??entrant.displayedTier??survivalTierForLp(entrant.lp,match.config.tierBands).group,rank:p.rank??entrant.finalRank,
-        score:completed.phase==="TIEBREAK"?roundScore(completed,p)/1000:roundScore(completed,p),
+        score:completed.phase==="TIEBREAK"?roundScore(match,completed,p)/1000:roundScore(match,completed,p),
         qualified:p.qualified&&!p.forfeited,forfeited:p.forfeited};
     })}:null;
   const ranked=survivalRankScores(activePlayers(round).map(p => ({participantId:p.participantId,
-    score:roundScore(round,p),highestProgress:p.highestProgress,
+    score:roundScore(match,round,p),highestProgress:p.highestProgress,
     attemptsUsed:p.attempts.length,attemptsFinished:p.attempts.filter(a => a.endedAt !== null).length,
-    waitingForOthers:round.phase === "TIEBREAK" && p.attempts.length === 3 && p.attempts.every(a => a.endedAt !== null)})));
+    waitingForOthers:round.phase === "TIEBREAK" && p.attempts.length >= match.config.tiebreakAttempts && p.attempts.every(a => a.endedAt !== null)})));
   const cutoff=ranked[Math.min(round.target,ranked.length)-1]?.score ?? null;
   const standings=ranked.map(p => {
     const player=round.players.find(v=>v.participantId===p.participantId)!;
@@ -598,7 +596,7 @@ export function survivalLiveView(match: SurvivalMatch, now: number, participantI
   const roundPlayers=round.players.map(p=>{
     const standing=standings.find(v=>v.participantId===p.participantId);
     if(standing)return standing;
-    const score=round.phase==="TIEBREAK"?roundScore(round,p)/1000:roundScore(round,p);
+    const score=round.phase==="TIEBREAK"?roundScore(match,round,p)/1000:roundScore(match,round,p);
     return {participantId:p.participantId,rank:p.rank??match.players.find(v=>v.participantId===p.participantId)!.finalRank??round.players.length,
       score,highestProgress:p.highestProgress,bestProgress:score,currentProgress:0,attemptActive:false,
       cleared:p.attempts.some(a=>a.endedAt!==null&&a.highestProgress===100),eliminated:true,qualified:false,
@@ -608,7 +606,7 @@ export function survivalLiveView(match: SurvivalMatch, now: number, participantI
   return {matchId:match.id,revision:match.revision,state:match.state,phase:round.phase,roundKey:round.key,
     selectionOpensAt:new Date(match.createdAt+SURVIVAL_INTRO_MS).toISOString(),nextMap:match.nextMap?{...match.nextMap,displayRoundNumber:round.ordinal+1}:null,
     presentationGate:match.presentationGate??null,online:match.online??false,roundNumber:survivalDisplayRoundNumber(round),displayRoundNumber:survivalDisplayRoundNumber(round),forceDeathMatch:match.forceDeathMatch??false,matchPlayerCount:match.config.matchPlayerCount,playerCount:match.players.length,roundPlayerCount:round.players.length,
-    mapGeneration:round.mapGeneration,map:round.map,averageLp:match.averageLp,difficultyGroup:match.difficultyGroup,
+    tiebreakAttempts:match.config.tiebreakAttempts,mapGeneration:round.mapGeneration,map:round.map,averageLp:match.averageLp,difficultyGroup:match.difficultyGroup,
     configGeneration:match.configGeneration,serverNow:new Date(now).toISOString(),
     preparationWarningAt:round.preparationStartedAt === null ? null : new Date(round.preparationStartedAt+10_000).toISOString(),
     preparationDeadlineAt:round.preparationStartedAt === null ? null : new Date(round.preparationStartedAt+15_000).toISOString(),
