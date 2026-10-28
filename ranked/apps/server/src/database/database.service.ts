@@ -52,6 +52,7 @@ const REQUIRED_MIGRATIONS = [
   "0029_achievement_survival_overhaul.sql",
   "0030_survival_64_player_format.sql",
   "0031_debug_spectate_custom_maps.sql",
+  "0032_survival_preparation_supply.sql",
 ] as const;
 
 export interface RankedSchemaStatus {
@@ -92,6 +93,7 @@ type SchemaProbeRow = QueryResultRow & {
   sur_online_players: boolean;
   sur_queue_fill_requests: boolean;
   sur_request_rates: boolean;
+  survival_map_supply: boolean;
 
   ranked_forum_records: boolean;
   ranked_forum_refresh_cooldowns: boolean;
@@ -259,6 +261,7 @@ export class DatabaseService implements DatabasePort, OnModuleInit, OnApplicatio
           to_regclass('public.sur_online_players') IS NOT NULL AS sur_online_players,
           to_regclass('public.sur_queue_fill_requests') IS NOT NULL AS sur_queue_fill_requests,
           to_regclass('public.sur_request_rates') IS NOT NULL AS sur_request_rates,
+          (to_regclass('public.sur_map_candidates') IS NOT NULL AND to_regclass('public.sur_map_candidate_buckets') IS NOT NULL AND to_regclass('public.sur_audio_failure_reports') IS NOT NULL AND to_regclass('public.sur_resource_quarantine') IS NOT NULL AND EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='sur_matches' AND column_name='map_failure_count')) AS survival_map_supply,
 
           to_regclass('public.ranked_forum_records') IS NOT NULL AS ranked_forum_records,
           to_regclass('public.ranked_forum_refresh_cooldowns') IS NOT NULL AS ranked_forum_refresh_cooldowns,
@@ -363,6 +366,7 @@ export class DatabaseService implements DatabasePort, OnModuleInit, OnApplicatio
         ["sur_online_players", "table sur_online_players"],
         ["sur_queue_fill_requests", "table sur_queue_fill_requests"],
         ["sur_request_rates", "table sur_request_rates"],
+        ["survival_map_supply", "Survival candidate/audio preparation schema"],
 
         ["ranked_forum_records", "table ranked_forum_records"],
         ["ranked_forum_refresh_cooldowns", "table ranked_forum_refresh_cooldowns"],

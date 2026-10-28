@@ -30,22 +30,25 @@ const UPSTREAM_HEADERS=["server","content-type","cf-ray","cf-mitigated","retry-a
 
 export function createSurvivalGdFetch(relay:SurvivalGdRelayEnvironment|undefined,fetcher:typeof fetch=fetch):typeof fetch {
   if(!relay)return fetcher;
+  let legacyUntil=0;
   return async(input,init)=>{
     const url=new URL(typeof input==="string"?input:input instanceof URL?input.href:input.url);
     if(url.origin!==GD_ORIGIN || !ENDPOINTS.has(url.pathname) || url.search || url.hash || url.username || url.password ||
       init?.method!=="POST" || typeof init.body!=="string")throw new SurvivalGdRelayError("GD relay request is not an allowed Survival endpoint");
+    const requestBody=init.body;
+    const search=url.pathname.endsWith("getGJLevels21.php");
+    let legacySearch=search && Date.now()<legacyUntil;
+    const legacyBody=()=>{const form=new URLSearchParams(requestBody);form.set("type","4");form.set("len","0,1,2,3,4");form.set("page",String(Math.min(255,Number(form.get("page")??0))));return form.toString();};
     // Rebuild headers: the relay key must never reach GD or a redirect target.
     let response:Response;
     try {response=await fetcher(`${relay.origin}${url.pathname.replace("/database","")}`,{
       method:"POST",redirect:"manual",headers:{"content-type":"application/x-www-form-urlencoded",accept:"*/*",
-        authorization:`Bearer ${relay.token}`},body:init.body,...(init.signal?{signal:init.signal}:{}),
+        authorization:`Bearer ${relay.token}`},body:legacySearch?legacyBody():init.body,...(init.signal?{signal:init.signal}:{}),
     });}catch{throw new SurvivalGdRelayError("GD relay connection failed or timed out");}
-    let legacySearch=false;
-    if(url.pathname.endsWith("getGJLevels21.php") && response.headers.get("x-corum-gd-relay-error")==="INVALID_REQUEST") {
+    if(search && !legacySearch && response.headers.get("x-corum-gd-relay-error")==="INVALID_REQUEST") {
       await response.body?.cancel().catch(()=>{});
-      const form=new URLSearchParams(init.body);form.set("type","4");form.set("len","0,1,2,3,4");form.set("page",String(Math.min(255,Number(form.get("page")??0))));
-      response=await fetcher(`${relay.origin}/getGJLevels21.php`,{method:"POST",redirect:"manual",headers:{"content-type":"application/x-www-form-urlencoded",accept:"*/*",authorization:`Bearer ${relay.token}`},body:form.toString(),...(init.signal?{signal:init.signal}:{})});
-      legacySearch=true;
+      response=await fetcher(`${relay.origin}/getGJLevels21.php`,{method:"POST",redirect:"manual",headers:{"content-type":"application/x-www-form-urlencoded",accept:"*/*",authorization:`Bearer ${relay.token}`},body:legacyBody(),...(init.signal?{signal:init.signal}:{})});
+      legacySearch=true;legacyUntil=Date.now()+10*60_000;
     }
     const marker=response.headers.get("x-corum-gd-relay");
     const relayError=response.headers.get("x-corum-gd-relay-error");

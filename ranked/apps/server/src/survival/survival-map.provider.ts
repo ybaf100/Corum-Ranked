@@ -4,6 +4,7 @@ import { Inject, Injectable } from "@nestjs/common";
 import { survivalDemonFromNativeCode, survivalMapAllowed, survivalMapRange, shuffle,
   type RandomSource, type SurvivalDifficultyGroup, type SurvivalMapPhase,
   type SurvivalMapMetadata, type SurvivalVerifiedMap } from "@corum-ranked/rules";
+import type {SqlExecutor} from "../database/database.port.js";
 import { RANDOM_SOURCE } from "../common/runtime.module.js";
 import { SurvivalGdRelayError } from "./survival-gd-transport.js";
 
@@ -13,9 +14,12 @@ export interface SurvivalMapRequest {
   phase: SurvivalMapPhase;
   minimumLevelId: number;
   excludedLevelIds: readonly number[];
+  reservation?: {matchId:string;roundKey:string;mapGeneration:number;token:string};
 }
 export interface SurvivalMapProvider {
   select(request: SurvivalMapRequest): Promise<SurvivalVerifiedMap>;
+  confirm?(tx:SqlExecutor,request:SurvivalMapRequest,map:SurvivalVerifiedMap):Promise<void>;
+  release?(request:SurvivalMapRequest):Promise<void>;
 }
 export type SurvivalMapErrorCode = "API_ERROR" | "EMPTY_SEARCH" | "INVALID_METADATA" |
   "DOWNLOAD_FAILED" | "INVALID_DATA" | "DUPLICATE_CANDIDATES" | "NO_ELIGIBLE_MAP";
@@ -102,7 +106,8 @@ export function parseSurvivalMetadata(record: string): SurvivalMapMetadata {
   if (!demon && (!denominator || !numerator)) throw new SurvivalMapError("INVALID_METADATA","Unrated native difficulty");
   return {...(row.get("2")?{name:row.get("2")!.slice(0,100)}:{}),levelId:integer(row,"1",true),stars:integer(row,"18",true),demon:demon===1,
     demonDifficulty:demon ? survivalDemonFromNativeCode(integer(row,"43")) : null,
-    automatic:automatic===1,platformer:length===5,length,featureScore:integer(row,"19"),epic:integer(row,"42")};
+    automatic:automatic===1,platformer:length===5,length,featureScore:integer(row,"19"),epic:integer(row,"42"),
+    featureGrade:integer(row,"42")===3?"MYTHIC":integer(row,"42")===2?"LEGENDARY":integer(row,"42")===1?"EPIC":integer(row,"19")>0?"FEATURED":"NONE"};
 }
 export function parseSurvivalSearch(body: string, page: number) {
   if (body.trim()==="-1") throw new SurvivalMapError("EMPTY_SEARCH","GD returned no levels");
@@ -157,7 +162,7 @@ export function verifySurvivalDownload(body: string, expected: SurvivalMapMetada
   const decoded=geometry.toString("utf8");
   if (!geometry.equals(Buffer.from(decoded)) || !validSurvivalGeometry(decoded)) throw new SurvivalMapError("INVALID_DATA","Malformed native level geometry");
   return {...metadata,...(expected.creator?{creator:expected.creator}:{}),levelVersion:version,geometrySha256:createHash("sha256").update(geometry).digest("hex"),
-    geometryBytes:geometry.length,verifiedAt:new Date().toISOString()};
+    geometryBytes:geometry.length,songIds:integer(row,"35")?[integer(row,"35")]:[],sfxIds:[],audioVerification:"METADATA_ONLY",audioDependencyCoverage:"PRIMARY_SONG_ONLY",verifiedAt:new Date().toISOString()};
 }
 
 interface RecentCatalog {
@@ -165,6 +170,7 @@ interface RecentCatalog {
   pageCount:number;
   visited:Set<number>;
   levels:Map<number,SurvivalMapMetadata>;
+  sources:Map<number,number>;
 }
 const CATALOG_TTL_MS=10*60_000,MAX_CATALOG_LEVELS=512;
 
@@ -203,7 +209,7 @@ export class GdSurvivalMapProvider implements SurvivalMapProvider {
         this.blocked={until:Date.now()+retryAfterMs,error};
       throw error;
     }
-    if(response.headers.get("x-corum-gd-legacy-search")==="1")this.legacyRelay=true;
+    if(path==="getGJLevels21.php")this.legacyRelay=response.headers.get("x-corum-gd-legacy-search")==="1";
     const reader=response.body.getReader(), parts:Uint8Array[]=[]; let size=0;
     try {
       for (;;) {const {value,done}=await reader.read(); if (done) break;
@@ -228,8 +234,8 @@ export class GdSurvivalMapProvider implements SurvivalMapProvider {
       type:"4",str:"",star:"1",len:"0,1,2,3",page:String(actualPage),...filter,...(this.legacyRelay?{type:"4"}:{}),
     },signal,2*1024*1024),this.legacyRelay?Math.min(255,actualPage):actualPage);
   }
-  private addCandidates(catalog:RecentCatalog,levels:readonly SurvivalMapMetadata[]):void {
-    for(const level of levels)catalog.levels.set(level.levelId,level);
+  private addCandidates(catalog:RecentCatalog,levels:readonly SurvivalMapMetadata[],page:number):void {
+    for(const level of levels){catalog.levels.set(level.levelId,level);catalog.sources.set(level.levelId,page);}
     while(catalog.levels.size>MAX_CATALOG_LEVELS)catalog.levels.delete(catalog.levels.keys().next().value!);
   }
   private async catalog(filter:Record<string,string>,signal:AbortSignal):Promise<RecentCatalog> {
@@ -240,8 +246,8 @@ export class GdSurvivalMapProvider implements SurvivalMapProvider {
       const initial=await this.search(filter,0,signal);
       if(!initial.total)throw new SurvivalMapError("EMPTY_SEARCH","No rated GD catalog candidates");
       const fresh:RecentCatalog={expiresAt:Date.now()+CATALOG_TTL_MS,
-        pageCount:Math.min(this.legacyRelay?256:200000,Math.ceil(initial.total/initial.pageSize)),visited:new Set([0]),levels:new Map()};
-      this.addCandidates(fresh,initial.levels);this.catalogs.set(key,fresh);return fresh;
+        pageCount:Math.min(this.legacyRelay?256:200000,Math.ceil(initial.total/initial.pageSize)),visited:new Set([0]),levels:new Map(),sources:new Map()};
+      this.addCandidates(fresh,initial.levels,0);this.catalogs.set(key,fresh);return fresh;
     })().finally(()=>this.catalogJobs.delete(key));
     this.catalogJobs.set(key,job);return job;
   }
@@ -250,7 +256,7 @@ export class GdSurvivalMapProvider implements SurvivalMapProvider {
     let page=Math.floor(this.random.next()*catalog.pageCount);
     while(catalog.visited.has(page))page=(page+1)%catalog.pageCount;
     catalog.visited.add(page);
-    try {this.addCandidates(catalog,(await this.search(filter,page,signal)).levels);}
+    try {this.addCandidates(catalog,(await this.search(filter,page,signal)).levels,this.legacyRelay?Math.min(255,page):page);}
     catch(e){catalog.visited.delete(page);throw e;}
   }
   public async select(request: SurvivalMapRequest): Promise<SurvivalVerifiedMap> {
@@ -276,27 +282,43 @@ export class GdSurvivalMapProvider implements SurvivalMapProvider {
       lastHttp=e instanceof SurvivalMapError?e.http:null;
     };
     for(const [id,until]of this.badCandidates)if(until<=Date.now())this.badCandidates.delete(id);
-    for(let pass=0;pass<3 && !signal.aborted && downloads<12;pass++)for(const filter of shuffle(searchFilters,this.random)) {
-      if(signal.aborted || downloads>=12)break;
-      let catalog:RecentCatalog;
-      try {catalog=await this.catalog(filter,signal);}catch(e){failed(e);continue;}
-      try {await this.replenish(catalog,filter,signal);}catch(e){failed(e);}
-      for(const level of shuffle([...catalog.levels.values()],this.random)) {
-        if(signal.aborted || downloads>=12)break;
-        if(!survivalMapAllowed(level,request.group,request.phase,request.minimumLevelId))continue;
-        if(excluded.has(level.levelId)){if(!failures.includes("DUPLICATE_CANDIDATES"))failures.push("DUPLICATE_CANDIDATES");continue;}
-        if(seen.has(level.levelId) || this.badCandidates.has(level.levelId))continue;
-        seen.add(level.levelId);downloads++;
-        try {
-          return verifySurvivalDownload(await this.post("downloadGJLevel22.php",{levelID:String(level.levelId)},signal,24*1024*1024),level,request);
-        }catch(e){
-          failed(e,"DOWNLOAD_FAILED");
-          if(e instanceof SurvivalMapError && ["INVALID_DATA","INVALID_METADATA"].includes(e.code)) {
-            this.badCandidates.set(level.levelId,Date.now()+120_000);catalog.levels.delete(level.levelId);
-          }
+    // Collect across sources and pages BEFORE choosing, rather than stopping
+    // at the first eligible page zero. IDs are coarse strata, never upload years.
+    const candidates:{level:SurvivalMapMetadata;type:string;page:number;catalog:RecentCatalog}[]=[];
+    for(const filter of shuffle(searchFilters,this.random)) {
+      if(signal.aborted)break;
+      try {
+        const catalog=await this.catalog(filter,signal);
+        try {await this.replenish(catalog,filter,signal);}catch(e){failed(e);}
+        for(const level of catalog.levels.values()) {
+          if(!survivalMapAllowed(level,request.group,request.phase,request.minimumLevelId))continue;
+          if(excluded.has(level.levelId)){if(!failures.includes("DUPLICATE_CANDIDATES"))failures.push("DUPLICATE_CANDIDATES");continue;}
+          if(this.badCandidates.has(level.levelId))continue;
+          candidates.push({level,type:this.legacyRelay?"4":filter.type!,page:catalog.sources.get(level.levelId)??0,catalog});
+        }
+      }catch(e){failed(e);}
+    }
+    // Round-robin independently shuffled source/ID strata, then deduplicate IDs.
+    const strata=new Map<string,typeof candidates>();
+    for(const candidate of candidates){const key=`${candidate.type}:${survivalIdBand(candidate.level.levelId)}`;
+      const bucket=strata.get(key)??[];bucket.push(candidate);strata.set(key,bucket);}
+    const groups=shuffle([...strata.values()].map(items=>shuffle(items,this.random)),this.random);
+    while(groups.some(items=>items.length) && !signal.aborted && downloads<12)for(const items of groups){
+      const candidate=items.pop();if(!candidate || downloads>=12 || signal.aborted)continue;
+      const {level,type,page,catalog}=candidate;if(seen.has(level.levelId))continue;
+      seen.add(level.levelId);downloads++;
+      try {
+        const map=verifySurvivalDownload(await this.post("downloadGJLevel22.php",{levelID:String(level.levelId)},signal,24*1024*1024),level,request);
+        return {...map,sourceSearchType:type,sourcePage:page,sourceIdBand:survivalIdBand(map.levelId)};
+      }catch(e){failed(e,"DOWNLOAD_FAILED");
+        if(e instanceof SurvivalMapError && ["INVALID_DATA","INVALID_METADATA"].includes(e.code)){
+          this.badCandidates.set(level.levelId,Date.now()+120_000);catalog.levels.delete(level.levelId);
         }
       }
     }
     throw new SurvivalMapError(failures.at(-1)??"NO_ELIGIBLE_MAP",lastDetail,failures,lastHttp);
   }
 }
+
+/** A bounded ID stratum, not an asserted upload date. */
+export function survivalIdBand(levelId:number):string {return levelId<70_000_000?"40m-70m":levelId<100_000_000?"70m-100m":"100m+";}

@@ -1,3 +1,7 @@
+import {SurvivalMapPool} from "./survival-map-pool.js";
+import {DATABASE,type DatabasePort} from "../database/database.port.js";
+import {SERVER_CLOCK,type ServerClock} from "../common/runtime.module.js";
+import {SurvivalConfigService} from "../config/survival-config.service.js";
 import {SurvivalReplayReceiptController} from "./survival-replay-receipt.controller.js";
 import {SurvivalSpectatorLiveService} from "./survival-spectator-live.service.js";
 import {SurvivalSpectatorLiveController} from "./survival-spectator-live.controller.js";
@@ -25,10 +29,10 @@ import { SERVER_ENVIRONMENT,type ServerEnvironment } from "../config/server-envi
 import { createSurvivalGdFetch } from "./survival-gd-transport.js";
 @Module({ imports: [ForumRecordsModule,RankedConfigModule, SessionModule, AchievementModule], controllers: [SurvivalReplayReceiptController,SurvivalSpectatorLiveController,SurvivalPlayerInfoController,SurvivalController,SurvivalEngineController,SurvivalDebugController,SurvivalOnlineController,SurvivalQueueController],
   providers: [SurvivalSpectatorLiveService,SurvivalService,SurvivalEngineService,SurvivalDebugService,SurvivalOnlineService,SurvivalQueueService,SurvivalRateService,{provide:SURVIVAL_MAP_PROVIDER,
-    useFactory:(random:RandomSource,environment:ServerEnvironment)=>{
+    useFactory:(random:RandomSource,environment:ServerEnvironment,db:DatabasePort,clock:ServerClock,config:SurvivalConfigService)=>{
       Logger.log(`Survival GD transport=${environment.survivalGdRelay?"relay":"direct"}`,"SurvivalGdTransport");
-      return new GdSurvivalMapProvider(random,createSurvivalGdFetch(environment.survivalGdRelay));
+      return new SurvivalMapPool(db,new GdSurvivalMapProvider(random,createSurvivalGdFetch(environment.survivalGdRelay)),clock,()=>config.getSnapshot().config.minimumLevelId);
     },
-    inject:[RANDOM_SOURCE,SERVER_ENVIRONMENT]}],
+    inject:[RANDOM_SOURCE,SERVER_ENVIRONMENT,DATABASE,SERVER_CLOCK,SurvivalConfigService]}],
   exports: [SurvivalService,SurvivalEngineService] })
 export class SurvivalModule {}

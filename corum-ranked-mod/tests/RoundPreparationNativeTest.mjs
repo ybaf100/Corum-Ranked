@@ -23,7 +23,7 @@ test('actual round preparation executes native download/resource/delegate/launch
     const cpp = String.raw`
 #include "${join(root, 'src/domain/LevelPreparationPolicy.hpp')}"
 #include "${join(root,'tests/helpers/InactiveReplayDouble.hpp')}"
-#include "${join(root, 'src/domain/RoundResourcePolicy.hpp')}"
+#include "${join(root, 'src/domain/RoundAudioFailure.hpp')}"
 #include "${join(root, 'src/domain/SurvivalNativeOptions.hpp')}"
 #include <cassert>
 namespace corum::ranked {struct SurvivalSpectatorRuntime {static SurvivalSpectatorRuntime& get(){static SurvivalSpectatorRuntime r;return r;}bool sceneLevel(int)const{return false;}replay::InactiveWorld* world()const{return nullptr;}bool publishing()const{return false;}bool launchAllowed=false;int failedExits=0;bool canLaunch()const{return launchAllowed;}template<class...T>bool arm(T...){return launchAllowed;}template<class...T>bool capture(T const&...){return false;}template<class...T>void terminal(T const&...){}void sceneExited(){launchAllowed=false;++failedExits;}bool exitRequested()const{return false;}};}
@@ -101,7 +101,7 @@ struct GJGameLevel {
     GJLevelType m_levelType=GJLevelType::SearchResult;
     bool m_lowDetailMode=true,m_levelNotDownloaded=true,m_lowDetailModeToggled=false,m_disableShakeToggled=false;
 };
-enum class GJSongError {Failed};
+enum class GJSongError {Failed=1,NotAllowed=2,Cancelled=3};
 struct SongInfoObject {int m_songID=0;bool m_unloaded=false;std::string m_songUrl;};
 struct LevelDownloadDelegate {virtual ~LevelDownloadDelegate()=default;
     virtual void levelDownloadFinished(GJGameLevel*){}virtual void levelDownloadFailed(int){} };
@@ -175,7 +175,7 @@ void pumpSurvivalGameplayExit(PlayLayer*){}
 struct SurvivalRuntime {bool nativeActive=false;void tick(){}bool normalRoundCleared()const{return false;}static SurvivalRuntime&get(){static SurvivalRuntime r;return r;}
  bool interceptFreePlayNativeQuit(GJGameLevel*)const{return false;}bool acquiring()const{return nativeActive;}bool active()const{return nativeActive;}bool canEnter()const{return false;}void noteNativeLaunch(){}bool canReplayCleared()const{return false;}bool armClearedReplay(GJGameLevel*,CCScene*)const{return false;}bool canEnterObserver()const{return false;}bool observing()const{return false;}bool armObserver(GJGameLevel*,CCScene*)const{return false;}
  std::string optionsContext()const{return {};}bool validateNative(GJGameLevel*)const{return nativeActive;}bool armNative(GJGameLevel*)const{return false;}
- void preparationFailed(std::string const&){} };
+ void preparationFailed(std::string const&){} void audioPreparationFailed(RoundAudioFailure const&){} };
 
 struct SurvivalOptionsPreferences {static SurvivalOptionsPreferences&get(){static SurvivalOptionsPreferences p;return p;}void apply(GJGameLevel* level,std::string const&){applySurvivalNativeOptions(level,false,false);}};
 
@@ -279,6 +279,15 @@ int main(){
     RoundAutomation incomplete;incomplete.elapsed=50;incomplete.updateAutomation();assert(runtime.readyRequests==0);
     fakeNow+=5;ticks(p);assert(music->requests["song42"]==2);music->file(42);ticks(p);assert(p.ready());
     assert(p.view().songsTotal==2&&p.view().sfxTotal==1&&p.view().audioProgress==1);
+    // Execute real multicast failure handling: NotAllowed stops automatic
+    // retries, but a legitimate effective local file still restores readiness.
+    downloaded.m_songIDs="42,43,314";ticks(p);assert(music->requests["info314"]==1);
+    music->finishKey("info314");for(auto* delegate:music->delegates)delegate->loadSongInfoFailed(314,GJSongError::NotAllowed);
+    ticks(p);assert(p.view().audioFailure&&p.view().audioFailure->category==RoundAudioCategory::Permanent);
+    ticks(p,20);assert(music->requests["info314"]==1&&!p.ready());
+    music->file(314);ticks(p);assert(p.ready()&&!p.view().audioFailure);
+    downloaded.m_songIDs="42,43";ticks(p);assert(p.ready());
+
     // Execute the actual popup automation against completed automatic map/song/SFX
     // acquisition. With 50s still on the server's resource deadline, READY must
     // occur at the independent 10s countdown, never at timeout. No button click.

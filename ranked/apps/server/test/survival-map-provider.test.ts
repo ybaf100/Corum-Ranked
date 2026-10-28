@@ -51,7 +51,7 @@ describe("actual GD Survival search/download protocol",()=>{
       return new Response(`${demon}:5:1:4:${gzipSync(geometry).toString("base64url")}#hash#hash`);
     }) as unknown as typeof fetch;
     const map=await new GdSurvivalMapProvider(new SeededRandom(1),fetcher).select({...request,group:"GOLD",phase:"TIEBREAK"});
-    expect(map.demonDifficulty).toBe("INSANE");expect(paths).toHaveLength(2);
+    expect(map.demonDifficulty).toBe("INSANE");expect(paths).toHaveLength(4);
   });
   it("randomizes validated pages, excludes duplicates/old IDs, and uses the same map only once",async()=>{
     const pages:number[]=[];let downloadRequests=0;
@@ -61,7 +61,7 @@ describe("actual GD Survival search/download protocol",()=>{
       downloadRequests++;return new Response(download(Number(body.get("levelID"))));
     }) as unknown as typeof fetch;
     const map=await new GdSurvivalMapProvider(new SeededRandom(1),fetcher).select({...request,excludedLevelIds:[40000000,40000001]});
-    expect(map.levelId).toBe(40000002);expect(pages).toEqual([0,1]);expect(downloadRequests).toBe(1);
+    expect(map.levelId).toBe(40000002);expect(pages).toEqual(Array(6).fill([0,1]).flat());expect(downloadRequests).toBe(1);
   });
   it("shares a recent candidate pool but revalidates every selected download and match exclusion",async()=>{
     let searches=0,downloads=0;
@@ -73,15 +73,15 @@ describe("actual GD Survival search/download protocol",()=>{
     const first=await provider.select(request);
     const second=await provider.select({...request,excludedLevelIds:[first.levelId]});
     expect(second.levelId).not.toBe(first.levelId);expect(downloads).toBe(2);
-    // ROUND_1 searches normal categories 3 and 4; each pool is bootstrapped
+    // ROUND_1 searches categories 3 and 4 across all three sources; each is bootstrapped
     // at most once, not re-fetched for every round or concurrent match.
-    expect(searches).toBeLessThanOrEqual(2);
+    expect(searches).toBe(6);
   });
   it.each([[0,0],[12,0],[0,1],[4,2],[1,3]])("keeps GD feature %i / epic %i through verified metadata",async(featureScore,epic)=>{
     const quality=record()+`:19:${featureScore}:42:${epic}`;
     expect(parseSurvivalMetadata(quality)).toMatchObject({length:2,featureScore,epic});
     expect(verifySurvivalDownload(`${quality}:5:1:4:${gzipSync(geometry).toString("base64url")}#hash`,parseSurvivalMetadata(quality),request))
-      .toMatchObject({featureScore,epic});
+      .toMatchObject({featureScore,epic,featureGrade:epic===3?"MYTHIC":epic===2?"LEGENDARY":epic===1?"EPIC":featureScore>0?"FEATURED":"NONE"});
   });
   it("samples catalogs past the former page 255 boundary without a release-date filter",async()=>{
     const pages:number[]=[];
@@ -96,7 +96,7 @@ describe("actual GD Survival search/download protocol",()=>{
     }) as unknown as typeof fetch;
     const provider=new GdSurvivalMapProvider({next:()=>.8},fetcher);
     expect((await provider.select(request)).levelId).toBe(40000001);
-    expect(pages).toEqual([0,1600]);
+    expect(pages).toEqual(Array(6).fill([0,1600]).flat());
   });
   it("expands liked, recent and awarded catalogs and rejects XL before any download",async()=>{
     const types=new Set<string>();let downloads=0;
@@ -173,7 +173,7 @@ describe("actual GD Survival search/download protocol",()=>{
       await expect(provider.select({...request,group})).rejects.toThrow("fixture-ray");
     expect(searches).toBe(1);
     vi.setSystemTime(29999);await expect(provider.select(request)).rejects.toThrow("HTTP 403");expect(searches).toBe(1);
-    vi.setSystemTime(30000);expect((await provider.select(request)).levelId).toBe(40000000);expect(searches).toBe(2);
+    vi.setSystemTime(30000);expect((await provider.select(request)).levelId).toBe(40000000);expect(searches).toBe(7);
   });
   it("bounds error-body reads and excludes raw bodies and private response headers",async()=>{
     let cancelled=false;
@@ -199,7 +199,7 @@ describe("actual GD Survival search/download protocol",()=>{
       if(String(url).endsWith("getGJLevels21.php")){searches++;return searches===1?new Response("error",{status:500}):new Response(page([40000000,40000001]));}
       downloads++;return new Response(download(Number(new URLSearchParams(String(init?.body)).get("levelID")),downloads===1?"invalid":geometry));
     }) as unknown as typeof fetch;
-    const result=await new GdSurvivalMapProvider(new SeededRandom(1),fetcher).select(request);expect(result.levelId).toBeGreaterThanOrEqual(40000000);expect(searches).toBe(2);expect(downloads).toBe(2);
+    const result=await new GdSurvivalMapProvider(new SeededRandom(1),fetcher).select(request);expect(result.levelId).toBeGreaterThanOrEqual(40000000);expect(searches).toBe(6);expect(downloads).toBe(2);
   });
   it("reports exhaustion without generating a level ID or selecting a wrong difficulty",async()=>{
     const fetcher=vi.fn(async()=>new Response(page([39999999]))) as unknown as typeof fetch;

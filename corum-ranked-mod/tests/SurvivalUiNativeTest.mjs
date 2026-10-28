@@ -143,7 +143,7 @@ int main(){CCScene origin,other;auto* director=CCDirector::sharedDirector();dire
  owner.selection.complete=false;owner.queueNativeLaunch();assert(work.empty());owner.selection.complete=true;runtime.pending=true;owner.queueNativeLaunch();assert(work.empty());runtime.pending=false;
  inUpdate=true;owner.queueNativeLaunch();owner.queueNativeLaunch();assert(work.size()==1&&preparation.launches==0);inUpdate=false;
  drain();assert(preparation.launches==1&&!owner.m_launchedContext.empty()&&owner.m_pendingLaunch.empty());
- for(int changed=0;changed<12;++changed){owner.m_launchedContext.clear();owner.queueNativeLaunch();
+ for(int changed=0;changed<12;++changed){owner.m_launchedContext.clear();owner.queueNativeLaunch(changed==7);
   if(changed==0){++runtime.context.round;}
   if(changed==1){director->scene=&other;}
   if(changed==2){owner.m_closed=true;}
@@ -151,13 +151,13 @@ int main(){CCScene origin,other;auto* director=CCDirector::sharedDirector();dire
   if(changed==4){owner.running=false;}
   if(changed==5){runtime.enter=false;}
   Dialog dialog;dialog.parent=&origin;if(changed==6)owner.m_jukebox=WeakRef(&dialog);
-  if(changed==7)owner.m_browsingBoard=true;
+  if(changed==7)owner.m_manualMap=true;
   if(changed==8)owner.m_entrySyncAfter=runtime.sync;
   if(changed==9)director->next=&other;
   if(changed==10)owner.selection.complete=false;
   if(changed==11)runtime.pending=true;
   drain();assert(preparation.launches==1&&owner.m_launchedContext.empty()&&owner.m_pendingLaunch.empty());
-  owner.m_jukebox.reset();owner.m_entrySyncAfter.reset();owner.m_browsingBoard=false;owner.m_closed=false;owner.m_confirmation=false;owner.running=true;owner.selection.complete=true;runtime.pending=false;runtime.enter=true;director->scene=&origin;director->next=nullptr;
+  owner.m_jukebox.reset();owner.m_entrySyncAfter.reset();owner.m_browsingBoard=false;owner.m_manualMap=false;owner.m_closed=false;owner.m_confirmation=false;owner.running=true;owner.selection.complete=true;runtime.pending=false;runtime.enter=true;director->scene=&origin;director->next=nullptr;
  }
  preparation.success=false;owner.queueNativeLaunch();drain();assert(preparation.launches==2&&owner.m_launchedContext.empty());
  preparation.success=true;owner.queueNativeLaunch();drain();assert(preparation.launches==3&&!owner.m_launchedContext.empty());
@@ -167,10 +167,10 @@ int main(){CCScene origin,other;auto* director=CCDirector::sharedDirector();dire
  assert(runtime.refreshes==1&&!replayOwner.m_browsingBoard&&replayOwner.m_manualMap&&!replayOwner.m_replayRequestedContext.empty());
  replayOwner.queueNativeLaunch();assert(work.empty());++runtime.sync;replayOwner.queueNativeLaunch();drain();
  assert(preparation.launches==4&&replayOwner.m_replayRequestedContext.empty());
- runtime.enter=true;replayOwner.m_entrySyncAfter.reset();replayOwner.m_manualMap=false;
- replayOwner.queueNativeLaunch(true);++replayOwner.m_boardVisit;replayOwner.m_browsingBoard=true;
- replayOwner.m_browsingBoard=false;drain();assert(preparation.launches==4); // returned before callback still cancels the old reservation
- replayOwner.queueNativeLaunch(true);drain();assert(preparation.launches==5); // fresh pre-start auto request
+ runtime.enter=true;replayOwner.m_entrySyncAfter.reset();replayOwner.m_manualMap=false;++runtime.context.round;
+ replayOwner.queueNativeLaunch(true);replayOwner.m_browsingBoard=true;
+ replayOwner.m_browsingBoard=false;drain();assert(preparation.launches==5); // board navigation preserves the automatic reservation
+ replayOwner.queueNativeLaunch(true);drain();assert(preparation.launches==5); // duplicate automatic request stays suppressed
  replayOwner.m_manualMap=true;replayOwner.queueNativeLaunch(false);drain();assert(preparation.launches==6); // explicit live entry remains allowed
 }`);
 });

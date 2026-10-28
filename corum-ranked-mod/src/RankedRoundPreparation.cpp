@@ -95,6 +95,8 @@ void RankedRoundPreparation::retry() {
     if (m_pendingMap || !m_tickets.empty() || m_urlPending) return;
     m_mapRetry = {};
     m_retries.clear();
+    m_audioFailures.clear();
+    m_view.audioFailure.reset();
     m_urlAttempts = 0;
     m_urlNextAt = 0;
     m_view.error.clear();
@@ -135,6 +137,8 @@ void RankedRoundPreparation::pump() {
         m_mapRetry = {};
         m_mapTimeoutReported = false;
         m_retries.clear();
+    m_audioFailures.clear();
+    m_view.audioFailure.reset();
         m_songs.clear(); m_sfx.clear();
         if (!m_urlPending) { m_urlAttempts = 0; m_urlNextAt = 0; }
         if (m_pendingMap) m_discardedMap = true;
@@ -151,14 +155,14 @@ void RankedRoundPreparation::pump() {
         if (!active && ticket.quiet >= 3) {
             if (!ticket.discarded && ticket.context == m_context && !resourceReady(key)) {
                 m_retries[key].failed(now);
-                if (m_retries[key].attempts >= 3)
-                    m_view.error = fmt::format("{} {} FAILED",
-                        key.kind == RoundResourceKind::Sfx ? "SFX" : "SONG", key.id);
+                auto category=classifyRoundAudioFailure(key.kind,ticket.nativeError,ticket.completed && ticket.nativeError==0);
+                if(category==RoundAudioCategory::Permanent || m_retries[key].attempts>=3)
+                    audioFailed({key,category,ticket.nativeError});
             }
             it = m_tickets.erase(it);
         } else {
             if (now - ticket.began >= 120 && !ticket.discarded && ticket.context == m_context)
-                m_view.error = "AUDIO REQUEST STILL ACTIVE - WAITING FOR NATIVE COMPLETION";
+                audioFailed({key,RoundAudioCategory::Timeout,0});
             ++it;
         }
     }
@@ -276,14 +280,31 @@ bool RankedRoundPreparation::resourceReady(RoundResourceKey key) const {
 void RankedRoundPreparation::complete(RoundResourceKey key) {
     if (auto found = m_tickets.find(key); found != m_tickets.end()) found->second.completed = true;
 }
+void RankedRoundPreparation::fail(RoundResourceKey key,GJSongError error){
+    auto found=m_tickets.find(key);if(found==m_tickets.end() || found->second.completed)return;
+    auto& ticket=found->second;ticket.completed=true;ticket.nativeError=static_cast<int>(error);
+    if(ticket.discarded || ticket.context!=m_context)return;
+    log::warn("[RankedPrepare] stage=AUDIO_NATIVE_FAILURE context={} kind={} id={} nativeCode={} category={}",
+        preparationContextText(ticket.context),static_cast<int>(key.kind),key.id,ticket.nativeError,
+        roundAudioCategoryName(classifyRoundAudioFailure(key.kind,ticket.nativeError)));
+}
+void RankedRoundPreparation::audioFailed(RoundAudioFailure const& failure){
+    auto found=m_audioFailures.find(failure.resource);
+    if(found!=m_audioFailures.end() && found->second.category==failure.category && found->second.nativeCode==failure.nativeCode)return;
+    m_audioFailures[failure.resource]=failure;m_view.audioFailure=failure;
+    m_view.error=std::string(roundAudioCategoryName(failure.category));
+    log::warn("[RankedPrepare] stage=AUDIO_PREPARATION_FAILED context={} kind={} id={} nativeCode={} category={}",
+        preparationContextText(m_context),static_cast<int>(failure.resource.kind),failure.resource.id,failure.nativeCode,m_view.error);
+    if(SurvivalRuntime::get().acquiring())SurvivalRuntime::get().audioPreparationFailed(failure);
+}
 void RankedRoundPreparation::loadSongInfoFinished(SongInfoObject* info) {
     if (info) complete({RoundResourceKind::SongInfo, info->m_songID});
 }
-void RankedRoundPreparation::loadSongInfoFailed(int id, GJSongError) { complete({RoundResourceKind::SongInfo, id}); }
+void RankedRoundPreparation::loadSongInfoFailed(int id, GJSongError error) { fail({RoundResourceKind::SongInfo, id},error); }
 void RankedRoundPreparation::downloadSongFinished(int id) { complete({RoundResourceKind::Song, id}); }
-void RankedRoundPreparation::downloadSongFailed(int id, GJSongError) { complete({RoundResourceKind::Song, id}); }
+void RankedRoundPreparation::downloadSongFailed(int id, GJSongError error) { fail({RoundResourceKind::Song, id},error); }
 void RankedRoundPreparation::downloadSFXFinished(int id) { complete({RoundResourceKind::Sfx, id}); }
-void RankedRoundPreparation::downloadSFXFailed(int id, GJSongError) { complete({RoundResourceKind::Sfx, id}); }
+void RankedRoundPreparation::downloadSFXFailed(int id, GJSongError error) { fail({RoundResourceKind::Sfx, id},error); }
 void RankedRoundPreparation::issue(RoundResourceKey key, double now) {
     if (m_tickets.contains(key) || nativeActive(key) || !m_retries[key].available(now)) return;
     m_tickets.emplace(key, ResourceTicket{m_context, now});
@@ -331,13 +352,21 @@ void RankedRoundPreparation::pumpAudio(GJGameLevel* level, double now) {
     auto const total = m_view.songsTotal + m_view.sfxTotal;
     m_view.audioReady = m_view.songsDone + m_view.sfxDone == total;
     m_view.audioProgress = total ? static_cast<float>(units / total) : 1.0f;
-    if (m_view.audioReady) { m_view.error.clear(); return; }
+    if (m_view.audioReady) { m_view.error.clear();m_view.audioFailure.reset(); return; }
+    // A valid effective NONG/Jukebox file wins over an earlier remote failure.
+    for(auto it=m_audioFailures.begin();it!=m_audioFailures.end();){
+        auto key=it->first;
+        if(resourceReady({key.kind==RoundResourceKind::SongInfo?RoundResourceKind::Song:key.kind,key.id})){
+            if(m_view.audioFailure && m_view.audioFailure->resource==key){m_view.audioFailure.reset();m_view.error.clear();}
+            it=m_audioFailures.erase(it);
+        }else ++it;
+    }
     if (needsURL && music->m_customContentURL.empty()) {
         if (!m_urlPending && now >= m_urlNextAt && m_urlAttempts < 3) {
             m_urlPending = true; m_urlQuiet = 0; m_urlBegan = now; ++m_urlAttempts;
             music->getCustomContentURL();
         }
-        if (m_urlAttempts >= 3 && !m_urlPending) m_view.error = "CONTENT URL FAILED";
+        if (m_urlAttempts >= 3 && !m_urlPending) m_view.error = "AUDIO_METADATA_UNAVAILABLE";
         return;
     }
     // Keep native concurrency bounded, including stale tickets and foreign work.
@@ -354,8 +383,9 @@ void RankedRoundPreparation::pumpAudio(GJGameLevel* level, double now) {
     }
     auto request = [&](RoundResourceKey key) {
         if (occupied >= 3 || m_tickets.contains(key) || nativeActive(key)) return;
+        if(auto failure=m_audioFailures.find(key);failure!=m_audioFailures.end() && failure->second.category==RoundAudioCategory::Permanent)return;
         if (m_retries[key].attempts >= 3) {
-            m_view.error = fmt::format("AUDIO {} FAILED", key.id);
+            if(!m_view.audioFailure)audioFailed({key,RoundAudioCategory::Unknown,0});
             return;
         }
         if (!m_retries[key].available(now)) return;

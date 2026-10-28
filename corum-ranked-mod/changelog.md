@@ -1,3 +1,11 @@
+# v0.5.0-beta.110
+- Keep Survival preparation and first automatic entry running while the status board is open.
+- Show the server round clock on the Free Play main menu without covering menu controls.
+- Defer slow online downloads instead of counting them as surrender; late entry retains the shared deadline.
+- Classify native audio failures and replace a pre-play map only after independent authenticated corroboration.
+- Persist verified map candidates with fenced reservations, bounded replenishment and broader search sampling.
+- Preserve beta.109 replay, spectator, scoring, achievement and AP data.
+
 # v0.5.0-beta.109
 - Preserve official Survival replay files through OS save-directory aliases, delayed receipts and storage failures; log the first rejected field/stage and separate capture, file and confirmation notices.
 - Scope outcome navigation to the exact round/map generation; show Standings during a match and reserve final results for FINAL_RESULT. Force Clear never fabricates native 100% input.

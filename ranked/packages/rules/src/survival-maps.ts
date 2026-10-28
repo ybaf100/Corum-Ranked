@@ -17,12 +17,21 @@ export interface SurvivalMapMetadata {
   readonly length?:number;
   readonly featureScore?:number;
   readonly epic?:number;
+  readonly featureGrade?:"NONE"|"FEATURED"|"EPIC"|"LEGENDARY"|"MYTHIC";
 }
 export interface SurvivalVerifiedMap extends SurvivalMapMetadata {
   readonly levelVersion: number;
   readonly geometrySha256: string;
   readonly geometryBytes: number;
   readonly verifiedAt: string;
+  readonly songIds?: readonly number[];
+  readonly sfxIds?: readonly number[];
+  readonly sourceSearchType?: string;
+  readonly sourcePage?: number;
+  readonly sourceIdBand?: string;
+  readonly audioVerification?: "METADATA_ONLY";
+  readonly audioDependencyCoverage?:"PRIMARY_SONG_ONLY";
+
 }
 export interface SurvivalMapRange {
   readonly minimumStars: number | null;

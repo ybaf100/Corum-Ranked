@@ -6,6 +6,13 @@ struct CatalogTranslation {char const* key;char const* english;char const* korea
 inline constexpr std::array kTranslations {
     CatalogTranslation{"A logged-in Geometry Dash account is required.", "A logged-in Geometry Dash account is required.", "로그인된 Geometry Dash 계정이 필요합니다."},
     CatalogTranslation{"A mod update is required before entering Ranked.", "A mod update is required before entering Ranked.", "랭크에 입장하려면 모드를 업데이트하세요."},
+    CatalogTranslation{"AUDIO_CACHE_INVALID", "Audio file is missing or empty · retry required", "음원 파일이 없거나 비어 있음 · 재시도 필요"},
+    CatalogTranslation{"AUDIO_DOWNLOAD_TIMEOUT", "Audio download timed out · waiting for download to finish", "음원 다운로드 시간 초과 · 요청 종료 대기"},
+    CatalogTranslation{"AUDIO_DOWNLOAD_TRANSIENT", "Audio download failed · retry available", "일시적인 음원 다운로드 실패 · 재시도 가능"},
+    CatalogTranslation{"AUDIO_METADATA_UNAVAILABLE", "Audio information unavailable · retry available", "음원 정보를 받을 수 없음 · 재시도 가능"},
+    CatalogTranslation{"AUDIO_STORAGE_FAILURE", "Cannot save audio · check device storage", "음원 저장 불가 · 저장 공간 확인"},
+    CatalogTranslation{"AUDIO_UNAVAILABLE_PERMANENT", "Required audio is unavailable · checking replacement map", "필수 음원 다운로드 불가 · 맵 교체 확인 중"},
+    CatalogTranslation{"AUDIO_UNKNOWN_ERROR", "Audio preparation failed · retry available", "음원 준비 오류 · 재시도 가능"},
     CatalogTranslation{"Bot fill requires a debug client", "Bot fill requires a debug client", "디버그 모드에서만 사용할 수 있습니다."},
     CatalogTranslation{"Checking for an active Placement run...", "Checking for an active Placement run...", "진행 중인 배치 경기를 확인하는 중..."},
     CatalogTranslation{"Choose a starting Pool.", "Choose a starting Pool.", "시작할 POOL을 선택하세요."},

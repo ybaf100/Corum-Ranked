@@ -19,6 +19,7 @@ class SurvivalMapSelectionLayer final : public cocos2d::CCLayerColor {
     std::deque<std::size_t> m_sounds;
     std::int64_t m_lastSound=0;
     std::int64_t m_lastFrameMillis=0;
+    bool advanceTimeline(SurvivalMatchView const&,std::optional<std::int64_t> countdown);
     void resetVisuals();
     void numberFrame(SurvivalRevealFrame const&,SurvivalSelectionLayout const&);
     void thumbnailFrame(SurvivalRevealFrame const&,SurvivalSelectionLayout const&);
@@ -32,6 +33,7 @@ public:
     void prepareServerMap(SurvivalMatchView const&);
     void present(SurvivalMatchView const&,RoundPreparationView const&,SurvivalNativeOptions,bool supportsLdm,bool actionsEnabled,bool canEnter,
         std::optional<std::int64_t> countdown,std::optional<std::int64_t> remaining);
+    void advancePreparation(SurvivalMatchView const&,std::optional<std::int64_t> countdown);
     void hideSelection();
     bool settled()const;
     void onEnter() override;

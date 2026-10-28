@@ -1,3 +1,4 @@
+import {reportSurvivalAudioFailure,type SurvivalAudioFailure} from "./survival-audio-recovery.js";
 import { DemandWorker, signalAfterCommit } from "../database/database-work.js";
 import { lockSurvivalAdmission,assertSurvivalAdmission } from "./survival-admission.js";
 import { createHash } from "node:crypto";
@@ -16,7 +17,7 @@ export type SurvivalAdmissionPlayer =
   | {participantId:string;kind:"HUMAN";playerId:string}
   | {participantId:string;kind:"BOT";name:string;lp:number};
 interface MatchRow { snapshot:SurvivalMatch; request_hash:string; map_job_token:string|null;
-  map_job_deadline_at:Date|string|null; map_retry_at:Date|string|null; }
+  map_job_deadline_at:Date|string|null; map_retry_at:Date|string|null; map_failure_count?:number; }
 const hash = (value:unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const iso = (milliseconds:number|null) => milliseconds===null ? null : new Date(milliseconds).toISOString();
 const changed = (a:unknown,b:unknown) => JSON.stringify(a)!==JSON.stringify(b);
@@ -132,6 +133,9 @@ export class SurvivalEngineService implements OnApplicationBootstrap, OnApplicat
       const now=this.clock.now().getTime();
       let match=await this.adapt(tx,row.snapshot,now);
       match=reduceSurvivalMatch(match,command,now);
+      if(actor && command.type==="PREPARATION_FAILED" && command.audioFailure &&
+        survivalCurrentRound(match).key===command.roundKey && survivalCurrentRound(match).mapGeneration===command.mapGeneration)
+        match=await reportSurvivalAudioFailure(tx,match,actor.playerId,command.audioFailure as SurvivalAudioFailure,now);
       match=await this.adapt(tx,match,now);
       await this.persist(tx,row.snapshot,match);
       await tx.query(`INSERT INTO sur_match_commands(match_id,event_key,request_hash,command,applied_revision,received_at)
@@ -162,27 +166,22 @@ export class SurvivalEngineService implements OnApplicationBootstrap, OnApplicat
       if(!target || (row.map_retry_at && new Date(row.map_retry_at).getTime()>now) ||
         (row.map_job_token && row.map_job_deadline_at && new Date(row.map_job_deadline_at).getTime()>now))return null;
       const token=this.ids.next();
-      await tx.query("UPDATE sur_matches SET map_job_token=$2,map_job_deadline_at=$3 WHERE id=$1",[matchId,token,iso(now+40_000)]);
+      await tx.query("UPDATE sur_matches SET map_job_token=$2,map_job_deadline_at=$3 WHERE id=$1",[matchId,token,iso(now+180_000)]);
       return {token,roundKey:target.roundKey,mapGeneration:target.mapGeneration,request:{group:row.snapshot.difficultyGroup,
         phase:target.phase,minimumLevelId:row.snapshot.config.minimumLevelId,
+        reservation:{matchId,roundKey:target.roundKey,mapGeneration:target.mapGeneration,token},
         excludedLevelIds:row.snapshot.rounds.flatMap(r=>r.selectedMaps.map(m=>m.levelId))}};
     });
     if(!job)return;
     try {
-      let window=30;
+      const window=30;
       for(let attempt=0;attempt<8;attempt++) {
         const recent=(await this.database.query<{level_id:string}>("SELECT level_id FROM sur_map_selection_history ORDER BY id DESC LIMIT $1",[window])).rows.map(r=>Number(r.level_id));
         let map:SurvivalVerifiedMap;
         try {
           map=await this.maps.select({...job.request,excludedLevelIds:[...job.request.excludedLevelIds,...recent]});
           if(recent.includes(map.levelId))throw new SurvivalMapError("DUPLICATE_CANDIDATES","Provider returned a recently selected map");
-        } catch(error) {
-          if(window>0 && recent.length>0 && error instanceof SurvivalMapError && ["DUPLICATE_CANDIDATES","NO_ELIGIBLE_MAP","EMPTY_SEARCH"].includes(error.code) &&
-            !error.failures.some(code=>["API_ERROR","DOWNLOAD_FAILED"].includes(code))) {
-            window-=10;await this.database.query("UPDATE sur_matches SET map_job_deadline_at=$3 WHERE id=$1 AND map_job_token=$2",[matchId,job.token,iso(this.clock.now().getTime()+40000)]);continue;
-          }
-          throw error;
-        }
+        } catch(error) {await this.maps.release?.(job.request);throw error;}
         const accepted=await this.database.transaction(async tx=>{
           const row=await this.lock(tx,matchId),round=survivalCurrentRound(row.snapshot),target=survivalMapSelectionTarget(row.snapshot);
           if(row.map_job_token!==job.token || !target || target.roundKey!==job.roundKey || target.mapGeneration!==job.mapGeneration || target.phase!==job.request.phase)return true;
@@ -191,19 +190,29 @@ export class SurvivalEngineService implements OnApplicationBootstrap, OnApplicat
           const latest=(await tx.query<{level_id:string}>("SELECT level_id FROM sur_map_selection_history ORDER BY id DESC LIMIT $1",[window])).rows;
           if(latest.some(r=>Number(r.level_id)===map.levelId))return false;
           const match=reduceSurvivalMatch(row.snapshot,{type:target.prefetch?"NEXT_MAP_SELECTED":"MAP_SELECTED",roundKey:round.key,mapGeneration:round.mapGeneration,map},this.clock.now().getTime());
+          await this.maps.confirm?.(tx,job.request,map);
           await this.persist(tx,row.snapshot,match);
           await tx.query("INSERT INTO sur_map_selection_history(match_id,round_key,map_generation,level_id,history_window,selected_at) VALUES($1,$2,$3,$4,$5,$6)",[matchId,job.roundKey,job.mapGeneration,map.levelId,window,this.clock.now().toISOString()]);
-          await tx.query("UPDATE sur_matches SET map_job_token=NULL,map_job_deadline_at=NULL,map_retry_at=NULL,map_error=NULL WHERE id=$1",[matchId]);
+          await tx.query("UPDATE sur_matches SET map_job_token=NULL,map_job_deadline_at=NULL,map_retry_at=NULL,map_error=NULL,map_failure_count=0 WHERE id=$1",[matchId]);
           return true;
         });
-        if(accepted)return;
+        if(accepted){await this.maps.release?.(job.request);return;}
+        await this.maps.release?.(job.request);
       }
       throw new SurvivalMapError("DUPLICATE_CANDIDATES","Concurrent Survival selections exhausted candidate retries");
     } catch(e) {
+      await this.maps.release?.(job.request);
       const error=e instanceof SurvivalMapError ? {code:e.code,message:e.message,failures:e.failures,http:e.http} : {code:"API_ERROR",message:e instanceof Error?e.message:String(e)};
       const retryMs=e instanceof SurvivalMapError?Math.min(120_000,Math.max(2_000,e.retryAfterMs)):2_000;
-      await this.database.query(`UPDATE sur_matches SET map_job_token=NULL,map_job_deadline_at=NULL,map_retry_at=$3,map_error=$4::jsonb
+      await this.database.query(`UPDATE sur_matches SET map_job_token=NULL,map_job_deadline_at=NULL,map_retry_at=$3,map_error=$4::jsonb,map_failure_count=map_failure_count+1
         WHERE id=$1 AND map_job_token=$2`,[matchId,job.token,iso(this.clock.now().getTime()+retryMs),JSON.stringify(error)]);
+      await this.database.transaction(async tx=>{
+        const row=await this.lock(tx,matchId);
+        if((row.map_failure_count??0)>=6 && row.snapshot.state==="MAP_SELECTION"){
+          const round=survivalCurrentRound(row.snapshot);
+          await this.persist(tx,row.snapshot,reduceSurvivalMatch(row.snapshot,{type:"MAP_SUPPLY_FAILED",roundKey:round.key,mapGeneration:round.mapGeneration},this.clock.now().getTime()));
+        }
+      });
       this.logger.warn(`Survival map selection ${matchId}: ${error.code}; retryMs=${retryMs}; ${error.message}`);
     }
   }

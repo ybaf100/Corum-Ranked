@@ -114,7 +114,7 @@ int main(){Layer layer;auto r=survivalSelectionLayout(568,426,true,true);Surviva
 });
 
 test('production board/back actions preserve initial entry before start and expose manual entry after start',()=>{
- const source=read('ui/SurvivalGameLayer.cpp');const actions=source.split('\n').filter(l=>l.includes('if(tag==8)')||l.includes('if(tag==9)')).join('\n');assert(actions.includes('m_boardVisit'));
+ const source=read('ui/SurvivalGameLayer.cpp');const actions=source.split('\n').filter(l=>l.includes('if(tag==8)')||l.includes('if(tag==9)')).join('\n');assert(!actions.includes('m_manualMap=true'));assert(!actions.includes('++m_boardVisit'));
  run(`#include <cassert>
 #include <optional>
 #include <string>
@@ -124,8 +124,8 @@ struct Board{bool m_browsingBoard=false,m_manualMap=false;std::uint64_t m_boardV
  void action(int tag,Runtime& runtime){${actions}}
 };
 int main(){for(auto state:{"ENTERING","COUNTDOWN","PLAYING"})for(bool entered:{false,true}){Runtime runtime;runtime.v.state=state;runtime.entered=entered;Board b;
- b.action(9,runtime);assert(b.m_browsingBoard&&b.m_manualMap&&b.m_boardVisit==1&&runtime.entered==entered);
- b.action(8,runtime);assert(!b.m_browsingBoard&&b.m_manualMap==(entered||runtime.v.state=="PLAYING"));assert(runtime.refreshes==1&&b.m_entrySyncAfter==42);
+ b.action(9,runtime);assert(b.m_browsingBoard&&!b.m_manualMap&&b.m_boardVisit==0&&runtime.entered==entered);
+ b.action(8,runtime);assert(!b.m_browsingBoard&&!b.m_manualMap&&b.m_boardVisit==0);assert(runtime.refreshes==1&&!b.m_entrySyncAfter);
 }}
 `);
 });

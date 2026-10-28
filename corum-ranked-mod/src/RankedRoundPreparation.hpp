@@ -1,7 +1,7 @@
 #pragma once
 
 #include "RankedLevelPreparation.hpp"
-#include "domain/RoundResourcePolicy.hpp"
+#include "domain/RoundAudioFailure.hpp"
 #include <Geode/binding/LevelDownloadDelegate.hpp>
 #include <Geode/binding/MusicDownloadDelegate.hpp>
 #include <map>
@@ -20,6 +20,7 @@ struct RoundPreparationView {
     bool audioReady = false;
     int songsDone = 0, songsTotal = 0, sfxDone = 0, sfxTotal = 0;
     float audioProgress = 0;
+    std::optional<RoundAudioFailure> audioFailure;
     std::string error;
 };
 
@@ -57,10 +58,13 @@ private:
         unsigned quiet = 0;
         bool completed = false;
         bool discarded = false;
+        int nativeError = 0;
     };
     bool nativeActive(RoundResourceKey key) const;
     bool resourceReady(RoundResourceKey key) const;
     void complete(RoundResourceKey key);
+    void fail(RoundResourceKey key,GJSongError error);
+    void audioFailed(RoundAudioFailure const& failure);
     void issue(RoundResourceKey key, double now);
     void pumpMap(double now);
     void pumpAudio(GJGameLevel* level, double now);
@@ -80,6 +84,7 @@ private:
     std::vector<int> m_songs, m_sfx;
     std::map<RoundResourceKey, ResourceTicket> m_tickets;
     std::map<RoundResourceKey, RoundResourceRetry> m_retries;
+    std::map<RoundResourceKey, RoundAudioFailure> m_audioFailures;
     geode::WeakRef<PlayLayer> m_play;
     geode::WeakRef<cocos2d::CCScene> m_origin,m_returnScene;
     std::optional<geode::WeakRef<cocos2d::CCScene>> m_nativePauseRestoreOrigin;

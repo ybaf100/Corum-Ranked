@@ -2422,5 +2422,33 @@
   "replay-file-error": {
     "en": "Replay file could not be saved",
     "ko": "리플레이 파일 저장 실패"
+  },
+  "AUDIO_UNAVAILABLE_PERMANENT": {
+    "en": "Required audio is unavailable · checking replacement map",
+    "ko": "필수 음원 다운로드 불가 · 맵 교체 확인 중"
+  },
+  "AUDIO_DOWNLOAD_TRANSIENT": {
+    "en": "Audio download failed · retry available",
+    "ko": "일시적인 음원 다운로드 실패 · 재시도 가능"
+  },
+  "AUDIO_DOWNLOAD_TIMEOUT": {
+    "en": "Audio download timed out · waiting for download to finish",
+    "ko": "음원 다운로드 시간 초과 · 요청 종료 대기"
+  },
+  "AUDIO_METADATA_UNAVAILABLE": {
+    "en": "Audio information unavailable · retry available",
+    "ko": "음원 정보를 받을 수 없음 · 재시도 가능"
+  },
+  "AUDIO_CACHE_INVALID": {
+    "en": "Audio file is missing or empty · retry required",
+    "ko": "음원 파일이 없거나 비어 있음 · 재시도 필요"
+  },
+  "AUDIO_STORAGE_FAILURE": {
+    "en": "Cannot save audio · check device storage",
+    "ko": "음원 저장 불가 · 저장 공간 확인"
+  },
+  "AUDIO_UNKNOWN_ERROR": {
+    "en": "Audio preparation failed · retry available",
+    "ko": "음원 준비 오류 · 재시도 가능"
   }
 }

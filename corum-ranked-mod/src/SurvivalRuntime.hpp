@@ -1,5 +1,6 @@
 #pragma once
 #include "domain/LevelPreparationPolicy.hpp"
+#include "domain/RoundAudioFailure.hpp"
 #include "domain/ServerClock.hpp"
 #include "domain/SurvivalMapPolicy.hpp"
 #include "domain/SurvivalHudPresentation.hpp"
@@ -10,6 +11,7 @@
 #include <Geode/Geode.hpp>
 #include <Geode/utils/web.hpp>
 #include <deque>
+#include <set>
 
 class PlayLayer;
 namespace corum::ranked {
@@ -42,6 +44,7 @@ public:
     void recover();
     void refreshRound() { m_nextPoll={}; poll(); }
     std::int64_t serverSyncMillis() const { return m_lastServerNow; }
+    std::optional<std::int64_t> serverSyncAgeMs()const;
     bool active() const { return !m_view.id.empty(); }
     bool creating() const { return m_creating; }
     bool queueing() const { return m_queue.status=="QUEUED" || m_queue.status=="JOINING"; }
@@ -87,6 +90,7 @@ public:
     std::int64_t remainingMs() const;
     void assetsReady(GJGameLevel* level);
     void preparationFailed(std::string const& reason);
+    void audioPreparationFailed(RoundAudioFailure const& failure);
     void sceneEntered(int levelId);
     bool beginAttempt();
     void progress(double value);
@@ -162,13 +166,14 @@ private:
     LevelPreparationContext m_prepared;
     geode::Ref<GJGameLevel> m_launchLevel;
     std::string m_spectatorAcceptedAttempt;
-    std::string m_session,m_attempt,m_attemptContext,m_enteredContext,m_readyContext,m_lastMapDiagnostic,m_presentationContext;
+    std::string m_session,m_attempt,m_attemptContext,m_enteredContext,m_readyContext,m_failedContext,m_lastMapDiagnostic,m_presentationContext;
     double m_attemptBest=0,m_lastProgress=-1;
     int m_localAttempts=0;
     float m_tick=0;
     bool m_creating=false,m_pollBusy=false,m_eventBusy=false,m_recoverBusy=false,m_needRecovery=false,m_queuePollBusy=false;
     std::uint64_t m_generation=0,m_queueGeneration=0,m_eventGeneration=0,m_pollGeneration=0;
     std::int64_t m_lastServerNow=0;
+    std::set<std::string> m_audioReported;
     std::deque<matjson::Value> m_events;
     std::chrono::steady_clock::time_point m_pollStartedAt{},m_nextPoll{},m_nextProgress{},m_retryAt{},m_recoverRetryAt{},m_nextQueuePoll{},m_ackRetryAt{};
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_controlRequest,m_pollRequest,m_eventRequest,m_recoverRequest,m_queueRequest;

@@ -60,7 +60,7 @@ void SurvivalRuntime::tick() {
         replay::Recorder::get().finishFromLast("CONNECTION_LOST");
         ++m_generation;m_controlRequest.cancel();m_pollRequest.cancel();m_eventRequest.cancel();m_recoverRequest.cancel();m_queueRequest.cancel();
         m_lastServerNow=0;m_session=token;m_creating=m_pollBusy=m_eventBusy=m_recoverBusy=m_queuePollBusy=false;m_view={};m_queue={};++m_queueGeneration;m_prepared={};m_events.clear();m_attempt.clear();m_spectatorAcceptedAttempt.clear();
-        m_attemptContext=m_enteredContext=m_readyContext="";m_nextPoll={};
+        m_attemptContext=m_enteredContext=m_readyContext=m_failedContext="";m_audioReported.clear();m_nextPoll={};
         m_clock={};resetSurrender();
         m_needRecovery=!token.empty();m_recoverRetryAt={};m_ackRetryAt={};
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
@@ -286,7 +286,7 @@ void SurvivalRuntime::observe(matjson::Value const& root) {
     m_view.activeAttemptId=root["myActiveAttemptId"].asString().unwrapOr("");m_view.activeAttemptProgress=root["myActiveAttemptProgress"].asDouble().unwrapOr(0);
     if(oldContext!=preparationContext()) {
         replay::Recorder::get().finishFromLast("ROUND_TRANSITION");
-        m_prepared={};m_attempt.clear();m_spectatorAcceptedAttempt.clear();m_attemptContext=m_enteredContext=m_readyContext="";m_lastProgress=-1;m_localAttempts=0;
+        m_prepared={};m_attempt.clear();m_spectatorAcceptedAttempt.clear();m_attemptContext=m_enteredContext=m_readyContext=m_failedContext="";m_audioReported.clear();m_lastProgress=-1;m_localAttempts=0;
     }
     if(oldState=="PLAYING"&&m_view.state!="PLAYING")replay::Recorder::get().finishFromLast("SERVER_ENDED");
     pumpSurrenderReturn();
@@ -406,6 +406,10 @@ bool SurvivalRuntime::attemptLimitReached() const {
     auto own=std::find_if(m_view.standings.begin(),m_view.standings.end(),[&](auto const& p){return p.id==m_view.ownId;});
     return std::max(m_localAttempts,own==m_view.standings.end()?0:own->attemptsUsed)>=3;
 }
+std::optional<std::int64_t> SurvivalRuntime::serverSyncAgeMs()const{
+    if(!m_clock.synchronized()||m_lastServerNow<=0)return {};
+    return std::max<std::int64_t>(0,m_clock.serverNowMillis(localNow())-m_lastServerNow);
+}
 std::optional<std::int64_t> SurvivalRuntime::countdownMs() const { return m_clock.signedRemainingMillis(m_view.startsAt,localNow()); }
 std::optional<std::int64_t> SurvivalRuntime::entryWaitMs() const { return m_clock.signedRemainingMillis(m_view.entryOpensAt,localNow()); }
 void SurvivalRuntime::selectedPanelReady(bool ready){
@@ -495,8 +499,22 @@ void SurvivalRuntime::assetsReady(GJGameLevel* level) {
 }
 void SurvivalRuntime::preparationFailed(std::string const& reason) {
     if(m_view.ownEliminated || observing() || freePlaying())return;
-    if(m_view.state!="PREPARING" || !m_readyContext.empty())return;
-    auto body=event("PREPARATION_FAILED");body["reason"]=reason;m_readyContext=preparationContextText(preparationContext());enqueue(std::move(body));
+    if(m_view.state!="PREPARING" || m_failedContext==preparationContextText(preparationContext()) || !m_readyContext.empty())return;
+    auto body=event("PREPARATION_FAILED");body["reason"]=reason;m_failedContext=preparationContextText(preparationContext());enqueue(std::move(body));
+}
+void SurvivalRuntime::audioPreparationFailed(RoundAudioFailure const& failure){
+    if(!m_view.online || m_view.ownEliminated || observing() || freePlaying() || m_view.ownAssetsReady ||
+        (m_view.state!="PREPARING" && m_view.state!="ENTERING") || failure.resource.id<=0)return;
+    auto key=preparationContextText(preparationContext())+":"+std::to_string(static_cast<int>(failure.resource.kind))+":"+
+        std::to_string(failure.resource.id)+":"+std::string(roundAudioCategoryName(failure.category));
+    if(m_audioReported.contains(key) || m_audioReported.size()>=32)return;
+    m_audioReported.insert(key);
+    auto body=event("PREPARATION_FAILED");body["reason"]=std::string(roundAudioCategoryName(failure.category));
+    matjson::Value report=matjson::Value::object();
+    report["category"]=std::string(roundAudioCategoryName(failure.category));
+    report["resourceKind"]=failure.resource.kind==RoundResourceKind::Sfx?"SFX":"SONG";
+    report["resourceId"]=failure.resource.id;report["nativeCode"]=failure.nativeCode;
+    body["audioFailure"]=std::move(report);enqueue(std::move(body));
 }
 void SurvivalRuntime::sceneEntered(int levelId) {
     if(m_view.ownEliminated || observing() || freePlaying())return;

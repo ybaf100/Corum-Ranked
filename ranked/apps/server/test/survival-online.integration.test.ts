@@ -63,13 +63,13 @@ afterAll(async()=>{if(pool){await pool.query(`DROP SCHEMA "${testSchema}" CASCAD
 afterEach(async()=>{if(app)await app.close();});
 beforeEach(async()=>{
  await db.query("UPDATE ranked_achievement_versions SET activated_at='2000-01-01',debug_enabled_at='2000-01-01',overhaul_activated_at='2000-01-01'");
- await db.query("TRUNCATE ranked_players,sur_matches,sur_mode_state CASCADE");now=Date.parse("2026-10-13T00:00:00Z");sequence=1000;mapId=40000000;clients.length=0;
+ await db.query("TRUNCATE ranked_players,sur_matches,sur_mode_state,sur_resource_quarantine CASCADE");now=Date.parse("2026-10-13T00:00:00Z");sequence=1000;mapId=40000000;clients.length=0;
  document={generation:"online-1",generatedAt:new Date(now).toISOString(),config:{...DEFAULT_SURVIVAL_CONFIG,enabled:true}};
  config=new SurvivalConfigService({fetchConfig:async()=>document},env,db);await config.refresh();
  soloDoc=configDocumentFixture();const solo={getSnapshot:()=>({...soloDoc,operational:{...soloDoc.operational,enabled:false}})} as RankedConfigService;
  engine=new SurvivalEngineService(db,clock,ids,config,{select:async(request)=>{const range=survivalMapRange(request.group,request.phase);
   return {levelId:mapId++,levelVersion:1,stars:range.minimumStars??10,demon:range.minimumStars===null,demonDifficulty:range.minimumStars===null?(range.demons[0]??null):null,
-    automatic:false,platformer:false,geometrySha256:"a".repeat(64),geometryBytes:64,verifiedAt:new Date(now).toISOString()};}});
+    automatic:false,platformer:false,geometrySha256:"a".repeat(64),geometryBytes:64,songIds:[123],sfxIds:[],verifiedAt:new Date(now).toISOString()};}});
  vi.spyOn(engine,"ensureMapSelection").mockImplementation(()=>{});
  const achievements=new AchievementService(db,clock,ids);survival=new SurvivalService(db,clock,ids,config,achievements);
  sessions=new SessionService(db,{fetchCurrentTier:async()=>"NONE"},clock,ids,solo,tokens);
@@ -686,5 +686,36 @@ describe('own Survival replay official receipt over authenticated production HTT
    mapGeneration:survivalCurrentRound(m).mapGeneration,geometryHash:survivalCurrentRound(m).map!.geometrySha256});
   expect(await engine.get(id)).toEqual(before);
   const stranger=await client();expect((await api(stranger,path)).status).toBe(403);
+ });
+});
+
+
+describe("authenticated audio recovery and delayed entry",()=>{
+ it("requires independent stable accounts, rejects stale generations and changes only a pre-play map",async()=>{
+  const {group,id}=await game(8);now+=6000;await touch(group);await online.tickOnce();await engine.selectMap(id);let m=await engine.get(id);
+  const original=survivalCurrentRound(m),level=original.map!.levelId;
+  const failure={category:"AUDIO_UNAVAILABLE_PERMANENT",resourceKind:"SONG",resourceId:123,nativeCode:2};
+  await event(group[0]!,m,"PREPARATION_FAILED",{reason:failure.category,audioFailure:failure});
+  await event(group[0]!,m,"PREPARATION_FAILED",{reason:failure.category,audioFailure:failure});
+  expect((await engine.get(id)).state).toBe("PREPARING");
+  expect(Number((await db.query<{n:string}>("SELECT count(*)::text AS n FROM sur_audio_failure_reports WHERE match_id=$1",[id])).rows[0]!.n)).toBe(1);
+  expect((await db.query("SELECT * FROM sur_resource_quarantine WHERE resource_id=$1",[level])).rows).toHaveLength(0);
+  const stale=await api(group[1]!,`/online/matches/${id}/events`,{eventId:ids.next(),type:"PREPARATION_FAILED",roundKey:original.key,mapGeneration:99,levelId:level,reason:failure.category,audioFailure:failure});expect(stale.status).toBe(409);
+  await event(group[1]!,m,"PREPARATION_FAILED",{reason:failure.category,audioFailure:failure});
+  m=await engine.get(id);expect(m.state).toBe("MAP_SELECTION");expect(survivalCurrentRound(m).mapGeneration).toBe(original.mapGeneration+1);expect(survivalCurrentRound(m).map).toBeNull();
+  const quarantined=(await db.query<{resource_kind:string}>("SELECT resource_kind FROM sur_resource_quarantine WHERE resource_id IN ($1,123)",[level])).rows.map(r=>r.resource_kind).sort();expect(quarantined).toEqual(["MAP","SONG"]);
+  expect((await db.query("SELECT * FROM sur_lp_ledger WHERE player_id=ANY($1::uuid[])",[group.map(c=>c.session.playerId)])).rows).toHaveLength(0);
+  expect((await db.query("SELECT * FROM sur_attempts WHERE match_id=$1",[id])).rows).toHaveLength(0);
+  await engine.selectMap(id);const next=await engine.get(id);expect(survivalCurrentRound(next).map!.levelId).not.toBe(level);
+  const oldReady=await api(group[0]!,`/online/matches/${id}/events`,{eventId:ids.next(),type:"ASSETS_READY",roundKey:original.key,mapGeneration:original.mapGeneration,levelId:level,certificate:original.map,installedMods:mods});expect(oldReady.status).toBe(409);
+ });
+ it("does not let transient failures or a lone reporter quarantine any map, and forbids reports after play begins",async()=>{
+  const {group,id}=await game(8);now+=6000;await touch(group);await online.tickOnce();await engine.selectMap(id);let m=await engine.get(id);
+  for(const c of group.slice(0,2))await event(c,m,"PREPARATION_FAILED",{reason:"AUDIO_DOWNLOAD_TRANSIENT",audioFailure:{category:"AUDIO_DOWNLOAD_TRANSIENT",resourceKind:"SONG",resourceId:123,nativeCode:1}});
+  expect((await engine.get(id)).state).toBe("PREPARING");expect((await db.query("SELECT * FROM sur_resource_quarantine WHERE resource_id=123")).rows).toHaveLength(0);
+  for(const c of group)await event(c,m,"ASSETS_READY",{certificate:survivalCurrentRound(m).map});m=await engine.get(id);
+  now=survivalCurrentRound(m).entryRequestedAt!+5000;await touch(group);for(const c of group)await event(c,m,"ENTERED");m=await engine.get(id);now=survivalCurrentRound(m).startsAt!;await touch(group);m=await engine.tick(id);
+  const r=survivalCurrentRound(m),response=await api(group[0]!,`/online/matches/${id}/events`,{eventId:ids.next(),type:"PREPARATION_FAILED",roundKey:r.key,mapGeneration:r.mapGeneration,levelId:r.map!.levelId,reason:"AUDIO_UNAVAILABLE_PERMANENT",audioFailure:{category:"AUDIO_UNAVAILABLE_PERMANENT",resourceKind:"SONG",resourceId:123,nativeCode:2}});
+  expect(response.status).toBe(409);expect((await engine.get(id)).state).toBe("PLAYING");expect((await engine.get(id)).rounds[0]!.endsAt).toBe(r.endsAt);
  });
 });

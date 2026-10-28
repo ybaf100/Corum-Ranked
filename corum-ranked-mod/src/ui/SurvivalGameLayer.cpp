@@ -137,15 +137,15 @@ class SurvivalGameLayer final : public CCLayerColor {
         if(tag==12){beginResultMotion();return;}
         if(tag==11){ui::showSurvivalStandings();return;}
         if(tag==10)RankedRoundPreparation::get().retry();
-        if(tag==0)queueNativeLaunch();
+        if(tag==0){m_manualMap=true;queueNativeLaunch();}
         if(tag==15)requestClearedReplay();
         if(tag==16 && m_cardPages>1)m_cardPage=(m_cardPage+m_cardPages-1)%m_cardPages;
         if(tag==17 && m_cardPages>1)m_cardPage=(m_cardPage+1)%m_cardPages;
         if(tag==1)runtime.acknowledge();
         if(tag==2){if(runtime.outcomeChoice()==SurvivalOutcomeChoice::LiveSpectate){SurvivalSpectatorRuntime::get().leave();runtime.chooseOutcome(SurvivalOutcomeChoice::Undecided);m_browsingBoard=true;}else if(runtime.observing()){runtime.leaveObserver();runtime.chooseOutcome(SurvivalOutcomeChoice::Standings);m_browsingBoard=true;}else confirmSurrender();}
         if(tag==7){if(runtime.view().ownEliminated){SurvivalSpectatorRuntime::get().leave();runtime.chooseOutcome(SurvivalOutcomeChoice::Observe);m_browsingBoard=false;m_manualMap=true;}else runtime.beginFreePlay();}
-        if(tag==8){m_browsingBoard=false;m_manualMap=runtime.view().state=="PLAYING" || runtime.previouslyEntered();m_entrySyncAfter=runtime.serverSyncMillis();runtime.refreshRound();}
-        if(tag==9){++m_boardVisit;m_browsingBoard=true;m_manualMap=true;}
+        if(tag==8){m_browsingBoard=false;runtime.refreshRound();}
+        if(tag==9){m_browsingBoard=true;}
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
         if(tag==3)showSurvivalForceRankPopup();
 #endif
@@ -169,6 +169,7 @@ class SurvivalGameLayer final : public CCLayerColor {
     }
     void queueNativeLaunch(bool automatic=false) {
         auto& runtime=SurvivalRuntime::get();auto const context=runtime.preparationContext();
+        if(automatic && m_launchedContext==preparationContextText(context))return;
         if(m_closed || !m_pendingLaunch.empty() || !m_selection->settled() || runtime.surrenderPending() || !(runtime.canEnter() || runtime.canEnterObserver() || runtime.canReplayCleared()) ||
             (m_entrySyncAfter && runtime.serverSyncMillis()<=*m_entrySyncAfter))return;
         m_pendingLaunch=preparationContextText(context);
@@ -182,7 +183,7 @@ class SurvivalGameLayer final : public CCLayerColor {
             auto& runtime=SurvivalRuntime::get();
             auto const jukeboxOpen=owner->m_jukebox && owner->m_jukebox->lock() && owner->m_jukebox->lock()->getParent();
             if(CCDirector::sharedDirector()->getNextScene() || jukeboxOpen || owner->m_closed || !owner->isRunning() || owner->getParent()!=scene || owner->m_motion ||
-                owner->m_confirmation || owner->m_browsingBoard || (automatic && (owner->m_manualMap || navigation!=owner->m_boardVisit)) || !owner->m_selection->settled() || runtime.surrenderPending() || context!=runtime.preparationContext() || !(runtime.canEnter() || runtime.canEnterObserver() || runtime.canReplayCleared()) ||
+                owner->m_confirmation || (automatic && (owner->m_manualMap || navigation!=owner->m_boardVisit)) || !owner->m_selection->settled() || runtime.surrenderPending() || context!=runtime.preparationContext() || !(runtime.canEnter() || runtime.canEnterObserver() || runtime.canReplayCleared()) ||
                 (owner->m_entrySyncAfter && runtime.serverSyncMillis()<=*owner->m_entrySyncAfter))return;
             if(RankedRoundPreparation::get().launch(scene)){owner->m_launchedContext=preparationContextText(context);owner->m_replayRequestedContext.clear();}
         });
@@ -395,7 +396,9 @@ public:
         auto const headingWidth=std::max(80.f,getContentSize().width-24-(m_boardClock->isVisible()?2*144.f:0.f));
         m_heading->setPosition({getContentSize().width/2,getContentSize().height-29});
         ui::fitMenuLabelWidth(m_boardClock,140,.28f,.18f);
-        auto const mapWindow=nextRound && !elimination && !intro && !liveBoard && view.map.levelId>0 && view.state!="ROUND_RESULT";
+        auto const preparationWindow=nextRound && !elimination && !intro && view.map.levelId>0 && view.state!="ROUND_RESULT";
+        if(preparationWindow)m_selection->advancePreparation(view,runtime.countdownMs());
+        auto const mapWindow=preparationWindow && !liveBoard;
         auto const searching=nextRound && !elimination && !intro && !liveBoard && view.state=="MAP_SELECTION";
         auto const selectionWindow=mapWindow || searching;
         auto const now=std::chrono::steady_clock::now();
@@ -448,7 +451,7 @@ public:
                 (runtime.canEnter() || runtime.canEnterObserver() || runtime.canReplayCleared()) && interactive && (!m_entrySyncAfter || runtime.serverSyncMillis()>*m_entrySyncAfter),runtime.countdownMs(),runtime.roundRemainingMs());
         }else if(!elimination)showParticipants(view,result);
         if(m_confirmation && (result || view.state=="CANCELLED" || m_confirmationContext!=view.id+":"+view.roundKey+":"+std::to_string(view.mapGeneration))){if(auto popup=m_confirmation->lock())popup->cancel();m_confirmation.reset();}
-        runtime.selectedPanelReady(selectionWindow && m_selection->settled() && preparation.mapReady && preparation.audioReady && preparation.error.empty());
+        runtime.selectedPanelReady(preparationWindow && m_selection->settled() && preparation.mapReady && preparation.audioReady && preparation.error.empty());
         if(RankedRoundPreparation::get().ready()){
             if(runtime.observing())runtime.validateNative(level);
             else if(!view.ownAssetsReady)runtime.assetsReady(level);
@@ -458,7 +461,7 @@ public:
         if(jukeboxOpen)if(auto popup=m_jukebox->lock())popup->setCountdown(i18n::text(clock,clock));
         // INTRO and round-result gates advance on the authoritative server clock.
         if(!m_motion && !elimination && !m_confirmation && !jukeboxOpen && !debugPopup && !runtime.creating() &&
-            mapWindow && view.state!="PLAYING" && !m_manualMap && m_selection->settled() && !runtime.surrenderPending() &&
+            preparationWindow && !runtime.previouslyEntered() && !m_manualMap && m_selection->settled() && !runtime.surrenderPending() &&
             (runtime.canEnter() || runtime.canEnterObserver()) && m_launchedContext!=context)queueNativeLaunch(true);
         if(m_replayRequestedContext==context && selectionWindow && !m_motion && !m_confirmation && !m_browsingBoard && runtime.canReplayCleared())queueNativeLaunch();
         if(view.state=="CANCELLED" && !result && !runtime.creating())runtime.acknowledge();
@@ -481,7 +484,7 @@ public:
         // Both gameplay exit and this first Back are navigation only. The
         // retained coordinator owns the match/polling and never pops here.
         if(!m_browsingBoard && !(SurvivalRuntime::get().officialRoundCleared() && !m_manualMap)){
-            ++m_boardVisit;m_browsingBoard=true;m_manualMap=true;return;
+            m_browsingBoard=true;return;
         }
         if(!SurvivalRuntime::get().view().ownEliminated)confirmSurrender();
     }

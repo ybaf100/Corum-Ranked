@@ -113,7 +113,7 @@ export class SurvivalOnlineService implements OnApplicationBootstrap,OnApplicati
     let command:SurvivalCommand;
     if(body.type==="PRESENTATION_COMPLETE")command={type:body.type,roundKey:body.roundKey,mapGeneration:body.mapGeneration,participantId:own.participant_id};
     else if(body.type==="ASSETS_READY"){if(!body.certificate)throw new BadRequestException("Map certificate required");command={type:body.type,...context,certificate:body.certificate};}
-    else if(body.type==="PREPARATION_FAILED")command={type:body.type,...context,reason:body.reason??"NATIVE_PREPARATION_FAILED"};
+    else if(body.type==="PREPARATION_FAILED")command={type:body.type,...context,reason:body.reason??"NATIVE_PREPARATION_FAILED",...(body.audioFailure?{audioFailure:body.audioFailure}:{})};
     else if(body.type==="ENTERED")command={type:body.type,...context};
     else if(body.type==="FORFEIT")command={type:body.type,roundKey:body.roundKey,mapGeneration:body.mapGeneration,participantIds:[own.participant_id],reason:"ONLINE_SURRENDER"};
     else {

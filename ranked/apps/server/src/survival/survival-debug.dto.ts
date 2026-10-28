@@ -1,3 +1,4 @@
+import {AUDIO_FAILURE_CATEGORIES,type SurvivalAudioFailure} from "./survival-audio-recovery.js";
 import { IsArray, ValidateNested, IsIn, IsInt, IsNumber, IsObject, IsOptional, IsString, IsUUID, Length, Max, Min, ValidateIf } from "class-validator";
 import type { SurvivalDifficultyGroup, SurvivalVerifiedMap } from "@corum-ranked/rules";
 import { Type } from "class-transformer";
@@ -9,6 +10,12 @@ export class CreateSurvivalDebugDto extends EnvironmentRecheckDto {
   @IsIn(["RED_BRONZE","SILVER","GOLD"]) public averageGroup!:SurvivalDifficultyGroup;
   @IsOptional() @IsInt() @Min(1) @Max(64) public forceRank?:number;
   @IsOptional() @IsInt() @Min(1) @Max(63) public botCount?:number;
+}
+export class SurvivalAudioFailureDto implements SurvivalAudioFailure {
+  @IsIn(AUDIO_FAILURE_CATEGORIES) public category!:SurvivalAudioFailure["category"];
+  @IsIn(["SONG","SFX"]) public resourceKind!:"SONG"|"SFX";
+  @IsInt() @Min(1) @Max(2147483647) public resourceId!:number;
+  @IsInt() @Min(0) @Max(3) public nativeCode!:number;
 }
 export class SurvivalDebugEventDto {
   @IsUUID() public eventId!:string;
@@ -24,6 +31,7 @@ export class SurvivalDebugEventDto {
   @IsOptional() @IsNumber({allowInfinity:false,allowNaN:false}) @Min(0) @Max(100) public currentProgress?:number;
   @IsOptional() @IsObject() public certificate?:SurvivalVerifiedMap;
   @IsOptional() @IsString() @Length(1,160) public reason?:string;
+  @IsOptional() @ValidateNested() @Type(()=>SurvivalAudioFailureDto) public audioFailure?:SurvivalAudioFailureDto;
 }
 export class ForceSurvivalDebugDto {
   @IsString() @Length(1,128) public password!:string;

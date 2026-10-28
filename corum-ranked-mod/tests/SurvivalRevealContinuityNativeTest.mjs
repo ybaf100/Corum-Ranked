@@ -47,6 +47,7 @@ test('production selection context/registry path never resets an active reel on 
  // Compile the production ownership/timeline transaction before the renderer.
  // Only renderer, saved preferences and wall-clock boundaries are doubled.
  const transaction=present.slice(present.indexOf('    auto const now='),present.indexOf('    m_active=true;'));
+ const timeline=source.slice(source.indexOf('bool SurvivalMapSelectionLayer::advanceTimeline('),source.indexOf('void SurvivalMapSelectionLayer::advancePreparation(')).replace('SurvivalMapSelectionLayer::','');
  const code=`#include "domain/SurvivalMapSelection.hpp"
 #include <cassert>
 #include <map>
@@ -58,10 +59,12 @@ struct SurvivalThumbnailProvider{static unsigned applicationEpoch(){return 0;}};
 struct Mod{static Mod*get(){static Mod m;return &m;}template<class T>T getSavedValue(char const*){return {};}};
 struct RevealRecord{long began=0;std::size_t consumed=0;bool complete=false,centerPlayed=false;SurvivalRevealModeChoice mode{};SurvivalThumbnailReel reel{};long resolvedAt=0;};
 std::map<std::string,RevealRecord>reveals;
-struct View{std::string id="match",roundKey="r1";int mapGeneration=1;struct Map{int levelId=0;}map;};
+struct View{std::string id="match",roundKey="r1",state="PREPARING";int mapGeneration=1;struct Map{int levelId=0;}map;};
+using SurvivalMatchView=View;
 struct Layer{SurvivalMapSelectionTimeline m_timeline;unsigned m_appEpoch=0;unsigned long m_sceneGeneration=1;bool m_needsResume=false;int resets=0;long m_lastFrameMillis=0;
  Size getContentSize(){return {};}void resetVisuals(){++resets;}
- void present(View const&view){${transaction} (void)size;}
+ ${timeline}
+ void present(View const&view){std::optional<std::int64_t> countdown;${transaction} (void)size;(void)context;(void)changed;}
 };
 int main(){View view;Layer layer;layer.present(view);assert(layer.resets==1);
  clockMs=2500;view.map.levelId=73153577;layer.present(view);assert(layer.resets==1&&layer.m_timeline.frame(clockMs).elapsed==1.5);

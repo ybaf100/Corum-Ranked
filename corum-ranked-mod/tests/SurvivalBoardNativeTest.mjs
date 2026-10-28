@@ -86,7 +86,7 @@ struct SurvivalRuntime{SurvivalOutcomeChoice outcomeChoice()const{return Surviva
 struct Coordinator{std::uint64_t m_boardVisit=0;bool m_closed=false,m_motion=false,m_browsingBoard=false,m_manualMap=false;std::chrono::steady_clock::time_point m_eliminationUntil{};int confirmations=0;void confirmSurrender(){++confirmations;}
  ${back}
 };
-int main(){Coordinator c;auto&r=SurvivalRuntime::get();c.keyBackClicked();assert(c.m_browsingBoard&&c.m_manualMap&&c.confirmations==0&&r.acknowledgments==0&&!c.m_closed);
+int main(){Coordinator c;auto&r=SurvivalRuntime::get();c.keyBackClicked();assert(c.m_browsingBoard&&!c.m_manualMap&&c.m_boardVisit==0&&c.confirmations==0&&r.acknowledgments==0&&!c.m_closed);
  c.keyBackClicked();assert(c.confirmations==1&&!c.m_closed);r.v.ownEliminated=true;c.keyBackClicked();assert(c.confirmations==1);
  c.m_browsingBoard=false;c.m_manualMap=false;r.cleared=true;r.v.ownEliminated=false;c.keyBackClicked();assert(c.confirmations==2);
  c.m_manualMap=true;c.keyBackClicked();assert(c.m_browsingBoard&&c.confirmations==2);

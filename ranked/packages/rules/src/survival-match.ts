@@ -38,6 +38,8 @@ export interface SurvivalRoundPlayer {
   participantId: string;
   assetsReadyAt: number | null;
   preparationFailure: string | null;
+  /** Connected download/entry delay; distinct from transport absence. */
+  entryDeferred?:boolean;
   enteredAt: number | null;
   highestProgress: number;
   attempts: SurvivalAttempt[];
@@ -53,6 +55,7 @@ export interface SurvivalRound {
   phase: SurvivalMapPhase;
   target: number;
   mapGeneration: number;
+  preparationRerolls?:number;
   map: SurvivalVerifiedMap | null;
   selectedMaps: SurvivalVerifiedMap[];
   preparationStartedAt: number | null;
@@ -111,7 +114,7 @@ export type SurvivalCommand =
   | { type: "NEXT_MAP_SELECTED"; roundKey:string;mapGeneration:number;map:SurvivalVerifiedMap }
   | { type: "MAP_SELECTED"; roundKey: string; mapGeneration: number; map: SurvivalVerifiedMap }
   | ({ type: "ASSETS_READY"; participantId: string; certificate: SurvivalVerifiedMap } & SurvivalRoundContext)
-  | ({ type: "PREPARATION_FAILED"; participantId: string; reason: string } & SurvivalRoundContext)
+  | ({ type: "PREPARATION_FAILED"; participantId: string; reason: string; audioFailure?:{category:string;resourceKind:"SONG"|"SFX";resourceId:number;nativeCode:number} } & SurvivalRoundContext)
   | ({ type: "ENTERED"; participantId: string } & SurvivalRoundContext)
   | ({ type: "ATTEMPT_START"; participantId: string; attemptId: string } & SurvivalRoundContext)
   | ({ type: "PROGRESS" | "ATTEMPT_END"; participantId: string; attemptId: string; progress: number; currentProgress?: number } & SurvivalRoundContext)
@@ -119,6 +122,7 @@ export type SurvivalCommand =
   | ({ type: "DEBUG_FORCE_CLEAR"; participantId: string; attemptId: string } & SurvivalRoundContext)
   | ({ type: "DEBUG_END_ROUND"; participantId: string } & SurvivalRoundContext)
   // This command is for the verified server provider, never an untrusted client report.
+  | { type:"MAP_SUPPLY_FAILED";roundKey:string;mapGeneration:number }
   | { type: "MAP_INVALIDATED"; roundKey: string; mapGeneration: number; reason: string }
   // Future session adapters establish responsibility; the engine only records
   // their trusted decision. No public forfeit route is exposed in M3.
@@ -128,7 +132,7 @@ function conflict(message: string): never { throw new RankedDomainError("INVALID
 export const survivalCurrentRound = (match: SurvivalMatch): SurvivalRound => match.rounds[match.rounds.length - 1]!;
 const terminal = (match: SurvivalMatch): boolean => match.state === "FINAL_RESULT" || match.state === "CANCELLED";
 const activePlayers = (round: SurvivalRound) => round.players.filter(player => !player.forfeited);
-const entryPlayers = (round: SurvivalRound) => activePlayers(round).filter(player=>!player.absent);
+const entryPlayers = (round: SurvivalRound) => activePlayers(round).filter(player=>!player.absent&&!player.entryDeferred);
 
 /** Raw percentages for normal rounds; fixed integer milli-percent for Death Match.
  * Decimal shifting avoids the 1.005-style binary multiplication rounding error. */
@@ -153,7 +157,7 @@ function roundScore(round: SurvivalRound, player: SurvivalRoundPlayer): number {
 }
 function startAttempt(match: SurvivalMatch, round: SurvivalRound, player: SurvivalRoundPlayer, id: string, now: number): void {
   if (player.attempts.some(a => a.id === id)) return;
-  if (match.state !== "PLAYING" || (match.online && (player.absent || player.assetsReadyAt === null || player.enteredAt === null)) ||
+  if (match.state !== "PLAYING" || (match.online && (player.absent || player.entryDeferred || player.assetsReadyAt === null || player.enteredAt === null)) ||
     !id || id.length > 80 || player.attempts.some(a => a.endedAt === null) ||
     (round.phase === "TIEBREAK" && player.attempts.length >= 3)) conflict("Attempt cannot start");
   player.attempts.push({id,sequence:player.attempts.length+1,startedAt:now,endedAt:null,highestProgress:0});
@@ -288,15 +292,23 @@ function survivorsOrEnd(match: SurvivalMatch, round: SurvivalRound, at: number):
 }
 function forfeitUnready(match: SurvivalMatch, round: SurvivalRound, ready: (p: SurvivalRoundPlayer) => boolean,
   at: number, reason: string): void {
+  if(match.online){
+    // The shared deadline still opens entry for ready players. A download is
+    // not a surrender: delayed clients keep zero until certified late entry.
+    for(const player of activePlayers(round).filter(p=>!ready(p)))player.entryDeferred=true;
+    return;
+  }
   for (const player of entryPlayers(round).filter(p => !ready(p))) {
     player.forfeited=true; eliminate(match,round,player,roundScore(round,player),reason,at);
   }
   survivorsOrEnd(match,round,at);
 }
 function reroll(match: SurvivalMatch, round: SurvivalRound, at: number, reason: string): void {
+  round.preparationRerolls=(round.preparationRerolls??0)+1;
+  if(round.preparationRerolls>3){finishMatch(match,null,at,"MAP_SUPPLY_UNAVAILABLE");return;}
   round.mapGeneration++; round.map=null; round.preparationStartedAt=null; round.entryRequestedAt=null;
   round.firstEnteredAt=null; round.startsAt=null; round.endsAt=null;
-  for (const player of round.players) {player.assetsReadyAt=null; player.preparationFailure=null; player.enteredAt=null;}
+  for (const player of round.players) {player.assetsReadyAt=null; player.preparationFailure=null; player.enteredAt=null;player.entryDeferred=false;}
   transition(match,"MAP_SELECTION",at,reason);
 }
 function finishRound(match: SurvivalMatch, round: SurvivalRound, at: number): void {
@@ -333,8 +345,13 @@ function advanceTimers(match: SurvivalMatch, now: number): void {
     round.startsAt=now+3000;round.endsAt=round.startsAt+180000;transition(match,"COUNTDOWN",now,"PRESENT_ENTRY_BARRIER_COMPLETE");
   }
   if (match.state === "PREPARING" && round.preparationStartedAt !== null && now >= round.preparationStartedAt + 15_000) {
-    const ready=entryPlayers(round).filter(p => p.assetsReadyAt !== null);
-    if (!ready.length && entryPlayers(round).length) {reroll(match,round,now,"NO_ASSETS_READY"); return;}
+    const ready=(match.online?activePlayers(round):entryPlayers(round)).filter(p => p.assetsReadyAt !== null);
+    if (!ready.length && entryPlayers(round).length) {
+      // A fixed server-owned grace applies only when nobody can start yet.
+      // One slow client never extends the ready participants' fifteen seconds.
+      if(match.online && now<round.preparationStartedAt+60_000 && !activePlayers(round).every(p=>p.preparationFailure!==null))return;
+      reroll(match,round,now,"NO_ASSETS_READY"); return;
+    }
     forfeitUnready(match,round,p => p.assetsReadyAt !== null,now,"ASSET_PREPARATION_TIMEOUT");
     if (!terminal(match)) {round.entryRequestedAt=now; transition(match,"ENTERING",now,"ASSETS_BARRIER_COMPLETE");}
   }
@@ -389,6 +406,9 @@ export function reduceSurvivalMatch(before: SurvivalMatch, command: SurvivalComm
       assertSelectedMap(match,round.phase,command.map);
       round.map=structuredClone(command.map); round.selectedMaps.push(structuredClone(command.map));
       if(match.presentationGate!=="INTRO"){round.preparationStartedAt=now; transition(match,"PREPARING",now,"VERIFIED_MAP_SELECTED");}
+    } else if(command.type==="MAP_SUPPLY_FAILED"){
+      if(match.state!=="MAP_SELECTION")conflict("Map supply cancellation is pre-play only");
+      finishMatch(match,null,now,"MAP_SUPPLY_UNAVAILABLE");
     } else if (command.type === "MAP_INVALIDATED") {
       if (!["PREPARING","ENTERING"].includes(match.state)) conflict("Started rounds cannot change map");
       reroll(match,round,now,command.reason);
@@ -422,11 +442,11 @@ export function reduceSurvivalMatch(before: SurvivalMatch, command: SurvivalComm
       switch (command.type) {
         case "ASSETS_READY": {
           if (player.assetsReadyAt !== null) break;
-          const late=match.online && player.absent && ["ENTERING","COUNTDOWN","PLAYING"].includes(match.state);
+          const late=match.online && (player.absent||player.entryDeferred) && ["ENTERING","COUNTDOWN","PLAYING"].includes(match.state);
           if (match.state !== "PREPARING" && !late) conflict("Assets are not being prepared");
           const {verifiedAt: _receivedAt,...certificate}=command.certificate;
           const {verifiedAt: _verifiedAt,...expected}=round.map;
-          if (Object.keys(expected).some(key => certificate[key as keyof typeof certificate] !== expected[key as keyof typeof expected])) conflict("Client map certificate mismatch");
+          if (Object.keys(expected).some(key => JSON.stringify(certificate[key as keyof typeof certificate]) !== JSON.stringify(expected[key as keyof typeof expected]))) conflict("Client map certificate mismatch");
           player.assetsReadyAt=now; player.preparationFailure=null;
           if (match.state==="PREPARING" && entryPlayers(round).every(p => p.assetsReadyAt !== null)) {
             round.entryRequestedAt=now; transition(match,"ENTERING",now,"ASSETS_BARRIER_COMPLETE");
@@ -434,15 +454,15 @@ export function reduceSurvivalMatch(before: SurvivalMatch, command: SurvivalComm
           break;
         }
         case "PREPARATION_FAILED":
-          if (match.state !== "PREPARING" || player.assetsReadyAt !== null) conflict("Preparation already finished");
+          if (!["PREPARING","ENTERING"].includes(match.state) || player.assetsReadyAt !== null) conflict("Preparation already finished");
           player.preparationFailure=command.reason;
           if (activePlayers(round).every(p => p.preparationFailure !== null)) reroll(match,round,now,"ALL_PREPARATIONS_FAILED");
           break;
         case "ENTERED":
           if (player.enteredAt !== null) break;
-          if ((match.state !== "ENTERING" && !(match.online && player.absent && ["COUNTDOWN","PLAYING"].includes(match.state))) || player.assetsReadyAt === null) conflict("Native entry is not invited");
+          if ((match.state !== "ENTERING" && !(match.online && (player.absent||player.entryDeferred) && ["COUNTDOWN","PLAYING"].includes(match.state))) || player.assetsReadyAt === null) conflict("Native entry is not invited");
           if (match.state === "ENTERING" && (survivalEntryOpensAt(round) === null || now < survivalEntryOpensAt(round)!)) conflict("Native entry is waiting for the ready countdown");
-          player.enteredAt=now;player.absent=false; round.firstEnteredAt ??= now;
+          player.enteredAt=now;player.absent=false;player.entryDeferred=false; round.firstEnteredAt ??= now;
           if (match.state==="ENTERING" && entryPlayers(round).every(p => p.enteredAt !== null)) {
             round.startsAt=now+3_000; round.endsAt=round.startsAt+180_000;
             transition(match,"COUNTDOWN",now,"ALL_NATIVE_SCENES_ENTERED");
@@ -574,7 +594,8 @@ export function survivalLiveView(match: SurvivalMatch, now: number, participantI
     cutoffScore:round.phase === "TIEBREAK" && cutoff !== null ? cutoff/1000 : cutoff,
     targetQualifiers:Math.min(round.target,standings.length),finalFirstScore:["FINAL","TIEBREAK"].includes(round.phase) ? standings[0]?.score ?? null : null,
     preparation:round.players.map(p => ({participantId:p.participantId,assetsReady:p.assetsReadyAt !== null,
-      entered:p.enteredAt !== null,absent:p.absent??false,failed:p.preparationFailure,forfeited:p.forfeited})),
+      entered:p.enteredAt !== null,absent:p.absent??false,entryDeferred:p.entryDeferred??false,
+      preparationStatus:p.forfeited?"FORFEITED":p.enteredAt!==null?"ENTERED":p.absent?"ABSENT":p.assetsReadyAt!==null?"ASSETS_READY":p.preparationFailure?"PREPARATION_FAILED":"DOWNLOADING",failed:p.preparationFailure,forfeited:p.forfeited})),
     participants:match.players.map(p => ({participantId:p.participantId,name:p.name,kind:p.kind,gdAccountId:p.gdAccountId??null,lpSnapshot:p.lp,
       displayedTier:match.config.tierBands.find(b=>b.tier===p.displayedTier)?.group??p.displayedTier??survivalTierForLp(p.lp,match.config.tierBands).group,
       eliminationStage:p.eliminationStage,eliminatedAt:p.eliminatedAt===undefined?null:new Date(p.eliminatedAt).toISOString(),finalRank:p.finalRank,forfeitReason:p.forfeitReason})),

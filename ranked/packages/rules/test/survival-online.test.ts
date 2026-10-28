@@ -8,7 +8,7 @@ const make=(n=16)=>createSurvivalMatch("test",entrants(n),config,"g",0,true);
 const context=(m:SurvivalMatch)=>({roundKey:survivalCurrentRound(m).key,mapGeneration:survivalCurrentRound(m).mapGeneration,levelId:survivalCurrentRound(m).map?.levelId??0});
 function command(m:SurvivalMatch,c:SurvivalCommand,time:number){return reduceSurvivalMatch(m,c,time);}
 function map(m:SurvivalMatch,time:number){const r=survivalCurrentRound(m),range=survivalMapRange(m.difficultyGroup,r.phase);
- return command(m,{type:"MAP_SELECTED",...context(m),map:{levelId:40000000+r.ordinal,levelVersion:1,stars:range.minimumStars??10,demon:range.minimumStars===null,demonDifficulty:range.minimumStars===null?(range.demons[0]??null):null,
+ return command(m,{type:"MAP_SELECTED",...context(m),map:{levelId:40000000+r.ordinal+r.mapGeneration*100,levelVersion:1,stars:range.minimumStars??10,demon:range.minimumStars===null,demonDifficulty:range.minimumStars===null?(range.demons[0]??null):null,
  automatic:false,platformer:false,geometryBytes:1,geometrySha256:"a".repeat(64),verifiedAt:new Date(time).toISOString()}},time);}
 function ready(m:SurvivalMatch,time:number){m=map(m,time);const r=survivalCurrentRound(m);
  for(const p of r.players)m=command(m,{type:"ASSETS_READY",...context(m),participantId:p.participantId,certificate:r.map!},time+1);
@@ -73,5 +73,38 @@ describe("Survival M5 confirmed online policies",()=>{
      const actual=human.reduce((a,b)=>a+b,0)/human.length,filled=[...human,...bots].reduce((a,b)=>a+b,0)/16;
      expect(survivalDifficultyForAverage(filled,config.tierBands)).toBe(survivalDifficultyForAverage(actual,config.tierBands));expect(human).toEqual(before);
    }
+ });
+});
+
+describe("online preparation deferral",()=>{
+ it.each([8,16,64])("keeps slow downloaders eligible in a %i-player match without extending the shared clock",n=>{
+   const cfg={...config,matchPlayerCount:n===64?64 as const:16 as const,round1Qualifiers:n===64?40:10,round2Qualifiers:n===64?26:6,round3Qualifiers:n===64?12:3,...(n===64?{round4Qualifiers:5}:{})};
+   let m=map(createSurvivalMatch("slow",entrants(n),cfg,"g",0,true),1);
+   const certificate=survivalCurrentRound(m).map!;
+   for(let i=1;i<n;i++)m=command(m,{type:"ASSETS_READY",...context(m),participantId:`p${i}`,certificate},2);
+   m=command(m,{type:"TICK"},15001);
+   expect(m.state).toBe("ENTERING");expect(survivalCurrentRound(m).players[0]).toMatchObject({entryDeferred:true,forfeited:false,assetsReadyAt:null,enteredAt:null,highestProgress:0});
+   for(let i=1;i<n;i++)m=command(m,{type:"ENTERED",...context(m),participantId:`p${i}`},20001);
+   const start=survivalCurrentRound(m).startsAt!,end=survivalCurrentRound(m).endsAt!;
+   m=command(m,{type:"TICK"},start);
+   expect(()=>command(m,{type:"ATTEMPT_START",...context(m),participantId:"p0",attemptId:"early"},start+1)).toThrow();
+   m=command(m,{type:"ASSETS_READY",...context(m),participantId:"p0",certificate},start+2);
+   expect(()=>command(m,{type:"ATTEMPT_START",...context(m),participantId:"p0",attemptId:"early2"},start+3)).toThrow();
+   m=command(m,{type:"ENTERED",...context(m),participantId:"p0"},start+4);
+   m=record(m,"p0",74.1234,start+5);
+   expect(survivalCurrentRound(m).players[0]).toMatchObject({entryDeferred:false,forfeited:false,highestProgress:74.1234});
+   expect(survivalCurrentRound(m).endsAt).toBe(end);expect(end-start).toBe(180000);expect(survivalSettlementInputs(m)).toEqual([]);
+ });
+ it("caps all-downloading grace and map replacement attempts without charging supply failures",()=>{
+   let m=map(make(8),1);m=command(m,{type:"TICK"},15001);expect(m.state).toBe("PREPARING");
+   m=command(m,{type:"TICK"},60001);expect(m.state).toBe("MAP_SELECTION");
+   for(let i=0;i<3;i++){m=map(m,m.updatedAt+1);m=command(m,{type:"MAP_INVALIDATED",...context(m),reason:"COMMON_AUDIO_UNAVAILABLE"},m.updatedAt+1);}
+   expect(m.state).toBe("CANCELLED");expect(m.cancellationReason).toBe("MAP_SUPPLY_UNAVAILABLE");expect(survivalSettlementInputs(m)).toEqual([]);
+ });
+ it("accepts value-identical certificate arrays after JSON transport and rejects changed dependencies",()=>{
+   let m=map(make(8),1);survivalCurrentRound(m).map={...survivalCurrentRound(m).map!,songIds:[123],sfxIds:[456]};
+   const certificate=structuredClone(survivalCurrentRound(m).map!);
+   expect(()=>command(m,{type:"ASSETS_READY",...context(m),participantId:"p0",certificate:{...certificate,songIds:[999]}},2)).toThrow();
+   m=command(m,{type:"ASSETS_READY",...context(m),participantId:"p0",certificate},2);expect(survivalCurrentRound(m).players[0]!.assetsReadyAt).toBe(2);
  });
 });

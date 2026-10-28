@@ -17,7 +17,7 @@ namespace corum::ranked::ui {
 namespace {
 std::int64_t monotonicMs(){return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();}
 std::uint64_t sceneSequence=0;
-struct RevealRecord {std::int64_t began=0;std::size_t consumed=0;bool complete=false,centerPlayed=false;SurvivalRevealModeChoice mode;SurvivalThumbnailReel reel;std::int64_t resolvedAt=0;};
+struct RevealRecord {std::int64_t began=0;std::size_t consumed=0;bool complete=false,centerPlayed=false;SurvivalRevealModeChoice mode{};SurvivalThumbnailReel reel{};std::int64_t resolvedAt=0;};
 // Retained scenes normally keep the timeline. The bounded registry also covers
 // a recreated coordinator without replaying elapsed locks or a second reveal.
 std::map<std::string,RevealRecord> reveals;
@@ -186,15 +186,8 @@ void SurvivalMapSelectionLayer::playLocks(SurvivalRevealFrame const& frame){
 #endif
     }
 }
-void SurvivalMapSelectionLayer::present(SurvivalMatchView const& view,RoundPreparationView const& prep,SurvivalNativeOptions options,
-    bool supportsLdm,bool actionsEnabled,bool canEnter,std::optional<std::int64_t> countdown,std::optional<std::int64_t> remaining){
-    auto const now=monotonicMs();auto const size=getContentSize();
-#if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
-    if(m_lastFrameMillis && now-m_lastFrameMillis>50)log::info("[SurvivalReveal] frameGapMs={} id={}",now-m_lastFrameMillis,view.map.levelId);
-#endif
-    m_lastFrameMillis=now;
-    auto const appEpoch=SurvivalThumbnailProvider::applicationEpoch();
-    if(appEpoch!=m_appEpoch){m_appEpoch=appEpoch;resetVisuals();m_needsResume=true;}
+bool SurvivalMapSelectionLayer::advanceTimeline(SurvivalMatchView const& view,std::optional<std::int64_t> countdown){
+    auto const now=monotonicMs();
     SurvivalSelectionContext context{view.id,view.roundKey,view.mapGeneration,static_cast<std::uint64_t>(std::max(0,view.map.levelId)),m_sceneGeneration};
     bool const changed=!context.sameReveal(m_timeline.context());
     if(changed){resetVisuals();
@@ -210,6 +203,25 @@ void SurvivalMapSelectionLayer::present(SurvivalMatchView const& view,RoundPrepa
         Mod::get()->getSavedValue<std::string>("survival-map-reveal-complete")==context.key()){
         m_timeline.skip();
     }
+    m_timeline.followServer(view.state,countdown,now);
+    return changed;
+}
+void SurvivalMapSelectionLayer::advancePreparation(SurvivalMatchView const& view,std::optional<std::int64_t> countdown){
+    advanceTimeline(view,countdown);
+    auto const& context=m_timeline.context();
+    if(m_timeline.frame(monotonicMs()).settled){auto& record=reveals[context.revealKey()];if(!record.complete){record.complete=true;Mod::get()->setSavedValue("survival-map-reveal-complete",context.revealKey());}}
+}
+void SurvivalMapSelectionLayer::present(SurvivalMatchView const& view,RoundPreparationView const& prep,SurvivalNativeOptions options,
+    bool supportsLdm,bool actionsEnabled,bool canEnter,std::optional<std::int64_t> countdown,std::optional<std::int64_t> remaining){
+    auto const now=monotonicMs();auto const size=getContentSize();
+#if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
+    if(m_lastFrameMillis && now-m_lastFrameMillis>50)log::info("[SurvivalReveal] frameGapMs={} id={}",now-m_lastFrameMillis,view.map.levelId);
+#endif
+    m_lastFrameMillis=now;
+    auto const appEpoch=SurvivalThumbnailProvider::applicationEpoch();
+    if(appEpoch!=m_appEpoch){m_appEpoch=appEpoch;resetVisuals();m_needsResume=true;}
+    auto const changed=advanceTimeline(view,countdown);
+    auto const& context=m_timeline.context();
     m_active=true;setVisible(true);
     auto const supported=SurvivalThumbnailProvider::supported();bool previewsReady=false;
     if(supported){auto& provider=SurvivalThumbnailProvider::get();provider.activate(context);m_providerContext=context;previewsReady=!provider.previews().empty();}
@@ -262,7 +274,7 @@ void SurvivalMapSelectionLayer::present(SurvivalMatchView const& view,RoundPrepa
 #endif
     }}
 }
-bool SurvivalMapSelectionLayer::settled()const{return m_active && m_timeline.frame(monotonicMs()).settled;}
+bool SurvivalMapSelectionLayer::settled()const{return m_timeline.frame(monotonicMs()).settled;}
 void SurvivalMapSelectionLayer::hideSelection(){
     if(m_providerContext){SurvivalThumbnailProvider::get().release(*m_providerContext);m_providerContext.reset();}
     if(!m_active)return;m_active=false;setVisible(false);m_panel->suspend();m_sounds.clear();resetVisuals();m_needsResume=true;m_lastFrameMillis=0;
