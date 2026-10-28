@@ -24,6 +24,8 @@ export class SurvivalMapPool implements SurvivalMapProvider,OnApplicationBootstr
   private priority:string|null=null;
   private timer:ReturnType<typeof setTimeout>|null=null;
   private stopping=false;
+  private initialFill:Promise<void>=Promise.resolve();
+  public waitForInitialFill():Promise<void>{return this.initialFill;}
   public constructor(private readonly db:DatabasePort,private readonly source:SurvivalMapProvider,
     private readonly clock:ServerClock,private readonly minimumLevelId:number|(()=>number)=40_000_000){}
   private now(){return this.clock.now().getTime();}
@@ -52,6 +54,7 @@ export class SurvivalMapPool implements SurvivalMapProvider,OnApplicationBootstr
     const rows=(await this.db.query<CandidateRow>("SELECT bucket_key,level_id,metadata,expires_at FROM sur_map_candidates WHERE status='READY' AND expires_at>$1",[this.clock.now().toISOString()])).rows;
     for(const row of rows){this.known.add(Number(row.level_id));const bucket=this.buckets.get(row.bucket_key);if(bucket){bucket.ready++;bucket.nextAt=Math.min(bucket.nextAt,new Date(row.expires_at).getTime());}}
     for(const [key,bucket]of this.buckets)if(bucket.ready<TARGET)this.refill(key);
+    this.initialFill=Promise.all([...this.jobs.values()]).then(()=>{});
     this.schedule();
   }
   public async onApplicationShutdown():Promise<void>{this.stopping=true;if(this.timer)clearTimeout(this.timer);await Promise.allSettled(this.jobs.values());}

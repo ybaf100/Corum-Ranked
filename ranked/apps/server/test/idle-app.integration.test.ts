@@ -1,3 +1,5 @@
+import {SURVIVAL_MAP_PROVIDER} from "../src/survival/survival-map.provider.js";
+import {SurvivalMapPool} from "../src/survival/survival-map-pool.js";
 import 'reflect-metadata';
 import { appendFileSync } from 'node:fs';
 import { readFile,readdir } from 'node:fs/promises';
@@ -51,6 +53,12 @@ it.each([16,64] as const)('measures actual full-app SQL in %i-player format with
  const app=module.createNestApplication();app.useLogger(false);
  try{
   await app.init();
+  // Initial verified-candidate work is real startup work, not idle polling.
+  // Keep its actual SQL in the startup count, then measure genuine quiescence.
+  // Do not replace the real provider or disable its backoff/recovery worker.
+  await app.get<SurvivalMapPool>(SURVIVAL_MAP_PROVIDER).waitForInitialFill();
+  const recovered=(await db.query<{count:string}>("SELECT count(*)::text AS count FROM sur_map_candidate_buckets WHERE request->'lastFailure' IS NOT NULL")).rows[0]!;
+  expect(Number(recovered.count)).toBe(11);
   if(format===64){const config=app.get(SurvivalConfigService);await config.withAdmission(()=>db.transaction(tx=>config.operationMode(tx,64)));config.applyOperationMode(64);}
   expect(app.get(SurvivalConfigService).getSnapshot().config.matchPlayerCount).toBe(format);
   const startup=counter.metrics.queries;counter.reset();
