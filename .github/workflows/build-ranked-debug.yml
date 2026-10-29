@@ -207,6 +207,9 @@ jobs:
           - name: Windows
             os: windows-latest
             target: Win64
+          - name: macOS
+            os: macos-latest
+            target: MacOS
           - name: iOS
             os: macos-latest
             target: iOS
@@ -272,6 +275,7 @@ jobs:
       matrix:
         config:
           - {name: Windows, os: windows-latest, target: Win64}
+          - {name: macOS, os: macos-latest, target: MacOS}
           - {name: Android32, os: ubuntu-latest, target: Android32}
           - {name: Android64, os: ubuntu-latest, target: Android64}
     runs-on: ${{ matrix.config.os }}
@@ -334,6 +338,7 @@ jobs:
               )
           expected_binaries = {
               "hwanhee1.corum_ranked.dll",
+              "hwanhee1.corum_ranked.dylib",
               "hwanhee1.corum_ranked.ios.dylib",
               "hwanhee1.corum_ranked.android32.so",
               "hwanhee1.corum_ranked.android64.so",

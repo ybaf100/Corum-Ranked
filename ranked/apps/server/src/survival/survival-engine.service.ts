@@ -1,3 +1,5 @@
+import {persistSurvivalBadges} from "./survival-badges.service.js";
+import {survivalRoundBadges} from "@corum-ranked/rules";
 import {reportSurvivalAudioFailure,type SurvivalAudioFailure} from "./survival-audio-recovery.js";
 import { DemandWorker, signalAfterCommit } from "../database/database-work.js";
 import { lockSurvivalAdmission,assertSurvivalAdmission } from "./survival-admission.js";
@@ -257,6 +259,7 @@ export class SurvivalEngineService implements OnApplicationBootstrap, OnApplicat
     if(before.nextMap && (!match.nextMap || match.nextMap.map.levelId!==before.nextMap.map.levelId || match.nextMap.phase!==before.nextMap.phase || match.nextMap.roundKey!==before.nextMap.roundKey || match.nextMap.mapGeneration!==before.nextMap.mapGeneration) &&
       !match.rounds.some(r=>r.key===before.nextMap!.roundKey && r.phase===before.nextMap!.phase && r.mapGeneration===before.nextMap!.mapGeneration && r.map?.levelId===before.nextMap!.map.levelId))
       await this.maps.discardPrefetch?.(tx,match.id,before.nextMap.roundKey,before.nextMap.mapGeneration,before.nextMap.map.levelId);
+    match.roundBadges=survivalRoundBadges(match);
     await tx.query(`UPDATE sur_matches SET state=$2,revision=$3,current_round_key=$4,winner_id=$5,snapshot=$6::jsonb,
       updated_at=$7,finished_at=$8 WHERE id=$1`,[match.id,match.state,match.revision,survivalCurrentRound(match).key,
       match.winnerId,JSON.stringify(match),iso(match.updatedAt),iso(match.finishedAt)]);
@@ -329,5 +332,6 @@ export class SurvivalEngineService implements OnApplicationBootstrap, OnApplicat
         ON CONFLICT(match_id,round_key,participant_id,attempt_id) DO UPDATE SET highest_progress=EXCLUDED.highest_progress,
           ended_at=EXCLUDED.ended_at${r.phase==="TIEBREAK"?",score_millipercent=EXCLUDED.score_millipercent":""}`,[match.id,r.key,JSON.stringify(attempts)]);
     }
+    if(changed(before?.roundBadges,match.roundBadges) && match.roundBadges?.length)await persistSurvivalBadges(tx,match);
   }
 }

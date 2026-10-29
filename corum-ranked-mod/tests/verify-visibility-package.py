@@ -34,6 +34,13 @@ def verify_binary(binary, platform, debug):
         raise ValueError("missing safety/capture boundary or unsafe persistence detour")
     if b"[CorumCrashDiag]" in binary:
         raise ValueError("diagnostic runtime must not enter production packages")
+    if platform == "mac":
+        magic,count=struct.unpack_from(">II",binary)
+        if magic not in (0xCAFEBABE,0xCAFEBABF) or count!=2:
+            raise ValueError("expected universal macOS x86_64/arm64 dylib")
+        stride=32 if magic==0xCAFEBABF else 20
+        cpus={struct.unpack_from(">I",binary,8+i*stride)[0] for i in range(count)}
+        if cpus!={0x01000007,0x0100000C}:raise ValueError("missing macOS architecture")
     if platform == "ios":
         if struct.unpack_from("<II", binary) != (0xFEEDFACF, 0x0100000C):
             raise ValueError("expected a thin iOS arm64 dylib")
@@ -59,7 +66,7 @@ if __name__ == "__main__":
         args.package = packages[0]
     binaries = {"ios": "hwanhee1.corum_ranked.ios.dylib"}
     if not args.ios_only:
-        binaries.update(win="hwanhee1.corum_ranked.dll",
+        binaries.update(mac="hwanhee1.corum_ranked.dylib",win="hwanhee1.corum_ranked.dll",
                         android32="hwanhee1.corum_ranked.android32.so",
                         android64="hwanhee1.corum_ranked.android64.so")
     with zipfile.ZipFile(args.package) as package:

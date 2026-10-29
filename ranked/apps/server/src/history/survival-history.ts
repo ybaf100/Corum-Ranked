@@ -1,12 +1,13 @@
-import { survivalMilliPercent,type SurvivalMatch } from '@corum-ranked/rules';
+import { survivalMilliPercent,survivalRoundBadges,type SurvivalRoundBadge,type SurvivalMatch } from '@corum-ranked/rules';
 import { recordedLevelId } from './solo-history.js';
 const object=(v:unknown):Record<string,any>=>{if(typeof v==='string'){try{return JSON.parse(v);}catch{return {};}}return v&&typeof v==='object'?v as Record<string,any>:{};};
 /** History is a result projection, never the live aggregate (which contains
  * leases, checkpoint evidence, bot cursors and unfinished attempts). */
-export function survivalHistoryProjection(value:unknown,personalResult:unknown,myParticipantId:string,summary=false){
+export function survivalHistoryProjection(value:unknown,personalResult:unknown,myParticipantId:string,summary=false,storedBadges?:readonly SurvivalRoundBadge[]){
  const match=object(value) as unknown as SurvivalMatch,result=object(personalResult);
  const completed=match.state==='FINAL_RESULT';const inProgress=!['FINAL_RESULT','CANCELLED'].includes(match.state);
  const players=Array.isArray(match.players)?match.players:[];
+ const badges=(storedBadges??survivalRoundBadges(match)).filter(b=>b.participantId===myParticipantId);
  const rounds=(Array.isArray(match.rounds)?match.rounds:[]).map(r=>{
   const confirmed=r.finishedAt!==null&&Number.isFinite(r.finishedAt);
   const map=r.map?{levelId:recordedLevelId(r.map.levelId),title:(r.map as any).name??(r.map as any).title??'',creator:(r.map as any).creator??null,
@@ -26,7 +27,7 @@ export function survivalHistoryProjection(value:unknown,personalResult:unknown,m
   const replayIdentity=confirmed&&bestAttempt&&r.map?{matchId:match.id,roundKey:r.key,roundNumber:r.ordinal,phase:r.phase,mapGeneration:r.mapGeneration,
    participantId:myParticipantId,attemptId:bestAttempt.id,attemptOrdinal:bestAttempt.sequence,levelId:r.map.levelId,mapVersion:r.map.levelVersion,
    mapGeometrySha256:r.map.geometrySha256,officialBestProgress:bestAttempt.highestProgress,debug:match.online!==true}:null;
-  return {replayIdentity,ownRank:confirmed&&own?own.rank:null,ownQualified:confirmed&&own?own.qualified&&!own.forfeited:null,key:r.key,ordinal:r.ordinal,displayRoundNumber:r.ordinal,phase:r.phase,completed:confirmed,status:confirmed?'COMPLETED':inProgress?'IN_PROGRESS':'UNFINISHED',map,
+  return {roundBadge:badges.find(b=>b.sourceRoundKey===r.key)??null,replayIdentity,ownRank:confirmed&&own?own.rank:null,ownQualified:confirmed&&own?own.qualified&&!own.forfeited:null,key:r.key,ordinal:r.ordinal,displayRoundNumber:r.ordinal,phase:r.phase,completed:confirmed,status:confirmed?'COMPLETED':inProgress?'IN_PROGRESS':'UNFINISHED',map,
    cutoffScore,target:r.target,qualifiedCount:confirmed?r.players.filter(p=>p.qualified&&!p.forfeited).length:null,
    finishedAt:confirmed?new Date(r.finishedAt!).toISOString():null,standings};
  });
@@ -42,5 +43,6 @@ export function survivalHistoryProjection(value:unknown,personalResult:unknown,m
  const snapshot={id:match.id,matchPlayerCount:match.config.matchPlayerCount,forceDeathMatch:match.forceDeathMatch??false,state:match.state,createdAt:match.createdAt,players:(summary?[]:players).map(p=>({participantId:p.participantId,name:p.name,kind:p.kind,finalRank:completed?p.finalRank:null})),rounds:rounds.map(r=>({key:r.key,ordinal:r.ordinal,displayRoundNumber:r.ordinal,phase:r.phase,map:r.map,finishedAt:r.finishedAt,cutoffScore:r.cutoffScore,players:r.standings.map(p=>({participantId:p.participantId,rank:p.rank,highestProgress:p.highestProgress,qualified:p.qualified,attempts:Array.from({length:p.attemptCount},()=>({}))}))}))};
  return {detailsLoaded:!summary,state:match.state,inProgress,completed,settlementPending,finalRank,participantCount:players.length,debug:match.online!==true,
   matchPlayerCount:match.config.matchPlayerCount,reachedFinal:match.rounds?.some(r=>(r.phase==='FINAL'||r.phase==='TIEBREAK')&&r.players.some(p=>p.participantId===myParticipantId))??false,
+  roundBadges:badges,
   currentRoundKey:rounds.at(-1)?.key??null,rounds,myParticipantId,result:safeResult,snapshot};
 }

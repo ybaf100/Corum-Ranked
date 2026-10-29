@@ -91,7 +91,7 @@ test('leaderboard cards share the native scroll owner without a swallowing row m
 
 test('result settlement animation starts automatically once, waits for real settlement and survives reopened result screens',()=>{
  const src=read('src/ui/SurvivalGameLayer.cpp');
- assert.match(src,/if\(stage==SurvivalFlowStage::PersonalResult \|\| stage==SurvivalFlowStage::Ceremony\)beginResultMotion\(\)/);
+ assert.match(src,/if\(stage==SurvivalFlowStage::ScoreAnimation\)beginResultMotion\(\)/);
  const panel=read('src/ui/SurvivalOutcomePanel.hpp');assert.doesNotMatch(panel,/LP DETAILS/);assert.match(panel,/if\(choice\)button\(i18n::text\("survival-view-board"/);
  run(`
 #include <cassert>
@@ -111,8 +111,8 @@ ${method(src,'void beginResultMotion()')}
 int main(){Layer l;auto&r=SurvivalRuntime::get();l.beginResultMotion();assert(l.scores==0);
  r.v.result.ready=true;l.beginResultMotion();assert(l.scores==0&&l.m_resultMotion.empty()&&Mod::get()->saved.empty());
  r.input=ScoreAnimationInput{};l.beginResultMotion();assert(l.scores==1&&l.m_motion&&!l.keypad);for(int i=0;i<20;i++)l.beginResultMotion();assert(l.scores==1);
- Layer reopened;reopened.beginResultMotion();assert(reopened.scores==0);
- r.v.id="next-match";r.input->promoted=true;r.input->afterTier="AQUA";reopened.beginResultMotion();assert(reopened.scores==1&&Mod::get()->saved=="next-match");
+ Layer reopened;reopened.beginResultMotion();assert(reopened.scores==1); // An interrupted animation is not falsely marked complete.
+ r.v.id="next-match";r.input->promoted=true;r.input->afterTier="AQUA";reopened.beginResultMotion();assert(reopened.scores==2&&Mod::get()->saved.empty());
 }
 `);
 });

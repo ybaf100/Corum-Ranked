@@ -1,3 +1,4 @@
+import type {SurvivalRoundBadge} from "@corum-ranked/rules";
 import {readSurvivalRecords} from "./survival-records.js";
 import {publicAchievementTitle} from "../achievement/public-title.js";
 import type { HistoryOptions } from "../history/history-options.js";
@@ -101,8 +102,12 @@ export class SurvivalService {
     const rank="COALESCE((o.result->>'rank')::int,(d.result->>'rank')::int,p.final_rank)";
     const filters:Record<string,string>={WIN:`AND m.state='FINAL_RESULT' AND ${rank}=1`,CHAMPION:`AND m.state='FINAL_RESULT' AND ${rank}=1`,LOSS:`AND m.state='FINAL_RESULT' AND ${rank}>1`,PODIUM:`AND m.state='FINAL_RESULT' AND ${rank}<=3`,ELIMINATED:`AND m.state='FINAL_RESULT' AND ${rank}>3`,IN_PROGRESS:"AND m.state NOT IN ('FINAL_RESULT','CANCELLED')"};
     const filter=filters[options.result??'ALL']??'';
-    const matches=await this.database.query<{id:string;created_at:Date|string;finished_at:Date|string|null;snapshot:unknown;result:unknown;participant_id:string}>(
-      `SELECT m.id,m.created_at,p.participant_id,CASE WHEN m.state='FINAL_RESULT' THEN m.finished_at ELSE NULL END AS finished_at,m.snapshot,COALESCE(o.result,d.result) AS result
+    const matches=await this.database.query<{id:string;created_at:Date|string;finished_at:Date|string|null;snapshot:unknown;result:unknown;participant_id:string;badges:SurvivalRoundBadge[]}>(
+      `SELECT m.id,m.created_at,p.participant_id,CASE WHEN m.state='FINAL_RESULT' THEN m.finished_at ELSE NULL END AS finished_at,m.snapshot,COALESCE(o.result,d.result) AS result,
+         COALESCE((SELECT jsonb_agg(jsonb_build_object('participantId',b.participant_id,'roundKey',b.logical_round_key,'sourceRoundKey',b.source_round_key,
+           'ordinal',b.ordinal,'roundLabel',b.round_label,'levelId',b.level_id,'difficulty',b.difficulty,'rank',b.official_rank,
+           'survived',b.survived,'grade',b.grade,'confirmedAt',to_char(b.confirmed_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')) ORDER BY b.ordinal)
+           FROM sur_round_badges b WHERE b.match_id=m.id AND b.player_id=p.player_id),'[]'::jsonb) AS badges
        FROM sur_matches m JOIN sur_match_players p ON p.match_id=m.id JOIN sur_profiles sp ON sp.player_id=p.player_id
        LEFT JOIN sur_debug_matches d ON d.match_id=m.id LEFT JOIN sur_online_players o ON o.match_id=m.id AND o.player_id=p.player_id
        WHERE p.player_id=$1 AND m.state<>'CANCELLED'
@@ -113,7 +118,7 @@ export class SurvivalService {
     const events = options.summary?{rows:[]}:await this.database.query(`SELECT event_key,actual_delta,lp_after,tier_after,awarded_at
       FROM sur_lp_ledger WHERE player_id=$1 ORDER BY awarded_at DESC,id DESC LIMIT 30`, [playerId]);
     return { mode: "SURVIVAL", serverNow: this.clock.now().toISOString(),
-      matches:matches.rows.map(row=>({matchId:row.id,mode:"SURVIVAL",createdAt:new Date(row.created_at).toISOString(),finishedAt:row.finished_at?new Date(row.finished_at).toISOString():null,...survivalHistoryProjection(row.snapshot,row.result,row.participant_id,options.summary)})),lpEvents: events.rows };
+      matches:matches.rows.map(row=>({matchId:row.id,mode:"SURVIVAL",createdAt:new Date(row.created_at).toISOString(),finishedAt:row.finished_at?new Date(row.finished_at).toISOString():null,...survivalHistoryProjection(row.snapshot,row.result,row.participant_id,options.summary,row.badges)})),lpEvents: events.rows };
   }
 
   public recordAchievementsWithin(tx:SqlExecutor,matchId:string,playerId:string) {

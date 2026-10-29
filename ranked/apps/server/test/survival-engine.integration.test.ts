@@ -1,3 +1,4 @@
+import {SurvivalBadgesService} from "../src/survival/survival-badges.service.js";
 import {SurvivalPlayerInfoController} from "../src/survival/survival-player-info.controller.js";
 import {ForumRecordsService} from "../src/forum/forum-records.service.js";
 import "reflect-metadata";
@@ -75,6 +76,26 @@ async function play(match:SurvivalMatch,scores?:number[]){
   now=survivalCurrentRound(match).endsAt!;return engine.tick(match.id);
 }
 describe("durable Survival M3 engine",()=>{
+  it("persists immutable official badges and idempotent backfill without touching rewards or records",async()=>{
+    let match=await engine.create("badge-ledger",entrants);
+    while(match.state!=="FINAL_RESULT"){match=await play(match);if(match.state==="ROUND_RESULT")match=await engine.tick(match.id);}
+    const service=new SurvivalBadgesService(database);
+    const badges=(await database.query("SELECT * FROM sur_round_badges ORDER BY participant_id,ordinal")).rows;
+    expect(badges).toHaveLength(35);
+    const own=await service.collection(entrants[0]!.kind==="HUMAN"?entrants[0]!.playerId:"");
+    expect(own.totals.MYTHIC).toBe(4);expect(own.totals.ELIMINATED).toBe(0);
+    expect(own.difficulties.map(d=>d.id)).toEqual(["HARD","HARDER","INSANE","EASY_DEMON","MEDIUM_DEMON","HARD_DEMON","INSANE_DEMON"]);
+    expect(own.difficulties.find(d=>d.id==="INSANE_DEMON")!.counts.MYTHIC).toBe(0);
+    const profiles=(await database.query("SELECT * FROM sur_profiles ORDER BY player_id")).rows;
+    const attempts=(await database.query("SELECT * FROM sur_attempts ORDER BY match_id,round_key,participant_id,attempt_id")).rows;
+    await service.onApplicationBootstrap();await new SurvivalBadgesService(database).onApplicationBootstrap();
+    await pg.exec(await readFile(fileURLToPath(new URL("../../../migrations/0035_survival_round_badges.sql",import.meta.url)),"utf8"));
+    expect((await database.query("SELECT * FROM sur_round_badges ORDER BY participant_id,ordinal")).rows).toEqual(badges);
+    expect((await database.query("SELECT * FROM sur_profiles ORDER BY player_id")).rows).toEqual(profiles);
+    expect((await database.query("SELECT * FROM sur_attempts ORDER BY match_id,round_key,participant_id,attempt_id")).rows).toEqual(attempts);
+    expect((await service.collection(entrants[15]!.kind==="HUMAN"?entrants[15]!.playerId:"")).totals.ELIMINATED).toBe(1);
+  });
+
   it("bounds failed pre-play supply searches and cancels without mutating profiles or LP",async()=>{
     const match=await engine.create("bounded-supply",entrants);
     const profiles=(await database.query("SELECT * FROM sur_profiles ORDER BY player_id")).rows;

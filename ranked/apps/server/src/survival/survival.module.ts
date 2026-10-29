@@ -1,3 +1,4 @@
+import {SurvivalBadgesService} from "./survival-badges.service.js";
 import {SurvivalMapPool} from "./survival-map-pool.js";
 import {DATABASE,type DatabasePort} from "../database/database.port.js";
 import {SERVER_CLOCK,type ServerClock} from "../common/runtime.module.js";
@@ -28,7 +29,7 @@ import { SurvivalDebugService } from "./survival-debug.service.js";
 import { SERVER_ENVIRONMENT,type ServerEnvironment } from "../config/server-environment.js";
 import { createSurvivalGdFetch } from "./survival-gd-transport.js";
 @Module({ imports: [ForumRecordsModule,RankedConfigModule, SessionModule, AchievementModule], controllers: [SurvivalReplayReceiptController,SurvivalSpectatorLiveController,SurvivalPlayerInfoController,SurvivalController,SurvivalEngineController,SurvivalDebugController,SurvivalOnlineController,SurvivalQueueController],
-  providers: [SurvivalSpectatorLiveService,SurvivalService,SurvivalEngineService,SurvivalDebugService,SurvivalOnlineService,SurvivalQueueService,SurvivalRateService,{provide:SURVIVAL_MAP_PROVIDER,
+  providers: [SurvivalBadgesService,SurvivalSpectatorLiveService,SurvivalService,SurvivalEngineService,SurvivalDebugService,SurvivalOnlineService,SurvivalQueueService,SurvivalRateService,{provide:SURVIVAL_MAP_PROVIDER,
     useFactory:(random:RandomSource,environment:ServerEnvironment,db:DatabasePort,clock:ServerClock,config:SurvivalConfigService)=>{
       Logger.log(`Survival GD transport=${environment.survivalGdRelay?"relay":"direct"}`,"SurvivalGdTransport");
       return new SurvivalMapPool(db,new GdSurvivalMapProvider(random,createSurvivalGdFetch(environment.survivalGdRelay)),clock,()=>config.getSnapshot().config.minimumLevelId);

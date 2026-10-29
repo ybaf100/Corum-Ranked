@@ -2458,5 +2458,69 @@
   "survival-attempt-result-syncing": {
     "en": "SYNCING ATTEMPT RESULT",
     "ko": "시도 결과 동기화 중"
+  },
+  "badge-menu": {
+    "en": "BADGES",
+    "ko": "뱃지"
+  },
+  "badge-collection": {
+    "en": "ROUND BADGES",
+    "ko": "라운드 뱃지 전시장"
+  },
+  "badge-total": {
+    "en": "TOTAL",
+    "ko": "총 획득 수"
+  },
+  "badge-drag": {
+    "en": "DRAG TO EXPLORE · TAP FOR DETAILS",
+    "ko": "좌우로 드래그 · 눌러서 상세 보기"
+  },
+  "badge-load-failed": {
+    "en": "COULD NOT LOAD BADGES · RETRY",
+    "ko": "뱃지를 불러오지 못했습니다 · 다시 시도"
+  },
+  "badge-official-rounds": {
+    "en": "OFFICIAL SURVIVAL ROUND RESULTS",
+    "ko": "공식 서바이벌 라운드 결과"
+  },
+  "badge-difficulty-HARD": {
+    "en": "Hard",
+    "ko": "하드"
+  },
+  "badge-difficulty-HARDER": {
+    "en": "Harder",
+    "ko": "하더"
+  },
+  "badge-difficulty-INSANE": {
+    "en": "Insane",
+    "ko": "인세인"
+  },
+  "badge-difficulty-EASY_DEMON": {
+    "en": "Easy Demon",
+    "ko": "이지 데몬"
+  },
+  "badge-difficulty-MEDIUM_DEMON": {
+    "en": "Medium Demon",
+    "ko": "미디엄 데몬"
+  },
+  "badge-difficulty-HARD_DEMON": {
+    "en": "Hard Demon",
+    "ko": "하드 데몬"
+  },
+  "badge-difficulty-INSANE_DEMON": {
+    "en": "Insane Demon",
+    "ko": "인세인 데몬"
+  },
+  "badge-difficulty-EASY": {
+    "en": "Easy",
+    "ko": "이지"
+  },
+  "badge-difficulty-NORMAL": {
+    "en": "Normal",
+    "ko": "노멀"
+  },
+  "badge-difficulty-EXTREME_DEMON": {
+    "en": "Extreme Demon",
+    "ko": "익스트림 데몬"
   }
 }

@@ -1,3 +1,11 @@
+# v0.5.0-beta.115
+
+- Collect official Survival round badges, with immutable difficulty/rank snapshots and idempotent server persistence.
+- Add sequential result cards, badges beside history thumbnails, and an achievement badge gallery with difficulty details.
+- Derive gallery difficulties from all official Survival map-selection rules; keep ELIMINATED last.
+- Present eligible ceremonies before LP changes and personal results; preserve early-exit result paths.
+- Build and validate universal macOS packages alongside Windows, iOS and Android.
+
 # v0.5.0-beta.114
 
 - Keep the active Death Match attempt in the remaining count: the sixth attempt shows 1/6 while playing, then 0/6 after its terminal event. Entry limits and automatic return still use server-confirmed completion.

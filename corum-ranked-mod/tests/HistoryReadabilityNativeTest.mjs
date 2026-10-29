@@ -148,9 +148,11 @@ struct CCLabelBMFont:CCNode{};struct CCSprite:CCNode{static CCSprite*create(){re
 namespace fmt{std::string format(char const* pattern,int n){std::string s(pattern);auto p=s.find("{}");s.replace(p,2,std::to_string(n));return s;}}
 constexpr Color kBlue{1,2,3},kDeepPanel2{1,2,3},kDeepPanel{1,2,3},kCyan{1,2,3},kGold{1,2,3};
 namespace corum::ranked {
-struct HistoryRound{int levelId=123,stars=7;std::string title="Exact Level",creator="Creator",key="r1",difficulty="HARDER",length="LONG",grade="LEGENDARY",label="R1";std::optional<int> featureScore=1,epic=2;};
+struct Badge{bool present=false;bool isObject()const{return present;}};
+struct HistoryRound{Badge roundBadge;int levelId=123,stars=7;std::string title="Exact Level",creator="Creator",key="r1",difficulty="HARDER",length="LONG",grade="LEGENDARY",label="R1";std::optional<int> featureScore=1,epic=2;};
 struct SurvivalThumbnailProvider{static inline bool available=false;static bool supported(){return available;}};
 namespace ui{constexpr Color Text{1,2,3},TextMuted{1,2,3};inline MapMetadata seen;void grayButtonVisual(CCNode*){}
+CCNode*survivalRoundBadge(Badge const&,CCSize size){auto*n=new CCNode;n->size=size;n->id="round-badge";return n;}
 CCNode*mapDifficultyBadge(int,MapMetadata metadata,float width,float height,bool native,std::optional<MapDifficulty> recorded){seen=metadata;assert(!native&&recorded&&recorded->nativeCode==4);auto*p=new CCNode;p->size={width,height};return p;}}
 ${method(read('src/domain/HistoryPresentation.hpp'),'inline float historyMapPanelHeight(')}
 }
@@ -165,13 +167,16 @@ CCMenuItemSpriteExtra*historyButton(CCNode*,std::string,CCPoint p,float,int,int 
 ${method(popup,'    bool historyHasThumbnail(')}
 ${method(popup,'    void historyMapPanel(')}
 };
-int main(){using namespace corum::ranked;for(bool enabled:{false,true})for(int level:{0,123})for(float width:{156.f,206.f,300.f,390.f}){
- SurvivalThumbnailProvider::available=enabled;CorumRankedLayer layer;HistoryRound round;round.levelId=level;CCNode content;
- bool thumb=enabled&&level>0;auto h=historyMapPanelHeight(width,thumb);layer.historyMapPanel(&content,round,{width/2,h/2},width,h);
+int main(){using namespace corum::ranked;for(bool earned:{false,true})for(bool enabled:{false,true})for(int level:{0,123})for(float width:{156.f,206.f,300.f,390.f}){
+ SurvivalThumbnailProvider::available=enabled;CorumRankedLayer layer;HistoryRound round;round.levelId=level;round.roundBadge.present=earned;CCNode content;
+ bool thumb=enabled&&level>0;auto h=earned?310.f:historyMapPanelHeight(width,thumb);layer.historyMapPanel(&content,round,{width/2,h/2},width,h);
  assert(layer.buttons==1&&layer.lastLevel==level);assert((layer.m_historyThumbnail!=nullptr)==thumb);assert(layer.m_historyThumbnailGeneration==(thumb?1:0));
  assert(ui::seen.stars==7&&ui::seen.epic==2&&ui::seen.kind=="NORMAL");
  if(thumb)assert(layer.m_historyThumbnailContext.id==123&&layer.m_historyThumbnailContext.match=="match");
  bool frame=false;for(auto* node:content.children[0]->children)if(node->id=="ranked-history-thumbnail")frame=true;assert(frame==thumb);
+ CCNode*badge=nullptr,*thumbnail=nullptr;for(auto*node:content.children[0]->children){if(node->id=="round-badge")badge=node;if(node->id=="ranked-history-thumbnail")thumbnail=node;}
+ assert((badge!=nullptr)==earned);
+ if(badge){assert(badge->pos.x-badge->size.width/2>=0&&badge->pos.x+badge->size.width/2<=width);if(thumbnail)assert(thumbnail->pos.x+thumbnail->size.width/2<badge->pos.x-badge->size.width/2);}
 }}
 `);
 });

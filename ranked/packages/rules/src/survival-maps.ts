@@ -52,6 +52,30 @@ export function survivalMapRange(group: SurvivalDifficultyGroup, phase: Survival
   return structuredClone(RANGES[group][phase]);
 }
 
+/** Official GD difficulty, independent of a map's featured grade. */
+export const SURVIVAL_MAP_DIFFICULTIES = [
+  {id:"EASY",name:"Easy",nativeCode:1,minimumStars:2,maximumStars:2},
+  {id:"NORMAL",name:"Normal",nativeCode:2,minimumStars:3,maximumStars:3},
+  {id:"HARD",name:"Hard",nativeCode:3,minimumStars:4,maximumStars:5},
+  {id:"HARDER",name:"Harder",nativeCode:4,minimumStars:6,maximumStars:7},
+  {id:"INSANE",name:"Insane",nativeCode:5,minimumStars:8,maximumStars:9},
+  ...(["EASY","MEDIUM","HARD","INSANE","EXTREME"] as const).map((d,i)=>({
+    id:`${d}_DEMON`,name:`${d[0]}${d.slice(1).toLowerCase()} Demon`,
+    nativeCode:[7,8,6,9,10][i]!,demonDifficulty:d,minimumStars:10,maximumStars:10})),
+] as const;
+export function survivalRecordedDifficulty(map:SurvivalMapMetadata) {
+  if(map.automatic || map.platformer || !Number.isInteger(map.stars))return null;
+  return SURVIVAL_MAP_DIFFICULTIES.find(d=>map.demon
+    ?map.stars===10 && "demonDifficulty" in d && d.demonDifficulty===map.demonDifficulty
+    :map.demonDifficulty===null && !("demonDifficulty" in d) && map.stars>=d.minimumStars && map.stars<=d.maximumStars)??null;
+}
+/** The gallery follows ALL selection rules, never today's pool or user history. */
+export function survivalCollectibleDifficulties() {
+  return SURVIVAL_MAP_DIFFICULTIES.filter(d=>Object.values(RANGES).some(phases=>Object.values(phases).some(r=>
+    "demonDifficulty" in d?r.demons.includes(d.demonDifficulty):r.minimumStars!==null && r.maximumStars!==null &&
+      d.minimumStars<=r.maximumStars && d.maximumStars>=r.minimumStars))).map(d=>({id:d.id,name:d.name,nativeCode:d.nativeCode}));
+}
+
 /** Codes verified against Geode's GD 2.2081 DemonDifficultyType enum.
  * Search demonFilter codes are different and are deliberately not used here. */
 export function survivalDemonFromNativeCode(code: number): SurvivalDemonDifficulty | null {

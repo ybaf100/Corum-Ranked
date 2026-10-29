@@ -1,3 +1,4 @@
+#include "SurvivalRoundBadge.hpp"
 #include "../SurvivalSpectatorRuntime.hpp"
 #pragma once
 #include "../domain/SurvivalRoundPresentation.hpp"
@@ -119,6 +120,7 @@ class SurvivalOutcomePanel final:public cocos2d::CCLayerColor {
     std::function<void(int)> m_action;CCMenu* m_menu=nullptr;CCMenuItemSpriteExtra* m_watch=nullptr;CCMenuItemSpriteExtra* m_freeChoice=nullptr;CCMenuItemSpriteExtra* m_resultChoice=nullptr;
     std::string m_key,m_identity;std::vector<SurvivalStanding> m_profiles;
     struct Podium {CCNode* pedestal;CCMenuItemSpriteExtra* avatar;CCNode* stamp;CCNode* place;CCNode* glow;float x,base,height;int rank;};
+    std::vector<CCNode*> m_badges;
     std::vector<Podium> m_stages;double m_elapsed=0;
     CCLabelBMFont *m_watchText=nullptr,*m_detail=nullptr;
     CCNode* m_halo=nullptr;
@@ -134,19 +136,20 @@ public:
     static SurvivalOutcomePanel* create(std::function<void(int)> action){auto* p=new SurvivalOutcomePanel;if(p->initWithColor({4,8,16,255})){p->m_action=std::move(action);p->setID("survival-outcome-panel"_spr);p->autorelease();return p;}delete p;return nullptr;}
     void present(SurvivalMatchView const& view,SurvivalFlowStage stage,float dt){
         auto const choice=stage==SurvivalFlowStage::EliminatedChoice,ceremony=stage==SurvivalFlowStage::Ceremony;
-        auto const key=view.id+":"+view.roundKey+":"+std::to_string(view.mapGeneration)+":"+std::to_string(static_cast<int>(stage));
+        auto const key=view.id+":"+view.ownId+":"+(choice?view.roundKey+":"+std::to_string(view.mapGeneration):std::string{})+":"+std::to_string(static_cast<int>(stage));
         // Settlement arriving updates the labels/tiers without resetting a podium animation.
         auto const settled=view.result.isObject();std::string buildKey=key+(settled?":settled":":pending")+":"+std::to_string(view.result["actualDelta"].asInt().unwrapOr(0));
         for(auto const& p:view.result["standings"].asArray().unwrapOr(std::vector<matjson::Value>{}))
             buildKey+=":"+p["participantId"].asString().unwrapOr("")+":"+p["tierAfter"].asString().unwrapOr("")+":"+(p["lpAfter"].isNumber()?std::to_string(p["lpAfter"].asInt().unwrapOr(0)):"pending")+":"+std::to_string(p["delta"].asInt().unwrapOr(0));
         auto const size=CCDirector::sharedDirector()->getWinSize();
-        if(m_key!=buildKey){auto const elapsed=m_identity==key?m_elapsed:0.;m_identity=key;m_key=buildKey;removeAllChildrenWithCleanup(true);m_profiles=survivalRoster(view);m_stages.clear();m_elapsed=elapsed;m_watch=nullptr;m_freeChoice=m_resultChoice=nullptr;m_detail=m_watchText=nullptr;m_halo=nullptr;
+        if(m_key!=buildKey){auto const elapsed=m_identity==key?m_elapsed:0.;m_identity=key;m_key=buildKey;removeAllChildrenWithCleanup(true);m_profiles=survivalRoster(view);m_stages.clear();m_badges.clear();m_elapsed=elapsed;m_watch=nullptr;m_freeChoice=m_resultChoice=nullptr;m_detail=m_watchText=nullptr;m_halo=nullptr;
             m_menu=CCMenu::create();m_menu->setPosition(CCPointZero);addChild(m_menu,20);
             auto heading=menuLabel(i18n::text(choice?"survival-eliminated":ceremony?"survival-podium":"survival-personal-result",choice?"ELIMINATED":ceremony?"FINAL PODIUM":"PERSONAL RESULT"),.60f,{size.width/2,size.height-30},ceremony?Gold:Cyan,FontWeight::Black);fitFullMenuLabel(heading,size.width-30,28,.60f);addChild(heading,5);
             if(choice){
                 auto* detail=menuLabel(i18n::text("survival-spectator-choices","Play locally or view the standings."),.25f,{size.width/2,size.height*.57f},TextMuted,FontWeight::SemiBold);fitFullMenuLabel(detail,size.width-40,40,.25f);addChild(detail,5);
                 auto const width=std::min(180.f,(size.width-36)/2);
                 m_freeChoice=button(i18n::text("survival-free-play","FREE PLAY"),{size.width/2-width/2-5,size.height*.37f},width,18,Green);
+                if(settled)button(i18n::text("survival-personal-result","PERSONAL RESULT"),{size.width/2,size.height*.20f},180,21,Gold);
                 m_resultChoice=button(i18n::text("survival-view-board","STANDINGS"),{size.width/2+width/2+5,size.height*.37f},width,14,Cyan);
             }else if(ceremony){
                 std::array<int,3> ranks{2,1,3};auto const width=std::min(138.f,(size.width-48)/3),base=80.f;
@@ -176,23 +179,35 @@ public:
                     if(rank==1){glow=createRankAmbientFx("GOLD",{68,68},RankBadgeDisplay::Matched);glow->setPosition({x,base+h+46});glow->setID("survival-podium-gold-ambient"_spr);addChild(glow,4);m_halo=glow;}
                     m_stages.push_back({pedestal,item,stamp,place,glow,x,base,h,rank});
                 }
+            }else if(stage==SurvivalFlowStage::ScoreAnimation){
+                addChild(menuLabel(i18n::text("settlement-pending","SETTLEMENT PENDING"),.30f,{size.width/2,size.height/2},TextMuted));
+                button(i18n::text("retry","RETRY"),{size.width/2,44},132,12,Blue);
             }else{
+                auto const personalX=size.width*.24f;
                 auto it=std::find_if(m_profiles.begin(),m_profiles.end(),[&](auto const& row){return row.id==view.ownId;});
                 if(it!=m_profiles.end()){
                     auto* face=CCNode::create();face->setContentSize({260,85});if(auto* icon=survivalAvatar(*it,view.ownId,43)){icon->setPosition({130,59});face->addChild(icon,5);}
                     auto* name=playerNameLabel(it->name,.37f,{130,15},Cyan,FontWeight::Black);fitFullMenuLabel(name,248,22,.37f);face->addChild(name,5);
-                    auto* item=CCMenuItemSpriteExtra::create(face,this,menu_selector(SurvivalOutcomePanel::onAction));item->setTag(100+static_cast<int>(it-m_profiles.begin()));item->setPosition({size.width/2,size.height*.65f});m_menu->addChild(item);
+                    auto* item=CCMenuItemSpriteExtra::create(face,this,menu_selector(SurvivalOutcomePanel::onAction));item->setTag(100+static_cast<int>(it-m_profiles.begin()));item->setPosition({personalX,size.height*.65f});m_menu->addChild(item);
                     auto const rank=it->rank>0?survivalOrdinal(it->rank):i18n::text("survival-result-wait","PENDING");
-                    auto* label=menuLabel(rank,.48f,{size.width/2,size.height*.42f},Gold,FontWeight::Black);addChild(label,5);
+                    auto* label=menuLabel(rank,.48f,{personalX,size.height*.42f},Gold,FontWeight::Black);addChild(label,5);
                 }
                 auto const lp=settled?fmt::format("{:+} LP · {} LP · {}",view.result["actualDelta"].asInt().unwrapOr(0),view.result["profileAfter"]["lp"].asInt().unwrapOr(0),view.result["profileAfter"]["tier"].asString().unwrapOr("")):i18n::text("settlement-pending","SETTLEMENT PENDING");
-                m_detail=menuLabel(lp,.30f,{size.width/2,size.height*.28f},Text,FontWeight::ExtraBold);fitFullMenuLabel(m_detail,size.width-30,24,.30f);addChild(m_detail,5);
-                if(settled){auto* badge=createAnimatedRankBadge(view.result["profileAfter"]["tier"].asString().unwrapOr("UNRANKED"),{40,40},RankBadgeDisplay::Leaderboard);badge->setPosition({size.width/2+110,size.height*.43f});addChild(badge,5);}
+                m_detail=menuLabel(lp,.30f,{personalX,size.height*.28f},Text,FontWeight::ExtraBold);fitFullMenuLabel(m_detail,size.width*.44f-12,32,.30f);addChild(m_detail,5);
+                if(settled){auto* badge=createAnimatedRankBadge(view.result["profileAfter"]["tier"].asString().unwrapOr("UNRANKED"),{40,40},RankBadgeDisplay::Leaderboard);badge->setPosition({personalX+65,size.height*.43f});addChild(badge,5);}
+            }
+            if(stage==SurvivalFlowStage::PersonalResult){
+                auto const rows=view.roundBadges.asArray().unwrapOr(std::vector<matjson::Value>{});
+                auto const width=size.width*.52f,slot=width/std::max<std::size_t>(1,rows.size());
+                for(auto const& badge:rows){if(badge["participantId"].asString().unwrapOr("")!=view.ownId)continue;
+                    if(auto* card=survivalRoundBadge(badge,{std::min(78.f,slot-5),94})){card->setPosition({size.width*.48f+slot*(m_badges.size()+.5f),size.height*.52f});addChild(card,5);m_badges.push_back(card);}
+                }
             }
             if(choice)button(i18n::text("survival-view-board","VIEW STATUS"),{size.width/2,24},140,11,Blue);
-            else button(i18n::text("close","CLOSE"),{size.width/2,24},132,1,Blue)->setEnabled(settled);
+            else if(stage!=SurvivalFlowStage::ScoreAnimation)button(i18n::text(ceremony?"continue":"close",ceremony?"CONTINUE":"CLOSE"),{size.width/2,24},132,ceremony?20:1,Blue)->setEnabled(settled);
         }
         m_elapsed+=std::max(0.f,dt);
+        for(std::size_t i=0;i<m_badges.size();++i){auto const frame=survivalBadgeMotion(i,m_elapsed);m_badges[i]->setScale(static_cast<float>(frame.scale));propagateModeOpacity(m_badges[i],static_cast<GLubyte>(frame.opacity*255));}
         for(auto const& p:m_stages){auto const frame=survivalPodiumFrame(p.rank,m_elapsed);
             p.pedestal->setVisible(frame.rise>0);p.pedestal->setScaleY(static_cast<float>(frame.rise));
             p.avatar->setVisible(frame.avatar);p.avatar->setEnabled(frame.interactive);

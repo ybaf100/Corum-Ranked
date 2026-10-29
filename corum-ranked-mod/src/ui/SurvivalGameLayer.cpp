@@ -133,7 +133,9 @@ class SurvivalGameLayer final : public CCLayerColor {
         if((tag==0 || tag==4 || tag==5 || tag==6 || tag==10) && (m_confirmation || runtime.surrenderPending()))return;
         if(tag==13 || tag==19){m_browsingBoard=true;if(runtime.officialRoundCleared() && !runtime.freePlaying()){runtime.chooseOutcome(SurvivalOutcomeChoice::LiveSpectate);SurvivalSpectatorRuntime::get().openTargets();}return;}
         if(tag==18){runtime.chooseOutcome(SurvivalOutcomeChoice::Observe);m_launchedContext.clear();m_manualMap=false;m_browsingBoard=false;return;}
-        if(tag==14){SurvivalSpectatorRuntime::get().leave();runtime.leaveObserver();runtime.chooseOutcome(runtime.view().ownEliminated?SurvivalOutcomeChoice::Standings:SurvivalOutcomeChoice::Undecided);m_browsingBoard=true;return;}
+        if(tag==14){SurvivalSpectatorRuntime::get().leave();runtime.leaveObserver();runtime.chooseOutcome(runtime.view().ownEliminated?(runtime.view().result.isObject()?SurvivalOutcomeChoice::PersonalResult:SurvivalOutcomeChoice::Standings):SurvivalOutcomeChoice::Undecided);m_browsingBoard=true;return;}
+        if(tag==21){runtime.chooseOutcome(SurvivalOutcomeChoice::PersonalResult);return;}
+        if(tag==20){runtime.completeResultScreen(false);return;}
         if(tag==12){beginResultMotion();return;}
         if(tag==11){ui::showSurvivalStandings();return;}
         if(tag==10)RankedRoundPreparation::get().retry();
@@ -343,15 +345,14 @@ class SurvivalGameLayer final : public CCLayerColor {
         auto const weak=WeakRef<SurvivalGameLayer>(this);
         queueInMainThread([weak,input=std::move(input)]() mutable {
             auto owner=weak.lock();if(!owner || !owner->isRunning())return;
-            auto* score=ui::ResultScoreLayer::create(std::move(input),owner.data(),[weak] {if(auto layer=weak.lock()){layer->m_motion=false;layer->setKeypadEnabled(true);}});
-            if(score)owner->addChild(score,1100);else{owner->m_motion=false;owner->setKeypadEnabled(true);}
+            auto* score=ui::ResultScoreLayer::create(std::move(input),owner.data(),[weak,id=SurvivalRuntime::get().view().id] {if(auto layer=weak.lock()){if(SurvivalRuntime::get().view().id==id)SurvivalRuntime::get().completeResultScreen(true);layer->m_motion=false;layer->setKeypadEnabled(true);}});
+            if(score)owner->addChild(score,1100);else{owner->m_motion=false;owner->m_resultMotion.clear();owner->setKeypadEnabled(true);}
         });
     }
     void beginResultMotion() {
         auto& runtime=SurvivalRuntime::get();auto const& view=runtime.view();
         if(!view.result.isObject() || m_resultMotion==view.id)return;
-        if(Mod::get()->getSavedValue<std::string>("survival-result-animation")==view.id)return;
-        auto input=runtime.scoreAnimation();if(!input)return;m_resultMotion=view.id;Mod::get()->setSavedValue("survival-result-animation",view.id);m_motion=true;setKeypadEnabled(false);
+        auto input=runtime.scoreAnimation();if(!input)return;m_resultMotion=view.id;m_motion=true;setKeypadEnabled(false);
         auto const weak=WeakRef<SurvivalGameLayer>(this);auto finish=[weak,input=*input]{if(auto owner=weak.lock())owner->scoreMotion(input);};
         if((input->promoted || input->demoted) && input->beforeTier!=input->afterTier){
             auto* transition=ui::RankTransitionLayer::create(input->beforeTier,input->afterTier,input->promoted?ui::RankTransitionType::Promotion:ui::RankTransitionType::Demotion,
@@ -375,9 +376,9 @@ public:
         // owners continue independently in SurvivalRuntime/Recorder.
         auto const navigationContext=runtime.optionsContext();
         if(m_navigationContext!=navigationContext){m_navigationContext=navigationContext;m_browsingBoard=false;m_manualMap=false;m_entrySyncAfter.reset();m_replayRequestedContext.clear();m_launchedContext.clear();++m_boardVisit;}
-        auto const stage=runtime.flowStage();auto const outcome=stage==SurvivalFlowStage::EliminatedChoice || stage==SurvivalFlowStage::PersonalResult || stage==SurvivalFlowStage::Ceremony;
+        auto const stage=runtime.flowStage();auto const outcome=stage==SurvivalFlowStage::EliminatedChoice || stage==SurvivalFlowStage::PersonalResult || stage==SurvivalFlowStage::Ceremony || stage==SurvivalFlowStage::ScoreAnimation;
         if(outcome){
-            if(stage==SurvivalFlowStage::PersonalResult || stage==SurvivalFlowStage::Ceremony)beginResultMotion();
+            if(stage==SurvivalFlowStage::ScoreAnimation)beginResultMotion();
             syncAudio(view);if(m_selection->isVisible())m_selection->hideSelection();if(view.nextMap["map"].isObject())m_selection->prepareServerMap(runtime.preparationView());m_grid->setVisible(false);m_pager->setVisible(false);m_heading->setVisible(false);m_map->setVisible(false);m_status->setVisible(false);m_boardClock->setVisible(false);m_spinner->setVisible(false);
             for(auto* button:{m_liveWatch,m_resume,m_continue,m_surrender,m_freePlay,m_backToMap,m_viewBoard,m_force})if(button)button->setVisible(false);
             m_outcome->setVisible(!m_motion);if(!m_motion){m_outcome->present(view,stage,dt);

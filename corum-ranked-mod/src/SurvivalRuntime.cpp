@@ -1,3 +1,5 @@
+#include <Geode/binding/GJAccountManager.hpp>
+#include "domain/SurvivalBadgePresentation.hpp"
 #include "domain/SurvivalRoundPresentation.hpp"
 #include "replay/SurvivalReplayRecorder.hpp"
 #include "SurvivalSpectatorRuntime.hpp"
@@ -204,6 +206,7 @@ void SurvivalRuntime::observe(matjson::Value const& root) {
     if(m_view.id.empty()){m_lastServerNow=0;m_clock={};}
     auto const oldContext=preparationContext();
     auto const oldState=m_view.state;
+    auto const watchedFinal=(m_view.phase=="FINAL"||m_view.phase=="TIEBREAK")&&SurvivalSpectatorRuntime::get().watchingThroughEnd();
     m_view.id=id;m_view.revision=static_cast<std::uint64_t>(revision);m_view.state=root["state"].asString().unwrapOr("");
     m_view.phase=root["phase"].asString().unwrapOr("");m_view.roundKey=root["roundKey"].asString().unwrapOr("");
     m_view.presentationGate=root["presentationGate"].asString().unwrapOr("");
@@ -222,7 +225,9 @@ void SurvivalRuntime::observe(matjson::Value const& root) {
     m_view.entryOpensAt=root["entryOpensAt"].asString().unwrapOr("");
     m_view.entryRequestedAt=root["entryRequestedAt"].asString().unwrapOr("");
     m_view.certificate=root["map"];m_view.result=root["result"];
+    m_view.roundBadges=root["roundBadges"];
     m_view.completedRound=root["completedRound"];m_view.nextMap=root["nextMap"];m_view.participants=root["participants"];
+    if(oldState!="FINAL_RESULT"&&m_view.state=="FINAL_RESULT"&&watchedFinal)Mod::get()->setSavedValue(resultFlowKey()+":watched",true);
     m_view.selectionOpensAt=root["selectionOpensAt"].asString().unwrapOr("");
     m_view.mapError=root["mapSelection"]["errorCode"].asString().unwrapOr("");
     auto const diagnostic=m_view.id+":"+m_view.roundKey+":"+std::to_string(m_view.mapGeneration)+":"+m_view.mapError+
@@ -315,17 +320,31 @@ void SurvivalRuntime::poll() {
         }
     });
 }
+std::string SurvivalRuntime::resultFlowKey() const {return "survival-result-flow:"+std::to_string(GJAccountManager::sharedState()->m_accountID)+":"+m_view.id;}
+void SurvivalRuntime::completeResultScreen(bool score){
+    if(!m_view.result.isObject() || (m_view.state!="FINAL_RESULT"&&!m_view.ownEliminated))return;
+    auto const key=resultFlowKey();auto const old=Mod::get()->getSavedValue<int>(key);
+    Mod::get()->setSavedValue(key,std::max(old,score?2:1));(void)Mod::get()->saveData();
+}
+SurvivalFlowStage SurvivalRuntime::flowStage() const {
+    if(m_view.state!="FINAL_RESULT" && outcomeChoice()!=SurvivalOutcomeChoice::PersonalResult && !(m_view.ownEliminated&&Mod::get()->getSavedValue<bool>(resultFlowKey()+":requested")))return survivalFlowStage(m_view.state,m_view.presentationGate,m_view.ownEliminated,outcomeChoice());
+    bool podium=false;for(auto const& p:m_view.participants.asArray().unwrapOr(std::vector<matjson::Value>{}))
+        if(p["participantId"].asString().unwrapOr("")==m_view.ownId){auto rank=p["finalRank"].asInt().unwrapOr(0);podium=m_view.state=="FINAL_RESULT"&&rank>=1&&rank<=3;}
+    auto const screen=survivalResultScreen(m_view.result.isObject(),podium||Mod::get()->getSavedValue<bool>(resultFlowKey()+":watched"),Mod::get()->getSavedValue<int>(resultFlowKey()));
+    return screen==SurvivalResultScreen::Ceremony?SurvivalFlowStage::Ceremony:screen==SurvivalResultScreen::Personal?SurvivalFlowStage::PersonalResult:SurvivalFlowStage::ScoreAnimation;
+}
 SurvivalOutcomeChoice SurvivalRuntime::outcomeChoice() const {
     if(Mod::get()->getSavedValue<std::string>("survival-outcome-context")!=optionsContext())return SurvivalOutcomeChoice::Undecided;
     auto const choice=Mod::get()->getSavedValue<int>("survival-outcome-choice",0);
-    return choice==1&&m_view.ownEliminated?SurvivalOutcomeChoice::Observe:choice==2&&m_view.state=="FINAL_RESULT"?SurvivalOutcomeChoice::PersonalResult:choice==3&&officialRoundCleared()?SurvivalOutcomeChoice::LiveSpectate:choice==4&&m_view.ownEliminated?SurvivalOutcomeChoice::Standings:SurvivalOutcomeChoice::Undecided;
+    return choice==1&&m_view.ownEliminated?SurvivalOutcomeChoice::Observe:choice==2&&(m_view.state=="FINAL_RESULT"||(m_view.ownEliminated&&m_view.result.isObject()))?SurvivalOutcomeChoice::PersonalResult:choice==3&&officialRoundCleared()?SurvivalOutcomeChoice::LiveSpectate:choice==4&&m_view.ownEliminated?SurvivalOutcomeChoice::Standings:SurvivalOutcomeChoice::Undecided;
 }
 void SurvivalRuntime::chooseOutcome(SurvivalOutcomeChoice choice){
     if(choice==outcomeChoice()||!active())return;
     if(choice==SurvivalOutcomeChoice::LiveSpectate){if(!officialRoundCleared()||freePlaying())return;}
-    else if(choice==SurvivalOutcomeChoice::PersonalResult&&m_view.state!="FINAL_RESULT")return;
+    else if(choice==SurvivalOutcomeChoice::PersonalResult&&m_view.state!="FINAL_RESULT"&&!(m_view.ownEliminated&&m_view.result.isObject()))return;
     else if(!m_view.ownEliminated){if(choice!=SurvivalOutcomeChoice::Undecided&&m_view.state!="FINAL_RESULT")return;}
     else if(choice==SurvivalOutcomeChoice::Observe&&watchLockSeconds()>0)return;
+    Mod::get()->setSavedValue(resultFlowKey()+":requested",choice==SurvivalOutcomeChoice::PersonalResult);
     Mod::get()->setSavedValue("survival-outcome-context",optionsContext());Mod::get()->setSavedValue("survival-outcome-choice",static_cast<int>(choice));
     (void)Mod::get()->saveData();
 }

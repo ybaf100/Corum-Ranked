@@ -18,6 +18,7 @@ public:
     void leave(bool chooseAgain=false);
     void freePlay();
     bool active()const{return m_authorized;}
+    bool watchingThroughEnd()const{return m_authorized&&m_inScene&&!m_exitRequested;}
     bool sceneLevel(int level)const;
     bool canLaunch()const;
     bool arm(GJGameLevel* level);

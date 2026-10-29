@@ -24,3 +24,4 @@ export * from "./solo-tiers.js";
 export * from "./achievement-survival.js";
 
 export * from "./survival-achievement-checkpoint.js";
+export * from "./survival-round-badges.js";

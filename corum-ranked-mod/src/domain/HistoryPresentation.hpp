@@ -25,7 +25,7 @@ struct HistoryStanding {
     double progress=0;bool own=false,qualified=false,cleared=false,forfeited=false,cutoffBoundary=false;
 };
 struct HistoryRound {
-    matjson::Value replayIdentity=nullptr;
+    matjson::Value replayIdentity=nullptr,roundBadge=nullptr;
     std::string key,label,title,creator,difficulty,length,result,winnerSide,grade;
     int levelId=0,stars=0,target=0,qualifiedCount=0,nextDeathmatch=0;
     std::optional<int> featureScore,epic;
@@ -39,7 +39,7 @@ struct HistoryRound {
 inline std::vector<HistoryRound> historyRounds(matjson::Value const& record,bool survival) {
     std::vector<HistoryRound> result;
     auto append=[&](matjson::Value const& r,bool dm){
-        HistoryRound v;v.replayIdentity=r["replayIdentity"];v.deathmatch=dm;v.completed=r["completed"].asBool().unwrapOr(false);
+        HistoryRound v;v.roundBadge=r["roundBadge"];v.replayIdentity=r["replayIdentity"];v.deathmatch=dm;v.completed=r["completed"].asBool().unwrapOr(false);
         auto const map=survival?r["map"]:r;
         v.levelId=historyLevelId(map["levelId"]);v.title=map[survival?"title":"mapTitle"].asString().unwrapOr("");
         v.creator=map["creator"].asString().unwrapOr("");v.difficulty=map["difficulty"].asString().unwrapOr("");

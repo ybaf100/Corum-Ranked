@@ -8,7 +8,7 @@ import urllib.error
 import urllib.request
 import zipfile
 
-PLATFORMS = {"hwanhee1.corum_ranked.dll", "hwanhee1.corum_ranked.ios.dylib",
+PLATFORMS = {"hwanhee1.corum_ranked.dll", "hwanhee1.corum_ranked.dylib", "hwanhee1.corum_ranked.ios.dylib",
              "hwanhee1.corum_ranked.android32.so", "hwanhee1.corum_ranked.android64.so"}
 
 

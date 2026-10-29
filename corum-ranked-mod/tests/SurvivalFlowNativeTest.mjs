@@ -47,13 +47,15 @@ test('production outcome selection is scoped to match, round and map generation 
 #include <map>
 #include <variant>
 #include <cassert>
-struct Mod{std::map<std::string,std::variant<std::string,int>> saved;static Mod*get(){static Mod m;return &m;}
+struct Mod{std::map<std::string,std::variant<std::string,int,bool>> saved;static Mod*get(){static Mod m;return &m;}
  template<class T>T getSavedValue(std::string const&key,T fallback=T{}){auto i=saved.find(key);return i!=saved.end()?std::get<T>(i->second):fallback;}
  template<class T>void setSavedValue(std::string const&key,T value){saved[key]=value;}void saveData(){}};
 namespace corum::ranked{struct SurvivalRuntime{
- struct View{std::string id="match",roundKey="stage-1",state="PLAYING";int mapGeneration=1;bool ownEliminated=false;}m_view;bool cleared=true,free=false;int lock=0;
+ struct Value{bool ready=false;bool isObject()const{return ready;}};
+ struct View{Value result;std::string id="match",roundKey="stage-1",state="PLAYING";int mapGeneration=1;bool ownEliminated=false;}m_view;bool cleared=true,free=false;int lock=0;
  bool active()const{return !m_view.id.empty();}bool officialRoundCleared()const{return cleared&&!m_view.ownEliminated&&m_view.state=="PLAYING";}bool freePlaying()const{return free;}int watchLockSeconds()const{return lock;}
  ${options}
+ std::string resultFlowKey()const{return "flow:"+m_view.id;}
  SurvivalOutcomeChoice outcomeChoice()const;void chooseOutcome(SurvivalOutcomeChoice);
 };
 ${method('SurvivalOutcomeChoice SurvivalRuntime::outcomeChoice()')}
@@ -64,6 +66,7 @@ int main(){using namespace corum::ranked;SurvivalRuntime r;r.chooseOutcome(Survi
  r.m_view.state="PLAYING";r.chooseOutcome(SurvivalOutcomeChoice::LiveSpectate);r.m_view.mapGeneration=2;assert(r.outcomeChoice()==SurvivalOutcomeChoice::Undecided);
  r.m_view.ownEliminated=true;r.chooseOutcome(SurvivalOutcomeChoice::Standings);assert(r.outcomeChoice()==SurvivalOutcomeChoice::Standings);r.lock=5;r.chooseOutcome(SurvivalOutcomeChoice::Observe);assert(r.outcomeChoice()==SurvivalOutcomeChoice::Standings);r.lock=0;r.chooseOutcome(SurvivalOutcomeChoice::Observe);assert(r.outcomeChoice()==SurvivalOutcomeChoice::Observe);
  r.m_view.roundKey="stage-3";assert(r.outcomeChoice()==SurvivalOutcomeChoice::Undecided);r.chooseOutcome(SurvivalOutcomeChoice::LiveSpectate);assert(r.outcomeChoice()==SurvivalOutcomeChoice::Undecided);
+ r.m_view.result.ready=true;r.chooseOutcome(SurvivalOutcomeChoice::PersonalResult);assert(r.outcomeChoice()==SurvivalOutcomeChoice::PersonalResult);
  r.m_view.state="FINAL_RESULT";r.chooseOutcome(SurvivalOutcomeChoice::PersonalResult);assert(r.outcomeChoice()==SurvivalOutcomeChoice::PersonalResult);
  // A legacy match-only saved choice must not capture a new round.
  Mod::get()->setSavedValue("survival-outcome-context",r.m_view.id);assert(r.outcomeChoice()==SurvivalOutcomeChoice::Undecided);

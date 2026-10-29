@@ -1,3 +1,5 @@
+import {SurvivalController} from "../src/survival/survival.controller.js";
+import {SurvivalBadgesService} from "../src/survival/survival-badges.service.js";
 import {SurvivalReplayReceiptController} from "../src/survival/survival-replay-receipt.controller.js";
 import {SurvivalSpectatorLiveService} from "../src/survival/survival-spectator-live.service.js";
 import {SurvivalSpectatorLiveController} from "../src/survival/survival-spectator-live.controller.js";
@@ -80,7 +82,7 @@ beforeEach(async()=>{
  // Deterministic server clock tests explicitly tick production workers. This
  // leaves real HTTP handlers, auth, transactions, reducer and payment intact.
  vi.spyOn(online,"onApplicationBootstrap").mockImplementation(async()=>{});vi.spyOn(queue,"onApplicationBootstrap").mockImplementation(async()=>{});
- const module=await Test.createTestingModule({controllers:[SurvivalReplayReceiptController,SurvivalSpectatorLiveController,SurvivalQueueController,SurvivalOnlineController,AchievementController,HistoryController],providers:[SessionGuard,AdmissionVersionGuard,
+ const module=await Test.createTestingModule({controllers:[SurvivalController,SurvivalReplayReceiptController,SurvivalSpectatorLiveController,SurvivalQueueController,SurvivalOnlineController,AchievementController,HistoryController],providers:[SessionGuard,AdmissionVersionGuard,SurvivalBadgesService,{provide:SurvivalService,useValue:survival},
   {provide:SurvivalSpectatorLiveService,useValue:spectator},{provide:DATABASE,useValue:db},{provide:SERVER_CLOCK,useValue:clock},{provide:TokenService,useValue:tokens},
   {provide:HistoryService,useValue:new HistoryService({history:async()=>({matches:[]})} as unknown as MatchService,survival,clock)},
   {provide:AchievementService,useValue:achievements},{provide:SurvivalQueueService,useValue:queue},{provide:SurvivalOnlineService,useValue:online},{provide:SurvivalRateService,useValue:rates}]}).compile();
@@ -113,6 +115,24 @@ async function prepare(id:string,group:Client[]){let m=await engine.get(id);now+
 async function record(c:Client,m:SurvivalMatch,progress:number){const attemptId=ids.next();await event(c,m,"ATTEMPT_START",{attemptId});await event(c,m,"ATTEMPT_END",{attemptId,progress});}
 
 describe("Survival M5 public HTTP and persistent online game",()=>{
+ it("serves authenticated permanent badge collections from official results, preserving zero policy slots and history-reset totals",async()=>{
+  expect((await fetch(base+"/api/ranked/survival/badges")).status).toBe(401);
+  const {group,id}=await game(2),a=group[0]!,b=group[1]!;let m=await prepare(id,group);
+  const empty=await api(a,"/badges");expect(empty.status).toBe(200);expect(empty.body.totals.ELIMINATED).toBe(0);
+  expect(empty.body.difficulties.map((d:any)=>d.id)).toEqual(["HARD","HARDER","INSANE","EASY_DEMON","MEDIUM_DEMON","HARD_DEMON","INSANE_DEMON"]);
+  await record(a,m,10);await record(b,m,20);now=survivalCurrentRound(m).endsAt!;await touch(group);await online.tickOnce();
+  const counts=await api(a,"/badges");expect(counts.status).toBe(200);expect(counts.body.totals).toMatchObject({MYTHIC:0,LEGENDARY:0,ELIMINATED:1});
+  expect((await api(b,"/badges")).body.totals).toMatchObject({MYTHIC:1,ELIMINATED:0});
+  const history=(await api(a,"/history")).body;expect(history.matches[0].rounds[0].roundBadge).toMatchObject({grade:"ELIMINATED",rank:2,roundLabel:"FINAL"});
+  const rows=(await db.query("SELECT * FROM sur_round_badges ORDER BY participant_id")).rows;expect(rows).toHaveLength(2);
+  for(let i=0;i<3;i++)expect((await api(a,"/badges")).body).toEqual(counts.body);
+  await new SurvivalBadgesService(db).onApplicationBootstrap();expect((await db.query("SELECT * FROM sur_round_badges ORDER BY participant_id")).rows).toEqual(rows);
+  await db.query("UPDATE ranked_players SET gd_username='hwanhee1' WHERE id=$1",[a.session.playerId]);
+  await new AdminService(db,env,{} as RankedConfigService,clock,config).execute({...a.session,gdUsername:"hwanhee1"},{action:"RESET_HISTORY",scope:"SURVIVAL",confirmation:"RESET",password:"fixture-password"});
+  expect((await api(a,"/history")).body.matches).toHaveLength(0);expect((await api(a,"/badges")).body).toEqual(counts.body);
+  expect((await api(a,"/badges",{grade:"MYTHIC",rank:1})).status).toBe(404);
+ });
+
  it("holds the ready room for exactly 5s, accepts surrender during the wait and preserves its deadline",async()=>{
   const {group,id}=await game(8),owner=group[0]!,peers=group.slice(1);
   now+=(await engine.get(id)).presentationGate==="INTRO"?6000:5000;await touch(group);await online.tickOnce();await engine.selectMap(id);let m=await engine.get(id);

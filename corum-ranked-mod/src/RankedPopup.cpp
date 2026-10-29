@@ -1,3 +1,5 @@
+#include "ui/SurvivalBadgeCollection.hpp"
+#include "ui/SurvivalRoundBadge.hpp"
 #include "replay/HistoryReplayButton.hpp"
 #include "ui/PublicPlayerProfile.hpp"
 #include "ui/LobbyPopulationView.hpp"
@@ -4103,6 +4105,7 @@ class CorumRankedLayer final : public CCLayerColor {
             kGold,
             kCyan
         );
+        if(!titleSelectorOpen){auto* badges=addButton(tr("badge-menu","BADGES"),{size.width-61,size.height-30},menu_selector(CorumRankedLayer::onBadgeCollection),false,.36f);badges->setID("ranked-achievement-badges"_spr);}
         auto* ap = makeTextPlate(
             fmt::format("{} AP", view.achievements.totalAp),
             {size.width*.19f, 27.0f},
@@ -4506,18 +4509,20 @@ class CorumRankedLayer final : public CCLayerColor {
         panel->setID("ranked-history-level-panel"_spr);
         historyText(panel,round.title.empty()?tr("history-level-name-unavailable","LEVEL NAME UNAVAILABLE"):round.title,.43f,{width/2,height-21},width-24,ui::Text,true);
         historyText(panel,round.creator.empty()?tr("history-unavailable","UNAVAILABLE"):"by "+round.creator,.27f,{width/2,height-45},width-24,ui::TextMuted);
-        auto const thumbnail=historyHasThumbnail(round),horizontal=thumbnail&&width>=300;
+        auto const earned=round.roundBadge.isObject();
+        auto const thumbnail=historyHasThumbnail(round),horizontal=thumbnail&&width>=300&&!earned;
         if(thumbnail){
-            auto const thumbWidth=horizontal?150.f:std::min(width-24,150.f),thumbHeight=thumbWidth*9/16;
-            auto* frame=makeNeonPanel({thumbWidth,thumbHeight},{horizontal?87.f:width/2,height-(horizontal?111.f:98.f)},kBlue,kDeepPanel,240);
+            auto const thumbWidth=earned?std::min(150.f,width-94):horizontal?150.f:std::min(width-24,150.f),thumbHeight=thumbWidth*9/16;
+            auto* frame=makeNeonPanel({thumbWidth,thumbHeight},{earned?(width-74)/2:horizontal?87.f:width/2,height-(earned?108.f:horizontal?111.f:98.f)},kBlue,kDeepPanel,240);
             frame->setID("ranked-history-thumbnail"_spr);panel->addChild(frame,3);
             auto* placeholder=historyText(frame,tr("loading","Loading..."),.24f,{thumbWidth/2,thumbHeight/2},thumbWidth-12,ui::TextMuted);m_historyThumbnailPlaceholder=placeholder;
             auto* sprite=CCSprite::create();sprite->setPosition({thumbWidth/2,thumbHeight/2});frame->addChild(sprite,5);m_historyThumbnail=sprite;
             m_historyThumbnailSize=CCSize{thumbWidth-4,thumbHeight-4};m_historyTexture=nullptr;
             m_historyThumbnailContext={m_historySelectedId,round.key,0,static_cast<std::uint64_t>(round.levelId),++m_historyThumbnailGeneration};
         }
+        if(earned)if(auto* badge=ui::survivalRoundBadge(round.roundBadge,{62,84})){badge->setPosition({thumbnail?width-43:width/2,height-108});panel->addChild(badge,5);}
         float const infoLeft=horizontal?174.f:12.f,infoWidth=width-infoLeft-12;
-        float const infoTop=thumbnail&&!horizontal?height-156:height-62;
+        float const infoTop=earned?height-166:thumbnail&&!horizontal?height-156:height-62;
         MapMetadata metadata;metadata.kind=round.difficulty.find("DEMON")!=std::string::npos?"DEMON":round.difficulty.empty()?"UNKNOWN":"NORMAL";
         if(round.stars>0)metadata.stars=round.stars;
         metadata.featureScore=round.featureScore;metadata.epic=round.epic;
@@ -4569,7 +4574,7 @@ class CorumRankedLayer final : public CCLayerColor {
         auto const viewport=CCSize{layout.width,layout.height};auto* scroll=corum::ranked::ui::createRankedTapScroll(viewport,[weak=WeakRef(this)](CCPoint start,CCPoint end){if(auto owner=weak.lock())owner->onHistoryPlayerTap(start,end);});m_historyBoardScroll=scroll;scroll->setID("ranked-history-board-scroll"_spr);scroll->setPosition({(size.width-layout.width)/2,layout.bottom});m_root->addChild(scroll,3);
         auto* content=scroll->m_contentLayer;
         if(!round.completed){
-            auto const mapWidth=std::min(layout.width,390.f),mapHeight=corum::ranked::historyMapPanelHeight(mapWidth,historyHasThumbnail(round));
+            auto const mapWidth=std::min(layout.width,390.f),mapHeight=(round.roundBadge.isObject()?310.f:corum::ranked::historyMapPanelHeight(mapWidth,historyHasThumbnail(round)));
             auto const h=std::max(viewport.height,mapHeight+75);content->setContentSize({layout.width,h});
             historyText(content,item.inProgress?tr("history-round-live","This round is still in progress."):tr("history-round-unfinished","This round has no confirmed result."),.32f,{layout.width/2,h-25},layout.width-20,kCyan);
             historyText(content,item.inProgress?tr("history-round-live-help","Final records and rankings appear after the round ends."):tr("history-unavailable","UNAVAILABLE"),.25f,{layout.width/2,h-51},layout.width-20,corum::ranked::ui::TextMuted);
@@ -4577,7 +4582,7 @@ class CorumRankedLayer final : public CCLayerColor {
         }
         if(!survival){
             auto const mapWidth=layout.split?layout.mapWidth:std::min(layout.width,390.f);auto const boardWidth=layout.split?layout.width-mapWidth-10:layout.width;
-            auto const mapHeight=corum::ranked::historyMapPanelHeight(mapWidth,historyHasThumbnail(round));
+            auto const mapHeight=(round.roundBadge.isObject()?310.f:corum::ranked::historyMapPanelHeight(mapWidth,historyHasThumbnail(round)));
             auto const h=std::max(viewport.height,layout.split?std::max(mapHeight,205.f):mapHeight+205);content->setContentSize({layout.width,h});
             historyMapPanel(content,round,{layout.split?mapWidth/2:layout.width/2,h-mapHeight/2},mapWidth,mapHeight);
             auto const boardX=layout.split?mapWidth+10:0.f,boardTop=layout.split?h:h-mapHeight-12;
@@ -4601,7 +4606,7 @@ class CorumRankedLayer final : public CCLayerColor {
             historyText(panel,tied?tr("tie","TIE"):outcome==item.side?tr("history-your-round-win","YOU WIN THIS ROUND"):tr("history-rival-round-win","RIVAL WINS THIS ROUND"),.28f,{boardWidth/2,45},boardWidth-14,tied?kGold:outcome==item.side?kGreen:kRed);
             if(round.nextDeathmatch>0)historyText(panel,fmt::format("{} DM {}",tr("history-continued","CONTINUED IN"),round.nextDeathmatch),.24f,{boardWidth/2,20},boardWidth-16,corum::ranked::ui::TextMuted);
         }else{
-            auto const mapWidth=layout.split?layout.mapWidth:std::min(layout.width,390.f),mapHeight=corum::ranked::historyMapPanelHeight(mapWidth,historyHasThumbnail(round));
+            auto const mapWidth=layout.split?layout.mapWidth:std::min(layout.width,390.f),mapHeight=(round.roundBadge.isObject()?310.f:corum::ranked::historyMapPanelHeight(mapWidth,historyHasThumbnail(round)));
             auto const boardHeight=58.f+round.standings.size()*70;auto const h=std::max(viewport.height,layout.split?std::max({220.f,mapHeight,boardHeight}):mapHeight+250.f+boardHeight);content->setContentSize({layout.width,h});
             historyMapPanel(content,round,{layout.split?mapWidth/2:layout.width/2,h-mapHeight/2},mapWidth,mapHeight);
             auto const boardX=layout.split?layout.mapWidth+8:0.f,boardTop=layout.split?h:h-mapHeight-244;
@@ -5026,6 +5031,7 @@ class CorumRankedLayer final : public CCLayerColor {
         RankedRuntime::get().fetchHistoryScope(scope);
     }
 
+    void onBadgeCollection(CCObject*) {corum::ranked::ui::showSurvivalBadgeCollection();}
     void onAchievements(CCObject*) {
         if (m_modeTransition.moving()) return;
         auto const selected = m_modeTransition.selected();

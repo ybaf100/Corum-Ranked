@@ -1,4 +1,5 @@
 import { observeSurvivalAchievementCheckpoint, observeSurvivalAchievementRecovery, type SurvivalAchievementCheckpoint } from "./survival-achievement-checkpoint.js";
+import {survivalRoundBadges,type SurvivalRoundBadge} from "./survival-round-badges.js";
 import { survivalOnlineTargets,survivalOnlineRewardRank } from "./survival-online.js";
 import { RankedDomainError } from "./errors.js";
 import { survivalPlacementLp, survivalTierForLp, type SurvivalConfig } from "./survival.js";
@@ -68,6 +69,8 @@ export interface SurvivalRound {
   players: SurvivalRoundPlayer[];
 }
 export interface SurvivalMatch {
+  /** Immutable official awards, captured alongside the result snapshot. */
+  roundBadges?:SurvivalRoundBadge[];
   id: string;
   online?:boolean;
   variableSize?:boolean;
@@ -616,6 +619,7 @@ export function survivalLiveView(match: SurvivalMatch, now: number, participantI
     startsAt:round.startsAt === null ? null : new Date(round.startsAt).toISOString(),
     endsAt:round.endsAt === null ? null : new Date(round.endsAt).toISOString(),
     remainingSeconds:match.state === "PLAYING" && round.endsAt !== null ? Math.max(0,(round.endsAt-now)/1000) : 0,
+    roundBadges:survivalRoundBadges(match).filter(b=>participantId===null || b.participantId===participantId),
     standings,roundPlayers,completedRound,top3:standings.slice(0,3),myRank:standings.find(p => p.participantId === participantId)?.rank ?? null,
     cutoffScore:round.phase === "TIEBREAK" && cutoff !== null ? cutoff/1000 : cutoff,
     targetQualifiers:Math.min(round.target,standings.length),finalFirstScore:["FINAL","TIEBREAK"].includes(round.phase) ? standings[0]?.score ?? null : null,
