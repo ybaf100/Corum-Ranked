@@ -15,11 +15,12 @@ export function survivalBadgeGrade(rank:number,survived:boolean):SurvivalBadgeGr
  * TIEBREAK share one logical result; tied qualifiers await their deciding round.
  * Missing historical rank/map evidence produces no invented award. */
 export function survivalRoundBadges(match:SurvivalMatch):SurvivalRoundBadge[] {
-  if(match.state==="CANCELLED")return [];
+  if(match.state==="CANCELLED"||!Array.isArray(match.rounds)||!Array.isArray(match.players))return [];
   const badges=[...(match.roundBadges??[])];
   const seen=new Set(badges.map(b=>`${b.participantId}:${b.roundKey}`));
   for(const round of match.rounds){
-    if(!round.map)continue;
+    if(!round.map || !Array.isArray(round.players) || !round.key || !Number.isInteger(round.ordinal) || round.ordinal<1 ||
+      !Number.isSafeInteger(round.map.levelId) || round.map.levelId<1 || round.map.levelId>2_147_483_647)continue;
     const confirmed=round.finishedAt!==null&&Number.isFinite(round.finishedAt);
     const difficulty=survivalRecordedDifficulty(round.map);if(!difficulty)continue;
     const final=round.phase==="FINAL"||round.phase==="TIEBREAK";
