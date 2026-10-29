@@ -1431,6 +1431,7 @@ class CorumRankedLayer final : public CCLayerColor {
             "black"
         );
         corum::ranked::ui::fitMenuLabelWidth(title, size.width - 170.0f, 0.70f, 0.40f);
+        title->setID("ranked-screen-title"_spr);
         m_root->addChild(title, 6);
 
         auto* eyebrow = makeLabel(
@@ -4105,7 +4106,14 @@ class CorumRankedLayer final : public CCLayerColor {
             kGold,
             kCyan
         );
-        if(!titleSelectorOpen){auto* badges=addButton(tr("badge-menu","BADGES"),{size.width-61,size.height-30},menu_selector(CorumRankedLayer::onBadgeCollection),false,.36f);badges->setID("ranked-achievement-badges"_spr);}
+        if(!titleSelectorOpen){
+            // Same visual scale as the main lobby's achievement entry.
+            auto* badges=addButton(tr("badge-menu","BADGES"),{},menu_selector(CorumRankedLayer::onBadgeCollection),false,.66f);
+            auto const width=badges->getContentSize().width;
+            badges->setPosition({size.width-20-width/2,size.height-28});badges->setID("ranked-achievement-badges"_spr);
+            if(auto* title=typeinfo_cast<CCLabelBMFont*>(m_root->getChildByID("ranked-screen-title"_spr)))
+                corum::ranked::ui::fitMenuLabelWidth(title,std::max(50.f,size.width-2*(width+28)),.70f,.40f);
+        }
         auto* ap = makeTextPlate(
             fmt::format("{} AP", view.achievements.totalAp),
             {size.width*.19f, 27.0f},

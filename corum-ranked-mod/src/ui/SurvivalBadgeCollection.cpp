@@ -1,7 +1,8 @@
 #include "SurvivalBadgeCollection.hpp"
 #include "../domain/SurvivalBadgeCollectionData.hpp"
 #include "RankedTranslations.hpp"
-#include "SurvivalRoundBadge.hpp"
+#include "SurvivalCollectionBadge.hpp"
+#include "../domain/SurvivalCollectionPresentation.hpp"
 #include "RankedPopupLayout.hpp"
 #include "../RankedRuntime.hpp"
 #include <Geode/ui/Popup.hpp>
@@ -13,23 +14,19 @@ using namespace geode::prelude;
 namespace corum::ranked::ui {
 namespace {
 std::string difficultyName(matjson::Value const& d){auto id=d["id"].asString().unwrapOr("");return i18n::text("badge-difficulty-"+id,d["name"].asString().unwrapOr(id));}
-CCNode* difficultyFace(matjson::Value const& d,float extent){
-    auto* face=GJDifficultySprite::create(static_cast<int>(d["nativeCode"].asInt().unwrapOr(0)),GJDifficultyName::Short);
-    if(face){auto s=face->getContentSize();face->setScale(extent/std::max({1.f,s.width,s.height}));}return face;
-}
 class BadgeDetail final:public Popup {
     std::string m_session;std::function<void()> m_closed;
     bool init(matjson::Value const& data,matjson::Value const& selected,bool eliminated,std::function<void()> closed){
         auto layout=rankedPopupLayout({410,292},CCDirector::sharedDirector()->getWinSize());
         if(!Popup::init(layout.size.width,layout.size.height))return false;
         m_session=RankedRuntime::get().spectatorLiveSessionToken();m_closed=std::move(closed);m_bgSprite->setVisible(false);
-        auto* root=rankedPopupContent(m_mainLayer,m_buttonMenu,layout);root->addChild(surface({410,292},{205,146},eliminated?Red:Cyan,Surface,255,true));
+        auto* root=rankedPopupContent(m_mainLayer,m_buttonMenu,layout);root->addChild(surface({410,292},{205,146},eliminated?Red:Cyan,Surface,242,true));
         auto* title=menuLabel(eliminated?"ELIMINATED":difficultyName(selected),.36f,{205,266},eliminated?Red:Cyan,FontWeight::Black);fitFullMenuLabel(title,350,24,.36f);root->addChild(title,5);
         auto const counts=eliminated?data["totals"]:selected["counts"];std::int64_t total=0;
         if(eliminated)total=counts["ELIMINATED"].asInt().unwrapOr(0);else for(auto g:SurvivalBadgeGrades)total+=counts[std::string(g)].asInt().unwrapOr(0);
         root->addChild(menuLabel(fmt::format("{}: {}",i18n::text("badge-total","TOTAL"),total),.27f,{240,229},Text,FontWeight::ExtraBold));
-        if(eliminated){matjson::Value b=matjson::makeObject({{"grade","ELIMINATED"}});if(auto* card=survivalRoundBadge(b,{54,50},false)){card->setPosition({58,226});root->addChild(card,5);}}
-        else if(auto* icon=difficultyFace(selected,40)){icon->setPosition({58,229});root->addChild(icon,5);}
+        auto* preview=survivalCollectionBadge(static_cast<int>(selected["nativeCode"].asInt().unwrapOr(0)),eliminated?"ELIMINATED":"",44);
+        preview->setPosition({62,229});root->addChild(preview,5);
         if(eliminated){
             auto rows=survivalBadgeCollectionRows(data);auto actual=data["eliminatedByDifficulty"].asArray().unwrapOr(std::vector<matjson::Value>{});
             for(auto const& r:actual)if(std::none_of(rows.begin(),rows.end(),[&](auto const& d){return d["id"]==r["difficulty"];}))rows.push_back(matjson::makeObject({{"id",r["difficulty"]},{"name",r["difficulty"]}}));
@@ -38,10 +35,12 @@ class BadgeDetail final:public Popup {
                 float x=columns==1?205.f:108.f+194.f*(i/per),y=195.f-23.f*(i%per);
                 auto* label=menuLabel(fmt::format("{}  {}",difficultyName(d),n),.24f,{x,y},Text);fitFullMenuLabel(label,columns==1?350:180,20,.24f);root->addChild(label,5);
             }
-        }else for(std::size_t i=0;i<5;++i){
-            auto const grade=std::string(SurvivalBadgeGrades[i]);auto const y=190.f-36.f*i;
-            auto b=matjson::makeObject({{"grade",grade}});if(auto* card=survivalRoundBadge(b,{105,30},false)){card->setPosition({100,y});root->addChild(card,5);}
-            root->addChild(menuLabel(fmt::format("{}",counts[grade].asInt().unwrapOr(0)),.32f,{287,y},survivalBadgeColor(grade),FontWeight::Black));
+        }else for(std::size_t i=0;i<SurvivalCollectionGrades.size();++i){
+            auto const grade=SurvivalCollectionGrades[i];auto const cell=survivalCollectionGradeCell(i);
+            auto* badge=survivalCollectionBadge(static_cast<int>(selected["nativeCode"].asInt().unwrapOr(0)),grade,cell.side);
+            badge->setPosition({cell.x,cell.y});root->addChild(badge,5);
+            auto* count=menuLabel(fmt::format("{}",counts[std::string(grade)].asInt().unwrapOr(0)),.30f,{cell.x,cell.countY},survivalBadgeColor(grade),FontWeight::Black);
+            fitFullMenuLabel(count,cell.side,18,.30f);root->addChild(count,5);
         }
         scheduleUpdate();return true;
     }
@@ -60,9 +59,12 @@ public:
         auto* p=new BadgeStrip;if(!p->init()){delete p;return nullptr;}p->autorelease();p->setContentSize({440,112});p->m_count=rows.size()+1;p->m_tap=std::move(tap);
         auto* stencil=CCDrawNode::create();CCPoint points[]={{0,0},{440,0},{440,112},{0,112}};stencil->drawPolygon(points,4,{1,1,1,1},0,{1,1,1,1});
         auto* clip=CCClippingNode::create(stencil);p->addChild(clip);p->m_content=CCNode::create();clip->addChild(p->m_content);
-        for(std::size_t i=0;i<p->m_count;++i){auto const last=i==rows.size();auto* cell=surface({82,106},{44.f+88*i,56},last?Red:Blue,SurfaceRaised,255,true);p->m_content->addChild(cell);
-            if(last)cell->addChild(menuLabel("X",.85f,{41,66},Red,FontWeight::Black));else if(auto* icon=difficultyFace(rows[i],42)){icon->setPosition({41,66});cell->addChild(icon,5);}
-            auto* label=menuLabel(last?"ELIMINATED":difficultyName(rows[i]),.23f,{41,24},last?Red:Text,FontWeight::ExtraBold);fitFullMenuLabel(label,72,30,.23f);cell->addChild(label,5);
+        for(std::size_t i=0;i<p->m_count;++i){
+            auto const last=i==rows.size();
+            auto* cell=survivalCollectionBadge(last?0:static_cast<int>(rows[i]["nativeCode"].asInt().unwrapOr(0)),last?"ELIMINATED":"",76);
+            cell->setPosition({44.f+88*i,68});p->m_content->addChild(cell,5);
+            auto* label=menuLabel(last?"ELIMINATED":difficultyName(rows[i]),.23f,{44.f+88*i,14},last?Red:Text,FontWeight::ExtraBold);
+            fitFullMenuLabel(label,76,22,.23f);p->m_content->addChild(label,5);
         }
         p->setTouchEnabled(true);return p;
     }
@@ -80,7 +82,7 @@ class BadgeCollection final:public Popup {
     bool init()override{
         auto layout=rankedPopupLayout({480,260},CCDirector::sharedDirector()->getWinSize());if(!Popup::init(layout.size.width,layout.size.height))return false;
         setID("survival-badge-collection"_spr);m_bgSprite->setVisible(false);m_root=rankedPopupContent(m_mainLayer,m_buttonMenu,layout);
-        m_root->addChild(surface({480,260},{240,130},Gold,Surface,255,true));
+        m_root->addChild(surface({480,260},{240,130},Gold,Surface,242,true));
         m_root->addChild(menuLabel(i18n::text("badge-collection","ROUND BADGES"),.39f,{240,231},Gold,FontWeight::Black));
         m_status=menuLabel(i18n::text("loading","Loading..."),.24f,{240,190},TextMuted);m_root->addChild(m_status,5);
         auto* hint=menuLabel(i18n::text("badge-drag","DRAG TO EXPLORE · TAP FOR DETAILS"),.22f,{240,60},TextMuted);fitFullMenuLabel(hint,440,20,.22f);m_root->addChild(hint,5);

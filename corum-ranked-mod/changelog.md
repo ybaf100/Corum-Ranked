@@ -1,3 +1,10 @@
+# v0.5.0-beta.116
+
+- Show collection badges as square native GD difficulty faces with Rated, Featured, Epic, Legendary and Mythic effects.
+- Arrange difficulty details in a centered three-plus-two grid, retaining official collection counts.
+- Use dark outlined badge panels and enlarge the achievement page BADGES entry to the lobby toolbar scale.
+- Preserve personal result and history badge presentation.
+
 # v0.5.0-beta.115
 
 - Collect official Survival round badges, with immutable difficulty/rank snapshots and idempotent server persistence.
