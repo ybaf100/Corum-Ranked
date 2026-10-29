@@ -52,3 +52,8 @@ Neither log contains a first jump DESYNC record, actual replay bytes, or source 
 - Migration 0034 applied twice in isolated Neon PostgreSQL 18 branch `br-young-hill-azqqa6gp`, copied from production. Both applications preserve 1 account, 1 Survival profile, LP 110, AP 45, MMR 150, 2 Survival matches and 198 existing TIEBREAK attempts. The test branch expires 2026-10-30. Existing live snapshots remain authoritative at their stored limit.
 
 - Pre-activation review added an actual Recorder-to-storage regression with a nonempty button queue. Nested commands carry button data; tick/elapsed belong to their enclosing dispatch. The codec now validates that structure without erroneously requiring top-level provenance on each nested button. All four replay bridge/playback/recorder/storage harnesses passed after this correction.
+
+
+## Final beta.113 identity preservation
+
+Final review identified that rebuilding an already populated identity index at first source activation could overwrite original object coordinates after Move/Follow motion. The fallback now builds only an empty index; the native Random harness verifies an existing index is never rebuilt. This final correction is published as beta.113, preserving any immutable beta.112 packages and all earlier commits. All beta.112 functionality and snapshot compatibility remain included. Physical entropie branch parity is still unverified.

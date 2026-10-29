@@ -1,3 +1,8 @@
+# v0.5.0-beta.113
+
+- Preserve the Random object identities indexed at native initialization. Only fill an empty index at the first capture activation, so later Move/Follow motion cannot rewrite original identity coordinates.
+- Includes the beta.112 Survival replay, spectator recovery, audio, HUD and six-attempt corrections. Published beta.112 files remain immutable.
+
 # v0.5.0-beta.112
 
 - Survival Death Match uses six attempts for new matches; legacy snapshots retain their captured limit. Return after terminal server confirmation, preserving the final replay.

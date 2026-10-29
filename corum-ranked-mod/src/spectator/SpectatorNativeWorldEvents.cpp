@@ -154,7 +154,8 @@ class $modify(CorumNativeRandomBranch, RandTriggerGameObject) {
         // The prepared-level predicate may be false during nested init/reset.
         // Build identities at the first real capture activation as well.
         if((recording||debugRecord) && scope!=play->m_fields->scope){
-            play->buildObjects();play->m_fields->scope=scope;play->m_fields->ordinal=0;
+            if(play->m_fields->objects.empty())play->buildObjects();
+            play->m_fields->scope=scope;play->m_fields->ordinal=0;
             play->m_fields->captured.clear();play->m_fields->snapshot.reset();
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
             log::info("[SpectatorRandom] phase=CAPTURE_READY attemptId={} objects={}",scope,play->m_fields->objects.size());

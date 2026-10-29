@@ -21,7 +21,7 @@ struct GJBaseGameLayer{std::vector<int>groups;virtual ~GJBaseGameLayer()=default
 ${structs}
 struct OutputHook:GJBaseGameLayer{${method('    void spawnGroup(')}};
 struct PlayLayer:OutputHook{GJGameLevel level;GJGameLevel*m_level=&level;bool m_isTestMode=false,m_isPracticeMode=false;int m_currentStep=12;struct{double m_levelTime=.05;}m_gameState;
- struct Fields{std::unordered_map<GameObject*,ObjectIdentity>objects;bool remote=false,applyingSource=false;std::set<int>missingActivations;std::string scope;std::uint64_t ordinal=0;std::deque<SpectatorRandomEvent>expected;std::vector<SpectatorRandomEvent>captured;SpectatorRandomEvents snapshot;unsigned misses=0;}fields;Fields*m_fields=&fields;void buildObjects(){} };using CorumNativeWorldEventLayer=PlayLayer;
+ struct Fields{std::unordered_map<GameObject*,ObjectIdentity>objects;bool remote=false,applyingSource=false;std::set<int>missingActivations;std::string scope;std::uint64_t ordinal=0;std::deque<SpectatorRandomEvent>expected;std::vector<SpectatorRandomEvent>captured;SpectatorRandomEvents snapshot;unsigned misses=0;}fields;Fields*m_fields=&fields;int identityBuilds=0;void buildObjects(){++identityBuilds;} };using CorumNativeWorldEventLayer=PlayLayer;
 static PlayLayer*current=nullptr;static replay::Playback*ownedPlayback=nullptr;
 PlayLayer*owner(GJBaseGameLayer*p){return current&&static_cast<GJBaseGameLayer*>(current)==p?current:nullptr;}
 replay::Playback*replayOwner(PlayLayer*p){return p==current?ownedPlayback:nullptr;}
@@ -33,7 +33,7 @@ struct RandTriggerGameObject:GameObject{int m_objectID=1912,nativeChoice=7,nativ
 struct RandomHook:RandTriggerGameObject{${method('    void triggerObject(')}};
 replay::Playback playback(matjson::Value event){replay::Document d;d.complete=true;matjson::Value initial;initial["kind"]="initial";initial["randomSeed"]="1";initial["replayRandSeed"]="2";matjson::Value frame;frame["kind"]="frame";frame["dt"]=.05;auto pose=encodeSpectatorPose(SpectatorGhostPose{});pose["kind"]="pose";pose["progress"]=20.;d.records={initial,frame,event,pose};return replay::Playback(std::move(d));}
 int main(){PlayLayer scene;current=&scene;RandomHook random;scene.fields.objects[&random]={0,1912,100,200};auto& recorder=replay::Recorder::get();
- random.triggerObject(&scene,11,nullptr);assert(scene.groups.back()==7&&random.nativeCalls==1&&recorder.records.size()==1);auto sourceEvent=recorder.records[0];assert(sourceEvent["event"]["outputs"][0]["group"].asInt().unwrap()==7);
+ random.triggerObject(&scene,11,nullptr);assert(scene.groups.back()==7&&random.nativeCalls==1&&recorder.records.size()==1);assert(scene.identityBuilds==0);auto sourceEvent=recorder.records[0];assert(sourceEvent["event"]["outputs"][0]["group"].asInt().unwrap()==7);
  random.nativeChoice=42;random.triggerObject(&scene,11,nullptr);assert(scene.groups.back()==42&&random.nativeCalls==2&&recorder.records.size()==2);
  SurvivalRuntime::get().official=false;auto viewer=playback(sourceEvent);ownedPlayback=&viewer;random.nativeChoice=999;random.triggerObject(&scene,11,nullptr);assert(scene.groups.back()==7&&random.nativeCalls==2&&recorder.records.size()==2&&!viewer.desync());
  auto zeroChoice=playback(sourceEvent);ownedPlayback=&zeroChoice;random.nativeChoice=-1;random.triggerObject(&scene,11,nullptr);assert(scene.groups.back()==7&&random.nativeCalls==2&&!zeroChoice.desync());
