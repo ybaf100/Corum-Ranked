@@ -10,10 +10,16 @@
 #include <Geode/cocos/misc_nodes/CCClippingNode.h>
 #include <Geode/cocos/draw_nodes/CCDrawNode.h>
 #include <Geode/utils/web.hpp>
+#include <cctype>
 using namespace geode::prelude;
 namespace corum::ranked::ui {
 namespace {
-std::string difficultyName(matjson::Value const& d){auto id=d["id"].asString().unwrapOr("");return i18n::text("badge-difficulty-"+id,d["name"].asString().unwrapOr(id));}
+std::string difficultyName(matjson::Value const& d){
+    auto name=d["name"].asString().unwrapOr("");if(!name.empty())return name;
+    auto id=d["id"].asString().unwrapOr("");
+    for(std::size_t i=0;i<id.size();++i)id[i]=id[i]=='_'?' ':static_cast<char>(i==0||id[i-1]==' '?std::toupper(static_cast<unsigned char>(id[i])):std::tolower(static_cast<unsigned char>(id[i])));
+    return id;
+}
 class BadgeDetail final:public Popup {
     std::string m_session;std::function<void()> m_closed;
     bool init(matjson::Value const& data,matjson::Value const& selected,bool eliminated,std::function<void()> closed){
@@ -23,7 +29,7 @@ class BadgeDetail final:public Popup {
         auto* root=rankedPopupContent(m_mainLayer,m_buttonMenu,layout);root->addChild(surface({410,292},{205,146},eliminated?Red:Cyan,Surface,242,true));
         auto* title=menuLabel(eliminated?"ELIMINATED":difficultyName(selected),.36f,{205,266},eliminated?Red:Cyan,FontWeight::Black);fitFullMenuLabel(title,350,24,.36f);root->addChild(title,5);
         auto const counts=eliminated?data["totals"]:selected["counts"];std::int64_t total=0;
-        if(eliminated)total=counts["ELIMINATED"].asInt().unwrapOr(0);else for(auto g:SurvivalBadgeGrades)total+=counts[std::string(g)].asInt().unwrapOr(0);
+        if(eliminated)total=counts["ELIMINATED"].asInt().unwrapOr(0);else total=survivalBadgeCollectionTotal(counts);
         root->addChild(menuLabel(fmt::format("{}: {}",i18n::text("badge-total","TOTAL"),total),.27f,{240,229},Text,FontWeight::ExtraBold));
         auto* preview=survivalCollectionBadge(static_cast<int>(selected["nativeCode"].asInt().unwrapOr(0)),eliminated?"ELIMINATED":"",44);
         preview->setPosition({62,229});root->addChild(preview,5);
@@ -55,7 +61,7 @@ class BadgeStrip final:public CCLayer {
     CCNode* m_content=nullptr;std::function<void(std::size_t)> m_tap;std::size_t m_count=0;
     float m_offset=0,m_origin=0,m_distance=0;CCPoint m_start{};int m_touch=-1;
 public:
-    static BadgeStrip* create(std::vector<matjson::Value> const& rows,std::function<void(std::size_t)> tap){
+    static BadgeStrip* create(std::vector<matjson::Value> const& rows,std::int64_t eliminatedCount,std::function<void(std::size_t)> tap){
         auto* p=new BadgeStrip;if(!p->init()){delete p;return nullptr;}p->autorelease();p->setContentSize({440,112});p->m_count=rows.size()+1;p->m_tap=std::move(tap);
         auto* stencil=CCDrawNode::create();CCPoint points[]={{0,0},{440,0},{440,112},{0,112}};stencil->drawPolygon(points,4,{1,1,1,1},0,{1,1,1,1});
         auto* clip=CCClippingNode::create(stencil);p->addChild(clip);p->m_content=CCNode::create();clip->addChild(p->m_content);
@@ -63,8 +69,9 @@ public:
             auto const last=i==rows.size();
             auto* cell=survivalCollectionBadge(last?0:static_cast<int>(rows[i]["nativeCode"].asInt().unwrapOr(0)),last?"ELIMINATED":"",76);
             cell->setPosition({44.f+88*i,68});p->m_content->addChild(cell,5);
-            auto* label=menuLabel(last?"ELIMINATED":difficultyName(rows[i]),.23f,{44.f+88*i,14},last?Red:Text,FontWeight::ExtraBold);
-            fitFullMenuLabel(label,76,22,.23f);p->m_content->addChild(label,5);
+            auto const count=last?eliminatedCount:survivalBadgeCollectionTotal(rows[i]["counts"]);
+            auto* label=menuLabel(fmt::format("{}",count),.29f,{44.f+88*i,14},last?Red:Text,FontWeight::ExtraBold);
+            fitFullMenuLabel(label,76,22,.29f);p->m_content->addChild(label,5);
         }
         p->setTouchEnabled(true);return p;
     }
@@ -102,7 +109,7 @@ class BadgeCollection final:public Popup {
             }
             p->m_data=json.unwrap();auto rows=survivalBadgeCollectionRows(p->m_data);
             p->m_status->setString(i18n::text("badge-official-rounds","OFFICIAL SURVIVAL ROUND RESULTS").c_str());p->m_status->setColor(TextMuted);
-            p->m_strip=BadgeStrip::create(rows,[weak](std::size_t index){if(auto owner=weak.lock())owner->detail(index);});p->m_strip->setPosition({20,74});p->m_root->addChild(p->m_strip,5);
+            p->m_strip=BadgeStrip::create(rows,p->m_data["totals"]["ELIMINATED"].asInt().unwrapOr(0),[weak](std::size_t index){if(auto owner=weak.lock())owner->detail(index);});p->m_strip->setPosition({20,74});p->m_root->addChild(p->m_strip,5);
         });
     }
     void detail(std::size_t index){

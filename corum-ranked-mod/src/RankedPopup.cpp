@@ -4528,7 +4528,7 @@ class CorumRankedLayer final : public CCLayerColor {
             m_historyThumbnailSize=CCSize{thumbWidth-4,thumbHeight-4};m_historyTexture=nullptr;
             m_historyThumbnailContext={m_historySelectedId,round.key,0,static_cast<std::uint64_t>(round.levelId),++m_historyThumbnailGeneration};
         }
-        if(earned)if(auto* badge=ui::survivalRoundBadge(round.roundBadge,{62,84})){badge->setPosition({thumbnail?width-43:width/2,height-108});panel->addChild(badge,5);}
+        if(earned)if(auto* badge=ui::survivalRoundBadge(round.roundBadge,{62,62})){badge->setPosition({thumbnail?width-43:width/2,height-108});panel->addChild(badge,5);}
         float const infoLeft=horizontal?174.f:12.f,infoWidth=width-infoLeft-12;
         float const infoTop=earned?height-166:thumbnail&&!horizontal?height-156:height-62;
         MapMetadata metadata;metadata.kind=round.difficulty.find("DEMON")!=std::string::npos?"DEMON":round.difficulty.empty()?"UNKNOWN":"NORMAL";

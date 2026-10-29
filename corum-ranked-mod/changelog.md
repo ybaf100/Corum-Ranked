@@ -1,3 +1,9 @@
+# v0.5.0-beta.117
+
+- Show owned totals below collection badges and use English difficulty names in details.
+- Keep difficulty face bodies the same modest size across native grade effects, reserving their largest shared ornament bounds.
+- Reuse dark square difficulty-face badges in personal results and history, retaining official round/rank captions and sequential entrance animation.
+
 # v0.5.0-beta.116
 
 - Show collection badges as square native GD difficulty faces with Rated, Featured, Epic, Legendary and Mythic effects.

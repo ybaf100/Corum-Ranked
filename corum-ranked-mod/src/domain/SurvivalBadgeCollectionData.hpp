@@ -1,10 +1,16 @@
 #pragma once
 #include "SurvivalBadgePresentation.hpp"
 #include <matjson.hpp>
+#include <cstdint>
 #include <vector>
 namespace corum::ranked {
 inline std::vector<matjson::Value> survivalBadgeCollectionRows(matjson::Value const& data){
     return data["difficulties"].asArray().unwrapOr(std::vector<matjson::Value>{});
+}
+inline std::int64_t survivalBadgeCollectionTotal(matjson::Value const& counts){
+    std::int64_t total=0;
+    for(auto grade:SurvivalBadgeGrades)total+=counts[std::string(grade)].asInt().unwrapOr(0);
+    return total;
 }
 inline bool survivalBadgeCountsValid(matjson::Value const& counts){
     if(!counts.isObject())return false;
