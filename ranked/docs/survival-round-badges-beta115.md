@@ -26,4 +26,4 @@ Result presentation progress is scoped to account + match and saved after comple
 
 ## Validation limits
 
-Automated rule, PostgreSQL integration, native policy/layout and package checks are recorded in the completion report. Universal macOS is added to the existing Windows/iOS/Android matrices and the immutable publication barrier. A successful compile/package check is not physical GD gameplay, audio or touch verification. No GD 2.2081 application/device is available in this workspace; actual visual/gesture behavior requires a real device check.
+Automated rule, PostgreSQL integration, native policy/layout and package checks are recorded in the completion report. Universal macOS is added to the existing Windows/iOS/Android matrices and the immutable publication barrier. The Lightsail job retains fail-closed package gating with a bounded 40-minute channel wait and 60-minute job budget, accommodating the additional macOS Release/Debug ON/OFF builds. A successful compile/package check is not physical GD gameplay, audio or touch verification. No GD 2.2081 application/device is available in this workspace; actual visual/gesture behavior requires a real device check.

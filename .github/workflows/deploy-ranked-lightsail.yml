@@ -32,7 +32,7 @@ jobs:
     if: github.ref == 'refs/heads/main' && !(github.event_name == 'push' && contains(github.event.head_commit.message, '[no-deploy]')) && (github.event_name == 'workflow_dispatch' || vars.LIGHTSAIL_AUTO_DEPLOY == 'true' || (github.event_name == 'push' && contains(github.event.head_commit.message, '[deploy-lightsail]')))
     runs-on: ubuntu-24.04
     environment: lightsail-production
-    timeout-minutes: 35
+    timeout-minutes: 60
     steps:
       - name: Checkout authoritative main
         uses: actions/checkout@v4
@@ -86,7 +86,7 @@ jobs:
         run: |
           python3 -m unittest discover -s ranked/tools/tests -p 'test_published_clients.py'
           version="$(python3 -c 'import json; print(json.load(open("corum-ranked-mod/mod.json"))["version"])')"
-          python3 ranked/tools/verify-published-clients.py --base "$RANKED_DOWNLOAD_BASE_URL" --version "$version"
+          python3 ranked/tools/verify-published-clients.py --base "$RANKED_DOWNLOAD_BASE_URL" --version "$version" --wait-seconds 2400
 
       - name: Upload immutable image and activate with rollback
         if: github.event_name == 'push' || inputs.mode == 'deploy'
