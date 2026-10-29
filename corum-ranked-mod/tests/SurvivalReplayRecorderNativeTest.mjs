@@ -33,6 +33,11 @@ void frame(Recorder&r,double progress){r.nativeFrameBegin();Json f;f["kind"]="fr
 Receipt receipt(std::string id,double p){return {"match","r1",id,"p",std::string(64,'a'),1,123,1,p,p,true,p==100,true};}
 void drain(Recorder&r){for(auto&f:r.m_writes)f.get();r.m_writes.clear();}
 int main(){Recorder r;r.m_recovery.get();r.begin(metadata("first"));initial(r);frame(r,35);assert(std::filesystem::is_empty("${dir}/replays/pending"));
+ // Exercise production Recorder -> validation -> disk for a real queued
+ // command. Nested commands inherit the enclosing record's tick/time context.
+ Json command;command["button"]=1;command["down"]=true;command["player2"]=false;command["nativeStep"]=7;command["timestamp"]=.003;
+ Json queue;queue["kind"]="buttons";queue["dt"]=.005;queue["clear"]=false;queue["nativeStep"]=7;queue["queued"]=Json::array();queue["queued"].push(command);queue["remaining"]=Json::array();r.add(queue);assert(r.active()&&r.error().empty());
+ auto valid=queue;valid["tick"]=7;valid["elapsed"]=.02;assert(recordValid(valid));valid["queued"][0]["timestamp"]=Json();assert(!recordValid(valid));
  r.finish("DEATH",35);assert(r.active());r.nativeFrameEnd();assert(!r.active());r.accepted("first",true);drain(r);assert(r.storage().reconcile(receipt("first",35)).get());
  r.begin(metadata("timeout"));initial(r);r.accepted("timeout",true);frame(r,74);r.finish("ROUND_TIMEOUT",74);r.finish("EXIT",0);r.nativeFrameEnd();drain(r);assert(r.storage().reconcile(receipt("timeout",74)).get());
  auto best=r.storage().best(metadata("x")).get();assert(best&&str(best->footer,"terminalReason")=="ROUND_TIMEOUT");assert(number(best->records.back(),"progress")==74);

@@ -31,15 +31,19 @@ inline std::string metadataProblem(Json const& j){
     return {};
 }
 inline bool metadataValid(Json const& j){return metadataProblem(j).empty();}
+inline bool replayButtonCommandValid(Json const& r){
+    return integer(r,"button")>=1&&integer(r,"button")<=3&&r["down"].isBool()&&r["player2"].isBool()&&
+        integer(r,"nativeStep")>=0&&r["timestamp"].isNumber()&&std::isfinite(number(r,"timestamp"));
+}
 inline bool recordValid(Json const& r){
     auto kind=str(r,"kind");if(integer(r,"tick")<0||!std::isfinite(number(r,"elapsed"))||number(r,"elapsed")<0)return false;
     if(kind=="buttons"){
         if(!r["clear"].isBool()||integer(r,"nativeStep")<0||!std::isfinite(number(r,"dt"))||number(r,"dt")<0||number(r,"dt")>1)return false;
         for(auto key:{"queued","remaining"}){auto values=r[key].asArray();if(values.isErr()||values.unwrap().size()>4096)return false;
-            for(auto input:values.unwrap()){input["kind"]="input";if(!recordValid(input))return false;}}
+            for(auto const& input:values.unwrap())if(!replayButtonCommandValid(input))return false;}
         return true;
     }
-    if(kind=="input")return integer(r,"button")>=1&&integer(r,"button")<=3&&r["down"].isBool()&&r["player2"].isBool()&&integer(r,"nativeStep")>=0&&std::isfinite(number(r,"timestamp"));
+    if(kind=="input")return replayButtonCommandValid(r);
     if(kind=="frame"||kind=="step")return std::isfinite(number(r,"dt"))&&(kind=="frame"?number(r,"dt")>0:number(r,"dt")>=0)&&number(r,"dt")<=1&&
       (kind=="frame"||(r["half"].isBool()&&r["last"].isBool()&&integer(r,"nativeStep")>=0));
     if(kind=="pose")return decodeSpectatorPose(r).has_value()&&number(r,"progress")>=0&&number(r,"progress")<=100;
