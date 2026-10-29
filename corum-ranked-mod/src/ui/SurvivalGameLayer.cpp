@@ -341,19 +341,20 @@ class SurvivalGameLayer final : public CCLayerColor {
         m_eliminationUntil=now+std::chrono::milliseconds(alreadyPresented?0:SurvivalBeforeEliminationMilliseconds+SurvivalEliminationMilliseconds);
         m_nextMapAt=now+std::chrono::milliseconds(SurvivalRosterMilliseconds);return true;
     }
-    void scoreMotion(ScoreAnimationInput input) {
+    void scoreMotion(ScoreAnimationInput input,std::string context) {
         auto const weak=WeakRef<SurvivalGameLayer>(this);
-        queueInMainThread([weak,input=std::move(input)]() mutable {
+        queueInMainThread([weak,context,input=std::move(input)]() mutable {
             auto owner=weak.lock();if(!owner || !owner->isRunning())return;
-            auto* score=ui::ResultScoreLayer::create(std::move(input),owner.data(),[weak,id=SurvivalRuntime::get().view().id] {if(auto layer=weak.lock()){if(SurvivalRuntime::get().view().id==id)SurvivalRuntime::get().completeResultScreen(true);layer->m_motion=false;layer->setKeypadEnabled(true);}});
+            if(SurvivalRuntime::get().resultFlowKey()!=context){if(owner->m_resultMotion==context){owner->m_resultMotion.clear();owner->m_motion=false;owner->setKeypadEnabled(true);}return;}
+            auto* score=ui::ResultScoreLayer::create(std::move(input),owner.data(),[weak,context] {if(auto layer=weak.lock();layer&&layer->m_resultMotion==context){if(SurvivalRuntime::get().resultFlowKey()==context)SurvivalRuntime::get().completeResultScreen(true);layer->m_motion=false;layer->setKeypadEnabled(true);}});
             if(score)owner->addChild(score,1100);else{owner->m_motion=false;owner->m_resultMotion.clear();owner->setKeypadEnabled(true);}
         });
     }
     void beginResultMotion() {
         auto& runtime=SurvivalRuntime::get();auto const& view=runtime.view();
-        if(!view.result.isObject() || m_resultMotion==view.id)return;
-        auto input=runtime.scoreAnimation();if(!input)return;m_resultMotion=view.id;m_motion=true;setKeypadEnabled(false);
-        auto const weak=WeakRef<SurvivalGameLayer>(this);auto finish=[weak,input=*input]{if(auto owner=weak.lock())owner->scoreMotion(input);};
+        if(!view.result.isObject() || m_resultMotion==runtime.resultFlowKey())return;
+        auto input=runtime.scoreAnimation();if(!input)return;m_resultMotion=runtime.resultFlowKey();m_motion=true;setKeypadEnabled(false);
+        auto const weak=WeakRef<SurvivalGameLayer>(this);auto const context=runtime.resultFlowKey();auto finish=[weak,context,input=*input]{if(auto owner=weak.lock())owner->scoreMotion(input,context);};
         if((input->promoted || input->demoted) && input->beforeTier!=input->afterTier){
             auto* transition=ui::RankTransitionLayer::create(input->beforeTier,input->afterTier,input->promoted?ui::RankTransitionType::Promotion:ui::RankTransitionType::Demotion,
                 text(input->promoted?"promoted":"demoted",input->promoted?"PROMOTED":"DEMOTED"),text("skip","SKIP"),text("continue","CONTINUE"),finish,true);

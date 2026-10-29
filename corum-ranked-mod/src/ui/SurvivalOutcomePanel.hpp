@@ -125,6 +125,7 @@ class SurvivalOutcomePanel final:public cocos2d::CCLayerColor {
     CCLabelBMFont *m_watchText=nullptr,*m_detail=nullptr;
     CCNode* m_halo=nullptr;
     void onAction(CCObject* object){if(auto* item=typeinfo_cast<CCMenuItemSpriteExtra*>(object);item && item->isEnabled()){
+        auto const& current=SurvivalRuntime::get().view();if(!m_identity.starts_with(current.id+":"+current.ownId+":"))return;
         auto tag=item->getTag();if(tag>=100){if(static_cast<std::size_t>(tag-100)<m_profiles.size())openSurvivalProfile(this,m_profiles[tag-100]);}
         else if(tag==11)showSurvivalStandings();else if(m_action)m_action(tag);
     }}
