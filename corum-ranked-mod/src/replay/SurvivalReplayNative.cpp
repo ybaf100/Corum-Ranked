@@ -211,7 +211,7 @@ public:
             PlayerButtonCommand c;c.m_button=static_cast<PlayerButton>(input["button"].asInt().unwrapOr(1));c.m_isPush=input["down"].asBool().unwrapOr(false);c.m_isPlayer2=input["player2"].asBool().unwrapOr(false);c.m_step=static_cast<int>(input["nativeStep"].asInt().unwrapOr(0));c.m_timestamp=input["timestamp"].asDouble().unwrapOr(0);m_queuedButtons.push_back(c);
         }
         auto const* expected=playback?playback->nativeButtons(dt,clear,m_currentStep):nullptr;
-        if(expected){m_queuedButtons.clear();for(auto const& input:(*expected)["queued"].asArray().unwrapOr(std::vector<matjson::Value>{})){
+        if(expected){m_queuedButtons.clear();auto const queued=(*expected)["queued"].asArray().unwrapOr(std::vector<matjson::Value>{});for(auto const& input:queued){
             PlayerButtonCommand c;c.m_button=static_cast<PlayerButton>(input["button"].asInt().unwrapOr(1));c.m_isPush=input["down"].asBool().unwrapOr(false);c.m_isPlayer2=input["player2"].asBool().unwrapOr(false);c.m_step=static_cast<int>(input["nativeStep"].asInt().unwrapOr(0));c.m_timestamp=input["timestamp"].asDouble().unwrapOr(0);m_queuedButtons.push_back(c);
         }}
         auto before=recording?m_queuedButtons:gd::vector<PlayerButtonCommand>{};

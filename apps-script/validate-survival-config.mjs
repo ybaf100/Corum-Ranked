@@ -33,7 +33,7 @@ test('setup creates independent defaults, preserves Solo and is repeatable',()=>
   assert.equal(f.context.setupCorumSurvivalConfig().valid,true);
   const d=f.document();
   assert.equal(d.validation.valid,true);
-  assert.deepEqual(d.config, {enabled:false,initialLp:150,placementEnabled:false,promotionSeriesEnabled:false,demotionProtectionEnabled:true,matchPlayerCount:16,minimumPlayers:8,matchmakingMaxWaitSeconds:180,tierMatchingEnabled:false,roundSeconds:180,round1Qualifiers:10,round2Qualifiers:6,round3Qualifiers:3,finalWinners:1,allowCutoffTies:true,lastAttemptEnabled:false,scoreMultiplier:1,tiebreakAttempts:3,tiebreakDecimals:3,minimumLevelId:40000000,demotionWarningRecoveryLp:50,demotionTargetOffsetLp:50,tierBands:['RED','AQUA','BRONZE','SILVER','GOLD'].map((tier,index)=>({tier,group:tier,minimumLp:index*300})),placementLp:[50,40,30,25,20,15,10,8,5,2,-10,-20,-30,-40,-50,-55]});
+  assert.deepEqual(d.config, {enabled:false,initialLp:150,placementEnabled:false,promotionSeriesEnabled:false,demotionProtectionEnabled:true,matchPlayerCount:16,minimumPlayers:8,matchmakingMaxWaitSeconds:180,tierMatchingEnabled:false,roundSeconds:180,round1Qualifiers:10,round2Qualifiers:6,round3Qualifiers:3,finalWinners:1,allowCutoffTies:true,lastAttemptEnabled:false,scoreMultiplier:1,tiebreakAttempts:6,tiebreakDecimals:3,minimumLevelId:40000000,demotionWarningRecoveryLp:50,demotionTargetOffsetLp:50,tierBands:['RED','AQUA','BRONZE','SILVER','GOLD'].map((tier,index)=>({tier,group:tier,minimumLp:index*300})),placementLp:[50,40,30,25,20,15,10,8,5,2,-10,-20,-30,-40,-50,-55]});
   const count=f.spreadsheet.getSheetByName('Survival Config').rows.length;
   f.set('enabled',true); f.set('initialLp',175);
   f.context.setupCorumSurvivalConfig();
