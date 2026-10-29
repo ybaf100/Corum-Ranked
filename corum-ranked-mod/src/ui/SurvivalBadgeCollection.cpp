@@ -1,4 +1,5 @@
 #include "SurvivalBadgeCollection.hpp"
+#include "../domain/SurvivalBadgeCollectionData.hpp"
 #include "RankedTranslations.hpp"
 #include "SurvivalRoundBadge.hpp"
 #include "RankedPopupLayout.hpp"
@@ -18,7 +19,7 @@ CCNode* difficultyFace(matjson::Value const& d,float extent){
 }
 class BadgeDetail final:public Popup {
     std::string m_session;std::function<void()> m_closed;
-    bool init(matjson::Value data,matjson::Value selected,bool eliminated,std::function<void()> closed){
+    bool init(matjson::Value const& data,matjson::Value const& selected,bool eliminated,std::function<void()> closed){
         auto layout=rankedPopupLayout({410,292},CCDirector::sharedDirector()->getWinSize());
         if(!Popup::init(layout.size.width,layout.size.height))return false;
         m_session=RankedRuntime::get().spectatorLiveSessionToken();m_closed=std::move(closed);m_bgSprite->setVisible(false);
@@ -30,7 +31,7 @@ class BadgeDetail final:public Popup {
         if(eliminated){matjson::Value b=matjson::makeObject({{"grade","ELIMINATED"}});if(auto* card=survivalRoundBadge(b,{54,50},false)){card->setPosition({58,226});root->addChild(card,5);}}
         else if(auto* icon=difficultyFace(selected,40)){icon->setPosition({58,229});root->addChild(icon,5);}
         if(eliminated){
-            auto rows=data["difficulties"].asArray().unwrapOr(std::vector<matjson::Value>{});auto actual=data["eliminatedByDifficulty"].asArray().unwrapOr(std::vector<matjson::Value>{});
+            auto rows=survivalBadgeCollectionRows(data);auto actual=data["eliminatedByDifficulty"].asArray().unwrapOr(std::vector<matjson::Value>{});
             for(auto const& r:actual)if(std::none_of(rows.begin(),rows.end(),[&](auto const& d){return d["id"]==r["difficulty"];}))rows.push_back(matjson::makeObject({{"id",r["difficulty"]},{"name",r["difficulty"]}}));
             auto const columns=rows.size()>7?2:1;auto const per=(rows.size()+columns-1)/columns;
             for(std::size_t i=0;i<rows.size();++i){auto const& d=rows[i];std::int64_t n=0;for(auto const& r:actual)if(r["difficulty"]==d["id"])n=r["count"].asInt().unwrapOr(0);
@@ -93,19 +94,17 @@ class BadgeCollection final:public Popup {
         web::WebRequest request;request.header("Authorization","Bearer "+session);request.followRedirects(false);request.timeout(std::chrono::seconds(15));
         m_request.spawn(request.get("https://api.52-74-37-130.sslip.io/api/ranked/survival/badges"),[weak=WeakRef(this),generation,session](web::WebResponse response){
             auto p=weak.lock();if(!p||p->m_closed||p->m_generation!=generation||session!=RankedRuntime::get().spectatorLiveSessionToken())return;p->m_busy=false;
-            auto json=response.json();auto validCounts=[](matjson::Value const& counts){if(!counts.isObject())return false;for(auto grade:SurvivalBadgeGrades){auto n=counts[std::string(grade)].asInt();if(n.isErr()||n.unwrap()<0)return false;}return true;};
-            bool valid=response.code()==200&&json.isOk()&&json.unwrap()["difficulties"].isArray()&&validCounts(json.unwrap()["totals"]);
-            if(valid)for(auto const& d:json.unwrap()["difficulties"].asArray().unwrap())if(!d["id"].isString()||!d["name"].isString()||!d["nativeCode"].isNumber()||!validCounts(d["counts"]))valid=false;
+            auto json=response.json();bool const valid=response.code()==200&&json.isOk()&&survivalBadgeCollectionValid(json.unwrap());
             if(!valid){
                 p->m_status->setString(i18n::text("badge-load-failed","COULD NOT LOAD BADGES · RETRY").c_str());p->m_status->setColor(Red);return;
             }
-            p->m_data=json.unwrap();auto rows=p->m_data["difficulties"].asArray().unwrapOr(std::vector<matjson::Value>{});
+            p->m_data=json.unwrap();auto rows=survivalBadgeCollectionRows(p->m_data);
             p->m_status->setString(i18n::text("badge-official-rounds","OFFICIAL SURVIVAL ROUND RESULTS").c_str());p->m_status->setColor(TextMuted);
             p->m_strip=BadgeStrip::create(rows,[weak](std::size_t index){if(auto owner=weak.lock())owner->detail(index);});p->m_strip->setPosition({20,74});p->m_root->addChild(p->m_strip,5);
         });
     }
     void detail(std::size_t index){
-        if(m_closed||!m_strip)return;auto rows=m_data["difficulties"].asArray().unwrapOr(std::vector<matjson::Value>{});if(index>rows.size())return;
+        if(m_closed||!m_strip)return;auto rows=survivalBadgeCollectionRows(m_data);if(index>rows.size())return;
         auto* popup=BadgeDetail::create(m_data,index<rows.size()?rows[index]:matjson::Value(),index==rows.size(),[weak=WeakRef(this)]{if(auto owner=weak.lock();owner&&!owner->m_closed&&owner->m_strip)owner->m_strip->setTouchEnabled(true);});
         if(popup){m_strip->setTouchEnabled(false);popup->show();}
     }

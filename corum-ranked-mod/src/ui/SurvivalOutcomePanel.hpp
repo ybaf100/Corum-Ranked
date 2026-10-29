@@ -186,8 +186,9 @@ public:
                 auto const personalX=size.width*.24f;
                 auto it=std::find_if(m_profiles.begin(),m_profiles.end(),[&](auto const& row){return row.id==view.ownId;});
                 if(it!=m_profiles.end()){
-                    auto* face=CCNode::create();face->setContentSize({260,85});if(auto* icon=survivalAvatar(*it,view.ownId,43)){icon->setPosition({130,59});face->addChild(icon,5);}
-                    auto* name=playerNameLabel(it->name,.37f,{130,15},Cyan,FontWeight::Black);fitFullMenuLabel(name,248,22,.37f);face->addChild(name,5);
+                    auto const personalWidth=size.width*.44f-12;
+                    auto* face=CCNode::create();face->setContentSize({personalWidth,85});if(auto* icon=survivalAvatar(*it,view.ownId,43)){icon->setPosition({personalWidth/2,59});face->addChild(icon,5);}
+                    auto* name=playerNameLabel(it->name,.37f,{personalWidth/2,15},Cyan,FontWeight::Black);fitFullMenuLabel(name,personalWidth-12,22,.37f);face->addChild(name,5);
                     auto* item=CCMenuItemSpriteExtra::create(face,this,menu_selector(SurvivalOutcomePanel::onAction));item->setTag(100+static_cast<int>(it-m_profiles.begin()));item->setPosition({personalX,size.height*.65f});m_menu->addChild(item);
                     auto const rank=it->rank>0?survivalOrdinal(it->rank):i18n::text("survival-result-wait","PENDING");
                     auto* label=menuLabel(rank,.48f,{personalX,size.height*.42f},Gold,FontWeight::Black);addChild(label,5);
@@ -198,9 +199,9 @@ public:
             }
             if(stage==SurvivalFlowStage::PersonalResult){
                 auto const rows=view.roundBadges.asArray().unwrapOr(std::vector<matjson::Value>{});
-                auto const width=size.width*.52f,slot=width/std::max<std::size_t>(1,rows.size());
                 for(auto const& badge:rows){if(badge["participantId"].asString().unwrapOr("")!=view.ownId)continue;
-                    if(auto* card=survivalRoundBadge(badge,{std::min(78.f,slot-5),94})){card->setPosition({size.width*.48f+slot*(m_badges.size()+.5f),size.height*.52f});addChild(card,5);m_badges.push_back(card);}
+                    auto const layout=survivalBadgeCardLayout(size.width,size.height,rows.size(),m_badges.size());
+                    if(auto* card=survivalRoundBadge(badge,{layout.width,layout.height})){card->setPosition({layout.x,layout.y});addChild(card,5);m_badges.push_back(card);}
                 }
             }
             if(choice)button(i18n::text("survival-view-board","VIEW STATUS"),{size.width/2,24},140,11,Blue);

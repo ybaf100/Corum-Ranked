@@ -125,3 +125,17 @@ int main(){using namespace corum::ranked;SurvivalMatchView view;std::vector<matj
 }
 `);
 });
+
+test('badge collection uses SDK JSON const array decoding and rejects malformed counts instead of fabricating zero',()=>run(`
+#include "domain/SurvivalBadgeCollectionData.hpp"
+#include <cassert>
+using namespace corum::ranked;
+int main(){
+ auto data=matjson::parse(R"({"difficulties":[{"id":"HARD","name":"Hard","nativeCode":3,"counts":{"MYTHIC":3,"LEGENDARY":7,"EPIC":12,"FEATURED":21,"RATED":35,"ELIMINATED":2}}],"totals":{"MYTHIC":3,"LEGENDARY":7,"EPIC":12,"FEATURED":21,"RATED":35,"ELIMINATED":2},"eliminatedByDifficulty":[{"difficulty":"HARD","count":2}]})").unwrap();
+ assert(survivalBadgeCollectionValid(data));auto rows=survivalBadgeCollectionRows(data);assert(rows.size()==1&&rows[0]["counts"]["MYTHIC"].asInt().unwrap()==3);
+ data["totals"]["MYTHIC"]=-1;assert(!survivalBadgeCollectionValid(data));data["totals"]["MYTHIC"]=3;
+ data["difficulties"][0]["counts"]["EPIC"]=nullptr;assert(!survivalBadgeCollectionValid(data));
+ data["difficulties"][0]["counts"]["EPIC"]=0;assert(survivalBadgeCollectionValid(data));
+ data["difficulties"]=nullptr;assert(!survivalBadgeCollectionValid(data));assert(survivalBadgeCollectionRows(data).empty());
+}
+`));
