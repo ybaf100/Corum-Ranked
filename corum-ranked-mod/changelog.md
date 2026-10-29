@@ -1,3 +1,8 @@
+# v0.5.0-beta.114
+
+- Keep the active Death Match attempt in the remaining count: the sixth attempt shows 1/6 while playing, then 0/6 after its terminal event. Entry limits and automatic return still use server-confirmed completion.
+- Includes all beta.112/113 integrated corrections; earlier package paths remain immutable.
+
 # v0.5.0-beta.113
 
 - Preserve the Random object identities indexed at native initialization. Only fill an empty index at the first capture activation, so later Move/Follow motion cannot rewrite original identity coordinates.

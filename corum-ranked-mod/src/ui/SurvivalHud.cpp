@@ -124,7 +124,7 @@ void SurvivalHud::present(SurvivalMatchView const& view,std::int64_t remainingMs
     m_auxTimer.text(deathmatch?time:"");
     m_difference.foreground->setVisible(!deathmatch);m_difference.shadow->setVisible(!deathmatch);
     if(deathmatch){
-        auto const left=survivalRemainingAttempts(own==view.standings.end()?0:own->attemptsUsed,SurvivalRuntime::get().localAttemptsUsed(),view.tiebreakAttempts);
+        auto const left=survivalRemainingAttempts(own==view.standings.end()?0:own->attemptsUsed,SurvivalRuntime::get().localAttemptsUsed(),view.tiebreakAttempts,!SurvivalRuntime::get().localAttemptId().empty());
         auto const delta=std::string(m_difference.foreground->getString());
         m_timer.text(observer?delta:fmt::format("{}/{} {}",left,view.tiebreakAttempts,delta));
         m_timer.fit(size.width*.52f,.72f,.40f);m_timer.position({size.width/2,topY-18});

@@ -57,3 +57,8 @@ Neither log contains a first jump DESYNC record, actual replay bytes, or source 
 ## Final beta.113 identity preservation
 
 Final review identified that rebuilding an already populated identity index at first source activation could overwrite original object coordinates after Move/Follow motion. The fallback now builds only an empty index; the native Random harness verifies an existing index is never rebuilt. This final correction is published as beta.113, preserving any immutable beta.112 packages and all earlier commits. All beta.112 functionality and snapshot compatibility remain included. Physical entropie branch parity is still unverified.
+
+
+## Final beta.114 remaining-count semantics
+
+The active native attempt is included in the HUD's remaining count: first active = 6/6, sixth active = 1/6, sixth locally terminal = 0/6 while waiting for the server acknowledgment. This avoids showing SYNCING ATTEMPT RESULT during the sixth live attempt. Server admission still uses attemptsUsed and automatic return still requires attemptsFinished plus drained End telemetry. Domain tests cover lagged server counts and legacy three-attempt snapshots as well. Beta.114 is the final activation target; beta.112/113 immutable package paths and valid commits are preserved.

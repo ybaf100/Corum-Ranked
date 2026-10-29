@@ -8,7 +8,11 @@
 #include <vector>
 
 namespace corum::ranked {
-inline int survivalRemainingAttempts(int serverUsed,int localUsed,int limit=6){return limit-std::clamp(std::max(serverUsed,localUsed),0,limit);}
+// Include the currently playable attempt. A started sixth remains 1/6;
+// only its terminal event changes the display to 0/6. Admission still uses used.
+inline int survivalRemainingAttempts(int serverUsed,int localUsed,int limit=6,bool active=false){
+    return limit-std::clamp(std::max(serverUsed,localUsed)-(active?1:0),0,limit);
+}
 inline std::optional<double> survivalComparisonScore(std::string_view phase,
     std::optional<double> cutoff,std::optional<double> first) {
     return phase=="FINAL" || phase=="TIEBREAK"?first:cutoff;
