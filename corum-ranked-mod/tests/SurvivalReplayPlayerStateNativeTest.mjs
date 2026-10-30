@@ -13,7 +13,7 @@ test('production initial physics snapshot restores Cube/Ship motion, holds, grav
   writeFileSync(join(dir,'test.cpp'),`#include "replay/SurvivalReplayPlayerState.hpp"
 #include <cassert>
 #include <map>
-namespace cocos2d{struct CCPoint{float x=0,y=0;};}
+namespace cocos2d{struct CCSize{float width=0,height=0;};struct CCPoint{float x=0,y=0;CCPoint&operator=(CCSize const& size){x=size.width;y=size.height;return *this;}};}
 struct Player{
 #define DECLARE_FIELD(type,name) type name{};
  CORUM_REPLAY_PHYSICS_SCALARS(DECLARE_FIELD)
@@ -28,11 +28,11 @@ using namespace corum::ranked::replay;
 int main(){
  auto refs=PhysicsJson::object();refs["floor"]=17;
  for(bool ship:{false,true}){
-  Player source,target;source.m_isShip=target.m_isShip=ship;source.position={15,108.642f};source.rotation=2.703f;
-  source.m_yVelocity=15.125;source.m_yVelocityBeforeSlope=3.5;source.m_gravity=-.9;source.m_gravityMod=.75f;source.m_shipRotation={-1.25f,3.75f};
+  Player source,target;source.m_isShip=target.m_isShip=ship;source.position=cocos2d::CCPoint{15,108.642f};source.rotation=2.703f;
+  source.m_yVelocity=15.125;source.m_yVelocityBeforeSlope=3.5;source.m_gravity=-.9;source.m_gravityMod=.75f;source.m_shipRotation=cocos2d::CCPoint{-1.25f,3.75f};
   source.m_jumpBuffered=true;source.m_wasJumpBuffered=true;source.m_holdingButtons={{0,false},{1,true},{2,false},{3,true}};
   source.m_dashX=1.5;source.m_dashY=-2.5;source.m_dashAngle=.125;source.m_dashStartTime=12.5;source.m_isDashing=true;
-  source.m_isOnSlope=true;source.m_slopeVelocity=2.25f;source.m_slopeStartTime=2.75;source.m_stateForceVector={.5f,2.5f};source.m_stateForce=2;
+  source.m_isOnSlope=true;source.m_slopeVelocity=2.25f;source.m_slopeStartTime=2.75;source.m_stateForceVector=cocos2d::CCPoint{.5f,2.5f};source.m_stateForce=2;
   auto state=captureReplayPlayerState(&source,refs);assert(replayPlayerStateProblem(&target,state,refs).empty());
   applyReplayPlayerState(&target,state);assert(target.positionWrites==1);assert(captureReplayPlayerState(&target,refs)==state);
   auto before=target.m_yVelocity;auto damaged=state;damaged.erase("m_yVelocity");assert(!replayPlayerStateProblem(&target,damaged,refs).empty());assert(target.m_yVelocity==before&&target.positionWrites==1);

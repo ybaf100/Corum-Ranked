@@ -20,7 +20,6 @@
 #include <Geode/binding/PlayerObject.hpp>
 #include <Geode/binding/GameObject.hpp>
 #include <Geode/binding/DashRingObject.hpp>
-#include <Geode/binding/CheckpointObject.hpp>
 using namespace geode::prelude;
 namespace {
 using corum::ranked::replay::Json;
@@ -48,7 +47,9 @@ Json replayWorldReferences(PlayLayer* layer,PlayerObject* player){
     object("potentialSlope",player->m_currentPotentialSlope);object("lastGround",player->m_lastGroundObject);
     object("previousGround",player->m_preLastGroundObject);object("collided",player->m_collidedObject);
     object("left",player->m_collidingWithLeft);object("right",player->m_collidingWithRight);
-    object("portal",player->m_lastActivatedPortal);object("checkpoint",player->m_pendingCheckpoint);
+    object("portal",player->m_lastActivatedPortal);
+    refs["checkpointPresent"]=player->m_pendingCheckpoint!=nullptr;
+    if(player->m_pendingCheckpoint)refs["unresolved"]=true;
     auto floats=Json::array();for(auto v:player->m_playerFollowFloats)floats.push(v);refs["follow"]=std::move(floats);
     auto rings=Json::array();for(auto v:player->m_touchedRings)rings.push(v);auto sorted=rings.asArray().unwrap();std::sort(sorted.begin(),sorted.end(),[](auto const&a,auto const&b){return a.asInt().unwrap()<b.asInt().unwrap();});refs["touchedRings"]=Json::array();for(auto v:sorted)refs["touchedRings"].push(v);
     refs["touchingRingsCount"]=player->m_touchingRings?static_cast<int>(player->m_touchingRings->count()):0;
