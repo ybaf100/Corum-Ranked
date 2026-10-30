@@ -97,7 +97,7 @@ public:
     void sceneEntered(int levelId);
     bool beginAttempt();
     void progress(double value);
-    void endAttempt(double value);
+    void endAttempt(double value,std::string reason="EXIT",std::string expectedAttempt={});
     bool normalRoundCleared() const;
     bool officialRoundCleared() const;
     bool canFreePlay() const;
@@ -161,6 +161,7 @@ private:
     void enqueue(matjson::Value body);
     void pumpEvents();
     void discardObsoleteEvents();
+    void closeRecoveredAttempt();
     void poll();
     bool current(std::uint64_t generation,std::string const& session) const;
     SurvivalMatchView m_view;
@@ -171,6 +172,8 @@ private:
     std::string m_spectatorAcceptedAttempt;
     std::string m_session,m_attempt,m_attemptContext,m_enteredContext,m_readyContext,m_failedContext,m_lastMapDiagnostic,m_presentationContext;
     double m_attemptBest=0,m_lastProgress=-1;
+    matjson::Value m_attemptOwner,m_attemptMetadata;
+    std::string m_recoveredEndAttempt;
     int m_localAttempts=0;
     float m_tick=0;
     bool m_creating=false,m_pollBusy=false,m_eventBusy=false,m_recoverBusy=false,m_needRecovery=false,m_queuePollBusy=false;

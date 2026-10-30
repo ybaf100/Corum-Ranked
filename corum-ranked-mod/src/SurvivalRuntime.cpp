@@ -60,6 +60,7 @@ void SurvivalRuntime::tick() {
     replay::Recorder::get().pump();
     auto const token=RankedRuntime::get().spectatorLiveSessionToken();
     if(token!=m_session) {
+        endAttempt(m_attemptBest,"CONNECTION_LOST",m_attempt);
         replay::Recorder::get().finishFromLast("CONNECTION_LOST");
         ++m_generation;m_controlRequest.cancel();m_pollRequest.cancel();m_eventRequest.cancel();m_recoverRequest.cancel();m_queueRequest.cancel();
         m_lastServerNow=0;m_session=token;m_creating=m_pollBusy=m_eventBusy=m_recoverBusy=m_queuePollBusy=false;m_view={};m_queue={};++m_queueGeneration;m_prepared={};m_events.clear();m_attempt.clear();m_spectatorAcceptedAttempt.clear();
@@ -293,10 +294,11 @@ void SurvivalRuntime::observe(matjson::Value const& root) {
     m_view.spectatorDemand=root["spectatorDemand"].asBool().unwrapOr(false);
     m_view.activeAttemptId=root["myActiveAttemptId"].asString().unwrapOr("");m_view.activeAttemptProgress=root["myActiveAttemptProgress"].asDouble().unwrapOr(0);
     if(oldContext!=preparationContext()) {
+        endAttempt(m_attemptBest,"ROUND_TRANSITION",m_attempt);
         replay::Recorder::get().finishFromLast("ROUND_TRANSITION");
         m_prepared={};m_attempt.clear();m_spectatorAcceptedAttempt.clear();m_attemptContext=m_enteredContext=m_readyContext=m_failedContext="";m_audioReported.clear();m_lastProgress=-1;m_localAttempts=0;
     }
-    if(oldState=="PLAYING"&&m_view.state!="PLAYING")replay::Recorder::get().finishFromLast("SERVER_ENDED");
+    if(oldState=="PLAYING"&&m_view.state!="PLAYING"){auto reason=roundRemainingMs().value_or(1)==0?"ROUND_TIMEOUT":"SERVER_ENDED";endAttempt(m_attemptBest,reason,m_attempt);replay::Recorder::get().finishFromLast(reason);}
     pumpSurrenderReturn();
     discardObsoleteEvents();
     m_view.error.clear();Mod::get()->setSavedValue("survival-debug-match",id);
@@ -557,12 +559,18 @@ void SurvivalRuntime::sceneEntered(int levelId) {
     m_enteredContext=key;Mod::get()->setSavedValue("survival-native-entered",optionsContext());
     // A killed process leaves a durable open attempt. Close its accepted record
     // before the fresh native scene can start another one, including in DM.
-    if(!m_view.activeAttemptId.empty() && m_attempt.empty()) {
-        auto body=event("ATTEMPT_END");body["attemptId"]=m_view.activeAttemptId;body["progress"]=m_view.activeAttemptProgress;enqueue(std::move(body));
-    }
+    closeRecoveredAttempt();
+}
+void SurvivalRuntime::closeRecoveredAttempt(){
+    auto& recorder=replay::Recorder::get();
+    if(freePlaying()||observing()||m_enteredContext!=preparationContextText(preparationContext())||recorder.recovering()||!m_attempt.empty()||m_view.activeAttemptId.empty()||m_recoveredEndAttempt==m_view.activeAttemptId||recorder.hasPendingClose(m_view.activeAttemptId))return;
+    // A process died before its End was journaled. Close only the server's
+    // existing owned attempt at its already accepted progress; no new replay.
+    auto body=event("ATTEMPT_END");body["attemptId"]=m_view.activeAttemptId;body["progress"]=m_view.activeAttemptProgress;m_recoveredEndAttempt=m_view.activeAttemptId;enqueue(std::move(body));
 }
 bool SurvivalRuntime::beginAttempt() {
-    if(!canPlay() || !m_attempt.empty())return false;
+    closeRecoveredAttempt();
+    if(!canPlay() || !m_attempt.empty() || !m_view.activeAttemptId.empty())return false;
     auto own=std::find_if(m_view.standings.begin(),m_view.standings.end(),[&](auto const& p){return p.id==m_view.ownId;});
     if(attemptLimitReached())return false;
     auto body=event("ATTEMPT_START");if(!RankedRuntime::get().prepareSurvivalEnvironment(body))return false;
@@ -574,6 +582,7 @@ bool SurvivalRuntime::beginAttempt() {
     metadata["mapGeneration"]=m_view.mapGeneration;metadata["levelId"]=m_view.map.levelId;metadata["mapVersion"]=m_view.map.version;
     metadata["mapGeometrySha256"]=m_view.certificate["geometrySha256"];metadata["participantId"]=m_view.ownId;
     metadata["attemptId"]=m_attempt;metadata["attemptOrdinal"]=m_localAttempts;metadata["startedAt"]=m_clock.serverNowMillis(localNow());metadata["debug"]=m_view.debug;
+    m_attemptMetadata=metadata;m_attemptOwner=event("ATTEMPT_END");m_attemptOwner["attemptId"]=m_attempt;
     replay::Recorder::get().begin(std::move(metadata));
     body["attemptId"]=m_attempt;enqueue(std::move(body));return true;
 }
@@ -587,12 +596,20 @@ void SurvivalRuntime::progress(double value) {
     }
     auto body=event("PROGRESS");body["attemptId"]=m_attempt;body["progress"]=m_attemptBest;body["currentProgress"]=value;enqueue(std::move(body));
 }
-void SurvivalRuntime::endAttempt(double value) {
-    if(freePlaying() || observing())return;
-    if(m_attempt.empty() || m_attemptContext!=preparationContextText(preparationContext()))return;
-    if(std::isfinite(value) && value>=0 && value<=100)m_attemptBest=std::max(m_attemptBest,value);
-    replay::Recorder::get().finish(value==100?"CLEAR":"EXIT",m_attemptBest);
-    auto body=event("ATTEMPT_END");body["attemptId"]=std::exchange(m_attempt,{});body["progress"]=m_attemptBest;enqueue(std::move(body));
+void SurvivalRuntime::endAttempt(double value,std::string reason,std::string expectedAttempt) {
+    if(expectedAttempt.empty()&&(freePlaying()||observing()))return;
+    if(m_attempt.empty()||(!expectedAttempt.empty()&&expectedAttempt!=m_attempt))return;
+    if(m_attemptOwner["attemptId"].asString().unwrapOr("")!=m_attempt){m_view.error="Official Attempt ownership unavailable. Reconnecting...";return;}
+    auto id=std::exchange(m_attempt,{});
+    if(std::isfinite(value)&&value>=0&&value<=100)m_attemptBest=std::max(m_attemptBest,value);
+    // Source ownership is captured at START. A new round/view must never
+    // re-label the old End, and a local viewer never owns this snapshot.
+    auto body=m_attemptOwner;
+    if(body["attemptId"].asString().unwrapOr("")!=id){m_view.error="Official Attempt ownership unavailable. Reconnecting...";return;}
+    body["progress"]=m_attemptBest;
+    replay::Recorder::get().officialEnd(m_attemptMetadata,body,value==100?"CLEAR":std::move(reason),m_attemptBest);
+    if(m_view.state=="PLAYING"&&m_attemptMetadata["matchId"].asString().unwrapOr("")==m_view.id&&body["roundKey"].asString().unwrapOr("")==m_view.roundKey&&body["mapGeneration"].asInt().unwrapOr(0)==m_view.mapGeneration)enqueue(std::move(body));
+    m_attemptOwner=m_attemptMetadata=matjson::Value();
 }
 bool SurvivalRuntime::officialRoundCleared() const {
     if(m_view.ownEliminated||m_view.state!="PLAYING"||!m_attempt.empty()||!m_view.activeAttemptId.empty())return false;

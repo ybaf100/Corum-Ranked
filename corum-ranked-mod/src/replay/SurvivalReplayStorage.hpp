@@ -24,6 +24,8 @@ public:
     std::future<std::optional<Json>> inspect(Json identity);
     std::future<std::unique_ptr<Playback>> playback(Json identity);
     std::future<std::vector<Json>> recover();
+    std::future<void> journalClose(Json metadata);
+    std::future<void> closeAcknowledged(std::string attempt);
     std::string error()const;
 private:
     std::filesystem::path m_root;

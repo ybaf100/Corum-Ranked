@@ -701,11 +701,11 @@ describe('own Survival replay official receipt over authenticated production HTT
   const {group,id}=await game(16),m=await prepare(id,group),owner=group[0]!,other=group[1]!,attempt=ids.next();
   await event(owner,m,'ATTEMPT_START',{attemptId:attempt});await event(owner,m,'PROGRESS',{attemptId:attempt,progress:74.999,currentProgress:74.999});
   const path=`/replays/matches/${id}/attempts/${attempt}`;
-  expect((await api(owner,path)).body).toMatchObject({accepted:true,ended:false,progress:74.999,participantId:owner.session.playerId});
+  expect((await api(owner,path)).body).toMatchObject({accepted:true,ended:false,progress:74.999,bestAttemptId:null,participantId:owner.session.playerId});
   expect((await api(other,path)).body.accepted).toBe(false);
   now=survivalCurrentRound(await engine.get(id)).endsAt!+1;await touch(group);await online.tickOnce();
   const before=await engine.get(id),receipt=await api(owner,path);
-  expect(receipt.status).toBe(200);expect(receipt.body).toMatchObject({accepted:true,ended:true,progress:74.999,score:74,roundBestScore:74,
+  expect(receipt.status).toBe(200);expect(receipt.body).toMatchObject({accepted:true,ended:true,progress:74.999,score:74,roundBestScore:74,bestAttemptId:attempt,
    mapGeneration:survivalCurrentRound(m).mapGeneration,geometryHash:survivalCurrentRound(m).map!.geometrySha256});
   expect(await engine.get(id)).toEqual(before);
   const stranger=await client();expect((await api(stranger,path)).status).toBe(403);

@@ -109,11 +109,11 @@ int main(){
  buffering=false;dual=true;
  for(bool ship:{false,true}){
   PlayerObject a,b;a.ship=b.ship=ship;PlayLayer scene;scene.m_player1=&a;scene.m_player2=&b;PlayLayer::current=&scene;sourceCbf=true;
-  Document doc;doc.complete=true;doc.metadata["nativeInputVersion"]=3;Json init;init["kind"]="initial";doc.records.push_back(init);
-  for(int n=0;n<40;++n){float durations[]={1.f/30,1.f/60,1.f/144,1.f/240,1.f/120};float dt=durations[n%5];Json frame;frame["kind"]="frame";frame["dt"]=static_cast<double>(dt);doc.records.push_back(frame);beginCbfNativeFrame(&scene);worldStep(scene,dt);doc.records.push_back(finishCbfNativeFrame());doc.records.push_back(actualPose(scene));}
+  Document doc;doc.complete=true;doc.metadata["nativeInputVersion"]=3;doc.metadata["nativeClockVersion"]=1;Json init;init["kind"]="initial";init["timestamp"]=scene.m_timestamp;doc.records.push_back(init);
+  for(int n=0;n<40;++n){float durations[]={1.f/30,1.f/60,1.f/144,1.f/240,1.f/120};float dt=durations[n%5];Json frame;frame["kind"]="frame";frame["dt"]=static_cast<double>(dt);doc.records.push_back(frame);beginNativeInputClock(&scene);beginCbfNativeFrame(&scene);scene.m_timestamp=70163.98234975+n*.1;{NativeInputClockScope nativeStepClock("STEP",scene.m_timestamp);worldStep(scene,dt);}doc.records.push_back(finishCbfNativeFrame());doc.records.push_back(finishNativeInputClock());assert(nativeInputClockError().empty());doc.records.push_back(actualPose(scene));}
   for(double speed:{.5,1.,2.,4.}){
    PlayerObject c,d;c.ship=d.ship=ship;PlayLayer target;target.m_player1=&c;target.m_player2=&d;PlayLayer::current=&target;sourceCbf=false;Playback replay(doc);replay.speed(speed);
-   auto step=[&]{auto dt=static_cast<float>(replay.current()->dt);beginCbfNativeFrame(&target,&replay);worldStep(target,dt);finishCbfNativeFrame();replay.completeFrame(actualPose(target));assert(!replay.desync());};
+   auto step=[&]{auto dt=static_cast<float>(replay.current()->dt);beginNativeInputClock(&target,&replay);beginCbfNativeFrame(&target,&replay);target.m_timestamp=90163.98234975+target.m_currentStep*.1;{NativeInputClockScope nativeStepClock("STEP",target.m_timestamp);worldStep(target,dt);}finishCbfNativeFrame();finishNativeInputClock();assert(nativeInputClockError().empty());replay.completeFrame(actualPose(target));assert(!replay.desync());};
    replay.pause(true);replay.accumulate(.1);assert(!replay.due());replay.pause(false);
    int count=0;while(!replay.ended()){replay.accumulate(1./60);while(replay.due()){step();++count;}}assert(count==40&&target.m_currentStep==404&&motion(&c)==motion(&a)&&motion(&d)==motion(&b));
    replay.seek(.1);assert(replay.takeReset());replay.restart();
@@ -122,6 +122,8 @@ int main(){
    replay.seek(replay.duration());while(replay.due()){step();}assert(replay.ended()&&motion(&c)==motion(&a)&&motion(&d)==motion(&b));
   }
  }
+ // A late scope from a retired scene cannot touch a new scene clock.
+ {PlayLayer oldScene,newScene;PlayLayer::current=&oldScene;beginNativeInputClock(&oldScene);{NativeInputClockScope late("STEP",oldScene.m_timestamp);retireNativeReplayFrame(&oldScene);PlayLayer::current=&newScene;beginNativeInputClock(&newScene);}auto trace=finishNativeInputClock();assert(nativeInputClockError().empty()&&trace["events"].size()==1);assert(finishNativeInputClock().isNull());}
  Hook shipHook{"PlayerObject::updateShipRotation"},slerpHook{"Slerp2D"},clockHook{"GJBaseGameLayer::getModifiedDelta"};
  Hook u{"PlayerObject::update"},r{"PlayerObject::updateRotation"},cmd{"GJBaseGameLayer::processCommands"},world{"GJBaseGameLayer::update"},unrelated{"PlayLayer::levelComplete"};Mod::cbf()->hooks={&u,&r,&cmd,&world,&unrelated};
 #if defined(GEODE_IS_WINDOWS)

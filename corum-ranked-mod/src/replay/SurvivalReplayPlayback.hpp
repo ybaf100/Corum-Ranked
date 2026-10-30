@@ -5,16 +5,18 @@ namespace corum::ranked::replay {
 // Drives verified native callbacks; no remote poses are used to move the local player.
 class Playback final {
 public:
-    struct Frame{double dt=0;Json queued=nullptr,preInputs=nullptr,cbf=nullptr;std::vector<Json> inputs,steps,poses,anchors,buttons,dispatches;std::vector<SpectatorRandomEvent> randoms;};
+    struct Frame{double dt=0;Json queued=nullptr,preInputs=nullptr,cbf=nullptr,clock=nullptr;std::vector<Json> inputs,steps,poses,anchors,buttons,dispatches;std::vector<SpectatorRandomEvent> randoms;};
     explicit Playback(Document document):m_document(std::move(document)){
         if(!m_document.complete||m_document.records.empty()||str(m_document.records.front(),"kind")!="initial")throw std::runtime_error("Replay initial state unavailable");
         m_initial=m_document.records.front();Frame frame;
         for(auto& r:m_document.records){auto kind=str(r,"kind");
           if(kind=="frame"){if(frame.dt>0)m_frames.push_back(std::move(frame));frame={};frame.dt=number(r,"dt");frame.queued=r["queued"];frame.preInputs=r["preInputs"];}
           else if(kind=="random"){if(auto event=decodeSpectatorRandomEvent(r["event"]))frame.randoms.push_back(std::move(*event));}
-          else if(kind=="cbf")frame.cbf=std::move(r);else if(kind=="dispatch")frame.dispatches.push_back(std::move(r));else if(kind=="buttons")frame.buttons.push_back(std::move(r));else if(kind=="anchor")frame.anchors.push_back(std::move(r));else if(kind=="input")frame.inputs.push_back(std::move(r));else if(kind=="step")frame.steps.push_back(std::move(r));else if(kind=="pose")frame.poses.push_back(std::move(r));
+          else if(kind=="clock")frame.clock=std::move(r);else if(kind=="cbf")frame.cbf=std::move(r);else if(kind=="dispatch")frame.dispatches.push_back(std::move(r));else if(kind=="buttons")frame.buttons.push_back(std::move(r));else if(kind=="anchor")frame.anchors.push_back(std::move(r));else if(kind=="input")frame.inputs.push_back(std::move(r));else if(kind=="step")frame.steps.push_back(std::move(r));else if(kind=="pose")frame.poses.push_back(std::move(r));
         }if(frame.dt>0)m_frames.push_back(std::move(frame));if(m_frames.empty())throw std::runtime_error("Replay native timeline unavailable");
+        if(integer(metadata(),"verifiedFrameCount")>0){auto n=static_cast<std::size_t>(integer(metadata(),"verifiedFrameCount"));if(n>m_frames.size())throw std::runtime_error("Official replay prefix exceeds capture");m_frames.resize(n);}
         if(cbf())for(auto const& frame:m_frames)if(!cbfFrameValid(frame.cbf))throw std::runtime_error("CBF Native boundary tape incomplete; existing file preserved");
+        if(integer(metadata(),"nativeClockVersion")==1)for(auto const& f:m_frames)if(!replayClockDataValid(f.clock))throw std::runtime_error("Native input clock trace incomplete; existing file preserved");
         double time=0;for(auto& f:m_frames){std::sort(f.randoms.begin(),f.randoms.end(),[](auto const&a,auto const&b){return a.ordinal<b.ordinal;});time+=f.dt;m_times.push_back(time);if(!f.poses.empty())m_anchors.push_back({number(f.poses.back(),"progress"),time});}
         std::sort(m_anchors.begin(),m_anchors.end(),[](auto const&a,auto const&b){return a.progress<b.progress||(a.progress==b.progress&&a.time<b.time);});
         m_document.metadata["captureCompleteness"]=m_document.footer["captureCompleteness"];
@@ -51,7 +53,7 @@ public:
     double duration()const{return m_times.empty()?0:m_times.back();}
     bool desync()const{return m_desync;}
     Json const& failure()const{return m_failure;}
-    void reject(std::string const& reason,Json expected=Json(),Json actual=Json()){
+    void reject(std::string const& reason,Json expected=Json(),Json actual=Json(),std::string comparisonPath="$"){
         auto category=reason.substr(0,reason.find(':'));m_errorCounts[category]=m_errorCounts[category].asInt().unwrapOr(0)+1;
         if(m_desync){m_failure["errorCounts"]=m_errorCounts;return;}
         m_desync=true;m_failure["errorCounts"]=m_errorCounts;m_failure["accuracyMode"]=metadata()["accuracyMode"];m_failure["physicsEnvironment"]=metadata()["physicsEnvironment"];m_failure["reason"]=reason;m_failure["frame"]=static_cast<std::int64_t>(m_index);
@@ -59,7 +61,7 @@ public:
         m_failure["nativeTick"]=m_recordedTick;m_failure["presentationElapsed"]=m_time;
         if(cbf()){auto names=Json::array();for(auto name:{"x","y","rotation","yVelocity","shipRotationX","shipRotationY","jumpBuffered","isOnGround","holdingMask","lastCollisionBottom","lastCollisionTop","lastCollisionLeft","lastCollisionRight"})names.push(name);m_failure["cbfMotionFields"]=std::move(names);}
         m_failure["dispatchesConsumed"]=static_cast<std::int64_t>(m_dispatch);m_failure["previousExpected"]=m_presentedPose?*m_presentedPose:Json();
-        m_failure["firstDifferentField"]=cbfFirstDifference(expected,actual);m_failure["nativeInputVersion"]=integer(metadata(),"nativeInputVersion");m_failure["physicsSchema"]=integer(initial(),"physicsSchema");
+        m_failure["firstDifferentField"]=cbfFirstDifference(expected,actual,std::move(comparisonPath));m_failure["nativeInputVersion"]=integer(metadata(),"nativeInputVersion");m_failure["physicsSchema"]=integer(initial(),"physicsSchema");
         m_failure["expected"]=std::move(expected);m_failure["actual"]=std::move(actual);
     }
     Json const* nativeButtons(double dt,bool clear,int step){
@@ -79,6 +81,9 @@ public:
     bool inputV2()const{return integer(metadata(),"nativeInputVersion")>=2;}
     bool cbf()const{return integer(metadata(),"nativeInputVersion")==3;}
     std::int64_t recordedTick()const{return m_recordedTick;}
+    double frameEntryClock()const{if(m_index>0&&m_frames[m_index-1].poses.empty())return std::numeric_limits<double>::quiet_NaN();auto const& j=m_index==0?m_initial:m_frames[m_index-1].poses.back()["physics"];return j["timestamp"].asDouble().unwrapOr(std::numeric_limits<double>::quiet_NaN());}
+    double frameExitClock()const{auto* f=current();return f&&!f->poses.empty()?f->poses.back()["physics"]["timestamp"].asDouble().unwrapOr(std::numeric_limits<double>::quiet_NaN()):std::numeric_limits<double>::quiet_NaN();}
+    double nextInputClock()const{auto* f=current();return f&&m_dispatch<f->dispatches.size()?number(f->dispatches[m_dispatch],"timestamp"):std::numeric_limits<double>::quiet_NaN();}
     Json pendingInputs()const{
         if(m_index==0)return m_initial["queued"];
         auto const& previous=m_frames[m_index-1];return previous.poses.empty()?Json():previous.poses.back()["physics"]["pendingButtons"];
@@ -115,14 +120,14 @@ public:
         auto* f=current();if(!f)return;if(m_step!=f->steps.size()||m_anchor!=f->anchors.size()||m_random!=f->randoms.size()||m_buttons!=f->buttons.size()||(inputV2()&&m_dispatch!=f->dispatches.size()))reject("UNCONSUMED_NATIVE_EVENTS");
         if(!f->poses.empty()){
             auto const& expected=f->poses.back();
-            if(inputV2()&&expected["physics"]!=actual["physics"])reject("NATIVE_PHYSICS_STATE",expected,actual);
-            auto samePose=[](Json const&a,Json const&b){
-                if(std::hypot(number(a,"x")-number(b,"x"),number(a,"y")-number(b,"y"))>2)return false;
-                if(a["rotation"].isNumber()&&b["rotation"].isNumber()&&std::abs(std::remainder(number(a,"rotation")-number(b,"rotation"),360.))>5)return false;
-                for(auto key:{"mode","mini","upsideDown","flipped","dual","dead","finished"})if(a[key]!=b[key])return false;
-                return true;
+            if(inputV2()&&expected["physics"]!=actual["physics"])reject("NATIVE_PHYSICS_STATE",expected["physics"],actual["physics"],"$.physics");
+            auto validatePose=[&](Json const&a,Json const&b,std::string const& path){
+                if(std::hypot(number(a,"x")-number(b,"x"),number(a,"y")-number(b,"y"))>2){Json left,right;for(auto k:{"x","y"}){left[k]=a[k];right[k]=b[k];}reject("POSE_OR_PHYSICS_STATE",left,right,path);return;}
+                if(a["rotation"].isNumber()&&b["rotation"].isNumber()&&std::abs(std::remainder(number(a,"rotation")-number(b,"rotation"),360.))>5){reject("POSE_OR_PHYSICS_STATE",a["rotation"],b["rotation"],path+".rotation");return;}
+                for(auto key:{"mode","mini","upsideDown","flipped","dual","dead","finished"})if(a[key]!=b[key]){reject("POSE_OR_PHYSICS_STATE",a[key],b[key],path+"."+key);return;}
             };
-            if(!samePose(expected,actual)||(expected["dual"].asBool().unwrapOr(false)&&!samePose(expected["player2"],actual["player2"])))reject("POSE_OR_PHYSICS_STATE",expected,actual);
+            validatePose(expected,actual,"$");
+            if(expected["dual"].asBool().unwrapOr(false))validatePose(expected["player2"],actual["player2"],"$.player2");
         }
         if(!f->poses.empty())m_presentedPose=&f->poses.back();
         m_time+=f->dt;m_budget=std::max(0.,m_budget-f->dt);++m_index;m_step=m_anchor=m_random=m_buttons=m_legacyInput=m_dispatch=0;

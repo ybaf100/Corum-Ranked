@@ -1,3 +1,4 @@
+import {survivalBestEndedAttempt} from '../history/survival-best-attempt.js';
 import {type SurvivalMatch,survivalMilliPercent} from '@corum-ranked/rules';
 /** Own official state only. No file bytes, uploads, reporting or scoring writes. */
 export function survivalReplayReceipt(match:SurvivalMatch,participantId:string,attemptId:string){
@@ -9,7 +10,7 @@ export function survivalReplayReceipt(match:SurvivalMatch,participantId:string,a
    roundKey:round.key,roundNumber:round.ordinal,phase:round.phase,mapGeneration:round.mapGeneration,
    levelId:round.map?.levelId??null,mapVersion:round.map?.levelVersion??null,geometryHash:round.map?.geometrySha256??null,
    startedAt:attempt.startedAt,endedAt:attempt.endedAt,ended:attempt.endedAt!==null,
-   progress:attempt.highestProgress,roundBest:player.highestProgress,cleared:attempt.endedAt!==null&&attempt.highestProgress===100,
+   progress:attempt.highestProgress,roundBest:player.highestProgress,bestAttemptId:survivalBestEndedAttempt(round,participantId)?.id??null,cleared:attempt.endedAt!==null&&attempt.highestProgress===100,
    score:scoring(attempt.highestProgress),roundBestScore:scoring(player.highestProgress),debug:!match.online};
  }
  return {accepted:false,matchId:match.id,participantId,attemptId};

@@ -80,7 +80,7 @@ std::future<void> Storage::append(std::string attempt,std::vector<Json> records,
     if(p.bytes+encoded.size()>MaxFileBytes-16384)throw std::runtime_error("Replay storage budget exceeded; best preserved");
     diskBudget(encoded.size()+16384);
     {std::ofstream out(pending(attempt),std::ios::binary|std::ios::app);out<<encoded;
-      if(final){Json f;f["footer"]=true;f["payloadSha256"]=str(b,"sha256");f["recordCount"]=static_cast<std::int64_t>(p.count+records.size());f["captureCompleteness"]="COMPLETE";f["replayValidationStatus"]="AWAITING_OFFICIAL_RECEIPT";
+      if(final){Json f;f["footer"]=true;f["payloadSha256"]=str(b,"sha256");f["recordCount"]=static_cast<std::int64_t>(p.count+records.size());f["captureCompleteness"]=records.back()["capturePartial"].asBool().unwrapOr(false)?"PARTIAL_RECOVERED":"COMPLETE";f["replayValidationStatus"]="AWAITING_OFFICIAL_RECEIPT";
       f["terminalReason"]=records.back()["reason"];f["bestProgress"]=records.back()["progress"];f["cleared"]=number(records.back(),"progress")==100;
       f["endedAt"]=static_cast<std::int64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count());
       f["durationMs"]=p.elapsed*1000;f["nativeTickCount"]=p.ticks;f["inputEventCount"]=static_cast<std::int64_t>(p.inputs);f["poseSampleCount"]=static_cast<std::int64_t>(p.poses);
@@ -113,7 +113,7 @@ std::future<bool> Storage::reconcile(Receipt r){return submit([this,r]{
     }
     if(!receiptMatches(d,r))return false;auto m=manifest();auto key=roundStorageKey(d.metadata);auto old=str(m["best"][key],"file");
     bool tie=str(d.metadata,"phase")=="TIEBREAK";
-    if(score(r.progress,tie)<score(r.roundBest,tie)){
+    if((!r.bestAttemptId.empty()&&r.bestAttemptId!=r.attemptId)||score(r.progress,tie)<score(r.roundBest,tie)){
       m["pending"].erase(sha256Text(r.attemptId));saveManifest(m);fs::remove(path);return false;
     }
     if(!old.empty()){
@@ -127,6 +127,9 @@ std::future<bool> Storage::reconcile(Receipt r){return submit([this,r]{
     auto file="survival/"+key+"/"+sha256Text(r.attemptId)+".replay";auto dest=m_root/file;safeDirectories(dest.parent_path());
     if(fs::exists(dest))throw std::runtime_error("Replay immutable file already exists");replace(path,dest);
     Json entry;entry["file"]=file;entry["progress"]=r.progress;entry["cleared"]=r.cleared;entry["attemptId"]=r.attemptId;entry["payloadSha256"]=d.chain;
+    entry["verifiedFrameCount"]=static_cast<std::int64_t>(verifiedReplayFrames(d,r));entry["officialBestAttemptId"]=r.bestAttemptId;
+    auto allFrames=static_cast<std::size_t>(std::count_if(d.records.begin(),d.records.end(),[](auto const& v){return str(v,"kind")=="frame";}));
+    entry["officialCompletion"]=verifiedReplayFrames(d,r)==allFrames&&score(number(d.records.back(),"progress"),tie)==score(r.progress,tie)&&((number(d.records.back(),"progress")==100)==r.cleared)?"FULL_CAPTURE":"OFFICIAL_PREFIX";
     m["best"][key]=entry;m["pending"].erase(sha256Text(r.attemptId));
     try{saveManifest(m);}catch(...){replace(dest,path);throw;}
     if(!old.empty()&&old!=file)fs::remove(m_root/old);return true;
@@ -135,11 +138,22 @@ std::optional<Document> Storage::loadBest(Json const& identity){
     auto m=manifest();auto key=roundStorageKey(identity);auto file=str(m["best"][key],"file");if(file.empty())return std::nullopt;
     auto expected="survival/"+key+"/"+sha256Text(str(m["best"][key],"attemptId"))+".replay";if(file!=expected)throw std::runtime_error("Replay manifest path invalid");
     auto d=decode(m_root/file);if(roundStorageKey(d.metadata)!=key||str(m["best"][key],"payloadSha256")!=d.chain)throw std::runtime_error("Replay best integrity failed");
-    d.metadata["officialBestProgress"]=m["best"][key]["progress"];return d;
+    d.metadata["officialBestProgress"]=m["best"][key]["progress"];d.metadata["verifiedFrameCount"]=m["best"][key]["verifiedFrameCount"];d.metadata["officialCompletion"]=m["best"][key]["officialCompletion"];return d;
 }
 std::future<std::optional<Document>> Storage::best(Json identity){return submit([this,identity]{return loadBest(identity);});}
 std::future<std::unique_ptr<Playback>> Storage::playback(Json identity){return submit([this,identity]()->std::unique_ptr<Playback>{auto d=loadBest(identity);return d?std::make_unique<Playback>(std::move(*d)):nullptr;});}
 std::future<std::optional<Json>> Storage::inspect(Json identity){return submit([this,identity]()->std::optional<Json>{auto d=loadBest(identity);return d?std::optional(d->metadata):std::nullopt;});}
+std::future<void> Storage::journalClose(Json metadata){return submit([this,metadata]{
+    auto const& e=metadata["closingEvent"];
+    if(!metadataValid(metadata)||str(e,"type")!="ATTEMPT_END"||str(e,"attemptId")!=str(metadata,"attemptId")||str(e,"roundKey")!=str(metadata,"roundKey")||integer(e,"mapGeneration")!=integer(metadata,"mapGeneration")||integer(e,"levelId")!=integer(metadata,"levelId")||str(e,"eventId").empty()||score(number(e,"progress"),str(metadata,"phase")=="TIEBREAK")<0)throw std::runtime_error("Replay closing ownership invalid");
+    auto m=manifest();auto key=sha256Text(str(metadata,"attemptId"));
+    if(!m["closing"].isObject())m["closing"]=Json::object();
+    bool exists=m["closing"].contains(key);
+    if(exists&&m["closing"][key]["closingEvent"]!=e)throw std::runtime_error("Replay closing event changed");
+    if(m["closing"].size()>=MaxPending&&!exists)throw std::runtime_error("Replay closing journal capacity reached");
+    m["closing"][key]=metadata;saveManifest(m);
+});}
+std::future<void> Storage::closeAcknowledged(std::string attempt){return submit([this,attempt]{auto m=manifest();if(m["closing"].erase(sha256Text(attempt)))saveManifest(m);});}
 std::future<std::vector<Json>> Storage::recover(){return submit([this]{
     safeDirectories(m_root/"pending");std::vector<Json> result;auto m=manifest();
     // Recover the journal window between immutable rename and manifest commit.
@@ -157,8 +171,11 @@ std::future<std::vector<Json>> Storage::recover(){return submit([this]{
       if(result.size()>=MaxPending)break;if(!entry.is_regular_file()||entry.is_symlink()||entry.path().extension()!=".tmp")continue;
       try{auto d=decode(entry.path(),true);if(entry.path()!=pending(str(d.metadata,"attemptId")))continue;
         if(!d.complete){fs::resize_file(entry.path(),d.validBytes);d.metadata["captureCompleteness"]="PARTIAL_RECOVERED";}
+        auto const& cm=m;if(str(cm["closing"][sha256Text(str(d.metadata,"attemptId"))]["closingEvent"],"type")=="ATTEMPT_END")d.metadata["closingEvent"]=cm["closing"][sha256Text(str(d.metadata,"attemptId"))]["closingEvent"];
         result.push_back(d.metadata);
       }catch(...){/* A corrupt pending file never authorizes deleting an existing best. */}
-    }return result;
+    }
+    if(m["closing"].isObject())for(auto const& metadata:m["closing"]){if(result.size()>=MaxPending)break;if(metadataValid(metadata)&&std::none_of(result.begin(),result.end(),[&](auto const& e){return str(e,"attemptId")==str(metadata,"attemptId");}))result.push_back(metadata);}
+    return result;
 });}
 }

@@ -69,7 +69,7 @@ matjson::Value replayPose(PlayLayer* layer){
 class $modify(CorumSurvivalReplayLayer,PlayLayer){
 public:
  struct ReplayCamera {CCPoint origin,second,diff;float zoom=1,angle=0;struct Layer{CCPoint pos;float x=1,y=1,angle=0;};std::array<Layer,3> layers;};
- struct Fields {Json trace=Json::array();std::array<unsigned,2> playerUpdates{};bool preInput=false;std::optional<ReplayCamera> nativeCamera;bool ready=false,replayOwned=false,liveWorldOwned=false,replayAdvancing=false,internalReset=false,desyncReported=false;CCLabelBMFont* replayText=nullptr;CCLabelBMFont* captureError=nullptr;std::string captureErrorText;Slider* replaySlider=nullptr;float replayHudWait=0;unsigned lastRenderFrame=0;
+ struct Fields {Json trace=Json::array();std::array<unsigned,2> playerUpdates{};bool preInput=false;std::optional<ReplayCamera> nativeCamera;bool ready=false,replayOwned=false,liveWorldOwned=false,replayAdvancing=false,internalReset=false,desyncReported=false,retiring=false;CCLabelBMFont* replayText=nullptr;CCLabelBMFont* captureError=nullptr;std::string captureErrorText,captureAttempt,initialAttempt;Slider* replaySlider=nullptr;float replayHudWait=0;unsigned lastRenderFrame=0;
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
  double captureUs=0,captureMaxUs=0;unsigned captureFrames=0;
 #endif
@@ -154,7 +154,7 @@ public:
     }
     void reportReplayFailure(Json before=nullptr){
         auto* replay=worldPlayback();if(!replay)return;
-        if(replay->desync()&&!m_fields->desyncReported){m_fields->desyncReported=true;log::warn("[SurvivalReplayDesync] attemptId={} initial={} failure={} actualBefore={} actualAfter={} environment={}",corum::ranked::replay::str(replay->metadata(),"attemptId"),replay->initial().dump(matjson::NO_INDENTATION),replay->failure().dump(matjson::NO_INDENTATION),before.dump(matjson::NO_INDENTATION),physicsEvidence(true).dump(matjson::NO_INDENTATION),corum::ranked::replay::captureReplayPhysicsEnvironment().dump(matjson::NO_INDENTATION));}
+        if(replay->desync()&&!m_fields->desyncReported){m_fields->desyncReported=true;log::warn("[SurvivalReplayDesync] attemptId={} initial={} failure={} actualBefore={} actualAfter={} inputClock={} environment={}",corum::ranked::replay::str(replay->metadata(),"attemptId"),replay->initial().dump(matjson::NO_INDENTATION),replay->failure().dump(matjson::NO_INDENTATION),before.dump(matjson::NO_INDENTATION),physicsEvidence(true).dump(matjson::NO_INDENTATION),corum::ranked::replay::nativeInputClockDiagnostics().dump(matjson::NO_INDENTATION),corum::ranked::replay::captureReplayPhysicsEnvironment().dump(matjson::NO_INDENTATION));}
     }
     void onReplayControl(CCObject* sender){
         auto* replay=worldPlayback();if(!replay||!sender)return;
@@ -207,9 +207,11 @@ public:
                 if(auto problem=corum::ranked::replay::prepareReplayInputBoundary(m_queuedButtons,frame->queued,replay->pendingInputs());!problem.empty())replay->reject(problem,frame->queued,corum::ranked::replay::encodeReplayButtons(m_queuedButtons));
                 if(replay->desync())break;
             }
+            corum::ranked::replay::beginNativeInputClock(this,replay);
             if(replay->cbf())corum::ranked::replay::beginCbfNativeFrame(this,replay);
             {m_fields->replayAdvancing=true;corum::ranked::advanceSurvivalReplayWorld(this,static_cast<float>(frame->dt));m_fields->replayAdvancing=false;}
             if(replay->cbf())corum::ranked::replay::finishCbfNativeFrame();
+            corum::ranked::replay::finishNativeInputClock();
             auto pose=replayPose(this);pose["physics"]=physicsEvidence();replay->completeFrame(pose);
             reportReplayFailure(before);
             if(m_fields->liveWorldOwned)saveReplayCamera();
@@ -227,7 +229,7 @@ public:
         }
         m_fields->replayHudWait-=dt;if(m_fields->replayHudWait<=0){m_fields->replayHudWait=.1f;
           auto status=replay->desync()?"REPLAY DESYNC":replay->seeking()?"SEEKING":replay->ended()?"FINISHED":replay->paused()?"PAUSED":"PLAYING";
-          auto text=fmt::format("{} · {} · {:.1f}/{:.1f}s · {:.1f}x · BEST {:.3f}%",corum::ranked::replay::str(replay->metadata(),"captureCompleteness")=="PARTIAL_RECOVERED"?"PARTIAL REPLAY":"INPUT REPLAY",status,replay->time(),replay->duration(),replay->speed(),replay->metadata()["officialBestProgress"].asDouble().unwrapOr(0));
+          auto text=fmt::format("{} · {} · {:.1f}/{:.1f}s · {:.1f}x · BEST {:.3f}%",(corum::ranked::replay::str(replay->metadata(),"officialCompletion")=="OFFICIAL_PREFIX"||corum::ranked::replay::str(replay->metadata(),"captureCompleteness")=="PARTIAL_RECOVERED")?"PARTIAL REPLAY":"INPUT REPLAY",status,replay->time(),replay->duration(),replay->speed(),replay->metadata()["officialBestProgress"].asDouble().unwrapOr(0));
           m_fields->replayText->setString(text.c_str());corum::ranked::ui::fitFullMenuLabel(m_fields->replayText,CCDirector::sharedDirector()->getWinSize().width-20,20,.25f);
           m_fields->replaySlider->setValue(replay->duration()>0?replay->time()/replay->duration():0);
         }
@@ -252,10 +254,14 @@ public:
     auto captureBegan=std::chrono::steady_clock::now();
 #endif
     auto& survival=corum::ranked::SurvivalRuntime::get();auto& recorder=corum::ranked::replay::Recorder::get();
+    if(replay->m_fields->retiring)return;
     bool official=play->m_level&&survival.gameplayLevel(static_cast<int>(play->m_level->m_levelID))&&!survival.freePlaying()&&!play->m_isPracticeMode&&!play->m_isTestMode&&survival.canPlay();
-    bool frameBegan=false,cbfFrameBegan=false;
+    bool frameBegan=false,cbfFrameBegan=false;std::string frameAttempt;std::uint64_t frameClockGeneration=0;
     if(official&&std::isfinite(dt)&&dt>0&&dt<=1&&!recorder.inNativeFrame()&&!play->m_isPaused&&play->m_player1&&!play->m_player1->m_isDead&&!play->m_hasCompletedLevel){
-      if(survival.localAttemptId().empty()&&survival.beginAttempt()&&recorder.active()){
+      if(survival.localAttemptId().empty()&&!survival.beginAttempt())return;
+      replay->m_fields->captureAttempt=survival.localAttemptId();
+      if(recorder.active()&&replay->m_fields->initialAttempt!=survival.localAttemptId()){
+        replay->m_fields->initialAttempt=survival.localAttemptId();
         matjson::Value initial;initial["kind"]="initial";initial["randomSeed"]=std::to_string(m_randomSeed);initial["replayRandSeed"]=std::to_string(m_replayRandSeed);
         initial["physicsSchema"]=corum::ranked::replay::ReplayPhysicsSchema;
         if(recorder.cbfCapture())initial["cbfInitial"]=corum::ranked::replay::captureCbfInitial(play);
@@ -266,7 +272,7 @@ public:
         initial["clickBetweenSteps"]=m_clickBetweenSteps;initial["clickOnSteps"]=m_clickOnSteps;initial["isBetweenSteps"]=m_isBetweenSteps;
         initial["started"]=play->m_started;initial["inResetDelay"]=play->m_inResetDelay;initial["attemptTime"]=play->m_attemptTime;initial["levelTime"]=static_cast<double>(play->m_gameState.m_levelTime);initial["extraDelta"]=m_extraDelta;initial["nativeStep"]=m_currentStep;initial["resumeTimer"]=m_resumeTimer;initial["pose"]=replayPose(play);auto problem=corum::ranked::replay::replayInitialDataProblem(initial);if(problem.empty()&&recorder.cbfCapture()&&!corum::ranked::replay::cbfInitialDataValid(initial["cbfInitial"]))problem="CBF_INITIAL_STATE_UNAVAILABLE";if(!problem.empty())recorder.unsupported(problem);else recorder.add(initial);
       }
-      if(recorder.active()&&recorder.physicsEnvironmentUnchanged()){if(recorder.cbfCapture()){corum::ranked::replay::beginCbfNativeFrame(play);cbfFrameBegan=true;}replay->resetReplayTrace();corum::ranked::beginNativeWorldEventCapture(play);recorder.nativeFrameBegin();frameBegan=true;recorder.elapsed(play->m_attemptTime);matjson::Value frame;frame["kind"]="frame";frame["dt"]=static_cast<double>(dt);frame["queued"]=corum::ranked::replay::encodeReplayButtons(m_queuedButtons);frame["preInputs"]=recorder.takePreInputs();recorder.add(frame);}
+      if(recorder.active()&&recorder.physicsEnvironmentUnchanged()){corum::ranked::replay::beginNativeInputClock(play);if(recorder.cbfCapture()){corum::ranked::replay::beginCbfNativeFrame(play);cbfFrameBegan=true;}replay->resetReplayTrace();corum::ranked::beginNativeWorldEventCapture(play);recorder.nativeFrameBegin();frameBegan=true;frameAttempt=recorder.currentAttemptId();frameClockGeneration=corum::ranked::replay::nativeInputClockGeneration();recorder.elapsed(play->m_attemptTime);matjson::Value frame;frame["kind"]="frame";frame["dt"]=static_cast<double>(dt);frame["queued"]=corum::ranked::replay::encodeReplayButtons(m_queuedButtons);frame["preInputs"]=recorder.takePreInputs();recorder.add(frame);}
     }
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
     auto beforePhysics=std::chrono::steady_clock::now();
@@ -275,9 +281,12 @@ public:
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
     auto afterPhysics=std::chrono::steady_clock::now();
 #endif
-    if(cbfFrameBegan){auto cbf=corum::ranked::replay::finishCbfNativeFrame();if(auto error=corum::ranked::replay::cbfNativeFrameError();!error.empty())recorder.unsupported(error);else recorder.add(std::move(cbf));}
-    if(frameBegan&&recorder.active()){auto pose=replayPose(play);pose["physics"]=replay->physicsEvidence();pose["kind"]="pose";recorder.elapsed(play->m_attemptTime);recorder.add(pose);}
-    if(frameBegan)recorder.nativeFrameEnd();
+    bool sameCapture=frameBegan&&recorder.currentAttemptId()==frameAttempt;
+    if(cbfFrameBegan&&sameCapture){auto cbf=corum::ranked::replay::finishCbfNativeFrame();if(auto error=corum::ranked::replay::cbfNativeFrameError();!error.empty())recorder.unsupported(error);else recorder.add(std::move(cbf));}
+    if(sameCapture){auto clock=corum::ranked::replay::finishNativeInputClock();if(auto error=corum::ranked::replay::nativeInputClockError();!error.empty())recorder.unsupported(error);else recorder.add(std::move(clock));}
+    if(sameCapture&&recorder.active()){auto pose=replayPose(play);pose["physics"]=replay->physicsEvidence();pose["kind"]="pose";recorder.elapsed(play->m_attemptTime);recorder.add(pose);}
+    if(sameCapture)recorder.nativeFrameEnd();
+    else if(frameBegan&&frameClockGeneration==corum::ranked::replay::nativeInputClockGeneration())corum::ranked::replay::retireNativeReplayFrame(play);
     if(official)replay->showCaptureError();
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
     if(official){auto us=std::chrono::duration<double,std::micro>(beforePhysics-captureBegan+std::chrono::steady_clock::now()-afterPhysics).count();
@@ -292,6 +301,7 @@ public:
         auto& recorder=corum::ranked::replay::Recorder::get();
         bool trace=owner&&(owner->m_fields->replayAdvancing||(recorder.active()&&play->m_level&&corum::ranked::SurvivalRuntime::get().gameplayLevel(static_cast<int>(play->m_level->m_levelID))&&!corum::ranked::SurvivalRuntime::get().freePlaying()&&!play->m_isPracticeMode&&!play->m_isTestMode));
         auto* player=trace?(player1?play->m_player1:play->m_player2):nullptr;
+        corum::ranked::replay::NativeInputClockScope clock("INPUT",m_timestamp);
         Json input;if(trace){input["button"]=button;input["down"]=down;input["player2"]=!player1;input["nativeStep"]=m_currentStep;input["timestamp"]=m_timestamp;input["before"]=replayMotion(player);}
         GJBaseGameLayer::handleButton(down,button,player1);
         if(trace){input["after"]=replayMotion(player);
@@ -300,6 +310,7 @@ public:
         }
     }
     void processCommands(float dt,bool half,bool last){
+        corum::ranked::replay::NativeInputClockScope clock("STEP",m_timestamp);
         auto* play=PlayLayer::get();auto* owner=play&&static_cast<GJBaseGameLayer*>(play)==this?static_cast<CorumSurvivalReplayLayer*>(play):nullptr;
         if(owner&&owner->m_fields->replayAdvancing){if(auto* replay=owner->worldPlayback())replay->nativeStep(dt,half,last,m_currentStep);}
         if(owner&&corum::ranked::SurvivalRuntime::get().gameplayLevel(static_cast<int>(play->m_level->m_levelID)) && !corum::ranked::SurvivalRuntime::get().freePlaying() && !play->m_isPracticeMode && !play->m_isTestMode&&corum::ranked::replay::Recorder::get().active()&&corum::ranked::replay::Recorder::get().inNativeFrame()){
@@ -357,8 +368,14 @@ void survivalReplayNativeSnap(PlayerObject* player,bool spider,float fromX,float
     if(owner->m_fields->replayAdvancing){if(auto* world=owner->worldPlayback())world->nativeAnchor(anchor);return;}
     if(play->m_level&&!play->m_isPracticeMode&&!play->m_isTestMode&&SurvivalRuntime::get().gameplayLevel(static_cast<int>(play->m_level->m_levelID))&&!SurvivalRuntime::get().freePlaying()&&replay::Recorder::get().active())replay::Recorder::get().add(anchor);
 }
-void finishSurvivalReplayForReturn(PlayLayer* play){
-    if(!play||play!=PlayLayer::get())return;
-    replay::Recorder::get().finish(SurvivalRuntime::get().surrenderPending()?"SURRENDER":SurvivalRuntime::get().roundRemainingMs().value_or(0)==0?"ROUND_TIMEOUT":"ROUND_TRANSITION",replayPercent(play));
+void finishSurvivalReplayForReturn(PlayLayer* play,std::string reason,bool exited){
+    if(!play||(!exited&&play!=PlayLayer::get()))return;
+    auto* owner=static_cast<CorumSurvivalReplayLayer*>(play);
+    if(owner->m_fields->replayOwned||owner->m_fields->liveWorldOwned||owner->m_fields->captureAttempt.empty())return;
+    auto id=owner->m_fields->captureAttempt;owner->m_fields->retiring=true;
+    if(reason.empty())reason=SurvivalRuntime::get().surrenderPending()?"FORFEIT":SurvivalRuntime::get().roundRemainingMs().value_or(0)==0?"ROUND_TIMEOUT":"ROUND_TRANSITION";
+    SurvivalRuntime::get().endAttempt(replayPercent(play),reason,id);
+    auto& recorder=replay::Recorder::get();if(recorder.currentAttemptId()==id)recorder.finishFromLast(reason);
+    if(exited){recorder.sceneExited(id,std::move(reason));replay::retireNativeReplayFrame(play);}
 }
 }

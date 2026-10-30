@@ -11,6 +11,11 @@ public:
     void accepted(std::string const& attempt,bool accepted);
     void add(Json record);
     void finish(std::string reason,double progress);
+    void officialEnd(Json metadata,Json event,std::string reason,double progress);
+    void sceneExited(std::string const& attempt,std::string reason);
+    std::string const& currentAttemptId()const{return m_current;}
+    bool hasPendingClose(std::string const& attempt)const{return m_closing.contains(attempt);}
+    bool recovering()const{return m_recovery.valid();}
     void unsupported(std::string reason);
     void nativeInput(Json value);
     Json takePreInputs(){auto values=std::move(m_preInputs);m_preInputs=Json::array();return values;}
@@ -22,7 +27,7 @@ public:
     std::uint64_t tick()const{return m_tick;}
     void nextTick(){++m_tick;}
     bool inNativeFrame()const{return m_nativeFrame;}
-    void nativeFrameBegin(){m_nativeFrame=true;}
+    void nativeFrameBegin();
     void nativeFrameEnd();
     void elapsed(double value){if(std::isfinite(value)&&value>=0)m_elapsed=value;}
     std::string const& error()const{return m_error;}
@@ -44,6 +49,14 @@ private:
     ReplayNotice m_notice=ReplayNotice::None;
     std::string m_displayAttempt,m_receiptToken;
     std::map<std::string,Json> m_deferredReceipts;
+    std::map<std::string,Json> m_closing;
+    std::deque<Json> m_endQueue;
+    bool m_endBusy=false;
+    geode::async::TaskHolder<geode::utils::web::WebResponse> m_endRequest;
+    std::vector<Json> m_frameRecords;
+    std::size_t m_frameBytes=0;
+    std::uint64_t m_frameTick=0;
+    double m_frameElapsed=0;
     std::uint64_t m_tick=0;
     double m_elapsed=0,m_bestProgress=0;
     bool m_receiptBusy=false,m_nativeFrame=false,m_cbf=false;
@@ -55,5 +68,6 @@ private:
     void flush(Capture&);
     void queueReceipt(Json metadata);
     void note(ReplayNotice,std::string stage,std::string reason,Json const& metadata);
+    void commitRecord(Json record);
 };
 }

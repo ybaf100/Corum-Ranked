@@ -11,6 +11,7 @@ test('production replay storage atomically promotes official best only, preserve
  const json=process.env.CORUM_MATJSON_SOURCE,result=process.env.CORUM_RESULT_INCLUDE;if(!json||!result)throw Error('Pinned Geode JSON dependencies required');
  const code=String.raw`
 #include "${join(root,'src/replay/SurvivalReplayStorage.hpp')}"
+#include "${join(root,'src/replay/SurvivalReplayPlayback.hpp')}"
 #include <cassert>
 #include <iostream>
 using namespace corum::ranked::replay;
@@ -53,6 +54,16 @@ int main(){
  // A complete immutable rename preceding a process crash remains recoverable from the journal.
  auto journal=metadata("rename-window");journal["roundKey"]="round3";s.begin(journal).get();initial(s,"rename-window",40);t["progress"]=40.;s.append("rename-window",{t},true).get();
  auto from=std::filesystem::path("${dir}/replays/pending/"+corum::ranked::sha256Text("rename-window")+".tmp");auto to=std::filesystem::path("${dir}/replays/survival/"+roundStorageKey(journal)+"/"+corum::ranked::sha256Text("rename-window")+".replay");std::filesystem::create_directories(to.parent_path());std::filesystem::rename(from,to);s.recover().get();assert(std::filesystem::exists(from));proof=receipt("rename-window",40);proof.roundKey="round3";assert(s.reconcile(proof).get());
+ // A server cutoff authorizes an exact complete Native prefix, while the
+ // original longer capture bytes and terminal remain immutable.
+ auto cutoff=metadata("cutoff");cutoff["roundKey"]="cutoff-round";s.begin(cutoff).get();initial(s,"cutoff",10);
+ for(double value:{20.,30.}){Json f;f["kind"]="frame";f["dt"]=.01;f["tick"]=1;f["elapsed"]=.01;Json p;p["kind"]="pose";p["tick"]=1;p["elapsed"]=.01;p["x"]=0.;p["y"]=0.;p["rotation"]=0.;p["progress"]=value;p["mode"]="CUBE";for(auto key:{"mini","upsideDown","flipped","dual","dead","finished"})p[key]=false;s.append("cutoff",{f,p}).get();}
+ t["progress"]=30.;s.append("cutoff",{t},true).get();auto sourceFile=std::filesystem::path("${dir}/replays/pending/"+corum::ranked::sha256Text("cutoff")+".tmp");auto bytes=[](auto const& path){std::ifstream in(path,std::ios::binary);return std::string((std::istreambuf_iterator<char>(in)),{});};auto sourceBytes=bytes(sourceFile);
+ auto cutoffReceipt=receipt("cutoff",20);cutoffReceipt.roundKey="cutoff-round";cutoffReceipt.bestAttemptId="cutoff";assert(s.reconcile(cutoffReceipt).get());auto bounded=s.best(cutoff).get();assert(bounded&&number(bounded->records.back(),"progress")==30&&integer(bounded->metadata,"verifiedFrameCount")==2&&str(bounded->metadata,"officialCompletion")=="OFFICIAL_PREFIX");
+ auto destination=std::filesystem::path("${dir}/replays/survival/"+roundStorageKey(cutoff)+"/"+corum::ranked::sha256Text("cutoff")+".replay");assert(bytes(destination)==sourceBytes);auto playable=s.playback(cutoff).get();assert(playable&&playable->duration()==.02);
+ auto forged=*bounded;cutoffReceipt.progress=cutoffReceipt.roundBest=25;assert(!receiptMatches(forged,cutoffReceipt));cutoffReceipt.progress=cutoffReceipt.roundBest=100;cutoffReceipt.cleared=true;assert(!receiptMatches(forged,cutoffReceipt));
+ // Server-best identity, including a tied first attempt, controls promotion.
+ auto notBest=metadata("not-official-best");notBest["roundKey"]="tie-identity";s.begin(notBest).get();initial(s,"not-official-best",40);t["progress"]=40.;s.append("not-official-best",{t},true).get();auto tied=receipt("not-official-best",40);tied.roundKey="tie-identity";tied.bestAttemptId="earlier-official-attempt";assert(!s.reconcile(tied).get()&&!s.best(notBest).get());
  // A different generation, map or debug partition cannot read this best.
  auto other=metadata("x");other["mapGeneration"]=2;assert(!s.best(other).get());other=metadata("x");other["debug"]=true;assert(!s.best(other).get());
 }

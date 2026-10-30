@@ -3,6 +3,7 @@
 #include "SurvivalReplayPlayerState.hpp"
 #include "SurvivalReplayCompatibility.hpp"
 #include "SurvivalReplayCbfTrace.hpp"
+#include "SurvivalReplayClock.hpp"
 #include "../domain/Sha256.hpp"
 #include <matjson.hpp>
 #include <fstream>
@@ -31,6 +32,7 @@ inline std::string metadataProblem(Json const& j){
     for(auto key:{"matchId","roundKey","participantId","attemptId"})if(str(j,key).empty()||str(j,key).size()>256)return key;
     for(auto key:{"mapGeneration","levelId","mapVersion"})if(integer(j,key)<=0)return key;
     if(!hashValid(str(j,"mapGeometrySha256")))return "mapGeometrySha256";
+    if(!j["nativeClockVersion"].isNull()&&integer(j,"nativeClockVersion")!=1)return "nativeClockVersion";
     if(!j["nativeInputVersion"].isNull()){
         auto version=integer(j,"nativeInputVersion");
         if(version<1||version>3)return "nativeInputVersion";
@@ -79,6 +81,7 @@ inline bool cbfInitialDataValid(Json const& value){
 inline bool recordValid(Json const& r){
     auto kind=str(r,"kind");if(integer(r,"tick")<0||!std::isfinite(number(r,"elapsed"))||number(r,"elapsed")<0)return false;
     if(kind=="cbf")return cbfFrameValid(r);
+    if(kind=="clock")return replayClockDataValid(r);
     if(kind=="buttons"){
         if(!r["clear"].isBool()||integer(r,"nativeStep")<0||!std::isfinite(number(r,"dt"))||number(r,"dt")<0||number(r,"dt")>1)return false;
         for(auto key:{"queued","remaining"}){auto values=r[key].asArray();if(values.isErr()||values.unwrap().size()>4096)return false;
@@ -163,14 +166,39 @@ inline bool cbfDocumentComplete(Document const& d){
     }
     return frame&&proof;
 }
+inline bool completeNativeFrameRecords(std::vector<Json> const& records,Json const& metadata){
+    if(records.empty()||str(records.front(),"kind")!="frame"||str(records.back(),"kind")!="pose")return false;
+    bool cbf=integer(metadata,"nativeInputVersion")!=3,clock=integer(metadata,"nativeClockVersion")!=1;
+    for(auto const& r:records){auto kind=str(r,"kind");if(kind=="cbf")cbf=cbfFrameValid(r);if(kind=="clock")clock=replayClockDataValid(r);if(kind=="pose"&&(!cbf||!clock))return false;}
+    return cbf&&clock;
+}
+// Return a complete, evidence-backed Native prefix for an official closed
+// Attempt. The immutable capture may extend beyond the server's cutoff; those
+// later frames are retained on disk and never presented as official progress.
+inline std::size_t verifiedReplayFrames(Document const& d,Receipt const& r){
+    if(d.records.empty()||str(d.records.front(),"kind")!="initial"||score(r.progress,str(d.metadata,"phase")=="TIEBREAK")<0)return 0;
+    if(integer(d.metadata,"nativeInputVersion")==3&&!cbfInitialDataValid(d.records.front()["cbfInitial"]))return 0;
+    bool dm=str(d.metadata,"phase")=="TIEBREAK",open=false,pose=false,cbf=false,clock=false,clear=false;
+    std::size_t complete=0,candidate=0;std::int64_t highest=0;auto target=score(r.progress,dm);
+    auto close=[&]{if(!open)return;bool valid=pose&&(integer(d.metadata,"nativeInputVersion")!=3||cbf)&&(integer(d.metadata,"nativeClockVersion")!=1||clock);
+        if(valid){++complete;if(highest==target&&(!r.cleared||clear)&&(!clear||r.cleared))candidate=complete;}else open=false;};
+    for(auto const& v:d.records){auto kind=str(v,"kind");
+        if(kind=="frame"){if(open){close();if(!open)break;}open=true;pose=cbf=clock=false;}
+        else if(open&&kind=="cbf")cbf=cbfFrameValid(v);
+        else if(open&&kind=="clock")clock=replayClockDataValid(v);
+        else if(open&&kind=="pose"){if((integer(d.metadata,"nativeInputVersion")==3&&!cbf)||(integer(d.metadata,"nativeClockVersion")==1&&!clock)){open=false;break;}pose=true;highest=std::max(highest,score(number(v,"progress"),dm));clear=clear||number(v,"progress")==100;}
+        else if(open&&kind!="terminal")pose=false; // evidence after a pose requires a new final Native pose
+    }
+    if(open)close();
+    return candidate;
+}
 inline bool receiptMatches(Document const& d,Receipt const& r){auto const& m=d.metadata;
-    return cbfDocumentComplete(d)&&(integer(m,"nativeInputVersion")<2||(!d.records.empty()&&replayInitialDataProblem(d.records.front()).empty()&&replayPhysicsEnvironmentProblem(m["physicsEnvironment"]).empty()))&&
+    return verifiedReplayFrames(d,r)>0&&(integer(m,"nativeInputVersion")<2||(!d.records.empty()&&replayInitialDataProblem(d.records.front()).empty()&&replayPhysicsEnvironmentProblem(m["physicsEnvironment"]).empty()))&&
       r.accepted&&r.ended&&d.complete&&!d.records.empty()&&str(d.records.front(),"kind")=="initial"&&
       std::any_of(d.records.begin(),d.records.end(),[](auto const& item){return str(item,"kind")=="frame";})&&
       std::any_of(d.records.begin(),d.records.end(),[](auto const& item){return str(item,"kind")=="pose";})&&str(m,"matchId")==r.matchId&&str(m,"roundKey")==r.roundKey&&str(m,"attemptId")==r.attemptId&&
       str(m,"participantId")==r.participantId&&integer(m,"mapGeneration")==r.mapGeneration&&integer(m,"levelId")==r.levelId&&
       integer(m,"mapVersion")==r.mapVersion&&str(m,"mapGeometrySha256")==r.geometryHash&&
-      score(number(d.records.back(),"progress"),str(m,"phase")=="TIEBREAK")==score(r.progress,str(m,"phase")=="TIEBREAK")&&
       r.cleared==(r.progress==100)&&score(r.progress,str(m,"phase")=="TIEBREAK")<=score(r.roundBest,str(m,"phase")=="TIEBREAK");
 }
 }

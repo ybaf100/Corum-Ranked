@@ -21,7 +21,7 @@ namespace geode {
 namespace log {template<class... T>void info(T const&...) {}}
 struct Mod{static Mod*get(){static Mod m;return &m;}std::filesystem::path getSaveDir(){return "${dir}";}};
 namespace utils::web {struct WebResponse{matjson::Value value;int status=200;int code()const{return status;}struct Result{matjson::Value value;matjson::Value unwrapOr(matjson::Value)const{return value;}};Result json()const{return {value};}};
-struct WebRequest{template<class...T>void header(T...){}template<class T>void timeout(T){}void followRedirects(bool){}int get(std::string const&){return 1;}};}
+struct WebRequest{template<class...T>void header(T...){}template<class T>void timeout(T){}static inline matjson::Value lastBody;static inline std::string lastUrl;template<class T>void bodyJSON(T const&v){lastBody=v;}void followRedirects(bool){}int post(std::string const&url){lastUrl=url;return 1;}int get(std::string const&url){lastUrl=url;return 1;}};}
 namespace async{template<class T>struct TaskHolder{std::function<void(T)>cb;template<class F>void spawn(int,F f){cb=f;}void reply(T v){auto f=std::exchange(cb,{});assert(f);f(v);}};}
 namespace prelude{using geode::Mod;namespace web=geode::utils::web;}}
 namespace corum::ranked {struct RankedRuntime{static RankedRuntime&get(){static RankedRuntime r;return r;}std::string spectatorLiveSessionToken(){return "test-session-only";}};}
@@ -31,17 +31,18 @@ ${source}
 using namespace corum::ranked::replay;
 Json metadata(std::string id){Json m;m["formatVersion"]=1;m["gameVersion"]="2.2081";m["matchId"]="match";m["roundKey"]="r1";m["attemptId"]=id;m["participantId"]="p";m["mapGeneration"]=1;m["levelId"]=123;m["mapVersion"]=1;m["mapGeometrySha256"]=std::string(64,'a');m["phase"]="ROUND_1";return m;}
 void initial(Recorder&r){r.add(initialReplayPhysicsFixture());}
-void frame(Recorder&r,double progress){r.nativeFrameBegin();Json f;f["kind"]="frame";f["dt"]=.01;r.add(f);r.nextTick();r.elapsed(.01);auto pose=corum::ranked::encodeSpectatorPose(corum::ranked::SpectatorGhostPose{});pose["kind"]="pose";pose["progress"]=progress;r.add(pose);}
+void sample(Recorder&r,double progress){ReplayInputClock clock;clock.source();double stamp=0;auto edge=clock.enter("FRAME",stamp);stamp=.01;clock.leave(edge,stamp);r.add(clock.finish());auto pose=corum::ranked::encodeSpectatorPose(corum::ranked::SpectatorGhostPose{});pose["kind"]="pose";pose["progress"]=progress;r.add(pose);}
+void frame(Recorder&r,double progress,bool completed=true){r.nativeFrameBegin();Json f;f["kind"]="frame";f["dt"]=.01;r.add(f);r.nextTick();r.elapsed(.01);if(completed)sample(r,progress);}
 Receipt receipt(std::string id,double p){return {"match","r1",id,"p",std::string(64,'a'),1,123,1,p,p,true,p==100,true};}
 void drain(Recorder&r){for(auto&f:r.m_writes)f.get();r.m_writes.clear();}
 int main(){Recorder r;r.m_recovery.get();testEnvironment["cbf"]["loaded"]=true;testEnvironment["cbf"]["version"]="v1.5.0";testEnvironment["cbf"]["disabled"]=false;testEnvironment["cbf"]["clickOnSteps"]=false;testEnvironment["cbf"]["physicsBypass"]=false;
- r.begin(metadata("unsupported-cbf"));assert(!r.active()&&r.notice()==ReplayNotice::Unsupported&&r.error()=="CBF_NATIVE_BOUNDARIES_UNAVAILABLE");testEnvironment["cbf"]["loaded"]=false;r.begin(metadata("bad-initial"));r.unsupported("INITIAL_PHYSICS_UNAVAILABLE");r.accepted("bad-initial",true);assert(!r.active()&&r.m_writes.empty());r.begin(metadata("first"));initial(r);frame(r,35);assert(std::filesystem::is_empty("${dir}/replays/pending"));
+ r.begin(metadata("unsupported-cbf"));assert(!r.active()&&r.notice()==ReplayNotice::Unsupported&&r.error()=="CBF_NATIVE_BOUNDARIES_UNAVAILABLE");testEnvironment["cbf"]["loaded"]=false;r.begin(metadata("bad-initial"));r.unsupported("INITIAL_PHYSICS_UNAVAILABLE");r.accepted("bad-initial",true);assert(!r.active()&&r.m_writes.empty());r.begin(metadata("first"));initial(r);frame(r,35,false);assert(std::filesystem::is_empty("${dir}/replays/pending"));
  // Exercise production Recorder -> validation -> disk for a real queued
  // command. Nested commands inherit the enclosing record's tick/time context.
  Json command;command["button"]=1;command["down"]=true;command["player2"]=false;command["nativeStep"]=7;command["timestamp"]=.003;
  Json queue;queue["kind"]="buttons";queue["dt"]=.005;queue["clear"]=false;queue["nativeStep"]=7;queue["queued"]=Json::array();queue["queued"].push(command);queue["remaining"]=Json::array();r.add(queue);assert(r.active()&&r.error().empty());
  auto valid=queue;valid["tick"]=7;valid["elapsed"]=.02;assert(recordValid(valid));valid["queued"][0]["timestamp"]=Json();assert(!recordValid(valid));
- r.finish("DEATH",35);assert(r.active());r.nativeFrameEnd();assert(!r.active());r.accepted("first",true);drain(r);assert(r.storage().reconcile(receipt("first",35)).get());
+ sample(r,35);r.finish("DEATH",35);assert(r.active());r.nativeFrameEnd();assert(!r.active());r.accepted("first",true);drain(r);assert(r.storage().reconcile(receipt("first",35)).get());
  r.begin(metadata("timeout"));initial(r);r.accepted("timeout",true);frame(r,74);r.finish("ROUND_TIMEOUT",74);r.finish("EXIT",0);r.nativeFrameEnd();drain(r);assert(r.storage().reconcile(receipt("timeout",74)).get());
  auto best=r.storage().best(metadata("x")).get();assert(best&&str(best->footer,"terminalReason")=="ROUND_TIMEOUT");assert(number(best->records.back(),"progress")==74);
  // A Start response can be ambiguous (lost ACK/retry conflict). Keep RAM until an owner-only receipt proves it.
@@ -84,13 +85,32 @@ int main(){Recorder r;r.m_recovery.get();testEnvironment["cbf"]["loaded"]=true;t
  for(int i=0;i<2;++i){Json player;player["lastPosition"]=Json::array();player["lastPosition"].push(0.);player["lastPosition"].push(105.);player["collisionLogs"]=Json::array();for(int j=0;j<4;++j)player["collisionLogs"].push(0);init["cbfInitial"]["players"].push(player);}
  r.add(init);r.accepted("cbf-complete",true);r.nativeFrameBegin();
  Json f;f["kind"]="frame";f["dt"]=.01;f["preInputs"]=Json::array();auto applied=command;applied["before"]=Json::array();applied["after"]=Json::array();f["preInputs"].push(applied);r.add(f);r.nativeInput(applied);
- Json proof;proof["kind"]="cbf";proof["schema"]=1;proof["roots"]=Json::array();proof["clocks"]=Json::array();r.add(proof);
+ Json proof;proof["kind"]="cbf";proof["schema"]=1;proof["roots"]=Json::array();proof["clocks"]=Json::array();r.add(proof);ReplayInputClock clock;clock.source();double stamp=0;auto edge=clock.enter("FRAME",stamp);stamp=.01;clock.leave(edge,stamp);r.add(clock.finish());
  auto pose=corum::ranked::encodeSpectatorPose(corum::ranked::SpectatorGhostPose{});pose["kind"]="pose";pose["progress"]=50.;r.add(pose);r.finish("DEATH",50);r.nativeFrameEnd();drain(r);
  auto cr=receipt("cbf-complete",50);cr.roundKey="cbf-round";assert(r.storage().reconcile(cr).get());auto cbfBest=r.storage().best(cbfMetadata).get();assert(cbfBest&&integer(cbfBest->metadata,"nativeInputVersion")==3&&integer(cbfBest->footer,"inputEventCount")==2);
  auto incomplete=*cbfBest;std::erase_if(incomplete.records,[](auto const& v){return str(v,"kind")=="cbf";});assert(!receiptMatches(incomplete,cr));
  auto unknown=cbfBest->metadata;unknown["nativeInputVersion"]=4;assert(!metadataValid(unknown));unknown["nativeInputVersion"]=3;unknown["accuracyMode"]="GD_NATIVE_FRAME_V2";assert(!metadataValid(unknown));
  capability["leaseHeld"]=true;r.begin(metadata("leased-source"));assert(!r.active()&&r.error()=="CBF_SOURCE_HOOKS_LEASED");capability["leaseHeld"]=false;
  r.begin(metadata("changed-environment"));r.add(init);assert(r.physicsEnvironmentUnchanged());testEnvironment["cbf"]["disabled"]=true;assert(!r.physicsEnvironmentUnchanged()&&!r.active());
+ assert(str(r.storage().best(metadata("x")).get()->metadata,"attemptId")=="new-good");
+ // Complete Native frame staging and a durable owned End survive Scene loss.
+ testEnvironment["cbf"]["loaded"]=false;r.m_receipts.clear();r.m_deferredReceipts.clear();r.m_endQueue.clear();
+ auto closing=metadata("timeout-close");closing["roundKey"]="close-round";r.begin(closing);initial(r);r.accepted("timeout-close",true);frame(r,70);
+ Json end;end["eventId"]="owned-end-event";end["type"]="ATTEMPT_END";end["attemptId"]="timeout-close";end["roundKey"]="close-round";end["mapGeneration"]=1;end["levelId"]=123;end["progress"]=70.;
+ r.officialEnd(closing,end,"ROUND_TIMEOUT",70);assert(r.active());r.nativeFrameEnd();assert(!r.active());drain(r);
+ auto recovered=r.storage().recover().get();auto journal=std::find_if(recovered.begin(),recovered.end(),[](auto const& x){return str(x,"attemptId")=="timeout-close";});assert(journal!=recovered.end()&&(*journal)["closingEvent"]==end);
+ r.m_receipts.clear();r.m_nextReceipt={};r.queueReceipt(closing);r.pump();assert(r.m_receiptBusy);
+ geode::utils::web::WebResponse open;open.value["accepted"]=true;open.value["ended"]=false;r.m_request.reply(open);assert(r.m_endQueue.size()==1);
+ r.m_nextReceipt={};r.pump();assert(r.m_endBusy&&geode::utils::web::WebRequest::lastBody==end&&geode::utils::web::WebRequest::lastUrl.find("/matches/match/events")!=std::string::npos);
+ geode::utils::web::WebResponse endAck;r.m_endRequest.reply(endAck);r.m_nextReceipt={};r.pump();assert(r.m_receiptBusy);
+ geode::utils::web::WebResponse closed;closed.value=closing;closed.value["accepted"]=true;closed.value["ended"]=true;closed.value["progress"]=70.;closed.value["roundBest"]=70.;closed.value["bestAttemptId"]="timeout-close";closed.value["geometryHash"]=std::string(64,'a');closed.value["cleared"]=false;r.m_request.reply(closed);
+ assert(r.m_promotions.size()==1&&r.m_promotions.front().result.get());r.m_promotions.clear();drain(r);assert(r.storage().playback(closing).get());
+ assert(!r.hasPendingClose("timeout-close"));
+ // A retired incomplete frame contributes neither pose nor score. The last
+ // complete frame remains replayable after an authoritative cutoff receipt.
+ auto partial=metadata("scene-retired");partial["roundKey"]="retired-round";r.begin(partial);initial(r);r.accepted("scene-retired",true);frame(r,40);r.nativeFrameEnd();
+ frame(r,90,false);r.finish("ROUND_TIMEOUT",90);r.sceneExited("foreign-attempt","SCENE_EXIT");assert(r.active());r.sceneExited("scene-retired","SCENE_EXIT");assert(!r.active());drain(r);
+ auto proofReceipt=receipt("scene-retired",40);proofReceipt.roundKey="retired-round";proofReceipt.bestAttemptId="scene-retired";assert(r.storage().reconcile(proofReceipt).get());auto preserved=r.storage().best(partial).get();assert(preserved&&number(preserved->records.back(),"progress")==40&&str(preserved->footer,"captureCompleteness")=="PARTIAL_RECOVERED");
  assert(str(r.storage().best(metadata("x")).get()->metadata,"attemptId")=="new-good");
 }
 

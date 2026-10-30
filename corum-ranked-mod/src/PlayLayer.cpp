@@ -1846,7 +1846,7 @@ public:
         if(m_fields->survivalLevel) {
             if(!corum::ranked::resumeRankedPauseBeforeQuit(this))return;
             unschedule(schedule_selector(CorumRankedPlayLayer::survivalFrame));
-            if(!m_fields->autoExitRequested && !m_isPracticeMode)corum::ranked::SurvivalRuntime::get().endAttempt(m_hasCompletedLevel?100.0:rankedProgressPercent(this));
+            if(!m_isPracticeMode)corum::ranked::finishSurvivalReplayForReturn(this,"QUIT");
         }
 
         if (m_fields->rankedLevel && !corum::ranked::resumeRankedPauseBeforeQuit(this)) {
@@ -1898,6 +1898,7 @@ public:
     }
 
     void onExit() {
+        if(m_fields->survivalLevel)corum::ranked::finishSurvivalReplayForReturn(this,"SCENE_EXIT",true);
         unschedule(schedule_selector(CorumRankedPlayLayer::survivalFrame));
         if (m_fields->entryOverlay) {
             m_fields->entryOverlay->dismiss();

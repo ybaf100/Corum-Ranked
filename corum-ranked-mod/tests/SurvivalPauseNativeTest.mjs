@@ -120,7 +120,9 @@ struct SurvivalRuntime{std::string m_spectatorAcceptedAttempt;
  bool surrenderPending()const{return !m_surrenderEventId.empty()&&!m_surrenderAccepted;}
  std::string preparationContext()const{return m_view.roundKey;}std::string matchEndpoint(std::string const&p)const{return p;}
  void observe(matjson::Value const&v){if(v.contains("eliminated"))m_view.ownEliminated=v["eliminated"].asBool().unwrapOr(false);}
- matjson::Value event(std::string const&)const;void endAttempt(double);void enqueue(matjson::Value);void pumpEvents();void discardObsoleteEvents();void surrender();void resetSurrender();void pumpSurrenderReturn();
+ matjson::Value m_attemptOwner,m_attemptMetadata;
+ SurvivalRuntime(){m_attemptOwner=event("ATTEMPT_END");m_attemptOwner["attemptId"]=m_attempt;m_attemptMetadata["matchId"]=m_view.id;m_attemptMetadata["attemptId"]=m_attempt;}
+ matjson::Value event(std::string const&)const;void endAttempt(double,std::string reason="EXIT",std::string expectedAttempt="");void enqueue(matjson::Value);void pumpEvents();void discardObsoleteEvents();void surrender();void resetSurrender();void pumpSurrenderReturn();
 };
 ${['matjson::Value SurvivalRuntime::event(', 'void SurvivalRuntime::enqueue(', 'void SurvivalRuntime::endAttempt(', 'void SurvivalRuntime::pumpEvents()', 'void SurvivalRuntime::discardObsoleteEvents()', 'void SurvivalRuntime::resetSurrender()', 'void SurvivalRuntime::surrender()', 'void SurvivalRuntime::pumpSurrenderReturn()'].map(n=>method(runtime,n)).join('\n')}
 }

@@ -7,6 +7,8 @@ test('production native replay boundary records only consumed P1/P2 commands, bl
  const cpp=`
 #include <matjson.hpp>
 #include "${root}/src/replay/SurvivalReplayPlayback.hpp"
+#include "${root}/src/replay/SurvivalReplayCbfNative.hpp"
+namespace corum::ranked::replay{std::size_t enterNativeInputClock(char const*,double&){return NoClockBoundary;}std::uint64_t nativeInputClockGeneration(){return 0;}void leaveNativeInputClock(std::size_t,double&,std::uint64_t){}}
 #include <algorithm>
 #include <cassert>
 #include <cmath>

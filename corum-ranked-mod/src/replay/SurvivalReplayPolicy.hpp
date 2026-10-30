@@ -25,6 +25,7 @@ struct Receipt {
     int mapGeneration=0,levelId=0,mapVersion=0;
     double progress=0,roundBest=0;
     bool ended=false,cleared=false,accepted=false;
+    std::string bestAttemptId{};
 };
 inline bool improves(double candidate,double previous,bool tiebreak){return score(candidate,tiebreak)>score(previous,tiebreak);}
 // Rewind never reverses triggers; work is spread over render frames.

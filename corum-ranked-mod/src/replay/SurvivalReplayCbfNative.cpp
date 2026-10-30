@@ -14,7 +14,7 @@ namespace corum::ranked::replay {
 namespace {
 struct State {
     PlayLayer* layer=nullptr;Playback* playback=nullptr;
-    bool frame=false,root=false,dispatching=false;int depth=0;
+    bool frame=false,root=false,dispatching=false;int depth=0;std::uint64_t epoch=0;
     Json rootData,data;std::vector<Json> operations;CbfBoundaryCursor cursor;
     std::size_t rootIndex=0,clockIndex=0;
     std::array<CCPoint,2> previousPositions{};
@@ -25,6 +25,9 @@ struct State {
     std::uintptr_t slerpAddress=0;Hook* slerpObserver=nullptr;
 };
 State& state(){static auto* value=new State;return *value;}
+struct InputClockState {PlayLayer* owner=nullptr;Playback* replay=nullptr;ReplayInputClock clock;bool active=false;std::uint64_t generation=0;std::size_t frame=NoClockBoundary;};
+InputClockState& inputClock(){static auto* value=new InputClockState;return *value;}
+void checkInputClock(){auto& s=inputClock();if(s.replay&&!s.clock.error().empty())s.replay->reject(s.clock.error(),nullptr,s.clock.observations(),"$.inputClock");}
 Mod* cbfMod(){for(auto* mod:Loader::get()->getAllMods())if(mod->isLoaded()&&mod->getID()=="syzzi.click_between_frames")return mod;return nullptr;}
 int playerIndex(PlayerObject* player){return state().layer&&player==state().layer->m_player2?1:0;}
 PlayerObject* playerAt(int index){return !state().layer?nullptr:index?state().layer->m_player2:state().layer->m_player1;}
@@ -46,10 +49,10 @@ void clearCollisionLog(PlayerObject* p){
 }
 void checkCursor(){auto& s=state();if(!s.cursor.error().empty())fail(s.cursor.error(),s.cursor.expected(),s.cursor.actual());}
 struct Operation {
-    bool engaged=false,external=false,clear=false;std::size_t index=0;PlayerObject* player=nullptr;PlayerObject* previousPlayer=nullptr;
+    bool engaged=false,external=false,clear=false;std::size_t index=0;std::uint64_t epoch=0;PlayerObject* player=nullptr;PlayerObject* previousPlayer=nullptr;
     Operation(std::string name,PlayerObject* p,float dt,Json fields=Json::object()):player(p){
         auto& s=state();if(!active()||!s.root||(name!="SLERP"&&(!p||(p!=s.layer->m_player1&&p!=s.layer->m_player2))))return;
-        engaged=true;external=s.depth==0;
+        engaged=true;epoch=s.epoch;external=s.depth==0;
         fields["op"]=name;fields["player"]=playerIndex(p);fields["external"]=external;fields["before"]=motion(p);
         fields["nativeStep"]=s.layer->m_currentStep;fields["nativeTick"]=s.playback?s.playback->recordedTick():static_cast<std::int64_t>(Recorder::get().tick());fields["levelTime"]=static_cast<double>(s.layer->m_gameState.m_levelTime);
         auto rootDelta=number(s.rootData,"dt");fields["fraction"]=rootDelta>0?std::clamp(static_cast<double>(std::max(s.simulated[0],s.simulated[1]))/rootDelta,0.,1.):0.;
@@ -66,7 +69,7 @@ struct Operation {
     }
     void finish(Json result=nullptr){
         if(!engaged)return;
-        auto& s=state();--s.depth;
+        auto& s=state();if(s.epoch!=epoch){engaged=false;return;}--s.depth;
         if(s.playback){s.cursor.leave(index,motion(player),result);checkCursor();if(clear&&s.fault.empty())clearCollisionLog(player);}
         else {s.operations[index]["after"]=motion(player);if(!result.isNull())s.operations[index]["result"]=std::move(result);}
         s.nativePlayer=previousPlayer;engaged=false;
@@ -101,11 +104,11 @@ void executeExternal(Json const& op){
     else fail("CBF_UNEXPECTED_EXTERNAL_OPERATION",op);
 }
 struct Root {
-    bool captured=false,handled=false;
+    bool captured=false,handled=false;std::uint64_t epoch=0;
     Root(PlayerObject* p,char const* method,float dt){
         auto& s=state();if(s.frame&&s.playback&&s.layer==PlayLayer::get()&&!s.fault.empty()){handled=true;return;}
         if(!active()||s.root||!p||(p!=s.layer->m_player1&&p!=s.layer->m_player2))return;
-        captured=true;s.root=true;s.depth=0;s.updates={};s.simulated={};s.rootData=Json::object();
+        captured=true;epoch=s.epoch;s.root=true;s.depth=0;s.updates={};s.simulated={};s.rootData=Json::object();
         s.rootData["method"]=method;s.rootData["player"]=playerIndex(p);s.rootData["dt"]=static_cast<double>(dt);s.rootData["before"]=motion(p);s.rootData["lastPositionBefore"]=point(p->m_lastPosition);
         if(std::string_view(method)=="UPDATE"&&playerIndex(p)==0){
             s.previousPositions={playerAt(0)->getPosition(),playerAt(1)->getPosition()};s.startingGround={playerAt(0)->m_isOnGround,playerAt(1)->m_isOnGround};
@@ -120,7 +123,7 @@ struct Root {
         while(s.fault.empty()){
             auto const* next=s.cursor.next();if(!next)break;
             if(!(*next)["external"].asBool().unwrap()){fail("CBF_MISSING_PARENT_NATIVE_CALL",*next);break;}
-            auto index=s.cursor.index();executeExternal(*next);
+            auto index=s.cursor.index();executeExternal(*next);if(s.epoch!=epoch)return;
             if(index==s.cursor.index()&&s.fault.empty()){fail("CBF_NATIVE_OBSERVER_NOT_CALLED");break;}
         }
         s.cursor.finish();checkCursor();
@@ -131,7 +134,7 @@ struct Root {
     }
     ~Root(){
         if(!captured)return;
-        auto& s=state();
+        auto& s=state();if(s.epoch!=epoch)return;
         auto p=playerAt(static_cast<int>(integer(s.rootData,"player")));
         if(!s.playback){s.rootData["after"]=motion(p);s.rootData["lastPositionAfter"]=point(p->m_lastPosition);s.rootData["ops"]=Json::array();for(auto& op:s.operations)s.rootData["ops"].push(std::move(op));}
         if(!s.playback&&cbfText(s.rootData,"method")=="UPDATE"&&integer(s.rootData,"player")==0){
@@ -220,6 +223,20 @@ Json cbfNativeCapability(){
 #endif
     result["binarySha256"]=binaryHash;result["verified"]=complete&&hashValid(binaryHash);result["leaseHeld"]=cbfReplayHooksHeld();return result;
 }
+void beginNativeInputClock(PlayLayer* owner,Playback* replay){
+    auto& s=inputClock();++s.generation;s.owner=owner;s.replay=replay;s.active=true;
+    if(replay)s.clock.replay(replay->current()->clock,replay->frameEntryClock(),replay->frameExitClock());else s.clock.source();
+    s.frame=s.clock.enter("FRAME",owner->m_timestamp);checkInputClock();
+}
+std::size_t enterNativeInputClock(char const* phase,double& timestamp){
+    auto& s=inputClock();if(!s.active||s.owner!=PlayLayer::get())return NoClockBoundary;
+    auto index=s.clock.enter(phase,timestamp,s.replay?s.replay->nextInputClock():std::numeric_limits<double>::quiet_NaN());checkInputClock();return index;
+}
+std::uint64_t nativeInputClockGeneration(){return inputClock().generation;}
+void leaveNativeInputClock(std::size_t index,double& timestamp,std::uint64_t generation){auto& s=inputClock();if(!s.active||(generation&&generation!=s.generation))return;s.clock.leave(index,timestamp);checkInputClock();}
+Json finishNativeInputClock(){auto& s=inputClock();if(!s.active||!s.owner)return nullptr;s.clock.leave(s.frame,s.owner->m_timestamp);auto result=s.clock.finish();checkInputClock();s.active=false;return result;}
+Json nativeInputClockDiagnostics(){return inputClock().clock.observations();}
+std::string nativeInputClockError(){return inputClock().clock.error();}
 std::string acquireCbfReplayHooks(Json const& environment){
     auto& s=state();if(!environment["cbf"]["loaded"].asBool().unwrapOr(false)||environment["cbf"]["disabled"].asBool().unwrapOr(true))return {};
     if(!s.leased.empty())return "CBF_REPLAY_LEASE_ALREADY_HELD";
@@ -234,15 +251,19 @@ std::string acquireCbfReplayHooks(Json const& environment){
 void releaseCbfReplayHooks(){
     auto& s=state();std::vector<Hook*> failed;
     for(auto it=s.leased.rbegin();it!=s.leased.rend();++it)if(auto result=(*it)->enable();!result){failed.push_back(*it);log::error("[SurvivalReplayCBF] CBF hook restoration failed: {}",(*it)->getDisplayName());}
-    s.leased=std::move(failed);s.frame=s.root=false;s.layer=nullptr;s.playback=nullptr;s.nativePlayer=s.shipPlayer=nullptr;s.depth=0;
+    s.leased=std::move(failed);++s.epoch;s.frame=s.root=false;s.layer=nullptr;s.playback=nullptr;s.nativePlayer=s.shipPlayer=nullptr;s.depth=0;
 }
 bool cbfReplayHooksHeld(){return !state().leased.empty();}
 void beginCbfNativeFrame(PlayLayer* layer,Playback* replay){
-    auto& s=state();s.layer=layer;s.playback=replay;s.frame=true;s.root=false;s.depth=0;s.nativePlayer=s.shipPlayer=nullptr;s.rootIndex=s.clockIndex=0;s.totalUpdates={};s.fault.clear();s.operations.clear();
+    auto& s=state();++s.epoch;s.layer=layer;s.playback=replay;s.frame=true;s.root=false;s.depth=0;s.nativePlayer=s.shipPlayer=nullptr;s.rootIndex=s.clockIndex=0;s.totalUpdates={};s.fault.clear();s.operations.clear();
     if(replay){s.data=replay->current()->cbf;if(!cbfFrameValid(s.data))fail("CBF_FRAME_TAPE_INVALID");}
     else{s.data=Json::object();s.data["kind"]="cbf";s.data["schema"]=CbfBoundarySchema;s.data["roots"]=Json::array();s.data["clocks"]=Json::array();}
 }
-Json finishCbfNativeFrame(){auto& s=state();if(s.playback){if(s.rootIndex!=s.data["roots"].size()||s.clockIndex!=s.data["clocks"].size())fail("CBF_UNCONSUMED_FRAME_BOUNDARIES");}s.frame=s.root=false;return s.playback?s.data:cbfCompactFrame(s.data);}
+void retireNativeReplayFrame(PlayLayer* owner){
+    auto& c=inputClock();if(c.owner==owner){++c.generation;c.active=false;c.owner=nullptr;c.replay=nullptr;}
+    auto& s=state();if(s.layer==owner){++s.epoch;s.frame=s.root=false;s.layer=nullptr;s.playback=nullptr;s.nativePlayer=s.shipPlayer=nullptr;s.depth=0;}
+}
+Json finishCbfNativeFrame(){auto& s=state();if(!s.frame)return nullptr;if(s.playback){if(s.rootIndex!=s.data["roots"].size()||s.clockIndex!=s.data["clocks"].size())fail("CBF_UNCONSUMED_FRAME_BOUNDARIES");}s.frame=s.root=false;return s.playback?s.data:cbfCompactFrame(s.data);}
 std::string cbfNativeFrameError(){return state().fault;}
 Json cbfNativeUpdateCounts(){auto v=Json::array();for(auto n:state().totalUpdates)v.push(static_cast<std::int64_t>(n));return v;}
 Json captureCbfInitial(PlayLayer* layer){
@@ -298,7 +319,7 @@ class $modify(CorumCbfReplayNativeWorld,GJBaseGameLayer){
     int checkCollisions(PlayerObject* p,float dt,bool ignoreDamage){corum::ranked::replay::Json fields;fields["ignoreDamage"]=ignoreDamage;corum::ranked::replay::Operation operation("COLLISION",p,dt,std::move(fields));return GJBaseGameLayer::checkCollisions(p,dt,ignoreDamage);}
     void handleButton(bool down,int button,bool player1){corum::ranked::replay::Json fields;fields["down"]=down;fields["button"]=button;fields["timestamp"]=m_timestamp;corum::ranked::replay::Operation operation("INPUT",player1?m_player1:m_player2,0,std::move(fields));GJBaseGameLayer::handleButton(down,button,player1);}
 #if !defined(GEODE_IS_MACOS)
-    double getModifiedDelta(float dt){using namespace corum::ranked::replay;auto result=GJBaseGameLayer::getModifiedDelta(dt);auto& s=state();if(!active())return result;
+    double getModifiedDelta(float dt){using namespace corum::ranked::replay;NativeInputClockScope clockScope("DELTA",m_timestamp);auto result=GJBaseGameLayer::getModifiedDelta(dt);auto& s=state();if(!active())return result;
         Json clock;clock["in"]=static_cast<double>(dt);clock["out"]=result;clock["queuedAfter"]=encodeReplayButtons(m_queuedButtons);
         if(s.playback){result=static_cast<float>(result);clock["out"]=result;auto clocks=s.data["clocks"].asArray().unwrap();if(s.clockIndex>=clocks.size()){fail("CBF_EXTRA_CLOCK");return result;}auto expected=clocks[s.clockIndex++];if(expected["in"]!=clock["in"]||expected["out"]!=clock["out"]){fail("CBF_NATIVE_CLOCK",expected,clock);return result;}
             // Explicit source CBF queue handoff, not inferred consumption.

@@ -158,7 +158,8 @@ test('observer exit and cleared replay retain exact scene/context/session gates 
 #include <optional>
 #include <string>
 #include <utility>
-struct Value{std::string text;Value&operator=(std::string s){text=s;return *this;}Value&operator=(double){return *this;}Value&operator[](char const*){return *this;}struct Read{std::string text;std::string unwrapOr(std::string s)const{return text.empty()?s:text;}};Read asString()const{return {text};}};
+struct Value{std::string text;Value()=default;Value&operator=(bool){return *this;}Value&operator=(std::string s){text=s;return *this;}Value&operator=(double){return *this;}Value&operator[](char const*){return *this;}struct Read{std::string text;std::string unwrapOr(std::string s)const{return text.empty()?s:text;}};Read asString()const{return {text};}struct IntRead{int unwrapOr(int v)const{return v;}};IntRead asInt()const{return {};}};
+namespace matjson{using Value=::Value;}
 struct GJGameLevel{int id=40000000;};struct CCScene{};struct CCDirector{CCScene*scene=nullptr;static auto*sharedDirector(){static CCDirector d;return &d;}CCScene*getRunningScene(){return scene;}};
 template<class T>struct Ref{T*p=nullptr;Ref()=default;Ref(std::nullptr_t){}T*data()const{return p;}Ref&operator=(std::nullptr_t){p=nullptr;return *this;}};
 template<class T>struct WeakRef{T*p=nullptr;WeakRef(T*p):p(p){}};
@@ -169,14 +170,14 @@ struct RankedRuntime{std::string token="session";static auto&get(){static Ranked
 enum class SurvivalOutcomeChoice{PersonalResult,Undecided};
 std::string preparationContextText(LevelPreparationContext const&){return "exact-context";}
 struct SurvivalRuntime{
- struct View{std::string id="match",roundKey="r1",state="PLAYING";int mapGeneration=1;bool ownEliminated=false,online=false,ownAssetsReady=true,ownEntered=true,ownAbsent=false;struct Map{int levelId=40000000;}map;Value completedRound;}m_view;
+ struct View{std::string id="match",roundKey="r1",state="PLAYING";int mapGeneration=1;std::string error;bool ownEliminated=false,online=false,ownAssetsReady=true,ownEntered=true,ownAbsent=false;struct Map{int levelId=40000000;}map;Value completedRound;}m_view;
  LevelPreparationContext context{"match",40000000,1,0,false,0,0},m_prepared=context;std::string m_session="session",m_attempt="official-old",m_attemptContext="exact-context";double m_attemptBest=38;bool cleared=true,watch=false,m_freePlayNativeQuitFinished=false;long remaining=180000;int returns=0,events=0;
  SurvivalFreePlayState m_freePlay;std::optional<WeakRef<CCScene>>m_freePlayOrigin,m_freePlayQuitScene;Ref<GJGameLevel>m_freePlayQuitLevel;
  bool active()const{return true;}bool freePlaying()const{return m_freePlay.active;}bool normalRoundCleared()const{return cleared;}bool officialRoundCleared()const{return cleared;}bool surrenderPending()const{return false;}bool observing()const{return watch;}long remainingMs()const{return remaining;}
  LevelPreparationContext preparationContext()const{return context;}bool validateNative(GJGameLevel*l)const{return l&&l->id==context.levelId;}
  void chooseOutcome(SurvivalOutcomeChoice){watch=false;}void pumpFreePlayReturn(){++returns;}
- Value event(std::string){return {};}void enqueue(Value){++events;}
- bool canFreePlay()const;bool canReplayCleared()const;bool armClearedReplay(GJGameLevel*,CCScene*);bool canPlay()const;void leaveObserver();void endAttempt(double);
+ Value m_attemptOwner,m_attemptMetadata;Value event(std::string){return {};}void enqueue(Value){++events;}
+ bool canFreePlay()const;bool canReplayCleared()const;bool armClearedReplay(GJGameLevel*,CCScene*);bool canPlay()const;void leaveObserver();void endAttempt(double,std::string reason="EXIT",std::string expectedAttempt="");
 };
 ${['bool SurvivalRuntime::canFreePlay()', 'bool SurvivalRuntime::canReplayCleared()', 'bool SurvivalRuntime::armClearedReplay(', 'bool SurvivalRuntime::canPlay()', 'void SurvivalRuntime::leaveObserver()', 'void SurvivalRuntime::endAttempt('].map(n=>method(src,n)).join('\n')}
 }

@@ -1,3 +1,12 @@
+# v0.5.0-beta.120
+
+- Capture and replay the Native input-clock assignments at frame, delta, step and dispatch boundaries without changing source gameplay or copying replay poses.
+- Report the actual failing physics/pose predicate and a bounded clock trace; preserve Native DESYNC, RNG and input-consumption checks.
+- Reserve official End ownership at Start and persist stable End events across timeout, round/session change and scene exit; retry against the original context and owner receipt.
+- Commit complete Native frames only. Preserve earlier complete frames when a scene retires mid-frame and retain immutable full captures while bounding playback to the exact official cutoff prefix.
+- Share History/Receipt best Attempt identity, including ties and real Clear precedence. Preserve existing records, scores, LP/AP, badges and Death Match UI.
+- Actual GD/device CBF playback and Native scene teardown remain unverified; automated doubles and packaged builds do not establish physical-device success.
+
 # v0.5.0-beta.119
 
 - Add a versioned CBF 1.5.0 Native-boundary recording/replay driver: actual applied input, substep update/collision/rotation order, Native clock and Windows ship timing.
