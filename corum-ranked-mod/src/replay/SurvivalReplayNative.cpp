@@ -128,7 +128,7 @@ public:
         m_gameState.m_timeWarp=static_cast<float>(corum::ranked::replay::number(initial,"timeWarp"));m_gameState.m_isDualMode=initial["dual"].asBool().unwrap();
         m_clickBetweenSteps=initial["clickBetweenSteps"].asBool().unwrap();m_clickOnSteps=initial["clickOnSteps"].asBool().unwrap();m_isBetweenSteps=initial["isBetweenSteps"].asBool().unwrap();
         corum::ranked::replay::applyReplayPlayerState(m_player1,initial["player1"]);corum::ranked::replay::applyReplayPlayerState(m_player2,initial["player2"]);
-        m_queuedButtons.clear();for(auto const& value:initial["queued"].asArray().unwrap())m_queuedButtons.push_back(corum::ranked::replay::decodeReplayButton<PlayerButtonCommand>(value));
+        auto const queued=initial["queued"].asArray().unwrap();m_queuedButtons.clear();for(auto const& value:queued)m_queuedButtons.push_back(corum::ranked::replay::decodeReplayButton<PlayerButtonCommand>(value));
         m_fields->desyncReported=false;saveReplayCamera();
     }
     void resetReplayTrace(){m_fields->trace=Json::array();m_fields->playerUpdates={};}
@@ -183,7 +183,7 @@ public:
             if(replay->inputV2()){
                 if(!frame->preInputs.isArray()){replay->reject("PRE_FRAME_INPUTS_UNAVAILABLE");break;}
                 m_fields->replayAdvancing=true;m_fields->preInput=true;
-                for(auto const& input:frame->preInputs.asArray().unwrap()){
+                auto const preInputs=frame->preInputs.asArray().unwrap();for(auto const& input:preInputs){
                     auto* player=input["player2"].asBool().unwrap()?m_player2:m_player1;
                     if(replayMotion(player)!=input["before"]||m_currentStep!=corum::ranked::replay::integer(input,"nativeStep")||m_timestamp!=corum::ranked::replay::number(input,"timestamp")){replay->reject("PRE_FRAME_INPUT_STATE",input,physicsEvidence());break;}
                     handleButton(input["down"].asBool().unwrap(),static_cast<int>(corum::ranked::replay::integer(input,"button")),!input["player2"].asBool().unwrap());

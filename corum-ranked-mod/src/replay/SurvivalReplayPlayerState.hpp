@@ -93,6 +93,6 @@ template<class Player> void applyReplayPlayerState(Player* player,PhysicsJson co
 #define CORUM_APPLY_POINT(type,name) {auto p=data[#name].asArray().unwrap();player->name={static_cast<float>(p[0].asDouble().unwrap()),static_cast<float>(p[1].asDouble().unwrap())};}
     CORUM_REPLAY_PHYSICS_POINTS(CORUM_APPLY_POINT)
 #undef CORUM_APPLY_POINT
-    player->m_holdingButtons.clear();for(auto const& h:data["holdingButtons"].asArray().unwrap()){auto pair=h.asArray().unwrap();player->m_holdingButtons[static_cast<int>(pair[0].asInt().unwrap())]=pair[1].asBool().unwrap();}
+    auto const holds=data["holdingButtons"].asArray().unwrap();player->m_holdingButtons.clear();for(auto const& h:holds){auto pair=h.asArray().unwrap();player->m_holdingButtons[static_cast<int>(pair[0].asInt().unwrap())]=pair[1].asBool().unwrap();}
 }
 }
