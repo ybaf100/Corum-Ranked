@@ -1898,7 +1898,7 @@ public:
     }
 
     void onExit() {
-        if(m_fields->survivalLevel)corum::ranked::finishSurvivalReplayForReturn(this,"SCENE_EXIT",true);
+        corum::ranked::finishSurvivalReplayForReturn(this,"SCENE_EXIT",true);
         unschedule(schedule_selector(CorumRankedPlayLayer::survivalFrame));
         if (m_fields->entryOverlay) {
             m_fields->entryOverlay->dismiss();

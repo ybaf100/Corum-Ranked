@@ -3,6 +3,8 @@
 #include <cmath>
 #include <limits>
 #include <string>
+#include <string_view>
+#include <cstdint>
 #include <vector>
 namespace corum::ranked::replay {
 // m_timestamp is the Native input clock, distinct from levelTime / dt / tick.

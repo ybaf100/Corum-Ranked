@@ -2,6 +2,7 @@
 #include <matjson.hpp>
 #include <string>
 #include <cstdint>
+#include <cstddef>
 class PlayLayer;
 namespace corum::ranked::replay {
 class Playback;

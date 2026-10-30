@@ -370,12 +370,13 @@ void survivalReplayNativeSnap(PlayerObject* player,bool spider,float fromX,float
 }
 void finishSurvivalReplayForReturn(PlayLayer* play,std::string reason,bool exited){
     if(!play||(!exited&&play!=PlayLayer::get()))return;
+    if(exited)replay::retireNativeReplayFrame(play);
     auto* owner=static_cast<CorumSurvivalReplayLayer*>(play);
     if(owner->m_fields->replayOwned||owner->m_fields->liveWorldOwned||owner->m_fields->captureAttempt.empty())return;
     auto id=owner->m_fields->captureAttempt;owner->m_fields->retiring=true;
     if(reason.empty())reason=SurvivalRuntime::get().surrenderPending()?"FORFEIT":SurvivalRuntime::get().roundRemainingMs().value_or(0)==0?"ROUND_TIMEOUT":"ROUND_TRANSITION";
     SurvivalRuntime::get().endAttempt(replayPercent(play),reason,id);
     auto& recorder=replay::Recorder::get();if(recorder.currentAttemptId()==id)recorder.finishFromLast(reason);
-    if(exited){recorder.sceneExited(id,std::move(reason));replay::retireNativeReplayFrame(play);}
+    if(exited)recorder.sceneExited(id,std::move(reason));
 }
 }

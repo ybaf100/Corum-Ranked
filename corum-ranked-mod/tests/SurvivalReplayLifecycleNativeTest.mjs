@@ -57,7 +57,7 @@ int main(){using namespace corum::ranked;auto&r=SurvivalRuntime::get();auto&rec=
  // capture, and cannot end or finalize the replacement scene's Attempt.
  r.m_attempt="new-a";r.m_attemptOwner["attemptId"]="new-a";rec.id="new-a";newScene.fields.captureAttempt="new-a";PlayLayer::current=&newScene;
  auto before=rec.finishes;finishSurvivalReplayForReturn(&oldScene,"SCENE_EXIT",true);assert(r.m_attempt=="new-a"&&rec.id=="new-a"&&rec.finishes==before&&rec.ended==1&&replay::retired==&oldScene);
- newScene.fields.replayOwned=true;finishSurvivalReplayForReturn(&newScene,"SCENE_EXIT",true);assert(r.m_attempt=="new-a"&&rec.ended==1);newScene.fields.replayOwned=false;newScene.fields.liveWorldOwned=true;finishSurvivalReplayForReturn(&newScene,"SCENE_EXIT",true);assert(rec.ended==1);
+ newScene.fields.replayOwned=true;finishSurvivalReplayForReturn(&newScene,"SCENE_EXIT",true);assert(r.m_attempt=="new-a"&&rec.ended==1&&replay::retired==&newScene);newScene.fields.replayOwned=false;newScene.fields.liveWorldOwned=true;finishSurvivalReplayForReturn(&newScene,"SCENE_EXIT",true);assert(rec.ended==1);
  r.m_attempt.clear();r.m_view.roundKey="new";r.m_enteredContext="new";r.m_view.activeAttemptId="server-orphan";r.m_view.activeAttemptProgress=22;rec.recovery=true;rec.pending=false;r.closeRecoveredAttempt();assert(r.events.empty());
  rec.recovery=false;rec.pending=true;r.closeRecoveredAttempt();assert(r.events.empty());rec.pending=false;r.closeRecoveredAttempt();r.closeRecoveredAttempt();assert(r.events.size()==1&&r.events[0]["attemptId"].asString().unwrap()=="server-orphan"&&r.events[0]["progress"].asDouble().unwrap()==22);
 }
