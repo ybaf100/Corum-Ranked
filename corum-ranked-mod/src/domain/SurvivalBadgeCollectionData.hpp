@@ -9,7 +9,7 @@ inline std::vector<matjson::Value> survivalBadgeCollectionRows(matjson::Value co
 }
 inline std::int64_t survivalBadgeCollectionTotal(matjson::Value const& counts){
     std::int64_t total=0;
-    for(auto grade:SurvivalBadgeGrades)total+=counts[std::string(grade)].asInt().unwrapOr(0);
+    for(auto grade:SurvivalBadgeGrades)if(grade!="ELIMINATED")total+=counts[std::string(grade)].asInt().unwrapOr(0);
     return total;
 }
 inline bool survivalBadgeCountsValid(matjson::Value const& counts){

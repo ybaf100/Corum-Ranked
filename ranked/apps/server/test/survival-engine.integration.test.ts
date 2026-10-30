@@ -76,6 +76,35 @@ async function play(match:SurvivalMatch,scores?:number[]){
   now=survivalCurrentRound(match).endsAt!;return engine.tick(match.id);
 }
 describe("durable Survival M3 engine",()=>{
+  it("backfills missing FINAL/DM badges beside unchanged legacy rows exactly once per source round",async()=>{
+    let match=await engine.create("badge-repeated-dm",entrants.slice(0,3));
+    match=await play(match,[95,95,80]);expect(match.state).toBe("ROUND_RESULT");
+    match=await engine.tick(match.id);match=await play(match,[95,95]);expect(match.state).toBe("ROUND_RESULT");
+    match=await engine.tick(match.id);match=await play(match,[99,90]);expect(match.state).toBe("FINAL_RESULT");
+    const last=survivalCurrentRound(match).key;
+    const legacy=(match.roundBadges??[]).filter(b=>b.participantId==="p02"||b.sourceRoundKey===last).map(b=>({...b,roundKey:"FINAL",roundLabel:"FINAL"}));
+    expect(legacy).toHaveLength(3);
+    // This isolated PGlite fixture reproduces the beta.115-117 physical ledger.
+    await database.query("DELETE FROM sur_round_badges WHERE match_id=$1 AND source_round_key<>$2 AND participant_id<>'p02'",[match.id,last]);
+    await database.query("UPDATE sur_round_badges SET logical_round_key='FINAL',round_label='FINAL' WHERE match_id=$1",[match.id]);
+    await database.query("UPDATE sur_matches SET snapshot=jsonb_set(snapshot,'{roundBadges}',$2::jsonb) WHERE id=$1",[match.id,JSON.stringify(legacy)]);
+    const original=(await database.query("SELECT * FROM sur_round_badges ORDER BY participant_id")).rows;
+    const profiles=(await database.query("SELECT * FROM sur_profiles ORDER BY player_id")).rows;
+    const rewards=(await database.query("SELECT * FROM sur_lp_ledger ORDER BY id")).rows;
+    const attempts=(await database.query("SELECT * FROM sur_tiebreak_attempts ORDER BY round_key,participant_id,sequence")).rows;
+    const migration=await readFile(fileURLToPath(new URL("../../../migrations/0036_survival_badge_source_round.sql",import.meta.url)),"utf8");
+    await pg.exec(migration);await pg.exec(migration);
+    const service=new SurvivalBadgesService(database);await service.onApplicationBootstrap();await service.onApplicationBootstrap();
+    const after=(await database.query<{logical_round_key:string;participant_id:string;source_round_key:string}>("SELECT * FROM sur_round_badges ORDER BY participant_id,ordinal")).rows;
+    expect(after).toHaveLength(7);
+    expect(after.filter(b=>b.logical_round_key==="FINAL")).toEqual(original);
+    expect(new Set(after.map(b=>`${b.participant_id}:${b.source_round_key}`)).size).toBe(7);
+    expect((await database.query("SELECT * FROM sur_profiles ORDER BY player_id")).rows).toEqual(profiles);
+    expect((await database.query("SELECT * FROM sur_lp_ledger ORDER BY id")).rows).toEqual(rewards);
+    expect((await database.query("SELECT * FROM sur_tiebreak_attempts ORDER BY round_key,participant_id,sequence")).rows).toEqual(attempts);
+    const player=entrants[0]!;expect(player.kind).toBe("HUMAN");
+    const counts=await service.collection(player.kind==="HUMAN"?player.playerId:"");expect(counts.totals.MYTHIC).toBe(3);expect(counts.totals.ELIMINATED).toBe(0);
+  });
   it("persists immutable official badges and idempotent backfill without touching rewards or records",async()=>{
     let match=await engine.create("badge-ledger",entrants);
     while(match.state!=="FINAL_RESULT"){match=await play(match);if(match.state==="ROUND_RESULT")match=await engine.tick(match.id);}

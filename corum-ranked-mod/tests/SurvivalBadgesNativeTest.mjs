@@ -35,6 +35,13 @@ int main(){
   }
  }
  assert(survivalBadgeMotion(0,.2).opacity>survivalBadgeMotion(1,.2).opacity);
+ for(float width:{320.f,426.67f,568.f,1024.f})for(float height:{240.f,320.f,600.f})for(std::size_t count:{0u,1u,5u,6u,7u,20u,65u}){
+  std::size_t visited=0;auto first=survivalBadgePage(count,0,width,height);
+  for(std::size_t p=0;p<first.pages;++p){auto page=survivalBadgePage(count,p,width,height);assert(page.begin==visited&&page.page==p&&page.count<=6);visited+=page.count;
+   for(std::size_t i=0;i<page.count;++i){auto lift=page.pages>1?30.f:0.f;auto a=survivalBadgeCardLayout(width,height-lift,page.count,i);a.y+=lift;assert(a.width==a.height&&a.width>=48);assert(a.y-a.height/2>=58+lift&&a.y+a.height/2<=height-60);}
+  }
+  assert(visited==count);assert(survivalBadgePage(count,9999,width,height).page==first.pages-1);
+ }
 }`;
  const dir=mkdtempSync(join(tmpdir(),'survival-badges-'));try{writeFileSync(join(dir,'test.cpp'),cpp);execFileSync('g++',['-std=c++23','-Wall','-Wextra','-Wpedantic','-Werror','-I',join(root,'src'),join(dir,'test.cpp'),'-o',join(dir,'test')],{stdio:'pipe'});execFileSync(join(dir,'test'),[],{stdio:'pipe'});}catch(e){throw new Error(e.stderr?.toString()||e.message);}finally{rmSync(dir,{recursive:true,force:true});}
 });

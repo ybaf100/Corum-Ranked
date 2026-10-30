@@ -2522,5 +2522,9 @@
   "badge-difficulty-EXTREME_DEMON": {
     "en": "Extreme Demon",
     "ko": "익스트림 데몬"
+  },
+  "replay-physics-unsupported": {
+    "en": "Replay capture unavailable for this physics environment",
+    "ko": "현재 물리 환경에서는 리플레이를 기록할 수 없습니다"
   }
 }

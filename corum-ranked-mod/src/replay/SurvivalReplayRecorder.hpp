@@ -11,6 +11,9 @@ public:
     void accepted(std::string const& attempt,bool accepted);
     void add(Json record);
     void finish(std::string reason,double progress);
+    void unsupported(std::string reason);
+    void nativeInput(Json value);
+    Json takePreInputs(){auto values=std::move(m_preInputs);m_preInputs=Json::array();return values;}
     void pump();
     void finishFromLast(std::string reason){finish(std::move(reason),m_bestProgress);}
     bool active()const{return !m_current.empty();}
@@ -43,6 +46,7 @@ private:
     double m_elapsed=0,m_bestProgress=0;
     bool m_receiptBusy=false,m_nativeFrame=false;
     std::optional<std::pair<std::string,double>> m_terminal;
+    Json m_preInputs=Json::array();
     std::chrono::steady_clock::time_point m_nextReceipt{},m_flushAt{};
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_request;
     void flush(Capture&);

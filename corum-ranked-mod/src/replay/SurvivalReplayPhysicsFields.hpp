@@ -1,0 +1,131 @@
+#pragma once
+#include <matjson.hpp>
+#include <array>
+#include <cmath>
+#include <cstdint>
+#include <limits>
+#include <string>
+#include <type_traits>
+#include <utility>
+
+// Public GD 2.2081 binding fields, independently serialized by name and type.
+// No native memory dumps, platform offsets or third-party replay code.
+#if defined(GEODE_IS_ANDROID) || defined(GEODE_IS_IOS)
+#define CORUM_REPLAY_PHYSICS_PLATFORM(X) X(bool,m_collidingBetweenSteps)
+#else
+#define CORUM_REPLAY_PHYSICS_PLATFORM(X)
+#endif
+#define CORUM_REPLAY_PHYSICS_SCALARS(X) \
+    X(double,m_yVelocity) \
+    X(double,m_yVelocityBeforeSlope) \
+    X(double,m_gravity) \
+    X(float,m_gravityMod) \
+    X(double,m_fallSpeed) \
+    X(float,m_slopeVelocity) \
+    X(double,m_slopeStartTime) \
+    X(double,m_slopeEndTime) \
+    X(double,m_currentSlopeYVelocity) \
+    X(double,m_slopeRotation) \
+    X(float,m_slopeAngle) \
+    X(float,m_slopeAngleRadians) \
+    X(double,m_groundYVelocity) \
+    X(double,m_speedMultiplier) \
+    X(float,m_playerSpeed) \
+    X(float,m_playerSpeedAC) \
+    X(float,m_vehicleSize) \
+    X(double,m_dashX) \
+    X(double,m_dashY) \
+    X(double,m_dashAngle) \
+    X(double,m_dashStartTime) \
+    X(double,m_totalTime) \
+    X(double,m_gameModeChangedTime) \
+    X(double,m_lastJumpTime) \
+    X(double,m_lastLandTime) \
+    X(double,m_lastFlipTime) \
+    X(double,m_lastSpiderFlipTime) \
+    X(float,m_lastMovedTime) \
+    X(double,m_yStart) \
+    X(float,m_rotationSpeed) \
+    X(float,m_rotateSpeed) \
+    X(double,m_platformerXVelocity) \
+    X(double,m_maybeReverseSpeed) \
+    X(double,m_maybeReverseAcceleration) \
+    X(double,m_physDeltaRelated) \
+    X(int,m_stateOnGround) \
+    X(unsigned char,m_stateJumpBuffered) \
+    X(int,m_stateNoAutoJump) \
+    X(int,m_stateDartSlide) \
+    X(int,m_stateFlipGravity) \
+    X(int,m_stateForce) \
+    X(int,m_stateHitHead) \
+    X(int,m_stateScale) \
+    X(int,m_stateBoostX) \
+    X(int,m_stateBoostY) \
+    X(int,m_reverseRelated) \
+    X(int,m_lastCollisionBottom) \
+    X(int,m_lastCollisionTop) \
+    X(int,m_lastCollisionLeft) \
+    X(int,m_lastCollisionRight) \
+    X(int,m_collidingWithSlopeId) \
+    X(bool,m_isShip) \
+    X(bool,m_isBall) \
+    X(bool,m_isBird) \
+    X(bool,m_isDart) \
+    X(bool,m_isRobot) \
+    X(bool,m_isSpider) \
+    X(bool,m_isSwing) \
+    X(bool,m_isSideways) \
+    X(bool,m_isPlatformer) \
+    X(bool,m_isUpsideDown) \
+    X(bool,m_isDead) \
+    X(bool,m_isOnGround) \
+    X(bool,m_isOnGround2) \
+    X(bool,m_isOnGround3) \
+    X(bool,m_isOnGround4) \
+    X(bool,m_isGoingLeft) \
+    X(bool,m_isDashing) \
+    X(bool,m_isOnSlope) \
+    X(bool,m_wasOnSlope) \
+    X(bool,m_jumpBuffered) \
+    X(bool,m_wasJumpBuffered) \
+    X(bool,m_wasRobotJump) \
+    X(bool,m_holdingLeft) \
+    X(bool,m_holdingRight) \
+    X(bool,m_leftPressedFirst) \
+    X(bool,m_inputsLocked) \
+    X(bool,m_controlsDisabled) \
+    X(bool,m_isLocked) \
+    X(bool,m_isMoving) \
+    X(bool,m_platformerMovingLeft) \
+    X(bool,m_platformerMovingRight) \
+    X(bool,m_isSliding) \
+    X(bool,m_isSlidingRight) \
+    X(bool,m_isOnIce) \
+    X(bool,m_affectedByForces) \
+    X(bool,m_isCollidingWithSlope) \
+    X(bool,m_slopeFlipGravityRelated) \
+    X(bool,m_slopeSlidingMaybeRotated) \
+    X(bool,m_isBallRotating) \
+    X(bool,m_isBallRotating2) \
+    X(bool,m_isRotating) \
+    X(bool,m_touchedRing) \
+    X(bool,m_touchedCustomRing) \
+    X(bool,m_touchedGravityPortal) \
+    X(bool,m_touchedPad) \
+    X(bool,m_stateRingJump) \
+    X(bool,m_stateRingJump2) \
+    X(bool,m_wasTeleported) \
+    X(bool,m_fixGravityBug) \
+    X(bool,m_reverseSync) \
+    X(bool,m_hasEverJumped) \
+    X(bool,m_hasEverHitRing) \
+    X(double,m_accelerationOrSpeed) \
+    X(double,m_snapDistance) \
+    X(bool,m_fixRobotJump) \
+    X(bool,m_isBeingSpawnedByDualPortal)
+#define CORUM_REPLAY_PHYSICS_POINTS(X) \
+    X(cocos2d::CCPoint,m_shipRotation) \
+    X(cocos2d::CCPoint,m_lastPortalPos) \
+    X(cocos2d::CCPoint,m_stateForceVector) \
+    X(cocos2d::CCPoint,m_position) \
+    X(cocos2d::CCPoint,m_lastGroundedPos)

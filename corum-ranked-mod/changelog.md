@@ -1,3 +1,12 @@
+# v0.5.0-beta.118
+
+- Preserve queued input across native frames, restore versioned initial player physics and clocks, and verify actual button dispatch separately from queue removal.
+- Record first-failure native physics evidence. Explicitly refuse unsupported CBF timing and legacy playback with missing essential state; preserve existing files and best records.
+- Use normal-round typography, placement and rank tint for the Survival Death Match attempts/difference HUD while retaining the top-left timer.
+- Keep ELIMINATED in its own collection, display Solo scores/differences to one decimal, and distinguish FINAL / DM1 / DM2 badges by actual source round.
+- Page repeated Death Match badges inside personal results; preserve historical ledger rows and prevent duplicate source-round awards.
+- Native GD / device and active CBF playback have not been verified; active CBF timing is not supported by the native frame replay driver.
+
 # v0.5.0-beta.117
 
 - Show owned totals below collection badges and use English difficulty names in details.

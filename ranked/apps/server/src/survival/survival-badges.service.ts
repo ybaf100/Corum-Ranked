@@ -29,7 +29,9 @@ export class SurvivalBadgesService implements OnApplicationBootstrap {
   public async collection(playerId:string){
     const rows=await this.db.query<{difficulty:string;grade:string;count:string}>(`SELECT b.difficulty,b.grade,count(*)::text AS count FROM sur_round_badges b
       JOIN sur_matches m ON m.id=b.match_id WHERE b.player_id=$1 AND m.state<>'CANCELLED' GROUP BY b.difficulty,b.grade`,[playerId]);
-    const counts=(difficulty?:string)=>Object.fromEntries(SURVIVAL_BADGE_GRADES.map(grade=>[grade,rows.rows.filter(r=>r.grade===grade&&(!difficulty||r.difficulty===difficulty)).reduce((s,r)=>s+Number(r.count),0)]));
+    // ELIMINATED has its own collection. Retain the DTO key with zero for
+    // difficulty slots so older decoders remain compatible, without counting X.
+    const counts=(difficulty?:string)=>Object.fromEntries(SURVIVAL_BADGE_GRADES.map(grade=>[grade,difficulty&&grade==="ELIMINATED"?0:rows.rows.filter(r=>r.grade===grade&&(!difficulty||r.difficulty===difficulty)).reduce((s,r)=>s+Number(r.count),0)]));
     const difficulties=survivalCollectibleDifficulties().map(d=>({...d,counts:counts(d.id)}));
     const eliminatedByDifficulty=rows.rows.filter(r=>r.grade==="ELIMINATED").map(r=>({difficulty:r.difficulty,count:Number(r.count)}));
     return {difficulties,totals:counts(),eliminatedByDifficulty,grades:SURVIVAL_BADGE_GRADES};

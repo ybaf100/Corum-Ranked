@@ -1,4 +1,5 @@
 #include "SurvivalReplayRuntime.hpp"
+#include "SurvivalReplayEnvironment.hpp"
 #include "../HistoryLevelLookup.hpp"
 #include "../RankedRoundPreparation.hpp"
 #include "../RankedLevelPreparation.hpp"
@@ -20,6 +21,10 @@ void Runtime::pump(){
     try{auto doc=m_loading.get();if(m_pendingIdentity){auto next=std::move(*m_pendingIdentity);m_pendingIdentity.reset();request(std::move(next));return;}if(!m_requested)return;if(!doc){m_error="No replay saved on this device";return;}
       for(auto key:{"matchId","roundKey","participantId","mapGeometrySha256","mapVersion","mapGeneration","levelId","attemptId"})
         if(doc->metadata()[key]!=m_identity[key])throw std::runtime_error("Replay does not match this official record or map version");
+      auto problem=replayInitialDataProblem(doc->initial());
+      if(problem.empty())problem=replayPhysicsEnvironmentProblem(doc->metadata()["physicsEnvironment"]);
+      if(problem.empty())problem=replayPhysicsEnvironmentProblem(captureReplayPhysicsEnvironment());
+      if(!problem.empty())throw std::runtime_error("Native replay unavailable: "+problem+". Saved record and best are preserved.");
       m_playback=std::move(doc);
     }catch(std::exception const&e){m_error=e.what();}
 }
@@ -37,7 +42,11 @@ bool Runtime::validate(GJGameLevel* level){
     if(sha256Text(decoded)==expected)return true;
     m_error="Recorded map geometry is unavailable or changed";return false;
 }
-bool Runtime::arm(GJGameLevel* level){if(!canLaunch()||!validate(level))return false;m_scene=true;return true;}
+bool Runtime::arm(GJGameLevel* level){
+    if(!canLaunch()||!validate(level))return false;
+    if(auto problem=replayPhysicsEnvironmentProblem(captureReplayPhysicsEnvironment());!problem.empty()){m_error="Native replay unavailable: "+problem;return false;}
+    m_scene=true;return true;
+}
 namespace {
 class LaunchPopup final:public Popup{
     CCLabelBMFont* m_label=nullptr;bool m_launch=false;

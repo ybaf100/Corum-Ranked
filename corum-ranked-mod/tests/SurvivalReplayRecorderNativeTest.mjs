@@ -12,6 +12,7 @@ test('actual recorder and filesystem wait for official Start, defer terminal thr
   const cpp=`
 #include "${root}/src/replay/SurvivalReplayStorage.hpp"
 #include "${root}/src/replay/SurvivalReplayPlayback.hpp"
+#include "${root}/tests/helpers/ReplayPhysicsFixture.hpp"
 #include <cassert>
 #include <chrono>
 #include <functional>
@@ -24,15 +25,17 @@ struct WebRequest{template<class...T>void header(T...){}template<class T>void ti
 namespace async{template<class T>struct TaskHolder{std::function<void(T)>cb;template<class F>void spawn(int,F f){cb=f;}void reply(T v){auto f=std::exchange(cb,{});assert(f);f(v);}};}
 namespace prelude{using geode::Mod;namespace web=geode::utils::web;}}
 namespace corum::ranked {struct RankedRuntime{static RankedRuntime&get(){static RankedRuntime r;return r;}std::string spectatorLiveSessionToken(){return "test-session-only";}};}
+namespace corum::ranked::replay {matjson::Value testEnvironment=[]{matjson::Value e;e["schema"]=2;e["cbf"]["loaded"]=false;return e;}();matjson::Value captureReplayPhysicsEnvironment(){return testEnvironment;}}
 ${header}
 ${source}
 using namespace corum::ranked::replay;
 Json metadata(std::string id){Json m;m["formatVersion"]=1;m["gameVersion"]="2.2081";m["matchId"]="match";m["roundKey"]="r1";m["attemptId"]=id;m["participantId"]="p";m["mapGeneration"]=1;m["levelId"]=123;m["mapVersion"]=1;m["mapGeometrySha256"]=std::string(64,'a');m["phase"]="ROUND_1";return m;}
-void initial(Recorder&r){Json i;i["kind"]="initial";i["randomSeed"]="1";i["replayRandSeed"]="2";r.add(i);}
+void initial(Recorder&r){r.add(initialReplayPhysicsFixture());}
 void frame(Recorder&r,double progress){r.nativeFrameBegin();Json f;f["kind"]="frame";f["dt"]=.01;r.add(f);r.nextTick();r.elapsed(.01);auto pose=corum::ranked::encodeSpectatorPose(corum::ranked::SpectatorGhostPose{});pose["kind"]="pose";pose["progress"]=progress;r.add(pose);}
 Receipt receipt(std::string id,double p){return {"match","r1",id,"p",std::string(64,'a'),1,123,1,p,p,true,p==100,true};}
 void drain(Recorder&r){for(auto&f:r.m_writes)f.get();r.m_writes.clear();}
-int main(){Recorder r;r.m_recovery.get();r.begin(metadata("first"));initial(r);frame(r,35);assert(std::filesystem::is_empty("${dir}/replays/pending"));
+int main(){Recorder r;r.m_recovery.get();testEnvironment["cbf"]["loaded"]=true;testEnvironment["cbf"]["version"]="v1.5.0";testEnvironment["cbf"]["disabled"]=false;testEnvironment["cbf"]["clickOnSteps"]=false;testEnvironment["cbf"]["physicsBypass"]=false;
+ r.begin(metadata("unsupported-cbf"));assert(!r.active()&&r.notice()==ReplayNotice::Unsupported&&r.error()=="CBF_ACTIVE_TIMING_UNSUPPORTED");testEnvironment["cbf"]["loaded"]=false;r.begin(metadata("bad-initial"));r.unsupported("INITIAL_PHYSICS_UNAVAILABLE");r.accepted("bad-initial",true);assert(!r.active()&&r.m_writes.empty());r.begin(metadata("first"));initial(r);frame(r,35);assert(std::filesystem::is_empty("${dir}/replays/pending"));
  // Exercise production Recorder -> validation -> disk for a real queued
  // command. Nested commands inherit the enclosing record's tick/time context.
  Json command;command["button"]=1;command["down"]=true;command["player2"]=false;command["nativeStep"]=7;command["timestamp"]=.003;

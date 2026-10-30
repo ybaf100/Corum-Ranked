@@ -14,6 +14,14 @@ inline SurvivalBadgeMotion survivalBadgeMotion(std::size_t index,double elapsed)
 }
 inline float survivalBadgeGalleryOffset(float offset,std::size_t count,float width){return std::clamp(offset,0.f,std::max(0.f,(static_cast<float>(count)-5)*width/5));}
 struct SurvivalBadgeCardLayout {float x,y,width,height;};
+struct SurvivalBadgePage {std::size_t page,pages,begin,count;};
+inline SurvivalBadgePage survivalBadgePage(std::size_t count,std::size_t page,float width,float height){
+    auto const columns=std::max<std::size_t>(1,std::min<std::size_t>(3,static_cast<std::size_t>(width*.52f/66)));
+    auto const capacity=columns*(height<290?1u:2u);
+    auto const pages=std::max<std::size_t>(1,(count+capacity-1)/capacity);
+    page=std::min(page,pages-1);auto const begin=page*capacity;
+    return {page,pages,begin,std::min<std::size_t>(capacity,count-begin)};
+}
 inline SurvivalBadgeCardLayout survivalBadgeCardLayout(float width,float height,std::size_t count,std::size_t index){
     auto const area=width*.52f;
     auto const columns=std::max<std::size_t>(1,std::min<std::size_t>({3,count,static_cast<std::size_t>(area/66)}));

@@ -5,6 +5,17 @@
 #include <string>
 
 namespace corum::ranked {
+// Solo round points are fractional. Keep this separate from Survival's
+// ordinary progress, whose official presentation uses whole percentages.
+inline std::string soloScoreText(double value,bool signedValue=false) {
+    if(!std::isfinite(value))value=0;
+    auto normalized=std::round(value*10.0)/10.0;
+    if(normalized==0)normalized=0;
+    std::ostringstream output;
+    if(signedValue&&normalized>0)output<<'+';
+    output<<std::fixed<<std::setprecision(1)<<normalized;
+    return output.str();
+}
 // Presentation only. Server records, ordering and cutoff comparisons keep
 // their original precision. Normal GD progress displays whole percentages.
 inline std::string rankedScoreText(double value,bool deathmatch=false,bool signedValue=false) {

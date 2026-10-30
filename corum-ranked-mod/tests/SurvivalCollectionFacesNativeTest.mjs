@@ -107,7 +107,8 @@ int main(){
  for(auto const& [id,name]:{std::pair{"HARD","Hard"},std::pair{"HARDER","Harder"},std::pair{"EASY_DEMON","Easy Demon"}}){matjson::Value d;d.fields["id"].text=id;assert(difficultyName(d)==name);d.fields["name"].text=name;assert(difficultyName(d)==name);}
  matjson::Value counts;assert(survivalBadgeCollectionTotal(counts)==0);
  counts.fields["MYTHIC"].number=2147483648LL;counts.fields["RATED"].number=5;counts.fields["ELIMINATED"].number=4;
- assert(survivalBadgeCollectionTotal(counts)==2147483657LL);
+ assert(survivalBadgeCollectionTotal(counts)==2147483653LL);
+ matjson::Value eliminatedOnly;eliminatedOnly.fields["ELIMINATED"].number=100;assert(survivalBadgeCollectionTotal(eliminatedOnly)==0);
  for(auto grade:SurvivalBadgeGrades){
   matjson::Value b;b.fields["grade"].text=grade;b.fields["difficulty"].text="EASY_DEMON";b.fields["roundLabel"].text="R2";b.fields["rank"].number=2;captions.clear();
   auto*card=survivalRoundBadge(b,{62,84});assert(card&&card->size.width==62&&card->size.height==62&&card->code==7&&card->grade==grade&&card->area==40);

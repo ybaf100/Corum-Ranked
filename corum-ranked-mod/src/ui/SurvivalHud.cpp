@@ -122,21 +122,22 @@ void SurvivalHud::present(SurvivalMatchView const& view,std::int64_t remainingMs
     auto const time=fmt::format("{:02}:{:02}",seconds/60,seconds%60);
     auto const topY=layoutHud(size.width,size.height).topY;
     m_auxTimer.text(deathmatch?time:"");
-    m_difference.foreground->setVisible(!deathmatch);m_difference.shadow->setVisible(!deathmatch);
+    m_difference.foreground->setVisible(true);m_difference.shadow->setVisible(true);
     if(deathmatch){
         auto const left=survivalRemainingAttempts(own==view.standings.end()?0:own->attemptsUsed,SurvivalRuntime::get().localAttemptsUsed(),view.tiebreakAttempts,!SurvivalRuntime::get().localAttemptId().empty());
-        auto const delta=std::string(m_difference.foreground->getString());
-        m_timer.text(observer?delta:fmt::format("{}/{} {}",left,view.tiebreakAttempts,delta));
-        m_timer.fit(size.width*.52f,.72f,.40f);m_timer.position({size.width/2,topY-18});
+        m_timer.text(observer?std::string{}:fmt::format("{}/{}",left,view.tiebreakAttempts));
         if(left==0 && !observer)m_waiting.text(own!=view.standings.end()&&own->waiting?i18n::text("survival-attempts-finished","ATTEMPTS COMPLETE · WAITING FOR RESULTS"):i18n::text("survival-attempt-result-syncing","SYNCING ATTEMPT RESULT"));
     }else{
-        m_timer.text(time);m_timer.fit(size.width*.32f,CompetitiveClockScale,CompetitiveClockScale*.7f);
-        m_difference.fit(size.width*.25f,CompetitiveClockScale,CompetitiveClockScale*.7f);
-        auto const clockWidth=m_timer.foreground->getContentSize().width*m_timer.foreground->getScale();
-        auto const deltaWidth=m_difference.foreground->getContentSize().width*m_difference.foreground->getScale();
-        auto const pair=competitiveClockPair(size.width/2,clockWidth,deltaWidth);
-        m_timer.position({pair.clockX,topY-18});m_difference.position({pair.deltaX,topY-18});
+        m_timer.text(time);
     }
+    // Both modes use the ordinary round's authored font scale, standing tint,
+    // baseline and measured two-label pair. DM's clock remains below FPS.
+    m_timer.fit(size.width*.32f,CompetitiveClockScale,CompetitiveClockScale*.7f);
+    m_difference.fit(size.width*.25f,CompetitiveClockScale,CompetitiveClockScale*.7f);
+    auto const clockWidth=m_timer.foreground->getContentSize().width*m_timer.foreground->getScale();
+    auto const deltaWidth=m_difference.foreground->getContentSize().width*m_difference.foreground->getScale();
+    auto const pair=competitiveClockPair(size.width/2,clockWidth,deltaWidth);
+    m_timer.position({pair.clockX,topY-18});m_difference.position({deathmatch&&observer?size.width/2:pair.deltaX,topY-18});
 }
 void SurvivalHud::presentProgressMarkers(SurvivalMatchView const& view) {
     auto bar=m_progressBar.lock();auto fill=m_progressFill.lock();auto lines=m_progressLines.lock();

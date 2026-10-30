@@ -1,5 +1,6 @@
 #include "domain/SurvivalRoundPresentation.hpp"
 #include "replay/SurvivalReplayRecorder.hpp"
+#include "replay/SurvivalReplayEnvironment.hpp"
 #include "SurvivalSpectatorRuntime.hpp"
 #include "SurvivalRuntime.hpp"
 #include "RankedRuntime.hpp"
@@ -117,6 +118,10 @@ void SurvivalSpectatorRuntime::tick(){
         try{auto document=m_worldLoading.get();if(!m_authorized||!currentScope())throw std::runtime_error("Spectator round changed");
             if(!document||replay::number(document->metadata(),"officialBestProgress")!=100||replay::str(document->metadata(),"mapGeometrySha256")!=v.certificate["geometrySha256"].asString().unwrapOr("")||
                replay::integer(document->metadata(),"mapVersion")!=v.map.version||replay::str(document->metadata(),"captureCompleteness")!="COMPLETE")throw std::runtime_error("A complete verified clear replay of this map is required on this device");
+            auto problem=replay::replayInitialDataProblem(document->initial());
+            if(problem.empty())problem=replay::replayPhysicsEnvironmentProblem(document->metadata()["physicsEnvironment"]);
+            if(problem.empty())problem=replay::replayPhysicsEnvironmentProblem(replay::captureReplayPhysicsEnvironment());
+            if(!problem.empty())throw std::runtime_error("Native clear replay unavailable: "+problem);
             m_world=std::move(document);m_error.clear();m_busy=false;
         }catch(std::exception const&e){m_error=e.what();m_authorized=false;m_busy=false;SpectatorLiveRuntime::survival().stopSurvival();}
     }

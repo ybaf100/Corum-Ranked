@@ -122,6 +122,9 @@ describe("Survival M5 public HTTP and persistent online game",()=>{
   expect(empty.body.difficulties.map((d:any)=>d.id)).toEqual(["HARD","HARDER","INSANE","EASY_DEMON","MEDIUM_DEMON","HARD_DEMON","INSANE_DEMON"]);
   await record(a,m,10);await record(b,m,20);now=survivalCurrentRound(m).endsAt!;await touch(group);await online.tickOnce();
   const counts=await api(a,"/badges");expect(counts.status).toBe(200);expect(counts.body.totals).toMatchObject({MYTHIC:0,LEGENDARY:0,ELIMINATED:1});
+  expect(counts.body.difficulties.every((d:any)=>d.counts.ELIMINATED===0)).toBe(true);
+  expect(counts.body.difficulties.reduce((sum:number,d:any)=>sum+Object.values(d.counts).reduce((s:number,n:any)=>s+Number(n),0),0)).toBe(0);
+  expect(counts.body.eliminatedByDifficulty.reduce((sum:number,d:any)=>sum+d.count,0)).toBe(1);
   expect((await api(b,"/badges")).body.totals).toMatchObject({MYTHIC:1,ELIMINATED:0});
   const history=(await api(a,"/history")).body;expect(history.matches[0].rounds[0].roundBadge).toMatchObject({grade:"ELIMINATED",rank:2,roundLabel:"FINAL"});
   const rows=(await db.query("SELECT * FROM sur_round_badges ORDER BY participant_id")).rows;expect(rows).toHaveLength(2);

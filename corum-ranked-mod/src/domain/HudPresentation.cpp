@@ -113,8 +113,8 @@ HudPresentation presentHud(HudInput const& input) {
     result.fpsText = input.renderFps && std::isfinite(*input.renderFps) && *input.renderFps > 0.0
         ? "FPS : " + std::to_string(static_cast<int>(std::lround(*input.renderFps)))
         : "FPS : -";
-    result.ownScoreText = "Score : " + formatNumber(ownScore,input.deathmatch);
-    result.opponentScoreText = "Score : " + formatNumber(opponentScore,input.deathmatch);
+    result.ownScoreText = "Score : " + (input.deathmatch?formatNumber(ownScore,true):soloScoreText(ownScore));
+    result.opponentScoreText = "Score : " + (input.deathmatch?formatNumber(opponentScore,true):soloScoreText(opponentScore));
     result.ownChecks = clearChecks(ownClears);
     result.opponentChecks = clearChecks(opponentClears);
     result.deathmatch = input.deathmatch;

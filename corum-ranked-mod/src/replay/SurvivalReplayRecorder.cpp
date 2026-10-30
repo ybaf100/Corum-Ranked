@@ -1,5 +1,6 @@
 #include "SurvivalReplayRecorder.hpp"
 #include "../RankedRuntime.hpp"
+#include "SurvivalReplayEnvironment.hpp"
 using namespace geode::prelude;
 namespace corum::ranked::replay {
 namespace {template<class T>bool ready(std::future<T>const& f){return f.valid()&&f.wait_for(std::chrono::seconds(0))==std::future_status::ready;}}
@@ -20,15 +21,31 @@ void Recorder::retryPending(){for(auto const& [_,m]:m_deferredReceipts){auto ret
 void Recorder::begin(Json metadata){
     auto id=str(metadata,"attemptId");if(id!=m_current&&!m_current.empty())finishFromLast("RESET");m_displayAttempt=id;
     if(auto problem=metadataProblem(metadata);!problem.empty()){note(ReplayNotice::Preparation,"METADATA","INVALID_FIELD:"+problem,metadata);return;}
+    metadata["nativeInputVersion"]=2;metadata["physicsEnvironment"]=captureReplayPhysicsEnvironment();
+    if(auto problem=replayPhysicsEnvironmentProblem(metadata["physicsEnvironment"]);!problem.empty()){
+        note(ReplayNotice::Unsupported,"PHYSICS_ENVIRONMENT",problem,metadata);return;
+    }
     if(m_captures.contains(str(metadata,"attemptId")))return;
     if(!m_current.empty())finishFromLast("RESET");
     if(m_captures.size()>=8){note(ReplayNotice::Receipt,"START_APPROVAL","APPROVAL_BACKLOG",metadata);return;}
-    note(ReplayNotice::None,"CAPTURE_BEGIN","VALID_IDENTITY",metadata);m_terminal.reset();m_current=str(metadata,"attemptId");m_tick=0;m_elapsed=m_bestProgress=0;m_captures[m_current]={std::move(metadata)};m_flushAt={};
+    note(ReplayNotice::None,"CAPTURE_BEGIN","VALID_IDENTITY",metadata);m_terminal.reset();m_preInputs=Json::array();m_current=str(metadata,"attemptId");m_tick=0;m_elapsed=m_bestProgress=0;m_captures[m_current]={std::move(metadata)};m_flushAt={};
+}
+void Recorder::unsupported(std::string reason){
+    auto found=m_captures.find(m_current);if(found==m_captures.end())return;
+    found->second.damaged=true;note(ReplayNotice::Unsupported,"NATIVE_BOUNDARY",std::move(reason),found->second.metadata);
+    finishFromLast("UNSUPPORTED_PHYSICS");
+}
+void Recorder::nativeInput(Json value){
+    if(!active())return;
+    if(m_nativeFrame){value["kind"]="dispatch";add(std::move(value));return;}
+    if(m_preInputs.asArray().unwrap().size()>=4096){unsupported("PRE_FRAME_INPUT_LIMIT");return;}
+    m_preInputs.push(std::move(value));
 }
 void Recorder::accepted(std::string const& attempt,bool value){
     auto found=m_captures.find(attempt);if(found==m_captures.end())return;
     if(!value){found->second.uncertain=true;note(ReplayNotice::Receipt,"ATTEMPT_START_ACK","PENDING_OR_REJECTED_START",found->second.metadata);return;}
     auto& c=found->second;if(c.accepted)return;c.accepted=true;
+    if(c.damaged)return; // A late Start ACK cannot create an unsupported pending file.
     try{m_writes.push_back({m_storage.begin(c.metadata),"STORAGE_BEGIN",attempt,str(c.metadata,"roundKey")});flush(c);}catch(std::exception const&e){c.damaged=true;note(ReplayNotice::File,"STORAGE_BEGIN",e.what(),c.metadata);}
 }
 void Recorder::flush(Capture& c){

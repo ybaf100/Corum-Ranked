@@ -121,25 +121,31 @@ class SurvivalOutcomePanel final:public cocos2d::CCLayerColor {
     std::string m_key,m_identity;std::vector<SurvivalStanding> m_profiles;
     struct Podium {CCNode* pedestal;CCMenuItemSpriteExtra* avatar;CCNode* stamp;CCNode* place;CCNode* glow;float x,base,height;int rank;};
     std::vector<CCNode*> m_badges;
+    std::string m_badgeMatch;std::size_t m_badgePage=0,m_badgeCount=0;
     std::vector<Podium> m_stages;double m_elapsed=0;
     CCLabelBMFont *m_watchText=nullptr,*m_detail=nullptr;
     CCNode* m_halo=nullptr;
     void onAction(CCObject* object){if(auto* item=typeinfo_cast<CCMenuItemSpriteExtra*>(object);item && item->isEnabled()){
         auto const& current=SurvivalRuntime::get().view();if(!m_identity.starts_with(current.id+":"+current.ownId+":"))return;
         auto tag=item->getTag();if(tag>=100){if(static_cast<std::size_t>(tag-100)<m_profiles.size())openSurvivalProfile(this,m_profiles[tag-100]);}
-        else if(tag==11)showSurvivalStandings();else if(m_action)m_action(tag);
+        else if(tag==31||tag==32){
+            auto const size=CCDirector::sharedDirector()->getWinSize();auto const page=survivalBadgePage(m_badgeCount,m_badgePage,size.width,size.height);
+            m_badgePage=tag==31?(page.page>0?page.page-1:0):std::min(page.page+1,page.pages-1);
+            m_key.clear();m_elapsed=0;
+        }else if(tag==11)showSurvivalStandings();else if(m_action)m_action(tag);
     }}
-    CCMenuItemSpriteExtra* button(std::string text,CCPoint at,float width,int tag,ccColor3B accent=Blue){
-        auto* face=surface({width,30},{},accent,SurfaceRaised,255,true);auto* label=menuLabel(text,.29f,{width/2,15},Text,FontWeight::ExtraBold);fitFullMenuLabel(label,width-12,22,.29f);face->addChild(label,5);
+    CCMenuItemSpriteExtra* button(std::string text,CCPoint at,float width,int tag,ccColor3B accent=Blue,float height=30){
+        auto* face=surface({width,height},{},accent,SurfaceRaised,255,true);auto* label=menuLabel(text,.29f,{width/2,height/2},Text,FontWeight::ExtraBold);fitFullMenuLabel(label,width-12,height-6,.29f);face->addChild(label,5);
         auto* item=CCMenuItemSpriteExtra::create(face,this,menu_selector(SurvivalOutcomePanel::onAction));item->setPosition(at);item->setTag(tag);m_menu->addChild(item);if(tag==13)m_watchText=label;return item;
     }
 public:
     static SurvivalOutcomePanel* create(std::function<void(int)> action){auto* p=new SurvivalOutcomePanel;if(p->initWithColor({4,8,16,255})){p->m_action=std::move(action);p->setID("survival-outcome-panel"_spr);p->autorelease();return p;}delete p;return nullptr;}
     void present(SurvivalMatchView const& view,SurvivalFlowStage stage,float dt){
+        auto const badgeMatch=view.id+":"+view.ownId;if(m_badgeMatch!=badgeMatch){m_badgeMatch=badgeMatch;m_badgePage=m_badgeCount=0;}
         auto const choice=stage==SurvivalFlowStage::EliminatedChoice,ceremony=stage==SurvivalFlowStage::Ceremony;
         auto const key=view.id+":"+view.ownId+":"+(choice?view.roundKey+":"+std::to_string(view.mapGeneration):std::string{})+":"+std::to_string(static_cast<int>(stage));
         // Settlement arriving updates the labels/tiers without resetting a podium animation.
-        auto const settled=view.result.isObject();std::string buildKey=key+(settled?":settled":":pending")+":"+std::to_string(view.result["actualDelta"].asInt().unwrapOr(0));
+        auto const settled=view.result.isObject();std::string buildKey=key+(settled?":settled":":pending")+":"+std::to_string(view.result["actualDelta"].asInt().unwrapOr(0))+":badges:"+std::to_string(m_badgePage);
         for(auto const& p:view.result["standings"].asArray().unwrapOr(std::vector<matjson::Value>{}))
             buildKey+=":"+p["participantId"].asString().unwrapOr("")+":"+p["tierAfter"].asString().unwrapOr("")+":"+(p["lpAfter"].isNumber()?std::to_string(p["lpAfter"].asInt().unwrapOr(0)):"pending")+":"+std::to_string(p["delta"].asInt().unwrapOr(0));
         auto const size=CCDirector::sharedDirector()->getWinSize();
@@ -199,10 +205,19 @@ public:
                 if(settled){auto* badge=createAnimatedRankBadge(view.result["profileAfter"]["tier"].asString().unwrapOr("UNRANKED"),{40,40},RankBadgeDisplay::Leaderboard);badge->setPosition({personalX+65,size.height*.43f});addChild(badge,5);}
             }
             if(stage==SurvivalFlowStage::PersonalResult){
-                auto const rows=view.roundBadges.asArray().unwrapOr(std::vector<matjson::Value>{});
-                for(auto const& badge:rows){if(badge["participantId"].asString().unwrapOr("")!=view.ownId)continue;
-                    auto const layout=survivalBadgeCardLayout(size.width,size.height,rows.size(),m_badges.size());
-                    if(auto* card=survivalRoundBadge(badge,{layout.width,layout.height})){card->setPosition({layout.x,layout.y});addChild(card,5);m_badges.push_back(card);}
+                auto rows=view.roundBadges.asArray().unwrapOr(std::vector<matjson::Value>{});
+                std::erase_if(rows,[&](auto const& badge){return badge["participantId"].asString().unwrapOr("")!=view.ownId||!survivalBadgeKnown(badge["grade"].asString().unwrapOr(""));});
+                m_badgeCount=rows.size();auto const page=survivalBadgePage(rows.size(),m_badgePage,size.width,size.height);m_badgePage=page.page;
+                for(std::size_t i=0;i<page.count;++i){auto const& badge=rows[page.begin+i];
+                    auto const lift=page.pages>1?30.f:0.f;
+                    auto const layout=survivalBadgeCardLayout(size.width,size.height-lift,page.count,i);
+                    if(auto* card=survivalRoundBadge(badge,{layout.width,layout.height})){card->setPosition({layout.x,layout.y+lift});addChild(card,5);m_badges.push_back(card);}
+                }
+                if(page.pages>1){
+                    auto const center=size.width*.74f;
+                    auto* caption=menuLabel(fmt::format("{} / {}",page.page+1,page.pages),.22f,{center,68},TextMuted,FontWeight::ExtraBold);fitFullMenuLabel(caption,76,16,.22f);addChild(caption,5);
+                    button("<",{center-56,68},28,31,Blue,22)->setEnabled(page.page>0);
+                    button(">",{center+56,68},28,32,Blue,22)->setEnabled(page.page+1<page.pages);
                 }
             }
             if(choice)button(i18n::text("survival-view-board","VIEW STATUS"),{size.width/2,24},140,11,Blue);

@@ -1,4 +1,4 @@
-import { survivalMilliPercent,survivalRoundBadges,type SurvivalRoundBadge,type SurvivalMatch } from '@corum-ranked/rules';
+import { survivalMilliPercent,survivalRoundBadges,survivalPresentRoundBadges,type SurvivalRoundBadge,type SurvivalMatch } from '@corum-ranked/rules';
 import { recordedLevelId } from './solo-history.js';
 const object=(v:unknown):Record<string,any>=>{if(typeof v==='string'){try{return JSON.parse(v);}catch{return {};}}return v&&typeof v==='object'?v as Record<string,any>:{};};
 /** History is a result projection, never the live aggregate (which contains
@@ -7,7 +7,8 @@ export function survivalHistoryProjection(value:unknown,personalResult:unknown,m
  const match=object(value) as unknown as SurvivalMatch,result=object(personalResult);
  const completed=match.state==='FINAL_RESULT';const inProgress=!['FINAL_RESULT','CANCELLED'].includes(match.state);
  const players=Array.isArray(match.players)?match.players:[];
- const badges=(storedBadges??survivalRoundBadges(match)).filter(b=>b.participantId===myParticipantId);
+ const badges=survivalPresentRoundBadges(match,storedBadges??survivalRoundBadges(match)).filter(b=>b.participantId===myParticipantId);
+ const deathmatches=(Array.isArray(match.rounds)?match.rounds:[]).filter(r=>r.phase==='TIEBREAK');
  const rounds=(Array.isArray(match.rounds)?match.rounds:[]).map(r=>{
   const confirmed=r.finishedAt!==null&&Number.isFinite(r.finishedAt);
   const map=r.map?{levelId:recordedLevelId(r.map.levelId),title:(r.map as any).name??(r.map as any).title??'',creator:(r.map as any).creator??null,
@@ -27,7 +28,7 @@ export function survivalHistoryProjection(value:unknown,personalResult:unknown,m
   const replayIdentity=confirmed&&bestAttempt&&r.map?{matchId:match.id,roundKey:r.key,roundNumber:r.ordinal,phase:r.phase,mapGeneration:r.mapGeneration,
    participantId:myParticipantId,attemptId:bestAttempt.id,attemptOrdinal:bestAttempt.sequence,levelId:r.map.levelId,mapVersion:r.map.levelVersion,
    mapGeometrySha256:r.map.geometrySha256,officialBestProgress:bestAttempt.highestProgress,debug:match.online!==true}:null;
-  return {roundBadge:badges.find(b=>b.sourceRoundKey===r.key)??null,replayIdentity,ownRank:confirmed&&own?own.rank:null,ownQualified:confirmed&&own?own.qualified&&!own.forfeited:null,key:r.key,ordinal:r.ordinal,displayRoundNumber:r.ordinal,phase:r.phase,completed:confirmed,status:confirmed?'COMPLETED':inProgress?'IN_PROGRESS':'UNFINISHED',map,
+  return {roundBadge:badges.find(b=>b.sourceRoundKey===r.key)??null,replayIdentity,deathmatchSequence:r.phase==='TIEBREAK'?deathmatches.findIndex(dm=>dm.key===r.key)+1:null,ownRank:confirmed&&own?own.rank:null,ownQualified:confirmed&&own?own.qualified&&!own.forfeited:null,key:r.key,ordinal:r.ordinal,displayRoundNumber:r.ordinal,phase:r.phase,completed:confirmed,status:confirmed?'COMPLETED':inProgress?'IN_PROGRESS':'UNFINISHED',map,
    cutoffScore,target:r.target,qualifiedCount:confirmed?r.players.filter(p=>p.qualified&&!p.forfeited).length:null,
    finishedAt:confirmed?new Date(r.finishedAt!).toISOString():null,standings};
  });

@@ -18,6 +18,7 @@ test('actual Survival spectator runtime gates admission, ACK publication, mode t
 #include <memory>
 #include <iostream>
 #include "${new URL('../src/replay/SurvivalReplayPlayback.hpp',import.meta.url).pathname}"
+#include "${new URL('../tests/helpers/ReplayPhysicsFixture.hpp',import.meta.url).pathname}"
 #include <chrono>
 #include <optional>
 #include <functional>
@@ -42,6 +43,7 @@ struct Pending{Operation op;std::function<void(WebResponse)>done;};inline std::v
 namespace async{template<class T>struct TaskHolder{void cancel(){}void spawn(utils::web::Operation o,std::function<void(T)>f){utils::web::pending.push_back({o,f});}};}}
 using namespace geode::utils;
 namespace corum::ranked::replay {
+inline Json captureReplayPhysicsEnvironment(){Json e;e["schema"]=2;e["cbf"]["loaded"]=false;return e;}
 struct StorageBoundary{
  bool available=true,damaged=false;
  std::future<std::unique_ptr<Playback>> playback(Json){
@@ -49,7 +51,7 @@ struct StorageBoundary{
   if(damaged)promise.set_exception(std::make_exception_ptr(std::runtime_error("Replay damaged")));
   else if(!available)promise.set_value(nullptr);
   else {Document d;d.footer=Json();d.complete=true;d.metadata["officialBestProgress"]=100.;d.metadata["mapGeometrySha256"]=std::string(64,'a');d.metadata["mapVersion"]=1;d.footer["captureCompleteness"]="COMPLETE";
-   Json i;i["kind"]="initial";d.records.push_back(i);Json f;f["kind"]="frame";f["dt"]=.01;d.records.push_back(f);promise.set_value(std::make_unique<Playback>(std::move(d)));}
+   d.metadata["physicsEnvironment"]=captureReplayPhysicsEnvironment();d.metadata["nativeInputVersion"]=2;auto i=initialReplayPhysicsFixture();d.records.push_back(i);Json f;f["kind"]="frame";f["dt"]=.01;d.records.push_back(f);promise.set_value(std::make_unique<Playback>(std::move(d)));}
   return promise.get_future();
  }
 };

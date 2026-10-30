@@ -545,6 +545,7 @@ inline constexpr std::array kTranslations {
     CatalogTranslation{"replay-device-missing", "No replay on this device", "이 기기에 저장된 리플레이 없음"},
     CatalogTranslation{"replay-file-error", "Replay file could not be saved", "리플레이 파일 저장 실패"},
     CatalogTranslation{"replay-native-unavailable", "Official result has no matching native replay", "공식 기록에 해당하는 실제 리플레이 없음"},
+    CatalogTranslation{"replay-physics-unsupported", "Replay capture unavailable for this physics environment", "현재 물리 환경에서는 리플레이를 기록할 수 없습니다"},
     CatalogTranslation{"replay-preparation-failed", "Replay preparation failed", "리플레이 녹화 준비 실패"},
     CatalogTranslation{"replay-receipt-pending", "Awaiting official replay confirmation", "서버 기록 확인 대기"},
     CatalogTranslation{"replay-space-error", "Not enough replay storage", "리플레이 저장 공간 부족"},

@@ -17,3 +17,4 @@ class PlayerObject;
 namespace corum::ranked {void survivalReplayNativeSnap(PlayerObject*,bool,float,float);}
 
 namespace corum::ranked {void advanceSurvivalReplayWorld(PlayLayer*,float);}
+namespace corum::ranked {void survivalReplayPlayerStep(PlayerObject*,float,bool);}

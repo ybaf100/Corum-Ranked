@@ -54,6 +54,11 @@ inline std::vector<HistoryRound> historyRounds(matjson::Value const& record,bool
             v.key=r["key"].asString().unwrapOr("");auto const phase=r["phase"].asString().unwrapOr("");
             auto const ordinal=static_cast<int>(r["displayRoundNumber"].asInt().unwrapOr(r["ordinal"].asInt().unwrapOr(0)));
             v.label=survivalRoundLabel(phase,ordinal,true);
+            if(phase=="TIEBREAK"){
+                auto sequence=r["deathmatchSequence"].asInt().unwrapOr(0);
+                if(sequence<=0)sequence=1+std::count_if(result.begin(),result.end(),[](auto const& previous){return previous.deathmatch;});
+                v.label="DM"+std::to_string(sequence);
+            }
             v.deathmatch=phase=="TIEBREAK";v.cutoff=historyNumber(r["cutoffScore"]);
             auto const ownQualified=r["ownQualified"].asBool();if(ownQualified.isOk())v.ownQualified=ownQualified.unwrap();
             if(v.completed)if(auto rank=r["ownRank"].asInt();rank.isOk()&&rank.unwrap()>0)v.ownRank=static_cast<int>(rank.unwrap());

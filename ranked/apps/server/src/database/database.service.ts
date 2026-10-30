@@ -56,6 +56,7 @@ const REQUIRED_MIGRATIONS = [
   "0033_survival_force_deathmatch.sql",
   "0034_survival_six_attempts.sql",
   "0035_survival_round_badges.sql",
+  "0036_survival_badge_source_round.sql",
 ] as const;
 
 export interface RankedSchemaStatus {
@@ -88,6 +89,7 @@ type SchemaProbeRow = QueryResultRow & {
   sur_tiebreaks: boolean;
   sur_tiebreak_attempts: boolean;
   sur_round_badges:boolean;
+  survival_badge_source_unique:boolean;
   sur_match_commands: boolean;
   sur_lp_ledger: boolean;
   sur_debug_matches: boolean;
@@ -259,6 +261,7 @@ export class DatabaseService implements DatabasePort, OnModuleInit, OnApplicatio
           to_regclass('public.sur_tiebreaks') IS NOT NULL AS sur_tiebreaks,
           to_regclass('public.sur_tiebreak_attempts') IS NOT NULL AS sur_tiebreak_attempts,
           to_regclass('public.sur_round_badges') IS NOT NULL AS sur_round_badges,
+          EXISTS(SELECT 1 FROM pg_index WHERE indexrelid=to_regclass('public.sur_round_badges_source_result') AND indisunique AND indisvalid) AS survival_badge_source_unique,
           to_regclass('public.sur_match_commands') IS NOT NULL AS sur_match_commands,
           to_regclass('public.sur_lp_ledger') IS NOT NULL AS sur_lp_ledger,
           to_regclass('public.sur_debug_matches') IS NOT NULL AS sur_debug_matches,
@@ -367,6 +370,7 @@ export class DatabaseService implements DatabasePort, OnModuleInit, OnApplicatio
         ["sur_tiebreaks", "table sur_tiebreaks"],
         ["sur_tiebreak_attempts", "table sur_tiebreak_attempts"],
         ["sur_round_badges", "table sur_round_badges"],
+        ["survival_badge_source_unique", "Survival per-source-round badge identity"],
         ["sur_match_commands", "table sur_match_commands"],
         ["sur_lp_ledger", "table sur_lp_ledger"],
         ["sur_debug_matches", "table sur_debug_matches"],

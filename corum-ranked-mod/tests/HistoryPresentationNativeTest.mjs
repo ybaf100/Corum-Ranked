@@ -31,7 +31,7 @@ int main(){
  assert(recordedMapDifficulty("Auto")->nativeCode==-1);assert(!recordedMapDifficulty("unknown"));
  assert(historyMapPanelHeight(180,false)<historyMapPanelHeight(180,true));assert(historyMapPanelHeight(390,false)<historyMapPanelHeight(390,true));assert(rounds.size()==3&&rounds[0].levelId==123&&rounds[0].standings[0].progress==82.345);
  assert(rounds[0].standings[0].own&&rounds[0].standings[0].tiedPlayers==2&&rounds[0].standings[0].attempts==3);
- assert(rounds[1].label=="FINAL"&&!rounds[1].completed&&rounds[1].standings.empty());assert(rounds[2].label=="DEATH MATCH");
+ assert(rounds[1].label=="FINAL"&&!rounds[1].completed&&rounds[1].standings.empty());assert(rounds[2].label=="DM1");
  record["rounds"][0]["phase"]="ROUND_3";assert(historyRounds(record,true)[0].label=="R1");
  record["rounds"][0]["phase"]="ROUND_4";assert(historyRounds(record,true)[0].label=="R1");
  auto solo=matjson::parse(R"({"rounds":[{"roundNumber":2,"completed":true,"levelId":456,"mapTitle":"Solo","scoreA":400,"scoreB":200,"bestProgressA":82,"bestProgressB":100,"clearedB":true}],"deathmatches":[{"sequence":1,"completed":true,"levelId":789,"bestProgressA":82.345,"bestProgressB":82.345,"nextDeathmatchSequence":2},{"sequence":2,"completed":true}]})").unwrap();

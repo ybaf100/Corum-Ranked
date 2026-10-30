@@ -16,17 +16,19 @@ test('production native replay boundary records only consumed P1/P2 commands, bl
 namespace gd{template<class T>using vector=std::vector<T>;}
 enum class PlayerButton{Jump=1};struct PlayerButtonCommand{PlayerButton m_button=PlayerButton::Jump;bool m_isPush=false,m_isPlayer2=false;int m_step=0;double m_timestamp=0;};
 struct GJGameLevel{int m_levelID=123;};
-struct GJBaseGameLayer{gd::vector<PlayerButtonCommand>m_queuedButtons;int m_currentStep=0,nativeInputs=0,nativeUpdates=0,consumed=0;bool m_isTestMode=false,m_isPracticeMode=false,m_isPaused=false;void handleButton(bool,int,bool){++nativeInputs;}
+using Json=matjson::Value;
+struct PlayerObject{};Json replayMotion(PlayerObject*){return Json::array();}
+struct GJBaseGameLayer{double m_timestamp=0;PlayerObject*m_player1=nullptr,*m_player2=nullptr;gd::vector<PlayerButtonCommand>m_queuedButtons;int m_currentStep=0,nativeInputs=0,nativeUpdates=0,consumed=0;bool m_isTestMode=false,m_isPracticeMode=false,m_isPaused=false;void handleButton(bool,int,bool){++nativeInputs;}
  void processQueuedButtons(float,bool){std::erase_if(m_queuedButtons,[&](auto const&c){if(c.m_step<=m_currentStep){++consumed;return true;}return false;});}
  void update(float){++nativeUpdates;assert(m_isTestMode&&!m_isPaused);}
 };
 struct PlayLayer:GJBaseGameLayer{GJGameLevel level;GJGameLevel*m_level=&level;static inline PlayLayer*current=nullptr;static PlayLayer*get(){return current;}};
 static corum::ranked::replay::Playback* activePlayback=nullptr;
-struct CorumSurvivalReplayLayer:PlayLayer{struct Fields{bool replayOwned=false,liveWorldOwned=false,replayAdvancing=false,survivalReplayLevel=false,survivalLiveLevel=false;}fields;Fields*m_fields=&fields;corum::ranked::replay::Playback*worldPlayback(){return activePlayback;}};using CorumRankedPlayLayer=CorumSurvivalReplayLayer;
+struct CorumSurvivalReplayLayer:PlayLayer{struct Fields{bool ready=true,internalReset=false,preInput=false,replayOwned=false,liveWorldOwned=false,replayAdvancing=false,survivalReplayLevel=false,survivalLiveLevel=false;}fields;Fields*m_fields=&fields;corum::ranked::replay::Playback*worldPlayback(){return activePlayback;}};using CorumRankedPlayLayer=CorumSurvivalReplayLayer;
 static PlayLayer*persistenceOwner=nullptr;struct ScopedPersistenceOwner{PlayLayer*old=persistenceOwner;ScopedPersistenceOwner(PlayLayer*p){persistenceOwner=p;}~ScopedPersistenceOwner(){persistenceOwner=old;}};
 struct ScopedRealGameplayEnd{bool&value;bool old;ScopedRealGameplayEnd(bool&v,bool n):value(v),old(v){v=n;}~ScopedRealGameplayEnd(){value=old;}};
 namespace corum::ranked{
-namespace replay {struct Recorder{std::vector<matjson::Value>records;bool enabled=true;static Recorder&get(){static Recorder r;return r;}bool active()const{return enabled;}bool inNativeFrame()const{return true;}void add(matjson::Value v){records.push_back(v);}};}
+namespace replay {struct Recorder{std::vector<matjson::Value>records;bool enabled=true;static Recorder&get(){static Recorder r;return r;}bool active()const{return enabled;}bool inNativeFrame()const{return true;}void add(matjson::Value v){records.push_back(v);}void nativeInput(matjson::Value v){records.push_back(v);}};}
 struct SurvivalRuntime{bool official=true,free=false;static SurvivalRuntime&get(){static SurvivalRuntime r;return r;}bool gameplayLevel(int id)const{return official&&id==123;}bool freePlaying()const{return free;}};
 struct SurvivalSpectatorRuntime{bool worldOwned=false;static SurvivalSpectatorRuntime&get(){static SurvivalSpectatorRuntime s;return s;}bool world()const{return worldOwned;}};
 ${method(play,'void advanceSurvivalReplayWorld(')}

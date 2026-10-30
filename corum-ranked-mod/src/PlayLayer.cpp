@@ -2529,7 +2529,7 @@ public:
                     fmt::runtime(corum::ranked::i18n::text("placement-record-row","{} - {}% ({} pts)")),
                     ordinal,
                     formatScore(records[rank].progress),
-                    formatScore(records[rank].score)
+                    corum::ranked::soloScoreText(records[rank].score)
                 )
             );
             setHudVisible(row, true);
@@ -2682,10 +2682,10 @@ public:
             m_fields->qualifyingPercent
         );
         if (placement) updatePlacementTopHud(liveProgress);
-        setHudText(m_fields->ownScoreLabel, formatScore(ownLiveScore,match.deathmatchSequence>0));
+        setHudText(m_fields->ownScoreLabel, match.deathmatchSequence>0?formatScore(ownLiveScore,true):corum::ranked::soloScoreText(ownLiveScore));
         limitHudWidth(m_fields->ownScoreLabel, 76.0f, 0.714f, 0.26f);
         auto const opponentScore = ownIsA ? match.scoreB : match.scoreA;
-        setHudText(m_fields->opponentScoreLabel, formatScore(opponentScore,match.deathmatchSequence>0));
+        setHudText(m_fields->opponentScoreLabel, match.deathmatchSequence>0?formatScore(opponentScore,true):corum::ranked::soloScoreText(opponentScore));
         limitHudWidth(m_fields->opponentScoreLabel, 76.0f, 0.714f, 0.26f);
         auto ownChecks = presentation.ownChecks;
         if (!presentation.deathmatch) ownChecks = corum::ranked::clearChecks(runtime.localDisplayClears());
@@ -3049,7 +3049,9 @@ class $modify(CorumRankedSpectatorDummyPlayer, PlayerObject) {
         auto const observed = layer && layer->observesSpectatorPlayer(this);
         auto const teleportedBefore = m_wasTeleported;
         auto const before = observed ? layer->observedSpectatorPlayerPose(this) : corum::ranked::SpectatorGhostPose{};
+        corum::ranked::survivalReplayPlayerStep(this,dt,true);
         PlayerObject::update(dt);
+        corum::ranked::survivalReplayPlayerStep(this,dt,false);
         // Native teleport flag also covers object-driven relocation outside the
         // portal entry callback. A position delta alone never creates evidence.
         if (observed && !teleportedBefore && m_wasTeleported)

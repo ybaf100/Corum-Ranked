@@ -1,5 +1,7 @@
 #pragma once
 #include "SurvivalReplayPolicy.hpp"
+#include "SurvivalReplayPlayerState.hpp"
+#include "SurvivalReplayCompatibility.hpp"
 #include "../domain/Sha256.hpp"
 #include <matjson.hpp>
 #include <fstream>
@@ -33,7 +35,32 @@ inline std::string metadataProblem(Json const& j){
 inline bool metadataValid(Json const& j){return metadataProblem(j).empty();}
 inline bool replayButtonCommandValid(Json const& r){
     return integer(r,"button")>=1&&integer(r,"button")<=3&&r["down"].isBool()&&r["player2"].isBool()&&
-        integer(r,"nativeStep")>=0&&r["timestamp"].isNumber()&&std::isfinite(number(r,"timestamp"));
+        integer(r,"nativeStep")>=0&&integer(r,"nativeStep")<=std::numeric_limits<int>::max()&&r["timestamp"].isNumber()&&std::isfinite(number(r,"timestamp"));
+}
+inline bool replayButtonQueueValid(Json const& value){
+    auto values=value.asArray();return values.isOk()&&values.unwrap().size()<=4096&&std::all_of(values.unwrap().begin(),values.unwrap().end(),replayButtonCommandValid);
+}
+template<class Commands> Json encodeReplayButtons(Commands const& commands){
+    auto values=Json::array();for(auto const& c:commands){Json v;v["button"]=static_cast<int>(c.m_button);v["down"]=c.m_isPush;v["player2"]=c.m_isPlayer2;v["nativeStep"]=c.m_step;v["timestamp"]=c.m_timestamp;values.push(std::move(v));}return values;
+}
+template<class Command> Command decodeReplayButton(Json const& input){
+    if(!replayButtonCommandValid(input))throw std::runtime_error("Invalid native replay command");
+    Command c;c.m_button=static_cast<decltype(c.m_button)>(integer(input,"button"));c.m_isPush=input["down"].asBool().unwrap();c.m_isPlayer2=input["player2"].asBool().unwrap();c.m_step=static_cast<int>(integer(input,"nativeStep"));c.m_timestamp=number(input,"timestamp");return c;
+}
+inline bool replayDispatchValid(Json const& value){
+    return replayButtonCommandValid(value)&&(value["before"].isArray()||value["before"].isNull())&&(value["after"].isArray()||value["after"].isNull());
+}
+inline std::string replayInitialDataProblem(Json const& initial){
+    if(integer(initial,"physicsSchema")!=ReplayPhysicsSchema)return "LEGACY_INITIAL_PHYSICS_UNAVAILABLE";
+    if(auto problem=replayPlayerDataProblem(initial["player1"]);!problem.empty())return problem;
+    if(!initial["player2"].isNull())if(auto problem=replayPlayerDataProblem(initial["player2"]);!problem.empty())return problem;
+    if(!replayButtonQueueValid(initial["queued"]))return "INITIAL_QUEUE_UNAVAILABLE";
+    for(auto key:{"nativeStep","resumeTimer"})if(!replayPhysicsFits<int>(initial[key]))return "INITIAL_CLOCK_UNAVAILABLE";
+    for(auto key:{"started","inResetDelay","dual","clickBetweenSteps","clickOnSteps","isBetweenSteps"})if(!initial[key].isBool())return "INITIAL_CLOCK_UNAVAILABLE";
+    if(initial["dual"].asBool().unwrap()&&initial["player2"].isNull())return "INITIAL_DUAL_PLAYER_UNAVAILABLE";
+    for(auto key:{"attemptTime","levelTime","extraDelta","timestamp","timeWarp"})if(!replayPhysicsFits<double>(initial[key]))return "INITIAL_CLOCK_UNAVAILABLE";
+    if(number(initial,"timeWarp")<=0||number(initial,"attemptTime")<0||number(initial,"levelTime")<0)return "INITIAL_CLOCK_INVALID";
+    return {};
 }
 inline bool recordValid(Json const& r){
     auto kind=str(r,"kind");if(integer(r,"tick")<0||!std::isfinite(number(r,"elapsed"))||number(r,"elapsed")<0)return false;
@@ -44,12 +71,18 @@ inline bool recordValid(Json const& r){
         return true;
     }
     if(kind=="input")return replayButtonCommandValid(r);
-    if(kind=="frame"||kind=="step")return std::isfinite(number(r,"dt"))&&(kind=="frame"?number(r,"dt")>0:number(r,"dt")>=0)&&number(r,"dt")<=1&&
-      (kind=="frame"||(r["half"].isBool()&&r["last"].isBool()&&integer(r,"nativeStep")>=0));
+    if(kind=="dispatch")return replayDispatchValid(r);
+    if(kind=="frame"||kind=="step"){
+        if(!std::isfinite(number(r,"dt"))||(kind=="frame"?number(r,"dt")<=0:number(r,"dt")<0)||number(r,"dt")>1)return false;
+        if(kind=="step")return r["half"].isBool()&&r["last"].isBool()&&integer(r,"nativeStep")>=0;
+        if(!r["queued"].isNull()&&!replayButtonQueueValid(r["queued"]))return false;
+        if(!r["preInputs"].isNull()){auto inputs=r["preInputs"].asArray();if(inputs.isErr()||inputs.unwrap().size()>4096||!std::all_of(inputs.unwrap().begin(),inputs.unwrap().end(),replayDispatchValid))return false;}
+        return true;
+    }
     if(kind=="pose")return decodeSpectatorPose(r).has_value()&&number(r,"progress")>=0&&number(r,"progress")<=100;
     if(kind=="initial"){
         for(auto key:{"randomSeed","replayRandSeed"}){auto text=str(r,key);std::uint64_t n=0;auto parsed=std::from_chars(text.data(),text.data()+text.size(),n);if(text.empty()||parsed.ec!=std::errc{}||parsed.ptr!=text.data()+text.size())return false;}
-        return true;
+        return r["physicsSchema"].isNull()||replayInitialDataProblem(r).empty();
     }
     if(kind=="random")return decodeSpectatorRandomEvent(r["event"]).has_value();
     if(kind=="anchor")return (str(r,"event")=="TELEPORT"||str(r,"event")=="SPIDER_SNAP")&&r["player2"].isBool()&&
@@ -105,7 +138,8 @@ inline std::string roundStorageKey(Json const& metadata){
     return sha256Text(str(metadata,"matchId")+"\n"+str(metadata,"roundKey")+"\n"+std::to_string(integer(metadata,"mapGeneration"))+"\n"+str(metadata,"participantId")+"\n"+(metadata["debug"].asBool().unwrapOr(false)?"debug":"online"));
 }
 inline bool receiptMatches(Document const& d,Receipt const& r){auto const& m=d.metadata;
-    return r.accepted&&r.ended&&d.complete&&!d.records.empty()&&str(d.records.front(),"kind")=="initial"&&
+    return (integer(m,"nativeInputVersion")!=2||(!d.records.empty()&&replayInitialDataProblem(d.records.front()).empty()&&replayPhysicsEnvironmentProblem(m["physicsEnvironment"]).empty()))&&
+      r.accepted&&r.ended&&d.complete&&!d.records.empty()&&str(d.records.front(),"kind")=="initial"&&
       std::any_of(d.records.begin(),d.records.end(),[](auto const& item){return str(item,"kind")=="frame";})&&
       std::any_of(d.records.begin(),d.records.end(),[](auto const& item){return str(item,"kind")=="pose";})&&str(m,"matchId")==r.matchId&&str(m,"roundKey")==r.roundKey&&str(m,"attemptId")==r.attemptId&&
       str(m,"participantId")==r.participantId&&integer(m,"mapGeneration")==r.mapGeneration&&integer(m,"levelId")==r.levelId&&

@@ -43,7 +43,7 @@ double currentProgress(PlayLayer* layer) {
 }
 
 std::string formatNumber(double value) {
-    return corum::ranked::rankedScoreText(value);
+    return corum::ranked::soloScoreText(value);
 }
 
 std::string formatDeathmatchDelta(double value) {
@@ -92,7 +92,7 @@ ccColor3B deltaColor(double value, double fullColorAt) {
 }
 
 std::string signedValue(double value, std::string const& suffix) {
-    return corum::ranked::rankedScoreText(value,false,true)+suffix;
+    return corum::ranked::soloScoreText(value,true)+suffix;
 }
 
 float renderedWidth(CCLabelBMFont* label) {
@@ -426,7 +426,7 @@ class $modify(CorumRankedGameplayUx, PlayLayer) {
                 : std::nullopt;
             ownScore = runtime.localDisplayScore(currentProgress(this), qualifying);
         }
-        auto const difference = std::trunc(ownScore) - std::trunc(opponentScore);
+        auto const difference = ownScore - opponentScore;
         setShadowText(m_fields->scoreDelta, signedValue(difference, ""));
         setShadowColor(m_fields->scoreDelta, deltaColor(difference, 200.0));
         positionNormalTimerPair();
