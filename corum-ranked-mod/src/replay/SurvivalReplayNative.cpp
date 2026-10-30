@@ -77,7 +77,17 @@ public:
  bool init(GJGameLevel* level,bool useReplay,bool noObjects){
    m_fields->replayOwned=level&&corum::ranked::replay::Runtime::get().owns(static_cast<int>(level->m_levelID));
    m_fields->liveWorldOwned=level&&corum::ranked::SurvivalSpectatorRuntime::get().sceneLevel(static_cast<int>(level->m_levelID))&&corum::ranked::SurvivalSpectatorRuntime::get().world();
-   if(!PlayLayer::init(level,useReplay,noObjects))return false;
+   // A failed restore must never leak replay's leased physics into ordinary
+   // gameplay. Retry before entering Native init, outside every CBF callback.
+   if(!m_fields->replayOwned&&!m_fields->liveWorldOwned&&corum::ranked::replay::cbfReplayHooksHeld()){
+     corum::ranked::replay::releaseCbfReplayHooks();
+     if(corum::ranked::replay::cbfReplayHooksHeld()){
+       log::error("[SurvivalReplayCBF] Native scene admission blocked: CBF_HOOK_RESTORE_FAILED");
+       queueInMainThread([]{FLAlertLayer::create("CBF",corum::ranked::i18n::text("replay-cbf-restore-failed","CBF physics could not be restored. Restart Geometry Dash before playing.").c_str(),"OK")->show();});
+       return false;
+     }
+   }
+   if(!PlayLayer::init(level,useReplay,noObjects)){if(m_fields->replayOwned)corum::ranked::replay::Runtime::get().exited();if(m_fields->liveWorldOwned)corum::ranked::SurvivalSpectatorRuntime::get().sceneExited();return false;}
    if(m_fields->replayOwned){m_isTestMode=true;resetReplayInitial();addReplayHud();}
    if(m_fields->liveWorldOwned)resetReplayInitial();m_fields->ready=true;return true;
  }
@@ -117,6 +127,7 @@ public:
         auto problem=corum::ranked::replay::replayInitialDataProblem(initial);
         if(problem.empty())problem=corum::ranked::replay::replayPlayerStateProblem(m_player1,initial["player1"],replayWorldReferences(this,m_player1));
         if(problem.empty())problem=corum::ranked::replay::replayPlayerStateProblem(m_player2,initial["player2"],replayWorldReferences(this,m_player2));
+        if(problem.empty()&&replay->cbf())problem=corum::ranked::replay::validateCbfInitial(this,initial["cbfInitial"]);
         if(!problem.empty()){replay->reject(problem);return;}
         auto seed=numFromString<std::uint64_t>(initial["randomSeed"].asString().unwrapOr(""));
         auto replaySeed=numFromString<std::uint64_t>(initial["replayRandSeed"].asString().unwrapOr(""));
@@ -130,6 +141,7 @@ public:
         m_clickBetweenSteps=initial["clickBetweenSteps"].asBool().unwrap();m_clickOnSteps=initial["clickOnSteps"].asBool().unwrap();m_isBetweenSteps=initial["isBetweenSteps"].asBool().unwrap();
         corum::ranked::replay::applyReplayPlayerState(m_player1,initial["player1"]);corum::ranked::replay::applyReplayPlayerState(m_player2,initial["player2"]);
         auto const queued=initial["queued"].asArray().unwrap();m_queuedButtons.clear();for(auto const& value:queued)m_queuedButtons.push_back(corum::ranked::replay::decodeReplayButton<PlayerButtonCommand>(value));
+        if(replay->cbf())corum::ranked::replay::restoreCbfInitial(this,initial["cbfInitial"]);
         m_fields->desyncReported=false;saveReplayCamera();
     }
     void resetReplayTrace(){m_fields->trace=Json::array();m_fields->playerUpdates={};}
@@ -138,7 +150,7 @@ public:
         value["nativeStep"]=m_currentStep;value["timestamp"]=m_timestamp;value["extraDelta"]=m_extraDelta;
         value["randomSeed"]=std::to_string(m_randomSeed);value["replayRandSeed"]=std::to_string(m_replayRandSeed);
         value["pendingButtons"]=corum::ranked::replay::encodeReplayButtons(m_queuedButtons);
-        auto count=Json::array();for(auto n:m_fields->playerUpdates)count.push(static_cast<std::int64_t>(n));value["playerUpdates"]=std::move(count);if(detailed)value["trace"]=m_fields->trace;return value;
+        auto count=Json::array();for(auto n:m_fields->playerUpdates)count.push(static_cast<std::int64_t>(n));value["playerUpdates"]=(corum::ranked::replay::Recorder::get().cbfCapture()||((m_fields->replayOwned||m_fields->liveWorldOwned)&&worldPlayback()&&worldPlayback()->cbf()))?corum::ranked::replay::cbfNativeUpdateCounts():std::move(count);if(detailed)value["trace"]=m_fields->trace;return value;
     }
     void reportReplayFailure(Json before=nullptr){
         auto* replay=worldPlayback();if(!replay)return;
@@ -170,6 +182,7 @@ public:
     }
     void pumpReplay(float dt){
         auto* replay=worldPlayback();if(!replay)return;
+        if(!replay->desync())if(auto problem=corum::ranked::replay::replayPhysicsEnvironmentMismatch(replay->metadata()["physicsEnvironment"],corum::ranked::replay::captureReplayPhysicsEnvironment());!problem.empty())replay->reject(problem);
         if(m_fields->replayOwned&&m_isPaused){FMODAudioEngine::sharedEngine()->pauseMusic(0);return;}
         if(m_fields->liveWorldOwned){
           auto frame=corum::ranked::SpectatorLiveRuntime::survival().presentationFrame();if(!frame||!frame->pose||!frame->pose->progress)return;
@@ -194,7 +207,9 @@ public:
                 if(auto problem=corum::ranked::replay::prepareReplayInputBoundary(m_queuedButtons,frame->queued,replay->pendingInputs());!problem.empty())replay->reject(problem,frame->queued,corum::ranked::replay::encodeReplayButtons(m_queuedButtons));
                 if(replay->desync())break;
             }
+            if(replay->cbf())corum::ranked::replay::beginCbfNativeFrame(this,replay);
             {m_fields->replayAdvancing=true;corum::ranked::advanceSurvivalReplayWorld(this,static_cast<float>(frame->dt));m_fields->replayAdvancing=false;}
+            if(replay->cbf())corum::ranked::replay::finishCbfNativeFrame();
             auto pose=replayPose(this);pose["physics"]=physicsEvidence();replay->completeFrame(pose);
             reportReplayFailure(before);
             if(m_fields->liveWorldOwned)saveReplayCamera();
@@ -238,11 +253,12 @@ public:
 #endif
     auto& survival=corum::ranked::SurvivalRuntime::get();auto& recorder=corum::ranked::replay::Recorder::get();
     bool official=play->m_level&&survival.gameplayLevel(static_cast<int>(play->m_level->m_levelID))&&!survival.freePlaying()&&!play->m_isPracticeMode&&!play->m_isTestMode&&survival.canPlay();
-    bool frameBegan=false;
+    bool frameBegan=false,cbfFrameBegan=false;
     if(official&&std::isfinite(dt)&&dt>0&&dt<=1&&!recorder.inNativeFrame()&&!play->m_isPaused&&play->m_player1&&!play->m_player1->m_isDead&&!play->m_hasCompletedLevel){
       if(survival.localAttemptId().empty()&&survival.beginAttempt()&&recorder.active()){
         matjson::Value initial;initial["kind"]="initial";initial["randomSeed"]=std::to_string(m_randomSeed);initial["replayRandSeed"]=std::to_string(m_replayRandSeed);
         initial["physicsSchema"]=corum::ranked::replay::ReplayPhysicsSchema;
+        if(recorder.cbfCapture())initial["cbfInitial"]=corum::ranked::replay::captureCbfInitial(play);
         initial["player1"]=corum::ranked::replay::captureReplayPlayerState(play->m_player1,replayWorldReferences(play,play->m_player1));
         initial["player2"]=corum::ranked::replay::captureReplayPlayerState(play->m_player2,replayWorldReferences(play,play->m_player2));
         initial["queued"]=corum::ranked::replay::encodeReplayButtons(m_queuedButtons);initial["timestamp"]=m_timestamp;
@@ -250,7 +266,7 @@ public:
         initial["clickBetweenSteps"]=m_clickBetweenSteps;initial["clickOnSteps"]=m_clickOnSteps;initial["isBetweenSteps"]=m_isBetweenSteps;
         initial["started"]=play->m_started;initial["inResetDelay"]=play->m_inResetDelay;initial["attemptTime"]=play->m_attemptTime;initial["levelTime"]=static_cast<double>(play->m_gameState.m_levelTime);initial["extraDelta"]=m_extraDelta;initial["nativeStep"]=m_currentStep;initial["resumeTimer"]=m_resumeTimer;initial["pose"]=replayPose(play);if(auto problem=corum::ranked::replay::replayInitialDataProblem(initial);!problem.empty())recorder.unsupported(problem);else recorder.add(initial);
       }
-      if(recorder.active()){replay->resetReplayTrace();corum::ranked::beginNativeWorldEventCapture(play);recorder.nativeFrameBegin();frameBegan=true;recorder.elapsed(play->m_attemptTime);matjson::Value frame;frame["kind"]="frame";frame["dt"]=static_cast<double>(dt);frame["queued"]=corum::ranked::replay::encodeReplayButtons(m_queuedButtons);frame["preInputs"]=recorder.takePreInputs();recorder.add(frame);}
+      if(recorder.active()&&recorder.physicsEnvironmentUnchanged()){if(recorder.cbfCapture()){corum::ranked::replay::beginCbfNativeFrame(play);cbfFrameBegan=true;}replay->resetReplayTrace();corum::ranked::beginNativeWorldEventCapture(play);recorder.nativeFrameBegin();frameBegan=true;recorder.elapsed(play->m_attemptTime);matjson::Value frame;frame["kind"]="frame";frame["dt"]=static_cast<double>(dt);frame["queued"]=corum::ranked::replay::encodeReplayButtons(m_queuedButtons);frame["preInputs"]=recorder.takePreInputs();recorder.add(frame);}
     }
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
     auto beforePhysics=std::chrono::steady_clock::now();
@@ -259,6 +275,7 @@ public:
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
     auto afterPhysics=std::chrono::steady_clock::now();
 #endif
+    if(cbfFrameBegan){auto cbf=corum::ranked::replay::finishCbfNativeFrame();if(auto error=corum::ranked::replay::cbfNativeFrameError();!error.empty())recorder.unsupported(error);else recorder.add(std::move(cbf));}
     if(frameBegan&&recorder.active()){auto pose=replayPose(play);pose["physics"]=replay->physicsEvidence();pose["kind"]="pose";recorder.elapsed(play->m_attemptTime);recorder.add(pose);}
     if(frameBegan)recorder.nativeFrameEnd();
     if(official)replay->showCaptureError();

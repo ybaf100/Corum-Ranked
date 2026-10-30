@@ -5,21 +5,22 @@ namespace corum::ranked::replay {
 // Drives verified native callbacks; no remote poses are used to move the local player.
 class Playback final {
 public:
-    struct Frame{double dt=0;Json queued=nullptr,preInputs=nullptr;std::vector<Json> inputs,steps,poses,anchors,buttons,dispatches;std::vector<SpectatorRandomEvent> randoms;};
+    struct Frame{double dt=0;Json queued=nullptr,preInputs=nullptr,cbf=nullptr;std::vector<Json> inputs,steps,poses,anchors,buttons,dispatches;std::vector<SpectatorRandomEvent> randoms;};
     explicit Playback(Document document):m_document(std::move(document)){
         if(!m_document.complete||m_document.records.empty()||str(m_document.records.front(),"kind")!="initial")throw std::runtime_error("Replay initial state unavailable");
         m_initial=m_document.records.front();Frame frame;
         for(auto& r:m_document.records){auto kind=str(r,"kind");
           if(kind=="frame"){if(frame.dt>0)m_frames.push_back(std::move(frame));frame={};frame.dt=number(r,"dt");frame.queued=r["queued"];frame.preInputs=r["preInputs"];}
           else if(kind=="random"){if(auto event=decodeSpectatorRandomEvent(r["event"]))frame.randoms.push_back(std::move(*event));}
-          else if(kind=="dispatch")frame.dispatches.push_back(std::move(r));else if(kind=="buttons")frame.buttons.push_back(std::move(r));else if(kind=="anchor")frame.anchors.push_back(std::move(r));else if(kind=="input")frame.inputs.push_back(std::move(r));else if(kind=="step")frame.steps.push_back(std::move(r));else if(kind=="pose")frame.poses.push_back(std::move(r));
+          else if(kind=="cbf")frame.cbf=std::move(r);else if(kind=="dispatch")frame.dispatches.push_back(std::move(r));else if(kind=="buttons")frame.buttons.push_back(std::move(r));else if(kind=="anchor")frame.anchors.push_back(std::move(r));else if(kind=="input")frame.inputs.push_back(std::move(r));else if(kind=="step")frame.steps.push_back(std::move(r));else if(kind=="pose")frame.poses.push_back(std::move(r));
         }if(frame.dt>0)m_frames.push_back(std::move(frame));if(m_frames.empty())throw std::runtime_error("Replay native timeline unavailable");
+        if(cbf())for(auto const& frame:m_frames)if(!cbfFrameValid(frame.cbf))throw std::runtime_error("CBF Native boundary tape incomplete; existing file preserved");
         double time=0;for(auto& f:m_frames){std::sort(f.randoms.begin(),f.randoms.end(),[](auto const&a,auto const&b){return a.ordinal<b.ordinal;});time+=f.dt;m_times.push_back(time);if(!f.poses.empty())m_anchors.push_back({number(f.poses.back(),"progress"),time});}
         std::sort(m_anchors.begin(),m_anchors.end(),[](auto const&a,auto const&b){return a.progress<b.progress||(a.progress==b.progress&&a.time<b.time);});
         m_document.metadata["captureCompleteness"]=m_document.footer["captureCompleteness"];
         m_document.records.clear();m_document.records.shrink_to_fit();
     }
-    void restart(){m_index=0;m_time=0;m_budget=0;m_desync=false;m_failure=Json();m_recordedTick=0;m_step=m_anchor=m_random=m_buttons=m_legacyInput=m_dispatch=0;m_presentedPose=nullptr;m_seeking=m_target>0;}
+    void restart(){m_index=0;m_time=0;m_budget=0;m_desync=false;m_failure=Json();m_errorCounts=Json::object();m_recordedTick=0;m_step=m_anchor=m_random=m_buttons=m_legacyInput=m_dispatch=0;m_presentedPose=nullptr;m_seeking=m_target>0;}
     void seek(double seconds){m_target=std::clamp(seconds,0.,duration());m_seeking=std::abs(m_target-m_time)>1e-6;if(m_target<m_time)m_reset=true;}
     void followRemote(std::string const& attempt,double elapsed,double progress){
         if(!std::isfinite(elapsed)||!std::isfinite(progress)||progress<0||progress>100)return;
@@ -51,10 +52,12 @@ public:
     bool desync()const{return m_desync;}
     Json const& failure()const{return m_failure;}
     void reject(std::string const& reason,Json expected=Json(),Json actual=Json()){
-        if(m_desync)return;
-        m_desync=true;m_failure["reason"]=reason;m_failure["frame"]=static_cast<std::int64_t>(m_index);
+        auto category=reason.substr(0,reason.find(':'));m_errorCounts[category]=m_errorCounts[category].asInt().unwrapOr(0)+1;
+        if(m_desync){m_failure["errorCounts"]=m_errorCounts;return;}
+        m_desync=true;m_failure["errorCounts"]=m_errorCounts;m_failure["accuracyMode"]=metadata()["accuracyMode"];m_failure["physicsEnvironment"]=metadata()["physicsEnvironment"];m_failure["reason"]=reason;m_failure["frame"]=static_cast<std::int64_t>(m_index);
         m_failure["step"]=static_cast<std::int64_t>(m_step);m_failure["buttonDispatches"]=static_cast<std::int64_t>(m_buttons);
         m_failure["dispatchesConsumed"]=static_cast<std::int64_t>(m_dispatch);m_failure["previousExpected"]=m_presentedPose?*m_presentedPose:Json();
+        m_failure["firstDifferentField"]=cbfFirstDifference(expected,actual);m_failure["nativeInputVersion"]=integer(metadata(),"nativeInputVersion");m_failure["physicsSchema"]=integer(initial(),"physicsSchema");
         m_failure["expected"]=std::move(expected);m_failure["actual"]=std::move(actual);
     }
     Json const* nativeButtons(double dt,bool clear,int step){
@@ -71,7 +74,9 @@ public:
     }
     void nativeButtonsConsumed(Json const& expected,Json const& actual){if(expected!=actual)reject("INPUT_CONSUMPTION",expected,actual);}
 
-    bool inputV2()const{return integer(metadata(),"nativeInputVersion")==2;}
+    bool inputV2()const{return integer(metadata(),"nativeInputVersion")>=2;}
+    bool cbf()const{return integer(metadata(),"nativeInputVersion")==3;}
+    std::int64_t recordedTick()const{return m_recordedTick;}
     Json pendingInputs()const{
         if(m_index==0)return m_initial["queued"];
         auto const& previous=m_frames[m_index-1];return previous.poses.empty()?Json():previous.poses.back()["physics"]["pendingButtons"];
@@ -122,7 +127,7 @@ public:
         if(m_seeking&&(m_time>=m_target||ended())){m_seeking=false;m_budget=0;}
     }
 private:
-    Document m_document;Json m_initial,m_failure;Json const* m_presentedPose=nullptr;
+    Document m_document;Json m_initial,m_failure,m_errorCounts=Json::object();Json const* m_presentedPose=nullptr;
     struct Anchor{double progress,time;};
     std::vector<Anchor> m_anchors;
     std::vector<Frame> m_frames;std::vector<double> m_times;

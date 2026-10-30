@@ -1,3 +1,11 @@
+# v0.5.0-beta.119
+
+- Add a versioned CBF 1.5.0 Native-boundary recording/replay driver: actual applied input, substep update/collision/rotation order, Native clock and Windows ship timing.
+- Verify CBF binary/profile and hook ordering, lease only replay-owned physics hooks, and restore them before ordinary gameplay without changing user settings.
+- Preserve the v2 Vanilla/CBS path, official receipts, best files, initial-state validation and DESYNC checks; reject incomplete legacy/optional unsupported profiles without fabricated state.
+- Report the first differing physics field and error counters. Keep existing Survival badges, Death Match HUD, scoring and all server data.
+- Automated contract/build checks do not establish actual GD/device CBF playback; real-device validation remains outstanding.
+
 # v0.5.0-beta.118
 
 - Preserve queued input across native frames, restore versioned initial player physics and clocks, and verify actual button dispatch separately from queue removal.

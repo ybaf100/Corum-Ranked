@@ -103,6 +103,11 @@ safety|={'RandTriggerGameObject::triggerObject','GJBaseGameLayer::spawnGroup','G
 probes={'GJBaseGameLayer::playerTouchedTrigger','EffectGameObject::triggerObject'}
 def binary(targets):return struct.pack('<II',0xFEEDFACF,0x0100000C)+b''.join(('[GEODE_MODIFY_NAME] '+name+' [GEODE_MODIFY_ADDRESS] 0x0\\0').encode() for name in targets)
 assert set(v.verify_binary(binary(player|safety),'ios',False))==player
+win=(player-{'PlayerObject::updateSpecial'})|{'PlayerObject::updateShipRotation'}
+assert set(v.verify_binary(binary(win|safety),'win',False))==win
+try:v.verify_binary(binary((win|safety)-{'PlayerObject::updateShipRotation'}),'win',False)
+except ValueError:pass
+else:raise AssertionError('missing Windows CBF ship observer accepted')
 assert set(v.verify_binary(binary(player|safety|probes),'ios',True))==player
 for missing in ['RandTriggerGameObject::triggerObject','GJBaseGameLayer::spawnGroup','GJBaseGameLayer::checkCollisions','GJBaseGameLayer::collisionCheckObjects']:
  for debug in [False,True]:

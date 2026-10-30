@@ -17,6 +17,8 @@ public:
     void pump();
     void finishFromLast(std::string reason){finish(std::move(reason),m_bestProgress);}
     bool active()const{return !m_current.empty();}
+    bool cbfCapture()const{return active()&&m_cbf;}
+    bool physicsEnvironmentUnchanged();
     std::uint64_t tick()const{return m_tick;}
     void nextTick(){++m_tick;}
     bool inNativeFrame()const{return m_nativeFrame;}
@@ -44,7 +46,8 @@ private:
     std::map<std::string,Json> m_deferredReceipts;
     std::uint64_t m_tick=0;
     double m_elapsed=0,m_bestProgress=0;
-    bool m_receiptBusy=false,m_nativeFrame=false;
+    bool m_receiptBusy=false,m_nativeFrame=false,m_cbf=false;
+    Json m_environment;
     std::optional<std::pair<std::string,double>> m_terminal;
     Json m_preInputs=Json::array();
     std::chrono::steady_clock::time_point m_nextReceipt{},m_flushAt{};

@@ -2526,5 +2526,9 @@
   "replay-physics-unsupported": {
     "en": "Replay capture unavailable for this physics environment",
     "ko": "현재 물리 환경에서는 리플레이를 기록할 수 없습니다"
+  },
+  "replay-cbf-restore-failed": {
+    "en": "CBF physics could not be restored. Restart Geometry Dash before playing.",
+    "ko": "CBF 물리를 복구하지 못했습니다. 플레이하기 전에 Geometry Dash를 재시작하세요."
   }
 }

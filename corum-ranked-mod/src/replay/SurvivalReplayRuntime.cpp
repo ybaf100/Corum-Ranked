@@ -23,7 +23,7 @@ void Runtime::pump(){
         if(doc->metadata()[key]!=m_identity[key])throw std::runtime_error("Replay does not match this official record or map version");
       auto problem=replayInitialDataProblem(doc->initial());
       if(problem.empty())problem=replayPhysicsEnvironmentProblem(doc->metadata()["physicsEnvironment"]);
-      if(problem.empty())problem=replayPhysicsEnvironmentProblem(captureReplayPhysicsEnvironment());
+      if(problem.empty())problem=replayPhysicsEnvironmentMismatch(doc->metadata()["physicsEnvironment"],captureReplayPhysicsEnvironment());
       if(!problem.empty())throw std::runtime_error("Native replay unavailable: "+problem+". Saved record and best are preserved.");
       m_playback=std::move(doc);
     }catch(std::exception const&e){m_error=e.what();}
@@ -33,7 +33,7 @@ LevelPreparationContext Runtime::context()const{
     return {str(m_identity,"matchId"),static_cast<int>(integer(m_identity,"levelId")),static_cast<int>(integer(m_identity,"roundNumber")),0,false,0,static_cast<int>(integer(m_identity,"mapGeneration"))};
 }
 void Runtime::cancel(){if(m_scene)return;m_pendingIdentity.reset();m_requested=false;m_playback.reset();}
-void Runtime::exited(){m_scene=false;cancel();}
+void Runtime::exited(){releaseCbfReplayHooks();m_scene=false;cancel();}
 bool Runtime::validate(GJGameLevel* level){
     if(!level||integer(m_identity,"levelId")!=static_cast<int>(level->m_levelID)||integer(m_identity,"mapVersion")!=level->m_levelVersion||level->m_levelString.empty())return false;
     auto expected=str(m_identity,"mapGeometrySha256");std::string raw=level->m_levelString;
@@ -44,7 +44,8 @@ bool Runtime::validate(GJGameLevel* level){
 }
 bool Runtime::arm(GJGameLevel* level){
     if(!canLaunch()||!validate(level))return false;
-    if(auto problem=replayPhysicsEnvironmentProblem(captureReplayPhysicsEnvironment());!problem.empty()){m_error="Native replay unavailable: "+problem;return false;}
+    if(auto problem=replayPhysicsEnvironmentMismatch(m_playback->metadata()["physicsEnvironment"],captureReplayPhysicsEnvironment());!problem.empty()){m_error="Native replay unavailable: "+problem;return false;}
+    if(m_playback->cbf())if(auto problem=acquireCbfReplayHooks(captureReplayPhysicsEnvironment());!problem.empty()){m_error=problem;return false;}
     m_scene=true;return true;
 }
 namespace {

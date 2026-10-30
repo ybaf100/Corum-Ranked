@@ -6,7 +6,7 @@
 #include <matjson.hpp>
 namespace corum::ranked::replay {
 inline constexpr int FormatVersion=1;
-inline constexpr std::size_t MaxFileBytes=48*1024*1024,MaxRecords=250000,MaxBlockRecords=256,MaxPending=64;
+inline constexpr std::size_t MaxFileBytes=128*1024*1024,MaxRecords=512000,MaxBlockRecords=256,MaxPending=64;
 inline std::int64_t score(double progress,bool tiebreak){
     if(!std::isfinite(progress)||progress<0||progress>100)return -1;
     // Same nonnegative milli-percent rounding as Survival rules; ordinary rounds truncate.

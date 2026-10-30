@@ -540,6 +540,7 @@ inline constexpr std::array kTranslations {
     CatalogTranslation{"reference-loading", "REFERENCE MAP LOADING...", "기준 맵 불러오는 중..."},
     CatalogTranslation{"refresh", "REFRESH", "새로고침"},
     CatalogTranslation{"replay-capture-error", "Replay capture failed; existing best preserved", "리플레이 녹화 실패 · 기존 최고기록은 보존됩니다"},
+    CatalogTranslation{"replay-cbf-restore-failed", "CBF physics could not be restored. Restart Geometry Dash before playing.", "CBF 물리를 복구하지 못했습니다. 플레이하기 전에 Geometry Dash를 재시작하세요."},
     CatalogTranslation{"replay-damaged", "Replay file damaged", "리플레이 파일 손상"},
     CatalogTranslation{"replay-data-error", "Replay data error", "리플레이 데이터 오류"},
     CatalogTranslation{"replay-device-missing", "No replay on this device", "이 기기에 저장된 리플레이 없음"},

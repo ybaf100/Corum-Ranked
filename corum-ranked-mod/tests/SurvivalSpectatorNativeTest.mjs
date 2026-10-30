@@ -43,6 +43,7 @@ struct Pending{Operation op;std::function<void(WebResponse)>done;};inline std::v
 namespace async{template<class T>struct TaskHolder{void cancel(){}void spawn(utils::web::Operation o,std::function<void(T)>f){utils::web::pending.push_back({o,f});}};}}
 using namespace geode::utils;
 namespace corum::ranked::replay {
+inline std::string acquireCbfReplayHooks(Json const&){return {};}inline void releaseCbfReplayHooks(){}
 inline Json captureReplayPhysicsEnvironment(){Json e;e["schema"]=2;e["cbf"]["loaded"]=false;return e;}
 struct StorageBoundary{
  bool available=true,damaged=false;

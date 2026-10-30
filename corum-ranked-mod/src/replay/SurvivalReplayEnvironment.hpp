@@ -1,5 +1,6 @@
 #pragma once
 #include "SurvivalReplayCompatibility.hpp"
+#include "SurvivalReplayCbfNative.hpp"
 #include <Geode/Geode.hpp>
 #include <algorithm>
 #include <string_view>
@@ -21,6 +22,7 @@ inline matjson::Value captureReplayPhysicsEnvironment(){
 #endif
         }
     }
+    if(cbf["loaded"].asBool().unwrapOr(false)&&!cbf["disabled"].asBool().unwrapOr(true))cbf["nativeBoundary"]=cbfNativeCapability();
     environment["cbf"]=std::move(cbf);environment["mods"]=std::move(mods);
     environment["driver"]="GD_2_2081_NATIVE_FRAME_V2";
     return environment;

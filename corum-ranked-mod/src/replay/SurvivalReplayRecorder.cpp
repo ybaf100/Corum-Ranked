@@ -21,7 +21,8 @@ void Recorder::retryPending(){for(auto const& [_,m]:m_deferredReceipts){auto ret
 void Recorder::begin(Json metadata){
     auto id=str(metadata,"attemptId");if(id!=m_current&&!m_current.empty())finishFromLast("RESET");m_displayAttempt=id;
     if(auto problem=metadataProblem(metadata);!problem.empty()){note(ReplayNotice::Preparation,"METADATA","INVALID_FIELD:"+problem,metadata);return;}
-    metadata["nativeInputVersion"]=2;metadata["physicsEnvironment"]=captureReplayPhysicsEnvironment();
+    metadata["physicsEnvironment"]=captureReplayPhysicsEnvironment();m_environment=metadata["physicsEnvironment"];m_cbf=replayCbfActive(m_environment);metadata["nativeInputVersion"]=m_cbf?3:2;metadata["accuracyMode"]=m_cbf?"CBF_NATIVE_BOUNDARIES_V1":"GD_NATIVE_FRAME_V2";
+    if(m_cbf&&m_environment["cbf"]["nativeBoundary"]["leaseHeld"].asBool().unwrapOr(false)){note(ReplayNotice::Preparation,"PHYSICS_ENVIRONMENT","CBF_SOURCE_HOOKS_LEASED",metadata);return;}
     if(auto problem=replayPhysicsEnvironmentProblem(metadata["physicsEnvironment"]);!problem.empty()){
         note(ReplayNotice::Unsupported,"PHYSICS_ENVIRONMENT",problem,metadata);return;
     }
@@ -29,6 +30,13 @@ void Recorder::begin(Json metadata){
     if(!m_current.empty())finishFromLast("RESET");
     if(m_captures.size()>=8){note(ReplayNotice::Receipt,"START_APPROVAL","APPROVAL_BACKLOG",metadata);return;}
     note(ReplayNotice::None,"CAPTURE_BEGIN","VALID_IDENTITY",metadata);m_terminal.reset();m_preInputs=Json::array();m_current=str(metadata,"attemptId");m_tick=0;m_elapsed=m_bestProgress=0;m_captures[m_current]={std::move(metadata)};m_flushAt={};
+}
+bool Recorder::physicsEnvironmentUnchanged(){
+    if(!active())return false;
+    auto current=captureReplayPhysicsEnvironment();
+    auto problem=replayPhysicsEnvironmentMismatch(m_environment,current);
+    if(!problem.empty()){unsupported("PHYSICS_ENVIRONMENT_CHANGED:"+problem);return false;}
+    return true;
 }
 void Recorder::unsupported(std::string reason){
     auto found=m_captures.find(m_current);if(found==m_captures.end())return;

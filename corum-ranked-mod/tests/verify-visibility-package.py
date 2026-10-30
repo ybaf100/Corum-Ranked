@@ -14,6 +14,8 @@ def verify_binary(binary, platform, debug):
                 ("update", "updateRotation", "spiderTestJump", "setPosition", "setRotation")}
     if platform != "win":
         expected.add("PlayerObject::updateSpecial")
+    else:
+        expected.add("PlayerObject::updateShipRotation")
     player = {name for name in targets if name.startswith("PlayerObject::")}
     if player != expected:
         raise ValueError({"platform": platform, "missing": sorted(expected - player),

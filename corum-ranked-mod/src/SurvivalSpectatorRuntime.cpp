@@ -85,10 +85,11 @@ bool SurvivalSpectatorRuntime::currentScope()const{
 }
 bool SurvivalSpectatorRuntime::sceneLevel(int level)const{return m_inScene && m_authorized && m_context.levelId==level && currentScope();}
 bool SurvivalSpectatorRuntime::canLaunch()const{return m_authorized&&m_world&&!m_inScene&&!m_exitRequested&&currentScope()&&!SurvivalRuntime::get().freePlaying();}
-bool SurvivalSpectatorRuntime::arm(GJGameLevel* level){if(!canLaunch()||!SurvivalRuntime::get().validateNative(level))return false;m_inScene=true;return true;}
+bool SurvivalSpectatorRuntime::arm(GJGameLevel* level){if(!canLaunch()||!SurvivalRuntime::get().validateNative(level))return false;if(m_world->cbf())if(auto problem=replay::acquireCbfReplayHooks(replay::captureReplayPhysicsEnvironment());!problem.empty()){m_error=problem;return false;}m_inScene=true;return true;}
 void SurvivalSpectatorRuntime::freePlay(){m_startFreePlay=true;leave();}
 void SurvivalSpectatorRuntime::leave(bool chooseAgain){m_openAfterExit=chooseAgain;m_pendingTarget.clear();m_exitRequested=true;if(!m_inScene)sceneExited();}
 void SurvivalSpectatorRuntime::sceneExited(){
+    replay::releaseCbfReplayHooks();
     m_inScene=false;m_authorized=false;m_world.reset();++m_generation;m_busy=false;m_request.cancel();
     SpectatorLiveRuntime::survival().stopSurvival();
     if(!m_match.empty()&&m_match==SurvivalRuntime::get().view().id&&m_session==RankedRuntime::get().spectatorLiveSessionToken())m_leave.spawn(request().post(path()+"/leave"),[](web::WebResponse){});
@@ -120,7 +121,7 @@ void SurvivalSpectatorRuntime::tick(){
                replay::integer(document->metadata(),"mapVersion")!=v.map.version||replay::str(document->metadata(),"captureCompleteness")!="COMPLETE")throw std::runtime_error("A complete verified clear replay of this map is required on this device");
             auto problem=replay::replayInitialDataProblem(document->initial());
             if(problem.empty())problem=replay::replayPhysicsEnvironmentProblem(document->metadata()["physicsEnvironment"]);
-            if(problem.empty())problem=replay::replayPhysicsEnvironmentProblem(replay::captureReplayPhysicsEnvironment());
+            if(problem.empty())problem=replay::replayPhysicsEnvironmentMismatch(document->metadata()["physicsEnvironment"],replay::captureReplayPhysicsEnvironment());
             if(!problem.empty())throw std::runtime_error("Native clear replay unavailable: "+problem);
             m_world=std::move(document);m_error.clear();m_busy=false;
         }catch(std::exception const&e){m_error=e.what();m_authorized=false;m_busy=false;SpectatorLiveRuntime::survival().stopSurvival();}

@@ -2,6 +2,7 @@
 #include "SurvivalReplayPolicy.hpp"
 #include "SurvivalReplayPlayerState.hpp"
 #include "SurvivalReplayCompatibility.hpp"
+#include "SurvivalReplayCbfTrace.hpp"
 #include "../domain/Sha256.hpp"
 #include <matjson.hpp>
 #include <fstream>
@@ -30,6 +31,11 @@ inline std::string metadataProblem(Json const& j){
     for(auto key:{"matchId","roundKey","participantId","attemptId"})if(str(j,key).empty()||str(j,key).size()>256)return key;
     for(auto key:{"mapGeneration","levelId","mapVersion"})if(integer(j,key)<=0)return key;
     if(!hashValid(str(j,"mapGeometrySha256")))return "mapGeometrySha256";
+    if(!j["nativeInputVersion"].isNull()){
+        auto version=integer(j,"nativeInputVersion");
+        if(version<1||version>3)return "nativeInputVersion";
+        if(version==3&&(str(j,"accuracyMode")!="CBF_NATIVE_BOUNDARIES_V1"||!replayCbfActive(j["physicsEnvironment"])||!replayPhysicsEnvironmentProblem(j["physicsEnvironment"]).empty()))return "CBF_ACCURACY_PROFILE";
+    }
     return {};
 }
 inline bool metadataValid(Json const& j){return metadataProblem(j).empty();}
@@ -62,8 +68,17 @@ inline std::string replayInitialDataProblem(Json const& initial){
     if(number(initial,"timeWarp")<=0||number(initial,"attemptTime")<0||number(initial,"levelTime")<0)return "INITIAL_CLOCK_INVALID";
     return {};
 }
+inline bool cbfInitialDataValid(Json const& value){
+    if(integer(value,"schema")!=CbfBoundarySchema||!value["players"].isArray()||value["players"].size()!=2)return false;
+    for(auto const& player:value["players"]){
+        if(!replayPhysicsPointValid(player["lastPosition"])||!player["collisionLogs"].isArray()||player["collisionLogs"].size()!=4)return false;
+        for(auto const& count:player["collisionLogs"])if(count.asInt().unwrapOr(-1)!=0)return false;
+    }
+    return true;
+}
 inline bool recordValid(Json const& r){
     auto kind=str(r,"kind");if(integer(r,"tick")<0||!std::isfinite(number(r,"elapsed"))||number(r,"elapsed")<0)return false;
+    if(kind=="cbf")return cbfFrameValid(r);
     if(kind=="buttons"){
         if(!r["clear"].isBool()||integer(r,"nativeStep")<0||!std::isfinite(number(r,"dt"))||number(r,"dt")<0||number(r,"dt")>1)return false;
         for(auto key:{"queued","remaining"}){auto values=r[key].asArray();if(values.isErr()||values.unwrap().size()>4096)return false;
@@ -82,7 +97,7 @@ inline bool recordValid(Json const& r){
     if(kind=="pose")return decodeSpectatorPose(r).has_value()&&number(r,"progress")>=0&&number(r,"progress")<=100;
     if(kind=="initial"){
         for(auto key:{"randomSeed","replayRandSeed"}){auto text=str(r,key);std::uint64_t n=0;auto parsed=std::from_chars(text.data(),text.data()+text.size(),n);if(text.empty()||parsed.ec!=std::errc{}||parsed.ptr!=text.data()+text.size())return false;}
-        return r["physicsSchema"].isNull()||replayInitialDataProblem(r).empty();
+        return (r["physicsSchema"].isNull()||replayInitialDataProblem(r).empty())&&(r["cbfInitial"].isNull()||cbfInitialDataValid(r["cbfInitial"]));
     }
     if(kind=="random")return decodeSpectatorRandomEvent(r["event"]).has_value();
     if(kind=="anchor")return (str(r,"event")=="TELEPORT"||str(r,"event")=="SPIDER_SNAP")&&r["player2"].isBool()&&
@@ -137,8 +152,19 @@ inline Document decode(std::filesystem::path const& path,bool recover=false){
 inline std::string roundStorageKey(Json const& metadata){
     return sha256Text(str(metadata,"matchId")+"\n"+str(metadata,"roundKey")+"\n"+std::to_string(integer(metadata,"mapGeneration"))+"\n"+str(metadata,"participantId")+"\n"+(metadata["debug"].asBool().unwrapOr(false)?"debug":"online"));
 }
+inline bool cbfDocumentComplete(Document const& d){
+    if(integer(d.metadata,"nativeInputVersion")!=3)return true;
+    if(d.records.empty()||!cbfInitialDataValid(d.records.front()["cbfInitial"]))return false;
+    bool frame=false,proof=false;
+    for(auto const& record:d.records){auto kind=str(record,"kind");
+        if(kind=="frame"){if(frame&&!proof)return false;frame=true;proof=false;}
+        if(kind=="cbf"){if(!frame||proof||!cbfFrameValid(record))return false;proof=true;}
+        if(kind=="pose"&&frame&&!proof)return false;
+    }
+    return frame&&proof;
+}
 inline bool receiptMatches(Document const& d,Receipt const& r){auto const& m=d.metadata;
-    return (integer(m,"nativeInputVersion")!=2||(!d.records.empty()&&replayInitialDataProblem(d.records.front()).empty()&&replayPhysicsEnvironmentProblem(m["physicsEnvironment"]).empty()))&&
+    return cbfDocumentComplete(d)&&(integer(m,"nativeInputVersion")<2||(!d.records.empty()&&replayInitialDataProblem(d.records.front()).empty()&&replayPhysicsEnvironmentProblem(m["physicsEnvironment"]).empty()))&&
       r.accepted&&r.ended&&d.complete&&!d.records.empty()&&str(d.records.front(),"kind")=="initial"&&
       std::any_of(d.records.begin(),d.records.end(),[](auto const& item){return str(item,"kind")=="frame";})&&
       std::any_of(d.records.begin(),d.records.end(),[](auto const& item){return str(item,"kind")=="pose";})&&str(m,"matchId")==r.matchId&&str(m,"roundKey")==r.roundKey&&str(m,"attemptId")==r.attemptId&&

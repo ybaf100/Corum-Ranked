@@ -35,7 +35,7 @@ void frame(Recorder&r,double progress){r.nativeFrameBegin();Json f;f["kind"]="fr
 Receipt receipt(std::string id,double p){return {"match","r1",id,"p",std::string(64,'a'),1,123,1,p,p,true,p==100,true};}
 void drain(Recorder&r){for(auto&f:r.m_writes)f.get();r.m_writes.clear();}
 int main(){Recorder r;r.m_recovery.get();testEnvironment["cbf"]["loaded"]=true;testEnvironment["cbf"]["version"]="v1.5.0";testEnvironment["cbf"]["disabled"]=false;testEnvironment["cbf"]["clickOnSteps"]=false;testEnvironment["cbf"]["physicsBypass"]=false;
- r.begin(metadata("unsupported-cbf"));assert(!r.active()&&r.notice()==ReplayNotice::Unsupported&&r.error()=="CBF_ACTIVE_TIMING_UNSUPPORTED");testEnvironment["cbf"]["loaded"]=false;r.begin(metadata("bad-initial"));r.unsupported("INITIAL_PHYSICS_UNAVAILABLE");r.accepted("bad-initial",true);assert(!r.active()&&r.m_writes.empty());r.begin(metadata("first"));initial(r);frame(r,35);assert(std::filesystem::is_empty("${dir}/replays/pending"));
+ r.begin(metadata("unsupported-cbf"));assert(!r.active()&&r.notice()==ReplayNotice::Unsupported&&r.error()=="CBF_NATIVE_BOUNDARIES_UNAVAILABLE");testEnvironment["cbf"]["loaded"]=false;r.begin(metadata("bad-initial"));r.unsupported("INITIAL_PHYSICS_UNAVAILABLE");r.accepted("bad-initial",true);assert(!r.active()&&r.m_writes.empty());r.begin(metadata("first"));initial(r);frame(r,35);assert(std::filesystem::is_empty("${dir}/replays/pending"));
  // Exercise production Recorder -> validation -> disk for a real queued
  // command. Nested commands inherit the enclosing record's tick/time context.
  Json command;command["button"]=1;command["down"]=true;command["player2"]=false;command["nativeStep"]=7;command["timestamp"]=.003;
@@ -74,8 +74,26 @@ int main(){Recorder r;r.m_recovery.get();testEnvironment["cbf"]["loaded"]=true;t
  ok.value["geometryHash"]=std::string(64,'a');ok.value["accepted"]=true;ok.value["ended"]=true;ok.value["progress"]=90.;ok.value["roundBest"]=90.;ok.value["cleared"]=false;r.m_request.reply(ok);
  assert(r.m_promotions.size()==1);assert(r.m_promotions.front().result.get());r.m_promotions.clear();
  assert(str(r.storage().best(metadata("x")).get()->metadata,"attemptId")=="new-good");
-
+ // Version 3 uses the same approved recorder/storage/receipt path. These are
+ // format/transaction tests; actual CBF physics is exercised separately.
+ testEnvironment["cbf"]["loaded"]=true;testEnvironment["cbf"]["precisionFix"]=false;
+ auto& capability=testEnvironment["cbf"]["nativeBoundary"];capability["driver"]=1;capability["verified"]=true;capability["binarySha256"]=std::string(64,'b');capability["platform"]="ios";
+ auto cbfMetadata=metadata("cbf-complete");cbfMetadata["roundKey"]="cbf-round";
+ r.begin(cbfMetadata);assert(r.active()&&r.cbfCapture());
+ auto init=initialReplayPhysicsFixture();init["cbfInitial"]["schema"]=1;init["cbfInitial"]["players"]=Json::array();
+ for(int i=0;i<2;++i){Json player;player["lastPosition"]=Json::array();player["lastPosition"].push(0.);player["lastPosition"].push(105.);player["collisionLogs"]=Json::array();for(int j=0;j<4;++j)player["collisionLogs"].push(0);init["cbfInitial"]["players"].push(player);}
+ r.add(init);r.accepted("cbf-complete",true);r.nativeFrameBegin();
+ Json f;f["kind"]="frame";f["dt"]=.01;f["preInputs"]=Json::array();auto applied=command;applied["before"]=Json::array();applied["after"]=Json::array();f["preInputs"].push(applied);r.add(f);r.nativeInput(applied);
+ Json proof;proof["kind"]="cbf";proof["schema"]=1;proof["roots"]=Json::array();proof["clocks"]=Json::array();r.add(proof);
+ auto pose=corum::ranked::encodeSpectatorPose(corum::ranked::SpectatorGhostPose{});pose["kind"]="pose";pose["progress"]=50.;r.add(pose);r.finish("DEATH",50);r.nativeFrameEnd();drain(r);
+ auto cr=receipt("cbf-complete",50);cr.roundKey="cbf-round";assert(r.storage().reconcile(cr).get());auto cbfBest=r.storage().best(cbfMetadata).get();assert(cbfBest&&integer(cbfBest->metadata,"nativeInputVersion")==3&&integer(cbfBest->footer,"inputEventCount")==2);
+ auto incomplete=*cbfBest;std::erase_if(incomplete.records,[](auto const& v){return str(v,"kind")=="cbf";});assert(!receiptMatches(incomplete,cr));
+ auto unknown=cbfBest->metadata;unknown["nativeInputVersion"]=4;assert(!metadataValid(unknown));unknown["nativeInputVersion"]=3;unknown["accuracyMode"]="GD_NATIVE_FRAME_V2";assert(!metadataValid(unknown));
+ capability["leaseHeld"]=true;r.begin(metadata("leased-source"));assert(!r.active()&&r.error()=="CBF_SOURCE_HOOKS_LEASED");capability["leaseHeld"]=false;
+ r.begin(metadata("changed-environment"));r.add(init);assert(r.physicsEnvironmentUnchanged());testEnvironment["cbf"]["disabled"]=true;assert(!r.physicsEnvironmentUnchanged()&&!r.active());
+ assert(str(r.storage().best(metadata("x")).get()->metadata,"attemptId")=="new-good");
 }
+
 `;
   writeFileSync(join(dir,'test.cpp'),cpp);execFileSync('g++',['-std=c++23','-pthread','-I',json+'/include','-I',result,join(dir,'test.cpp'),join(root,'src/replay/SurvivalReplayStorage.cpp'),...['value','impl','parser','dump','external/dragonbox'].map(p=>json+'/src/'+p+'.cpp'),'-o',join(dir,'test')],{stdio:'pipe'});execFileSync(join(dir,'test'),[],{stdio:'pipe'});
  }catch(e){throw Error(e.stderr?.toString()||e.message);}finally{rmSync(dir,{recursive:true,force:true});}
