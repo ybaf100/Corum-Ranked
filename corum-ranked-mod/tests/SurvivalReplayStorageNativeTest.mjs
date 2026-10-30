@@ -62,6 +62,16 @@ int main(){
  auto cutoffReceipt=receipt("cutoff",20);cutoffReceipt.roundKey="cutoff-round";cutoffReceipt.bestAttemptId="cutoff";assert(s.reconcile(cutoffReceipt).get());auto bounded=s.best(cutoff).get();assert(bounded&&number(bounded->records.back(),"progress")==30&&integer(bounded->metadata,"verifiedFrameCount")==2&&str(bounded->metadata,"officialCompletion")=="OFFICIAL_PREFIX");
  auto destination=std::filesystem::path("${dir}/replays/survival/"+roundStorageKey(cutoff)+"/"+corum::ranked::sha256Text("cutoff")+".replay");assert(bytes(destination)==sourceBytes);auto playable=s.playback(cutoff).get();assert(playable&&playable->duration()==.02);
  auto forged=*bounded;cutoffReceipt.progress=cutoffReceipt.roundBest=25;assert(!receiptMatches(forged,cutoffReceipt));cutoffReceipt.progress=cutoffReceipt.roundBest=100;cutoffReceipt.cleared=true;assert(!receiptMatches(forged,cutoffReceipt));
+ // A killed process may have durable complete frames beyond the server's
+ // cutoff but no footer. Recovery must seal the real capture, then expose
+ // only the exact evidenced prefix; valid original bytes remain unchanged.
+ auto torn=metadata("cutoff-torn");torn["roundKey"]="cutoff-torn-round";s.begin(torn).get();initial(s,"cutoff-torn",10);
+ for(double value:{20.,30.}){Json f;f["kind"]="frame";f["dt"]=.01;f["tick"]=1;f["elapsed"]=.01;Json p;p["kind"]="pose";p["tick"]=1;p["elapsed"]=.01;p["x"]=0.;p["y"]=0.;p["rotation"]=0.;p["progress"]=value;p["mode"]="CUBE";for(auto k:{"mini","upsideDown","flipped","dual","dead","finished"})p[k]=false;s.append("cutoff-torn",{f,p}).get();}
+ auto tornPath=std::filesystem::path("${dir}/replays/pending/"+corum::ranked::sha256Text("cutoff-torn")+".tmp");auto validTornBytes=bytes(tornPath);{std::ofstream out(tornPath,std::ios::app);out<<"{torn";}
+ auto tornReceipt=receipt("cutoff-torn",20);tornReceipt.roundKey="cutoff-torn-round";tornReceipt.bestAttemptId="cutoff-torn";
+ auto foreign=tornReceipt;foreign.levelId=999;assert(!s.reconcile(foreign).get()&&bytes(tornPath)==validTornBytes+"{torn");
+ assert(s.reconcile(tornReceipt).get());auto recoveredPrefix=s.best(torn).get();assert(recoveredPrefix&&str(recoveredPrefix->footer,"captureCompleteness")=="PARTIAL_RECOVERED"&&number(recoveredPrefix->footer,"bestProgress")==30&&integer(recoveredPrefix->metadata,"verifiedFrameCount")==2);
+ auto recoveredFile=std::filesystem::path("${dir}/replays/survival/"+roundStorageKey(torn)+"/"+corum::ranked::sha256Text("cutoff-torn")+".replay");assert(bytes(recoveredFile).starts_with(validTornBytes));assert(s.playback(torn).get()->duration()==.02);
  // Server-best identity, including a tied first attempt, controls promotion.
  auto notBest=metadata("not-official-best");notBest["roundKey"]="tie-identity";s.begin(notBest).get();initial(s,"not-official-best",40);t["progress"]=40.;s.append("not-official-best",{t},true).get();auto tied=receipt("not-official-best",40);tied.roundKey="tie-identity";tied.bestAttemptId="earlier-official-attempt";assert(!s.reconcile(tied).get()&&!s.best(notBest).get());
  // A different generation, map or debug partition cannot read this best.

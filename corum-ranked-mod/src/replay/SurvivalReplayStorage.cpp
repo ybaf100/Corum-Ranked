@@ -96,16 +96,17 @@ std::future<void> Storage::discard(std::string attempt){return submit([this,atte
 std::future<bool> Storage::reconcile(Receipt r){return submit([this,r]{
     auto path=pending(r.attemptId);if(!fs::exists(path))return false;auto d=decode(path,true);
     if(!d.complete){
-      if(!r.accepted||!r.ended||d.records.empty()||str(d.records.front(),"kind")!="initial")return false;
-      auto pose=std::find_if(d.records.rbegin(),d.records.rend(),[](auto const& item){return str(item,"kind")=="pose";});
-      if(pose==d.records.rend()||score(number(*pose,"progress"),str(d.metadata,"phase")=="TIEBREAK")!=score(r.progress,str(d.metadata,"phase")=="TIEBREAK"))return false;
+      // Validate full owner/map authority and a complete Native prefix before
+      // touching an unsealed capture. The last local frame may be newer than
+      // the official cutoff; its real evidence is retained, never re-scored.
+      if(!receiptNativeEvidenceMatches(d,r))return false;
+      double capturedProgress=0;for(auto const& v:d.records)if(str(v,"kind")=="pose")capturedProgress=std::max(capturedProgress,number(v,"progress"));
       fs::resize_file(path,d.validBytes);Json terminal;terminal["kind"]="terminal";terminal["tick"]=d.records.back()["tick"];terminal["elapsed"]=d.records.back()["elapsed"];
-      terminal["progress"]=(*pose)["progress"];terminal["reason"]="PROCESS_RECOVERY";auto b=block({terminal},d.chain,0);
+      terminal["progress"]=capturedProgress;terminal["reason"]="PROCESS_RECOVERY";auto b=block({terminal},d.chain,0);
       std::size_t sequences=0;{std::ifstream scan(path);std::string line;while(std::getline(scan,line))++sequences;}b["sequence"]=static_cast<std::int64_t>(sequences-1);
       bool const hasTerminal=str(d.records.back(),"kind")=="terminal";
-      if(hasTerminal && score(number(d.records.back(),"progress"),str(d.metadata,"phase")=="TIEBREAK")!=score(r.progress,str(d.metadata,"phase")=="TIEBREAK"))return false;
       Json footer;footer["footer"]=true;footer["payloadSha256"]=hasTerminal?Json(d.chain):b["sha256"];footer["recordCount"]=static_cast<std::int64_t>(d.records.size()+(hasTerminal?0:1));
-      footer["captureCompleteness"]="PARTIAL_RECOVERED";footer["replayValidationStatus"]="AWAITING_OFFICIAL_RECEIPT";footer["terminalReason"]="PROCESS_RECOVERY";footer["bestProgress"]=hasTerminal?d.records.back()["progress"]:(*pose)["progress"];
+      footer["captureCompleteness"]="PARTIAL_RECOVERED";footer["replayValidationStatus"]="AWAITING_OFFICIAL_RECEIPT";footer["terminalReason"]="PROCESS_RECOVERY";footer["bestProgress"]=hasTerminal?d.records.back()["progress"]:Json(capturedProgress);
       footer["payloadBytes"]=static_cast<std::int64_t>(d.validBytes+(hasTerminal?0:b.dump(matjson::NO_INDENTATION).size()+1));
       footer["footerSha256"]=sha256Text(footer.dump(matjson::NO_INDENTATION));
       {std::ofstream out(path,std::ios::app);if(!hasTerminal)out<<b.dump(matjson::NO_INDENTATION)<<'\n';out<<footer.dump(matjson::NO_INDENTATION)<<'\n';out.flush();if(!out)throw std::runtime_error("Replay recovery seal failed");}

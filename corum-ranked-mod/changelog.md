@@ -1,3 +1,10 @@
+# v0.5.0-beta.121
+
+- Recover an unsealed capture when complete Native frames prove the official timeout prefix, even when later real frames exceed the server cutoff.
+- Validate receipt ownership, map, initial physics and clock/CBF evidence before changing a torn pending file. Preserve all valid original capture bytes and its actual local best; bound playback to the authorized prefix.
+- Keep pending files without a matching Native proof, existing best records, server scoring, LP/AP and all prior replay safety checks.
+- Actual GD/device playback remains unverified.
+
 # v0.5.0-beta.120
 
 - Capture and replay the Native input-clock assignments at frame, delta, step and dispatch boundaries without changing source gameplay or copying replay poses.

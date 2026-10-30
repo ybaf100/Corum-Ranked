@@ -192,13 +192,14 @@ inline std::size_t verifiedReplayFrames(Document const& d,Receipt const& r){
     if(open)close();
     return candidate;
 }
-inline bool receiptMatches(Document const& d,Receipt const& r){auto const& m=d.metadata;
+inline bool receiptNativeEvidenceMatches(Document const& d,Receipt const& r){auto const& m=d.metadata;
     return verifiedReplayFrames(d,r)>0&&(integer(m,"nativeInputVersion")<2||(!d.records.empty()&&replayInitialDataProblem(d.records.front()).empty()&&replayPhysicsEnvironmentProblem(m["physicsEnvironment"]).empty()))&&
-      r.accepted&&r.ended&&d.complete&&!d.records.empty()&&str(d.records.front(),"kind")=="initial"&&
+      r.accepted&&r.ended&&!d.records.empty()&&str(d.records.front(),"kind")=="initial"&&
       std::any_of(d.records.begin(),d.records.end(),[](auto const& item){return str(item,"kind")=="frame";})&&
       std::any_of(d.records.begin(),d.records.end(),[](auto const& item){return str(item,"kind")=="pose";})&&str(m,"matchId")==r.matchId&&str(m,"roundKey")==r.roundKey&&str(m,"attemptId")==r.attemptId&&
       str(m,"participantId")==r.participantId&&integer(m,"mapGeneration")==r.mapGeneration&&integer(m,"levelId")==r.levelId&&
       integer(m,"mapVersion")==r.mapVersion&&str(m,"mapGeometrySha256")==r.geometryHash&&
       r.cleared==(r.progress==100)&&score(r.progress,str(m,"phase")=="TIEBREAK")<=score(r.roundBest,str(m,"phase")=="TIEBREAK");
 }
+inline bool receiptMatches(Document const& d,Receipt const& r){return d.complete&&receiptNativeEvidenceMatches(d,r);}
 }
