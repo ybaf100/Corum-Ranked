@@ -19,7 +19,7 @@ struct State {
     std::size_t rootIndex=0,clockIndex=0;
     std::array<CCPoint,2> previousPositions{};
     std::array<bool,2> startingGround{},split{};
-    std::array<unsigned,2> updates{},totalUpdates{};std::array<float,2> simulated{};PlayerObject* shipPlayer=nullptr;
+    std::array<unsigned,2> updates{},totalUpdates{};std::array<float,2> simulated{};PlayerObject* shipPlayer=nullptr;PlayerObject* nativePlayer=nullptr;
     std::string fault;std::vector<Hook*> leased;
     float shipFactor=0,shipRequested=0;
     std::uintptr_t slerpAddress=0;Hook* slerpObserver=nullptr;
@@ -46,7 +46,7 @@ void clearCollisionLog(PlayerObject* p){
 }
 void checkCursor(){auto& s=state();if(!s.cursor.error().empty())fail(s.cursor.error(),s.cursor.expected(),s.cursor.actual());}
 struct Operation {
-    bool engaged=false,external=false,clear=false;std::size_t index=0;PlayerObject* player=nullptr;
+    bool engaged=false,external=false,clear=false;std::size_t index=0;PlayerObject* player=nullptr;PlayerObject* previousPlayer=nullptr;
     Operation(std::string name,PlayerObject* p,float dt,Json fields=Json::object()):player(p){
         auto& s=state();if(!active()||!s.root||(name!="SLERP"&&(!p||(p!=s.layer->m_player1&&p!=s.layer->m_player2))))return;
         engaged=true;external=s.depth==0;
@@ -62,14 +62,14 @@ struct Operation {
         clear=external&&name=="ROTATE"&&cbfText(s.rootData,"method")=="UPDATE";
         if(s.playback){index=s.cursor.enter(fields);checkCursor();}
         else {index=s.operations.size();if(index>=CbfMaxOperations){fail("CBF_OPERATION_BUDGET");engaged=false;return;}s.operations.push_back(std::move(fields));}
-        ++s.depth;if(name=="UPDATE"){++s.totalUpdates[playerIndex(p)];if(external){++s.updates[playerIndex(p)];s.simulated[playerIndex(p)]+=dt;}}
+        previousPlayer=s.nativePlayer;s.nativePlayer=p;++s.depth;if(name=="UPDATE"){++s.totalUpdates[playerIndex(p)];if(external){++s.updates[playerIndex(p)];s.simulated[playerIndex(p)]+=dt;}}
     }
     void finish(Json result=nullptr){
         if(!engaged)return;
         auto& s=state();--s.depth;
         if(s.playback){s.cursor.leave(index,motion(player),result);checkCursor();if(clear&&s.fault.empty())clearCollisionLog(player);}
         else {s.operations[index]["after"]=motion(player);if(!result.isNull())s.operations[index]["result"]=std::move(result);}
-        engaged=false;
+        s.nativePlayer=previousPlayer;engaged=false;
     }
     ~Operation(){finish();}
 };
@@ -156,7 +156,7 @@ float observeSlerp(float a,float b,float coefficient){
     // Same float operations as CBF's MIT Windows ship correction. Its target
     // comes from the loaded CBF Hook, never a fixed executable offset.
     if(active()&&s.playback&&s.shipFactor!=0){s.shipFactor*=coefficient*1024.f;coefficient=s.shipFactor;}
-    args.push(coefficient);Json fields;fields["args"]=std::move(args);Operation op("SLERP",active()?s.shipPlayer:nullptr,0,std::move(fields));
+    args.push(coefficient);Json fields;fields["args"]=std::move(args);Operation op("SLERP",active()?(s.shipPlayer?s.shipPlayer:s.nativePlayer):nullptr,0,std::move(fields));
     auto result=reinterpret_cast<float(*)(float,float,float)>(s.slerpAddress)(a,b,coefficient);op.finish(result);return result;
 }
 #endif
@@ -208,9 +208,16 @@ Json cbfNativeCapability(){
 #endif
     static std::string binaryHash;static std::filesystem::path binaryPath;
     if(binaryHash.empty()||binaryPath!=mod->getBinaryPath()){
-        binaryPath=mod->getBinaryPath();std::error_code ec;auto size=std::filesystem::file_size(binaryPath,ec);
+        binaryHash.clear();binaryPath=mod->getBinaryPath();std::error_code ec;auto size=std::filesystem::file_size(binaryPath,ec);
         if(!ec&&size>0&&size<64*1024*1024){std::ifstream in(binaryPath,std::ios::binary);std::string bytes((std::istreambuf_iterator<char>(in)),{});if(in.eof()||in.good())binaryHash=sha256Text(bytes);}
     }
+#if defined(__aarch64__) || defined(_M_ARM64)
+    result["architecture"]="arm64";
+#elif defined(__arm__) || defined(_M_ARM)
+    result["architecture"]="arm32";
+#else
+    result["architecture"]="x64";
+#endif
     result["binarySha256"]=binaryHash;result["verified"]=complete&&hashValid(binaryHash);result["leaseHeld"]=cbfReplayHooksHeld();return result;
 }
 std::string acquireCbfReplayHooks(Json const& environment){
@@ -227,11 +234,11 @@ std::string acquireCbfReplayHooks(Json const& environment){
 void releaseCbfReplayHooks(){
     auto& s=state();std::vector<Hook*> failed;
     for(auto it=s.leased.rbegin();it!=s.leased.rend();++it)if(auto result=(*it)->enable();!result){failed.push_back(*it);log::error("[SurvivalReplayCBF] CBF hook restoration failed: {}",(*it)->getDisplayName());}
-    s.leased=std::move(failed);s.frame=s.root=false;s.layer=nullptr;s.playback=nullptr;s.depth=0;
+    s.leased=std::move(failed);s.frame=s.root=false;s.layer=nullptr;s.playback=nullptr;s.nativePlayer=s.shipPlayer=nullptr;s.depth=0;
 }
 bool cbfReplayHooksHeld(){return !state().leased.empty();}
 void beginCbfNativeFrame(PlayLayer* layer,Playback* replay){
-    auto& s=state();s.layer=layer;s.playback=replay;s.frame=true;s.root=false;s.depth=0;s.rootIndex=s.clockIndex=0;s.totalUpdates={};s.fault.clear();s.operations.clear();
+    auto& s=state();s.layer=layer;s.playback=replay;s.frame=true;s.root=false;s.depth=0;s.nativePlayer=s.shipPlayer=nullptr;s.rootIndex=s.clockIndex=0;s.totalUpdates={};s.fault.clear();s.operations.clear();
     if(replay){s.data=replay->current()->cbf;if(!cbfFrameValid(s.data))fail("CBF_FRAME_TAPE_INVALID");}
     else{s.data=Json::object();s.data["kind"]="cbf";s.data["schema"]=CbfBoundarySchema;s.data["roots"]=Json::array();s.data["clocks"]=Json::array();}
 }

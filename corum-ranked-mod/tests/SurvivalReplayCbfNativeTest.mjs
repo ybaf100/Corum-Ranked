@@ -51,6 +51,7 @@ void nativeMove(PlayerObject*p,float dt){Operation op("UPDATE",p,dt);++nativeCal
 void nativeRotate(PlayerObject*p,float dt){Operation op("ROTATE",p,dt);
 #if defined(GEODE_IS_WINDOWS)
  if(p->ship){p->updateShipRotation(dt);return;}
+ p->rotation=observeSlerp(p->rotation,p->rotation+3.f,dt);p->m_shipRotation={p->rotation,dt};return;
 #endif
  p->rotation+=(p->ship?float(p->m_yVelocity)*.25f:3.f)*dt;p->m_shipRotation={p->rotation,dt};}
 void PlayerObject::updateShipRotation(float requested){
@@ -81,7 +82,9 @@ void PlayerObject::update(float dt){Root guard(this,"UPDATE",dt);if(guard.handle
 void PlayerObject::updateRotation(float dt){Root guard(this,"ROTATE",dt);if(guard.handled)return;auto split=sourceCbf&&sourceSplit&&(this==PlayLayer::get()->m_player1?!buffering:dual);nativeRotate(this,split?dt*.25f:dt);if(split)m_lastPosition=sourcePrevious[this==PlayLayer::get()->m_player2];}
 int PlayLayer::checkCollisions(PlayerObject*p,float dt,bool ignore){Json f;f["ignoreDamage"]=ignore;Operation op("COLLISION",p,dt,std::move(f));p->logs[0].size=1;p->m_lastCollisionTop=17;if(p->pos.y<105){p->pos.y=105;p->m_yVelocity=0;p->m_isOnGround=true;}return 0;}
 void PlayLayer::handleButton(bool down,int button,bool first){auto*p=first?m_player1:m_player2;Json f;f["button"]=button;f["down"]=down;f["timestamp"]=m_timestamp;Operation op("INPUT",p,0,std::move(f));++inputCalls;p->m_holdingButtons[button]=down;}
-void sequence(PlayLayer& scene){scene.m_player1->update(1);if(dual)scene.m_player2->update(1);scene.m_player1->updateRotation(1);if(dual)scene.m_player2->updateRotation(1);}
+void sequence(PlayLayer& scene,float dt=1){scene.m_player1->update(dt);if(dual)scene.m_player2->update(dt);scene.m_player1->updateRotation(dt);if(dual)scene.m_player2->updateRotation(dt);}
+Json actualPose(PlayLayer& scene){Json p;p["kind"]="pose";p["x"]=scene.m_player1->pos.x;p["y"]=scene.m_player1->pos.y;p["rotation"]=scene.m_player1->rotation;p["physics"]["p1"]=motion(scene.m_player1);p["physics"]["p2"]=motion(scene.m_player2);p["physics"]["nativeStep"]=scene.m_currentStep;p["physics"]["pendingButtons"]=Json::array();return p;}
+void worldStep(PlayLayer& scene,float dt){sequence(scene,dt);++scene.m_currentStep;scene.m_timestamp+=dt;scene.m_gameState.m_levelTime+=dt;}
 int main(){
  std::ofstream("${dir}/cbf.bin")<<"CBF fixture binary, not the real GD mod";
 #if defined(GEODE_IS_WINDOWS)
@@ -99,6 +102,25 @@ int main(){
   if(!cbfNativeFrameError().empty()){std::cerr<<cbfNativeFrameError()<<" "<<playback.failure().dump()<<"\\n";return 1;}
   assert(motion(&c)==expectedA&&motion(&d)==expectedB);assert(point(c.m_lastPosition)==lastA&&point(d.m_lastPosition)==lastB);
   Playback bad(doc);auto stable=c.pos;c.pos.x+=25;beginCbfNativeFrame(&target,&bad);sequence(target);finishCbfNativeFrame();assert(bad.desync());auto first=bad.failure()["reason"];bad.reject("FOLLOWUP_FAILURE");assert(bad.failure()["reason"]==first&&bad.failure()["errorCounts"]["FOLLOWUP_FAILURE"].asInt().unwrap()==1);assert(c.pos.x==stable.x+25);
+ }
+ // Exercise the actual Native-boundary interpreter under the production
+ // render scheduler. Positions/velocities below come from the independent
+ // local movement bodies, never the expected pose in the document.
+ buffering=false;dual=true;
+ for(bool ship:{false,true}){
+  PlayerObject a,b;a.ship=b.ship=ship;PlayLayer scene;scene.m_player1=&a;scene.m_player2=&b;PlayLayer::current=&scene;sourceCbf=true;
+  Document doc;doc.complete=true;doc.metadata["nativeInputVersion"]=3;Json init;init["kind"]="initial";doc.records.push_back(init);
+  for(int n=0;n<40;++n){float durations[]={1.f/30,1.f/60,1.f/144,1.f/240,1.f/120};float dt=durations[n%5];Json frame;frame["kind"]="frame";frame["dt"]=static_cast<double>(dt);doc.records.push_back(frame);beginCbfNativeFrame(&scene);worldStep(scene,dt);doc.records.push_back(finishCbfNativeFrame());doc.records.push_back(actualPose(scene));}
+  for(double speed:{.5,1.,2.,4.}){
+   PlayerObject c,d;c.ship=d.ship=ship;PlayLayer target;target.m_player1=&c;target.m_player2=&d;PlayLayer::current=&target;sourceCbf=false;Playback replay(doc);replay.speed(speed);
+   auto step=[&]{auto dt=static_cast<float>(replay.current()->dt);beginCbfNativeFrame(&target,&replay);worldStep(target,dt);finishCbfNativeFrame();replay.completeFrame(actualPose(target));assert(!replay.desync());};
+   replay.pause(true);replay.accumulate(.1);assert(!replay.due());replay.pause(false);
+   int count=0;while(!replay.ended()){replay.accumulate(1./60);while(replay.due()){step();++count;}}assert(count==40&&target.m_currentStep==404&&motion(&c)==motion(&a)&&motion(&d)==motion(&b));
+   replay.seek(.1);assert(replay.takeReset());replay.restart();
+   auto reset=[](PlayerObject& p){p.pos={0,105};p.m_lastPosition=p.m_shipRotation={};p.rotation=0;p.m_yVelocity=0;p.m_jumpBuffered=false;p.m_isOnGround=true;p.m_holdingButtons.clear();for(auto& log:p.logs)log.size=0;p.m_lastCollisionBottom=p.m_lastCollisionTop=p.m_lastCollisionLeft=p.m_lastCollisionRight=-1;};reset(c);reset(d);target.m_currentStep=364;target.m_timestamp=.5;target.m_gameState.m_levelTime=.75;
+   while(replay.due()){step();}assert(!replay.desync()&&replay.time()>=.1&&!replay.seeking());
+   replay.seek(replay.duration());while(replay.due()){step();}assert(replay.ended()&&motion(&c)==motion(&a)&&motion(&d)==motion(&b));
+  }
  }
  Hook shipHook{"PlayerObject::updateShipRotation"},slerpHook{"Slerp2D"},clockHook{"GJBaseGameLayer::getModifiedDelta"};
  Hook u{"PlayerObject::update"},r{"PlayerObject::updateRotation"},cmd{"GJBaseGameLayer::processCommands"},world{"GJBaseGameLayer::update"},unrelated{"PlayLayer::levelComplete"};Mod::cbf()->hooks={&u,&r,&cmd,&world,&unrelated};

@@ -57,3 +57,79 @@ profiles until proven. Changes during recording/replay invalidate that Attempt's
 capture rather than fabricating timestamps. SDK/platform compilation and Native
 contract tests are separate from actual GD/device validation, which has not yet
 been performed in this environment. No production changes have been made.
+
+## Format and safety contract
+
+The immutable container remains formatVersion=1. Native input version2 remains
+Vanilla/CBS; version3 explicitly names accuracyMode=CBF_NATIVE_BOUNDARIES_V1.
+The initial physics schema2 is preserved. CBF's separate initial extension1
+stores the two players' lastPosition and collision-log emptiness. Nonempty or
+missing initial log evidence is refused rather than copying unknown object
+references. Zero RNG strings remain valid.
+
+Each v3 render frame carries exactly one `cbf` proof, before its final pose.
+Its roots record the actual update/rotation boundaries. Operations carry the
+actual Native step/tick, gameplay levelTime, elapsed substep fraction, actor,
+arguments, external/nested ownership, and physical before/after evidence.
+`$before`/`$after` are lossless references to identical root evidence. They do
+not reconstruct missing state. Actual dispatch events retain P1/P2, button,
+press/release and gameplay timestamp; raw queue commands retain their original
+Native timestamps wherever exposed. macOS's already-private CBF OS queue is
+not assigned invented wall-clock timestamps: its actual applied phase/dt/order
+is the replay authority. Attempt/match/map identity comes from the enclosing
+approved immutable document.
+
+Only external calls are driven by the tape. Nested Native calls must occur
+naturally, once, and consume their corresponding entries. A mismatch retains
+DESYNC, the first differing field and category counters. No source pose is
+written during simulation. Windows ship correction records both the outer
+requested dt and the inner Native dt, including non-split/buffering actors.
+Other Slerp calls inherit their actual nested Native player context.
+
+Admission checks the real loaded CBF1.5.0 binary hash, platform/architecture,
+settings, enabled source hooks, and observer priorities. During a replay lease,
+only the deliberately leased CBF physics hooks count as enabled capability.
+A setting/profile change stops the capture/replay. Lease failures restore all
+successfully disabled hooks. Failed restoration remains tracked, is retried
+before a normal Native scene is initialized, and blocks that scene with a
+restart message if still unresolved. User CBF setting values are never changed.
+
+Storage remains asynchronous, hash-chained, receipt-gated and bounded: 128MiB
+per file, 512000 records, 2MiB per block, 4096 roots/frame and 1024 operations/root;
+the existing 1MiB unacknowledged capture and 128MiB pending-disk budgets remain.
+High-density/long captures can reach a budget and must show an actionable
+failure while preserving the existing Best. Actual device performance, maximum
+length and memory use are still unverified; these caps are not a long-session
+performance claim. A partial v3 frame without its proof cannot be promoted.
+
+## Automated evidence and remaining device work
+
+The production CBF controller/cursor is compiled against independent Native
+boundary doubles for macOS and Windows. Cube/Ship, buffering, Dual/P1/P2,
+press/release, collision repair, local lastPosition, nested Windows ship/Slerp,
+hook acquisition/restore failures and first-failure preservation are covered.
+The actual production Playback scheduler also drives independently calculated
+motion at 0.5x/1x/2x/4x, pause, backward reset and forward seek with variable dt.
+The Recorder/Storage test covers CBF CAPTURE_BEGIN, official Start/End receipts,
+full frame proof, durable Best promotion, missing-proof rejection, accurate
+applied input counts and environment changes. These are contract tests, not
+execution of proprietary Geometry Dash or the installed CBF binary.
+
+Default active CBF1.5.0 has the new driver path on Windows, Android32/64, iOS
+and both macOS architectures. The binary/profile must match for playback.
+COS, Physics Bypass, unknown versions and Windows Wine remain explicitly
+unsupported. Vanilla and installed-but-disabled CBF keep the v2 path.
+
+Still required on actual GD2.2081: a new default-CBF official Attempt through
+CAPTURE_BEGIN -> complete Storage/receipt -> History -> full Native replay;
+original Cube frame92/93 and Ship frame2/35 cases; CBF OFF/ON; portals, wave,
+spider, moving slopes/Random/Follow; real audio and touch; long-session memory;
+scene/pause/restart on iPadOS and the other devices. No device success is
+claimed. Exact counter364-vs0 attribution and the first cause of the old Ship
+rotation failures remain unconfirmed without those original physical states.
+
+Reference sources (read at immutable revisions):
+- [CBF source, MIT](https://github.com/theyareonit/Click-Between-Frames/blob/9fa7c6f590945d048b8e83de71eaba30dcb0c64e/src/main.cpp)
+- [ToastyReplay engine](https://github.com/ToastexGD/ToastyReplay/blob/016a5c8219e39c732583f655583ceee1982a3168/src/core/replay_engine.cpp)
+- [GucciBot boundary](https://github.com/Nigelx1/GucciBot/blob/f6ad752d31bf0ca7e954961d7756e2fdbe9da9cf/src/hooks/hook_gjbasegamelayer.cpp)
+- [Geode Hook public API v5.8.2](https://github.com/geode-sdk/geode/blob/v5.8.2/loader/include/Geode/loader/Hook.hpp)

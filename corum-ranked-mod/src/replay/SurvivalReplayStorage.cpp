@@ -75,6 +75,7 @@ std::future<void> Storage::append(std::string attempt,std::vector<Json> records,
     auto found=m_pending.find(attempt);if(found==m_pending.end())throw std::runtime_error("Replay writer missing Attempt");auto& p=found->second;
     if(records.empty()||records.size()>MaxBlockRecords||p.count+records.size()>MaxRecords)throw std::runtime_error("Replay record budget exceeded");
     auto b=block(records,p.chain,p.sequence);auto encoded=b.dump(matjson::NO_INDENTATION)+"\n";
+    if(encoded.size()>2*1024*1024)throw std::runtime_error("Replay block budget exceeded; existing best preserved");
     for(auto const&r:records){p.inputs+=str(r,"kind")==((integer(p.metadata,"nativeInputVersion")>=2)?"dispatch":"input");if(integer(p.metadata,"nativeInputVersion")>=2&&str(r,"kind")=="frame"&&r["preInputs"].isArray())p.inputs+=r["preInputs"].size();p.poses+=str(r,"kind")=="pose";p.ticks=std::max(p.ticks,integer(r,"tick"));p.elapsed=std::max(p.elapsed,number(r,"elapsed"));}
     if(p.bytes+encoded.size()>MaxFileBytes-16384)throw std::runtime_error("Replay storage budget exceeded; best preserved");
     diskBudget(encoded.size()+16384);

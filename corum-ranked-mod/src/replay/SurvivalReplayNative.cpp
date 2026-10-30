@@ -182,13 +182,13 @@ public:
     }
     void pumpReplay(float dt){
         auto* replay=worldPlayback();if(!replay)return;
-        if(!replay->desync())if(auto problem=corum::ranked::replay::replayPhysicsEnvironmentMismatch(replay->metadata()["physicsEnvironment"],corum::ranked::replay::captureReplayPhysicsEnvironment());!problem.empty())replay->reject(problem);
         if(m_fields->replayOwned&&m_isPaused){FMODAudioEngine::sharedEngine()->pauseMusic(0);return;}
         if(m_fields->liveWorldOwned){
           auto frame=corum::ranked::SpectatorLiveRuntime::survival().presentationFrame();if(!frame||!frame->pose||!frame->pose->progress)return;
           replay->followRemote(frame->context.attemptId+":"+std::to_string(frame->context.generation)+":"+std::to_string(frame->context.epoch),frame->publisherElapsedMs/1000.,*frame->pose->progress);
         }else replay->accumulate(dt);
         if(replay->takeReset()){m_fields->internalReset=true;PlayLayer::resetLevel();m_fields->internalReset=false;m_isTestMode=m_fields->replayOwned;replay->restart();resetReplayInitial();}
+        if(!replay->desync())if(auto problem=corum::ranked::replay::replayPhysicsEnvironmentMismatch(replay->metadata()["physicsEnvironment"],corum::ranked::replay::captureReplayPhysicsEnvironment());!problem.empty())replay->reject(problem);
         auto began=std::chrono::steady_clock::now();
         for(std::size_t n=0;n<corum::ranked::replay::SeekPolicy::MaxFramesPerPump&&replay->due();++n){
             auto const* frame=replay->current();
@@ -264,7 +264,7 @@ public:
         initial["queued"]=corum::ranked::replay::encodeReplayButtons(m_queuedButtons);initial["timestamp"]=m_timestamp;
         initial["timeWarp"]=play->m_gameState.m_timeWarp;initial["dual"]=play->m_gameState.m_isDualMode;
         initial["clickBetweenSteps"]=m_clickBetweenSteps;initial["clickOnSteps"]=m_clickOnSteps;initial["isBetweenSteps"]=m_isBetweenSteps;
-        initial["started"]=play->m_started;initial["inResetDelay"]=play->m_inResetDelay;initial["attemptTime"]=play->m_attemptTime;initial["levelTime"]=static_cast<double>(play->m_gameState.m_levelTime);initial["extraDelta"]=m_extraDelta;initial["nativeStep"]=m_currentStep;initial["resumeTimer"]=m_resumeTimer;initial["pose"]=replayPose(play);if(auto problem=corum::ranked::replay::replayInitialDataProblem(initial);!problem.empty())recorder.unsupported(problem);else recorder.add(initial);
+        initial["started"]=play->m_started;initial["inResetDelay"]=play->m_inResetDelay;initial["attemptTime"]=play->m_attemptTime;initial["levelTime"]=static_cast<double>(play->m_gameState.m_levelTime);initial["extraDelta"]=m_extraDelta;initial["nativeStep"]=m_currentStep;initial["resumeTimer"]=m_resumeTimer;initial["pose"]=replayPose(play);auto problem=corum::ranked::replay::replayInitialDataProblem(initial);if(problem.empty()&&recorder.cbfCapture()&&!corum::ranked::replay::cbfInitialDataValid(initial["cbfInitial"]))problem="CBF_INITIAL_STATE_UNAVAILABLE";if(!problem.empty())recorder.unsupported(problem);else recorder.add(initial);
       }
       if(recorder.active()&&recorder.physicsEnvironmentUnchanged()){if(recorder.cbfCapture()){corum::ranked::replay::beginCbfNativeFrame(play);cbfFrameBegan=true;}replay->resetReplayTrace();corum::ranked::beginNativeWorldEventCapture(play);recorder.nativeFrameBegin();frameBegan=true;recorder.elapsed(play->m_attemptTime);matjson::Value frame;frame["kind"]="frame";frame["dt"]=static_cast<double>(dt);frame["queued"]=corum::ranked::replay::encodeReplayButtons(m_queuedButtons);frame["preInputs"]=recorder.takePreInputs();recorder.add(frame);}
     }

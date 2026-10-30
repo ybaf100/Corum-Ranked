@@ -56,6 +56,8 @@ public:
         if(m_desync){m_failure["errorCounts"]=m_errorCounts;return;}
         m_desync=true;m_failure["errorCounts"]=m_errorCounts;m_failure["accuracyMode"]=metadata()["accuracyMode"];m_failure["physicsEnvironment"]=metadata()["physicsEnvironment"];m_failure["reason"]=reason;m_failure["frame"]=static_cast<std::int64_t>(m_index);
         m_failure["step"]=static_cast<std::int64_t>(m_step);m_failure["buttonDispatches"]=static_cast<std::int64_t>(m_buttons);
+        m_failure["nativeTick"]=m_recordedTick;m_failure["presentationElapsed"]=m_time;
+        if(cbf()){auto names=Json::array();for(auto name:{"x","y","rotation","yVelocity","shipRotationX","shipRotationY","jumpBuffered","isOnGround","holdingMask","lastCollisionBottom","lastCollisionTop","lastCollisionLeft","lastCollisionRight"})names.push(name);m_failure["cbfMotionFields"]=std::move(names);}
         m_failure["dispatchesConsumed"]=static_cast<std::int64_t>(m_dispatch);m_failure["previousExpected"]=m_presentedPose?*m_presentedPose:Json();
         m_failure["firstDifferentField"]=cbfFirstDifference(expected,actual);m_failure["nativeInputVersion"]=integer(metadata(),"nativeInputVersion");m_failure["physicsSchema"]=integer(initial(),"physicsSchema");
         m_failure["expected"]=std::move(expected);m_failure["actual"]=std::move(actual);

@@ -27,7 +27,7 @@ inline std::string replayPhysicsEnvironmentMismatch(matjson::Value const& source
     if(auto p=replayPhysicsEnvironmentProblem(current);!p.empty())return p;
     if(replayCbfActive(source)!=replayCbfActive(current))return "CBF_ACCURACY_MODE_MISMATCH";
     if(replayCbfActive(source))for(auto key:{"version","precisionFix"})if(source["cbf"][key]!=current["cbf"][key])return "CBF_SETTINGS_MISMATCH";
-    if(replayCbfActive(source))for(auto key:{"platform","binarySha256","driver"})if(source["cbf"]["nativeBoundary"][key]!=current["cbf"]["nativeBoundary"][key])return "CBF_NATIVE_DRIVER_MISMATCH";
+    if(replayCbfActive(source))for(auto key:{"platform","architecture","binarySha256","driver"})if(source["cbf"]["nativeBoundary"][key]!=current["cbf"]["nativeBoundary"][key])return "CBF_NATIVE_DRIVER_MISMATCH";
     return {};
 }
 }
