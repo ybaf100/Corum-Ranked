@@ -62,6 +62,13 @@ class $modify(CorumNativeWorldEventLayer, PlayLayer) {
         std::optional<SpectatorRemoteContext> context;
         bool remote = false, applyingSource = false;
         std::set<int> missingActivations;
+        // Per-trigger activation counts for the current source context. A native
+        // activation is "missing" only while it outnumbers the source-recorded
+        // activations of that trigger; a late native mirror of an already
+        // applied source event is not missing evidence (beta.125 log: the cause
+        // stayed DEGRADED after the source event had been APPLIED).
+        std::unordered_map<int,unsigned> nativeActivations, sourceActivations;
+        unsigned missingLogs = 0;
         unsigned misses = 0;
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
         bool trace = false;
@@ -106,7 +113,7 @@ class $modify(CorumNativeWorldEventLayer, PlayLayer) {
         m_fields->expected.clear();
         m_fields->context.reset();
         m_fields->ordinal = m_fields->seen = 0;
-        m_fields->remote = false;m_fields->applyingSource=false;m_fields->missingActivations.clear();
+        m_fields->remote = false;m_fields->applyingSource=false;m_fields->missingActivations.clear();m_fields->nativeActivations.clear();m_fields->sourceActivations.clear();m_fields->missingLogs=0;
     }
 };
 namespace {
@@ -184,7 +191,12 @@ class $modify(CorumNativeRandomBranch, RandTriggerGameObject) {
             // Native collision/spawn may run ahead of the presented source
             // clock. Only the due-event drain may dispatch authoritative outputs.
             if(!play->m_fields->applyingSource){
+                auto const native=++play->m_fields->nativeActivations[identity.index];
+                auto const source=play->m_fields->sourceActivations[identity.index];
+                if(native<=source)return; // late native mirror of an already applied source activation
                 play->m_fields->missingActivations.insert(identity.index);
+                if(play->m_fields->missingLogs++<16)
+                    log::info("[SpectatorRandom] phase=NATIVE_AHEAD triggerIndex={} objectId={} native={} source={} levelMs={:.1f}",identity.index,identity.id,native,source,play->m_gameState.m_levelTime*1000);
                 SpectatorLiveRuntime::get().noteWorldPartial("RANDOM_SOURCE_ACTIVATION_MISSING");return;
             }
             if(play->m_fields->expected.empty())return;
@@ -215,7 +227,8 @@ class $modify(CorumNativeRandomBranch, RandTriggerGameObject) {
             // here would draw a fresh branch and mutate unrelated native RNG.
             for(auto const& output:call.event.outputs)emitSpawn(layer,output,uniqueId,m_controlID);
             if(remote){
-                play->m_fields->missingActivations.erase(identity.index);
+                auto const source=++play->m_fields->sourceActivations[identity.index];
+                if(source>=play->m_fields->nativeActivations[identity.index])play->m_fields->missingActivations.erase(identity.index);
                 if(play->m_fields->missingActivations.empty())SpectatorLiveRuntime::get().worldCauseRecovered("RANDOM_SOURCE_ACTIVATION_MISSING");
             }
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
@@ -322,7 +335,7 @@ void prepareNativeWorldEvents(PlayLayer *layer, SpectatorRemoteFrame const &fram
         play->m_fields->context = frame.context;
         play->m_fields->expected.clear();
         play->m_fields->seen = 0;
-        play->m_fields->misses = 0;play->m_fields->missingActivations.clear();
+        play->m_fields->misses = 0;play->m_fields->missingActivations.clear();play->m_fields->nativeActivations.clear();play->m_fields->sourceActivations.clear();play->m_fields->missingLogs=0;
     }
     play->m_fields->remote = true;
     if (frame.pose->randomEvents)

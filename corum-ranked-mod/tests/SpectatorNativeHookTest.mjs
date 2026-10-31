@@ -158,7 +158,7 @@ struct CorumRankedPlayLayer : PlayLayer {
     bool tracesSpectatorPlayer(PlayerObject*){return false;}
     bool observesSpectatorPlayer(PlayerObject*) {return false;}
     void observeSpectatorNativeSnap(PlayerObject*,corum::ranked::SpectatorDiscontinuity,corum::ranked::SpectatorGhostPose const&,char const* = "TELEPORT_FLAG") {}
-    struct Fields {bool survivalLiveLevel=false,survivalReplayLevel=false;std::optional<SurvivalDialogRef> survivalSurrender;bool survivalLevel=false,survivalWaiting=false,survivalFreePlayHud=false,survivalNativeClearFinished=false;
+    struct Fields {bool survivalLiveLevel=false,survivalReplayLevel=false;std::optional<SurvivalDialogRef> survivalSurrender;bool survivalLevel=false,survivalWaiting=false,survivalWaitPaused=false,survivalResetDeferred=false,survivalFreePlayHud=false,survivalNativeClearFinished=false;
         bool nativeCompletionStarted = false;
         EntryOverlay* entryOverlay = nullptr;
         bool nativeEntryHeld = false;
@@ -181,6 +181,7 @@ struct CorumRankedPlayLayer : PlayLayer {
     void spectatorFrame(float){}
     void unschedule(int){}
     #define schedule_selector(x) 0
+    void beginSurvivalWait(bool){m_fields->survivalWaiting=true;}
     void testDummyResetBoundary(){${dummyReset}}
     ${callbacks}
 };

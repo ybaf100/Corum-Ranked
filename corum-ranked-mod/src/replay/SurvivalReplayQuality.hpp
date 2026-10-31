@@ -43,7 +43,10 @@ inline ReplayQualityView classifyReplayQuality(matjson::Value const& state,matjs
     auto const& best=state["best"];
     if(!best.isObject()){
         auto const& pending=state["pending"];
-        if(pending.isObject()){v.quality=ReplayQuality::WaitingReceipt;v.reason=pending["replayValidationStatus"].asString().unwrapOr("AWAITING_OFFICIAL_RECEIPT");return v;}
+        if(pending.isObject()){
+            auto status=pending["replayValidationStatus"].asString().unwrapOr("AWAITING_OFFICIAL_RECEIPT");
+            // Only a genuinely unconfirmed capture is "waiting"; a final mismatch is unavailable.
+            v.quality=status=="AWAITING_OFFICIAL_RECEIPT"?ReplayQuality::WaitingReceipt:ReplayQuality::Unavailable;v.reason=status;return v;}
         v.quality=ReplayQuality::NotOnDevice;return v;
     }
     for(auto key:{"attemptId","mapGeometrySha256","mapVersion","levelId"})if(best[key]!=identity[key]){v.quality=ReplayQuality::Unavailable;v.reason="NOT_THE_OFFICIAL_BEST_ATTEMPT";return v;}

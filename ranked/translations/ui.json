@@ -2391,6 +2391,38 @@
     "en": "VIEW REPLAY",
     "ko": "리플레이 보기"
   },
+  "replay-seeking": {
+    "en": "Moving to replay position...",
+    "ko": "리플레이 위치로 이동 중..."
+  },
+  "replay-seek-speed": {
+    "en": "Replay seek speed",
+    "ko": "리플레이 이동 속도"
+  },
+  "replay-seek-low": {
+    "en": "Low",
+    "ko": "저속"
+  },
+  "replay-seek-normal": {
+    "en": "Normal",
+    "ko": "보통"
+  },
+  "replay-seek-fast": {
+    "en": "Fast",
+    "ko": "고속"
+  },
+  "replay-seek-fast-title": {
+    "en": "FAST REPLAY SEEK",
+    "ko": "고속 리플레이 이동"
+  },
+  "replay-seek-fast-warning": {
+    "en": "Fast seek simulates many native frames per screen frame. Low-end devices may stutter, heat up or close the game while seeking. Use it?",
+    "ko": "고속 이동은 화면 한 프레임마다 다수의 Native 프레임을 계산합니다. 저사양 기기에서는 이동 중 끊김, 발열 또는 게임 종료가 발생할 수 있습니다. 사용할까요?"
+  },
+  "replay-seek-fast-confirm": {
+    "en": "USE FAST",
+    "ko": "고속 사용"
+  },
   "spectator-partial-history": {
     "en": "PARTIAL SYNC · HISTORY TRUNCATED",
     "ko": "부분 동기화 · 기록 일부 누락"

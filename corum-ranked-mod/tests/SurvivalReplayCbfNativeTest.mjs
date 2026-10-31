@@ -106,7 +106,12 @@ int main(){
   assert(target.witness(2600,1,true,true,{22,2600,other}));assert(source.reference(2166,{11,2166,descriptor})!=target.reference(2600,{22,2600,other}));
   assert(!target.reference(2599,{0,-1,nullptr}));assert(!target.reference(2599,{23,2599,descriptor}));
   target.reset({{22,2600,other},{21,2599,descriptor}});assert(source.manifest()!=target.manifest());
-  target.reset({{21,2599,descriptor},{22,2600,descriptor}});assert(!target.witness(2599,0,true,true,{21,2599,descriptor}));assert(target.diagnosticTarget(2599)["ambiguousDefinition"].asBool().unwrap());
+  // Stacked duplicate definitions: each keeps its own index; a hit on the other duplicate is a mismatch.
+  {ReplayCollisionIdentity dupSource,dupTarget;dupSource.reset({{11,2166,descriptor},{12,2167,descriptor}});dupTarget.reset({{21,2599,descriptor},{22,2600,descriptor}});
+   assert(dupSource.manifest()==dupTarget.manifest()&&dupTarget.diagnosticTarget(2599)["ambiguousDefinition"].asBool().unwrap());
+   assert(dupSource.witness(2166,0,true,true,{11,2166,descriptor})&&dupTarget.witness(2599,0,true,true,{21,2599,descriptor})&&dupTarget.witness(2600,1,true,true,{22,2600,descriptor}));
+   assert(dupSource.reference(2166,{11,2166,descriptor})==dupTarget.reference(2599,{21,2599,descriptor}));
+   assert(dupSource.reference(2166,{11,2166,descriptor})!=dupTarget.reference(2600,{22,2600,descriptor}));}
   target.reset({{21,2599,descriptor},{22,2599,other}});assert(!target.witness(2599,0,true,true,{21,2599,descriptor}));
  }
  std::ofstream("${dir}/cbf.bin")<<"CBF fixture binary, not the real GD mod";

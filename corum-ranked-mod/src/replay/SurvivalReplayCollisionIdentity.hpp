@@ -68,7 +68,13 @@ public:
     }
     bool witness(int raw,std::size_t index,bool nativeCandidate,bool dictionaryKey,Object const& actual,int player=0,int side=0){
         if(player<0||player>1||side<0||side>3||raw<0||!nativeCandidate||!dictionaryKey||!current(index,actual)||actual.runtimeId!=raw||!actual.definition.isArray()||actual.definition.size()==0||actual.definition[0].asInt().unwrapOr(-1)<0)return false;
-        auto unique=this->index(raw);if(!unique||*unique!=index||m_ambiguousDefinitions.contains(actual.definition.dump(matjson::NO_INDENTATION)))return false;
+        // Identity is the map index inside the ordered, hash-verified manifest,
+        // so byte-identical stacked objects (common in GD maps) stay distinct:
+        // a Playback hit on the OTHER duplicate yields a different index and
+        // fails the comparison. Rejecting them here only aborted valid Source
+        // captures (beta.125 iOS log: index 142, CBF_COLLISION_IDENTITY_UNPROVEN
+        // at 0.725 s). A runtime ID shared by two objects still fails closed.
+        auto unique=this->index(raw);if(!unique||*unique!=index)return false;
         m_witnessed.insert(witnessKey(raw,player,side));return true;
     }
     std::optional<CollisionJson> reference(int raw,Object const& actual,int player=0,int side=0){

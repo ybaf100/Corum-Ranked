@@ -8,6 +8,8 @@
 #include "RankedVisuals.hpp"
 #include "RankedCreditsPopup.hpp"
 #include "RankedPopupLayout.hpp"
+#include "RankedConfirmPopup.hpp"
+#include "../replay/SurvivalReplaySeekSpeed.hpp"
 #include <Geode/binding/Slider.hpp>
 #include <Geode/ui/Popup.hpp>
 #include <cmath>
@@ -21,7 +23,7 @@ class RankedSettingsPopup final : public Popup {
     CCLabelBMFont* m_forumStatus = nullptr;
     CCLabelBMFont* m_forumCooldown = nullptr;
     CCMenuItemSpriteExtra* m_refreshRecords = nullptr;
-    CCMenuItemSpriteExtra *m_defaultLdm=nullptr,*m_defaultShake=nullptr,*m_thumbnails=nullptr,*m_selectionMotion=nullptr;
+    CCMenuItemSpriteExtra *m_defaultLdm=nullptr,*m_defaultShake=nullptr,*m_thumbnails=nullptr,*m_selectionMotion=nullptr,*m_seekSpeed=nullptr;
     bool m_refreshDisabled = false;
     bool m_closed = false, m_exited = false, m_dirty = false;
 
@@ -35,22 +37,22 @@ class RankedSettingsPopup final : public Popup {
     }
 
     bool init() override {
-        auto const layout=rankedPopupLayout({360,306},CCDirector::sharedDirector()->getWinSize());
+        auto const layout=rankedPopupLayout({360,346},CCDirector::sharedDirector()->getWinSize());
         if (!Popup::init(layout.size.width,layout.size.height)) return false;
         m_noElasticity=true;
         m_bgSprite->setVisible(false);m_closeBtn->setVisible(false);setID("ranked-settings-popup"_spr);
         auto* content=rankedPopupContent(m_mainLayer,m_buttonMenu,layout);
-        auto* panel=surface({360,306},{180,153},Cyan,Surface,255,true);content->addChild(panel,0);
+        auto* panel=surface({360,346},{180,173},Cyan,Surface,255,true);content->addChild(panel,0);
         auto add=[&](std::string const& text,CCPoint position,CCSize bounds,float scale,ccColor3B color,FontWeight weight=FontWeight::ExtraBold){
             auto* label=menuLabel(text,scale,position,color,weight);fitFullMenuLabel(label,bounds.width,bounds.height,scale);panel->addChild(label,10);return label;
         };
-        add(i18n::text("settings","Settings"),{180,284},{330,24},.5f,Text,FontWeight::Black);
-        add(i18n::text("ranked-volume","Ranked menu BGM"),{94,264},{146,16},.26f,Text);
+        add(i18n::text("settings","Settings"),{180,324},{330,24},.5f,Text,FontWeight::Black);
+        add(i18n::text("ranked-volume","Ranked menu BGM"),{94,304},{146,16},.26f,Text);
         m_volume=Slider::create(this,menu_selector(RankedSettingsPopup::onVolume),.55f);if(!m_volume)return false;
-        m_volume->setID("ranked-volume-slider"_spr);m_volume->setPosition({94,238});m_volume->setValue(RankedVolumeControl::get().volume());panel->addChild(m_volume,20);
-        m_percent=add("",{94,214},{146,18},.30f,Gold);updatePercent();
-        add(i18n::text("ranked-volume-scope","Lobby, matchmaking and results BGM"),{94,190},{144,26},.20f,TextMuted,FontWeight::SemiBold);
-        add(i18n::text("survival-default-options","SURVIVAL DEFAULTS"),{266,264},{146,16},.24f,Cyan);
+        m_volume->setID("ranked-volume-slider"_spr);m_volume->setPosition({94,278});m_volume->setValue(RankedVolumeControl::get().volume());panel->addChild(m_volume,20);
+        m_percent=add("",{94,254},{146,18},.30f,Gold);updatePercent();
+        add(i18n::text("ranked-volume-scope","Lobby, matchmaking and results BGM"),{94,230},{144,26},.20f,TextMuted,FontWeight::SemiBold);
+        add(i18n::text("survival-default-options","SURVIVAL DEFAULTS"),{266,304},{146,16},.24f,Cyan);
         // Use Popup's own menu: it already owns the modal input priority.
         auto* menu=m_buttonMenu;menu->setZOrder(20);
         auto const defaults=SurvivalOptionsPreferences::get().defaults();
@@ -58,13 +60,15 @@ class RankedSettingsPopup final : public Popup {
             auto* item=CCMenuItemSpriteExtra::create(survivalOptionFace({146,32},caption,value),this,menu_selector(RankedSettingsPopup::onDefaults));
             item->setPosition(at);item->setTag(tag);menu->addChild(item);return item;
         };
-        m_defaultLdm=toggle(i18n::text("survival-default-ldm","Default LDM"),defaults.lowDetail,{266,238},0);m_defaultLdm->setID("survival-default-ldm-switch"_spr);
-        m_defaultShake=toggle(i18n::text("survival-default-shake","Default Disable Shake"),defaults.disableShake,{266,202},1);m_defaultShake->setID("survival-default-shake-switch"_spr);
+        m_defaultLdm=toggle(i18n::text("survival-default-ldm","Default LDM"),defaults.lowDetail,{266,278},0);m_defaultLdm->setID("survival-default-ldm-switch"_spr);
+        m_defaultShake=toggle(i18n::text("survival-default-shake","Default Disable Shake"),defaults.disableShake,{266,242},1);m_defaultShake->setID("survival-default-shake-switch"_spr);
         auto& preferences=SurvivalOptionsPreferences::get();
-        m_thumbnails=toggle(i18n::text("survival-image-thumbnails","Level Thumbnails"),preferences.thumbnails(),{94,151},2);
+        m_thumbnails=toggle(i18n::text("survival-image-thumbnails","Level Thumbnails"),preferences.thumbnails(),{94,191},2);
         m_thumbnails->setID("survival-thumbnails-switch"_spr);
-        m_selectionMotion=toggle(i18n::text("survival-selection-motion","Fancy Level Selection Animation"),preferences.selectionMotion(),{266,151},3);
+        m_selectionMotion=toggle(i18n::text("survival-selection-motion","Fancy Level Selection Animation"),preferences.selectionMotion(),{266,191},3);
         m_selectionMotion->setID("survival-selection-motion-switch"_spr);updateMotionSetting();
+        m_seekSpeed=CCMenuItemSpriteExtra::create(seekSpeedFace(),this,menu_selector(RankedSettingsPopup::onSeekSpeed));
+        m_seekSpeed->setID("replay-seek-speed-button"_spr);m_seekSpeed->setPosition({180,151});menu->addChild(m_seekSpeed);
         m_refreshRecords=CCMenuItemSpriteExtra::create(refreshButtonFace(false),this,menu_selector(RankedSettingsPopup::onRefreshRecords));
         m_refreshRecords->setID("ranked-forum-refresh-button"_spr);m_refreshRecords->setPosition({180,96});menu->addChild(m_refreshRecords);
         m_forumStatus=add("",{180,66},{320,22},.20f,TextMuted,FontWeight::SemiBold);
@@ -77,6 +81,28 @@ class RankedSettingsPopup final : public Popup {
         auto* credits=CCMenuItemSpriteExtra::create(creditsFace,this,menu_selector(RankedSettingsPopup::onCredits));credits->setID("ranked-credits-button"_spr);credits->setPosition({94,22});menu->addChild(credits);
         // Includes the one-time migration if this is the first Settings visit.
         m_dirty=true;return true;
+    }
+    static replay::ReplaySeekSpeed seekSpeed(){return replay::replaySeekSpeedFromInt(static_cast<int>(Mod::get()->getSavedValue<int64_t>("replay-seek-speed",1)));}
+    CCNode* seekSpeedFace(){
+        auto const speed=seekSpeed();
+        auto name=speed==replay::ReplaySeekSpeed::Low?i18n::text("replay-seek-low","Low"):speed==replay::ReplaySeekSpeed::Fast?i18n::text("replay-seek-fast","Fast"):i18n::text("replay-seek-normal","Normal");
+        auto* face=surface({320,32},{},speed==replay::ReplaySeekSpeed::Fast?Gold:Cyan,SurfaceRaised,250,true);
+        auto* caption=menuLabel(i18n::text("replay-seek-speed","Replay seek speed")+": "+name,.30f,{160,16},Text,FontWeight::ExtraBold);
+        fitFullMenuLabel(caption,298,22,.30f);face->addChild(caption,5);return face;
+    }
+    void setSeekSpeed(replay::ReplaySeekSpeed speed){
+        Mod::get()->setSavedValue<int64_t>("replay-seek-speed",replay::replaySeekSpeedToInt(speed));m_dirty=true;
+        if(m_seekSpeed&&!m_closed)m_seekSpeed->setNormalImage(seekSpeedFace());
+    }
+    void onSeekSpeed(CCObject*){
+        if(m_closed)return;
+        auto const next=replay::nextReplaySeekSpeed(seekSpeed());
+        if(next!=replay::ReplaySeekSpeed::Fast){setSeekSpeed(next);return;}
+        // Fast is opt-in: same Corum confirm UI as the other Ranked dialogs.
+        Ref<RankedSettingsPopup> keep(this);
+        if(auto* warning=RankedConfirmPopup::create(i18n::text("replay-seek-fast-title","FAST REPLAY SEEK"),
+            i18n::text("replay-seek-fast-warning","Fast seek simulates many native frames per screen frame. Low-end devices may stutter, heat up or close the game while seeking. Use it?"),
+            [keep](bool accepted){if(accepted)keep->setSeekSpeed(replay::ReplaySeekSpeed::Fast);},i18n::text("replay-seek-fast-confirm","USE FAST")))warning->show();
     }
     void onDefaults(CCObject* sender) {
         if(m_closed)return;auto* item=typeinfo_cast<CCMenuItemSpriteExtra*>(sender);if(!item)return;

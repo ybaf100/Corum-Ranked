@@ -11,6 +11,7 @@ test('production input timeline keeps P1/P2 tick order, detects native divergenc
  const json=process.env.CORUM_MATJSON_SOURCE,result=process.env.CORUM_RESULT_INCLUDE;if(!json||!result)throw Error('Pinned Geode JSON dependencies required');
  const cpp=String.raw`
 #include "${join(root,'src/replay/SurvivalReplayPlayback.hpp')}"
+#include "${join(root,'src/replay/SurvivalReplaySeekSpeed.hpp')}"
 #include <cassert>
 using namespace corum::ranked::replay;
 Document source(){Document d;d.complete=true;Json initial;initial["kind"]="initial";d.records.push_back(initial);
@@ -30,6 +31,11 @@ int main(){Playback p(source());assert(!p.due());p.accumulate(.01);assert(p.due(
   assert(!p.seeking()&&p.time()>=.4&&p.time()<.42&&p.seekProgress()==1&&!p.desync());
   // Markers come only from recorded evidence: this tape reaches 99.5%, no death/clear/random/anchor.
   for(auto const& m:p.markers())assert(m.kind=='C'||m.kind=='D'||m.kind=='R'||m.kind=='T');assert(p.markers().size()<=Playback::kMaxMarkers);}
+ {// Seek speed setting: Normal is the previous fixed policy; Fast is larger and opt-in; cycle order Low->Normal->Fast->Low.
+  auto normal=replaySeekBudget(ReplaySeekSpeed::Normal);assert(normal.framesPerPump==SeekPolicy::MaxFramesPerPump&&normal.millisPerPump==SeekPolicy::MaxPumpMillis);
+  assert(replaySeekBudget(ReplaySeekSpeed::Low).framesPerPump<normal.framesPerPump&&replaySeekBudget(ReplaySeekSpeed::Fast).framesPerPump>normal.framesPerPump);
+  assert(nextReplaySeekSpeed(ReplaySeekSpeed::Low)==ReplaySeekSpeed::Normal&&nextReplaySeekSpeed(ReplaySeekSpeed::Normal)==ReplaySeekSpeed::Fast&&nextReplaySeekSpeed(ReplaySeekSpeed::Fast)==ReplaySeekSpeed::Low);
+  assert(replaySeekSpeedFromInt(-5)==ReplaySeekSpeed::Low&&replaySeekSpeedFromInt(9)==ReplaySeekSpeed::Fast&&replaySeekSpeedFromInt(1)==ReplaySeekSpeed::Normal);}
  auto frame=p.current();p.nativeStep(.02,false,true,tick);p.completeFrame(frame->poses[0]);assert(p.desync()&&!p.due());
  Playback bad(source());bad.accumulate(.01);bad.nativeStep(.01,false,true,0);auto pose=bad.current()->poses[0];pose["x"]=400.;bad.completeFrame(pose);assert(bad.desync());
  Playback follow(source());follow.followRemote("attempt1",1,50);assert(follow.takeReset()&&follow.seeking());follow.restart();tick=0;while(follow.due())advance(follow,tick);auto before=follow.time();

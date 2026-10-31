@@ -13,7 +13,7 @@ function method(name,from=0){
 }
 for(const debugOn of [false,true]) test(`native update/rotation/teleport -> completed camera snapshot -> 50ms capture (Debug ${debugOn?'ON':'OFF'})`,()=>{
     const owner=['bool observesSpectatorPlayer(', 'corum::ranked::SpectatorGhostPose observedSpectatorPose(',
-        'corum::ranked::SpectatorGhostPose observedSpectatorPlayerPose(', 'bool tracesSpectatorPlayer(', 'void traceSpectatorSource(', 'void observeSpectatorNativeUpdate(', 'void observeSpectatorNativeSnap(', 'void noteSpectatorCaptureResult(', 'void sampleSpectatorPresentation()'].map(n=>method(n)).join('\n');
+        'corum::ranked::SpectatorGhostPose observedSpectatorPlayerPose(', 'bool tracesSpectatorPlayer(', 'void traceSpectatorSource(', 'void observeSpectatorNativeUpdate(', 'void observeSpectatorNativeSnap(', 'void noteSpectatorCaptureResult(', 'void notePendingTeleportSource(', 'void nativePlayerTeleported(', 'void sampleSpectatorPresentation()'].map(n=>method(n)).join('\n');
     const playerAt=source.indexOf('class $modify(CorumRankedSpectatorDummyPlayer');
     const worldAt=source.indexOf('class $modify(CorumRankedSpectatorCameraHook');
     const capture=readFileSync(join(root,'src/spectator/SpectatorPlayerCapture.cpp'),'utf8').replace(/^#include.*$/gm,'');
@@ -25,6 +25,7 @@ for(const debugOn of [false,true]) test(`native update/rotation/teleport -> comp
 #include "${join(root,'src/spectator/SpectatorPlayerCapture.hpp')}"
 #include "${join(root,'src/domain/SpectatorCameraPolicy.hpp')}"
 #include <cassert>
+#include <array>
 #include "${join(root,'src/domain/SpectatorSourceTrace.hpp')}"
 #include "${join(root,'src/domain/SpectatorAudioPolicy.hpp')}"
 struct FMODAudioEngine{static FMODAudioEngine*sharedEngine(){static FMODAudioEngine e;return &e;}std::string getActiveMusic(int){return "voice.mp3";}unsigned getMusicTimeMS(int){return 0;}};
@@ -100,7 +101,7 @@ struct DebugSpectateRuntime {
 struct CorumRankedPlayLayer:PlayLayer {
  corum::ranked::SpectatorLiveRuntime& spectatorTransport(){return corum::ranked::SpectatorLiveRuntime::get();}
  bool blockEntryGameplayUpdate(){return false;}
- struct Fields{SpectatorSourceTrace spectatorSourceTrace;unsigned spectatorCaptureDrops=0;int levelId=123;bool survivalLiveLevel=false,survivalReplayLevel=false,survivalLevel=false;struct Driver{bool partialHistory()const{return false;}template<class...T>bool apply(T...){return false;}std::optional<float> takeNativeDeltaSeconds(){return {};}}spectatorWorldDriver;bool spectatorWorldPoseApplied=false,spectatorCollisionChecked=false;SpectatorNativeProbe spectatorNativeProbe;bool rankedInitialized=false,rankedLevel=true,safetyRetired=false,spectatorMode=false,spectatorPending=false;
+ struct Fields{SpectatorSourceTrace spectatorSourceTrace;unsigned spectatorCaptureDrops=0;std::array<std::optional<SpectatorGhostPose>,2> pendingTeleportSource{};std::array<double,2> pendingTeleportLevelTime{-1,-1};int portalTeleportDepth=0;int levelId=123;bool survivalLiveLevel=false,survivalReplayLevel=false,survivalLevel=false;struct Driver{bool partialHistory()const{return false;}template<class...T>bool apply(T...){return false;}std::optional<float> takeNativeDeltaSeconds(){return {};}}spectatorWorldDriver;bool spectatorWorldPoseApplied=false,spectatorCollisionChecked=false;SpectatorNativeProbe spectatorNativeProbe;bool rankedInitialized=false,rankedLevel=true,safetyRetired=false,spectatorMode=false,spectatorPending=false;
   corum::ranked::SpectatorSceneContext sceneContext;std::optional<SpectatorRemoteFrame>spectatorRenderedFrame;struct Remote{template<class...T>void update(T...){}void presentationVisible(bool){}}remotePlayer;
   bool debugRecordScene=false,debugPlaybackScene=false,debugRecordHasFrame=false;SpectatorCapturePolicy spectatorCapture;std::shared_ptr<SpectatorCosmetics const> spectatorCosmetics;std::chrono::steady_clock::time_point nextCosmeticCaptureAt{};bool spectatorWorldUpdateInProgress=false,spectatorWorldResetInProgress=false;std::optional<unsigned> spectatorCameraFrameNumber;}fields;
  Fields* m_fields=&fields;
@@ -160,6 +161,20 @@ int main(){
  player.setPosition(destination);world.checkCameraLimitAfterTeleport(&player,0);
  player.m_wasTeleported=false;world.observeSpectatorNativeUpdate(&player);
  assert(!world.fields.spectatorCapture.snapshot()->discontinuity); // diagnostics cannot authorize movement
+ // beta.125 iOS log order (Entropie 71.295 s): flag already set -> setPosition
+ // (Y 4044 -> 5437.5) -> GD's PlayerObject::playerTeleported() in the same step.
+ // The native teleport callback is the evidence; the pre-move pose is the source.
+ world.fields.spectatorCapture.reset();world.m_gameState.m_levelTime=71.29583;player.position={25892.316f,4044};player.m_wasTeleported=true;
+ player.setPosition({25892.316f,5437.5f});assert(!world.fields.spectatorCapture.snapshot()||!world.fields.spectatorCapture.snapshot()->discontinuity);
+ player.playerTeleported();
+ {auto captured=world.fields.spectatorCapture.snapshot();assert(captured&&captured->discontinuity&&captured->discontinuity->type==SpectatorDiscontinuity::Teleport);
+  assert(captured->discontinuity->fromY==4044&&captured->discontinuity->toY==5437.5f&&world.fields.spectatorCaptureDrops==0);}
+ // Exactly one event: a later callback without a fresh flagged write in that step adds nothing,
+ // and a portal entry (which captures itself) never double-counts through the callback.
+ player.playerTeleported();assert(world.fields.spectatorCapture.snapshot()->discontinuity->nativeEvents.size()==1);
+ world.fields.spectatorCapture.reset();world.fields.portalTeleportDepth=1;player.m_wasTeleported=true;player.setPosition({25900,4044});player.playerTeleported();world.fields.portalTeleportDepth=0;
+ assert(!world.fields.spectatorCapture.snapshot()||!world.fields.spectatorCapture.snapshot()->discontinuity);
+ player.m_wasTeleported=false;
  world.fields.levelId=123;
  auto dummyUpdates=player.updates;world.fields.spectatorMode=true;
  for(int i=0;i<3;++i){world.update(.016f);}assert(player.updates==dummyUpdates);

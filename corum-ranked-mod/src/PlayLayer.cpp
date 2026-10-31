@@ -42,6 +42,7 @@
 #include "domain/RenderFpsMeter.hpp"
 #include "ui/PlayerIcon.hpp"
 #include "ui/RankedTranslations.hpp"
+#include <Geode/binding/PauseLayer.hpp>
 #include "ui/RankedVisuals.hpp"
 #include "ui/RankedEntryOverlay.hpp"
 #include "ui/RankedInput.hpp"
@@ -234,6 +235,8 @@ public:
         corum::ranked::LevelPreparationContext survivalContext;
         corum::ranked::ui::SurvivalHud* survivalHud = nullptr;
         bool survivalWaiting = false;
+        // Restart freeze fix: what the wait itself changed, so it can be undone.
+        bool survivalWaitPaused = false, survivalResetDeferred = false;
         bool rankedInitialized = false;
         bool nativeEntryHeld = false;
         // Process-owned fallback is independent of the paused native PlayLayer scheduler.
@@ -251,6 +254,12 @@ public:
         corum::ranked::SpectatorCapturePolicy spectatorCapture;
         corum::ranked::SpectatorSourceTrace spectatorSourceTrace;
         unsigned spectatorCaptureDrops=0;
+        // Trigger/area teleports bypass GJBaseGameLayer::teleportPlayer on iOS:
+        // flag -> setPosition -> PlayerObject::playerTeleported(). Keep the pre-move
+        // pose of that exact physics step; the native callback is the evidence.
+        std::array<std::optional<corum::ranked::SpectatorGhostPose>,2> pendingTeleportSource{};
+        std::array<double,2> pendingTeleportLevelTime{-1,-1};
+        int portalTeleportDepth=0;
         std::shared_ptr<corum::ranked::SpectatorCosmetics const> spectatorCosmetics;
         std::chrono::steady_clock::time_point nextCosmeticCaptureAt{};
 
@@ -695,6 +704,18 @@ public:
         return false;
     }
 
+    void beginSurvivalWait(bool resetDeferred) {
+        if(!m_fields->survivalWaiting && !m_isPaused)m_fields->survivalWaitPaused=true;
+        m_fields->survivalWaiting=true;m_isPaused=true;
+        m_fields->survivalResetDeferred=m_fields->survivalResetDeferred||resetDeferred;
+    }
+
+    bool survivalPauseMenuOpen() {
+        auto* scene=getParent();if(!scene || !scene->getChildren())return false;
+        for(auto* child:CCArrayExt<CCNode*>(scene->getChildren()))if(typeinfo_cast<PauseLayer*>(child))return true;
+        return false;
+    }
+
     bool blockSurvivalEntry() {
         if(!m_fields->rankedInitialized || m_fields->entryNativeCompletionInProgress)return m_fields->nativeEntryHeld;
         if(m_fields->autoExitRequested)return true;
@@ -702,7 +723,20 @@ public:
         if(runtime.preparationContext()!=m_fields->survivalContext || runtime.view().state=="ROUND_RESULT" ||
             runtime.view().state=="FINAL_RESULT" || runtime.view().state=="CANCELLED") {queueHeldEntryExit();return true;}
         if(runtime.surrenderPending()){m_queuedButtons.clear();return true;}
-        if(!m_fields->nativeEntryHeld)return m_fields->survivalWaiting;
+        if(!m_fields->nativeEntryHeld){
+            // A transient canPlay()=false (server clock resync, session refresh,
+            // presence/asset poll) used to freeze the scene until map re-entry:
+            // nothing ever cleared the wait. Release it once the server again
+            // authorizes play, and run the deferred restart through the normal
+            // Survival reset path (End already reported, a new Start follows).
+            if(m_fields->survivalWaiting && runtime.canPlay() && !runtime.attemptLimitReached() && runtime.view().state=="PLAYING"){
+                m_fields->survivalWaiting=false;
+                if(std::exchange(m_fields->survivalWaitPaused,false) && !survivalPauseMenuOpen())m_isPaused=false;
+                if(std::exchange(m_fields->survivalResetDeferred,false))resetLevel();
+                return false;
+            }
+            return m_fields->survivalWaiting;
+        }
         auto* director=CCDirector::sharedDirector();
         bool const ownsScene=this==PlayLayer::get() && getParent() &&
             getParent()==director->getRunningScene() && !director->getNextScene();
@@ -743,7 +777,7 @@ public:
             queueSurvivalGameplayReturn();return;
         }
         if(blockSurvivalEntry())return;
-        if(!runtime.canPlay() && runtime.view().state=="PLAYING" && !m_hasCompletedLevel) {m_fields->survivalWaiting=true;m_isPaused=true;}
+        if(!runtime.canPlay() && runtime.view().state=="PLAYING" && !m_hasCompletedLevel) {beginSurvivalWait(false);}
     }
 
     void queueSurvivalGameplayReturn() {
@@ -986,6 +1020,22 @@ public:
         log::info("[SpectatorSourceTrace] attempt={} stage={} frame={} order={} event={} nativeStep={} nativeMs={} p2={} before=({},{}) after=({},{}) mode={} gravity={} velocity={} lastPosition=({},{}) teleportedBefore={} teleportedAfter={} objectId={} runtimeId={} result={} pendingEvents={}",
             attempt,callback,trace.frame,order,trace.event,m_currentStep,m_gameState.m_levelTime*1000,player==m_player2,before.x,before.y,x,y,corum::ranked::spectatorModeName(pose.mode),pose.upsideDown,player->m_yVelocity,player->m_lastPosition.x,player->m_lastPosition.y,teleportedBefore,player->m_wasTeleported,objectId,uniqueId,result,
             capture?(player==m_player2&&capture->player2?(capture->player2->discontinuity?capture->player2->discontinuity->nativeEvents.size():0):(capture->discontinuity?capture->discontinuity->nativeEvents.size():0)):0);
+    }
+
+    void notePendingTeleportSource(PlayerObject* player) {
+        if(!player||!player->m_wasTeleported||!observesSpectatorPlayer(player))return;
+        auto const i=player==m_player2?1u:0u;
+        if(m_fields->pendingTeleportSource[i]&&m_fields->pendingTeleportLevelTime[i]==m_gameState.m_levelTime)return; // first write of this step
+        m_fields->pendingTeleportSource[i]=observedSpectatorPlayerPose(player);m_fields->pendingTeleportLevelTime[i]=m_gameState.m_levelTime;
+    }
+
+    void nativePlayerTeleported(PlayerObject* player) {
+        if(!player)return;
+        auto const i=player==m_player2?1u:0u;
+        auto source=m_fields->pendingTeleportSource[i];m_fields->pendingTeleportSource[i].reset();
+        // The portal entry hook captures its own event; never double-count it.
+        if(!source||m_fields->portalTeleportDepth>0||m_fields->pendingTeleportLevelTime[i]!=m_gameState.m_levelTime)return;
+        observeSpectatorNativeSnap(player,corum::ranked::SpectatorDiscontinuity::Teleport,*source,"PLAYER_TELEPORTED");
     }
 
     void observeSpectatorNativeUpdate(PlayerObject* player) {
@@ -1649,7 +1699,7 @@ public:
             if(m_fields->rankedInitialized && !m_fields->nativeEntryHeld) {
                 auto& survival=corum::ranked::SurvivalRuntime::get();
                 if(!m_fields->attemptEndReported){corum::ranked::replay::Recorder::get().finish("RESET",m_hasCompletedLevel?100.0:rankedProgressPercent(this));survival.endAttempt(m_hasCompletedLevel?100.0:rankedProgressPercent(this));}
-                if(survival.attemptLimitReached() || !survival.canPlay()) {m_fields->survivalWaiting=true;m_isPaused=true;return;}
+                if(survival.attemptLimitReached() || !survival.canPlay()) {m_fields->attemptEndReported=true;beginSurvivalWait(true);return;}
                 m_fields->attemptStartReported=m_fields->attemptEndReported=false;
             }
             PlayLayer::resetLevel();return;
@@ -3087,7 +3137,9 @@ class $modify(CorumRankedSpectatorCameraHook, GJBaseGameLayer) {
         auto const before = observed ? owner->observedSpectatorPlayerPose(player) : corum::ranked::SpectatorGhostPose{};
         auto const source=player?player->getPosition():CCPoint{};
         auto const flag=player&&player->m_wasTeleported;
+        if(owner)++owner->m_fields->portalTeleportDepth;
         GJBaseGameLayer::teleportPlayer(object, player);
+        if(owner)--owner->m_fields->portalTeleportDepth;
         if(player)corum::ranked::survivalReplayNativeSnap(player,false,source.x,source.y);
         if (observed){owner->traceSpectatorSource(3,"PORTAL",player,before,flag,object->m_objectID,object->m_uniqueID);owner->observeSpectatorNativeSnap(player, corum::ranked::SpectatorDiscontinuity::Teleport, before,"PORTAL");}
     }
@@ -3175,6 +3227,7 @@ class $modify(CorumRankedSpectatorDummyPlayer, PlayerObject) {
         if (layer && layer->blocksSpectatorNativePlayerWrite(this)) return;
         auto const observed=layer&&layer->tracesSpectatorPlayer(this);
         auto const before=observed?corum::ranked::captureSpectatorPose(this):corum::ranked::SpectatorGhostPose{};auto const flag=m_wasTeleported;
+        if(layer&&flag)layer->notePendingTeleportSource(this); // observation only; not evidence by itself
         PlayerObject::setPosition(position);
         if(observed)layer->traceSpectatorSource(4,"SET_POSITION_OBSERVATION_ONLY",this,before,flag);
     }
@@ -3185,6 +3238,7 @@ class $modify(CorumRankedSpectatorDummyPlayer, PlayerObject) {
         auto before=observed?corum::ranked::captureSpectatorPose(this):corum::ranked::SpectatorGhostPose{};auto flag=m_wasTeleported;
         PlayerObject::playerTeleported();
         if(observed)layer->traceSpectatorSource(13,"PLAYER_TELEPORTED",this,before,flag);
+        if(layer)layer->nativePlayerTeleported(this);
     }
 #endif
 

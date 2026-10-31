@@ -4,6 +4,7 @@
 #include "SurvivalReplayRuntime.hpp"
 #include "SurvivalReplayEnvironment.hpp"
 #include "SurvivalReplayInputBoundary.hpp"
+#include "SurvivalReplaySeekSpeed.hpp"
 #include "../SurvivalRuntime.hpp"
 #include "../SurvivalSceneBridge.hpp"
 #include "../spectator/SpectatorPlayerCapture.hpp"
@@ -69,7 +70,7 @@ matjson::Value replayPose(PlayLayer* layer){
 class $modify(CorumSurvivalReplayLayer,PlayLayer){
 public:
  struct ReplayCamera {CCPoint origin,second,diff;float zoom=1,angle=0;struct Layer{CCPoint pos;float x=1,y=1,angle=0;};std::array<Layer,3> layers;};
- struct Fields {Json trace=Json::array();std::array<unsigned,2> playerUpdates{};bool preInput=false;std::optional<ReplayCamera> nativeCamera;bool ready=false,replayOwned=false,liveWorldOwned=false,replayAdvancing=false,internalReset=false,desyncReported=false,retiring=false;CCLabelBMFont* replayText=nullptr;CCLabelBMFont* captureError=nullptr;std::string captureErrorText,captureAttempt,initialAttempt;Slider* replaySlider=nullptr;float replayHudWait=0;corum::ranked::SpectatorAudioClockPolicy replayAudio;bool replayMarkersAdded=false;CCNode* replayDesyncMarker=nullptr;unsigned lastRenderFrame=0;
+ struct Fields {Json trace=Json::array();std::array<unsigned,2> playerUpdates{};bool preInput=false;std::optional<ReplayCamera> nativeCamera;bool ready=false,replayOwned=false,liveWorldOwned=false,replayAdvancing=false,internalReset=false,desyncReported=false,retiring=false;CCLabelBMFont* replayText=nullptr;CCLabelBMFont* captureError=nullptr;std::string captureErrorText,captureAttempt,initialAttempt;Slider* replaySlider=nullptr;float replayHudWait=0;corum::ranked::SpectatorAudioClockPolicy replayAudio;bool replayMarkersAdded=false;CCNode* replayDesyncMarker=nullptr;CCLayerColor* seekOverlay=nullptr;CCLayerColor* seekFill=nullptr;CCLabelBMFont* seekLabel=nullptr;float seekBarWidth=0;unsigned lastRenderFrame=0;
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
  double captureUs=0,captureMaxUs=0;unsigned captureFrames=0;
 #endif
@@ -198,6 +199,22 @@ public:
           auto* item=CCMenuItemSpriteExtra::create(face,this,menu_selector(CorumSurvivalReplayLayer::onReplayControl));item->setTag(i+1);item->setPosition({(size.width-width)/2+cell*(i+.5f),16});menu->addChild(item);
         }
         m_fields->replaySlider=Slider::create(this,menu_selector(CorumSurvivalReplayLayer::onReplaySeek),.65f);m_fields->replaySlider->setPosition({size.width/2,43});addChild(m_fields->replaySlider,1500);
+        // Seek cover: the world is being re-simulated from a verified reset, so
+        // intermediate frames are hidden behind a progress screen. Controls stay above it.
+        auto* overlay=CCLayerColor::create(ccc4(8,10,18,236),size.width,size.height);overlay->setVisible(false);addChild(overlay,1490);m_fields->seekOverlay=overlay;
+        auto barWidth=std::min(320.f,size.width-60);m_fields->seekBarWidth=barWidth;
+        auto* track=CCLayerColor::create(ccc4(255,255,255,48),barWidth,8);track->setPosition({(size.width-barWidth)/2,size.height/2-14});overlay->addChild(track);
+        auto* fill=CCLayerColor::create(ccc4(80,200,255,255),barWidth,8);fill->setAnchorPoint({0,0});fill->ignoreAnchorPointForPosition(false);fill->setPosition({(size.width-barWidth)/2,size.height/2-14});fill->setScaleX(0);overlay->addChild(fill,1);m_fields->seekFill=fill;
+        m_fields->seekLabel=corum::ranked::ui::menuLabel(corum::ranked::i18n::text("replay-seeking","Moving to replay position..."),.32f,{size.width/2,size.height/2+16},corum::ranked::ui::Text);overlay->addChild(m_fields->seekLabel,2);
+    }
+    void updateSeekOverlay(corum::ranked::replay::Playback* replay){
+        if(!m_fields->seekOverlay)return;
+        bool const show=replay&&m_fields->replayOwned&&replay->seeking()&&!replay->desync();
+        m_fields->seekOverlay->setVisible(show);if(!show)return;
+        auto progress=static_cast<float>(std::clamp(replay->seekProgress(),0.,1.));
+        if(m_fields->seekFill)m_fields->seekFill->setScaleX(progress);
+        if(m_fields->seekLabel){auto text=fmt::format("{} {:.0f}%  ({:.1f}s / {:.1f}s)",corum::ranked::i18n::text("replay-seeking","Moving to replay position..."),progress*100,replay->time(),replay->seekTarget());
+            m_fields->seekLabel->setString(text.c_str());corum::ranked::ui::fitFullMenuLabel(m_fields->seekLabel,CCDirector::sharedDirector()->getWinSize().width-40,24,.32f);}
     }
     // P2-D: timeline markers for events actually present in the recorded tape,
     // on a self-sized strip above the controls (does not move existing buttons).
@@ -221,7 +238,10 @@ public:
         if(replay->takeReset()){m_fields->internalReset=true;{corum::ranked::replay::ReplayWorldOptionsScope loadOptions(m_level,replay->initial()["worldOptions"]);PlayLayer::resetLevel();}m_fields->internalReset=false;m_isTestMode=m_fields->replayOwned;replay->restart();resetReplayInitial();}
         if(!replay->desync())if(auto problem=corum::ranked::replay::replayPhysicsEnvironmentMismatch(replay->metadata()["physicsEnvironment"],corum::ranked::replay::captureReplayPhysicsEnvironment());!problem.empty())replay->reject(problem);
         auto began=std::chrono::steady_clock::now();
-        for(std::size_t n=0;n<corum::ranked::replay::SeekPolicy::MaxFramesPerPump&&replay->due();++n){
+        // Seek throughput is a user setting; ordinary 1x playback is unaffected (one frame per dt).
+        auto const budget=replay->seeking()?corum::ranked::replay::replaySeekBudget(corum::ranked::replay::replaySeekSpeedFromInt(static_cast<int>(Mod::get()->getSavedValue<int64_t>("replay-seek-speed",1)))):
+            corum::ranked::replay::ReplaySeekBudget{corum::ranked::replay::SeekPolicy::MaxFramesPerPump,corum::ranked::replay::SeekPolicy::MaxPumpMillis};
+        for(std::size_t n=0;n<budget.framesPerPump&&replay->due();++n){
             auto const* frame=replay->current();
             if(m_fields->liveWorldOwned)restoreReplayCamera();
             resetReplayTrace();auto before=physicsEvidence();
@@ -246,9 +266,9 @@ public:
             auto pose=replayPose(this);pose["physics"]=physicsEvidence();replay->completeFrame(pose);
             reportReplayFailure(before);
             if(m_fields->liveWorldOwned)saveReplayCamera();
-            if(std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-began).count()>=corum::ranked::replay::SeekPolicy::MaxPumpMillis)break;
+            if(std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-began).count()>=budget.millisPerPump)break;
         }
-        reportReplayFailure();
+        reportReplayFailure();updateSeekOverlay(replay);
         if(m_fields->liveWorldOwned){for(auto* player:{m_player1,m_player2})corum::ranked::CorumRemotePlayer::hideNativeVisuals(player);return;}
         auto* audio=FMODAudioEngine::sharedEngine();auto const* presented=replay->presentedPose();
         auto& audioClock=m_fields->replayAudio;

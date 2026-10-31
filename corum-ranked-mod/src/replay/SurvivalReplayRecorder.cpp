@@ -189,7 +189,10 @@ void Recorder::pump(){
         auto id=str(metadata,"attemptId");m_closing.erase(id);
         try{m_writes.push_back({m_storage.closeAcknowledged(id),"OFFICIAL_END_ACK",id,str(metadata,"roundKey")});}catch(std::exception const&e){note(ReplayNotice::File,"OFFICIAL_END_ACK",e.what(),metadata);}
         if(metadata["capturedProgress"].isNumber()&&(score(number(metadata,"capturedProgress"),str(metadata,"phase")=="TIEBREAK")<score(number(j,"progress"),str(metadata,"phase")=="TIEBREAK")||(str(metadata,"terminalReason")=="DEBUG_FORCE_CLEAR"&&score(number(metadata,"capturedProgress"),str(metadata,"phase")=="TIEBREAK")!=score(number(j,"progress"),str(metadata,"phase")=="TIEBREAK")))){
-            note(ReplayNotice::Unsupported,"OFFICIAL_RECEIPT",str(metadata,"terminalReason")=="DEBUG_FORCE_CLEAR"?"FORCE_CLEAR_HAS_NO_NATIVE_CLEAR_REPLAY":"OFFICIAL_AND_NATIVE_PROGRESS_DIFFER",metadata);return;
+            auto reason=str(metadata,"terminalReason")=="DEBUG_FORCE_CLEAR"?"FORCE_CLEAR_HAS_NO_NATIVE_CLEAR_REPLAY":"OFFICIAL_AND_NATIVE_PROGRESS_DIFFER";
+            note(ReplayNotice::Unsupported,"OFFICIAL_RECEIPT",reason,metadata);
+            try{m_writes.push_back({m_storage.markUnmatched(id,reason),"OFFICIAL_RECEIPT_FINAL",id,str(metadata,"roundKey")});}catch(...){}
+            return;
         }
         if(auto found=m_captures.find(str(metadata,"attemptId"));found!=m_captures.end()){
             if(found->second.damaged){m_captures.erase(found);return;}accepted(str(metadata,"attemptId"),true);

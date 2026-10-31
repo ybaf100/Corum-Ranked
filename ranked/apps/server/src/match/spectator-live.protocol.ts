@@ -230,7 +230,7 @@ export const parseSpectatorKeyframe = (value: unknown): SpectatorPoseKeyframe =>
            (raw.type==="SPIDER_SNAP"&&(raw.afterMode!=="SPIDER"||(raw.beforeMode===raw.afterMode&&beforeGravity===afterGravity))))throw new BadRequestException("Unverified native event chain");
         let trace:{event:number;tick:number;step:number;elapsedMs:number;callback:string}|undefined;
         if(raw.trace!==undefined){const t=raw.trace;
-          if(!isRecord(t)||![t.event,t.tick,t.step].every(n=>typeof n==='number'&&Number.isSafeInteger(n)&&n>=0&&n<=1000000000)||Number(t.event)<1||typeof t.elapsedMs!=='number'||!Number.isFinite(t.elapsedMs)||t.elapsedMs<0||t.elapsedMs>86400000||!['PORTAL','TELEPORT_FLAG','SPIDER'].includes(String(t.callback)))throw new BadRequestException('Invalid native diagnostic identity');
+          if(!isRecord(t)||![t.event,t.tick,t.step].every(n=>typeof n==='number'&&Number.isSafeInteger(n)&&n>=0&&n<=1000000000)||Number(t.event)<1||typeof t.elapsedMs!=='number'||!Number.isFinite(t.elapsedMs)||t.elapsedMs<0||t.elapsedMs>86400000||!['PORTAL','TELEPORT_FLAG','SPIDER','PLAYER_TELEPORTED'].includes(String(t.callback)))throw new BadRequestException('Invalid native diagnostic identity');
           trace={event:Number(t.event),tick:Number(t.tick),step:Number(t.step),elapsedMs:t.elapsedMs,callback:String(t.callback)};
         }
         return {type:raw.type,fromX:x,fromY:y,toX:tx,toY:ty,beforeMode:raw.beforeMode as SpectatorGameMode,afterMode:raw.afterMode as SpectatorGameMode,beforeGravity,afterGravity,...(trace?{trace}:{})};

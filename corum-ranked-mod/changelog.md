@@ -1,3 +1,13 @@
+# v0.5.0-beta.126
+
+- Survival restart freeze: a transient "cannot play" moment during a restart paused the scene and nothing ever cleared that wait, so the map had to be re-entered. The wait now releases when the server authorizes play again and runs the deferred restart once through the normal Survival path (End already reported). A user pause menu and the tiebreak attempt limit are respected.
+- Entropie RECAPTURE REQUIRED: the 71.295 s relocation is a trigger teleport that bypasses the portal entry on iOS (flag -> setPosition -> PlayerObject::playerTeleported()). The native playerTeleported() callback now issues the Teleport evidence with the pre-move pose of the same physics step; portal entries are not double-counted. Server and viewer accept the new PLAYER_TELEPORTED trace label. A position change without that native callback is still rejected. Windows has no playerTeleported() hook yet.
+- PARTIAL SYNC: Random triggers are now reconciled per trigger by native vs source activation counts. A late native mirror of an already applied source activation is no longer reported as missing; a native activation the source never recorded still keeps PARTIAL SYNC.
+- Round 1 replay not recorded: identical stacked objects (same ID/position/rotation/scale/groups) aborted the capture with CBF_COLLISION_IDENTITY_UNPROVEN. Collision targets are identified by their index in the ordered, hash-verified map manifest, so duplicates stay distinct (hitting the other duplicate is still a desync). Shared runtime IDs still fail closed.
+- "Waiting for official receipt" forever: a final official receipt that a capture cannot match marks it UNAVAILABLE (file kept, never promoted) instead of waiting and retrying indefinitely.
+- Replay seek: a cover screen with a progress bar is shown while the replay re-simulates to the selected point. Settings > Replay seek speed (Low / Normal / Fast); Fast asks for confirmation in the Corum dialog. Seeking still replays every recorded native frame from a verified reset.
+- Actual GD/device behaviour is unverified.
+
 # v0.5.0-beta.125
 
 - Preserve the actual Source low-detail and camera-shake load options in new recordings. Replay and Survival viewer worlds apply those recorded options before Native object creation/reset, then restore the shared level preferences. A differing loaded LDM fails closed; legacy files without the option evidence are never guessed or rewritten.

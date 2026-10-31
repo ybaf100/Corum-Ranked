@@ -43,7 +43,8 @@ int main(){
  record(s,"wrong-map",100);r=receipt("wrong-map",100);r.mapGeneration=2;assert(!s.reconcile(r).get());
  s.begin(metadata("crash")).get();initial(s,"crash",85);Json frame;frame["kind"]="frame";frame["tick"]=1;frame["elapsed"]=.01;frame["dt"]=.01;s.append("crash",{frame}).get();
  {std::ofstream out("${dir}/replays/pending/"+corum::ranked::sha256Text("crash")+".tmp",std::ios::app);out<<"{truncated";}
- auto recovered=s.recover().get();assert(recovered.size()==2);assert(str(s.best(metadata("x")).get()->metadata,"attemptId")=="clear");
+ auto recovered=s.recover().get();assert(recovered.size()==1); // wrong-map is a final official mismatch: kept on disk, not re-queued
+ assert(std::filesystem::exists("${dir}/replays/pending/"+corum::ranked::sha256Text("wrong-map")+".tmp"));assert(str(s.best(metadata("x")).get()->metadata,"attemptId")=="clear");
  bool failed=false;try{record(s,"clear",99);}catch(...){failed=true;}assert(failed);assert(str(s.best(metadata("x")).get()->metadata,"attemptId")=="clear");
  // A torn journal is promoted only after an exact official closed receipt, with a partial label.
  auto partial=metadata("partial");partial["roundKey"]="round2";s.begin(partial).get();initial(s,"partial",74);
@@ -85,6 +86,11 @@ int main(){
   v=classifyReplayQuality(s.inspectState(awaiting).get(),awaiting,"");assert(v.quality==ReplayQuality::WaitingReceipt&&!v.playable);
   auto absent=metadata("absent");absent["roundKey"]="absent-round";
   v=classifyReplayQuality(s.inspectState(absent).get(),absent,"");assert(v.quality==ReplayQuality::NotOnDevice&&!v.playable);
+  // A final official receipt that cannot match leaves "waiting" and is not re-queued.
+  s.markUnmatched("awaiting","OFFICIAL_AND_NATIVE_PROGRESS_DIFFER").get();
+  v=classifyReplayQuality(s.inspectState(awaiting).get(),awaiting,"");assert(v.quality==ReplayQuality::Unavailable&&v.reason=="OFFICIAL_AND_NATIVE_PROGRESS_DIFFER"&&!v.playable);
+  {auto recovered=s.recover().get();for(auto const& m:recovered)assert(str(m,"attemptId")!="awaiting");}
+  assert(std::filesystem::exists("${dir}/replays/pending/"+corum::ranked::sha256Text("awaiting")+".tmp"));
   Json good=Json::object();good["best"]=cutoff;good["best"]["officialCompletion"]="FULL_CAPTURE";good["best"]["captureCompleteness"]="COMPLETE";
   v=classifyReplayQuality(good,cutoff,"");assert(v.quality==ReplayQuality::CompleteVerified&&v.playable);
   good["best"]["officialCompletion"]="OFFICIAL_PREFIX";v=classifyReplayQuality(good,cutoff,"");assert(v.quality==ReplayQuality::OfficialPrefix&&v.playable);

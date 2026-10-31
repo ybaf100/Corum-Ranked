@@ -22,7 +22,7 @@ inline std::string_view spectatorDiscontinuityName(SpectatorDiscontinuity type) 
 }
 // Diagnostic identity only. It never authorizes a position correction.
 struct SpectatorSnapTrace {std::int64_t event=0,tick=0,step=0;double elapsedMs=0;std::string callback;};
-inline bool validSpectatorSnapTrace(SpectatorSnapTrace const& t){return t.event>0&&t.event<=1000000000&&t.tick>=0&&t.tick<=1000000000&&t.step>=0&&t.step<=1000000000&&std::isfinite(t.elapsedMs)&&t.elapsedMs>=0&&t.elapsedMs<=86400000&&(t.callback=="PORTAL"||t.callback=="TELEPORT_FLAG"||t.callback=="SPIDER");}
+inline bool validSpectatorSnapTrace(SpectatorSnapTrace const& t){return t.event>0&&t.event<=1000000000&&t.tick>=0&&t.tick<=1000000000&&t.step>=0&&t.step<=1000000000&&std::isfinite(t.elapsedMs)&&t.elapsedMs>=0&&t.elapsedMs<=86400000&&(t.callback=="PORTAL"||t.callback=="TELEPORT_FLAG"||t.callback=="SPIDER"||t.callback=="PLAYER_TELEPORTED");}
 struct SpectatorNativeSnapEvent {SpectatorDiscontinuity type=SpectatorDiscontinuity::Teleport;float fromX=0,fromY=0,toX=0,toY=0;SpectatorGameMode beforeMode=SpectatorGameMode::Cube,afterMode=SpectatorGameMode::Cube;bool beforeGravity=false,afterGravity=false;std::optional<SpectatorSnapTrace> trace=std::nullopt;};
 struct SpectatorSnapEvidence {
     SpectatorDiscontinuity type = SpectatorDiscontinuity::Teleport;

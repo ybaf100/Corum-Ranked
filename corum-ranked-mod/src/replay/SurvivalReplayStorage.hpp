@@ -24,6 +24,9 @@ public:
     std::future<std::optional<Json>> inspect(Json identity);
     /** History quality evidence: best metadata, pending/closing journal state or the damage reason. */
     std::future<Json> inspectState(Json identity);
+    /** A final official receipt that this capture can never match: keep the
+     * bytes, stop presenting it as "waiting for receipt". Never touches a best. */
+    std::future<void> markUnmatched(std::string attempt,std::string reason);
     std::future<std::unique_ptr<Playback>> playback(Json identity);
     std::future<std::vector<Json>> recover();
     std::future<void> journalClose(Json metadata);
@@ -48,6 +51,7 @@ private:
     Json manifest()const;
     std::optional<Document> loadBest(Json const& identity);
     void saveManifest(Json const&);
+    void markPendingStatus(Json& manifest,std::string const& attempt,std::string const& reason);
     void safeDirectories(std::filesystem::path const&);
     void diskBudget(std::uintmax_t);
     void durable(std::filesystem::path const&);

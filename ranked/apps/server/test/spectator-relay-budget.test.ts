@@ -1,7 +1,7 @@
 import { gzipSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 import { appendSpectatorPacket, readSpectatorStream } from "../src/match/spectator-relay.js";
-import { parseSpectatorPacket, type LiveStream } from "../src/match/spectator-live.protocol.js";
+import { parseSpectatorKeyframe, parseSpectatorPacket, type LiveStream } from "../src/match/spectator-live.protocol.js";
 import { SPECTATOR_HISTORY_MAX_BYTES } from "../src/match/spectator-live.policy.js";
 
 const packet = (sequence: number) => parseSpectatorPacket({
@@ -41,5 +41,14 @@ describe("P2-C spectator relay memory budget", () => {
     console.info(`[P2-A baseline] packet≈${perPacket.toFixed(0)}B json≈${(bytesPerSecond / 1024).toFixed(1)}KiB/s/viewer gzip=${(gzipRatio * 100).toFixed(0)}%`);
     expect(perPacket).toBeGreaterThan(0);
     expect(bytesPerSecond).toBeLessThan(64 * 1024);
+  });
+
+  it("accepts the native PLAYER_TELEPORTED evidence callback (Entropie trigger teleport) and still rejects unknown callbacks", () => {
+    const keyframe = (callback: string) => ({ x: 25892.316, y: 5437.5, rotation: 0, mode: "SHIP", mini: false, upsideDown: false, flipped: false, dual: false, dead: false, finished: false,
+      discontinuity: { type: "TELEPORT", fromX: 25892.316, fromY: 4044, toX: 25892.316, toY: 5437.5,
+        nativeEvents: [{ type: "TELEPORT", fromX: 25892.316, fromY: 4044, toX: 25892.316, toY: 5437.5, beforeMode: "SHIP", afterMode: "SHIP", beforeGravity: false, afterGravity: false,
+          trace: { event: 1, tick: 8669, step: 33880, elapsedMs: 71295.8, callback } }] } });
+    expect(parseSpectatorKeyframe(keyframe("PLAYER_TELEPORTED")).discontinuity?.type).toBe("TELEPORT");
+    expect(() => parseSpectatorKeyframe(keyframe("SET_POSITION"))).toThrow();
   });
 });

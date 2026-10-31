@@ -193,7 +193,7 @@ struct SurvivalRuntime {
     static SurvivalRuntime& get(){static SurvivalRuntime r;return r;}
     int preparationContext()const{return context;}void tick(){++ticks;}
     View const& view()const{return data;}
-    bool surrenderPending()const{return pending;}bool canPlay()const{return playable;}
+    bool surrenderPending()const{return pending;}bool canPlay()const{return playable;}bool limit=false;bool attemptLimitReached()const{return limit;}
     std::optional<std::int64_t> countdownMs()const{return remaining;}
     void sceneEntered(int id){assert(id==123);++notes;if(!posted){posted=true;++posts;}}
 };
@@ -201,7 +201,7 @@ struct SurvivalRuntime {
 namespace corum::ranked {inline bool quitThroughSurvivalCompletionOverlay(PlayLayer*){return false;}}
 struct CorumRankedPlayLayer:PlayLayer {
     struct Fields {
-        bool rankedInitialized=true,survivalWaiting=false;int survivalContext=1;
+        bool rankedInitialized=true,survivalWaiting=false,survivalWaitPaused=false,survivalResetDeferred=false;int survivalContext=1;
         bool survivalLevel=false,survivalNativeClearFinished=false;bool nativeEntryHeld=true,autoExitRequested=false,entryWasPaused=false,entryNativeCompletionInProgress=false;
         bool entryTouchEnabled=true,entryKeyboardEnabled=true;
         bool entryUIKeyboardEnabled=false,entryUIKeypadEnabled=false,entryUIPauseEnabled=false;
@@ -214,6 +214,8 @@ struct CorumRankedPlayLayer:PlayLayer {
     Fields* m_fields=&fields;
     void onQuit(){++quitCalls;}
     bool blocksLocalEvidence(){return false;}
+    int resets=0;bool pauseMenu=false;void resetLevel(){++resets;}bool survivalPauseMenuOpen(){return pauseMenu;}
+    ${method(play, '    void beginSurvivalWait(bool resetDeferred)')}
     ${method(play, 'bool blockSurvivalEntry()')}
     ${method(play, '    void releaseEntryControls()')}
     void initializeEntryInputHold(){${inputHold}}
@@ -226,6 +228,19 @@ struct CorumRankedPlayLayer:PlayLayer {
 };
 int main(){
     using namespace corum::ranked;
+    {// Restart freeze: a transient canPlay()=false during a Survival restart held
+     // the scene forever. The wait now releases and performs the deferred reset.
+        auto& survival=SurvivalRuntime::get();survival.data.state="PLAYING";survival.playable=false;
+        CorumRankedPlayLayer play;play.fields.survivalLevel=true;play.fields.nativeEntryHeld=false;play.m_isPaused=false;
+        play.beginSurvivalWait(true);assert(play.fields.survivalWaiting&&play.m_isPaused&&play.blockSurvivalEntry()&&play.resets==0);
+        survival.playable=true;assert(!play.blockSurvivalEntry()&&!play.fields.survivalWaiting&&!play.m_isPaused&&play.resets==1);
+        assert(!play.blockSurvivalEntry()&&play.resets==1); // exactly one deferred restart
+        // A user pause menu opened during the wait stays paused; a tiebreak limit keeps waiting.
+        CorumRankedPlayLayer menu;menu.fields.nativeEntryHeld=false;menu.m_isPaused=false;survival.playable=false;menu.beginSurvivalWait(false);menu.pauseMenu=true;
+        survival.playable=true;assert(!menu.blockSurvivalEntry()&&menu.m_isPaused&&menu.resets==0);
+        CorumRankedPlayLayer limited;limited.fields.nativeEntryHeld=false;survival.limit=true;limited.beginSurvivalWait(true);
+        assert(limited.blockSurvivalEntry()&&limited.resets==0);survival.limit=false;survival.playable=false;survival.data.state="ENTERING";
+    }
     {
         CorumRankedPlayLayer clearing;clearing.fields.survivalLevel=true;clearing.m_hasCompletedLevel=true;
         clearing.queueHeldEntryExit();assert(!clearing.fields.autoExitRequested&&deferred.empty());

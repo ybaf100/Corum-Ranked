@@ -101,7 +101,7 @@ std::future<bool> Storage::reconcile(Receipt r){return submit([this,r]{
       // Validate full owner/map authority and a complete Native prefix before
       // touching an unsealed capture. The last local frame may be newer than
       // the official cutoff; its real evidence is retained, never re-scored.
-      if(!receiptNativeEvidenceMatches(d,r))return false;
+      if(!receiptNativeEvidenceMatches(d,r)){auto unmatched=manifest();markPendingStatus(unmatched,r.attemptId,"OFFICIAL_EVIDENCE_MISMATCH");saveManifest(unmatched);return false;}
       double capturedProgress=0;for(auto const& v:d.records)if(str(v,"kind")=="pose")capturedProgress=std::max(capturedProgress,number(v,"progress"));
       fs::resize_file(path,d.validBytes);Json terminal;terminal["kind"]="terminal";terminal["tick"]=d.records.back()["tick"];terminal["elapsed"]=d.records.back()["elapsed"];
       terminal["progress"]=capturedProgress;terminal["reason"]="PROCESS_RECOVERY";auto b=block({terminal},d.chain,0);
@@ -114,7 +114,8 @@ std::future<bool> Storage::reconcile(Receipt r){return submit([this,r]{
       {std::ofstream out(path,std::ios::app);if(!hasTerminal)out<<b.dump(matjson::NO_INDENTATION)<<'\n';out<<footer.dump(matjson::NO_INDENTATION)<<'\n';out.flush();if(!out)throw std::runtime_error("Replay recovery seal failed");}
       durable(path);d=decode(path);
     }
-    if(!receiptMatches(d,r))return false;auto m=manifest();auto key=roundStorageKey(d.metadata);auto old=str(m["best"][key],"file");
+    if(!receiptMatches(d,r)){auto unmatched=manifest();markPendingStatus(unmatched,r.attemptId,"OFFICIAL_EVIDENCE_MISMATCH");saveManifest(unmatched);return false;}
+    auto m=manifest();auto key=roundStorageKey(d.metadata);auto old=str(m["best"][key],"file");
     bool tie=str(d.metadata,"phase")=="TIEBREAK";
     if((!r.bestAttemptId.empty()&&r.bestAttemptId!=r.attemptId)||score(r.progress,tie)<score(r.roundBest,tie)){
       m["pending"].erase(sha256Text(r.attemptId));saveManifest(m);fs::remove(path);return false;
@@ -146,6 +147,13 @@ std::optional<Document> Storage::loadBest(Json const& identity){
 std::future<std::optional<Document>> Storage::best(Json identity){return submit([this,identity]{return loadBest(identity);});}
 std::future<std::unique_ptr<Playback>> Storage::playback(Json identity){return submit([this,identity]()->std::unique_ptr<Playback>{auto d=loadBest(identity);return d?std::make_unique<Playback>(std::move(*d)):nullptr;});}
 std::future<std::optional<Json>> Storage::inspect(Json identity){return submit([this,identity]()->std::optional<Json>{auto d=loadBest(identity);return d?std::optional(d->metadata):std::nullopt;});}
+void Storage::markPendingStatus(Json& m,std::string const& attempt,std::string const& reason){
+    auto key=sha256Text(attempt);if(!m["pending"].isObject()||!m["pending"].contains(key))return;
+    m["pending"][key]["replayValidationStatus"]=reason;
+}
+std::future<void> Storage::markUnmatched(std::string attempt,std::string reason){return submit([this,attempt,reason]{
+    auto m=manifest();if(!m["pending"].isObject()||!m["pending"].contains(sha256Text(attempt)))return;markPendingStatus(m,attempt,reason);saveManifest(m);
+});}
 std::future<Json> Storage::inspectState(Json identity){return submit([this,identity]{
     Json state=Json::object();
     try{
@@ -159,7 +167,9 @@ std::future<Json> Storage::inspectState(Json identity){return submit([this,ident
     auto attempt=str(identity,"attemptId");if(attempt.empty())return state;
     auto m=manifest();auto key=sha256Text(attempt);
     if(!state.contains("best")&&(m["pending"].contains(key)||m["closing"].contains(key)||fs::exists(pending(attempt)))){
-        Json pendingState=Json::object();pendingState["replayValidationStatus"]="AWAITING_OFFICIAL_RECEIPT";
+        Json pendingState=Json::object();
+        auto status=m["pending"].contains(key)?str(m["pending"][key],"replayValidationStatus"):std::string();
+        pendingState["replayValidationStatus"]=status.empty()?"AWAITING_OFFICIAL_RECEIPT":status;
         pendingState["captureCompleteness"]=m["pending"].contains(key)?Json(str(m["pending"][key],"captureCompleteness")):Json("UNKNOWN");
         state["pending"]=pendingState;
     }
@@ -211,6 +221,9 @@ std::future<std::vector<Json>> Storage::recover(){return submit([this]{
     for(auto const& entry:fs::directory_iterator(m_root/"pending")){
       if(result.size()>=MaxPending)break;if(!entry.is_regular_file()||entry.is_symlink()||entry.path().extension()!=".tmp")continue;
       try{auto d=decode(entry.path(),true);if(entry.path()!=pending(str(d.metadata,"attemptId")))continue;
+        // A final official mismatch is preserved on disk but never re-queued for receipts.
+        if(auto status=str(m["pending"][sha256Text(str(d.metadata,"attemptId"))],"replayValidationStatus");
+           status=="OFFICIAL_EVIDENCE_MISMATCH"||status=="OFFICIAL_AND_NATIVE_PROGRESS_DIFFER"||status=="FORCE_CLEAR_HAS_NO_NATIVE_CLEAR_REPLAY")continue;
         if(!d.complete){fs::resize_file(entry.path(),d.validBytes);d.metadata["captureCompleteness"]="PARTIAL_RECOVERED";}
         auto const& cm=m;if(str(cm["closing"][sha256Text(str(d.metadata,"attemptId"))]["closingEvent"],"type")=="ATTEMPT_END")d.metadata["closingEvent"]=cm["closing"][sha256Text(str(d.metadata,"attemptId"))]["closingEvent"];
         result.push_back(d.metadata);

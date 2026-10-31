@@ -84,6 +84,7 @@ struct CorumRankedPlayLayer: PlayLayer {
     corum::ranked::SpectatorSceneContext survivalSpectatorSceneContext(){return {};}
 
  void syncSpectatorAudio(){}
+ void notePendingTeleportSource(PlayerObject*){} void nativePlayerTeleported(PlayerObject*){}
  bool blockEntryGameplayUpdate(){return false;}
     struct Fields {struct Trace{unsigned frame=0;}spectatorSourceTrace;bool survivalLiveLevel=false,survivalReplayLevel=false;
 #if !defined(CORUM_RANKED_DEBUG_SPECTATE)
