@@ -172,6 +172,88 @@ docs/agent-transfer/VERIFICATION.md에 다음을 기록한다.
 
 **다음 사용자 메시지 원문:** `이어서`
 
+## Notion 최신화 및 prompt 수정 요청 (원문)
+
+```text
+notion 업데이트도 해줘. 모두 최신으로. 그리고 노션도 참고하러고 프롬프트 업뎃해줘.
+Repository: ybaf100/Corum-Ranked
+
+이전 Codex 세션을 이어받는다. 이미 완료된 기능을 처음부터 다시 구현하지 않는다.
+
+1. 인계 브랜치 준비
+
+git fetch origin
+git switch handoff/claude-code-20261031-beta122
+
+로컬 브랜치가 없으면:
+git switch --track origin/handoff/claude-code-20261031-beta122
+
+기대 HEAD:
+e1705a68171a60918fff00e82275abe145b3a813
+
+먼저 git status와 HEAD를 확인한다. 기존 변경을 덮어쓰거나 reset/force push하지 않는다.
+
+2. 다음 순서로 읽는다
+
+- CLAUDE.md
+- AGENTS.md
+- docs/agent-transfer/AGENT_HANDOFF.md
+- docs/agent-transfer/SESSION_TRANSCRIPT.md
+- docs/agent-transfer/VERIFICATION.md
+- docs/agent-transfer/DELIVERY.md
+- docs/agent-transfer/evidence/CODEX_UNIFIED_PROMPT.md
+- docs/agent-transfer/evidence/BETA122_COMPLETION.md
+- ranked/docs/workflow-recapture-collision-beta122-diagnosis.md
+
+필요한 세부 증거:
+- docs/agent-transfer/SOURCE_LOCATIONS.txt
+- docs/agent-transfer/ATTACHMENTS.json
+- docs/agent-transfer/evidence/LOG_ANALYSIS.md
+- docs/agent-transfer/evidence/REPLAY_DESYNC_CASES.json
+- docs/agent-transfer/evidence/beta122-completion-report.json
+
+체크섬 검증:
+sha256sum --check docs/agent-transfer/FILE_SHA256SUMS.txt
+
+3. 현재 상태를 정확히 이해한다
+
+beta.122 코드·자동검사·R2 Release/Debug 게시·Singapore 배포는 이전 세션에서 완료됐다.
+
+당시 main 및 운영 SHA:
+a122cddce51fdf9c8d8a90c6f81d91b048dd8868
+
+그러나 실제 GD/CBF 실행 성공은 미검증이다.
+Entropie의 정확한 Native 이동 함수와 정상 이동을 입증하는 실기기 증거도 미확정이다.
+CBF 충돌 신원·재시작 검사는 독립 Native doubles에서 통과했으며 실제 게임 검증과 구분해야 한다.
+
+과거 보고서를 현재 코드·운영 상태 확인의 대체 근거로 사용하지 않는다.
+
+4. 인계의 한계를 지킨다
+
+SESSION_TRANSCRIPT.md는 완전한 대화 export가 아니다.
+긴 사용자 요청 4개는 요약이며, 접근할 수 없는 과거 대화나 이미지 내용을 창작하지 않는다.
+첨부 prompt 원문과 채팅 원문을 동일한 것으로 간주하지 않는다.
+원본 로그/ZIP이 필요하면 ATTACHMENTS.json을 확인하고 없는 파일을 명확하게 보고한다.
+
+5. 지금 수행할 일
+
+우선 문서와 실제 코드를 읽고 다음을 간결하게 보고한다.
+
+- 구현 완료 / 부분 완료 / 미완료
+- 확정 원인 / 아직 가설인 부분
+- 다음 검증에 필요한 환경·첨부
+- 우선순위가 있는 다음 실행 단계
+
+이 단계에서는 신규 기능 구현, main 병합, 버전 증가, 패키지 게시, 운영 배포를 하지 않는다.
+내가 후속 작업을 지시하면 그 범위에서 진행한다.
+
+추가 구현이 승인되면 직전에 origin/main을 다시 fetch하고 최신 AGENTS.md를 읽는다.
+기존 정상 변경·리플레이 Best·계정·LP/AP·업적·기록을 보존한다.
+허용 오차 확대, DESYNC 검사 제거, 좌표 강제 보정, 가짜 재생으로 문제를 숨기지 않는다.
+실제 수행하지 않은 테스트나 배포를 완료라고 보고하지 않는다.
+비밀키·토큰·인증정보를 문서나 응답에 출력하지 않는다.
+```
+
 **인계 준비 시작 assistant 원문:**
 
 ```text

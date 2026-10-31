@@ -61,6 +61,26 @@ Singapore HTTPS host는 AGENTS.md 참조. SSH known-host pinning 유지. R2 gate
 
 ## 인계 최종 체크리스트
 
+## 2026-10-31 · Notion 최신화 및 Claude prompt
+
+- Notion은 workspace search로 기존 Corum Ranked Canonical Index/Context 구조를 찾아 쓰기 전 해당 페이지를 전부 fetch했다. Canonical 문서에 과거 beta.11/ybadfg/Render 상태가 남아 있어 과거 본문을 삭제하지 않고 2026-10-31 beta.122 authoritative override를 append했다.
+- 업데이트 페이지 8개: Canonical Index, Canonical Context, Bugs / Regression / History, Testing / CI / Release, Client / UI / UX, Game Rules, Server / DB / API, Achievements / AP / Titles. 기존 Placement/Config 페이지는 beta.122 관련 제품 변경이 없어 그대로 뒀다.
+- Notion markdown specification을 먼저 fetch하고 append-only insertion을 사용했다. 결과 페이지를 다시 읽어 beta.122 section/source SHA와 문서별 내용이 반영됨을 확인했다. 최종 Notion page URLs는 아래 및 Claude prompt 파일에 기록한다.
+- credential/secret은 Notion이나 저장소에 추가하지 않았다. Notion update가 제품 코드나 DB를 변경하지 않았다.
+- 사용자가 Claude prompt가 Notion을 참고하도록 요청해 `docs/agent-transfer/CLAUDE_CODE_HANDOFF_PROMPT.md`와 root `CLAUDE.md`를 갱신했다. Claude는 canonical index/context부터 읽고 작업 범위에 맞는 하위 문서를 선택하며 current main/CI/운영과 reconcile하도록 안내한다.
+- 이번 문서 변경에 별도 product test를 추가/실행하지 않았다. 문서 whitespace 및 handoff checksum 검증 후 전용 branch에 push한다.
+
+Notion pages:
+
+- https://app.notion.com/p/3ce44344d8ba8114a916ea7f28eec697
+- https://app.notion.com/p/3c844344d8ba81f990d3e0caff87d6d3
+- https://app.notion.com/p/3ce44344d8ba818d948dc4787b78670c
+- https://app.notion.com/p/3ce44344d8ba811cad72e738f2800196
+- https://app.notion.com/p/3ce44344d8ba81c18b4ef00ad1f2b94e
+- https://app.notion.com/p/3ce44344d8ba81f6ba7acc8a682d7164
+- https://app.notion.com/p/3ce44344d8ba81d6a32af674dfb2f604
+- https://app.notion.com/p/3da44344d8ba812b8447c6ba8c0e1614
+
 - [x] code snapshot은 beta.122 전체 커밋 위에 보존, 기능 변경 없음.
 - [x] 현재 목표/금지/상태/결정/실패/가설/다음작업/소스 위치/환경 기록.
 - [x] 사용자 지시 순서와 최신 변경 우선순위, 실제GD 미검증 표시.

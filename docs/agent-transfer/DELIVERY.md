@@ -26,6 +26,7 @@ Claude Code 시작 메시지:
 ## 파일 목록
 
 - root CLAUDE.md: 자동 시작용 규칙 연결.
+- CLAUDE_CODE_HANDOFF_PROMPT.md: Notion 참고를 포함한 Claude용 복사 프롬프트.
 - AGENT_HANDOFF.md: 목표·권한·상태·결정·가설·다음 작업.
 - SESSION_TRANSCRIPT.md: 순서별 부분 전사와 명시적 요약, 한계.
 - VERIFICATION.md: 실제 검사/명령·오류·미검증·환경.
@@ -33,6 +34,14 @@ Claude Code 시작 메시지:
 - ATTACHMENTS.json: 원본 첨부 경로/크기/SHA256; 바이너리는 미포함.
 - evidence/: 최신 첨부의 원본 prompt/분석/cases/index/checksums 및 이전 배포 완료 보고/구조화 결과.
 - FILE_SHA256SUMS.txt: 이 파일과 다른 인계 파일의 무결성(자기 자신 제외).
+
+## Notion 참고 위치
+
+Claude Code prompt는 Notion Canonical Index와 Canonical Context를 먼저 읽고, 작업 범위에 맞게 Game Rules/Bugs/CI-Release/Client/Server/Achievements 페이지를 선택하도록 안내한다. 각 항목의 날짜를 확인하고 최신 main/CI/운영 증거와 대조한다. Notion 연결이 없으면 그 한계를 알리고 저장소를 기준으로 이어간다.
+
+- [Corum Ranked Canonical Index](https://app.notion.com/p/3ce44344d8ba8114a916ea7f28eec697)
+- [Corum Ranked Canonical Context](https://app.notion.com/p/3c844344d8ba81f990d3e0caff87d6d3)
+- 상세 page URLs는 `CLAUDE_CODE_HANDOFF_PROMPT.md`에 있다.
 
 ## 한계
 

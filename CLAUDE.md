@@ -3,6 +3,15 @@
 Read `AGENTS.md`, then `docs/agent-transfer/AGENT_HANDOFF.md`,
 `SESSION_TRANSCRIPT.md` and `VERIFICATION.md` before acting.
 
+For Corum Ranked work, also read `docs/agent-transfer/CLAUDE_CODE_HANDOFF_PROMPT.md`.
+When Notion is connected, consult the Corum Ranked Canonical Index and the
+topic-specific Notion page before implementation. Reconcile those notes with
+the freshly fetched `origin/main`, current CI and production evidence; the
+Notion pages contain historical snapshots and may lag. Update the relevant
+Notion page only when the user asks for a Notion update or the active task
+requires maintaining that record. If Notion is unavailable, state that and
+continue from repository evidence.
+
 The latest user request overrides the standing deployment default: this task is
 handoff preparation only. Do not merge to main, publish packages, deploy, bump
 versions or implement new features. Remain on the handoff branch unless the user

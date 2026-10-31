@@ -66,6 +66,10 @@ P2: 실제 supported 플랫폼 UI/음질·Native regression. 새 증거/원인 �
 - A: `.github/workflows/ranked-release.yml`, `ranked-native.yml`, `ranked-feedback.yml`, `ranked-ci.yml`, `build-ranked-mod.yml`, `build-ranked-debug.yml`, `deploy-ranked-lightsail.yml`; `ranked/tools/verify-published-clients.py`, `verify-production-release.py`; `corum-ranked-mod/tools/combine-ranked-packages.py`, `prepare-mod-release.py`, `publish-mod-r2.py`.
 - 상세 설계: `ranked/docs/workflow-recapture-collision-beta122-diagnosis.md`. 전체62개 변경 파일은 첨부 completion JSON `changedFiles`.
 
+## Notion 최신화
+
+사용자가 Notion 업데이트와 prompt 변경을 요청했다. Notion Canonical Index/Context 및 Bugs/CI-Release/Client/Game Rules/Server DB/Achievements 페이지에 2026-10-31 beta.122 갱신을 추가했다. 과거 본문은 보존했다. Claude가 복사할 prompt와 Notion page URLs는 `CLAUDE_CODE_HANDOFF_PROMPT.md`에 있다.
+
 ## Claude 환경 이전
 
 root CLAUDE.md가 명시적으로 AGENTS.md와 이 패키지를 읽도록 안내한다. Codex 전용 tool 이름·연결은 Claude에 자동 이전되지 않는다. 본인 GitHub/Neon/SSH 권한을 안전하게 재설정하되 토큰·Secrets를 문서나 채팅에 붙이지 않는다. 환경 파일을 복사/출력하지 않는다. 이 패키지에는 인증정보가 없다. `ATTACHMENTS.json`은 원본 파일 경로/크기/해시 목록이며 로컬 경로는 새 환경에서 유효하지 않을 수 있다. raw Geode 로그와 inline 이미지 바이너리는 저장소에 넣지 않았다. 별도 사용자 제공 첨부가 필요하다.
