@@ -977,7 +977,7 @@ public:
         auto& trace=m_fields->spectatorSourceTrace;auto order=++trace.order;
         auto x=player->getPositionX(),y=player->getPositionY();
         auto large=std::hypot(x-before.x,y-before.y)>400;
-        if(!trace.emit(path,m_fields->levelId,m_gameState.m_levelTime,x,large||std::string_view(result)!="OBSERVED"))return;
+        if(!trace.emit(path,m_fields->levelId,m_gameState.m_levelTime,x,large||teleportedBefore!=player->m_wasTeleported||std::string_view(result)!="OBSERVED"))return;
         auto const pose=corum::ranked::captureSpectatorPose(player);auto capture=m_fields->spectatorCapture.snapshot();
         auto attempt=m_fields->survivalLevel?corum::ranked::SurvivalRuntime::get().localAttemptId():corum::ranked::RankedRuntime::get().spectatorLiveAttemptId();
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
@@ -3064,7 +3064,13 @@ class $modify(CorumRankedSpectatorCameraHook, GJBaseGameLayer) {
         auto* replayLayer=PlayLayer::get();
         if(replayLayer&&static_cast<GJBaseGameLayer*>(replayLayer)==this&&objects&&count>0)corum::ranked::survivalReplayCollisionCandidates(replayLayer,player,objects->data(),static_cast<std::size_t>(std::min(count,static_cast<int>(objects->size()))));
         if(!corum::ranked::ScopedSpectatorTriggerQuery::owns(this,player)){
-            GJBaseGameLayer::collisionCheckObjects(player,objects,count,dt);return;
+            auto* owner=replayLayer&&static_cast<GJBaseGameLayer*>(replayLayer)==this?static_cast<CorumRankedPlayLayer*>(replayLayer):nullptr;
+            auto observed=owner&&owner->tracesSpectatorPlayer(player);
+            auto before=observed?corum::ranked::captureSpectatorPose(player):corum::ranked::SpectatorGhostPose{};
+            auto flag=observed&&player->m_wasTeleported;
+            GJBaseGameLayer::collisionCheckObjects(player,objects,count,dt);
+            if(observed)owner->traceSpectatorSource(10,"COLLISION_OBJECTS",player,before,flag);
+            return;
         }
         gd::vector<GameObject*> triggers;
         if(objects)for(int i=0;i<std::max(0,std::min(count,static_cast<int>(objects->size())));++i){
@@ -3084,6 +3090,27 @@ class $modify(CorumRankedSpectatorCameraHook, GJBaseGameLayer) {
         GJBaseGameLayer::teleportPlayer(object, player);
         if(player)corum::ranked::survivalReplayNativeSnap(player,false,source.x,source.y);
         if (observed){owner->traceSpectatorSource(3,"PORTAL",player,before,flag,object->m_objectID,object->m_uniqueID);owner->observeSpectatorNativeSnap(player, corum::ranked::SpectatorDiscontinuity::Teleport, before,"PORTAL");}
+    }
+
+#if !defined(GEODE_IS_WINDOWS)
+    // Diagnostic boundaries only. An inlined/bypassed teleport entry may still
+    // call these Native helpers. Neither a target query nor a flag authorizes
+    // a movement event; keep the original portal/flag-edge capture policy.
+    CCPoint getPortalTargetPos(TeleportPortalObject* object,GameObject* target,PlayerObject* player){
+        auto* layer=PlayLayer::get();auto* owner=layer&&static_cast<GJBaseGameLayer*>(layer)==this?static_cast<CorumRankedPlayLayer*>(layer):nullptr;
+        auto observed=owner&&owner->tracesSpectatorPlayer(player);
+        auto before=observed?corum::ranked::captureSpectatorPose(player):corum::ranked::SpectatorGhostPose{};auto flag=observed&&player->m_wasTeleported;
+        auto result=GJBaseGameLayer::getPortalTargetPos(object,target,player);
+        if(observed)owner->traceSpectatorSource(11,"PORTAL_TARGET_QUERY",player,before,flag,object?object->m_objectID:0,object?object->m_uniqueID:-1);
+        return result;
+    }
+#endif
+    void checkCameraLimitAfterTeleport(PlayerObject* player,float offset){
+        auto* layer=PlayLayer::get();auto* owner=layer&&static_cast<GJBaseGameLayer*>(layer)==this?static_cast<CorumRankedPlayLayer*>(layer):nullptr;
+        auto observed=owner&&owner->tracesSpectatorPlayer(player);
+        auto before=observed?corum::ranked::captureSpectatorPose(player):corum::ranked::SpectatorGhostPose{};auto flag=observed&&player->m_wasTeleported;
+        GJBaseGameLayer::checkCameraLimitAfterTeleport(player,offset);
+        if(observed)owner->traceSpectatorSource(12,"CAMERA_LIMIT_AFTER_TELEPORT",player,before,flag);
     }
 };
 
@@ -3151,6 +3178,15 @@ class $modify(CorumRankedSpectatorDummyPlayer, PlayerObject) {
         PlayerObject::setPosition(position);
         if(observed)layer->traceSpectatorSource(4,"SET_POSITION_OBSERVATION_ONLY",this,before,flag);
     }
+
+#if !defined(GEODE_IS_WINDOWS)
+    void playerTeleported(){
+        auto* layer=localSafetyLayer();auto observed=layer&&layer->tracesSpectatorPlayer(this);
+        auto before=observed?corum::ranked::captureSpectatorPose(this):corum::ranked::SpectatorGhostPose{};auto flag=m_wasTeleported;
+        PlayerObject::playerTeleported();
+        if(observed)layer->traceSpectatorSource(13,"PLAYER_TELEPORTED",this,before,flag);
+    }
+#endif
 
     void setRotation(float rotation) {
         auto* layer = localSafetyLayer();

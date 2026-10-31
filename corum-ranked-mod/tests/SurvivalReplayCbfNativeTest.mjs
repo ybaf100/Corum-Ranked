@@ -106,7 +106,7 @@ int main(){
   assert(target.witness(2600,1,true,true,{22,2600,other}));assert(source.reference(2166,{11,2166,descriptor})!=target.reference(2600,{22,2600,other}));
   assert(!target.reference(2599,{0,-1,nullptr}));assert(!target.reference(2599,{23,2599,descriptor}));
   target.reset({{22,2600,other},{21,2599,descriptor}});assert(source.manifest()!=target.manifest());
-  target.reset({{21,2599,descriptor},{22,2600,descriptor}});assert(!target.witness(2599,0,true,true,{21,2599,descriptor}));
+  target.reset({{21,2599,descriptor},{22,2600,descriptor}});assert(!target.witness(2599,0,true,true,{21,2599,descriptor}));assert(target.diagnosticTarget(2599)["ambiguousDefinition"].asBool().unwrap());
   target.reset({{21,2599,descriptor},{22,2599,other}});assert(!target.witness(2599,0,true,true,{21,2599,descriptor}));
  }
  std::ofstream("${dir}/cbf.bin")<<"CBF fixture binary, not the real GD mod";
@@ -163,6 +163,21 @@ int main(){
    assert(prepareCbfInitialCollisionLogs(&target,initial,true).empty()&&validateCbfInitial(&target,initial).empty());assert(a.m_lastCollisionBottom==2166);restoreCbfInitial(&target,initial);
   }
   auto unknown=initial;unknown["players"][0]["collisionLogs"][0]=1;a.logs[0].size=3;assert(prepareCbfInitialCollisionLogs(&target,unknown,true)=="CBF_INITIAL_STATE_UNAVAILABLE"&&a.logs[0].size==3);
+ }
+ // A mismatched map must stay rejected before mutation, but carry bounded
+ // field/chunk evidence instead of an empty frame-zero diagnostics report.
+ {PlayerObject a,b;PlayLayer target;target.m_player1=&a;target.m_player2=&b;PlayLayer::current=&target;
+  auto initial=captureCbfInitial(&target);auto diagnostic=initial["objectDiagnostics"];auto manifest=initial["objects"];
+  assert(replayFailureCategory("CBF_MAP_OBJECT_IDENTITY_MISMATCH")=="MAP_IDENTITY");
+  assert(diagnostic["manifest"]==manifest&&diagnostic["fields"]["startX"].isString());
+  target.collider.m_startPosition.x+=1;a.logs[0].size=2;
+  assert(prepareCbfInitialCollisionLogs(&target,initial,true)=="CBF_MAP_OBJECT_IDENTITY_MISMATCH"&&a.logs[0].size==2);
+  auto actual=captureCbfInitial(&target);assert(actual["objects"]!=manifest);
+  assert(actual["objectDiagnostics"]["fields"]["startX"]!=diagnostic["fields"]["startX"]);
+  assert(actual["objectDiagnostics"]["fields"]["startY"]==diagnostic["fields"]["startY"]);
+  assert(actual["objectDiagnostics"]["chunks"]!=diagnostic["chunks"]);
+  assert(actual["objectDiagnostics"].dump().size()<16384&&actual["objectDiagnostics"]["chunks"].size()<=32);
+  retireNativeReplayFrame(&target);
  }
  // A new official Source Attempt discards prior Native identity witnesses;
  // it does not mutate live Native collision dictionaries or scalar values.

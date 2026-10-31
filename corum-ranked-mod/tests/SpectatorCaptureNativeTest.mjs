@@ -50,9 +50,12 @@ struct PlayerObject {
  float getPositionX()const{return position.x;}float getPositionY()const{return position.y;}CCPoint getPosition()const{return position;}float getRotation()const{return rotation;}bool isVisible()const{return true;}
  virtual ~PlayerObject()=default;
  virtual void update(float){++updates;if(moving)position.x+=5;if(nativeTeleport){position.x+=729.7268f;m_wasTeleported=true;nativeTeleport=false;}}
+ virtual void setPosition(CCPoint const& p){position=p;}
+ virtual void playerTeleported(){m_wasTeleported=true;}
  virtual void updateRotation(float){if(moving)rotation+=3;}
  virtual void spiderTestJump(bool){position.y+=700;m_isUpsideDown=!m_isUpsideDown;}
 };
+struct GameObject{};
 struct TeleportPortalObject{int m_objectID=747,m_uniqueID=17;};
 struct GJBaseGameLayer {
  struct {bool m_isDualMode=false;CCPoint m_cameraPosition;double m_levelTime=0;float m_cameraZoom=1,m_cameraAngle=0,m_targetCameraZoom=1,m_targetCameraAngle=0;} m_gameState;
@@ -63,6 +66,8 @@ struct GJBaseGameLayer {
  virtual ~GJBaseGameLayer()=default;
  virtual void update(float dt){clockMs+=std::int64_t(dt*1000);m_attemptTime+=dt;
   if(m_player1){m_player1->update(dt);m_player1->updateRotation(dt);m_gameState.m_cameraPosition={m_player1->position.x-200,m_player1->position.y-100};}}
+ CCPoint getPortalTargetPos(TeleportPortalObject*,GameObject*,PlayerObject*){return {25891.88f,5437.5f};}
+ void checkCameraLimitAfterTeleport(PlayerObject*,float){}
  void teleportPlayer(TeleportPortalObject*,PlayerObject* p){p->position.x+=729.7268f;p->m_wasTeleported=true;}
 };
 struct PlayLayer:GJBaseGameLayer {
@@ -101,16 +106,19 @@ struct CorumRankedPlayLayer:PlayLayer {
  Fields* m_fields=&fields;
  bool prepareSpectatorScene(){return false;}bool spectatorCameraActive(){return false;}bool beginSpectatorWorldFrame(){return false;}
  void reconcileSpectatorWorldDriver(){}void driveSpectatorCamera(){}void logSpectatorNativeCamera(char const*){}void logSpectatorWorldDriver(){}void logSpectatorNativeProbe(){}
+ bool blocksSpectatorNativePlayerWrite(PlayerObject* p)const{return freezeLocalDummy(p);}
  bool freezeLocalDummy(PlayerObject*)const{return fields.spectatorMode || fields.debugPlaybackScene;}
  ${owner}
 };
 static CorumRankedPlayLayer* localSafetyLayer(){return static_cast<CorumRankedPlayLayer*>(PlayLayer::get());}
 struct PlayerHook:PlayerObject {
- ${['void update(float dt)', 'void updateRotation(float dt)', 'void spiderTestJump(bool dynamic)'].map(n=>method(n,playerAt)).join('\n')}
+ ${['void update(float dt)', 'void updateRotation(float dt)', 'void spiderTestJump(bool dynamic)', 'void setPosition(CCPoint const& position)', 'void playerTeleported()'].map(n=>method(n,playerAt)).join('\n')}
 };
 struct WorldHook:CorumRankedPlayLayer {
  ${method('void update(float dt)',worldAt)}
  ${method('void teleportPlayer(',worldAt)}
+ ${method('CCPoint getPortalTargetPos(',worldAt)}
+ ${method('void checkCameraLimitAfterTeleport(',worldAt)}
 };
 int main(){
  auto& publisher=SpectatorLiveRuntime::get();PlayerHook player;WorldHook world;PlayLayer::current=&world;
@@ -139,6 +147,20 @@ int main(){
  assert(!world.fields.spectatorCapture.snapshot()->discontinuity);
  world.fields.spectatorCapture.reset();player.m_wasTeleported=false;player.nativeTeleport=true;world.update(.016f);
  assert(world.fields.spectatorCapture.snapshot()->discontinuity); // genuine native flag rising edge
+ // Real log order: an inner Native helper sets the flag, setPosition
+ // moves with true->true, the world later clears it. Observe that boundary
+ // without inventing a trusted snap from a query, flag, or arbitrary write.
+ world.fields.spectatorCapture.reset();world.fields.levelId=143308401;
+ world.m_gameState.m_levelTime=71.291;player.position={25891.88f,3969};player.m_wasTeleported=false;
+ world.traceSpectatorSource(13,"PLAYER_TELEPORTED",&player,captureSpectatorPose(&player),false);
+ auto critical=world.fields.spectatorSourceTrace.criticalLogs;
+ auto destination=world.getPortalTargetPos(&portal,nullptr,&player);
+ player.playerTeleported();
+ assert(world.fields.spectatorSourceTrace.criticalLogs==critical+1); // flag transition survives normal 50ms throttle
+ player.setPosition(destination);world.checkCameraLimitAfterTeleport(&player,0);
+ player.m_wasTeleported=false;world.observeSpectatorNativeUpdate(&player);
+ assert(!world.fields.spectatorCapture.snapshot()->discontinuity); // diagnostics cannot authorize movement
+ world.fields.levelId=123;
  auto dummyUpdates=player.updates;world.fields.spectatorMode=true;
  for(int i=0;i<3;++i){world.update(.016f);}assert(player.updates==dummyUpdates);
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)

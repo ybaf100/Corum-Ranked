@@ -41,7 +41,7 @@ int playerIndex(PlayerObject* player){return state().layer&&player==state().laye
 PlayerObject* playerAt(int index){return !state().layer?nullptr:index?state().layer->m_player2:state().layer->m_player1;}
 void fail(std::string reason,Json expected=nullptr,Json actual=nullptr);
 struct CollisionWorld {
-    PlayLayer* owner=nullptr;std::string error;ReplayCollisionIdentity identities;std::vector<Ref<GameObject>> retained;
+    PlayLayer* owner=nullptr;std::string error;ReplayCollisionIdentity identities;std::vector<Ref<GameObject>> retained;Json diagnostics;
 };
 CollisionWorld& collisionWorld(){static auto* value=new CollisionWorld;return *value;}
 Json collisionDefinition(GameObject* object){
@@ -61,10 +61,11 @@ ReplayCollisionIdentity::Object collisionObject(PlayLayer* layer,std::size_t ind
 void prepareCollisionWorld(PlayLayer* layer,bool reset=false){
     auto& world=collisionWorld();if(world.owner==layer&&!reset)return;
     world.retained.clear();world.error.clear();world.owner=layer;std::vector<ReplayCollisionIdentity::Object> objects;
-    if(layer&&layer->m_objects&&layer->m_objects->count()>500000){world.identities.reset({});world.error="CBF_MAP_OBJECT_BUDGET";return;}
+    if(layer&&layer->m_objects&&layer->m_objects->count()>500000){world.identities.reset({});world.diagnostics=nullptr;world.error="CBF_MAP_OBJECT_BUDGET";return;}
     if(layer&&layer->m_objects){objects.reserve(layer->m_objects->count());world.retained.reserve(layer->m_objects->count());
         for(unsigned i=0;i<layer->m_objects->count();++i){auto* object=typeinfo_cast<GameObject*>(layer->m_objects->objectAtIndex(i));world.retained.emplace_back(object);objects.push_back(collisionObject(layer,i));}}
     world.identities.reset(std::move(objects));
+    world.diagnostics=world.identities.diagnostics();
 }
 std::array<int,4> collisionRaw(PlayerObject* p){return {p->m_lastCollisionBottom,p->m_lastCollisionTop,p->m_lastCollisionLeft,p->m_lastCollisionRight};}
 Json collisionRawJson(PlayerObject* p){auto values=Json::array();if(p)for(auto raw:collisionRaw(p))values.push(raw);return values;}
@@ -72,7 +73,7 @@ Json collisionReference(int raw,int player,int side){
     if(raw==-1)return -1;
     auto& world=collisionWorld();auto at=world.identities.index(raw);auto current=at?collisionObject(world.owner,*at):ReplayCollisionIdentity::Object{};
     auto ref=world.identities.reference(raw,current,player,side);
-    if(!ref){Json actual;actual["runtimeId"]=raw;actual["player"]=player;actual["side"]=side;actual["map"]=world.identities.manifest();actual["candidates"]=Json::array();auto const& s=state();
+    if(!ref){Json actual;actual["runtimeId"]=raw;actual["player"]=player;actual["side"]=side;actual["map"]=world.identities.manifest();actual["target"]=world.identities.diagnosticTarget(raw);actual["candidates"]=Json::array();auto const& s=state();
         for(std::size_t i=0;i<s.lastCandidateEvidenceCount[player];++i){auto const& c=s.lastCandidateEvidence[player][i];Json item;item["objectId"]=c.objectId;item["runtimeUniqueId"]=c.runtimeId;item["originX"]=c.x;item["originY"]=c.y;actual["candidates"].push(item);}
         actual["directionalDictionaryKeys"]=Json::array();for(auto key:s.lastCollisionKeys[player])actual["directionalDictionaryKeys"].push(key);
         fail(world.identities.error(),nullptr,actual);return raw;}
@@ -336,7 +337,7 @@ void noteCbfNativeCollisionCandidates(PlayLayer* owner,PlayerObject* player,Game
     auto& candidates=s.collisionCandidates[playerIndex(player)];for(std::size_t i=0;i<count;++i)if(objects[i]){if(!candidates.contains(objects[i])&&candidates.size()>=8192){fail("CBF_COLLISION_CANDIDATE_BUDGET");return;}auto inserted=candidates.insert(objects[i]).second;auto actor=playerIndex(player);if(inserted&&s.candidateEvidenceCount[actor]<16){auto* object=objects[i];s.candidateEvidence[actor][s.candidateEvidenceCount[actor]++]={object->m_objectID,object->m_uniqueID,object->m_startPosition.x,object->m_startPosition.y};}}
 }
 void retireNativeReplayFrame(PlayLayer* owner){
-    auto& world=collisionWorld();if(world.owner==owner){world.retained.clear();world.owner=nullptr;world.identities.reset({});}
+    auto& world=collisionWorld();if(world.owner==owner){world.retained.clear();world.owner=nullptr;world.identities.reset({});world.diagnostics=nullptr;}
     auto& c=inputClock();if(c.owner==owner){++c.generation;c.active=false;c.owner=nullptr;c.replay=nullptr;}
     auto& s=state();if(s.layer==owner){++s.epoch;s.frame=s.root=false;s.layer=nullptr;s.playback=nullptr;s.nativePlayer=s.shipPlayer=nullptr;s.depth=0;}
 }
@@ -347,7 +348,7 @@ Json captureCbfInitial(PlayLayer* layer,bool newSourceAttempt){
     Json value;value["schema"]=CbfBoundarySchema;value["players"]=Json::array();
     if(!layer)return value;
     if(newSourceAttempt&&(layer!=PlayLayer::get()||state().frame))return value;
-    prepareCollisionWorld(layer,newSourceAttempt);value["objects"]=collisionWorld().identities.manifest();
+    prepareCollisionWorld(layer,newSourceAttempt);value["objects"]=collisionWorld().identities.manifest();value["objectDiagnostics"]=collisionWorld().diagnostics;
     for(auto* p:{layer->m_player1,layer->m_player2}){if(!p){value["players"].push(nullptr);continue;}Json item;item["lastPosition"]=point(p->m_lastPosition);auto logs=Json::array();for(auto* log:{p->m_collisionLogTop,p->m_collisionLogBottom,p->m_collisionLogLeft,p->m_collisionLogRight})logs.push(log?static_cast<int>(log->count()):-1);item["collisionLogs"]=logs;value["players"].push(item);}return value;
 }
 std::string prepareCbfInitialCollisionLogs(PlayLayer* layer,Json const& value,bool nativeResetOwned){

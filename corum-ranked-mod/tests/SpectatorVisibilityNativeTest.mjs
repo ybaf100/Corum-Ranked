@@ -31,7 +31,7 @@ test('production PlayerObject hooks exclude the visibility detour and priority o
             });
             const hooks = block(processed, 'class $modify(CorumRankedSpectatorDummyPlayer,');
             const expected = ['update', 'updateRotation', 'spiderTestJump', 'setPosition', 'setRotation'];
-            if (platform !== 'WINDOWS') expected.push('updateSpecial');
+            if (platform !== 'WINDOWS') expected.push('updateSpecial', 'playerTeleported');
             assert.deepEqual([...hooks.matchAll(/\bvoid (\w+)\(/g)].map(match => match[1])
                 .filter(name => name !== 'onModify').sort(), expected.sort());
             assert(!processed.includes('"PlayerObject::setVisible"'));

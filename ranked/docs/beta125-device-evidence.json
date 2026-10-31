@@ -1,0 +1,60 @@
+{
+  "files": [
+    {
+      "file": "1-Geode-2026-10-31-19.45.09.log",
+      "bytes": 303270,
+      "sha256": "9395a3f276ff99fbfa9e1bd0de70833bbb01c56e1ee1d61b8be8edf657ee2e13"
+    },
+    {
+      "file": "2-Geode-2026-10-31-19.40.24.log",
+      "bytes": 275773,
+      "sha256": "ca7ecae4294af2be78149fba506ae9deef78629bd880f4b263079d850f5e2bc4"
+    },
+    {
+      "file": "3-replay-5569c8de048162ee-1793443467048.json",
+      "bytes": 6968,
+      "sha256": "b3b3166975e18bdd644e8966b564e802ba89545e9be4a7db748ce21cabde7d65",
+      "failure": {
+        "reason": "CBF_MAP_OBJECT_IDENTITY_MISMATCH",
+        "frame": 0,
+        "step": 0,
+        "expected": {},
+        "actual": {}
+      },
+      "levelId": 48561623,
+      "captureCompleteness": "COMPLETE",
+      "recordedFrames": 1543
+    },
+    {
+      "file": "4-replay-1bc6f2c8591a018b-1793443483780.json",
+      "bytes": 6710,
+      "sha256": "b54cc257fc0d8623c9b865dcea696ae18441d02e65baaf2a4aceb5561471d561",
+      "failure": {
+        "reason": "CBF_MAP_OBJECT_IDENTITY_MISMATCH",
+        "frame": 0,
+        "step": 0,
+        "expected": {},
+        "actual": {}
+      },
+      "levelId": 88103903,
+      "captureCompleteness": "COMPLETE",
+      "recordedFrames": 1828
+    },
+    {
+      "file": "5-replay-6fddc550c0d5a37c-1793443477411.json",
+      "bytes": 6695,
+      "sha256": "4f03c031641bcc4a2b0d45059508b786f899cec63869ae8fea6bacdc1ee0f8d3",
+      "failure": {
+        "reason": "CBF_MAP_OBJECT_IDENTITY_MISMATCH",
+        "frame": 0,
+        "step": 0,
+        "expected": {},
+        "actual": {}
+      },
+      "levelId": 43115881,
+      "captureCompleteness": "COMPLETE",
+      "recordedFrames": 3469
+    }
+  ],
+  "limits": "JSON attachments are bounded diagnostic reports, not full replay documents; raw attachments are not committed. No new successful device run is available."
+}

@@ -161,6 +161,7 @@ struct PlayerObject: cocos2d::CCNode {
     int gameplayPositionWrites=0,physicsUpdates=0,rotationUpdates=0,spiderJumps=0;
     bool m_wasTeleported=false;int m_followRelated=0;float m_unk838=0;std::vector<float> m_playerFollowFloats=std::vector<float>(200);
     GJBaseGameLayer* m_gameLayer=nullptr;
+    void playerTeleported(){m_wasTeleported=true;}
     virtual void update(float){++physicsUpdates;} virtual void updateRotation(float){++rotationUpdates;}
     virtual void spiderTestJump(bool){++spiderJumps;}
     virtual void updateSpecial(float dt){m_unk838+=dt;if(m_unk838>=.01f){++m_followRelated;m_unk838-=.01f;}m_playerFollowFloats[m_followRelated%200]=position.y;}

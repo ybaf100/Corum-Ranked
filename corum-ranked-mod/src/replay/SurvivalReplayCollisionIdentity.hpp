@@ -28,6 +28,38 @@ public:
         m_manifest=CollisionJson::object();m_manifest["schema"]=1;m_manifest["count"]=static_cast<std::int64_t>(m_objects.size());m_manifest["sha256"]=sha256Text(definitions.dump(matjson::NO_INDENTATION));
     }
     CollisionJson const& manifest()const{return m_manifest;}
+    // Diagnostic only: bounded field/chunk hashes locate an unstable Native
+    // descriptor without weakening the ordered, full manifest comparison.
+    // Called once per Source Attempt/reset, never on every physics frame.
+    CollisionJson diagnostics()const{
+        CollisionJson result;result["manifest"]=m_manifest;
+        result["fields"]=CollisionJson::object();
+        char const* names[]={"objectId","startX","startY","rotationX","rotationY","scaleX","scaleY","groups"};
+        for(std::size_t field=0;field<8;++field){auto values=CollisionJson::array();
+            for(auto const& object:m_objects)values.push(object.definition.isArray()&&object.definition.size()>field?object.definition[field]:CollisionJson());
+            result["fields"][names[field]]=sha256Text(values.dump(matjson::NO_INDENTATION));
+        }
+        result["chunks"]=CollisionJson::array();result["samples"]=CollisionJson::array();
+        auto stride=std::max<std::size_t>(1,(m_objects.size()+31)/32);
+        for(std::size_t first=0;first<m_objects.size();first+=stride){auto values=CollisionJson::array();
+            for(auto i=first;i<std::min(first+stride,m_objects.size());++i)values.push(m_objects[i].definition);
+            CollisionJson chunk;chunk["first"]=static_cast<std::int64_t>(first);chunk["count"]=static_cast<std::int64_t>(values.size());chunk["sha256"]=sha256Text(values.dump(matjson::NO_INDENTATION));result["chunks"].push(chunk);
+        }
+        // A group list may itself be large: retain only small sample definitions.
+        for(std::size_t i=0;i<m_objects.size()&&result["samples"].size()<8;i+=std::max<std::size_t>(1,m_objects.size()/8)){
+            CollisionJson sample;sample["index"]=static_cast<std::int64_t>(i);
+            if(m_objects[i].definition.dump(matjson::NO_INDENTATION).size()<=512)sample["definition"]=m_objects[i].definition;
+            result["samples"].push(sample);
+        }
+        result["ambiguousDefinitions"]=static_cast<std::int64_t>(m_ambiguousDefinitions.size());return result;
+    }
+    CollisionJson diagnosticTarget(int raw)const{
+        CollisionJson result;auto at=index(raw);result["uniqueRuntimeIndex"]=at?CollisionJson(static_cast<std::int64_t>(*at)):CollisionJson();
+        if(at){auto const& d=m_objects[*at].definition;
+            result["ambiguousDefinition"]=m_ambiguousDefinitions.contains(d.dump(matjson::NO_INDENTATION));
+            if(d.dump(matjson::NO_INDENTATION).size()<=512)result["definition"]=d;
+        }return result;
+    }
     std::optional<std::size_t> index(int raw)const{auto i=m_byRuntime.find(raw);return i!=m_byRuntime.end()&&i->second.size()==1?std::optional(i->second.front()):std::nullopt;}
     bool current(std::size_t index,Object const& actual)const{
         if(index>=m_objects.size())return false;

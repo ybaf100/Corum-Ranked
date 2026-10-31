@@ -1,3 +1,11 @@
+# v0.5.0-beta.125
+
+- Preserve the actual Source low-detail and camera-shake load options in new recordings. Replay and Survival viewer worlds apply those recorded options before Native object creation/reset, then restore the shared level preferences. A differing loaded LDM fails closed; legacy files without the option evidence are never guessed or rewritten.
+- Fix empty frame-zero Replay diagnostic reports for `CBF_MAP_OBJECT_IDENTITY_MISMATCH`: include the recorded and current initial collision evidence and classify the failure as MAP_IDENTITY. The ordered map hash and every collision/DESYNC comparison remain mandatory.
+- New recordings retain bounded diagnostic field/chunk hashes and descriptor samples separately from the authoritative collision manifest. Missing collision witnesses also report whether the target definition is ambiguous. These diagnostics never authorize a collision identity or rewrite an old recording.
+- Entropie source tracing now observes Native portal target queries, post-teleport camera helpers, player teleport notifications and collision-object batches, and records teleport flag transitions even within the normal 50 ms log throttle. `setPosition` and helper calls remain observations only, with the existing per-Attempt log limits.
+- The supplied beta.124 device logs still show unproven Entropie movement and three frame-zero map-identity rejections. Their underlying Native causes are not yet established; this release repairs recorded load-option loss and evidence collection; it does not establish the device failures as resolved. Existing replays, Bests, scores and server data are unchanged. Actual beta.125 GD/CBF device behaviour is unverified.
+
 # v0.5.0-beta.124
 
 - Official vs spectator traffic: Solo spectator publish/poll reuse one locked match authority read per session for at most 250 ms (single-flight, never shared across sessions or tokens, failures never cached), so 20 Hz publishing and fast viewer polls no longer queue on the official match row lock. A Survival telemetry backlog now evicts advisory PROGRESS instead of dropping an official Start/End. "No viewers" no longer exhausts the spectator publisher budget.

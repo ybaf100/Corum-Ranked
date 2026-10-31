@@ -4,6 +4,7 @@
 #include "SurvivalReplayCompatibility.hpp"
 #include "SurvivalReplayCbfTrace.hpp"
 #include "SurvivalReplayClock.hpp"
+#include "SurvivalReplayWorldOptions.hpp"
 #include "../domain/Sha256.hpp"
 #include <matjson.hpp>
 #include <fstream>
@@ -61,6 +62,7 @@ inline bool replayDispatchValid(Json const& value){
 /** P0-C: first-failure category so unrelated causes are never reported as one DESYNC. */
 inline std::string replayFailureCategory(std::string const& reason){
     auto has=[&](char const* s){return reason.find(s)!=std::string::npos;};
+    if(reason=="CBF_MAP_OBJECT_IDENTITY_MISMATCH")return "MAP_IDENTITY";
     if(has("RANDOM"))return "RANDOM";
     if(has("COLLISION"))return "COLLISION_TARGET";
     if(has("CBF"))return "CBF_SUBSTEP";
@@ -73,6 +75,7 @@ inline std::string replayFailureCategory(std::string const& reason){
     return "OTHER";
 }
 inline std::string replayInitialDataProblem(Json const& initial){
+    if(auto problem=replayWorldOptionsProblem(initial["worldOptions"]);!problem.empty())return problem;
     if(integer(initial,"physicsSchema")!=ReplayPhysicsSchema)return "LEGACY_INITIAL_PHYSICS_UNAVAILABLE";
     if(auto problem=replayPlayerDataProblem(initial["player1"]);!problem.empty())return problem;
     if(!initial["player2"].isNull())if(auto problem=replayPlayerDataProblem(initial["player2"]);!problem.empty())return problem;
