@@ -21,8 +21,12 @@ for(const platform of ['MACOS','WINDOWS'])test(platform+': production CBF root/c
 #include <iostream>
 using namespace corum::ranked::replay;
 struct CCPoint{float x=0,y=0;CCPoint()=default;CCPoint(float a,float b):x(a),y(b){}};
-struct Dict{int size=0;void removeAllObjects(){size=0;}int count()const{return size;}};
-struct PlayerObject{
+struct GameObject{virtual ~GameObject()=default;int m_objectID=1,m_uniqueID=17;CCPoint m_startPosition{30,120};float m_startRotationX=0,m_startRotationY=0,m_startScaleX=1,m_startScaleY=1;short m_groupCount=0;std::array<short,10>*m_groups=nullptr;};
+struct ObjectArray{std::vector<GameObject*> values;unsigned count()const{return static_cast<unsigned>(values.size());}GameObject*objectAtIndex(unsigned i)const{return values.at(i);}};
+template<class T>T typeinfo_cast(GameObject*p){return dynamic_cast<T>(p);}
+template<class T>struct Ref{T*value;explicit Ref(T*p):value(p){}};
+struct Dict{int size=0,key=17;void removeAllObjects(){size=0;}int count()const{return size;}Dict*objectForKey(int value){return size&&key==value?this:nullptr;}};using CCDictionary=Dict;
+struct PlayerObject:GameObject{
  CCPoint pos{0,105},m_shipRotation{},m_lastPosition{};float rotation=0;double m_yVelocity=0;
  bool m_jumpBuffered=false,m_isOnGround=true,m_isUpsideDown=false,ship=false;
  std::map<int,bool>m_holdingButtons;int m_lastCollisionBottom=-1,m_lastCollisionTop=-1,m_lastCollisionLeft=-1,m_lastCollisionRight=-1;
@@ -30,7 +34,9 @@ struct PlayerObject{
  float getPositionX()const{return pos.x;}float getPositionY()const{return pos.y;}float getRotation()const{return rotation;}CCPoint getPosition()const{return pos;}
  void update(float);void updateRotation(float);void updateShipRotation(float);
 };
-struct PlayLayer{PlayerObject*m_player1=nullptr,*m_player2=nullptr;int m_currentStep=364;double m_timestamp=.5;struct{double m_levelTime=.75;}m_gameState;static inline PlayLayer*current=nullptr;static PlayLayer*get(){return current;}int checkCollisions(PlayerObject*,float,bool);void handleButton(bool,int,bool);};
+struct PlayLayer{GameObject collider,secondCollider;ObjectArray objects;ObjectArray*m_objects=&objects;int selectedCollider=0;
+ PlayLayer(){secondCollider.m_startPosition.x=60;secondCollider.m_uniqueID=18;objects.values={&collider,&secondCollider};}
+ PlayerObject*m_player1=nullptr,*m_player2=nullptr;int m_currentStep=364;double m_timestamp=.5;struct{double m_levelTime=.75;}m_gameState;static inline PlayLayer*current=nullptr;static PlayLayer*get(){return current;}int checkCollisions(PlayerObject*,float,bool);void handleButton(bool,int,bool);};
 struct Hook{std::string name;bool enabled=true,failDisable=false,failEnable=false;int disables=0,enables=0,priority=0;int getPriority()const{return priority;}
  std::string_view getDisplayName()const{return name;}bool isEnabled()const{return enabled;}std::uintptr_t getAddress()const;void setPriority(int p){priority=p;}
  geode::Result<> disable(){++disables;if(failDisable)return geode::Err("fixture disable failure");enabled=false;return geode::Ok();}
@@ -42,7 +48,7 @@ std::uintptr_t Hook::getAddress()const{return reinterpret_cast<std::uintptr_t>(&
 struct Mod{template<class F>geode::Result<Hook*>hook(void*,F,std::string,tulip::hook::TulipConvention){static Hook observer{"CorumReplay::SlerpObserver"};return geode::Ok(&observer);}template<class T>T getSavedValue(char const*,T fallback){return fallback;}static Mod*get(){static Mod m;return &m;}static Mod*cbf(){static Mod m;return &m;}std::vector<Hook*>hooks;bool isLoaded()const{return true;}std::string getID()const{return this==cbf()?"syzzi.click_between_frames":"hwanhee1.corum_ranked";}std::vector<Hook*>getHooks(){return hooks;}std::filesystem::path getBinaryPath(){return "${dir}/cbf.bin";}};
 struct Loader{static Loader*get(){static Loader l;return &l;}std::vector<Mod*>getAllMods(){return {Mod::cbf(),Mod::get()};}};
 namespace Priority{constexpr int First=-1000000,Last=100;}
-namespace fixtureLog{template<class...T>void error(T const&...){}}
+namespace fixtureLog{template<class...T>void error(T const&...){}template<class...T>void info(T const&...){}template<class...T>void warn(T const&...){}}
 namespace corum::ranked::replay{namespace log=fixtureLog;struct Recorder{static Recorder&get(){static Recorder r;return r;}std::uint64_t tick()const{return 0;}};}
 ${native}
 using namespace corum::ranked::replay;
@@ -80,12 +86,29 @@ void PlayerObject::update(float dt){Root guard(this,"UPDATE",dt);if(guard.handle
  }
 }
 void PlayerObject::updateRotation(float dt){Root guard(this,"ROTATE",dt);if(guard.handled)return;auto split=sourceCbf&&sourceSplit&&(this==PlayLayer::get()->m_player1?!buffering:dual);nativeRotate(this,split?dt*.25f:dt);if(split)m_lastPosition=sourcePrevious[this==PlayLayer::get()->m_player2];}
-int PlayLayer::checkCollisions(PlayerObject*p,float dt,bool ignore){Json f;f["ignoreDamage"]=ignore;Operation op("COLLISION",p,dt,std::move(f));p->logs[0].size=1;p->m_lastCollisionTop=17;if(p->pos.y<105){p->pos.y=105;p->m_yVelocity=0;p->m_isOnGround=true;}return 0;}
+int PlayLayer::checkCollisions(PlayerObject*p,float dt,bool ignore){Json f;f["ignoreDamage"]=ignore;Operation op("COLLISION",p,dt,std::move(f));NativeCollisionQuery query(p);
+ noteCbfNativeCollisionCandidates(this,p,objects.values.data(),objects.values.size());auto* hit=objects.values.at(selectedCollider);p->logs[0].size=1;p->logs[0].key=hit->m_uniqueID;p->m_lastCollisionTop=hit->m_uniqueID;
+ if(p->pos.y<105){p->pos.y=105;p->m_yVelocity=0;p->m_isOnGround=true;}query.finish();return 0;}
 void PlayLayer::handleButton(bool down,int button,bool first){auto*p=first?m_player1:m_player2;Json f;f["button"]=button;f["down"]=down;f["timestamp"]=m_timestamp;Operation op("INPUT",p,0,std::move(f));++inputCalls;p->m_holdingButtons[button]=down;}
 void sequence(PlayLayer& scene,float dt=1){scene.m_player1->update(dt);if(dual)scene.m_player2->update(dt);scene.m_player1->updateRotation(dt);if(dual)scene.m_player2->updateRotation(dt);}
 Json actualPose(PlayLayer& scene){Json p;p["kind"]="pose";p["x"]=scene.m_player1->pos.x;p["y"]=scene.m_player1->pos.y;p["rotation"]=scene.m_player1->rotation;p["physics"]["p1"]=motion(scene.m_player1);p["physics"]["p2"]=motion(scene.m_player2);p["physics"]["nativeStep"]=scene.m_currentStep;p["physics"]["pendingButtons"]=Json::array();return p;}
 void worldStep(PlayLayer& scene,float dt){sequence(scene,dt);++scene.m_currentStep;scene.m_timestamp+=dt;scene.m_gameState.m_levelTime+=dt;}
 int main(){
+ // Policy proof is independent of the Native doubles below. Same-kind objects
+ // remain distinct; descriptors/order/deletion/recreation cannot silently map.
+ {ReplayCollisionIdentity source,target;auto descriptor=Json::array();descriptor.push(1);descriptor.push(30);auto other=descriptor;other[1]=60;
+  source.reset({{11,2166,descriptor},{12,2167,other}});target.reset({{21,2599,descriptor},{22,2600,other}});
+  assert(source.manifest()==target.manifest());assert(!source.reference(2166,{11,2166,descriptor}));
+  assert(!source.witness(2166,0,false,true,{11,2166,descriptor}));assert(!source.witness(2166,0,true,false,{11,2166,descriptor}));
+  assert(source.witness(2166,0,true,true,{11,2166,descriptor}));assert(target.witness(2599,0,true,true,{21,2599,descriptor}));
+  assert(source.reference(2166,{11,2166,descriptor})==target.reference(2599,{21,2599,descriptor}));
+  assert(!source.reference(2166,{11,2166,descriptor},1,0));assert(!source.reference(2166,{11,2166,descriptor},0,1));
+  assert(target.witness(2600,1,true,true,{22,2600,other}));assert(source.reference(2166,{11,2166,descriptor})!=target.reference(2600,{22,2600,other}));
+  assert(!target.reference(2599,{0,-1,nullptr}));assert(!target.reference(2599,{23,2599,descriptor}));
+  target.reset({{22,2600,other},{21,2599,descriptor}});assert(source.manifest()!=target.manifest());
+  target.reset({{21,2599,descriptor},{22,2600,descriptor}});assert(!target.witness(2599,0,true,true,{21,2599,descriptor}));
+  target.reset({{21,2599,descriptor},{22,2599,other}});assert(!target.witness(2599,0,true,true,{21,2599,descriptor}));
+ }
  std::ofstream("${dir}/cbf.bin")<<"CBF fixture binary, not the real GD mod";
 #if defined(GEODE_IS_WINDOWS)
  state().slerpAddress=reinterpret_cast<std::uintptr_t>(&baseSlerp);
@@ -95,13 +118,16 @@ int main(){
   PlayLayer source;source.m_player1=&a;source.m_player2=&b;PlayLayer::current=&source;sourceCbf=true;sourceSplit=false;
   beginCbfNativeFrame(&source);sequence(source);auto tape=finishCbfNativeFrame();
   assert(cbfNativeFrameError().empty()&&cbfFrameValid(tape));auto expectedA=motion(&a),expectedB=motion(&b);auto lastA=point(a.m_lastPosition),lastB=point(b.m_lastPosition);
-  Document doc;doc.complete=true;doc.metadata["nativeInputVersion"]=3;Json initial;initial["kind"]="initial";Json frame;frame["kind"]="frame";frame["dt"]=.01;doc.records={initial,frame,tape};Playback playback(doc);
-  PlayerObject c,d;c.ship=d.ship=ship;if(buffer)c.m_isOnGround=false;PlayLayer target;target.m_player1=&c;target.m_player2=&d;PlayLayer::current=&target;sourceCbf=false;
+  Document doc;doc.complete=true;doc.metadata["nativeInputVersion"]=3;Json initial;initial["kind"]="initial";Json frame;frame["kind"]="frame";frame["dt"]=.01;initial["cbfInitial"]=captureCbfInitial(&source);doc.records={initial,frame,tape};Playback playback(doc);
+  PlayerObject c,d;c.ship=d.ship=ship;if(buffer)c.m_isOnGround=false;PlayLayer target;target.collider.m_uniqueID=2599;target.secondCollider.m_uniqueID=2600;target.m_player1=&c;target.m_player2=&d;PlayLayer::current=&target;sourceCbf=false;
   beginCbfNativeFrame(&target,&playback); // set tape tick via production processCommands accounting
   sequence(target);finishCbfNativeFrame();
   if(!cbfNativeFrameError().empty()){std::cerr<<cbfNativeFrameError()<<" "<<playback.failure().dump()<<"\\n";return 1;}
   assert(motion(&c)==expectedA&&motion(&d)==expectedB);assert(point(c.m_lastPosition)==lastA&&point(d.m_lastPosition)==lastB);
-  Playback bad(doc);auto stable=c.pos;c.pos.x+=25;beginCbfNativeFrame(&target,&bad);sequence(target);finishCbfNativeFrame();assert(bad.desync());auto first=bad.failure()["reason"];bad.reject("FOLLOWUP_FAILURE");assert(bad.failure()["reason"]==first&&bad.failure()["errorCounts"]["FOLLOWUP_FAILURE"].asInt().unwrap()==1);assert(c.pos.x==stable.x+25);
+  Playback bad(doc);auto stable=c.pos;c.pos.x+=25;beginCbfNativeFrame(&target,&bad);sequence(target);finishCbfNativeFrame();assert(bad.desync());auto first=bad.failure()["reason"];bad.reject("FOLLOWUP_FAILURE");assert(bad.failure()["reason"]==first&&bad.failure()["errorCounts"]["FOLLOWUP_FAILURE"].asInt().unwrap()==1);assert(c.pos.x==stable.x+25);retireNativeReplayFrame(&target);
+  // A different actual target with the same kind is still a real desync,
+  // even when these independent Native-double bodies yield the same pose.
+  {PlayerObject e,f;e.ship=f.ship=ship;if(buffer)e.m_isOnGround=false;PlayLayer wrong;wrong.m_player1=&e;wrong.m_player2=&f;wrong.selectedCollider=1;wrong.collider.m_uniqueID=2601;wrong.secondCollider.m_uniqueID=2602;PlayLayer::current=&wrong;Playback different(doc);beginCbfNativeFrame(&wrong,&different);sequence(wrong);finishCbfNativeFrame();if(tape["collisionWitnesses"].size()){assert(different.desync()&&different.failure()["reason"].asString().unwrap()=="CBF_COLLISION_TARGET_MISMATCH");}else assert(!different.desync());retireNativeReplayFrame(&wrong);}
  }
  // Exercise the actual Native-boundary interpreter under the production
  // render scheduler. Positions/velocities below come from the independent
@@ -109,18 +135,40 @@ int main(){
  buffering=false;dual=true;
  for(bool ship:{false,true}){
   PlayerObject a,b;a.ship=b.ship=ship;PlayLayer scene;scene.m_player1=&a;scene.m_player2=&b;PlayLayer::current=&scene;sourceCbf=true;
-  Document doc;doc.complete=true;doc.metadata["nativeInputVersion"]=3;doc.metadata["nativeClockVersion"]=1;Json init;init["kind"]="initial";init["timestamp"]=scene.m_timestamp;doc.records.push_back(init);
-  for(int n=0;n<40;++n){float durations[]={1.f/30,1.f/60,1.f/144,1.f/240,1.f/120};float dt=durations[n%5];Json frame;frame["kind"]="frame";frame["dt"]=static_cast<double>(dt);doc.records.push_back(frame);beginNativeInputClock(&scene);beginCbfNativeFrame(&scene);scene.m_timestamp=70163.98234975+n*.1;{NativeInputClockScope nativeStepClock("STEP",scene.m_timestamp);worldStep(scene,dt);}doc.records.push_back(finishCbfNativeFrame());doc.records.push_back(finishNativeInputClock());assert(nativeInputClockError().empty());doc.records.push_back(actualPose(scene));}
+  Document doc;doc.complete=true;doc.metadata["nativeInputVersion"]=3;doc.metadata["nativeClockVersion"]=1;Json init;init["kind"]="initial";init["timestamp"]=scene.m_timestamp;init["cbfInitial"]=captureCbfInitial(&scene);doc.records.push_back(init);
+  for(int n=0;n<280;++n){float durations[]={1.f/30,1.f/60,1.f/144,1.f/240,1.f/120};float dt=durations[n%5];Json frame;frame["kind"]="frame";frame["dt"]=static_cast<double>(dt);doc.records.push_back(frame);beginNativeInputClock(&scene);beginCbfNativeFrame(&scene);scene.m_timestamp=70163.98234975+n*.1;{NativeInputClockScope nativeStepClock("STEP",scene.m_timestamp);worldStep(scene,dt);}{auto tape=finishCbfNativeFrame();if(!cbfNativeFrameError().empty()||!cbfFrameValid(tape)){std::cerr<<"source frame "<<n<<" "<<cbfNativeFrameError()<<" "<<tape.dump()<<"\\n";return 1;}doc.records.push_back(tape);}doc.records.push_back(finishNativeInputClock());assert(nativeInputClockError().empty());doc.records.push_back(actualPose(scene));}
   for(double speed:{.5,1.,2.,4.}){
-   PlayerObject c,d;c.ship=d.ship=ship;PlayLayer target;target.m_player1=&c;target.m_player2=&d;PlayLayer::current=&target;sourceCbf=false;Playback replay(doc);replay.speed(speed);
+   PlayerObject c,d;c.ship=d.ship=ship;PlayLayer target;target.collider.m_uniqueID=2599;target.secondCollider.m_uniqueID=2600;target.m_player1=&c;target.m_player2=&d;PlayLayer::current=&target;sourceCbf=false;Playback replay(doc);replay.speed(speed);
    auto step=[&]{auto dt=static_cast<float>(replay.current()->dt);beginNativeInputClock(&target,&replay);beginCbfNativeFrame(&target,&replay);target.m_timestamp=90163.98234975+target.m_currentStep*.1;{NativeInputClockScope nativeStepClock("STEP",target.m_timestamp);worldStep(target,dt);}finishCbfNativeFrame();finishNativeInputClock();assert(nativeInputClockError().empty());replay.completeFrame(actualPose(target));assert(!replay.desync());};
    replay.pause(true);replay.accumulate(.1);assert(!replay.due());replay.pause(false);
-   int count=0;while(!replay.ended()){replay.accumulate(1./60);while(replay.due()){step();++count;}}assert(count==40&&target.m_currentStep==404&&motion(&c)==motion(&a)&&motion(&d)==motion(&b));
+   int count=0, renders=0;while(!replay.ended()){if(++renders>10000){std::cerr<<"scheduler stalled "<<replay.failure().dump()<<" time="<<replay.time()<<" speed="<<speed<<"\\n";return 1;}replay.accumulate(1./60);while(replay.due()){step();++count;}}assert(count==280&&target.m_currentStep==644&&motion(&c)==motion(&a)&&motion(&d)==motion(&b));
    replay.seek(.1);assert(replay.takeReset());replay.restart();
    auto reset=[](PlayerObject& p){p.pos={0,105};p.m_lastPosition=p.m_shipRotation={};p.rotation=0;p.m_yVelocity=0;p.m_jumpBuffered=false;p.m_isOnGround=true;p.m_holdingButtons.clear();for(auto& log:p.logs)log.size=0;p.m_lastCollisionBottom=p.m_lastCollisionTop=p.m_lastCollisionLeft=p.m_lastCollisionRight=-1;};reset(c);reset(d);target.m_currentStep=364;target.m_timestamp=.5;target.m_gameState.m_levelTime=.75;
    while(replay.due()){step();}assert(!replay.desync()&&replay.time()>=.1&&!replay.seeking());
    replay.seek(replay.duration());while(replay.due()){step();}assert(replay.ended()&&motion(&c)==motion(&a)&&motion(&d)==motion(&b));
+   if(speed==1)for(int restart=0;restart<3;++restart){
+    replay.restart();reset(c);reset(d);target.m_currentStep=364;target.m_timestamp=.5;target.m_gameState.m_levelTime=.75;
+    c.logs[0].size=3;d.logs[2].size=2;assert(prepareCbfInitialCollisionLogs(&target,replay.initial()["cbfInitial"],true).empty());assert(validateCbfInitial(&target,replay.initial()["cbfInitial"]).empty());restoreCbfInitial(&target,replay.initial()["cbfInitial"]);
+    while(!replay.ended()){replay.accumulate(1./60);while(replay.due())step();}
+    assert(!replay.desync()&&target.m_currentStep==644&&motion(&c)==motion(&a)&&motion(&d)==motion(&b));
+   }
+   retireNativeReplayFrame(&target);
   }
+ }
+ // The exact recorded empty dictionaries may be restored only after an
+ // owned Native reset. Strict validation still rejects stale/unknown state.
+ {PlayerObject a,b;PlayLayer target;target.m_player1=&a;target.m_player2=&b;PlayLayer::current=&target;auto initial=captureCbfInitial(&target);
+  for(int restart=0;restart<3;++restart){a.logs[0].size=1;b.logs[1].size=2;a.m_lastCollisionBottom=2166;
+   assert(validateCbfInitial(&target,initial)=="CBF_INITIAL_COLLISION_LOG_MISMATCH");assert(prepareCbfInitialCollisionLogs(&target,initial,false)=="CBF_INITIAL_RESET_NOT_OWNED"&&a.logs[0].size==1);
+   assert(prepareCbfInitialCollisionLogs(&target,initial,true).empty()&&validateCbfInitial(&target,initial).empty());assert(a.m_lastCollisionBottom==2166);restoreCbfInitial(&target,initial);
+  }
+  auto unknown=initial;unknown["players"][0]["collisionLogs"][0]=1;a.logs[0].size=3;assert(prepareCbfInitialCollisionLogs(&target,unknown,true)=="CBF_INITIAL_STATE_UNAVAILABLE"&&a.logs[0].size==3);
+ }
+ // A new official Source Attempt discards prior Native identity witnesses;
+ // it does not mutate live Native collision dictionaries or scalar values.
+ {PlayerObject a,b;PlayLayer source;source.m_player1=&a;source.m_player2=&b;PlayLayer::current=&source;sourceCbf=false;beginCbfNativeFrame(&source);source.checkCollisions(&a,0,true);finishCbfNativeFrame();
+  auto& world=collisionWorld();auto actual=collisionObject(&source,0);assert(world.identities.reference(source.collider.m_uniqueID,actual,0,1));
+  auto initial=captureCbfInitial(&source,true);assert(initial["objects"]==world.identities.manifest());assert(!world.identities.reference(source.collider.m_uniqueID,actual,0,1));assert(a.logs[0].size==1&&a.m_lastCollisionTop==source.collider.m_uniqueID);retireNativeReplayFrame(&source);
  }
  // A late scope from a retired scene cannot touch a new scene clock.
  {PlayLayer oldScene,newScene;PlayLayer::current=&oldScene;beginNativeInputClock(&oldScene);{NativeInputClockScope late("STEP",oldScene.m_timestamp);retireNativeReplayFrame(&oldScene);PlayLayer::current=&newScene;beginNativeInputClock(&newScene);}auto trace=finishNativeInputClock();assert(nativeInputClockError().empty()&&trace["events"].size()==1);assert(finishNativeInputClock().isNull());}
@@ -149,7 +197,7 @@ int main(){
  std::cout<<"CBF boundary fixture passed; proprietary GD physics not executed\\n";
 }
 `);
- execFileSync('g++',['-std=c++23','-Wall','-Wextra','-Werror','-isystem',json+'/include','-isystem',result,'-I',join(root,'src'),join(dir,'test.cpp'),...['value','impl','parser','dump','external/dragonbox'].map(p=>json+'/src/'+p+'.cpp'),'-o',join(dir,'test')],{stdio:'pipe'});
+ execFileSync('g++',['-std=c++23','-O1','-Wall','-Wextra','-Werror','-isystem',json+'/include','-isystem',result,'-I',join(root,'src'),join(dir,'test.cpp'),...['value','impl','parser','dump','external/dragonbox'].map(p=>json+'/src/'+p+'.cpp'),'-o',join(dir,'test')],{stdio:'pipe'});
  execFileSync(join(dir,'test'),[],{stdio:'pipe'});
  }catch(e){throw Error(e.stderr?.toString()||e.message);}finally{rmSync(dir,{recursive:true,force:true});}
 });

@@ -1,4 +1,5 @@
 """Read-only verification after the single-run Singapore release activation."""
+import argparse
 import importlib.util
 import json
 import os
@@ -20,11 +21,13 @@ def read_json(path):
         return json.load(response)
 
 
-def verify(version, base):
-    packages = clients.wait_for_clients(base, version, 0)
+def verify(version, base, expected_sha=None):
+    packages = clients.wait_for_clients(base, version, 0, expected_sha) if expected_sha else clients.wait_for_clients(base, version, 0)
     health = read_json("/health")
     if health.get("status") != "ok" or health.get("service") != "corum-ranked-server":
         raise ValueError("Singapore health failed")
+    if expected_sha is not None and health.get("sourceSha") != expected_sha:
+        raise ValueError("Active server source SHA differs from the verified clients")
     ready = read_json("/ready")
     if not all(ready.get(key) is True for key in ("ready", "databaseConnected", "databaseReady", "schemaReady")):
         raise ValueError("Singapore database/schema readiness failed")
@@ -45,11 +48,16 @@ def verify(version, base):
             raise ValueError(f"{channel}: unexpected live download URL")
     result = {"api": API, "version": version, "health": True, "ready": True,
               "clients": packages, "modes": config.get("modes", {})}
+    if expected_sha is not None:
+        result["sourceSha"] = health["sourceSha"]
     print(json.dumps(result), flush=True)
     return result
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--expected-sha")
+    args = parser.parse_args()
     version = json.loads((ROOT / "corum-ranked-mod/mod.json").read_text())["version"]
     verify(version, os.environ.get("RANKED_DOWNLOAD_BASE_URL") or
-           "https://pub-11442f32945446a49b9da0a5e69f2451.r2.dev")
+           "https://pub-11442f32945446a49b9da0a5e69f2451.r2.dev", args.expected_sha)

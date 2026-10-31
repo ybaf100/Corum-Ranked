@@ -110,7 +110,7 @@ class R2Client:
                 raise PublishError("Immutable R2 object has different bytes; use a new version")
 
 
-def publish(directory, channel, version, base, client):
+def publish(directory, channel, version, base, client, expected_sha=None):
     if channel not in {"debug", "release"} or not re.fullmatch(
             r"v\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?", version):
         raise PublishError("Invalid Ranked channel or version")
@@ -129,7 +129,15 @@ def publish(directory, channel, version, base, client):
         marker = json.loads(package.read("corum-build-channel.json"))
         if not isinstance(manifest, dict) or manifest.get("id") != MOD_ID or manifest.get("version") != version:
             raise PublishError("Ranked package identity or version does not match")
-        if marker != {"channel": channel, "version": version}:
+        stamp = {"channel": channel, "version": version}
+        source_sha = marker.get("sourceSha")
+        if source_sha is not None:
+            if not isinstance(source_sha, str) or not re.fullmatch(r"[0-9a-f]{40}", source_sha):
+                raise PublishError("Invalid package source SHA")
+            stamp["sourceSha"] = source_sha
+        if expected_sha is not None and source_sha != expected_sha:
+            raise PublishError("Package source SHA differs from the publication run")
+        if marker != stamp:
             raise PublishError("Ranked package channel marker does not match")
     descriptor_path = Path(directory) / (channel + ".json")
     if descriptor_path.stat().st_size > 4096:
@@ -142,6 +150,8 @@ def publish(directory, channel, version, base, client):
             data.get("sizeBytes") != len(payload) or
             data.get("sha256") != hashlib.sha256(payload).hexdigest()):
         raise PublishError("Ranked descriptor hash, size or version does not match the package")
+    if data.get("sourceSha") != source_sha:
+        raise PublishError("Descriptor/package source SHA mismatch")
     prefix = "ranked/" + channel + "-" + version
     filename = "Corum-Ranked-" + version + "-" + channel + ".geode"
     url = base + "/" + prefix + "/" + filename
@@ -149,6 +159,8 @@ def publish(directory, channel, version, base, client):
         raise PublishError("Ranked descriptor points outside the configured R2 package path")
     canonical = {channel: {"version": version, "sha256": data["sha256"],
                            "sizeBytes": len(payload), "downloadUrl": url}}
+    if source_sha is not None:
+        canonical[channel]["sourceSha"] = source_sha
     descriptor_payload = (json.dumps(canonical, indent=2) + "\n").encode()
     # The public descriptor is the commit point. A failed package upload never
     # advertises an incomplete update; retries cannot replace different bytes.
@@ -169,7 +181,7 @@ def main():
                           os.environ.get("RANKED_R2_SECRET_ACCESS_KEY", ""),
                           os.environ.get("RANKED_R2_BUCKET", "corum-ranked-download"))
         url = publish(args.directory, args.channel, args.version,
-                      os.environ.get("RANKED_DOWNLOAD_BASE_URL", ""), client)
+                      os.environ.get("RANKED_DOWNLOAD_BASE_URL", ""), client, os.environ.get("GITHUB_SHA"))
     except (PublishError, OSError, ValueError, KeyError, zipfile.BadZipFile) as error:
         message = str(error) if isinstance(error, PublishError) else "Invalid or unreadable Ranked package/configuration"
         print("::error::" + message)

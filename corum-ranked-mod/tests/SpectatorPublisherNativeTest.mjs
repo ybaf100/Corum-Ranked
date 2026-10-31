@@ -62,7 +62,7 @@ namespace geode::async {template<class T> struct TaskHolder {
 namespace corum::ranked {
 auto publishTestClock=std::chrono::steady_clock::time_point(std::chrono::seconds(10));
 auto testClockNow(){return publishTestClock;}
-namespace log {template<class... T> void debug(T...){} }
+namespace log {template<class... T> void debug(T...){} template<class... T> void info(T...){} }
 enum class RuntimeStage {Ready,Matched};
 struct RankedRuntime {
     struct Map{int levelId=123;};struct Match {std::optional<Map>currentMap=Map{};std::string matchId="match",state="ROUND_PLAYING";int roundNumber=1,deathmatchSequence=0;bool spectatorLiveEnabled=true;};

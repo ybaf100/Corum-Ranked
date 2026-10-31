@@ -1,0 +1,58 @@
+name: Ranked quick feedback
+on:
+  pull_request:
+  push:
+    branches-ignore: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  scope:
+    runs-on: ubuntu-latest
+    outputs:
+      server: ${{ steps.scope.outputs.server }}
+      client: ${{ steps.scope.outputs.client }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Lint all workflow dependencies before scoped feedback
+        run: bash ranked/tools/check-workflows.sh
+      - id: scope
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          python3 - <<'PY'
+          import os, subprocess
+          base = os.environ['BASE']
+          paths = subprocess.check_output(['git', 'diff', '--name-only', base, 'HEAD'], text=True).splitlines() if base and set(base) != {'0'} else ['.github/workflows/']
+          shared = any(p.startswith(('ranked/packages/', 'ranked/translations/', 'ranked/tools/', '.github/', 'apps-script/')) or p in ('ranked/apps/server/src/session/client-version.ts', 'corum-ranked-mod/mod.json', 'ranked/package.json', 'ranked/package-lock.json') for p in paths)
+          server = shared or any(p.startswith('ranked/') for p in paths)
+          client = shared or any(p.startswith('corum-ranked-mod/') for p in paths)
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
+              out.write(f'server={str(server).lower()}\nclient={str(client).lower()}\n')
+          print('Quick feedback only; full required validation remains independent. Changed:', paths)
+          PY
+  server:
+    needs: scope
+    if: needs.scope.outputs.server == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: ranked/package-lock.json
+      - run: npm ci --prefix ranked
+      - run: npm run typecheck --prefix ranked
+  client:
+    needs: scope
+    if: needs.scope.outputs.client == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - run: node --test corum-ranked-mod/tests/*SourceTest.mjs

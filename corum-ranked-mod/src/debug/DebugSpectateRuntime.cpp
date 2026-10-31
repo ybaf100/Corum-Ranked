@@ -79,7 +79,7 @@ void DebugSpectateRuntime::start(bool playback, std::string password,float start
     installPump();
     m_mode = playback ? DebugSpectateMode::PreparingPlayback : DebugSpectateMode::PreparingRecord;
     m_status = playback ? "REQUESTING SERVER PLAYBACK..." : "CREATING SERVER RECORDING...";
-    m_launched = false; m_playbackComplete = false; m_errors = 0; m_capture = {};
+    m_launched = false; m_playbackComplete = false; m_errors = 0; m_capture = {};m_evidenceLogs=0;
     m_previousCapturedPose.reset();m_nativeClockOrigin.reset();
     m_id.clear(); m_token.clear(); m_contextId.clear();
     // Admission belongs to a NEW scope. A deadline/backoff left by an expired
@@ -183,6 +183,9 @@ bool DebugSpectateRuntime::recordPose(SpectatorGhostPose const& pose, bool termi
     auto const sequence = m_capture.nextSequence();
     auto const accepted = m_capture.capture(elapsed, pose, terminal);
     if (accepted) {
+        if(m_levelId==143308401&&elapsed>=70000&&elapsed<=73000&&m_evidenceLogs++<128){auto wire=encodeSpectatorPose(pose);
+            log::info("[SpectatorEvidence] stage=DEBUG_CAPTURED attempt={} sequence={} elapsedMs={} p1={} p2={}",m_id,sequence,elapsed,wire["discontinuity"].dump(matjson::NO_INDENTATION),wire["player2"]["discontinuity"].dump(matjson::NO_INDENTATION));}
+
         if (sequence >= 18 && sequence <= 22 && m_previousCapturedPose) {
             auto const& previous = *m_previousCapturedPose;
             log::info("[DebugSpectate] capture forensic sequence={} elapsedMs={} x={} y={} deltaX={} deltaY={} distance={} previousMode={} mode={} mini={} upsideDown={} flipped={} dual={} cameraX={} cameraY={} discontinuity={}",
@@ -217,6 +220,8 @@ void DebugSpectateRuntime::pumpRecording() {
             if(f.pose.cosmetics && validSpectatorCosmetics(*f.pose.cosmetics)){
                 frame["keyframe"]["cosmetics"]=encodeSpectatorCosmetics(*f.pose.cosmetics);
             }
+            if(m_levelId==143308401&&f.elapsedMs>=70000&&f.elapsedMs<=73000&&m_evidenceLogs++<128)
+                log::info("[SpectatorEvidence] stage=DEBUG_ENCODED_UPLOAD attempt={} sequence={} elapsedMs={} p1={} p2={}",m_id,f.sequence,f.elapsedMs,frame["keyframe"]["discontinuity"].dump(matjson::NO_INDENTATION),frame["keyframe"]["player2"]["discontinuity"].dump(matjson::NO_INDENTATION));
             auto size=frame.dump().size();
             if(bytes+size>48*1024){if(sent==0){fail("RECORD_FRAME_BYTE_LIMIT");return;}break;}
             bytes+=size;++sent;frames.push(frame);

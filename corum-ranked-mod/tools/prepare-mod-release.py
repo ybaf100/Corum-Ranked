@@ -14,9 +14,11 @@ BINARIES = {MOD_ID + extension for extension in (".dll", ".dylib", ".ios.dylib",
 MARKER = "corum-build-channel.json"
 
 
-def prepare(package: Path, channel: str, version: str, output: Path):
+def prepare(package: Path, channel: str, version: str, output: Path, source_sha=None):
     if channel not in ("debug", "release") or not re.fullmatch(r"v\d+\.\d+\.\d+(?:-[a-zA-Z0-9.]+)?", version):
         raise ValueError("Invalid release channel/version")
+    if source_sha is not None and not re.fullmatch(r"[0-9a-f]{40}", source_sha):
+        raise ValueError("Invalid source SHA")
     output.mkdir(parents=True, exist_ok=True)
     filename = f"Corum-Ranked-{version}-{channel}.geode"
     destination = output / filename
@@ -34,12 +36,17 @@ def prepare(package: Path, channel: str, version: str, output: Path):
                     stamped.writestr(entry, source.read(entry))
             marker = zipfile.ZipInfo(MARKER, (1980, 1, 1, 0, 0, 0))
             marker.compress_type = zipfile.ZIP_DEFLATED
-            stamped.writestr(marker, json.dumps({"channel": channel, "version": version}, separators=(",", ":")))
+            stamp = {"channel": channel, "version": version}
+            if source_sha is not None:
+                stamp["sourceSha"] = source_sha
+            stamped.writestr(marker, json.dumps(stamp, separators=(",", ":")))
     temporary.replace(destination)
     size = destination.stat().st_size
     if not 0 < size <= 128 * 1024 * 1024:
         raise ValueError("Mod update exceeds the client download limit")
     descriptor = {"version": version, "sha256": hashlib.sha256(destination.read_bytes()).hexdigest(), "sizeBytes": size}
+    if source_sha is not None:
+        descriptor["sourceSha"] = source_sha
     base = os.environ.get("RANKED_DOWNLOAD_BASE_URL", "").strip().rstrip("/")
     if base:
         parsed = urlsplit(base)
@@ -56,5 +63,6 @@ if __name__ == "__main__":
     parser.add_argument("channel", choices=("debug", "release"))
     parser.add_argument("version")
     parser.add_argument("output", type=Path)
+    parser.add_argument("--source-sha")
     args = parser.parse_args()
-    print(prepare(args.package, args.channel, args.version, args.output))
+    print(prepare(args.package, args.channel, args.version, args.output, args.source_sha))

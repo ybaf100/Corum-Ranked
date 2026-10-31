@@ -18,6 +18,7 @@
 #include "RankedAudioManager.hpp"
 #include "SpectatorLiveRuntime.hpp"
 #include "domain/SpectatorCapturePolicy.hpp"
+#include "domain/SpectatorSourceTrace.hpp"
 #include "domain/SpectatorAudioPolicy.hpp"
 #include "domain/SpectatorProgressPolicy.hpp"
 #include "spectator/ScopedCameraTargetOverride.hpp"
@@ -248,6 +249,7 @@ public:
         bool pauseQuitBlockedLogged = false;
         bool gameplayFrameObserved = false;
         corum::ranked::SpectatorCapturePolicy spectatorCapture;
+        corum::ranked::SpectatorSourceTrace spectatorSourceTrace;
         std::shared_ptr<corum::ranked::SpectatorCosmetics const> spectatorCosmetics;
         std::chrono::steady_clock::time_point nextCosmeticCaptureAt{};
 
@@ -965,20 +967,45 @@ public:
         return player==m_player1?observedSpectatorPose():corum::ranked::captureSpectatorPose(player);
     }
 
+    bool tracesSpectatorPlayer(PlayerObject* player){return player&&corum::ranked::SpectatorSourceTrace::window(m_fields->levelId,m_gameState.m_levelTime,player->getPositionX())&&observesSpectatorPlayer(player);}
+
+    void traceSpectatorSource(unsigned path,char const* callback,PlayerObject* player,
+                              corum::ranked::SpectatorGhostPose const& before,bool teleportedBefore,
+                              int objectId=0,int uniqueId=-1,char const* result="OBSERVED") {
+        if(!tracesSpectatorPlayer(player))return;
+        auto& trace=m_fields->spectatorSourceTrace;auto order=++trace.order;
+        auto x=player->getPositionX(),y=player->getPositionY();
+        auto large=std::hypot(x-before.x,y-before.y)>400;
+        if(!trace.emit(path,m_fields->levelId,m_gameState.m_levelTime,x,large||std::string_view(result)!="OBSERVED"))return;
+        auto const pose=corum::ranked::captureSpectatorPose(player);auto capture=m_fields->spectatorCapture.snapshot();
+        auto attempt=m_fields->survivalLevel?corum::ranked::SurvivalRuntime::get().localAttemptId():corum::ranked::RankedRuntime::get().spectatorLiveAttemptId();
+#if defined(CORUM_RANKED_DEBUG_SPECTATE)
+        if(m_fields->debugRecordScene)attempt=corum::ranked::debug::DebugSpectateRuntime::get().recordingIdForDiagnostics();
+#endif
+        log::info("[SpectatorSourceTrace] attempt={} stage={} frame={} order={} event={} nativeStep={} nativeMs={} p2={} before=({},{}) after=({},{}) mode={} gravity={} velocity={} lastPosition=({},{}) teleportedBefore={} teleportedAfter={} objectId={} runtimeId={} result={} pendingEvents={}",
+            attempt,callback,trace.frame,order,trace.event,m_currentStep,m_gameState.m_levelTime*1000,player==m_player2,before.x,before.y,x,y,corum::ranked::spectatorModeName(pose.mode),pose.upsideDown,player->m_yVelocity,player->m_lastPosition.x,player->m_lastPosition.y,teleportedBefore,player->m_wasTeleported,objectId,uniqueId,result,
+            capture?(player==m_player2&&capture->player2?(capture->player2->discontinuity?capture->player2->discontinuity->nativeEvents.size():0):(capture->discontinuity?capture->discontinuity->nativeEvents.size():0)):0);
+    }
+
     void observeSpectatorNativeUpdate(PlayerObject* player) {
         if (observesSpectatorPlayer(player)) (void)observedSpectatorPose();
     }
 
     void observeSpectatorNativeSnap(PlayerObject* player, corum::ranked::SpectatorDiscontinuity type,
-                                    corum::ranked::SpectatorGhostPose const& before) {
+                                    corum::ranked::SpectatorGhostPose const& before, char const* callback="TELEPORT_FLAG") {
+        auto& trace=m_fields->spectatorSourceTrace;
+        std::optional<corum::ranked::SpectatorSnapTrace> identity;
+        if(corum::ranked::SpectatorSourceTrace::window(m_fields->levelId,m_gameState.m_levelTime,player->getPositionX()))identity=corum::ranked::SpectatorSnapTrace{static_cast<std::int64_t>(++trace.event),static_cast<std::int64_t>(trace.frame),m_currentStep,m_gameState.m_levelTime*1000,callback};
         if(player==m_player2 && m_gameState.m_isDualMode && observesSpectatorPlayer(m_player1)){
             auto const after=corum::ranked::captureSpectatorPose(player);
-            m_fields->spectatorCapture.secondaryNativeSnap(type,before,after);
+            auto result=m_fields->spectatorCapture.secondaryNativeSnap(type,before,after,identity);
+            traceSpectatorSource(8,"CAPTURE_P2",player,before,player->m_wasTeleported,0,-1,result);
             return;
         }
         if (!observesSpectatorPlayer(player)) return;
         auto const after = corum::ranked::captureSpectatorPose(player, false, false, false);
-        m_fields->spectatorCapture.nativeSnap(type, before, after);
+        auto result=m_fields->spectatorCapture.nativeSnap(type, before, after,identity);
+        traceSpectatorSource(9,"CAPTURE_P1",player,before,player->m_wasTeleported,0,-1,result);
         (void)observedSpectatorPose();
     }
 
@@ -986,6 +1013,7 @@ public:
         if (!observesSpectatorPlayer(m_player1) || m_player1->m_isDead || m_hasCompletedLevel) return;
         // End of the native world update, after physics, rotation and camera.
         auto const pose = observedSpectatorPose();
+        traceSpectatorSource(6,"SNAPSHOT",m_player1,pose,m_player1->m_wasTeleported);
         auto const ready = m_fields->spectatorCapture.stableNativeFrame(m_attemptTime,
             m_started && !m_inResetDelay && !m_isPaused && m_player1->m_gameLayer == this &&
             std::isfinite(m_player1->m_vehicleSize) && m_player1->m_vehicleSize > 0);
@@ -997,14 +1025,14 @@ public:
                     log::info("[DebugSpectate] initial world seed nativeElapsedMs={} x={} y={} cameraX={} cameraY={}",
                         m_attemptTime * 1000, pose.x, pose.y, pose.camera ? pose.camera->x : 0, pose.camera ? pose.camera->y : 0);
                 m_fields->debugRecordHasFrame = true;
-                m_fields->spectatorCapture.sampled();
+                traceSpectatorSource(7,"SAMPLED",m_player1,pose,m_player1->m_wasTeleported);m_fields->spectatorCapture.sampled();
             }
             return;
         }
 #endif
-        if(m_fields->survivalLevel){if(ready && corum::ranked::SurvivalSpectatorRuntime::get().capture(pose))m_fields->spectatorCapture.sampled();return;}
-        if (ready && corum::ranked::SpectatorLiveRuntime::get().tickPublisher(pose, false))
-            m_fields->spectatorCapture.sampled();
+        if(m_fields->survivalLevel){if(ready && corum::ranked::SurvivalSpectatorRuntime::get().capture(pose)){traceSpectatorSource(7,"SAMPLED",m_player1,pose,m_player1->m_wasTeleported);m_fields->spectatorCapture.sampled();}return;}
+        if (ready && corum::ranked::SpectatorLiveRuntime::get().tickPublisher(pose, false)){
+            traceSpectatorSource(7,"SAMPLED",m_player1,pose,m_player1->m_wasTeleported);m_fields->spectatorCapture.sampled();}
     }
 
     corum::ranked::SpectatorSceneContext survivalSpectatorSceneContext(){auto const&v=corum::ranked::SurvivalRuntime::get().view();return {v.id,v.roundNumber,0,v.map.levelId};}
@@ -1583,6 +1611,7 @@ public:
             if(m_fields->survivalReplayLevel)m_isTestMode=true;return;
         }
         m_fields->spectatorCapture.reset();
+        m_fields->spectatorSourceTrace={};
         auto& runtime = corum::ranked::RankedRuntime::get();
         syncSpectatorLocalSafety();
         ScopedPersistenceOwner persistence(this);
@@ -2984,14 +3013,23 @@ class $modify(CorumRankedSpectatorCameraHook, GJBaseGameLayer) {
             owner->logSpectatorWorldDriver();
             return;
         }
+        auto const sourceOwner=owner&&owner->observesSpectatorPlayer(m_player1);
+        if(sourceOwner)++owner->m_fields->spectatorSourceTrace.frame;
+        auto const sourceObserved=sourceOwner&&owner->tracesSpectatorPlayer(m_player1);
+        auto const sourceBefore=sourceObserved?corum::ranked::captureSpectatorPose(m_player1):corum::ranked::SpectatorGhostPose{};
+        auto const sourceFlag=sourceObserved&&m_player1->m_wasTeleported;
         GJBaseGameLayer::update(dt);
+        if(sourceObserved)owner->traceSpectatorSource(0,"GJ_UPDATE",m_player1,sourceBefore,sourceFlag);
         if (owner) owner->sampleSpectatorPresentation();
     }
 
     int checkCollisions(PlayerObject* player,float dt,bool ignoreDamage){
         auto* play=PlayLayer::get();auto* owner=play && static_cast<GJBaseGameLayer*>(play)==this?static_cast<CorumRankedPlayLayer*>(play):nullptr;
         if(owner && owner->m_fields->survivalLiveLevel && corum::ranked::SurvivalSpectatorRuntime::get().world())return GJBaseGameLayer::checkCollisions(player,dt,ignoreDamage);
-        if(!owner || !owner->spectatorCameraActive())return GJBaseGameLayer::checkCollisions(player,dt,ignoreDamage);
+        if(!owner || !owner->spectatorCameraActive()){
+            if(owner&&owner->tracesSpectatorPlayer(player)){auto before=corum::ranked::captureSpectatorPose(player);auto flag=player->m_wasTeleported;auto result=GJBaseGameLayer::checkCollisions(player,dt,ignoreDamage);owner->traceSpectatorSource(5,"COLLISIONS",player,before,flag);return result;}
+            return GJBaseGameLayer::checkCollisions(player,dt,ignoreDamage);
+        }
         if(player!=m_player1)return 0; // native P2/remote visuals have no spectator trigger authority
         if(!owner->m_fields->spectatorWorldUpdateInProgress || !owner->m_fields->spectatorWorldPoseApplied || owner->m_fields->spectatorCollisionChecked)return 0;
         owner->m_fields->spectatorCollisionChecked=true;
@@ -3000,6 +3038,8 @@ class $modify(CorumRankedSpectatorCameraHook, GJBaseGameLayer) {
         return GJBaseGameLayer::checkCollisions(player,dt,true);
     }
     void collisionCheckObjects(PlayerObject* player,gd::vector<GameObject*>* objects,int count,float dt){
+        auto* replayLayer=PlayLayer::get();
+        if(replayLayer&&static_cast<GJBaseGameLayer*>(replayLayer)==this&&objects&&count>0)corum::ranked::survivalReplayCollisionCandidates(replayLayer,player,objects->data(),static_cast<std::size_t>(std::min(count,static_cast<int>(objects->size()))));
         if(!corum::ranked::ScopedSpectatorTriggerQuery::owns(this,player)){
             GJBaseGameLayer::collisionCheckObjects(player,objects,count,dt);return;
         }
@@ -3017,9 +3057,10 @@ class $modify(CorumRankedSpectatorCameraHook, GJBaseGameLayer) {
         auto const observed = owner && object && owner->observesSpectatorPlayer(player);
         auto const before = observed ? owner->observedSpectatorPlayerPose(player) : corum::ranked::SpectatorGhostPose{};
         auto const source=player?player->getPosition():CCPoint{};
+        auto const flag=player&&player->m_wasTeleported;
         GJBaseGameLayer::teleportPlayer(object, player);
         if(player)corum::ranked::survivalReplayNativeSnap(player,false,source.x,source.y);
-        if (observed) owner->observeSpectatorNativeSnap(player, corum::ranked::SpectatorDiscontinuity::Teleport, before);
+        if (observed){owner->traceSpectatorSource(3,"PORTAL",player,before,flag,object->m_objectID,object->m_uniqueID);owner->observeSpectatorNativeSnap(player, corum::ranked::SpectatorDiscontinuity::Teleport, before,"PORTAL");}
     }
 };
 
@@ -3057,6 +3098,7 @@ class $modify(CorumRankedSpectatorDummyPlayer, PlayerObject) {
         // portal entry callback. A position delta alone never creates evidence.
         if (observed && !teleportedBefore && m_wasTeleported)
             layer->observeSpectatorNativeSnap(this, corum::ranked::SpectatorDiscontinuity::Teleport, before);
+        if(observed)layer->traceSpectatorSource(this==layer->m_player2?2:1,"PLAYER_UPDATE",this,before,teleportedBefore);
         if (layer) layer->observeSpectatorNativeUpdate(this);
     }
 
@@ -3075,13 +3117,16 @@ class $modify(CorumRankedSpectatorDummyPlayer, PlayerObject) {
         PlayerObject::spiderTestJump(dynamic);
         if(m_isSpider && gravity!=m_isUpsideDown)corum::ranked::survivalReplayNativeSnap(this,true,source.x,source.y);
         if (observed && before.upsideDown != m_isUpsideDown)
-            layer->observeSpectatorNativeSnap(this, corum::ranked::SpectatorDiscontinuity::SpiderSnap, before);
+            layer->observeSpectatorNativeSnap(this, corum::ranked::SpectatorDiscontinuity::SpiderSnap, before,"SPIDER");
     }
 
     void setPosition(CCPoint const& position) {
         auto* layer = localSafetyLayer();
         if (layer && layer->blocksSpectatorNativePlayerWrite(this)) return;
+        auto const observed=layer&&layer->tracesSpectatorPlayer(this);
+        auto const before=observed?corum::ranked::captureSpectatorPose(this):corum::ranked::SpectatorGhostPose{};auto const flag=m_wasTeleported;
         PlayerObject::setPosition(position);
+        if(observed)layer->traceSpectatorSource(4,"SET_POSITION_OBSERVATION_ONLY",this,before,flag);
     }
 
     void setRotation(float rotation) {

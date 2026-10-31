@@ -1,4 +1,4 @@
-import {BadRequestException,ConflictException,ForbiddenException,HttpException,Inject,Injectable} from '@nestjs/common';
+import {BadRequestException,ConflictException,ForbiddenException,HttpException,Inject,Injectable,Logger} from '@nestjs/common';
 import {survivalCurrentRound,survivalLiveView,type SurvivalMatch} from '@corum-ranked/rules';
 import {DATABASE,type DatabasePort} from '../database/database.port.js';
 import {SERVER_CLOCK,type ServerClock} from '../common/runtime.module.js';
@@ -10,12 +10,13 @@ import {appendSpectatorPacket,readSpectatorStream,relayFallback} from '../match/
 // Serialized bytes are measured; JS object/allocator overhead is not a resident-memory guarantee.
 export const SURVIVAL_RELAY_LIMITS={streams:8,perMatch:4,historyPackets:2400,streamBytes:4*1024*1024,totalBytes:24*1024*1024,viewers:256,rateBuckets:2048,demandMs:8000} as const;
 interface Context {roundKey:string;mapGeneration:number;levelId:number;}
-interface Stored {context:Context;targetId:string;sessionId:string;stream:LiveStream;bytes:number;}
+interface Stored {context:Context;targetId:string;sessionId:string;stream:LiveStream;bytes:number;traceLogs:number;}
 interface Demand {matchId:string;targetId:string;roundKey:string;mapGeneration:number;expires:number;}
 const object=(v:unknown):v is Record<string,unknown>=>typeof v==='object'&&v!==null&&!Array.isArray(v);
 const same=(a:Context,b:Context)=>a.roundKey===b.roundKey&&a.mapGeneration===b.mapGeneration&&a.levelId===b.levelId;
 @Injectable()
 export class SurvivalSpectatorLiveService {
+  private readonly logger=new Logger(SurvivalSpectatorLiveService.name);
   private readonly streams=new Map<string,Stored>();
   private readonly viewers=new Map<string,Demand>();
   private readonly rates=new Map<string,{at:number;count:number}>();
@@ -93,12 +94,15 @@ export class SurvivalSpectatorLiveService {
       if(!existing&&(this.streams.size>=SURVIVAL_RELAY_LIMITS.streams||[...this.streams.values()].filter(s=>s.stream.matchId===id).length>=SURVIVAL_RELAY_LIMITS.perMatch))throw new ConflictException('SURVIVAL_STREAM_LIMIT');
       stream={matchId:id,slot:round.ordinal,side:'A',attemptId:first.attemptId,generation:first.generation,lastSequence:-1,lastReceivedAtMs:this.now(),packets:[]};
     }else stream={...existing.stream,packets:[...existing.stream.packets],history:[...(existing.stream.history??[])]};
+    let traceLogs=reset?0:existing!.traceLogs;
     const initialSequence=stream.lastSequence,oldSamples=stream.history??[];
     for(const p of packets){
       if(p.sequence<=stream.lastSequence){const prior=stream.history?.find(v=>v.sequence===p.sequence);if(!prior)throw new ConflictException('SPECTATOR_STALE_SEQUENCE');
         const {receivedAtMs:_,...plain}=prior;if(JSON.stringify(plain)!==JSON.stringify(p))throw new ConflictException('SPECTATOR_CHANGED_RETRY');continue;}
       if(p.sequence!==stream.lastSequence+1)throw new ConflictException('SPECTATOR_SEQUENCE_GAP');
       appendSpectatorPacket(stream,p,this.now(),SURVIVAL_RELAY_LIMITS.historyPackets);
+      if(context.levelId===143308401&&p.elapsedMs>=70000&&p.elapsedMs<=73000&&traceLogs++<64)
+        this.logger.log(JSON.stringify({stage:'RELAY_ACCEPTED',attemptId:p.attemptId,generation:p.generation,sequence:p.sequence,elapsedMs:p.elapsedMs,p1:p.keyframe.discontinuity??null,p2:p.keyframe.player2?.discontinuity??null}));
     }
     const retained=stream.history??[];
     const charge=(p:unknown)=>Buffer.byteLength(JSON.stringify(p));
@@ -108,7 +112,7 @@ export class SurvivalSpectatorLiveService {
     while(bytes>SURVIVAL_RELAY_LIMITS.streamBytes&&retained.length>64){bytes-=retained.splice(0,64).reduce((n,p)=>n+charge(p),0);}
     const total=[...this.streams.entries()].reduce((n,[k,s])=>n+(k===key?0:s.bytes),bytes);
     if(total>SURVIVAL_RELAY_LIMITS.totalBytes)throw new ConflictException('SURVIVAL_RELAY_BUDGET');
-    this.streams.set(key,{context,targetId:own.participantId,sessionId:session.sessionId,stream,bytes});
+    this.streams.set(key,{context,targetId:own.participantId,sessionId:session.sessionId,stream,bytes,traceLogs});
     return {accepted:true,protocolVersion:2,attemptId:first.attemptId,generation:first.generation,sequence:stream.lastSequence};
   }
   public async subscribe(id:string,session:RankedSessionContext,q:Record<string,string|undefined>){

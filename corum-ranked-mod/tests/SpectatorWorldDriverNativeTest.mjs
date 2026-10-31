@@ -85,7 +85,7 @@ struct CorumRankedPlayLayer: PlayLayer {
 
  void syncSpectatorAudio(){}
  bool blockEntryGameplayUpdate(){return false;}
-    struct Fields {bool survivalLiveLevel=false,survivalReplayLevel=false;
+    struct Fields {struct Trace{unsigned frame=0;}spectatorSourceTrace;bool survivalLiveLevel=false,survivalReplayLevel=false;
 #if !defined(CORUM_RANKED_DEBUG_SPECTATE)
  int levelId=123;
 #endif
@@ -112,9 +112,11 @@ struct CorumRankedPlayLayer: PlayLayer {
     bool freezeLocalDummy(PlayerObject* p){return p==m_player1 && m_fields->localSafety.active();}
     corum::ranked::SpectatorGhostPose observedSpectatorPlayerPose(PlayerObject* p){return corum::ranked::captureSpectatorPose(p);}
     corum::ranked::SpectatorGhostPose observedSpectatorPose(){return corum::ranked::captureSpectatorPose(m_player1);}
- bool observesSpectatorPlayer(PlayerObject*){return false;}
+ template<class...T>void traceSpectatorSource(T const&...){}
+    bool tracesSpectatorPlayer(PlayerObject*){return false;}
+    bool observesSpectatorPlayer(PlayerObject*){return false;}
     void observeSpectatorNativeUpdate(PlayerObject*){}
-    void observeSpectatorNativeSnap(PlayerObject*,corum::ranked::SpectatorDiscontinuity,corum::ranked::SpectatorGhostPose const&){}
+    void observeSpectatorNativeSnap(PlayerObject*,corum::ranked::SpectatorDiscontinuity,corum::ranked::SpectatorGhostPose const&,char const* = "TELEPORT_FLAG"){}
     ${methods}
     ${hook}
     ${worldHook}

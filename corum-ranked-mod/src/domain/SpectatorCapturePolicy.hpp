@@ -24,38 +24,38 @@ public:
         m_effects|=pose.effects;if(pose.player2)m_secondaryEffects|=pose.player2->effects;
         m_latest = pose;
     }
-    void nativeSnap(SpectatorDiscontinuity type, SpectatorGhostPose const& before,
-                    SpectatorGhostPose const& after) {
-        if (!finiteSpectatorBody(before) || !finiteSpectatorBody(after)) return;
-        if(type==SpectatorDiscontinuity::SpiderSnap&&(after.mode!=SpectatorGameMode::Spider||(before.mode==after.mode&&before.upsideDown==after.upsideDown)))return;
+    char const* nativeSnap(SpectatorDiscontinuity type, SpectatorGhostPose const& before,
+                    SpectatorGhostPose const& after, std::optional<SpectatorSnapTrace> trace=std::nullopt) {
+        if (!finiteSpectatorBody(before) || !finiteSpectatorBody(after)) return "INVALID_BODY";
+        if(type==SpectatorDiscontinuity::SpiderSnap&&(after.mode!=SpectatorGameMode::Spider||(before.mode==after.mode&&before.upsideDown==after.upsideDown)))return "SPIDER_MODE_OR_GRAVITY";
         SpectatorSnapEvidence snap{type, before.x, before.y, after.x, after.y};
         if (before.camera && validSpectatorCamera(*before.camera)) snap.fromCamera = before.camera;
-        if (!finiteSpectatorSnap(snap)) return;
+        if (!finiteSpectatorSnap(snap)) return "INVALID_EVENT_OR_CHAIN_LIMIT";
         if (m_snap) {
             // Coalesce only an observed native event chain. Never bridge an
             // arbitrary correction or an unrelated callback's coordinates.
-            if (std::hypot(before.x - m_snap->toX, before.y - m_snap->toY) > 400.0f) return;
+            if (std::hypot(before.x - m_snap->toX, before.y - m_snap->toY) > 400.0f) return "CHAIN_GAP";
             snap.fromX = m_snap->fromX; snap.fromY = m_snap->fromY;
             snap.fromCamera = m_snap->fromCamera;
             if (m_snap->type == SpectatorDiscontinuity::Teleport) snap.type = m_snap->type;
             snap.nativeEvents=m_snap->nativeEvents;
         }
-        snap.nativeEvents.push_back({type,before.x,before.y,after.x,after.y,before.mode,after.mode,before.upsideDown,after.upsideDown});
-        if (!finiteSpectatorSnap(snap)) return;
-        m_snap = snap; m_cameraSnap = true;
+        snap.nativeEvents.push_back({type,before.x,before.y,after.x,after.y,before.mode,after.mode,before.upsideDown,after.upsideDown,std::move(trace)});
+        if (!finiteSpectatorSnap(snap)) return "INVALID_EVENT_OR_CHAIN_LIMIT";
+        m_snap = snap; m_cameraSnap = true; return "CAPTURED";
     }
-    void secondaryNativeSnap(SpectatorDiscontinuity type,SpectatorGhostPose const& before,SpectatorGhostPose const& after){
-        if(!finiteSpectatorBody(before)||!finiteSpectatorBody(after))return;
-        if(type==SpectatorDiscontinuity::SpiderSnap&&(after.mode!=SpectatorGameMode::Spider||(before.mode==after.mode&&before.upsideDown==after.upsideDown)))return;
+    char const* secondaryNativeSnap(SpectatorDiscontinuity type,SpectatorGhostPose const& before,SpectatorGhostPose const& after,std::optional<SpectatorSnapTrace> trace=std::nullopt){
+        if(!finiteSpectatorBody(before)||!finiteSpectatorBody(after))return "INVALID_BODY";
+        if(type==SpectatorDiscontinuity::SpiderSnap&&(after.mode!=SpectatorGameMode::Spider||(before.mode==after.mode&&before.upsideDown==after.upsideDown)))return "SPIDER_MODE_OR_GRAVITY";
         SpectatorSnapEvidence snap{type,before.x,before.y,after.x,after.y};
-        if(!finiteSpectatorSnap(snap))return;
-        if(m_secondarySnap){if(std::hypot(before.x-m_secondarySnap->toX,before.y-m_secondarySnap->toY)>400)return;
+        if(!finiteSpectatorSnap(snap))return "INVALID_EVENT_OR_CHAIN_LIMIT";
+        if(m_secondarySnap){if(std::hypot(before.x-m_secondarySnap->toX,before.y-m_secondarySnap->toY)>400)return "CHAIN_GAP";
             snap.fromX=m_secondarySnap->fromX;snap.fromY=m_secondarySnap->fromY;
             if(m_secondarySnap->type==SpectatorDiscontinuity::Teleport)snap.type=SpectatorDiscontinuity::Teleport;
             snap.nativeEvents=m_secondarySnap->nativeEvents;}
-        snap.nativeEvents.push_back({type,before.x,before.y,after.x,after.y,before.mode,after.mode,before.upsideDown,after.upsideDown});
-        if(!finiteSpectatorSnap(snap))return;
-        m_secondarySnap=snap;
+        snap.nativeEvents.push_back({type,before.x,before.y,after.x,after.y,before.mode,after.mode,before.upsideDown,after.upsideDown,std::move(trace)});
+        if(!finiteSpectatorSnap(snap))return "INVALID_EVENT_OR_CHAIN_LIMIT";
+        m_secondarySnap=snap; return "CAPTURED";
     }
     bool stableNativeFrame(double nativeTime, bool nativeReady) {
         if (!nativeReady || !m_latest || !std::isfinite(nativeTime) || nativeTime < 0 ||

@@ -13,7 +13,7 @@ function method(name,from=0){
 }
 for(const debugOn of [false,true]) test(`native update/rotation/teleport -> completed camera snapshot -> 50ms capture (Debug ${debugOn?'ON':'OFF'})`,()=>{
     const owner=['bool observesSpectatorPlayer(', 'corum::ranked::SpectatorGhostPose observedSpectatorPose(',
-        'corum::ranked::SpectatorGhostPose observedSpectatorPlayerPose(', 'void observeSpectatorNativeUpdate(', 'void observeSpectatorNativeSnap(', 'void sampleSpectatorPresentation()'].map(n=>method(n)).join('\n');
+        'corum::ranked::SpectatorGhostPose observedSpectatorPlayerPose(', 'bool tracesSpectatorPlayer(', 'void traceSpectatorSource(', 'void observeSpectatorNativeUpdate(', 'void observeSpectatorNativeSnap(', 'void sampleSpectatorPresentation()'].map(n=>method(n)).join('\n');
     const playerAt=source.indexOf('class $modify(CorumRankedSpectatorDummyPlayer');
     const worldAt=source.indexOf('class $modify(CorumRankedSpectatorCameraHook');
     const capture=readFileSync(join(root,'src/spectator/SpectatorPlayerCapture.cpp'),'utf8').replace(/^#include.*$/gm,'');
@@ -25,6 +25,7 @@ for(const debugOn of [false,true]) test(`native update/rotation/teleport -> comp
 #include "${join(root,'src/spectator/SpectatorPlayerCapture.hpp')}"
 #include "${join(root,'src/domain/SpectatorCameraPolicy.hpp')}"
 #include <cassert>
+#include "${join(root,'src/domain/SpectatorSourceTrace.hpp')}"
 #include "${join(root,'src/domain/SpectatorAudioPolicy.hpp')}"
 struct FMODAudioEngine{static FMODAudioEngine*sharedEngine(){static FMODAudioEngine e;return &e;}std::string getActiveMusic(int){return "voice.mp3";}unsigned getMusicTimeMS(int){return 0;}};
 namespace corum::ranked {struct SurvivalSpectatorRuntime {static SurvivalSpectatorRuntime& get(){static SurvivalSpectatorRuntime r;return r;}bool sceneLevel(int)const{return false;}replay::InactiveWorld* world()const{return nullptr;}bool publishing()const{return false;}bool canLaunch()const{return false;}template<class...T>bool arm(T...){return false;}template<class...T>bool capture(T const&...){return false;}template<class...T>void terminal(T const&...){}void sceneExited(){}bool exitRequested()const{return false;}};}
@@ -45,14 +46,14 @@ struct PlayerObject {
  GJBaseGameLayer* m_gameLayer=nullptr;CCPoint position{100,40};MainLayer main;MainLayer* m_mainLayer=&main;
  bool m_isShip=false,m_isBall=false,m_isBird=false,m_isDart=false,m_isRobot=false,m_isSpider=false,m_isSwing=false;
  bool m_isUpsideDown=false,m_isDead=false,m_wasTeleported=false,moving=false,nativeTeleport=false;
- float m_vehicleSize=1,rotation=0;int updates=0,m_followRelated=0;float m_unk838=0;std::vector<float> m_playerFollowFloats=std::vector<float>(200,40);
- CCPoint getPosition()const{return position;}float getRotation()const{return rotation;}bool isVisible()const{return true;}
+ double m_yVelocity=0;CCPoint m_lastPosition;float m_vehicleSize=1,rotation=0;int updates=0,m_followRelated=0;float m_unk838=0;std::vector<float> m_playerFollowFloats=std::vector<float>(200,40);
+ float getPositionX()const{return position.x;}float getPositionY()const{return position.y;}CCPoint getPosition()const{return position;}float getRotation()const{return rotation;}bool isVisible()const{return true;}
  virtual ~PlayerObject()=default;
  virtual void update(float){++updates;if(moving)position.x+=5;if(nativeTeleport){position.x+=729.7268f;m_wasTeleported=true;nativeTeleport=false;}}
  virtual void updateRotation(float){if(moving)rotation+=3;}
  virtual void spiderTestJump(bool){position.y+=700;m_isUpsideDown=!m_isUpsideDown;}
 };
-struct TeleportPortalObject{};
+struct TeleportPortalObject{int m_objectID=747,m_uniqueID=17;};
 struct GJBaseGameLayer {
  struct {bool m_isDualMode=false;CCPoint m_cameraPosition;double m_levelTime=0;float m_cameraZoom=1,m_cameraAngle=0,m_targetCameraZoom=1,m_targetCameraAngle=0;} m_gameState;
  MainLayer *m_objectLayer=nullptr,*m_inShaderObjectLayer=nullptr,*m_aboveShaderObjectLayer=nullptr;
@@ -75,7 +76,8 @@ SpectatorRandomEvents captureNativeRandomEvents(PlayLayer*){return {};}
 void commitNativeRandomEvents(PlayLayer*,SpectatorRandomEvents const&){}
 unsigned captureSpectatorEffects(PlayerObject*,SpectatorGameMode){return 0;}
 SpectatorCosmetics captureSpectatorCosmetics(PlayerObject*,PlayerObject*){return {};}
-struct RankedRuntime {bool spectator=false;static RankedRuntime& get(){static RankedRuntime r;return r;}bool isSpectating()const{return spectator;}};
+struct SurvivalRuntime{static SurvivalRuntime&get(){static SurvivalRuntime r;return r;}std::string localAttemptId()const{return "source-fixture";}};
+struct RankedRuntime {std::string spectatorLiveAttemptId()const{return "source-fixture";}bool spectator=false;static RankedRuntime& get(){static RankedRuntime r;return r;}bool isSpectating()const{return spectator;}};
 struct SpectatorLiveRuntime {
  std::vector<SpectatorRemoteFrame> takeRestorationFrames(){return {};}void restorationApplied(SpectatorRemoteFrame const&,bool,double){}void noteWorldPartial(std::string){}
  bool busy=false;std::int64_t next=0;std::vector<SpectatorGhostPose> sent;
@@ -84,7 +86,7 @@ struct SpectatorLiveRuntime {
 };
 namespace debug {
 struct DebugSpectateRuntime {
- DebugSpectateCapture capture;std::vector<SpectatorGhostPose> sent;
+ std::string recordingIdForDiagnostics()const{return "debug-source-fixture";}DebugSpectateCapture capture;std::vector<SpectatorGhostPose> sent;
  int m_levelId=kDebugSpectateLevelId;int levelId()const{return m_levelId;}static DebugSpectateRuntime& get(){static DebugSpectateRuntime d;return d;}
  bool recordPose(SpectatorGhostPose const& p){if(!capture.capture(clockMs,p))return false;sent.push_back(p);return true;}
 };
@@ -93,7 +95,7 @@ struct DebugSpectateRuntime {
 struct CorumRankedPlayLayer:PlayLayer {
  corum::ranked::SpectatorLiveRuntime& spectatorTransport(){return corum::ranked::SpectatorLiveRuntime::get();}
  bool blockEntryGameplayUpdate(){return false;}
- struct Fields{bool survivalLiveLevel=false,survivalReplayLevel=false,survivalLevel=false;struct Driver{bool partialHistory()const{return false;}template<class...T>bool apply(T...){return false;}std::optional<float> takeNativeDeltaSeconds(){return {};}}spectatorWorldDriver;bool spectatorWorldPoseApplied=false,spectatorCollisionChecked=false;SpectatorNativeProbe spectatorNativeProbe;bool rankedInitialized=false,rankedLevel=true,safetyRetired=false,spectatorMode=false,spectatorPending=false;
+ struct Fields{SpectatorSourceTrace spectatorSourceTrace;int levelId=123;bool survivalLiveLevel=false,survivalReplayLevel=false,survivalLevel=false;struct Driver{bool partialHistory()const{return false;}template<class...T>bool apply(T...){return false;}std::optional<float> takeNativeDeltaSeconds(){return {};}}spectatorWorldDriver;bool spectatorWorldPoseApplied=false,spectatorCollisionChecked=false;SpectatorNativeProbe spectatorNativeProbe;bool rankedInitialized=false,rankedLevel=true,safetyRetired=false,spectatorMode=false,spectatorPending=false;
   corum::ranked::SpectatorSceneContext sceneContext;std::optional<SpectatorRemoteFrame>spectatorRenderedFrame;struct Remote{template<class...T>void update(T...){}void presentationVisible(bool){}}remotePlayer;
   bool debugRecordScene=false,debugPlaybackScene=false,debugRecordHasFrame=false;SpectatorCapturePolicy spectatorCapture;std::shared_ptr<SpectatorCosmetics const> spectatorCosmetics;std::chrono::steady_clock::time_point nextCosmeticCaptureAt{};bool spectatorWorldUpdateInProgress=false,spectatorWorldResetInProgress=false;std::optional<unsigned> spectatorCameraFrameNumber;}fields;
  Fields* m_fields=&fields;
@@ -169,6 +171,7 @@ test('actual Debug recording clock seeds at the first valid native world and pre
 #include "${join(root,'src/domain/SpectatorCameraPolicy.hpp')}"
 #include <cassert>
 #include <limits>
+#include "${join(root,'src/spectator/SpectatorPoseCodec.hpp')}"
 namespace geode::log {template<class... T>void info(T...){} }
 using namespace geode;
 namespace corum::ranked::debug {
@@ -176,6 +179,7 @@ static std::chrono::steady_clock::time_point wall{};
 auto testClockNow(){return wall;}
 struct DebugSpectateRuntime {
  DebugSpectateMode m_mode=DebugSpectateMode::Recording;
+ unsigned m_evidenceLogs=0;int m_levelId=123;std::string m_id="clock-fixture";
  DebugSpectateCapture m_capture;
  std::chrono::steady_clock::time_point m_recordStartedAt{};
  std::optional<SpectatorGhostPose> m_previousCapturedPose;std::optional<double>m_nativeClockOrigin;std::string error;void fail(std::string value){error=value;}
@@ -210,7 +214,8 @@ int main(){
 `;
     const dir=mkdtempSync(join(tmpdir(),'corum-world-seed-'));
     try{const file=join(dir,'seed.cpp'),binary=join(dir,'seed');writeFileSync(file,cpp);
-        execFileSync('g++',['-std=c++23','-Wall','-Wextra','-Wpedantic','-Werror',file,'-o',binary],{stdio:'pipe'});
+        const json=process.env.CORUM_MATJSON_SOURCE,result=process.env.CORUM_RESULT_INCLUDE;assert(json&&result);
+        execFileSync('g++',['-std=c++23','-Wall','-Wextra','-Wpedantic','-Werror','-isystem',json+'/include','-isystem',result,file,...['value','impl','parser','dump','external/dragonbox'].map(p=>json+'/src/'+p+'.cpp'),'-o',binary],{stdio:'pipe'});
         execFileSync(binary,[],{stdio:'pipe'});
     }finally{rmSync(dir,{recursive:true,force:true});}
 });

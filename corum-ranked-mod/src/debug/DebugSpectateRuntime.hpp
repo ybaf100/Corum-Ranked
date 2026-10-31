@@ -26,6 +26,7 @@ public:
     bool playbackLevel(int levelId) const;
     bool preparedLevel(int levelId) const;
     LevelPreparationContext preparationContext() const;
+    std::string const& recordingIdForDiagnostics()const{return m_id;}
     std::string const& contextId() const { return m_contextId; }
     std::string const& status() const { return m_status; }
     DebugSpectateMode mode() const { return m_mode; }
@@ -48,6 +49,7 @@ private:
     int m_levelId=kDebugSpectateLevelId;
     float m_startPercent=0;
     double m_playbackStartElapsedMs=0;
+    unsigned m_evidenceLogs=0;
     int m_errors = 0;
     bool m_busy = false, m_launched = false, m_playbackComplete = false;
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_request;

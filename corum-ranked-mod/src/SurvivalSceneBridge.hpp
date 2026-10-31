@@ -1,5 +1,6 @@
 #pragma once
 #include <string>
+#include <cstddef>
 class PlayLayer;
 namespace corum::ranked {
 bool isOfficialSurvivalPlayLayer(PlayLayer* layer);
@@ -15,6 +16,8 @@ namespace corum::ranked {void presentSurvivalReplayCamera(PlayLayer*);}
 namespace corum::ranked {void finishSurvivalReplayForReturn(PlayLayer*,std::string reason={},bool sceneExited=false);}
 
 class PlayerObject;
+class GameObject;
+namespace corum::ranked {void survivalReplayCollisionCandidates(PlayLayer*,PlayerObject*,GameObject* const*,std::size_t);}
 namespace corum::ranked {void survivalReplayNativeSnap(PlayerObject*,bool,float,float);}
 
 namespace corum::ranked {void advanceSurvivalReplayWorld(PlayLayer*,float);}

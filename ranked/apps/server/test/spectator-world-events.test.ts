@@ -18,6 +18,15 @@ describe('production native world-event wire validation',()=>{
   expect(()=>parseSpectatorKeyframe({...pose,discontinuity:{...discontinuity,nativeEvents:[{...first,afterGravity:false},second]}})).toThrow();
   expect(()=>parseSpectatorKeyframe({...pose,discontinuity:{...discontinuity,nativeEvents:Array(9).fill(first)}})).toThrow();
  });
+ it('round-trips bounded diagnostic event identity without treating it as movement proof',()=>{
+  const trace={event:1,tick:12,step:3,elapsedMs:71295,callback:'PORTAL'};
+  const native={type:'TELEPORT',fromX:25885.127,fromY:4044,toX:25894.729,toY:5439,beforeMode:'SHIP',afterMode:'SHIP',beforeGravity:false,afterGravity:false,trace};
+  const discontinuity={type:'TELEPORT',fromX:native.fromX,fromY:native.fromY,toX:native.toX,toY:native.toY,nativeEvents:[native]};
+  // Protocol fixture only: this does not attest an actual Entropie callback.
+  expect(parseSpectatorKeyframe({...pose,mode:'SHIP',discontinuity}).discontinuity?.nativeEvents?.[0]?.trace).toEqual(trace);
+  for(const bad of [{...trace,event:0},{...trace,tick:-1},{...trace,elapsedMs:Infinity},{...trace,callback:'POSITION_DELTA'}])
+    expect(()=>parseSpectatorKeyframe({...pose,discontinuity:{...discontinuity,nativeEvents:[{...native,trace:bad}]}})).toThrow();
+ });
  it('rejects partial, nonfinite, oversized, foreign-index and unclocked event state',()=>{
   for(const randomEvents of [[{...event,objectIndex:4294967296}],[{...event,elapsedMs:NaN}],[event,event],Array(17).fill(event),[{...event,outputs:[{...event.outputs[0],remap:Array(33).fill(1)}]}]])expect(()=>parseSpectatorKeyframe({...pose,simulation,randomEvents})).toThrow();
   expect(()=>parseSpectatorKeyframe({...pose,randomEvents:[event]})).toThrow();

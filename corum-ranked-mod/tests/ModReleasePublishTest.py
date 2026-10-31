@@ -48,7 +48,7 @@ class ModReleasePublishTest(unittest.TestCase):
         dependency = re.search(r'^    needs: \[([^\]]+)\]', publish, re.M)
         self.assertIsNotNone(dependency)
         self.assertEqual({name.strip() for name in dependency[1].split(',')},
-                         {'metadata', 'package', 'ios-debug-off', 'additional-debug-off'})
+                         {'metadata', 'package', 'tests', 'ios-debug-off', 'additional-debug-off', 'full-validation'})
         # Default Actions needs semantics must reject failure in any required job.
         self.assertNotIn('always()', publish)
 

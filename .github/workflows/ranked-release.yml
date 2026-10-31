@@ -1,0 +1,96 @@
+name: Release Corum Ranked
+on:
+  push:
+    branches: [main]
+    paths: ['ranked/**', 'corum-ranked-mod/**', 'apps-script/**', '.github/workflows/**']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  policy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      publish: ${{ steps.policy.outputs.publish }}
+      deploy: ${{ steps.policy.outputs.deploy }}
+    steps:
+      - id: policy
+        env:
+          EVENT: ${{ github.event_name }}
+          MESSAGE: ${{ github.event.head_commit.message }}
+          PUBLISH: ${{ vars.RANKED_PUBLISH_R2 }}
+          AUTO_DEPLOY: ${{ vars.LIGHTSAIL_AUTO_DEPLOY }}
+        run: |
+          python3 - <<'PY'
+          import os
+          message = os.environ['MESSAGE']
+          publish = '[build only]' not in message and (os.environ['PUBLISH'] == 'true' or '[publish-r2]' in message or '[deploy-lightsail]' in message)
+          deploy = '[no-deploy]' not in message and (os.environ['EVENT'] == 'workflow_dispatch' or os.environ['AUTO_DEPLOY'] == 'true' or '[deploy-lightsail]' in message)
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
+              out.write(f'publish={str(publish).lower()}\ndeploy={str(deploy).lower()}\n')
+          PY
+  validation:
+    uses: ./.github/workflows/ranked-ci.yml
+    with:
+      coordinated: true
+  release:
+    uses: ./.github/workflows/build-ranked-mod.yml
+    with:
+      prepare_only: true
+  debug:
+    uses: ./.github/workflows/build-ranked-debug.yml
+    with:
+      prepare_only: true
+  image:
+    needs: policy
+    if: needs.policy.outputs.deploy == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare the same source image while clients compile
+        run: |
+          docker build --pull --build-arg "CORUM_SOURCE_SHA=${GITHUB_SHA}" --label "org.opencontainers.image.revision=${GITHUB_SHA}" -f ranked/Dockerfile.lightsail -t "corum-ranked:${GITHUB_SHA}" ranked
+          docker save "corum-ranked:${GITHUB_SHA}" | gzip -1 > image.tar.gz
+          sha256sum image.tar.gz > image.tar.gz.sha256
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Corum-Ranked-Server-${{ github.sha }}
+          path: image.tar.gz*
+          retention-days: 3
+          if-no-files-found: error
+  publish-release:
+    needs: [policy, validation, release, debug]
+    if: needs.policy.outputs.publish == 'true'
+    uses: ./.github/workflows/publish-ranked-download.yml
+    with:
+      channel: release
+      version: ${{ needs.release.outputs.version }}
+      artifact: ${{ needs.release.outputs.artifact }}
+    secrets:
+      r2_access_key_id: ${{ secrets.RANKED_R2_ACCESS_KEY_ID }}
+      r2_secret_access_key: ${{ secrets.RANKED_R2_SECRET_ACCESS_KEY }}
+  publish-debug:
+    needs: [policy, validation, release, debug]
+    if: needs.policy.outputs.publish == 'true'
+    uses: ./.github/workflows/publish-ranked-download.yml
+    with:
+      channel: debug
+      version: ${{ needs.debug.outputs.version }}
+      artifact: ${{ needs.debug.outputs.artifact }}
+    secrets:
+      r2_access_key_id: ${{ secrets.RANKED_R2_ACCESS_KEY_ID }}
+      r2_secret_access_key: ${{ secrets.RANKED_R2_SECRET_ACCESS_KEY }}
+  activate:
+    needs: [policy, validation, release, debug, image, publish-release, publish-debug]
+    if: >-
+      always() && needs.policy.outputs.deploy == 'true' &&
+      needs.validation.result == 'success' && needs.release.result == 'success' &&
+      needs.debug.result == 'success' && needs.image.result == 'success' &&
+      (needs.policy.outputs.publish != 'true' ||
+      (needs.publish-release.result == 'success' && needs.publish-debug.result == 'success'))
+    uses: ./.github/workflows/deploy-ranked-lightsail.yml
+    with:
+      coordinated: true
+      mode: deploy
+      prepared_image: Corum-Ranked-Server-${{ github.sha }}
+    secrets: inherit

@@ -11,6 +11,8 @@ struct Recorder {static Recorder&get(){static Recorder r;return r;}template<clas
 
 namespace corum::ranked {template<class T>void finishSurvivalReplayForReturn(T*,std::string={},bool=false){}}
 
+namespace corum::ranked {template<class...T>void survivalReplayCollisionCandidates(T const&...){}}
+
 namespace corum::ranked {template<class T>void survivalReplayNativeSnap(T*,bool,float,float){}}
 
 namespace corum::ranked {template<class T>void survivalReplayPlayerStep(T*,float,bool){}}

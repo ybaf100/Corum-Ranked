@@ -15,7 +15,7 @@ import { DEBUG_SPECTATE_FORMAT_VERSION, DEBUG_SPECTATE_MAX_FRAMES,
 
 interface Frame { readonly sequence: number; readonly elapsedMs: number; readonly keyframe: SpectatorPoseKeyframe }
 interface Recording {
-  readonly id: string; readonly tokenHash: string; readonly expiresAtMs: number;
+  readonly id: string; readonly tokenHash: string; readonly expiresAtMs: number;readonly levelId:number;traceLogs:number;
   frames: Frame[]; finalizing: Promise<unknown> | null; finalizeCompleted: boolean | null;
 }
 interface RecordingRow {
@@ -117,7 +117,7 @@ export class DebugSpectateService implements OnModuleInit, OnApplicationShutdown
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
     [id, object(body).levelId, DEBUG_SPECTATE_FORMAT_VERSION, DEBUG_SPECTATE_SAMPLE_MS,
       now, `${session.gdAccountId}:${session.gdUsername}`, this.tokens.hash(token), expiresAt]);
-    this.recordings.set(id, { id, tokenHash: this.tokens.hash(token), expiresAtMs: expiresAt.getTime(), frames: [], finalizing: null, finalizeCompleted: null });
+    this.recordings.set(id, { id, tokenHash: this.tokens.hash(token), expiresAtMs: expiresAt.getTime(),levelId:Number(object(body).levelId),traceLogs:0, frames: [], finalizing: null, finalizeCompleted: null });
     this.logger.log(`[DebugSpectate] record started recordingId=${id}`);
     return { recordingId: id, token, levelId: object(body).levelId,
       formatVersion: DEBUG_SPECTATE_FORMAT_VERSION, sampleIntervalMs: DEBUG_SPECTATE_SAMPLE_MS, expiresAt: expiresAt.toISOString() };
@@ -153,6 +153,8 @@ export class DebugSpectateService implements OnModuleInit, OnApplicationShutdown
       }
       next.push(parsed);
     }
+    if(recording.levelId===143308401)for(const frame of next.slice(recording.frames.length))if(frame.elapsedMs>=70000&&frame.elapsedMs<=73000&&recording.traceLogs++<64)
+      this.logger.log(JSON.stringify({stage:'DEBUG_RECORD_ACCEPTED',attemptId:id,sequence:frame.sequence,elapsedMs:frame.elapsedMs,p1:frame.keyframe.discontinuity??null,p2:frame.keyframe.player2?.discontinuity??null}));
     recording.frames = next;
     return { accepted: true, lastSequence: next.length - 1, frameCount: next.length };
   }
@@ -195,6 +197,8 @@ export class DebugSpectateService implements OnModuleInit, OnApplicationShutdown
         finalized_at = $3, duration_ms = $4, frame_count = $5 WHERE id = $1 RETURNING *`,
       [recording.id, completed, this.clock.now(), duration, recording.frames.length]);
     });
+    if(recording.levelId===143308401)for(const frame of recording.frames.filter(f=>f.elapsedMs>=70000&&f.elapsedMs<=73000).slice(0,64))
+      this.logger.log(JSON.stringify({stage:'DEBUG_RECORD_STORED',attemptId:recording.id,sequence:frame.sequence,elapsedMs:frame.elapsedMs,p1:frame.keyframe.discontinuity??null,p2:frame.keyframe.player2?.discontinuity??null}));
     this.recordings.delete(recording.id);
     this.logger.log(`[DebugSpectate] record finalized recordingId=${recording.id} completed=${completed}`);
     this.logger.log(`[DebugSpectate] recording persisted recordingId=${recording.id} frameCount=${recording.frames.length} durationMs=${duration}`);
@@ -245,6 +249,8 @@ export class DebugSpectateService implements OnModuleInit, OnApplicationShutdown
     // Only the playback clock/relayed elapsed times lose the leading blank time.
     const leadingMs = validated[0]!.elapsedMs;
     const normalized = validated.map(frame => ({ ...frame, elapsedMs: frame.elapsedMs - leadingMs }));
+    if(Number(row.level_id)===143308401)for(const frame of normalized.filter(f=>f.elapsedMs>=70000&&f.elapsedMs<=73000).slice(0,64))
+      this.logger.log(JSON.stringify({stage:'DEBUG_RECORD_LOADED',attemptId:row.id,sequence:frame.sequence,elapsedMs:frame.elapsedMs,p1:frame.keyframe.discontinuity??null,p2:frame.keyframe.player2?.discontinuity??null}));
     const startIndex=requested===0?0:normalized.findIndex(frame=>frame.keyframe.progress!==undefined && frame.keyframe.progress>=requested);
     if(startIndex<0){
       throw new BadRequestException(normalized.some(frame=>frame.keyframe.progress!==undefined)

@@ -40,6 +40,7 @@ test('actual camera owner hook ends in recorded viewport, drives once, restores 
 #include "${join(root,'src/spectator/SpectatorTriggerScope.hpp')}"
 #include "${join(root, 'src/domain/SpectatorNativeProbe.hpp')}"
 #include "${join(root,'src/domain/SpectatorRestoreTimeline.hpp')}"
+#include "${join(root,'src/spectator/SpectatorPlayerCapture.hpp')}"
 #include <chrono>
 namespace corum::ranked {struct SurvivalSpectatorRuntime {static SurvivalSpectatorRuntime& get(){static SurvivalSpectatorRuntime r;return r;}bool sceneLevel(int)const{return false;}replay::InactiveWorld* world()const{return nullptr;}bool publishing()const{return false;}bool canLaunch()const{return false;}template<class...T>bool arm(T...){return false;}template<class...T>bool capture(T const&...){return false;}template<class...T>void terminal(T const&...){}void sceneExited(){}bool exitRequested()const{return false;}};}
 
@@ -83,7 +84,7 @@ struct CorumRankedPlayLayer: PlayLayer {
 
  void syncSpectatorAudio(){}
  bool blockEntryGameplayUpdate(){return false;}
-    struct Fields {bool survivalLiveLevel=false,survivalReplayLevel=false;
+    struct Fields {struct Trace{unsigned frame=0;}spectatorSourceTrace;bool survivalLiveLevel=false,survivalReplayLevel=false;
 #if !defined(CORUM_RANKED_DEBUG_SPECTATE)
  int levelId=123;
 #endif
@@ -106,6 +107,9 @@ struct CorumRankedPlayLayer: PlayLayer {
     FieldsAccess<Fields> m_fields;bool watchable=true;
     bool watchableSpectatorScene(){return watchable;}
     bool prepareSpectatorScene(){return spectatorCameraActive();}
+    bool observesSpectatorPlayer(PlayerObject*){return false;}
+    bool tracesSpectatorPlayer(PlayerObject*){return false;}
+    template<class...T>void traceSpectatorSource(T const&...){}
     void sampleSpectatorPresentation(){}void logSpectatorWorldDriver(){}void logSpectatorNativeProbe(){}
     ${methods}
     ${hook}
@@ -214,7 +218,7 @@ int main(){
         for(const debug of [false,true]){
             const binary=join(dir,'test');
             execFileSync('g++',['-std=c++23','-Wall','-Wextra','-Wpedantic','-Werror',...(debug?['-DCORUM_RANKED_DEBUG_SPECTATE=1']:[]),'-I',dir,
-                join(root,'src/spectator/CorumRemotePlayer.cpp'),join(root,'src/spectator/CorumSpectatorCamera.cpp'),join(root,'src/spectator/SpectatorWorldDriver.cpp'),join(dir,'test.cpp'),'-o',binary],{stdio:'pipe'});
+                join(root,'src/spectator/CorumRemotePlayer.cpp'),join(root,'src/spectator/CorumSpectatorCamera.cpp'),join(root,'src/spectator/SpectatorWorldDriver.cpp'),join(root,'src/spectator/SpectatorPlayerCapture.cpp'),join(dir,'test.cpp'),'-o',binary],{stdio:'pipe'});
             assert.match(execFileSync(binary,{encoding:'utf8'}),/UI safety passed/);
         }
     } finally {rmSync(dir,{recursive:true,force:true});}

@@ -52,6 +52,7 @@ public:
     double time()const{return m_time;}
     double duration()const{return m_times.empty()?0:m_times.back();}
     bool desync()const{return m_desync;}
+    bool unprovenCollisionIdentity()const{auto reason=str(m_failure,"reason");return m_desync&&(reason=="INITIAL_COLLISION_IDENTITY_UNAVAILABLE"||reason=="CBF_LEGACY_COLLISION_IDENTITY_UNAVAILABLE"||reason=="CBF_COLLISION_IDENTITY_UNPROVEN");}
     Json const& failure()const{return m_failure;}
     void reject(std::string const& reason,Json expected=Json(),Json actual=Json(),std::string comparisonPath="$"){
         auto category=reason.substr(0,reason.find(':'));m_errorCounts[category]=m_errorCounts[category].asInt().unwrapOr(0)+1;

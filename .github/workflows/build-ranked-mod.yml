@@ -2,28 +2,39 @@ name: Build Corum Ranked Mod
 
 # Keep bindings and Codegen on one tested revision; the moving Codegen release
 # can generate types incompatible with the manifest's Geode SDK.
-# A [deploy-lightsail] [publish-r2] source push starts this Release run alongside
-# Validate, Debug, and Lightsail. Publish immediately after package validation;
-# Lightsail independently waits for both verified immutable channels.
-# Build Release on main; publication remains opt-in and supports build-only pushes.
-# Debug and Release publish to distinct immutable R2 paths and filenames.
+# Main releases are coordinated by ranked-release.yml. Both channels and full
+# validation must finish before publication; platform compilation is parallel.
+# Standalone manual runs retain the same validation and immutable R2 gates.
 on:
+  workflow_call:
+    inputs:
+      prepare_only:
+        type: boolean
+        default: false
+    outputs:
+      version:
+        value: ${{ jobs.metadata.outputs.version }}
+      artifact:
+        value: ${{ jobs.metadata.outputs.artifact_name }}
   push:
     branches: [main]
     paths:
       - "corum-ranked-mod/**"
       - "ranked/translations/**"
-      - "ranked/tools/localization/**"
+      - "ranked/tools/**"
+      - "ranked/packages/**"
+      - "ranked/package*.json"
       - "ranked/apps/server/src/session/client-version.ts"
-      - ".github/workflows/build-ranked-mod.yml"
-      - ".github/workflows/publish-ranked-download.yml"
+      - ".github/workflows/**"
   pull_request:
     paths:
       - "corum-ranked-mod/**"
       - "ranked/translations/**"
-      - "ranked/tools/localization/**"
+      - "ranked/tools/**"
+      - "ranked/packages/**"
+      - "ranked/package*.json"
       - "ranked/apps/server/src/session/client-version.ts"
-      - ".github/workflows/build-ranked-mod.yml"
+      - ".github/workflows/**"
   workflow_dispatch:
 
 permissions:
@@ -31,11 +42,13 @@ permissions:
 
 jobs:
   metadata:
+    if: inputs.prepare_only || github.ref != 'refs/heads/main' || github.event_name != 'push'
     name: Validate Ranked release manifest
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
       artifact_name: ${{ steps.version.outputs.artifact_name }}
+      geode_sdk: ${{ steps.version.outputs.geode_sdk }}
     steps:
       - uses: actions/checkout@v7
       - name: Read and validate mod identity/version
@@ -53,6 +66,8 @@ jobs:
           if (!required || required !== manifest.version) {
             throw new Error(`Client/server version mismatch: mod=${manifest.version}, server=${required}`);
           }
+          if (!/^\d+\.\d+\.\d+$/.test(manifest.geode)) throw new Error('Expected an exact Geode SDK version');
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `geode_sdk=${manifest.geode}\n`);
           fs.appendFileSync(process.env.GITHUB_OUTPUT, `version=${manifest.version}\n`);
           fs.appendFileSync(process.env.GITHUB_OUTPUT, `artifact_name=Corum-Ranked-${manifest.version}\n`);
           NODE
@@ -83,14 +98,23 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Build isolated Ranked release package
-        uses: geode-sdk/build-geode-mod@main
+        id: native
+        env:
+          SCCACHE_C_CUSTOM_CACHE_BUSTER: ${{ hashFiles('corum-ranked-mod/CMakeLists.txt', '.github/workflows/build-ranked-mod.yml', '.github/workflows/build-ranked-debug.yml') }}-geode-${{ needs.metadata.outputs.geode_sdk }}-bindings-70986055-${{ runner.os }}-${{ matrix.config.target || 'iOS' }}-Release-debugOFF-lto-codegen-v1
+        uses: geode-sdk/build-geode-mod@a0f7676e6fcd1a584f6d0c1c800239008412defc
         with:
+          cli: v3.9.0
           sdk: given
           bindings-ref: 70986055f526da15318779703f0e904be822f162
           path: corum-ranked-mod
           target: ${{ matrix.config.target }}
-          combine: true
+          combine: false
           configure-args: -DSKIP_BUILDING_CODEGEN=OFF -DCORUM_RANKED_DEBUG_BOT_MATCH=OFF -DCORUM_RANKED_DEBUG_SPECTATE=OFF
+      - uses: actions/upload-artifact@v7
+        with:
+          name: corum-platform-release-${{ matrix.config.target }}
+          path: ${{ steps.native.outputs.build-output }}/*.geode
+          if-no-files-found: error
 
   package:
     name: Package ${{ needs.metadata.outputs.version }} Release
@@ -100,8 +124,20 @@ jobs:
       - build
     steps:
       - uses: actions/checkout@v7
-      - uses: geode-sdk/build-geode-mod/combine@main
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: corum-platform-release-*
+          path: native-builds
+      - uses: geode-sdk/cli/.github/actions/setup@9e3c4a0657fca324e0d39d10375b67e01657b775
+        with:
+          version: v3.9.0
+      - name: Merge only the selected channel's five Native packages
         id: build
+        env:
+          MOD_VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          python3 corum-ranked-mod/tools/combine-ranked-packages.py native-builds release "$MOD_VERSION" combined
+          echo "build-output=$GITHUB_WORKSPACE/combined" >> "$GITHUB_OUTPUT"
       - name: Normalize combined release package
         env:
           BUILD_OUTPUT: ${{ steps.build.outputs.build-output }}
@@ -116,7 +152,7 @@ jobs:
             exit 1
           fi
           cp "${PACKAGES[0]}" "dist/hwanhee1.corum_ranked.geode"
-          python3 corum-ranked-mod/tools/prepare-mod-release.py dist/hwanhee1.corum_ranked.geode release "$MOD_VERSION" dist
+          python3 corum-ranked-mod/tools/prepare-mod-release.py dist/hwanhee1.corum_ranked.geode release "$MOD_VERSION" dist --source-sha "$GITHUB_SHA"
           cp "dist/Corum-Ranked-$MOD_VERSION-release.geode" dist/hwanhee1.corum_ranked.geode
           python3 corum-ranked-mod/tests/verify-visibility-package.py dist/hwanhee1.corum_ranked.geode "$MOD_VERSION"
           python3 corum-ranked-mod/tests/verify-font-package.py dist/hwanhee1.corum_ranked.geode
@@ -130,8 +166,8 @@ jobs:
           if-no-files-found: error
 
   publish-download:
-    if: github.ref == 'refs/heads/main' && (vars.RANKED_PUBLISH_R2 == 'true' || (github.event_name == 'push' && contains(github.event.head_commit.message, '[deploy-lightsail]') || contains(github.event.head_commit.message, '[publish-r2]'))) && !contains(github.event.head_commit.message, '[build only]') && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-    needs: [metadata, package]
+    if: ${{ !inputs.prepare_only && github.ref == 'refs/heads/main' && (vars.RANKED_PUBLISH_R2 == 'true' || (github.event_name == 'push' && contains(github.event.head_commit.message, '[deploy-lightsail]') || contains(github.event.head_commit.message, '[publish-r2]'))) && !contains(github.event.head_commit.message, '[build only]') && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
+    needs: [metadata, package, tests, full-validation]
     uses: ./.github/workflows/publish-ranked-download.yml
     with:
       channel: release
@@ -140,3 +176,15 @@ jobs:
     secrets:
       r2_access_key_id: ${{ secrets.RANKED_R2_ACCESS_KEY_ID }}
       r2_secret_access_key: ${{ secrets.RANKED_R2_SECRET_ACCESS_KEY }}
+
+  tests:
+    needs: metadata
+    if: ${{ !inputs.prepare_only }}
+    uses: ./.github/workflows/ranked-native.yml
+
+  full-validation:
+    needs: metadata
+    if: ${{ !inputs.prepare_only }}
+    uses: ./.github/workflows/ranked-ci.yml
+    with:
+      coordinated: true

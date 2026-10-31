@@ -9,6 +9,7 @@ const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const source = readFileSync(join(root, 'src/SpectatorLiveRuntime.cpp'), 'utf8');
 const header = readFileSync(join(root, 'src/SpectatorLiveRuntime.hpp'), 'utf8');
 const evidence = JSON.parse(readFileSync(join(root, 'tests/fixtures/debug-spectate-ipados-beta26.json'), 'utf8'));
+const entropie = JSON.parse(readFileSync(join(root, 'tests/fixtures/entropie-unproven-snaps-beta121.json'), 'utf8'));
 const method = signature => {
     const start = source.indexOf(signature); assert(start >= 0);
     const open = source.indexOf('{', start);
@@ -39,6 +40,7 @@ namespace corum::ranked::debug {struct DebugSpectateRuntime{static DebugSpectate
 #include <variant>
 #include <vector>
 namespace matjson {
+constexpr int NO_INDENTATION=0;
 template<class T> struct Result {
     std::optional<T> value;
     bool isErr()const{return !value;}
@@ -55,7 +57,7 @@ struct Value {
     Value(Array x):data(std::move(x)){} Value(Object x):data(std::move(x)){}
     bool contains(std::string const& k)const{auto p=std::get_if<Object>(&data);return p && p->contains(k);}
     bool isObject()const{return std::holds_alternative<Object>(data);}
-    std::string dump()const{return "{}";} // SDK diagnostic serialization boundary; real JSON is exercised by Stage 2 harness
+    std::string dump()const{return "{}";}std::string dump(int)const{return dump();} // SDK diagnostic serialization boundary; real JSON is exercised by Stage 2 harness
 
     Value operator[](std::string const& k)const{
         if(auto p=std::get_if<Object>(&data)){auto i=p->find(k);if(i!=p->end())return i->second;}return {};
@@ -118,6 +120,20 @@ matjson::Value response(int sequence,double x,std::string attempt="A",int genera
 }
 int main(){
     using namespace corum::ranked;
+    // Original Entropie negative packets: no event is synthesized. The actual
+    // production decoder must retain the previous valid pose and require a
+    // recapture, rather than restart immutable bad history or call it network.
+    for(auto values:std::vector<std::array<double,8>>{${entropie.cases.map(c=>'{'+[c.fromSequence,c.toSequence,c.fromMs,c.toMs,...c.from,...c.to].join(',')+'}').join(',')}}){
+        SpectatorLiveRuntime entropie;entropie.m_viewMatchId="match";
+        auto first=response(0,values[4]);auto packets=first["packets"].asArray().unwrap();packets[0]["elapsedMs"]=static_cast<int>(values[2]);packets[0]["keyframe"]["mode"]="SHIP";packets[0]["keyframe"]["y"]=values[5];first["packets"]=packets;
+        entropie.applyViewerResponse(first);entropie.m_lastViewSequence=static_cast<int>(values[0]);
+        auto next=response(static_cast<int>(values[1]),values[6]);packets=next["packets"].asArray().unwrap();packets[0]["elapsedMs"]=static_cast<int>(values[3]);packets[0]["keyframe"]["mode"]="SHIP";packets[0]["keyframe"]["y"]=values[7];next["packets"]=packets;
+        auto epoch=entropie.m_viewPresentationEpoch;entropie.applyViewerResponse(next);
+        assert(entropie.m_reason=="POSE_DISCONTINUITY"&&!entropie.m_rejectedWorldContext.empty()&&!entropie.m_disconnected);
+        assert(entropie.m_lastAcceptedPose->x==static_cast<float>(values[4])&&entropie.m_lastAcceptedPose->y==static_cast<float>(values[5]));
+        entropie.applyViewerResponse(next);assert(entropie.m_viewPresentationEpoch==epoch);
+    }
+
     // Real shared codec and decoder: all discrete states stay exact at alpha=0.
     for(auto mode : {SpectatorGameMode::Cube,SpectatorGameMode::Ship,SpectatorGameMode::Ball,
         SpectatorGameMode::UFO,SpectatorGameMode::Wave,SpectatorGameMode::Robot,SpectatorGameMode::Spider,SpectatorGameMode::Swing}) {

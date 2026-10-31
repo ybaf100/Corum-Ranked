@@ -1,3 +1,11 @@
+# v0.5.0-beta.122
+
+- Prepare Native tests, platform builds and the server image in parallel; require full validation and both immutable client channels before Singapore activation. Pin the tested Geode builder/CLI and verify package/server source SHA, supersession and duplicate activation.
+- Record CBF collision-target identity only after Native candidate/dictionary witnesses, bind stable object references to the ordered map fingerprint, and retain exact physics/input/DESYNC comparisons. Restore only explicitly empty initial collision logs after an owned Native reset.
+- Preserve old replay files and Best records. Historical numeric collision IDs without object evidence cannot be safely upgraded; report unavailable identity instead of guessing a target.
+- Add bounded Entropie source/capture/codec/relay/viewer diagnostics and retain rejection of the original unproven large Ship movements. The exact Native relocation callback remains unconfirmed without actual GD recapture.
+- Actual GD/device collision mapping, three Native restarts and Entropie positive playback remain unverified. Automated Native doubles do not establish real-game success.
+
 # v0.5.0-beta.121
 
 - Recover an unsealed capture when complete Native frames prove the official timeout prefix, even when later real frames exceed the server cutoff.

@@ -22,7 +22,7 @@ def fixture(channel, stamp=None, binaries=True):
         for name in barrier.PLATFORMS if binaries else []:
             package.writestr(name, "binary")
     data = output.getvalue()
-    descriptor = json.dumps({channel: {"version": VERSION, "sizeBytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}}).encode()
+    descriptor = json.dumps({channel: {"version": VERSION, "sizeBytes": len(data), "sha256": hashlib.sha256(data).hexdigest(), **({"sourceSha": stamp["sourceSha"]} if stamp and "sourceSha" in stamp else {})}}).encode()
     return descriptor, data
 
 
@@ -39,6 +39,19 @@ class PublishedClientBarrierTest(unittest.TestCase):
         for descriptor, payload in cases:
             with patch.object(barrier, "fetch", side_effect=[descriptor, payload]), self.assertRaises(ValueError):
                 barrier.verify_channel("https://cdn.test", VERSION, "release")
+
+    def test_same_version_with_missing_or_mixed_source_sha_fails_closed(self):
+        for channel in ('release', 'debug'):
+            stamp = {'channel':channel, 'version':VERSION, 'sourceSha':'a'*40}
+            with patch.object(barrier, 'fetch', side_effect=fixture(channel, stamp)):
+                self.assertEqual(barrier.verify_channel('https://cdn.test', VERSION, channel, 'a'*40)['sourceSha'], 'a'*40)
+            for data in (fixture(channel), fixture(channel, stamp)):
+                with patch.object(barrier, 'fetch', side_effect=data), self.assertRaisesRegex(ValueError, 'source SHA'):
+                    barrier.verify_channel('https://cdn.test', VERSION, channel, 'b'*40)
+            descriptor, package = fixture(channel, stamp)
+            altered = json.loads(descriptor); altered[channel]['sourceSha'] = 'b'*40
+            with patch.object(barrier, 'fetch', side_effect=[json.dumps(altered).encode(), package]), self.assertRaisesRegex(ValueError, 'source SHA'):
+                barrier.verify_channel('https://cdn.test', VERSION, channel, 'a'*40)
 
     def test_waits_for_missing_channel_without_redownloading_verified_release(self):
         calls = []

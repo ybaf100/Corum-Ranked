@@ -3,6 +3,16 @@ name: Build Corum Ranked Debug
 # Keep bindings and Codegen on one tested revision; the moving Codegen release
 # can generate types incompatible with the manifest's Geode SDK.
 on:
+  workflow_call:
+    inputs:
+      prepare_only:
+        type: boolean
+        default: false
+    outputs:
+      version:
+        value: ${{ jobs.metadata.outputs.version }}
+      artifact:
+        value: ${{ jobs.metadata.outputs.artifact_name }}
   workflow_dispatch:
   push:
     branches:
@@ -10,31 +20,33 @@ on:
     paths:
       - "corum-ranked-mod/**"
       - "ranked/translations/**"
-      - "ranked/tools/localization/**"
+      - "ranked/tools/**"
+      - "ranked/packages/**"
+      - "ranked/package*.json"
       - "ranked/apps/server/src/session/client-version.ts"
-      - ".github/workflows/build-ranked-mod.yml"
-      - ".github/workflows/build-ranked-debug.yml"
-      - ".github/workflows/publish-ranked-download.yml"
+      - ".github/workflows/**"
   pull_request:
     paths:
       - "corum-ranked-mod/**"
       - "ranked/translations/**"
-      - "ranked/tools/localization/**"
+      - "ranked/tools/**"
+      - "ranked/packages/**"
+      - "ranked/package*.json"
       - "ranked/apps/server/src/session/client-version.ts"
-      - ".github/workflows/build-ranked-mod.yml"
-      - ".github/workflows/build-ranked-debug.yml"
-      - ".github/workflows/publish-ranked-download.yml"
+      - ".github/workflows/**"
 
 permissions:
   contents: read
 
 jobs:
   metadata:
+    if: inputs.prepare_only || github.ref != 'refs/heads/main' || github.event_name != 'push'
     name: Validate Ranked debug manifest
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
       artifact_name: ${{ steps.version.outputs.artifact_name }}
+      geode_sdk: ${{ steps.version.outputs.geode_sdk }}
       assets_changed: ${{ steps.assets.outputs.changed }}
     steps:
       - uses: actions/checkout@v7
@@ -97,6 +109,8 @@ jobs:
               `Client/server version mismatch: mod=${manifest.version}, server=${requiredVersion}`,
             );
           }
+          if (!/^\d+\.\d+\.\d+$/.test(manifest.geode)) throw new Error('Expected an exact Geode SDK version');
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `geode_sdk=${manifest.geode}\n`);
           fs.appendFileSync(process.env.GITHUB_OUTPUT, `version=${manifest.version}\n`);
           fs.appendFileSync(
             process.env.GITHUB_OUTPUT,
@@ -105,101 +119,13 @@ jobs:
           NODE
 
   tests:
-    name: Validate Debug Bot policy domain
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: "22"
-      - name: Compile policy domains with strict warnings and run
-        run: |
-          g++ -std=c++23 -Wall -Wextra -Wpedantic -Werror \
-            corum-ranked-mod/tests/DomainTest.cpp \
-            corum-ranked-mod/src/domain/AttemptScoring.cpp \
-            corum-ranked-mod/src/domain/EnvironmentPolicy.cpp \
-            corum-ranked-mod/src/domain/HudPresentation.cpp \
-            corum-ranked-mod/src/domain/RenderFpsMeter.cpp \
-            corum-ranked-mod/src/domain/ServerClock.cpp \
-            -o /tmp/corum-ranked-domain-test
-          /tmp/corum-ranked-domain-test
-          g++ -std=c++23 -Wall -Wextra -Wpedantic -Werror \
-            corum-ranked-mod/tests/DebugBotDomainTest.cpp \
-            corum-ranked-mod/src/debug/DebugBotConfig.cpp \
-            -o /tmp/corum-ranked-debug-bot-domain-test
-          /tmp/corum-ranked-debug-bot-domain-test
-          g++ -std=c++23 -Wall -Wextra -Wpedantic -Werror \
-            corum-ranked-mod/tests/DebugSpectateDomainTest.cpp \
-            -o /tmp/corum-ranked-debug-spectate-domain-test
-          /tmp/corum-ranked-debug-spectate-domain-test
-          g++ -std=c++23 -Wall -Wextra -Wpedantic -Werror \
-            corum-ranked-mod/tests/SpectatorLocalSafetyTest.cpp \
-            -o /tmp/corum-ranked-spectator-safety-test
-          /tmp/corum-ranked-spectator-safety-test
-          g++ -std=c++23 -Wall -Wextra -Wpedantic -Werror \
-            corum-ranked-mod/tests/SpectatorRemotePolicyTest.cpp \
-            -o /tmp/corum-ranked-spectator-remote-test
-          /tmp/corum-ranked-spectator-remote-test
-          g++ -std=c++23 -Wall -Wextra -Wpedantic -Werror \
-            corum-ranked-mod/tests/SpectatorCameraPolicyTest.cpp \
-            -o /tmp/corum-ranked-spectator-camera-test
-          /tmp/corum-ranked-spectator-camera-test
-          g++ -std=c++23 -Wall -Wextra -Wpedantic -Werror \
-            corum-ranked-mod/tests/SpectatorInterpolationBufferTest.cpp \
-            -o /tmp/corum-ranked-spectator-buffer-test
-          /tmp/corum-ranked-spectator-buffer-test
-          g++ -std=c++23 -Wall -Wextra -Wpedantic -Werror \
-            corum-ranked-mod/tests/MatchPauseBudgetTest.cpp \
-            -o /tmp/corum-ranked-match-pause-test
-          /tmp/corum-ranked-match-pause-test
-          g++ -std=c++23 -Wall -Wextra -Wpedantic -Werror \
-            corum-ranked-mod/tests/LevelPreparationTest.cpp \
-            -o /tmp/corum-ranked-level-prepare-test
-          /tmp/corum-ranked-level-prepare-test
-          g++ -std=c++23 -Wall -Wextra -Wpedantic -Werror \
-            corum-ranked-mod/tests/SurvivalHudPresentationTest.cpp \
-            -o /tmp/corum-ranked-survival-hud-test
-          /tmp/corum-ranked-survival-hud-test
-      - name: Prepare pinned Geode JSON regression dependency
-        shell: bash
-        run: |
-          mkdir -p "$RUNNER_TEMP/corum-json" "$RUNNER_TEMP/corum-result"
-          curl --fail --location --retry 3 https://codeload.github.com/geode-sdk/json/tar.gz/6330ad4d63d168c861e0a1b9d4127cdbd6807ad9 | tar -xz --strip-components=1 -C "$RUNNER_TEMP/corum-json"
-          curl --fail --location --retry 3 https://codeload.github.com/geode-sdk/result/tar.gz/b17911426ced3ca519d9a338aea76053be6fc4f1 | tar -xz --strip-components=1 -C "$RUNNER_TEMP/corum-result"
-          echo "CORUM_MATJSON_SOURCE=$RUNNER_TEMP/corum-json" >> "$GITHUB_ENV"
-          echo "CORUM_RESULT_INCLUDE=$RUNNER_TEMP/corum-result/include" >> "$GITHUB_ENV"
-      - name: Generate editable game translations before native validation
-        run: node ranked/tools/localization/build.mjs
-      - name: Validate native client behavior (two files in parallel)
-        # Each native harness uses its own temporary directory. Bound compiler
-        # concurrency so small runners retain memory headroom; keep all tests.
-        run: node --test --test-concurrency=2 corum-ranked-mod/tests/*.mjs
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-      - name: Render Achievement v2 production shaders with software OpenGL ES
-        env:
-          LIBGL_ALWAYS_SOFTWARE: "1"
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends libegl1 libgl1-mesa-dri
-          python -m pip install Pillow
-          python corum-ranked-mod/tests/render-achievement-effects.py "$RUNNER_TEMP/achievement-effects"
-      - uses: actions/upload-artifact@v7
-        with:
-          name: Achievement-v2-shader-preview
-          path: ${{ runner.temp }}/achievement-effects
-      - name: Validate release packaging and publication
-        run: |
-          python3 corum-ranked-mod/tests/ModReleaseBuildTest.py
-          python3 corum-ranked-mod/tests/ModReleasePublishTest.py
-          python3 corum-ranked-mod/tests/AssetPackBuildTest.py
+    needs: metadata
+    uses: ./.github/workflows/ranked-native.yml
 
   build:
     name: ${{ matrix.config.name }} Debug ${{ needs.metadata.outputs.version }}
     needs:
       - metadata
-      - tests
     strategy:
       fail-fast: false
       matrix:
@@ -223,27 +149,38 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Build Debug Bot package
-        uses: geode-sdk/build-geode-mod@main
+        id: native
+        env:
+          SCCACHE_C_CUSTOM_CACHE_BUSTER: ${{ hashFiles('corum-ranked-mod/CMakeLists.txt', '.github/workflows/build-ranked-mod.yml', '.github/workflows/build-ranked-debug.yml') }}-geode-${{ needs.metadata.outputs.geode_sdk }}-bindings-70986055-${{ runner.os }}-${{ matrix.config.target || 'iOS' }}-Release-debugON-lto-codegen-v1
+        uses: geode-sdk/build-geode-mod@a0f7676e6fcd1a584f6d0c1c800239008412defc
         with:
+          cli: v3.9.0
           sdk: given
           bindings-ref: 70986055f526da15318779703f0e904be822f162
           path: corum-ranked-mod
           target: ${{ matrix.config.target }}
-          combine: true
+          combine: false
           configure-args: -DSKIP_BUILDING_CODEGEN=OFF -DCORUM_RANKED_DEBUG_BOT_MATCH=ON -DCORUM_RANKED_DEBUG_SPECTATE=ON
+      - uses: actions/upload-artifact@v7
+        with:
+          name: corum-platform-debug-${{ matrix.config.target }}
+          path: ${{ steps.native.outputs.build-output }}/*.geode
+          if-no-files-found: error
 
   ios-debug-off:
     name: Validate iOS Debug OFF ${{ needs.metadata.outputs.version }}
     needs:
       - metadata
-      - tests
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7
       - name: Compile official iOS configuration
+        env:
+          SCCACHE_C_CUSTOM_CACHE_BUSTER: ${{ hashFiles('corum-ranked-mod/CMakeLists.txt', '.github/workflows/build-ranked-mod.yml', '.github/workflows/build-ranked-debug.yml') }}-geode-${{ needs.metadata.outputs.geode_sdk }}-bindings-70986055-${{ runner.os }}-iOS-Release-debugOFF-lto-codegen-v1
         id: build
-        uses: geode-sdk/build-geode-mod@main
+        uses: geode-sdk/build-geode-mod@a0f7676e6fcd1a584f6d0c1c800239008412defc
         with:
+          cli: v3.9.0
           sdk: given
           bindings-ref: 70986055f526da15318779703f0e904be822f162
           path: corum-ranked-mod
@@ -269,7 +206,7 @@ jobs:
 
   additional-debug-off:
     name: Validate ${{ matrix.config.name }} Debug OFF ${{ needs.metadata.outputs.version }}
-    needs: [metadata, tests]
+    needs: [metadata]
     strategy:
       fail-fast: false
       matrix:
@@ -282,9 +219,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Compile official configuration
+        env:
+          SCCACHE_C_CUSTOM_CACHE_BUSTER: ${{ hashFiles('corum-ranked-mod/CMakeLists.txt', '.github/workflows/build-ranked-mod.yml', '.github/workflows/build-ranked-debug.yml') }}-geode-${{ needs.metadata.outputs.geode_sdk }}-bindings-70986055-${{ runner.os }}-${{ matrix.config.target || 'iOS' }}-Release-debugOFF-lto-codegen-v1
         id: build
-        uses: geode-sdk/build-geode-mod@main
+        uses: geode-sdk/build-geode-mod@a0f7676e6fcd1a584f6d0c1c800239008412defc
         with:
+          cli: v3.9.0
           sdk: given
           bindings-ref: 70986055f526da15318779703f0e904be822f162
           path: corum-ranked-mod
@@ -305,8 +245,20 @@ jobs:
       - build
     steps:
       - uses: actions/checkout@v7
-      - uses: geode-sdk/build-geode-mod/combine@main
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: corum-platform-debug-*
+          path: native-builds
+      - uses: geode-sdk/cli/.github/actions/setup@9e3c4a0657fca324e0d39d10375b67e01657b775
+        with:
+          version: v3.9.0
+      - name: Merge only the selected channel's five Native packages
         id: build
+        env:
+          MOD_VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          python3 corum-ranked-mod/tools/combine-ranked-packages.py native-builds debug "$MOD_VERSION" combined
+          echo "build-output=$GITHUB_WORKSPACE/combined" >> "$GITHUB_OUTPUT"
       - name: Normalize and validate combined Debug package
         env:
           BUILD_OUTPUT: ${{ steps.build.outputs.build-output }}
@@ -347,7 +299,7 @@ jobs:
           if missing:
               raise SystemExit("Combined package is missing: " + ", ".join(missing))
           PY
-          python3 corum-ranked-mod/tools/prepare-mod-release.py dist/hwanhee1.corum_ranked.geode debug "$MOD_VERSION" dist
+          python3 corum-ranked-mod/tools/prepare-mod-release.py dist/hwanhee1.corum_ranked.geode debug "$MOD_VERSION" dist --source-sha "$GITHUB_SHA"
           cp "dist/Corum-Ranked-$MOD_VERSION-debug.geode" dist/hwanhee1.corum_ranked.geode
           python3 corum-ranked-mod/tests/verify-visibility-package.py \
             dist/hwanhee1.corum_ranked.geode "$MOD_VERSION" --debug
@@ -397,8 +349,8 @@ jobs:
           if-no-files-found: error
 
   publish-download:
-    if: github.ref == 'refs/heads/main' && (vars.RANKED_PUBLISH_R2 == 'true' || (github.event_name == 'push' && contains(github.event.head_commit.message, '[deploy-lightsail]') || contains(github.event.head_commit.message, '[publish-r2]'))) && !contains(github.event.head_commit.message, '[build only]') && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-    needs: [metadata, package, ios-debug-off, additional-debug-off]
+    if: ${{ !inputs.prepare_only && github.ref == 'refs/heads/main' && (vars.RANKED_PUBLISH_R2 == 'true' || (github.event_name == 'push' && contains(github.event.head_commit.message, '[deploy-lightsail]') || contains(github.event.head_commit.message, '[publish-r2]'))) && !contains(github.event.head_commit.message, '[build only]') && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
+    needs: [metadata, package, tests, ios-debug-off, additional-debug-off, full-validation]
     uses: ./.github/workflows/publish-ranked-download.yml
     with:
       channel: debug
@@ -407,3 +359,10 @@ jobs:
     secrets:
       r2_access_key_id: ${{ secrets.RANKED_R2_ACCESS_KEY_ID }}
       r2_secret_access_key: ${{ secrets.RANKED_R2_SECRET_ACCESS_KEY }}
+
+  full-validation:
+    needs: metadata
+    if: ${{ !inputs.prepare_only }}
+    uses: ./.github/workflows/ranked-ci.yml
+    with:
+      coordinated: true

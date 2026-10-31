@@ -109,6 +109,7 @@ std::string SpectatorLiveRuntime::endpoint(std::string const& path) const {
 }
 
 void SpectatorLiveRuntime::resetPublisher() {
+    m_sourceEvidenceLogs=0;
     ++m_publishRequestGeneration;
     m_publishBusy = false;
     m_publishMatchId.clear();
@@ -129,7 +130,7 @@ void SpectatorLiveRuntime::resetViewer() {
     m_worldRestoreReason.clear();m_worldCauses.clear();m_partialSync=false;m_restoreStepCostMs=2;
     m_viewerPollGapMs = 20;
     ++m_viewRequestGeneration;
-    ++m_viewPresentationEpoch;
+    ++m_viewPresentationEpoch;m_viewEvidenceLogs=0;
     if (m_viewPresentationEpoch == 0) ++m_viewPresentationEpoch;
     m_viewBusy = false;
     m_viewMatchId.clear();
@@ -250,6 +251,10 @@ bool SpectatorLiveRuntime::tickPublisher(SpectatorGhostPose const& pose, bool pr
             m_publishQueue.nextSequence()-1,elapsed,c.x,c.y,t.zoom,t.angle,t.layers[0].scaleX,t.layers[0].scaleY,t.layers[0].rotation);
     }
 #endif
+    if(captured&&(m_publishLevel==143308401)&&elapsed>=70000&&elapsed<=73000&&m_sourceEvidenceLogs++<128){
+        auto wire=encodeSpectatorPose(pose);
+        log::info("[SpectatorEvidence] stage=QUEUED_ENCODED attempt={} generation={} sequence={} elapsedMs={} p1={} p2={}",m_publishAttemptId,m_publishGeneration,m_publishQueue.nextSequence()-1,elapsed,wire["discontinuity"].dump(matjson::NO_INDENTATION),wire["player2"]["discontinuity"].dump(matjson::NO_INDENTATION));
+    }
     m_publishSequence = static_cast<std::uint64_t>(m_publishQueue.nextSequence());
     if (!m_publishBusy && now >= m_nextPublishAt) publish(pose);
     // Consumed native evidence is tied to capture, never to HTTP request/ACK.
@@ -374,6 +379,8 @@ void SpectatorLiveRuntime::publish(SpectatorGhostPose const&) {
             if(sample.pose.cosmetics && validSpectatorCosmetics(*sample.pose.cosmetics) && m_publishCosmeticRevision!=sample.pose.cosmetics->revision){
                 packet["cosmetics"]=encodeSpectatorCosmetics(*sample.pose.cosmetics);m_publishCosmeticRevision=sample.pose.cosmetics->revision;
             }
+            if(m_publishLevel==143308401&&sample.elapsedMs>=70000&&sample.elapsedMs<=73000&&m_sourceEvidenceLogs++<128)
+                log::info("[SpectatorEvidence] stage=PUBLISH attempt={} generation={} sequence={} elapsedMs={} p1={} p2={}",m_publishAttemptId,m_publishGeneration,sample.sequence,sample.elapsedMs,packet["keyframe"]["discontinuity"].dump(matjson::NO_INDENTATION),packet["keyframe"]["player2"]["discontinuity"].dump(matjson::NO_INDENTATION));
             packets.push(packet);
         }
         m_publishBatchBody = matjson::Value(); m_publishBatchBody["packets"] = packets;
@@ -691,7 +698,7 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
     if (streamChanged || resetStream) {
         m_rejectedWorldContext.clear();
         m_viewCosmetics.reset();m_viewCosmeticRevision=0;
-        ++m_viewPresentationEpoch;
+        ++m_viewPresentationEpoch;m_viewEvidenceLogs=0;
         if (m_viewPresentationEpoch == 0) ++m_viewPresentationEpoch;
         m_viewAttemptId = attemptId;
         m_viewGeneration = generation;
@@ -793,7 +800,9 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
             setFallback("DUAL_UNSUPPORTED");return; // legacy stream lacks a complete second body
         }
         auto const decoded = decodeSpectatorPose(keyframe);
-        if (!decoded) { setFallback("INVALID_POSE"); return; }
+        if (!decoded) { log::warn("[SpectatorEvidence] stage=DECODE_REJECT attempt={} generation={} sequence={} elapsedMs={} reason=INVALID_POSE_OR_NATIVE_CHAIN",attemptId,generation,sequence,elapsedMs);setFallback("INVALID_POSE"); return; }
+        if(expectedLevel==143308401&&elapsedMs>=70000&&elapsedMs<=73000&&m_viewEvidenceLogs++<128)
+            log::info("[SpectatorEvidence] stage=RECEIVED_DECODED attempt={} generation={} epoch={} sequence={} elapsedMs={} p1={} p2={}",attemptId,generation,m_viewPresentationEpoch,sequence,elapsedMs,keyframe["discontinuity"].dump(matjson::NO_INDENTATION),keyframe["player2"]["discontinuity"].dump(matjson::NO_INDENTATION));
         auto pose = *decoded;
         if(pose.randomEvents&&(!pose.simulation||!m_randomEvents.push(pose.randomEvents,pose.simulation->elapsedMs,elapsedMs))){noteWorldPartial("RANDOM_EVENT_HISTORY_INCOMPLETE");}
         if(packet.contains("cosmetics") || keyframe.contains("cosmetics")){

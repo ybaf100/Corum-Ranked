@@ -20,7 +20,10 @@ enum class SpectatorDiscontinuity { Teleport, SpiderSnap };
 inline std::string_view spectatorDiscontinuityName(SpectatorDiscontinuity type) {
     return type == SpectatorDiscontinuity::Teleport ? "TELEPORT" : "SPIDER_SNAP";
 }
-struct SpectatorNativeSnapEvent {SpectatorDiscontinuity type=SpectatorDiscontinuity::Teleport;float fromX=0,fromY=0,toX=0,toY=0;SpectatorGameMode beforeMode=SpectatorGameMode::Cube,afterMode=SpectatorGameMode::Cube;bool beforeGravity=false,afterGravity=false;};
+// Diagnostic identity only. It never authorizes a position correction.
+struct SpectatorSnapTrace {std::int64_t event=0,tick=0,step=0;double elapsedMs=0;std::string callback;};
+inline bool validSpectatorSnapTrace(SpectatorSnapTrace const& t){return t.event>0&&t.event<=1000000000&&t.tick>=0&&t.tick<=1000000000&&t.step>=0&&t.step<=1000000000&&std::isfinite(t.elapsedMs)&&t.elapsedMs>=0&&t.elapsedMs<=86400000&&(t.callback=="PORTAL"||t.callback=="TELEPORT_FLAG"||t.callback=="SPIDER");}
+struct SpectatorNativeSnapEvent {SpectatorDiscontinuity type=SpectatorDiscontinuity::Teleport;float fromX=0,fromY=0,toX=0,toY=0;SpectatorGameMode beforeMode=SpectatorGameMode::Cube,afterMode=SpectatorGameMode::Cube;bool beforeGravity=false,afterGravity=false;std::optional<SpectatorSnapTrace> trace=std::nullopt;};
 struct SpectatorSnapEvidence {
     SpectatorDiscontinuity type = SpectatorDiscontinuity::Teleport;
     float fromX = 0, fromY = 0, toX = 0, toY = 0;
@@ -124,7 +127,7 @@ inline bool finiteSpectatorPose(SpectatorGhostPose const& pose){
 
 inline bool finiteSpectatorSnap(SpectatorSnapEvidence const& snap) {
     if(snap.nativeEvents.size()>8)return false;
-    for(std::size_t i=0;i<snap.nativeEvents.size();++i){auto const& e=snap.nativeEvents[i];SpectatorSnapEvidence step{e.type,e.fromX,e.fromY,e.toX,e.toY};
+    for(std::size_t i=0;i<snap.nativeEvents.size();++i){auto const& e=snap.nativeEvents[i];if(e.trace&&!validSpectatorSnapTrace(*e.trace))return false;SpectatorSnapEvidence step{e.type,e.fromX,e.fromY,e.toX,e.toY};
         if(!finiteSpectatorSnap(step)||spectatorModeName(e.beforeMode).empty()||spectatorModeName(e.afterMode).empty()||
            (e.type==SpectatorDiscontinuity::SpiderSnap&&(e.afterMode!=SpectatorGameMode::Spider||(e.beforeMode==e.afterMode&&e.beforeGravity==e.afterGravity))))return false;
         if(i&&std::hypot(e.fromX-snap.nativeEvents[i-1].toX,e.fromY-snap.nativeEvents[i-1].toY)>400)return false;

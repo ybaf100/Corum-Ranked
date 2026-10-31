@@ -10,6 +10,7 @@ test('production Random native activation/output hooks record real selected grou
 #include <cassert>
 #include "${root}/src/domain/SpectatorCapturePolicy.hpp"
 #include <deque>
+#include "${root}/src/domain/SpectatorSourceTrace.hpp"
 #include <set>
 #include <unordered_map>
 using namespace corum::ranked;
@@ -44,6 +45,15 @@ int main(){PlayLayer scene;current=&scene;RandomHook random;scene.fields.objects
  // Multiple verified native snaps may cancel their gravity flips before a 50ms packet.
  SpectatorGhostPose before;before.mode=SpectatorGameMode::Spider;before.x=0;before.y=100;auto middle=before;middle.x=1;middle.y=1000;middle.upsideDown=true;auto after=before;after.x=10;after.y=120;
  SpectatorCapturePolicy capture;capture.observe(before);capture.nativeSnap(SpectatorDiscontinuity::SpiderSnap,before,middle);capture.observe(middle);capture.nativeSnap(SpectatorDiscontinuity::SpiderSnap,middle,after);capture.observe(after);auto combined=capture.snapshot();assert(combined&&combined->discontinuity&&combined->discontinuity->nativeEvents.size()==2&&verifiedSpectatorSnap(before,*combined));auto wire=encodeSpectatorPose(*combined);assert(decodeSpectatorPose(wire));combined->discontinuity->nativeEvents.clear();assert(!verifiedSpectatorSnap(before,*combined));
+ // Codec/capture policy fixtures exercise diagnostic identity only; these
+ // synthetic callbacks are NOT positive Native Entropie reproduction evidence.
+ capture.reset();before.mode=SpectatorGameMode::Ship;before.x=25885.127f;before.y=4044;after=before;after.x=25894.729f;after.y=5439;
+ assert(!verifiedSpectatorSnap(before,after));capture.observe(before);
+ SpectatorSnapTrace trace{1,12,3,71295,"PORTAL"};assert(std::string(capture.nativeSnap(SpectatorDiscontinuity::Teleport,before,after,trace))=="CAPTURED");capture.observe(after);
+ auto encodedTrace=encodeSpectatorPose(*capture.snapshot());auto decodedTrace=decodeSpectatorPose(encodedTrace);assert(decodedTrace&&decodedTrace->discontinuity->nativeEvents[0].trace->event==1);
+ encodedTrace["discontinuity"]["nativeEvents"][0]["trace"]["callback"]="POSITION_DELTA";assert(!decodeSpectatorPose(encodedTrace));
+ capture.sampled();assert(!capture.snapshot()->discontinuity);
+ SpectatorSourceTrace budget;for(int i=0;i<1000;++i){(void)budget.emit(i%16,143308401,70.0+i*.003,25890,false);(void)budget.emit(0,143308401,71,25890,true);}assert(budget.logs<=160&&budget.criticalLogs==32);assert(!budget.emit(0,1,71,25890,true));
  SpectatorRandomTimeline timeline;auto e=*decodeSpectatorRandomEvent(sourceEvent["event"]);auto events=std::make_shared<std::vector<SpectatorRandomEvent>const>(std::vector{e});assert(timeline.push(events,50,100));assert(!timeline.through(0));assert(timeline.through(100)->size()==1);assert(timeline.push(events,50,100));assert(timeline.through(150)->size()==1);e.ordinal=3;assert(!timeline.push(std::make_shared<std::vector<SpectatorRandomEvent>const>(std::vector{e}),100,50));timeline.reset();assert(!timeline.through(100));
 }
 `;

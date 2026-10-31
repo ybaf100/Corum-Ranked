@@ -95,6 +95,7 @@ private:
     [[nodiscard]] std::string endpoint(std::string const& path) const;
 
     std::string m_publishMatchId;
+    unsigned m_sourceEvidenceLogs=0;
     int m_publishRound = 0, m_publishDeathmatch = 0, m_publishLevel=0;
     SpectatorPublishQueue m_publishQueue;
     std::chrono::steady_clock::time_point m_publisherPausedAt {};
@@ -140,6 +141,7 @@ private:
     std::string m_viewTerminalAttemptId;
     std::uint64_t m_viewGeneration = 0;
     std::uint64_t m_viewPresentationEpoch = 0;
+    unsigned m_viewEvidenceLogs=0;
     std::int64_t m_lastViewSequence = -1;
     std::string m_opponentName;
     std::shared_ptr<SpectatorCosmetics const> m_viewCosmetics;

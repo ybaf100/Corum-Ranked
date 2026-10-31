@@ -16,7 +16,7 @@ export interface SpectatorSnapEvidence {
   readonly type: "TELEPORT" | "SPIDER_SNAP";
   readonly fromX: number; readonly fromY: number; readonly toX: number; readonly toY: number;
   readonly cameraFromX?: number; readonly cameraFromY?: number;
-  readonly nativeEvents?:readonly {readonly type:"TELEPORT"|"SPIDER_SNAP";readonly fromX:number;readonly fromY:number;readonly toX:number;readonly toY:number;readonly beforeMode:SpectatorGameMode;readonly afterMode:SpectatorGameMode;readonly beforeGravity:boolean;readonly afterGravity:boolean}[];
+  readonly nativeEvents?:readonly {readonly type:"TELEPORT"|"SPIDER_SNAP";readonly fromX:number;readonly fromY:number;readonly toX:number;readonly toY:number;readonly beforeMode:SpectatorGameMode;readonly afterMode:SpectatorGameMode;readonly beforeGravity:boolean;readonly afterGravity:boolean;readonly trace?:{event:number;tick:number;step:number;elapsedMs:number;callback:string}}[];
 }
 
 export interface SpectatorPoseKeyframe {
@@ -227,7 +227,12 @@ export const parseSpectatorKeyframe = (value: unknown): SpectatorPoseKeyframe =>
         const beforeGravity=requiredBoolean(raw.beforeGravity,"native.beforeGravity"),afterGravity=requiredBoolean(raw.afterGravity,"native.afterGravity");
         if([x,y,tx,ty].some(v=>Math.abs(v)>10000000)||d===0||(raw.type==="TELEPORT"?d>100000:Math.abs(tx-x)>400||Math.abs(ty-y)>2400)||
            (raw.type==="SPIDER_SNAP"&&(raw.afterMode!=="SPIDER"||(raw.beforeMode===raw.afterMode&&beforeGravity===afterGravity))))throw new BadRequestException("Unverified native event chain");
-        return {type:raw.type,fromX:x,fromY:y,toX:tx,toY:ty,beforeMode:raw.beforeMode as SpectatorGameMode,afterMode:raw.afterMode as SpectatorGameMode,beforeGravity,afterGravity};
+        let trace:{event:number;tick:number;step:number;elapsedMs:number;callback:string}|undefined;
+        if(raw.trace!==undefined){const t=raw.trace;
+          if(!isRecord(t)||![t.event,t.tick,t.step].every(n=>typeof n==='number'&&Number.isSafeInteger(n)&&n>=0&&n<=1000000000)||Number(t.event)<1||typeof t.elapsedMs!=='number'||!Number.isFinite(t.elapsedMs)||t.elapsedMs<0||t.elapsedMs>86400000||!['PORTAL','TELEPORT_FLAG','SPIDER'].includes(String(t.callback)))throw new BadRequestException('Invalid native diagnostic identity');
+          trace={event:Number(t.event),tick:Number(t.tick),step:Number(t.step),elapsedMs:t.elapsedMs,callback:String(t.callback)};
+        }
+        return {type:raw.type,fromX:x,fromY:y,toX:tx,toY:ty,beforeMode:raw.beforeMode as SpectatorGameMode,afterMode:raw.afterMode as SpectatorGameMode,beforeGravity,afterGravity,...(trace?{trace}:{})};
       });
       if(Math.hypot(nativeEvents[0]!.fromX-fromX,nativeEvents[0]!.fromY-fromY)>.1||Math.hypot(nativeEvents.at(-1)!.toX-toX,nativeEvents.at(-1)!.toY-toY)>.1||nativeEvents.some((e,i)=>i>0&&Math.hypot(e.fromX-nativeEvents![i-1]!.toX,e.fromY-nativeEvents![i-1]!.toY)>400))throw new BadRequestException("Noncontiguous native event chain");
     }

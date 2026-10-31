@@ -71,6 +71,7 @@ inline std::string replayInitialDataProblem(Json const& initial){
     return {};
 }
 inline bool cbfInitialDataValid(Json const& value){
+    if(!value["objects"].isNull()&&!replayCollisionManifestValid(value["objects"]))return false;
     if(integer(value,"schema")!=CbfBoundarySchema||!value["players"].isArray()||value["players"].size()!=2)return false;
     for(auto const& player:value["players"]){
         if(!replayPhysicsPointValid(player["lastPosition"])||!player["collisionLogs"].isArray()||player["collisionLogs"].size()!=4)return false;

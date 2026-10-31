@@ -8,6 +8,7 @@ const runtime = read('../src/RankedRuntime.cpp');
 const ux = read('../src/GameplayUx.cpp');
 const policy = read('../src/domain/SpectatorLocalSafety.hpp');
 const debugWorkflow = read('../../.github/workflows/build-ranked-debug.yml');
+const nativeWorkflow = read('../../.github/workflows/ranked-native.yml');
 
 function body(source, signature) {
     const at = source.indexOf(signature);
@@ -152,6 +153,7 @@ test('transition logs are bounded and automatic Debug CI includes both regressio
     for (const guard of ['suppressedDeathLogged', 'suppressedCompletionLogged', 'suppressedSaveLogged']) {
         assert.match(play, new RegExp(`if \\((?:blocked && )?!m_fields->${guard}\\)`));
     }
-    assert.match(debugWorkflow, /SpectatorLocalSafetyTest\.cpp/);
-    assert.match(debugWorkflow, /node --test(?: --test-concurrency=\d+)? corum-ranked-mod\/tests\/(?:SpectatorLocalSafetySourceTest|\*)\.mjs/);
+    assert.match(debugWorkflow, /uses: \.\/.github\/workflows\/ranked-native\.yml/);
+    assert.match(nativeWorkflow, /SpectatorLocalSafetyTest\.cpp/);
+    assert.match(nativeWorkflow, /node --test(?: --test-concurrency=\d+)? corum-ranked-mod\/tests\/(?:SpectatorLocalSafetySourceTest|\*)\.mjs/);
 });

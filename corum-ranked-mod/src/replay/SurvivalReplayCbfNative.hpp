@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <cstddef>
 class PlayLayer;
+class PlayerObject;
+class GameObject;
 namespace corum::ranked::replay {
 class Playback;
 // Source capture is read-only. Physics hooks are leased only while a replay
@@ -13,11 +15,13 @@ std::string acquireCbfReplayHooks(matjson::Value const& environment);
 void releaseCbfReplayHooks();
 bool cbfReplayHooksHeld();
 void beginCbfNativeFrame(PlayLayer*,Playback* replay=nullptr);
+void noteCbfNativeCollisionCandidates(PlayLayer*,PlayerObject*,GameObject* const*,std::size_t);
 matjson::Value finishCbfNativeFrame();
 std::string cbfNativeFrameError();
 matjson::Value cbfNativeUpdateCounts();
-matjson::Value captureCbfInitial(PlayLayer*);
+matjson::Value captureCbfInitial(PlayLayer*,bool newSourceAttempt=false);
 std::string validateCbfInitial(PlayLayer*,matjson::Value const&);
+std::string prepareCbfInitialCollisionLogs(PlayLayer*,matjson::Value const&,bool nativeResetOwned);
 void restoreCbfInitial(PlayLayer*,matjson::Value const&);
 void beginNativeInputClock(PlayLayer*,Playback* replay=nullptr);
 std::size_t enterNativeInputClock(char const* phase,double& timestamp);

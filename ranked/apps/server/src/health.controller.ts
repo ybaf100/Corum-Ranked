@@ -14,6 +14,7 @@ export class HealthController {
     return {
       status: "ok",
       service: "corum-ranked-server",
+      sourceSha: /^[a-f0-9]{40}$/.test(process.env.CORUM_SOURCE_SHA ?? "") ? process.env.CORUM_SOURCE_SHA : null,
       serverNow: new Date().toISOString(),
     };
   }

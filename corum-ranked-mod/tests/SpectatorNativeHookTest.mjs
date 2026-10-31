@@ -154,8 +154,10 @@ struct CorumRankedPlayLayer : PlayLayer {
     }
     corum::ranked::SpectatorGhostPose observedSpectatorPlayerPose(PlayerObject* p){return corum::ranked::captureSpectatorPose(p);}
     void observeSpectatorNativeUpdate(PlayerObject*) {}
+    template<class...T>void traceSpectatorSource(T const&...){}
+    bool tracesSpectatorPlayer(PlayerObject*){return false;}
     bool observesSpectatorPlayer(PlayerObject*) {return false;}
-    void observeSpectatorNativeSnap(PlayerObject*,corum::ranked::SpectatorDiscontinuity,corum::ranked::SpectatorGhostPose const&) {}
+    void observeSpectatorNativeSnap(PlayerObject*,corum::ranked::SpectatorDiscontinuity,corum::ranked::SpectatorGhostPose const&,char const* = "TELEPORT_FLAG") {}
     struct Fields {bool survivalLiveLevel=false,survivalReplayLevel=false;std::optional<SurvivalDialogRef> survivalSurrender;bool survivalLevel=false,survivalWaiting=false,survivalFreePlayHud=false,survivalNativeClearFinished=false;
         bool nativeCompletionStarted = false;
         EntryOverlay* entryOverlay = nullptr;

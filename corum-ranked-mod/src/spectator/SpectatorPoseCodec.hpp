@@ -32,7 +32,7 @@ inline matjson::Value encodeSpectatorPose(SpectatorGhostPose const& pose) {
         value["discontinuity"]["fromY"] = static_cast<double>(snap.fromY);
         value["discontinuity"]["toX"] = static_cast<double>(snap.toX);
         value["discontinuity"]["toY"] = static_cast<double>(snap.toY);
-        if(!snap.nativeEvents.empty()){value["discontinuity"]["nativeEvents"]=matjson::Value::array();for(auto const& e:snap.nativeEvents){matjson::Value j;j["type"]=std::string(spectatorDiscontinuityName(e.type));j["fromX"]=e.fromX;j["fromY"]=e.fromY;j["toX"]=e.toX;j["toY"]=e.toY;j["beforeMode"]=std::string(spectatorModeName(e.beforeMode));j["afterMode"]=std::string(spectatorModeName(e.afterMode));j["beforeGravity"]=e.beforeGravity;j["afterGravity"]=e.afterGravity;value["discontinuity"]["nativeEvents"].push(j);}}
+        if(!snap.nativeEvents.empty()){value["discontinuity"]["nativeEvents"]=matjson::Value::array();for(auto const& e:snap.nativeEvents){matjson::Value j;j["type"]=std::string(spectatorDiscontinuityName(e.type));j["fromX"]=e.fromX;j["fromY"]=e.fromY;j["toX"]=e.toX;j["toY"]=e.toY;j["beforeMode"]=std::string(spectatorModeName(e.beforeMode));j["afterMode"]=std::string(spectatorModeName(e.afterMode));j["beforeGravity"]=e.beforeGravity;j["afterGravity"]=e.afterGravity;if(e.trace){auto const&t=*e.trace;j["trace"]["event"]=t.event;j["trace"]["tick"]=t.tick;j["trace"]["step"]=t.step;j["trace"]["elapsedMs"]=t.elapsedMs;j["trace"]["callback"]=t.callback;}value["discontinuity"]["nativeEvents"].push(j);}}
         if (snap.fromCamera && validSpectatorCamera(*snap.fromCamera)) {
             value["discontinuity"]["cameraFromX"] = static_cast<double>(snap.fromCamera->x);
             value["discontinuity"]["cameraFromY"] = static_cast<double>(snap.fromCamera->y);
@@ -116,6 +116,7 @@ inline std::optional<SpectatorGhostPose> decodeSpectatorPose(matjson::Value cons
         if(evidence.contains("nativeEvents")){auto events=evidence["nativeEvents"].asArray();if(events.isErr()||events.unwrap().empty()||events.unwrap().size()>8)return std::nullopt;
             for(auto const& e:events.unwrap()){auto type=e["type"].asString().unwrapOr("");auto before=parseSpectatorMode(e["beforeMode"].asString().unwrapOr("")),after=parseSpectatorMode(e["afterMode"].asString().unwrapOr(""));if((type!="TELEPORT"&&type!="SPIDER_SNAP")||!before||!after||e["beforeGravity"].asBool().isErr()||e["afterGravity"].asBool().isErr())return std::nullopt;
                 snap.nativeEvents.push_back({type=="TELEPORT"?SpectatorDiscontinuity::Teleport:SpectatorDiscontinuity::SpiderSnap,static_cast<float>(e["fromX"].asDouble().unwrapOr(nan)),static_cast<float>(e["fromY"].asDouble().unwrapOr(nan)),static_cast<float>(e["toX"].asDouble().unwrapOr(nan)),static_cast<float>(e["toY"].asDouble().unwrapOr(nan)),*before,*after,e["beforeGravity"].asBool().unwrapOr(false),e["afterGravity"].asBool().unwrapOr(false)});
+                if(e.contains("trace")){auto const&t=e["trace"];SpectatorSnapTrace trace{t["event"].asInt().unwrapOr(-1),t["tick"].asInt().unwrapOr(-1),t["step"].asInt().unwrapOr(-1),t["elapsedMs"].asDouble().unwrapOr(nan),t["callback"].asString().unwrapOr("")};if(!validSpectatorSnapTrace(trace))return std::nullopt;snap.nativeEvents.back().trace=std::move(trace);}
             }
         }
         if (!finiteSpectatorSnap(snap)) return std::nullopt;

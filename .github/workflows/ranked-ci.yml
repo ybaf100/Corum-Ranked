@@ -1,6 +1,11 @@
 name: Validate Corum Ranked
 
 on:
+  workflow_call:
+    inputs:
+      coordinated:
+        type: boolean
+        default: false
   workflow_dispatch:
   push:
     branches:
@@ -13,7 +18,7 @@ on:
       - "apps-script/SurvivalConfig.gs"
       - "apps-script/validate-survival-config.mjs"
       - "apps-script/validate-ranked-config.mjs"
-      - ".github/workflows/ranked-ci.yml"
+      - ".github/workflows/**"
   pull_request:
     paths:
       - "ranked/**"
@@ -23,13 +28,14 @@ on:
       - "apps-script/SurvivalConfig.gs"
       - "apps-script/validate-survival-config.mjs"
       - "apps-script/validate-ranked-config.mjs"
-      - ".github/workflows/ranked-ci.yml"
+      - ".github/workflows/**"
 
 permissions:
   contents: read
 
 jobs:
   test:
+    if: inputs.coordinated || github.ref != 'refs/heads/main' || github.event_name != 'push'
     name: Rules, server, database, and Apps Script
     runs-on: ubuntu-latest
     services:
@@ -46,6 +52,8 @@ jobs:
           --health-interval 5s --health-timeout 5s --health-retries 12
     steps:
       - uses: actions/checkout@v7
+      - name: Check reusable workflows, expressions, matrices and permissions
+        run: bash ranked/tools/check-workflows.sh
       - uses: actions/setup-node@v7
         with:
           node-version: "22"
@@ -55,6 +63,8 @@ jobs:
         run: npm ci --prefix ranked
       - name: Type-check every Ranked workspace
         run: npm run typecheck --prefix ranked
+      - name: Install pinned workflow parser for release safety tests
+        run: python3 -m pip install PyYAML==6.0.3
       - name: Validate public release and activation checks without production access
         run: python3 -m unittest discover -s ranked/tools/tests -p 'test_*.py'
       - name: Validate authenticated GD relay Worker

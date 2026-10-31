@@ -22,10 +22,10 @@ class ProductionReleaseTest(unittest.TestCase):
         for channel, update in self.config["modUpdates"].items():
             update["downloadUrl"] = f"{BASE}/ranked/{channel}-{VERSION}/Corum-Ranked-{VERSION}-{channel}.geode"
 
-    def verify(self):
+    def verify(self, expected_sha=None):
         with patch.object(production.clients, "wait_for_clients", return_value=self.packages), \
              patch.object(production, "read_json", side_effect=[self.health, self.ready, self.config]):
-            return production.verify(VERSION, BASE)
+            return production.verify(VERSION, BASE, expected_sha)
 
     def test_both_public_channels_and_readiness_must_match(self):
         self.assertTrue(self.verify()["ready"])
@@ -34,6 +34,14 @@ class ProductionReleaseTest(unittest.TestCase):
         self.ready["rankedReady"] = False
         self.ready["config"]["queueEnabled"] = False
         self.assertTrue(self.verify()["ready"])
+
+    def test_active_server_source_must_equal_the_verified_client_source(self):
+        self.health['sourceSha'] = 'a'*40
+        self.assertEqual(self.verify('a'*40)['sourceSha'], 'a'*40)
+        for source in ('b'*40, None):
+            self.health['sourceSha'] = source
+            with self.assertRaisesRegex(ValueError, 'Active server source SHA'):
+                self.verify('a'*40)
 
     def test_bad_readiness_version_hash_or_url_fails(self):
         cases = [("ready", "schemaReady", False), ("ready", "rankedReady", False),

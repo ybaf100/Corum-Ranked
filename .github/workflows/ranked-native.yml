@@ -1,0 +1,98 @@
+name: Validate Ranked Native
+on:
+  workflow_call:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  tests:
+    name: Validate Debug Bot policy domain
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - name: Compile policy domains with strict warnings and run
+        run: |
+          g++ -std=c++23 -Wall -Wextra -Wpedantic -Werror \
+            corum-ranked-mod/tests/DomainTest.cpp \
+            corum-ranked-mod/src/domain/AttemptScoring.cpp \
+            corum-ranked-mod/src/domain/EnvironmentPolicy.cpp \
+            corum-ranked-mod/src/domain/HudPresentation.cpp \
+            corum-ranked-mod/src/domain/RenderFpsMeter.cpp \
+            corum-ranked-mod/src/domain/ServerClock.cpp \
+            -o /tmp/corum-ranked-domain-test
+          /tmp/corum-ranked-domain-test
+          g++ -std=c++23 -Wall -Wextra -Wpedantic -Werror \
+            corum-ranked-mod/tests/DebugBotDomainTest.cpp \
+            corum-ranked-mod/src/debug/DebugBotConfig.cpp \
+            -o /tmp/corum-ranked-debug-bot-domain-test
+          /tmp/corum-ranked-debug-bot-domain-test
+          g++ -std=c++23 -Wall -Wextra -Wpedantic -Werror \
+            corum-ranked-mod/tests/DebugSpectateDomainTest.cpp \
+            -o /tmp/corum-ranked-debug-spectate-domain-test
+          /tmp/corum-ranked-debug-spectate-domain-test
+          g++ -std=c++23 -Wall -Wextra -Wpedantic -Werror \
+            corum-ranked-mod/tests/SpectatorLocalSafetyTest.cpp \
+            -o /tmp/corum-ranked-spectator-safety-test
+          /tmp/corum-ranked-spectator-safety-test
+          g++ -std=c++23 -Wall -Wextra -Wpedantic -Werror \
+            corum-ranked-mod/tests/SpectatorRemotePolicyTest.cpp \
+            -o /tmp/corum-ranked-spectator-remote-test
+          /tmp/corum-ranked-spectator-remote-test
+          g++ -std=c++23 -Wall -Wextra -Wpedantic -Werror \
+            corum-ranked-mod/tests/SpectatorCameraPolicyTest.cpp \
+            -o /tmp/corum-ranked-spectator-camera-test
+          /tmp/corum-ranked-spectator-camera-test
+          g++ -std=c++23 -Wall -Wextra -Wpedantic -Werror \
+            corum-ranked-mod/tests/SpectatorInterpolationBufferTest.cpp \
+            -o /tmp/corum-ranked-spectator-buffer-test
+          /tmp/corum-ranked-spectator-buffer-test
+          g++ -std=c++23 -Wall -Wextra -Wpedantic -Werror \
+            corum-ranked-mod/tests/MatchPauseBudgetTest.cpp \
+            -o /tmp/corum-ranked-match-pause-test
+          /tmp/corum-ranked-match-pause-test
+          g++ -std=c++23 -Wall -Wextra -Wpedantic -Werror \
+            corum-ranked-mod/tests/LevelPreparationTest.cpp \
+            -o /tmp/corum-ranked-level-prepare-test
+          /tmp/corum-ranked-level-prepare-test
+          g++ -std=c++23 -Wall -Wextra -Wpedantic -Werror \
+            corum-ranked-mod/tests/SurvivalHudPresentationTest.cpp \
+            -o /tmp/corum-ranked-survival-hud-test
+          /tmp/corum-ranked-survival-hud-test
+      - name: Prepare pinned Geode JSON regression dependency
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/corum-json" "$RUNNER_TEMP/corum-result"
+          curl --fail --location --retry 3 https://codeload.github.com/geode-sdk/json/tar.gz/6330ad4d63d168c861e0a1b9d4127cdbd6807ad9 | tar -xz --strip-components=1 -C "$RUNNER_TEMP/corum-json"
+          curl --fail --location --retry 3 https://codeload.github.com/geode-sdk/result/tar.gz/b17911426ced3ca519d9a338aea76053be6fc4f1 | tar -xz --strip-components=1 -C "$RUNNER_TEMP/corum-result"
+          echo "CORUM_MATJSON_SOURCE=$RUNNER_TEMP/corum-json" >> "$GITHUB_ENV"
+          echo "CORUM_RESULT_INCLUDE=$RUNNER_TEMP/corum-result/include" >> "$GITHUB_ENV"
+      - name: Generate editable game translations before native validation
+        run: node ranked/tools/localization/build.mjs
+      - name: Validate native client behavior (two files in parallel)
+        # Each native harness uses its own temporary directory. Bound compiler
+        # concurrency so small runners retain memory headroom; keep all tests.
+        run: node --test --test-concurrency=2 corum-ranked-mod/tests/*.mjs
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Render Achievement v2 production shaders with software OpenGL ES
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libegl1 libgl1-mesa-dri
+          python -m pip install Pillow
+          python corum-ranked-mod/tests/render-achievement-effects.py "$RUNNER_TEMP/achievement-effects"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Achievement-v2-shader-preview
+          path: ${{ runner.temp }}/achievement-effects
+      - name: Validate release packaging and publication
+        run: |
+          python3 corum-ranked-mod/tests/ModCombineBuildTest.py
+          python3 corum-ranked-mod/tests/ModReleaseBuildTest.py
+          python3 corum-ranked-mod/tests/ModReleasePublishTest.py
+          python3 corum-ranked-mod/tests/AssetPackBuildTest.py
