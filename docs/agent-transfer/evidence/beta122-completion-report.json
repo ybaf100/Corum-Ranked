@@ -1,0 +1,453 @@
+{
+  "version": "v0.5.0-beta.122",
+  "sourceSha": "a122cddce51fdf9c8d8a90c6f81d91b048dd8868",
+  "baselineSha": "5875c91cc3bf64b3eb1cfc3c019dcc5ef4f16b68",
+  "workflow": {
+    "id": 41177728737,
+    "url": "https://github.com/ybaf100/Corum-Ranked/actions/runs/41177728737",
+    "attempt": 2,
+    "conclusion": "success",
+    "startedAt": "2026-10-31T06:48:03Z",
+    "completedAt": "2026-10-31T06:57:23Z",
+    "durationSeconds": 560,
+    "jobsSucceeded": 26,
+    "jobsIntentionallySkipped": 9,
+    "jobsFailed": 0
+  },
+  "packages": {
+    "release": {
+      "version": "v0.5.0-beta.122",
+      "sha256": "4ec912cdacc902cdae55ded4e4f7ff8e642d16daae81dd7eabadcd90f4b53ec6",
+      "sizeBytes": 15121293,
+      "downloadUrl": "https://pub-11442f32945446a49b9da0a5e69f2451.r2.dev/ranked/release-v0.5.0-beta.122/Corum-Ranked-v0.5.0-beta.122-release.geode",
+      "sourceSha": "a122cddce51fdf9c8d8a90c6f81d91b048dd8868"
+    },
+    "debug": {
+      "version": "v0.5.0-beta.122",
+      "sha256": "8e952a1c5b78ce610e92ca63e0955d1b8bb118a6286a987bb405ff4eda107ae0",
+      "sizeBytes": 16128301,
+      "downloadUrl": "https://pub-11442f32945446a49b9da0a5e69f2451.r2.dev/ranked/debug-v0.5.0-beta.122/Corum-Ranked-v0.5.0-beta.122-debug.geode",
+      "sourceSha": "a122cddce51fdf9c8d8a90c6f81d91b048dd8868"
+    }
+  },
+  "production": {
+    "api": "https://api.52-74-37-130.sslip.io",
+    "sourceSha": "a122cddce51fdf9c8d8a90c6f81d91b048dd8868",
+    "verifiedAt": "2026-10-31T07:02:46.735025+00:00",
+    "publicChecks": [
+      {
+        "path": "/health",
+        "status": 200,
+        "body": {
+          "status": "ok",
+          "service": "corum-ranked-server",
+          "sourceSha": "a122cddce51fdf9c8d8a90c6f81d91b048dd8868",
+          "serverNow": "2026-10-31T07:02:45.127Z"
+        }
+      },
+      {
+        "path": "/ready",
+        "status": 200,
+        "body": {
+          "ready": true,
+          "publicDataReady": true,
+          "rankedReady": true,
+          "databaseReady": true,
+          "databaseConnected": true,
+          "schemaReady": true,
+          "missingSchema": [],
+          "config": {
+            "ready": true,
+            "queueEnabled": true,
+            "generation": "ranked-v0.5-4b9cacc9:map-v1:aa2b1eb955d7a454",
+            "fetchedAt": "2026-10-31T07:02:18.430Z",
+            "lastAttemptAt": "2026-10-31T07:02:13.809Z",
+            "lastError": null
+          },
+          "serverNow": "2026-10-31T07:02:45.180Z"
+        }
+      },
+      {
+        "path": "/api/ranked/config",
+        "status": 200,
+        "body": {
+          "serverNow": "2026-10-31T07:02:45.130Z",
+          "generation": "ranked-v0.5-4b9cacc9:map-v1:aa2b1eb955d7a454",
+          "rulesVersion": "corum-ranked-v0.5",
+          "requiredClientVersion": "v0.5.0-beta.122",
+          "modUpdates": {
+            "debug": {
+              "version": "v0.5.0-beta.122",
+              "sha256": "8e952a1c5b78ce610e92ca63e0955d1b8bb118a6286a987bb405ff4eda107ae0",
+              "sizeBytes": 16128301,
+              "downloadUrl": "https://pub-11442f32945446a49b9da0a5e69f2451.r2.dev/ranked/debug-v0.5.0-beta.122/Corum-Ranked-v0.5.0-beta.122-debug.geode"
+            },
+            "release": {
+              "version": "v0.5.0-beta.122",
+              "sha256": "4ec912cdacc902cdae55ded4e4f7ff8e642d16daae81dd7eabadcd90f4b53ec6",
+              "sizeBytes": 15121293,
+              "downloadUrl": "https://pub-11442f32945446a49b9da0a5e69f2451.r2.dev/ranked/release-v0.5.0-beta.122/Corum-Ranked-v0.5.0-beta.122-release.geode"
+            }
+          },
+          "queueEnabled": true,
+          "modes": {
+            "soloRanked": {
+              "ready": true,
+              "enabled": true
+            },
+            "survival": {
+              "ready": true,
+              "enabled": true,
+              "generation": "survival-b0676719:64p",
+              "matchPlayerCount": 64,
+              "fetchedAt": "2026-10-31T07:02:15.456Z",
+              "error": null
+            }
+          },
+          "rules": {
+            "rulesVersion": "corum-ranked-v0.5",
+            "roundSeconds": 300,
+            "clearTarget": 3,
+            "finalAttemptWindowSeconds": 10,
+            "lastAttemptWindowSeconds": 10,
+            "banSeconds": 10,
+            "bestOf": 3
+          },
+          "modRestrictionEnabled": false,
+          "cbf": {
+            "modId": "syzzi.click_between_frames",
+            "requiredSettings": {
+              "soft-toggle": false,
+              "click-on-steps": false,
+              "physics-bypass": false
+            }
+          },
+          "client": {
+            "audio": {
+              "enabled": true,
+              "fadeInSeconds": 0.3,
+              "fadeOutSeconds": 0.3,
+              "resources": [
+                {
+                  "key": "menu",
+                  "label": "Lobby Theme",
+                  "songId": 786863,
+                  "startSeconds": 0,
+                  "loop": true,
+                  "volumePercent": 100
+                },
+                {
+                  "key": "menu_demotion_warning",
+                  "label": "Demotion Warning Lobby Theme",
+                  "songId": 10007988,
+                  "startSeconds": 29,
+                  "loop": true,
+                  "volumePercent": 100
+                },
+                {
+                  "key": "menu_promotion",
+                  "label": "Promotion Lobby Theme",
+                  "songId": 10007988,
+                  "startSeconds": 29,
+                  "loop": true,
+                  "volumePercent": 100
+                },
+                {
+                  "key": "match",
+                  "label": "Round 1/2 Theme",
+                  "songId": 786863,
+                  "startSeconds": 26,
+                  "loop": true,
+                  "volumePercent": 100
+                },
+                {
+                  "key": "round3_deathmatch_wait",
+                  "label": "Round 3 / Death Match Wait Theme",
+                  "songId": 482872,
+                  "startSeconds": 46,
+                  "loop": true,
+                  "volumePercent": 100
+                },
+                {
+                  "key": "result_win",
+                  "label": "Result Theme",
+                  "songId": 493898,
+                  "startSeconds": 29,
+                  "loop": false,
+                  "volumePercent": 100
+                },
+                {
+                  "key": "result_lose",
+                  "label": "Result Theme",
+                  "songId": 493898,
+                  "startSeconds": 29,
+                  "loop": false,
+                  "volumePercent": 100
+                }
+              ]
+            },
+            "ui": {
+              "fadeInSeconds": 0.24,
+              "fadeOutSeconds": 0.18
+            },
+            "assets": {
+              "enabled": true,
+              "assetPackVersion": "visuals-v1",
+              "sha256": "9c91279a1a11406217a29ee210f6fbb10bdce461bb83f7e4ef7a0f6bfa3762a0",
+              "sizeBytes": 24649307
+            }
+          },
+          "allowedMods": [
+            {
+              "id": "hwanhee1.corum_ranked",
+              "displayName": "Corum Ranked",
+              "required": true,
+              "enabled": true
+            },
+            {
+              "id": "syzzi.click_between_frames",
+              "displayName": "Click Between Frames",
+              "required": true,
+              "enabled": true
+            },
+            {
+              "id": "geode.custom-keybinds",
+              "displayName": "Custom Keybinds",
+              "required": false,
+              "enabled": true
+            },
+            {
+              "id": "geode.node-ids",
+              "displayName": "Node Ids",
+              "required": true,
+              "enabled": true
+            },
+            {
+              "id": "hwanhee1.corum_integration",
+              "displayName": "Corum Integration",
+              "required": false,
+              "enabled": true
+            },
+            {
+              "id": "fleym.nongd",
+              "displayName": "Jukebox",
+              "required": false,
+              "enabled": true
+            },
+            {
+              "id": "b1rtek.gddlintegration",
+              "displayName": "GDDL Integration",
+              "required": false,
+              "enabled": true
+            },
+            {
+              "id": "elohmrow.death_tracker",
+              "displayName": "Death Tracker",
+              "required": false,
+              "enabled": true
+            },
+            {
+              "id": "kevadroz.practicecheckpointpermanence",
+              "displayName": "Practice Checkpoint Permanence",
+              "required": false,
+              "enabled": true
+            },
+            {
+              "id": "cvolton.level-id-api",
+              "displayName": "Editor Level ID API",
+              "required": false,
+              "enabled": true
+            },
+            {
+              "id": "sabe.persistenceapi",
+              "displayName": "PersistenceAPI",
+              "required": false,
+              "enabled": true
+            },
+            {
+              "id": "alk.better-touch-prio",
+              "displayName": "Better Touch Prio",
+              "required": false,
+              "enabled": true
+            }
+          ]
+        }
+      },
+      {
+        "path": "/api/ranked/history",
+        "status": 401,
+        "body": {
+          "message": "Missing Ranked session token",
+          "error": "Unauthorized",
+          "statusCode": 401
+        }
+      },
+      {
+        "path": "/api/ranked/survival/badges",
+        "status": 401,
+        "body": {
+          "message": "Missing Ranked session token",
+          "error": "Unauthorized",
+          "statusCode": 401
+        }
+      },
+      {
+        "path": "/api/ranked/achievements",
+        "status": 401,
+        "body": {
+          "message": "Missing Ranked session token",
+          "error": "Unauthorized",
+          "statusCode": 401
+        }
+      },
+      {
+        "path": "/api/ranked/survival/history",
+        "status": 401,
+        "body": {
+          "message": "Missing Ranked session token",
+          "error": "Unauthorized",
+          "statusCode": 401
+        }
+      },
+      {
+        "path": "/api/ranked/survival/debug/active",
+        "status": 401,
+        "body": {
+          "message": "Missing Ranked session token",
+          "error": "Unauthorized",
+          "statusCode": 401
+        }
+      },
+      {
+        "path": "/api/ranked/survival/online/matches/00000000-0000-4000-8000-000000000001/spectator-live/targets",
+        "status": 401,
+        "body": {
+          "message": "Missing Ranked session token",
+          "error": "Unauthorized",
+          "statusCode": 401
+        }
+      }
+    ]
+  },
+  "database": {
+    "before": {
+      "captured_at": "2026-10-31T06:11:08.443Z",
+      "database": "neondb",
+      "matches": 17,
+      "badges": 1429,
+      "badge_digest": "3b590c968b2314fb4ad24bb276fdd872",
+      "survival_profiles_digest": "fcafb1d1f00f3175d3a7536e8844073b",
+      "solo_profiles_digest": "7c19e6ade222177226aa1851c8765835",
+      "ap_ledger": 25,
+      "unlocks": 25,
+      "attempts": 8149,
+      "dm_attempts": 263,
+      "solo_attempts": 0,
+      "accounts": 1
+    },
+    "after": {
+      "captured_at": "2026-10-31T07:01:05.365Z",
+      "database": "neondb",
+      "accounts": 1,
+      "matches": 17,
+      "badges": 1429,
+      "badge_digest": "3b590c968b2314fb4ad24bb276fdd872",
+      "survival_profiles_digest": "fcafb1d1f00f3175d3a7536e8844073b",
+      "solo_profiles_digest": "7c19e6ade222177226aa1851c8765835",
+      "ap_ledger": 25,
+      "unlocks": 25,
+      "attempts": 8149,
+      "dm_attempts": 263,
+      "solo_attempts": 0
+    },
+    "allSelectedCountsAndDigestsUnchanged": true,
+    "newMigrations": 0
+  },
+  "validation": {
+    "rulesPassed": 361,
+    "serverPassed": 710,
+    "serverSkipped": 1,
+    "nativePassed": 329,
+    "cppDomainProgramsPassed": 10,
+    "localPostgresHttpAndPoolReconnectPassed": 67,
+    "ciPostgresHttpPassed": 66,
+    "releasePlatformBuildsPassed": 5,
+    "debugOnPlatformBuildsPassed": 5,
+    "debugOffPlatformBuildsPassed": 5,
+    "normalSimulationMatches": 1050,
+    "virtualSoakHours": 10,
+    "deviceVerification": false
+  },
+  "limitations": [
+    "Actual GD 2.2081/CBF 1.5.0 gameplay not available",
+    "Entropie exact Native relocation function, positive recapture fixture and 71.295s independent Attempt reproduction unconfirmed",
+    "Historical raw collision scalar meaning and actual object equality cannot be proved from supplied logs; unsupported legacy collision identities stay preserved and fail closed",
+    "Three complete restarts and speed/seek results use independent Native doubles, not actual GD",
+    "Production rollback failure was not deliberately triggered; existing path preserved and policy tests pass",
+    "No controlled fully cold/warm runner comparison; archive and sccache statistics measured from real jobs"
+  ],
+  "changedFiles": [
+    ".github/workflows/build-ranked-debug.yml",
+    ".github/workflows/build-ranked-mod.yml",
+    ".github/workflows/deploy-ranked-lightsail.yml",
+    ".github/workflows/ranked-ci.yml",
+    ".github/workflows/ranked-feedback.yml",
+    ".github/workflows/ranked-native.yml",
+    ".github/workflows/ranked-release.yml",
+    "AGENTS.md",
+    "corum-ranked-mod/changelog.md",
+    "corum-ranked-mod/mod.json",
+    "corum-ranked-mod/src/PlayLayer.cpp",
+    "corum-ranked-mod/src/SpectatorLiveRuntime.cpp",
+    "corum-ranked-mod/src/SpectatorLiveRuntime.hpp",
+    "corum-ranked-mod/src/SurvivalSceneBridge.hpp",
+    "corum-ranked-mod/src/debug/DebugSpectateRuntime.cpp",
+    "corum-ranked-mod/src/debug/DebugSpectateRuntime.hpp",
+    "corum-ranked-mod/src/domain/SpectatorCapturePolicy.hpp",
+    "corum-ranked-mod/src/domain/SpectatorRemotePolicy.hpp",
+    "corum-ranked-mod/src/domain/SpectatorSourceTrace.hpp",
+    "corum-ranked-mod/src/replay/SurvivalReplayCbfNative.cpp",
+    "corum-ranked-mod/src/replay/SurvivalReplayCbfNative.hpp",
+    "corum-ranked-mod/src/replay/SurvivalReplayCbfTrace.hpp",
+    "corum-ranked-mod/src/replay/SurvivalReplayCodec.hpp",
+    "corum-ranked-mod/src/replay/SurvivalReplayCollisionIdentity.hpp",
+    "corum-ranked-mod/src/replay/SurvivalReplayNative.cpp",
+    "corum-ranked-mod/src/replay/SurvivalReplayPlayback.hpp",
+    "corum-ranked-mod/src/spectator/SpectatorPoseCodec.hpp",
+    "corum-ranked-mod/tests/ModCombineBuildTest.py",
+    "corum-ranked-mod/tests/ModReleasePublishTest.py",
+    "corum-ranked-mod/tests/SpectatorCameraOwnerNativeTest.mjs",
+    "corum-ranked-mod/tests/SpectatorCaptureNativeTest.mjs",
+    "corum-ranked-mod/tests/SpectatorLiveViewerNativeTest.mjs",
+    "corum-ranked-mod/tests/SpectatorLocalSafetySourceTest.mjs",
+    "corum-ranked-mod/tests/SpectatorNativeHookTest.mjs",
+    "corum-ranked-mod/tests/SpectatorPublisherNativeTest.mjs",
+    "corum-ranked-mod/tests/SpectatorWorldDriverNativeTest.mjs",
+    "corum-ranked-mod/tests/SpectatorWorldEventsNativeTest.mjs",
+    "corum-ranked-mod/tests/SurvivalReplayCbfNativeTest.mjs",
+    "corum-ranked-mod/tests/fixtures/entropie-unproven-snaps-beta121.json",
+    "corum-ranked-mod/tests/helpers/InactiveReplayDouble.hpp",
+    "corum-ranked-mod/tools/combine-ranked-packages.py",
+    "corum-ranked-mod/tools/prepare-mod-release.py",
+    "corum-ranked-mod/tools/publish-mod-r2.py",
+    "ranked/Dockerfile.lightsail",
+    "ranked/apps/server/package.json",
+    "ranked/apps/server/src/debug-spectate/debug-spectate.service.ts",
+    "ranked/apps/server/src/health.controller.ts",
+    "ranked/apps/server/src/match/spectator-live.protocol.ts",
+    "ranked/apps/server/src/session/client-version.ts",
+    "ranked/apps/server/src/survival/survival-spectator-live.service.ts",
+    "ranked/apps/server/test/lightsail-deploy-policy.test.ts",
+    "ranked/apps/server/test/spectator-world-events.test.ts",
+    "ranked/docs/workflow-recapture-collision-beta122-diagnosis.md",
+    "ranked/package-lock.json",
+    "ranked/package.json",
+    "ranked/packages/rules/package.json",
+    "ranked/tools/check-workflows.sh",
+    "ranked/tools/tests/test_production_release.py",
+    "ranked/tools/tests/test_published_clients.py",
+    "ranked/tools/tests/test_release_workflow.py",
+    "ranked/tools/verify-production-release.py",
+    "ranked/tools/verify-published-clients.py"
+  ]
+}

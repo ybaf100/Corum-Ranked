@@ -1,0 +1,142 @@
+{
+  "repository": "ybaf100/Corum-Ranked",
+  "main_sha_at_authoring": "5875c91cc3bf64b3eb1cfc3c019dcc5ef4f16b68",
+  "mod_version_at_authoring": "v0.5.0-beta.121",
+  "logs": [
+    {
+      "path": "logs/primary/Geode 2026-10-31 02.16.39.log",
+      "source_name": "Geode 2026-10-31 02.16.39.log",
+      "size_bytes": 316041,
+      "line_count": 1662,
+      "sha256": "8d9a0c836e7ef9751b29685d1b696bb3283ede5cc4386f26cda80c6824fbb1ed",
+      "hits": {
+        "recaptureRequired=true": 0,
+        "[SurvivalReplayDesync]": 7,
+        "CBF_ACTIVE_TIMING_UNSUPPORTED": 0,
+        "CBF_ROOT:before": 5,
+        "CBF_INITIAL_COLLISION_LOG_MISMATCH": 2
+      }
+    },
+    {
+      "path": "logs/primary/Geode 2026-10-31 02.03.18.log",
+      "source_name": "Geode 2026-10-31 02.03.18.log",
+      "size_bytes": 477316,
+      "line_count": 2411,
+      "sha256": "0d06429ed19191ae6bbf008ec81212179ac41f06d61c325186775b08e93f6b53",
+      "hits": {
+        "recaptureRequired=true": 2,
+        "[SurvivalReplayDesync]": 0,
+        "CBF_ACTIVE_TIMING_UNSUPPORTED": 0
+      }
+    },
+    {
+      "path": "logs/primary/Geode 2026-10-30 00.15.34.log",
+      "source_name": "Geode 2026-10-30 00.15.34.log",
+      "size_bytes": 458962,
+      "line_count": 2602,
+      "sha256": "ca825aba36bc785a4b7686b9cb38c0c8865554e055738d8f142f032883f7eaa0",
+      "hits": {
+        "recaptureRequired=true": 1,
+        "[SurvivalReplayDesync]": 0,
+        "CBF_ACTIVE_TIMING_UNSUPPORTED": 0
+      }
+    },
+    {
+      "path": "logs/primary/Geode 2026-10-28 22.03.07(1).log",
+      "source_name": "Geode 2026-10-28 22.03.07(1).log",
+      "size_bytes": 516560,
+      "line_count": 2829,
+      "sha256": "1297e1a0f62149e7dc7cb9074d9b868bc5c5523234833ba33330475a24590d84",
+      "hits": {
+        "recaptureRequired=true": 2,
+        "[SurvivalReplayDesync]": 0,
+        "CBF_ACTIVE_TIMING_UNSUPPORTED": 0
+      }
+    },
+    {
+      "path": "logs/context/spectator/Geode 2026-10-30 00.15.04.log",
+      "source_name": "Geode 2026-10-30 00.15.04.log",
+      "size_bytes": 51977,
+      "line_count": 603,
+      "sha256": "26ae69a4b80bc501cfa2f56e2e607ce8dd2251398e516f43b93ab95606522046",
+      "hits": {
+        "recaptureRequired=true": 0,
+        "[SurvivalReplayDesync]": 0,
+        "CBF_ACTIVE_TIMING_UNSUPPORTED": 0
+      }
+    },
+    {
+      "path": "logs/context/spectator/Geode 2026-10-30 00.15.26.log",
+      "source_name": "Geode 2026-10-30 00.15.26.log",
+      "size_bytes": 49181,
+      "line_count": 537,
+      "sha256": "d5dc6297af3169b5cf6db324f0e9592929082a657207727f58cfe5d4c1e46a31",
+      "hits": {
+        "recaptureRequired=true": 0,
+        "[SurvivalReplayDesync]": 0,
+        "CBF_ACTIVE_TIMING_UNSUPPORTED": 0
+      }
+    },
+    {
+      "path": "logs/context/replay/Geode 2026-10-29 23.16.41.log",
+      "source_name": "Geode 2026-10-29 23.16.41.log",
+      "size_bytes": 106280,
+      "line_count": 899,
+      "sha256": "1454df5b2c77dbd6469f2534fddfb1e69deb851f603b012570c04de22f85d3e0",
+      "hits": {
+        "recaptureRequired=true": 0,
+        "[SurvivalReplayDesync]": 5,
+        "CBF_ACTIVE_TIMING_UNSUPPORTED": 0
+      }
+    },
+    {
+      "path": "logs/context/replay/Geode 2026-10-29 23.16.41(1).log",
+      "source_name": "Geode 2026-10-29 23.16.41(1).log",
+      "size_bytes": 228349,
+      "line_count": 1788,
+      "sha256": "1d001427833448d2f3795fae07d5947253f7bbf8f3e4f951e390f41f382100b9",
+      "hits": {
+        "recaptureRequired=true": 0,
+        "[SurvivalReplayDesync]": 5,
+        "CBF_ACTIVE_TIMING_UNSUPPORTED": 0
+      }
+    },
+    {
+      "path": "logs/context/replay/Geode 2026-10-30 07.33.16.log",
+      "source_name": "Geode 2026-10-30 07.33.16.log",
+      "size_bytes": 60311,
+      "line_count": 637,
+      "sha256": "4f5da56cb041e6a9214293622aacd2354ba33fcc5692ebee4c2663d4d84a0fda",
+      "hits": {
+        "recaptureRequired=true": 0,
+        "[SurvivalReplayDesync]": 1,
+        "CBF_ACTIVE_TIMING_UNSUPPORTED": 0
+      }
+    },
+    {
+      "path": "logs/context/replay/Geode 2026-10-30 19.55.15.log",
+      "source_name": "Geode 2026-10-30 19.55.15.log",
+      "size_bytes": 81929,
+      "line_count": 791,
+      "sha256": "71d8282f9e9af27126b80ce500f21f58a0361b03ff96e0198dec0d844b11c72b",
+      "hits": {
+        "recaptureRequired=true": 0,
+        "[SurvivalReplayDesync]": 0,
+        "CBF_ACTIVE_TIMING_UNSUPPORTED": 1
+      }
+    },
+    {
+      "path": "logs/context/replay/Geode 2026-10-30 21.59.54.log",
+      "source_name": "Geode 2026-10-30 21.59.54.log",
+      "size_bytes": 187529,
+      "line_count": 1277,
+      "sha256": "de3a6b04577d7ee49f68fef3d1cb87f846c86d66fa55bf569ab6001497eb081f",
+      "hits": {
+        "recaptureRequired=true": 0,
+        "[SurvivalReplayDesync]": 3,
+        "CBF_ACTIVE_TIMING_UNSUPPORTED": 0
+      }
+    }
+  ],
+  "package_revision": "2026-10-31-v2-cbf-collision-desync"
+}

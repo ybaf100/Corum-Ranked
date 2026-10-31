@@ -1,0 +1,75 @@
+corum-ranked-mod/src/SpectatorLiveRuntime.cpp:571:            applyViewerResponse(root);
+corum-ranked-mod/src/SpectatorLiveRuntime.cpp:589:void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
+corum-ranked-mod/src/SpectatorLiveRuntime.cpp:627:            m_heldPresentation=m_restoreTimeline.frame();m_restoreTimeline.reset();noteWorldPartial("RESTORE_HISTORY_GAP");m_forceRestoreRequest=true;
+corum-ranked-mod/src/SpectatorLiveRuntime.cpp:662:    if(m_debugContextId.empty() && !hasRestoration)noteWorldPartial("WORLD_HISTORY_UNAVAILABLE");
+corum-ranked-mod/src/SpectatorLiveRuntime.cpp:664:    if(!hasRestoration)noteWorldPartial("WORLD_HISTORY_UNAVAILABLE");
+corum-ranked-mod/src/SpectatorLiveRuntime.cpp:687:                m_viewTerminalAttemptId=attemptId;m_lastViewSequence=restoration["headSequence"].asInt().unwrapOr(m_lastViewSequence);m_forceRestoreRequest=false;noteWorldPartial("ATTEMPT_ENDED_DURING_RESTORE");
+corum-ranked-mod/src/SpectatorLiveRuntime.cpp:713:            if(!available)noteWorldPartial(restoration["reason"].asString().unwrapOr("WORLD_HISTORY_UNAVAILABLE"));
+corum-ranked-mod/src/SpectatorLiveRuntime.cpp:714:            else if(restoration["headSequence"].asInt().unwrapOr(0)>0)noteWorldPartial("NATIVE_HISTORY_REPLAY_LIMITED");
+corum-ranked-mod/src/SpectatorLiveRuntime.cpp:807:        if(pose.randomEvents&&(!pose.simulation||!m_randomEvents.push(pose.randomEvents,pose.simulation->elapsedMs,elapsedMs))){noteWorldPartial("RANDOM_EVENT_HISTORY_INCOMPLETE");}
+corum-ranked-mod/src/SpectatorLiveRuntime.cpp:814:        if(hasRestoration && (!pose.camera || !pose.camera->transform))noteWorldPartial("CAMERA_TRANSFORM_UNAVAILABLE");
+corum-ranked-mod/src/SpectatorLiveRuntime.cpp:815:        if(pose.dual)noteWorldPartial("DUAL_PLAYER2_TRIGGERS_UNVERIFIED");
+corum-ranked-mod/src/SpectatorLiveRuntime.cpp:959:void SpectatorLiveRuntime::requestSceneRestore(){
+corum-ranked-mod/src/SpectatorLiveRuntime.cpp:968:void SpectatorLiveRuntime::restorationApplied(SpectatorRemoteFrame const& frame,bool clockAdvanced,double workMs){
+corum-ranked-mod/src/SpectatorLiveRuntime.cpp:972:    if(!clockAdvanced)noteWorldPartial("NATIVE_WORLD_CLOCK_HELD");
+corum-ranked-mod/src/SpectatorLiveRuntime.cpp:980:void SpectatorLiveRuntime::noteWorldPartial(std::string reason){
+corum-ranked-mod/src/domain/SpectatorSourceTrace.hpp:7:struct SpectatorSourceTrace {
+corum-ranked-mod/src/PlayLayer.cpp:21:#include "domain/SpectatorSourceTrace.hpp"
+corum-ranked-mod/src/PlayLayer.cpp:252:        corum::ranked::SpectatorSourceTrace spectatorSourceTrace;
+corum-ranked-mod/src/PlayLayer.cpp:879:        if(frame&&frame->pose&&!frame->pose->audio){live.noteWorldPartial("AUDIO_TIMELINE_UNAVAILABLE");live.audioPrepared(true);}
+corum-ranked-mod/src/PlayLayer.cpp:885:        if(track.empty() || corum::ranked::spectatorTrackHash(track)!=sample.trackHash){pause();live.noteWorldPartial("AUDIO_TRACK_UNAVAILABLE");live.audioPrepared(false);return;}
+corum-ranked-mod/src/PlayLayer.cpp:970:    bool tracesSpectatorPlayer(PlayerObject* player){return player&&corum::ranked::SpectatorSourceTrace::window(m_fields->levelId,m_gameState.m_levelTime,player->getPositionX())&&observesSpectatorPlayer(player);}
+corum-ranked-mod/src/PlayLayer.cpp:985:        log::info("[SpectatorSourceTrace] attempt={} stage={} frame={} order={} event={} nativeStep={} nativeMs={} p2={} before=({},{}) after=({},{}) mode={} gravity={} velocity={} lastPosition=({},{}) teleportedBefore={} teleportedAfter={} objectId={} runtimeId={} result={} pendingEvents={}",
+corum-ranked-mod/src/PlayLayer.cpp:998:        if(corum::ranked::SpectatorSourceTrace::window(m_fields->levelId,m_gameState.m_levelTime,player->getPositionX()))identity=corum::ranked::SpectatorSnapTrace{static_cast<std::int64_t>(++trace.event),static_cast<std::int64_t>(trace.frame),m_currentStep,m_gameState.m_levelTime*1000,callback};
+corum-ranked-mod/src/PlayLayer.cpp:1089:            if(!m_fields->survivalLiveLevel)spectatorTransport().requestSceneRestore();
+corum-ranked-mod/src/PlayLayer.cpp:1216:        log::info("[DebugSpectate] native-path window={} frames={} sequence={} elapsedMs={} segment={} blockedUpdate={} checkCollisions={} collisionObjects={} touchedObject={} activatedObjectIDs={} touchedTrigger={} canActivate={} allowed={} teleport={} spawn={} commands={} follow={} dynamicMove={} triggerObject={} repeatedTriggerCalls={} lastX={} lastY={} x={} y={}",
+corum-ranked-mod/src/PlayLayer.cpp:2971:            if(owner->m_fields->spectatorWorldDriver.partialHistory())live.noteWorldPartial(
+corum-ranked-mod/src/PlayLayer.cpp:2979:                if(restoring){live.restorationApplied(restorationFrames[step],owner->m_fields->spectatorWorldPoseApplied,0);continue;}
+corum-ranked-mod/src/PlayLayer.cpp:3008:            if(restoring)live.restorationApplied(restorationFrames[step],m_gameState.m_levelTime>worldClockBefore,
+corum-ranked-mod/src/replay/SurvivalReplayCbfNative.hpp:17:void beginCbfNativeFrame(PlayLayer*,Playback* replay=nullptr);
+corum-ranked-mod/src/replay/SurvivalReplayCbfNative.hpp:19:matjson::Value finishCbfNativeFrame();
+corum-ranked-mod/src/replay/SurvivalReplayCbfNative.hpp:22:matjson::Value captureCbfInitial(PlayLayer*,bool newSourceAttempt=false);
+corum-ranked-mod/src/replay/SurvivalReplayCbfNative.hpp:24:std::string prepareCbfInitialCollisionLogs(PlayLayer*,matjson::Value const&,bool nativeResetOwned);
+corum-ranked-mod/src/replay/SurvivalReplayCbfTrace.hpp:3:#include "SurvivalReplayCollisionIdentity.hpp"
+corum-ranked-mod/src/replay/SurvivalReplayPlayback.hpp:55:    bool unprovenCollisionIdentity()const{auto reason=str(m_failure,"reason");return m_desync&&(reason=="INITIAL_COLLISION_IDENTITY_UNAVAILABLE"||reason=="CBF_LEGACY_COLLISION_IDENTITY_UNAVAILABLE"||reason=="CBF_COLLISION_IDENTITY_UNPROVEN");}
+corum-ranked-mod/src/replay/SurvivalReplayCollisionIdentity.hpp:17:class ReplayCollisionIdentity final {
+corum-ranked-mod/src/replay/SurvivalReplayNative.cpp:91:   if(m_fields->replayOwned){m_isTestMode=true;resetReplayInitial();addReplayHud();}
+corum-ranked-mod/src/replay/SurvivalReplayNative.cpp:92:   if(m_fields->liveWorldOwned)resetReplayInitial();m_fields->ready=true;return true;
+corum-ranked-mod/src/replay/SurvivalReplayNative.cpp:123:    void resetReplayInitial(){
+corum-ranked-mod/src/replay/SurvivalReplayNative.cpp:131:        if(problem.empty()&&replay->cbf())problem=corum::ranked::replay::prepareCbfInitialCollisionLogs(this,initial["cbfInitial"],m_fields->replayOwned||m_fields->liveWorldOwned);
+corum-ranked-mod/src/replay/SurvivalReplayNative.cpp:134:            if(problem.starts_with("CBF_INITIAL"))replay->reject(problem,initial["cbfInitial"],corum::ranked::replay::captureCbfInitial(this),"$.cbfInitial");
+corum-ranked-mod/src/replay/SurvivalReplayNative.cpp:196:        if(replay->takeReset()){m_fields->internalReset=true;PlayLayer::resetLevel();m_fields->internalReset=false;m_isTestMode=m_fields->replayOwned;replay->restart();resetReplayInitial();}
+corum-ranked-mod/src/replay/SurvivalReplayNative.cpp:217:            if(replay->cbf())corum::ranked::replay::beginCbfNativeFrame(this,replay);
+corum-ranked-mod/src/replay/SurvivalReplayNative.cpp:219:            if(replay->cbf())corum::ranked::replay::finishCbfNativeFrame();
+corum-ranked-mod/src/replay/SurvivalReplayNative.cpp:237:          auto status=replay->unprovenCollisionIdentity()?"COLLISION IDENTITY UNAVAILABLE":replay->desync()?"REPLAY DESYNC":replay->seeking()?"SEEKING":replay->ended()?"FINISHED":replay->paused()?"PAUSED":"PLAYING";
+corum-ranked-mod/src/replay/SurvivalReplayNative.cpp:273:        if(recorder.cbfCapture())initial["cbfInitial"]=corum::ranked::replay::captureCbfInitial(play,true);
+corum-ranked-mod/src/replay/SurvivalReplayNative.cpp:281:      if(recorder.active()&&recorder.physicsEnvironmentUnchanged()){corum::ranked::replay::beginNativeInputClock(play);if(recorder.cbfCapture()){corum::ranked::replay::beginCbfNativeFrame(play);cbfFrameBegan=true;}replay->resetReplayTrace();corum::ranked::beginNativeWorldEventCapture(play);recorder.nativeFrameBegin();frameBegan=true;frameAttempt=recorder.currentAttemptId();frameClockGeneration=corum::ranked::replay::nativeInputClockGeneration();recorder.elapsed(play->m_attemptTime);matjson::Value frame;frame["kind"]="frame";frame["dt"]=static_cast<double>(dt);frame["queued"]=corum::ranked::replay::encodeReplayButtons(m_queuedButtons);frame["preInputs"]=recorder.takePreInputs();recorder.add(frame);}
+corum-ranked-mod/src/replay/SurvivalReplayNative.cpp:291:    if(cbfFrameBegan&&sameCapture){auto cbf=corum::ranked::replay::finishCbfNativeFrame();if(auto error=corum::ranked::replay::cbfNativeFrameError();!error.empty())recorder.unsupported(error);else recorder.add(std::move(cbf));}
+corum-ranked-mod/src/replay/SurvivalReplayCbfNative.cpp:3:#include "SurvivalReplayCollisionIdentity.hpp"
+corum-ranked-mod/src/replay/SurvivalReplayCbfNative.cpp:44:    PlayLayer* owner=nullptr;std::string error;ReplayCollisionIdentity identities;std::vector<Ref<GameObject>> retained;
+corum-ranked-mod/src/replay/SurvivalReplayCbfNative.cpp:46:CollisionWorld& collisionWorld(){static auto* value=new CollisionWorld;return *value;}
+corum-ranked-mod/src/replay/SurvivalReplayCbfNative.cpp:56:ReplayCollisionIdentity::Object collisionObject(PlayLayer* layer,std::size_t index){
+corum-ranked-mod/src/replay/SurvivalReplayCbfNative.cpp:62:    auto& world=collisionWorld();if(world.owner==layer&&!reset)return;
+corum-ranked-mod/src/replay/SurvivalReplayCbfNative.cpp:63:    world.retained.clear();world.error.clear();world.owner=layer;std::vector<ReplayCollisionIdentity::Object> objects;
+corum-ranked-mod/src/replay/SurvivalReplayCbfNative.cpp:66:        for(unsigned i=0;i<layer->m_objects->count();++i){auto* object=typeinfo_cast<GameObject*>(layer->m_objects->objectAtIndex(i));world.retained.emplace_back(object);objects.push_back(collisionObject(layer,i));}}
+corum-ranked-mod/src/replay/SurvivalReplayCbfNative.cpp:73:    auto& world=collisionWorld();auto at=world.identities.index(raw);auto current=at?collisionObject(world.owner,*at):ReplayCollisionIdentity::Object{};
+corum-ranked-mod/src/replay/SurvivalReplayCbfNative.cpp:82:struct NativeCollisionQuery {
+corum-ranked-mod/src/replay/SurvivalReplayCbfNative.cpp:84:    explicit NativeCollisionQuery(PlayerObject* p):player(p){auto& s=state();engaged=s.frame&&s.collisionIdentity&&p&&(p==s.layer->m_player1||p==s.layer->m_player2);if(engaged){epoch=s.epoch;previous=std::move(s.collisionCandidates[playerIndex(p)]);s.collisionCandidates[playerIndex(p)].clear();previousEvidence=s.candidateEvidence[playerIndex(p)];previousCount=s.candidateEvidenceCount[playerIndex(p)];s.candidateEvidenceCount[playerIndex(p)]=0;}}
+corum-ranked-mod/src/replay/SurvivalReplayCbfNative.cpp:88:        auto raw=collisionRaw(player);std::array<CCDictionary*,4> logs{player->m_collisionLogBottom,player->m_collisionLogTop,player->m_collisionLogLeft,player->m_collisionLogRight};auto& world=collisionWorld();
+corum-ranked-mod/src/replay/SurvivalReplayCbfNative.cpp:91:            auto at=world.identities.index(raw[side]);if(!at)continue;auto current=collisionObject(s.layer,*at);auto* object=reinterpret_cast<GameObject*>(current.instance);
+corum-ranked-mod/src/replay/SurvivalReplayCbfNative.cpp:99:    ~NativeCollisionQuery(){finish();}
+corum-ranked-mod/src/replay/SurvivalReplayCbfNative.cpp:327:void beginCbfNativeFrame(PlayLayer* layer,Playback* replay){
+corum-ranked-mod/src/replay/SurvivalReplayCbfNative.cpp:329:    if(!collisionWorld().error.empty())fail(collisionWorld().error);
+corum-ranked-mod/src/replay/SurvivalReplayCbfNative.cpp:331:        if(s.collisionIdentity&&(s.data["objectIdentity"]!=collisionWorld().identities.manifest()||s.data["objectIdentity"]!=replay->initial()["cbfInitial"]["objects"]))fail("CBF_MAP_OBJECT_IDENTITY_MISMATCH",s.data["objectIdentity"],collisionWorld().identities.manifest());}
+corum-ranked-mod/src/replay/SurvivalReplayCbfNative.cpp:332:    else{s.collisionIdentity=true;s.data=Json::object();s.data["objectIdentity"]=collisionWorld().identities.manifest();s.data["collisionWitnesses"]=Json::array();s.data["kind"]="cbf";s.data["schema"]=CbfBoundarySchema;s.data["roots"]=Json::array();s.data["clocks"]=Json::array();}
+corum-ranked-mod/src/replay/SurvivalReplayCbfNative.cpp:339:    auto& world=collisionWorld();if(world.owner==owner){world.retained.clear();world.owner=nullptr;world.identities.reset({});}
+corum-ranked-mod/src/replay/SurvivalReplayCbfNative.cpp:343:Json finishCbfNativeFrame(){auto& s=state();if(!s.frame)return nullptr;if(s.playback){if(s.rootIndex!=s.data["roots"].size()||s.clockIndex!=s.data["clocks"].size())fail("CBF_UNCONSUMED_FRAME_BOUNDARIES");}s.frame=s.root=false;return s.playback?s.data:cbfCompactFrame(s.data);}
+corum-ranked-mod/src/replay/SurvivalReplayCbfNative.cpp:346:Json captureCbfInitial(PlayLayer* layer,bool newSourceAttempt){
+corum-ranked-mod/src/replay/SurvivalReplayCbfNative.cpp:350:    prepareCollisionWorld(layer,newSourceAttempt);value["objects"]=collisionWorld().identities.manifest();
+corum-ranked-mod/src/replay/SurvivalReplayCbfNative.cpp:353:std::string prepareCbfInitialCollisionLogs(PlayLayer* layer,Json const& value,bool nativeResetOwned){
+corum-ranked-mod/src/replay/SurvivalReplayCbfNative.cpp:361:    if(!collisionWorld().error.empty())return collisionWorld().error;
+corum-ranked-mod/src/replay/SurvivalReplayCbfNative.cpp:362:    if(value["objects"].isObject()&&value["objects"]!=collisionWorld().identities.manifest())return "CBF_MAP_OBJECT_IDENTITY_MISMATCH";
+corum-ranked-mod/src/replay/SurvivalReplayCbfNative.cpp:363:    auto before=captureCbfInitial(layer);
+corum-ranked-mod/src/replay/SurvivalReplayCbfNative.cpp:365:    log::info("[SurvivalReplayCollisionReset] owned=true before={} expected={} after={} rawP1={} rawP2={}",before.dump(matjson::NO_INDENTATION),value.dump(matjson::NO_INDENTATION),captureCbfInitial(layer).dump(matjson::NO_INDENTATION),collisionRawJson(layer->m_player1).dump(matjson::NO_INDENTATION),collisionRawJson(layer->m_player2).dump(matjson::NO_INDENTATION));
+corum-ranked-mod/src/replay/SurvivalReplayCbfNative.cpp:372:    auto current=captureCbfInitial(layer);for(int i=0;i<2;++i){if(!replayPhysicsPointValid(value["players"][i]["lastPosition"]))return "CBF_INITIAL_POSITION_INVALID";if(value["players"][i]["collisionLogs"]!=current["players"][i]["collisionLogs"])return "CBF_INITIAL_COLLISION_LOG_MISMATCH";}
+corum-ranked-mod/src/replay/SurvivalReplayCbfNative.cpp:415:    int checkCollisions(PlayerObject* p,float dt,bool ignoreDamage){corum::ranked::replay::Json fields;fields["ignoreDamage"]=ignoreDamage;corum::ranked::replay::Operation operation("COLLISION",p,dt,std::move(fields));corum::ranked::replay::NativeCollisionQuery query(p);auto result=GJBaseGameLayer::checkCollisions(p,dt,ignoreDamage);query.finish();return result;}
