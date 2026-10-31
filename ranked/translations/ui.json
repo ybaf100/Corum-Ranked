@@ -2409,11 +2409,11 @@
   },
   "spectator-world-desync": {
     "en": "WORLD DESYNC · WAITING FOR NEXT ATTEMPT",
-    "ko": "월드 불일치 · 다음 시도 대기"
+    "ko": "맵 상태 불일치 · 다음 시도 대기"
   },
   "spectator-recapture": {
     "en": "RECAPTURE REQUIRED · WAITING FOR NEXT ATTEMPT",
-    "ko": "재캡처 필요 · 다음 시도 대기"
+    "ko": "증거 부족 · 다음 시도 대기"
   },
   "spectator-disconnected": {
     "en": "DISCONNECTED · REOPEN SPECTATE",
@@ -2421,7 +2421,7 @@
   },
   "spectator-buffering": {
     "en": "BUFFERING...",
-    "ko": "버퍼링 중..."
+    "ko": "수신 지연 중..."
   },
   "spectator-history-gap": {
     "en": "HISTORY GAP · RESYNCING",
