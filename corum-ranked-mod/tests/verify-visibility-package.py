@@ -13,7 +13,7 @@ def verify_binary(binary, platform, debug):
     expected = {"PlayerObject::" + name for name in
                 ("update", "updateRotation", "spiderTestJump", "setPosition", "setRotation")}
     if platform != "win":
-        expected.add("PlayerObject::updateSpecial")
+        expected.update({"PlayerObject::updateSpecial", "PlayerObject::playerTeleported"})
     else:
         expected.add("PlayerObject::updateShipRotation")
     player = {name for name in targets if name.startswith("PlayerObject::")}
@@ -27,10 +27,12 @@ def verify_binary(binary, platform, debug):
                 "PauseLayer::customSetup",
                 "GameManager::returnToLastScene",
                 "GJBaseGameLayer::update", "GJBaseGameLayer::updateCamera",
-                "GJBaseGameLayer::teleportPlayer", "PlayLayer::startMusic",
+                "GJBaseGameLayer::teleportPlayer", "GJBaseGameLayer::checkCameraLimitAfterTeleport", "PlayLayer::startMusic",
                 "RandTriggerGameObject::triggerObject", "GJBaseGameLayer::spawnGroup",
                 "GJBaseGameLayer::processCommands", "GJBaseGameLayer::processQueuedButtons", "GJBaseGameLayer::handleButton",
                 "GJBaseGameLayer::checkCollisions", "GJBaseGameLayer::collisionCheckObjects"}
+    if platform != "win":
+        required.add("GJBaseGameLayer::getPortalTargetPos")
     forbidden = {"GJGameLevel::saveNewScore", "GJGameLevel::storeNewLocalScore"}
     if not required <= targets or targets & forbidden:
         raise ValueError("missing safety/capture boundary or unsafe persistence detour")

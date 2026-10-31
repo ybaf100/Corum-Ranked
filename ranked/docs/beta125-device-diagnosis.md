@@ -86,3 +86,10 @@ Native playback/Entropie fixed until an actual device run establishes it.
   ModReleaseBuild2/2, ModReleasePublish10/10; production/publication guards10/10.
 - Full CI/platform builds and public deployment are separate release gates.
   No actual beta.125 GD/CBF execution has been performed in this environment.
+
+Initial coordinated run41199079096 compiled iOS Debug OFF successfully but its
+package verifier rejected the new playerTeleported observation hook. The exact
+non-Windows PlayerObject allowlist was updated, and the camera/target diagnostic
+helpers are now required in packages. Negative tests still reject visibility
+hooks, absent safety/observation boundaries and leaked Debug probes (3/3 passed).
+No package publication or production activation passed that failed gate.
