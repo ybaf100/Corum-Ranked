@@ -133,6 +133,10 @@ test('seven cached previews can paint all eight fixed roulette slots without a b
 #include <cassert>
 int main(){using namespace corum::ranked;SurvivalThumbnailReel r;for(unsigned n=1;n<=7;++n)r.observe(n);
  for(unsigned i=0;i<8;++i)assert(r.imageIdForSlot(i)>0);
+ // Placeholders borrow different arrived images (no run of the first image).
+ SurvivalThumbnailReel few;few.observe(5);few.observe(6);few.observe(7);
+ for(unsigned i=3;i<8;++i)assert(few.imageIdForSlot(i)!=few.imageIdForSlot(i+1)||i+1==8);
+ assert(few.imageIdForSlot(3)!=few.imageIdForSlot(4)&&few.imageIdForSlot(4)!=few.imageIdForSlot(5));
  auto ids=r.slots();r.observe(4);assert(r.slots()==ids);
 }`);
 });

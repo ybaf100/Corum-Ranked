@@ -176,7 +176,7 @@ struct SurvivalRuntime{
  bool active()const{return true;}bool freePlaying()const{return m_freePlay.active;}bool normalRoundCleared()const{return cleared;}bool officialRoundCleared()const{return cleared;}bool surrenderPending()const{return false;}bool observing()const{return watch;}long remainingMs()const{return remaining;}
  LevelPreparationContext preparationContext()const{return context;}bool validateNative(GJGameLevel*l)const{return l&&l->id==context.levelId;}
  void chooseOutcome(SurvivalOutcomeChoice){watch=false;}void pumpFreePlayReturn(){++returns;}
- Value m_attemptOwner,m_attemptMetadata;Value event(std::string){return {};}void enqueue(Value){++events;}
+ Value m_attemptOwner,m_attemptMetadata;std::string m_lastEndedAttempt;Value event(std::string){return {};}void enqueue(Value){++events;}
  bool canFreePlay()const;bool canReplayCleared()const;bool armClearedReplay(GJGameLevel*,CCScene*);bool canPlay()const;void leaveObserver();void endAttempt(double,std::string reason="EXIT",std::string expectedAttempt="");
 };
 ${['bool SurvivalRuntime::canFreePlay()', 'bool SurvivalRuntime::canReplayCleared()', 'bool SurvivalRuntime::armClearedReplay(', 'bool SurvivalRuntime::canPlay()', 'void SurvivalRuntime::leaveObserver()', 'void SurvivalRuntime::endAttempt('].map(n=>method(src,n)).join('\n')}

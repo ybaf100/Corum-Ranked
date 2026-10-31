@@ -31,7 +31,7 @@ PlayLayer* retired=nullptr;void retireNativeReplayFrame(PlayLayer*p){retired=p;}
 }
 struct SurvivalRuntime{static auto&get(){static SurvivalRuntime r;return r;}
  struct View{std::string id="match",roundKey="old",state="PLAYING",error,activeAttemptId="";int mapGeneration=1;double activeAttemptProgress=0;}m_view;
- std::string m_attempt="a",m_enteredContext="old",m_recoveredEndAttempt;double m_attemptBest=40;Json m_attemptOwner,m_attemptMetadata;bool free=false,watch=false;
+ std::string m_attempt="a",m_enteredContext="old",m_recoveredEndAttempt,m_lastEndedAttempt;double m_attemptBest=40;Json m_attemptOwner,m_attemptMetadata;bool free=false,watch=false;
  std::vector<Json> events;
  SurvivalRuntime(){m_attemptOwner=event("ATTEMPT_END");m_attemptOwner["attemptId"]="a";m_attemptMetadata["matchId"]="match";m_attemptMetadata["attemptId"]="a";}
  bool freePlaying()const{return free;}bool observing()const{return watch;}bool surrenderPending()const{return false;}std::optional<int>roundRemainingMs()const{return 0;}

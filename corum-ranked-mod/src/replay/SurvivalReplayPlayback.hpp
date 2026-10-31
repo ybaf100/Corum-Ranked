@@ -32,13 +32,15 @@ public:
     std::uint64_t seekGeneration()const{return m_seekGeneration;}
     double seekTarget()const{return m_target;}
     /** 0..1 progress of the active seek simulation. */
+    /** Seconds of native world the active seek must simulate in total. */
+    double seekSpan()const{return m_seeking?std::max(0.,m_target-m_seekOrigin):0;}
     double seekProgress()const{if(!m_seeking)return 1;auto span=m_target-m_seekOrigin;return span>1e-6?std::clamp((m_time-m_seekOrigin)/span,0.,1.):1;}
     struct Marker{double time;char kind;}; // D death, C clear, R random, T native teleport/snap anchor
     std::vector<Marker> const& markers()const{return m_markers;}
     static constexpr std::size_t kMaxMarkers=96;
     void followRemote(std::string const& attempt,double elapsed,double progress){
         if(!std::isfinite(elapsed)||!std::isfinite(progress)||progress<0||progress>100)return;
-        if(attempt!=m_followAttempt){m_followAttempt=attempt;m_reset=true;m_seeking=true;m_target=0;}
+        if(attempt!=m_followAttempt){m_followAttempt=attempt;m_reset=true;m_seeking=true;m_target=0;m_seekOrigin=0;}
         double best=1e30,target=0;
         auto low=std::lower_bound(m_anchors.begin(),m_anchors.end(),progress-.5,[](auto const&a,double value){return a.progress<value;});
         auto high=std::upper_bound(low,m_anchors.end(),progress+.5,[](double value,auto const&a){return value<a.progress;});
@@ -49,10 +51,10 @@ public:
           if(cost<best){best=cost;target=anchor.time;}
         }
         m_partial=best>5||std::abs(target-elapsed)>2||candidates>120;
-        if(m_reset){m_target=target;m_seeking=true;return;}
+        if(m_reset){m_target=target;m_seeking=true;m_seekOrigin=0;return;}
         // Tiny regressions hold the existing world. Large discontinuities replay forward from a clean reset.
-        if(target>m_time+.05){m_target=target;m_seeking=true;}
-        else if(target<m_time-1){m_reset=true;m_target=target;m_seeking=true;}
+        if(target>m_time+.05){if(!m_seeking)m_seekOrigin=m_time;m_target=target;m_seeking=true;}
+        else if(target<m_time-1){m_reset=true;m_target=target;m_seeking=true;m_seekOrigin=0;}
         m_budget=0;
     }
     bool partial()const{return m_partial;}

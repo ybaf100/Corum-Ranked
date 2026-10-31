@@ -54,7 +54,7 @@ struct CCNode: CCObject {
     void unscheduleAllSelectors() { ++unschedules; }
     void stopAllActions() {}
     void setID(std::string const&) {}
-    void setAnchorPoint(CCPoint) {}
+    CCPoint anchorPoint{.5f,.5f};void setAnchorPoint(CCPoint p){anchorPoint=p;}CCPoint getAnchorPoint()const{return anchorPoint;}
     void ignoreAnchorPointForPosition(bool) {}
     void setPosition(CCPoint p) { position=p; ++positionWrites; }
     void setRotation(float r) { rotation=r; ++rotationWrites; }
@@ -82,9 +82,18 @@ struct CCNode: CCObject {
     }
 };
 struct CCLayer: CCNode { static CCLayer* create() { auto* p=new CCLayer; p->autorelease(); return p; } };
+#ifndef GL_SRC_ALPHA
+#define GL_SRC_ALPHA 0x0302
+#endif
+#ifndef GL_ONE
+#define GL_ONE 1
+#endif
+struct ccBlendFunc{unsigned src=0,dst=0;};
 struct CCSprite: CCNode {
-    CCRect rect{};void* image=nullptr;
+    CCRect rect{};void* image=nullptr;ccBlendFunc blend{};
     static CCSprite* create(){auto* s=new CCSprite;s->autorelease();return s;}
+    static CCSprite* createWithSpriteFrame(void* frame){auto* s=create();s->image=frame;return s;}
+    void setBlendFunc(ccBlendFunc b){blend=b;}
     void setTextureRect(CCRect r){rect=r;}void* displayFrame(){return image;}void setDisplayFrame(void* v){image=v;}
 };
 struct CCMotionStreak:CCNode {int resets=0,updates=0;void reset(){++resets;}void update(float){++updates;}};
@@ -174,6 +183,7 @@ struct PlayerObject: cocos2d::CCNode {
       *m_vehicleGroundParticles=nullptr,*m_ufoClickParticles=nullptr,*m_robotBurstParticles=nullptr,
       *m_dashParticles=nullptr,*m_swingBurstParticles1=nullptr,*m_swingBurstParticles2=nullptr,
       *m_landParticles0=nullptr,*m_landParticles1=nullptr;
+    cocos2d::CCSprite* m_dashFireSprite=nullptr;
     static PlayerObject* create(int,int,PlayLayer*,cocos2d::CCLayer* layer,bool) {
         ++creates; if(fail)return nullptr;
         auto* p=new PlayerObject; p->autorelease();

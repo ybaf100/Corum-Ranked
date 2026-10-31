@@ -44,6 +44,8 @@
 #include "ui/RankedTranslations.hpp"
 #include <Geode/binding/PauseLayer.hpp>
 #include "ui/RankedVisuals.hpp"
+#include "ui/SeekProgressOverlay.hpp"
+#include "replay/SurvivalReplaySeekSpeed.hpp"
 #include "ui/RankedEntryOverlay.hpp"
 #include "ui/RankedInput.hpp"
 #include "ui/PlacementGradeBadge.hpp"
@@ -260,6 +262,8 @@ public:
         std::array<std::optional<corum::ranked::SpectatorGhostPose>,2> pendingTeleportSource{};
         std::array<double,2> pendingTeleportLevelTime{-1,-1};
         int portalTeleportDepth=0;
+        unsigned spectatorTeleportHookLogs=0,spectatorTeleportDecisionLogs=0,pauseExitLogs=0;
+        corum::ranked::ui::SeekProgressOverlay spectatorSeekCover;
         std::shared_ptr<corum::ranked::SpectatorCosmetics const> spectatorCosmetics;
         std::chrono::steady_clock::time_point nextCosmeticCaptureAt{};
 
@@ -1022,6 +1026,13 @@ public:
             capture?(player==m_player2&&capture->player2?(capture->player2->discontinuity?capture->player2->discontinuity->nativeEvents.size():0):(capture->discontinuity?capture->discontinuity->nativeEvents.size():0)):0);
     }
 
+    // Replay & spectate seek-speed setting also bounds spectator restore catch-up.
+    std::pair<std::size_t,double> spectatorCatchupBudget(){
+        auto const budget=corum::ranked::replay::spectatorCatchupBudget(corum::ranked::replay::replaySeekSpeedFromInt(
+            static_cast<int>(Mod::get()->getSavedValue<int64_t>("replay-seek-speed",1))));
+        return {budget.framesPerPump,budget.millisPerPump};
+    }
+
     void notePendingTeleportSource(PlayerObject* player) {
         if(!player||!player->m_wasTeleported||!observesSpectatorPlayer(player))return;
         auto const i=player==m_player2?1u:0u;
@@ -1033,7 +1044,15 @@ public:
         if(!player)return;
         auto const i=player==m_player2?1u:0u;
         auto source=m_fields->pendingTeleportSource[i];m_fields->pendingTeleportSource[i].reset();
-        // The portal entry hook captures its own event; never double-count it.
+        // The observed portal entry hook captures its own event; never double-count it.
+        char const* skip=!observesSpectatorPlayer(player)?nullptr:!source?"NO_PENDING_SOURCE":m_fields->portalTeleportDepth>0?"PORTAL_HOOK_OWNS":
+            m_fields->pendingTeleportLevelTime[i]!=m_gameState.m_levelTime?"STEP_MISMATCH":nullptr;
+        if(observesSpectatorPlayer(player)&&m_fields->spectatorTeleportDecisionLogs<16){
+            ++m_fields->spectatorTeleportDecisionLogs;
+            log::info("[SpectatorEvidence] stage=PLAYER_TELEPORTED decision={} player2={} depth={} pendingMs={:.3f} levelTimeMs={:.3f} fromY={} toY={}",
+                skip?skip:"CAPTURE",player==m_player2,m_fields->portalTeleportDepth,m_fields->pendingTeleportLevelTime[i]*1000,m_gameState.m_levelTime*1000,
+                source?source->y:0.f,player->getPositionY());
+        }
         if(!source||m_fields->portalTeleportDepth>0||m_fields->pendingTeleportLevelTime[i]!=m_gameState.m_levelTime)return;
         observeSpectatorNativeSnap(player,corum::ranked::SpectatorDiscontinuity::Teleport,*source,"PLAYER_TELEPORTED");
     }
@@ -1699,6 +1718,7 @@ public:
             if(m_fields->rankedInitialized && !m_fields->nativeEntryHeld) {
                 auto& survival=corum::ranked::SurvivalRuntime::get();
                 if(!m_fields->attemptEndReported){corum::ranked::replay::Recorder::get().finish("RESET",m_hasCompletedLevel?100.0:rankedProgressPercent(this));survival.endAttempt(m_hasCompletedLevel?100.0:rankedProgressPercent(this));}
+                log::info("[SurvivalAttempt] stage=RESET canPlay={} limit={} endReported={} waiting={}",survival.canPlay(),survival.attemptLimitReached(),m_fields->attemptEndReported,m_fields->survivalWaiting);
                 if(survival.attemptLimitReached() || !survival.canPlay()) {m_fields->attemptEndReported=true;beginSurvivalWait(true);return;}
                 m_fields->attemptStartReported=m_fields->attemptEndReported=false;
             }
@@ -1990,7 +2010,25 @@ public:
         if(freePlayReturn)survival.finishFreePlayNativeQuit();
     }
 
+    // The pause menu runs PlayLayer::onExit() while this scene stays the running
+    // scene (no replacement pending). That is not a scene exit: retiring there
+    // ended the official Survival Attempt with SCENE_EXIT, stopped the replay
+    // capture and skipped every later native update, so the level froze at 0%
+    // after resume/restart (beta.126 iOS log: Pause opened -> SCENE_EXIT).
+    // A real exit (replace/pop/transition) still runs the full onExit teardown.
+    bool onExitWithoutSceneChange() {
+        auto* director=CCDirector::sharedDirector();
+        if(!getParent() || getParent()!=director->getRunningScene() || director->getNextScene())return false;
+        if(m_fields->rankedInitialized&&m_fields->pauseExitLogs<8){++m_fields->pauseExitLogs;
+            log::info("[SceneLifecycle] onExit without scene change level={} paused={} survival={}",m_fields->levelId,m_isPaused,m_fields->survivalLevel);}
+        ScopedPersistenceOwner persistence(this);
+        corum::ranked::ScopedSpectatorPersistenceMode noSave(m_isTestMode, blocksLevelPersistence(m_level));
+        PlayLayer::onExit();
+        return true;
+    }
+
     void onExit() {
+        if(onExitWithoutSceneChange())return;
         corum::ranked::finishSurvivalReplayForReturn(this,"SCENE_EXIT",true);
         unschedule(schedule_selector(CorumRankedPlayLayer::survivalFrame));
         if (m_fields->entryOverlay) {
@@ -2864,6 +2902,7 @@ public:
             }
             m_fields->spectatorPanel->setVisible(false);
         }
+        if (!spectatorVisible) m_fields->spectatorSeekCover.hide();
         if (spectatorVisible) {
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
             auto const hudStarted=std::chrono::steady_clock::now();
@@ -2893,6 +2932,14 @@ public:
                 m_fields->spectatorCamera.state() == corum::ranked::SpectatorCameraState::Waiting ? i18n::text("spectator-waiting","WAITING...") : "LIVE";
             if(rendered && rendered->pose && rendered->pose->dual)state+=" · DUAL";
             setHudText(m_fields->spectatorStatusLabel,state);
+            // Restore backfill (>= 1 s of history) runs behind the same seek cover
+            // as replays; progress is the real applied/total validated samples.
+            if(auto [restoreApplied,restoreTotal]=corum::ranked::SpectatorLiveRuntime::get().restoreProgress();
+               status==corum::ranked::SpectatorLiveStatus::Syncing && restoreTotal>=20 && restoreApplied<restoreTotal){
+                m_fields->spectatorSeekCover.attach(this,1490);
+                m_fields->spectatorSeekCover.show(i18n::text("spectator-seeking","Moving to the live position..."),
+                    fmt::format("{}/{}",restoreApplied,restoreTotal),static_cast<double>(restoreApplied)/static_cast<double>(restoreTotal));
+            }else m_fields->spectatorSeekCover.hide();
             limitHudWidth(m_fields->spectatorStatusLabel,140.f,.20f,.14f);
             auto percent=rendered && m_level?corum::ranked::spectatorProgressPercent(*rendered,m_levelLength,m_level->m_timestamp):std::nullopt;
             setHudText(m_fields->spectatorProgressLabel,percent?fmt::format("{:.2f}%",*percent):"--% ");
@@ -3028,7 +3075,8 @@ class $modify(CorumRankedSpectatorCameraHook, GJBaseGameLayer) {
         if (owner && owner->prepareSpectatorScene() && owner->spectatorCameraActive()) {
             if (!owner->beginSpectatorWorldFrame()) return;
             auto& live=owner->spectatorTransport();
-            auto restorationFrames=live.takeRestorationFrames();
+            auto const catchup=owner->spectatorCatchupBudget();
+            auto restorationFrames=live.takeRestorationFrames(catchup.first,catchup.second);
             auto const restoring=!restorationFrames.empty();
             auto const steps=restoring?restorationFrames.size():std::size_t(1);
             for(std::size_t step=0;step<steps;++step){
@@ -3137,9 +3185,18 @@ class $modify(CorumRankedSpectatorCameraHook, GJBaseGameLayer) {
         auto const before = observed ? owner->observedSpectatorPlayerPose(player) : corum::ranked::SpectatorGhostPose{};
         auto const source=player?player->getPosition():CCPoint{};
         auto const flag=player&&player->m_wasTeleported;
-        if(owner)++owner->m_fields->portalTeleportDepth;
+        // Only a hook call that will capture its own PORTAL evidence may suppress
+        // the PlayerObject::playerTeleported fallback. Teleport triggers can call
+        // this with a null player (native picks the players itself); that call
+        // captures nothing here, so the native callback must still record it.
+        if(owner&&!observed&&owner->m_fields->spectatorTeleportHookLogs<8&&(owner->observesSpectatorPlayer(owner->m_player1))){
+            ++owner->m_fields->spectatorTeleportHookLogs;
+            log::info("[SpectatorEvidence] stage=TELEPORT_HOOK_UNOBSERVED player={} objectId={} levelTimeMs={:.1f}",
+                player==nullptr?"null":player==owner->m_player1?"p1":player==owner->m_player2?"p2":"other",object?object->m_objectID:0,owner->m_gameState.m_levelTime*1000);
+        }
+        if(observed)++owner->m_fields->portalTeleportDepth;
         GJBaseGameLayer::teleportPlayer(object, player);
-        if(owner)--owner->m_fields->portalTeleportDepth;
+        if(observed)--owner->m_fields->portalTeleportDepth;
         if(player)corum::ranked::survivalReplayNativeSnap(player,false,source.x,source.y);
         if (observed){owner->traceSpectatorSource(3,"PORTAL",player,before,flag,object->m_objectID,object->m_uniqueID);owner->observeSpectatorNativeSnap(player, corum::ranked::SpectatorDiscontinuity::Teleport, before,"PORTAL");}
     }

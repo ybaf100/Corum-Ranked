@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace corum::ranked::ui {
 
@@ -208,6 +209,77 @@ inline void fitMenuLabelWidth(CCLabelBMFont* text, float width, float maximumSca
 
 inline void fitFullMenuLabel(CCLabelBMFont* text, float width, float height, float scale) {
     fitFullLabel(text, width, height, rankedMenuTextScale(scale));
+}
+
+// CCLabelBMFont's own width wrapping does not reliably break this UTF-8 font
+// (a long Korean warning stayed on one line far past its popup). Break lines
+// explicitly at spaces, or between whole UTF-8 glyphs for an overlong word,
+// then shrink until the complete block fits its reserved box.
+inline void fitWrappedMenuLabel(CCLabelBMFont* text, std::string const& value, float width, float height, float scale) {
+    if (!text || width <= 0 || height <= 0) return;
+    text->setWidth(-1);
+    text->setLineBreakWithoutSpace(false);
+    text->setAlignment(kCCTextAlignmentCenter);
+    auto measure = [text](std::string const& line) {
+        text->setString(line.c_str());
+        return text->getContentSize().width;
+    };
+    auto glyphs = [](std::string const& word) {
+        std::vector<std::string> out;
+        for (std::size_t i = 0; i < word.size();) {
+            auto const lead = static_cast<unsigned char>(word[i]);
+            std::size_t n = lead < 0x80 ? 1 : (lead >> 5) == 0x6 ? 2 : (lead >> 4) == 0xE ? 3 : (lead >> 3) == 0x1E ? 4 : 1;
+            n = std::min(n, word.size() - i);
+            out.push_back(word.substr(i, n));
+            i += n;
+        }
+        return out;
+    };
+    auto current = rankedMenuTextScale(scale);
+    std::string joined = value;
+    for (int pass = 0; pass < 16; ++pass) {
+        setLabelScale(text, current);
+        auto const applied = text->getScale();
+        if (applied <= 0) return;
+        auto const limit = width / applied;
+        std::vector<std::string> lines;
+        std::size_t paragraphStart = 0;
+        while (paragraphStart <= value.size()) {
+            auto paragraphEnd = value.find('\n', paragraphStart);
+            if (paragraphEnd == std::string::npos) paragraphEnd = value.size();
+            auto const paragraph = value.substr(paragraphStart, paragraphEnd - paragraphStart);
+            std::string line;
+            std::size_t wordStart = 0;
+            while (wordStart <= paragraph.size()) {
+                auto wordEnd = paragraph.find(' ', wordStart);
+                if (wordEnd == std::string::npos) wordEnd = paragraph.size();
+                auto const word = paragraph.substr(wordStart, wordEnd - wordStart);
+                wordStart = wordEnd + 1;
+                if (word.empty()) continue;
+                auto const candidate = line.empty() ? word : line + " " + word;
+                if (measure(candidate) <= limit) { line = candidate; continue; }
+                if (!line.empty()) { lines.push_back(line); line.clear(); }
+                if (measure(word) <= limit) { line = word; continue; }
+                for (auto const& glyph : glyphs(word)) {
+                    if (!line.empty() && measure(line + glyph) > limit) { lines.push_back(line); line.clear(); }
+                    line += glyph;
+                }
+            }
+            lines.push_back(line);
+            paragraphStart = paragraphEnd + 1;
+        }
+        joined.clear();
+        for (std::size_t i = 0; i < lines.size(); ++i) { if (i) joined += '\n'; joined += lines[i]; }
+        text->setString(joined.c_str());
+        auto const size = text->getContentSize();
+        if (size.height * applied <= height && size.width * applied <= width + .5f) return;
+        auto const ratio = std::min(height / std::max(1.f, size.height * applied), width / std::max(1.f, size.width * applied));
+        current *= std::clamp(std::sqrt(ratio) * .95f, .5f, .95f);
+    }
+    // Last resort: never draw outside the box.
+    auto const size = text->getContentSize();
+    if (size.width > 0 && size.height > 0)
+        text->setScale(std::min({text->getScale(), width / size.width, height / size.height}));
 }
 
 // Names stay on one line. Clear a previous wrapping width before measuring,

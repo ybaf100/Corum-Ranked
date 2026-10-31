@@ -575,14 +575,25 @@ void SurvivalRuntime::sceneEntered(int levelId) {
 }
 void SurvivalRuntime::closeRecoveredAttempt(){
     auto& recorder=replay::Recorder::get();
-    if(freePlaying()||observing()||m_enteredContext!=preparationContextText(preparationContext())||recorder.recovering()||!m_attempt.empty()||m_view.activeAttemptId.empty()||m_recoveredEndAttempt==m_view.activeAttemptId||recorder.hasPendingClose(m_view.activeAttemptId))return;
+    if(freePlaying()||observing()||m_enteredContext!=preparationContextText(preparationContext())||recorder.recovering()||!m_attempt.empty()||m_view.activeAttemptId.empty()||m_recoveredEndAttempt==m_view.activeAttemptId||m_lastEndedAttempt==m_view.activeAttemptId||recorder.hasPendingClose(m_view.activeAttemptId))return;
     // A process died before its End was journaled. Close only the server's
     // existing owned attempt at its already accepted progress; no new replay.
     auto body=event("ATTEMPT_END");body["attemptId"]=m_view.activeAttemptId;body["progress"]=m_view.activeAttemptProgress;m_recoveredEndAttempt=m_view.activeAttemptId;enqueue(std::move(body));
 }
 bool SurvivalRuntime::beginAttempt() {
     closeRecoveredAttempt();
-    if(!canPlay() || !m_attempt.empty() || !m_view.activeAttemptId.empty())return false;
+    // The server view may still list our own just-ended Attempt until its End
+    // ACK/poll lands. That End is already queued ahead of this Start in the
+    // FIFO, so it must not hold the reset world at 0% (beta.126 iOS log).
+    auto const staleOwnActive=!m_view.activeAttemptId.empty()&&m_view.activeAttemptId==m_lastEndedAttempt;
+    if(!canPlay() || !m_attempt.empty() || (!m_view.activeAttemptId.empty()&&!staleOwnActive)){
+        auto const now=std::chrono::steady_clock::now();
+        if(now>=m_startRefusalLogAt){m_startRefusalLogAt=now+std::chrono::seconds(1);
+            geode::log::info("[SurvivalAttempt] stage=START_REFUSED canPlay={} localAttempt={} serverActive={} lastEnded={} state={} remainingMs={} queued={}",
+                canPlay(),!m_attempt.empty(),m_view.activeAttemptId,m_lastEndedAttempt,m_view.state,remainingMs(),m_events.size());
+            if(!m_view.activeAttemptId.empty()&&m_attempt.empty())m_nextPoll={};} // refresh authority (at most 1/s), not on the idle cadence
+        return false;
+    }
     auto own=std::find_if(m_view.standings.begin(),m_view.standings.end(),[&](auto const& p){return p.id==m_view.ownId;});
     if(attemptLimitReached())return false;
     auto body=event("ATTEMPT_START");if(!RankedRuntime::get().prepareSurvivalEnvironment(body))return false;
@@ -612,7 +623,7 @@ void SurvivalRuntime::endAttempt(double value,std::string reason,std::string exp
     if(expectedAttempt.empty()&&(freePlaying()||observing()))return;
     if(m_attempt.empty()||(!expectedAttempt.empty()&&expectedAttempt!=m_attempt))return;
     if(m_attemptOwner["attemptId"].asString().unwrapOr("")!=m_attempt){m_view.error="Official Attempt ownership unavailable. Reconnecting...";return;}
-    auto id=std::exchange(m_attempt,{});
+    auto id=std::exchange(m_attempt,{});m_lastEndedAttempt=id;
     if(std::isfinite(value)&&value>=0&&value<=100)m_attemptBest=std::max(m_attemptBest,value);
     // Source ownership is captured at START. A new round/view must never
     // re-label the old End, and a local viewer never owns this snapshot.

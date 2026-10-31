@@ -11,6 +11,7 @@ test('production Random native activation/output hooks record real selected grou
 #include "${root}/src/domain/SpectatorCapturePolicy.hpp"
 #include <deque>
 #include "${root}/src/domain/SpectatorSourceTrace.hpp"
+#include <map>
 #include <set>
 #include <unordered_map>
 using namespace corum::ranked;
@@ -22,7 +23,7 @@ struct GJBaseGameLayer{std::vector<int>groups;virtual ~GJBaseGameLayer()=default
 ${structs}
 struct OutputHook:GJBaseGameLayer{${method('    void spawnGroup(')}};
 struct PlayLayer:OutputHook{GJGameLevel level;GJGameLevel*m_level=&level;bool m_isTestMode=false,m_isPracticeMode=false;int m_currentStep=12;struct{double m_levelTime=.05;}m_gameState;
- struct Fields{std::unordered_map<GameObject*,ObjectIdentity>objects;bool remote=false,applyingSource=false;std::set<int>missingActivations;std::unordered_map<int,unsigned>nativeActivations,sourceActivations;unsigned missingLogs=0;std::string scope;std::uint64_t ordinal=0;std::deque<SpectatorRandomEvent>expected;std::vector<SpectatorRandomEvent>captured;SpectatorRandomEvents snapshot;unsigned misses=0;}fields;Fields*m_fields=&fields;int identityBuilds=0;void buildObjects(){++identityBuilds;} };using CorumNativeWorldEventLayer=PlayLayer;
+ struct Fields{std::unordered_map<GameObject*,ObjectIdentity>objects;bool remote=false,applyingSource=false;std::map<int,double>missingActivations;std::unordered_map<int,unsigned>nativeActivations,sourceActivations;unsigned missingLogs=0;std::string scope;std::uint64_t ordinal=0;std::deque<SpectatorRandomEvent>expected;std::vector<SpectatorRandomEvent>captured;SpectatorRandomEvents snapshot;unsigned misses=0;}fields;Fields*m_fields=&fields;int identityBuilds=0;void buildObjects(){++identityBuilds;} };using CorumNativeWorldEventLayer=PlayLayer;
 static PlayLayer*current=nullptr;static replay::Playback*ownedPlayback=nullptr;
 PlayLayer*owner(GJBaseGameLayer*p){return current&&static_cast<GJBaseGameLayer*>(current)==p?current:nullptr;}
 replay::Playback*replayOwner(PlayLayer*p){return p==current?ownedPlayback:nullptr;}
@@ -44,9 +45,14 @@ int main(){PlayLayer scene;current=&scene;RandomHook random;scene.fields.objects
  {// PARTIAL SYNC (beta.125 log): native activation before OR after the source event.
   auto& live=SpectatorLiveRuntime::get();auto e=*decodeSpectatorRandomEvent(sourceEvent["event"]);auto apply=[&]{scene.fields.expected.push_back(e);scene.fields.applyingSource=true;random.triggerObject(&scene,11,nullptr);scene.fields.applyingSource=false;};
   scene.fields.remote=true;live.reason.clear();
-  random.triggerObject(&scene,11,nullptr);assert(live.reason=="RANDOM_SOURCE_ACTIVATION_MISSING");apply();assert(live.reason.empty()&&scene.fields.missingActivations.empty()); // native ahead, then source
+  // beta.127: native running one sample ahead is not partial by itself (no HUD flapping).
+  random.triggerObject(&scene,11,nullptr);assert(live.reason.empty()&&scene.fields.missingActivations.size()==1);
+  assert(!randomSourcesOverdue(scene.fields.missingActivations,scene.m_gameState.m_levelTime*1000+kRandomSourceGraceMs));
+  apply();assert(live.reason.empty()&&scene.fields.missingActivations.empty()); // native ahead, then source
   apply();random.triggerObject(&scene,11,nullptr);assert(live.reason.empty()&&scene.fields.missingActivations.empty()); // source first, late native mirror
-  random.triggerObject(&scene,11,nullptr);assert(live.reason=="RANDOM_SOURCE_ACTIVATION_MISSING"); // an extra native activation with no source event stays partial
+  // An extra native activation with no source event is missing; past the grace it is partial.
+  random.triggerObject(&scene,11,nullptr);assert(scene.fields.missingActivations.size()==1);
+  assert(randomSourcesOverdue(scene.fields.missingActivations,scene.m_gameState.m_levelTime*1000+kRandomSourceGraceMs+1));
   scene.fields.remote=false;scene.fields.missingActivations.clear();scene.fields.nativeActivations.clear();scene.fields.sourceActivations.clear();live.reason.clear();}
  auto encoded=sourceEvent["event"];assert(decodeSpectatorRandomEvent(encoded));encoded["objectIndex"]=4294967296LL;assert(!decodeSpectatorRandomEvent(encoded));
  // Multiple verified native snaps may cancel their gravity flips before a 50ms packet.

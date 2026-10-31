@@ -33,8 +33,11 @@ public:
     auto const& slots()const{return m_ids;}
     std::uint64_t imageIdForSlot(std::size_t slot)const{
         if(m_ids[slot % m_ids.size()])return m_ids[slot % m_ids.size()];
-        auto first=std::find_if(m_ids.begin(),m_ids.end(),[](auto id){return id!=0;});
-        return first==m_ids.end()?0:*first;
+        // A placeholder borrows a different arrived image per slot (round-robin)
+        // instead of repeating the first one across every empty slot.
+        std::array<std::uint64_t,8> filled{};std::size_t count=0;
+        for(auto id:m_ids)if(id)filled[count++]=id;
+        return count==0?0:filled[slot%count];
     }
 };
 enum class SurvivalRevealStage { PendingSelection, Rolling, Locking, Landing, Details, Settled, Cancelled };

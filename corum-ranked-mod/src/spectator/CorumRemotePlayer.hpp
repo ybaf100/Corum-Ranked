@@ -44,6 +44,7 @@ private:
     void applyCosmetics(SpectatorGhostPose const& pose,bool modeChanged);
     void updateEffects(SpectatorRemoteFrame const& frame);
     void resetEffects();
+    void updateDashFire(SpectatorGhostPose const& pose,double elapsed);
 
 
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
@@ -54,6 +55,10 @@ private:
     std::unique_ptr<CorumRemotePlayer> m_secondary;
     std::optional<SpectatorAvatarCosmetics> m_cosmetics;
     std::array<geode::Ref<cocos2d::CCSprite>,8> m_ghosts;
+    // Dash-orb flame: a copy of the native dash fire frame, driven only by the
+    // publisher's observed dash emission bit and its observed motion direction.
+    geode::Ref<cocos2d::CCSprite> m_dashFire;
+    float m_dashAngle=0;bool m_dashAngleKnown=false;float m_lastEffectX=0,m_lastEffectY=0;
     std::array<double,8> m_ghostTimes{};
     unsigned m_ghostCursor=0,m_previousEffects=0;
     double m_effectElapsedMs=-1,m_lastGhostMs=-100;

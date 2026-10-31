@@ -991,9 +991,12 @@ void SpectatorLiveRuntime::requestSceneRestore(){
     m_reason="SCENE_RESTORE_REQUESTED";
     m_forceRestoreRequest=true;m_nextViewerPollAt={};
 }
-std::vector<SpectatorRemoteFrame> SpectatorLiveRuntime::takeRestorationFrames(){
+std::vector<SpectatorRemoteFrame> SpectatorLiveRuntime::takeRestorationFrames(std::size_t maxFrames,double budgetMs){
     if(m_forceRestoreRequest || !presentationFrame())return {};
-    return m_restoreTimeline.takeBatch(static_cast<std::size_t>(std::clamp(2.0/std::max(.05,m_restoreStepCostMs),1.0,8.0)));
+    // Frame-time budget / measured per-sample cost, capped by the seek-speed setting.
+    auto const cap=static_cast<double>(std::clamp<std::size_t>(maxFrames,1,SpectatorRestoreTimeline::kMaxStepsPerFrame));
+    auto const budget=std::isfinite(budgetMs)&&budgetMs>0?budgetMs:2.0;
+    return m_restoreTimeline.takeBatch(static_cast<std::size_t>(std::clamp(budget/std::max(.05,m_restoreStepCostMs),1.0,cap)));
 }
 void SpectatorLiveRuntime::restorationApplied(SpectatorRemoteFrame const& frame,bool clockAdvanced,double workMs){
     if(std::isfinite(workMs) && workMs>0)m_restoreStepCostMs=m_restoreStepCostMs*.75+workMs*.25;

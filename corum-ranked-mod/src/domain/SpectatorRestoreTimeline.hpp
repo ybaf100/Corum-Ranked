@@ -9,7 +9,9 @@ namespace corum::ranked {
 // Validated protocol history only. No pointer, engine-state blob or gameplay event.
 class SpectatorRestoreTimeline {
 public:
-    static constexpr std::size_t kMaxSamples=4096,kStepsPerFrame=8;
+    // kStepsPerFrame is the Normal catch-up batch; the user seek-speed setting may
+    // raise it up to kMaxStepsPerFrame (each sample still runs its real native steps).
+    static constexpr std::size_t kMaxSamples=4096,kStepsPerFrame=8,kMaxStepsPerFrame=64;
     void begin(SpectatorRemoteContext context,bool available){
         reset();m_context=std::move(context);m_active=available;
     }
@@ -25,7 +27,7 @@ public:
     std::vector<SpectatorRemoteFrame> takeBatch(std::size_t maxSteps=kStepsPerFrame){
         std::vector<SpectatorRemoteFrame> batch;
         if(!m_active)return batch;
-        for(std::size_t i=0;i<std::min(kStepsPerFrame,maxSteps) && !m_queue.empty();++i){batch.push_back(std::move(m_queue.front()));m_queue.pop_front();}
+        for(std::size_t i=0;i<std::min(kMaxStepsPerFrame,maxSteps) && !m_queue.empty();++i){batch.push_back(std::move(m_queue.front()));m_queue.pop_front();}
         return batch;
     }
     bool applied(SpectatorRemoteFrame const& frame){

@@ -7,6 +7,7 @@
 #include <Geode/binding/HardStreak.hpp>
 #include <Geode/binding/GameManager.hpp>
 #include <chrono>
+#include <cmath>
 
 using namespace geode::prelude;
 
@@ -110,7 +111,7 @@ bool CorumRemotePlayer::createVisual(PlayLayer* layer) {
 void CorumRemotePlayer::destroyVisual() {
     m_poseCurrent = false;
     if(m_secondary)m_secondary->cleanup();
-    resetEffects();for(auto& ghost:m_ghosts)ghost=nullptr;
+    resetEffects();for(auto& ghost:m_ghosts)ghost=nullptr;m_dashFire=nullptr;
     m_cosmetics.reset();m_appliedState.reset();
     auto const hadVisual = m_player.data() != nullptr || m_root.data() != nullptr;
     if (m_player) {
@@ -228,6 +229,8 @@ void CorumRemotePlayer::resetEffects(){
     m_effectElapsedMs=-1;m_previousEffects=0;m_lastGhostMs=-100;m_effectSegment=0;
     m_ghostTimes.fill(-1e9);m_ghostCursor=0;
     for(auto& ghost:m_ghosts)if(ghost)ghost->setVisible(false);
+    if(m_dashFire)m_dashFire->setVisible(false);
+    m_dashAngleKnown=false;
     if(!m_player)return;
     auto* p=m_player.data();
     if(p->m_regularTrail)p->m_regularTrail->reset();
@@ -284,7 +287,40 @@ void CorumRemotePlayer::updateEffects(SpectatorRemoteFrame const& frame){
         auto const alpha=std::clamp(1.0-(elapsed-m_ghostTimes[i])/400.0,0.0,1.0);
         ghost->setVisible(alpha>0);ghost->setOpacity(static_cast<GLubyte>(100*alpha));
     }
+    updateDashFire(pose,elapsed);
     m_previousEffects=pose.effects;
+}
+
+void CorumRemotePlayer::updateDashFire(SpectatorGhostPose const& pose,double elapsed){
+    // Bit 14 = native m_dashParticles emitting, i.e. the publisher is dashing.
+    constexpr unsigned kDashBit=1u<<14;
+    auto const dashing=(pose.effects&kDashBit)!=0 && pose.visible && !pose.dead;
+    auto const dx=pose.x-m_lastEffectX,dy=pose.y-m_lastEffectY;
+    m_lastEffectX=pose.x;m_lastEffectY=pose.y;
+    if(!dashing){if(m_dashFire)m_dashFire->setVisible(false);m_dashAngleKnown=false;return;}
+    // A dash moves in a straight line: the observed displacement is its direction.
+    // Ignore a presentation-segment jump (stale previous position after a reset).
+    if(auto const step=std::hypot(dx,dy);step>.5f&&step<200.f){m_dashAngle=std::atan2(dy,dx);m_dashAngleKnown=true;}
+    auto* p=m_player.data();
+    if(!m_dashFire){
+        auto* native=p?p->m_dashFireSprite:nullptr;
+        auto* frame=native?native->displayFrame():nullptr;
+        if(!frame||!m_effectsRoot)return;
+        m_dashFire=CCSprite::createWithSpriteFrame(frame);
+        if(!m_dashFire)return;
+        m_dashFire->setAnchorPoint(native->getAnchorPoint());
+        m_dashFire->setBlendFunc({GL_SRC_ALPHA,GL_ONE});
+        m_effectsRoot->addChild(m_dashFire.data(),-1);
+    }
+    auto const color=m_cosmetics?ccc3(m_cosmetics->primary.r,m_cosmetics->primary.g,m_cosmetics->primary.b):ccc3(255,255,255);
+    m_dashFire->setColor(color);
+    m_dashFire->setPosition({pose.x,pose.y});
+    // Cocos rotation is clockwise degrees; the flame trails opposite to motion.
+    m_dashFire->setRotation(m_dashAngleKnown?-m_dashAngle*180.f/3.14159265f:0.f);
+    auto const pulse=1.f+.08f*std::sin(static_cast<float>(elapsed)*.025f);
+    m_dashFire->setScale((pose.mini?.6f:1.f)*pulse);
+    m_dashFire->setOpacity(static_cast<GLubyte>(200+40*std::sin(static_cast<float>(elapsed)*.04f)));
+    m_dashFire->setVisible(true);
 }
 
 void CorumRemotePlayer::applyPose(SpectatorGhostPose const& pose) {

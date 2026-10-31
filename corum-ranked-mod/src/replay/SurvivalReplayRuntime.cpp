@@ -7,6 +7,7 @@
 #include "../ui/RankedVisuals.hpp"
 #include <Geode/ui/Popup.hpp>
 #include <Geode/binding/GJGameLevel.hpp>
+#include <Geode/binding/FMODAudioEngine.hpp>
 #include <Geode/cocos/support/zip_support/ZipUtils.h>
 using namespace geode::prelude;
 namespace corum::ranked::replay {
@@ -33,7 +34,10 @@ LevelPreparationContext Runtime::context()const{
     return {str(m_identity,"matchId"),static_cast<int>(integer(m_identity,"levelId")),static_cast<int>(integer(m_identity,"roundNumber")),0,false,0,static_cast<int>(integer(m_identity,"mapGeneration"))};
 }
 void Runtime::cancel(){if(m_scene)return;m_pendingIdentity.reset();m_requested=false;m_playback.reset();}
-void Runtime::exited(){releaseCbfReplayHooks();m_scene=false;cancel();}
+void Runtime::exited(){
+    // Replay speed changes the level music channel pitch; never leak it to normal play.
+    if(auto* engine=FMODAudioEngine::sharedEngine())if(auto* channel=engine->getActiveMusicChannel(0))channel->setPitch(1.f);
+    releaseCbfReplayHooks();m_scene=false;cancel();}
 bool Runtime::validate(GJGameLevel* level){
     if(!level||integer(m_identity,"levelId")!=static_cast<int>(level->m_levelID)||integer(m_identity,"mapVersion")!=level->m_levelVersion||level->m_levelString.empty())return false;
     auto expected=str(m_identity,"mapGeometrySha256");std::string raw=level->m_levelString;

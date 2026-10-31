@@ -85,7 +85,7 @@ public:
         return "LIVE";
     }
     void requestSceneRestore();
-    std::vector<SpectatorRemoteFrame> takeRestorationFrames();
+    std::vector<SpectatorRemoteFrame> takeRestorationFrames(std::size_t maxFrames=SpectatorRestoreTimeline::kStepsPerFrame,double budgetMs=2.0);
     void restorationApplied(SpectatorRemoteFrame const& frame,bool clockAdvanced,double workMs=0);
     void noteWorldPartial(std::string reason);
     void worldCauseRecovered(std::string const& reason);

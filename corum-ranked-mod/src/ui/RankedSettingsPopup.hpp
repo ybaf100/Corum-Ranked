@@ -12,6 +12,7 @@
 #include "../replay/SurvivalReplaySeekSpeed.hpp"
 #include <Geode/binding/Slider.hpp>
 #include <Geode/ui/Popup.hpp>
+#include <array>
 #include <cmath>
 
 namespace corum::ranked::ui {
@@ -24,6 +25,8 @@ class RankedSettingsPopup final : public Popup {
     CCLabelBMFont* m_forumCooldown = nullptr;
     CCMenuItemSpriteExtra* m_refreshRecords = nullptr;
     CCMenuItemSpriteExtra *m_defaultLdm=nullptr,*m_defaultShake=nullptr,*m_thumbnails=nullptr,*m_selectionMotion=nullptr,*m_seekSpeed=nullptr;
+    std::array<CCMenuItemSpriteExtra*,4> m_seekOptions{};
+    bool m_seekMenuOpen=false;
     bool m_refreshDisabled = false;
     bool m_closed = false, m_exited = false, m_dirty = false;
 
@@ -83,12 +86,54 @@ class RankedSettingsPopup final : public Popup {
         m_dirty=true;return true;
     }
     static replay::ReplaySeekSpeed seekSpeed(){return replay::replaySeekSpeedFromInt(static_cast<int>(Mod::get()->getSavedValue<int64_t>("replay-seek-speed",1)));}
+    static ccColor3B seekColor(replay::ReplaySeekSpeed speed){
+        switch(speed){case replay::ReplaySeekSpeed::Low:return Blue;case replay::ReplaySeekSpeed::Fast:return Gold;
+            case replay::ReplaySeekSpeed::UltraFast:return Red;case replay::ReplaySeekSpeed::Normal:break;}
+        return Cyan;
+    }
+    static std::string seekName(replay::ReplaySeekSpeed speed){
+        switch(speed){case replay::ReplaySeekSpeed::Low:return i18n::text("replay-seek-low","Low");
+            case replay::ReplaySeekSpeed::Fast:return i18n::text("replay-seek-fast","Fast");
+            case replay::ReplaySeekSpeed::UltraFast:return i18n::text("replay-seek-ultra","Ultra fast");
+            case replay::ReplaySeekSpeed::Normal:break;}
+        return i18n::text("replay-seek-normal","Normal");
+    }
     CCNode* seekSpeedFace(){
-        auto const speed=seekSpeed();
-        auto name=speed==replay::ReplaySeekSpeed::Low?i18n::text("replay-seek-low","Low"):speed==replay::ReplaySeekSpeed::Fast?i18n::text("replay-seek-fast","Fast"):i18n::text("replay-seek-normal","Normal");
-        auto* face=surface({320,32},{},speed==replay::ReplaySeekSpeed::Fast?Gold:Cyan,SurfaceRaised,250,true);
-        auto* caption=menuLabel(i18n::text("replay-seek-speed","Replay seek speed")+": "+name,.30f,{160,16},Text,FontWeight::ExtraBold);
+        auto const speed=seekSpeed();auto const color=seekColor(speed);
+        auto* face=surface({320,32},{},color,SurfaceRaised,250,true);
+        auto* caption=menuLabel(i18n::text("replay-seek-speed","Replay & spectate seek speed")+": "+seekName(speed),.30f,{160,16},
+            replay::replaySeekSpeedNeedsWarning(speed)?color:Text,FontWeight::ExtraBold);
         fitFullMenuLabel(caption,298,22,.30f);face->addChild(caption,5);return face;
+    }
+    // Dropdown row: Fast is a yellow button, UltraFast a red one; the current
+    // choice is marked with a filled dot.
+    CCNode* seekOptionFace(replay::ReplaySeekSpeed speed,bool selected){
+        auto const color=seekColor(speed);
+        auto* face=surface({300,22},{},color,SurfaceRaised,252,true);
+        auto* caption=menuLabel(std::string(selected?"\xE2\x97\x8F ":"\xE2\x97\x8B ")+seekName(speed),.26f,{150,11},
+            replay::replaySeekSpeedNeedsWarning(speed)?color:Text,FontWeight::ExtraBold);
+        fitFullMenuLabel(caption,280,16,.26f);face->addChild(caption,5);return face;
+    }
+    void setSeekMenuOpen(bool open){
+        if(m_closed)return;m_seekMenuOpen=open;
+        if(open&&!m_seekOptions[0]&&m_buttonMenu){
+            for(std::size_t i=0;i<m_seekOptions.size();++i){
+                auto const speed=replay::kReplaySeekSpeeds[i];
+                auto* item=CCMenuItemSpriteExtra::create(seekOptionFace(speed,false),this,menu_selector(RankedSettingsPopup::onSeekOption));
+                item->setTag(replay::replaySeekSpeedToInt(speed));item->setPosition({180,124.f-24.f*static_cast<float>(i)});
+                m_buttonMenu->addChild(item,30);m_seekOptions[i]=item;
+            }
+        }
+        auto const current=seekSpeed();
+        for(std::size_t i=0;i<m_seekOptions.size();++i)if(auto* item=m_seekOptions[i]){
+            auto const speed=replay::kReplaySeekSpeeds[i];
+            if(open)item->setNormalImage(seekOptionFace(speed,speed==current));
+            item->setVisible(open);item->setEnabled(open);
+        }
+        // The list covers the forum refresh row; it must not receive taps meanwhile.
+        if(m_refreshRecords)m_refreshRecords->setVisible(!open);
+        if(m_forumStatus)m_forumStatus->setVisible(!open);
+        if(m_forumCooldown)m_forumCooldown->setVisible(!open);
     }
     void setSeekSpeed(replay::ReplaySeekSpeed speed){
         Mod::get()->setSavedValue<int64_t>("replay-seek-speed",replay::replaySeekSpeedToInt(speed));m_dirty=true;
@@ -96,13 +141,25 @@ class RankedSettingsPopup final : public Popup {
     }
     void onSeekSpeed(CCObject*){
         if(m_closed)return;
-        auto const next=replay::nextReplaySeekSpeed(seekSpeed());
-        if(next!=replay::ReplaySeekSpeed::Fast){setSeekSpeed(next);return;}
-        // Fast is opt-in: same Corum confirm UI as the other Ranked dialogs.
+        setSeekMenuOpen(!m_seekMenuOpen);
+    }
+    void onSeekOption(CCObject* sender){
+        if(m_closed)return;auto* item=typeinfo_cast<CCMenuItemSpriteExtra*>(sender);if(!item)return;
+        auto const chosen=replay::replaySeekSpeedFromInt(item->getTag());
+        setSeekMenuOpen(false);
+        if(chosen==seekSpeed()||!replay::replaySeekSpeedNeedsWarning(chosen)){setSeekSpeed(chosen);return;}
+        // Fast/UltraFast are opt-in through the Corum confirm UI; UltraFast has a
+        // red, stronger warning.
         Ref<RankedSettingsPopup> keep(this);
-        if(auto* warning=RankedConfirmPopup::create(i18n::text("replay-seek-fast-title","FAST REPLAY SEEK"),
-            i18n::text("replay-seek-fast-warning","Fast seek simulates many native frames per screen frame. Low-end devices may stutter, heat up or close the game while seeking. Use it?"),
-            [keep](bool accepted){if(accepted)keep->setSeekSpeed(replay::ReplaySeekSpeed::Fast);},i18n::text("replay-seek-fast-confirm","USE FAST")))warning->show();
+        auto const ultra=chosen==replay::ReplaySeekSpeed::UltraFast;
+        auto* warning=ultra?
+            RankedConfirmPopup::create(i18n::text("replay-seek-ultra-title","ULTRA FAST SEEK WARNING"),
+                i18n::text("replay-seek-ultra-warning","Ultra fast seek simulates several times more native frames per screen frame than Fast. Use it only on high-end devices. On lower-end devices the screen may freeze for a long time, the device may overheat, or the game may be force-closed. Use it anyway?"),
+                [keep,chosen](bool accepted){if(accepted)keep->setSeekSpeed(chosen);},i18n::text("replay-seek-ultra-confirm","USE ULTRA FAST"),Red):
+            RankedConfirmPopup::create(i18n::text("replay-seek-fast-title","FAST REPLAY SEEK"),
+                i18n::text("replay-seek-fast-warning","Fast seek simulates many native frames per screen frame. Low-end devices may stutter, heat up or close the game while seeking. Use it?"),
+                [keep,chosen](bool accepted){if(accepted)keep->setSeekSpeed(chosen);},i18n::text("replay-seek-fast-confirm","USE FAST"));
+        if(warning)warning->show();
     }
     void onDefaults(CCObject* sender) {
         if(m_closed)return;auto* item=typeinfo_cast<CCMenuItemSpriteExtra*>(sender);if(!item)return;

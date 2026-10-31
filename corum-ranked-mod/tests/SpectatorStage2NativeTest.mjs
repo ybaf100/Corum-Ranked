@@ -20,7 +20,7 @@ test('production HTTP decoder, bounded restoration, recovery and compositor shar
   const header=read('src/SpectatorLiveRuntime.hpp').replace(/^#include.*$|^#pragma once$/gm,'').replaceAll('private:','public:');
   const methods=['SpectatorLiveStatus SpectatorLiveRuntime::status()', 'void SpectatorLiveRuntime::resetViewer()',
    'void SpectatorLiveRuntime::applyViewerResponse(', 'void SpectatorLiveRuntime::setFallback(',
-   'void SpectatorLiveRuntime::requestSceneRestore()', 'std::vector<SpectatorRemoteFrame> SpectatorLiveRuntime::takeRestorationFrames()',
+   'void SpectatorLiveRuntime::requestSceneRestore()', 'std::vector<SpectatorRemoteFrame> SpectatorLiveRuntime::takeRestorationFrames(',
    'void SpectatorLiveRuntime::restorationApplied(', 'void SpectatorLiveRuntime::noteWorldPartial(', 'void SpectatorLiveRuntime::worldCauseRecovered(', 'std::optional<SpectatorRemoteFrame> SpectatorLiveRuntime::presentationFrame()', 'std::optional<SpectatorRemoteFrame> SpectatorLiveRuntime::worldFrame()',
    'void SpectatorLiveRuntime::tickViewer()', 'void SpectatorLiveRuntime::pollViewer()'].map(method).join('\n');
   const cpp=`

@@ -62,7 +62,7 @@ struct SpectatorLiveRuntime {
     static SpectatorLiveRuntime& get(){static SpectatorLiveRuntime r;return r;}
     auto presentationFrame()const{++reads;return frame;}auto worldFrame()const{++reads;return frame;}bool restoringWorld()const{return restore.active();}
     SpectatorRestoreTimeline restore;
-    auto takeRestorationFrames(){return restore.takeBatch();}
+    auto takeRestorationFrames(std::size_t maxFrames=8,double=2.0){return restore.takeBatch(maxFrames);}
     void restorationApplied(SpectatorRemoteFrame const& f,bool,double){restore.applied(f);}
     void requestSceneRestore(){}void noteWorldPartial(std::string){}
 
@@ -79,6 +79,7 @@ struct ScopedRealGameplayEnd{bool& flag;bool previous;ScopedRealGameplayEnd(bool
 template<class T>struct FieldsAccess { std::unique_ptr<T> value=std::make_unique<T>();T* operator->(){return value.get();} };
 struct CorumRankedPlayLayer: PlayLayer {
     corum::ranked::SpectatorLiveRuntime& spectatorTransport(){return corum::ranked::SpectatorLiveRuntime::get();}
+    std::pair<std::size_t,double> spectatorCatchupBudget(){return {8,2.0};}
     void survivalSpectatorFrame(float){}
     corum::ranked::SpectatorSceneContext survivalSpectatorSceneContext(){return {};}
 

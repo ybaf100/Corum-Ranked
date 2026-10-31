@@ -75,7 +75,7 @@ namespace i18n{std::string text(char const*,char const* english){return english;
 namespace ui{inline constexpr ccColor3B Red{255,60,60},Blue{80,120,220},Cyan{64,224,255},Gold{255,205,65},Surface{8,15,25},SurfaceRaised{18,25,40},Text{230,235,244},TextMuted{150,150,150};
  enum class FontWeight{SemiBold,ExtraBold,Black};CCNode* surface(CCSize s,CCPoint p,ccColor3B,ccColor3B,int,bool){auto* n=CCNode::create();n->size=s;n->position=p;return n;}
  CCLabelBMFont* menuLabel(std::string s,float scale,CCPoint p,ccColor3B color,FontWeight=FontWeight::SemiBold){auto* n=new CCLabelBMFont;n->setString(s.c_str());n->setScale(scale);n->position=p;n->color=color;return n;}
- void fitMenuLabelWidth(CCLabelBMFont*,float,float,float){}void fitFullMenuLabel(CCLabelBMFont*,float,float,float){}
+ void fitMenuLabelWidth(CCLabelBMFont*,float,float,float){}void fitFullMenuLabel(CCLabelBMFont*,float,float,float){}void fitWrappedMenuLabel(CCLabelBMFont*,std::string const&,float,float,float){}
  void grayButtonVisual(CCNode* node){node->color={100,100,100};}void cancelMenuTouch(CCMenu* menu){++menu->cancellations;}
 }
 struct SurvivalRuntime{static SurvivalRuntime&get(){static SurvivalRuntime r;return r;}bool active()const{return false;}};void showSurvivalDebugPopup(){}

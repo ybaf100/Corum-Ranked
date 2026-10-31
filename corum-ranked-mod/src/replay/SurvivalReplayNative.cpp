@@ -10,6 +10,7 @@
 #include "../spectator/SpectatorPlayerCapture.hpp"
 #include "../spectator/SpectatorPoseCodec.hpp"
 #include "../ui/RankedVisuals.hpp"
+#include "../ui/SeekProgressOverlay.hpp"
 #include "../domain/SpectatorAudioPolicy.hpp"
 #include "../spectator/SpectatorNativeWorldEvents.hpp"
 #include <Geode/binding/FMODAudioEngine.hpp>
@@ -70,7 +71,7 @@ matjson::Value replayPose(PlayLayer* layer){
 class $modify(CorumSurvivalReplayLayer,PlayLayer){
 public:
  struct ReplayCamera {CCPoint origin,second,diff;float zoom=1,angle=0;struct Layer{CCPoint pos;float x=1,y=1,angle=0;};std::array<Layer,3> layers;};
- struct Fields {Json trace=Json::array();std::array<unsigned,2> playerUpdates{};bool preInput=false;std::optional<ReplayCamera> nativeCamera;bool ready=false,replayOwned=false,liveWorldOwned=false,replayAdvancing=false,internalReset=false,desyncReported=false,retiring=false;CCLabelBMFont* replayText=nullptr;CCLabelBMFont* captureError=nullptr;std::string captureErrorText,captureAttempt,initialAttempt;Slider* replaySlider=nullptr;float replayHudWait=0;corum::ranked::SpectatorAudioClockPolicy replayAudio;bool replayMarkersAdded=false;CCNode* replayDesyncMarker=nullptr;CCLayerColor* seekOverlay=nullptr;CCLayerColor* seekFill=nullptr;CCLabelBMFont* seekLabel=nullptr;float seekBarWidth=0;unsigned lastRenderFrame=0;
+ struct Fields {Json trace=Json::array();std::array<unsigned,2> playerUpdates{};bool preInput=false;std::optional<ReplayCamera> nativeCamera;bool ready=false,replayOwned=false,liveWorldOwned=false,replayAdvancing=false,internalReset=false,desyncReported=false,retiring=false;CCLabelBMFont* replayText=nullptr;CCLabelBMFont* captureError=nullptr;std::string captureErrorText,captureAttempt,initialAttempt;Slider* replaySlider=nullptr;float replayHudWait=0;corum::ranked::SpectatorAudioClockPolicy replayAudio;bool replayMarkersAdded=false;CCNode* replayDesyncMarker=nullptr;corum::ranked::ui::SeekProgressOverlay seekCover;float appliedMusicPitch=1;unsigned lastRenderFrame=0;
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
  double captureUs=0,captureMaxUs=0;unsigned captureFrames=0;
 #endif
@@ -201,20 +202,25 @@ public:
         m_fields->replaySlider=Slider::create(this,menu_selector(CorumSurvivalReplayLayer::onReplaySeek),.65f);m_fields->replaySlider->setPosition({size.width/2,43});addChild(m_fields->replaySlider,1500);
         // Seek cover: the world is being re-simulated from a verified reset, so
         // intermediate frames are hidden behind a progress screen. Controls stay above it.
-        auto* overlay=CCLayerColor::create(ccc4(8,10,18,236),size.width,size.height);overlay->setVisible(false);addChild(overlay,1490);m_fields->seekOverlay=overlay;
-        auto barWidth=std::min(320.f,size.width-60);m_fields->seekBarWidth=barWidth;
-        auto* track=CCLayerColor::create(ccc4(255,255,255,48),barWidth,8);track->setPosition({(size.width-barWidth)/2,size.height/2-14});overlay->addChild(track);
-        auto* fill=CCLayerColor::create(ccc4(80,200,255,255),barWidth,8);fill->setAnchorPoint({0,0});fill->ignoreAnchorPointForPosition(false);fill->setPosition({(size.width-barWidth)/2,size.height/2-14});fill->setScaleX(0);overlay->addChild(fill,1);m_fields->seekFill=fill;
-        m_fields->seekLabel=corum::ranked::ui::menuLabel(corum::ranked::i18n::text("replay-seeking","Moving to replay position..."),.32f,{size.width/2,size.height/2+16},corum::ranked::ui::Text);overlay->addChild(m_fields->seekLabel,2);
+        m_fields->seekCover.attach(this,1490);
     }
     void updateSeekOverlay(corum::ranked::replay::Playback* replay){
-        if(!m_fields->seekOverlay)return;
-        bool const show=replay&&m_fields->replayOwned&&replay->seeking()&&!replay->desync();
-        m_fields->seekOverlay->setVisible(show);if(!show)return;
-        auto progress=static_cast<float>(std::clamp(replay->seekProgress(),0.,1.));
-        if(m_fields->seekFill)m_fields->seekFill->setScaleX(progress);
-        if(m_fields->seekLabel){auto text=fmt::format("{} {:.0f}%  ({:.1f}s / {:.1f}s)",corum::ranked::i18n::text("replay-seeking","Moving to replay position..."),progress*100,replay->time(),replay->seekTarget());
-            m_fields->seekLabel->setString(text.c_str());corum::ranked::ui::fitFullMenuLabel(m_fields->seekLabel,CCDirector::sharedDirector()->getWinSize().width-40,24,.32f);}
+        namespace i18n=corum::ranked::i18n;auto& cover=m_fields->seekCover;
+        if(!replay||replay->desync()||!replay->seeking()){cover.hide();return;}
+        auto const progress=std::clamp(replay->seekProgress(),0.,1.);
+        if(m_fields->replayOwned){
+            cover.attach(this,1490);
+            cover.show(i18n::text("replay-seeking","Moving to replay position..."),fmt::format("{:.0f}%  ({:.1f}s / {:.1f}s)",progress*100,replay->time(),replay->seekTarget()),progress);
+            return;
+        }
+        // Live spectator world: cover only a real catch-up (a reset or >= 1.5 s
+        // of native world to simulate), never the per-sample follow.
+        if(m_fields->liveWorldOwned&&replay->seekSpan()>=1.5){
+            cover.attach(this,1490);
+            cover.show(i18n::text("spectator-seeking","Moving to the live position..."),fmt::format("{:.0f}%  ({:.1f}s / {:.1f}s)",progress*100,replay->time(),replay->seekTarget()),progress);
+            return;
+        }
+        cover.hide();
     }
     // P2-D: timeline markers for events actually present in the recorded tape,
     // on a self-sized strip above the controls (does not move existing buttons).
@@ -272,7 +278,13 @@ public:
         if(m_fields->liveWorldOwned){for(auto* player:{m_player1,m_player2})corum::ranked::CorumRemotePlayer::hideNativeVisuals(player);return;}
         auto* audio=FMODAudioEngine::sharedEngine();auto const* presented=replay->presentedPose();
         auto& audioClock=m_fields->replayAudio;
-        if(replay->paused()||replay->seeking()||replay->ended()||replay->desync()||replay->speed()!=1||!presented||!(*presented)["audio"].isObject()){audio->pauseMusic(0);audioClock.interrupt();}
+        // Music follows the replay speed (0.5x/2x/4x change tempo with pitch,
+        // as FMOD resampling). A speed change re-aligns the position once.
+        auto const speed=static_cast<float>(replay->speed());
+        if(speed!=m_fields->appliedMusicPitch){m_fields->appliedMusicPitch=speed;audioClock.interrupt();}
+        // A reset/seek can recreate the music channel at pitch 1: verify every frame.
+        if(auto* channel=audio->getActiveMusicChannel(0)){float current=1.f;if(channel->getPitch(&current)!=FMOD_OK||std::abs(current-speed)>.001f)channel->setPitch(speed);}
+        if(replay->paused()||replay->seeking()||replay->ended()||replay->desync()||!presented||!(*presented)["audio"].isObject()){audio->pauseMusic(0);audioClock.interrupt();}
         else{
             // P1-E: one exact alignment after pause/seek/speed change, then the
             // shared hysteresis policy (no per-frame >100ms chasing).

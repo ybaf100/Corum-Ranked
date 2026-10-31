@@ -120,7 +120,7 @@ struct SurvivalRuntime{std::string m_spectatorAcceptedAttempt;
  bool surrenderPending()const{return !m_surrenderEventId.empty()&&!m_surrenderAccepted;}
  std::string preparationContext()const{return m_view.roundKey;}std::string matchEndpoint(std::string const&p)const{return p;}
  void observe(matjson::Value const&v){if(v.contains("eliminated"))m_view.ownEliminated=v["eliminated"].asBool().unwrapOr(false);}
- matjson::Value m_attemptOwner,m_attemptMetadata;
+ matjson::Value m_attemptOwner,m_attemptMetadata;std::string m_lastEndedAttempt;
  SurvivalRuntime(){m_attemptOwner=event("ATTEMPT_END");m_attemptOwner["attemptId"]=m_attempt;m_attemptMetadata["matchId"]=m_view.id;m_attemptMetadata["attemptId"]=m_attempt;}
  matjson::Value event(std::string const&)const;void endAttempt(double,std::string reason="EXIT",std::string expectedAttempt="");void enqueue(matjson::Value);void pumpEvents();void discardObsoleteEvents();void surrender();void resetSurrender();void pumpSurrenderReturn();
 };
@@ -212,7 +212,7 @@ namespace geode::log{template<class...T>void debug(T const&...){}}
 // Extracted native methods use geode::log explicitly; avoid colliding with ::log(double).
 namespace corum::ranked{
 namespace i18n{std::string text(char const*,char const*fallback){return fallback;}}
-namespace ui{constexpr int Gold=1,Surface=2,SurfaceRaised=3,Text=4,Blue=5,Red=6;enum class FontWeight{ExtraBold,SemiBold};Node*surface(CCSize s,CCPoint p,int,int,int,bool){auto*n=new Node;n->size=s;n->pos=p;return n;}Label*menuLabel(std::string,float,CCPoint,int,FontWeight){return new Label;}void fitMenuLabelWidth(Label*,float,float,float){}void fitFullMenuLabel(Label*,float,float,float){}
+namespace ui{using ccColor3B=int;constexpr int Gold=1,Surface=2,SurfaceRaised=3,Text=4,Blue=5,Red=6;enum class FontWeight{ExtraBold,SemiBold};Node*surface(CCSize s,CCPoint p,int,int,int,bool){auto*n=new Node;n->size=s;n->pos=p;return n;}Label*menuLabel(std::string,float,CCPoint,int,FontWeight){return new Label;}void fitMenuLabelWidth(Label*,float,float,float){}void fitFullMenuLabel(Label*,float,float,float){}void fitWrappedMenuLabel(Label*,std::string const&,float,float,float){}
 }
 struct SurvivalRuntime{std::string m_spectatorAcceptedAttempt;struct View{std::string id="m",roundKey="r1",phase="ROUND_1";int mapGeneration=1;bool debug=true,online=false,ownEliminated=false,ownAssetsReady=true,ownEntered=true;}m_view;bool playable=true,pending=false,cleared=false,surrenderable=true;int submissions=0,surrenders=0;static SurvivalRuntime&get(){static SurvivalRuntime r;return r;}auto const&view()const{return m_view;}bool canPlay()const{return playable;}bool canSurrender()const{return surrenderable;}std::string surrenderMessage()const{return "Forfeit?";}void surrender(){++surrenders;surrenderable=false;}bool normalRoundCleared()const{return cleared;}bool forceClearPending()const{return pending;}bool surrenderPending()const{return false;}bool canForceClear()const;void forceClear(){if(canForceClear()&&!pending){++submissions;pending=true;}}};
 ${method(runtime,'bool SurvivalRuntime::canForceClear()')}

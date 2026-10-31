@@ -174,6 +174,9 @@ private:
     double m_attemptBest=0,m_lastProgress=-1;
     matjson::Value m_attemptOwner,m_attemptMetadata;
     std::string m_recoveredEndAttempt;
+    // Own Attempt whose End is already journaled and queued ahead of any new Start.
+    std::string m_lastEndedAttempt;
+    std::chrono::steady_clock::time_point m_startRefusalLogAt{};
     int m_localAttempts=0;
     float m_tick=0;
     bool m_creating=false,m_pollBusy=false,m_eventBusy=false,m_recoverBusy=false,m_needRecovery=false,m_queuePollBusy=false;

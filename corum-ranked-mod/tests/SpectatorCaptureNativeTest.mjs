@@ -69,7 +69,10 @@ struct GJBaseGameLayer {
   if(m_player1){m_player1->update(dt);m_player1->updateRotation(dt);m_gameState.m_cameraPosition={m_player1->position.x-200,m_player1->position.y-100};}}
  CCPoint getPortalTargetPos(TeleportPortalObject*,GameObject*,PlayerObject*){return {25891.88f,5437.5f};}
  void checkCameraLimitAfterTeleport(PlayerObject*,float){}
- void teleportPlayer(TeleportPortalObject*,PlayerObject* p){p->position.x+=729.7268f;p->m_wasTeleported=true;}
+ void teleportPlayer(TeleportPortalObject*,PlayerObject* p){
+  // A teleport trigger may pass no player: native moves P1 itself via flag -> setPosition -> playerTeleported.
+  if(!p){auto* t=m_player1;t->m_wasTeleported=true;t->setPosition({t->position.x,t->position.y+1393.5f});t->playerTeleported();return;}
+  p->position.x+=729.7268f;p->m_wasTeleported=true;}
 };
 struct PlayLayer:GJBaseGameLayer {
  bool m_isTestMode=false,m_isPracticeMode=false,m_hasCompletedLevel=false;float getCurrentPercent(){return 12.5f;}
@@ -85,7 +88,7 @@ SpectatorCosmetics captureSpectatorCosmetics(PlayerObject*,PlayerObject*){return
 struct SurvivalRuntime{static SurvivalRuntime&get(){static SurvivalRuntime r;return r;}std::string localAttemptId()const{return "source-fixture";}};
 struct RankedRuntime {std::string spectatorLiveAttemptId()const{return "source-fixture";}bool spectator=false;static RankedRuntime& get(){static RankedRuntime r;return r;}bool isSpectating()const{return spectator;}};
 struct SpectatorLiveRuntime {
- std::vector<SpectatorRemoteFrame> takeRestorationFrames(){return {};}void restorationApplied(SpectatorRemoteFrame const&,bool,double){}void noteWorldPartial(std::string){}
+ std::vector<SpectatorRemoteFrame> takeRestorationFrames(std::size_t=8,double=2.0){return {};}void restorationApplied(SpectatorRemoteFrame const&,bool,double){}void noteWorldPartial(std::string){}
  bool busy=false;std::int64_t next=0;std::vector<SpectatorGhostPose> sent;
  static SpectatorLiveRuntime& get(){static SpectatorLiveRuntime r;return r;}
  bool tickPublisher(SpectatorGhostPose const& p,bool){if(busy||clockMs<next)return false;sent.push_back(p);next=clockMs+50;return true;}
@@ -100,8 +103,9 @@ struct DebugSpectateRuntime {
 }
 struct CorumRankedPlayLayer:PlayLayer {
  corum::ranked::SpectatorLiveRuntime& spectatorTransport(){return corum::ranked::SpectatorLiveRuntime::get();}
+ std::pair<std::size_t,double> spectatorCatchupBudget(){return {8,2.0};}
  bool blockEntryGameplayUpdate(){return false;}
- struct Fields{SpectatorSourceTrace spectatorSourceTrace;unsigned spectatorCaptureDrops=0;std::array<std::optional<SpectatorGhostPose>,2> pendingTeleportSource{};std::array<double,2> pendingTeleportLevelTime{-1,-1};int portalTeleportDepth=0;int levelId=123;bool survivalLiveLevel=false,survivalReplayLevel=false,survivalLevel=false;struct Driver{bool partialHistory()const{return false;}template<class...T>bool apply(T...){return false;}std::optional<float> takeNativeDeltaSeconds(){return {};}}spectatorWorldDriver;bool spectatorWorldPoseApplied=false,spectatorCollisionChecked=false;SpectatorNativeProbe spectatorNativeProbe;bool rankedInitialized=false,rankedLevel=true,safetyRetired=false,spectatorMode=false,spectatorPending=false;
+ struct Fields{SpectatorSourceTrace spectatorSourceTrace;unsigned spectatorCaptureDrops=0;std::array<std::optional<SpectatorGhostPose>,2> pendingTeleportSource{};std::array<double,2> pendingTeleportLevelTime{-1,-1};int portalTeleportDepth=0;unsigned spectatorTeleportHookLogs=0,spectatorTeleportDecisionLogs=0,pauseExitLogs=0;int levelId=123;bool survivalLiveLevel=false,survivalReplayLevel=false,survivalLevel=false;struct Driver{bool partialHistory()const{return false;}template<class...T>bool apply(T...){return false;}std::optional<float> takeNativeDeltaSeconds(){return {};}}spectatorWorldDriver;bool spectatorWorldPoseApplied=false,spectatorCollisionChecked=false;SpectatorNativeProbe spectatorNativeProbe;bool rankedInitialized=false,rankedLevel=true,safetyRetired=false,spectatorMode=false,spectatorPending=false;
   corum::ranked::SpectatorSceneContext sceneContext;std::optional<SpectatorRemoteFrame>spectatorRenderedFrame;struct Remote{template<class...T>void update(T...){}void presentationVisible(bool){}}remotePlayer;
   bool debugRecordScene=false,debugPlaybackScene=false,debugRecordHasFrame=false;SpectatorCapturePolicy spectatorCapture;std::shared_ptr<SpectatorCosmetics const> spectatorCosmetics;std::chrono::steady_clock::time_point nextCosmeticCaptureAt{};bool spectatorWorldUpdateInProgress=false,spectatorWorldResetInProgress=false;std::optional<unsigned> spectatorCameraFrameNumber;}fields;
  Fields* m_fields=&fields;
@@ -174,6 +178,13 @@ int main(){
  player.playerTeleported();assert(world.fields.spectatorCapture.snapshot()->discontinuity->nativeEvents.size()==1);
  world.fields.spectatorCapture.reset();world.fields.portalTeleportDepth=1;player.m_wasTeleported=true;player.setPosition({25900,4044});player.playerTeleported();world.fields.portalTeleportDepth=0;
  assert(!world.fields.spectatorCapture.snapshot()||!world.fields.spectatorCapture.snapshot()->discontinuity);
+ // beta.126 recapture (161bcd9c): the trigger teleport reached the hooked teleportPlayer with no
+ // player, so the hook captured nothing yet still suppressed the native callback. An unobserved
+ // hook call must not own the evidence: the playerTeleported() callback records it.
+ world.fields.spectatorCapture.reset();player.m_wasTeleported=false;player.position={25892.316f,3924};
+ world.teleportPlayer(&portal,nullptr);
+ {auto captured=world.fields.spectatorCapture.snapshot();assert(captured&&captured->discontinuity&&captured->discontinuity->type==SpectatorDiscontinuity::Teleport);
+  assert(captured->discontinuity->fromY==3924&&captured->discontinuity->toY==5317.5f&&world.fields.portalTeleportDepth==0);}
  player.m_wasTeleported=false;
  world.fields.levelId=123;
  auto dummyUpdates=player.updates;world.fields.spectatorMode=true;

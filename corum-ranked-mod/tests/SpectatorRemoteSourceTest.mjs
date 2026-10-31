@@ -35,6 +35,14 @@ test('level and spectator exit clean up before vanilla teardown', () => {
     assert.match(play, /cleanupSpectatorPresentation\(\);\s*live.reset\(\);\s*if \(!m_fields->autoExitRequested\)/);
     assert.match(read('src/spectator/CorumRemotePlayer.hpp'), /~CorumRemotePlayer\(\)/);
 });
+test('pause-time onExit (scene stays running, nothing pending) keeps the Attempt, capture and publisher', () => {
+    const exit = play.slice(play.indexOf('void onExit()'));
+    assert.match(exit, /^void onExit\(\) \{\s*if\(onExitWithoutSceneChange\(\)\)return;\s*corum::ranked::finishSurvivalReplayForReturn\(this,"SCENE_EXIT",true\);/);
+    const guard = play.slice(play.indexOf('bool onExitWithoutSceneChange()'), play.indexOf('void onExit()'));
+    assert.match(guard, /getParent\(\)!=director->getRunningScene\(\) \|\| director->getNextScene\(\)\)return false;/);
+    assert(guard.indexOf('ScopedSpectatorPersistenceMode') < guard.indexOf('PlayLayer::onExit()'));
+    assert.doesNotMatch(guard, /finishSurvivalReplayForReturn|safetyRetired|spectatorPresentationRetired|unschedule/);
+});
 test('typed live frame preserves server identity and a local reset epoch', () => {
     const frame = live.slice(live.indexOf('SpectatorLiveRuntime::presentationFrame()'));
     for (const field of ['matchId', 'roundNumber', 'deathmatchSequence', 'levelId', 'attemptId', 'generation', 'epoch']) {

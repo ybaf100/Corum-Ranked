@@ -12,6 +12,7 @@
 #include <Geode/modify/PlayLayer.hpp>
 #include <Geode/modify/RandTriggerGameObject.hpp>
 #include <deque>
+#include <map>
 #include <set>
 #include <unordered_map>
 using namespace geode::prelude;
@@ -22,6 +23,13 @@ struct ObjectIdentity {
     int index, id;
     float x, y;
 };
+// One published sample is 50 ms; a native Random activation may legitimately run
+// ahead of the sample that carries its recorded outputs. Past this it is missing.
+constexpr double kRandomSourceGraceMs=250.0;
+bool randomSourcesOverdue(std::map<int,double> const& missing,double nowMs){
+    for(auto const& [index,since]:missing)if(nowMs-since>kRandomSourceGraceMs)return true;
+    return false;
+}
 struct RandomCall {
     SpectatorRandomEvent event;
     GJBaseGameLayer *layer = nullptr;
@@ -61,7 +69,7 @@ class $modify(CorumNativeWorldEventLayer, PlayLayer) {
         std::uint64_t ordinal = 0, seen = 0;
         std::optional<SpectatorRemoteContext> context;
         bool remote = false, applyingSource = false;
-        std::set<int> missingActivations;
+        std::map<int,double> missingActivations; // trigger index -> native levelMs when it ran ahead
         // Per-trigger activation counts for the current source context. A native
         // activation is "missing" only while it outnumbers the source-recorded
         // activations of that trigger; a late native mirror of an already
@@ -194,10 +202,13 @@ class $modify(CorumNativeRandomBranch, RandTriggerGameObject) {
                 auto const native=++play->m_fields->nativeActivations[identity.index];
                 auto const source=play->m_fields->sourceActivations[identity.index];
                 if(native<=source)return; // late native mirror of an already applied source activation
-                play->m_fields->missingActivations.insert(identity.index);
+                play->m_fields->missingActivations.try_emplace(identity.index,play->m_gameState.m_levelTime*1000);
                 if(play->m_fields->missingLogs++<16)
                     log::info("[SpectatorRandom] phase=NATIVE_AHEAD triggerIndex={} objectId={} native={} source={} levelMs={:.1f}",identity.index,identity.id,native,source,play->m_gameState.m_levelTime*1000);
-                SpectatorLiveRuntime::get().noteWorldPartial("RANDOM_SOURCE_ACTIVATION_MISSING");return;
+                // Not yet partial: the recorded activation is attached to the next
+                // published sample (<= one sample later). Partial only if it stays
+                // missing past kRandomSourceGraceMs (applyDueNativeRandomEvents).
+                return;
             }
             if(play->m_fields->expected.empty())return;
             auto const& expected=play->m_fields->expected.front();
@@ -367,6 +378,8 @@ void applyDueNativeRandomEvents(PlayLayer *layer) {
         if (play->m_fields->expected.size() >= count)
             break;
     }
+    if(randomSourcesOverdue(play->m_fields->missingActivations,play->m_gameState.m_levelTime*1000))
+        SpectatorLiveRuntime::get().noteWorldPartial("RANDOM_SOURCE_ACTIVATION_MISSING");
 }
 void noteNativeFollowTrigger(GJBaseGameLayer *layer, EffectGameObject *trigger) {
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)

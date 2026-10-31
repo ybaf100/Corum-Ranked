@@ -145,6 +145,8 @@ ${source.slice(source.indexOf('thread_local PlayLayer* persistenceOwner'), sourc
 ${source.slice(source.indexOf('struct ScopedRealGameplayEnd {'), source.indexOf('std::int64_t steadyNowMicros()'))}
 double rankedProgressPercent(PlayLayer* layer) { return layer->percent; }
 struct CorumRankedPlayLayer : PlayLayer {
+    // Scene-replacing exit: the pause-only onExit path is covered in SpectatorRemoteSourceTest.
+    bool onExitWithoutSceneChange(){return false;}
     corum::ranked::SpectatorLiveRuntime& spectatorTransport(){return corum::ranked::SpectatorLiveRuntime::get();}
     void survivalSpectatorFrame(float){}
 

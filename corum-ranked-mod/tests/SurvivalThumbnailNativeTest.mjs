@@ -160,12 +160,12 @@ int main(int argc,char**argv){assert(argc==2);saveRoot=argv[1];auto dir=saveRoot
    else reply(i,200,webp(),{{"Content-Type","image/webp"}});
   }fakeNow+=250;pump(p,3);
  }
- auto firstPool=p.previews();assert(firstPool.size()==7);std::set<std::uint64_t> initial;
- for(auto const& [id,texture]:firstPool){assert(texture);initial.insert(id);}assert(initial.size()==7);
+ auto firstPool=p.previews();assert(firstPool.size()==8);std::set<std::uint64_t> initial;
+ for(auto const& [id,texture]:firstPool){assert(texture);initial.insert(id);}assert(initial.size()==8);
  for(int round=2;round<=4;round++){
   auto beforeRound=flights.size();pooled.roundKey="R"+std::to_string(round);pooled.mapGeneration=round;pooled.levelId=600+round;++pooled.sceneGeneration;
-  p.activate(pooled);auto cached=p.previews();assert(cached.size()==7);
-  for(auto const& [id,texture]:cached)assert(id>=2000&&id<2010&&texture);
+  p.activate(pooled);auto cached=p.previews();assert(cached.size()==8);
+  for(auto const& [id,texture]:cached)assert(id>=2000&&id<2012&&texture);
   for(int frame=0;frame<12;frame++){
    auto end=flights.size();for(std::size_t i=beforeRound;i<end;i++)if(!flights[i].done&&!flights[i].cancelled){
     assert(flights[i].ticket.url.find("/random/")==std::string::npos);
@@ -175,6 +175,16 @@ int main(int argc,char**argv){assert(argc==2);saveRoot=argv[1];auto dir=saveRoot
   }
  }
  p.release(pooled);assert(active()==0);
+ // Warm pool: a NEW match is seeded from the disk cache, so its first reel has
+ // 8 distinct images before any random download (no HTTP for the seeded ids).
+ auto next=pooled;next.matchId="next-match";next.roundKey="R1";next.mapGeneration=1;next.levelId=900;++next.sceneGeneration;
+ auto beforeNext=flights.size();p.activate(next);
+ for(int frame=0;frame<20;frame++){fakeNow+=50;pump(p,3);}
+ auto warm=p.previews();assert(warm.size()==8);std::set<std::uint64_t> warmIds;
+ for(auto const& [id,texture]:warm){assert(id>=2000&&id<2012&&texture);warmIds.insert(id);}assert(warmIds.size()==8);
+ for(std::size_t i=beforeNext;i<flights.size();i++){auto const& url=flights[i].ticket.url;
+  for(auto id:warmIds)assert(url.find("/"+std::to_string(id)+"/")==std::string::npos);}
+ p.release(next);assert(active()==0);
 }`);
 }
 test('actual provider bounds anonymous requests, cancels obsolete replies, handles 302/404/retry/cache and decodes away from GL thread',()=>runProvider());

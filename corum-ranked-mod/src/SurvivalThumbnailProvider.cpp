@@ -1,6 +1,7 @@
 #include "SurvivalThumbnailProvider.hpp"
 #include "SurvivalOptionsPreferences.hpp"
 #include "domain/SurvivalThumbnailPolicy.hpp"
+#include <algorithm>
 #include <fstream>
 #include <iterator>
 #include <set>
@@ -58,19 +59,42 @@ void SurvivalThumbnailProvider::activate(SurvivalSelectionContext const& context
         if(context.levelId && m_selected!=context.levelId){m_selected=context.levelId;enqueue({m_selected,false});enqueue({m_selected,true},true);}
         return;
     }
-    if(context.matchId!=m_poolMatch){
+    auto const newMatch=context.matchId!=m_poolMatch;
+    if(newMatch){
         m_candidates.clear();m_poolMatch=context.matchId;m_poolReveal=context.revealKey();m_randomRequests=0;
     }
     m_reveal=context.revealKey();
     deactivate();m_context=identity;m_selected=context.levelId;m_enabled=enabled;m_httpRequests=0;
     m_liveness=std::make_shared<std::atomic_bool>(enabled);
     if(!enabled)return;
-    for(auto id:m_candidates)enqueue({id,false});
+    // Warm pool: start every match with previously downloaded small thumbnails
+    // from the bounded disk cache, so the first reel has distinct images before
+    // any random download finishes. New random images still top the pool up.
+    if(newMatch && !m_history)seedFromDisk(context.levelId,std::hash<std::string>{}(context.matchId));
     if(m_selected){enqueue({m_selected,false});enqueue({m_selected,true},true);}
+    for(auto id:m_candidates)enqueue({id,false});
 }
 void SurvivalThumbnailProvider::candidate(std::uint64_t id){
-    if(!id || id==m_selected || m_candidates.size()>=10 || std::find(m_candidates.begin(),m_candidates.end(),id)!=m_candidates.end())return;
+    if(!id || id==m_selected || m_candidates.size()>=SurvivalThumbnailPoolSize || std::find(m_candidates.begin(),m_candidates.end(),id)!=m_candidates.end())return;
     m_candidates.push_back(id);
+}
+void SurvivalThumbnailProvider::seedFromDisk(std::uint64_t selected,std::size_t salt){
+    std::error_code ec;std::vector<std::pair<std::filesystem::file_time_type,std::uint64_t>> files;
+    for(auto const& entry:std::filesystem::directory_iterator(m_directory,ec)){
+        if(ec)break;if(!entry.is_regular_file(ec))continue;
+        auto const name=entry.path().filename().string();
+        if(!name.ends_with("-small.webp"))continue;
+        auto const digits=name.substr(0,name.size()-std::string_view("-small.webp").size());
+        if(digits.empty()||digits.size()>19||!std::all_of(digits.begin(),digits.end(),[](unsigned char c){return c>='0'&&c<='9';}))continue;
+        auto const id=std::stoull(digits);if(!id||id==selected)continue;
+        files.push_back({entry.last_write_time(ec),id});
+    }
+    // Newest files first (the disk cache keeps <= 32), then rotate the start per
+    // match so consecutive matches do not open with the identical reel.
+    std::sort(files.begin(),files.end(),[](auto const& a,auto const& b){return a.first>b.first;});
+    if(files.size()>SurvivalThumbnailSeedSize*2)files.resize(SurvivalThumbnailSeedSize*2);
+    for(std::size_t n=0;n<files.size()&&m_candidates.size()<SurvivalThumbnailSeedSize;++n)
+        candidate(files[(n+salt)%files.size()].second);
 }
 void SurvivalThumbnailProvider::deactivate(){
     if(m_liveness)m_liveness->store(false);
@@ -174,7 +198,8 @@ void SurvivalThumbnailProvider::cache(Decode const& work,Decoded decoded){
 }
 void SurvivalThumbnailProvider::trim(){
     auto total=[&]{std::size_t n=0;for(auto const& [k,e]:m_cache)n+=e.bytes;return n;};
-    while(m_cache.size()>(m_history?4:12) || total()>(m_history?8:16)*1024*1024){
+    // Live: the warm pool (<= SurvivalThumbnailPoolSize small) plus the selected small/medium.
+    while(m_cache.size()>(m_history?4:SurvivalThumbnailPoolSize+4) || total()>(m_history?8:24)*1024*1024){
         auto victim=m_cache.end();for(auto it=m_cache.begin();it!=m_cache.end();++it){
             auto const pooled=!it->second.medium && std::find(m_candidates.begin(),m_candidates.end(),it->second.id)!=m_candidates.end();
             auto const victimPooled=victim!=m_cache.end() && !victim->second.medium && std::find(m_candidates.begin(),m_candidates.end(),victim->second.id)!=m_candidates.end();
@@ -216,7 +241,7 @@ void SurvivalThumbnailProvider::update(float){
         static_cast<int>(m_encoded.size())+static_cast<int>(m_decode.has_value());
     // Download a bounded pool during the first intro only. Later rounds rotate
     // these cached images instead of racing a new random download against a reel.
-    if(!m_history && m_reveal==m_poolReveal && smallThumbnailCount+outstanding<10 && m_randomRequests<20 && m_httpRequests<40 && m_jobs.size()<3)enqueue({0,false,true});
+    if(!m_history && m_reveal==m_poolReveal && smallThumbnailCount+outstanding<SurvivalThumbnailPoolSize && m_randomRequests<20 && m_httpRequests<40 && m_jobs.size()<3)enqueue({0,false,true});
     auto selectedDisk=[&](Job const& job){return !job.random && !job.network && job.id==m_selected;};
     auto const awaitingSelectedDisk=std::any_of(m_jobs.begin(),m_jobs.end(),selectedDisk) ||
         std::any_of(m_encoded.begin(),m_encoded.end(),[&](auto const& e){return selectedDisk(e.job);}) ||
@@ -242,7 +267,7 @@ std::vector<std::pair<std::uint64_t,Ref<CCTexture2D>>> SurvivalThumbnailProvider
     if(m_invalidTextureCache)return result;
     // Round identity changes the order/subset, never the shared cache identity.
     auto const offset=m_candidates.empty()?0:std::hash<std::string>{}(m_reveal)%m_candidates.size();
-    for(std::size_t n=0;n<m_candidates.size() && result.size()<7;++n){auto const id=m_candidates[(n+offset)%m_candidates.size()];if(id==m_selected)continue;auto it=m_cache.find(key({id,false}));if(it!=m_cache.end() && ids.insert(id).second){it->second.used=now();result.emplace_back(id,it->second.texture);}}
+    for(std::size_t n=0;n<m_candidates.size() && result.size()<SurvivalThumbnailReelImages;++n){auto const id=m_candidates[(n+offset)%m_candidates.size()];if(id==m_selected)continue;auto it=m_cache.find(key({id,false}));if(it!=m_cache.end() && ids.insert(id).second){it->second.used=now();result.emplace_back(id,it->second.texture);}}
     return result;
 }
 }
