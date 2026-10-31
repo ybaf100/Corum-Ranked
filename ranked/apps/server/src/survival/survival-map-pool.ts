@@ -62,9 +62,19 @@ export class SurvivalMapPool implements SurvivalMapProvider,OnApplicationBootstr
     const key=survivalCandidateBucket(request);if(this.buckets.has(key))return key;
     if(this.buckets.size>=MAX_BUCKETS)throw new SurvivalMapError("NO_ELIGIBLE_MAP","Candidate bucket budget exceeded");
     const clean={group:request.group,phase:request.phase,minimumLevelId:request.minimumLevelId,excludedLevelIds:[]};
-    this.buckets.set(key,{request:clean,ready:0,nextAt:this.now()+TTL_MS,failures:0,lastError:null,diagnosticKey:""});
-    await this.db.query(`INSERT INTO sur_map_candidate_buckets(bucket_key,request) VALUES($1,$2::jsonb)
-      ON CONFLICT(bucket_key) DO NOTHING`,[key,JSON.stringify(clean)]);return key;
+    // Persist before publishing the in-memory bucket: a failed INSERT must not
+    // leave a key that every later refill trusts but PostgreSQL never stored.
+    await this.ensureBucketRow(this.db,key,clean);
+    if(!this.buckets.has(key))this.buckets.set(key,{request:clean,ready:0,nextAt:this.now()+TTL_MS,failures:0,lastError:null,diagnosticKey:""});
+    return key;
+  }
+  /** The bucket row is a disposable cache parent (Admin reset-all truncates
+   * every sur_* table while this process keeps running). Every candidate
+   * write re-asserts it in the same transaction, so a vanished parent row can
+   * never turn into a permanent sur_map_candidates_bucket_key_fkey failure. */
+  private async ensureBucketRow(executor:SqlExecutor,key:string,request:SurvivalMapRequest):Promise<void>{
+    await executor.query(`INSERT INTO sur_map_candidate_buckets(bucket_key,request) VALUES($1,$2::jsonb)
+      ON CONFLICT(bucket_key) DO NOTHING`,[key,JSON.stringify(request)]);
   }
   private async capacity(tx:SqlExecutor,key:string):Promise<number>{
     await tx.query(`UPDATE sur_map_candidates SET status='COOLDOWN',retry_after=expires_at,invalid_reason='POOL_CAPACITY'
@@ -91,6 +101,7 @@ export class SurvivalMapPool implements SurvivalMapProvider,OnApplicationBootstr
           if(this.known.has(map.levelId))throw new SurvivalMapError("DUPLICATE_CANDIDATES","Verifier ignored candidate exclusions");
           const ready=await this.db.transaction(async tx=>{
           await tx.query("SELECT pg_advisory_xact_lock(hashtext('survival-candidate-reserve-v1'))");
+          await this.ensureBucketRow(tx,key,bucket.request);
           await tx.query(`INSERT INTO sur_map_candidates(bucket_key,level_id,metadata,status,verified_at,expires_at)
             VALUES($1,$2,$3::jsonb,'READY',$4,$5) ON CONFLICT(bucket_key,level_id) DO UPDATE
             SET metadata=EXCLUDED.metadata,status='READY',verified_at=EXCLUDED.verified_at,expires_at=EXCLUDED.expires_at,

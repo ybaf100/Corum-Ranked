@@ -253,7 +253,7 @@ bool SpectatorLiveRuntime::tickPublisher(SpectatorGhostPose const& pose, bool pr
 #endif
     if(captured&&(m_publishLevel==143308401)&&elapsed>=70000&&elapsed<=73000&&m_sourceEvidenceLogs++<128){
         auto wire=encodeSpectatorPose(pose);
-        log::info("[SpectatorEvidence] stage=QUEUED_ENCODED attempt={} generation={} sequence={} elapsedMs={} p1={} p2={}",m_publishAttemptId,m_publishGeneration,m_publishQueue.nextSequence()-1,elapsed,wire["discontinuity"].dump(matjson::NO_INDENTATION),wire["player2"]["discontinuity"].dump(matjson::NO_INDENTATION));
+        log::info("[SpectatorEvidence] stage=QUEUED_ENCODED attempt={} generation={} sequence={} elapsedMs={} p1={} p2={}",m_publishAttemptId,m_publishGeneration,m_publishQueue.nextSequence()-1,elapsed,spectatorEvidenceDiscontinuity(wire),spectatorEvidenceDiscontinuity(wire,true));
     }
     m_publishSequence = static_cast<std::uint64_t>(m_publishQueue.nextSequence());
     if (!m_publishBusy && now >= m_nextPublishAt) publish(pose);
@@ -380,7 +380,7 @@ void SpectatorLiveRuntime::publish(SpectatorGhostPose const&) {
                 packet["cosmetics"]=encodeSpectatorCosmetics(*sample.pose.cosmetics);m_publishCosmeticRevision=sample.pose.cosmetics->revision;
             }
             if(m_publishLevel==143308401&&sample.elapsedMs>=70000&&sample.elapsedMs<=73000&&m_sourceEvidenceLogs++<128)
-                log::info("[SpectatorEvidence] stage=PUBLISH attempt={} generation={} sequence={} elapsedMs={} p1={} p2={}",m_publishAttemptId,m_publishGeneration,sample.sequence,sample.elapsedMs,packet["keyframe"]["discontinuity"].dump(matjson::NO_INDENTATION),packet["keyframe"]["player2"]["discontinuity"].dump(matjson::NO_INDENTATION));
+                log::info("[SpectatorEvidence] stage=PUBLISH attempt={} generation={} sequence={} elapsedMs={} p1={} p2={}",m_publishAttemptId,m_publishGeneration,sample.sequence,sample.elapsedMs,spectatorEvidenceDiscontinuity(packet["keyframe"]),spectatorEvidenceDiscontinuity(packet["keyframe"],true));
             packets.push(packet);
         }
         m_publishBatchBody = matjson::Value(); m_publishBatchBody["packets"] = packets;
@@ -802,7 +802,7 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
         auto const decoded = decodeSpectatorPose(keyframe);
         if (!decoded) { log::warn("[SpectatorEvidence] stage=DECODE_REJECT attempt={} generation={} sequence={} elapsedMs={} reason=INVALID_POSE_OR_NATIVE_CHAIN",attemptId,generation,sequence,elapsedMs);setFallback("INVALID_POSE"); return; }
         if(expectedLevel==143308401&&elapsedMs>=70000&&elapsedMs<=73000&&m_viewEvidenceLogs++<128)
-            log::info("[SpectatorEvidence] stage=RECEIVED_DECODED attempt={} generation={} epoch={} sequence={} elapsedMs={} p1={} p2={}",attemptId,generation,m_viewPresentationEpoch,sequence,elapsedMs,keyframe["discontinuity"].dump(matjson::NO_INDENTATION),keyframe["player2"]["discontinuity"].dump(matjson::NO_INDENTATION));
+            log::info("[SpectatorEvidence] stage=RECEIVED_DECODED attempt={} generation={} epoch={} sequence={} elapsedMs={} p1={} p2={}",attemptId,generation,m_viewPresentationEpoch,sequence,elapsedMs,spectatorEvidenceDiscontinuity(keyframe),spectatorEvidenceDiscontinuity(keyframe,true));
         auto pose = *decoded;
         if(pose.randomEvents&&(!pose.simulation||!m_randomEvents.push(pose.randomEvents,pose.simulation->elapsedMs,elapsedMs))){noteWorldPartial("RANDOM_EVENT_HISTORY_INCOMPLETE");}
         if(packet.contains("cosmetics") || keyframe.contains("cosmetics")){

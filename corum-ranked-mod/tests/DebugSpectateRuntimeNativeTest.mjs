@@ -595,6 +595,24 @@ int main(){
     auto custom=admission(false);custom["levelId"]=123456789;respond(201,custom);assert(runtime.levelId()==123456789&&runtime.preparedLevel(123456789)&&!runtime.preparedLevel(88350599));
     runtime.sceneEntered(123456789);assert(runtime.recordLevel(123456789));runtime.cancelRecording();respond(201);
     runtime.start(true,"secret");custom=admission(true);custom["levelId"]=123456789;respond(201,custom);runtime.sceneEntered(123456789);assert(runtime.playbackLevel(123456789)&&!runtime.playbackLevel(88350599));runtime.exitScene();respond(201);
+    // beta.122 iOS regression: Entropie 70-73s evidence logging indexed the
+    // outgoing frame through mutable operator[], inserting discontinuity:{} and
+    // player2:{discontinuity:{}}; the server 400 then ended the recording.
+    runtime.start(false,"secret",0,143308401);auto entropie=admission(false);entropie["levelId"]=143308401;respond(201,entropie);
+    runtime.sceneEntered(143308401);assert(runtime.recordLevel(143308401));
+    SpectatorGhostPose early{25000,4074,0,false,false};early.nativeElapsedMs=1000.0;
+    runtime.recordPose(early);assert(pending.size()==1&&pending[0].operation.url.ends_with("/frames"));
+    ack["lastSequence"]=pending[0].operation.body["frames"].asArray().unwrap().back()["sequence"].asInt().unwrapOr(-1);
+    SpectatorGhostPose evidence{25001,4074,0,false,false};evidence.nativeElapsedMs=71100.0;
+    runtime.recordPose(evidence);respond(201,ack);runtime.tick();
+    assert(pending.size()==1&&pending[0].operation.url.ends_with("/frames"));
+    {auto frames=pending[0].operation.body["frames"].asArray().unwrap();assert(!frames.empty());bool window=false;
+     for(auto const& frame:frames){auto const& keyframe=frame["keyframe"];auto elapsed=frame["elapsedMs"].asInt().unwrapOr(-1);
+        window=window||(elapsed>=70000&&elapsed<=73000);
+        assert(!keyframe.contains("discontinuity")&&!keyframe.contains("player2"));}
+     assert(window);}
+    assert(runtime.mode()==DebugSpectateMode::Recording);
+    runtime.cancelRecording();
 }
 `;
     const dir = mkdtempSync(join(tmpdir(), 'corum-debug-runtime-native-'));

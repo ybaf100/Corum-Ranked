@@ -106,5 +106,24 @@ describe("durable verified Survival candidate pool",()=>{
    const row=(await db.query<{invalid_reason:string;retry_after:Date;expires_at:Date}>("SELECT invalid_reason,retry_after,expires_at FROM sur_map_candidates WHERE level_id=$1",[selected.levelId])).rows[0]!;
    expect(row.invalid_reason).toBe("PREFETCH_PHASE_CHANGED");expect(row.retry_after).toEqual(row.expires_at);
  });
+ it("recovers when the bucket parent rows vanish under a running process (Admin reset-all)",async()=>{
+   // beta.122 iOS log: every Survival match failed with
+   // sur_map_candidates_bucket_key_fkey after the cache parents were truncated
+   // while the pool kept its in-memory bucket keys.
+   const p=pool();await p.onApplicationBootstrap();await idle(p);
+   await db.query("TRUNCATE sur_map_candidates,sur_map_candidate_buckets");
+   const map=await p.select(request);expect(map.geometrySha256).toMatch(/^[a-f0-9]{64}$/);
+   expect((await db.query("SELECT 1 FROM sur_map_candidate_buckets WHERE bucket_key=$1",[survivalCandidateBucket(request)])).rows).toHaveLength(1);
+   await db.transaction(tx=>p.confirm(tx,request,map));expect(await count("CONSUMED")).toBe(1);
+ });
+ it("does not keep a bucket key in memory when its first parent INSERT fails",async()=>{
+   const p=pool();await p.onApplicationBootstrap();await idle(p);
+   const fresh={...request,minimumLevelId:70000000};const original=db.query.bind(db);let failed=false;
+   const spy=vi.spyOn(db,"query").mockImplementation(((sql:string,params?:unknown[])=>{
+     if(!failed && sql.includes("INSERT INTO sur_map_candidate_buckets")){failed=true;return Promise.reject(new Error("transient connection reset"));}
+     return original(sql,params);}) as typeof db.query);
+   await expect(p.select(fresh)).rejects.toThrow("transient connection reset");spy.mockRestore();sequence=70000000;
+   const map=await p.select(fresh);expect(map.levelId).toBeGreaterThanOrEqual(70000000);
+ });
 
 });

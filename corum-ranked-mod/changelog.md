@@ -1,3 +1,9 @@
+# v0.5.0-beta.123
+
+- Fix Debug RECORD ending mid-run on Entropie (143308401) at 70 s: beta.122 evidence logging read the outgoing keyframe through mutable `matjson::Value::operator[]`, which inserted `discontinuity: {}` and `player2: {discontinuity: {}}` into the upload. The server correctly rejected the batch (400) and the recording became incomplete / not TEST eligible. Survival live PUBLISH used the same pattern. Logging now reads the wire value without mutating it; server validation is unchanged.
+- Fix Survival map preparation failing on every match with `sur_map_candidates_bucket_key_fkey` once the candidate bucket cache rows disappeared under a running server (e.g. Admin reset-all truncates every `sur_*` table). The candidate transaction now re-asserts its bucket parent row, and a bucket key is only cached in memory after its row is stored.
+- No change to DESYNC checks, pose/discontinuity validation, replay files, Best records, LP/AP or achievements. Actual GD/device recording, TEST playback and Survival replay remain to be verified on the device.
+
 # v0.5.0-beta.122
 
 - Prepare Native tests, platform builds and the server image in parallel; require full validation and both immutable client channels before Singapore activation. Pin the tested Geode builder/CLI and verify package/server source SHA, supersession and duplicate activation.

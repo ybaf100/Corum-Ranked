@@ -246,6 +246,16 @@ int main(){
     assert(nativeClock.tickPublisher(pose,false));assert(web::pending.back().request.body["packets"].asArray().unwrap().front()["elapsedMs"].asInt().unwrapOr(-1)==60050);
     web::pending.back().callback({409});publishTestClock+=std::chrono::milliseconds(100);pose.nativeElapsedMs=60100;
     assert(nativeClock.tickPublisher(pose,false));assert(web::pending.back().request.body["packets"].asArray().unwrap().front()["elapsedMs"].asInt().unwrapOr(-1)==60100);
+    // beta.122 regression: Entropie 70-73s PUBLISH evidence logging must not
+    // insert discontinuity/player2 into the packet the relay validates.
+    ranked={};ranked.state.stage=RuntimeStage::Ready;web::pending.clear();SpectatorLiveRuntime entropie;
+    entropie.m_external=SurvivalSpectatorTransportContext{"survival","R1:target","survival-session","R1","human","entropie-attempt",2,143308401,7,false,true};
+    pose={25000,4074,0,false,false};pose.nativeElapsedMs=71100;
+    assert(entropie.tickPublisher(pose,false));
+    {auto packets=web::pending.back().request.body["packets"].asArray().unwrap();assert(!packets.empty());
+     for(auto const& packet:packets){auto const& keyframe=packet["keyframe"];
+        assert(packet["levelId"].asInt().unwrapOr(0)==143308401&&packet["elapsedMs"].asInt().unwrapOr(-1)==71100);
+        assert(!keyframe.contains("discontinuity")&&!keyframe.contains("player2"));}}
 }
 
 `;

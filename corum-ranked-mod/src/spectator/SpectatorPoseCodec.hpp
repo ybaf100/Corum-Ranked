@@ -47,6 +47,19 @@ inline matjson::Value encodeSpectatorPose(SpectatorGhostPose const& pose) {
     if(pose.dual && pose.player2)value["player2"]=encodeSpectatorPose(spectatorSecondaryAsPose(*pose.player2));
     return value;
 }
+/** Diagnostic read of a wire keyframe. Mutable matjson operator[] inserts a
+ * missing key as an empty object, so evidence logging must never index a
+ * payload that is still going to be sent; that turned an absent
+ * discontinuity/player2 into `{}` and made the server reject the batch. */
+inline std::string spectatorEvidenceDiscontinuity(matjson::Value const& keyframe,bool player2=false){
+    if(!keyframe.isObject())return "none";
+    if(player2){
+        if(!keyframe.contains("player2"))return "none";
+        return spectatorEvidenceDiscontinuity(keyframe["player2"]);
+    }
+    if(!keyframe.contains("discontinuity"))return "none";
+    return keyframe["discontinuity"].dump(matjson::NO_INDENTATION);
+}
 inline std::optional<SpectatorGhostPose> decodeSpectatorPose(matjson::Value const& value) {
     if (!value.isObject()) return std::nullopt;
     auto const mode = parseSpectatorMode(value["mode"].asString().unwrapOr(""));

@@ -184,7 +184,7 @@ bool DebugSpectateRuntime::recordPose(SpectatorGhostPose const& pose, bool termi
     auto const accepted = m_capture.capture(elapsed, pose, terminal);
     if (accepted) {
         if(m_levelId==143308401&&elapsed>=70000&&elapsed<=73000&&m_evidenceLogs++<128){auto wire=encodeSpectatorPose(pose);
-            log::info("[SpectatorEvidence] stage=DEBUG_CAPTURED attempt={} sequence={} elapsedMs={} p1={} p2={}",m_id,sequence,elapsed,wire["discontinuity"].dump(matjson::NO_INDENTATION),wire["player2"]["discontinuity"].dump(matjson::NO_INDENTATION));}
+            log::info("[SpectatorEvidence] stage=DEBUG_CAPTURED attempt={} sequence={} elapsedMs={} p1={} p2={}",m_id,sequence,elapsed,spectatorEvidenceDiscontinuity(wire),spectatorEvidenceDiscontinuity(wire,true));}
 
         if (sequence >= 18 && sequence <= 22 && m_previousCapturedPose) {
             auto const& previous = *m_previousCapturedPose;
@@ -221,7 +221,7 @@ void DebugSpectateRuntime::pumpRecording() {
                 frame["keyframe"]["cosmetics"]=encodeSpectatorCosmetics(*f.pose.cosmetics);
             }
             if(m_levelId==143308401&&f.elapsedMs>=70000&&f.elapsedMs<=73000&&m_evidenceLogs++<128)
-                log::info("[SpectatorEvidence] stage=DEBUG_ENCODED_UPLOAD attempt={} sequence={} elapsedMs={} p1={} p2={}",m_id,f.sequence,f.elapsedMs,frame["keyframe"]["discontinuity"].dump(matjson::NO_INDENTATION),frame["keyframe"]["player2"]["discontinuity"].dump(matjson::NO_INDENTATION));
+                log::info("[SpectatorEvidence] stage=DEBUG_ENCODED_UPLOAD attempt={} sequence={} elapsedMs={} p1={} p2={}",m_id,f.sequence,f.elapsedMs,spectatorEvidenceDiscontinuity(frame["keyframe"]),spectatorEvidenceDiscontinuity(frame["keyframe"],true));
             auto size=frame.dump().size();
             if(bytes+size>48*1024){if(sent==0){fail("RECORD_FRAME_BYTE_LIMIT");return;}break;}
             bytes+=size;++sent;frames.push(frame);
