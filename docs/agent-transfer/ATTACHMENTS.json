@@ -1,1 +1,65 @@
-[]
+[
+  {
+    "filename": "Geode 2026-10-28 22.03.07.log",
+    "originalLocalPath": "/tmp/codex-remote-attachments/01a182be-8162-75db-9d93-1f27242c7082/75448F2A-7E24-4598-9196-0C1899688338/1-Geode-2026-10-28-22.03.07.log",
+    "availableAtHandoff": false,
+    "committed": false,
+    "sizeBytes": null,
+    "sha256": null,
+    "hashProvenance": "unavailable; not invented"
+  },
+  {
+    "filename": "Geode 2026-10-28 22.02.58.log",
+    "originalLocalPath": "/tmp/codex-remote-attachments/01a182be-8162-75db-9d93-1f27242c7082/75448F2A-7E24-4598-9196-0C1899688338/2-Geode-2026-10-28-22.02.58.log",
+    "availableAtHandoff": false,
+    "committed": false,
+    "sizeBytes": null,
+    "sha256": null,
+    "hashProvenance": "unavailable; not invented"
+  },
+  {
+    "filename": "Geode 2026-10-28 22.02.26.log",
+    "originalLocalPath": "/tmp/codex-remote-attachments/01a182be-8162-75db-9d93-1f27242c7082/75448F2A-7E24-4598-9196-0C1899688338/3-Geode-2026-10-28-22.02.26.log",
+    "availableAtHandoff": false,
+    "committed": false,
+    "sizeBytes": null,
+    "sha256": null,
+    "hashProvenance": "unavailable; not invented"
+  },
+  {
+    "filename": "Geode 2026-10-29 23.16.41.log",
+    "originalLocalPath": "/tmp/codex-remote-attachments/01a182be-8162-75db-9d93-1f27242c7082/B0061ADD-E923-4C0C-B65C-DF40C7B33F6B/1-Geode-2026-10-29-23.16.41.log",
+    "availableAtHandoff": false,
+    "committed": false,
+    "sizeBytes": null,
+    "sha256": null,
+    "hashProvenance": "unavailable; not invented"
+  },
+  {
+    "filename": "Corum_Ranked_CBF_Replay_Desync_Integrated_Codex_2026-10-30.zip",
+    "originalLocalPath": "/tmp/codex-remote-attachments/01a182be-8162-75db-9d93-1f27242c7082/ABD6B970-0463-45A1-B912-4997D5E3CF1C/1-Corum_Ranked_CBF_Replay_Desync_Integrated_Codex_2026-10-30.zip",
+    "availableAtHandoff": false,
+    "committed": false,
+    "sizeBytes": null,
+    "sha256": null,
+    "hashProvenance": "unavailable; not invented"
+  },
+  {
+    "filename": "Corum_Ranked_CBF_DESYNC_Timeout_Replay_Integrated_2026-10-30.zip",
+    "originalLocalPath": "/tmp/codex-remote-attachments/01a182be-8162-75db-9d93-1f27242c7082/1EC7F2D9-6B9E-45EC-BB59-4B634FC33952/1-Corum_Ranked_CBF_DESYNC_Timeout_Replay_Integrated_2026-10-30.zip",
+    "availableAtHandoff": false,
+    "committed": false,
+    "sizeBytes": null,
+    "sha256": null,
+    "hashProvenance": "unavailable; not invented"
+  },
+  {
+    "filename": "Corum_Ranked_Workflow_Recapture_ReplayDesync_Codex_2026-10-31_v2.zip",
+    "originalLocalPath": "/tmp/codex-remote-attachments/01a182be-8162-75db-9d93-1f27242c7082/103A8335-095A-4B5A-B28A-DC9C18BC0339/1-Corum_Ranked_Workflow_Recapture_ReplayDesync_Codex_2026-10-31_v2.zip",
+    "availableAtHandoff": false,
+    "committed": false,
+    "sizeBytes": null,
+    "sha256": "e0cae449d02b8f46726abd1af216da5f29d4dd4dec52e0fbed4f7edd29383866",
+    "hashProvenance": "previous verified beta122 record; not rechecked"
+  }
+]
